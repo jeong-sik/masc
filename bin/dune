@@ -48,8 +48,8 @@
   cohttp-eio
   masc.prompt_registry
   masc.masc_schedule
-  agent_sdk
-  agent_sdk.llm_provider))
+  masc.agent_core
+  masc.agent_core.llm_provider))
 
 (executable
  (name main_stdio_eio)
@@ -58,6 +58,7 @@
  (package masc)
  (libraries
   masc
+  masc.runtime
   masc.crypto_rng
   masc.server
   masc.config
@@ -84,8 +85,8 @@
   cohttp-eio
   masc.prompt_registry
   masc.mcp_transport_protocol
-  agent_sdk
-  agent_sdk.llm_provider))
+  masc.agent_core
+  masc.agent_core.llm_provider))
 
 (executable
  (name masc_cost)
@@ -118,34 +119,25 @@
   cohttp-eio
   masc.prompt_registry
   masc.mcp_transport_protocol
-  agent_sdk
-  agent_sdk.llm_provider))
+  masc.agent_core
+  masc.agent_core.llm_provider))
+
+(executable
+ (name keeper_store_layout_manifest)
+ (modules keeper_store_layout_manifest)
+ (libraries masc.masc_core yojson))
 
 (executable
  (name public_tool_manifest)
  (modules public_tool_manifest)
- (libraries masc masc.masc_tool_dispatch yojson))
+ (libraries
+  masc
+  masc.masc_tool_dispatch
+  masc.tool_catalog_surfaces
+  yojson))
 
 ;; runtime_materialize (RFC-0058 §9 Phase 9.3): retired. The CLI's only
 ;; purpose was to pre-write the old derived JSON artifact.
-
-;; Env knob catalog generator (#10733):
-;;   regenerates docs/runtime-tunables.md from lib/config/env_config_*.ml.
-;;   CI gate ensures the catalog stays in sync with the source.
-
-(executable
- (name env_knob_catalog)
- (modules env_knob_catalog)
- (libraries str))
-
-;; Compaction audit CLI: inspect .masc/data/harness-compact/ JSONL
-
-(executable
- (name masc_compaction_audit)
- (modules masc_compaction_audit)
- (public_name masc-compaction-audit)
- (package masc)
- (libraries masc masc_core masc.config_dir_resolver unix eio eio_main))
 
 ;; Offline deterministic checkpoint purge CLI (RFC-0351 S1): duplicate
 ;; collapse, unsigned reasoning strip, tool-result content clear. Dry-run by
@@ -156,17 +148,27 @@
  (modules masc_checkpoint_purge)
  (public_name masc-checkpoint-purge)
  (package masc)
- (libraries masc masc_core masc.config_dir_resolver agent_sdk unix))
+ (libraries masc masc_core masc.config_dir_resolver masc.agent_core unix))
 
-;; Read-only keeper feature proof CLI: renders the same JSON as
-;; /api/v1/dashboard/keeper-feature-proof without starting a server.
+;; RFC-0374 capability probe runner.  Answers "can runtime R reach tool T"
+;; without writing to the keeper's chat, checkpoint, or memory, which is what
+;; made the 2026-08-12 sweep measure its own traffic (masc#28414).
 
 (executable
- (name keeper_feature_proof_report)
- (modules keeper_feature_proof_report)
- (public_name masc-keeper-feature-proof)
+ (name keeper_capability_probe_cli)
+ (modules keeper_capability_probe_cli)
+ (public_name masc-keeper-capability-probe)
  (package masc)
- (libraries masc masc.dashboard masc_core fs_compat unix yojson eio eio_main))
+ (libraries
+  masc
+  masc.server
+  masc.runtime
+  masc.fusion_core
+  masc_eio_context
+  unix
+  yojson
+  eio
+  eio_main))
 
 ;; Deployment preflight helper.  The shell gate delegates runtime lease
 ;; ownership and schedule signal decoding to the same OCaml authorities used
@@ -177,33 +179,377 @@
  (public_name masc-deployment-preflight-helper)
  (package masc)
  (libraries
+  masc
   masc.server
   masc.host_config
   masc.keeper_runtime
   masc.masc_schedule
+  masc.masc_tool_blob_store
+  masc.fusion_core
+  masc.run_registry_core
+  masc.masc_types
+  masc.masc_core
+  masc.config_dir_resolver
+  masc.board_handlers
+  fs_compat
   cmdliner
   unix
   yojson))
 
 ;; Per-turn timeline tool: masc-trace <base-path> <keeper> <turn_id>
-;; Reads execution-receipts JSONL and prints rows matching the turn_id.
-;; Foundation for the Step 10 turn-tracing CLI; widens to tool_calls
-;; and system_log in follow-up stacks.
+;; Reads typed runtime evidence and prints rows matching the turn identity.
 
 (executable
  (name masc_trace)
  (modules masc_trace)
  (public_name masc-trace)
  (package masc)
- (libraries yojson masc.config_dir_resolver))
+ (libraries yojson masc.config_dir_resolver masc.keeper_contract))
 
 ;; TUI Dashboard - Terminal interface for multi-agent workspace
+
+(library
+ (name masc_tui_operator_projection)
+ (wrapped false)
+ (modules masc_tui_operator_projection)
+ (libraries masc masc.operator masc.masc_core yojson))
+
+(library
+ (name masc_tui_task_selection)
+ (wrapped false)
+ (modules masc_tui_task_selection)
+ (libraries masc.masc_types))
+
+(library
+ (name masc_tui_keeper_chat_projection)
+ (wrapped false)
+ (modules masc_tui_keeper_chat_projection)
+ (libraries
+  masc
+  masc_tui_credential
+  masc.keeper_chat_operations
+  masc.masc_random_id
+  masc.masc_core
+  masc.masc_types
+  yojson))
+
+(library
+ (name masc_tui_keeper_chat_live)
+ (wrapped false)
+ (modules masc_tui_keeper_chat_live)
+ (libraries masc_tui_keeper_chat_projection yojson))
+
+(library
+ (name masc_tui_observer)
+ (wrapped false)
+ (modules masc_tui_observer)
+ (libraries masc_tui_keeper_chat_projection yojson))
+
+(library
+ (name masc_tui_command)
+ (wrapped false)
+ (modules masc_tui_command))
+
+(library
+ (name masc_tui_mcp)
+ (wrapped false)
+ (modules masc_tui_mcp)
+ (libraries masc_tui_keeper_chat_projection yojson))
+
+(library
+ (name masc_tui_acting)
+ (wrapped false)
+ (modules masc_tui_acting)
+ (libraries masc_tui_observer))
+
+(library
+ (name masc_tui_keeper_chat_queue)
+ (wrapped false)
+ (modules masc_tui_keeper_chat_queue)
+ (libraries))
+
+(library
+ (name masc_tui_keeper_chat_history)
+ (wrapped false)
+ (modules masc_tui_keeper_chat_history)
+ (libraries masc_tui_keeper_chat_transcript yojson))
+
+(library
+ (name masc_tui_keeper_chat_transcript)
+ (wrapped false)
+ (modules masc_tui_keeper_chat_transcript)
+ (libraries
+  masc
+  masc_tui_keeper_chat_live
+  masc_tui_keeper_chat_projection
+  masc_tui_message_layout))
+
+(library
+ (name masc_tui_scroll)
+ (wrapped false)
+ (modules masc_tui_scroll))
+
+(library
+ (name masc_tui_keys)
+ (wrapped false)
+ (modules masc_tui_keys)
+ (libraries masc_tui_types))
+
+(library
+ (name masc_tui_mode)
+ (wrapped false)
+ (modules masc_tui_mode))
+
+(library
+ (name masc_tui_theme)
+ (wrapped false)
+ (modules masc_tui_theme)
+ (libraries masc_tui_terminal_palette))
+
+(library
+ (name masc_tui_terminal_palette)
+ (wrapped false)
+ (modules masc_tui_terminal_palette)
+ (libraries unix)
+ (foreign_stubs
+  (language c)
+  (names masc_tui_terminal_palette_stubs))
+ (c_library_flags (-lncurses)))
+
+(library
+ (name masc_tui_paste)
+ (wrapped false)
+ (modules masc_tui_paste))
+
+(library
+ (name masc_tui_utf8_input)
+ (wrapped false)
+ (modules masc_tui_utf8_input))
+
+(library
+ (name masc_tui_paste_spill)
+ (wrapped false)
+ (modules masc_tui_paste_spill)
+ (libraries masc_tui_message_layout))
+
+(library
+ (name masc_tui_graphics)
+ (wrapped false)
+ (modules masc_tui_graphics)
+ (libraries base64))
+
+(library
+ (name masc_tui_terminal_probe)
+ (wrapped false)
+ (modules masc_tui_terminal_probe)
+ (libraries masc_tui_terminal_palette masc_tui_graphics))
+
+(library
+ (name masc_tui_diff)
+ (wrapped false)
+ (modules masc_tui_diff))
+
+(library
+ (name masc_tui_span)
+ (wrapped false)
+ (modules masc_tui_span)
+ (libraries masc_tui_message_layout))
+
+(library
+ (name masc_tui_message_layout)
+ (wrapped false)
+ (modules masc_tui_message_layout)
+ (libraries uucp uuseg))
+
+(library
+ (name masc_tui_markdown_render_cache)
+ (wrapped false)
+ (modules masc_tui_markdown_render_cache)
+ (libraries masc_tui_markdown))
+
+(library
+ (name masc_tui_send_disposition)
+ (wrapped false)
+ (modules masc_tui_send_disposition))
+
+(library
+ (name masc_tui_frame_presenter)
+ (wrapped false)
+ (modules masc_tui_frame_presenter))
+
+(library
+ (name masc_tui_keeper_activity)
+ (wrapped false)
+ (modules masc_tui_keeper_activity)
+ (libraries masc masc.time_codec unix))
+
+(library
+ (name masc_tui_metrics_tail)
+ (wrapped false)
+ (modules masc_tui_metrics_tail)
+ (libraries masc dated_jsonl masc_tui_scroll))
+
+(library
+ (name masc_tui_context_state)
+ (wrapped false)
+ (modules masc_tui_context_state)
+ (libraries masc masc.masc_workspace yojson))
+
+(library
+ (name masc_tui_observation_layout)
+ (wrapped false)
+ (modules masc_tui_observation_layout)
+ (libraries masc masc_tui_message_layout))
+
+(library
+ (name masc_tui_render_schedule)
+ (wrapped false)
+ (modules masc_tui_render_schedule))
+
+(library
+ (name masc_tui_help)
+ (wrapped false)
+ (modules masc_tui_help)
+ (libraries masc_tui_message_layout))
+
+(library
+ (name masc_tui_roster_pane)
+ (wrapped false)
+ (modules masc_tui_roster_pane))
+
+(library
+ (name masc_tui_keeper_mark)
+ (wrapped false)
+ (modules masc_tui_keeper_mark)
+ (libraries masc))
+
+(library
+ (name masc_tui_footer)
+ (wrapped false)
+ (modules masc_tui_footer)
+ (libraries masc_tui_message_layout))
+
+(library
+ (name masc_tui_board_selection)
+ (wrapped false)
+ (modules masc_tui_board_selection))
+
+(library
+ (name masc_tui_planning_detail)
+ (wrapped false)
+ (modules masc_tui_planning_detail)
+ (libraries masc masc_tui_message_layout))
+
+(library
+ (name masc_tui_planning_selection)
+ (wrapped false)
+ (modules masc_tui_planning_selection))
+
+(library
+ (name masc_tui_tool_tree)
+ (wrapped false)
+ (modules masc_tui_tool_tree)
+ (libraries masc))
+
+(library
+ (name masc_tui_code_lexer)
+ (wrapped false)
+ (modules masc_tui_code_lexer))
+
+(library
+ (name masc_tui_markdown)
+ (wrapped false)
+ (modules masc_tui_markdown)
+ (libraries masc_tui_code_lexer masc_tui_message_layout))
+
+(library
+ (name masc_tui_composer)
+ (wrapped false)
+ (modules masc_tui_composer)
+ (libraries masc_tui_render_schedule))
+
+(library
+ (name masc_tui_keeper_control)
+ (wrapped false)
+ (modules masc_tui_keeper_control)
+ (libraries masc masc_tui_credential yojson))
+
+(library
+ (name masc_tui_keeper_selection)
+ (wrapped false)
+ (modules masc_tui_keeper_selection))
+
+(library
+ (name masc_tui_board_detail)
+ (wrapped false)
+ (modules masc_tui_board_detail))
+
+(library
+ (name masc_tui_terminal_write_repair)
+ (wrapped false)
+ (modules masc_tui_terminal_write_repair)
+ (libraries masc_tui_render_schedule unix))
+
+(library
+ (name masc_tui_editor)
+ (wrapped false)
+ (modules masc_tui_editor)
+ (libraries unix))
+
+(library
+ (name masc_tui_csi)
+ (wrapped false)
+ (modules masc_tui_csi))
+
+(library
+ (name masc_tui_editor_jump)
+ (wrapped false)
+ (modules masc_tui_editor_jump)
+ (libraries masc_tui_editor unix))
+
+(library
+ (name masc_tui_credential)
+ (modules masc_tui_credential))
+
+; Carved out so a test can read it. surface_needs decides what a refresh tick
+; fetches for the surface on screen, and the chat pane having no field there
+; is why it read its history once and never again.
+(library
+ (name masc_tui_types)
+ (wrapped false)
+ (modules masc_tui_types)
+ (libraries
+  masc
+  masc.masc_goal
+  masc.masc_types
+  masc_tui_acting
+  masc_tui_board_detail
+  masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_queue
+  masc_tui_keeper_chat_transcript
+  masc_tui_keeper_control
+  masc_tui_keeper_selection
+  masc_tui_message_layout
+  masc_tui_metrics_tail
+  masc_tui_observer
+  masc_tui_operator_projection
+  masc_tui_paste
+  masc_tui_paste_spill
+  masc_tui_utf8_input
+  masc_tui_send_disposition
+  unix
+  yojson))
+
+(library
+ (name masc_tui_terminal_title)
+ (wrapped false)
+ (modules masc_tui_terminal_title)
+ (libraries masc_tui_types))
 
 (executable
  (name masc_tui)
  (modules
   masc_tui
-  masc_tui_types
   masc_tui_ansi
   masc_tui_render
   masc_tui_loader
@@ -211,7 +557,68 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_keys
+  masc_tui_theme
+  masc_tui_terminal_palette
+  masc_tui_terminal_probe
+  masc_tui_code_lexer
+  masc_tui_span
+  masc_tui_diff
   masc
+  masc.auth
+  masc.masc_random_id
+   masc.time_codec
+  terminal_size
+  masc_tui_credential
+  masc_tui_types
+  masc_tui_terminal_title
+  masc.runtime
+  ;; masc_tui_render names Fusion_types directly to label a run's topology.
+  ;; Tui_decode carries the type through fur_topology, but dune does not open a
+  ;; transitive library's module names, so masc_tui lists masc.fusion_core.
+  masc.fusion_core
+  masc_tui_footer
+  masc_tui_roster_pane
+  masc_tui_keeper_mark
+  masc_tui_help
+  masc_tui_context_state
+  masc_tui_frame_presenter
+  masc_tui_keeper_activity
+  masc_tui_keeper_chat_history
+  masc_tui_keeper_chat_live
+  masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_queue
+  masc_tui_observer
+  masc_tui_acting
+  masc_tui_command
+  masc_tui_mcp
+  masc_tui_keeper_chat_transcript
+  masc_tui_composer
+  masc_tui_keeper_control
+  masc_tui_markdown
+  masc_tui_graphics
+  masc_tui_markdown_render_cache
+  masc_tui_message_layout
+  masc_tui_paste
+  masc_tui_paste_spill
+  masc_tui_utf8_input
+  masc_tui_scroll
+  masc_tui_send_disposition
+  masc_tui_metrics_tail
+  masc_tui_observation_layout
+  masc_tui_operator_projection
+  masc_tui_board_detail
+  masc_tui_board_selection
+  masc_tui_keeper_selection
+  masc_tui_planning_selection
+  masc_tui_planning_detail
+  masc_tui_task_selection
+  masc_tui_render_schedule
+  masc_tui_tool_tree
+  masc_tui_terminal_write_repair
+  masc_tui_editor
+  masc_tui_editor_jump
+  masc_tui_csi
   masc.dashboard
   masc.server
   masc.config
@@ -224,6 +631,7 @@
   fs_compat
   time_compat
   masc_log
+  masc_goal
   masc_workspace
   masc_backend
   masc_process
@@ -234,57 +642,19 @@
   str
   eio_main
   eio
+  mtime.clock.os
   httpun
   cohttp
   cohttp-eio
   masc.prompt_registry
   masc.mcp_transport_protocol
-  agent_sdk
-  agent_sdk.llm_provider))
-
-(executable
- (name masc_worker_run)
- (modules masc_worker_run)
- (public_name masc-worker-run)
- (package masc)
- (libraries
-  masc
-  masc.crypto_rng
-  masc.dashboard
-  masc.server
-  masc.worker_execution_spec
-  yojson
-  unix
-  eio_main
-  eio
-  masc_core
-  masc_types
-  fs_compat
-  time_compat
-  masc_log
-  masc_workspace
-  masc_backend
-  masc_process
-  masc_eio_context
-  fmt
-  str
-  httpun
-  cohttp
-  cohttp-eio
-  masc.prompt_registry
-  masc.mcp_transport_protocol
-  agent_sdk
-  agent_sdk.llm_provider))
+  masc.agent_core
+  masc.agent_core.llm_provider))
 
 ; RFC-0057 Phase 2 — tool descriptor codegen for lib/tool_schemas/.
 ; Depends on tool_schemas_specs (types-only sibling library) to share
 ; spec records with future schema-lint / doc-gen tooling. The cycle is
 ; avoided because tool_schemas_specs does not depend on masc_tool_schemas.
-
-(executable
- (name gen_tool_descriptors)
- (modules gen_tool_descriptors)
- (libraries masc.tool_schemas_specs yojson))
 
 ;; RFC-0252 standalone fusion harness: on-demand panel+judge deliberation vs
 ;; single-model baseline, side by side. Makes live LLM calls (NOT a test —
@@ -298,6 +668,7 @@
  (package masc)
  (libraries
   masc
+  masc.server
   masc.crypto_rng
   masc.fusion_core
   masc.runtime
@@ -316,7 +687,46 @@
   cohttp-eio
   masc.prompt_registry
   masc.mcp_transport_protocol
-  agent_sdk
-  agent_sdk.llm_provider))
+  masc.agent_core
+  masc.agent_core.llm_provider))
+
+;; E6 continuity evidence harness (task-11, M1 PR1): drives an existing
+;; keeper's live chat surface over HTTP (unlike fusion_run.ml, which calls
+;; Fusion directly and bypasses the server), injects seeded nonce facts one
+;; per turn, asks for recall, and correlates each turn against the durable
+;; on-disk transcript's delivery_key/turn_ref rather than trusting the HTTP
+;; response alone. Makes live HTTP calls against a running server (NOT a
+;; test — CI determinism rules forbid network calls in test/).
+
+(executable
+ (name keeper_canary_run)
+ (modules keeper_canary_run keeper_canary_http)
+ (public_name masc-keeper-canary-run)
+ (package masc)
+ (libraries
+  masc
+  masc.keeper_canary
+  masc.time_codec
+  masc.server
+  masc.runtime
+  masc.agent_core
+  masc.agent_core.llm_provider
+  masc.crypto_rng
+  masc.config
+  masc.config_dir_resolver
+  masc.masc_random_id
+  masc.http_client
+  masc.keeper_chat_delivery_identity
+  masc_types
+  masc_core
+  unix
+  yojson
+  digestif
+  eio
+  eio_main
+  time_compat
+  masc_eio_context
+  masc_process
+  fs_compat))
 
 ; Executable for MASC MCP

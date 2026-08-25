@@ -1,6 +1,6 @@
 (** Deterministic offline checkpoint purge (RFC-0351 S1).
 
-    Reduces a persisted OAS checkpoint with three closed rules, none of which
+    Reduces a persisted AGENT_CORE checkpoint with three closed rules, none of which
     involves an LLM:
 
     - R1 duplicate collapse: byte-identical text-only messages repeated at
@@ -11,6 +11,12 @@
     - R3 tool-result clear: [ToolResult] blocks in closed tool cycles have
       their content replaced by {!cleared_tool_result_content}, preserving the
       [tool_use_id]/[ToolUse] pairing (the cycle stays a valid closed unit).
+      Failed results ([Tool_failed]) are exempt and pass through byte-exact:
+      their payload is the feedback the keeper reads on later turns and the
+      only error evidence the durable history carries. The exemption is a
+      type-level distinction (the typed outcome), not content classification,
+      so it stays inside RFC-0351 §2's "judge by type, integer, or byte
+      comparison only" rule.
 
     R2 and R3 run before R1: stripping reasoning can make previously distinct
     assistant messages byte-identical, and duplicate grouping sees only the
@@ -28,7 +34,7 @@
     history has to be prevented at the write boundary that admitted it
     (#25443). [session_id], [turn_count], and every other checkpoint field
     outside [messages] pass through unchanged, so
-    [Keeper_checkpoint_store.save_oas_classified] accepts the result as an
+    [Keeper_checkpoint_store.save_agent_core_classified] accepts the result as an
     equal-watermark re-save.
 
     Applying the purge twice with the same config returns the first result
@@ -45,7 +51,7 @@ type config =
 
 val default_config : config
 (** [{ dup_threshold = 3; keep_recent_messages = 20; strip_thinking = true;
-      clear_tool_results = true }] — the rule set measured on the analyst
+      clear_tool_results = true }] — the rule set measured on a live Keeper
     checkpoint (1,315 -> 579 messages, -28.0% bytes, next-turn input
     -26.0%). *)
 
@@ -71,13 +77,13 @@ type purge_error =
 
 val purge_messages
   :  config:config
-  -> Agent_sdk.Types.message list
-  -> (Agent_sdk.Types.message list * report, purge_error) result
+  -> Agent_core.Types.message list
+  -> (Agent_core.Types.message list * report, purge_error) result
 (** Pure message-list transform behind {!purge}. Exposed for tests. *)
 
 val purge
   :  config:config
-  -> Agent_sdk.Checkpoint.t
-  -> (Agent_sdk.Checkpoint.t * report, purge_error) result
+  -> Agent_core.Checkpoint.t
+  -> (Agent_core.Checkpoint.t * report, purge_error) result
 (** Apply {!purge_messages} to [ckpt.messages], leaving every other field
     unchanged. *)

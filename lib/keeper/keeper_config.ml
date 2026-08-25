@@ -53,6 +53,55 @@ let keeper_board_own_recent_max_rp =
     ~description:"Own recent board posts injected into the world observation per turn (0 = disable)" ()
 let keeper_board_own_recent_max () : int =
   Runtime_params.get keeper_board_own_recent_max_rp
+
+(* Fleet-message context layer. A keeper broadcast is projected into every
+   other keeper's transcript, but the pending-message lanes admit only rows
+   that mention this keeper or that the Owner authored, so a projected row
+   reaches the dashboard and never the prompt. This layer carries the newest
+   projected rows as raw observation data.
+
+   [max] bounds how many rows the world observation carries per turn. The
+   layer is cursor-independent standing context, like own recent board posts:
+   there is no acknowledgement watermark, so nothing accumulates for a keeper
+   that never runs an autonomous turn. *)
+let keeper_fleet_messages_max_rp =
+  _rp_int ~key:"keeper.fleet.messages.max"
+    ~default:(fun () -> 10)
+    ~min_v:0 ~max_v:1000
+    ~description:"Fleet messages injected into the world observation per turn (0 = disable)" ()
+let keeper_fleet_messages_max () : int =
+  Runtime_params.get keeper_fleet_messages_max_rp
+
+(* How many of the keeper's own past turns are replayed as actions. The default
+   is the depth the product states a keeper must not lose ("10턴 전에 한 자신의
+   발화나 행동"), and it fits the measured fleet distribution: a turn renders
+   at a median 1.6 KB, so ten turns add ~16 KB to a prompt that was assembling
+   5.8 KB against a 131 KB runtime cap. *)
+let keeper_own_recent_turns_max_rp =
+  _rp_int ~key:"keeper.own_actions.turns.max"
+    ~default:(fun () -> 10)
+    ~min_v:0 ~max_v:200
+    ~description:"Past turns of the keeper's own tool calls replayed into the world observation (0 = disable)" ()
+let keeper_own_recent_turns_max () : int =
+  Runtime_params.get keeper_own_recent_turns_max_rp
+
+(* The briefing is pinned: the conversation window cannot take back whatever
+   it occupies. A keeper whose briefing outgrew its runtime's whole request cap
+   could not assemble a turn at all, and no cut of the history helped, because
+   the bytes were never in the history (masc#29676: 141,937 pinned bytes
+   against a 131,072 cap, 86 turns refused across eight hours).
+
+   Half keeps the guarantee symmetric — the turn being briefed always has at
+   least as much room as the briefing about it. It is a ceiling, not a target:
+   a briefing that already fits takes what it needs and this never applies. *)
+let keeper_context_briefing_share_percent_rp =
+  _rp_int ~key:"keeper.context.briefing.share_percent"
+    ~default:(fun () -> 50)
+    ~min_v:1 ~max_v:100
+    ~description:"Share of the runtime's declared request-body cap the world-state briefing may occupy" ()
+let keeper_context_briefing_share_percent () : int =
+  Runtime_params.get keeper_context_briefing_share_percent_rp
+
 let keeper_bootstrap_proactive_warmup_sec_rp =
   _rp_int ~key:"keeper.proactive.warmup_sec"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_PROACTIVE_WARMUP_SEC"
@@ -89,6 +138,26 @@ let keeper_batch_limit_rp =
 let keeper_batch_limit () : int =
   Runtime_params.get keeper_batch_limit_rp
 
+(* Batch-size knob, not a workaround cap: adversarial review on
+   masc#27054 traced continuation_wake and found it re-wakes the owner for
+   exactly one more Completed partition per heartbeat cycle, not an
+   off-turn queue. So the choice is not "block vs don't block" but a
+   cycle-count/per-cycle-blocking-time tradeoff with bad extremes on both
+   ends: 1 settlement/turn means 192 heartbeat cycles for a 192-item
+   backlog; 192 settlements/turn is the original unbounded blocking this
+   knob replaced (384 durable writes before the owner's turn can proceed
+   at all). 8 sits between those without profiling data past that it
+   avoids either extreme; max_v caps the dial at the largest backlog
+   this repo has observed in production (masc#27017's 192). *)
+let keeper_board_attention_settlements_per_turn_rp =
+  _rp_int ~key:"keeper.board_attention.settlements_per_turn"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOARD_ATTENTION_SETTLEMENTS_PER_TURN"
+                          ~default:8 ~min_v:1 ~max_v:192)
+    ~min_v:1 ~max_v:192
+    ~description:"Completed board-attention partitions settled per owner turn before the remainder defers to a continuation wake" ()
+let keeper_board_attention_settlements_per_turn () : int =
+  Runtime_params.get keeper_board_attention_settlements_per_turn_rp
+
 
 
 
@@ -110,15 +179,6 @@ let keeper_unified_temperature_rp =
 let keeper_unified_temperature () : float =
   Runtime_params.get keeper_unified_temperature_rp
 
-let keeper_unified_max_tokens_rp =
-  _rp_int ~key:"keeper.turn.max_output_tokens"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_UNIFIED_MAX_TOKENS"
-                          ~default:65536 ~min_v:256 ~max_v:262144)
-    ~min_v:256 ~max_v:262144
-    ~description:"Keeper turn max output tokens fallback (runtime.toml may override in production)" ()
-let keeper_unified_max_tokens () : int =
-  Runtime_params.get keeper_unified_max_tokens_rp
-
 (** Force module initialization to guarantee all runtime params are registered
     before [Runtime_params.restore]. Call from server bootstrap. *)
 let ensure_runtime_params_init () =
@@ -128,7 +188,27 @@ let ensure_runtime_params_init () =
 let keeper_enable_thinking_rp =
   _rp_bool ~key:"keeper.turn.enable_thinking"
     ~default:(fun () -> bool_of_env_default "MASC_KEEPER_ENABLE_THINKING" ~default:false)
-    ~description:"Pass enable_thinking to OAS (default: false; Ollama+Qwen3.5 consumes all tokens in thinking mode)" ()
+    ~description:"Pass enable_thinking to AGENT_CORE (default: false; Ollama+Qwen3.5 consumes all tokens in thinking mode)" ()
 
 let keeper_enable_thinking () : bool =
   Runtime_params.get keeper_enable_thinking_rp
+
+(* The AGENT_CORE run loop continues after every tool round and stops only when
+   the model finishes, errors, or runs a terminal tool, so a turn ended by
+   exhausting wall clock or context rather than by any declared bound. Measured
+   2026-08-24 over 4,416 keeper turns: p50 0 rounds, p90 6, p99 56, max 279;
+   20 turns went past 80. A run that reaches the ceiling fails with
+   ToolRoundLimitExceeded, which the turn's terminal reason code carries -- it
+   is not truncated into something that reads as a finished run. 0 keeps the
+   loop unbounded. *)
+let keeper_max_tool_rounds_rp =
+  _rp_int ~key:"keeper.turn.max_tool_rounds"
+    ~default:(fun () -> 0)
+    ~min_v:0 ~max_v:1000
+    ~description:"Ceiling on tool-continuation rounds in one keeper turn (0 = unbounded)" ()
+
+let keeper_max_tool_rounds () : int option =
+  match Runtime_params.get keeper_max_tool_rounds_rp with
+  | 0 -> None
+  | rounds -> Some rounds
+;;

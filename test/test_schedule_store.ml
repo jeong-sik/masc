@@ -576,6 +576,38 @@ let test_read_state_raises_on_corrupt () =
   | exception Schedule_store.Corrupt_ledger_exn _ -> ()
 ;;
 
+(* [load] decides over two probes — the primary ledger and its [.last-good]
+   mirror — and an absent mirror is the only recovery result whose meaning
+   depends on which way the primary failed: an uninitialised store is [Fresh],
+   a broken primary with no mirror is [Corrupt].
+
+   [corrupt_both] leaves the mirror present-but-unparseable, so neither of
+   these two inputs was covered. Collapsing the primary axis would turn the
+   second into an empty state, which is the silent-data-loss shape
+   [test_mutation_refused_and_preserves_corrupt_ledger] exists to prevent. *)
+let test_absent_mirror_separates_uninitialised_from_corrupt () =
+  with_workspace
+  @@ fun config ->
+  (match Schedule_store.read_state_result config with
+   | Ok state ->
+     check int "an uninitialised store reads as empty" 0
+       (List.length state.Schedule_store.schedules)
+   | Error error ->
+     failf
+       "an uninitialised store must not read as corrupt: %s"
+       (Schedule_store.read_error_to_string error));
+  let req = make_request () in
+  ignore (insert_ok config req);
+  Workspace_core.write_text config (schedules_path config) "{not json";
+  Workspace_core.delete_path config (recovery_path config);
+  check bool "recovery mirror removed" false
+    (Workspace_utils.path_exists config (recovery_path config));
+  match Schedule_store.read_state_result config with
+  | Ok _ -> fail "a broken primary with no mirror must not read as empty"
+  | Error (Schedule_store.Corrupt_read_ledger { recovery_err; _ }) ->
+    check (option string) "no mirror means no recovery detail" None recovery_err
+;;
+
 (* The core silent-failure-to-data-loss regression: a mutation on a corrupt
    ledger must be refused (typed [Corrupt_ledger]) and must NOT overwrite the
    present-but-corrupt files with an empty default. *)
@@ -845,6 +877,80 @@ let test_prune_does_not_bind_orphan_receipt_to_reused_public_id () =
     (List.length state.wakes)
 ;;
 
+let rejection_error = function
+  | Ok _ -> None
+  | Error error -> Some error
+;;
+
+let test_contract_vocabularies_own_strings_and_errors () =
+  let cases =
+    [ ("actor_kind",
+       [ "human_operator"; "automated_actor"; "system" ],
+       Schedule_contract_values.actor_kind_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.actor_kind_of_string v)),
+       rejection_error (Schedule_contract_values.actor_kind_of_string "nope"))
+    ; ("schedule_status",
+       [ "scheduled"; "due"; "running"; "succeeded"; "failed"; "cancelled"; "expired" ],
+       Schedule_contract_values.schedule_status_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.schedule_status_of_string v)),
+       rejection_error (Schedule_contract_values.schedule_status_of_string "nope"))
+    ; ("schedule_source",
+       [ "operator_request"; "automated_request"; "system_request" ],
+       Schedule_contract_values.schedule_source_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.schedule_source_of_string v)),
+       rejection_error (Schedule_contract_values.schedule_source_of_string "nope"))
+    ; ("recurrence_kind",
+       [ "one_shot"; "interval"; "daily"; "cron" ],
+       Schedule_contract_values.recurrence_kind_strings,
+       (fun v ->
+          Result.is_ok (Schedule_contract_values.recurrence_kind_of_string v)),
+       rejection_error
+         (Schedule_contract_values.recurrence_kind_of_string "nope"))
+    ; ("wake_status",
+       [ "running"; "succeeded"; "failed" ],
+       Schedule_contract_values.wake_status_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.wake_status_of_string v)),
+       rejection_error (Schedule_contract_values.wake_status_of_string "nope"))
+    ]
+  in
+  List.iter
+    (fun (field, expected, contract_strings, decodes, rejection) ->
+      check (list string)
+        (Printf.sprintf "%s has one canonical wire vocabulary" field)
+        expected
+        contract_strings;
+      match rejection with
+      | None -> Alcotest.failf "%s must reject \"nope\"" field
+      | Some error ->
+        check string
+          (Printf.sprintf "%s names its field" field)
+          field
+          error.Schedule_contract_values.field;
+        check string
+          (Printf.sprintf "%s carries the rejected value" field)
+          "nope"
+          error.rejected;
+        check (list string)
+          (Printf.sprintf "%s carries exactly its accepted set" field)
+          expected
+          error.accepted;
+        check string
+          (Printf.sprintf "%s renders one correction hint" field)
+          (Printf.sprintf
+             "unknown %s: nope; accepted: %s"
+             field
+             (String.concat ", " expected))
+          (Schedule_contract_values.decode_error_to_string error);
+        List.iter
+          (fun value ->
+            check bool
+              (Printf.sprintf "%s offers %s, which decodes" field value)
+              true
+              (decodes value))
+          error.accepted)
+    cases
+;;
+
 let () =
   run "Schedule_store"
     [
@@ -867,6 +973,8 @@ let () =
             test_startup_recovery_refuses_corrupt_ledger;
           test_case "read_state raises on corrupt ledger" `Quick
             test_read_state_raises_on_corrupt;
+          test_case "absent mirror separates uninitialised from corrupt" `Quick
+            test_absent_mirror_separates_uninitialised_from_corrupt;
           test_case "mutation refused and corrupt ledger preserved" `Quick
             test_mutation_refused_and_preserves_corrupt_ledger;
           test_case "primary write failure is surfaced" `Quick
@@ -924,6 +1032,8 @@ let () =
             "prune scopes wake receipt ownership by schedule instance"
             `Quick
             test_prune_does_not_bind_orphan_receipt_to_reused_public_id;
+          test_case "contract vocabularies own strings and errors" `Quick
+            test_contract_vocabularies_own_strings_and_errors;
         ] );
     ]
 ;;

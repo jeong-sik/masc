@@ -15,14 +15,14 @@ This document is the operator-facing SSOT for:
 - Keeper composite signal path: `lib/keeper/keeper_registry.ml`
 - Keeper heartbeat snapshot path: `lib/keeper/keeper_keepalive.ml`
 - Server-push snapshot loops: `lib/server/server_dashboard_http_core.ml`, `lib/server/server_dashboard_http_execution_surfaces.ml`
-- OAS Event_bus bridge: `lib/oas_events.ml`, `lib/oas_event_bridge.ml`
+- Agent Core Event_bus bridge: `lib/keeper/keeper_event_bridge.ml`
 
 ## Read Model Rules
 
 - SSE is freshness transport, not the authoritative read model.
 - `keeper_composite_changed` is signal-only. Consumers re-fetch `/api/v1/keepers/:name/composite`.
 - `operator_snapshot` and `operator_digest` are cached server-push surfaces. Default HTTP reads usually return the cache.
-- OAS bridge events are replayable because `oas_event_bridge` persists them under `.masc/oas-events/`.
+- Agent Core events are replayable because `Keeper_event_bridge` persists them under `.masc/agent-core-events/`.
 - Keeper context occupancy and last-turn provider usage are separate observations.
   There is currently no owner-boundary context measurement, so
   operator/execution snapshots expose typed `not_observed`. They neither
@@ -40,7 +40,7 @@ This document is the operator-facing SSOT for:
 | `operator_digest` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Default root HTTP path returns cache; non-default requests recompute. |
 | `execution_snapshot` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Used by execution dashboard surfaces. |
 | `transport_health_snapshot` | Background proactive refresh loop | Cached payload wrapped as `{type, payload, ts_unix}` | Used for transport diagnostics. |
-| `namespace_truth_snapshot` | After namespace-truth recomposition from cached surfaces | Cached payload wrapped as `{type, payload, ts_unix}` | Namespace truth dashboard snapshot. |
+| `project_snapshot` | After project-snapshot recomposition from cached surfaces | Cached payload wrapped as `{type, payload, ts_unix}` | Project dashboard snapshot. |
 
 ## Keeper Context Observation Contract
 
@@ -122,7 +122,7 @@ By contrast, the nearby `dispatch_keeper_phase_event` calls in the overflow-retr
 
 ### Base timing
 
-- Keepalive loop base interval: `30s`
+- Keepalive loop base interval: `300s`
 - Keepalive sleep: exact resolved `keeper.keepalive_interval_sec`
 - Snapshot write interval: runtime param `keeper.snapshot_sec`
 - Current default `keeper.snapshot_sec`: `300s`
@@ -195,7 +195,7 @@ If you are watching dashboard freshness:
 
 - Graceful stop should show lifecycle transitions and normal cleanup.
 - Abrupt termination should be diagnosed from:
-  - `oas:masc:keeper:lifecycle` / crash detail
+  - `agent_core:masc:keeper:lifecycle` / crash detail
   - registry crash state
   - `crash-events/` durable records
   - missing follow-up snapshot traffic
@@ -212,12 +212,13 @@ Source of accepted event names on the dashboard side: `dashboard/src/types/sse.t
 | Board and notification compatibility | `board_post`, `masc/board_post`, `board_comment`, `masc/board_comment`, `board_delete`, `masc/board_delete`, `post_created`, `comment_added`, `post_voted`, `comment_voted` |
 | Keeper direct SSE | `keeper_heartbeat`, `keeper_handoff`, `masc/keeper_handoff`, `keeper_compaction`, `masc/keeper_compaction`, `keeper_guardrail`, `masc/keeper_guardrail`, `keeper_phase_changed`, `keeper_composite_changed`, `keeper_tool_call`, `masc/keeper_tool_call`, `keeper_tool_skipped`, `keeper_turn_complete`, `masc/keeper_turn_complete` |
 | Gate / HITL | `client_input_approved`, `client_input_rejected`, `client_input_updated`, `approval:pending`, `approval:resolved` |
-| OAS bridge | `oas:masc:keeper:lifecycle`, `oas:agent_started`, `oas:agent_completed`, `oas:tool_called`, `oas:tool_completed`, `oas:turn_started`, `oas:turn_completed`, `oas:context_compacted`, `oas:task_state_changed`, `oas:masc:harness:verdict_recorded`, `oas:masc:harness:pre_compact`, `oas:masc:harness:handoff` |
-| Server-push snapshots | `namespace_truth_snapshot`, `execution_snapshot`, `operator_snapshot`, `operator_digest`, `transport_health_snapshot` |
+| agent core bridge | `agent_core:masc:keeper:lifecycle`, `agent_core:agent_started`, `agent_core:agent_completed`, `agent_core:tool_called`, `agent_core:tool_completed`, `agent_core:turn_started`, `agent_core:turn_completed`, `agent_core:context_compacted`, `agent_core:task_state_changed`, `agent_core:masc:harness:verdict_recorded`, `agent_core:masc:harness:pre_compact`, `agent_core:masc:harness:handoff` |
+| Server-push snapshots | `project_snapshot`, `execution_snapshot`, `operator_snapshot`, `operator_digest`, `transport_health_snapshot` |
 
-### 2. OAS custom events published by MASC
+### 2. Agent Core custom events published by MASC
 
-These originate in `lib/oas_events.ml` and are later relayed by `oas_event_bridge`.
+Domain publishers emit typed `Agent_core.Event_bus.Custom` payloads and
+`Keeper_event_bridge` relays them.
 
 | Event name | Meaning |
 | --- | --- |
@@ -232,8 +233,8 @@ These originate in `lib/oas_events.ml` and are later relayed by `oas_event_bridg
 
 | Event name | Status | Notes |
 | --- | --- | --- |
-| `keeper_lifecycle` | removed legacy direct SSE | Replaced by `keeper_phase_changed` for observer-facing FSM transitions and `oas:masc:keeper:lifecycle` for lifecycle detail. |
-| `workspace_truth_snapshot` | removed legacy alias | Replaced by `namespace_truth_snapshot`; same payload shape, canonical event name only. |
+| `keeper_lifecycle` | removed legacy direct SSE | Replaced by `keeper_phase_changed` for observer-facing FSM transitions and `agent_core:masc:keeper:lifecycle` for lifecycle detail. |
+| `workspace_truth_snapshot` | removed legacy alias | Replaced by `project_snapshot`; same payload shape, canonical event name only. |
 
 ## Representative Messages
 
@@ -289,11 +290,11 @@ Meaning:
 - changed-only SSE fanout
 - payload body is large and surface-specific; example above is intentionally minimal
 
-### 4. OAS-relayed SSE: `oas:masc:keeper:lifecycle`
+### 4. agent core-relayed SSE: `agent_core:masc:keeper:lifecycle`
 
 ```json
 {
-  "type": "oas:masc:keeper:lifecycle",
+  "type": "agent_core:masc:keeper:lifecycle",
   "event_type": "masc:keeper:lifecycle",
   "ts_unix": 1710000000.123,
   "correlation_id": "corr-...",
@@ -310,16 +311,16 @@ Meaning:
 
 Meaning:
 
-- observer and agent stream sessions both receive the live OAS tail
+- observer and agent stream sessions both receive the live agent core tail
 - lifecycle detail now carries `phase`, so the payload can replace the removed legacy direct SSE
-- dashboard runtime state ingests this as OAS telemetry, while main keeper transition journaling still comes from `keeper_phase_changed`
+- dashboard runtime state ingests this as agent core telemetry, while main keeper transition journaling still comes from `keeper_phase_changed`
 
 ## Variantization Status
 
 ## What is already typed
 
 - Dashboard-side SSE names are modeled as a TypeScript string union in `dashboard/src/types/sse.ts`.
-- Dashboard OAS monitor types are separately modeled in `dashboard/src/types/oas.ts`.
+- Dashboard agent core monitor types are separately modeled in `dashboard/src/types/agent core.ts`.
 - Composite observer internals are variantized:
   - TLA action names mirrored as OCaml variants
   - invariant keys mirrored as OCaml variants
@@ -328,14 +329,14 @@ Meaning:
 ## What is still stringly typed
 
 - Direct SSE producers emit raw JSON objects with string `"type"` fields.
-- OAS custom events are published as `Agent_sdk.Event_bus.Custom (name, payload)`, where `name` is still a free string.
-- The bridge preserves that string name as `event_type` and prefixes it into `type = "oas:" ^ event_type`.
+- agent core custom events are published as `Agent_core.Event_bus.Custom (name, payload)`, where `name` is still a free string.
+- The bridge preserves that string name as `event_type` and prefixes it into `type = "agent_core:" ^ event_type`.
 
 ## Practical conclusion
 
 - This is partially variantized, not end-to-end variantized.
 - Domain contracts inside the composite observer are strongly typed.
-- Dashboard OAS monitor events are now modeled as a discriminated union rather than a wide product type.
+- Dashboard agent core monitor events are now modeled as a discriminated union rather than a wide product type.
 - Transport event names themselves are still mostly string-labeled protocols.
 
 ## Source Pointers
@@ -344,6 +345,6 @@ Meaning:
 - Composite signal router: `dashboard/src/sse-store.ts`, `dashboard/src/composite-signals.ts`
 - Composite producer: `lib/keeper/keeper_registry.ml`
 - Heartbeat snapshot writer: `lib/keeper/keeper_keepalive.ml`
-- OAS custom event publishers: `lib/oas_events.ml`
-- OAS bridge + durable replay: `lib/oas_event_bridge.ml`
+- MASC domain event publisher: `lib/keeper/keeper_event_publisher.ml`
+- Agent Core bridge + durable replay: `lib/keeper/keeper_event_bridge.ml`
 - Server-push snapshot loops: `lib/server/server_dashboard_http_core.ml`, `lib/server/server_dashboard_http_execution_surfaces.ml`, `lib/server/server_dashboard_http_namespace_truth.ml`

@@ -1,0 +1,60 @@
+{
+  "schema": "masc.keeper_rw23_protected_main_evidence.v1",
+  "captured_at": "2026-08-21T07:48:41Z",
+  "source_sha": "c884017be761e1d614305b32e53aac7285f62470",
+  "github": {
+    "run_id": 32455741544,
+    "job_id": 96696914654,
+    "run_url": "https://github.com/jeong-sik/masc/actions/runs/32455741544",
+    "artifact_id": 9438679282,
+    "artifact_name": "keeper-realworld-evidence-32455741544-1"
+  },
+  "execution": {
+    "status": "failed",
+    "started_at": "2026-08-21T07:09:01Z",
+    "completed_at": "2026-08-21T07:48:41Z",
+    "effective_base_path": "/home/runner/work/_temp/keeper-realworld-base.30txCU",
+    "runtime_strategy": "shared_runtime",
+    "distinct_runtime_count": 1,
+    "runtime_by_role": {
+      "coordinator": "glm-coding.glm-4-7-coding",
+      "builder-a": "glm-coding.glm-4-7-coding",
+      "builder-b": "glm-coding.glm-4-7-coding",
+      "reviewer": "glm-coding.glm-4-7-coding",
+      "researcher": "glm-coding.glm-4-7-coding"
+    }
+  },
+  "rw23": {
+    "goal_id": "goal-keeper-collab-rw-32455741544-1-verifier",
+    "task_id": "task-001",
+    "artifact_path": "artifacts/keeper-collab-rw-32455741544-1-goal-proof.txt",
+    "task_created_at": "2026-08-21T07:10:15Z",
+    "autonomous_claim_at": "2026-08-21T07:11:15Z",
+    "success_artifact_submitted_at": "2026-08-21T07:20:44Z",
+    "task_verdict": {
+      "status": "approved",
+      "to_status": "done",
+      "recorded_at": "2026-08-21T07:21:01Z",
+      "authority_actor": "verifier_exact",
+      "evaluator_runtime": "glm-coding.glm-5-turbo",
+      "verification_id": "vrf-29be12fd8fcabb9a0752302fd291575a"
+    },
+    "directed_refutation_turn": {
+      "started_at": "2026-08-21T07:39:12Z",
+      "completed_at": "2026-08-21T07:43:36Z",
+      "status": "failed",
+      "failure_kind": "Turn_exception",
+      "failure_detail": "turn_failed: Rate limited: Rate limit reached for requests"
+    },
+    "goal_refutation_observed": false,
+    "goal_proof_observed": false,
+    "goal_browser_evidence_observed": false
+  },
+  "verdict": {
+    "status": "failed",
+    "primary_cause": "The success-token verifier Task was created during fleet setup and exposed through the coordinator active Goal scope, so autonomous work completed and Task verification approved it before the directed RW23 refutation phase.",
+    "secondary_observation": "The later directed refutation turn was rate-limited. Retrying it cannot restore the already-consumed Task rejection transition.",
+    "fix_pr": 29272,
+    "completion_claim": "none"
+  }
+}

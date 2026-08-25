@@ -75,24 +75,53 @@ let rec map_stages = function
         | Error e -> Error e
         | Ok tail -> Ok (simple :: tail)))
 
-let to_shell_ir
+let pipeline_to_ir
       (stages :
         ( (string * Shell_ir.arg_meta)
         * (string * Shell_ir.arg_meta) list
         * Redirect_scope.t list )
         list)
-    : Shell_ir.t Parsed.t =
+    : (Shell_ir.t, Parsed.parse_error) result =
   match map_stages stages with
-  | Error e -> Parsed.Parse_error e
-  | Ok [ single ] -> Parsed.Parsed (Shell_ir.Simple single)
+  | Error e -> Error e
+  | Ok [ single ] -> Ok (Shell_ir.Simple single)
   | Ok (_ :: _ :: _ as many) ->
-    let ir_stages = List.map (fun s -> Shell_ir.Simple s) many in
-    Parsed.Parsed (Shell_ir.Pipeline ir_stages)
+    Ok (Shell_ir.Pipeline (List.map (fun s -> Shell_ir.Simple s) many))
   | Ok [] ->
     (* Unreachable: the grammar uses separated_nonempty_list so
        stages is always length >= 1.  Defensive. *)
-    Parsed.Parse_error
-      { pos = Lexing.dummy_pos; token = ""; expected = [ "command" ] }
+    Error { pos = Lexing.dummy_pos; token = ""; expected = [ "command" ] }
+
+let to_shell_ir
+      ((head, tail) :
+        ( (string * Shell_ir.arg_meta)
+        * (string * Shell_ir.arg_meta) list
+        * Redirect_scope.t list )
+        list
+        * (Shell_ir.connector
+          * ( (string * Shell_ir.arg_meta)
+            * (string * Shell_ir.arg_meta) list
+            * Redirect_scope.t list )
+            list)
+          list)
+    : Shell_ir.t Parsed.t =
+  let ( let* ) = Result.bind in
+  let parsed =
+    let* head_ir = pipeline_to_ir head in
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | (connector, stages) :: rest ->
+        let* ir = pipeline_to_ir stages in
+        loop ((connector, ir) :: acc) rest
+    in
+    let* tail_irs = loop [] tail in
+    match tail_irs with
+    | [] -> Ok head_ir
+    | _ :: _ -> Ok (Shell_ir.Sequence { head = head_ir; tail = tail_irs })
+  in
+  match parsed with
+  | Ok ir -> Parsed.Parsed ir
+  | Error e -> Parsed.Parse_error e
 
 (* Post-hoc [reason_too_complex] classifier.  Runs only after the
    Menhir grammar (or lexer) has rejected the input — so the input is
@@ -117,7 +146,9 @@ let classify_too_complex (source : string) : Parsed.reason_too_complex option =
   if has "$((" then Some `Arith_expansion
   else if has "<<<" then Some `Here_string
   else if has "<<" then Some `Heredoc
-  else if has "&&" || has "||" then Some `Logic_op
+  (* [&&], [||] and [;] are in the subset now, so reaching here with one means
+     the input failed for another reason -- an operand the grammar could not
+     read. *)
   else if has "$(" || has "`" then Some `Cmd_subst
   else if has "<(" || has ">(" then Some `Proc_subst
   else if has ">>" || has ">" || has "<" then Some `Redirect

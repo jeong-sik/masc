@@ -1292,7 +1292,7 @@
           "refId": "A"
         }
       ],
-      "description": "On-disk telemetry stores. tool_calls/oas-events growth starved the readers on 2026-06-09; trajectories hit 483MB (#20682)."
+      "description": "On-disk telemetry stores. tool_calls/agent-core-events growth starved the readers on 2026-06-09; trajectories hit 483MB (#20682)."
     },
     {
       "id": 5,
@@ -1329,7 +1329,7 @@
           "refId": "B"
         }
       ],
-      "description": "Drop_oldest sheds on the oas_runtime bus (#20676); Block accumulates publish wait on masc_domain."
+      "description": "Drop_oldest sheds on the agent_core_runtime bus (#20676); Block accumulates publish wait on masc_domain."
     },
     {
       "id": 6,
@@ -1589,12 +1589,12 @@
           "refId": "A"
         }
       ],
-      "description": "Average streaming first-chunk latency. The OAS stream-idle gate kills silent streams at 60s."
+      "description": "Average streaming first-chunk latency. The AGENT_CORE stream-idle gate kills silent streams at 60s."
     },
     {
       "id": 13,
       "type": "timeseries",
-      "title": "OAS Bridge Timeouts / Cancels",
+      "title": "AGENT_CORE Bridge Timeouts / Cancels",
       "gridPos": {
         "x": 8,
         "y": 171,
@@ -1616,12 +1616,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(masc_oas_bridge_timeout_total[5m])) * 60",
+          "expr": "sum(rate(masc_agent_core_bridge_timeout_total[5m])) * 60",
           "legendFormat": "timeouts/min",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(masc_oas_bridge_cancel_total[5m])) * 60",
+          "expr": "sum(rate(masc_agent_core_bridge_cancel_total[5m])) * 60",
           "legendFormat": "cancels/min",
           "refId": "B"
         }

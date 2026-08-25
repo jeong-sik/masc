@@ -39,7 +39,7 @@ let status_json = function
 let git_status_json ~base_path (repo : Repo_manager_types.repository) =
   let abs_local_path = Repo_store.local_path ~base_path repo in
   let repo_for_git = { repo with local_path = abs_local_path } in
-  match Repo_git.status_summary ~repository:repo_for_git with
+  match Repo_git.status_summary ~repository:repo_for_git () with
   | Ok summary ->
       `Assoc
         [
@@ -68,7 +68,7 @@ let sync_currency_json ~base_path (repo : Repo_manager_types.repository) =
   let abs_local_path = Repo_store.local_path ~base_path repo in
   let repo_for_git = { repo with local_path = abs_local_path } in
   let target_ref = "origin/" ^ repo.default_branch in
-  match Repo_git.ahead_behind ~repository:repo_for_git ~target_ref with
+  match Repo_git.ahead_behind ~repository:repo_for_git ~target_ref () with
   | Ok (behind, ahead) ->
       `Assoc
         [
@@ -92,6 +92,14 @@ let repository_json ~base_path (repo : Repo_manager_types.repository) =
       ("id", `String repo.id);
       ("name", `String repo.name);
       ("url", `String repo.url);
+      (* RFC-0378 §5.3b: the server is the only slug mint — clients carry
+         this value into co-view context and scope queries instead of
+         re-deriving it from the url. [`Null] when the url cannot
+         canonicalize (blank or local-path remote). *)
+      ( "codebase",
+        match Agent_observation.canonical_url_of_remote repo.url with
+        | Some slug -> `String slug
+        | None -> `Null );
       ("local_path", `String repo.local_path);
       ("aliases", `List (List.map (fun s -> `String s) repo.aliases));
       ("default_branch", `String repo.default_branch);
@@ -101,8 +109,6 @@ let repository_json ~base_path (repo : Repo_manager_types.repository) =
       ("sync_interval", `Int repo.sync_interval);
       ("created_at", timestamp_json repo.created_at);
       ("updated_at", timestamp_json repo.updated_at);
-      ("git_status", git_status_json ~base_path repo);
-      ("sync_currency", sync_currency_json ~base_path repo);
     ]
   in
   let fields =
@@ -111,6 +117,23 @@ let repository_json ~base_path (repo : Repo_manager_types.repository) =
     | Some msg -> ("error_message", `String msg) :: fields
   in
   `Assoc fields
+
+(* The same repository, plus what only git can answer: whether the working tree
+   is dirty and how far it has drifted from its remote. Each of those is a
+   subprocess, so this is the shape a caller asks for one repository at a time —
+   never the shape a list is built from. Listing five registered repositories
+   used to run ten git processes and take 4.0-5.5 s to return 2.8 KB, on every
+   request, uncached; the dashboard needs this state for the one repository in
+   its status bar. *)
+let repository_observation_json ~base_path (repo : Repo_manager_types.repository) =
+  let git_fields =
+    [ ("git_status", git_status_json ~base_path repo)
+    ; ("sync_currency", sync_currency_json ~base_path repo)
+    ]
+  in
+  match repository_json ~base_path repo with
+  | `Assoc fields -> `Assoc (fields @ git_fields)
+  | other -> other
 
 let branch_json ~default_branch name =
   let remote_prefix = "remotes/" in
@@ -236,8 +259,11 @@ let parse_repository_json body_str =
                 url;
                 local_path =
                   (* New repository requests may omit the managed checkout
-                     location; the HTTP constructor owns that choice. *)
-                  Option.value ~default:(Filename.concat ".masc/repos" id)
+                     location; the HTTP constructor owns that choice. The
+                     default is base-path-relative because Repo_store.local_path
+                     concats it onto the base path. *)
+                  Option.value
+                    ~default:(Config_dir_resolver.repos_relative_path ~id)
                     raw_local_path;
                 aliases;
                 default_branch = Option.value ~default:"main" raw_default_branch;
@@ -272,7 +298,8 @@ let handle_get_repository state id req reqd =
   match Repo_store.find ~base_path id with
   | Error msg -> json_response ~status:`Not_found req reqd (json_error msg)
   | Ok repo ->
-      Http.Response.json_value ~request:req (repository_json ~base_path repo) reqd
+      Http.Response.json_value ~request:req
+        (repository_observation_json ~base_path repo) reqd
 
 let handle_list_branches state id req reqd =
   let base_path = base_path_of_state state in

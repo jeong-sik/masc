@@ -37,11 +37,15 @@ let with_temp_tree f =
 let test_lists_existing_sibling_dirs () =
   with_temp_tree (fun root ->
     mkdir_p (Filename.concat root "repos/masc");
-    mkdir_p (Filename.concat root "repos/oas");
+    mkdir_p (Filename.concat root "repos/agent_core");
     let hint = Exec_policy.existing_sibling_dirs_hint ~workdir:root "repos/masc-mcp" in
     Alcotest.(check (option string))
       "stale repos/masc-mcp surfaces the real repos/ entries (sorted, no rename table)"
-      (Some "(existing directories under repos/: masc, oas)")
+      (* Sorted by String.compare, so agent_core precedes masc. The literal is
+         written out rather than derived from the mkdir_p calls above: deriving
+         it would call the same sort the subject uses and pass whatever order
+         the subject produced. *)
+      (Some "(existing directories under repos/: agent_core, masc)")
       hint)
 ;;
 
@@ -111,7 +115,10 @@ let test_explicit_redirect_outside_workdir_is_rejected () =
     let target = Masc_exec.Path_scope.classify ~raw:"/etc/passwd" ~cwd:workdir in
     let redirect =
       Masc_exec.Redirect_scope.File
-        { fd = 1; target; mode = Masc_exec.Redirect_scope.Write }
+        { fd = 1
+        ; target = Masc_exec.Redirect_scope.In_command_namespace target
+        ; mode = Masc_exec.Redirect_scope.Write
+        }
     in
     let ir = shell_ir ~redirects:[ redirect ] ~workdir [] in
     Alcotest.(check bool)

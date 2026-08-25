@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Canonical MCP tool help content.
 
     The MCP schema description should stay short and discovery-oriented.
@@ -129,109 +112,34 @@ let constraints_from_meta (meta : Tool_catalog.metadata) =
   in
   visibility_note @ implementation_note
 
-let manual_help_entry name =
-  match name with
-  | "masc_tool_help" ->
-      Some
-        {
-          name;
-          short_description = "Return canonical help and metadata for a specific MASC tool.";
-          when_to_use = "Use when you need the concise description, visibility, and detailed guidance for one tool.";
-          key_constraints = [];
-          details_markdown =
-            "Returns the canonical short description, visibility metadata, and detailed help for a specific tool.";
-          doc_refs = [ "docs/KEEPER-USER-MANUAL.md" ];
-          prompt_hints = [ "Pair with prompt 'tool_help' when you want a ready-to-use explanation." ];
-          examples = [ "name='keeper_task_done'"; "name='masc_plan_set_task'" ];
-          alternatives = [];
-        }
-  | "keeper_task_done" ->
-      Some
-        {
-          name;
-          short_description =
-            "Mark your owned task done with a result summary and evidence_refs.";
-          when_to_use =
-            "Use when the current keeper has finished an owned task and can cite concrete evidence_refs.";
-          key_constraints =
-            [
-              "Caller must own the task unless using a force tool.";
-              "evidence_refs must include at least one locally validated base-path artifact, local git commit, or .masc trace/turn/receipt artifact when marking work done.";
-            ];
-          details_markdown =
-            "Completes the task directly. For PR-bearing work, include the PR URL or artifact reference in evidence_refs instead of using a separate verification-evidence wrapper.";
-          doc_refs = [];
-          prompt_hints = [ "Prefer this over retired task verification wrapper tools." ];
-          examples =
-            [
-              "task_id='task-123' result='Implemented the task; checks passed.' evidence_refs=['artifact:review-42']";
-            ];
-          alternatives = [];
-        }
-  | "keeper_memory_write" ->
-      Some
-        {
-          name;
-          short_description = "Persist a durable keeper memory claim.";
-          when_to_use =
-            "Use when something from this turn must outlive it: every write is a durable claim later turns read back.";
-          key_constraints =
-            [
-              "There is no kind argument; sending one is rejected.";
-              "Do not use for transient scratch notes.";
-            ];
-          details_markdown =
-            "Writes a bounded durable claim into the Memory OS fact store that recall renders into later turns.";
-          doc_refs = [];
-          prompt_hints = [];
-          examples =
-            [
-              "title='verification wrapper retired' content='Use keeper_task_done evidence_refs; do not call separate submit evidence wrappers.'";
-            ];
-          alternatives = [];
-        }
-  | "keeper_tasks_list" ->
-      Some
-        {
-          name;
-          short_description = "List MASC backlog tasks visible to this keeper.";
-          when_to_use =
-            "Use before claiming work, checking awaiting verification items, or diagnosing current task state.";
-          key_constraints =
-            [
-              "include_done defaults to false.";
-              "Use status to narrow the list when inspecting a specific lifecycle state.";
-            ];
-          details_markdown =
-            "Returns task_id, title, status, assignee, and priority for backlog tasks visible to the keeper.";
-          doc_refs = [];
-          prompt_hints = [];
-          examples = [ "status='todo' include_done=false limit=20" ];
-          alternatives = [];
-        }
-  | "masc_plan_set_task" ->
-      Some
-        {
-          name;
-          short_description = "Set or update the plan-of-record for a claimed task.";
-          when_to_use =
-            "Use after masc_claim to record the high-level plan (1-5 bullet outline) before doing significant work. Future-you and reviewers read this to understand intent without rerunning your reasoning.";
-          key_constraints =
-            [
-              "Caller must own a claim on the target task_id.";
-              "Plan body should be short prose, not a runbook — it is a commitment, not a script.";
-            ];
-          details_markdown =
-            "Replaces any prior plan on the task; history is preserved in the audit log.";
-          doc_refs = [];
-          prompt_hints = [];
-          examples =
-            [
-              "task_id='task-123' plan='1) Extend tool_help_registry record  2) Backfill 6 manual entries  3) Add regression tests.'";
-            ];
-          alternatives = [];
-        }
-  | _ -> None
+(* Authored help lives in the tool's own [config/tools/<name>.toml] [help]
+   table (RFC prompts-and-tool-definitions-outside-ocaml §2.2; the in-code
+   table this replaces was the last hand-written copy). The embedded tree is
+   the source: definitions are validated at boot, so a file that fails to
+   load here has already refused the boot — the defensive [Error] arm below
+   only means "no authored help", never a silent half-entry. *)
+let toml_help_table =
+  lazy
+    (let table = Hashtbl.create 32 in
+     List.iter
+       (fun rel ->
+          if
+            String.starts_with ~prefix:"tools/" rel
+            && String.equal (Filename.dirname rel) "tools"
+            && Filename.check_suffix rel ".toml"
+          then (
+            let name = Filename.remove_extension (Filename.basename rel) in
+            match Embedded_config.read rel with
+            | None -> ()
+            | Some contents ->
+              (match Tool_definition_toml.load ~name ~contents with
+               | Ok { Tool_definition_toml.help = Some help; _ } ->
+                 Hashtbl.replace table name help
+               | Ok { Tool_definition_toml.help = None; _ } | Error _ -> ())))
+       Embedded_config.file_list;
+     table)
+
+let toml_help name = Hashtbl.find_opt (Lazy.force toml_help_table) name
 
 let derived_short_description_with_meta (_meta : Tool_catalog.metadata) name original =
   let seed =
@@ -263,8 +171,35 @@ let derived_details_with_meta (meta : Tool_catalog.metadata) original =
       ]
 
 let entry_of_schema (schema : Masc_domain.tool_schema) : help_entry =
-  match manual_help_entry schema.name with
-  | Some entry -> entry
+  match toml_help schema.name with
+  | Some (help : Tool_definition_toml.help) ->
+      (* An authored [help] table is the whole entry, the way the retired
+         in-code table was: absent prose fields fall back to the schema
+         derivation, absent lists stay empty rather than picking up derived
+         constraint notes, so an authored entry renders exactly as written. *)
+      let meta = Tool_catalog.metadata schema.name in
+      {
+        name = schema.name;
+        short_description =
+          (match help.short_description with
+           | Some text -> text
+           | None ->
+               derived_short_description_with_meta meta schema.name
+                 schema.description);
+        when_to_use =
+          (match help.when_to_use with
+           | Some text -> text
+           | None -> default_when_to_use schema.name);
+        key_constraints = help.key_constraints;
+        details_markdown =
+          (match help.details_markdown with
+           | Some text -> text
+           | None -> derived_details_with_meta meta schema.description);
+        doc_refs = help.doc_refs;
+        prompt_hints = help.prompt_hints;
+        examples = help.examples;
+        alternatives = help.alternatives;
+      }
   | None ->
       (* Fetch catalog metadata once and thread it through every helper
          that would otherwise re-query Tool_catalog.metadata.  Without
@@ -434,7 +369,3 @@ let index_markdown (schemas : Masc_domain.tool_schema list) =
      ]
     @ rows)
 
-let validate_short_description (entry : help_entry) =
-  not (String.contains entry.short_description '\n')
-  && String.length (String.trim entry.short_description) > 0
-  && String.length entry.short_description <= 140

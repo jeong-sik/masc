@@ -18,6 +18,7 @@ type t =
     }
   | Webhook of { source : string; event_id : string }
   | Agent
+  | Broadcast
   | Gate of { label : string; address : (string * string) list }
 
 let equal (a : t) (b : t) = a = b
@@ -29,50 +30,10 @@ let lane_label = function
   | Slack _ -> "slack"
   | Webhook _ -> "webhook"
   | Agent -> "agent"
+  | Broadcast -> "broadcast"
   | Gate { label; _ } -> label
 
 (* ── JSON codec ── *)
-
-let opt_string_field key = function
-  | None -> []
-  | Some value -> [ (key, `String value) ]
-
-let string_assoc_json fields =
-  `Assoc (List.map (fun (key, value) -> (key, `String value)) fields)
-
-let string_assoc_of_json = function
-  | `Assoc fields ->
-      Ok
-        (List.filter_map
-           (fun (key, value) ->
-             match value with
-             | `String s -> Some (key, s)
-             | _ -> None)
-           fields)
-  | _ -> Error "expected string object"
-
-let required_string key = function
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some (`String value) -> Ok value
-      | _ -> Error (Printf.sprintf "missing string field %s" key))
-  | _ -> Error "expected object"
-
-let optional_string key = function
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some (`String value) when String.trim value <> "" -> Some value
-      | Some (`String _) | Some `Null | None -> None
-      | Some _ -> None)
-  | _ -> None
-
-let optional_object key = function
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some (`Assoc _ as obj) -> Some obj
-      | Some `Null | None -> None
-      | Some _ -> None)
-  | _ -> None
 
 let ( let* ) = Result.bind
 
@@ -80,18 +41,18 @@ let to_json = function
   | Dashboard { session_id } ->
       `Assoc
         ([ ("kind", `String "dashboard") ]
-        @ opt_string_field "session_id" session_id)
+        @ Json_util.string_field_if_present "session_id" session_id)
   | Discord { guild_id; channel_id; parent_channel_id; thread_id } ->
       `Assoc
         ([ ("kind", `String "discord"); ("channel_id", `String channel_id) ]
-        @ opt_string_field "guild_id" guild_id
-        @ opt_string_field "parent_channel_id" parent_channel_id
-        @ opt_string_field "thread_id" thread_id)
+        @ Json_util.string_field_if_present "guild_id" guild_id
+        @ Json_util.string_field_if_present "parent_channel_id" parent_channel_id
+        @ Json_util.string_field_if_present "thread_id" thread_id)
   | Slack { team_id; channel_id; thread_ts } ->
       `Assoc
         ([ ("kind", `String "slack"); ("channel_id", `String channel_id) ]
-        @ opt_string_field "team_id" team_id
-        @ opt_string_field "thread_ts" thread_ts)
+        @ Json_util.string_field_if_present "team_id" team_id
+        @ Json_util.string_field_if_present "thread_ts" thread_ts)
   | Webhook { source; event_id } ->
       `Assoc
         [
@@ -100,49 +61,51 @@ let to_json = function
           ("event_id", `String event_id);
         ]
   | Agent -> `Assoc [ ("kind", `String "agent") ]
+  | Broadcast -> `Assoc [ ("kind", `String "broadcast") ]
   | Gate { label; address } ->
       `Assoc
         [
           ("kind", `String "gate");
           ("label", `String label);
-          ("address", string_assoc_json address);
+          ("address", Json_util.string_assoc_to_json address);
         ]
 
 let of_json json =
-  let* kind = required_string "kind" json in
+  let* kind = Json_util.require_string json "kind" in
   match kind with
   | "dashboard" ->
-      Ok (Dashboard { session_id = optional_string "session_id" json })
+      Ok (Dashboard { session_id = Json_util.assoc_string_opt "session_id" json })
   | "discord" ->
-      let* channel_id = required_string "channel_id" json in
+      let* channel_id = Json_util.require_string json "channel_id" in
       Ok
         (Discord
            {
-             guild_id = optional_string "guild_id" json;
+             guild_id = Json_util.assoc_string_opt "guild_id" json;
              channel_id;
-             parent_channel_id = optional_string "parent_channel_id" json;
-             thread_id = optional_string "thread_id" json;
+             parent_channel_id = Json_util.assoc_string_opt "parent_channel_id" json;
+             thread_id = Json_util.assoc_string_opt "thread_id" json;
            })
   | "slack" ->
-      let* channel_id = required_string "channel_id" json in
+      let* channel_id = Json_util.require_string json "channel_id" in
       Ok
         (Slack
            {
-             team_id = optional_string "team_id" json;
+             team_id = Json_util.assoc_string_opt "team_id" json;
              channel_id;
-             thread_ts = optional_string "thread_ts" json;
+             thread_ts = Json_util.assoc_string_opt "thread_ts" json;
            })
   | "webhook" ->
-      let* source = required_string "source" json in
-      let* event_id = required_string "event_id" json in
+      let* source = Json_util.require_string json "source" in
+      let* event_id = Json_util.require_string json "event_id" in
       Ok (Webhook { source; event_id })
   | "agent" -> Ok Agent
+  | "broadcast" -> Ok Broadcast
   | "gate" ->
-      let* label = required_string "label" json in
+      let* label = Json_util.require_string json "label" in
       let address =
-        match optional_object "address" json with
+        match Json_util.assoc_object_opt "address" json with
         | None -> Ok []
-        | Some obj -> string_assoc_of_json obj
+        | Some obj -> Json_util.string_assoc_of_json obj
       in
       let* address = address in
       Ok (Gate { label; address })

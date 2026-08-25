@@ -136,7 +136,7 @@ describe('CostDashboard route-backed focus behavior', () => {
 
     render(h(CostDashboard, { view: 'cost' }), container)
     await waitFor(
-      () => container.textContent?.includes('이 시간 창에서 기록된 Runtime 지연 분포가 없습니다.') ?? false,
+      () => container.textContent?.includes('이 시간 창에서 기록된 Runtime 지연 분포 없음') ?? false,
       'focused latency empty state',
     )
 

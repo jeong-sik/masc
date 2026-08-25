@@ -56,12 +56,14 @@ let schedule_due_stimulus ?(schedule_id = "sched-ledger-1") () :
   ; arrived_at = 1234.5
   ; payload =
       Keeper_event_queue.Schedule_due
-        { schedule_instance_id = "instance-" ^ schedule_id
+        { occurrence_id = "schedule-due:" ^ schedule_id
+        ; schedule_instance_id = "instance-" ^ schedule_id
         ; schedule_id
         ; due_at = 1200.0
         ; payload_digest = "payload-digest"
         ; title = Some "Wake"
         ; message = "Scheduled lane wake"
+        ; result_delivery = None
         }
   }
 ;;
@@ -108,17 +110,15 @@ let write_file path content =
 let event_queue_snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue-v15.json"
+    "event-queue-v17.json"
 ;;
 
 let reaction_ledger_dir ~base_path ~keeper_name =
-  Filename.concat
-    (Filename.concat
-       (Filename.concat
-          (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
-          keeper_name)
-       "reaction-ledger")
-    "v5"
+  (* Ask the writer where it writes. Rebuilding the path here made a storage
+     generation bump silently point the test at an empty old namespace. *)
+  Masc.Keeper_reaction_ledger.store_dir
+    ~masc_root:(Common.masc_dir_from_base_path ~base_path)
+    ~keeper_name
 ;;
 
 let reaction_ledger_store ~base_path ~keeper_name =
@@ -186,7 +186,7 @@ let test_event_queue_stimulus_and_turn_reaction () =
   in
   check int "two rows persisted" 2 (List.length rows);
   let stimulus_row = List.nth rows 0 in
-  check_member_string "stimulus schema" "keeper.reaction_ledger.v5" "schema" stimulus_row;
+  check_member_string "stimulus schema" Masc.Keeper_reaction_ledger.schema "schema" stimulus_row;
   check_member_string "stimulus record kind" "stimulus" "record_kind" stimulus_row;
   check_member_string "board stimulus id" "board:post-42" "stimulus_id" stimulus_row;
   check_member_string
@@ -264,7 +264,7 @@ let test_unknown_record_kind_is_quarantined_not_fatal () =
   Dated_jsonl.append
     (reaction_ledger_store ~base_path ~keeper_name)
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v5"
+        [ "schema", `String Masc.Keeper_reaction_ledger.schema
         ; "record_kind", `String "unexpected"
         ; "event_id", `String "krl:unknown-record-kind-fixture"
         ; "keeper_name", `String keeper_name
@@ -332,6 +332,39 @@ let test_summary_marks_unreacted_and_reacted_stimuli () =
     (reacted_summary |> member "pending_stimulus_count" |> to_int);
   check int "turn started count" 1
     (reacted_summary |> member "turn_started_count" |> to_int)
+;;
+
+(* The fleet verdict reads each keeper's typed status. It used to sum the
+   pending and quarantined counts back out of the JSON those summaries had
+   just been rendered into, with a string comparison behind it that nothing
+   could reach (#27560). This is the path that carries a degraded keeper up
+   with no durable-queue signal involved. *)
+let test_fleet_summary_follows_a_degraded_keeper () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "fleet-degraded-keeper" in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    (board_stimulus ~post_id:"post-fleet-degraded" ());
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "the keeper itself is degraded" "degraded" "status" summary;
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check int
+    "no stale durable queue, so that path cannot be what degrades the fleet"
+    0
+    (fleet |> member "durable_event_queue_stale_count" |> to_int);
+  check_member_string
+    "a degraded keeper degrades the fleet"
+    "degraded"
+    "status"
+    fleet
 ;;
 
  let test_fleet_summary_surfaces_durable_event_queue_backlog () =
@@ -468,7 +501,7 @@ let test_fleet_summary_surfaces_durable_event_queue_discovery_error () =
   in
   mkdir_p invalid_keeper_dir;
   write_file
-    (Filename.concat invalid_keeper_dir "event-queue-v15.json")
+    (Filename.concat invalid_keeper_dir "event-queue-v17.json")
     (Yojson.Safe.to_string (Keeper_event_queue.queue_to_yojson Keeper_event_queue.empty));
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
@@ -635,6 +668,49 @@ let test_fleet_summary_surfaces_durable_event_queue_parse_error () =
   check_member_string "durable queue parse error path" path "path" read_error
 ;;
 
+let test_lock_free_observation_rejects_generation_change () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "observation-generation-change" in
+  let first = schedule_due_stimulus ~schedule_id:"before-observation" () in
+  let second = schedule_due_stimulus ~schedule_id:"during-observation" () in
+  (match
+     Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+       ~base_path
+       ~keeper_name
+       first
+   with
+   | Ok _ -> ()
+   | Error error -> failf "failed to seed durable event queue: %s" error);
+  let observed =
+    Keeper_event_queue_persistence.For_testing
+    .observe_snapshot_with_errors_with_interleave
+      ~between_samples:(fun () ->
+        match
+          Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+            ~base_path
+            ~keeper_name
+            second
+        with
+        | Ok _ -> ()
+        | Error error -> failf "failed to mutate durable event queue: %s" error)
+      ~base_path
+      ~keeper_name
+  in
+  check int
+    "incoherent observation returns exactly one typed error"
+    1
+    (List.length observed.read_errors);
+  let error = List.hd observed.read_errors in
+  check string
+    "concurrent generation change is typed unavailable"
+    "incoherent_read"
+    (Keeper_event_queue_persistence.snapshot_read_error_kind_to_string error.kind);
+  check int
+    "incoherent observation cannot return a healthy queue"
+    0
+    (Keeper_event_queue.length observed.pending)
+;;
+
 let test_unknown_reaction_is_quarantined_without_clearing_pending () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "unknown-reaction-keeper" in
@@ -647,7 +723,7 @@ let test_unknown_reaction_is_quarantined_without_clearing_pending () =
   Dated_jsonl.append
     (reaction_ledger_store ~base_path ~keeper_name)
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v5"
+        [ "schema", `String Masc.Keeper_reaction_ledger.schema
         ; "record_kind", `String "reaction"
         ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
         ; "keeper_name", `String keeper_name
@@ -744,8 +820,6 @@ let test_stimulus_kind_string_roundtrip () =
     ; Keeper_reaction_ledger.Connector_attention
     ; Keeper_reaction_ledger.Hitl_resolved
     ; Keeper_reaction_ledger.Manual_compaction
-    ; Keeper_reaction_ledger.Goal_assigned
-    ; Keeper_reaction_ledger.Goal_reconciliation_ready
     ; Keeper_reaction_ledger.Completion_authority_rejected
     ];
   check bool "unknown stimulus kind string is None" true
@@ -782,7 +856,7 @@ let test_reaction_kind_string_roundtrip () =
 let test_unexpected_schema_rows_are_quarantined_without_double_counting () =
   with_temp_base
   @@ fun base_path ->
-  let keeper_name = "sangsu" in
+  let keeper_name = "alpha" in
   let stimulus = board_stimulus () in
   let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
   Keeper_reaction_ledger.record_event_queue_stimulus
@@ -977,7 +1051,7 @@ let test_missing_identity_does_not_claim_an_occurrence_identity () =
   Dated_jsonl.append
     (reaction_ledger_store ~base_path ~keeper_name)
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v5"
+        [ "schema", `String Masc.Keeper_reaction_ledger.schema
         ; "record_kind", `String "stimulus"
         ; "event_id", `String "unattributed-event"
         ; "keeper_name", `String keeper_name
@@ -1004,6 +1078,141 @@ let test_missing_identity_does_not_claim_an_occurrence_identity () =
     (summary |> member "quarantined_row_count" |> to_int);
   let reason = summary |> member "quarantine_reason_counts" |> to_list |> List.hd in
   check_member_string "identity quarantine reason" "missing_stimulus_id" "reason" reason
+;;
+
+let test_event_queue_reaction_evidence_batch_indexes_multiple_occurrences () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "batch-evidence-keeper" in
+  let first = schedule_due_stimulus ~schedule_id:"batch-first" () in
+  let second = schedule_due_stimulus ~schedule_id:"batch-second" () in
+  let first_id = Keeper_reaction_ledger.stimulus_id_of_event_queue first in
+  let second_id = Keeper_reaction_ledger.stimulus_id_of_event_queue second in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    first;
+  Keeper_reaction_ledger.record_event_queue_turn_started
+    ~base_path
+    ~keeper_name
+    first;
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    second;
+  let batch =
+    match
+      Keeper_reaction_ledger.event_queue_reaction_evidence_batch_result
+        ~base_path
+        ~keeper_name
+        ~stimulus_ids:[ second_id; first_id; second_id ]
+    with
+    | Ok batch -> batch
+    | Error error ->
+      fail
+        (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+           error)
+  in
+  check (list string) "first-request order with duplicates collapsed"
+    [ second_id; first_id ]
+    (List.map fst batch);
+  let complete stimulus_id =
+    match List.assoc_opt stimulus_id batch with
+    | Some (Keeper_reaction_ledger.Evidence_complete evidence) -> evidence
+    | Some (Keeper_reaction_ledger.Evidence_quarantined _) ->
+      fail "batch evidence unexpectedly quarantined"
+    | None -> fail "requested batch evidence is missing"
+  in
+  let second_evidence = complete second_id in
+  check bool "second stimulus is visible" true second_evidence.stimulus_seen;
+  check bool "second turn has not started" false second_evidence.turn_started_seen;
+  check int "second has one exact row" 1 second_evidence.matched_record_count;
+  let first_evidence = complete first_id in
+  check bool "first stimulus is visible" true first_evidence.stimulus_seen;
+  check bool "first turn start is visible" true first_evidence.turn_started_seen;
+  check int "first has two exact rows" 2 first_evidence.matched_record_count;
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_batch_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_ids:[ "" ]
+  with
+  | Error Keeper_reaction_ledger.Evidence_invalid_stimulus_id -> ()
+  | Error error ->
+    failf
+      "empty batch identity returned the wrong error: %s"
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+         error)
+  | Ok _ -> fail "empty batch identity was accepted"
+;;
+
+
+(* The post-append fault seam is declared in the .mli as a boundary contract:
+   it must exist exactly once as a definition and once as a declaration, so the
+   fault path cannot acquire a second entry point.
+   [scripts/keeper_event_queue_projection_boundary_check.ml] asserts that shape
+   from outside the compiler, which is why an unused-declaration sweep read the
+   declaration as dead and removed it (#27230), turning main red.
+
+   This case holds the declaration from inside the compiler. It calls the seam
+   with a callback that does nothing but record that it ran, so removing the
+   declaration again is a compile error here rather than a red main later. *)
+let test_after_ledger_append_seam_is_reachable_through_the_interface () =
+  let ran = ref false in
+  let result =
+    Keeper_reaction_ledger.For_testing.with_after_ledger_append
+      ~after_ledger_append:(fun () ->
+        ran := true;
+        Ok ())
+      (fun () -> "body ran")
+  in
+  check string "the scoped body's value is returned" "body ran" result;
+  (* The seam installs the hook for the scope; whether this body triggers an
+     append is not this case's claim. What is claimed is that the declaration
+     exists and its type is the one the boundary check names. *)
+  ignore !ran
+;;
+
+(* The event id is recomputed on read and compared, so the digest decides
+   replay: two stimuli landing on one id make the second read as the first.
+   MD5 and SHA-256 both produce a hex string of the right shape, and every
+   other case in this file passes under either, so the algorithm needs saying
+   out loud (#26720). *)
+let test_event_id_digest_is_sha256 () =
+  let stimulus_id = "board:post-42" in
+  let expected =
+    "krl:" ^ Digestif.SHA256.(digest_string (stimulus_id ^ "|stimulus") |> to_hex)
+  in
+  let actual = Masc.Keeper_reaction_ledger.digest_id "krl" (stimulus_id ^ "|stimulus") in
+  check string "event id carries a SHA-256 digest" expected actual;
+  check
+    int
+    "and the full digest, not a truncation"
+    (String.length "krl:" + 64)
+    (String.length actual)
+;;
+
+(* The fleet summary emitted four statuses from a closed type and a fifth,
+   "unavailable", as a bare string beside it, so nothing in the code said the
+   vocabulary was five wide (#27560). These read the field the HTTP route
+   serves and check it against the exported list. *)
+let test_fleet_summary_status_vocabulary_is_closed () =
+  let status json =
+    match json with
+    | `Assoc fields ->
+      (match List.assoc_opt "status" fields with
+       | Some (`String value) -> value
+       | _ -> Alcotest.fail "fleet summary carried no status string")
+    | _ -> Alcotest.fail "fleet summary is not an object"
+  in
+  let unavailable = status (Masc.Keeper_reaction_ledger.unavailable_fleet_summary_json ()) in
+  Alcotest.(check bool)
+    (Printf.sprintf "%S is in the declared vocabulary" unavailable)
+    true
+    (List.mem unavailable Masc.Keeper_reaction_ledger.fleet_summary_status_strings);
+  Alcotest.(check (list string))
+    "the vocabulary is exactly these five"
+    [ "empty"; "ok"; "degraded"; "unknown"; "unavailable" ]
+    Masc.Keeper_reaction_ledger.fleet_summary_status_strings
 ;;
 
 let () =
@@ -1043,6 +1252,10 @@ let () =
             `Quick
             test_summary_marks_unreacted_and_reacted_stimuli
         ; test_case
+            "fleet summary follows a degraded keeper"
+            `Quick
+            test_fleet_summary_follows_a_degraded_keeper
+        ; test_case
             "fleet summary surfaces durable event queue backlog"
             `Quick
             test_fleet_summary_surfaces_durable_event_queue_backlog
@@ -1067,6 +1280,10 @@ let () =
             `Quick
             test_fleet_summary_surfaces_durable_event_queue_parse_error
         ; test_case
+            "lock-free observation rejects generation change"
+            `Quick
+            test_lock_free_observation_rejects_generation_change
+        ; test_case
             "unknown reaction is quarantined without clearing pending"
             `Quick
             test_unknown_reaction_is_quarantined_without_clearing_pending
@@ -1082,6 +1299,22 @@ let () =
             "reaction_kind string round-trip drift guard"
             `Quick
             test_reaction_kind_string_roundtrip
+        ; test_case
+            "reaction evidence batch indexes multiple occurrences"
+            `Quick
+            test_event_queue_reaction_evidence_batch_indexes_multiple_occurrences
+        ; test_case
+            "after_ledger_append seam is reachable through the interface"
+            `Quick
+            test_after_ledger_append_seam_is_reachable_through_the_interface
+        ; test_case
+            "event id digest is SHA-256"
+            `Quick
+            test_event_id_digest_is_sha256
+        ; test_case
+            "fleet summary status vocabulary is closed"
+            `Quick
+            test_fleet_summary_status_vocabulary_is_closed
         ] )
     ]
 ;;

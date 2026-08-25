@@ -118,74 +118,34 @@ harness_seed_server_config() {
   local config_dir="${base_path%/}/.masc/config"
   local seeded_runtime=0
 
+  # The boot-path config lives in files rather than heredocs so
+  # [test_runtime_config_validity] discovers it and checks the lane ids against
+  # [Server_runtime_bootstrap.mandatory_exact_output_lane_ids]. A heredoc is
+  # invisible to that test, which is how a harness fixture can name a lane the
+  # server no longer accepts and only fail when the harness runs (#25726,
+  # #25727). Missing fixtures fail here rather than seeding an empty config.
+  local TRANSPORT_HARNESS_FIXTURE_DIR="$repo_root/scripts/fixtures/transport-harness"
+  local fixture
+  for fixture in runtime.toml agent-core-models-overlay.toml; do
+    if [[ ! -f "$TRANSPORT_HARNESS_FIXTURE_DIR/$fixture" ]]; then
+      echo "harness: fixture missing: scripts/fixtures/transport-harness/$fixture" >&2
+      return 1
+    fi
+  done
+
   mkdir -p \
     "$config_dir" \
     "$config_dir/keepers" \
-    "$config_dir/personas" \
     "$config_dir/prompts"
 
   if [[ ! -f "$config_dir/runtime.toml" ]]; then
-    cat >"$config_dir/runtime.toml" <<'EOF'
-[runtime]
-default = "deepseek.smoke"
-
-[runtime.exact_output_lanes.hitl_auto_judge]
-slots = ["deepseek.smoke"]
-
-[runtime.exact_output_lanes.board_attention_exact]
-slots = ["deepseek.smoke"]
-
-[providers.deepseek]
-display-name = "Transport Harness Smoke"
-protocol = "openai-compatible-http"
-endpoint = "http://127.0.0.1:9/v1"
-
-[models.smoke]
-# Harness-local opaque runtime alias. The adjacent typed capability block is
-# the sole declaration used when no exact OAS catalog row exists.
-api-name = "transport-harness-smoke"
-max-context = 32768
-tools-support = true
-streaming = true
-
-[models.smoke.capabilities]
-supports-tool-choice = true
-
-[deepseek.smoke]
-is-default = true
-max-concurrent = 1
-max-request-body-bytes = 65536
-EOF
+    cp "$TRANSPORT_HARNESS_FIXTURE_DIR/runtime.toml" "$config_dir/runtime.toml"
     seeded_runtime=1
   fi
 
-  if [[ "$seeded_runtime" == "1" && ! -f "$config_dir/oas-models-overlay.toml" ]]; then
-    cat >"$config_dir/oas-models-overlay.toml" <<'EOF'
-[[providers]]
-id = "deepseek"
-kind = "openai_compat"
-base_url = "http://127.0.0.1:9/v1"
-request_path = "/chat/completions"
-api_key_env = ""
-capabilities_base = "openai_chat"
-
-[[models]]
-id_prefix = "transport-harness-smoke"
-provider_name = "deepseek"
-base = "openai_chat"
-max_context_tokens = 32768
-max_output_tokens = 1024
-supports_tools = true
-supports_tool_choice = true
-supports_response_format_json = false
-supports_structured_output = false
-supports_native_streaming = true
-
-[[targets]]
-id = "deepseek.smoke"
-provider_ref = "deepseek"
-model_id = "transport-harness-smoke"
-EOF
+  if [[ "$seeded_runtime" == "1" && ! -f "$config_dir/agent-core-models-overlay.toml" ]]; then
+    cp "$TRANSPORT_HARNESS_FIXTURE_DIR/agent-core-models-overlay.toml" \
+      "$config_dir/agent-core-models-overlay.toml"
   fi
 }
 
@@ -264,10 +224,9 @@ harness_start_server() {
     unset MCP_AUTH_TOKEN
     unset MASC_ADMIN_TOKEN
     unset MASC_TOKEN
-    export MASC_AUTONOMY_ENABLED="0"
+    export MASC_KEEPER_AUTONOMOUS_ENABLED="${MASC_HARNESS_KEEPER_AUTONOMOUS_ENABLED:-0}"
     export MASC_ORCHESTRATOR_ENABLED="0"
     export MASC_OTEL_ENABLED="0"
-    export MASC_TOOL_TIMEOUT_DEFAULT_SEC="${MASC_TOOL_TIMEOUT_DEFAULT_SEC:-90}"
     export GRAPHQL_API_KEY=""
     export GRAPHQL_URL="http://127.0.0.1:9/graphql"
     exec "$server_exe" --port "$port" --base-path "$base_path"

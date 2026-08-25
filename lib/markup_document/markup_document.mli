@@ -12,9 +12,6 @@ type t =
 val parse_html : string -> t list
 (** Parse an HTML5 document or fragment with Markup.ml error recovery. *)
 
-val parse_xml : string -> t list
-(** Parse an XML document with Markup.ml entity, namespace, and CDATA handling. *)
-
 val text_content : t -> string
 val attribute : string -> t -> string option
 val elements_named : string -> t list -> t list

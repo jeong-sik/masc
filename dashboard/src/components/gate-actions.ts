@@ -11,6 +11,7 @@ import { refreshGate } from './gate-refresh'
 import {
   gateApprovalActing,
   gateError,
+  observeGateAuditReceipts,
 } from './gate-signals'
 export { refreshGate }
 
@@ -20,14 +21,28 @@ export async function respondToKeeperApproval(
   rememberRule = false,
 ) {
   if (!id) return
+  const resolution = (() => {
+    if (decision === 'approve') return { decision, rememberRule } as const
+    const reason = window.prompt('승인 요청을 거부하는 이유를 입력하세요.')
+    if (reason === null || reason.trim() === '') return null
+    return { decision, reason } as const
+  })()
+  if (resolution === null) {
+    showToast('거부 이유를 입력해야 합니다', 'warning')
+    return
+  }
   gateApprovalActing.value = id
   try {
-    await resolveGateApproval(id, decision, rememberRule)
-    const message =
-      decision === 'approve'
-        ? (rememberRule ? 'keeper 승인 요청을 승인하고 Always 규칙을 저장했습니다' : 'keeper 승인 요청을 승인했습니다')
-        : 'keeper 승인 요청을 거부했습니다'
-    showToast(message, 'success')
+    const result = await resolveGateApproval(id, resolution)
+    observeGateAuditReceipts(result.audit_receipts, { id, transport: 'http' })
+    const auditFailed = result.audit_receipts.some(receipt => !receipt.recorded)
+    const message = decision === 'approve'
+      ? (rememberRule ? 'keeper 승인 요청을 승인하고 Always 규칙을 저장했습니다' : 'keeper 승인 요청을 승인했습니다')
+      : 'keeper 승인 요청을 거부했습니다'
+    showToast(
+      auditFailed ? `${message} · 감사 기록은 저장되지 않았습니다` : message,
+      auditFailed ? 'warning' : 'success',
+    )
     await refreshGate({ force: true })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'keeper 승인 요청을 처리하지 못했습니다'
@@ -61,8 +76,15 @@ export async function deleteKeeperApprovalRule(id: string) {
   if (!id) return
   gateApprovalActing.value = `rule:${id}`
   try {
-    await deleteGateApprovalRule(id)
-    showToast('Always 규칙을 삭제했습니다', 'success')
+    const result = await deleteGateApprovalRule(id)
+    observeGateAuditReceipts([result.audit], { id, transport: 'http' })
+    const auditFailed = !result.audit.recorded
+    showToast(
+      auditFailed
+        ? 'Always 규칙을 삭제했습니다 · 감사 기록은 저장되지 않았습니다'
+        : 'Always 규칙을 삭제했습니다',
+      auditFailed ? 'warning' : 'success',
+    )
     await refreshGate({ force: true })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Always 규칙을 삭제하지 못했습니다'

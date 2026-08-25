@@ -1,6 +1,8 @@
 open Alcotest
 open Repo_manager_types
 
+let () = Mirage_crypto_rng_unix.use_default ()
+
 let rec rm_rf path =
   if Sys.file_exists path
   then
@@ -46,20 +48,35 @@ let make_meta ?(sandbox_profile = Keeper_types_profile_sandbox.Local) name =
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok m -> m
+  (* [sandbox_profile] is not a persisted meta field — it comes from the
+     keeper's TOML profile — so the fixture JSON cannot carry it, and passing
+     it there is rejected as outside the current schema. Set it on the record
+     the fixture returns instead. Before this, the parameter was accepted and
+     dropped: a case asking for [Docker] got a Local keeper, and
+     [keeper_observation_host_path_of_visible_path] returns early for
+     non-Docker profiles, so the container->host mapping the Docker case is
+     named for never ran. *)
+  | Ok m -> { m with Masc.Keeper_meta_contract.sandbox_profile }
   | Error e -> Alcotest.fail e
 ;;
 
 (* #23469: relative tool paths anchor at the keeper's playground sandbox
    root, mirroring the file tools' own resolution; absolute paths pass
-   through and pathless calls stay at [base_path]. *)
+   through. masc#28582: a pathless call answers [None] — it names no
+   document, and standing the project root in for one is what let a
+   coordination tool's observation claim a file it never touched. *)
 let sandbox_root = "/sandbox/tester"
 
-let observed_path fields =
+let observed_path_opt fields =
   Masc.Keeper_run_tools_hooks.observation_file_path_from_tool_input
-    ~base_path:"/tmp/masc-base"
     ~sandbox_root
     (`Assoc fields)
+;;
+
+let observed_path fields =
+  match observed_path_opt fields with
+  | Some path -> path
+  | None -> Alcotest.fail "expected the tool input to name a file"
 ;;
 
 let test_explicit_cwd_scopes_relative_file_path () =
@@ -71,11 +88,17 @@ let test_explicit_cwd_scopes_relative_file_path () =
        [ "file_path", `String "lib/foo.ml"; "cwd", `String "repos/masc" ])
 ;;
 
-let test_scratch_path_stays_sandbox_rooted_with_repo_cwd () =
+(* #28533 dropped "scratch" from the sandbox-rooted prefix list, in the same
+   change that removed the tool-schema sentence teaching it: no code ever
+   created that directory, so the only paths shaped like it were ones a model
+   invented from the sentence. A [scratch/…] path is therefore an ordinary
+   relative path now and anchors at the typed [cwd] like any other. "repos"
+   deliberately stays in that list. *)
+let test_scratch_path_anchors_at_cwd_like_any_relative_path () =
   check
     string
     "scratch/file_path"
-    "/sandbox/tester/scratch/notes.md"
+    "/sandbox/tester/repos/masc/scratch/notes.md"
     (observed_path
        [ "file_path", `String "scratch/notes.md"; "cwd", `String "repos/masc" ])
 ;;
@@ -195,7 +218,10 @@ let test_files_list_uses_first_object_file_path () =
 ;;
 
 let test_missing_path_falls_back_to_base_path () =
-  check string "base fallback" "/tmp/masc-base" (observed_path [])
+  (* A tool call that names no file has no document to attribute. It used to
+     answer the project root, which the observation then stored as the edited
+     file. *)
+  check (option string) "pathless call names no document" None (observed_path_opt [])
 ;;
 
 let with_partition_fixture ?sandbox_profile f =
@@ -212,53 +238,97 @@ let with_partition_fixture ?sandbox_profile f =
     f ~config ~meta)
 ;;
 
-let resolve_partition ~config ~meta fields =
-  Masc.Keeper_run_tools_hooks.observation_partition_for_tool_input
+let resolve_attribution ?tool_name ~config ~meta fields =
+  Masc.Keeper_run_tools_hooks.observation_attribution_for_tool_input
+    ?tool_name
     ~config
     ~meta
-    ~kind:"tool_event"
     (`Assoc fields)
 ;;
 
-(* The keeper's playground clone of a registered repo resolves to the
-   repo's [By_url] bucket via the structural playground parse — the
-   #23469 regression this case pins: before the sandbox anchor, this
-   input re-anchored at the server base path and only matched because
-   the same repo happened to be registered at [repos/masc] there. *)
-let test_partition_resolution_uses_project_root_for_masc_base_path () =
-  with_partition_fixture (fun ~config ~meta ->
-    let partition, rel_path =
-      resolve_partition
-        ~config
-        ~meta
-        [ "cwd", `String "repos/masc"; "path", `String "lib/foo.ml" ]
-    in
-    check string "repo-relative path" "lib/foo.ml" rel_path;
-    match partition with
-    | Agent_observation.By_url slug ->
-      check string "slug" "github.com_jeong-sik_masc" slug
-    | Agent_observation.No_canonical_url
-    | Agent_observation.Unmatched
-    | Agent_observation.Base_unresolved
-    | Agent_observation.Legacy_default ->
-      fail "expected By_url partition")
+let addressed_or_fail = function
+  | Agent_observation.File (Agent_observation.Addressed { address; _ }) -> address
+  | Agent_observation.File (Agent_observation.Unaddressed { reason; _ }) ->
+    fail
+      ("expected an addressed fact, got Unaddressed "
+       ^ Agent_observation.Unattributed.reason_to_string reason)
+  | Agent_observation.Pathless -> fail "expected an addressed fact, got Pathless"
 ;;
 
-let test_partition_unregistered_playground_repo_is_unmatched () =
+(* The keeper's playground clone of a registered repo resolves to the
+   repo's address via the structural playground parse — the #23469
+   regression this case pins: before the sandbox anchor, this input
+   re-anchored at the server base path and only matched because the
+   same repo happened to be registered at [repos/masc] there. *)
+(* A coordination tool names no file: the observation is a keeper-timeline
+   fact with no document. The helper used to answer the project root here,
+   which the consumer then stored as the edited file — a broadcast claiming
+   a document it never touched (masc#28582). *)
+let test_partition_resolution_leaves_pathless_calls_without_a_document () =
   with_partition_fixture (fun ~config ~meta ->
-    let partition, _ =
-      resolve_partition
-        ~config
-        ~meta
-        [ "path", `String "repos/ghost/lib/foo.ml" ]
+    match resolve_attribution ~config ~meta [ "message", `String "fixing: CI" ] with
+    | Agent_observation.Pathless -> ()
+    | Agent_observation.File _ ->
+      fail "a pathless call must not carry a file attribution")
+;;
+
+let test_partition_resolution_uses_project_root_for_masc_base_path () =
+  with_partition_fixture (fun ~config ~meta ->
+    let address =
+      addressed_or_fail
+        (resolve_attribution
+           ~config
+           ~meta
+           [ "cwd", `String "repos/masc"; "path", `String "lib/foo.ml" ])
     in
-    match partition with
-    | Agent_observation.Unmatched -> ()
-    | Agent_observation.By_url _
-    | Agent_observation.No_canonical_url
-    | Agent_observation.Base_unresolved
-    | Agent_observation.Legacy_default ->
-      fail "expected Unmatched partition for unregistered playground repo")
+    check
+      string
+      "slug"
+      "github.com_jeong-sik_masc"
+      (Agent_observation.Code_address.codebase address);
+    check
+      string
+      "repo-relative path"
+      "lib/foo.ml"
+      (Agent_observation.Code_address.path address))
+;;
+
+let test_annotate_uses_input_code_address_without_sandbox_resolution () =
+  with_partition_fixture (fun ~config ~meta ->
+    let address =
+      addressed_or_fail
+        (resolve_attribution
+           ~tool_name:"keeper_ide_annotate"
+           ~config
+           ~meta
+           [ "codebase", `String "github.com_jeong-sik_masc"
+           ; "file_path", `String "lib/annotated.ml"
+           ])
+    in
+    check string "annotation codebase" "github.com_jeong-sik_masc"
+      (Agent_observation.Code_address.codebase address);
+    check string "annotation repo-relative path" "lib/annotated.ml"
+      (Agent_observation.Code_address.path address))
+;;
+
+let test_partition_unregistered_playground_repo_fails_with_repo_id () =
+  with_partition_fixture (fun ~config ~meta ->
+    match
+      resolve_attribution ~config ~meta [ "path", `String "repos/ghost/lib/foo.ml" ]
+    with
+    | Agent_observation.File
+        (Agent_observation.Unaddressed
+           { reason = Agent_observation.Unattributed.Unregistered_repo_id repo_id
+           ; attempted_path
+           }) ->
+      check string "repo id" "ghost" repo_id;
+      check
+        bool
+        "attempted path preserved for forensics"
+        true
+        (String.length attempted_path > 0)
+    | _ ->
+      fail "expected Unaddressed Unregistered_repo_id for unregistered playground repo")
 ;;
 
 let test_partition_docker_visible_path_maps_to_playground_repo () =
@@ -270,36 +340,34 @@ let test_partition_docker_visible_path_maps_to_playground_repo () =
            (Masc.Keeper_sandbox.container_root meta.name)
            "repos/masc/lib/docker.ml"
        in
-       let partition, rel_path =
-         resolve_partition ~config ~meta [ "path", `String container_repo_path ]
+       let address =
+         addressed_or_fail
+           (resolve_attribution ~config ~meta [ "path", `String container_repo_path ])
        in
-       check string "repo-relative path" "lib/docker.ml" rel_path;
-       match partition with
-       | Agent_observation.By_url slug ->
-         check string "slug" "github.com_jeong-sik_masc" slug
-       | Agent_observation.No_canonical_url
-       | Agent_observation.Unmatched
-       | Agent_observation.Base_unresolved
-       | Agent_observation.Legacy_default ->
-         fail "expected Docker visible absolute path to resolve to By_url")
+       check
+         string
+         "slug"
+         "github.com_jeong-sik_masc"
+         (Agent_observation.Code_address.codebase address);
+       check
+         string
+         "repo-relative path"
+         "lib/docker.ml"
+         (Agent_observation.Code_address.path address))
 ;;
 
 (* A bare relative path outside the [repos/<id>/] lane is a real
-   playground-local file, not a repo file — it must degrade to the typed
-   orphan partition instead of borrowing whichever repository overlaps
+   playground-local file, not a repo file — it must fail attribution with
+   the typed reason instead of borrowing whichever repository overlaps
    the server base path. *)
-let test_partition_bare_relative_outside_repos_is_base_unresolved () =
+let test_partition_bare_relative_outside_repos_is_unregistered_path () =
   with_partition_fixture (fun ~config ~meta ->
-    let partition, _ =
-      resolve_partition ~config ~meta [ "path", `String "notes/todo.md" ]
-    in
-    match partition with
-    | Agent_observation.Base_unresolved -> ()
-    | Agent_observation.By_url _
-    | Agent_observation.No_canonical_url
-    | Agent_observation.Unmatched
-    | Agent_observation.Legacy_default ->
-      fail "expected Base_unresolved partition for playground-local file")
+    match resolve_attribution ~config ~meta [ "path", `String "notes/todo.md" ] with
+    | Agent_observation.File
+        (Agent_observation.Unaddressed
+           { reason = Agent_observation.Unattributed.Unregistered_path; _ }) ->
+      ()
+    | _ -> fail "expected Unaddressed Unregistered_path for playground-local file")
 ;;
 
 (* --- gate history slice ------------------------------------------------- *)
@@ -314,8 +382,8 @@ let encoded_bytes jsons =
 ;;
 
 let bulky_message index =
-  Agent_sdk.Types.text_message
-    Agent_sdk.Types.Assistant
+  Agent_core.Types.text_message
+    Agent_core.Types.Assistant
     (Printf.sprintf "turn %d %s" index (String.make 4096 'x'))
 ;;
 
@@ -371,14 +439,14 @@ let test_gate_history_drops_orphan_tool_result () =
      the newest. A retained result with no visible call reads as evidence of
      something the judge never sees happen. *)
   let call =
-    Agent_sdk.Types.make_message
-      ~role:Agent_sdk.Types.Assistant
-      [ Agent_sdk.Types.ToolUse
+    Agent_core.Types.make_message
+      ~role:Agent_core.Types.Assistant
+      [ Agent_core.Types.ToolUse
           { id = "call-outside-window"; name = "masc_status"; input = `Assoc [] }
       ]
   in
   let orphan_result =
-    Agent_sdk.Types.tool_result_msg
+    Agent_core.Types.tool_result_msg
       ~tool_use_id:"call-outside-window"
       ~content:"cluster snapshot"
       ()
@@ -393,18 +461,456 @@ let test_gate_history_drops_orphan_tool_result () =
     (List.length kept + omitted)
 ;;
 
+(* ── completed_tool_calls: what the judge is handed ────────────────────
+   The judge bundle has two evidence axes and #26081 bounded only one, against
+   a measured "~41 KB remainder". On 2026-08-09 that remainder was 791,432 B of
+   an 860,589 B bundle - 623,999 B of it a single tool [result] - and the judge
+   slot refused the prompt with code 1261. The fix is not a smaller slice of the
+   old shape but a smaller shape: the judge is asked about a call that has not
+   run yet, so a previous tool's payload is not evidence it was ever asked to
+   weigh. These cases pin the payload out and keep the ceiling honest. *)
+
+let huge_tool_result index =
+  (* Mirrors the live 623,999 B [result] that refused the prompt. *)
+  Tool_result.Completed
+    { Tool_result.data =
+        `Assoc
+          [ "index", `Int index
+          ; "body", `String (String.make 620_000 'y')
+          ]
+    ; metadata = None
+    ; tool_name = "network_read"
+    ; duration_ms = 1.0
+    }
+;;
+
+let record_calls context count =
+  List.iter
+    (fun index ->
+       Masc.Keeper_gate_causal_context.record_tool_result
+         context
+         ~operation:"network_read"
+         ~input:(`Assoc [ "index", `Int index ])
+         (huge_tool_result index))
+    (List.init count Fun.id)
+;;
+
+let completed_calls_of_snapshot (context : Masc.Keeper_gate_causal_context.t) =
+  let open Yojson.Safe.Util in
+  let snapshot = (Masc.Keeper_gate_causal_context.snapshot context).snapshot in
+  ( snapshot |> member "completed_tool_calls" |> to_list
+  , snapshot |> member "completed_tool_calls_omitted" |> to_int )
+;;
+
+let encoded_json_bytes items =
+  List.fold_left
+    (fun total json -> total + String.length (Yojson.Safe.to_string json))
+    0
+    items
+;;
+
+let test_completed_calls_share_the_history_budget () =
+  check
+    int
+    "both evidence axes read one declared budget"
+    Masc.Keeper_gate_causal_context.evidence_budget_bytes
+    Setup.gate_history_budget_bytes
+;;
+
+let test_tool_payload_is_never_rendered () =
+  let context =
+    Masc.Keeper_gate_causal_context.create ~turn_id:(Some 1) ~initial:(`Assoc [])
+  in
+  record_calls context 13;
+  let kept, omitted = completed_calls_of_snapshot context in
+  (* 13 calls each holding a 620 KB payload: on the old shape this was 791,432 B
+     and no budget could keep every call. *)
+  check int "every call is retained" 13 (List.length kept);
+  check int "nothing had to be dropped" 0 omitted;
+  check
+    bool
+    "the whole turn renders in a few KB"
+    true
+    (encoded_json_bytes kept < 4096);
+  let open Yojson.Safe.Util in
+  List.iter
+    (fun call ->
+       check
+         (list string)
+         "only identity, input and disposition reach the judge"
+         [ "operation"; "input"; "disposition" ]
+         (call |> to_assoc |> List.map fst))
+    kept
+;;
+
+let test_disposition_survives_for_every_call () =
+  (* [disposition] is the part the judgment turns on once the payload is gone. *)
+  let context =
+    Masc.Keeper_gate_causal_context.create ~turn_id:(Some 1) ~initial:(`Assoc [])
+  in
+  Masc.Keeper_gate_causal_context.record_tool_result
+    context
+    ~operation:"network_read"
+    ~input:(`Assoc [ "index", `Int 0 ])
+    (huge_tool_result 0);
+  Masc.Keeper_gate_causal_context.record_tool_result
+    context
+    ~operation:"network_read"
+    ~input:(`Assoc [ "index", `Int 1 ])
+    (Tool_result.Failed
+       { Tool_result.class_ = Tool_result.Dependency_unavailable
+       ; message = "upstream refused"
+       ; data = `Null
+       ; metadata = None
+       ; tool_name = "network_read"
+       ; duration_ms = 1.0
+       });
+  let kept, _ = completed_calls_of_snapshot context in
+  let open Yojson.Safe.Util in
+  let dispositions = List.map (fun c -> c |> member "disposition" |> to_string) kept in
+  check int "both calls are present" 2 (List.length dispositions);
+  check
+    bool
+    "the failed call is distinguishable from the completed one"
+    true
+    (List.nth dispositions 0 <> List.nth dispositions 1)
+;;
+
+let test_budget_still_bounds_a_large_input () =
+  (* The payload is gone but a tool [input] can itself be large, and an axis with
+     no declared ceiling is the one that grows until a provider refuses. *)
+  let context =
+    Masc.Keeper_gate_causal_context.create ~turn_id:(Some 1) ~initial:(`Assoc [])
+  in
+  let total = 40 in
+  List.iter
+    (fun index ->
+       Masc.Keeper_gate_causal_context.record_tool_result
+         context
+         ~operation:"network_read"
+         ~input:
+           (`Assoc
+             [ "index", `Int index
+             ; "body", `String (String.make 4096 'x')
+             ])
+         (huge_tool_result index))
+    (List.init total Fun.id);
+  let kept, omitted = completed_calls_of_snapshot context in
+  check
+    bool
+    "rendered calls stay inside the declared budget"
+    true
+    (encoded_json_bytes kept
+     <= Masc.Keeper_gate_causal_context.evidence_budget_bytes);
+  check bool "older calls were dropped" true (omitted > 0);
+  (* Nothing may vanish unreported: judge.effect.md tells the judge to read
+     [completed_tool_calls_omitted] before treating the list as the whole turn. *)
+  check int "every call is either kept or counted" total (List.length kept + omitted);
+  let open Yojson.Safe.Util in
+  check
+    int
+    "the newest call survives"
+    (total - 1)
+    (List.nth kept (List.length kept - 1)
+     |> member "input"
+     |> member "index"
+     |> to_int)
+;;
+
+let test_completed_calls_short_list_is_whole () =
+  let context =
+    Masc.Keeper_gate_causal_context.create ~turn_id:(Some 1) ~initial:(`Assoc [])
+  in
+  record_calls context 3;
+  let kept, omitted = completed_calls_of_snapshot context in
+  check int "nothing is dropped" 0 omitted;
+  check int "every call is kept" 3 (List.length kept)
+;;
+
+let test_concurrent_tool_observers_commit_as_transactions () =
+  Eio_main.run @@ fun _env ->
+  let serialize =
+    Masc.Keeper_run_tools_hooks.create_tool_observer_serialization ()
+  in
+  let trace = ref [] in
+  let record event = trace := event :: !trace in
+  let first_entered, resolve_first_entered = Eio.Promise.create () in
+  let release_first, resolve_release_first = Eio.Promise.create () in
+  let second_attempting, resolve_second_attempting = Eio.Promise.create () in
+  Eio.Switch.run (fun sw ->
+    Eio.Fiber.fork ~sw (fun () ->
+      serialize (fun () ->
+        record "receipt:first";
+        Eio.Promise.resolve resolve_first_entered ();
+        Eio.Promise.await release_first;
+        record "activity:first"));
+    Eio.Promise.await first_entered;
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Promise.resolve resolve_second_attempting ();
+      serialize (fun () ->
+        record "receipt:second";
+        record "activity:second"));
+    Eio.Promise.await second_attempting;
+    (* Give the second fiber a scheduling turn while the first observer is
+       suspended. Without the production serialization boundary this would put
+       the second receipt/activity pair inside the first pair. *)
+    Eio.Fiber.yield ();
+    Eio.Promise.resolve resolve_release_first ());
+  check
+    (list string)
+    "receipt and activity effects share one completion order"
+    [ "receipt:first"
+    ; "activity:first"
+    ; "receipt:second"
+    ; "activity:second"
+    ]
+    (List.rev !trace)
+;;
+
+let test_failed_tool_observer_releases_next_completion () =
+  Eio_main.run @@ fun _env ->
+  let serialize =
+    Masc.Keeper_run_tools_hooks.create_tool_observer_serialization ()
+  in
+  (match serialize (fun () -> raise Exit) with
+   | () -> fail "failed observer unexpectedly returned"
+   | exception Exit -> ());
+  let observed = ref false in
+  serialize (fun () -> observed := true);
+  check bool "a reported observer failure does not poison later receipts" true !observed
+;;
+
+
+(* A call refused before the handler runs used to leave only a counter. The
+   keeper's own history showed nothing, so it repeated the same malformed call
+   every turn. An executed failure must still be written once, not twice:
+   [post_tool_use] already records that one. *)
+let rejected_rows_for ~stage =
+  with_temp_base_path @@ fun base_path ->
+  Fun.protect
+    ~finally:(fun () -> Masc.Keeper_tool_call_log.reset_for_testing ())
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       Masc.Keeper_tool_call_log.init ~base_path ();
+       let config = Masc.Workspace.default_config base_path in
+       let meta_ref = ref (make_meta "rejection-keeper") in
+       let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
+       let hooks =
+         Masc.Keeper_hooks_agent_core.make_hooks
+           ~config ~meta_ref ~turn_ctx_cell 
+           ~trace_id:"rejection-trace" ~keeper_turn_id:1
+           ~on_after_turn_ordinal:ignore ()
+       in
+       let hook =
+         match hooks.Agent_core.Hooks.post_tool_use_failure with
+         | Some hook -> hook
+         | None -> fail "post_tool_use_failure hook is not installed"
+       in
+       let invocation =
+         Agent_core.Tool_contract.Invocation.create
+           ~tool_use_id:"call-1" ~turn:1
+           ~completion:Agent_core.Tool_contract.Continue_after_success
+           ~schedule:
+             { planned_index = 0
+             ; batch_index = 0
+             ; batch_size = 1
+             ; execution_mode = Agent_core.Tool_contract.Serial
+             }
+       in
+       let _ =
+         hook
+           (Agent_core.Hooks.PostToolUseFailure
+              { invocation
+              ; tool_name = "keeper_broadcast"
+              ; input = `Assoc []
+              ; stage
+              ; duration_ms = 1.0
+              ; error = {|"message": MISSING (required: string)|}
+              })
+       in
+       Masc.Keeper_tool_call_log.flush_now ();
+       Masc.Keeper_tool_call_log.read_recent ~keeper_name:"rejection-keeper" ())
+;;
+
+let test_a_rejected_call_leaves_a_row () =
+  let rows = rejected_rows_for ~stage:Agent_core.Hooks.Validation_before_execution in
+  check int "exactly one row" 1 (List.length rows);
+  match rows with
+  | [ row ] ->
+    let field name =
+      match Json_util.assoc_member_opt name row with
+      | Some (`String s) -> s
+      | Some (`Bool b) -> string_of_bool b
+      | Some other -> Yojson.Safe.to_string other
+      | None -> "<absent>"
+    in
+    check string "the tool that refused" "keeper_broadcast" (field "tool");
+    check string "recorded as a failure" "false" (field "success");
+    check bool "the argument object it was refused for" true
+      (String.length (field "input") > 0);
+    check bool "the refusal text" true
+      (let out = field "output" in
+       String.length out > 0
+       && (try ignore (Str.search_forward (Str.regexp_string "MISSING") out 0); true
+           with Not_found -> false))
+  | _ -> fail "expected exactly one row"
+;;
+
+let test_an_executed_failure_is_not_written_twice () =
+  let rows = rejected_rows_for ~stage:Agent_core.Hooks.Execution in
+  check int "post_tool_use owns that row, this hook adds none" 0 (List.length rows)
+;;
+
+let test_production_post_tool_hook_cancellation_releases_next_completion () =
+  with_temp_base_path @@ fun base_path ->
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_execution_join.For_testing.clear ();
+      Masc.Keeper_tool_call_log.reset_for_testing ())
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Masc.Keeper_tool_call_log.init ~base_path ();
+       let config = Masc.Workspace.default_config base_path in
+       let meta_ref = ref (make_meta "cancelled-observer") in
+       let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
+       let serialize =
+         Masc.Keeper_run_tools_hooks.create_tool_observer_serialization ()
+       in
+       let first_entered, resolve_first_entered = Eio.Promise.create () in
+       let release_first, resolve_release_first = Eio.Promise.create () in
+       let first_body_completed = ref false in
+       let second_observed = ref false in
+       let observation_count = ref 0 in
+       let hooks =
+         Masc.Keeper_hooks_agent_core.make_hooks
+           ~config
+           ~meta_ref
+           ~turn_ctx_cell
+           ~trace_id:"cancelled-observer-trace"
+           ~keeper_turn_id:1
+           ~on_after_turn_ordinal:ignore
+           ~on_tool_executed:
+             (fun
+               ~tool_name:_ ~input:_ ~output_text:_ ~success:_ ~duration_ms:_
+               ~provider:_ ~typed_outcome:_ ->
+               serialize (fun () ->
+                 incr observation_count;
+                 if !observation_count = 1
+                 then begin
+                   Eio.Promise.resolve resolve_first_entered ();
+                   Eio.Promise.await release_first;
+                   first_body_completed := true
+                 end
+                 else
+                   second_observed := true))
+           ()
+       in
+       let post_tool_use =
+         match hooks.Agent_core.Hooks.post_tool_use with
+         | Some hook -> hook
+         | None -> fail "production Keeper hooks omitted post_tool_use"
+       in
+       let event planned_index =
+         let invocation =
+           Agent_core.Tool_contract.Invocation.create
+             ~tool_use_id:("cancel-observer-" ^ string_of_int planned_index)
+             ~turn:1
+             ~completion:Agent_core.Tool_contract.Continue_after_success
+             ~schedule:
+               { planned_index
+               ; batch_index = 0
+               ; batch_size = 1
+               ; execution_mode = Agent_core.Tool_contract.Serial
+               }
+         in
+         Agent_core.Hooks.PostToolUse
+           { invocation
+           ; tool_name = "keeper_time_now"
+           ; input = `Assoc []
+           ; output = Ok { Agent_core.Types.content = "ok"; _meta = None }
+           ; result_bytes = 2
+           ; duration_ms = 1.0
+           }
+       in
+       let worker_done, resolve_worker_done = Eio.Promise.create () in
+       let cancellation_ready, resolve_cancellation_ready = Eio.Promise.create () in
+       Eio.Switch.run @@ fun sw ->
+       Eio.Fiber.fork ~sw (fun () ->
+         Eio.Cancel.sub @@ fun cancellation ->
+         Eio.Promise.resolve resolve_cancellation_ready cancellation;
+         let outcome =
+           match post_tool_use (event 0) with
+           | _ -> `Returned
+           | exception Eio.Cancel.Cancelled _ -> `Cancelled
+         in
+         Eio.Promise.resolve resolve_worker_done outcome);
+       let cancellation = Eio.Promise.await cancellation_ready in
+       Eio.Promise.await first_entered;
+       Eio.Cancel.cancel cancellation (Failure "cancel production observer");
+       (* Give the cancelled worker a scheduling turn before releasing the
+          synthetic blocker. A cancellation-masked observer reaches the line
+          after [await]; a cancellable observer unwinds through the mutex
+          finalizer without completing the body. *)
+       Eio.Time.sleep (Eio.Stdenv.clock env) 0.05;
+       Eio.Promise.resolve resolve_release_first ();
+       (match Eio.Promise.await worker_done with
+        | `Cancelled -> ()
+        | `Returned -> fail "production post-tool hook swallowed cancellation");
+       check bool
+         "cancellation preempts the observation body"
+         false
+         !first_body_completed;
+       (match post_tool_use (event 1) with
+        | Agent_core.Hooks.Continue -> ()
+        | _ -> fail "later production post-tool hook did not continue");
+       check bool
+         "cancelled observer releases the mutex for the next production hook"
+         true
+         !second_observed)
+;;
+
+(* The post-tool-round predicate is the position of the last message, not
+   containment over history: an old Tool message earlier in the conversation
+   must not read as "this round follows tool execution" — that misread
+   suppressed the world state on the first round of ordinary turns
+   (one keeper's turn 15, 2026-08-24). *)
+let message role content : Agent_core.Types.message =
+  { role; content = [ Agent_core.Types.Text content ]; name = None
+  ; tool_call_id = None; metadata = []
+  }
+
+let test_ends_with_tool_results_is_positional () =
+  let user = message Agent_core.Types.User "ask" in
+  let assistant = message Agent_core.Types.Assistant "plan" in
+  let tool = message Agent_core.Types.Tool "result" in
+  check bool "empty history is not post-tool" false
+    (Masc.Keeper_run_prompt.ends_with_tool_results []);
+  check bool "a turn's first round ends with the user" false
+    (Masc.Keeper_run_prompt.ends_with_tool_results [ user ]);
+  check bool "a round after tool execution ends with the tool" true
+    (Masc.Keeper_run_prompt.ends_with_tool_results [ user; assistant; tool ]);
+  check bool "an old tool message before a new user turn does not count" false
+    (Masc.Keeper_run_prompt.ends_with_tool_results [ user; assistant; tool; user ])
+
 let () =
   run
     "keeper_run_tools_hooks"
-    [ ( "observation_file_path"
+    [ ( "post_tool_round"
+      , [ test_case
+            "the predicate is positional, not containment"
+            `Quick
+            test_ends_with_tool_results_is_positional
+        ] )
+    ; ( "observation_file_path"
       , [ test_case
             "explicit cwd scopes relative file_path"
             `Quick
             test_explicit_cwd_scopes_relative_file_path
         ; test_case
-            "scratch path stays sandbox-rooted with repo cwd"
+            "scratch path anchors at cwd like any relative path"
             `Quick
-            test_scratch_path_stays_sandbox_rooted_with_repo_cwd
+            test_scratch_path_anchors_at_cwd_like_any_relative_path
         ; test_case
             "sandbox-rooted file_path ignores cwd"
             `Quick
@@ -443,23 +949,67 @@ let () =
         ; test_case "drops a tool result whose call fell outside" `Quick
             test_gate_history_drops_orphan_tool_result
         ] )
+    ; ( "completed_tool_calls_evidence"
+      , [ test_case "tool payloads never reach the judge" `Quick
+            test_tool_payload_is_never_rendered
+        ; test_case "disposition survives for every call" `Quick
+            test_disposition_survives_for_every_call
+        ; test_case "both evidence axes share one budget" `Quick
+            test_completed_calls_share_the_history_budget
+        ; test_case "the budget still bounds a large input" `Quick
+            test_budget_still_bounds_a_large_input
+        ; test_case "short call list is passed through whole" `Quick
+            test_completed_calls_short_list_is_whole
+        ] )
     ; ( "observation_partition"
       , [ test_case
+            "pathless call names no document"
+            `Quick
+            test_partition_resolution_leaves_pathless_calls_without_a_document
+        ; test_case
             "uses project root when config base is .masc"
             `Quick
             test_partition_resolution_uses_project_root_for_masc_base_path
         ; test_case
-            "unregistered playground repo is Unmatched"
+            "annotate uses its input code address"
             `Quick
-            test_partition_unregistered_playground_repo_is_unmatched
+            test_annotate_uses_input_code_address_without_sandbox_resolution
+        ; test_case
+            "unregistered playground repo fails with its repo id"
+            `Quick
+            test_partition_unregistered_playground_repo_fails_with_repo_id
         ; test_case
             "Docker visible absolute path maps to playground repo"
             `Quick
             test_partition_docker_visible_path_maps_to_playground_repo
         ; test_case
-            "bare relative outside repos lane is Base_unresolved"
+            "bare relative outside repos lane is an unregistered path"
             `Quick
-            test_partition_bare_relative_outside_repos_is_base_unresolved
+            test_partition_bare_relative_outside_repos_is_unregistered_path
+        ] )
+    ; ( "concurrent_tool_observer"
+      , [ test_case
+            "commits receipt and activity as one transaction"
+            `Quick
+            test_concurrent_tool_observers_commit_as_transactions
+        ; test_case
+            "releases the next completion after a reported failure"
+            `Quick
+            test_failed_tool_observer_releases_next_completion
+        ; test_case
+            "production hook cancellation releases the next completion"
+            `Quick
+            test_production_post_tool_hook_cancellation_releases_next_completion
+        ] )
+    ; ( "rejected_tool_calls"
+      , [ test_case
+            "a call refused before execution leaves a row"
+            `Quick
+            test_a_rejected_call_leaves_a_row
+        ; test_case
+            "an executed failure is not written twice"
+            `Quick
+            test_an_executed_failure_is_not_written_twice
         ] )
     ]
 ;;

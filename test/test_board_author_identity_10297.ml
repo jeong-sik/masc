@@ -6,7 +6,7 @@
     contract's [agent_name] when the caller's [author] argument was
     blank.  Any non-blank caller-supplied [author] passed through
     canonicalisation without comparison, so an LLM running as
-    keeper [velvet-hammer] could write [author = "analyst"] and
+    keeper [xi-hammer] could write [author = "delta"] and
     impersonate a different principal on the public board.
     Board comment/vote paths also lacked an [agent_name] comparison
     point, so they could not have caught spoofing either.
@@ -19,8 +19,8 @@
     2. Caller's canonical equals ctx canonical → preserve canonical
        form, optionally stash raw surface in
        [meta.<field>_raw_agent_name] when the caller passed a
-       different surface form (e.g. [keeper-velvet-hammer-agent]
-       vs [velvet-hammer]).
+       different surface form (e.g. [keeper-xi-hammer-agent]
+       vs [xi-hammer]).
     3. Caller's canonical disagrees with ctx canonical → REWRITE to
        ctx canonical, preserve the caller's claim under
        [meta.<field>_caller_claim] for forensics, and increment
@@ -65,12 +65,12 @@ let assoc fields = `Assoc fields
 let test_blank_field_fills_from_ctx () =
   let result =
     D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
-      ~agent_name:"keeper-velvet-hammer-agent"
+      ~agent_name:"keeper-xi-hammer-agent"
       (assoc [ ("body", `String "hi") ])
   in
   check (option string)
     "blank author rewritten to ctx canonical"
-    (Some "velvet-hammer")
+    (Some "xi-hammer")
     (json_string_field "author" result);
   check (option string)
     "no caller_claim recorded for blank source"
@@ -80,12 +80,12 @@ let test_blank_field_fills_from_ctx () =
 let test_anonymous_field_fills_from_ctx () =
   let result =
     D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
-      ~agent_name:"keeper-velvet-hammer-agent"
+      ~agent_name:"keeper-xi-hammer-agent"
       (assoc [ ("author", `String "anonymous"); ("body", `String "hi") ])
   in
   check (option string)
     "anonymous author rewritten to ctx canonical"
-    (Some "velvet-hammer")
+    (Some "xi-hammer")
     (json_string_field "author" result);
   check (option string)
     "no caller_claim recorded for anonymous source"
@@ -97,12 +97,12 @@ let test_anonymous_field_fills_from_ctx () =
 let test_caller_short_name_matches_ctx () =
   let result =
     D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
-      ~agent_name:"keeper-velvet-hammer-agent"
-      (assoc [ ("author", `String "velvet-hammer") ])
+      ~agent_name:"keeper-xi-hammer-agent"
+      (assoc [ ("author", `String "xi-hammer") ])
   in
   check (option string)
     "matching short-name preserved"
-    (Some "velvet-hammer")
+    (Some "xi-hammer")
     (json_string_field "author" result);
   check (option string)
     "no caller_claim because no spoof"
@@ -116,16 +116,16 @@ let test_caller_passes_full_agent_name_form () =
      [meta.author_raw_agent_name] — legacy semantic preserved. *)
   let result =
     D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
-      ~agent_name:"velvet-hammer"
-      (assoc [ ("author", `String "keeper-velvet-hammer-agent") ])
+      ~agent_name:"xi-hammer"
+      (assoc [ ("author", `String "keeper-xi-hammer-agent") ])
   in
   check (option string)
     "canonical short-name in author"
-    (Some "velvet-hammer")
+    (Some "xi-hammer")
     (json_string_field "author" result);
   check (option string)
     "raw surface preserved in meta.author_raw_agent_name"
-    (Some "keeper-velvet-hammer-agent")
+    (Some "keeper-xi-hammer-agent")
     (meta_string_field "author_raw_agent_name" result);
   check (option string)
     "no caller_claim because canonicals match"
@@ -134,25 +134,25 @@ let test_caller_passes_full_agent_name_form () =
 
 (* --- 3. caller canonical disagrees with ctx canonical ----------- *)
 
-let test_velvet_hammer_cannot_post_as_analyst () =
-  (* The exact #10297 reproducer: velvet-hammer keeper attempts to
-     write a board post under analyst's name.  Dispatcher must
-     rewrite the author to velvet-hammer, preserve the analyst
+let test_velvet_hammer_cannot_post_as_delta () =
+  (* The exact #10297 reproducer: xi-hammer keeper attempts to
+     write a board post under delta's name.  Dispatcher must
+     rewrite the author to xi-hammer, preserve the delta
      claim in meta, and increment the spoof counter. *)
   let before = counter_for ~tool:"masc_board_post" ~field:"author" in
   let result =
     D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
-      ~agent_name:"keeper-velvet-hammer-agent"
+      ~agent_name:"keeper-xi-hammer-agent"
       (assoc
-         [ ("author", `String "analyst"); ("body", `String "spoof attempt") ])
+         [ ("author", `String "delta"); ("body", `String "spoof attempt") ])
   in
   check (option string)
     "author rewritten to ctx canonical"
-    (Some "velvet-hammer")
+    (Some "xi-hammer")
     (json_string_field "author" result);
   check (option string)
     "caller claim preserved in meta.author_caller_claim"
-    (Some "analyst")
+    (Some "delta")
     (meta_string_field "author_caller_claim" result);
   check (float 0.0001)
     "spoof counter +1"
@@ -166,16 +166,16 @@ let test_voter_field_spoof_also_rewritten () =
   let before = counter_for ~tool:"masc_board_vote" ~field:"voter" in
   let result =
     D.enforce_caller_identity ~tool:"masc_board_vote" ~field:"voter"
-      ~agent_name:"keeper-velvet-hammer-agent"
-      (assoc [ ("voter", `String "analyst"); ("post_id", `String "p1") ])
+      ~agent_name:"keeper-xi-hammer-agent"
+      (assoc [ ("voter", `String "delta"); ("post_id", `String "p1") ])
   in
   check (option string)
     "voter rewritten to ctx canonical"
-    (Some "velvet-hammer")
+    (Some "xi-hammer")
     (json_string_field "voter" result);
   check (option string)
     "voter claim preserved in meta.voter_caller_claim"
-    (Some "analyst")
+    (Some "delta")
     (meta_string_field "voter_caller_claim" result);
   check (float 0.0001)
     "voter spoof counter +1"
@@ -190,8 +190,8 @@ let test_counter_separates_by_tool_and_field () =
   let other_before = counter_for ~tool:"masc_board_vote" ~field:"voter" in
   let _ =
     D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
-      ~agent_name:"keeper-velvet-hammer-agent"
-      (assoc [ ("author", `String "analyst") ])
+      ~agent_name:"keeper-xi-hammer-agent"
+      (assoc [ ("author", `String "delta") ])
   in
   check (float 0.0001)
     "vote/voter unchanged when post/author bumps"
@@ -209,11 +209,11 @@ let test_empty_ctx_preserves_legacy_canonicalisation () =
   let result =
     D.enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
       ~agent_name:""
-      (assoc [ ("author", `String "keeper-velvet-hammer-agent") ])
+      (assoc [ ("author", `String "keeper-xi-hammer-agent") ])
   in
   check (option string)
     "canonical short-name even without ctx"
-    (Some "velvet-hammer")
+    (Some "xi-hammer")
     (json_string_field "author" result)
 
 let () =
@@ -235,8 +235,8 @@ let () =
         ] );
       ( "spoof-rewrite",
         [
-          test_case "velvet-hammer cannot post as analyst" `Quick
-            test_velvet_hammer_cannot_post_as_analyst;
+          test_case "xi-hammer cannot post as delta" `Quick
+            test_velvet_hammer_cannot_post_as_delta;
           test_case "voter spoof also rewritten" `Quick
             test_voter_field_spoof_also_rewritten;
         ] );

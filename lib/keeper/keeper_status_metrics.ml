@@ -22,11 +22,12 @@ let metrics_tool_audit_persistence_surface =
   "keeper_status_runtime_keeper_metrics"
 
 let report_persistence_read_drop ~surface ~reason ~path ~detail =
+  let reason_wire = Read_drop_reason.to_wire reason in
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
       Otel_metric_store.inc_counter
         Otel_metric_store.metric_persistence_read_drops
-        ~labels:[ "surface", surface; "reason", reason ]
+        ~labels:[ "surface", surface; "reason", reason_wire ]
         ())
     ~surface
     ~reason
@@ -91,7 +92,7 @@ let summarize_metrics_lines (lines : string list) : metrics_summary =
           | _ ->
               report_metrics_summary_read_drop
                 ~reason:
-                  Safe_ops.persistence_read_drop_reason_invalid_payload
+                  Read_drop_reason.Invalid_payload
                 ~detail:"keeper metrics row is not a JSON object";
               raise Exit
         in
@@ -182,13 +183,13 @@ let summarize_metrics_lines (lines : string list) : metrics_summary =
       | Yojson.Json_error detail ->
           report_metrics_summary_read_drop
             ~reason:
-              Safe_ops.persistence_read_drop_reason_entry_load_error
+              Read_drop_reason.Json_syntax_error
             ~detail;
           acc
       | Yojson.Safe.Util.Type_error (detail, _) ->
           report_metrics_summary_read_drop
             ~reason:
-              Safe_ops.persistence_read_drop_reason_invalid_payload
+              Read_drop_reason.Invalid_payload
             ~detail;
           acc)
     empty_metrics_summary
@@ -258,7 +259,7 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
           | None -> path
         in
         report_drop
-          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~reason:Read_drop_reason.Entry_load_error
           ~detail:(Printf.sprintf "%s: %s" location detail);
         None
     | Dated_jsonl.Parsed (`Assoc _ as json) ->
@@ -282,13 +283,13 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
          | Some Keeper_metrics_record.Heartbeat | None -> None)
     | Dated_jsonl.Parsed _ ->
         report_drop
-          ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+          ~reason:Read_drop_reason.Invalid_payload
           ~detail:"keeper metrics row is not a JSON object";
         None
   in
   let report_read_error error =
     report_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~reason:Read_drop_reason.Entry_load_error
       ~detail:(Dated_jsonl.read_error_to_string error)
   in
   let rows_stable ~physical_row_count =
@@ -346,12 +347,3 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
 
 let latest_tool_audit_snapshot_from_files config ~keeper_name =
   latest_tool_audit_snapshot_from_metrics config keeper_name
-
-let accountability_summary_lookup config =
-  Keeper_accountability.accountability_summary_lookup config
-
-let accountability_summary_json config ~keeper_name ~agent_name =
-  Keeper_accountability.accountability_summary_json
-    config
-    ~keeper_name
-    ~agent_name

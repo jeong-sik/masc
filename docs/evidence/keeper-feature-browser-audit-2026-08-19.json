@@ -1,0 +1,52 @@
+{
+  "captured_at": "2026-08-19T01:20+09:00",
+  "method": "playwright chromium 1440x900 against the live dashboard (http://localhost:8935/dashboard), DOM text markers counted from body.inner_text; reproduction: goto hash, wait networkidle+1.8s, count markers",
+  "shell": {
+    "build_label": "v0.23.0 · 03920433d0",
+    "ws": "Connected",
+    "auth": "Verified @dashboard · admin",
+    "console_errors": 0
+  },
+  "surfaces": {
+    "board": {
+      "hash": "#board",
+      "rendered_chars": 21520,
+      "markers": { "투표": 20, "karma": 20, "👍": 20, "▲": 20, "댓글": 1 },
+      "verdict": "board list renders live posts with vote/karma controls; comment count marker present"
+    },
+    "workspace": {
+      "hash": "#workspace",
+      "rendered_chars": 25909,
+      "markers": { "task": 141, "goal": 40, "claim": 52 },
+      "verdict": "task and goal surfaces render live data with claim controls"
+    },
+    "feature_health": {
+      "hash": "#monitoring?section=feature-health",
+      "rendered_chars": 2192,
+      "verdict": "section navigation renders a distinct view"
+    }
+  },
+  "live_cross_checks": {
+    "github_credential": {
+      "source": "<base-path>/.masc/tool_calls/2026-08/{18,19}.jsonl",
+      "keeper_git_executions": 2,
+      "keeper_gh_executions": 6,
+      "successes": 8,
+      "verdict": "keeper-held GitHub credentials execute git/gh live, 8/8 success"
+    },
+    "provider_free": {
+      "source": "execution-receipts 2026-08-16..18, all keepers",
+      "receipts_by_family": {
+        "ollama_cloud": 3541,
+        "glm-coding": 1778,
+        "antigravity_subscription": 746,
+        "claude_code": 143
+      },
+      "verdict": "four runtime families served turns in the same window"
+    }
+  },
+  "notes": [
+    "screenshots (5) captured in the session scratchpad; DOM marker counts above are the durable form per docs/evidence JSON convention (no binary in git)",
+    "#28885 measurements recorded as issue comments: fence 123/123 with prior effects; validation-reject escalation antigravity-only 45/45; dead-turn reject round-trips absent from the 14,466-message checkpoint (1 surviving = turn-continued case)"
+  ]
+}

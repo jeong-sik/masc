@@ -26,6 +26,9 @@ type config_error =
   | Invalid_staged_judge_group_size of int
       (** staged_judge_group_size < Fusion_policy.min_staged_judge_group_size *)
   | Invalid_max_output_tokens of string * int
+  | Invalid_timeout_s of string * float
+      (** (preset 이름, 데드라인): panel_timeout_s / judge_timeout_s / 1차 심판
+          timeout_s 가 유한 양수가 아님. *)
       (** (preset 이름, 값) — max_output_tokens override는 양수여야 함 *)
   | Missing_default_preset of string
       (** enabled인데 default_preset가 비었거나 presets에 없음. 빈 문자엏도 거부 —

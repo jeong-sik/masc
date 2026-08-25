@@ -12,17 +12,22 @@ module StringSet = Set_util.StringSet
 (* File storage paths                                               *)
 (* ================================================================ *)
 
-let root_dir (config : Workspace_utils.config) =
-  Filename.concat (Workspace_utils.masc_dir config) "activity-events"
+(* The directory this store occupies under [.masc]. Exposed so readers of the
+   same store name it from here instead of spelling the literal. *)
+let store_dirname = "activity-events"
 
-let month_dir (config : Workspace_utils.config) =
-  let tm = Unix.gmtime (Time_compat.now ()) in
-  Filename.concat (root_dir config)
-    (Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1))
+let root_dir (config : Workspace_utils.config) =
+  Filename.concat (Workspace_utils.masc_dir config) store_dirname
+
+(* [Jsonl_writer] owns the YYYY-MM/DD.jsonl layout. This module used to spell
+   it out again, and it read the clock once for the month and once more for
+   the day, so a write that crossed midnight on the last of a month could put
+   the new day's file under the old month's directory (#27143). *)
+let current_dated_path (config : Workspace_utils.config) =
+  Jsonl_writer.dated_path_now ~base_dir:(root_dir config)
 
 let day_path (config : Workspace_utils.config) =
-  let tm = Unix.gmtime (Time_compat.now ()) in
-  Filename.concat (month_dir config) (Printf.sprintf "%02d.jsonl" tm.tm_mday)
+  (current_dated_path config).Jsonl_writer.path
 
 let seq_path (config : Workspace_utils.config) =
   Filename.concat (root_dir config) "_seq"
@@ -30,9 +35,12 @@ let seq_path (config : Workspace_utils.config) =
 let lock_path (config : Workspace_utils.config) =
   Filename.concat (root_dir config) "_stream"
 
-let ensure_dirs config =
+(* Takes the path the caller is about to append to, so the directory made and
+   the file opened come from one reading of the clock. *)
+let ensure_dirs config (dated : Jsonl_writer.dated_path) =
   Workspace_utils.mkdir_p (root_dir config);
-  Workspace_utils.mkdir_p (month_dir config)
+  (* [month_dir] is the directory name, not a path; the full one is here. *)
+  Workspace_utils.mkdir_p (Filename.dirname dated.Jsonl_writer.path)
 
 let read_current_seq config =
   match Safe_ops.read_file_safe (seq_path config) with
@@ -58,7 +66,6 @@ let sanitize_event (value : event) =
   {
     value with
     ts_iso = Safe_ops.sanitize_text_utf8 value.ts_iso;
-    workspace_id = Safe_ops.sanitize_text_utf8 value.workspace_id;
     kind = Safe_ops.sanitize_text_utf8 value.kind;
     actor = Option.map sanitize_entity_ref value.actor;
     subject = Option.map sanitize_entity_ref value.subject;
@@ -95,7 +102,6 @@ let sanitize_event_traced (value : event) : event =
      List.map always allocates a new list, so tags are compared element-wise. *)
   let changed =
     not (sanitized.ts_iso == value.ts_iso)
-    || not (sanitized.workspace_id == value.workspace_id)
     || not (sanitized.kind == value.kind)
     || entity_ref_changed sanitized.actor value.actor
     || entity_ref_changed sanitized.subject value.subject
@@ -246,9 +252,31 @@ let rec past_day_cache_insert path mtime parsed =
     past_day_cache_insert path mtime parsed
 
 let file_mtime path =
-  try Some (Unix.stat path).Unix.st_mtime with _ -> None
+  try Some (Unix.stat path).Unix.st_mtime with _ -> None  (* cancel-guard-ok: guards Unix.stat: no Eio cancellation point *)
 
 let reset_past_day_cache_for_testing () = Atomic.set past_day_cache Past_day_path_map.empty
+
+(* What the caches are holding, so an operator reads it instead of estimating
+   it. Sizing this from outside meant taking process RSS, reading [live_words]
+   off /health, and multiplying the on-disk JSONL by a guessed parse factor --
+   an estimate that lands within a factor of two and settles nothing. The
+   parsed record count is the number that matters: it is what a retention
+   change moves, and RFC-0201 Step 4 sized this design against "15+ MB of
+   historic data" that is now an order of magnitude larger.
+
+   A read, not a gauge: this module has no metric dependency, and the caller
+   that already exports gauges decides how often to look. *)
+type cache_stats = {
+  past_day_files : int;  (** parsed day files held *)
+  past_day_records : int;  (** events across them *)
+}
+
+let cache_stats () =
+  let cache = Atomic.get past_day_cache in
+  { past_day_files = Past_day_path_map.cardinal cache
+  ; past_day_records =
+      Past_day_path_map.fold (fun _ (_, events) acc -> acc + List.length events) cache 0
+  }
 
 (* P0-4 (masc perf root-cause report, 2026-07-15, item (1)): the 2s
    [Dashboard_snapshot.refresh_loop] calls [read_all_events] up to 3x per
@@ -429,7 +457,13 @@ let matches_filters ?(kinds = []) (value : event) =
     [latest_store_seq] is the max of the persisted sequence counter and the
     JSONL rows so a stale [_seq] file cannot make dashboard cursors move
     backward. *)
-let list_events_with_meta config ?(kinds = []) ~after_seq ~limit
+(* [keep] runs with the other filters, BEFORE [limit] pages the result, so
+   [limit] counts events the caller wanted. Applying it afterwards discards
+   part of the page and leaves the caller unable to say how wide a page it
+   needs — the read already loads the whole log, so a caller that filtered
+   later had to inflate [limit] and still lost its oldest events to a busier
+   agent. *)
+let list_events_with_meta config ?(kinds = []) ~after_seq ~limit ~keep
     ?since_ms () =
   let stored = read_all_events config in
   let latest_store_seq = max (read_current_seq config) (max_event_seq stored) in
@@ -438,6 +472,7 @@ let list_events_with_meta config ?(kinds = []) ~after_seq ~limit
     |> List.filter (fun value ->
            value.seq > after_seq
            && matches_filters ~kinds value
+           && keep value
            && (match since_ms with
                | None -> true
                | Some ms -> value.ts_ms >= ms))
@@ -456,13 +491,14 @@ let list_events_with_meta config ?(kinds = []) ~after_seq ~limit
 let list_events_with_total config ?(kinds = []) ~after_seq ~limit
     ?since_ms () =
   let page, total, _latest_store_seq, _latest_matching_seq =
-    list_events_with_meta config ~kinds ~after_seq ~limit ?since_ms ()
+    list_events_with_meta config ~kinds ~after_seq ~limit
+      ~keep:(fun _ -> true) ?since_ms ()
   in
   (page, total)
 
-let list_events config ?(kinds = []) ~after_seq ~limit () =
+let list_events config ?(kinds = []) ~after_seq ~limit ~keep () =
   let page, _total, _latest_store_seq, _latest_matching_seq =
-    list_events_with_meta config ~kinds ~after_seq ~limit ()
+    list_events_with_meta config ~kinds ~after_seq ~limit ~keep ()
   in
   page
 
@@ -485,7 +521,8 @@ let activity_events_store_path config = root_dir config
 let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
   let value, json_line =
     Workspace_utils.with_file_lock config (lock_path config) (fun () ->
-        ensure_dirs config;
+        let dated = current_dated_path config in
+        ensure_dirs config dated;
         let seq = read_current_seq config + 1 in
         write_current_seq config seq;
         let value =
@@ -493,7 +530,6 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
             seq;
             ts_ms = now_ts_ms ();
             ts_iso = Masc_domain.now_iso ();
-            workspace_id = "default";  (* retained for JSONL backward compat *)
             kind;
             actor;
             subject;
@@ -503,7 +539,7 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
           |> sanitize_event_traced
         in
         let json_line = Yojson.Safe.to_string (event_to_yojson value) in
-        append_line (day_path config) (json_line ^ "\n");
+        append_line dated.Jsonl_writer.path (json_line ^ "\n");
         (value, json_line))
   in
   let encoded = format_sse_event_data ~seq:value.seq json_line in
@@ -532,7 +568,8 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
 
 let json_response config ?(kinds = []) ~after_seq ~limit () =
   let events, total_matching, latest_store_seq, latest_matching_seq =
-    list_events_with_meta config ~kinds ~after_seq ~limit ()
+    list_events_with_meta config ~kinds ~after_seq ~limit
+      ~keep:(fun _ -> true) ()
   in
   let next_after_seq =
     match List.rev events with
@@ -569,7 +606,6 @@ let json_response config ?(kinds = []) ~after_seq ~limit () =
       ("after_seq", `Int after_seq);
       ("next_after_seq", `Int next_after_seq);
       ("limit", `Int limit);
-      ("workspace_id", `String "default");  (* backward compat *)
       ("kinds", `List (List.map (fun value -> `String value) kinds));
       ("latest_seq", `Int latest_store_seq);
       ("latest_matching_seq", `Int latest_matching_seq);
@@ -641,7 +677,6 @@ let graph_json config ?(kinds = []) ?(limit = 500)
             label = node.label;
             status = node.status;
             weight = node.weight;
-            semantic_weight = node.semantic_weight;
             last_event_at = node.last_event_at;
             meta = node.meta;
           }
@@ -744,19 +779,16 @@ let graph_json config ?(kinds = []) ?(limit = 500)
           ~events_shown:(List.length events)
           ~events_store_total
           ~extra:[
-            ("workspace_id", `String "default");
             ("kinds", `List (List.map (fun value -> `String value) kinds));
           ] () );
       ( "stats",
         `Assoc
           [
             ("event_count", `Int (List.length events));
-            ("node_count", `Int (List.length nodes_json));
             ("edge_count", `Int (List.length edges_json));
             ("agent_count", `Int (count_kind "agent"));
             ("task_count", `Int (count_kind "task"));
             ("decision_count", `Int (count_kind "decision"));
-            ("operation_count", `Int (count_kind "operation"));
             ("active_agents", `Int active_agents);
           ] );
       ("stats_history", `List stats_history);
@@ -893,8 +925,6 @@ module For_testing = struct
   let reset_current_day_cache_for_testing = reset_current_day_cache_for_testing
   let reset_past_day_cache_for_testing = reset_past_day_cache_for_testing
   let current_day_parsed_line_count () = Atomic.get current_day_parse_counter
-  let current_day_cache_entry_count () =
-    Stdlib.Mutex.protect current_day_cache_mu (fun () -> Hashtbl.length current_day_cache)
   let past_day_cache_entry_count () =
     Past_day_path_map.cardinal (Atomic.get past_day_cache)
   let current_day_path = day_path

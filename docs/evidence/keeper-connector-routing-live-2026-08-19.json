@@ -1,0 +1,26 @@
+{
+  "captured_at": "2026-08-19T05:26:00Z",
+  "purpose": "Connector routing 행 live 축 — 맥락 기반 surface 선택의 실측",
+  "source": "<base-path>/.masc/keeper_chat/*.jsonl (128 files, user→assistant surface 쌍 집계)",
+  "contract": "keeper_surface_post는 요청된 surface 라벨로 lane을 결정하고, 바인딩되지 않은 surface로의 post는 에러 (lib/keeper/keeper_surface_post.mli:3-7)",
+  "same_surface_reply": {
+    "dashboard->dashboard": 1895,
+    "agent->agent": 180,
+    "discord->discord": 151,
+    "slack->slack": 11
+  },
+  "cross_surface_routing": {
+    "discord->dashboard": 936,
+    "dashboard->slack": 52,
+    "dashboard->discord": 26,
+    "agent->dashboard": 28,
+    "slack->dashboard": 2,
+    "note": "keeper별로 갈린다 — sangsu가 discord↔dashboard 양방향(936 + 26), kidsnote가 slack↔dashboard 양방향(52 + 2). 유입 surface를 그대로 되받는 고정 라우팅이 아니라 keeper가 대상 surface를 고른 결과."
+  },
+  "per_surface_recency": {
+    "sangsu": { "dashboard": "08-18 16:39Z", "discord": "08-17 12:02Z", "agent": "08-10 20:29Z" },
+    "kidsnote": { "slack": "08-16 21:45Z", "dashboard": "08-16 16:07Z" }
+  },
+  "verdict": "live 축 충족: 4개 surface(dashboard·discord·slack·agent)로 실제 응답이 나갔고, 유입과 다른 surface를 고르는 cross-routing이 2 keeper에서 양방향으로 관측된다. 다만 최신 discord 응답은 08-17, slack은 08-16이라 당일 트래픽은 dashboard/agent 중심 — 커넥터 토큰 미구성 상태(운영자 프로비저닝 대기)와 정합.",
+  "not_measured": "승인되지 않은 재배달 부재(negative property)는 이 집계로 증명되지 않는다 — 별도 감사 필요."
+}

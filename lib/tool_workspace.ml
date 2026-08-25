@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Tool_workspace - Workspace management operations
     Handles: status, init, check
     Note: stateful workspace helpers remain in server dispatch modules
@@ -50,7 +33,10 @@ let effective_cluster_name (config : Workspace.config) =
 
 (* Handlers *)
 
-let unique_strings items =
+(* Trims before comparing, so [" a"] and ["a"] are one value, and drops
+   what is blank after trimming. [Json_util.dedupe_keep_order] does
+   neither; naming this one [unique_strings] hid that difference. *)
+let unique_trimmed_nonblank items =
   List.fold_left
     (fun acc item ->
        let item = String.trim item in
@@ -65,11 +51,16 @@ let unique_strings items =
 let credential_state (ctx : context) ~actual_name =
   let auth_cfg = Auth.load_auth_config ctx.config.base_path in
   let credential_required = auth_cfg.enabled && auth_cfg.require_token in
-  let credential_candidates = unique_strings [ ctx.agent_name; actual_name ] in
+  let credential_candidates =
+    unique_trimmed_nonblank [ ctx.agent_name; actual_name ]
+  in
   let internal_keeper_credential_available name =
+    (* Typed in-process read (RFC-0371 B11): this used to getenv the token
+       the process itself had putenv'd at boot — its own environment as an
+       in-memory channel, re-read per tool call. *)
     match
       ( Workspace_identity_backend.keeper_name_for_agent_name name
-      , Sys.getenv_opt Auth.internal_keeper_token_env_key )
+      , Auth.internal_keeper_token () )
     with
     | Some _, Some raw ->
       let token = String.trim raw in
@@ -145,33 +136,6 @@ let safe_get_agents (ctx : context) =
     []
 ;;
 
-let todo_task_has_completed_deliverable_conflict (ctx : context) (task : Masc_domain.task)
-  =
-  match task.task_status with
-  | Masc_domain.Todo ->
-    (match Planning_eio.load ctx.config ~task_id:task.id with
-     | Ok plan_ctx ->
-       Task_completion_claim.deliverable_claims_completion
-         ~task_id:task.id
-         plan_ctx.deliverable
-     | Error _ -> false)
-  | Masc_domain.Claimed _
-  | Masc_domain.InProgress _
-  | Masc_domain.AwaitingVerification _
-  | Masc_domain.Done _
-  | Masc_domain.Cancelled _ -> false
-;;
-
-let todo_completed_deliverable_conflicts (ctx : context) tasks =
-  List.filter_map
-    (fun (task : Masc_domain.task) ->
-       Workspace_query.safe_yield ();
-       if todo_task_has_completed_deliverable_conflict ctx task
-       then Some task.id
-       else None)
-    tasks
-;;
-
 let resolve_current_binding ~assigned_task_ids ~planning_current =
   let primary_owned =
     match assigned_task_ids with
@@ -223,25 +187,13 @@ let planning_context_state
       (active_tasks : Masc_domain.task list)
   =
   match binding.primary_owned with
-  | None -> { planning_missing_task = None; deliverable_conflict_task = None }
+  | None -> { planning_missing_task = None }
   | Some task_id ->
     (match Planning_eio.load ctx.config ~task_id with
      | Error _ ->
-       { planning_missing_task = Some task_id; deliverable_conflict_task = None }
+       { planning_missing_task = Some task_id }
      | Ok plan_ctx ->
-       let deliverable_conflict_task =
-         match
-           List.find_opt
-             (fun (task : Masc_domain.task) -> String.equal task.id task_id)
-             active_tasks
-         with
-         | Some { task_status = Masc_domain.Claimed _ | Masc_domain.InProgress _; _ }
-           when Task_completion_claim.deliverable_claims_completion
-                  ~task_id
-                  plan_ctx.deliverable -> Some task_id
-         | Some _ | None -> None
-       in
-       { planning_missing_task = None; deliverable_conflict_task })
+       { planning_missing_task = None })
 ;;
 
 let status_summary_string (ctx : context) =
@@ -251,6 +203,19 @@ let status_summary_string (ctx : context) =
   | Error error ->
     Error (Printf.sprintf "status snapshot unavailable: backlog read failed: %s" error)
   | Ok { Workspace.observed_backlog = backlog; recovered_from } ->
+  (* Read the goal-task registry through the Result reader so a damaged
+     registry surfaces here instead of rendering as "no task has a goal". The
+     renderer takes the built index as an argument — its contract says every
+     line is a deliberate operator surface, which a store read inside it
+     would quietly break. *)
+  match Workspace_goal_index.read_goal_task_links_r ctx.config with
+  | Error error ->
+    Error
+      (Printf.sprintf "status snapshot unavailable: goal link read failed: %s" error)
+  | Ok goal_task_links ->
+  let task_goal_index =
+    Workspace_goal_index.build_task_goal_index ~goal_task_links ()
+  in
   let session_bound =
     (* status_summary_string is read-only on the workspace file; a missing
        or malformed file is treated as "session not bound" because that's the
@@ -344,9 +309,6 @@ let status_summary_string (ctx : context) =
       backlog.tasks
   in
   let active_tasks = List.rev active_tasks in
-  let todo_conflict_task_ids = todo_completed_deliverable_conflicts ctx active_tasks in
-  let todo_conflict_count = List.length todo_conflict_task_ids in
-  let fresh_todo_count = max 0 (todo_count - todo_conflict_count) in
   let matches_you assignee =
     String.equal assignee ctx.agent_name || String.equal assignee actual_name
   in
@@ -385,17 +347,6 @@ let status_summary_string (ctx : context) =
       | None -> items
     in
     let items =
-      match planning_state.deliverable_conflict_task with
-      | Some task_id ->
-        items
-        @ [ Printf.sprintf
-              "Owned task %s already has a completed-looking deliverable while the task \
-               is still active."
-              task_id
-          ]
-      | None -> items
-    in
-    let items =
       if Option.is_some binding.primary_owned && not binding.current_task_set
       then
         items
@@ -415,20 +366,10 @@ let status_summary_string (ctx : context) =
         @ [ "Planning current_task is set but no active task is assigned to you." ]
       | Some _ | None -> items
     in
-    let items =
-      if todo_conflict_count > 0
-      then
-        items
-        @ [ Printf.sprintf
-              "%d todo task(s) have completed-looking planning deliverables."
-              todo_conflict_count
-          ]
-      else items
-    in
-    if fresh_todo_count > 0 && Stdlib.List.length binding.assigned_task_ids = 0
+    if todo_count > 0 && Stdlib.List.length binding.assigned_task_ids = 0
     then
       items
-      @ [ Printf.sprintf "%d unclaimed task(s) are available right now." fresh_todo_count
+      @ [ Printf.sprintf "%d unclaimed task(s) are available right now." todo_count
         ]
     else items
   in
@@ -448,8 +389,8 @@ let status_summary_string (ctx : context) =
        ~in_progress_count
        ~done_count
        ~cancelled_count
-       ~todo_conflict_task_ids
        ~binding
+       ~task_goal_index
        ~planning_state
        ~attention_items
        ~state
@@ -468,11 +409,11 @@ let status_summary_string (ctx : context) =
 let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
   match Snapshot_protocol.if_revision args with
   | Error message ->
-    Tool_result.make_err
+    error_result_typed
       ~tool_name
-      ~class_:Tool_result.Policy_rejection
       ~start_time
-      ~data:(`String message)
+      ~failure_class:Tool_result.Policy_rejection
+      ~code:Validation_error
       message
   | Ok if_revision ->
   let task_list_name =
@@ -480,11 +421,10 @@ let handle_status ~task_list_projection ~tool_name ~start_time ctx args =
   in
   (match status_summary_string ctx with
    | Error message ->
-     Tool_result.make_err
+     error_result_typed
        ~tool_name
-       ~class_:Tool_result.Runtime_failure
        ~start_time
-       ~data:(`Assoc [ "error", `String "status_unavailable"; "detail", `String message ])
+       ~code:Internal_error
        message
    | Ok (snapshot, recovered_from) ->
      let revision =
@@ -551,14 +491,6 @@ let inspect_state ctx =
   { task_claimed; current_task_set }
 ;;
 
-let state_to_json st =
-  `Assoc
-    [ "task_claimed", `Bool st.task_claimed
-    ; "current_task_set", `Bool st.current_task_set
-    ; "session_active", `Bool false
-    ]
-;;
-
 (* ── State check (assertion-based verification) ────────────────── *)
 
 (** Issue #8636: SSOT for [masc_check] assertion vocabulary. Schema
@@ -578,7 +510,7 @@ let handle_heartbeat ~tool_name ~start_time ctx _args =
        resolve (bind the session, refresh credentials).
        [Workflow_rejection]. *)
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time message
 ;;
 
@@ -599,7 +531,6 @@ let dispatch_bindings : (string * dispatch_handler) list =
   [ "masc_heartbeat", handle_heartbeat
   ; "masc_goal_list", Workspace_goals.handle_goal_list
   ; "masc_goal_upsert", Workspace_goals.handle_goal_upsert
-  ; "masc_goal_assign", Workspace_goals.handle_goal_assign
   ; "masc_goal_transition", Workspace_goals.handle_goal_transition
   ; "masc_check", handle_check
   ]

@@ -87,7 +87,6 @@ parse_refs=$(count_code_refs "$parse_pattern")
 allowed_parse_files=(
   "lib/exec/command_gate/shell_command_gate.ml"
   "lib/exec_policy/exec_policy.ml"
-  "lib/exec_policy/exec_policy_command_syntax.ml"
 )
 
 unclassified_parse_files=()
@@ -105,11 +104,11 @@ while IFS= read -r file; do
   fi
 done < <(list_code_files "$parse_pattern" | sort)
 
-dispatcher_consumers=$(list_code_files 'Keeper_tool_execute_shell_ir\.dispatch' \
+dispatcher_consumers=$(list_code_files 'Keeper_tooling\.Execute_shell_ir\.dispatch' \
   | rg '^lib/keeper/' \
   | wc -l \
   | tr -d ' ')
-path_validation_surfaces=$(list_code_files 'Exec_policy\.validate_shell_ir_paths|Keeper_tool_execute_shell_ir\.(dispatch|validate_paths)' \
+path_validation_surfaces=$(list_code_files 'Exec_policy\.validate_shell_ir_paths|Keeper_tooling\.Execute_shell_ir\.(dispatch|validate_paths)' \
   | rg -v 'exec_policy/exec_policy\.(ml|mli)$' \
   | wc -l \
   | tr -d ' ')

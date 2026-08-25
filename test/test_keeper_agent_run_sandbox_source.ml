@@ -3,7 +3,7 @@
     Keeper-internal tools are sandbox-aware, but provider-native CLI tools
     such as Shell/ReadFile inherit the CLI transport cwd. If that cwd falls
     back to the server process cwd, Docker-profile keepers can dirty the repo
-    root instead of their playground. This pins the handoff point into OAS. *)
+    root instead of their playground. This pins the handoff point into AGENT_CORE. *)
 
 open Alcotest
 
@@ -137,7 +137,7 @@ let test_keeper_tools_cleanup_is_retained_and_invoked () =
     bool
     "run setup retains the full keeper tool bundle"
     true
-    (contains ~needle:"Keeper_tools_oas_bundle.make_tool_bundle" run_tools_setup_src);
+    (contains ~needle:"Keeper_tools_agent_core_bundle.make_tool_bundle" run_tools_setup_src);
   check
     bool
     "run setup exposes the cleanup callback"

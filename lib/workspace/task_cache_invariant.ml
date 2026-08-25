@@ -1,98 +1,173 @@
-(** Task_cache_invariant — Fleet-wide guard against stale task-cache emissions.
+(** Task_cache_invariant — reads canonical task state and the subject's own
+    record without collapsing absence, unreadability, and disagreement into
+    one another.
 
-    Any keeper module that maintains its own task-state cache MUST call
-    [with_fresh_task_status] before emitting broadcasts, mentions, or
-    transitions tied to a specific task ID.  Callers that need finer control
-    can compose [fresh_task_status] + [is_terminal] directly.
+    Two lookups, each keeping its failure modes apart:
+      - {!read_fresh_task_status} answers what the backlog says about a task.
+      - {!agent_current_task_match} answers what one agent record caches, and
+        says so when the record could not be read at all.
 
-    If the backlog reports the task as terminal (Done / Cancelled) while
-    the caller's cache is still active the guard:
-      1. Clears [current_task] on the agent record when it matches [task_id].
-      2. Logs a [cache_desync.cleared] event with module identity.
-      3. Returns [None] so callers skip the original emission.
+    {!clear_stale_agent_task_if_matching} clears [current_task] on a matching
+    record and logs a [cache_desync.cleared] event.  Whether the caller then
+    suppresses, rejects, or reports a dependency failure is the caller's
+    decision, made on the returned variant.
 
-    The caller is responsible for emitting a single [cache_invalidated]
-    broadcast in place of the original message (typically by passing the
-    replacement content directly to [Workspace_broadcast.broadcast]).
-
-    @since #13397 — fleet-wide invariant for broadcast / mention desync. *)
+    @since #13397 — broadcast / mention desync. *)
 
 open Masc_domain
 open Workspace_utils
 
+type fresh_task_lookup =
+  | Found of Masc_domain.task_status
+  | Absent
+  | Unavailable of string
+
 (** Read the current task status directly from the backlog (snapshot read,
-    no write lock).  Returns [None] when the task is absent or the backlog
-    cannot be read. *)
-let fresh_task_status config ~(task_id : string)
-    : Masc_domain.task_status option =
+    no write lock), preserving absence and read failure as distinct facts. *)
+let read_fresh_task_status config ~(task_id : string) : fresh_task_lookup =
   match Workspace_backlog.read_backlog_r config with
-  | Error _ -> None
+  | Error detail -> Unavailable detail
   | Ok backlog ->
-      List.find_opt
-        (fun (t : Masc_domain.task) -> String.equal t.id task_id)
-        backlog.tasks
-      |> Option.map (fun (t : Masc_domain.task) -> t.task_status)
+    (match
+       List.find_opt
+         (fun (t : Masc_domain.task) -> String.equal t.id task_id)
+         backlog.tasks
+     with
+     | Some task -> Found task.task_status
+     | None -> Absent)
+;;
+
+(** What one agent record says about a task, with the ways the answer can be
+    unavailable kept apart from the answer itself. *)
+type agent_task_match =
+  | Matches
+  | Mismatch
+  | Missing
+  | Unreadable of string
 
 (** [is_terminal status] returns [true] iff the status is [Done _] or
     [Cancelled _].  SSOT: [Masc_domain.task_status_is_terminal]. *)
 let is_terminal = Masc_domain.task_status_is_terminal
 
-(** Clear the agent's [current_task] field on disk when it equals [task_id]
-    and log a [cache_desync.cleared] diagnostic event. *)
-let clear_stale_agent_task
+(** Why an agent record had its [current_task] cleared.
+
+    [After_commit] is the routine sweep a writer runs once its backlog commit
+    lands: the previous assignee stops owning a task that just moved. Nothing
+    was out of step. [Desync] is the reactive path, which clears only after
+    reading the canonical backlog and finding the task terminal or gone.
+
+    Both used to emit [cache_desync.cleared]. Two thirds of 3,000 recorded
+    events came from [transition_task_r], an after-commit site, so the count
+    could not answer whether agent caches actually drift -- the question
+    #27411 has to settle before deciding what the seven repair sites are
+    for. *)
+type clear_cause =
+  | After_commit
+  | Desync
+
+let clear_cause_event_type = function
+  | After_commit -> "task_cache.cleared_after_commit"
+  | Desync -> "cache_desync.cleared"
+
+let emit_cache_clear_event config ~cause ~agent_name ~task_id ~status_label ~module_name =
+  try
+    log_event config
+      (`Assoc
+        [ "type", `String (clear_cause_event_type cause)
+        ; "module", `String module_name
+        ; "agent", `String agent_name
+        ; "task_id", `String task_id
+        ; "backlog_status", `String status_label
+        ; "ts", `String (now_iso ())
+        ])
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Misc.warn
+      "task_cache_invariant: log_event failed (%s %s): %s"
+      module_name
+      task_id
+      (Printexc.to_string exn)
+;;
+
+let agent_file config agent_name =
+  Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json")
+;;
+
+let agent_current_task_match config ~agent_name ~task_id =
+  let path = agent_file config agent_name in
+  if not (path_exists config path)
+  then Missing
+  else
+    with_file_lock config path (fun () ->
+      match read_json_result config path with
+      | Error detail -> Unreadable detail
+      | Ok json ->
+        (match agent_of_yojson json with
+         | Ok agent -> if agent.current_task = Some task_id then Matches else Mismatch
+         | Error detail -> Unreadable detail))
+;;
+
+let clear_stale_agent_task_if_matching
       config
+      ~(cause : clear_cause)
       ~(agent_name : string)
       ~(task_id : string)
-      ~(status : Masc_domain.task_status)
+      ~(status_label : string)
       ~(module_name : string)
-    : unit =
-  (* 1. Clear agent state on disk *)
-  let agent_file =
-    Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json")
+  =
+  let path =
+    agent_file config agent_name
   in
-  if Sys.file_exists agent_file then
-    with_file_lock config agent_file (fun () ->
-      let json = read_json config agent_file in
-      match agent_of_yojson json with
-      | Ok agent when agent.current_task = Some task_id ->
-          let updated =
-            { agent with status = Masc_domain.Active; current_task = None }
-          in
-          write_json config agent_file (agent_to_yojson updated)
-      | Ok _ -> ()
-      | Error msg ->
-          Log.Misc.warn
-            "task_cache_invariant: agent parse failed for %s: %s"
-            agent_name msg);
-  (* 2. Log the desync event *)
-  (try
-     log_event config
-       (`Assoc
-           [ ("type", `String "cache_desync.cleared")
-           ; ("module", `String module_name)
-           ; ("agent", `String agent_name)
-           ; ("task_id", `String task_id)
-           ; ("backlog_status",
-              `String (Masc_domain.task_status_to_string status))
-           ; ("ts", `String (now_iso ()))
-           ])
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-       Log.Misc.warn
-         "task_cache_invariant: log_event failed (%s %s): %s"
-         module_name task_id (Printexc.to_string exn))
+  let outcome =
+    if not (path_exists config path)
+    then Missing
+    else
+      with_file_lock config path (fun () ->
+        match read_json_result config path with
+        | Error detail -> Unreadable detail
+        | Ok json ->
+          (match agent_of_yojson json with
+           | Ok agent when agent.current_task = Some task_id ->
+             let updated =
+               { agent with status = Masc_domain.Active; current_task = None }
+             in
+             write_json config path (agent_to_yojson updated);
+             Matches
+           | Ok _ -> Mismatch
+           | Error detail -> Unreadable detail))
+  in
+  (match outcome with
+   | Matches ->
+     emit_cache_clear_event config ~cause ~agent_name ~task_id ~status_label ~module_name
+   | Mismatch | Missing | Unreadable _ -> ());
+  outcome
+;;
+
+(** Clear the agent's [current_task] field on disk when it equals [task_id]
+    and log one diagnostic event named by [cause]. *)
+let clear_stale_agent_task config ~cause ~agent_name ~task_id ~status ~module_name =
+  ignore
+    (clear_stale_agent_task_if_matching
+       config
+       ~cause
+       ~agent_name
+       ~task_id
+       ~status_label:(Masc_domain.task_status_to_string status)
+       ~module_name)
+;;
 
 (** Scan every on-disk agent record and clear [current_task] when it equals
     [task_id].  Use this when the backlog no longer references the task
     (terminal status or deletion) and the exact previous assignee is not
-    known.  Logs one [cache_desync.cleared] event per affected agent.
+    known.  Logs one event per affected agent, named by [cause].
 
     The read is best-effort and unlocked; [clear_stale_agent_task] re-checks
     the match under the per-agent file lock before writing, so the worst race
     is a no-op or a duplicate log rather than a corrupt agent record. *)
 let clear_stale_agent_task_for_task
       config
+      ~(cause : clear_cause)
       ~(task_id : string)
       ~(status : Masc_domain.task_status)
       ~(module_name : string)
@@ -113,6 +188,7 @@ let clear_stale_agent_task_for_task
                   match agent_of_yojson json with
                   | Ok agent when agent.current_task = Some task_id ->
                       clear_stale_agent_task config
+                        ~cause
                         ~agent_name:agent.name
                         ~task_id
                         ~status
@@ -137,37 +213,3 @@ let clear_stale_agent_task_for_task
            "task_cache_invariant: unexpected scan error (%s): %s"
            module_name
            (Printexc.to_string exn))
-
-(** Core invariant wrapper.
-
-    [with_fresh_task_status config ~agent_name ~task_id ~module_name f]
-    re-reads [task_id] from the backlog.  If the status is terminal:
-      - clears [current_task] on the agent record when it matches [task_id]
-      - logs a [cache_desync.cleared] event
-      - returns [None] — callers MUST skip the original emission and instead
-        emit a single [cache_invalidated] broadcast
-
-    If the task is still active, calls [f status] and returns [Some result].
-
-    Returns [None] when the task is not found (treat as unknown; caller decides).
-
-    @param module_name  Short ASCII label for the diagnostic log,
-    e.g. ["taskmaster.broadcast"] or ["mention_tracker.emit"]. *)
-let with_fresh_task_status
-      config
-      ~(agent_name : string)
-      ~(task_id : string)
-      ~(module_name : string)
-      (f : Masc_domain.task_status -> 'a)
-    : 'a option =
-  match fresh_task_status config ~task_id with
-  | Some status when is_terminal status ->
-      clear_stale_agent_task config ~agent_name ~task_id ~status ~module_name;
-      None
-  | Some status ->
-      Some (f status)
-  | None ->
-      (* Task not found in backlog — conservative: return None so the caller
-         treats it as though suppressed.  Callers that need to distinguish
-         "terminal" from "absent" should use [fresh_task_status] directly. *)
-      None

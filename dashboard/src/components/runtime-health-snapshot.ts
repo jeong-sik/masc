@@ -55,8 +55,7 @@ function runtimeKey(provider: DashboardRuntimeProviderSnapshot): string {
 function providerProbeMap(probe: DashboardRuntimeProbeResponse | null): Map<string, DashboardRuntimeProviderProbe> {
   const map = new Map<string, DashboardRuntimeProviderProbe>()
   for (const item of probe?.probe?.providers ?? []) {
-    const key = item.runtime_id ?? null
-    if (key) map.set(key, item)
+    map.set(item.runtime_id, item)
   }
   return map
 }
@@ -69,23 +68,17 @@ function configuredDefaultRuntime(providers: DashboardRuntimeProvidersResponse |
 }
 
 function probeDefaultRuntime(probe: DashboardRuntimeProbeResponse | null): string | null {
-  return probe?.probe?.summary?.default_runtime_id
-    ?? probe?.probe?.configured_default_model
-    ?? probe?.probe?.effective_model
-    ?? null
+  return probe?.probe.summary.default_runtime_id ?? null
 }
 
 function countProviderStatus(
   providers: DashboardRuntimeProvidersResponse | null,
   probe: DashboardRuntimeProbeResponse | null,
 ) {
-  const probeItems = probe?.probe?.providers ?? []
-  const reachable = probe?.probe?.summary?.reachable
-    ?? probeItems.filter(item => item.reachable === true).length
-  const failed = probe?.probe?.summary?.failed
-    ?? probeItems.filter(item => item.reachable === false).length
-  const skipped = probe?.probe?.summary?.skipped
-    ?? probeItems.filter(item => item.status === 'skipped_cli').length
+  const probeItems = probe?.probe.providers ?? []
+  const reachable = probe?.probe.summary.reachable ?? 0
+  const failed = probe?.probe.summary.failed ?? 0
+  const skipped = probe?.probe.summary.skipped ?? 0
   const missingAuth =
     probeItems.filter(item => item.status === 'missing_auth' || item.status === 'auth_failed').length
     + (providers?.providers ?? []).filter(provider => provider.status === 'missing_auth').length
@@ -94,7 +87,7 @@ function countProviderStatus(
     failed,
     skipped,
     missingAuth,
-    total: providers?.summary?.runtimes ?? providers?.providers.length ?? probe?.probe?.summary?.runtimes ?? 0,
+    total: providers?.summary?.runtimes ?? providers?.providers.length ?? probe?.probe.summary.runtimes ?? 0,
   }
 }
 
@@ -166,7 +159,7 @@ function shortUrl(value: string | null | undefined): string {
 }
 
 function formatCheckedAt(probe: DashboardRuntimeProbeResponse | null): string {
-  const ts = probe?.probe?.checked_at ?? probe?.generated_at
+  const ts = probe?.probe.checked_at ?? probe?.generated_at
   if (!ts) return 'probe time unknown'
   const ms = Date.parse(ts)
   if (!Number.isFinite(ms)) return ts
@@ -174,11 +167,8 @@ function formatCheckedAt(probe: DashboardRuntimeProbeResponse | null): string {
 }
 
 function runtimeProbeFreshnessLabel(probe: DashboardRuntimeProbeResponse | null): string {
-  // Reflect the server's non-blocking refresh_state so a force=1 ("Live probe")
-  // response is not mislabelled "fresh probe" when it is actually a stale value
-  // returned with a background refresh scheduled. Falls back to the cache_hit
-  // flag for older servers that do not emit refresh_state.
-  switch (probe?.refresh_state) {
+  if (!probe) return 'probe unavailable'
+  switch (probe.refresh_state) {
     case 'served_stale':
       return 'refreshing'
     case 'warming_up':
@@ -186,8 +176,6 @@ function runtimeProbeFreshnessLabel(probe: DashboardRuntimeProbeResponse | null)
     case 'fresh':
     case 'recent':
       return 'cache hit'
-    default:
-      return probe?.cache_hit ? 'cache hit' : 'fresh probe'
   }
 }
 
@@ -195,7 +183,7 @@ function firstProblem(
   providers: DashboardRuntimeProvidersResponse | null,
   probe: DashboardRuntimeProbeResponse | null,
 ): { id: string; message: string; detail: string | null } | null {
-  const probeProblem = (probe?.probe?.providers ?? []).find(item =>
+  const probeProblem = (probe?.probe.providers ?? []).find(item =>
     item.reachable === false
     || item.status === 'missing_auth'
     || item.status === 'auth_failed'
@@ -204,8 +192,8 @@ function firstProblem(
   )
   if (probeProblem) {
     return {
-      id: probeProblem.runtime_id ?? probeProblem.provider_id ?? 'runtime',
-      message: probeProblem.status ?? 'probe failed',
+      id: probeProblem.runtime_id,
+      message: probeProblem.status,
       detail: probeProblem.error ?? probeProblem.probe_url ?? probeProblem.endpoint_url ?? null,
     }
   }
@@ -236,11 +224,12 @@ function assignmentStatusDetail(assignmentStatus: DashboardRuntimeAssignmentStat
 }
 
 function endpointRows(probe: DashboardRuntimeProbeResponse | null): Array<{ label: string; value: string | null | undefined }> {
-  return [
-    { label: 'server', value: probe?.probe?.server_url },
-    { label: 'models', value: probe?.probe?.ps_endpoint },
-    { label: 'generate', value: probe?.probe?.generate_endpoint },
-  ].filter(row => Boolean(row.value))
+  return (probe?.probe.providers ?? [])
+    .map(provider => ({
+      label: provider.runtime_id,
+      value: provider.probe_url ?? provider.endpoint_url,
+    }))
+    .filter(row => row.value !== null)
 }
 
 function defaultRuntimeSpecRows(provider: DashboardRuntimeProviderSnapshot | null): Array<{ label: string; value: string }> {

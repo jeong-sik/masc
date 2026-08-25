@@ -49,15 +49,12 @@ export function asKeeperRuntimeBlockerClass(
 
 const BACKEND_KEEPER_META_BLOCKER_CLASSES = [
   'runtime_exhausted',
-  'turn_timeout',
   'fiber_unresolved',
   'stale_turn_timeout',
-  'sdk_context_window_exceeded',
-  'sdk_unrecognized_stop_reason',
-  'sdk_idle_detected',
-  'sdk_guardrail_violation',
-  'sdk_tripwire_violation',
-  'sdk_exit_condition_met',
+  'agent_core_context_window_exceeded',
+  'agent_core_unrecognized_stop_reason',
+  'agent_core_guardrail_violation',
+  'agent_core_tripwire_violation',
 ] as const
 
 type BackendKeeperMetaBlockerClass = typeof BACKEND_KEEPER_META_BLOCKER_CLASSES[number]

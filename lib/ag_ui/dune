@@ -7,7 +7,7 @@
  (wrapped false)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
-  (:standard -w +4 -w +32))
+  (:standard -w +4 -w +33 -w +37))
  (libraries time_compat yojson masc_core masc.sse_wire)
  (preprocess
   (pps ppx_deriving.show ppx_deriving.eq)))

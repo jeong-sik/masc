@@ -1,0 +1,24 @@
+(include_subdirs no)
+
+(library
+ (name agent_core_protocol)
+ (public_name masc.agent_core.protocol)
+ (wrapped true)
+ (libraries
+  agent_core_base
+  llm_provider
+  yojson
+  eio
+  eio.unix
+  cohttp
+  cohttp-eio
+  uri
+  unix
+  mcp_protocol_bundle)
+ (flags
+  (:standard -open Agent_core_base))
+ (inline_tests)
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_inline_test ppx_let))
+ (instrumentation
+  (backend bisect_ppx)))

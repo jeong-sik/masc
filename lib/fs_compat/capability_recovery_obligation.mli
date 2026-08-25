@@ -263,7 +263,6 @@ val locator_parent_components : locator -> string list
 val locator_parent : locator -> identity
 val locator_target_leaf : locator -> string
 
-val prepared_owner : prepared -> owner
 val prepared_operation_id : prepared -> operation_id
 val prepared_locator : prepared -> locator
 
@@ -534,6 +533,12 @@ module For_testing : sig
 
   val area_directory : store -> area -> Eio.Fs.dir_ty Eio.Path.t
 end
+
+(** The label an {!operation} carries in failure JSON.  Exported because
+    [Capability_recovery_reconciler] renders the same field and kept its
+    own copy of the 17 arms; two mappings for one type drift apart the
+    moment an operation is added. *)
+val operation_to_string : operation -> string
 
 val validation_error_to_string : validation_error -> string
 val failure_to_string : failure -> string

@@ -29,7 +29,7 @@ export function keeperDirectChatAccess(
 
   const mutationAccess = dashboardAuthAccess(summary, 'worker')
   const actor = summary.effective_agent ?? summary.requested_agent ?? 'dashboard'
-  const role = summary.effective_role ?? summary.default_role ?? null
+  const role = summary.effective_role ?? null
   const reason = cleanErrorMessage(summary.keeper_msg_error)
     ?? mutationAccess.reason
     ?? `@${actor}는 masc_keeper_msg 권한이 없습니다.`

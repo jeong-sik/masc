@@ -117,13 +117,13 @@ let clear_agent_current_task_cache config ~task_id =
   let agents_path = agents_dir config in
   if path_exists config agents_path
   then (
-    let agent_files =
-      try Sys.readdir agents_path with
-      | Sys_error msg ->
-        Log.Misc.warn "cache desync agent scan failed: %s" msg;
-        [||]
-    in
-    Array.iter
+    (* Backend-aware listing: the guard above already went through
+       [path_exists config], but the listing used bare [Sys.readdir], so a
+       Memory-backend workspace scanned an empty local mirror and skipped
+       the cache invalidation silently (RFC-0371 B9). [list_dir] is total —
+       missing dir and backend errors read as []. *)
+    let agent_files = list_dir config agents_path in
+    List.iter
       (fun name ->
          if Filename.check_suffix name ".json"
          then (
@@ -131,7 +131,7 @@ let clear_agent_current_task_cache config ~task_id =
            if path_exists config path
            then
              with_file_lock config path (fun () ->
-               match read_agent_with_repair config path with
+               match read_agent config path with
                | Ok agent when agent.current_task = Some task_id ->
                  let status =
                    match agent.status with
@@ -161,15 +161,13 @@ let clear_agent_current_task_cache config ~task_id =
       agent_files)
 ;;
 
-(* #13460: cache desync invalidation counter. Workspace_broadcast emits this when
-   it replaces an active-claim/release message for a terminal backlog task with
-   a cache_invalidated broadcast.  Clear workspace-owned current_task caches so the
-   same stale claim does not re-emit every taskmaster cycle.  Keep labels
-   fleet-bounded; the task id stays in the replacement message/event, not the
-   Otel_metric_store series key. *)
-let record_cache_desync_cleared config ~module_name:_ ~task_id ~status =
-  if not (String.equal status "backlog_unavailable")
-  then clear_agent_current_task_cache config ~task_id
+(* #13460: fires only after a broadcast replaced a message about a task the
+   canonical backlog reports as terminal or absent. A backlog the reader could
+   not open never reaches here — it fails the broadcast instead — so every
+   call means the task really is over and the workspace-owned current_task
+   caches for it can go. *)
+let record_cache_desync_cleared config ~module_name:_ ~task_id ~status:_ =
+  clear_agent_current_task_cache config ~task_id
 ;;
 
 let () = Atomic.set Workspace_hooks.cache_desync_cleared_fn record_cache_desync_cleared
@@ -223,6 +221,3 @@ let () =
 
 
 
-
-(* Workspace_multi removed — operational namespace is always "default" *)
-(* Workspace_vote, Workspace_tempo removed — dead prod code (Epic #7261 Step 5 audit). *)

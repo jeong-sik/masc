@@ -1,7 +1,7 @@
 # MASC Rich Connector Rendering & Turn Lifecycle Projection — Design Review
 
 > Status: design draft
-> Scope: MASC (`~/me/workspace/yousleepwhen/masc`) connector ingress/egress, rich output rendering, turn progress projection, and live runtime behavior under `<base-path>/.masc`. OAS boundary respected: no MASC semantics leak into OAS.
+> Scope: MASC (`~/me/workspace/yousleepwhen/masc`) connector ingress/egress, rich output rendering, turn progress projection, and live runtime behavior under `<base-path>/.masc`. agent core boundary respected: no MASC semantics leak into agent core.
 > Authors: adversarial review swarm
 > Date: 2026-06-20
 
@@ -19,17 +19,17 @@ This design treats connector rendering as a MASC-owned surface projection layer:
 2. Carry rich response blocks alongside fallback text.
 3. Let each connector render according to an explicit capability manifest.
 4. Degrade visibly when a connector cannot render a block or lifecycle event.
-5. Keep OAS generic: provider/model transport, generic Agent lifecycle, hooks, and tool-use APIs stay outside MASC-specific connector policy.
+5. Keep agent core generic: provider/model transport, generic Agent lifecycle, hooks, and tool-use APIs stay outside MASC-specific connector policy.
 
 ---
 
 ## 2. System Context
 
 - **MASC repo:** `~/me/workspace/yousleepwhen/masc`
-- **OAS repo:** `~/me/workspace/yousleepwhen/oas`
+- **agent core repo:** `~/me/workspace/yousleepwhen/agent core`
 - **Live runtime root:** `<base-path>/.masc` for the active `MASC_BASE_PATH` or `--base-path`.
 - **MASC role:** parallel multi-agent execution, keeper/runtime orchestration, board/fusion/dashboard surfaces, connector gates, operational monitoring, and MASC-specific turn projection.
-- **OAS role:** OCaml Agent SDK public library: provider/model handling, transport, generic Agent turn lifecycle, hooks, sync/async/batch tool-use systems, and provider-neutral content types.
+- **agent core role:** OCaml Agent SDK public library: provider/model handling, transport, generic Agent turn lifecycle, hooks, sync/async/batch tool-use systems, and provider-neutral content types.
 - **Runtime truth rule:** repo seed config and docs are not proof of live behavior. For live claims, verify the runtime under `<base-path>/.masc` and the health surface before treating a design as deployed.
 
 The design target is the MASC boundary between:
@@ -38,7 +38,7 @@ The design target is the MASC boundary between:
 external channel event
   -> MASC channel gate / sidecar
   -> MASC runtime turn request
-  -> OAS generic Agent/provider execution
+  -> agent core generic Agent/provider execution
   -> MASC turn lifecycle + rich response projection
   -> connector-specific renderer
 ```
@@ -47,9 +47,9 @@ external channel event
 
 ## 3. Scope & Boundary Rules
 
-- **OAS stays generic.** OAS may expose provider-neutral content blocks, transport behavior, and generic Agent response helpers. No keeper, board, fusion, connector, dashboard, live runtime, or MASC channel policy moves into OAS.
+- **agent core stays generic.** agent core may expose provider-neutral content blocks, transport behavior, and generic Agent response helpers. No keeper, board, fusion, connector, dashboard, live runtime, or MASC channel policy moves into agent core.
 - **MASC owns surface projection.** Slack Block Kit, Discord embeds/uploads, Telegram Bot API formatting, iMessage AppleScript, CLI ANSI, TUI layout, Dashboard rendering, polling endpoints, and channel progress messages stay in MASC.
-- **MASC owns MASC turn state.** Channel-specific start/ack/wait/poll/finish behavior is MASC runtime behavior, even when the underlying model execution goes through OAS.
+- **MASC owns MASC turn state.** Channel-specific start/ack/wait/poll/finish behavior is MASC runtime behavior, even when the underlying model execution goes through agent core.
 - **Single source of truth.** The canonical connector representation is a typed MASC turn surface event stream plus rich content blocks. Each connector translates that stream into its native format.
 - **Fallback text is not enough.** Plain `reply` text remains the last-resort representation, not the primary connector contract.
 
@@ -57,28 +57,28 @@ external channel event
 
 ## 4. Current-State Capability Matrix
 
-| Capability | Dashboard | Discord | Slack (OCaml) | Slack sidecar | Telegram | iMessage | CLI | TUI |
-|---|---|---|---|---|---|---|---|---|
-| Plain text | ✅ | ✅ (2000-char chunks) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Markdown inline | ✅ | ⚠️ partial | ⚠️ mrkdwn | ⚠️ plain | ❌ | ❌ | ❌ | ❌ |
-| Code blocks | ✅ highlighted | ⚠️ fenced, can split | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Lists | ✅ | ⚠️ | ⚠️ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Tables | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Callouts / blockquotes | ✅ | ❌ (quote only) | ⚠️ context | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Images png/jpg/gif/webp | ✅ | ⚠️ embed if event | ⚠️ block if event | ❌ | ❌ | ❌ | ❌ | ❌ |
-| SVG | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Mermaid | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Audio | ✅ player | ❌ raw URL | ❌ link | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Video | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Documents pdf/md/txt/csv/json | ⚠️ limited whitelist | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Inbound attachments | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Outbound attachments | ✅ data-URL | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Capability | Dashboard | Discord | Slack | Telegram | iMessage | CLI | TUI |
+|---|---|---|---|---|---|---|---|
+| Plain text | ✅ | ✅ (2000-char chunks) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Markdown inline | ✅ | ⚠️ partial | ⚠️ mrkdwn | ❌ | ❌ | ❌ | ❌ |
+| Code blocks | ✅ highlighted | ⚠️ fenced, can split | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Lists | ✅ | ⚠️ | ⚠️ | ❌ | ❌ | ❌ | ❌ |
+| Tables | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Callouts / blockquotes | ✅ | ❌ (quote only) | ⚠️ context | ❌ | ❌ | ❌ | ❌ |
+| Images png/jpg/gif/webp | ✅ | ⚠️ embed if event | ⚠️ block if event | ❌ | ❌ | ❌ | ❌ |
+| SVG | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Mermaid | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Audio | ✅ player | ❌ raw URL | ❌ link | ❌ | ❌ | ❌ | ❌ |
+| Video | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Documents pdf/md/txt/csv/json | ⚠️ limited whitelist | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Inbound attachments | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Outbound attachments | ✅ data-URL | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Fusion panels | ✅ card | ❌ raw text | ❌ raw text | ❌ | ❌ | ❌ | ❌ |
 | Tool results / blobs | ✅ trace card | ⚠️ embed | ⚠️ context | ❌ | ❌ | ❌ | ❌ |
-| Turn progress / status | ✅ typed receipt | ⚠️ text projection | ⚠️ text projection | ❌ | ❌ | ❌ | ⚠️ manual | ⚠️ status only |
-| Turn start / ack | ✅ | ⚠️ message only | ⚠️ message only | ⚠️ message only | ⚠️ message only | ⚠️ message only | ✅ | ⚠️ command only |
-| Wait / poll status | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ⚠️ manual | ❌ |
-| Turn completion / failure identity | ✅ | ⚠️ text only | ⚠️ text only | ⚠️ text only | ⚠️ text only | ⚠️ text only | ⚠️ text only | ⚠️ status only |
+| Turn progress / status | ✅ typed receipt | ⚠️ text projection | ⚠️ text projection | ❌ | ❌ | ⚠️ manual | ⚠️ status only |
+| Turn start / ack | ✅ | ⚠️ message only | ⚠️ message only | ⚠️ message only | ⚠️ message only | ✅ | ⚠️ command only |
+| Wait / poll status | ✅ | ❌ | ❌ | ❌ | ❌ | ⚠️ manual | ❌ |
+| Turn completion / failure identity | ✅ | ⚠️ text only | ⚠️ text only | ⚠️ text only | ⚠️ text only | ⚠️ text only | ⚠️ status only |
 
 Legend: ✅ supported · ⚠️ partial / degraded · ❌ silently dropped / unsupported
 
@@ -115,9 +115,9 @@ Legend: ✅ supported · ⚠️ partial / degraded · ❌ silently dropped / uns
 
 ### 5.3 Slack connector
 
-**Finding:** The OCaml adapter only handles `Link_block`, `Image_block`, `Audio_block`, and `Tool_context_block`; plain text is sent as raw fallback. The Python sidecar ignores `GateResponse.structured` entirely and builds a single `section` + `context` block. Block Kit limits (50 blocks, 3000 chars per block text) are not enforced. Mrkdwn metacharacters (`<`, `>`, `&`, `*`) are not escaped. Inbound Slack file attachments are ignored.
+**Finding:** The OCaml adapter only handles `Link_block`, `Image_block`, `Audio_block`, and `Tool_context_block`; plain text is sent as raw fallback. Block Kit limits (50 blocks, 3000 chars per block text) are not enforced. Mrkdwn metacharacters (`<`, `>`, `&`, `*`) are not escaped. Inbound Slack file attachments are ignored.
 
-**Improvements (`lib/keeper/keeper_chat_slack.ml`, `sidecars/slack-bot/src/formatters.py`, `sidecars/slack-bot/src/bot.py`):**
+**Improvements (`lib/keeper/keeper_chat_slack.ml`):**
 - On `Run_finished`, parse accumulated text with `content_blocks_of_text`, merge with event blocks, and send a unified Block Kit payload.
 - Map `Code` → fenced code `section`, `Table` → fixed-width ASCII code block or file upload, `List` → bullet section, `Callout` → emoji-prefixed section.
 - Escape Slack mrkdwn special characters in titles/descriptions.
@@ -238,23 +238,23 @@ Poll_snapshot         { request_id; turn_id option; status; latest_event_seq }
 
 ---
 
-### 5.9 OAS boundary and MASC response facade
+### 5.9 agent core boundary and MASC response facade
 
-**Finding:** The current MASC/OAS bridge makes it easy to collapse a provider response into plain text before connector renderers can use structured content. That is a MASC facade problem first. OAS already owns generic provider/model transport, Agent lifecycle, hooks, and tool-use surfaces; it must not grow keeper, board, fusion, connector, live runtime, or dashboard semantics just to satisfy MASC rendering.
+**Finding:** The current MASC/agent core bridge makes it easy to collapse a provider response into plain text before connector renderers can use structured content. That is a MASC facade problem first. agent core already owns generic provider/model transport, Agent lifecycle, hooks, and tool-use surfaces; it must not grow keeper, board, fusion, connector, live runtime, or dashboard semantics just to satisfy MASC rendering.
 
 **MASC-first improvements:**
-- Extend `Agent_sdk_response` facade with MASC-local helpers that preserve the provider response shape available today, while still exposing `text_of_response` as fallback.
+- Add a connector-owned typed projection from agent-core response blocks to MASC `chat_block`; do not restore a generic response facade.
 - Carry `response_blocks : chat_block list` alongside `response_text` through `keeper_turn.ml` and `keeper_agent_run_response_text.ml`.
-- Convert generic OAS content blocks into MASC `chat_block` values at the MASC boundary; never expose `chat_block` back into OAS.
+- Convert generic agent core content blocks into MASC `chat_block` values at the MASC boundary; never expose `chat_block` back into agent core.
 - Store MASC connector artifacts in the MASC blob/artifact store and emit URL-bearing blocks for connectors that can render or link them.
-- Add `User_video` / file attachment support in MASC input plumbing only after the provider-generic OAS block exists.
+- Add `User_video` / file attachment support in MASC input plumbing only after the provider-generic agent core block exists.
 
-**Optional OAS upstream follow-up, separate from this MASC design:**
+**Optional agent core upstream follow-up, separate from this MASC design:**
 - Add provider-neutral helpers such as `fold_content_blocks`, `markdown_of_content`, and `markdown_of_response`.
 - Add a generic `Video` content block variant if the provider matrix needs it.
 - Persist generic structured tool-result envelopes (`{ content; json; content_blocks }`) only if useful outside MASC.
 
-**Non-goal:** OAS must not know MASC keeper phases, channel gates, board posts, fusion panels, dashboard URLs, or `<base-path>/.masc` runtime layout.
+**Non-goal:** agent core must not know MASC keeper phases, channel gates, board posts, fusion panels, dashboard URLs, or `<base-path>/.masc` runtime layout.
 
 ---
 
@@ -343,9 +343,9 @@ A new module `lib/gate/connector_capabilities.ml` (or `config/connector-formats.
 19. Expand Dashboard attachment whitelist and add video handling with strict size limits.
 20. Add runtime health/dashboard evidence showing connector capability config loaded from the live runtime.
 
-### P4 — Optional OAS generic upstream
-21. Add provider-neutral OAS helpers only after the MASC boundary proves which generic blocks are actually missing.
-22. Keep OAS changes in a separate PR and separate validation path.
+### P4 — Optional agent core generic upstream
+21. Add provider-neutral agent core helpers only after the MASC boundary proves which generic blocks are actually missing.
+22. Keep agent core changes in a separate PR and separate validation path.
 
 ---
 
@@ -361,7 +361,7 @@ Create fixtures under `test/fixtures/rich_content/`:
 | `xss_payload.md` | `<script>`, `javascript:`, onerror SVG, malformed `data:` |
 | `slack_metacharacters.md` | `<@U123>`, `&`, `*bold*` |
 | `fusion_ref.json` | Fusion block with valid/missing/expired `board_post_id` |
-| `tool_image_result.json` | Tool result containing an OAS `Image` block |
+| `tool_image_result.json` | Tool result containing an agent core `Image` block |
 | `attachments.json` | Image data URL, audio data URL, 11 MB file, `.mov` |
 | `turn_lifecycle.jsonl` | Requested, accepted, waiting, progress, tool, finished, failed, and poll snapshot events |
 | `connector_capabilities.toml` | Per-connector lifecycle/render limits and downgrade expectations |
@@ -374,7 +374,6 @@ Add tests:
 - `test_channel_gate_metrics.ml` — every unsupported block emits a downgrade/drop metric.
 - `test_gate_keeper_backend.ml` — `GateResponse.structured` includes final blocks and correlation ids.
 - `sidecars/telegram-bot/tests/test_formatters.py` — MarkdownV2 escape; scalar-aware chunking.
-- `sidecars/slack-bot/tests/test_formatters.py` — chunking preserves code fences.
 - `sidecars/shared/tests/test_gate_response.py` — structured event/poll payload parsing remains backward-compatible.
 - `dashboard/src/components/chat/markdown-blocks.test.ts` — ordered list, empty table header, unmatched backticks.
 - `dashboard/src/components/common/markdown-renderer.test.ts` — XSS sanitization, fence repair correctness.
@@ -387,7 +386,7 @@ Acceptance criteria:
 - Code fences are never split without fence repair.
 - XSS payloads are sanitized before DOM insertion.
 - Provider limits (Discord 2000/10 embeds, Slack 4000/50 blocks, Telegram 4096) are explicitly tested and never violated.
-- Tool results containing generic OAS image blocks render in MASC surfaces without adding MASC concepts to OAS.
+- Tool results containing generic agent core image blocks render in MASC surfaces without adding MASC concepts to agent core.
 - Unsupported blocks produce a visible fallback plus a metric/log entry.
 
 ---
@@ -408,7 +407,6 @@ Acceptance criteria:
 - `lib/gate/channel_gate_connector.ml{,i}`
 - `lib/gate_keeper_backend.ml`
 - `lib/keeper/keeper_multimodal_input.ml{,i}`
-- `lib/agent_sdk_response.ml{,i}`
 - `lib/keeper/keeper_turn.ml`
 - `lib/keeper/keeper_agent_run_response_text.ml`
 - `lib/server/server_routes_http_keeper_stream.ml`
@@ -421,7 +419,6 @@ Acceptance criteria:
 ### MASC Python sidecars
 - `sidecars/shared/gate_shared/gate_response.py`
 - `sidecars/shared/gate_shared/gate_client_base.py`
-- `sidecars/slack-bot/src/formatters.py`, `bot.py`
 - `sidecars/telegram-bot/src/formatters.py`, `bot.py`
 - `sidecars/imessage-bot/src/bot.py`, `imessage_bridge.py`
 - `sidecars/cli-connector/src/bot.py`
@@ -440,7 +437,7 @@ Acceptance criteria:
 - `dashboard/src/api/schemas/keeper-chat-history.ts`
 - Dashboard API schemas for gate responses, poll snapshots, and turn lifecycle events.
 
-### Optional OAS generic follow-up, separate PR
+### Optional agent core generic follow-up, separate PR
 - `lib/llm_provider/types.ml`
 - `lib/llm_provider/api_common.ml`
 - `lib/tool_result_store.ml`
@@ -449,10 +446,10 @@ Acceptance criteria:
 
 ## 10. Boundary Checklist
 
-- [ ] No keeper phase, board semantics, fusion concept, or connector policy is added to OAS.
-- [ ] OAS changes, if any, are limited to generic multimodal blocks, content folding, and structured tool-result storage that are useful outside MASC.
+- [ ] No keeper phase, board semantics, fusion concept, or connector policy is added to agent core.
+- [ ] agent core changes, if any, are limited to generic multimodal blocks, content folding, and structured tool-result storage that are useful outside MASC.
 - [ ] MASC connector event names, `request_id`, RFC-0233 `Turn_ref`-derived `turn_id`, polling, sidecar progress, and live runtime paths remain in MASC.
 - [ ] All connector-specific rendering stays under `masc/lib/keeper`, `masc/lib/gate`, `masc/sidecars`, `masc/dashboard`, and `masc/bin`.
-- [ ] The shared block schema is owned by MASC; OAS continues to use its own `content_block` sum.
+- [ ] The shared block schema is owned by MASC; agent core continues to use its own `content_block` sum.
 - [ ] Live runtime claims are checked against `<base-path>/.masc` before being described as deployed.
 - [ ] Fallback text is present for every rich block and lifecycle event that a connector cannot render.

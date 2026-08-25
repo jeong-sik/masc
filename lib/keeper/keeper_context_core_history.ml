@@ -9,24 +9,6 @@ open Keeper_types_profile
    re-declaring the alias here to prevent a duplicate-definition error at
    the include site; reference the underlying module qualified instead. *)
 
-let normalize_system_context_prefix (text : string) : string =
-  let trimmed = String.trim text in
-  let prefix = "[system context]" in
-  if String.starts_with ~prefix trimmed
-  then (
-    let prefix_len = String.length prefix in
-    let rest_len = String.length trimmed - prefix_len in
-    if rest_len <= 0 then "" else String.trim (String.sub trimmed prefix_len rest_len))
-  else trimmed
-
-let has_world_state_signature (text : string) : bool =
-  let trimmed = normalize_system_context_prefix text in
-  String_util.contains_substring_ci trimmed "## Current World State"
-  &&
-  (String_util.contains_substring_ci trimmed "### Namespace State"
-   || String_util.contains_substring_ci trimmed "### Available Tools"
-   || String_util.contains_substring_ci trimmed "### Continuity")
-
 type history_line_action =
   | Keep_main
   | Move_internal
@@ -67,9 +49,15 @@ let persist_message ?source session msg =
                 ("source", `String source) :: fields
             | _ -> fields
           in
-          `Assoc
-            (("timestamp", `Float now_ts) :: ("ts_unix", `Float now_ts) :: fields)
+          `Assoc (("ts_unix", `Float now_ts) :: fields)
       | j -> j
     in
     let line = Yojson.Safe.to_string payload ^ "\n" in
+    (* The session directory appears when something is stored in it, so the
+       first append is what opens it. The three durable-save primitives the
+       checkpoint store uses create their own parent — [save_atomic] directly,
+       [save_bytes_durable_atomic_observed] and [save_json_durable_atomic_from]
+       through [save_bytes_durable_atomic_core] — and this is the only writer
+       under a session directory that appends instead. *)
+    let (_created : string) = Keeper_fs.ensure_dir (Filename.dirname path) in
     Fs_compat.append_file path line

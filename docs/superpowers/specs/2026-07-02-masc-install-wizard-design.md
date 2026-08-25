@@ -49,7 +49,9 @@ A wizard removes this friction and prevents the common "server exits immediately
 ## User Flow (TTY)
 
 ```text
-$ curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
+$ TAG=vX.Y.Z
+$ curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/$TAG/scripts/install.sh" -o /tmp/masc-install.sh
+$ bash /tmp/masc-install.sh --version "$TAG"
 ==> platform: masc-macos-arm64
 ==> version: v0.19.51
 ==> installed: ~/.local/bin/masc
@@ -121,7 +123,7 @@ When stdin is not a TTY:
 
 - The wizard is skipped by default.
 - The existing install flow runs unchanged.
-- A helpful message is printed pointing to `.masc/config/.env.local` and `docs/runtime-tunables.md`.
+- A helpful message is printed pointing to `.masc/config/.env.local` and the typed `masc_config` surface.
 
 ## Error Handling
 

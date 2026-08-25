@@ -64,8 +64,6 @@ type outcome =
           remains unacknowledged. If the raw effect result still exists in
           process, later attempts repair persistence without rerunning it. *)
 
-val repair_stage_to_string : repair_stage -> string
-
 val outcome_to_string : outcome -> string
 (** Render operation, journal state, exact evidence byte count, and SHA-256
     only. Full replay output is never copied into operational logs. *)
@@ -85,8 +83,8 @@ val append_model_evidence :
 
 val append_model_evidence_block :
   model_evidence ->
-  Agent_sdk.Types.content_block list ->
-  Agent_sdk.Types.content_block list
+  Agent_core.Types.content_block list ->
+  Agent_core.Types.content_block list
 (** Append the same canonical replay reference to a structured user input.
     This keeps replay evidence live when a multimodal goal uses [goal_blocks]
     instead of the string [goal]. *)
@@ -94,8 +92,8 @@ val append_model_evidence_block :
 val project_model_input :
   base_path:string ->
   model_evidence ->
-  Agent_sdk.Types.message list ->
-  (Agent_sdk.Types.message list, string) result
+  Agent_core.Types.message list ->
+  (Agent_core.Types.message list, Agent_core.Error.t) result
 (** Append the canonical typed artifact reference as an explicit provider-only
     message. Exact replay bytes remain in durable storage and are read through
     [keeper_artifact_read], so replay evidence cannot bypass provider-input
@@ -137,25 +135,35 @@ type replayable =
   | Replay_execute
   | Replay_network_read
   | Replay_connector_post
+  | Replay_memory_write
 
 val replayable_of_operation : string -> replayable option
 (** Which approved operations can be spent without the Keeper re-emitting the
     call. Exposed because a decode function that exists but is never dispatched
     to is indistinguishable from a working replay at the boundary. *)
 
+type replay_execution =
+  { outcome : outcome
+  ; terminal_effect_receipt :
+      Keeper_tool_execution.terminal_effect_receipt option
+  }
+(** The durable replay outcome plus the turn-settlement receipt owned by a
+    successfully applied connector post. Other replayable operations and
+    unapplied or indeterminate connector effects carry [None]. *)
+
 (** Replay the approved effect behind [approval_id] exactly once.
 
     Covers operations whose approvals a Keeper must otherwise re-earn by
     re-emitting a byte-identical call: [filesystem_write], [tool_execute], and
-    producer-typed [network_read] (WebSearch/WebFetch), and exact
-    [connector_post] continuations. Any other operation is
+    producer-typed [network_read] (WebSearch/WebFetch), exact
+    [connector_post] continuations, and exact [memory_write] mutations. Any other operation is
     {!Not_applicable}; its existing model-issued path remains authoritative.
 
     [gate_context] is the same causal-context provider the model-issued write
     path supplies. A re-derived input mismatch follows that producer's existing
     ordinary Gate semantics; replay adds no second authorization constraint.
 
-    The caller already holds [Keeper_turn_admission]'s per-Keeper turn mutex.
+    The caller already runs in the Keeper Owner child.
     Replay does not add an approval claim or workspace-wide backpressure Gate.
     Consumption is the durable one-shot grant. A repeated call after a
     successful replay returns the durable outcome without invoking the effect.
@@ -172,6 +180,21 @@ val replay_approved_effect :
   approval_id:string ->
   unit ->
   outcome
+
+val replay_approved_effect_with_receipt :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  publication_recovery:Keeper_publication_recovery_availability.turn_context ->
+  turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
+  ?gate_context:(unit -> Keeper_gate.causal_context) ->
+  grant:Keeper_gate.cycle_grant ->
+  approval_id:string ->
+  unit ->
+  replay_execution
+(** Replay exactly once and retain the typed connector-post receipt needed by
+    turn finalization. [replay_approved_effect] is the outcome-only projection
+    for callers that do not own a turn boundary. *)
 
 module For_testing : sig
   val persist_replay_artifact :

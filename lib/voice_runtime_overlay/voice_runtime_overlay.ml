@@ -164,27 +164,30 @@ let normalize_base_url value =
   else trimmed
 ;;
 
-let http_listener_env_explicit () =
-  Option.is_some (Sys.getenv_opt Env_config_core.http_base_url_env_key |> trim_opt)
-  || Option.is_some (Sys.getenv_opt Env_config_core.host_env_key |> trim_opt)
-  || Option.is_some (Sys.getenv_opt Env_config_core.http_port_env_key |> trim_opt)
-;;
+(* Where the overlay reaches the MASC server.
 
+   [MASC_HTTP_BASE_URL] says it outright and wins. Without it the server is the
+   one on this machine, so the address is loopback and the port is the one it
+   listens on.
+
+   It used to read MASC_HOST here. That is the server's bind address -- its
+   documented non-default values are the wildcards 0.0.0.0 and ::, which
+   [Masc_network_defaults.is_unspecified_host] names as "every interface"
+   rather than a reachable peer -- so setting it the way the server's own help
+   recommends built "http://0.0.0.0:<port>" and called it a base URL. A port
+   has no such wildcard, so it is still read from the listener.
+
+   The branch that chose between two spellings of this is gone with it: both
+   arms produced the same string, and the predicate that picked between them
+   had this as its only caller. *)
 let default_session_base_url () =
   match Sys.getenv_opt Env_config_core.http_base_url_env_key |> trim_opt with
   | Some base_url -> normalize_base_url base_url
   | None ->
-    if http_listener_env_explicit ()
-    then
-      Printf.sprintf
-        "http://%s:%s"
-        (Env_config_core.masc_host ())
-        (Env_config_core.masc_http_port ())
-    else
-      Printf.sprintf
-        "http://%s:%s"
-        (Env_config_core.masc_host ())
-        (Env_config_core.masc_http_port ())
+    Printf.sprintf
+      "http://%s:%s"
+      Masc_network_defaults.masc_http_loopback_peer
+      (Env_config_core.masc_http_port ())
 ;;
 
 let compose_endpoint_url ~base_url ~path =
@@ -249,20 +252,6 @@ let session_mcp_url_of_endpoint (endpoint : Voice_config.endpoint) =
        | None -> Ok (default_session_url ~path:"/mcp")))
 ;;
 
-let session_health_url_of_endpoint (endpoint : Voice_config.endpoint) =
-  let adapter = adapter_for_endpoint endpoint in
-  if adapter.transport <> Voice_mcp
-  then
-    Error (Printf.sprintf "session endpoint %s must use voice_mcp transport" endpoint.id)
-  else (
-    match endpoint.health_url with
-    | Some url -> Ok url
-    | None ->
-      (match endpoint.base_url with
-       | Some base_url -> Ok (compose_endpoint_url ~base_url ~path:"/health")
-       | None -> Ok (default_session_url ~path:"/health")))
-;;
-
 let default_elevenlabs_base_url = Voice_config.default_elevenlabs_base_url
 
 let endpoint_base_url (endpoint : Voice_config.endpoint) =
@@ -325,18 +314,19 @@ let http_request_for_tts
       [ "Content-Type", "application/json"; "Accept", "audio/mpeg" ]
       @ if api_key = "" then [] else [ "Authorization", "Bearer " ^ api_key ]
     in
+    (* [voice_tuning] is stability / similarity_boost / style — the ElevenLabs
+       voice_settings object. OpenAI's /v1/audio/speech takes model, input,
+       voice, response_format and speed, so those three were spec-external
+       fields sent to a server that never asked for them (#24068). There is no
+       OpenAI-side tuning in the config to send instead: the record carries
+       only the ElevenLabs three. Declaring a per-transport tuning type is the
+       fuller fix and a config-schema change; this stops the leak. *)
     let body_json =
       `Assoc
         [ "input", `String message
         ; "voice", `String voice
         ; "model", `String model
         ; "response_format", `String "mp3"
-        ; ( "voice_settings"
-          , `Assoc
-              [ "stability", `Float tuning.stability
-              ; "similarity_boost", `Float tuning.similarity_boost
-              ; "style", `Float tuning.style
-              ] )
         ]
     in
     Ok { url = base_url ^ "/audio/speech"; headers; body_json }

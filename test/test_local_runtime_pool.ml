@@ -18,7 +18,6 @@ let make_runtime ?model ?(max_concurrency = 2) id base_url =
     max_concurrency;
     active_slots = 0;
     queue_depth = 0;
-    latency_ema_ms = None;
     failure_streak = 0;
     cooldown_until = None;
     last_error = None;
@@ -28,16 +27,11 @@ let make_runtime ?model ?(max_concurrency = 2) id base_url =
   }
 
 let install_pool runtimes =
-  Local_runtime_pool.pool :=
-    {
-      Local_runtime_pool.empty_pool with
-      runtimes;
-      fingerprint = Local_runtime_pool.current_fingerprint ();
-    }
+  Local_runtime_pool.For_testing.install_pool runtimes
 
 let test_parse_runtime_env () =
   Local_runtime_pool.reset ();
-  (* OAS 0.112.0 auto-appends Ollama endpoint (http://127.0.0.1:11434) to
+  (* AGENT_CORE 0.112.0 auto-appends Ollama endpoint (http://127.0.0.1:11434) to
      LLM_ENDPOINTS.  ollama_endpoint is a module-level constant so env changes
      at test time have no effect.  Include it in the LLM_ENDPOINTS list to
      keep the count predictable via deduplication. *)
@@ -81,12 +75,17 @@ let test_parse_llm_endpoints_env () =
 (* [test_acquire_requires_explicit_or_runtime_model] removed 2026-05-05 —
    covered the acquire surface that was archived. *)
 
-let test_record_measured_ceiling () =
-  Local_runtime_pool.reset ();
-  Local_runtime_pool.record_measured_ceiling 12;
-  Local_runtime_pool.record_measured_ceiling 8;
-  Alcotest.(check (option int)) "ceiling is max" (Some 12)
-    (Local_runtime_pool.measured_ceiling ())
+let test_missing_discovery_is_scoped_not_fleet_health () =
+  let open Yojson.Safe.Util in
+  let result = Masc.Tool_local_runtime_verify.runtime_verify_json () in
+  Alcotest.(check string) "local verification scope"
+    "local_openai_compatible_runtime_pool"
+    (result |> member "verification_scope" |> to_string);
+  Alcotest.(check bool) "does not block Keeper turns" false
+    (result |> member "blocks_keeper_turns" |> to_bool);
+  Alcotest.(check string) "fleet provider health is not assessed"
+    "not_assessed"
+    (result |> member "fleet_provider_health" |> to_string)
 
 (* [test_failure_cooldown_from_env] removed 2026-05-05 — exercised the
    failure-streak path through release/acquire which was archived. *)
@@ -99,7 +98,7 @@ let () =
           Alcotest.test_case "parse runtime env" `Quick test_parse_runtime_env;
           Alcotest.test_case "parse LLM_ENDPOINTS env" `Quick
             test_parse_llm_endpoints_env;
-          Alcotest.test_case "record measured ceiling" `Quick
-            test_record_measured_ceiling;
+          Alcotest.test_case "missing discovery is local-only" `Quick
+            test_missing_discovery_is_scoped_not_fleet_health;
         ] );
     ]

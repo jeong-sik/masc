@@ -62,7 +62,7 @@ let pid_is_live pid =
   match Unix.kill pid 0 with
   | () -> true
   | exception Unix.Unix_error (Unix.ESRCH, _, _) -> false
-  | exception _ -> true
+  | exception _ -> true  (* cancel-guard-ok: guards a blocking syscall: no Eio cancellation point *)
 
 let prune_stale_dumps ~dir =
   if preserve_requested ()

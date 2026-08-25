@@ -23,9 +23,6 @@ val load_context_from_checkpoint :
   base_dir:string ->
   Keeper_context_runtime.session_context * Keeper_context_runtime.working_context option
 
-(** Default JSON for memory check tool. *)
-val memory_check_default_json : unit -> Yojson.Safe.t
-
 (** {1 Keepalive Runtime} *)
 
 (* Proactive emission and explicit workspace replies are now handled
@@ -54,9 +51,6 @@ val build_keeper_system_prompt :
   ?active_goals:(string * string) list ->
   unit ->
   string
-
-(** Append trait clause to existing trait string. *)
-val append_trait_clause : base:string -> clause:string -> string
 
 (** Check if text appears fragmentary (incomplete sentence fragments). *)
 val looks_fragmentary_history_text : string -> bool

@@ -5,10 +5,9 @@
     tracking; TTS (agent_speak) still goes through direct HTTP
     endpoints (ElevenLabs, etc).
 
-    Internal: 4 helpers stay private —
-    \[trim_opt\] (string trim + empty-to-None coercion),
+    Internal: 3 helpers stay private —
     \[resolved_base_path_opt\] / \[masc_base_dir\] (base-path
-    resolution chain), and the \[session_manager_ref] lazy
+    resolution chain), and the [session_manager_ref] lazy
     singleton cell.  All consumed only inside
     {!get_session_manager}.
 

@@ -86,7 +86,11 @@ let strict_success_names =
 
 let strict_guard_cases =
   [
-    ("masc_keeper_delegate", [ "requires Eio context" ]);
+    (* The runner plumbs sw/clock (RFC-0182 Phase 5 PR-A.2), so the dispatch
+       no longer stops at the "requires Eio context" gate: the deliberately
+       invalid target name ("bad keeper!") must be rejected by argument
+       validation. *)
+    ("masc_keeper_delegate", [ "keeper_name must match" ]);
   ]
 
 let endpoint_unavailable_guard_names =
@@ -96,6 +100,7 @@ let endpoint_unavailable_guard_names =
     "masc_interrupt";
     "masc_pending_interrupts";
     "masc_reject";
+    "masc_operator_snapshot";
   ]
 
 let endpoint_unavailable_guard_fragments =
@@ -107,12 +112,13 @@ let endpoint_unavailable_guard_fragments =
 
 let generic_matrix_excluded_names =
   [
-    "masc_keeper_delegate";
-    "masc_operator_snapshot";
-    (* Excluded: masc_keeper_delegate / masc_operator_snapshot require a live
-       keeper context to pass tag_registry validation in the standalone runner.
-       TODO: wire into the matrix runner with a minimal keeper stub,
-       or split into a keeper-matrix suite. *)
+    (* Awaiting the fusion MCP execution wiring (#28960, in flight in a
+       parallel session): the endpoint currently answers both with the typed
+       keeper-internal refusal, and the MCP-side binding decision (which
+       fusion runs a non-keeper caller may read) belongs to that change.
+       Remove both entries together with that wiring. *)
+    "masc_fusion";
+    "masc_fusion_status";
   ]
 
 let string_starts_with ~prefix s =
@@ -120,25 +126,10 @@ let string_starts_with ~prefix s =
   let slen = String.length s in
   slen >= plen && String.sub s 0 plen = prefix
 
-let contains_substring haystack needle =
-  let haystack = String.lowercase_ascii haystack in
-  let needle = String.lowercase_ascii needle in
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    if nlen = 0 then
-      true
-    else if idx + nlen > hlen then
-      false
-    else if String.sub haystack idx nlen = needle then
-      true
-    else
-      loop (idx + 1)
-  in
-  loop 0
-
 let contains_any haystack needles =
-  List.exists (fun needle -> contains_substring haystack needle) needles
+  List.exists
+    (fun needle -> String_util.contains_substring_ci haystack needle)
+    needles
 
 let assoc_field name = function
   | `Assoc fields -> List.assoc_opt name fields
@@ -235,14 +226,17 @@ let rec waitpid_nointr pid =
   | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
 ;;
 
-let seed_persona_dir base_path agent_name =
-  let personas_dir =
+let seed_keeper_config base_path agent_name =
+  let keepers_dir =
     Filename.concat
       (Filename.concat (Filename.concat base_path ".masc") "config")
-      "personas"
+      "keepers"
   in
-  mkdir_p (Filename.concat personas_dir agent_name);
-  Unix.putenv "MASC_PERSONAS_DIR" personas_dir;
+  let agent_dir = Filename.concat keepers_dir agent_name in
+  mkdir_p agent_dir;
+  Fs_compat.save_file
+    (Filename.concat keepers_dir (agent_name ^ ".toml"))
+    "[keeper]\nautoboot_enabled = true\ninstructions = \"Run the tool matrix.\"\n";
   Config_dir_resolver.reset ()
 
 let run_cmd_exn argv =
@@ -321,7 +315,7 @@ let ensure_bound fixture =
   if (Tool_result.is_success result) then ()
   else begin
     let body = (Tool_result.message result) in
-    if contains_substring body "already joined" then ()
+    if String_util.contains_substring_ci body "already joined" then ()
     else failwith ("masc_start failed: " ^ body)
   end
 
@@ -339,10 +333,17 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net
       ~base_path
   in
-  seed_persona_dir base_path tool_matrix_agent_name;
+  (* The matrix models a fully booted server: tools behind the startup gate
+     (e.g. masc_keeper_up) must see [state_ready], exactly as after the
+     production bootstrap publishes readiness. *)
+  (match Masc.Server_startup_state.mark_state_ready () with
+  | Ok () -> ()
+  | Error err ->
+      failwith (Masc.Server_startup_state.state_ready_error_to_string err));
+  seed_keeper_config base_path tool_matrix_agent_name;
   let auth_token =
     match
-      Masc.Auth.create_token base_path ~agent_name:tool_matrix_agent_name
+      Auth.create_token base_path ~agent_name:tool_matrix_agent_name
         ~role:Masc_domain.Admin
     with
     | Ok (token, _cred) -> token
@@ -386,7 +387,7 @@ let ensure_goal fixture =
       let goal =
         match
           Goal_store.upsert_goal (Mcp_server.workspace_config fixture.state)
-            ~title:"Tool Matrix Goal" ()
+            ~title:"Tool Matrix Goal" ~metric:"m" ~target_value:"1" ()
         with
         | Ok (goal, _status) -> goal
         | Error err -> failwith ("failed to seed tool matrix goal: " ^ err)
@@ -543,6 +544,43 @@ let prepare_for_name fixture name =
       ]
   then
     ignore (ensure_code_file fixture);
+  if name = "masc_get_metrics" then begin
+    (* The read contract needs at least one recorded metric for the calling
+       agent; an empty store answers with a not_found rejection instead. *)
+    let now = Unix.gettimeofday () in
+    Masc.Metrics_store_eio.record
+      (Mcp_server.workspace_config fixture.state)
+      {
+        Masc.Metrics_store_eio.id = Masc.Metrics_store_eio.generate_id ();
+        agent_id = fixture.agent_name;
+        task_id = "tool-matrix-metric";
+        started_at = now;
+        completed_at = Some now;
+        success = true;
+        error_message = None;
+        collaborators = [];
+        handoff_from = None;
+        handoff_to = None;
+      }
+  end;
+  if name = "masc_task_set_goal" then begin
+    (* masc_task_set_goal links goalless tasks only (RFC-0267 Phase 2), but
+       [ensure_task] creates its task already linked to the fixture goal.
+       Seed a goalless task first so the shared task-id cache serves it. *)
+    let body =
+      execute_tool_ok fixture ~name:"masc_add_task"
+        ~arguments:
+          (`Assoc
+            [
+              ("title", `String "Tool Matrix Goalless Task");
+              ("priority", `Int 2);
+              ("description", `String "goalless task fixture");
+            ])
+    in
+    match extract_id body ~fields:[ "task_id"; "id" ] ~prefixes:[ "task-" ] with
+    | Some task_id -> fixture.task_id <- Some task_id
+    | None -> failwith ("failed to parse goalless task id from: " ^ body)
+  end;
   if name = "masc_library_add" then
     mkdir_p (Filename.concat fixture.base_path "docs/library");
   if List.mem name [ "masc_library_list"; "masc_library_read"; "masc_library_search" ] then
@@ -822,6 +860,11 @@ let web_search_guard_fragments =
     "search endpoint returned no http status";
     "search endpoint returned http";
     "search endpoint returned a non-rss payload";
+    (* A credential-less environment (CI runner) has an empty provider
+       chain; the tool answers with the operator-facing remedy instead
+       of a hit list. Referenced from the .mli so the expectation
+       cannot drift from the message the lib actually renders. *)
+    Masc.Tool_misc_web_search.no_provider_configured_message;
   ]
 
 let guard_fragments_for_name name =
@@ -829,6 +872,10 @@ let guard_fragments_for_name name =
     web_search_guard_fragments
   else if
     string_starts_with ~prefix:"keeper_" name
+    (* analyze_image is a keeper shard runtime tool (catalog
+       [keeper_shard_read]) without the [keeper_] name prefix; the MCP
+       endpoint answers it with the keeper-internal refusal. *)
+    || String.equal name "analyze_image"
   then
     endpoint_unavailable_guard_fragments @ state_guard_fragments
   else if
@@ -993,7 +1040,6 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
 	  let saved_env =
 	    [
 	      ("MASC_BASE_PATH", Sys.getenv_opt "MASC_BASE_PATH");
-	      ("MASC_PERSONAS_DIR", Sys.getenv_opt "MASC_PERSONAS_DIR");
 	    ]
 	  in
 	  let base_path = temp_dir "mcp-tool-matrix-" in
@@ -1032,3 +1078,35 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
                schema.Masc_domain.name (Printexc.to_string exn)))
   in
   (base_path, result)
+
+(* Regression: contains_any must match fatal/guard fragments case-insensitively.
+   PR #28206 replaced the local lowercasing helper with a byte-wise
+   case-sensitive contains_substring; contains_any now uses
+   String_util.contains_substring_ci so mixed-case responses such as
+   "Internal Error" or "Already joined" still match the lowercase fragments. *)
+let test_mixed_case_contains_any () =
+  let assert_matches haystack needle =
+    if not (contains_any haystack [ needle ]) then
+      failwith
+        (Printf.sprintf "contains_any should match %S against %S" needle haystack)
+  in
+  let assert_not_matches haystack needle =
+    if contains_any haystack [ needle ] then
+      failwith
+        (Printf.sprintf "contains_any should NOT match %S against %S" needle haystack)
+  in
+  (* fatal fragments *)
+  assert_matches "Internal Error" "internal error";
+  assert_matches "internal error" "internal error";
+  assert_matches "TOOL TIMED OUT AFTER 30s" "tool timed out after";
+  assert_matches "Unknown Tool" "unknown tool";
+  (* guard fragments *)
+  assert_matches "Already Joined" "already joined";
+  assert_matches "Not Available on this MCP endpoint" "not available on this MCP endpoint";
+  (* negative: distinct text must not match *)
+  assert_not_matches "internal success" "internal error";
+  assert_not_matches "already done" "already joined";
+  ()
+
+let () =
+  test_mixed_case_contains_any ()

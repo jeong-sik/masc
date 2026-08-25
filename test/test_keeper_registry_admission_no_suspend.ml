@@ -1,5 +1,5 @@
 (** Regression: the closure handed to
-    [Keeper_turn_admission.commit_registration_if_open] must not suspend.
+    [Keeper_shutdown_intake_fence.commit_registration_if_open] must not suspend.
 
     That function evaluates its argument inside [Stdlib.Mutex.protect
     slot.state_mu]. [Stdlib.Mutex.lock] blocks the OS thread that runs the Eio
@@ -31,7 +31,7 @@
 
 module Reservation = Masc.Keeper_lifecycle_reservation
 module KR = Masc.Keeper_registry
-module Admission = Masc.Keeper_turn_admission
+module Intake_fence = Masc.Keeper_shutdown_intake_fence
 
 let base_path = "/tmp/test_keeper_registry_admission_no_suspend"
 let keeper_name = "wedgecheck"
@@ -42,7 +42,7 @@ let make_meta name =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ "name", `String name
-        ; "agent_name", `String ("agent-" ^ name)
+        ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name name)
         ; "trace_id", `String ("trace-" ^ name)
         ; "allowed_paths", `List [ `String "*" ]
         ; "autoboot_enabled", `Bool false
@@ -59,7 +59,7 @@ let make_meta name =
 let run_interleaving () =
   Eio_main.run (fun _env ->
     KR.For_testing.clear ();
-    Admission.For_testing.reset ();
+    Intake_fence.For_testing.reset ();
     let key_lock_taken, set_key_lock_taken = Eio.Promise.create () in
     let release_key_lock, do_release_key_lock = Eio.Promise.create () in
     let registration_done, set_registration_done = Eio.Promise.create () in
@@ -84,11 +84,10 @@ let run_interleaving () =
           Eio.Promise.await key_lock_taken;
           Eio.Fiber.yield ();
           Eio.Fiber.yield ();
-          let snapshot = Admission.snapshot_for ~base_path ~keeper_name in
-          assert (String.equal snapshot.Admission.snapshot_keeper_name keeper_name);
-          (* The slot must be idle: no turn is in flight, only a registration
-             is in progress. *)
-          assert (Option.is_none snapshot.Admission.snapshot_in_flight);
+          let shutdown_operation_id =
+            Intake_fence.shutdown_operation_id ~base_path ~keeper_name
+          in
+          assert (Option.is_none shutdown_operation_id);
           Eio.Promise.resolve do_release_key_lock ())
       ];
     match Eio.Promise.await registration_done with
@@ -112,7 +111,7 @@ let () =
              while holding state_mu (Stdlib.Mutex), so the Eio scheduler \
              thread is blocked and the domain cannot make progress. Acquire \
              the lifecycle key lock outside \
-             Keeper_turn_admission.commit_registration_if_open.";
+             Keeper_shutdown_intake_fence.commit_registration_if_open.";
           exit 1)
         else (
           Unix.sleepf 0.05;
@@ -125,5 +124,5 @@ let () =
   Domain.join watchdog;
   print_endline
     "PASS: fenced registration parks on the lifecycle key lock without holding \
-     the admission slot mutex"
+     the durable-intake mutex"
 ;;

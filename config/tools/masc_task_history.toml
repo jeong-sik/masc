@@ -1,0 +1,16 @@
+name = "masc_task_history"
+description = """
+Fetch recent task transition history from event logs. Useful for audits or \
+debugging transitions."""
+
+[[params]]
+name = "task_id"
+type = "string"
+required = true
+description = "Task ID to filter (e.g., 'task-001')"
+
+[[params]]
+name = "limit"
+type = "integer"
+description = "Max events to return (default: 50)"
+default = 50

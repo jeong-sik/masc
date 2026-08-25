@@ -35,8 +35,22 @@ function response(queue: KeeperApprovalQueueItem[]): DashboardGateResponse {
     approval_queue: queue,
     approval_queue_state: { state: 'ready' },
     recent_resolved: [],
+    recent_resolved_page: {
+      returned: 0,
+      matched: 0,
+      limit: 20,
+      window_minutes: 1440,
+      truncated: false,
+      scan_exhausted: false,
+    },
+    recent_resolved_state: { state: 'ready' },
     approval_rules: [],
-  } as DashboardGateResponse
+    approval_rules_state: { state: 'ready' },
+    hitl: {
+      gate_mode: { mode: 'manual', configured: true, state: 'ready' },
+      judge_lane: { status: 'available', lane_id: 'keeper_gate_judge', slots: ['keeper_gate_judge'] },
+    },
+  }
 }
 
 async function loadGate() {
@@ -56,7 +70,10 @@ async function loadGate() {
     deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
     setGateMode: vi.fn().mockResolvedValue({ ok: true }),
   }))
-  vi.doMock('../sse-store', () => ({ registerGateRefresh: vi.fn() }))
+  vi.doMock('../sse-store', () => ({
+    registerGateRefresh: vi.fn(),
+    registerGateAuditReceiptObserver: vi.fn(),
+  }))
   const signals = await import('./gate-signals')
   const actions = await import('./gate-actions')
   return { fetchDashboardGate, signals, actions }
@@ -115,11 +132,19 @@ describe('Gate resource (stale-while-revalidate)', () => {
         severity: 'bad',
         icon: '!',
       },
-      recent_resolved: [],
-      // Null, not a zeroed page: an observation error leaves the history bounds
-      // unknown, and a zeroed page would render as "nothing was decided".
+      recent_resolved: null,
       recent_resolved_page: null,
+      recent_resolved_state: {
+        state: 'unavailable',
+        stage: 'list_recent_resolved',
+        error: 'Gate 새로고침 실패',
+      },
       approval_rules: [],
+      approval_rules_state: {
+        state: 'unavailable',
+        error: 'Gate 새로고침 실패',
+      },
+      hitl: null,
     })
     expect(signals.gateError.value).toContain('Gate 새로고침 실패')
     expect(signals.gateLoading.value).toBe(false)

@@ -18,28 +18,28 @@ import {
 } from './journal-entry'
 import { appendLiveToolCall } from './components/session-trace/session-trace-live-store'
 import { scheduleSessionTraceReload } from './components/session-trace/session-trace-state'
-import { recordSseCompaction } from './components/keeper-workspace/compaction-snapshots'
 import { appendAuditEntry } from './live-store'
-import { applyKeeperTurnProgress } from './keeper-state'
+import { applyKeeperOperationTurnEvent } from './keeper-stream'
+import type { KeeperChatStreamEvent } from './api'
 import { isCrashedPhase } from './lib/keeper-predicates'
 import {
-  parseOasPayload,
-  type TypedOasPayload,
+  parseAgentCorePayload,
+  type TypedAgentCorePayload,
 } from './schemas/sse-event-payload'
 import { asNumber } from './components/common/normalize'
 import { RingBuffer } from './lib/ring-buffer'
-import type * as OasRuntimeStore from './oas-runtime-store'
+import type * as AgentCoreRuntimeStore from './agent-core-runtime-store'
 
+import { isAgentCoreEventType, sseEventFamily, withoutMascNamespace } from './lib/sse-event-type'
 import {
   MAX_JOURNAL_ENTRIES,
-  OAS_EVENT_PREFIX,
 } from './config/constants'
 
-let oasRuntimeStorePromise: Promise<typeof OasRuntimeStore> | null = null
+let agentCoreRuntimeStorePromise: Promise<typeof AgentCoreRuntimeStore> | null = null
 
-function loadOasRuntimeStore(): Promise<typeof OasRuntimeStore> {
-  oasRuntimeStorePromise ??= import('./oas-runtime-store')
-  return oasRuntimeStorePromise
+function loadAgentCoreRuntimeStore(): Promise<typeof AgentCoreRuntimeStore> {
+  agentCoreRuntimeStorePromise ??= import('./agent-core-runtime-store')
+  return agentCoreRuntimeStorePromise
 }
 
 function traceValueString(value: unknown): string | null {
@@ -75,6 +75,24 @@ function keeperTraceNameFromEvent(event: SSEEvent, fallback: string): string {
   )
 }
 
+// Per-turn cache observability (RFC-0382). Two sources with different
+// semantics, shown side by side and never merged: `cache_read_tokens` is
+// usage-reported by cloud providers; `cache_n`/`prompt_n` are wire timings
+// (llama-server, Ollama) — KV-reused vs freshly prefilled prompt tokens.
+function turnCacheSuffix(event: SSEEvent): string {
+  const parts: string[] = []
+  const cacheRead = asNumber(event.cache_read_tokens)
+  if (cacheRead != null && cacheRead > 0) parts.push(`캐시 read ${cacheRead}tok`)
+  const cacheN = asNumber(event.cache_n)
+  const promptN = asNumber(event.prompt_n)
+  if (cacheN != null && promptN != null) {
+    const seen = cacheN + promptN
+    const pct = seen > 0 ? ` (${Math.round((cacheN / seen) * 100)}%)` : ''
+    parts.push(`KV 재사용 ${cacheN}/${seen}tok${pct}`)
+  }
+  return parts.length > 0 ? ` · ${parts.join(' · ')}` : ''
+}
+
 // --- Signals ---
 
 const eventCount = signal(0)
@@ -84,6 +102,11 @@ export const journal = signal<JournalEntry[]>([])
 // --- Journal ---
 
 const journalRing = new RingBuffer<JournalEntry>(MAX_JOURNAL_ENTRIES)
+
+export function _resetJournalForTests(): void {
+  journalRing.clear()
+  journal.value = []
+}
 
 function addJournalEntry(
   agent: string,
@@ -135,15 +158,6 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() !== '' ? value : undefined
 }
 
-function formatTaskNarrative(agent: string, taskId?: string, status?: string): string {
-  const actor = actorLabel(agent)
-  const task = (taskId ?? '').trim()
-  const nextStatus = (status ?? '').trim()
-  if (task && nextStatus) return `${actor}가 태스크 ${task}를 ${nextStatus} 상태로 갱신했습니다.`
-  if (task) return `${actor}가 태스크 ${task}를 갱신했습니다.`
-  return `${actor}가 태스크 상태를 갱신했습니다.`
-}
-
 function formatBoardNarrative(label: '게시글' | '댓글', author: string, preview: string | undefined): string {
   return `${actorLabel(author)}가 ${label}을 남겼습니다${quotePreview(preview)}`
 }
@@ -172,11 +186,11 @@ function addTypedJournalEntry(
   })
 }
 
-/** Extract OAS envelope fields (correlation_id, run_id, ts_unix) from an SSE
+/** Extract Agent Core envelope fields (correlation_id, run_id, ts_unix) from an SSE
  * event into the shape expected by JournalEntry. Returns an empty object for
- * non-OAS events so spreading into `extra` stays inert. */
-function envelopeFromEvent(event: SSEEvent): Pick<JournalEntry, 'correlationId' | 'runId' | 'oasTs'> {
-  const out: Pick<JournalEntry, 'correlationId' | 'runId' | 'oasTs'> = {}
+ * non-Agent Core events so spreading into `extra` stays inert. */
+function envelopeFromEvent(event: SSEEvent): Pick<JournalEntry, 'correlationId' | 'runId' | 'agentCoreTs'> {
+  const out: Pick<JournalEntry, 'correlationId' | 'runId' | 'agentCoreTs'> = {}
   if (typeof event.correlation_id === 'string' && event.correlation_id.trim() !== '') {
     out.correlationId = event.correlation_id
   }
@@ -184,21 +198,21 @@ function envelopeFromEvent(event: SSEEvent): Pick<JournalEntry, 'correlationId' 
     out.runId = event.run_id
   }
   if (typeof event.ts_unix === 'number' && Number.isFinite(event.ts_unix)) {
-    out.oasTs = event.ts_unix
+    out.agentCoreTs = event.ts_unix
   }
   return out
 }
 
-/** Parse an OAS event payload through the atdgen-generated typed boundary.
+/** Parse an Agent Core event payload through the atdgen-generated typed boundary.
  *  Returns the typed payload on success, or null on failure; failures are
  *  logged with structured issues so malformed events are not silently dropped. */
-function parseOasPayloadOrWarn(
+function parseAgentCorePayloadOrWarn(
   eventType: string,
   payload: unknown,
-): TypedOasPayload | null {
-  const result = parseOasPayload(eventType, payload)
+): TypedAgentCorePayload | null {
+  const result = parseAgentCorePayload(eventType, payload)
   if (result.success) return result.data
-  console.warn('[server-push] dropping malformed OAS payload', {
+  console.warn('[server-push] dropping malformed Agent Core payload', {
     issues: result.error.issues,
     payload,
   })
@@ -207,18 +221,18 @@ function parseOasPayloadOrWarn(
 
 // --- WebSocket event ingress ---
 
-let pauseOasRuntimeIngress = false
-let queuedOasEvents: SSEEvent[] = []
+let pauseAgentCoreRuntimeIngress = false
+let queuedAgentCoreEvents: SSEEvent[] = []
 
-export function pauseQueuedOasRuntimeIngress(): void {
-  pauseOasRuntimeIngress = true
+export function pauseQueuedAgentCoreRuntimeIngress(): void {
+  pauseAgentCoreRuntimeIngress = true
 }
 
-export function resumeQueuedOasRuntimeIngress(): void {
-  pauseOasRuntimeIngress = false
-  if (queuedOasEvents.length === 0) return
-  const pending = queuedOasEvents
-  queuedOasEvents = []
+export function resumeQueuedAgentCoreRuntimeIngress(): void {
+  pauseAgentCoreRuntimeIngress = false
+  if (queuedAgentCoreEvents.length === 0) return
+  const pending = queuedAgentCoreEvents
+  queuedAgentCoreEvents = []
   for (const event of pending) {
     handleEvent(event)
   }
@@ -226,17 +240,15 @@ export function resumeQueuedOasRuntimeIngress(): void {
 
 export function normalizeSSEDispatchType(rawType: string): string {
   if (
-    rawType === 'oas:masc:audit_event'
+    rawType === 'agent_core:masc:audit_event'
     || rawType === 'masc:audit_event'
     || rawType === 'masc/audit_event'
   ) {
     return 'audit_event'
   }
-  const mascPrefix = 'masc/'
-  return rawType.startsWith(mascPrefix)
-    && !rawType.startsWith('masc/board_')
-    ? rawType.slice(mascPrefix.length)
-    : rawType
+  // Board events keep their namespace: the bare `board_*` names mean something
+  // else to the dispatcher.
+  return sseEventFamily(rawType) === 'board' ? rawType : withoutMascNamespace(rawType)
 }
 
 /** Apply one typed event delivered by the dashboard WebSocket. */
@@ -247,37 +259,27 @@ export function recordServerPushEvent(event: SSEEvent): void {
 }
 
 function handleEvent(event: SSEEvent): void {
-  // Normalize only dispatch aliases. The OAS Event_bus bridge relays
-  // MASC Custom("masc.*") payloads as oas:masc:* events; audit ledger
+  // Normalize only dispatch aliases. The Agent Core Event_bus bridge relays
+  // MASC Custom("masc.*") payloads as agent_core:masc:* events; audit ledger
   // events still belong to the dashboard audit stream.
   const rawType = event.type
-  if (pauseOasRuntimeIngress && rawType.startsWith(OAS_EVENT_PREFIX)) {
-    queuedOasEvents.push(event)
+  if (pauseAgentCoreRuntimeIngress && isAgentCoreEventType(rawType)) {
+    queuedAgentCoreEvents.push(event)
     return
   }
   const type = normalizeSSEDispatchType(rawType)
   const agent = event.agent ?? event.author ?? event.from ?? event.from_agent ?? ''
-  if (rawType.startsWith(OAS_EVENT_PREFIX)) {
-    void loadOasRuntimeStore()
-      .then(({ applyOasRuntimeEvent }) => {
-        applyOasRuntimeEvent(event, { includeLiveTrace: true })
+  if (isAgentCoreEventType(rawType)) {
+    void loadAgentCoreRuntimeStore()
+      .then(({ applyAgentCoreRuntimeEvent }) => {
+        applyAgentCoreRuntimeEvent(event, { includeLiveTrace: true })
       })
       .catch(err => {
-        console.warn('[server-push] OAS runtime handler unavailable', err instanceof Error ? err.message : err)
+        console.warn('[server-push] Agent Core runtime handler unavailable', err instanceof Error ? err.message : err)
       })
   }
 
   switch (type) {
-    case 'agent_bound':
-      addTypedJournalEntry(agent, 'Joined', 'system', 'agent_bound', {
-        narrativeText: `${actorLabel(agent)}가 프로젝트에 참여했습니다.`,
-      })
-      break
-    case 'agent_unbound':
-      addTypedJournalEntry(agent, 'Left', 'system', 'agent_unbound', {
-        narrativeText: `${actorLabel(agent)}가 프로젝트에서 나갔습니다.`,
-      })
-      break
     case 'broadcast':
       addTypedJournalEntry(
         agent,
@@ -288,19 +290,6 @@ function handleEvent(event: SSEEvent): void {
           severity: event.severity,
           source: event.source,
           narrativeText: `${actorLabel(agent)}가 공지/메시지를 보냈습니다${quotePreview(event.message ?? event.content)}`,
-        },
-      )
-      break
-    case 'task_update':
-      addTypedJournalEntry(
-        agent,
-        `Task: ${event.task_id ?? ''} -> ${event.status ?? ''}`,
-        'tasks',
-        'task_update',
-        {
-          severity: event.severity,
-          source: event.source,
-          narrativeText: formatTaskNarrative(agent, event.task_id, event.status),
         },
       )
       break
@@ -450,7 +439,7 @@ function handleEvent(event: SSEEvent): void {
       }
       addTypedJournalEntry(
         event.name ?? agent,
-        `Turn ${event.turn ?? '?'} tok=${((event.input_tokens ?? 0) + (event.output_tokens ?? 0))} tools=${event.tool_calls_made ?? 0}`,
+        `Turn ${event.turn ?? '?'} tok=${((event.input_tokens ?? 0) + (event.output_tokens ?? 0))} tools=${event.tool_calls_made ?? 0}${turnCacheSuffix(event)}`,
         'keepers',
         'unknown',
         {
@@ -494,31 +483,6 @@ function handleEvent(event: SSEEvent): void {
       break
     case 'keeper_compaction': {
       const keeperNameCompaction = event.name ?? agent
-      const beforeTokCompaction =
-        typeof event.before_tokens === 'number' && Number.isFinite(event.before_tokens)
-          ? event.before_tokens
-          : null
-      // Three-step fallback for the post-compaction token count: prefer the
-      // reported after_tokens, else derive it from saved_tokens relative to the
-      // known before count, else leave it unknown. Written as if/else (not a
-      // nested ternary) to satisfy no-nested-ternary and keep the priority clear.
-      let afterTokCompaction: number | null = null
-      if (typeof event.after_tokens === 'number' && Number.isFinite(event.after_tokens)) {
-        afterTokCompaction = event.after_tokens
-      } else if (
-        typeof event.saved_tokens === 'number'
-        && Number.isFinite(event.saved_tokens)
-        && beforeTokCompaction != null
-      ) {
-        afterTokCompaction = Math.max(0, beforeTokCompaction - event.saved_tokens)
-      }
-      recordSseCompaction(
-        keeperNameCompaction,
-        beforeTokCompaction,
-        afterTokCompaction,
-        event.trigger ?? '자동',
-        event.runtime ?? '—',
-      )
       addTypedJournalEntry(
         keeperNameCompaction,
         `Compaction saved ${event.saved_tokens ?? '?'} tokens (${event.trigger ?? '?'})`,
@@ -534,19 +498,6 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'keeper_guardrail':
-      addTypedJournalEntry(
-        event.name ?? agent,
-        `Guardrail: ${event.reason ?? '(unknown reason)'}`,
-        'keepers',
-        'keeper_guardrail',
-        {
-          severity: event.severity ?? '(unknown severity)',
-          source: event.source,
-          narrativeText: `${actorLabel(event.name ?? agent)}가 guardrail에 의해 중단되었습니다: ${event.reason ?? '(unknown reason)'}`,
-        },
-      )
-      break
     case 'keeper_phase_changed':
       addTypedJournalEntry(
         event.name ?? agent,
@@ -598,105 +549,42 @@ function handleEvent(event: SSEEvent): void {
       }
       break
     }
-    case 'keeper_chat_turn_progress': {
-      // Live tool-call progress for queued/consumer-side turns — no journal
-      // entry (keeper_tool_call already journals completions); this feeds the
-      // chat thread directly.
+    case 'keeper_chat_operation_event': {
       const keeperName = event.name ?? agent
-      const runId = event.run_id?.trim()
-      const toolCallId = event.tool_call_id
-      const kind = event.kind
-      if (!keeperName || !runId || !toolCallId) break
-      if (kind !== 'tool_call_start' && kind !== 'tool_call_end') break
-      applyKeeperTurnProgress(keeperName, {
-        runId,
-        kind,
-        toolCallId,
-        toolName: event.tool_name ?? null,
-        receiptIds: event.receipt_ids,
+      const operationId = event.operation_id?.trim()
+      if (!keeperName || !operationId || !isRecord(event.ag_ui_event)) break
+      applyKeeperOperationTurnEvent(keeperName, {
+        operationId,
+        event: event.ag_ui_event as unknown as KeeperChatStreamEvent,
       })
-      break
-    }
-    case 'keeper_tool_skipped': {
-      const toolName = event.tool_name ?? '?'
-      const reasonCode = event.reason_code ?? 'unknown'
-      addTypedJournalEntry(
-        event.name ?? agent,
-        `Tool skipped: ${toolName} (${reasonCode})`,
-        'keepers',
-        'keeper_tool_call',
-        {
-          severity: 'warn',
-          source: event.source,
-          narrativeText: `${actorLabel(event.name ?? agent)}의 ${toolName} 도구가 차단되었습니다 (${reasonCode})`,
-        },
-      )
-      {
-        const keeperName = keeperTraceNameFromEvent(event, agent)
-        if (!keeperName) break
-        appendLiveToolCall(keeperName, {
-          toolName,
-          durationMs: 0,
-          success: false,
-          error: `skipped: ${reasonCode}`,
-          tsUnix: typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000,
-        })
+      if (
+        event.ag_ui_event.type === 'CUSTOM'
+        && event.ag_ui_event.name === 'KEEPER_TOOL_RESULT_READY'
+      ) {
+        void import('./keeper-runtime')
+          .then(mod => mod.hydrateKeeperToolOutputs(keeperName))
+          .catch(err => {
+            console.debug(
+              '[keeper-stream] queued tool output hydration unavailable',
+              err instanceof Error ? err.message : '',
+            )
+          })
       }
       break
     }
-    // OAS bridge events
-    case 'oas:masc:keeper:lifecycle': {
+    // Agent Core bridge events
+    case 'agent_core:masc:keeper:lifecycle': {
       break
     }
-    case 'oas:masc:trust_updated': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const agentA = (p.agent_a as string) ?? ''
-      const agentB = (p.agent_b as string) ?? ''
-      const trustScore = typeof p.trust_score === 'number' ? p.trust_score : undefined
-      addTypedJournalEntry(
-        agentA,
-        `Trust ${agentB}${trustScore != null ? ` · ${trustScore.toFixed(2)}` : ''}`,
-        'oas',
-        'oas_event',
-        {
-          narrativeText:
-            `${actorLabel(agentA)}와 ${actorLabel(agentB)} 사이 trust score가 갱신되었습니다`
-            + (trustScore != null ? ` (${trustScore.toFixed(2)})` : ''),
-          ...envelopeFromEvent(event),
-        },
-      )
-      break
-    }
-    case 'oas:masc:reputation_changed': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const agentName = (p.agent_name as string) ?? ''
-      const oldScore = typeof p.old_score === 'number' ? p.old_score : undefined
-      const newScore = typeof p.new_score === 'number' ? p.new_score : undefined
-      const trend = (p.trend as string) ?? undefined
-      addTypedJournalEntry(
-        agentName,
-        `Reputation${oldScore != null && newScore != null ? ` ${oldScore.toFixed(2)} → ${newScore.toFixed(2)}` : ''}${trend ? ` · ${trend}` : ''}`,
-        'oas',
-        'oas_event',
-        {
-          narrativeText:
-            `${actorLabel(agentName)} reputation이 갱신되었습니다`
-            + (oldScore != null && newScore != null ? ` (${oldScore.toFixed(2)} → ${newScore.toFixed(2)})` : '')
-            + (trend ? `, trend=${trend}` : ''),
-          ...envelopeFromEvent(event),
-        },
-      )
-      break
-    }
-    case 'oas:agent_started': {
-      const parsed = parseOasPayloadOrWarn(type, event.payload)
+    case 'agent_core:agent_started': {
+      const parsed = parseAgentCorePayloadOrWarn(type, event.payload)
       if (!parsed || parsed.kind !== 'agent_started') break
       const { payload } = parsed
       addTypedJournalEntry(
         payload.agent_name,
         `Agent run started${payload.task_id ? ` · ${payload.task_id}` : ''}`,
-        'oas',
-        'oas_event',
+        'agentCore',
+        'agent_core_event',
         {
           severity: event.severity,
           source: event.source,
@@ -707,15 +595,15 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'oas:agent_completed': {
-      const parsed = parseOasPayloadOrWarn(type, event.payload)
+    case 'agent_core:agent_completed': {
+      const parsed = parseAgentCorePayloadOrWarn(type, event.payload)
       if (!parsed || parsed.kind !== 'agent_completed') break
       const { payload } = parsed
       addTypedJournalEntry(
         payload.agent_name,
         `Agent run completed${payload.task_id ? ` · ${payload.task_id}` : ''} · ${payload.elapsed_s.toFixed(1)}s`,
-        'oas',
-        'oas_event',
+        'agentCore',
+        'agent_core_event',
         {
           severity: event.severity,
           source: event.source,
@@ -726,15 +614,53 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'oas:agent_failed': {
-      const parsed = parseOasPayloadOrWarn(type, event.payload)
+    case 'agent_core:agent_yielded': {
+      const parsed = parseAgentCorePayloadOrWarn(type, event.payload)
+      if (!parsed || parsed.kind !== 'agent_yielded') break
+      const { payload } = parsed
+      addTypedJournalEntry(
+        payload.agent_name,
+        `Agent run yielded · T${payload.turn} · ${payload.elapsed_s.toFixed(1)}s`,
+        'agentCore',
+        'agent_core_event',
+        {
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `${actorLabel(payload.agent_name)} agent run yielded at turn ${payload.turn}`,
+          preview: payload.task_id,
+          ...envelopeFromEvent(event),
+        },
+      )
+      break
+    }
+    case 'agent_core:agent_input_required': {
+      const parsed = parseAgentCorePayloadOrWarn(type, event.payload)
+      if (!parsed || parsed.kind !== 'agent_input_required') break
+      const { payload } = parsed
+      addTypedJournalEntry(
+        payload.agent_name,
+        `Agent input required · ${payload.request_id}`,
+        'agentCore',
+        'agent_core_event',
+        {
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `${actorLabel(payload.agent_name)} agent run requires input: ${payload.question}`,
+          preview: payload.question,
+          ...envelopeFromEvent(event),
+        },
+      )
+      break
+    }
+    case 'agent_core:agent_failed': {
+      const parsed = parseAgentCorePayloadOrWarn(type, event.payload)
       if (!parsed || parsed.kind !== 'agent_failed') break
       const { payload } = parsed
       addTypedJournalEntry(
         payload.agent_name,
         `Agent run failed${payload.task_id ? ` · ${payload.task_id}` : ''} · ${payload.elapsed_s.toFixed(1)}s${payload.error ? ` · ${payload.error}` : ''}`,
-        'oas',
-        'oas_event',
+        'agentCore',
+        'agent_core_event',
         {
           severity: event.severity,
           source: event.source,
@@ -745,15 +671,15 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'oas:tool_called': {
-      const parsed = parseOasPayloadOrWarn(type, event.payload)
+    case 'agent_core:tool_called': {
+      const parsed = parseAgentCorePayloadOrWarn(type, event.payload)
       if (!parsed || parsed.kind !== 'tool_called') break
       const { payload } = parsed
       addTypedJournalEntry(
         payload.agent_name,
         `Tool called: ${payload.tool_name}`,
-        'oas',
-        'oas_tool',
+        'agentCore',
+        'agent_core_tool',
         {
           severity: event.severity,
           source: event.source,
@@ -762,15 +688,15 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'oas:tool_completed': {
-      const parsed = parseOasPayloadOrWarn(type, event.payload)
+    case 'agent_core:tool_completed': {
+      const parsed = parseAgentCorePayloadOrWarn(type, event.payload)
       if (!parsed || parsed.kind !== 'tool_completed') break
       const { payload } = parsed
       addTypedJournalEntry(
         payload.agent_name,
         `Tool completed: ${payload.tool_name}`,
-        'oas',
-        'oas_tool',
+        'agentCore',
+        'agent_core_tool',
         {
           severity: event.severity,
           source: event.source,
@@ -779,15 +705,15 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'oas:handoff_requested': {
-      const parsed = parseOasPayloadOrWarn(type, event.payload)
+    case 'agent_core:handoff_requested': {
+      const parsed = parseAgentCorePayloadOrWarn(type, event.payload)
       if (!parsed || parsed.kind !== 'handoff_requested') break
       const { payload } = parsed
       addTypedJournalEntry(
         payload.from_agent,
         `Handoff requested · ${payload.from_agent}→${payload.to_agent}${payload.reason ? ` · ${payload.reason}` : ''}`,
-        'oas',
-        'oas_event',
+        'agentCore',
+        'agent_core_event',
         {
           severity: event.severity,
           source: event.source,
@@ -798,15 +724,15 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'oas:handoff_completed': {
-      const parsed = parseOasPayloadOrWarn(type, event.payload)
+    case 'agent_core:handoff_completed': {
+      const parsed = parseAgentCorePayloadOrWarn(type, event.payload)
       if (!parsed || parsed.kind !== 'handoff_completed') break
       const { payload } = parsed
       addTypedJournalEntry(
         payload.from_agent,
         `Handoff completed · ${payload.from_agent}→${payload.to_agent} · ${payload.elapsed_s.toFixed(1)}s`,
-        'oas',
-        'oas_event',
+        'agentCore',
+        'agent_core_event',
         {
           severity: event.severity,
           source: event.source,
@@ -817,15 +743,15 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'oas:turn_started': {
-      const parsed = parseOasPayloadOrWarn(type, event.payload)
+    case 'agent_core:turn_started': {
+      const parsed = parseAgentCorePayloadOrWarn(type, event.payload)
       if (!parsed || parsed.kind !== 'turn_started') break
       const { payload } = parsed
       addTypedJournalEntry(
         payload.agent_name,
         `Turn started · T${payload.turn}`,
-        'oas',
-        'oas_turn',
+        'agentCore',
+        'agent_core_turn',
         {
           severity: event.severity,
           source: event.source,
@@ -834,15 +760,15 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'oas:turn_completed': {
-      const parsed = parseOasPayloadOrWarn(type, event.payload)
+    case 'agent_core:turn_completed': {
+      const parsed = parseAgentCorePayloadOrWarn(type, event.payload)
       if (!parsed || parsed.kind !== 'turn_completed') break
       const { payload } = parsed
       addTypedJournalEntry(
         payload.agent_name,
         `Turn completed · T${payload.turn}`,
-        'oas',
-        'oas_turn',
+        'agentCore',
+        'agent_core_turn',
         {
           severity: event.severity,
           source: event.source,
@@ -851,53 +777,24 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'oas:context_compacted': {
-      const parsed = parseOasPayloadOrWarn(type, event.payload)
+    case 'agent_core:context_compacted': {
+      const parsed = parseAgentCorePayloadOrWarn(type, event.payload)
       if (!parsed || parsed.kind !== 'context_compacted') break
       const { payload } = parsed
-      const trigger = payload.phase ? `OAS ${payload.phase}` : 'OAS context_compacted'
-      // The OAS context_compacted wire carries no runtime field
-      // (lib/sse_event/sse_event.atd context_compacted_payload has 4 fields),
-      // so the snapshot runtime is unknown on this path.
-      recordSseCompaction(
-        payload.agent_name,
-        payload.before_tokens,
-        payload.after_tokens,
-        trigger,
-        '—',
-      )
       addTypedJournalEntry(
         payload.agent_name,
-        `OAS compact · ${payload.before_tokens}→${payload.after_tokens} · ${payload.phase}`,
-        'oas',
-        'oas_context',
+        `Agent Core compact · ${payload.before_tokens}→${payload.after_tokens} · ${payload.phase}`,
+        'agentCore',
+        'agent_core_context',
         {
           severity: event.severity,
           source: event.source,
-          narrativeText: `${actorLabel(payload.agent_name)} OAS context compact (${payload.phase})`,
+          narrativeText: `${actorLabel(payload.agent_name)} Agent Core context compact (${payload.phase})`,
         },
       )
       break
     }
-    case 'oas:task_state_changed': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const taskId = asString(p.task_id) ?? event.task_id ?? 'unknown'
-      const fromState = asString(p.from_state)
-      const toState = asString(p.to_state)
-      addTypedJournalEntry(
-        taskId,
-        `Task ${taskId}${fromState || toState ? ` · ${fromState ?? '?'}→${toState ?? '?'}` : ''}`,
-        'oas',
-        'oas_task',
-        {
-          severity: event.severity,
-          source: event.source,
-          narrativeText: `Task 상태 변경 ${taskId}${fromState || toState ? ` (${fromState ?? '?'} → ${toState ?? '?'})` : ''}`,
-        },
-      )
-      break
-    }
-    case 'oas:durable:llm_request': {
+    case 'agent_core:durable:llm_request': {
       const p = (event.payload ?? {}) as Record<string, unknown>
       const agentName = asString(p.agent_name) ?? asString(event.agent_name) ?? agent
       const turn = asNumber(p.turn)
@@ -912,9 +809,9 @@ function handleEvent(event: SSEEvent): void {
           : ''
       addTypedJournalEntry(
         agentName,
-        `OAS durable llm_request${turn != null ? ` · T${turn}` : ''} · runtime · ${inputTokens}tok${cacheSuffix}`,
-        'oas',
-        'oas_event',
+        `Agent Core durable llm_request${turn != null ? ` · T${turn}` : ''} · runtime · ${inputTokens}tok${cacheSuffix}`,
+        'agentCore',
+        'agent_core_event',
         {
           severity: event.severity,
           source: event.source,
@@ -923,7 +820,7 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'oas:durable:llm_response': {
+    case 'agent_core:durable:llm_response': {
       const p = (event.payload ?? {}) as Record<string, unknown>
       const agentName = asString(p.agent_name) ?? asString(event.agent_name) ?? agent
       const turn = asNumber(p.turn)
@@ -932,9 +829,9 @@ function handleEvent(event: SSEEvent): void {
       const durationMs = asNumber(p.duration_ms)
       addTypedJournalEntry(
         agentName,
-        `OAS durable llm_response${turn != null ? ` · T${turn}` : ''} · ${outputTokens}tok · ${stopReason}${durationMs != null ? ` · ${durationMs.toFixed(0)}ms` : ''}`,
-        'oas',
-        'oas_event',
+        `Agent Core durable llm_response${turn != null ? ` · T${turn}` : ''} · ${outputTokens}tok · ${stopReason}${durationMs != null ? ` · ${durationMs.toFixed(0)}ms` : ''}`,
+        'agentCore',
+        'agent_core_event',
         {
           severity: event.severity,
           source: event.source,
@@ -943,7 +840,7 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'oas:durable:error_occurred': {
+    case 'agent_core:durable:error_occurred': {
       const p = (event.payload ?? {}) as Record<string, unknown>
       const agentName = asString(p.agent_name) ?? asString(event.agent_name) ?? agent
       const turn = asNumber(p.turn)
@@ -951,9 +848,9 @@ function handleEvent(event: SSEEvent): void {
       const detail = asString(p.detail) ?? ''
       addTypedJournalEntry(
         agentName,
-        `OAS 에러 · ${errorDomain}${turn != null ? ` · T${turn}` : ''}`,
-        'oas',
-        'oas_event',
+        `Agent Core 에러 · ${errorDomain}${turn != null ? ` · T${turn}` : ''}`,
+        'agentCore',
+        'agent_core_event',
         {
           severity: event.severity,
           source: event.source,
@@ -963,13 +860,13 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'oas:durable:turn_started':
-    case 'oas:durable:tool_called':
-    case 'oas:durable:tool_completed':
-    case 'oas:durable:state_transition':
-    case 'oas:durable:checkpoint_saved': {
-      // Already covered by non-durable oas:* events; journal-only.
-      addTypedJournalEntry(agent, type, 'oas', 'oas_event', {
+    case 'agent_core:durable:turn_started':
+    case 'agent_core:durable:tool_called':
+    case 'agent_core:durable:tool_completed':
+    case 'agent_core:durable:state_transition':
+    case 'agent_core:durable:checkpoint_saved': {
+      // Already covered by non-durable agent_core:* events; journal-only.
+      addTypedJournalEntry(agent, type, 'agentCore', 'agent_core_event', {
         severity: event.severity,
         source: event.source,
       })

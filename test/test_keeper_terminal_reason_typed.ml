@@ -20,6 +20,9 @@ module R = Masc.Keeper_execution_receipt
 module C = Masc.Keeper_contract_classifier
 module Tr = Keeper_terminal_reason
 module UTS = Masc.Keeper_unified_turn_success.For_testing
+module KTP = Masc.Keeper_terminal_effect_policy
+module KOAR = Masc.Keeper_observability_artifact_registry
+module Health_fleet = Server_routes_http_runtime_health_fleet
 module KMC = Masc.Keeper_meta_contract
 module KMS = Masc.Keeper_meta_store
 module Keeper_identity = Masc.Keeper_identity
@@ -51,7 +54,7 @@ let meta_fixture_exn json =
 ;;
 
 let write_meta_exn config meta =
-  match KMS.write_meta config meta with
+  match KMS.replace_snapshot config meta with
   | Ok () -> ()
   | Error err -> failwith ("write_meta failed: " ^ err)
 ;;
@@ -61,6 +64,17 @@ let read_meta_exn config keeper_name =
   | Ok (Some meta) -> meta
   | Ok None -> failwith ("missing persisted meta for " ^ keeper_name)
   | Error err -> failwith ("read_meta failed: " ^ err)
+;;
+
+let with_owner_inventory config f =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  (match Masc.Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+   | Ok _ -> ()
+   | Error error ->
+     failwith (Masc.Keeper_owner_registry.install_error_to_string error));
+  f ()
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -75,6 +89,20 @@ let roundtrip_corpus =
     "runtime_exhausted"
   ; Keeper_internal_error.capacity_backpressure_kind
   ; Keeper_internal_error.incomplete_tool_transcript_kind
+  ; Keeper_internal_error.provider_attempt_effect_fenced_kind
+  ; Keeper_internal_error.tool_correction_lost_kind
+    (* The rest of what [kind_of_masc_internal_error] emits. The corpus used
+       to hold five of its thirteen kinds, so the eight missing ones were
+       neither recognised nor deliberately left [Unknown] — they were simply
+       never considered, and four of them reached operators as "unmapped
+       runtime state" in production (#29929). Spelled out here rather than
+       taken from [wire_kind_to_string]: this list is the oracle's, and
+       reading it from the producer would remove the check. *)
+  ; "accept_rejected"
+  ; "terminal_effect_failed"
+  ; "internal_unhandled_exception"
+  ; "internal_bridge_exception"
+  ; "internal_contract_rejected"
   ; "internal_error"
   ; "pre_dispatch_success"
   ; "provider_error"
@@ -95,6 +123,15 @@ let roundtrip_corpus =
   ; "provider_error_server:500"
   ; "provider_error_missing_api_key"
   ; "provider_error_hard_quota:openai"
+    (* Producer kinds with no policy yet, which is not the same as the
+       deliberate Unknowns below. None has ever been observed — zero rows
+       across 189 receipt files and every August log — so there is no trace
+       to classify them from. [of_wire] names them explicitly and answers
+       [Unknown], so the open question is visible in the match instead of
+       being an absent arm. *)
+  ; "resumable_cli_session"
+  ; "receipt_persistence_failed"
+  ; "gate_replay_repair_required"
     (* genuine Unknown (preserve-don't-fix) *)
   ; "no_capable_provider"
   ; "mcp_error"
@@ -163,7 +200,17 @@ let frozen_operator_disposition (receipt : R.t)
   then R.Disp_fail_open_next_runtime, R.Reason_capacity_backpressure
   else if
     String.equal terminal_reason Keeper_internal_error.incomplete_tool_transcript_kind
-  then R.Disp_operator_reset_required, R.Reason_transcript_corruption
+  then R.Disp_unknown, R.Reason_transcript_corruption
+  else if
+    String.equal
+      terminal_reason
+      Keeper_internal_error.provider_attempt_effect_fenced_kind
+  then R.Disp_unknown, R.Reason_provider_attempt_effect_fenced
+  else if
+    String.equal terminal_reason Keeper_internal_error.tool_correction_lost_kind
+  then R.Disp_unknown, R.Reason_tool_correction_lost
+  else if String.equal terminal_reason "terminal_effect_failed"
+  then R.Disp_unknown, R.Reason_terminal_effect_failed
   else if preflight_config_failure
   then R.Disp_fail_open_next_runtime, R.Reason_preflight_config_error
   else if
@@ -181,7 +228,11 @@ let frozen_operator_disposition (receipt : R.t)
   then R.Disp_fail_open_next_runtime, R.Reason_transient_runtime_retry
   else if provider_runtime_failure
   then R.Disp_fail_open_next_runtime, R.Reason_provider_runtime_error
-  else if String.equal terminal_reason "internal_error"
+  else if
+    String.equal terminal_reason "internal_error"
+    || String.equal terminal_reason "internal_unhandled_exception"
+    || String.equal terminal_reason "internal_bridge_exception"
+    || String.equal terminal_reason "internal_contract_rejected"
   then R.Disp_fail_open_next_runtime, R.Reason_internal_error
   else if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
   then R.Disp_fail_open_next_runtime, R.Reason_degraded_retry
@@ -202,6 +253,8 @@ let frozen_operator_disposition (receipt : R.t)
       R.Disp_pass, R.Reason_healthy
     | `Ok when receipt.runtime_outcome = R.Runtime_not_dispatched ->
       R.Disp_pass, R.Reason_healthy
+    | _ when String.equal terminal_reason "accept_rejected" ->
+      R.Disp_fail_open_next_runtime, R.Reason_accept_rejected
     | _ -> R.Disp_unknown, R.Reason_unmapped_runtime_state)
 ;;
 
@@ -217,17 +270,12 @@ let base_receipt : R.t =
   { keeper_name = "test-keeper"
   ; agent_name = "test-agent"
   ; trace_id = "trace-1"
-  ; generation = 1
   ; turn_count = Some 1
-  ; oas_turn_count = None
-  ; oas_dispatch_mode = None
-  ; oas_internal_runtime_disabled = false
+  ; agent_core_turn_count = None
   ; current_task_id = None
-  ; goal_ids = []
   ; outcome = `Error
   ; terminal_reason_code = ""
   ; response_text_present = false
-  ; model_used = None
   ; completion_contract_result = R.Completion_observation_unknown
   ; actionable_signal = Some C.No_actionable_signal
   ; tool_surface = base_tool_surface
@@ -239,7 +287,7 @@ let base_receipt : R.t =
   ; runtime_attempt_count = 1
   ; runtime_fallback_applied = false
   ; runtime_outcome = R.Runtime_completed
-  ; oas_internal_runtime_allowed = true
+  ; agent_core_internal_runtime_allowed = true
   ; degraded_retry_applied = false
   ; degraded_retry_runtime = None
   ; fallback_reason = None
@@ -292,12 +340,119 @@ let () =
       }
   in
   check
-    "transcript corruption requires operator reset"
-    (transcript_corruption
-     = (R.Disp_operator_reset_required, R.Reason_transcript_corruption));
+    "transcript corruption stays a typed alert, not a pause"
+    (transcript_corruption = (R.Disp_unknown, R.Reason_transcript_corruption));
   check
     "transcript corruption emits operator broadcast"
-    (R.needs_operator_broadcast (fst transcript_corruption))
+    (R.needs_operator_broadcast (fst transcript_corruption));
+  let fenced_error =
+    Keeper_internal_error.Provider_attempt_effect_fenced
+      { runtime_id = "antigravity_subscription.gemini-3-6-flash-high"
+      ; effect_disposition = Keeper_provider_attempt_effect_core.Effect_attempted
+      ; diagnostic = "provider response did not prove whether the tool effect settled"
+      }
+  in
+  let fenced_json = Keeper_internal_error.masc_internal_error_to_json fenced_error in
+  check
+    "provider-attempt fence codec emits the canonical kind"
+    (Json_util.get_string fenced_json "kind"
+     = Some Keeper_internal_error.provider_attempt_effect_fenced_kind);
+  check
+    "provider-attempt fence codec round-trips the typed evidence"
+    (Keeper_internal_error.parse_masc_internal_error_json fenced_json
+     = Some fenced_error);
+  let fenced_wire = Keeper_internal_error.provider_attempt_effect_fenced_kind in
+  let producer_wire =
+    fenced_error
+    |> Keeper_internal_error.core_error_of_masc_internal_error
+    |> Masc.Keeper_agent_error.terminal_reason_code_of_core_error
+  in
+  check
+    "provider-attempt fence producer projects the canonical terminal wire"
+    (String.equal producer_wire fenced_wire);
+  check
+    "provider-attempt fence wire decodes to the closed terminal variant"
+    (match Tr.of_wire fenced_wire with
+     | Tr.Provider_attempt_effect_fenced wire -> String.equal wire fenced_wire
+     | _ -> false);
+  check
+    "provider-attempt fence terminal wire round-trips byte-identically"
+    (String.equal (Tr.to_wire (Tr.of_wire fenced_wire)) fenced_wire);
+  let lost_error =
+    Keeper_internal_error.Tool_correction_lost
+      { runtime_id = "antigravity_subscription.gemini-3-6-flash-high"
+      ; effect_disposition = Keeper_provider_attempt_effect_core.Effect_attempted
+      ; reject_count = 2
+      ; diagnostic = "turn died after two corrective tool rejections"
+      }
+  in
+  let lost_json = Keeper_internal_error.masc_internal_error_to_json lost_error in
+  check
+    "tool-correction-lost codec emits the canonical kind"
+    (Json_util.get_string lost_json "kind"
+     = Some Keeper_internal_error.tool_correction_lost_kind);
+  check
+    "tool-correction-lost codec round-trips the typed evidence"
+    (Keeper_internal_error.parse_masc_internal_error_json lost_json
+     = Some lost_error);
+  let lost_wire = Keeper_internal_error.tool_correction_lost_kind in
+  check
+    "tool-correction-lost wire decodes to the closed terminal variant"
+    (match Tr.of_wire lost_wire with
+     | Tr.Tool_correction_lost wire -> String.equal wire lost_wire
+     | _ -> false);
+  check
+    "tool-correction-lost terminal wire round-trips byte-identically"
+    (String.equal (Tr.to_wire (Tr.of_wire lost_wire)) lost_wire);
+  let lost_disposition =
+    R.operator_disposition
+      { base_receipt with
+        terminal_reason_code = lost_wire
+      ; error_kind = Some (R.error_kind_of_string "internal")
+      ; outcome = `Error
+      ; runtime_outcome = R.Runtime_failed
+      }
+  in
+  check
+    "tool-correction-lost keeps operator attention with its own typed reason"
+    (lost_disposition = (R.Disp_unknown, R.Reason_tool_correction_lost));
+  check
+    "tool-correction-lost reason has the canonical dashboard wire"
+    (String.equal
+       (R.operator_disposition_reason_to_string (snd lost_disposition))
+       lost_wire);
+  let unmapped_metric = Keeper_metrics.(to_string ReceiptUnmappedDisposition) in
+  let unmapped_before = Masc.Otel_metric_store.metric_value_or_zero unmapped_metric () in
+  let fenced_disposition =
+    R.operator_disposition
+      { base_receipt with
+        terminal_reason_code = fenced_wire
+      ; error_kind = Some (R.error_kind_of_string "internal")
+      ; outcome = `Error
+      ; runtime_outcome = R.Runtime_failed
+      }
+  in
+  let unmapped_after = Masc.Otel_metric_store.metric_value_or_zero unmapped_metric () in
+  check
+    "provider-attempt fence keeps operator attention with a typed reason"
+    (fenced_disposition
+     = (R.Disp_unknown, R.Reason_provider_attempt_effect_fenced));
+  check
+    "provider-attempt fence reason has the canonical dashboard wire"
+    (String.equal
+       (R.operator_disposition_reason_to_string (snd fenced_disposition))
+       fenced_wire);
+  check
+    "attempted provider effect still forbids same-turn retry"
+    (not
+       (Keeper_provider_attempt_effect_core.allows_same_turn_retry
+          Keeper_provider_attempt_effect_core.Effect_attempted));
+  check
+    "provider-attempt fence still emits an operator broadcast"
+    (R.needs_operator_broadcast (fst fenced_disposition));
+  check
+    "provider-attempt fence does not increment the unmapped regression metric"
+    (Float.equal unmapped_before unmapped_after)
 ;;
 
 let () =
@@ -326,109 +481,6 @@ let () =
   check
     "runtime completion ignores missing visible-output observation"
     (disposition = R.Disp_pass)
-;;
-
-let () =
-  with_temp_dir "transcript-corruption-pause" (fun base_path ->
-    let config = Masc.Workspace.default_config base_path in
-    ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-    let meta =
-      meta_fixture_exn
-        (`Assoc
-          [ "name", `String "corrupted-transcript"
-          ; ( "agent_name"
-            , `String
-                (Masc.Keeper_identity.keeper_agent_name
-                   "corrupted-transcript") )
-          ; "trace_id", `String "trace-corrupted-transcript"
-          ])
-    in
-    write_meta_exn config meta;
-    (match
-       KMS.persist_transcript_corruption_pause
-         config
-         ~keeper_name:meta.name
-         ~trace_id:meta.runtime.trace_id
-         ~generation:meta.runtime.nonce
-     with
-     | Ok `Persisted -> ()
-     | Ok `No_durable_meta ->
-       check "transcript corruption pause found durable meta" false
-     | Error error ->
-       check ("transcript corruption pause persisted: " ^ error) false);
-    let paused = read_meta_exn config meta.name in
-    check "transcript corruption pauses durable keeper" paused.paused;
-    check
-      "transcript corruption persists typed reset-required latch"
-      (match paused.latched_reason with
-       | Some Keeper_latched_reason.Transcript_corruption_reset_required -> true
-       | Some
-           ( Keeper_latched_reason.Operator_paused _
-           | Keeper_latched_reason.Dead_tombstone )
-       | None ->
-         false);
-    let generic_resume = KMC.mark_resumed paused in
-    check
-      "generic resume cannot clear transcript reset-required latch"
-      (generic_resume.paused
-       && generic_resume.latched_reason = paused.latched_reason))
-;;
-
-let () =
-  with_temp_dir "transcript-corruption-pause-identity" (fun base_path ->
-    let config = Masc.Workspace.default_config base_path in
-    ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-    let original =
-      meta_fixture_exn
-        (`Assoc
-          [ "name", `String "replaced-transcript-owner"
-          ; ( "agent_name"
-            , `String
-                (Masc.Keeper_identity.keeper_agent_name
-                   "replaced-transcript-owner") )
-          ; "trace_id", `String "trace-replaced-transcript-owner-old"
-          ])
-    in
-    write_meta_exn config original;
-    let current = read_meta_exn config original.name in
-    let replacement_trace =
-      match
-        Keeper_id.Trace_id.of_string
-          "trace-replaced-transcript-owner-new"
-      with
-      | Ok trace_id -> trace_id
-      | Error detail -> failwith detail
-    in
-    let replacement =
-      { current with
-        runtime =
-          { current.runtime with
-            trace_id = replacement_trace
-          ; nonce = current.runtime.nonce + 1
-          }
-      }
-    in
-    write_meta_exn config replacement;
-    (match
-       KMS.persist_transcript_corruption_pause
-         config
-         ~keeper_name:original.name
-         ~trace_id:original.runtime.trace_id
-         ~generation:original.runtime.nonce
-     with
-     | Error _ -> ()
-     | Ok _ ->
-       check
-         "replaced Keeper identity rejects old transcript pause"
-         false);
-    let retained = read_meta_exn config original.name in
-    check
-      "old transcript lane cannot pause replacement"
-      (not retained.paused
-       && Keeper_id.Trace_id.equal
-            retained.runtime.trace_id
-            replacement_trace
-       && retained.runtime.nonce = replacement.runtime.nonce))
 ;;
 
 let () =
@@ -497,7 +549,6 @@ let operator_disposition_kinds =
   ; R.Disp_pass_next_model
   ; R.Disp_user_cancelled
   ; R.Disp_skipped
-  ; R.Disp_operator_reset_required
   ; R.Disp_unknown
   ]
 ;;
@@ -600,13 +651,12 @@ let () =
       ; source = Keeper_internal_error.Provider_capacity
       ; detail = "provider health cooldown active before dispatch"
       ; retry_after = Keeper_internal_error.No_retry_hint
-      ; cooldown_cause = None
       }
   in
   let code =
     internal_error
-    |> Keeper_internal_error.sdk_error_of_masc_internal_error
-    |> Masc.Keeper_agent_error.terminal_reason_code_of_sdk_error
+    |> Keeper_internal_error.core_error_of_masc_internal_error
+    |> Masc.Keeper_agent_error.terminal_reason_code_of_core_error
   in
   check
     "capacity producer uses canonical terminal kind"
@@ -756,7 +806,6 @@ let () =
     ; outcome = `Ok
     ; runtime_outcome = R.Runtime_completed
     ; completion_contract_result = R.Completion_no_visible_output
-    ; goal_ids = [ "GOAL-1" ]
     ; actionable_signal
     }
   in
@@ -826,11 +875,12 @@ let () =
   in
   let terminal_outcome = UTS.Terminal_checkpoint in
   let returned =
-    UTS.persist_terminal_turn_meta_for_outcome
-      ~config
-      ~original_meta
-      ~updated_meta
-      ~terminal_outcome
+    with_owner_inventory config (fun () ->
+      UTS.persist_terminal_turn_meta_for_outcome
+        ~config
+        ~original_meta
+        ~updated_meta
+        ~terminal_outcome)
   in
   let persisted = read_meta_exn config keeper_name in
   check "checkpoint returns advanced turn usage"
@@ -877,12 +927,15 @@ let () =
     in
     { response_text = "completed"
     ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
+    ; terminal_effect_receipt = None
     ; model_used = "test-model"
+    ; runtime_id = "test-runtime"
+    ; max_context = 1000
     ; prompt_metrics
     ; ctx_composition
     ; runtime_observation = None
     ; turn_count = 1
-    ; final_oas_turn_ordinal = 0
+    ; final_agent_core_turn_ordinal = 0
     ; usage = Masc.Inference_utils.zero_usage
     ; usage_reported = true
     ; tool_calls = []
@@ -896,18 +949,60 @@ let () =
     ; tool_surface
     }
   in
+  let direct_outcome =
+    Masc.Keeper_execution_outcome.create
+      ~lane:Masc.Keeper_execution_outcome.Direct
+      (run_result ())
+  in
+  let autonomous_outcome =
+    Masc.Keeper_execution_outcome.create
+      ~lane:
+        (Masc.Keeper_execution_outcome.Autonomous
+           Masc.Keeper_world_observation.Reactive)
+      (run_result ())
+  in
+  check
+    "direct/autonomous normalize the same response"
+    (String.equal
+       (Masc.Keeper_execution_outcome.response_text direct_outcome)
+       (Masc.Keeper_execution_outcome.response_text autonomous_outcome));
+  check
+    "direct/autonomous normalize the same terminal class"
+    (Masc.Keeper_execution_outcome.terminal direct_outcome
+     = Masc.Keeper_execution_outcome.terminal autonomous_outcome);
+  check
+    "direct projects through reactive metrics channel"
+    (Masc.Keeper_execution_outcome.metrics_channel direct_outcome
+     = Masc.Keeper_world_observation.Reactive);
   let reactive_success ~last_outcome ~last_reason =
     let proactive_rt =
       { meta.runtime.proactive_rt with last_outcome; last_reason }
     in
     let prior = { meta with runtime = { meta.runtime with proactive_rt } } in
+    let reactive_event : Masc.Keeper_world_observation.pending_board_event =
+      { event_kind = Masc.Keeper_world_observation.Board_post_created
+      ; post_id = "reactive-success"
+      ; author = "peer"
+      ; title = "Reactive wake"
+      ; preview = "Continue ordinary work."
+      ; hearth = None
+      ; post_kind = Masc.Board.Human_post
+      ; updated_at = 0.0
+      ; explicit_mention = false
+      ; matched_targets = []
+      ; self_commented = false
+      ; new_external_since = 1
+      ; latest_external_author = Some "peer"
+      ; latest_external_preview = Some "Continue ordinary work."
+      }
+    in
     let observation : Masc.Keeper_world_observation.world_observation =
       { pending_messages = []
-      ; pending_board_events = []
+      ; pending_board_events = [ reactive_event ]
       ; idle_seconds = 0
       ; active_goals = []
       ; unclaimed_task_count = 0
-      ; claimable_task_count = 0
+      ; claimable_tasks = []
       ; failed_task_count = 0
       ; scheduled_automation =
           Masc.Keeper_world_observation.empty_scheduled_automation_observation
@@ -916,6 +1011,8 @@ let () =
       ; connected_surfaces = []
       ; connected_surface_failures = []
       ; own_recent_board_posts = []
+      ; fleet_messages = []
+      ; own_recent_actions = []
       }
     in
     Masc.Keeper_unified_metrics.update_metrics_from_result
@@ -951,6 +1048,7 @@ let () =
       ; provider_id = Some "kimi_code"
       ; http_status = None
       ; runtime_id = Some "kimi_code.kimi-for-coding"
+      ; agent_core_timeout = None
       ; reason = None
       }
   in
@@ -986,6 +1084,175 @@ let () =
        check
          "successful terminal turn clears turn consecutive failures"
          (entry_after_success.turn_consecutive_failures = 0))
+;;
+
+let () =
+  check
+    "checkpoint failure blocks product success"
+    (KTP.failure_blocks_product_success KTP.Checkpoint_store);
+  check
+    "receipt failure blocks product success"
+    (KTP.failure_blocks_product_success KTP.Execution_receipt);
+  check
+    "Owner meta failure blocks product success"
+    (KTP.failure_blocks_product_success KTP.Owner_meta);
+  check
+    "metrics failure cannot rewrite product success"
+    (not (KTP.failure_blocks_product_success KTP.Metrics_snapshot));
+  let observed = ref 0 in
+  KTP.run_best_effort
+    ~terminal_effect:KTP.Activity_graph
+    ~on_error:(fun _ -> incr observed)
+    (fun () -> failwith "injected activity projection failure");
+  check "best-effort failure is observed once" (!observed = 1);
+  let critical_rejected =
+    try
+      KTP.run_best_effort
+        ~terminal_effect:KTP.Checkpoint_store
+        ~on_error:(fun _ -> ())
+        (fun () -> ());
+      false
+    with
+    | Invalid_argument _ -> true
+  in
+  check "critical effect cannot enter best-effort wrapper" critical_rejected
+;;
+
+let () =
+  check
+    "observability artifacts all have consumer and retention owners"
+    (KOAR.validate () = []);
+  check
+    "observability inventory covers the six audited stores"
+    (List.length KOAR.entries = 6);
+  check
+    "observability artifacts never claim command authority"
+    (match KOAR.to_yojson () with
+     | `Assoc fields -> List.assoc_opt "command_authority" fields = Some (`Bool false)
+     | _ -> false)
+;;
+
+let () =
+  let member name = function
+    | `Assoc fields -> Option.value ~default:`Null (List.assoc_opt name fields)
+    | _ -> `Null
+  in
+  let string_member name json =
+    match member name json with
+    | `String value -> value
+    | _ -> ""
+  in
+  let queue ~count ~oldest_age =
+    `Assoc
+      [ "status", `String "ok"
+      ; "operator_action_required", `Bool false
+      ; "counts_complete", `Bool true
+      ; "read_error_count", `Int 0
+      ; "transition_outbox_count", `Int 0
+      ; "runnable_backlog_count", `Int count
+      ; "runnable_oldest_age_seconds", oldest_age
+      ; "recoverable_backlog_count", `Int 0
+      ; "retained_disabled_backlog_count", `Int 0
+      ; "paused_dead_backlog_count", `Int 0
+      ; "shutdown_fenced_backlog_count", `Int 0
+      ]
+  in
+  let stalled =
+    Health_fleet.keeper_event_queue_health_dimensions
+      ~stale_after_sec:300.0
+      (queue ~count:2 ~oldest_age:(`Float 600.0))
+  in
+  check
+    "healthy storage remains distinct from stalled work"
+    (String.equal (string_member "status" (member "storage_integrity" stalled)) "ok"
+     && String.equal (string_member "state" (member "work_liveness" stalled)) "stalled");
+  check
+    "stalled runnable work degrades queue status"
+    (String.equal (string_member "status" stalled) "degraded");
+  check
+    "runnable backlog is never backlog-clean"
+    (member "backlog_clean" stalled = `Bool false);
+  let fresh_backlog =
+    Health_fleet.keeper_event_queue_health_dimensions
+      ~stale_after_sec:300.0
+      (queue ~count:1 ~oldest_age:(`Float 5.0))
+  in
+  check
+    "fresh runnable backlog is explicit warning, not ok"
+    (String.equal (string_member "status" fresh_backlog) "warning");
+  let recoverable =
+    match queue ~count:0 ~oldest_age:`Null with
+    | `Assoc fields ->
+      `Assoc
+        (("status", `String "degraded")
+         :: ("operator_action_required", `Bool true)
+         :: ("recoverable_backlog_count", `Int 2)
+         :: List.remove_assoc "status"
+              (List.remove_assoc "operator_action_required"
+                 (List.remove_assoc "recoverable_backlog_count" fields)))
+    | _ -> assert false
+  in
+  let recoverable =
+    Health_fleet.keeper_event_queue_health_dimensions
+      ~stale_after_sec:300.0
+      recoverable
+  in
+  check
+    "non-runnable actionable backlog carries an explicit reason"
+    (match member "status_reasons" recoverable with
+     (* The fixture above sets recoverable_backlog_count to 2, and the reason
+        now carries it so an operator can tell two from two hundred. *)
+     | `List reasons -> List.mem (`String "recoverable_backlog=2") reasons
+     | _ -> false);
+  check
+    "non-runnable actionable backlog is never backlog-clean"
+    (member "backlog_clean" recoverable = `Bool false);
+  check
+    "non-runnable actionable backlog reports blocked work"
+    (String.equal
+       (string_member "state" (member "work_liveness" recoverable))
+       "blocked"
+     && member "operator_action_required" (member "work_liveness" recoverable)
+        = `Bool true);
+  let projection_pending =
+    match queue ~count:0 ~oldest_age:`Null with
+    | `Assoc fields ->
+      `Assoc
+        (("transition_outbox_count", `Int 1)
+         :: List.remove_assoc "transition_outbox_count" fields)
+    | _ -> assert false
+  in
+  let projection_pending =
+    Health_fleet.keeper_event_queue_health_dimensions
+      ~stale_after_sec:300.0
+      projection_pending
+  in
+  check
+    "pending transition projection is never backlog-clean"
+    (member "backlog_clean" projection_pending = `Bool false);
+  let immediate_backlog =
+    Health_fleet.keeper_event_queue_health_dimensions
+      ~stale_after_sec:0.0
+      (queue ~count:1 ~oldest_age:(`Float 0.0))
+  in
+  check
+    "zero-second threshold degrades runnable backlog immediately"
+    (String.equal (string_member "status" immediate_backlog) "degraded");
+  check
+    "zero-second threshold requires operator action immediately"
+    (member "operator_action_required" immediate_backlog = `Bool true);
+  let unavailable =
+    Health_fleet.keeper_event_queue_health_dimensions
+      ~stale_after_sec:300.0
+      (`Assoc
+         [ "status", `String "unavailable"
+         ; "counts_complete", `Bool false
+         ; "runnable_backlog_count", `Int 0
+         ])
+  in
+  check
+    "unavailable queue never claims backlog clean"
+    (member "backlog_clean" unavailable = `Bool false)
 ;;
 
 let () =

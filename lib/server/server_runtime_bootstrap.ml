@@ -5,14 +5,14 @@ open Server_routes_http
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 module Config_root_bootstrap = Server_runtime_config_root_bootstrap
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 
 let config_bootstrap_mode = Config_root_bootstrap.config_bootstrap_mode
 let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
 let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
 
-let oas_model_catalog_env_var_name = "OAS_MODEL_CATALOG"
-let oas_models_overlay_toml_filename = "oas-models-overlay.toml"
+let agent_core_model_catalog_env_var_name = "AGENT_CORE_MODEL_CATALOG"
+let agent_core_models_overlay_toml_filename = "agent-core-models-overlay.toml"
 
 (* Seconds withheld from tool-blob maintenance so the boot stages that follow
    it (Runtime_params restore, credential audit, Domain_pool, Keeper gate
@@ -21,8 +21,6 @@ let oas_models_overlay_toml_filename = "oas-models-overlay.toml"
    reserve carries them at the ~10x slowdown observed when a concurrent build
    saturates the disk, which is the condition under which maintenance
    overran its host's watchdog. *)
-let blob_maintenance_boot_reserve_sec = 60.0
-
 let nonempty_env env name =
   match env name with
   | Some value ->
@@ -46,28 +44,28 @@ let install_runtime_model_catalog_override ~load_catalog ~set_catalog path =
   | Error detail ->
     raise (Env_config_core.Config_error (Printf.sprintf "catalog %s: %s" path detail))
 
-let configure_oas_model_catalog_env
+let configure_agent_core_model_catalog_env
       ?(env = Sys.getenv_opt)
-      ?(agent_sdk_catalog = Llm_provider.Model_catalog.global)
+      ?(agent_core_catalog = Llm_provider.Model_catalog.global)
       ?(load_catalog = Llm_provider.Model_catalog.load_file)
       ?(set_catalog = Llm_provider.Model_catalog.set_global)
       ()
   =
-  match nonempty_env env oas_model_catalog_env_var_name with
+  match nonempty_env env agent_core_model_catalog_env_var_name with
   | Some path ->
     install_runtime_model_catalog_override ~load_catalog ~set_catalog path;
     Log.Misc.info
-      "model_catalog: OAS_MODEL_CATALOG=%s already configured and loaded"
+      "model_catalog: AGENT_CORE_MODEL_CATALOG=%s already configured and loaded"
       path;
     Some path
   | None ->
-    (match agent_sdk_catalog () with
+    (match agent_core_catalog () with
      | Some _ ->
        Log.Misc.info
-         "model_catalog: no explicit catalog path resolved; using agent_sdk ambient \
+         "model_catalog: no explicit catalog path resolved; using agent_core ambient \
           model catalog"
      | None ->
-       raise (Env_config_core.Config_error "model_catalog: OAS embedded model catalog is unavailable"));
+       raise (Env_config_core.Config_error "model_catalog: AGENT_CORE embedded model catalog is unavailable"));
     None
 
 let warn_ignored_config_root_full_catalogs
@@ -75,23 +73,23 @@ let warn_ignored_config_root_full_catalogs
       ~config_root
       ()
   =
-  if Option.is_none (nonempty_env env oas_model_catalog_env_var_name)
+  if Option.is_none (nonempty_env env agent_core_model_catalog_env_var_name)
   then
-    [ "models.toml"; "oas-models.toml" ]
+    [ "models.toml"; "agent-core-models.toml" ]
     |> List.iter (fun filename ->
       let path = Filename.concat config_root filename in
       if Option.is_some (existing_file path)
       then
         Log.Misc.warn
-          "model_catalog: ignoring retired config-root full catalog %s; OAS embedded catalog plus oas-models-overlay.toml is the deployment SSOT (set OAS_MODEL_CATALOG explicitly only for a deliberate full replacement)"
+          "model_catalog: ignoring retired config-root full catalog %s; AGENT_CORE embedded catalog plus agent-core-models-overlay.toml is the deployment SSOT (set AGENT_CORE_MODEL_CATALOG explicitly only for a deliberate full replacement)"
           path)
 
-(* RFC-0342 D1 / RFC-OAS-036: deployment-local capability deltas live in a
+(* RFC-0342 D1 / Agent Core contract: deployment-local capability deltas live in a
    config-root overlay merged onto the embedded catalog
    ([Model_catalog.set_global_overlay]), instead of a full-catalog fork that
-   shadows every embedded row and goes stale on each OAS release. Only an
-   operator-supplied [OAS_MODEL_CATALOG] keeps full-replacement precedence. *)
-let resolve_oas_model_catalog_overlay_path ?config_root () =
+   shadows every embedded row and goes stale on each AGENT_CORE release. Only an
+   operator-supplied [AGENT_CORE_MODEL_CATALOG] keeps full-replacement precedence. *)
+let resolve_agent_core_model_catalog_overlay_path ?config_root () =
   match config_root with
   | None -> None
   | Some root ->
@@ -99,15 +97,15 @@ let resolve_oas_model_catalog_overlay_path ?config_root () =
     if String.equal root "" then
       None
     else
-      existing_file (Filename.concat root oas_models_overlay_toml_filename)
+      existing_file (Filename.concat root agent_core_models_overlay_toml_filename)
 
-let configure_oas_model_catalog_overlay
+let configure_agent_core_model_catalog_overlay
       ?config_root
       ?(load_catalog = Llm_provider.Model_catalog.load_file)
       ?(set_overlay = Llm_provider.Model_catalog.set_global_overlay)
       ()
   =
-  match resolve_oas_model_catalog_overlay_path ?config_root () with
+  match resolve_agent_core_model_catalog_overlay_path ?config_root () with
   | None -> None
   | Some path ->
     (match load_catalog path with
@@ -235,7 +233,7 @@ let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
               (Printf.sprintf
                  "exact-output registry: mandatory lane %S is missing in %s; add \
                   [runtime.exact_output_lanes.%s] with a non-empty slots array \
-                  of OAS target refs, or reset the preserved runtime.toml and \
+                  of AGENT_CORE target refs, or reset the preserved runtime.toml and \
                   restart so MASC can reseed it; existing runtime configs are \
                   never migrated automatically"
                  lane_id
@@ -246,7 +244,7 @@ let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
            (Env_config_core.Config_error
               (Printf.sprintf
                  "exact-output registry: mandatory lane %S has no slots in %s; \
-                  configure at least one OAS target ref or reset the preserved \
+                  configure at least one AGENT_CORE target ref or reset the preserved \
                   runtime.toml and restart so MASC can reseed it; existing \
                   runtime configs are never migrated automatically"
                  lane_id
@@ -255,34 +253,42 @@ let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
     mandatory_exact_output_lane_ids
 ;;
 
-let require_usable_mandatory_exact_output_lanes ~config_path registry =
+let warn_rejected_exact_output_slots registry =
   List.iter
-    (fun lane_id ->
-       match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
-       | Ok { selected_slots = _ :: _; _ } -> ()
-       | Ok { selected_slots = []; _ } ->
-         raise
-           (Env_config_core.Config_error
-              (Printf.sprintf
-                 "exact-output registry: mandatory lane %S in %s resolved \
-                  without a usable admitted slot; make at least one configured \
-                  target credential available and restart; no runtime, \
-                  environment, or migration fallback is applied"
-                 lane_id
-                 config_path))
-       | Error error ->
-         raise
-           (Env_config_core.Config_error
-              (Printf.sprintf
-                 "exact-output registry: mandatory lane %S in %s has no \
-                  credential-usable admitted slot: %s; make at least one \
-                  configured target credential available and restart; no \
-                  runtime, environment, or migration fallback is applied"
-                 lane_id
-                 config_path
-                 (Runtime_exact_output_registry.lane_resolution_error_to_string
-                    error))))
-    mandatory_exact_output_lane_ids
+    (fun (slot : Runtime_exact_output_registry.rejected_slot) ->
+       Log.Server.warn
+         "exact_output: lane %S slot %d (%S) ignored because target %S is absent from the frozen catalog; remaining admitted slots stay active"
+         slot.lane_id
+         slot.position
+         slot.slot_id
+         slot.target_ref)
+    (Runtime_exact_output_registry.rejected_slots registry)
+;;
+
+let warn_rejected_exact_output_bindings resolver_snapshot =
+  List.iter
+    (fun (binding : Exact_output.rejected_target_binding) ->
+       Log.Server.warn
+         "exact_output: target %S excluded from the frozen resolver because its %s binding is missing; lane admission will decide whether required targets remain"
+         binding.target_ref
+         (exact_output_binding_component_to_string binding.component))
+    (Exact_output.resolver_rejected_target_bindings resolver_snapshot)
+;;
+
+let warn_optional_exact_output_lane registry ~lane_id ~feature =
+  match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+  | Ok { selected_slots = _ :: _; _ } -> ()
+  | Ok { selected_slots = []; _ }
+  | Error (Runtime_exact_output_registry.No_admitted_lane_slots _) ->
+    Log.Server.warn
+      "exact_output: %s is degraded because lane %S has no admitted target in the frozen catalog"
+      feature
+      lane_id
+  | Error (Runtime_exact_output_registry.Exact_lane_unconfigured _) ->
+    Log.Server.warn
+      "exact_output: %s is degraded until [runtime.exact_output_lanes.%s] is configured with AGENT_CORE target refs"
+      feature
+      lane_id
 ;;
 
 let configure_exact_output_registry ?config_root () =
@@ -291,11 +297,11 @@ let configure_exact_output_registry ?config_root () =
   in
   require_explicit_mandatory_exact_output_lanes ~config_path lanes;
   let catalog, catalog_description =
-    match nonempty_env Sys.getenv_opt oas_model_catalog_env_var_name with
+    match nonempty_env Sys.getenv_opt agent_core_model_catalog_env_var_name with
     | Some path -> Exact_output.Full_replacement_file path, " from full replacement " ^ path
     | None ->
-      (match resolve_oas_model_catalog_overlay_path ?config_root () with
-       | None -> Exact_output.Embedded_default, " from OAS embedded catalog"
+      (match resolve_agent_core_model_catalog_overlay_path ?config_root () with
+       | None -> Exact_output.Embedded_default, " from AGENT_CORE embedded catalog"
        | Some path ->
          (match read_exact_output_overlay path with
           | Ok contents ->
@@ -313,46 +319,47 @@ let configure_exact_output_registry ?config_root () =
           | Sys_error _ | Invalid_argument _ -> Error ())
     }
   in
-  match Exact_output.load_resolver_snapshot ~io ~catalog () with
+  match
+    Exact_output.load_resolver_snapshot
+      ~io
+      ~target_binding_policy:Exact_output.Exclude_unbound_targets
+      ~catalog
+      ()
+  with
   | Error error ->
     raise
       (Env_config_core.Config_error
          ("exact-output resolver snapshot: "
           ^ exact_output_snapshot_error_to_string error))
   | Ok resolver_snapshot ->
-    (match Runtime.publish_exact_output_registry ~lanes resolver_snapshot with
+    warn_rejected_exact_output_bindings resolver_snapshot;
+    (match
+       Runtime.publish_exact_output_registry
+         ~required_lane_ids:mandatory_exact_output_lane_ids
+         ~lanes
+         resolver_snapshot
+     with
      | Error detail ->
        raise
          (Env_config_core.Config_error
             ("exact-output resolver-and-lane registry: " ^ detail))
      | Ok registry ->
-       (* [resolve_lane] is the exact credential-availability path used by
-          execution. Validate the immutable value returned by atomic publication
-          before Keeper persistence recovery or any worker can be produced. *)
-       require_usable_mandatory_exact_output_lanes ~config_path registry;
-       let generation = Runtime_exact_output_registry.generation registry in
+       warn_rejected_exact_output_slots registry;
        Log.Misc.info
-         "exact_output: immutable resolver-and-lane registry generation %Ld published%s"
-         generation
+         "exact_output: immutable resolver-and-lane registry published%s"
          catalog_description;
-       if
-         not
-           (List.exists
-              (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-                 String.equal lane.id "compaction_exact")
-              lanes)
-       then
-         Log.Server.warn
-           "exact_output: compaction is degraded until [runtime.exact_output_lanes.compaction_exact] is configured with OAS target refs";
-       if
-         not
-           (List.exists
-              (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-                 String.equal lane.id "librarian_exact")
-              lanes)
-       then
-         Log.Server.warn
-           "exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with OAS target refs")
+       warn_optional_exact_output_lane
+         registry
+         ~lane_id:"compaction_exact"
+         ~feature:"compaction";
+       warn_optional_exact_output_lane
+         registry
+         ~lane_id:"librarian_exact"
+         ~feature:"librarian";
+       warn_optional_exact_output_lane
+         registry
+         ~lane_id:Runtime.verifier_exact_lane_id
+         ~feature:"completion authority")
 ;;
 
 let install_domain_pool_references domain_pool =
@@ -378,13 +385,6 @@ let () =
   ignore (Dashboard.force_link, Operator_tool.force_link);
   Transport_read_model.register_grpc_service_name Masc_grpc_service.service_name;
   Transport_read_model.register_grpc_health_service_name Masc_grpc_server.health_service_name;
-  Transport_read_model.register_webrtc_status (fun () ->
-    { ice_server_urls = Server_webrtc_transport.configured_ice_server_urls ()
-    ; pending_offers = Server_webrtc_transport.pending_offer_count ()
-    ; active_peers = Server_webrtc_transport.active_peer_count ()
-    ; live_connections = Server_webrtc_transport.live_webrtc_count ()
-    ; connected_channels = Server_webrtc_transport.connected_channel_count ()
-    });
   Dashboard_snapshot.register_dashboard_tools_http_json Server_dashboard_http_runtime_info.dashboard_tools_http_json;
   Dashboard_snapshot.register_namespace_truth_snapshot Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches;
   if Option.is_none (Sys.getenv_opt "OCAMLRUNPARAM") then begin
@@ -458,14 +458,6 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   let base_path = Env_config_core.normalize_masc_base_path_input base_path in
   Runtime_params.initialize ~base_path;
   Fs_compat.set_fs fs;
-  (* RFC-0266 §7 Phase D: replay persisted fusion run history into the
-     process-wide registry so in-progress + recently-completed runs survive
-     server restart. Missing files yield an empty registry; malformed replay
-     lines are logged and skipped. *)
-  let registry_path =
-    Filename.concat (Common.masc_dir_from_base_path ~base_path) "fusion-runs.jsonl"
-  in
-  Fusion_run_registry.set_global (Fusion_run_registry.replay registry_path);
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;
   Eio_context.set_switch sw;
@@ -491,8 +483,8 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   bootstrap_base_path_config_root ~base_path;
   let config_root = (startup_config_resolution ~base_path).config_root.path in
   warn_ignored_config_root_full_catalogs ~config_root ();
-  let (_ : string option) = configure_oas_model_catalog_env () in
-  let (_ : string option) = configure_oas_model_catalog_overlay ~config_root () in
+  let (_ : string option) = configure_agent_core_model_catalog_env () in
+  let (_ : string option) = configure_agent_core_model_catalog_overlay ~config_root () in
   (* Apply keeper runtime overrides from the resolved config root's
      runtime.toml. Must run before any module that reads
      [Env_config_keeper.KeeperKeepalive] env vars at init time. Existing
@@ -539,7 +531,24 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
       Log.Runtime.info
         ~category:Log.Boundary
         "keeper stream idle timeout resolved: disabled (no inter-line idle bound)");
+  (* RFC-OAS-037: same boot observability for the first-event (TTFT/prefill)
+     budget — configured-vs-effective must stay distinguishable at runtime,
+     the exact ambiguity #25128 hit for the idle knob. *)
+  Keeper_runtime_resolved.(
+    let first_event = (current ()).first_event_timeout_sec in
+    match first_event.value with
+    | Some seconds ->
+      Log.Runtime.info
+        ~category:Log.Boundary
+        "keeper first-event (TTFT/prefill) timeout resolved: %.1fs (source: %s)"
+        seconds
+        (source_to_string first_event.source)
+    | None ->
+      Log.Runtime.info
+        ~category:Log.Boundary
+        "keeper first-event timeout resolved: disabled (no first-event bound)");
   Keeper_task_owner_backend.install_hooks ();
+  Server_dashboard_http_execution_surfaces.install_task_mutation_cache_invalidation ();
   let state =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock
       ~mono_clock ~net
@@ -567,15 +576,6 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
      telemetry export. *)
   Pool_metrics.register ();
   state
-
-let runtime_path_diagnostics ?input_base_path (state : Mcp_server.server_state) =
-  let config = Mcp_server.workspace_config state in
-  Server_base_path_diagnostics.detect
-    ?input_base_path
-    ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
-    ~effective_base_path:config.base_path
-    ~effective_masc_root:(Workspace.masc_root_dir config)
-    ()
 
 let restore_persisted_sessions (state : Mcp_server.server_state) =
   Session.restore_from_disk state.session_registry
@@ -642,6 +642,8 @@ let startup_failure_disposition ~state_ready =
 
 type owner_initialization_error =
   | Runtime_config_path_unavailable
+  | Run_registry_already_installed of
+      [ `Exact_lane | `Fusion | `Goal_verification | `Verification ]
   | Runtime_default_initialization_failed of Runtime.strict_init_error
   | Keeper_persistence_preparation_failed of
       Server_bootstrap_loops.keeper_persistence_prepare_error
@@ -674,6 +676,14 @@ type activated_owner_state =
 let owner_initialization_error_to_string = function
   | Runtime_config_path_unavailable ->
     "no runtime config path; cannot initialize the default Runtime"
+  | Run_registry_already_installed `Fusion ->
+    "Fusion run registry already has a process owner"
+  | Run_registry_already_installed `Verification ->
+    "Verification run registry already has a process owner"
+  | Run_registry_already_installed `Goal_verification ->
+    "Goal verification run registry already has a process owner"
+  | Run_registry_already_installed `Exact_lane ->
+    "Exact lane run registry already has a process owner"
   | Runtime_default_initialization_failed error ->
     "Runtime.init_default_degraded failed: "
     ^ Runtime.strict_init_error_to_string error
@@ -749,6 +759,62 @@ let initialize_owner_state_blocking
     raise
       (Owner_initialization_failed
          (Startup_path_guard_rejected path_diagnostics));
+  Fs_compat.set_fs fs;
+  let masc_dir = Common.masc_dir_from_base_path ~base_path in
+  let fusion_registry =
+    Filename.concat masc_dir Fusion_run_registry.storage_filename
+    |> Fusion_run_registry.replay
+  in
+  (match Fusion_run_registry.install_global fusion_registry with
+   | Ok () -> ()
+   | Error Fusion_run_registry.Already_installed ->
+     raise
+       (Owner_initialization_failed
+          (Run_registry_already_installed `Fusion)));
+  let verification_registry =
+    Filename.concat masc_dir Verification_run_registry.storage_filename
+    |> Verification_run_registry.replay
+  in
+  (match Verification_run_registry.install_global verification_registry with
+   | Ok () -> ()
+   | Error Verification_run_registry.Already_installed ->
+     raise
+       (Owner_initialization_failed
+          (Run_registry_already_installed `Verification)));
+  let goal_verification_registry =
+    Filename.concat masc_dir Goal_verification_run_registry.storage_filename
+    |> Goal_verification_run_registry.replay
+  in
+  (match
+     Goal_verification_run_registry.install_global goal_verification_registry
+   with
+   | Ok () -> ()
+   | Error Goal_verification_run_registry.Already_installed ->
+     raise
+       (Owner_initialization_failed
+          (Run_registry_already_installed `Goal_verification)));
+  let exact_lane_registry =
+    Filename.concat masc_dir Exact_lane_run_registry.storage_filename
+    |> Exact_lane_run_registry.replay
+  in
+  (match Exact_lane_run_registry.install_global exact_lane_registry with
+   | Ok () -> ()
+   | Error Exact_lane_run_registry.Already_installed ->
+     raise
+       (Owner_initialization_failed
+          (Run_registry_already_installed `Exact_lane)));
+  let broadcast_internal_agent_runs_changed () =
+    Sse.broadcast (`Assoc [ "type", `String "internal_agent_runs_changed" ])
+  in
+  Atomic.set
+    Verification_run_registry.change_observer_fn
+    broadcast_internal_agent_runs_changed;
+  Atomic.set
+    Goal_verification_run_registry.change_observer_fn
+    broadcast_internal_agent_runs_changed;
+  Atomic.set
+    Exact_lane_run_registry.change_observer_fn
+    broadcast_internal_agent_runs_changed;
   (* [main_eio] caches the normalized operator input before entering Eio.
      Replace that preflight value with the canonical owner identity before
      [Workspace.default_config_uncached] constructs its backend, otherwise the
@@ -756,6 +822,29 @@ let initialize_owner_state_blocking
   Workspace_utils_backend_setup.cache_resolved_base_path base_path;
   Discovery_cache.set_env ~sw ~net;
   Gc_sampler.run ~sw ~clock ~interval:30.0;
+  (* The activity-events parse cache alongside the heap gauges: it is retained
+     for the life of each day file, so its size is a steady state rather than
+     churn, and 30s is often enough to see it move when retention sweeps.
+     Sampled here rather than inside [Gc_sampler] so neither that module nor
+     [Activity_graph] gains a dependency on the other. *)
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      (try
+         let stats = Activity_graph.cache_stats () in
+         Otel_metric_store.set_gauge
+           Otel_metric_store.metric_activity_cache_files
+           (float_of_int stats.Activity_graph.past_day_files);
+         Otel_metric_store.set_gauge
+           Otel_metric_store.metric_activity_cache_records
+           (float_of_int stats.Activity_graph.past_day_records)
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Server.warn "activity cache gauge sample failed: %s" (Printexc.to_string exn));
+      Eio.Time.sleep clock 30.0;
+      loop ()
+    in
+    loop ());
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       Eio.Time.sleep clock 5.0;
@@ -814,9 +903,9 @@ let initialize_owner_state_blocking
       | Fd_accountant.Storage_space_exhausted ->
         Keeper_disk_pressure.note_exception ~site exn);
   Log.Server.info "Fd_accountant OS resource observers installed";
-  Agent_sdk_log_bridge.install ();
+  Runtime_log_sink.install ();
   Log.Server.info
-    "Agent_sdk_log_bridge installed (agent_sdk.Log -> masc structured log)";
+    "Runtime_log_sink installed (agent core -> MASC structured log)";
   let state =
     create_server_state
       ~sw
@@ -852,6 +941,18 @@ let initialize_owner_state_blocking
      raise
        (Owner_initialization_failed
           (Runtime_default_initialization_failed error)));
+  (* masc#28404. Boot refuses only over runtimes something actually routes to,
+     which is right — an unassigned runtime is not a reason to stay down. But
+     the blocked ones then started silently, and the answer to "why can I not
+     assign this runtime" lived nowhere. One line per blocked runtime at boot is
+     that answer; empty is the healthy state and logs nothing. *)
+  List.iter
+    (fun ((runtime : Runtime.t), reason) ->
+      Log.Server.warn
+        "Runtime %s is not keeper-dispatchable: %s"
+        runtime.id
+        reason)
+    (Runtime.keeper_dispatch_blocked (Runtime.get_runtimes ()));
   configure_exact_output_registry
     ~config_root:(Filename.dirname runtime_config_path)
     ();
@@ -861,6 +962,55 @@ let initialize_owner_state_blocking
   sync_admin_token_env state;
   sync_internal_keeper_token_env state;
   sync_bootable_keeper_credentials state;
+  (* Shutdown admission restore below is mailbox-linearized by the Keeper
+     Owner. Install the inventory before persistence preparation so a durable
+     shutdown fence can be restored on a real process restart. The operation
+     runner remains dormant until the corresponding Keeper registry entry is
+     healthy, so queued chat work cannot run across this pre-ready boundary. *)
+  let keeper_owner_count =
+    match
+      Keeper_owner_registry.install_from_store
+        ~sw
+        ~operation_runner:
+          (Some (Server_routes_http_keeper_stream.operation_runner ~state ~clock))
+        (* The chat lane is told when its dependency is ready
+           ([wake_operation_drain]); the autonomous lane had no equivalent and
+           rediscovered a freed slot only on its next keepalive cadence, which
+           RFC-0373 measured as up to five consecutive lost cycles. The Owner
+           fires this only when the freed slot is still unclaimed, so the wake
+           means a turn can start now. *)
+        ~on_turn_slot_released:
+          (Some
+             (fun ~keeper_name ->
+               match
+                 Keeper_registry.wakeup_running
+                   ~intent:Keeper_registry.Turn_slot_released
+                   ~base_path:(Mcp_server.workspace_config state).base_path
+                   keeper_name
+               with
+               | Keeper_registry.Signaled -> ()
+               | Keeper_registry.Deferred_unregistered ->
+                 Log.Keeper.info
+                   ~keeper_name
+                   "turn slot release wake deferred: keeper is no longer registered"
+               | Keeper_registry.Deferred_not_running phase ->
+                 Log.Keeper.info
+                   ~keeper_name
+                   "turn slot release wake deferred: phase=%s"
+                   (Keeper_state_machine.phase_to_string phase)
+               | Keeper_registry.Deferred_lifecycle _ ->
+                 (* The registry already logged this arm and incremented
+                    LifecycleDispatchRejections with intent=turn_slot_released;
+                    repeating it here would double-count one denial. *)
+                 ()))
+        (Mcp_server.workspace_config state)
+    with
+    | Ok count -> count
+    | Error error -> raise (Keeper_owner_registry.Install_failed error)
+  in
+  Log.Keeper.info
+    "keeper_owner: installed %d single-owner actor(s) before persistence recovery"
+    keeper_owner_count;
   let prepared_keeper_persistence =
     match
       Server_bootstrap_loops.prepare_keeper_persistence
@@ -874,21 +1024,6 @@ let initialize_owner_state_blocking
         (Owner_initialization_failed
            (Keeper_persistence_preparation_failed error))
   in
-  (* Preparation above has converged recovery writes, while Keeper
-     persistence owners have not started yet, so startup is the sole
-     quiescent scan/deletion boundary. A blob must remain unreferenced across
-     two complete startup scans before deletion. A failed scan retains every
-     blob.
-
-     The scan reads every durable consumer file, so its cost grows with
-     workspace size while the startup watchdog's budget does not: an
-     unbounded scan let the watchdog exit a server that was otherwise ready
-     to serve, which is the zombie-listener failure #3107 introduced the
-     watchdog to prevent, arriving through a different door. The scan
-     therefore gets an explicit deadline derived from the watchdog's
-     remaining time. Exhausting it aborts before the candidate snapshot is
-     written, so every blob is retained -- the same outcome as any other
-     scan failure. *)
   (match
      Eio_unix.run_in_systhread (fun () ->
        Keeper_wire_capture.prune_expired
@@ -896,51 +1031,14 @@ let initialize_owner_state_blocking
    with
    | Error error ->
      Log.Server.warn
-       "startup tool blob maintenance stopped; wire-capture retention prune failed: %s"
+       "startup wire-capture retention prune failed: %s"
        (Keeper_wire_capture.prune_error_to_string error)
    | Ok wire_capture_pruned ->
      if wire_capture_pruned > 0
      then
        Log.Server.info
          "startup wire-capture retention: pruned %d expired day-file(s)"
-         wire_capture_pruned;
-     let maintenance_budget_sec =
-       Server_startup_state.remaining_watchdog_budget_sec
-         ~reserve_sec:blob_maintenance_boot_reserve_sec
-     in
-     if maintenance_budget_sec <= 0.0
-     then
-       Log.Server.warn
-         "startup tool blob maintenance skipped; the startup watchdog budget \
-          is already spent (reserve=%.0fs). Every blob is retained."
-         blob_maintenance_boot_reserve_sec
-     else (
-       let deadline_epoch_seconds =
-         Unix.gettimeofday () +. maintenance_budget_sec
-       in
-       match
-         Eio_unix.run_in_systhread (fun () ->
-           Tool_blob_maintenance.run
-             ~base_path
-             ~mode:Tool_blob_maintenance.Delete_previous_candidates
-             ~budget:(Tool_blob_maintenance.Bounded_by { deadline_epoch_seconds }))
-       with
-       | Ok report ->
-         if report.candidates_recorded > 0 || report.deleted > 0
-         then
-           Log.Server.info
-             "startup tool blob maintenance: live=%d blobs=%d candidates=%d \
-              deleted=%d"
-             report.live_references
-             report.blobs_observed
-             report.candidates_recorded
-             report.deleted
-       | Error error ->
-         Log.Server.warn
-           "startup tool blob maintenance stopped; no further blobs were \
-            deleted (budget=%.0fs): %s"
-           maintenance_budget_sec
-           (Tool_blob_maintenance.error_to_string error)));
+         wire_capture_pruned);
   Runtime_settings.ensure_init ();
   Runtime_params.restore ~base_path;
   Log.Server.info "Runtime_params restored from %s" base_path;
@@ -988,78 +1086,81 @@ let initialize_owner_state_blocking
     (Domain_pool.domain_count domain_pool);
   { state; path_diagnostics; prepared_keeper_persistence; domain_pool }
 
-(* Cap the per-boot file list in the sync log line; full counts are always
-   logged, names are illustrative. *)
-let max_logged_prompt_sync_entries = 10
-
-let sync_prompt_assets_from_binary () =
+(* Copies and deletions are two events, so they get two lines with two
+   sample budgets. One line held both and cut the shared sample at ten: a
+   version bump copies enough to fill it, and the deleted paths never
+   reached the line. For [Tools] those names are the whole message, since a
+   definition an operator drops into the runtime directory is deleted at the
+   next boot and nothing else says so. *)
+let sync_managed_assets_from_binary ~label ~domain ~dest_dir () =
   let sync =
-    Prompt_defaults.sync_prompt_assets
+    Managed_asset_sync.sync
+      ~domain
       ~read:Embedded_config.read
       ~files:Embedded_config.file_list
-      ~prompts_dir:(Config_dir_resolver.prompts_dir ())
+      ~dest_dir
       ()
   in
-  (match
-     sync.Prompt_defaults.copied,
-     sync.Prompt_defaults.overwritten,
-     sync.Prompt_defaults.removed
-   with
-   | [], [], [] -> ()
-   | copied, overwritten, removed ->
-       let names = copied @ overwritten @ removed in
-       let shown =
-         List.filteri (fun i _ -> i < max_logged_prompt_sync_entries) names
-       in
-       Log.Misc.info
-         "prompt assets synced from binary: %d copied, %d overwritten, %d retired [%s%s]"
-         (List.length copied)
-         (List.length overwritten)
-         (List.length removed)
-         (String.concat ", " shown)
-         (if List.length names > max_logged_prompt_sync_entries then ", …"
-          else ""));
+  Option.iter
+    (fun line -> Log.Misc.info "%s" line)
+    (Managed_asset_sync.distribution_line ~label sync);
+  Option.iter
+    (fun line -> Log.Misc.warn "%s" line)
+    (Managed_asset_sync.removed_line ~label sync);
   List.iter
-    (fun (rel, msg) -> Log.Misc.warn "prompt asset sync failed: %s: %s" rel msg)
-    sync.Prompt_defaults.failed
+    (fun (rel, msg) -> Log.Misc.warn "%s asset sync failed: %s: %s" label rel msg)
+    sync.Managed_asset_sync.failed
+
+(* Tool definitions ship embedded in the binary and are read once at boot
+   (RFC prompts-and-tool-definitions-outside-ocaml §6). A definition that
+   does not decode refuses the boot here, before readiness, instead of
+   publishing a partial tool surface. *)
+let validate_embedded_tool_definitions () =
+  match
+    Tool_definition_toml.validate_embedded
+      ~read:Embedded_config.read
+      ~files:Embedded_config.file_list
+  with
+  | Ok () -> ()
+  | Error message -> failwith (Printf.sprintf "embedded tool definition: %s" message)
 
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
   let config = Mcp_server.workspace_config state in
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
   Config_dir_resolver.log_resolution ~context:"ServerBootstrap" ();
-  (* Converge runtime prompt markdown onto the binary-embedded assets
-     before the registry scans the directory (#20929: merged prompt edits
-     never reached the runtime dir otherwise). *)
-  sync_prompt_assets_from_binary ();
-  (* Initialize prompt registry with defaults and restore saved overrides *)
-  let prompt_markdown_dir =
-    Prompt_defaults.bootstrap_runtime
-      ~workspace_path:config.workspace_path
-      ~base_path:config.base_path
-  in
-  let expected_prompt_dir = Config_dir_resolver.prompts_dir () in
-  if prompt_markdown_dir <> expected_prompt_dir then
-    Log.Misc.warn
-      "prompt markdown dir diverges from resolved config root: %s (expected %s)"
-      prompt_markdown_dir expected_prompt_dir;
-  let missing_prompt_files = Prompt_registry.validate_required_prompt_files () in
-  if missing_prompt_files <> [] then
-    begin
-    Otel_metric_store.inc_counter Otel_metric_store.metric_error_events ~labels:[("type", Error_event_type.(to_label Missing_config))] ();
-    Log.Misc.error "required prompt files missing: %s"
-      (missing_prompt_files
-      |> List.map (fun (key, path) -> Printf.sprintf "%s -> %s" key path)
-      |> String.concat ", ");
-  end;
-  let invalid_prompt_templates = Prompt_registry.validate_prompt_templates () in
-  if invalid_prompt_templates <> [] then
-    begin
-    Otel_metric_store.inc_counter Otel_metric_store.metric_error_events ~labels:[("type", Error_event_type.(to_label Missing_config))] ();
-    Log.Misc.error "prompt templates use unknown variables: %s"
-      (invalid_prompt_templates
-      |> List.map (fun (key, variable) -> Printf.sprintf "%s -> %s" key variable)
-      |> String.concat ", ")
-  end
+  (* Converge the runtime prompt markdown and tool definition dirs onto the
+     binary-embedded assets before anything scans them (#20929: merged
+     prompt edits never reached the runtime dir otherwise). *)
+  sync_managed_assets_from_binary
+    ~label:"prompt"
+    ~domain:Managed_asset_sync.Prompts
+    ~dest_dir:(Config_dir_resolver.prompts_dir ())
+    ();
+  sync_managed_assets_from_binary
+    ~label:"tool"
+    ~domain:Managed_asset_sync.Tools
+    ~dest_dir:(Config_dir_resolver.tools_dir ())
+    ();
+  validate_embedded_tool_definitions ();
+  (* Load the registry and replay operator overrides. The resolved directory is
+     not inspected afterwards: three checks used to stand here and none of them
+     gated. One compared a value against the call that produced it. One
+     re-asserted a post-condition of the directory scan itself, and could not
+     see the failure it read as protecting against, because a file the loader
+     never read is never registered. One logged templates using undeclared
+     variables. All three continued on failure, so a boot serving silently
+     shorter prompts looked healthy.
+
+     The prompts ship embedded in this binary, and
+     [test_prompt_templates_render] requires every file under config/prompts to
+     register as a key, resolve from a real source, render with the variables
+     its own frontmatter declares, and use each one. Repeating that at start
+     decides nothing the build did not already decide. *)
+  ignore
+    (Prompt_defaults.bootstrap_runtime
+       ~workspace_path:config.workspace_path
+       ~base_path:config.base_path
+     : string)
 
 let start_owner_lazy_tasks ~sw state =
   let run_lazy_task (task_name, task_fn) =
@@ -1153,7 +1254,7 @@ let mark_owner_state_ready () =
   match Server_startup_state.mark_state_ready () with
   | Error error -> Error (Readiness_transition_failed error)
   | Ok () ->
-    let observed = Server_startup_state.(!state) in
+    let observed = Server_startup_state.snapshot () in
     if observed.state_ready then Ok ()
     else
       Error
@@ -1165,6 +1266,13 @@ let start_completion_authority ~sw ~clock (state : Mcp_server.server_state) =
     ~clock
     ~config:(Mcp_server.workspace_config state)
 
+(* RFC-0387 stage 2 PR-2: the goal-side verifier caller. It must start in the
+   same post-readiness lane as the task completion authority — the stage-2
+   gate is illegal to merge without it (a gate no one calls wedges every goal
+   that enters [Verifying]). *)
+let start_goal_verifier ~sw (state : Mcp_server.server_state) =
+  Goal_verification_agent.start ~sw ~config:(Mcp_server.workspace_config state)
+
 let start_post_ready_owner_lanes
       ~sw
       ~clock
@@ -1175,6 +1283,7 @@ let start_post_ready_owner_lanes
      and stdio must install the system-LLM authority before maintenance can
      observe or resume AwaitingVerification work. *)
   start_completion_authority ~sw ~clock state;
+  start_goal_verifier ~sw state;
   Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
 
 let install_keeper_gate_persistence state =
@@ -1273,12 +1382,28 @@ let activate_owner_state
 
 let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_request_handler
     ~make_h2_request_handler ~make_h2_error_handler () =
+  let resolved_auth_config =
+    match Server_auth_config.resolve (Server_auth_config.read_env ()) with
+    | Ok config -> config
+    | Error error ->
+      raise
+        (Env_config_core.Config_error
+           (Server_auth_config.resolve_error_to_string error))
+  in
+  (match Server_auth.configure resolved_auth_config with
+   | Ok () -> ()
+   | Error error ->
+     raise
+       (Env_config_core.Config_error
+          (Server_auth.configure_error_to_string error)));
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     init_runtime_context env
   in
-  (* Route OAS provider diagnostics into the structured log before any
+  let configured_agent_transport = Masc_grpc_transport.configure_from_env () in
+  let configured_http_mode = Env_config.Transport.configure_h2_from_env () in
+  (* Route provider diagnostics into the structured log before any
      provider call runs (#25148). *)
-  Oas_diag_sink.install ();
+  Provider_diag_log_sink.install ();
   (* 0. Dashboard bundle freshness — a stale bundle silently keeps calling
      routes the current binary already removed (#24332 governance->gate:
      the served SPA still called DELETE'd /api/v1/dashboard/governance for
@@ -1322,15 +1447,14 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
   in
   let h2_error_handler = make_h2_error_handler () in
   let http_mode =
-    match Env_config.Transport.use_h2 () with
+    match configured_http_mode with
     | Env_config.Transport.H2_only -> `H2_only
     | Env_config.Transport.H1_only -> `H1_only
-    | Env_config.Transport.Auto
-    | Env_config.Transport.Unknown_h2_mode _ -> `Auto
+    | Env_config.Transport.Auto -> `Auto
   in
   let socket = Server_bootstrap_http.listen_socket ~sw ~net config in
   Transport_metrics.set_ws_same_origin_runtime_ready false;
-  server_state := None;
+  clear_server_state ();
   Server_startup_state.reset ();
 
   (* 2. Run owner initialization outside the accept loop. The state and
@@ -1342,7 +1466,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
     let handle_initialization_failure error =
       match
         startup_failure_disposition
-          ~state_ready:Server_startup_state.(!state).state_ready
+          ~state_ready:(Server_startup_state.snapshot ()).state_ready
       with
       | Fatal_pre_ready ->
         Log.Server.error
@@ -1374,10 +1498,10 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       (* Authentication wrappers treat [server_state = Some _] as the mutation
          capability boundary. Publish only after transport-neutral activation
          has restored Gate state and started the owner persistence lanes. *)
-      server_state := Some state;
+      publish_server_state state;
       (* Global readiness is the transport-neutral owner capability, not a
          quorum over optional transports. Mark it before starting fallible
-         Discord/gRPC/WS/WebRTC/dashboard auxiliaries so one transport cannot
+         Discord/gRPC/WS/dashboard auxiliaries so one transport cannot
          turn an already-published HTTP owner into a process-wide fatal
          pre-readiness failure. Each auxiliary owns its typed health state. *)
       (match mark_owner_state_ready () with
@@ -1424,7 +1548,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       Masc_grpc_server.start ~sw ~env ~workspace_config:(Mcp_server.workspace_config state)
         ~tool_dispatcher;
       (* Initialize gRPC client for keeper heartbeat when transport is gRPC *)
-      (match Masc_grpc_transport.from_env () with
+      (match configured_agent_transport with
        | Masc_grpc_transport.Grpc ->
            (try
               let client = Masc_grpc_client.create_from_env ~sw ~env in
@@ -1433,7 +1557,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.Server.warn "gRPC keeper client init failed: %s"
                 (Printexc.to_string exn))
-       | Http | Ws | Webrtc | Local -> ());
+       | Http | Ws | Local -> ());
       let dispatch_ws_inbound_message ws_session_id body_str =
           let jsonrpc_id_opt body =
             match Yojson.Safe.from_string body with
@@ -1443,7 +1567,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
                 | Some _ -> Some `Null
                 | None -> None)
             | _ -> None
-            | exception _ -> None
+            | exception _ -> None (* cancel-guard-ok: the scrutinee is a decoded JSON value and the arms only pattern-match on it, so no fiber work runs under this handler *)
           in
           let send_overloaded_response rejection =
             Log.Server.debug
@@ -1529,85 +1653,27 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       in
       Server_mcp_transport_ws.set_inbound_message_handler
         dispatch_ws_inbound_message;
+      (* WebSocket rides the HTTP listener's same-origin /ws upgrade
+         (enabled by default, opt-out via MASC_WS_ENABLED=0). *)
       Transport_metrics.set_ws_same_origin_runtime_ready true;
-      (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
-      Server_ws_standalone.start ~sw ~env
-        ~on_message:Server_mcp_transport_ws.dispatch_inbound_message;
-      (* WebRTC DataChannel transport (enabled by default, opt-out via MASC_WEBRTC_ENABLED=0) *)
-      if Server_webrtc_transport.is_enabled () then (
-        Log.Server.info "WebRTC DataChannel transport enabled";
-        Server_webrtc_transport.set_message_handler
-          (fun peer_id body_str ->
-            Eio.Fiber.fork ~sw (fun () ->
-              try
-                let response_json =
-                  Mcp_eio.handle_request ~clock ~sw
-                    ~mcp_session_id:peer_id state body_str
-                in
-                let response_str = Yojson.Safe.to_string response_json in
-                if response_str <> "null" then begin
-                  match
-                    Server_webrtc_transport.send_to_peer peer_id response_str
-                  with
-                  | Ok _bytes -> ()
-                  | Error e ->
-                    Log.Server.warn
-                      "WebRTC send_to_peer dropped response for peer=%s: %s"
-                      peer_id e
-                end
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.Server.warn "WebRTC dispatch error %s: %s"
-                  peer_id (Printexc.to_string exn)));
-        Server_webrtc_transport.set_connection_starter
-          (fun peer_id ->
-            Server_webrtc_transport.start_webrtc_connection ~sw ~env peer_id));
       (* Register transport providers for unified bridge *)
       Transport_bridge.register_provider (module struct
         let name = "sse"
         let protocol = Transport.Sse
         let is_enabled () = true  (* SSE is always enabled *)
         let session_count () = Sse.client_count ()
-        let status_json () = `Assoc [
-          "clients", `Int (Sse.client_count ());
-          "external_subscribers", `Int (Sse.external_subscriber_count ());
-        ]
-        let reap_stale () = List.length (Sse.cleanup_stale ())
       end);
       Transport_bridge.register_provider (module struct
         let name = "ws"
         let protocol = Transport.Ws
-        let is_enabled () = Server_ws_standalone.is_enabled ()
+        let is_enabled () = Transport_metrics.ws_enabled ()
         let session_count () = Server_mcp_transport_ws.session_count ()
-        let status_json () = `Assoc [
-          "port", `Int (Server_ws_standalone.configured_port ());
-          "sessions", `Int (Server_mcp_transport_ws.session_count ());
-        ]
-        let reap_stale () = 0  (* WS sessions self-clean on disconnect *)
       end);
       Transport_bridge.register_provider (module struct
         let name = "grpc"
         let protocol = Transport.Grpc
         let is_enabled () = Masc_grpc_server.is_enabled ()
         let session_count () = 0  (* gRPC uses per-call, no persistent sessions *)
-        let status_json () = `Assoc [
-          "port", `Int (Masc_grpc_server.configured_port ());
-          "service", `String Masc_grpc_service.service_name;
-        ]
-        let reap_stale () = 0
-      end);
-      Transport_bridge.register_provider (module struct
-        let name = "webrtc"
-        let protocol = Transport.Webrtc
-        let is_enabled () = Server_webrtc_transport.is_enabled ()
-        let session_count () = Server_webrtc_transport.live_webrtc_count ()
-        let status_json () = `Assoc [
-          "active_peers", `Int (Server_webrtc_transport.active_peer_count ());
-          "live_connections", `Int (Server_webrtc_transport.live_webrtc_count ());
-          "connected_channels", `Int (Server_webrtc_transport.connected_channel_count ());
-        ]
-        let reap_stale () = 0  (* WebRTC has its own ICE timeout *)
       end);
       Transport_bridge.seal ();
       (* Cold-start warm-cache stagger is handled by warm_delay_s in each
@@ -1618,8 +1684,18 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       Server_dashboard_http.start_transport_health_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_execution_trust_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
-      Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;
-      Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;
+      Server_dashboard_http.start_operator_snapshot_refresh_loop
+        ~state
+        ~sw
+        ~clock
+        ~broadcast_snapshot:
+          Server_dashboard_http_execution_surfaces.broadcast_operator_snapshot;
+      Server_dashboard_http.start_operator_digest_refresh_loop
+        ~state
+        ~sw
+        ~clock
+        ~broadcast_digest:
+          Server_dashboard_http_execution_surfaces.broadcast_operator_digest;
       (* Pre-warm shell cache in a separate fiber so it cannot block
          lazy startup tasks or later keeper loop startup
          (#keeper-bootstrap-stuck). *)
@@ -1665,7 +1741,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
     try
       let timeout_sec = Server_startup_state.watchdog_timeout_sec () in
       Eio.Time.sleep clock timeout_sec;
-      let current = Server_startup_state.(!state) in
+      let current = Server_startup_state.snapshot () in
       if not current.state_ready then (
         let elapsed = Server_startup_state.elapsed_since_start () in
         Log.Server.error

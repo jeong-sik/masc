@@ -6,24 +6,17 @@ type t = {
   prev_hash : string option;
 }
 
-let initialized = ref false
+(* ULID-lite: 16 hex chars of timestamp-ms, "-", 20 hex chars of entropy. The
+   shape is unchanged; the entropy used to come from a self-seeded generator
+   this module kept for itself, which was neither the OS CSPRNG the rest of the
+   tree draws from nor the source any other ID uses (#26718). *)
+let random_hex_bytes = 10
 
-let init_random () =
-  if not !initialized then begin
-    Random.self_init ();
-    initialized := true
-  end
-
-(* ULID-lite: 16 hex chars timestamp-ms + "-" + 26 hex chars random. *)
+(* NDT-OK: opaque identifier entropy, never a branch input. *)
 let generate_id () =
-  init_random ();
   let now_ms = Int64.of_float (Unix.gettimeofday () *. 1000.0) in
-  let ts_hex = Printf.sprintf "%016Lx" now_ms in
-  let r1 = Random.int64 0x100000000L in
-  let r2 = Random.int64 0x100000000L in
-  let r3 = Random.int64 0x10000L in
-  let r_hex = Printf.sprintf "%08Lx%08Lx%04Lx" r1 r2 r3 in
-  ts_hex ^ "-" ^ r_hex
+  Printf.sprintf "%016Lx-%s" now_ms (Random_id.hex ~bytes:random_hex_bytes)
+;;
 
 let make ~category ~payload ~prev_hash =
   { id = generate_id ();
@@ -67,7 +60,7 @@ let kind_name : Yojson.Safe.t -> string = function
   | `Null -> "null"
   | `Bool _ -> "bool"
   | `Int _ -> "int"
-  | `Intlit _ -> "int"
+  | `Intlit _ -> "intlit"
   | `Float _ -> "float"
   | `String _ -> "string"
   | `Assoc _ -> "object"

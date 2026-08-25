@@ -48,17 +48,6 @@ let optional_string_field name fields =
   | Some _ -> Error ("expected string field: " ^ name)
 ;;
 
-let optional_keeper_wake_urgency_field name fields =
-  match List.assoc_opt name fields with
-  | None | Some `Null -> Ok None
-  | Some (`String value) ->
-    let* urgency =
-      Schedule_supported_kinds.keeper_wake_urgency_of_string (String.trim value)
-    in
-    Ok (Some urgency)
-  | Some _ -> Error ("expected string field: " ^ name)
-;;
-
 let keeper_name_field name fields =
   let* value = string_field name fields in
   if Schedule_supported_kinds.valid_keeper_wake_target_name value
@@ -129,6 +118,24 @@ type keeper_wake_occurrence_status =
   | Keeper_wake_already_acked
   | Keeper_wake_already_failed
   | Keeper_wake_already_cancelled
+
+type keeper_wake_result_delivery_policy =
+  | Keeper_wake_result_delivery_none
+  | Keeper_wake_result_delivery_reply_to_origin
+
+let keeper_wake_result_delivery_policy_to_string = function
+  | Keeper_wake_result_delivery_none -> "none"
+  | Keeper_wake_result_delivery_reply_to_origin -> "reply_to_origin"
+;;
+
+let keeper_wake_result_delivery_policy_of_fields fields =
+  let* policy = optional_string_field "result_delivery_policy" fields in
+  match policy with
+  | None -> Ok Keeper_wake_result_delivery_none
+  | Some "none" -> Ok Keeper_wake_result_delivery_none
+  | Some "reply_to_origin" -> Ok Keeper_wake_result_delivery_reply_to_origin
+  | Some value -> Error ("unsupported result_delivery_policy: " ^ value)
+;;
 
 let keeper_wake_occurrence_status_to_string = function
   | Keeper_wake_awaiting_ack -> "awaiting_ack"
@@ -256,6 +263,7 @@ type dispatch_receipt =
       ; stimulus : string
       ; stimulus_id : string option
       ; reaction_ledger_status : keeper_wake_reaction_ledger_status option
+      ; result_delivery_policy : keeper_wake_result_delivery_policy
       ; occurrence_status : keeper_wake_occurrence_status
       ; activation_outcome : keeper_wake_activation_outcome
       }
@@ -275,6 +283,9 @@ let dispatch_receipt_of_detail = function
       let* stimulus_id = optional_string_field "stimulus_id" fields in
       let* reaction_ledger_status =
         keeper_wake_reaction_ledger_status_of_fields fields
+      in
+      let* result_delivery_policy =
+        keeper_wake_result_delivery_policy_of_fields fields
       in
       let* occurrence_status =
         let* value = string_field "occurrence_status" fields in
@@ -313,6 +324,7 @@ let dispatch_receipt_of_detail = function
            ; stimulus
            ; stimulus_id
            ; reaction_ledger_status
+           ; result_delivery_policy
            ; occurrence_status
            ; activation_outcome
            })
@@ -331,6 +343,7 @@ let dispatch_receipt_to_yojson = function
       ; stimulus
       ; stimulus_id
       ; reaction_ledger_status
+      ; result_delivery_policy
       ; occurrence_status
       ; activation_outcome
       } ->
@@ -347,6 +360,10 @@ let dispatch_receipt_to_yojson = function
        ; "schedule_id", `String schedule_id
        ; "urgency", `String urgency
        ; "post_id", `String post_id
+       ; ( "result_delivery_policy"
+         , `String
+             (keeper_wake_result_delivery_policy_to_string
+                result_delivery_policy) )
        ; ( "occurrence_status"
          , `String (keeper_wake_occurrence_status_to_string occurrence_status) )
        ]
@@ -461,15 +478,21 @@ let activation_outcome_for_required_wake config ~base_path ~keeper_name =
           ^ Executor_pool_ref.strict_submit_error_to_string error))
   | Ok meta_result ->
     let admission =
-      Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
+      Keeper_owner_registry.shutdown_operation_id ~base_path ~keeper_name
     in
     let runtime =
       Keeper_activation_readiness.owner_runtime_of_registry_entry
         (Keeper_registry.get ~base_path keeper_name)
     in
+    (match admission with
+     | Error error ->
+       Keeper_wake_activation_deferred
+         (Keeper_wake_activation_owner_unknown
+            (Keeper_owner_registry.lookup_error_to_string error))
+     | Ok shutdown_operation_id ->
     (match
        Keeper_activation_readiness.classify_durable_demand_execution
-         ~shutdown_operation_id:admission.snapshot_shutdown_operation_id
+         ~shutdown_operation_id
          ~runtime
          meta_result
      with
@@ -513,7 +536,7 @@ let activation_outcome_for_required_wake config ~base_path ~keeper_name =
         | Keeper_registry.Deferred_lifecycle denial ->
           Keeper_wake_activation_deferred
             (Keeper_wake_activation_lifecycle_denied
-               (Keeper_lifecycle_admission.autonomous_denial_to_wire denial))))
+               (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)))))
 ;;
 
 let log_activation_outcome ~schedule_id ~keeper_name = function
@@ -651,7 +674,8 @@ let occurrence_source_and_disposition
       | Keeper_event_queue_state.Turn_attempt_terminal { detail } ->
         Terminally_failed (detail, terminal_evidence)
       | Keeper_event_queue_state.Fusion_terminal _
-      | Keeper_event_queue_state.Hitl_terminal _ ->
+      | Keeper_event_queue_state.Hitl_terminal _
+      | Keeper_event_queue_state.Turn_completed ->
         Terminally_completed terminal_evidence
     in
     ( terminal.source
@@ -927,6 +951,10 @@ let dispatch_keeper_wake
     terminal_dispatch_result
       (Schedule_payload_projection.body_optional_string payload "title")
   in
+  let* result_delivery =
+    terminal_dispatch_result
+      (Schedule_payload_projection.body_result_delivery payload)
+  in
   let* urgency = terminal_dispatch_result (body_keeper_wake_urgency payload) in
   let urgency =
     urgency
@@ -936,12 +964,14 @@ let dispatch_keeper_wake
     |> keeper_queue_urgency_of_schedule_urgency
   in
   let wake : Keeper_event_queue.scheduled_wake =
-    { schedule_instance_id = request.Schedule_domain.schedule_instance_id
+    { occurrence_id = Schedule_occurrence_id.to_string signal.occurrence_id
+    ; schedule_instance_id = request.Schedule_domain.schedule_instance_id
     ; schedule_id = request.Schedule_domain.schedule_id
     ; due_at = request.due_at
     ; payload_digest = Schedule_domain.payload_digest request.payload
     ; title
     ; message
+    ; result_delivery
     }
   in
   let stimulus : Keeper_event_queue.stimulus =
@@ -1012,6 +1042,11 @@ let dispatch_keeper_wake
          ; "schedule_id", `String request.schedule_id
          ; "urgency", `String (Keeper_event_queue.urgency_to_string urgency)
          ; "post_id", `String stimulus.post_id
+         ; ( "result_delivery_policy"
+           , `String
+               (match result_delivery with
+                | None -> "none"
+                | Some _ -> "reply_to_origin") )
          ; ( "occurrence_status"
            , `String (keeper_wake_occurrence_status_to_string occurrence_status) )
          ]
@@ -1029,13 +1064,13 @@ let dispatch_keeper_wake
       Ok (Schedule_runner.Work_accepted { detail; acceptance_commit })
   in
   match
-    Keeper_turn_admission.run_durable_intake_if_open
+    Keeper_shutdown_intake_fence.run_durable_intake_if_open
       ~base_path
       ~keeper_name:intake_owner
       dispatch_while_fenced
   with
-  | Keeper_turn_admission.Intake_committed result -> result
-  | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+  | Keeper_shutdown_intake_fence.Intake_committed result -> result
+  | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
     retryable_dispatch_failure
       (Printf.sprintf
          "scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"

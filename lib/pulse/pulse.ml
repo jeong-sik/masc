@@ -35,8 +35,6 @@ type lifecycle =
 type stats = {
   total_beats   : int;
   total_nudges  : int;
-  uptime_s      : float;
-  avg_interval  : float;
 }
 
 module type Consumer = sig
@@ -63,9 +61,11 @@ type t = {
   (* engine state *)
   mutable seq         : int;
   mutable last_beat_v : beat option;
-  mutable alive       : bool;
+  (* Written by the loop and by the daemon's release handler, read by
+     [nudge] from arbitrary fibers. [Atomic] states that crossing and keeps
+     the flag correct if the engine ever runs off the main domain. *)
+  alive       : bool Atomic.t;
   mutable total_nudges: int;
-  mutable start_ts    : float;
 }
 
 (* ── Defaults ────────────────────────────────────────────────── *)
@@ -87,27 +87,33 @@ let kst_hour clock =
   let t = Unix.gmtime (now clock) in
   (t.tm_hour + 9) mod 24
 
-(** Is the current hour within the quiet window? *)
-let is_quiet_hour clock rhythm =
-  let h = kst_hour clock in
-  let (qs, qe) = rhythm.quiet in
+(** Is [hour] within the quiet window?  Takes the hour rather than a clock so
+    the decision itself is a pure function of its inputs: the clock reading is
+    the caller's, and [For_testing] hands these out unchanged instead of
+    keeping a second copy that tests could pass while production drifted. *)
+let is_quiet_hour_at ~hour ~quiet_range =
+  let (qs, qe) = quiet_range in
   if qs <= qe then
     (* e.g., 1..6 *)
-    h >= qs && h < qe
+    hour >= qs && hour < qe
   else
     (* wrap-around, e.g., 22..6 *)
-    h >= qs || h < qe
+    hour >= qs || hour < qe
 
-(** Compute the effective interval for the next beat.
+(** Effective interval for a beat landing on [hour].
     Quiet hours stretch the base interval by 3x, clamped to [min, max]. *)
-let effective_interval clock rhythm =
+let effective_interval_at ~hour rhythm =
   let base =
-    if is_quiet_hour clock rhythm then
+    if is_quiet_hour_at ~hour ~quiet_range:rhythm.quiet then
       rhythm.base_s *. 3.0
     else
       rhythm.base_s
   in
   Float.max rhythm.min_s (Float.min rhythm.max_s base)
+
+(** Compute the effective interval for the next beat. *)
+let effective_interval clock rhythm =
+  effective_interval_at ~hour:(kst_hour clock) rhythm
 
 (* ── Consumer dispatch ───────────────────────────────────────── *)
 
@@ -215,7 +221,7 @@ let loop t =
   done;
   (* Final beat: shutdown demand *)
   let _shutdown_beat = tick t Demand in
-  t.alive <- false;
+  Atomic.set t.alive false;
   Log.Pulse.info "stopped after %d beats" t.seq
 
 (* ── Public API ──────────────────────────────────────────────── *)
@@ -234,33 +240,31 @@ let create ~clock ~rhythm ~lifecycle ~consumers =
     shutdown_r;
     seq         = 0;
     last_beat_v = None;
-    alive       = false;
+    alive       = Atomic.make false;
     total_nudges= 0;
-    start_ts    = now ac;
   }
 
 let run ~sw t =
-  t.alive    <- true;
-  t.start_ts <- now t.clock;
+  Atomic.set t.alive true;
   match t.lifecycle with
   | Always_on ->
     Eio.Fiber.fork_daemon ~sw (fun () ->
       (* Safe: finally is mutable field write — no I/O, no exception risk *)
       Fun.protect
         (fun () -> loop t; `Stop_daemon)
-        ~finally:(fun () -> t.alive <- false)
+        ~finally:(fun () -> Atomic.set t.alive false)
     )
   | Bounded _ ->
     Eio.Fiber.fork ~sw (fun () ->
       (* Safe: finally is mutable field write — no I/O, no exception risk *)
       Fun.protect
         (fun () -> loop t)
-        ~finally:(fun () -> t.alive <- false)
+        ~finally:(fun () -> Atomic.set t.alive false)
     )
 
 let nudge t ~reason =
   Eio.Mutex.use_rw ~protect:true t.nudge_mutex (fun () ->
-    if t.alive && Eio.Stream.is_empty t.nudge_stream then
+    if Atomic.get t.alive && Eio.Stream.is_empty t.nudge_stream then
       (* Capacity-1 mailbox: buffer one nudge. If already pending, coalesce
          (skip the new one — the loop will fire a Nudge beat soon anyway).
          The is_empty guard avoids blocking on a full stream.
@@ -280,20 +284,13 @@ let set_rhythm t rhythm =
 let get_rhythm t = t.rhythm
 
 let stats t =
-  let uptime = (now t.clock) -. t.start_ts in
-  let avg =
-    if t.seq > 0 then uptime /. (Float.of_int t.seq)
-    else 0.0
-  in
   {
     total_beats  = t.seq;
     total_nudges = t.total_nudges;
-    uptime_s     = uptime;
-    avg_interval = avg;
   }
 
 let last_beat t = t.last_beat_v
-let is_alive t  = t.alive
+let is_alive t  = Atomic.get t.alive
 
 let add_consumer t consumer =
   t.consumers <- t.consumers @ [consumer]
@@ -305,17 +302,16 @@ let remove_consumer t name =
 
 (* ── Testing helpers ───────────────────────────────────────────── *)
 
+(* Re-exports, not copies: [test_pulse.ml] drives these names, so they have to
+   be the same functions [effective_interval] runs on every beat. *)
 module For_testing = struct
-  let is_quiet_hour_at ~hour ~quiet_range =
-    let (qs, qe) = quiet_range in
-    if qs <= qe then hour >= qs && hour < qe
-    else hour >= qs || hour < qe
+  let is_quiet_hour_at = is_quiet_hour_at
+  let effective_interval_at = effective_interval_at
 
-  let effective_interval_at ~hour rhythm =
-    let quiet = is_quiet_hour_at ~hour ~quiet_range:rhythm.quiet in
-    let base =
-      if quiet then rhythm.base_s *. 3.0
-      else rhythm.base_s
-    in
-    Float.max rhythm.min_s (Float.min rhythm.max_s base)
+  (* The clock-taking wrapper the beat loop actually calls. Exposed so a test
+     can pin the delegation itself, which neither pure function reaches: a
+     wrapper that stopped consulting the rhythm, or read the hour from the
+     wrong place, would leave both of them passing. *)
+  let effective_interval_for_clock clock rhythm =
+    effective_interval (Clock clock) rhythm
 end

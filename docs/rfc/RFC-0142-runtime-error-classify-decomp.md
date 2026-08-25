@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0085", "0088", "0089", "0148", "0154"]
-implementation_prs: [16790, 16806, 16894, 16899, 17474]
 ---
 
 ## Progress audit (2026-05-21)
@@ -162,8 +161,6 @@ These coexist with three distinct concerns intertwined in one module:
 - **Concern A** — `masc_internal_error` variant definition + JSON serialization (lines ~1-300).
 - **Concern B** — SDK error (`Anthropic_sdk.Error.t`, `Openai_sdk.Error.t`) → `masc_internal_error` classification (lines ~300-650).
 - **Concern C** — agent-code CLI prompt preflight (lines ~650-873).
-
-The godfile header itself documents extraction from `oas_worker_named.ml`. A second extraction is overdue.
 
 ## 3. Why the catch-alls are dangerous
 

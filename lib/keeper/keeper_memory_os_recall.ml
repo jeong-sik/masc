@@ -18,12 +18,8 @@ let record_unavailable reason =
     ()
 ;;
 
-(* The block frames stored facts for the turn; it states no rule of its own.
-   How a Keeper is to treat memory — context rather than instruction, and
-   time-sensitive claims verified against live state — is one sentence in
-   config/prompts/keeper.md, where the Keeper's other standing rules are.
-   Leaving a second asset here meant the same reader was addressed from two
-   files, and it could fail to render. *)
+(* The block carries the selected facts and their source revision without
+   adding behavioral policy. *)
 let recall_block ~revision ~updated_at ~facts =
   Printf.sprintf
     "--- Memory OS Recall ---\nLLM-selected current memory, revision %d, updated %s.\n%s"
@@ -32,28 +28,17 @@ let recall_block ~revision ~updated_at ~facts =
     facts
 ;;
 
-type render_result =
-  { block : string
-  ; injected_fact_keys : string list
-  ; n_facts_in_store : int
-  ; failure_reason : unavailable_reason option
-  }
-
-(* A turn without recall injects nothing, and does so identically whether the
-   store is empty or the read failed. The reason reaches the operator through
-   the [MemoryOsRecallUnavailable] counter and the warn log at each call site.
-   It does not reach the keeper: a paragraph stating that memory is missing
-   makes the absence a fact the keeper can reason from, which is what the
-   removed keeper.memory_os_recall.unavailable asset did. *)
-let omit ?reason ~n_facts_in_store () =
+(* A turn without recall injects nothing. The reason remains operator-visible
+   through [MemoryOsRecallUnavailable] and the warning at each call site. *)
+let omit ?reason () =
   Option.iter record_unavailable reason;
-  { block = ""; injected_fact_keys = []; n_facts_in_store; failure_reason = reason }
+  ""
 ;;
 
 let render_snapshot ~now:_ snapshot =
   let facts = snapshot.Keeper_memory_os_current.facts in
   match facts with
-  | [] -> omit ~n_facts_in_store:0 ()
+  | [] -> omit ()
   | _ ->
     let max_bytes = Env_config.KeeperMemoryOs.recall_facts_max_bytes () in
     (match Keeper_memory_os_budget.measure ~max_bytes facts with
@@ -62,35 +47,30 @@ let render_snapshot ~now:_ snapshot =
          "memory os recall fact payload exceeds byte budget actual_bytes=%d max_bytes=%d"
          actual_bytes
          max_bytes;
-       omit ~reason:Fact_budget_exceeded ~n_facts_in_store:(List.length facts) ()
+       omit ~reason:Fact_budget_exceeded ()
      | Fits _ ->
-       { block =
-           recall_block
-             ~revision:snapshot.revision
-             ~updated_at:(Masc_domain.iso8601_of_unix_seconds snapshot.updated_at)
-             ~facts:(Keeper_memory_os_budget.render_facts facts)
-       ; injected_fact_keys = List.map memory_id facts
-       ; n_facts_in_store = List.length facts
-       ; failure_reason = None
-       })
+       recall_block
+         ~revision:snapshot.revision
+         ~updated_at:(Masc_domain.iso8601_of_unix_seconds snapshot.updated_at)
+         ~facts:(Keeper_memory_os_budget.render_facts facts))
 ;;
 
 let render_context_result ~keepers_dir ~keeper_id ~now =
   match
     Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
   with
-  | Ok None -> omit ~n_facts_in_store:0 ()
+  | Ok None -> omit ()
   | Ok (Some snapshot) -> render_snapshot ~now snapshot
   | Error message ->
     Log.Keeper.warn
       "memory os recall unavailable keeper=%s: %s"
       keeper_id
       message;
-    omit ~reason:Read_error ~n_facts_in_store:0 ()
+    omit ~reason:Read_error ()
 ;;
 
 let render_context ~keepers_dir ~keeper_id ~now () =
-  (render_context_result ~keepers_dir ~keeper_id ~now).block
+  render_context_result ~keepers_dir ~keeper_id ~now
 ;;
 
 let enabled () =
@@ -109,9 +89,9 @@ let render_if_enabled ~keepers_dir ~keeper_id ~now () =
           "memory os recall unavailable keeper=%s: %s"
           keeper_id
           (Printexc.to_string exn);
-        omit ~reason:Read_error ~n_facts_in_store:0 ()
+        omit ~reason:Read_error ()
     in
-    match String.trim result.block with
+    match String.trim result with
     | "" -> None
     | block -> Some block
 ;;

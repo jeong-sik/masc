@@ -19,6 +19,7 @@ let base_group : Fusion_policy.panel_group =
   ; system_prompt = "panel"
   ; web_tools = false
   ; max_output_tokens = None
+  ; timeout_s = None
   }
 
 (* RFC-0280: presets는 [Validated_preset.t]라 private — of_preset로만 생성. 테스트
@@ -42,9 +43,9 @@ let base_policy : Fusion_policy.t =
           ; judge = "a"
           ; judge_system_prompt = "judge"
           ; judge_max_output_tokens = None
+  ; judge_timeout_s = None
           ; judges = []
           ; min_answered = Fusion_policy.default_min_answered
-          ; fallback_judge_model = None
           }
       ]
   }
@@ -343,7 +344,7 @@ panel_system_prompt = "z"
       (List.mem (Fusion_config.Duplicate_panelist ("p", "dup")) es)
   | Ok _ -> Alcotest.fail "expected Error Duplicate_panelist"
 
-(* 같은 model을 서로 다른 라벨로 둔 두 그룹(persona ensemble) → 정체성이 달라
+(* 같은 model을 서로 다른 라벨로 둔 두 그룹(ensemble) → 정체성이 달라
    ["skeptic (claude)"; "optimist (claude)"] → Ok. RFC-0278의 핵심 시나리오. *)
 let same_model_diff_prompt_toml =
   {|
@@ -731,6 +732,7 @@ let test_config_two_judges_not_staged_eligible () =
     ; jsystem_prompt = label ^ " lens"
     ; jweb_tools = false
     ; jmax_output_tokens = None
+    ; jtimeout_s = None
     }
   in
   let judges =
@@ -765,6 +767,135 @@ judge_max_output_tokens = -1
          (function Fusion_config.Invalid_max_output_tokens _ -> true | _ -> false)
          es)
   | Ok _ -> Alcotest.fail "expected Error Invalid_max_output_tokens"
+
+(* 데드라인 축(RFC-0252 §9). [panel_timeout_s]/[judge_timeout_s]/1차 심판
+   [timeout_s]는 오랫동안 운영 config에 존재하면서 파서에 소비자가 없었다 —
+   subscription CLI 패널이 실측 34.7s까지 걸려 240s를 선언해 뒀는데 그 값이 어디에도
+   도달하지 않았다. 파싱·검증·per-judge 폴백을 핀한다. *)
+let test_config_parses_timeouts () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+panel_timeout_s = 240.0
+judge_timeout_s = 180
+[[fusion.presets.p1.judges]]
+model = "a"
+label = "evidence"
+system_prompt = "lens"
+timeout_s = 90.5
+[[fusion.presets.p1.judges]]
+model = "b"
+label = "coverage"
+system_prompt = "lens"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.failf "expected Ok, got %d error(s): %s" (List.length es)
+      (String.concat "; " (List.map Fusion_config.show_config_error es))
+  | Ok cfg ->
+    (match cfg.Fusion_policy.presets with
+     | [ vp ] ->
+       let p = Fusion_policy.Validated_preset.preset vp in
+       let group = List.hd p.Fusion_policy.panels in
+       Alcotest.(check (option (float 0.001)))
+         "panel_timeout_s reaches the group" (Some 240.0)
+         group.Fusion_policy.timeout_s;
+       (* 정수 리터럴도 초 값으로 읽힌다 — 운영자가 180과 180.0을 구분해 쓸 이유가 없다. *)
+       Alcotest.(check (option (float 0.001)))
+         "integer judge_timeout_s is accepted as seconds" (Some 180.0)
+         p.Fusion_policy.judge_timeout_s;
+       (match p.Fusion_policy.judges with
+        | [ evidence; coverage ] ->
+          Alcotest.(check (option (float 0.001)))
+            "per-judge timeout_s is parsed" (Some 90.5)
+            evidence.Fusion_policy.jtimeout_s;
+          Alcotest.(check (option (float 0.001)))
+            "a judge without its own deadline stays None (preset supplies it)" None
+            coverage.Fusion_policy.jtimeout_s
+        | js -> Alcotest.failf "expected 2 judges, got %d" (List.length js))
+     | ps -> Alcotest.failf "expected 1 preset, got %d" (List.length ps))
+
+let test_config_rejects_nonpositive_timeout () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+panel_timeout_s = 0
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Invalid_timeout_s present" true
+      (List.exists
+         (function Fusion_config.Invalid_timeout_s _ -> true | _ -> false)
+         es)
+  | Ok _ -> Alcotest.fail "expected Error Invalid_timeout_s for a zero deadline"
+
+let test_config_rejects_negative_judge_timeout () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+judge_timeout_s = -30.0
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Invalid_timeout_s present" true
+      (List.exists
+         (function Fusion_config.Invalid_timeout_s _ -> true | _ -> false)
+         es)
+  | Ok _ -> Alcotest.fail "expected Error Invalid_timeout_s for a negative deadline"
+
+(* 데드라인 미선언은 유효하다 — 그 경우 런타임/provider 선언이 유일한 값으로 남는다.
+   이 대조군이 없으면 위 두 거부 테스트는 "모든 preset을 거부해도" 통과한다. *)
+let test_config_absent_timeouts_are_valid () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.failf "a preset without deadlines must load: %s"
+      (String.concat "; " (List.map Fusion_config.show_config_error es))
+  | Ok cfg ->
+    (match cfg.Fusion_policy.presets with
+     | [ vp ] ->
+       let p = Fusion_policy.Validated_preset.preset vp in
+       Alcotest.(check (option (float 0.001)))
+         "no preset judge deadline" None p.Fusion_policy.judge_timeout_s;
+       Alcotest.(check (option (float 0.001)))
+         "no panel group deadline" None
+         (List.hd p.Fusion_policy.panels).Fusion_policy.timeout_s
+     | ps -> Alcotest.failf "expected 1 preset, got %d" (List.length ps))
 
 (* enabled인데 default_preset 생략(="") → preset 생략 호출이 폭빽할 default가 없어
    항상 Preset_unknown ""로 deny. 빈 default_preset도 로드 거부. *)
@@ -831,15 +962,15 @@ let test_config_disabled_with_preset () =
    그 변형이 발화하는지 확인한다. private 타입이라 외부는 of_preset로만 t를 만든다. *)
 let mk_preset ?(panels = [ base_group ]) ?(judge = "j") ?(judge_prompt = "synthesize")
     ?(judges = []) ?(min_answered = Fusion_policy.default_min_answered)
-    ?(fallback_judge_model = None) (name : string) : Fusion_policy.preset =
+    (name : string) : Fusion_policy.preset =
   { Fusion_policy.name
   ; panels
   ; judge
   ; judge_system_prompt = judge_prompt
   ; judge_max_output_tokens = None
+  ; judge_timeout_s = None
   ; judges
   ; min_answered
-  ; fallback_judge_model
   }
 
 let test_validated_ok () =
@@ -890,6 +1021,7 @@ let base_judge : Fusion_policy.judge_spec =
   ; jsystem_prompt = "lens"
   ; jweb_tools = false
   ; jmax_output_tokens = None
+    ; jtimeout_s = None
   }
 
 (* judges=[]면 (simple/refine/conditional preset) 기존과 동일하게 유효 = byte-identity. *)
@@ -1038,6 +1170,7 @@ let g_web4 : Fusion_policy.panel_group =
   ; system_prompt = "p"
   ; web_tools = true
   ; max_output_tokens = None
+  ; timeout_s = None
   }
 
 let test_judge_args_single_group_identity () =
@@ -1512,6 +1645,13 @@ let () =
             test_config_two_judges_not_staged_eligible
         ; Alcotest.test_case "invalid_max_output_tokens" `Quick
             test_config_invalid_max_output_tokens
+        ; Alcotest.test_case "timeouts_parse" `Quick test_config_parses_timeouts
+        ; Alcotest.test_case "zero_timeout_rejected" `Quick
+            test_config_rejects_nonpositive_timeout
+        ; Alcotest.test_case "negative_judge_timeout_rejected" `Quick
+            test_config_rejects_negative_judge_timeout
+        ; Alcotest.test_case "absent_timeouts_valid" `Quick
+            test_config_absent_timeouts_are_valid
         ; Alcotest.test_case "empty_default_preset" `Quick test_config_empty_default_preset
         ; Alcotest.test_case "disabled_with_preset" `Quick test_config_disabled_with_preset
         ; Alcotest.test_case "judges_parse" `Quick test_config_judges_parse

@@ -1,4 +1,5 @@
 ---
+rfc: "keeper-vision-delegation-tool"
 title: "Vision-as-a-tool delegation (decouple multimodal input from conversation runtime)"
 status: Draft
 supersedes-partial: RFC-0265 (image/document modality path)
@@ -22,7 +23,7 @@ This is a multi-phase infrastructure proposal, **not** glue over existing parts.
 
 The reroute model couples "which model reads the image" with "which model runs the whole conversation". Residual consequences after Phase 0 (root cause confirmed adversarially + by live probe):
 
-1. **Whole-runtime swap**. A text-strong persona keeper loses its assigned model for the turn; conversely a vision turn drags persona/tooling onto whatever runtime declares image support.
+1. **Whole-runtime swap**. A text-strong Keeper loses its assigned model for the turn; conversely a vision turn drags keeper/tooling onto whatever runtime declares image support.
 2. **Sticky reroute**. The image persists in re-sent history (`keeper_turn_driver.ml:145-157` folds both `initial_messages` and `oas_checkpoint.messages` into the modality computation — intentionally, to avoid provider-400 on the re-sent image). So **every** later text-only follow-up recomputes `required=['image']` and re-reroutes.
 3. **Full base64 re-send each turn**. The image is never image-aware-evicted from history; `image_block` carries inline base64 `data`, so the payload is re-serialized on every subsequent turn → latency and token cost grow per turn.
 4. **Lands on whatever single runtime declares the capability**. In the live config that was the local `gemma4-26b-a4b-qat` (`max-concurrent=1`, Q4 GGUF) — slow, and it returned empty text → `keeper_tool_response.ml:12` `no textual reply`.
@@ -94,7 +95,7 @@ The post-turn librarian (`keeper_librarian_runtime.ml`) proves one-shot exact-ou
 ## 3. Trade-offs
 
 **Pros**
-- Main keeper runtime unchanged → persona/tools/context preserved.
+- Main keeper runtime unchanged → keeper/tools/context preserved.
 - No sticky reroute; no per-turn base64 re-send (latency/cost bounded) — **conditional on §2.3 covering both entry sites**.
 - Vision failures are isolated tool errors, not turn-fatal `no textual reply`.
 - A single config gap can no longer route an entire keeper to a weak model.

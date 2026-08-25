@@ -14,6 +14,7 @@
   keeper_disk_pressure
   keeper_fd_pressure
   keeper_recording_error_state
+  keeper_provider_attempt_effect_core
   keeper_internal_error
   keeper_runtime_failure_route
   keeper_latched_reason
@@ -23,9 +24,11 @@
   keeper_event_queue_persistence
   keeper_continuation_channel)
  (private_modules keeper_event_queue_owner_lock)
+ (flags
+  (:standard -w +33))
  (libraries
-  agent_sdk
-  agent_sdk.llm_provider
+  masc.agent_core
+  masc.agent_core.llm_provider
   eio
   masc_eio_context
   masc.config

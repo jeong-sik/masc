@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0056"]
-implementation_prs: []
 ---
 
 # RFC-0175 — Godfile decomposition Wave D

@@ -13,20 +13,17 @@
     [assignment]) had zero production callers as of
     2026-05-05 and was removed surgically per audit response;
     if leasing semantics are needed in the future, the design
-    should land at the OAS runtime layer per RFC-0026 (the
+    should land at the AGENT_CORE runtime layer per RFC-0026 (the
     same architectural rollback as [admission_queue]).
-    The read-only accessors below remain in active use by
-    [tool_local_runtime_status] / [tool_local_runtime_verify]
-    / [tool_local_runtime_bench]. See
+    [parse_errors] below is currently unconsumed — the local-runtime
+    status tool that surfaced it was removed — but is retained because
+    it captures runtime.toml load-time parse errors. See
     [docs/audit-responses/2026-05-05-dashboard-heuristic.md]
     §7.1 for the verification matrix.
 
-    Ref-cell architecture: {!pool} is a global [pool_state ref]
-    guarded by an [Eio.Mutex].  The ref is exposed because
-    [test/test_local_runtime_pool.ml] needs to install a
-    custom seed state without rebuilding the discovery cache
-    on every test.  Production code paths reach {!pool}
-    only through the locked accessors below. *)
+    State architecture: the process-global value is an atomic reference to an
+    immutable [pool_state], with compound refreshes serialized by a standard
+    mutex. Production and test code reach it only through typed accessors. *)
 
 (** {1 Runtime + snapshot records} *)
 
@@ -37,7 +34,6 @@ type runtime = {
   max_concurrency : int;
   active_slots : int;
   queue_depth : int;
-  latency_ema_ms : float option;
   failure_streak : int;
   cooldown_until : float option;
   last_error : string option;
@@ -45,12 +41,10 @@ type runtime = {
   total_success : int;
   total_failure : int;
 }
-(** Per-endpoint runtime entry.  [latency_ema_ms] is the
-    exponential moving average of release-reported latency
-    (alpha = 0.2).  [failure_streak] tracks consecutive
-    failures; >= 3 triggers a [cooldown_until] window so
-    the selector skips the runtime until the window
-    elapses. *)
+(** Per-endpoint runtime entry.  [failure_streak] is 1 when the latest
+    discovery pass marked the endpoint unhealthy (else 0); unhealthy
+    endpoints also get a [cooldown_until] window so the selector skips
+    the runtime until the window elapses. *)
 
 type runtime_snapshot = {
   id : string;
@@ -59,7 +53,6 @@ type runtime_snapshot = {
   max_concurrency : int;
   active_slots : int;
   queue_depth : int;
-  latency_ema_ms : float option;
   failure_streak : int;
   cooldown_until : float option;
   last_error : string option;
@@ -75,13 +68,11 @@ type pool_state = {
   runtimes : runtime list;
   fingerprint : string;
   parse_errors : string list;
-  measured_ceiling : int option;
 }
 (** Snapshot of the pool.  [fingerprint] is recomputed from
     the discovery cache on each load and used by
     {!ensure_loaded} to detect that the underlying endpoints
-    have changed.  [measured_ceiling] is the operator-set
-    upper bound on total concurrent acquires. *)
+    have changed. *)
 
 (** {1 Constants + global state} *)
 
@@ -89,27 +80,16 @@ val default_pool_label : string
 (** ["local64"] — the canonical label used when the caller
     does not specify a [preferred_pool]. *)
 
-val empty_pool : pool_state
-(** Zero-valued [pool_state] used as the reset target and
-    the test-seed scaffolding template. *)
-
-val pool : pool_state ref
-(** Global pool ref.  Production code reaches this only
-    through the locked accessors below; the ref is exposed
-    because [test/test_local_runtime_pool.ml] installs a
-    fixed runtime list ([Local_runtime_pool.pool := ...])
-    to drive deterministic acquire / release scenarios. *)
-
 (** {1 Lifecycle} *)
 
 val reset : unit -> unit
-(** Reinstalls {!empty_pool} under the pool lock.  Used by
+(** Reinstalls the empty state under the pool lock.  Used by
     tests to clear state between cases. *)
 
-val current_fingerprint : unit -> string
-(** Stable hash of the current discovery cache snapshot.
-    Equality of two consecutive calls means no endpoints
-    were added / removed / re-discovered. *)
+module For_testing : sig
+  val install_pool : runtime list -> unit
+  (** Install a deterministic runtime snapshot under the pool lock. *)
+end
 
 val runtime_id_of_base_url : string -> string
 (** Derives a stable runtime id from a [base_url] (e.g.
@@ -122,42 +102,17 @@ val runtime_id_of_base_url : string -> string
 
 val parse_errors : unit -> string list
 (** Returns the [pool_state.parse_errors] list.  Populated
-    when [load_runtimes_from_env] could not interpret the
-    [MASC_LOCAL_LLM_ENDPOINTS] entry; surfaced to the
-    operator dashboard. *)
+    when [load_runtimes_from_env] could not interpret an
+    entry of [LLM_ENDPOINTS] — Agent Core's
+    [Llm_provider.Discovery.llm_endpoints_env_var], not a
+    MASC-prefixed name; surfaced to the operator dashboard. *)
 
 val snapshots : unit -> runtime_snapshot list
 (** Read-only projection of every {!runtime} into a
     {!runtime_snapshot} (adds derived [port]).  Caller may
     keep the list across yields — values are immutable. *)
 
-val configured_capacity : unit -> int
-(** Sum of [max_concurrency] over every runtime in the
-    pool.  Hard ceiling on simultaneous acquires across the
-    pool. *)
 
-val healthy_runtime_count : unit -> int
-(** Number of runtimes whose [cooldown_until] is unset or
-    in the past — the count of slots currently considered
-    eligible for new work. *)
-
-val allocated_slots : unit -> int
-(** Sum of [active_slots] across the pool.  Equals the
-    number of outstanding leases. *)
-
-val measured_ceiling : unit -> int option
-(** Operator-installed upper bound on
-    {!allocated_slots}.  [None] when no measurement has
-    been recorded yet; recorded by
-    [tool_local_runtime_bench] and surfaced by
-    [tool_local_runtime_status]. *)
-
-val record_measured_ceiling : int -> unit
-(** Stores a new [measured_ceiling].  Replaces the previous
-    value unconditionally (no monotonic guard — the
-    operator endpoint validates the value before calling). *)
-
-(* [acquire] / [release] removed 2026-05-05 — see header §Status. *)
 
 (** {1 Snapshot serialization} *)
 

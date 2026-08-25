@@ -1,4 +1,4 @@
-(** Typed provider/runtime observations for SDK errors crossing from OAS into
+(** Typed provider/runtime observations for agent-core errors crossing from AGENT_CORE into
     MASC. This boundary classifies transport facts only; it never decides a
     Keeper lifecycle transition. *)
 
@@ -36,18 +36,6 @@ let stream_idle_state_of_label = function
   | "streaming_done" -> Some Streaming_done
   | "streaming_unknown" -> Some Streaming_unknown
   | _ -> None
-;;
-
-let stream_idle_state_is_activity = function
-  | Streaming_answer
-  | Streaming_thinking
-  | Streaming_tool_call
-  | Streaming_heartbeat
-  | Streaming_substrate -> true
-  | Awaiting_first_event
-  | Awaiting_first_delta
-  | Streaming_done
-  | Streaming_unknown -> false
 ;;
 
 type timeout_phase =
@@ -113,23 +101,9 @@ let timeout_phase_of_label label =
     | _ -> None
 ;;
 
-let timeout_phase_is_streaming_activity = function
-  | Stream_idle state -> stream_idle_state_is_activity state
-  | First_token
-  | Http_operation
-  | Non_streaming_body
-  | Stream_body
-  | Provider_step
-  | Cli_stdout_idle
-  | Caller_budget
-  | Wall_clock
-  | Capacity_backpressure
-  | Unknown_timeout -> false
-;;
-
 type timeout_source =
-  | Oas_api
-  | Oas_provider
+  | Agent_core_api
+  | Agent_core_provider
 
 type provider_timeout =
   { phase : timeout_phase option
@@ -140,9 +114,41 @@ type t =
   | Provider_timeout of provider_timeout
   | Not_provider_runtime_failure
 
-let timeout_phase_of_oas_phase phase =
-  Llm_provider.Http_client.timeout_phase_to_label phase
-  |> timeout_phase_of_label
+(* Direct variant-to-variant translation (RFC-0371 B12): this used to render
+   the agent-core phase to its label and re-parse the label into the MASC
+   vocabulary — a typed->string->typed round trip inside one function. Both
+   matches are exhaustive, so a new constructor on either side is a compile
+   error here instead of a silent [None]. *)
+let stream_idle_state_of_agent_core :
+      Llm_provider.Http_client.stream_idle_state -> stream_idle_state
+  = function
+  | Llm_provider.Http_client.Awaiting_first_event -> Awaiting_first_event
+  | Awaiting_first_delta -> Awaiting_first_delta
+  | Streaming_answer -> Streaming_answer
+  | Streaming_thinking -> Streaming_thinking
+  | Streaming_tool_call -> Streaming_tool_call
+  | Streaming_heartbeat -> Streaming_heartbeat
+  | Streaming_substrate -> Streaming_substrate
+  | Streaming_done -> Streaming_done
+  | Streaming_unknown -> Streaming_unknown
+;;
+
+let timeout_phase_of_agent_core_phase :
+      Llm_provider.Http_client.timeout_phase -> timeout_phase option
+  = function
+  | Llm_provider.Http_client.First_token -> Some First_token
+  | Http_operation -> Some Http_operation
+  | Non_streaming_body -> Some Non_streaming_body
+  | Stream_body -> Some Stream_body
+  | Stream_idle state -> Some (Stream_idle (stream_idle_state_of_agent_core state))
+  | Provider_step -> Some Provider_step
+  | Cli_stdout_idle -> Some Cli_stdout_idle
+  | Wall_clock -> Some Wall_clock
+  | Capacity_backpressure -> Some Capacity_backpressure
+  | Unknown_timeout -> Some Unknown_timeout
+  (* MASC's vocabulary has no pre-request phases; the label path dropped
+     them to [None] and the typed map preserves that. *)
+  | Admission | Queue -> None
 ;;
 
 let suffix_after_prefix text prefix =
@@ -169,9 +175,16 @@ let trim_phase_token token =
 let provider_runtime_error_timeout_phase_label ~code =
   let code = String.lowercase_ascii (String.trim code) in
   let code_phase =
-    match suffix_after_prefix code "provider_error_timeout:" with
+    match
+      suffix_after_prefix
+        code
+        Keeper_terminal_reason.wire_provider_error_timeout_prefix
+    with
     | Some label -> Some label
-    | None -> suffix_after_prefix code "provider_error_network:timeout:"
+    | None ->
+      suffix_after_prefix
+        code
+        Keeper_terminal_reason.wire_provider_error_network_timeout_prefix
   in
   match Option.map trim_phase_token code_phase with
   | Some phase when not (String.equal phase "") -> Some phase
@@ -180,24 +193,39 @@ let provider_runtime_error_timeout_phase_label ~code =
 
 let provider_runtime_error_looks_like_timeout ~code =
   let code = String.lowercase_ascii (String.trim code) in
-  String.equal code "provider_error_timeout"
-  || String.starts_with ~prefix:"provider_error_timeout:" code
-  || String.equal code "provider_error_network:timeout"
-  || String.starts_with ~prefix:"provider_error_network:timeout:" code
+  String.equal code Keeper_terminal_reason.wire_provider_error_timeout
+  || String.starts_with
+       ~prefix:Keeper_terminal_reason.wire_provider_error_timeout_prefix
+       code
+  || String.equal code Keeper_terminal_reason.wire_provider_error_network_timeout
+  || String.starts_with
+       ~prefix:Keeper_terminal_reason.wire_provider_error_network_timeout_prefix
+       code
 ;;
 
-let classify_provider_runtime_error_record ~code ~detail =
+let classify_provider_runtime_error_record ?agent_core_timeout ~code ~detail () =
   ignore detail;
-  if provider_runtime_error_looks_like_timeout ~code
-  then
+  (* Typed observation first (RFC-0371 §6.1(3)): records built while the
+     original agent-core error was in hand carry it, and no string is
+     consulted. The prefix parse below survives only for records rehydrated
+     from persisted wire, where the string is all that remains. *)
+  match agent_core_timeout with
+  | Some { Keeper_turn_terminal_code.phase } ->
     Provider_timeout
-      { source = Oas_provider
-      ; phase =
-        (Option.bind
-           (provider_runtime_error_timeout_phase_label ~code)
-           timeout_phase_of_label)
+      { source = Agent_core_provider
+      ; phase = Option.bind phase timeout_phase_of_agent_core_phase
       }
-  else Not_provider_runtime_failure
+  | None ->
+    if provider_runtime_error_looks_like_timeout ~code
+    then
+      Provider_timeout
+        { source = Agent_core_provider
+        ; phase =
+          (Option.bind
+             (provider_runtime_error_timeout_phase_label ~code)
+             timeout_phase_of_label)
+        }
+    else Not_provider_runtime_failure
 ;;
 
 let provider_timeout ~source ~phase =
@@ -215,6 +243,8 @@ let classify_masc_internal_error = function
       | Keeper_internal_error.Internal_contract_rejected _
       | Keeper_internal_error.Incomplete_tool_transcript _
       | Keeper_internal_error.Terminal_effect_failed _
+      | Keeper_internal_error.Provider_attempt_effect_fenced _
+      | Keeper_internal_error.Tool_correction_lost _
       | Keeper_internal_error.Receipt_persistence_failed _
       | Keeper_internal_error.Gate_replay_repair_required _ )
   | None ->
@@ -224,12 +254,12 @@ let classify_masc_internal_error = function
 let classify_provider_error = function
   | Llm_provider.Error.Timeout { timeout_phase; _ } ->
     provider_timeout
-      ~source:Oas_provider
-      ~phase:(Option.bind timeout_phase timeout_phase_of_oas_phase)
+      ~source:Agent_core_provider
+      ~phase:(Option.bind timeout_phase timeout_phase_of_agent_core_phase)
   | Llm_provider.Error.NetworkError { timeout_phase = Some phase; _ } ->
     provider_timeout
-      ~source:Oas_provider
-      ~phase:(timeout_phase_of_oas_phase phase)
+      ~source:Agent_core_provider
+      ~phase:(timeout_phase_of_agent_core_phase phase)
   | Llm_provider.Error.MissingApiKey _
   | Llm_provider.Error.InvalidConfig _
   | Llm_provider.Error.ParseError _
@@ -250,25 +280,25 @@ let classify_provider_error = function
     Not_provider_runtime_failure
 ;;
 
-let classify_sdk_error (err : Agent_sdk.Error.sdk_error) : t =
+let classify_core_error (err : Agent_core.Error.t) : t =
   match Keeper_internal_error.classify_masc_internal_error err with
   | Some _ as internal_error -> classify_masc_internal_error internal_error
   | None ->
     (match err with
-     | Agent_sdk.Error.Api (Timeout _) ->
-       provider_timeout ~source:Oas_api ~phase:None
-     | Agent_sdk.Error.Provider provider_error ->
+     | Agent_core.Error.Api (Timeout _) ->
+       provider_timeout ~source:Agent_core_api ~phase:None
+     | Agent_core.Error.Provider provider_error ->
        classify_provider_error provider_error
-     | Agent_sdk.Error.Api (NetworkError _ | Overloaded _ | ServerError _
+     | Agent_core.Error.Api (NetworkError _ | Overloaded _ | ServerError _
        | RateLimited _ | AuthError _ | AuthorizationError _ | PaymentRequired _
        | InvalidRequest _ | NotFound _ | ContextOverflow _ | InputCapacity _)
-     | Agent_sdk.Error.Agent _
-     | Agent_sdk.Error.Mcp _
-     | Agent_sdk.Error.Config _
-     | Agent_sdk.Error.Serialization _
-     | Agent_sdk.Error.Io _
-     | Agent_sdk.Error.Orchestration _
-     | Agent_sdk.Error.Internal _ ->
+     | Agent_core.Error.Agent _
+     | Agent_core.Error.Mcp _
+     | Agent_core.Error.Config _
+     | Agent_core.Error.Serialization _
+     | Agent_core.Error.Io _
+     | Agent_core.Error.Orchestration _
+     | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
        Not_provider_runtime_failure)
 ;;
 
@@ -278,5 +308,5 @@ let is_provider_timeout = function
 ;;
 
 let is_provider_timeout_error err =
-  classify_sdk_error err |> is_provider_timeout
+  classify_core_error err |> is_provider_timeout
 ;;

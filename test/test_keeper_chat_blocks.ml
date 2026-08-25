@@ -223,6 +223,7 @@ let test_dashboard_rich_blocks_roundtrip () =
         };
       B.Trace
         {
+          omitted = 0;
           trace =
             [
               B.Trace_think
@@ -230,7 +231,7 @@ let test_dashboard_rich_blocks_roundtrip () =
                   text = "checking";
                   content_withheld = false;
                   ts = Some "2026-07-01T00:00:00Z";
-                  oas_block_index = Some 0;
+                  agent_core_block_index = Some 0;
                 };
               B.Trace_tool
                 {
@@ -241,7 +242,7 @@ let test_dashboard_rich_blocks_roundtrip () =
                   args = Some (`Assoc [ ("limit", `Int 5) ]);
                   result = Some (`Assoc [ ("ok", `Bool true) ]);
                   ts = Some "2026-07-01T00:00:01Z";
-                  oas_block_index = Some 1;
+                  agent_core_block_index = Some 1;
                 };
               B.Trace_reason
                 {
@@ -271,13 +272,13 @@ let test_trace_decoder_accepts_dashboard_fallbacks () =
                 [ `Assoc
                     [ ("kind", `String "think")
                     ; ("text", `String "thinking")
-                    ; ("oasBlockIndex", `Int 7)
+                    ; ("agent_coreBlockIndex", `Int 7)
                     ]
                 ; `Assoc
                     [ ("kind", `String "tool")
                     ; ("name", `String "keeper_tasks_list")
                     ; ("status", `String "paused")
-                    ; ("oasBlockIndex", `Int 8)
+                    ; ("agent_coreBlockIndex", `Int 8)
                     ]
                 ] )
           ]
@@ -286,9 +287,10 @@ let test_trace_decoder_accepts_dashboard_fallbacks () =
   match B.blocks_of_yojson json with
   | Some
       [ B.Trace
-          { trace =
-              [ B.Trace_think { oas_block_index = Some 7; _ }
-              ; B.Trace_tool { status = None; oas_block_index = Some 8; _ }
+          { omitted = 0
+          ; trace =
+              [ B.Trace_think { agent_core_block_index = Some 7; _ }
+              ; B.Trace_tool { status = None; agent_core_block_index = Some 8; _ }
               ]
           }
       ] -> ()
@@ -350,6 +352,23 @@ let test_redacted_http_url_opt_reports_drop_reason () =
     (B.redacted_http_url_opt ~on_drop "example.com/a.png");
   Alcotest.(check (list dropped_reason_testable))
     "missing scheme recorded"
+    [ B.Missing_scheme ]
+    !drops
+
+(* RFC-0371 B2 regression: the try/with wrappers around the Uri helpers were
+   removed because Uri.of_string is total. These pin that garbage input still
+   flows through the option-based checks as ordinary values — no exception
+   escapes, nothing is silently classified as valid. *)
+let test_url_helpers_are_total_on_garbage () =
+  let garbage = "\x00 not a uri \xff%%%" in
+  let drops = ref [] in
+  let on_drop reason = drops := reason :: !drops in
+  Alcotest.(check (option string))
+    "garbage url is dropped, not raised"
+    None
+    (B.redacted_http_url_opt ~on_drop garbage);
+  Alcotest.(check (list dropped_reason_testable))
+    "garbage drops as missing scheme"
     [ B.Missing_scheme ]
     !drops
 
@@ -486,7 +505,7 @@ let test_thinking_block_requires_content () =
        (`List [ `Assoc [ ("t", `String "thinking"); ("redacted", `Bool true) ] ])
      = None)
 
-let withheld_think_trace steps = [ B.Trace { trace = steps } ]
+let withheld_think_trace steps = [ B.Trace { trace = steps; omitted = 0 } ]
 
 let test_withheld_think_step_roundtrip () =
   (* The public autonomous projection admits the step and its timestamp with no
@@ -498,7 +517,7 @@ let test_withheld_think_step_roundtrip () =
           { text = ""
           ; content_withheld = true
           ; ts = Some "2026-08-04T00:00:00Z"
-          ; oas_block_index = None
+          ; agent_core_block_index = None
           }
       ]
   in
@@ -532,7 +551,7 @@ let test_withheld_think_step_encoder_scrubs_smuggled_text () =
           { text = "leaked reasoning"
           ; content_withheld = true
           ; ts = None
-          ; oas_block_index = None
+          ; agent_core_block_index = None
           }
       ]
   in
@@ -595,6 +614,43 @@ let test_withheld_think_step_still_requires_text_field () =
           ])
      = None)
 
+(* A trace block that was abridged has to say so. A shorter [trace] with no
+   count reads as a shorter turn, which is a different fact from a turn whose
+   trace did not fit this surface. Zero stays off the wire so an ordinary
+   turn's shape is unchanged. *)
+let test_omitted_step_count_survives_the_wire () =
+  let step =
+    B.Trace_think
+      { text = "checking"
+      ; content_withheld = false
+      ; ts = Some "2026-07-01T00:00:00Z"
+      ; agent_core_block_index = None
+      }
+  in
+  let json_of omitted =
+    B.blocks_to_yojson [ B.Trace { trace = [ step ]; omitted } ]
+  in
+  let has_omitted json =
+    match json with
+    | `List [ `Assoc fields ] -> List.assoc_opt "omitted" fields
+    | _ -> None
+  in
+  Alcotest.(check bool)
+    "a whole trace does not carry the field"
+    true
+    (Option.is_none (has_omitted (json_of 0)));
+  Alcotest.(check (option int))
+    "an abridged trace reports how many steps it dropped"
+    (Some 16682)
+    (match has_omitted (json_of 16682) with
+     | Some (`Int n) -> Some n
+     | _ -> None);
+  match B.blocks_of_yojson (json_of 16682) with
+  | Some [ B.Trace { omitted; _ } ] ->
+    Alcotest.(check int) "round trip keeps the count" 16682 omitted
+  | _ -> Alcotest.fail "abridged trace block did not round trip"
+;;
+
 let () =
   Alcotest.run "keeper_chat_blocks"
     [
@@ -632,6 +688,8 @@ let () =
             test_query_string_stripped_for_extension_check;
           Alcotest.test_case "redacted_http_url_opt reports drop reason" `Quick
             test_redacted_http_url_opt_reports_drop_reason;
+          Alcotest.test_case "url helpers are total on garbage input" `Quick
+            test_url_helpers_are_total_on_garbage;
         ] );
       ( "serialization",
         [
@@ -673,6 +731,8 @@ let () =
             test_withheld_think_step_encoder_scrubs_smuggled_text;
           Alcotest.test_case "withheld think decoder scrubs smuggled text" `Quick
             test_withheld_think_step_decoder_scrubs_smuggled_text;
+          Alcotest.test_case "abridged trace reports its omitted step count" `Quick
+            test_omitted_step_count_survives_the_wire;
           Alcotest.test_case "withheld think step still requires text field" `Quick
             test_withheld_think_step_still_requires_text_field;
         ] );

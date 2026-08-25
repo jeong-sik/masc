@@ -11,18 +11,7 @@ val add_routes :
 module For_testing : sig
   val resolve_relative : base:string -> string -> string option
   val workspace_root_for_initialize : base_path:string -> string -> string
-  val initialize_result_json : unit -> Yojson.Safe.t
-  val inbound_dispatch_worker_count : int
-
-  (** [resolve_lang relative] classifies a workspace-relative path's language
-      (task-1691): [Known_lang lang_id] when a language server is mapped, else
-      [Unknown_lang]. *)
-  type lang =
-    | Known_lang of string
-    | Unknown_lang
-
-  val resolve_lang : string -> lang
-
+  val initialize_result_json : workspace_root:string -> unit -> Yojson.Safe.t
   (** Fixed size of the inbound LSP dispatch worker pool
       ([Lsp_proxy_limits.inbound_dispatch_worker_count]); >1 keeps slow LSP
       init off the socket read path. *)
@@ -36,6 +25,26 @@ module For_testing : sig
       language verdict; unknown extensions are [Unknown_lang] rather than a
       permissive default. *)
   val resolve_lang : string -> resolved_lang
+
+  type document_request_error =
+    | Missing_document_uri
+    | Document_uri_outside_workspace
+
+  type resolved_document_request =
+    { uri : string
+    ; relative_path : string
+    ; line : int option
+    ; language : resolved_lang
+    }
+
+  (** Decode the document URI, workspace-relative path, optional non-negative
+      line, and language verdict once. Missing/out-of-workspace documents stay
+      typed errors rather than becoming [""] paths, and malformed/negative
+      positions stay [None] rather than [-1]. *)
+  val resolve_document_request :
+    anchor:string ->
+    Yojson.Safe.t ->
+    (resolved_document_request, document_request_error) result
 
   (** Per-language LSP health (task-1691). [Overlay_only] carries the last
       error that forced the language into overlay-only mode. *)
@@ -82,6 +91,12 @@ module For_testing : sig
 
   (** Canonical handled LSP method catalog as [(wire_method, class)]. *)
   val handled_lsp_methods : unit -> (string * method_class) list
+
+  (** Methods the proxy does not answer itself, and what happens to them.
+      Disjoint from {!handled_lsp_methods} by construction: a method the
+      catalog knows is classified from the catalog, so naming it here too
+      would be two tables deciding the same thing (#28686). *)
+  val relayed_lsp_methods : unit -> (string * disposition) list
 
   (** Classify a handled method by wire name, or [None] when the method is not
       in the direct proxy catalog. *)

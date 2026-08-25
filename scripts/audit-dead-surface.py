@@ -104,7 +104,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import functools
 import re
+import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -116,7 +119,15 @@ ROOT = Path(__file__).resolve().parent.parent
 SOURCE_ROOTS = ("lib", "bin", "test")
 
 # Directories that never contain authored source.
-SKIP_PARTS = frozenset({"_build", "node_modules", ".git", "_opam", ".worktrees"})
+#
+# `.claude` holds tool state, and `.claude/worktrees` under it holds whole
+# copies of this tree. Those copies made every export look referenced by its
+# own duplicate: measured 2026-08-20 at the same commit, a checkout carrying
+# 14,298 files there reported 21 dead exports where a clean one reported 539.
+# `.worktrees` was already listed but does not match this path -- the name is
+# `worktrees`, without the leading dot -- so the audit walked 25,507 files
+# locally against CI's 9,491 and then advised lowering the baseline by 518.
+SKIP_PARTS = frozenset({"_build", "node_modules", ".git", "_opam", ".worktrees", ".claude"})
 
 # Short names collide with unrelated identifiers often enough that a token
 # scan says little about them, so `--exports` skips them by default.
@@ -152,20 +163,98 @@ def module_name(stem: str) -> str:
     return stem[0].upper() + stem[1:]
 
 
+def is_skipped_name(name: str) -> bool:
+    """One path component the walk must not descend into or collect.
+
+    `is_skipped` tested every component of a relative path, the filename
+    included, so a file whose own name is in SKIP_PARTS was dropped. Pruning
+    only directories would quietly widen what the scan reads, so the same
+    predicate is applied to filenames too.
+    """
+    return name in SKIP_PARTS or name.startswith(".worktree")
+
+
+@functools.lru_cache(maxsize=None)
+def tracked_files(root: Path) -> frozenset[Path] | None:
+    """Absolute paths git tracks under [root], or [None] when git cannot say.
+
+    `SKIP_PARTS` names the directories that hold copies of this tree, and each
+    new place one appears has cost a wrong count before it was added: worktrees
+    under `.claude` reported 21 dead exports where a clean checkout reported
+    539 (see the note there). The list grows one entry per incident because it
+    answers "which directory" when the question is "which files are ours".
+
+    Git already knows. Measured 2026-08-23 at the same commit, a checkout
+    holding campaign output under `reports/`, two `task-*/` directories with a
+    stray `.ml` in each, and old `git.diff` files reported 13 dead exports
+    where a fresh worktree reported 47 -- the names written in that leftover
+    output counted as callers.
+
+    A file that is not tracked yet reads as absent, so a caller written in one
+    is not seen. That is the same thing CI sees, which is the point.
+
+    [None] rather than an empty set when git is unavailable or [root] is not
+    its own work tree: the self-test builds a tree in a temp directory, and
+    an empty set there would report every symbol dead.
+    """
+    def git(*args: str) -> str | None:
+        try:
+            done = subprocess.run(
+                ["git", "-C", str(root), *args],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return done.stdout if done.returncode == 0 else None
+
+    top = git("rev-parse", "--show-toplevel")
+    if top is None:
+        return None
+    if Path(top.strip()).resolve() != root.resolve():
+        return None
+    listed = git("ls-files", "-z")
+    if listed is None:
+        return None
+    return frozenset(root / name for name in listed.split("\0") if name)
+
+
 def all_files(root: Path) -> list[Path]:
     """Every authored file in the tree, whatever its extension.
 
     Extension allow-lists are the failure mode this audit exists to avoid: an
     earlier ad-hoc version skipped `test/stanzas/*.inc` and reported three
     live, CI-running tests as orphans.
+
+    Pruned during the walk, not filtered after it. `Path.rglob` descends into
+    every directory and hands back what it found, so `SKIP_PARTS` could only
+    discard paths already visited: on a checkout with worktrees under
+    `.worktrees/`, each with its own `_build`, that is the whole tree many times
+    over. Measured here, 2026-08-07, 192 worktrees present:
+
+        rglob then filter   2,292,279 files and still going at 60s
+        prune while walking     24,426 files in 0.4s
+
+    That number is this checkout, not CI: 192 worktrees contribute nearly all of
+    it and a fresh clone has none. What pruning is worth in CI is smaller and
+    still real -- `.git` and, after a build, `_build` (42,237 files here) were
+    both walked and then discarded.
     """
+    tracked = tracked_files(root)
     out: list[Path] = []
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        if is_skipped(path.relative_to(root)):
-            continue
-        out.append(path)
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if not is_skipped_name(name)]
+        directory = Path(dirpath)
+        for name in filenames:
+            if is_skipped_name(name):
+                continue
+            path = directory / name
+            if tracked is not None and path not in tracked:
+                continue
+            if path.is_file():
+                out.append(path)
     return out
 
 
@@ -426,6 +515,19 @@ def run_self_test() -> int:
             "module Alias = Plain_surface\nlet _ = 0\n"
         )
 
+        # Skipped trees are pruned during the walk, and pruning must not change
+        # what the scan sees. Both halves are asserted below: a reference parked
+        # inside a skipped tree must not keep a value alive, and the pruning
+        # must not swallow the sibling directories it walks past.
+        stale = root / ".worktrees" / "old-checkout" / "lib"
+        stale.mkdir(parents=True)
+        (stale / "stale_consumer.ml").write_text("let _ = Plain_surface.unfacaded_helper ()\n")
+        build = root / "lib" / "_build" / "default"
+        build.mkdir(parents=True)
+        (build / "generated_consumer.ml").write_text(
+            "let _ = Wrapped_surface.wrapped_helper ()\n"
+        )
+
         entries = {d["name"]: d for d in find_dead_exports(root, DEFAULT_MIN_NAME_LEN)}
         republished = entries.get("republished_helper")
         if republished is None:
@@ -444,6 +546,27 @@ def run_self_test() -> int:
             failures.append("value behind a multi-line facade not reported")
         elif not wrapped.get("reexported_by"):
             failures.append("multi-line include module type of not matched")
+
+        # Both of these were still reported above: a call sitting in
+        # .worktrees/ or _build/ is not a reference. They are asserted here so
+        # that a walk which stops pruning fails loudly instead of quietly
+        # shrinking the report -- the direction that hides dead surface.
+        if "unfacaded_helper" not in entries:
+            failures.append("a reference under .worktrees/ was counted as live")
+        if "wrapped_helper" not in entries:
+            failures.append("a reference under _build/ was counted as live")
+
+        (root / "lib" / "_build").parent.joinpath("_opam").write_text("not a directory\n")
+
+        walked = {path.name for path in all_files(root)}
+        if "_opam" in walked:
+            failures.append("a file whose own name is skipped was collected")
+        if "stale_consumer.ml" in walked:
+            failures.append(".worktrees/ was walked instead of pruned")
+        if "generated_consumer.ml" in walked:
+            failures.append("_build/ was walked instead of pruned")
+        if "plain_surface.ml" not in walked:
+            failures.append("pruning removed a sibling it should have walked")
 
     for failure in failures:
         print(f"self-test FAIL: {failure}", file=sys.stderr)
@@ -464,9 +587,98 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                         help=f"Skip export names shorter than this (default {DEFAULT_MIN_NAME_LEN}).")
     parser.add_argument("--stanzas", action="store_true",
                         help="Report test/stanzas/*.inc files that test/dune never includes.")
+    parser.add_argument("--ratchet", action="store_true",
+                        help="With --exports, fail when the count exceeds DEAD_EXPORT_BASELINE.")
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
     parser.add_argument("--self-test", action="store_true", help="Run the regression guard and exit.")
     return parser.parse_args(argv)
+
+
+# Exact current count. The audit's documented categories explain why every
+# reported entry is not mechanically removable; the ratchet still forbids
+# adding another dead public export.
+#
+# Lowered from 548 to 545 on 2026-08-14 (#28656): three
+# keeper_official_client_host hook helpers (hook_error,
+# illegal_hook_decision, invoke_turn_hook) lost their last external callers
+# when the three runtime modules were consolidated onto
+# invoke_turn_completion_hooks, and keeper_tool_descriptor.composable_output_to_json
+# / keeper_tool_plan.output_value never had one. All three .mli exports
+# were dropped (implementations kept where still used internally,
+# output_value's implementation removed as unused).
+# 545 -> 541: tightened to the measured count. The four counts of slack
+# predate the Keeper_compact_audit purge (main already measured 541 against
+# the stale 545 baseline); the purge itself did not change the count.
+# 540 -> 539: tightened to the measured count on the RFC-0387 stage-1 tree
+# (measured 2026-08-20: 539). The one count of slack predates this change;
+# goal_verification's exports all have callers (dashboard joins + tests), so
+# the ledger added none.
+# 536 -> 532: tightened to the measured count (measured 2026-08-22: 532
+# before and after this change). The four counts of slack predate it; the
+# change itself is count-neutral because the four exports it orphaned
+# (audit_log.entry_of_json_r, common.keeper_runtime_store_dirname,
+# workspace_utils_paths_backend tasks_dirname / backlog_filename) were
+# dropped from their .mli in the same PR, implementations kept where still
+# used internally.
+# 532 -> 529: the #29396 A22 purge deleted three exports this audit already
+# listed (keeper_memory_recall.recent_lines_or_record,
+# runtime_observation.model_label_of_config, session.add_mcp_session_header)
+# and orphaned nothing. 529 -> 528: measured on the merge with main after
+# #29515 (2026-08-22).
+# 528 -> 526: measured on the merge with main (PR #29539, 2026-08-22).
+# 526 -> 522: the agent JSON repair path (#29396 A15) removed four more
+# exports (normalize_agent_last_seen, short_json_repr,
+# agent_json_needs_repair, read_agent_with_repair_result).
+# 522 -> 521: dropping the Mcp_server JSON-RPC aliases removed one more
+# export (mcp_server.jsonrpc_request_to_yojson).
+# 521 -> 519: dropping server_routes_http_common.state_switch_opt and
+# state_clock_opt removed two more dead exports.
+# 519 -> 55: swept every export the audit could reach. The facades here mirror
+# their sub-modules with `include module type of` and never re-declare what
+# they forward, so dropping the declaration at the owning module narrowed the
+# facade with it and no facade needed editing. Declarations went first; the
+# compiler then reported the orphaned implementations, and each round exposed
+# more, so the count fell further than the declarations removed. Held back:
+# twelve names carrying the spec-bridge shape this file warns about above.
+# Those need the three questions answered one at a time, not a scan. What
+# remains is those twelve plus the entries an odoc link names as an intended
+# entry point.
+#
+# Do not name the survivors here. A first draft of this note listed three of
+# them, and the token scan read its own comment as a caller: the gate counted
+# three fewer than the tree held. State the test, not the roster -- as the
+# paragraph above already says.
+DEAD_EXPORT_BASELINE = 43
+
+
+def run_ratchet(count: int) -> int:
+    """Compare the dead-export count against the frozen baseline.
+
+    Below the baseline passes and says by how much, rather than failing until
+    someone edits the number. The other direction is wrong for a measured
+    reason: failing on your own improvement turned main red three times in an
+    hour while people were wiring suites.
+    """
+    if count > DEAD_EXPORT_BASELINE:
+        print(
+            f"[dead-surface] FAIL - {count} dead exports, over the "
+            f"{DEAD_EXPORT_BASELINE} baseline by {count - DEAD_EXPORT_BASELINE}.\n"
+            "\n"
+            "An export with no caller anywhere in the tree is usually a surface\n"
+            "someone meant to wire and did not. Remove it, wire it, or raise\n"
+            f"DEAD_EXPORT_BASELINE in {Path(__file__).name} with the reason.",
+            file=sys.stderr,
+        )
+        return 1
+    if count < DEAD_EXPORT_BASELINE:
+        print(
+            f"[dead-surface] OK - {count} dead exports, {DEAD_EXPORT_BASELINE} "
+            f"baseline - lower DEAD_EXPORT_BASELINE to hold the "
+            f"{DEAD_EXPORT_BASELINE - count} you removed"
+        )
+        return 0
+    print(f"[dead-surface] OK - {count} dead exports, at baseline")
+    return 0
 
 
 def main(argv: list[str]) -> int:
@@ -478,6 +690,15 @@ def main(argv: list[str]) -> int:
         return 2
 
     payload: dict[str, object] = {}
+    dead_export_count: int | None = None
+    # Say which files were searched for callers. The same commit answers 13 or
+    # 47 depending on what is lying around untracked, and both used to print
+    # the same line.
+    scanned = "git-tracked files" if tracked_files(ROOT) is not None else (
+        "every file in the tree (git could not say what is tracked)")
+    payload["reference_scope"] = scanned
+    if not args.json and (args.modules or args.exports):
+        print(f"callers searched in: {scanned}")
     if args.modules:
         dead_modules = find_dead_modules(ROOT)
         payload["dead_modules"] = dead_modules
@@ -487,6 +708,7 @@ def main(argv: list[str]) -> int:
                 print(f"  {entry['loc']:6d} LoC  {entry['module']}  {entry['ml']}")
     if args.exports:
         dead_exports = find_dead_exports(ROOT, args.min_name_len)
+        dead_export_count = len(dead_exports)
         per_module: dict[str, int] = defaultdict(int)
         for entry in dead_exports:
             per_module[entry["module"]] += 1
@@ -515,6 +737,11 @@ def main(argv: list[str]) -> int:
                 print(f"  {orphan}")
     if args.json:
         print(json.dumps(payload, indent=2))
+    if args.ratchet:
+        if dead_export_count is None:
+            print("--ratchet needs --exports", file=sys.stderr)
+            return 2
+        return run_ratchet(dead_export_count)
     return 0
 
 

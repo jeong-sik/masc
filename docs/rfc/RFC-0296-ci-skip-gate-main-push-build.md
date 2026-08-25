@@ -8,15 +8,20 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0270", "0206"]
-implementation_prs: []
 ---
 
 # RFC-0296: CI skip-gate main-push safety-net
 
-Status: Draft · `Build and Test` must always run on non-PR events (push to
-main/develop, workflow_dispatch) regardless of the changed-surface scope, so a
-`lib/` regression introduced by a non-build-path merge is detected on the next
-main push instead of persisting silently behind a green `CI Gate`.
+Status: Draft · `Build and Test` must always run on non-PR events (develop
+push, the main timer, workflow_dispatch) regardless of the changed-surface
+scope, so a `lib/` regression introduced by a non-build-path merge is detected
+on the next timer run instead of persisting silently behind a green `CI Gate`.
+
+The trigger is a timer rather than the merge itself because main takes 254
+commits a day and a run takes 22-34 minutes: per-commit runs asked for 4.4 runs
+in flight at all times and got a queue instead, 26 deep at 2026-08-24T01:20Z,
+sitting ahead of the pull_request runs that are the actual merge gate. The
+safety-net this RFC asks for is only worth having if it produces verdicts.
 
 > Anchors read against `origin/main` (`10152718aef`) on 2026-06-28.
 > `lib/` and workflow line numbers shift; re-confirm against the merge-base

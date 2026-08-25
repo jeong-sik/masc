@@ -9,7 +9,7 @@
       with swapped argument order.
     - [take n xs] — first n elements of a list (tolerant of short
       input).
-    - [String_util.trim_to_option raw] — empty-after-trim string -> None.
+    - [String_util.trim_nonempty raw] — empty-after-trim string -> None.
 
     Pure builders + value records. Verbatim extract from
     [Server_dashboard_http_runtime_info]; the parent retains

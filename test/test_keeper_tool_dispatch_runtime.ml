@@ -80,12 +80,12 @@ let project_replay_message_exn ~base_path
        Masc.Keeper_gate_replay.project_model_input
          ~base_path
          evidence
-         [ Agent_sdk.Types.user_msg message.text ]
+         [ Agent_core.Types.user_msg message.text ]
      with
      | Ok [ _canonical; projected ] ->
-       Agent_sdk.Types.text_of_content projected.content
+       Agent_core.Types.text_of_content projected.content
      | Ok _ -> fail "replay projection did not append exact evidence"
-     | Error detail -> fail detail)
+     | Error detail -> fail (Agent_core.Error.to_string detail))
 ;;
 
 let make_meta ?(name = "keeper-exec-tools") () =
@@ -175,18 +175,23 @@ let with_exec_fixture
                    run
                else run ())))
 
-let contains_substring text needle =
-  let text_len = String.length text in
-  let needle_len = String.length needle in
-  let rec loop idx =
-    idx + needle_len <= text_len
-    && (String.sub text idx needle_len = needle || loop (idx + 1))
-  in
-  needle_len = 0 || loop 0
-
 let parse_json raw =
   try Yojson.Safe.from_string raw with
   | Yojson.Json_error err -> fail ("invalid json: " ^ err)
+
+let structured_tool_output_exn ~base_path content =
+  match Tool_output.decode_from_agent_core content with
+  | Tool_output.Not_marker -> parse_json content
+  | Tool_output.Invalid_marker { detail } -> fail detail
+  | Tool_output.Decoded reference ->
+    if not (String.equal reference.mime Tool_output.artifact_manifest_mime)
+    then fail "tool output marker is not a typed result manifest";
+    let payload = fetch_artifact_exn ~base_path reference |> parse_json in
+    (match Tool_output.artifact_manifest_of_json payload with
+     | Tool_output.Decoded_artifact_manifest { structured_content; _ } ->
+       structured_content
+     | Tool_output.Not_artifact_manifest -> fail "typed result manifest is absent"
+     | Tool_output.Invalid_artifact_manifest { detail } -> fail detail)
 
 let outcome_label = function
   | Tool_result.Completed () -> "success"
@@ -285,10 +290,10 @@ let test_public_read_rejects_unsupported_range_fields () =
         |> Option.value ~default:""
       in
       check bool "error mentions unsupported field" true
-        (contains_substring error "unsupported field");
+        (String_util.contains_substring error "unsupported field");
       check bool "error mentions start_line" true
-        (contains_substring error "start_line");
-      check string "validation source" "oas_tool_middleware"
+        (String_util.contains_substring error "start_line");
+      check string "validation source" "agent_core_tool_middleware"
         Yojson.Safe.Util.(member "validation" json |> to_string);
       check string "failure class" "policy_rejection"
         Yojson.Safe.Util.(member "failure_class" json |> to_string);
@@ -299,10 +304,14 @@ let test_public_read_rejects_unsupported_range_fields () =
          | `Assoc _ -> true
          | _ -> false))
 
-let test_public_read_rejects_offset_without_enrichment () =
+let test_public_read_accepts_offset_without_enrichment () =
   with_exec_fixture
-    "keeper_tool_dispatch_runtime_read_rejects_offset"
+    "keeper_tool_dispatch_runtime_read_accepts_offset"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let playground = KES.keeper_default_write_root ~config ~meta in
+      let file_path = Filename.concat playground "offset-window.txt" in
+      mkdir_p playground;
+      write_file file_path "one\ntwo\nthree\n";
       let result =
         KET.execute_keeper_tool_call_with_outcome
           ~config
@@ -312,21 +321,54 @@ let test_public_read_rejects_offset_without_enrichment () =
           ~name:"Read"
           ~input:
             (`Assoc
-               [ "file_path", `String "lib/keeper/keeper_transition_audit.ml"
-               ; "offset", `Int 100
+               [ "file_path", `String "offset-window.txt"
+               ; "offset", `Int 2
                ])
           ()
       in
-      check string "runtime outcome" "failure" (outcome_label result.disposition);
-      let json =
-        match result.data with
-        | Some data -> data
-        | None -> fail "validation rejection omitted typed data"
+      let json = check_success_result "offset Read" result in
+      check string "offset is a 1-based line coordinate" "two\nthree\n"
+        (json_string_field ~default:"" "content" json))
+
+let test_surface_read_rejects_duplicate_dispatch_fields () =
+  with_exec_fixture
+    "keeper_tool_dispatch_runtime_surface_read_rejects_duplicates"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let run input =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~publication_recovery
+          ~ctx_work
+          ~name:"keeper_surface_read"
+          ~input
+          ()
       in
-      check bool "dispatch does not add a tutor" true
-        Yojson.Safe.Util.(member "tool_tutor" json = `Null);
-      check bool "validation names exact field" true
-        (contains_substring result.raw_output "offset"))
+      let duplicate_mode =
+        run
+          (`Assoc
+             [ "surface", `String "discord"
+             ; "mode", `String "channel"
+             ; "mode", `String "local" ])
+      in
+      let duplicate_channel =
+        run
+          (`Assoc
+             [ "surface", `String "discord"
+             ; "mode", `String "channel"
+             ; "channel_id", `String "123"
+             ; "channel_id", `String "456" ])
+      in
+      check bool "duplicate fields produce validation output" true
+        (String_util.contains_substring duplicate_mode.raw_output "error_code");
+      check string "duplicate mode is named"
+        "keeper_surface_read arguments contains duplicate field \"mode\""
+        Yojson.Safe.Util.(member "message" (parse_json duplicate_mode.raw_output) |> to_string);
+      check bool "duplicate channel produces validation output" true
+        (String_util.contains_substring duplicate_channel.raw_output "error_code");
+      check string "duplicate channel is not silently selected"
+        "keeper_surface_read arguments contains duplicate field \"channel_id\""
+        Yojson.Safe.Util.(member "message" (parse_json duplicate_channel.raw_output) |> to_string))
 
 let test_board_runtime_rejects_unknown_route () =
   let meta = make_meta ~name:"keeper-board-runtime-guard" () in
@@ -355,11 +397,16 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (json_contains_tool "masc_board_fake" json);
   check bool "voice tool grouped" true
     (member "voice" "keeper_voice_speak");
+  let is_model_visible name =
+    List.exists
+      (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
+      (Masc.Keeper_tool_policy.keeper_model_tool_schemas ())
+  in
   check bool "task tool grouped as workspace" true
     (member "workspace" "keeper_task_claim");
-  check bool "MASC task tool grouped as workspace" true
+  check bool "MASC task tool grouped as workspace" (is_model_visible "masc_transition")
     (member "workspace" "masc_transition");
-  check bool "MASC plan tool grouped as workspace" true
+  check bool "MASC plan tool grouped as workspace" (is_model_visible "masc_plan_get")
     (member "workspace" "masc_plan_get");
   check bool "surface read grouped as surface" true
     (member "surface" "keeper_surface_read");
@@ -685,7 +732,7 @@ let check_publication_recovery_failure
        check bool
          (label ^ " " ^ sentinel_label ^ " is absent from tool output")
          false
-         (contains_substring public_output sentinel))
+         (String_util.contains_substring public_output sentinel))
     sentinels;
   check bool (label ^ " created no file") false (Sys.file_exists target)
 ;;
@@ -822,6 +869,259 @@ let test_initializing_recovery_isolates_only_publication_writes () =
          (read_file existing_path))
 ;;
 
+let test_identical_keeper_invocations_join_across_production_boundaries () =
+  with_exec_fixture
+    ~bind_eio_context:true
+    "keeper_tool_observation_exact_invocation"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let net =
+         match Eio_context.get_net_opt () with
+         | Some net -> net
+         | None -> fail "test Eio net missing"
+       in
+       Masc.Keeper_tool_call_log.reset_for_testing ();
+       Masc.Keeper_execution_join.For_testing.clear ();
+       Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
+       Masc.Keeper_chat_store.append_user_message
+         ~base_dir:config.base_path
+         ~keeper_name:meta.name
+         ~content:
+           (String.make
+              (Masc.Tool_bridge.default_externalize_threshold_bytes + 1)
+              'x')
+         ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+         ();
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       Fun.protect
+         ~finally:(fun () ->
+           Masc.Keeper_execution_join.For_testing.clear ();
+           Masc.Keeper_tool_call_log.reset_for_testing ();
+           bundle.cleanup ())
+         (fun () ->
+            let agent_name = Masc.Keeper_identity.keeper_agent_name meta.name in
+            let trace_id = "keeper-tool-observation-exact-invocation" in
+            let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
+            Masc.Keeper_tool_call_log.set_turn_context
+              ~cell:turn_ctx_cell
+              ~agent_name
+              ~trace_id
+              ~turn:0
+              ~keeper_turn_id:1
+              ();
+            let hooks =
+              Masc.Keeper_hooks_agent_core.make_hooks
+                ~config
+                ~meta_ref:(ref meta)
+                ~turn_ctx_cell
+                ~trace_id
+                ~keeper_turn_id:1
+                ~on_after_turn_ordinal:ignore
+                ()
+            in
+            let event_bus = Agent_core.Event_bus.create () in
+            let subscription =
+              Agent_core.Event_bus.subscribe
+                ~config:
+                  (Agent_core.Event_bus.subscription_config
+                     ~capacity:8
+                     ~overflow:Agent_core.Event_bus.Drop_oldest
+                   |> Result.get_ok)
+                event_bus
+            in
+            let agent =
+              Agent_core.Agent.create
+                ~net
+                ~config:
+                  { (Agent_core.Types.default_config ~model:"test-model") with
+                    name = agent_name
+                  }
+                ~tools:bundle.tools
+                ~options:{ Agent_core.Agent.default_options with hooks }
+                ()
+            in
+            let execute_identical_occurrence () =
+              let options = Agent_core.Agent.options agent in
+              match
+                Agent_core.Agent_tools.execute_tools
+                  ~context:(Agent_core.Agent.context agent)
+                  ~tools:
+                    (Agent_core.Tool_set.to_list (Agent_core.Agent.tools agent))
+                  ~hooks:options.hooks
+                  ?tool_approval:options.tool_approval
+                  ~event_bus:(Some event_bus)
+                  ~tracer:options.tracer
+                  ~agent_name
+                  ~turn_count:0
+                  ~usage:(Agent_core.Agent.state agent).usage
+                  [ Agent_core.Types.ToolUse
+                      { id = ""
+                      ; name = "keeper_surface_read"
+                      ; input =
+                          `Assoc
+                            [ "surface", `String "dashboard"
+                            ; "limit", `Int 1
+                            ]
+                      }
+                  ]
+              with
+              | Ok
+                  { Agent_core.Agent_tools.completed_results = [ result ]
+                  ; completion = Agent_core.Agent_tools.Continue_after_batch
+                  } ->
+                result
+              | Ok _ -> fail "identical Keeper invocation returned an unexpected report"
+              | Error _ -> fail "identical Keeper invocation failed"
+            in
+            (* Both calls deliberately have the same provider id, turn, planned
+               index, tool and input. Their heap identity is the only occurrence
+               discriminator, and neither completion is bridged until both hooks
+               have registered their joins. *)
+            let first = execute_identical_occurrence () in
+            let second = execute_identical_occurrence () in
+            check bool
+              "production dispatch creates distinct invocation objects"
+              false
+              (first.invocation == second.invocation);
+            check string
+              "provider ids are structurally identical"
+              (Agent_core.Tool_contract.Invocation.tool_use_id first.invocation)
+              (Agent_core.Tool_contract.Invocation.tool_use_id second.invocation);
+            check int
+              "turns are structurally identical"
+              (Agent_core.Tool_contract.Invocation.turn first.invocation)
+              (Agent_core.Tool_contract.Invocation.turn second.invocation);
+            check int
+              "planned indices are structurally identical"
+              (Agent_core.Tool_contract.Invocation.planned_index first.invocation)
+              (Agent_core.Tool_contract.Invocation.planned_index second.invocation);
+            check bool
+              "schedules are structurally identical"
+              true
+              (Agent_core.Tool_contract.Invocation.schedule first.invocation
+               = Agent_core.Tool_contract.Invocation.schedule second.invocation);
+            check bool
+              "completion contracts are structurally identical"
+              true
+              (Agent_core.Tool_contract.Invocation.completion first.invocation
+               = Agent_core.Tool_contract.Invocation.completion second.invocation);
+            let original_result_bytes =
+              List.map
+                (fun (result : Agent_core.Agent_tools.tool_execution_result) ->
+                   match Tool_output.decode_from_agent_core result.content with
+                   | Tool_output.Decoded reference ->
+                     let original =
+                       fetch_artifact_exn
+                         ~base_path:config.base_path
+                         reference
+                     in
+                     check bool
+                       "externalized result is smaller than its original payload"
+                       true
+                       (String.length result.content < String.length original);
+                     String.length original
+                   | Tool_output.Not_marker ->
+                     fail "production Keeper result was not externalized"
+                   | Tool_output.Invalid_marker { detail } ->
+                     failf "production Keeper result has invalid marker: %s" detail)
+                [ first; second ]
+            in
+            let expected_original_bytes =
+              match original_result_bytes with
+              | [ first_bytes; second_bytes ] ->
+                check int
+                  "identical reads externalize the same original byte count"
+                  first_bytes
+                  second_bytes;
+                first_bytes
+              | _ -> fail "expected original byte counts for two Keeper results"
+            in
+            let completion_json =
+              Agent_core.Event_bus.drain subscription
+              |> List.filter_map (fun (event : Agent_core.Event_bus.event) ->
+                match event.payload with
+                | Agent_core.Event_bus.ToolCompleted _ ->
+                  Masc.Keeper_event_bridge.native_event_to_json event
+                | _ -> None)
+            in
+            check int
+              "both production completions reach the bridge"
+              2
+              (List.length completion_json);
+            let string_member key = function
+              | `Assoc fields ->
+                (match List.assoc_opt key fields with
+                 | Some (`String value) -> Some value
+                 | _ -> None)
+              | _ -> None
+            in
+            let event_execution_ids =
+              List.map
+                (fun json ->
+                   match
+                     Option.bind
+                       (match json with
+                        | `Assoc fields -> List.assoc_opt "payload" fields
+                        | _ -> None)
+                       (string_member "execution_id")
+                   with
+                   | Some execution_id -> execution_id
+                   | None -> fail "bridged Keeper completion has no execution_id")
+                completion_json
+            in
+            check int
+              "each occurrence keeps a distinct execution id"
+              2
+              (List.length (List.sort_uniq String.compare event_execution_ids));
+            let log_rows =
+              Masc.Keeper_tool_call_log.read_recent
+                ~keeper_name:meta.name
+                ~n:2
+                ()
+            in
+            check int "both calls reach the durable tool log" 2 (List.length log_rows);
+            let log_execution_ids =
+              List.map
+                (fun row ->
+                   match string_member "execution_id" row with
+                   | Some execution_id -> execution_id
+                   | None -> fail "durable Keeper tool row has no execution_id")
+                log_rows
+            in
+            check
+              (list string)
+              "event and durable-log joins agree"
+              (List.sort String.compare log_execution_ids)
+              (List.sort String.compare event_execution_ids);
+            List.iter
+              (fun row ->
+                 match row with
+                 | `Assoc fields ->
+                   (match List.assoc_opt "result_bytes" fields with
+                    | Some (`Int bytes) ->
+                      check int
+                        "handler original-byte observation reaches durable row"
+                        expected_original_bytes
+                        bytes
+                    | _ -> fail "durable Keeper tool row has no result_bytes")
+                 | _ -> fail "durable Keeper tool row is not an object")
+              log_rows;
+            check int
+              "post hooks consume both handler observations"
+              0
+              (Masc.Keeper_tool_call_log.pending_truncation_count_for_testing ());
+            check int
+              "bridge consumes both exact joins"
+              0
+              (Masc.Keeper_execution_join.For_testing.size ())))
+;;
+
 let test_manual_gate_defers_publication_writes_before_recovery () =
   with_exec_fixture
     "keeper_tool_dispatch_manual_publication_gate"
@@ -892,9 +1192,9 @@ let test_manual_gate_defers_publication_writes_before_recovery () =
          (read_file path))
 ;;
 
-let test_manual_gate_deferral_stays_deferred_through_oas_bridge () =
+let test_manual_gate_defers_memory_write_before_persistence () =
   with_exec_fixture
-    "keeper_tool_dispatch_manual_gate_oas_bridge"
+    "keeper_tool_dispatch_manual_memory_write_gate"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        (match
           Masc.Keeper_gate_mode.set
@@ -904,7 +1204,52 @@ let test_manual_gate_deferral_stays_deferred_through_oas_bridge () =
         with
         | Ok _ -> ()
         | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
-       let path = Filename.concat config.base_path "manual-gate-oas.txt" in
+       let keepers_dir =
+         Config_dir_resolver.keepers_dir_for_base_path
+           ~base_path:config.base_path
+       in
+       let memory_path =
+         Masc.Keeper_memory_os_current.path_for_keepers_dir
+           ~keepers_dir
+           ~keeper_id:meta.name
+       in
+       let result =
+         KET.execute_keeper_tool_call_with_outcome
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ~name:"keeper_memory_write"
+           ~input:
+             (`Assoc
+                [ "title", `String "must wait for approval"
+                ; "content", `String "must not persist before Gate approval"
+                ])
+           ()
+       in
+       check string
+         "Manual Gate memory write outcome"
+         "deferred"
+         (outcome_label result.KTE.disposition);
+       check bool
+         "Manual Gate memory write created no snapshot"
+         false
+         (Sys.file_exists memory_path))
+;;
+
+let test_manual_gate_deferral_stays_deferred_through_agent_core_bridge () =
+  with_exec_fixture
+    "keeper_tool_dispatch_manual_gate_agent_core_bridge"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"test"
+            Masc.Keeper_gate_mode.Manual
+        with
+        | Ok _ -> ()
+        | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
+       let path = Filename.concat config.base_path "manual-gate-agent-core.txt" in
        let input =
          `Assoc
            [ "file_path", `String path
@@ -918,7 +1263,7 @@ let test_manual_gate_deferral_stays_deferred_through_oas_bridge () =
          | _ :: _ :: _ -> fail "duplicate tool_write_file descriptors"
        in
        let handler =
-         Masc.Keeper_tools_oas_handler.make_keeper_tool_handler
+         Masc.Keeper_tools_agent_core_handler.make_keeper_tool_handler
            ~name:"Write"
            ~input_schema
            ~config
@@ -949,17 +1294,17 @@ let test_manual_gate_deferral_stays_deferred_through_oas_bridge () =
               (output.data |> member "gate" |> member "decision" |> to_string)
         | Tool_result.Completed _ -> fail "Gate deferral became Completed"
         | Tool_result.Failed _ -> fail "Gate deferral became Failed");
-       (match Masc.Tool_bridge.to_oas_typed_result masc_result with
+       (match Masc.Tool_bridge.to_agent_core_typed_result masc_result with
         | Ok { _meta = Some (`Assoc fields); _ } ->
           check (option string)
-            "OAS receives the one-way deferred projection"
+            "Agent Core receives the one-way deferred projection"
             (Some "deferred")
             (match List.assoc_opt "masc.tool_disposition" fields with
              | Some (`String value) -> Some value
              | Some _ | None -> None)
-        | Ok _ -> fail "Deferred OAS projection omitted its disposition marker"
+        | Ok _ -> fail "Deferred Agent Core projection omitted its disposition marker"
         | Error error ->
-          fail ("Deferred crossed the OAS boundary as failure: " ^ error.message));
+          fail ("Deferred crossed the Agent Core boundary as failure: " ^ error.message));
        check bool "Deferred Write executed no effect" false (Sys.file_exists path))
 ;;
 
@@ -1032,21 +1377,21 @@ let test_publication_initialization_crash_is_redacted () =
        check bool
          "exception payload is absent from message"
          false
-         (contains_substring result.raw_output exception_text);
+         (String_util.contains_substring result.raw_output exception_text);
        check bool
          "exception payload is absent from data"
          false
-         (contains_substring rendered_data exception_text);
+         (String_util.contains_substring rendered_data exception_text);
        if backtrace_text <> ""
        then (
          check bool
            "backtrace is absent from message"
            false
-           (contains_substring result.raw_output backtrace_text);
+           (String_util.contains_substring result.raw_output backtrace_text);
          check bool
            "backtrace is absent from data"
            false
-           (contains_substring rendered_data backtrace_text));
+           (String_util.contains_substring rendered_data backtrace_text));
        check bool "crashed initialization created no file" false
          (Sys.file_exists path))
 ;;
@@ -1890,9 +2235,9 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
       check string "Grep translates to rg op" "rg"
         (json_string_field ~default:"" "op" grep_json);
       check bool "Grep returns real match" true
-        (contains_substring grep_result.raw_output visible_file_path);
+        (String_util.contains_substring grep_result.raw_output visible_file_path);
       check bool "Grep match includes content" true
-        (contains_substring grep_result.raw_output "gamma");
+        (String_util.contains_substring grep_result.raw_output "gamma");
       let execute_result =
         run
           "Execute"
@@ -1905,8 +2250,12 @@ let test_model_visible_local_tools_dispatch_to_runtime_handlers () =
       let execute_json = check_success_result "Execute" execute_result in
       check bool "Execute used typed Shell IR" true
         (json_bool_field ~default:false "typed" execute_json);
-      check bool "Execute ran in requested cwd" true
-        (contains_substring execute_result.raw_output playground))
+      let observed_cwd =
+        json_string_field ~default:"" "output" execute_json |> String.trim
+      in
+      check string "Execute ran in requested cwd"
+        (Unix.realpath playground)
+        (Unix.realpath observed_cwd))
 
 let test_keeper_task_claim_accepts_specific_task_id () =
   with_exec_fixture "keeper_tool_dispatch_specific_task_claim"
@@ -1983,7 +2332,7 @@ let test_model_visible_web_search_dispatches_to_misc_runtime () =
         ~outcomes:
           [
             ("brave", `Error "offline");
-            ( "duckduckgo",
+            ( "searxng",
               `Hits
                 [
                   ( "OCaml Eio runtime",
@@ -2015,9 +2364,9 @@ let test_model_visible_web_search_dispatches_to_misc_runtime () =
             Yojson.Safe.Util.(member "status" json |> to_string);
           check string "query preserved" "ocaml eio runtime test"
             Yojson.Safe.Util.(member "query" result_json |> to_string);
-          check string "fallback provider selected" "duckduckgo"
+          check string "fallback provider selected" "searxng"
             Yojson.Safe.Util.(member "engine" result_json |> to_string);
-          check string "simulated provider url" "test://duckduckgo"
+          check string "simulated provider url" "test://searxng"
             Yojson.Safe.Util.(member "search_url" result_json |> to_string);
           check int "result count" 1
             Yojson.Safe.Util.(member "result_count" result_json |> to_int);
@@ -2056,7 +2405,7 @@ let test_model_visible_web_fetch_dispatches_to_misc_runtime () =
             (List.exists
                (fun (key, value) ->
                  String.equal key "User-Agent"
-                 && contains_substring value "MASC-FetchWeb")
+                 && String_util.contains_substring value "MASC-FetchWeb")
                headers);
           Ok (Some 200, html))
         (fun () ->
@@ -2095,21 +2444,23 @@ let test_model_visible_web_fetch_dispatches_to_misc_runtime () =
           check string "description" "Alias description & detail"
             Yojson.Safe.Util.(member "description" json |> to_string);
           check bool "heading rendered as markdown" true
-            (contains_substring
+            (String_util.contains_substring
                Yojson.Safe.Util.(member "text" json |> to_string)
                "# Alias Fetch");
           check bool "body text cleaned" true
-            (contains_substring
+            (String_util.contains_substring
                Yojson.Safe.Util.(member "text" json |> to_string)
                "Body content & proof.")))
 
-let test_public_masc_web_fetch_reaches_localhost_after_gate () =
+let test_public_masc_web_fetch_rejects_localhost_after_gate () =
   with_exec_fixture
     ~always_allow:true
     "keeper_tool_dispatch_web_fetch_reaches_localhost"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
+      let fetch_calls = ref 0 in
       Masc.Tool_misc.with_web_fetch_http_get_for_test
         (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ url ->
+          incr fetch_calls;
           check string "local url forwarded" "http://127.0.0.1:8935/health" url;
           Ok (Some 200, "healthy"))
         (fun () ->
@@ -2123,9 +2474,17 @@ let test_public_masc_web_fetch_reaches_localhost_after_gate () =
               ~input:(`Assoc [ ("url", `String "http://127.0.0.1:8935/health") ])
               ()
           in
-          check string "web fetch local outcome" "success"
+          check string "web fetch local outcome" "failure"
             (outcome_label result.disposition);
-          ()))
+          check bool
+            "localhost rejection is a workflow error"
+            true
+            (result.disposition = Tool_result.Failed Tool_result.Workflow_rejection);
+          check bool
+            "localhost rejection names the loopback boundary"
+            true
+            (String_util.contains_substring result.raw_output "loopback address");
+          check int "localhost never reaches HTTP" 0 !fetch_calls))
 
 let test_manual_gate_defers_web_tools_before_network () =
   with_exec_fixture "keeper_tool_dispatch_manual_web_gate"
@@ -2141,7 +2500,7 @@ let test_manual_gate_defers_web_tools_before_network () =
       let fetch_calls = ref 0 in
       Masc.Tool_misc.with_web_search_simulation_for_test
         ~outcomes:
-          [ ( "duckduckgo"
+          [ ( "searxng"
             , `Hits [ "unexpected", "https://example.com", "unexpected" ] )
           ]
         (fun () ->
@@ -2222,8 +2581,8 @@ let test_approved_web_search_grant_executes_exact_request () =
          Masc.Keeper_approval_queue.resolve_with_policy
            ~base_path:config.base_path
            ~id:approval_id
-           ~decision:Masc.Keeper_approval_queue.Decision.Approve
-           ~source:Masc.Keeper_approval_queue.Auto_judge
+           ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+           ~source:Keeper_approval_queue_rules_types.Auto_judge
            ()
        with
        | Ok _ -> ()
@@ -2244,7 +2603,7 @@ let test_approved_web_search_grant_executes_exact_request () =
       in
       Masc.Tool_misc.with_web_search_simulation_for_test
         ~outcomes:
-          [ ( "duckduckgo"
+          [ ( "searxng"
             , `Hits
                 [ ( "Scheduled result"
                   , "https://example.com/scheduled"
@@ -2325,8 +2684,8 @@ let test_approved_web_search_replays_without_model_resubmission () =
          Masc.Keeper_approval_queue.resolve_with_policy
            ~base_path:config.base_path
            ~id:approval_id
-           ~decision:Masc.Keeper_approval_queue.Decision.Approve
-           ~source:Masc.Keeper_approval_queue.Auto_judge
+           ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+           ~source:Keeper_approval_queue_rules_types.Auto_judge
            ()
        with
        | Ok _ -> ()
@@ -2347,7 +2706,7 @@ let test_approved_web_search_replays_without_model_resubmission () =
       in
       Masc.Tool_misc.with_web_search_simulation_for_test
         ~outcomes:
-          [ ( "duckduckgo"
+          [ ( "searxng"
             , `Hits
                 [ ( "Replayed result"
                   , "https://example.com/replayed"
@@ -2357,7 +2716,7 @@ let test_approved_web_search_replays_without_model_resubmission () =
         ]
         (fun () ->
           let bundle =
-            Masc.Keeper_tools_oas_bundle.make_tool_bundle
+            Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
               ~config
               ~meta
               ~publication_recovery
@@ -2387,7 +2746,7 @@ let test_approved_web_search_replays_without_model_resubmission () =
                  check bool
                    "stored WebSearch effect executed"
                    true
-                   (contains_substring output "Replayed result")
+                   (String_util.contains_substring output "Replayed result")
                | Some
                    { outcome = Masc.Keeper_gate_replay.Applied _; _ } ->
                  fail
@@ -2428,7 +2787,7 @@ let test_approved_web_search_replays_without_model_resubmission () =
             check bool
               "replayed WebSearch output survives behind the durable reference"
               true
-              (contains_substring output "Replayed result")
+              (String_util.contains_substring output "Replayed result")
           | Ok None -> fail "durable replay output artifact is missing"
           | Error error ->
             fail (Tool_blob_store.fetch_error_to_string error));
@@ -2443,14 +2802,35 @@ let test_approved_web_search_replays_without_model_resubmission () =
              ~base_path:config.base_path
              model_message
          in
+         let projected_evidence =
+           projected_message
+           |> String.split_on_char '\n'
+           |> List.rev
+           |> List.find (fun line -> not (String.equal (String.trim line) ""))
+           |> Yojson.Safe.from_string
+         in
          check bool
-           "durable replay output reaches the provider-only projection"
-           true
-           (contains_substring projected_message "Replayed result");
+           "durable replay output stays outside the provider-only projection"
+           false
+           (String_util.contains_substring projected_message "Replayed result");
+         (match
+            projected_evidence
+            |> Yojson.Safe.Util.member "untrusted_tool_output_ref"
+            |> Tool_output.normalized_artifact_ref_of_json
+          with
+          | Tool_output.Decoded_normalized_artifact_ref decoded ->
+            check string
+              "provider-only projection keeps the durable replay identity"
+              output_ref.sha256
+              decoded.sha256
+          | Tool_output.Not_normalized_artifact_ref ->
+            fail "provider replay evidence lost its artifact reference"
+          | Tool_output.Invalid_normalized_artifact_ref { detail } ->
+            fail detail);
          check bool
            "model is forbidden to request the consumed operation again"
            true
-           (contains_substring
+           (String_util.contains_substring
               model_message.text
               "Do not request the approved operation again")
        | Ok _ -> fail "durable WebSearch replay result was missing"
@@ -2476,6 +2856,215 @@ let test_approved_web_search_replays_without_model_resubmission () =
         failf
           "consumed WebSearch did not reuse its durable outcome: %s"
           (Masc.Keeper_gate_replay.outcome_to_string outcome))
+
+let test_approved_memory_write_replays_without_model_resubmission () =
+  with_exec_fixture "keeper_tool_dispatch_replayed_memory_write"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"test"
+            Masc.Keeper_gate_mode.Manual
+        with
+        | Ok _ -> ()
+        | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
+       let input =
+         `Assoc
+           [ "title", `String "approved memory"
+           ; "content", `String "host replay persisted this exact claim"
+           ]
+       in
+       let deferred =
+         KET.execute_keeper_tool_call_with_outcome
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ~name:"keeper_memory_write"
+           ~input
+           ()
+       in
+       (match deferred.disposition with
+        | Tool_result.Deferred () -> ()
+        | Tool_result.Completed () | Tool_result.Failed _ ->
+          fail "approval-gated memory write did not defer before replay");
+       let approval_id =
+         match
+           Masc.Keeper_approval_queue.list_pending_entries_for_workspace
+             ~base_path:config.base_path
+         with
+         | Ok [ entry ] -> entry.id
+         | Ok entries ->
+           failf
+             "expected one pending memory approval, got %d"
+             (List.length entries)
+         | Error error ->
+           fail (Masc.Keeper_approval_queue.storage_error_to_string error)
+       in
+       (match
+          Masc.Keeper_approval_queue.resolve_with_policy
+            ~base_path:config.base_path
+            ~id:approval_id
+            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+            ~source:Keeper_approval_queue_rules_types.Auto_judge
+            ()
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail (Masc.Keeper_approval_queue.resolve_error_to_string error));
+       let resolution : Keeper_event_queue.hitl_resolution =
+         { approval_id
+         ; decision = Keeper_event_queue.Hitl_approved
+         ; channel =
+             Keeper_continuation_channel.unrouted
+               "replayed memory write test"
+         }
+       in
+       let grant =
+         match Masc.Keeper_gate.cycle_grant_of_resolution resolution with
+         | Some grant -> grant
+         | None -> fail "approved memory resolution did not create a grant"
+       in
+       (match
+          Masc.Keeper_gate_replay.replay_approved_effect
+            ~config
+            ~meta
+            ~publication_recovery
+            ~turn_sandbox_factory:None
+            ~grant
+            ~approval_id
+            ()
+        with
+        | Masc.Keeper_gate_replay.Applied
+            { operation = "memory_write"
+            ; journal = Masc.Keeper_gate_replay.Replay_journal_recorded
+            ; _
+            } ->
+          ()
+        | outcome ->
+          failf
+            "approved memory write was not host-replayed: %s"
+            (Masc.Keeper_gate_replay.outcome_to_string outcome));
+       let keepers_dir =
+         Config_dir_resolver.keepers_dir_for_base_path
+           ~base_path:config.base_path
+       in
+       match
+         Masc.Keeper_memory_os_current.read_for_keepers_dir
+           ~keepers_dir
+           ~keeper_id:meta.name
+       with
+       | Ok (Some { facts = [ fact ]; _ }) ->
+         check string
+           "host replay persisted the approved exact claim"
+           "**approved memory** host replay persisted this exact claim"
+           fact.claim
+       | Ok (Some snapshot) ->
+         failf
+           "host replay persisted %d memory facts instead of one"
+           (List.length snapshot.facts)
+       | Ok None -> fail "host replay persisted no memory snapshot"
+       | Error detail -> fail detail)
+
+let test_durable_connector_replay_settles_terminal_turn () =
+  with_exec_fixture "keeper_durable_connector_replay_terminal"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let input =
+         `Assoc
+           [ "connector", `String "discord"
+           ; "channel_id", `String "D-approved"
+           ; "content", `String "approved reply already delivered"
+           ; "mention_user_ids", `List []
+           ]
+       in
+       let approval_id =
+         match
+           Masc.Keeper_approval_queue.submit_pending
+             ~keeper_name:meta.name
+             ~tool_name:"connector_post"
+             ~input
+             ~base_path:config.base_path
+             ()
+         with
+         | Ok submission -> submission.approval_id
+         | Error error ->
+           fail (Masc.Keeper_approval_queue.storage_error_to_string error)
+       in
+       (match
+          Masc.Keeper_approval_queue.resolve_with_policy
+            ~base_path:config.base_path
+            ~id:approval_id
+            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+            ~source:Keeper_approval_queue_rules_types.Auto_judge
+            ()
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail (Masc.Keeper_approval_queue.resolve_error_to_string error));
+       (match
+          Masc.Keeper_approval_queue.consume_approved_resolution
+            ~base_path:config.base_path
+            ~id:approval_id
+            ~keeper_name:meta.name
+            ~tool_name:"connector_post"
+            ~input
+        with
+        | Ok (Masc.Keeper_approval_queue.Consumption_committed _)
+        | Ok Masc.Keeper_approval_queue.Consumption_already_committed ->
+          ()
+        | Ok Masc.Keeper_approval_queue.Consumption_not_matching ->
+          fail "exact connector approval did not match"
+        | Error error ->
+          fail (Masc.Keeper_approval_queue.grant_error_to_string error));
+       let output_ref =
+         Tool_blob_store.put_durable
+           (Tool_blob_store.create ~base_path:config.base_path)
+           ~bytes:(Masc.Keeper_surface_post.ok_json ~surface:"discord" ())
+           ~mime:"application/json"
+       in
+       (match
+          Masc.Keeper_approval_queue.record_consumed_resolution_replay
+            ~base_path:config.base_path
+            ~id:approval_id
+            ~outcome:(Masc.Keeper_approval_queue.Replay_applied output_ref)
+        with
+        | Ok Masc.Keeper_approval_queue.Replay_recorded
+        | Ok Masc.Keeper_approval_queue.Replay_already_recorded ->
+          ()
+        | Error error ->
+          fail (Masc.Keeper_approval_queue.grant_error_to_string error));
+       let resolution : Keeper_event_queue.hitl_resolution =
+         { approval_id
+         ; decision = Keeper_event_queue.Hitl_approved
+         ; channel =
+             Keeper_continuation_channel.unrouted
+               "durable connector replay terminal test"
+         }
+       in
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~hitl_resolution:resolution
+           ()
+       in
+       Fun.protect ~finally:bundle.cleanup @@ fun () ->
+       match bundle.terminal_effect_state () with
+       | Masc.Keeper_tools_agent_core.Terminal_effect_completed
+           (Masc.Keeper_tool_execution.Surface_post_completed
+              (Masc.Keeper_surface_post.To_discord { channel_id })) ->
+         check string
+           "durable replay settles the exact approved target"
+           "D-approved"
+           channel_id
+       | ( Masc.Keeper_tools_agent_core.Terminal_effect_open
+         | Masc.Keeper_tools_agent_core.Deferred_tool_result
+         | Masc.Keeper_tools_agent_core.External_effect_deferred
+         | Masc.Keeper_tools_agent_core.Terminal_effect_completed _
+         | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ) ->
+         fail "durable connector replay remained eligible for visible delivery")
 
 let approved_web_search_resolution
       ~config
@@ -2523,8 +3112,8 @@ let approved_web_search_resolution
      Masc.Keeper_approval_queue.resolve_with_policy
        ~base_path:config.base_path
        ~id:approval_id
-       ~decision:Masc.Keeper_approval_queue.Decision.Approve
-       ~source:Masc.Keeper_approval_queue.Auto_judge
+       ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+       ~source:Keeper_approval_queue_rules_types.Auto_judge
        ()
    with
    | Ok _ -> ()
@@ -2567,7 +3156,7 @@ let test_blob_failure_repairs_journal_without_second_effect () =
        let first =
          Masc.Tool_misc.with_web_search_simulation_for_test
            ~outcomes:
-             [ ( "duckduckgo"
+             [ ( "searxng"
                , `Hits
                    [ ( "Exactly once"
                      , "https://example.com/once"
@@ -2633,7 +3222,7 @@ let test_blob_failure_repairs_journal_without_second_effect () =
          check bool
            "journal-only repair persisted the exact prior outcome"
            true
-           (contains_substring output "Exactly once")
+           (String_util.contains_substring output "Exactly once")
        | outcome ->
          failf
            "in-memory journal-only repair failed: %s"
@@ -2674,7 +3263,7 @@ let test_journal_failure_retries_only_persistence () =
        let first =
          Masc.Tool_misc.with_web_search_simulation_for_test
            ~outcomes:
-             [ ( "duckduckgo"
+             [ ( "searxng"
                , `Hits
                    [ ( "Journal once"
                      , "https://example.com/journal-once"
@@ -2764,7 +3353,7 @@ let test_unknown_effect_is_durable_and_not_replayed () =
        in
        let first =
          Masc.Tool_misc.with_web_search_simulation_for_test
-           ~outcomes:[ "duckduckgo", `Error "forced exact failure" ]
+           ~outcomes:[ "searxng", `Error "forced exact failure" ]
          @@ fun () ->
          Masc.Keeper_gate_replay.replay_approved_effect
            ~config
@@ -2841,7 +3430,6 @@ let test_consumed_without_outcome_is_terminal_indeterminate () =
          ; base_path = config.base_path
          ; causal_context = None
          ; task_id = None
-         ; goal_ids = []
          ; continuation_channel = None
          }
        in
@@ -2920,7 +3508,6 @@ let test_unsupported_approved_operation_retains_exact_model_issued_path () =
          ; base_path = config.base_path
          ; causal_context = None
          ; task_id = None
-         ; goal_ids = []
          ; continuation_channel = None
          }
        in
@@ -2938,8 +3525,8 @@ let test_unsupported_approved_operation_retains_exact_model_issued_path () =
           Masc.Keeper_approval_queue.resolve_with_policy
             ~base_path:config.base_path
             ~id:approval_id
-            ~decision:Masc.Keeper_approval_queue.Decision.Approve
-            ~source:Masc.Keeper_approval_queue.Auto_judge
+            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+            ~source:Keeper_approval_queue_rules_types.Auto_judge
             ()
         with
         | Ok _ -> ()
@@ -2999,11 +3586,11 @@ let test_unsupported_approved_operation_retains_exact_model_issued_path () =
        check bool
          "unsupported exact input remains in the model-issued path"
          true
-         (contains_substring model_message "UNSUPPORTED-END");
+         (String_util.contains_substring model_message "UNSUPPORTED-END");
        check bool
          "unsupported approval does not invent operator repair"
          false
-         (contains_substring model_message "Operator repair is required"))
+         (String_util.contains_substring model_message "Operator repair is required"))
 ;;
 
 let workflow_rejection_message =
@@ -3012,6 +3599,7 @@ let workflow_rejection_message =
 let test_tool_result_does_not_infer_task_fsm_rejections_from_message () =
   let result =
     Tool_result.error
+      ~failure_class:Tool_result.Runtime_failure
       ~tool_name:"masc_transition"
       ~start_time:(Unix.gettimeofday ())
       workflow_rejection_message
@@ -3103,8 +3691,8 @@ let keeper_delegate_input_schema () =
   | Some schema -> schema.input_schema
   | None -> fail "masc_keeper_delegate schema missing"
 
-let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
-  let dir = temp_dir "oas-handler-eio-context" in
+let test_agent_core_handler_threads_eio_context_to_keeper_dispatch () =
+  let dir = temp_dir "agent-core-handler-eio-context" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
@@ -3164,7 +3752,7 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
                    ~data:delegated_data
                    ()));
           let handler =
-            Masc.Keeper_tools_oas_handler.make_keeper_tool_handler
+            Masc.Keeper_tools_agent_core_handler.make_keeper_tool_handler
               ~name:"masc_keeper_delegate"
               ~input_schema:(keeper_delegate_input_schema ())
               ~config
@@ -3181,7 +3769,6 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
                       [ "kind", `String "keeper"
                       ; "name", `String "keeper-target"
                       ] )
-                ; "capability", `String "invoke_turn"
                 ; "prompt", `String "hello"
                 ])
           in
@@ -3217,14 +3804,13 @@ let register_registered_dispatch_probe () =
   Tool_dispatch.register
     ~tool_name:registered_dispatch_probe_tool
     ~handler:(fun ~name ~args:_ ->
-      Some
-        (tool_ok ~tool_name:name
-           (Yojson.Safe.to_string
-              (`Assoc
-                [ ("ok", `Bool true)
-                ; ("tool", `String name)
-                ; ("route", `String "registered")
-                ]))))
+      tool_ok ~tool_name:name
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ ("ok", `Bool true)
+             ; ("tool", `String name)
+             ; ("route", `String "registered")
+             ])))
 
 let workflow_rejection_probe_tool = "test_keeper_workflow_rejection_probe"
 
@@ -3233,18 +3819,17 @@ let register_workflow_rejection_probe () =
   Tool_dispatch.register
     ~tool_name:workflow_rejection_probe_tool
     ~handler:(fun ~name ~args:_ ->
-      Some
-        (Tool_result.error
-           ~failure_class:(Some Tool_result.Workflow_rejection)
-           ~tool_name:name
-           ~start_time:(Unix.gettimeofday ())
-           workflow_rejection_message))
+      Tool_result.error
+        ~failure_class:Tool_result.Workflow_rejection
+        ~tool_name:name
+        ~start_time:(Unix.gettimeofday ())
+        workflow_rejection_message)
 
 let register_typed_outcome_probe name make_result =
   register_probe_schema name;
   Tool_dispatch.register
     ~tool_name:name
-    ~handler:(fun ~name ~args:_ -> Some (make_result name))
+    ~handler:(fun ~name ~args:_ -> make_result name)
 ;;
 
 let execute_registered_probe ~fixture ~name ~make_result =
@@ -3365,15 +3950,15 @@ let test_registered_dispatch_preserves_workflow_failure_class () =
          | Tool_result.Completed () -> fail "expected typed failure"
          | Tool_result.Deferred () -> fail "expected typed failure, got deferred");
         check bool "error message preserved" true
-          (contains_substring execution.raw_output "Self-approval"))
+          (String_util.contains_substring execution.raw_output "Self-approval"))
 
-(* ── OAS descriptor execution mode ───────────────────────────
+(* ── Agent Core descriptor execution mode ───────────────────────────
 
    WebSearch/WebFetch hit external rate-limited APIs. They must not be
    assigned an inferred execution mode merely because they are read-only. *)
 
-let make_dummy_oas_tool name =
-  Masc.Tool_bridge.oas_tool_of_masc
+let make_dummy_agent_core_tool name =
+  Masc.Tool_bridge.agent_core_tool_of_masc
     ~name
     ~description:"descriptor probe"
     ~input_schema:
@@ -3422,13 +4007,13 @@ let test_descriptor_route_miss_payload_is_typed_runtime_failure () =
 ;;
 
 let check_no_inferred_descriptor ~msg name =
-  let tool = make_dummy_oas_tool name in
-  match Agent_sdk.Tool.descriptor tool with
+  let tool = make_dummy_agent_core_tool name in
+  match Agent_core.Tool.descriptor tool with
   | None -> ()
   | Some _ -> fail (Printf.sprintf "%s: inferred descriptor for %s" msg name)
 ;;
 
-let test_catalog_metadata_does_not_infer_oas_descriptors () =
+let test_catalog_metadata_does_not_infer_agent_core_descriptors () =
   List.iter
     (fun name -> check_no_inferred_descriptor ~msg:"generic bridge" name)
     [ "masc_web_search"; "masc_web_fetch"; "tool_read_file"; "tool_search_files" ]
@@ -3436,25 +4021,25 @@ let test_catalog_metadata_does_not_infer_oas_descriptors () =
 
 let find_tool_by_name tools name =
   List.find_opt
-    (fun (t : Agent_sdk.Tool.t) -> String.equal t.Agent_sdk.Tool.schema.Agent_sdk.Types.name name)
+    (fun (t : Agent_core.Tool.t) -> String.equal t.Agent_core.Tool.schema.Agent_core.Types.name name)
     tools
 ;;
 
-let check_bundle_has_no_inferred_descriptor ~msg tools name =
+let check_bundle_has_canonical_descriptor ~msg tools name =
   match find_tool_by_name tools name with
   | None -> fail (Printf.sprintf "%s: %s not in bundle" msg name)
   | Some t ->
-    (match Agent_sdk.Tool.descriptor t with
-     | None -> ()
-     | Some _ -> fail (Printf.sprintf "%s: %s has inferred descriptor" msg name))
+    (match Agent_core.Tool.descriptor t with
+     | Some _ -> ()
+     | None -> fail (Printf.sprintf "%s: %s lost its canonical descriptor" msg name))
 ;;
 
-let test_model_visible_tools_do_not_infer_oas_descriptors () =
+let test_model_visible_tools_keep_canonical_agent_core_descriptors () =
   with_exec_fixture
-    "model_visible_oas_descriptors"
+    "model_visible_agent_core_descriptors"
     (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
        let tools =
-         Masc.Keeper_tools_oas_bundle.make_tools
+         Masc.Keeper_tools_agent_core_bundle.make_tools
            ~config
            ~meta
            ~publication_recovery
@@ -3463,7 +4048,7 @@ let test_model_visible_tools_do_not_infer_oas_descriptors () =
        in
        List.iter
          (fun name ->
-            check_bundle_has_no_inferred_descriptor ~msg:"model-visible" tools name)
+            check_bundle_has_canonical_descriptor ~msg:"model-visible" tools name)
          [ "WebSearch"; "WebFetch"; "Grep"; "Read" ])
 ;;
 
@@ -3473,13 +4058,54 @@ let terminal_surface_post tools =
   | None -> fail "keeper_surface_post missing from Keeper tool bundle"
 ;;
 
+let test_surface_post_bundle_names_reader_and_repeat_cost () =
+  with_exec_fixture
+    "surface_post_model_description"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       let description =
+         (terminal_surface_post bundle.tools).Agent_core.Tool.schema.description
+       in
+       let help_description =
+         match
+           List.find_opt
+             (fun (schema : Masc_domain.tool_schema) ->
+                String.equal schema.name "keeper_surface_post")
+             Tool_shard_types.surface_tools
+         with
+         | Some schema -> schema.description
+         | None -> fail "keeper_surface_post missing from help schema projection"
+       in
+       check string
+         "help and Agent Core projections use the same description"
+         help_description
+         description;
+       List.iter
+         (fun phrase ->
+            check bool
+              (Printf.sprintf "projected description contains %S" phrase)
+              true
+              (String_util.contains_substring description phrase))
+         [ "read by a person"
+         ; "unchanged status reposted every cycle"
+         ; "the turn ends without a post"
+         ])
+;;
+
 let test_invalid_surface_post_input_stays_correction_capable () =
   with_exec_fixture
     ~bind_eio_context:true
     "surface_post_invalid_input"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        let bundle =
-         Masc.Keeper_tools_oas_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -3488,7 +4114,7 @@ let test_invalid_surface_post_input_stays_correction_capable () =
        in
        let surface_post = terminal_surface_post bundle.tools in
        (match
-          Agent_sdk.Tool.execute
+          Agent_core.Tool.execute
             surface_post
             (`Assoc
                [ "surface", `String "dashboard"
@@ -3498,17 +4124,17 @@ let test_invalid_surface_post_input_stays_correction_capable () =
         | Error _ -> ()
         | Ok _ -> fail "handler-level invalid terminal input unexpectedly succeeded");
        (match bundle.terminal_effect_state () with
-        | Masc.Keeper_tools_oas.Terminal_effect_open -> ()
-        | Masc.Keeper_tools_oas.Deferred_tool_result ->
+        | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
+        | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
           fail "invalid terminal input unexpectedly deferred a tool result"
-        | Masc.Keeper_tools_oas.External_effect_deferred ->
+        | Masc.Keeper_tools_agent_core.External_effect_deferred ->
           fail "invalid terminal input unexpectedly deferred an external effect"
-        | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+        | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
           fail "invalid terminal input completed the terminal effect"
-        | Masc.Keeper_tools_oas.Terminal_effect_failed _ ->
+        | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ->
           fail "invalid terminal input poisoned the terminal effect");
        (match
-          Agent_sdk.Tool.execute
+          Agent_core.Tool.execute
             surface_post
             (`Assoc
                [ "surface", `String "dashboard"
@@ -3517,16 +4143,16 @@ let test_invalid_surface_post_input_stays_correction_capable () =
         with
         | Ok _ -> ()
         | Error error ->
-          failf "corrected terminal input failed: %s" error.Agent_sdk.Types.message);
+          failf "corrected terminal input failed: %s" error.Agent_core.Types.message);
        (match bundle.terminal_effect_state () with
-        | Masc.Keeper_tools_oas.Terminal_effect_completed -> ()
-        | Masc.Keeper_tools_oas.Terminal_effect_open ->
+        | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ -> ()
+        | Masc.Keeper_tools_agent_core.Terminal_effect_open ->
           fail "corrected terminal input left the terminal effect open"
-        | Masc.Keeper_tools_oas.Deferred_tool_result ->
+        | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
           fail "corrected terminal input unexpectedly deferred a tool result"
-        | Masc.Keeper_tools_oas.External_effect_deferred ->
+        | Masc.Keeper_tools_agent_core.External_effect_deferred ->
           fail "corrected terminal input unexpectedly deferred an external effect"
-        | Masc.Keeper_tools_oas.Terminal_effect_failed _ ->
+        | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ->
           fail "corrected terminal input failed the terminal effect");
        let chat_path =
          Filename.concat
@@ -3538,7 +4164,7 @@ let test_invalid_surface_post_input_stays_correction_capable () =
        Unix.unlink chat_path;
        Unix.mkdir chat_path 0o755;
        (match
-          Agent_sdk.Tool.execute
+          Agent_core.Tool.execute
             surface_post
             (`Assoc
                [ "surface", `String "dashboard"
@@ -3548,14 +4174,14 @@ let test_invalid_surface_post_input_stays_correction_capable () =
         | Error _ -> ()
         | Ok _ -> fail "forced later terminal failure unexpectedly succeeded");
        match bundle.terminal_effect_state () with
-       | Masc.Keeper_tools_oas.Terminal_effect_failed _ -> ()
-       | Masc.Keeper_tools_oas.Terminal_effect_open ->
+       | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ -> ()
+       | Masc.Keeper_tools_agent_core.Terminal_effect_open ->
          fail "later failure reopened the completed terminal effect"
-       | Masc.Keeper_tools_oas.Deferred_tool_result ->
+       | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
          fail "later failure unexpectedly became a generic defer"
-       | Masc.Keeper_tools_oas.External_effect_deferred ->
+       | Masc.Keeper_tools_agent_core.External_effect_deferred ->
          fail "later failure unexpectedly became an external defer"
-       | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+        | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
          fail "later failure was hidden by the completed terminal effect")
 ;;
 
@@ -3655,7 +4281,7 @@ let test_deferred_web_search_yields_before_provider_retry () =
         | Ok _ -> ()
         | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
        let bundle =
-         Masc.Keeper_tools_oas_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -3692,7 +4318,7 @@ let test_deferred_web_search_yields_before_provider_retry () =
            ~cooperative_yield_probe:(fun _boundary ->
              Masc.Keeper_agent_run.terminal_effect_boundary_decision
                (bundle.terminal_effect_state ()))
-           [ Agent_sdk.Types.Text "search for the tool" ]
+           [ Agent_core.Types.Text "search for the tool" ]
        in
        check int
          "deferred effect stops before a second provider call"
@@ -3725,16 +4351,16 @@ let test_deferred_web_search_yields_before_provider_retry () =
         | Error error ->
           failf
             "deferred effect failed instead of yielding: %s"
-            (Agent_sdk.Error.to_string error));
+            (Agent_core.Error.to_string error));
        match bundle.terminal_effect_state () with
-       | Masc.Keeper_tools_oas.External_effect_deferred -> ()
-       | Masc.Keeper_tools_oas.Deferred_tool_result ->
+       | Masc.Keeper_tools_agent_core.External_effect_deferred -> ()
+       | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
          fail "Gate deferred effect became a generic tool defer"
-       | Masc.Keeper_tools_oas.Terminal_effect_open ->
+       | Masc.Keeper_tools_agent_core.Terminal_effect_open ->
          fail "deferred effect was not observed at the tool boundary"
-       | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+       | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
          fail "deferred effect became terminal completion"
-       | Masc.Keeper_tools_oas.Terminal_effect_failed _ ->
+       | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ->
          fail "deferred effect became terminal failure")
 ;;
 
@@ -3753,7 +4379,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
        mkdir_p (Filename.dirname chat_path);
        Unix.mkdir chat_path 0o755;
        let bundle =
-         Masc.Keeper_tools_oas_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -3769,15 +4395,16 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
        let subscriber_id = "surface-post-append-failure" in
        Masc.Sse.subscribe_external
          ~id:subscriber_id
-         ~callback:(fun event ->
-           if contains_substring event "\"type\":\"keeper_chat_appended\""
+         ~callback:(fun (ev : Masc.Sse.external_event) ->
+            let event = ev.Masc.Sse.ext_frame in
+           if String_util.contains_substring event "\"type\":\"keeper_chat_appended\""
            then incr chat_broadcast_count)
          ();
        Fun.protect
          ~finally:(fun () -> Masc.Sse.unsubscribe_external subscriber_id)
          (fun () ->
             let result =
-              Agent_sdk.Tool.execute
+              Agent_core.Tool.execute
                 surface_post
                 (`Assoc
                    [ "surface", `String "dashboard"
@@ -3787,20 +4414,20 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
             (match result with
              | Error error ->
                check bool
-                 "append failure is an OAS runtime error"
+                 "append failure is an Agent Core runtime error"
                  true
-                 (error.Agent_sdk.Types.error_class
-                  = Some Agent_sdk.Types.Unknown);
+                 (error.Agent_core.Types.error_class
+                  = Some Agent_core.Types.Unknown);
                let error_detail =
                  Yojson.Safe.Util.
-                   (parse_json error.Agent_sdk.Types.message
+                   (parse_json error.Agent_core.Types.message
                     |> member "error"
                     |> to_string)
                in
                check bool
                  "raw append failure retains the exact full chat target"
                  true
-                 (contains_substring error_detail chat_path)
+                 (String_util.contains_substring error_detail chat_path)
              | Ok _ -> fail "durable dashboard append failure became Completed");
             check int
               "failed append emits no keeper chat broadcast"
@@ -3808,7 +4435,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
               !chat_broadcast_count;
             let terminal_state = bundle.terminal_effect_state () in
             (match terminal_state with
-             | Masc.Keeper_tools_oas.Terminal_effect_failed failure ->
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
                check bool
                  "terminal failure retains the runtime failure class"
                  true
@@ -3821,27 +4448,27 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                check bool
                  "terminal failure retains the exact full chat target"
                  true
-                 (contains_substring failure.diagnostic chat_path)
-             | Masc.Keeper_tools_oas.Terminal_effect_open ->
+                 (String_util.contains_substring failure.diagnostic chat_path)
+             | Masc.Keeper_tools_agent_core.Terminal_effect_open ->
                fail "failed surface delivery left the terminal effect open"
-             | Masc.Keeper_tools_oas.Deferred_tool_result ->
+             | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
                fail "failed surface delivery became a generic defer"
-             | Masc.Keeper_tools_oas.External_effect_deferred ->
+             | Masc.Keeper_tools_agent_core.External_effect_deferred ->
                fail "failed surface delivery became an external defer"
-             | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+       | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
                fail "failed surface delivery set terminal completion");
             let first_terminal_failure =
               match terminal_state with
-              | Masc.Keeper_tools_oas.Terminal_effect_failed failure -> failure
-              | Masc.Keeper_tools_oas.Terminal_effect_open
-              | Masc.Keeper_tools_oas.Deferred_tool_result
-              | Masc.Keeper_tools_oas.External_effect_deferred
-              | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+              | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure -> failure
+              | Masc.Keeper_tools_agent_core.Terminal_effect_open
+              | Masc.Keeper_tools_agent_core.Deferred_tool_result
+              | Masc.Keeper_tools_agent_core.External_effect_deferred
+             | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
                 fail "failed surface delivery lost its terminal failure"
             in
             Unix.rmdir chat_path;
             (match
-               Agent_sdk.Tool.execute
+               Agent_core.Tool.execute
                  surface_post
                  (`Assoc
                     [ "surface", `String "dashboard"
@@ -3852,31 +4479,32 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
              | Error error ->
                failf
                  "later successful terminal call failed: %s"
-                 error.Agent_sdk.Types.message);
+                 error.Agent_core.Types.message);
             (match bundle.terminal_effect_state () with
-             | Masc.Keeper_tools_oas.Terminal_effect_failed failure ->
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
                check bool
                  "first terminal failure is not overwritten"
                  true
                  (failure = first_terminal_failure)
-             | Masc.Keeper_tools_oas.Terminal_effect_open ->
+             | Masc.Keeper_tools_agent_core.Terminal_effect_open ->
                fail "later success reopened the failed terminal effect"
-             | Masc.Keeper_tools_oas.Deferred_tool_result ->
+             | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
                fail "later success changed failure into a generic defer"
-             | Masc.Keeper_tools_oas.External_effect_deferred ->
+             | Masc.Keeper_tools_agent_core.External_effect_deferred ->
                fail "later success changed failure into an external defer"
-             | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+             | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
                fail "later success overwrote the failed terminal effect");
             Unix.unlink chat_path;
             Unix.mkdir chat_path 0o755;
             let runtime_bundle =
-              Masc.Keeper_tools_oas_bundle.make_tool_bundle
+              Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
                 ~config
                 ~meta
                 ~publication_recovery
                 ~ctx_snapshot:ctx_work
                 ()
             in
+            let broadcasts_before_runtime_failure = !chat_broadcast_count in
             let runtime_error, provider_call_count =
               with_openai_tool_call_server
                 ~tool_name:"keeper_surface_post"
@@ -3911,7 +4539,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                   ~cooperative_yield_probe:(fun _boundary ->
                     Masc.Keeper_agent_run.terminal_effect_boundary_decision
                       (runtime_bundle.terminal_effect_state ()))
-                  [ Agent_sdk.Types.Text "deliver the dashboard reply" ]
+                  [ Agent_core.Types.Text "deliver the dashboard reply" ]
               with
               | Error error -> error
               | Ok _ -> fail "terminal failure reached ordinary provider completion"
@@ -3932,14 +4560,14 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                check bool
                  "Runtime_agent error retains the exact full chat target"
                  true
-                 (contains_substring diagnostic chat_path)
+                 (String_util.contains_substring diagnostic chat_path)
              | Some other ->
                failf
                  "Runtime_agent returned %s instead of terminal_effect_failed"
                  (Keeper_internal_error.kind_of_masc_internal_error other)
              | None -> fail "Runtime_agent flattened the typed terminal failure");
             (match runtime_bundle.terminal_effect_state () with
-             | Masc.Keeper_tools_oas.Terminal_effect_failed failure ->
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
                check bool
                  "runtime terminal state retains Runtime_failure"
                  true
@@ -3952,18 +4580,18 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                check bool
                  "runtime terminal state retains the exact full chat target"
                  true
-                 (contains_substring failure.diagnostic chat_path)
-             | Masc.Keeper_tools_oas.Terminal_effect_open ->
+                 (String_util.contains_substring failure.diagnostic chat_path)
+             | Masc.Keeper_tools_agent_core.Terminal_effect_open ->
                fail "runtime terminal failure was not recorded"
-             | Masc.Keeper_tools_oas.Deferred_tool_result ->
+             | Masc.Keeper_tools_agent_core.Deferred_tool_result ->
                fail "runtime terminal failure became a generic defer"
-             | Masc.Keeper_tools_oas.External_effect_deferred ->
+             | Masc.Keeper_tools_agent_core.External_effect_deferred ->
                fail "runtime terminal failure became an external defer"
-             | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+             | Masc.Keeper_tools_agent_core.Terminal_effect_completed _ ->
                fail "runtime terminal failure became completion");
             check int
               "runtime failure emits no keeper chat broadcast"
-              0
+              broadcasts_before_runtime_failure
               !chat_broadcast_count;
             check bool
               "runtime terminal delivery failure is not auto-recoverable"
@@ -3972,7 +4600,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                  runtime_error);
             let exact_route =
               Keeper_runtime_failure_route.route_of_error
-                ~boundary:Keeper_runtime_failure_route.Oas_execution
+                ~boundary:Keeper_runtime_failure_route.Agent_core_execution
                 runtime_error
             in
              (match exact_route with
@@ -3985,21 +4613,21 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                ()
              | _ -> fail "typed terminal failure did not reach its exact route");
             let transient_terminal_error =
-              Keeper_internal_error.sdk_error_of_masc_internal_error
+              Keeper_internal_error.core_error_of_masc_internal_error
                 (Keeper_internal_error.Terminal_effect_failed
-                   { failure_class = Tool_result.Transient_error
+                   { failure_class = Tool_result.Dependency_unavailable
                    ; effect_disposition = Tool_result.Effect_outcome_unknown
                    ; diagnostic = "unknown transient terminal effect"
                    })
             in
             (match
                Keeper_runtime_failure_route.route_of_error
-                 ~boundary:Keeper_runtime_failure_route.Oas_execution
+                 ~boundary:Keeper_runtime_failure_route.Agent_core_execution
                  transient_terminal_error
              with
              | Keeper_runtime_failure_route.Exhausted_visible_alive
                  { terminal =
-                     Keeper_runtime_failure_route.Terminal_effect_transient_failure
+                     Keeper_runtime_failure_route.Terminal_effect_dependency_unavailable
                  ; provenance = Keeper_runtime_failure_route.Masc_internal_error
                  ; _
                  } ->
@@ -4016,6 +4644,1746 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
             ()))
 ;;
 
+let composition_node_id value =
+  match Masc.Keeper_tool_plan.Node_id.make value with
+  | Ok id -> id
+  | Error Masc.Keeper_tool_plan.Node_id.Empty -> fail "composition node id is empty"
+;;
+
+let composition_descriptor name =
+  Masc.Keeper_tool_descriptor.all_descriptors ()
+  |> List.find_opt (fun descriptor ->
+    Masc.Keeper_tool_descriptor.keeper_model_names descriptor
+    |> List.exists (String.equal name))
+  |> function
+  | Some descriptor -> descriptor
+  | None -> fail ("composition descriptor missing: " ^ name)
+;;
+
+let composition_invocation ~completion =
+  Agent_core.Tool_contract.Invocation.create
+    ~tool_use_id:"composition-parent"
+    ~turn:7
+    ~schedule:
+      { Agent_core.Tool_contract.planned_index = 0
+      ; batch_index = 0
+      ; batch_size = 1
+      ; execution_mode = Agent_core.Tool_contract.Serial
+      }
+    ~completion
+;;
+
+let one_node_clock_composition =
+  {|[[compositions]]
+name = "clock"
+description = "Read the exact Keeper clock."
+execution = "inline"
+
+[[compositions.nodes]]
+id = "time"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+|}
+;;
+
+(* #30220 made skills the only composition source: [make_tools] reads
+   [Keeper_skill_catalog.composition_entries], not a bare catalog. The fixtures
+   here are still composition TOML -- what changed is who carries it to the
+   bundle -- so this wraps one in the skill document that now does. The
+   directory has to match the frontmatter name, which has to match the
+   composition's own name; that is what decides the [keeper_compose_*] tool. *)
+let skill_catalog_of_composition ~name toml =
+  let document =
+    Printf.sprintf
+      "---\nname: %s\ndescription: %s\n---\n\nComposition fixture.\n\n```toml composition\n%s```\n"
+      name
+      name
+      toml
+  in
+  match Masc.Keeper_skill_catalog.of_documents [ name, document ] with
+  | Ok catalog -> catalog
+  | Error error ->
+    failf
+      "composition fixture %S was rejected as a skill: %s"
+      name
+      (Masc.Keeper_skill_catalog.error_to_string error)
+;;
+
+let one_node_terminal_composition =
+  {|[[compositions]]
+name = "surface"
+execution = "inline"
+
+[[compositions.nodes]]
+id = "post"
+tool = "keeper_surface_post"
+[compositions.nodes.input]
+kind = "literal"
+value = { surface = "dashboard", content = "composition terminal" }
+|}
+;;
+
+let invalid_clock_input_composition =
+  {|[[compositions]]
+name = "invalid-clock-input"
+execution = "inline"
+
+[[compositions.nodes]]
+id = "time"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = { unsupported = true }
+|}
+;;
+
+let post_effect_terminal_failure_composition =
+  {|[[compositions]]
+name = "write-then-invalid-post"
+execution = "inline"
+
+[[compositions.nodes]]
+id = "write"
+tool = "keeper_memory_write"
+[compositions.nodes.input]
+kind = "literal"
+value = { title = "composition effect", content = "must execute exactly once" }
+
+[[compositions.nodes]]
+id = "post"
+tool = "keeper_surface_post"
+after = ["write"]
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+|}
+;;
+
+let unknown_effect_terminal_failure_composition =
+  {|[[compositions]]
+name = "unknown-write-before-post"
+execution = "inline"
+
+[[compositions.nodes]]
+id = "write"
+tool = "keeper_memory_write"
+[compositions.nodes.input]
+kind = "literal"
+value = { title = "composition unknown", content = "do not retry an uncertain write" }
+
+[[compositions.nodes]]
+id = "post"
+tool = "keeper_surface_post"
+after = ["write"]
+[compositions.nodes.input]
+kind = "literal"
+value = { surface = "dashboard", content = "must not be reached" }
+|}
+;;
+
+let write_then_unchanged_board_composition ~revision =
+  Printf.sprintf
+    {|[[compositions]]
+name = "write-then-durable-wait"
+execution = "inline"
+
+[[compositions.nodes]]
+id = "write"
+tool = "keeper_memory_write"
+[compositions.nodes.input]
+kind = "literal"
+value = { title = "composition before wait", content = "must execute exactly once before yielding" }
+
+[[compositions.nodes]]
+id = "wait"
+tool = "masc_board_list"
+after = ["write"]
+[compositions.nodes.input]
+kind = "literal"
+value = { if_revision = %S }
+|}
+    revision
+;;
+
+let async_param_memory_composition =
+  {|[[compositions]]
+name = "memory-background"
+execution = "async"
+
+[[compositions.params]]
+name = "query"
+type = "string"
+description = "The exact durable-memory query to run."
+
+[[compositions.nodes]]
+id = "search"
+tool = "keeper_memory_search"
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "query"
+[compositions.nodes.input.fields.value]
+kind = "param"
+name = "query"
+|}
+;;
+
+let shell_output_composition =
+  {|[[compositions]]
+name = "shell-output"
+description = "Feed one typed Shell IR result into a later Keeper tool."
+execution = "inline"
+
+[[compositions.nodes]]
+id = "emit"
+tool = "Execute"
+[compositions.nodes.input]
+kind = "literal"
+value = { argv = ["printf", "shell-composition-marker"] }
+
+[[compositions.nodes]]
+id = "search"
+tool = "keeper_memory_search"
+after = ["emit"]
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "query"
+[compositions.nodes.input.fields.value]
+kind = "output"
+node = "emit"
+pointer = "/output"
+|}
+;;
+
+let shell_artifact_composition () =
+  let oversized_output =
+    String.make (Masc.Tool_bridge.default_externalize_threshold_bytes + 1) 'x'
+  in
+  Printf.sprintf
+    {|[[compositions]]
+name = "shell-artifact"
+description = "Feed one typed Shell IR artifact identity into a later Keeper tool."
+execution = "inline"
+
+[[compositions.nodes]]
+id = "emit"
+tool = "Execute"
+[compositions.nodes.input]
+kind = "literal"
+value = { argv = ["printf", "%s"] }
+
+[[compositions.nodes]]
+id = "search"
+tool = "keeper_memory_search"
+after = ["emit"]
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "query"
+[compositions.nodes.input.fields.value]
+kind = "output"
+node = "emit"
+pointer = "/output_artifact/_blob/sha256"
+|}
+    oversized_output
+;;
+
+let test_composition_catalog_materializes_and_executes_first_class_tool () =
+  with_exec_fixture "composition-first-class-tool"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let skill_catalog =
+         skill_catalog_of_composition ~name:"clock" one_node_clock_composition
+       in
+       let tools =
+         Masc.Keeper_tools_agent_core_bundle.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog
+           ()
+       in
+       let tool =
+         match find_tool_by_name tools "keeper_compose_clock" with
+         | Some tool -> tool
+         | None -> fail "catalog entry was not materialized as an Agent-Core tool"
+       in
+       check string
+         "catalog description reaches model-visible schema"
+         "Read the exact Keeper clock."
+         tool.Agent_core.Tool.schema.description;
+       (match Agent_core.Tool.completion tool with
+        | Agent_core.Tool_contract.Continue_after_success -> ()
+        | Agent_core.Tool_contract.Terminal_after_success _ ->
+          fail "ordinary composition was materialized as terminal");
+       match
+         Agent_core.Tool.execute
+           ~invocation:
+             (composition_invocation
+                ~completion:Agent_core.Tool_contract.Continue_after_success)
+           tool
+           (`Assoc [])
+       with
+       | Error error ->
+         failf "materialized composition failed: %s" error.Agent_core.Types.message
+       | Ok output ->
+         let payload = parse_json output.Agent_core.Types.content in
+         check string
+           "outer composition identity"
+           "keeper_compose_clock"
+           Yojson.Safe.Util.(member "composition_tool" payload |> to_string);
+         (match Yojson.Safe.Util.member "actions" payload with
+          | `List [ action ] ->
+            check string
+              "nested node identity"
+              "time"
+              Yojson.Safe.Util.(member "node_id" action |> to_string);
+            check string
+              "nested tool identity"
+              "keeper_time_now"
+              Yojson.Safe.Util.(member "tool_name" action |> to_string);
+            check int
+              "nested planned index"
+              0
+              Yojson.Safe.Util.(member "schedule" action |> member "planned_index" |> to_int);
+            (match Yojson.Safe.Util.member "result" action with
+             | `Assoc fields ->
+               check bool
+                 "nested result exposes typed data"
+                 true
+                 (List.mem_assoc "data" fields)
+             | _ -> fail "nested action result lost typed result shape")
+          | _ -> fail "composition did not expose its single settled action"))
+;;
+
+let test_composition_feeds_typed_shell_ir_output_to_later_tool () =
+  with_exec_fixture
+    ~process:true
+    ~always_allow:true
+    "composition-shell-ir-output"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let skill_catalog =
+         skill_catalog_of_composition ~name:"shell-output" shell_output_composition
+       in
+       let tools =
+         Masc.Keeper_tools_agent_core_bundle.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog
+           ()
+       in
+       let tool =
+         match find_tool_by_name tools "keeper_compose_shell-output" with
+         | Some tool -> tool
+         | None -> fail "Shell IR composition was not materialized"
+       in
+       match
+         Agent_core.Tool.execute
+           ~invocation:
+             (composition_invocation
+                ~completion:Agent_core.Tool_contract.Continue_after_success)
+           tool
+           (`Assoc [])
+       with
+       | Error error -> fail error.Agent_core.Types.message
+       | Ok output ->
+         let payload = parse_json output.content in
+         (match Yojson.Safe.Util.member "actions" payload with
+          | `List [ emit; search ] ->
+            check string
+              "Shell IR node"
+              "Execute"
+              Yojson.Safe.Util.(member "tool_name" emit |> to_string);
+            check bool
+              "Shell IR typed result"
+              true
+              Yojson.Safe.Util.
+                (member "result" emit |> member "data" |> member "typed" |> to_bool);
+            check string
+              "Shell IR exact output"
+              "shell-composition-marker"
+              Yojson.Safe.Util.
+                (member "result" emit |> member "data" |> member "output" |> to_string);
+            check string
+              "later node receives typed Shell IR output"
+              "shell-composition-marker"
+              Yojson.Safe.Util.(member "input" search |> member "query" |> to_string)
+          | _ -> fail "Shell IR composition did not settle both nodes in planned order"))
+;;
+
+let test_composition_externalizes_oversized_shell_ir_output () =
+  with_exec_fixture
+    ~process:true
+    ~always_allow:true
+    "composition-shell-ir-artifact"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       Masc.Keeper_tool_call_log.reset_for_testing ();
+       Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
+       let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
+       let skill_catalog =
+         skill_catalog_of_composition
+           ~name:"shell-artifact"
+           (shell_artifact_composition ())
+       in
+       let tools =
+         Masc.Keeper_tools_agent_core_bundle.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog
+           ~turn_ctx_cell
+           ()
+       in
+       let tool =
+         match find_tool_by_name tools "keeper_compose_shell-artifact" with
+         | Some tool -> tool
+         | None -> fail "Shell IR artifact composition was not materialized"
+       in
+       match
+         Agent_core.Tool.execute
+           ~invocation:
+             (composition_invocation
+                ~completion:Agent_core.Tool_contract.Continue_after_success)
+           tool
+           (`Assoc [])
+       with
+       | Error error -> fail error.Agent_core.Types.message
+       | Ok output ->
+         let payload =
+           structured_tool_output_exn
+             ~base_path:config.base_path
+             output.content
+         in
+         (match Yojson.Safe.Util.member "actions" payload with
+          | `List [ emit; search ] ->
+            let data = Yojson.Safe.Util.(member "result" emit |> member "data") in
+            check
+              bool
+              "oversized output is not retained inline"
+              true
+              (Yojson.Safe.Util.member "output" data = `Null);
+            let artifact_ref field =
+              match
+                Yojson.Safe.Util.member field data
+                |> Tool_output.normalized_artifact_ref_of_json
+              with
+              | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+              | Tool_output.Not_normalized_artifact_ref ->
+                failf
+                  "oversized Shell IR output has no normalized %s reference"
+                  field
+              | Tool_output.Invalid_normalized_artifact_ref { detail } -> fail detail
+            in
+            let output_ref = artifact_ref "output_artifact" in
+            let stdout_ref = artifact_ref "stdout_artifact" in
+            let stderr_ref = artifact_ref "stderr_artifact" in
+            check string "combined output equals stdout" output_ref.sha256 stdout_ref.sha256;
+            check int "empty stderr is still explicit" 0 stderr_ref.bytes;
+            let artifact =
+              fetch_artifact_exn ~base_path:config.base_path output_ref
+            in
+            check
+              int
+              "artifact retains every output byte"
+              (Masc.Tool_bridge.default_externalize_threshold_bytes + 1)
+              (String.length artifact);
+            let durable_root_present =
+              Masc.Keeper_tool_call_log.read_recent
+                ~keeper_name:meta.name
+                ~n:10
+                ()
+              |> List.exists (fun row ->
+                Safe_ops.json_string_opt "composition_node_id" row = Some "emit"
+                &&
+                match Yojson.Safe.Util.member "artifact_refs" row with
+                | `List roots ->
+                  List.exists
+                    (fun root ->
+                       let blob = Yojson.Safe.Util.member "_blob" root in
+                       Safe_ops.json_string_opt "sha256" blob
+                       = Some output_ref.sha256
+                       && Safe_ops.json_string_opt "preview" blob = Some "")
+                    roots
+                | _ -> false)
+            in
+            check
+              bool
+              "durable action log owns a preview-free artifact root"
+              true
+              durable_root_present;
+            let maintenance mode =
+              match
+                Tool_blob_maintenance.run ~base_path:config.base_path ~mode
+              with
+              | Ok report -> report
+              | Error error ->
+                fail (Tool_blob_maintenance.error_to_string error)
+            in
+            let observed = maintenance Tool_blob_maintenance.Observe_only in
+            check
+              bool
+              "durable action evidence roots the stream artifacts"
+              true
+              (observed.live_references >= 2);
+            ignore
+              (maintenance Tool_blob_maintenance.Delete_previous_candidates);
+            check
+              string
+              "maintenance preserves the referenced output"
+              artifact
+              (fetch_artifact_exn ~base_path:config.base_path output_ref);
+            check
+              string
+              "later node receives the artifact identity"
+              output_ref.sha256
+              Yojson.Safe.Util.(member "input" search |> member "query" |> to_string)
+          | _ ->
+            fail
+              "Shell IR artifact composition did not settle both nodes in planned order"))
+;;
+
+let test_direct_execute_artifact_manifest_survives_maintenance () =
+  with_exec_fixture
+    ~process:true
+    ~always_allow:true
+    "direct-shell-ir-artifact"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let execute =
+         Masc.Keeper_tools_agent_core_bundle.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+         |> List.find_opt (fun (tool : Agent_core.Tool.t) ->
+           String.equal tool.schema.name "Execute")
+         |> function
+         | Some tool -> tool
+         | None -> fail "direct Execute tool is absent"
+       in
+       let oversized =
+         String.make (Masc.Tool_bridge.default_externalize_threshold_bytes + 1) 'd'
+       in
+       let output =
+         match
+           Agent_core.Tool.execute
+             ~invocation:
+               (composition_invocation
+                  ~completion:Agent_core.Tool_contract.Continue_after_success)
+             execute
+             (`Assoc [ "argv", `List [ `String "printf"; `String oversized ] ])
+         with
+         | Ok output -> output.Agent_core.Types.content
+         | Error error -> fail error.Agent_core.Types.message
+       in
+       let manifest_ref =
+         match Tool_output.decode_from_agent_core output with
+         | Tool_output.Decoded reference
+           when String.equal reference.mime Tool_output.artifact_manifest_mime ->
+           reference
+         | Tool_output.Decoded _ -> fail "direct Execute returned a non-manifest marker"
+         | Tool_output.Not_marker -> fail "direct Execute artifact result stayed inline"
+         | Tool_output.Invalid_marker { detail } -> fail detail
+       in
+       let durable_checkpoint =
+         Filename.concat
+           (Common.masc_dir_from_base_path ~base_path:config.base_path)
+           "keepers/direct-execute/checkpoint.json"
+       in
+       Fs_compat.mkdir_p (Filename.dirname durable_checkpoint);
+       Fs_compat.save_file
+         durable_checkpoint
+         (Yojson.Safe.to_string (`Assoc [ "tool_result", `String output ]));
+       let structured =
+         structured_tool_output_exn ~base_path:config.base_path output
+       in
+       let output_ref =
+         Yojson.Safe.Util.member "output_artifact" structured
+         |> Tool_output.normalized_artifact_ref_of_json
+         |> function
+         | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+         | Tool_output.Not_normalized_artifact_ref ->
+           fail "direct Execute manifest lost its child output reference"
+         | Tool_output.Invalid_normalized_artifact_ref { detail } -> fail detail
+       in
+       let maintenance mode =
+         match Tool_blob_maintenance.run ~base_path:config.base_path ~mode with
+         | Ok report -> report
+         | Error error -> fail (Tool_blob_maintenance.error_to_string error)
+       in
+       let observed = maintenance Tool_blob_maintenance.Observe_only in
+       check bool
+         "direct checkpoint roots manifest and child streams"
+         true
+         (observed.live_references >= 3);
+       ignore (maintenance Tool_blob_maintenance.Delete_previous_candidates);
+       check string
+         "direct Execute child survives both maintenance passes"
+         oversized
+         (fetch_artifact_exn ~base_path:config.base_path output_ref);
+       check bool
+         "manifest itself survives both maintenance passes"
+         true
+         (match
+            Tool_blob_store.fetch
+              (Tool_blob_store.create ~base_path:config.base_path)
+              ~sha256:manifest_ref.sha256
+          with
+          | Ok (Some _) -> true
+          | Ok None | Error _ -> false))
+;;
+
+let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop () =
+  with_exec_fixture
+    ~process:true
+    ~always_allow:true
+    "direct-shell-ir-post-effect-artifact-failure"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       Fun.protect
+         ~finally:bundle.cleanup
+         (fun () ->
+            let blob_root =
+              Tool_blob_store.create ~base_path:config.base_path
+              |> Tool_blob_store.root_dir
+            in
+            Fs_compat.mkdir_p (Filename.dirname blob_root);
+            Fs_compat.save_file blob_root "artifact persistence is blocked";
+            let marker = Filename.concat config.base_path "execute-invocations" in
+            let oversized =
+              String.make
+                (Masc.Tool_bridge.default_externalize_threshold_bytes + 1)
+                'p'
+            in
+            let terminal_error = ref None in
+            let projected =
+              match
+                Masc.Keeper_official_client_host.dynamic_tools
+                  ~tool_approval:None
+                  ~pre_tool_rejects:(ref [])
+                  ~runtime_label:"test-official-client"
+                  ~keeper_name:meta.name
+                  ~turn_count:1
+                  ~tools:bundle.tools
+                  ~hooks:Agent_core.Hooks.empty
+                  ~event_bus:None
+                  ~context_injector:None
+                  ~context:(Some (Agent_core.Context.create_sync ()))
+                  ~terminal_effect_state:bundle.terminal_effect_state
+                  ~terminal_error
+                  ~raw_trace_run:None
+              with
+              | Ok tools -> tools
+              | Error error -> fail (Agent_core.Error.to_string error)
+            in
+            let execute =
+              projected
+              |> List.find_opt
+                   (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
+                      String.equal tool.name "Execute")
+              |> function
+              | Some tool -> tool
+              | None -> fail "direct Execute tool was not projected"
+            in
+            let result =
+              execute.call
+                ~call_id:"direct-execute-post-effect-failure"
+                (`Assoc
+                   [ ( "argv"
+                     , `List
+                         [ `String "/bin/sh"
+                         ; `String "-c"
+                         ; `String "printf x >> \"$1\"; printf %s \"$2\""
+                         ; `String "keeper-execute-test"
+                         ; `String marker
+                         ; `String oversized
+                         ] )
+                   ])
+            in
+            check bool "artifact persistence failure is visible" false result.success;
+            check string
+              "the process effect occurs exactly once before settlement"
+              "x"
+              (read_file marker);
+            (match bundle.terminal_effect_state () with
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed
+                 { effect_disposition = Tool_result.Proven_post_effect; _ } ->
+               ()
+             | _ -> fail "ordinary Execute post-effect failure left bundle open");
+            match result.abort_turn with
+            | Some
+                (Masc.Keeper_official_client_host.Terminal_tool_boundary
+                  { tool_name = "Execute"
+                  ; outcome =
+                      Masc.Keeper_official_client_host.Terminal_failed
+                        { effect_disposition = Tool_result.Proven_post_effect; _ }
+                  }) ->
+              ()
+            | Some
+                (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
+            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | None ->
+              fail "direct Execute post-effect failure remained provider-retryable"))
+;;
+
+let test_direct_pre_effect_and_readonly_failures_remain_correction_capable () =
+  with_exec_fixture
+    ~process:true
+    ~always_allow:true
+    "direct-pre-effect-correction"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       Fun.protect
+         ~finally:bundle.cleanup
+         (fun () ->
+            let terminal_error = ref None in
+            let projected =
+              match
+                Masc.Keeper_official_client_host.dynamic_tools
+                  ~tool_approval:None
+                  ~pre_tool_rejects:(ref [])
+                  ~runtime_label:"test-official-client"
+                  ~keeper_name:meta.name
+                  ~turn_count:1
+                  ~tools:bundle.tools
+                  ~hooks:Agent_core.Hooks.empty
+                  ~event_bus:None
+                  ~context_injector:None
+                  ~context:(Some (Agent_core.Context.create_sync ()))
+                  ~terminal_effect_state:bundle.terminal_effect_state
+                  ~terminal_error
+                  ~raw_trace_run:None
+              with
+              | Ok tools -> tools
+              | Error error -> fail (Agent_core.Error.to_string error)
+            in
+            let call name input =
+              let tool =
+                projected
+                |> List.find_opt
+                     (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
+                        String.equal tool.name name)
+                |> function
+                | Some tool -> tool
+                | None -> failf "%s was not projected" name
+              in
+              tool.call ~call_id:("correction-" ^ name) input
+            in
+            let invalid_execute =
+              call "Execute" (`Assoc [ "argv", `List [ `String "" ] ])
+            in
+            check bool "invalid Execute is a failure" false invalid_execute.success;
+            check
+              (option string)
+              "pre-effect Execute failure keeps the turn open"
+              None
+              (Option.map
+                 (fun _ -> "abort")
+                 invalid_execute.abort_turn);
+            let invalid_write =
+              call
+                "Write"
+                (`Assoc
+                   [ "file_path", `String ""
+                   ; "content", `String "must not be written"
+                   ])
+            in
+            check bool "invalid Write is a failure" false invalid_write.success;
+            check
+              (option string)
+              "unaudited ordinary producer keeps its prior correction behavior"
+              None
+              (Option.map (fun _ -> "abort") invalid_write.abort_turn);
+            let missing_artifact =
+              call
+                "keeper_artifact_read"
+                (`Assoc [ "sha256", `String (String.make 64 '0') ])
+            in
+            check bool "missing artifact is a failure" false missing_artifact.success;
+            check
+              (option string)
+              "read-only failure keeps the turn open"
+              None
+              (Option.map
+                 (fun _ -> "abort")
+                 missing_artifact.abort_turn);
+            match bundle.terminal_effect_state () with
+            | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
+            | _ -> fail "correction-capable failures poisoned terminal state"))
+;;
+
+let test_composition_action_commit_advances_revision_before_refresh_event () =
+  with_exec_fixture "composition-action-commit-refresh"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let subscriber_id = "composition-action-commit-refresh" in
+       let frames = ref [] in
+       Masc.Keeper_tool_call_log.reset_for_testing ();
+       Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
+       let revision_before = Masc.Keeper_tool_call_log.committed_revision () in
+       Masc.Sse.subscribe_external
+         ~id:subscriber_id
+         ~callback:(fun event ->
+           let frame = event.Masc.Sse.ext_frame in
+           frames := frame :: !frames)
+         ();
+       Fun.protect
+         ~finally:(fun () ->
+           Masc.Sse.unsubscribe_external subscriber_id;
+           Masc.Keeper_tool_call_log.reset_for_testing ())
+         (fun () ->
+            let skill_catalog =
+              skill_catalog_of_composition ~name:"clock" one_node_clock_composition
+            in
+            let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
+            let tool =
+              Masc.Keeper_tools_agent_core_bundle.make_tools
+                ~config
+                ~meta
+                ~publication_recovery
+                ~ctx_snapshot:ctx_work
+                ~skill_catalog
+                ~turn_ctx_cell
+                ()
+              |> List.find_opt (fun tool ->
+                String.equal tool.Agent_core.Tool.schema.name "keeper_compose_clock")
+              |> Option.get
+            in
+            (match
+               Agent_core.Tool.execute
+                 ~invocation:
+                   (composition_invocation
+                      ~completion:Agent_core.Tool_contract.Continue_after_success)
+                 tool
+                 (`Assoc [])
+             with
+             | Ok _ -> ()
+             | Error error ->
+               failf "materialized composition failed: %s" error.Agent_core.Types.message);
+            let rows =
+              Masc.Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:1 ()
+            in
+            let committed_row =
+              match rows with
+              | [ row ] ->
+               check
+                 (option string)
+                 "committed nested row is immediately readable"
+                 (Some "time")
+                 (Safe_ops.json_string_opt "composition_node_id" row);
+               check
+                 (option string)
+                 "committed nested row preserves the runtime model bucket"
+                 (Some
+                    (Keeper_hooks_agent_core_types.current_keeper_model meta))
+                 (Safe_ops.json_string_opt "model" row);
+               check bool
+                 "committed nested row has canonical execution identity"
+                 true
+                 (match Safe_ops.json_string_opt "execution_id" row with
+                  | Some value -> String.trim value <> ""
+                  | None -> false);
+               check bool
+                 "committed nested row has producer byte count"
+                 true
+                 (match row with
+                  | `Assoc fields -> List.mem_assoc "result_bytes" fields
+                  | _ -> false);
+               row
+              | _ -> fail "expected one synchronously committed nested action row"
+            in
+            check
+              int
+              "durable revision advances before refresh"
+              (revision_before + 1)
+              (Masc.Keeper_tool_call_log.committed_revision ());
+            let committed_refresh =
+              List.find_map
+                (fun frame ->
+                   match Masc.Sse.data_payload_of_frame frame with
+                   | Error Masc.Sse.Missing_data_payload -> None
+                   | Ok payload ->
+                     let json = Yojson.Safe.from_string payload in
+                     if Safe_ops.json_string_opt "composition_node_id" json = Some "time"
+                     then Some json
+                     else None)
+                !frames
+            in
+            let committed_refresh =
+              match committed_refresh with
+              | Some event -> event
+              | None -> fail "post-commit refresh event was not broadcast"
+            in
+            let physical_tool_call_events =
+              List.filter_map
+                (fun frame ->
+                   match Masc.Sse.data_payload_of_frame frame with
+                   | Error Masc.Sse.Missing_data_payload -> None
+                   | Ok payload ->
+                     let json = Yojson.Safe.from_string payload in
+                     if Safe_ops.json_string_opt "type" json = Some "keeper_tool_call"
+                     then Some json
+                     else None)
+                !frames
+            in
+            check
+              int
+              "one physical tool execution event"
+              1
+              (List.length physical_tool_call_events);
+            check
+              (option string)
+              "commit refresh has a distinct event type"
+              (Some "keeper_tool_call_evidence_committed")
+              (Safe_ops.json_string_opt "type" committed_refresh);
+            List.iter
+              (fun field ->
+                 check
+                   (option string)
+                   (field ^ " joins committed row and refresh event")
+                   (Safe_ops.json_string_opt field committed_row)
+                   (Safe_ops.json_string_opt field committed_refresh))
+              [ "tool_use_id"; "composition_run_id" ]))
+;;
+
+let test_composition_telemetry_failure_does_not_change_execution () =
+  with_exec_fixture "composition-telemetry-best-effort"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let frames = ref [] in
+       let subscriber_id = "composition-telemetry-best-effort" in
+       Masc.Keeper_tool_call_log.reset_for_testing ();
+       Masc.Sse.subscribe_external
+         ~id:subscriber_id
+         ~callback:(fun event -> frames := event.Masc.Sse.ext_frame :: !frames)
+         ();
+       Fun.protect
+         ~finally:(fun () ->
+           Masc.Sse.unsubscribe_external subscriber_id;
+           Masc.Keeper_tool_call_log.reset_for_testing ())
+         (fun () ->
+            let skill_catalog =
+              skill_catalog_of_composition ~name:"clock" one_node_clock_composition
+            in
+            let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
+            let tool =
+              Masc.Keeper_tools_agent_core_bundle.make_tools
+                ~config
+                ~meta
+                ~publication_recovery
+                ~ctx_snapshot:ctx_work
+                ~skill_catalog
+                ~turn_ctx_cell
+                ()
+              |> List.find_opt (fun tool ->
+                String.equal tool.Agent_core.Tool.schema.name "keeper_compose_clock")
+              |> Option.get
+            in
+            (match
+               Agent_core.Tool.execute
+                 ~invocation:
+                   (composition_invocation
+                      ~completion:Agent_core.Tool_contract.Continue_after_success)
+                 tool
+                 (`Assoc [])
+             with
+             | Ok _ -> ()
+             | Error error ->
+               failf
+                 "telemetry outage changed composition execution: %s"
+                 error.Agent_core.Types.message);
+            check
+              int
+              "unavailable store does not fabricate a durable revision"
+              0
+              (Masc.Keeper_tool_call_log.committed_revision ());
+            let committed_refreshes =
+              List.filter_map
+                (fun frame ->
+                   match Masc.Sse.data_payload_of_frame frame with
+                   | Error Masc.Sse.Missing_data_payload -> None
+                   | Ok payload ->
+                     let json = Yojson.Safe.from_string payload in
+                     if
+                       Safe_ops.json_string_opt "type" json
+                       = Some "keeper_tool_call_evidence_committed"
+                     then Some json
+                     else None)
+                !frames
+            in
+            check
+              int
+              "no durable-commit refresh is emitted without a durable commit"
+              0
+              (List.length committed_refreshes)))
+;;
+
+let test_terminal_composition_materializes_terminal_completion () =
+  with_exec_fixture "composition-terminal-surface"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let skill_catalog =
+         skill_catalog_of_composition ~name:"surface" one_node_terminal_composition
+       in
+       let tools =
+         Masc.Keeper_tools_agent_core_bundle.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog
+           ()
+       in
+       let tool =
+         match find_tool_by_name tools "keeper_compose_surface" with
+         | Some tool -> tool
+         | None -> fail "terminal catalog entry was not materialized"
+       in
+       match Agent_core.Tool.completion tool with
+       | Agent_core.Tool_contract.Terminal_after_success
+           Agent_core.Tool_contract.Effect_outcome_unknown -> ()
+       | Agent_core.Tool_contract.Continue_after_success
+       | Agent_core.Tool_contract.Terminal_after_success _ ->
+         fail "terminal composition lost its outer completion contract")
+;;
+
+let test_composition_plan_failure_exposes_typed_cause () =
+  with_exec_fixture "composition-typed-plan-failure"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let skill_catalog =
+         skill_catalog_of_composition ~name:"invalid-clock-input"
+           invalid_clock_input_composition
+       in
+       let tool =
+         Masc.Keeper_tools_agent_core_bundle.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog
+           ()
+         |> List.find_opt (fun (tool : Agent_core.Tool.t) ->
+           String.equal tool.schema.name "keeper_compose_invalid-clock-input")
+         |> function
+         | Some tool -> tool
+         | None -> fail "invalid-input composition was not materialized"
+       in
+       match
+         Agent_core.Tool.execute
+           ~invocation:
+             (composition_invocation
+                ~completion:Agent_core.Tool_contract.Continue_after_success)
+           tool
+           (`Assoc [])
+       with
+       | Ok _ -> fail "runtime-invalid composition input unexpectedly succeeded"
+       | Error error ->
+         let payload = parse_json error.Agent_core.Types.message in
+         check string
+           "failed outer composition identity"
+           "keeper_compose_invalid-clock-input"
+           Yojson.Safe.Util.(member "composition_tool" payload |> to_string);
+         let cause = Yojson.Safe.Util.member "cause" payload in
+         check string
+           "typed executor cause"
+           "plan_execution_failed"
+           Yojson.Safe.Util.(member "kind" cause |> to_string);
+         check string
+           "typed plan failure"
+           "input_validation_failed"
+           Yojson.Safe.Util.(member "error" cause |> member "kind" |> to_string))
+;;
+
+let test_terminal_composition_post_effect_failure_closes_official_client_loop () =
+  with_exec_fixture "composition-post-effect-terminal-failure"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"composition-test"
+            Masc.Keeper_gate_mode.Always_allow
+        with
+        | Ok _ -> ()
+        | Error detail -> fail ("failed to allow composition effect: " ^ detail));
+       let skill_catalog =
+         skill_catalog_of_composition ~name:"write-then-invalid-post" post_effect_terminal_failure_composition
+       in
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog
+           ()
+       in
+       Fun.protect
+         ~finally:bundle.cleanup
+         (fun () ->
+            let terminal_error = ref None in
+            let projected =
+              match
+                Masc.Keeper_official_client_host.dynamic_tools
+                  ~tool_approval:None
+                  ~pre_tool_rejects:(ref [])
+                  ~runtime_label:"test-official-client"
+                  ~keeper_name:meta.name
+                  ~turn_count:7
+                  ~tools:bundle.tools
+                  ~hooks:Agent_core.Hooks.empty
+                  ~event_bus:None
+                  ~context_injector:None
+                  ~context:(Some (Agent_core.Context.create_sync ()))
+                  ~terminal_effect_state:bundle.terminal_effect_state
+                  ~terminal_error
+                  ~raw_trace_run:None
+              with
+              | Ok tools -> tools
+              | Error error -> fail (Agent_core.Error.to_string error)
+            in
+            let tool =
+              projected
+              |> List.find_opt
+                   (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
+                      String.equal
+                        tool.name
+                        "keeper_compose_write-then-invalid-post")
+              |> function
+              | Some tool -> tool
+              | None -> fail "terminal composition was not projected"
+            in
+            let result = tool.call ~call_id:"post-effect-composition" (`Assoc []) in
+            check bool "terminal node failure is visible" false result.success;
+            (match bundle.terminal_effect_state () with
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
+               check string
+                 "aggregate effect disposition"
+                 "proven_post_effect"
+                 (Tool_result.failure_effect_disposition_to_string
+                    failure.effect_disposition)
+             | _ -> fail "prior memory effect did not terminalize the bundle");
+            let failure_payload = parse_json result.content in
+            let cause = Yojson.Safe.Util.member "cause" failure_payload in
+            check string
+              "invalid node is rejected before dispatch"
+              "plan_execution_failed"
+              Yojson.Safe.Util.(member "kind" cause |> to_string);
+            let plan_error = Yojson.Safe.Util.member "error" cause in
+            check string
+              "plan failure retains input validation kind"
+              "input_validation_failed"
+              Yojson.Safe.Util.(member "kind" plan_error |> to_string);
+            check string
+              "plan failure retains the typed policy rejection"
+              "policy_rejection"
+              Yojson.Safe.Util.
+                (member "rejection" plan_error
+                 |> member "failure_class"
+                 |> to_string);
+            match result.abort_turn with
+            | Some
+                (Masc.Keeper_official_client_host.Terminal_tool_boundary
+                  { tool_name
+                  ; outcome =
+                      Masc.Keeper_official_client_host.Terminal_failed
+                        { effect_disposition = Tool_result.Proven_post_effect; _ }
+                  }) ->
+              check string
+                "official-client terminal tool"
+                "keeper_compose_write-then-invalid-post"
+                tool_name
+            | Some
+                (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
+            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | None ->
+              fail "official-client provider loop remained open after prior effect"))
+;;
+
+let test_terminal_composition_unknown_write_failure_closes_official_client_loop () =
+  with_exec_fixture "composition-unknown-effect-terminal-failure"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"composition-test"
+            Masc.Keeper_gate_mode.Always_allow
+        with
+        | Ok _ -> ()
+        | Error detail -> fail ("failed to allow composition effect: " ^ detail));
+       let keepers_dir =
+         Config_dir_resolver.keepers_dir_for_base_path
+           ~base_path:config.base_path
+       in
+       let snapshot_path =
+         Masc.Keeper_memory_os_current.path_for_keepers_dir
+           ~keepers_dir
+           ~keeper_id:meta.name
+       in
+       (* A directory at the canonical snapshot path forces the writable
+          producer to report its exact unknown-effect persistence failure. *)
+       Fs_compat.mkdir_p snapshot_path;
+       let skill_catalog =
+         skill_catalog_of_composition ~name:"unknown-write-before-post" unknown_effect_terminal_failure_composition
+       in
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog
+           ()
+       in
+       Fun.protect
+         ~finally:bundle.cleanup
+         (fun () ->
+            let terminal_error = ref None in
+            let projected =
+              match
+                Masc.Keeper_official_client_host.dynamic_tools
+                  ~tool_approval:None
+                  ~pre_tool_rejects:(ref [])
+                  ~runtime_label:"test-official-client"
+                  ~keeper_name:meta.name
+                  ~turn_count:8
+                  ~tools:bundle.tools
+                  ~hooks:Agent_core.Hooks.empty
+                  ~event_bus:None
+                  ~context_injector:None
+                  ~context:(Some (Agent_core.Context.create_sync ()))
+                  ~terminal_effect_state:bundle.terminal_effect_state
+                  ~terminal_error
+                  ~raw_trace_run:None
+              with
+              | Ok tools -> tools
+              | Error error -> fail (Agent_core.Error.to_string error)
+            in
+            let tool =
+              projected
+              |> List.find_opt
+                   (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
+                      String.equal
+                        tool.name
+                        "keeper_compose_unknown-write-before-post")
+              |> function
+              | Some tool -> tool
+              | None -> fail "unknown-effect composition was not projected"
+            in
+            let result = tool.call ~call_id:"unknown-effect-composition" (`Assoc []) in
+            check bool "ordinary writable failure is visible" false result.success;
+            (match bundle.terminal_effect_state () with
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
+               check string
+                 "producer-owned unknown disposition"
+                 "effect_outcome_unknown"
+                 (Tool_result.failure_effect_disposition_to_string
+                    failure.effect_disposition)
+             | _ -> fail "unknown writable failure did not terminalize the bundle");
+            match result.abort_turn with
+            | Some
+                (Masc.Keeper_official_client_host.Terminal_tool_boundary
+                  { tool_name
+                  ; outcome =
+                      Masc.Keeper_official_client_host.Terminal_failed
+                        { effect_disposition = Tool_result.Effect_outcome_unknown; _ }
+                  }) ->
+              check string
+                "official-client unknown-effect terminal tool"
+                "keeper_compose_unknown-write-before-post"
+                tool_name
+            | Some
+                (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
+            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | None ->
+              fail "official-client provider loop remained open after unknown effect"))
+;;
+
+let test_terminal_composition_post_effect_defer_closes_without_resume () =
+  with_exec_fixture "composition-generic-defer-terminal-boundary"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"composition-test"
+            Masc.Keeper_gate_mode.Always_allow
+        with
+        | Ok _ -> ()
+        | Error detail -> fail ("failed to allow composition effect: " ^ detail));
+       let direct_bundle =
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       let revision =
+         Fun.protect
+           ~finally:direct_bundle.cleanup
+           (fun () ->
+              let board_list =
+                match find_tool_by_name direct_bundle.tools "masc_board_list" with
+                | Some tool -> tool
+                | None -> fail "masc_board_list missing from Keeper tool bundle"
+              in
+              match Agent_core.Tool.execute board_list (`Assoc []) with
+              | Error error -> fail error.Agent_core.Types.message
+              | Ok output ->
+                Yojson.Safe.Util.
+                  (parse_json output.content |> member "revision" |> to_string))
+       in
+       let skill_catalog =
+         skill_catalog_of_composition
+           ~name:"write-then-durable-wait"
+           (write_then_unchanged_board_composition ~revision)
+       in
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog
+           ()
+       in
+       Fun.protect
+         ~finally:bundle.cleanup
+         (fun () ->
+            let composition_tool =
+              match
+                find_tool_by_name
+                  bundle.tools
+                  "keeper_compose_write-then-durable-wait"
+              with
+              | Some tool -> tool
+              | None -> fail "ordinary generic-deferred composition was not materialized"
+            in
+            (match Agent_core.Tool.completion composition_tool with
+             | Agent_core.Tool_contract.Continue_after_success -> ()
+             | Agent_core.Tool_contract.Terminal_after_success _ ->
+               fail "composition without a terminal node became statically terminal");
+            let terminal_error = ref None in
+            let projected =
+              match
+                Masc.Keeper_official_client_host.dynamic_tools
+                  ~tool_approval:None
+                  ~pre_tool_rejects:(ref [])
+                  ~runtime_label:"test-official-client"
+                  ~keeper_name:meta.name
+                  ~turn_count:9
+                  ~tools:bundle.tools
+                  ~hooks:Agent_core.Hooks.empty
+                  ~event_bus:None
+                  ~context_injector:None
+                  ~context:(Some (Agent_core.Context.create_sync ()))
+                  ~terminal_effect_state:bundle.terminal_effect_state
+                  ~terminal_error
+                  ~raw_trace_run:None
+              with
+              | Ok tools -> tools
+              | Error error -> fail (Agent_core.Error.to_string error)
+            in
+            let tool =
+              projected
+              |> List.find_opt
+                   (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
+                      String.equal
+                        tool.name
+                        "keeper_compose_write-then-durable-wait")
+              |> function
+              | Some tool -> tool
+              | None -> fail "generic-deferred composition was not projected"
+            in
+            let result = tool.call ~call_id:"generic-deferred-composition" (`Assoc []) in
+            check bool "generic-deferred composition is incomplete" false result.success;
+            (match bundle.terminal_effect_state () with
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
+               check string
+                 "prior write prevents false resumability"
+                 "proven_post_effect"
+                 (Tool_result.failure_effect_disposition_to_string
+                    failure.effect_disposition)
+             | _ -> fail "post-effect defer did not terminalize the composition");
+            let deferred_payload = parse_json result.content in
+            check string
+              "nested deferred node retains producer-owned kind"
+              "generic_deferred"
+              Yojson.Safe.Util.
+                (member "cause" deferred_payload
+                 |> member "node"
+                 |> member "deferred_kind"
+                 |> to_string);
+            match result.abort_turn with
+            | Some
+                (Masc.Keeper_official_client_host.Terminal_tool_boundary
+                  { tool_name
+                  ; outcome =
+                      Masc.Keeper_official_client_host.Terminal_failed
+                        { effect_disposition = Tool_result.Proven_post_effect; _ }
+                  }) ->
+              check string
+                "official-client post-effect defer terminal tool"
+                "keeper_compose_write-then-durable-wait"
+                tool_name
+            | Some
+                (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
+            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | None ->
+              fail "official-client provider loop remained retryable after post-effect defer"))
+;;
+
+let test_async_composition_binds_params_into_durable_status () =
+  with_exec_fixture
+    ~bind_eio_context:true
+    "composition-async-param-durable-status"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let query = "async-param-worker-marker" in
+       let skill_catalog =
+         skill_catalog_of_composition
+           ~name:"memory-background"
+           async_param_memory_composition
+       in
+       let tools =
+         Masc.Keeper_tools_agent_core_bundle.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~skill_catalog
+           ()
+       in
+       let async_tool =
+         match find_tool_by_name tools "keeper_compose_memory-background" with
+         | Some tool -> tool
+         | None -> fail "async composition tool was not materialized"
+       in
+       let status_tool =
+         match find_tool_by_name tools "keeper_composition_status" with
+         | Some tool -> tool
+         | None -> fail "async composition status tool was not materialized"
+       in
+       (match Agent_core.Tool.execution_mode status_tool ~input:`Null with
+        | Agent_core.Tool_contract.Concurrent -> ()
+        | Agent_core.Tool_contract.Serial -> fail "status tool lost read-only concurrency");
+       let request_id =
+         match
+           Agent_core.Tool.execute
+             ~invocation:
+               (composition_invocation
+                  ~completion:Agent_core.Tool_contract.Continue_after_success)
+             async_tool
+             (`Assoc [ "query", `String query ])
+         with
+         | Error error -> fail error.Agent_core.Types.message
+         | Ok output ->
+           let payload = parse_json output.content in
+           check string
+             "async acceptance mode"
+             "async"
+             Yojson.Safe.Util.(member "execution" payload |> to_string);
+           Yojson.Safe.Util.(member "request_id" payload |> to_string)
+       in
+       let rec await_terminal () =
+         match
+           Masc.Keeper_msg_async.poll
+             ~base_path:config.base_path
+             ~caller:meta.name
+             request_id
+         with
+         | Masc.Keeper_msg_async.Found
+             ({ status = Masc.Keeper_msg_async.Done _; _ } as entry) ->
+           entry
+         | Masc.Keeper_msg_async.Found
+             { status =
+                 ( Masc.Keeper_msg_async.Queued
+                 | Masc.Keeper_msg_async.Running
+                 | Masc.Keeper_msg_async.Cancelling _ )
+             ; _
+             } ->
+           Eio.Fiber.yield ();
+           await_terminal ()
+         | Masc.Keeper_msg_async.Found
+             { status =
+                 ( Masc.Keeper_msg_async.Lost _
+                 | Masc.Keeper_msg_async.Cancelled _
+                 | Masc.Keeper_msg_async.Persistence_failed _ )
+             ; _
+             } ->
+           fail "async read-only composition did not complete"
+         | Masc.Keeper_msg_async.Absent -> fail "durable async request disappeared"
+         | Masc.Keeper_msg_async.Unreadable reason -> fail reason
+         | Masc.Keeper_msg_async.Rejected _ -> fail "async request access was rejected"
+       in
+       let clock =
+         match Eio_context.get_clock_opt () with
+         | Some clock -> clock
+         | None -> fail "async composition test lost its bound Eio clock"
+       in
+       ignore
+         (Eio.Time.with_timeout_exn clock 5.0 await_terminal
+           : Masc.Keeper_msg_async.entry);
+       match
+         Agent_core.Tool.execute
+           ~invocation:
+             (composition_invocation
+                ~completion:Agent_core.Tool_contract.Continue_after_success)
+           status_tool
+           (`Assoc [ "request_id", `String request_id ])
+       with
+       | Error error -> fail error.Agent_core.Types.message
+       | Ok output ->
+         let payload = parse_json output.content in
+         check string
+           "durable terminal status"
+           "done"
+           Yojson.Safe.Util.(member "status" payload |> to_string);
+         check string
+           "durable structured composition result"
+           "keeper_compose_memory-background"
+           Yojson.Safe.Util.
+             (member "result" payload |> member "composition_tool" |> to_string);
+         match Yojson.Safe.Util.(member "result" payload |> member "actions") with
+         | `List [ action ] ->
+           check string
+             "bound param reaches worker action input"
+             query
+             Yojson.Safe.Util.(member "input" action |> member "query" |> to_string);
+           let memory_result =
+             Yojson.Safe.Util.(member "result" action |> member "data" |> to_string)
+             |> parse_json
+           in
+           check string
+             "worker tool executes with bound query"
+             query
+             Yojson.Safe.Util.(member "query" memory_result |> to_string)
+         | _ -> fail "durable async result lost its single worker action")
+;;
+
+let test_async_composition_status_preserves_artifact_manifest () =
+  with_exec_fixture
+    ~bind_eio_context:true
+    "composition-async-artifact-status"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       ignore publication_recovery;
+       ignore ctx_work;
+       let artifact_reference =
+         Tool_blob_store.put_durable
+           (Tool_blob_store.create ~base_path:config.base_path)
+           ~bytes:"async artifact payload"
+           ~mime:"text/plain"
+       in
+       let structured_data =
+         `Assoc
+           [ ( "output_artifact"
+             , Tool_output.normalized_artifact_ref_to_json artifact_reference )
+           ]
+       in
+       let background_sw =
+         match Masc.Keeper_msg_async.server_background_switch () with
+         | Ok sw -> sw
+         | Error error ->
+           fail
+             (Masc.Keeper_msg_async.submit_error_to_json error
+              |> Yojson.Safe.to_string)
+       in
+       let request_id =
+         match Masc.Keeper_msg_async.submit
+                 ~background_sw
+                 ~base_path:config.base_path
+                 ~caller:meta.name
+                 ~keeper_name:meta.name
+                 ~f:(fun _request_sw ->
+                   Tool_result.make_ok
+                     ~tool_name:"keeper_compose_artifact-fixture"
+                     ~start_time:(Time_compat.now ())
+                     ~data:structured_data
+                     ())
+                 ()
+         with
+         | Ok outcome -> outcome.request_id
+         | Error error ->
+           fail
+             (Masc.Keeper_msg_async.submit_error_to_json error
+              |> Yojson.Safe.to_string)
+       in
+       let rec await_terminal () =
+         match
+           Masc.Keeper_msg_async.poll
+             ~base_path:config.base_path
+             ~caller:meta.name
+             request_id
+         with
+         | Masc.Keeper_msg_async.Found
+             ({ status = Masc.Keeper_msg_async.Done _; _ } as entry) ->
+           entry
+         | Masc.Keeper_msg_async.Found
+             { status =
+                 ( Masc.Keeper_msg_async.Queued
+                 | Masc.Keeper_msg_async.Running
+                 | Masc.Keeper_msg_async.Cancelling _ )
+             ; _
+             } ->
+           Eio.Fiber.yield ();
+           await_terminal ()
+         | Masc.Keeper_msg_async.Found _ ->
+           fail "async artifact composition did not complete"
+         | Masc.Keeper_msg_async.Absent -> fail "async artifact request disappeared"
+         | Masc.Keeper_msg_async.Unreadable reason -> fail reason
+         | Masc.Keeper_msg_async.Rejected _ ->
+           fail "async artifact request access was rejected"
+       in
+       let clock =
+         match Eio_context.get_clock_opt () with
+         | Some clock -> clock
+         | None -> fail "async artifact test lost its bound Eio clock"
+       in
+       ignore
+         (Eio.Time.with_timeout_exn clock 5.0 await_terminal
+           : Masc.Keeper_msg_async.entry);
+       let status_result =
+         Masc.Keeper_tool_composition_surface.For_testing.status_result
+           ~config
+           ~meta
+           ~request_id
+       in
+       match Masc.Tool_bridge.to_agent_core_typed_result
+               ~base_path:config.base_path
+               status_result
+       with
+       | Error error -> fail error.Agent_core.Types.message
+       | Ok output ->
+         let payload =
+           structured_tool_output_exn
+             ~base_path:config.base_path
+             output.content
+         in
+         check string "artifact status remains terminal" "done"
+           Yojson.Safe.Util.(member "status" payload |> to_string);
+         let artifact =
+           Yojson.Safe.Util.
+             (member "result" payload
+              |> member "output_artifact")
+         in
+         match Tool_output.normalized_artifact_ref_of_json artifact with
+         | Tool_output.Decoded_normalized_artifact_ref _ -> ()
+         | Tool_output.Not_normalized_artifact_ref ->
+           fail "async status dropped its normalized artifact reference"
+         | Tool_output.Invalid_normalized_artifact_ref { detail } -> fail detail)
+;;
+
+let test_composition_runtime_uses_canonical_descriptor () =
+  with_exec_fixture "composition-canonical-descriptor"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let canonical = composition_descriptor "keeper_time_now" in
+       let supplied =
+         { canonical with
+           Masc.Keeper_tool_descriptor.execution =
+             Masc.Keeper_tool_descriptor.Ordinary Masc.Keeper_tool_descriptor.Serial
+         ; input_schema = `Assoc [ "type", `String "string" ]
+         ; composable_output = Masc.Keeper_tool_descriptor.Opaque_output
+         }
+       in
+       let node =
+         Masc.Keeper_tool_plan.node
+           ~id:(composition_node_id "time")
+           ~tool_name:"keeper_time_now"
+           ~input:(Masc.Keeper_tool_plan.Json_template.literal (`Assoc []))
+           ()
+       in
+       let plan =
+         match Masc.Keeper_tool_plan.create ~descriptors:[ supplied ] [ node ] with
+         | Ok plan -> plan
+         | Error _ -> fail "canonicalized composition plan was rejected"
+       in
+       match
+         Masc.Keeper_tool_plan_executor.execute_keeper
+           ~plan
+           ~run_id:(Masc.Keeper_tool_plan.Run_id.fresh ())
+           ~composition_run_id:(Masc.Keeper_tool_plan.Composition_run_id.fresh ())
+           ~parent_invocation:
+             (composition_invocation
+                ~completion:Agent_core.Tool_contract.Continue_after_success)
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       with
+       | Error _ -> fail "canonical exact-descriptor composition execution failed"
+       | Ok [ result ] ->
+         (match result.Masc.Keeper_tool_plan_executor.result with
+          | Tool_result.Completed _ -> ()
+          | Tool_result.Deferred _ | Tool_result.Failed _ ->
+            fail "canonical time descriptor did not complete");
+         check bool
+           "canonical concurrent schedule"
+           true
+           (result.schedule.execution_mode = Agent_core.Tool_contract.Concurrent)
+       | Ok _ -> fail "single-node composition settled an unexpected result count")
+;;
+
+let test_composition_terminal_requires_terminal_outer_invocation () =
+  with_exec_fixture "composition-terminal-outer-contract"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let descriptor = composition_descriptor "keeper_surface_post" in
+       let node =
+         Masc.Keeper_tool_plan.node
+           ~id:(composition_node_id "terminal")
+           ~tool_name:"keeper_surface_post"
+           ~input:(Masc.Keeper_tool_plan.Json_template.literal (`Assoc []))
+           ()
+       in
+       let plan =
+         match Masc.Keeper_tool_plan.create ~descriptors:[ descriptor ] [ node ] with
+         | Ok plan -> plan
+         | Error _ -> fail "terminal composition plan was rejected"
+       in
+       match
+         Masc.Keeper_tool_plan_executor.execute_keeper
+           ~plan
+           ~run_id:(Masc.Keeper_tool_plan.Run_id.fresh ())
+           ~composition_run_id:(Masc.Keeper_tool_plan.Composition_run_id.fresh ())
+           ~parent_invocation:
+             (composition_invocation
+                ~completion:Agent_core.Tool_contract.Continue_after_success)
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       with
+       | Error
+           { settled = []
+           ; cause =
+               Masc.Keeper_tool_plan_executor.Outer_completion_mismatch
+                 { expected =
+                     Agent_core.Tool_contract.Terminal_after_success
+                       Agent_core.Tool_contract.Effect_outcome_unknown
+                 ; actual = Agent_core.Tool_contract.Continue_after_success
+                 }
+           ; effect_disposition = Tool_result.Proven_pre_effect
+           } -> ()
+       | Error _ | Ok _ ->
+         fail "terminal composition accepted an ordinary outer invocation")
+;;
+
 let () =
   Masc_test_deps.init_unified_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
@@ -4023,15 +6391,21 @@ let () =
       test_case "public Read rejects unsupported range fields" `Quick
         test_public_read_rejects_unsupported_range_fields;
       test_case "public Read rejects offset without dispatch enrichment" `Quick
-        test_public_read_rejects_offset_without_enrichment;
+        test_public_read_accepts_offset_without_enrichment;
+      test_case "surface Read rejects duplicate dispatch fields" `Quick
+        test_surface_read_rejects_duplicate_dispatch_fields;
       test_case "missing file is failure" `Quick
         test_execute_with_outcome_missing_file_is_failure;
       test_case "initializing recovery isolates only publication writes" `Quick
         test_initializing_recovery_isolates_only_publication_writes;
+      test_case "identical Keeper invocations join across production boundaries" `Quick
+        test_identical_keeper_invocations_join_across_production_boundaries;
       test_case "Manual Gate defers writes before recovery acquisition" `Quick
         test_manual_gate_defers_publication_writes_before_recovery;
-      test_case "Manual Gate deferral stays deferred through OAS bridge" `Quick
-        test_manual_gate_deferral_stays_deferred_through_oas_bridge;
+      test_case "Manual Gate defers memory write before persistence" `Quick
+        test_manual_gate_defers_memory_write_before_persistence;
+      test_case "Manual Gate deferral stays deferred through Agent Core bridge" `Quick
+        test_manual_gate_deferral_stays_deferred_through_agent_core_bridge;
       test_case "initialization crash is redacted from tool output" `Quick
         test_publication_initialization_crash_is_redacted;
       test_case "reconciliation evidence is redacted from tool output" `Quick
@@ -4056,14 +6430,18 @@ let () =
         test_model_visible_web_search_dispatches_to_misc_runtime;
       test_case "model-visible WebFetch reaches misc runtime" `Quick
         test_model_visible_web_fetch_dispatches_to_misc_runtime;
-      test_case "public WebFetch reaches localhost after Gate" `Quick
-        test_public_masc_web_fetch_reaches_localhost_after_gate;
+      test_case "public WebFetch rejects localhost after Gate" `Quick
+        test_public_masc_web_fetch_rejects_localhost_after_gate;
       test_case "Manual Gate defers web tools before network" `Quick
         test_manual_gate_defers_web_tools_before_network;
       test_case "approved WebSearch grant executes exact request" `Quick
         test_approved_web_search_grant_executes_exact_request;
       test_case "approved WebSearch replays without model resubmission" `Quick
         test_approved_web_search_replays_without_model_resubmission;
+      test_case "approved memory write replays without model resubmission" `Quick
+        test_approved_memory_write_replays_without_model_resubmission;
+      test_case "durable connector replay settles terminal turn" `Quick
+        test_durable_connector_replay_settles_terminal_turn;
       test_case "blob failure repairs journal without second effect" `Quick
         test_blob_failure_repairs_journal_without_second_effect;
       test_case "journal failure retries only persistence" `Quick
@@ -4080,8 +6458,8 @@ let () =
         test_manual_gate_defers_tool_execute_before_process;
       test_case "tool_execute raw cmd requires typed Shell IR" `Quick
         test_tool_execute_raw_cmd_requires_typed_shell_ir;
-      test_case "OAS handler threads Eio context to keeper dispatch" `Quick
-        test_oas_handler_threads_eio_context_to_keeper_dispatch;
+      test_case "Agent Core handler threads Eio context to keeper dispatch" `Quick
+        test_agent_core_handler_threads_eio_context_to_keeper_dispatch;
       test_case "registered dispatch does not require masc_ prefix" `Quick
         test_registered_tool_dispatch_without_masc_prefix;
       test_case "registered dispatch preserves workflow failure class" `Quick
@@ -4098,6 +6476,40 @@ let () =
         test_invalid_surface_post_input_stays_correction_capable;
       test_case "surface append failure is not terminal completion" `Quick
         test_surface_post_append_failure_does_not_complete_terminal_effect;
+      test_case "composition dispatch uses canonical descriptor authority" `Quick
+        test_composition_runtime_uses_canonical_descriptor;
+      test_case "catalog composition is a first-class executable tool" `Quick
+        test_composition_catalog_materializes_and_executes_first_class_tool;
+      test_case "composition feeds typed Shell IR output to later tool" `Quick
+        test_composition_feeds_typed_shell_ir_output_to_later_tool;
+      test_case "composition externalizes oversized Shell IR output" `Quick
+        test_composition_externalizes_oversized_shell_ir_output;
+      test_case "direct Execute artifact manifest survives maintenance" `Quick
+        test_direct_execute_artifact_manifest_survives_maintenance;
+      test_case "direct Execute artifact failure closes official-client loop" `Quick
+        test_direct_execute_post_effect_artifact_failure_closes_official_client_loop;
+      test_case "direct pre-effect and read-only failures remain correction-capable" `Quick
+        test_direct_pre_effect_and_readonly_failures_remain_correction_capable;
+      test_case "composition action commit refreshes dashboard evidence" `Quick
+        test_composition_action_commit_advances_revision_before_refresh_event;
+      test_case "composition telemetry outage preserves execution" `Quick
+        test_composition_telemetry_failure_does_not_change_execution;
+      test_case "terminal catalog composition keeps terminal completion" `Quick
+        test_terminal_composition_materializes_terminal_completion;
+      test_case "composition failure exposes typed plan cause" `Quick
+        test_composition_plan_failure_exposes_typed_cause;
+      test_case "post-effect composition closes official-client loop" `Quick
+        test_terminal_composition_post_effect_failure_closes_official_client_loop;
+      test_case "unknown-effect composition closes official-client loop" `Quick
+        test_terminal_composition_unknown_write_failure_closes_official_client_loop;
+      test_case "post-effect deferred composition closes without resume" `Quick
+        test_terminal_composition_post_effect_defer_closes_without_resume;
+      test_case "async composition binds params into durable status" `Quick
+        test_async_composition_binds_params_into_durable_status;
+      test_case "async composition status preserves artifact manifest" `Quick
+        test_async_composition_status_preserves_artifact_manifest;
+      test_case "terminal composition requires terminal outer invocation" `Quick
+        test_composition_terminal_requires_terminal_outer_invocation;
     ]);
     ("exact_registered_dispatch", [
       test_case "raw Board runtime respects typed projection" `Quick
@@ -4109,10 +6521,12 @@ let () =
       test_case "descriptor route miss is typed runtime failure" `Quick
         test_descriptor_route_miss_payload_is_typed_runtime_failure;
     ]);
-    ("oas_descriptor", [
-      test_case "catalog flags do not infer OAS descriptors" `Quick
-        test_catalog_metadata_does_not_infer_oas_descriptors;
-      test_case "model-visible aliases do not infer OAS descriptors" `Quick
-        test_model_visible_tools_do_not_infer_oas_descriptors;
+    ("agent_core_descriptor", [
+      test_case "catalog flags do not infer Agent Core descriptors" `Quick
+        test_catalog_metadata_does_not_infer_agent_core_descriptors;
+      test_case "model-visible tools keep canonical Agent Core descriptors" `Quick
+        test_model_visible_tools_keep_canonical_agent_core_descriptors;
+      test_case "surface post description reaches the Agent Core bundle" `Quick
+        test_surface_post_bundle_names_reader_and_repeat_cost;
     ]);
   ]

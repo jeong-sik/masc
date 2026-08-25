@@ -85,7 +85,7 @@ let schedule_namespace_truth_shell_refresh ~sw ~clock config =
                      Env_config_runtime.Dashboard.shell_timeout_sec;
                    `Assoc []
                in
-               if result <> `Assoc [] && not (is_dashboard_cache_timeout_json result)
+               if result <> `Assoc [] && not (Dashboard_cache.is_timeout_envelope result)
                then (
                  Atomic.set last_good_shell result;
                  Atomic.set shell_warmed true;
@@ -110,12 +110,18 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
   let proactive_first_cycle_pending =
     not (cached_surface_has_success Execution_surfaces.execution_cache)
     &&
-    match Execution_surfaces.execution_cache.last_attempt_unix with
+    match
+      (Server_dashboard_http_cache.snapshot Execution_surfaces.execution_cache)
+        .last_attempt_unix
+    with
     | None -> true
     | Some attempt_ts ->
         let elapsed = Time_compat.now () -. attempt_ts in
         elapsed < warm_escape_s
-        && Option.is_none Execution_surfaces.execution_cache.last_error_unix
+        && Option.is_none
+             (Server_dashboard_http_cache.snapshot
+                Execution_surfaces.execution_cache)
+               .last_error_unix
   in
   if proactive_first_cycle_pending then
     Namespace_truth_support.compose_namespace_truth_initializing ~config
@@ -197,7 +203,8 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
         in
         Namespace_truth_support.compose_namespace_truth_snapshot ~config
           ~initialized:(Workspace.is_initialized config) ~shell_json ~execution_json
-        |> with_projection_diagnostics ~surface:"namespace_truth" ~started_at
+        |> Server_dashboard_http_core_cache.with_projection_diagnostics
+             ~surface:"namespace_truth" ~started_at
              ~extra:
                [
                  ("parallel_ms", `Int (int_of_float parallel_ms));
@@ -217,7 +224,8 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
       Namespace_truth_support.compose_namespace_truth_snapshot ~config
         ~initialized:(Workspace.is_initialized config)
         ~shell_json ~execution_json
-      |> with_projection_diagnostics ~surface:"namespace_truth" ~started_at
+      |> Server_dashboard_http_core_cache.with_projection_diagnostics
+           ~surface:"namespace_truth" ~started_at
            ~extra:
              [
                ("parallel_ms", `Int 0);
@@ -254,7 +262,9 @@ let namespace_truth_snapshot_from_caches (state : Mcp_server.server_state) :
          composed snapshot. The HTTP path
          ([dashboard_namespace_truth_http_json]) keeps [cached_surface_json]
          where clients render cache_state/stale_age_ms. *)
-      Server_dashboard_http_execution_surfaces.execution_cache.json
+      (Server_dashboard_http_cache.snapshot
+         Server_dashboard_http_execution_surfaces.execution_cache)
+        .json
     in
     Some
       (Namespace_truth_support.compose_namespace_truth_snapshot ~config
@@ -344,16 +354,10 @@ let broadcast_namespace_truth_snapshot (state : Mcp_server.server_state) : unit 
             ("ts_unix", `Float (Time_compat.now ()));
           ]
       in
-      let namespace_alias_sse_json =
-        `Assoc
-          [
-            ("type", `String "namespace_truth_snapshot");
-            ("payload", snapshot);
-            ("ts_unix", `Float (Time_compat.now ()));
-          ]
-      in
+      (* One event, not two. The alias carried the identical payload and every
+         consumer handled the two names in the same branch, so the fanout sent
+         each namespace-truth snapshot twice to say one thing (#27664). *)
       Sse.broadcast_to Observers namespace_sse_json;
-      Sse.broadcast_to Observers namespace_alias_sse_json;
       (* Snapshot broadcasts are normal dashboard fanout. The cache/update
          failures around this path are logged separately. *)
       Log.Dashboard.routine "project-snapshot pushed via SSE"

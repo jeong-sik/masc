@@ -6,8 +6,6 @@ let reasons =
     , R.Operator_paused { operator_actor = R.operator_actor_grpc_directive } )
   ; ( "keeper_down operator pause"
     , R.Operator_paused { operator_actor = R.operator_actor_keeper_down } )
-  ; "dead tombstone", R.Dead_tombstone
-  ; "transcript corruption reset required", R.Transcript_corruption_reset_required
   ]
 ;;
 
@@ -41,10 +39,15 @@ let test_retired_failure_latches_fail_closed () =
   [ "retired_failure_latch:cycles=4"
   ; "runtime_exhausted:all_providers_failed"
   ; "stale_storm"
+  ; (* Retired with the transcript-corruption latch: a past structural defect
+       is evidence, not a scheduling gate. Boot-time tail recovery closes the
+       open tool cycles a process death leaves behind. *)
+    "transcript_corruption_reset_required"
   ]
   |> List.iter (fun wire -> expect_error wire (R.of_wire wire));
   [ `Assoc [ "kind", `String "retired_failure_latch" ]
   ; `Assoc [ "kind", `String "runtime_exhausted" ]
+  ; `Assoc [ "kind", `String "transcript_corruption_reset_required" ]
   ]
   |> List.iter (fun json ->
     expect_error (Yojson.Safe.to_string json) (R.Stable.of_yojson json))

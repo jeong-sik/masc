@@ -13,7 +13,7 @@
     [emit_board_signal], [backend], [sort_posts_in_memory],
     [normalize_author_filter], [agent_matches_author_filter],
     [matching_post_ids_for_comment_author_filter], the
-    [all_sort_orders] convenience list, [is_initialized])
+    [all_sort_orders] convenience list)
     are hidden — callers consume the typed
     sort-order helpers, lifecycle entry points, post / comment /
     vote operations, and the JSON projection / hook setters
@@ -37,6 +37,10 @@ type board_signal_kind =
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed of board_reaction_change
+  | Board_vote_cast of board_vote_change
+      (** A vote landed on a post or comment. Emitted by {!vote} and
+          {!vote_comment} after the store accepted the vote; a duplicate
+          same-direction vote ([Already_voted]) emits nothing. *)
 
 and board_reaction_change = {
   target_type : Board.reaction_target_type;
@@ -44,6 +48,19 @@ and board_reaction_change = {
   user_id : string;
   emoji : string;
   reacted : bool;
+}
+
+and board_vote_target =
+  | Vote_on_post of string
+  | Vote_on_comment of string
+
+and board_vote_change = {
+  target : board_vote_target;
+  target_author : string;
+      (** Author of the voted-on post or comment, read from the store when the
+          vote landed, so a router can address that lane without re-reading. *)
+  voter : string;
+  direction : Board.vote_direction;
 }
 
 type board_signal = {
@@ -97,7 +114,7 @@ type board_sse_event =
 
 val set_board_signal_hook : (addressed_board_signal -> unit) -> unit
 (** Replace the in-process hook invoked from {!create_post}, {!add_comment},
-    and {!toggle_reaction}. *)
+    {!toggle_reaction}, {!vote}, and {!vote_comment}. *)
 
 val set_board_sse_hook : (board_sse_event -> unit) -> unit
 (** Replace the in-process SSE hook invoked from every mutating
@@ -186,6 +203,10 @@ val update_post :
   (Board.post, Board.board_error) Result.t
 
 val get_post : post_id:string -> (Board.post, Board.board_error) Result.t
+
+val find_post_by_run_id : run_id:string -> Board.post option
+(** Exact O(1) lookup through the Board typed-origin [fusion_run_id] index.
+    Returns [None] on a miss; does not scan post text or [meta_json]. *)
 
 val list_posts :
   ?visibility_filter:Board.visibility option ->
@@ -336,7 +357,13 @@ val get_agent_karma : agent_name:string -> int
 
 (** {1 Aggregates} *)
 
-val list_hearths : unit -> (string * int) list
+val list_hearths
+  :  ?exclude_system:bool
+  -> ?exclude_automation:bool
+  -> unit
+  -> (string * int) list
+(** Aggregates hearth counts over the same typed post-kind filter axis used by
+    [list_posts]. Omitted filters preserve the complete Board aggregate. *)
 
 val stats : unit -> Yojson.Safe.t
 (** Board snapshot ([post_count] / [comment_count] / per-author /

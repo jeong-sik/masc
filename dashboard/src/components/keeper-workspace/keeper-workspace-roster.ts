@@ -13,10 +13,11 @@ import {
 } from 'lucide-preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
-import { keepers } from '../../store'
+import { keepers, executionError, executionLoaded } from '../../store'
 import { navigate } from '../../router'
 import { selectKeeper } from '../../keeper-actions'
 import { keeperMobilePane } from '../keeper-detail-state'
+import { BroadcastComposer } from './broadcast-composer'
 import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../../composite-signals'
 import { compositeSnapshotForKeeper } from '../../lib/keeper-composite-lookup'
 import { formatCompactAge, formatRelativeSec } from '../../lib/format-time'
@@ -24,7 +25,12 @@ import { persistentSignal } from '../../lib/persistent-signal'
 import { keeperActivityDisplay, keeperDisplayRuntime } from '../../lib/keeper-runtime-display'
 import type { KeeperActivityDisplay } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
-import { sortByRecency } from '../../lib/keeper-recency'
+import { compareByRecency, sortByRecency } from '../../lib/keeper-recency'
+import {
+  deriveKeeperRuntimeProjection,
+  keeperAttentionSignals,
+} from '../../lib/keeper-runtime-projection'
+import type { KeeperCompositeSnapshot } from '../../api/schemas/keeper-composite'
 import type { Keeper } from '../../types'
 import { KEEPER_ACTION_LABELS, runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
 import { VirtualList } from '../common/virtual-list'
@@ -113,12 +119,19 @@ const WINDOW_AT = 60
 // per-row context/tool rows, now moved to the runtime panel.
 const ROSTER_ROW_ESTIMATED_HEIGHT = 69
 
-/** Blocked tasks + explicit attention flag → the roster attention badge. */
-function attentionCount(keeper: Keeper): number {
-  return keeper.blocked_task_count ?? (keeper.needs_attention === true ? 1 : 0)
-}
-function needsAttention(keeper: Keeper): boolean {
-  return keeper.needs_attention === true || attentionCount(keeper) > 0
+/** How many attention signals this keeper is raising.
+ *
+ *  Threaded as an accessor for the same reason `bucketOf` is: the count comes
+ *  from the fleet composite, and a call site that cannot reach the composite
+ *  must not silently answer a different question. It used to read two flat
+ *  record fields (`needs_attention`, `blocked_task_count`) while the
+ *  monitoring roster read the runtime projection's attention signals, so one
+ *  keeper could be 주의 there and 실행 중 here. Both now read
+ *  `keeperAttentionSignals`. */
+type AttentionOf = (keeper: Keeper) => number
+
+function attentionSignalCount(keeper: Keeper, composite: KeeperCompositeSnapshot | null): number {
+  return keeperAttentionSignals(deriveKeeperRuntimeProjection({ keeper, composite })).length
 }
 
 function keeperContextRatio(keeper: Keeper): number | null {
@@ -158,16 +171,25 @@ function keeperStatusRank(keeper: Keeper, bucketOf: BucketOf): number {
   return 3
 }
 
-function compareFleetRows(bucketOf: BucketOf): (a: Keeper, b: Keeper) => number {
+/** Bucket order first, then the same recency order the rows display.
+ *
+ *  The grouped view previously ordered within a bucket by context ratio
+ *  descending. That key is invisible on the row — the row shows a relative
+ *  activity time — and it moves on every turn as the window fills, so the
+ *  list reordered under the operator with no readable rule and a click could
+ *  land on whichever keeper had just taken that slot. Recency is the key the
+ *  row already prints, and it is the same SSOT the keepers page uses to pick
+ *  its default selection, so top-of-list and auto-selection agree. */
+function compareFleetRows(bucketOf: BucketOf, nowMs: number): (a: Keeper, b: Keeper) => number {
   return (a, b) =>
     keeperStatusRank(a, bucketOf) - keeperStatusRank(b, bucketOf)
-    || compareContextRatioDescending(a, b)
-    || a.name.localeCompare(b.name)
+    || compareByRecency(a, b, nowMs)
 }
 
 export function rosterFleetSummary(
   rows: readonly Keeper[],
-  bucketOf: BucketOf = keeperBucket,
+  bucketOf: BucketOf,
+  attentionOf: AttentionOf,
 ): RosterFleetSummary {
   const summary: RosterFleetSummary = {
     total: rows.length,
@@ -187,7 +209,7 @@ export function rosterFleetSummary(
     if (bucket === 'stuck') summary.stuck += 1
     if (bucket === 'paused') summary.paused += 1
     if (bucket === 'offline') summary.offline += 1
-    if (needsAttention(keeper)) summary.attention += 1
+    if (attentionOf(keeper) > 0) summary.attention += 1
     if (keeper.current_gate?.kind === 'approval_required') summary.approvalGate += 1
     const contextRatio = keeperContextRatio(keeper)
     if (contextRatio === null) {
@@ -204,16 +226,21 @@ export function rosterFleetSummary(
  *  above the rest, ordered by blocked-task count (min 1 when only the flag is
  *  set, so a flagged-but-unblocked keeper still outranks a calm one). Mirrors
  *  the v2 roster's numeric `k.att` sort key. */
-function attentionScore(keeper: Keeper): number {
-  return needsAttention(keeper) ? Math.max(1, attentionCount(keeper)) : 0
+function attentionScore(keeper: Keeper, attentionOf: AttentionOf): number {
+  return attentionOf(keeper)
 }
 
 /** Comparator for the 'name'/'att' flat sort modes. 'status' keeps the bucket
  *  grouping and 'recent' uses sortByRecency (decorate-sort-undecorate); neither
  *  reaches here. Name ties break alphabetically so the order is stable. */
-function compareKeepers(a: Keeper, b: Keeper, sort: 'name' | 'att'): number {
+function compareKeepers(
+  a: Keeper,
+  b: Keeper,
+  sort: 'name' | 'att',
+  attentionOf: AttentionOf,
+): number {
   if (sort === 'name') return a.name.localeCompare(b.name)
-  return attentionScore(b) - attentionScore(a)
+  return attentionScore(b, attentionOf) - attentionScore(a, attentionOf)
     || compareContextRatioDescending(a, b)
     || a.name.localeCompare(b.name)
 }
@@ -252,19 +279,20 @@ function matchesQuery(keeper: Keeper, q: string): boolean {
 
 function RosterRow({
   keeper,
+  attentionCount: att,
   active,
   onSelect,
   onMenu,
   style,
 }: {
   keeper: Keeper
+  attentionCount: number
   active: boolean
   onSelect: (name: string) => void
   onMenu: (keeper: Keeper, event: MouseEvent) => void
   style?: string
 }) {
   const tone = keeperFleetTone(keeper)
-  const att = attentionCount(keeper)
   const scope = keeperScope(keeper)
   const basepath = keeperBasepath(keeper)
   // Design roster identity sub-line = basepath; fall back to the scope proxy
@@ -300,6 +328,12 @@ function RosterRow({
         <div class="kw-kp-name">${keeper.koreanName ?? keeper.name}</div>
         <div class="kw-kp-sub">
           <span class="kw-kp-state"><${StatusDot} tone=${tone} pulse=${beat} />${phaseLabel}</span>
+          ${keeper.sandbox_profile === 'local'
+            // Design roster sub-line marker (rails.jsx `.kp-sandbox`): the ⬡
+            // glyph flags a dedicated worktree folder. No kw-* counterpart —
+            // the vendored kit owns this class outright.
+            ? html`<span class="kp-sandbox" title="이 keeper 전용 작업 폴더 — git worktree 로 갈라 놔서 다른 keeper 와 파일이 섞이지 않습니다 (OS·컨테이너 샌드박스는 아님)">⬡</span>`
+            : null}
           ${handle ? html`<span aria-hidden="true">·</span><span class="kw-kp-handle kp-handle" title=${handleTitle}>${handle}</span>` : null}
         </div>
       </div>
@@ -370,7 +404,7 @@ function lifecycleActions(keeper: Keeper): KeeperActionKey[] {
 
 async function runRosterKeeperAction(keeper: Keeper, action: KeeperActionKey): Promise<void> {
   if (action === 'resume') {
-    await runKeeperAction(keeper.name, action, keeper.generation)
+    await runKeeperAction(keeper.name, action)
   } else {
     await runKeeperAction(keeper.name, action)
   }
@@ -475,6 +509,16 @@ function KeeperRosterMenu({
   `
 }
 
+// An empty list has three different causes and the text must say which:
+// the fleet has not loaded yet, the load failed, or the filter excluded
+// every keeper. Loaded-and-empty is the only case that is "no keepers".
+export function rosterEmptyText(fleetSize: number): string {
+  if (executionError.value !== null) return `키퍼 목록을 불러오지 못했습니다: ${executionError.value}`
+  if (!executionLoaded.value) return '키퍼 목록을 불러오는 중…'
+  if (fleetSize === 0) return '등록된 키퍼가 없습니다'
+  return '일치하는 키퍼가 없습니다'
+}
+
 export function KeeperWorkspaceRoster({
   activeName,
   onSelect,
@@ -490,6 +534,7 @@ export function KeeperWorkspaceRoster({
 }): VNode {
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
+  const [bcastOpen, setBcastOpen] = useState(false)
   const filter = rosterFilterPref.value
   const sort = rosterSortPref.value
   const setFilter = (next: RosterFilter) => {
@@ -526,15 +571,19 @@ export function KeeperWorkspaceRoster({
   const fleetSnapshot = fleetCompositeSnapshot.value
   const compositeByKeeperKey = useMemo(() => buildCompositeByKeeperKey(fleetSnapshot), [fleetSnapshot])
   const bucketOf: BucketOf = k => keeperBucket(k, compositeSnapshotForKeeper(k, compositeByKeeperKey))
+  // Same composite the buckets use, so grouping and the attention badge cannot
+  // disagree about the same keeper within one render pass.
+  const attentionOf: AttentionOf = k =>
+    attentionSignalCount(k, compositeSnapshotForKeeper(k, compositeByKeeperKey))
   const counts = {
     all: all.length,
     run: all.filter(k => bucketOf(k) === 'running').length,
-    att: all.filter(needsAttention).length,
+    att: all.filter(k => attentionOf(k) > 0).length,
   }
 
   const visible = all.filter(k => {
     if (filter === 'run' && bucketOf(k) !== 'running') return false
-    if (filter === 'att' && !needsAttention(k)) return false
+    if (filter === 'att' && attentionOf(k) === 0) return false
     return matchesQuery(k, query)
   })
 
@@ -544,7 +593,7 @@ export function KeeperWorkspaceRoster({
   const sortRows = (rows: Keeper[]): Keeper[] => {
     if (sort === 'status') return rows
     if (sort === 'recent') return sortByRecency(rows, nowMs)
-    return [...rows].sort((a, b) => compareKeepers(a, b, sort))
+    return [...rows].sort((a, b) => compareKeepers(a, b, sort, attentionOf))
   }
 
   const select = (name: string) => {
@@ -615,7 +664,7 @@ export function KeeperWorkspaceRoster({
     for (const group of GROUP_ORDER) {
       const rows = visible
         .filter(k => bucketOf(k) === group.bucket)
-        .sort(compareFleetRows(bucketOf))
+        .sort(compareFleetRows(bucketOf, nowMs))
       if (rows.length === 0) continue
       items.push({ type: 'header', bucket: group.bucket, label: group.label, count: rows.length })
       for (const keeper of rows) items.push({ type: 'row', keeper })
@@ -651,7 +700,7 @@ export function KeeperWorkspaceRoster({
     if (item.type === 'header') {
       return renderHeader(item)
     }
-    return html`<${RosterRow} keeper=${item.keeper} active=${item.keeper.name === activeName} onSelect=${select} onMenu=${openMenu} />`
+    return html`<${RosterRow} keeper=${item.keeper} attentionCount=${attentionOf(item.keeper)} active=${item.keeper.name === activeName} onSelect=${select} onMenu=${openMenu} />`
   }
 
   function getKey(item: RosterItem): string {
@@ -689,6 +738,16 @@ export function KeeperWorkspaceRoster({
               >
                 <${Search} size=${14} aria-hidden="true" />
               </button>
+              <button
+                type="button"
+                class="kw-rfilter-icon rfilter-icon v2-monitoring-action"
+                aria-label="전체 브로드캐스트"
+                title="전체 브로드캐스트 — 모든 keeper에게 동일 메시지"
+                data-testid="roster-broadcast-open"
+                onClick=${() => setBcastOpen(true)}
+              >
+                ⊚
+              </button>
               <select
                 class="kw-roster-sort roster-sort v2-monitoring-action"
                 aria-label="키퍼 정렬"
@@ -702,20 +761,25 @@ export function KeeperWorkspaceRoster({
               </select>
             </div>
             ${searchOpen || query
+              // Design structure (rails.jsx): the search field is its own
+              // `.roster-head` band below `.roster-filters` — the kit rule
+              // (v2.css `.roster-head`) supplies the padding + bottom border.
               ? html`
-                  <input
-                    class="kw-roster-search roster-search"
-                    type="text"
-                    placeholder="이름 · 스코프 검색…"
-                    aria-label="키퍼 검색"
-                    value=${query}
-                    onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-                  />
+                  <div class="roster-head">
+                    <input
+                      class="kw-roster-search roster-search"
+                      type="text"
+                      placeholder="이름 · 스코프 검색…"
+                      aria-label="키퍼 검색"
+                      value=${query}
+                      onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
+                    />
+                  </div>
                 `
               : null}
           </div>
           ${visible.length === 0
-            ? html`<div class="kw-roster-list roster-list"><div class="kw-roster-empty v2-monitoring-row">일치하는 키퍼가 없습니다</div></div>`
+            ? html`<div class="kw-roster-list roster-list"><div class="kw-roster-empty v2-monitoring-row">${rosterEmptyText(all.length)}</div></div>`
         : useVirtual
           ? html`<${VirtualList}
               items=${items}
@@ -727,7 +791,7 @@ export function KeeperWorkspaceRoster({
           : html`<div class="kw-roster-list roster-list">
               ${items.map(item => item.type === 'header'
                 ? renderHeader(item)
-                : html`<${RosterRow} key=${item.keeper.name} keeper=${item.keeper} active=${item.keeper.name === activeName} onSelect=${select} onMenu=${openMenu} style=${rowStyle} />`)}
+                : html`<${RosterRow} key=${item.keeper.name} keeper=${item.keeper} attentionCount=${attentionOf(item.keeper)} active=${item.keeper.name === activeName} onSelect=${select} onMenu=${openMenu} style=${rowStyle} />`)}
             </div>`}
         `}
       ${menu
@@ -737,6 +801,9 @@ export function KeeperWorkspaceRoster({
             onSelect=${select}
             onOpenConfig=${onOpenConfig}
           />`
+        : null}
+      ${bcastOpen
+        ? html`<${BroadcastComposer} keepers=${all} onClose=${() => setBcastOpen(false)} />`
         : null}
     </aside>
   `

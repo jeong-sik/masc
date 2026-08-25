@@ -66,14 +66,6 @@ let unix_error_to_string err op arg =
   in
   Printf.sprintf "%s%s: %s" op target (Unix.error_message err)
 
-let file_kind_to_shape = function
-  | Unix.S_REG -> "regular"
-  | Unix.S_DIR -> "directory"
-  | Unix.S_CHR -> "character_device"
-  | Unix.S_BLK -> "block_device"
-  | Unix.S_LNK -> "symlink"
-  | Unix.S_FIFO -> "fifo"
-  | Unix.S_SOCK -> "socket"
 
 let inspect_regular_current_task path =
   try
@@ -94,11 +86,11 @@ let inspect_current_task_path effective_masc_root =
         (path, shape, error)
     | kind ->
         ( path,
-          file_kind_to_shape kind,
+          Fs_compat.file_kind_to_string kind,
           Some
             (Printf.sprintf
                "expected absent or a regular read/write file, got %s"
-               (file_kind_to_shape kind)) )
+               (Fs_compat.file_kind_to_string kind)) )
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> (path, "absent", None)
   | Unix.Unix_error (err, op, arg) ->
@@ -206,12 +198,11 @@ let startup_lines (diag : t) =
   in
   List.filter_map (fun line -> line) lines
 
-let logged_once : bool ref = ref false
+let logged_once = Atomic.make false
 
 let log_startup_warning (diag : t) =
   match diag.warning with
-  | Some message when not !logged_once ->
-      logged_once := true;
+  | Some message when Atomic.compare_and_set logged_once false true ->
       Log.Server.warn "%s%s" message
         (if diag.strict_mode_requested then " (strict mode enabled)" else "")
   | Some message ->

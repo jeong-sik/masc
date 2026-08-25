@@ -22,11 +22,11 @@ type pending_board_event_kind =
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed of board_reaction_event
+  | Board_vote_cast of Board_dispatch.board_vote_change
   | Fusion_completed
+  | Delegate_completed
   | Schedule_due of Keeper_event_queue.scheduled_wake
-  | External_attention
-  | Goal_assigned
-  | Goal_reconciliation_ready
+  | External_attention of Keeper_counterpart_observation.t
   | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
   | Task_cancelled of Keeper_event_queue.task_cancellation
 
@@ -53,14 +53,14 @@ let is_board_activity_event (event : pending_board_event) =
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed _
+  | Board_vote_cast _
   | Fusion_completed
-  | External_attention
-  | Goal_assigned
-  (* Goal-lifecycle signal, not a schedule dispatch, so it sits with
-     [Goal_assigned]. The [false] arm would also compile but would route the
-     event to the Scheduled Automation renderer and drop it from
-     [board_activity_count]. *)
-  | Goal_reconciliation_ready -> true
+  (* Like [Fusion_completed] this has no Board post behind its id, and for the
+     same reason it is still counted here: this block is the only one that
+     renders the row's title and preview, and the answer is the whole point of
+     the wake. Excluded, the Keeper would be woken with nothing to read. *)
+  | Delegate_completed
+  | External_attention _ -> true
   (* Neither carries a Board post, so routing either here would count a
      non-existent post in [board_activity_count]. Each has its own renderer. *)
   | Completion_authority_rejected _ | Task_cancelled _ -> false
@@ -72,10 +72,10 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed _
+  | Board_vote_cast _
   | Fusion_completed
-  | External_attention
-  | Goal_assigned
-  | Goal_reconciliation_ready
+  | Delegate_completed
+  | External_attention _
   | Completion_authority_rejected _
   | Task_cancelled _ -> false
 ;;
@@ -86,11 +86,11 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed _
+  | Board_vote_cast _
   | Fusion_completed
+  | Delegate_completed
   | Schedule_due _
-  | External_attention
-  | Goal_assigned
-  | Goal_reconciliation_ready
+  | External_attention _
   | Task_cancelled _ -> false
 ;;
 
@@ -100,14 +100,14 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
 let is_task_cancellation_event (event : pending_board_event) =
   match event.event_kind with
   | Task_cancelled _ -> true
+  | Delegate_completed
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed _
+  | Board_vote_cast _
   | Fusion_completed
   | Schedule_due _
-  | External_attention
-  | Goal_assigned
-  | Goal_reconciliation_ready
+  | External_attention _
   | Completion_authority_rejected _ -> false
 ;;
 
@@ -135,13 +135,15 @@ let empty_scheduled_automation_observation =
   }
 ;;
 
+module Inputs = Keeper_world_observation_inputs
+
 type world_observation =
   { pending_messages : Keeper_world_observation_message_scope.pending_message list
   ; pending_board_events : pending_board_event list
   ; idle_seconds : int
   ; active_goals : string list
   ; unclaimed_task_count : int
-  ; claimable_task_count : int
+  ; claimable_tasks : Inputs.claimable_task_identity list
   ; failed_task_count : int
   ; scheduled_automation : scheduled_automation_observation
   ; backlog_revision : int option
@@ -149,6 +151,8 @@ type world_observation =
   ; connected_surfaces : Gate_surface.surface_presence list
   ; connected_surface_failures : Gate_surface.presence_failure list
   ; own_recent_board_posts : Board.post list
+  ; fleet_messages : Keeper_world_observation_message_scope.fleet_message list
+  ; own_recent_actions : Keeper_own_recent_actions.turn list
   }
 
 type keeper_cycle_channel =
@@ -165,6 +169,7 @@ type event_queue_trigger =
   | Completion_authority_rejection_stimulus
   | Task_cancellation_stimulus
   | Manual_compaction_stimulus
+  | Workspace_message_stimulus
 
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Mention_pending
@@ -176,6 +181,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Completion_authority_rejection_pending
   | Task_cancellation_pending
   | Manual_compaction_pending
+  | Workspace_message_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Task_backlog of
@@ -221,13 +227,14 @@ type board_signal_match = Board_signal.match_result =
   }
 
 module Message_scope = Keeper_world_observation_message_scope
-module Inputs = Keeper_world_observation_inputs
 
 let self_ids = Message_scope.self_ids
 let is_self_author = Message_scope.is_self_author
 
-let collect_message_scope = Message_scope.collect_message_scope
-let read_backlog_counts = Inputs.read_backlog_counts
+let collect_message_scope_and_fleet = Message_scope.collect_message_scope_and_fleet
+let read_backlog_snapshot = Inputs.read_backlog_snapshot
+
+let claimable_task_count observation = List.length observation.claimable_tasks
 let count_running_keeper_fibers = Inputs.count_running_keeper_fibers
 let compute_idle_seconds = Inputs.compute_idle_seconds
 let board_signal_match = Board_signal.match_signal
@@ -346,14 +353,31 @@ let schedule_query_failure_message = function
   | exn -> Printexc.to_string exn
 ;;
 
+(* Two keepers can be involved in one schedule: the one that created it and
+   the one the payload wakes. Filtering on [scheduled_by] alone showed it to
+   the first and hid it from the second, so a wake an operator scheduled was
+   invisible to every keeper while still being delivered to one of them
+   (#25689). Show it to both — this only adds rows. *)
 let schedule_visible_to_keeper keeper_name (request : Schedule_domain.schedule_request)
   =
   match keeper_name with
   | None -> true
   | Some keeper_name ->
-    (match request.scheduled_by.kind with
-     | Schedule_domain.Automated_actor -> String.equal request.scheduled_by.id keeper_name
-     | Schedule_domain.Human_operator | Schedule_domain.System -> false)
+    let scheduled_by_this_keeper =
+      match request.scheduled_by.kind with
+      | Schedule_domain.Automated_actor ->
+        String.equal request.scheduled_by.id keeper_name
+      | Schedule_domain.Human_operator | Schedule_domain.System -> false
+    in
+    let wakes_this_keeper =
+      match
+        Schedule_payload_projection.creation_keeper_wake_target
+          ~payload:(Schedule_domain.payload_to_yojson request.payload)
+      with
+      | Ok (Some target) -> String.equal target keeper_name
+      | Ok None | Error _ -> false
+    in
+    scheduled_by_this_keeper || wakes_this_keeper
 ;;
 
 let read_scheduled_automation_observation
@@ -421,6 +445,7 @@ let pending_board_event_kind_of_signal (signal : Board_dispatch.board_signal) =
   | Board_dispatch.Board_comment_added -> Board_comment_added
   | Board_dispatch.Board_reaction_changed reaction ->
     Board_reaction_changed (board_reaction_event_of_dispatch reaction)
+  | Board_dispatch.Board_vote_cast vote -> Board_vote_cast vote
 ;;
 
 let pending_board_event_of_board_signal
@@ -462,6 +487,9 @@ let pending_board_event_of_board_signal
          | Board_signal.Available `Never -> Ok (false, 0, None, None)
          | Board_signal.Available (`No_new_external | `New_external _) ->
            Ok (true, 0, None, None))
+      (* The vote row states who voted which way on what; the reply counters
+         belong to comment events, so none are derived here. *)
+      | Board_dispatch.Board_vote_cast _ -> Ok (false, 0, None, None)
     in
     (match comment_derived with
      | Error unavailable -> Error unavailable
@@ -530,6 +558,47 @@ let pending_board_event_of_fusion_completion
 ;;
 
 
+let delegate_reply_preview_max_len = 480
+
+(* The answer to a turn this Keeper asked another Keeper to run. It arrives as
+   a just-arrived board event for the same reason a Fusion result does: the
+   asker is mid-cycle and reads its pending events, not a request store. The
+   Keeper that ran the turn is named as the author so the row reads as an
+   answer from someone rather than a note this Keeper wrote to itself. *)
+let pending_board_event_of_delegate_completion
+      ~(arrived_at : float)
+      (dc : Keeper_event_queue.delegate_completion)
+  : pending_board_event
+  =
+  (* The row is already [event=... post_id=... author=... preview=...], so the
+     title states the outcome and nothing else: a sentence here would repeat
+     what the structured fields say, and model-facing prose belongs in the
+     config prompt files rather than in this module (RFC
+     prompts-and-tool-definitions-outside-ocaml). [Delegate_no_reply] has no
+     preview because there was no text; the outcome is the whole fact. *)
+  let outcome, message =
+    match dc.dc_terminal with
+    | Keeper_event_queue.Delegate_replied reply -> "replied", reply
+    | Keeper_event_queue.Delegate_no_reply -> "no_reply", ""
+    | Keeper_event_queue.Delegate_failed detail -> "failed", detail
+  in
+  { event_kind = Delegate_completed
+  ; post_id = Keeper_event_queue.delegate_completion_post_id dc
+  ; author = dc.dc_keeper
+  ; title = Printf.sprintf "%s %s" dc.dc_keeper outcome
+  ; preview = short_preview ~max_len:delegate_reply_preview_max_len message
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 0
+  ; latest_external_author = None
+  ; latest_external_preview = None
+  }
+;;
+
 let scheduled_automation_actor = "scheduled_automation"
 
 let pending_board_event_of_scheduled_wake
@@ -582,6 +651,7 @@ let pending_board_event_of_external_attention
   let surface_label = Surface_ref.lane_label item.conversation.surface in
   let urgency_label = Keeper_external_attention.urgency_to_string item.urgency in
   let actor = external_attention_actor_label item in
+  let counterpart = Keeper_counterpart_observation.of_external_attention item in
   let explicit_mention, matched_targets =
     match item.urgency with
     | Keeper_external_attention.Mention
@@ -591,7 +661,7 @@ let pending_board_event_of_external_attention
     | Keeper_external_attention.System ->
       false, []
   in
-  { event_kind = External_attention
+  { event_kind = External_attention counterpart
   ; post_id = "connector-attention:" ^ item.event_id
   ; author = actor
   ; title =
@@ -610,68 +680,6 @@ let pending_board_event_of_external_attention
   ; new_external_since = 1
   ; latest_external_author = Some actor
   ; latest_external_preview = Some (short_preview ~max_len:80 item.content_preview)
-  }
-;;
-
-(* RFC-0315 P3 W0: surface a fresh goal assignment as actionable turn input.
-   Author is the assigning actor (tool caller or "toml_reconcile"); the event
-   records the assignment context and the keeper decides what to do with it. *)
-let pending_board_event_of_goal_assignment
-      ~meta:(_ : keeper_meta)
-      ~(arrived_at : float)
-      (ga : Keeper_event_queue.goal_assignment)
-  : pending_board_event
-  =
-  let author = ga.ga_assigned_by in
-  { event_kind = Goal_assigned
-  ; post_id = Keeper_event_queue.goal_assignment_post_id ga
-  ; author
-  ; title = Printf.sprintf "Goal assigned: %s" ga.ga_goal_title
-  ; preview =
-      short_preview
-        ~max_len:fusion_result_preview_max_len
-        (Printf.sprintf
-           "Goal %s is now in your active goals (assigned by %s)."
-           ga.ga_goal_id
-           ga.ga_assigned_by)
-  ; hearth = None
-  ; post_kind = Board.System_post
-  ; updated_at = arrived_at
-  ; explicit_mention = false
-  ; matched_targets = []
-  ; self_commented = false
-  ; new_external_since = 1
-  ; latest_external_author = Some ga.ga_assigned_by
-  ; latest_external_preview = None
-  }
-;;
-
-let pending_board_event_of_goal_reconciliation_ready
-      ~meta
-      ~(arrived_at : float)
-      (ready : Keeper_event_queue.goal_reconciliation_ready)
-  : pending_board_event
-  =
-  { event_kind = Goal_reconciliation_ready
-  ; post_id = Keeper_event_queue.goal_reconciliation_ready_post_id ready
-  ; author = "masc"
-  ; title = Printf.sprintf "Goal reconciliation ready: %s" ready.gr_goal_id
-  ; preview =
-      short_preview
-        ~max_len:fusion_result_preview_max_len
-        (Printf.sprintf
-           "Task %s made every linked Task terminal for goal %s. Re-read Goal and Task SSOT before choosing completion, blocking, or follow-up work."
-           ready.gr_triggering_task_id
-           ready.gr_goal_id)
-  ; hearth = None
-  ; post_kind = Board.System_post
-  ; updated_at = arrived_at
-  ; explicit_mention = true
-  ; matched_targets = [ meta.name; ready.gr_goal_id ]
-  ; self_commented = false
-  ; new_external_since = 0
-  ; latest_external_author = None
-  ; latest_external_preview = None
   }
 ;;
 
@@ -779,20 +787,6 @@ let pending_board_event_of_stimulus
             ~post_id:stimulus.post_id
             ~arrived_at:stimulus.arrived_at
             sw))
-  | Keeper_event_queue.Goal_assigned ga ->
-    Ok
-      (Some
-         (pending_board_event_of_goal_assignment
-            ~meta
-            ~arrived_at:stimulus.arrived_at
-            ga))
-  | Keeper_event_queue.Goal_reconciliation_ready ready ->
-    Ok
-      (Some
-         (pending_board_event_of_goal_reconciliation_ready
-            ~meta
-            ~arrived_at:stimulus.arrived_at
-            ready))
   | Keeper_event_queue.Completion_authority_rejected rejection ->
     Ok
       (Some
@@ -805,14 +799,23 @@ let pending_board_event_of_stimulus
          (pending_board_event_of_task_cancellation
             ~arrived_at:stimulus.arrived_at
             cancellation))
+  | Keeper_event_queue.Delegate_completed dc ->
+    Ok
+      (Some
+         (pending_board_event_of_delegate_completion
+            ~arrived_at:stimulus.arrived_at
+            dc))
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
-  | Keeper_event_queue.Manual_compaction_requested ->
+  | Keeper_event_queue.Manual_compaction_requested
+  | Keeper_event_queue.Workspace_message _ ->
     (* RFC-connector-ambient-attention-wake P1: not a board event. The wake
        fires via the trigger itself; [Hitl_resolved] carries no observation to
        inject — the keeper resumes on its own state once the approval is gone
-       from the queue. *)
+       from the queue. [Workspace_message] carries a pointer to a transcript row
+       the message lane already reads, so injecting a board event here would
+       show the operator the same message twice. *)
     Ok None
 ;;
 
@@ -1003,7 +1006,23 @@ let collect_board_events_with_cursor_policy
                           ~base_path
                           candidate
                       with
-                      | Ok _ -> ()
+                      | Ok acceptance ->
+                        let persistence =
+                          match acceptance.persistence with
+                          | Keeper_board_attention_candidate.Candidate_recorded ->
+                            "recorded"
+                          | Keeper_board_attention_candidate.Candidate_already_present ->
+                            "duplicate"
+                        in
+                        Otel_metric_store.inc_counter
+                          Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
+                          ~labels:
+                            [ "keeper", meta.name
+                            ; "kind", "post_created"
+                            ; "audience", Board_audience.label audience
+                            ; "persistence", persistence
+                            ]
+                          ()
                       | Error detail ->
                         raise
                           (Keeper_board_attention_candidate.Candidate_unavailable
@@ -1148,26 +1167,12 @@ let collect_board_events_without_advancing_cursor
     ~meta
 ;;
 
-(* [meta.active_goal_ids] records which goals were assigned to this keeper. It
-   is not cleared when a goal reaches a terminal phase, and
-   [resolve_active_goal_ids] only checks that the id exists — so a Completed or
-   Dropped goal stays on the list indefinitely. The store's phase is the
-   authority on whether the goal is still work, and
-   [Goal_phase.admits_self_directed_progress] is the exhaustive predicate for
-   it. Filtering here keeps the observation honest for every reader, instead of
-   leaving each prompt surface to remember the question.
-
-   An id the store cannot resolve is kept: that is a different fault (an
-   assigned goal that no longer exists) and dropping it here would replace a
-   visible inconsistency with a silent one. *)
-let live_active_goal_ids ~(config : Workspace.config) (meta : keeper_meta) =
-  List.filter
-    (fun goal_id ->
-      match Goal_store.get_goal config ~goal_id with
-      | Some { Goal_store.phase; _ } ->
-        Goal_phase.admits_self_directed_progress phase
-      | None -> true)
-    meta.active_goal_ids
+(* Goals are shared intent: the store is the only record of which ones are
+   still open, so the observation reads it directly. *)
+let open_goal_ids ~(config : Workspace.config) =
+  Goal_store.list_goals config ()
+  |> List.filter_map (fun (g : Goal_store.goal) ->
+       if Goal_phase.admits_self_directed_progress g.phase then Some g.id else None)
 ;;
 
 let observe
@@ -1176,14 +1181,17 @@ let observe
       ~(meta : keeper_meta)
   : world_observation
   =
-  let pending_messages = collect_message_scope ~config ~meta in
-  let ( unclaimed_task_count
-      , claimable_task_count
-      , failed_task_count
-      , backlog_revision )
-    =
-    read_backlog_counts ~config ~meta
+  let pending_messages, fleet_messages =
+    collect_message_scope_and_fleet
+      ~config
+      ~meta
+      ~fleet_limit:(Keeper_config.keeper_fleet_messages_max ())
   in
+  let backlog_snapshot = read_backlog_snapshot ~config ~meta in
+  let unclaimed_task_count = backlog_snapshot.unclaimed_count in
+  let claimable_tasks = backlog_snapshot.claimable_tasks in
+  let failed_task_count = backlog_snapshot.failed_count in
+  let backlog_revision = backlog_snapshot.revision in
   let running_keeper_fiber_count = count_running_keeper_fibers ~config in
   let idle_seconds = compute_idle_seconds ~meta in
   let scheduled_automation =
@@ -1207,9 +1215,9 @@ let observe
   { pending_messages
   ; pending_board_events
   ; idle_seconds
-  ; active_goals = live_active_goal_ids ~config meta
+  ; active_goals = open_goal_ids ~config
   ; unclaimed_task_count
-  ; claimable_task_count
+  ; claimable_tasks
   ; failed_task_count
   ; scheduled_automation
   ; backlog_revision
@@ -1217,19 +1225,22 @@ let observe
   ; connected_surfaces = surface_presence.surfaces
   ; connected_surface_failures = surface_presence.failures
   ; own_recent_board_posts = collect_own_recent_board_posts ~meta
+  ; fleet_messages
+  ; own_recent_actions =
+      Keeper_own_recent_actions.collect
+        ~keeper_name:meta.name
+        ~max_turns:(Keeper_config.keeper_own_recent_turns_max ())
   }
 ;;
 
 let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   : world_observation
   =
-  let ( unclaimed_task_count
-      , claimable_task_count
-      , failed_task_count
-      , backlog_revision )
-    =
-    read_backlog_counts ~config ~meta
-  in
+  let backlog_snapshot = read_backlog_snapshot ~config ~meta in
+  let unclaimed_task_count = backlog_snapshot.unclaimed_count in
+  let claimable_tasks = backlog_snapshot.claimable_tasks in
+  let failed_task_count = backlog_snapshot.failed_count in
+  let backlog_revision = backlog_snapshot.revision in
   let scheduled_automation =
     read_scheduled_automation_observation
       ~keeper_name:(Some meta.name)
@@ -1242,9 +1253,9 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   { pending_messages = []
   ; pending_board_events = []
   ; idle_seconds = compute_idle_seconds ~meta
-  ; active_goals = live_active_goal_ids ~config meta
+  ; active_goals = open_goal_ids ~config
   ; unclaimed_task_count
-  ; claimable_task_count
+  ; claimable_tasks
   ; failed_task_count
   ; scheduled_automation
   ; backlog_revision
@@ -1252,6 +1263,14 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; connected_surfaces = surface_presence.surfaces
   ; connected_surface_failures = surface_presence.failures
   ; own_recent_board_posts = collect_own_recent_board_posts ~meta
+    (* No fleet layer here. This path answers a direct keeper message and
+       empties the reactive lanes because the triggering message is the point,
+       and collecting fleet rows would mean a full transcript read
+       ([Keeper_chat_store.load_all], 1.8 MB in production) on a path that
+       performs no transcript I/O at all. The keeper sees fleet context on its
+       next [observe] turn, where the same load already happens. *)
+  ; fleet_messages = []
+  ; own_recent_actions = []
   }
 ;;
 
@@ -1268,7 +1287,7 @@ let failed_drives_wake failed_task_count = failed_task_count > 0
 let actionable_signal_present (observation : world_observation) =
   observation.pending_messages <> []
   || observation.pending_board_events <> []
-  || claimable_drives_wake observation.claimable_task_count
+  || claimable_drives_wake (claimable_task_count observation)
   || failed_drives_wake observation.failed_task_count
   || observation.scheduled_automation.due_ready_count > 0
 ;;
@@ -1304,9 +1323,33 @@ let keeper_cycle_decision
   let proactive_gate_enabled =
     Keeper_lifecycle_gate_env.enabled Keeper_lifecycle_gate.Proactive meta
   in
-  let event_queue_reactive_triggers =
+  (* A scheduler wake delivered through the event queue is a scheduled
+     stimulus, not a reactive one. Routing it through the reactive trigger
+     list ran the turn with [channel = Reactive], which applied the
+     reactive prompt/sleep semantics and dropped the wake from every
+     [channel = Scheduled_autonomous] reader (proactive evidence, decision
+     log proof). The due signal joins the scheduled-autonomous decision
+     below instead; a wake that coincides with a real reactive trigger
+     still attributes to that trigger. *)
+  let scheduled_due_from_queue, event_queue_reactive_triggers =
     List.map turn_reason_of_event_queue_trigger event_queue_triggers
+    |> List.partition (function
+      | Scheduled_automation_due -> true
+      | Mention_pending
+      | Board_event_pending
+      | Scope_message_pending
+      | Bootstrap_stimulus_pending
+      | Connector_attention_pending
+      | Hitl_resolved_pending
+      | Completion_authority_rejection_pending
+      | Task_cancellation_pending
+      | Manual_compaction_pending
+      | Workspace_message_pending
+      | Scheduled_autonomous_turn
+      | Task_backlog _
+      | Never_started -> false)
   in
+  let scheduled_due_from_queue = scheduled_due_from_queue <> [] in
   let manual_compaction_control =
     List.mem Manual_compaction_stimulus event_queue_triggers
   in
@@ -1335,6 +1378,7 @@ let keeper_cycle_decision
                  | Hitl_resolved_pending
                  | Task_cancellation_pending
                  | Manual_compaction_pending
+                 | Workspace_message_pending
                  | Scheduled_autonomous_turn
                  | Scheduled_automation_due
                  | Task_backlog _
@@ -1393,11 +1437,12 @@ let keeper_cycle_decision
            idle time, and previous-turn age remain observations for the model;
            fixed local thresholds never suppress a Keeper cycle. *)
         let has_actionable_tasks =
-          claimable_drives_wake observation.claimable_task_count
+          claimable_drives_wake (claimable_task_count observation)
           || failed_drives_wake observation.failed_task_count
         in
         let has_actionable_schedule =
           observation.scheduled_automation.due_ready_count > 0
+          || scheduled_due_from_queue
         in
         let is_bootstrap = since_last_scheduled_autonomous = max_int in
         let run_reasons =
@@ -1406,7 +1451,7 @@ let keeper_cycle_decision
              then
                Some
                  (Task_backlog
-                    { unclaimed = observation.claimable_task_count
+                    { unclaimed = claimable_task_count observation
                     ; failed = observation.failed_task_count
                     })
              else None)
@@ -1447,6 +1492,3 @@ let keeper_cycle_decision
         })
 ;;
 
-let should_run_keeper_cycle ~(meta : keeper_meta) (observation : world_observation) =
-  (keeper_cycle_decision ~meta observation).should_run
-;;

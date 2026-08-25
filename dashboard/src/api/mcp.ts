@@ -17,7 +17,10 @@ import {
   refreshDevTokenAfterAuthError,
   resetDevTokenBootstrap,
 } from './dev-token'
-import { reportToolHostFailure } from './tool-host-failure'
+import {
+  reportToolHostFailure,
+  type ToolHostFailureCauseCode,
+} from './tool-host-failure'
 import { showActionToast } from '../components/common/toast'
 import { errorToString } from '../lib/format-string'
 
@@ -37,6 +40,7 @@ async function bestEffortReportToolHostFailure(payload: {
   toolName: string
   message: string
   phase: string
+  causeCode: ToolHostFailureCauseCode
   requestId?: string
   timeoutMs?: number
 }) {
@@ -46,6 +50,7 @@ async function bestEffortReportToolHostFailure(payload: {
       tool_name: payload.toolName,
       transport: 'mcp_http',
       phase: payload.phase,
+      cause_code: payload.causeCode,
       message: payload.message,
       request_id: payload.requestId,
       timeout_ms: payload.timeoutMs,
@@ -55,16 +60,18 @@ async function bestEffortReportToolHostFailure(payload: {
   }
 }
 
-function shouldReportToolHostFailure(message: string): boolean {
-  const normalized = message.toLowerCase()
-  return (
-    normalized.includes('timeout after')
-    || normalized.includes('timed out awaiting tools/call')
-    || normalized.includes('failed to fetch')
-    || normalized.includes('networkerror')
-    || normalized.includes('load failed')
-    || normalized.includes('error decoding response body')
-  )
+type ToolHostFailureObservation =
+  | { causeCode: 'tool_host_timeout'; timeoutMs: number }
+  | { causeCode: 'tool_host_transport_unavailable'; timeoutMs?: never }
+
+function toolHostFailureObservation(err: unknown): ToolHostFailureObservation | null {
+  if (err instanceof ApiRequestError && err.timeout) {
+    return { causeCode: 'tool_host_timeout', timeoutMs: DEFAULT_MCP_TIMEOUT_MS }
+  }
+  if (err instanceof TypeError) {
+    return { causeCode: 'tool_host_transport_unavailable' }
+  }
+  return null
 }
 
 function explicitToolActor(args: Record<string, unknown>): string | null {
@@ -231,17 +238,58 @@ interface McpCallResponse {
     isError?: boolean
     structuredContent?: unknown
   }
-  error?: { message?: string }
+  error?: { message?: string; code?: number }
+}
+
+class McpProtocolError extends Error {
+  readonly code: number | null
+
+  constructor(message: string, code: number | null) {
+    super(message)
+    this.name = 'McpProtocolError'
+    this.code = code
+  }
 }
 
 class McpToolCallError extends Error {
   readonly authErrorCode: unknown
+  readonly structuredContent: unknown
 
-  constructor(message: string, authErrorCode: unknown) {
+  constructor(message: string, authErrorCode: unknown, structuredContent: unknown) {
     super(message)
     this.name = 'McpToolCallError'
     this.authErrorCode = authErrorCode
+    this.structuredContent = structuredContent
   }
+}
+
+export function mcpStructuredContentFromError(error: unknown): unknown {
+  return error instanceof McpToolCallError ? error.structuredContent : null
+}
+
+export type McpCallFailureDisposition =
+  | 'known_tool_response'
+  | 'known_pre_effect'
+  | 'outcome_unknown'
+
+export function mcpCallFailureDisposition(error: unknown): McpCallFailureDisposition {
+  if (error instanceof McpToolCallError) return 'known_tool_response'
+  if (error instanceof McpProtocolError && error.code === -32001) {
+    return 'known_pre_effect'
+  }
+  if (
+    error instanceof ApiRequestError
+    && !error.timeout
+    && error.status !== undefined
+    && error.status >= 400
+    && error.status < 500
+  ) {
+    return 'known_pre_effect'
+  }
+  if (error instanceof Error && error.message === MCP_BLOCKED_MESSAGE) {
+    return 'known_pre_effect'
+  }
+  return 'outcome_unknown'
 }
 
 function structuredAuthErrorCode(value: unknown): unknown {
@@ -256,12 +304,18 @@ function parseMcpHttpResponse(raw: string): McpCallResponse {
 }
 
 function extractMcpText(res: McpCallResponse): string {
-  if (res.error?.message) throw new Error(res.error.message)
+  if (res.error?.message) {
+    throw new McpProtocolError(
+      res.error.message,
+      typeof res.error.code === 'number' ? res.error.code : null,
+    )
+  }
   if (res.result?.isError) {
     const err = res.result.content?.[0]?.text ?? 'MCP tool call failed'
     throw new McpToolCallError(
       err,
       structuredAuthErrorCode(res.result.structuredContent),
+      res.result.structuredContent,
     )
   }
   return res.result?.content?.[0]?.text ?? ''
@@ -274,14 +328,26 @@ async function callMcpToolInternal(
 ): Promise<string> {
   const requestId = randomUuid()
   synchronizeMcpAuthRevision()
-  const explicitActor = explicitToolActor(args)
+  let explicitActor: string | null = null
   try {
     const binding = await ensureBinding()
+    // ensureBinding may install the loopback dev credential, so classify
+    // identity authority only after it returns. Never let a caller-supplied
+    // transport hint override the credential used by this request.
+    const hasBearer = getStoredToken() !== null
+    explicitActor = hasBearer ? null : explicitToolActor(args)
     const actor = explicitActor ?? implicitToolActor()
-    const toolArgs =
-      explicitActor == null && actor
+    const toolArgs = (() => {
+      if (hasBearer) {
+        const { _agent_name: _untrustedActor, ...credentialBoundArgs } = args
+        return actor
+          ? { ...credentialBoundArgs, _agent_name: actor }
+          : credentialBoundArgs
+      }
+      return explicitActor == null && actor
         ? { ...args, _agent_name: actor }
         : args
+    })()
     const text = await mcpPost({
       jsonrpc: '2.0',
       method: 'tools/call',
@@ -308,13 +374,15 @@ async function callMcpToolInternal(
       return callMcpToolInternal(toolName, args, false)
     }
     const message = errorToString(err)
-    if (shouldReportToolHostFailure(message)) {
+    const failure = toolHostFailureObservation(err)
+    if (failure) {
       await bestEffortReportToolHostFailure({
         toolName,
         message,
         phase: 'tools/call',
+        causeCode: failure.causeCode,
         requestId,
-        timeoutMs: DEFAULT_MCP_TIMEOUT_MS,
+        timeoutMs: failure.timeoutMs,
       })
     }
     throw err
@@ -358,7 +426,11 @@ async function listMcpTools(cursor?: string): Promise<McpToolsListResult> {
     jsonrpc: '2.0',
     method: 'tools/list',
     params: cursor ? { cursor } : {},
-    id: Date.now(),
+    // A uuid, like every other request in this file. `Date.now()` gave two
+    // calls in the same millisecond the same JSON-RPC id, and repeated the
+    // whole value space roughly every 16m40s once it was taken modulo a
+    // million.
+    id: randomUuid(),
   }, binding)
   const parsed = parseMcpListResponse(text)
   if (parsed.error) {
@@ -371,10 +443,19 @@ async function listMcpTools(cursor?: string): Promise<McpToolsListResult> {
   return parsed.result
 }
 
-const MAX_TOOL_LIST_PAGES = 50
+/* Pagination ends when the server stops handing back a cursor. The failure
+   worth guarding is a server that never stops -- one that returns the same
+   cursor forever, or cycles through a set of them -- and the answer to that is
+   progress, not a page budget.
 
+   A fixed cap answered a different question. It refused a server that
+   legitimately had more pages than the number someone picked, and it let a
+   non-progressing server run for that many round trips before saying anything.
+   Seen cursors decide it directly: a cursor that repeats means the server has
+   not advanced, and that is the error. */
 export async function listAllMcpTools(): Promise<McpToolsListResult['tools']> {
   const all: McpToolsListResult['tools'] = []
+  const seenCursors = new Set<string>()
   let cursor: string | undefined
   let pages = 0
   do {
@@ -382,10 +463,13 @@ export async function listAllMcpTools(): Promise<McpToolsListResult['tools']> {
     all.push(...page.tools)
     cursor = page.nextCursor
     pages++
-    if (pages >= MAX_TOOL_LIST_PAGES && cursor) {
-      throw new Error(
-        `tools/list: reached maximum pagination limit of ${MAX_TOOL_LIST_PAGES} pages while server indicated more pages (pagesFetched=${pages}, toolsCollected=${all.length}, lastCursor=${cursor})`
-      )
+    if (cursor !== undefined) {
+      if (seenCursors.has(cursor)) {
+        throw new Error(
+          `tools/list: server repeated cursor ${cursor} after ${pages} page(s), so pagination is not advancing (toolsCollected=${all.length})`
+        )
+      }
+      seenCursors.add(cursor)
     }
   } while (cursor)
   return all

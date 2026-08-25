@@ -29,14 +29,22 @@ val missing_sidecar_dir_message :
   ?project_root:string -> base_path:string -> string -> string
 
 val today_yyyymmdd : unit -> string
-val legacy_status_rel : string -> string
 
 type sidecar_status_config =
   { env_names : string list
   ; toml_keys : string list
+  ; stale_after_env_name : string
   }
 
 val sidecar_status_config : string -> sidecar_status_config
+
+val default_status_stale_sec : int
+
+val status_stale_sec : string -> int
+(** Age at which a sidecar's heartbeat stops counting as alive, read from
+    the connector's [MASC_*_STATUS_STALE_SEC] variable — the same window the
+    gate state modules apply when rendering "stale". Raises on an id outside
+    {!known_ids}, like {!sidecar_status_config}. *)
 val read_file : string -> string
 val strip_matching_quotes : string -> string
 val parse_env_assignment : string -> (string * string) option

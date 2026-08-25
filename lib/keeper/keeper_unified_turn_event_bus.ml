@@ -1,7 +1,7 @@
-(** Turn-scoped OAS event-bus state for [Keeper_unified_turn].
+(** Turn-scoped agent-core event-bus state for [Keeper_unified_turn].
 
     Concurrency model: each keeper turn creates one [t]. The event-bus subscriber
-    ([Agent_sdk_metrics_bridge]) pushes events from the agent-sdk event domain,
+    ([Runtime_event_bus]) pushes events from the in-process agent-core domain,
     which runs on its own Eio domain/fiber. The turn executes on a different
     domain/fiber. Therefore reads and writes of shared state ([state],
     [drain_cancel]) can interleave across domains, justifying [Atomic.t] + CAS
@@ -30,8 +30,8 @@ type drain_cancel_state =
 type event_bus_subscription =
   | No_event_bus
   | Subscribed of
-      { event_bus : Agent_sdk.Event_bus.t
-      ; event_bus_sub : Agent_sdk_metrics_bridge.handle
+      { event_bus : Agent_core.Event_bus.t
+      ; event_bus_sub : Runtime_event_bus.handle
       }
 
 type t =
@@ -55,11 +55,11 @@ let create ?event_bus ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~tur
       Subscribed
         { event_bus
         ; event_bus_sub =
-            Agent_sdk_metrics_bridge.subscribe
+            Runtime_event_bus.subscribe
               ~capacity:256
-              ~overflow:Agent_sdk.Event_bus.Drop_oldest
+              ~overflow:Agent_core.Event_bus.Drop_oldest
               ~purpose:"keeper_turn"
-              ~filter:(Agent_sdk.Event_bus.filter_agent keeper_name)
+              ~filter:(Agent_core.Event_bus.filter_agent keeper_name)
               event_bus
         }
     | None -> No_event_bus
@@ -90,13 +90,13 @@ let record_fsm_tool_transitions ~keeper_name ~turn_id old_count events =
   let count = ref old_count in
   let transitions = ref [] in
   List.iter
-    (fun (evt : Agent_sdk.Event_bus.event) ->
+    (fun (evt : Agent_core.Event_bus.event) ->
        match evt.payload with
-       | Agent_sdk.Event_bus.ToolCalled _ ->
+       | Agent_core.Event_bus.ToolCalled _ ->
          let prev = !count in
          count := prev + 1;
          if prev = 0 then transitions := Enter_awaiting :: !transitions
-       | Agent_sdk.Event_bus.ToolCompleted _ ->
+       | Agent_core.Event_bus.ToolCompleted _ ->
          let prev = !count in
          if prev > 0
          then (
@@ -150,7 +150,7 @@ let emit_fsm_transition ~keeper_name ~turn_id ~pending_count transition =
 let drain ?(site = "unspecified") t =
   let events =
     match Atomic.get t.event_bus_subscription with
-    | Subscribed { event_bus_sub; _ } -> Agent_sdk_metrics_bridge.drain event_bus_sub
+    | Subscribed { event_bus_sub; _ } -> Runtime_event_bus.drain event_bus_sub
     | No_event_bus -> []
   in
   let outcome = if events = [] then "empty" else "drained" in
@@ -299,7 +299,7 @@ let unsubscribe t =
   ignore (drain ~site:"unsubscribe_final" t);
   (match Atomic.exchange t.event_bus_subscription No_event_bus with
   | Subscribed { event_bus; event_bus_sub } ->
-    Agent_sdk_metrics_bridge.unsubscribe event_bus event_bus_sub
+    Runtime_event_bus.unsubscribe event_bus event_bus_sub
   | No_event_bus -> ())
 ;;
 

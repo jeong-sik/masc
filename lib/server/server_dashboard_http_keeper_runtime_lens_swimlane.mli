@@ -9,18 +9,10 @@ type runtime_lens_gap =
 
 val runtime_lens_gap_json : runtime_lens_gap -> Yojson.Safe.t
 
-val runtime_lens_gap_codes_for_lane :
-  runtime_lens_gap list -> string -> string list
-
 val runtime_lens_event_count :
   Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan ->
   Keeper_runtime_manifest.event_kind ->
   int
-
-val runtime_lens_events_json :
-  Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan ->
-  Keeper_runtime_manifest.event_kind list ->
-  Yojson.Safe.t
 
 val runtime_lens_swimlane_json :
   Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan ->
@@ -51,11 +43,3 @@ type lane_policy =
 
 val lane_policies : lane_policy list
 val event_lane : Keeper_runtime_manifest.event_kind -> string
-val lane_mandatory_event_codes : string -> string list
-val lane_terminal_event_codes : string -> string list
-val lane_mandatory_events_present :
-  Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan -> string -> bool
-val lane_terminal_event_present :
-  Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan -> string -> bool
-val runtime_lens_swimlane_completeness :
-  Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan -> string -> string

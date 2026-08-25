@@ -6,6 +6,20 @@ type state =
   | Not_started
   | Running of { container_name : string }
 
+type github_identity_snapshot =
+  { args : string list
+  ; host_dir : string
+  ; revision : string
+  ; cleanup : unit -> unit
+  }
+
+type github_identity_snapshots =
+  { current : github_identity_snapshot option
+  ; retired : github_identity_snapshot list
+  }
+
+let no_github_identity_snapshots = { current = None; retired = [] }
+
 type t =
   { config : Workspace.config
   ; meta : keeper_meta
@@ -17,10 +31,34 @@ type t =
   ; gid : int
   ; network_mode : network_mode
   ; state : state Atomic.t
+  ; github_identity_snapshots : github_identity_snapshots Atomic.t
   }
 
 let get_state t = Atomic.get t.state
 let set_state t state = Atomic.set t.state state
+
+let rec update_github_identity_snapshots t update =
+  let current = Atomic.get t.github_identity_snapshots in
+  let updated = update current in
+  if not (Atomic.compare_and_set t.github_identity_snapshots current updated)
+  then update_github_identity_snapshots t update
+;;
+
+let release_github_identity_snapshot t =
+  let snapshots = Atomic.exchange t.github_identity_snapshots no_github_identity_snapshots in
+  Option.iter (fun snapshot -> snapshot.cleanup ()) snapshots.current;
+  List.iter (fun snapshot -> snapshot.cleanup ()) snapshots.retired
+;;
+
+let github_identity_secret_files t =
+  let snapshots = Atomic.get t.github_identity_snapshots in
+  let snapshots =
+    match snapshots.current with
+    | None -> snapshots.retired
+    | Some current -> current :: snapshots.retired
+  in
+  List.map (fun snapshot -> Filename.concat snapshot.host_dir "hosts.yml") snapshots
+;;
 
 module For_testing = struct
   let create_minimal ~config ~meta ~state =
@@ -34,6 +72,7 @@ module For_testing = struct
     ; gid = 0
     ; network_mode = Network_none
     ; state = Atomic.make state
+    ; github_identity_snapshots = Atomic.make no_github_identity_snapshots
     }
   ;;
 
@@ -68,6 +107,7 @@ let create
   ; gid = Unix.getgid ()
   ; network_mode
   ; state = Atomic.make Not_started
+  ; github_identity_snapshots = Atomic.make no_github_identity_snapshots
   }
 ;;
 
@@ -115,39 +155,58 @@ let container_path_of_host (t : t) ~host_path =
          t.host_root)
 ;;
 
-let repos_in_playground host_root =
-  let repos_dir = Filename.concat host_root "repos" in
-  if not (Sys.file_exists repos_dir && Sys.is_directory repos_dir)
-  then []
-  else (
-    try
-      Sys.readdir repos_dir
-      |> Array.to_list
-      |> List.filter (fun name ->
-        let p = Filename.concat repos_dir name in
-        try Sys.is_directory p && Sys.file_exists (Filename.concat p ".git") with
-        | Sys_error _ -> false)
-      |> List.sort compare
-    with
-    | Sys_error _ -> [])
+(* Previously listed [<host_root>/repos/*] and swallowed every failure into an
+   empty list, which made "no checkout", "no repos directory" and "could not
+   read" indistinguishable. A cwd that cannot be mapped is silently redirected
+   to the container root, so the reason has to reach the log. *)
+let discovered_checkouts (t : t) =
+  match Keeper_playground_checkouts.discover ~root:t.host_root with
+  | Ok (Keeper_playground_checkouts.Complete checkouts) -> checkouts
+  | Ok (Keeper_playground_checkouts.Partial { found; limit }) ->
+    Log.Keeper.warn
+      "playground checkout scan incomplete keeper=%s root=%s limit=%s"
+      t.meta.name
+      t.host_root
+      (Keeper_playground_checkouts.limit_to_string limit);
+    found
+  | Error error ->
+    Log.Keeper.warn
+      "playground checkout scan failed keeper=%s root=%s error=%s"
+      t.meta.name
+      t.host_root
+      (Keeper_playground_checkouts.scan_error_to_string error);
+    []
+;;
 
-let rec skip_worktree_prefix = function
+let skip_worktree_prefix = function
   | ".worktrees" :: _branch :: rest -> rest
   | "./.worktrees" :: _branch :: rest -> rest
   | other -> other
 
-let find_repo_segment_and_suffix ~repos ~host_cwd =
-  let segments = String.split_on_char '/' host_cwd in
-  let rec find_suffix = function
-    | [] -> None
+type cwd_match =
+  | Matched of Keeper_playground_checkouts.checkout * string
+  | Ambiguous_segment of string * Keeper_playground_checkouts.checkout list
+  | No_match
+
+(* Once the layout is free, two checkouts can share a basename (a keeper
+   holding both [repos/masc] and [.masc/repos/masc]). The previous [List.mem]
+   answered such a case by sort order, i.e. arbitrarily. *)
+let find_checkout_and_suffix ~checkouts ~host_cwd =
+  let rec find = function
+    | [] -> No_match
     | head :: tail ->
-      if List.mem head repos then
-        let effective_tail = skip_worktree_prefix tail in
-        Some (head, String.concat "/" effective_tail)
-      else
-        find_suffix tail
+      (match
+         List.filter
+           (fun (c : Keeper_playground_checkouts.checkout) ->
+              String.equal c.name head)
+           checkouts
+       with
+       | [ checkout ] ->
+         Matched (checkout, String.concat "/" (skip_worktree_prefix tail))
+       | [] -> find tail
+       | many -> Ambiguous_segment (head, many))
   in
-  find_suffix segments
+  find (String.split_on_char '/' host_cwd)
 
 let container_cwd_of_host (t : t) ~host_cwd =
   match container_path_of_host t ~host_path:host_cwd with
@@ -157,14 +216,28 @@ let container_cwd_of_host (t : t) ~host_cwd =
             ~container_root:t.container_root ~host_cwd with
     | Some cwd -> cwd
     | None ->
-      let repos = repos_in_playground t.host_root in
-      (match find_repo_segment_and_suffix ~repos ~host_cwd with
-       | Some (repo_name, suffix) ->
-         let logical_path =
-           Filename.concat (Filename.concat "repos" repo_name) suffix
-         in
-         Filename.concat t.container_root logical_path
-       | None -> t.container_root)
+      let checkouts = discovered_checkouts t in
+      (match find_checkout_and_suffix ~checkouts ~host_cwd with
+       | Matched (checkout, suffix) ->
+         Filename.concat
+           t.container_root
+           (Keeper_playground_checkouts.join checkout ~suffix)
+       | Ambiguous_segment (segment, many) ->
+         (* Falling back to the container root is still the answer — there is
+            no better one — but which of the candidates was meant is now
+            recorded instead of decided by sort order. *)
+         Log.Keeper.warn
+           "playground cwd segment matches multiple checkouts keeper=%s segment=%s \
+            paths=%s"
+           t.meta.name
+           segment
+           (String.concat
+              ","
+              (List.map
+                 (fun (c : Keeper_playground_checkouts.checkout) -> c.relative_path)
+                 many));
+         t.container_root
+       | No_match -> t.container_root)
 ;;
 
 let format_docker_exec_error ~head_program ~st ~out =
@@ -371,6 +444,46 @@ let start_container ?timeout_sec (t : t) =
         with
         | Error err -> Error ("docker_container_start_failed: secret_projection: " ^ err)
         | Ok secret_projection ->
+         let github_identity_result =
+           match (Atomic.get t.github_identity_snapshots).current with
+          | Some snapshot -> Ok (snapshot, false)
+          | None ->
+            (match
+               Keeper_github_identity.docker_args_for_tool
+                 ~config:t.config
+                 ~keeper_name:t.meta.name
+                 ~container_masc_dir:
+                   (Keeper_sandbox_runtime_setup.container_masc_dir
+                      ~container_root:t.container_root)
+             with
+             | Error _ as error -> error
+             | Ok projection ->
+               Ok
+                 ( { args = projection.args
+                   ; host_dir = projection.host_snapshot_dir
+                   ; revision = projection.revision
+                   ; cleanup = projection.cleanup
+                   }
+                 , true ))
+         in
+         (match github_identity_result with
+          | Error err ->
+            Eio_guard.protect
+              ~finally:secret_projection.cleanup
+              (fun () ->
+                 Error
+                   ("docker_container_start_failed: github_identity_invalid: "
+                    ^ err))
+          | Ok (github_identity, github_identity_is_new) ->
+         let keep_github_identity_snapshot = ref false in
+         Eio_guard.protect
+           ~finally:(fun () ->
+             Fun.protect
+               ~finally:secret_projection.cleanup
+               (fun () ->
+                 if github_identity_is_new && not !keep_github_identity_snapshot
+                 then github_identity.cleanup ()))
+           (fun () ->
          let argv =
            Keeper_sandbox_runtime.docker_command_argv ()
            @ [ "run"; "-d"; "--rm"; "--name"; container_name ]
@@ -411,15 +524,12 @@ let start_container ?timeout_sec (t : t) =
                ~base_path:t.config.base_path
                ~container_root:t.container_root
            @ secret_projection.docker_args
+           @ github_identity.args
            @ identity_mounts
            @ network_args
            @ [ image; "tail"; "-f"; "/dev/null" ]
          in
-         let st, out =
-           Eio_guard.protect
-             ~finally:secret_projection.cleanup
-             (fun () -> run_argv_with_status ?timeout_sec argv)
-         in
+         let st, out = run_argv_with_status ?timeout_sec argv in
          (match st with
          | Unix.WEXITED 0 ->
             (match
@@ -428,6 +538,11 @@ let start_container ?timeout_sec (t : t) =
                  container_name
              with
              | Ok () ->
+               if github_identity_is_new
+               then
+                 update_github_identity_snapshots t (fun snapshots ->
+                   { snapshots with current = Some github_identity });
+               keep_github_identity_snapshot := true;
                set_state t (Running { container_name });
                Ok container_name
              | Error inspect_out ->
@@ -471,7 +586,7 @@ let start_container ?timeout_sec (t : t) =
               (Printf.sprintf
                  "docker_container_start_failed: %s%s"
                  (Keeper_sandbox_runtime.docker_failure_output_for_log out)
-                 mount_context)))))
+                 mount_context)))))))
 ;;
 
 let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
@@ -488,6 +603,80 @@ let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
         set_state t Not_started;
         start_container ?timeout_sec t)
   | Not_started -> start_container ?timeout_sec t
+;;
+
+let retire_current_github_identity_snapshot t =
+  update_github_identity_snapshots t (fun snapshots ->
+    match snapshots.current with
+    | None -> snapshots
+    | Some current ->
+      { current = None; retired = current :: snapshots.retired })
+;;
+
+let stop_container_for_github_identity_refresh ?timeout_sec t =
+  let retire () =
+    set_state t Not_started;
+    retire_current_github_identity_snapshot t;
+    Ok ()
+  in
+  match get_state t with
+  | Not_started -> retire ()
+  | Running { container_name } ->
+    let timeout_sec =
+      Option.value
+        timeout_sec
+        ~default:
+          (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ())
+    in
+    let argv =
+      Keeper_sandbox_runtime.docker_command_argv () @ [ "rm"; "-f"; container_name ]
+    in
+    let status, output = run_argv_with_status ~timeout_sec argv in
+    (match status with
+     | Unix.WEXITED 0 -> retire ()
+     | _ ->
+       (match
+          Keeper_sandbox_runtime.probe_container_state_optional
+            ~container_name
+            ~timeout_sec
+            ()
+        with
+        | Ok Keeper_sandbox_runtime.Docker_container_absent -> retire ()
+        | Ok Keeper_sandbox_runtime.Docker_container_running
+        | Ok Keeper_sandbox_runtime.Docker_container_stopped
+        | Error _ ->
+          Error
+            (Printf.sprintf
+               "cannot refresh GitHub identity while turn container %s remains: status=%s output=%s"
+               container_name
+               (Keeper_sandbox_exec_failure.status_label status)
+               (Exec_policy.truncate_for_log output))))
+;;
+
+let prepare_github_identity_secret_files ?timeout_sec t =
+  let ensure_bound () =
+    match ensure_started ?timeout_sec t with
+    | Error _ as error -> error
+    | Ok _container_name ->
+      (match (Atomic.get t.github_identity_snapshots).current with
+       | None -> Error "running container has no GitHub identity snapshot"
+       | Some _ -> Ok (github_identity_secret_files t))
+  in
+  match
+    Keeper_github_identity.current_tool_identity_revision
+      ~config:t.config
+      ~keeper_name:t.meta.name
+  with
+  | Error _ as error -> error
+  | Ok central_revision ->
+    (match (Atomic.get t.github_identity_snapshots).current with
+     | None -> ensure_bound ()
+     | Some snapshot when String.equal snapshot.revision central_revision ->
+       ensure_bound ()
+     | Some _ ->
+       (match stop_container_for_github_identity_refresh ?timeout_sec t with
+        | Error _ as error -> error
+        | Ok () -> ensure_bound ()))
 ;;
 
 let run_exec_with_status_split_once
@@ -686,18 +875,19 @@ let run_exec_pipeline_with_status_once
           let cwd = Option.value stage_cwd ~default:cwd in
           let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
           let argv = docker_exec_pipeline_argv t ~container_name ~container_cwd command_argv in
-          { Process_eio.argv
-          ; env = Some (sandbox_environment ())
-          ; cwd = Some (Config_dir_resolver.current_working_dir ())
-          })
+          Process_eio.plumbed_stage
+            ~argv
+            ~env:(Some (sandbox_environment ()))
+            ~cwd:(Some (Config_dir_resolver.current_working_dir ())))
         stages
     in
-    Ok
-      (run_argv_pipeline_with_status_split
-         ?timeout_sec
-         ?on_stdout_chunk
-         ?on_stderr_chunk
-         process_stages)
+    (* These stages carry no file redirect, so the runner's redirect error is
+       out of reach here; it is passed on rather than folded into a status. *)
+    run_argv_pipeline_with_status_split
+      ?timeout_sec
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      process_stages
 ;;
 
 let run_exec_pipeline_with_status ?on_stdout_chunk ?on_stderr_chunk ?timeout_sec
@@ -827,6 +1017,9 @@ let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
 ;;
 
 let cleanup (t : t) =
+  Fun.protect
+    ~finally:(fun () -> release_github_identity_snapshot t)
+    (fun () ->
   match get_state t with
   | Not_started -> ()
   | Running { container_name } ->
@@ -919,5 +1112,5 @@ let cleanup (t : t) =
             Log.Keeper.info
               "%s: docker rm -f %s reported failure but container is gone"
               t.meta.name
-              container_name))
+              container_name)))
 ;;

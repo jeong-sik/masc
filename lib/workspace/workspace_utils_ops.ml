@@ -30,37 +30,7 @@ let validate_file_path path =
 (* Sanitization helpers                         *)
 (* ============================================ *)
 
-let sanitize_html str =
-  let buf = Buffer.create (String.length str) in
-  String.iter (fun c ->
-    match c with
-    | '<' -> Buffer.add_string buf "&lt;"
-    | '>' -> Buffer.add_string buf "&gt;"
-    | '&' -> Buffer.add_string buf "&amp;"
-    | '"' -> Buffer.add_string buf "&quot;"
-    | '\'' -> Buffer.add_string buf "&#x27;"
-    | _ -> Buffer.add_char buf c
-  ) str;
-  Buffer.contents buf
-
-let sanitize_agent_name = sanitize_html
-let sanitize_message = sanitize_html
-
-let safe_filename name =
-  let buf = Buffer.create (String.length name * 3) in
-  String.iter (fun c ->
-    let c_lower = Char.lowercase_ascii c in
-    let valid =
-      (c_lower >= 'a' && c_lower <= 'z') ||
-      (c_lower >= '0' && c_lower <= '9') ||
-      c_lower = '.' || c_lower = '_' || c_lower = '-'
-    in
-    if valid then
-      Buffer.add_char buf c_lower
-    else
-      Printf.bprintf buf "_%02x" (Char.code c)
-  ) name;
-  Buffer.contents buf
+let safe_filename = Common.safe_filename
 
 (* ============================================ *)
 (* Result-returning validators                  *)
@@ -399,14 +369,6 @@ let read_json_opt config path =
       if Sys.file_exists path then Some (read_json_local path)
       else None
 
-let agent_json_needs_repair = function
-  | `Assoc fields -> (
-      match List.assoc_opt "last_seen" fields with
-      | Some (`String _) -> false
-      | Some (`Int _ | `Float _ | `Null) | None -> true
-      | Some _ -> false)
-  | _ -> false
-
 let is_fd_pressure_exn exn =
   match System_error_class.classify_exn exn with
   | System_error_class.Fd_exhaustion -> true
@@ -427,13 +389,13 @@ let read_agent_json_from_backend config key =
     |> Result.map_error (fun e ->
          Json_read_error
            (Printf.sprintf
-              "[read_agent_with_repair] backend_get failed for %s: %s"
+              "[read_agent] backend_get failed for %s: %s"
               key
               (Backend_types.show_error e)))
   in
   match content_opt with
   | Some content ->
-      parse_json_content_result ~context:"read_agent_with_repair" content
+      parse_json_content_result ~context:"read_agent" content
       |> Result.map_error (fun msg -> Json_read_error msg)
   | None -> Ok (`Assoc [])
 
@@ -452,7 +414,7 @@ let read_agent_json_result config path =
        | Memory _ -> read_agent_json_from_backend config key)
   | None -> read_json_local_result_exn path
 
-let read_agent_with_repair_result config path =
+let read_agent_result config path =
   let* json =
     read_agent_json_result config path
     |> Result.map_error (function
@@ -460,19 +422,11 @@ let read_agent_with_repair_result config path =
          | Json_read_exn exn -> Agent_read_error (Printexc.to_string exn)
          | Json_read_error msg -> Agent_read_error msg)
   in
-  let* agent =
-    Masc_domain.agent_of_yojson json
-    |> Result.map_error (fun msg -> Agent_read_error msg)
-  in
-  if agent_json_needs_repair json then (
-    Log.Workspace.warn
-      "agent state repair: repaired agent JSON and rewrote canonical state for %s"
-      path;
-    write_json config path (Masc_domain.agent_to_yojson agent));
-  Ok agent
+  Masc_domain.agent_of_yojson json
+  |> Result.map_error (fun msg -> Agent_read_error msg)
 
-let read_agent_with_repair config path =
-  read_agent_with_repair_result config path
+let read_agent config path =
+  read_agent_result config path
   |> Result.map_error (function
        | Agent_fd_pressure exn ->
            let detail = Printexc.to_string exn in
@@ -628,19 +582,12 @@ let log_event config event_json =
   let events_dir = Filename.concat (masc_dir config) "events" in
   mkdir_p events_dir;
 
-  let today =
-    let open Unix in
-    let tm = gmtime (gettimeofday ()) in
-    Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1)
-  in
-  let month_dir = Filename.concat events_dir today in
+  (* Two gmtime calls used to pick the month and the day, so a midnight
+     between them filed the last day of one month under the next one's
+     directory. [Jsonl_writer] runs one call behind both (#27143). *)
+  let dated = Jsonl_writer.dated_path_now ~base_dir:events_dir in
+  let month_dir = Filename.concat events_dir dated.Jsonl_writer.month_dir in
   mkdir_p month_dir;
-
-  let day =
-    let open Unix in
-    let tm = gmtime (gettimeofday ()) in
-    Printf.sprintf "%02d.jsonl" tm.tm_mday
-  in
-  let log_file = Filename.concat month_dir day in
+  let log_file = dated.Jsonl_writer.path in
 
   Fs_compat.append_file log_file (Yojson.Safe.to_string event_json ^ "\n")

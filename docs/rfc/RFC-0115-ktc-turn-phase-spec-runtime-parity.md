@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0002", "0042", "0072", "0113", "0114"]
-implementation_prs: [15944]
 ---
 
 # RFC-0115: KTC turn_phase spec ← runtime parity — backfill spec for Turn_routing / Turn_exhausted

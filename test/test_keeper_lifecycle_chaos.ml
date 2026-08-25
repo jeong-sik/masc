@@ -110,16 +110,6 @@ let test_supervisor_restart_cycle () =
   crash_keeper "sv-restart";
   restart_keeper "sv-restart" ~attempt:1
 
-let test_explicit_tombstone_to_dead () =
-  setup "tombstone-dead";
-  crash_keeper "tombstone-dead";
-  R.mark_dead ~base_path:bp "tombstone-dead" ~at:1.0;
-  check phase_t "dead" KSM.Dead (get_phase "tombstone-dead");
-
-  dispatch_expect_rejected "tombstone-dead" KSM.Heartbeat_ok;
-  dispatch_expect_rejected "tombstone-dead"
-    (KSM.Supervisor_restart_attempt { attempt = 99 });
-  dispatch_expect_rejected "tombstone-dead" KSM.Fiber_started
 
 let test_compaction_crash_recovery () =
   setup "compact";
@@ -161,7 +151,7 @@ let test_handoff_success () =
   check phase_t "handing off" KSM.HandingOff tr.new_phase;
 
   let tr = dispatch "handoff"
-    (KSM.Handoff_completed { new_trace_id = "trace-2"; generation = 2 }) in
+    (KSM.Handoff_completed { new_trace_id = "trace-2" }) in
   check phase_t "back to running" KSM.Running tr.new_phase
 
 let test_pause_resume () =
@@ -192,7 +182,7 @@ let test_full_chaos_sequence () =
   check phase_t "handoff" KSM.HandingOff tr.new_phase;
   (* Handoff completes but fiber crashes immediately after *)
   let tr = dispatch "chaos"
-    (KSM.Handoff_completed { new_trace_id = "trace-fail"; generation = 1 }) in
+    (KSM.Handoff_completed { new_trace_id = "trace-fail" }) in
   check phase_t "handoff complete → running" KSM.Running tr.new_phase;
   let tr = dispatch "chaos"
     (KSM.Fiber_terminated { outcome = "handoff target unreachable"; provider_id = None; http_status = None }) in
@@ -249,8 +239,7 @@ let () =
     ; ( "supervisor"
       , [ eio_test "restart cycle" test_supervisor_restart_cycle ] )
     ; ( "terminal"
-      , [ eio_test "explicit tombstone → Dead" test_explicit_tombstone_to_dead
-        ; eio_test "graceful shutdown → Stopped" test_graceful_shutdown ] )
+      , [ eio_test "graceful shutdown → Stopped" test_graceful_shutdown ] )
     ; ( "buffer_states"
       , [ eio_test "compaction crash → recovery" test_compaction_crash_recovery
         ; eio_test "handoff success" test_handoff_success

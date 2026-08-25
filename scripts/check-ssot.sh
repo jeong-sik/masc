@@ -123,13 +123,175 @@ r7_count="$({ rg -U -c --no-heading "$r7_pattern" bin lib test 2>/dev/null || tr
   | awk -F: '{sum += $2} END {print sum+0}')"
 if [ "$r7_count" -gt 0 ]; then
   echo "ERROR[R7-metric-label-keeper-name]: $r7_count occurrences (baseline 0)." >&2
-  echo "  Replace with: \"keeper\" — the canonical metric label key (cf. Keeper_hooks_oas_types.label_keeper)." >&2
+  echo "  Replace with: \"keeper\" — the canonical metric label key (cf. Keeper_hooks_agent_core_types.label_keeper)." >&2
   echo "  Offending sites:" >&2
   rg -U -l "$r7_pattern" bin lib test 2>/dev/null | sed 's/^/    /' >&2
   fail=1
 else
   echo "OK[R7-metric-label-keeper-name]: 0 occurrences (baseline 0)."
 fi
+
+# SSOT-R8 — TUI state colours are semantic Theme tokens, not renderer-local
+# ANSI choices. Syntax colours have their own Theme.Syntax namespace, so the
+# renderer has no reason to reach for raw red/yellow/green either.
+check_rule "R8-tui-status-color" 0 \
+  "Theme.ok / Theme.warn / Theme.bad (or Theme.Syntax for code content)" \
+  'Ansi\.(red|yellow|green)' \
+  '' \
+  bin/masc_tui_render.ml
+
+# SSOT-R9 — conversation-role style is owned beside Theme. The renderer may
+# branch on row kind, but it must not map a role directly to an ANSI style.
+check_rule "R9-tui-chat-theme-owner" 0 \
+  "Chat_theme.origin / Chat_theme.body" \
+  '(Masc_tui_)?Message_layout\.(User|Keeper|Status|Error|Tool|Thinking).*-> (Ansi|Theme)\.' \
+  '' \
+  bin/masc_tui_render.ml
+
+# SSOT-R10 — Theme is the only production owner of projected background SGR
+# bytes. Existing diff backgrounds and the new RGB/indexed serializer remain
+# literal in masc_tui_theme.ml; callers pass typed projected colours instead.
+# The prefix is the owned surface: 48:25 is deliberately a match, as is split
+# construction such as "48;" ^ "2". A completed mode is not required before
+# the raw extended-background construction has already bypassed Theme.
+r10_pattern='(^|[^0-9])48[;:]'
+r10_self_test_failed=0
+for fixture in '48;2' '48;5' '48:2' '48:5' '"48;" ^ "2"' '48:25'; do
+  if ! printf '%s\n' "$fixture" | rg -q "$r10_pattern"; then
+    echo "ERROR[R10-pattern-self-test]: did not match $fixture" >&2
+    r10_self_test_failed=1
+  fi
+done
+if printf '%s\n' '148;2' '47;2' '47:5' '49;2' '49:5' \
+  | rg -q "$r10_pattern"; then
+  echo "ERROR[R10-pattern-self-test]: matched a non-48 prefix" >&2
+  r10_self_test_failed=1
+fi
+if [ "$r10_self_test_failed" -eq 0 ]; then
+  echo "OK[R10-pattern-self-test]: owned prefixes and numeric boundary covered."
+else
+  fail=1
+fi
+check_rule "R10-tui-projected-background" 0 \
+  "Masc_tui_theme.Sgr.background" \
+  "$r10_pattern" \
+  'bin/masc_tui_theme\.mli?:' \
+  bin lib
+
+# SSOT-R11 — Palette.For_testing can choose a level directly and therefore
+# bypass the process-local stdout capability owner. Production code may use
+# only Masc_tui_terminal_palette.best_color. The full module name catches
+# direct calls and alias declarations; the narrow function name also catches
+# calls through an alias such as X.best_color_for_level.
+r11_pattern='Masc_tui_terminal_palette[[:space:]]*\.[[:space:]]*For_testing|best_color_for_level'
+r11_self_test_failed=0
+for fixture in \
+  'Masc_tui_terminal_palette.For_testing.best_color_for_level' \
+  'module X = Masc_tui_terminal_palette.For_testing' \
+  'X.best_color_for_level'; do
+  if ! printf '%s\n' "$fixture" | rg -q "$r11_pattern"; then
+    echo "ERROR[R11-pattern-self-test]: did not match $fixture" >&2
+    r11_self_test_failed=1
+  fi
+done
+if printf '%s\n' \
+  'Masc_tui_terminal_palette.best_color' \
+  'module X = Masc_tui_terminal_palette' \
+  'X.best_color' \
+  | rg -q "$r11_pattern"; then
+  echo "ERROR[R11-pattern-self-test]: matched the production API" >&2
+  r11_self_test_failed=1
+fi
+if [ "$r11_self_test_failed" -eq 0 ]; then
+  echo "OK[R11-pattern-self-test]: direct and alias bypasses covered."
+else
+  fail=1
+fi
+check_rule "R11-tui-palette-for-testing" 0 \
+  "Masc_tui_terminal_palette.best_color" \
+  "$r11_pattern" \
+  'bin/masc_tui_terminal_palette\.mli?:' \
+  bin lib
+
+# SSOT-R12 — Theme.For_testing accepts injected environment/capability facts,
+# so it is a test fixture rather than a second production styling authority.
+# The full module name catches direct use. The member pattern catches use via
+# a Masc_tui_theme alias, and the declaration pattern prevents hiding the
+# fixture module behind another alias before the member is selected.
+r12_owner_pattern='Masc_tui_theme[[:space:]]*\.[[:space:]]*For_testing'
+r12_member_pattern='For_testing[[:space:]]*\.[[:space:]]*(colors_enabled|user_message_background|user_message_background_rgb)'
+r12_alias_pattern="module[[:space:]]+[A-Z][A-Za-z0-9_']*[[:space:]]*=[[:space:]]*([A-Z][A-Za-z0-9_']*[[:space:]]*\.[[:space:]]*)+For_testing"
+r12_scope_pattern="(open!?|include)[[:space:]]+([A-Z][A-Za-z0-9_']*[[:space:]]*\.[[:space:]]*)+For_testing"
+r12_pattern="${r12_owner_pattern}|${r12_member_pattern}|${r12_alias_pattern}|${r12_scope_pattern}"
+r12_self_test_failed=0
+for fixture in \
+  'Masc_tui_theme.For_testing.user_message_background' \
+  'Theme.For_testing.user_message_background' \
+  'Theme.For_testing.colors_enabled' \
+  'module X = Masc_tui_theme.For_testing' \
+  'module X = Theme.For_testing' \
+  'open Theme.For_testing' \
+  'include Theme.For_testing'; do
+  if ! printf '%s\n' "$fixture" | rg -q "$r12_pattern"; then
+    echo "ERROR[R12-pattern-self-test]: did not match $fixture" >&2
+    r12_self_test_failed=1
+  fi
+done
+if printf '%s\n' \
+  'Masc_tui_theme.user_message_background' \
+  'Theme.user_message_background' \
+  'Masc_tui_theme.colors_enabled' \
+  'Theme.colors_enabled' \
+  'module Theme = Masc_tui_theme' \
+  | rg -q "$r12_pattern"; then
+  echo "ERROR[R12-pattern-self-test]: matched the production API" >&2
+  r12_self_test_failed=1
+fi
+if [ "$r12_self_test_failed" -eq 0 ]; then
+  echo "OK[R12-pattern-self-test]: direct, member, alias-declaration, and scope boundaries covered."
+else
+  fail=1
+fi
+check_rule "R12-tui-theme-for-testing" 0 \
+  "Masc_tui_theme semantic production tokens" \
+  "$r12_pattern" \
+  'bin/masc_tui_theme\.mli?:' \
+  bin lib
+
+# SSOT-R13 — shared footer facts are rendered only by Masc_tui_footer. A
+# surface supplies its local key hints and typed status items; spelling Port
+# or Refresh inside another production string recreates the per-screen drift
+# #30194 removed. The second arm catches the simplest split-literal bypass.
+r13_pattern='"[^"\n]*(Port:|Refresh:)|"(Port|Refresh)"[[:space:]]*\^[[:space:]]*":"'
+r13_self_test_failed=0
+for fixture in \
+  '"Port: %d"' \
+  '"Refresh: %.0fs"' \
+  '"keys | Port: 8935"' \
+  '"Port" ^ ":"'; do
+  if ! printf '%s\n' "$fixture" | rg -q "$r13_pattern"; then
+    echo "ERROR[R13-pattern-self-test]: did not match $fixture" >&2
+    r13_self_test_failed=1
+  fi
+done
+if printf '%s\n' \
+  'Masc_tui_footer.Port port' \
+  'Masc_tui_footer.Refresh_interval seconds' \
+  'footer_line state ~status' \
+  | rg -q "$r13_pattern"; then
+  echo "ERROR[R13-pattern-self-test]: matched the typed footer API" >&2
+  r13_self_test_failed=1
+fi
+if [ "$r13_self_test_failed" -eq 0 ]; then
+  echo "OK[R13-pattern-self-test]: direct and split footer fact literals covered."
+else
+  fail=1
+fi
+check_rule "R13-tui-footer-fact-literal" 0 \
+  "Masc_tui_footer status_item projection" \
+  "$r13_pattern" \
+  'bin/masc_tui_footer\.mli?:' \
+  bin
 
 # SSOT-R3 (tool-name literal) is intentionally deferred to #8448's landing:
 # the raw `"masc_..."` match is too noisy without the Tool_name.Keeper variant
@@ -139,6 +301,6 @@ fi
 echo ""
 echo "SSOT snapshot (baselines tracked inline; lower them as SSOT PRs land):"
 echo "  Script: scripts/check-ssot.sh"
-echo "  Related issues: #8355 #8387 #8403 #8414 #8448 #8455 #8462"
+echo "  Related issues: #8355 #8387 #8403 #8414 #8448 #8455 #8462 #30194 #30196 #30411"
 
 exit "$fail"

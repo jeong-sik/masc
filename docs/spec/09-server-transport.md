@@ -1,15 +1,5 @@
 ---
 status: reference
-last_verified: 2026-06-05
-code_refs:
-  - lib/server/
-  - lib/server/masc_grpc_server.ml
-  - lib/server/masc_grpc_service.ml
-  - lib/config/masc_grpc_transport.ml
-  - lib/sse.ml
-  - lib/transport.ml
-  - bin/main_eio.ml
-  - bin/main_stdio_eio.ml
 ---
 
 # Server & Transport
@@ -18,7 +8,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Server |
-| Maps to | `lib/server/`, `lib/sse.ml`, `lib/transport.ml`, `lib/http_server_eio.ml`, `lib/http_server_h2.ml`, `lib/mcp_server_eio*.ml`, `bin/main_eio.ml`, `bin/main_stdio_eio.ml` |
+| Maps to | `lib/server/`, `lib/sse.ml`, `lib/transport.ml`, `lib/http_server_eio.ml`, `lib/mcp_server_eio*.ml`, `bin/main_eio.ml`, `bin/main_stdio_eio.ml` |
 | Dependencies | 02-types-and-invariants |
 | Modules | 61 |
 | LOC | ~17,700 |
@@ -27,14 +17,14 @@ code_refs:
 
 ## 1. Purpose
 
-MCP(Model Context Protocol)를 다중 트랜스포트(HTTP/1.1, HTTP/2 h2c, WebSocket, gRPC, WebRTC, stdio)로 제공하는 서버 레이어. JSON-RPC 2.0 기반 MCP 요청을 받아 도구 디스패치로 라우팅하고, SSE(Server-Sent Events)로 이벤트를 스트리밍한다.
+MCP(Model Context Protocol)를 다중 트랜스포트(HTTP/1.1, HTTP/2 h2c, WebSocket, gRPC, stdio)로 제공하는 서버 레이어. JSON-RPC 2.0 기반 MCP 요청을 받아 도구 디스패치로 라우팅하고, SSE(Server-Sent Events)로 이벤트를 스트리밍한다.
 
 핵심 설계 결정:
 
 - **httpun-eio** 기반 HTTP/1.1이 canonical transport. Eio direct-style async.
 - SSE는 per-session `Eio.Stream.t` mailbox 패턴. broadcast 시 global write-lock 없음.
 - HTTP/2는 `h2-eio` 기반이며 `MASC_USE_H2=auto|1|0`로 listener mode를 제어한다. 기본값 `auto`는 HTTP/1.1과 h2c를 같은 포트에서 자동 감지한다.
-- gRPC, WebSocket, WebRTC는 보조지만 지원되는 트랜스포트다. 현재 runtime 기본값은 활성이고 `MASC_*_ENABLED=0`으로만 비활성화한다.
+- gRPC, WebSocket은 보조지만 지원되는 트랜스포트다. 현재 runtime 기본값은 활성이고 `MASC_*_ENABLED=0`으로만 비활성화한다.
 - stdio 모드는 CLI-Tool-A MCP 클라이언트의 표준 연결 방식.
 
 ---
@@ -48,7 +38,7 @@ graph TB
         GC[CLI-Tool-C<br/>MCP HTTP]
         CX[CLI-Tool-B<br/>MCP HTTP]
         DB[Dashboard<br/>Browser SSE]
-        EXT[외부 에이전트<br/>gRPC / WS / WebRTC]
+        EXT[외부 에이전트<br/>gRPC / WS]
     end
 
     subgraph EntryPoints["Entry Points"]
@@ -59,9 +49,8 @@ graph TB
     subgraph TransportLayer["Transport Layer"]
         MCP_HTTP[server_mcp_transport_http<br/>POST /mcp + GET /mcp SSE]
         H2_GW[server_h2_gateway<br/>HTTP/2 h2c]
-        WS_T[server_ws_standalone<br/>GET /ws discovery + ws://:8937/]
+        WS_T[server_mcp_transport_ws<br/>GET /ws same-origin upgrade]
         GRPC_S[masc_grpc_server<br/>:8936 h2c]
-        WEBRTC[server_webrtc_transport<br/>/webrtc/*]
     end
 
     subgraph CoreServer["Core Server"]
@@ -82,12 +71,11 @@ graph TB
     EXT -->|gRPC / WS| GRPC_S & WS_T
 
     STDIO --> MCP_EIO
-    HTTP --> MCP_HTTP & H2_GW & WS_T & WEBRTC & ROUTES
+    HTTP --> MCP_HTTP & H2_GW & WS_T & ROUTES
     MCP_HTTP --> MCP_EIO
     H2_GW --> MCP_EIO
     WS_T -.->|Sse.subscribe_external| SSE_MOD
     GRPC_S --> MCP_EIO
-    WEBRTC -.->|signaling only| MCP_EIO
 
     MCP_EIO --> TD
     MCP_EIO --> SSE_MOD
@@ -103,25 +91,43 @@ graph TB
 |-----------|---------------|--------|------|------------|--------|
 | HTTP/1.1 | httpun-eio | `server_mcp_transport_http` | 8935 | 기본값 | Canonical |
 | HTTP/2 (h2c) | h2-eio | `server_h2_gateway` | 8935 | `MASC_USE_H2=auto` (기본) 또는 `1` | Available |
-| WebSocket | httpun-ws-eio | `server_ws_standalone` + `server_mcp_transport_ws` | 8937 standalone, discovery via 8935 `/ws` | 기본값, `MASC_WS_ENABLED=0`으로 비활성화 | **Experimental** |
-| gRPC | grpc-direct (h2c) | `masc_grpc_server` | 8936 | 기본값, `MASC_GRPC_ENABLED=0`으로 비활성화 | Available |
-| WebRTC | ocaml-webrtc | `server_webrtc_transport` | 8935 `/webrtc/*` | 기본값, `MASC_WEBRTC_ENABLED=0`으로 비활성화 | **Experimental** (local interop only; live env-gated) |
+| WebSocket | ws-direct (`ws-direct-eio` / `ws-direct-gluten`) | `server_mcp_transport_ws` | HTTP 리스너의 `/ws` same-origin 업그레이드 | 기본값, `MASC_WS_ENABLED=0`으로 비활성화 | **Experimental** |
+| gRPC | grpc-direct (h2c) | `masc_grpc_server` | 8936 | 기본 비활성, `MASC_GRPC_ENABLED=1`로 활성화 | Available |
 | stdio | Eio stdin/stdout | `main_stdio_eio` + `mcp_server_eio.run_stdio` | N/A | `masc-stdio` 실행 | Available |
 
 **Experimental** 상태의 의미: 해당 transport는 코드가 존재하고 로컬 테스트에서 동작하지만, 프로덕션 interop 검증이 미완료. API/프로토콜은 향후 breaking change가 발생할 수 있음. 기본값으로 활성화되어 있으나, 주의해서 사용.
 
-### 3.1 Transport 선택 로직 (에이전트 측)
+### 3.1 Transport 값 (아직 아무것도 고르지 않는다)
 
-`lib/config/masc_grpc_transport.ml`이 에이전트 측 트랜스포트 선택을 정의한다:
+`lib/config/masc_grpc_transport.ml`이 값을 정의한다:
 
 ```ocaml
-type t = Http | Grpc | Ws | Webrtc | Local
+type t = Http | Grpc | Ws | Local
 ```
 
-선택 순서:
-1. API 호출 시 명시된 `~transport` 파라미터
-2. `MASC_AGENT_TRANSPORT` 환경변수 (`"grpc"`, `"http"`, `"ws"`, `"webrtc"`, `"local"`)
-3. 기본값: `Local` (파일시스템 기반 Workspace 직접 호출)
+`MASC_AGENT_TRANSPORT` 로 값을 정하고 기본은 `Local` 이다. **그런데 값을 바꿔도
+에이전트가 서버에 닿는 경로는 달라지지 않는다.** 코드 전체에서 이 값을 읽는
+곳은 한 군데이고, 하는 일은 로그 한 줄이다.
+
+```ocaml
+(* lib/runtime/runtime_agent.ml:1101 *)
+(match config.transport with
+ | Masc_grpc_transport.Local -> ()
+ | t ->
+   Log.Runtime_agent.info "%s: transport=%s"
+     config.name (Masc_grpc_transport.to_string t));
+```
+
+`grpc` 로 두면 서버 부팅 때 keeper heartbeat 클라이언트가 생기는 효과는 있다
+(`server_runtime_bootstrap.ml`). 그 외 에이전트 트래픽은 값과 무관하게 같은
+경로로 간다.
+
+이 절은 전에 "선택 순서" 를 세 단계로 적어놓고 1번을 `~transport` 파라미터라고
+했는데, 코드에 있는 그 이름의 파라미터는 `Llm_provider.Llm_transport.t` 로
+**에이전트가 LLM 과 말하는 방식**이다. 여기 `Masc_grpc_transport.t`
+(**에이전트가 masc 서버와 말하는 방식**) 와는 타입이 다르다.
+
+배선 여부와 방향은 #30370 에서 다룬다.
 
 ---
 
@@ -291,9 +297,9 @@ SSE 재연결 폭주(connection storm)를 방지하는 rate limiter:
 
 | 환경변수 | 기본값 | 설명 |
 |---------|--------|------|
-| `MASC_SSE_RECONNECT_MIN_INTERVAL_S` | 0.0 (비활성) | session별 최소 재연결 간격 |
-| `MASC_SSE_CONNECT_WINDOW_S` | 0.0 (비활성) | sliding window 크기 |
-| `MASC_SSE_CONNECT_MAX_IN_WINDOW` | 0 (비활성) | window 내 최대 연결 수 |
+| `MASC_SSE_RECONNECT_MIN_INTERVAL_S` | 1.0 | session별 최소 재연결 간격 (`<= 0` 이면 비활성) |
+| `MASC_SSE_CONNECT_WINDOW_S` | 60.0 | sliding window 크기 (`<= 0` 이면 비활성) |
+| `MASC_SSE_CONNECT_MAX_IN_WINDOW` | 10 | window 내 최대 연결 수 (`<= 0` 이면 비활성) |
 
 제한 초과 시 `429 Too Many Requests` + `Retry-After` 헤더를 반환한다.
 
@@ -359,9 +365,7 @@ typed authority만 소비한다. downstream에서 raw `Host`/`:authority`를 다
 | GET | `/mcp/operator` | `handle_get_operator_mcp` | Operator SSE |
 | DELETE | `/mcp/operator` | `handle_delete_mcp ~profile:Operator_remote` | Operator 세션 종료 |
 | GET | `/sse` | `sse_simple_handler` | 단순 SSE (Observer) |
-| GET | `/ws` | `websocket_discovery_json` | WebSocket discovery JSON (`enabled`, `ws_port`, `ws_url`) |
-| POST | `/webrtc/offer` | `handle_offer_request` | WebRTC offer signaling |
-| POST | `/webrtc/answer` | `handle_answer_request` | WebRTC answer signaling |
+| GET | `/ws` | `websocket_discovery_json` | WebSocket discovery JSON (`enabled`, `ws_url`) |
 | OPTIONS | `*` | `options_handler` | CORS preflight |
 
 ### 6.2 REST API 라우트 (server_routes_http 조립)
@@ -484,7 +488,10 @@ client는 허용한다. 로컬 Vite cross-port는 명시된 loopback dev-origin 
 
 ### 8.1 활성화
 
-`MASC_USE_H2=1` 환경변수로 opt-in. 설정 시 HTTP/1.1과 HTTP/2 서버가 동시에 시작된다 (동일 포트, ALPN 협상 아님 - h2c cleartext).
+`MASC_USE_H2=auto`는 같은 포트에서 HTTP/1.1과 HTTP/2 prior-knowledge
+연결을 자동 판별한다. `1`/`h2_only`는 HTTP/2만, `0`/`h1_only`는
+HTTP/1.1만 허용한다. 그 밖의 값은 서버 시작 전에 거부된다. 이 경로는 TLS
+ALPN이 아닌 h2c cleartext 연결이다.
 
 ### 8.2 동작 방식
 
@@ -515,12 +522,12 @@ Cloudflare tunnel origin은 cleartext h2(h2c)를 지원하지 않는다. 따라�
 
 ### 9.1 활성화
 
-기본값은 활성이다. `MASC_WS_ENABLED=0` 또는 `false`일 때만 비활성화된다. `GET /ws`는 업그레이드 엔드포인트가 아니라 standalone WS 소켓 discovery JSON을 반환한다.
+기본값은 활성이다. `MASC_WS_ENABLED=0` 또는 `false`일 때만 비활성화된다. `GET /ws`는 두 가지로 동작한다 — `Upgrade: websocket` 헤더가 있으면 same-origin 검사 후 WebSocket 업그레이드를 수행하고(`server_routes_http_routes_frontend.ml`의 `websocket_handler`), 헤더가 없으면 standalone WS 소켓 discovery JSON을 반환한다.
 
 ### 9.2 동작 방식
 
-1. `GET /ws`로 `enabled`, `ws_port`, `ws_url`, `session_count`를 discovery
-2. 실제 연결은 standalone WS 포트(`ws://127.0.0.1:${MASC_WS_PORT:-8937}/`)로 HTTP 101 upgrade
+1. `GET /ws`로 `enabled`, `ws_url`, `session_count`를 discovery
+2. 실제 연결은 같은 HTTP 리스너의 `GET /ws`로 same-origin HTTP 101 upgrade
 2. WebSocket 연결 성공 후 `Sse.subscribe_external`로 broadcast 이벤트 수신 등록
 3. 인바운드 메시지: JSON-RPC 요청으로 디스패치 (현재 `on_message` callback, 기본값은 log & ignore)
 4. Ping/Pong 자동 처리
@@ -536,7 +543,9 @@ WebSocket 세션은 `ws-{timestamp_ms}-{counter}` 형식 ID를 사용한다. SHA
 
 ### 10.1 활성화
 
-기본값은 활성이다. `MASC_GRPC_ENABLED=0` 또는 `false`일 때만 비활성화된다. 포트는 `MASC_GRPC_PORT` (기본값: 8936).
+기본값은 **비활성**이다 (2026-08-25부터). `MASC_GRPC_ENABLED=1`일 때만 뜬다. 포트는 `MASC_GRPC_PORT` (기본값: 8936).
+
+껐다기보다 **아무도 켠 적이 없었다**: 서버 자신의 transport-health 집계가 이 표면이 듣고 있던 내내 `subscribers: 0`, `events_delivered: 0`을 보고했다. 그동안 websocket이 `primary_path`를 맡고 SSE가 브로드캐스트를 날랐다. 코드는 그대로이므로 되돌리는 건 환경변수 하나다.
 
 ### 10.2 Service 정의
 
@@ -555,7 +564,7 @@ RPCs:
 
 ### 10.3 Wire Format
 
-JSON 인코딩된 문자열을 gRPC 프레이밍으로 전송. Protobuf 바이너리가 아닌 JSON을 사용한다. 각 메시지 타입은 `to_bytes`/`of_bytes`로 직렬화/역직렬화한다.
+Protobuf 바이너리를 gRPC 프레이밍으로 전송. 타입은 `proto/masc_workspace.proto`에서 `ocaml-protoc-plugin`으로 생성되며, 생성된 모듈은 `Masc_proto.Masc_workspace.Masc.Workspace.V1` 아래에 있다. 각 메시지 타입은 `to_bytes`/`of_bytes`로 직렬화/역직렬화한다.
 
 ### 10.4 Subscribe Streaming
 
@@ -566,72 +575,6 @@ JSON 인코딩된 문자열을 gRPC 프레이밍으로 전송. Protobuf 바이�
 - `grpc.health.v1.Health/Check` 지원
 - `grpc.reflection.v1.ServerReflection` 지원
 - transport harness는 `grpc_health_v1.proto`를 사용해 health check를 검증한다
-
----
-
-## 11. WebRTC Transport
-
-**소스**: `lib/server/server_webrtc_transport.ml` (183 LOC)
-
-### 11.1 활성화
-
-기본값은 활성이다. `MASC_WEBRTC_ENABLED=0` 또는 `false`일 때만 비활성화된다. 로컬 signaling + server-side peer 경로는 hermetic harness로 검증하고, live ICE/TURN/browser interop은 env-gated로 분리한다.
-
-### 11.2 Signaling Flow
-
-```
-Agent A                    MASC Server                    Agent B
-   |                           |                             |
-   |-- POST /webrtc/offer ---->|                             |
-   |   {agent_name, ice, dtls} |                             |
-   |<-- {offer_id} ------------|                             |
-   |                           |                             |
-   |                           |<-- POST /webrtc/answer -----|
-   |                           |    {offer_id, agent_name}   |
-   |                           |--- {peer_id, channel} ----->|
-   |                           |                             |
-   |<======= "masc-events" DataChannel (P2P) =============>|
-```
-
-ICE + DTLS 완료 후 `"masc-events"` DataChannel을 통해 JSON-RPC 메시지를 P2P로 교환한다. 서버는 signaling만 중계하고, 데이터 전송은 서버를 경유하지 않는다.
-
-만료된 offer는 60초 후 자동 정리 (`cleanup_expired_offers`).
-
-### 11.3 ICE Server Configuration
-
-서버 측 ICE server는 다음 우선순위로 읽는다.
-
-1. `MASC_WEBRTC_ICE_SERVERS_JSON`
-2. `MASC_WEBRTC_ICE_URLS` + 선택적 `MASC_WEBRTC_ICE_USERNAME` / `MASC_WEBRTC_ICE_CREDENTIAL` / `MASC_WEBRTC_ICE_TLS_CA`
-3. `ocaml-webrtc` 기본 ICE server (기본 STUN)
-
-운영자는 `/health`의 `transport.webrtc.ice_server_urls`로 현재 적용된 URL 목록을 확인할 수 있다.
-
-### 11.4 Env-Gated Live Interop Proof
-
-hermetic CI는 signaling + peer lifecycle만 검증한다. 실제 인터넷 상호운용성은 env-gated proof lane으로 분리한다.
-
-- local/manual entrypoint: `bash scripts/harness/transport/verify_webrtc_live_env.sh`
-- GitHub Actions entrypoint: `.github/workflows/webrtc-live-interop.yml`
-- browser-side env:
-  - `MASC_WEBRTC_LIVE_ICE_URLS`
-  - 선택적 `MASC_WEBRTC_LIVE_ICE_USERNAME`
-  - 선택적 `MASC_WEBRTC_LIVE_ICE_CREDENTIAL`
-- server-side env:
-  - `MASC_WEBRTC_ICE_URLS`
-  - 선택적 `MASC_WEBRTC_ICE_USERNAME`
-  - 선택적 `MASC_WEBRTC_ICE_CREDENTIAL`
-
-현재 proof lane은 다음을 보장한다.
-
-- 브라우저가 실제 ICE candidate를 gather한다.
-- `/health`가 서버 ICE server URL 구성을 노출한다.
-- 서버가 브라우저가 생성한 candidate 문자열을 받아 offer/answer signaling을 완료한다.
-
-현재 proof lane이 아직 보장하지 않는 것:
-
-- 브라우저와 서버 사이의 완전한 SDP answer 교환
-- end-to-end DataChannel 메시지 교환
 
 ---
 
@@ -777,10 +720,9 @@ sequenceDiagram
 |---------|--------|------|
 | `MASC_USE_H2` | `auto` | HTTP listener mode (`auto`, `1`=`h2_only`, `0`=`h1_only`) |
 | `MASC_WS_ENABLED` | 1 | WebSocket 활성화 (`0`으로 비활성화) |
-| `MASC_GRPC_ENABLED` | 1 | gRPC 활성화 (`0`으로 비활성화) |
+| `MASC_GRPC_ENABLED` | 0 | gRPC 활성화 (`1`로 활성화) |
 | `MASC_GRPC_PORT` | 8936 | gRPC 포트 |
-| `MASC_WEBRTC_ENABLED` | 1 | WebRTC 활성화 (`0`으로 비활성화) |
-| `MASC_AGENT_TRANSPORT` | `local` | 에이전트 측 트랜스포트 선택 |
+| `MASC_AGENT_TRANSPORT` | `local` | 값만 정한다. 경로는 안 바뀐다 (§3.1) |
 
 ### 15.3 인증 설정
 
@@ -793,9 +735,9 @@ sequenceDiagram
 
 | 환경변수 | 기본값 | 설명 |
 |---------|--------|------|
-| `MASC_SSE_RECONNECT_MIN_INTERVAL_S` | 0.0 | 최소 재연결 간격 |
-| `MASC_SSE_CONNECT_WINDOW_S` | 0.0 | Rate limit window |
-| `MASC_SSE_CONNECT_MAX_IN_WINDOW` | 0 | Window 내 최대 연결 수 |
+| `MASC_SSE_RECONNECT_MIN_INTERVAL_S` | 1.0 | 최소 재연결 간격 (`<= 0`이면 비활성화) |
+| `MASC_SSE_CONNECT_WINDOW_S` | 60.0 | Rate limit window (`<= 0`이면 비활성화) |
+| `MASC_SSE_CONNECT_MAX_IN_WINDOW` | 10 | Window 내 최대 연결 수 (`<= 0`이면 비활성화) |
 
 ### 15.5 HTTP Compression
 
@@ -814,14 +756,14 @@ sequenceDiagram
 - `GET /api/v1/openapi.json`으로 접근
 - 모든 REST-바인딩된 MCP 도구를 OpenAPI path로 변환
 - `x-mcp-operations`: MCP 도구 카탈로그 (inputSchema, tags, help entry)
-- `x-agent-sdk-tools`: SDK alias 바인딩
+- `x-agent-core-tools`: Agent Core 바인딩
 - `/mcp` POST 엔드포인트에 전체 operation catalog 첨부
 
 ---
 
 ## 17. Invariants
 
-**INV-SERVER-001**: HTTP/1.1 서버는 항상 활성. H2는 opt-in이고, WS/gRPC/WebRTC는 default-on이며 `MASC_*_ENABLED=0`일 때만 비활성화된다.
+**INV-SERVER-001**: HTTP/1.1 서버는 항상 활성. H2는 opt-in이고, WS/gRPC는 default-on이며 `MASC_*_ENABLED=0`일 때만 비활성화된다.
 
 **INV-SERVER-002**: 모든 MCP POST 요청은 `initialize`/`ping` 제외 `Mcp-Session-Id` 헤더 필수. 없으면 `validate_session_requirement`가 거부한다.
 
@@ -862,10 +804,9 @@ sequenceDiagram
 | `server_routes_http_routes_dashboard.ml` | - | Keeper Gate dashboard routes |
 | `sse.ml` | 474 | SSE event registry + broadcast |
 | `sse_workspace_filter.ml` | 63 | Workspace별 SSE 필터링 |
-| `oas_event_bridge.ml` | 56 | OAS -> SSE 이벤트 브릿지 |
+| `keeper_event_bridge.ml` | - | Agent Core Event_bus -> SSE 이벤트 브릿지 |
 | `transport.ml` | 674 | 프로토콜 바인딩 추상화 + OpenAPI 생성 |
 | `http_server_eio.ml` | 675 | httpun-eio 래퍼 (Router, Compression) |
-| `http_server_h2.ml` | 325 | h2-eio 래퍼 |
 | `auth.ml` | 435 | 인증/인가 코어 |
 
 ### 18.2 Server Sub-library (lib/server/)
@@ -882,7 +823,6 @@ sequenceDiagram
 | `server_h2_gateway.ml` | 740 | HTTP/2 게이트웨이 (전체 라우팅) |
 | `server_h2_gateway_routes_extra.ml` | 171 | H2 추가 라우트 |
 | `server_mcp_transport_ws.ml` | 160 | WebSocket 트랜스포트 |
-| `server_webrtc_transport.ml` | 183 | WebRTC signaling |
 | `server_auth.ml` | 491 | HTTP 레벨 인증/권한 |
 | `server_routes_http.ml` | 17 | 라우트 조립 진입점 |
 | `server_dashboard_http.ml` | 566 | Dashboard API 핸들러 |
@@ -892,7 +832,7 @@ sequenceDiagram
 
 | Module | LOC | 역할 |
 |--------|-----|------|
-| `lib/server/masc_grpc_types.ml` | 485 | gRPC 메시지 타입 (JSON wire format) |
+| `lib/server/masc_grpc_types.ml` | 596 | gRPC 메시지 타입 (protobuf wire format) |
 | `lib/server/masc_grpc_service.ml` | 417 | gRPC 서비스 핸들러 |
 | `lib/server/masc_grpc_server.ml` | 67 | gRPC 서버 시작 |
 | `lib/server/masc_grpc_client.ml` | 150 | gRPC 클라이언트 |
@@ -910,6 +850,6 @@ sequenceDiagram
 | httpun-ws | https://github.com/anmonteiro/httpun-ws |
 | grpc-direct | `workspace/yousleepwhen/grpc-direct` |
 | Cloudflare Tunnel | `docs/spec/01-system-overview.md` |
-| QUICK-START.md | `docs/QUICK-START.md` |
+| README quickstart | `README.md#start-here` |
 | COMMON-PITFALLS.md | `docs/COMMON-PITFALLS.md` |
 | 02-types-and-invariants | `docs/spec/02-types-and-invariants.md` |

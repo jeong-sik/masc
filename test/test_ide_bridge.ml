@@ -2,6 +2,20 @@
 
 open Alcotest
 
+(* RFC-0378 A2: test-side attribution builders. *)
+let unattributed_file attempted_path =
+  Agent_observation.File
+    (Agent_observation.Unaddressed
+       { reason = Agent_observation.Unattributed.Unregistered_path; attempted_path })
+;;
+
+let addressed_file ~codebase ~path =
+  match Agent_observation.Code_address.v ~codebase ~path with
+  | Ok address ->
+    Agent_observation.File (Agent_observation.Addressed { address; checkout = None })
+  | Error e -> failwith (Agent_observation.Code_address.invalid_to_string e)
+;;
+
 let with_temp_dir f =
   let dir = Filename.temp_file "ide_bridge_test" "" in
   Sys.remove dir;
@@ -16,6 +30,7 @@ let test_ingest_tool_event () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
+      ~codebase:"github.com_other_repo"
       ~tool_name:"fs_write"
       ~keeper_id:"keeper-alpha"
       ~turn_id:"turn-123"
@@ -26,7 +41,7 @@ let test_ingest_tool_event () =
       ~file_path:(Some "lib/test.ml")
       ~timestamp_ms:1717400000000L
       ();
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
+    let dir = Ide_paths.code_store_dir ~base_dir:base_dir ~codebase:"github.com_other_repo" in
     let path = Filename.concat dir "tool_events.jsonl" in
     check bool "file exists" true (Sys.file_exists path);
     let ic = open_in path in
@@ -39,34 +54,71 @@ let test_ingest_tool_event () =
     check string "keeper_id" "keeper-alpha" keeper_id)
 ;;
 
-let test_ingest_turn_event () =
+(* RFC-0378 B: the bus carries no turn events. Tests that exercise the
+   turn read path seed the stored row directly — standing in for the
+   pre-existing data the readers serve until rung E. *)
+let rec mkdir_p path =
+  if path = "" || path = "/" || Sys.file_exists path
+  then ()
+  else (
+    mkdir_p (Filename.dirname path);
+    try Unix.mkdir path 0o755 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+;;
+
+let seed_turn_row ~base_dir ~turn_id ~keeper_id ~phase ~timestamp_ms =
+  let dir = Ide_paths.code_store_dir ~base_dir ~codebase:"github.com_other_repo" in
+  mkdir_p dir;
+  let row =
+    Ide_event_types.ide_event_to_json
+      (Ide_event_types.Turn_event
+         { turn_id
+         ; keeper_id
+         ; phase
+         ; model_used = None
+         ; tools_used = []
+         ; stop_reason = None
+         ; duration_ms = None
+         ; timestamp_ms
+         })
+  in
+  let oc =
+    open_out_gen
+      [ Open_append; Open_creat ]
+      0o644
+      (Filename.concat dir "turn_events.jsonl")
+  in
+  output_string oc (Yojson.Safe.to_string row ^ "\n");
+  close_out oc
+;;
+
+let test_turn_rows_remain_readable () =
   with_temp_dir (fun base_dir ->
-    Ide_bridge.ingest_turn_event
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
+    seed_turn_row
+      ~base_dir
       ~turn_id:"turn-456"
       ~keeper_id:"keeper-beta"
       ~phase:"completed"
-      ~model_used:(Some "claude-sonnet-4-6")
-      ~tools_used:["fs_write"; "execute"]
-      ~stop_reason:(Some "end_turn")
-      ~duration_ms:(Some 5000)
       ~timestamp_ms:1717400000000L;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
-    let path = Filename.concat dir "turn_events.jsonl" in
-    check bool "file exists" true (Sys.file_exists path);
-    let ic = open_in path in
-    let line = input_line ic in
-    close_in ic;
-    let json = Yojson.Safe.from_string line in
-    let phase = Yojson.Safe.Util.member "phase" json |> Yojson.Safe.Util.to_string in
-    check string "phase" "completed" phase)
+    match
+      Ide_bridge.list_events
+        ~base_path:base_dir
+        ~codebase:"github.com_other_repo"
+        ~kind:Ide_bridge.Turn
+        ()
+    with
+    | [ event ] ->
+      let field key = Yojson.Safe.Util.(member key event |> to_string) in
+      check string "turn_id" "turn-456" (field "turn_id");
+      check string "phase" "completed" (field "phase")
+    | events -> Alcotest.failf "expected one turn event, got %d" (List.length events))
 ;;
 
 let test_ingest_multiple_events () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
+      ~codebase:"github.com_other_repo"
       ~tool_name:"fs_write"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -79,6 +131,7 @@ let test_ingest_multiple_events () =
       ();
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
+      ~codebase:"github.com_other_repo"
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -89,7 +142,7 @@ let test_ingest_multiple_events () =
       ~file_path:None
       ~timestamp_ms:2000L
       ();
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
+    let dir = Ide_paths.code_store_dir ~base_dir:base_dir ~codebase:"github.com_other_repo" in
     let path = Filename.concat dir "tool_events.jsonl" in
     let ic = open_in path in
     let count = ref 0 in
@@ -100,6 +153,12 @@ let test_ingest_multiple_events () =
 
 let json_string key json =
   Yojson.Safe.Util.member key json |> Yojson.Safe.Util.to_string
+;;
+
+let json_field_is_null key json =
+  match Yojson.Safe.Util.member key json with
+  | `Null -> true
+  | _ -> false
 ;;
 
 let json_intlit key json =
@@ -117,6 +176,7 @@ let test_list_events_filters_keeper_and_pages () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
+      ~codebase:"github.com_other_repo"
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t-old"
@@ -129,6 +189,7 @@ let test_list_events_filters_keeper_and_pages () =
       ();
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
+      ~codebase:"github.com_other_repo"
       ~tool_name:"read_file"
       ~keeper_id:"k2"
       ~turn_id:"t-other"
@@ -141,6 +202,7 @@ let test_list_events_filters_keeper_and_pages () =
       ();
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
+      ~codebase:"github.com_other_repo"
       ~tool_name:"write_file"
       ~keeper_id:"k1"
       ~turn_id:"t-new"
@@ -154,6 +216,7 @@ let test_list_events_filters_keeper_and_pages () =
     let events =
       Ide_bridge.list_events
         ~base_path:base_dir
+        ~codebase:"github.com_other_repo"
         ~kind:Ide_bridge.Tool
         ~keeper_id:"k1"
         ~limit:1
@@ -170,6 +233,7 @@ let test_list_events_merges_kinds_newest_first () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
+      ~codebase:"github.com_other_repo"
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t-tool"
@@ -180,22 +244,142 @@ let test_list_events_merges_kinds_newest_first () =
       ~file_path:None
       ~timestamp_ms:1000L
       ();
-    Ide_bridge.ingest_turn_event
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
+    seed_turn_row
+      ~base_dir
       ~turn_id:"t-turn"
       ~keeper_id:"k1"
       ~phase:"completed"
-      ~model_used:None
-      ~tools_used:[]
-      ~stop_reason:None
-      ~duration_ms:None
       ~timestamp_ms:3000L;
-    let events = Ide_bridge.list_events ~base_path:base_dir ~limit:2 () in
+    let events =
+      Ide_bridge.list_events
+        ~base_path:base_dir
+        ~codebase:"github.com_other_repo"
+        ~limit:2
+        ()
+    in
     check (list string) "newest-first types" [ "turn"; "tool" ]
       (List.map (json_string "type") events);
     check (list int64) "newest-first timestamps" [ 3000L; 1000L ]
       (List.map (json_intlit "timestamp_ms") events))
+;;
+
+(* masc#28582: the row carries the path the attribution resolver named, not the
+   argument the keeper typed. The two differ whenever the keeper addressed a
+   file through its sandbox — which is the normal case — and a consumer that
+   joins on [file_path] can only match one of them. Both the event and the
+   cursor derived from the same call have to carry the resolved one. *)
+let test_hook_row_carries_the_resolved_path_not_the_raw_argument () =
+  with_temp_dir (fun base_dir ->
+    let raw_argument =
+      "/base/.masc/playground/delta/repos/masc/lib/keeper/keeper_approval_queue.ml"
+    in
+    let resolved = "lib/keeper/keeper_approval_queue.ml" in
+    let input =
+      `Assoc
+        [ "path", `String raw_argument
+        ; "line_start", `Int 5
+        ; "focus_mode", `String "editing"
+        ]
+    in
+    Ide_bridge.ingest_tool_event_from_hook
+      ~base_path:base_dir
+      ~attribution:(addressed_file ~codebase:"github.com_x_y" ~path:resolved)
+      ~tool_name:"edit_file"
+      ~keeper_id:"delta"
+      ~turn_id:"turn-3"
+      ~outcome:"ok"
+      ~typed_outcome_str:"progress"
+      ~duration_ms:4.0
+      ~output_text:"edited"
+      ~input;
+    (match
+       Ide_bridge.list_events
+         ~base_path:base_dir
+         ~codebase:("github.com_x_y")
+         ~kind:Ide_bridge.Tool
+         ()
+     with
+     | [ event ] ->
+       check string "event carries the resolved path" resolved (json_string "file_path" event)
+     | events -> Alcotest.failf "expected one tool event, got %d" (List.length events));
+    match
+      Ide_bridge.list_cursors
+        ~base_path:base_dir
+        ~codebase:("github.com_x_y")
+        ()
+    with
+    | [ cursor ] ->
+      check string "cursor carries the same resolved path" resolved (json_string "file_path" cursor)
+    | cursors -> Alcotest.failf "expected one cursor, got %d" (List.length cursors))
+;;
+
+(* A tool call that names no file produces no cursor and stores no document:
+   the row is a keeper-timeline fact. *)
+let test_pathless_hook_stores_no_document () =
+  with_temp_dir (fun base_dir ->
+    Ide_bridge.ingest_tool_event_from_hook
+      ~base_path:base_dir
+      ~attribution:Agent_observation.Pathless
+      ~tool_name:"masc_broadcast"
+      ~keeper_id:"delta"
+      ~turn_id:"turn-4"
+      ~outcome:"ok"
+      ~typed_outcome_str:"progress"
+      ~duration_ms:1.0
+      ~output_text:"sent"
+      ~input:(`Assoc [ "message", `String "hello"; "focus_mode", `String "editing" ]);
+    (* RFC-0378 §5.2: nothing is persisted — the keeper-timeline record of
+       a pathless call lives in the tool_calls store, not here. *)
+    (match
+       Ide_bridge.list_events
+         ~base_path:base_dir
+         ~codebase:"github.com_x_y"
+         ~kind:Ide_bridge.Tool
+         ()
+     with
+     | [] -> ()
+     | events ->
+       Alcotest.failf "pathless call must persist nothing, got %d" (List.length events));
+    check int "no cursor" 0
+      (List.length
+         (Ide_bridge.list_cursors ~base_path:base_dir ~codebase:"github.com_x_y" ()))
+  )
+;;
+
+(* RFC-0378 §5.2: an unaddressed write is a keeper fact — the ide store
+   persists no row and no cursor for it; its durable record is the
+   tool_calls store. *)
+let test_unaddressed_hook_persists_nothing () =
+  with_temp_dir (fun base_dir ->
+    Ide_bridge.ingest_tool_event_from_hook
+      ~base_path:base_dir
+      ~attribution:(unattributed_file "/outside/tree.ml")
+      ~tool_name:"edit_file"
+      ~keeper_id:"k1"
+      ~turn_id:"t1"
+      ~outcome:"ok"
+      ~typed_outcome_str:"progress"
+      ~duration_ms:1.0
+      ~output_text:"x"
+      ~input:
+        (`Assoc
+           [ "path", `String "/outside/tree.ml"
+           ; "line_start", `Int 1
+           ; "focus_mode", `String "editing"
+           ]);
+    (match
+       Ide_bridge.list_events
+         ~base_path:base_dir
+         ~codebase:"github.com_x_y"
+         ~kind:Ide_bridge.Tool
+         ()
+     with
+     | [] -> ()
+     | events ->
+       Alcotest.failf "unaddressed call must persist nothing, got %d" (List.length events));
+    check int "no cursor" 0
+      (List.length
+         (Ide_bridge.list_cursors ~base_path:base_dir ~codebase:"github.com_x_y" ())))
 ;;
 
 let test_cursor_from_hook_uses_real_file_and_line () =
@@ -211,7 +395,7 @@ let test_cursor_from_hook_uses_real_file_and_line () =
     in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
+      ~attribution:(addressed_file ~codebase:"github.com_x_y" ~path:"lib/test.ml")
       ~tool_name:"keeper_ide_annotate"
       ~keeper_id:"k1"
       ~turn_id:"turn-7"
@@ -220,7 +404,12 @@ let test_cursor_from_hook_uses_real_file_and_line () =
       ~duration_ms:10.0
       ~output_text:"annotated"
       ~input;
-    match Ide_bridge.list_cursors ~base_path:base_dir () with
+    match
+      Ide_bridge.list_cursors
+        ~base_path:base_dir
+        ~codebase:("github.com_x_y")
+        ()
+    with
     | [ cursor ] ->
       check string "keeper_id" "k1" (json_string "keeper_id" cursor);
       check string "file_path" "lib/test.ml" (json_string "file_path" cursor);
@@ -245,7 +434,7 @@ let test_cursor_from_hook_notifies_after_persist () =
       (fun () ->
         Ide_bridge.ingest_tool_event_from_hook
           ~base_path:base_dir
-          ~partition:Ide_paths.Legacy_default
+          ~attribution:(addressed_file ~codebase:"github.com_x_y" ~path:"lib/test.ml")
           ~tool_name:"keeper_ide_annotate"
           ~keeper_id:"k1"
           ~turn_id:"turn-7"
@@ -262,7 +451,11 @@ let test_cursor_from_hook_notifies_after_persist () =
         check (option string) "durable cursor notification keeper" (Some "k1")
           !notified_keeper;
         check int "cursor is durable before notification returns" 1
-          (List.length (Ide_bridge.list_cursors ~base_path:base_dir ()))))
+          (List.length
+             (Ide_bridge.list_cursors
+                ~base_path:base_dir
+                ~codebase:("github.com_x_y")
+                ()))))
 ;;
 
 let test_cursor_notifications_reraise_cancellation () =
@@ -284,7 +477,7 @@ let test_cursor_notifications_reraise_cancellation () =
           raises_cancel (fun () ->
             Ide_bridge.ingest_tool_event_from_hook
               ~base_path:base_dir
-              ~partition:Ide_paths.Legacy_default
+              ~attribution:(addressed_file ~codebase:"github.com_x_y" ~path:"lib/test.ml")
               ~tool_name:"keeper_ide_annotate"
               ~keeper_id:"k1"
               ~turn_id:"turn-7"
@@ -304,6 +497,7 @@ let test_cursor_notifications_reraise_cancellation () =
           raises_cancel (fun () ->
             Ide_bridge.ingest_cursor_event
               ~base_path:base_dir
+              ~codebase:"github.com_x_y"
               ~keeper_id:"k1"
               ~file_path:"lib/test.ml"
               ~line:13
@@ -319,7 +513,7 @@ let test_cursor_from_hook_skips_missing_line () =
     let input = `Assoc [ "file_path", `String "lib/test.ml" ] in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
+      ~attribution:(addressed_file ~codebase:"github.com_x_y" ~path:"lib/test.ml")
       ~tool_name:"keeper_ide_annotate"
       ~keeper_id:"k1"
       ~turn_id:"turn-7"
@@ -329,7 +523,8 @@ let test_cursor_from_hook_skips_missing_line () =
       ~output_text:"annotated"
       ~input;
     check int "no cursor without line" 0
-      (List.length (Ide_bridge.list_cursors ~base_path:base_dir ())))
+      (List.length
+         (Ide_bridge.list_cursors ~base_path:base_dir ~codebase:"github.com_x_y" ())))
 ;;
 
 let test_cursor_from_hook_skips_missing_focus_mode () =
@@ -339,7 +534,7 @@ let test_cursor_from_hook_skips_missing_focus_mode () =
     in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
+      ~attribution:(addressed_file ~codebase:"github.com_x_y" ~path:"lib/test.ml")
       ~tool_name:"keeper_ide_annotate"
       ~keeper_id:"k1"
       ~turn_id:"turn-7"
@@ -349,177 +544,21 @@ let test_cursor_from_hook_skips_missing_focus_mode () =
       ~output_text:"annotated"
       ~input;
     check int "no cursor without explicit focus mode" 0
-      (List.length (Ide_bridge.list_cursors ~base_path:base_dir ())))
+      (List.length
+         (Ide_bridge.list_cursors ~base_path:base_dir ~codebase:"github.com_x_y" ())))
 ;;
 
-let test_hook_extracts_file_path_from_path_key () =
-  with_temp_dir (fun base_dir ->
-    let input = `Assoc [ "path", `String "lib/test.ml"; "content", `String "hello" ] in
-    Ide_bridge.ingest_tool_event_from_hook
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~tool_name:"fs_write"
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~outcome:"ok"
-      ~typed_outcome_str:"progress"
-      ~duration_ms:100.0
-      ~output_text:"wrote 10 lines"
-      ~input;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
-    let path = Filename.concat dir "tool_events.jsonl" in
-    let ic = open_in path in
-    let line = input_line ic in
-    close_in ic;
-    let json = Yojson.Safe.from_string line in
-    let fp = Yojson.Safe.Util.member "file_path" json in
-    check string "file_path" "lib/test.ml" (Yojson.Safe.Util.to_string fp))
-;;
 
-let test_hook_extracts_file_path_from_file_path_key () =
-  with_temp_dir (fun base_dir ->
-    let input = `Assoc [ "file_path", `String "src/main.ml" ] in
-    Ide_bridge.ingest_tool_event_from_hook
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~tool_name:"fs_edit"
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~outcome:"ok"
-      ~typed_outcome_str:"progress"
-      ~duration_ms:50.0
-      ~output_text:"edited"
-      ~input;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
-    let path = Filename.concat dir "tool_events.jsonl" in
-    let ic = open_in path in
-    let line = input_line ic in
-    close_in ic;
-    let json = Yojson.Safe.from_string line in
-    let fp = Yojson.Safe.Util.member "file_path" json in
-    check string "file_path" "src/main.ml" (Yojson.Safe.Util.to_string fp))
-;;
 
-let test_hook_and_cursor_share_path_priority () =
-  with_temp_dir (fun base_dir ->
-    let input =
-      `Assoc
-        [ "path", `String "lib/from-path.ml"
-        ; "file_path", `String "lib/from-file-path.ml"
-        ; "line", `Int 9
-        ; "focus_mode", `String "editing"
-        ]
-    in
-    Ide_bridge.ingest_tool_event_from_hook
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~tool_name:"fs_edit"
-      ~keeper_id:"k1"
-      ~turn_id:"turn-9"
-      ~outcome:"ok"
-      ~typed_outcome_str:"progress"
-      ~duration_ms:50.0
-      ~output_text:"edited"
-      ~input;
-    let events = Ide_bridge.list_events ~base_path:base_dir () in
-    let cursors = Ide_bridge.list_cursors ~base_path:base_dir () in
-    match events, cursors with
-    | event :: _, [ cursor ] ->
-      check
-        string
-        "tool event path priority"
-        "lib/from-path.ml"
-        (json_string "file_path" event);
-      check
-        string
-        "cursor path priority"
-        "lib/from-path.ml"
-        (json_string "file_path" cursor)
-    | _ -> fail "expected one tool event and one cursor")
-;;
 
-let test_hook_and_cursor_share_blank_path_fallback () =
-  with_temp_dir (fun base_dir ->
-    let input =
-      `Assoc
-        [ "path", `String " "
-        ; "file_path", `String "lib/from-file-path.ml"
-        ; "line", `Int 9
-        ; "focus_mode", `String "editing"
-        ]
-    in
-    Ide_bridge.ingest_tool_event_from_hook
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~tool_name:"fs_edit"
-      ~keeper_id:"k1"
-      ~turn_id:"turn-9"
-      ~outcome:"ok"
-      ~typed_outcome_str:"progress"
-      ~duration_ms:50.0
-      ~output_text:"edited"
-      ~input;
-    let events = Ide_bridge.list_events ~base_path:base_dir () in
-    let cursors = Ide_bridge.list_cursors ~base_path:base_dir () in
-    match events, cursors with
-    | event :: _, [ cursor ] ->
-      check
-        string
-        "tool event blank path fallback"
-        "lib/from-file-path.ml"
-        (json_string "file_path" event);
-      check
-        string
-        "cursor blank path fallback"
-        "lib/from-file-path.ml"
-        (json_string "file_path" cursor)
-    | _ -> fail "expected one tool event and one cursor")
-;;
 
-let test_hook_and_cursor_share_nested_arguments_path () =
-  with_temp_dir (fun base_dir ->
-    let input =
-      `Assoc
-        [ ( "arguments"
-          , `Assoc [ "file_path", `String "lib/from-arguments.ml" ] )
-        ; "line", `Int 9
-        ; "focus_mode", `String "editing"
-        ]
-    in
-    Ide_bridge.ingest_tool_event_from_hook
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~tool_name:"fs_edit"
-      ~keeper_id:"k1"
-      ~turn_id:"turn-9"
-      ~outcome:"ok"
-      ~typed_outcome_str:"progress"
-      ~duration_ms:50.0
-      ~output_text:"edited"
-      ~input;
-    let events = Ide_bridge.list_events ~base_path:base_dir () in
-    let cursors = Ide_bridge.list_cursors ~base_path:base_dir () in
-    match events, cursors with
-    | event :: _, [ cursor ] ->
-      check
-        string
-        "tool event nested arguments path"
-        "lib/from-arguments.ml"
-        (json_string "file_path" event);
-      check
-        string
-        "cursor nested arguments path"
-        "lib/from-arguments.ml"
-        (json_string "file_path" cursor)
-    | _ -> fail "expected one tool event and one cursor")
-;;
 
 let test_hook_no_file_path () =
   with_temp_dir (fun base_dir ->
     let input = `Assoc [ "command", `String "ls" ] in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
+      ~attribution:Agent_observation.Pathless
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -528,14 +567,11 @@ let test_hook_no_file_path () =
       ~duration_ms:10.0
       ~output_text:"file1.ml\nfile2.ml"
       ~input;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
+    (* RFC-0378 §5.2: a pathless call is a keeper fact — the ide store
+       persists nothing for it, in any store. *)
+    let dir = Ide_paths.code_store_dir ~base_dir:base_dir ~codebase:"github.com_other_repo" in
     let path = Filename.concat dir "tool_events.jsonl" in
-    let ic = open_in path in
-    let line = input_line ic in
-    close_in ic;
-    let json = Yojson.Safe.from_string line in
-    let fp = Yojson.Safe.Util.member "file_path" json in
-    check bool "file_path is null" true (fp = `Null))
+    check bool "pathless call persists no ide row" false (Sys.file_exists path))
 ;;
 
 let test_hook_summary_truncation () =
@@ -544,7 +580,7 @@ let test_hook_summary_truncation () =
     let input = `Assoc [] in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
+      ~attribution:(addressed_file ~codebase:"github.com_x_y" ~path:"lib/test.ml")
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -553,7 +589,11 @@ let test_hook_summary_truncation () =
       ~duration_ms:10.0
       ~output_text:long_output
       ~input;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
+    let dir =
+      Ide_paths.code_store_dir
+        ~base_dir:base_dir
+        ~codebase:"github.com_x_y"
+    in
     let path = Filename.concat dir "tool_events.jsonl" in
     let ic = open_in path in
     let line = input_line ic in
@@ -568,7 +608,7 @@ let test_hook_typed_outcome_mapping () =
     let input = `Assoc [] in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
+      ~attribution:(addressed_file ~codebase:"github.com_x_y" ~path:"lib/test.ml")
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -577,7 +617,11 @@ let test_hook_typed_outcome_mapping () =
       ~duration_ms:10.0
       ~output_text:"command failed"
       ~input;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
+    let dir =
+      Ide_paths.code_store_dir
+        ~base_dir:base_dir
+        ~codebase:"github.com_x_y"
+    in
     let path = Filename.concat dir "tool_events.jsonl" in
     let ic = open_in path in
     let line = input_line ic in
@@ -595,6 +639,7 @@ let test_concurrent_ingest () =
       fun () ->
         Ide_bridge.ingest_tool_event
           ~base_path:base_dir
+          ~codebase:"github.com_other_repo"
           ~tool_name:"fs_write"
           ~keeper_id:"k1"
           ~turn_id:(Printf.sprintf "t-%d" i)
@@ -611,7 +656,7 @@ let test_concurrent_ingest () =
       Eio.Switch.run (fun sw ->
         List.iter (fun f -> Eio.Fiber.fork ~sw f) fibers));
     (* Verify all events were written *)
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
+    let dir = Ide_paths.code_store_dir ~base_dir:base_dir ~codebase:"github.com_other_repo" in
     let path = Filename.concat dir "tool_events.jsonl" in
     let ic = open_in path in
     let count = ref 0 in
@@ -761,6 +806,7 @@ let test_list_events_reads_across_segments () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
+      ~codebase:"github.com_other_repo"
       ~tool_name:"write_file"
       ~keeper_id:"k1"
       ~turn_id:"t-live"
@@ -771,7 +817,7 @@ let test_list_events_reads_across_segments () =
       ~file_path:None
       ~timestamp_ms:5000L
       ();
-    let dir = Ide_paths.partition_store_dir ~base_dir Ide_paths.Legacy_default in
+    let dir = Ide_paths.code_store_dir ~base_dir ~codebase:"github.com_other_repo" in
     let path = Filename.concat dir "tool_events.jsonl" in
     let oc = open_out (path ^ ".1") in
     output_string oc
@@ -779,7 +825,12 @@ let test_list_events_reads_across_segments () =
        ^ "\n");
     close_out oc;
     let events =
-      Ide_bridge.list_events ~base_path:base_dir ~kind:Ide_bridge.Tool ~limit:10 ()
+      Ide_bridge.list_events
+        ~base_path:base_dir
+        ~codebase:"github.com_other_repo"
+        ~kind:Ide_bridge.Tool
+        ~limit:10
+        ()
     in
     check int "reads both live and archived segments" 2 (List.length events);
     check (list string) "newest-first across segments" [ "t-live"; "t-arch" ]
@@ -851,14 +902,11 @@ let test_queue_writer_drains () =
     check int "writer drained all jobs" n (Atomic.get ran))
 ;;
 
-(* task-1733 regression: a partition threaded through the hook path (as the
-   agent-observation sink now does with [event.partition]) must route the tool
-   event AND its derived cursor into that partition's store — not the orphan
-   [Legacy_default]. This is the exact split that left dashboard by-url reads
-   empty while data piled up in _orphan. *)
-let test_partition_routes_tool_event_and_cursor_by_url () =
+(* The typed codebase carried through the hook path must route the tool event
+   and its derived cursor into the same store. *)
+let test_codebase_routes_tool_event_and_cursor () =
   with_temp_dir (fun base_dir ->
-    let by_url = Ide_paths.By_url "github.com/jeong-sik/wkbl" in
+    let by_url = "github.com_jeong-sik_wkbl" in
     let input =
       `Assoc
         [ "file_path", `String "lib/test.ml"
@@ -868,7 +916,7 @@ let test_partition_routes_tool_event_and_cursor_by_url () =
     in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
-      ~partition:by_url
+      ~attribution:(addressed_file ~codebase:"github.com_jeong-sik_wkbl" ~path:"lib/test.ml")
       ~tool_name:"keeper_ide_annotate"
       ~keeper_id:"k1"
       ~turn_id:"turn-1"
@@ -879,35 +927,28 @@ let test_partition_routes_tool_event_and_cursor_by_url () =
       ~input;
     (* Scoped (by-url) reads see both the tool event and the cursor. *)
     let by_url_events =
-      Ide_bridge.list_events ~base_path:base_dir ~partition:by_url ()
+      Ide_bridge.list_events ~base_path:base_dir ~codebase:by_url ()
     in
-    check bool "by-url partition holds the tool event" true
+    check bool "codebase holds the tool event" true
       (List.length by_url_events >= 1);
     let by_url_cursors =
-      Ide_bridge.list_cursors ~base_path:base_dir ~partition:by_url ()
+      Ide_bridge.list_cursors ~base_path:base_dir ~codebase:by_url ()
     in
-    check bool "by-url partition holds the derived cursor" true
+    check bool "codebase holds the derived cursor" true
       (List.length by_url_cursors >= 1);
-    (* The orphan partition (what an unscoped read used to fall back to) stays
-       empty for a scoped write — proving the write is no longer hardcoded to
-       Legacy_default. *)
-    let orphan_events =
+    let other_events =
       Ide_bridge.list_events ~base_path:base_dir
-        ~partition:Ide_paths.Legacy_default ()
+        ~codebase:"github.com_other_repo" ()
     in
-    check int "orphan partition has no scoped tool event" 0
-      (List.length orphan_events);
-    let orphan_cursors =
+    check int "other codebase has no tool event" 0 (List.length other_events);
+    let other_cursors =
       Ide_bridge.list_cursors ~base_path:base_dir
-        ~partition:Ide_paths.Legacy_default ()
+        ~codebase:"github.com_other_repo" ()
     in
-    check int "orphan partition has no scoped cursor" 0
-      (List.length orphan_cursors))
+    check int "other codebase has no cursor" 0 (List.length other_cursors))
 ;;
 
-(* Backward compat: an explicit [Legacy_default] write still lands in the orphan
-   store and is invisible to a by-url read (partitions are isolated). *)
-let test_partition_legacy_default_isolated_from_by_url () =
+let test_codebases_are_isolated () =
   with_temp_dir (fun base_dir ->
     let input =
       `Assoc
@@ -918,7 +959,7 @@ let test_partition_legacy_default_isolated_from_by_url () =
     in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
+      ~attribution:(addressed_file ~codebase:"github.com_x_y" ~path:"lib/test.ml")
       ~tool_name:"keeper_ide_annotate"
       ~keeper_id:"k1"
       ~turn_id:"turn-1"
@@ -927,18 +968,19 @@ let test_partition_legacy_default_isolated_from_by_url () =
       ~duration_ms:5.0
       ~output_text:"{}"
       ~input;
-    let orphan_events =
-      Ide_bridge.list_events ~base_path:base_dir
-        ~partition:Ide_paths.Legacy_default ()
-    in
-    check bool "legacy write lands in orphan" true
-      (List.length orphan_events >= 1);
     let by_url_events =
-      Ide_bridge.list_events ~base_path:base_dir
-        ~partition:(Ide_paths.By_url "github.com/jeong-sik/wkbl") ()
+      Ide_bridge.list_events
+        ~base_path:base_dir
+        ~codebase:("github.com_x_y")
+        ()
     in
-    check int "by-url read does not see the orphan write" 0
-      (List.length by_url_events))
+    check bool "addressed write lands in its codebase" true
+      (List.length by_url_events >= 1);
+    let other_events =
+      Ide_bridge.list_events ~base_path:base_dir ~codebase:"github.com_other_repo" ()
+    in
+    check int "other codebase does not see the addressed write" 0
+      (List.length other_events))
 ;;
 
 let () =
@@ -946,14 +988,13 @@ let () =
     "ide_bridge"
     [ ( "ingest"
       , [ test_case "tool event" `Quick test_ingest_tool_event
-        ; test_case "turn event" `Quick test_ingest_turn_event
+        ; test_case "seeded turn rows remain readable" `Quick test_turn_rows_remain_readable
         ; test_case "multiple events" `Quick test_ingest_multiple_events
         ] )
-    ; ( "partition_attribution"
-      , [ test_case "by-url routes tool event + cursor" `Quick
-            test_partition_routes_tool_event_and_cursor_by_url
-        ; test_case "legacy_default isolated from by-url" `Quick
-            test_partition_legacy_default_isolated_from_by_url
+    ; ( "codebase attribution"
+      , [ test_case "routes tool event + cursor" `Quick
+            test_codebase_routes_tool_event_and_cursor
+        ; test_case "codebases are isolated" `Quick test_codebases_are_isolated
         ] )
     ; ( "read"
       , [ test_case "filters keeper and pages" `Quick test_list_events_filters_keeper_and_pages
@@ -977,8 +1018,19 @@ let () =
         ; test_case "drops oldest at capacity" `Quick test_queue_drop_oldest
         ; test_case "writer drains queue" `Quick test_queue_writer_drains
         ] )
+    ; ( "document identity"
+      , [ test_case
+            "row carries the resolved path, not the raw argument"
+            `Quick
+            test_hook_row_carries_the_resolved_path_not_the_raw_argument
+        ; test_case
+            "pathless call stores no document"
+            `Quick
+            test_pathless_hook_stores_no_document
+        ] )
     ; ( "cursor"
-      , [ test_case "from hook uses real file and line" `Quick test_cursor_from_hook_uses_real_file_and_line
+      , [ test_case "unaddressed hook persists nothing" `Quick test_unaddressed_hook_persists_nothing
+        ; test_case "from hook uses real file and line" `Quick test_cursor_from_hook_uses_real_file_and_line
         ; test_case
             "from hook notifies after persist"
             `Quick
@@ -994,21 +1046,7 @@ let () =
             test_cursor_from_hook_skips_missing_focus_mode
         ] )
     ; ( "hook_extract"
-      , [ test_case "file_path from path key" `Quick test_hook_extracts_file_path_from_path_key
-        ; test_case "file_path from file_path key" `Quick test_hook_extracts_file_path_from_file_path_key
-        ; test_case
-            "tool event and cursor share path priority"
-            `Quick
-            test_hook_and_cursor_share_path_priority
-        ; test_case
-            "tool event and cursor share blank path fallback"
-            `Quick
-            test_hook_and_cursor_share_blank_path_fallback
-        ; test_case
-            "tool event and cursor share nested arguments path"
-            `Quick
-            test_hook_and_cursor_share_nested_arguments_path
-        ; test_case "no file_path (execute)" `Quick test_hook_no_file_path
+      , [ test_case "no file_path (execute)" `Quick test_hook_no_file_path
         ; test_case "summary truncation" `Quick test_hook_summary_truncation
         ; test_case "typed_outcome mapping" `Quick test_hook_typed_outcome_mapping
         ] )

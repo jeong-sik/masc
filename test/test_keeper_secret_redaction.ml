@@ -98,7 +98,7 @@ let test_snapshot_redacts_base_secret_values () =
   let base_secret = "base.secret!" in
   write_file (Filename.concat (Filename.concat base_root "env") "GH_TOKEN")
     (base_secret ^ "\n");
-  let redaction = R.snapshot ~base_path:base ~keeper_name:"idealist" in
+  let redaction = R.snapshot ~base_path:base ~keeper_name:"fixture-keeper" in
   let redacted = R.redact_text redaction ("token=" ^ base_secret) in
   not_contains "base env exact value hidden" redacted base_secret;
   contains "redaction marker present" redacted "[REDACTED]"
@@ -124,6 +124,34 @@ let test_json_redaction_preserves_shape () =
   not_contains "exact value hidden in json" raw env_secret;
   not_contains "sensitive key value hidden" raw "plain-password";
   contains "count preserved" raw {|"count":1|}
+
+(* A secret can be the key, not only the value: a header name, or a parameter
+   a tool used as a dict key. Three boundaries call [redact_json] and only one
+   used to also redact keys, so the other two emitted the secret (#22941). *)
+let test_json_redaction_covers_object_keys () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let keeper_name = "json-keys" in
+  let root = secret_root_default ~base ~keeper_name in
+  let env_secret = "key.secret!" in
+  write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN") env_secret;
+  let redaction = R.snapshot ~base_path:base ~keeper_name in
+  let json =
+    `Assoc
+      [ (env_secret, `String "value under a secret key")
+      ; ( "nested"
+        , `Assoc [ ("headers", `Assoc [ (env_secret, `String "1") ]) ] )
+      ; ("list", `List [ `Assoc [ (env_secret, `Int 2) ] ])
+      ; ("kept", `String "not a secret")
+      ]
+  in
+  let raw = Yojson.Safe.to_string (R.redact_json redaction json) in
+  not_contains "top-level key redacted" raw env_secret;
+  contains "the structure survives" raw {|"kept":"not a secret"|};
+  contains "the value under the redacted key survives" raw "value under a secret key";
+  contains "the nested int survives" raw "2"
+;;
 
 let test_execute_output_redaction_uses_keeper_snapshot () =
   let base = temp_dir () in
@@ -151,46 +179,122 @@ let test_execute_output_redaction_uses_keeper_snapshot () =
   contains "stdout marker present" stdout "[REDACTED]";
   contains "stderr marker present" stderr "[REDACTED]"
 
-let test_stream_redaction_reassembles_split_secret () =
+let test_stream_redaction_hides_secret_across_chunks () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let keeper_name = "stream" in
   let root = secret_root_default ~base ~keeper_name in
-  let secret = "stream.secret!" in
-  write_file (Filename.concat (Filename.concat root "env") "STREAM_TOKEN") secret;
-  let redaction = R.snapshot ~base_path:base ~keeper_name in
-  let state = R.create_stream_state () in
-  let first = R.redact_stream_chunk redaction state "prefix stream." in
-  Alcotest.(check string) "unterminated line is held" "" first;
-  let second = R.redact_stream_chunk redaction state "secret! suffix\nnext\n" in
-  not_contains "split secret hidden" second secret;
-  contains "split secret marker present" second "[REDACTED]";
-  contains "complete trailing line emitted" second "next\n";
-  Alcotest.(check string)
-    "finish after newline has no held bytes"
-    ""
-    (R.redact_stream_finish redaction state)
+  let secret = "chunk.boundary.secret" in
+  write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN") secret;
+  let state =
+    R.snapshot ~base_path:base ~keeper_name |> R.create_stream_state
+  in
+  let first = R.redact_stream_chunk state "prefix chunk.boundary." in
+  let second = R.redact_stream_chunk state "secret suffix\nnext" in
+  let trailing = R.redact_stream_finish state in
+  Alcotest.(check string) "unterminated line is withheld" "" first;
+  not_contains "joined secret is hidden" second secret;
+  contains "joined line has marker" second "[REDACTED]";
+  Alcotest.(check string) "final unterminated line is emitted" "next" trailing
 
-let test_stream_redaction_finish_redacts_held_tail () =
+let test_execute_output_redacts_github_hosts_scalar () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
-  let keeper_name = "stream-tail" in
+  let token = "classic-token-without-structural-prefix" in
+  let hosts = Filename.concat base "hosts.yml" in
+  write_file hosts
+    ("github.com:\n  user: keeper-user\n  oauth_token: " ^ token ^ "\n");
+  let stdout, stderr, output =
+    Execute.redact_execute_output_with_additional_secret_files
+      ~additional_secret_files:[ hosts ]
+      ~base_path:base
+      ~keeper_name:"github-output"
+      ~stdout:("token=" ^ token)
+      ~stderr:""
+  in
+  not_contains "GitHub token hidden from stdout" stdout token;
+  not_contains "GitHub token hidden from combined output" output token;
+  Alcotest.(check string) "empty stderr remains empty" "" stderr;
+  contains "GitHub token redaction marker present" stdout "[REDACTED]"
+
+let test_stream_redacts_github_hosts_scalar_across_chunks () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let token = "github-token-split-across-chunks" in
+  let hosts = Filename.concat base "hosts.yml" in
+  write_file hosts ("github.com:\n  oauth_token: " ^ token ^ "\n");
+  let state =
+    R.snapshot_with_additional_secret_files
+      ~additional_secret_files:[ hosts ]
+      ~base_path:base
+      ~keeper_name:"github-stream"
+    |> R.create_stream_state
+  in
+  let first = R.redact_stream_chunk state "github-token-split-" in
+  let second = R.redact_stream_chunk state "across-chunks\n" in
+  Alcotest.(check string) "partial token is withheld" "" first;
+  not_contains "streamed GitHub token is hidden" second token;
+  contains "streamed GitHub token marker present" second "[REDACTED]"
+
+let test_stream_emits_bounded_unterminated_output () =
+  let input = String.make 200_000 'x' in
+  let state = R.create_stream_state R.empty in
+  let emitted = R.redact_stream_chunk state input in
+  let trailing = R.redact_stream_finish state in
+  Alcotest.(check bool) "long line streams before finish" true
+    (String.length emitted > 0);
+  Alcotest.(check bool) "only a bounded suffix remains" true
+    (String.length trailing < 10_000);
+  Alcotest.(check string) "streaming preserves ordinary bytes" input
+    (emitted ^ trailing)
+
+let test_stream_emits_carriage_return_progress () =
+  let state = R.create_stream_state R.empty in
+  let emitted = R.redact_stream_chunk state "step 1\rstep 2\rpartial" in
+  Alcotest.(check string) "carriage-return records stream immediately"
+    "step 1\rstep 2\r"
+    emitted;
+  Alcotest.(check string) "partial progress remains for finish" "partial"
+    (R.redact_stream_finish state)
+
+let test_stream_redacts_secret_crossing_bounded_flush () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let keeper_name = "bounded-crossing" in
   let root = secret_root_default ~base ~keeper_name in
-  let secret = "tail.secret!" in
-  write_file (Filename.concat (Filename.concat root "env") "TAIL_TOKEN") secret;
-  let redaction = R.snapshot ~base_path:base ~keeper_name in
-  let state = R.create_stream_state () in
-  let emitted = R.redact_stream_chunk redaction state ("tail=" ^ secret) in
-  Alcotest.(check string) "unterminated tail is held" "" emitted;
-  let flushed = R.redact_stream_finish redaction state in
-  not_contains "held tail secret hidden" flushed secret;
-  contains "held tail marker present" flushed "[REDACTED]";
-  Alcotest.(check string)
-    "finish clears held bytes"
-    ""
-    (R.redact_stream_finish redaction state)
+  let secret = "bounded.flush.secret.value" in
+  write_file (Filename.concat (Filename.concat root "env") "TOKEN") secret;
+  let state = R.snapshot ~base_path:base ~keeper_name |> R.create_stream_state in
+  let body = String.make 4_090 'x' ^ secret ^ String.make 5_000 'y' in
+  let first = R.redact_stream_chunk state body in
+  let emitted = first ^ R.redact_stream_chunk state "\n" in
+  let trailing = R.redact_stream_finish state in
+  Alcotest.(check bool) "bounded line emits before its terminator" true
+    (String.length first > 0);
+  not_contains "secret crossing the bounded cut is hidden" (emitted ^ trailing) secret;
+  contains "crossing secret leaves a marker" (emitted ^ trailing) "[REDACTED]"
+
+let test_stream_bounds_overlapping_repeated_secret () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let keeper_name = "bounded-overlap" in
+  let root = secret_root_default ~base ~keeper_name in
+  let secret = "aaaaaaaa" in
+  write_file (Filename.concat (Filename.concat root "env") "TOKEN") secret;
+  let state = R.snapshot ~base_path:base ~keeper_name |> R.create_stream_state in
+  let emitted = R.redact_stream_chunk state (String.make 200_000 'a') in
+  let trailing = R.redact_stream_finish state in
+  Alcotest.(check bool) "overlapping secret stream emits before finish" true
+    (String.length emitted > 0);
+  Alcotest.(check bool) "overlapping secret leaves a bounded suffix" true
+    (String.length trailing < 10_000);
+  not_contains "repeated secret bytes do not escape" (emitted ^ trailing) secret;
+  contains "repeated secret produces markers" emitted "[REDACTED]"
 
 let () =
   Alcotest.run
@@ -204,11 +308,23 @@ let () =
             test_snapshot_redacts_base_secret_values;
           Alcotest.test_case "redacts json while preserving shape" `Quick
             test_json_redaction_preserves_shape;
+          Alcotest.test_case "redacts json object keys" `Quick
+            test_json_redaction_covers_object_keys;
           Alcotest.test_case "redacts Execute stdout stderr and combined output" `Quick
             test_execute_output_redaction_uses_keeper_snapshot;
-          Alcotest.test_case "reassembles split stream secrets" `Quick
-            test_stream_redaction_reassembles_split_secret;
-          Alcotest.test_case "redacts held stream tail on finish" `Quick
-            test_stream_redaction_finish_redacts_held_tail;
+          Alcotest.test_case "redacts a secret split across chunks" `Quick
+            test_stream_redaction_hides_secret_across_chunks;
+          Alcotest.test_case "redacts GitHub hosts scalar from Execute output" `Quick
+            test_execute_output_redacts_github_hosts_scalar;
+          Alcotest.test_case "redacts streamed GitHub scalar across chunks" `Quick
+            test_stream_redacts_github_hosts_scalar_across_chunks;
+          Alcotest.test_case "bounds unterminated stream buffering" `Quick
+            test_stream_emits_bounded_unterminated_output;
+          Alcotest.test_case "streams carriage-return progress" `Quick
+            test_stream_emits_carriage_return_progress;
+          Alcotest.test_case "redacts a secret crossing a bounded flush" `Quick
+            test_stream_redacts_secret_crossing_bounded_flush;
+          Alcotest.test_case "bounds an overlapping repeated secret" `Quick
+            test_stream_bounds_overlapping_repeated_secret;
         ] )
     ]

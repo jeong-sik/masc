@@ -21,7 +21,10 @@ let default_config = {
     Env_config_core.get_string
       ~default:Masc_network_defaults.masc_http_default_host
       "MASC_HTTP_HOST";
-  max_connections = Env_config_core.get_int ~default:512 "MASC_HTTP_MAX_CONNECTIONS";
+  max_connections =
+    Env_config_core.get_int
+      ~default:Masc_network_defaults.masc_http_default_max_connections
+      "MASC_HTTP_MAX_CONNECTIONS";
   listen_backlog = Env_config_core.get_int ~default:128 "MASC_TCP_LISTEN_BACKLOG";
 }
 
@@ -64,7 +67,7 @@ end
     [Httpun.Reqd.respond_with_string] to silently discard the
     [Failure "...invalid state..."] that httpun raises when the
     request descriptor has already transitioned into its error-
-    handling path (e.g. client disconnected during a long OAS
+    handling path (e.g. client disconnected during a long AGENT_CORE
     turn and httpun's own error_handler fired first — the
     2026-05-05 cycle9 FATAL race).
 
@@ -85,8 +88,8 @@ let safe_respond_with_string reqd response body =
       match Late_response.classify_write_failure exn with
       | Some msg ->
           (* Recognised late-response race (httpun "invalid state" / closed
-             writer).  Aligned with [Server_ws_standalone] heartbeat /
-             send_pong / handler sites which already log this at debug —
+             writer).  Aligned with the WebSocket heartbeat / send_pong /
+             handler sites which already log this at debug —
              closes the #13082 review N-of-M leftover: the SSOT classifier
              was unified but this site kept emitting WARN, drowning the
              [None] branch's genuinely-unexpected signal in routine
@@ -96,7 +99,7 @@ let safe_respond_with_string reqd response body =
           Log.Http.debug
             "[http-eio] respond_with_string skipped (reqd already in \
              error-handling state; classifier match — \
-             2026-05-05 OAS cancellation race): %s" msg
+             2026-05-05 AGENT_CORE cancellation race): %s" msg
       | None ->
           Log.Http.warn
             "[http-eio] respond_with_string unexpected exception: %s"
@@ -171,43 +174,102 @@ module Response = struct
 
       @param compress Enable compression if client accepts (default: true)
       @param request Optional request to check Accept-Encoding header *)
+  (* One entity tag policy for every response that carries one. Truncated
+     because a tag only has to distinguish this body from the previous body of
+     the same resource, not resist collision from an attacker. *)
+  let etag_hex_chars = 12
+
+  let etag_of_body body =
+    let hash = Digest.string body |> Digest.to_hex in
+    String.sub hash 0 (min etag_hex_chars (String.length hash))
+
+  (* Weak, because the same JSON goes out gzipped, zstd-compressed, or plain
+     depending on Accept-Encoding, and those are three encodings of one
+     payload rather than three payloads. If-None-Match compares weakly, which
+     is the comparison we want. *)
+  let weak_etag_value body = "W/\"" ^ etag_of_body body ^ "\""
+
+  (* Store the response but revalidate before every use. Without this a cache
+     is free to invent a freshness lifetime for a 200 that carries a validator
+     and serve keeper state that has moved on. *)
+  let json_revalidate_cache_control = "no-cache"
+
+  (* What a request gets, decided before any socket work. Kept as a closed
+     variant and a pure function so every combination of method, status, and
+     If-None-Match is decidable in a test without constructing a [Reqd]. *)
+  type json_conditional =
+    | Untagged
+    (** No validator offered: the response is not a successful safe read, so a
+        tag would invite revalidation of something that should not be reused. *)
+    | Tagged of string
+    (** Full body, carrying this tag for the client to present next time. *)
+    | Not_modified of string
+    (** The client's tag matches; it already holds this body. *)
+
+  let json_conditional ~status ~(meth : Httpun.Method.t) ~if_none_match ~body =
+    let safe_read = match meth with `GET | `HEAD -> true | _ -> false in
+    if not (safe_read && status = `OK) then Untagged
+    else
+      let etag_value = weak_etag_value body in
+      match if_none_match with
+      | Some client_tag when String.equal (String.trim client_tag) etag_value ->
+        Not_modified etag_value
+      | Some _ | None -> Tagged etag_value
+
   let json ?(status = `OK) ?(compress = true) ?(extra_headers = []) ?request body reqd =
     let request =
       match request with
       | Some req -> req
       | None -> Httpun.Reqd.request reqd
     in
-    let final_body, compression_headers =
-      Http_response_payload.compress_body
-        ~compress
-        ~accept_encoding:(Httpun.Headers.get request.headers "accept-encoding")
-        body
+    let send ~validator_headers =
+      let final_body, compression_headers =
+        Http_response_payload.compress_body
+          ~compress
+          ~accept_encoding:(Httpun.Headers.get request.headers "accept-encoding")
+          body
+      in
+      safe_respond_with_string reqd
+        (response
+           ~before_headers:(extra_headers @ validator_headers)
+           ~tail_headers:compression_headers
+           ~content_type:json_content_type status final_body)
+        final_body
     in
-    safe_respond_with_string reqd
-      (response ~before_headers:extra_headers ~tail_headers:compression_headers
-         ~content_type:json_content_type status final_body)
-      final_body
+    (* A client that sends no If-None-Match always receives the body: it has
+       not claimed to hold a copy. Measured on the live server, 11 of 12 polled
+       dashboard routes return byte-identical bodies across repeated polls, so
+       for a client that does present a tag the match is the common case. *)
+    match
+      json_conditional
+        ~status
+        ~meth:request.Httpun.Request.meth
+        ~if_none_match:
+          (Httpun.Headers.get request.Httpun.Request.headers "if-none-match")
+        ~body
+    with
+    | Untagged -> send ~validator_headers:[]
+    | Tagged etag_value ->
+      send
+        ~validator_headers:
+          [ ("etag", etag_value); ("cache-control", json_revalidate_cache_control) ]
+    | Not_modified etag_value ->
+      (* The body is not compressed, written to the socket, or parsed by the
+         client. That is the whole saving — the projection behind it already
+         came from the dashboard cache. *)
+      let headers =
+        Httpun.Headers.of_list
+          [ ("content-length", "0");
+            ("etag", etag_value);
+            ("cache-control", json_revalidate_cache_control);
+          ]
+      in
+      safe_respond_with_string reqd
+        (Httpun.Response.create ~headers `Not_modified)
+        ""
 
   let json_value ?status ?compress ?extra_headers ?request value reqd =
     json ?status ?compress ?extra_headers ?request (Yojson.Safe.to_string value) reqd
-
-  (** Sunset headers for deprecated endpoints per RFC 8594.
-      [date] must be an HTTP-date (RFC 7231 S7.1.1.1), e.g. ["Sat, 01 Jun 2026 00:00:00 GMT"].
-      Usage: [Response.json ~extra_headers:(sunset_headers ~date ~successor) ...] *)
-  let sunset_headers ~date ?successor () =
-    let base = [
-      ("Sunset", date);
-      ("Deprecation", "true");
-    ] in
-    match successor with
-    | Some url -> ("Link", Printf.sprintf "<%s>; rel=\"successor-version\"" url) :: base
-    | None -> base
-
-  (** Legacy JSON response without compression check (backwards compatible) *)
-  let json_raw ?(status = `OK) body reqd =
-    safe_respond_with_string reqd
-      (response ~content_type:json_content_type status body)
-      body
 
   (** HTML response with ETag and conditional 304 support.
       For static HTML that only changes on rebuild (e.g. dashboard).
@@ -274,10 +336,7 @@ module Request = struct
     in
     match from_env "MASC_MAX_BODY_BYTES" with
     | Some v -> v
-    | None ->
-        (match from_env "MCP_MAX_BODY_BYTES" with
-         | Some v -> v
-         | None -> default_max_body_bytes)
+    | None -> default_max_body_bytes
 
   let respond_error reqd status body =
     let headers =
@@ -460,8 +519,8 @@ module Router = struct
     delete: method_routes;
     options: method_routes;
     exact_paths: (string, unit) Hashtbl.t;
-    mutable routes: route list;
-    mutable route_count: int;
+    routes: route list;
+    route_count: int;
   }
 
   let create_prefix_node () =
@@ -555,9 +614,14 @@ module Router = struct
               | Some routes -> add_to_method_routes Prefix route routes
               | None -> ())
            methods);
-    router.routes <- route :: router.routes;
-    router.route_count <- router.route_count + 1;
-    router
+    (* [add_kind] already returns the router and every caller threads it
+       (`router |> get ... |> post ...`), so the two fields the router owns
+       can come back on a new record. The method index and the prefix trie
+       stay in-place containers carried by [{ router with ... }]. *)
+    { router with
+      routes = route :: router.routes
+    ; route_count = router.route_count + 1
+    }
 
   let add ~path ~methods ~handler router =
     add_kind Exact ~path ~methods ~handler:(Plain handler) router

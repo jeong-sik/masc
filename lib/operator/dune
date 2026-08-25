@@ -9,6 +9,7 @@
   masc
   masc.dashboard
   masc.masc_tool_surface
+  masc.embedded_config
   masc.auth
   yojson
   otoml
@@ -37,7 +38,6 @@
   grpc-direct-core
   h2
   h2-eio
-  ocaml-webrtc
   eio
   eio_main
   eio.unix
@@ -49,9 +49,9 @@
   fmt
   cohttp
   cohttp-eio
-  agent_sdk
-  agent_sdk.base
-  agent_sdk.llm_provider
+  masc.agent_core
+  masc.agent_core.base
+  masc.agent_core.llm_provider
   masc.tool_types
   masc.attribution
   masc.exec_policy
@@ -121,7 +121,6 @@
   masc.prompt_registry
   masc.mcp_transport_protocol
   masc.mcp_session
-  masc.response
   masc.ag_ui
   opentelemetry
   opentelemetry.client
@@ -129,7 +128,6 @@
   ambient-context-eio
   masc.shared_audit
   masc.shared_types
-  masc.resilience
   masc.multimodal
   masc.repo_manager
   masc.parse_outcome)

@@ -10,26 +10,26 @@ let vision_default_max_tokens = 1024
 
 let max_image_bytes () = Env_config_keeper.KeeperVision.max_image_bytes ()
 
-let truncated_of_stop_reason : Agent_sdk.Types.stop_reason -> bool = function
-  | Agent_sdk.Types.MaxTokens -> true
+let truncated_of_stop_reason : Agent_core.Types.stop_reason -> bool = function
+  | Agent_core.Types.MaxTokens -> true
   (* ContentFilter is a policy terminal like Refusal, not a length cut.
      RepetitionTruncation is a provider repetition guard, not token-budget
      exhaustion; classifying it as truncated would prescribe the wrong
      larger-budget remediation.
-     UnmatchedToolCalls is OAS's internal fail-closed tool-turn shape;
+     UnmatchedToolCalls is AGENT_CORE's internal fail-closed tool-turn shape;
      vision runs with tool_choice = None so it cannot legitimately occur,
      and it carries no partial-extraction signal either way. *)
-  | Agent_sdk.Types.EndTurn
-  | Agent_sdk.Types.StopToolUse
-  | Agent_sdk.Types.StopSequence
-  | Agent_sdk.Types.Refusal
-  | Agent_sdk.Types.ContentFilter
-  | Agent_sdk.Types.RepetitionTruncation
-  | Agent_sdk.Types.PauseTurn
-  | Agent_sdk.Types.Compaction
-  | Agent_sdk.Types.ContextWindowExceeded
-  | Agent_sdk.Types.UnmatchedToolCalls
-  | Agent_sdk.Types.Unknown _ -> false
+  | Agent_core.Types.EndTurn
+  | Agent_core.Types.StopToolUse
+  | Agent_core.Types.StopSequence
+  | Agent_core.Types.Refusal
+  | Agent_core.Types.ContentFilter
+  | Agent_core.Types.RepetitionTruncation
+  | Agent_core.Types.PauseTurn
+  | Agent_core.Types.Compaction
+  | Agent_core.Types.ContextWindowExceeded
+  | Agent_core.Types.UnmatchedToolCalls
+  | Agent_core.Types.Unknown _ -> false
 
 let provider_for_vision (provider_cfg : Llm_provider.Provider_config.t) =
   { provider_cfg with
@@ -46,7 +46,7 @@ let provider_for_vision (provider_cfg : Llm_provider.Provider_config.t) =
   }
   |> Keeper_structured_output_schema.without_response_format
 
-let message_of_request (req : Va.request) : Agent_sdk.Types.message =
+let message_of_request (req : Va.request) : Agent_core.Types.message =
   let query =
     Printf.sprintf
       "Analyze the attached image for this request:\n\
@@ -55,17 +55,18 @@ let message_of_request (req : Va.request) : Agent_sdk.Types.message =
        not include markdown fences or prose outside the JSON object."
       req.Va.query
   in
-  Agent_sdk.Types.make_message
-    ~role:Agent_sdk.Types.User
-    [ Agent_sdk.Types.text_block query
-    ; Agent_sdk.Types.image_block
-        ~source_type:Agent_sdk.Types.Base64
+  Agent_core.Types.make_message
+    ~role:Agent_core.Types.User
+    [ Agent_core.Types.text_block query
+    ; Agent_core.Types.image_block
+        ~source_type:Agent_core.Types.Base64
         ~media_type:req.Va.image_media_type
         ~data:(Base64.encode_string req.Va.image_bytes)
         ()
     ]
 
-let vision_runtime_candidates () : (string * Runtime.t) list =
+let vision_runtime_candidates ()
+  : (string * Runtime.t * Llm_provider.Provider_config.t) list =
   (* Delegate image-capability admission to the RFC-0265 SSOT
      [Runtime_agent.caps_admit_required_modalities] so a runtime surfaced to the
      vision tool is exactly one the dispatch capability gate would admit. Do NOT
@@ -85,13 +86,18 @@ let vision_runtime_candidates () : (string * Runtime.t) list =
   in
   from_failover @ rest
   |> List.filter_map (fun (rt : Runtime.t) ->
-       let caps = Runtime_agent.input_capabilities_of_runtime rt in
-       if Runtime_agent.caps_admit_required_modalities caps [ "image" ]
-       then Some (rt.Runtime.id, rt)
-       else None)
+       match rt.Runtime.execution with
+       | Runtime_execution.Codex_app_server _
+       | Runtime_execution.Claude_code _
+       | Runtime_execution.Antigravity_cli _ -> None
+       | Runtime_execution.Agent_core provider_config ->
+         let caps = Runtime_agent.input_capabilities_of_runtime rt in
+         if Runtime_agent.caps_admit_required_modalities caps [ "image" ]
+         then Some (rt.Runtime.id, rt, provider_config)
+         else None)
 
 let vision_runtime_ids () : string list =
-  List.map fst (vision_runtime_candidates ())
+  List.map (fun (runtime_id, _, _) -> runtime_id) (vision_runtime_candidates ())
 
 let first_vision_runtime_id () : (string, string) result =
   match vision_runtime_ids () with
@@ -152,7 +158,7 @@ let terminal_policy_http_error = function
 
 let failure_class_of_http_error = function
   | err when terminal_policy_http_error err -> Tool_result.Policy_rejection
-  | err when Runtime_attempt_fsm.should_try_next err -> Tool_result.Transient_error
+  | err when Runtime_attempt_fsm.should_try_next err -> Tool_result.Dependency_unavailable
   | _ -> Tool_result.Runtime_failure
 
 let string_member key json =
@@ -245,15 +251,15 @@ let vision_text_of_json = function
   | _ -> Error "vision response must be a JSON object"
 ;;
 
-let vision_text_of_response (response : Agent_sdk.Types.api_response) =
+let vision_text_of_response (response : Agent_core.Types.api_response) =
   match
-    (Agent_sdk.Structured.response_json_extractor ()) response
+    (Agent_core.Structured.response_json_extractor ()) response
   with
   | Ok json -> vision_text_of_json json
   | Error msg -> Error ("vision response is not valid structured JSON: " ^ msg)
 ;;
 
-let outcome_of_response (response : Agent_sdk.Types.api_response) =
+let outcome_of_response (response : Agent_core.Types.api_response) =
   match vision_text_of_response response with
   | Error detail -> Vo_invalid_structured_response detail
   | Ok text ->
@@ -307,7 +313,7 @@ let run_candidates_outcome
            { failure_class = failure_class_of_http_error err
            ; detail = Provider_http_error.to_message err
            })
-    | (runtime_id, rt) :: rest ->
+    | (runtime_id, rt, provider_config) :: rest ->
       let continue_with last_error =
         (if not (List.is_empty rest)
          then sleep_before_next_candidate ~clock ~attempt_index);
@@ -316,7 +322,7 @@ let run_candidates_outcome
           ~attempt_index:(attempt_index + 1)
           rest
       in
-      let config = provider_for_vision rt.Runtime.provider_config in
+      let config = provider_for_vision provider_config in
       match Runtime.validate_request_body_cap ~runtime_id config with
       | Error error ->
         record_vision_candidate_attempt
@@ -431,8 +437,8 @@ let execution_of_vision_outcome = function
          "no_capable_runtime")
   | Vo_timeout ->
     Keeper_tool_execution.failure
-      ~class_:Tool_result.Transient_error
-      (err_json ~failure_class:Tool_result.Transient_error "timeout")
+      ~class_:Tool_result.Dependency_unavailable
+      (err_json ~failure_class:Tool_result.Dependency_unavailable "timeout")
   | Vo_invalid_structured_response detail ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Runtime_failure

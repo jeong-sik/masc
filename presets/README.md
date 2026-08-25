@@ -1,16 +1,16 @@
 # Team Presets
 
 A team preset is an additive config overlay that seeds a ready-to-boot set of
-keepers (with their personas) into a live MASC config root. It exists because
-config seeding intentionally excludes `keepers/` and `personas/` — a fresh
+keepers into a live MASC config root. It exists because config seeding
+intentionally excludes `keepers/` — a fresh
 install boots zero keepers until an operator opts a team in.
 
 `scripts/seed-team.sh <preset> <base-path>` copies a preset's `keepers/` and
-`personas/` into `<base-path>/.masc/config/`. The four team keepers inherit
+into `<base-path>/.masc/config/`. The four team keepers inherit
 `[runtime].default` from `runtime.toml` (shipped as
 `ollama_cloud.deepseek-v4-flash`), so a preset never edits the model catalog and
-stays coherent with `runtime.toml` and OAS's embedded catalog plus the
-deployment `oas-models-overlay.toml` by construction.
+stays coherent with `runtime.toml` and AGENT_CORE's embedded catalog plus the
+deployment `agent-core-models-overlay.toml` by construction.
 
 Presets live at the repo top level (`presets/`), not under `config/`, so the
 server's config-root bootstrap never copies them into a live runtime config
@@ -21,8 +21,8 @@ root — they are install-time seed sources, not runtime config.
 ```
 presets/<preset>/
   manifest.txt                 # SSOT file list (seed-team.sh + install.sh read it)
-  keepers/<name>.toml          # one per keeper, self-contained, autoboot_enabled = true
-  personas/<name>/profile.json # persona for each keeper
+  keepers/<name>.toml          # operational config, autoboot_enabled = true
+  keepers/<name>/AGENT.md      # complete Keeper instructions
 ```
 
 Each keeper TOML is self-contained: every field the keeper gets is written in its

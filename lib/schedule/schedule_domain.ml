@@ -1,4 +1,4 @@
-type actor_kind =
+type actor_kind = Schedule_contract_values.actor_kind =
   | Human_operator
   | Automated_actor
   | System
@@ -9,7 +9,7 @@ type actor =
   ; display_name : string option
   }
 
-type schedule_status =
+type schedule_status = Schedule_contract_values.schedule_status =
   | Scheduled
   | Due
   | Running
@@ -18,18 +18,9 @@ type schedule_status =
   | Cancelled
   | Expired
 
-let all_schedule_statuses =
-  [ Scheduled
-  ; Due
-  ; Running
-  ; Succeeded
-  ; Failed
-  ; Cancelled
-  ; Expired
-  ]
-;;
+let all_schedule_statuses = Schedule_contract_values.schedule_statuses
 
-type schedule_source =
+type schedule_source = Schedule_contract_values.schedule_source =
   | Operator_request
   | Automated_request
   | System_request
@@ -68,7 +59,7 @@ type schedule_request =
   ; recurrence : recurrence
   }
 
-type wake_status =
+type wake_status = Schedule_contract_values.wake_status =
   | Wake_running
   | Wake_succeeded
   | Wake_failed
@@ -91,79 +82,54 @@ let nonempty field value =
   if String.trim value = "" then Error (field ^ " must be non-empty") else Ok value
 ;;
 
-let actor_kind_to_string = function
-  | Human_operator -> "human_operator"
-  | Automated_actor -> "automated_actor"
-  | System -> "system"
+let decode_error_to_string = Schedule_contract_values.decode_error_to_string
+let actor_kind_to_string = Schedule_contract_values.actor_kind_to_string
+
+let actor_kind_of_string value =
+  Schedule_contract_values.actor_kind_of_string value
+  |> Result.map_error decode_error_to_string
 ;;
 
-let actor_kind_of_string = function
-  | "human_operator" -> Ok Human_operator
-  | "automated_actor" -> Ok Automated_actor
-  | "system" -> Ok System
-  | other -> Error ("unknown actor_kind: " ^ other)
+let schedule_status_to_string = Schedule_contract_values.schedule_status_to_string
+
+let schedule_status_of_string value =
+  Schedule_contract_values.schedule_status_of_string value
+  |> Result.map_error decode_error_to_string
 ;;
 
-let schedule_status_to_string = function
-  | Scheduled -> "scheduled"
-  | Due -> "due"
-  | Running -> "running"
-  | Succeeded -> "succeeded"
-  | Failed -> "failed"
-  | Cancelled -> "cancelled"
-  | Expired -> "expired"
+let schedule_source_to_string = Schedule_contract_values.schedule_source_to_string
+
+let schedule_source_of_string value =
+  Schedule_contract_values.schedule_source_of_string value
+  |> Result.map_error decode_error_to_string
 ;;
 
-let schedule_status_of_string = function
-  | "scheduled" -> Ok Scheduled
-  | "due" -> Ok Due
-  | "running" -> Ok Running
-  | "succeeded" -> Ok Succeeded
-  | "failed" -> Ok Failed
-  | "cancelled" -> Ok Cancelled
-  | "expired" -> Ok Expired
-  | other -> Error ("unknown schedule_status: " ^ other)
+let recurrence_kind = function
+  | One_shot -> Schedule_contract_values.One_shot
+  | Interval _ -> Schedule_contract_values.Interval
+  | Daily _ -> Schedule_contract_values.Daily
+  | Cron _ -> Schedule_contract_values.Cron
 ;;
 
-let schedule_source_to_string = function
-  | Operator_request -> "operator_request"
-  | Automated_request -> "automated_request"
-  | System_request -> "system_request"
-;;
-
-let schedule_source_of_string = function
-  | "operator_request" -> Ok Operator_request
-  | "automated_request" -> Ok Automated_request
-  | "system_request" -> Ok System_request
-  | other -> Error ("unknown schedule_source: " ^ other)
-;;
-
-let recurrence_kind_to_string = function
-  | One_shot -> "one_shot"
-  | Interval _ -> "interval"
-  | Daily _ -> "daily"
-  | Cron _ -> "cron"
+let recurrence_kind_to_string recurrence =
+  recurrence
+  |> recurrence_kind
+  |> Schedule_contract_values.recurrence_kind_to_string
 ;;
 
 let recurrence_summary = function
-  | One_shot -> "one_shot"
+  | One_shot as recurrence -> recurrence_kind_to_string recurrence
   | Interval { interval_sec } -> Printf.sprintf "every %ds" interval_sec
   | Daily { hour; minute; second; timezone } ->
     Printf.sprintf "daily %02d:%02d:%02d %s" hour minute second timezone
   | Cron { expression; timezone } -> Printf.sprintf "cron %s %s" expression timezone
 ;;
 
-let wake_status_to_string = function
-  | Wake_running -> "running"
-  | Wake_succeeded -> "succeeded"
-  | Wake_failed -> "failed"
-;;
+let wake_status_to_string = Schedule_contract_values.wake_status_to_string
 
-let wake_status_of_string = function
-  | "running" -> Ok Wake_running
-  | "succeeded" -> Ok Wake_succeeded
-  | "failed" -> Ok Wake_failed
-  | other -> Error ("unknown wake_status: " ^ other)
+let wake_status_of_string value =
+  Schedule_contract_values.wake_status_of_string value
+  |> Result.map_error decode_error_to_string
 ;;
 
 let is_terminal = function
@@ -473,13 +439,15 @@ let validate_recurrence = function
   | Cron { expression; timezone } -> validate_cron ~expression ~timezone
 ;;
 
-let recurrence_to_yojson = function
-  | One_shot -> `Assoc [ "kind", `String "one_shot" ]
+let recurrence_to_yojson recurrence =
+  let kind = recurrence_kind_to_string recurrence in
+  match recurrence with
+  | One_shot -> `Assoc [ "kind", `String kind ]
   | Interval { interval_sec } ->
-    `Assoc [ "kind", `String "interval"; "interval_sec", `Int interval_sec ]
+    `Assoc [ "kind", `String kind; "interval_sec", `Int interval_sec ]
   | Daily { hour; minute; second; timezone } ->
     `Assoc
-      [ "kind", `String "daily"
+      [ "kind", `String kind
       ; "hour", `Int hour
       ; "minute", `Int minute
       ; "second", `Int second
@@ -487,7 +455,7 @@ let recurrence_to_yojson = function
       ]
   | Cron { expression; timezone } ->
     `Assoc
-      [ "kind", `String "cron"
+      [ "kind", `String kind
       ; "expression", `String expression
       ; "timezone", `String timezone
       ]
@@ -495,13 +463,17 @@ let recurrence_to_yojson = function
 
 let recurrence_of_yojson = function
   | `Assoc fields ->
-    let* kind = string_field "kind" fields in
+    let* kind_wire_value = string_field "kind" fields in
+    let* kind =
+      Schedule_contract_values.recurrence_kind_of_string kind_wire_value
+      |> Result.map_error decode_error_to_string
+    in
     (match kind with
-     | "one_shot" -> Ok One_shot
-     | "interval" ->
+     | Schedule_contract_values.One_shot -> Ok One_shot
+     | Schedule_contract_values.Interval ->
        let* interval_sec = int_field "interval_sec" fields in
        validate_recurrence (Interval { interval_sec })
-     | "daily" ->
+     | Schedule_contract_values.Daily ->
        let* hour = int_field "hour" fields in
        let* minute = int_field "minute" fields in
        let* second =
@@ -514,11 +486,10 @@ let recurrence_of_yojson = function
        in
        let* timezone = string_field "timezone" fields in
        validate_recurrence (Daily { hour; minute; second; timezone })
-     | "cron" ->
+     | Schedule_contract_values.Cron ->
        let* expression = string_field "expression" fields in
        let* timezone = string_field "timezone" fields in
-       validate_recurrence (Cron { expression; timezone })
-     | other -> Error ("unknown recurrence kind: " ^ other))
+       validate_recurrence (Cron { expression; timezone }))
   | _ -> Error "expected recurrence object"
 ;;
 
@@ -835,5 +806,9 @@ let mark_due ~now (request : schedule_request) =
   | Scheduled | Due when expired_at ~now request ->
     { request with status = Expired }
   | Scheduled when request.due_at <= now -> { request with status = Due }
-  | _ -> request
+  (* Not yet due, or already Due and not yet expired. *)
+  | Scheduled | Due -> request
+  (* Running is the executor's to move; the four terminal states never
+     transition again. *)
+  | Running | Succeeded | Failed | Cancelled | Expired -> request
 ;;

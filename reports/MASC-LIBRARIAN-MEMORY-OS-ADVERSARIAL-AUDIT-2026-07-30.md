@@ -1377,7 +1377,7 @@ Rondo autonomous turns 1772–1775:
 - user input과 assistant turn의 exact identity
 - failover 후 어느 runtime 결과가 authoritative한지
 
-User input 주변: Rondo 1686–1689에서 dashboard user input 직후 persona/dynamic
+User input 주변: Rondo 1686–1689에서 dashboard user input 직후 keeper instructions/dynamic
 digest가 direct-chat 값으로 바뀌고 다음 turn에서 autonomous 값으로 돌아오는
 흐름은 확인했다. 하지만 user row가 `turn_ref=null`이므로 “이 입력이 정확히
 turn #1687을 열었다”는 계약 수준 증명은 불가능하다.

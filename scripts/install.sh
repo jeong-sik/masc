@@ -2,11 +2,10 @@
 # masc installer — download prebuilt binary, seed runtime config/catalog, smoke-check.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh -o /tmp/masc-install.sh
+#   TAG=vX.Y.Z
+#   curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/$TAG/scripts/install.sh" -o /tmp/masc-install.sh
 #   less /tmp/masc-install.sh
-#   bash /tmp/masc-install.sh --version <release-tag>
-#   curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash -s -- --version <release-tag> --prefix /usr/local/bin
+#   bash /tmp/masc-install.sh --version "$TAG"
 #
 # Flags:
 #   --version vX.Y.Z   Pin a specific release (default: latest)
@@ -34,7 +33,7 @@
 #   MASC_RELEASE_BASE_URL  Override the release asset base URL (mirror or
 #                  air-gapped install; file:// works). Defaults to
 #                  https://github.com/<repo>/releases/download
-#   OAS_MODEL_CATALOG  Explicit full model catalog override. When unset, OAS's
+#   AGENT_CORE_MODEL_CATALOG  Explicit full model catalog override. When unset, AGENT_CORE's
 #                  embedded catalog is merged with the deployment overlay.
 #   MASC_RUNTIME_EVENTS=0/1  Override OCaml Runtime_events. When unset, the
 #                  generated server command keeps the binary's default.
@@ -689,7 +688,7 @@ detect_asset() {
     Darwin/arm64)  echo "masc-macos-arm64" ;;
     Linux/x86_64)  echo "masc-linux-x64"   ;;
     Darwin/x86_64) die "macOS x86_64 release asset not built. Build from source per README." ;;
-    Linux/aarch64) die "Linux arm64 release asset not built yet. Track .github/workflows/release.yml." ;;
+    Linux/aarch64) echo "masc-linux-arm64" ;;
     *) die "unsupported platform: $os/$arch" ;;
   esac
 }
@@ -772,8 +771,8 @@ PREFLIGHT_HELPER_DEST="$PREFIX/masc-deployment-preflight-helper"
 PREFLIGHT_GATE_DEST="$PREFIX/masc-check-runtime-deployment-preflight"
 
 model_catalog_env_value() {
-  if [ -n "${OAS_MODEL_CATALOG:-}" ]; then
-    echo "$OAS_MODEL_CATALOG"
+  if [ -n "${AGENT_CORE_MODEL_CATALOG:-}" ]; then
+    echo "$AGENT_CORE_MODEL_CATALOG"
   else
     echo ""
   fi
@@ -788,7 +787,7 @@ run_masc_with_install_env() {
   if [ -n "$catalog" ]; then
     MASC_BASE_PATH="$BASE_PATH" \
       MASC_BASE_PATH_INPUT="$BASE_PATH" \
-      OAS_MODEL_CATALOG="$catalog" \
+      AGENT_CORE_MODEL_CATALOG="$catalog" \
       MASC_RUNTIME_EVENTS="${MASC_RUNTIME_EVENTS:-0}" \
       "$@"
   else
@@ -895,7 +894,7 @@ fi
 if [ "$SEED_CONFIG" -eq 1 ]; then
   CONFIG_DIR="$BASE_PATH/.masc/config"
   RUNTIME_FILE="$CONFIG_DIR/runtime.toml"
-  MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/oas-models-overlay.toml"
+  MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/agent-core-models-overlay.toml"
 
   if [ -e "$RUNTIME_FILE" ] && [ -e "$MODEL_CATALOG_OVERLAY_FILE" ] && [ "$FORCE" -eq 0 ]; then
     log "config already present at $CONFIG_DIR, skipping seed"
@@ -936,7 +935,7 @@ if [ "$SEED_CONFIG" -eq 1 ]; then
     }
 
     seed_config_if_missing "runtime.toml" "$RUNTIME_FILE"
-    seed_config_if_missing "oas-models-overlay.toml" "$MODEL_CATALOG_OVERLAY_FILE"
+    seed_config_if_missing "agent-core-models-overlay.toml" "$MODEL_CATALOG_OVERLAY_FILE"
   fi
 fi
 
@@ -944,7 +943,7 @@ fi
 maybe_run_wizard "$BASE_PATH"
 
 # --- 4c. keeper team preset ----------------------------------------------------
-# Seeds presets/<preset>/{keepers,personas} into the config root (verified via
+# Seeds presets/<preset>/keepers into the config root (verified via
 # the release SHA256SUMS, like the config seed). The keepers inherit
 # [runtime].default, so no catalog is edited. Runs after config seed so
 # runtime.toml exists first.
@@ -1042,7 +1041,7 @@ if [ "${MASC_RUNTIME_EVENTS+x}" = "x" ]; then
 fi
 start_env="${runtime_events_start_env}MASC_BASE_PATH=\"$BASE_PATH\" MASC_BASE_PATH_INPUT=\"$BASE_PATH\""
 if [ -n "$catalog_hint" ]; then
-  start_env="OAS_MODEL_CATALOG=\"$catalog_hint\" $start_env"
+  start_env="AGENT_CORE_MODEL_CATALOG=\"$catalog_hint\" $start_env"
 fi
 
 cat <<EOF
@@ -1052,6 +1051,9 @@ ${c_grn}masc ${VERSION} installed.${c_off}
 Next:
   ${c_dim}# load provider key${c_off}
   $source_hint
+
+  ${c_dim}# mint a worker bearer in this shell for your MCP client${c_off}
+  eval "\$($DEST login --base-path \"$BASE_PATH\" --host 127.0.0.1 --port \"$MASC_PORT\" --agent local-mcp-client --role worker --client-env MASC_TOKEN --no-expiry --shell)"
 
   ${c_dim}# start server (loopback only)${c_off}
   $start_env $DEST --base-path "$BASE_PATH"
@@ -1063,7 +1065,7 @@ Next:
   ${c_dim}# sanity check${c_off}
   curl http://127.0.0.1:${MASC_PORT}/health
 
-  ${c_dim}# wire up your MCP client (local agent)${c_off}
+  ${c_dim}# source the printed bearer exports in the shell that starts your MCP client${c_off}
   See: https://github.com/$REPO#mcp-client-setup
 
 EOF

@@ -3,7 +3,98 @@
 open Alcotest
 open Masc
 
-(* All tests must run within Eio context due to Eio.Mutex usage *)
+module State = Client_registry_state
+
+(* Shell tests run in Eio; the state-transition tests above the shell cases do
+   not need a runtime. *)
+
+let identity ~session_key ~agent_name ~last_seen : Client_identity.t =
+  { uuid = "00000000-0000-7000-8000-000000000000"
+  ; session_key
+  ; agent_name
+  ; agent_name_origin = `Supplied
+  ; channel = None
+  ; user_id = None
+  ; capabilities = []
+  ; registered_at = 1.0
+  ; last_seen
+  ; metadata = []
+  }
+;;
+
+let test_pure_state_reuses_winner_after_race () =
+  let first = identity ~session_key:"first-key" ~agent_name:"first" ~last_seen:1.0 in
+  let state, installed =
+    State.install_session
+      ~now:2.0
+      ~mcp_session_id:"shared-mcp"
+      ~candidate:first
+      State.empty
+  in
+  (match installed with
+   | State.Registered identity ->
+     check string "first candidate registered" "first-key" identity.session_key
+   | State.Reused _ -> fail "empty state unexpectedly reused an identity");
+  let competing =
+    identity ~session_key:"competing-key" ~agent_name:"competing" ~last_seen:3.0
+  in
+  let state, raced =
+    State.install_session
+      ~now:9.0
+      ~mcp_session_id:"shared-mcp"
+      ~candidate:competing
+      state
+  in
+  (match raced with
+   | State.Reused identity ->
+     check string "race keeps installed identity" "first-key" identity.session_key;
+     check (float 0.0) "race touches winner" 9.0 identity.last_seen
+   | State.Registered _ -> fail "race replaced the installed identity");
+  check int "race leaves one identity" 1 (State.count state);
+  let _, delayed_touch =
+    match State.reuse_session ~now:8.0 ~mcp_session_id:"shared-mcp" state with
+    | Some reused -> reused
+    | None -> fail "installed session disappeared before delayed touch"
+  in
+  check (float 0.0) "delayed touch cannot move last_seen backwards" 9.0
+    delayed_touch.last_seen
+;;
+
+let test_pure_state_unregisters_last_owner () =
+  let shared =
+    identity ~session_key:"shared-key" ~agent_name:"shared" ~last_seen:1.0
+  in
+  let state, _ =
+    State.install_session
+      ~now:2.0
+      ~mcp_session_id:"owner-1"
+      ~candidate:shared
+      State.empty
+  in
+  let state, _ =
+    State.install_session
+      ~now:3.0
+      ~mcp_session_id:"owner-2"
+      ~candidate:shared
+      state
+  in
+  let state =
+    State.cache_resolved_name
+      ~mcp_session_id:"owner-2"
+      ~name:"shared"
+      ~is_ephemeral:false
+      state
+  in
+  let state = State.unregister_mcp_session ~mcp_session_id:"owner-2" state in
+  check int "shared identity remains" 1 (State.count state);
+  check
+    (option (pair string bool))
+    "closed owner cache removed"
+    None
+    (State.resolved_name state "owner-2");
+  let state = State.unregister_mcp_session ~mcp_session_id:"owner-1" state in
+  check int "last owner removes identity" 0 (State.count state)
+;;
 
 let test_init () =
   Eio_main.run @@ fun env ->
@@ -132,19 +223,9 @@ let test_concurrent_access () =
   ()
 
 (** Contract: N fibers racing to create an identity for the same
-    [mcp_session_id] must converge to a single [session_key].  This
-    is asserted even though under single-domain Eio with uncontended
-    Registry locks, [get_or_create_identity] currently executes
-    atomically and the race would not fire without the
-    double-checked locking fix.  The test defends the invariant
-    against future changes — a migration to multi-domain, a refactor
-    that introduces a yield between [Hashtbl.find_opt] and
-    [Hashtbl.replace], or Registry contention that forces
-    [reg.lock] to suspend — any of which would otherwise orphan the
-    first-seen identity because both fibers would observe [None] in
-    [session_identity_map], both [Registry.register] with a fresh
-    UUID [session_key], and only the last [Hashtbl.replace] would
-    win.  See lib/agent_registry_eio.ml [session_cache_mu] comment. *)
+    [mcp_session_id] converge to one [session_key]. Candidate materialization
+    happens outside the mutex, so [Client_registry_state.install_session] must
+    recheck the immutable snapshot at the atomic commit. *)
 let test_concurrent_same_mcp_session_id () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -178,6 +259,12 @@ let test_concurrent_same_mcp_session_id () =
 
 let () =
   run "Client_registry_eio" [
+    "pure state", [
+      test_case "race reuses winner" `Quick
+        test_pure_state_reuses_winner_after_race;
+      test_case "last owner removes identity" `Quick
+        test_pure_state_unregisters_last_owner;
+    ];
     "basics", [
       test_case "init" `Quick test_init;
       test_case

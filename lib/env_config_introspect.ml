@@ -6,16 +6,10 @@
     server library, which already depends on [masc.config] in [lib/dune]. *)
 
 let server_meta () =
-  let git_commit =
-    match Sys.getenv_opt "MASC_BUILD_GIT_COMMIT" with
-    | Some c ->
-        let trimmed = String.trim c in
-        if trimmed <> "" then Some trimmed else None
-    | None -> None
-  in
+  let git_commit = (Build_identity.current ()).Build_identity.binary_commit in
   `Assoc
     [
-      ("version", `String Version.version);
+      ("version", `String Runtime_build_version.current);
       ("git_commit", Json_util.string_opt_to_json git_commit);
       ("ocaml_version", `String Sys.ocaml_version);
       ("uptime_seconds", `Float (Server_startup_state.elapsed_since_start ()));

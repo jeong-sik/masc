@@ -1,7 +1,11 @@
 
 (** Plan Tool Handlers
 
-    Extracted from mcp_server_eio.ml for testability.
+    Extracted from mcp_server_eio.ml for testability, which [dispatch]
+    provides: test_tool_plan_coverage drives all eight tools through it by
+    name and never named a handler. The handlers themselves were exported
+    too, and nothing outside this module ever called one.
+
     8 tools: plan_init, plan_update, note_add, deliver, plan_get,
              plan_set_task, plan_get_task, plan_clear_task
 *)
@@ -11,22 +15,10 @@ type context = {
   config: Workspace.config;
 }
 
-(** {1 Individual Handlers} *)
-
-val handle_plan_init : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
-val handle_plan_update : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
-val handle_note_add : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
-val handle_deliver : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
-val handle_plan_get : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
-val handle_plan_set_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
-val handle_plan_get_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
-val handle_plan_clear_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
-
 (** {1 Dispatcher} *)
 
 (** Dispatch plan tool by name. Returns None if not a plan tool. *)
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.result option
 
-(* schemas removed in RFC-0057 PR-2 — plan tool schemas are now emitted
-   via Tool_descriptors_gen and surfaced through
-   Tool_schemas_misc.schemas in the Config chain. *)
+(* Plan tool schemas are declared in config/tools/masc_plan_*.toml and
+   surfaced through Tool_schemas_misc.schemas in the Config chain. *)

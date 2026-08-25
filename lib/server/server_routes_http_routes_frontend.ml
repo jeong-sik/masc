@@ -129,7 +129,17 @@ let websocket_handler ?sw ?clock ~upgrade request reqd =
       (match
          websocket_upgrade_authorized ~base_path ~request_authority request
        with
-       | Error err -> respond_auth_error request reqd err
+       | Error err ->
+         (* Reject-boundary contract: every client-visible auth reject
+            leaves a metric + log trace (see [record_mcp_auth_reject]).
+            The response shape is unchanged. *)
+         Server_mcp_transport_http_respond.record_mcp_auth_reject
+           ~endpoint:"GET /ws upgrade"
+           ~claimed_agent:(agent_from_request request)
+           ~token_presented:(Option.is_some (auth_token_from_request request))
+           ~session_id:None
+           (Server_mcp_transport_http_types.auth_failure_of_masc_error err);
+         respond_auth_error request reqd err
        | Ok () ->
          (match
             Server_mcp_transport_ws.upgrade_connection
@@ -144,24 +154,6 @@ let websocket_handler ?sw ?clock ~upgrade request reqd =
     | Some reason -> Http.Response.text ~status:`Service_unavailable reason reqd
   else
     websocket_discovery_handler request reqd
-
-let webrtc_signaling_handler signaling_fn request reqd =
-  with_permission_auth ~permission:Masc_domain.CanBroadcast
-    (fun _state _req reqd ->
-      if not (Server_webrtc_transport.is_enabled ()) then
-        Http.Response.json_value ~status:`Not_found
-          (`Assoc [ ("error", `String "webrtc transport disabled") ])
-          reqd
-      else
-        Http.Request.read_body_async reqd (fun body_str ->
-          match signaling_fn body_str with
-          | Ok body ->
-              Http.Response.json body reqd
-          | Error msg ->
-              Http.Response.json_value ~status:`Bad_request
-                (`Assoc [ ("error", `String msg) ])
-                reqd))
-    request reqd
 
 let add_routes ?sw ?clock ~port router =
   router
@@ -344,10 +336,6 @@ let add_routes ?sw ?clock ~port router =
        ~handler:handle_delete_mcp
   |> Http.Router.add ~path:"/mcp/managed" ~methods:[`DELETE]
        ~handler:(handle_delete_mcp ~profile:Server_mcp_transport_http.Managed_agent)
-  |> Http.Router.post "/webrtc/offer"
-       (webrtc_signaling_handler Server_webrtc_transport.handle_offer_request)
-  |> Http.Router.post "/webrtc/answer"
-       (webrtc_signaling_handler Server_webrtc_transport.handle_answer_request)
   |> Http.Router.add ~path:"/graphql" ~methods:[`GET; `POST]
        ~handler:(fun request reqd ->
          with_read_auth (fun _state req reqd -> handle_graphql req reqd) request reqd)

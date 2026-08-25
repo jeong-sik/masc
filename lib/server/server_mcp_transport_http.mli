@@ -71,7 +71,6 @@ val validate_mcp_session_delete_profile :
 val method_from_body : string -> string option
 val inject_agent_name_into_body :
   ?rewrite_existing:bool ->
-  ?strip_token:bool ->
   agent_name:string ->
   string ->
   string
@@ -99,8 +98,24 @@ val get_header_any_case : Httpun.Headers.t -> string -> string option
 val get_cookie_value : Httpun.Request.t -> string -> string option
 val get_session_id_any : Httpun.Request.t -> string option
 val get_protocol_version : Httpun.Request.t -> string
+type protocol_version_rejection =
+  Server_mcp_transport_http_session.protocol_version_rejection =
+  | Unsupported_version of { requested : string }
+  | Session_version_mismatch of
+      { session_id : string
+      ; expected : string
+      ; got : string
+      }
+
+val protocol_version_rejection_body : protocol_version_rejection -> string
+val protocol_version_rejection_code :
+  protocol_version_rejection -> Mcp_error_code.t
+val protocol_version_rejection_message : protocol_version_rejection -> string
+
 val validate_protocol_version_continuity :
-  session_id:string -> Httpun.Request.t -> (unit, string) result
+  session_id:string ->
+  Httpun.Request.t ->
+  (unit, protocol_version_rejection) result
 val get_protocol_version_for_session :
   ?session_id:string -> Httpun.Request.t -> string
 val request_force_json_response : Httpun.Request.t -> bool

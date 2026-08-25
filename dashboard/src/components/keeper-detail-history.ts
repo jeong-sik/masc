@@ -1,25 +1,22 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import { formatPct1 } from '../lib/format-number'
 import { unixSecondsToDate } from '../lib/format-time'
 import { ActionButton } from './common/button'
 import { requestConfirm } from './common/confirm-dialog'
 import {
+  applyKeeperCheckpointPurge,
   deleteKeeperHistorySnapshots,
   fetchKeeperCheckpoints,
+  previewKeeperCheckpointPurge,
   type KeeperCheckpointCurrentError,
   type KeeperCheckpointHistoryError,
   type KeeperCheckpointInventory,
+  type KeeperCheckpointPurgeResponse,
   type KeeperCheckpointSummary,
-} from '../api/keeper'
+} from '../api/keeper-lifecycle'
 import { TextInput } from './common/input'
 import { Checkbox } from './common/checkbox'
-import { TimeAgo } from './common/time-ago'
-import { keeperStatusDetails } from '../keeper-state'
-import { isRecord } from './common/normalize'
 import { showToast } from './common/toast'
-import { PanelCard } from './common/panel-card'
-import { SectionHeader } from './common/section-header'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
 
 function SnapshotBadge({ tone, children }: { tone: 'accent' | 'neutral' | 'ok' | 'warn' | 'bad'; children: unknown }) {
@@ -38,13 +35,19 @@ function formatCheckpointTime(timestamp: number): string {
   })
 }
 
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '-'
+  if (bytes < 1024) return `${bytes} B`
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+}
+
 /**
- * Pure filter for OAS snapshot history rows.
+ * Pure filter for Agent Core snapshot history rows.
  *
  * Case-insensitive substring match on `snapshot_id`, `source_kind`, and
  * `latest_preview` so operators can locate a snapshot by partial id, by the
  * preview text that described the turn, or by its source kind
- * (`oas_current` / `oas_history`).
+ * (`agent_core_current` / `agent_core_history`).
  *
  * Empty/whitespace query returns the input reference unchanged (no new
  * array allocation, preserves referential equality for memoisation).
@@ -173,6 +176,8 @@ export function KeeperCheckpointPanel({
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [deleting, setDeleting] = useState(false)
   const [historyQuery, setHistoryQuery] = useState('')
+  const [purgePreview, setPurgePreview] = useState<KeeperCheckpointPurgeResponse | null>(null)
+  const [purgePending, setPurgePending] = useState<'preview' | 'apply' | null>(null)
 
   const loadInventory = () => {
     void (async () => {
@@ -195,6 +200,7 @@ export function KeeperCheckpointPanel({
   useEffect(() => {
     setInventory(null)
     setSelectedIds([])
+    setPurgePreview(null)
     loadInventory()
   }, [keeperName, refreshToken])
 
@@ -213,7 +219,7 @@ export function KeeperCheckpointPanel({
         return
       }
       const confirmed = await requestConfirm({
-        title: 'OAS snapshot 삭제',
+        title: 'Agent Core snapshot 삭제',
         message: `${selectedIds.length}개 snapshot history를 삭제합니다.\n현재 active checkpoint는 건드리지 않습니다.`,
         tone: 'danger',
         confirmText: '삭제',
@@ -233,6 +239,53 @@ export function KeeperCheckpointPanel({
         showToast(err instanceof Error ? err.message : 'snapshot 삭제 실패', 'error')
       } finally {
         setDeleting(false)
+      }
+    })()
+  }
+
+  const previewPurge = () => {
+    void (async () => {
+      setPurgePending('preview')
+      try {
+        const result = await previewKeeperCheckpointPurge(keeperName)
+        setPurgePreview(result)
+        setInventory(result.inventory)
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : 'checkpoint purge 미리보기 실패', 'error')
+      } finally {
+        setPurgePending(null)
+      }
+    })()
+  }
+
+  const applyPurge = () => {
+    void (async () => {
+      if (!purgePreview) return
+      const report = purgePreview.report
+      const confirmed = await requestConfirm({
+        title: '현재 checkpoint 청소',
+        message: `${keeperName}의 현재 checkpoint를 ${formatBytes(report.bytes_before)} → ${formatBytes(report.bytes_after)}로 정리합니다.\n원본은 byte-exact backup으로 먼저 저장됩니다.`,
+        tone: 'danger',
+        confirmText: '백업 후 청소',
+      })
+      if (!confirmed) return
+      setPurgePending('apply')
+      try {
+        const result = await applyKeeperCheckpointPurge(keeperName)
+        setPurgePreview(result)
+        setInventory(result.inventory)
+        if (result.applied) {
+          const warningSuffix = result.warnings.length > 0
+            ? ` · 경고 ${result.warnings.length}건`
+            : ''
+          showToast(`checkpoint 청소 완료 · ${formatBytes(result.report.bytes_removed)} 감소${warningSuffix}`, 'success')
+        } else {
+          showToast('checkpoint는 이미 정리된 상태입니다', 'success')
+        }
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : 'checkpoint purge 적용 실패', 'error')
+      } finally {
+        setPurgePending(null)
       }
     })()
   }
@@ -274,7 +327,7 @@ export function KeeperCheckpointPanel({
     <div class="flex flex-col gap-3 v2-monitoring-panel">
       <div class="flex items-center justify-between gap-3 v2-monitoring-toolbar">
         <div class="text-2xs text-[var(--color-fg-muted)]">
-          current OAS checkpoint와 OAS snapshot history만 노출합니다.
+          current Agent Core checkpoint와 Agent Core snapshot history만 노출합니다.
         </div>
         <div class="flex items-center gap-2">
           <${ActionButton}
@@ -298,12 +351,69 @@ export function KeeperCheckpointPanel({
         error=${inventory.current_error}
       />
 
+      <div
+        class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3 v2-monitoring-panel"
+        data-testid="keeper-checkpoint-purge"
+      >
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">현재 checkpoint 청소</div>
+            <div class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
+              닫힌 tool 결과, unsigned reasoning, 반복 메시지만 정리합니다. 대화 구조와 최근 20개 메시지는 보존합니다.
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <${ActionButton}
+              variant="ghost"
+              size="md"
+              disabled=${purgePending !== null || inventory.current_status !== 'available'}
+              ariaBusy=${purgePending === 'preview'}
+              testId="keeper-checkpoint-purge-preview"
+              onClick=${previewPurge}
+            >${purgePending === 'preview' ? '계산 중...' : '정리 미리보기'}<//>
+            <${ActionButton}
+              variant="danger"
+              size="md"
+              disabled=${
+                purgePending !== null
+                || !purgePreview
+                || !purgePreview.apply_allowed
+                || purgePreview.report.bytes_removed <= 0
+              }
+              ariaBusy=${purgePending === 'apply'}
+              testId="keeper-checkpoint-purge-apply"
+              onClick=${applyPurge}
+            >${purgePending === 'apply' ? '청소 중...' : '백업 후 청소'}<//>
+          </div>
+        </div>
+
+        ${purgePreview
+          ? html`
+              <div class="mt-3 grid grid-cols-2 gap-2 text-2xs md:grid-cols-4" data-testid="keeper-checkpoint-purge-report">
+                <div><span class="text-[var(--color-fg-muted)]">크기</span><div class="mt-0.5 font-mono text-[var(--color-fg-primary)]">${formatBytes(purgePreview.report.bytes_before)} → ${formatBytes(purgePreview.report.bytes_after)}</div></div>
+                <div><span class="text-[var(--color-fg-muted)]">tool 결과</span><div class="mt-0.5 font-mono text-[var(--color-fg-primary)]">${purgePreview.report.tool_results_cleared}</div></div>
+                <div><span class="text-[var(--color-fg-muted)]">reasoning</span><div class="mt-0.5 font-mono text-[var(--color-fg-primary)]">${purgePreview.report.reasoning_blocks_stripped}</div></div>
+                <div><span class="text-[var(--color-fg-muted)]">반복 메시지</span><div class="mt-0.5 font-mono text-[var(--color-fg-primary)]">${purgePreview.report.duplicates_dropped}</div></div>
+              </div>
+              ${!purgePreview.apply_allowed
+                ? html`<div class="mt-3 rounded-[var(--r-1)] border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs text-[var(--color-fg-muted)]" role="status">적용하려면 먼저 상단의 종료 버튼으로 Keeper를 완전히 종료하세요. 미리보기는 현재 상태에서도 안전합니다.</div>`
+                : null}
+              ${purgePreview.backup_path
+                ? html`<div class="mt-3 break-all font-mono text-3xs text-[var(--color-fg-muted)]" data-testid="keeper-checkpoint-purge-backup">backup: ${purgePreview.backup_path}</div>`
+                : null}
+              ${purgePreview.warnings.length > 0
+                ? html`<div class="mt-3 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2 text-2xs text-[var(--rose-light)]" role="alert">${purgePreview.warnings.join(' · ')}</div>`
+                : null}
+            `
+          : null}
+      </div>
+
       <${CheckpointHistoryFailures} failures=${inventory.history_errors} />
 
       <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-panel">
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border-default)] px-3 py-2 v2-monitoring-toolbar">
           <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
-            OAS Snapshot History
+            Agent Core Snapshot History
             ${inventory && inventory.history.length > 0 && historyQuery.trim() !== ''
               ? html`<span class="ml-2 text-3xs font-normal normal-case tracking-normal text-[var(--color-fg-disabled)]">${filterCheckpointHistory(inventory.history, historyQuery).length}/${inventory.history.length}</span>`
               : null}
@@ -313,12 +423,12 @@ export function KeeperCheckpointPanel({
             class="min-w-40 max-w-65 flex-1 !px-2 !py-1 !text-2xs"
             value=${historyQuery}
             placeholder="snapshot id / preview / 요약 필터"
-            ariaLabel="OAS snapshot history 필터"
+            ariaLabel="Agent Core snapshot history 필터"
             onInput=${(e: Event) => { setHistoryQuery((e.target as HTMLInputElement).value) }}
           />
         </div>
         ${!inventory || inventory.history.length === 0
-          ? html`<div class="px-3 py-3 text-xs text-[var(--color-fg-muted)] v2-monitoring-row">저장된 OAS history snapshot이 아직 없습니다.</div>`
+          ? html`<div class="px-3 py-3 text-xs text-[var(--color-fg-muted)] v2-monitoring-row">저장된 Agent Core history snapshot이 아직 없습니다.</div>`
           : (() => {
               const visibleHistory = filterCheckpointHistory(inventory.history, historyQuery)
               const isFiltering = historyQuery.trim() !== ''
@@ -358,202 +468,6 @@ export function KeeperCheckpointPanel({
               `
             })()}
       </div>
-    </div>
-  `
-}
-
-interface GenerationLineageManifest {
-  generation: number
-  trace_id: string
-  generation_id?: string
-  parent_generation?: number | null
-  parent_trace_id?: string | null
-  created_at?: string
-  trigger_reason?: string
-  context_ratio?: number
-}
-
-interface GenerationLineageEntry {
-  generation: number
-  trace_id: string
-  generation_id?: string
-  parent_generation?: number | null
-  parent_trace_id?: string | null
-  created_at?: string
-  trigger_reason?: string
-  context_ratio?: number
-}
-
-function isGenerationLineageManifest(value: unknown): value is GenerationLineageManifest {
-  if (!isRecord(value)) return false
-  return typeof value.generation === 'number'
-    && typeof value.trace_id === 'string'
-    && (value.parent_generation == null || typeof value.parent_generation === 'number')
-    && (value.parent_trace_id == null || typeof value.parent_trace_id === 'string')
-    && (value.created_at == null || typeof value.created_at === 'string')
-    && (value.trigger_reason == null || typeof value.trigger_reason === 'string')
-    && (value.context_ratio == null || typeof value.context_ratio === 'number')
-}
-
-function isGenerationLineageEntry(value: unknown): value is GenerationLineageEntry {
-  if (!isRecord(value)) return false
-  return typeof value.generation === 'number'
-    && typeof value.trace_id === 'string'
-    && (value.parent_generation == null || typeof value.parent_generation === 'number')
-    && (value.parent_trace_id == null || typeof value.parent_trace_id === 'string')
-    && (value.created_at == null || typeof value.created_at === 'string')
-    && (value.trigger_reason == null || typeof value.trigger_reason === 'string')
-    && (value.context_ratio == null || typeof value.context_ratio === 'number')
-}
-
-function compactTraceId(traceId: string): string {
-  return traceId.length > 28
-    ? `${traceId.slice(0, 12)}…${traceId.slice(-8)}`
-    : traceId
-}
-
-export function lineageTransitionLabel(parentGeneration: number | null | undefined, generation: number): string {
-  return `${parentGeneration != null ? `gen ${parentGeneration}` : 'root'} -> gen ${generation}`
-}
-
-export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
-  const detail = keeperStatusDetails.value[keeperName]
-  if (!detail?.rawStatus) return null
-  const raw = detail.rawStatus
-  if (!isRecord(raw) || !isRecord(raw.generation_lineage)) return null
-
-  const lineage = raw.generation_lineage
-  const currentGeneration = typeof lineage.current_generation === 'number' ? lineage.current_generation : null
-  const currentTraceId = typeof lineage.current_trace_id === 'string' ? lineage.current_trace_id : null
-  const generationId = typeof lineage.generation_id === 'string' ? lineage.generation_id : null
-  const traceHistoryCount = typeof lineage.trace_history_count === 'number' ? lineage.trace_history_count : 0
-  const manifestPath = typeof lineage.manifest_path === 'string' ? lineage.manifest_path : null
-  const indexPath = typeof lineage.index_path === 'string' ? lineage.index_path : null
-  const manifest = isGenerationLineageManifest(lineage.manifest) ? lineage.manifest : null
-  const recent = (Array.isArray(lineage.recent) ? lineage.recent : []).filter(isGenerationLineageEntry)
-
-  if (currentGeneration == null && currentTraceId == null && recent.length === 0) return null
-
-  const latestEntry = recent[0] ?? null
-
-  return html`
-    <div class="md:col-span-2">
-      <${PanelCard} title="생성 계보">
-        <div class="text-2xs text-[var(--color-fg-muted)] mb-3">
-          최신 rollover가 위에 표시됩니다 (append-only).
-        </div>
-
-        ${latestEntry
-          ? html`
-            <div class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-8)] p-3 mb-3 v2-monitoring-panel">
-              <div class="flex flex-wrap items-center gap-2 mb-1">
-                <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-accent-fg)]">최신 핸드오프</span>
-                <${MonoBadge}>${lineageTransitionLabel(latestEntry.parent_generation, latestEntry.generation)}</${MonoBadge}>
-                ${latestEntry.created_at
-                  ? html`<span class="text-3xs text-[var(--color-fg-disabled)]">recorded <${TimeAgo} timestamp=${latestEntry.created_at} /></span>`
-                  : null}
-              </div>
-              <div class="text-2xs text-[var(--color-fg-primary)]">
-                ${latestEntry.trigger_reason ? `trigger ${latestEntry.trigger_reason} · ` : ''}context ratio ${formatPct1(latestEntry.context_ratio)}
-              </div>
-            </div>
-          `
-          : null}
-
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3 v2-monitoring-row">
-          <div class="px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-card">
-            <${SectionHeader} size="xs">현재 세대</${SectionHeader}>
-            <div class="mt-1 text-lg font-semibold text-[var(--color-fg-secondary)]">${currentGeneration ?? '-'}</div>
-            ${generationId ? html`<div class="text-3xs text-[var(--color-fg-disabled)] font-mono truncate" title=${generationId}>${generationId}</div>` : null}
-          </div>
-          <div class="px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-card">
-            <${SectionHeader} size="xs">추적 계보</${SectionHeader}>
-            <div class="mt-1 text-lg font-semibold text-[var(--color-fg-secondary)]">${traceHistoryCount}</div>
-            <div class="text-3xs text-[var(--color-fg-disabled)]">historical traces retained in meta.trace_history</div>
-          </div>
-          <div class="px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-card">
-            <${SectionHeader} size="xs">현재 추적</${SectionHeader}>
-            <div class="mt-1 text-sm font-mono text-[var(--color-fg-secondary)] truncate" title=${currentTraceId ?? ''}>${currentTraceId ? compactTraceId(currentTraceId) : '-'}</div>
-            <div class="text-3xs text-[var(--color-fg-disabled)]">artifact appears after the first successful handoff</div>
-          </div>
-        </div>
-
-        ${manifest
-          ? html`
-            <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 mb-3 v2-monitoring-panel">
-              <div class="flex flex-wrap items-center gap-2 mb-2">
-                <${SectionHeader} size="xs">현재 매니페스트</${SectionHeader}>
-                <${MonoBadge}>gen ${manifest.generation}</${MonoBadge}>
-                ${manifest.created_at
-                  ? html`<span class="text-3xs text-[var(--color-fg-disabled)]">created <${TimeAgo} timestamp=${manifest.created_at} /></span>`
-                  : null}
-              </div>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-2xs v2-monitoring-row">
-                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 v2-monitoring-card">
-                  <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider mb-1">부모</div>
-                  <div class="text-[var(--color-fg-secondary)]">${manifest.parent_generation != null ? `gen ${manifest.parent_generation}` : 'root generation'}</div>
-                  ${manifest.parent_trace_id
-                    ? html`<div class="font-mono text-[var(--color-fg-disabled)] truncate" title=${manifest.parent_trace_id}>${compactTraceId(manifest.parent_trace_id)}</div>`
-                    : null}
-                </div>
-                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 v2-monitoring-card">
-                  <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider mb-1">트리거</div>
-                  <div class="text-[var(--color-fg-secondary)]">${manifest.trigger_reason ?? '-'}</div>
-                  <div class="text-[var(--color-fg-disabled)]">context ratio ${formatPct1(manifest.context_ratio)}</div>
-                </div>
-              </div>
-            </div>
-          `
-          : html`
-            <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 mb-3 text-2xs text-[var(--color-fg-muted)] v2-monitoring-panel">
-              아직 handoff lineage manifest가 없습니다. generation 0에서는 현재 trace만 유지되고, 첫 successful handoff 이후부터 manifest/index가 생깁니다.
-            </div>
-          `}
-
-        <div>
-          <${SectionHeader} size="xs" class="mb-1">최근 핸드오프</${SectionHeader}>
-          <div class="text-2xs text-[var(--color-fg-disabled)] mb-2">최신 rollover 가 먼저 표시되어 operator 가 현재 trace 를 최근 이력과 비교할 수 있습니다.</div>
-          ${recent.length > 0
-            ? html`
-              <div class="flex flex-col gap-2 v2-monitoring-row">
-                ${recent.map((entry, index) => {
-                  const isLatest = index === 0
-                  return html`
-                    <div class=${`px-3 py-2 rounded-[var(--r-1)] border ${isLatest ? 'border-[var(--accent-22)] bg-[var(--accent-8)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'} v2-monitoring-row`}>
-                      <div class="flex flex-wrap items-center gap-2">
-                        <${MonoBadge}>gen ${entry.generation}</${MonoBadge}>
-                        ${isLatest
-                          ? html`<${StatusChip} tone="info" uppercase=${false} class="font-semibold">latest</${StatusChip}>`
-                          : null}
-                        ${entry.created_at
-                          ? html`<span class="text-3xs text-[var(--color-fg-disabled)]"><${TimeAgo} timestamp=${entry.created_at} /></span>`
-                          : null}
-                      </div>
-                      <div class="mt-1 text-2xs text-[var(--color-fg-primary)]">
-                        ${lineageTransitionLabel(entry.parent_generation, entry.generation)}
-                        ${entry.trigger_reason ? ` · ${entry.trigger_reason}` : ''}
-                        ${entry.context_ratio != null ? ` · ratio ${formatPct1(entry.context_ratio)}` : ''}
-                      </div>
-                      <div class="mt-1 text-3xs font-mono text-[var(--color-fg-disabled)] truncate" title=${entry.trace_id}>
-                        ${compactTraceId(entry.trace_id)}
-                      </div>
-                    </div>
-                  `
-                })}
-              </div>
-            `
-            : html`<div class="text-2xs text-[var(--color-fg-muted)]">기록된 핸드오프 항목이 아직 없습니다.</div>`}
-        </div>
-
-        ${manifestPath || indexPath
-          ? html`
-            <div class="mt-3 flex flex-col gap-1 text-3xs text-[var(--color-fg-disabled)]">
-              ${manifestPath ? html`<div class="font-mono truncate" title=${manifestPath}>manifest ${manifestPath}</div>` : null}
-              ${indexPath ? html`<div class="font-mono truncate" title=${indexPath}>index ${indexPath}</div>` : null}
-            </div>
-          `
-          : null}
-      <//>
     </div>
   `
 }

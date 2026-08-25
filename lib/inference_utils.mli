@@ -8,14 +8,14 @@
     Returns [default] when unset or unparseable. *)
 val int_of_env_default : string -> default:int -> min_v:int -> max_v:int -> int
 
-(** Compute total tokens from OAS api_usage. *)
-val total_tokens : Agent_sdk.Types.api_usage -> int
+(** Compute total tokens from AGENT_CORE api_usage. *)
+val total_tokens : Agent_core.Types.api_usage -> int
 
 (** Zero usage marker. *)
-val zero_usage : Agent_sdk.Types.api_usage
+val zero_usage : Agent_core.Types.api_usage
 
 (** Extract usage from an api_response, defaulting to {!zero_usage}. *)
-val usage_of_response : Agent_sdk_response.api_response -> Agent_sdk.Types.api_usage
+val usage_of_response : Agent_core.Types.api_response -> Agent_core.Types.api_usage
 
 (** Convert elapsed seconds to integer milliseconds for telemetry. Positive
     sub-1ms intervals are rounded up to 1; non-positive or non-finite
@@ -36,10 +36,7 @@ val sanitize_text_utf8 : string -> string
 val sanitize_json_utf8 : Yojson.Safe.t -> Yojson.Safe.t
 
 (** Sanitize text content blocks in a message. *)
-val sanitize_message_utf8 : Agent_sdk.Types.message -> Agent_sdk.Types.message
-
-(** Sanitize text content blocks in a list of messages. *)
-val sanitize_messages_utf8 : Agent_sdk.Types.message list -> Agent_sdk.Types.message list
+val sanitize_message_utf8 : Agent_core.Types.message -> Agent_core.Types.message
 
 (** Maximum concurrent model calls (from [MASC_MAX_CONCURRENT_MODELS], default 8). *)
 val max_concurrent_models : int

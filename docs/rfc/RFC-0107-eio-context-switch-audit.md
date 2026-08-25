@@ -1,6 +1,5 @@
 ---
 rfc: "0107"
-phase: C.0
 status: Evidence
 created: 2026-05-17
 supplement_of: RFC-0107
@@ -39,7 +38,7 @@ supplement_of: RFC-0107
 
 | 파일 | 라인 | 의도 |
 |---|---|---|
-| `lib/runtime/runtime_oas_runner.ml` | 23 | OAS runner sw fallback |
+| `lib/runtime/runtime_oas_runner.ml` | 23 | agent_core runner sw fallback |
 | `lib/runtime/runtime_runtime.ml` | 177 | runtime fiber attachment |
 | `lib/runtime/runtime_catalog_runtime.ml` | 619 | catalog runtime fork |
 | `lib/keeper/keeper_run_tools.ml` | 781 | tool execution sw |

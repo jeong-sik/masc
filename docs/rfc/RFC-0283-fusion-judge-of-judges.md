@@ -1,11 +1,16 @@
+---
+rfc: "0283"
+status: Implemented
+---
+
 # RFC-0283 — Fusion: judge-of-judges 위상 (flat/staged reducer)
 
-- Status: Draft
+- Status: Implemented
 - Author: Vincent (yousleepwhen) + Claude
 - Created: 2026-06-23
 - Parent: RFC-0252 (fusion-panel-judge-deliberation) — §9(preset)를 개정. 위상 선택은 "Fusion as a Tool" 슬라이스 계열(refine/conditional)의 연장.
 - Scope: `lib/fusion_core/` (preset/config/types/policy), `lib/fusion/` (judge/orchestrator), `lib/keeper/keeper_tool_descriptor.ml` (스키마), `config/runtime.toml` (`[fusion.presets.*]`)
-- Boundary: OAS 0줄 변경. sink 계약 무변경. 기존 단일 `judge` 필드 **유지**(파괴 변경 없음). `simple`/`refine`/`conditional` 위상 동작 불변.
+- Boundary: agent_core 0줄 변경. sink 계약 무변경. 기존 단일 `judge` 필드 **유지**(파괴 변경 없음). `simple`/`refine`/`conditional` 위상 동작 불변.
 - Concurrency update (2026-07-17): retired `max_concurrent_judges` never
   controlled execution. Configured judge identities are the exact fan-out set;
   MASC-owned durable host draining is tracked separately in #25032.
@@ -20,7 +25,7 @@
 - `refine`: panel → judge → judge'(1차 종합 재검토) → sink
 - `conditional`: 1차 판정이 `Insufficient`일 때만 refine
 
-세 위상 모두 **reduce 단계에 심판이 하나**다. 패널(fan-out)은 RFC-0277/0278로 데이터 주도(이종 그룹·persona)가 됐지만 reduce는 단일 순차 심판으로 남아 있다.
+세 위상 모두 **reduce 단계에 심판이 하나**다. 패널(fan-out)은 RFC-0277/0278로 데이터 주도(이종 그룹·keeper)가 됐지만 reduce는 단일 순차 심판으로 남아 있다.
 
 `judge-of-judges`(JOJ)는 reduce 쪽의 **병렬 fan-out + 합성**이다: 같은 패널 답을 **서로 다른 N개 1차 심판**(각자 다른 모델 또는 다른 lens/system_prompt)이 독립적으로 종합하고, **meta 심판**이 그 N개 종합을 하나로 reconcile한다.
 
@@ -32,7 +37,7 @@ panel → [judge_1, judge_2, ..., judge_N] → meta-judge → sink
 
 같은 모델·같은 prompt로 심판을 N번 돌리면 (결정론이면) 동일 출력 → meta 무의미. 신뢰할 수 있는 다양성은 **모델 차이** 또는 **lens 차이**(system_prompt)에서 온다. `build_agent`는 temperature/sampling을 노출하지 않으므로 "같은 심판 N 샘플"은 API상 불가하고 신뢰 불가다. 따라서 JOJ는 **config에 1차 심판 목록**을 요구한다 — RFC-0277이 패널을 `panel: string list` → `panels: panel_group list`로 만든 것과 대칭.
 
-근거: persona ensemble(RFC-0278)이 패널에서 다양성을 증명했듯, 심판에도 같은 원리를 적용한다("회의론자 심판 + 낙관론자 심판 + 문자주의 심판 → meta가 reconcile").
+근거: keeper ensemble(RFC-0278)이 패널에서 다양성을 증명했듯, 심판에도 같은 원리를 적용한다("회의론자 심판 + 낙관론자 심판 + 문자주의 심판 → meta가 reconcile").
 
 ## 2. 설계 (Design)
 
@@ -137,7 +142,7 @@ val run_meta : (* run/run_refine과 동형, ~priors 추가 *) ...
 | preset에 `judges` 추가, Validated_preset 검증 | 기존 `judge`/`judge_system_prompt` |
 | `[fusion].staged_judge_group_size` config + staged grouping validation | panel preset grammar |
 | fusion_topology에 `Judge_of_judges`, `Staged_judge_of_judges` | simple/refine/conditional 동작 |
-| Fusion_judge: compose_meta_prompt/run_meta | sink 계약, OAS |
+| Fusion_judge: compose_meta_prompt/run_meta | sink 계약, agent_core |
 | orchestrator JOJ 분기 + 1차 병렬 fan-out | panel fan-out |
 
 ## 4. 테스트

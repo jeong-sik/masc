@@ -15,22 +15,16 @@ type t = {
         when available.  This is runtime repo truth, not binary truth. *)
   commit : string option;
     (** Backwards-compatible identity field.  Uses [binary_commit] when
-        [MASC_BUILD_GIT_COMMIT] is set, otherwise falls back to
+        the build-time stamp is present, otherwise falls back to
         [repo_head_commit].  Inspect [commit_source] before using this as
         deploy proof. *)
   commit_source : string option;
-    (** [Some "env:MASC_BUILD_GIT_COMMIT"] when [commit] came from the
-        build env override, [Some "runtime_repo_head"] when it came from
-        probing the current checkout, [None] when unknown. *)
-  commit_unix_ts : float option;
-    (** Unix timestamp of [commit].  Kept for compatibility; prefer the
-        source-specific timestamp fields below. *)
-  commit_age_seconds : int option;
-    (** Age of [commit_unix_ts].  Kept for compatibility; prefer
-        [binary_commit_age_seconds] for binary freshness. *)
+    (** [Some "embedded"] when [commit] came from the build-time stamp,
+        [Some "runtime_repo_head"] when it came from probing the current
+        checkout, [None] when unknown. *)
   binary_commit : string option;
-    (** Commit supplied by [MASC_BUILD_GIT_COMMIT], when available.  This is
-        the only commit field that operators should use as binary-build
+    (** Commit stamped into the binary at build time, when available.  This
+        is the only commit field that operators should use as binary-build
         identity in this module. *)
   binary_commit_source : string option;
   binary_commit_unix_ts : float option;
@@ -69,9 +63,11 @@ val repo_root : unit -> string option
     which may intentionally point at a different workspace such as [~/me]. *)
 
 val resolve_commit :
-  env_value:string option -> probe:(unit -> string option) -> string option
-(** Resolve commit hash from env var or probe function.
-    Exposed for testing. *)
+  embedded:string option ->
+  probe:(unit -> string option) ->
+  string option
+(** Resolve commit hash: build-time embedded stamp first, then the probe
+    function. Exposed for testing. *)
 
 type commit_resolution = {
   commit : string option;
@@ -83,9 +79,14 @@ type commit_resolution = {
 }
 
 val resolve_commit_details :
-  env_value:string option -> probe:(unit -> string option) -> commit_resolution
-(** Resolve the compatibility [commit] plus the source-specific binary/env
-    and runtime repo-head fields.  Exposed for testing. *)
+  embedded:string option ->
+  probe:(unit -> string option) ->
+  commit_resolution
+(** Resolve the compatibility [commit] plus the source-specific binary and
+    runtime repo-head fields. [binary_commit] carries the build-time
+    embedded stamp (source ["embedded"]); the repo-head probe never
+    populates it because the source tree next to the process moves
+    independently of the binary. Exposed for testing. *)
 
 val pick_repo_candidates :
   exe_dir:string -> cwd:string -> string list

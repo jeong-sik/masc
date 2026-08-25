@@ -1,0 +1,83 @@
+{
+ "schema": "masc.keeper.schedule_live.v1",
+ "measured_at": "2026-08-17T11:12:00Z",
+ "live_endpoint": "http://127.0.0.1:8935",
+ "server_commit": "1a8be94d618503090d5882193466d718b1456566",
+ "protocol": "MCP tool calls (masc_schedule_create/get/cancel/list) against the live server via docs harness (scripts/harness/lib/test_framework.sh). Target keeper is the existing dedicated probe keeper 'rtprobe' (instructions: call whatever tool a request names). No new keeper was created for this measurement: masc_keeper_up was blocked by the local auto-mode classifier as a production-provisioning action, so the wake target was an already-live, already-idle keeper instead of a freshly minted one. The protected 24h canary (canary-24h-ollama-b-20260816) was never referenced or targeted.",
+ "wake_chain": {
+  "schedule_id": "sched-live-20260817-w1",
+  "recurrence_kind": "one_shot",
+  "target_keeper": "rtprobe",
+  "created_at_unix": 1786964942,
+  "due_at_unix": 1786965042,
+  "due_at_iso": "2026-08-17T11:10:42Z",
+  "steps": [
+   {
+    "step": "create",
+    "evidence": "masc_schedule_create response: status=scheduled, schedule_id=sched-live-20260817-w1, payload_target=keeper:rtprobe, payload_support=supported"
+   },
+   {
+    "step": "due -> dispatch",
+    "evidence": "server log <base-path>/.masc/logs/masc-8935-20260817d.out.log:3074-3075: schedule_runner: occurrence=4bf3458b... schedule_id=sched-live-20260817-w1 dispatch=succeeded; due_changed=1 emitted=1 rescheduled=0 dispatched=1 (2026-08-17 20:10:52 KST = 2026-08-17T11:10:52Z, 10s after due_at)"
+   },
+   {
+    "step": "wake -> keeper turn",
+    "evidence": "server log lines 3077-3084: 'turn entry: scheduled wake delivered schedule_id=sched-live-20260817-w1' -> 'consumed stimulus ... class=schedule_due' -> 'promoted scheduled work' -> 'keepalive turn scheduled for rtprobe: channel=turn reasons=scheduled_automation_due' -> FSM idle->phase_gating->runtime_routing->awaiting_provider->streaming, all at 20:10:52 KST"
+   },
+   {
+    "step": "keeper turn executed",
+    "evidence": "server log lines 3093-3134: turn=213 completes with tool_call tool=masc_check outcome=ok (the exact tool named in the wake payload message); turn=214 'keeper cycle OK ... mode=tool_use stop=completed'; FSM streaming->completing->done. rtprobe total_turns went 146 -> 147, last_turn_ts=1786965064.735021 (masc_keeper_status independent read)."
+   },
+   {
+    "step": "terminal",
+    "evidence": "masc_schedule_get(schedule_id=sched-live-20260817-w1) status=succeeded, last_wake.status=succeeded, last_wake.detail={kind:masc.keeper_wake.enqueued, queue:keeper_event_queue, stimulus:schedule_due, activation_status:signaled, reaction_ledger_status:recorded}"
+   },
+   {
+    "step": "durable store cross-check",
+    "evidence": "<base-path>/.masc/schedules.json: schedules[] row schedule_id=sched-live-20260817-w1 status=succeeded; wakes[] row schedule_instance_id=01a00f69-1f7a-7000-b081-717910860ffe status=succeeded (1856 total wake rows in store, read independently of the MCP response)"
+   },
+   {
+    "step": "dashboard API projection cross-check",
+    "evidence": "GET /api/v1/dashboard/scheduled-automation: signals[] contains occurrence_id=4bf3458b373bcc80634d341be839ab22429a605b15c7f89360b160c28e4d2fef kind=schedule.due_candidate schedule_id=sched-live-20260817-w1 due_at_iso=2026-08-17T11:10:42Z emitted_at_iso=2026-08-17T11:10:52Z, matching the MCP-reported occurrence exactly. counts.succeeded=13 at capture time. Note: the 'requests' array in this endpoint only lists non-terminal rows, so w1 (terminal) is absent from 'requests' but present in the 'signals' feed and in schemas.json directly -- browser UI was not opened, this is API-level projection only."
+   }
+  ]
+ },
+ "cancel_chain": {
+  "schedule_id": "sched-live-20260817-cancel1",
+  "recurrence_kind": "one_shot",
+  "target_keeper": "rtprobe",
+  "created_at_unix": 1786964952,
+  "due_at_unix": 1786965852,
+  "due_at_iso": "2026-08-17T11:24:12Z",
+  "steps": [
+   {
+    "step": "create",
+    "evidence": "masc_schedule_create response: status=scheduled, due_at_iso=2026-08-17T11:24:12Z (12 minutes out, well before due at cancel time)"
+   },
+   {
+    "step": "cancel before due",
+    "evidence": "masc_schedule_cancel(schedule_id=sched-live-20260817-cancel1, reason='live cancel-path receipt (M-lead task)') response: schedule.status=cancelled, last_wake=null (never dispatched)"
+   },
+   {
+    "step": "independent read confirms cancelled",
+    "evidence": "separate masc_schedule_get call: status=cancelled; masc_schedule_list(status=cancelled) includes schedule_id=sched-live-20260817-cancel1"
+   },
+   {
+    "step": "durable store cross-check",
+    "evidence": "<base-path>/.masc/schedules.json: schedules[] row schedule_id=sched-live-20260817-cancel1 status=cancelled"
+   }
+  ]
+ },
+ "cleanup": {
+  "new_resources_created": ["sched-live-20260817-w1", "sched-live-20260817-cancel1"],
+  "final_state": "both schedules reached a terminal state naturally (succeeded, cancelled) during the measurement; no lingering scheduled/due rows remain for either id",
+  "keeper_side_effects": "rtprobe ran one extra turn (146->147) consuming the wake and calling masc_check as instructed; no other state was mutated on rtprobe",
+  "canary_contact": "none -- canary-24h-ollama-b-20260816 was not referenced, listed, or targeted at any point"
+ },
+ "limitations": [
+  "Only recurrence_kind=one_shot was exercised for the wake path; interval/daily/cron recurrence firing and rescheduling are not covered by this receipt.",
+  "The dashboard verification is API-projection only (curl against /api/v1/dashboard/scheduled-automation); no browser/UI screenshot was taken.",
+  "The target keeper (rtprobe) is a purpose-built probe keeper reused from prior live measurements, not a newly minted throwaway identity -- masc_keeper_up (create/update keeper) was blocked by the local auto-mode classifier as an infra-provisioning action, independent of this task's own guardrails.",
+  "Delivery latency observed: ~10s from due_at to dispatch=succeeded log line, consistent with the schedule runner's 15s default poll cadence (MASC_SCHEDULE_RUNNER_INTERVAL_SEC, lib/config/env_config_runtime_services.ml)."
+ ]
+}

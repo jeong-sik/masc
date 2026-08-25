@@ -21,13 +21,15 @@ export interface BoardMonitoring {
 
 export interface PendingConfirmation {
   confirm_token: string
-  actor?: string
-  action_type?: string
-  target_type?: string
-  target_id?: string | null
-  delegated_tool?: string
-  created_at?: string
-  preview?: unknown
+  trace_id: string
+  actor: string
+  action_type: string
+  target_type: string
+  target_id: string | null
+  payload: Record<string, unknown>
+  delegated_tool: string
+  created_at: string
+  expires_at: string | null
 }
 
 export interface PendingConfirmEnvelope {
@@ -37,6 +39,50 @@ export interface PendingConfirmEnvelope {
 
 export type GateDecisionSource = 'always_allowed' | 'auto_judge' | 'human_operator'
 export type GateJudgment = 'approve' | 'deny' | 'require_human'
+
+export type KeeperApprovalAuditEvent =
+  | 'pending'
+  | 'resolved'
+  | 'summary_updated'
+  | 'rule_created'
+  | 'rule_deleted'
+  | 'grant_consumed'
+  | 'gate_allowed'
+  | 'gate_exact_rule_expired'
+  | 'gate_exact_rule_store_degraded'
+  | 'gate_grant_unavailable'
+  | 'auto_judge_operator_retry_started'
+  | 'auto_judge_block_observation_superseded'
+  | 'auto_judge_restart_worker_recovered'
+  | 'auto_judge_restart_judgment_recovered'
+
+export type KeeperApprovalAuditReceipt =
+  | {
+      event: KeeperApprovalAuditEvent
+      recorded: true
+      cleanup_failure?: {
+        stage: 'append_cleanup'
+        detail: string
+      }
+    }
+  | {
+      event: KeeperApprovalAuditEvent
+      recorded: false
+      stage: 'store_create' | 'append'
+      detail: string
+    }
+
+export type KeeperApprovalAuditFailure = Extract<
+  KeeperApprovalAuditReceipt,
+  { recorded: false }
+>
+
+export interface KeeperApprovalAuditFailureNotice {
+  id: string | null
+  transport: 'http' | 'sse'
+  observed_at: string
+  receipt: KeeperApprovalAuditFailure
+}
 
 /** LLM-generated operator briefing attached to a pending approval by the HITL
  *  context-summary worker (`hitl_summary_worker.ml`). Mirrors
@@ -158,21 +204,17 @@ export interface KeeperResolvedApprovalItem {
   keeper_name: string
   tool_name: string
   decision: KeeperResolvedApprovalDecision
-  decision_raw?: string | null
-  decision_reason?: string | null
-  resolved_at?: string | null
-  turn_id?: number | null
-  task_id?: string | null
-  goal_id?: string | null
-  goal_ids?: string[]
-  decision_source?: GateDecisionSource | null
-  rule_match?: {
-    rule_id?: string | null
-  } | null
-  /** Judge evidence recorded on the resolved audit event at resolution time
-   *  (#26126). `null` on events written before that enrichment existed. */
-  summary_status?: HitlSummaryStatus | null
-  exact_attempt?: KeeperExactAttemptState | null
+  decision_raw: string
+  decision_reason: string | null
+  resolved_at: string
+  turn_id: number | null
+  task_id: string | null
+  goal_id: string | null
+  goal_ids: string[]
+  actor: string | null
+  decision_source: GateDecisionSource
+  summary_status: HitlSummaryStatus
+  exact_attempt: KeeperExactAttemptState
 }
 
 /** An approval_queue row the server sent but the client contract rejected.
@@ -186,7 +228,7 @@ export interface KeeperApprovalQueueRowViolation {
   tool_name?: string | null
 }
 
-/** Which exact-output lane serves Gate Auto Judge. Slot order is OAS failover
+/** Which exact-output lane serves Gate Auto Judge. Slot order is Agent Core failover
  *  order: the first slot is the model that actually judges. */
 export type GateJudgeLane =
   | { status: 'available'; lane_id: string; slots: string[] }
@@ -196,20 +238,23 @@ export interface KeeperApprovalRule {
   id: string
   keeper_name: string
   tool_name: string
-  request_fingerprint?: string
-  created_at?: string | null
-  created_by?: string | null
-  source_approval_id?: string | null
+  request_fingerprint: string
+  created_at: number
+  created_by: string
+  source_approval_id: string
+  expires_at: number | null
 }
+
+export type KeeperApprovalRulesState =
+  | { state: 'ready' }
+  | { state: 'unavailable'; error: string }
 
 export type GateMode = 'manual' | 'auto_judge' | 'always_allow'
 
-export interface GateModeStatus {
-  mode: GateMode
-  configured?: boolean
-  state?: 'ready' | 'invalid' | string
-  read_error?: string
-}
+export type GateModeStatus =
+  | { mode: GateMode; configured: boolean; state: 'ready' }
+  | { mode: 'auto_judge'; configured: boolean; state: 'unavailable'; read_error: string }
+  | { mode: 'manual'; configured: true; state: 'invalid'; read_error: string }
 
 /**
  * Bounds that produced `recent_resolved`. Read them with the rows: `returned`
@@ -227,30 +272,37 @@ export interface KeeperResolvedApprovalPage {
   scan_exhausted: boolean
 }
 
+export type KeeperResolvedApprovalState =
+  | { state: 'ready' }
+  | { state: 'unavailable'; stage: 'list_recent_resolved'; error: string }
+
 export interface DashboardGateResponse {
   generated_at?: string
   note?: string
   approval_queue: KeeperApprovalQueueItem[] | null
   approval_queue_state: KeeperApprovalQueueState
   approval_queue_violations?: KeeperApprovalQueueRowViolation[]
-  recent_resolved?: KeeperResolvedApprovalItem[]
-  recent_resolved_page?: KeeperResolvedApprovalPage | null
-  approval_rules?: KeeperApprovalRule[]
-  hitl?: {
-    gate_mode?: GateModeStatus
-    judge_lane?: GateJudgeLane
-  }
+  recent_resolved: KeeperResolvedApprovalItem[] | null
+  recent_resolved_page: KeeperResolvedApprovalPage | null
+  recent_resolved_state: KeeperResolvedApprovalState
+  approval_rules: KeeperApprovalRule[]
+  approval_rules_state: KeeperApprovalRulesState
+  hitl: {
+    gate_mode: GateModeStatus
+    judge_lane: GateJudgeLane
+  } | null
 }
 
 export interface OperatorActionDescriptor {
   action_type: string
+  tool_name: string
   target_type: string
-  description?: string
-  confirm_required?: boolean
+  description: string
+  confirm_required: boolean
 }
 
 export interface PendingConfirmSummary {
-  actor_filter?: string | null
+  actor_filter: string | null
   filter_active: boolean
   visible_count: number
   total_count: number

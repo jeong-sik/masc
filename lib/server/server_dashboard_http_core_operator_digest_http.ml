@@ -158,8 +158,6 @@ let operator_digest_http_json ~state ~sw ~clock request =
           ; "generated_at", `String (Masc_domain.now_iso ())
           ]
     in
-    (* See [operator_snapshot_http_json] above for the parameterized-cache
-       rationale.  Same 5s SWR window applies to operator/digest views. *)
     Ok
       (Dashboard_cache.get_or_compute_with_timeout
          cache_key
@@ -167,5 +165,5 @@ let operator_digest_http_json ~state ~sw ~clock request =
          ~clock
          ~timeout_sec:Core_cache.dashboard_request_timeout_s
          compute
-       |> Core_operator_query.with_operator_digest_metadata ~config ~cache_key ~query))
+       |> Core_operator_query.with_operator_digest_metadata ~config ~query))
 ;;

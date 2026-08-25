@@ -1,0 +1,24 @@
+name = "tool_write_file"
+description = """
+Write or append a file. path is required. For mode='overwrite' (default) or \
+'append', content is required and non-empty. Good overwrite: \
+path='lib/foo.ml', content='let x = 1'. Bad: path='', content=''. Creates \
+parent dirs."""
+
+[[params]]
+name = "path"
+type = "string"
+required = true
+description = "Relative or absolute file path to write"
+
+[[params]]
+name = "content"
+type = "string"
+required = true
+description = "File content to write"
+
+[[params]]
+name = "mode"
+type = "string"
+enum = ["overwrite", "append"]
+description = "Write mode (default: overwrite)"

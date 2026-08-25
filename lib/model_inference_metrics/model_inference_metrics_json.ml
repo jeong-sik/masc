@@ -93,7 +93,6 @@ let model_stats_to_json ?(model_label = public_runtime_label) (s : model_stats)
              (fun (c : coverage_reason_count) ->
                 `Assoc [ "reason", `String c.crc_reason; "count", `Int c.crc_count ])
              s.coverage_reason_counts) )
-    ; "fallback_count", `Int s.fallback_count
     ; "success_count", `Int s.success_count
     ; "error_count", `Int s.error_count
     ; "total_cost_usd", Json_util.float_opt_to_json s.total_cost_usd
@@ -236,21 +235,6 @@ let render_keeper_prompt_feedback (agg : aggregate) =
 ;;
 
 (* ── Provider stats JSON ────────────────────────────────── *)
-
-let provider_stats_to_json (s : provider_stats) : Yojson.Safe.t =
-  `Assoc
-    [ "provider", `String public_runtime_label
-    ; "entry_count", `Int s.ps_entry_count
-    ; "model_count", `Int 0
-    ; "avg_tok_per_sec", Json_util.float_opt_to_json s.ps_avg_tok_per_sec
-    ; "avg_prompt_tok_per_sec", Json_util.float_opt_to_json s.ps_avg_prompt_tok_per_sec
-    ; "avg_decode_tok_per_sec", Json_util.float_opt_to_json s.ps_avg_decode_tok_per_sec
-    ; "avg_latency_ms", Json_util.float_opt_to_json s.ps_avg_latency_ms
-    ; "p50_latency_ms", Json_util.float_opt_to_json s.ps_p50_latency_ms
-    ; "p95_latency_ms", Json_util.float_opt_to_json s.ps_p95_latency_ms
-    ; "total_cost_usd", Json_util.float_opt_to_json s.ps_total_cost_usd
-    ]
-;;
 
 (* ── Cost & Latency aggregator ─────────────────────────────
    Composes the O4 cost-latency payload consumed by the

@@ -26,12 +26,6 @@
 #     should not be expected to gain a [@@deriving tla] hook. Snapshot:
 #     scripts/tla-ppx-baseline.json.
 #
-# Inversion vs OAS ratchet:
-#   The OAS boundary ratchet enforces an *upper* floor (current must
-#   be ≤ baseline) because we want fewer direct violations. Here we
-#   enforce a *lower* floor (current must be ≥ baseline) because we
-#   want monotonic adoption growth.
-#
 # Policy: PRs that intentionally remove a [@@deriving tla] (e.g. when
 # inlining a small variant) must --regenerate AND open a paired
 # follow-up issue documenting the removal rationale. Anti-pattern:

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>런타임 KV 캐시 재사용 · reasoning 연속성 실측 감사</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, "Apple SD Gothic Neo", sans-serif; max-width: 60rem;
+         margin: 2rem auto; padding: 0 1rem; line-height: 1.6; }
+  h1 { font-size: 1.4rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
+  table { border-collapse: collapse; width: 100%; margin: .8rem 0; font-size: .92rem; }
+  th, td { border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+           padding: .35rem .6rem; text-align: left; vertical-align: top; }
+  th { background: color-mix(in srgb, currentColor 8%, transparent); }
+  code { font-family: ui-monospace, monospace; font-size: .88em;
+         background: color-mix(in srgb, currentColor 8%, transparent);
+         padding: .05rem .3rem; border-radius: 3px; }
+  .dead { color: #c0392b; font-weight: 600; }
+  .good { color: #1e8e3e; font-weight: 600; }
+  .note { font-size: .88rem; opacity: .85; }
+  .verdict { border-left: 4px solid color-mix(in srgb, currentColor 40%, transparent);
+             padding: .2rem 1rem; margin: 1rem 0; }
+</style>
+</head>
+<body>
+
+<h1>런타임 KV 캐시 재사용 · reasoning 연속성 실측 감사</h1>
+<p class="note">
+2026-08-16 · 측정 스크립트: <code>scripts/bench-kv-cache.py</code> ·
+원본 증거: <code>docs/evidence/kv-cache-harness-2026-08-16.jsonl</code> ·
+설계 SSOT: <code>docs/rfc/RFC-0382</code> ·
+측정 환경: M3 Max 128GB, llama-server <code>b10180 (11b068d06)</code>, Qwen3.8-27B UD-Q4_K_XL(ollama blob 직접 로드), <code>-c 16384 -np 1 --jinja --reasoning-format deepseek</code>, 캐시 관련 서버 플래그는 전부 기본값
+</p>
+
+<div class="verdict">
+<p><strong>판정 5줄.</strong></p>
+<ol>
+<li>MASC의 프롬프트 조립은 이미 캐시 인지형이다 — 안정 system 헤드 / append-only 히스토리 / window 양자화 컷 / 변동 컨텍스트 꼬리 주입이 코드에 설계 주석과 함께 존재한다 (<code>agent_turn.ml:33-34</code> "critical for local LLM KV-cache reuse").</li>
+<li>llama-server + Qwen3.8-27B에서 <strong>preserve-thinking + append-only</strong>는 턴당 prefill을 <span class="good">26~34 토큰(≈0.7s)</span>으로 만든다. 이전 턴에 생성된 thinking의 KV가 슬롯에 남아 있고, 같은 reasoning_content를 히스토리로 되돌려주면 재처리가 새 user 메시지 분량으로 수렴하기 때문이다.</li>
+<li>시스템 헤드에 타임스탬프 <em>한 줄</em>을 매턴 갱신하면 재처리 토큰이 <span class="dead">314 → 863 → 1,892(14.4s)</span>로 히스토리에 비례해 배증한다. 같은 정보를 대화 꼬리로 옮기면 61~69 토큰 상수 — <strong>턴4 기준 31배 차이</strong>. 변동 정보의 위치가 캐시의 전부다.</li>
+<li>llama-server는 스트리밍 최종 청크에 <code>timings.cache_n</code>(재사용 토큰 수)을 opt-in 없이 싣는데, agent-core 스트리밍 경로는 Ollama NDJSON에서만 timings를 읽어 <span class="dead">로컬 행(전부 streaming=true)의 캐시 관측이 유실</span>된다 (G1).</li>
+<li>라이브 fleet(8/15, 762턴)의 캐시 히트율은 클라이언트 구조가 아니라 provider가 결정했다: gemini 84.1% / GLM 68.5% / <span class="dead">ollama_cloud(deepseek) 0%</span> — 하루 2,340만 input 토큰 전량 재프리필 (GLM 수치는 최초 게재분 40.6%의 정정, 표 3 참조). 멀티턴 keeper를 캐시 없는 provider에 태우는 배치가 지연·비용의 주범이다.</li>
+</ol>
+</div>
+
+<h2>표 1. 히스토리 정책별 턴당 재처리 비용 (같은 대화, 같은 모델, 같은 서버)</h2>
+<p class="note">각 셀: <code>prompt_n</code>(이번 턴에 다시 처리한 토큰) / <code>prompt_ms</code>. cache_n·전체 원값은 evidence JSONL 참조. 턴1 제외 사유: 하네스가 시나리오 간 슬롯 캐시를 지우지 않아 턴1은 직전 시나리오 잔여 캐시에 오염될 수 있다(volatile 턴1 cache_n=559). strip·volatile 일부 턴은 thinking이 max_tokens를 소진한 퇴화 생성(content_chars=0)으로, 턴2~4 상대 비교에는 영향 없으나 volatile의 절대 수치엔 생성 길이 변동이 혼입될 수 있다.</p>
+<table>
+<tr><th>히스토리 정책</th><th>턴2</th><th>턴3</th><th>턴4</th><th>경향</th></tr>
+<tr><td><strong>preserve</strong> — append-only + reasoning_content 재주입 (<code>chat_template_kwargs {"preserve_thinking": true}</code>)</td>
+    <td class="good">29 / 0.9s</td><td class="good">34 / 0.6s</td><td class="good">26 / 0.7s</td><td>상수</td></tr>
+<tr><td><strong>strip</strong> — Qwen 기본 (이전 턴 reasoning 제거)</td>
+    <td>122 / 1.4s</td><td>86 / 1.2s</td><td>32 / 1.2s</td><td>마지막 교환 크기에 비례</td></tr>
+<tr><td><strong>volatile-head</strong> — system 프롬프트 끝에 타임스탬프 1줄 매턴 갱신</td>
+    <td class="dead">314 / 4.0s</td><td class="dead">863 / 7.1s</td><td class="dead">1,892 / 14.4s</td><td class="dead">히스토리 길이에 비례 (배증)</td></tr>
+<tr><td><strong>volatile-tail</strong> — 같은 타임스탬프를 새 user 메시지 머리에</td>
+    <td class="good">64 / 1.0s</td><td class="good">69 / 1.1s</td><td class="good">61 / 1.0s</td><td>상수</td></tr>
+</table>
+<p class="note">volatile-head 턴4에서 <code>cache_n</code>이 559→68로 무너졌다 — hybrid(SSM) 모델은 임의 위치 롤백이 불가능해 체크포인트(<code>--ctx-checkpoints</code>, 기본 32/slot, llama.cpp PR #15293) 위치까지만 되감는데, 매턴 헤드가 변형되면 체크포인트가 고갈된다. full-attention 모델보다 hybrid 모델이 프리픽스 오염에 더 취약하다는 실측.</p>
+
+<h2>표 2. 로컬 서빙 경로 비교 (같은 Qwen3.8-27B, 같은 박스)</h2>
+<table>
+<tr><th>경로</th><th>prefill</th><th>decode</th><th>턴간 KV 재사용</th><th>비고</th></tr>
+<tr><td>ollama 0.32.12 <code>/api/chat</code></td><td>12.3 t/s</td><td>3.2 t/s</td><td>미계측</td><td>2026-08-15 실측 (runtime.toml 주석)</td></tr>
+<tr><td>mlx_vlm.server 0.6.13 + MTP draft (현 8080)</td><td>—</td><td>19.1 t/s</td><td class="dead">없음</td><td><code>apc_enabled:false</code> 실측 + upstream이 요청마다 Metal 캐시 소거 (mlx-vlm#999). response_format 미지원(draft)</td></tr>
+<tr><td><strong>llama-server b10180</strong></td><td class="good">167 t/s</td><td class="good">17.6 t/s</td><td class="good">cache_n 실측 재사용</td><td>JSON schema · slot save/restore · <code>--reasoning-preserve</code> 지원. 로드 로그: "chat template supports preserving reasoning"</td></tr>
+</table>
+<p class="note">ollama의 3.2 t/s는 qwen35 아키텍처(Gated DeltaNet hybrid)의 SSM Metal 경로가 느린 빌드였고, brew b10180은 같은 GGUF에서 5.5배를 낸다. 로컬 레인이 "느려서 강등"된 2026-08-07~08의 근거가 더 이상 성립하지 않는다.</p>
+
+<h2>표 3. 라이브 fleet 캐시 히트 (2026-08-15, 762턴)</h2>
+<p class="note">정정(2026-08-16 적대적 리뷰): GLM의 <code>input_tokens</code>는 캐시 재사용분 포함형(input = cache_read + cache_miss, 표본 불일치 0건)이라 히트율은 r/i. 최초 게재분의 40.6% = r/(r+i)는 분모 이중 계산 오류였다 — G6(provider별 usage 의미론)가 이 표에서 실현된 사례. gemini는 배제형이라 r/(r+i)가 맞다. 원본 로그는 라이브 증가 파일로 사후 재현 불가, 수치는 8/15 스냅샷.</p>
+<table>
+<tr><th>모델 (런타임)</th><th>턴</th><th>cache_read</th><th>input</th><th>히트율</th></tr>
+<tr><td>gemini-3.6-flash-high (antigravity)</td><td>127</td><td>145.5M</td><td>27.6M</td><td class="good">84.1% (r/(r+i), 배제형)</td></tr>
+<tr><td>GLM-5-Turbo (glm-coding)</td><td>364</td><td>13.1M</td><td>19.2M</td><td>68.5% (r/i, 포함형)</td></tr>
+<tr><td>deepseek-v4-flash:0731 (ollama_cloud)</td><td>271</td><td>0</td><td>23.4M</td><td class="dead">0%</td></tr>
+</table>
+
+<h2>외부 주장 검증 (인용 프롬프트 대조)</h2>
+<table>
+<tr><th>주장</th><th>판정</th><th>근거</th></tr>
+<tr><td>llama-server <code>--reasoning-preserve</code> 플래그</td><td class="good">실재</td><td>b10180 <code>--help</code> 실측 (컷오프 이후 추가)</td></tr>
+<tr><td>Qwen3.6+/3.8 <code>preserve_thinking</code> template kwarg</td><td class="good">실재</td><td>GGUF 로드 로그 + hermes-agent#56004 (preserve 부재로 multi-turn thinking 유실 이슈)</td></tr>
+<tr><td>보존 + 캐시 결합 시 다음 턴 prefill ≈ 0</td><td class="good">실측 확인</td><td>표 1 preserve 행</td></tr>
+<tr><td><code>--prompt-cache ./cache.bin</code>으로 서버 캐시 제어</td><td class="dead">부정확</td><td>llama-cli 전용. 서버는 <code>cache_prompt</code> 요청 필드(기본 true) + <code>--slot-save-path</code>/<code>POST /slots/{id}?action=save</code></td></tr>
+<tr><td>Jinja 템플릿을 직접 수정해 reasoning_content 보존</td><td>불필요</td><td>템플릿이 <code>supports_preserve_reasoning</code>을 선언하면 kwarg/플래그로 제어 — 수정 없이 동작 (이번 측정이 그 경로)</td></tr>
+</table>
+
+<h2>격차와 다음 단계</h2>
+<table>
+<tr><th>#</th><th>격차</th><th>조치</th></tr>
+<tr><td>G1</td><td>OpenAI-compat SSE 스트림에서 <code>timings</code>(cache_n) 유실 — <code>complete_stream.ml</code>이 Ollama NDJSON만 읽음</td><td>PR-2: 최종 청크 timings 파싱 → telemetry 합류</td></tr>
+<tr><td>G2</td><td>llama-server 레인 부재 (8080은 mlx 점유, llama 레인 사망)</td><td>PR-4: b10180 기반 레인 복원 + runbook (<code>--cache-reuse 256 --slot-save-path</code> 권장)</td></tr>
+<tr><td>G3</td><td>로컬 행 <code>preserve-thinking=false</code> 일괄 — 템플릿은 지원, 실측 이득 확인</td><td>PR-4: keeper 대화 레인에서 preserve 활성 (exact JSON 레인은 think off 유지)</td></tr>
+<tr><td>G4</td><td>Anthropic 히스토리 캐시 breakpoint 없음 (system+tools만)</td><td>PR-5: top-level 자동 cache_control 옵트인 (read 0.1x)</td></tr>
+<tr><td>G5</td><td>대시보드가 캐시를 bool로 축약</td><td>PR-3: cache_n/prompt_n 원값 노출</td></tr>
+<tr><td>G6</td><td>provider별 usage 의미론(input에 cached 포함 여부) 미감사</td><td>후속 감사</td></tr>
+</table>
+
+<h2>추가: 라이브 fleet 검증 (2026-08-16 04:10~04:25 KST)</h2>
+<p class="note">위 하네스 측정 이후, llama_cpp 레인을 실제 keeper fleet에 올려 검증했다. 절차와 수치는 RFC-0382 §7 참조.</p>
+<table>
+<tr><th>관측</th><th>값</th></tr>
+<tr><td>턴 15 (콜드, 35K 프리픽스)</td><td>first-event 120s 데드라인에 3회 취소 — 취소마다 슬롯 KV 적립(12K→22K→32K), 4번째 시도 완주. 재시도 사다리가 수렴하지만 수 분 낭비</td></tr>
+<tr><td>턴 16 (웜)</td><td class="good">LCP 유사도 0.949 · 캐시 재사용 94.6% — 신규 1,769tok/19.3s 프리필, ttfrc 27.2s, finish=completed, enable_thinking=true, input 34,468 / output 717</td></tr>
+<tr><td>대시보드</td><td>컨텍스트 미터 34.5k/65.5k(53%)가 provider 실측 토큰으로 표시, 런타임 패널에 chat-template-kwargs 축 노출</td></tr>
+<tr><td>파생 수정</td><td>콜드 프리필의 SSE 침묵 → <code>return_progress</code>(prefill 중 prompt_progress 청크, b10180 검증)로 근본 해결 — PR #28791. 타임아웃 값(120s)은 유지</td></tr>
+</table>
+
+<p class="note">이 리포트의 모든 수치는 위 명시된 환경에서의 단일 측정이다. mlx 서버와 동시 상주 상태라 decode 절대값에는 Metal 경합이 섞여 있고, 정책 간 <em>상대</em> 비교(같은 세션 내 연속 측정)가 이 리포트의 주장 범위다.</p>
+
+</body>
+</html>

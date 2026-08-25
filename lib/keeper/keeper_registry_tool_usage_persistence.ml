@@ -167,26 +167,54 @@ let report_restore_failure name reason =
   Log.Keeper.warn "restore_tool_usage %s: %s" name reason
 ;;
 
-let restore ~base_path name =
+let restore_with ~base_path name apply =
   let path = tool_usage_path ~base_path name in
   if not (Fs_compat.file_exists path)
   then ()
   else (
+    try
+      let content = Fs_compat.load_file path in
+      let json = Yojson.Safe.from_string content in
+      (match decode_tool_usage ~expected_keeper:name json with
+       | Ok tools -> apply tools
+       | Error reason -> report_restore_failure name reason)
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn -> report_restore_failure name (Printexc.to_string exn))
+;;
+
+let restore ~base_path name =
+  let path = tool_usage_path ~base_path name in
+  if Fs_compat.file_exists path
+  then
     match Keeper_registry.get ~base_path name with
     | None -> report_restore_failure name "keeper is not registered"
     | Some _entry ->
-      (try
-         let content = Fs_compat.load_file path in
-         let json = Yojson.Safe.from_string content in
-         (match decode_tool_usage ~expected_keeper:name json with
-          | Ok tools ->
-            List.iter
-              (fun (tool_name, entry) ->
-                 Keeper_registry.set_tool_usage_entry
-                   ~base_path ~name ~tool_name entry)
-              tools
-          | Error reason -> report_restore_failure name reason)
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn -> report_restore_failure name (Printexc.to_string exn)))
+      restore_with ~base_path name (fun tools ->
+        List.iter
+          (fun (tool_name, entry) ->
+             Keeper_registry.set_tool_usage_entry ~base_path ~name ~tool_name entry)
+          tools)
+;;
+
+let restore_for_lifecycle token (expected : registry_entry) =
+  let base_path = expected.base_path in
+  let name = expected.name in
+  restore_with ~base_path name (fun tools ->
+    let result =
+      Keeper_registry.update_entry_exact_for_lifecycle token expected (fun current ->
+        let tool_usage =
+          List.fold_left
+            (fun usage (tool_name, entry) -> StringMap.add tool_name entry usage)
+            current.tool_usage
+            tools
+        in
+        { current with tool_usage })
+    in
+    if not
+         (Keeper_registry.exact_update_succeeded
+            expected
+            ~site:"restore_tool_usage_for_lifecycle"
+            result)
+    then report_restore_failure name "lifecycle-owned registry update was rejected")
 ;;

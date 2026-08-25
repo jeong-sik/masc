@@ -1,7 +1,5 @@
-(* Keeper_tool_execute_runtime — typed Shell IR execution pipeline.
-
-   Private sub-module included by [Keeper_tool_command_runtime]. Only exposes what the
-   facade needs. *)
+(** Keeper_tool_execute_runtime — owner of the typed Shell IR execution
+    pipeline and its public Keeper execution boundary. *)
 
 val handle_tool_execute :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
@@ -46,6 +44,18 @@ val handle_tool_execute_with_outcome :
   Keeper_tool_execution.t
 
 module For_testing : sig
+  (* Test seam: when set, [handle_tool_execute_typed] routes its dispatch
+     through this override instead of the real shell dispatch, so tests can
+     drive each rejected-dispatch branch through the real production wiring
+     (stream start -> dispatch -> stream end) without spawning a process. *)
+  val dispatch_override :
+    (unit ->
+     ( Masc_exec.Exec_dispatch.dispatch_result
+     , Keeper_tooling.Execute_shell_ir.dispatch_error )
+     result)
+    option
+    ref
+
   val elapsed_duration_ms : start_time:float -> end_time:float -> int
   val model_execute_location_fields :
     config:Workspace.config ->
@@ -53,13 +63,16 @@ module For_testing : sig
     args:Yojson.Safe.t ->
     cwd:string ->
     (string * Yojson.Safe.t) list
-  val execute_gate_input :
-    input:Yojson.Safe.t ->
-    cwd:string ->
-    sandbox_profile:string ->
-    sandbox_target:string ->
-    Yojson.Safe.t
+
   val redact_execute_output :
+    base_path:string ->
+    keeper_name:string ->
+    stdout:string ->
+    stderr:string ->
+    string * string * string
+
+  val redact_execute_output_with_additional_secret_files :
+    additional_secret_files:string list ->
     base_path:string ->
     keeper_name:string ->
     stdout:string ->

@@ -1,8 +1,12 @@
 type keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
-  persona_name : string option;
   instructions : string option;
+  (* Per-keeper autonomous-turn instructions. When non-empty and the turn
+     channel is Scheduled_autonomous, this replaces [instructions] in the
+     system prompt. When absent, autonomous turns fall back to [instructions]
+     — zero behavioral change for keepers that don't set it. *)
+  autonomous_instructions : string option;
   autoboot_enabled : bool option;
   mention_targets : string list;
   proactive_enabled : bool option;
@@ -11,34 +15,39 @@ type keeper_profile_defaults = {
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
   multimodal_policy : Keeper_types_profile_sandbox.multimodal_policy option;
-  active_goal_ids : string list option;
+  (* User message this keeper's autonomous turns are woken with, overriding the
+     fleet [autonomous.wake_prompt]. Distinct from [instructions]: that frames
+     the system prompt once, this is the conversation input the keeper receives
+     every cycle and which the durable checkpoint keeps. [None] inherits. *)
+  autonomous_wake_prompt : string option;
   max_context_override : int option;
   (* Telemetry Feedback — inject behavioral stats into keeper context *)
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;
-  (* Per-keeper OAS CLI transport env vars (OAS 0.159+).
-     Parsed from [[keeper.oas_env]] table.  Keys MUST match
-     ^OAS_[A-Z]+_.+ — any other entries are dropped with
+  (* RFC-0390: how much of an official client's built-in tool surface this
+     keeper may use. [None] keeps each runtime's own default posture. *)
+  native_tool_posture : Runtime_native_tools.posture option;
+  (* RFC-0389: per-keeper model tool groups (raw TOML strings). [None]
+     inherits the default (every model-visible tool). Converted to
+     [Keeper_tool_descriptor.tool_surface] at the consumption site to avoid
+     a dependency cycle through Keeper_meta_contract. *)
+  tool_groups : string list option;
+  (* Per-keeper AGENT_CORE CLI transport env vars (AGENT_CORE 0.159+).
+     Parsed from [[keeper.agent_core_env]] table.  Keys MUST match
+     ^AGENT_CORE_[A-Z]+_.+ — any other entries are dropped with
      a warning to avoid ambient env injection via keeper TOML.
-     Applied via Unix.putenv right before each turn so OAS transport
+     Applied via Unix.putenv right before each turn so AGENT_CORE transport
      build_args picks them up.  Empty list = no overrides. *)
-  oas_env : (string * string) list;
-  (* Keys present under [keeper] (or other tables) that are NOT in
-     [canonical_keeper_toml_key_names].  Captured at load time so
-     downstream surfaces (keeper_status_detail, dashboards) can show
-     drift instead of silently ignoring legacy / typo'd keys.
-     Today this is also logged via [warn_unknown_keeper_toml_keys];
-     the field is purely additive. *)
-  unknown_toml_keys : string list;
+  agent_core_env : (string * string) list;
 }
 
 let empty_keeper_profile_defaults =
   {
     id = None;
     manifest_path = None;
-    persona_name = None;
     instructions = None;
+    autonomous_instructions = None;
     autoboot_enabled = None;
     mention_targets = [];
     proactive_enabled = None;
@@ -47,12 +56,13 @@ let empty_keeper_profile_defaults =
     sandbox_image = None;
     network_mode = None;
     multimodal_policy = None;
-    active_goal_ids = None;
+    autonomous_wake_prompt = None;
     max_context_override = None;
     telemetry_feedback_enabled = None;
     telemetry_feedback_window_hours = None;
     always_allow = None;
-    unknown_toml_keys = [];
-    oas_env = [];
+    native_tool_posture = None;
+    tool_groups = None;
+    agent_core_env = [];
   }
 ;;

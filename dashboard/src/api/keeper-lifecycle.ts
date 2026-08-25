@@ -27,7 +27,6 @@ interface KeeperResumeOptions extends KeeperControlOptions {
 }
 
 interface PendingResumeIntent {
-  ownerGeneration: number
   operatorOperationId: string
 }
 
@@ -39,18 +38,14 @@ function createResumeOperationId(): string {
 
 function resumeIntent(
   name: string,
-  ownerGeneration: number,
   explicitOperationId?: string,
 ): PendingResumeIntent {
   if (explicitOperationId) {
-    return { ownerGeneration, operatorOperationId: explicitOperationId }
+    return { operatorOperationId: explicitOperationId }
   }
   const pending = pendingResumeIntents.get(name)
-  if (pending?.ownerGeneration === ownerGeneration) return pending
-  const created = {
-    ownerGeneration,
-    operatorOperationId: createResumeOperationId(),
-  }
+  if (pending) return pending
+  const created = { operatorOperationId: createResumeOperationId() }
   pendingResumeIntents.set(name, created)
   return created
 }
@@ -62,9 +57,6 @@ function clearCommittedResumeIntent(name: string, intent: PendingResumeIntent): 
   }
 }
 
-function isOwnerGeneration(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0
-}
 async function safeJsonResponse<T>(resp: Response, fallbackError: string): Promise<T> {
   try {
     const body = await resp.text()
@@ -207,7 +199,7 @@ export function clearKeeper(
 
 export interface KeeperCheckpointSummary {
   snapshot_id: string
-  source_kind: 'oas_current' | 'oas_history' | string
+  source_kind: 'agent_core_current' | 'agent_core_history' | string
   is_current: boolean
   path: string
   created_at: number
@@ -222,13 +214,13 @@ export interface KeeperCheckpointSummary {
 }
 
 export interface KeeperCheckpointCurrentError {
-  kind: 'store_error' | 'parse_error' | 'io_error' | 'sdk_other_error' | string
+  kind: 'store_error' | 'parse_error' | 'io_error' | 'agent_core_error' | string
   detail: string
 }
 
 export interface KeeperCheckpointHistoryError {
   snapshot_id: string
-  source_kind: 'oas_history' | string
+  source_kind: 'agent_core_history' | string
   is_current: false
   path: string
   file_stat: {
@@ -236,7 +228,7 @@ export interface KeeperCheckpointHistoryError {
     mtime?: number
   } | null
   status: 'missing' | 'unavailable'
-  error_kind: 'not_found' | 'store_error' | 'parse_error' | 'io_error' | 'sdk_other_error' | string
+  error_kind: 'not_found' | 'store_error' | 'parse_error' | 'io_error' | 'agent_core_error' | string
   error_detail: string | null
 }
 
@@ -257,6 +249,32 @@ interface KeeperCheckpointDeleteResponse {
   keeper: string
   deleted_snapshot_ids: string[]
   missing_snapshot_ids: string[]
+  inventory: KeeperCheckpointInventory
+}
+
+export interface KeeperCheckpointPurgeReport {
+  messages_before: number
+  messages_after: number
+  bytes_before: number
+  bytes_after: number
+  bytes_removed: number
+  duplicates_dropped: number
+  reasoning_blocks_stripped: number
+  reasoning_messages_dropped: number
+  tool_results_cleared: number
+}
+
+export interface KeeperCheckpointPurgeResponse {
+  schema: 'masc.keeper_checkpoint_purge.v1'
+  ok: true
+  action: 'preview_purge' | 'apply_purge'
+  keeper: string
+  trace_id: string
+  apply_allowed: boolean
+  applied: boolean
+  backup_path: string | null
+  report: KeeperCheckpointPurgeReport
+  warnings: string[]
   inventory: KeeperCheckpointInventory
 }
 
@@ -300,6 +318,42 @@ export async function deleteKeeperHistorySnapshots(
   return resp.json() as Promise<KeeperCheckpointDeleteResponse>
 }
 
+async function requestKeeperCheckpointPurge(
+  name: string,
+  action: 'preview_purge' | 'apply_purge',
+): Promise<KeeperCheckpointPurgeResponse> {
+  const path = `/api/v1/keepers/${encodeURIComponent(name)}/checkpoints`
+  const resp = await fetchControlPlane(path, {
+    method: 'POST',
+    headers: jsonHeaders(),
+    body: JSON.stringify({ action }),
+  })
+  if (!resp.ok) {
+    const payload = await safeJsonResponse<{ error?: string }>(
+      resp,
+      `${name} checkpoint purge 실패`,
+    )
+    throw new Error(
+      typeof payload.error === 'string' && payload.error.trim() !== ''
+        ? payload.error
+        : `${name} checkpoint purge 실패 (HTTP ${resp.status})`,
+    )
+  }
+  return resp.json() as Promise<KeeperCheckpointPurgeResponse>
+}
+
+export function previewKeeperCheckpointPurge(
+  name: string,
+): Promise<KeeperCheckpointPurgeResponse> {
+  return requestKeeperCheckpointPurge(name, 'preview_purge')
+}
+
+export function applyKeeperCheckpointPurge(
+  name: string,
+): Promise<KeeperCheckpointPurgeResponse> {
+  return requestKeeperCheckpointPurge(name, 'apply_purge')
+}
+
 export function pauseKeeper(
   name: string,
   opts: KeeperControlOptions = {},
@@ -314,23 +368,13 @@ export function pauseKeeper(
 
 export async function resumeKeeper(
   name: string,
-  ownerGeneration: number | null | undefined,
   opts: KeeperResumeOptions = {},
 ): Promise<KeeperLifecycleResponse> {
-  if (!isOwnerGeneration(ownerGeneration)) {
-    return {
-      ok: false,
-      action: 'resume',
-      name,
-      error: `Cannot resume ${name}: current owner generation is unavailable`,
-    }
-  }
-  const intent = resumeIntent(name, ownerGeneration, opts.operatorOperationId)
+  const intent = resumeIntent(name, opts.operatorOperationId)
   const result = await safeKeeperPostWithBody(
     `/api/v1/keepers/${encodeURIComponent(name)}/directive`,
     {
       action: 'resume',
-      owner_nonce: intent.ownerGeneration,
       operator_operation_id: intent.operatorOperationId,
     },
     `Failed to resume ${name}`,
@@ -363,7 +407,6 @@ export type BulkKeeperDirectiveAction = 'pause' | 'resume' | 'wakeup'
 
 export interface BulkKeeperResumeTarget {
   name: string
-  ownerGeneration: number
   operatorOperationId?: string
 }
 
@@ -405,27 +448,10 @@ export async function bulkKeeperDirective(
   const names = subjects.map(subject => typeof subject === 'string' ? subject : subject.name)
   const fallbackError = `Failed to ${action} ${subjects.length} keeper(s)`
   const resumeTargets = action === 'resume' ? subjects as BulkKeeperResumeTarget[] : []
-  const invalidResumeTarget = resumeTargets.find(
-    target => typeof target.name !== 'string' || !isOwnerGeneration(target.ownerGeneration),
-  )
-  if (invalidResumeTarget) {
-    const error = `Cannot resume ${invalidResumeTarget.name}: current owner generation is unavailable`
-    return {
-      ok: false,
-      action,
-      requested: subjects.length,
-      succeeded: 0,
-      results: names.map(name => ({ name, ok: false, error })),
-    }
-  }
   const resumeIntents = action === 'resume'
     ? resumeTargets.map(target => ({
         name: target.name,
-        intent: resumeIntent(
-          target.name,
-          target.ownerGeneration,
-          target.operatorOperationId,
-        ),
+        intent: resumeIntent(target.name, target.operatorOperationId),
       }))
     : []
   const body = action === 'resume'
@@ -433,7 +459,6 @@ export async function bulkKeeperDirective(
         action,
         targets: resumeIntents.map(({ name, intent }) => ({
           name,
-          owner_nonce: intent.ownerGeneration,
           operator_operation_id: intent.operatorOperationId,
         })),
       }
@@ -481,4 +506,53 @@ export async function bulkKeeperDirective(
       })),
     }
   }
+}
+
+// --- Keeper purge (permanent removal) ---
+
+// The purge endpoint admits a keeper from its persisted metadata rather than
+// from a live registry lane, so a keeper that has already stopped is a valid
+// target. `masc_keeper_down` cannot reach those: it refuses a keeper whose
+// metadata exists without a live lane.
+export interface KeeperPurgeResponse {
+  ok: true
+  accepted: boolean
+  target_kind: 'keeper'
+  agent_name: string
+  keeper_name: string
+  operation_id: string
+}
+
+// What the server's purge plan removes, in the order it removes it
+// (Keeper_shutdown_types.dashboard_purge_artifact_plan). The confirmation UI
+// shows this list, so it must stay in step with that plan.
+export const KEEPER_PURGE_ARTIFACTS: readonly string[] = [
+  '메트릭 저장소',
+  '결정 로그',
+  '피드백 로그',
+  '런타임 디렉터리',
+  'Memory OS 스냅샷과 저널',
+  'TOML 설정',
+  '대화 기록',
+  '에이전트 파일과 인증 토큰',
+]
+
+export async function purgeKeeper(name: string): Promise<KeeperPurgeResponse> {
+  const resp = await fetchControlPlane('/api/v1/dashboard/agents/purge', {
+    method: 'POST',
+    headers: jsonHeaders(),
+    body: JSON.stringify({ agent_name: name }),
+  })
+  if (!resp.ok) {
+    const payload = await safeJsonResponse<{ error?: string }>(
+      resp,
+      `${name} 제거 실패`,
+    )
+    throw new Error(
+      typeof payload.error === 'string' && payload.error.trim() !== ''
+        ? payload.error
+        : `${name} 제거 실패 (HTTP ${resp.status})`,
+    )
+  }
+  return resp.json() as Promise<KeeperPurgeResponse>
 }

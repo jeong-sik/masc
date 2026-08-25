@@ -137,6 +137,48 @@ let queue_reaction_change_of_board
   }
 ;;
 
+let board_vote_target_of_queue = function
+  | Keeper_event_queue.Vote_on_post post_id -> Board_dispatch.Vote_on_post post_id
+  | Keeper_event_queue.Vote_on_comment comment_id ->
+    Board_dispatch.Vote_on_comment comment_id
+;;
+
+let board_vote_direction_of_queue = function
+  | Keeper_event_queue.Vote_up -> Board.Up
+  | Keeper_event_queue.Vote_down -> Board.Down
+;;
+
+let board_vote_change_of_queue (vote : Keeper_event_queue.board_vote_change)
+  : Board_dispatch.board_vote_change
+  =
+  { target = board_vote_target_of_queue vote.target
+  ; target_author = vote.target_author
+  ; voter = vote.voter
+  ; direction = board_vote_direction_of_queue vote.direction
+  }
+;;
+
+let queue_vote_target_of_board = function
+  | Board_dispatch.Vote_on_post post_id -> Keeper_event_queue.Vote_on_post post_id
+  | Board_dispatch.Vote_on_comment comment_id ->
+    Keeper_event_queue.Vote_on_comment comment_id
+;;
+
+let queue_vote_direction_of_board = function
+  | Board.Up -> Keeper_event_queue.Vote_up
+  | Board.Down -> Keeper_event_queue.Vote_down
+;;
+
+let queue_vote_change_of_board (vote : Board_dispatch.board_vote_change)
+  : Keeper_event_queue.board_vote_change
+  =
+  { target = queue_vote_target_of_board vote.target
+  ; target_author = vote.target_author
+  ; voter = vote.voter
+  ; direction = queue_vote_direction_of_board vote.direction
+  }
+;;
+
 let board_stimulus_of_board_signal (signal : Board_dispatch.board_signal) =
   { Keeper_event_queue.kind =
       (match signal.kind with
@@ -144,7 +186,9 @@ let board_stimulus_of_board_signal (signal : Board_dispatch.board_signal) =
        | Board_dispatch.Board_comment_added -> Keeper_event_queue.Comment_added
        | Board_dispatch.Board_reaction_changed reaction ->
          Keeper_event_queue.Reaction_changed
-           (queue_reaction_change_of_board reaction))
+           (queue_reaction_change_of_board reaction)
+       | Board_dispatch.Board_vote_cast vote ->
+         Keeper_event_queue.Vote_cast (queue_vote_change_of_board vote))
   ; author = signal.author
   ; title = signal.title
   ; content = signal.content
@@ -168,7 +212,9 @@ let board_signal_of_board_stimulus
        | Keeper_event_queue.Post_created -> Board_dispatch.Board_post_created
        | Keeper_event_queue.Comment_added -> Board_dispatch.Board_comment_added
        | Keeper_event_queue.Reaction_changed reaction ->
-         Board_dispatch.Board_reaction_changed (board_reaction_change_of_queue reaction))
+         Board_dispatch.Board_reaction_changed (board_reaction_change_of_queue reaction)
+       | Keeper_event_queue.Vote_cast vote ->
+         Board_dispatch.Board_vote_cast (board_vote_change_of_queue vote))
   ; post_id
   ; author = bs.author
   ; title = bs.title
@@ -220,7 +266,7 @@ let address_text (signal : Board_dispatch.board_signal) =
          (fun part -> not (String.equal (String.trim part) ""))
          [ signal.title; signal.content ])
   | Board_dispatch.Board_comment_added -> signal.content
-  | Board_dispatch.Board_reaction_changed _ -> ""
+  | Board_dispatch.Board_reaction_changed _ | Board_dispatch.Board_vote_cast _ -> ""
 ;;
 
 let mention_ids_of_signal signal =
@@ -327,17 +373,29 @@ type wake_reason =
   | Broadcast
       (** The exact [@@all] Keeper Board address selected every non-author
           lane. *)
+  | Comment_on_self_post
+      (** An external comment arrived on a post the keeper authored. The
+          reaction path already woke the author of the post it landed on; the
+          comment path checked only whether the keeper had itself commented, so
+          an answer to a keeper's own question did not reach it. *)
   | Thread_reply_after_self_comment
       (** A new external comment arrived on a post the keeper had commented on. *)
   | Reaction_after_self_activity
       (** An external reaction landed on a post the keeper authored or a thread
           the keeper had commented on. *)
+  | Vote_on_self_post
+      (** Someone else voted on a post the keeper authored. *)
+  | Vote_on_self_comment
+      (** Someone else voted on a comment the keeper authored. *)
 
 let wake_reason_label = function
   | Explicit_mention -> "explicit_mention"
   | Broadcast -> "broadcast"
+  | Comment_on_self_post -> "comment_on_self_post"
   | Thread_reply_after_self_comment -> "thread_reply_after_self_comment"
   | Reaction_after_self_activity -> "reaction_after_self_activity"
+  | Vote_on_self_post -> "vote_on_self_post"
+  | Vote_on_self_comment -> "vote_on_self_comment"
 ;;
 
 let self_authored_post ~self_ids ~(post_id : string) =
@@ -364,8 +422,24 @@ let reaction_touches_self_activity ~self_ids ~(signal : Board_dispatch.board_sig
          | Unavailable _ as unavailable -> unavailable
          | Available `Never -> Available false
          | Available (`No_new_external | `New_external _) -> Available true))
-  | Board_dispatch.Board_post_created | Board_dispatch.Board_comment_added ->
-    Available false
+  | Board_dispatch.Board_post_created
+  | Board_dispatch.Board_comment_added
+  | Board_dispatch.Board_vote_cast _ -> Available false
+;;
+
+(* A vote addresses exactly one lane: whoever wrote the voted-on post or
+   comment. The producer read that author from the store when the vote landed
+   and carries it in the payload, so no Board read happens here and the
+   predicate cannot be [Unavailable]. The voter is [signal.author], and
+   [route_for_keeper] has already ignored the signal for the voter's own
+   lane, so a self-vote reaches no lane. *)
+let vote_targets_self_writing ~self_ids (vote : Board_dispatch.board_vote_change) =
+  if Message_scope.is_self_author ~self_ids vote.target_author
+  then (
+    match vote.target with
+    | Board_dispatch.Vote_on_post _ -> Some Vote_on_self_post
+    | Board_dispatch.Vote_on_comment _ -> Some Vote_on_self_comment)
+  else None
 ;;
 
 let wake_reason
@@ -384,10 +458,24 @@ let wake_reason
        | Unavailable _ as unavailable -> unavailable
        | Available true -> Available (Some Reaction_after_self_activity)
        | Available false -> Available None)
+    | Board_dispatch.Board_vote_cast vote ->
+      Available (vote_targets_self_writing ~self_ids vote)
     | Board_dispatch.Board_comment_added ->
-      (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
+      (* Authorship first, the same order [reaction_touches_self_activity] uses
+         above. Without it [check_self_comment_status] answers [`Never] for the
+         author of the post — it only looks for the keeper's own comments — so
+         an answer to a keeper's question never reached the keeper that asked.
+         Measured on the live Board: 72 of 98 external comments on Keeper posts
+         did not wake the poster, including a post whose title addressed the
+         replier by name. *)
+      (match self_authored_post ~self_ids ~post_id:signal.post_id with
        | Unavailable _ as unavailable -> unavailable
-       | Available (`New_external _) -> Available (Some Thread_reply_after_self_comment)
-       | Available (`Never | `No_new_external) -> Available None)
+       | Available true -> Available (Some Comment_on_self_post)
+       | Available false ->
+         (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
+          | Unavailable _ as unavailable -> unavailable
+          | Available (`New_external _) ->
+            Available (Some Thread_reply_after_self_comment)
+          | Available (`Never | `No_new_external) -> Available None))
     | Board_dispatch.Board_post_created -> Available None)
 ;;

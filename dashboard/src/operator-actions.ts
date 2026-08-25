@@ -86,6 +86,8 @@ export async function refreshOperatorSnapshot(opts?: RefreshOptions): Promise<vo
       lastSnapshotRefreshAt = Date.now()
     } catch (err) {
       const summary = extractApiError(err, 'operator 스냅샷 로드 실패')
+      operatorSnapshot.value = null
+      lastSnapshotRefreshAt = 0
       operatorError.value = summary.message
       operatorErrorStatus.value = summary.status
     } finally {

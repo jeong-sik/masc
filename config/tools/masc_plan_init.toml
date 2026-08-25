@@ -1,0 +1,13 @@
+name = "masc_plan_init"
+description = """
+Initialize a planning context for a task, creating task_plan.md, notes.md, \
+and deliverable.md structure. Use when starting structured work on a claimed \
+task that needs planning artifacts. After keeper_task_claim; follow up with \
+masc_plan_update to write the plan."""
+additional_properties = false
+
+[[params]]
+name = "task_id"
+type = "string"
+required = true
+description = "Task ID to create planning context for"

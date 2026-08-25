@@ -90,3 +90,8 @@ val classify_cancellation_cause : exn -> cancellation_origin
 val exited : t -> exit Eio.Promise.t
 val peek_exit : t -> exit option
 val await_exit : t -> exit
+
+(** Whether this lane crossed the exact-once start boundary. A lane rejected
+    while still [Not_started] reports [false], including after its
+    [Shutdown_before_start] receipt is settled. *)
+val crossed_start_boundary : t -> bool

@@ -18,20 +18,19 @@ describe('SSEEventTypeSchema', () => {
 
   it('accepts MASC wire aliases emitted by server-side SSE publishers', () => {
     expect(SSEEventTypeSchema.parse('masc/broadcast')).toBe('masc/broadcast')
-    expect(SSEEventTypeSchema.parse('masc/agent_bound')).toBe('masc/agent_bound')
-    expect(SSEEventTypeSchema.parse('masc/agent_unbound')).toBe('masc/agent_unbound')
+    expect(SSEEventTypeSchema.parse('masc/board_post')).toBe('masc/board_post')
   })
 
-  it('accepts current and future oas-prefixed event types', () => {
-    expect(SSEEventTypeSchema.parse('oas:agent_failed')).toBe('oas:agent_failed')
-    expect(SSEEventTypeSchema.parse('oas:masc:keeper_gate')).toBe('oas:masc:keeper_gate')
-    expect(SSEEventTypeSchema.parse('oas:future:event')).toBe('oas:future:event')
+  it('accepts current and future agent-core-prefixed event types', () => {
+    expect(SSEEventTypeSchema.parse('agent_core:agent_failed')).toBe('agent_core:agent_failed')
+    expect(SSEEventTypeSchema.parse('agent_core:masc:keeper_gate')).toBe('agent_core:masc:keeper_gate')
+    expect(SSEEventTypeSchema.parse('agent_core:future:event')).toBe('agent_core:future:event')
   })
 
   it('accepts audit event wire aliases', () => {
     expect(SSEEventTypeSchema.parse('audit_event')).toBe('audit_event')
     expect(SSEEventTypeSchema.parse('masc:audit_event')).toBe('masc:audit_event')
-    expect(SSEEventTypeSchema.parse('oas:masc:audit_event')).toBe('oas:masc:audit_event')
+    expect(SSEEventTypeSchema.parse('agent_core:masc:audit_event')).toBe('agent_core:masc:audit_event')
   })
 
   it('accepts board reaction changes', () => {
@@ -179,14 +178,14 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(true)
   })
 
-  it('parses an OAS event with attribution envelope', () => {
+  it('parses an Agent Core event with attribution envelope', () => {
     const r = SSEMessageSchema.safeParse({
-      type: 'oas:turn_completed',
+      type: 'agent_core:turn_completed',
       correlation_id: 'abc',
       run_id: 'r1',
       attribution: {
         origin: 'det',
-        gate: 'oas_completion',
+        gate: 'agent_core_completion',
         evidence: { reason: 'ok' },
         outcome: { kind: 'passed' },
       },
@@ -231,11 +230,244 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(false)
   })
 
+  it('accepts an operation-keyed Keeper AG-UI event', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_chat_operation_event',
+      name: 'sangsu',
+      operation_id: 'kmsg-operation-1',
+      ts_unix: 1_712_000_000,
+      ag_ui_event: {
+        type: 'TEXT_MESSAGE_CONTENT',
+        threadId: 'keeper-consumer:sangsu',
+        runId: 'run-1',
+        messageId: 'message-1',
+        delta: '안녕하세요',
+        timestamp: 1_712_000_000,
+      },
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it('accepts exact durable tool-result readiness identity', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_chat_operation_event',
+      name: 'sangsu',
+      operation_id: 'kmsg-operation-1',
+      ag_ui_event: {
+        type: 'CUSTOM',
+        threadId: 'keeper-consumer:sangsu',
+        runId: 'run-1',
+        name: 'KEEPER_TOOL_RESULT_READY',
+        value: { tool_call_id: 'tool-use-7' },
+        timestamp: 1_712_000_000,
+      },
+    })
+    expect(r.success).toBe(true)
+  })
+
+  // The three below reached main with a name in the contract and no field list.
+  // The lookup fell back to an empty list, so every field the server actually
+  // sends read as an unexpected one and the whole turn failed. Each case here
+  // carries the exact payload lib/server/server_keeper_chat_agui_projection.ml
+  // and server_routes_http_keeper_stream.ml emit.
+  const customEvent = (name: string, value: unknown) => ({
+    type: 'keeper_chat_operation_event',
+    name: 'sangsu',
+    operation_id: 'kmsg-operation-1',
+    ag_ui_event: {
+      type: 'CUSTOM',
+      threadId: 'keeper-consumer:sangsu',
+      runId: 'run-1',
+      name,
+      value,
+      timestamp: 1_712_000_000,
+    },
+  })
+
+  it('accepts a tool approval request with the fields the server sends', () => {
+    const r = SSEMessageSchema.safeParse(
+      customEvent('KEEPER_TOOL_APPROVAL_REQUESTED', {
+        tool_call_id: 'tool-use-7',
+        tool_call_name: 'execute',
+        args: '{"command":"ls"}',
+        question: 'Run this command?',
+      }),
+    )
+    expect(r.success).toBe(true)
+  })
+
+  it('accepts a settled tool approval', () => {
+    const r = SSEMessageSchema.safeParse(
+      customEvent('KEEPER_TOOL_APPROVAL_SETTLED', {
+        tool_call_id: 'tool-use-7',
+        outcome: 'approved',
+      }),
+    )
+    expect(r.success).toBe(true)
+  })
+
+  it('accepts a durable chat operation acceptance', () => {
+    const r = SSEMessageSchema.safeParse(
+      customEvent('KEEPER_CHAT_OPERATION_ACCEPTED', {
+        operation_id: 'kmsg-operation-1',
+        state: 'Running',
+        queued_count: 2,
+      }),
+    )
+    expect(r.success).toBe(true)
+  })
+
+  it('still rejects a field the approval contract does not carry', () => {
+    const r = SSEMessageSchema.safeParse(
+      customEvent('KEEPER_TOOL_APPROVAL_REQUESTED', {
+        tool_call_id: 'tool-use-7',
+        tool_call_name: 'execute',
+        args: '{}',
+        question: 'Run this command?',
+        deadline_ms: 30_000,
+      }),
+    )
+    expect(r.success).toBe(false)
+  })
+
+  it('accepts a message_delta usage that reports only some cumulative counters', () => {
+    const event = (usage: unknown) => ({
+      type: 'keeper_chat_operation_event',
+      name: 'sangsu',
+      operation_id: 'kmsg-operation-1',
+      ag_ui_event: {
+        type: 'CUSTOM',
+        threadId: 'keeper-consumer:sangsu',
+        runId: 'run-1',
+        name: 'KEEPER_STREAM_MESSAGE_DELTA',
+        value: { stop_reason: 'end_turn', usage },
+        timestamp: 1_712_000_000,
+      },
+    })
+    // The classic wire shape: the final delta reports only the cumulative
+    // output counter. The producer omits unreported fields entirely.
+    expect(SSEMessageSchema.safeParse(event({ output_tokens: 42 })).success).toBe(true)
+    // The server-tool shape: every counter repeated as a cumulative total —
+    // still no total_tokens or cost on a delta.
+    expect(
+      SSEMessageSchema.safeParse(
+        event({
+          input_tokens: 60_882,
+          output_tokens: 510,
+          cache_creation_input_tokens: 200,
+          cache_read_input_tokens: 50_000,
+        }),
+      ).success,
+    ).toBe(true)
+    expect(SSEMessageSchema.safeParse(event({ output_tokens: 4.2 })).success).toBe(false)
+    expect(SSEMessageSchema.safeParse(event({ total_tokens: 9 })).success).toBe(false)
+  })
+
+  it('accepts an operator-visible projection error for an operation', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_chat_operation_event',
+      name: 'sangsu',
+      operation_id: 'kmsg-operation-1',
+      ag_ui_event: {
+        type: 'RUN_ERROR',
+        threadId: 'keeper-consumer:sangsu',
+        message: 'Unsupported Keeper chat event: KEEPER_UNTYPED_EVENT',
+        timestamp: 1_712_000_000,
+      },
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it('accepts external-effect completion only with a typed delivery target', () => {
+    const event = (value: unknown) => ({
+      type: 'keeper_chat_operation_event',
+      name: 'sangsu',
+      operation_id: 'kmsg-operation-1',
+      ag_ui_event: {
+        type: 'CUSTOM',
+        threadId: 'keeper-consumer:sangsu',
+        name: 'KEEPER_EXTERNAL_EFFECT_COMPLETED',
+        value,
+        timestamp: 1_712_000_000,
+      },
+    })
+    expect(SSEMessageSchema.safeParse(event(null)).success).toBe(false)
+    expect(SSEMessageSchema.safeParse(event({})).success).toBe(false)
+    expect(
+      SSEMessageSchema.safeParse(event({ target: { kind: 'dashboard' } })).success,
+    ).toBe(true)
+    expect(
+      SSEMessageSchema.safeParse(
+        event({
+          target: {
+            kind: 'slack',
+            channel_id: 'C09TK9L4DV4',
+            thread_ts: '1786524720.554309',
+          },
+        }),
+      ).success,
+    ).toBe(true)
+    expect(
+      SSEMessageSchema.safeParse(event({ target: { kind: 'telegram' } })).success,
+    ).toBe(false)
+    expect(
+      SSEMessageSchema.safeParse(event({ target: { kind: 'slack' } })).success,
+    ).toBe(false)
+    expect(
+      SSEMessageSchema.safeParse(event({ widened: true })).success,
+    ).toBe(false)
+  })
+
+  it('rejects an untyped Keeper custom event name', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_chat_operation_event',
+      name: 'sangsu',
+      operation_id: 'kmsg-operation-1',
+      ag_ui_event: {
+        type: 'CUSTOM',
+        threadId: 'keeper-consumer:sangsu',
+        name: 'KEEPER_UNTYPED_EVENT',
+        value: null,
+        timestamp: 1_712_000_000,
+      },
+    })
+    expect(r.success).toBe(false)
+  })
+
+  it('rejects fields outside the exact AG-UI event variant', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_chat_operation_event',
+      name: 'sangsu',
+      operation_id: 'kmsg-operation-1',
+      ag_ui_event: {
+        type: 'TEXT_MESSAGE_CONTENT',
+        threadId: 'keeper-consumer:sangsu',
+        delta: 'hello',
+        toolCallId: 'not-valid-for-text',
+        timestamp: 1_712_000_000,
+      },
+    })
+    expect(r.success).toBe(false)
+  })
+
+  it('rejects the removed Keeper turn event contract', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_chat_turn_event',
+      name: 'sangsu',
+      ag_ui_event: {
+        type: 'RUN_STARTED',
+        threadId: 'keeper-consumer:sangsu',
+        timestamp: 1_712_000_000,
+      },
+    })
+    expect(r.success).toBe(false)
+  })
+
   it('accepts a typed Keeper waiting-inventory invalidation', () => {
     const r = SSEMessageSchema.safeParse({
       type: 'keeper_waiting_inventory_changed',
       keeper_name: 'keeper-1',
-      queue_kind: 'chat_queue',
+      queue_kind: 'chat_operation',
       ts_unix: 1_712_000_000,
     })
     expect(r.success).toBe(true)
@@ -243,7 +475,7 @@ describe('SSEMessageSchema', () => {
 
   it('accepts the exact runtime telemetry sample envelope', () => {
     const r = SSEMessageSchema.safeParse({
-      type: 'oas_telemetry_sample',
+      type: 'agent_core_telemetry_sample',
       payload: {
         sample: { provider_id: 'private', model_id: 'private', status: 'ok' },
         recorded_at: 1_712_000_000,
@@ -260,32 +492,15 @@ describe('SSEMessageSchema', () => {
     { payload: { sample: {}, recorded_at: 'bad' }, provider_id: 'runtime', model_id: 'runtime' },
     { payload: { recorded_at: 1 }, provider_id: 'runtime', model_id: 'runtime' },
   ])('rejects malformed runtime telemetry sample envelopes: %o', value => {
-    expect(SSEMessageSchema.safeParse({ type: 'oas_telemetry_sample', ...value }).success).toBe(false)
+    expect(SSEMessageSchema.safeParse({ type: 'agent_core_telemetry_sample', ...value }).success).toBe(false)
   })
 
   it.each([
-    { type: 'keeper_waiting_inventory_changed', queue_kind: 'chat_queue' },
+    { type: 'keeper_waiting_inventory_changed', queue_kind: 'chat_operation' },
     { type: 'keeper_waiting_inventory_changed', keeper_name: 'keeper-1' },
     { type: 'keeper_waiting_inventory_changed', keeper_name: 'keeper-1', queue_kind: 'unknown' },
   ])('rejects an incomplete Keeper waiting-inventory invalidation: %o', value => {
     expect(SSEMessageSchema.safeParse(value).success).toBe(false)
-  })
-
-  it('accepts a typed compaction snapshot cache completion', () => {
-    expect(SSEMessageSchema.safeParse({
-      type: 'keeper_compaction_snapshots_changed',
-      keeper_name: 'keeper-1',
-      status: 'ready',
-      ts_unix: 1_712_000_000,
-    }).success).toBe(true)
-  })
-
-  it('rejects compaction snapshot cache completion without a closed status', () => {
-    expect(SSEMessageSchema.safeParse({
-      type: 'keeper_compaction_snapshots_changed',
-      keeper_name: 'keeper-1',
-      status: 'warming',
-    }).success).toBe(false)
   })
 
   it('accepts a gate_mode_changed event with a null previous_mode', () => {
@@ -385,6 +600,68 @@ describe('parseSSEMessage', () => {
     warnSpy.mockRestore()
   })
 
+  it('keeps internal agent invalidations at the websocket parse boundary', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const msg = parseSSEMessage({ type: 'internal_agent_runs_changed' })
+    expect(msg?.type).toBe('internal_agent_runs_changed')
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
+  })
+
+  it('keeps committed composition evidence at the websocket parse boundary', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const msg = parseSSEMessage({
+      type: 'keeper_tool_call_evidence_committed',
+      name: 'analyst',
+      tool_name: 'keeper_time_now',
+      composition_tool: 'keeper_compose_mission-snapshot',
+      composition_run_id: '019d1234-5678-7abc-8def-0123456789ab',
+      composition_node_id: 'clock',
+      composition_execution: 'inline',
+      parent_tool_use_id: '',
+      tool_use_id: 'nested-call',
+      turn: 7,
+      planned_index: 0,
+      batch_index: 0,
+      batch_size: 3,
+      execution_mode: 'concurrent',
+      ts_unix: 1_786_588_800,
+    })
+
+    expect(msg).toMatchObject({
+      type: 'keeper_tool_call_evidence_committed',
+      name: 'analyst',
+      composition_node_id: 'clock',
+      parent_tool_use_id: '',
+      tool_use_id: 'nested-call',
+    })
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
+  })
+
+  it('rejects committed composition evidence without exact join identity', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(parseSSEMessage({
+      type: 'keeper_tool_call_evidence_committed',
+      name: 'analyst',
+      tool_name: 'keeper_time_now',
+      composition_tool: 'keeper_compose_mission-snapshot',
+      composition_run_id: '',
+      composition_node_id: 'clock',
+      composition_execution: 'inline',
+      parent_tool_use_id: 'outer-call',
+      tool_use_id: 'nested-call',
+      turn: 7,
+      planned_index: 0,
+      batch_index: 0,
+      batch_size: 3,
+      execution_mode: 'concurrent',
+      ts_unix: 1_786_588_800,
+    })).toBeNull()
+    expect(warnSpy).toHaveBeenCalledOnce()
+    warnSpy.mockRestore()
+  })
+
   it('keeps gate_mode_changed events instead of dropping them as schema drift', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const msg = parseSSEMessage({
@@ -429,19 +706,19 @@ describe('parseSSEMessage', () => {
     warnSpy.mockRestore()
   })
 
-  it('keeps unknown oas-prefixed events instead of dropping them', () => {
+  it('keeps unknown agent-core-prefixed events instead of dropping them', () => {
     const msg = parseSSEMessage({
-      type: 'oas:slot_scheduler_observed',
+      type: 'agent_core:slot_scheduler_observed',
       payload: { state: 'saturated', active: 3, max_slots: 3 },
     })
     expect(msg).not.toBeNull()
-    expect(msg?.type).toBe('oas:slot_scheduler_observed')
+    expect(msg?.type).toBe('agent_core:slot_scheduler_observed')
   })
 
-  it('keeps oas telemetry tuple payloads instead of logging schema drift', () => {
+  it('keeps agentCore telemetry tuple payloads instead of logging schema drift', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const msg = parseSSEMessage({
-      type: 'oas:telemetry_event',
+      type: 'agent_core:telemetry_event',
       event_type: 'telemetry_event',
       ts_unix: 1781584363.694713,
       payload: [
@@ -454,7 +731,7 @@ describe('parseSSEMessage', () => {
       ],
     })
     expect(msg).not.toBeNull()
-    expect(msg?.type).toBe('oas:telemetry_event')
+    expect(msg?.type).toBe('agent_core:telemetry_event')
     expect(warnSpy).not.toHaveBeenCalled()
     warnSpy.mockRestore()
   })

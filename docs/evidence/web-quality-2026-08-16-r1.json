@@ -1,0 +1,267 @@
+{
+  "captured_at": "2026-08-16T03:44:45+0900",
+  "script": "scripts/bench-web-quality.py",
+  "top_k": 5,
+  "case_count": 8,
+  "providers": {
+    "ollama": {
+      "summary": {
+        "cases_scored": 8,
+        "cases_errored": 0,
+        "hit_at_1": "5/6",
+        "hit_at_5": "5/6",
+        "hangul_ok": "2/2",
+        "median_elapsed_ms": 1230.9
+      },
+      "cases": [
+        {
+          "query": "OCaml 5.5 effect handlers tutorial",
+          "category": "official-docs",
+          "http_status": 200,
+          "elapsed_ms": 1230.9,
+          "result_count": 5,
+          "top_hosts": [
+            "ocaml.org",
+            "github.com",
+            "lewinb.net",
+            "thomasnelson.me",
+            "xavierleroy.org"
+          ],
+          "hit_at_1": true,
+          "hit_at_5": true,
+          "first_match_rank": 1
+        },
+        {
+          "query": "python asyncio TaskGroup documentation",
+          "category": "official-docs",
+          "http_status": 200,
+          "elapsed_ms": 1112.5,
+          "result_count": 5,
+          "top_hosts": [
+            "docs.python.org",
+            "docs.python.org",
+            "github.com",
+            "github.com",
+            "github.com"
+          ],
+          "hit_at_1": true,
+          "hit_at_5": true,
+          "first_match_rank": 1
+        },
+        {
+          "query": "RFC 9110 HTTP semantics status codes",
+          "category": "reference",
+          "http_status": 200,
+          "elapsed_ms": 2564.4,
+          "result_count": 5,
+          "top_hosts": [
+            "www.rfc-editor.org",
+            "www.rfc-editor.org",
+            "www.iana.org",
+            "datatracker.ietf.org",
+            "www.ietf.org"
+          ],
+          "hit_at_1": true,
+          "hit_at_5": true,
+          "first_match_rank": 1
+        },
+        {
+          "query": "git rebase autostash pop conflict behavior",
+          "category": "technical-qa",
+          "http_status": 200,
+          "elapsed_ms": 1779.2,
+          "result_count": 5,
+          "top_hosts": [
+            "git-scm.dev",
+            "github.com",
+            "github.com",
+            "github.com",
+            "public-inbox.org"
+          ],
+          "hit_at_1": false,
+          "hit_at_5": false,
+          "first_match_rank": null
+        },
+        {
+          "query": "Eio Switch cancellation semantics OCaml",
+          "category": "niche",
+          "http_status": 200,
+          "elapsed_ms": 1588.5,
+          "result_count": 5,
+          "top_hosts": [
+            "ocaml.org",
+            "ocaml.github.io",
+            "ocaml.github.io",
+            "ocaml.github.io",
+            "discuss.ocaml.org"
+          ],
+          "hit_at_1": true,
+          "hit_at_5": true,
+          "first_match_rank": 1
+        },
+        {
+          "query": "Anthropic Claude latest model announcement",
+          "category": "recency",
+          "http_status": 200,
+          "elapsed_ms": 895.7,
+          "result_count": 5,
+          "top_hosts": [
+            "www.anthropic.com",
+            "www.anthropic.com",
+            "www.anthropic.com",
+            "www.anthropic.com",
+            "www.theverge.com"
+          ],
+          "hit_at_1": true,
+          "hit_at_5": true,
+          "first_match_rank": 1
+        },
+        {
+          "query": "장마철 제습기 원리",
+          "category": "korean",
+          "http_status": 200,
+          "elapsed_ms": 976.3,
+          "result_count": 5,
+          "top_hosts": [
+            "choicemon.com",
+            "www.ajd.co.kr",
+            "www.hvacrj.co.kr",
+            "ko.wikipedia.org",
+            "kotopranking.com"
+          ],
+          "hangul_ratio": 0.804,
+          "hangul_ok": true
+        },
+        {
+          "query": "전세 계약 갱신 청구권 조건",
+          "category": "korean",
+          "http_status": 200,
+          "elapsed_ms": 1069.7,
+          "result_count": 5,
+          "top_hosts": [
+            "www.mylawstory.com",
+            "aptcheck.kr",
+            "www.molit.go.kr",
+            "www.law.go.kr",
+            "angrywitch.co.kr"
+          ],
+          "hangul_ratio": 0.747,
+          "hangul_ok": true
+        }
+      ]
+    },
+    "brave_grounded": {
+      "skipped": "BRAVE_SEARCH_API_KEY absent"
+    },
+    "searxng": {
+      "summary": {
+        "cases_scored": 8,
+        "cases_errored": 0,
+        "hit_at_1": "2/6",
+        "hit_at_5": "2/6",
+        "hangul_ok": "0/2",
+        "median_elapsed_ms": 1920.5
+      },
+      "cases": [
+        {
+          "query": "OCaml 5.5 effect handlers tutorial",
+          "category": "official-docs",
+          "http_status": 200,
+          "elapsed_ms": 2214.2,
+          "result_count": 10,
+          "top_hosts": [
+            "ocaml.org",
+            "github.com",
+            "github.com",
+            "aj002.github.io",
+            "ocaml.org"
+          ],
+          "hit_at_1": true,
+          "hit_at_5": true,
+          "first_match_rank": 1
+        },
+        {
+          "query": "python asyncio TaskGroup documentation",
+          "category": "official-docs",
+          "http_status": 200,
+          "elapsed_ms": 2125.5,
+          "result_count": 10,
+          "top_hosts": [
+            "docs.python.org",
+            "docs.python.org",
+            "www.pyblog.in",
+            "www.geeksforgeeks.org",
+            "github.com"
+          ],
+          "hit_at_1": true,
+          "hit_at_5": true,
+          "first_match_rank": 1
+        },
+        {
+          "query": "RFC 9110 HTTP semantics status codes",
+          "category": "reference",
+          "http_status": 200,
+          "elapsed_ms": 1438.0,
+          "result_count": 0,
+          "top_hosts": [],
+          "hit_at_1": false,
+          "hit_at_5": false,
+          "first_match_rank": null
+        },
+        {
+          "query": "git rebase autostash pop conflict behavior",
+          "category": "technical-qa",
+          "http_status": 200,
+          "elapsed_ms": 608.2,
+          "result_count": 0,
+          "top_hosts": [],
+          "hit_at_1": false,
+          "hit_at_5": false,
+          "first_match_rank": null
+        },
+        {
+          "query": "Eio Switch cancellation semantics OCaml",
+          "category": "niche",
+          "http_status": 200,
+          "elapsed_ms": 2461.0,
+          "result_count": 0,
+          "top_hosts": [],
+          "hit_at_1": false,
+          "hit_at_5": false,
+          "first_match_rank": null
+        },
+        {
+          "query": "Anthropic Claude latest model announcement",
+          "category": "recency",
+          "http_status": 200,
+          "elapsed_ms": 1491.7,
+          "result_count": 0,
+          "top_hosts": [],
+          "hit_at_1": false,
+          "hit_at_5": false,
+          "first_match_rank": null
+        },
+        {
+          "query": "장마철 제습기 원리",
+          "category": "korean",
+          "http_status": 200,
+          "elapsed_ms": 1920.5,
+          "result_count": 0,
+          "top_hosts": [],
+          "hangul_ratio": 0.0,
+          "hangul_ok": false
+        },
+        {
+          "query": "전세 계약 갱신 청구권 조건",
+          "category": "korean",
+          "http_status": 200,
+          "elapsed_ms": 895.7,
+          "result_count": 0,
+          "top_hosts": [],
+          "hangul_ratio": 0.0,
+          "hangul_ok": false
+        }
+      ]
+    }
+  }
+}

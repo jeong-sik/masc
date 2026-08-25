@@ -1,10 +1,13 @@
 (** Transport_bridge — Unified transport provider interface.
 
-    Each transport (SSE, WS, gRPC, WebRTC) implements {!PROVIDER}
+    Each transport (SSE, WS, gRPC) implements {!PROVIDER}
     and registers at server bootstrap. The bridge centralizes:
     - Discovery: protocol enumeration, Agent Card generation
-    - Lifecycle: session reaping across all transports
     - Metrics: aggregate session/connection counts
+
+    Session reaping is not centralized here: SSE reaps via
+    {!Server_bootstrap_maintenance}, and the other transports clean up
+    on disconnect.
 
     Broadcast still flows through SSE's external_subscriber
     pattern. This module does not replace that mechanism. *)
@@ -12,7 +15,7 @@
 (** Contract that every transport must satisfy. *)
 module type PROVIDER = sig
   val name : string
-  (** Short identifier: "sse", "ws", "grpc", "webrtc". *)
+  (** Short identifier: "sse", "ws", "grpc". *)
 
   val protocol : Transport.protocol
   (** Which protocol enum this provider implements. *)
@@ -22,12 +25,6 @@ module type PROVIDER = sig
 
   val session_count : unit -> int
   (** Number of active sessions/connections right now. *)
-
-  val status_json : unit -> Yojson.Safe.t
-  (** Protocol-specific status for diagnostic endpoints. *)
-
-  val reap_stale : unit -> int
-  (** Clean up dead/idle sessions. Returns number reaped. *)
 end
 
 (** {1 Provider Registry} *)
@@ -42,9 +39,6 @@ val seal : unit -> unit
     registered (end of bootstrap). Post-seal reads from multiple
     fibers are safe without synchronization. *)
 
-val providers : unit -> (module PROVIDER) list
-(** All registered providers, in registration order. *)
-
 val provider_by_name : string -> (module PROVIDER) option
 (** Lookup a provider by its [name] field. *)
 
@@ -52,12 +46,6 @@ val provider_by_name : string -> (module PROVIDER) option
 
 val total_session_count : unit -> int
 (** Sum of [session_count] across all enabled providers. *)
-
-val status_all_json : unit -> Yojson.Safe.t
-(** Assoc of provider name -> status_json for all providers. *)
-
-val reap_all_stale : unit -> int
-(** Reap stale sessions across all providers. Returns total reaped. *)
 
 val enabled_protocols : unit -> Transport.protocol list
 (** List of protocols with at least one enabled provider. *)

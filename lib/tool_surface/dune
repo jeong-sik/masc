@@ -16,6 +16,12 @@
  (public_name masc.masc_tool_surface)
  (wrapped false)
  (private_modules
+  tool_shard_types_schemas_filesystem_toml
+  tool_shard_types_schemas_execute_toml
+  tool_shard_types_schemas_taskboard_toml
+  tool_shard_types_schemas_base_toml
+  tool_shard_types_schemas_voice_toml
+  tool_shard_types_schemas_surface_toml
   tool_shard_types_core
   tool_shard_types_enum_mirrors
   tool_shard_types_schemas_base
@@ -36,12 +42,18 @@
   masc.tool_catalog_surfaces
   masc.masc_tool_dispatch
   masc.masc_exec
-  agent_sdk
-  agent_sdk.base
+  masc.agent_core
+  masc.agent_core.base
   mcp_protocol
   time_compat
   fs_compat
   yojson
+  ; Tool_definition_toml parses config/tools/<name>.toml declarations, and
+  ; the board keeper projections read them from the binary-embedded config
+  ; tree. embedded_config is generated data with no masc dependencies, so
+  ; the leaf constraint above still holds.
+  otoml
+  masc.embedded_config
   eio
   unix)
  (preprocess

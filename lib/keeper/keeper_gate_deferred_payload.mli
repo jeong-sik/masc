@@ -2,7 +2,7 @@
 
     This module owns only the Gate receipt payload. The execution disposition
     is represented exclusively by {!Tool_result.Deferred}; payload fields and
-    OAS metadata are never semantic authorities. *)
+    AGENT_CORE metadata are never semantic authorities. *)
 
 type t
 
@@ -10,6 +10,7 @@ val create
   :  operation:string
   -> approval_id:string
   -> reason:Keeper_gate.deferred_reason
+  -> audit_receipts:Keeper_approval.Audit.receipt list
   -> ?context:Yojson.Safe.t
   -> unit
   -> t

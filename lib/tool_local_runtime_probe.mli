@@ -13,16 +13,16 @@
     mirror the runtime — those helpers are implementation
     detail; probe is the contract layer.
 
-    Internal: ~22 helpers stay private — \[bool_opt_to_json] /
-    \[clamp] / \[trim_to_option] / \[ns_to_ms] / \[tok_per_second] /
-    \[collapse_preview] / \[truncate_text] /
-    \[generate_probe_skip_reason_to_string] / \[string_or_fallback] /
-    \[loaded_model_name] / \[ollama_loaded_model_to_yojson] /
-    \[ollama_probe_run_to_yojson] / \[default_probe_prompt] /
-    \[fetch_ollama_ps] / \[select_effective_model] /
-    \[failed_probe_run] / \[run_single_probe] /
-    \[prompt_eval_duration_ms_of_run_json] /
-    \[generate_probe_skip_reason] type + the
+    Internal: ~22 helpers stay private — [bool_opt_to_json] /
+    [trim_to_option] / [ns_to_ms] / [tok_per_second] /
+    [collapse_preview] / [truncate_text] /
+    [generate_probe_skip_reason_to_string] / [string_or_fallback] /
+    [loaded_model_name] / [ollama_loaded_model_to_yojson] /
+    [ollama_probe_run_to_yojson] / [default_probe_prompt] /
+    [fetch_ollama_ps] / [select_effective_model] /
+    [failed_probe_run] / [run_single_probe] /
+    [prompt_eval_duration_ms_of_run_json] /
+    [generate_probe_skip_reason] type + the
     [include Tool_local_runtime_http] runtime.  All consumed
     only inside {!runtime_ollama_probe_json}'s pipeline. *)
 
@@ -225,6 +225,16 @@ val validate_timeout_sec : int -> (int, string) result
 (** [validate_timeout_sec value] accepts every positive integer unchanged.
     Non-positive values are rejected explicitly. *)
 
+val validate_probe_runs : int -> (int, string) result
+val validate_max_tokens : int -> (int, string) result
+val validate_ps_timeout_sec : int -> (int, string) result
+(** The bounded probe knobs. Each accepts its range unchanged and rejects
+    anything outside it with a message naming the range; none rewrites the
+    value it was given. The bounds are declared once here and mirrored into
+    the tool schema, so a caller reads the range before sending rather than
+    inferring it from a result that silently ran a different probe (#25006,
+    following #24851 for [timeout_sec]). *)
+
 val runtime_ollama_probe_json :
   ?server_url:string ->
   ?model:string ->
@@ -239,12 +249,13 @@ val runtime_ollama_probe_json :
   ?run_generate:bool ->
   unit ->
   Yojson.Safe.t
-(** Top-level probe orchestrator.  Defaults: [probe_runs=2]
-    (clamped to [\[1, 4]]), [max_tokens=16] (clamped to
-    [\[1, 128]]), [think_mode=Think_auto], [timeout_sec=6]
-    (every positive explicit value is preserved; non-positive values raise
-    [Invalid_argument]), [ps_timeout_sec=2] (clamped to [\[1, 30]]),
-    [generate_when_unloaded=true], [run_generate=true].
+(** Top-level probe orchestrator.  Defaults: [probe_runs=2] (accepted in
+    [\[1, 4\]]), [max_tokens=16] (accepted in [\[1, 128\]]),
+    [think_mode=Think_auto], [timeout_sec=6] (every positive value accepted),
+    [ps_timeout_sec=2] (accepted in [\[1, 30\]]),
+    [generate_when_unloaded=true], [run_generate=true].  Every explicit value
+    is either run as given or refused with [Invalid_argument]; none is
+    rewritten to fit.
     Returns a JSON snapshot with [/api/ps] state + per-run timing +
     KV-cache assessment.  Per PR #20479 spirit: the tool itself
     (ollama [OLLAMA_LOAD_TIMEOUT]) owns hang protection; callers do

@@ -1,0 +1,20 @@
+; Secret_patterns — structural secret masking shared by every sink.
+;
+; Extracted from Observability_redact so leaf sinks (masc_log) can mask
+; secret-shaped values without depending on the main masc library, which
+; itself depends on masc_log. Observability_redact delegates here, so the
+; pattern list stays a single source of truth.
+;
+; Keep this library's dependencies to re + yojson. A dependency added here
+; is inherited by masc_log and therefore by every module that logs.
+
+(include_subdirs no)
+
+(library
+ (name masc_secret_patterns)
+ (public_name masc.secret_patterns)
+ (wrapped false)
+ (modules secret_patterns)
+ (flags
+  (:standard -w +4 -w +33))
+ (libraries re yojson))

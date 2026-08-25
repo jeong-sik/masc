@@ -3,26 +3,41 @@
     Runs a compute function periodically, with exponential backoff on
     consecutive failures. *)
 
+type phase =
+  | Warm_cache
+  | Refresh
+
+type timeout =
+  { label : string
+  ; phase : phase
+  ; timeout_s : float
+  ; elapsed_s : float
+  }
+
+type failure =
+  | Timed_out of timeout
+  | Raised of exn
+
+val failure_message : failure -> string
+(** Render a failure only at an operator/cache/wire boundary. Timeout rendering
+    preserves the existing [Failure("refresh_timeout ...")] text contract. *)
+
 type config = {
   label : string;           (** Log prefix, e.g. "execution" or "mission". *)
   interval_s : float;       (** Base refresh interval in seconds. *)
   max_backoff_s : float;    (** Cap for exponential backoff. *)
   failure_threshold : int;  (** Consecutive failures before backoff kicks in. *)
-  timeout_s : float;        (** Warm-cache timeout. *)
-  on_error : (exn -> unit) option;  (** Called on timeout or exception. *)
-  health_check : (unit -> bool) option;  (** Pre-compute gate. If [Some f] and [f ()] returns [false], the cycle is skipped and backoff applied. *)
+  timeout_s : float;        (** Per-attempt timeout. *)
+  on_failure : (failure -> unit) option;  (** Called on timeout or exception. *)
   warm_delay_s : float;    (** Delay before cold-start warm-cache compute (0.0 = immediate). *)
   warn_first_failure : bool;  (** Log a warning on the very first refresh failure. *)
 }
 
 val default_config : label:string -> interval_s:float -> config
 (** [default_config ~label ~interval_s] returns a config with
-    [max_backoff_s = 120.0], [failure_threshold = 5], [timeout_s = 10.0]. *)
+    [max_backoff_s = 60.0], [failure_threshold = 3], [timeout_s = 10.0]. *)
 
 module For_testing : sig
-  val timeout_failure_message :
-    label:string -> phase:string -> timeout_s:float -> elapsed_s:float -> string
-
   val should_warn_refresh_failure :
     ?warn_first_failure:bool -> failure_threshold:int -> int -> bool
 end
@@ -37,8 +52,8 @@ val start :
 (** Start a refresh loop with warm cache and circuit breaker.
 
     [compute] produces a value; [on_result] stores it (typically writing
-    to a ref).  A warm-cache run executes synchronously before the async
-    loop, bounded by [config.timeout_s].
+    to a ref).  Warm-cache and recurring runs live in child fibers owned by
+    [sw], with every attempt bounded by [config.timeout_s].
 
-    When [config.on_error] is set, it is called on timeout or exception,
+    When [config.on_failure] is set, it is called on timeout or exception,
     allowing callers to record the failure (e.g. mark_cached_surface_error). *)

@@ -22,10 +22,3 @@ val invalidate_tool_audit_cache :
 (** Forget the process-local tool-audit snapshot when a Keeper metrics
     directory is removed. A later Keeper with the same name must not inherit
     the deleted runtime's audit state. *)
-val accountability_summary_lookup :
-  Workspace.config ->
-  keeper_name:string ->
-  agent_name:string ->
-  Yojson.Safe.t
-val accountability_summary_json :
-  Workspace.config -> keeper_name:string -> agent_name:string -> Yojson.Safe.t

@@ -7,6 +7,10 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+(* The failure-reason / turn-phase clusters live in Keeper_registry_types;
+   keeper_registry.mli re-exports them with [include module type of], so the
+   values and types must come through this structure. *)
+include Keeper_registry_types
 include Keeper_registry_setup
 
 let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
@@ -244,9 +248,9 @@ let is_running ~base_path name =
      and [Failing] because a keeper in [Failing] may still complete
      its in-flight turn before the recovery transition; [is_running]
      answers the operator-facing question "is this keeper currently
-     running?" and treats only [Running] as such. The 12 other phases
-     (Offline, Failing, Overflowed, Compacting, HandingOff, Draining,
-     Paused, Stopped, Crashed, Restarting, Dead) yield [false]
+     running?" and treats only [Running] as such. The 10 other phases
+     (Offline, Failing, Compacting, HandingOff, Draining,
+     Paused, Stopped, Crashed, Restarting) yield [false]
      here. A future phase variant (e.g. a hypothetical [Migrating] or
      [Healing]) would silently inherit [false] under the previous
      [Some _ -> false] catch-all without a review point on whether
@@ -261,22 +265,20 @@ let is_running ~base_path name =
       { phase =
           ( Offline
           | Failing
-          | Overflowed
           | Compacting
           | HandingOff
           | Draining
           | Paused
           | Stopped
           | Crashed
-          | Restarting
-          | Dead )
+          | Restarting )
       ; _
       } -> false
   | None -> false
 ;;
 
 (** True if the keeper has ANY registry entry (regardless of state).
-    Used by reconcile to avoid re-launching Crashed/Dead keepers. *)
+    Used by reconcile to avoid re-launching Crashed keepers. *)
 let is_registered ~base_path name = Option.is_some (get ~base_path name)
 
 let count_running ?base_path () =
@@ -298,18 +300,8 @@ let record_crash ~base_path name ts msg =
   Error_tracking.record_crash ~base_path name ts msg ~update_entry:update_entry_unit
 ;;
 
-let set_failure_reason_exact entry reason =
-  update_entry_exact entry (fun current -> { current with last_failure_reason = reason })
-;;
-
 let set_last_error_exact entry err =
   update_entry_exact entry (fun current -> { current with last_error = Some err })
-;;
-
-let record_crash_exact entry ts msg =
-  Log.Keeper.error "registry: recording exact-lane crash name=%s msg=%s" entry.name msg;
-  update_entry_exact entry (fun current ->
-    Error_tracking.record_crash_entry current ts msg)
 ;;
 
 let exact_update_succeeded entry ~site = function
@@ -333,12 +325,6 @@ let exact_update_succeeded entry ~site = function
       site
       (registry_entry_validation_error_to_string validation_error);
     false
-;;
-
-let set_grpc_close ~base_path name close_fn =
-  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  | Some entry -> Atomic.set entry.grpc_close close_fn
-  | None -> ()
 ;;
 
 let started_at ~base_path name =
@@ -366,6 +352,8 @@ type wakeup_intent =
   | Broadcast_signal
   | Compaction_signal
   | Attention_result
+  | Runtime_parameter_change
+  | Turn_slot_released
 
 let wakeup_intent_to_wire = function
   | Reactive_signal -> "reactive_signal"
@@ -376,6 +364,8 @@ let wakeup_intent_to_wire = function
   | Broadcast_signal -> "broadcast_signal"
   | Compaction_signal -> "compaction_signal"
   | Attention_result -> "attention_result"
+  | Runtime_parameter_change -> "runtime_parameter_change"
+  | Turn_slot_released -> "turn_slot_released"
 ;;
 
 type wakeup_outcome =
@@ -460,17 +450,71 @@ let wakeup_running_exact ~intent (expected : registry_entry) =
           | Deferred_lifecycle denial -> Exact_wake_lifecycle_denied denial)))
 ;;
 
+type cadence_sleeper_wakeup_outcome =
+  | Cadence_sleeper_signaled
+  | Cadence_sleeper_missing
+  | Cadence_sleeper_replaced
+  | Cadence_sleeper_in_flight
+  | Cadence_sleeper_awake
+  | Cadence_sleeper_inactive of Keeper_state_machine.phase
+  | Cadence_sleeper_lifecycle_denied of
+      Keeper_lifecycle_admission.autonomous_denial
+  | Cadence_sleeper_lifecycle_reserved of
+      Keeper_lifecycle_reservation.snapshot
+
+let wakeup_cadence_sleeper_exact (expected : registry_entry) =
+  let base_path = expected.base_path in
+  let name = expected.name in
+  Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+    match Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name () with
+    | Error owner -> Cadence_sleeper_lifecycle_reserved owner
+    | Ok () ->
+      let key = registry_key ~base_path name in
+      (match StringMap.find_opt key (Atomic.get registry) with
+       | None -> Cadence_sleeper_missing
+       | Some current
+         when not
+                (Keeper_lane.Id.equal
+                   (Keeper_lane.id current.lane)
+                   (Keeper_lane.id expected.lane)) ->
+         Cadence_sleeper_replaced
+       | Some current ->
+         let lifecycle_state =
+           Keeper_lifecycle_admission.state
+             ~paused:current.meta.paused
+             ~latched_reason:current.meta.latched_reason
+         in
+         (match Keeper_lifecycle_admission.admit_autonomous lifecycle_state with
+          | Keeper_lifecycle_admission.Autonomous_denied denial ->
+            record_lifecycle_wakeup_denial
+              ~intent:Runtime_parameter_change
+              current
+              denial;
+            Cadence_sleeper_lifecycle_denied denial
+          | Keeper_lifecycle_admission.Autonomous_admitted ->
+            (match current.phase with
+             | Keeper_state_machine.Running | Keeper_state_machine.Failing ->
+               (match current.current_turn_observation with
+                | Some _ -> Cadence_sleeper_in_flight
+                | None ->
+                  (* tla-lint: allow-mutation: cadence sleep handshake — CAS
+                     consumes only an active inter-cycle sleeper. *)
+                  if Atomic.compare_and_set current.cadence_sleeping true false
+                  then Cadence_sleeper_signaled
+                  else Cadence_sleeper_awake)
+             | phase -> Cadence_sleeper_inactive phase))))
+;;
+
 let fiber_health_of ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None -> Fiber_unknown
   | Some entry ->
     (match entry.phase with
-     | Dead -> Fiber_dead
      | Crashed | Restarting -> Fiber_zombie
      | Stopped ->
        if lane_has_exited entry then Fiber_unknown else Fiber_alive
      | Offline -> Fiber_unknown
-     | Running | Paused | Failing | Overflowed | Compacting | HandingOff | Draining ->
+     | Running | Paused | Failing | Compacting | HandingOff | Draining ->
        (match Eio.Promise.peek entry.done_p with
         | None -> Fiber_alive
         | Some `Stopped ->
@@ -548,14 +592,17 @@ let cleanup_tracking ~base_path name =
   | None -> ()
 ;;
 
-let cleanup_tracking_exact (entry : registry_entry) =
-  update_entry_exact entry (fun current ->
-    { current with
-      board_wakeups = StringMap.empty
-    ; tool_usage = StringMap.empty
-    ; board_cursor_ts = 0.0
-    ; board_cursor_post_id = None
-    })
+let cleanup_tracking_entry current =
+  { current with
+    board_wakeups = StringMap.empty
+  ; tool_usage = StringMap.empty
+  ; board_cursor_ts = 0.0
+  ; board_cursor_post_id = None
+  }
+;;
+
+let cleanup_tracking_exact_for_lifecycle token (entry : registry_entry) =
+  update_entry_exact_for_lifecycle token entry cleanup_tracking_entry
 ;;
 
 let clear () =
@@ -587,7 +634,7 @@ let set_board_cursor ~base_path name ts post_id =
 (* -- Tool usage tracking ------------------------------------------- *)
 
 (* Safe without a mutex: updates go through [update_entry]'s CAS loop, so
-   keeper-turn OAS callbacks and runtime MCP server callbacks can both
+   keeper-turn AGENT_CORE callbacks and runtime MCP server callbacks can both
    record usage for the same keeper without clobbering each other. *)
 let record_tool_use ~base_path name ~tool_name ~disposition =
   match
@@ -692,7 +739,6 @@ let rec dispatch_event_with_audit_internal
           ?lifecycle_token
           ?expected_lane
           ?(origin = Generic_dispatch)
-          ?snapshot
           ?events_fired
           ?selected_event
           name
@@ -786,12 +832,6 @@ let rec dispatch_event_with_audit_internal
        let from_phase_str = Keeper_state_machine.phase_to_string tr.prev_phase in
        let to_phase_str = Keeper_state_machine.phase_to_string tr.new_phase in
        let event_str = Keeper_state_machine.event_to_string event in
-       (* Update dead_since_ts: always set to now on Dead transition *)
-       let dead_since_ts =
-         match tr.new_phase with
-         | Keeper_state_machine.Dead -> Some now
-         | _ -> None
-       in
        let new_seq = entry.transition_seq + 1 in
        (match
           install_entry_if_current_internal
@@ -800,7 +840,6 @@ let rec dispatch_event_with_audit_internal
             { entry with
               phase = tr.new_phase
             ; conditions = tr.updated_conditions
-            ; dead_since_ts
             ; transition_seq = new_seq
             ; last_context_actions
             ; pending_turn_measurement
@@ -819,7 +858,6 @@ let rec dispatch_event_with_audit_internal
             ?lifecycle_token
             ?expected_lane
             ~origin
-            ?snapshot
             ?events_fired
             ?selected_event
             name
@@ -861,8 +899,7 @@ let rec dispatch_event_with_audit_internal
           let audit_selected_event = Option.value selected_event ~default:event in
           Keeper_transition_audit.record_transition
             ~keeper_name:name
-            { snapshot
-            ; events_fired = audit_events_fired
+            { events_fired = audit_events_fired
             ; selected_event = audit_selected_event
             ; prev_phase = tr.prev_phase
             ; new_phase = tr.new_phase
@@ -1015,7 +1052,6 @@ let rec dispatch_event_with_audit_internal
             ?lifecycle_token
             ?expected_lane
             ~origin
-            ?snapshot
             ?events_fired
             ?selected_event
             name
@@ -1055,7 +1091,6 @@ let rec dispatch_event_with_audit_internal
 let dispatch_event_with_audit
       ~base_path
       ?(origin = Generic_dispatch)
-      ?snapshot
       ?events_fired
       ?selected_event
       name
@@ -1064,7 +1099,6 @@ let dispatch_event_with_audit
   dispatch_event_with_audit_internal
     ~base_path
     ~origin
-    ?snapshot
     ?events_fired
     ?selected_event
     name
@@ -1139,7 +1173,6 @@ let dispatch_event_unit ~base_path ?(origin = Generic_dispatch) name event =
 let dispatch_event_with_audit_and_log
       ~base_path
       ?(origin = Generic_dispatch)
-      ?snapshot
       ?events_fired
       ?selected_event
       name
@@ -1149,7 +1182,6 @@ let dispatch_event_with_audit_and_log
     dispatch_event_with_audit
       ~base_path
       ~origin
-      ?snapshot
       ?events_fired
       ?selected_event
       name
@@ -1176,6 +1208,7 @@ let prepare_fiber_launch ~base_path name =
      (* tla-lint: allow-mutation: fiber signal — initialise per-fiber Atomic flags before keeper launch *)
      Atomic.set entry.fiber_stop false;
      Atomic.set entry.fiber_wakeup false;
+     Atomic.set entry.cadence_sleeping false;
      Atomic.set entry.waiting_for_inference false
    | None ->
      (* P3 cleanup: previously this was a silent no-op when the
@@ -1200,6 +1233,7 @@ let prepare_fiber_launch ~base_path name =
 let prepare_fiber_launch_for_lifecycle token (entry : registry_entry) =
   Atomic.set entry.fiber_stop false;
   Atomic.set entry.fiber_wakeup false;
+  Atomic.set entry.cadence_sleeping false;
   Atomic.set entry.waiting_for_inference false;
   dispatch_event_exact_for_lifecycle token entry Keeper_state_machine.Fiber_started
 ;;
@@ -1218,7 +1252,6 @@ module For_testing = struct
   let register = register
   let unregister = unregister
   let clear = clear
-  let reload_meta_from_disk = reload_meta_from_disk
   let record_restart = record_restart
   let set_started_at_for_test = set_started_at_for_test
   let crash_log_of = crash_log_of

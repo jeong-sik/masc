@@ -5,6 +5,8 @@ import { describe, it, expect } from 'vitest'
 import {
   priorityStars,
   priorityLabel,
+  goalPhaseLabel,
+  goalPhaseStatus,
   phaseFilterLabel,
   matchesGoalPhaseFilter,
   sortByPriority,
@@ -75,6 +77,22 @@ describe('priorityLabel', () => {
 })
 
 // ================================================================
+// goalPhaseLabel / goalPhaseStatus
+// ================================================================
+
+describe('goalPhaseLabel', () => {
+  it('returns 검증 중 for verifying (RFC-0387 stage 2)', () => {
+    expect(goalPhaseLabel('verifying')).toBe('검증 중')
+  })
+})
+
+describe('goalPhaseStatus', () => {
+  it('maps verifying to the awaiting_verification info tone', () => {
+    expect(goalPhaseStatus('verifying')).toBe('awaiting_verification')
+  })
+})
+
+// ================================================================
 // phaseFilterLabel
 // ================================================================
 
@@ -87,12 +105,8 @@ describe('phaseFilterLabel', () => {
     expect(phaseFilterLabel('executing')).toBe('실행 중')
   })
 
-  it('returns 차단됨 for blocked', () => {
-    expect(phaseFilterLabel('blocked')).toBe('차단됨')
-  })
-
-  it('returns 일시정지 for paused', () => {
-    expect(phaseFilterLabel('paused')).toBe('일시정지')
+  it('returns 검증 중 for verifying', () => {
+    expect(phaseFilterLabel('verifying')).toBe('검증 중')
   })
 
   it('returns 완료 for completed', () => {
@@ -119,8 +133,14 @@ describe('matchesGoalPhaseFilter', () => {
   })
 
   it('matches only the requested phase', () => {
-    expect(matchesGoalPhaseFilter('blocked', 'blocked')).toBe(true)
-    expect(matchesGoalPhaseFilter('executing', 'blocked')).toBe(false)
+    expect(matchesGoalPhaseFilter('dropped', 'dropped')).toBe(true)
+    expect(matchesGoalPhaseFilter('executing', 'dropped')).toBe(false)
+  })
+
+  it('matches verifying goals against the verifying filter', () => {
+    expect(matchesGoalPhaseFilter('verifying', 'verifying')).toBe(true)
+    expect(matchesGoalPhaseFilter('executing', 'verifying')).toBe(false)
+    expect(matchesGoalPhaseFilter('verifying', 'all')).toBe(true)
   })
 })
 
@@ -208,7 +228,7 @@ describe('filterTasksByQuery', () => {
   type Searchable = { id: string; title: string; description?: string | null; assignee?: string | null }
   const tasks: Searchable[] = [
     { id: 't1', title: '[masc] Fix keeper heartbeat', description: 'Eio timeout regression', assignee: 'claude' },
-    { id: 't2', title: '[oas] Add Groq provider', description: null, assignee: 'codex' },
+    { id: 't2', title: '[agentCore] Add Groq provider', description: null, assignee: 'codex' },
     { id: 't3', title: 'Dashboard polish', description: 'Tailwind migration cleanup', assignee: null },
     { id: 't4', title: 'Write evidence record', description: 'BFCL 67 verification', assignee: 'gemini' },
   ]
@@ -273,7 +293,7 @@ describe('task completion display truth', () => {
     expect(formatProgressPct({ done: 0, total: 0, ratio: 0 })).toBe('no linked tasks')
   })
 
-  it('formats linked task counts instead of a goal-attainment percentage', () => {
+  it('formats linked task counts and says they are not a metric measurement', () => {
     expect(formatProgressPct({ done: 2, total: 5, ratio: 0.4 })).toBe('2/5 tasks')
   })
 
@@ -284,7 +304,7 @@ describe('task completion display truth', () => {
     const meter = container.querySelector('[data-task-count-meter]') as HTMLElement | null
     expect(meter).not.toBeNull()
     expect(meter?.getAttribute('data-task-count-meter-pct')).toBe('25')
-    expect(meter?.getAttribute('title')).toContain('not a goal-attainment metric')
+    expect(meter?.getAttribute('title')).toContain('목표 지표를 잰 값이 아닙니다')
     const fill = meter?.firstElementChild as HTMLElement | null
     expect(fill?.className).toContain('bg-[var(--color-accent-fg)]')
     expect(fill?.className).not.toContain('status-ok')

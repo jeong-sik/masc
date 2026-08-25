@@ -30,7 +30,6 @@ const RuntimeEntrySchema = object({
 })
 
 const ModelRoutingSchema = object({
-  cross_verifier_runtime_id: nullable(string()),
   media_failover: array(string()),
 })
 

@@ -113,6 +113,14 @@ describe("TurnFsmDetailPanel", () => {
         duration_ms: null,
         error: null,
         runtime: null,
+        claim_attempt: {
+          present: false,
+          source: "keeper_task_claim_tool_call",
+          status: "not_observed",
+          result: null,
+          claimed_task_id: null,
+          claimed_goal_id: null,
+        },
       },
     })
 

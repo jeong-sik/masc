@@ -173,6 +173,24 @@ let test_rejection_stats_increment () =
   check int "exactly 2 rejections" 2 count;
   check bool "time > 0" true (time > 0.0)
 
+let test_rejection_stats_concurrent_snapshot () =
+  Validation.reset_rejection_stats ();
+  let writes_per_domain = 8 in
+  let domains =
+    List.init 4 (fun domain_index ->
+      Domain.spawn (fun () ->
+        for write_index = 1 to writes_per_domain do
+          ignore
+            (Validation.Agent_id.validate
+               (Printf.sprintf "invalid/%d/%d" domain_index write_index))
+        done))
+  in
+  List.iter Domain.join domains;
+  let count, last_rejection_time = Validation.get_rejection_stats () in
+  check int "no concurrent increments lost" (4 * writes_per_domain) count;
+  check bool "snapshot timestamp accompanies count" true
+    (last_rejection_time > 0.0)
+
 (* ============================================================
    Edge Cases
    ============================================================ *)
@@ -236,53 +254,26 @@ let test_agent_id_double_dot () =
   | Ok _ -> fail "should reject double dot"
   | Error _ -> ()
 
-(* ============================================================
-   Sound-partial quote stripping (#9787)
-   ============================================================ *)
-
-let test_task_id_single_quoted_recoverable () =
-  match Validation.Task_id.validate "'task-031'" with
-  | Ok t -> check string "stripped to inner" "task-031" (Validation.Task_id.to_string t)
-  | Error msg -> failf "expected recovery, got: %s" msg
-
-let test_task_id_double_quoted_recoverable () =
-  match Validation.Task_id.validate "\"task-041\"" with
-  | Ok t -> check string "stripped to inner" "task-041" (Validation.Task_id.to_string t)
-  | Error msg -> failf "expected recovery, got: %s" msg
-
-let test_task_id_quoted_inner_invalid () =
-  (* Outer quotes match but inner contains invalid char — must surface a
-     quote-aware error and not silently accept the inner. *)
-  match Validation.Task_id.validate "'bad/id'" with
-  | Ok _ -> fail "should reject quoted but invalid inner"
-  | Error msg ->
-      check bool "mentions quotes" true
-        (try ignore (Re.exec (Re.Pcre.re "quotes" |> Re.compile) msg); true
-         with Not_found -> false)
-
-let test_task_id_mismatched_quotes_not_stripped () =
-  (* Single + double mismatch must NOT be stripped — keep strict error. *)
-  match Validation.Task_id.validate "'task-031\"" with
-  | Ok _ -> fail "should reject mismatched outer quotes"
-  | Error _ -> ()
+let test_task_id_quotes_are_rejected () =
+  List.iter
+    (fun raw ->
+       match Validation.Task_id.validate raw with
+       | Ok _ -> failf "quoted task id %S must be rejected" raw
+       | Error _ -> ())
+    [ "'task-031'"; "\"task-041\""; "'bad/id'"; "'task-031\"" ]
 
 let test_task_id_unquoted_still_works () =
   match Validation.Task_id.validate "task-099" with
   | Ok t -> check string "preserved" "task-099" (Validation.Task_id.to_string t)
   | Error msg -> failf "should accept bare id: %s" msg
 
-let test_agent_id_single_quoted_recoverable () =
-  match Validation.Agent_id.validate "'keeper'" with
-  | Ok t -> check string "stripped to inner" "keeper" (Validation.Agent_id.to_string t)
-  | Error msg -> failf "expected recovery, got: %s" msg
-
-let test_agent_id_quoted_inner_invalid () =
-  match Validation.Agent_id.validate "'has space'" with
-  | Ok _ -> fail "should reject quoted but invalid inner"
-  | Error msg ->
-      check bool "mentions quotes" true
-        (try ignore (Re.exec (Re.Pcre.re "quotes" |> Re.compile) msg); true
-         with Not_found -> false)
+let test_agent_id_quotes_are_rejected () =
+  List.iter
+    (fun raw ->
+       match Validation.Agent_id.validate raw with
+       | Ok _ -> failf "quoted agent id %S must be rejected" raw
+       | Error _ -> ())
+    [ "'keeper'"; "\"keeper\""; "'has space'" ]
 
 (* ============================================================
    Test Runners
@@ -332,6 +323,8 @@ let () =
     "rejection_stats", [
       test_case "reset" `Quick test_reset_rejection_stats;
       test_case "increment" `Quick test_rejection_stats_increment;
+      test_case "concurrent immutable snapshot" `Quick
+        test_rejection_stats_concurrent_snapshot;
     ];
     "edge_cases", [
       test_case "agent max length" `Quick test_agent_id_max_length;
@@ -346,13 +339,9 @@ let () =
       test_case "agent single dot" `Quick test_agent_id_single_dot;
       test_case "agent double dot" `Quick test_agent_id_double_dot;
     ];
-    "quote_stripping_9787", [
-      test_case "task single-quoted recoverable" `Quick test_task_id_single_quoted_recoverable;
-      test_case "task double-quoted recoverable" `Quick test_task_id_double_quoted_recoverable;
-      test_case "task quoted inner invalid" `Quick test_task_id_quoted_inner_invalid;
-      test_case "task mismatched quotes" `Quick test_task_id_mismatched_quotes_not_stripped;
+    "identifier_quotes", [
+      test_case "task quotes are rejected" `Quick test_task_id_quotes_are_rejected;
       test_case "task unquoted still works" `Quick test_task_id_unquoted_still_works;
-      test_case "agent single-quoted recoverable" `Quick test_agent_id_single_quoted_recoverable;
-      test_case "agent quoted inner invalid" `Quick test_agent_id_quoted_inner_invalid;
+      test_case "agent quotes are rejected" `Quick test_agent_id_quotes_are_rejected;
     ];
   ]

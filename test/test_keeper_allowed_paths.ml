@@ -19,16 +19,6 @@ let make_meta ?(allowed_paths = []) ~name () =
 let sandbox_roots meta =
   [ KAP.sandbox_path_of_meta ~meta ]
 
-let contains_substring s needle =
-  let s_len = String.length s in
-  let n_len = String.length needle in
-  let rec loop i =
-    if i + n_len > s_len then false
-    else if String.sub s i n_len = needle then true
-    else loop (i + 1)
-  in
-  n_len = 0 || loop 0
-
 let test_empty_paths_default_to_sandbox_root () =
   let meta = make_meta ~name:"keeper" () in
   let expected = sandbox_roots meta in
@@ -66,9 +56,9 @@ let test_validate_rejects_globs_and_traversal () =
   | Ok () -> fail "expected path-shape rejection"
   | Error err ->
       check bool "error mentions rejected path" true
-        (contains_substring err "workspace/../outside");
+        (String_util.contains_substring err "workspace/../outside");
       check bool "error mentions glob" true
-        (contains_substring err "logs/*.txt")
+        (String_util.contains_substring err "logs/*.txt")
 
 let test_validate_accepts_plain_paths () =
   match

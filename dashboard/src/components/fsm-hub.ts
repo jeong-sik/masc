@@ -11,7 +11,8 @@ import {
   type KeeperCompositeSnapshot,
   type KeeperRuntimeTraceResponse,
 } from '../api/keeper'
-import { fetchGateKeepers } from '../api/gate'
+import { fetchGateKeepers } from '../api/gate-keepers'
+import { dashboardRuntime } from '../api/effect-http'
 import { executionLoaded, keepers, refreshExecution } from '../store'
 import { compositeTick } from '../composite-signals'
 import { nowSecondsSignal, useNowSecondsTicker } from '../lib/now-signal'
@@ -115,7 +116,7 @@ export function executionReceiptLabel(execution: KeeperCompositeExecution | unde
 }
 
 export function executionReceiptTitle(execution: KeeperCompositeExecution | undefined): string {
-  if (!execution?.latest_receipt_present) return '아직 execution receipt가 없습니다.'
+  if (!execution?.latest_receipt_present) return '아직 execution receipt 없음'
   const deferredRuntime = execution.runtime?.degraded_retry_runtime
   const deferredRetry = deferredRuntime
     ? `retry: ${execution.runtime?.degraded_retry_applied ? 'applied' : 'queued'} -> ${deferredRuntime}`
@@ -201,10 +202,10 @@ function runtimeTraceTurnLabel(trace: KeeperRuntimeTraceResponse): string {
   const keeperTurn = trace.turn_identity.requested_keeper_turn_id
     ?? trace.turn_identity.manifest_keeper_turn_ids.at(-1)
     ?? null
-  const oasTurn = trace.turn_identity.max_oas_turn_count
+  const agentCoreTurn = trace.turn_identity.max_agent_core_turn_count
   const keeperLabel = keeperTurn == null ? '—' : `#${keeperTurn}`
-  const oasLabel = oasTurn == null ? '—' : String(oasTurn)
-  return `turn ${keeperLabel} / oas ${oasLabel}`
+  const agentCoreLabel = agentCoreTurn == null ? '—' : String(agentCoreTurn)
+  return `turn ${keeperLabel} / agentCore ${agentCoreLabel}`
 }
 
 function runtimeTraceTitle(trace: KeeperRuntimeTraceResponse): string {
@@ -545,23 +546,22 @@ export function FsmHub(props: FsmHubProps = {}) {
   )
   useEffect(() => {
     if (!shouldUseGateKeeperFallback(executionLoadedValue, storeNames)) return
-    let cancelled = false
-    void (async () => {
-      try {
-        const data = await fetchGateKeepers()
-        if (cancelled) return
+    const controller = new AbortController()
+    void dashboardRuntime
+      .runPromise(fetchGateKeepers(), { signal: controller.signal })
+      .then(data => {
         const next = data.keepers.map(k => k.name).sort()
         setGateKeeperNames(prev =>
           prev.length === next.length && prev.every((v, i) => v === next[i])
             ? prev
             : next,
         )
-      } catch {
+      })
+      .catch(() => {
         // Gate endpoint auth failure or network error — keep the last
         // successful fallback snapshot until the primary store path lands.
-      }
-    })()
-    return () => { cancelled = true }
+      })
+    return () => { controller.abort() }
   }, [executionLoadedValue, storeNames, pollTick])
 
   const keeperNames = shouldUseGateKeeperFallback(executionLoadedValue, storeNames)
@@ -758,7 +758,7 @@ export function FsmHub(props: FsmHubProps = {}) {
           ? 'composite snapshot을 받지 못했습니다 — keeper 이름을 확인하거나 새로고침하세요'
           : keeperNames.length > 0
           ? `위 탭에서 키퍼를 선택하면 composite FSM 스냅샷을 표시합니다 (${keeperNames.length}개 사용 가능)`
-          : '등록된 키퍼가 없습니다 — MASC에 키퍼를 기동하면 자동으로 표시됩니다'} />
+          : '등록된 키퍼 없음'} />
       ` : loading && !snapshot ? html`
         <${SkeletonLayout} />
       ` : error ? html`
@@ -1000,7 +1000,7 @@ function StatusBar({
           ${paused ? html`
             <span
               class="px-1.5 py-0.5 rounded-[var(--r-1)] border text-3xs font-mono text-[var(--color-fg-muted)] border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
-              title="탭이 백그라운드 상태 — 폴링 중지됨. 탭으로 돌아오면 즉시 갱신됩니다."
+              title="백그라운드 — 폴링 일시정지"
             >
               ⏸ 일시 중지
             </span>

@@ -1,9 +1,7 @@
 import { isRecord, asString, asNumber, asBoolean, asStringArray, extractArray } from './components/common/normalize'
 import {
   normalizeOperatorActionDescriptor,
-  normalizePendingConfirmation,
   normalizePendingConfirmEnvelope,
-  normalizePendingConfirmSummary,
 } from './pending-confirm'
 import {
   normalizeKeeperContextMetricsUnavailable,
@@ -23,11 +21,9 @@ import type {
   OperatorGuidanceSummary,
   OperatorJudgment,
   OperatorKeeperSnapshot,
-  OperatorReviewDecision,
   OperatorRecommendedAction,
   OperatorSnapshot,
   OperatorNamespaceSnapshot,
-  PendingConfirmation,
 } from './types'
 import { SYSTEM_ACTOR_NAME } from './types/core'
 
@@ -56,10 +52,10 @@ function normalizeNamespace(raw: unknown): OperatorNamespaceSnapshot {
 }
 
 function normalizeInferenceInflight(raw: unknown): InferenceInflightSnapshot | null {
-  if (!isRecord(raw) || raw.boundary_owner !== 'oas_runtime') return null
+  if (!isRecord(raw) || raw.boundary_owner !== 'agent_core_runtime') return null
   const active = asNumber(raw.active)
   if (active === undefined || !Number.isSafeInteger(active) || active < 0) return null
-  return { boundary_owner: 'oas_runtime', active }
+  return { boundary_owner: 'agent_core_runtime', active }
 }
 
 function normalizeGuidanceSummary(raw: unknown): OperatorGuidanceSummary | null {
@@ -77,11 +73,6 @@ function normalizeGuidanceSummary(raw: unknown): OperatorGuidanceSummary | null 
   }
 }
 
-function normalizeOperatorReviewDecisionValue(raw: unknown): OperatorReviewDecision['decision'] | null {
-  const decision = asString(raw)?.trim().toLowerCase()
-  return decision === 'resolved' || decision === 'deferred' ? decision : null
-}
-
 function normalizeOperatorDigestTargetType(raw: unknown): OperatorDigest['target_type'] {
   const targetType = asString(raw)?.trim().toLowerCase()
   switch (targetType) {
@@ -92,29 +83,6 @@ function normalizeOperatorDigestTargetType(raw: unknown): OperatorDigest['target
       return targetType
     default:
       return 'root'
-  }
-}
-
-function normalizeReviewDecision(raw: unknown): OperatorReviewDecision | null {
-  if (!isRecord(raw)) return null
-  const itemId = asString(raw.item_id)
-  const fingerprint = asString(raw.fingerprint)
-  const decision = normalizeOperatorReviewDecisionValue(raw.decision)
-  const actor = asString(raw.actor)
-  const reason = asString(raw.reason)
-  const at = asString(raw.at)
-  const targetType = asString(raw.target_type)
-  if (!itemId || !fingerprint || !decision || !actor || !reason || !at || !targetType) return null
-  return {
-    item_id: itemId,
-    fingerprint,
-    decision,
-    actor,
-    reason,
-    at,
-    target_type: targetType,
-    target_id: asString(raw.target_id) ?? null,
-    recommended_action_type: asString(raw.recommended_action_type) ?? null,
   }
 }
 
@@ -170,9 +138,6 @@ export function normalizeOperatorDigest(raw: unknown): OperatorDigest {
     recommended_actions: extractArray(root.recommended_actions)
       .map(normalizeRecommendedAction)
       .filter((item): item is OperatorRecommendedAction => item !== null),
-    recent_reviews: extractArray(root.recent_reviews)
-      .map(normalizeReviewDecision)
-      .filter((item): item is OperatorReviewDecision => item !== null),
   }
 }
 
@@ -202,8 +167,6 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     context_metrics_unavailable: normalizeKeeperContextMetricsUnavailable(raw.context_metrics_unavailable),
     last_turn_usage: normalizeKeeperLastTurnUsage(raw.last_turn_usage),
     generation: asNumber(raw.generation),
-    active_goal_ids: asStringArray(raw.active_goal_ids),
-    last_autonomous_action_at: asString(raw.last_autonomous_action_at) ?? null,
     last_turn_ago_s: asNumber(raw.last_turn_ago_s),
     model: hasModelLabel ? 'runtime' : undefined,
     needs_attention: typeof raw.needs_attention === 'boolean' ? raw.needs_attention : null,
@@ -214,8 +177,10 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
 }
 
 export function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
-  const root = isRecord(raw) ? raw : {}
+  if (!isRecord(raw)) throw new Error('invalid operator snapshot')
+  const root = raw
   const pendingConfirmEnvelope = normalizePendingConfirmEnvelope(root.pending_confirm_envelope)
+  if (!pendingConfirmEnvelope) throw new Error('invalid pending_confirm_envelope')
   return {
     root: normalizeNamespace(root.root),
     keepers: extractArray(root.keepers, ['items', 'keepers'])
@@ -228,15 +193,7 @@ export function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
     recent_messages: extractArray(root.recent_messages, ['messages'])
       .map(normalizeMessage)
       .filter((item): item is Message => item !== null),
-    pending_confirms: pendingConfirmEnvelope?.items
-      ?? extractArray(root.pending_confirms, ['items', 'confirms'])
-        .map(normalizePendingConfirmation)
-        .filter((item): item is PendingConfirmation => item !== null),
-    pending_confirm_envelope: pendingConfirmEnvelope ?? undefined,
-    pending_confirm_summary:
-      pendingConfirmEnvelope?.summary
-      ?? normalizePendingConfirmSummary(root.pending_confirm_summary)
-      ?? undefined,
+    pending_confirm_envelope: pendingConfirmEnvelope,
     available_actions: extractArray(root.available_actions, ['actions'])
       .map(normalizeOperatorActionDescriptor)
       .filter((item): item is OperatorActionDescriptor => item !== null),

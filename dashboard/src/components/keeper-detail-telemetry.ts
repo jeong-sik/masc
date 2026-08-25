@@ -98,9 +98,6 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <span>latest ${latestTotal != null ? `${latestTotal.toLocaleString()} bytes` : '-'}</span>
             <span>cacheable ${latestCacheable != null ? `${latestCacheable.toLocaleString()} bytes` : '-'}</span>
             ${cacheableRatio != null ? html`<span>${Math.round(cacheableRatio * 100)}% cacheable</span>` : null}
-            ${latest?.runtime_strategy
-              ? html`<span>strategy ${latest.runtime_strategy}</span>`
-              : null}
           </div>
         <//>
 

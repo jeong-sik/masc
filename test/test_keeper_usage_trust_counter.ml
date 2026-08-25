@@ -106,7 +106,7 @@ let test_per_keeper_isolation () =
     (outcome_for ~keeper:b ~outcome:"untrusted")
 
 let test_zero_and_large_usage_are_reported () =
-  let zero = Agent_sdk.Types.zero_api_usage in
+  let zero = Agent_core.Types.zero_api_usage in
   let large = { zero with input_tokens = 2_000_000; output_tokens = 3_000_000 } in
   Alcotest.(check bool)
     "zero usage is an ordinary report"

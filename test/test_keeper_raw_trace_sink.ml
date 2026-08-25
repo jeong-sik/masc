@@ -1,8 +1,8 @@
-(** Regression guards for the keeper OAS raw-trace wiring.
+(** Regression guards for the keeper Agent Core raw-trace wiring.
 
     [Keeper_turn_driver.run_named] has always accepted [?raw_trace] and
-    forwarded it into the OAS agent builder, but the sole keeper dispatch
-    site ([call_run_named] in keeper_agent_run.ml) never supplied it: OAS
+    forwarded it into the Agent Core agent builder, but the sole keeper dispatch
+    site ([call_run_named] in keeper_agent_run.ml) never supplied it: Agent Core
     started no raw-trace run for keeper turns, so
     [run_result.trace_ref]/[run_validation] stayed permanently [None] in
     the unified-metrics decision/snapshot rows and the keeper_turn.ml
@@ -70,14 +70,14 @@ let ok_or_fail label = function
   | Ok v -> v
   | Error err ->
       Alcotest.fail
-        (Printf.sprintf "%s: %s" label (Agent_sdk.Error.to_string err))
+        (Printf.sprintf "%s: %s" label (Agent_core.Error.to_string err))
 
 let sink_or_fail label = function
   | Keeper_agent_run.Sink_ready sink -> sink
   | Keeper_agent_run.Sink_degraded err ->
       Alcotest.fail
         (Printf.sprintf "%s: degraded: %s" label
-           (Agent_sdk.Error.to_string err))
+           (Agent_core.Error.to_string err))
 
 let write_file path content =
   let oc = open_out path in
@@ -90,17 +90,17 @@ let jsonl_files dir =
   |> Array.to_list
   |> List.filter (fun entry -> Filename.check_suffix entry ".jsonl")
 
-(* Drive one turn's records through the sink with the OAS run API — the
-   same append sequence [Agent_sdk.Agent.run] performs when the agent is
+(* Drive one turn's records through the sink with the Agent Core run API — the
+   same append sequence [Agent_core.Agent.run] performs when the agent is
    built with the sink. *)
 let materialize_turn ~(meta : Keeper_meta_contract.keeper_meta) ~turn sink =
   let active =
     ok_or_fail "start_run"
-      (Agent_sdk.Raw_trace.start_run sink ~agent_name:meta.name
+      (Agent_core.Raw_trace.start_run sink ~agent_name:meta.name
          ~prompt:(Printf.sprintf "turn-%d" turn) ())
   in
   ok_or_fail "finish_run"
-    (Agent_sdk.Raw_trace.finish_run active
+    (Agent_core.Raw_trace.finish_run active
        ~final_text:(Some (Printf.sprintf "done-%d" turn))
        ~stop_reason:(Some "end_turn") ~error:None)
 
@@ -117,15 +117,15 @@ let write_turn_record config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
     }
   in
   Keeper_turn_record_writer.write
+    ~model_input_window:None
     ~config
     ~keeper_name:meta.name
     ~agent_name:meta.agent_name
-    ~generation:meta.runtime.nonce
     ~turn_kind:Turn_record.Autonomous
     ~trace_id
     ~absolute_turn:turn
     ~runtime_profile:"test-runtime"
-    ~model:(Some "test-model")
+    ~selected_model:(Some "test-model")
     ~finish_reason:(Some "completed")
     ~context_window:None
     ~price_input_per_million:None
@@ -188,10 +188,10 @@ let test_sink_path_and_session_identity () =
   in
   Alcotest.(check string) "sink file lives in the SSOT raw-trace dir"
     (Keeper_types_support.keeper_raw_trace_dir config meta.name)
-    (Filename.dirname (Agent_sdk.Raw_trace.file_path sink));
+    (Filename.dirname (Agent_core.Raw_trace.file_path sink));
   Alcotest.(check (option string)) "sink session id = keeper trace id"
     (Some (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
-    (Agent_sdk.Raw_trace.session_id sink);
+    (Agent_core.Raw_trace.session_id sink);
   let sink2 =
     sink_or_fail "keeper_raw_trace_sink (second turn)"
       (Keeper_agent_run.For_testing.keeper_raw_trace_sink ~config ~meta)
@@ -199,8 +199,8 @@ let test_sink_path_and_session_identity () =
   Alcotest.(check bool) "second turn gets a fresh file" true
     (not
        (String.equal
-          (Agent_sdk.Raw_trace.file_path sink)
-          (Agent_sdk.Raw_trace.file_path sink2)))
+          (Agent_core.Raw_trace.file_path sink)
+          (Agent_core.Raw_trace.file_path sink2)))
 
 let test_sink_creates_keeper_runtime_dir () =
   with_workspace @@ fun config ->
@@ -232,10 +232,10 @@ let test_per_turn_files_isolate_turns () =
       sink_or_fail "keeper_raw_trace_sink"
         (Keeper_agent_run.For_testing.keeper_raw_trace_sink ~config ~meta)
     in
-    let (_ref : Agent_sdk.Raw_trace.run_ref) =
+    let (_ref : Agent_core.Raw_trace.run_ref) =
       materialize_turn ~meta ~turn sink
     in
-    let path = Agent_sdk.Raw_trace.file_path sink in
+    let path = Agent_core.Raw_trace.file_path sink in
     write_turn_record config ~meta ~turn ~raw_trace_path:path;
     path
   in
@@ -244,14 +244,14 @@ let test_per_turn_files_isolate_turns () =
   Alcotest.(check bool) "turn files are distinct" true
     (not (String.equal path1 path2));
   let records_of path =
-    ok_or_fail "read_all" (Agent_sdk.Raw_trace.read_all ~path ())
+    ok_or_fail "read_all" (Agent_core.Raw_trace.read_all ~path ())
   in
   let count_started records =
     List.length
       (List.filter
-         (fun (r : Agent_sdk.Raw_trace.record) ->
+         (fun (r : Agent_core.Raw_trace.record) ->
            match r.record_type with
-           | Agent_sdk.Raw_trace.Run_started -> true
+           | Agent_core.Raw_trace.Run_started -> true
            | _ -> false)
          records)
   in
@@ -261,7 +261,7 @@ let test_per_turn_files_isolate_turns () =
     (count_started (records_of path2))
 
 (* P1a core: corrupt (or arbitrarily large) historical trace data must
-   not fail sink creation — the fresh per-turn file means OAS
+   not fail sink creation — the fresh per-turn file means Agent Core
    [create -> scan_next_seq -> read_all] never touches it. Covers both a
    corrupt previous per-turn file and a corrupt legacy single-file
    [raw-trace.jsonl] from the pre-review layout of this branch. *)
@@ -286,9 +286,9 @@ let test_corrupt_history_does_not_block_sink () =
   in
   Alcotest.(check bool) "fresh file, not the corrupt one" true
     (not
-       (String.equal (Agent_sdk.Raw_trace.file_path sink) corrupt_turn_file));
+       (String.equal (Agent_core.Raw_trace.file_path sink) corrupt_turn_file));
   (* The new turn still traces normally. *)
-  let (_ref : Agent_sdk.Raw_trace.run_ref) =
+  let (_ref : Agent_core.Raw_trace.run_ref) =
     materialize_turn ~meta ~turn:1 sink
   in
   (* And the dispatch adapter hands the sink to the turn (no degrade). *)
@@ -459,8 +459,8 @@ let test_post_commit_cleanup_prunes_orphan_and_preserves_reference () =
     sink_or_fail "keeper_raw_trace_sink"
       (Keeper_agent_run.For_testing.keeper_raw_trace_sink ~config ~meta)
   in
-  let current_path = Agent_sdk.Raw_trace.file_path sink in
-  let (_ref : Agent_sdk.Raw_trace.run_ref) =
+  let current_path = Agent_core.Raw_trace.file_path sink in
+  let (_ref : Agent_core.Raw_trace.run_ref) =
     materialize_turn ~meta ~turn:2 sink
   in
   write_turn_record config ~meta ~turn:2 ~raw_trace_path:current_path;
@@ -477,9 +477,9 @@ let test_post_commit_cleanup_prunes_orphan_and_preserves_reference () =
   Alcotest.(check int) "only reference plus current sink remain" 2
     (List.length (jsonl_files dir))
 
-let response ?(content = []) ?(stop_reason = Agent_sdk.Types.EndTurn) () =
+let response ?(content = []) ?(stop_reason = Agent_core.Types.EndTurn) () =
   {
-    Agent_sdk.Types.id = "resp-test";
+    Agent_core.Types.id = "resp-test";
     model = "model-test";
     stop_reason;
     content;
@@ -487,7 +487,7 @@ let response ?(content = []) ?(stop_reason = Agent_sdk.Types.EndTurn) () =
     telemetry = None;
   }
 
-(* Consumer-level regression: a turn whose sink reached the OAS run
+(* Consumer-level regression: a turn whose sink reached the Agent Core run
    produces non-[None] result-level [trace_ref]/[run_validation]. The
    projection below is exactly what [Runtime_agent.run] performs after
    [Agent.run]: [trace_ref = Agent.last_raw_trace_run agent] (whose body
@@ -500,16 +500,16 @@ let test_traced_turn_yields_result_level_fields () =
     sink_or_fail "keeper_raw_trace_sink"
       (Keeper_agent_run.For_testing.keeper_raw_trace_sink ~config ~meta)
   in
-  let (_ref : Agent_sdk.Raw_trace.run_ref) =
+  let (_ref : Agent_core.Raw_trace.run_ref) =
     materialize_turn ~meta ~turn:1 sink
   in
-  let trace_ref = Agent_sdk.Raw_trace.last_run sink in
+  let trace_ref = Agent_core.Raw_trace.last_run sink in
   let run_validation =
     match trace_ref with
     | Some ref_ ->
         Some
           (ok_or_fail "validate_run"
-             (Agent_sdk.Raw_trace_query.validate_run ref_))
+             (Agent_core.Raw_trace_query.validate_run ref_))
     | None -> None
   in
   let result : Runtime_agent.run_result =
@@ -529,14 +529,70 @@ let test_traced_turn_yields_result_level_fields () =
       Alcotest.fail "run_result.trace_ref must be Some for a traced turn"
   | Some r ->
       Alcotest.(check string) "trace_ref points at the per-turn sink file"
-        (Agent_sdk.Raw_trace.file_path sink)
-        r.Agent_sdk.Raw_trace.path);
+        (Agent_core.Raw_trace.file_path sink)
+        r.Agent_core.Raw_trace.path);
   match result.run_validation with
   | None ->
       Alcotest.fail "run_result.run_validation must be Some for a traced turn"
   | Some v ->
       Alcotest.(check bool) "minimal traced run validates ok" true
-        v.Agent_sdk.Raw_trace.ok
+        v.Agent_core.Raw_trace.ok
+
+(* The terminal append a failed turn performs is exactly
+   [finish_run ~error:(Some _)] — what
+   [Keeper_official_client_host.finish_raw_error] does. What a failed turn
+   cannot do is carry a reference up through [run_result], because the failure
+   travels as [Error]; its TurnRecord therefore named no trace at all.
+   Retention reaches traces only through TurnRecord references — the orphan
+   case above shows an unnamed file is deleted — so the trace of every failed
+   turn was removed by the next prune, which is the only trace a failure
+   investigation has. The reference has to come from the sink, which holds one
+   run per keeper turn whichever way that turn ended. *)
+let test_failed_turn_keeps_its_trace_through_retention () =
+  with_workspace @@ fun config ->
+  let meta = make_test_meta () in
+  let sink =
+    sink_or_fail "keeper_raw_trace_sink"
+      (Keeper_agent_run.For_testing.keeper_raw_trace_sink ~config ~meta)
+  in
+  let path = Agent_core.Raw_trace.file_path sink in
+  let active =
+    ok_or_fail "start_run"
+      (Agent_core.Raw_trace.start_run sink ~agent_name:meta.name
+         ~prompt:"turn that fails" ())
+  in
+  let (_ref : Agent_core.Raw_trace.run_ref) =
+    ok_or_fail "finish_run"
+      (Agent_core.Raw_trace.finish_run active ~final_text:None
+         ~stop_reason:None
+         ~error:(Some "Antigravity turn timed out after 600.000s"))
+  in
+  (* [turn_trace_ref] is [None] for every failed turn: [run_result] exists
+     only on the success branch. *)
+  (match
+     Keeper_agent_run.For_testing.raw_trace_reference_for_turn
+       ~turn_trace_ref:None ~sink:(Some sink)
+   with
+  | None -> Alcotest.fail "a failed turn must name the run its sink closed"
+  | Some r ->
+      Alcotest.(check string) "reference names this turn's trace file" path
+        r.Agent_core.Raw_trace.path);
+  (* [write_turn_record] records "completed"; retention reads the reference
+     alone, so the finish reason does not change which files survive. *)
+  write_turn_record config ~meta ~turn:1 ~raw_trace_path:path;
+  let summary = prune_or_fail config in
+  Alcotest.(check int) "the failed turn's trace is not a deletion candidate" 0
+    summary.removed;
+  Alcotest.(check bool) "the failed turn's trace survives retention" true
+    (Sys.file_exists path)
+
+(* Without a sink the turn ran untraced and there is no run to name. A
+   reference invented here would point at a file that does not exist. *)
+let test_untraced_turn_names_no_reference () =
+  Alcotest.(check bool) "untraced turn yields no reference" true
+    (Option.is_none
+       (Keeper_agent_run.For_testing.raw_trace_reference_for_turn
+          ~turn_trace_ref:None ~sink:None))
 
 let read_file path =
   let ic = open_in path in
@@ -646,6 +702,10 @@ let () =
             test_post_commit_cleanup_prunes_orphan_and_preserves_reference;
           Alcotest.test_case "traced turn yields result-level fields" `Quick
             test_traced_turn_yields_result_level_fields;
+          Alcotest.test_case "failed turn keeps its trace through retention"
+            `Quick test_failed_turn_keeps_its_trace_through_retention;
+          Alcotest.test_case "untraced turn names no reference" `Quick
+            test_untraced_turn_names_no_reference;
           Alcotest.test_case "dispatch passes ?raw_trace" `Quick
             test_keeper_dispatch_passes_raw_trace;
         ] );

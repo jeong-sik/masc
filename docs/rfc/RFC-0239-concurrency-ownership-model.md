@@ -7,7 +7,6 @@ updated: 2026-06-15
 author: vincent
 supersedes: []
 related: ["RFC-0059", "RFC-0225", "RFC-0237"]
-implementation_prs: []
 ---
 
 # RFC-0239 — Concurrency ownership model
@@ -37,7 +36,6 @@ the Discord-thread feature commits (`thread` keyword false positives) and the
 | `9a2bd58cd` | `lib/otel_dispatch_hook/otel_dispatch_hook.ml` + `lib/otel_spans/otel_spans.ml` override refs | `Atomic.t` ×3 |
 | `e21457975` | `lib/voice/voice_bridge.ml` health cache | `Atomic.t` record |
 | `d9c9c4d05` | `lib/mcp_server.ml` `workspace_config` (+ call-site reads across `lib/server/*`) | `Atomic.t` |
-| `6554d84cf` | `lib/board/board_moderation.ml` global store | `Eio.Mutex.t` |
 | `0e0755d94` | `lib/streamable_http.ml` `session.last_seen` | `Atomic.t` |
 | `220047b5a` | `lib/dashboard/dashboard_harness_health.ml` JSONL stores (`pre_compact_store`, `wake_payload_store`) | `Eio.Mutex.t` + `Atomic.t` |
 | `9ad99d0af` | `lib/server/lsp_message_router.ml` id counter + pending table | `Atomic.t` + table |
@@ -218,8 +216,8 @@ audited single-word atomics).
 ### §3.2 Option B — agent/subsystem-as-actor (message passing, extend RFC-0059)
 
 Adopt the idle RFC-0059 actor model: each piece of long-lived mutable
-control-plane state (keeper turn FSM bookkeeping, board moderation store, otel
-override registry, session table) becomes the private state of one actor loop
+control-plane state (keeper turn FSM bookkeeping, otel override registry,
+session table) becomes the private state of one actor loop
 fiber, mutated only by messages on a typed `Actor_mailbox`. No mutex, because no
 shared access — the loop fiber is the single writer.
 

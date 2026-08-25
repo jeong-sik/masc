@@ -11,12 +11,23 @@ val string_has_prefix : prefix:string -> string -> bool
 val tool_call_output_text : Yojson.Safe.t -> string option
 val parse_tool_call_output : Yojson.Safe.t -> Yojson.Safe.t option
 val claim_status_of_output : Yojson.Safe.t -> string
-val composite_claim_scope_absent :
+val composite_claim_attempt_absent :
   [> `Assoc of
        (string *
         [> `Bool of bool | `List of 'a list | `Null | `String of string ])
        list ]
-val composite_claim_scope_json :
+val claim_rows_per_keeper : int
+val claim_window_rows : int
+
+type claim_window = Server_dashboard_http_composite_claims.claim_window
+
+val read_claim_window : unit -> claim_window
+
+val latest_task_claim_row :
+  claim_window -> keeper_name:string -> Yojson.Safe.t option
+
+val composite_claim_attempt_json :
+  claim_window:claim_window ->
   keeper_name:string -> [> `Assoc of (string * Yojson.Safe.t) list ]
 val find_override_field_source :
   string -> Yojson.Safe.t -> Yojson.Safe.t option
@@ -25,6 +36,7 @@ val composite_config_drift_json :
   keeper_name:string -> [> `Assoc of (string * Yojson.Safe.t) list ]
 val composite_execution_receipt_json :
   config:Workspace.config ->
+  claim_window:claim_window ->
   keeper_name:string -> [> `Assoc of (string * Yojson.Safe.t) list ]
 val lower_string_opt : string option -> string option
 val string_opt_is_any : string option -> string list -> bool

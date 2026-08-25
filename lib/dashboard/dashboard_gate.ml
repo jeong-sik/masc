@@ -6,7 +6,7 @@
 
 (* Which exact-output lane serves Gate Auto Judge, read from the published
    runtime registry. The first slot is the model that judges; later slots are
-   OAS failover order. An unpublished or busy registry reports itself as a
+   AGENT_CORE failover order. An unpublished or busy registry reports itself as a
    closed unavailable variant instead of guessing (#26126). *)
 let judge_lane_json () =
   let lane_id = Hitl_summary_worker.lane_id in
@@ -47,7 +47,7 @@ let hitl_status_json ~base_path =
 (* The page bounds travel with the rows. Without them a client cannot tell an
    empty window from a store it never reached, or a complete history from the
    newest slice of one. *)
-let recent_resolved_page_json (history : Keeper_approval_queue.resolved_history) =
+let recent_resolved_page_json (history : Keeper_approval.Audit.resolved_history) =
   `Assoc
     [ "returned", `Int (List.length history.resolved_rows)
     ; "matched", `Int history.resolved_matched
@@ -72,22 +72,36 @@ let dashboard_json ~base_path ~limit ~window_minutes =
   (* NDT-OK: HTTP observation boundary; captured once for the pure projection,
      matching [Dashboard_gate_metrics.gate_tool_events_json]. *)
   let now_ts = Unix.gettimeofday () in
-  let resolved_history =
-    Keeper_approval_queue.list_recent_resolved
-      ~base_path
-      ~now_ts
-      ~limit
-      ~window_minutes
-      ()
+  let recent_resolved, recent_resolved_page, recent_resolved_state =
+    match
+      Keeper_approval.Audit.list_recent_resolved
+        ~base_path
+        ~now_ts
+        ~limit
+        ~window_minutes
+        ()
+    with
+    | Ok history ->
+      ( `List history.resolved_rows
+      , recent_resolved_page_json history
+      , `Assoc [ "state", `String "ready" ] )
+    | Error error ->
+      ( `Null
+      , `Null
+      , `Assoc
+          [ "state", `String "unavailable"
+          ; "stage", `String (Keeper_approval.Audit.read_stage_to_string error.stage)
+          ; "error", `String error.detail
+          ] )
   in
   let approval_rules, approval_rules_state =
-    match Keeper_approval_queue.list_rules_dashboard_json ~base_path () with
+    match Keeper_approval_queue_rules.list_rules_dashboard_json ~base_path () with
     | Ok json -> json, `Assoc [ "state", `String "ready" ]
     | Error error ->
       ( `List []
       , `Assoc
           [ "state", `String "unavailable"
-          ; "error", `String (Keeper_approval_queue.rule_store_error_to_string error)
+          ; "error", `String (Keeper_approval_queue_rules_types.rule_store_error_to_string error)
           ] )
   in
   `Assoc
@@ -97,8 +111,9 @@ let dashboard_json ~base_path ~limit ~window_minutes =
           "External effects use exact Always Allowed, Auto Judge, or nonblocking human HITL." )
     ; "approval_queue", approval_queue
     ; "approval_queue_state", approval_queue_state
-    ; "recent_resolved", `List resolved_history.resolved_rows
-    ; "recent_resolved_page", recent_resolved_page_json resolved_history
+    ; "recent_resolved", recent_resolved
+    ; "recent_resolved_page", recent_resolved_page
+    ; "recent_resolved_state", recent_resolved_state
     ; "approval_rules", approval_rules
     ; "approval_rules_state", approval_rules_state
     ; "hitl", hitl_status_json ~base_path

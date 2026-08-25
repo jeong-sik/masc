@@ -8,13 +8,6 @@ let normalize_path path =
 let playground_root_no_create ~(config : Workspace.config) ~(meta : keeper_meta) =
   Keeper_sandbox.host_root_abs_of_meta ~config meta
 
-let repos_root_of_playground_root playground_root =
-  Filename.concat playground_root "repos" |> normalize_path
-
-let repo_root_of_playground_root ~playground_root ~repo_name =
-  Filename.concat (repos_root_of_playground_root playground_root) repo_name
-  |> normalize_path
-
 let safe_repo_component s =
   s <> ""
   && s <> "."
@@ -31,20 +24,6 @@ let safe_repo_component s =
           || c = '_'
           || c = '.')
        s
-
-let candidate_repo_roots_no_create ~base_path ~keeper_id ~repository_id =
-  if not (safe_repo_component repository_id)
-  then []
-  else
-    [ Keeper_types_profile_sandbox.Local; Keeper_types_profile_sandbox.Docker ]
-    |> List.map (fun sandbox_profile ->
-      let playground_root =
-        Filename.concat
-          base_path
-          (Keeper_sandbox.host_root_rel_of_profile sandbox_profile keeper_id)
-      in
-      repo_root_of_playground_root ~playground_root ~repo_name:repository_id)
-    |> List.sort_uniq String.compare
 
 type execution_location_scope =
   | Playground_root
@@ -124,8 +103,6 @@ let host_execution_location_json
     ; "scope", `String (string_of_execution_location_scope scope)
     ; "playground_root", `String playground
     ; "relative_cwd", relative_cwd
-    ; "relative_path_base", `String cwd
-    ; "argv_relative_paths_resolve_against_cwd", `Bool true
     ; "repo_name", Json_util.string_opt_to_json repo_name
     ; "repo_root", Json_util.string_opt_to_json repo_root
     ]
@@ -164,7 +141,7 @@ let execution_location_json ~config ~meta ~args ~cwd =
         else `Null
     in
     let path_fields =
-      [ "cwd"; "playground_root"; "relative_path_base"; "repo_root" ]
+      [ "cwd"; "playground_root"; "repo_root" ]
     in
     let rec project = function
       | `Assoc fields ->

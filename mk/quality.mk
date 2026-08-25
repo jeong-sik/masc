@@ -1,8 +1,4 @@
-.PHONY: diagnostics-oas-pin diagnostics-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard diagnostics-oas-drift dashboard-drift-check dashboard-drift-regen fmt fmt-check health ocaml-health check-memory-leak check-silent check-ssot check-variants ci
-
-# Fast local-only diagnostics for OAS/agent_sdk pin drift in the current switch.
-diagnostics-oas-pin:
-	bash scripts/check-oas-pin.sh --local-only
+.PHONY: diagnostics-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard dashboard-drift-check dashboard-drift-regen fmt fmt-check health ocaml-health check-memory-leak check-silent check-ssot check-variants ci
 
 # Disk hygiene snapshot for TLC artefacts, Dune cache drift, isolated builds, worktree fan-out.
 diagnostics-disk-hygiene:
@@ -15,13 +11,6 @@ fix-disk-hygiene:
 # Hard reset path for cache drift: also reset ~/.cache/dune and remove stray _build_* dirs.
 fix-disk-hygiene-hard:
 	bash scripts/disk-hygiene.sh --fix --reset-dune-cache --clean-extra-build-dirs
-
-# Check OAS API surface (Event_bus variants, HttpError variants, Metrics fields)
-# against scripts/oas-api-surface.json fingerprint. Catches upstream variant/field
-# additions before they surface as scattered non-exhaustive warnings in consumer
-# modules. Regenerate with: bash scripts/oas-drift-check.sh --regenerate
-diagnostics-oas-drift:
-	bash scripts/oas-drift-check.sh
 
 # Dashboard styling-drift ratchet gate — fail if forbidden Tailwind patterns
 # (bg-white/N, border-white/N, rounded-[Npx], text-zinc-*, text-[9px], ...)
@@ -48,7 +37,7 @@ health:
 	@echo "Health snapshot: .health/health-snapshot.json"
 
 # Warn-only OCaml north-star snapshot. This reports risk-pattern counts without
-# changing CI policy or the public OAS/MCP/task semantics.
+# changing CI policy or the public AGENT_CORE/MCP/task semantics.
 ocaml-health:
 	@mkdir -p .health
 	bash scripts/ocaml-north-star-health.sh --json-out .health/ocaml-north-star-health.json

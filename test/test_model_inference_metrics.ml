@@ -98,24 +98,12 @@ let recent_hour_bucket_timestamp () =
 let runtime_lane_label_for_test model_key =
   "runtime_lane_" ^ String.sub (Digest.to_hex (Digest.string model_key)) 0 12
 
-let contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else
-    let rec loop i =
-      if i + needle_len > haystack_len then false
-      else if String.sub haystack i needle_len = needle then true
-      else loop (i + 1)
-    in
-    loop 0
-
 let success_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=50)
     ?(cache_read_tokens=0) ?(cache_creation_tokens=0)
     ?(latency_ms=500) ?prompt_per_second ?peak_memory_gb
     ?provider ?provider_kind ?usage_trust ?(usage_anomaly_reasons=[])
     ?(cost_usd=0.01) ?(tools_used=[]) () =
-  let trace_id, keeper_turn_id, oas_turn_ordinal =
+  let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ?identity_seed ~model ~ts ()
   in
   let extra_telemetry_fields =
@@ -157,7 +145,7 @@ let success_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=
       ("model_used", `String model);
       ("outcome", `String "success");
       ("turn_count", `Int 1);
-      ("oas_turn_ordinal", `Int oas_turn_ordinal);
+      ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
       ("usage_reported", `Bool true);
       ("telemetry_reported", `Bool true);
       ("tokens_per_second", `Float (Float.of_int output_tokens /. (Float.of_int latency_ms /. 1000.0)));
@@ -167,7 +155,6 @@ let success_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=
       ("cache_read_tokens", `Int cache_read_tokens);
       ("cache_creation_tokens", `Int cache_creation_tokens);
       ("reasoning_tokens", `Int 0);
-      ("fallback_applied", `Bool false);
       ("cost_usd", `Float cost_usd);
     ] @ extra_telemetry_fields));
   ]
@@ -175,7 +162,7 @@ let success_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=
 let cost_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=50)
     ?(latency_ms=500) ?tokens_per_second ?provider
     ?(provider_kind="ollama") () =
-  let trace_id, keeper_turn_id, oas_turn_ordinal =
+  let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ?identity_seed ~model ~ts ()
   in
   let tok_fields =
@@ -201,7 +188,7 @@ let cost_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=50)
     ("source", `String "auto_trajectory");
     ("trace_id", `String trace_id);
     ("keeper_turn_id", `Int keeper_turn_id);
-    ("oas_turn_ordinal", `Int oas_turn_ordinal);
+    ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
     ("request_latency_ms", `Int latency_ms);
   ] @ provider_fields @ tok_fields)
 
@@ -216,7 +203,6 @@ let error_entry ~runtime_id ~ts ?provider () =
         | Some v -> `String v
         | None -> `Null);
       ("runtime_id", `String runtime_id);
-      ("candidate_models", `List [`String "claude"; `String "model-b"]);
       ("error_category", `String "timeout");
       ("outcome", `String "error");
       ("usage_reported", `Bool false);
@@ -227,11 +213,11 @@ let error_entry ~runtime_id ~ts ?provider () =
 let success_entry_without_usage ~model ~ts ?provider
     ?(telemetry_reported = false)
     ?(coverage_reason = "missing_usage_and_inference")
-    ?(coverage_stage = "oas")
+    ?(coverage_stage = "agent_core")
     ?turn_lane
     ?stop_reason
     () =
-  let trace_id, keeper_turn_id, oas_turn_ordinal =
+  let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ~model ~ts ()
   in
   let extra_fields =
@@ -264,13 +250,12 @@ let success_entry_without_usage ~model ~ts ?provider
       ("model_used", `String model);
       ("outcome", `String "success");
       ("turn_count", `Int 1);
-      ("oas_turn_ordinal", `Int oas_turn_ordinal);
-      ("fallback_applied", `Bool false);
+      ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
     ] @ extra_fields @ diag_fields));
   ]
 
 let success_entry_without_model ~runtime_id ~ts ?(tool_count = 1) () =
-  let trace_id, keeper_turn_id, oas_turn_ordinal =
+  let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ~model:runtime_id ~ts ()
   in
   `Assoc [
@@ -286,25 +271,24 @@ let success_entry_without_model ~runtime_id ~ts ?(tool_count = 1) () =
         ("runtime_id", `String runtime_id);
         ("outcome", `String "success");
         ("turn_count", `Int 1);
-        ("oas_turn_ordinal", `Int oas_turn_ordinal);
+        ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
         ("stop_reason", `String "completed");
         ("usage_reported", `Bool false);
         ("telemetry_reported", `Bool false);
-        ("coverage_stage", `String "oas");
+        ("coverage_stage", `String "agent_core");
         ("coverage_reason", `String "missing_usage_and_inference");
-        ("fallback_applied", `Bool false);
       ] );
   ]
 
 let sparse_provider_context_entry ~outcome ~runtime_id ~ts () =
-  let trace_id, keeper_turn_id, oas_turn_ordinal =
+  let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ~model:runtime_id ~ts ()
   in
   let identity_fields =
     if String.equal outcome "success"
     then
       [ "turn_count", `Int 1
-      ; "oas_turn_ordinal", `Int oas_turn_ordinal
+      ; "agent_core_turn_ordinal", `Int agent_core_turn_ordinal
       ]
     else []
   in
@@ -319,7 +303,6 @@ let sparse_provider_context_entry ~outcome ~runtime_id ~ts () =
       `Assoc [
         ("runtime_id", `String runtime_id);
         ("selected_model", `Null);
-        ("candidate_models", `List []);
       ] );
     ( "telemetry",
       `Assoc ([
@@ -329,13 +312,12 @@ let sparse_provider_context_entry ~outcome ~runtime_id ~ts () =
         ("usage_reported", `Bool false);
         ("telemetry_reported", `Bool false);
         ( "coverage_stage",
-          `String (if String.equal outcome "error" then "unknown" else "oas") );
+          `String (if String.equal outcome "error" then "unknown" else "agent_core") );
         ( "coverage_reason",
           `String
             (if String.equal outcome "error"
              then "error_turn"
              else "missing_usage_and_inference") );
-        ("fallback_applied", `Bool false);
       ] @ identity_fields) );
   ]
 
@@ -350,7 +332,7 @@ let check_hw_decode_field ~name json expected =
 
 let test_hw_decode_parser_reads_current_field () =
   let ts = now_unix () in
-  let trace_id, keeper_turn_id, oas_turn_ordinal =
+  let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ~model:"model" ~ts ()
   in
   let row key =
@@ -365,10 +347,9 @@ let test_hw_decode_parser_reads_current_field () =
             [ "model_used", `String "model"
             ; "outcome", `String "success"
             ; "turn_count", `Int 1
-            ; "oas_turn_ordinal", `Int oas_turn_ordinal
+            ; "agent_core_turn_ordinal", `Int agent_core_turn_ordinal
             ; "usage_reported", `Bool false
             ; "telemetry_reported", `Bool true
-            ; "fallback_applied", `Bool false
             ; key, `Float 42.0
             ] )
       ]
@@ -476,8 +457,7 @@ let test_provider_kind_is_not_reconstructed () =
     check (option string) "provider not reconstructed" None s.provider;
     let recent = List.hd s.recent_entries in
     check (option string) "recent provider not reconstructed" None recent.re_provider;
-    let rollup = M.provider_rollup agg in
-    check int "provider rollup stays empty" 0 (List.length rollup))
+    ())
 
 let test_usage_labels_never_suppress_raw_aggregates () =
   let base = test_dir () in
@@ -544,9 +524,9 @@ let test_error_turns_counted () =
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     check int "total_entries" 2 agg.total_entries;
     check int "total_error_entries" 1 agg.total_error_entries;
-    (* Error attributed to first candidate "claude" *)
+    (* Error attributed to the dispatched runtime_id *)
     let error_model = List.find_opt (fun (s : M.model_stats) ->
-      s.model_id = "claude") agg.models in
+      s.model_id = "local_only (runtime)") agg.models in
     check bool "error model found" true (Option.is_some error_model);
     let em = Option.get error_model in
     check (option string) "error provider unresolved" None em.provider;
@@ -777,7 +757,7 @@ let test_coverage_diagnostics_survive_aggregation () =
       (Some "missing_usage_and_inference")
       s.primary_coverage_reason;
     check (option string) "primary coverage stage"
-      (Some "oas")
+      (Some "agent_core")
       s.primary_coverage_stage;
     check int "coverage reason counts" 1 (List.length s.coverage_reason_counts);
     let recent = List.hd s.recent_entries in
@@ -796,7 +776,7 @@ let test_coverage_diagnostics_survive_aggregation () =
       (Some "missing_usage_and_inference")
       recent.re_coverage_reason;
     check (option string) "recent coverage stage"
-      (Some "oas")
+      (Some "agent_core")
       recent.re_coverage_stage;
     let json = M.to_json agg in
     let open Yojson.Safe.Util in
@@ -811,7 +791,7 @@ let test_coverage_diagnostics_survive_aggregation () =
       "missing_usage_and_inference"
       (m |> member "primary_coverage_reason" |> to_string);
     check string "json primary coverage stage"
-      "oas"
+      "agent_core"
       (m |> member "primary_coverage_stage" |> to_string);
     let reason_counts = m |> member "coverage_reason_counts" |> to_list in
     check int "json reason count length" 1 (List.length reason_counts);
@@ -821,7 +801,7 @@ let test_coverage_diagnostics_survive_aggregation () =
     let recent_json = m |> member "recent_entries" |> to_list |> List.hd in
     check string "recent json outcome" "success"
       (recent_json |> member "outcome" |> to_string);
-    check string "recent json stage" "oas"
+    check string "recent json stage" "agent_core"
       (recent_json |> member "coverage_stage" |> to_string))
 
 let test_success_without_model_uses_runtime_attribution () =
@@ -1064,7 +1044,7 @@ let test_cost_read_failure_is_not_empty_success () =
       Yojson.Safe.Util.(diagnostics |> member "state" |> to_string);
     let detail = Yojson.Safe.Util.(diagnostics |> member "detail" |> to_string) in
     check bool "typed read detail is surfaced" true
-      (contains_substring detail costs_dir))
+      (String_util.contains_substring detail costs_dir))
 ;;
 
 let test_cost_latency_json_composes_axes_and_percentiles () =
@@ -1172,7 +1152,7 @@ let test_cost_latency_json_preserves_missing_latency_as_null () =
     let path = make_keeper_dir base "cost_latency_missing" in
     let ts = now_unix () in
     let row_ts = ts -. 10.0 in
-    let trace_id, keeper_turn_id, oas_turn_ordinal =
+    let trace_id, keeper_turn_id, agent_core_turn_ordinal =
       inference_identity_values ~model:"unlatenced-model" ~ts:row_ts ()
     in
     write_decisions path [
@@ -1186,7 +1166,7 @@ let test_cost_latency_json_preserves_missing_latency_as_null () =
           ("model_used", `String "unlatenced-model");
           ("outcome", `String "success");
           ("turn_count", `Int 1);
-          ("oas_turn_ordinal", `Int oas_turn_ordinal);
+          ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
           ("usage_reported", `Bool true);
           ("telemetry_reported", `Bool false);
           ("provider", `String "local");
@@ -1213,7 +1193,7 @@ let test_cost_latency_json_preserves_missing_latency_as_null () =
 (* ── thinking_fraction tests ─────────────────────── *)
 
 let success_entry_with_thinking ~model ~ts ~thinking_enabled () =
-  let trace_id, keeper_turn_id, oas_turn_ordinal =
+  let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ~model ~ts ()
   in
   let thinking_field = match thinking_enabled with
@@ -1230,7 +1210,7 @@ let success_entry_with_thinking ~model ~ts ~thinking_enabled () =
       ("model_used", `String model);
       ("outcome", `String "success");
       ("turn_count", `Int 1);
-      ("oas_turn_ordinal", `Int oas_turn_ordinal);
+      ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
       ("usage_reported", `Bool true);
       ("telemetry_reported", `Bool true);
       ("tokens_per_second", `Float 10.0);
@@ -1239,7 +1219,6 @@ let success_entry_with_thinking ~model ~ts ~thinking_enabled () =
       ("output_tokens", `Int 50);
       ("cache_read_tokens", `Int 0);
       ("reasoning_tokens", `Int 0);
-      ("fallback_applied", `Bool false);
       ("cost_usd", `Float 0.01);
     ] @ thinking_field));
   ]
@@ -1311,7 +1290,7 @@ let test_thinking_fraction_json_serialization () =
 (* ── Bucket tests ───────────────────────────────── *)
 
 let success_entry_with_cache ~model ~ts ?(input_tokens=100) ~cache_read () =
-  let trace_id, keeper_turn_id, oas_turn_ordinal =
+  let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     inference_identity_values ~model ~ts ()
   in
   `Assoc [
@@ -1324,7 +1303,7 @@ let success_entry_with_cache ~model ~ts ?(input_tokens=100) ~cache_read () =
       ("model_used", `String model);
       ("outcome", `String "success");
       ("turn_count", `Int 1);
-      ("oas_turn_ordinal", `Int oas_turn_ordinal);
+      ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
       ("usage_reported", `Bool true);
       ("telemetry_reported", `Bool true);
       ("tokens_per_second", `Float 10.0);
@@ -1333,7 +1312,6 @@ let success_entry_with_cache ~model ~ts ?(input_tokens=100) ~cache_read () =
       ("output_tokens", `Int 50);
       ("cache_read_tokens", `Int cache_read);
       ("reasoning_tokens", `Int 0);
-      ("fallback_applied", `Bool false);
       ("cost_usd", `Float 0.01);
     ]);
   ]
@@ -1424,13 +1402,11 @@ let test_buckets_with_compute () =
     let b = List.hd m.buckets in
     check int "bucket entry_count" 1 b.b_entry_count)
 
-(* ── provider_rollup ─────────────────────────────── *)
+(* ── Hand-built aggregate fixtures ────────────── *)
 
-(* We build aggregates by hand instead of going through [M.compute] so
-   these tests verify only the rollup math (weighted means, entry_count
-   sums, model_count grouping) without depending on the jsonl parser.
-   That keeps the assertions robust to future changes in decisions.jsonl
-   shape. *)
+(* Built by hand instead of going through [M.compute] so the assertions
+   below do not depend on the jsonl parser, and stay robust to future
+   changes in the decisions.jsonl shape. *)
 
 let zero_model_stats (model_id : string) ~provider ~entry_count
     : M.model_stats =
@@ -1465,7 +1441,6 @@ let zero_model_stats (model_id : string) ~provider ~entry_count
     primary_coverage_stage = None;
     primary_coverage_reason = None;
     coverage_reason_counts = [];
-    fallback_count = 0;
     success_count = entry_count;
     error_count = 0;
     total_cost_usd = None;
@@ -1482,127 +1457,6 @@ let successful_cost_read : M.cost_read_result =
     ; schema_violation_rows = 0
     ; identity_conflict_rows = 0
     }
-
-let test_provider_rollup_empty_aggregate () =
-  let agg : M.aggregate =
-    { window_minutes = 30
-    ; bucket_minutes = 0
-    ; models = []
-    ; total_entries = 0
-    ; total_error_entries = 0
-    ; latency_buckets = []
-    ; cost_read = successful_cost_read
-    }
-  in
-  check int "empty models gives empty rollup" 0
-    (List.length (M.provider_rollup agg))
-
-let test_provider_rollup_skips_unknown_provider () =
-  let m1 = zero_model_stats "glm-coding:auto" ~provider:(Some "glm-coding")
-             ~entry_count:5 in
-  let m2 = zero_model_stats "bare-model" ~provider:None ~entry_count:3 in
-  let agg : M.aggregate =
-    { window_minutes = 30; bucket_minutes = 0; models = [m1; m2]
-    ; total_entries = 8; total_error_entries = 0; latency_buckets = []
-    ; cost_read = successful_cost_read }
-  in
-  let rollup = M.provider_rollup agg in
-  check int "only provider=Some survives" 1 (List.length rollup);
-  let stats = List.hd rollup in
-  check string "provider" "glm-coding" stats.ps_provider;
-  check int "entry_count" 5 stats.ps_entry_count
-
-let test_provider_rollup_weighted_mean () =
-  (* Two models on the same provider with different entry_counts should
-     produce an entry-weighted mean, not a simple average:
-     (100 * 20 + 50 * 80) / (20 + 80) = (2000 + 4000) / 100 = 60.0 *)
-  let m1 =
-    { (zero_model_stats "ollama:qwen3.6" ~provider:(Some "ollama")
-                         ~entry_count:20)
-      with avg_tok_per_sec = Some 100.0 }
-  in
-  let m2 =
-    { (zero_model_stats "ollama:qwen3.5" ~provider:(Some "ollama")
-                         ~entry_count:80)
-      with avg_tok_per_sec = Some 50.0 }
-  in
-  let agg : M.aggregate =
-    { window_minutes = 30; bucket_minutes = 0; models = [m1; m2]
-    ; total_entries = 100; total_error_entries = 0; latency_buckets = []
-    ; cost_read = successful_cost_read }
-  in
-  let rollup = M.provider_rollup agg in
-  let stats = List.hd rollup in
-  check int "merged entry_count" 100 stats.ps_entry_count;
-  check int "model_count" 2 stats.ps_model_count;
-  (match stats.ps_avg_tok_per_sec with
-   | Some v ->
-     (* Alcotest doesn't export float approx eq by default; allow 0.01. *)
-     if Float.abs (v -. 60.0) > 0.01 then
-       failf "weighted mean expected ~60.0 but got %f" v
-   | None -> fail "weighted mean should be Some")
-
-let test_provider_rollup_all_none_yields_none () =
-  (* Two models with every perf field None — the rollup must not
-     invent zeros where upstream reported nothing. *)
-  let m1 = zero_model_stats "x:1" ~provider:(Some "x") ~entry_count:5 in
-  let m2 = zero_model_stats "x:2" ~provider:(Some "x") ~entry_count:5 in
-  let agg : M.aggregate =
-    { window_minutes = 30; bucket_minutes = 0; models = [m1; m2]
-    ; total_entries = 10; total_error_entries = 0; latency_buckets = []
-    ; cost_read = successful_cost_read }
-  in
-  let rollup = M.provider_rollup agg in
-  let stats = List.hd rollup in
-  check (option (float 0.0001)) "avg_tok_per_sec stays None"
-    None stats.ps_avg_tok_per_sec;
-  check (option (float 0.0001)) "avg_prompt_tok_per_sec stays None"
-    None stats.ps_avg_prompt_tok_per_sec;
-  check (option (float 0.0001)) "p95_latency_ms stays None"
-    None stats.ps_p95_latency_ms
-
-let test_provider_rollup_sort_by_entry_count_desc () =
-  let a = zero_model_stats "a:1" ~provider:(Some "a") ~entry_count:3 in
-  let b = zero_model_stats "b:1" ~provider:(Some "b") ~entry_count:10 in
-  let c = zero_model_stats "c:1" ~provider:(Some "c") ~entry_count:7 in
-  let agg : M.aggregate =
-    { window_minutes = 30; bucket_minutes = 0; models = [a; b; c]
-    ; total_entries = 20; total_error_entries = 0; latency_buckets = []
-    ; cost_read = successful_cost_read }
-  in
-  let rollup = M.provider_rollup agg in
-  let names = List.map (fun s -> s.M.ps_provider) rollup in
-  check (list string) "sorted by entry_count desc" ["b"; "c"; "a"] names
-
-let test_provider_rollup_json_shape () =
-  let m =
-    { (zero_model_stats "kimi_cli:kimi" ~provider:(Some "kimi_cli")
-                         ~entry_count:42)
-      with avg_tok_per_sec = Some 25.0
-         ; prompt_avg_tok_per_sec = Some 180.0
-         ; p95_latency_ms = Some 3200.0 }
-  in
-  let agg : M.aggregate =
-    { window_minutes = 30; bucket_minutes = 0; models = [m]
-    ; total_entries = 42; total_error_entries = 0; latency_buckets = []
-    ; cost_read = successful_cost_read }
-  in
-  let json = M.provider_stats_to_json (List.hd (M.provider_rollup agg)) in
-  match json with
-  | `Assoc fields ->
-    check string "provider redacted"
-      (match List.assoc "provider" fields with `String s -> s | _ -> "!")
-      "runtime";
-    check int "model_count redacted"
-      0
-      (match List.assoc "model_count" fields with `Int n -> n | _ -> -1);
-    check int "request_count surfaces entry_count"
-      42
-      (match List.assoc "entry_count" fields with `Int n -> n | _ -> -1);
-    (match List.assoc "avg_prompt_tok_per_sec" fields with
-     | `Float f when Float.abs (f -. 180.0) < 0.01 -> ()
-     | _ -> fail "avg_prompt_tok_per_sec should be Float 180.0")
-  | _ -> fail "provider_stats_to_json should return an Assoc"
 
 let test_prompt_feedback_empty_aggregate () =
   let agg : M.aggregate =
@@ -1645,11 +1499,11 @@ let test_prompt_feedback_redacts_provider_model_identity () =
     }
   in
   let text = M.render_keeper_prompt_feedback agg in
-  check bool "contains redacted lane label" true (contains_substring text lane);
-  check bool "contains total turns" true (contains_substring text "total_turns=10");
-  check bool "contains error rate" true (contains_substring text "error_rate=30.0%");
-  check bool "does not expose provider" false (contains_substring text "openrouter");
-  check bool "does not expose raw model" false (contains_substring text "secret-model")
+  check bool "contains redacted lane label" true (String_util.contains_substring text lane);
+  check bool "contains total turns" true (String_util.contains_substring text "total_turns=10");
+  check bool "contains error rate" true (String_util.contains_substring text "error_rate=30.0%");
+  check bool "does not expose provider" false (String_util.contains_substring text "openrouter");
+  check bool "does not expose raw model" false (String_util.contains_substring text "secret-model")
 
 let test_prompt_feedback_is_cost_independent () =
   let render total_cost_usd =
@@ -1677,7 +1531,7 @@ let test_prompt_feedback_is_cost_independent () =
   List.iter
     (fun forbidden ->
        check bool ("planning feedback excludes " ^ forbidden) false
-         (contains_substring baseline forbidden))
+         (String_util.contains_substring baseline forbidden))
     [ "cost="; "cost_usd"; "$" ]
 
 let test_usage_signal_uses_tokens_not_cost () =
@@ -1700,7 +1554,6 @@ let test_usage_signal_uses_tokens_not_cost () =
     ; cache_read_tokens = None
     ; cache_creation_tokens = None
     ; reasoning_tokens = None
-    ; fallback_applied = false
     ; cost_usd = Some 12.34
     ; tool_call_count = 0
     ; tools_used = []
@@ -1788,20 +1641,6 @@ let () =
       test_case "sparse entries → distinct buckets" `Quick test_buckets_sparse;
       test_case "cache_hit_ratio zero denom" `Quick test_buckets_cache_hit_ratio_zero_denom;
       test_case "compute_with_buckets integration" `Quick test_buckets_with_compute;
-    ];
-    "provider_rollup", [
-      test_case "empty aggregate gives empty rollup" `Quick
-        test_provider_rollup_empty_aggregate;
-      test_case "skips models with provider=None" `Quick
-        test_provider_rollup_skips_unknown_provider;
-      test_case "entry-weighted mean across models" `Quick
-        test_provider_rollup_weighted_mean;
-      test_case "all-None perf fields preserve None in rollup" `Quick
-        test_provider_rollup_all_none_yields_none;
-      test_case "sorted by entry_count descending" `Quick
-        test_provider_rollup_sort_by_entry_count_desc;
-      test_case "provider_stats_to_json shape" `Quick
-        test_provider_rollup_json_shape;
     ];
     "prompt_feedback", [
       test_case "empty aggregate renders empty" `Quick

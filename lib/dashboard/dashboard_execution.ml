@@ -71,7 +71,7 @@ let workspace_status_json (config : Workspace.config) : Yojson.Safe.t =
     ; "project", `String project
     ; "tempo_interval_s", `Float tempo.current_interval_s
     ; "paused", `Bool paused
-    ; "version", `String Version.version
+    ; "version", `String Runtime_build_version.current
     ]
 ;;
 
@@ -288,8 +288,8 @@ let enrich_keeper_with_diagnostic ~(config : Workspace.config) (keeper_json : Yo
                | Some diagnostic -> diagnostic
                | None ->
                  Keeper_status_runtime.keeper_diagnostic_json
+                   ~config
                    ~meta
-                   ~agent_status:(Option.value ~default:`Null (Json_util.assoc_member_opt "agent" keeper_json))
                    ~keepalive_running
                    ~history_items:[]
                    ~now_ts
@@ -440,7 +440,7 @@ let keeper_queue_last_seen keeper trust =
   latest_iso_timestamp
     [ Json_util.assoc_string_opt "ts" latest_causal
     ; Json_util.assoc_string_opt "observed_at" latest_causal
-    ; Json_util.assoc_string_opt "last_autonomous_action_at" keeper
+    ; Json_util.assoc_string_opt "tool_audit_at" keeper
     ; Json_util.assoc_string_opt "last_heartbeat" keeper
     ; Json_util.assoc_string_opt "updated_at" keeper
     ; Json_util.assoc_string_opt "created_at" keeper
@@ -547,9 +547,9 @@ let task_completed_at (task : Masc_domain.task) =
 ;;
 
 let task_execution_links_json (task : Masc_domain.task) =
-  match task.contract with
-  | Some contract -> Masc_domain.task_execution_links_to_yojson contract.links
-  | None -> `Null
+  match task.execution_links with
+  | { operation_id = None; session_id = None } -> `Null
+  | links -> Masc_domain.task_execution_links_to_yojson links
 ;;
 
 (* RFC-0267 Phase 1: project the registry's canonical goal_id onto the wire.
@@ -632,7 +632,6 @@ let message_json (message : Masc_domain.message) =
     ; "timestamp", `String message.timestamp
     ; "trace_context", Json_util.string_opt_to_json message.trace_context
     ; "expires_at", Json_util.float_opt_to_json message.expires_at
-    ; "relevance", `String message.relevance
     ; "seq", `Int message.seq
     ]
 ;;
@@ -812,8 +811,6 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
             [ "surface", `String "execution"
             ; "workspace_root", `String config.base_path
             ; "workspace_path", `String config.workspace_path
-            ; "persistence_sanitized_count", `Int utf8_repair.repaired_reads
-            ; "persistence_sanitized_bytes", `Int utf8_repair.repaired_bytes
             ; ( "persistence_sanitized_paths_sample"
               , `List (List.map (fun path -> `String path) utf8_repair.path_samples) )
             ] )
@@ -830,7 +827,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
         )
       ; "agents", agents_json ~keepers ~agents
       ; (* pipeline_stage is now included in the snapshot keepers_json,
-             so no redundant read_meta + parse_agent_status needed here. *)
+             so no redundant read_meta is needed here. *)
         "keepers", `List keepers
       ]
     in
@@ -856,7 +853,6 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       ; ( "task_counts"
         , `Assoc
             [ "active", `Int (List.length active_tasks)
-            ; "done_recent", `Int (List.length recent_done)
             ; "total", `Int (List.length tasks)
             ; "shown", `Int (List.length all_visible)
             ] )

@@ -18,38 +18,18 @@ describe('normalizeFusionPanelReason', () => {
     expect(normalizeFusionPanelReason('gpt-5', '')).toBeUndefined()
   })
 
-  it('decodes OCaml Provider_error literals', () => {
-    expect(
-      normalizeFusionPanelReason('gpt-5', 'Fusion_types.Provider_error "quota exceeded"'),
-    ).toBe('quota exceeded')
-  })
-
   it('re-attributions Provider unknown errors to the real model id', () => {
+    // fusion_sink writes panel_failure_text prose here, not OCaml constructor
+    // syntax; only the unknown-provider rewrite is left to do.
     expect(
-      normalizeFusionPanelReason(
-        'gpt-5',
-        "Fusion_types.Provider_error \"Provider 'unknown': rate limit\"",
-      ),
+      normalizeFusionPanelReason('gpt-5', "Provider 'unknown': rate limit"),
     ).toBe("Provider 'gpt-5': rate limit")
   })
 
-  it('normalizes Timeout and Empty_response constructors', () => {
-    expect(normalizeFusionPanelReason('gpt-5', 'Fusion_types.Timeout')).toBe('timeout')
-    expect(normalizeFusionPanelReason('gpt-5', '( Fusion_types.Empty_response )')).toBe(
-      'empty response',
-    )
+  it('leaves the prose alone when the provider is already named', () => {
     expect(
-      normalizeFusionPanelReason(
-        'gpt-5',
-        'Fusion_types.Empty_response "empty response (stop_reason=max_tokens)"',
-      ),
-    ).toBe('empty response (stop_reason=max_tokens)')
-  })
-
-  it('normalizes Invalid_max_output_tokens without provider attribution', () => {
-    expect(
-      normalizeFusionPanelReason('gpt-5', '( Fusion_types.Invalid_max_output_tokens 0 )'),
-    ).toBe('invalid max_output_tokens 0')
+      normalizeFusionPanelReason('gpt-5', "Provider 'claude': rate limit"),
+    ).toBe("Provider 'claude': rate limit")
   })
 
   it('passes through plain reasons', () => {
@@ -97,7 +77,7 @@ describe('normalizeFusionPanel', () => {
         model: 'gpt-5',
         status: 'answered',
         answer: 'canary',
-        reason_detail: 'Fusion_types.Provider_error "quota"',
+        reason_detail: 'quota',
         reason_code: 'provider_error',
         input_tokens: 100,
         output_tokens: '200',

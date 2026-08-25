@@ -77,8 +77,7 @@ const STATUS_CHIP_TONES: ReadonlySet<string> = new Set([
  *
  *   1. Design-system / backend FSM names from the Anyang Sleepers
  *      spec: running, compacting, handing_off, draining, failing,
- *      overflowed, restarting, paused, stopped, crashed, dead,
- *      offline.
+ *      restarting, paused, stopped, crashed, dead, offline.
  *
  *   2. Dashboard-layer names defined in `types/core.ts#KeeperLifecycleState`
  *      and the live agent `status` union: active, preparing,
@@ -105,9 +104,8 @@ export function keeperStateTone(state: string): StatusChipTone {
     case 'preparing':
     case 'listening':
       return 'info'
-    // warn — degraded but not yet dead
+    // warn — degraded but not crashed
     case 'failing':
-    case 'overflowed':
     case 'restarting':
     case 'busy':
       return 'warn'
@@ -116,7 +114,6 @@ export function keeperStateTone(state: string): StatusChipTone {
       return 'paused'
     // error — crash / lost
     case 'crashed':
-    case 'dead':
       return 'bad'
     // inactive — offline / stopped / never started
     case 'stopped':

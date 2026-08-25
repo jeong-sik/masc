@@ -69,9 +69,29 @@ describe('refreshNamespaceTruth', () => {
     expect(mergedBuild?.build).toEqual({
       release_version: '2.148.0',
       commit: '2897da06',
+      commit_source: null,
+      binary_commit: null,
+      binary_commit_source: null,
+      repo_head_commit: null,
+      repo_head_commit_source: null,
       started_at: '2026-03-25T08:05:54Z',
       uptime_seconds: 588,
     })
   }, 20000)
+
+  it('clears a previous snapshot when the authoritative read fails', async () => {
+    apiMocks.fetchDashboardNamespaceTruth.mockRejectedValue(new Error('store unreadable'))
+    const namespaceTruthStore = await import('./namespace-truth-store')
+
+    namespaceTruthStore.namespaceTruth.value = {
+      generated_at: '2026-08-08T00:00:00Z',
+      root: { status: { project: 'default' } },
+    } as never
+
+    await namespaceTruthStore.refreshNamespaceTruth({ force: true })
+
+    expect(namespaceTruthStore.namespaceTruth.value).toBeNull()
+    expect(namespaceTruthStore.namespaceTruthError.value).toBe('store unreadable')
+  })
 
 })

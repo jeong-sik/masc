@@ -1,15 +1,12 @@
 type waiting_source =
   | Event_queue_pending
-  | Chat_queue_pending
-  | Chat_queue_inflight
-  | Chat_queue_recovery_required
-  | Chat_queue_persistence_blocked
+  | Chat_operation_queued
+  | Chat_operation_running
   | Hitl_pending
   | External_attention
   | Fusion_running
   | Schedule_waiting
-  | Turn_admission_waiting
-  | Turn_admission_shutdown
+  | Owner_shutdown
   | Operator_pending_confirm
   | Read_error
 
@@ -22,7 +19,7 @@ type keeper_state =
 type wake_producer =
   | Board_dispatch
   | Board_attention_judge
-  | Keeper_chat_queue_store
+  | Keeper_owner_actor
   | Keeper_supervisor
   | Fusion_sink
   | Connector_attention_hook
@@ -30,19 +27,23 @@ type wake_producer =
   | External_attention_store
   | Schedule_store
   | Schedule_runner
-  | Keeper_turn_admission
   | Operator_pending_confirm_store
-  | Keeper_goal_assignment
-  | Keeper_goal_reconciliation
   | Completion_authority
   | Keeper_task_cancellation
   | Keeper_compaction_request
+  | Keeper_workspace_message
+  | Keeper_delegate
   | Read_model_reader
 
 type waiting_row =
   { keeper_name : string option
   ; source : waiting_source
   ; waiting_on : string
+  ; what : string
+      (** Operator sentence for the row, derived from the row's typed fields.
+          The raw vocabulary ([waiting_on], [wake_producer], [next_action],
+          [detail]) stays for the technical disclosure; this is what the
+          queue reads as by default. *)
   ; wake_producer : wake_producer
   ; since : float option
   ; due_at : float option
@@ -54,32 +55,26 @@ let external_attention_dashboard_row_limit = 64
 
 let source_to_string = function
   | Event_queue_pending -> "event_queue_pending"
-  | Chat_queue_pending -> "chat_queue_pending"
-  | Chat_queue_inflight -> "chat_queue_inflight"
-  | Chat_queue_recovery_required -> "chat_queue_recovery_required"
-  | Chat_queue_persistence_blocked -> "chat_queue_persistence_blocked"
+  | Chat_operation_queued -> "chat_operation_queued"
+  | Chat_operation_running -> "chat_operation_running"
   | Hitl_pending -> "hitl_pending"
   | External_attention -> "external_attention"
   | Fusion_running -> "fusion_running"
   | Schedule_waiting -> "schedule_waiting"
-  | Turn_admission_waiting -> "turn_admission_waiting"
-  | Turn_admission_shutdown -> "turn_admission_shutdown"
+  | Owner_shutdown -> "owner_shutdown"
   | Operator_pending_confirm -> "operator_pending_confirm"
   | Read_error -> "read_error"
 ;;
 
 let all_waiting_sources =
   [ Event_queue_pending
-  ; Chat_queue_pending
-  ; Chat_queue_inflight
-  ; Chat_queue_recovery_required
-  ; Chat_queue_persistence_blocked
+  ; Chat_operation_queued
+  ; Chat_operation_running
   ; Hitl_pending
   ; External_attention
   ; Fusion_running
   ; Schedule_waiting
-  ; Turn_admission_waiting
-  ; Turn_admission_shutdown
+  ; Owner_shutdown
   ; Operator_pending_confirm
   ; Read_error
   ]
@@ -97,7 +92,7 @@ let all_keeper_states = [ Idle; Busy; Waiting; Deferred ]
 let wake_producer_to_string = function
   | Board_dispatch -> "board_dispatch"
   | Board_attention_judge -> "board_attention_judge"
-  | Keeper_chat_queue_store -> "keeper_chat_queue_store"
+  | Keeper_owner_actor -> "keeper_owner_actor"
   | Keeper_supervisor -> "keeper_supervisor"
   | Fusion_sink -> "fusion_sink"
   | Connector_attention_hook -> "connector_attention_hook"
@@ -105,13 +100,12 @@ let wake_producer_to_string = function
   | External_attention_store -> "external_attention_store"
   | Schedule_store -> "schedule_store"
   | Schedule_runner -> "schedule_runner"
-  | Keeper_turn_admission -> "keeper_turn_admission"
   | Operator_pending_confirm_store -> "operator_pending_confirm_store"
-  | Keeper_goal_assignment -> "keeper_goal_assignment"
-  | Keeper_goal_reconciliation -> "keeper_goal_reconciliation"
   | Keeper_task_cancellation -> "keeper_task_cancellation"
   | Completion_authority -> "completion_authority"
   | Keeper_compaction_request -> "keeper_compaction_request"
+  | Keeper_workspace_message -> "keeper_workspace_message"
+  | Keeper_delegate -> "keeper_delegate"
   | Read_model_reader -> "read_model_reader"
 ;;
 
@@ -125,10 +119,10 @@ let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_produ
   | Connector_attention _ -> Connector_attention_hook
   | Hitl_resolved _ -> Hitl_resolution_hook
   | Manual_compaction_requested -> Keeper_compaction_request
-  | Goal_assigned _ -> Keeper_goal_assignment
-  | Goal_reconciliation_ready _ -> Keeper_goal_reconciliation
   | Completion_authority_rejected _ -> Completion_authority
   | Task_cancelled _ -> Keeper_task_cancellation
+  | Workspace_message _ -> Keeper_workspace_message
+  | Delegate_completed _ -> Keeper_delegate
 ;;
 
 let unix_iso_json = function
@@ -136,20 +130,17 @@ let unix_iso_json = function
   | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
 ;;
 
-let float_json = function
-  | None -> `Null
-  | Some value -> `Float value
-;;
 
 let waiting_row_json (row : waiting_row) =
   `Assoc
     [ "keeper_name", Json_util.string_opt_to_json row.keeper_name
     ; "source", `String (source_to_string row.source)
     ; "waiting_on", `String row.waiting_on
+    ; "what", `String row.what
     ; "wake_producer", `String (wake_producer_to_string row.wake_producer)
-    ; "since", float_json row.since
+    ; "since", Json_util.float_opt_to_json row.since
     ; "since_iso", unix_iso_json row.since
-    ; "due_at", float_json row.due_at
+    ; "due_at", Json_util.float_opt_to_json row.due_at
     ; "due_at_iso", unix_iso_json row.due_at
     ; "next_action", `String row.next_action
     ; "detail", row.detail
@@ -166,34 +157,242 @@ let take_with_truncation limit rows =
   loop limit [] rows
 ;;
 
-let rows_for_queue_snapshot ~keeper_name ~source ~next_action queue =
-  Keeper_event_queue.to_list queue
-  |> List.mapi (fun queue_index (stimulus : Keeper_event_queue.stimulus) ->
-    let detail =
-      `Assoc
+(* [payload_kind] collapses every payload to a constant label, so the fields
+   that say why a keeper is blocked travel separately: the rejection's reason,
+   the cancellation's author and reason, the workspace message's sender and
+   request id. The whole payload is never serialized here (a board stimulus
+   carries post text). Every kind is enumerated so a new payload has to decide
+   its own visibility. *)
+let queue_payload_detail_fields : Keeper_event_queue.stimulus_payload -> (string * Yojson.Safe.t) list =
+  function
+  | Completion_authority_rejected rejection ->
+    [ "rejection_reason", `String rejection.car_reason
+    ; "rejection_task_id", `String rejection.car_task_id
+    ]
+  | Task_cancelled cancellation ->
+    (* The reason is emitted only when the canceller gave one, so an operator
+       can tell an unexplained cancellation from one whose reason was empty. *)
+    [ "cancelled_task_id", `String cancellation.tc_task_id
+    ; "cancelled_by", `String cancellation.tc_cancelled_by
+    ]
+    @ (match cancellation.tc_reason with
+       | None -> []
+       | Some reason -> [ "cancelled_reason", `String reason ])
+  | Workspace_message message ->
+    [ "message_request_id", `String message.wmsg_request_id
+    ; "message_from", `String message.wmsg_from
+    ]
+  | Board_signal _
+  | Board_attention _
+  | Bootstrap
+  | Fusion_completed _
+  | Schedule_due _
+  | Connector_attention _
+  | Hitl_resolved _
+  | Manual_compaction_requested -> []
+  | Delegate_completed dc ->
+    [ "delegate_operation_id", `String dc.dc_operation_id
+    ; "delegate_keeper", `String dc.dc_keeper
+    ]
+;;
+
+let board_signal_what (signal : Keeper_event_queue.board_stimulus) =
+  match signal.kind with
+  | Post_created -> Printf.sprintf "%s의 새 글" signal.author
+  | Comment_added -> Printf.sprintf "%s의 댓글" signal.author
+  | Reaction_changed change ->
+    Printf.sprintf
+      "%s의 반응 %s"
+      change.user_id
+      (if change.reacted then "추가" else "제거")
+  | Vote_cast change ->
+    Printf.sprintf
+      "%s의 %s 투표"
+      change.voter
+      (match change.direction with
+       | Vote_up -> "찬성"
+       | Vote_down -> "반대")
+;;
+
+(* One operator sentence per payload kind, from the payload's own typed
+   fields. Every kind is enumerated: a new stimulus has to say what an
+   operator should read it as before it can reach the queue view. *)
+let queue_payload_what : Keeper_event_queue.stimulus_payload -> string = function
+  | Board_signal signal -> board_signal_what signal
+  | Board_attention attention ->
+    Printf.sprintf "%s (관련성 판정 통과)" (board_signal_what attention.signal)
+  | Bootstrap -> "기동 직후 첫 턴"
+  | Fusion_completed completion ->
+    (match completion.terminal with
+     | Fusion_succeeded _ -> Printf.sprintf "Fusion 결과 도착 · %s" completion.run_id
+     | Fusion_failed _ -> Printf.sprintf "Fusion 실패 · %s" completion.run_id
+     | Fusion_cancelled -> Printf.sprintf "Fusion 취소됨 · %s" completion.run_id)
+  | Schedule_due wake ->
+    Printf.sprintf
+      "예약 실행 시각 도래 · %s"
+      (match wake.title with
+       | Some title -> title
+       | None -> wake.schedule_id)
+  | Connector_attention _ -> "외부 메시지 도착"
+  | Hitl_resolved resolution ->
+    (match resolution.decision with
+     | Hitl_approved -> Printf.sprintf "운영자 승인됨 · %s" resolution.approval_id
+     | Hitl_rejected _ -> Printf.sprintf "운영자 거절됨 · %s" resolution.approval_id)
+  | Manual_compaction_requested -> "운영자 압축 요청"
+  | Completion_authority_rejected rejection ->
+    Printf.sprintf "작업 %s 완료 증거 거절됨" rejection.car_task_id
+  | Task_cancelled cancellation ->
+    Printf.sprintf
+      "%s가 작업 %s 취소"
+      cancellation.tc_cancelled_by
+      cancellation.tc_task_id
+  | Workspace_message message -> Printf.sprintf "%s가 보낸 메시지" message.wmsg_from
+  | Delegate_completed dc ->
+    (match dc.dc_terminal with
+     | Delegate_replied _ ->
+       Printf.sprintf "%s의 답 도착 · %s" dc.dc_keeper dc.dc_operation_id
+     | Delegate_no_reply ->
+       Printf.sprintf "%s가 답 없이 끝냄 · %s" dc.dc_keeper dc.dc_operation_id
+     | Delegate_failed _ ->
+       Printf.sprintf "%s가 끝내지 못함 · %s" dc.dc_keeper dc.dc_operation_id)
+;;
+
+let urgency_what_suffix : Keeper_event_queue.urgency -> string = function
+  | Immediate -> " (즉시)"
+  | Normal -> ""
+  | Low -> " (낮은 우선순위)"
+;;
+
+let stimulus_what (stimulus : Keeper_event_queue.stimulus) =
+  queue_payload_what stimulus.payload ^ urgency_what_suffix stimulus.urgency
+;;
+
+(* Pending Connector_attention stimuli repeat one row per accepted message
+   (the intake invariant keeps every event durable), so a Keeper that cannot
+   consume right now — a blocked lane, a stalled cycle — turns the inventory
+   into a wall of identical rows under the display cap. RFC-0377 already
+   drains a same-conversation backlog in one turn, so per-event rows carry no
+   operator decision the aggregate loses: this projection collapses every
+   pending Connector_attention stimulus into one row per urgency with a count
+   and the oldest arrival. The oldest member keeps its [source_ref] /
+   [source_incarnation] so the operator boundary still resolves the row, and
+   every member event id rides in [detail]. A single pending Connector event
+   renders exactly the ungrouped row. Every non-Connector stimulus keeps its
+   own row. *)
+let rows_for_queue_snapshot ~keeper_name ~source ~next_action selections =
+  let connector_selections =
+    List.filter_map
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         match selection.source.payload with
+         | Keeper_event_queue.Connector_attention _ -> Some selection
+         | _ -> None)
+      selections
+  in
+  let connector_count = List.length connector_selections in
+  let oldest_arrived_at =
+    List.fold_left
+      (fun oldest (selection : Keeper_event_queue_state.pending_selection) ->
+         Float.min oldest selection.source.arrived_at)
+      Float.max_float connector_selections
+  in
+  let connector_event_ids =
+    List.filter_map
+      (fun (selection : Keeper_event_queue_state.pending_selection) ->
+         match selection.source.payload with
+         | Keeper_event_queue.Connector_attention { event_id; _ } -> Some event_id
+         | _ -> None)
+      connector_selections
+    |> List.sort String.compare
+  in
+  let connectors_emitted = ref false in
+  let rec go queue_index acc = function
+    | [] -> List.rev acc
+    | (selection : Keeper_event_queue_state.pending_selection) :: rest ->
+      let stimulus : Keeper_event_queue.stimulus = selection.source in
+      (* [source_ref] + [source_incarnation] are the exact-entry address the
+         operator boundary
+         ([Server_dashboard_http_keeper_event_queue_operator]) resolves
+         through [Keeper_event_queue_state.resolve_pending_selection], so a
+         row read here can be cancelled, transferred, or reprioritized
+         without a second queue projection. Both are wire strings: the ref
+         is a SHA-256 hex and the incarnation a decimal int64. *)
+      let base_detail =
         [ "queue_index", `Int queue_index
         ; "post_id", `String stimulus.post_id
+        ; ( "source_ref"
+          , `String (Keeper_event_queue_state.source_snapshot_ref stimulus) )
+        ; ( "source_incarnation"
+          , `String (Int64.to_string selection.admitted_revision) )
         ; "urgency", `String (Keeper_event_queue.urgency_to_string stimulus.urgency)
         ; "arrived_at_unix", `Float stimulus.arrived_at
         ; "payload_kind",
           `String (Keeper_event_queue.payload_kind_label stimulus.payload)
         ]
-    in
-    { keeper_name = Some keeper_name
-    ; source
-    ; waiting_on = Keeper_event_queue.payload_kind_label stimulus.payload
-    ; wake_producer = wake_producer_of_payload stimulus.payload
-    ; since = Some stimulus.arrived_at
-    ; due_at = None
-    ; next_action
-    ; detail
-    })
+        @ queue_payload_detail_fields stimulus.payload
+      in
+      let row ~what ~since ~detail =
+        { keeper_name = Some keeper_name
+        ; source
+        ; waiting_on = Keeper_event_queue.payload_kind_label stimulus.payload
+        ; what
+        ; wake_producer = wake_producer_of_payload stimulus.payload
+        ; since
+        ; due_at = None
+        ; next_action
+        ; detail
+        }
+      in
+      (match stimulus.payload with
+       | Keeper_event_queue.Connector_attention _
+         when connector_count > 1 && not !connectors_emitted ->
+         connectors_emitted := true;
+         let bounded, bounded_truncated =
+           let rec take count acc = function
+             | [] -> (List.rev acc, false)
+             | _ :: _ when count <= 0 -> (List.rev acc, true)
+             | id :: rest -> take (count - 1) (id :: acc) rest
+           in
+           take 10 [] connector_event_ids
+         in
+         go
+           (queue_index + 1)
+           (row
+              ~what:
+                (Printf.sprintf
+                   "외부 메시지 도착 ×%d" connector_count
+                   ^ urgency_what_suffix stimulus.urgency)
+              ~since:(Some oldest_arrived_at)
+              ~detail:
+                (`Assoc
+                   (base_detail
+                    @ [ ("group_count", `Int connector_count)
+                      ; ( "group_event_ids"
+                        , `List (List.map (fun id -> `String id) bounded) )
+                      ; ("group_event_ids_truncated", `Bool bounded_truncated)
+                      ]))
+              :: acc)
+           rest
+       | Keeper_event_queue.Connector_attention _ when connector_count > 1 ->
+         (* Already represented by the aggregate row above. *)
+         go (queue_index + 1) acc rest
+       | _ ->
+         go
+           (queue_index + 1)
+           (row
+              ~what:(stimulus_what stimulus)
+              ~since:(Some stimulus.arrived_at)
+              ~detail:(`Assoc base_detail)
+              :: acc)
+           rest)
+  in
+  go 0 [] selections
 ;;
 
 let read_error_row ?keeper_name ~waiting_on ~next_action detail =
   { keeper_name
   ; source = Read_error
   ; waiting_on
+  ; what = Printf.sprintf "대기 기록 읽기 실패 · %s" waiting_on
   ; wake_producer = Read_model_reader
   ; since = None
   ; due_at = None
@@ -226,7 +425,7 @@ let queue_read_error_rows ~keeper_name errors =
 
 let event_queue_rows ~base_path ~keeper_name =
   let snapshot =
-    Keeper_event_queue_persistence.load_snapshot_with_errors ~base_path ~keeper_name
+    Keeper_event_queue_persistence.load_selections_with_errors ~base_path ~keeper_name
   in
   rows_for_queue_snapshot
     ~keeper_name
@@ -244,184 +443,102 @@ let schedule_read_error_detail = function
       ]
 ;;
 
-let chat_queue_source_label = function
-  | Keeper_chat_queue.Dashboard _ -> "dashboard"
-  | Keeper_chat_queue.Discord _ -> "discord"
-  | Keeper_chat_queue.Slack _ -> "slack"
-;;
-
-let chat_queue_active_row ~source ~next_action ~lifecycle_fields keeper_name queue_index
-    (receipt : Keeper_chat_queue.active_receipt) =
-  let msg = receipt.message in
-  let source_label = chat_queue_source_label msg.source in
-  { keeper_name = Some keeper_name
-    ; source
-    ; waiting_on = source_label
-    ; wake_producer = Keeper_chat_queue_store
-    ; since = Some msg.timestamp
-    ; due_at = None
-    ; next_action
-    ; detail =
-        `Assoc
-          [ "queue_index", `Int queue_index
-          ; ( "receipt_id"
-            , `String
-                (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id) )
-          ; ( "message_source"
-            , Keeper_chat_receipt_projection.message_source_json
-                msg.source )
-          ; "content_length", `Int (String.length msg.content)
-          ; "user_block_count", `Int (List.length msg.user_blocks)
-          ; "attachment_count", `Int (List.length msg.attachments)
-          ; "lifecycle", `Assoc lifecycle_fields
-          ]
-    }
-;;
-
-let chat_queue_invariant_error_row keeper_name queue_index
-    (receipt : Keeper_chat_queue.active_receipt) expected_state =
-  read_error_row ~keeper_name ~waiting_on:"chat_queue_snapshot_invariant"
-    ~next_action:"repair_keeper_chat_queue_snapshot"
-    (`Assoc
-      [ "expected_state", `String expected_state
-      ; ( "receipt_id"
-        , `String
-            (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id) )
-      ; "queue_index", `Int queue_index
-      ])
-;;
-
-let chat_queue_load_error_row keeper_name
-    (error : Keeper_chat_queue.snapshot_load_error) =
-  let kind = Keeper_chat_queue.snapshot_load_error_kind_to_string error.kind in
-  read_error_row ~keeper_name ~waiting_on:"chat_queue_snapshot"
-    ~next_action:"repair_keeper_chat_queue_snapshot"
-    (`Assoc
-      [ "kind", `String kind
-      ; "path", Json_util.string_opt_to_json error.path
-      ; "message", `String error.message
-      ])
-;;
-
-let chat_queue_persistence_blocked_rows ~base_path keeper_name =
-  match
-    Keeper_chat_consumer.persistence_blocked_status
-      ~base_path
-      ~keeper_name
-  with
-  | Ok None -> []
-  | Error message ->
+let chat_operation_rows ~base_path keeper_name =
+  match Keeper_owner_registry.operation_projection ~base_path ~keeper_name with
+  | Error error ->
     [ read_error_row
         ~keeper_name
-        ~waiting_on:"chat_queue_persistence_blocked_observation"
-        ~next_action:"repair_keeper_chat_consumer_state"
-        (`Assoc [ "message", `String message ])
+        ~waiting_on:"keeper_owner_operation_projection"
+        ~next_action:"inspect_keeper_owner"
+        (`Assoc
+           [ "message",
+             `String (Keeper_owner_registry.lookup_error_to_string error)
+           ])
     ]
-  | Ok (Some status) ->
+  | Ok projection ->
+    let queued =
+      if projection.queued_count = 0
+      then []
+      else
+        [ { keeper_name = Some keeper_name
+          ; source = Chat_operation_queued
+          ; waiting_on = "owner_fifo"
+          ; what = Printf.sprintf "운영자 채팅 %d건 대기" projection.queued_count
+          ; wake_producer = Keeper_owner_actor
+          ; since = None
+          ; due_at = None
+          ; next_action = "keeper_owner_start_fifo_head"
+          ; detail = `Assoc [ "queued_count", `Int projection.queued_count ]
+          }
+        ]
+    in
+    let running =
+      match projection.running_operation_id with
+      | None -> []
+      | Some operation_id ->
+        [ { keeper_name = Some keeper_name
+          ; source = Chat_operation_running
+          ; waiting_on = "keeper_turn"
+          ; what = "운영자와 진행 중인 대화"
+          ; wake_producer = Keeper_owner_actor
+          ; since = None
+          ; due_at = None
+          ; next_action = "keeper_owner_settle_operation"
+          ; detail =
+              `Assoc
+                [ "operation_id",
+                  `String
+                    (Keeper_chat_operation.Operation_id.to_string operation_id)
+                ]
+          }
+        ]
+    in
+    running @ queued
+;;
+
+let owner_shutdown_rows ~base_path keeper_name =
+  match Keeper_owner_registry.get ~base_path ~keeper_name with
+  | Error error ->
     [ { keeper_name = Some keeper_name
-      ; source = Chat_queue_persistence_blocked
-      ; waiting_on = "operator_reconciliation"
-      ; wake_producer = Keeper_chat_queue_store
+      ; source = Read_error
+      ; waiting_on = "keeper_owner"
+      ; what = "대기 기록 읽기 실패 · keeper_owner"
+      ; wake_producer = Read_model_reader
       ; since = None
       ; due_at = None
-      ; next_action = "reconcile_keeper_chat_queue"
+      ; next_action = "restart_keeper_owner"
       ; detail =
           `Assoc
-            [ "operation", `String "finalize"
-            ; "lease_id", `String status.lease_id
-            ; "error", Keeper_chat_queue.mutation_error_to_json status.error
-            ]
+            [ "error", `String (Keeper_owner_registry.lookup_error_to_string error) ]
       }
     ]
-;;
-
-let chat_queue_rows ~base_path keeper_name =
-  let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
-  let pending =
-    snapshot.pending
-    |> List.mapi (fun queue_index
-                       (receipt : Keeper_chat_queue.active_receipt) ->
-           match receipt.Keeper_chat_queue.state with
-           | Keeper_chat_queue.Pending ->
-               chat_queue_active_row ~source:Chat_queue_pending
-                 ~next_action:"keeper_chat_consumer_drain"
-                 ~lifecycle_fields:[ "state", `String "pending" ] keeper_name
-                 queue_index receipt
-           | Keeper_chat_queue.Inflight _ | Keeper_chat_queue.Delivered _
-           | Keeper_chat_queue.Recovery_required _
-           | Keeper_chat_queue.Failed _ ->
-               chat_queue_invariant_error_row keeper_name queue_index receipt
-                 "pending")
-  in
-  let inflight =
-    snapshot.inflight
-    |> List.mapi (fun queue_index
-                       (receipt : Keeper_chat_queue.active_receipt) ->
-           match receipt.Keeper_chat_queue.state with
-           | Keeper_chat_queue.Inflight { lease_id; started_at } ->
-               chat_queue_active_row ~source:Chat_queue_inflight
-                 ~next_action:"keeper_chat_turn_terminal_receipt"
-                 ~lifecycle_fields:
-                   [ "state", `String "inflight"
-                   ; "lease_id", `String lease_id
-                   ; "started_at", `Float started_at
-                   ; "started_at_iso", unix_iso_json (Some started_at)
-                   ]
-                 keeper_name queue_index receipt
-           | Keeper_chat_queue.Pending | Keeper_chat_queue.Delivered _
-           | Keeper_chat_queue.Recovery_required _
-           | Keeper_chat_queue.Failed _ ->
-               chat_queue_invariant_error_row keeper_name queue_index receipt
-                 "inflight")
-  in
-  let recovery_required =
-    snapshot.recovery_required
-    |> List.mapi (fun queue_index
-                       (receipt : Keeper_chat_queue.active_receipt) ->
-           match receipt.Keeper_chat_queue.state with
-           | Keeper_chat_queue.Recovery_required { lease_id; started_at } ->
-             chat_queue_active_row ~source:Chat_queue_recovery_required
-               ~next_action:"resolve_keeper_chat_queue_recovery"
-               ~lifecycle_fields:
-                 [ "state", `String "recovery_required"
-                 ; "lease_id", `String lease_id
-                 ; "started_at", `Float started_at
-                 ; "started_at_iso", unix_iso_json (Some started_at)
-                 ; "dispatchable", `Bool false
-                 ]
-               keeper_name queue_index receipt
-           | Keeper_chat_queue.Pending
-           | Keeper_chat_queue.Inflight _
-           | Keeper_chat_queue.Delivered _
-           | Keeper_chat_queue.Failed _ ->
-             chat_queue_invariant_error_row keeper_name queue_index receipt
-               "recovery_required")
-  in
-  pending @ inflight @ recovery_required
-  @ chat_queue_persistence_blocked_rows ~base_path keeper_name
-  @ List.map (chat_queue_load_error_row keeper_name) snapshot.load_errors
-;;
-
-let turn_admission_rows ~base_path keeper_name =
-  let snapshot = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name in
+  | Ok owner ->
+  let in_flight = Keeper_owner.turn_in_flight owner in
   let in_flight_detail =
-    match snapshot.snapshot_in_flight with
+    match in_flight with
     | None -> `Null
-    | Some (info : Keeper_turn_admission.in_flight_info) ->
+    | Some (info : Keeper_owner.turn_in_flight) ->
+      let lane =
+        match info.lane with
+        | Keeper_owner.Autonomous -> "autonomous"
+        | Keeper_owner.Chat_operation -> "chat_operation"
+        | Keeper_owner.Maintenance -> "maintenance"
+      in
       `Assoc
-        [ "lane", `String (Keeper_turn_admission.lane_to_string info.lane)
+        [ "lane", `String lane
         ; "started_at", `Float info.started_at
         ; "started_at_iso", unix_iso_json (Some info.started_at)
         ]
   in
   let shutdown_rows =
-    match snapshot.snapshot_shutdown_operation_id with
+    match Keeper_owner.shutdown_operation_id owner with
     | None -> []
     | Some operation_id ->
       [ { keeper_name = Some keeper_name
-        ; source = Turn_admission_shutdown
+        ; source = Owner_shutdown
         ; waiting_on = "shutdown"
-        ; wake_producer = Keeper_turn_admission
+        ; what = "종료 정리 중"
+        ; wake_producer = Keeper_owner_actor
         ; since = None
         ; due_at = None
         ; next_action = "keeper_shutdown_finalize"
@@ -431,45 +548,23 @@ let turn_admission_rows ~base_path keeper_name =
                 , `String
                     (Keeper_shutdown_types.Operation_id.to_string operation_id) )
               ; "admission_fenced", `Bool true
-              ; "chat_waiting_count", `Int snapshot.snapshot_waiting
               ; "in_flight", in_flight_detail
               ]
         }
       ]
   in
-  let waiting_rows =
-    if snapshot.snapshot_waiting <= 0
-    then []
-    else
-      [ { keeper_name = Some keeper_name
-      ; source = Turn_admission_waiting
-      ; waiting_on = "chat"
-      ; wake_producer = Keeper_turn_admission
-      ; since = snapshot.snapshot_waiting_since
-      ; due_at = None
-      ; next_action = "turn_slot_release"
-      ; detail =
-          `Assoc
-            [ "waiting_lane", `String "chat"
-            ; "waiting_since", float_json snapshot.snapshot_waiting_since
-            ; "waiting_since_iso", unix_iso_json snapshot.snapshot_waiting_since
-            ; "chat_waiting_count", `Int snapshot.snapshot_waiting
-            ; "in_flight", in_flight_detail
-            ]
-      }
-      ]
-  in
-  shutdown_rows @ waiting_rows
+  shutdown_rows
 ;;
 
 let hitl_rows keeper_name pending =
   pending
-  |> List.filter (fun (entry : Keeper_approval_queue.pending_approval) ->
+  |> List.filter (fun (entry : Keeper_approval_queue_rules_types.pending_approval) ->
     String.equal entry.keeper_name keeper_name)
-  |> List.map (fun (entry : Keeper_approval_queue.pending_approval) ->
+  |> List.map (fun (entry : Keeper_approval_queue_rules_types.pending_approval) ->
     { keeper_name = Some keeper_name
     ; source = Hitl_pending
     ; waiting_on = entry.tool_name
+    ; what = Printf.sprintf "운영자 승인 대기 · %s" entry.tool_name
     ; wake_producer = Hitl_resolution_hook
     ; since = Some entry.requested_at
     ; due_at = None
@@ -478,17 +573,99 @@ let hitl_rows keeper_name pending =
         `Assoc
           [ "approval_id", `String entry.id
           ; "tool_name", `String entry.tool_name
-          ; "summary_status", Keeper_approval_queue.summary_status_to_yojson entry.summary_status
-          ; "exact_attempt", Keeper_approval_queue.exact_attempt_state_to_yojson entry.exact_attempt
+          ; "summary_status", Keeper_approval_queue_rules_types.summary_status_to_yojson entry.summary_status
+          ; "exact_attempt", Keeper_approval_queue_rules_types.exact_attempt_state_to_yojson entry.exact_attempt
           ; ( "summary_attempt_disposition"
-            , Keeper_approval_queue.summary_attempt_disposition_to_yojson
+            , Keeper_approval_queue_rules_types.summary_attempt_disposition_to_yojson
                 entry.summary_attempt_disposition )
           ; "turn_id", Json_util.int_opt_to_json entry.turn_id
           ; "task_id", Json_util.string_opt_to_json entry.task_id
           ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-          ; "goal_ids", `List (List.map (fun id -> `String id) entry.goal_ids)
           ]
     })
+;;
+
+let external_attention_what (item : Keeper_external_attention.item) =
+  match item.urgency with
+  | Keeper_external_attention.Mention -> Printf.sprintf "%s 멘션" item.source_label
+  | Direct_message -> Printf.sprintf "%s DM" item.source_label
+  | Ambient -> Printf.sprintf "%s 대화 (멘션 없음)" item.source_label
+  | System -> Printf.sprintf "%s 시스템 알림" item.source_label
+;;
+
+(* Same display wall as the queue rows above, from the sibling store: a
+   backlogged conversation records one pending external-attention row per
+   message. Grouping unit is the conversation — urgency × source ×
+   conversation_id — because that is what the keeper will answer (RFC-0377
+   drains a conversation backlog in one turn). One pending item renders
+   exactly the ungrouped row; a group renders the oldest arrival as [since],
+   the oldest event id as the row address, and the newest content preview.
+   Mentions and DMs can share a conversation with ambient traffic and still
+   aggregate only among their own urgency. *)
+let external_attention_grouped_rows ~keeper_name
+    (pending : Keeper_external_attention.item list) : waiting_row list =
+  let rec collect groups = function
+    | [] -> List.rev groups
+    | (item : Keeper_external_attention.item) :: rest ->
+      let key =
+        ( Keeper_external_attention.urgency_to_string item.urgency
+        , item.source_label
+        , item.conversation.conversation_id )
+      in
+      (match List.assoc_opt key groups with
+       | Some members ->
+         collect
+           ((key, item :: members) :: List.remove_assoc key groups)
+           rest
+       | None -> collect ((key, [ item ]) :: groups) rest)
+  in
+  let oldest (members : Keeper_external_attention.item list) =
+    List.fold_left
+      (fun (best : Keeper_external_attention.item)
+           (item : Keeper_external_attention.item) ->
+         if item.received_at < best.received_at then item else best)
+      (List.hd members)
+      members
+  in
+  let newest (members : Keeper_external_attention.item list) =
+    List.fold_left
+      (fun (best : Keeper_external_attention.item)
+           (item : Keeper_external_attention.item) ->
+         if item.received_at > best.received_at then item else best)
+      (List.hd members)
+      members
+  in
+  collect [] pending
+  |> List.map (fun (_, members) ->
+         let count = List.length members in
+         let anchor = oldest members in
+         let preview = (newest members).content_preview in
+         { keeper_name = Some keeper_name
+         ; source = External_attention
+         ; waiting_on = anchor.source_label
+         ; what =
+             (if count > 1 then
+                Printf.sprintf "%s ×%d" (external_attention_what anchor) count
+              else external_attention_what anchor)
+         ; wake_producer = External_attention_store
+         ; since = Some anchor.received_at
+         ; due_at = None
+         ; next_action = "keeper_process_external_attention"
+         ; detail =
+             `Assoc
+               ([ "event_id", `String anchor.event_id
+                ; "urgency",
+                  `String (Keeper_external_attention.urgency_to_string anchor.urgency)
+                ; "conversation_id", `String anchor.conversation.conversation_id
+                ; "content_preview", `String preview
+                ; "surface",
+                  Keeper_external_attention.surface_ref_to_json anchor.conversation.surface
+                ]
+               @
+               if count > 1 then
+                 [ ("group_count", `Int count) ]
+               else [])
+         })
 ;;
 
 let external_attention_rows ~base_path ~keeper_name =
@@ -508,25 +685,7 @@ let external_attention_rows ~base_path ~keeper_name =
     let pending, truncated =
       take_with_truncation external_attention_dashboard_row_limit pending
     in
-    ( pending
-      |> List.map (fun (item : Keeper_external_attention.item) ->
-        { keeper_name = Some keeper_name
-        ; source = External_attention
-        ; waiting_on = item.source_label
-        ; wake_producer = External_attention_store
-        ; since = Some item.received_at
-        ; due_at = None
-        ; next_action = "keeper_process_external_attention"
-        ; detail =
-            `Assoc
-              [ "event_id", `String item.event_id
-              ; "urgency", `String (Keeper_external_attention.urgency_to_string item.urgency)
-              ; "conversation_id", `String item.conversation.conversation_id
-              ; "content_preview", `String item.content_preview
-              ; "surface", Keeper_external_attention.surface_ref_to_json item.conversation.surface
-              ]
-        })
-    , truncated )
+    (external_attention_grouped_rows ~keeper_name pending, truncated)
 ;;
 
 let fusion_rows keeper_name runs =
@@ -541,6 +700,7 @@ let fusion_rows keeper_name runs =
           { keeper_name = Some keeper_name
           ; source = Fusion_running
           ; waiting_on = run.run_id
+          ; what = Printf.sprintf "Fusion 실행 중 · %s" run.preset
           ; wake_producer = Fusion_sink
           ; since = Some run.started_at
           ; due_at = None
@@ -562,13 +722,14 @@ let pending_confirm_row ?keeper_name
   { keeper_name
   ; source = Operator_pending_confirm
   ; waiting_on = entry.action_type
+  ; what = Printf.sprintf "운영자 확인 대기 · %s" entry.action_type
   ; wake_producer = Operator_pending_confirm_store
   ; since = None
   ; due_at = None
   ; next_action = "operator_confirm_action"
   ; detail =
       `Assoc
-        [ "token", `String entry.token
+        [ "confirm_token", `String entry.confirm_token
         ; "trace_id", `String entry.trace_id
         ; "actor", `String entry.actor
         ; "target_type", `String entry.target_type
@@ -638,6 +799,7 @@ let schedule_rows ~keeper_names state =
     { keeper_name = schedule_keeper_owner keeper_names request
     ; source = Schedule_waiting
     ; waiting_on = schedule_waiting_on request
+    ; what = Printf.sprintf "예약 실행 · %s" request.schedule_id
     ; wake_producer =
         (match request.status with
          | Scheduled | Due | Running -> Schedule_runner
@@ -699,7 +861,7 @@ let row_state rows =
     List.exists
       (fun row ->
          row.source = Fusion_running
-         || row.source = Turn_admission_shutdown)
+         || row.source = Owner_shutdown)
       rows
   then Deferred
   else if rows <> []
@@ -894,9 +1056,9 @@ let keeper_json ~base_path keeper_name ~busy ~external_attention_truncated rows 
            then [ "external_attention", `Bool true ]
            else []) )
     ; "sources", `Assoc (source_counts rows)
-    ; "since", float_json since
+    ; "since", Json_util.float_opt_to_json since
     ; "since_iso", unix_iso_json since
-    ; "due_at", float_json due_at
+    ; "due_at", Json_util.float_opt_to_json due_at
     ; "due_at_iso", unix_iso_json due_at
     ; "source_next_actions", `Assoc (source_next_actions rows)
     ; "current_execution", current_execution_json ~base_path keeper_name
@@ -911,8 +1073,8 @@ let keeper_rows ~base_path ~pending_approvals ~fusion_runs ~pending_confirms kee
     in
     let rows =
       event_queue_rows ~base_path ~keeper_name
-      @ chat_queue_rows ~base_path keeper_name
-      @ turn_admission_rows ~base_path keeper_name
+      @ chat_operation_rows ~base_path keeper_name
+      @ owner_shutdown_rows ~base_path keeper_name
       @ hitl_rows keeper_name pending_approvals
       @ external_attention_rows
       @ fusion_rows keeper_name fusion_runs
@@ -941,6 +1103,7 @@ let pending_approval_read_error error =
   { keeper_name = None
   ; source = Read_error
   ; waiting_on = "keeper_gate_pending_store"
+  ; what = "대기 기록 읽기 실패 · keeper_gate_pending_store"
   ; wake_producer = Read_model_reader
   ; since = None
   ; due_at = None
@@ -1064,4 +1227,8 @@ let dashboard_json_for_keeper config ~keeper_name =
 
 module For_testing = struct
   let dashboard_json_with_pending_reader = dashboard_json_with_pending_reader
+
+  let external_attention_grouped_rows = external_attention_grouped_rows
+
+  let rows_for_queue_snapshot = rows_for_queue_snapshot
 end

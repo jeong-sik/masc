@@ -133,6 +133,10 @@ let test_entry_json_omits_empty_fields () =
       "empty alternatives list omitted from JSON" false (has_key "alternatives")
   | _ -> Alcotest.fail "entry_json must return an Assoc"
 
+(* The omitted-when-empty half is covered by [test_entry_json_omits_empty_fields]
+   on keeper_time_now. This fixture exists for the opposite property, so it
+   asserts inclusion on both list fields rather than reusing one entry to prove
+   emission and omission at once. *)
 let test_entry_json_includes_populated_fields () =
   let entry = lookup "keeper_task_done" in
   let json = Registry.entry_json entry in
@@ -142,7 +146,7 @@ let test_entry_json_includes_populated_fields () =
     Alcotest.(check bool)
       "populated examples list emitted in JSON" true (has_key "examples");
     Alcotest.(check bool)
-      "empty alternatives list omitted from JSON" false (has_key "alternatives")
+      "populated alternatives list emitted in JSON" true (has_key "alternatives")
   | _ -> Alcotest.fail "entry_json must return an Assoc"
 
 let () =

@@ -43,8 +43,6 @@ export function normalizeJournalSource(value: string | null | undefined): Journa
 
 export function defaultJournalSeverity(eventType: JournalEventType | undefined): JournalSeverity {
   switch (eventType) {
-    case 'keeper_guardrail':
-      return 'error'
     case 'unknown':
       return 'unknown'
     default:

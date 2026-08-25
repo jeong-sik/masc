@@ -103,7 +103,7 @@ let base_obs : WO.world_observation =
   ; idle_seconds = 0
   ; active_goals = []
   ; unclaimed_task_count = 0
-  ; claimable_task_count = 0
+  ; claimable_tasks = []
   ; failed_task_count = 0
   ; scheduled_automation = WO.empty_scheduled_automation_observation
   ; backlog_revision = Some 1
@@ -111,6 +111,8 @@ let base_obs : WO.world_observation =
   ; connected_surfaces = []
   ; connected_surface_failures = []
   ; own_recent_board_posts = []
+  ; fleet_messages = []
+  ; own_recent_actions = []
   }
 ;;
 
@@ -348,6 +350,71 @@ let test_durable_demand_does_not_require_proactive () =
      | Readiness.Unknown _ -> false)
 ;;
 
+let test_durable_demand_bypasses_autoboot_only_for_live_running_owner () =
+  without_overrides @@ fun () ->
+  let autoboot_disabled = { (ready_meta ()) with autoboot_enabled = false } in
+  let classify ?(shutdown_operation_id = None) runtime =
+    Readiness.classify_durable_demand_execution
+      ~shutdown_operation_id
+      ~runtime
+      (Ok autoboot_disabled)
+  in
+  check bool "live running owner accepts persisted demand" true
+    (match
+       classify (owner_runtime ~phase:State_machine.Running ~live_fiber:true)
+     with
+     | Readiness.Executable -> true
+     | Readiness.Recoverable
+     | Readiness.Retained_disabled _
+     | Readiness.Paused_dead _
+     | Readiness.Shutdown_fenced _
+     | Readiness.Unknown _ -> false);
+  let remains_autoboot_disabled runtime =
+    match classify runtime with
+    | Readiness.Retained_disabled Readiness.Retained_autoboot_disabled -> true
+    | Readiness.Executable
+    | Readiness.Recoverable
+    | Readiness.Retained_disabled _
+    | Readiness.Paused_dead _
+    | Readiness.Shutdown_fenced _
+    | Readiness.Unknown _ -> false
+  in
+  check bool "absent owner is not autobooted" true
+    (remains_autoboot_disabled Readiness.Owner_unregistered);
+  check bool "dead fiber is not treated as executable" true
+    (remains_autoboot_disabled
+       (owner_runtime ~phase:State_machine.Running ~live_fiber:false));
+  check bool "terminal owner is not treated as executable" true
+    (remains_autoboot_disabled
+       (owner_runtime ~phase:State_machine.Stopped ~live_fiber:true));
+  let operation_id = Shutdown_types.Operation_id.generate () in
+  check bool "shutdown fence still dominates the live-owner exception" true
+    (match
+       classify
+         ~shutdown_operation_id:(Some operation_id)
+         (owner_runtime ~phase:State_machine.Running ~live_fiber:true)
+     with
+     | Readiness.Shutdown_fenced actual ->
+       Shutdown_types.Operation_id.equal operation_id actual
+     | Readiness.Executable
+     | Readiness.Recoverable
+     | Readiness.Retained_disabled _
+     | Readiness.Paused_dead _
+     | Readiness.Unknown _ -> false);
+  with_flag "MASC_KEEPER_AUTONOMOUS_ENABLED" "false" @@ fun () ->
+  check bool "global autonomous kill-switch still dominates" true
+    (match
+       classify (owner_runtime ~phase:State_machine.Running ~live_fiber:true)
+     with
+     | Readiness.Retained_disabled Readiness.Retained_autoboot_disabled -> true
+     | Readiness.Executable
+     | Readiness.Recoverable
+     | Readiness.Retained_disabled _
+     | Readiness.Paused_dead _
+     | Readiness.Shutdown_fenced _
+     | Readiness.Unknown _ -> false)
+;;
+
 let test_owner_execution_shutdown_fence_blocks_boot () =
   without_overrides @@ fun () ->
   let operation_id = Shutdown_types.Operation_id.generate () in
@@ -396,13 +463,11 @@ let test_active_admission () =
   check bool "state is active" true
     (match state with
      | Admission.Active -> true
-     | Admission.Paused _ | Admission.Dead_tombstone -> false);
+     | Admission.Paused _ -> false);
   check bool "manual one-shot admitted" true
     (match Admission.admit_manual_one_shot state with
      | Admission.Manual_admitted_active -> true
-     | Admission.Manual_admitted_paused_recovery _
-     | Admission.Manual_denied_dead_tombstone
-     | Admission.Manual_denied_transcript_reset_required -> false);
+     | Admission.Manual_admitted_paused_recovery _ -> false);
   check bool "autonomous admitted" true
     (match Admission.admit_autonomous state with
      | Admission.Autonomous_admitted -> true
@@ -417,16 +482,14 @@ let test_classified_pause_admission () =
     (match state with
      | Admission.Paused (Admission.Classified reason) ->
        Keeper_latched_reason.equal reason operator_pause
-     | Admission.Active | Admission.Paused Admission.Unclassified
-     | Admission.Dead_tombstone -> false);
+     | Admission.Active | Admission.Paused Admission.Unclassified -> false);
   check bool "manual one-shot is an explicit recovery" true
     (match Admission.admit_manual_one_shot state with
      | Admission.Manual_admitted_paused_recovery (Admission.Classified reason) ->
        Keeper_latched_reason.equal reason operator_pause
      | Admission.Manual_admitted_active
      | Admission.Manual_admitted_paused_recovery Admission.Unclassified
-     | Admission.Manual_denied_dead_tombstone
-     | Admission.Manual_denied_transcript_reset_required -> false);
+     -> false);
   check bool "autonomous execution is denied" true
     (match Admission.admit_autonomous state with
      | Admission.Autonomous_denied
@@ -434,8 +497,7 @@ let test_classified_pause_admission () =
        Keeper_latched_reason.equal reason operator_pause
      | Admission.Autonomous_admitted
      | Admission.Autonomous_denied
-         ( Admission.Autonomous_paused Admission.Unclassified
-         | Admission.Autonomous_dead_tombstone ) -> false)
+         (Admission.Autonomous_paused Admission.Unclassified) -> false)
 ;;
 
 let test_unclassified_pause_fails_closed () =
@@ -443,126 +505,17 @@ let test_unclassified_pause_fails_closed () =
   check bool "missing latch remains paused" true
     (match state with
      | Admission.Paused Admission.Unclassified -> true
-     | Admission.Active | Admission.Paused (Admission.Classified _)
-     | Admission.Dead_tombstone -> false);
+     | Admission.Active | Admission.Paused (Admission.Classified _) -> false);
   check bool "unclassified pause blocks autonomous execution" true
     (match Admission.admit_autonomous state with
      | Admission.Autonomous_denied
          (Admission.Autonomous_paused Admission.Unclassified) -> true
      | Admission.Autonomous_admitted
      | Admission.Autonomous_denied
-         ( Admission.Autonomous_paused (Admission.Classified _)
-         | Admission.Autonomous_dead_tombstone ) -> false)
+         (Admission.Autonomous_paused (Admission.Classified _)) -> false)
 ;;
 
-let test_dead_tombstone_dominates_stale_paused_bit () =
-  let state =
-    lifecycle_state
-      ~paused:false
-      ~latched_reason:(Some Keeper_latched_reason.Dead_tombstone)
-  in
-  check bool "dead latch is terminal even when paused was cleared" true
-    (match state with
-     | Admission.Dead_tombstone -> true
-     | Admission.Active | Admission.Paused _ -> false);
-  check bool "manual one-shot denied" true
-    (match Admission.admit_manual_one_shot state with
-     | Admission.Manual_denied_dead_tombstone -> true
-     | Admission.Manual_admitted_active
-     | Admission.Manual_admitted_paused_recovery _
-     | Admission.Manual_denied_transcript_reset_required -> false);
-  check bool "autonomous execution denied as terminal" true
-    (match Admission.admit_autonomous state with
-     | Admission.Autonomous_denied Admission.Autonomous_dead_tombstone -> true
-     | Admission.Autonomous_admitted
-     | Admission.Autonomous_denied (Admission.Autonomous_paused _) -> false)
-;;
 
-let test_readiness_projects_dead_tombstone () =
-  without_overrides @@ fun () ->
-  let meta =
-    { (ready_meta ()) with
-      paused = false
-    ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
-    }
-  in
-  let activation = (Readiness.of_meta meta).autonomous_activation in
-  check bool "dead keeper is not autonomously ready" false activation.ok;
-  check bool "readiness preserves typed terminal denial" true
-    (match activation.blocker with
-     | Some (Readiness.Lifecycle_denied Admission.Autonomous_dead_tombstone) ->
-       true
-     | Some
-         ( Readiness.Lifecycle_denied (Admission.Autonomous_paused _)
-         | Readiness.Autoboot_disabled
-         | Readiness.Proactive_disabled )
-     | None -> false);
-  check string "wire projection distinguishes dead from pause" "dead_tombstone"
-    (Readiness.autonomous_check_value activation)
-;;
-
-let test_transcript_corruption_requires_reset () =
-  without_overrides @@ fun () ->
-  let reason = Keeper_latched_reason.Transcript_corruption_reset_required in
-  let state =
-    lifecycle_state ~paused:false ~latched_reason:(Some reason)
-  in
-  check bool "reset-required latch dominates stale pause bit" true
-    (match state with
-     | Admission.Paused (Admission.Classified actual) ->
-       Keeper_latched_reason.equal actual reason
-     | Admission.Active
-     | Admission.Paused Admission.Unclassified
-     | Admission.Dead_tombstone ->
-       false);
-  check bool "generic manual resume is denied" true
-    (match Admission.admit_manual_one_shot state with
-     | Admission.Manual_denied_transcript_reset_required -> true
-     | Admission.Manual_admitted_active
-     | Admission.Manual_admitted_paused_recovery _
-     | Admission.Manual_denied_dead_tombstone ->
-       false);
-  let meta =
-    { (ready_meta ()) with paused = false; latched_reason = Some reason }
-  in
-  let readiness = Readiness.of_meta meta in
-  check bool "reset-required Keeper is not ready" false
-    readiness.autonomous_activation.ok;
-  check bool "health projects reset-required identity" true
-    (match Readiness.pause_kind meta with
-     | Readiness.Transcript_corruption_reset_required -> true
-     | Readiness.Active
-     | Readiness.Operator_paused
-     | Readiness.Unclassified_paused
-     | Readiness.Dead_tombstone ->
-       false)
-;;
-
-let test_health_projection_uses_typed_lifecycle () =
-  let dead_meta =
-    { (ready_meta ()) with
-      paused = true
-    ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
-    }
-  in
-  let unclassified_meta =
-    { (ready_meta ()) with paused = true; latched_reason = None }
-  in
-  check bool "health classifies dead tombstone" true
-    (match Readiness.pause_kind dead_meta with
-     | Readiness.Dead_tombstone -> true
-     | Readiness.Active
-     | Readiness.Operator_paused
-     | Readiness.Unclassified_paused
-     | Readiness.Transcript_corruption_reset_required -> false);
-  check bool "health does not mislabel missing reason as operator pause" true
-    (match Readiness.pause_kind unclassified_meta with
-     | Readiness.Unclassified_paused -> true
-     | Readiness.Active
-     | Readiness.Operator_paused
-     | Readiness.Dead_tombstone
-     | Readiness.Transcript_corruption_reset_required -> false)
-;;
 
 let () = init_runtime_default_for_tests ()
 
@@ -588,6 +541,8 @@ let () =
             test_owner_execution_requires_live_fiber
         ; test_case "durable demand bypasses proactive policy" `Quick
             test_durable_demand_does_not_require_proactive
+        ; test_case "durable demand bypasses autoboot only for live owner" `Quick
+            test_durable_demand_bypasses_autoboot_only_for_live_running_owner
         ; test_case "shutdown fence blocks boot" `Quick
             test_owner_execution_shutdown_fence_blocks_boot
         ; test_case "unknown owner truth fails closed" `Quick
@@ -598,14 +553,7 @@ let () =
         ; test_case "classified pause" `Quick test_classified_pause_admission
         ; test_case "unclassified pause fails closed" `Quick
             test_unclassified_pause_fails_closed
-        ; test_case "dead tombstone dominates stale pause bit" `Quick
-            test_dead_tombstone_dominates_stale_paused_bit
-        ; test_case "readiness projects dead tombstone" `Quick
-            test_readiness_projects_dead_tombstone
-        ; test_case "transcript corruption requires reset" `Quick
-            test_transcript_corruption_requires_reset
-        ; test_case "health projects typed lifecycle" `Quick
-            test_health_projection_uses_typed_lifecycle
+
         ] )
     ]
 ;;

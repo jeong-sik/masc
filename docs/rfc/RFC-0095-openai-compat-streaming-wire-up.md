@@ -7,8 +7,7 @@ updated: 2026-05-22
 author: jeong-sik
 supersedes: []
 superseded_by: null
-related: ["0047", "0045", "0033", "0058"]
-implementation_prs: [15722,15725]
+related: ["0033", "0058"]
 ---
 
 # RFC-0095 — Provider-D-compat provider streaming wire-up
@@ -16,7 +15,7 @@ implementation_prs: [15722,15725]
 ## 1. Summary
 
 masc 의 streaming infrastructure 는 4 layer (llama-server SSE,
-runtime transport `complete_stream`, OAS streaming hooks,
+runtime transport `complete_stream`, agent_core streaming hooks,
 `llm_metric_bridge` legacy metrics backend emission) 모두 코드 수준에 정착돼 있으나,
 **`Custom_openai_compat` runtime binding 을 사용하는 provider
 (예: 본 RFC 작성 시점의 `runpod_mtp`, `local_mtp`) 는 streaming chunk 를
@@ -48,7 +47,6 @@ SSE chunk 를 정상 송출. 즉 *서버는 streaming 가능*, *masc 가 runtime
 |---|---|---|
 | L1 server-side SSE | external llama-server / RunPod proxy | ✓ |
 | L2 runtime transport `complete_stream` | `lib/runtime/runtime_transport.ml:1535, 1656, 1711` | ✓ defined |
-| L3 OAS hooks | `lib/oas_compat/oas_compat.ml:257-288` | ✓ `first_chunk` + `chunk_index` + `inter_chunk_ms` |
 | L4 metric emission | `lib/llm_metric_bridge.ml:448-469` | ✓ global legacy metrics backend sink |
 | **Master switch** | `Runtime_attempt_liveness_config.current_mode ()` | controls `liveness_observer_opt` |
 | **Wire to SDK** | `keeper_turn_driver_try_provider.ml:332-457` → `Runtime_runner.run:?on_event` (runtime_runner.ml:438 body) → `Agent_sdk.Agent.run_stream` | ✓ when `on_event = Some _` |
@@ -139,7 +137,7 @@ Phase 0 PR 은 **production behavior 무변경**. trace 코드는 `-tags trace`
   `rg` grep 결과를 부록으로 첨부.
 - **H3 confirmed**: SDK 가 외부 opam dependency 라 직접 patch 불가
   → runtime transport layer 에 *openai_compat 전용 chunk parser shim*
-  을 추가하여 OAS hook chain 에 직접 연결. SDK upgrade path 와 충돌하지
+  을 추가하여 agent_core hook chain 에 직접 연결. SDK upgrade path 와 충돌하지
   않는 *layer-above* fix.
 
 Fix 자체는 **production-impacting**. 다음 안전망 적용:
@@ -199,10 +197,6 @@ Fix 자체는 **production-impacting**. 다음 안전망 적용:
 
 - Evidence dump timestamp: 2026-05-17 KST, masc uptime 31 분 단계
   legacy metrics backend metric snapshot.
-- RFC-0047 (OAS adapter decomposition) — file-rename scope, 본 RFC 와
-  직교.
-- RFC-0045 (SDK turn boundary alignment) — Agent SDK ↔ keeper FSM 경계
-  영역; H1/H3 fix 시 SDK contract 영향 평가의 출발점.
 - RFC-0058 (Declarative runtime config) — `streaming = true` 플래그의
   schema-level 의미 정의 위치; §10 question 4 cross-ref.
 - `feedback_lint_string_classifier_is_workaround_not_fundamental` —

@@ -2,7 +2,7 @@
     Extracted from [keeper_supervisor.ml] (godfile decomp). The
     extractor uses callback injection (publish_lifecycle and
     supervise_keepalive) to avoid sibling -> parent cycles, mirroring
-    the [Keeper_supervisor_cleanup_tombstone] sibling. *)
+    the [Keeper_supervisor_cleanup] sibling. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -44,10 +44,8 @@ let reconcile_keepalive_keepers
         (match e.phase with
          | Keeper_state_machine.Running
          | Keeper_state_machine.Paused -> true
-         | Keeper_state_machine.Crashed
-         | Keeper_state_machine.Dead -> true
+         | Keeper_state_machine.Crashed -> true
          | Keeper_state_machine.Failing
-         | Keeper_state_machine.Overflowed
          | Keeper_state_machine.Compacting
          | Keeper_state_machine.HandingOff
          | Keeper_state_machine.Draining
@@ -129,30 +127,6 @@ let reconcile_keepalive_keepers
        reconcile_one name;
        Eio_guard.yield_step reconcile_ym)
     names;
-  (try
-     let summary =
-       Keeper_goal_reconciliation_wake.reconcile_startup ~config:ctx.config
-     in
-     if
-       summary.enqueued_count > 0
-       || summary.unresolved_count > 0
-       || summary.failed_count > 0
-     then
-       Log.Keeper.info
-         "goal reconciliation startup scan ready=%d enqueued=%d already_present=%d \
-          unresolved=%d failed=%d"
-         summary.ready_count
-         summary.enqueued_count
-         summary.already_present_count
-         summary.unresolved_count
-         summary.failed_count
-   with
-   | Eio.Cancel.Cancelled _ as exn -> raise exn
-   | exn ->
-     inc_reconcile_failure ~name:"fleet" ~operation:"goal_reconciliation";
-     Log.Keeper.warn
-       "goal reconciliation startup scan failed non-fatally and will retry: %s"
-       (Printexc.to_string exn));
   Log.Keeper.debug
     "reconcile_keepalive_keepers: completed (elapsed_ms=%d)"
     (int_of_float ((Time_compat.now () -. t0) *. 1000.0))

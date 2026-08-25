@@ -8,7 +8,7 @@
     {!Fusion_judge_parse.of_string}의 strict 파싱을 통과해야 하며 위반은
     [Parse_error]로 fail-loud한다.
 
-    2026-07-26까지 이 문서는 "OAS capability facts가 native structured output을
+    2026-07-26까지 이 문서는 "AGENT_CORE capability facts가 native structured output을
     허용하면 JsonSchema를 싣는다(Native tier)"와 "tier 결정은 로그로 관측"을
     적고 있었다. 구현에는 그 분기도 tier 로그도 없다.
 
@@ -17,7 +17,7 @@
     벗기므로(fusion_judge_parse.ml:177-190), 응답 전체가 펜스 블록 하나면 파싱은
     통과한다. 벗겨지지 않는 경우는 둘뿐이다 — 펜스 앞에 산문이 붙어 첫 3바이트가
     ``` 이 아니거나, 펜스 뒤에 개행이 없어 [String.index_opt s '\n'] 이 [None]
-    이라 원문이 그대로 나가는 경우. 라이브 관측(keeper rondo, event-queue-v12.json
+    이라 원문이 그대로 나가는 경우. 라이브 Keeper 관측(event-queue-v12.json
     last_settlement, 2026-07-25T10:44Z, ``Invalid token '```json``)은 Yojson 이
     펜스를 봤다는 뜻이므로 이 둘 중 하나이며, 어느 쪽인지는 tier 기록이 없어
     settlement 만으로는 가려지지 않는다.
@@ -43,8 +43,11 @@ val compose_prompt : question:string -> panel:Fusion_types.panel_outcome list ->
     {!Fusion_judge_parse.of_string}으로 파싱한다.
     [web_tools=true]면 심판 에이전트에 web_search/web_fetch를 주입한다.
     [max_tokens]는 출력 토큰 예산이다. 생략하면 Runtime_agent 기본값을 보존한다.
-    빌드/실행/빈응답/파싱 실패는 [Error (msg, usage)]. [Masc_oas_bridge.run_safe]는
-    예외/취소만 관측하며 Provider transport가 timeout을 소유한다. 성공 시 종합 + 소비
+    [timeout_s]는 응답 데드라인(초)이며 에이전트의 [body_timeout_s]로 집행된다.
+    생략하면 Provider transport가 선언한 값이 그대로 유일한 데드라인으로 남는다 —
+    preset은 그 위에 얹는 요청 단위 override지 두 번째 SSOT가 아니다.
+    빌드/실행/빈응답/파싱 실패는 [Error (msg, usage)]. [Masc_agent_core_bridge.run_safe]는
+    예외/취소만 관측한다. 성공 시 종합 + 소비
     토큰 [usage]를 반환하고(panel과 대칭, 비용 회계 RFC §10),
     실패 시에도 usage를 동반한다 — 응답을 받은 뒤 실패(빈 응답/파싱 실패)는 소비분을,
     토큰 소비 전 실패(빌드/실행/provider 에러)는 [Fusion_types.zero_usage]를 싣는다. 이로써
@@ -53,6 +56,7 @@ val run
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?max_tokens:int
+  -> ?timeout_s:float
   -> judge_system_prompt:string
   -> judge_model:string
   -> question:string
@@ -82,6 +86,7 @@ val run_refine
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?max_tokens:int
+  -> ?timeout_s:float
   -> judge_system_prompt:string
   -> judge_model:string
   -> question:string
@@ -121,6 +126,7 @@ val run_meta
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?max_tokens:int
+  -> ?timeout_s:float
   -> judge_system_prompt:string
   -> judge_model:string
   -> question:string
@@ -137,9 +143,9 @@ module For_testing : sig
     :  Llm_provider.Provider_config.t
     -> (Llm_provider.Provider_config.t, string) result
 
-  val failure_of_sdk_error
+  val failure_of_core_error
     :  runtime_id:string
     -> prefix:string
-    -> Agent_sdk.Error.sdk_error
+    -> Agent_core.Error.t
     -> Fusion_types.judge_failure
 end

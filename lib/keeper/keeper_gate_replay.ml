@@ -166,6 +166,9 @@ let network_read_operation = Keeper_tool_in_process_runtime.network_read_gate_op
 let connector_post_operation =
   Keeper_tool_in_process_runtime.connector_post_gate_operation
 ;;
+let memory_write_operation =
+  Keeper_tool_memory_runtime.memory_write_gate_operation
+;;
 
 (* The producer owns both the argument schema and the effect encoding, so it
    owns the inversion; replay only decides whether to spend the grant. *)
@@ -184,6 +187,9 @@ let network_read_of_gate_input =
 let connector_post_of_gate_input =
   Keeper_tool_in_process_runtime.connector_post_replay_of_gate_input
 ;;
+let memory_write_args_of_gate_input =
+  Keeper_tool_memory_runtime.replay_memory_write_args_of_gate_input
+;;
 
 (* Which approved operations this module can spend without the Keeper
    re-emitting the call. Separated from the replay body so the set is
@@ -194,6 +200,7 @@ type replayable =
   | Replay_execute
   | Replay_network_read
   | Replay_connector_post
+  | Replay_memory_write
 
 let replayable_of_operation operation =
   if String.equal operation write_operation
@@ -204,6 +211,8 @@ let replayable_of_operation operation =
   then Some Replay_network_read
   else if String.equal operation connector_post_operation
   then Some Replay_connector_post
+  else if String.equal operation memory_write_operation
+  then Some Replay_memory_write
   else None
 ;;
 
@@ -212,6 +221,22 @@ type effect_outcome =
   | Effect_applied_with_warning of string
   | Effect_failed of string
   | Effect_indeterminate of string
+
+type replay_execution =
+  { outcome : outcome
+  ; terminal_effect_receipt :
+      Keeper_tool_execution.terminal_effect_receipt option
+  }
+
+let replay_execution ?terminal_effect_receipt outcome =
+  { outcome; terminal_effect_receipt }
+;;
+
+let applied_terminal_effect_receipt replay_effect receipt =
+  match replay_effect with
+  | Effect_applied _ | Effect_applied_with_warning _ -> receipt
+  | Effect_failed _ | Effect_indeterminate _ -> None
+;;
 
 let replay_artifact_identity artifact_ref =
   Tool_output.with_preview artifact_ref ""
@@ -249,6 +274,8 @@ module Repair_map = Map.Make (String)
 type pending_repair =
   { operation : string
   ; replay_effect : effect_outcome
+  ; terminal_effect_receipt :
+      Keeper_tool_execution.terminal_effect_receipt option
   }
 
 (* A Keeper turn already owns the per-Keeper admission mutex before replay
@@ -316,7 +343,7 @@ let retire_stale_grant
       ~tool_name:request.tool_name
       ~input:request.input
   with
-  | Ok Keeper_approval_queue.Consumption_committed
+  | Ok (Keeper_approval_queue.Consumption_committed _)
   | Ok Keeper_approval_queue.Consumption_already_committed ->
     Ok ()
   | Ok Keeper_approval_queue.Consumption_not_matching ->
@@ -343,35 +370,52 @@ let replay_journal_status ~base_path ~approval_id replay_outcome =
     Error (Keeper_approval_queue.grant_error_to_string error)
 ;;
 
-let replayed_outcome ~base_path ~approval_id ~operation replay_effect =
+let replayed_outcome
+      ~base_path
+      ~approval_id
+      ~operation
+      ?terminal_effect_receipt
+      replay_effect
+  =
+  let terminal_effect_receipt =
+    applied_terminal_effect_receipt replay_effect terminal_effect_receipt
+  in
   remember_pending_repair
     ~base_path
     ~approval_id
-    { operation; replay_effect };
+    { operation; replay_effect; terminal_effect_receipt };
   match persist_replay_effect ~base_path replay_effect with
   | Error detail ->
-    Repair_required { operation; stage = Evidence_storage; detail }
+    replay_execution
+      ?terminal_effect_receipt
+      (Repair_required { operation; stage = Evidence_storage; detail })
   | Ok replay_outcome ->
     (match replay_journal_status ~base_path ~approval_id replay_outcome with
      | Error detail ->
-       Repair_required { operation; stage = Replay_journal; detail }
+       replay_execution
+         ?terminal_effect_receipt
+         (Repair_required { operation; stage = Replay_journal; detail })
      | Ok journal ->
        forget_pending_repair ~base_path ~approval_id;
-       (match replay_outcome with
-        | Keeper_approval_queue.Replay_applied output_ref ->
-          Applied { operation; output_ref; journal }
-        | Keeper_approval_queue.Replay_applied_with_warning detail_ref ->
-          Applied_with_warning { operation; detail_ref; journal }
-        | Keeper_approval_queue.Replay_failed detail_ref ->
-          Failed { operation; detail_ref; journal }
-        | Keeper_approval_queue.Replay_indeterminate detail_ref ->
-          Indeterminate { operation; detail_ref; journal }))
+       let outcome =
+         match replay_outcome with
+         | Keeper_approval_queue.Replay_applied output_ref ->
+           Applied { operation; output_ref; journal }
+         | Keeper_approval_queue.Replay_applied_with_warning detail_ref ->
+           Applied_with_warning { operation; detail_ref; journal }
+         | Keeper_approval_queue.Replay_failed detail_ref ->
+           Failed { operation; detail_ref; journal }
+         | Keeper_approval_queue.Replay_indeterminate detail_ref ->
+           Indeterminate { operation; detail_ref; journal }
+       in
+       replay_execution ?terminal_effect_receipt outcome)
 ;;
 
-let durable_replay_outcome
+let durable_replay_execution
       ~base_path
       ~operation
       ~journal
+      ?terminal_effect_receipt
       replay_outcome
   =
   let verified =
@@ -393,15 +437,27 @@ let durable_replay_outcome
         (fun _ -> `Indeterminate detail_ref)
         (retrieve_replay_artifact ~base_path detail_ref)
   in
-  match verified with
-  | Ok (`Applied output_ref) -> Applied { operation; output_ref; journal }
-  | Ok (`Applied_with_warning detail_ref) ->
-    Applied_with_warning { operation; detail_ref; journal }
-  | Ok (`Failed detail_ref) -> Failed { operation; detail_ref; journal }
-  | Ok (`Indeterminate detail_ref) ->
-    Indeterminate { operation; detail_ref; journal }
-  | Error detail ->
-    Repair_required { operation; stage = Evidence_retrieval; detail }
+  let outcome =
+    match verified with
+    | Ok (`Applied output_ref) -> Applied { operation; output_ref; journal }
+    | Ok (`Applied_with_warning detail_ref) ->
+      Applied_with_warning { operation; detail_ref; journal }
+    | Ok (`Failed detail_ref) -> Failed { operation; detail_ref; journal }
+    | Ok (`Indeterminate detail_ref) ->
+      Indeterminate { operation; detail_ref; journal }
+    | Error detail ->
+      Repair_required { operation; stage = Evidence_retrieval; detail }
+  in
+  replay_execution ?terminal_effect_receipt outcome
+;;
+
+let durable_replay_outcome ~base_path ~operation ~journal replay_outcome =
+  (durable_replay_execution
+     ~base_path
+     ~operation
+     ~journal
+     replay_outcome)
+    .outcome
 ;;
 
 type replay_evidence_effect =
@@ -547,12 +603,12 @@ let append_model_evidence ~approval_id ~user_message = function
 
 let append_model_evidence_block evidence blocks =
   blocks
-  @ [ Agent_sdk.Types.Text (canonical_replay_evidence_fragment evidence) ]
+  @ [ Agent_core.Types.Text (canonical_replay_evidence_fragment evidence) ]
 ;;
 
 let project_model_input ~base_path:_ evidence messages =
   let referenced = replay_evidence_fragment evidence in
-  Ok (messages @ [ Agent_sdk.Types.user_msg referenced ])
+  Ok (messages @ [ Agent_core.Types.user_msg referenced ])
 ;;
 
 let approved_resolution_message ~approval_id ~tool_name ~input ~user_message =
@@ -688,26 +744,6 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
          ; Printf.sprintf "- rationale: %s" rationale
          ; "This resolution grants no authorization."
          ])
-  | Some
-      { Keeper_event_queue.approval_id
-      ; decision = Keeper_event_queue.Hitl_edited edited_input
-      ; _
-      } ->
-    let edited_input = Yojson.Safe.pretty_to_string edited_input in
-    plain_model_message
-      (String.concat
-         "\n"
-         [ user_message
-         ; ""
-         ; "Gate resolution delivered:"
-         ; Printf.sprintf "- approval_id: %s" approval_id
-         ; "- decision: edited"
-         ; "- edited input:"
-         ; "```json"
-         ; edited_input
-         ; "```"
-         ; "This edit grants no authorization; any external effect follows the ordinary Gate independently."
-         ])
   | None -> plain_model_message user_message
 ;;
 
@@ -735,7 +771,36 @@ let compose_model_message
       hitl_resolution
 ;;
 
-let replay_approved_effect
+let connector_post_terminal_effect_receipt connector_post =
+  Keeper_tool_execution.Surface_post_completed
+    (Keeper_tool_in_process_runtime.connector_post_replay_target connector_post)
+;;
+
+let terminal_effect_receipt_of_durable_replay request replay_outcome =
+  match
+    replayable_of_operation request.Keeper_approval_queue.tool_name,
+    replay_outcome
+  with
+  | ( Some Replay_connector_post
+    , ( Keeper_approval_queue.Replay_applied _
+      | Keeper_approval_queue.Replay_applied_with_warning _ ) ) ->
+    Result.map
+      (fun connector_post ->
+         Some (connector_post_terminal_effect_receipt connector_post))
+      (connector_post_of_gate_input request.input)
+  | ( ( Some Replay_write
+      | Some Replay_execute
+      | Some Replay_network_read
+      | Some Replay_memory_write
+      | None )
+    , _ )
+  | Some Replay_connector_post,
+    ( Keeper_approval_queue.Replay_failed _
+    | Keeper_approval_queue.Replay_indeterminate _ ) ->
+    Ok None
+;;
+
+let replay_approved_effect_with_receipt
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(publication_recovery :
@@ -758,29 +823,41 @@ let replay_approved_effect
          ~base_path:config.base_path
          ~approval_id
      with
-     | Some { operation; replay_effect } ->
+     | Some { operation; replay_effect; terminal_effect_receipt } ->
        replayed_outcome
          ~base_path:config.base_path
          ~approval_id
          ~operation
+         ?terminal_effect_receipt
          replay_effect
      | None ->
-       Repair_required
-         { operation = "unknown"
-         ; detail = Keeper_approval_queue.grant_error_to_string error
-         ; stage = Resolution_lookup
-         })
+       replay_execution
+         (Repair_required
+            { operation = "unknown"
+            ; detail = Keeper_approval_queue.grant_error_to_string error
+            ; stage = Resolution_lookup
+            }))
   | Ok
       { request
       ; state = Keeper_approval_queue.Resolution_consumed
       ; replay_outcome = Some replay_outcome
       } ->
     forget_pending_repair ~base_path:config.base_path ~approval_id;
-    durable_replay_outcome
-      ~base_path:config.base_path
-      ~operation:request.tool_name
-      ~journal:Replay_journal_already_recorded
-      replay_outcome
+    (match terminal_effect_receipt_of_durable_replay request replay_outcome with
+     | Error detail ->
+       replay_execution
+         (Repair_required
+            { operation = request.tool_name
+            ; stage = Request_decode
+            ; detail
+            })
+     | Ok terminal_effect_receipt ->
+       durable_replay_execution
+         ~base_path:config.base_path
+         ~operation:request.tool_name
+         ~journal:Replay_journal_already_recorded
+         ?terminal_effect_receipt
+         replay_outcome)
   | Ok
       { request
       ; state = Keeper_approval_queue.Resolution_consumed
@@ -791,11 +868,12 @@ let replay_approved_effect
          ~base_path:config.base_path
          ~approval_id
      with
-     | Some { operation; replay_effect } ->
+     | Some { operation; replay_effect; terminal_effect_receipt } ->
        replayed_outcome
          ~base_path:config.base_path
          ~approval_id
          ~operation
+         ?terminal_effect_receipt
          replay_effect
      | None ->
        replayed_outcome
@@ -809,17 +887,18 @@ let replay_approved_effect
       ; state = Keeper_approval_queue.Resolution_unconsumed
       ; replay_outcome = Some _
       } ->
-    Repair_required
-      { operation = request.tool_name
-      ; stage = Invalid_resolution_state
-      ; detail = "replay outcome exists before grant consumption"
-      }
+    replay_execution
+      (Repair_required
+         { operation = request.tool_name
+         ; stage = Invalid_resolution_state
+         ; detail = "replay outcome exists before grant consumption"
+         })
   | Ok
       { request
       ; state = Keeper_approval_queue.Resolution_unconsumed
       ; replay_outcome = None
       } ->
-    let run_effect operation run =
+    let run_effect ?terminal_effect_receipt operation run =
       let execution =
         try Ok (run ()) with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -846,11 +925,12 @@ let replay_approved_effect
              request
          with
          | Error detail ->
-           Repair_required
-             { operation
-             ; stage = Stale_grant_retirement
-             ; detail
-             }
+           replay_execution
+             (Repair_required
+                { operation
+                ; stage = Stale_grant_retirement
+                ; detail
+                })
          | Ok () ->
            replayed_outcome
              ~base_path:config.base_path
@@ -862,16 +942,24 @@ let replay_approved_effect
           ~base_path:config.base_path
           ~approval_id
           ~operation
+          ?terminal_effect_receipt
           (summarize_execution ~operation execution)
     in
-    let replay operation decode run =
+    let replay ?terminal_effect_receipt_of_args operation decode run =
       match decode request.input with
       | Error detail ->
-        Repair_required { operation; stage = Request_decode; detail }
-      | Ok args -> run_effect operation (fun () -> run args)
+        replay_execution
+          (Repair_required { operation; stage = Request_decode; detail })
+      | Ok args ->
+        let terminal_effect_receipt =
+          Option.map
+            (fun make_receipt -> make_receipt args)
+            terminal_effect_receipt_of_args
+        in
+        run_effect ?terminal_effect_receipt operation (fun () -> run args)
     in
     (match replayable_of_operation request.tool_name with
-     | None -> Not_applicable
+     | None -> replay_execution Not_applicable
      | Some Replay_write ->
        replay write_operation write_args_of_gate_input (fun args ->
          Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
@@ -898,11 +986,12 @@ let replay_approved_effect
      | Some Replay_network_read ->
        (match network_read_of_gate_input request.input with
         | Error detail ->
-          Repair_required
-            { operation = network_read_operation
-            ; stage = Request_decode
-            ; detail
-            }
+          replay_execution
+            (Repair_required
+               { operation = network_read_operation
+               ; stage = Request_decode
+               ; detail
+               })
         | Ok (Keeper_tool_in_process_runtime.Replay_web_search args) ->
           run_effect network_read_operation (fun () ->
             Keeper_tool_in_process_runtime.handle_web_search_with_outcome
@@ -925,6 +1014,7 @@ let replay_approved_effect
               ()))
      | Some Replay_connector_post ->
        replay
+         ~terminal_effect_receipt_of_args:connector_post_terminal_effect_receipt
          connector_post_operation
          connector_post_of_gate_input
          (fun connector_post ->
@@ -934,7 +1024,41 @@ let replay_approved_effect
               ?continuation_channel
               ?gate_context
               ~gate_grant:grant
-              connector_post))
+              connector_post)
+     | Some Replay_memory_write ->
+       replay memory_write_operation memory_write_args_of_gate_input (fun args ->
+         Keeper_tool_in_process_runtime.handle_memory_write_with_outcome
+           ~config
+           ~meta
+           ?continuation_channel
+           ?gate_context
+           ~gate_grant:grant
+           ~args
+           ()))
+;;
+
+let replay_approved_effect
+      ~config
+      ~meta
+      ~publication_recovery
+      ~turn_sandbox_factory
+      ?continuation_channel
+      ?gate_context
+      ~grant
+      ~approval_id
+      ()
+  =
+  (replay_approved_effect_with_receipt
+     ~config
+     ~meta
+     ~publication_recovery
+     ~turn_sandbox_factory
+     ?continuation_channel
+     ?gate_context
+     ~grant
+     ~approval_id
+     ())
+    .outcome
 ;;
 
 module For_testing = struct

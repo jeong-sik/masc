@@ -3,7 +3,7 @@
 // Phase = lifecycle health (생명주기), complementary to pipeline_stage (활동).
 //
 // Color mapping follows the Anyang Sleepers design system (#8177,
-// #8235): the 13 phases collapse into 6 visual groups so that across
+// #8235): the 11 phases collapse into 6 visual groups so that across
 // a row of 40 keepers the palette reads as 6 semantic categories
 // rather than 13 similar-but-subtly-different hues. Individual phase
 // is still distinguished by its icon and Korean label — the color
@@ -37,12 +37,12 @@ interface PhaseStyle {
 // 6 visual groups per design system README:
 //   ok      running                                          → --ok
 //   working compacting · handing_off · draining · restarting → --accent (slate)
-//   warn    failing · overflowed                             → --warn
+//   warn    failing                                          → --warn
 //   paused  paused                                           → --paused
 //   inactive offline · stopped · dead                        → --text-muted / --bad-light
 //
 // Restarting sits with "working" — operators read a restart as
-// recovery-in-progress, not a fresh failure. Dead keeps the bad-light
+// recovery-in-progress, not a fresh failure. Crashed keeps the bad-light
 // hue (brick) because it indicates a terminated agent, distinct from
 // Stopped (intentional) and Offline (never connected).
 const SOFT_GLOW = '0 0 8px color-mix(in srgb, currentColor 25%, transparent)'
@@ -62,7 +62,6 @@ export const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
   Offline:    { label: PHASE_LABEL_KO.unbooted,     color: 'var(--color-fg-muted)', bg: 'var(--color-bg-elevated)',   border: 'var(--color-border-default)',   glow: 'none',        icon: '○' },
   Running:    { label: PHASE_LABEL_KO.running,     color: 'var(--color-status-ok)',         bg: 'var(--ok-10)',     border: 'var(--ok-20)',      glow: SOFT_GLOW,     icon: '●' },
   Failing:    { label: PHASE_LABEL_KO.failing,     color: 'var(--color-status-warn)',       bg: 'var(--warn-10)',   border: 'var(--warn-20)',    glow: SOFT_GLOW,     icon: '▲' },
-  Overflowed: { label: PHASE_LABEL_KO.overflowed, color: 'var(--color-status-warn)',       bg: 'var(--warn-10)',   border: 'var(--warn-20)',    glow: SOFT_GLOW,     icon: '⚠' },
   Compacting: { label: PHASE_LABEL_KO.compacting,     color: 'var(--color-accent-fg)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '◆' },
   HandingOff: { label: PHASE_LABEL_KO.handoff,     color: 'var(--color-accent-fg)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '⟳' },
   Draining:   { label: PHASE_LABEL_KO.draining,     color: 'var(--color-accent-fg)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '▽' },
@@ -70,7 +69,6 @@ export const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
   Stopped:    { label: PHASE_LABEL_KO.stopped,     color: 'var(--color-fg-muted)', bg: 'var(--color-bg-elevated)',   border: 'var(--color-border-default)',   glow: 'none',        icon: '■' },
   Crashed:    { label: PHASE_LABEL_KO.crashed,   color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: STRONG_GLOW,   icon: '✕' },
   Restarting: { label: PHASE_LABEL_KO.restarting,     color: 'var(--color-accent-fg)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '↺' },
-  Dead:       { label: PHASE_LABEL_KO.dead,     color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: 'none',        icon: '✦' },
 }
 
 const PIPELINE_STAGE_DETAIL_LABELS: Record<string, string> = {
@@ -85,7 +83,6 @@ const PIPELINE_STAGE_DETAIL_LABELS: Record<string, string> = {
   operator_or_policy_paused: '일시정지',
   clean_stop_terminal: '정상 정지',
   crashed_restart_candidate: '재시작 후보',
-  dead_tombstone_terminal: 'Dead tombstone',
   structural_failure_terminal: '구조 실패',
 }
 

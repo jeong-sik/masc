@@ -1,0 +1,89 @@
+name = "masc_runtime_ollama_probe"
+description = """
+Admin-only native Ollama timing probe with repeated /api/generate calls. It \
+may load a model and change warm/cache state, so it is not read-only or \
+idempotent. Returns loaded models from /api/ps, per-run \
+load/prompt-eval/generation timings, tok/sec estimates, and a timing-based \
+repeated-prefix reuse inference. This does not expose direct KV occupancy or \
+hit-rate."""
+
+[[params]]
+name = "server_url"
+type = "string"
+
+[[params]]
+name = "model"
+type = "string"
+
+[[params]]
+name = "prompt"
+type = "string"
+
+[[params]]
+name = "keep_alive"
+type = "string"
+
+[[params]]
+name = "probe_runs"
+type = "integer"
+minimum = 1
+maximum = 4
+description = """
+Generate runs per probe. Values outside [1, 4] are rejected, not reduced."""
+
+[[params]]
+name = "max_tokens"
+type = "integer"
+minimum = 1
+maximum = 128
+description = """
+Output tokens per generate run. Values outside [1, 128] are rejected, not \
+reduced."""
+
+[[params]]
+name = "ps_timeout_sec"
+type = "integer"
+minimum = 1
+maximum = 30
+description = """
+Timeout for the /api/ps state read in seconds. Values outside [1, 30] are \
+rejected, not reduced."""
+
+[[params]]
+name = "think"
+type = "boolean"
+description = """
+Boolean shorthand for think_mode. false disables reasoning-mode thinking; \
+true enables it."""
+
+[[params]]
+name = "think_mode"
+type = "string"
+enum = ["auto", "disabled", "enabled"]
+description = """
+Think mode choice. auto lets model decide; disabled skips reasoning; enabled \
+forces it."""
+
+[[params]]
+name = "think_policy"
+type = "string"
+description = """
+Adaptive thinking policy for Ollama reasoning models. auto defaults to \
+response-oriented non-thinking probes; enabled measures thinking path \
+explicitly."""
+
+[[params]]
+name = "timeout_sec"
+type = "integer"
+minimum = 1
+description = """
+Explicit probe timeout in seconds. Every positive value is passed through \
+unchanged."""
+
+[[params]]
+name = "generate_when_unloaded"
+type = "boolean"
+
+[[params]]
+name = "run_generate"
+type = "boolean"

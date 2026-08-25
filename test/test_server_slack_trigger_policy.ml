@@ -1,12 +1,14 @@
-(* RFC-0317 — the server's resolved-config trigger-policy parser for the Slack
-   gateway must delegate to the single canonical grammar in
-   [Slack_gateway_state], so production config and the (separately test-covered)
-   grammar cannot drift. Mirror of [test_server_discord_trigger_policy].
+(* RFC-0317 / masc#29078 — the Slack gateway's trigger-policy resolution must
+   delegate to the single canonical grammar in [Slack_gateway_state] and apply
+   the same precedence and failure posture as the Discord sibling
+   ([test_server_discord_trigger_policy]).
 
-   These assertions pin the wrapper's contract: an empty value is unset
-   (=> default), the four valid forms parse through to the same variant the
-   strict grammar yields, and an unparseable value (or empty user_only id)
-   falls back to the default rather than producing a half-formed policy. *)
+   These assertions pin the contract on both configured planes: env wins over
+   TOML, a blank/unset env falls through to TOML, a missing file/key yields the
+   default, and an unparseable value on *either* plane is a typed load error.
+   Neither plane may quietly resolve to a policy the operator did not write —
+   the default is [Mention_or_thread], which is wider than [Mention_only], so a
+   silent fallback would broaden the trigger surface on a typo. *)
 
 open Alcotest
 open Masc
@@ -55,6 +57,43 @@ let with_temp_toml content f =
        f path)
 ;;
 
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end
+    else Sys.remove path
+;;
+
+let with_temp_dir f =
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf
+         "masc-slack-trigger-policy-root-%d-%d"
+         (Unix.getpid ())
+         (Random.bits ()))
+  in
+  Unix.mkdir dir 0o700;
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+;;
+
+let write_file path content =
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+;;
+
+(* Point the config resolver at a temp config root so the TOML plane is under
+   test control. MASC_CONFIG_DIR is the documented override the sandbox suites
+   already use. *)
+let with_config_root dir f =
+  with_env "MASC_CONFIG_DIR" dir @@ fun () ->
+  with_env "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE" "1" @@ fun () ->
+  Config_dir_resolver.reset ();
+  Fun.protect ~finally:Config_dir_resolver.reset f
+;;
+
 let load_error_to_string error = G.trigger_policy_load_error_to_string error
 
 let test_with_env_restores_unset () =
@@ -65,16 +104,13 @@ let test_with_env_restores_unset () =
   check (option string) "restored unset" None (Sys.getenv_opt key)
 ;;
 
-let test_empty_is_default () =
-  check string "empty => default" default_str (ps (G.parse_trigger_policy ""))
+(* -- resolved_trigger_policy: env > TOML > default -- *)
 
-let test_whitespace_is_default () =
-  check string "whitespace => default" default_str
-    (ps (G.parse_trigger_policy "   "))
-
-let test_valid_values_parse_through () =
-  (* Each valid form yields exactly what the strict grammar yields,
-     proving the wrapper delegates rather than re-implementing. *)
+let test_env_valid_values_parse_through () =
+  (* Each valid form resolves to exactly what the strict grammar yields, so the
+     config boundary delegates rather than re-implementing the grammar. *)
+  with_temp_dir @@ fun dir ->
+  with_config_root dir @@ fun () ->
   List.iter
     (fun raw ->
       let expected =
@@ -82,21 +118,88 @@ let test_valid_values_parse_through () =
         | Ok p -> ps p
         | Error msg -> failf "strict grammar rejected %S: %s" raw msg
       in
-      check string (Printf.sprintf "%S parses through" raw) expected
-        (ps (G.parse_trigger_policy raw)))
+      with_env "MASC_SLACK_TRIGGER_POLICY" raw @@ fun () ->
+      match G.resolved_trigger_policy () with
+      | Ok p ->
+        check string (Printf.sprintf "%S resolves through" raw) expected (ps p)
+      | Error e ->
+        failf "expected %S to resolve, got error: %s" raw
+          (load_error_to_string e))
     [ "mention_only"; "mention_or_thread"; "all"; "user_only:U123" ]
+;;
 
-let test_unknown_falls_back_to_default () =
-  (* A typo must not produce a policy the operator did not write. The wrapper
-     logs (via Log.Server) and returns the default. *)
-  check string "typo => default" default_str
-    (ps (G.parse_trigger_policy "mention_ony"))
+let test_env_valid_wins_over_toml () =
+  with_temp_dir @@ fun dir ->
+  write_file (Filename.concat dir "runtime.toml")
+    "[slack]\ntrigger_policy = \"all\"\n";
+  with_config_root dir @@ fun () ->
+  with_env "MASC_SLACK_TRIGGER_POLICY" "mention_only" @@ fun () ->
+  match G.resolved_trigger_policy () with
+  | Ok p -> check string "env wins over TOML" "mention_only" (ps p)
+  | Error e ->
+    failf "expected env policy, got error: %s" (load_error_to_string e)
+;;
 
-let test_user_only_empty_id_falls_back () =
-  (* The strict grammar rejects an empty id; the wrapper falls back to the
-     default instead of constructing User_only "". *)
-  check string "user_only: empty id => default" default_str
-    (ps (G.parse_trigger_policy "user_only:"))
+let test_env_invalid_is_load_error () =
+  (* A typo must not resolve. Before masc#29078 this logged a WARN and returned
+     Mention_or_thread, quietly widening the trigger surface. *)
+  with_temp_dir @@ fun dir ->
+  with_config_root dir @@ fun () ->
+  with_env "MASC_SLACK_TRIGGER_POLICY" "mention_ony" @@ fun () ->
+  match G.resolved_trigger_policy () with
+  | Error (G.Trigger_policy_env_invalid _) -> ()
+  | Error e ->
+    failf "expected env_invalid, got: %s" (load_error_to_string e)
+  | Ok p -> failf "invalid env must not resolve, got %s" (ps p)
+;;
+
+let test_env_user_only_empty_id_is_load_error () =
+  (* The strict grammar rejects an empty id; the boundary must surface that
+     rather than constructing User_only "" or falling back. *)
+  with_temp_dir @@ fun dir ->
+  with_config_root dir @@ fun () ->
+  with_env "MASC_SLACK_TRIGGER_POLICY" "user_only:" @@ fun () ->
+  match G.resolved_trigger_policy () with
+  | Error (G.Trigger_policy_env_invalid _) -> ()
+  | Error e ->
+    failf "expected env_invalid, got: %s" (load_error_to_string e)
+  | Ok p -> failf "empty user_only id must not resolve, got %s" (ps p)
+;;
+
+let test_env_blank_falls_to_toml () =
+  with_temp_dir @@ fun dir ->
+  write_file (Filename.concat dir "runtime.toml")
+    "[slack]\ntrigger_policy = \"all\"\n";
+  with_config_root dir @@ fun () ->
+  with_env "MASC_SLACK_TRIGGER_POLICY" "   " @@ fun () ->
+  match G.resolved_trigger_policy () with
+  | Ok p -> check string "blank env is unset" "all" (ps p)
+  | Error e ->
+    failf "expected TOML policy, got error: %s" (load_error_to_string e)
+;;
+
+let test_env_unset_falls_to_toml () =
+  with_temp_dir @@ fun dir ->
+  write_file (Filename.concat dir "runtime.toml")
+    "[slack]\ntrigger_policy = \"all\"\n";
+  with_config_root dir @@ fun () ->
+  with_env "MASC_SLACK_TRIGGER_POLICY" "" @@ fun () ->
+  match G.resolved_trigger_policy () with
+  | Ok p -> check string "TOML applies when env unset" "all" (ps p)
+  | Error e ->
+    failf "expected TOML policy, got error: %s" (load_error_to_string e)
+;;
+
+let test_all_unset_is_default () =
+  with_temp_dir @@ fun dir ->
+  with_config_root dir @@ fun () ->
+  with_env "MASC_SLACK_TRIGGER_POLICY" "" @@ fun () ->
+  match G.resolved_trigger_policy () with
+  | Ok p -> check string "default when nothing configured" default_str (ps p)
+  | Error e -> failf "expected default, got error: %s" (load_error_to_string e)
+;;
+
+(* -- load_trigger_policy_from_toml: the TOML plane in isolation -- *)
 
 let test_missing_runtime_toml_is_typed_missing () =
   let path = Filename.temp_file "masc-slack-trigger-policy-missing-" ".toml" in
@@ -262,9 +365,9 @@ let test_bound_message_queues_exact_slack_ts () =
       check bool "accept completed before handoff" true !accepted_before_delivery;
       (match !observed_delivery with
        | Some
-           { source =
-               Keeper_chat_queue.Slack
-                 { channel_id; user_id; user_name; team_id; thread_ts }
+           { continuation_channel =
+               Keeper_continuation_channel.Slack
+                 { channel_id; user_id; team_id; thread_ts }
            ; surface =
                Surface_ref.Slack
                  { team_id = surface_team_id
@@ -277,7 +380,6 @@ let test_bound_message_queues_exact_slack_ts () =
            } ->
          check string "Slack delivery channel" "C123" channel_id;
          check string "Slack delivery actor" "U123" user_id;
-         check string "Slack delivery actor name" "operator" user_name;
          check (option string) "Slack delivery team" (Some "T123") team_id;
          check (option string) "Slack delivery workspace identity"
            (Some "T123") workspace_id;
@@ -285,8 +387,8 @@ let test_bound_message_queues_exact_slack_ts () =
            (Some "1710000000.123456") thread_ts;
          check string "Slack surface channel" "C123" surface_channel_id;
          check (option string) "Slack surface team" (Some "T123") surface_team_id;
-         check (option string) "Slack source message is top-level" None
-           surface_thread_ts;
+         check (option string) "Slack surface preserves reply thread"
+           (Some "1710000000.123456") surface_thread_ts;
          check (option string) "Slack conversation identity"
            (Some "slack:channel:C123") conversation_id;
          check (option string) "Slack external event identity"
@@ -349,16 +451,20 @@ let test_binding_store_failure_does_not_enqueue () =
 
 let () =
   run "server_slack_trigger_policy"
-    [ ( "parse_trigger_policy"
+    [ ( "resolved_trigger_policy (env > TOML > default)"
       , [ test_case "with_env restores unset" `Quick test_with_env_restores_unset
-        ; test_case "empty => default" `Quick test_empty_is_default
-        ; test_case "whitespace => default" `Quick test_whitespace_is_default
-        ; test_case "valid values parse through strict grammar" `Quick
-            test_valid_values_parse_through
-        ; test_case "unknown => default (no silent coercion)" `Quick
-            test_unknown_falls_back_to_default
-        ; test_case "user_only empty id => default" `Quick
-            test_user_only_empty_id_falls_back
+        ; test_case "valid values resolve through strict grammar" `Quick
+            test_env_valid_values_parse_through
+        ; test_case "valid env wins over TOML" `Quick
+            test_env_valid_wins_over_toml
+        ; test_case "invalid env => load error (no silent default)" `Quick
+            test_env_invalid_is_load_error
+        ; test_case "user_only empty id => load error" `Quick
+            test_env_user_only_empty_id_is_load_error
+        ; test_case "blank env falls to TOML" `Quick
+            test_env_blank_falls_to_toml
+        ; test_case "unset env falls to TOML" `Quick test_env_unset_falls_to_toml
+        ; test_case "all unset => default" `Quick test_all_unset_is_default
         ] )
     ; ( "runtime.toml loading"
       , [ test_case "missing file => typed missing" `Quick

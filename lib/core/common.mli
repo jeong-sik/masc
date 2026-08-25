@@ -6,13 +6,9 @@
 (** Boolean environment variable with permissive truthy parsing:
     ["1"], ["true"], ["yes"], ["on"] (case/whitespace insensitive)
     all return [true]; absent, empty, or anything else returns [false]. *)
-val env_true : string -> bool
-
 (** [true] when [MASC_STRICT_FINALIZERS] env is truthy. Callers can
     opt into raising finally-block exceptions instead of swallowing
     them. *)
-val strict_finalizers : unit -> bool
-
 val handle_finalizer_error :
   module_name:string ->
   label:string ->
@@ -62,12 +58,39 @@ type keeper_runtime_store =
   | Keeper_turn_records
   | Keeper_reaction_ledger
   | Keeper_trajectories
+  | Keeper_crash_events
 (** Canonical child-store names under {!keepers_runtime_dirname}. *)
 
-val keeper_runtime_store_dirname : keeper_runtime_store -> string
 val keeper_runtime_store_of_dirname : string -> keeper_runtime_store option
-val keeper_runtime_store_dirnames : string list
+val keeper_runtime_store_dirname : keeper_runtime_store -> string
+val keeper_runtime_stores : keeper_runtime_store list
 
+type keeper_runtime_store_placement =
+  | Keeper_scoped_dated
+      (** [keepers/<name>/<store>/YYYY-MM/DD.jsonl]. Grows without bound, so
+          both the startup pass and the 24h pass prune it by age. *)
+  | Keeper_scoped_versioned
+      (** [keepers/<name>/<store>/v<N>/]. A schema change moves to the next
+          directory and the previous one is simply never read again, which is
+          what a hard cut is supposed to look like. *)
+  | Keeper_scoped_rotated
+      (** [keepers/<name>/<store>/<file>.jsonl] plus numeric rotations. The
+          flat-file pass owns these, not the dated one. *)
+  | Workspace_scoped
+      (** [<masc root>/<store>]: named here for the dirname, but not written
+          under [keepers/]. *)
+
+val keeper_runtime_store_placement
+  :  keeper_runtime_store
+  -> keeper_runtime_store_placement
+(** Where a store puts its files, and therefore which retention pass owns it.
+
+    This exists because the answer used to be a second list of directory names
+    written out in the maintenance pass. turn-records was added to the store
+    table on 2026-07-31 and nobody added it to that list, so it went unpruned
+    for months at roughly 4 MB a day fleet-wide. A store now has to say where
+    it lives, and the match is exhaustive, so the next one cannot be added
+    without answering. *)
 val auth_dir_from_base_path : base_path:string -> string
 (** [<base_path>/.masc/auth]. SSOT path so {!Auth} and
     {!Keeper_identity} can both compute it without depending on each
@@ -79,15 +102,42 @@ val agents_dir_from_base_path : base_path:string -> string
     files live ([<agent_name>.json]). *)
 
 val max_tool_output_bytes : int
-(** SSOT 64KB cap for MCP tool response bodies. *)
+(** SSOT 64KB cap for MCP tool response bodies.
 
-val truncate_response :
-  ?max_bytes:int ->
-  total_count:int ->
-  string ->
-  string
+    This is an {e inline} threshold: it decides how much of a result is
+    carried in the response body versus offloaded to the blob store. It is
+    not a bound on how much output the runtime will accept from a
+    subprocess — that bound is {!max_process_capture_head_bytes} +
+    {!max_process_capture_tail_bytes}. Conflating the two is what let a
+    single [Execute] call retain 590MB. *)
+
+val max_process_capture_head_bytes : int
+(** Bytes retained from the {e start} of one captured subprocess stream.
+    Backed by a growable buffer, so this budget costs nothing until output
+    actually reaches it. *)
+
+val max_process_capture_tail_bytes : int
+(** Bytes retained from the {e end} of one captured subprocess stream.
+    Backed by a ring allocated eagerly at this size, so it is set to the
+    256KB scale the dashboard already pays per keeper rather than to the
+    head budget.
+
+    Head + tail is the acceptance ceiling for a single stream. claude-code's
+    comparable ceiling is 64 MiB, but it streams bash output to a file on
+    disk while MASC retains the capture in memory for the turn, so the
+    ceiling here is lower. The drainer keeps reading past the ceiling so the
+    exit status and the tail (where failures report) stay exact; only
+    retention is bounded, so memory is O(head + tail) rather than
+    O(output). Elided bytes are reported by {!Exec_buffer.render}'s
+    truncation marker rather than dropped silently. *)
+
 (** [truncate_response ?max_bytes ~total_count s] returns [s] unchanged
     when its length is at most [max_bytes] (default
     {!max_tool_output_bytes}). Otherwise returns the first [max_bytes]
     characters followed by a machine-readable truncation suffix that
     records the original length and [total_count]. *)
+
+val safe_filename : string -> string
+(** Fold a value into one path component: lowercase, keep [a-z0-9._-], and
+    escape anything else as [_XX]. Every layer that turns a name into a file
+    name goes through this, so a name cannot mean two files. *)

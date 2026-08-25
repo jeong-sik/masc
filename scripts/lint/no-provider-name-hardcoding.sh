@@ -3,7 +3,7 @@
 # not keep growing in the MASC-owned runtime projection boundary.
 #
 # This is intentionally narrower than a repo-wide string grep.  Terms like
-# "auto" are valid in auth, agent naming, voice persona,
+# "auto" are valid in auth, agent naming, voice configuration,
 # and unrelated operator UX code. The migration risk is the runtime projection
 # boundary learning concrete provider identity after Provider_adapter was removed.
 #
@@ -94,7 +94,7 @@ if [[ -s "$new_tmp" ]]; then
   echo
   echo "[no-provider-name-hardcoding] DRIFT UP: new provider/model literals in runtime boundary" >&2
   sed 's/^/  - /' "$new_tmp" >&2
-  echo "  Route provider/model truth through OAS runtime bindings or a MASC-local policy overlay." >&2
+  echo "  Route provider/model truth through AGENT_CORE runtime bindings or a MASC-local policy overlay." >&2
 fi
 
 if [[ -s "$stale_tmp" ]]; then

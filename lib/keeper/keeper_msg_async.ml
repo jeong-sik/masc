@@ -340,19 +340,25 @@ let with_store_transition_lock ~base_path ~request_id f =
         Store_transition_table.add store_transition_locks key lock;
         lock)
   in
-  (* fun-protect-finally-ok: the registry user-count cleanup acquires only the
-     cancellation-protected bookkeeping mutex; it awaits no external event and
-     cannot strand the protected exception behind cancellable cleanup. *)
+  (* fun-protect-finally-ok: the user-count decrement runs under
+     [Eio.Cancel.protect], so it completes even when [f] raised because this
+     fiber is being cancelled. [Eio.Mutex.use_rw ~protect:true] is not enough on
+     its own: Eio documents [protect] as covering the critical section, not the
+     wait for the lock, so a contended [mu] would abort the cleanup and leave
+     [lock.users] above zero — the entry keyed by request id would then never be
+     removed from [store_transition_locks]. [with_keeper_lane_lock] below already
+     protects its cleanup the same way. *)
   Fun.protect
     ~finally:(fun () ->
-      Eio.Mutex.use_rw ~protect:true mu (fun () ->
-        lock.users <- lock.users - 1;
-        if lock.users = 0
-        then
-          match Store_transition_table.find_opt store_transition_locks key with
-          | Some current when current == lock ->
-            Store_transition_table.remove store_transition_locks key
-          | Some _ | None -> ()))
+      Eio.Cancel.protect (fun () ->
+        Eio.Mutex.use_rw ~protect:true mu (fun () ->
+          lock.users <- lock.users - 1;
+          if lock.users = 0
+          then
+            match Store_transition_table.find_opt store_transition_locks key with
+            | Some current when current == lock ->
+              Store_transition_table.remove store_transition_locks key
+            | Some _ | None -> ())))
     (fun () -> Eio.Mutex.use_rw ~protect:true lock.mutex f)
 ;;
 
@@ -843,6 +849,16 @@ let entry_record_to_json (e : entry) : Yojson.Safe.t =
   `Assoc fields
 ;;
 
+(* Whole-record equality, next to [same_request_identity]'s five identity
+   fields. The terminal-conflict check used to ask this by serializing both
+   entries and comparing the JSON. That agreed with the record only because
+   [entry_record_to_json] happens to emit every field, in a fixed order, on a
+   single code path — so adding a field to the wire, making one conditional,
+   or reordering the assoc would have quietly changed what counts as an
+   integrity conflict on a durable store. The predicate belongs to the record,
+   not to its rendering. *)
+let same_entry_record (left : entry) (right : entry) = left = right
+
 let same_request_identity (left : entry) (right : entry) =
   String.equal left.request_id right.request_id
   && String.equal left.keeper_name right.keeper_name
@@ -1187,7 +1203,7 @@ let persist_terminal_from_source ~ops ~(entry : entry) ~source_path =
       | Found terminal_entry when not (is_terminal_status terminal_entry.status) ->
         Error (Integrity_failed Terminal_partition_nonterminal)
       | Found terminal_entry ->
-        if entry_record_to_json terminal_entry = entry_record_to_json entry
+        if same_entry_record terminal_entry entry
         then (
           (* See lossless namespace protocol: observed cleanup failure is retried. *)
           ignore (remove_duplicate_source_unlocked ~ops ~entry source_path : bool);
@@ -1497,7 +1513,7 @@ let terminal_destination_state (entry : entry) =
         then Invalid_terminal_destination Terminal_conflict
         else if
           (not (is_terminal_status entry.status))
-          || entry_record_to_json terminal_entry = entry_record_to_json entry
+          || same_entry_record terminal_entry entry
         then Cleanup_source
         else
           Invalid_terminal_destination Terminal_conflict

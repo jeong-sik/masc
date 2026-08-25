@@ -31,15 +31,15 @@ LLM calls — run on demand. Deterministic given fixed model output (temperature
 reproducible via the recorded label output.
 
 This "judge" is the memory-os VALUE-EVAL judge (labels a fact useful/noise). It
-is NOT the keeper `verifier` persona (a keeper that approves tasks), and NOT the
+is NOT the `verifier` Keeper (which approves tasks), and NOT the
 [fusion] judge (RFC-0252, synthesizes a panel of model answers). Three distinct roles,
 three distinct config keys: [runtime.assignments] verifier / [fusion] judge /
 [memory_os] judge.
 
 NOTE (boundary): the ideal home for the live judge is the OCaml harness
-(test/eval_memory_os_value.ml) calling the OAS provider abstraction directly. This
+(test/eval_memory_os_value.ml) calling the AGENT_CORE provider abstraction directly. This
 Python path resolves the provider from runtime.toml and speaks raw HTTP instead, so
-it does NOT inherit OAS transport (retry / stream). Acceptable for a 1-shot
+it does NOT inherit AGENT_CORE transport (retry / stream). Acceptable for a 1-shot
 off-server batch eval; revisit if the judge ever moves onto a hot path.
 """
 
@@ -145,7 +145,7 @@ def resolve_judge_target(cfg: dict) -> tuple[str, str, str]:
 
     Precedence (CLI override is applied by the caller, above this):
       1. [memory_os] judge = "provider.model"  — the memory-os value-eval judge,
-         distinct from the keeper `verifier` persona and the [fusion] judge.
+         distinct from the `verifier` Keeper and the [fusion] judge.
       2. [runtime] default = "provider.model"  — fallback to the runtime's default.
     Aborts if neither is set (no permissive guess about which model to trust)."""
     mo = cfg.get("memory_os")

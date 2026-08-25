@@ -141,7 +141,7 @@ let ack_effect env =
   match env.envelope_id with Some id -> [ Send_ack { envelope_id = id } ] | None -> []
 ;;
 
-let rec step t ~now_mono input =
+let step t ~now_mono input =
   let log lvl msg = [ Log { level = lvl; message = msg } ] in
   match (t.state, input) with
   | (Disconnected | Reconnect_pending _), Connect_requested ->

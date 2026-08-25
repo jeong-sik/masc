@@ -1,10 +1,37 @@
+---
+rfc: "0343"
+status: Draft
+---
+
 # RFC-0343 — Repo location SSOT (collapse dual-authority, attribute by git-remote)
 
-- Status: Draft
-- Updated: 2026-07-15
+- Status: Draft — §3.1 (the sole LIVE item) is absorbed by RFC-keeper-workspace-root-only
+- Updated: 2026-08-13
 - Author: vincent
 - Related: RFC-0128 (§4.5 write partition), RFC-0324 (filesystem-repo-truth), RFC-0000 §3.15 (Keeper-Config SSOT) / D9
 - Supersedes: none (extends RFC-0128 §4.5 attribution mechanism)
+
+> **Absorption note (2026-08-13).** RFC-keeper-workspace-root-only (workspace root only) implements
+> §3.1 as one step of a larger sequence, and decides D8 — the playground
+> bundle is deleted because the system stops regulating layout under the root.
+> Two factual corrections to §3.1 surfaced while planning that work:
+>
+> 1. **"Both git ops already exist and are bounded" is half true.**
+>    `Repo_git.worktree_root` is bounded (5s + read-only env), but
+>    `get_origin_url` (`repo_git.ml:193`) passes neither `~timeout_sec` nor
+>    `~env:read_only_git_env`; `run_git` defaults to no timeout. Since
+>    `resolve_partition_for_write` runs as a post-hook on **every** tool call
+>    (`keeper_run_tools_hooks.ml:269-275`), the swap needs bounding and a
+>    per-checkout cache before it is safe.
+> 2. **A live checkout regresses under the naive swap.**
+>    `code-reviewer/repos/masc/review-pr-28304` has a local-path origin
+>    (`/Users/.../.masc/repos/masc`), which `canonical_url_of_remote` maps to
+>    `None` → orphan. Today the reverse-parse attributes it correctly via the
+>    catalog. A local-path fallback (match against registered `local_path`
+>    prefixes) is required.
+>
+> §5's own recommendation — keep the reverse-parse behind a flag for one
+> release — is retained in RFC-keeper-workspace-root-only §5.
 
 > **Status update (2026-07-15, code-verified).** The initial draft named
 > `clone_sandbox_repo` / `playground_repo_readiness` as a live production path.
@@ -22,7 +49,7 @@
 
 MASC defines "where repository X lives for a keeper" in **two independent authorities** joined by a reverse-parse of a filesystem path. This RFC removes the reverse-parse and makes write-attribution read the checkout's own `origin` URL (`git remote get-url`), an operation the codebase already performs for the same purpose in `discover_repositories`. Repo **identity** (id/name/url/aliases) is already SSOT in `repositories.toml` and is unchanged.
 
-Scope (LIVE, post-#24558): the **reverse-parse attribution** mechanism only (§3.1). The clone-record and field-rename items (§3.2/§3.3) are moot/optional after the dead-module deletion — see the status note above. Not in scope: the D8 decision to delete the playground bundle entirely (this RFC's §3.1 makes D8 (b3) trivial, not D8 itself).
+Scope (LIVE, post-#24558): the **reverse-parse attribution** mechanism only (§3.1). The clone-record and field-rename items (§3.2/§3.3) are moot/optional after the dead-module deletion — see the status note above. Not in scope: the D8 decision to delete the playground bundle entirely (this RFC's §3.1 makes D8 (b3) trivial, not D8 itself) — **RFC-keeper-workspace-root-only decides it**.
 
 ## 1. Problem (evidence)
 
@@ -40,7 +67,7 @@ Concrete failures:
 
 ## 2. Non-goals
 
-- Deleting the playground `mind/repos` bundle (D8; this RFC makes D8 (b3) — the `docker/` segment — deletable, but does not decide D8).
+- Deleting the playground bundle (D8; this RFC makes D8 (b3) — the `docker/` segment — deletable, but does not decide D8). **Decided by RFC-keeper-workspace-root-only**, which stops the system from creating any directory under the workspace root. (The `mind/` half of the old `mind/repos` bundle was already hard-cut in #26579, 2026-08-01.)
 - Changing repo **identity** storage (`repositories.toml` stays the identity SSOT).
 - Per-keeper credential/GitHub identity (RFC-gated, separate).
 - The keeper identity-handle unification (RFC-0000 §3.15 SEVERE row; separate RFC — but see §6, this RFC removes one downstream symptom).

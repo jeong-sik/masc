@@ -113,73 +113,115 @@ let parse_trace_history fields =
   | Some trace_id -> invalidf "trace_history contains invalid trace id %S" trace_id
 ;;
 
+let canonical_multimodal_policy_opt raw =
+  match multimodal_policy_of_string raw with
+  | Some policy when String.equal raw (multimodal_policy_to_string policy) ->
+    Some policy
+  | Some _ | None -> None
+;;
+
 let parse_multimodal_policy fields =
   let* raw = string_field fields "multimodal_policy" in
-  match multimodal_policy_of_string raw with
-  | Some policy when String.equal raw (multimodal_policy_to_string policy) -> Ok policy
-  | Some _ | None -> invalidf "multimodal_policy has non-canonical value %S" raw
+  match canonical_multimodal_policy_opt raw with
+  | Some policy -> Ok policy
+  | None -> invalidf "multimodal_policy has non-canonical value %S" raw
+;;
+
+let canonical_proactive_outcome_opt raw =
+  let outcome = proactive_cycle_outcome_of_string raw in
+  if String.equal raw (proactive_cycle_outcome_to_string outcome)
+  then Some outcome
+  else None
 ;;
 
 let parse_proactive_outcome fields =
   let* raw = string_field fields "last_proactive_outcome" in
-  let outcome = proactive_cycle_outcome_of_string raw in
-  if String.equal raw (proactive_cycle_outcome_to_string outcome)
-  then Ok outcome
-  else invalidf "last_proactive_outcome has non-canonical value %S" raw
+  match canonical_proactive_outcome_opt raw with
+  | Some outcome -> Ok outcome
+  | None -> invalidf "last_proactive_outcome has non-canonical value %S" raw
 ;;
 
-let parse_last_blocker fields =
-  let* value = required_field fields "last_blocker" in
-  match value with
-  | `Null -> Ok None
-  | `Assoc blocker_fields ->
-    let* () =
-      require_exact_fields
-        ~context:"last_blocker"
-        [ "klass"; "detail" ]
-        blocker_fields
-    in
-    let* detail = string_field blocker_fields "detail" in
-    let* klass_json = required_field blocker_fields "klass" in
-    let* klass =
-      match klass_json with
-      | `String label ->
-        (match blocker_class_of_serialized_string label with
-         | Some (Runtime_exhausted _) ->
-           invalidf "last_blocker.klass runtime_exhausted requires a reason object"
-         | Some klass -> Ok klass
-         | None -> invalidf "last_blocker.klass has unknown value %S" label)
-      | `Assoc klass_fields ->
-        let* () =
-          require_exact_fields
-            ~context:"last_blocker.klass"
-            [ "name"; "reason" ]
-            klass_fields
-        in
-        let* name = string_field klass_fields "name" in
-        if not (String.equal name "runtime_exhausted")
-        then invalidf "last_blocker.klass has unknown object name %S" name
-        else
-          let* reason_json = required_field klass_fields "reason" in
-          (match runtime_exhaustion_reason_of_json reason_json with
-           | Some reason
-             when Yojson.Safe.equal
-                    reason_json
-                    (runtime_exhaustion_reason_to_json reason) ->
-             Ok (Runtime_exhausted reason)
-           | Some _ | None ->
-             invalidf "last_blocker.klass.reason is not the current exact shape")
-      | other ->
-        invalidf
-          "last_blocker.klass must be a string or object, got %s"
-          (Json_util.kind_name other)
-    in
-    Ok (Some { klass; detail })
-  | other ->
-    invalidf
-      "field last_blocker must be an object or null, got %s"
-      (Json_util.kind_name other)
+type enum_field_repair =
+  { field : string
+  ; previous_value : string
+  ; repaired_value : string
+  }
+
+(* Issue #28844: repair target for one non-canonical enumerated value.
+   [None] means already canonical (no repair).  [Some repaired] is the
+   canonical spelling of the recognized value when the field's [of_string]
+   accepts [raw] — both parsers trim and lowercase, so a case/whitespace
+   misspelling keeps the operator's intent.  Only a value the parser does
+   not recognize at all falls back to the field's canonical default (the
+   value the create path writes for a keeper that never exercised the
+   corresponding machinery), which is the lossless reset. *)
+let proactive_outcome_repair_value raw =
+  match canonical_proactive_outcome_opt raw with
+  | Some _ -> None
+  | None ->
+    (* [proactive_cycle_outcome_of_string] is total: unrecognized garbage
+       lands on [Proactive_unknown], so a recognized misspelling is exactly
+       a parse to any other variant.  A misspelled ["unknown"] is
+       indistinguishable from garbage through the total parser and resets
+       with it. *)
+    (match proactive_cycle_outcome_of_string raw with
+     | Proactive_unknown ->
+       Some (proactive_cycle_outcome_to_string Proactive_never_started)
+     | outcome -> Some (proactive_cycle_outcome_to_string outcome))
 ;;
+
+let multimodal_policy_repair_value raw =
+  match canonical_multimodal_policy_opt raw with
+  | Some _ -> None
+  | None ->
+    (match multimodal_policy_of_string raw with
+     | Some policy -> Some (multimodal_policy_to_string policy)
+     | None -> Some (multimodal_policy_to_string default_multimodal_policy))
+;;
+
+(* Persisted enumerated fields repairable in place.  A field belongs here
+   only when an unrecognized value has exactly one sane fallback; anything
+   else keeps failing loud. *)
+let repairable_enum_fields =
+  [ "last_proactive_outcome", proactive_outcome_repair_value
+  ; "multimodal_policy", multimodal_policy_repair_value
+  ]
+;;
+
+let repair_non_canonical_enum_fields json =
+  match json with
+  | `Assoc fields ->
+    let repairs =
+      List.filter_map
+        (fun (field, repair_value) ->
+           match List.assoc_opt field fields with
+           | Some (`String raw) ->
+             (match repair_value raw with
+              | Some repaired_value ->
+                Some { field; previous_value = raw; repaired_value }
+              | None -> None)
+           | Some _ | None -> None)
+        repairable_enum_fields
+    in
+    (match repairs with
+     | [] -> None
+     | repairs ->
+       let repaired_fields =
+         List.map
+           (fun (key, value) ->
+              match
+                List.find_opt
+                  (fun repair -> String.equal repair.field key)
+                  repairs
+              with
+              | Some repair -> key, `String repair.repaired_value
+              | None -> key, value)
+           fields
+       in
+       Some (`Assoc repaired_fields, repairs))
+  | _ -> None
+;;
+
 
 let parse_runtime_attempt_outcome value =
   match value with
@@ -274,36 +316,38 @@ let parse_keeper_id fields =
     invalidf "keeper_id must be a string or null, got %s" (Json_util.kind_name other)
 ;;
 
-let parse_oas_env fields =
-  let* value = required_field fields "oas_env" in
+let parse_agent_core_env fields =
+  let* value = required_field fields "agent_core_env" in
   match value with
   | `Assoc env_fields ->
     (match find_duplicate env_fields with
-     | Some key -> invalidf "oas_env has duplicate key %S" key
+     | Some key -> invalidf "agent_core_env has duplicate key %S" key
      | None ->
        let rec collect acc = function
          | [] -> Ok (List.rev acc)
          | (key, `String value) :: rest -> collect ((key, value) :: acc) rest
          | (key, other) :: _ ->
            invalidf
-             "oas_env.%s must be a string, got %s"
+             "agent_core_env.%s must be a string, got %s"
              key
              (Json_util.kind_name other)
        in
        collect [] env_fields)
-  | other -> invalidf "oas_env must be an object, got %s" (Json_util.kind_name other)
+  | other -> invalidf "agent_core_env must be an object, got %s" (Json_util.kind_name other)
 ;;
 
 let decode_current_meta fields =
+  let* schema = string_field fields "schema" in
   let* name = string_field fields "name" in
   let* agent_name = string_field fields "agent_name" in
-  let* persona = nullable_string_field fields "persona" in
   let* instructions = string_field fields "instructions" in
+  let* autonomous_instructions =
+    nullable_string_field fields "autonomous_instructions"
+  in
   let* trace_id_raw = string_field fields "trace_id" in
   let* trace_id = parse_trace_id trace_id_raw in
   let* multimodal_policy = parse_multimodal_policy fields in
   let* trace_history = parse_trace_history fields in
-  let* nonce = int_field fields "generation" in
   let* last_handoff_ts = float_field fields "last_handoff_ts" in
   let* created_at = string_field fields "created_at" in
   let* updated_at = string_field fields "updated_at" in
@@ -329,27 +373,19 @@ let decode_current_meta fields =
   let* last_proactive_reason = string_field fields "last_proactive_reason" in
   let* last_proactive_preview = string_field fields "last_proactive_preview" in
   let* consecutive_noop_count = int_field fields "consecutive_noop_count" in
-  let* last_compaction_check_ts = float_field fields "last_compaction_check_ts" in
-  let* last_compaction_decision_raw = string_field fields "last_compaction_decision" in
-  let* active_goal_ids = string_list_field fields "active_goal_ids" in
-  let* last_autonomous_action_at = string_field fields "last_autonomous_action_at" in
-  let* autonomous_action_count = int_field fields "autonomous_action_count" in
-  let* autonomous_turn_count = int_field fields "autonomous_turn_count" in
-  let* autonomous_text_turn_count = int_field fields "autonomous_text_turn_count" in
-  let* autonomous_tool_turn_count = int_field fields "autonomous_tool_turn_count" in
-  let* board_reactive_turn_count = int_field fields "board_reactive_turn_count" in
-  let* mention_reactive_turn_count = int_field fields "mention_reactive_turn_count" in
-  let* noop_turn_count = int_field fields "noop_turn_count" in
   let* message_scope_ack_id = nullable_string_field fields "message_scope_ack_id" in
-  let* last_blocker = parse_last_blocker fields in
   let* last_runtime_attempt = parse_last_runtime_attempt fields in
   let* paused = bool_field fields "paused" in
   let* latched_reason = parse_latched_reason fields in
   let* current_task_id = parse_current_task_id fields in
   let* keeper_id = parse_keeper_id fields in
-  let* oas_env = parse_oas_env fields in
-  let* meta_version = int_field fields "meta_version" in
-  if not (validate_name name)
+  let* agent_core_env = parse_agent_core_env fields in
+  (* Kept now that the reader fails open: the exact-field check cannot see a
+     format whose field names stayed the same while their meaning changed, and
+     rejecting costs a reset rather than a dead keeper. *)
+  if not (String.equal schema "masc.keeper_meta.v1")
+  then invalidf "unsupported schema: %S" schema
+  else if not (validate_name name)
   then invalidf "name is invalid: %S" name
   (* Generation is the lifecycle fencing counter, so zero is not a valid
      persisted value: it is what an unstamped or reset row looks like. This
@@ -357,8 +393,6 @@ let decode_current_meta fields =
      same bound on every read, so the bound is carried here rather than
      relaxed. Absence is already rejected because [int_field] goes through
      [required_field]. *)
-  else if nonce < 1
-  then invalidf "persisted keeper generation must be a positive integer"
   else if
     not
       (String.equal
@@ -367,10 +401,6 @@ let decode_current_meta fields =
   then invalidf "agent_name does not match canonical keeper identity"
   else if not (validate_name (Keeper_id.Trace_id.to_string trace_id))
   then invalidf "trace_id is invalid: %S" trace_id_raw
-  else if meta_version < 0
-  then invalidf "meta_version must be nonnegative"
-  else if meta_version = max_int
-  then invalidf "meta_version must remain incrementable"
   else
     let usage : usage_metrics =
       { total_turns
@@ -391,8 +421,6 @@ let decode_current_meta fields =
       ; last_ts = last_compaction_ts
       ; last_before_tokens = last_compaction_before_tokens
       ; last_after_tokens = last_compaction_after_tokens
-      ; last_check_ts = last_compaction_check_ts
-      ; last_decision = compaction_runtime_decision_of_string last_compaction_decision_raw
       }
     in
     let proactive_rt : proactive_runtime =
@@ -410,30 +438,28 @@ let decode_current_meta fields =
       { usage
       ; compaction_rt
       ; proactive_rt
-      ; nonce
       ; trace_id
       ; trace_history
       ; last_handoff_ts
-      ; last_autonomous_action_at
-      ; autonomous_action_count
-      ; autonomous_turn_count
-      ; autonomous_text_turn_count
-      ; autonomous_tool_turn_count
-      ; board_reactive_turn_count
-      ; mention_reactive_turn_count
-      ; noop_turn_count
       ; message_scope_ack_id
-      ; last_blocker
       ; last_runtime_attempt
       }
     in
+    (* The eleven config fields below are placeholders, not decoded values.
+       TOML owns them and [Keeper_meta_contract.effective_meta_of_profile_defaults]
+       overlays the real ones on the way out, so [meta_to_json] never writes
+       them and this decoder has nothing to read back. A caller that writes
+       [{ meta with autoboot_enabled = false }] through [write_keeper_meta]
+       compiles, stores nothing and reads back [true] (#27357). Splitting
+       config out of this record is the fix; until then the round-trip
+       contract is pinned by test_keeper_meta_config_not_durable. *)
     let sandbox_profile = default_sandbox_profile in
     let meta : keeper_meta =
       { id = None
       ; name
       ; agent_name
-      ; persona
       ; instructions
+      ; autonomous_instructions
       ; sandbox_profile
       ; sandbox_image = None
       ; network_mode = default_network_mode_for_profile sandbox_profile
@@ -444,7 +470,6 @@ let decode_current_meta fields =
       ; always_allow = None
       ; created_at
       ; updated_at
-      ; active_goal_ids
       ; paused
       ; latched_reason
       ; autoboot_enabled = true
@@ -453,9 +478,9 @@ let decode_current_meta fields =
       ; telemetry_feedback_enabled = None
       ; telemetry_feedback_window_hours = None
       ; runtime
-      ; oas_env
+      ; agent_core_env
       ; keeper_id
-      ; meta_version
+      ; tool_groups = None
       }
     in
     Ok meta
@@ -468,10 +493,7 @@ let meta_of_json json =
     | Ok fields ->
       (match decode_current_meta fields with
        | Error _ as error -> error
-       | Ok meta ->
-         (match Keeper_meta_contract.terminal_latch_pause_violation meta with
-          | None -> Ok meta
-          | Some detail -> invalidf "%s" detail))
+       | Ok meta -> Ok meta)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> invalidf "decoder raised: %s" (Printexc.to_string exn)

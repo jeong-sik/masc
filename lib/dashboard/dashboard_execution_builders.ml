@@ -88,7 +88,7 @@ let worker_state_of_agent
   let key = String.lowercase_ascii (String.trim agent.name) in
   let message_opt = Hashtbl.find_opt messages_by_agent key in
   let last_seen_ts =
-    Dashboard_utils.parse_iso_opt (String_util.trim_to_option agent.last_seen) |> Option.value ~default:0.0
+    Dashboard_utils.parse_iso_opt (String_util.trim_nonempty agent.last_seen) |> Option.value ~default:0.0
   in
   let last_message_ts =
     match message_opt with
@@ -100,10 +100,10 @@ let worker_state_of_agent
     if last_signal_ts <= 0.0 then None
     else if last_message_ts >= last_seen_ts then
       match message_opt with
-      | Some (_, message) -> String_util.trim_to_option message.timestamp
-      | None -> String_util.trim_to_option agent.last_seen
+      | Some (_, message) -> String_util.trim_nonempty message.timestamp
+      | None -> String_util.trim_nonempty agent.last_seen
     else
-      String_util.trim_to_option agent.last_seen
+      String_util.trim_nonempty agent.last_seen
   in
   let signal_age_s =
     if last_signal_ts > 0.0 then max 0.0 (now_ts -. last_signal_ts)
@@ -128,11 +128,11 @@ let worker_state_of_agent
   let active_task_count = active_task_count tasks agent.name in
   let recent_output_preview =
     match message_opt with
-    | Some (_, message) -> String_util.trim_to_option (compact_text message.content)
+    | Some (_, message) -> String_util.trim_nonempty (compact_text message.content)
     | None -> None
   in
   let has_work =
-    Option.is_some (String_util.trim_to_option (Option.value ~default:"" agent.current_task))
+    Option.is_some (String_util.trim_nonempty (Option.value ~default:"" agent.current_task))
     || active_task_count > 0
   in
   let status_string = Masc_domain.string_of_agent_status agent.status in
@@ -158,7 +158,7 @@ let worker_state_of_agent
           ("watching", Tone_ok, "Standing by for the next task")
   in
   let focus =
-    match String_util.trim_to_option (Option.value ~default:"" agent.current_task) with
+    match String_util.trim_nonempty (Option.value ~default:"" agent.current_task) with
     | Some value -> value
     | None ->
         if active_task_count > 0 then
@@ -204,7 +204,6 @@ let worker_state_of_agent
 
 let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
   let name = string_field "name" keeper in
-  let agent = member_assoc "agent" keeper in
   let status = string_field "status" keeper in
   let context_ratio =
     match member_assoc "context_ratio" keeper with
@@ -215,16 +214,15 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
   let context_metrics_unavailable =
     member_assoc "context_metrics_unavailable" keeper
   in
+  (* The last action is dated by the tool call log through [tool_audit_at],
+     not by a keeper-meta mirror of it. The meta field this used to read was a
+     lifetime string stamped on autonomous tool turns only, so a keeper acting
+     on a reactive turn read as having never acted. *)
   let last_action_at =
-    String_util.trim_to_option (string_field "last_autonomous_action_at" keeper)
+    String_util.trim_nonempty (string_field "tool_audit_at" keeper)
   in
   let last_heartbeat_at =
-    latest_iso_timestamp
-      [
-        String_util.trim_to_option (string_field "updated_at" keeper);
-        String_util.trim_to_option (string_field "last_seen" agent);
-        String_util.trim_to_option (string_field "tool_audit_at" keeper);
-      ]
+    String_util.trim_nonempty (string_field "updated_at" keeper)
   in
   let last_signal_at = latest_iso_timestamp [ last_action_at; last_heartbeat_at ] in
   let last_action_ts = Dashboard_utils.parse_iso_opt last_action_at |> Option.value ~default:0.0 in
@@ -239,37 +237,47 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
     else infinity
   in
   let int_field_default key json = Option.value ~default:0 (Json_util.assoc_int_opt key json) in
-  let autonomous_action_count = int_field_default "autonomous_action_count" keeper in
-  let autonomous_turn_count = int_field_default "autonomous_turn_count" keeper in
-  let noop_turn_count = int_field_default "noop_turn_count" keeper in
   let turn_count = int_field_default "turn_count" keeper in
-  let generation = int_field_default "generation" keeper in
-  let goal_count = List.length (list_field "active_goal_ids" keeper) in
   (* Operator observation publishes a pause override in the same [status] field as
      the surface status, so this classifies the published vocabulary rather than
      the surface subset. A paused keeper is neither offline nor running: it is
      not failing, and it is also not going to make progress, so it carries its
      own liveness rather than borrowing either verdict. *)
-  let liveness =
-    match Keeper_status_runtime.control_plane_status_of_string_opt status with
-    | Some
-        (Keeper_status_runtime.Cp_surface
-           ( Keeper_status_runtime.Surface_offline
-           | Keeper_status_runtime.Surface_inactive )) ->
-      Cl_offline
-    | Some
-        (Keeper_status_runtime.Cp_surface
-           ( Keeper_status_runtime.Surface_active
-           | Keeper_status_runtime.Surface_busy
-           | Keeper_status_runtime.Surface_listening
-           | Keeper_status_runtime.Surface_idle )) ->
-      Cl_live
-    | Some Keeper_status_runtime.Cp_paused -> Cl_paused
+  (* Two readings, read separately. [paused] is a person's decision and health
+     is an observation; the status string this used to parse folded the two
+     into one word, and folded stale, degraded and zombie together on the way.
+
+     Health is parsed whether or not the keeper is paused, so a health this
+     build cannot read is rejected either way. Validating it only on the
+     unpaused path would grant producer drift a free pass on every paused
+     keeper - the permissive fallback moved one field over. *)
+  let health =
+    let raw = string_field "health_state" (member_assoc "diagnostic" keeper) in
+    match Keeper_status_runtime.keeper_health_of_string_opt raw with
+    | Some value -> value
     | None ->
       invalid_arg
+        (Printf.sprintf "dashboard continuity: unknown keeper health %S" raw)
+  in
+  let paused =
+    match Json_util.assoc_member_opt "paused" keeper with
+    | None -> false
+    | Some (`Bool value) -> value
+    | Some other ->
+      invalid_arg
         (Printf.sprintf
-           "dashboard continuity: unknown current keeper status %S"
-           status)
+           "dashboard continuity: keeper paused is not a boolean: %s"
+           (Yojson.Safe.to_string other))
+  in
+  let liveness =
+    if paused then Cl_paused
+    else
+      match health with
+      | Keeper_types.KH_offline | KH_zombie -> Cl_offline
+      (* Stale is a keeper whose heartbeat is late, not one that stopped: its
+         fiber is alive and it may still be taking turns. Reading it as offline
+         sent an operator to boot a keeper that was already up. *)
+      | KH_healthy | KH_idle | KH_stale | KH_degraded -> Cl_live
   in
   let continuity_offline =
     match liveness with
@@ -302,30 +310,28 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
       | Lc_preparing | Lc_compacting ->
           (Exec_warning, Tone_warn, "연속성 압력이 높습니다")
       | Lc_offline | Lc_active | Lc_idle ->
-          if autonomous_turn_count = 0 && turn_count > 0 then
-            (Exec_warning, Tone_warn,
-             Printf.sprintf "자율 턴 없음 (턴 %d회 수행)" turn_count)
-          else if effective_activity_age_s >= keeper_action_stale_sec then
+          (* The branch removed here warned whenever the lifetime autonomous
+             turn counter was zero. Being lifetime, it could only ever fire on
+             a keeper that had never taken an autonomous turn, and never again
+             once it took one - including after it stopped. *)
+          if effective_activity_age_s >= keeper_action_stale_sec then
             (Exec_warning, Tone_warn,
              Printf.sprintf "마지막 활동 %.0f시간 전" (effective_activity_age_s /. Masc_time_constants.hour))
           else
             (Exec_healthy, Tone_ok, "정상 동작 중")
   in
-  let continuity =
-    Printf.sprintf "Gen %d · Turns %d · Auto turns %d · Tool actions %d · Goals %d"
-      generation turn_count autonomous_turn_count autonomous_action_count goal_count
-  in
+  let continuity = Printf.sprintf "Turns %d" turn_count in
   let focus =
-    match string_list_of_field "active_goal_ids" keeper with
-    | goal_id :: _ -> goal_id
-    | [] -> "현재 활성 Goal 없음"
+    match String_util.trim_nonempty (string_field "current_task_id" keeper) with
+    | Some task_id -> task_id
+    | None -> "현재 작업 없음"
   in
   let recent_input_preview =
-    String_util.trim_to_option (string_field "recent_input_preview" keeper)
+    String_util.trim_nonempty (string_field "recent_input_preview" keeper)
   in
   let recent_output_preview =
-    String_util.trim_to_option (string_field "recent_output_preview" keeper)
-    |> option_or_else (fun () -> String_util.trim_to_option (string_field "last_proactive_preview" keeper))
+    String_util.trim_nonempty (string_field "recent_output_preview" keeper)
+    |> option_or_else (fun () -> String_util.trim_nonempty (string_field "last_proactive_preview" keeper))
   in
   let recent_tool_names =
     string_list_of_field "recent_tool_names" keeper |> cap_string_list
@@ -334,7 +340,7 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
     string_list_of_field "latest_tool_names" keeper |> cap_string_list
   in
   let latest_action_source =
-    String_util.trim_to_option (string_field "latest_action_source" keeper)
+    String_util.trim_nonempty (string_field "latest_action_source" keeper)
   in
   let profile = get_agent_profile name in
   {
@@ -352,8 +358,6 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
            ("note", `String note);
            ("focus", `String focus);
            ("last_signal_at", Json_util.string_opt_to_json last_signal_at);
-           ("last_autonomous_action_at", Json_util.string_opt_to_json last_signal_at);
-           ("generation", member_assoc "generation" keeper);
            ("turn_count", member_assoc "turn_count" keeper);
            ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
            ("context_metrics_unavailable", context_metrics_unavailable);
@@ -367,14 +371,11 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
             ("latest_action_source", Json_util.string_opt_to_json latest_action_source);
             ("tool_audit_source", member_assoc "tool_audit_source" keeper);
             ("tool_audit_at", member_assoc "tool_audit_at" keeper);
-            ("autonomous_action_count", `Int autonomous_action_count);
-            ("autonomous_turn_count", `Int autonomous_turn_count);
-            ("noop_turn_count", `Int noop_turn_count);
             ("last_heartbeat_at", Json_util.string_opt_to_json last_heartbeat_at);
             ("proactive_enabled", member_assoc "proactive_enabled" keeper);
             ("last_proactive_preview", member_assoc "last_proactive_preview" keeper);
             ( "model",
-              Json_util.string_opt_to_json (String_util.trim_to_option (string_field "active_model" keeper)) );
+              Json_util.string_opt_to_json (String_util.trim_nonempty (string_field "active_model" keeper)) );
             ("emoji", `String profile.emoji);
             ("koreanName", `String profile.korean_name);
           ]);
@@ -411,9 +412,9 @@ let task_operation_updated_at (task : Masc_domain.task) =
   | Masc_domain.Todo -> task.created_at
 
 let task_operation_id (task : Masc_domain.task) =
-  match Option.bind task.contract (fun contract -> contract.links.operation_id) with
+  match task.execution_links.operation_id with
   | Some operation_id -> (
-      match String_util.trim_to_option operation_id with
+      match String_util.trim_nonempty operation_id with
       | Some operation_id -> operation_id
       | None -> task.id)
   | None -> task.id
@@ -443,7 +444,7 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
                      ("task_status", `String (Masc_domain.task_status_to_string task.task_status));
                      ("objective", `String task.title);
                      ("updated_at", `String updated_at);
-                     ("source", `String "task_contract");
+                     ("source", `String "task_execution_links");
                      ("task_id", `String task.id);
                      ("severity", `String (Dashboard_utils.string_of_tone severity));
                      ( "handoff",

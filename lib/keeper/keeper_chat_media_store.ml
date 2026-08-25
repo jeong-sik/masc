@@ -1,6 +1,6 @@
 (** Keeper_chat_media_store — content-addressed store for model-generated media.
 
-    RFC-0301: model-generated media (image / audio / document) streamed by OAS as
+    RFC-0301: model-generated media (image / audio / document) streamed by AGENT_CORE as
     [MediaDelta { media_type; data }] is persisted here and surfaced in keeper chat
     by URL token, instead of being reduced to a byte count at the bridge. This
     generalizes the voice-clip token/serve pattern (RFC-0235:
@@ -15,7 +15,7 @@
 let media_subdir = "media"
 
 type persist_error =
-  | Unsupported_source_type of Agent_sdk.Types.media_source_kind
+  | Unsupported_source_type of Agent_core.Types.media_source_kind
   | Invalid_base64 of string
   | Media_too_large of { size_bytes : int; max_bytes : int }
   | Write_failed of string
@@ -70,7 +70,7 @@ let known_storage_exts =
 
 let normalize s = String.lowercase_ascii (String.trim s)
 
-(* [media_type] (an IANA type from the OAS media block) -> file extension. Unknown
+(* [media_type] (an IANA type from the AGENT_CORE media block) -> file extension. Unknown
    types fall back to [bin]; the content-type served is re-derived from the ext so
    the two stay consistent. *)
 let ext_of_media_type media_type =
@@ -244,7 +244,7 @@ let persist ~base_dir ~media_type ~data =
 let persist_error_to_string = function
   | Unsupported_source_type source_type ->
       Printf.sprintf "unsupported media source_type: %s"
-        (Agent_sdk.Types.media_source_kind_to_string source_type)
+        (Agent_core.Types.media_source_kind_to_string source_type)
   | Invalid_base64 msg ->
       "invalid base64 media payload: " ^ msg
   | Media_too_large { size_bytes; max_bytes } ->
@@ -256,11 +256,11 @@ let persist_error_to_string = function
 
 let raw_data_of_source ~source_type ~data =
   match source_type with
-  | Agent_sdk.Types.Base64 -> (
+  | Agent_core.Types.Base64 -> (
       match Base64.decode data with
       | Ok raw -> Ok raw
       | Error (`Msg msg) -> Error (Invalid_base64 msg))
-  | Agent_sdk.Types.Url | Agent_sdk.Types.File_id ->
+  | Agent_core.Types.Url | Agent_core.Types.File_id ->
       Error (Unsupported_source_type source_type)
 
 let persist_media_source_result ~base_dir ~media_type ~source_type ~data =

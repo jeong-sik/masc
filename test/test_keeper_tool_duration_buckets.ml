@@ -1,4 +1,4 @@
-module HK = Masc.Keeper_hooks_oas
+module HK = Masc.Keeper_hooks_agent_core
 module Metrics = Masc.Otel_metric_store
 
 let keeper = "test-keeper-tool-duration-buckets"

@@ -46,6 +46,10 @@ val stalled_session_threshold_sec : float
     descending-severity comparators. *)
 val severity_rank : operator_severity -> int
 
+(** [severity_rank_of_string raw] decodes a serialized severity and ranks it.
+    Anything that is not an [operator_severity] ranks 0. *)
+val severity_rank_of_string : string -> int
+
 (** Compare attention items: primary by descending severity rank,
     then by [target_id] (None last), then by [kind]. *)
 val compare_attention : attention_item -> attention_item -> int

@@ -1,0 +1,5 @@
+name = "keeper_time_now"
+description = """
+Get current server time. Returns now_iso (ISO8601) and now_unix (float). Use \
+to timestamp events, check elapsed time, or include current time in reports."""
+additional_properties = false

@@ -1,8 +1,5 @@
 ---
 status: reference
-last_verified: 2026-04-23
-code_refs:
-  - lib/capability_registry.ml
 ---
 
 # Capability Registry SSOT
@@ -21,7 +18,6 @@ Each capability may project into multiple surfaces:
 
 - `public_mcp`
 - `spawned_agent_mcp`
-- `local_worker`
 - `keeper`
 
 Removed surfaces (historical record):

@@ -1,7 +1,7 @@
 (** Pure-function unit tests for [Keeper_contract_classifier].
 
-    Covers the actionable-signal label mapper, the [is_actionable] projection,
-    and [classify_actionable_signal] precedence (unclaimed_tasks >
+    Covers the actionable-signal label mapper and
+    [classify_actionable_signal] precedence (unclaimed_tasks >
     completion_authority_rejection > board_activity). *)
 
 open Masc
@@ -9,9 +9,6 @@ module KCC = Keeper_contract_classifier
 
 let check_string label expected actual =
   Alcotest.(check string) label expected actual
-
-let check_bool label expected actual =
-  Alcotest.(check bool) label expected actual
 
 (* Helper to build a [world_observation] with named fields. *)
 let make_obs ?(rejections = 0) ?(cancellations = 0) ~tasks ~board ()
@@ -50,26 +47,6 @@ let test_signal_label_completion_authority_rejection () =
 let test_signal_label_none () =
   check_string "No_actionable_signal" "no_actionable_signal"
     (KCC.actionable_signal_label KCC.No_actionable_signal)
-
-(* ── is_actionable ────────────────────────────────────────────────────── *)
-
-let test_is_actionable_unclaimed () =
-  check_bool "Has_unclaimed_tasks is actionable" true
-    (KCC.is_actionable KCC.Has_unclaimed_tasks)
-
-let test_is_actionable_board () =
-  check_bool "Has_board_activity is actionable" true
-    (KCC.is_actionable KCC.Has_board_activity)
-
-let test_is_actionable_completion_authority_rejection () =
-  check_bool
-    "Has_completion_authority_rejection is actionable"
-    true
-    (KCC.is_actionable KCC.Has_completion_authority_rejection)
-
-let test_is_actionable_none () =
-  check_bool "No_actionable_signal is NOT actionable" false
-    (KCC.is_actionable KCC.No_actionable_signal)
 
 (* ── classify_actionable_signal: precedence ───────────────────────────── *)
 
@@ -120,10 +97,6 @@ let test_signal_label_cancellation () =
   check_string "Has_task_cancellation" "has_task_cancellation"
     (KCC.actionable_signal_label KCC.Has_task_cancellation)
 
-let test_is_actionable_cancellation () =
-  check_bool "Has_task_cancellation is actionable" true
-    (KCC.is_actionable KCC.Has_task_cancellation)
-
 let () =
   Alcotest.run "Keeper_contract_classifier_pure"
     [
@@ -136,16 +109,6 @@ let () =
           Alcotest.test_case "Has_task_cancellation" `Quick
             test_signal_label_cancellation;
           Alcotest.test_case "No_actionable_signal" `Quick test_signal_label_none;
-        ] );
-      ( "is_actionable",
-        [
-          Alcotest.test_case "unclaimed → true" `Quick test_is_actionable_unclaimed;
-          Alcotest.test_case "board → true" `Quick test_is_actionable_board;
-          Alcotest.test_case "completion authority rejection → true" `Quick
-            test_is_actionable_completion_authority_rejection;
-          Alcotest.test_case "cancellation → true" `Quick
-            test_is_actionable_cancellation;
-          Alcotest.test_case "none → false" `Quick test_is_actionable_none;
         ] );
       ( "classify_actionable_signal precedence",
         [

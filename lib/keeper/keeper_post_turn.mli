@@ -16,11 +16,10 @@
     per-turn context metrics. Explicit compaction has its own request path. *)
 type post_turn_lifecycle =
   { updated_meta : Keeper_meta_contract.keeper_meta
-  ; checkpoint : Agent_sdk.Checkpoint.t option
+  ; checkpoint : Agent_core.Checkpoint.t option
   ; handoff_json : Yojson.Safe.t option
   ; handoff_attempted : bool
   ; handoff_failure_reason : string option
-  ; turn_generation : int
   ; checkpoint_bytes : int
   ; message_count : int
   }
@@ -28,11 +27,10 @@ type post_turn_lifecycle =
 (** Recovered checkpoint after a durably applied explicit compaction request.
     Manual and provider-overflow callers consume the same result. *)
 type compaction_recovery =
-  { checkpoint : Agent_sdk.Checkpoint.t
+  { checkpoint : Agent_core.Checkpoint.t
   ; checkpoint_installation : Keeper_checkpoint_store.installed_checkpoint
   ; trigger : Compaction_trigger.t
   ; evidence : Keeper_compaction_evidence.t
-  ; turn_generation : int
   ; commit_count : int
   } [@@warning "-69"]
 
@@ -63,42 +61,21 @@ val compaction_recovery_error_to_string : compaction_recovery_error -> string
 (** End-of-turn pipeline. Preserves the checkpoint and persists the result to
     the keeper meta and dashboard surface. Explicit compaction is a separate
     request path; Keeper autonomy remains owned by its heartbeat/turn lane. *)
-val apply_post_turn_lifecycle_with_resilience_handles :
-  resilience_audit_store:Shared_audit.Store.t option ->
-  resilience_strategy_executor:Resilience.Recovery.strategy_executor option ->
+val apply_post_turn_lifecycle :
   meta:Keeper_meta_contract.keeper_meta ->
-  checkpoint:Agent_sdk.Checkpoint.t option ->
+  checkpoint:Agent_core.Checkpoint.t option ->
   post_turn_lifecycle
-(** Apply the keeper post-turn lifecycle with explicit resilience handles.
+(** Apply the keeper post-turn lifecycle.
 
-    Valid combinations of the two resilience arguments are:
-    - both [None]: no audit envelope, no recovery side effect.
-    - both [Some]: the feature-flagged resilience wire-in writes a
-      durable [RecoveryAttempted] envelope through the audit store
-      before invoking the executor, preserving auditability.
-
-    Passing [resilience_strategy_executor:(Some _)] together with
-    [resilience_audit_store:None] is rejected ({!Invalid_argument})
-    because retry/fallback/handoff/abort callbacks would mutate
-    live state without the pre-flight envelope that
-    [keeper_bridge] relies on.
-
-    @raise Invalid_argument when an executor is supplied without an
-      audit store.
-
-    Concurrency: [Shared_audit.Store.t] is a mutable single-writer
-    chain ([latest_hash] + append with no internal locking).  The
-    same store instance must not be threaded through concurrent
-    keeper turns — sharing one across fibers can produce envelopes
-    with duplicate [prev_hash] values and break audit-chain
-    verification.  Callers own serialization; the typical pattern
-    is one store per keeper, owned by the keeper bridge. *)
+    Ordering is strict: tool emission drain (K4b) then multimodal
+    hydration (K1). K4b is the producer K1 consumes, and the multimodal
+    pass persists a [workspace_meta] summary that depends on it. *)
 
 type prepared_compaction
 (** Fully-planned compaction: durable source loaded, policy and LLM plan
     computed, nothing committed yet.  Carrying this value lets a caller run
     the provider call outside any keeper admission and commit later — the
-    source CAS, not the turn slot, is the interleaving guard. The token is
+    source CAS, not the Keeper Owner child, is the interleaving guard. The token is
     opaque and owns the exact Keeper identity and commit policy captured at
     preparation; callers cannot construct it or combine a plan with another
     Keeper's metadata. The exact execution identity is retained as immutable
@@ -125,8 +102,8 @@ val commit_prepared_compaction :
 module For_testing : sig
   val commit_prepared_compaction_with_history :
     ?after_checkpoint_installed:(unit -> unit) ->
-    save_oas_history:
-      (session_dir:string -> Agent_sdk.Checkpoint.t -> unit) ->
+    save_agent_core_history:
+      (session_dir:string -> Agent_core.Checkpoint.t -> unit) ->
     prepared_compaction ->
     prepared_commit_outcome
 end
@@ -138,7 +115,7 @@ val no_compaction_of_prepared :
   ?cause:Keeper_compaction_outcome.exact_execution_terminal_cause ->
   prepared_compaction -> no_compaction
 
-(** Reload the canonical OAS checkpoint and apply an explicit typed
+(** Reload the canonical AGENT_CORE checkpoint and apply an explicit typed
     compaction request. Composition of {!prepare_compaction} and
     {!commit_prepared_compaction}; the source CAS is the commit authority. *)
 val recover_latest_checkpoint_for_compaction :

@@ -25,7 +25,6 @@ import {
   KeeperSecretProjectionPanel,
   filterSignalGroups,
   deriveKeeperLiveTruth,
-  resolveKeeperCurrentTaskLabel,
 } from './keeper-detail-runtime'
 import {
   resolveKeeperObservedToolAudit,
@@ -58,7 +57,7 @@ function runtimeProviderFixture(runtimeId: string): DashboardRuntimeProviderSnap
     source: 'runtime.toml',
     models: ['model-api'],
     effective_capabilities: {
-      source: 'oas-provider-config-model',
+      source: 'agent-core-provider-config-model',
       accepted_reasoning_efforts: null,
       thinking_control_format: 'reasoning-effort',
       supports_multimodal_inputs: true,
@@ -97,7 +96,6 @@ function runtimeProviderFixture(runtimeId: string): DashboardRuntimeProviderSnap
       model: {
         id: modelId,
         api_name: 'model-api',
-        match_prefixes: ['model-'],
         capabilities: {
           source: 'runtime.toml',
           thinking_control_format: 'reasoning-effort',
@@ -212,59 +210,6 @@ describe('resolveKeeperObservedToolAudit', () => {
   })
 })
 
-describe('resolveKeeperCurrentTaskLabel', () => {
-  it('shows the active task when one is bound', () => {
-    const keeper: Keeper = {
-      name: 'config-provenance',
-      status: 'busy',
-      agent: {
-        name: 'keeper-config-provenance-agent',
-        current_task: 'task-046',
-      },
-    }
-
-    expect(resolveKeeperCurrentTaskLabel(keeper)).toBe('task-046')
-  })
-
-  it('shows unassigned when the runtime reported no bound task', () => {
-    const keeper: Keeper = {
-      name: 'sangsu',
-      status: 'active',
-      agent: {
-        name: 'keeper-sangsu-agent',
-        current_task: null,
-      },
-    }
-
-    expect(resolveKeeperCurrentTaskLabel(keeper)).toBe('unassigned')
-  })
-
-  it('treats an empty current task string as unassigned', () => {
-    const keeper: Keeper = {
-      name: 'sangsu',
-      status: 'active',
-      agent: {
-        name: 'keeper-sangsu-agent',
-        current_task: '   ',
-      },
-    }
-
-    expect(resolveKeeperCurrentTaskLabel(keeper)).toBe('unassigned')
-  })
-
-  it('returns unlinked when no keeper payload is available', () => {
-    expect(resolveKeeperCurrentTaskLabel(null)).toBe('unlinked')
-  })
-
-  it('keeps not_collected for online keepers without linked agent payload', () => {
-    const keeper: Keeper = {
-      name: 'sangsu',
-      status: 'active',
-    }
-
-    expect(resolveKeeperCurrentTaskLabel(keeper)).toBe('not_collected')
-  })
-})
 
 describe('RuntimeSignals', () => {
   it('renders metrics_window top lists as visual distributions', () => {
@@ -272,7 +217,6 @@ describe('RuntimeSignals', () => {
       name: 'sangsu',
       status: 'active',
       metrics_window: {
-        fallback_rate: 0.15,
         top_tools: [
           { tool: 'masc_board_post', count: 7 },
           { tool: 'masc_status', count: 4 },
@@ -296,23 +240,23 @@ describe('RuntimeSignals', () => {
       name: 'sangsu',
       status: 'active',
       metrics_window: {
-        fallback_rate: 0.12,
         intervention_share: 0.4,
+        intervention_per_turn: 1.5,
       },
     }
 
     render(h(RuntimeSignals, { keeper }))
 
-    // Before filtering: labels from multiple groups are visible.
-    expect(screen.getByText('런타임 폴백')).toBeInTheDocument()
+    // Before filtering: both rows are visible.
     expect(screen.getByText('개입 비중')).toBeInTheDocument()
+    expect(screen.getByText('턴당 개입')).toBeInTheDocument()
 
-    const input = screen.getByPlaceholderText('신호 지표 필터 (예: 폴백, 개입)') as HTMLInputElement
-    fireEvent.input(input, { target: { value: '개입' } })
+    const input = screen.getByPlaceholderText('신호 지표 필터 (예: 개입)') as HTMLInputElement
+    fireEvent.input(input, { target: { value: '턴당' } })
 
     // Non-matching labels are gone, matching ones remain.
-    expect(screen.queryByText('런타임 폴백')).not.toBeInTheDocument()
-    expect(screen.getByText('개입 비중')).toBeInTheDocument()
+    expect(screen.queryByText('개입 비중')).not.toBeInTheDocument()
+    expect(screen.getByText('턴당 개입')).toBeInTheDocument()
   })
 
   it('shows the filter-specific empty state when no rows match', () => {
@@ -320,13 +264,13 @@ describe('RuntimeSignals', () => {
       name: 'sangsu',
       status: 'active',
       metrics_window: {
-        fallback_rate: 0.12,
+        intervention_share: 0.12,
       },
     }
 
     render(h(RuntimeSignals, { keeper }))
 
-    const input = screen.getByPlaceholderText('신호 지표 필터 (예: 폴백, 개입)') as HTMLInputElement
+    const input = screen.getByPlaceholderText('신호 지표 필터 (예: 개입)') as HTMLInputElement
     fireEvent.input(input, { target: { value: 'nonexistent-zzz' } })
 
     expect(screen.getByText(/필터 결과 없음/)).toBeInTheDocument()
@@ -364,8 +308,6 @@ describe('RuntimeLensSection', () => {
       manifest_scan_diagnostics: {
         state: 'available',
         schema: 'keeper.runtime_manifest_scan_diagnostics.v1',
-        retired_event_count: 0,
-        retired_event_counts: [],
         unsupported_event_count: 0,
         unsupported_event_counts: [],
         unsupported_event_unattributed_count: 0,
@@ -377,7 +319,7 @@ describe('RuntimeLensSection', () => {
         requested_keeper_turn_id: 7,
         manifest_keeper_turn_ids: [7],
         receipt_turn_counts: [7],
-        max_oas_turn_count: 3,
+        max_agent_core_turn_count: 3,
         provider_lane_resolved_count: 1,
         provider_attempt_started_count: 1,
         provider_attempt_finished_count: 1,
@@ -393,7 +335,7 @@ describe('RuntimeLensSection', () => {
         finished_count: 1,
         terminal_status: 'timeout',
         terminal_error: 'Timeout after 120s',
-        terminal_exception_kind: 'outer_oas_timeout',
+        terminal_exception_kind: 'outer_agent_core_timeout',
         attempts: [],
       },
       event_bus: {
@@ -417,7 +359,7 @@ describe('RuntimeLensSection', () => {
         turn_clock: {
           trace_id: 'trace-lens',
           keeper_turn_id: 7,
-          max_oas_turn_count: 3,
+          max_agent_core_turn_count: 3,
           terminal_event_present: true,
           terminal_event: 'turn_finished',
           manifest_total_rows: 6,
@@ -446,21 +388,6 @@ describe('RuntimeLensSection', () => {
           },
           source_clock: {
             counts: {},
-          },
-          claim_scope: {
-            present: false,
-            source: 'tool_call_log',
-            status: 'not_observed',
-            result: null,
-            mode: null,
-            scoped: null,
-            active_goal_ids: [],
-            effective_goal_ids: [],
-            fallback_reason: null,
-            matched_goal_id: null,
-            excluded_count: null,
-            claimed_task_id: null,
-            claimed_goal_id: null,
           },
           config_drift: {
             present: false,
@@ -498,7 +425,7 @@ describe('RuntimeLensSection', () => {
         swimlanes: {
           keeper: lane('keeper', 'Keeper', 2, 'finished'),
           masc_policy_runtime: lane('masc_policy_runtime', 'MASC Runtime', 1, 'error'),
-          oas_agent: lane('oas_agent', 'OAS', 2, 'checkpoint_saved'),
+          agent_core_agent: lane('agent_core_agent', 'Agent Core', 2, 'checkpoint_saved'),
           provider: lane('provider', 'Provider', 2, 'timeout'),
           tool_runtime: lane('tool_runtime', 'Tool Runtime', 0, 'not_observed'),
           memory_context: lane('memory_context', 'Memory/Context', 3, 'flushed'),
@@ -515,7 +442,7 @@ describe('RuntimeLensSection', () => {
             finished_at: null,
             trace_id: 'trace-lens',
             keeper_turn_id: 7,
-            oas_turn_count: 2,
+            agent_core_turn_count: 2,
             provider_attempt_id: 'trace-lens:keeper-7:provider-attempt-1',
             tool_batch_id: null,
             checkpoint_id: null,
@@ -566,7 +493,7 @@ describe('RuntimeLensSection', () => {
         ],
         checkpoints: [
           {
-            kind: 'oas_checkpoint',
+            kind: 'agent_core_checkpoint',
             path: '/tmp/checkpoint.json',
             present: false,
             file_stat: null,
@@ -620,8 +547,9 @@ describe('RuntimeLensSection', () => {
           handoff_active: false,
           operator_paused: false,
           stop_requested: false,
-          dead_tombstone_latched: false,
+          restart_requested: false,
           drain_complete: false,
+          credential_archived: false,
         },
         determining_condition: 'running_fiber_alive',
         rows: [],
@@ -642,6 +570,14 @@ describe('RuntimeLensSection', () => {
         duration_ms: 16000,
         error: null,
         runtime: null,
+        claim_attempt: {
+          present: false,
+          source: 'keeper_task_claim_tool_call',
+          status: 'not_observed',
+          result: null,
+          claimed_task_id: null,
+          claimed_goal_id: null,
+        },
       },
       runtime_attention: {
         state: 'blocked',
@@ -686,7 +622,7 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('provider attempts')).toBeInTheDocument()
     expect(screen.getAllByText('1/1').length).toBeGreaterThan(0)
     expect(screen.getByText('provider terminal')).toBeInTheDocument()
-    expect(screen.getByText('timeout / outer_oas_timeout')).toBeInTheDocument()
+    expect(screen.getByText('timeout / outer_agent_core_timeout')).toBeInTheDocument()
     expect(screen.getByText('clock edges')).toBeInTheDocument()
     expect(screen.getByText('clock groups')).toBeInTheDocument()
     expect(screen.getByTestId('runtime-lens-clock-groups')).toBeInTheDocument()
@@ -703,16 +639,11 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('Tool Runtime')).toBeInTheDocument()
   })
 
-  it('surfaces retired, unsupported, and invalid manifest rows', () => {
+  it('surfaces unsupported and invalid manifest rows', () => {
     const trace = runtimeTraceFixture()
     trace.manifest_scan_diagnostics = {
       state: 'available',
       schema: 'keeper.runtime_manifest_scan_diagnostics.v1',
-      retired_event_count: 2,
-      retired_event_counts: [
-        { event: 'state_snapshot_sidecar_saved', count: 1 },
-        { event: 'working_state_sidecar_saved', count: 1 },
-      ],
       unsupported_event_count: 3,
       unsupported_event_counts: [{ event: 'future_manifest_event', count: 1 }],
       unsupported_event_unattributed_count: 2,
@@ -725,7 +656,7 @@ describe('RuntimeLensSection', () => {
 
     render(h(RuntimeLensSection, { trace }))
 
-    expect(screen.getByText('retired 2 · unsupported 3 · invalid 1')).toBeInTheDocument()
+    expect(screen.getByText('unsupported 3 · invalid 1')).toBeInTheDocument()
     expect(screen.getByText('manifest diagnostics').nextElementSibling).toHaveAttribute(
       'title',
       expect.stringContaining('unsupported rows outside identity detail bound=2'),
@@ -771,7 +702,7 @@ describe('RuntimeLensSection', () => {
     expect(catalog).toHaveTextContent('provider.model')
     expect(catalog).toHaveTextContent('Runtime Provider')
     expect(catalog).toHaveTextContent('model-api')
-    expect(catalog).toHaveTextContent('source:oas-provider-config-model')
+    expect(catalog).toHaveTextContent('source:agent-core-provider-config-model')
     expect(catalog).toHaveTextContent('input:multimodal,image,audio')
     expect(catalog).toHaveTextContent('wire:responses.reasoning')
     expect(catalog).toHaveTextContent('tool-call-replay:required')
@@ -916,13 +847,18 @@ describe('RuntimeLensSection', () => {
         server_repo_git_commit: '386514c1f9',
         workspace_git_commit: 'd0add960d7',
         server_repo_path: { path: '/repo/.worktrees/stale-server' },
+        build: {
+          binary_commit: 'a1b2c3d4e5f6',
+        },
       },
     })
 
     expect(summary.tone).toBe('warn')
     expect(summary.runtimeWarnings).toEqual(['Runtime build commit differs from server repo HEAD.'])
-    expect(summary.runtimeBuildLabel).toBe('386514c1f9 vs workspace d0add960d7')
-    expect(summary.runtimeRepoLabel).toBe('.worktrees/stale-server')
+    expect(summary.runtimeBuildLabel).toBe('a1b2c3d4e5')
+    expect(summary.runtimeRepoLabel).toBe(
+      '.worktrees/stale-server · head 386514c1f9 · workspace d0add960d7',
+    )
   })
 
   it('renders secret projection status without secret values', () => {

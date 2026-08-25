@@ -4,18 +4,24 @@
  (name masc_runtime)
  (public_name masc.runtime)
  (wrapped false)
- (flags :standard)
  (libraries
+  masc.build_version
   yojson
+  cstruct
   otoml
   masc.toml_line_editor
   base64
+  dune-build-info
   unix
   logs
   eio
-  agent_sdk
-  agent_sdk.base
-  agent_sdk.llm_provider
+  cohttp
+  cohttp-eio
+  eqaf
+  masc.agent_core
+  masc.agent_core.base
+  masc.agent_core.llm_provider
+  masc.mcp_transport_protocol
   masc.masc_core
   masc.masc_types
   uri
@@ -26,7 +32,6 @@
   masc.masc_tool_dispatch
   masc.config
   masc.config_dir_resolver
-  masc.event_bus_slots
   masc.provider_tool_support
   masc.keeper_runtime
   masc.auth
@@ -35,6 +40,7 @@
   masc.types_boundary
   time_compat
   masc.dated_jsonl
+  masc_random_id
   masc.masc_process
   masc.otel_spans
   masc.otel_metric_store

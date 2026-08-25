@@ -1,6 +1,6 @@
 #!/bin/bash
 # MASC Benchmark Framework
-# Usage: ./benchmark.sh [session|read|workspace collaboration|runtime|a2a|all] [iterations]
+# Usage: ./benchmark.sh [session|read|workspace-collaboration|runtime|a2a|all] [iterations]
 
 set -euo pipefail
 
@@ -416,9 +416,9 @@ bench_read_path() {
   collect_tool_samples "mcp_read_messages" "masc_messages" '{"limit":5}' "$ITERATIONS" "recent workspace messages"
 }
 
-bench_workspace collaboration() {
+bench_workspace_collaboration() {
   collect_tool_samples "mcp_workspace_broadcast" "masc_broadcast" \
-    "$(jq -cn --arg agent "$MASC_AGENT" '{agent_name:$agent,message:"benchmark",format:"compact"}')" \
+    "$(jq -cn --arg agent "$MASC_AGENT" '{agent_name:$agent,content:"benchmark",format:"compact"}')" \
     "$ITERATIONS" "bound agent write path"
 }
 
@@ -435,7 +435,7 @@ bench_runtime() {
     bench_call_tool "masc_runtime_verify" '{}' >/dev/null
     runtime_status_samples+=("$BENCH_LAST_MS")
   done
-  append_row "oas_runtime_status" "runtime_verify" "${runtime_status_samples[@]}"
+  append_row "agent_core_runtime_status" "runtime_verify" "${runtime_status_samples[@]}"
 }
 
 ensure_session_ready() {
@@ -449,7 +449,7 @@ run_pattern() {
       collect_initialize_samples "$ITERATIONS"
       ensure_session_ready
       bench_read_path
-      bench_workspace collaboration
+      bench_workspace_collaboration
       bench_a2a
       bench_runtime
       ;;
@@ -460,9 +460,9 @@ run_pattern() {
       ensure_session_ready
       bench_read_path
       ;;
-    workspace collaboration)
+    workspace-collaboration)
       ensure_session_ready
-      bench_workspace collaboration
+      bench_workspace_collaboration
       ;;
     runtime)
       ensure_session_ready
@@ -474,7 +474,7 @@ run_pattern() {
       ;;
     *)
       error "Unknown pattern: $PATTERN"
-      echo "Available: session, read, workspace collaboration, runtime, a2a, all" >&2
+      echo "Available: session, read, workspace-collaboration, runtime, a2a, all" >&2
       exit 1
       ;;
   esac

@@ -1,5 +1,5 @@
 (** Keeper_context_core — shared keeper context utilities: working context,
-    checkpoint management, serialization, and OAS checkpoint operations.
+    checkpoint management, serialization, and AGENT_CORE checkpoint operations.
 
     Working context types live in {!Keeper_types}.
     Pure context operations (previously in Keeper_working_context)
@@ -13,7 +13,7 @@ open Keeper_meta_contract
 open Keeper_types_profile
 
 module Message_json = Keeper_context_core_message_json
-module Canonical_tool = Agent_sdk.Canonical_tool
+module Canonical_tool = Agent_core.Canonical_tool
 
 (* ================================================================ *)
 (* Working Context Types (re-exported from Keeper_types)             *)
@@ -28,7 +28,7 @@ type session_context = Keeper_types.session_context
 (* Working Context Operations (inlined from Keeper_working_context)  *)
 (* ================================================================ *)
 
-let text_of_message = Agent_sdk.Types.text_of_message
+let text_of_message = Agent_core.Types.text_of_message
 
 let ensure_dir path =
   (* ensure_dir returns the created path; fire-and-forget *)
@@ -36,7 +36,7 @@ let ensure_dir path =
 
 let checkpoint_of_context (ctx : working_context) = ctx.checkpoint
 
-let oas_context_of_context (ctx : working_context) = ctx.checkpoint.context
+let agent_core_context_of_context (ctx : working_context) = ctx.checkpoint.context
 
 let system_prompt_of_context (ctx : working_context) =
   Option.value ~default:"" ctx.checkpoint.system_prompt
@@ -45,15 +45,15 @@ let messages_of_context (ctx : working_context) =
   ctx.checkpoint.messages
 
 let empty_runtime_checkpoint ~system_prompt ~messages
-    ~(context : Agent_sdk.Context.t) : Agent_sdk.Checkpoint.t =
+    ~(context : Agent_core.Context.t) : Agent_core.Checkpoint.t =
   {
-    Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version;
+    Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version;
     session_id = "";
     agent_name = "";
     model = "";
     system_prompt = Some system_prompt;
     messages;
-    usage = Agent_sdk.Types.empty_usage;
+    usage = Agent_core.Types.empty_usage;
     turn_count = 0;
     created_at = Time_compat.now ();
     tools = [];
@@ -66,7 +66,7 @@ let empty_runtime_checkpoint ~system_prompt ~messages
     reasoning_effort = None;
     enable_thinking = None;
     preserve_thinking = None;
-    response_format = Agent_sdk.Types.Off;
+    response_format = Agent_core.Types.Off;
     thinking_budget = None;
     cache_system_prompt = false;
     context;
@@ -77,11 +77,11 @@ let empty_runtime_checkpoint ~system_prompt ~messages
 let message_count (ctx : working_context) =
   List.length (messages_of_context ctx)
 
-let create_oas_context ~eio =
-  if eio then Agent_sdk.Context.create () else Agent_sdk.Context.create_sync ()
+let create_agent_core_context ~eio =
+  if eio then Agent_core.Context.create () else Agent_core.Context.create_sync ()
 
 let create ~eio ~system_prompt =
-  let context = create_oas_context ~eio in
+  let context = create_agent_core_context ~eio in
   let checkpoint =
     empty_runtime_checkpoint ~system_prompt ~messages:[] ~context
   in
@@ -90,9 +90,9 @@ let create ~eio ~system_prompt =
 let set_system_prompt (ctx : working_context) ~system_prompt =
   let messages =
     List.map
-      (fun (m : Agent_sdk.Types.message) ->
-        if m.role = Agent_sdk.Types.System
-        then { m with role = Agent_sdk.Types.Assistant }
+      (fun (m : Agent_core.Types.message) ->
+        if m.role = Agent_core.Types.System
+        then { m with role = Agent_core.Types.Assistant }
         else m)
       (messages_of_context ctx)
   in
@@ -101,7 +101,7 @@ let set_system_prompt (ctx : working_context) ~system_prompt =
   in
   { checkpoint }
 
-let append ctx (msg : Agent_sdk.Types.message) =
+let append ctx (msg : Agent_core.Types.message) =
   let checkpoint =
     { ctx.checkpoint with messages = messages_of_context ctx @ [ msg ] }
   in
@@ -110,10 +110,10 @@ let append ctx (msg : Agent_sdk.Types.message) =
 let append_many ctx msgs =
   List.fold_left append ctx msgs
 
-let sync_oas_context (ctx : working_context) : working_context =
-  let context = oas_context_of_context ctx in
+let sync_agent_core_context (ctx : working_context) : working_context =
+  let context = agent_core_context_of_context ctx in
   let message_count = message_count ctx in
-  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
+  Agent_core.Context.set_scoped context Agent_core.Context.Session
     "message_count" (`Int message_count);
   ctx
 
@@ -139,21 +139,21 @@ let serialize_context (ctx : working_context) : string =
 let serialized_bytes (ctx : working_context) : int =
   String.length (serialize_context ctx)
 
+(* Naming a session does not open one. Every writer under this directory goes
+   through [Keeper_fs.save_atomic], which creates the parent it needs, so the
+   directory appears when something is actually stored in it. Creating it here
+   meant a failed boot — which never reaches a write — still left an empty
+   session behind, and autoboot retries left one per round: 39,594 directories
+   had accumulated by 2026-08-23, 96.7% of the recent ones belonging to no
+   keeper meta at all (#29586). *)
 let create_session ~session_id ~base_dir =
-  let session_dir = Filename.concat base_dir session_id in
-  ensure_dir session_dir;
-  { session_id; session_dir }
+  { session_id; session_dir = Filename.concat base_dir session_id }
 
 include Keeper_context_core_history
 
 (* ================================================================ *)
 (* End of inlined Keeper_working_context operations                  *)
 (* ================================================================ *)
-
-let timed = Inference_utils.timed
-let zero_usage = Inference_utils.zero_usage
-let usage_of_response = Inference_utils.usage_of_response
-let total_tokens = Inference_utils.total_tokens
 
 (* ================================================================ *)
 (* Checkpoint Store Delegation                                        *)

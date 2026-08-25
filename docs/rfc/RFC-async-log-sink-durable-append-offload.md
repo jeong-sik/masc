@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0108", "0079"]
-implementation_prs: []
 ---
 
 # RFC: Offload the structured-log durable append off the emitting fiber
@@ -29,7 +28,7 @@ latent throughput bottleneck for **all 644+ `Log.{Runtime,Keeper,Mcp}.{warn,erro
 call sites**, not any one subsystem.
 
 It became load-bearing when #25162 (`Oas_diag_sink`) added a new high-rate
-producer: OAS `Llm_provider.Diag.warn/error` now route into `Log.Runtime`, so a
+producer: agent_core `Llm_provider.Diag.warn/error` now route into `Log.Runtime`, so a
 provider 4xx/429 storm (observed: deepseek-v4-flash ~78% 4xx) fires one
 synchronous durable flush per rejected request, serializing provider fibers on
 the log mutex + disk flush precisely during the storm. #25162 merged with this
@@ -115,7 +114,7 @@ rewrite would break boot/shutdown logging.
 
 ## 6. Alternative rejected: bound at `Oas_diag_sink`
 
-Dedupe/sample/rate-bound the `oas:*` warns at `oas_diag_sink.ml:24-48`. Rejected
+Dedupe/sample/rate-bound the `agent_core:*` warns at `oas_diag_sink.ml:24-48`. Rejected
 as a standalone fix: (a) it quiets only the one new producer while the other
 644+ warn/error sites keep hitting the same synchronous flush; (b) cap / cooldown
 / dedup / sample is an explicit manifest workaround-rejection signature requiring
@@ -133,7 +132,7 @@ P1 is latent, not production-blocking now).
    path, line lands immediately; then start consumer → subsequent lines defer.
 4. Shutdown-drain: enqueue, cancel the switch, assert residue synchronously
    flushed via `on_release` (models safety invariant #1).
-5. Storm/harness: simulate the deepseek 429 pattern (hundreds of `oas:*`
+5. Storm/harness: simulate the deepseek 429 pattern (hundreds of `agent_core:*`
    `Diag.warn`/s); assert producer emit latency stays bounded (no per-record
    flush syscall on the emitting fiber).
 6. Interleave (RFC-0108 regression): concurrent producers never emit `}{`-concat

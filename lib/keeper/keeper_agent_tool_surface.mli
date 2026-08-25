@@ -17,7 +17,6 @@ type turn_lane =
   | Lane_retry
 
 val turn_lane_to_string : turn_lane -> string
-val turn_lane_of_string : string -> turn_lane option
 val turn_lane_to_yojson : turn_lane -> Yojson.Safe.t
 
 (** Diagnostic surface metrics emitted into trajectory entries. *)
@@ -32,12 +31,6 @@ val owned_active_task_id_for_meta :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_id.Task_id.t option
-
-(** Field-level merge for [write_meta_with_merge]. *)
-val merge_current_task_id :
-  latest:Keeper_meta_contract.keeper_meta ->
-  caller:Keeper_meta_contract.keeper_meta ->
-  Keeper_meta_contract.keeper_meta
 
 (** Reconcile [meta.current_task_id] with the backlog. *)
 val sync_current_task_id_from_backlog :

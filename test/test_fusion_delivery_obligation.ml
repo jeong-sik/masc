@@ -38,22 +38,20 @@ let with_temp_base f =
   in
   let old_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
   let old_base_path_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
-  let old_registry = Fusion_run_registry.global () in
+  let registry = Fusion_run_registry.create () in
   Unix.mkdir base_path 0o700;
   Unix.putenv "MASC_BASE_PATH" base_path;
   Unix.putenv "MASC_BASE_PATH_INPUT" base_path;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Fusion_run_registry.set_global (Fusion_run_registry.create ());
   Fun.protect
     ~finally:(fun () ->
-      Fusion_run_registry.set_global old_registry;
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
       restore_env "MASC_BASE_PATH" old_base_path;
       restore_env "MASC_BASE_PATH_INPUT" old_base_path_input;
       remove_tree base_path)
-    (fun () -> f base_path)
+    (fun () -> f base_path registry)
 ;;
 
 let expect_ok = function
@@ -74,14 +72,15 @@ let channel =
     ~parent_channel_id:None
     ~thread_id:(Some "thread-1")
     ~user_id:"user-1"
+    ()
   |> function
   | Ok channel -> channel
   | Error detail -> fail detail
 ;;
 
 let payload ?(prompt = "compare implementations") () : Obligation.accepted_payload =
-  { keeper_name = "analyst"
-  ; submitted_by = "analyst"
+  { keeper_name = "delta"
+  ; submitted_by = "delta"
   ; prompt
   ; preset = "council"
   ; web_tools = false
@@ -91,7 +90,7 @@ let payload ?(prompt = "compare implementations") () : Obligation.accepted_paylo
 ;;
 
 let test_exact_prepare_load_inventory_remove () =
-  with_temp_base (fun base_path ->
+  with_temp_base (fun base_path _registry ->
     Eio_main.run (fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let request_id = request_id "kmsg-fusion-1" in
@@ -136,7 +135,7 @@ let test_exact_prepare_load_inventory_remove () =
 ;;
 
 let test_corrupt_peer_is_quarantined_locally () =
-  with_temp_base (fun base_path ->
+  with_temp_base (fun base_path _registry ->
     Eio_main.run (fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let request_id = request_id "kmsg-fusion-peer" in
@@ -156,7 +155,7 @@ let test_corrupt_peer_is_quarantined_locally () =
 ;;
 
 let test_startup_recovery_projects_canonical_terminal () =
-  with_temp_base (fun base_path ->
+  with_temp_base (fun base_path registry ->
     Eio_main.run (fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       Eio.Switch.run (fun background_sw ->
@@ -185,7 +184,7 @@ let test_startup_recovery_projects_canonical_terminal () =
           Keeper_msg_async.submit_with_request_id ~on_accepted
             ~on_worker_settled:(fun settlement ->
               Eio.Promise.resolve resolve_settled settlement)
-            ~background_sw ~base_path ~caller:"analyst" ~keeper_name:"analyst"
+            ~background_sw ~base_path ~caller:"delta" ~keeper_name:"delta"
             ~f:(fun ~request_id:_ _request_sw ->
               Keeper_types_profile.tool_result_ok_data
                 (Fusion_types.deliberation_evidence_to_yojson evidence))
@@ -207,7 +206,7 @@ let test_startup_recovery_projects_canonical_terminal () =
              { durability = Keeper_msg_async.Durable; _ } -> ()
          | _ -> fail "worker did not produce one durable canonical terminal");
         let report =
-          Fusion_delivery_projector.recover_startup ~base_path
+          Fusion_delivery_projector.recover_startup ~registry ~base_path ()
           |> function
           | Ok report -> report
           | Error error -> fail (Obligation.error_to_string error)
@@ -233,7 +232,7 @@ let test_startup_recovery_projects_canonical_terminal () =
          | Error error -> fail (Obligation.error_to_string error)
          | Ok _ -> fail "projected obligation was not removed");
         match
-          Keeper_event_queue_persistence.load ~base_path ~keeper_name:"analyst"
+          Keeper_event_queue_persistence.load ~base_path ~keeper_name:"delta"
           |> Keeper_event_queue.dequeue
         with
         | Some ({ payload = Keeper_event_queue.Fusion_completed completion; _ }, _) ->
@@ -246,7 +245,7 @@ let test_startup_recovery_projects_canonical_terminal () =
 ;;
 
 let test_startup_cleanup_observes_atomic_orphans () =
-  with_temp_base (fun base_path ->
+  with_temp_base (fun base_path registry ->
     Eio_main.run (fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let staging =
@@ -256,7 +255,7 @@ let test_startup_cleanup_observes_atomic_orphans () =
       Fs_compat.save_file (Filename.concat staging ".atomic_empty.tmp") "";
       Fs_compat.save_file (Filename.concat staging ".atomic_payload.tmp") "payload";
       let report =
-        Fusion_delivery_projector.recover_startup ~base_path
+        Fusion_delivery_projector.recover_startup ~registry ~base_path ()
         |> function
         | Ok report -> report
         | Error error -> fail (Obligation.error_to_string error)
@@ -275,7 +274,7 @@ let test_startup_recovery_remediates_missing_evidence () =
   (* P1 remediation: a durably canonical [Done{ok=true; data=None}] can never
      become projectable, so recovery must deliver a typed failure and clear
      the obligation instead of retrying it on every startup. *)
-  with_temp_base (fun base_path ->
+  with_temp_base (fun base_path registry ->
     Eio_main.run (fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       Eio.Switch.run (fun background_sw ->
@@ -296,7 +295,7 @@ let test_startup_recovery_remediates_missing_evidence () =
           Keeper_msg_async.submit_with_request_id ~on_accepted
             ~on_worker_settled:(fun settlement ->
               Eio.Promise.resolve resolve_settled settlement)
-            ~background_sw ~base_path ~caller:"analyst" ~keeper_name:"analyst"
+            ~background_sw ~base_path ~caller:"delta" ~keeper_name:"delta"
             ~f:(fun ~request_id:_ _request_sw ->
               (* A plain string body settles [Done{ok=true; data=None}]. *)
               Keeper_types_profile.tool_result_ok "done without evidence")
@@ -318,7 +317,7 @@ let test_startup_recovery_remediates_missing_evidence () =
              { durability = Keeper_msg_async.Durable; _ } -> ()
          | _ -> fail "worker did not produce one durable canonical terminal");
         let report =
-          Fusion_delivery_projector.recover_startup ~base_path
+          Fusion_delivery_projector.recover_startup ~registry ~base_path ()
           |> function
           | Ok report -> report
           | Error error -> fail (Obligation.error_to_string error)
@@ -341,7 +340,7 @@ let test_startup_recovery_remediates_missing_evidence () =
          | Error error -> fail (Obligation.error_to_string error)
          | Ok _ -> fail "remediated obligation was not removed");
         match
-          Keeper_event_queue_persistence.load ~base_path ~keeper_name:"analyst"
+          Keeper_event_queue_persistence.load ~base_path ~keeper_name:"delta"
           |> Keeper_event_queue.dequeue
         with
         | Some ({ payload = Keeper_event_queue.Fusion_completed completion; _ }, _) ->
@@ -369,21 +368,18 @@ let test_startup_recovery_remediates_missing_evidence () =
 ;;
 
 let test_evidence_unavailable_typed_failure_code () =
-  (* The sink failure code is derived from the typed variant — the live path
-     must never bypass it with a raw string. *)
+  (* The registry wire code is derived from the typed failure, never chosen by
+     a caller passing a raw string. The failure now lives in the sink because
+     that is where the terminal it maps to is decided. *)
   check string "failure code derives from typed variant" "evidence_unavailable"
-    (Fusion_delivery_projector.projection_error_failure_code
-       Fusion_delivery_projector.Evidence_unavailable);
+    (Fusion_sink.delivery_failure_code Fusion_sink.Evidence_unavailable);
   check string "detail derives from typed variant"
     "Fusion computation completed successfully without deliberation evidence"
-    (Fusion_delivery_projector.projection_error_to_string
-       Fusion_delivery_projector.Evidence_unavailable);
-  match
-    Fusion_delivery_projector.projection_error_failure_code
-      (Fusion_delivery_projector.Projection_failed "boom")
-  with
-  | _ -> fail "non-sink projection error must not have a failure code"
-  | exception Invalid_argument _ -> ()
+    (Fusion_sink.delivery_failure_detail Fusion_sink.Evidence_unavailable);
+  check string "cancellation keeps its provenance in the detail"
+    "operator stop (cancelled_by=vincent)"
+    (Fusion_sink.delivery_failure_detail
+       (Fusion_sink.Cancelled { reason = "operator stop"; cancelled_by = "vincent" }))
 ;;
 
 let () =

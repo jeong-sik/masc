@@ -31,7 +31,6 @@ let make_routes ~port ~host:_ ~sw ~clock =
   |> Server_routes_http_routes_voice.add_routes
   |> Server_routes_http_routes_multimodal.add_routes
   |> Server_routes_http_routes_autonomous.add_routes
-  |> Server_routes_http_routes_resilience.add_routes
   |> Server_routes_http_routes_channel_gate.add_routes ~sw ~clock
   |> Server_routes_http_routes_sidecar.add_routes ~sw ~clock
   |> Server_routes_http_routes_repositories.add_routes

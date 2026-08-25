@@ -1,12 +1,12 @@
-(** Masc_context_injector — OAS context_injector for MASC agents.
+(** Masc_context_injector — AGENT_CORE context_injector for MASC agents.
 
-    Writes temporal and tool metadata to {!Agent_sdk.Context.t} after each
+    Writes temporal and tool metadata to {!Agent_core.Context.t} after each
     tool execution.  Shared between Keeper and Worker paths.
 
     The write path:
     {[
       context_injector (after tool exec)
-        → Context.set key value  (via OAS Pipeline Stage 5)
+        → Context.set key value  (via AGENT_CORE Pipeline Stage 5)
     ]}
     [Context.set] overwrites by key, so repeated tool calls keep this
     metadata surface bounded to the keys declared below rather than
@@ -30,13 +30,13 @@ type config = {
 val default_config : unit -> config
 (** Create a config with [start_time = Unix.gettimeofday ()]. *)
 
-val make : config:config -> unit -> Agent_sdk.Hooks.context_injector
-(** Build an OAS [context_injector] function.
+val make : config:config -> unit -> Agent_core.Hooks.context_injector
+(** Build an AGENT_CORE [context_injector] function.
 
     Thread-safe: uses {!Atomic} counters internally.
     Returns [Some injection] for every tool call (never [None]). *)
 
-val render_temporal_summary : ?now:float -> Agent_sdk.Context.t -> string option
+val render_temporal_summary : ?now:float -> Agent_core.Context.t -> string option
 (** Render a one-line temporal summary from [Context.t].
 
     [time=] and [elapsed=] are recomputed from [now] (defaulting to

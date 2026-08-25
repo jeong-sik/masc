@@ -58,18 +58,6 @@ let descriptor_internal_name_set () =
   tbl
 ;;
 
-let contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  if needle_len = 0
-  then true
-  else
-    let rec loop i =
-      i + needle_len <= haystack_len
-      &&
-      (String.equal (String.sub haystack i needle_len) needle || loop (i + 1))
-    in
-    loop 0
 ;;
 
 let source_path rel =
@@ -124,17 +112,21 @@ let test_keeper_model_projection_is_single_and_unique () =
   List.iter
     (fun (descriptor : Descriptor.t) ->
        let projected = Descriptor.keeper_model_names descriptor in
-       let candidates = Descriptor.keeper_candidate_names descriptor in
        match descriptor.keeper_model_projection with
        | Descriptor.Preferred_public_name ->
          Alcotest.(check (list string))
            (descriptor.id ^ " preferred model projection")
            [ descriptor.public_name ]
            projected;
+         (* The internal name stays owned by this descriptor even though the
+            model is never shown it. [registered_names] is the name-integrity
+            axis; [keeper_model_names] is the admission axis. Keeping both here
+            is what stops a rename from freeing the internal name for another
+            descriptor to claim. *)
          Alcotest.(check bool)
-           (descriptor.id ^ " keeps internal dispatch candidate")
+           (descriptor.id ^ " still owns its internal handler route")
            true
-           (List.mem descriptor.internal_name candidates)
+           (List.mem descriptor.internal_name (Descriptor.registered_names descriptor))
        | Descriptor.Internal_name ->
          Alcotest.(check (list string))
            (descriptor.id ^ " internal model projection")
@@ -144,20 +136,12 @@ let test_keeper_model_projection_is_single_and_unique () =
          Alcotest.(check (list string))
            (descriptor.id ^ " operator-only control has no model projection")
            []
-           projected;
-         Alcotest.(check (list string))
-           (descriptor.id ^ " operator-only control has no Keeper candidates")
-           []
-           candidates
+           projected
        | Descriptor.Transport_alias _ ->
          Alcotest.(check (list string))
            (descriptor.id ^ " transport alias has no duplicate model projection")
            []
-           projected;
-         Alcotest.(check (list string))
-           (descriptor.id ^ " has no Keeper candidates")
-           []
-           candidates)
+           projected)
     (all_descriptors ())
 ;;
 
@@ -214,6 +198,16 @@ let test_model_visible_descriptors_own_capability_identity () =
         descriptor.id)
 ;;
 
+(* [Keeper_schema_toml] decodes each file in a module-level [let] and fails
+   the boot on a bad one, which is the contract its .mli states. That makes
+   the loop below unreachable: a schema that would fail it kills the process
+   before any test function starts, so it can only ever run against schemas
+   that already pass (#29354).
+
+   Keeping the loop and adding a case that drives the same parser the loader
+   uses. [Tool_definition_toml.load] is what [schema_of_name] calls, and it
+   returns a result, so the rejection is observable here rather than only as
+   a boot trace. *)
 let test_model_visible_descriptors_have_canonical_input_schemas () =
   Descriptor.model_visible_descriptors ()
   |> List.iter (fun (descriptor : Descriptor.t) ->
@@ -225,6 +219,46 @@ let test_model_visible_descriptors_have_canonical_input_schemas () =
          descriptor.id
          (String.concat "; " errors));
     ignore descriptor.input_schema_source)
+;;
+
+let test_the_loader_refuses_a_malformed_declaration () =
+  let malformed =
+    {|name = "masc_keeper_up"
+description = "probe"
+
+[[params]]
+name = "keeper_name"
+type = "nonsense"
+|}
+  in
+  match
+    Tool_definition_toml.load ~name:"masc_keeper_up" ~contents:malformed
+  with
+  | Ok _ ->
+    Alcotest.fail
+      "a param type outside the schema vocabulary must not load; the boot \
+       depends on this refusal"
+  | Error _ -> ()
+;;
+
+(* The other half: the refusal has to be about the malformed part, not about
+   the loader rejecting everything. *)
+let test_the_loader_accepts_the_same_declaration_repaired () =
+  let repaired =
+    {|name = "masc_keeper_up"
+description = "probe"
+
+[[params]]
+name = "keeper_name"
+type = "string"
+|}
+  in
+  match
+    Tool_definition_toml.load ~name:"masc_keeper_up" ~contents:repaired
+  with
+  | Ok _ -> ()
+  | Error detail ->
+    Alcotest.failf "the repaired declaration must load: %s" detail
 ;;
 
 let test_all_resolved_descriptor_schemas_are_structurally_valid () =
@@ -252,11 +286,76 @@ let test_structurally_invalid_schema_is_excluded () =
   Alcotest.(check (list string))
     "malformed schema has no model names"
     []
-    (Descriptor.keeper_model_names malformed);
+    (Descriptor.keeper_model_names malformed)
+;;
+
+(* The description a Keeper reads and the description in the canonical registry
+   used to be two strings. [cluster_descriptor] looked the tool up for its
+   input_schema and then took a second description from an inline argument, and
+   nothing compared them: 66 of 98 model-visible descriptors disagreed, and in
+   57 the model saw the shorter one — including every Goal tool and
+   [masc_transition], whose canonical text is the only place [release] is
+   named.
+
+   That seam is closed: [cluster_descriptor] takes both fields from the one
+   lookup. This pins it. The exceptions below reach the model through other
+   constructors and keep their own text on purpose — the Board projection
+   narrows the canonical schema for the Keeper surface (its description is
+   usually the longer, more specific one), and the shard/library/individual
+   tools are declared with [in_process_descriptor] rather than the cluster
+   path. Adding an inline description back onto a cluster tool fails here. *)
+let descriptions_owned_elsewhere =
+  [ (* Board: [masc_board_descriptor] carries the Keeper projection's own text *)
+    "masc_board_comment"
+  ; "masc_board_curation_read"
+  ; "masc_board_curation_submit"
+  ; "masc_board_list"
+  ; "masc_board_post"
+  ; "masc_board_search"
+  ; "masc_board_vote"
+    (* Shard runtime tools: declared directly, not through the cluster path *)
+  ; "tool_edit_file"
+  ; "tool_execute"
+  ; "tool_read_file"
+  ; "tool_search_files"
+  ; "tool_write_file"
+    (* Library and individually-declared keeper tools *)
+  ; "keeper_library_read"
+  ; "keeper_library_search"
+  ; "masc_library_list"
+  ; "keeper_context_status"
+  ; "keeper_ide_annotate"
+  ; "keeper_memory_search"
+  ; "keeper_memory_write"
+  ; "keeper_person_note_set"
+  ; "keeper_time_now"
+  ; "keeper_tools_list"
+  ]
+;;
+
+let test_cluster_descriptions_come_from_the_registry () =
+  let canonical = Hashtbl.create 512 in
+  List.iter
+    (fun (schema : Masc_domain.tool_schema) ->
+       if not (Hashtbl.mem canonical schema.name)
+       then Hashtbl.add canonical schema.name schema.description)
+    Masc.Config.raw_all_tool_schemas;
+  let drifted =
+    Descriptor.model_visible_descriptors ()
+    |> List.filter_map (fun (d : Descriptor.t) ->
+         if List.mem d.internal_name descriptions_owned_elsewhere
+         then None
+         else
+           match Hashtbl.find_opt canonical d.internal_name with
+           | None -> None
+           | Some canon ->
+             if String.equal canon d.description then None else Some d.internal_name)
+    |> List.sort String.compare
+  in
   Alcotest.(check (list string))
-    "malformed schema has no execution candidates"
+    "every cluster tool's description is the registry's"
     []
-    (Descriptor.keeper_candidate_names malformed)
+    drifted
 ;;
 
 let test_registered_cluster_model_projections_are_explicit () =
@@ -270,16 +369,10 @@ let test_registered_cluster_model_projections_are_explicit () =
   let keeper_model_names = Policy.keeper_model_tool_names () in
   List.iter
     (fun name -> check_projection name Descriptor.Internal_name)
-    [ "masc_runtime_verify"
-    ; "masc_runtime_ollama_probe"
-    ];
-  List.iter
-    (fun name -> check_projection name Descriptor.Internal_name)
     [ "keeper_library_read"
     ; "keeper_library_search"
     ; "masc_library_add"
     ; "masc_library_list"
-    ; "masc_heartbeat"
     ; "masc_gc"
     ; "masc_get_metrics"
     ];
@@ -297,6 +390,28 @@ let test_registered_cluster_model_projections_are_explicit () =
       "masc_status"
     ; "masc_pause"
     ; "masc_resume"
+      (* Completion-backed runtime verification and the native Ollama timing
+         probe are explicit Admin diagnostics, distinct from
+         [/api/v1/dashboard/runtime-probe], which reads metadata only. Both can
+         load a model or change warm/cache state. Registration is unchanged;
+         the metadata-only dashboard route owns separate [CanReadState]
+         authority. *)
+    ; "masc_runtime_verify"
+    ; "masc_runtime_ollama_probe"
+      (* #29681 took these off the model surface after two months of zero
+         Keeper calls. Pinned here so the surface cannot quietly regrow: the
+         plan tools are an operator's editing surface, and heartbeat, check,
+         tool_help, and the agent screens answer questions the world-state
+         frame already carries. All stay registered for MCP/HTTP. *)
+    ; "masc_heartbeat"
+    ; "masc_check"
+    ; "masc_tool_help"
+    ; "masc_agent_card"
+    ; "masc_agent_timeline"
+    ; "masc_plan_init"
+    ; "masc_plan_update"
+    ; "masc_plan_get"
+    ; "masc_plan_set_task"
     ];
   List.iter
     (fun (name, projected_by) ->
@@ -304,7 +419,25 @@ let test_registered_cluster_model_projections_are_explicit () =
     [ "masc_library_read", "keeper_library_read"
     ; "masc_library_search", "keeper_library_search"
     ; "masc_tasks", "keeper_tasks_list"
+      (* #29681: the keeper_* twin is what the model sees. *)
+    ; "masc_add_task", "keeper_task_create"
+    ; "masc_batch_add_tasks", "keeper_task_create"
+    ; "masc_transition", "keeper_task_claim"
+    ; "masc_update_priority", "keeper_task_claim"
     ]
+;;
+
+let test_local_runtime_effect_metadata_is_explicit () =
+  let verify = required_internal_descriptor "masc_runtime_verify" in
+  Alcotest.(check (option bool))
+    "verify is not read-only"
+    (Some false)
+    verify.policy.readonly_hint;
+  let probe = required_internal_descriptor "masc_runtime_ollama_probe" in
+  Alcotest.(check (option bool))
+    "native probe is not read-only"
+    (Some false)
+    probe.policy.readonly_hint
 ;;
 
 let test_keeper_management_projection_is_explicit () =
@@ -331,15 +464,10 @@ let test_keeper_management_projection_is_explicit () =
     ; "masc_keeper_sandbox_start"
     ; "masc_keeper_sandbox_stop"
     ; "masc_keeper_reset"
-    ; "masc_keeper_persona_audit"
+    ; "masc_keeper_audit"
     ; "masc_keeper_status"
     ; "masc_keeper_down"
     ; "masc_keeper_up"
-    ; "masc_keeper_create_from_persona"
-    ; "masc_persona_list"
-    ; "masc_persona_create"
-    ; "masc_persona_update"
-    ; "masc_persona_delete"
     ]
 ;;
 
@@ -487,6 +615,38 @@ let test_internal_name_snake_case () =
 let test_registry_not_empty () =
   if all_descriptors () = []
   then Alcotest.failf "Keeper_tool_descriptor.all_descriptors () returned []"
+
+let object_schema = `Assoc [ "type", `String "object" ]
+
+let schema_named name : Masc_domain.tool_schema =
+  { name; description = "one line"; input_schema = object_schema }
+;;
+
+let rejects_with what schemas =
+  match Masc.Config.validate_schemas schemas with
+  | () -> Alcotest.failf "validate_schemas accepted %s" what
+  | exception Invalid_argument _ -> ()
+;;
+
+(* The disjointness that [Keeper_tool_descriptor.find_cluster_schema_opt] relies
+   on is enforced here and nowhere else: the six registries it falls through are
+   all concatenated into [Config.raw_all_tool_schemas]. *)
+let test_duplicate_schema_name_is_rejected () =
+  rejects_with
+    "a repeated tool name"
+    [ schema_named "masc_status"; schema_named "masc_status" ]
+;;
+
+let test_distinct_schema_names_are_accepted () =
+  Masc.Config.validate_schemas
+    [ schema_named "masc_status"; schema_named "masc_tasks" ]
+;;
+
+let test_blank_schema_description_is_rejected () =
+  rejects_with
+    "a blank description"
+    [ { name = "masc_status"; description = ""; input_schema = object_schema } ]
+;;
 
 let schema_property_description schema name =
   let open Yojson.Safe.Util in
@@ -1163,6 +1323,67 @@ let test_readonly_policy_projection_is_descriptor_owned () =
     false
     (List.mem "tool_write_file" projected)
 
+let test_concurrent_execution_opt_ins_are_exact () =
+  let concurrent_internal_names =
+    all_descriptors ()
+    |> List.filter_map (fun (descriptor : Descriptor.t) ->
+      match descriptor.execution with
+      | Descriptor.Ordinary Descriptor.Concurrent -> Some descriptor.internal_name
+      | Descriptor.Ordinary Descriptor.Serial | Descriptor.Terminal -> None)
+    |> List.sort_uniq String.compare
+  in
+  Alcotest.(check (list string))
+    "only explicitly audited handlers opt into concurrent batches"
+    [ "keeper_artifact_read"
+    ; "keeper_library_read"
+    ; "keeper_library_search"
+    ; "keeper_tasks_audit"
+    ; "keeper_tasks_list"
+    ; "keeper_time_now"
+    ; "keeper_tools_list"
+    ; "masc_agent_card"
+    ; "masc_agent_fitness"
+    ; "masc_agent_timeline"
+    ; "masc_board_curation_read"
+    ; "masc_board_hearths"
+    ; "masc_board_list"
+    ; "masc_board_post_get"
+    ; "masc_board_profile"
+    ; "masc_board_search"
+    ; "masc_board_stats"
+    ; "masc_board_sub_board_get"
+    ; "masc_board_sub_board_list"
+    ; "masc_config"
+    ; "masc_fusion_status"
+    ; "masc_get_metrics"
+    ; "masc_goal_list"
+    ; "masc_plan_get_task"
+    ; "masc_run_list"
+    ; "masc_task_history"
+    ; "masc_tasks"
+    ; "masc_tool_help"
+    ; "masc_web_fetch"
+    ; "masc_web_search"
+    ; "tool_read_file"
+    ; "tool_search_files"
+    ]
+    concurrent_internal_names
+
+let test_concurrent_opt_ins_are_statically_read_only () =
+  (* Property mirror of the fail-closed admission rule enforced by the
+     [Descriptor.descriptor] constructor: a Concurrent descriptor without a
+     static read-only hint cannot be constructed, so the registry must never
+     contain one. *)
+  all_descriptors ()
+  |> List.iter (fun (descriptor : Descriptor.t) ->
+    match descriptor.execution, Descriptor.readonly_static_hint descriptor with
+    | Descriptor.Ordinary Descriptor.Concurrent, Some true -> ()
+    | Descriptor.Ordinary Descriptor.Concurrent, (Some false | None) ->
+      Alcotest.fail
+        (descriptor.internal_name
+         ^ " opts into concurrent batches without a static read-only hint")
+    | Descriptor.Ordinary Descriptor.Serial, _ | Descriptor.Terminal, _ -> ())
+
 let test_readonly_policy_is_descriptor_input_aware () =
   let public_input =
     `Assoc [ "pattern", `String "Keeper_tool_descriptor"; "op", `String "rm" ]
@@ -1198,14 +1419,6 @@ let test_readonly_policy_is_descriptor_input_aware () =
        ~tool_name:"tool_search_files"
        ~input:internal_input)
 
-let test_inline_policy_uses_descriptor_resolution () =
-  Alcotest.(check (list string))
-    "safe inline tools project from descriptors"
-    []
-    (Descriptor.keeper_safe_inline_names ());
-  ()
-;;
-
 let test_public_name_projection_uses_descriptor_resolution () =
   Alcotest.(check (list string))
     "tool_execute public projection"
@@ -1240,7 +1453,7 @@ let test_run_tools_setup_has_no_direct_public_mcp_catalog_read () =
   Alcotest.(check bool)
     "keeper_run_tools_setup does not classify with Tool_catalog.is_public_mcp"
     false
-    (contains_substring source "Tool_catalog.is_public_mcp")
+    (String_util.contains_substring source "Tool_catalog.is_public_mcp")
 ;;
 
 (* RFC-0182 §3.1 — verify keeper descriptors project from name → descriptor
@@ -1259,16 +1472,11 @@ let cluster_projection_table =
   ; "masc_keeper_sandbox_start", "tool_masc_keeper_dispatch"
   ; "masc_keeper_sandbox_stop", "tool_masc_keeper_dispatch"
   ; "masc_keeper_reset", "tool_masc_keeper_dispatch"
-  ; "masc_keeper_persona_audit", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_audit", "tool_masc_keeper_dispatch"
   ; "masc_keeper_status", "tool_masc_keeper_dispatch"
   ; "masc_keeper_down", "tool_masc_keeper_dispatch"
   ; "masc_keeper_delegate", "tool_masc_keeper_dispatch"
   ; "masc_keeper_up", "tool_masc_keeper_dispatch"
-  ; "masc_keeper_create_from_persona", "tool_masc_keeper_dispatch"
-  ; "masc_persona_list", "tool_masc_keeper_dispatch"
-  ; "masc_persona_create", "tool_masc_keeper_dispatch"
-  ; "masc_persona_update", "tool_masc_keeper_dispatch"
-  ; "masc_persona_delete", "tool_masc_keeper_dispatch"
   ]
 ;;
 
@@ -1433,8 +1641,8 @@ let test_keeper_dispatch_ref_reaches_every_keeper_descriptor () =
 
 let test_public_mcp_surface_has_exact_dispatch_owner () =
   let descriptor_names = descriptor_internal_name_set () in
-  let inline_names =
-    Tool_schemas_inline.schemas
+  let runtime_names =
+    Tool_schemas_misc.mcp_runtime_schemas
     |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   in
   let surface = Tool_catalog_surfaces.public_mcp_surface_tools in
@@ -1442,7 +1650,7 @@ let test_public_mcp_surface_has_exact_dispatch_owner () =
     List.filter
       (fun name ->
          (not (Hashtbl.mem descriptor_names name))
-         && not (List.mem name inline_names))
+         && not (List.mem name runtime_names))
       surface
   in
   if missing <> []
@@ -1454,11 +1662,197 @@ let test_public_mcp_surface_has_exact_dispatch_owner () =
       (String.concat ", " missing)
 ;;
 
+let test_public_mcp_membership_matches_surface_ssot () =
+  let surface = Tool_catalog_surfaces.public_mcp_surface_tools in
+  List.iter
+    (fun (schema : Masc_domain.tool_schema) ->
+       Alcotest.(check bool)
+         (schema.name ^ " public membership matches the canonical surface")
+         (List.mem schema.name surface)
+         (Tool_catalog.is_public_mcp schema.name))
+    Masc.Config.raw_all_tool_schemas
+;;
+
+(* keeper_surface_post is described in three places: the MCP tool schema
+   (tool_surface layer), the keeper descriptor's input schema, and the executor
+   that validates the call. Nothing made them agree, and two descriptions had
+   already drifted into saying a dashboard/discord target is "ignored" when the
+   executor rejects it. RFC-0056 forbids the tool_surface layer from importing
+   keeper, so the block cap exists as two constants; this pins them equal and
+   pins the parameter sets equal, which is the check that was missing. *)
+let surface_post_schema_properties (schema : Yojson.Safe.t) =
+  match schema with
+  | `Assoc fields -> (
+    match List.assoc_opt "properties" fields with
+    | Some (`Assoc props) -> List.map fst props |> List.sort String.compare
+    | Some _ | None -> Alcotest.fail "keeper_surface_post schema has no properties")
+  | _ -> Alcotest.fail "keeper_surface_post schema is not an object"
+;;
+
+let surface_post_block_cap (schema : Yojson.Safe.t) =
+  match schema with
+  | `Assoc fields -> (
+    match List.assoc_opt "properties" fields with
+    | Some (`Assoc props) -> (
+      match List.assoc_opt "blocks" props with
+      | Some (`Assoc block_fields) -> List.assoc_opt "maxItems" block_fields
+      | Some _ | None -> None)
+    | Some _ | None -> None)
+  | _ -> None
+;;
+
+let tool_schema_for name =
+  match
+    List.find_opt
+      (fun (t : Masc_domain.tool_schema) -> String.equal t.name name)
+      Tool_shard_types.surface_tools
+  with
+  | Some tool -> tool.input_schema
+  | None -> Alcotest.failf "tool schema %s is not registered" name
+;;
+
+let descriptor_schema_for name =
+  (* Registered with [~keeper_model_projection:Internal_name], so
+     [public_input_schema] does not resolve it. *)
+  match Descriptor.descriptors_for_internal name with
+  | descriptor :: _ -> descriptor.Descriptor.input_schema
+  | [] -> Alcotest.failf "descriptor %s is not registered" name
+;;
+
+let test_surface_post_schema_copies_agree () =
+  let tool_schema = tool_schema_for "keeper_surface_post" in
+  let descriptor_schema = descriptor_schema_for "keeper_surface_post" in
+  check
+    (list string)
+    "the two keeper_surface_post schemas declare the same parameters"
+    (surface_post_schema_properties descriptor_schema)
+    (surface_post_schema_properties tool_schema);
+  let expected = `Int Masc.Keeper_surface_post.max_rich_blocks in
+  check
+    bool
+    "the tool schema's block cap equals the executor's"
+    true
+    (surface_post_block_cap tool_schema = Some expected);
+  check
+    bool
+    "the descriptor's block cap equals the executor's"
+    true
+    (surface_post_block_cap descriptor_schema = Some expected)
+;;
+
+(* The executor refuses these two parameters outside Slack. A description that
+   says "ignored" sends the model into a call that fails. *)
+let test_surface_post_descriptions_do_not_promise_ignoring () =
+  let contains needle haystack =
+    let n = String.length needle in
+    let rec scan i =
+      i + n <= String.length haystack
+      && (String.equal (String.sub haystack i n) needle || scan (i + 1))
+    in
+    n > 0 && scan 0
+  in
+  let descriptions schema =
+    match schema with
+    | `Assoc fields -> (
+      match List.assoc_opt "properties" fields with
+      | Some (`Assoc props) ->
+        List.filter_map
+          (fun (name, value) ->
+             match value with
+             | `Assoc value_fields -> (
+               match List.assoc_opt "description" value_fields with
+               | Some (`String text) -> Some (name, text)
+               | Some _ | None -> None)
+             | _ -> None)
+          props
+      | Some _ | None -> [])
+    | _ -> []
+  in
+  List.iter
+    (fun schema ->
+       List.iter
+         (fun (name, text) ->
+            match name with
+            | "thread_ts" | "blocks" ->
+              check
+                bool
+                (name ^ " does not describe a rejected target as ignored")
+                false
+                (contains "ignored for dashboard" text
+                 || contains "ignored for discord" text)
+            | _ -> ())
+         (descriptions schema))
+    [ tool_schema_for "keeper_surface_post"
+    ; descriptor_schema_for "keeper_surface_post"
+    ]
+;;
+
+let test_probe_schema_declares_the_bounds_it_enforces () =
+  (* The probe refuses probe_runs/max_tokens/ps_timeout_sec outside their
+     ranges (#25006). A caller that cannot read those ranges off the schema
+     learns them from a rejection instead, one wasted round trip per knob,
+     and nothing in the type system ties the two together. *)
+  (* Not [tool_schema_for]: the probe is an Operator_diagnostic, so it is
+     registered but withheld from the keeper model projection that
+     [surface_tools] is. Read it where it is declared. *)
+  let schema =
+    match
+      List.find_opt
+        (fun (definition : Tool_schemas_local_runtime.definition) ->
+          String.equal definition.schema.name "masc_runtime_ollama_probe")
+        Tool_schemas_local_runtime.definitions
+    with
+    | Some definition -> definition.schema.input_schema
+    | None -> Alcotest.fail "masc_runtime_ollama_probe is not declared"
+  in
+  let bound field key expected =
+    let actual =
+      schema
+      |> Yojson.Safe.Util.member "properties"
+      |> Yojson.Safe.Util.member field
+      |> Yojson.Safe.Util.member key
+    in
+    Alcotest.(check string)
+      (Printf.sprintf "%s declares %s" field key)
+      (Yojson.Safe.to_string (`Int expected))
+      (Yojson.Safe.to_string actual)
+  in
+  bound "probe_runs" "minimum" 1;
+  bound "probe_runs" "maximum" 4;
+  bound "max_tokens" "minimum" 1;
+  bound "max_tokens" "maximum" 128;
+  bound "ps_timeout_sec" "minimum" 1;
+  bound "ps_timeout_sec" "maximum" 30;
+  bound "timeout_sec" "minimum" 1
+;;
+
 let () =
   Alcotest.run
     "keeper_tool_descriptor_registry_integrity"
-    [ ( "uniqueness"
+    [ ( "surface_post schema parity"
+      , [ test_case
+            "both keeper_surface_post schemas agree with the executor"
+            `Quick
+            test_surface_post_schema_copies_agree
+        ; test_case
+            "slack-only parameters are not described as ignored"
+            `Quick
+            test_surface_post_descriptions_do_not_promise_ignoring
+        ] )
+    ; ( "uniqueness"
       , [ test_case "registry not empty" `Quick test_registry_not_empty
+        ; test_case
+            "a repeated schema name is rejected"
+            `Quick
+            test_duplicate_schema_name_is_rejected
+        ; test_case
+            "distinct schema names are accepted"
+            `Quick
+            test_distinct_schema_names_are_accepted
+        ; test_case
+            "a blank schema description is rejected"
+            `Quick
+            test_blank_schema_description_is_rejected
         ; test_case "public_name is unique" `Quick test_public_name_uniqueness
         ; test_case "internal_name is unique" `Quick test_internal_name_uniqueness
         ; test_case
@@ -1481,6 +1875,14 @@ let () =
             "model-visible descriptors have canonical input schemas"
             `Quick
             test_model_visible_descriptors_have_canonical_input_schemas
+        ; Alcotest.test_case
+            "the loader refuses a malformed declaration"
+            `Quick
+            test_the_loader_refuses_a_malformed_declaration
+        ; Alcotest.test_case
+            "the loader accepts the same declaration repaired"
+            `Quick
+            test_the_loader_accepts_the_same_declaration_repaired
         ; test_case
             "resolved descriptor schemas are structurally valid"
             `Quick
@@ -1494,9 +1896,17 @@ let () =
             `Quick
             test_structurally_invalid_schema_is_excluded
         ; test_case
+            "cluster descriptions come from the registry"
+            `Quick
+            test_cluster_descriptions_come_from_the_registry
+        ; test_case
             "registered cluster model projections are explicit"
             `Quick
             test_registered_cluster_model_projections_are_explicit
+        ; test_case
+            "local runtime effect metadata is explicit"
+            `Quick
+            test_local_runtime_effect_metadata_is_explicit
         ; test_case
             "Keeper management projection is explicit"
             `Quick
@@ -1604,9 +2014,21 @@ let () =
             "public_mcp_surface_tools has an exact dispatch owner"
             `Quick
             test_public_mcp_surface_has_exact_dispatch_owner
+        ; test_case
+            "public MCP membership matches the canonical surface"
+            `Quick
+            test_public_mcp_membership_matches_surface_ssot
         ] )
     ; ( "policy-projection"
       , [ test_case
+            "concurrent execution opt-ins are exact"
+            `Quick
+            test_concurrent_execution_opt_ins_are_exact
+        ; test_case
+            "concurrent execution opt-ins are statically read-only"
+            `Quick
+            test_concurrent_opt_ins_are_statically_read_only
+        ; test_case
             "descriptor owns the read-only metadata projection"
             `Quick
             test_readonly_policy_projection_is_descriptor_owned
@@ -1615,10 +2037,6 @@ let () =
             `Quick
             test_readonly_policy_is_descriptor_input_aware
         ; test_case
-            "MCP context policy uses descriptor resolution"
-            `Quick
-            test_inline_policy_uses_descriptor_resolution
-        ; test_case
             "public names project through descriptor resolution"
             `Quick
             test_public_name_projection_uses_descriptor_resolution
@@ -1626,5 +2044,9 @@ let () =
             "keeper_run_tools_setup avoids public MCP catalog classifier"
             `Quick
             test_run_tools_setup_has_no_direct_public_mcp_catalog_read
+        ; test_case
+            "ollama probe schema declares the bounds it enforces"
+            `Quick
+            test_probe_schema_declares_the_bounds_it_enforces
         ] )
     ]

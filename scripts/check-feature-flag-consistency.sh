@@ -20,9 +20,10 @@ REGISTERED=$(sed -n \
   "$REGISTRY" | sort -u)
 
 # Registry-backed reads exist in config modules and in runtime gates. Scan the
-# complete library so a live non-config consumer cannot be misreported stale.
+# complete library and accept the typed [get_bool*] accessor family so a strict
+# security reader is not misreported as a stale registry entry.
 CONSUMED=$(
-  { grep -rh 'Feature_flag_registry.get_bool "MASC_' "$LIB_DIR" || true; } \
+  { grep -rh 'Feature_flag_registry.get_bool' "$LIB_DIR" || true; } \
     | grep -o '"MASC_[A-Z_]*"' \
     | tr -d '"' \
     | sort -u \

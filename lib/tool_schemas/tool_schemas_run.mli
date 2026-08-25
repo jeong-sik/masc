@@ -15,7 +15,7 @@
     Concatenated by {!Keeper_tool_surfaces} into the
     process-wide tool surface; list length and per-tool [name]
     strings are part of the public contract because the agent
-    SDK's tool-routing tables grep them at startup. *)
+    Agent Core tool-routing tables grep them at startup. *)
 
 val schemas : Masc_domain.tool_schema list
 (** The four run-tracking schemas in the surface order documented
@@ -23,4 +23,4 @@ val schemas : Masc_domain.tool_schema list
     contract seam — a rename of [masc_run_get] to
     [masc_run_read] (or any other rebranding) must touch this
     file as part of an explicit migration so the agent
-    SDK's routing tables stay in sync. *)
+    Agent Core routing tables stay in sync. *)

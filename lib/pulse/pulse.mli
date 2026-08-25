@@ -49,8 +49,6 @@ type lifecycle =
 type stats = {
   total_beats   : int;
   total_nudges  : int;
-  uptime_s      : float;
-  avg_interval  : float;
 }
 
 (** {1 Consumer — who rides each beat} *)
@@ -142,4 +140,9 @@ module For_testing : sig
   val effective_interval_at : hour:int -> rhythm -> float
   (** [effective_interval_at ~hour rhythm] computes the interval in seconds.
       During quiet hours: base * 3.0, clamped to [min_s, max_s]. *)
+
+  val effective_interval_for_clock : _ Eio.Time.clock -> rhythm -> float
+  (** The clock-taking form the beat loop calls, reading the hour from
+      [clock] rather than taking it. Same result as
+      {!effective_interval_at} at that hour. *)
 end

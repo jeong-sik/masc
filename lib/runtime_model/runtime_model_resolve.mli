@@ -1,7 +1,7 @@
-(** Model ID resolution through OAS runtime provider bindings.
+(** Model ID resolution through AGENT_CORE runtime provider bindings.
 
     Pure functions that map [auto] to runtime binding defaults or local
-    discovery. Provider-specific alias/catalog truth belongs upstream in OAS.
+    discovery. Provider-specific alias/catalog truth belongs upstream in AGENT_CORE.
 
     @since 0.92.0 extracted from Runtime_config
 
@@ -27,23 +27,15 @@ type model_resolution =
   ; provenance : model_resolution_provenance
   }
 
-(** Resolve provider:auto expansion for any registered runtime provider. *)
-val auto_models_for_runtime_prefix
-  :  ?getenv:(string -> string option)
-  -> string
-  -> string list option
-
 (** Resolve ["auto"] for any provider. Local providers resolve ["auto"] via
     {!Llm_provider.Discovery.first_discovered_model_id}; non-local providers
-    use OAS runtime binding defaults. *)
+    use AGENT_CORE runtime binding defaults. *)
 val resolve_auto_model
   :  ?getenv:(string -> string option)
   -> ?discover:(unit -> string option)
   -> string
   -> model_selector
   -> model_resolution
-
-val resolve_auto_model_id : string -> string -> string
 
 (** Parse a "model@url" custom model spec.
     Returns [(model_id, base_url)].

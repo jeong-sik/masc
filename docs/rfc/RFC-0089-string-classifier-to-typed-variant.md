@@ -8,14 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042"]
-implementation_prs:
-  - 15520  # G1 tool_help_registry tool_family
-  - 15523  # G4 keeper_checkpoint_store ENOENT
-  - 15524  # G2 board author_kind + voter_kind
-  - 15684  # keeper_path_check_error closed sum + emit-site routing
-  - 15699  # shadow-gate parse_outcome_kind
-  - 15703  # eval gate destructive-pattern SSOT
-  - 15704  # eval_gate evasion_kind
 ---
 
 # RFC-0089 — String Classifier 박멸: typed variant 직접 교체
@@ -71,8 +63,7 @@ RFC-0042 (Draft, `keeper_turn_terminal.t.code` closed sum) 가 동일 안티패�
 
 ## §3 Audit 결과 (sample)
 
-전체 인벤토리는 `docs/rfc/inventory/RFC-0089-string-classifier-sites.md` 참조.
-본 절은 결정에 영향을 준 sample만 inline.
+결정에 영향을 준 sample만 inline.
 
 ### §3.1 Scope-in (typed variant 교체 대상)
 

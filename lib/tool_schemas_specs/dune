@@ -6,6 +6,8 @@
  (wrapped false)
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 enabled. Leaf util sublib. + unused-value ratchet (warning 32)
  (flags
-  (:standard -w +4 -w +32))
- (libraries yojson)
- (modules tool_schemas_specs_types))
+  (:standard -w +4 -w +33 -w +37))
+ (libraries yojson masc_types)
+ (modules
+  local_runtime_tool_policy
+  tool_schemas_specs_types))

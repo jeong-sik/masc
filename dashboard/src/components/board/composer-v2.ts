@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import { AtSign, Megaphone, Mic, Paperclip, Send, Square, UserRound, X } from 'lucide-preact'
-import { currentDashboardActor, sendBroadcast } from '../../api'
+import { broadcastReceiptMessage, currentDashboardActor, sendBroadcast } from '../../api'
 import { keepers as dashboardKeepers, refreshExecution } from '../../store'
 import {
   dispatchOperatorAction,
@@ -349,7 +349,12 @@ export function ComposerV2({
           payload: { message: request.compose.body },
         })
       } else {
-        await sendBroadcast(currentDashboardActor(), request.compose.body)
+        const receipt = await sendBroadcast(currentDashboardActor(), request.compose.body)
+        if (!receipt.ok) {
+          resetDraft()
+          showToast(broadcastReceiptMessage(receipt), 'warning')
+          return
+        }
       }
       if (keeperId) setKeeperTarget(`keeper:${keeperId}`)
       resetDraft()

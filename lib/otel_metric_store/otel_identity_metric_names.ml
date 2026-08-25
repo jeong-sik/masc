@@ -42,7 +42,6 @@ let metric_silent_dashboard_actor_fallback =
 ;;
 
 let metric_auth_strict_would_reject = Otel_metric_store_core.declare_counter "masc_auth_strict_would_reject_total"
-let metric_config_unknown_keys_ignored = Otel_metric_store_core.declare_counter "masc_config_unknown_keys_ignored_total"
 let metric_startup_internal_keeper_token_sync =
   Otel_metric_store_core.declare_counter "masc_startup_internal_keeper_token_sync_total"
 ;;

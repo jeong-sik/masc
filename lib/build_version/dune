@@ -1,0 +1,10 @@
+(include_subdirs no)
+
+(library
+ (name masc_build_version)
+ (public_name masc.build_version)
+ (wrapped false)
+ (modules build_version)
+ (flags
+  (:standard -w +4 -w +33 -w +37))
+ (libraries dune-build-info))

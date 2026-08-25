@@ -36,12 +36,11 @@ let store_for_dir dir ~guild_id_field =
     ~binding_audit_read_path:(fun () -> audit_path)
     ~guild_id_field
 
-let sample_event ?guild_id ~action () =
+let sample_event ~action () =
   Store.
     {
       timestamp = "2026-07-01T00:00:00Z";
       action;
-      guild_id;
       channel_id = "channel-1";
       keeper_name = "luna";
       actor_id = "dashboard";
@@ -89,7 +88,7 @@ let test_rejects_malformed_binding_rows () =
   expect_error "duplicate channel id was accepted"
     (`Assoc
       [ "channel-1", `String "luna"
-      ; "channel-1", `String "sangsu"
+      ; "channel-1", `String "alpha"
       ])
 
 let test_read_bindings_result_missing_store_is_empty () =
@@ -132,7 +131,7 @@ let test_audit_failure_rolls_back_binding_mutation () =
   let result =
     Store.mutate_bindings store ~decide:(fun _ ->
       Ok
-        ( [ ({ channel_id = "channel-2"; keeper_name = "sangsu" }
+        ( [ ({ channel_id = "channel-2"; keeper_name = "alpha" }
             : Store.binding) ]
         , sample_event ~action:"bind" ()
         , () ))
@@ -196,7 +195,7 @@ let test_failed_mutation_cannot_erase_concurrent_success () =
       in
       Ok (updated, sample_event ~action:"bind" (), ()))
   in
-  let failed = Domain.spawn (fun () -> bind "failed" "sangsu") in
+  let failed = Domain.spawn (fun () -> bind "failed" "alpha") in
   Stdlib.Mutex.lock coordination_mu;
   while not !first_audit_waiting do
     Stdlib.Condition.wait coordination coordination_mu
@@ -239,15 +238,12 @@ let test_audit_guild_id_policy () =
   with_temp_dir @@ fun dir ->
   let omit = store_for_dir dir ~guild_id_field:Store.Omit in
   let empty = store_for_dir dir ~guild_id_field:Store.Include_empty in
-  let value = store_for_dir dir ~guild_id_field:Store.Include_event_value in
-  let event = sample_event ~guild_id:"guild-1" ~action:"bind" () in
+  let event = sample_event ~action:"bind" () in
   check bool "omits guild_id"
     true
     (Store.audit_event_json omit event |> U.member "guild_id" = `Null);
-  check string "keeps empty sidecar guild_id" ""
-    (Store.audit_event_json empty event |> U.member "guild_id" |> U.to_string);
-  check string "keeps discord guild_id" "guild-1"
-    (Store.audit_event_json value event |> U.member "guild_id" |> U.to_string)
+  check string "keeps the constant-empty guild_id key" ""
+    (Store.audit_event_json empty event |> U.member "guild_id" |> U.to_string)
 
 let test_append_and_read_recent_audit () =
   with_temp_dir @@ fun dir ->

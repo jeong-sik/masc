@@ -21,11 +21,36 @@ type current_task_observation =
       ; error : string
       }
 
+type claimable_task_identity =
+  { task_id : Keeper_id.Task_id.t }
+
+type backlog_snapshot =
+  { unclaimed_count : int
+  ; claimable_tasks : claimable_task_identity list
+  ; failed_count : int
+  ; revision : int option
+  }
+
+let empty_backlog_snapshot =
+  { unclaimed_count = 0; claimable_tasks = []; failed_count = 0; revision = None }
+;;
+
+let rec tasks_with_identities = function
+  | [] -> Ok []
+  | (task : Masc_domain.task) :: rest ->
+    (match Keeper_id.Task_id.of_string task.id with
+     | Error reason -> Error reason
+     | Ok task_id ->
+       Result.map
+         (fun tasks -> (task, task_id) :: tasks)
+         (tasks_with_identities rest))
+;;
+
 (* A keeper must not treat a task it authored itself as work waiting for it.
-   Without this, a persona whose response to "an unclaimed task exists" is to
+   Without this, a Keeper whose response to "an unclaimed task exists" is to
    create a routing/report task produces a closed positive feedback loop: the
    new task is itself an unclaimed Todo authored by the same keeper, so it
-   re-satisfies the trigger on the next observation. Live evidence: taskmaster
+   re-satisfies the trigger on the next observation. In the live incident, one Keeper
    authored 367 of the active tasks, 272 of them the same four "Route g0700 #N"
    templates re-emitted once per iteration (#28..#90), none ever claimed.
 
@@ -44,27 +69,10 @@ let task_is_self_authored_todo ~(meta : keeper_meta) (task : Masc_domain.task) =
     false
 ;;
 
-let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta)
-    ~(tasks : Masc_domain.task list) () =
-  (* [read_backlog_counts] already loaded [tasks]. Reuse them to get the same
-     empty-scope fallback as the claim path without a second backlog read.
-     Self-authored Todo work is a hard exclusion, so it cannot keep the scope
-     artificially nonempty and hide eligible peer work. *)
-  let task_eligible task = not (task_is_self_authored_todo ~meta task) in
-  let scope =
-    Keeper_runtime_contract.resolve_claim_goal_scope_for_tasks
-      ~config
-      ~meta
-      ~tasks
-      ~task_eligible
-      ()
-  in
-  scope.task_filter
-;;
-
-(** Read workspace backlog counts. *)
-let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
-  : int * int * int * int option
+(** Read one authoritative backlog snapshot. Counts, claimable rows, and
+    revision are projected from the same primary read. *)
+let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
+  : backlog_snapshot
   =
   try
     match Workspace.read_backlog_observation_with_source_r config with
@@ -73,70 +81,84 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
         Keeper_metrics.(to_string ObservationQueryFailures)
         ~labels:
           [ ( "operation"
-            , Runtime_observation_query_operation.(to_label Read_backlog_counts) )
+            , Runtime_observation_query_operation.(to_label Read_backlog_snapshot) )
           ]
         ();
-      Log.Keeper.warn "read_backlog_counts: backlog read failed: %s" message;
-      0, 0, 0, None
+      Log.Keeper.warn "read_backlog_snapshot: backlog read failed: %s" message;
+      empty_backlog_snapshot
     | Ok { Workspace.recovered_from = Some recovery; _ } ->
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ObservationQueryFailures)
         ~labels:
           [ ( "operation"
-            , Runtime_observation_query_operation.(to_label Read_backlog_counts) )
+            , Runtime_observation_query_operation.(to_label Read_backlog_snapshot) )
           ]
         ();
       Log.Keeper.warn
-        "read_backlog_counts: recovery snapshot is non-authoritative: %s"
+        "read_backlog_snapshot: recovery snapshot is non-authoritative: %s"
         recovery.primary_error;
-      0, 0, 0, None
+      empty_backlog_snapshot
     | Ok { Workspace.observed_backlog = backlog; recovered_from = None } ->
-    let unclaimed_tasks =
-      List.filter
-        (fun (t : Masc_domain.task) -> t.task_status = Masc_domain.Todo)
-        backlog.tasks
-    in
-    let unclaimed = List.length unclaimed_tasks in
-    let claim_scope_filter =
-      claim_goal_scope_filter ~config ~meta ~tasks:backlog.tasks ()
-    in
-    let claimable =
-      List.length
-        (List.filter
-           (fun task ->
-              Workspace_task_schedule.task_is_claim_pool_candidate task
-              && claim_scope_filter task
-              (* Self-authored tasks stay in [unclaimed] (the count stays an
-                 honest view of the backlog) but are not offered back to their
-                 author as claimable work — that edge is the feedback loop. *)
-              && not (task_is_self_authored_todo ~meta task))
-           unclaimed_tasks)
-    in
-    let failed =
-      (* "Failed" here means still-auditable active work. Terminal Cancelled
-         tasks are historical evidence, not a reason to wake every keeper.
-         Keep the current keeper's own task out of the count: keepers may
-         claim without a materialized [.masc/agents/] record, so the audit can
-         still see the self-assigned task as an orphan. *)
-      Workspace.audit_orphan_tasks config
-      |> List.filter (fun (_, assignee) -> assignee <> meta.agent_name)
-      |> List.map fst
-      |> List.filter claim_scope_filter
-      |> List.length
-    in
-    ( unclaimed
-    , claimable
-    , failed
-    , Some backlog.version )
+    (match tasks_with_identities backlog.tasks with
+     | Error reason ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string ObservationQueryFailures)
+         ~labels:
+           [ ( "operation"
+             , Runtime_observation_query_operation.(to_label Read_backlog_snapshot) )
+           ]
+         ();
+       Log.Keeper.warn
+         "read_backlog_snapshot: invalid task identity: %s"
+         reason;
+       empty_backlog_snapshot
+     | Ok tasks_with_ids ->
+       let unclaimed_tasks =
+         List.filter
+           (fun ((task : Masc_domain.task), _) ->
+              task.task_status = Masc_domain.Todo)
+           tasks_with_ids
+       in
+       let unclaimed = List.length unclaimed_tasks in
+       let claimable_tasks =
+         unclaimed_tasks
+         |> List.filter_map (fun (task, task_id) ->
+              if
+                Workspace_task_schedule.task_is_claim_pool_candidate task
+                (* Self-authored tasks stay in [unclaimed] (the count stays an
+                   honest view of the backlog) but are not offered back to their
+                   author as claimable work — that edge is the feedback loop. *)
+                && not (task_is_self_authored_todo ~meta task)
+              then Some { task_id }
+              else None)
+       in
+       let failed =
+         (* "Failed" here means still-auditable active work. Terminal Cancelled
+            tasks are historical evidence, not a reason to wake every keeper.
+            Keep the current keeper's own task out of the count: keepers may
+            claim without a materialized [.masc/agents/] record, so the audit can
+            still see the self-assigned task as an orphan. *)
+         Workspace.audit_orphan_tasks_in_tasks config backlog.tasks
+         |> List.filter (fun (_, assignee) -> assignee <> meta.agent_name)
+         |> List.map fst
+         |> List.length
+       in
+       { unclaimed_count = unclaimed
+       ; claimable_tasks
+       ; failed_count = failed
+       ; revision = Some backlog.version
+       })
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ObservationQueryFailures)
       ~labels:
-        [ ("operation", Runtime_observation_query_operation.(to_label Read_backlog_counts)) ]
+        [ ( "operation"
+          , Runtime_observation_query_operation.(to_label Read_backlog_snapshot) )
+        ]
       ();
-    Log.Keeper.warn "read_backlog_counts failed: %s" (Printexc.to_string ex);
+    Log.Keeper.warn "read_backlog_snapshot failed: %s" (Printexc.to_string ex);
     raise ex
 ;;
 

@@ -1,6 +1,11 @@
 open Alcotest
 
 module Routes = Server_routes_http_routes_channel_gate
+module Mcp_server = Masc.Mcp_server
+module Http_server_eio = Masc.Http_server_eio
+module Workspace = Masc.Workspace
+module Keeper_types_profile = Masc.Keeper_types_profile
+module Keeper_meta_store = Masc.Keeper_meta_store
 module U = Yojson.Safe.Util
 
 let with_env name value f =
@@ -54,18 +59,15 @@ let with_sidecar_paths prefix dir f =
     with_envs (env_names "_BINDING_STORE_PATH") (Some binding_path) (fun () ->
       with_envs (env_names "_BINDING_AUDIT_PATH") (Some audit_path) f))
 
-let test_resolve_connector_status_name_prefers_explicit_name () =
-  check (option string) "name wins and normalizes" (Some "discord")
-    (Routes.resolve_connector_status_name ~name:"  Discord  "
-       ~channel:"telegram" ())
-
-let test_resolve_connector_status_name_normalizes_legacy_channel () =
-  check (option string) "legacy channel lowercased" (Some "discord")
-    (Routes.resolve_connector_status_name ~channel:"  DISCORD  " ())
+let test_resolve_connector_status_name_trims_and_lowercases () =
+  check (option string) "name is trimmed and lowercased" (Some "discord")
+    (Routes.resolve_connector_status_name ~name:"  Discord  " ())
 
 let test_resolve_connector_status_name_ignores_blank_inputs () =
-  check (option string) "blank query params ignored" None
-    (Routes.resolve_connector_status_name ~name:"   " ~channel:"   " ())
+  check (option string) "blank name ignored" None
+    (Routes.resolve_connector_status_name ~name:"   " ());
+  check (option string) "absent name ignored" None
+    (Routes.resolve_connector_status_name ())
 
 let python_utc_iso_now () =
   let z = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
@@ -160,9 +162,8 @@ let test_slack_default_paths_resolve_under_base_path () =
         with_env "MASC_BASE_PATH_INPUT" None (fun () ->
           with_envs
             [
-              "SLACK_STATUS_PATH"; "MASC_SLACK_STATUS_PATH"; "SLACK_BINDING_STORE_PATH"
-            ; "MASC_SLACK_BINDING_STORE_PATH"; "SLACK_BINDING_AUDIT_PATH"
-            ; "MASC_SLACK_BINDING_AUDIT_PATH"
+              "SLACK_BINDING_STORE_PATH"; "MASC_SLACK_BINDING_STORE_PATH"
+            ; "SLACK_BINDING_AUDIT_PATH"; "MASC_SLACK_BINDING_AUDIT_PATH"
             ]
             None
             (fun () ->
@@ -238,28 +239,315 @@ let test_slack_connector_json_carries_identity () =
       "connector capabilities use the canonical projection"
       Channel_gate_connector_capability.all_json
       (json |> U.member "capabilities");
-    (* The endpoint passes [~gate_status_json]; identity must survive the
-       merge, since it is the tile-matching key. *)
-    let merged =
-      Channel_gate_slack_state.connector_json
-        ~gate_status_json:(`Assoc [ ("channels", `List []) ])
-        ()
-    in
-    check string "connector id survives gate_status merge" "slack"
-      (merged |> U.member "connector_id" |> U.to_string);
-    check string "display name survives gate_status merge" "Slack"
-      (merged |> U.member "display_name" |> U.to_string))
+    check string "status source" "in_process_gateway"
+      (json |> U.member "status_source" |> U.to_string);
+    check bool "gateway state surfaced" true
+      (json |> U.member "gateway_state" |> U.to_string
+       |> String.trim |> String.length > 0))
 
+(* Regression: /api/v1/gate/keeper-status route error paths.
+   RFC-0371 B4 — the old handler derived 404 by substring-matching "keeper
+   not found" in a rendered tool error.  The fix introduced a typed
+   [keeper_exists] precheck so the route answers 400/404/503 directly.
+   These tests pin the error_json wire contract and the four error-path
+   response shapes so a future refactor cannot silently revert to
+   substring-based classification. *)
+
+let test_error_json_wire_shape () =
+  let json = Channel_gate.error_json "name is required" in
+  check bool "ok is false" false (json |> U.member "ok" |> U.to_bool);
+  check string "error message" "name is required"
+    (json |> U.member "error" |> U.to_string)
+
+let test_error_json_unknown_keeper_includes_name () =
+  let json = Channel_gate.error_json "unknown keeper: beta" in
+  check bool "ok is false" false (json |> U.member "ok" |> U.to_bool);
+  check string "error contains keeper name" "unknown keeper: beta"
+    (json |> U.member "error" |> U.to_string)
+
+
+(* HTTP boundary regression tests for GET /api/v1/gate/keeper-status *)
+
+let loopback_request_authority () =
+  match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+  | Ok authority -> authority
+  | Error `Malformed -> Alcotest.fail "failed to construct loopback request authority"
+
+let create_token_exn base_path ~agent_name ~role =
+  match Auth.create_token base_path ~agent_name ~role with
+  | Ok token_info -> token_info
+  | Error msg -> Alcotest.failf "create_token failed: %s" (Masc_domain.masc_error_to_string msg)
+
+let with_temp_base_path f =
+  with_temp_dir (fun dir ->
+    let auth_config =
+      { Masc_domain.default_auth_config with enabled = true; require_token = true }
+    in
+    Auth.save_auth_config dir auth_config;
+    let token, _cred =
+      create_token_exn dir ~agent_name:"gate-admin" ~role:Masc_domain.Admin
+    in
+    let state = Mcp_server.For_testing.create_state ~base_path:dir in
+    f dir state token)
+
+let dispatch_gate_route ~sw ~clock state token target_path =
+  Server_request_authority.with_current (loopback_request_authority ()) (fun () ->
+    let router = Routes.add_routes ~sw ~clock (Http_server_eio.Router.create ()) in
+    Server_auth.publish_server_state state;
+    let response_buf = Buffer.create 1024 in
+    let conn =
+      Httpun.Server_connection.create (fun reqd ->
+        Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+    in
+    let request_str =
+      Printf.sprintf
+        "GET %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\nOrigin: http://127.0.0.1:8935\r\nAuthorization: Bearer %s\r\n\r\n"
+        target_path token
+    in
+    let bytes =
+      Bigstringaf.of_string ~off:0 ~len:(String.length request_str) request_str
+    in
+    let rec feed off =
+      let remaining = Bigstringaf.length bytes - off in
+      if remaining > 0 then (
+        let consumed =
+          Httpun.Server_connection.read conn bytes ~off ~len:remaining
+        in
+        if consumed <= 0 then Alcotest.fail "httpun test feed made no progress";
+        feed (off + consumed))
+    in
+    feed 0;
+    let rec flush () =
+      match Httpun.Server_connection.next_write_operation conn with
+      | `Write iovecs ->
+          List.iter
+            (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
+               Buffer.add_string response_buf
+                 (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
+            iovecs;
+          let written =
+            List.fold_left
+              (fun total (iov : Bigstringaf.t Httpun.IOVec.t) -> total + iov.len)
+              0 iovecs
+          in
+          Httpun.Server_connection.report_write_result conn (`Ok written);
+          flush ()
+      | `Yield | `Close _ -> ()
+    in
+    flush ();
+    Server_auth.clear_server_state ();
+    Buffer.contents response_buf)
+
+let parse_http_response response_str =
+  let lines = String.split_on_char '\n' response_str in
+  let status_code =
+    match lines with
+    | status_line :: _ ->
+        (match String.split_on_char ' ' (String.trim status_line) with
+         | _ver :: code_str :: _ -> int_of_string code_str
+         | _ -> Alcotest.failf "Could not parse status line: %S" status_line)
+    | [] -> Alcotest.fail "Empty response"
+  in
+  let json =
+    match String.index_opt response_str '{' with
+    | Some idx ->
+        let body_str = String.sub response_str idx (String.length response_str - idx) in
+        Yojson.Safe.from_string (String.trim body_str)
+    | None ->
+        Alcotest.failf "No JSON body found in response: %S" response_str
+  in
+  (status_code, json)
+
+let test_keeper_status_http_400_missing_name () =
+  with_temp_base_path (fun dir state token ->
+    Printf.printf "TEST DIR: %s, CONFIG BASE PATH: %s\n%!" dir (Mcp_server.workspace_config state).Workspace.base_path;
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      Eio.Switch.run (fun sw ->
+        let response = dispatch_gate_route ~sw ~clock state token "/api/v1/gate/keeper-status" in
+                let status, json = parse_http_response response in
+        check int "http status 400" 400 status;
+        check bool "ok is false" false (json |> U.member "ok" |> U.to_bool);
+        check string "error message" "name is required" (json |> U.member "error" |> U.to_string))))
+
+let test_keeper_status_http_400_blank_name () =
+  with_temp_base_path (fun dir state token ->
+    Printf.printf "TEST DIR: %s, CONFIG BASE PATH: %s\n%!" dir (Mcp_server.workspace_config state).Workspace.base_path;
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      Eio.Switch.run (fun sw ->
+        let response = dispatch_gate_route ~sw ~clock state token "/api/v1/gate/keeper-status?name=%20%20" in
+                let status, json = parse_http_response response in
+        check int "http status 400" 400 status;
+        check bool "ok is false" false (json |> U.member "ok" |> U.to_bool);
+        check string "error message" "name is required" (json |> U.member "error" |> U.to_string))))
+
+let test_keeper_status_http_404_unknown_keeper () =
+  with_temp_base_path (fun dir state token ->
+    Printf.printf "TEST DIR: %s, CONFIG BASE PATH: %s\n%!" dir (Mcp_server.workspace_config state).Workspace.base_path;
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      Eio.Switch.run (fun sw ->
+        let response = dispatch_gate_route ~sw ~clock state token "/api/v1/gate/keeper-status?name=nonexistent_keeper" in
+                let status, json = parse_http_response response in
+        check int "http status 404" 404 status;
+        check bool "ok is false" false (json |> U.member "ok" |> U.to_bool);
+        check string "error message" "unknown keeper: nonexistent_keeper" (json |> U.member "error" |> U.to_string))))
+
+let test_keeper_status_http_503_meta_read_error () =
+  with_temp_base_path (fun dir state token ->
+    Printf.printf "TEST DIR: %s, CONFIG BASE PATH: %s\n%!" dir (Mcp_server.workspace_config state).Workspace.base_path;
+    let config = Mcp_server.workspace_config state in
+    let corrupt_path = Keeper_types_profile.keeper_meta_path config "corrupt_keeper" in
+    Fs_compat.mkdir_p (Filename.dirname corrupt_path);
+    let oc = open_out corrupt_path in
+    output_string oc "{ invalid json syntax }";
+    close_out oc;
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      Eio.Switch.run (fun sw ->
+        let response = dispatch_gate_route ~sw ~clock state token "/api/v1/gate/keeper-status?name=corrupt_keeper" in
+                let status, json = parse_http_response response in
+        check int "http status 503" 503 status;
+        check bool "ok is false" false (json |> U.member "ok" |> U.to_bool);
+        check bool "error non-empty" true (String.length (json |> U.member "error" |> U.to_string) > 0))))
+
+let runtime_toml = {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+let init_runtime_default_for_tests () =
+  let path = Filename.temp_file "gate_runtime_" ".toml" in
+  let oc = open_out path in
+  output_string oc runtime_toml;
+  close_out oc;
+  match Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
+
+let test_keeper_status_http_200_valid_keeper () =
+  init_runtime_default_for_tests ();
+  with_temp_base_path (fun _dir state token ->
+    let config = Mcp_server.workspace_config state in
+    let json =
+      `Assoc
+        [ ("name", `String "valid_keeper")
+        ; ("agent_name", `String "keeper-valid_keeper-agent")
+        ; ("trace_id", `String "trace-valid_keeper")
+        ]
+    in
+    let meta =
+      match Masc_test_deps.meta_of_json_fixture json with
+      | Ok m -> m
+      | Error err -> Alcotest.failf "meta_of_json_fixture failed: %s" err
+    in
+    (match Keeper_meta_store.replace_snapshot config meta with
+     | Ok () -> ()
+     | Error err -> Alcotest.failf "replace_snapshot failed: %s" err);
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      Eio.Switch.run (fun sw ->
+        let response = dispatch_gate_route ~sw ~clock state token "/api/v1/gate/keeper-status?name=valid_keeper" in
+        let status, json = parse_http_response response in
+        check int "http status 200" 200 status;
+        check string "keeper name in response" "valid_keeper" (json |> U.member "name" |> U.to_string))))
+
+let test_keeper_status_http_502_dispatch_failure () =
+  with_temp_base_path (fun dir state token ->
+    let agents_dir = Workspace.agents_dir (Mcp_server.workspace_config state) in
+    Fs_compat.mkdir_p agents_dir;
+    let valid_path = Filename.concat agents_dir "valid_keeper.json" in
+    let oc = open_out valid_path in
+    output_string oc {|{"name":"analyst"}|};
+    close_out oc;
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      Eio.Switch.run (fun sw ->
+        let req = Httpun.Request.create `GET "/api/v1/gate/keeper-status?name=valid_keeper" in
+        let response_buf = Buffer.create 1024 in
+        Server_auth.publish_server_state state;
+        let conn =
+          Httpun.Server_connection.create (fun reqd ->
+            Server_request_authority.with_current (loopback_request_authority ()) (fun () ->
+              let args = `Assoc [ ("name", `String "analyst"); ("tail_order", `String "invalid_order_value") ] in
+              Routes.respond_keeper_tool_json ~sw ~clock state req reqd ~tool_name:"masc_keeper_status" ~args))
+        in
+        let request_str = Printf.sprintf "GET /api/v1/gate/keeper-status?name=valid_keeper HTTP/1.1\r\nHost: 127.0.0.1:8935\r\nOrigin: http://127.0.0.1:8935\r\nAuthorization: Bearer %s\r\n\r\n" token in
+        let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length request_str) request_str in
+        let rec feed off =
+          let remaining = Bigstringaf.length bytes - off in
+          if remaining > 0 then (
+            let consumed = Httpun.Server_connection.read conn bytes ~off ~len:remaining in
+            if consumed <= 0 then Alcotest.fail "httpun feed made no progress";
+            feed (off + consumed))
+        in
+        feed 0;
+        let rec flush () =
+          match Httpun.Server_connection.next_write_operation conn with
+          | `Write iovecs ->
+              List.iter
+                (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
+                   Buffer.add_string response_buf
+                     (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
+                iovecs;
+              let written =
+                List.fold_left
+                  (fun total (iov : Bigstringaf.t Httpun.IOVec.t) -> total + iov.len)
+                  0 iovecs
+              in
+              Httpun.Server_connection.report_write_result conn (`Ok written);
+              flush ()
+          | `Yield | `Close _ -> ()
+        in
+        flush ();
+        let status, json = parse_http_response (Buffer.contents response_buf) in
+        check int "http status 502" 502 status;
+        check bool "ok is false" false (json |> U.member "ok" |> U.to_bool);
+        check bool "error contains message" true (String.length (json |> U.member "error" |> U.to_string) > 0))))
 let () =
   run "channel_gate_connector_routes"
     [
+      ( "keeper_status_route_http_contract",
+        [
+          test_case "error_json wire shape" `Quick
+            test_error_json_wire_shape;
+          test_case "unknown keeper error includes name" `Quick
+            test_error_json_unknown_keeper_includes_name;
+          test_case "HTTP 400 Bad Request on missing name" `Quick
+            test_keeper_status_http_400_missing_name;
+          test_case "HTTP 400 Bad Request on blank name" `Quick
+            test_keeper_status_http_400_blank_name;
+          test_case "HTTP 404 Not Found on unknown keeper" `Quick
+            test_keeper_status_http_404_unknown_keeper;
+          test_case "HTTP 503 Service Unavailable on corrupt meta read error" `Quick
+            test_keeper_status_http_503_meta_read_error;
+          test_case "HTTP 200 OK on valid keeper status dispatch" `Quick
+            test_keeper_status_http_200_valid_keeper;
+          test_case "HTTP 502 Bad Gateway on post-precheck dispatch failure" `Quick
+            test_keeper_status_http_502_dispatch_failure;
+        ] );
+
       ( "resolve_connector_status_name",
         [
-          test_case "prefers explicit name" `Quick
-            test_resolve_connector_status_name_prefers_explicit_name;
-          test_case "normalizes legacy channel" `Quick
-            test_resolve_connector_status_name_normalizes_legacy_channel;
-          test_case "ignores blank inputs" `Quick
+          test_case "trims and lowercases the name" `Quick
+            test_resolve_connector_status_name_trims_and_lowercases;
+          test_case "ignores blank and absent input" `Quick
             test_resolve_connector_status_name_ignores_blank_inputs;
         ] );
       ( "sidecar_connector_state",

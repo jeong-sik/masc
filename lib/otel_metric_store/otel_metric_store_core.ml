@@ -38,8 +38,6 @@ let with_lock f =
   Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock metrics_mutex) f
 ;;
 
-let last_deadlock_backtrace_for_test () = Atomic.get last_deadlock_backtrace
-
 (** Best-effort wrapper: never crash the caller fiber for a metrics update.
     Metrics are advisory; losing one sample must not take down the OTel tick
     fiber or the keeper turn. *)
@@ -61,10 +59,7 @@ let register_counter ~name ~help ?(labels = []) () =
 
 (* Zero-fill declaration: registers the unlabeled 0-cell at module-init time
    and hands the name back so `let metric_x = declare_counter "..."` keeps
-   the constant shape.  Counters only: a counter that has not fired IS 0,
-   so exporting the 0-cell removes the absence-vs-zero ambiguity in
-   dashboards (a gauge that was never set has no honest value — gauges and
-   histograms stay lazy). *)
+   the constant shape. *)
 let declare_counter name =
   register_counter ~name ~help:name ();
   name
@@ -85,6 +80,22 @@ let register_histogram ~name ~help ?(labels = []) () =
       if not (Hashtbl.mem metrics key)
       then
         Hashtbl.add metrics key { name; help; metric_type = Histogram; value = 0.0; labels }))
+;;
+
+let declare_gauge name =
+  register_gauge ~name ~help:name ();
+  name
+;;
+
+let histogram_count_name name = name ^ "_count"
+
+let declare_histogram name =
+  register_histogram ~name ~help:name ();
+  register_counter
+    ~name:(histogram_count_name name)
+    ~help:(name ^ " observation count")
+    ();
+  name
 ;;
 
 let histogram_buckets : (string, float list) Hashtbl.t = Hashtbl.create 16
@@ -177,7 +188,8 @@ let snapshot () =
 let observe_histogram name ?(labels = []) value =
   best_effort (fun () ->
     let key = metric_key name labels in
-    let count_key = metric_key (name ^ "_count") labels in
+    let count_name = histogram_count_name name in
+    let count_key = metric_key count_name labels in
     with_lock (fun () ->
       (match Hashtbl.find_opt metrics key with
        | Some m -> m.value <- m.value +. value
@@ -192,7 +204,7 @@ let observe_histogram name ?(labels = []) value =
          Hashtbl.add
            metrics
            count_key
-           { name = name ^ "_count"
+           { name = count_name
            ; help = name ^ " observation count"
            ; metric_type = Counter
            ; value = 1.0

@@ -4,7 +4,7 @@ open Masc
 
 let keeper_name = "keeper-autonomous-source"
 let agent_name = "keeper-autonomous-agent"
-let runtime_agent_name = "oas-test-runtime"
+let runtime_agent_name = "agent_core-test-runtime"
 let trace_id = "trace-test-0000"
 
 let temp_dir () =
@@ -40,22 +40,22 @@ let ensure_trace_dir config =
 
 let raw_record ~worker_run_id ~seq ~ts ~record_type fields =
   `Assoc
-    (("trace_version", `Int Agent_sdk.Raw_trace.trace_version)
+    (("trace_version", `Int Agent_core.Raw_trace.trace_version)
      :: ("worker_run_id", `String worker_run_id)
      :: ("seq", `Int seq)
      :: ("ts", `Float ts)
      :: ("agent_name", `String runtime_agent_name)
      :: ("session_id", `String trace_id)
-     :: ("record_type", `String (Agent_sdk.Raw_trace.record_type_to_string record_type))
+     :: ("record_type", `String (Agent_core.Raw_trace.record_type_to_string record_type))
      :: fields)
 ;;
 
 let run_lines ~worker_run_id ~start_seq ~base_ts ~prompt ~final_text =
   [ raw_record ~worker_run_id ~seq:start_seq ~ts:base_ts
-      ~record_type:Agent_sdk.Raw_trace.Run_started
+      ~record_type:Agent_core.Raw_trace.Run_started
       [ "prompt", `String prompt; "model", `String "test-model" ]
   ; raw_record ~worker_run_id ~seq:(start_seq + 1) ~ts:(base_ts +. 1.)
-      ~record_type:Agent_sdk.Raw_trace.Assistant_block
+      ~record_type:Agent_core.Raw_trace.Assistant_block
       [ "block_index", `Int 0
       ; "block_kind", `String "thinking"
       ; ( "assistant_block"
@@ -65,7 +65,7 @@ let run_lines ~worker_run_id ~start_seq ~base_ts ~prompt ~final_text =
             ] )
       ]
   ; raw_record ~worker_run_id ~seq:(start_seq + 2) ~ts:(base_ts +. 2.)
-      ~record_type:Agent_sdk.Raw_trace.Tool_execution_started
+      ~record_type:Agent_core.Raw_trace.Tool_execution_started
       [ "tool_name", `String "Read"
       ; "tool_input", `Assoc [ "path", `String "secret.ml" ]
       ; "tool_use_id", `String ("tool-" ^ worker_run_id)
@@ -76,7 +76,7 @@ let run_lines ~worker_run_id ~start_seq ~base_ts ~prompt ~final_text =
       ; "tool_execution_mode", `String "serial"
       ]
   ; raw_record ~worker_run_id ~seq:(start_seq + 3) ~ts:(base_ts +. 3.)
-      ~record_type:Agent_sdk.Raw_trace.Tool_execution_finished
+      ~record_type:Agent_core.Raw_trace.Tool_execution_finished
       [ "tool_name", `String "Read"
       ; "tool_result", `String {|{"files":["target.ml"]}|}
       ; "tool_error", `Bool false
@@ -87,7 +87,7 @@ let run_lines ~worker_run_id ~start_seq ~base_ts ~prompt ~final_text =
       ; "tool_batch_size", `Int 1
       ]
   ; raw_record ~worker_run_id ~seq:(start_seq + 4) ~ts:(base_ts +. 4.)
-      ~record_type:Agent_sdk.Raw_trace.Run_finished
+      ~record_type:Agent_core.Raw_trace.Run_finished
       [ "final_text", `String final_text; "stop_reason", `String "end_turn" ]
   ]
 ;;
@@ -112,17 +112,17 @@ let run_ref ~path ~worker_run_id ~start_seq =
   }
 ;;
 
-let write_turn_record config ~absolute_turn ~generation ~turn_kind ~raw_trace_run_ref =
+let write_turn_record config ~absolute_turn ~turn_kind ~raw_trace_run_ref =
   Keeper_turn_record_writer.write
+    ~model_input_window:None
     ~config
     ~keeper_name
     ~agent_name
-    ~generation
     ~turn_kind
     ~trace_id
     ~absolute_turn
     ~runtime_profile:"test-runtime"
-    ~model:(Some "public-model")
+    ~selected_model:(Some "public-model")
     ~finish_reason:(Some "completed")
     ~context_window:None
     ~price_input_per_million:None
@@ -174,7 +174,7 @@ let test_projects_exact_run_outcome_and_activity () =
   let selected = run_lines ~worker_run_id:"run-selected" ~start_seq:5 ~base_ts:2000.
       ~prompt:Keeper_unified_prompt.autonomous_wake_marker ~final_text:"selected outcome" in
   write_lines path (first @ selected);
-  write_turn_record config ~absolute_turn:41 ~generation:9
+  write_turn_record config ~absolute_turn:41 
     ~turn_kind:Turn_record.Autonomous
     ~raw_trace_run_ref:(Some (run_ref ~path ~worker_run_id:"run-selected" ~start_seq:5));
   match Keeper_autonomous_turn_source.load_recent ~config ~keeper_name () with
@@ -207,7 +207,7 @@ let test_direct_marker_spoof_is_excluded () =
   write_lines path
     (run_lines ~worker_run_id:"run-direct" ~start_seq:1 ~base_ts:3000.
        ~prompt:Keeper_unified_prompt.autonomous_wake_marker ~final_text:"spoof");
-  write_turn_record config ~absolute_turn:42 ~generation:9
+  write_turn_record config ~absolute_turn:42 
     ~turn_kind:Turn_record.Direct
     ~raw_trace_run_ref:(Some (run_ref ~path ~worker_run_id:"run-direct" ~start_seq:1));
   Alcotest.(check int) "producer-owned kind excludes direct marker spoof" 0
@@ -220,7 +220,7 @@ let test_missing_or_outside_trace_is_skipped () =
   write_lines outside
     (run_lines ~worker_run_id:"run-outside" ~start_seq:1 ~base_ts:4000.
        ~prompt:"ignored" ~final_text:"must not leak");
-  write_turn_record config ~absolute_turn:43 ~generation:9
+  write_turn_record config ~absolute_turn:43 
     ~turn_kind:Turn_record.Autonomous
     ~raw_trace_run_ref:(Some (run_ref ~path:outside ~worker_run_id:"run-outside" ~start_seq:1));
   Alcotest.(check int) "path outside keeper trace store is rejected" 0
@@ -246,10 +246,10 @@ let test_mismatched_raw_trace_runtime_identity_is_skipped () =
     run_lines ~worker_run_id:"run-mismatch" ~start_seq:1 ~base_ts:4500.
       ~prompt:"ignored" ~final_text:"must not be attributed"
     |> replace_raw_field_at ~index:3 ~field:"agent_name"
-         ~value:(`String "oas-other-runtime")
+         ~value:(`String "agent_core-other-runtime")
   in
   write_lines path records;
-  write_turn_record config ~absolute_turn:44 ~generation:9
+  write_turn_record config ~absolute_turn:44 
     ~turn_kind:Turn_record.Autonomous
     ~raw_trace_run_ref:
       (Some (run_ref ~path ~worker_run_id:"run-mismatch" ~start_seq:1));
@@ -267,7 +267,7 @@ let test_mismatched_raw_trace_session_identity_is_skipped () =
          ~value:(`String "trace-other-9999")
   in
   write_lines path records;
-  write_turn_record config ~absolute_turn:45 ~generation:9
+  write_turn_record config ~absolute_turn:45 
     ~turn_kind:Turn_record.Autonomous
     ~raw_trace_run_ref:
       (Some (run_ref ~path ~worker_run_id:"run-mismatch" ~start_seq:1));
@@ -282,7 +282,7 @@ let test_since_and_limit_use_current_records () =
     let worker_run_id = "run-" ^ string_of_int index in
     write_lines path
       (run_lines ~worker_run_id ~start_seq:1 ~base_ts ~prompt:"ignored" ~final_text:text);
-    write_turn_record config ~absolute_turn:index ~generation:9
+    write_turn_record config ~absolute_turn:index 
       ~turn_kind:Turn_record.Autonomous
       ~raw_trace_run_ref:(Some (run_ref ~path ~worker_run_id ~start_seq:1))
   in
@@ -312,7 +312,8 @@ let test_committed_autonomous_turn_invalidates_live_chat () =
   Eio.Switch.run @@ fun sw ->
   Eio.Switch.on_release sw (fun () -> Sse.unsubscribe_external subscriber_id);
   Sse.subscribe_external ~id:subscriber_id
-    ~callback:(fun frame ->
+    ~callback:(fun (ev : Sse.external_event) ->
+      let frame = ev.Sse.ext_frame in
       if keeper_chat_appended_for keeper_name frame
       then
         visible_turns_at_broadcast :=
@@ -320,7 +321,7 @@ let test_committed_autonomous_turn_invalidates_live_chat () =
             (Keeper_autonomous_turn_source.load_recent
                ~config ~keeper_name ()))
     ();
-  write_turn_record config ~absolute_turn:46 ~generation:9
+  write_turn_record config ~absolute_turn:46 
     ~turn_kind:Turn_record.Autonomous
     ~raw_trace_run_ref:
       (Some (run_ref ~path ~worker_run_id ~start_seq:1));
@@ -344,17 +345,18 @@ let test_direct_turn_does_not_duplicate_chat_invalidation () =
   Eio.Switch.run @@ fun sw ->
   Eio.Switch.on_release sw (fun () -> Sse.unsubscribe_external subscriber_id);
   Sse.subscribe_external ~id:subscriber_id
-    ~callback:(fun frame ->
+    ~callback:(fun (ev : Sse.external_event) ->
+      let frame = ev.Sse.ext_frame in
       if keeper_chat_appended_for keeper_name frame then incr invalidations)
     ();
-  write_turn_record config ~absolute_turn:47 ~generation:9
+  write_turn_record config ~absolute_turn:47 
     ~turn_kind:Turn_record.Direct ~raw_trace_run_ref:None;
   Alcotest.(check int) "direct chat path owns its invalidation" 0 !invalidations
 ;;
 
-(* The OAS runtime identity is opaque here. The reader validates it against
+(* The AGENT_CORE runtime identity is opaque here. The reader validates it against
    the selected raw rows without comparing it to the Keeper identity. *)
-let sdk_run_ref ~agent_name ~session_id : Agent_sdk.Raw_trace.run_ref =
+let agent_core_run_ref ~agent_name ~session_id : Agent_core.Raw_trace.run_ref =
   { worker_run_id = "wr-exact-run"
   ; path = "/keepers/" ^ keeper_name ^ "/raw-traces/turn-exact.jsonl"
   ; start_seq = 1
@@ -365,11 +367,11 @@ let sdk_run_ref ~agent_name ~session_id : Agent_sdk.Raw_trace.run_ref =
 ;;
 
 let test_runtime_identity_is_recorded_not_compared () =
-  let runtime_agent_name = "oas-ollama_cloud.deepseek-v4-flash" in
+  let runtime_agent_name = "agent_core-ollama_cloud.deepseek-v4-flash" in
   match
     Keeper_agent_run.For_testing.turn_record_raw_trace_run_ref
       ~expected_session_id:trace_id
-      (sdk_run_ref ~agent_name:runtime_agent_name ~session_id:(Some trace_id))
+      (agent_core_run_ref ~agent_name:runtime_agent_name ~session_id:(Some trace_id))
   with
   | Error detail -> Alcotest.failf "runtime identity was compared, not recorded: %s" detail
   | Ok (recorded : Turn_record.raw_trace_run_ref) ->
@@ -383,7 +385,7 @@ let test_keeper_agent_identity_is_also_accepted () =
   match
     Keeper_agent_run.For_testing.turn_record_raw_trace_run_ref
       ~expected_session_id:trace_id
-      (sdk_run_ref ~agent_name ~session_id:(Some trace_id))
+      (agent_core_run_ref ~agent_name ~session_id:(Some trace_id))
   with
   | Error detail -> Alcotest.failf "expected the reference to be recorded: %s" detail
   | Ok (recorded : Turn_record.raw_trace_run_ref) ->
@@ -394,7 +396,7 @@ let test_session_identity_mismatch_is_rejected () =
   match
     Keeper_agent_run.For_testing.turn_record_raw_trace_run_ref
       ~expected_session_id:trace_id
-      (sdk_run_ref ~agent_name ~session_id:(Some "trace-other-9999"))
+      (agent_core_run_ref ~agent_name ~session_id:(Some "trace-other-9999"))
   with
   | Ok _ -> Alcotest.fail "a foreign session identity was recorded"
   | Error _ -> ()
@@ -404,10 +406,116 @@ let test_absent_session_identity_is_rejected () =
   match
     Keeper_agent_run.For_testing.turn_record_raw_trace_run_ref
       ~expected_session_id:trace_id
-      (sdk_run_ref ~agent_name ~session_id:None)
+      (agent_core_run_ref ~agent_name ~session_id:None)
   with
   | Ok _ -> Alcotest.fail "a reference without session identity was recorded"
   | Error _ -> ()
+;;
+
+(* #28413. The wake prompt is the user turn every autonomous cycle is woken
+   with, and it is kept by the durable checkpoint, so it is worth configuring
+   per keeper -- and worth bounding, since its cost recurs on every later turn
+   that replays the history. *)
+
+let wake_prompt_profile prompt =
+  { Keeper_types_profile.empty_keeper_profile_defaults with
+    autonomous_wake_prompt = prompt
+  }
+;;
+
+let test_wake_prompt_validation_rejects_blank_and_unbounded () =
+  let validate = Env_config_keeper.KeeperAutonomous.validate_wake_prompt in
+  Alcotest.(check bool)
+    "blank is rejected rather than folded into the default"
+    true
+    (Result.is_error (validate "   "));
+  Alcotest.(check bool) "empty is rejected" true (Result.is_error (validate ""));
+  let bound = Env_config_keeper.KeeperAutonomous.max_wake_prompt_bytes in
+  Alcotest.(check bool)
+    "a value at the bound is admitted"
+    true
+    (Result.is_ok (validate (String.make bound 'x')));
+  Alcotest.(check bool)
+    "one byte over the bound is rejected"
+    true
+    (Result.is_error (validate (String.make (bound + 1) 'x')));
+  match validate "  ask a better question  " with
+  | Error reason -> Alcotest.failf "a valid prompt was rejected: %s" reason
+  | Ok value ->
+    Alcotest.(check string) "surrounding whitespace is trimmed"
+      "ask a better question" value
+;;
+
+(* Ordering matters: the literal case must run before this process sets the
+   fleet variable, because OCaml's Unix has no unsetenv to undo it. *)
+let test_wake_prompt_resolution_order () =
+  let resolve ?profile_defaults () =
+    Keeper_unified_prompt.effective_autonomous_wake_prompt ?profile_defaults ()
+  in
+  Alcotest.(check string)
+    "no keeper and no fleet value resolves to the literal"
+    Keeper_unified_prompt.autonomous_wake_marker
+    (resolve ());
+  Alcotest.(check string)
+    "a keeper value is used even with no fleet value"
+    "keeper asks"
+    (resolve ~profile_defaults:(wake_prompt_profile (Some "keeper asks")) ());
+  Unix.putenv "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT" "fleet asks";
+  Alcotest.(check string)
+    "a keeper without its own value inherits the fleet value"
+    "fleet asks"
+    (resolve ~profile_defaults:(wake_prompt_profile None) ());
+  Alcotest.(check string)
+    "no profile at all still inherits the fleet value"
+    "fleet asks"
+    (resolve ());
+  Alcotest.(check string)
+    "a keeper value overrides the fleet value"
+    "keeper asks"
+    (resolve ~profile_defaults:(wake_prompt_profile (Some "keeper asks")) ());
+  (* A set-but-invalid fleet value must surface, not silently restore the
+     default -- otherwise a typo reads as "configuration had no effect". *)
+  Unix.putenv "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT" "   ";
+  Alcotest.check_raises
+    "a blank fleet value raises instead of falling back"
+    (Env_config_core.Config_error
+       "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT: autonomous wake prompt must not be blank")
+    (fun () -> ignore (resolve ()))
+;;
+
+(* The dashboard history schema (keeper-chat-history.ts) requires [id] on every
+   row and silently drops any row without one. A projected autonomous turn
+   without [id] would therefore never reach the transcript. *)
+let test_dashboard_history_autonomous_rows_carry_id () =
+  with_workspace @@ fun config ->
+  let path = trace_path config "history-id" in
+  let worker_run_id = "run-history-id" in
+  write_lines path
+    (run_lines ~worker_run_id ~start_seq:1 ~base_ts:7000.
+       ~prompt:Keeper_unified_prompt.autonomous_wake_marker
+       ~final_text:"visible in history");
+  write_turn_record config ~absolute_turn:48 
+    ~turn_kind:Turn_record.Autonomous
+    ~raw_trace_run_ref:(Some (run_ref ~path ~worker_run_id ~start_seq:1));
+  match
+    Server_dashboard_http_keeper_api.keeper_chat_history_json config keeper_name
+  with
+  | `List rows ->
+    Alcotest.(check int) "one autonomous row in history" 1 (List.length rows);
+    List.iter
+      (fun row ->
+        match row with
+        | `Assoc fields ->
+          (match List.assoc_opt "id" fields with
+           | Some (`String id) when String.length id > 0 ->
+             Alcotest.(check string) "id is namespaced off the turn ref"
+               "autonomous:trace-test-0000#48" id
+           | _ ->
+             Alcotest.fail
+               "autonomous history row without id is dropped by the dashboard schema")
+        | _ -> Alcotest.fail "history row is not an object")
+      rows
+  | _ -> Alcotest.fail "history body is not a list"
 ;;
 
 let () =
@@ -431,7 +539,7 @@ let () =
             test_direct_turn_does_not_duplicate_chat_invalidation
         ] )
     ; ( "exact_run_reference"
-      , [ Alcotest.test_case "records the OAS runtime identity" `Quick
+      , [ Alcotest.test_case "records the AGENT_CORE runtime identity" `Quick
             test_runtime_identity_is_recorded_not_compared
         ; Alcotest.test_case "records a keeper-shaped identity" `Quick
             test_keeper_agent_identity_is_also_accepted
@@ -439,5 +547,15 @@ let () =
             test_session_identity_mismatch_is_rejected
         ; Alcotest.test_case "rejects an absent session identity" `Quick
             test_absent_session_identity_is_rejected
+        ] )
+    ; ( "dashboard_history"
+      , [ Alcotest.test_case "autonomous rows carry a schema-required id" `Quick
+            test_dashboard_history_autonomous_rows_carry_id
+        ] )
+    ; ( "wake_prompt"
+      , [ Alcotest.test_case "rejects blank and over-bound values" `Quick
+            test_wake_prompt_validation_rejects_blank_and_unbounded
+        ; Alcotest.test_case "keeper then fleet then literal (#28413)" `Quick
+            test_wake_prompt_resolution_order
         ] )
     ]

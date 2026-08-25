@@ -106,47 +106,32 @@ let chat_appended ~keeper_name ~source ?content () =
 let chat_appended_with_audio ~keeper_name ~source ~audio ?content () =
   do_broadcast ~keeper_name ~source ~audio:(Some audio) ?content ()
 
-type turn_progress_kind =
-  | Tool_call_started
-  | Tool_call_ended
 
-let turn_progress_kind_to_string = function
-  | Tool_call_started -> "tool_call_start"
-  | Tool_call_ended -> "tool_call_end"
-
-let turn_progress_to_json ~keeper_name ~run_id ~kind ~tool_call_id ~tool_name
-    ~receipt_ids =
+let operation_event_to_json ~keeper_name ~operation_id ~event =
   `Assoc
-    ([ ("type", `String "keeper_chat_turn_progress")
-     ; ("name", `String keeper_name)
-     ; ("run_id", `String run_id)
-     ; ("kind", `String (turn_progress_kind_to_string kind))
-     ; ("tool_call_id", `String tool_call_id)
-     ; ("ts_unix", `Float (Time_compat.now ()))
-     ]
-     @ (match tool_name with
-        | None -> []
-        | Some tool_name -> [ ("tool_name", `String tool_name) ])
-     @
-     match receipt_ids with
-     | [] -> []
-     | receipt_ids ->
-       [ ("receipt_ids", `List (List.map (fun id -> `String id) receipt_ids)) ])
+    [ "type", `String "keeper_chat_operation_event"
+    ; "name", `String keeper_name
+    ; "operation_id", `String operation_id
+    ; "ag_ui_event", Ag_ui.event_to_json event
+    ; "ts_unix", `Float (Time_compat.now ())
+    ]
+;;
 
-let turn_progress ~keeper_name ~run_id ~kind ~tool_call_id ?tool_name
-    ?(receipt_ids = []) () =
+let operation_event ~keeper_name ~operation_id ~event =
   try
-    Sse.broadcast
-      (turn_progress_to_json ~keeper_name ~run_id ~kind ~tool_call_id ~tool_name
-         ~receipt_ids)
+    Sse.broadcast_to
+      Sse.Observers
+      (operation_event_to_json ~keeper_name ~operation_id ~event)
   with
-  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string SseBroadcastFailures)
-      ~labels:[ ("keeper", keeper_name); ("site", "chat_turn_progress") ]
+      ~labels:[ "keeper", keeper_name; "site", "chat_operation_event" ]
       ();
     Log.Keeper.warn
-      "keeper_chat_broadcast: turn_progress name=%s failed: %s"
+      "keeper_chat_broadcast: operation_event name=%s operation_id=%s failed: %s"
       keeper_name
+      operation_id
       (Printexc.to_string exn)
+;;

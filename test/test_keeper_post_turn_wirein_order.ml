@@ -4,7 +4,6 @@ open Alcotest
 
 module Compact_policy = Masc.Keeper_compact_policy
 module Post_turn = Masc.Keeper_post_turn
-module Admission = Masc.Keeper_turn_admission
 module Cycle = Masc.Keeper_heartbeat_loop_cycle
 module Queue = Keeper_event_queue
 module Registry_queue = Masc.Keeper_registry_event_queue
@@ -35,6 +34,7 @@ let exact_terminal ?(slot_id = "compaction-slot") ?(call_id = "call-compaction")
     ; call_id
     ; plan_fingerprint = "compaction-plan"
     ; request_body_sha256 = String.make 64 'c'
+    ; detail = None
     }
 ;;
 
@@ -140,25 +140,6 @@ let test_compaction_rejection_tag_is_stable () =
      request_body_sha256=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
     (Post_turn.compaction_recovery_error_to_string error)
 
-let test_final_admission_busy_requeues_only_pre_dispatch_no_compaction () =
-  let preserves =
-    Masc.Keeper_manual_compaction.For_testing
-    .preserve_no_compaction_after_final_admission_busy
-  in
-  check
-    bool
-    "No_eligible_history remains replayable after final admission Busy"
-    false
-    (preserves Keeper_compaction_outcome.No_eligible_history);
-  check
-    bool
-    "post-dispatch exact terminal remains source-bound after final admission Busy"
-    true
-    (preserves
-       (Keeper_compaction_outcome.Exact_execution_terminal
-          (exact_terminal Keeper_compaction_outcome.Exact_execution_failed)))
-;;
-
 let make_meta
       ?(name = "post-turn-no-auto-compact")
       ?(trace_id = "trace-post-turn-no-auto-compact")
@@ -176,18 +157,18 @@ let make_meta
   | Error detail -> failf "keeper meta fixture failed: %s" detail
 
 let make_checkpoint () =
-  Agent_sdk.Checkpoint.
+  Agent_core.Checkpoint.
     { version = checkpoint_version
     ; session_id = "trace-post-turn-no-auto-compact"
     ; agent_name = "post-turn-no-auto-compact"
     ; model = "test-model"
     ; system_prompt = None
     ; messages =
-        [ Agent_sdk.Types.text_message Agent_sdk.Types.User "keep"
-        ; Agent_sdk.Types.text_message Agent_sdk.Types.Assistant (String.make 2048 'x')
-        ; Agent_sdk.Types.text_message Agent_sdk.Types.User (String.make 2048 'y')
+        [ Agent_core.Types.text_message Agent_core.Types.User "keep"
+        ; Agent_core.Types.text_message Agent_core.Types.Assistant (String.make 2048 'x')
+        ; Agent_core.Types.text_message Agent_core.Types.User (String.make 2048 'y')
         ]
-    ; usage = Agent_sdk.Types.empty_usage
+    ; usage = Agent_core.Types.empty_usage
     ; turn_count = 7
     ; created_at = 1_700_000_000.0
     ; tools = []
@@ -199,24 +180,78 @@ let make_checkpoint () =
     ; min_p = None
     ; enable_thinking = None
     ; preserve_thinking = None
-    ; response_format = Agent_sdk.Types.Off
+    ; response_format = Agent_core.Types.Off
     ; thinking_budget = None
     ; reasoning_effort = None
     ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create_sync ()
+    ; context = Agent_core.Context.create_sync ()
     ; mcp_sessions = []
     ; working_context = None
     }
 
-let block_message role content : Agent_sdk.Types.message =
+let make_irreducible_checkpoint ~name ~trace_id () =
+  { (make_checkpoint ()) with
+    session_id = trace_id
+  ; agent_name = name
+  ; messages =
+      [ Agent_core.Types.text_message
+          Agent_core.Types.Assistant
+          "one valid but irreducible source"
+      ]
+  }
+
+let persist_checkpoint_source_exn
+      ~label
+      config
+      (meta : Masc.Keeper_meta_contract.keeper_meta)
+      (checkpoint : Agent_core.Checkpoint.t)
+  =
+  let session =
+    Masc.Keeper_context_core.create_session
+      ~session_id:checkpoint.Agent_core.Checkpoint.session_id
+      ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+  in
+  let context =
+    Masc.Keeper_context_core.context_of_agent_core_checkpoint checkpoint
+  in
+  match
+    Masc.Keeper_context_core.save_agent_core_checkpoint_classified
+      ~multimodal_policy:meta.multimodal_policy
+      ~keeper_name:meta.name
+      ~session
+      ~agent_name:meta.agent_name
+      ~ctx:context
+  with
+  | Error detail ->
+    failf
+      "%s checkpoint fixture failed: %s"
+      label
+      (Masc.Keeper_context_core.checkpoint_write_error_to_string
+         ~persistence_error_to_string:(fun detail -> detail)
+         detail)
+  | Ok _ ->
+    (match
+       Masc.Keeper_checkpoint_store.load_agent_core_with_ref
+         ~session_dir:session.session_dir
+         ~session_id:checkpoint.session_id
+     with
+     | Ok (_, source) -> source
+     | Error error ->
+       failf
+         "%s checkpoint source fixture failed: %s"
+         label
+         (Post_turn.compaction_recovery_error_to_string
+            (Post_turn.Checkpoint_ref_load_failed error)))
+
+let block_message role content : Agent_core.Types.message =
   { role; content; name = None; tool_call_id = None; metadata = [] }
 
 let tool_use id =
-  Agent_sdk.Types.ToolUse
+  Agent_core.Types.ToolUse
     { id; name = "test_tool"; input = `Assoc [ "id", `String id ] }
 
 let tool_result id =
-  Agent_sdk.Types.ToolResult
+  Agent_core.Types.ToolResult
     { tool_use_id = id
     ; content = "result:" ^ id
     ; outcome = Tool_succeeded
@@ -253,7 +288,7 @@ let test_atomic_cycle_and_normalization_cross_evidence_gate () =
         ensure_registered_keeper ~base_path:config.base_path meta;
         let checkpoint = { (make_checkpoint ()) with messages } in
         let context =
-          checkpoint |> Masc.Keeper_context_core.context_of_oas_checkpoint
+          checkpoint |> Masc.Keeper_context_core.context_of_agent_core_checkpoint
         in
         let preparation =
           Compact_policy.compact_for_request_typed
@@ -272,14 +307,14 @@ let test_atomic_cycle_and_normalization_cross_evidence_gate () =
       run_case
         ~name:"atomic-cycle-evidence"
         ~messages:
-          [ block_message Agent_sdk.Types.User [ Agent_sdk.Types.Text "prompt" ]
-          ; block_message Agent_sdk.Types.Assistant
-              [ Agent_sdk.Types.Thinking
+          [ block_message Agent_core.Types.User [ Agent_core.Types.Text "prompt" ]
+          ; block_message Agent_core.Types.Assistant
+              [ Agent_core.Types.Thinking
                   { content = "private"; signature = None }
               ; tool_use "atomic"
               ]
-          ; block_message Agent_sdk.Types.Tool
-              [ Agent_sdk.Types.ToolResult
+          ; block_message Agent_core.Types.Tool
+              [ Agent_core.Types.ToolResult
                   { tool_use_id = "atomic"
                   ; content = String.make 4096 'r'
                   ; outcome = Tool_succeeded
@@ -287,21 +322,21 @@ let test_atomic_cycle_and_normalization_cross_evidence_gate () =
                   ; content_blocks = None
                   }
               ]
-          ; block_message Agent_sdk.Types.Assistant
-              [ Agent_sdk.Types.Text "raw suffix" ]
+          ; block_message Agent_core.Types.Assistant
+              [ Agent_core.Types.Text "raw suffix" ]
           ]
         (summarize_response "done");
       run_case
         ~name:"reasoning-normalization-evidence"
         ~messages:
-          [ block_message Agent_sdk.Types.User [ Agent_sdk.Types.Text "prompt" ]
-          ; block_message Agent_sdk.Types.Assistant
-              [ Agent_sdk.Types.Thinking
+          [ block_message Agent_core.Types.User [ Agent_core.Types.Text "prompt" ]
+          ; block_message Agent_core.Types.Assistant
+              [ Agent_core.Types.Thinking
                   { content = String.make 4096 'p'; signature = None }
-              ; Agent_sdk.Types.Text "visible"
+              ; Agent_core.Types.Text "visible"
               ]
-          ; block_message Agent_sdk.Types.User
-              [ Agent_sdk.Types.Text "follow-up" ]
+          ; block_message Agent_core.Types.User
+              [ Agent_core.Types.Text "follow-up" ]
           ]
         (summarize_response "visible"))
 ;;
@@ -311,9 +346,7 @@ let test_regular_post_turn_does_not_auto_compact () =
   let meta = make_meta () in
   let checkpoint = make_checkpoint () in
   let result =
-    Post_turn.apply_post_turn_lifecycle_with_resilience_handles
-      ~resilience_audit_store:None
-      ~resilience_strategy_executor:None
+    Post_turn.apply_post_turn_lifecycle
       ~meta
       ~checkpoint:(Some checkpoint)
   in
@@ -362,41 +395,18 @@ let test_missing_exact_lane_is_source_bound_no_compaction () =
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
        init_runtime_fixture ();
-       let checkpoint = make_checkpoint () in
-       let session =
-         Masc.Keeper_context_core.create_session
-           ~session_id:checkpoint.session_id
-           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+       let checkpoint =
+         make_irreducible_checkpoint
+           ~name:meta.name
+           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+           ()
        in
-       let context = Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint in
        let expected_source =
-         match
-          Masc.Keeper_context_core.save_oas_checkpoint_classified
-            ~multimodal_policy:meta.multimodal_policy
-            ~keeper_name:meta.name
-            ~session
-            ~agent_name:meta.agent_name
-            ~ctx:context
-            ~generation:1
-        with
-        | Ok _ ->
-          (match
-             Masc.Keeper_checkpoint_store.load_oas_with_ref
-               ~session_dir:session.session_dir
-               ~session_id:checkpoint.session_id
-           with
-           | Ok (_, source) -> source
-           | Error error ->
-             failf
-               "missing-lane checkpoint source fixture failed: %s"
-               (Post_turn.compaction_recovery_error_to_string
-                  (Post_turn.Checkpoint_ref_load_failed error)))
-        | Error detail ->
-          failf
-            "missing-lane checkpoint fixture failed: %s"
-            (Masc.Keeper_context_core.checkpoint_write_error_to_string
-               ~persistence_error_to_string:(fun detail -> detail)
-               detail)
+         persist_checkpoint_source_exn
+           ~label:"missing-lane irreducible"
+           config
+           meta
+           checkpoint
        in
        let resolver_snapshot =
          Exact_fixture.resolver_snapshot
@@ -433,10 +443,6 @@ let test_missing_exact_lane_is_source_bound_no_compaction () =
            "terminal evidence retains checkpoint turn"
            expected_source.turn_count
            source.turn_count;
-         check int
-           "terminal evidence retains checkpoint generation"
-           expected_source.generation
-           source.generation;
          check string
            "terminal evidence retains checkpoint digest"
            expected_source.sha256
@@ -446,6 +452,84 @@ let test_missing_exact_lane_is_source_bound_no_compaction () =
            "missing exact lane returned a retryable error: %s"
            (Post_turn.compaction_recovery_error_to_string error)
        | Ok _ -> fail "missing exact lane unexpectedly prepared compaction")
+;;
+
+let test_irreducible_window_is_source_bound_no_compaction () =
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+       let name = "post-turn-irreducible-window" in
+       let trace_id = "trace-post-turn-irreducible-window" in
+       let meta = make_meta ~name ~trace_id () in
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       init_runtime_fixture ();
+       let checkpoint = make_irreducible_checkpoint ~name ~trace_id () in
+       let expected_source =
+         persist_checkpoint_source_exn
+           ~label:"irreducible-window"
+           config
+           meta
+           checkpoint
+       in
+       let slot_id = "irreducible-post-turn-slot" in
+       let resolver_snapshot =
+         Exact_fixture.resolver_snapshot
+           ~source:"post-turn irreducible exact lane"
+           [ ({ id = slot_id; base_url = "http://127.0.0.1:9" }
+              : Exact_fixture.target_fixture)
+           ]
+       in
+       ignore
+         (Exact_fixture.publish_registry
+            ~lane_id:"compaction_exact"
+            ~slot_ids:[ slot_id ]
+            resolver_snapshot);
+       ensure_registered_keeper ~base_path:config.base_path meta;
+       match
+         Post_turn.prepare_compaction
+           ~base_path:config.base_path
+           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+           ~meta
+           ~trigger:Compaction_trigger.Manual
+           ()
+       with
+       | Error
+           (Post_turn.No_compaction
+              ({ source
+               ; reason = Keeper_compaction_outcome.No_reducible_boundary
+               } as no_compaction)) ->
+         check string
+           "terminal evidence retains checkpoint trace"
+           (Keeper_id.Trace_id.to_string expected_source.trace_id)
+           (Keeper_id.Trace_id.to_string source.trace_id);
+         check int
+           "terminal evidence retains checkpoint turn"
+           expected_source.turn_count
+           source.turn_count;
+         check string
+           "terminal evidence retains checkpoint digest"
+           expected_source.sha256
+           source.sha256;
+         check string
+           "terminal receipt keeps irreducible identity"
+           "no_compaction:no_reducible_boundary"
+           (Post_turn.compaction_recovery_error_to_tag
+              (Post_turn.No_compaction no_compaction))
+       | Error error ->
+         failf
+           "irreducible window returned the wrong product result: %s"
+           (Post_turn.compaction_recovery_error_to_string error)
+       | Ok _ -> fail "irreducible window unexpectedly prepared compaction")
 ;;
 
 let test_malformed_structure_preserves_checkpoint () =
@@ -476,7 +560,7 @@ let test_malformed_structure_preserves_checkpoint () =
   let orphan = block_message User [ tool_result "orphan" ] in
   let checkpoint = { (make_checkpoint ()) with messages = [ orphan ] } in
   let context =
-    Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint in
+    Masc.Keeper_context_core.context_of_agent_core_checkpoint checkpoint in
   ensure_registered_keeper ~base_path:config.base_path meta;
   let preparation =
     Compact_policy.compact_for_request_typed
@@ -601,15 +685,14 @@ let test_prepare_commit_source_cas () =
            ~session_id:checkpoint.session_id
            ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
        in
-       let context = Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint in
+       let context = Masc.Keeper_context_core.context_of_agent_core_checkpoint checkpoint in
        (match
-          Masc.Keeper_context_core.save_oas_checkpoint_classified
+          Masc.Keeper_context_core.save_agent_core_checkpoint_classified
             ~multimodal_policy:meta.multimodal_policy
             ~keeper_name:meta.name
             ~session
             ~agent_name:meta.agent_name
             ~ctx:context
-            ~generation:1
         with
         | Ok _ -> ()
         | Error detail ->
@@ -669,7 +752,7 @@ let test_prepare_commit_source_cas () =
         (fun () ->
            match
              Post_turn.For_testing.commit_prepared_compaction_with_history
-               ~save_oas_history:(fun ~session_dir:_ _ ->
+               ~save_agent_core_history:(fun ~session_dir:_ _ ->
                  raise_history_cancellation ())
                prepared
            with
@@ -738,7 +821,7 @@ let test_prepare_commit_source_cas () =
      | Post_turn.Committed _ ->
        fail "stale prepared value committed past the source CAS");
     (match
-       Masc.Keeper_checkpoint_store.load_oas
+       Masc.Keeper_checkpoint_store.load_agent_core
          ~session_dir:session.session_dir
          ~session_id:session.session_id
      with
@@ -782,16 +865,15 @@ let test_post_install_cancellation_returns_committed_failure () =
            ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
        in
        let context =
-         Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint
+         Masc.Keeper_context_core.context_of_agent_core_checkpoint checkpoint
        in
        (match
-          Masc.Keeper_context_core.save_oas_checkpoint_classified
+          Masc.Keeper_context_core.save_agent_core_checkpoint_classified
             ~multimodal_policy:meta.multimodal_policy
             ~keeper_name:meta.name
             ~session
             ~agent_name:meta.agent_name
             ~ctx:context
-            ~generation:1
         with
         | Ok _ -> ()
         | Error detail ->
@@ -831,7 +913,7 @@ let test_post_install_cancellation_returns_committed_failure () =
              raise
                (Eio.Cancel.Cancelled
                   (Failure "injected post-install compaction cancellation")))
-           ~save_oas_history:(fun ~session_dir:_ _ -> ())
+           ~save_agent_core_history:(fun ~session_dir:_ _ -> ())
            prepared
        in
        (match outcome with
@@ -874,7 +956,7 @@ let test_invalid_structural_evidence_after_dispatch_is_terminal () =
       let meta = make_meta ~name:"invalid-evidence-terminal" () in
       ensure_registered_keeper ~base_path:config.base_path meta;
       let context =
-        make_checkpoint () |> Masc.Keeper_context_core.context_of_oas_checkpoint
+        make_checkpoint () |> Masc.Keeper_context_core.context_of_agent_core_checkpoint
       in
       let plan_for_units ~units =
         match
@@ -951,7 +1033,7 @@ let test_post_dispatch_non_reducing_output_is_terminal () =
             ~meta
             ~trigger:Compaction_trigger.Manual
             (make_checkpoint ()
-             |> Masc.Keeper_context_core.context_of_oas_checkpoint)
+             |> Masc.Keeper_context_core.context_of_agent_core_checkpoint)
         in
         check int (name ^ " performs one POST") 1 (Exact_fixture.post_count server);
         (match preparation.decision with
@@ -1049,9 +1131,6 @@ let () =
     "durable compaction", [
       test_case "compaction rejection tag is stable"
         `Quick test_compaction_rejection_tag_is_stable;
-      test_case
-        "final-admission Busy distinguishes pre-dispatch from exact terminal"
-        `Quick test_final_admission_busy_requeues_only_pre_dispatch_no_compaction;
       test_case "regular post-turn does not auto-compact"
         `Quick test_regular_post_turn_does_not_auto_compact;
       test_case
@@ -1074,5 +1153,7 @@ let () =
         `Quick test_reactive_prepare_has_no_retry_gate;
       test_case "missing exact lane is source-bound no-compaction"
         `Quick test_missing_exact_lane_is_source_bound_no_compaction;
+      test_case "irreducible window is source-bound no-compaction"
+        `Quick test_irreducible_window_is_source_bound_no_compaction;
     ];
   ]

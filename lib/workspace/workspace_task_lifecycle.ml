@@ -152,11 +152,31 @@ let decide
            ; verification_id = new_verification_id ()
            })
     else Error Invalid_transition
+  (* Resubmission supersedes the pending obligation instead of replacing the
+     task. Refusing it left [Cancel] as the assignee's only move out of
+     [AwaitingVerification], and the live backlog shows what that cost: 16
+     refusals of this exact transition, and 10 cancellations whose stated reason
+     was the deliverable itself.
+
+     A fresh [verification_id] is what makes it safe. A verdict computed against
+     the superseded request carries the old id and is refused by
+     {!decide_verdict} with [Verification_id_mismatch], so an in-flight judge
+     cannot land on evidence it never read. [started_at] is preserved: the work
+     began once, whatever the submission count. *)
   | ( Masc_domain.Submit_for_verification
-    , ( Masc_domain.Todo
-      | Masc_domain.AwaitingVerification _
-      | Masc_domain.Done _
-      | Masc_domain.Cancelled _ ) ) ->
+    , Masc_domain.AwaitingVerification { assignee; started_at; _ } ) ->
+    if same_agent assignee
+    then
+      ok
+        (Masc_domain.AwaitingVerification
+           { assignee
+           ; started_at
+           ; submitted_at = now
+           ; verification_id = new_verification_id ()
+           })
+    else Error Invalid_transition
+  | ( Masc_domain.Submit_for_verification
+    , (Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _) ) ->
     Error Invalid_transition
 ;;
 
@@ -245,7 +265,17 @@ let valid_next_actions ~same_agent ~task_status =
         ~notes:"preview"
         ~reason:"preview"
     with
-    | Ok _ -> true
+    (* An action the FSM admits but that leaves the status where it is -- Claim
+       on a Task you already hold, Start on one already started, Release on a
+       Todo, Cancel on a Cancelled one -- is not a next action. It is accepted
+       so a repeat is idempotent rather than an error, which is a different
+       question from "what can you do from here".
+
+       Listing them told a Keeper that a Done Task's next actions were
+       [claim;start;done], all three of which return it unchanged. The Goal
+       surface answers the same question the same way as of #27464: its
+       available-actions list carries [Move_to] and drops [Already]. *)
+    | Ok { new_status; _ } -> new_status <> task_status
     | Error _ -> false
   in
   List.filter try_action Masc_domain.all_task_actions

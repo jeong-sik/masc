@@ -17,20 +17,20 @@ let serving_constraint ?(expires_at_unix_s = 4_102_444_800) () =
   |> Result.get_ok
 
 let input_capacity constraint_ reason =
-  Agent_sdk.Error.Api
+  Agent_core.Error.Api
     (InputCapacity
        { message = "Context overflow: typed capacity"
        ; constraint_
-       ; reason = Agent_sdk.Retry.Serving_constraint_rejected reason
+       ; reason = Agent_core.Retry.Serving_constraint_rejected reason
        })
 
 let measurement_unavailable constraint_ =
-  Agent_sdk.Error.Api
+  Agent_core.Error.Api
     (InputCapacity
        { message = "token measurement unavailable"
        ; constraint_
        ; reason =
-           Agent_sdk.Retry.Token_measurement_unavailable
+           Agent_core.Retry.Token_measurement_unavailable
              Llm_provider.Input_token_count.Anthropic_messages_count_tokens
        })
 
@@ -40,25 +40,25 @@ let test_is_context_overflow_only_for_overflow_errors () =
     "ContextOverflow matches"
     true
     (EC.is_context_overflow
-       (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 })));
+       (Agent_core.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 })));
   check
     bool
     "ContextOverflow without limit"
     true
     (EC.is_context_overflow
-       (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = None })));
+       (Agent_core.Error.Api (ContextOverflow { message = "exceeded"; limit = None })));
   check
     bool
     "NetworkError does not match"
     false
     (EC.is_context_overflow
-       (Agent_sdk.Error.Api
+       (Agent_core.Error.Api
           (NetworkError
              { message = "Connection_reset"
              ; kind = Llm_provider.Http_client.Connection_refused
              })));
   let rendered_only =
-    Agent_sdk.Error.Internal
+    Agent_core.Error.Internal
       "Context overflow: model_context_window_exceeded arbitrary provider text"
   in
   check bool "rendered internal text does not match" false
@@ -67,13 +67,13 @@ let test_is_context_overflow_only_for_overflow_errors () =
     (EC.is_auto_recoverable_turn_error rendered_only);
   (* [Error.Agent (UnrecognizedStopReason _)] is never a context overflow here,
      whatever token it carries. Both an unmodeled provider token and an overflow
-     token are asserted, because the SDK CAN deliver the latter: only
+     token are asserted, because agent core CAN deliver the latter: only
      [Types.stop_reason_of_string] maps overflow tokens to the typed
      [ContextWindowExceeded], and the Ollama / Ollama-NDJSON / OpenAI-Responses
      decoders build [Types.Unknown <raw>] without it. Classifying that here would
      be a string classifier standing in for a typed provider signal. *)
   let unmodeled_stop_reason =
-    Agent_sdk.Error.Agent
+    Agent_core.Error.Agent
       (UnrecognizedStopReason { reason = "provider_specific_halt" })
   in
   check bool "unmodeled stop reason is not a context overflow" false
@@ -82,7 +82,7 @@ let test_is_context_overflow_only_for_overflow_errors () =
     false
     (EC.is_auto_recoverable_turn_error unmodeled_stop_reason);
   let overflow_token_stop_reason =
-    Agent_sdk.Error.Agent
+    Agent_core.Error.Agent
       (UnrecognizedStopReason { reason = "model_context_window_exceeded" })
   in
   check bool "overflow token on an agent stop reason is still not classified here"
@@ -131,24 +131,24 @@ let test_context_overflow_is_not_auto_recoverable () =
     "ContextOverflow is not auto-recoverable at turn level"
     false
     (EC.is_auto_recoverable_turn_error
-       (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 })))
+       (Agent_core.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 })))
 ;;
 
 module Budget = Masc.Keeper_turn_runtime_budget
 
 let request_body_too_large ~actual_bytes ~limit_bytes =
-  Agent_sdk.Error.Api
+  Agent_core.Error.Api
     (InvalidRequest
        { message = "serialized request body exceeds the declared limit"
-       ; reason = Agent_sdk.Retry.Request_body_too_large { actual_bytes; limit_bytes }
+       ; reason = Agent_core.Retry.Request_body_too_large { actual_bytes; limit_bytes }
        })
 ;;
 
 let request_body_refused_by_provider ~status =
-  Agent_sdk.Error.Api
+  Agent_core.Error.Api
     (InvalidRequest
        { message = "provider refused the serialized request body"
-       ; reason = Agent_sdk.Retry.Request_body_refused_by_provider { status }
+       ; reason = Agent_core.Retry.Request_body_refused_by_provider { status }
        })
 ;;
 
@@ -177,7 +177,7 @@ let test_byte_axis_is_a_capacity_refusal () =
    | Some _ | None -> fail "provider refusal status was not preserved");
   match
     Budget.capacity_refusal_of_error
-      (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 }))
+      (Agent_core.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 }))
   with
   | Some (Budget.Provider_context_window { limit_tokens = Some 32768 }) -> ()
   | Some _ | None -> fail "the context window axis regressed"
@@ -208,7 +208,7 @@ let test_byte_axis_forwards_exact_request_wire_observation () =
       (Some
          (fun ~runtime_id ~max_request_body_bytes ~body_bytes ->
            observed := Some (runtime_id, max_request_body_bytes, body_bytes)))
-    (Agent_sdk.Error.Api
+    (Agent_core.Error.Api
        (ContextOverflow { message = "exceeded"; limit = Some 32768 }));
   check
     (option (triple string int int))
@@ -283,7 +283,7 @@ let test_unusable_capacity_evidence_is_non_compacting () =
 ;;
 
 (* The classifier feeding the cascade path publishes
-   reason="provider_context_overflow" and the Sdk_context_window_exceeded blocker
+   reason="provider_context_overflow" and the Agent_core_context_window_exceeded blocker
    class, so admitting a byte refusal there would label it as a window exceedance. *)
 let test_lane_classifier_admits_only_the_token_axis () =
   let module E = Masc.Keeper_unified_turn_execution.For_testing in
@@ -303,7 +303,7 @@ let test_lane_classifier_admits_only_the_token_axis () =
      fail "a provider byte refusal was classified as a token overflow");
   match
     E.declared_lane_failure_of_error
-      (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = None }))
+      (Agent_core.Error.Api (ContextOverflow { message = "exceeded"; limit = None }))
   with
   | E.Provider_context_overflow { limit_tokens = None } -> ()
   | E.Provider_context_overflow { limit_tokens = Some _ }

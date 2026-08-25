@@ -3,7 +3,7 @@
 
 (** [safe_respond_with_string] guards [Httpun.Reqd.respond_with_string]
     against the [Failure "invalid state, currently handling error"] race
-    that occurs when a client disconnects while a long OAS turn is in
+    that occurs when a client disconnects while a long AGENT_CORE turn is in
     progress and httpun's error_handler has already started responding
     (2026-05-05 cycle9 FATAL incident). *)
 let safe_respond_with_string reqd response body =
@@ -18,13 +18,13 @@ let safe_respond_with_string reqd response body =
      RFC-0106 P1: routed via [Cancel_safe.observe] so the Cancelled
      re-raise discipline lives in one place. The [Failure] arm is
      preserved inside [on_exn] because it is a typed boundary
-     (2026-05-05 OAS cancel race), not a catch-all. *)
+     (2026-05-05 AGENT_CORE cancel race), not a catch-all. *)
   Cancel_safe.observe
     ~on_exn:(function
       | Failure msg ->
           Log.Server.warn
             "[mcp-http] respond_with_string skipped (reqd invalid state; \
-             2026-05-05 OAS cancel race): %s"
+             2026-05-05 AGENT_CORE cancel race): %s"
             msg
       | exn ->
           let backtrace = Printexc.get_backtrace () in
@@ -99,6 +99,68 @@ let respond_mcp_error ?(extra_headers = []) ?data ?id
   in
   safe_respond_with_string reqd response body
 
+let mcp_auth_reject_reason_label
+    (failure : Server_mcp_transport_http_types.auth_failure) =
+  (* An absent [auth_error_code] folds to the fixed "unclassified"
+     label on purpose — the metric label set must stay bounded, and
+     the absence itself is what gets counted. Nothing is silently
+     repaired: the paired [Log.Auth] event carries the full failure
+     message and a [`Null] reason for the same reject. DET-OK. *)
+  Option.value ~default:"unclassified" failure.auth_error_code
+
+let mcp_auth_reject_details ~endpoint ~claimed_agent ~token_presented
+    ~session_id (failure : Server_mcp_transport_http_types.auth_failure) =
+  let opt_string = function
+    | Some value -> `String value
+    | None -> `Null
+  in
+  `Assoc
+    [
+      ("endpoint", `String endpoint);
+      ("reason", opt_string failure.auth_error_code);
+      ("message", `String failure.message);
+      ("claimed_agent", opt_string claimed_agent);
+      ("token_presented", `Bool token_presented);
+      (* [`Null] when the request carried no [Mcp-Session-Id]
+         (e.g. h2 DELETE rejected before session resolution). *)
+      ("session_id", opt_string session_id);
+    ]
+
+(* Auth reject boundary observation. The transport is the only place
+   that turns an [auth_failure] into a client-visible 401, so it is
+   the only place that can record the rejection server-side. Before
+   this the reject produced no log line, no metric, and no audit
+   trace: on 2026-08-18 every external MCP credential had gone stale
+   after a token rotation and the operator surface could not
+   distinguish "no client ever connected" from "every client is being
+   rejected" ([mcp_transport_sessions.json] empty either way).
+   The raw bearer is never logged — only whether one was presented. *)
+let record_mcp_auth_reject ~endpoint ~claimed_agent ~token_presented
+    ~session_id (failure : Server_mcp_transport_http_types.auth_failure) =
+  Log.Auth.emit Log.Warn
+    ~details:
+      (mcp_auth_reject_details ~endpoint ~claimed_agent ~token_presented
+         ~session_id failure)
+    ~category:Log.Routine
+    (Printf.sprintf "MCP auth rejected: %s (%s)" endpoint failure.message);
+  Transport_metrics.inc_mcp_auth_reject ~endpoint
+    ~reason:(mcp_auth_reject_reason_label failure)
+
+let respond_mcp_auth_error ~(deps : Server_mcp_transport_http_types.deps)
+    ~request_authority ~endpoint request reqd ~session_id ~protocol_version
+    (failure : Server_mcp_transport_http_types.auth_failure) =
+  record_mcp_auth_reject ~endpoint
+    ~claimed_agent:(Server_auth.agent_from_request request)
+    ~token_presented:(Option.is_some (deps.auth_token_from_request request))
+    ~session_id:(Some session_id) failure;
+  respond_mcp_error
+    ?data:
+      (Option.map
+         (fun code -> `Assoc [ ("auth_error_code", `String code) ])
+         failure.auth_error_code)
+    ~code:Mcp_error_code.Auth_error ~deps ~request_authority request reqd
+    ~session_id ~protocol_version failure.message
+
 (* [respond_not_ready] is intentionally retained outside
    [respond_mcp_error]: it runs before [json_headers] / [session_id]
    are available. Widening [respond_mcp_error] to the pre-runtime case
@@ -164,7 +226,6 @@ let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~ori
       [
         ("error", `String "sse_connection_rate_limited");
         ("reason", `String reason_label);
-        ("retry_after_seconds", `Float retry_after_s);
       ]
     |> Yojson.Safe.to_string
   in

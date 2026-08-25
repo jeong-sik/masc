@@ -115,6 +115,17 @@ let post_sync ?clock ?timeout_sec ~url ~headers ~body () =
   | Ok { Pool.status; body; _ } -> Ok (status, body)
   | Error e -> Error e
 
+(** POST that keeps the response headers. The MCP transport answers an
+    [initialize] with its session id in a header, not the body, so a caller
+    opening a session has nothing to read from [post_sync]. *)
+let post_response_sync ?clock ?timeout_sec ~url ~headers ~body () =
+  with_optional_timeout ?clock ?timeout_sec @@ fun () ->
+  with_pool @@ fun pool ->
+  match Pool.request pool ?clock ?timeout_seconds:timeout_sec
+          ~method_:`POST ~url ~headers ~body () with
+  | Ok { Pool.status; headers; body } -> Ok { status; headers; body }
+  | Error e -> Error e
+
 (** PATCH with structured error handling. *)
 let patch_sync ?clock ?timeout_sec ~url ~headers ~body () =
   with_optional_timeout ?clock ?timeout_sec @@ fun () ->
@@ -140,16 +151,37 @@ let get_sync ?clock ?timeout_sec ~url ~headers () =
   | Ok response -> Ok (response.status, response.body)
   | Error _ as error -> error
 
+(** POST that hands each response body chunk to [on_chunk] as it arrives.
+
+    No [with_optional_timeout] wrapper: a wall-clock cap would cancel a stream
+    that is still delivering bytes, which is the case this exists to serve.
+    The bound is [idle_timeout_sec], enforced per chunk inside the pool.
+
+    [idle_timeout_sec] is required rather than defaulted. A tolerable silence
+    depends on the protocol being streamed — a keeper turn goes quiet for as
+    long as the tool it is running takes — and this module cannot know it. *)
+let post_stream ~clock ~idle_timeout_sec ~url ~headers ~body ~on_chunk () =
+  with_pool @@ fun pool ->
+  Pool.request_streaming pool ~clock ~idle_timeout_sec ~method_:`POST ~url
+    ~headers ~body ~on_chunk ()
+
+(** GET that hands each response body chunk to [on_chunk] as it arrives,
+    for a server-sent event stream a client subscribes to rather than
+    requests: the observer feed at [GET /mcp?sse_kind=observer]. Same
+    contract as {!post_stream}: no wall-clock cap, [idle_timeout_sec] bounds
+    silence, and the caller chooses that bound because only it knows how
+    long the stream it is reading is allowed to go quiet. *)
+let get_stream ~clock ~idle_timeout_sec ~url ~headers ~on_chunk () =
+  with_pool @@ fun pool ->
+  Pool.request_streaming pool ~clock ~idle_timeout_sec ~method_:`GET ~url
+    ~headers ~on_chunk ()
+
 module For_testing = struct
   let with_request_timeout ~clock ~timeout_sec f =
     with_optional_timeout ~clock ~timeout_sec f
 end
 
 (* ── Observability ────────────────────────────────────────────────── *)
-
-(** Return the pool for the current domain, if initialized.
-    Backward-compatible accessor for telemetry consumers. *)
-let pool_singleton_opt () : Pool.t option = Domain.DLS.get pool_key
 
 (** Return all domain pools created so far.
     Used by [Pool_metrics] to aggregate counters across domains.

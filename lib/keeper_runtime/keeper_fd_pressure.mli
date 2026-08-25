@@ -34,7 +34,6 @@ val projection_fields : unit -> (string * Yojson.Safe.t) list
 val reset_for_tests : unit -> unit
 
 val process_nofile_soft_limit : unit -> int option
-val process_open_fd_count : unit -> int option
 val system_fd_snapshot : ?now:float -> unit -> system_fd_snapshot option
 
 val runtime_state_json :

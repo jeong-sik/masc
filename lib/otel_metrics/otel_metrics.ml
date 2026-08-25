@@ -21,20 +21,6 @@ type sample = {
 let attrs_of_labels (labels : (string * string) list) =
   List.map (fun (k, v) -> (k, `String v)) labels
 
-let metric_of_sample (s : sample) : M.t =
-  let dp = M.float ~attrs:(attrs_of_labels s.labels) s.value in
-  match s.kind with
-  | Counter ->
-    M.sum ~name:s.name ~is_monotonic:true
-      ~aggregation_temporality:M.Aggregation_temporality_cumulative [ dp ]
-  | Gauge -> M.gauge ~name:s.name [ dp ]
-  | Histogram ->
-    (* store keeps a single accumulated value (not bucketed); export as a
-       cumulative non-monotonic sum so the value is preserved. Real buckets are
-       a follow-up once Otel_metric_store_core grows them. *)
-    M.sum ~name:s.name ~is_monotonic:false
-      ~aggregation_temporality:M.Aggregation_temporality_cumulative [ dp ]
-
 (** Group samples by [(name, kind)] so that samples sharing the same metric
     identity become a single [M.t] with multiple data points. This reduces the
     number of protobuf metrics emitted per OTel export tick. *)

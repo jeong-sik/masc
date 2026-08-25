@@ -203,7 +203,7 @@ if [[ -z "$BASE_URL" ]]; then
     echo "ERROR: no server executable; build ./bin/main_eio.exe first" >&2; exit 1; }
   PORT="${PORT:-$(harness_pick_free_port)}"
   BASE_PATH="$(harness_mktemp_dir "masc-starvation-base")"
-  # Pre-seed the canonical runtime.toml so the strict OAS capability gate
+  # Pre-seed the canonical runtime.toml so the strict AGENT_CORE capability gate
   # (Runtime.init_default_strict, server_runtime_bootstrap.ml:641) accepts boot.
   # harness_seed_server_config writes runtime.toml only when absent, so seeding it
   # here overrides the lib's placeholder "smoke" model (which is not in the catalog).

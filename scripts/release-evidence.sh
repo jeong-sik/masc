@@ -10,7 +10,9 @@ The bundle includes:
   - artifact install smoke (`--version` from an installed location)
   - local boot + /health capture
   - MCP initialize + tools/list + masc_status captures
-  - dashboard read-path captures for briefing + namespace truth
+  - dashboard read-path captures for briefing + project snapshot
+  - Keeper V01-V15 compile/regression conformance logs + correlated bundle
+  - RW01-RW16 real-world multi-Keeper bundle is verified separately after an isolated runtime run
 
 Raw files are written next to OUTPUT_MARKDOWN.
 EOF
@@ -34,10 +36,10 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 [[ -x "$BINARY" ]] || { echo "release-evidence: binary not executable: $BINARY" >&2; exit 1; }
-[[ -f config/oas-models-overlay.toml ]] || { echo "release-evidence: config/oas-models-overlay.toml missing" >&2; exit 1; }
+[[ -f config/agent-core-models-overlay.toml ]] || { echo "release-evidence: config/agent-core-models-overlay.toml missing" >&2; exit 1; }
 
 readonly SMOKE_FIXTURE_DIR="$repo_root/scripts/fixtures/release-evidence"
-for smoke_fixture in runtime.toml oas-models-overlay.toml; do
+for smoke_fixture in runtime.toml agent-core-models-overlay.toml; do
   [[ -f "$SMOKE_FIXTURE_DIR/$smoke_fixture" ]] || {
     echo "release-evidence: smoke fixture missing: scripts/fixtures/release-evidence/$smoke_fixture" >&2
     exit 1
@@ -65,18 +67,26 @@ status_json="$out_dir/masc-status.json"
 briefing_headers="$out_dir/dashboard-briefing.headers"
 briefing_body="$out_dir/dashboard-briefing.body"
 briefing_json="$out_dir/dashboard-briefing.json"
-namespace_headers="$out_dir/namespace-truth.headers"
-namespace_body="$out_dir/namespace-truth.body"
-namespace_json="$out_dir/namespace-truth.json"
+project_snapshot_headers="$out_dir/project-snapshot.headers"
+project_snapshot_body="$out_dir/project-snapshot.body"
+project_snapshot_json="$out_dir/project-snapshot.json"
 dev_token_json="$out_dir/dashboard-dev-token.json"
 install_version_stdout="$out_dir/install-version.stdout"
 install_version_stderr="$out_dir/install-version.stderr"
+lifecycle_dir="$out_dir/keeper-full-lifecycle"
+lifecycle_bundle_json="$lifecycle_dir/bundle.json"
+lifecycle_bundle_md="$lifecycle_dir/bundle.md"
 
-cleanup() {
+stop_server() {
   if [[ -n "${SERVER_PID:-}" ]]; then
     kill "${SERVER_PID}" >/dev/null 2>&1 || true
     wait "${SERVER_PID}" 2>/dev/null || true
+    SERVER_PID=""
   fi
+}
+
+cleanup() {
+  stop_server
   rm -rf "$tmp"
 }
 trap cleanup EXIT
@@ -239,8 +249,8 @@ copy_install_smoke() {
   # Server_runtime_bootstrap.mandatory_exact_output_lane_ids by
   # test_runtime_config_validity, which runs in every PR.
   cp "$SMOKE_FIXTURE_DIR/runtime.toml" "$base_path/.masc/config/runtime.toml"
-  cp "$SMOKE_FIXTURE_DIR/oas-models-overlay.toml" \
-    "$base_path/.masc/config/oas-models-overlay.toml"
+  cp "$SMOKE_FIXTURE_DIR/agent-core-models-overlay.toml" \
+    "$base_path/.masc/config/agent-core-models-overlay.toml"
 }
 
 capture_installed_version() {
@@ -277,7 +287,6 @@ env \
   MASC_TOKEN= \
   MASC_GRPC_ENABLED=0 \
   MASC_WS_ENABLED=0 \
-  MASC_WEBRTC_ENABLED=0 \
   MASC_KEEPER_BOOTSTRAP_ENABLED=false \
   "$BINARY" --base-path "$base_path" --port "$PORT" >"$server_log" 2>&1 &
 SERVER_PID=$!
@@ -335,11 +344,19 @@ curl -sS -D "$briefing_headers" -o "$briefing_body" \
 normalize_http_json "$briefing_headers" "$briefing_body" "$briefing_json" \
   "/api/v1/dashboard/briefing"
 
-curl -sS -D "$namespace_headers" -o "$namespace_body" \
+curl -sS -D "$project_snapshot_headers" -o "$project_snapshot_body" \
   -H 'Accept: application/json' \
-  "${BASE_URL}/api/v1/dashboard/namespace-truth"
-normalize_http_json "$namespace_headers" "$namespace_body" "$namespace_json" \
-  "/api/v1/dashboard/namespace-truth"
+  "${BASE_URL}/api/v1/dashboard/project-snapshot"
+normalize_http_json "$project_snapshot_headers" "$project_snapshot_body" "$project_snapshot_json" \
+  "/api/v1/dashboard/project-snapshot"
+
+# The live smoke has completed. Stop its isolated server before executing the
+# lifecycle matrix so process/port-sensitive scenarios observe a clean host.
+stop_server
+python3 scripts/keeper-full-lifecycle-evidence.py --output-dir "$lifecycle_dir"
+python3 scripts/keeper-full-lifecycle-evidence.py \
+  --verify \
+  --output-dir "$lifecycle_dir"
 
 python3 - \
   "$OUTFILE" \
@@ -353,9 +370,11 @@ python3 - \
   "$tools_json" \
   "$status_json" \
   "$briefing_json" \
-  "$namespace_json" \
+  "$project_snapshot_json" \
   "$initialize_json" \
-  "$server_log" <<'PY'
+  "$server_log" \
+  "$lifecycle_bundle_json" \
+  "$lifecycle_bundle_md" <<'PY'
 import json
 import pathlib
 import sys
@@ -373,9 +392,11 @@ from datetime import datetime, timezone
     tools_json,
     status_json,
     briefing_json,
-    namespace_json,
+    project_snapshot_json,
     initialize_json,
     server_log,
+    lifecycle_bundle_json,
+    lifecycle_bundle_md,
 ) = sys.argv[1:]
 
 def load(path):
@@ -386,8 +407,9 @@ health = load(health_json)
 tools = load(tools_json)
 status = load(status_json)
 briefing = load(briefing_json)
-namespace_truth = load(namespace_json)
+project_snapshot = load(project_snapshot_json)
 initialize = load(initialize_json)
+lifecycle = load(lifecycle_bundle_json)
 
 tool_count = len(tools.get("result", {}).get("tools", []))
 status_text = None
@@ -398,7 +420,7 @@ for item in content:
       break
 
 briefing_keys = sorted(briefing.keys())[:10]
-namespace_keys = sorted(namespace_truth.keys())[:10]
+project_snapshot_keys = sorted(project_snapshot.keys())[:10]
 health_keys = sorted(health.keys())[:10]
 generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -439,7 +461,15 @@ md = f"""# Release Evidence Bundle
 ## Dashboard Read Paths
 
 - `/api/v1/dashboard/briefing` returned HTTP-shaped JSON with keys: `{", ".join(briefing_keys)}`
-- `/api/v1/dashboard/namespace-truth` returned keys: `{", ".join(namespace_keys)}`
+- `/api/v1/dashboard/project-snapshot` returned keys: `{", ".join(project_snapshot_keys)}`
+
+## Keeper Full-Lifecycle Conformance
+
+- Evidence schema: `{lifecycle.get("schema", "<missing>")}`
+- Source SHA: `{lifecycle.get("source_sha", "<missing>")}`
+- Correlation bundle: `{lifecycle.get("bundle_id", "<missing>")}`
+- Result: `{lifecycle.get("status", "<missing>")}` ({lifecycle.get("passed_count", 0)}/{lifecycle.get("scenario_count", 0)})
+- Human-readable matrix: `{pathlib.Path(lifecycle_bundle_md).resolve().relative_to(pathlib.Path(outfile).resolve().parent)}`
 
 ## Raw Captures
 
@@ -451,8 +481,11 @@ md = f"""# Release Evidence Bundle
 - `tools-list.json`
 - `masc-status.json`
 - `dashboard-briefing.json`
-- `namespace-truth.json`
+- `project-snapshot.json`
 - `server.log`
+- `keeper-full-lifecycle/bundle.json`
+- `keeper-full-lifecycle/bundle.md`
+- `keeper-full-lifecycle/v01-*.log` through `v15-*.log`
 
 ## Re-run
 

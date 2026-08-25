@@ -24,6 +24,8 @@ module Http = Http_server_eio
 
 let is_valid_sha256 value = Result.is_ok (Tool_blob_store.validate_sha256 value)
 
+let artifact_read_permission = Masc_domain.CanAdmin
+
 let blob_response ~base_path ~sha256 =
   let store = Tool_blob_store.create ~base_path in
   match Tool_blob_store.fetch store ~sha256 with
@@ -57,18 +59,18 @@ let blob_response ~base_path ~sha256 =
 let add_routes router =
   router
   |> Http.Router.prefix_get "/api/v1/artifacts/" (fun request reqd ->
-       with_public_read
-         (fun state _req reqd ->
+       with_token_permission_auth ~permission:artifact_read_permission
+         (fun state _agent_name _req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            let path = Http.Request.path request in
            match extract_path_param ~prefix:"/api/v1/artifacts/" path with
            | None ->
-               respond_public_read_json_value ~status:`Bad_request request reqd
+               respond_json_value_with_cors ~status:`Bad_request request reqd
                  (`Assoc [ ("error", `String "sha256 path parameter required") ])
            | Some raw ->
                (match Tool_blob_store.validate_sha256 raw with
                 | Error invalid ->
-                    respond_public_read_json_value
+                    respond_json_value_with_cors
                       ~status:`Bad_request
                       request
                       reqd
@@ -83,5 +85,5 @@ let add_routes router =
                     let json, status =
                       blob_response ~base_path ~sha256:raw
                     in
-                    respond_public_read_json_value ~status request reqd json))
+                    respond_json_value_with_cors ~status request reqd json))
          request reqd)

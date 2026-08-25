@@ -1,15 +1,19 @@
 (include_subdirs no)
 
 (library
- (name masc_keeper_tooling)
+ (name keeper_tooling)
  (public_name masc.keeper_tooling)
- (wrapped false)
+ (wrapped true)
  (modules
-  keeper_tool_execute_shell_ir
-  keeper_tool_name
-  keeper_tool_response)
+  execute_shell_ir
+  name
+  response
+  shell_costume
+  subset_rewrite)
+ (flags
+  (:standard -w +4 -w +33))
  (libraries
-  agent_sdk
+  masc.agent_core
   masc.bounded_event_dedupe
   masc.config
   masc.exec_policy

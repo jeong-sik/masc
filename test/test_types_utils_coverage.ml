@@ -388,7 +388,8 @@ let test_task_roundtrip () =
     created_at = "2024-01-01T00:00:00Z";
     created_by = None;
     predecessor_task_id = None;
-    contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
+    contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
+    skills = [];
   } in
   let json = Masc_domain.task_to_yojson task in
   let result = Masc_domain.task_of_yojson json in
@@ -406,13 +407,15 @@ let test_backlog_roundtrip () =
         created_at = "2024-01-01T00:00:00Z";
         created_by = None;
         predecessor_task_id = None;
-        contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None };
+        skills = [];
+        contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None };
       { id = "t2"; title = "Task 2"; description = "Desc 2";
         task_status = Done { assignee = "a"; completed_at = "2024-01-02T00:00:00Z"; notes = None };
         priority = 2; files = []; created_at = "2024-01-01T01:00:00Z";
         created_by = None;
         predecessor_task_id = None;
-        contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None };
+        skills = [];
+        contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None };
     ];
     last_updated = "2024-01-02T00:00:00Z";
     version = 5;
@@ -491,7 +494,7 @@ let test_default_auth_config () =
 let test_auth_config_roundtrip () =
   let cfg = Masc_domain.{
     enabled = true;
-    workspace_secret_hash = Some "sha256:secret";
+    workspace_secret_hash = Some (String.make 64 'a');
     require_token = true;
     token_expiry_hours = 48;
   } in
@@ -516,19 +519,6 @@ let test_parse_gitdir_invalid () =
 (* ============================================================ *)
 (* Workspace_utils.sanitize Tests                                     *)
 (* ============================================================ *)
-
-let test_sanitize_html () =
-  let input = "<script>alert('xss')</script>" in
-  let result = Workspace_utils.sanitize_html input in
-  check bool "no angle brackets" true
-    (not (String.contains result '<') && not (String.contains result '>'));
-  check bool "escaped lt" true (String.length result > String.length input)
-
-let test_sanitize_html_quotes () =
-  let input = "Hello \"world\" & 'friends'" in
-  let result = Workspace_utils.sanitize_html input in
-  check bool "quotes escaped" true
-    (not (String.contains result '"') && not (String.contains result '\''))
 
 let test_safe_filename () =
   let input = "file with spaces & special<chars>.txt" in
@@ -693,8 +683,6 @@ let gitdir_tests = [
 ]
 
 let sanitize_tests = [
-  "html script", `Quick, test_sanitize_html;
-  "html quotes", `Quick, test_sanitize_html_quotes;
   "safe_filename special", `Quick, test_safe_filename;
   "safe_filename valid", `Quick, test_safe_filename_valid;
 ]

@@ -1,3 +1,8 @@
+---
+rfc: "0324"
+status: Draft
+---
+
 # RFC-0324: keeper repo 경로를 filesystem 진실로 (catalog 거짓 주입 제거)
 
 ## Status
@@ -7,14 +12,14 @@ Draft
 
 keeper들이 매 턴 `cwd_not_directory` 에러로 자기 repo 경로를 못 찾는 현상이 상시 발생한다.
 
-- garnet keeper → `repos/masc` 시도 (실제 clone은 `masc-mcp`, `oas`)
+- garnet keeper → `repos/masc` 시도 (실제 clone은 `masc-mcp`, `agent_core`)
 - nick0cave keeper → `repos/jeong-sic-masc` 시도 (실제 clone은 `masc`)
 
 ### 근본 원인
 
 keeper prompt assembly(`lib/keeper/keeper_prompt.ml`의 `registered_repositories_block`)가 `repositories.toml` catalog의 **globally registered repo ID**를 "유효한 `repos/<name>` 세그먼트"로 keeper에게 주입한다. 하지만 catalog ID와 keeper playground에 **실제로 clone된 디렉토리 이름** 사이에 invariant가 없다:
 
-- provisioning은 clone을 basename/별칭(`masc`, `masc-mcp`, `oas`)으로 깐다.
+- provisioning은 clone을 basename/별칭(`masc`, `masc-mcp`, `agent_core`)으로 깐다.
 - catalog/합성은 다른 이름(`masc`, `jeong-sik-masc`)을 쓴다.
 - keeper는 catalog를 진실로 믿고 → 디스크에 없는 경로를 Execute cwd로 시도 → `cwd_not_directory`.
 
@@ -75,7 +80,7 @@ dune runtest test_exec_policy
 ```
 
 - keeper 새 턴에서 prompt에 `<registered_repositories>` 블록이 더 이상 렌더링되지 않는지.
-- garnet/nick0cave keeper가 tool로 playground를 조회한 뒤 정확한 clone 경로(`masc-mcp`, `oas`, `masc`)를 사용하는지 로그 모니터링.
+- garnet/nick0cave keeper가 tool로 playground를 조회한 뒤 정확한 clone 경로(`masc-mcp`, `agent_core`, `masc`)를 사용하는지 로그 모니터링.
 - keeper Execute가 filesystem 실존 디렉토리에 대해 catalog 무관하게 허용되는지.
 - `cwd_not_directory` 에러 빈도 감소 확인.
 

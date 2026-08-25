@@ -3,7 +3,6 @@
     Split from {!Server_dashboard_http_keeper_api}; gap construction stays in
     the facade while repeated JSON rendering helpers live here. *)
 
-open Server_dashboard_http_keeper_api_types
 open Server_dashboard_http_keeper_runtime_manifest_scan
 
 type runtime_lens_gap =
@@ -120,7 +119,7 @@ let lane_policies =
     ; mandatory_events = [ Keeper_runtime_manifest.Runtime_routed ]
     ; terminal_events = []
     }
-  ; { lane = "oas_agent"
+  ; { lane = "agent_core_agent"
     ; mandatory_events = [ Keeper_runtime_manifest.Checkpoint_saved ]
     ; terminal_events =
         [ Keeper_runtime_manifest.Checkpoint_saved ]
@@ -153,7 +152,7 @@ let event_lane = function
     "provider"
   | Keeper_runtime_manifest.Checkpoint_loaded
   | Keeper_runtime_manifest.Checkpoint_saved ->
-    "oas_agent"
+    "agent_core_agent"
   | Keeper_runtime_manifest.Context_injected
   | Keeper_runtime_manifest.Context_compacted
   | Keeper_runtime_manifest.Event_bus_correlated ->
@@ -161,18 +160,6 @@ let event_lane = function
 
 let lane_policy_for_lane lane =
   List.find_opt (fun policy -> String.equal policy.lane lane) lane_policies
-
-let lane_mandatory_event_codes lane =
-  match lane_policy_for_lane lane with
-  | Some policy ->
-    List.map Keeper_runtime_manifest.event_kind_to_string policy.mandatory_events
-  | None -> []
-
-let lane_terminal_event_codes lane =
-  match lane_policy_for_lane lane with
-  | Some policy ->
-    List.map Keeper_runtime_manifest.event_kind_to_string policy.terminal_events
-  | None -> []
 
 let lane_mandatory_events_present scan lane =
   match lane_policy_for_lane lane with

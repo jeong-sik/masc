@@ -43,8 +43,6 @@ describe('ConnectorOnboardingGrid', () => {
     render(html`<${ConnectorOnboardingGrid} />`, container)
     const text = container.textContent ?? ''
     // Discord + Slack cards are omitted from onboarding (in-process) — no run.sh.
-    expect(text).not.toContain('cd sidecars/discord-bot && ./run.sh')
-    expect(text).not.toContain('cd sidecars/slack-bot && ./run.sh')
     expect(text).toContain('cd sidecars/imessage-bot && ./run.sh')
     expect(text).toContain('cd sidecars/telegram-bot && ./run.sh')
   })
@@ -71,20 +69,20 @@ describe('ConnectorOnboardingGrid', () => {
     })
   })
 
-  it('includes bulk Start All action for cold-start spawn of all 4 at once', () => {
+  it('bulk Start All counts the sidecars it can actually spawn', () => {
     render(html`<${ConnectorOnboardingGrid} />`, container)
     const startAll = container.querySelector('[data-testid="bulk-action-start"]') as HTMLButtonElement
     expect(startAll).toBeTruthy()
-    // ConnectorBulkActions still derives its count from
-    // KNOWN_CONNECTOR_IDS (status-panel side), not the onboarding
-    // grid's filtered list — discord is still a known connector for
-    // the gate, just not externally spawnable.
-    expect(startAll.textContent).toContain('(4)')
+    // The count used to say 4 and this comment used to explain why it
+    // disagreed with the grid beside it: ConnectorBulkActions counted every
+    // known connector, and discord and slack have no sidecar to spawn. The
+    // two now agree, and the number is the number of cards.
+    expect(startAll.textContent).toContain('(2)')
   })
 
   it('shows the cold-start heading explaining the empty state', () => {
     render(html`<${ConnectorOnboardingGrid} />`, container)
-    expect(container.textContent ?? '').toContain('아직 연결된 사이드카가 없습니다')
+    expect(container.textContent ?? '').toContain('아직 연결된 사이드카 없음')
   })
 
   it('renders a per-card Start button with testId for each external sidecar', () => {

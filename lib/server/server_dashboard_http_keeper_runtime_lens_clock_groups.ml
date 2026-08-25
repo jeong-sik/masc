@@ -4,7 +4,6 @@
     compactions and event-bus correlations) from the edge
     stream produced by {!Server_dashboard_http_keeper_runtime_lens_clock_edges}. *)
 
-open Server_dashboard_http_keeper_api_types
 open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_runtime_lens_swimlane
 
@@ -20,7 +19,7 @@ let add_unique_non_empty value values =
   if value = "" then values else add_unique value values
 
 let option_string_default default = function
-  | Some value when Option.is_some (String_util.trim_to_option value) -> value
+  | Some value when Option.is_some (String_util.trim_nonempty value) -> value
   | Some _ | None -> default
 
 let option_int_string = function
@@ -30,18 +29,18 @@ let option_int_string = function
 type clock_group_acc =
   { group_type : string
   ; group_id : string
-  ; mutable edge_count : int
-  ; mutable edge_ids : string list
-  ; mutable lanes : string list
-  ; mutable events : string list
-  ; mutable statuses : string list
-  ; mutable first_observed_at : string option
-  ; mutable last_observed_at : string option
-  ; mutable terminal_events : string list
-  ; mutable parent_event_ids : string list
-  ; mutable caused_by : string list
-  ; mutable event_bus_event_count : int
-  ; mutable event_bus_payload_kinds : string list
+  ; edge_count : int
+  ; edge_ids : string list
+  ; lanes : string list
+  ; events : string list
+  ; statuses : string list
+  ; first_observed_at : string option
+  ; last_observed_at : string option
+  ; terminal_events : string list
+  ; parent_event_ids : string list
+  ; caused_by : string list
+  ; event_bus_event_count : int
+  ; event_bus_payload_kinds : string list
   }
 
 let clock_group_terminal_event group_type event =
@@ -62,7 +61,7 @@ let runtime_lens_clock_groups_json scan =
   let ensure_group group_type group_id =
     let key = clock_group_key group_type group_id in
     match Hashtbl.find_opt groups key with
-    | Some group -> group
+    | Some group -> key, group
     | None ->
       let group =
         { group_type
@@ -83,48 +82,67 @@ let runtime_lens_clock_groups_json scan =
       in
       Hashtbl.replace groups key group;
       ordered_keys := !ordered_keys @ [ key ];
-      group
+      key, group
   in
+  (* The table owns the group, so an edge folds in by rebinding the entry.
+     Every field reads [group] from before this edge, matching what the
+     in-place writes observed. *)
   let update_group group_type group_id edge =
-    let group = ensure_group group_type group_id in
+    let key, group = ensure_group group_type group_id in
     let event = option_string_default "unknown_event" (edge_string "event" edge) in
-    group.edge_count <- group.edge_count + 1;
-    (match edge_string "edge_id" edge with
-     | Some value -> group.edge_ids <- add_unique_non_empty value group.edge_ids
-     | None -> ());
-    (match edge_string "lane" edge with
-     | Some value -> group.lanes <- add_unique_non_empty value group.lanes
-     | None -> ());
-    group.events <- add_unique_non_empty event group.events;
-    (match edge_string "status" edge with
-     | Some value -> group.statuses <- add_unique_non_empty value group.statuses
-     | None -> ());
-    (match edge_string "observed_at" edge with
-     | Some value ->
-       if group.first_observed_at = None then group.first_observed_at <- Some value;
-       group.last_observed_at <- Some value
-     | None -> ());
-    if clock_group_terminal_event group_type event then
-      group.terminal_events <- add_unique_non_empty event group.terminal_events;
-    (match edge_string "parent_event_id" edge with
-     | Some value ->
-       group.parent_event_ids <- add_unique_non_empty value group.parent_event_ids
-     | None -> ());
-    (match edge_string "caused_by" edge with
-     | Some value -> group.caused_by <- add_unique_non_empty value group.caused_by
-     | None -> ());
-    (match edge_int "event_bus_event_count" edge with
-     | Some count -> group.event_bus_event_count <- group.event_bus_event_count + count
-     | None -> ());
-    group.event_bus_payload_kinds <-
-      List.fold_left
-        (fun acc value -> add_unique_non_empty value acc)
-        group.event_bus_payload_kinds
-        (edge_string_list "event_bus_payload_kinds" edge)
+    let observed_at = edge_string "observed_at" edge in
+    let updated =
+      { group with
+        edge_count = group.edge_count + 1
+      ; edge_ids =
+          (match edge_string "edge_id" edge with
+           | Some value -> add_unique_non_empty value group.edge_ids
+           | None -> group.edge_ids)
+      ; lanes =
+          (match edge_string "lane" edge with
+           | Some value -> add_unique_non_empty value group.lanes
+           | None -> group.lanes)
+      ; events = add_unique_non_empty event group.events
+      ; statuses =
+          (match edge_string "status" edge with
+           | Some value -> add_unique_non_empty value group.statuses
+           | None -> group.statuses)
+      ; first_observed_at =
+          (match observed_at, group.first_observed_at with
+           | Some value, None -> Some value
+           | (Some _ | None), existing -> existing)
+      ; last_observed_at =
+          (match observed_at with
+           | Some value -> Some value
+           | None -> group.last_observed_at)
+      ; terminal_events =
+          (if clock_group_terminal_event group_type event
+           then add_unique_non_empty event group.terminal_events
+           else group.terminal_events)
+      ; parent_event_ids =
+          (match edge_string "parent_event_id" edge with
+           | Some value -> add_unique_non_empty value group.parent_event_ids
+           | None -> group.parent_event_ids)
+      ; caused_by =
+          (match edge_string "caused_by" edge with
+           | Some value -> add_unique_non_empty value group.caused_by
+           | None -> group.caused_by)
+      ; event_bus_event_count =
+          (match edge_int "event_bus_event_count" edge with
+           | Some count -> group.event_bus_event_count + count
+           | None -> group.event_bus_event_count)
+      ; event_bus_payload_kinds =
+          List.fold_left
+            (fun acc value -> add_unique_non_empty value acc)
+            group.event_bus_payload_kinds
+            (edge_string_list "event_bus_payload_kinds" edge)
+      }
+    in
+    Hashtbl.replace groups key updated
   in
   let add_if_present edge group_type field =
     match edge_string field edge with
-    | Some group_id when Option.is_some (String_util.trim_to_option group_id) -> update_group group_type group_id edge
+    | Some group_id when Option.is_some (String_util.trim_nonempty group_id) -> update_group group_type group_id edge
     | Some _ | None -> ()
   in
   Server_dashboard_http_keeper_runtime_lens_clock_edges.clock_edge_jsons scan
@@ -179,7 +197,7 @@ let clock_group_open_gap ~code ~severity ~lane ~label groups =
     groups
     |> List.filter_map (fun group ->
       match Json_util.get_bool group "closed", Json_util.get_string group "group_id" with
-      | Some false, Some group_id -> String_util.trim_to_option group_id
+      | Some false, Some group_id -> String_util.trim_nonempty group_id
       | _ -> None)
   in
   match open_ids with
@@ -225,7 +243,7 @@ let runtime_lens_clock_group_gaps scan =
   |> (fun gaps ->
        match
          clock_group_open_gap ~code:"clock_checkpoint_group_open" ~severity:"warn"
-           ~lane:"oas_agent" ~label:"checkpoint" (groups_of_type "checkpoint")
+           ~lane:"agent_core_agent" ~label:"checkpoint" (groups_of_type "checkpoint")
        with
        | Some gap -> gap :: gaps
        | None -> gaps)
@@ -323,7 +341,7 @@ let runtime_lens_clock_gaps scan =
   |> (fun gaps ->
        if checkpoint_saved_count > 0 && scan.context_injected_count = 0 then
          add ~code:"clock_checkpoint_without_context" ~severity:"warn"
-           ~lane:"oas_agent"
+           ~lane:"agent_core_agent"
            ~detail:
              "checkpoint_saved exists without a context_injected clock edge"
            gaps

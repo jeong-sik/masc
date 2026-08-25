@@ -9,226 +9,11 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_agent_result
 
-type replay_suffix_prune_reason =
-  | Canonical_success_replay
-
-let replay_suffix_prune_reason_to_string = function
-  | Canonical_success_replay -> "canonical_success_replay"
-;;
-
-let replay_response_text_for_capture ~suppress_visible_response ~response_text =
-  if suppress_visible_response || String.trim response_text = ""
-  then None
-  else Some response_text
-;;
-
-let replay_response_text_for_persistence ~suppress_visible_response ~response_text =
-  replay_response_text_for_capture ~suppress_visible_response ~response_text
-;;
-
-type wire_capture_response_suppression_reason =
-  | Control_checkpoint
-
-let wire_capture_response_suppression_reasons ~control_checkpoint =
-  if control_checkpoint then [ Control_checkpoint ] else []
-;;
-
-let wire_capture_response_suppression_reason_label = function
-  | Control_checkpoint -> "control_checkpoint"
-;;
-
-let emit_wire_capture_response_suppressed_metric ~keeper_name reason =
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string WireCaptureResponseSuppressed)
-    ~labels:
-      [ ("keeper", keeper_name)
-      ; ("reason", wire_capture_response_suppression_reason_label reason)
-      ]
-    ()
-;;
-
-let emit_wire_capture_response_suppressed_metrics ~keeper_name reasons =
-  List.iter
-    (emit_wire_capture_response_suppressed_metric ~keeper_name)
-    reasons
-;;
-
-let is_trailing_blank_assistant (message : Agent_sdk.Types.message) =
-  match message.role, message.content with
-  | Agent_sdk.Types.Assistant, [] -> true
-  | Agent_sdk.Types.Assistant, blocks ->
-    List.for_all
-      (function
-        | Agent_sdk.Types.Text text -> String.trim text = ""
-        | _ -> false)
-      blocks
-  | _, _ -> false
-;;
-
-let drop_trailing_blank_assistants messages =
-  let rec drop dropped = function
-    | message :: rest when is_trailing_blank_assistant message -> drop true rest
-    | reversed -> List.rev reversed, dropped
-  in
-  drop false (List.rev messages)
-;;
-
-let canonical_success_replay_checkpoint
-      ~(history_messages : Agent_sdk.Types.message list)
-      ~(session_id : string)
-      ~(response_text : string)
-      (checkpoint : Agent_sdk.Checkpoint.t)
-  =
-  match
-    Keeper_replay_prefix.split
-      ~prefix:history_messages
-      checkpoint.Agent_sdk.Checkpoint.messages
-  with
-  | Ok current_suffix ->
-       (* A blank visible response is not authority to erase typed replay. The
-          suffix may contain an actual user input, ToolUse/ToolResult pair,
-          thinking, or media whose effect has already happened. Remove only an
-          inert trailing Assistant shell; the typed skipped-wake rule above owns
-          the autonomous marker independently. *)
-       let current_suffix, blank_assistant_dropped =
-         if String.trim response_text = ""
-         then drop_trailing_blank_assistants current_suffix
-         else current_suffix, false
-       in
-       let replay_suffix_pruned =
-         if blank_assistant_dropped
-         then Some Canonical_success_replay
-         else None
-       in
-       let checkpoint =
-         if String.trim response_text = ""
-         then
-           { checkpoint with
-             Agent_sdk.Checkpoint.session_id
-           ; messages = history_messages @ current_suffix
-           ; working_context = None
-           }
-         else
-           let base_messages = history_messages @ current_suffix in
-           let messages =
-             if
-               List.exists
-                 (fun (msg : Agent_sdk.Types.message) ->
-                    msg.role = Agent_sdk.Types.Assistant)
-                 current_suffix
-             then base_messages
-             else
-               base_messages
-               @
-               [ Agent_sdk.Types.make_message
-                   ~role:Agent_sdk.Types.Assistant
-                   [ Agent_sdk.Types.Text response_text ]
-               ]
-           in
-           Keeper_context_core.patch_checkpoint_last_assistant
-             { checkpoint with Agent_sdk.Checkpoint.messages }
-             ~session_id
-             ~response_text
-       in
-       Ok
-         ( checkpoint
-         , replay_suffix_pruned )
-  | Error _ ->
-    Error
-      "refusing to save checkpoint: canonical replay persistence requires \
-       checkpoint messages to match pre-turn history prefix"
-;;
-
-let observation_replay_checkpoint
-      ~(history_messages : Agent_sdk.Types.message list)
-      ~(session_id : string)
-      (checkpoint : Agent_sdk.Checkpoint.t)
-  =
-  match
-    Keeper_replay_prefix.split
-      ~prefix:history_messages
-      checkpoint.Agent_sdk.Checkpoint.messages
-  with
-  | Ok _ ->
-    Ok
-      ( { checkpoint with
-          Agent_sdk.Checkpoint.session_id
-        }
-      , None )
-  | Error _ ->
-    Error
-      "refusing to save execution-observation checkpoint: messages do not match pre-turn history prefix"
-;;
-
-let checkpoint_for_replay_persistence
-      ~(history_messages : Agent_sdk.Types.message list)
-      ~(session_id : string)
-      ~(response_text : string)
-      ?(stop_reason = Runtime_agent.Completed)
-      (checkpoint : Agent_sdk.Checkpoint.t)
-  =
-  match stop_reason with
-  | Runtime_agent.InputRequired _ ->
-    (* The elicitation request can follow a current-turn tool result. Blank
-       response canonicalization and completion-contract pruning must not
-       remove that suffix; prefix validation still fails closed. *)
-    (match
-       Keeper_replay_prefix.split
-         ~prefix:history_messages
-         checkpoint.Agent_sdk.Checkpoint.messages
-     with
-     | Ok (_ :: _) ->
-       Ok
-         ( { checkpoint with
-             Agent_sdk.Checkpoint.session_id
-           }
-         , None )
-     | Ok [] ->
-       Error
-         "refusing to save input-required checkpoint without a current-turn \
-          replay suffix"
-     | Error _ ->
-       Error
-         "refusing to save input-required checkpoint: messages do not match \
-          pre-turn history prefix")
-  | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.Yielded_to_durable_stimulus _
-  | Runtime_agent.Awaiting_external_effect _
-  | Runtime_agent.Yielded_after_repeated_tool_call _ ->
-    (* A control-boundary checkpoint retains the current-turn tool result so
-       resumption cannot repeat an already committed effect. *)
-    observation_replay_checkpoint ~history_messages ~session_id checkpoint
-  | Runtime_agent.Completed ->
-    canonical_success_replay_checkpoint
-      ~history_messages
-      ~session_id
-      ~response_text
-      checkpoint
-;;
-
-module For_testing = struct
-  let replay_suffix_prune_reason_to_string =
-    replay_suffix_prune_reason_to_string
-
-  let checkpoint_for_replay_persistence = checkpoint_for_replay_persistence
-  let replay_response_text_for_capture = replay_response_text_for_capture
-  let replay_response_text_for_persistence = replay_response_text_for_persistence
-
-  let wire_capture_response_suppression_reasons =
-    wire_capture_response_suppression_reasons
-
-  let wire_capture_response_suppression_reason_label =
-    wire_capture_response_suppression_reason_label
-
-  let emit_wire_capture_response_suppressed_metrics =
-    emit_wire_capture_response_suppressed_metrics
-
-end
-
 let finalize
     ~config
     ~meta
-    ~generation
+    ~publication_recovery
+    ~ctx_snapshot
     ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
     ~manifest_keeper_turn_id
     ~session
@@ -237,10 +22,13 @@ let finalize
     ~(acc : Keeper_run_tools.hook_accumulator)
     ~actual_keeper_tool_names
     ~(result : Runtime_agent.run_result)
-    ~final_oas_turn_ordinal
+    ~last_persisted_checkpoint
+    ~final_agent_core_turn_ordinal
     ~checkpoint_persistence_error
     ~post_turn_t0
     ~runtime_id_string
+    ~max_context
+    ~checkpoint_owner
     ~history_messages
     ~prompt_metrics
     ~ctx_composition
@@ -249,22 +37,42 @@ let finalize
     ~history_assistant_source
     ~raw_response_text
     ~turn_outcome
+    ~terminal_effect_receipt
     ~capture_replay_response
-    ?continuation_delivery_channel
+    ?continuation_channel
     () =
   let completion_contract_result = acc.receipt_completion_contract_result in
   let control_checkpoint =
     Keeper_agent_run_response_text.stop_reason_suppresses_visible_response
       result.stop_reason
   in
+  (* Every arm named, no catch-all: a new outcome must state whether its effect
+     already reached the reader rather than defaulting to "did not". *)
+  let terminal_effect_settled =
+    match turn_outcome with
+    | Keeper_turn_outcome.External_effect_completed -> true
+    | Keeper_turn_outcome.Visible_reply
+    | Keeper_turn_outcome.Continuation_checkpoint
+    | Keeper_turn_outcome.External_effect_pending
+    | Keeper_turn_outcome.No_visible_reply -> false
+  in
+  (* RFC-0385: an internal turn's wake cue and final text are not conversation.
+     The history source label is what the turn already carries, so the decision
+     comes from it and not from the text. Direct turns keep [direct_assistant]
+     and are unaffected (RFC-0376 4.3). *)
+  let exclude_thought_from_replay =
+    Keeper_types_support.is_internal_history_source history_assistant_source
+  in
   let suppression_reasons =
-    wire_capture_response_suppression_reasons ~control_checkpoint
+    Keeper_replay_checkpoint.wire_capture_response_suppression_reasons
+      ~control_checkpoint
+      ~terminal_effect_settled
   in
   let suppress_visible_response = suppression_reasons <> [] in
   let raw_response_text_present =
     String.trim raw_response_text <> ""
   in
-  emit_wire_capture_response_suppressed_metrics
+  Keeper_replay_checkpoint.emit_wire_capture_response_suppressed_metrics
     ~keeper_name:meta.name
     suppression_reasons;
   let { Keeper_agent_run_response_text.response_text } =
@@ -274,38 +82,40 @@ let finalize
       ~suppress_response_text:suppress_visible_response
       ()
   in
+  let ( let* ) = Result.bind in
   receipt_response_text_present_ref := raw_response_text_present;
-  let replay_response_text =
-    replay_response_text_for_persistence
+  let assistant_msg =
+    Keeper_replay_checkpoint.consume_replay_response
       ~suppress_visible_response
       ~response_text
+      ~consume:(fun ~response_text ->
+        let assistant_msg =
+          Agent_core.Types.make_message
+           ~role:Agent_core.Types.Assistant
+           [ Agent_core.Types.Text response_text ]
+        in
+        Keeper_context_runtime.persist_message
+          ~source:history_assistant_source
+          session
+          assistant_msg;
+        capture_replay_response ~response_text;
+        assistant_msg)
   in
-  let assistant_msg =
-    Option.map
-      (fun replay_response_text ->
-         Agent_sdk.Types.make_message
-           ~role:Agent_sdk.Types.Assistant
-           [ Agent_sdk.Types.Text replay_response_text ])
-      replay_response_text
-  in
-  (match replay_response_text, assistant_msg with
-   | Some response_text, Some assistant_msg ->
-     Keeper_context_runtime.persist_message
-       ~source:history_assistant_source
-       session
-       assistant_msg;
-     capture_replay_response ~response_text
-   | _ -> ());
-  let saved_checkpoint_result =
-    match result.checkpoint with
-    | Some checkpoint ->
+  let save_agent_core_checkpoint result_checkpoint =
+    let checkpoint, source_already_persisted =
+        Keeper_replay_checkpoint.select_finalization_checkpoint
+          ~last_persisted_checkpoint
+          result_checkpoint
+      in
       let checkpoint_for_save_result =
-        checkpoint_for_replay_persistence
+        Keeper_replay_checkpoint.checkpoint_for_replay_persistence
           ~history_messages
           ~session_id:
             (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~response_text
+          ~suppress_visible_response
           ~stop_reason:result.stop_reason
+          ~exclude_thought_from_replay
           checkpoint
       in
       (match checkpoint_for_save_result with
@@ -315,17 +125,30 @@ let finalize
               ~keeper_name:meta.name
               ~detail)
        | Ok (patched, replay_suffix_pruned) ->
-         (match
-            Keeper_checkpoint_store.save_oas_classified
-              ~session_dir:session.session_dir
-              patched
-          with
-       | Ok (Keeper_checkpoint_store.Saved _) ->
+         let already_persisted =
+           Keeper_replay_checkpoint.finalization_checkpoint_already_persisted
+             ~source_already_persisted
+             ~source:checkpoint
+             ~patched
+             ~replay_suffix_pruned
+         in
+         let save_outcome =
+           if already_persisted
+           then Ok `Reused
+           else
+             Keeper_checkpoint_store.save_agent_core_classified
+               ~session_dir:session.session_dir
+               patched
+             |> Result.map (fun outcome -> `Written outcome)
+         in
+         (match save_outcome with
+       | Ok `Reused
+       | Ok (`Written (Keeper_checkpoint_store.Saved _)) ->
          append_manifest ~site:"checkpoint_saved"
            ~keeper_turn_id:manifest_keeper_turn_id
-           ~oas_turn_count:result.turns
+           ~agent_core_turn_count:result.turns
            ~checkpoint_path:
-             (Keeper_checkpoint_store.oas_checkpoint_path
+             (Keeper_checkpoint_store.agent_core_checkpoint_path
                 ~session_dir:session.session_dir
                 ~session_id:patched.session_id)
            ~decision:
@@ -339,7 +162,9 @@ let finalize
                 ( "replay_suffix_prune_reason"
                 , (match replay_suffix_pruned with
                    | Some reason ->
-                     `String (replay_suffix_prune_reason_to_string reason)
+                     `String
+                       (Keeper_replay_checkpoint
+                        .replay_suffix_prune_reason_to_string reason)
                    | None -> `Null) );
                 ( "completion_contract_result"
                 , `String
@@ -349,11 +174,11 @@ let finalize
                ])
            Keeper_runtime_manifest.Checkpoint_saved;
          Ok (Some patched)
-       | Ok (Keeper_checkpoint_store.Stale_noop
-                { incoming_turn_count; known_turn_count }) ->
+       | Ok (`Written (Keeper_checkpoint_store.Stale_noop
+                { incoming_turn_count; known_turn_count })) ->
          Log.Keeper.warn ~keeper_name:meta.name
-           "runtime=%s OAS checkpoint stale no-op: incoming turn_count=%d, last saved=%d"
-           (Keeper_meta_contract.runtime_id_of_meta meta)
+           "runtime=%s AGENT_CORE checkpoint stale no-op: incoming turn_count=%d, last saved=%d"
+           runtime_id_string
            incoming_turn_count known_turn_count;
          Otel_metric_store.inc_counter
            "masc_keeper_checkpoint_stale_noop_total"
@@ -362,8 +187,8 @@ let finalize
          Ok None
        | Error e ->
          Log.Keeper.error ~keeper_name:meta.name
-           "runtime=%s OAS checkpoint save failed: %s"
-           (Keeper_meta_contract.runtime_id_of_meta meta)
+           "runtime=%s AGENT_CORE checkpoint save failed: %s"
+           runtime_id_string
            e;
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string CheckpointFailures)
@@ -372,11 +197,12 @@ let finalize
          Error
            (checkpoint_persistence_error
               ~keeper_name:meta.name
-              ~detail:("OAS checkpoint save failed: " ^ e))))
-    | None ->
+              ~detail:("AGENT_CORE checkpoint save failed: " ^ e))))
+  in
+  let missing_agent_core_checkpoint () =
       Log.Keeper.error ~keeper_name:meta.name
-        "runtime=%s missing OAS checkpoint after run"
-        (Keeper_meta_contract.runtime_id_of_meta meta);
+        "runtime=%s missing AGENT_CORE checkpoint after run"
+        runtime_id_string;
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CheckpointFailures)
         ~labels:[ "keeper", meta.name; "site", "missing" ]
@@ -384,26 +210,44 @@ let finalize
       Error
         (checkpoint_persistence_error
            ~keeper_name:meta.name
-           ~detail:"missing OAS checkpoint after run")
+           ~detail:"missing AGENT_CORE checkpoint after run")
   in
-  match saved_checkpoint_result with
-  | Error e -> Error e
-  | Ok saved_checkpoint ->
+  let unexpected_agent_core_checkpoint () =
+    Log.Keeper.error ~keeper_name:meta.name
+      "runtime=%s official-client runtime returned an AGENT_CORE checkpoint"
+      runtime_id_string;
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string CheckpointFailures)
+      ~labels:[ "keeper", meta.name; "site", "owner_mismatch" ]
+      ();
+    Error
+      (checkpoint_persistence_error
+         ~keeper_name:meta.name
+         ~detail:"official-client runtime returned an AGENT_CORE checkpoint")
+  in
+  let saved_checkpoint_result =
+    match checkpoint_owner, result.checkpoint with
+    | Runtime_execution.Masc_agent_core, Some result_checkpoint ->
+      save_agent_core_checkpoint result_checkpoint
+    | Runtime_execution.Masc_agent_core, None -> missing_agent_core_checkpoint ()
+    | Runtime_execution.Official_client, Some _ ->
+      unexpected_agent_core_checkpoint ()
+    | Runtime_execution.Official_client, None -> Ok None
+  in
+  let* saved_checkpoint = saved_checkpoint_result in
     (* Retired proof-ledger evaluation is absent. Strict Task completion
        judgment is owned by the authenticated operator or typed judge
        boundary. *)
     let librarian_messages =
       match saved_checkpoint with
-      | Some checkpoint -> checkpoint.Agent_sdk.Checkpoint.messages
+      | Some checkpoint -> checkpoint.Agent_core.Checkpoint.messages
       | None -> Option.to_list assistant_msg
     in
     Keeper_agent_run_post_turn_memory.run
       ~config
       ~meta
-      ~generation
-      ~profile_defaults
       ~turn:manifest_keeper_turn_id
-      ~oas_turn_count:result.turns
+      ~agent_core_turn_count:result.turns
       ~actual_tools:actual_keeper_tool_names
       ~librarian_messages
       ~post_turn_t0
@@ -412,12 +256,15 @@ let finalize
     Ok
       { response_text
       ; turn_outcome
+      ; terminal_effect_receipt
       ; model_used = model
+      ; runtime_id = runtime_id_string
+      ; max_context
       ; prompt_metrics
       ; ctx_composition
       ; runtime_observation = result.runtime_observation
       ; turn_count = result.turns
-      ; final_oas_turn_ordinal
+      ; final_agent_core_turn_ordinal
       ; usage
       ; usage_reported = Option.is_some result.response.usage
       ; tool_calls = List.rev acc.tool_calls

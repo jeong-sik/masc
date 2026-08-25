@@ -19,6 +19,7 @@
 @import "./variables.css";
 @import "./base.css";
 @import "./fonts.css";
+@import "./fonts-noto-sans-kr.css";
 @import "./keyframes.css";
 
 /* ── Feature imports (alphabetical, a11y.css last for runtime) ── */
@@ -29,7 +30,6 @@
 @import "./dashboard.css";
 @import "./ops.css";
 @import "./pipeline.css";
-@import "./pixel-avatar.css";
 @import "./tools.css";
 @import "./ui.css";
 @import "./responsive.css";
@@ -48,7 +48,6 @@
 @import "./v2-monitoring.css";
 @import "./v2-command.css";
 @import "./v2-workspace.css";
-@import "./v2-monitoring-leftovers.css";
 @import "./v2-lab.css";
 @import "./v2-ide.css";
 @import "./a11y.css"; /* after feature styles so reduced-motion overrides win */
@@ -255,7 +254,6 @@ tbody tr:hover {
   padding: var(--sp-1h);
 }
 
-#dashboard-side-rail,
 #main-content {
   border-color: var(--color-border-default);
   border-radius: var(--r-1);

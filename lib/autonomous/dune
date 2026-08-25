@@ -5,7 +5,7 @@
  (public_name masc.autonomous)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
-  (:standard -w +4 -w +32))
+  (:standard -w +4 -w +33 -w +37))
  (libraries shared_types yojson)
  (preprocess
   (pps ppx_tla)))

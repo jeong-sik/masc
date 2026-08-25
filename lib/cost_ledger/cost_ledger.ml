@@ -1,7 +1,7 @@
 type inference_identity =
   { trace_id : string
   ; keeper_turn_id : int
-  ; oas_turn_ordinal : int
+  ; agent_core_turn_ordinal : int
   }
 
 type source =
@@ -116,7 +116,7 @@ let compare_inference_identity left right =
     let by_keeper_turn = Int.compare left.keeper_turn_id right.keeper_turn_id in
     if by_keeper_turn <> 0
     then by_keeper_turn
-    else Int.compare left.oas_turn_ordinal right.oas_turn_ordinal)
+    else Int.compare left.agent_core_turn_ordinal right.agent_core_turn_ordinal)
 ;;
 
 let inference_identity row =
@@ -131,15 +131,15 @@ let source_of_fields fields =
   | "manual_cli" ->
     let* () = required_null fields "trace_id" in
     let* () = required_null fields "keeper_turn_id" in
-    let* () = required_null fields "oas_turn_ordinal" in
+    let* () = required_null fields "agent_core_turn_ordinal" in
     Ok Manual_cli
   | "auto_trajectory" ->
     let* trace_id = required_string fields "trace_id" in
     let* keeper_turn_id = required_positive_int fields "keeper_turn_id" in
-    let* oas_turn_ordinal =
-      required_nonnegative_int fields "oas_turn_ordinal"
+    let* agent_core_turn_ordinal =
+      required_nonnegative_int fields "agent_core_turn_ordinal"
     in
-    Ok (Auto_trajectory { trace_id; keeper_turn_id; oas_turn_ordinal })
+    Ok (Auto_trajectory { trace_id; keeper_turn_id; agent_core_turn_ordinal })
   | _ -> invalid "source" "must be manual_cli or auto_trajectory"
 ;;
 
@@ -198,7 +198,7 @@ let reserved_fields =
   ; "source"
   ; "trace_id"
   ; "keeper_turn_id"
-  ; "oas_turn_ordinal"
+  ; "agent_core_turn_ordinal"
   ]
 ;;
 
@@ -209,13 +209,13 @@ let to_json ?(extra_fields = []) row =
     | Usage_reported { input_tokens; output_tokens; cost_usd } ->
       `Int input_tokens, `Int output_tokens, `Float cost_usd, false
   in
-  let trace_id, keeper_turn_id, oas_turn_ordinal =
+  let trace_id, keeper_turn_id, agent_core_turn_ordinal =
     match row.source with
     | Manual_cli -> `Null, `Null, `Null
     | Auto_trajectory identity ->
       ( `String identity.trace_id
       , `Int identity.keeper_turn_id
-      , `Int identity.oas_turn_ordinal )
+      , `Int identity.agent_core_turn_ordinal )
   in
   let extra_fields =
     List.filter
@@ -234,7 +234,7 @@ let to_json ?(extra_fields = []) row =
      ; "source", `String (source_to_string row.source)
      ; "trace_id", trace_id
      ; "keeper_turn_id", keeper_turn_id
-     ; "oas_turn_ordinal", oas_turn_ordinal
+     ; "agent_core_turn_ordinal", agent_core_turn_ordinal
      ]
      @ extra_fields)
 ;;

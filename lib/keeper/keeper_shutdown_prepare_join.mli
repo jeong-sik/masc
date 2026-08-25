@@ -14,15 +14,13 @@ type error =
   | Existing_operation of Keeper_shutdown_types.Operation_id.t
   | Meta_snapshot_missing
   | Meta_snapshot_identity_changed
-  | Meta_snapshot_version_changed of
-      { expected : int
-      ; actual : int
-      }
   | Meta_snapshot_read_failed of string
   | Task_discovery_failed of string
+  | Owner_command_failed of string
   | Prepare_persist_failed of Keeper_shutdown_store.error
   | Cancellation_failed of Keeper_shutdown_types.t
   | Join_failed of Keeper_shutdown_types.t
+  | Join_phase_mismatch of Keeper_shutdown_types.t
   | Join_record_update_failed of Keeper_shutdown_store.error
 
 val error_to_string : error -> string
@@ -50,9 +48,12 @@ val prepare_dormant :
   request:request ->
   (Keeper_shutdown_types.t, error) result
 
-(** Cancel and join the exact lane captured by [prepare]. Never call this
-    from that Keeper's admitted turn; lifecycle tools fork it on the server
-    switch after returning the accepted operation id. *)
+(** Cancel and join the exact Keeper lane captured by [prepare], and gracefully
+    drain its detached Librarian lane. [Prepared] begins the join. Re-entry with
+    [Joining_lanes] fails closed as durable [Blocked/Lane_join], because replaying
+    turn cancellation could erase a safety verdict that failed to persist.
+    Never call this from that Keeper's admitted turn; lifecycle tools fork it
+    on the server switch after returning the accepted operation id. *)
 val join_prepared :
   config:Workspace.config ->
   entry:Keeper_registry.registry_entry ->

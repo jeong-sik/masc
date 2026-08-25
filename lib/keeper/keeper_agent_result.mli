@@ -4,7 +4,7 @@ type tool_call_detail =
   { tool_name : string
   ; provider : string
   ; execution_outcome : Tool_result.tool_call_outcome
-      (** Typed [Tool_result.Ok]/[Error] truth captured at the OAS hook boundary.
+      (** Typed [Tool_result.Ok]/[Error] truth captured at the AGENT_CORE hook boundary.
           Durable tool-call audit uses [Keeper_tool_call_log].
 
           [tool_call_detail_to_json] renders this into the receipt's ["outcome"]
@@ -28,22 +28,25 @@ type operator_disposition =
 type run_result =
   { response_text : string
   ; turn_outcome : Keeper_turn_outcome.t
+  ; terminal_effect_receipt : Keeper_tool_execution.terminal_effect_receipt option
   ; model_used : string
+  ; runtime_id : string
+  ; max_context : int
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
   ; ctx_composition : Keeper_agent_prompt_metrics.ctx_composition_metrics
   ; runtime_observation : Runtime_observation.runtime_observation option
   ; turn_count : int
-  ; final_oas_turn_ordinal : int
-  ; usage : Agent_sdk.Types.api_usage
+  ; final_agent_core_turn_ordinal : int
+  ; usage : Agent_core.Types.api_usage
   ; usage_reported : bool
   ; tool_calls : tool_call_detail list
   ; completion_contract_result : Keeper_execution_receipt.completion_contract_result
   ; operator_disposition : operator_disposition option
-  ; checkpoint : Agent_sdk.Checkpoint.t option
-  ; trace_ref : Agent_sdk.Raw_trace.run_ref option
-  ; run_validation : Agent_sdk.Raw_trace.run_validation option
+  ; checkpoint : Agent_core.Checkpoint.t option
+  ; trace_ref : Agent_core.Raw_trace.run_ref option
+  ; run_validation : Agent_core.Raw_trace.run_validation option
   ; stop_reason : Runtime_agent.stop_reason
-  ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
+  ; inference_telemetry : Agent_core.Types.inference_telemetry option
   ; tool_surface : Keeper_agent_tool_surface.tool_surface_metrics
   }
 
@@ -58,6 +61,6 @@ val tool_call_count : run_result -> int
 
 val runtime_lane_label : string
 (** Boundary-redacted label used wherever MASC's keeper metrics surface
-    exposes a model identity field. OAS owns concrete provider/model
+    exposes a model identity field. AGENT_CORE owns concrete provider/model
     identity; the keeper-side surface collapses to this single label
     via [Boundary_redaction]. *)

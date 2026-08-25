@@ -4,7 +4,6 @@ import {
   type AgentTimelineEvent,
   type AgentTimelineResponse,
 } from './schemas/agent-timeline'
-import { type LogEntry, type LogsResponse } from './schemas/logs'
 import {
   type RuntimeDefaultsResponse,
   type RuntimeEntry,
@@ -18,12 +17,6 @@ import {
   type ResolvedAssignmentTarget,
   type RuntimeAssignment,
 } from './schemas/runtime-resolved'
-import {
-  type ProviderLogCatalogEntry,
-  type ProviderLogsCatalogResponse,
-  type ProviderLogTailLine,
-  type ProviderLogTailResponse,
-} from './schemas/provider-logs'
 export type {
   DashboardGoalsTreeResponse,
   DashboardGoalDetailResponse,
@@ -33,33 +26,69 @@ export type {
   GoalKeeperTrustLatestEvent,
   GoalKeeperTrustSummary,
   GoalDetailTimelineEvent,
-  GoalAttainmentProjection,
-  GoalCompletionSummary,
   GoalTaskSummary,
   GoalTreeNode,
   GoalTreeSummary,
   GoalTreeTask,
 } from '../types'
 export { fetchDashboardGoalsTree, fetchDashboardGoalDetail } from './dashboard-goals'
-export type {
-  ConfigEntry,
-  ConfigEntryProvenance,
-  ConfigEntrySource,
-  DashboardConfigResponse,
-} from './schemas/dashboard-config'
 export { reportToolHostFailure } from './tool-host-failure'
 export { fetchDashboardBootstrap, fetchDashboardShell } from './dashboard-hot'
-export type { FusionRunStatusLabel, FusionRunRecord, DashboardFusionRunsResponse } from './dashboard-fusion'
-export { parseFusionRunsResponse, fetchFusionRuns } from './dashboard-fusion'
+export type {
+  FusionRunStatusLabel,
+  FusionTopologyLabel,
+  FusionRunRecord,
+  DashboardFusionRunsResponse,
+  FusionConfigView,
+  FusionPresetConfigView,
+  FusionPanelGroupView,
+  FusionJudgeSpecView,
+} from './dashboard-fusion'
+export {
+  parseFusionRunsResponse,
+  fetchFusionRuns,
+  parseFusionConfigResponse,
+  fetchFusionConfig,
+  runnableTopologies,
+} from './dashboard-fusion'
+export type {
+  VerificationRunStatusLabel,
+  VerificationRunRecord,
+  DashboardVerificationRunsResponse,
+} from './dashboard-verification-runs'
+export {
+  parseVerificationRunsResponse,
+  fetchVerificationRuns,
+} from './dashboard-verification-runs'
+export type {
+  GoalVerificationReviewKind,
+  GoalVerificationRunStatus,
+  GoalVerificationRunRecord,
+  DashboardGoalVerificationRunsResponse,
+} from './dashboard-goal-verification-runs'
+export {
+  parseGoalVerificationRunsResponse,
+  fetchGoalVerificationRuns,
+} from './dashboard-goal-verification-runs'
+export {
+  fetchExactLaneRun,
+  fetchExactLaneRuns,
+  parseExactLaneRunResponse,
+  parseExactLaneRunsResponse,
+  type DashboardExactLaneRunsResponse,
+  type ExactLane,
+  type ExactLaneRunCursor,
+  type ExactLaneRunRecord,
+  type ExactLaneRunSummary,
+  type ExactLaneRunInput,
+  type ExactLaneRunStatus,
+} from './dashboard-exact-lane-runs'
 
 // --- Dashboard projections ---
 
 export type { DashboardFeedRetention, DashboardFeedMetadata } from './dashboard-shared'
 export { decodeDashboardFeedMetadata } from './dashboard-shared'
 
-// --- System logs ---
-
-export type { LogEntry, LogsResponse }
 export type { RuntimeDefaultsResponse, RuntimeEntry, ModelRouting }
 export type {
   RuntimeResolvedResponse,
@@ -69,21 +98,6 @@ export type {
   ResolvedAssignmentTarget,
   RuntimeAssignment,
 }
-export type {
-  ProviderLogCatalogEntry,
-  ProviderLogsCatalogResponse,
-  ProviderLogTailLine,
-  ProviderLogTailResponse,
-}
-
-export {
-  fetchLogs,
-  fetchProviderLogsCatalog,
-  fetchProviderLogTail,
-  fetchDashboardConfig,
-  parseContextThresholds,
-} from './dashboard-logs'
-
 export type { AgentTimelineEvent, AgentTimelineResponse }
 
 export { fetchAgentTimeline } from './dashboard-agent'
@@ -160,7 +174,29 @@ export type {
   LatencyBucket,
   DashboardRuntimeModelMetricsResponse,
   RuntimeTomlConfig,
+  RuntimeConfigApplication,
+  RuntimeConfigApplicationLane,
+  RuntimeConfigKeeperOverlayApplication,
+  RuntimeConfigPreview,
+  RuntimeConfigValidation,
+  RuntimeConfigValidationIssue,
+  RuntimeKeeperSetting,
+  RuntimeTomlEditorProtocol,
   RuntimeRoutingLane,
+  DashboardOfficialClientRecoveryFailure,
+  DashboardOfficialClientKind,
+  DashboardOfficialClientSettlement,
+  DashboardOfficialClientSessionPhase,
+  DashboardOfficialClientRecoveryResolutionRecord,
+  DashboardOfficialClientTransientReleaseRecord,
+  DashboardOfficialClientSession,
+  DashboardOfficialClientSessionResponse,
+  DashboardOfficialClientRecoveryApplication,
+  DashboardOfficialClientAuditReceipt,
+  DashboardOfficialClientRecoveryResponse,
+  DashboardOfficialClientRecoveryDecision,
+  DashboardOfficialClientLoginStatus,
+  DashboardOfficialClientProbeResponse,
 } from './dashboard-runtime'
 export {
   fetchRuntimeProviders,
@@ -169,9 +205,13 @@ export {
   fetchRuntimeDefaults,
   fetchRuntimeResolved,
   saveRuntimeTomlConfig,
+  previewRuntimeTomlConfig,
   patchRuntimeAssignment,
   patchRuntimeMediaFailover,
   patchRuntimeRouting,
+  fetchOfficialClientSession,
+  resolveOfficialClientSession,
+  probeOfficialClientLogin,
 } from './dashboard-runtime'
 
 export type {
@@ -194,6 +234,17 @@ export {
 export {
   parseDashboardKeeperWaitingSource,
 } from './dashboard-tools-prompts'
+
+export {
+  fetchDashboardScheduledAutomation,
+  normalizeScheduledAutomation,
+} from './dashboard-scheduled-automation'
+
+export type {
+  DashboardScheduledAutomationAvailableData,
+  DashboardScheduledAutomationPage,
+  DashboardScheduledAutomationProjection,
+} from './dashboard-scheduled-automation'
 
 export { fetchDashboardMissionBriefing, fetchDashboardPlanning } from './dashboard-mission'
 
@@ -226,6 +277,9 @@ export type {
   DashboardToolsResponse,
   DashboardScheduleRunnerCounts,
   DashboardScheduleRunnerStatus,
+  DashboardKeeperQueueStorageIntegrity,
+  DashboardKeeperQueueWorkLiveness,
+  DashboardKeeperEventQueueHealth,
 } from './dashboard-tools-prompts'
 
 export type {
@@ -280,7 +334,15 @@ export type { ToolStat, HourlyBucket, ToolStatsResponse } from './dashboard-keep
 export { fetchKeeperToolStats } from './dashboard-keeper-tool-stats'
 
 // ── Keeper tool call log (full I/O) ──────────────────────
-export type { ToolCallOutputBlob, ToolCallEntry, ToolCallsResponse } from './dashboard-keeper-tool-calls'
+export type {
+  ToolCallOutputBlob,
+  ToolCallEntry,
+  ToolCallsResponse,
+  ToolCallPathResolution,
+  ToolCallRuntimeContract,
+  ToolCallActionRadius,
+  ToolCallRouteEvidence,
+} from './dashboard-keeper-tool-calls'
 export { fetchKeeperToolCalls } from './dashboard-keeper-tool-calls'
 
 // ── Keeper turn records (RFC-0233 PR-4) ─────────────────
@@ -299,15 +361,11 @@ export type {
   MemoryOsUpdateSource,
   MemoryOsTurnRecordSnapshot,
   TurnRecordsResponse,
-  KeeperCompactionSnapshotLinks,
-  KeeperCompactionSnapshot,
-  KeeperCompactionSnapshotsResponse,
   TurnTranscriptLine,
   TurnTranscript,
 } from './dashboard-turn-records'
 export {
   fetchKeeperTurnRecords,
-  fetchKeeperCompactionSnapshots,
   fetchKeeperTurnTranscript,
   parseMemoryOsFactCategory,
 } from './dashboard-turn-records'
@@ -334,8 +392,6 @@ export type {
   KeeperMemoryHealthAlertTarget,
   KeeperMemoryHealthKeeperEntry,
   KeeperMemoryHealthResponse,
-  AuditIntegrityKeeperEntry,
-  AuditIntegrityResponse,
   VerificationRequest,
   VerificationRequestsResponse,
   TlaSpecCategory,
@@ -350,7 +406,6 @@ export type {
 } from './dashboard-misc'
 export {
   fetchKeeperMemoryHealth,
-  fetchAuditIntegrity,
   fetchVerificationRequests,
   fetchTlaSpecs,
   fetchTlcResults,

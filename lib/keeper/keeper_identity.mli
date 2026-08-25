@@ -13,7 +13,6 @@ val keeper_name_from_agent_name : string -> string option
     caller never holds "this is an alias" without the name it resolves to. *)
 val keeper_name_of_agent_alias : string -> string option
 
-val is_keeper_agent_alias : string -> bool
 val canonical_keeper_name_from_agent_name : string -> string option
 val is_keeper_principal_agent_name : string -> bool
 (** [is_keeper_principal_agent_name name] returns true for task-owner
@@ -69,19 +68,16 @@ type parsed_identity = {
   trace_id : string option;
 }
 
-val parse_json_identity : Yojson.Safe.t -> parsed_identity
-
 (** {1 SSOT keeper identity names (RFC P1)} *)
 
 type name_bundle = {
-  persona_name : string;
   keeper_name : string;
   agent_name : string;
 }
 
 type validation_error =
   | Empty_input
-  | Persona_not_found of {
+  | Keeper_not_found of {
       input : string;
       resolved : string;
       searched : string;
@@ -92,17 +88,17 @@ type validation_error =
 val normalize_all_names :
   input_agent_name:string ->
   ?base_path:string ->
-  ?check_persona:bool ->
+  ?check_keeper:bool ->
   unit ->
   (name_bundle, validation_error) result
-(** [normalize_all_names ~input_agent_name ?base_path ?check_persona ()]
+(** [normalize_all_names ~input_agent_name ?base_path ?check_keeper ()]
     resolves the canonical name fields of a
     keeper from any of its accepted input shapes (bare name, [keeper-X-agent]
     wrapper, generated nickname like [executor-warm-raven], or wrapper +
     nickname combination).
 
-    P1 default: [check_persona = false] — pure normalization without
-    filesystem lookups. P3 preflight enables persona existence checks.
+    P1 default: [check_keeper = false] — pure normalization without
+    filesystem lookups. P3 preflight enables Keeper prompt existence checks.
 
     [base_path] defaults to the empty string, which makes
     [Common.masc_dir_from_base_path] resolve relative to the current

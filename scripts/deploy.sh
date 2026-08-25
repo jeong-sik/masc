@@ -5,8 +5,13 @@
 # Usage: ./scripts/deploy.sh [--skip-build] [--restart-tunnel]
 #
 # Ports:
-#   Dev:  8935 (launchd, live development)
-#   Prod: 8945 (this script, Cloudflare tunnel target)
+#   8935  the single instance the Cloudflare tunnel routes to; see
+#         docs/REDEPLOY-8935-RUNBOOK.md, which owns that plane
+#   8945  this script's plane, reached only from the host
+#
+# The tunnel config lives outside this repo (~/.cloudflared/config.yml) and
+# points masc.crying.pictures at 8935, so a deploy here does not change what
+# public traffic reaches.
 #
 # Management mode: manual, using nohup + PID file. A loaded launchd service is
 # rejected because it cannot participate in the atomic BasePath lease handoff.
@@ -128,7 +133,6 @@ readonly SCRIPT_DIR REPO_DIR RELEASE_DIR PROD_PORT HEALTH_URL BASE_PATH \
     PREPARE_UNDER_DEPLOYMENT_LEASE BUILD_EXE BUILD_PREFLIGHT_HELPER RELEASE_EXE \
     BACKUP_EXE KEEPER_ENV
 preserve_env_override MASC_CONFIG_DIR
-preserve_env_override MASC_PERSONAS_DIR
 if [ -f "$KEEPER_ENV" ]; then
     set -a
     # shellcheck disable=SC1090
@@ -142,7 +146,6 @@ if [ -f "$REPO_DIR/.env" ]; then
     set +a
 fi
 restore_env_override MASC_CONFIG_DIR
-restore_env_override MASC_PERSONAS_DIR
 
 if [ ! -d "$RUNTIME_ROOT" ] || [ -L "$RUNTIME_ROOT" ]; then
     echo "Error: deployment requires an existing exact runtime directory at $RUNTIME_ROOT" >&2
@@ -266,16 +269,18 @@ else
 fi
 
 # --- 6. Restart Cloudflare tunnel (optional) ---
+# Restarts the cloudflared process only. Its ingress rules come from
+# ~/.cloudflared/config.yml, so this does not re-point any hostname at the
+# port just deployed.
 if [ "$RESTART_TUNNEL" = true ]; then
     echo "==> Restarting Cloudflare tunnel..." >&2
     launchctl kickstart -k "gui/$(id -u)/com.jeongsik.masc-cloudflared" 2>/dev/null || true
-    echo "    Tunnel restarted." >&2
+    echo "    cloudflared restarted (ingress rules unchanged)." >&2
 fi
 
 # --- Done ---
 echo "" >&2
 echo "Deploy complete." >&2
 echo "  Prod: http://127.0.0.1:$PROD_PORT" >&2
-echo "  Tunnel: https://masc.crying.pictures" >&2
 echo "  PID: ${PROD_PID:-?} ($PID_FILE)" >&2
 echo "  Logs: $LOG_DIR/masc-prod.{out,err}.log" >&2

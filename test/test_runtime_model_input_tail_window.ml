@@ -10,7 +10,7 @@
     over-capacity request whenever atom weight exceeded the sizing sample. *)
 
 module Window = Runtime_model_input_tail_window
-module Types = Agent_sdk.Types
+module Types = Agent_core.Types
 
 let k = Window.atoms_per_window
 
@@ -103,8 +103,10 @@ let first_text (messages : Types.message list) =
    exercise structure rather than the budget. *)
 let unbounded_capacity = 100_000_000
 
-let project ?(capacity_bytes = unbounded_capacity) ?(reserved_bytes = 0) history =
+let project ?(allow_empty_history = false) ?(capacity_bytes = unbounded_capacity)
+    ?(reserved_bytes = 0) history =
   Window.project
+    ~allow_empty_history
     ~measure_message_bytes
     ~capacity_bytes
     ~reserved_bytes
@@ -181,6 +183,140 @@ let test_heavy_atoms_cut_below_the_count_threshold () =
   fits_budget ~capacity_bytes ~reserved_bytes projected
 ;;
 
+let test_next_shrink_capacity_clamps_to_lopsided_newest_atom () =
+  let pinned =
+    message
+      ~metadata:Types.Extra_system_context_provenance.metadata
+      ~role:Types.User
+      "pinned-context"
+  in
+  let oldest = padded ~role:Types.User ~tag:"oldest|" 400 in
+  let newest = padded ~role:Types.User ~tag:"newest|" 600 in
+  let history = [ pinned; oldest; newest ] in
+  let target_capacity_bytes = total_bytes history / 2 in
+  match
+    Window.next_shrink_capacity_bytes
+      ~measure_message_bytes
+      ~target_capacity_bytes
+      history
+  with
+  | None -> Alcotest.fail "two non-empty atoms must have a smaller boundary"
+  | Some capacity_bytes ->
+    Alcotest.(check bool)
+      "structural minimum clamps above the raw half target"
+      true
+      (capacity_bytes > target_capacity_bytes);
+    let projected =
+      ok_exn
+        ~what:"lopsided structural shrink"
+        (project ~capacity_bytes history)
+    in
+    Alcotest.(check int) "oldest atom was removed" 1 (count_atoms projected);
+    Alcotest.(check bool)
+      "pinned context survived"
+      true
+      (List.exists (fun message -> message == pinned) projected);
+    Alcotest.(check bool)
+      "newest atom survived"
+      true
+      (List.exists (fun message -> message == newest) projected);
+    Alcotest.(check bool)
+      "capacity includes the conservative preamble reserve"
+      true
+      (capacity_bytes > total_bytes projected);
+    fits_budget ~capacity_bytes ~reserved_bytes:0 projected
+;;
+
+let test_next_shrink_capacity_ignores_materialized_preamble () =
+  let preamble =
+    message
+      ~metadata:[ (Window.preamble_marker_key, `Bool true) ]
+      ~role:Types.User
+      "synthetic preamble"
+  in
+  let newest = padded ~role:Types.User ~tag:"newest|" 600 in
+  match
+    Window.next_shrink_capacity_bytes
+      ~measure_message_bytes
+      ~target_capacity_bytes:500
+      [ preamble; newest ]
+  with
+  | None -> ()
+  | Some _ ->
+    Alcotest.fail
+      "a materialized preamble must not create a retry boundary before the newest atom"
+;;
+
+let test_next_shrink_rejects_larger_framed_retry () =
+  let oldest = padded ~role:Types.User ~tag:"oldest|" 100 in
+  let newest = padded ~role:Types.Assistant ~tag:"newest|" 600 in
+  match
+    Window.next_shrink_capacity_bytes
+      ~measure_message_bytes
+      ~target_capacity_bytes:350
+      [ oldest; newest ]
+  with
+  | None -> ()
+  | Some capacity_bytes ->
+    Alcotest.failf
+      "synthetic framing expanded a 700-byte refusal into a %d-byte retry"
+      capacity_bytes
+;;
+
+let test_bootstrap_floor_drops_the_only_prior_atom () =
+  let pinned =
+    message
+      ~metadata:Types.Extra_system_context_provenance.metadata
+      ~role:Types.User
+      "pinned-context"
+  in
+  let only_prior_atom = padded ~role:Types.User ~tag:"prior|" 600 in
+  let history = [ pinned; only_prior_atom ] in
+  let floor_capacity_bytes =
+    match Window.minimum_capacity_bytes ~measure_message_bytes history with
+    | Some capacity -> capacity
+    | None -> Alcotest.fail "a single prior atom must have a bootstrap floor"
+  in
+  let projected =
+    ok_exn
+      ~what:"bootstrap floor"
+      (project ~allow_empty_history:true ~capacity_bytes:floor_capacity_bytes history)
+  in
+  Alcotest.(check int) "all prior atoms were removed" 0 (count_atoms projected);
+  Alcotest.(check bool)
+    "pinned context survived"
+    true
+    (List.exists (fun message -> message == pinned) projected);
+  Alcotest.(check bool)
+    "zero-history floor carries the omission preamble"
+    true
+    (List.exists is_preamble projected);
+  fits_budget ~capacity_bytes:floor_capacity_bytes ~reserved_bytes:0 projected
+;;
+
+let test_bootstrap_next_shrink_reaches_zero_history () =
+  let only_prior_atom = padded ~role:Types.Assistant ~tag:"prior|" 600 in
+  match
+    Window.next_shrink_capacity_bytes
+      ~allow_empty_history:true
+      ~measure_message_bytes
+      ~target_capacity_bytes:300
+      [ only_prior_atom ]
+  with
+  | None -> Alcotest.fail "bootstrap shrink must remove the only prior atom"
+  | Some capacity_bytes ->
+    let projected =
+      ok_exn
+        ~what:"single-atom bootstrap shrink"
+        (project
+           ~allow_empty_history:true
+           ~capacity_bytes
+           [ only_prior_atom ])
+    in
+    Alcotest.(check int) "no organic atom remains" 0 (count_atoms projected);
+    Alcotest.(check bool) "the floor is framed" true (List.exists is_preamble projected)
+;;
+
 let test_cut_is_quantized_when_a_quantized_cut_fits () =
   (* Cache stability (#26535): when some multiple of [k] fits, the drop count
      is that multiple, so the transmitted prefix only moves in whole
@@ -233,6 +369,219 @@ let test_exact_cut_when_no_quantized_cut_fits () =
     "history was cut" true
     (count_atoms projected < count_atoms history);
   fits_budget ~capacity_bytes ~reserved_bytes:0 projected
+;;
+
+(* The keeper's own history is the thing being reported on, so the assertion is
+   stated against the input the caller handed in — not against a number the
+   projection also produced. A share computed only from the transmitted list
+   would be vacuous: dropped atoms leave no trace there. *)
+let test_projection_reports_how_much_history_it_carried () =
+  let history = atoms (4 * k) in
+  let capacity_bytes = total_bytes history / 8 in
+  let projected =
+    match
+      Window.project_with_drop
+        ~measure_message_bytes
+        ~capacity_bytes
+        ~reserved_bytes:0
+        history
+    with
+    | Ok projection -> projection
+    | Error error ->
+      Alcotest.failf "reported cut: %s" (Window.budget_error_to_string error)
+  in
+  let observed =
+    Window.observe ~history_atom_count:projected.Window.atom_count projected
+  in
+  Alcotest.(check int)
+    "total is the history the caller handed in"
+    (count_atoms history)
+    observed.Window.total_atoms;
+  Alcotest.(check int)
+    "transmitted is what came back"
+    (count_atoms projected.Window.messages)
+    observed.Window.transmitted_atoms;
+  Alcotest.(check bool)
+    "a cut history reports less than it held" true
+    (observed.Window.transmitted_atoms < observed.Window.total_atoms);
+  fits_budget ~capacity_bytes ~reserved_bytes:0 projected.Window.messages
+;;
+
+(* Absence of a cut has to be reportable as such. Without this the dashboard
+   cannot tell "sent everything" from "no observation", and both would render
+   as a full history. *)
+let test_uncut_history_reports_everything_carried () =
+  let history = atoms 3 in
+  let projected =
+    match
+      Window.project_with_drop
+        ~measure_message_bytes
+        ~capacity_bytes:unbounded_capacity
+        ~reserved_bytes:0
+        history
+    with
+    | Ok projection -> projection
+    | Error error ->
+      Alcotest.failf "uncut: %s" (Window.budget_error_to_string error)
+  in
+  let observed =
+    Window.observe ~history_atom_count:projected.Window.atom_count projected
+  in
+  Alcotest.(check int)
+    "nothing was dropped" observed.Window.total_atoms observed.Window.transmitted_atoms;
+  Alcotest.(check int)
+    "and that total is the whole history"
+    (count_atoms history)
+    observed.Window.total_atoms
+;;
+
+(* The demotion pipeline cuts, materializes, and — when a blob fails to
+   persist — re-cuts the survivors. That last projection only ever saw the
+   survivors, so a denominator read off it would report a keeper that reached
+   back over a fraction of its history as having reached over nearly all of
+   it. *)
+let test_chained_cut_keeps_the_whole_history_as_denominator () =
+  let history = atoms (4 * k) in
+  let cut ~capacity_bytes messages =
+    match
+      Window.project_with_drop
+        ~measure_message_bytes
+        ~capacity_bytes
+        ~reserved_bytes:0
+        messages
+    with
+    | Ok projection -> projection
+    | Error error ->
+      Alcotest.failf "chained cut: %s" (Window.budget_error_to_string error)
+  in
+  let first = cut ~capacity_bytes:(total_bytes history / 4) history in
+  let second =
+    cut
+      ~capacity_bytes:(total_bytes first.Window.messages / 2)
+      first.Window.messages
+  in
+  let observed =
+    Window.observe ~history_atom_count:first.Window.atom_count second
+  in
+  Alcotest.(check int)
+    "denominator is the whole history, not the survivors"
+    (count_atoms history)
+    observed.Window.total_atoms;
+  Alcotest.(check bool)
+    "which the chained projection could not have supplied" true
+    (observed.Window.total_atoms > second.Window.atom_count);
+  Alcotest.(check int)
+    "numerator is what the last cut kept"
+    (count_atoms second.Window.messages)
+    observed.Window.transmitted_atoms
+;;
+
+(* The point of the window is how many turns a keeper can still see. Reasoning
+   blocks a dialect never replays are deleted before serialization, so charging
+   the budget for them buys nothing and costs conversation. This is the feature
+   in one assertion: the same budget, the same history, more of it transmitted
+   once the unsent bytes stop being counted. *)
+module Provider_config = Agent_core.Llm_provider.Provider_config
+module Capabilities = Agent_core.Llm_provider.Capabilities
+
+let non_replaying_config =
+  Provider_config.make
+    ~kind:Provider_config.OpenAI_compat
+    ~model_id:"model-a"
+    ~base_url:"https://provider.example"
+    ~model_capabilities_override:
+      { Capabilities.default_capabilities with
+        supports_reasoning = true
+      ; reasoning_replay_override = Capabilities.Force_no_replay
+      }
+    ()
+;;
+
+(* Each assistant atom carries a reasoning block roughly the size of its text,
+   so the unsent share is large enough to move the cut rather than round away. *)
+let deliberating_history n =
+  List.concat
+    (List.init n (fun i ->
+       [ user i
+       ; message
+           ~role:Types.Assistant
+           ~metadata:[]
+           (Printf.sprintf "assistant-%d|" i)
+       ]))
+;;
+
+(* The suite's shared encoder counts transmitted text only, which is what makes
+   its budgets readable as character counts. That model cannot express this
+   case: MASC budgets with [Keeper_context_core.message_to_json], which counts
+   every block including the reasoning the wire will delete — that gap is the
+   whole defect. So this case measures every block. *)
+let measure_all_blocks (m : Types.message) =
+  List.fold_left
+    (fun acc (block : Types.content_block) ->
+       match block with
+       | Types.Text text -> acc + String.length text
+       | Types.Thinking { content; _ } -> acc + String.length content
+       | Types.ReasoningDetails _
+       | Types.RedactedThinking _
+       | Types.ToolUse _
+       | Types.ToolResult _
+       | Types.Image _
+       | Types.Document _
+       | Types.Audio _ -> acc)
+    0
+    m.content
+;;
+
+let total_all_blocks messages =
+  List.fold_left (fun acc m -> acc + measure_all_blocks m) 0 messages
+;;
+
+let project_all ~capacity_bytes history =
+  Window.project
+    ~allow_empty_history:false
+    ~measure_message_bytes:measure_all_blocks
+    ~capacity_bytes
+    ~reserved_bytes:0
+    history
+;;
+
+let test_dropping_unsent_reasoning_widens_the_window () =
+  let config = non_replaying_config in
+  let history =
+    List.map
+      (fun (m : Types.message) ->
+         match m.role with
+         | Types.Assistant ->
+           { m with
+             Types.content =
+               Types.Thinking
+                 { content = String.make atom_bytes 'r'; signature = None }
+               :: m.content
+           }
+         | Types.User | Types.Tool | Types.System -> m)
+      (deliberating_history (2 * k))
+  in
+  let capacity_bytes = total_all_blocks history / 4 in
+  let raw = ok_exn ~what:"raw cut" (project_all ~capacity_bytes history) in
+  let transmitted =
+    match
+      Agent_core.Llm_provider.Complete_common.transmitted_history ~config history
+    with
+    | Ok messages -> messages
+    | Error error ->
+      Alcotest.failf
+        "transmitted history: %s"
+        (Agent_core.Llm_provider.Reasoning_history_projection.error_to_string error)
+  in
+  Alcotest.(check bool)
+    "the wire drops reasoning this dialect never replays" true
+    (total_all_blocks transmitted < total_all_blocks history);
+  let projected =
+    ok_exn ~what:"projected cut" (project_all ~capacity_bytes transmitted)
+  in
+  Alcotest.(check bool)
+    "so the same budget carries more of the conversation" true
+    (count_atoms projected > count_atoms raw)
 ;;
 
 let test_tool_results_stay_with_their_call () =
@@ -429,12 +778,40 @@ let () =
             test_cut_when_over_capacity
         ; Alcotest.test_case "heavy atoms cut below the count threshold" `Quick
             test_heavy_atoms_cut_below_the_count_threshold
+        ; Alcotest.test_case
+            "next shrink clamps to lopsided newest atom"
+            `Quick
+            test_next_shrink_capacity_clamps_to_lopsided_newest_atom
+        ; Alcotest.test_case
+            "next shrink ignores materialized preamble"
+            `Quick
+            test_next_shrink_capacity_ignores_materialized_preamble
+        ; Alcotest.test_case
+            "next shrink rejects larger framed retry"
+            `Quick
+            test_next_shrink_rejects_larger_framed_retry
+        ; Alcotest.test_case
+            "bootstrap floor drops the only prior atom"
+            `Quick
+            test_bootstrap_floor_drops_the_only_prior_atom
+        ; Alcotest.test_case
+            "bootstrap next shrink reaches zero history"
+            `Quick
+            test_bootstrap_next_shrink_reaches_zero_history
         ; Alcotest.test_case "cut is quantized when a quantized cut fits" `Quick
             test_cut_is_quantized_when_a_quantized_cut_fits
         ; Alcotest.test_case "cut point is stable while the budget holds" `Quick
             test_cut_point_is_stable_while_the_budget_holds
         ; Alcotest.test_case "exact cut when no quantized cut fits" `Quick
             test_exact_cut_when_no_quantized_cut_fits
+        ; Alcotest.test_case "projection reports how much history it carried"
+            `Quick test_projection_reports_how_much_history_it_carried
+        ; Alcotest.test_case "uncut history reports everything carried" `Quick
+            test_uncut_history_reports_everything_carried
+        ; Alcotest.test_case "chained cut keeps the whole history as denominator"
+            `Quick test_chained_cut_keeps_the_whole_history_as_denominator
+        ; Alcotest.test_case "dropping unsent reasoning widens the window"
+            `Quick test_dropping_unsent_reasoning_widens_the_window
         ; Alcotest.test_case "tool results stay with their call" `Quick
             test_tool_results_stay_with_their_call
         ; Alcotest.test_case "preamble on assistant head" `Quick

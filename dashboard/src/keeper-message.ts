@@ -1,5 +1,9 @@
 import { asNumber, asString, isRecord } from './components/common/normalize'
-import type { KeeperConversationDetails, KeeperTurnOutcome } from './types'
+import type {
+  KeeperConversationDetails,
+  KeeperExternalEffectTarget,
+  KeeperTurnOutcome,
+} from './types'
 
 function stripSkillRouteLines(text: string): string {
   return text
@@ -25,6 +29,8 @@ function normalizeKeeperTurnOutcome(value: unknown): KeeperTurnOutcome | null {
       return 'visible_reply'
     case 'continuation_checkpoint':
       return 'continuation_checkpoint'
+    case 'external_effect_completed':
+      return 'external_effect_completed'
     case 'external_effect_pending':
       return 'external_effect_pending'
     case 'no_visible_reply':
@@ -32,6 +38,27 @@ function normalizeKeeperTurnOutcome(value: unknown): KeeperTurnOutcome | null {
     default:
       return null
   }
+}
+
+// Closed decode of the reply payload's `external_effect_target` /
+// KEEPER_EXTERNAL_EFFECT_COMPLETED target. The reply payload carries the
+// field only when the turn completed an external effect; a missing field or
+// any malformed shape decodes to null and the card keeps its generic copy
+// instead of guessing a destination.
+export function normalizeKeeperExternalEffectTarget(
+  value: unknown,
+): KeeperExternalEffectTarget | null {
+  if (!isRecord(value)) return null
+  const kind = asString(value.kind, '').trim()
+  if (kind === 'dashboard') return { kind: 'dashboard' }
+  const channelId = asString(value.channel_id, '').trim()
+  if (!channelId) return null
+  if (kind === 'discord') return { kind: 'discord', channelId }
+  if (kind === 'slack') {
+    const threadTs = asString(value.thread_ts, '').trim()
+    return { kind: 'slack', channelId, threadTs: threadTs || null }
+  }
+  return null
 }
 
 function normalizeKeeperUsage(raw: unknown): NonNullable<KeeperConversationDetails['usage']> | null {
@@ -58,6 +85,7 @@ export function keeperTurnOutcomeSuppressesReply(
   outcome: KeeperTurnOutcome | null | undefined,
 ): boolean {
   return outcome === 'continuation_checkpoint'
+    || outcome === 'external_effect_completed'
     || outcome === 'external_effect_pending'
     || outcome === 'no_visible_reply'
 }
@@ -85,6 +113,9 @@ export function normalizeKeeperConversationDetails(raw: unknown): KeeperConversa
     usage,
     replyText: reply || null,
     turnOutcome: normalizeKeeperTurnOutcome(payload.turn_outcome),
+    externalEffectTarget: normalizeKeeperExternalEffectTarget(
+      payload.external_effect_target,
+    ),
     rawPayload: payload,
   }
 }

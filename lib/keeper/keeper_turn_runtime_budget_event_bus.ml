@@ -1,6 +1,6 @@
 (** Turn event-bus observation summary.
 
-    OAS lifecycle events supply correlation metadata only. MASC-owned
+    AGENT_CORE lifecycle events supply correlation metadata only. MASC-owned
     compaction state must come from the lane's durable completion path,
     never from this lossy observation bus. *)
 

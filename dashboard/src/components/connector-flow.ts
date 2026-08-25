@@ -103,7 +103,6 @@ export function ConnectorFlowSection({ connector, gate }: {
               <${StatChip} label="in" value=${String(stats.message_count)} />
               <${StatChip} label="ok" value=${`${stats.success_count} (${stats.success_rate_pct}%)`} />
               <${StatChip} label="err" value=${String(stats.error_count)} />
-              <${StatChip} label="dup" value=${String(stats.duplicate_count)} />
               ${stats.avg_duration_ms > 0
                 ? html`<${StatChip} label="avg" value=${`${Math.round(stats.avg_duration_ms)}ms`} />`
                 : null}

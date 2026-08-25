@@ -142,5 +142,4 @@ KCAF is the first audit where the drift is *runtime predicate vs static type alp
 - `lib/keeper/keeper_turn_driver.ml:657-669` (hard-quota override).
 - `scripts/audit-tla-annotation-drift.sh:79-87` (`TYPE_SET_PAIRS` extension point).
 - KSM A-1 audit (`ksm-init-mapping-2026-05-12.md`) — same shape "spec stricter typing, OCaml runtime decision".
-- KCR C-2 audit (`kcr-c2-health-state-representation-gap-2026-05-12.md`) — sibling drift class (representation mismatch).
 - RFC-0065 Phase 5.1 B1 — KCAF spec authoring origin.

@@ -8,7 +8,7 @@
 
 (** Three-channel turn prompt. The observation frame is separated from the
     persisted user message so it can be injected per-turn (via
-    [dynamic_context]) instead of accumulating in the OAS conversation.
+    [dynamic_context]) instead of accumulating in the AGENT_CORE conversation.
 
     Feedback-loop invariant (#25193, RFC PR #25246, operator decision
     2026-07-20): [world_state] must never be persisted as a conversation
@@ -25,17 +25,34 @@ type turn_prompt_parts = {
           to the persisted message history. *)
   user_message : string;
       (** Current user-turn input. Operator utterances are durable. For an
-          autonomous continuation this is {!autonomous_wake_marker}, which is
-          also durable: each cycle is an ordinary next user turn followed by
-          its assistant/tool suffix. HITL resolutions are appended by the turn
-          driver. *)
+          autonomous continuation this is
+          {!effective_autonomous_wake_prompt}, which is also durable: each
+          cycle is an ordinary next user turn followed by its assistant/tool
+          suffix. HITL resolutions are appended by the turn driver. *)
 }
 
 val autonomous_wake_marker : string
-(** Durable input for an autonomous continuation. It is appended to the same
-    checkpoint as the following assistant/tool suffix. The fresh observation
-    frame lives separately in {!turn_prompt_parts.world_state} and is never
-    persisted. *)
+(** Last-resort input for an autonomous continuation, used when neither the
+    keeper nor the fleet configures one. It is appended to the same checkpoint
+    as the following assistant/tool suffix. The fresh observation frame lives
+    separately in {!turn_prompt_parts.world_state} and is never persisted.
+
+    Do not compare a turn's [user_message] against this to decide whether the
+    turn was autonomous: operators can change the value, and that classifier
+    would then be wrong for exactly the deployments that configured it. *)
+
+val effective_autonomous_wake_prompt :
+  ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
+  unit ->
+  string
+(** Resolves the wake prompt: the keeper's [autonomous_wake_prompt], else the
+    fleet [autonomous.wake_prompt] / [MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT], else
+    {!autonomous_wake_marker}. Total -- both configured sources are validated
+    where they are parsed, so this cannot fail while a prompt is being built.
+
+    Changing either source affects turns taken after the change. Earlier turns
+    keep the wording they were woken with, because the checkpoint is history
+    rather than a view. *)
 
 val format_current_task : Masc_domain.task -> string
 
@@ -50,41 +67,38 @@ val format_current_task_observation
 val effective_instructions :
   meta:Keeper_meta_contract.keeper_meta ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
+  ?channel:Keeper_world_observation.keeper_cycle_channel ->
   unit ->
   string
-(** Resolve the single instructions value used by every system-prompt
-    entrypoint and its dashboard projection. *)
+(** Alias of [effective_autonomous_instructions]; kept for callers that
+    predate the channel-aware rename. *)
 
-val owned_executing_goals_without_tasks :
-  config:Workspace.config ->
-  keeper_name:string ->
-  (string * string) list
-(** RFC-0362 §4.3 — the Goals this keeper owns that are still executing and
-    carry no linked Task. Read from [goal.owner], not from
-    [meta.active_goal_ids]: ownership lives on the Goal, and that keeper-side
-    pointer is empty for every keeper on the live workspace.
+(** What the prompt knows about one active goal: id, title, and the stored
+    phase. [summary_phase] is [None] only for an id the store cannot resolve
+    (a dangling assignment, kept visible). RFC-0387 stage 2 carries the phase
+    so a [Verifying] goal renders annotated in the Active Goals layer — the
+    gate must not make the goal disappear from the keeper (review P0-1). *)
+type goal_summary = {
+  summary_goal_id : string;
+  summary_title : string;
+  summary_phase : Goal_phase.t option;
+}
 
-    The RFC's acceptance criterion (§4.3) reads off this list: the measured
-    0-of-10 executing goals with a Task must move, or the owner field is
-    decoration and should be removed. *)
+val active_goal_summaries_of_store :
+  config:Workspace.config -> goal_summary list
+(** The Goals still open enough to progress, read straight from the store.
 
-val active_goal_summaries :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  (string * string) list
-(** Resolve the active goal ids a keeper can still progress, for the stable
-    prompt contract. [meta.active_goal_ids] records assignment and is never
-    cleared when a goal reaches a terminal phase, so ids whose stored phase
-    fails {!Goal_phase.admits_self_directed_progress} are dropped rather than
-    announced as available work. Unknown ids remain present with an empty title
-    so every entrypoint renders the same bare-id fallback: an assigned goal that
-    no longer exists is a different fault and stays visible. *)
+    A Goal is shared intent and names no keeper, so this is the same list for
+    everyone. {!Goal_phase.admits_self_directed_progress} decides membership --
+    [Verifying] stays in (the gate holds the phase, not the work) and terminal
+    phases drop out. *)
 
 val build_system_prompt :
   meta:Keeper_meta_contract.keeper_meta ->
   config:Workspace.config ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
-  ?active_goal_summaries:(string * string) list ->
+  ?channel:Keeper_world_observation.keeper_cycle_channel ->
+  ?active_goal_summaries:goal_summary list ->
   unit ->
   string
 (** Build the model-facing stable Keeper contract shared by direct and
@@ -105,7 +119,8 @@ val build_prompt :
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   turn_decision:Keeper_world_observation.keeper_cycle_decision ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
-  ?active_goal_summaries:(string * string) list ->
+  ?active_goal_summaries:goal_summary list ->
+  ?context_budget_bytes:int ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
   turn_prompt_parts
@@ -119,14 +134,15 @@ val build_prompt :
     - [current_task] renders the held task or its explicit missing/unavailable
       state. [No_current_task] omits the layer.
     - [?active_goal_summaries]: renders goal titles next to ids in the Active
-      Goals layer. Omitted or empty: bare ids. *)
+      Goals layer, with a proof-pending annotation on [Verifying] goals
+      (RFC-0387 stage 2). Omitted or empty: bare ids. *)
 
 val build_prompt_preview :
   meta:Keeper_meta_contract.keeper_meta ->
   config:Workspace.config ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
-  ?active_goal_summaries:(string * string) list ->
+  ?active_goal_summaries:goal_summary list ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
   turn_prompt_parts

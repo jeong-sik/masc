@@ -3,7 +3,6 @@ title: run_named closure decomposition
 rfc: 0051
 status: Active
 created: 2026-05-09
-implementation_prs: []
 ---
 
 # RFC-0051 — `run_named` closure decomposition
@@ -14,7 +13,7 @@ implementation_prs: []
 | Author | Agent-LLM-A Opus 4.7 (Vincent supervising) |
 | Created | 2026-05-09 |
 | Supersedes | — |
-| Depends on | RFC-0047 (oas-adapter-decomposition, merged), RFC-0048 PR-1/PR-2 (helper + wrapper extraction, merged) |
+| Depends on | RFC-0048 PR-1/PR-2 (helper + wrapper extraction, merged) |
 | Implementation scope | `lib/keeper/keeper_turn_driver.ml` (1146 LOC) |
 
 본 RFC는 `keeper_turn_driver.ml` 내 `run_named` 함수(현재 1109 LOC)의 내부 closure 3종 (`try_provider`, `try_runtime`, `cycle_loop`)을 분해하는 **설계 문서**다. 실제 구현 PR은 본 RFC 승인 후 별도 발행한다.
@@ -27,7 +26,6 @@ implementation_prs: []
 
 | 단계 | 내용 | LOC delta | PR |
 |---|---|---|---|
-| RFC-0047 Phase 4 | `oas_worker_named.ml` → `keeper_turn_driver.ml` rename | 0 | #14301 |
 | RFC-0048 PR-1 | top-level pure helper 10개 → `keeper_turn_driver_helpers.ml` | 1459 → 1347 (-112) | #14319 |
 | RFC-0048 PR-2 | wrapper 3개 (`run_model_by_label` / `run_named_with_masc_tools` / `run_model_with_masc_tools`) → `keeper_turn_driver_wrappers.ml` | 1347 → 1146 (-201) | #14324 |
 
@@ -50,7 +48,7 @@ implementation_prs: []
 
 ### 1.3 본 RFC가 풀려는 문제
 
-RFC-0047 §4.1과 RFC-0048 본문이 명시한 **A/B/C 의미 결합도**:
+현재 코드의 **A/B/C 의미 결합도**:
 
 - **A (Agent SDK invocation)**: 단일 provider에 대한 LLM 호출, response 파싱, error 분류 — `try_provider` 본체
 - **B (Runtime strategy)**: provider 후보군 순회, retry 정책, exhaustion 판정 — `try_runtime` 본체
@@ -68,7 +66,6 @@ RFC-0047 §4.1과 RFC-0048 본문이 명시한 **A/B/C 의미 결합도**:
 - **`run_named` 시그니처 50+ 인자 자체의 인자 그룹화** — 별도 RFC 후보. 본 RFC는 호출 시그니처를 *불변 유지*.
 - **Runtime strategy의 token bucket / deadline scheduler 도입** — RFC-0029 영역.
 - **Agent SDK 자체의 streaming protocol 변경** — agent_sdk repo 영역.
-- **`run_named` 외 다른 OAS-prefix 잔재 정리** — RFC-0047에서 완료.
 
 ---
 
@@ -230,7 +227,7 @@ let step : run_named_state -> run_named_state = ...
 3. 측정 결과를 PR-3a body에 *명시 인용* (변수명 + line 번호).
 4. `try_provider_ctx` record가 그 인벤토리와 1:1 대응.
 
-이는 RFC-0047 audit 메모리 (`feedback_audit_matrix_decays_with_main_drift`)의 fresh-grep 강제 규칙과 동일 패턴.
+이 인벤토리는 매 검증 시점의 fresh grep 결과와 일치해야 한다.
 
 ### 3.3 비목표 명시
 
@@ -277,7 +274,7 @@ PR-3a 머지 후 OpenTelemetry span name 변동을 *허용하지 않는다*. 새
 |---|---|---|
 | ctx record field 분류 오분류 → silent capture 누락 → 런타임 NPE/wrong-state | PR review에서 ctx field 인용 검증 | §3.2 사전 측정 의무화 |
 | Eio cancel boundary가 closure 분해로 변경 → 기존 cancel propagation 깨짐 | `test_keeper_turn_driver_cancel_*` 회귀 | 옵션 A는 closure → top-level 변환만, control flow는 그대로 보존. cancel 변경 시 별 RFC. |
-| ocamlformat-check 충돌로 main blocker | 직전 RFC-0047 시리즈에서 advisory였음 | 새 파일은 `ocamlformat -i` 미리 적용. 기존 파일 reformat 금지. |
+| ocamlformat-check 충돌로 main blocker | 포맷 차이가 대규모 diff를 만들 수 있음 | 새 파일은 `ocamlformat -i` 미리 적용. 기존 파일 reformat 금지. |
 | 동일 영역 다른 PR (RFC-0029 fanout 등)과 충돌 | `gh pr list --search "keeper_turn_driver"` | PR 시작 전 active PR sweep 의무. RFC-0048 PR-2 머지 패턴과 동일. |
 | 본 RFC 시리즈 *중간*에 main blocker 발견 | CI red | 진행 중지, blocker 별 PR 우선 처리. PR-3 시리즈 머지 직진 금지. |
 
@@ -324,7 +321,6 @@ PR-3a 머지 후 OpenTelemetry span name 변동을 *허용하지 않는다*. 새
 ## 9. References
 
 - **선행 작업**:
-  - `docs/rfc/RFC-0047-oas-adapter-decomposition.md` (Implemented)
   - `lib/keeper/keeper_turn_driver_helpers.ml` (RFC-0048 PR-1, #14319)
   - `lib/keeper/keeper_turn_driver_wrappers.ml` (RFC-0048 PR-2, #14324)
 - **연관 RFC**:

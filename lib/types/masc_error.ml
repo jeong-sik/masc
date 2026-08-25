@@ -24,39 +24,98 @@ let rate_limit_config_to_yojson c =
   ]
 
 let rate_limit_config_of_yojson json =
-  try
-    let int_field name default =
-      Json_util.get_int json name |> Option.value ~default
+  let type_name = function
+    | `Assoc _ -> "object"
+    | `Bool _ -> "boolean"
+    | `Float _ | `Int _ | `Intlit _ -> "number"
+    | `List _ -> "array"
+    | `Null -> "null"
+    | `String _ -> "string"
+  in
+  let field fields name = List.assoc_opt name fields in
+  let int_field fields name default =
+    match field fields name with
+    | None -> Ok default
+    | Some (`Int value) -> Ok value
+    | Some (`Intlit value) ->
+      (match int_of_string_opt value with
+       | Some value -> Ok value
+       | None -> Error (Printf.sprintf "rate_limit.%s is outside integer range" name))
+    | Some value ->
+      Error
+        (Printf.sprintf
+           "rate_limit.%s must be integer, got %s"
+           name
+           (type_name value))
+  in
+  let float_field fields name default =
+    match field fields name with
+    | None -> Ok default
+    | Some (`Float value) -> Ok value
+    | Some (`Int value) -> Ok (Float.of_int value)
+    | Some value ->
+      Error
+        (Printf.sprintf
+           "rate_limit.%s must be number, got %s"
+           name
+           (type_name value))
+  in
+  let string_list_field fields name default =
+    match field fields name with
+    | None -> Ok default
+    | Some (`List values) ->
+      let rec collect index acc = function
+        | [] -> Ok (List.rev acc)
+        | `String value :: rest -> collect (index + 1) (value :: acc) rest
+        | value :: _ ->
+          Error
+            (Printf.sprintf
+               "rate_limit.%s[%d] must be string, got %s"
+               name
+               index
+               (type_name value))
+      in
+      collect 0 [] values
+    | Some value ->
+      Error
+        (Printf.sprintf
+           "rate_limit.%s must be array, got %s"
+           name
+           (type_name value))
+  in
+  match json with
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let* per_minute = int_field fields "per_minute" default_rate_limit.per_minute in
+    let* burst_allowed =
+      int_field fields "burst_allowed" default_rate_limit.burst_allowed
     in
-    let float_field name default =
-      Json_util.get_float json name |> Option.value ~default
+    let* priority_agents =
+      string_list_field fields "priority_agents" default_rate_limit.priority_agents
     in
-    let string_list_field name default =
-      match Json_util.get_array json name with
-      | Some (`List values) ->
-          List.filter_map (function `String s -> Some s | _ -> None) values
-      | _ -> default
+    let* worker_multiplier =
+      float_field fields "worker_multiplier" default_rate_limit.worker_multiplier
     in
-    let per_minute = int_field "per_minute" default_rate_limit.per_minute in
-    let burst_allowed = int_field "burst_allowed" default_rate_limit.burst_allowed in
-    let priority_agents =
-      string_list_field "priority_agents" default_rate_limit.priority_agents
+    let* admin_multiplier =
+      float_field fields "admin_multiplier" default_rate_limit.admin_multiplier
     in
-    let worker_multiplier =
-      float_field "worker_multiplier" default_rate_limit.worker_multiplier
+    let* broadcast_per_minute =
+      int_field fields "broadcast_per_minute" default_rate_limit.broadcast_per_minute
     in
-    let admin_multiplier =
-      float_field "admin_multiplier" default_rate_limit.admin_multiplier
+    let* task_ops_per_minute =
+      int_field fields "task_ops_per_minute" default_rate_limit.task_ops_per_minute
     in
-    let broadcast_per_minute =
-      int_field "broadcast_per_minute" default_rate_limit.broadcast_per_minute
-    in
-    let task_ops_per_minute =
-      int_field "task_ops_per_minute" default_rate_limit.task_ops_per_minute
-    in
-    Ok { per_minute; burst_allowed; priority_agents; worker_multiplier;
-         admin_multiplier; broadcast_per_minute; task_ops_per_minute }
-  with e -> Error (Printexc.to_string e)
+    Ok
+      { per_minute
+      ; burst_allowed
+      ; priority_agents
+      ; worker_multiplier
+      ; admin_multiplier
+      ; broadcast_per_minute
+      ; task_ops_per_minute
+      }
+  | value ->
+    Error (Printf.sprintf "rate_limit must be object, got %s" (type_name value))
 
 let limit_for_category config = function
   | GeneralLimit -> config.per_minute
@@ -254,12 +313,12 @@ let dashboard_auth_error_code : t -> string option = function
   | Task _ | Agent _ | System _ | RateLimitExceeded _ | CacheError _ ->
       Some "unknown"
 
-(* [is_retryable] mirrors [Error.is_retryable] in OAS so MASC-side
-   callers don't have to fall back on an OAS-only predicate when
+(* [is_retryable] mirrors [Error.is_retryable] in AGENT_CORE so MASC-side
+   callers don't have to fall back on an AGENT_CORE-only predicate when
    reasoning about a [masc_error]. Conservative — when in doubt
    return [false] so callers don't loop on deterministic
    failures. Source for the audit-driven motivation:
-   2026-04-29 OAS↔MASC Implementation Quality Audit
+   2026-04-29 AGENT_CORE↔MASC Implementation Quality Audit
    §"Re-tryability". *)
 let is_retryable = function
   | Task _ | Agent _ -> false

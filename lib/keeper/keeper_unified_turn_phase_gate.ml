@@ -14,12 +14,11 @@ type phase_gate_outcome =
   | Phase_gate_proceed
   | Phase_gate_cancelled of keeper_meta
   | Phase_gate_skipped of keeper_meta
-  | Phase_gate_terminal_error of Agent_sdk.Error.sdk_error
+  | Phase_gate_terminal_error of Agent_core.Error.t
 
 let decide_and_record
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
-      ~(generation : int)
       ~(keeper_turn_id : int)
       ~(append_phase_gate_decision :
          Keeper_unified_turn_phase_plan.turn_plan
@@ -55,7 +54,6 @@ let decide_and_record
     Keeper_turn_helpers.record_pre_dispatch_terminal_observation
       ~config
       ~meta
-      ~generation
       ~runtime_id:
         (           (runtime_id_of_meta meta))
       ~outcome:`Cancelled
@@ -95,7 +93,6 @@ let decide_and_record
       Keeper_turn_helpers.record_pre_dispatch_terminal_observation
         ~config
         ~meta
-        ~generation
         ~runtime_id:
           (             (runtime_id_of_meta meta))
         ~outcome:`Skipped
@@ -131,7 +128,6 @@ let decide_and_record
       Keeper_turn_helpers.record_pre_dispatch_terminal_observation
         ~config
         ~meta
-        ~generation
         ~runtime_id:
           (             (runtime_id_of_meta meta))
         ~outcome:`Error
@@ -149,7 +145,7 @@ let decide_and_record
         ~prev:Keeper_turn_fsm.Phase_gating
         (Keeper_turn_fsm.Failed
            (Keeper_turn_fsm.Failure_runtime_error terminal_reason_code));
-      Phase_gate_terminal_error (Agent_sdk.Error.Internal error_message), turn_state
+      Phase_gate_terminal_error (Agent_core.Error.Internal error_message), turn_state
     | phase_opt ->
       let turn_plan =
         Keeper_unified_turn_phase_plan.decide_turn_plan_at_phase_gate

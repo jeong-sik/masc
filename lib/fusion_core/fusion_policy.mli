@@ -19,6 +19,11 @@ type panel_group =
   ; web_tools : bool  (** 그룹에 web_search/web_fetch 주입 여부. *)
   ; max_output_tokens : int option
       (** 그룹 모델당 출력 토큰 예산 override. [None]이면 Runtime_agent 기본값. *)
+  ; timeout_s : float option
+      (** 그룹 모델당 응답 데드라인(초) — Agent_core 경로는 [body_timeout_s],
+          official-client 경로는 어댑터 turn timeout 으로 집행된다. [None]이면
+          런타임/provider 가 이미 선언한 값이 그대로 쓰인다: preset 은 그 위에
+          얹는 소비자 override 이며 별도 SSOT 가 아니다. *)
   }
 [@@deriving show, eq]
 
@@ -31,7 +36,9 @@ type judge_spec =
   ; jsystem_prompt : string  (** 이 1차 심판의 lens — config에서 필수(코드 default 없음). *)
   ; jweb_tools : bool  (** web_search/web_fetch 주입 여부. *)
   ; jmax_output_tokens : int option
-      (** 출력 토큰 예산 override. [None]이면 Runtime_agent 기본값. *)
+      (** 출력 토큰 예산 override. [None]이면 preset 의 [judge_max_output_tokens]. *)
+  ; jtimeout_s : float option
+      (** 이 1차 심판의 응답 데드라인(초). [None]이면 preset 의 [judge_timeout_s]. *)
   }
 [@@deriving show, eq]
 
@@ -48,6 +55,9 @@ type preset =
       (** 심판 모델 system prompt — config에서 필수(코드 default 없음). *)
   ; judge_max_output_tokens : int option
       (** 단일/refine/meta 심판 출력 토큰 예산 override. [None]이면 기본값. *)
+  ; judge_timeout_s : float option
+      (** 심판 응답 데드라인(초). single/refine/meta/stage-meta 와, 자기
+          [jtimeout_s] 가 없는 1차 심판에 적용된다. [None]이면 런타임/provider 설정. *)
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
@@ -57,8 +67,6 @@ type preset =
           [judge = Error]로 완료한다 (빈 패널 종합 날조 방지).
           허용 범위는 [1]부터 패널 모델 총합까지; full-panel quorum([총합])도
           명시적으로 설정할 수 있다. *)
-  ; fallback_judge_model : string option
-      (** Legacy observed value; failures never trigger an automatic call. *)
   }
 [@@deriving show, eq]
 
@@ -79,14 +87,17 @@ val min_staged_judge_group_size : int
 (** Optional max-output-token overrides must be positive when present. *)
 val valid_max_output_tokens : int option -> bool
 
+(** Optional response deadlines must be finite and positive when present. Zero,
+    negative, NaN and infinity are rejected at load rather than given an
+    invented meaning; "no deadline" is expressed by omitting the key. *)
+val valid_timeout_s : float option -> bool
+
 (** 모든 그룹의 모델을 평탄화 (그룹순 × 그룹내 모델순 보존). *)
 val preset_models : preset -> string list
 
 (** 그룹 전체에 패널 모델이 하나 이상 있는가.
     {!Validated_preset.of_preset}의 검증 술어. Provider별 cardinality 한계는 이
     MASC-owned preset 타입을 제한하지 않는다. *)
-val preset_has_models : preset -> bool
-
 (** 패널 정체성 (RFC-0278). [label]이 비면 [model] 그대로(legacy byte-identical),
     있으면 ["label (model)"]. agent 카드명·심판 패널 태그·[panel_answer.model]에
     쓰이는 유일 식별자. provider 라우팅은 원 model로 build 시점에 따로 한다. *)
@@ -103,23 +114,13 @@ val preset_duplicate_panelist : preset -> string option
 
 (** 모든 그룹의 패널 system prompt + 심판 system prompt가 비어있지 않은가
     (config 로드 시 fail-fast 검증). *)
-val preset_prompts_present : preset -> bool
-
 (** 심판 모델 id가 비어있지 않은가 (config 로드 시 fail-fast 검증). *)
-val preset_judge_present : preset -> bool
-
 (** JOJ 1차 심판들의 정체성 ({!panelist_id}, [jlabel]/[jmodel]). 입력순 = meta 프롬프트
     attribution 순서. judges=[]면 []. (RFC-0283) *)
-val preset_judge_ids : preset -> string list
-
 (** 두 1차 심판이 같은 정체성을 가지면 그 id ({!preset_duplicate_panelist}와 동형 — meta
     프롬프트 attribution 모호성 방지). 없으면 [None]. judges=[]면 [None]. (RFC-0283) *)
-val preset_duplicate_judge : preset -> string option
-
 (** 모든 1차 심판의 system prompt(lens)가 비어있지 않은가. judges=[]면 vacuously [true]
     (simple/refine/conditional은 judges를 안 쓴다). (RFC-0283) *)
-val preset_judge_prompts_present : preset -> bool
-
 (** Staged JOJ preset grouping validation. This is runtime topology validation
     rather than preset validation because the same preset may be valid for flat
     JOJ while invalid for staged JOJ. *)
@@ -166,6 +167,8 @@ module Validated_preset : sig
     | Duplicate_panelist of string  (** 두 패널이 같은 정체성({!panelist_id}) *)
     | Bad_max_output_tokens of int
         (** 그룹/심판 max_output_tokens override가 양수가 아님 *)
+    | Bad_timeout_s of float
+        (** 그룹/심판/1차 심판 응답 데드라인이 유한 양수가 아님 *)
     | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
     | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성 (RFC-0283) *)
     | Min_answered_below_min of int

@@ -14,15 +14,34 @@ const {
   isRemoteAccess,
   setStoredToken,
 } = vi.hoisted(() => ({
+  // Carries timeout/timeoutMs like the real one in ./core. The double used to
+  // drop them, so every case that "tested a timeout" actually threw an error
+  // with no timeout field and a hand-written message -- which is why a
+  // message-substring classifier looked correct here.
   ApiRequestError: class ApiRequestError extends Error {
     status?: number
     authErrorCode?: string
+    timeout?: boolean
+    timeoutMs?: number
 
-    constructor(opts: { status?: number; detail?: string; authErrorCode?: string }) {
-      super(opts.detail ?? 'API request failed')
+    constructor(opts: {
+      status?: number
+      detail?: string
+      authErrorCode?: string
+      timeout?: boolean
+      timeoutMs?: number
+      method?: string
+      path?: string
+    }) {
+      super(
+        opts.timeout === true
+          ? `${opts.method ?? 'POST'} ${opts.path ?? '/mcp'}: timeout after ${opts.timeoutMs ?? 0}ms`
+          : opts.detail ?? 'API request failed')
       this.name = 'ApiRequestError'
       this.status = opts.status
       this.authErrorCode = opts.authErrorCode
+      this.timeout = opts.timeout
+      this.timeoutMs = opts.timeoutMs
     }
   },
   apiRequestErrorFromResponse: vi.fn(async (method: string, path: string, res: Response) =>
@@ -141,20 +160,20 @@ describe('MCP 2026-07-28 dashboard client', () => {
     getStoredTokenMeta.mockReturnValue({
       source: 'dev',
       actor: 'dashboard',
-      role: 'worker',
+      role: 'admin',
     })
     fetchWithTimeout
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        token: 'test-stored-token', actor: 'dashboard', role: 'worker',
+        token: 'test-stored-token', actor: 'dashboard', role: 'admin',
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(okToolResponse())
     const { callMcpTool } = await import('./mcp')
-    await callMcpTool('masc_keeper_create_from_persona', { persona_name: 'sonsukku' })
+    await callMcpTool('masc_keeper_up', { name: 'sonsukku' })
 
     const [, init] = callsByMethod('tools/call')[0]!
     const body = JSON.parse(init.body as string)
     expect(body.params.arguments).toEqual({
-      persona_name: 'sonsukku',
+      name: 'sonsukku',
       _agent_name: 'dashboard',
     })
   })
@@ -167,11 +186,87 @@ describe('MCP 2026-07-28 dashboard client', () => {
     fetchWithTimeout.mockResolvedValueOnce(okToolResponse())
 
     const { callMcpTool } = await import('./mcp')
-    await callMcpTool('masc_persona_list', {})
+    await callMcpTool('masc_keeper_list', {})
 
     const [, init] = callsByMethod('tools/call')[0]!
     const body = JSON.parse(init.body as string)
     expect(body.params.arguments).toEqual({})
+  })
+
+  it('does not let _agent_name override a bearer credential owner', async () => {
+    getStoredToken.mockReturnValue('dashboard-token')
+    getStoredTokenMeta.mockReturnValue({
+      source: 'manual',
+      actor: 'dashboard',
+      scope: null,
+    })
+    authHeaders.mockReturnValue({ Authorization: 'Bearer dashboard-token' })
+    fetchWithTimeout.mockResolvedValueOnce(okToolResponse())
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_transition', {
+      task_id: 'task-223',
+      agent_name: 'dashboard-admin-deft-cobra',
+      _agent_name: 'dashboard-admin-deft-cobra',
+    })
+
+    const [, init] = callsByMethod('tools/call')[0]!
+    const body = JSON.parse(init.body as string)
+    expect(body.params.arguments).toEqual({
+      task_id: 'task-223',
+      agent_name: 'dashboard-admin-deft-cobra',
+    })
+    expect(authHeaders).toHaveBeenLastCalledWith({ actorName: null })
+  })
+
+  // Pagination stops on absence of a cursor, and the guard is progress rather
+  // than a page budget: #26771 capped at 50 pages, which refused a server with
+  // 51 legitimate pages and let a non-progressing one run 50 round trips first.
+  it('rejects a server that repeats a cursor instead of advancing', async () => {
+    const page = () => new Response(JSON.stringify({
+      result: { tools: [{ name: 'one', description: '', inputSchema: {} }], nextCursor: 'same' },
+    }), { status: 200 })
+    fetchWithTimeout.mockResolvedValueOnce(page()).mockResolvedValueOnce(page())
+
+    const { listAllMcpTools } = await import('./mcp')
+    await expect(listAllMcpTools()).rejects.toThrow(/repeated cursor same/)
+    // Two round trips, not fifty: the second page is where non-progress shows.
+    expect(callsByMethod('tools/list')).toHaveLength(2)
+  })
+
+  it('follows more pages than the retired fixed cap allowed', async () => {
+    const PAGES = 60
+    for (let i = 0; i < PAGES; i++) {
+      const last = i === PAGES - 1
+      fetchWithTimeout.mockResolvedValueOnce(new Response(JSON.stringify({
+        result: {
+          tools: [{ name: `tool-${i}`, description: '', inputSchema: {} }],
+          ...(last ? {} : { nextCursor: `cursor-${i}` }),
+        },
+      }), { status: 200 }))
+    }
+
+    const { listAllMcpTools } = await import('./mcp')
+    await expect(listAllMcpTools()).resolves.toHaveLength(PAGES)
+  })
+
+  it('gives every tools/list page a distinct request id', async () => {
+    fetchWithTimeout
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        result: { tools: [{ name: 'one', description: '', inputSchema: {} }], nextCursor: 'next' },
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        result: { tools: [{ name: 'two', description: '', inputSchema: {} }] },
+      }), { status: 200 }))
+
+    const { listAllMcpTools } = await import('./mcp')
+    await listAllMcpTools()
+
+    const ids = callsByMethod('tools/list')
+      .map(([, init]) => JSON.parse(init.body as string).id)
+    expect(new Set(ids).size).toBe(ids.length)
+    // A wall-clock id is a number; these are uuids.
+    for (const id of ids) expect(typeof id).toBe('string')
   })
 
   it('uses current metadata on every tools/list page', async () => {
@@ -226,7 +321,8 @@ describe('MCP 2026-07-28 dashboard client', () => {
   })
 
   it('reports transport failures without legacy session telemetry', async () => {
-    fetchWithTimeout.mockRejectedValueOnce(new Error('POST /mcp: timeout after 30000ms'))
+    fetchWithTimeout.mockRejectedValueOnce(
+      new ApiRequestError({ method: 'POST', path: '/mcp', timeout: true, timeoutMs: 30000 }))
 
     const { callMcpTool } = await import('./mcp')
     await expect(callMcpTool('masc_keeper_msg', { message: 'ping' }))
@@ -237,9 +333,48 @@ describe('MCP 2026-07-28 dashboard client', () => {
       tool_name: 'masc_keeper_msg',
       transport: 'mcp_http',
       phase: 'tools/call',
+      cause_code: 'tool_host_timeout',
       timeout_ms: 30000,
     }))
     expect(reportToolHostFailure.mock.calls[0]![0].session_id).toBeUndefined()
+  })
+
+  // The transport says whether a request reached a tool. These cases pin that
+  // the decision reads the thrown value, not its prose.
+  it('reports a fetch that never reached the host', async () => {
+    fetchWithTimeout.mockRejectedValueOnce(new TypeError('Load failed'))
+
+    const { callMcpTool } = await import('./mcp')
+    await expect(callMcpTool('masc_keeper_msg', { message: 'ping' })).rejects.toThrow()
+
+    expect(reportToolHostFailure).toHaveBeenCalledWith(expect.objectContaining({
+      tool_name: 'masc_keeper_msg',
+      phase: 'tools/call',
+      cause_code: 'tool_host_transport_unavailable',
+    }))
+    expect(reportToolHostFailure.mock.calls[0]![0].timeout_ms).toBeUndefined()
+  })
+
+  it('does not report a non-timeout ApiRequestError', async () => {
+    fetchWithTimeout.mockRejectedValueOnce(
+      new ApiRequestError({ status: 500, detail: 'internal error' }))
+
+    const { callMcpTool } = await import('./mcp')
+    await expect(callMcpTool('masc_keeper_msg', { message: 'ping' })).rejects.toThrow()
+
+    expect(reportToolHostFailure).not.toHaveBeenCalled()
+  })
+
+  // The regression the typed check removes: a tool error whose own text
+  // contains transport wording was reported as a host failure.
+  it('does not report a tool error whose message reads like a transport failure', async () => {
+    fetchWithTimeout.mockRejectedValueOnce(
+      new Error('tool refused: load failed while parsing the uploaded fixture'))
+
+    const { callMcpTool } = await import('./mcp')
+    await expect(callMcpTool('masc_keeper_msg', { message: 'ping' })).rejects.toThrow()
+
+    expect(reportToolHostFailure).not.toHaveBeenCalled()
   })
 
   it('fails closed after a 403 until client state is reset', async () => {
@@ -273,7 +408,7 @@ describe('MCP 2026-07-28 dashboard client', () => {
     getStoredTokenMeta.mockReturnValue(null)
     fetchWithTimeout
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        token: 'loopback-dev-token', actor: 'dashboard', role: 'worker',
+        token: 'loopback-dev-token', actor: 'dashboard', role: 'admin',
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(okToolResponse())
 
@@ -281,10 +416,68 @@ describe('MCP 2026-07-28 dashboard client', () => {
     await callMcpTool('masc_status', {})
 
     expect(setStoredToken).toHaveBeenCalledWith('loopback-dev-token', {
-      source: 'dev', actor: 'dashboard', role: 'worker',
+      source: 'dev', actor: 'dashboard', role: 'admin',
     })
     expect(fetchWithTimeout.mock.calls.map(call => call[0]))
       .toEqual(['/api/v1/dashboard/dev-token', '/mcp'])
+  })
+
+  /* The loopback dev-token is Admin (#28354), and `ensureDevToken` refuses any
+     other role rather than storing a credential it cannot use. Until this case
+     existed the refusal branch had no test of its own — it was reached by
+     accident, because the fixtures above still served the pre-#28354 `worker`
+     role, which silently turned four tests that meant to exercise bootstrap,
+     identity binding, and token refresh into four assertions about a bootstrap
+     that never ran. Pin the refusal here so those tests can state their own
+     subject. */
+  it('refuses a dev-token payload that is not the Admin contract', async () => {
+    getStoredToken.mockReturnValue(null)
+    getStoredTokenMeta.mockReturnValue(null)
+    fetchWithTimeout
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        token: 'loopback-dev-token', actor: 'dashboard', role: 'worker',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(okToolResponse())
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_status', {})
+
+    expect(setStoredToken).not.toHaveBeenCalled()
+  })
+
+  it('binds identity to a bearer bootstrapped during the call', async () => {
+    let token: string | null = null
+    let meta: { source: 'dev'; actor: 'dashboard'; role: 'admin' } | null = null
+    let revision = 0
+    getStoredToken.mockImplementation(() => token)
+    getStoredTokenMeta.mockImplementation(() => meta)
+    currentStoredTokenRevision.mockImplementation(() => revision)
+    setStoredToken.mockImplementationOnce((nextToken, nextMeta) => {
+      token = nextToken
+      meta = nextMeta
+      revision += 1
+    })
+    fetchWithTimeout
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        token: 'loopback-dev-token', actor: 'dashboard', role: 'admin',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(okToolResponse())
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_transition', {
+      task_id: 'task-223',
+      agent_name: 'target-keeper',
+      _agent_name: 'foreign-caller',
+    })
+
+    const [, init] = callsByMethod('tools/call')[0]!
+    const body = JSON.parse(init.body as string)
+    expect(body.params.arguments).toEqual({
+      task_id: 'task-223',
+      agent_name: 'target-keeper',
+      _agent_name: 'dashboard',
+    })
+    expect(authHeaders).toHaveBeenLastCalledWith({ actorName: 'dashboard' })
   })
 
   it('uses distinct platform UUIDs for consecutive tool request identities', async () => {
@@ -325,8 +518,8 @@ describe('MCP 2026-07-28 dashboard client', () => {
 
   it('refreshes a managed token once on a typed MCP auth result', async () => {
     let token: string | null = 'stale-dev-token'
-    let meta: { source: 'dev'; actor: 'dashboard'; role: 'worker' } | null = {
-      source: 'dev', actor: 'dashboard', role: 'worker',
+    let meta: { source: 'dev'; actor: 'dashboard'; role: 'admin' } | null = {
+      source: 'dev', actor: 'dashboard', role: 'admin',
     }
     let revision = 0
     getStoredToken.mockImplementation(() => token)
@@ -344,7 +537,7 @@ describe('MCP 2026-07-28 dashboard client', () => {
     })
     fetchWithTimeout
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        token: 'stale-dev-token', actor: 'dashboard', role: 'worker',
+        token: 'stale-dev-token', actor: 'dashboard', role: 'admin',
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(`data: ${JSON.stringify({
         result: {
@@ -354,7 +547,7 @@ describe('MCP 2026-07-28 dashboard client', () => {
         },
       })}\n`, { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        token: 'fresh-dev-token', actor: 'dashboard', role: 'worker',
+        token: 'fresh-dev-token', actor: 'dashboard', role: 'admin',
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(okToolResponse())
 
@@ -375,8 +568,8 @@ describe('MCP 2026-07-28 dashboard client', () => {
 
   it('refreshes a managed token once on a typed HTTP 401', async () => {
     let token: string | null = 'stale-dev-token'
-    let meta: { source: 'dev'; actor: 'dashboard'; role: 'worker' } | null = {
-      source: 'dev', actor: 'dashboard', role: 'worker',
+    let meta: { source: 'dev'; actor: 'dashboard'; role: 'admin' } | null = {
+      source: 'dev', actor: 'dashboard', role: 'admin',
     }
     let revision = 0
     getStoredToken.mockImplementation(() => token)
@@ -404,7 +597,7 @@ describe('MCP 2026-07-28 dashboard client', () => {
     })
     fetchWithTimeout
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        token: 'stale-dev-token', actor: 'dashboard', role: 'worker',
+        token: 'stale-dev-token', actor: 'dashboard', role: 'admin',
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         jsonrpc: '2.0',
@@ -416,7 +609,7 @@ describe('MCP 2026-07-28 dashboard client', () => {
         },
       }), { status: 401, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        token: 'fresh-dev-token', actor: 'dashboard', role: 'worker',
+        token: 'fresh-dev-token', actor: 'dashboard', role: 'admin',
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(okToolResponse())
 

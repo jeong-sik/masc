@@ -142,11 +142,11 @@ let panel_meta (o : Fusion_types.panel_outcome) : Yojson.Safe.t =
       ; ("output_tokens", `Int usage.Fusion_types.output_tokens)
       ]
   | Fusion_types.Failed { failed_model; reason } ->
-    let reason_code = Fusion_oas.panel_failure_code reason in
+    let reason_code = Fusion_agent_core.panel_failure_code reason in
     (* reason detail은 실패 시점에 raw model로 이미 attribution됐다. 여기서
        ~runtime_id:failed_model(=panelist)로 재-attribution하면 "skeptic (claude)"
        같은 정체성이 provider 슬롯에 새거나 중복 prefix가 붙는다 (RFC-0278). *)
-    let reason_detail = Fusion_oas.panel_failure_text reason in
+    let reason_detail = Fusion_agent_core.panel_failure_text reason in
     `Assoc
       [ ("model", `String failed_model)
       ; ("status", `String "failed")
@@ -255,6 +255,53 @@ let judge_node_meta (o : Fusion_types.judge_outcome) : Yojson.Safe.t =
          ; ("timed_out", `Bool timed_out)
          ])
 
+(* 종결 실패의 사유. [Keeper_msg_async] 의 lifecycle 상태에서 파생되며, 여기까지
+   typed 로 오는 이유는 wake 가 보낼 terminal 이 사유에 달려 있기 때문이다: 취소는
+   실패가 아니라 취소로 도착해야 키퍼가 재시도 여부를 판단할 수 있다.
+
+   이전에는 이 자리가 [(string code, string detail)] 튜플이었고 wake 는 [~ok:bool]
+   을 받았다. 그래서 [Keeper_event_queue.Fusion_cancelled] 는 typed 로 존재하고
+   렌더러·코덱·테스트까지 갖췄는데 **생산자가 하나도 없었다** — 취소된 run 은 전부
+   [Fusion_failed] 로 도착했다. 사유를 문자열로 접은 뒤 불리언으로 한 번 더 접은
+   결과다. code 문자열은 registry wire 로 남지만(대시보드가 읽는다) 그것은 이
+   합에서 파생되지, 분기를 고르는 입력이 아니다. *)
+type delivery_failure =
+  | Computation_failed of string
+  | Lost of string
+  | Cancelled of
+      { reason : string
+      ; cancelled_by : string
+      }
+  | Persistence_failed of
+      { attempted_status : string
+      ; reason : string
+      }
+  | Evidence_unavailable
+
+let delivery_failure_code = function
+  | Computation_failed _ -> "computation_failed"
+  | Lost _ -> "lost"
+  | Cancelled _ -> "cancelled"
+  | Persistence_failed _ -> "persistence_failed"
+  | Evidence_unavailable -> "evidence_unavailable"
+
+let delivery_failure_detail = function
+  | Computation_failed detail | Lost detail -> detail
+  | Cancelled { reason; cancelled_by } ->
+    Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by
+  | Persistence_failed { attempted_status; reason } ->
+    Printf.sprintf "%s (attempted_status=%s)" reason attempted_status
+  | Evidence_unavailable ->
+    "Fusion computation completed successfully without deliberation evidence"
+
+(* 취소만 [Fusion_cancelled] 로 간다. 나머지는 심의가 실패한 것이고, 취소는
+   심의가 중단된 것이다 — 키퍼에게 다른 사실이다. *)
+let terminal_of_delivery_failure failure ~content =
+  match failure with
+  | Cancelled _ -> Keeper_event_queue.Fusion_cancelled
+  | Computation_failed _ | Lost _ | Persistence_failed _ | Evidence_unavailable ->
+    Keeper_event_queue.Fusion_failed content
+
 (* RFC-0266: 심의 완료 시 호출 키퍼를 typed [Fusion_completed] stimulus로 깨운다.
    board post + chat append(영속)와 별개로, 잠든(Running) 키퍼를 즉시 깨워
    resolved_answer가 다음 턴의 actionable 입력으로 도착하게 하는 hint+payload 경로다.
@@ -296,13 +343,8 @@ let broadcast_run_status ~registry ~run_id =
    stimulus on its next admitted turn (mirrors HITL's post-commit signal).
    Eio structural cancellation (Cancelled) is always re-raised. *)
 let wake_keeper_on_fusion_completion
-      ~base_dir ~keeper ~run_id ~channel ~ok ~resolved_answer ~board_post_id :
+      ~base_dir ~keeper ~run_id ~channel ~terminal ~board_post_id :
     (unit, string) result =
-  let terminal =
-    if ok
-    then Keeper_event_queue.Fusion_succeeded resolved_answer
-    else Keeper_event_queue.Fusion_failed resolved_answer
-  in
   let fusion_completion =
     Keeper_event_queue.{ run_id; terminal; board_post_id; channel }
   in
@@ -327,7 +369,12 @@ let wake_keeper_on_fusion_completion
       "fusion completion wake durable-commit failed run_id=%s: %s" run_id reason;
     Error reason
   | Ok () ->
-    Log.Keeper.info "fusion completion wake: keeper=%s run_id=%s ok=%b" keeper run_id ok;
+    Log.Keeper.info "fusion completion wake: keeper=%s run_id=%s terminal=%s" keeper
+      run_id
+      (match terminal with
+       | Keeper_event_queue.Fusion_succeeded _ -> "succeeded"
+       | Keeper_event_queue.Fusion_failed _ -> "failed"
+       | Keeper_event_queue.Fusion_cancelled -> "cancelled");
     (try
        match
          Keeper_registry.wakeup_running
@@ -362,15 +409,25 @@ let wake_keeper_on_fusion_completion
 let delivery_key_of_run_id run_id =
   Keeper_chat_delivery_identity.Request_id.of_string run_id
   |> Result.map (fun request_id ->
-    Keeper_chat_delivery_identity.Async_request request_id)
+    Keeper_chat_delivery_identity.Fusion_run request_id)
   |> Result.map_error (fun detail ->
     Printf.sprintf "invalid Fusion run delivery identity: %s" detail)
 ;;
 
-let emit ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges ~judge_usage :
+let emit ~registry ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges
+      ~judge_usage :
     (unit, string) result =
   let ( let* ) = Result.bind in
   let* delivery_key = delivery_key_of_run_id run_id in
+  (* The projector registers the run as running before the orchestrator
+     reaches this point, and running entries are never trimmed, so the
+     registry is the single source of the start coordinate. *)
+  let* started_at =
+    match Fusion_run_registry.get registry ~run_id with
+    | Some run -> Ok run.started_at
+    | None ->
+      Error (Printf.sprintf "Fusion run %s is not registered" run_id)
+  in
   try
     (* 비용 관측(제약 아님) — 패널 N + 심판 1 실측 토큰 합산 (RFC §10). board 증거에만
        남긴다 (cost cap은 v1 제외, 측정값만 — 괴상한 제약 제거 원칙). 실패한 패널/심판은
@@ -399,7 +456,7 @@ let emit ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges ~jud
              | Fusion_types.Failed { failed_model; reason } ->
                Some
                  (Printf.sprintf "- %s: %s" failed_model
-                    (Fusion_oas.panel_failure_text reason)))
+                    (Fusion_agent_core.panel_failure_text reason)))
     in
     let render_failure f =
       let base =
@@ -424,6 +481,7 @@ let emit ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges ~jud
       Some
         (`Assoc
            [ ("question", `String question)
+           ; ("started_at", `Float started_at)
            ; ("panel", `List (List.map panel_meta panel))
            ; ("judge", judge_meta judge)
              (* RFC-0284: 실행된 심판 노드 관측 배열 (panel과 동형). 기존 단일 [judge]
@@ -538,20 +596,26 @@ let emit ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges ~jud
        let wake_result =
          match judge with
          | Ok j ->
-           Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
-             ~ok:true ();
-           broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
-           wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel ~ok:true
-             ~resolved_answer:j.Fusion_types.resolved_answer ~board_post_id
+           Fusion_run_registry.mark_completed registry ~run_id
+             ~outcome:Fusion_run_registry.Succeeded;
+           broadcast_run_status ~registry ~run_id;
+           wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel
+             ~terminal:
+               (Keeper_event_queue.Fusion_succeeded j.Fusion_types.resolved_answer)
+             ~board_post_id
          | Error e ->
-           Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
-             ~failure:(Fusion_types.judge_failure_text e)
-             ~failure_code:(Fusion_types.judge_failure_tag e)
-             ~ok:false ();
-           broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
-           wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel ~ok:false
-             ~resolved_answer:
-               (Printf.sprintf "fusion run failed — %s" (render_failure e))
+           Fusion_run_registry.mark_completed registry ~run_id
+             ~outcome:
+               (Fusion_run_registry.Failed
+                  { reason = Fusion_types.judge_failure_text e
+                  ; code = Fusion_types.judge_failure_tag e
+                  });
+           broadcast_run_status ~registry ~run_id;
+           (* 심판이 실패한 것이지 run 이 취소된 것이 아니므로 [Fusion_failed] 다. *)
+           wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel
+             ~terminal:
+               (Keeper_event_queue.Fusion_failed
+                  (Printf.sprintf "fusion run failed — %s" (render_failure e)))
              ~board_post_id
        in
        (* Chat/Board are independently idempotent, but the producer obligation
@@ -569,9 +633,13 @@ let emit ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges ~jud
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
 
-let emit_failure ~base_dir ~keeper ~run_id ~channel ~failure_code ~detail =
+let emit_failure ~registry ~base_dir ~keeper ~run_id ~channel ~failure =
   let ( let* ) = Result.bind in
   let* delivery_key = delivery_key_of_run_id run_id in
+  let failure_code = delivery_failure_code failure in
+  let detail = delivery_failure_detail failure in
+  (* 취소도 chat 본문은 같은 한 줄로 남긴다 — 사람이 읽는 줄은 사유를 이미 담고
+     있고, 분기가 필요한 쪽은 키퍼가 받는 typed terminal 이다. *)
   let content =
     Printf.sprintf "Fusion run `%s` failed (%s): %s" run_id failure_code detail
   in
@@ -587,8 +655,9 @@ let emit_failure ~base_dir ~keeper ~run_id ~channel ~failure_code ~detail =
     | Ok (Keeper_chat_store.Already_present _) -> Ok ()
     | Error _ as error -> error
   in
-  Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
-    ~failure:detail ~failure_code ~ok:false ();
-  broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
-  wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel ~ok:false
-    ~resolved_answer:content ~board_post_id:""
+  Fusion_run_registry.mark_completed registry ~run_id
+    ~outcome:(Fusion_run_registry.Failed { reason = detail; code = failure_code });
+  broadcast_run_status ~registry ~run_id;
+  wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel
+    ~terminal:(terminal_of_delivery_failure failure ~content)
+    ~board_post_id:""

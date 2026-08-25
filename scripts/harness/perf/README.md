@@ -126,7 +126,7 @@ server runs its serialize+compress path as production browsers trigger; set empt
 and `MASC_HARNESS_SERVER_EXE` (pin a specific binary so two builds can be A/B-compared without
 overwriting `_build`).
 
-The booted server runs with `MASC_AUTONOMY_ENABLED=0` (harness lib default): **no keepers run**, so
+The booted server runs with `MASC_KEEPER_AUTONOMOUS_ENABLED=0` (harness lib default): **no keepers run**, so
 the in-process axis is the only "busy domain" source. To exercise the keeper axis, use `--base-url`
 against a live runtime (see below).
 
@@ -147,17 +147,17 @@ keepers that run **real autonomous turns** against `mock_openai_provider.py` (ne
 probes `/health` while those keepers and optional host hogs contend for the one main Eio domain.
 
 ```bash
-# MASC_PERSONA_SOURCE_ROOT points at a populated MASC root (one with
-# config/personas/<persona>); the gate copies that persona into its ephemeral
-# base path. It is resolved from an explicit path, never home-anchored (SSOT-R6).
-MASC_PERSONA_SOURCE_ROOT=<your-masc-root> \
+# MASC_KEEPER_SOURCE_ROOT points at a populated MASC root containing
+# config/keepers/<keeper>.toml. The gate copies that Keeper declaration into its
+# ephemeral base path. It is resolved from an explicit path (SSOT-R6).
+MASC_KEEPER_SOURCE_ROOT=<your-masc-root> \
   MOCK_REPLY_BYTES=150000 INJECT_INTERVAL=0.05 WARM_TURNS_SEC=30 \
   scripts/harness/perf/keeper_load_gate.sh --keepers 24 --levels "0 8" --probes 50
 ```
 
-`MASC_PERSONA_SOURCE_ROOT` is the `.masc` dir that holds `config/personas/<persona>` (e.g.
-`<root>/.masc`); the gate copies that persona into its ephemeral base path (resolved from an explicit
-path, never home-anchored — SSOT-R6).
+`MASC_KEEPER_SOURCE_ROOT` is the `.masc` dir that holds
+`config/keepers/<keeper>.toml` (for example `<root>/.masc`). The gate copies
+that prompt into its ephemeral base path from the explicit root.
 
 `mock_openai_provider.py` serves `POST /v1/chat/completions` in both non-streaming JSON (the
 `backend_openai_request.ml` default `?(stream = false)` path) and SSE `chat.completion.chunk` modes
@@ -166,8 +166,8 @@ path, never home-anchored — SSOT-R6).
 **The boot recipe (verified — keepers issue real turns; FSM reaches `awaiting_provider -> streaming`):**
 
 1. **runtime.toml must borrow a catalog-valid model id.** `Runtime.init_default_strict`
-   (`server_runtime_bootstrap.ml`) rejects any model whose `api-name` is absent from the OAS catalog
-   (the OAS embedded catalog). Set `api-name = "deepseek-v4-flash"` (a catalog `id_prefix`) while pointing
+   (`server_runtime_bootstrap.ml`) rejects any model whose `api-name` is absent from the AGENT_CORE catalog
+   (the AGENT_CORE embedded catalog). Set `api-name = "deepseek-v4-flash"` (a catalog `id_prefix`) while pointing
    the provider `endpoint` at the local mock.
 2. **The keeper TOML must opt into autoboot.** Declarative keepers are excluded by design unless the
    `[keeper]` section sets `autoboot_enabled = true` (`keeper_runtime.ml:154`) **and**
@@ -177,10 +177,10 @@ path, never home-anchored — SSOT-R6).
 3. **The keeper TOML must set `sandbox_profile = "local"`** (or `"docker"`) — boot rejects without it.
 4. Boot env: `MASC_KEEPER_BOOTSTRAP_ENABLED=true`, `MASC_ORCHESTRATOR_ENABLED=1`,
    `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC=<n>`. Boot the exe directly —
-   **not** via `harness_start_server`, which hardcodes the bootstrap off. (`MASC_AUTONOMY_ENABLED`
-   does not exist in the code; the lib sets it as a harmless no-op.)
-5. A persona directory must exist under `$BASE/.masc/config/personas/<persona_name>/`; the gate
-   copies a real one (`analyst`) to avoid format guessing.
+   **not** via `harness_start_server`, which disables Keeper bootstrap and autonomous activation.
+5. Every generated Keeper has a non-empty
+   `$BASE/.masc/config/keepers/<keeper>.toml`; the gate copies a checked-in
+   Keeper prompt as the source.
 
 The gate refuses to report numbers if zero provider calls are seen during warmup (the mock wiring
 is then broken), and it records a `turns_during` column per level.
@@ -278,3 +278,82 @@ constrained by RFC-0059 (keepers are pinned to the main domain; only *serving* m
 go through an RFC, validated by the Mode B keeper-load gate (whose sustained-load refinements have
 landed and now reproduce the keeper-burst RED — the gate Phase 3 must flip GREEN).
 launchd `ProcessType=Interactive` is a worthwhile but partial deployment-side mitigation.
+
+## Mode C: request-cost gate (`request_cost_gate.sh`)
+
+Modes A and B stress *contention*: many requests, or many keepers, competing for the one main
+Eio domain. They answer where work runs and who it queues behind. Mode C holds concurrency at
+**one** and asks a different question — how much does a single request cost?
+
+The distinction matters because the two failures need different fixes. Contention is solved by
+isolation (a dedicated pool or serving domain, RFC-0204). Cost is not: a read that materialises
+the whole store still kills whichever lane it lands on, and its heap is process-global, so every
+keeper shares the GC pressure. Isolation cannot make a large request small.
+
+### What it measures
+
+One heavy request, four axes:
+
+| axis | what it catches |
+|---|---|
+| `probe_p95_ms` | trivial-endpoint p95 while one heavy request is in flight |
+| `rss_peak_delta_mb` | heap growth attributable to that single request |
+| `cancel_recovery_s` | seconds until the probe recovers after the client aborts (3 consecutive healthy probes, so one lucky sample cannot pass it) |
+| `post_abort_heap_growth_mb` | heap growth *after* the client is gone — the unambiguous signal that cancellation did not propagate |
+
+`post_abort_heap_growth_mb` is the axis to trust. Latency is noisy; a heap that keeps climbing
+with no client left to receive the result is not.
+
+### Baseline control
+
+The run refuses to produce a verdict when the idle probe is already slow
+(`MAX_BASELINE_P95_MS`, default 50ms) and exits **1 (ERROR)** rather than 2 (RED). A busy host
+makes every downstream number look like a defect; RFC-0204's first diagnosis was reversed for
+exactly this reason. ERROR means "measurement invalid", not "code is fine".
+
+### Seeding
+
+An empty store cannot reproduce the defect — with little data the full scan is fast. The gate
+seeds a synthetic store (`seed_telemetry_store.py`) of a known shape: `--keepers` per-keeper
+fan-out stores plus the four fixed-path sources, `--entries` rows each, spread over dated
+partitions in the layout the reader expects.
+
+`--keepers` is a parameter because the reader's scan cap is per-store, not per-request. Running
+the gate at two keeper counts shows whether one request's cost tracks store count; if it does,
+the request has no budget of its own.
+
+### Run
+
+```bash
+# Boot mode (self-contained, deterministic). Reuses an existing build.
+MASC_HARNESS_SERVER_EXE=_build/default/bin/main_eio.exe \
+  scripts/harness/perf/request_cost_gate.sh --keepers 8 --entries 20000
+
+# Attach mode against a running server; --server-pid is required for the RSS axes.
+scripts/harness/perf/request_cost_gate.sh \
+  --base-url http://127.0.0.1:8935 --server-pid "$(lsof -ti :8935 -sTCP:LISTEN | head -1)"
+```
+
+Artifacts land in `logs/perf-request-cost/<run-id>/`: `summary.json`, per-probe `probes.csv`,
+and `rss.csv`.
+
+### Measured results (origin/main `7e57a3af79`, M3 Max 16-core, 2026-08-12)
+
+Seed: 8 keepers x 20,000 entries/store = 12 stores, 240,000 entries, 125MB on disk.
+One request to `/api/v1/dashboard/telemetry?n=0`:
+
+| axis | measured | threshold | verdict |
+|---|---|---|---|
+| `probe_p95_ms` | 1128.0 (max 4424.0) | 250 | FAIL |
+| `rss_peak_delta_mb` | 1005.5 | 512 | FAIL |
+| `cancel_recovery_s` | 20.4 | 5 | FAIL |
+| `post_abort_heap_growth_mb` | 315.6 | 64 | FAIL |
+
+A 125MB store yields 1GB of heap from one request — roughly 8x amplification — and the server
+keeps computing for 20 seconds after the client is gone. RED here is the proof the gate catches
+the defect; a gate that passes on current main would be too weak.
+
+Scaling was measured at 4 vs 8 keepers, but only the heap axis is comparable: the 4-keeper run
+had a baseline p95 of 22.1ms against 3.2ms for the 8-keeper run, so its latency numbers carry
+host contention. Heap grew 682.8MB -> 1005.5MB as keepers doubled. The baseline control added
+after that run rejects such a run outright.

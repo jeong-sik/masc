@@ -3,8 +3,6 @@
 module StringMap : module type of Set_util.StringMap
 module IntMap : Map.S with type key = int
 
-val model_id_unknown : string
-
 type recent_entry =
   { re_ts_unix : float
   ; re_provider : string option
@@ -84,7 +82,6 @@ type model_stats =
   ; primary_coverage_stage : string option
   ; primary_coverage_reason : string option
   ; coverage_reason_counts : coverage_reason_count list
-  ; fallback_count : int
   ; success_count : int
   ; error_count : int
   ; total_cost_usd : float option
@@ -120,19 +117,6 @@ type aggregate =
   ; cost_read : cost_read_result
   }
 
-type provider_stats =
-  { ps_provider : string
-  ; ps_entry_count : int
-  ; ps_model_count : int
-  ; ps_avg_tok_per_sec : float option
-  ; ps_avg_prompt_tok_per_sec : float option
-  ; ps_avg_decode_tok_per_sec : float option
-  ; ps_avg_latency_ms : float option
-  ; ps_p50_latency_ms : float option
-  ; ps_p95_latency_ms : float option
-  ; ps_total_cost_usd : float option
-  }
-
 type raw_entry =
   { model : string
   ; provider : string option
@@ -152,7 +136,6 @@ type raw_entry =
   ; cache_read_tokens : int option
   ; cache_creation_tokens : int option
   ; reasoning_tokens : int option
-  ; fallback_applied : bool
   ; cost_usd : float option
   ; tool_call_count : int
   ; tools_used : string list

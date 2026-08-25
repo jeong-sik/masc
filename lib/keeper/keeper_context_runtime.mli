@@ -17,64 +17,55 @@ type session_context = Keeper_types.session_context
 
 (** {1 Working Context Operations} *)
 
-val text_of_message : Agent_sdk.Types.message -> string
+val text_of_message : Agent_core.Types.message -> string
 val message_count : working_context -> int
 val serialized_bytes : working_context -> int
-val checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
-val resume_checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
-val oas_context_of_context : working_context -> Agent_sdk.Context.t
+val checkpoint_of_context : working_context -> Agent_core.Checkpoint.t
+val resume_checkpoint_of_context : working_context -> Agent_core.Checkpoint.t
+val agent_core_context_of_context : working_context -> Agent_core.Context.t
 val system_prompt_of_context : working_context -> string
-val messages_of_context : working_context -> Agent_sdk.Types.message list
+val messages_of_context : working_context -> Agent_core.Types.message list
 val create : eio:bool -> system_prompt:string -> working_context
 val set_system_prompt : working_context -> system_prompt:string -> working_context
-val append : working_context -> Agent_sdk.Types.message -> working_context
-val append_many : working_context -> Agent_sdk.Types.message list -> working_context
-val sync_oas_context : working_context -> working_context
+val append : working_context -> Agent_core.Types.message -> working_context
+val append_many : working_context -> Agent_core.Types.message list -> working_context
+val sync_agent_core_context : working_context -> working_context
 
-val role_to_string : Agent_sdk.Types.role -> string
+val role_to_string : Agent_core.Types.role -> string
 
 (** Strict variant — returns [None] for unrecognised role strings.
     Use this in checkpoint loaders / new code where silently
     misattributing a chat-history message would corrupt the
     LLM-visible conversation. *)
-val role_of_string_opt : string -> Agent_sdk.Types.role option
-val message_to_json : Agent_sdk.Types.message -> Yojson.Safe.t
-val message_of_json : Yojson.Safe.t -> Agent_sdk.Types.message
+val role_of_string_opt : string -> Agent_core.Types.role option
+val message_to_json : Agent_core.Types.message -> Yojson.Safe.t
+val message_of_json : Yojson.Safe.t -> Agent_core.Types.message
 val serialize_context : working_context -> string
 val create_session : session_id:string -> base_dir:string -> session_context
-val persist_message : ?source:string -> session_context -> Agent_sdk.Types.message -> unit
-
-(** {1 Inference Utilities} *)
-
-val timed : (unit -> 'a) -> 'a * int
-val zero_usage : Agent_sdk.Types.api_usage
-val usage_of_response : Agent_sdk.Types.api_response -> Agent_sdk.Types.api_usage
-val total_tokens : Agent_sdk.Types.api_usage -> int
+val persist_message : ?source:string -> session_context -> Agent_core.Types.message -> unit
 
 (** {1 Keeper Context Lifecycle} *)
 
 val log_keeper_exn : label:string -> exn -> unit
 
-val context_of_oas_checkpoint
-  :  Agent_sdk.Checkpoint.t
+val context_of_agent_core_checkpoint
+  :  Agent_core.Checkpoint.t
   -> working_context
 
-val save_oas_checkpoint
+val save_agent_core_checkpoint
   :  multimodal_policy:Keeper_types_profile.multimodal_policy
   -> keeper_name:string
   -> session:session_context
   -> agent_name:string
   -> ctx:working_context
-  -> generation:int
-  -> (Agent_sdk.Checkpoint.t, string Keeper_context_core.checkpoint_write_error) result
+  -> (Agent_core.Checkpoint.t, string Keeper_context_core.checkpoint_write_error) result
 
 type post_turn_lifecycle =
   { updated_meta : keeper_meta
-  ; checkpoint : Agent_sdk.Checkpoint.t option
+  ; checkpoint : Agent_core.Checkpoint.t option
   ; handoff_json : Yojson.Safe.t option
   ; handoff_attempted : bool
   ; handoff_failure_reason : string option
-  ; turn_generation : int
   ; checkpoint_bytes : int
   ; message_count : int
   }
@@ -120,11 +111,9 @@ val compaction_decision_to_string : compaction_decision -> string
 val compaction_decision_applied : compaction_decision -> bool
 val compaction_decision_prepared : compaction_decision -> bool
 
-val apply_post_turn_lifecycle_with_resilience_handles
-  :  resilience_audit_store:Shared_audit.Store.t option
-  -> resilience_strategy_executor:Resilience.Recovery.strategy_executor option
-  -> meta:keeper_meta
-  -> checkpoint:Agent_sdk.Checkpoint.t option
+val apply_post_turn_lifecycle
+  :  meta:keeper_meta
+  -> checkpoint:Agent_core.Checkpoint.t option
   -> post_turn_lifecycle
 
 val dispatch_keeper_phase_event
@@ -165,9 +154,6 @@ val dispatch_post_turn_lifecycle_events
 (** {1 Trace and Board Utilities} *)
 
 val generate_trace_id : ?now:float -> unit -> string
-val keeper_board_write_tool_names : string list
-val keeper_action_kind_of_tool_names : string list -> string
-
 (** {1 Model and Workspace Utilities} *)
 
 val effective_model_labels_for_turn : keeper_meta -> string list
@@ -176,8 +162,6 @@ val resolve_max_context_resolution
   :  requested_override:int option
   -> string list
   -> max_context_resolution
-
-val resolve_max_context_resolution_of_meta : keeper_meta -> max_context_resolution
 
 val resolve_max_context_resolution_for_runtime_id
   :  requested_override:int option
@@ -214,12 +198,6 @@ val build_keeper_system_prompt
   -> unit
   -> string
 
-val append_trait_clause : base:string -> clause:string -> string
-
 (** {1 Fragment Detection (used by dashboard)} *)
 
 val looks_fragmentary_history_text : string -> bool
-
-(** {1 Memory Check} *)
-
-val memory_check_default_json : unit -> Yojson.Safe.t

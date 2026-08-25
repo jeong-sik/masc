@@ -1,9 +1,14 @@
+---
+rfc: "0206"
+status: Draft
+---
+
 # RFC-0206: Runtime 개념 — runtime→Runtime 재탄생
 
 - Status: Draft
 - Date: 2026-05-30
 - Supersedes 라우팅 레이어: RFC-0038(routing-intent), RFC-0041(group-item-hierarchy), RFC-0058 §Layer-4/5(routes/aliases), RFC-0181(routes+phonebook dual-SSOT)
-- Superseded (partial): binding-key id 형식(`id = "provider.model"`, §2)은 RFC-0211이 supersede — id는 masc에 opaque, OAS만 parser. single-binding 모델/fail-fast load/§2.1은 유지.
+- Superseded (partial): binding-key id 형식(`id = "provider.model"`, §2)은 runtime assignment contract이 supersede — id는 masc에 opaque, agent_core만 parser. single-binding 모델/fail-fast load/§2.1은 유지.
 - Builds on: RFC-0058(provider/model/binding 선언 스키마, Layers 1-3), keeper_meta_contract(HEAD; exhaustion 분류)
 - Context: PR #19536이 `lib/runtime*`(170+파일) 전면 삭제 + 빌드 의도적 broken. 본 RFC는 그 후속 "Runtime 구현 채우기"의 설계 SSOT.
 
@@ -37,11 +42,11 @@ Runtime은 하나의 완전히 materialize된 (Provider × Model × Binding) tri
 | `api_format` | `Messages_api \| Chat_completions_api \| Ollama_api` | `runtime_api_format` |
 | `transport` | `Http of string \| Cli of string` | `runtime_transport` |
 | `credential` | `Env of string \| File of string \| Inline of string` | `runtime_credential` |
-| `thinking_control_format` | OAS `Llm_provider.Capabilities.thinking_control_format` re-export (`No_thinking_control`, `Thinking_object`, `Thinking_object_adaptive`, `Thinking_object_only`, `Chat_template_kwargs`, `Chat_template_token of string`, `Ollama_think`, `Reasoning_effort`, `Enable_thinking`) | `runtime_thinking_control_format` |
+| `thinking_control_format` | agent_core `Llm_provider.Capabilities.thinking_control_format` re-export (`No_thinking_control`, `Thinking_object`, `Thinking_object_adaptive`, `Thinking_object_only`, `Chat_template_kwargs`, `Chat_template_token of string`, `Ollama_think`, `Reasoning_effort`, `Enable_thinking`) | `runtime_thinking_control_format` |
 | `capabilities` | 10-field provider 행동 record + `capabilities_default` | `runtime_capabilities` |
 | `model_capabilities` | 24-field record (`Llm_provider.Capabilities` 미러) + default | `runtime_model_capabilities` |
 | `provider` | Layer 1 record (id/display_name/protocol/api_format/transport/is_non_interactive/credentials/capabilities/headers). log·healthcheck sub-record는 v1에서 parse-and-ignore | `runtime_provider` |
-| `model_spec` | Layer 2 record (id/api_name/tools_support/max_context/thinking_support/max_thinking_budget/streaming/capabilities/match_prefixes) | `runtime_model_spec` |
+| `model_spec` | Layer 2 record (id/api_name/tools_support/max_context/thinking_support/max_thinking_budget/streaming/capabilities). `match_prefixes` 는 R4 가 matcher 포팅을 금지했으므로 필드도 두지 않는다 | `runtime_model_spec` |
 | `binding` | Layer 3 record (provider_id/model_id/is_default/optional max_concurrent/price_*/keep_alive/num_ctx) + `binding_key` | `runtime_binding` |
 | `config` | `{ providers; models; bindings; default_runtime_id }` — **routes/system_targets/profiles/aliases DROP** | `runtime_config` minus routing |
 
@@ -62,7 +67,7 @@ runtime 5-state(`Idle/Selecting/Trying/Done/Exhausted`)는 다중후보 selectio
 
 **계승(INHERIT):**
 - `keeper_meta_contract`의 exhaustion_reason + blocker_class (frozen, 재사용)
-- `Llm_provider.Provider_config.t`를 `Runtime.t.provider_config` hot-path 대상으로 (외부 OAS lib, 생존)
+- `Llm_provider.Provider_config.t`를 `Runtime.t.provider_config` hot-path 대상으로 (외부 agent_core lib, 생존)
 - RFC-0058 절대 원칙: 코드는 provider/model 이름을 모른다 — provider 추가 = TOML 항목만, 재컴파일 없음
 - RFC-0058 §4.1 load-time validation = `Runtime.load_list`의 fail-fast gate
 - `binding.max_concurrent` is optional metadata for explicit operator overrides; missing means no static per-binding cap. It does not replace URL/probe-based capacity by default.

@@ -14,9 +14,25 @@ let pp_error fmt = function
       Format.fprintf fmt "Slack API error: %s" error
   | Other msg -> Format.fprintf fmt "Other: %s" msg
 
+let effect_disposition = function
+  | Slack_api _ -> Tool_result.Proven_pre_effect
+  | Network _ | Http_status _ -> Tool_result.Effect_outcome_unknown
+  | Other _ ->
+    (* [Other] carries two facts the wire type does not separate: a
+       non-JSON response (nothing proven) and [ok=true] with no [ts]
+       (the message was posted). Reporting the weaker
+       [Effect_outcome_unknown] is sound for both — it only ever
+       withholds correction, never permits a retry of a committed send.
+       Separating them belongs with a split of the [Other] constructor in
+       {!Slack_rest_client}. *)
+    Tool_result.Effect_outcome_unknown
+;;
+
 let slack_message_limit = 4000
 let slack_max_blocks = 50
 let slack_block_text_limit = 3000
+let slack_markdown_limit = 12_000
+let min_edit_interval_s = Slack_rest_client.streaming_update_min_interval_sec
 
 let redact content = Observability_redact.redact_text content
 
@@ -38,6 +54,20 @@ let split_at_codepoint s ~limit =
 
 let truncate_to_limit s limit = fst (split_at_codepoint s ~limit)
 
+let is_ascii_space = function
+  | ' ' | '\n' | '\r' | '\t' -> true
+  | _ -> false
+
+let stable_stream_prefix content =
+  let len = String.length content in
+  let rec find index =
+    if index < 0 then 0
+    else if is_ascii_space content.[index] then index + 1
+    else find (index - 1)
+  in
+  let stable_len = find (len - 1) in
+  if stable_len = 0 then "" else String.sub content 0 stable_len
+
 let escape_mrkdwn_text s =
   let buf = Buffer.create (String.length s) in
   String.iter
@@ -48,6 +78,19 @@ let escape_mrkdwn_text s =
       | c -> Buffer.add_char buf c)
     s;
   Buffer.contents buf
+
+let stream_content content =
+  content
+  |> stable_stream_prefix
+  |> redact
+  |> escape_mrkdwn_text
+  |> fun value -> truncate_to_limit value slack_message_limit
+
+let final_stream_content content =
+  content
+  |> redact
+  |> escape_mrkdwn_text
+  |> fun value -> truncate_to_limit value slack_message_limit
 
 let truncate_block_text s = truncate_to_limit s slack_block_text_limit
 
@@ -101,16 +144,6 @@ let image_block_json ~url ~caption =
     ; ("alt_text", `String alt_text)
     ]
 
-(* Plain mrkdwn section for notices that have no URL (e.g. an attachment
-   whose stored metadata failed the typed decode — the surface must name it,
-   not drop it). Same redact/escape/truncate pipeline as the other builders. *)
-let section_block_json ~text =
-  let text = redact text |> escape_mrkdwn_text |> truncate_block_text in
-  `Assoc
-    [ ("type", `String "section")
-    ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String text) ])
-    ]
-
 let audio_block_json ~base_url ~token ~message_text =
   let url = public_voice_audio_url ?base_url token |> escape_mrkdwn_text in
   let message_text = redact message_text |> escape_mrkdwn_text in
@@ -153,6 +186,45 @@ let status_block_json ({ Keeper_chat_blocks.kind } : Keeper_chat_blocks.status_b
     ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String body) ])
     ]
 
+let escape_markdown_mentions text =
+  let length = String.length text in
+  let buffer = Buffer.create length in
+  let rec copy index =
+    if index < length then
+      if
+        text.[index] = '<'
+        && index + 1 < length
+        && (text.[index + 1] = '@' || text.[index + 1] = '!')
+      then (
+        Buffer.add_string buffer "&lt;";
+        copy (index + 1)
+      ) else (
+        Buffer.add_char buffer text.[index];
+        copy (index + 1)
+      )
+  in
+  copy 0;
+  Buffer.contents buffer
+
+let markdown_block_json text =
+  let text =
+    redact text
+    |> escape_markdown_mentions
+    |> fun value -> truncate_to_limit value slack_markdown_limit
+  in
+  `Assoc [ "type", `String "markdown"; "text", `String text ]
+
+let mention_block_json user_ids =
+  let text =
+    user_ids
+    |> List.map (Printf.sprintf "<@%s>")
+    |> String.concat " "
+  in
+  `Assoc
+    [ "type", `String "section"
+    ; "text", `Assoc [ "type", `String "mrkdwn"; "text", `String text ]
+    ]
+
 (* ── Content → Slack blocks ──────────────────────────────────────── *)
 
 let slack_block_of_chat_block = function
@@ -186,9 +258,38 @@ let slack_block_of_chat_block = function
   | Keeper_chat_blocks.Thinking _ -> None
 
 let content_blocks_of_text text =
-  text
-  |> Keeper_chat_blocks.parse_text_to_blocks
-  |> List.filter_map slack_block_of_chat_block
+  if String.trim text = "" then []
+  else
+    let media_blocks =
+      text
+      |> Keeper_chat_blocks.parse_text_to_blocks
+      |> List.filter_map (function
+        | Keeper_chat_blocks.Image _ as block -> slack_block_of_chat_block block
+        | Keeper_chat_blocks.Text _
+        | Keeper_chat_blocks.Heading _
+        | Keeper_chat_blocks.Unordered_list _
+        | Keeper_chat_blocks.Callout _
+        | Keeper_chat_blocks.Table _
+        | Keeper_chat_blocks.Code _
+        | Keeper_chat_blocks.Mermaid _
+        | Keeper_chat_blocks.Svg _
+        | Keeper_chat_blocks.Voice _
+        | Keeper_chat_blocks.Attach _
+        | Keeper_chat_blocks.Link _
+        | Keeper_chat_blocks.Fusion _
+        | Keeper_chat_blocks.Status _
+        | Keeper_chat_blocks.Trace _
+        | Keeper_chat_blocks.Thinking _ -> None)
+    in
+    markdown_block_json text :: media_blocks
+
+let message_blocks_of_text ~mention_user_ids text =
+  let mention_blocks =
+    match mention_user_ids with
+    | [] -> []
+    | user_ids -> [ mention_block_json user_ids ]
+  in
+  mention_blocks @ content_blocks_of_text text
 
 let final_message_blocks ~content ~event_blocks =
   content_blocks_of_text content @ event_blocks
@@ -235,6 +336,20 @@ let build_message_body ~channel ~content ~blocks ?thread_ts () =
   in
   `Assoc fields |> Yojson.Safe.to_string
 
+let build_update_message_body ~channel ~message_id ~content ~blocks =
+  let fields =
+    [ "channel", `String channel
+    ; "ts", `String message_id
+    ; "text", `String content
+    ]
+  in
+  let fields =
+    match blocks with
+    | [] -> fields
+    | _ -> fields @ [ "blocks", `List blocks ]
+  in
+  `Assoc fields |> Yojson.Safe.to_string
+
 let build_thread_status_body ~channel ~thread_ts ~status =
   `Assoc
     [ "channel_id", `String channel
@@ -275,10 +390,19 @@ let set_thread_status ?clock
 
 let send_message_with_blocks ?clock
     ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
-    ?thread_ts ~token ~channel ~content ~blocks () =
-  let content =
+    ?thread_ts ?(mention_user_ids = []) ~token ~channel ~content ~blocks () =
+  let fallback_content =
     redact content |> escape_mrkdwn_text |> fun s ->
     truncate_to_limit s slack_message_limit
+  in
+  let content =
+    match mention_user_ids with
+    | [] -> fallback_content
+    | user_ids ->
+      let mentions =
+        user_ids |> List.map (Printf.sprintf "<@%s>") |> String.concat " "
+      in
+      truncate_to_limit (mentions ^ "\n" ^ fallback_content) slack_message_limit
   in
   let blocks = limit_blocks_for_slack blocks in
   let body_json = build_message_body ~channel ~content ~blocks ?thread_ts () in
@@ -323,12 +447,90 @@ let send_message ?clock ?timeout_sec ?thread_ts ~token ~channel ~content () =
   send_message_with_blocks ?clock ?timeout_sec ?thread_ts
     ~token ~channel ~content ~blocks:[] ()
 
+let error_of_slack_rest = function
+  | Slack_rest_client.Network message -> Network message
+  | Slack_rest_client.Http_status { code; body } -> Http_status { code; body }
+  | Slack_rest_client.Slack_api { error } -> Slack_api { error }
+  | Slack_rest_client.Other message -> Other message
+
+let edit_message_with_blocks ?clock
+    ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
+    ~token ~channel ~message_id ~content ~blocks () =
+  let content = final_stream_content content in
+  let blocks = limit_blocks_for_slack blocks in
+  let body = build_update_message_body ~channel ~message_id ~content ~blocks in
+  match
+    Masc_http_client.post_sync ?clock ~timeout_sec
+      ~url:"https://slack.com/api/chat.update"
+      ~headers:
+        [ "Authorization", "Bearer " ^ token
+        ; "Content-Type", "application/json"
+        ]
+      ~body ()
+  with
+  | Error error -> Error (Network error)
+  | Ok (code, response_body) when code < 200 || code >= 300 ->
+    Error (Http_status { code; body = response_body })
+  | Ok (_, response_body) ->
+    (try
+       let json = Yojson.Safe.from_string response_body in
+       match Json_util.get_bool json "ok" with
+       | Some true -> Ok ()
+       | Some false ->
+         (match Json_util.get_string json "error" with
+          | Some error -> Error (Slack_api { error })
+          | None -> Error (Other "Slack chat.update returned ok=false"))
+       | None -> Error (Other "Slack chat.update response is missing ok")
+     with
+     | Yojson.Json_error message ->
+       Error (Other ("Slack chat.update JSON parse error: " ^ message)))
+
+let delete_message ?clock
+    ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
+    ~token ~channel ~message_id () =
+  let body =
+    `Assoc [ "channel", `String channel; "ts", `String message_id ]
+    |> Yojson.Safe.to_string
+  in
+  match
+    Masc_http_client.post_sync ?clock ~timeout_sec
+      ~url:"https://slack.com/api/chat.delete"
+      ~headers:
+        [ "Authorization", "Bearer " ^ token
+        ; "Content-Type", "application/json"
+        ]
+      ~body ()
+  with
+  | Error error -> Error (Network error)
+  | Ok (code, response_body) when code < 200 || code >= 300 ->
+    Error (Http_status { code; body = response_body })
+  | Ok (_, response_body) ->
+    (try
+       let json = Yojson.Safe.from_string response_body in
+       match Json_util.get_bool json "ok" with
+       | Some true -> Ok ()
+       | Some false ->
+         (match Json_util.get_string json "error" with
+          | Some error -> Error (Slack_api { error })
+          | None -> Error (Other "Slack chat.delete returned ok=false"))
+       | None -> Error (Other "Slack chat.delete response is missing ok")
+     with
+     | Yojson.Json_error message ->
+       Error (Other ("Slack chat.delete JSON parse error: " ^ message)))
+
 (* ── Adapter loop ────────────────────────────────────────────────── *)
 
 let add_block acc block = block :: acc
 
 let adapter_loop_with_transport
     ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t)
+    ?post_stream
+    ?edit_stream
+    ?edit_blocks
+    ?delete_stream
+    (* NDT-OK: wall time only paces external Slack edits; tests inject [now]. *)
+    ?(now = Unix.gettimeofday)
+    ?(sleep = fun _ -> ())
     ~(send_plain : content:string -> (unit, error) result)
     ~(send_blocks :
        content:string -> blocks:Yojson.Safe.t list -> (unit, error) result)
@@ -336,6 +538,8 @@ let adapter_loop_with_transport
     ?base_url
     ?(on_send_result = fun _ -> ()) () =
   let external_effect_completed = ref false in
+  let tool_trail = ref (Keeper_chat_tool_trail.create ()) in
+  let external_effect_cleanup_result = ref (Ok ()) in
   let activity_error_logged = ref false in
   let last_activity_status = ref None in
   let update_activity status =
@@ -355,55 +559,157 @@ let adapter_loop_with_transport
     end
   in
   let clear_activity () = update_activity "" in
-  let rec loop ~acc_text ~acc_blocks ~run_id_opt =
-    match Keeper_chat_events.subscribe events with
+  let streaming_transport =
+    match post_stream, edit_stream, edit_blocks, delete_stream with
+    | Some post, Some edit, Some edit_final, Some delete ->
+      Some (post, edit, edit_final, delete)
+    | None, None, None, None -> None
+    | _ -> invalid_arg "Slack streaming transport must be supplied as one closed set"
+  in
+  let pace_edit last_edit_time =
+    let remaining = min_edit_interval_s -. (now () -. last_edit_time) in
+    if remaining > 0.0 then sleep remaining
+  in
+  let rec loop ~acc_text ~acc_blocks ~run_id_opt ~message_id
+      ~last_edit_time ~last_edited_text =
+    let continue ?(acc_text = acc_text) ?(acc_blocks = acc_blocks)
+        ?(run_id_opt = run_id_opt) ?(message_id = message_id)
+        ?(last_edit_time = last_edit_time)
+        ?(last_edited_text = last_edited_text) () =
+      loop ~acc_text ~acc_blocks ~run_id_opt ~message_id ~last_edit_time
+        ~last_edited_text
+    in
+    let event = Keeper_chat_events.subscribe events in
+    (* Tool activity shows here as a transient "사용 중" line that the next one
+       overwrites; the trail keeps the same events so the delivered reply can
+       still name the work. See keeper_chat_tool_trail.mli. *)
+    Keeper_chat_tool_trail.on_event !tool_trail event;
+    match event with
     | Text_delta text ->
-        loop ~acc_text:(acc_text ^ text) ~acc_blocks ~run_id_opt
+        let acc_text = acc_text ^ text in
+        let patch_content = stream_content acc_text in
+        (match streaming_transport, message_id with
+         | None, _ -> continue ~acc_text ()
+         | Some _, None when patch_content = "" ->
+           continue ~acc_text ()
+         | Some (post, _, _, _), None ->
+           (match post ~content:patch_content with
+            | Ok created_id ->
+              continue ~acc_text ~message_id:(Some created_id)
+                ~last_edit_time:(now ()) ~last_edited_text:patch_content ()
+            | Error error ->
+              Log.Keeper.warn
+                "keeper_chat_slack: streaming POST failed: %s"
+                (Format.asprintf "%a" pp_error error);
+              continue ~acc_text ())
+         | Some (_, edit, _, _), Some message_id ->
+           let elapsed = now () -. last_edit_time in
+           if patch_content = last_edited_text || elapsed < min_edit_interval_s
+           then continue ~acc_text ()
+           else
+             (match edit ~message_id ~content:patch_content with
+              | Ok () ->
+                continue ~acc_text ~last_edit_time:(now ())
+                  ~last_edited_text:patch_content ()
+              | Error error ->
+                Log.Keeper.warn
+                  "keeper_chat_slack: streaming PATCH failed (message_id=%s): %s"
+                  message_id
+                  (Format.asprintf "%a" pp_error error);
+                continue ~acc_text ()))
     | Text_message_end ->
-        loop ~acc_text ~acc_blocks ~run_id_opt
+        let final_content = final_stream_content acc_text in
+        (match streaming_transport, message_id with
+         | Some (_, edit, _, _), Some message_id
+           when final_content <> last_edited_text ->
+           pace_edit last_edit_time;
+           (match edit ~message_id ~content:final_content with
+            | Ok () ->
+              continue ~last_edit_time:(now ())
+                ~last_edited_text:final_content ()
+            | Error error ->
+              Log.Keeper.warn
+                "keeper_chat_slack: text-end PATCH failed (message_id=%s): %s"
+                message_id
+                (Format.asprintf "%a" pp_error error);
+              continue ())
+         | _ -> continue ())
     | Run_finished { run_id = _ } ->
         if !external_effect_completed
-        then on_send_result (Ok ())
+        then on_send_result !external_effect_cleanup_result
         else begin
+          let delivered_text = Keeper_chat_tool_trail.append_to !tool_trail ~text:acc_text in
           let blocks =
-            final_message_blocks ~content:acc_text
+            final_message_blocks ~content:delivered_text
               ~event_blocks:(List.rev acc_blocks)
           in
-          if String.length acc_text > 0 || List.length blocks > 0
-          then on_send_result (send_blocks ~content:acc_text ~blocks)
+          (* [delivered_text] is what goes out — the accumulated text plus the
+             tool trail. Asking about [acc_text] asked about a different value:
+             a tool-only turn has no assistant text but does have a trail, and
+             settled Error while the turn layer settled Delivered (#26406). *)
+          if String.length delivered_text > 0 || List.length blocks > 0
+          then
+            let result =
+              match streaming_transport, message_id with
+              | Some (_, _, edit_final, _), Some message_id ->
+                let final_content = final_stream_content delivered_text in
+                if final_content = last_edited_text && blocks = []
+                then Ok ()
+                else begin
+                  pace_edit last_edit_time;
+                  edit_final ~message_id ~content:delivered_text ~blocks
+                end
+              | _ -> send_blocks ~content:delivered_text ~blocks
+            in
+            on_send_result result
           else
             on_send_result
               (Error (Other "Slack terminal reply contained no text or blocks"))
         end;
         clear_activity ();
         ()
-    | External_effect_completed ->
+    | External_effect_completed _ ->
         external_effect_completed := true;
-        loop ~acc_text ~acc_blocks ~run_id_opt
+        (match streaming_transport, message_id with
+         | Some (_, _, _, delete), Some message_id ->
+           external_effect_cleanup_result := delete ~message_id
+         | _ -> ());
+        continue ()
     | Event_error { message } ->
-        on_send_result (send_plain ~content:("Keeper error: " ^ message));
+        let content = "Keeper error: " ^ message in
+        let result =
+          match streaming_transport, message_id with
+          | Some (_, edit, _, _), Some message_id ->
+            pace_edit last_edit_time;
+            edit ~message_id ~content:(final_stream_content content)
+          | _ -> send_plain ~content
+        in
+        on_send_result result;
         clear_activity ();
         ()
     | Run_started { run_id; thread_id = _ } ->
         update_activity "답변을 준비하고 있어요…";
+        (* A new run's work is its own; the previous run's trail went out with
+           the previous run's reply. *)
+        tool_trail := Keeper_chat_tool_trail.create ();
         loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:(Some run_id)
+          ~message_id:None ~last_edit_time:0.0 ~last_edited_text:""
     | Text_message_start { message_id = _; role = _ } ->
-        loop ~acc_text ~acc_blocks ~run_id_opt
-    | Custom { name; value = _ } ->
-        Log.Keeper.debug "keeper_chat_slack: custom event %s" name;
-        loop ~acc_text ~acc_blocks ~run_id_opt
-    | Oas_stream_connected
-    | Oas_stream_message_start _
-    | Oas_stream_message_delta _
-    | Oas_stream_message_stop
-    | Oas_stream_ping
-    | Oas_content_block_start _
-    | Oas_content_block_stop _
-    | Oas_thinking_delta _
-    | Oas_thinking_signature_delta _
-    | Oas_media_delta _ ->
-        loop ~acc_text ~acc_blocks ~run_id_opt
-    | Oas_stream_protocol_error error ->
+        continue ()
+    | Reply_details _
+    | Continuation_checkpoint _
+    | Agent_core_stream_connected
+    | Agent_core_stream_message_start _
+    | Agent_core_stream_message_delta _
+    | Agent_core_stream_message_stop
+    | Agent_core_stream_ping
+    | Agent_core_content_block_start _
+    | Agent_core_content_block_stop _
+    | Agent_core_thinking_delta _
+    | Agent_core_thinking_signature_delta _
+    | Agent_core_media_delta _ ->
+        continue ()
+    | Agent_core_stream_protocol_error error ->
         (* This is an interim diagnostic, not the terminal queued-message
            delivery receipt. Reporting it through [on_send_result] could let a
            successful diagnostic mask a later final-send failure. *)
@@ -418,28 +724,37 @@ let adapter_loop_with_transport
            Log.Keeper.warn
              "keeper_chat_slack: protocol diagnostic delivery failed: %s"
              (Format.asprintf "%a" pp_error error));
-        loop ~acc_text ~acc_blocks ~run_id_opt
-    | Tool_call_start _ ->
-        update_activity "필요한 작업을 진행하고 있어요…";
-        loop ~acc_text ~acc_blocks ~run_id_opt
-    | Tool_call_args _ | Tool_call_args_snapshot _ | Tool_call_end _ ->
-        loop ~acc_text ~acc_blocks ~run_id_opt
+        continue ()
+    | Tool_call_start { tool_call_name; _ } ->
+        update_activity (Printf.sprintf "🔧 %s 사용 중…" tool_call_name);
+        continue ()
+    (* An approval prompt has no operator on a connector channel: nobody is
+       sitting there to answer y/n, and posting the question would ask a room
+       to decide something it cannot. Approval is offered on the operator's
+       own surface, so this never arrives here -- it is spelled out rather
+       than left to a catch-all so a future surface has to make the same
+       decision deliberately. *)
+    | Tool_call_args _ | Tool_call_args_snapshot _ | Tool_call_end _
+    | Tool_approval_requested _ | Tool_approval_settled _
+    | Tool_result_ready _ ->
+        continue ()
     | Link_block { url; title; description; image = _ } ->
         let block = link_block_json ~url ~title ~description in
-        loop ~acc_text ~acc_blocks:(add_block acc_blocks block) ~run_id_opt
+        continue ~acc_blocks:(add_block acc_blocks block) ()
     | Image_block { url; caption } ->
         let block = image_block_json ~url ~caption in
-        loop ~acc_text ~acc_blocks:(add_block acc_blocks block) ~run_id_opt
+        continue ~acc_blocks:(add_block acc_blocks block) ()
     | Status_block status ->
         let block = status_block_json status in
-        loop ~acc_text:"" ~acc_blocks:(add_block acc_blocks block) ~run_id_opt
+        continue ~acc_text:"" ~acc_blocks:(add_block acc_blocks block) ()
     | Audio_block { token; mime = _; message_text; duration_sec = _ } ->
         let block = audio_block_json ~base_url ~token ~message_text in
-        loop ~acc_text ~acc_blocks:(add_block acc_blocks block) ~run_id_opt
+        continue ~acc_blocks:(add_block acc_blocks block) ()
     | Tool_context_block _ ->
-        loop ~acc_text ~acc_blocks ~run_id_opt
+        continue ()
   in
-  loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:None
+  loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:None ~message_id:None
+    ~last_edit_time:0.0 ~last_edited_text:""
 
 let adapter_loop ~clock ~token ~channel ?thread_ts ~events ?base_url
     ?on_send_result () =
@@ -455,6 +770,20 @@ let adapter_loop ~clock ~token ~channel ?thread_ts ~events ?base_url
         None
   in
   adapter_loop_with_transport
+    ~post_stream:(fun ~content ->
+      Slack_rest_client.send_message ~clock ~token ~channel_id:channel
+        ~text:content ?thread_ts ()
+      |> Result.map_error error_of_slack_rest)
+    ~edit_stream:(fun ~message_id ~content ->
+      Slack_rest_client.edit_message ~clock ~token ~channel_id:channel
+        ~ts:message_id ~text:content ()
+      |> Result.map_error error_of_slack_rest)
+    ~edit_blocks:(fun ~message_id ~content ~blocks ->
+      edit_message_with_blocks ~clock ~token ~channel ~message_id ~content
+        ~blocks ())
+    ~delete_stream:(fun ~message_id ->
+      delete_message ~clock ~token ~channel ~message_id ())
+    ~sleep:(Eio.Time.sleep clock)
     ~send_plain:(fun ~content ->
       send_message ~clock ?thread_ts ~token ~channel ~content ())
     ~send_blocks:(fun ~content ~blocks ->
@@ -470,6 +799,9 @@ module For_testing = struct
   let image_block_json = image_block_json
   let audio_block_json = audio_block_json
   let content_blocks_of_text = content_blocks_of_text
+  let message_blocks_of_text = message_blocks_of_text
+  let markdown_block_json = markdown_block_json
+  let mention_block_json = mention_block_json
   let final_message_blocks = final_message_blocks
   let build_message_body = build_message_body
   let build_thread_status_body = build_thread_status_body

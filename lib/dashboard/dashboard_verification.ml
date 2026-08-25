@@ -23,14 +23,13 @@ let clamp_limit limit =
   else if l > max_limit then max_limit
   else l
 
-(** Criteria carry the "completion_contract" in their Custom text. *)
+(** Criteria are the exact completion-contract statements. *)
 let completion_contract_of_criteria (criteria : V.criterion list) : string list =
-  List.map (fun (V.Custom text) -> text) criteria
+  criteria
 
 (** Read one required current-schema evidence list. Empty arrays are valid;
-    missing or malformed fields carry a public projection error. No legacy
-    field aliases are consulted and malformed arrays are never partially
-    projected. *)
+    missing or malformed fields carry a public projection error and malformed
+    arrays are never partially projected. *)
 let string_list_of_output field (output : Yojson.Safe.t)
   : string list * string option =
   let missing () =
@@ -154,19 +153,27 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
 
 (* ── Snapshot assembly ──────────────────────────────── *)
 
-(** Load the raw verification request list from the supplied MASC base_path.
+(** Load the request scan from the supplied MASC base_path.
 
-    Protected against filesystem errors — failures surface as an empty
-    list plus a log line, matching the tolerance
-    [Verification.list_requests] already offers on a missing dir. *)
-let load_requests ~base_path () : V.verification_request list =
-  try V.list_requests base_path
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-      Log.Task.warn "[dashboard-verification] list_requests failed: %s"
-        (Printexc.to_string exn);
-      []
+    [failwith] is kept for the directory-level error, where the scan produced
+    no knowledge at all and a projection would be inventing one. A file the
+    schema cannot read is not that case: it arrives in [unreadable] and is
+    reported alongside the requests that did read. Before this, one such file
+    raised here and the whole endpoint answered 500, which named a single path
+    while hiding how many records the reader had actually rejected. *)
+let load_scan ~base_path () : V.request_scan =
+  match V.list_requests base_path with
+  | Ok scan -> scan
+  | Error detail -> failwith detail
+
+(* Operator-facing shape for the files the reader could not parse. Emitted on
+   every projection that reads the store, so an unreadable record is visible
+   without having to correlate a counter against a log line. *)
+let unreadable_fields (scan : V.request_scan) =
+  [ ("unreadable_total", `Int (List.length scan.V.unreadable))
+  ; ( "unreadable"
+    , `List (List.map V.unreadable_to_yojson scan.V.unreadable) )
+  ]
 
 (** Filter by task_id when the caller requested a specific task. Empty
     string is treated as "no filter" to match the HTTP contract. *)
@@ -191,8 +198,8 @@ let fd_pressure_fields () = Keeper_fd_pressure.projection_fields ()
 (* Compute the request-listing projection from an already-loaded list.
    Factored out so [proof_compose] can share the disk scan between
    summary and request listing. *)
-let requests_json_of_requests ?task_id ~limit all : Yojson.Safe.t =
-  let filtered = filter_by_task_id all task_id in
+let requests_json_of_requests ?task_id ~limit (scan : V.request_scan) : Yojson.Safe.t =
+  let filtered = filter_by_task_id scan.V.readable task_id in
   let sorted = sort_desc filtered in
   let trimmed = take limit sorted in
   `Assoc
@@ -200,37 +207,35 @@ let requests_json_of_requests ?task_id ~limit all : Yojson.Safe.t =
      ; ("total", `Int (List.length filtered))
      ; ("requests", `List (List.map request_to_json trimmed))
      ]
+     @ unreadable_fields scan
      @ fd_pressure_fields ())
 
 let requests_json ~base_path ?task_id ?limit () : Yojson.Safe.t =
   let limit = clamp_limit limit in
-  let all = load_requests ~base_path () in
-  requests_json_of_requests ?task_id ~limit all
+  let scan = load_scan ~base_path () in
+  requests_json_of_requests ?task_id ~limit scan
 
 let summary_json ~base_path () : Yojson.Safe.t =
-  let all = load_requests ~base_path () in
+  let scan = load_scan ~base_path () in
   `Assoc
     ([ ("updated_at", `String (Masc_domain.now_iso ()))
-     ; ("total", `Int (List.length all))
+     ; ("total", `Int (List.length scan.V.readable))
      ]
+     @ unreadable_fields scan
      @ fd_pressure_fields ())
 
-(* Single-load companion for handlers that emit both projections
-   side-by-side ([/api/v1/dashboard/proof] is the live caller).
-
-   [summary_json] and [requests_json] each call [load_requests], so
-   the historic proof handler scanned the verification store twice
-   per refresh.  This helper performs one scan and folds the two
-   projections from the shared list. *)
+(* Single-load companion for handlers that emit both projections side by side.
+   One request-store scan feeds both projections. *)
 let proof_compose ~base_path ?limit () : Yojson.Safe.t * Yojson.Safe.t =
   let limit = clamp_limit limit in
-  let all = load_requests ~base_path () in
+  let scan = load_scan ~base_path () in
   let summary =
     `Assoc
       ([ ("updated_at", `String (Masc_domain.now_iso ()))
-       ; ("total", `Int (List.length all))
+       ; ("total", `Int (List.length scan.V.readable))
        ]
+       @ unreadable_fields scan
        @ fd_pressure_fields ())
   in
-  let requests = requests_json_of_requests ~limit all in
+  let requests = requests_json_of_requests ~limit scan in
   summary, requests

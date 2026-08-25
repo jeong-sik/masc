@@ -13,15 +13,6 @@ let source_root () =
 let script_path () =
   Filename.concat (source_root ()) "scripts/ci-run-tests.sh"
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    idx + nlen <= hlen
-    && (String.sub haystack idx nlen = needle || loop (idx + 1))
-  in
-  nlen = 0 || loop 0
-
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
@@ -128,7 +119,7 @@ let test_dune_command_is_observed_once_and_sanitized () =
       check string "DUNE_RPC removed" "unset" (read_file rpc_log);
       let observed = String.concat "\n" [ read_file ci_log; stdout; stderr ] in
       check bool "success reported" true
-        (contains_substring observed "tests completed successfully"))
+        (String_util.contains_substring observed "tests completed successfully"))
 
 let test_failure_is_not_retried () =
   with_temp_dir "ci-run-tests-failure" (fun dir ->
@@ -149,21 +140,72 @@ let test_failure_is_not_retried () =
       check int "one attempt" 1 (count_lines count_log);
       let observed = String.concat "\n" [ read_file ci_log; stdout; stderr ] in
       check bool "failure diagnostics" true
-        (contains_substring observed "[ci-diag] reason=nonzero_exit_7");
+        (String_util.contains_substring observed "[ci-diag] reason=nonzero_exit_7");
       check bool "failure reported" true
-        (contains_substring observed "test command failed with exit=7"))
+        (String_util.contains_substring observed "test command failed with exit=7"))
 
-let test_legacy_deadline_knob_does_not_terminate_command () =
-  with_temp_dir "ci-run-tests-no-deadline" (fun dir ->
+let test_deadline_terminates_command_once () =
+  with_temp_dir "ci-run-tests-deadline" (fun dir ->
       let ci_log = Filename.concat dir "ci.log" in
+      let started_log = Filename.concat dir "started.log" in
       let done_log = Filename.concat dir "done.log" in
       let command =
-        Printf.sprintf "sleep 2; printf 'done' > %s" (Filename.quote done_log)
+        Printf.sprintf
+          "printf 'started' > %s; sleep 5; printf 'done' > %s"
+          (Filename.quote started_log)
+          (Filename.quote done_log)
+      in
+      let env = ("CI_TEST_TIMEOUT_SEC", "1") :: base_env ci_log in
+      let code, stdout, stderr = run_ci ~cwd:dir ~env command in
+      check int "timeout exit code" 124 code;
+      check string "one command started" "started" (read_file started_log);
+      check bool "timed-out command did not complete" false (Sys.file_exists done_log);
+      let observed = String.concat "\n" [ read_file ci_log; stdout; stderr ] in
+      check bool "active process diagnostics" true
+        (String_util.contains_substring observed "[ci-diag] reason=timeout_1s");
+      check bool "timeout reported" true
+        (String_util.contains_substring observed
+           "test command timed out after 1s"))
+
+let test_deadline_kills_reparented_term_ignoring_child () =
+  with_temp_dir "ci-run-tests-descendant" (fun dir ->
+      let ci_log = Filename.concat dir "ci.log" in
+      let child_pid_file = Filename.concat dir "child.pid" in
+      let child_heartbeat_file = Filename.concat dir "child-heartbeat.log" in
+      let command =
+        Printf.sprintf
+          "trap 'exit 0' TERM; (trap '' TERM; while :; do printf x >> %s; sleep 1; \
+           done) & child=$!; printf '%%s' \"$child\" > %s; while :; do sleep 1; done"
+          (Filename.quote child_heartbeat_file)
+          (Filename.quote child_pid_file)
       in
       let env = ("CI_TEST_TIMEOUT_SEC", "1") :: base_env ci_log in
       let code, _, _ = run_ci ~cwd:dir ~env command in
-      check int "command completes" 0 code;
-      check string "completion evidence" "done" (read_file done_log))
+      check int "timeout exit code" 124 code;
+      let child_pid = read_file child_pid_file |> String.trim |> int_of_string in
+      let heartbeat_bytes () = (Unix.stat child_heartbeat_file).Unix.st_size in
+      (* The script must kill the reparented TERM-ignoring child. run_ci can
+         return before the KILL escalation lands, so poll until the child is
+         actually gone (bounded) before measuring. This makes the pass case
+         deterministic; a real failure to kill still trips the check below. *)
+      let deadline = Unix.gettimeofday () +. 5.0 in
+      let rec wait_child_dead () =
+        if Unix.gettimeofday () >= deadline then ()
+        else
+          try
+            Unix.kill child_pid 0;
+            Unix.sleep 1;
+            wait_child_dead ()
+          with Unix.Unix_error _ -> ()
+      in
+      wait_child_dead ();
+      let bytes_after_timeout = heartbeat_bytes () in
+      Unix.sleep 2;
+      let bytes_after_observation = heartbeat_bytes () in
+      (try Unix.kill child_pid Sys.sigkill with Unix.Unix_error _ -> ());
+      check int "TERM-ignoring descendant stops making progress"
+        bytes_after_timeout
+        bytes_after_observation)
 
 let test_contract_harness_runs_once () =
   with_temp_dir "ci-run-tests-contract" (fun dir ->
@@ -182,20 +224,18 @@ let test_contract_harness_runs_once () =
       check int "one contract attempt" 1 (count_lines count_log);
       let observed = String.concat "\n" [ read_file ci_log; stdout; stderr ] in
       check bool "contract success reported" true
-        (contains_substring observed "contract harness completed successfully"))
+        (String_util.contains_substring observed "contract harness completed successfully"))
 
-let test_control_layers_are_absent () =
+let test_retry_layers_are_absent () =
   let script = read_file (script_path ()) in
   List.iter
     (fun forbidden ->
       check bool ("absent: " ^ forbidden) false
-        (contains_substring script forbidden))
+        (String_util.contains_substring script forbidden))
     [
-      "CI_TEST_TIMEOUT_SEC";
       "CI_TEST_ALLOW_FLAKY_RETRY";
       "CI_TEST_ALLOW_RPC_RETRY";
       "CI_TEST_ALLOW_CLEAN_RETRY";
-      "run_with_timeout";
       "retrying once";
     ]
 
@@ -207,11 +247,13 @@ let () =
           test_case "dune command observed once and sanitized" `Quick
             test_dune_command_is_observed_once_and_sanitized;
           test_case "failure is not retried" `Quick test_failure_is_not_retried;
-          test_case "legacy deadline knob does not terminate command" `Quick
-            test_legacy_deadline_knob_does_not_terminate_command;
+          test_case "deadline terminates one command" `Quick
+            test_deadline_terminates_command_once;
+          test_case "deadline kills a reparented TERM-ignoring child" `Quick
+            test_deadline_kills_reparented_term_ignoring_child;
           test_case "contract harness runs once" `Quick
             test_contract_harness_runs_once;
-          test_case "control layers are absent" `Quick
-            test_control_layers_are_absent;
+          test_case "retry layers are absent" `Quick
+            test_retry_layers_are_absent;
         ] );
     ]

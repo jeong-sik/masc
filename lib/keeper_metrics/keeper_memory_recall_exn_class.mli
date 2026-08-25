@@ -41,5 +41,5 @@ val classify : exn -> t
 val to_label : t -> string
 (** Render the classification as the wire label value used by
     Otel_metric_store. Returns one of the lowercase strings
-    {[ "yojson_parse_error" ]}, {[ "io_error" ]}, {[ "type_error" ]},
-    {[ "other" ]}. *)
+    ["yojson_parse_error"], ["io_error"], ["type_error"],
+    ["other"]. *)

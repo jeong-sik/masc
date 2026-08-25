@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0225", "0230", "0231", "0252"]
-implementation_prs: ["20968", "20975", "20985", "20995", "21000"]
 ---
 
 # RFC-0233: TurnRecord + canonical execution identity
@@ -35,7 +34,7 @@ same second:
 |---|---|---|
 | `trajectories/<keeper>/<trace>.jsonl` | `{"turn":0,"round":4,"tool_name":...,"args":...}` **(verified)** | turn-relative `turn`/`round` |
 | `tool_calls/<YYYY-MM>/<DD>.jsonl` | full input/output + `runtime_contract.keeper_turn_id:718`, `trace_id`, `session_id` **(verified)** | absolute keeper turn + session |
-| `logs/system_log_<date>.jsonl` | `oas:tool_called` / `oas:tool_completed` pair, `correlation_id`, `run_id`, `turn:null` **(verified)** | OAS correlation ids |
+| `logs/system_log_<date>.jsonl` | `agent_core:tool_called` / `agent_core:tool_completed` pair, `correlation_id`, `run_id`, `turn:null` **(verified)** | agent_core correlation ids |
 
 No field is shared across all three. The dashboard session-trace
 interleaves at least two of these sources and renders the same physical
@@ -54,7 +53,7 @@ identity is minted at the execution boundary.
 `keeper_run_tools_hooks.ml` assembles `extra_system_context` as an
 append chain — dynamic context, temporal summary, claimed-task nudge,
 retry nudge, memory-os recall **(verified)** — and
-`build_keeper_system_prompt` renders persona fields per turn. None of
+`build_keeper_system_prompt` renders keeper fields per turn. None of
 this is persisted per turn. Execution receipts carry only
 `extra_system_context_digest` and sizes
 (`lib/keeper/keeper_agent_run_receipt.ml:121-123` **(verified)**) — a
@@ -63,7 +62,7 @@ digest can prove *change* but cannot show *what changed*.
 Consequences observed in the diagnosis session:
 
 - Operators cannot answer "which instruction blocks entered or left this
-  turn's context" (issue trail: persona tone drift, post-idle amnesia —
+  turn's context" (issue trail: keeper tone drift, post-idle amnesia —
   the mechanism was only reconstructable by reading source).
 - Sampling options (model profile, temperature, thinking budget) are
   scattered: `runtime_profile` lives in `runtime_contract` per tool
@@ -96,10 +95,10 @@ Propagation:
 - `tool_calls` store: new `execution_id` field.
 - trajectory writer: same field; `turn`/`round` stay as display
   attributes.
-- OAS event bridge: masc already owns the consumer that turns OAS
-  stream events into `oas:tool_called`/`oas:tool_completed` log rows;
+- agent_core event bridge: masc already owns the consumer that turns agent_core
+  stream events into `agent_core:tool_called`/`agent_core:tool_completed` log rows;
   that consumer joins on the in-flight execution (it is masc-side, so
-  no OAS API change — OAS stays masc-agnostic per the boundary rule).
+  no agent_core API change — agent_core stays masc-agnostic per the boundary rule).
 - dashboard: one row per `execution_id`; turn-relative and absolute
   labels become attributes of that row, not separate rows.
 
@@ -122,6 +121,7 @@ type turn_record =
   ; absolute_turn : int
   ; blocks : prompt_block list            (* assembly order *)
   ; runtime_profile : string
+  ; selected_model : string option        (* selected successful attempt *)
   ; sampling : { temperature : float option
                ; thinking_budget : int option
                ; enable_thinking : bool option }
@@ -132,7 +132,7 @@ type turn_record =
 
 `Prompt_block_id.t` is a closed sum mirroring today's real assembly
 chain in `keeper_run_tools_hooks.ml` and `keeper_prompt.ml`
-**(verified)**: `Persona | Continuity | Dynamic_context |
+**(verified)**: `Keeper | Continuity | Dynamic_context |
 Temporal_summary | Claimed_task_nudge | Retry_nudge | Memory_os_recall
 | Connected_surface | Other of string` — adding a new injection site
 without extending the variant is a compile-time error at the record
@@ -159,8 +159,8 @@ record; digests join against the existing prompt/receipt stores.
 
 - No new telemetry pipeline or transport — TurnRecord is one JSONL
   store next to the existing receipt store; views read it.
-- No OAS API change. The execution-id join happens in masc's own event
-  consumer. OAS continues to know nothing about MASC.
+- No agent_core API change. The execution-id join happens in masc's own event
+  consumer. agent_core continues to know nothing about MASC.
 - No backfill of historical stores; old rows render as today.
 - No prompt-text duplication into TurnRecord (digests only).
 
@@ -168,7 +168,7 @@ record; digests join against the existing prompt/receipt stores.
 
 1. PR-1: `Execution_id` + stamp at dispatch + `tool_calls` and
    trajectory fields (additive, old readers unaffected).
-2. PR-2: OAS event consumer join + dashboard single-row render keyed by
+2. PR-2: agent_core event consumer join + dashboard single-row render keyed by
    `execution_id` (closes the #20910 double-row symptom at the root).
 3. PR-3: `Prompt_block_id` + TurnRecord writer at receipt site.
 4. PR-4: dashboard turn inspector (block diff) + OTel span attributes.
@@ -182,7 +182,7 @@ cap/dedup — if the id is missing, writers fail loudly in dev builds.
   TurnRecord codec.
 - Behavioral: drive one fake tool execution through dispatch → assert
   exactly one `execution_id` appears in tool_calls + trajectory + the
-  oas-event rows for that call (no orphan, no dup).
+  agent_core-event rows for that call (no orphan, no dup).
 - Dashboard: session-trace fixture with all three sources for one
   execution → exactly one rendered row.
 - Block-diff: two synthetic TurnRecords → diff yields the exact
@@ -320,11 +320,11 @@ collapsed into `turn_ref`.
 
 ### §7.3 Boundary invariant (unchanged from §3)
 
-OAS owns the run/turn lifecycle and stays MASC-agnostic. OAS exposes no
+agent_core owns the run/turn lifecycle and stays MASC-agnostic. agent_core exposes no
 first-class per-turn id — only `(worker_run_id : string, turn : int)` on the
 event bus / `last_raw_trace_run` (**verified 2026-06-19**: `run()` does not
 return the run id). MASC joins that pair MASC-side and mints `Turn_ref`. No
-MASC concept (`turn_ref`, channel) crosses into OAS. The channel axis is
+MASC concept (`turn_ref`, channel) crosses into agent_core. The channel axis is
 `Surface_ref.t` (`lib/keeper/surface_ref.ml`: `Dashboard | Discord | Slack |
 Github | Webhook | Agent | Gate`). The keeper-v2 prototype's `imessage`
 source has no first-class variant today — it rides `Gate { label =
@@ -334,7 +334,7 @@ deferred** to whoever wires the iMessage gate.
 
 ### §7.4 Non-goals
 
-- No OAS API change (per §3).
+- No agent_core API change (per §3).
 - No backfill: legacy chat rows / posts decode `turn_ref = None`; the FE
   30-min window survives only as an explicit, commented, removal-targeted
   fallback for `None` rows.
@@ -439,16 +439,16 @@ view-side-repair violation of §2.3.
   no re-parse.
 - All three are `option`: `None` when the runtime is unknown or the operator
   left the rates unset in runtime.toml. The view renders "미상" (unknown),
-  never a fabricated value — the same absence contract `model` and
+  never a fabricated value — the same absence contract `selected_model` and
   `finish_reason` already follow (§2.3).
 - Cost is **not** stored: the view derives it from `price_*_per_million ×
   real token counts`, per the views-derive principle (§2.3).
 
 ### §8.3 Boundary invariant (unchanged from §3)
 
-No OAS change. MASC reads the runtime binding it already materialized at
-boot (`Runtime.t.binding`); OAS's `Provider_runtime_binding` catalog — which
-deliberately omits price ("OAS owns identity/capability, not pricing") — is
+No agent_core change. MASC reads the runtime binding it already materialized at
+boot (`Runtime.t.binding`); agent_core's `Provider_runtime_binding` catalog — which
+deliberately omits price ("agent_core owns identity/capability, not pricing") — is
 untouched. Price is MASC's operator-config concern, sourced from
 runtime.toml.
 
@@ -458,14 +458,14 @@ runtime.toml.
   "미상" for them.
 - `context_window` is the **keeper compaction budget**, not the provider's
   per-request `num_ctx` cap. `num_ctx` is an Ollama-only transport detail
-  (`oas/lib/llm_provider/backend_ollama.ml`: honored by Ollama only); the
+  (`agent_core/lib/llm_provider/backend_ollama.ml`: honored by Ollama only); the
   keeper resolver does not consult it, and conflating the two would mis-state
   the window for any Ollama binding where the operator set `num-ctx` below
   the model ceiling. For the current fleet (glm/deepseek/claude, none
   Ollama-bound) `max_context` is the effective window. A future wave that
   needs the provider-enforced cap should add a separate
   `provider_context_window` field rather than overload this one.
-- No OAS `request_latency_ms` (phase duration) — that is a separate
+- No agent_core `request_latency_ms` (phase duration) — that is a separate
   amendment (Wave 2b); this amendment is context window + pricing only.
 
 ### §8.5 Migration
@@ -476,7 +476,7 @@ the shared-record field addition catches every literal construction site
 
 1. **Type + codec** — `lib/types/turn_record.{mli,ml}`: three option fields
    on `t`; `to_json` via `opt_field`, `of_json` via `opt_member` (mirrors
-   `model`/`finish_reason`/`temperature`).
+   `selected_model`/`finish_reason`/`temperature`).
 2. **Runtime projection** — `lib/runtime/runtime.{ml,mli}`:
    `pricing_of_runtime_id : string -> float option * float option`, sibling
    to `max_context_of_runtime_id`.
@@ -537,12 +537,12 @@ context assembly (`ctx`), thinking (`reason`), tool calls (`tool`), and
 response generation (`gen`). Only the `tool` phase carried a measured
 `duration_ms` (from `/api/v1/keepers/:name/tool-calls`). The other three
 were hardcoded `durationMs: null, durationSource: 'not_recorded'`, and the
-`gen` phase's own `meta` string declared *"provider/OAS duration is not
+`gen` phase's own `meta` string declared *"provider/agent_core duration is not
 recorded in turn-records"*. So every keeper turn's response-generation bar
 read "측정 없음" even though the provider call wall-clock was already
 measured — it just never reached the record.
 
-The measurement already exists in-process: the OAS `api_response.telemetry`
+The measurement already exists in-process: the agent_core `api_response.telemetry`
 field carries `inference_telemetry.request_latency_ms`, and the transport
 layer (`complete_common.patch_telemetry` non-streaming, `complete_stream`
 streaming) synthesizes it for every provider, so it is populated whenever a
@@ -554,7 +554,7 @@ hooks already consume (`keeper_hooks_oas.ml:417` reads
 stored it, forcing the `gen` phase to render "측정 없음" — a view-side-repair
 violation of §2.3.
 
-### §9.2 Design — one option field, populated from OAS transport telemetry
+### §9.2 Design — one option field, populated from agent_core transport telemetry
 
 ```ocaml
 ; request_latency_ms : int option
@@ -563,8 +563,8 @@ violation of §2.3.
 
 - Sourced at the write site (`lib/keeper/keeper_agent_run.ml`, next to the
   `usage` binding) via `Option.bind result.inference_telemetry (fun t ->
-  t.request_latency_ms)`. `request_latency_ms` is itself `int option` in OAS
-  (`oas/lib/llm_provider/types.mli:197`), and `inference_telemetry` is an
+  t.request_latency_ms)`. `request_latency_ms` is itself `int option` in agent_core
+  (`agent_core/lib/llm_provider/types.mli:197`), and `inference_telemetry` is an
   outer `option`; `Option.bind` flattens the two layers rather than nesting
   option-of-option. On the error path (or before a response existed) the
   value is `None`.
@@ -573,23 +573,23 @@ violation of §2.3.
   `TurnPhase.durationSource` union, distinct from `'tool_call_log'` so the
   tooltip names the real source). Absent → the existing `'not_recorded'` /
   "측정 없음" render is preserved. No fabrication.
-- `ctx` and `reason` phases stay `'not_recorded'`: OAS `inference_telemetry`
+- `ctx` and `reason` phases stay `'not_recorded'`: agent_core `inference_telemetry`
   has no isolated measurement for context assembly or thinking, so mapping
   `request_latency_ms` onto them would mislabel the whole-call wall-clock.
   This is an honest limit, not a gap to paper over.
 
 ### §9.3 Boundary invariant (unchanged from §3)
 
-No OAS change. MASC reads `inference_telemetry` it already receives in the
+No agent_core change. MASC reads `inference_telemetry` it already receives in the
 keeper turn result — the same consumption pattern as
 `keeper_hooks_oas.ml:287/326/417`, `lib/runtime/dashboard_oas_bridge.ml`,
-and `keeper_unified_turn_success.ml:253`. The telemetry record is an OAS
+and `keeper_unified_turn_success.ml:253`. The telemetry record is an agent_core
 generic asset (`types.mli:325` docstring: *"Parsed from the raw API
 response; never computed by downstream"*); `rg "MASC|masc|keeper"` in
-`oas/lib/api.ml` / `types.ml` returns 0 hits, so `patch_telemetry` is OAS's
+`agent_core/lib/api.ml` / `types.ml` returns 0 hits, so `patch_telemetry` is agent_core's
 own transport pipeline, not MASC-requested code. Per
-`docs/OAS-MASC-BOUNDARY.md:16,50,52`, MASC consuming a public OAS response
-field is permitted; only adding MASC-specific code to OAS would not be.
+`docs/agent_core-MASC-BOUNDARY.md:16,50,52`, MASC consuming a public agent_core response
+field is permitted; only adding MASC-specific code to agent_core would not be.
 
 ### §9.4 Non-goals
 
@@ -603,7 +603,7 @@ field is permitted; only adding MASC-specific code to OAS would not be.
   every provider reports.
 - No derivation of `ctx`/`reason` durations by differencing
   `request_latency_ms` against tool durations — that would fabricate a
-  measurement OAS does not provide (see §9.6).
+  measurement agent_core does not provide (see §9.6).
 - No backfill: legacy rows decode `request_latency_ms` as `None`; the `gen`
   phase renders "측정 없음" exactly as before.
 
@@ -623,7 +623,7 @@ case).
 ### §9.6 Workaround guards (rejected per CLAUDE.md §워크어라운드)
 
 1. Deriving a `ctx` or `reason` duration as
-   `request_latency_ms − Σ tool durations` — constructs a measurement OAS
+   `request_latency_ms − Σ tool durations` — constructs a measurement agent_core
    never made; silent on multi-SDK-turn keeper turns where multiple provider
    calls occur. → leave those phases `'not_recorded'`.
 2. Defaulting `request_latency_ms` to 0 (the `keeper_hooks_oas.ml:417`
@@ -658,7 +658,7 @@ the full generation duration. This is the half of latency users perceive
 
 ### §10.2 Design
 
-Add `ttfrc_ms : float option` to `Turn_record.t`, sourced from OAS
+Add `ttfrc_ms : float option` to `Turn_record.t`, sourced from agent_core
 `inference_telemetry.ttfrc_ms` (Time-To-First-Response-Chunk, wall-clock).
 Unlike `request_latency_ms`, this isolates the wait for the first SSE chunk.
 The inspector renders it alongside the `gen` phase's end-to-end duration
@@ -667,7 +667,7 @@ The inspector renders it alongside the `gen` phase's end-to-end duration
 ### §10.3 Provider fill matrix (grounding)
 
 `ttfrc_ms` is the one phase-level signal populated across the keeper fleet:
-the OAS streaming transport (`complete_stream.ml:573-574`) sets it as a
+the agent_core streaming transport (`complete_stream.ml:573-574`) sets it as a
 provider-agnostic wall-clock measurement as soon as the first SSE chunk
 arrives. The keeper default fleet (deepseek-v4-flash / deepseek-v4-pro /
 glm-4-7-coding / minimax-m3, all `openai-compatible-http` + `streaming`)

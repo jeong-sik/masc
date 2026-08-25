@@ -44,9 +44,9 @@ let make_meta () =
       (`Assoc
         [
           ("name", `String keeper_name);
-          ("agent_name", `String "person-note-handler-agent");
+          (* [runtime_id] left JSON meta before 28ef484a39 closed the decoder
+             against fields outside the declared schema. *)
           ("trace_id", `String "trace-person-note");
-          ("runtime_id", `String "ollama_cloud.deepseek-v4-flash");
         ])
   with
   | Ok meta -> meta

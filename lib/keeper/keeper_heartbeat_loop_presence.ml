@@ -8,7 +8,6 @@
 
 open Keeper_types
 open Keeper_meta_contract
-open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
@@ -41,7 +40,6 @@ let effective_keepalive_meta
       when Keeper_id.Trace_id.equal
              registry_meta.runtime.trace_id
              selected.runtime.trace_id
-           && Int.equal registry_meta.runtime.nonce selected.runtime.nonce
            && Option.is_some
                 registry_meta.runtime.usage.last_usage_reported_at ->
       let observed_usage = registry_meta.runtime.usage in
@@ -106,54 +104,50 @@ let repair_identity_drift_for_keepalive ?lifecycle_token ~(ctx : _ context) (met
         ();
       None
     | Ok new_trace_id ->
-      let base_dir = session_base_dir ctx.config in
-      let _session =
-        Keeper_context_runtime.create_session ~session_id:new_trace_id_raw ~base_dir
-      in
-      let repaired =
-        { meta with
-          agent_name = expected_agent_name
-        ; updated_at = now_iso ()
-        ; runtime =
-            { meta.runtime with
-              trace_id = new_trace_id
-            ; trace_history =
-                Json_util.dedupe_keep_order
-                  (previous_trace_id :: meta.runtime.trace_history)
-            ; nonce = meta.runtime.nonce + 1
-            }
-        }
-      in
       (match
-         match lifecycle_token with
-         | None ->
-           write_meta_with_merge
-             ~merge:Keeper_meta_merge.monotonic_usage_counters
-             ctx.config
-             repaired
-         | Some token ->
-           write_meta_with_merge_for_lifecycle
-             token
-             ~merge:Keeper_meta_merge.monotonic_usage_counters
-             ctx.config
-             repaired
+         Keeper_owner_registry.apply_meta
+           ~base_path:ctx.config.base_path
+           ~keeper_name:meta.name
+           (Keeper_owner_reducer.Handoff_identity
+              { keeper_id = meta.keeper_id
+              ; agent_name = expected_agent_name
+              ; trace_id = new_trace_id
+              ; trace_history =
+                  Json_util.dedupe_keep_order
+                    (previous_trace_id :: meta.runtime.trace_history)
+              ; updated_at = now_iso ()
+              })
        with
-       | Ok () ->
+       | Ok (Some repaired) ->
+         let base_dir = session_base_dir ctx.config in
+         ignore
+           (Keeper_context_runtime.create_session
+              ~session_id:new_trace_id_raw
+              ~base_dir);
          Log.Keeper.warn
            "keepalive repaired identity drift for %s: %s -> %s"
            meta.name
            meta.agent_name
            expected_agent_name;
          Some repaired
-       | Error err ->
+       | Ok None ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string WriteMetaFailures)
            ~labels:[ "keeper", meta.name; "phase", "identity_repair" ]
            ();
          Log.Keeper.error
-           "keepalive identity repair failed for %s: write_meta failed: %s"
+           "keepalive identity repair failed for %s: owner removed metadata"
+           meta.name;
+         None
+       | Error error ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string WriteMetaFailures)
+           ~labels:[ "keeper", meta.name; "phase", "identity_repair" ]
+           ();
+         Log.Keeper.error
+           "keepalive identity repair failed for %s: owner command failed: %s"
            meta.name
-           err;
+           (Keeper_owner_registry.command_error_to_string error);
          None))
 ;;
 
@@ -191,13 +185,11 @@ let sync_keeper_presence
       ~(ctx : _ context)
       ~(meta_current : keeper_meta)
       ~(consecutive_failures : int ref)
-      ~(last_successful_heartbeat_ts : float ref)
   : keeper_meta
   =
   try
     let synced = meta_current in
     consecutive_failures := 0;
-    last_successful_heartbeat_ts := Time_compat.now ();
     Keeper_registry.dispatch_event_unit
       ~base_path:ctx.config.base_path
       meta_current.name
@@ -207,20 +199,7 @@ let sync_keeper_presence
       ~labels:[ "keeper", meta_current.name ]
       ();
     note_turn_failures_preserved_after_heartbeat ~ctx ~meta:meta_current;
-    match
-      write_meta_with_merge
-        ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-        ctx.config
-        synced
-    with
-    | Ok () -> synced
-    | Error e ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string WriteMetaFailures)
-        ~labels:[ "keeper", synced.name; "phase", "heartbeat" ]
-        ();
-      Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
-      synced
+    synced
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

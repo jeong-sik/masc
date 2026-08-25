@@ -438,7 +438,7 @@ function buildInjectedCtx(record: TurnRecordEntry, ctxPct: number | null, tokIn:
     : `미상   (${tokIn.toLocaleString()} / 미상 tok, runtime 미구성)`
   return `# world snapshot
 fsm.state      = n/a
-model          = ${record.model ?? 'n/a'}
+selected model = ${record.selected_model ?? 'n/a'}
 finish_reason  = ${record.finish_reason ?? 'n/a'}
 ctx.window     = ${ctxLine}
 keeper.turn    = T${record.absolute_turn}
@@ -546,7 +546,7 @@ function phaseDurationTitle(phase: TurnPhase): string {
     case 'tool_call_log':
       return 'duration_ms from /api/v1/keepers/:name/tool-calls'
     case 'provider_telemetry':
-      return 'request_latency_ms — provider call wall-clock (OAS inference_telemetry)'
+      return 'request_latency_ms — provider call wall-clock (Agent Core inference_telemetry)'
     case 'estimated':
       return 'estimated only; no durable duration for this phase'
     case 'not_recorded':
@@ -648,7 +648,7 @@ function buildTurnDetail(
   phases.push({
     label: '응답 생성',
     kind: 'gen',
-    // RFC-0233 §9 — ground the generation phase in OAS request_latency_ms
+    // RFC-0233 §9 — ground the generation phase in Agent Core request_latency_ms
     // (provider call wall-clock). Absent on the error path or before a
     // response existed → render "측정 없음" rather than fabricating a bar.
     durationMs: record.request_latency_ms ?? null,
@@ -661,7 +661,7 @@ function buildTurnDetail(
     visualOffsetMs: 0,
     meta: (() => {
       if (record.request_latency_ms == null) {
-        return 'provider/OAS duration is not recorded for this turn'
+        return 'provider/Agent Core duration is not recorded for this turn'
       }
       if (record.ttfrc_ms != null) {
         return `provider call wall-clock (request_latency_ms) · 첫 토큰 ${formatMsCompact(record.ttfrc_ms)} (ttfrc_ms)`
@@ -703,7 +703,7 @@ function CopyBtn({ text, label = '복사' }: { text: string; label?: string }) {
     setTimeout(() => setDone(false), 1200)
   }
   return html`
-    <button class="kti-copy ${done ? 'done' : ''}" onClick=${onClick}>
+    <button class="ti-copy ${done ? 'done' : ''}" onClick=${onClick}>
       ${done ? '\u2713 복사됨' : '\u2398 ' + label}
     </button>
   `
@@ -711,8 +711,8 @@ function CopyBtn({ text, label = '복사' }: { text: string; label?: string }) {
 
 function CodeCard({ cap, text, htmlContent, tokens }: { cap: string; text: string; htmlContent?: string; tokens?: number }) {
   return html`
-    <div class="kti-code">
-      <div class="kti-code-h">
+    <div class="ti-code">
+      <div class="ti-code-h">
         <span class="cap">${cap}</span>
         ${tokens != null ? html`<span class="sz">~${tokens} tok</span>` : null}
         <${CopyBtn} text=${text} />
@@ -728,23 +728,23 @@ function TimelineTab({ t }: { t: TurnDetail }) {
   const measuredCount = t.phases.filter(p => p.durationMs != null).length
   const unknownCount = t.phases.length - measuredCount
   return html`
-    <div class="kti-sec">
-      <div class="kti-sec-h">
+    <div class="ti-sec">
+      <div class="ti-sec-h">
         <h4>턴 워터폴</h4>
         <span class="n">
           ${t.phases.length} 단계 · 실측 ${t.measuredDurationMs != null ? formatMsCompact(t.measuredDurationMs) : '없음'} · 미측정 ${unknownCount}
         </span>
       </div>
-      <div class="kti-wf">
+      <div class="ti-wf">
         ${t.phases.map((p, i) => html`
-          <div key=${i} class="kti-wf-row">
-            <div class="kti-wf-lbl">
-              <span class="kti-wf-ico kti-k-${p.kind}"></span>
+          <div key=${i} class="ti-wf-row">
+            <div class="ti-wf-lbl">
+              <span class="ti-wf-ico ti-k-${p.kind}"></span>
               <span class="nm ${p.mono ? 'mono' : ''}" title=${p.meta ?? p.label}>${p.label}</span>
             </div>
-            <div class="kti-wf-track">
+            <div class="ti-wf-track">
               <div
-                class=${`kti-wf-bar kti-k-${p.kind}${p.durationSource === 'not_recorded' ? ' is-unmeasured' : ''}`}
+                class=${`ti-wf-bar ti-k-${p.kind}${p.durationSource === 'not_recorded' ? ' is-unmeasured' : ''}`}
                 title=${phaseDurationTitle(p)}
                 style=${{
                   left: `${(p.visualOffsetMs / t.visualTotalMs) * 100}%`,
@@ -752,15 +752,15 @@ function TimelineTab({ t }: { t: TurnDetail }) {
                 }}
               />
             </div>
-            <span class="kti-wf-dur" title=${phaseDurationTitle(p)}>${phaseDurationLabel(p)}</span>
+            <span class="ti-wf-dur" title=${phaseDurationTitle(p)}>${phaseDurationLabel(p)}</span>
           </div>
         `)}
       </div>
-      <div class="kti-wf-foot">
-        <div class="kti-wf-legend">
-          <span><i class="kti-k-reason"></i>추론</span>
-          <span><i class="kti-k-tool"></i>도구</span>
-          <span><i class="kti-k-gen"></i>생성</span>
+      <div class="ti-wf-foot">
+        <div class="ti-wf-legend">
+          <span><i class="ti-k-reason"></i>추론</span>
+          <span><i class="ti-k-tool"></i>도구</span>
+          <span><i class="ti-k-gen"></i>생성</span>
         </div>
         <span>실측 합계 <b>${t.measuredDurationMs != null ? formatMsCompact(t.measuredDurationMs) : '없음'}</b></span>
       </div>
@@ -792,15 +792,15 @@ function toTranscriptView(state: {
 // absence when the turn carried no joinable user row.
 function OperatorLine({ line, seq }: { line: TurnTranscriptLine | null; seq: number }) {
   return html`
-    <div class="kti-msg">
-      <div class="kti-msg-h">
-        <span class="kti-msg-role user">user</span>
+    <div class="ti-msg">
+      <div class="ti-msg-h">
+        <span class="ti-msg-role user">user</span>
         <span class="who">operator</span>
         <span class="seq">#${seq}</span>
       </div>
       ${line
-        ? html`<div class="kti-msg-b" data-testid="turn-transcript-user">${line.content}</div>`
-        : html`<div class="kti-msg-b kti-msg-absent" data-testid="turn-transcript-user-absent">
+        ? html`<div class="ti-msg-b" data-testid="turn-transcript-user">${line.content}</div>`
+        : html`<div class="ti-msg-b ti-msg-absent" data-testid="turn-transcript-user-absent">
             operator 요청이 이 턴에 기록되지 않았습니다 (turn_ref 미연결 또는 보존 윈도 밖)
           </div>`}
     </div>
@@ -820,9 +820,9 @@ function KeeperLine({
 }) {
   const isFailure = line?.kind === 'transport_failure'
   return html`
-    <div class="kti-msg">
-      <div class="kti-msg-h">
-        <span class="kti-msg-role assistant">assistant</span>
+    <div class="ti-msg">
+      <div class="ti-msg-h">
+        <span class="ti-msg-role assistant">assistant</span>
         <span class="who">${keeperName}</span>
         ${isFailure
           ? html`<span class="pill bad" data-testid="turn-transcript-assistant-failure">transport failure</span>`
@@ -830,8 +830,8 @@ function KeeperLine({
         <span class="seq">#${seq}</span>
       </div>
       ${line
-        ? html`<div class="kti-msg-b" data-testid="turn-transcript-assistant">${line.content}</div>`
-        : html`<div class="kti-msg-b kti-msg-absent" data-testid="turn-transcript-assistant-absent">
+        ? html`<div class="ti-msg-b" data-testid="turn-transcript-assistant">${line.content}</div>`
+        : html`<div class="ti-msg-b ti-msg-absent" data-testid="turn-transcript-assistant-absent">
             keeper 응답이 이 턴에 기록되지 않았습니다
           </div>`}
     </div>
@@ -856,8 +856,8 @@ function MessagesTab({
   const assistantSlots = assistantLines.length || 1
   const messageCount = 2 + userSlots + t.tools.length + assistantSlots
   return html`
-    <div class="kti-sec">
-      <div class="kti-sec-h">
+    <div class="ti-sec">
+      <div class="ti-sec-h">
         <h4>모델에 전달된 시퀀스</h4>
         <span class="n">${messageCount} 메시지</span>
       </div>
@@ -867,29 +867,29 @@ function MessagesTab({
       ${transcript.kind === 'error'
         ? html`<div class="text-2xs text-[var(--color-status-warn)] px-1 pb-1" data-testid="turn-transcript-error">전사 불러오기 실패 · ${transcript.message}</div>`
         : null}
-      <div class="kti-seq-rail">
-        <div class="kti-msg">
-          <div class="kti-msg-h">
-            <span class="kti-msg-role system">system</span>
+      <div class="ti-seq-rail">
+        <div class="ti-msg">
+          <div class="ti-msg-h">
+            <span class="ti-msg-role system">system</span>
             <span class="who">시스템 프롬프트</span>
             <span class="seq">#${++seq}</span>
           </div>
-          <div class="kti-msg-b mono">${t.systemPrompt}</div>
+          <div class="ti-msg-b mono">${t.systemPrompt}</div>
         </div>
-        <div class="kti-msg">
-          <div class="kti-msg-h">
-            <span class="kti-msg-role context">context</span>
+        <div class="ti-msg">
+          <div class="ti-msg-h">
+            <span class="ti-msg-role context">context</span>
             <span class="who">주입 컨텍스트</span>
             <span class="seq">#${++seq}</span>
           </div>
-          <div class="kti-msg-b mono">${t.injectedCtx}</div>
+          <div class="ti-msg-b mono">${t.injectedCtx}</div>
         </div>
         ${userLines.length
           ? userLines.map(line => html`<${OperatorLine} line=${line} seq=${++seq} />`)
           : html`<${OperatorLine} line=${null} seq=${++seq} />`}
         ${t.tools.map((tool, i) => html`
-          <div key=${i} class="kti-tool">
-            <div class="kti-tool-h">
+          <div key=${i} class="ti-tool">
+            <div class="ti-tool-h">
               <span class="seq">#${++seq}</span>
               <span class="tnm mono">${tool.toolName ?? tool.id}</span>
               <span class="pill ${toolStatusClass(tool.status)}">
@@ -902,7 +902,7 @@ function MessagesTab({
                 ? html`<span class="seq">${formatMsCompact(tool.durationMs)}</span>`
                 : html`<span class="seq">duration 없음</span>`}
             </div>
-            <div class="kti-tool-b">
+            <div class="ti-tool-b">
               ${tool.matched
                 ? html`
                   <${CodeCard}
@@ -917,7 +917,7 @@ function MessagesTab({
                   />
                 `
                 : html`
-                  <div class="kti-msg-b kti-msg-absent" data-testid="turn-tool-io-absent">
+                  <div class="ti-msg-b ti-msg-absent" data-testid="turn-tool-io-absent">
                     이 execution(${tool.id.slice(0, 24)})의 tool-call I/O를 tool-call 로그에서 찾지 못했습니다 (보존 윈도 밖이거나 미기록)
                   </div>
                 `}
@@ -934,9 +934,9 @@ function MessagesTab({
 
 function ContextTab({ t }: { t: TurnDetail }) {
   return html`
-    <div class="kti-sec">
-      <div class="kti-ctx-card">
-        <div class="kti-ctx-h">
+    <div class="ti-sec">
+      <div class="ti-ctx-card">
+        <div class="ti-ctx-h">
           <span class="t">시스템 프롬프트</span>
           <span class="tok">~${approxTokens(t.systemPrompt)} tok</span>
           <${CopyBtn} text=${t.systemPrompt} />
@@ -944,9 +944,9 @@ function ContextTab({ t }: { t: TurnDetail }) {
         <pre>${t.systemPrompt}</pre>
       </div>
     </div>
-    <div class="kti-sec">
-      <div class="kti-ctx-card">
-        <div class="kti-ctx-h">
+    <div class="ti-sec">
+      <div class="ti-ctx-card">
+        <div class="ti-ctx-h">
           <span class="t">주입 컨텍스트 · blocks · executions</span>
           <span class="tok">~${approxTokens(t.injectedCtx)} tok</span>
           <${CopyBtn} text=${t.injectedCtx} />
@@ -959,18 +959,18 @@ function ContextTab({ t }: { t: TurnDetail }) {
 
 function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail; source: string }) {
   return html`
-    <div class="kti-sec">
-      <div class="kti-sec-h"><h4>샘플링 파라미터</h4></div>
-      <div class="kti-params">
-        <span class="kti-param">temperature<b>${record.temperature ?? '—'}</b></span>
-        <span class="kti-param">top_p<b>${record.top_p ?? '—'}</b></span>
-        <span class="kti-param">max_tokens<b>${record.max_tokens?.toLocaleString() ?? '—'}</b></span>
-        <span class="kti-param">thinking_budget<b>${record.thinking_budget ?? '—'}</b></span>
-        <span class="kti-param">enable_thinking<b>${thinkingChipLabel(record)}</b></span>
+    <div class="ti-sec">
+      <div class="ti-sec-h"><h4>샘플링 파라미터</h4></div>
+      <div class="ti-params">
+        <span class="ti-param">temperature<b>${record.temperature ?? '—'}</b></span>
+        <span class="ti-param">top_p<b>${record.top_p ?? '—'}</b></span>
+        <span class="ti-param">max_tokens<b>${record.max_tokens?.toLocaleString() ?? '—'}</b></span>
+        <span class="ti-param">thinking_budget<b>${record.thinking_budget ?? '—'}</b></span>
+        <span class="ti-param">enable_thinking<b>${thinkingChipLabel(record)}</b></span>
       </div>
-      <div class="kti-sec-h" style=${{ marginTop: '16px' }}><h4>실행 메타데이터</h4></div>
-      <div class="kti-kv">
-        <span class="k">model</span><span class="v">${record.model ?? 'n/a'}</span>
+      <div class="ti-sec-h" style=${{ marginTop: '16px' }}><h4>실행 메타데이터</h4></div>
+      <div class="ti-kv">
+        <span class="k">selected model</span><span class="v">${record.selected_model ?? 'n/a'}</span>
         <span class="k">runtime</span><span class="v">${record.runtime_profile}</span>
         <span class="k">fsm.state</span><span class="v">n/a</span>
         <span class="k">input tokens</span><span class="v">${t.tokIn.toLocaleString()}</span>
@@ -1046,40 +1046,40 @@ function TurnDetailDrawer({
 
   return html`
     <div
-      class="kti-overlay"
+      class="ti-overlay"
       role="dialog"
       aria-modal="true"
       aria-label="턴 상세"
       onClick=${onClose}
       data-testid="turn-detail-drawer"
     >
-      <div class="kti-drawer" onClick=${(e: Event) => e.stopPropagation()}>
-        <div class="kti-head">
+      <div class="ti-drawer" onClick=${(e: Event) => e.stopPropagation()}>
+        <div class="ti-head">
           <h3>턴 상세</h3>
           <span class="tid mono">${t.traceId}</span>
-          <div class="kti-head-actions">
+          <div class="ti-head-actions">
             <${CopyBtn} text=${t.traceId} label="ID" />
-            <button class="kti-close" onClick=${onClose} title="닫기 (Esc)">\u2715</button>
+            <button class="ti-close" onClick=${onClose} title="닫기 (Esc)">\u2715</button>
           </div>
         </div>
 
-        <div class="kti-sub">
-          <span class="kti-chip">
+        <div class="ti-sub">
+          <span class="ti-chip">
             <span class="sub-k">keeper</span>${keeperName}
           </span>
-          <span class="kti-chip">
+          <span class="ti-chip">
             <span class="sub-k">keeper turn</span>T${row.record.absolute_turn}
           </span>
-          <span class="kti-chip">
+          <span class="ti-chip">
             <span class="sub-k">agent subturns</span>${formatTurnList(uniqueNumbers(t.tools.map(tool => tool.agentSubturn)))}
           </span>
-          <span class="kti-chip">
+          <span class="ti-chip">
             <span class="sub-k">thinking</span>${thinkingChipLabel(row.record)}
           </span>
-          <span class="kti-chip${row.record.finish_reason ? ' ok' : ''}">
+          <span class="ti-chip${row.record.finish_reason ? ' ok' : ''}">
             <span class="sub-k">finish</span>${row.record.finish_reason ?? 'n/a'}
           </span>
-          <span class="kti-chip">
+          <span class="ti-chip">
             <span class="sub-k">runtime</span>${row.record.runtime_profile}
           </span>
         </div>
@@ -1095,35 +1095,35 @@ function TurnDetailDrawer({
           `
           : null}
 
-        <div class="kti-summary" data-testid="turn-summary-stats">
-          <div class="kti-stat">
+        <div class="ti-summary" data-testid="turn-summary-stats">
+          <div class="ti-stat">
             <div class="k">실측</div>
             <div class="v">${t.measuredDurationMs != null ? formatMsCompact(t.measuredDurationMs) : '—'}</div>
           </div>
-          <div class="kti-stat">
+          <div class="ti-stat">
             <div class="k">입력</div>
             <div class="v">${(t.tokIn / 1000).toFixed(1)}<small>k</small></div>
           </div>
-          <div class="kti-stat">
+          <div class="ti-stat">
             <div class="k">출력</div>
             <div class="v volt">${t.tokOut.toLocaleString()}</div>
           </div>
-          <div class="kti-stat">
+          <div class="ti-stat">
             <div class="k">도구</div>
             <div class="v">${t.tools.length}</div>
           </div>
-          <div class="kti-stat">
+          <div class="ti-stat">
             <div class="k">추정비용</div>
             <div class="v ok">${t.cost != null ? `$${t.cost.toFixed(2)}` : '미상'}</div>
           </div>
         </div>
 
-        <div class="kti-tok" data-testid="turn-token-bar">
-          <div class="kti-tok-top">
+        <div class="ti-tok" data-testid="turn-token-bar">
+          <div class="ti-tok-top">
             <span class="lbl">토큰 경제</span>
             <span class="ctxpct">${t.ctxPct != null ? `컨텍스트 ${t.ctxPct.toFixed(1)}% / ${formatCtxWindowK(t.contextWindow)}` : '컨텍스트 미상'}</span>
           </div>
-          <div class="kti-tok-bar">
+          <div class="ti-tok-bar">
             <span
               class="seg-in"
               style=${{ width: `${(t.tokIn / (t.tokIn + t.tokOut)) * 100}%` }}
@@ -1133,19 +1133,19 @@ function TurnDetailDrawer({
               style=${{ width: `${(t.tokOut / (t.tokIn + t.tokOut)) * 100}%` }}
             />
           </div>
-          <div class="kti-tok-legend">
+          <div class="ti-tok-legend">
             <span class="in"><i></i>입력 <b>${t.tokIn.toLocaleString()}</b></span>
             <span class="out"><i></i>출력 <b>${t.tokOut.toLocaleString()}</b></span>
           </div>
         </div>
 
-        <div class="kti-tabs" role="tablist" aria-label="턴 상세 탭">
+        <div class="ti-tabs" role="tablist" aria-label="턴 상세 탭">
           ${TABS.map(([id, lbl]) => html`
             <button
               key=${id}
               role="tab"
               aria-selected=${tab === id}
-              class="kti-tab ${tab === id ? 'on' : ''}"
+              class="ti-tab ${tab === id ? 'on' : ''}"
               onClick=${() => setTab(id)}
               data-testid="turn-tab-${id}"
             >
@@ -1154,7 +1154,7 @@ function TurnDetailDrawer({
           `)}
         </div>
 
-        <div class="kti-body">
+        <div class="ti-body">
           ${tab === 'timeline' && html`<${TimelineTab} t=${t} />`}
           ${tab === 'messages' && html`<${MessagesTab} keeperName=${keeperName} t=${t} transcript=${transcript} />`}
           ${tab === 'context' && html`<${ContextTab} t=${t} />`}
@@ -1188,10 +1188,10 @@ function TurnRow({
   return html`
     <details class="rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors v2-monitoring-row">
       <summary
-        class="kti-turn-summary list-none cursor-pointer flex items-center gap-2 py-1.5 px-2 flex-wrap"
+        class="ti-turn-summary list-none cursor-pointer flex items-center gap-2 py-1.5 px-2 flex-wrap"
         onClick=${(e: Event) => {
           // Only open the drawer on direct summary clicks, not on the expand chevron area.
-          if (e.target === e.currentTarget || (e.target as HTMLElement).closest('.kti-turn-summary') === e.currentTarget) {
+          if (e.target === e.currentTarget || (e.target as HTMLElement).closest('.ti-turn-summary') === e.currentTarget) {
             onOpen(row)
           }
         }}
@@ -1227,6 +1227,36 @@ function TurnRow({
             ? html`<div class="text-2xs text-[var(--color-fg-disabled)] v2-monitoring-row">기록된 블록 없음</div>`
             : record.blocks.map(block => html`<${BlockRow} block=${block} />`)}
         </div>
+        ${(() => {
+          // Rendered outside the composition panel: input_components can be
+          // absent on a turn whose window observation succeeded (they come from
+          // two independent observations), and nesting this inside it hid the
+          // number on exactly those turns.
+          const transmitted = record.transmitted_atoms
+          const total = record.total_atoms
+          if (transmitted == null || total == null || total <= 0) return null
+          // Built as concatenation so the html template holds no nested literal.
+          const label =
+            '이력 '
+            + transmitted.toLocaleString()
+            + ' / '
+            + total.toLocaleString()
+            + ' atom ('
+            + ((transmitted / total) * 100).toFixed(1)
+            + '% 전송)'
+          // A turn measured against the durable shape budgeted for reasoning
+          // the wire deletes, so its window is narrower than it needed to be.
+          // Said here because the count alone reads as an ordinary bad turn.
+          const declined = record.model_input_measurement === 'durable_shape'
+          return html`
+            <div data-testid="turn-transmitted-atoms" class="flex items-center gap-2 text-2xs font-mono v2-monitoring-row">
+              <span class="text-[var(--color-fg-muted)]">${label}</span>
+              ${declined
+                ? html`<span data-testid="turn-measurement-declined" class="text-[var(--color-status-warn)]">· 체크포인트 형태로 측정 (전송되지 않는 reasoning 포함)</span>`
+                : null}
+            </div>
+          `
+        })()}
         ${record.input_components && record.input_components.length > 0
           ? (() => {
               const components = sortedInputComponents(record)

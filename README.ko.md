@@ -1,349 +1,305 @@
 # MASC
 
-[![OCaml](https://img.shields.io/badge/OCaml-%3E%3D%205.4-orange.svg)](https://ocaml.org/)
+[![OCaml](https://img.shields.io/badge/OCaml-5.5-orange.svg)](https://ocaml.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-[English version](README.md)
+[English](README.md)
 
-> 정확한 설치 릴리스, 로컬 포트, provider 환경변수 같은 휘발성 값의 SSOT는
-> [`README.md`](README.md), [`config/runtime.toml`](config/runtime.toml),
-> [`docs/runtime-tunables.md`](docs/runtime-tunables.md)입니다. 이 한글 문서는
-> 한국어 진입점이며, 그런 값은 의도적으로 복제하지 않습니다.
+MASC(Multi-Agent Shared Context)는 같은 프로젝트에서 일하는 여러
+에이전트가 작업 상태를 공유하도록 돕는 로컬 MCP 서버입니다. 목표, 작업,
+담당자, 보드 글, 실행 근거를 한 작업 공간에 저장하고 MCP와 웹 대시보드로
+보여줍니다.
 
-**MASC는 agent 작업을 위한 로컬 조율·관찰 레이어입니다.** 저장소 옆에서 MCP 서버로 돌면서 coding agent와 상주 Keeper가 goal, task, board 글, repository ownership, approval state를 같은 workspace에서 공유하게 합니다. 대시보드와 turn receipt로 agent의 결정과 실패를 들여다봅니다.
+**Keeper**는 MASC가 관리하는 선택형 상주 에이전트입니다. 공유 작업 공간에서
+이벤트를 받아 장기 작업을 수행합니다. MASC를 협업용 MCP 서버로만 쓸 때는
+Keeper가 없어도 됩니다.
 
-빠르게 일을 끝내는 도구라기보다, 속도 대신 조율·관찰성·장기 실행 persona 기반 agent 실험을 택한 도구입니다. 어떤 결정은 실용적이었고, 어떤 결정은 그냥 재미로 해본 실험입니다. 우연한 농담, 이상한 이름, 작은 설정놀음도 프로젝트 취향의 일부입니다. 그런 것들은 구조적 필연이라서가 아니라 재미있어서 남아 있습니다.
+> **개발 상태:** MASC는 로컬의 신뢰할 수 있는 환경을 대상으로 하는 pre-1.0
+> 프로젝트입니다. 운영 서비스나 보안 경계로 사용할 수 없습니다. Gate, 사람
+> 승인(HITL), Docker 실행은 일부 작업을 제한하지만, 무인 에이전트의 모든 위험한
+> 행동을 막아주지는 않습니다. IDE와 TUI는 실험 단계입니다. `main`의 코드는
+> 최신 공개 바이너리보다 앞서 있을 수 있습니다.
 
-> **개발 상태:** MASC는 아직 pre-1.0 실험입니다. 생산성 도구, production service,
-> 또는 security boundary가 아닙니다. 지금은 로컬 실험과 관찰 용도로만 사용하세요.
-> CODE/IDE 흐름은 아직 실사용 가능한 상태가 아니며, HITL/Sandbox 기능도 사고를
-> 일부 줄이는 운영 장치일 뿐 코드, secret, 인프라, 무인 agent 실행을 보호한다고
-> 믿으면 안 됩니다. 현재 목표는 agent 실패를 충분히 보이게 만들어 어떤 workflow가
-> 쓸모 있어질 수 있는지 찾는 것입니다.
+![MASC 대시보드 개요](docs/screenshots/dashboard/2026-08-21/01-overview.png)
 
-**Keeper**는 MASC가 관리하는 선택적 상주 agent입니다. 서버가 살아 있는 동안 상주하며, heartbeat 주기로 스스로 turn을 돌거나 멘션·메시지를 받으면 반응합니다.
+로컬에서 실행 중인 MASC를 캡처한 화면입니다. 운영 정보는 알아볼 수 없도록
+바꿨습니다. [대시보드 화면 목록](docs/screenshots/dashboard/2026-08-21/README.md)에서
+24개 화면과 캡처 조건을 확인할 수 있습니다.
 
-### 왜 Keeper인가 / Why "Keeper"
+## 먼저 실행하기
 
-이 환경의 에이전트를 **Keeper**라고 부릅니다. 불프로그(피터 몰리뉴)의 게임 *던전 키퍼*에서 따온 애칭입니다. 프로젝트 안에서 쓰는 용어이자 장난스럽게 붙인 이름이지, 별도의 거창한 아키텍처 주장은 아닙니다. 우연한 농담과 캐릭터 같은 이름을 일부러 조금 남기는 프로젝트입니다.
+### 로컬 소스에서 실행
 
----
-
-## MASC로 할 수 있는 일 / What you can do
-
-- **Goal·Task를 MCP 도구로 공유합니다.** 작업 소유권, 상태 전이, 검증 증거를 하나의 로컬 workspace에 둡니다.
-- **상주 Keeper를 굴리고 관찰합니다.** Keeper마다 페르소나·목표·지시문을 주고, 같은 주제나 저장소 위에서 서로 소통하게 둡니다.
-- **서로 다른 에이전트 스타일을 실험합니다.** Keeper마다 다른 관심사와 지시문을 줄 수 있고, 한 환경에서 무엇을 결정하고 어디서 부딪히는지 봅니다.
-- **기성 코딩 에이전트를 붙입니다.** MASC는 MCP 서버라, Claude Code·Codex 같은 MCP 클라이언트를 `/mcp`에 연결하면 같은 워크스페이스에 참여합니다 — 태스크 claim·전이, 보드, goal을 공유하고 `masc_broadcast`·@mention으로 Keeper를 깨웁니다. (외부에서 Keeper turn을 동기로 직접 호출하는 도구는 없고, 워크스페이스와 멘션으로 상호작용합니다.)
-- **같이 코드를 만질 때 뻔한 충돌을 줄입니다.** 여러 Keeper가 한 저장소를 고치면 turn·lock·작업자 소유권으로 조율을 시도하지만, concurrency safety를 보장하지는 않습니다.
-- **결정과 실패를 들여다봅니다.** 웹 대시보드로 Keeper / Goal / Task / Board를 실시간으로 보고, turn마다 receipt가 남습니다.
-- **외부 효과는 하나의 Gate로 보냅니다.** Always Allow·LLM Auto Judge·HITL은 비계층 명시 모드입니다. HITL은 exact request를 영속화하되 Keeper를 멈추지 않고, 결정이 오면 해당 lane을 깨웁니다.
-- **Keeper마다 모델을 다르게 설정합니다.** `runtime.toml` 한 줄로 runtime catalog에 있는 provider × model을 Keeper별로 지정합니다.
-
----
-
-## 기능 / Features
-
-상태 표기 — ✅ 지금 동작 · 🟡 부분 동작 · ❌ 미동작. 상태는 로컬 구현 경로 기준이며, production readiness나 security assurance가 아닙니다. 더 넓은 계획(cluster mode, 외부 IDE 확장, 추가 플랫폼 바이너리 등)은 [`ROADMAP.md`](ROADMAP.md)를 참고해 주세요.
-
-| 기능 | 상태 | 한 줄 설명 | 사용자 진입점 |
-|------|:----:|-----------|--------------|
-| **Keepers** | ✅ | 페르소나·목표·지시문을 가진 상주 에이전트. 서버 기동 시 자동 부팅, 상태는 디스크에 영속 | `.masc/config/keepers/*.toml` |
-| **Gate: Always Allow / Auto Judge / HITL** | 🟡 | exact 1회성 grant와 Keeper별 wake-up을 갖는 제품 중립 외부 효과 경계 | 대시보드 승인 큐 |
-| **Board** | ✅ | Keeper들이 글·댓글·투표로 비동기 협업, 게시가 관련 Keeper를 깨움 | `masc_board_*` 툴 / 대시보드 |
-| **Sandbox (Docker)** | 🟡 | Docker profile 셸 실행은 컨테이너를 쓰지만, local profile과 fallback 경로가 있어 security boundary가 아님 | keeper toml `sandbox_profile` |
-| **Dashboard** | ✅ | Keeper/Goal/Task/Board를 실시간으로 보고 명령을 내리는 웹 SPA | `dashboard/` (vite) |
-| **TUI** | ❌ | Not working — `masc-tui` 실행 파일이 있으나, CJK/emoji 레이아웃·스트리밍 진행·rich-block 렌더링 등 주요 공백으로 실제로 사용할 수 없음 | `masc-tui` |
-| **CODE / IDE (관망형)** | ❌ | Not working — LSP 프록시·주석 오버레이·대시보드 CODE 셸은 구현되어 있으나, 사람이 명령만 내리는 관망형 흐름이 검증되지 않아 실제로 사용할 수 없음 | 대시보드 Code |
-| **OpenTelemetry** | 🟡 | OTLP HTTP exporter + GenAI semconv span/metric은 동작하나, 아직 수집되지 않는 signal과 instrumentation 공백이 많음 | `OTEL_EXPORTER_OTLP_ENDPOINT` |
-| **Goal + Task** | 🟡 | Goal/Task CRUD·전이·검증·프롬프트 주입은 동작. 자동 스케줄링은 미구현 | `masc_goal_*` / `masc_*task*` 툴 |
-| **Multi-Runtime** | 🟡 | Keeper별 provider×model 라우팅 | `runtime.toml` |
-| **Provider Failover** | ❌ | provider 장애 시 자동 failover 없음; 수동 설정 변경 + 서버 재시작 필요 | `runtime.toml` |
-| **Fusion (+ JoJ)** | 🟡 | 여러 모델에 같은 질문 후 심판 모델이 종합. Simple/Refine/Conditional 동작, JoJ 미배선 | `masc_fusion` 툴 |
-| **Multi-Channel** | 🟡 | 외부 채널 메시지로 turn 시작/응답. 현재는 Discord만 라이브로 동작하고, Slack/Telegram은 사이드카 필요 | `POST /api/v1/gate/message` |
-
-### 현재 동작과 한계
-
-- **Keepers** — 각 Keeper는 서버가 살아 있는 동안 상주하는 장기 실행 에이전트입니다. heartbeat로 깨어나 turn을 돌고, 메모리·결정 로그는 디스크에 남아 재시작에도 복원됩니다. **한 Keeper는 한 번에 turn 하나만 돕니다**(동시에 두 일을 하지 않음) — 병렬은 여러 Keeper가 함께 도는 데서 옵니다. `[autonomous] concurrency`는 죽은 레거시 키이며, MASC는 전역 active-Keeper 상한을 강제하지 않습니다.
-- **Gate / HITL** — 디스패치 경계는 opaque operation identity와 complete typed input을 하나의 Gate에 보냅니다. Workspace/Keeper Always Allow는 즉시 진행하고 Auto Judge는 비동기로 판단하며 Manual은 HITL request를 영속화합니다. Deferred request는 promise를 기다리지 않고 Keeper로 반환되며, 결정 후 깨어난 해당 Keeper lane에서 exact 승인 request가 한 번만 소비됩니다. Gate는 승인 workflow이며 sandbox나 credential boundary가 아닙니다.
-- **Sandbox** — `docker run --rm`을 실제로 호출하고 cap-drop / no-new-privileges / read-only rootfs를 적용합니다. MASC는 Docker 동작을 관측하지만 전역 spawn slot으로 사전 허가하지 않습니다. 네트워크는 keeper의 `network_mode`로 제어합니다(기본 `inherit`, `none`으로 격리 가능). *한계*: 모든 Keeper가 docker가 아닙니다(일부는 `local`=호스트 실행). 이미지가 없고 playground 안이면 host 실행으로 강등됩니다(텔레메트리 기록). security boundary로 취급하지 마세요.
-- **Multi-Runtime** — `runtime.toml`의 `runtime.assignments`에 `keeper = provider.model` 한 줄이면 그 Keeper의 매 turn이 해당 provider로 갑니다.
-- **Provider Failover** — provider 장애 시 순서 failover는 미구현입니다. 장애가 나면 default/assignment를 손으로 고치고 서버를 재시작해야 합니다.
-- **Fusion + JoJ** — Keeper가 `masc_fusion`을 호출하면 패널 모델들이 같은 질문에 각자 답고 심판 모델이 합의/모순/맹점을 종합합니다. *한계*: JoJ(Judge of Judges) 위상은 코드·호출 경로가 있으나, 라이브 설정에 1차 심판 목록이 없어 호출 시 **fail-closed로 에러를 반환합니다**. 결과 registry는 in-memory라 재시작 시 사라집니다.
-- **Goal + Task** — Goal/Task는 MCP 툴로 만들고 상태 전이하며, active goal은 Keeper system prompt에 주입됩니다. turn은 채널/이벤트로 구동됩니다. (goal-loop OODA 기계는 2026-07-21 전면 은퇴 — RFC-0352 Path B: Goal 엔티티·MCP tool·task linkage는 유지, 스케줄러 스크립트·서버 broadcast·대시보드 패널은 제거)
-- **OpenTelemetry** — OTLP HTTP exporter와 GenAI semconv span/metric이 동작합니다. *한계*: 아직 수집되지 않는 signal과 instrumentation 공백이 많습니다. 예를 들어 Keeper turn 낮은 수준 이벤트, fusion 나이부 metric, provider별 latency breakdown 등은 부분적으로만 커버됩니다.
-- **CODE / IDE (관망형, 미동작)** — 사람이 코드를 직접 수정하지 않고 에이전트에게 명령만 내리는 관망형 IDE를 지향합니다. LSP 프록시·주석 오버레이·대시보드 CODE 셸은 구현되어 있으나, **관망형 명령 흐름이 검증되지 않아 현재 실사용 가능한 상태가 아닙니다.**
-
----
-
-## 빠른 시작 (5분) / Quick Start
-
-```bash
-# 1. 바이너리 설치 (macOS arm64 / Linux x86_64)
-brew install jeong-sik/masc/masc            # Homebrew (이 repo의 Formula/masc.rb)
-#   또는:  curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
-#   소스 빌드: git clone https://github.com/jeong-sik/masc.git && cd masc &&
-#     scripts/opam-pin-external-deps.sh --install && opam install . --deps-only &&
-#     scripts/dune-local.sh build @default
-
-# 2. 설정 시드 + provider 키 입력
-masc init
-#   .masc/config/.env.local 편집:
-#     export OLLAMA_CLOUD_API_KEY=...     # 아래 표에서 하나 선택
-
-# 3. 키 적용 + 시작
-source .masc/config/.env.local && masc start
-curl http://127.0.0.1:8935/health        # → 200 OK
-
-# 4. (선택) 대시보드
-cd dashboard && pnpm install && pnpm dev
-```
-
-Provider 키 (사용할 것을 `.masc/config/.env.local`에):
-
-| `runtime.toml` provider | 환경 변수 |
-|---|---|
-| `ollama_cloud` | `OLLAMA_CLOUD_API_KEY` |
-| `deepseek` | `DEEPSEEK_API_KEY` |
-| `glm-coding` | `ZAI_API_KEY_SB` |
-| `ollama` (로컬) | — (키 불필요) |
-
-> `masc init`이 `.masc/config/runtime.toml`을 시드합니다(`[runtime].default` 포함). 서버가 `refusing to boot`를 로그하면 워크스페이스에서 먼저 `masc init`을 실행하세요. `masc start`는 subcommand 없이 `masc`를 실행한 것과 동일(가이드용 명시적 이름).
-
----
-
-## 설치 / Install
-
-### 바이너리 (prebuilt)
-
-설치 스크립트를 먼저 확인하고 릴리스를 고정하는 경로를 권장합니다:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh -o /tmp/masc-install.sh
-less /tmp/masc-install.sh
-bash /tmp/masc-install.sh --version <release-tag>
-```
-
-버리는 로컬 환경에서는 편의상 아래 한 줄도 사용할 수 있습니다:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
-```
-
-`$HOME/.local/bin/masc`에 바이너리를 설치하고 `runtime.toml`을 `<base-path>/.masc/config/`에 시드합니다. 제공 바이너리: **macOS arm64**, **Linux x86_64**. 그 외 플랫폼은 소스 빌드를 사용합니다.
-
-설치 스크립트 요구 도구: `curl`과 기본 Unix 도구(`uname`, `chmod`, `mkdir`, `mktemp`)입니다. `jq`는 `--version` / `MASC_VERSION`을 생략해 GitHub latest release를 조회할 때만 필요합니다. Python/tomllib는 사용하지 않습니다. 재현 가능한 설치가 필요하면 `--version <release-tag>`로 고정하세요.
-
-릴리스 바이너리는 GitHub releases에서 내려받습니다. 선택한 릴리스가 `SHA256SUMS`를 제공하면 설치 스크립트는 다운로드한 바이너리와 seed config(`runtime.toml`)를 검증합니다. 기대 항목은 모두 존재해야 하며 값도 일치해야 합니다. 일부 기존 릴리스는 `SHA256SUMS`를 제공하지 않으며, 그런 릴리스는 검증된 바이너리 설치 경로를 사용할 수 없습니다. checksum 파일을 가져오지 못하면 기본값은 실패 종료입니다. 이 경우 아래 source build 경로를 쓰거나, 버리는 로컬 환경이나 air-gapped 설치에서만 `--allow-unverified` 또는 `MASC_ALLOW_UNVERIFIED=1`로 검증을 명시적으로 우회하세요. 이 경우 스크립트가 경고를 출력한 뒤 계속합니다.
-
-> `runtime.toml`이 없거나 `[runtime].default`가 비어 있으면 서버는 `refusing to boot` 로그를 남기고 status 1로 종료합니다 — 환경 기본값 폴백은 없습니다. 기동에 필요한 파일이므로 설치 스크립트가 [`config/runtime.toml`](config/runtime.toml)을 시드합니다. 직접 작성하려면 `[runtime].default = "<provider>.<model>"`와 그에 대응하는 `[provider.model]` runtime binding table을 정의하세요. `[runtime.assignments]`는 선택 사항이며 Keeper별 override에만 씁니다.
-
-### 소스 빌드 / From source
+OCaml 의존성을 한 번 설치한 뒤 작업 공간 서버를 실행합니다. 기본 quickstart는
+Keeper를 시작하지 않으며 모델 프로바이더 키도 요구하지 않습니다.
 
 ```bash
 git clone https://github.com/jeong-sik/masc.git
 cd masc
-scripts/opam-pin-external-deps.sh --install   # 외부 OCaml 의존성 핀 및 설치
+
+scripts/opam-pin-external-deps.sh --install
 opam install . --deps-only
-scripts/dune-local.sh build @default
+./quickstart.sh
+
+BASE_PATH="${MASC_QUICKSTART_HOME:-$HOME/masc-quickstart}"
+source "$BASE_PATH/.masc/config/mcp-client.env"
+curl http://127.0.0.1:8935/health
 ```
 
-요구 사항: OCaml ≥ 5.4, opam ≥ 2.0, dune ≥ 3.22. 빌드/테스트/CI 세부는 [`CONTRIBUTING.md`](CONTRIBUTING.md)를 참고해 주세요.
+기본값은 다음과 같습니다.
 
----
+- 런타임 상태: `~/masc-quickstart/.masc`
+- HTTP 포트: `8935`
+- 대시보드: `http://127.0.0.1:8935/dashboard/`
+- MCP 주소: `http://127.0.0.1:8935/mcp`
+- Keeper 구성: 없음
+- 런타임: `config/runtime.toml`의 현재 `[runtime].default`
+- MCP bearer export: `~/masc-quickstart/.masc/config/mcp-client.env`
 
-## 실행 / Run
+`--base-path`, `--team`, `--port`, `--no-open`, `--no-start` 옵션은
+`./quickstart.sh --help`에서 확인할 수 있습니다.
 
-MASC는 MCP 서버입니다. 기동한 뒤 에이전트/MCP 클라이언트를 그 서버에 붙입니다.
+`classic` Keeper 구성을 함께 시작하려면 첫 실행 때 모델 키를 제공합니다.
 
 ```bash
-# 1. 서버 기동 (loopback)
-PORT=8935   # 8935가 이미 사용 중이면 다른 로컬 포트 사용
-masc --base-path "$PWD" --port "$PORT"     # 바이너리 설치 시
-# 또는 소스에서:
-./start-masc.sh --http --port "$PORT"
-
-# 2. 상태 확인
-curl "http://127.0.0.1:${PORT}/health"
-
-# 3. MCP 클라이언트를 http://127.0.0.1:${PORT}/mcp 에 연결
+export OLLAMA_CLOUD_API_KEY=...
+./quickstart.sh --team classic
 ```
 
-| 실행 모드 | 명령 | 용도 |
-|----------|------|------|
-| 전체 런타임 | `./start-masc.sh --http --port <port>` | Keeper 스케줄러 포함 정식 기동 |
-| 격리 기동 | `scripts/run-local.sh --target-dir /path` | 폴더별 격리, 로컬 포트 자동 할당 |
-| Loopback | `scripts/start-loopback.sh` | 고정 loopback 포트, 스케줄러 끔(로컬 디버깅) |
+필요한 OCaml과 Dune 버전은 `dune-project`에 적혀 있습니다. 첫 소스 실행은
+OCaml 서버와 대시보드를 빌드하므로 몇 분 걸릴 수 있습니다.
 
-대시보드는 별도로 띄웁니다:
+### 공개 바이너리 설치
+
+공개 릴리스는 `main`보다 늦을 수 있습니다. 먼저
+[GitHub Releases](https://github.com/jeong-sik/masc/releases)에서 설치할 태그를
+고르세요. 설치 스크립트도 같은 태그에서 내려받아야 새 설치 스크립트와 예전
+릴리스 파일을 섞지 않을 수 있습니다.
 
 ```bash
-cd dashboard && pnpm install && pnpm dev   # vite가 로컬 서버로 프록시
-# 프로덕션 빌드: pnpm build
+TAG=vX.Y.Z
+curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/${TAG}/scripts/install.sh" \
+  -o /tmp/masc-install.sh
+less /tmp/masc-install.sh
+bash /tmp/masc-install.sh --version "$TAG"
 ```
 
-바이너리 설치 스크립트는 dashboard 소스를 clone하지 않습니다. 위 dashboard 명령은 repository checkout에서 실행하는 개발 경로입니다. 로컬 dashboard auth와 admin token 설정은 [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md)를 참고하세요.
+설치 방식은 선택한 태그에 따라 달라집니다. 최근 릴리스의 스크립트는
+`SHA256SUMS`가 있으면 내려받은 파일을 검증하고, 필요한 파일이 없으면 설치를
+중단합니다. 지원 플랫폼은 각 릴리스에 첨부된 파일을 기준으로 확인하세요. 설치가
+끝나면 스크립트가 출력한 login과 시작 명령을 따릅니다. login 명령은 MCP
+클라이언트용 worker bearer를 만듭니다. 기본 설정의 MCP endpoint는 인증 없는
+클라이언트를 받지 않습니다.
 
----
+## MCP 클라이언트 연결
 
-## 설정 / Configuration
+공개 MCP 경로는 HTTP입니다. 먼저 `quickstart.sh`가 만든 worker bearer를 현재
+셸에 읽습니다.
 
-런타임 설정과 상태는 `--base-path` 아래 `.masc/`에 모입니다. 설정 파일은 `.masc/config/`에 있습니다.
+```bash
+BASE_PATH="${MASC_QUICKSTART_HOME:-$HOME/masc-quickstart}"
+source "$BASE_PATH/.masc/config/mcp-client.env"
+```
 
-**시작에 필요한 것**
-
-| 파일 | 역할 |
-|------|------|
-| `runtime.toml` | provider/model 카탈로그 + `[runtime].default`. 기동에 필요: 파일(또는 `[runtime].default`)이 없으면 서버는 `refusing to boot` 로그를 남기고 status 1로 종료합니다 — 환경 기본값 폴백 없음 |
-⚠️ **레거시 / 미사용 키**: `runtime.toml`에 `[autonomous] concurrency` 또는 `[bootstrap] max_active_keepers`가 있다면 제거하세요. 두 키 모두 실행을 제어하지 않습니다.
-
-**에이전트를 만들 때**
-
-| 파일 | 역할 |
-|------|------|
-| `prompts/keeper.world.md` | 모든 Keeper에 공통 주입되는 **World 프롬프트**(공통 무대·규칙, `<world>` 블록). 고치면 전체 무대가 바뀝니다 |
-| `keepers/<name>.toml` | Keeper(등장인물) 정의 — goal·지시문·`persona_name`·`sandbox_profile`. World 위에 stack 됩니다 |
-| `personas/<name>/profile.json` | (선택) 직접 작성하는 페르소나 JSON. `persona_name`으로 참조하며 여러 Keeper가 공유 가능합니다 |
-
-**저장소에 코드 작업을 시킬 때만**
-
-| 파일 | 역할 |
-|------|------|
-| `repositories.toml` | Keeper가 clone/작업할 저장소 등록. repo 작업이 없으면 불필요합니다 |
-| `keeper_repo_mappings.toml` | Keeper → credential + 접근 가능 저장소 매핑 |
-| `credentials.toml` | PR용 GitHub 자격증명 |
-
-> `prompts/`의 나머지 `.md`는 행동·거버넌스·검증·메모리용 시스템 템플릿입니다. 이름으로 필요한 자리에서만 불려가고, 기본값으로 동작하므로 보통 건드리지 않습니다. "무대"를 바꾸려고 편집하는 것은 `keeper.world.md`입니다.
->
-> 직접 작성하는 것은 `keepers/<name>.toml`(Keeper 정의)와 `personas/<name>/profile.json`(페르소나)입니다. 런타임 상태(`.masc/keepers/*.json` + `*.jsonl` 로그)는 서버가 생성하므로 손대지 않습니다.
->
-> 실행 런타임 `.masc/`는 `--base-path`가 가리키는 곳입니다. 저장소 안의 `masc/.masc/`는 lock·scratch용입니다.
-
-Keeper 정의 예시 (`keepers/<name>.toml`):
+bearer 환경 변수를 지원하는 클라이언트에는 다음 형태로 등록합니다.
 
 ```toml
-[keeper]
-name = "albini"
-persona_name = "albini"
-goal = "흐름이 끊긴 task의 owner를 호명해 추궁합니다. 본인은 코드를 만들지 않습니다."
-active_goal_ids = ["goal-pm-flow"]
-sandbox_profile = "docker"     # 또는 "local"
-
-instructions = """
-... Keeper 행동 지시 ...
-"""
+[mcp_servers.masc]
+url = "http://127.0.0.1:8935/mcp"
+bearer_token_env_var = "MASC_TOKEN"
+http_headers = { "Accept" = "application/json, text/event-stream" }
 ```
 
-Keeper → runtime 할당은 `runtime.toml`에서 합니다 (keeper toml은 model/runtime을 직접 갖지 않습니다):
+클라이언트가 연결되면 아래 두 호출로 첫 작업을 시작할 수 있습니다.
+
+```text
+masc_start(path="/path/to/project", task_title="첫 작업 설명")
+masc_status()
+```
+
+`masc_start`는 작업할 프로젝트를 선택하고 작업 공간에 참여합니다. 제목을
+전달하면 새 작업을 만들고 자신이 맡습니다. 이후 MASC 도구를 통해 목표, 작업,
+보드 글, 상태 변경을 다른 에이전트와 공유합니다.
+
+기본 로컬 인증에서는 URL만 등록하면 `401 Unauthorized`가 납니다. 다른
+클라이언트 형식, initialize 직접 확인, 수동 bearer 생성은
+[`docs/MCP-TEMPLATE.md`](docs/MCP-TEMPLATE.md)를 참고하세요. admin 전용 대시보드
+작업은 [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md)에
+정리돼 있습니다.
+
+## 현재 범위
+
+| 영역 | 현재 용도 | 알아둘 점 |
+|---|---|---|
+| 작업 공간 협업 | MCP로 목표(Goal), 작업(Task), 담당자, 상태 변경, 보드 글, 검증 근거를 공유합니다 | 협업 정보는 여러 에이전트가 동시에 같은 소스 파일을 고칠 때 발생하는 충돌을 완전히 막지 못합니다 |
+| Keeper | 설정된 에이전트가 작업 공간의 이벤트를 받아 작업하고 실행 기록을 남깁니다 | 고급 기능이며 선택한 런타임과 Keeper 설정에 따라 동작이 달라집니다 |
+| 대시보드 | 작업 공간과 런타임 상태를 보고 운영 명령을 실행합니다 | 대시보드 빌드 상태와 인증 방식에 따라 화면 및 쓰기 권한이 달라집니다 |
+| Gate와 사람 승인 | 지원하는 외부 작업에 Always Allow, 모델 판단, 사람 승인을 적용합니다 | 승인 절차이며 샌드박스나 자격증명 보호 장치가 아닙니다 |
+| 런타임 선택 | Keeper마다 프로바이더와 모델을 지정하고 순서가 있는 후보 목록을 설정합니다 | 올바른 카탈로그와 프로바이더 자격증명이 필요합니다 |
+| Fusion | `masc_fusion`으로 여러 모델의 답과 심판 결과를 모읍니다 | 사용 전에 preset과 심판 런타임을 설정해야 합니다 |
+| 외부 채널 | Discord와 Slack 등 지원 채널을 작업 공간에 연결합니다 | token과 채널별 Keeper 연결을 운영자가 직접 설정해야 합니다 |
+| 로컬 또는 Docker 실행 | Keeper의 셸 작업에 `local` 또는 `docker`를 선택합니다 | `local`은 호스트에서 실행됩니다. Docker도 완전한 보안 경계가 아닙니다 |
+| IDE와 TUI | 실험 중인 화면과 터미널 UI를 살펴봅니다 | 일반 작업을 시작하는 기본 경로가 아닙니다 |
+
+현재 제품의 기본 경로는 저장소 작업 공간 협업입니다. Keeper 운영과 운영자
+기능은 그다음 단계입니다. 원격 환경의 안전성, 클러스터 배포, 운영 서비스 수준은
+현재 보장하지 않습니다. 범위와 우선순위는
+[`docs/PRODUCT-OPERATING-PLAN.md`](docs/PRODUCT-OPERATING-PLAN.md)를 참고하세요.
+
+## 설정
+
+MASC는 런타임 상태를 `<base-path>/.masc` 아래에 둡니다. 사용자가 작성하는
+설정은 기본적으로 `<base-path>/.masc/config`에 있습니다. `MASC_CONFIG_DIR`를
+지정하면 다른 설정 폴더를 사용할 수 있습니다.
+
+| 경로 | 용도 |
+|---|---|
+| `runtime.toml` | 프로바이더와 모델 목록, 필수 `[runtime].default`, 런타임 후보 목록, Keeper별 런타임 지정 |
+| `agent-core-models-overlay.toml` | 배포 환경에서 추가하는 모델 기능 정보. 파일이 없으면 Agent Core에 포함된 기본 카탈로그만 사용합니다 |
+| `keepers/<name>.toml` | Keeper 실행 설정 |
+| `keepers/<name>/AGENT.md` | Keeper의 전체 프롬프트. TOML로 만든 Keeper마다 필요합니다 |
+| `repositories.toml` | 저장소 작업에 사용할 저장소 이름과 체크아웃 정보 |
+| `keeper_repo_mappings.toml` | Keeper별 저장소 선호값. 기본 선택에만 쓰며 접근 권한을 제한하지 않습니다 |
+| `.env.local` | 현재 설치 스크립트와 빠른 실행 절차가 기록하는 프로바이더 환경 변수 |
+
+Keeper 하나에는 사용자가 작성하는 파일 두 개가 필요합니다.
+
+```text
+<base-path>/.masc/config/keepers/reviewer.toml
+<base-path>/.masc/config/keepers/reviewer/AGENT.md
+```
+
+```toml
+# keepers/reviewer.toml
+[keeper]
+autoboot_enabled = true
+proactive_enabled = true
+sandbox_profile = "local"
+mention_targets = ["operator"]
+allowed_paths = ["workspace/yousleepwhen/masc"]
+```
+
+```markdown
+<!-- keepers/reviewer/AGENT.md -->
+현재 변경 내용을 검토하고, 파일 경로와 실행 명령을 포함한 근거를 보고하세요.
+```
+
+Keeper TOML에는 실행 설정만 둡니다. 프롬프트는 `AGENT.md`에 작성합니다.
+정의되지 않은 Keeper TOML 항목이 있으면 설정을 거부합니다.
+
+Keeper별 런타임은 `runtime.toml`에서 지정합니다.
 
 ```toml
 [runtime.assignments]
-albini = "<provider>.<model>"   # config/runtime.toml에 정의된 id로 교체
+reviewer = "<provider>.<model>"
 ```
 
-선택한 runtime이 cloud provider를 사용한다면 서버 시작 전에 필요한 provider credential을 export해야 합니다. runtime ID와 환경변수 knob의 SSOT는 [`config/runtime.toml`](config/runtime.toml)과 [`docs/runtime-tunables.md`](docs/runtime-tunables.md)입니다. provider key 이름을 README에 복제하지 않습니다.
+전체 파일 규칙은 [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md)에
+있습니다. 실제로 적용된 설정은 `masc_config` 도구나
+`/api/v1/dashboard/config`에서 확인할 수 있습니다.
 
----
+## 실행 방식
 
-## 디렉토리 구조 / Layout
-
-```
-masc/
-├── bin/            서버·CLI 진입점 (main_eio = HTTP 서버, masc_tui = TUI, fusion_run …)
-├── lib/            핵심 로직 (keeper/, board/, fusion/, gate/, ide/, server/, runtime/ …)
-├── dashboard/      TypeScript + Preact 대시보드 SPA
-├── docs/           스펙, 런북, RFC, 경계 문서
-├── scripts/        설치·빌드·CI·운영 스크립트
-├── config/         체크인된 기본 설정 (런타임이 시드로 사용)
-├── test/           Alcotest 스위트
-└── start-masc.sh   전체 런타임 기동 스크립트
-
-<base-path>/.masc/ (런타임 상태, --base-path 아래)
-├── config/         runtime.toml, keepers/, repositories.toml, credentials.toml …
-├── keepers/        Keeper별 런타임 상태·메모리 (*.json + *.jsonl 로그, 서버 생성)
-├── goals.json      Goal 상태
-├── tasks/          Task 백로그, goal↔task 링크
-├── board_*.jsonl   Board 글·댓글·투표 (append-only)
-└── audit-approvals/  HITL 승인 이력
-```
-
----
-
-## 관련 프로젝트
-
-이전 README에는 다른 agent runtime과의 상세 비교표가 있었습니다. 그 표는 당시 스냅샷으로는 유용했지만, 지금은 upstream의 실시간 inventory로 유지하지 않습니다. 현재 MASC의 로컬 계약은 위에서 설명한 범위로 읽으면 됩니다: repo-local MCP workspace, Keeper turn, dashboard/receipt 관찰성, `<base-path>/.masc/` 파일 상태, 그리고 `runtime.toml`을 통한 runtime assignment.
-
----
-
-## Dashboard
-
-대시보드는 해시 기반 라우터(`dashboard#<tab>?section=<section>`)로 서피스를 노출하는 웹 패널입니다. 서피스와 섹션의 canonical 정의는 `dashboard/src/config/navigation.ts`의 `DASHBOARD_SURFACES`와 `DASHBOARD_SECTION_ITEMS`이며, `hidden: true`로 표시된 항목(cockpit 등)은 UI에 노출되지 않습니다.
-
-메인 네비게이션 레일에 고정되는 서피스(`V2_PRIMARY_SURFACE_IDS`):
-
-| 서피스 | 설명 |
+| 명령 | 용도 |
 |---|---|
-| Overview | 빠른 신호와 브리핑 요약 |
-| Workspace | 작업 목표, 계획, 저장소, 검증 |
-| Keepers | Keeper 로스터, 대화, 컨텍스트 워크스페이스 |
-| Board | 사람·에이전트·자동화·시스템 게시물 |
-| Schedule | 예약된 Keeper 자동화와 wake 신호 |
-| Approvals | Keeper HITL 승인 큐 (도구 호출 게이트) |
-| Fusion | masc_fusion 패널·심판 숙의 |
-| Code | 실험적 CODE/IDE 셸; 실제 코딩 workflow에는 아직 사용할 수 없음 |
-| Connectors | 채널 사이드카와 Keeper 바인딩 |
-| Settings | Keeper 설정 운영 콘솔 |
-| Logs | 시스템 실행 로그 |
+| `masc start --base-path <path>` | 설치된 바이너리 실행. 하위 명령 없이 `masc`만 실행해도 같습니다 |
+| `./start-masc.sh --http --base-path <path>` | 소스 checkout에서 전체 런타임 실행 |
+| `scripts/start-loopback.sh` | Keeper 자동 시작을 기본으로 끈 채 `127.0.0.1:8935`에서 실행 |
+| `scripts/run-local.sh --target-dir <path>` | 경로에서 계산한 포트로 격리된 개발 런타임 실행 |
 
-레일 외부에서 접근 가능한 추가 서피스: Monitor (keeper fleet, 도구 모니터, 런타임, observatory), Command (개입·거버넌스·승인), Lab (도구 진단, safety harness, 성능, Memory OS, 키퍼 메모리 상태).
+상태 파일을 확인하거나 고치기 전에 서버가 실제로 사용하는 경로부터 확인하세요.
 
-라우트 예시: `dashboard#monitoring?section=agents`, `dashboard#monitoring?section=journey`, `dashboard#command?section=operations`, `dashboard#connectors?section=connector-status`, `dashboard#lab?section=memory-subsystems`, `dashboard#workspace?section=verification`.
+```bash
+curl -fsS 'http://127.0.0.1:8935/health?full=1' \
+  | jq '.paths | {effective_base_path, effective_masc_root, roots_diverge}'
+```
 
-(`monitoring?section=journey` 같은 일부 진단 뷰는 `navigation.ts` 레일 서피스가 아니라 `dashboard/src/components/status.ts`의 라우트-전용 매핑으로 제공됩니다 — 레일 라벨 없이 라우트로만 도달합니다.)
+`.masc/config/` 밖에서 서버가 만든 파일은 설정 입력이 아닙니다. Keeper 상태,
+작업 저장소, 보드 로그, 실행 기록, 승인 이력을 직접 고치지 마세요.
 
----
+## 대시보드
 
-## 문서 / Documentation
+서버는 `/dashboard/`에서 대시보드를 제공합니다. 화면 구성은
+`dashboard/src/config/navigation.ts`에 정의되어 있습니다.
 
-이 저장소의 문서는 모두 같은 신뢰도를 갖지 않습니다. `status`와 `last_verified`를 명시한 파일을 우선하고, 오래된 design/RFC 문서는 현재 runbook에서 다시 링크하지 않는 한 역사/맥락 문서로 읽어야 합니다.
+사이드바의 기본 화면은 다음과 같습니다.
 
-| 문서 | 용도 | 현재성 메모 |
-|---|---|---|
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 빌드/테스트/PR 기대치 | contributor workflow 문서이며 제품 홍보 문서가 아님 |
-| [`ROADMAP.md`](ROADMAP.md) | 6-8주 운영 관점 | 버전 헤더는 `dune-project`와 `CHANGELOG.md`에 맞는지 확인 |
-| [`docs/OAS-MASC-BOUNDARY.md`](docs/OAS-MASC-BOUNDARY.md) | MASC ↔ OAS 경계 | reference 문서; 오래된 본문보다 `last_verified`와 generated pin block 우선 |
-| [`docs/spec/SPEC-INDEX.md`](docs/spec/SPEC-INDEX.md) | spec suite 진입점 | living draft; 개별 spec에는 migration context가 남아 있을 수 있음 |
-| [`docs/KEEPER-USER-MANUAL.md`](docs/KEEPER-USER-MANUAL.md) | Keeper 개념과 운영 메모 | 오래된 manual; config truth는 [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md), [`config/runtime.toml`](config/runtime.toml), live code 우선 |
-| [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md) | release evidence bundle | 형식 문서; 사용 전 version line을 current release metadata와 맞출 것 |
+| 화면 | 용도 |
+|---|---|
+| Overview | 작업 공간과 런타임 요약 |
+| Keepers | Keeper 목록, 대화, 현재 작업 맥락 |
+| Registry | Keeper 설정과 런타임 연결 |
+| Monitor | Keeper 목록, 도구 상태, 런타임, 관찰 기록 |
+| Work | 목표, 계획, 저장소, 검증 상태 |
+| Gate | 사람 승인 대기 목록과 Always 규칙 |
+| Schedule | 예약 작업과 깨우기 신호 |
+| Board | 사람, 에이전트, 자동화, 시스템 글 |
+| Fusion | 패널과 심판 실행 결과 |
+| Logs | 런타임 이벤트 로그 |
+| IDE | 실험 중인 협업 IDE 화면 |
+| Connectors | 외부 채널 상태와 Keeper 연결 |
+| Settings | 운영 설정 화면 |
 
-대시보드 라우트 포맷·서피스 목록은 위 [Dashboard](#dashboard) 섹션을 참고해 주세요.
+화면 안에서 선택할 수 있는 하위 항목은 다음과 같습니다.
 
----
+| 화면 | 하위 항목 |
+|---|---|
+| Monitor | `agents`, `internal-agents`, `fleet-health`, `runtime`, `observatory` |
+| Work | `work`, `planning`, `repositories`, `verification` |
+| Connectors | `connector-status` |
+| IDE | `ide-shell` |
+| Lab | `tools`, `harness`, `performance`, `keeper-memory-health` |
 
-## 남은 과제 / Roadmap
+`Lab`과 `Command`는 주소로 열 수 있지만 기본 사이드바에는 없습니다. 숨겨진
+진단 화면은 사용자가 보는 기본 메뉴에 포함되지 않습니다.
 
-아래는 현재 한계를 바탕으로 정리한 구체적인 남은 작업입니다. 더 넓은 운영 계획은 [`ROADMAP.md`](ROADMAP.md)를 참고해 주세요.
+현재 대시보드에서 지원하는 주소 예시는
+`dashboard#monitoring?section=journey`,
+`dashboard#command?section=operations`,
+`dashboard#connectors?section=connector-status`,
+`dashboard#workspace?section=verification`입니다. `journey`는 메뉴에 표시되지 않는
+진단 화면입니다.
 
-| # | 영역 | 남은 작업 | 상태 변화 예상 |
-|---|------|----------|---------------|
-| 1 | **Keepers / Fleet** | 배포된 `runtime.toml`에서 죽은 `[autonomous] concurrency` 키를 제거하고, 전역 상한이 없는 런타임 계약과 fleet 문서를 맞춥니다. | 🟡→✅ |
-| 2 | **Provider Failover** | provider healthcheck 기반 **자동 순서 failover**를 구현합니다. 장애 시 다음 후보 provider로 Keeper turn을 자동 전환하고, 복구 시 로그/메트릭을 남깁니다. | ❌→✅ |
-| 3 | **Fusion + JoJ** | `runtime.toml`에 JoJ(Judge of Judges)용 1차 심판 패널(`judges`) 설정을 추가하고, fusion 결과 registry를 디스크에 영속화합니다. | 🟡→✅ |
-| 4 | **Goal + Task** | (superseded) goal-loop OODA 기계는 전면 은퇴됨(2026-07-21, RFC-0352 Path B). goal 기반 wake는 이 행의 부활이 아니라 새 typed Scheduler 설계로만 가능. | RFC-0352 |
-| 5 | **TUI** | `masc-tui`를 실제로 사용 가능한 상태로 만듭니다. 실행 파일은 있으나 CJK/emoji 레이아웃·스트리밍 진행·rich-block 렌더링 공백으로 현재는 사용할 수 없습니다. | ❌→🟡/✅ |
-| 6 | **IDE** | 관망형 IDE를 실제로 사용 가능한 상태로 만듭니다. LSP 프록시·주석 오버레이·대시보드 IDE 셸은 있으나, 사람이 명령만 내리는 흐름이 검증되지 않아 현재는 사용할 수 없습니다. | ❌→🟡/✅ |
-| 7 | **Multi-Channel** | Slack·Telegram 등 Discord 외 채널용 **사이드카**를 추가하고, gate message 스키마를 채널별로 확장합니다. | 🟡→✅ |
-| 8 | **Sandbox** | docker 이미지 미설치·playground 내 fallback 시 host 실행 비율을 줄이고, `sandbox_profile=local` 사용처를 명시적으로 문서화합니다. | ✅ 안정화 |
-| 9 | **HITL** | 사람의 결정을 기다리는 동안 Keeper를 블로킹하지 않습니다. exact request를 영속화하고 다른 작업을 계속하며, 결정이 오면 해당 Keeper lane만 깨웁니다. | ✅ 안정화 |
-| 10 | **Gate** | Always Allow·LLM Auto Judge·HITL을 비계층 선택지로 유지합니다. 제품·명령·risk level을 분류하지 않고 exact 1회성 grant를 감사합니다. | ✅ 안정화 |
-| 11 | **OpenTelemetry** | Keeper turn 낮은 수준 이벤트, fusion 나이부 metric, provider별 latency breakdown 등 누락된 signal과 instrumentation을 추가합니다. | 🟡→✅ |
+[24개 화면 목록](docs/screenshots/dashboard/2026-08-21/README.md)에서 기본 화면과
+Monitor, Work, Lab 화면을 확인할 수 있습니다.
 
----
+## 저장소 구조
 
-## 상태 / Status
+```text
+masc/
+├── bin/          서버와 CLI 시작점
+├── lib/          작업 공간, Keeper, 런타임, Gate, 서버 코드
+├── packages/     저장소에 포함된 Agent Core 패키지
+├── dashboard/    TypeScript와 Preact 대시보드 소스
+├── assets/       빌드된 웹 파일
+├── config/       초기 설정에 사용하는 기본 파일
+├── docs/         실행 안내, 계약, 스펙, 이전 RFC
+├── scripts/      빌드, 설치, 검사, 로컬 운영 스크립트
+└── test/         OCaml 테스트와 테스트 데이터
+```
 
-pre-1.0 (`0.y.z`). API와 설정 형식은 바뀔 수 있습니다. `1.0.0`은 저장소 협업·릴리스·운영자 경로가 caveat 없이 신뢰될 때까지 열지 않습니다.
+## 문서
 
-## License
+| 문서 | 용도 |
+|---|---|
+| [`docs/MCP-TEMPLATE.md`](docs/MCP-TEMPLATE.md) | MCP 클라이언트 설정 |
+| [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md) | 현재 Keeper 파일과 런타임 지정 규칙 |
+| [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | 로컬 토큰 발급과 대시보드 쓰기 권한 |
+| [`docs/AGENT-CORE-BOUNDARY.md`](docs/AGENT-CORE-BOUNDARY.md) | MASC와 저장소에 포함된 Agent Core의 역할 구분 |
+| [`docs/spec/SPEC-INDEX.md`](docs/spec/SPEC-INDEX.md) | 스펙 목록. 최신이라고 표시하지 않은 개수와 규모 정보는 과거 기록입니다 |
+| [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md) | 릴리스 근거 형식. 다시 쓸 때는 문서의 버전부터 확인해야 합니다 |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 빌드, 테스트, pull request 작업 방식 |
+| [`ROADMAP.md`](ROADMAP.md) | 현재 계획. 릴리스 약속은 아닙니다 |
 
-MIT. 보증 없이 "있는 그대로" 제공됩니다. 자세한 내용은 [`LICENSE`](LICENSE)를 참고해 주세요.
+## 개발 및 릴리스 상태
+
+- 패키지 버전은 `dune-project`에 정의되고 `masc.opam`에 반영됩니다.
+- 소스 릴리스 기록은 `CHANGELOG.md`에 있습니다.
+- 공개 바이너리와 지원 플랫폼은
+  [GitHub Releases](https://github.com/jeong-sik/masc/releases)의 첨부 파일을
+  기준으로 확인합니다.
+- 1.0 전에는 API와 설정 형식이 바뀔 수 있습니다.
+
+## 라이선스
+
+MIT. 자세한 내용은 [`LICENSE`](LICENSE)를 참고하세요.

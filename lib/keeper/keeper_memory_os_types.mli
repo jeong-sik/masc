@@ -8,7 +8,6 @@
     persistence codec, and tests share one source. *)
 val wire_field_claim : string
 val wire_field_category : string
-val wire_field_first_seen : string
 val wire_field_memory_id : string
 val wire_field_reason : string
 
@@ -29,6 +28,12 @@ type dropped_statement =
   }
 
 val dropped_statement_to_json : dropped_statement -> Yojson.Safe.t
+
+(** Inverse of {!dropped_statement_to_json}. Field-exact: an object carrying
+    anything besides [memory_id] and [reason] is [None] rather than being
+    read past, so a journal line written by a build with a wider statement
+    shape does not decode as this one. *)
+val dropped_statement_of_json : Yojson.Safe.t -> dropped_statement option
 
 (** Librarian taxonomy as a closed sum. Labels outside the current vocabulary
     reject at the producer and persistence boundaries. Categories are model

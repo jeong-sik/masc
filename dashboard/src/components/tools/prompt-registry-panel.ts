@@ -42,13 +42,12 @@ export interface PromptDestination {
   summary: string
 }
 
-const SOURCE_CHIP_ORDER: PromptSourceFilter[] = ['all', 'file', 'override', 'default', 'missing']
+const SOURCE_CHIP_ORDER: PromptSourceFilter[] = ['all', 'file', 'override', 'missing']
 
 const SOURCE_LABELS: Record<PromptSourceFilter, string> = {
   all: '전체',
   file: '파일',
   override: '오버라이드',
-  default: '기본값',
   missing: '누락',
 }
 
@@ -202,7 +201,6 @@ export function promptSourceCounts(
     all: prompts.length,
     file: 0,
     override: 0,
-    default: 0,
     missing: 0,
   }
   for (const p of prompts) counts[p.source] += 1
@@ -520,7 +518,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
 
             <div class="mb-4">
               <div class="mb-2 text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">파일 기준값</div>
-              <div class="max-h-55 overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] custom-scrollbar"><${Markdown} text=${'```markdown\n' + (selectedPrompt.file_value ?? '없음') + '\n```'} /></div>
+              <div class="max-h-[38vh] overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] custom-scrollbar"><${Markdown} text=${'```markdown\n' + (selectedPrompt.file_value ?? '없음') + '\n```'} /></div>
             </div>
 
             <div class="mb-2 flex items-center justify-between gap-2">
@@ -528,9 +526,9 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
               <div class="text-2xs text-[var(--color-fg-muted)]">저장 후 effective 미리보기가 오버라이드를 반영합니다</div>
             </div>
             <${TextArea}
-              rows=${18}
+              rows=${28}
               value=${draft}
-              class="min-h-80 font-mono text-xs"
+              class="min-h-[46vh] font-mono text-sm leading-relaxed"
               onInput=${(event: Event) => {
                 setDraft((event.target as HTMLTextAreaElement).value)
                 setStatus(null)
@@ -553,7 +551,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
             </div>
           ` : html`
             <div class="v2-lab-card rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-4 py-10 text-center text-xs text-[var(--color-fg-muted)]">
-              ${loading ? '프롬프트 목록을 불러오는 중입니다.' : '표시할 프롬프트가 없습니다.'}
+              ${loading ? '불러오는 중…' : '표시할 프롬프트 없음'}
             </div>
           `}
         </div>

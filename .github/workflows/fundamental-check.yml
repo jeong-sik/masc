@@ -22,7 +22,9 @@ name: Fundamental Check
 
 on:
   pull_request:
-    branches: [main]
+    # No base filter, for the reason ci.yml carries: the filter matches the
+    # base branch, so these guards skipped every stacked PR — the exact PRs
+    # that reach review with the least evidence.
   push:
     branches: [main]
 
@@ -30,14 +32,13 @@ permissions:
   contents: read
 
 concurrency:
-  # Supersede older guard bundles for the same PR. Keep main pushes
-  # uncancelled so every merge still gets its own regression signal.
+  # A newer main push contains every older commit, so only its guard bundle is
+  # actionable. PR synchronize events likewise supersede the previous head.
   group: >-
-    fundamental-check-${{
-      github.event_name == 'push' && github.ref_name == 'main' && github.sha
-      || github.event.pull_request.number || github.ref
+    fundamental-check-${{ github.event_name }}-${{
+      github.event.pull_request.number || github.ref
     }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   lint-suite:
@@ -69,7 +70,9 @@ jobs:
             "${{ github.event.pull_request.base.sha }}"
       - name: Run blocking lints (push)
         if: github.event_name != 'pull_request'
-        run: bash scripts/ci/run-lint-suite.sh blocking
+        run: >-
+          bash scripts/ci/run-lint-suite.sh blocking
+          "${{ github.event.before }}"
 
   lint-advisory:
     name: Lint Suite (advisory)

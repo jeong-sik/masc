@@ -95,6 +95,19 @@ type status =
   | Consumed of consumed_state
   | Quarantine of quarantine_state
 
+type status_view =
+  | Direct_resumable of resumable_status
+      (** A candidate that has never entered quarantine. *)
+  | Requeued_resumable of
+      { resumable : resumable_status
+      ; quarantine : quarantine_state
+      }
+      (** A requeued candidate is operationally resumable while retaining the
+          quarantine identity needed by reconciliation and audit. *)
+  | Suspended_quarantine of quarantine_state
+      (** A quarantined or requeue-requested candidate is not operationally
+          resumable. *)
+
 type candidate =
   { candidate_id : string
   ; keeper_name : string
@@ -145,32 +158,39 @@ type record_acceptance =
 
 exception Candidate_unavailable of string
 
-val delivery_failure_kind_to_string : delivery_failure_kind -> string
-val delivery_failure_kind_of_string : string -> delivery_failure_kind option
-val delivery_failure_to_yojson : delivery_failure -> Yojson.Safe.t
-val delivery_failure_of_yojson : Yojson.Safe.t -> (delivery_failure, string) result
+(* The [delivery_failure], [delivery] and [quarantine_failure_category] codecs
+   are not listed here. They serialize this module's own durable ledger and no
+   caller outside it ever named one -- exporting them offered a second way to
+   read and write the ledger's shape beside the operations that own it. The
+   functions stay; only the interface stops advertising them.
+   [quarantine_failure_category_to_string] is the exception and is kept:
+   [Keeper_board_attention_quarantine_command] renders the category. *)
+
 val judgment_to_yojson : judgment -> Yojson.Safe.t
 val judgment_of_yojson : Yojson.Safe.t -> (judgment, string) result
-val delivery_to_string : delivery -> string
-val delivery_of_string : string -> delivery option
 val quarantine_failure_category_to_string : quarantine_failure_category -> string
-val quarantine_failure_category_of_string : string -> quarantine_failure_category option
-val resumable_status : status -> resumable_status option
-val quarantine_state : status -> quarantine_state option
+val status_view : status -> status_view
+(** Total classification of a durable status. Unlike the removed pair of
+    optional projections, this preserves both operational resumability and
+    quarantine provenance without forcing callers to inspect [status] again. *)
 val signal_to_yojson : Board_dispatch.board_signal -> Yojson.Safe.t
+
+val candidate_id_of_signal :
+  keeper_name:string -> Board_dispatch.board_signal -> string
+(** Typed event identity of a Board signal for one keeper. [Board_post_created]
+    hashes (keeper, kind, post_id) only — volatile post fields (updated_at,
+    content) must not participate, or the backlog scanner's re-synthesized
+    signals mint a fresh candidate per post update (#28607). Exported so test
+    fixtures derive ids from this function instead of copying the formula. *)
 
 val singleton_judgment_request : candidate -> (Yojson.Safe.t, string) result
 (** Validate the current durable request schema and its outer candidate,
     Keeper, and signal identity, then return the one-item exact-flow input.
     Old or partial request JSON is rejected without compatibility decoding. *)
 
-val of_board_evidence :
-  meta:Keeper_meta_contract.keeper_meta ->
-  recorded_at:float ->
-  signal:Board_dispatch.board_signal ->
-  post:Board.post ->
-  comments:Board.comment list ->
-  (candidate, string) result
+(* [of_board_evidence] is the inner step of [of_board_signal] below, which is
+   the door callers use: it reads the post and comments and hands them here.
+   Nothing outside supplies its own evidence. *)
 
 val of_board_signal :
   meta:Keeper_meta_contract.keeper_meta ->
@@ -219,11 +239,10 @@ val record : base_path:string -> candidate -> record_result
 (** Validate the complete current candidate invariant before changing the
     durable ledger. *)
 
-val record_delivery_failure :
-  base_path:string ->
-  candidate ->
-  delivery_failure ->
-  (candidate, string) result
+(* [record_delivery_failure] is called from [consume_judged] in this module, on
+   the branch where the event queue answers [Identity_conflict] or
+   [Storage_error]. That is the only place a [delivery_failure] is constructed,
+   so a caller outside holds none to record. *)
 
 val record_judgment :
   base_path:string -> candidate -> judgment -> (candidate, string) result
@@ -263,15 +282,28 @@ val normalize_requeued_consumed :
     consumed resumable state. Direct [Consumed] is idempotent; every other
     state is rejected. *)
 
+type judgment_delivery_outcome =
+  | Delivered of candidate
+  | Candidate_absent
+      (** The named candidate is not in the live ledger — a retire moves the
+          whole store aside as one directory and never leaves a tombstone, so
+          this is indistinguishable from any other cause of absence and is
+          treated the same: the delivery cannot succeed on a retry of the
+          identical request, because there is no row left to update. *)
+
 val apply_judgment_and_deliver :
   base_path:string ->
   keeper_name:string ->
   candidate_id:string ->
   judgment:judgment ->
-  (candidate, string) result
+  (judgment_delivery_outcome, string) result
 (** Idempotently apply one completed worker judgment and finish its durable
-    event delivery. Success means the candidate is [Consumed]. Conflicting
-    prior judgment or a non-terminal delivery result is explicit. *)
+    event delivery. [Delivered] means the candidate is [Consumed].
+    [Candidate_absent] is explicit rather than folded into [Error] so a caller
+    can settle the partition without delivery instead of retrying an update
+    that structurally cannot land. Conflicting prior judgment or a
+    non-terminal delivery result against a candidate that does exist remains
+    an [Error]. *)
 
 val record_and_wake :
   base_path:string -> candidate -> (record_acceptance, string) result

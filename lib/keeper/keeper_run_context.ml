@@ -11,14 +11,14 @@ open Keeper_types_profile
 type run_context =
   { meta : keeper_meta
   ; temperature : float
-  ; context_injector : Agent_sdk.Hooks.context_injector
-  ; shared_context : Agent_sdk.Context.t
+  ; context_injector : Agent_core.Hooks.context_injector
+  ; shared_context : Agent_core.Context.t
   ; session_dir : string
   ; session : Keeper_types.session_context
   ; loaded_checkpoint_present : bool
   ; base_system_prompt : string
   ; ctx_work : working_context
-  ; resume_oas_checkpoint : Agent_sdk.Checkpoint.t option
+  ; resume_agent_core_checkpoint : Agent_core.Checkpoint.t option
   ; start_turn_count : int
   ; receipt_started_at : string
   ; config_root : string
@@ -31,7 +31,7 @@ let build_base_system_prompt
       ~(meta : keeper_meta)
   =
   let active_goal_summaries =
-    Keeper_unified_prompt.active_goal_summaries ~config ~meta
+    Keeper_unified_prompt.active_goal_summaries_of_store ~config
   in
   Keeper_unified_prompt.build_system_prompt
     ~meta
@@ -48,20 +48,10 @@ let prepare_run_context
       ~(runtime_id : string)
       ?temperature
       ?shared_context
-      ~(generation : int)
       ()
   =
   let receipt_started_at = Masc_domain.now_iso () in
   let meta = Keeper_agent_tool_surface.sync_current_task_id_from_backlog ~config meta in
-  let validated_goal_ids =
-    Keeper_runtime_contract.validate_active_goal_ids ~config ~meta ()
-  in
-  let meta =
-    if List.length validated_goal_ids <> List.length meta.active_goal_ids then
-      { meta with active_goal_ids = validated_goal_ids }
-    else
-      meta
-  in
   (* 0. Resolve inference parameters via Runtime_inference *)
   let fallback_temperature () =
     match temperature with
@@ -79,13 +69,8 @@ let prepare_run_context
   let shared_context =
     match shared_context with
     | Some ctx -> ctx
-    | None -> Agent_sdk.Context.create ()
+    | None -> Agent_core.Context.create ()
   in
-  (* OAS uses the caller-supplied context as the checkpoint context for both
-     new and resumed agents. Bind MASC's generation before dispatch so every
-     OAS-produced checkpoint carries the current keeper identity. *)
-  Agent_sdk.Context.set_scoped shared_context Agent_sdk.Context.Session
-    Keeper_checkpoint_store.keeper_generation_context_key (`Int generation);
   (* 1. Ensure session directory tree exists *)
   let session_dir =
     Filename.concat base_dir (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -122,16 +107,16 @@ let prepare_run_context
     Keeper_context_runtime.set_system_prompt base_ctx ~system_prompt:base_system_prompt
   in
   (* Preserve the restored context exactly. MASC does not classify, compact,
-     truncate, or re-persist it before dispatch; OAS owns provider context
+     truncate, or re-persist it before dispatch; AGENT_CORE owns provider context
      handling. Checkpoint persistence failure therefore cannot block this
      turn before the provider has observed the input. *)
-  let resume_oas_checkpoint =
+  let resume_agent_core_checkpoint =
     if loaded_checkpoint_present
     then Some (Keeper_context_runtime.checkpoint_of_context ctx_work)
     else None
   in
   let start_turn_count =
-    match resume_oas_checkpoint with
+    match resume_agent_core_checkpoint with
     | Some cp -> cp.turn_count
     | None -> 0
   in
@@ -144,7 +129,7 @@ let prepare_run_context
   ; loaded_checkpoint_present
   ; base_system_prompt
   ; ctx_work
-  ; resume_oas_checkpoint
+  ; resume_agent_core_checkpoint
   ; start_turn_count
   ; receipt_started_at
   ; config_root

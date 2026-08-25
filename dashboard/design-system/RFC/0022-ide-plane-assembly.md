@@ -13,7 +13,6 @@
   - RFC 0020 (Layered Overlay System — LAYERS toggle framework)
   - RFC 0021 (Anchored Thread Rail — CONVERSATION rail data model)
 - **Blocks**: RFC 0023, 0025, 0026 (모두 본 RFC 의 application)
-- **Sister RFC**: repo `docs/rfc/RFC-0033-worktree-status-sse.md` (server side)
 - **SSOT audit**: `dashboard/design-system/audits/2026-04-30-ide-mockup-vs-v0.4-mapping.md`
 - **GitHub Issues**: #13197 (P0-A) · #13198 (P0-B) · #13199 (P1-A) · #13200 (P1-B) · #13201 (P2)
 
@@ -71,19 +70,19 @@ PR-2~7 은 server endpoint scope 가 분리되어 있어 keeper 별 병렬 가�
 
 ## 5. Keeper 분배
 
-| Keeper | toml | persona | 분배 |
-|---|---|---|---|
-| **sangsu** | yes | sangsu | P0-A 서버 (coding preset, 안전 패턴) |
-| **nick0cave** | (toml 없음) | (link) | P0-A 클라이언트 wire-up |
-| **masc-improver** | yes | analyst | P0-B runtime (delivery preset, runtime 도메인) |
-| **issue_king** | yes | issue_king | P2 audit replay (delivery preset, 감사 도메인) |
-| **ramarama** | yes | (link) | P1-B drawer 서버 (delivery, sandbox) |
-| **taskmaster** | yes | (link) | umbrella 진행 추적 (delivery preset) |
-| **verifier** | persona only | verifier | 모든 PR 테스트 검증 |
-| **executor** | persona only | executor | 빌드/lint 게이트 |
-| **jobsian_purist** | (no toml) | (continuous) | P1-B drawer 클라이언트 |
-| **velvet-hammer** | (no toml) | (continuous) | P2 audit replay 회고 분석 |
-| **tech_glutton** | (no toml) | (continuous) | P0-B 통합 |
+| Keeper | config | 분배 |
+|---|---|---|
+| **sangsu** | yes | P0-A 서버 (coding preset, 안전 패턴) |
+| **nick0cave** | no | P0-A 클라이언트 wire-up |
+| **masc-improver** | yes | P0-B runtime (delivery preset, runtime 도메인) |
+| **issue_king** | yes | P2 audit replay (delivery preset, 감사 도메인) |
+| **ramarama** | yes | P1-B drawer 서버 (delivery, sandbox) |
+| **taskmaster** | yes | umbrella 진행 추적 (delivery preset) |
+| **verifier** | AGENT.md | 모든 PR 테스트 검증 |
+| **executor** | AGENT.md | 빌드/lint 게이트 |
+| **jobsian_purist** | AGENT.md | P1-B drawer 클라이언트 |
+| **velvet-hammer** | AGENT.md | P2 audit replay 회고 분석 |
+| **tech_glutton** | AGENT.md | P0-B 통합 |
 
 이외 continuous keeper(qa-king, imseonghan, retired coding-profile keeper)는 board post 보고 자율 picker.
 

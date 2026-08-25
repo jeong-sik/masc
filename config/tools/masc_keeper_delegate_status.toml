@@ -1,0 +1,29 @@
+name = "masc_keeper_delegate_status"
+description = """
+Read one Keeper chat operation by exact target and operation_id. A Keeper \
+that submitted the operation does not need this to receive the answer: that \
+arrives on its own queue when the turn ends. Use this to see where an \
+operation stands before then."""
+additional_properties = false
+
+[[params]]
+name = "target"
+type = "object"
+required = true
+additional_properties = false
+
+[[params.params]]
+name = "kind"
+type = "string"
+required = true
+enum = ["keeper"]
+
+[[params.params]]
+name = "name"
+type = "string"
+required = true
+
+[[params]]
+name = "operation_id"
+type = "string"
+required = true

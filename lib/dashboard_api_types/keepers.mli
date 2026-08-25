@@ -11,8 +11,6 @@ type keeper_status =
   | Warn
   | Dead
 
-val keeper_status_to_yojson : keeper_status -> Yojson.Safe.t
-
 (** One tool-span in a keeper's cycle, positioned as a percentage of the
     last-60-min window. *)
 type keeper_lane_frame = {
@@ -22,15 +20,11 @@ type keeper_lane_frame = {
   label : string;
 }
 
-val keeper_lane_frame_to_yojson : keeper_lane_frame -> Yojson.Safe.t
-
 (** One sample on the 60-min context-pressure polyline. *)
 type keeper_ctx_sample = {
   t_minus_min : int;   (** minutes ago, 0..60 *)
   ctx_pct : int;       (** 0..100 *)
 }
-
-val keeper_ctx_sample_to_yojson : keeper_ctx_sample -> Yojson.Safe.t
 
 (** Total run-state classification (#16, 38-bug campaign PR-5). Mirrors
     [Keeper_composite_observer.run_state] one-to-one; kept as a separate
@@ -41,8 +35,6 @@ type keeper_run_state_kind =
   | In_turn
   | Waiting
   | Suspended
-
-val keeper_run_state_kind_to_yojson : keeper_run_state_kind -> Yojson.Safe.t
 
 (** Per-kind fields are [None] / [[]] when not applicable to [kind] — e.g.
     [wake_kind] is only present for [In_turn]. *)
@@ -56,8 +48,6 @@ type keeper_run_state = {
   skip_reasons : string list;
   phase : string option;
 }
-
-val keeper_run_state_to_yojson : keeper_run_state -> Yojson.Safe.t
 
 (** Per-keeper summary. *)
 type keeper = {
@@ -74,8 +64,6 @@ type keeper = {
   ctx_history : keeper_ctx_sample list;
   run_state : keeper_run_state;
 }
-
-val keeper_to_yojson : keeper -> Yojson.Safe.t
 
 (** Top-level response. *)
 type response = {

@@ -72,11 +72,11 @@ let test_messages_temporal_decay_fields () =
   let config = Workspace_utils.default_config base_path in
   let _ = Workspace.init config ~agent_name:None in
   let _ =
-    Workspace.broadcast config ~from_agent:"operator" ~content:"hello @sangsu"
+    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"operator" ~content:"hello @alpha"
   in
   let json =
     graphql_query config
-      "{ messages(first: 10) { totalCount edges { node { from messageType content mention expiresAt relevance } } } }"
+      "{ messages(first: 10) { totalCount edges { node { from messageType content mention expiresAt } } } }"
   in
   let open Yojson.Safe.Util in
   let total = json |> member "data" |> member "messages" |> member "totalCount" |> to_int in
@@ -90,14 +90,12 @@ let test_messages_temporal_decay_fields () =
   Alcotest.(check string) "from" "operator" (node |> member "from" |> to_string);
   Alcotest.(check string) "messageType" "broadcast"
     (node |> member "messageType" |> to_string);
-  Alcotest.(check string) "content" "hello @sangsu"
+  Alcotest.(check string) "content" "hello @alpha"
     (node |> member "content" |> to_string);
-  Alcotest.(check string) "mention" "sangsu"
+  Alcotest.(check string) "mention" "alpha"
     (node |> member "mention" |> to_string);
   Alcotest.(check bool) "expiresAt null" true
     (node |> member "expiresAt" = `Null);
-  Alcotest.(check string) "relevance" "medium"
-    (node |> member "relevance" |> to_string);
   cleanup_dir base_path
 
 let () =

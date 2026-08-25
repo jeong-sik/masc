@@ -45,7 +45,7 @@ let valid_fs_write_mode_strings = List.map fs_write_mode_to_string all_fs_write_
 let read_file_default_max_bytes = Tool_shard_limits.read_file_default_max_bytes
 
 let read_file_min_max_bytes = 512
-let read_file_max_max_bytes = 200_000
+let read_file_max_max_bytes = Tool_shard_limits.read_file_max_max_bytes
 
 (** Read line window. The Read descriptor (agent.read_file) exposes
     [offset]/[limit] as LINE coordinates — the shape mainstream Read tools
@@ -193,6 +193,49 @@ let string_opt_nonempty name json =
     if trimmed = "" then None else Some trimmed
 ;;
 
+(* The rejection names the cwds that would have worked.
+   A keeper that guesses the host layout ("workspace/<org>/<repo>") gets the
+   same "directory does not exist" as one that asked for a repo nobody
+   materialized, and the two need opposite responses: retry with the right
+   path, or stop asking. A live Keeper hit the first and kept retrying
+   (#23442). The set is measured, not prescribed: whatever git checkouts sit
+   under the keeper's workspace root, wherever the keeper put them. An empty
+   set is reported as empty rather than omitted, because "no repository is
+   materialized" is the answer to a different question than "you named the
+   wrong one" — and by the same argument a scan that failed is a third answer
+   and says so. *)
+let available_cwd_hint ~config ~meta =
+  let root = keeper_playground_root ~config ~meta in
+  match Keeper_playground_checkouts.discover ~root with
+  | Ok (Keeper_playground_checkouts.Complete []) ->
+    " no repository is materialized for this keeper yet, so the workspace root \
+     is the only cwd that exists"
+  | Ok (Keeper_playground_checkouts.Complete checkouts) ->
+    Printf.sprintf
+      " available cwds: %s"
+      (String.concat
+         ", "
+         (List.map
+            (fun (c : Keeper_playground_checkouts.checkout) -> c.relative_path)
+            checkouts))
+  | Ok (Keeper_playground_checkouts.Partial { found; limit }) ->
+    (* Presenting a truncated list as complete is worse than saying it is
+       truncated: a keeper that cannot find its repo in a list that looks
+       exhaustive concludes it should stop asking. *)
+    Printf.sprintf
+      " available cwds (partial, %s): %s"
+      (Keeper_playground_checkouts.limit_to_string limit)
+      (String.concat
+         ", "
+         (List.map
+            (fun (c : Keeper_playground_checkouts.checkout) -> c.relative_path)
+            found))
+  | Error error ->
+    Printf.sprintf
+      " workspace checkout scan failed (%s); cwds could not be enumerated"
+      (Keeper_playground_checkouts.scan_error_to_string error)
+;;
+
 let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cwd =
   match cwd with
   | None -> Ok (keeper_default_read_root ~config ~meta)
@@ -210,8 +253,10 @@ let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cw
     else
       Error
         (Printf.sprintf
-           "cwd_not_directory: %s (directory does not exist; Read will not create cwd)"
-           cwd)
+           "cwd_not_directory: %s (directory does not exist; Read will not create \
+            cwd);%s"
+           cwd
+           (available_cwd_hint ~config ~meta))
 ;;
 
 let resolve_read_file_target
@@ -272,7 +317,6 @@ let handle_read_file_with_outcome
              ~fields:
                [ "path", `String target
                ; "offset", `Int window.start_line
-               ; "scanned_bytes", `Int (String.length body)
                ]
              (Printf.sprintf
                 "offset %d is beyond the scanned window (%d bytes; the file \
@@ -345,16 +389,17 @@ let handle_read_file_with_outcome
              ~scan_complete
              body)
          else (
-           match Safe_ops.read_file_safe target with
-           | Error e when String.starts_with ~prefix:file_not_found_prefix e ->
+           match Safe_ops.read_file_result target with
+           | Error (Safe_ops.File_not_found _ as err) ->
              Ok
                (Read_failed_payload
                   (missing_file_error_json
                      ~cwd
                      ~raw_path:(Some path)
                      ~target
-                     ~error:e))
-           | Error e -> Ok (Read_failed_message e)
+                     ~error:(Safe_ops.read_file_error_to_string err)))
+           | Error err ->
+             Ok (Read_failed_message (Safe_ops.read_file_error_to_string err))
            | Ok content ->
              Ok
                (payload_of_slice
@@ -372,6 +417,107 @@ let handle_read_file_with_outcome
      | Error msg ->
        Keeper_tool_execution.failure
          (error_json ~fields:[ "path", `String target ] msg))
+;;
+
+let handle_owned_read_file_with_outcome
+      ~ownership_root
+      ~(args : Yojson.Safe.t)
+  =
+  let path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
+  let max_bytes = read_file_default_max_bytes in
+  let cwd = string_opt_nonempty "cwd" args in
+  let resolve_target () =
+    if String.equal path ""
+    then Error "path is required"
+    else
+      let cwd_abs =
+        match cwd with
+        | None -> ownership_root
+        | Some cwd ->
+          if Filename.is_relative cwd
+          then Filename.concat ownership_root cwd
+          else cwd
+      in
+      match Fs_compat.inspect_owned_directory_chain ~ownership_root cwd_abs with
+      | Error rejection ->
+        Error (Fs_compat.owned_directory_chain_rejection_to_string rejection)
+      | Ok Fs_compat.Owned_directory_missing ->
+        Error
+          (Printf.sprintf
+             "cwd_not_directory: %s (directory does not exist)"
+             cwd_abs)
+      | Ok (Fs_compat.Owned_directory _) ->
+        let target =
+          if Filename.is_relative path then Filename.concat cwd_abs path else path
+        in
+        Ok target
+  in
+  match read_line_window_of_args args, resolve_target () with
+  | Error window_error, _ -> Keeper_tool_execution.failure (error_json window_error)
+  | Ok _, Error detail -> Keeper_tool_execution.failure (error_json detail)
+  | Ok window, Ok target ->
+    let fetch_bytes = read_window_fetch_bytes ~max_bytes window in
+    (match
+       Fs_compat.load_owned_regular_file_prefix
+         ~ownership_root
+         ~max_bytes:fetch_bytes
+         target
+     with
+     | Error error ->
+       Keeper_tool_execution.failure
+         (error_json
+            ~fields:[ "path", `String target ]
+            (Fs_compat.owned_regular_file_read_error_to_string error))
+     | Ok None ->
+       Keeper_tool_execution.failure
+         (missing_file_error_json
+            ~cwd
+            ~raw_path:(Some path)
+            ~target
+            ~error:"owned file is missing")
+     | Ok (Some prefix) ->
+       (match
+          slice_read_window
+            ~window
+            ~max_bytes
+            ~scan_complete:(not prefix.truncated)
+            prefix.content
+        with
+        | Error `Offset_beyond_scan ->
+          Keeper_tool_execution.failure
+            (error_json
+               ~fields:
+                 [ "path", `String target
+                 ; "offset", `Int window.start_line
+                 ]
+               (Printf.sprintf
+                  "offset %d is beyond the scanned window (%d bytes)"
+                  window.start_line
+                  (String.length prefix.content)))
+        | Ok slice ->
+          let optional_fields =
+            List.concat
+              [ (match slice.next_offset with
+                 | Some next -> [ "next_offset", `Int next ]
+                 | None -> [])
+              ; (if slice.last_line_partial
+                 then [ "last_line_partial", `Bool true ]
+                 else [])
+              ]
+          in
+          Keeper_tool_execution.success
+            (Yojson.Safe.to_string
+               (`Assoc
+                   ([ "ok", `Bool true
+                    ; "path", `String target
+                    ; "bytes", `Int (String.length slice.window_content)
+                    ; "file_bytes", `Int prefix.file_size
+                    ; "truncated", `Bool slice.window_truncated
+                    ; "offset", `Int window.start_line
+                    ; "returned_lines", `Int slice.returned_lines
+                    ; "content", `String slice.window_content
+                    ]
+                    @ optional_fields)))))
 ;;
 
 (* RFC-0006 Phase A.4: replace [old] with [new] in [text]. When
@@ -427,98 +573,178 @@ let apply_patch ~old_string ~new_string ~replace_all text =
       Ok (Buffer.contents buf, occurrences)))
 ;;
 
-(* RFC-0128 §4.5 — resolve an absolute or base-relative file_path to
-   a partition + repo-relative path. Four outcomes:
+(* RFC-0378 §5.1 — resolve a write's file path to its attribution.
 
-   1. [Repo_store.find_repo_by_path_prefix] hits AND the repo's [url]
-      normalises via [Agent_observation.canonical_url_of_remote] → [By_url slug]
-      bucket + the repo-relative [rel_path].
-   2. [Repo_store.find_repo_by_path_prefix] hits but the URL is blank or
-      unparseable → [No_canonical_url] + original path. Counter labelled
-      [reason=blank_url] or [reason=url_unparseable].
-   3. A sandbox playground [repo_id] is not present in the repository store →
-      [Unmatched] + original path. Counter labelled
-      [reason=sandbox_unregistered_repo].
-   4. No registered repo contains this path → [Base_unresolved] + original path.
-      Counter labelled [reason=unregistered_repo].
+   This is the system's only [Code_address] mint: it anchors the path,
+   recovers the owning repository (sandbox playground parse or
+   registered local_path prefix), lexically collapses dot segments, and
+   constructs the address. Attribution failure is a typed fact kind
+   carried on the record as [Unaddressed { reason; attempted_path }] —
+   not an exception. Total: never raises.
 
-   The keeper write path is fire-and-forget; this resolver also never
-   raises — unresolved paths degrade to typed non-[By_url] partitions with
-   metric labels so the operator can see how often each reason appears. *)
-let resolve_partition_for_write ~base_dir ~kind ~file_path =
+   Keeper writes inside the sandbox playground never appear under a
+   registered repo's [local_path] (the playground clone path is opaque
+   to [repositories.toml]), so the SSOT
+   {!Playground_paths.parse_playground_repo_path} recovers the
+   [(repo_id, rel)] pair first and the repository URL is looked up by
+   id. This makes the sandbox/working-tree join work without forcing
+   the operator to register every playground clone path. *)
+(* RFC-0378 §5.1 / #28968: a write inside a linked git worktree must
+   fold to the same [Code_address] as the main-tree write, with the
+   checkout root carried as the [checkout] projection metadata
+   (RFC-0378 §9's proposed representation: the measured
+   [--show-toplevel] value).
+
+   RFC-keeper-workspace-root-only §3.2 owns the mechanism: git itself
+   answers "which checkout holds this file" — no path convention is
+   special-cased (that RFC's deletion list explicitly bans new
+   [.worktrees] literals), so worktrees outside the [.worktrees/]
+   convention fold too. The fold applies only when git's
+   [--git-common-dir] for the file equals the matched repo root's
+   [.git]: that is git's own statement that the checkout is a linked
+   worktree of THIS repository. A nested foreign clone (its own
+   [.git]), a submodule ([.git/modules/...]), or any git failure
+   (not a repo, timeout) leaves today's attribution untouched.
+   Repository identity always comes from the registered catalog URL,
+   never the measured origin — playground clones use local-path
+   origins that do not canonicalise. *)
+type worktree_fold_decision =
+  | Fold_to of string
+  | No_fold
+
+(* One bounded git subprocess per (file directory, matched root); the
+   resolver sits on the path-bearing tool post-hook, so per-call
+   subprocess cost would tax every file-touching turn. Checkout roots
+   do not move while a directory exists, so entries never expire; a
+   catalog change alters [matched_root] and thereby the key. *)
+let worktree_fold_memo : (string * string, worktree_fold_decision) Hashtbl.t =
+  Hashtbl.create 64
+
+let worktree_fold_memo_mutex = Stdlib.Mutex.create ()
+
+let measured_worktree_fold ~matched_root ~file_dir =
+  let key = (file_dir, matched_root) in
+  let cached =
+    Stdlib.Mutex.protect worktree_fold_memo_mutex (fun () ->
+        Hashtbl.find_opt worktree_fold_memo key)
+  in
+  match cached with
+  | Some decision -> decision
+  | None ->
+    let decision =
+      match Repo_git.checkout_identity ~local_path:file_dir with
+      | Error _ -> No_fold
+      | Ok { Repo_git.toplevel; git_common_dir } ->
+        if String.equal toplevel matched_root
+        then No_fold
+        else if String.equal git_common_dir (Filename.concat matched_root ".git")
+        then Fold_to toplevel
+        else No_fold
+    in
+    Stdlib.Mutex.protect worktree_fold_memo_mutex (fun () ->
+        Hashtbl.replace worktree_fold_memo key decision);
+    decision
+
+(* The parsers hand back [rel] as the literal remainder of [abs], so
+   chopping that suffix recovers the matched repository's filesystem
+   root. A non-literal remainder (never produced today) skips folding
+   rather than guessing. *)
+let fs_root_of_rel ~abs ~rel =
+  let suffix = "/" ^ rel in
+  if String.length abs > String.length suffix
+     && String.ends_with ~suffix abs
+  then Some (String.sub abs 0 (String.length abs - String.length suffix))
+  else None
+
+let rel_and_checkout ~abs ~rel =
+  match fs_root_of_rel ~abs ~rel with
+  | None -> rel, None
+  | Some matched_root ->
+    (match
+       measured_worktree_fold ~matched_root ~file_dir:(Filename.dirname abs)
+     with
+     | No_fold -> rel, None
+     | Fold_to checkout_root ->
+       let prefix = checkout_root ^ "/" in
+       if String.length abs > String.length prefix
+          && String.starts_with ~prefix abs
+       then
+         ( String.sub abs (String.length prefix)
+             (String.length abs - String.length prefix)
+         , Some checkout_root )
+       else rel, None)
+
+let resolve_write_attribution ~base_dir ~file_path =
   let abs =
     if Filename.is_relative file_path
     then Filename.concat base_dir file_path
     else file_path
   in
-  let bump_orphan ~reason =
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string IdeOrphanWrites)
-      ~labels:[ "kind", kind; "reason", reason ]
-      ()
+  let unaddressed reason =
+    Agent_observation.Unaddressed { reason; attempted_path = file_path }
   in
-  let resolve_by_url ~rel ~repo_url ~orphan_reasons =
+  (* Lexical dot-segment collapse. [None] when the path escapes the
+     repo root — such a path does not name a file of the matched repo,
+     so it fails attribution rather than being repaired. *)
+  let normalize_rel rel =
+    let rec go acc = function
+      | [] -> Some (List.rev acc)
+      | ("" | ".") :: rest -> go acc rest
+      | ".." :: rest ->
+        (match acc with
+         | [] -> None
+         | _ :: tl -> go tl rest)
+      | seg :: rest -> go (seg :: acc) rest
+    in
+    match go [] (String.split_on_char '/' rel) with
+    | None | Some [] -> None
+    | Some segs -> Some (String.concat "/" segs)
+  in
+  let mint ~rel ~repo_url =
     let url = String.trim repo_url in
-    if url = "" then begin
-      bump_orphan ~reason:(snd orphan_reasons);
-      (Agent_observation.No_canonical_url, file_path)
-    end
+    if url = ""
+    then unaddressed Agent_observation.Unattributed.Blank_remote_url
     else
       match Agent_observation.canonical_url_of_remote url with
       | None ->
-        bump_orphan ~reason:(fst orphan_reasons);
-        (Agent_observation.No_canonical_url, file_path)
-      | Some slug -> (Agent_observation.By_url slug, rel)
+        unaddressed (Agent_observation.Unattributed.Unparseable_remote_url url)
+      | Some slug ->
+        let rel, checkout = rel_and_checkout ~abs ~rel in
+        (match normalize_rel rel with
+         | None -> unaddressed Agent_observation.Unattributed.Unregistered_path
+         | Some rel ->
+           (match Agent_observation.Code_address.v ~codebase:slug ~path:rel with
+            | Ok address -> Agent_observation.Addressed { address; checkout }
+            | Error invalid ->
+              unaddressed (Agent_observation.Unattributed.Unmintable invalid)))
   in
-  (* RFC-0128 §4.5 PR-6: keeper writes inside the sandbox playground
-     never appear under a registered repo's [local_path] (the playground
-     clone path is opaque to [repositories.toml]). Use the SSOT
-     {!Playground_paths.parse_playground_repo_path} to recover the
-     [(repo_id, rel)] pair, then look up the repository's URL by id.
-     This makes the sandbox/working-tree join work without forcing the
-     operator to also register every playground clone path. *)
   match
     Playground_paths.parse_playground_repo_path ~base_path:base_dir ~abs_path:abs
   with
   | Some (repo_id, rel) ->
     (match Repo_store.find_url_by_id ~base_path:base_dir repo_id with
-     | Ok (Some url) ->
-       resolve_by_url
-         ~rel
-         ~repo_url:url
-         ~orphan_reasons:("sandbox_url_unparseable", "sandbox_blank_url")
+     | Ok (Some url) -> mint ~rel ~repo_url:url
      | Ok None ->
-       bump_orphan ~reason:"sandbox_unregistered_repo";
-       (Agent_observation.Unmatched, file_path)
+       unaddressed (Agent_observation.Unattributed.Unregistered_repo_id repo_id)
      | Error _ ->
-       bump_orphan ~reason:"repository_catalog_unavailable";
-       (Agent_observation.Unmatched, file_path))
+       unaddressed Agent_observation.Unattributed.Repository_catalog_unavailable)
   | None ->
     (match Repo_store.find_repo_by_path_prefix ~base_path:base_dir abs with
-     | Ok None ->
-       bump_orphan ~reason:"unregistered_repo";
-       (Agent_observation.Base_unresolved, file_path)
-     | Ok (Some (repo, rel)) ->
-       resolve_by_url
-         ~rel
-         ~repo_url:repo.url
-         ~orphan_reasons:("url_unparseable", "blank_url")
+     | Ok (Some (repo, rel)) -> mint ~rel ~repo_url:repo.url
+     | Ok None -> unaddressed Agent_observation.Unattributed.Unregistered_path
      | Error _ ->
-       bump_orphan ~reason:"repository_catalog_unavailable";
-       (Agent_observation.Base_unresolved, file_path))
+       unaddressed Agent_observation.Unattributed.Repository_catalog_unavailable)
 ;;
 
-(** After a successful file write, record the code region in [.masc-ide/].
-    Fire-and-forget: errors are logged but never block the write path.
-    Emits a neutral [Agent_observation.write_region_event]; the IDE adapter
-    registers the concrete region-tracker sink.
+(** After a successful file write, record the code region in the IDE
+    observation store. Fire-and-forget: errors are logged but never
+    block the write path. Emits a neutral
+    [Agent_observation.write_region_event]; the IDE adapter registers
+    the concrete region-tracker sink.
 
-    RFC-0128 §4.5: the partition is resolved per-write from the
-    [file_path] so sandbox-clone keeper writes and working-tree IDE
-    reads see the same [By_url <slug>] bucket. When the path cannot
-    be resolved to a registered repo the record goes to
-    [.masc-ide/_orphan/] and the [masc_ide_orphan_writes_total]
-    counter increments. *)
+    RFC-0378 §5.1: the attribution is minted per-write from the
+    [file_path], so sandbox-clone keeper writes and working-tree IDE
+    reads join on the same [Code_address]. *)
 let track_write_region
       ~config
       ~keeper_name
@@ -531,8 +757,12 @@ let track_write_region
       ()
   =
   let base_dir = Keeper_alerting_path.project_root_of_config config in
-  let partition, rel_file_path =
-    resolve_partition_for_write ~base_dir ~kind:"region" ~file_path
+  let attribution = resolve_write_attribution ~base_dir ~file_path in
+  let rel_file_path =
+    match attribution with
+    | Agent_observation.Addressed { address; _ } ->
+      Agent_observation.Code_address.path address
+    | Agent_observation.Unaddressed { attempted_path; _ } -> attempted_path
   in
   let tool_name =
     match fs_write_mode_of_string_opt mode_raw with
@@ -566,7 +796,7 @@ let track_write_region
   try
     match
       Agent_observation.emit_write_region_event
-        { base_path = base_dir; partition; keeper_id = keeper_name; turn; tool_call_json }
+        { base_path = base_dir; attribution; keeper_id = keeper_name; turn; tool_call_json }
     with
     | Ok () -> None
     | Error err ->
@@ -1174,7 +1404,6 @@ let decide_file_write
     ; base_path = config.Workspace.base_path
     ; causal_context = Option.map (fun current -> current ()) gate_context
     ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
-    ; goal_ids = meta.active_goal_ids
     ; continuation_channel
     }
 ;;
@@ -1194,6 +1423,7 @@ let confined_write_is_keeper_playground
 
 type file_write_attempt =
   | Write_succeeded of string
+  | Write_authorized of Keeper_gate.authorization * file_write_attempt
   | Write_deferred of Keeper_gate_deferred_payload.t
   | Write_failed of
       { payload : string
@@ -1636,8 +1866,6 @@ let append_write_outcome_payload ~target outcome =
       ; ( "filesystem_append_target_effect"
         , `String
             (append_target_effect_to_string (append_target_effect outcome)) )
-      ; "filesystem_append_requested_bytes", `Int outcome.requested_bytes
-      ; "filesystem_append_bytes_written", `Int outcome.bytes_written
       ; ( "filesystem_append_target_binding"
         , append_target_binding_json outcome.target_binding )
       ; ( "filesystem_append_failure"
@@ -1698,8 +1926,11 @@ let observe_append_write_outcome ~keeper_name ~target outcome =
      | Fs_compat.Capability_append_target_changed ) -> ())
 ;;
 
-let file_write_attempt_to_execution = function
+let rec file_write_attempt_to_execution = function
   | Write_succeeded payload -> Keeper_tool_execution.success payload
+  | Write_authorized (authorization, attempt) ->
+    file_write_attempt_to_execution attempt
+    |> Keeper_tool_execution.with_gate_authorization authorization
   | Write_deferred deferred ->
     Keeper_gate_deferred_payload.to_execution deferred
   | Write_failed { payload; class_ } -> Keeper_tool_execution.failure ~class_ payload
@@ -2000,13 +2231,14 @@ let handle_file_write_with_outcome
           ~input
           ()
       with
-      | Keeper_gate.Deferred { approval_id; reason } ->
+      | Keeper_gate.Deferred { approval_id; reason; audit_receipts } ->
         Ok
           (Write_deferred
              (Keeper_gate_deferred_payload.create
                 ~operation:gate_operation
                 ~approval_id
                 ~reason
+                ~audit_receipts
                 ~context:(`Assoc [ "path", `String target ])
                 ()))
       | Keeper_gate.Unavailable reason ->
@@ -2028,7 +2260,16 @@ let handle_file_write_with_outcome
           ~keeper_name:meta.name
           "external effect authorized operation=filesystem_write source=%s"
           (Keeper_gate.authorization_source_to_string authorization.source);
-        continue ()
+        (match continue () with
+         | Ok attempt -> Ok (Write_authorized (authorization, attempt))
+         | Error message ->
+           Ok
+             (Write_authorized
+                ( authorization
+                , Write_failed
+                    { payload = error_json ~fields:[ "path", `String target ] message
+                    ; class_ = Tool_result.Runtime_failure
+                    } )))
   in
   let protect_write ~target f =
     try f () with
@@ -2269,7 +2510,11 @@ let handle_file_write_with_outcome
                 |> Result.map_error (fun error ->
                   Content_write_capability { error; created_parents })))
       in
-      (match run () with
+      (match
+         Keeper_external_resource_lease.with_lease
+           (Keeper_external_resource_lease.File_path target)
+           run
+       with
        | Ok attempt -> file_write_attempt_to_execution attempt
        | Error msg ->
          Keeper_tool_execution.failure
@@ -2392,7 +2637,11 @@ let handle_file_write_with_outcome
                             file
                             content))))
       in
-      (match run () with
+      (match
+         Keeper_external_resource_lease.with_lease
+           (Keeper_external_resource_lease.File_path target)
+           run
+       with
        | Ok attempt -> file_write_attempt_to_execution attempt
        | Error msg ->
          Keeper_tool_execution.failure
@@ -2662,7 +2911,11 @@ let handle_file_write_with_outcome
                                  Content_write_capability
                                    { error; created_parents = [] }))))
               in
-              (match run () with
+              (match
+                 Keeper_external_resource_lease.with_lease
+                   (Keeper_external_resource_lease.File_path target)
+                   run
+               with
                | Ok attempt -> file_write_attempt_to_execution attempt
                | Error msg ->
                  Keeper_tool_execution.failure

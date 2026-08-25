@@ -8,15 +8,6 @@ import { ensureDevToken } from './dev-token'
 import type { RuntimeDefaultsResponse } from './schemas/runtime-defaults'
 import type { RuntimeResolvedResponse } from './schemas/runtime-resolved'
 
-interface DashboardRuntimeProviderDiscovery {
-  healthy?: boolean
-  discovered_model?: string | null
-  ctx_size?: number | null
-  total_slots?: number | null
-  busy_slots?: number | null
-  idle_slots?: number | null
-}
-
 export interface DashboardRuntimeParameterPolicy {
   reasoning_toggle_wire?: string | null
   reasoning_replay_policy?: string | null
@@ -134,7 +125,6 @@ export interface DashboardRuntimeDeclaredModelSpec {
   top_k?: number | null
   min_p?: number | null
   capabilities?: DashboardRuntimeDeclaredModelCapabilities | null
-  match_prefixes: string[]
 }
 
 export interface DashboardRuntimeDeclaredBindingSpec {
@@ -266,7 +256,6 @@ export interface DashboardRuntimeProviderSnapshot {
   source?: string | null
   endpoint_url?: string | null
   note?: string | null
-  discovery?: DashboardRuntimeProviderDiscovery | null
 }
 
 export interface DashboardRuntimeAssignment {
@@ -379,7 +368,7 @@ export interface DashboardRuntimeModelMetric {
    * across the telemetry window. Distinct from `avg_tok_per_sec` which is
    * wall-clock (includes queue wait + prefill + thinking in the denominator).
    * Null when no entry in the window carried timings (non-Ollama providers or
-   * legacy rows before OAS started emitting inference_timings).
+   * legacy rows before Agent Core started emitting inference_timings).
    */
   hw_decode_avg_tok_per_sec?: number | null
   hw_decode_p50_tok_per_sec?: number | null
@@ -407,7 +396,6 @@ export interface DashboardRuntimeModelMetric {
   primary_coverage_stage?: string | null
   primary_coverage_reason?: string | null
   coverage_reason_counts?: Array<{ reason: string; count: number }> | null
-  fallback_count?: number | null
   success_count?: number | null
   error_count?: number | null
   total_cost_usd?: number | null
@@ -600,7 +588,6 @@ function decodeRuntimeDeclaredModelSpec(raw: unknown): DashboardRuntimeDeclaredM
     top_k: asNumber(raw.top_k) ?? null,
     min_p: asNumber(raw.min_p) ?? null,
     capabilities: decodeRuntimeDeclaredModelCapabilities(raw.capabilities),
-    match_prefixes: asStringArray(raw.match_prefixes),
   }
 }
 
@@ -660,7 +647,7 @@ function decodeRuntimeEffectiveCapabilities(raw: unknown): DashboardRuntimeEffec
     supports_extended_thinking: asBoolean(raw.supports_extended_thinking),
     supports_reasoning_budget: asBoolean(raw.supports_reasoning_budget),
     accepted_reasoning_efforts: decodeNullableStringArray(raw.accepted_reasoning_efforts),
-    // Keep the server-projected wire opaque. The OCaml/OAS capability enum is
+    // Keep the server-projected wire opaque. The OCaml/Agent Core capability enum is
     // the SSOT; duplicating its variants here would drift on the next catalog
     // release and turn a received value into a false "missing" state.
     thinking_control_format: asNullableString(raw.thinking_control_format),
@@ -690,18 +677,6 @@ function decodeRuntimeEffectiveCapabilities(raw: unknown): DashboardRuntimeEffec
     supports_code_execution: asBoolean(raw.supports_code_execution),
     emits_usage_tokens: asBoolean(raw.emits_usage_tokens),
     supported_models: decodeNullableStringArray(raw.supported_models),
-  }
-}
-
-function decodeRuntimeProviderDiscovery(raw: unknown): DashboardRuntimeProviderDiscovery | null {
-  if (!isRecord(raw)) return null
-  return {
-    healthy: asBoolean(raw.healthy),
-    discovered_model: asNullableString(raw.discovered_model),
-    ctx_size: asNumber(raw.ctx_size) ?? null,
-    total_slots: asNumber(raw.total_slots) ?? null,
-    busy_slots: asNumber(raw.busy_slots) ?? null,
-    idle_slots: asNumber(raw.idle_slots) ?? null,
   }
 }
 
@@ -767,7 +742,6 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     source: asNullableString(raw.source),
     endpoint_url: asNullableString(raw.endpoint_url),
     note: asNullableString(raw.note),
-    discovery: decodeRuntimeProviderDiscovery(raw.discovery),
   }
 }
 
@@ -946,7 +920,6 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
           .map(item => ({ reason: asString(item.reason) ?? '', count: asNumber(item.count) ?? 0 }))
           .filter(item => item.reason.length > 0)
       : null,
-    fallback_count: asNumber(raw.fallback_count) ?? null,
     success_count: asNumber(raw.success_count) ?? null,
     error_count: asNumber(raw.error_count) ?? null,
     total_cost_usd: asNumber(raw.total_cost_usd) ?? null,
@@ -1056,10 +1029,657 @@ export interface RuntimeTomlConfig {
   path: string | null
   file_name: string
   source_text: string
-  reloaded: boolean
+  provider_protocols: RuntimeTomlEditorProtocol[]
+  application?: RuntimeConfigApplication
+  validation?: RuntimeConfigValidation
+  keeper_setting_schema?: unknown
+  keeper_settings?: RuntimeKeeperSetting[]
   message?: string | null
   reason?: string | null
   issues?: unknown
+}
+
+export interface RuntimeConfigApplicationLane {
+  status: string
+  requires_restart: boolean
+  applied_at: string | number | null
+}
+
+export interface RuntimeConfigKeeperOverlayApplication extends RuntimeConfigApplicationLane {
+  configured_count: number
+  pending_keys: string[]
+  applied_keys: string[]
+  preempted_keys: string[]
+}
+
+export interface RuntimeConfigApplication {
+  operation: string
+  routing: RuntimeConfigApplicationLane
+  keeper_overlay: RuntimeConfigKeeperOverlayApplication
+}
+
+export interface RuntimeConfigValidationIssue {
+  key: string
+  kind: string
+  severity: 'error' | 'warning'
+  detail: string
+}
+
+export interface RuntimeConfigValidation {
+  valid: boolean
+  schema_version: number
+  current_schema_version: number
+  forward_schema: boolean
+  issues: RuntimeConfigValidationIssue[]
+}
+
+export interface RuntimeKeeperSetting {
+  key: string | null
+  env: string
+  configured_value: string | null
+  source: string
+  effective_value: string | null
+  effective_error: string | null
+  applied_at: number | null
+  reload_class: string
+  requires_restart: boolean
+  application_status: string
+  consumers: string[]
+}
+
+export interface RuntimeConfigPreview {
+  ok: boolean
+  can_save: boolean
+  validation: RuntimeConfigValidation
+  keeper_setting_schema?: unknown
+}
+
+export type RuntimeTomlEditorTransport = 'endpoint' | 'command'
+export type RuntimeTomlEditorSemantics = 'http_provider' | 'official_client'
+export type RuntimeTomlEditorCredentialPolicy = 'optional' | 'forbidden'
+
+export interface RuntimeTomlEditorProtocol {
+  protocol: string
+  transport: RuntimeTomlEditorTransport
+  semantics: RuntimeTomlEditorSemantics
+  credential_policy: RuntimeTomlEditorCredentialPolicy
+  requires_non_interactive: boolean
+}
+
+const RUNTIME_TOML_EDITOR_PROTOCOL_KEYS = [
+  'credential_policy',
+  'protocol',
+  'requires_non_interactive',
+  'semantics',
+  'transport',
+] as const
+
+function parseRuntimeTomlEditorProtocols(raw: unknown): RuntimeTomlEditorProtocol[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error('유효하지 않은 runtime provider protocol inventory')
+  }
+  const seen = new Set<string>()
+  return raw.map((entry) => {
+    if (!isRecord(entry)) throw new Error('유효하지 않은 runtime provider protocol entry')
+    const keys = Object.keys(entry).sort()
+    if (
+      keys.length !== RUNTIME_TOML_EDITOR_PROTOCOL_KEYS.length
+      || keys.some((key, index) => key !== RUNTIME_TOML_EDITOR_PROTOCOL_KEYS[index])
+    ) {
+      throw new Error('유효하지 않은 runtime provider protocol fields')
+    }
+    const protocol = entry.protocol
+    const transport = entry.transport
+    const semantics = entry.semantics
+    const credentialPolicy = entry.credential_policy
+    const requiresNonInteractive = entry.requires_non_interactive
+    if (
+      typeof protocol !== 'string'
+      || protocol === ''
+      || protocol.trim() !== protocol
+      || (transport !== 'endpoint' && transport !== 'command')
+      || (semantics !== 'http_provider' && semantics !== 'official_client')
+      || (credentialPolicy !== 'optional' && credentialPolicy !== 'forbidden')
+      || typeof requiresNonInteractive !== 'boolean'
+      || seen.has(protocol)
+    ) {
+      throw new Error('유효하지 않은 runtime provider protocol contract')
+    }
+    if (
+      (semantics === 'official_client'
+        && (transport !== 'command' || credentialPolicy !== 'forbidden' || !requiresNonInteractive))
+      || (semantics === 'http_provider'
+        && (transport !== 'endpoint' || credentialPolicy !== 'optional' || requiresNonInteractive))
+    ) {
+      throw new Error('일관되지 않은 runtime provider protocol contract')
+    }
+    seen.add(protocol)
+    return {
+      protocol,
+      transport,
+      semantics,
+      credential_policy: credentialPolicy,
+      requires_non_interactive: requiresNonInteractive,
+    }
+  })
+}
+
+export type DashboardOfficialClientRecoveryFailure =
+  | 'transient_spawn_failed'
+  | 'transport_interrupted'
+  | 'protocol_failed'
+  | 'provider_rejected'
+  | 'host_hook_failed'
+  | 'state_persistence_failed'
+  | 'process_restarted'
+
+export type DashboardOfficialClientKind = 'codex' | 'claude_code' | 'antigravity'
+
+export interface DashboardOfficialClientSettlement {
+  session_id: string
+  turn_id: string
+}
+
+export type DashboardOfficialClientSessionPhase =
+  | { kind: 'ready' }
+  | {
+      kind: 'start'
+      owner_epoch: string
+      previous_settlement: DashboardOfficialClientSettlement | null
+    }
+  | {
+      kind: 'active'
+      owner_epoch: string
+      session_id: string
+      previous_settlement: DashboardOfficialClientSettlement | null
+    }
+  | {
+      kind: 'turn_inflight'
+      owner_epoch: string
+      session_id: string
+      turn_id: string | null
+      previous_settlement: DashboardOfficialClientSettlement | null
+    }
+  | {
+      kind: 'recovery_required'
+      recovery_id: string
+      failure: DashboardOfficialClientRecoveryFailure
+      detail: string
+      required_at: number
+      owner_epoch: string
+      observed_session_id: string | null
+      observed_turn_id: string | null
+      previous_settlement: DashboardOfficialClientSettlement | null
+    }
+  | {
+      kind: 'settled'
+      session_id: string
+      turn_id: string
+    }
+
+export interface DashboardOfficialClientRecoveryResolutionRecord {
+  recovery_id: string
+  failure: DashboardOfficialClientRecoveryFailure
+  resolution: { kind: 'retry_previous' | 'restart_fresh' }
+  resolved_by: string
+  resolved_at: number
+}
+
+export interface DashboardOfficialClientTransientReleaseRecord {
+  failure: 'transient_spawn_failed'
+  owner_epoch: string
+  released_at: number
+}
+
+export interface DashboardOfficialClientSession {
+  client_kind: DashboardOfficialClientKind
+  runtime_id: string
+  phase: DashboardOfficialClientSessionPhase
+  turn_count: number
+  tool_surface_sha256: string
+  last_recovery_resolution: DashboardOfficialClientRecoveryResolutionRecord | null
+  last_transient_release: DashboardOfficialClientTransientReleaseRecord | null
+  updated_at: number
+}
+
+export interface DashboardOfficialClientSessionResponse {
+  schema: 'masc.dashboard.official-client-session.v1'
+  ok: true
+  keeper_name: string
+  session: DashboardOfficialClientSession | null
+}
+
+export type DashboardOfficialClientRecoveryApplication = 'applied' | 'replayed'
+
+export type DashboardOfficialClientAuditReceipt =
+  | { recorded: true }
+  | { recorded: false; error: string }
+
+export interface DashboardOfficialClientRecoveryResponse
+  extends DashboardOfficialClientSessionResponse {
+  resolution_application: DashboardOfficialClientRecoveryApplication
+  audit: DashboardOfficialClientAuditReceipt
+}
+
+export type DashboardOfficialClientRecoveryDecision =
+  | { resolution: 'retry_previous' }
+  | { resolution: 'restart_fresh' }
+
+export type DashboardOfficialClientLoginStatus =
+  | 'ready'
+  | 'invalid_config'
+  | 'cli_unavailable'
+  | 'login_required'
+  | 'timeout'
+  | 'protocol_error'
+  | 'probe_contract_error'
+
+export interface DashboardOfficialClientProbeResponse {
+  schema: 'masc.dashboard.official-client-probe.v1'
+  ok: true
+  runtime_id: string
+  client_kind: 'codex' | 'claude_code'
+  configured_model: string | null
+  measured_at: number
+  login: {
+    status: DashboardOfficialClientLoginStatus
+    authenticated: boolean
+    evidence_source: 'configured_executable_self_report'
+    identity_verified: false
+    auth_method: string | null
+    subscription_type: string | null
+    api_provider: string | null
+    detail: string | null
+  }
+  client: {
+    user_agent: string | null
+  }
+  execution: {
+    status: 'not_measured'
+    reason: 'login_probe_does_not_submit_model_turn'
+  }
+}
+
+const OFFICIAL_CLIENT_RECOVERY_FAILURES = new Set<DashboardOfficialClientRecoveryFailure>([
+  'transient_spawn_failed',
+  'transport_interrupted',
+  'protocol_failed',
+  'provider_rejected',
+  'host_hook_failed',
+  'state_persistence_failed',
+  'process_restarted',
+])
+
+const OFFICIAL_CLIENT_KINDS = new Set<DashboardOfficialClientKind>([
+  'codex',
+  'claude_code',
+  'antigravity',
+])
+
+const OFFICIAL_CLIENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const OFFICIAL_CLIENT_SHA256 = /^[0-9a-f]{64}$/
+
+function hasExactKeys(raw: Record<string, unknown>, allowed: readonly string[]): boolean {
+  const keys = Object.keys(raw)
+  return keys.length === allowed.length && keys.every(key => allowed.includes(key))
+}
+
+function decodeOfficialClientUuid(raw: unknown): string | null {
+  return typeof raw === 'string' && OFFICIAL_CLIENT_UUID.test(raw) ? raw : null
+}
+
+function decodeOfficialClientNonEmptyString(raw: unknown): string | null {
+  return typeof raw === 'string' && raw.trim() !== '' ? raw : null
+}
+
+function decodeOfficialClientNullableString(raw: unknown): string | null | undefined {
+  if (raw === null) return null
+  return decodeOfficialClientNonEmptyString(raw) ?? undefined
+}
+
+const OFFICIAL_CLIENT_LOGIN_STATUSES = new Set<DashboardOfficialClientLoginStatus>([
+  'ready',
+  'invalid_config',
+  'cli_unavailable',
+  'login_required',
+  'timeout',
+  'protocol_error',
+  'probe_contract_error',
+])
+
+function decodeOfficialClientSettlement(raw: unknown): DashboardOfficialClientSettlement | null {
+  if (!isRecord(raw) || !hasExactKeys(raw, ['session_id', 'turn_id'])) return null
+  const session_id = decodeOfficialClientNonEmptyString(raw.session_id)
+  const turn_id = decodeOfficialClientNonEmptyString(raw.turn_id)
+  return session_id && turn_id ? { session_id, turn_id } : null
+}
+
+function decodeOfficialClientNullableSettlement(
+  raw: unknown,
+): DashboardOfficialClientSettlement | null | undefined {
+  if (raw === null) return null
+  return decodeOfficialClientSettlement(raw) ?? undefined
+}
+
+function decodeOfficialClientFailure(raw: unknown): DashboardOfficialClientRecoveryFailure | null {
+  return typeof raw === 'string' && OFFICIAL_CLIENT_RECOVERY_FAILURES.has(raw as DashboardOfficialClientRecoveryFailure)
+    ? raw as DashboardOfficialClientRecoveryFailure
+    : null
+}
+
+function decodeOfficialClientPhase(raw: unknown): DashboardOfficialClientSessionPhase | null {
+  if (!isRecord(raw)) return null
+  switch (raw.kind) {
+    case 'ready':
+      return hasExactKeys(raw, ['kind']) ? { kind: 'ready' } : null
+    case 'start': {
+      if (!hasExactKeys(raw, ['kind', 'owner_epoch', 'previous_settlement'])) return null
+      const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
+      const previous_settlement = decodeOfficialClientNullableSettlement(raw.previous_settlement)
+      return owner_epoch && previous_settlement !== undefined
+        ? { kind: 'start', owner_epoch, previous_settlement }
+        : null
+    }
+    case 'active': {
+      if (!hasExactKeys(raw, ['kind', 'owner_epoch', 'session_id', 'previous_settlement'])) return null
+      const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
+      const session_id = decodeOfficialClientNonEmptyString(raw.session_id)
+      const previous_settlement = decodeOfficialClientNullableSettlement(raw.previous_settlement)
+      return owner_epoch && session_id && previous_settlement !== undefined
+        ? { kind: 'active', owner_epoch, session_id, previous_settlement }
+        : null
+    }
+    case 'turn_inflight': {
+      if (!hasExactKeys(raw, ['kind', 'owner_epoch', 'session_id', 'turn_id', 'previous_settlement'])) return null
+      const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
+      const session_id = decodeOfficialClientNonEmptyString(raw.session_id)
+      const turn_id = decodeOfficialClientNullableString(raw.turn_id)
+      const previous_settlement = decodeOfficialClientNullableSettlement(raw.previous_settlement)
+      return owner_epoch && session_id && turn_id !== undefined && previous_settlement !== undefined
+        ? { kind: 'turn_inflight', owner_epoch, session_id, turn_id, previous_settlement }
+        : null
+    }
+    case 'recovery_required': {
+      if (!hasExactKeys(raw, [
+        'kind',
+        'recovery_id',
+        'failure',
+        'detail',
+        'required_at',
+        'owner_epoch',
+        'observed_session_id',
+        'observed_turn_id',
+        'previous_settlement',
+      ])) return null
+      const recovery_id = decodeOfficialClientUuid(raw.recovery_id)
+      const failure = decodeOfficialClientFailure(raw.failure)
+      const detail = decodeOfficialClientNonEmptyString(raw.detail)
+      const required_at = asNumber(raw.required_at)
+      const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
+      const observed_session_id = decodeOfficialClientNullableString(raw.observed_session_id)
+      const observed_turn_id = decodeOfficialClientNullableString(raw.observed_turn_id)
+      const previous_settlement = decodeOfficialClientNullableSettlement(raw.previous_settlement)
+      if (
+        !recovery_id
+        || !failure
+        || !detail
+        || required_at == null
+        || !owner_epoch
+        || observed_session_id === undefined
+        || observed_turn_id === undefined
+        || previous_settlement === undefined
+        || (observed_turn_id !== null && observed_session_id === null)
+      ) return null
+      return {
+        kind: 'recovery_required',
+        recovery_id,
+        failure,
+        detail,
+        required_at,
+        owner_epoch,
+        observed_session_id,
+        observed_turn_id,
+        previous_settlement,
+      }
+    }
+    case 'settled': {
+      if (!hasExactKeys(raw, ['kind', 'session_id', 'turn_id'])) return null
+      const session_id = decodeOfficialClientNonEmptyString(raw.session_id)
+      const turn_id = decodeOfficialClientNonEmptyString(raw.turn_id)
+      return session_id && turn_id ? { kind: 'settled', session_id, turn_id } : null
+    }
+    default:
+      return null
+  }
+}
+
+function decodeOfficialClientTransientRelease(raw: unknown): DashboardOfficialClientTransientReleaseRecord | null {
+  if (!isRecord(raw) || !hasExactKeys(raw, ['failure', 'owner_epoch', 'released_at'])) return null
+  const failure = typeof raw.failure === 'string' ? raw.failure : null
+  const owner_epoch = decodeOfficialClientUuid(raw.owner_epoch)
+  const released_at = asNumber(raw.released_at)
+  if (failure !== 'transient_spawn_failed' || !owner_epoch || released_at == null) return null
+  return { failure, owner_epoch, released_at }
+}
+
+function decodeOfficialClientResolutionRecord(raw: unknown): DashboardOfficialClientRecoveryResolutionRecord | null {
+  if (
+    !isRecord(raw)
+    || !hasExactKeys(raw, ['failure', 'recovery_id', 'resolution', 'resolved_at', 'resolved_by'])
+    || !isRecord(raw.resolution)
+    || !hasExactKeys(raw.resolution, ['kind'])
+  ) return null
+  const recovery_id = decodeOfficialClientUuid(raw.recovery_id)
+  const failure = decodeOfficialClientFailure(raw.failure)
+  const resolved_by = decodeOfficialClientNonEmptyString(raw.resolved_by)
+  const resolved_at = asNumber(raw.resolved_at)
+  const kind = typeof raw.resolution.kind === 'string' ? raw.resolution.kind : null
+  if (!recovery_id || !failure || !resolved_by || resolved_at == null) return null
+  const resolution = kind === 'retry_previous' || kind === 'restart_fresh'
+    ? { kind } as const
+    : null
+  if (!resolution) return null
+  return {
+    recovery_id,
+    failure,
+    resolution,
+    resolved_by,
+    resolved_at,
+  }
+}
+
+function decodeOfficialClientSessionResponse(raw: unknown): DashboardOfficialClientSessionResponse | null {
+  if (
+    !isRecord(raw)
+    || !hasExactKeys(raw, ['schema', 'ok', 'keeper_name', 'session'])
+    || raw.schema !== 'masc.dashboard.official-client-session.v1'
+    || raw.ok !== true
+  ) return null
+  const keeper_name = decodeOfficialClientNonEmptyString(raw.keeper_name)
+  if (!keeper_name) return null
+  if (raw.session === null) {
+    return { schema: 'masc.dashboard.official-client-session.v1', ok: true, keeper_name, session: null }
+  }
+  if (
+    !isRecord(raw.session)
+    || !hasExactKeys(raw.session, [
+      'client_kind',
+      'runtime_id',
+      'phase',
+      'turn_count',
+      'tool_surface_sha256',
+      'last_recovery_resolution',
+      'last_transient_release',
+      'updated_at',
+    ])
+  ) return null
+  const client_kind = typeof raw.session.client_kind === 'string'
+    ? raw.session.client_kind
+    : null
+  const runtime_id = decodeOfficialClientNonEmptyString(raw.session.runtime_id)
+  const phase = decodeOfficialClientPhase(raw.session.phase)
+  const turn_count = asNumber(raw.session.turn_count)
+  const tool_surface_sha256 = typeof raw.session.tool_surface_sha256 === 'string'
+    ? raw.session.tool_surface_sha256
+    : null
+  const updated_at = asNumber(raw.session.updated_at)
+  const last_recovery_resolution = raw.session.last_recovery_resolution === null
+    ? null
+    : decodeOfficialClientResolutionRecord(raw.session.last_recovery_resolution)
+  const last_transient_release = raw.session.last_transient_release === null
+    ? null
+    : decodeOfficialClientTransientRelease(raw.session.last_transient_release)
+  if (
+    !client_kind
+    || !OFFICIAL_CLIENT_KINDS.has(client_kind as DashboardOfficialClientKind)
+    || !runtime_id
+    || !phase
+    || turn_count == null
+    || !Number.isInteger(turn_count)
+    || turn_count < 0
+    || (turn_count === 0 && phase.kind !== 'ready')
+    || !tool_surface_sha256
+    || !OFFICIAL_CLIENT_SHA256.test(tool_surface_sha256)
+    || updated_at == null
+  ) return null
+  if (raw.session.last_recovery_resolution !== null && !last_recovery_resolution) return null
+  if (raw.session.last_transient_release !== null && !last_transient_release) return null
+  return {
+    schema: 'masc.dashboard.official-client-session.v1',
+    ok: true,
+    keeper_name,
+    session: {
+      client_kind: client_kind as DashboardOfficialClientKind,
+      runtime_id,
+      phase,
+      turn_count,
+      tool_surface_sha256,
+      last_recovery_resolution,
+      last_transient_release,
+      updated_at,
+    },
+  }
+}
+
+function decodeOfficialClientAuditReceipt(raw: unknown): DashboardOfficialClientAuditReceipt | null {
+  if (!isRecord(raw) || typeof raw.recorded !== 'boolean') return null
+  if (raw.recorded) {
+    return hasExactKeys(raw, ['recorded']) ? { recorded: true } : null
+  }
+  if (!hasExactKeys(raw, ['recorded', 'error'])) return null
+  const error = decodeOfficialClientNonEmptyString(raw.error)
+  return error ? { recorded: false, error } : null
+}
+
+function decodeOfficialClientRecoveryResponse(raw: unknown): DashboardOfficialClientRecoveryResponse | null {
+  if (
+    !isRecord(raw)
+    || !hasExactKeys(raw, [
+      'schema',
+      'ok',
+      'keeper_name',
+      'session',
+      'resolution_application',
+      'audit',
+    ])
+  ) return null
+  const session = decodeOfficialClientSessionResponse({
+    schema: raw.schema,
+    ok: raw.ok,
+    keeper_name: raw.keeper_name,
+    session: raw.session,
+  })
+  const resolution_application = raw.resolution_application === 'applied'
+    || raw.resolution_application === 'replayed'
+    ? raw.resolution_application
+    : null
+  const audit = decodeOfficialClientAuditReceipt(raw.audit)
+  return session && resolution_application && audit
+    ? { ...session, resolution_application, audit }
+    : null
+}
+
+function decodeOfficialClientProbeResponse(raw: unknown): DashboardOfficialClientProbeResponse | null {
+  if (
+    !isRecord(raw)
+    || !hasExactKeys(raw, [
+      'schema',
+      'ok',
+      'runtime_id',
+      'client_kind',
+      'configured_model',
+      'measured_at',
+      'login',
+      'client',
+      'execution',
+    ])
+    || raw.schema !== 'masc.dashboard.official-client-probe.v1'
+    || raw.ok !== true
+  ) return null
+  if (!isRecord(raw.login) || !isRecord(raw.client) || !isRecord(raw.execution)) return null
+  const runtime_id = asString(raw.runtime_id)
+  const client_kind = asString(raw.client_kind)
+  if (raw.configured_model !== null && !asString(raw.configured_model)) return null
+  const configured_model = asNullableString(raw.configured_model)
+  const measured_at = asNumber(raw.measured_at)
+  const status = asString(raw.login.status)
+  const authenticated = asBoolean(raw.login.authenticated)
+  const evidenceSource = asString(raw.login.evidence_source)
+  const identityVerified = asBoolean(raw.login.identity_verified)
+  if (!hasExactKeys(raw.client, ['user_agent'])) return null
+  if (raw.client.user_agent !== null && !asString(raw.client.user_agent)) return null
+  const user_agent = asNullableString(raw.client.user_agent)
+  if (!runtime_id || (client_kind !== 'codex' && client_kind !== 'claude_code')) return null
+  if (
+    measured_at == null
+    || measured_at < 0
+    || measured_at > 8_640_000_000_000
+    || authenticated == null
+    || evidenceSource !== 'configured_executable_self_report'
+    || identityVerified !== false
+  ) return null
+  if (!status || !OFFICIAL_CLIENT_LOGIN_STATUSES.has(status as DashboardOfficialClientLoginStatus)) return null
+  if ((status === 'ready') !== authenticated) return null
+  const ready = status === 'ready'
+  const loginKeys = ready
+    ? ['status', 'authenticated', 'evidence_source', 'identity_verified', 'auth_method', 'subscription_type', 'api_provider']
+    : ['status', 'authenticated', 'evidence_source', 'identity_verified', 'detail']
+  if (!hasExactKeys(raw.login, loginKeys)) return null
+  const detail = ready ? null : asString(raw.login.detail) ?? null
+  if (!ready && !detail) return null
+  if (status === 'ready') {
+    if (!asString(raw.login.auth_method) || !asString(raw.login.subscription_type)) return null
+    if (raw.login.api_provider !== null && !asString(raw.login.api_provider)) return null
+  }
+  if (
+    !hasExactKeys(raw.execution, ['status', 'reason'])
+    ||
+    raw.execution.status !== 'not_measured'
+    || raw.execution.reason !== 'login_probe_does_not_submit_model_turn'
+  ) return null
+  return {
+    schema: 'masc.dashboard.official-client-probe.v1',
+    ok: true,
+    runtime_id,
+    client_kind,
+    configured_model,
+    measured_at,
+    login: {
+      status: status as DashboardOfficialClientLoginStatus,
+      authenticated,
+      evidence_source: 'configured_executable_self_report',
+      identity_verified: false,
+      auth_method: asNullableString(raw.login.auth_method),
+      subscription_type: asNullableString(raw.login.subscription_type),
+      api_provider: asNullableString(raw.login.api_provider),
+      detail,
+    },
+    client: { user_agent },
+    execution: {
+      status: 'not_measured',
+      reason: 'login_probe_does_not_submit_model_turn',
+    },
+  }
 }
 
 function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
@@ -1069,16 +1689,133 @@ function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
     path: asNullableString(record.path),
     file_name: asString(record.file_name) ?? 'runtime.toml',
     source_text: asString(record.source_text, ''),
-    reloaded: asBoolean(record.reloaded) ?? false,
+    provider_protocols: parseRuntimeTomlEditorProtocols(record.provider_protocols),
+    application: normalizeRuntimeConfigApplication(record.application),
+    validation: normalizeRuntimeConfigValidation(record.validation),
+    keeper_setting_schema: record.keeper_setting_schema,
+    keeper_settings: normalizeRuntimeKeeperSettings(record.keeper_settings),
     message: asNullableString(record.message),
     reason: asNullableString(record.reason),
     issues: record.issues,
   }
 }
 
+function appliedAt(raw: unknown): string | number | null {
+  return asString(raw) ?? asNumber(raw) ?? null
+}
+
+function normalizeApplicationLane(raw: unknown): RuntimeConfigApplicationLane {
+  const record = isRecord(raw) ? raw : {}
+  return {
+    status: asString(record.status) ?? 'unknown',
+    requires_restart: asBoolean(record.requires_restart) ?? false,
+    applied_at: appliedAt(record.applied_at),
+  }
+}
+
+function normalizeRuntimeConfigApplication(raw: unknown): RuntimeConfigApplication | undefined {
+  if (!isRecord(raw)) return undefined
+  const keeperOverlay = isRecord(raw.keeper_overlay) ? raw.keeper_overlay : {}
+  return {
+    operation: asString(raw.operation) ?? 'unknown',
+    routing: normalizeApplicationLane(raw.routing),
+    keeper_overlay: {
+      ...normalizeApplicationLane(keeperOverlay),
+      configured_count: asNumber(keeperOverlay.configured_count) ?? 0,
+      pending_keys: asStringArray(keeperOverlay.pending_keys) ?? [],
+      applied_keys: asStringArray(keeperOverlay.applied_keys) ?? [],
+      preempted_keys: asStringArray(keeperOverlay.preempted_keys) ?? [],
+    },
+  }
+}
+
+function normalizeRuntimeConfigValidation(raw: unknown): RuntimeConfigValidation | undefined {
+  if (!isRecord(raw)) return undefined
+  const issues = Array.isArray(raw.issues)
+    ? raw.issues.flatMap((issue): RuntimeConfigValidationIssue[] => {
+      if (!isRecord(issue)) return []
+      const severity = asString(issue.severity)
+      if (severity !== 'error' && severity !== 'warning') return []
+      return [{
+        key: asString(issue.key) ?? '',
+        kind: asString(issue.kind) ?? 'unknown',
+        severity,
+        detail: asString(issue.detail) ?? '',
+      }]
+    })
+    : []
+  return {
+    valid: asBoolean(raw.valid) ?? false,
+    schema_version: asNumber(raw.schema_version) ?? 0,
+    current_schema_version: asNumber(raw.current_schema_version) ?? 0,
+    forward_schema: asBoolean(raw.forward_schema) ?? false,
+    issues,
+  }
+}
+
+function normalizeRuntimeKeeperSettings(raw: unknown): RuntimeKeeperSetting[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  return raw.flatMap((value): RuntimeKeeperSetting[] => {
+    if (!isRecord(value)) return []
+    return [{
+      key: asNullableString(value.key),
+      env: asString(value.env) ?? '',
+      configured_value: asNullableString(value.configured_value),
+      source: asString(value.source) ?? 'unknown',
+      effective_value: asNullableString(value.effective_value),
+      effective_error: asNullableString(value.effective_error),
+      applied_at: asNumber(value.applied_at) ?? null,
+      reload_class: asString(value.reload_class) ?? 'unknown',
+      requires_restart: asBoolean(value.requires_restart) ?? false,
+      application_status: asString(value.application_status) ?? 'unknown',
+      consumers: asStringArray(value.consumers) ?? [],
+    }]
+  })
+}
+
 export async function fetchRuntimeTomlConfig(): Promise<RuntimeTomlConfig> {
   await ensureDevToken()
   return get<unknown>('/api/v1/runtime/config/raw').then(normalizeRuntimeTomlConfig)
+}
+
+export async function fetchOfficialClientSession(
+  keeperName: string,
+  opts?: AbortableRequestOptions,
+): Promise<DashboardOfficialClientSessionResponse> {
+  await ensureDevToken()
+  const query = new URLSearchParams({ keeper_name: keeperName })
+  const raw = await get<unknown>(`/api/v1/runtime/sessions/official-client?${query}`, { signal: opts?.signal })
+  const decoded = decodeOfficialClientSessionResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 official-client session payload')
+  return decoded
+}
+
+export async function resolveOfficialClientSession(
+  keeperName: string,
+  recoveryId: string,
+  decision: DashboardOfficialClientRecoveryDecision,
+): Promise<DashboardOfficialClientRecoveryResponse> {
+  await ensureDevToken()
+  const raw = await post<unknown>('/api/v1/runtime/sessions/official-client/resolve', {
+    keeper_name: keeperName,
+    recovery_id: recoveryId,
+    ...decision,
+  })
+  const decoded = decodeOfficialClientRecoveryResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 official-client recovery payload')
+  return decoded
+}
+
+export async function probeOfficialClientLogin(
+  runtimeId: string,
+): Promise<DashboardOfficialClientProbeResponse> {
+  await ensureDevToken()
+  const raw = await post<unknown>('/api/v1/runtime/official-client/probe', {
+    runtime_id: runtimeId,
+  })
+  const decoded = decodeOfficialClientProbeResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 official-client probe payload')
+  return decoded
 }
 
 // Structured, already-resolved runtime defaults / model routing (runtime.toml
@@ -1111,9 +1848,24 @@ export async function saveRuntimeTomlConfig(sourceText: string): Promise<Runtime
   }).then(normalizeRuntimeTomlConfig)
 }
 
+export async function previewRuntimeTomlConfig(sourceText: string): Promise<RuntimeConfigPreview> {
+  await ensureDevToken()
+  const raw = await post<unknown>('/api/v1/runtime/config/raw/preview', {
+    source_text: sourceText,
+  })
+  if (!isRecord(raw)) throw new Error('유효하지 않은 runtime config preview payload')
+  const validation = normalizeRuntimeConfigValidation(raw.validation)
+  if (!validation) throw new Error('유효하지 않은 runtime config validation payload')
+  return {
+    ok: asBoolean(raw.ok) ?? false,
+    can_save: asBoolean(raw.can_save) ?? false,
+    validation,
+    keeper_setting_schema: raw.keeper_setting_schema,
+  }
+}
+
 export type RuntimeRoutingLane =
   | 'default'
-  | 'cross_verifier'
 
 export async function patchRuntimeRouting(
   lane: RuntimeRoutingLane,

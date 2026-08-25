@@ -123,7 +123,7 @@ function makeRuntimeProvider(runtimeId: string, providerName: string, modelName:
     supports_code_execution: true,
     source: 'runtime.toml',
     effective_capabilities: {
-      source: 'oas-provider-config-model',
+      source: 'agent-core-provider-config-model',
       max_context_tokens: 128000,
       max_output_tokens: 8192,
       supports_tools: true,
@@ -254,7 +254,6 @@ function makeRuntimeProvider(runtimeId: string, providerName: string, modelName:
           supports_seed_with_images: true,
           supports_code_execution: true,
         },
-        match_prefixes: [`${modelName}-`],
       },
       binding: {
         provider_id: runtimeId.split('.')[0],
@@ -439,7 +438,7 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
   it('shows an actionable read-only hint (no deep-link) for a keeper without a valid name', async () => {
     refs.config = makeConfig({ selected_runtime_id: 'a.one' }, {}, '')
     render(
-      html`<${KeeperRuntimeModelEditor} keeperName="persona-keeper" onOpenRuntimeConfig=${vi.fn()} />`,
+      html`<${KeeperRuntimeModelEditor} keeperName="prompt-only-keeper" onOpenRuntimeConfig=${vi.fn()} />`,
       container,
     )
     await flush()

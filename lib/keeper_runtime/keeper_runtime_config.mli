@@ -4,7 +4,7 @@
     Per-base-path config for transport liveness, capacity, WebSearch
     provider selection, and other startup-scoped runtime parameters that
     previously lived only in environment variables. Closes the architectural gap
-    where tools/personas/runtime are per-base-path but selected runtime tuning
+    where tools/Keeper instructions/runtime are per-base-path but selected runtime tuning
     was global.
 
     Precedence (highest first):
@@ -62,8 +62,6 @@ val load_and_apply : base_path:string -> (int, load_failure) result
     This is the TOML intent *independent* of any env override — it lets
     operator surfaces warn when an env var silently differs from the
     operator's TOML configuration (issue #17192). *)
-val toml_value_opt : string -> string option
-
 (** Pure resolution: parse TOML and determine which env vars would be
     overridden, without mutating the process-local boot override store.
 
@@ -77,18 +75,57 @@ val resolve_overrides :
   Keeper_toml_loader.toml_doc ->
   int * (string * string) list
 
+(** {1 Typed Keeper setting schema and validation} *)
+
+val current_schema_version : int
+
+type validation_severity =
+  | Error
+  | Warning
+
+type validation_issue_kind =
+  | Invalid_schema_version
+  | Unknown_key
+  | Retired_key
+  | Type_mismatch
+  | Out_of_range
+
+type validation_issue =
+  { key : string
+  ; kind : validation_issue_kind
+  ; severity : validation_severity
+  ; detail : string
+  }
+
+type validation_report =
+  { schema_version : int
+  ; forward_schema : bool
+  ; issues : validation_issue list
+  }
+
+val validate_doc : Keeper_toml_loader.toml_doc -> validation_report
+val validate_source_text : string -> (validation_report, string) result
+val validation_report_is_valid : validation_report -> bool
+val validation_report_to_yojson : validation_report -> Yojson.Safe.t
+
+val setting_schema_to_yojson : unit -> Yojson.Safe.t
+(** Registry-generated schema for documentation and operator UI. *)
+
+val settings_projection_to_yojson :
+  Keeper_toml_loader.toml_doc -> Yojson.Safe.t
+(** Per-setting configured/effective source, effect boundary, and consumer
+    projection. Effective values reflect the current process snapshot; a newly
+    saved startup overlay remains visibly pending until restart. *)
+
+val overlay_application_to_yojson :
+  Keeper_toml_loader.toml_doc -> Yojson.Safe.t
+(** Aggregate startup-overlay application state for save/read responses. *)
+
 (** TOML schema (for documentation):
 
     {[
-      [autonomous]
-      concurrency                 = 3
-
-      [reactive]
-      concurrency                 = 4
-
       [heartbeat]
       sleep_chunk_sec             = 1.5
-      board_wakeup_max            = 4
 
       [turn]
       # stream_idle_timeout_sec is intentionally omitted (disabled).
@@ -97,4 +134,5 @@ val resolve_overrides :
       provider                    = "auto"
     ]}
 
-    Unknown keys are ignored (forward compatibility). *)
+    Keeper-owned unknown and retired keys are validated explicitly; unrelated
+    runtime/provider namespaces remain owned by their respective loaders. *)

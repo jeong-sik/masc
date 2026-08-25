@@ -1,5 +1,6 @@
 type t =
   | Ok
+  | Idle
   | Warming
   | Snapshot_not_ready
   | Degraded
@@ -11,22 +12,62 @@ type t =
   | Error
   | Timeout
 
-let of_string raw =
+(* [failing] is what [Channel_gate_metrics.health_of_counts] emits when a
+   channel had no successes at all, or an error rate at or above half. Before
+   it was listed here it fell through to [Unknown], which ranks 2 — the same as
+   [Degraded] — so the producer's worst rung and its middle rung arrived at
+   operators as one severity. *)
+let of_string_opt raw =
   match String.lowercase_ascii (String.trim raw) with
-  | "ok" | "good" | "healthy" -> Ok
-  | "warming" -> Warming
-  | "snapshot_not_ready" -> Snapshot_not_ready
-  | "degraded" | "interrupted" -> Degraded
-  | "stale" -> Stale
-  | "warning" | "warn" | "watch" | "risk" -> Warning
-  | "unavailable" -> Unavailable
-  | "blocked" -> Blocked
-  | "error" | "bad" | "critical" -> Error
-  | "timeout" -> Timeout
-  | "unknown" | _ -> Unknown
+  (* [empty] is what [Keeper_reaction_ledger] publishes for a ledger it read
+     and found nothing in, which its own type keeps distinct from the store it
+     could not reach at all ([Summary_unavailable]). Absent here it fell to
+     [Unknown], and the fleet health reader counts [Unknown] as unreachable, so
+     a quiet fleet reported its event-queue storage and work as unavailable
+     (#27560). *)
+  (* [reachable] is what the dashboard runtime probe emits when every runtime
+     it probed answered. Absent here it fell to [Unknown], which ranks 2 — the
+     same rung as [Degraded] — so a fully reachable fleet read as a troubled
+     one (#27560). *)
+  | "ok" | "good" | "healthy" | "empty" | "reachable" -> Some Ok
+  (* [idle] is what [Channel_gate_metrics.health_of_counts] emits for a channel
+     that carried no messages at all. It is not [Ok]: nothing succeeded, there
+     was simply nothing to do, and an operator reading a quiet channel wants
+     that difference. Absent here it fell to [Unknown], which ranks 2 — the
+     same rung as [Degraded] — so a silent channel read as a troubled one
+     (#27560). *)
+  | "idle" | "no_http_runtimes" -> Some Idle
+  (* [initializing] is what the dashboard core and the operator digest emit for
+     a workspace that has not finished starting. It was absent here, so it fell
+     to [Unknown], which ranks 2 — the same rung as [Degraded] and [Stale] — and
+     [is_health_at_risk] (rank >= 2) reported a booting workspace as at risk in
+     the briefing. It is the same state [Warming] already names (#27560). *)
+  | "warming" | "initializing" -> Some Warming
+  | "snapshot_not_ready" -> Some Snapshot_not_ready
+  | "degraded" | "interrupted" -> Some Degraded
+  | "stale" -> Some Stale
+  | "warning" | "warn" | "watch" | "risk" -> Some Warning
+  (* [unreachable] is the same probe's worst rung: nothing answered. It fell
+     to [Unknown] too, so "none answered" and "some answered" arrived at the
+     same severity (#27560). *)
+  | "unavailable" | "unreachable" -> Some Unavailable
+  | "blocked" -> Some Blocked
+  | "error" | "bad" | "critical" | "failing" -> Some Error
+  | "timeout" -> Some Timeout
+  | "unknown" -> Some Unknown
+  | _ -> None
+
+(* Kept total for callers that only need a status to render. It cannot tell an
+   explicit "unknown" from a word this vocabulary never had — use
+   {!of_string_opt} where that difference decides anything. *)
+let of_string raw =
+  match of_string_opt raw with
+  | Some status -> status
+  | None -> Unknown
 
 let to_string = function
   | Ok -> "ok"
+  | Idle -> "idle"
   | Warming -> "warming"
   | Snapshot_not_ready -> "snapshot_not_ready"
   | Degraded -> "degraded"
@@ -46,7 +87,7 @@ let rank = function
   | Blocked | Error | Timeout -> 3
   | Degraded | Stale | Warning | Unavailable | Unknown -> 2
   | Warming | Snapshot_not_ready -> 1
-  | Ok -> 0
+  | Ok | Idle -> 0
 
 let rank_string raw = raw |> of_string |> rank
 
@@ -56,4 +97,3 @@ let max_string left right = max (of_string left) (of_string right) |> to_string
 
 let requires_operator_action status = rank status >= 3
 
-let requires_operator_action_string raw = raw |> of_string |> requires_operator_action

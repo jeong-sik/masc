@@ -200,7 +200,7 @@ let test_sync_advances_clean_clone () =
                Alcotest.(check int) "advanced over one commit" 1 behind
            | other -> check_outcome "advanced" other);
           (match
-             Repo_git.ahead_behind ~repository:repo ~target_ref:"origin/main"
+             Repo_git.ahead_behind ~repository:repo ~target_ref:"origin/main" ()
            with
            | Ok (behind, ahead) ->
                Alcotest.(check (pair int int))

@@ -2,16 +2,16 @@
 
     Pre-fix [costs.jsonl] showed 100% [cost_usd=0] across 1697
     entries.  Each missing/reporting path (missing usage,
-    OAS cost omission, structurally-unmetered runtime, actual
+    AGENT_CORE cost omission, structurally-unmetered runtime, actual
     zero-token call) collapsed to the same [0.0] field with no
     way for an operator to distinguish "tracking is broken" from
-    "this runtime is unmetered" from "OAS did not report cost".
+    "this runtime is unmetered" from "AGENT_CORE did not report cost".
     Without that distinction the operator
     can't pick the right next action: A (audit) vs C (pricing
     SSOT) vs E (cross-link to #9959) all need different evidence.
 
     These tests pin
-    [Keeper_hooks_oas.classify_cost_usd_source]'s bounded
+    [Keeper_hooks_agent_core.classify_cost_usd_source]'s bounded
     classification:
 
     | path                | source string         |
@@ -19,16 +19,16 @@
     | usage_missing       | missing_usage         |
     | structurally_unmetered runtime | unmetered_provider |
     | reported non-zero cost | computed              |
-    | tokens + 0 cost | oas_cost_unreported |
+    | tokens + 0 cost | agent_core_cost_unreported |
 
     Precedence is fixed (top-down) so a missing-usage call on a
     pricing-known model still labels [missing_usage], not
-    [oas_cost_unreported] — the upstream signal is the more
+    [agent_core_cost_unreported] — the upstream signal is the more
     actionable failure mode. *)
 
 open Alcotest
 
-module H = Masc.Keeper_hooks_oas
+module H = Masc.Keeper_hooks_agent_core
 
 let check_source ~msg ~usage_missing ~runtime_unmetered
     ~cost_usd expected =
@@ -71,37 +71,37 @@ let test_computed_when_cost_reported () =
     ~cost_usd:0.0042
     "computed"
 
-let test_oas_cost_unreported_for_zero_cost_tokens () =
-  (* Trusted call with tokens but no positive OAS-reported cost falls
-     through to [oas_cost_unreported]. MASC must not inspect a local
+let test_agent_core_cost_unreported_for_zero_cost_tokens () =
+  (* Trusted call with tokens but no positive AGENT_CORE-reported cost falls
+     through to [agent_core_cost_unreported]. MASC must not inspect a local
      provider/model pricing catalog to guess why. *)
   check_source
-    ~msg:"reported tokens without OAS cost => oas_cost_unreported"
+    ~msg:"reported tokens without AGENT_CORE cost => agent_core_cost_unreported"
     ~usage_missing:false
     ~runtime_unmetered:false
     ~cost_usd:0.0
-    "oas_cost_unreported"
+    "agent_core_cost_unreported"
 
-let test_preview_runtime_without_oas_cost_is_unreported () =
+let test_preview_runtime_without_agent_core_cost_is_unreported () =
   check_source
-    ~msg:"preview runtime without OAS cost => oas_cost_unreported"
+    ~msg:"preview runtime without AGENT_CORE cost => agent_core_cost_unreported"
     ~usage_missing:false
     ~runtime_unmetered:false
     ~cost_usd:0.0
-    "oas_cost_unreported"
+    "agent_core_cost_unreported"
 
-let test_oas_cost_json_preserves_omission () =
-  check bool "omitted OAS cost stays JSON null" true
+let test_agent_core_cost_json_preserves_omission () =
+  check bool "omitted AGENT_CORE cost stays JSON null" true
     (H.For_testing.cost_usd_json None = `Null);
   check bool "reported zero remains numeric zero" true
     (H.For_testing.cost_usd_json (Some 0.0) = `Float 0.0)
 
 let test_hook_usage_missing_uses_token_evidence () =
-  let cost_only : Agent_sdk.Types.api_usage =
-    { Agent_sdk.Types.zero_api_usage with cost_usd = Some 0.25 }
+  let cost_only : Agent_core.Types.api_usage =
+    { Agent_core.Types.zero_api_usage with cost_usd = Some 0.25 }
   in
-  let cache_creation_only : Agent_sdk.Types.api_usage =
-    { Agent_sdk.Types.zero_api_usage with cache_creation_input_tokens = 1 }
+  let cache_creation_only : Agent_core.Types.api_usage =
+    { Agent_core.Types.zero_api_usage with cache_creation_input_tokens = 1 }
   in
   check bool "cost-only Some usage remains missing" true
     (H.For_testing.usage_missing_of_usage (Some cost_only));
@@ -113,11 +113,11 @@ let test_cost_only_usage_trust_matches_missing () =
      contradictory pair usage_trust=trusted + usage_missing=true.  Trust
      classification delegates to the same token evidence as
      [usage_missing_of_usage]. *)
-  let cost_only : Agent_sdk.Types.api_usage =
-    { Agent_sdk.Types.zero_api_usage with cost_usd = Some 0.25 }
+  let cost_only : Agent_core.Types.api_usage =
+    { Agent_core.Types.zero_api_usage with cost_usd = Some 0.25 }
   in
-  let real_usage : Agent_sdk.Types.api_usage =
-    { Agent_sdk.Types.zero_api_usage with
+  let real_usage : Agent_core.Types.api_usage =
+    { Agent_core.Types.zero_api_usage with
       input_tokens = 10;
       output_tokens = 5;
     }
@@ -146,20 +146,20 @@ let test_record_emit_skips_computed () =
     (counter_for "computed")
 
 let test_record_emit_increments_named_source () =
-  let before = counter_for "oas_cost_unreported" in
-  H.record_cost_emit_source "oas_cost_unreported";
+  let before = counter_for "agent_core_cost_unreported" in
+  H.record_cost_emit_source "agent_core_cost_unreported";
   check (float 0.0001)
-    "oas_cost_unreported +1"
+    "agent_core_cost_unreported +1"
     (before +. 1.0)
-    (counter_for "oas_cost_unreported")
+    (counter_for "agent_core_cost_unreported")
 
 let test_counter_isolation_between_sources () =
-  (* Bumping oas_cost_unreported must NOT move missing_usage.
+  (* Bumping agent_core_cost_unreported must NOT move missing_usage.
      Each source has its own series so dashboards split cleanly. *)
   let other_before = counter_for "missing_usage" in
-  H.record_cost_emit_source "oas_cost_unreported";
+  H.record_cost_emit_source "agent_core_cost_unreported";
   check (float 0.0001)
-    "missing_usage unchanged when oas_cost_unreported bumps"
+    "missing_usage unchanged when agent_core_cost_unreported bumps"
     other_before
     (counter_for "missing_usage")
 
@@ -177,12 +177,12 @@ let () =
             test_unmetered_provider;
           test_case "computed when cost is reported" `Quick
             test_computed_when_cost_reported;
-          test_case "OAS cost unreported for token usage" `Quick
-            test_oas_cost_unreported_for_zero_cost_tokens;
-          test_case "preview runtime without OAS cost" `Quick
-            test_preview_runtime_without_oas_cost_is_unreported;
-          test_case "OAS cost JSON preserves omission" `Quick
-            test_oas_cost_json_preserves_omission;
+          test_case "AGENT_CORE cost unreported for token usage" `Quick
+            test_agent_core_cost_unreported_for_zero_cost_tokens;
+          test_case "preview runtime without AGENT_CORE cost" `Quick
+            test_preview_runtime_without_agent_core_cost_is_unreported;
+          test_case "AGENT_CORE cost JSON preserves omission" `Quick
+            test_agent_core_cost_json_preserves_omission;
           test_case "hook usage missing uses token evidence" `Quick
             test_hook_usage_missing_uses_token_evidence;
           test_case "cost-only usage trust matches missing" `Quick

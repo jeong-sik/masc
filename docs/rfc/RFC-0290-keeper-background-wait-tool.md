@@ -1,3 +1,8 @@
+---
+rfc: "0290"
+status: Draft
+---
+
 # RFC-0290: Generic keeper background-work tool (spawn → wake-on-completion)
 
 - Status: Draft
@@ -47,8 +52,8 @@ The generalization is sound only with the §5 isolation and resource design.
 
 - **Inline blocking await as the default path.** A keeper turn must not `Eio.Promise.await` a background job as its primary way to get the result. (An optional short-budget inline mode may be added later behind a hard single-digit-second clamp; not in v1.)
 - **A `task_wait`-style blocking re-await tool.** Re-awaiting a handle from a later turn requires a durable result store that survives registry pruning. The fusion registry prunes completed entries at `max_completed_retained=64` (`fusion_run_registry.ml:35,47-53`); a `wait` tool over it would silently lose results. Deferred until a durable store is specified.
-- **Routing LLM/agent sub-jobs through OAS `async_agent`.** The research could not read the OAS `async_agent`/`approval` API (reader failed twice on transport errors). Any "LLM sub-jobs reuse OAS async_agent" claim is unverified and out of scope; v1 covers the subprocess job kind only.
-- **Touching the OAS boundary.** OAS must not learn about `wakeup_keeper`, the keeper registry, the board, or the event queue. The result→wake bridge lives only in the MASC tool fiber's terminal callback (§5.4).
+- **Routing LLM/agent sub-jobs through agent_core `async_agent`.** The research could not read the agent_core `async_agent`/`approval` API (reader failed twice on transport errors). Any "LLM sub-jobs reuse agent_core async_agent" claim is unverified and out of scope; v1 covers the subprocess job kind only.
+- **Touching the agent_core boundary.** agent_core must not learn about `wakeup_keeper`, the keeper registry, the board, or the event queue. The result→wake bridge lives only in the MASC tool fiber's terminal callback (§5.4).
 
 ## 4. Surface inventory
 
@@ -116,7 +121,7 @@ Because results are reachable by both wake (stimulus) and poll (`masc_bg_status`
 - **P0② unbounded concurrency / scheduler starvation.** No cap means ~15 keepers × unbounded spawns × `Eio_unix.run_in_systhread` waitpid (`autonomy_exec.ml:310`) saturate the systhread pool. Mitigation: §5.3 cap with rejection. Note: adding more domains is not a fix (keepers are scheduler-bound, not core-bound).
 - **R3 not-Running orphan window.** If the keeper is paused, in succession, or dead when a job completes, the `Bg_completed` stimulus drops. v1 treats this as intended (the keeper rereads state on resume); a durable result store is deferred with the `task_wait` non-goal. Documented so it is not mistaken for a delivery bug.
 - **R4 behavior/observability gap.** No eval asserts on background-job outcomes yet. v1 ships the mechanism and the unit/FD/cap tests above; outcome-quality measurement is a separate harness concern.
-- **R5 OAS boundary, checkpoint write contention.** Unverified: whether a root-switch task fiber and the turn fiber can race on checkpoint read/write. v1's subprocess jobs do not touch keeper checkpoints, sidestepping this; revisit before any in-process LLM job kind is added.
+- **R5 agent_core boundary, checkpoint write contention.** Unverified: whether a root-switch task fiber and the turn fiber can race on checkpoint read/write. v1's subprocess jobs do not touch keeper checkpoints, sidestepping this; revisit before any in-process LLM job kind is added.
 
 ## 8. Rollout
 

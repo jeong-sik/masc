@@ -4,7 +4,7 @@
     these constants instead of inlining magic strings/numbers.
 
     {!local_llm_default_url} follows the same env override chain that
-    OAS discovery uses before falling back to the current local runtime
+    AGENT_CORE discovery uses before falling back to the current local runtime
     URL.
 
     @since 2.241.0 *)
@@ -12,6 +12,11 @@
 (** {1 Ollama defaults} *)
 
 (** Default port for Ollama (OpenAI-compatible at [/v1]). *)
+val trim_trailing_slashes : string -> string
+(** Strip every trailing ['/'] from a URL-shaped value.  [""] and ["/"]
+    both become [""].  Paths keep their root: use
+    {!Env_config_core.strip_path_trailing_slashes} for those. *)
+
 val ollama_default_port : int
 
 (** ["http://127.0.0.1:<ollama_default_port>"]. *)
@@ -42,12 +47,9 @@ val is_ollama_url : string -> bool
 val openai_chat_completions_path : string
 
 (** [/chat/completions] — version-free path for [Provider_config.t] where
-    [base_url] already includes the version segment.  Matches the OAS
-    SDK's internal default in [api_openai.ml]. *)
+    [base_url] already includes the version segment.  Matches the AGENT_CORE
+    Agent Core's internal default in [api_openai.ml]. *)
 val chat_completions_path : string
-
-(** [/v1/models]. *)
-val openai_models_path : string
 
 (** {1 CLI transport discriminator} *)
 
@@ -61,7 +63,7 @@ val is_cli_transport_url : string -> bool
 (** {1 Local LLM URL} *)
 
 (** Override order:
-    [OAS_LOCAL_LLM_URL] -> {!ollama_default_url}. *)
+    [AGENT_CORE_LOCAL_LLM_URL] -> {!ollama_default_url}. *)
 val local_llm_default_url : string
 
 (** {1 MASC HTTP server} *)
@@ -72,6 +74,27 @@ val masc_http_default_port : int
 val masc_http_default_port_s : string
 
 val masc_http_default_host : string
+(** Where the MASC HTTP server binds by default. *)
+
+val masc_http_loopback_peer : string
+(** What a client on this machine dials to reach that server.
+
+    The same string as {!masc_http_default_host} today, and a different
+    question. A bind address may be a wildcard -- {!is_unspecified_host}
+    exists because 0.0.0.0 and :: mean "every interface" rather than a
+    reachable peer -- so a client that reads the server's bind setting as its
+    destination can end up dialing an address that is not one. *)
+
+val masc_http_default_max_connections : int
+(** Default concurrent-connection ceiling for the MASC HTTP server.
+
+    Named here so the reader ({!Http_server_eio}) and the operator snapshot
+    ({!Env_config_snapshot}) can share one number. They restated it
+    independently until #14143 raised the reader to 512 and left the snapshot
+    on 128. *)
+
+(** String form of {!masc_http_default_max_connections} for the env snapshot. *)
+val masc_http_default_max_connections_s : string
 
 (** {1 Loopback detection} *)
 
@@ -82,6 +105,10 @@ val is_loopback_host : string -> bool
 
 (** Convenience for [Uri.host]-style inputs. [None] → [false]. *)
 val is_loopback_host_opt : string option -> bool
+
+val is_unspecified_host : string -> bool
+(** [true] for the wildcard bind addresses 0.0.0.0 and ::. A wildcard means
+    "every interface", so it is not a peer any caller can reach back on. *)
 
 val normalize_loopback_base_url : string -> string
 (** Strip trailing slashes from [base_url] and canonicalize loopback
@@ -98,8 +125,6 @@ val vite_dev_default_port : int
 val vite_dev_default_origins : string list
 
 (** {1 SearXNG & OpenTelemetry} *)
-
-val searxng_default_port : int
 
 val searxng_default_url : string
 

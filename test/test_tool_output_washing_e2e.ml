@@ -5,7 +5,7 @@
 
       [Tool_bridge.maybe_externalize]
         \u2193 sha256 + blob marker
-      [Agent_sdk.Types.ToolResult { content = marker }]
+      [Agent_core.Types.ToolResult { content = marker }]
         \u2193 provider-bound message keeps marker
       [Keeper_artifact_read.handle]
         \u2193 one bounded typed page
@@ -22,13 +22,13 @@ module Bridge = Masc.Tool_bridge
 module K = Masc.Keeper_run_tools_hooks
 module R = Masc.Keeper_artifact_read
 module E = Masc.Keeper_tool_execution
-module T = Agent_sdk.Types
+module T = Agent_core.Types
 
 let project_completed_exn ?model_projection ~base_path ~tool_name data =
   let result =
     Tool_result.make_ok ~tool_name ~start_time:0.0 ~data ()
   in
-  match Bridge.to_oas_typed_result ?model_projection ~base_path result with
+  match Bridge.to_agent_core_typed_result ?model_projection ~base_path result with
   | Ok { content; _ } -> content
   | Error { message; _ } -> Alcotest.fail message
 
@@ -67,7 +67,7 @@ let test_artifact_page_makes_progress () =
            ])
     with
     | Ok request -> request
-    | Error error -> Alcotest.fail error
+    | Error error -> Alcotest.fail (R.invalid_request_to_string error)
   in
   let emoji = "\240\159\152\128x" in
   let incident_sized_payload = String.make 2_500 'w' in
@@ -77,7 +77,7 @@ let test_artifact_page_makes_progress () =
         (`Assoc [ "sha256", `String (String.make 64 'a') ])
     with
     | Ok request -> request
-    | Error error -> Alcotest.fail error
+    | Error error -> Alcotest.fail (R.invalid_request_to_string error)
   in
   let incident_page =
     match R.For_testing.page default_request incident_sized_payload with
@@ -126,7 +126,7 @@ let test_artifact_page_makes_progress () =
 
 let test_full_flow_externalize_reference_serve () =
   with_temp_base_path (fun dir ->
-      (* Step 1: Externalize through the production MASC -> OAS bridge with
+      (* Step 1: Externalize through the production MASC -> AGENT_CORE bridge with
          the same explicit Workspace base path the reader receives. The byte
          count reproduces the exact executor artifact that expanded an 88 KB
          checkpoint into a 9 MB provider request. *)
@@ -140,7 +140,7 @@ let test_full_flow_externalize_reference_serve () =
 
       (* Step 2: Verify the file landed in the sharded location. *)
       let sha256 =
-        match O.decode_from_oas marker with
+        match O.decode_from_agent_core marker with
         | O.Decoded { sha256; _ } -> sha256
         | O.Not_marker -> Alcotest.fail "bridge did not externalize payload"
         | O.Invalid_marker { detail } ->
@@ -153,11 +153,11 @@ let test_full_flow_externalize_reference_serve () =
       Alcotest.(check bool) "blob file exists" true
         (Sys.file_exists expected_path);
 
-      (* Step 3: The bridge returned an exact OAS marker. *)
+      (* Step 3: The bridge returned an exact AGENT_CORE marker. *)
       Alcotest.(check bool) "blob marker recognized" true (O.is_marker marker);
 
       (* Step 4: Marker round-trips through Tool_output.decode. *)
-      (match O.decode_from_oas marker with
+      (match O.decode_from_agent_core marker with
        | O.Decoded { sha256 = decoded_sha; bytes; preview = _; mime } ->
            Alcotest.(check string) "decoded sha matches" sha256 decoded_sha;
            Alcotest.(check int) "decoded bytes" (String.length payload) bytes;
@@ -198,7 +198,7 @@ let test_full_flow_externalize_reference_serve () =
         | Error error ->
           Alcotest.failf
             "provider projection failed: %s"
-            error
+            (Agent_core.Error.to_string error)
       in
       let projected_content = extract_tool_content (List.hd projected) in
       Alcotest.(check string) "provider content keeps artifact reference"
@@ -289,7 +289,7 @@ let test_full_flow_externalize_reference_serve () =
                'z'))
       in
       let second_sha =
-        match O.decode_from_oas second_marker with
+        match O.decode_from_agent_core second_marker with
         | O.Decoded { sha256; _ } -> sha256
         | O.Not_marker | O.Invalid_marker _ ->
           Alcotest.fail "second artifact setup failed"

@@ -1,4 +1,4 @@
-(** Typed immutable identity shared by direct Keeper chat requests, queued receipts,
+(** Typed immutable identity shared by Keeper operations, Fusion runs,
     durable delivery journals, and transcript idempotency slots. *)
 
 module Request_id : sig
@@ -10,32 +10,14 @@ module Request_id : sig
   val equal : t -> t -> bool
 end
 
-module Receipt_id : sig
-  type t
-
-  val generate : unit -> t
-  val of_request_id : Request_id.t -> t
-  (** Preserve a producer-allocated exact request identity as the queue receipt.
-      No derived hash or second namespace participates in duplicate convergence. *)
-  val of_string : string -> (t, string) result
-  val to_string : t -> string
-  val equal : t -> t -> bool
-end
-
-module Receipt_ids : sig
-  type t
-  type error = Empty
-
-  val singleton : Receipt_id.t -> t
-  val of_list : Receipt_id.t list -> (t, error) result
-  val error_to_string : error -> string
-  val to_list : t -> Receipt_id.t list
-end
-
 type delivery_key =
-  | Direct_request of Request_id.t
-  | Async_request of Request_id.t
-  | Queue_receipts of Receipt_ids.t
+  | Operation of Request_id.t
+  | Fusion_run of Request_id.t
+  | Workspace_message of Request_id.t
+
+(** [Workspace_message] identifies one producer-minted workspace broadcast.
+    It lets a mentioned Keeper append that exact broadcast to its durable
+    transcript once without treating the broadcast as a chat operation. *)
 
 type transcript_slot =
   | Accepted_user
@@ -45,14 +27,36 @@ type transcript_slot =
       }
   | Terminal_assistant
 
+(** The persisted provenance pair. A durable row carries both halves or
+    neither: a delivery key without its transcript slot cannot answer
+    "was this exact row already appended?", and a slot without its key
+    belongs to no delivery. Constructing the pair is the only way to
+    persist either half. *)
+type delivery_provenance =
+  { delivery_key : delivery_key
+  ; transcript_slot : transcript_slot
+  }
+
 val delivery_key_to_yojson : delivery_key -> Yojson.Safe.t
 val delivery_key_of_yojson : Yojson.Safe.t -> (delivery_key, string) result
 val delivery_key_equal : delivery_key -> delivery_key -> bool
-
-(** Deterministic, filesystem-safe derivation used only as a record filename.
-    The full typed identity remains inside every durable record. *)
-val delivery_key_file_stem : delivery_key -> string
-
 val transcript_slot_to_yojson : transcript_slot -> Yojson.Safe.t
 val transcript_slot_of_yojson : Yojson.Safe.t -> (transcript_slot, string) result
 val transcript_slot_equal : transcript_slot -> transcript_slot -> bool
+
+(** The two JSON fields a row carries for {!delivery_provenance}, written
+    together. *)
+val delivery_provenance_fields :
+  delivery_provenance -> (string * Yojson.Safe.t) list
+
+(** Reads the pair back out of a row's fields. [Ok None] when neither field
+    is present; [Error] when only one is present or either fails to decode.
+    Both durable readers decode through this function, so the pair
+    invariant cannot drift between them; they differ only in what they do
+    with [Error] — see {!Keeper_chat_store.chat_message} and the
+    append-once paths. *)
+val delivery_provenance_of_fields :
+  (string * Yojson.Safe.t) list -> (delivery_provenance option, string) result
+
+val delivery_provenance_equal :
+  delivery_provenance -> delivery_provenance -> bool

@@ -50,12 +50,6 @@ let call_unary_safe t ~sw ~env ~method_ ~request ~decode =
 
 (** {1 Unary RPCs} *)
 
-let get_status t ~sw ~env =
-  (* StatusRequest is an empty protobuf message: 0 bytes on the wire. *)
-  let request = "" in
-  call_unary_safe t ~sw ~env ~method_:"GetStatus" ~request
-    ~decode:T.StatusResponse.of_bytes
-
 let tool_call t ~sw ~env ~agent_name ~session_id ~tool_name ~arguments_json =
   let request = T.ToolCallRequest.to_bytes
     { agent_name; session_id; tool_name; arguments_json } in

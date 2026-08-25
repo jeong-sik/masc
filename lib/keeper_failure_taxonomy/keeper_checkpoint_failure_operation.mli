@@ -5,11 +5,11 @@
     checkpoint-related failure mode in keeper context loading/saving. *)
 
 type t =
-  | Oas_parse (** Parse failure on OAS checkpoint payload. *)
-  | Oas_store (** OAS checkpoint store write failure. *)
-  | Oas_io (** Generic OAS checkpoint I/O failure. *)
-  | Oas_sdk (** OAS SDK-level checkpoint error. *)
-  | Oas_sanitize_save (** Persisting a sanitized OAS checkpoint failed. *)
+  | Agent_core_parse (** Parse failure on AGENT_CORE checkpoint payload. *)
+  | Agent_core_store (** AGENT_CORE checkpoint store write failure. *)
+  | Agent_core_io (** Generic AGENT_CORE checkpoint I/O failure. *)
+  | Agent_core_failure (** Agent-core checkpoint error. *)
+  | Agent_core_sanitize_save (** Persisting a sanitized AGENT_CORE checkpoint failed. *)
   | Create_initial_save (** Initial checkpoint save during keeper boot create flow. *)
   | Compaction_save (** Saving a structurally compacted checkpoint failed. *)
 

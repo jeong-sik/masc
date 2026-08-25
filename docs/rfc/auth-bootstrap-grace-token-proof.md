@@ -4,7 +4,7 @@
 - Author: Claude (Sonnet 5), on behalf of jeong-sik (vincent)
 - Date: 2026-07-01
 - Related: RFC-0292 (Complete lib/auth de-duplication — out of scope: auth behavior; this RFC is exactly that behavior)
-- Tracking: masc-oas keeper-fleet audit 2026-07-01, item 12 (auth/dashboard token)
+- Tracking: masc-agent_core keeper-fleet audit 2026-07-01, item 12 (auth/dashboard token)
 
 ## 1. Problem
 

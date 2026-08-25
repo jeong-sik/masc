@@ -21,7 +21,6 @@ let test_build_resolved_serializes_defaults_and_routing () =
           ; is_default = false
           }
         ]
-    ; cross_verifier_runtime_id = None
     ; media_failover = [ "openai.gpt-4o" ]
     ; config_path = Some "/cfg/runtime.toml"
     }
@@ -45,12 +44,7 @@ let test_build_resolved_serializes_defaults_and_routing () =
   Alcotest.(check string) "runtime id" "openai.gpt-4o"
     (member "id" first |> Yojson.Safe.Util.to_string);
   Alcotest.(check bool) "runtime is_default" true
-    (member "is_default" first |> Yojson.Safe.Util.to_bool);
-  let routing = member "model_routing" json in
-  Alcotest.(check bool)
-    "cross verifier is null"
-    true
-    (member "cross_verifier_runtime_id" routing = `Null)
+    (member "is_default" first |> Yojson.Safe.Util.to_bool)
 
 let test_build_uninitialized_emits_null_not_fabricated_default () =
   (* No fabrication: an unresolved runtime config surfaces null/empty, never a
@@ -60,7 +54,6 @@ let test_build_uninitialized_emits_null_not_fabricated_default () =
     ; default_model = None
     ; default_max_context = None
     ; runtimes = []
-    ; cross_verifier_runtime_id = None
     ; media_failover = []
     ; config_path = None
     }
@@ -71,10 +64,7 @@ let test_build_uninitialized_emits_null_not_fabricated_default () =
   Alcotest.(check bool) "default_model is null" true
     (member "default_model" json = `Null);
   Alcotest.(check int) "runtimes empty" 0
-    (member "runtimes" json |> Yojson.Safe.Util.to_list |> List.length);
-  let routing = member "model_routing" json in
-  Alcotest.(check bool) "cross_verifier null" true
-    (member "cross_verifier_runtime_id" routing = `Null)
+    (member "runtimes" json |> Yojson.Safe.Util.to_list |> List.length)
 
 let () =
   Alcotest.run "runtime_defaults_json"

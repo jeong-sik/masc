@@ -1,0 +1,11 @@
+name = "masc_pause"
+description = """
+Pause the workspace until an operator resumes it. Existing state is \
+preserved."""
+additional_properties = false
+
+[[params]]
+name = "reason"
+type = "string"
+description = "Operator-visible reason for pausing the workspace"
+default = "Manual pause"

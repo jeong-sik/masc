@@ -119,6 +119,55 @@ let () =
     | Ok () -> Alcotest.fail "should have rejected unknown key"
   in
 
+  let test_keyed_mutation_returns_atomic_change () =
+    let _p =
+      Runtime_params.register
+        ~key:"test.atomic_change_param"
+        ~default:(fun () -> 300)
+        ~validate:(fun _ -> Ok ())
+        ~serialize:(fun value -> `Int value)
+        ~deserialize:(function
+          | `Int value -> Ok value
+          | _ -> Error "expected int")
+        ()
+    in
+    let first =
+      match
+        Runtime_params.set_by_key_with_change
+          "test.atomic_change_param"
+          (`Int 30)
+      with
+      | Ok change -> change
+      | Error message -> Alcotest.fail message
+    in
+    Alcotest.(check string) "first prior value" "300"
+      (Yojson.Safe.to_string first.old_value);
+    Alcotest.(check string) "first committed value" "30"
+      (Yojson.Safe.to_string first.new_value);
+    let second =
+      match
+        Runtime_params.set_by_key_with_change
+          "test.atomic_change_param"
+          (`Int 60)
+      with
+      | Ok change -> change
+      | Error message -> Alcotest.fail message
+    in
+    Alcotest.(check string) "second observes first commit" "30"
+      (Yojson.Safe.to_string second.old_value);
+    Alcotest.(check string) "second committed value" "60"
+      (Yojson.Safe.to_string second.new_value);
+    let cleared =
+      match Runtime_params.clear_by_key_with_change "test.atomic_change_param" with
+      | Ok change -> change
+      | Error message -> Alcotest.fail message
+    in
+    Alcotest.(check string) "clear prior value" "60"
+      (Yojson.Safe.to_string cleared.old_value);
+    Alcotest.(check string) "clear committed default" "300"
+      (Yojson.Safe.to_string cleared.new_value)
+  in
+
   let test_clear () =
     let p =
       Runtime_params.register
@@ -372,9 +421,7 @@ let () =
     let entries = Runtime_params.registry () in
     let has key = List.exists (fun (k, _, _, _, _) -> k = key) entries in
     Alcotest.(check bool) "keeper.keepalive_interval_sec"
-      true (has "keeper.keepalive_interval_sec");
-    Alcotest.(check bool) "keeper.dead_ttl_sec"
-      true (has "keeper.dead_ttl_sec")
+      true (has "keeper.keepalive_interval_sec")
   in
 
   let test_keeper_lifecycle_surface () =
@@ -387,7 +434,7 @@ let () =
     match keeper_surface with
     | None -> Alcotest.fail "keeper_lifecycle surface not found"
     | Some s ->
-        Alcotest.(check int) "param count" 3 (List.length s.param_keys);
+        Alcotest.(check int) "param count" 2 (List.length s.param_keys);
         Alcotest.(check bool) "has supervisor_sweep_sec"
           true (List.mem "keeper.supervisor_sweep_sec" s.param_keys)
   in
@@ -403,13 +450,11 @@ let () =
     match diag_surface with
     | None -> Alcotest.fail "keeper_diagnostics surface not found"
     | Some s ->
-        Alcotest.(check int) "param count" 4 (List.length s.param_keys);
+        Alcotest.(check int) "param count" 3 (List.length s.param_keys);
         Alcotest.(check bool) "has snapshot_sec"
           true (List.mem "keeper.snapshot_sec" s.param_keys);
         Alcotest.(check bool) "has work_as_hb_enabled"
           true (List.mem "keeper.work_as_hb_enabled" s.param_keys);
-        Alcotest.(check bool) "has work_as_hb_max_silence_sec"
-          true (List.mem "keeper.work_as_hb_max_silence_sec" s.param_keys);
         Alcotest.(check bool) "has stage_timing_ring_size"
           true (List.mem "keeper.stage_timing_ring_size" s.param_keys)
   in
@@ -508,6 +553,8 @@ let () =
           Alcotest.test_case "set_and_get" `Quick test_set_and_get;
           Alcotest.test_case "validation_rejects" `Quick test_validation_rejects;
           Alcotest.test_case "set_by_key" `Quick test_set_by_key;
+          Alcotest.test_case "keyed mutation returns atomic change" `Quick
+            test_keyed_mutation_returns_atomic_change;
           Alcotest.test_case "set_by_key_unknown" `Quick test_set_by_key_unknown;
           Alcotest.test_case "clear" `Quick test_clear;
           Alcotest.test_case "clear_by_key" `Quick test_clear_by_key;

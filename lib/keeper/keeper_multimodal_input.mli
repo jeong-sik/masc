@@ -1,8 +1,8 @@
 (** Keeper_multimodal_input — MASC-side semantic user input blocks.
 
     This module owns the dashboard/connector input contract before it crosses
-    into OAS.  It is intentionally distinct from dashboard rich-render blocks
-    and from OAS provider blocks. *)
+    into AGENT_CORE.  It is intentionally distinct from dashboard rich-render blocks
+    and from AGENT_CORE provider blocks. *)
 
 type user_media_block = {
   attachment_id : string;
@@ -16,8 +16,6 @@ type user_input_block =
   | User_image of user_media_block
   | User_document of user_media_block
   | User_audio of user_media_block
-
-val attachment_to_yojson : Keeper_chat_store.attachment -> Yojson.Safe.t
 
 val attachments_to_yojson : Keeper_chat_store.attachment list -> Yojson.Safe.t
 
@@ -40,16 +38,16 @@ val fallback_message :
 val modalities : user_input_block list -> string list
 (** Stable, duplicate-free modality labels present in the input. *)
 
-val to_oas_blocks :
+val to_agent_core_blocks :
   attachments:Keeper_chat_store.attachment list ->
   user_input_block list ->
-  (Agent_sdk.Types.content_block list, string) result
-(** Convert semantic MASC input blocks to OAS provider input blocks.  Media
+  (Agent_core.Types.content_block list, string) result
+(** Convert semantic MASC input blocks to AGENT_CORE provider input blocks.  Media
     blocks resolve their payload through [attachments] by [attachment_id].
-    Data URLs are normalized to raw base64 payloads before crossing into OAS,
+    Data URLs are normalized to raw base64 payloads before crossing into AGENT_CORE,
     and declared MIME types must match any MIME embedded in a data URL.
 
     Dashboard-supported text documents are base64-decoded and validated as
-    UTF-8 at this MASC boundary, then projected as OAS [Text] blocks so provider
+    UTF-8 at this MASC boundary, then projected as AGENT_CORE [Text] blocks so provider
     fallbacks do not need provider-specific file-input support. Binary and
-    provider-native documents remain OAS [Document] blocks. *)
+    provider-native documents remain AGENT_CORE [Document] blocks. *)

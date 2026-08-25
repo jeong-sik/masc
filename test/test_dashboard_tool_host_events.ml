@@ -23,6 +23,7 @@ let test_report_of_yojson_defaults () =
     `Assoc
       [
         ("tool_name", `String "masc_keeper_msg");
+        ("cause_code", `String "tool_host_timeout");
         ("message", `String "timed out awaiting tools/call after 120s");
       ]
   in
@@ -32,6 +33,8 @@ let test_report_of_yojson_defaults () =
       check string "agent defaulted from fallback" "codex" report.agent_name;
       check string "client defaulted from fallback" "codex" report.client_name;
       check string "transport default" "mcp_http" report.transport;
+      check bool "typed timeout cause" true
+        (report.cause = Failure_envelope.Tool_host_timeout);
       check (option string) "phase missing" None report.phase
 
 let test_report_of_yojson_accepts_stringish_ids () =
@@ -40,6 +43,7 @@ let test_report_of_yojson_accepts_stringish_ids () =
       [
         ("client_name", `String "codex");
         ("tool_name", `String "masc_keeper_msg");
+        ("cause_code", `String "tool_host_timeout");
         ("message", `String "timed out awaiting tools/call after 120s");
         ("request_id", `Int 42);
         ("session_id", `String "sess-1");
@@ -54,6 +58,37 @@ let test_report_of_yojson_accepts_stringish_ids () =
       check (option string) "request_id" (Some "42") report.request_id;
       check (option int) "timeout_ms" (Some 120000) report.timeout_ms;
       check (option string) "trace_id" (Some "trace-1") report.trace_id
+
+let test_report_rejects_missing_or_unknown_cause () =
+  let payload cause =
+    `Assoc
+      ([
+         ("tool_name", `String "masc_keeper_msg");
+         ("message", `String "operator-facing detail");
+       ]
+       @ cause)
+  in
+  let check_error label expected json =
+    match Dashboard_tool_host_events.report_of_yojson json with
+    | Ok _ -> failf "%s: expected Error" label
+    | Error actual -> check string label expected actual
+  in
+  check_error
+    "missing cause"
+    "missing required field: cause_code"
+    (payload []);
+  check_error
+    "unknown cause"
+    "unknown tool host cause_code: \"browser_said_no\""
+    (payload [ ("cause_code", `String "browser_said_no") ]);
+  check_error
+    "padded cause"
+    "unknown tool host cause_code: \" tool_host_timeout \""
+    (payload [ ("cause_code", `String " tool_host_timeout ") ]);
+  check_error
+    "non-string cause"
+    "field cause_code must be a JSON string"
+    (payload [ ("cause_code", `Int 1) ])
 
 let test_record_writes_audit_ring_and_telemetry () =
   let base_dir = temp_dir () in
@@ -70,6 +105,7 @@ let test_record_writes_audit_ring_and_telemetry () =
           tool_name = "masc_keeper_msg";
           transport = "mcp_http";
           phase = Some "tools/call";
+          cause = Failure_envelope.Tool_host_timeout;
           message = "timed out awaiting tools/call after 120s";
           request_id = Some "99";
           session_id = Some "sess-99";
@@ -139,29 +175,31 @@ let test_record_writes_audit_ring_and_telemetry () =
       in
       check bool "telemetry error recorded" true has_client_error)
 
-let test_generic_failure_envelope_is_retryable_without_operator_action () =
-  let details =
-    Dashboard_tool_host_events.details_json
-      {
-        agent_name = "codex";
-        client_name = "codex";
-        tool_name = "masc_keeper_msg";
-        transport = "mcp_http";
-        phase = Some "tools/call";
-        message = "upstream returned malformed payload";
-        request_id = Some "generic-1";
-        session_id = None;
-        trace_id = None;
-        timeout_ms = None;
-      }
+let test_explicit_cause_is_not_reparsed_from_message () =
+  let payload =
+    `Assoc
+      [
+        ("client_name", `String "codex");
+        ("tool_name", `String "masc_keeper_msg");
+        ("transport", `String "mcp_http");
+        ("phase", `String "tools/call");
+        ("cause_code", `String "tool_host_transport_unavailable");
+        ("message", `String "timed out after connection refused");
+        ("request_id", `String "transport-1");
+        ("timeout_ms", `Int 120000);
+      ]
   in
+  let report =
+    match Dashboard_tool_host_events.report_of_yojson payload with
+    | Ok report -> report
+    | Error error -> fail error
+  in
+  let details = Dashboard_tool_host_events.details_json report in
   let failure_envelope = Yojson.Safe.Util.member "failure_envelope" details in
-  check string "generic cause code" "tool_host_failure"
-    Yojson.Safe.Util.(failure_envelope |> member "cause_code" |> to_string);
-  check string "generic recoverability" "retryable"
-    Yojson.Safe.Util.(failure_envelope |> member "recoverability" |> to_string);
-  check bool "generic operator action omitted" true
-    Yojson.Safe.Util.(failure_envelope |> member "operator_action" = `Null)
+  check string
+    "typed transport cause wins"
+    "tool_host_transport_unavailable"
+    Yojson.Safe.Util.(failure_envelope |> member "cause_code" |> to_string)
 
 let test_blank_entity_id_is_normalized_out () =
   let details =
@@ -172,6 +210,7 @@ let test_blank_entity_id_is_normalized_out () =
         tool_name = "masc_keeper_msg";
         transport = "mcp_http";
         phase = Some "tools/call";
+        cause = Failure_envelope.Tool_host_transport_unavailable;
         message = "upstream returned malformed payload";
         request_id = Some "   ";
         session_id = Some "";
@@ -197,10 +236,12 @@ let () =
           test_case "report defaults" `Quick test_report_of_yojson_defaults;
           test_case "report stringish ids" `Quick
             test_report_of_yojson_accepts_stringish_ids;
+          test_case "report cause is required and closed" `Quick
+            test_report_rejects_missing_or_unknown_cause;
           test_case "record writes audit ring and telemetry" `Quick
             test_record_writes_audit_ring_and_telemetry;
-          test_case "generic failure envelope stays retryable" `Quick
-            test_generic_failure_envelope_is_retryable_without_operator_action;
+          test_case "message does not override typed cause" `Quick
+            test_explicit_cause_is_not_reparsed_from_message;
           test_case "blank entity_id is normalized out" `Quick
             test_blank_entity_id_is_normalized_out;
         ] );

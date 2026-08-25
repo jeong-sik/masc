@@ -8,7 +8,7 @@ import type { AuditEntry } from './api/dashboard'
 import { journal } from './sse'
 import { agents, agentMotionMap, keepers, staleKeepers } from './store'
 import { contextThresholds } from './config/context-thresholds'
-import { HEARTBEAT_STALE_MS } from './config/constants'
+import { AGENT_HEARTBEAT_STALE_MS } from './config/constants'
 import type { AgentMotionSnapshot } from './components/common/agent-motion'
 import type { StatusChipTone } from './components/common/status-chip'
 
@@ -54,7 +54,7 @@ export const filteredJournal: ReadonlySignal<JournalEntry[]> = computed(() => {
 
 export type PulseState = 'working' | 'idle' | 'stale'
 
-const STALE_THRESHOLD_MS = HEARTBEAT_STALE_MS
+const STALE_THRESHOLD_MS = AGENT_HEARTBEAT_STALE_MS
 
 interface AgentPulse {
   name: string
@@ -205,16 +205,12 @@ type LiveEventKindTone = Extract<StatusChipTone, 'ok' | 'warn' | 'bad' | 'info' 
 export function eventKindTone(entry: JournalEntry): LiveEventKindTone {
   const type = entry.eventType
   if (type === 'broadcast') return 'info'
-  if (type === 'agent_bound') return 'ok'
-  if (type === 'agent_unbound') return 'neutral'
-  if (type === 'task_update') return 'ok'
   if (type === 'board_post') return 'info'
   if (type === 'board_comment') return 'info'
   if (type === 'board_delete') return 'bad'
   if (type === 'keeper_heartbeat') return 'ok'
   if (type === 'keeper_handoff') return 'info'
   if (type === 'keeper_compaction') return 'warn'
-  if (type === 'keeper_guardrail') return 'warn'
   if (type === 'keeper_phase_changed') return 'info'
   if (entry.kind === 'board') return 'info'
   if (entry.kind === 'tasks') return 'ok'
@@ -232,16 +228,12 @@ export function eventKindTone(entry: JournalEntry): LiveEventKindTone {
 export function journalEventKindLabel(entry: JournalEntry): string {
   const type = entry.eventType
   if (type === 'broadcast') return 'broadcast'
-  if (type === 'agent_bound') return 'joined'
-  if (type === 'agent_unbound') return 'left'
-  if (type === 'task_update') return 'task'
   if (type === 'board_post') return 'post'
   if (type === 'board_comment') return 'comment'
   if (type === 'board_delete') return 'deleted'
   if (type === 'keeper_heartbeat') return 'heartbeat'
   if (type === 'keeper_handoff') return 'handoff'
   if (type === 'keeper_compaction') return 'compact'
-  if (type === 'keeper_guardrail') return 'guardrail'
   if (type === 'keeper_phase_changed') return 'phase'
   if (entry.kind === 'board') return 'board'
   if (entry.kind === 'tasks') return 'task'

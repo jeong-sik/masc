@@ -63,13 +63,9 @@ let print_startup_banner
     Printf.printf
       "   gRPC :%d → Workspace + grpc.health.v1.Health + reflection\n%!"
       (Masc_grpc_server.configured_port ());
-  if Server_ws_standalone.is_enabled ()
+  if Transport_metrics.ws_enabled ()
   then
-    Printf.printf
-      "   GET  /ws → WebSocket upgrade or discovery (standalone fallback ws://127.0.0.1:%d/)\n%!"
-      (Server_ws_standalone.configured_port ());
-  if Server_webrtc_transport.is_enabled ()
-  then Printf.printf "   POST /webrtc/offer, /webrtc/answer → WebRTC signaling\n%!"
+    Printf.printf "   GET  /ws → same-origin WebSocket upgrade or discovery\n%!"
 ;;
 
 (** Run a list of cleanups on [sw] release, executing all of them

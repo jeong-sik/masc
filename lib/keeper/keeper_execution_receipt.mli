@@ -123,17 +123,12 @@ type t =
   { keeper_name : string
   ; agent_name : string
   ; trace_id : string
-  ; generation : int
   ; turn_count : int option
-  ; oas_turn_count : int option
-  ; oas_dispatch_mode : string option
-  ; oas_internal_runtime_disabled : bool
+  ; agent_core_turn_count : int option
   ; current_task_id : string option
-  ; goal_ids : string list
   ; outcome : outcome_kind
   ; terminal_reason_code : string
   ; response_text_present : bool
-  ; model_used : string option
   ; completion_contract_result : completion_contract_result
   ; actionable_signal : Keeper_contract_classifier.actionable_signal option
     (** World-observation signal captured at turn time. It is independent of
@@ -147,7 +142,7 @@ type t =
   ; runtime_attempt_count : int
   ; runtime_fallback_applied : bool
   ; runtime_outcome : runtime_outcome
-  ; oas_internal_runtime_allowed : bool
+  ; agent_core_internal_runtime_allowed : bool
   ; degraded_retry_applied : bool
   ; degraded_retry_runtime : string option
   ; fallback_reason : Keeper_error_classify.degraded_retry_reason option
@@ -184,7 +179,6 @@ type operator_disposition_kind =
   | Disp_pass_next_model
   | Disp_user_cancelled
   | Disp_skipped
-  | Disp_operator_reset_required
   | Disp_unknown
 
 val operator_disposition_kind_to_string : operator_disposition_kind -> string
@@ -215,6 +209,29 @@ type operator_disposition_reason =
   | Reason_cancelled
   | Reason_phase_skipped
   | Reason_transcript_corruption
+  | Reason_provider_attempt_effect_fenced
+  (** The provider attempt did not prove whether an effect occurred. Paired
+      with [Disp_unknown] so operator attention remains required, while the
+      receipt is no longer counted as an unmapped classifier regression. *)
+  | Reason_tool_correction_lost
+  (** The fenced turn also recorded typed pre_tool_use rejections
+      (masc#28885). Same [Disp_unknown] pairing as
+      [Reason_provider_attempt_effect_fenced]; the label separates a lost
+      correction from an ordinary fenced provider failure. *)
+  | Reason_accept_rejected
+  (** The provider answered and MASC's own accept contract found nothing
+      usable in the response. Paired with [Disp_fail_open_next_runtime]: no
+      operator broadcast, because the keeper carries on and the action this
+      points at is a lane's output budget, not an incident. Reached only when
+      no degraded retry or runtime fallback claimed the receipt first — those
+      say what the system did about it, which is the more specific fact. *)
+  | Reason_terminal_effect_failed
+  (** The tool that ends the turn by producing an external artifact failed, or
+      returned no typed receipt for what it did. Paired with [Disp_unknown]:
+      whether the artifact reached the outside world is unknown, the turn is
+      never replayed and the stimulus is retired, so a human decides. Same
+      pairing as [Reason_provider_attempt_effect_fenced] and
+      [Reason_tool_correction_lost]; only the label differs. *)
   | Reason_unmapped_runtime_state
 
 val operator_disposition_reason_to_string : operator_disposition_reason -> string
@@ -226,15 +243,6 @@ val operator_disposition : t -> operator_disposition_kind * operator_disposition
 (** [needs_operator_broadcast disposition] returns true when the disposition
     indicates a silent dead-end that operators must be notified about. *)
 val needs_operator_broadcast : operator_disposition_kind -> bool
-
-(** Structured payload emitted for [keeper.operator_broadcast_required].
-    Exposed so tests can pin the diagnostic fields of a durable receipt whose
-    disposition requires operator attention. *)
-val operator_broadcast_payload
-  :  t
-  -> disposition:operator_disposition_kind
-  -> reason:operator_disposition_reason
-  -> Yojson.Safe.t
 
 val append : Workspace.config -> t -> unit
 val latest_json : Workspace.config -> string -> Yojson.Safe.t option

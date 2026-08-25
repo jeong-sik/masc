@@ -36,6 +36,7 @@ type failure_reason =
       ; provider_id : string option
       ; http_status : int option
       ; runtime_id : string option
+      ; agent_core_timeout : Keeper_turn_terminal_code.agent_core_timeout option
       ; reason : Keeper_meta_contract.runtime_exhaustion_reason option
       }
       (** Latched from the keeper turn terminal reason when the provider,
@@ -53,8 +54,23 @@ type failure_reason =
 
 exception Operator_interrupt
 (** Raised by [interrupt_current_turn] to cancel the live turn switch.
-    The turn runtime may catch this via [Eio.Cancel.Cancelled] and record
-    [failure_reason.Operator_interrupt] for observability. *)
+    Fibers inside the turn switch observe it as
+    [Eio.Cancel.Cancelled Operator_interrupt]; the [Eio.Switch.run] boundary
+    re-raises it BARE. Classification ladders must handle both forms
+    (#28810: the bare form used to fall into generic internal-error arms). *)
+
+val operator_interrupt_detail : string
+(** Human-facing detail for [Operator_interrupt] terminals. One shared string
+    so ledger rows, queued outcomes, and tool responses classify as one
+    incident class. *)
+
+val is_operator_interrupt : exn -> bool
+(** Whether [exn] reduces to {!Operator_interrupt} through every wrapper
+    shape Eio can deliver: bare, [Eio.Cancel.Cancelled],
+    [Fun.Finally_raised], and [Eio.Exn.Multiple] (only when every member
+    reduces). Classification ladders must use this rather than matching the
+    constructor directly (#28868 review: constructor-only arms missed the
+    combined shapes). *)
 
 val failure_reason_to_string : failure_reason -> string
 
@@ -232,7 +248,7 @@ val stage_to_witness : decision_stage -> packed_decision_stage
 
 (** Decision stages valid as ADVANCE targets within a turn.  Excludes
     [Decision_undecided] (the initial state set only by [mark_turn_started]
-    / [mark_sdk_turn_started]).  The 2 spec-forbidden [<active>_to_undecided]
+    / [mark_agent_core_turn_started]).  The 2 spec-forbidden [<active>_to_undecided]
     transitions are unrepresentable through this type, replacing the prior
     runtime [invalid_arg] inside [set_turn_decision_stage]. *)
 type decision_stage_active =
@@ -346,11 +362,12 @@ type wake_reason =
   | Chat_request
       (** The chat lane ({!Keeper_turn.run_keeper_invocation_turn_admitted})
           entered the turn. It carries no stimulus payload: a chat turn is
-          admitted from the chat queue, not selected from the event queue, so
-          there is nothing in {!Keeper_event_queue.stimulus_payload} that
-          describes it. Distinct from [Proactive_tick] because a chat turn is
-          requested, not scheduled — collapsing the two would report an
-          operator's message as autonomous activity. *)
+          claimed from the Owner's durable operation ledger, not selected from
+          the event queue, so there is nothing in
+          {!Keeper_event_queue.stimulus_payload} that describes it. Distinct
+          from [Proactive_tick] because a chat turn is requested, not scheduled
+          — collapsing the two would report an operator's message as autonomous
+          activity. *)
 
 val wake_reason_label : wake_reason -> string
 (** Stable low-cardinality label: ["proactive_tick"], ["woken"], or
@@ -366,10 +383,10 @@ type done_resolution = [ `Stopped | `Crashed of string ]
 
 type lifecycle_transaction_purpose =
   | Paused_work_disposition
+  | Keepalive_launch
 
 type lifecycle_reservation_snapshot =
   { owner_id : string
-  ; expected_generation : int
   ; purpose : lifecycle_transaction_purpose
   }
 
@@ -386,6 +403,11 @@ type registry_entry = {
       (** Observable conditions that derive [phase]. *)
   fiber_stop : bool Atomic.t;
   fiber_wakeup : bool Atomic.t;
+  cadence_sleeping : bool Atomic.t;
+      (** Ephemeral sleep handshake for runtime cadence decreases. [true]
+          only while the heartbeat fiber is inside its inter-cycle sleep. A
+          cadence wake consumes it with CAS, so active pre-turn work cannot
+          queue an extra paid cycle. *)
   event_queue : Keeper_event_queue.t Atomic.t;
       (** Event Layer queue for incoming stimuli. Independent of
           [fiber_wakeup] (which remains a hint signal). The Policy
@@ -404,7 +426,6 @@ type registry_entry = {
           double-resolve races return the prior terminal outcome. *)
   restart_count : int;
   last_restart_ts : float;
-  dead_since_ts : float option;
   crash_log : (float * string) list;
   last_error : string option;
   last_failure_reason : failure_reason option;
@@ -431,10 +452,10 @@ type registry_entry = {
           history files. [None] until the first [Context_measured] event
           has been dispatched. *)
   last_event_bus_correlation : string option;
-      (** Most recent OAS Event_bus [correlation_id] extracted after a
+      (** Most recent AGENT_CORE Event_bus [correlation_id] extracted after a
           keeper turn via [Event_bus.drain]. [None] until the first
           successful drain. Stable per session (= [meta.runtime.trace_id]
-          as passed to OAS). *)
+          as passed to AGENT_CORE). *)
   pending_turn_measurement : turn_measurement option;
       (** Fresh measurement captured by [Context_measured] and reserved
           for the next [mark_turn_measurement] call. Hidden from idle
@@ -480,7 +501,7 @@ and turn_observation = {
   last_progress_at : float;
       (** Unix timestamp of the most recent in-turn progress signal.
           Initialized to [started_at] and updated by registry transitions,
-          SDK streaming events, and completed tool calls. *)
+          Agent Core streaming events, and completed tool calls. *)
   last_progress_kind : string option;
       (** Low-cardinality label for the progress signal that most recently
           refreshed [last_progress_at]. *)
@@ -585,10 +606,6 @@ type lifecycle_event_origin =
 
 (** Pure converter for diagnostic / log labels. *)
 val lifecycle_event_origin_to_string : lifecycle_event_origin -> string
-
-(** Internal: predicate over [Keeper_state_machine.event] identifying the
-    compaction- and handoff-pair half-events. *)
-val is_paired_lifecycle_event : Keeper_state_machine.event -> bool
 
 (** Pure dispatch-origin gate: returns true iff the (origin, event) pair
     is allowed under the paired-lifecycle invariant. *)

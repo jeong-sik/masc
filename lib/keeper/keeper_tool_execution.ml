@@ -2,6 +2,14 @@ type deferred_kind =
   | Generic_deferred
   | External_effect_deferred
 
+let deferred_kind_to_string = function
+  | Generic_deferred -> "generic_deferred"
+  | External_effect_deferred -> "external_effect_deferred"
+;;
+
+type terminal_effect_receipt =
+  | Surface_post_completed of Keeper_surface_post.post_target
+
 type t =
   { raw_output : string
   ; data : Yojson.Safe.t option
@@ -10,6 +18,7 @@ type t =
   ; disposition :
       (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition
   ; deferred_kind : deferred_kind option
+  ; terminal_effect_receipt : terminal_effect_receipt option
   }
 
 let success raw_output =
@@ -19,6 +28,7 @@ let success raw_output =
   ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
   ; disposition = Tool_result.Completed ()
   ; deferred_kind = None
+  ; terminal_effect_receipt = None
   }
 ;;
 
@@ -29,6 +39,7 @@ let success_data ?metadata data =
   ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
   ; disposition = Tool_result.Completed ()
   ; deferred_kind = None
+  ; terminal_effect_receipt = None
   }
 ;;
 
@@ -39,6 +50,7 @@ let deferred_data ?metadata data =
   ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
   ; disposition = Tool_result.Deferred ()
   ; deferred_kind = Some Generic_deferred
+  ; terminal_effect_receipt = None
   }
 ;;
 
@@ -49,6 +61,7 @@ let deferred_external_effect_data ?metadata data =
   ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
   ; disposition = Tool_result.Deferred ()
   ; deferred_kind = Some External_effect_deferred
+  ; terminal_effect_receipt = None
   }
 ;;
 
@@ -63,6 +76,7 @@ let failure
   ; failure_effect_disposition = effect_disposition
   ; disposition = Tool_result.Failed class_
   ; deferred_kind = None
+  ; terminal_effect_receipt = None
   }
 ;;
 
@@ -78,7 +92,27 @@ let failure_data
   ; failure_effect_disposition = effect_disposition
   ; disposition = Tool_result.Failed class_
   ; deferred_kind = None
+  ; terminal_effect_receipt = None
   }
+;;
+
+let with_gate_authorization authorization result =
+  { result with
+    metadata =
+      Some
+        (Keeper_gate.authorization_metadata
+           ?producer_metadata:result.metadata
+           authorization)
+  }
+;;
+
+let with_surface_post_receipt target result =
+  match result.disposition with
+  | Tool_result.Completed () ->
+    { result with
+      terminal_effect_receipt = Some (Surface_post_completed target)
+    }
+  | Tool_result.Deferred () | Tool_result.Failed _ -> result
 ;;
 
 let of_tool_result (result : Tool_result.result) =
@@ -92,6 +126,7 @@ let of_tool_result (result : Tool_result.result) =
     ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
     ; disposition = Tool_result.Completed ()
     ; deferred_kind = None
+    ; terminal_effect_receipt = None
     }
   | Tool_result.Deferred { metadata; _ } ->
     { raw_output
@@ -100,13 +135,15 @@ let of_tool_result (result : Tool_result.result) =
     ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
     ; disposition = Tool_result.Deferred ()
     ; deferred_kind = Some Generic_deferred
+    ; terminal_effect_receipt = None
     }
   | Tool_result.Failed { class_; _ } ->
     { raw_output
     ; data
-    ; metadata = None
+    ; metadata = Tool_result.metadata result
     ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
     ; disposition = Tool_result.Failed class_
     ; deferred_kind = None
+    ; terminal_effect_receipt = None
     }
 ;;

@@ -1,6 +1,6 @@
 (** Workspace_task_id — Task ID parsing and archive management.
 
-    Public surface for {!Workspace_task_id.ml}.  Encapsulates the lock-protected
+    Public surface for [workspace_task_id.ml].  Encapsulates the lock-protected
     archive read/merge/write sequence so callers cannot bypass it.
     See issue #10751 for the broader [workspace/] [.mli] coverage push. *)
 

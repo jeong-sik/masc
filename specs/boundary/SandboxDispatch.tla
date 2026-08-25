@@ -1,13 +1,17 @@
 ---- MODULE SandboxDispatch ----
 \* Boundary spec for keeper sandbox dispatch routing.
 \*
-\* Runtime truth (lib/keeper/keeper_tools_oas.ml +
-\* lib/keeper/keeper_tool_command_runtime.ml):
+\* Runtime truth (lib/keeper/keeper_sandbox_factory.ml +
+\* lib/keeper/keeper_tool_execute_runtime.ml, both routing through
+\* Keeper_sandbox_runner.effective_sandbox_profile):
 \*
 \*   - [meta_profile] is the keeper's declared sandbox preference
 \*     (Local | Docker).
 \*   - [in_playground] gates whether playground-host fallback is even a
-\*     candidate route at the dispatch site.
+\*     candidate route. The runtime decides this by effective profile
+\*     (Local -> host, Docker -> container), not by testing whether the
+\*     working directory sits under the keeper's host root; the OCaml
+\*     predicate that did the latter had no caller and was deleted.
 \*   - [dispatched_via] records how the most recent typed Execute request was
 \*     resolved: None (no dispatch yet), Host, DockerReuse (existing
 \*     container), DockerColdstart (new container).

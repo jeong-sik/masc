@@ -18,10 +18,11 @@ vi.mock('../keeper-detail-helpers', () => ({
 }))
 
 import { navigate } from '../../router'
-import { keepers } from '../../store'
+import { keepers, executionError, executionLoaded } from '../../store'
 import { keeperMobilePane } from '../keeper-detail-state'
 import { runKeeperAction } from '../keeper-action-panel'
-import { KeeperWorkspaceRoster, rosterFilterPref, rosterFleetSummary, rosterSortPref } from './keeper-workspace-roster'
+import { KeeperWorkspaceRoster, rosterEmptyText, rosterFilterPref, rosterFleetSummary, rosterSortPref } from './keeper-workspace-roster'
+import { keeperBucket } from './keeper-workspace-shared'
 import type { Keeper } from '../../types'
 
 function mk(partial: Partial<Keeper>): Keeper {
@@ -52,6 +53,30 @@ afterEach(() => {
   render(null, host)
   host.remove()
   keepers.value = []
+})
+
+describe('rosterEmptyText', () => {
+  afterEach(() => {
+    executionLoaded.value = false
+    executionError.value = null
+  })
+
+  it('says loading before the fleet has hydrated', () => {
+    executionLoaded.value = false
+    expect(rosterEmptyText(0)).toBe('키퍼 목록을 불러오는 중…')
+  })
+
+  it('says the load failed when the execution fetch errored', () => {
+    executionLoaded.value = true
+    executionError.value = 'boom'
+    expect(rosterEmptyText(0)).toContain('불러오지 못했습니다')
+  })
+
+  it('distinguishes an empty fleet from a filter that matched nothing', () => {
+    executionLoaded.value = true
+    expect(rosterEmptyText(0)).toBe('등록된 키퍼가 없습니다')
+    expect(rosterEmptyText(3)).toBe('일치하는 키퍼가 없습니다')
+  })
 })
 
 describe('KeeperWorkspaceRoster', () => {
@@ -170,6 +195,25 @@ describe('KeeperWorkspaceRoster', () => {
     expect(attention?.getAttribute('title')).toContain('메시지 수가 아니라')
   })
 
+  // The reported split: monitoring showed 주의 for a keeper the keepers roster
+  // showed as plain 실행 중, because the roster answered from the execution
+  // row's blocked/needs_attention fields while monitoring read the runtime
+  // signals. Both now read the same attention axis, so a runtime-only signal
+  // (here: context past the warn threshold) is visible on this surface too.
+  it('marks a keeper 주의 from a runtime signal, not only from blocked tasks', () => {
+    keepers.value = [
+      mk({ name: 'hot', status: 'running', lifecycle_phase: 'Running', context_ratio: 0.99 }),
+    ]
+
+    render(html`<${KeeperWorkspaceRoster} activeName="hot" />`, host)
+
+    expect((host.querySelector('.kp-att') as HTMLElement | null)?.textContent).toBe('▲ 1')
+    const attentionChip = Array.from(host.querySelectorAll('.kw-rfilter')).find(chip =>
+      chip.textContent?.includes('주의'),
+    )
+    expect(attentionChip?.textContent).toBe('주의1')
+  })
+
   it('renders invalid configured keepers as a blocking row with one repair action', () => {
     keepers.value = [
       mk({
@@ -215,17 +259,25 @@ describe('KeeperWorkspaceRoster', () => {
   // unit test below.
 
   it('computes fleet summary from live keeper fields without local-only fleet actions', () => {
-    const result = rosterFleetSummary([
-      mk({ name: 'run', status: 'running', lifecycle_phase: 'Running', context_ratio: 0.8 }),
-      mk({ name: 'pause', status: 'running', paused: true, lifecycle_phase: 'Paused', needs_attention: true }),
-      mk({ name: 'off', status: 'stopped', lifecycle_phase: 'Stopped' }),
-      mk({
-        name: 'gate',
-        status: 'running',
-        lifecycle_phase: 'Running',
-        current_gate: { kind: 'approval_required', tool: 'shell' },
-      }),
-    ])
+    // The summary counts; deriving the attention axis is the accessor's job
+    // (the roster builds it from the fleet composite). A stub keeps this case
+    // about the counting.
+    const attentionOf = (keeper: Keeper) => (keeper.name === 'pause' ? 1 : 0)
+    const result = rosterFleetSummary(
+      [
+        mk({ name: 'run', status: 'running', lifecycle_phase: 'Running', context_ratio: 0.8 }),
+        mk({ name: 'pause', status: 'running', paused: true, lifecycle_phase: 'Paused', needs_attention: true }),
+        mk({ name: 'off', status: 'stopped', lifecycle_phase: 'Stopped' }),
+        mk({
+          name: 'gate',
+          status: 'running',
+          lifecycle_phase: 'Running',
+          current_gate: { kind: 'approval_required', tool: 'shell' },
+        }),
+      ],
+      keeper => keeperBucket(keeper),
+      attentionOf,
+    )
 
     expect(result).toEqual({
       total: 4,
@@ -240,7 +292,55 @@ describe('KeeperWorkspaceRoster', () => {
     })
   })
 
-  it('sorts observed zero context ahead of unknown context', () => {
+  // The grouped view orders by the key the row prints. Context ratio is not
+  // on the row and moves every turn, so ordering by it reshuffled the list
+  // under the operator; recency is visible and is the same key the keepers
+  // page uses to pick its default selection.
+  it('orders a status group by the recency each row displays', () => {
+    keepers.value = [
+      mk({
+        name: 'a-stale-but-full',
+        status: 'running',
+        lifecycle_phase: 'Running',
+        context_ratio: 0.9,
+        last_activity_at: '2026-08-12T09:00:00Z',
+      }),
+      mk({
+        name: 'z-fresh-but-empty',
+        status: 'running',
+        lifecycle_phase: 'Running',
+        context_ratio: 0,
+        last_activity_at: '2026-08-12T09:30:00Z',
+      }),
+    ]
+    render(html`<${KeeperWorkspaceRoster} activeName="a-stale-but-full" />`, host)
+
+    const rows = Array.from(host.querySelectorAll('.kw-kp-row'))
+    expect(rows.map(row => row.textContent)).toEqual([
+      expect.stringContaining('z-fresh-but-empty'),
+      expect.stringContaining('a-stale-but-full'),
+    ])
+  })
+
+  // Same-recency rows must not depend on arrival order in the store: the
+  // reported symptom was a list that reshuffled between snapshots.
+  it('breaks a recency tie by name so the grouped order is stable', () => {
+    const rowsFor = (order: readonly string[]) => {
+      keepers.value = order.map(name =>
+        mk({ name, status: 'running', lifecycle_phase: 'Running' }),
+      )
+      render(null, host)
+      render(html`<${KeeperWorkspaceRoster} activeName=${order[0]} />`, host)
+      return Array.from(host.querySelectorAll('.kw-kp-row')).map(row => row.textContent)
+    }
+
+    const forward = rowsFor(['alpha', 'bravo', 'charlie'])
+    const reversed = rowsFor(['charlie', 'bravo', 'alpha'])
+    expect(forward).toEqual(reversed)
+  })
+
+  it('sorts observed zero context ahead of unknown context under the 주의 sort', () => {
+    rosterSortPref.value = 'att'
     keepers.value = [
       mk({ name: 'a-unknown', status: 'running', lifecycle_phase: 'Running' }),
       mk({ name: 'z-observed-zero', status: 'running', lifecycle_phase: 'Running', context_ratio: 0 }),
@@ -372,6 +472,18 @@ describe('KeeperWorkspaceRoster', () => {
     expect(rows[0]?.textContent).toContain('rama')
   })
 
+  // Design structure (rails.jsx): the open search field sits in its own
+  // `.roster-head` band below `.roster-filters` — the vendored kit rule
+  // (v2.css `.roster-head`) owns the band's padding + bottom border.
+  it('wraps the open search field in the design .roster-head band', () => {
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
+    expect(host.querySelector('.roster-head')).toBeNull()
+    fireEvent.click(host.querySelector('.kw-rfilter-icon') as HTMLButtonElement)
+    const band = host.querySelector('.roster-head') as HTMLElement
+    expect(band).not.toBeNull()
+    expect(band.querySelector('.kw-roster-search.roster-search')).not.toBeNull()
+  })
+
   it('sorts the roster by name and attention count', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
     const sort = host.querySelector('.kw-roster-sort') as HTMLSelectElement
@@ -492,16 +604,34 @@ describe('KeeperWorkspaceRoster', () => {
     expect(handle?.getAttribute('title')).toBe('/workspace/keepers/keeper-miso')
   })
 
+  // Design roster sub-line marker (rails.jsx `.kp-sandbox`): the ⬡ glyph flags a
+  // keeper with a dedicated worktree folder. Live source: sandbox_profile —
+  // 'local' is the git-worktree profile the glyph's title describes.
+  it('renders the design ⬡ sandbox glyph only for local-worktree keepers', () => {
+    keepers.value = [
+      mk({ name: 'miso', status: 'running', sandbox_profile: 'local', sandbox_target: '/workspace/keepers/keeper-miso' }),
+      mk({ name: 'plain', status: 'running' }),
+    ]
+    render(html`<${KeeperWorkspaceRoster} activeName="miso" />`, host)
+    const rows = Array.from(host.querySelectorAll('.kw-kp-row')) as HTMLElement[]
+    const miso = rows.find(r => r.textContent?.includes('miso')) as HTMLElement
+    const plain = rows.find(r => r.textContent?.includes('plain')) as HTMLElement
+    const glyph = miso.querySelector('.kp-sandbox') as HTMLElement
+    expect(glyph?.textContent).toBe('⬡')
+    expect(glyph?.getAttribute('title')).toContain('git worktree')
+    expect(plain.querySelector('.kp-sandbox')).toBeNull()
+  })
+
   it('falls back to the runtime scope proxy when a keeper has no sandbox_target', () => {
     keepers.value = [mk({
       name: 'nobase',
       status: 'running',
-      runtime_canonical: 'oas.primary',
+      runtime_canonical: 'agentCore.primary',
       model: 'anthropic/claude-x',
     })]
     render(html`<${KeeperWorkspaceRoster} activeName="nobase" />`, host)
     const handle = host.querySelector('.kw-kp-handle') as HTMLElement
-    expect(handle?.textContent).toBe('oas.primary')
+    expect(handle?.textContent).toBe('agentCore.primary')
     expect(handle?.textContent).not.toBe('anthropic/claude-x')
   })
 

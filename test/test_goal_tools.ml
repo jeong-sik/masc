@@ -57,19 +57,6 @@ let get_string_field json field =
   | _ -> fail (field ^ " missing")
 ;;
 
-let contains_substring s needle =
-  let s_len = String.length s in
-  let n_len = String.length needle in
-  let rec loop i =
-    if n_len = 0
-    then true
-    else if i + n_len > s_len
-    then false
-    else if String.sub s i n_len = needle
-    then true
-    else loop (i + 1)
-  in
-  loop 0
 ;;
 
 let expect_error (result : Tool_result.result option) =
@@ -90,6 +77,8 @@ let test_goal_upsert_and_list () =
       ~args:
         (`Assoc
             [ "title", `String "Ship Goal Surface"
+            ; "metric", `String "deploys shipped"
+            ; "target_value", `String "1"
             ; "priority", `Int 2
             ])
   in
@@ -147,17 +136,18 @@ let test_goal_list_filters_by_phase () =
       | Some phase -> phase
       | None -> fail ("invalid phase fixture: " ^ phase)
     in
-    match Goal_store.upsert_goal config ~title ~phase () with
+    match Goal_store.upsert_goal config ~title ~metric:"m" ~target_value:"1"
+            ~phase () with
     | Ok _ -> ()
     | Error msg -> fail msg
   in
   create ~title:"Executing goal" ~phase:"executing";
-  create ~title:"Blocked goal" ~phase:"blocked";
+  create ~title:"Dropped goal" ~phase:"dropped";
   let listed =
     Tool_workspace.dispatch
       (workspace_ctx config)
       ~name:"masc_goal_list"
-      ~args:(`Assoc [ "phase", `String "blocked" ])
+      ~args:(`Assoc [ "phase", `String "dropped" ])
   in
   let listed_json =
     match listed with
@@ -168,14 +158,19 @@ let test_goal_list_filters_by_phase () =
   check int "one listed goal by phase" 1 (List.length goals);
   match goals with
   | [ goal_json ] ->
-    check string "phase filter honored" "blocked" (get_string_field goal_json "phase")
+    check string "phase filter honored" "dropped" (get_string_field goal_json "phase")
   | _ -> fail "expected one filtered goal"
 ;;
 
 let test_goal_list_includes_rollup () =
   with_workspace
   @@ fun config ->
-  (match Goal_store.upsert_goal config ~title:"Executing goal" () with
+  (match Goal_store.upsert_goal config ~title:"Executing goal" ~metric:"m"
+           ~target_value:"1" () with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  (match Goal_store.upsert_goal config ~title:"Verifying goal" ~metric:"m"
+           ~target_value:"1" ~phase:Goal_phase.Verifying () with
    | Ok _ -> ()
    | Error msg -> fail msg);
   let listed =
@@ -191,12 +186,15 @@ let test_goal_list_includes_rollup () =
   in
   let rollup = Yojson.Safe.Util.member "rollup" listed_json in
   check int "active goal is counted" 1
-    (Yojson.Safe.Util.member "active_count" rollup |> Yojson.Safe.Util.to_int)
+    (Yojson.Safe.Util.member "active_count" rollup |> Yojson.Safe.Util.to_int);
+  check int "verifying goal is counted" 1
+    (Yojson.Safe.Util.member "verifying_count" rollup |> Yojson.Safe.Util.to_int)
 ;;
 let test_goal_list_ignores_blank_optional_filters () =
   with_workspace
   @@ fun config ->
-  (match Goal_store.upsert_goal config ~title:"Blank filter goal" () with
+  (match Goal_store.upsert_goal config ~title:"Blank filter goal" ~metric:"m"
+           ~target_value:"1" () with
    | Ok _ -> ()
    | Error msg -> fail msg);
   let listed =
@@ -236,7 +234,7 @@ let test_goal_list_rejects_status_filter () =
     bool
     "error points to removed status"
     true
-    (contains_substring (Yojson.Safe.to_string error_json) "status filter was removed");
+    (String_util.contains_substring (Yojson.Safe.to_string error_json) "status filter was removed");
   let field_errors =
     Yojson.Safe.Util.member "field_errors" error_json |> Yojson.Safe.Util.to_list
   in
@@ -265,9 +263,10 @@ let test_goal_upsert_rejects_lifecycle_fields () =
     bool
     "phase error points at transition"
     true
-    (contains_substring (Yojson.Safe.to_string phase_error) "masc_goal_transition");
+    (String_util.contains_substring (Yojson.Safe.to_string phase_error) "masc_goal_transition");
   let goal, _kind =
-    match Goal_store.upsert_goal config ~title:"Existing goal" () with
+    match Goal_store.upsert_goal config ~title:"Existing goal" ~metric:"m"
+            ~target_value:"1" () with
     | Ok payload -> payload
     | Error msg -> fail msg
   in
@@ -327,23 +326,45 @@ let request_complete config goal_id =
          ])
 ;;
 
+(* RFC-0387 stage 2: [request_complete] enters [Verifying]; [Completed] is
+   reached only through the verifier's proof. *)
+let prove_complete config goal_id =
+  Some
+    (Workspace_goals.commit_verifier_decision
+       ~tool_name:"goal_verifier_commit"
+       ~start_time:0.
+       config
+       ~goal_id
+       ~verification_run_id:"goal-verifier-test-run"
+       ~decision:Workspace_goals.Proof_proven
+       ~evidence:"observed by the test verifier")
+;;
+
 let test_goal_completion_accepts_goal_without_tasks () =
   with_workspace
   @@ fun config ->
   let goal, _ =
-    match Goal_store.upsert_goal config ~title:"Direct completion" () with
+    match
+      Goal_store.upsert_goal config ~title:"Direct completion" ~metric:"m"
+        ~target_value:"1" ()
+    with
     | Ok payload -> payload
     | Error msg -> fail msg
   in
-  check string "completed directly" "completed"
-    (transition_phase (request_complete config goal.id))
+  check string "completion request enters verifying" "verifying"
+    (transition_phase (request_complete config goal.id));
+  check string "proof completes the goal" "completed"
+    (transition_phase (prove_complete config goal.id))
 ;;
 
 let test_goal_completion_ignores_open_task_count () =
   with_workspace
   @@ fun config ->
   let goal, _ =
-    match Goal_store.upsert_goal config ~title:"Open task completion" () with
+    match
+      Goal_store.upsert_goal config ~title:"Open task completion" ~metric:"m"
+        ~target_value:"1" ()
+    with
     | Ok payload -> payload
     | Error msg -> fail msg
   in
@@ -354,8 +375,10 @@ let test_goal_completion_ignores_open_task_count () =
        ~title:"Still open"
        ~priority:3
        ~description:"open");
-  check string "open task does not gate Goal completion" "completed"
-    (transition_phase (request_complete config goal.id))
+  check string "open task does not gate the completion request" "verifying"
+    (transition_phase (request_complete config goal.id));
+  check string "proof completes the goal" "completed"
+    (transition_phase (prove_complete config goal.id))
 ;;
 
 let test_goal_completion_ignores_metric_text () =
@@ -373,31 +396,10 @@ let test_goal_completion_ignores_metric_text () =
     | Ok payload -> payload
     | Error msg -> fail msg
   in
-  check string "metric text does not gate Goal completion" "completed"
-    (transition_phase (request_complete config goal.id))
-;;
-let test_goal_block_and_unblock_have_no_operator_hierarchy () =
-  with_workspace
-  @@ fun config ->
-  let goal, _ =
-    match Goal_store.upsert_goal config ~title:"Explicitly blocked Goal" () with
-    | Ok payload -> payload
-    | Error msg -> fail msg
-  in
-  let transition action =
-    Tool_workspace.dispatch
-      (workspace_ctx ~agent_name:"agent-alpha" config)
-      ~name:"masc_goal_transition"
-      ~args:
-        (`Assoc
-           [ "goal_id", `String goal.id
-           ; "action", `String action
-           ])
-  in
-  check string "ordinary caller blocks" "blocked"
-    (transition_phase (transition "block"));
-  check string "ordinary caller unblocks" "executing"
-    (transition_phase (transition "unblock"))
+  check string "metric text does not gate the completion request" "verifying"
+    (transition_phase (request_complete config goal.id));
+  check string "proof completes the goal" "completed"
+    (transition_phase (prove_complete config goal.id))
 ;;
 let () =
   run
@@ -434,10 +436,6 @@ let () =
             "completion ignores metric text"
             `Quick
             test_goal_completion_ignores_metric_text
-        ; test_case
-            "block and unblock have no operator hierarchy"
-            `Quick
-            test_goal_block_and_unblock_have_no_operator_hierarchy
         ] )
     ]
 ;;

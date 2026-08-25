@@ -1,0 +1,13 @@
+name = "masc_config"
+description = """
+Return the effective runtime configuration with source attribution (env var \
+or default) for each setting. Sensitive values (tokens, passwords) are \
+masked. Use to inspect or verify the server config without restarting. Pass \
+category to filter results to a single section."""
+additional_properties = false
+
+[[params]]
+name = "category"
+type = "string"
+enum = ["server", "auth", "transport", "storage", "runtime", "rate_limiting", "inference", "keeper", "keeper_execution", "autonomy", "dashboard", "operations", "channel", "process", "worker", "web_search", "session"]
+description = "Filter by config category"

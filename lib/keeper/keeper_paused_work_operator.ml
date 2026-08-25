@@ -237,8 +237,8 @@ let error_to_yojson error =
   | Some block ->
     `Assoc
       (fields
-       @ [ "error_code", `String "keeper_turn_admission_busy"
-         ; "admission", Keeper_turn_admission.autonomous_block_to_yojson block
+       @ [ "error_code", `String "keeper_owner_busy"
+         ; "admission", Keeper_owner.autonomous_block_to_yojson block
          ])
 ;;
 
@@ -258,12 +258,8 @@ let error_class = function
       { cause =
           ( Resume.Reservation_conflict _
           | Resume.Receipt_conflict _
-          | Resume.Durable_owner_nonce_changed _
           | Resume.Durable_owner_identity_changed
           | Resume.Durable_owner_not_paused
-          | Resume.Durable_owner_dead_tombstone
-          | Resume.Durable_owner_transcript_reset_required
-          | Resume.Registry_owner_nonce_changed _
           | Resume.Registry_owner_identity_changed
           | Resume.Registry_owner_not_paused _ )
       ; _
@@ -273,10 +269,8 @@ let error_class = function
       (Cancellation.Failed
         { cause =
             ( Cancellation.Durable_owner_not_paused
-            | Cancellation.Durable_owner_dead_tombstone
-            | Cancellation.Durable_owner_nonce_changed _
             | Cancellation.Registry_owner_not_paused _
-            | Cancellation.Registry_owner_nonce_changed _ )
+            )
         ; _
         })
   | Transfer_rejected
@@ -284,12 +278,9 @@ let error_class = function
           ( Transfer.Reservation_conflict _
           | Transfer.Receipt_conflict _
           | Transfer.Source_owner_not_paused
-          | Transfer.Source_owner_dead_tombstone
-          | Transfer.Source_owner_nonce_changed _
-          | Transfer.Source_owner_identity_changed
+                  | Transfer.Source_owner_identity_changed
           | Transfer.Target_owner_not_active
-          | Transfer.Target_owner_nonce_changed _
-          | Transfer.Target_owner_identity_changed
+                  | Transfer.Target_owner_identity_changed
           | Transfer.Continuation_binding_mismatch
           | Transfer.Source_queue_validation_failed _ )
       ; _
@@ -299,9 +290,7 @@ let error_class = function
           ( Source_terminal.Reservation_conflict _
           | Source_terminal.Receipt_conflict _
           | Source_terminal.Durable_owner_not_paused
-          | Source_terminal.Durable_owner_dead_tombstone
-          | Source_terminal.Durable_owner_nonce_changed _
-          | Source_terminal.Durable_owner_identity_changed
+                  | Source_terminal.Durable_owner_identity_changed
           | Source_terminal.Source_queue_validation_failed _ )
       ; _
       } ->
@@ -317,8 +306,11 @@ let error_class = function
       ; _
       }
   | Cancellation_rejected (Cancellation.Admission_busy _)
+  | Cancellation_rejected (Cancellation.Owner_unavailable _)
   | Transfer_rejected { cause = Transfer.Admission_busy _; _ }
+  | Transfer_rejected { cause = Transfer.Owner_unavailable _; _ }
   | Source_terminal_rejected { cause = Source_terminal.Admission_busy _; _ }
+  | Source_terminal_rejected { cause = Source_terminal.Owner_unavailable _; _ }
   | Cancellation_rejected
       (Cancellation.Failed
         { cause =
@@ -395,8 +387,6 @@ let inventory_json config ~keeper_name =
       ; ( "owner"
         , `Assoc
             [ "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-            ; "generation", `Int meta.runtime.nonce
-            ; "meta_version", `Int meta.meta_version
             ; "paused", `Bool meta.paused
             ; ( "pause_kind"
               , `String (Keeper_activation_readiness.pause_kind_to_wire pause_kind) )

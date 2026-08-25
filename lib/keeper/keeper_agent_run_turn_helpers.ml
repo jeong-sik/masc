@@ -37,7 +37,7 @@ let evict_oldest state =
     ; size = state.size - 1
     }
 
-let rec mark_task_link ~keeper ~task_id ~trace_id =
+let mark_task_link ~keeper ~task_id ~trace_id =
   let key = (keeper, task_id, trace_id) in
   let rec loop () =
     let state = Atomic.get link_task_cache_state in
@@ -66,62 +66,62 @@ let task_link_already_recorded ~keeper ~task_id ~trace_id =
 
 [@@@warning "-11"]
 
-let sdk_stream_event_is_first_token =
-  Agent_sdk.Llm_provider.Streaming.sse_event_is_first_token_signal
+let agent_core_stream_event_is_first_token =
+  Agent_core.Llm_provider.Streaming.sse_event_is_first_token_signal
 
-let sdk_stream_event_is_deliverable =
-  Agent_sdk.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal
+let agent_core_stream_event_is_deliverable =
+  Agent_core.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal
 
-let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
+let sse_event_progress_kind (event : Agent_core.Types.sse_event) =
   match event with
-  | Agent_sdk.Types.MessageStart _ -> Some "sse_message_start"
-  | Agent_sdk.Types.ContentBlockStart _ when sdk_stream_event_is_deliverable event ->
+  | Agent_core.Types.MessageStart _ -> Some "sse_message_start"
+  | Agent_core.Types.ContentBlockStart _ when agent_core_stream_event_is_deliverable event ->
       Some "sse_tool_block_start"
-  | Agent_sdk.Types.ContentBlockStart _ -> Some "sse_content_block_start"
-  | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.TextDelta _; _ }
-    when sdk_stream_event_is_deliverable event ->
+  | Agent_core.Types.ContentBlockStart _ -> Some "sse_content_block_start"
+  | Agent_core.Types.ContentBlockDelta { delta = Agent_core.Types.TextDelta _; _ }
+    when agent_core_stream_event_is_deliverable event ->
       Some "sse_text_delta"
-  | Agent_sdk.Types.ContentBlockDelta
+  | Agent_core.Types.ContentBlockDelta
       {
         delta =
-          ( Agent_sdk.Types.ThinkingDelta _
-          | Agent_sdk.Types.ReasoningDetailsDelta _ );
+          ( Agent_core.Types.ThinkingDelta _
+          | Agent_core.Types.ReasoningDetailsDelta _ );
         _;
       }
-    when sdk_stream_event_is_first_token event ->
+    when agent_core_stream_event_is_first_token event ->
       Some "sse_thinking_delta"
-  | Agent_sdk.Types.ContentBlockDelta
-      { delta = Agent_sdk.Types.InputJsonDelta _ | Agent_sdk.Types.InputJsonSnapshot _; _ }
-    when sdk_stream_event_is_deliverable event ->
+  | Agent_core.Types.ContentBlockDelta
+      { delta = Agent_core.Types.InputJsonDelta _ | Agent_core.Types.InputJsonSnapshot _; _ }
+    when agent_core_stream_event_is_deliverable event ->
       Some "sse_tool_arg_delta"
-  | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.MediaDelta _; _ }
-    when sdk_stream_event_is_deliverable event ->
+  | Agent_core.Types.ContentBlockDelta { delta = Agent_core.Types.MediaDelta _; _ }
+    when agent_core_stream_event_is_deliverable event ->
       Some "sse_media_delta"
-  | Agent_sdk.Types.ContentBlockDelta _ ->
-      (* Future OAS carrier deltas, such as provider-private reasoning signatures,
+  | Agent_core.Types.ContentBlockDelta _ ->
+      (* Future AGENT_CORE carrier deltas, such as provider-private reasoning signatures,
          are diagnostic stream evidence only. They must not be promoted to
          text/tool progress, keeper-visible output, or watchdog progress. *)
       Some "sse_content_delta"
-  | Agent_sdk.Types.ContentBlockStop _ -> Some "sse_content_block_stop"
-  | Agent_sdk.Types.MessageDelta _ -> Some "sse_message_delta"
-  | Agent_sdk.Types.MessageStop -> Some "sse_message_stop"
-  | Agent_sdk.Types.Ping -> None
-  | Agent_sdk.Types.SSEError _ -> Some "sse_error"
-  | Agent_sdk.Types.NDJSONError _ -> Some "ndjson_error"
-  | Agent_sdk.Types.SSEParseFailed _ -> Some "sse_parse_failed"
-  | Agent_sdk.Types.NDJSONParseFailed _ -> Some "ndjson_parse_failed"
-  | Agent_sdk.Types.SSEUnknownEventType _ -> Some "sse_unknown_event_type"
-  | Agent_sdk.Types.SSEUnsupportedPart _ -> Some "sse_unsupported_part"
-  | Agent_sdk.Types.SSEUnsupportedResponse _ -> Some "sse_unsupported_response"
-  | Agent_sdk.Types.StreamIncomplete _ -> Some "sse_stream_incomplete"
-  | Agent_sdk.Types.Connected -> Some "sse_connected"
-  | Agent_sdk.Types.Timeout _ -> Some "sse_timeout"
+  | Agent_core.Types.ContentBlockStop _ -> Some "sse_content_block_stop"
+  | Agent_core.Types.MessageDelta _ -> Some "sse_message_delta"
+  | Agent_core.Types.MessageStop -> Some "sse_message_stop"
+  | Agent_core.Types.Ping -> None
+  | Agent_core.Types.SSEError _ -> Some "sse_error"
+  | Agent_core.Types.NDJSONError _ -> Some "ndjson_error"
+  | Agent_core.Types.SSEParseFailed _ -> Some "sse_parse_failed"
+  | Agent_core.Types.NDJSONParseFailed _ -> Some "ndjson_parse_failed"
+  | Agent_core.Types.SSEUnknownEventType _ -> Some "sse_unknown_event_type"
+  | Agent_core.Types.SSEUnsupportedPart _ -> Some "sse_unsupported_part"
+  | Agent_core.Types.SSEUnsupportedResponse _ -> Some "sse_unsupported_response"
+  | Agent_core.Types.StreamIncomplete _ -> Some "sse_stream_incomplete"
+  | Agent_core.Types.Connected -> Some "sse_connected"
+  | Agent_core.Types.Timeout _ -> Some "sse_timeout"
 
 [@@@warning "+11"]
 
 let sse_event_watchdog_progress_kind event =
   match sse_event_progress_kind event with
-  | Some kind when sdk_stream_event_is_deliverable event -> Some kind
+  | Some kind when agent_core_stream_event_is_deliverable event -> Some kind
   | _ -> None
 
 let registry_progress_on_event ~record_turn_progress downstream event =
@@ -142,19 +142,18 @@ let emit_turn_end_safely ~keeper_name () =
         keeper_name
         (Printexc.to_string e)
 
-let runtime_manifest_context ~keeper_name ~agent_name ~trace_id ~generation
+let runtime_manifest_context ~keeper_name ~agent_name ~trace_id
     ~keeper_turn_id : Keeper_runtime_manifest.turn_context =
   {
     manifest_keeper_name = keeper_name;
     manifest_agent_name = Some agent_name;
     manifest_trace_id = trace_id;
-    manifest_generation = Some generation;
     manifest_keeper_turn_id = Some keeper_turn_id;
   }
 
 let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
-    ~generation ~runtime_id ?status ?decision ?keeper_turn_id
-    ?oas_turn_count ?elapsed_ms ?logical_seq ?checkpoint_path ?receipt_path
+    ~runtime_id ?status ?decision ?keeper_turn_id
+    ?agent_core_turn_count ?elapsed_ms ?logical_seq ?checkpoint_path ?receipt_path
     ?compaction_source ~site event =
   let decision =
     match keeper_turn_id with
@@ -162,7 +161,7 @@ let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
     | Some keeper_turn_id ->
       let ctx =
         runtime_manifest_context ~keeper_name ~agent_name ~trace_id
-          ~generation ~keeper_turn_id
+          ~keeper_turn_id
       in
       let decision =
         match decision with
@@ -173,11 +172,11 @@ let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
         (Keeper_runtime_manifest.with_clock_refs
            ~clock_refs:
              (Keeper_runtime_manifest.clock_refs_for_context ctx ~event
-                ?oas_turn_count ?elapsed_ms ?logical_seq ?compaction_source ())
+                ?agent_core_turn_count ?elapsed_ms ?logical_seq ?compaction_source ())
            decision)
   in
-  Keeper_runtime_manifest.make ~keeper_name ~agent_name ~trace_id ~generation
-    ?keeper_turn_id ?oas_turn_count ?logical_seq ~event ~runtime_id ?status
+  Keeper_runtime_manifest.make ~keeper_name ~agent_name ~trace_id
+    ?keeper_turn_id ?agent_core_turn_count ?logical_seq ~event ~runtime_id ?status
     ?decision ?checkpoint_path ?receipt_path ()
   |> Keeper_runtime_manifest.append_best_effort ~site config
 
@@ -212,7 +211,7 @@ type append_manifest_fn =
   ?status:string ->
   ?decision:Yojson.Safe.t ->
   ?keeper_turn_id:int ->
-  ?oas_turn_count:int ->
+  ?agent_core_turn_count:int ->
   ?checkpoint_path:string ->
   ?compaction_source:string ->
   site:string ->
@@ -224,14 +223,13 @@ let make_append_manifest
     ~keeper_name
     ~agent_name
     ~trace_id
-    ~generation
     ~runtime_id
     ~(turn_start : Mtime.t)
     ~(seq_ref : int Atomic.t)
   : append_manifest_fn
   =
   fun ?elapsed_ms ?logical_seq ?status ?decision ?keeper_turn_id ->
-  fun ?oas_turn_count ?checkpoint_path ?compaction_source ~site event ->
+  fun ?agent_core_turn_count ?checkpoint_path ?compaction_source ~site event ->
   let elapsed_ms =
     match elapsed_ms with
     | Some _ -> elapsed_ms
@@ -253,9 +251,8 @@ let make_append_manifest
     ~keeper_name
     ~agent_name
     ~trace_id
-    ~generation
     ~runtime_id
-    ?status ?decision ?keeper_turn_id ?oas_turn_count
+    ?status ?decision ?keeper_turn_id ?agent_core_turn_count
     ?elapsed_ms ?logical_seq
     ?checkpoint_path ?compaction_source
     ~site
@@ -270,11 +267,11 @@ let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =
   in
   (* Keeper tool execution and typed recovery judgment are separate provider
      lease phases. This is a Keeper lifecycle invariant, not an operator
-     tuning knob: OAS releases before tools/judgment and reacquires only for
+     tuning knob: AGENT_CORE releases before tools/judgment and reacquires only for
      the next main-model turn. *)
   let yield_on_tool = true in
   (* SSOT-DRIFT-REMEDIATION: Streaming⇄Awaiting_tool_result FSM transitions
-     are now emitted from the turn-scoped OAS Event_bus observation in
+     are now emitted from the turn-scoped AGENT_CORE Event_bus observation in
      [Keeper_unified_turn_event_bus], so they appear unconditionally even
      independently of these lease callbacks. The callbacks below record the
      mandatory Keeper provider-lease transition. *)

@@ -1,0 +1,20 @@
+; String_util — byte-wise string helpers with no dependencies.
+;
+; Extracted from masc_core so that callers needing only these helpers do not
+; have to take masc_core's eio / re.pcre / masc_log / otel_metric_store /
+; runtime_events edges. That cost is why several modules kept private copies
+; of contains_substring instead of using the canonical one; this removes the
+; reason.
+;
+; Keep this library dependency-free. A dependency added here is inherited by
+; every caller, and the copies come back.
+
+(include_subdirs no)
+
+(library
+ (name masc_string_util)
+ (public_name masc.string_util)
+ (wrapped false)
+ (modules string_util)
+ (flags
+  (:standard -w +4 -w +33)))

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SSEEvent } from '../types'
 import {
   isKeeperToolActivityEvent,
+  isKeeperToolEvidenceCommittedEvent,
   sseEventMatchesKeeper,
   sseKeeperName,
 } from './keeper-sse-match'
@@ -20,10 +21,15 @@ describe('keeper SSE matching', () => {
     expect(sseEventMatchesKeeper(event, 'other')).toBe(false)
   })
 
+  it('distinguishes committed evidence refresh from physical tool execution', () => {
+    const event = { type: 'keeper_tool_call_evidence_committed' } as SSEEvent
+    expect(isKeeperToolEvidenceCommittedEvent(event)).toBe(true)
+    expect(isKeeperToolActivityEvent(event)).toBe(false)
+  })
+
   it('recognizes tool-call events across canonical and MASC alias wire types', () => {
     expect(isKeeperToolActivityEvent({ type: 'keeper_tool_call' } as SSEEvent)).toBe(true)
     expect(isKeeperToolActivityEvent({ type: 'masc/keeper_tool_call' } as SSEEvent)).toBe(true)
-    expect(isKeeperToolActivityEvent({ type: 'keeper_tool_skipped' } as SSEEvent)).toBe(true)
     expect(isKeeperToolActivityEvent({ type: 'keeper_turn_complete' } as SSEEvent)).toBe(false)
   })
 })

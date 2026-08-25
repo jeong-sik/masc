@@ -1,0 +1,11 @@
+name = "masc_gc"
+description = """
+Run explicit age-based garbage collection. Agent lifecycle is not modified."""
+additional_properties = false
+
+[[params]]
+name = "days"
+type = "integer"
+required = true
+description = "Operator-selected retention horizon in days"
+minimum = 1

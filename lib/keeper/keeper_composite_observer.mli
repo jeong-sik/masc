@@ -10,7 +10,7 @@
       [Keeper_runtime_routing.select_runtime], or any routine that would
       shift keeper lifecycle state.
     - Does not read provider names, token counts, or context bytes —
-      those belong to OAS (see [feedback_masc-oas-layer-boundary]).
+      those belong to AGENT_CORE (see [feedback_masc-agent_core-layer-boundary]).
 
     Current scope: all projected sub-FSM live states are written directly
     into [Keeper_registry.registry_entry]. The observer no longer infers
@@ -63,9 +63,6 @@ type invariants_check = {
     once per violated invariant. No-op when all invariants hold. Called
     automatically from [observe]; exposed so unit tests can assert the
     counter bump without going through the full snapshot pipeline. *)
-val bump_invariant_violations :
-  keeper_name:string -> invariants_check -> unit
-
 (** {2 Pure invariant predicates}
 
     The [check_*] functions below are the conjuncts of the composite
@@ -79,14 +76,7 @@ val bump_invariant_violations :
 
     Pure: no side effects, no clock, no I/O. *)
 
-(** [PhaseTurnAlignment]: when KSM is in [Compacting], the turn phase must
-    also be [Turn_compacting]; conversely no other KSM phase may carry a
-    live [Turn_compacting]. *)
-val check_phase_turn_alignment : Keeper_state_machine.phase -> Keeper_registry.packed_turn_phase -> bool
 
-(** [CompactionAtomicity]:
-    [(kmc_compaction = compacting) <=> (phase = Compacting)]. *)
-val check_compaction_atomicity : Keeper_state_machine.phase -> Keeper_registry.packed_compaction_stage -> bool
 
 (** [NoRuntimeBeforeMeasurement] is specified as: runtime selection past
     [idle] requires a captured measurement. The implementation discards both
@@ -97,8 +87,6 @@ val check_compaction_atomicity : Keeper_state_machine.phase -> Keeper_registry.p
 val check_no_runtime_before_measurement :
   runtime_state:runtime_state -> measurement_captured:bool -> bool
 
-val check_phase_derivation_agreement :
-  Keeper_registry.registry_entry -> bool
 (** Runtime-visible mirror of
     [Keeper_invariant_check.DerivePhaseAgreement]: the recorded registry
     phase must equal [Keeper_state_machine.derive_phase conditions]. *)
@@ -332,8 +320,8 @@ type snapshot = {
 (** Derive a composite snapshot from a live registry entry.
 
     [correlation_id] and [run_id] may be supplied by the caller when the
-    observer is driven from a known event envelope (OAS event_bus
-    envelope, PR OAS#845). When absent, the snapshot uses
+    observer is driven from a known event envelope (AGENT_CORE event_bus
+    envelope, PR agent-core boundary). When absent, the snapshot uses
     [keeper:<name>:<transition_seq>] as a stable identifier so repeated
     reads within the same keeper transition return the same id. *)
 
@@ -347,15 +335,9 @@ val observe :
 val turn_phase_to_string : Keeper_registry.packed_turn_phase -> string
 
 (** Stringify [decision_stage]. Mirrors KeeperDecisionPipeline.tla. *)
-val decision_stage_to_string : Keeper_registry.packed_decision_stage -> string
-
 (** Stringify the runtime-state compatibility field. *)
-val runtime_state_to_string : runtime_state -> string
-
 (** Stringify [compaction_stage]. *)
 val compaction_stage_to_string : Keeper_registry.packed_compaction_stage -> string
-
-val invariant_key_to_string : invariant_key -> string
 
 (** Serialise a snapshot as the [/api/keepers/:name/composite] payload
     documented in RFC-0003 §7. *)

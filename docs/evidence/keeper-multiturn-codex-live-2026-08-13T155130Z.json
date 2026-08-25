@@ -1,0 +1,113 @@
+{
+  "schema": "masc.keeper_feature_matrix.multiturn_evidence.v1",
+  "captured_at": "2026-08-13T15:51:30Z",
+  "canary": "canary-multiturn-codex-20260814-0042",
+  "runtime": {
+    "assignment_source": "explicit",
+    "runtime_id": "codex_subscription.gpt-5.4",
+    "provider": "Codex ChatGPT Subscription",
+    "model": "gpt-5.4",
+    "keeper_dispatchable_at_preflight": true,
+    "turn_10_completion_log": {
+      "seq": 53846,
+      "success": true,
+      "stop_reason": "end_turn",
+      "usage_reported": false,
+      "elapsed_seconds": 14.55363392829895
+    }
+  },
+  "transcript": {
+    "path": "/Users/dancer/me/.masc/keeper_chat/canary-multiturn-codex-20260814-0042.jsonl",
+    "sha256": "9ecf2e528c52e74b6025bbffe1999651487299135b96981eca6e2952aa83f790",
+    "bytes": 13661,
+    "records": 20,
+    "user_records": 10,
+    "assistant_records": 10,
+    "first_record_at_unix": 1786635992.425508,
+    "last_record_at_unix": 1786636159.820906,
+    "first_record_at_iso": "2026-08-13T15:46:32Z",
+    "last_record_at_iso": "2026-08-13T15:49:19Z",
+    "turn_refs": [
+      "trace-1786635970987-00001#1",
+      "trace-1786635970987-00001#2",
+      "trace-1786635970987-00001#3",
+      "trace-1786635970987-00001#4",
+      "trace-1786635970987-00001#5",
+      "trace-1786635970987-00001#6",
+      "trace-1786635970987-00001#7",
+      "trace-1786635970987-00001#8",
+      "trace-1786635970987-00001#9",
+      "trace-1786635970987-00001#10"
+    ],
+    "assistant_block_types": {
+      "p": 20
+    },
+    "tool_invocation_blocks": 0
+  },
+  "configuration": {
+    "path": "/Users/dancer/me/.masc/config/keepers/canary-multiturn-codex-20260814-0042.toml",
+    "sha256": "6605862471a4cd7038fa4cbd20af354a5eb2b462dd18f0f431f79115b08a1e2d",
+    "sandbox_profile": "local",
+    "network_mode": "inherit",
+    "proactive_enabled": false,
+    "autoboot_enabled": true,
+    "allowed_paths": []
+  },
+  "facts_established_in_turns_1_to_9": [
+    "The project codename is Aster Ledger.",
+    "The prototype city is Nacre Bay.",
+    "Cobalt tokens must be processed before amber tokens.",
+    "If sensor Delta-7 goes silent, pause the shipment but retain the queue.",
+    "Dr. Iona Vale owns the recovery decision.",
+    "Recovery is confirmed by three consecutive violet pulses.",
+    "After confirmation, the retained queue moves to Orchid Pier.",
+    "The final recovery notice goes to channel Harbor-3.",
+    "Amber tokens tagged glasswing are quarantined rather than shipped, while cobalt remains first."
+  ],
+  "turn_10_assertions": {
+    "all_nine_distinct_facts_recalled": true,
+    "response_list_items": 10,
+    "why_list_has_ten_items": "The ninth fact was losslessly expanded into the glasswing exception and the still-active cobalt-first ordering.",
+    "complete_operational_sequence_reconstructed": true,
+    "contradiction_assessment": "There is no contradiction in these facts.",
+    "tool_use_requested": false,
+    "tool_use_observed": false
+  },
+  "terminal_state": {
+    "path": "/Users/dancer/me/.masc/keepers/canary-multiturn-codex-20260814-0042.json",
+    "sha256_after_shutdown": "fd3f326f4508ddcf556f489cebe342e7686803d0fd0b71ab6073a1b1697f3d4e",
+    "trace_id": "trace-1786635970987-00001",
+    "total_turns": 10,
+    "owner_terminal_operation_count": 10,
+    "owner_interrupted_operation_count": 0,
+    "paused": true,
+    "latched_reason": {
+      "kind": "operator_paused",
+      "actor": "keeper_down"
+    },
+    "shutdown_operation_id": "shutdown-70df459e-e092-4334-8006-c2e7ccee0bad",
+    "shutdown_finalized_log_seq": 53871,
+    "remove_meta": false,
+    "remove_session": false
+  },
+  "shutdown_observation": {
+    "log_seq": 53866,
+    "level": "WARN",
+    "message": "memory os librarian cancelled lane=librarian_exact before commit current_snapshot=present",
+    "interpretation": "The ten-turn chat proof is complete, but shutdown did not prove a committed Librarian update or restart recall. This warning must be investigated before promoting Memory OS persistence."
+  },
+  "verdict": "pass",
+  "proves": [
+    "A Codex subscription Keeper completed ten consecutive user-assistant turns on one trace.",
+    "Turn 10 recalled all nine distinct facts and reconstructed the full operational sequence without tools.",
+    "All ten owner operations reached terminal state without interruption.",
+    "The canary was explicitly paused after evidence capture without deleting its meta or session."
+  ],
+  "does_not_prove": [
+    "Memory survives process restart or compaction.",
+    "The Librarian committed a new memory snapshot during shutdown.",
+    "Other Codex models or other provider families satisfy the same contract.",
+    "The Keeper runs continuously for 1h, 2h, 4h, or 24h.",
+    "A browser renders the chat transcript without omission or duplication."
+  ]
+}

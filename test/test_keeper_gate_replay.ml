@@ -38,12 +38,12 @@ let projected_model_text ~base_path
        Masc.Keeper_gate_replay.project_model_input
          ~base_path
          evidence
-         [ Agent_sdk.Types.user_msg message.text ]
+         [ Agent_core.Types.user_msg message.text ]
      with
      | Ok [ _canonical; projected ] ->
-       Agent_sdk.Types.text_of_content projected.content
+       Agent_core.Types.text_of_content projected.content
      | Ok _ -> Alcotest.fail "replay projection did not append exact evidence"
-     | Error detail -> Alcotest.fail detail)
+     | Error detail -> Alcotest.fail (Agent_core.Error.to_string detail))
 ;;
 
 (* Reconstruction carries the approved payload fields back to the write
@@ -524,24 +524,24 @@ let test_multimodal_goal_projects_replay_reference () =
          | None -> Alcotest.fail "multimodal replay evidence is absent"
        in
        let image =
-         Agent_sdk.Types.Image
+         Agent_core.Types.Image
            { media_type = "image/png"
            ; data = "aW1hZ2U="
-           ; source_type = Agent_sdk.Types.Base64
+           ; source_type = Agent_core.Types.Base64
            }
        in
        let canonical_blocks =
          Masc.Keeper_gate_replay.append_model_evidence_block evidence [ image ]
        in
        let canonical_message =
-         Agent_sdk.Types.user_msg_blocks canonical_blocks
+         Agent_core.Types.user_msg_blocks canonical_blocks
        in
        Alcotest.check
          Alcotest.bool
          "multimodal canonical goal keeps only the artifact identity"
          false
          (String_util.contains_substring
-            (Agent_sdk.Types.text_of_content canonical_message.content)
+            (Agent_core.Types.text_of_content canonical_message.content)
             raw_output);
        match
          Masc.Keeper_gate_replay.project_model_input
@@ -549,11 +549,11 @@ let test_multimodal_goal_projects_replay_reference () =
            evidence
            [ canonical_message ]
        with
-       | Error detail -> Alcotest.fail detail
+       | Error detail -> Alcotest.fail (Agent_core.Error.to_string detail)
        | Ok [ original; projected ] ->
          (match original.content, projected.content with
-          | ( Agent_sdk.Types.Image _ :: Agent_sdk.Types.Text _ :: []
-            , [ Agent_sdk.Types.Text evidence_text ] ) ->
+          | ( Agent_core.Types.Image _ :: Agent_core.Types.Text _ :: []
+            , [ Agent_core.Types.Text evidence_text ] ) ->
             Alcotest.check
               Alcotest.bool
               "media block survives replay projection"
@@ -598,21 +598,21 @@ let test_replay_projection_recovers_when_canonical_reference_is_absent () =
          Masc.Keeper_gate_replay.project_model_input
            ~base_path
            evidence
-           [ Agent_sdk.Types.user_msg "reference was dropped" ]
+           [ Agent_core.Types.user_msg "reference was dropped" ]
        with
-       | Error detail -> Alcotest.fail detail
+       | Error detail -> Alcotest.fail (Agent_core.Error.to_string detail)
        | Ok [ original; recovered ] ->
          Alcotest.check
            Alcotest.string
            "original provider input is preserved"
            "reference was dropped"
-           (Agent_sdk.Types.text_of_content original.content);
+           (Agent_core.Types.text_of_content original.content);
          Alcotest.check
            Alcotest.bool
            "replay reference is appended independently of text layout"
            true
            (String_util.contains_substring
-              (Agent_sdk.Types.text_of_content recovered.content)
+              (Agent_core.Types.text_of_content recovered.content)
               artifact.sha256)
        | Ok _ ->
          Alcotest.fail
@@ -644,7 +644,49 @@ let test_dispatch_covers_all_replayable_operations () =
     Alcotest.bool
     "an approved connector_post is host-replayed"
     true
-    (replayable_of_operation "connector_post" = Some Replay_connector_post)
+    (replayable_of_operation "connector_post" = Some Replay_connector_post);
+  Alcotest.check
+    Alcotest.bool
+    "an approved memory_write is host-replayed"
+    true
+    (replayable_of_operation "memory_write" = Some Replay_memory_write)
+;;
+
+let test_memory_write_replay_preserves_exact_input () =
+  let input =
+    `Assoc
+      [ "title", `String "approved title"
+      ; "content", `String "approved content"
+      ]
+  in
+  Alcotest.check
+    result_json
+    "approved memory write arguments stay exact"
+    (Ok input)
+    (Masc.Keeper_tool_memory_runtime.replay_memory_write_args_of_gate_input
+       input)
+;;
+
+let test_memory_write_replay_rejects_invalid_input () =
+  List.iter
+    (fun input ->
+       match
+         Masc.Keeper_tool_memory_runtime.replay_memory_write_args_of_gate_input
+           input
+       with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "invalid memory write became replayable")
+    [ `Assoc [ "title", `String "missing content" ]
+    ; `Assoc
+        [ "content", `String "exact"
+        ; "content", `String "duplicate"
+        ]
+    ; `Assoc
+        [ "content", `String "exact"
+        ; "unknown", `String "widened"
+        ]
+    ; `String "not an object"
+    ]
 ;;
 
 let test_dispatch_refuses_unknown_operations () =
@@ -679,6 +721,7 @@ let test_large_connector_post_preserves_exact_durable_request () =
       ; "channel_id", `String "C-exact"
       ; "content", `String content
       ; "blocks", `List blocks
+      ; "mention_user_ids", `List [ `String "U123ABC" ]
       ]
   in
   match
@@ -689,20 +732,102 @@ let test_large_connector_post_preserves_exact_durable_request () =
       (Replay_slack_post
          { input = decoded_input
          ; channel_id
+         ; thread_ts
          ; content = decoded_content
          ; blocks = decoded_blocks
+         ; mention_user_ids
          }) ->
     Alcotest.check json "exact durable request retained" input decoded_input;
     Alcotest.check Alcotest.string "channel retained" "C-exact" channel_id;
+    Alcotest.check
+      (Alcotest.option Alcotest.string)
+      "absent thread_ts stays absent"
+      None
+      thread_ts;
     Alcotest.check Alcotest.string "large content retained" content decoded_content;
     Alcotest.check
       (Alcotest.list json)
       "large blocks retained"
       blocks
-      decoded_blocks
+      decoded_blocks;
+    Alcotest.check (Alcotest.list Alcotest.string) "mention ids retained"
+      [ "U123ABC" ] mention_user_ids
   | Ok (Replay_discord_post _) ->
     Alcotest.fail "Slack request decoded as Discord"
   | Error detail -> Alcotest.fail detail
+;;
+
+let test_slack_connector_post_retains_thread_ts () =
+  let open Masc.Keeper_tool_in_process_runtime in
+  let input =
+    `Assoc
+      [ "connector", `String "slack"
+      ; "channel_id", `String "C-exact"
+      ; "thread_ts", `String "1700000000.000100"
+      ; "content", `String "threaded reply"
+      ; "blocks", `List []
+      ; "mention_user_ids", `List []
+      ]
+  in
+  match
+    Masc.Keeper_tool_in_process_runtime.connector_post_replay_of_gate_input
+      input
+  with
+  | Ok (Replay_slack_post { thread_ts; channel_id; _ }) ->
+    Alcotest.check Alcotest.string "channel retained" "C-exact" channel_id;
+    Alcotest.check
+      (Alcotest.option Alcotest.string)
+      "thread coordinate retained"
+      (Some "1700000000.000100")
+      thread_ts
+  | Ok (Replay_discord_post _) ->
+    Alcotest.fail "Slack request decoded as Discord"
+  | Error detail -> Alcotest.fail detail
+;;
+
+let test_connector_post_replay_retains_terminal_target () =
+  let open Masc.Keeper_tool_in_process_runtime in
+  let input =
+    `Assoc
+      [ "connector", `String "discord"
+      ; "channel_id", `String "D-exact"
+      ; "content", `String "approved reply"
+      ; "mention_user_ids", `List []
+      ]
+  in
+  match connector_post_replay_of_gate_input input with
+  | Ok connector_post ->
+    (match connector_post_replay_target connector_post with
+     | Masc.Keeper_surface_post.To_discord { channel_id } ->
+       Alcotest.check
+         Alcotest.string
+         "terminal target remains the approved channel"
+         "D-exact"
+         channel_id
+     | ( Masc.Keeper_surface_post.To_dashboard
+       | Masc.Keeper_surface_post.To_slack _ ) ->
+       Alcotest.fail "Discord replay produced the wrong terminal target")
+  | Error detail -> Alcotest.fail detail
+;;
+
+let test_connector_post_replay_requires_mention_user_ids () =
+  let input =
+    `Assoc
+      [ "connector", `String "discord"
+      ; "channel_id", `String "D-no-mentions-field"
+      ; "content", `String "approved without the list"
+      ]
+  in
+  match
+    Masc.Keeper_tool_in_process_runtime.connector_post_replay_of_gate_input input
+  with
+  | Error detail ->
+    Alcotest.check
+      Alcotest.bool
+      "names the missing field"
+      true
+      (String_util.contains_substring detail "missing mention_user_ids")
+  | Ok _ -> Alcotest.fail "a request without mention_user_ids became replayable"
 ;;
 
 let test_connector_post_rejects_heuristic_or_truncated_input () =
@@ -720,14 +845,71 @@ let test_connector_post_rejects_heuristic_or_truncated_input () =
         [ "connector", `String "slack"
         ; "channel_id", `String "C-exact"
         ; "content", `String "missing exact blocks"
+        ; "mention_user_ids", `List []
         ]
     ; `Assoc
         [ "connector", `String "discord"
         ; "channel_id", `String "D-exact"
         ; "content", `String "exact"
+        ; "mention_user_ids", `List [ `String "123"; `String "123" ]
+        ]
+    ; `Assoc
+        [ "connector", `String "discord"
+        ; "channel_id", `String "D-exact"
+        ; "content", `String "exact"
+        ; "mention_user_ids", `List []
         ; "truncated", `Bool true
         ]
+    ; `Assoc
+        [ "connector", `String "slack"
+        ; "channel_id", `String "C-exact"
+        ; "thread_ts", `String "   "
+        ; "content", `String "blank thread coordinate"
+        ; "blocks", `List []
+        ; "mention_user_ids", `List []
+        ]
+    ; `Assoc
+        [ "connector", `String "slack"
+        ; "channel_id", `String "C-exact"
+        ; "thread_ts", `Int 1700000000
+        ; "content", `String "non-string thread coordinate"
+        ; "blocks", `List []
+        ; "mention_user_ids", `List []
+        ]
     ]
+;;
+
+(* The deferred payload is what the model reads when the Gate holds a call.
+   Without the replay contract stated there, the model resubmits the same
+   call while the approval is in flight (#28866: three duplicate approvals
+   of one web_search). This pins the stated fact, not its wording. *)
+let test_deferred_payload_states_the_replay_contract () =
+  let payload =
+    Masc.Keeper_gate.decision_to_yojson
+      (Masc.Keeper_gate.Deferred
+         { approval_id = "appr_test"
+         ; reason = Masc.Keeper_gate.Judge_requested
+         ; audit_receipts = []
+         })
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "deferred decision"
+    "deferred"
+    (payload |> member "decision" |> to_string);
+  let on_approve =
+    match payload |> member "on_approve" with
+    | `String text -> text
+    | _ -> Alcotest.fail "deferred payload has no on_approve string"
+  in
+  Alcotest.(check bool)
+    "on_approve states host replay delivery"
+    true
+    (Astring.String.is_infix ~affix:"delivers its output" on_approve);
+  Alcotest.(check bool)
+    "on_approve tells the model not to resubmit"
+    true
+    (Astring.String.is_infix ~affix:"Do not resubmit" on_approve)
 ;;
 
 let () =
@@ -819,6 +1001,30 @@ let () =
             "connector decoder rejects heuristic input"
             `Quick
             test_connector_post_rejects_heuristic_or_truncated_input
+        ; Alcotest.test_case
+            "slack connector request retains thread_ts"
+            `Quick
+            test_slack_connector_post_retains_thread_ts
+        ; Alcotest.test_case
+            "connector replay retains terminal target"
+            `Quick
+            test_connector_post_replay_retains_terminal_target
+        ; Alcotest.test_case
+            "connector replay requires mention_user_ids"
+            `Quick
+            test_connector_post_replay_requires_mention_user_ids
+        ; Alcotest.test_case
+            "memory write replay keeps exact input"
+            `Quick
+            test_memory_write_replay_preserves_exact_input
+        ; Alcotest.test_case
+            "memory write replay rejects invalid input"
+            `Quick
+            test_memory_write_replay_rejects_invalid_input
+        ; Alcotest.test_case
+            "deferred payload states the replay contract"
+            `Quick
+            test_deferred_payload_states_the_replay_contract
         ] )
     ]
 ;;

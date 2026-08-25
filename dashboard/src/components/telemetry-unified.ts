@@ -28,7 +28,7 @@ import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-ref
 import { isAbortError } from '../lib/async-state'
 import { errorToString } from '../lib/format-string'
 import { Btn } from './btn'
-import { OasHealthChip } from './oas-health-chip'
+import { AgentCoreHealthChip } from './agent-core-health-chip'
 import { CopyIdButton } from './common/copy-id-button'
 import { ringFocusClasses } from './common/ring'
 import { StatTile } from './common/stat-tile'
@@ -445,7 +445,7 @@ function entryPreview(e: TelemetryEntry): string {
       const caller = asNullableString(e.caller) ?? ''
       return `${caller || 'unknown'} -> ${tool}`
     }
-    case 'oas_event': {
+    case 'agent_core_event': {
       const eventType = asNullableString(e.event_type) ?? asNullableString(e.type) ?? '(unknown event_type)'
       const payloadKind = telemetryPayloadKind(e)
       const agentName = telemetryTurnActor(e)
@@ -511,7 +511,7 @@ function telemetryEntryHaystack(entry: TelemetryEntry): string {
   const source = typeof entry.source === 'string' ? entry.source : ''
   const preview = entryPreview(entry)
   const badges = telemetryScopeBadges(entry).join(' ')
-  const payload = entry.source === 'oas_event' ? compactTelemetryPayloadSearch(entry) : ''
+  const payload = entry.source === 'agent_core_event' ? compactTelemetryPayloadSearch(entry) : ''
   return `${source} ${preview} ${badges} ${payload}`
 }
 
@@ -1303,7 +1303,7 @@ export function TelemetryUnified() {
         </div>
       </div>
 
-      <${OasHealthChip} />
+      <${AgentCoreHealthChip} />
 
       <${TelemetryCachePanel}
         telemetry=${telemetry}

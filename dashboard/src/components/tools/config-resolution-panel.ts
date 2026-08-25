@@ -300,52 +300,41 @@ function DiagnosticRow({ item }: { item: DashboardRuntimeDiagnostic }) {
   `
 }
 
-
-function fmtBoolean(value: boolean | null | undefined): string {
-  if (value === true) return 'yes'
-  if (value === false) return 'no'
-  return MISSING_DATA_DASH
-}
-
-function probeTone(signal: string | null | undefined, probeOk: boolean | null | undefined): string {
-  if (probeOk === false) return 'border-[var(--rose-28)] bg-[var(--rose-10)] text-[var(--rose-fg)]'
-  switch (signal) {
-    case 'likely_reused':
-      return 'border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]'
-    case 'possible_reuse':
-      return 'border-[var(--yellow-bright-28)] bg-[var(--yellow-bright-10)] text-[var(--yellow-100)]'
-    case 'no_visible_reuse':
-      return 'border-[var(--color-border-default)] bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]'
-    default:
-      return 'border-[var(--color-border-default)] bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]'
-  }
-}
-
-function probeSignalLabel(signal: string | null | undefined): string {
-  switch (signal) {
-    case 'likely_reused':
-      return 'kv likely reused'
-    case 'possible_reuse':
-      return 'kv possible reuse'
-    case 'no_visible_reuse':
-      return 'no visible reuse'
-    case 'insufficient_data':
-      return 'insufficient data'
-    default:
-      return 'probe pending'
-  }
-}
-
-function providerProbeTone(status: string | null | undefined, reachable: boolean | null | undefined): string {
-  if (reachable === true) return 'ok'
-  if (status === 'skipped_cli') return 'neutral'
-  if (reachable === false) return 'bad'
-  return 'neutral'
-}
-
-function providerProbeLabel(status: string | null | undefined, reachable: boolean | null | undefined): string {
-  if (reachable === true) return 'reachable'
+function providerProbeTone(status: DashboardRuntimeProviderProbe['status']): string {
   switch (status) {
+    case 'reachable':
+      return 'ok'
+    case 'skipped_cli':
+      return 'neutral'
+    case 'missing_auth':
+    case 'auth_failed':
+    case 'network_error':
+    case 'server_error':
+    case 'endpoint_not_found':
+    case 'invalid_endpoint':
+    case 'invalid_execution_transport':
+    case 'http_error':
+      return 'bad'
+  }
+}
+
+function runtimeProbeRefreshLabel(response: DashboardRuntimeProbeResponse): string {
+  switch (response.refresh_state) {
+    case 'fresh':
+      return 'cache hit'
+    case 'recent':
+      return 'recent cache'
+    case 'served_stale':
+      return 'refreshing stale cache'
+    case 'warming_up':
+      return 'warming up'
+  }
+}
+
+function providerProbeLabel(status: DashboardRuntimeProviderProbe['status']): string {
+  switch (status) {
+    case 'reachable':
+      return 'reachable'
     case 'missing_auth':
       return 'missing auth'
     case 'auth_failed':
@@ -358,8 +347,12 @@ function providerProbeLabel(status: string | null | undefined, reachable: boolea
       return 'not found'
     case 'skipped_cli':
       return 'cli skipped'
-    default:
-      return status ?? 'unknown'
+    case 'invalid_endpoint':
+      return 'bad endpoint'
+    case 'invalid_execution_transport':
+      return 'bad transport'
+    case 'http_error':
+      return 'http error'
   }
 }
 
@@ -367,12 +360,10 @@ function runtimeProbeCatalogEntry(
   catalog: readonly DashboardRuntimeProviderSnapshot[],
   probe: DashboardRuntimeProviderProbe,
 ): DashboardRuntimeProviderSnapshot | null {
-  if (probe.runtime_id) {
-    const entry = findRuntimeCatalogEntry(catalog, probe.runtime_id)
-    if (entry) return entry
-  }
-  const providerId = probe.provider_id?.trim()
-  if (!providerId) return null
+  const entry = findRuntimeCatalogEntry(catalog, probe.runtime_id)
+  if (entry) return entry
+  const providerId = probe.provider_id.trim()
+  if (providerId === '') return null
   return catalog.find(entry => {
     const ids = [entry.provider_id, entry.provider]
     return ids.some(id => id?.trim() === providerId)
@@ -385,7 +376,7 @@ function runtimeProbeCatalogStatus(
 ): string {
   if (state.status === 'idle' || state.status === 'loading') return `catalog ${state.status}`
   if (state.status === 'error') return `catalog error: ${state.message}`
-  return `catalog missing for ${probe.runtime_id ?? probe.provider_id ?? '(unknown runtime)'}`
+  return `catalog missing for ${probe.runtime_id}`
 }
 
 function runtimeProbeCatalogRows(entry: DashboardRuntimeProviderSnapshot): readonly (readonly [string, string])[] {
@@ -493,7 +484,7 @@ function RuntimeTruthPanel({ runtimeResolution }: { runtimeResolution: Dashboard
         <${RuntimeMetaRow} label="effective base" value=${runtimeResolution.resolved_base_path.path ?? MISSING_DATA_DASH} />
         <${RuntimeMetaRow} label="effective .masc" value=${runtimeResolution.data_root.path ?? MISSING_DATA_DASH} />
         <${RuntimeMetaRow} label="server repo" value=${runtimeResolution.server_repo_path?.path ?? MISSING_DATA_DASH} />
-        <${RuntimeMetaRow} label="executable commit" value=${runtimeResolution.build.commit ?? MISSING_DATA_DASH} />
+        <${RuntimeMetaRow} label="executable commit" value=${runtimeResolution.build.binary_commit ?? MISSING_DATA_DASH} />
         <${RuntimeMetaRow} label="keeper fibers" value=${String(fleet?.keeper_fibers ?? MISSING_DATA_DASH)} />
         <${RuntimeMetaRow} label="fd active operations" value=${activeOperations == null ? MISSING_DATA_DASH : String(activeOperations)} />
         <${RuntimeMetaRow} label="fd resource errors (total)" value=${resourceErrors == null ? MISSING_DATA_DASH : String(resourceErrors)} />
@@ -533,13 +524,8 @@ function RuntimeProbePanel() {
     loadRuntimeCatalog()
   }, [])
 
-  const probe = state.value.data?.probe
-  const firstRun = probe?.runs?.[0] ?? null
-  const assessment = probe?.kv_cache_assessment ?? null
-  const signal = assessment?.signal ?? null
+  const probe = state.value.data?.probe ?? null
   const providerProbes = probe?.providers ?? []
-  const providerSummary = probe?.summary ?? null
-  const isProviderProbe = providerProbes.length > 0
   const catalog = runtimeCatalogState.value
   const catalogEntries = catalog.status === 'loaded' ? catalog.data : []
   const catalogSummary = catalog.status === 'loaded'
@@ -550,14 +536,16 @@ function RuntimeProbePanel() {
     <${ConfigCard} class="mt-4 px-4 py-4">
       <div class="mb-3 flex flex-wrap items-center gap-2">
         <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
-          ${isProviderProbe ? 'provider reachability' : 'ollama warm / kv probe'}
+          provider reachability
         </div>
-        <${StatusChip} tone=${isProviderProbe ? (probe?.probe_ok === false ? 'bad' : 'ok') : probeTone(signal, probe?.probe_ok)}>
-          ${isProviderProbe ? (probe?.status ?? 'provider probe') : probeSignalLabel(signal)}
+        <${StatusChip} tone=${probe?.status === 'warming_up' ? 'neutral' : probe?.probe_ok === false ? 'bad' : 'ok'}>
+          ${probe?.status ?? 'probe pending'}
         <//>
-        ${state.value.data?.cache_hit !== undefined
+        ${state.value.data
           ? html`
-              <${StatusChip} tone="neutral" uppercase=${false}>${state.value.data.cache_hit ? 'cached' : 'fresh'} · age ${formatNumber(state.value.data.cache_age_sec, 1)}s<//>
+              <${StatusChip} tone="neutral" uppercase=${false}>
+                ${runtimeProbeRefreshLabel(state.value.data)} · age ${state.value.data.cache_age_sec == null ? MISSING_DATA_DASH : `${formatNumber(state.value.data.cache_age_sec, 1)}s`}
+              <//>
             `
           : null}
         <${Btn}
@@ -580,108 +568,68 @@ function RuntimeProbePanel() {
       ${!state.value.error && !probe
         ? html`
             <div class="text-xs text-[var(--color-fg-muted)]">
-              ${state.value.loading ? 'runtime probe를 불러오는 중입니다.' : 'probe result가 아직 없습니다.'}
+              ${state.value.loading ? '불러오는 중…' : 'probe result가 아직 없음'}
             </div>
           `
         : null}
 
       ${probe
         ? html`
-            ${isProviderProbe
-              ? html`
-                  <div class="grid gap-3 md:grid-cols-2">
-                    <${RuntimeMetaRow} label="status" value=${probe.status ?? MISSING_DATA_DASH} />
-                    <${RuntimeMetaRow} label="checked at" value=${probe.checked_at ?? MISSING_DATA_DASH} />
-                    <${RuntimeMetaRow} label="reachable" value=${String(providerSummary?.reachable ?? 0)} />
-                    <${RuntimeMetaRow} label="failed" value=${String(providerSummary?.failed ?? 0)} />
-                    <${RuntimeMetaRow} label="skipped" value=${String(providerSummary?.skipped ?? 0)} />
-                    <${RuntimeMetaRow} label="default runtime" value=${providerSummary?.default_runtime_id ?? MISSING_DATA_DASH} />
-                    <${RuntimeMetaRow} label="provider catalog" value=${catalogSummary} />
+            <div class="grid gap-3 md:grid-cols-2">
+              <${RuntimeMetaRow} label="status" value=${probe.status} />
+              <${RuntimeMetaRow} label="checked at" value=${probe.checked_at} />
+              <${RuntimeMetaRow} label="reachable" value=${String(probe.summary.reachable)} />
+              <${RuntimeMetaRow} label="failed" value=${String(probe.summary.failed)} />
+              <${RuntimeMetaRow} label="skipped" value=${String(probe.summary.skipped)} />
+              <${RuntimeMetaRow} label="default runtime" value=${probe.summary.default_runtime_id ?? MISSING_DATA_DASH} />
+              <${RuntimeMetaRow} label="provider catalog" value=${catalogSummary} />
+            </div>
+            <div class="mt-3 flex flex-col gap-2">
+              ${providerProbes.map(item => {
+                const catalogEntry = runtimeProbeCatalogEntry(catalogEntries, item)
+                const catalogRows = catalogEntry ? runtimeProbeCatalogRows(catalogEntry) : []
+                return html`
+                <div class="v2-lab-row rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="min-w-0">
+                      <div class="truncate text-xs font-medium text-[var(--color-fg-primary)]">${item.runtime_id}</div>
+                      <div class="truncate text-2xs text-[var(--color-fg-muted)]">${item.probe_url ?? item.endpoint_url ?? MISSING_DATA_DASH}</div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <${StatusChip} tone=${providerProbeTone(item.status)} uppercase=${false}>${providerProbeLabel(item.status)}<//>
+                      <span class="font-mono text-2xs text-[var(--color-fg-muted)]">${item.http_status ?? MISSING_DATA_DASH} · ${item.latency_ms == null ? MISSING_DATA_DASH : `${formatNumber(item.latency_ms, 1)}ms`}</span>
+                    </div>
                   </div>
-                  <div class="mt-3 flex flex-col gap-2">
-                    ${providerProbes.map(item => {
-                      const catalogEntry = runtimeProbeCatalogEntry(catalogEntries, item)
-                      const catalogRows = catalogEntry ? runtimeProbeCatalogRows(catalogEntry) : []
-                      return html`
-                      <div class="v2-lab-row rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2">
-                        <div class="flex flex-wrap items-center justify-between gap-2">
-                          <div class="min-w-0">
-                            <div class="truncate text-xs font-medium text-[var(--color-fg-primary)]">${item.runtime_id ?? item.provider_id ?? '(unknown runtime)'}</div>
-                            <div class="truncate text-2xs text-[var(--color-fg-muted)]">${item.probe_url ?? item.endpoint_url ?? MISSING_DATA_DASH}</div>
+                  ${item.error
+                    ? html`<div class="mt-2 text-2xs text-[var(--rose-fg)]">${item.error}</div>`
+                    : null}
+                  ${catalogRows.length > 0
+                    ? html`
+                      <div
+                        class="mt-2 grid gap-1 border-t border-[var(--color-border-default)]/60 pt-2 text-2xs"
+                        data-testid="runtime-probe-catalog-spec"
+                      >
+                        ${catalogRows.map(([label, value]) => html`
+                          <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2">
+                            <span class="text-[var(--color-fg-muted)]">${label}</span>
+                            <span class="min-w-0 break-words font-mono text-[var(--color-fg-secondary)]" title=${value}>${value}</span>
                           </div>
-                          <div class="flex items-center gap-2">
-                            <${StatusChip} tone=${providerProbeTone(item.status, item.reachable)} uppercase=${false}>${providerProbeLabel(item.status, item.reachable)}<//>
-                            <span class="font-mono text-2xs text-[var(--color-fg-muted)]">${item.http_status ?? MISSING_DATA_DASH} · ${item.latency_ms == null ? MISSING_DATA_DASH : `${formatNumber(item.latency_ms, 1)}ms`}</span>
-                          </div>
-                        </div>
-                        ${item.error
-                          ? html`<div class="mt-2 text-2xs text-[var(--rose-fg)]">${item.error}</div>`
-                          : null}
-                        ${catalogRows.length > 0
-                          ? html`
-                            <div
-                              class="mt-2 grid gap-1 border-t border-[var(--color-border-default)]/60 pt-2 text-2xs"
-                              data-testid="runtime-probe-catalog-spec"
-                            >
-                              ${catalogRows.map(([label, value]) => html`
-                                <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2">
-                                  <span class="text-[var(--color-fg-muted)]">${label}</span>
-                                  <span class="min-w-0 break-words font-mono text-[var(--color-fg-secondary)]" title=${value}>${value}</span>
-                                </div>
-                              `)}
-                            </div>
-                          `
-                          : html`
-                            <div class="mt-2 text-2xs text-[var(--color-fg-muted)]" data-testid="runtime-probe-catalog-status">
-                              ${runtimeProbeCatalogStatus(catalog, item)}
-                            </div>
-                          `}
+                        `)}
                       </div>
-                    `})}
-                  </div>
-                `
-              : html`
-                  <div class="grid gap-3 md:grid-cols-2">
-                    <${RuntimeMetaRow} label="effective model" value=${probe.effective_model ?? MISSING_DATA_DASH} />
-                    <${RuntimeMetaRow} label="server" value=${probe.server_url ?? MISSING_DATA_DASH} />
-                    <${RuntimeMetaRow} label="loaded before/after" value=${`${fmtBoolean(probe.model_loaded_before_probe)} / ${fmtBoolean(probe.model_loaded_after_probe)}`} />
-                    <${RuntimeMetaRow}
-                      label="first run load"
-                      value=${`${formatNumber(firstRun?.load_duration_ms, 1)} ms`}
-                    />
-                    <${RuntimeMetaRow}
-                      label="prompt tok/s"
-                      value=${`${formatNumber(firstRun?.prompt_tokens_per_second, 1)} tok/s`}
-                    />
-                    <${RuntimeMetaRow}
-                      label="generation tok/s"
-                      value=${`${formatNumber(firstRun?.generation_tokens_per_second, 1)} tok/s`}
-                    />
-                    <${RuntimeMetaRow}
-                      label="prompt eval delta"
-                      value=${assessment?.prompt_eval_duration_reduction_ratio != null
-                        ? `${formatNumber(assessment.prompt_eval_duration_reduction_ratio * 100, 1)}%`
-                        : MISSING_DATA_DASH}
-                    />
-                    <${RuntimeMetaRow}
-                      label="loaded models"
-                      value=${String(probe.loaded_models_after?.length ?? probe.loaded_models_before?.length ?? 0)}
-                    />
-                  </div>
-                `}
+                    `
+                    : html`
+                      <div class="mt-2 text-2xs text-[var(--color-fg-muted)]" data-testid="runtime-probe-catalog-status">
+                        ${runtimeProbeCatalogStatus(catalog, item)}
+                      </div>
+                    `}
+                </div>
+              `})}
+            </div>
 
-            ${assessment?.note
-              ? html`
-                  <div class="mt-3 text-xs leading-relaxed text-[var(--color-fg-muted)]">
-                    ${assessment.note}
-                  </div>
-                `
-              : null}
-
-            ${(probe.observations?.length ?? 0) > 0
+            ${probe.observations.length > 0
               ? html`
                   <div class="mt-3 flex flex-col gap-2">
-                    ${probe.observations?.map(item => html`
+                    ${probe.observations.map(item => html`
                       <div class="v2-lab-row rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2 text-xs text-[var(--color-fg-primary)]">
                         ${item}
                       </div>
@@ -690,10 +638,10 @@ function RuntimeProbePanel() {
                 `
               : null}
 
-            ${(probe.errors?.length ?? 0) > 0
+            ${probe.errors.length > 0
               ? html`
                   <div class="mt-3 flex flex-col gap-2">
-                    ${probe.errors?.map(item => html`
+                    ${probe.errors.map(item => html`
                       <div class="v2-lab-panel rounded-[var(--r-1)] border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-2 text-xs text-[var(--rose-fg)]">
                         ${item}
                       </div>
@@ -764,12 +712,6 @@ export function ConfigResolutionPanel({
                   rootPath=${rootPath}
                   rootSource=${rootSource}
                 />
-                <${ConfigRow}
-                  label="personas"
-                  item=${resolution.personas}
-                  rootPath=${rootPath}
-                  rootSource=${rootSource}
-                />
               </div>
             </div>
           `
@@ -814,7 +756,7 @@ export function ConfigResolutionPanel({
                 <${RuntimeMetaRow} label="server repo head" value=${runtimeResolution.server_repo_git_commit ?? MISSING_DATA_DASH} />
                 <${RuntimeMetaRow} label="workspace head" value=${runtimeResolution.workspace_git_commit ?? MISSING_DATA_DASH} />
                 <${RuntimeMetaRow} label="resolved base head" value=${runtimeResolution.resolved_base_git_commit ?? MISSING_DATA_DASH} />
-                <${RuntimeMetaRow} label="runtime build" value=${runtimeResolution.build.commit ?? runtimeResolution.build.release_version} />
+                <${RuntimeMetaRow} label="runtime build" value=${runtimeResolution.build.binary_commit ?? MISSING_DATA_DASH} />
                 <${RuntimeMetaRow} label="started at" value=${runtimeResolution.build.started_at} />
               </div>
 

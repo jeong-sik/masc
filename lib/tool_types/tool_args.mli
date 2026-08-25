@@ -109,7 +109,12 @@ val ok_assoc : (string * Yojson.Safe.t) list -> Yojson.Safe.t
 val error_result : ?tool_name:string -> ?start_time:float -> string -> Tool_result.result
 
 val error_result_typed :
-  ?tool_name:string -> ?start_time:float -> code:error_code -> string -> Tool_result.result
+  ?tool_name:string ->
+  ?start_time:float ->
+  ?failure_class:Tool_result.tool_failure_class ->
+  code:error_code ->
+  string ->
+  Tool_result.result
 
 val ok_result :
   ?tool_name:string -> ?start_time:float -> (string * Yojson.Safe.t) list -> Tool_result.result
@@ -123,8 +128,6 @@ val ok_result :
 
 (** Trim whitespace; reject empty. *)
 val get_string_required : Yojson.Safe.t -> string -> (string, string) Result.t
-
-val get_int_required : Yojson.Safe.t -> string -> (int, string) Result.t
 
 (** Monadic bind for [('a, string) Result.t] → [Tool_result.result].
     Chains required field extractions with early error return. *)
@@ -161,7 +164,6 @@ type field_error = {
   received : string option;
 }
 
-val field_error_to_yojson : field_error -> Yojson.Safe.t
 val validation_error_assoc : field_error list -> Yojson.Safe.t
 
 (** [{"status":"error","error_code":"validation_error",

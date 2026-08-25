@@ -2,11 +2,6 @@
     extracted from operator_control_snapshot.ml. *)
 
 (* Local copies of trivial helpers to avoid sibling -> parent cycle. *)
-let non_empty_trimmed_string_opt value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
-
-
 let compact_runtime_trust_cache_ttl_sec = 3.0
 
 (* Cache key for the per-keeper runtime-trust projection.
@@ -31,7 +26,6 @@ let compact_runtime_trust_cache_ttl_sec = 3.0
      drops from 400-580ms (miss) to ~43ms (hit) on warm cycles.
 
    Identity bits the key keeps:
-   - [meta.runtime.nonce]: bumped on supervisor restart / takeover.
    - [meta.paused]: explicit pause/unpause toggle.
 
    Result: each keeper has exactly one cache slot.  Turn transitions
@@ -42,10 +36,9 @@ let compact_runtime_trust_cache_key
       ~(meta : Keeper_meta_contract.keeper_meta)
   =
   Printf.sprintf
-    "operator:keeper-runtime-trust:compact:v1:%s:%s:%d:%b"
+    "operator:keeper-runtime-trust:compact:v1:%s:%s:%b"
     config.base_path
     meta.name
-    meta.runtime.nonce
     meta.paused
 ;;
 

@@ -7,6 +7,7 @@ import {
 
 function validMessage(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
+    id: 'msg-current-1',
     role: 'user',
     content: 'hello keeper',
     ts: 1_712_000_000.25,
@@ -140,7 +141,6 @@ describe('safeParseKeeperChatHistoryMessage', () => {
           status: 'backend_trace_join',
           turn_ref: 'trace-1780648779957-00000#4071',
           trace_event_count: 2,
-          delivery_receipt: 'no_delivery_receipt',
           reason: 'turn_ref joined to retained trajectory/internal-history events',
         },
       }),
@@ -150,7 +150,6 @@ describe('safeParseKeeperChatHistoryMessage', () => {
       status: 'backend_trace_join',
       turn_ref: 'trace-1780648779957-00000#4071',
       trace_event_count: 2,
-      delivery_receipt: 'no_delivery_receipt',
       reason: 'turn_ref joined to retained trajectory/internal-history events',
     })
   })
@@ -169,7 +168,6 @@ describe('safeParseKeeperChatHistoryMessage', () => {
             'TEXT_MESSAGE_END',
             'RUN_FINISHED',
           ],
-          delivery_receipt: 'server_lifecycle_replay_only',
           reason: 'history row records durable server stream lifecycle replay',
         },
       }),
@@ -185,7 +183,6 @@ describe('safeParseKeeperChatHistoryMessage', () => {
         'TEXT_MESSAGE_END',
         'RUN_FINISHED',
       ],
-      delivery_receipt: 'server_lifecycle_replay_only',
       reason: 'history row records durable server stream lifecycle replay',
     })
   })
@@ -198,29 +195,87 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     ).toBeNull()
   })
 
+  // #27962 hard-cut the old delivery receipt off the wire and this test used
+  // to pin the removal. #28225 re-introduced `delivery_receipt` as a stream
+  // replay-coverage label on every persisted row; keeping the rejection pin
+  // made the boundary drop every direct-conversation row while only
+  // autonomous rows (no stream_contract) survived (#28407).
+  it('passes the #28225 delivery_receipt coverage label through', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        stream_contract: {
+          source: 'backend_turn_trace',
+          status: 'backend_trace_join',
+          delivery_receipt: 'no_delivery_receipt',
+        },
+      }),
+    )
+    expect(out?.stream_contract?.delivery_receipt).toBe('no_delivery_receipt')
+  })
+
+  it('ignores unknown additive stream_contract fields instead of dropping the row', () => {
+    // The per-row safeParse drop means a rejected key here deletes the whole
+    // message from the transcript. An additive backend field must degrade to
+    // "ignored", never to "row dropped" (#28407).
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        stream_contract: {
+          source: 'backend_turn_trace',
+          status: 'backend_trace_join',
+          some_future_field: 'introduced ahead of the dashboard',
+        },
+      }),
+    )
+    expect(out).not.toBeNull()
+    expect(out?.stream_contract?.source).toBe('backend_turn_trace')
+    expect(
+      (out?.stream_contract as Record<string, unknown> | undefined)?.some_future_field,
+    ).toBeUndefined()
+  })
+
   it('leaves turn_ref undefined on legacy rows without dropping the message', () => {
     const out = safeParseKeeperChatHistoryMessage(validMessage())
     expect(out).not.toBeNull()
     expect(out?.turn_ref).toBeUndefined()
   })
 
-  it('passes delivery_key through without dropping the row, whatever its shape', () => {
+  it('decodes the complete operation provenance pair', () => {
     const out = safeParseKeeperChatHistoryMessage(
-      validMessage({ delivery_key: { kind: 'direct_request', request_id: 'kmsg-1' } }),
+      validMessage({
+        delivery_key: { kind: 'operation', operation_id: 'kmsg-1' },
+        transcript_slot: { kind: 'accepted_user' },
+      }),
     )
     expect(out).not.toBeNull()
-    expect(out?.delivery_key).toEqual({ kind: 'direct_request', request_id: 'kmsg-1' })
-    // Malformed / unexpected shapes are tolerated too: the consumer extracts
-    // request_id tolerantly, so the row must survive.
-    expect(
-      safeParseKeeperChatHistoryMessage(validMessage({ delivery_key: 'kmsg-1' })),
-    ).not.toBeNull()
-    expect(
-      safeParseKeeperChatHistoryMessage(validMessage({ delivery_key: 42 })),
-    ).not.toBeNull()
-    expect(
-      safeParseKeeperChatHistoryMessage(validMessage())?.delivery_key,
-    ).toBeUndefined()
+    expect(out?.delivery_provenance).toEqual({
+      delivery_key: { kind: 'operation', operation_id: 'kmsg-1' },
+      transcript_slot: { kind: 'accepted_user' },
+    })
+    expect(out?.delivery_provenance_status).toBe('valid')
+    expect(out).not.toHaveProperty('delivery_key')
+    expect(out).not.toHaveProperty('transcript_slot')
+  })
+
+  it('keeps malformed or half provenance visible but non-reconcilable', () => {
+    for (const raw of [
+      validMessage({ delivery_key: { kind: 'operation', operation_id: 'kmsg-1' } }),
+      validMessage({
+        delivery_key: { kind: 'operation', request_id: 'kmsg-1' },
+        transcript_slot: { kind: 'accepted_user' },
+      }),
+      validMessage({ delivery_key: 'kmsg-1', transcript_slot: { kind: 'accepted_user' } }),
+    ]) {
+      const out = safeParseKeeperChatHistoryMessage(raw)
+      expect(out).not.toBeNull()
+      expect(out?.delivery_provenance).toBeNull()
+      expect(out?.delivery_provenance_status).toBe('invalid')
+    }
+  })
+
+  it('marks a row without provenance as absent', () => {
+    const out = safeParseKeeperChatHistoryMessage(validMessage())
+    expect(out?.delivery_provenance).toBeNull()
+    expect(out?.delivery_provenance_status).toBe('absent')
   })
 
   it('returns null when turn_ref has the wrong type', () => {
@@ -263,10 +318,13 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     expect(out?.id).toBe('msg-0001700000000000-0')
   })
 
-  it('accepts rows without an id (pre-R3 backend during the deploy window)', () => {
-    const out = safeParseKeeperChatHistoryMessage(validMessage())
-    expect(out).not.toBeNull()
-    expect(out?.id).toBeUndefined()
+  it('rejects rows without a current producer id', () => {
+    const { id: _, ...withoutId } = validMessage()
+    expect(safeParseKeeperChatHistoryMessage(withoutId)).toBeNull()
+  })
+
+  it('rejects rows with a blank producer id', () => {
+    expect(safeParseKeeperChatHistoryMessage(validMessage({ id: '  ' }))).toBeNull()
   })
 
   it('composes in a filter chain — drops garbage entries silently', () => {

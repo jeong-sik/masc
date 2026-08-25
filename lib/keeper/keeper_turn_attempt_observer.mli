@@ -22,9 +22,6 @@ val record_turn_start
   -> turn_id:int
   -> start_observation
 
-(** Read-only current observation state. *)
-val current_state : base_path:string -> keeper:string -> attempt_state option
-
 (** Clear one Keeper's in-process observation state at a lifecycle boundary. *)
 val reset_keeper : base_path:string -> keeper:string -> unit
 

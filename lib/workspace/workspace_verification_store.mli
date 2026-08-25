@@ -52,8 +52,22 @@ val request_header_of_yojson :
 val submitted_evidence_access_to_yojson :
   submitted_evidence_access -> Yojson.Safe.t
 
+val submitted_evidence_access_transport_to_yojson :
+  submitted_evidence_access -> Yojson.Safe.t
+(** Judge-transport projection of the snapshot: a [truncated=true] artifact
+    carries [content_omitted] and an explanatory [content_note] (file size,
+    snapshot cap, how to read ranges of the real file) instead of the prefix
+    content. {!submitted_evidence_access_to_yojson} remains the persistence
+    serializer and keeps the prefix for the audit record (#29615). *)
+
 val submitted_evidence_access_metadata_to_yojson :
   submitted_evidence_access -> Yojson.Safe.t
+
+val truncated_snapshot_items : Yojson.Safe.t -> (string * int) list
+(** [(reference, bytes)] for every truncated artifact in a persisted evidence
+    snapshot. Lets the submit path warn the producer at submission time
+    instead of leaving the "too large to read at once" fact discoverable only
+    after a review stalls. *)
 
 val evidence_read_failure_code : evidence_read_failure -> string
 (** Stable bounded code for diagnostics and metadata. Error detail is carried
@@ -63,22 +77,45 @@ val evidence_access_failure_to_string :
 val evidence_read_failure_of_owned_read_failure :
   Fs_compat.owned_regular_file_read_failure -> evidence_read_failure
 
+val verification_evidence_max_bytes : int
+(** Byte cap on the snapshot taken of a producer-owned evidence artifact. The
+    artifact itself is not truncated; only the copy persisted in the
+    verification request is. The judge-transport projection omits that prefix
+    entirely for a truncated artifact. Exposed so a test states the truncation
+    property against this value instead of copying the number, which made the
+    constant unchangeable without editing an assertion that never described
+    the constant. *)
+
 val project_root_of_base_path : string -> string
 (** The project root a BasePath names, whether the caller passed the project
     root itself or its [.masc] directory. Exposed so a producer's ownership
     root is derived by this function everywhere rather than re-derived beside
     it. *)
 
-val read_regular_file_prefix :
-  ownership_root:string ->
-  string ->
-  (string * int * bool, evidence_read_failure) result
-(** Read a bounded UTF-8 prefix of an owned regular file, returning
-    [(content, file_size, truncated)]. This is the reader that materializes an
-    [artifact:] evidence reference. {!Verification_authority_tools} reuses it so
-    a live read and its snapshot cannot disagree about the same file: one byte
-    cap, one policy for a multi-byte sequence cut by that cap, one failure
-    vocabulary. *)
+(** The reference shapes this store can read, decided without touching the
+    filesystem. *)
+type reference_form =
+  | Artifact_reference of string
+  | Note_reference of string
+  | Unresolvable_reference
+
+val classify_evidence_reference : string -> reference_form
+(** Shape of an evidence reference as {!snapshot_submitted_evidence_json} will
+    read it. This module is the only producer of evidence snapshots, so the
+    submit boundaries call this rather than restating the accepted prefixes:
+    a reference cannot be admitted at submit and then be unreadable at review,
+    and a new form added here reaches every caller. *)
+
+val note_reference_form : string
+(** The accepted form for narrative evidence, spelled from the prefix this
+    module matches on, so an error message naming it cannot drift from the
+    classifier. The artifact form has no such caller: a message that has to
+    name both uses {!resolvable_reference_forms}. *)
+
+val resolvable_reference_forms : string list
+(** The accepted forms, spelled for an error message that has to tell a caller
+    what to write instead. *)
+
 val snapshot_submitted_evidence_json :
   base_path:string ->
   worker:string ->
@@ -115,4 +152,3 @@ val inspect_submitted_evidence_for_authority :
     authority. The task id and producer must still match the durable request. *)
 val verifications_dir : string -> string
 val request_path : string -> string -> string
-val list_request_headers : string -> request_header list

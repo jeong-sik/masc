@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   formatKeeperVisibleReply,
+  keeperTurnOutcomeSuppressesReply,
   normalizeKeeperConversationDetails,
+  normalizeKeeperExternalEffectTarget,
   normalizeKeeperToolResponse,
 } from './keeper-message'
 
@@ -212,6 +214,34 @@ describe('normalizeKeeperConversationDetails', () => {
     expect(result?.turnOutcome).toBe('external_effect_pending')
     expect(result?.replyText).toBeNull()
   })
+
+  it('decodes the typed connector delivery without reply prose', () => {
+    const result = normalizeKeeperConversationDetails({
+      reply: '',
+      turn_outcome: 'external_effect_completed',
+    })
+    expect(result?.turnOutcome).toBe('external_effect_completed')
+    expect(result?.replyText).toBeNull()
+  })
+})
+
+// ================================================================
+// keeperTurnOutcomeSuppressesReply
+// ================================================================
+
+describe('keeperTurnOutcomeSuppressesReply', () => {
+  it('suppresses terminal control outcomes, including connector delivery', () => {
+    expect(keeperTurnOutcomeSuppressesReply('continuation_checkpoint')).toBe(true)
+    expect(keeperTurnOutcomeSuppressesReply('external_effect_pending')).toBe(true)
+    expect(keeperTurnOutcomeSuppressesReply('external_effect_completed')).toBe(true)
+    expect(keeperTurnOutcomeSuppressesReply('no_visible_reply')).toBe(true)
+  })
+
+  it('does not suppress a visible reply or a missing outcome', () => {
+    expect(keeperTurnOutcomeSuppressesReply('visible_reply')).toBe(false)
+    expect(keeperTurnOutcomeSuppressesReply(null)).toBe(false)
+    expect(keeperTurnOutcomeSuppressesReply(undefined)).toBe(false)
+  })
 })
 
 // ================================================================
@@ -319,5 +349,58 @@ describe('normalizeKeeperToolResponse', () => {
     })
     const result = normalizeKeeperToolResponse(raw)
     expect(result.text).toBe('A\n\nB')
+  })
+})
+
+// ================================================================
+// normalizeKeeperExternalEffectTarget
+// ================================================================
+
+describe('normalizeKeeperExternalEffectTarget', () => {
+  it('decodes the three delivery target kinds', () => {
+    expect(normalizeKeeperExternalEffectTarget({ kind: 'dashboard' }))
+      .toEqual({ kind: 'dashboard' })
+    expect(
+      normalizeKeeperExternalEffectTarget({ kind: 'discord', channel_id: 'D1' }),
+    ).toEqual({ kind: 'discord', channelId: 'D1' })
+    expect(
+      normalizeKeeperExternalEffectTarget({
+        kind: 'slack',
+        channel_id: 'C1',
+        thread_ts: '1700000000.000100',
+      }),
+    ).toEqual({ kind: 'slack', channelId: 'C1', threadTs: '1700000000.000100' })
+    expect(
+      normalizeKeeperExternalEffectTarget({ kind: 'slack', channel_id: 'C1' }),
+    ).toEqual({ kind: 'slack', channelId: 'C1', threadTs: null })
+  })
+
+  it('decodes malformed or legacy input to null instead of guessing', () => {
+    expect(normalizeKeeperExternalEffectTarget(undefined)).toBeNull()
+    expect(normalizeKeeperExternalEffectTarget(null)).toBeNull()
+    expect(normalizeKeeperExternalEffectTarget('slack')).toBeNull()
+    expect(normalizeKeeperExternalEffectTarget({ kind: 'telegram' })).toBeNull()
+    expect(normalizeKeeperExternalEffectTarget({ kind: 'slack' })).toBeNull()
+    expect(
+      normalizeKeeperExternalEffectTarget({ kind: 'discord', channel_id: ' ' }),
+    ).toBeNull()
+  })
+
+  it('is surfaced by normalizeKeeperConversationDetails from the reply payload', () => {
+    const details = normalizeKeeperConversationDetails({
+      reply: '',
+      turn_outcome: 'external_effect_completed',
+      turn_ref: 'trace-1#2',
+      external_effect_target: { kind: 'dashboard' },
+    })
+    expect(details?.turnOutcome).toBe('external_effect_completed')
+    expect(details?.externalEffectTarget).toEqual({ kind: 'dashboard' })
+
+    const legacy = normalizeKeeperConversationDetails({
+      reply: '',
+      turn_outcome: 'external_effect_completed',
+      turn_ref: 'trace-1#2',
+    })
+    expect(legacy?.externalEffectTarget).toBeNull()
   })
 })

@@ -1,5 +1,5 @@
 // AgentRuntimeStrip — compact horizontal strip showing keeper live metrics.
-// Renders pipeline stage badge, context ratio bar, generation, display model, and latest activity signal.
+// Renders pipeline stage badge, context ratio bar, display model, and latest activity signal.
 // Only renders if the agent has a linked keeper.
 
 import { html } from 'htm/preact'
@@ -38,9 +38,8 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
     ?? (keeper.last_turn_ago_s != null && keeper.last_turn_ago_s < 600 ? 'idle' : rawStage)
   const ctxRatio = keeper.context_ratio
   const ctxPct = ctxRatio != null ? Math.round(ctxRatio * 100) : null
-  const generation = keeper.generation
   const runtime = keeperDisplayRuntime(keeper)
-  const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
+  const activity = keeperActivityDisplay(keeper)
   if (runtime) loadRuntimeCatalog()
   const catalogState = runtime ? runtimeCatalogState.value : null
   const catalog = catalogState?.status === 'loaded' ? catalogState.data : []
@@ -73,13 +72,6 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
             ></div>
           </div>
           <span class="text-sm text-[var(--color-fg-primary)] tabular-nums">${ctxPct}%</span>
-        </div>
-      ` : null}
-
-      ${generation != null ? html`
-        <div class="flex items-center gap-1.5 text-sm">
-          <span class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider">GEN</span>
-          <span class="text-sm text-[var(--color-fg-primary)] tabular-nums">${generation}</span>
         </div>
       ` : null}
 

@@ -1,11 +1,5 @@
 ---
 status: reference
-last_verified: 2026-07-13
-code_refs:
-  - lib/config/
-  - lib/fusion/
-  - lib/fusion_core/
-  - config/
 ---
 
 # Configuration
@@ -29,9 +23,9 @@ observable.
 
 | Configuration | Owner | Rule |
 |---|---|---|
-| provider/model catalog and call features | OAS | generic; imports no MASC concept |
-| runtime id and fallback membership | OAS config, referenced by MASC | MASC stores ids, not vendor branches |
-| Keeper persona/world/runtime | MASC Keeper config | one immutable snapshot per Keeper cycle |
+| provider/model catalog and call features | agent core | generic; imports no MASC concept |
+| runtime id and fallback membership | agent core config, referenced by MASC | MASC stores ids, not vendor branches |
+| Keeper instructions/world/runtime | MASC Keeper config | one immutable snapshot per Keeper cycle |
 | Tool descriptors and schemas | registered tool modules | no parallel policy table |
 | Gate mode and judge runtime | MASC Gate config | generic, no product/tool cases |
 | Scheduler conditions | MASC Scheduler | explicit time/event expressions |
@@ -43,12 +37,12 @@ operator choice. Configurability is not added speculatively.
 
 ## 3. Keeper runtime selection
 
-A Keeper names a runtime id resolved through the OAS catalog. Fallbacks are an
+A Keeper names a runtime id resolved through the agent core catalog. Fallbacks are an
 explicit ordered runtime membership, not a health tier, score, failure count,
 or vendor-specific branch. Provider outcomes are recorded and returned to the
 Keeper/LLM; MASC does not turn them into cooldown or admission policy.
 
-Runtime declarations describe capabilities reported by OAS, including text,
+Runtime declarations describe capabilities reported by agent core, including text,
 tool use, reasoning/thinking, multi-turn, image/audio/voice, streaming, and
 structured output. MASC must not guess these features from model-name strings.
 
@@ -105,7 +99,7 @@ Secrets are redacted at the typed secret boundary, not by substring matching.
 - `INV-CONFIG-001`: one canonical key and one typed owner per setting.
 - `INV-CONFIG-002`: all paths derive from `BasePath`.
 - `INV-CONFIG-003`: reload is validate-then-atomic-swap.
-- `INV-CONFIG-004`: OAS remains free of MASC concepts.
+- `INV-CONFIG-004`: agent core remains free of MASC concepts.
 - `INV-CONFIG-005`: Tool descriptors are the tool-surface SSOT.
 - `INV-CONFIG-006`: semantic Gate decisions use the configured LLM.
 - `INV-CONFIG-007`: no config value automatically pauses/stops a Keeper.

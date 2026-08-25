@@ -1149,11 +1149,21 @@ let ensure_roots ~base_path ~keeper_name candidates =
               then Error "candidate Keeper differs from partition ledger Keeper"
               else
                 let* () = valid_time "candidate recorded_at" candidate.recorded_at in
-                match Candidate.resumable_status candidate.status with
-                | None | Some (Candidate.Resumable_consumed _) -> Ok roots
-                | Some
+                match Candidate.status_view candidate.status with
+                | Candidate.Suspended_quarantine _
+                | Candidate.Direct_resumable (Candidate.Resumable_consumed _)
+                | Candidate.Requeued_resumable
+                    { resumable = Candidate.Resumable_consumed _; _ } ->
+                  Ok roots
+                | Candidate.Direct_resumable
                     (Candidate.Resumable_pending _
-                    | Candidate.Resumable_judged _) ->
+                    | Candidate.Resumable_judged _)
+                | Candidate.Requeued_resumable
+                    { resumable =
+                        (Candidate.Resumable_pending _
+                        | Candidate.Resumable_judged _)
+                    ; _
+                    } ->
                   let* context_key = Candidate.Context_key.of_candidate candidate in
                   (match Id_map.find_opt candidate.candidate_id view.live_candidate_owner with
                    | Some owner_id ->
@@ -1301,26 +1311,6 @@ let claim_ready_exact
       | Some _ -> Ok None))
 ;;
 
-let transition_running ~base_path ~partition ~worker_epoch decide =
-  update ~base_path ~keeper_name:partition.keeper_name (fun view ->
-    match Id_map.find_opt partition.partition_id view.by_id with
-    | None -> Error ("Board attention partition not found: " ^ partition.partition_id)
-    | Some current ->
-      (match current.state with
-       | Running running when Worker_epoch.equal running.worker_epoch worker_epoch ->
-         let* state = decide running in
-         let* updated = advance_state current state in
-         if updated = current then Ok ([], current) else Ok ([ updated ], updated)
-       | Running running ->
-         Error
-           (Printf.sprintf
-              "partition %s is owned by worker %s"
-              partition.partition_id
-              (Worker_epoch.to_string running.worker_epoch))
-       | Ready | Completed _ | Settled _ | Blocked _ ->
-         Error ("partition is not Running: " ^ partition.partition_id)))
-;;
-
 let transition_running_exact ~base_path ~partition ~worker_epoch decide =
   let* (partition, changed), write_outcome =
     update_exact ~base_path ~keeper_name:partition.keeper_name (fun view ->
@@ -1395,12 +1385,7 @@ let record_before_advance ~worker_epoch ~base_path ~partition ~source ~next =
              Error "before-advance predispatch rejection requires a durable advancing visit")
         | Unbound ->
           (match source with
-           | Predispatch_rejection _ ->
-             let last_from =
-               match source with
-               | Predispatch_rejection visit -> visit
-               | Executed_failure _ -> assert false
-             in
+           | Predispatch_rejection last_from ->
              Ok
                (Running
                   { running with

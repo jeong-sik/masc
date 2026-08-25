@@ -152,6 +152,19 @@ let parse_user_media_block ~(kind : string) fields =
         ; size
         }
 
+(* Shared body for the media block kinds. The constructor is chosen at the
+   single point where the kind string is matched, so no arm can be
+   unreachable and no wildcard can silently misclassify a new kind. *)
+let parse_media_input_block json ~kind make =
+  let* fields =
+    exact_object_fields
+      ~field:("user_blocks " ^ kind ^ " block")
+      ~allowed:[ "type"; "attachment_id"; "name"; "mime_type"; "size" ]
+      json
+  in
+  let* media = parse_user_media_block ~kind fields in
+  Ok (make media)
+
 let parse_user_input_block json =
   let* base_fields =
     exact_object_fields
@@ -170,20 +183,10 @@ let parse_user_input_block json =
     let text = String.trim text in
     if text = "" then Error "user_blocks text block requires non-empty text"
     else Ok (User_text text)
-  | ("image" | "document" | "audio") as kind ->
-    let* fields =
-      exact_object_fields
-        ~field:("user_blocks " ^ kind ^ " block")
-        ~allowed:[ "type"; "attachment_id"; "name"; "mime_type"; "size" ]
-        json
-    in
-    let* media = parse_user_media_block ~kind fields in
-    Ok
-      (match kind with
-       | "image" -> User_image media
-       | "document" -> User_document media
-       | "audio" -> User_audio media
-       | _ -> assert false)
+  | "image" -> parse_media_input_block json ~kind:"image" (fun media -> User_image media)
+  | "document" ->
+    parse_media_input_block json ~kind:"document" (fun media -> User_document media)
+  | "audio" -> parse_media_input_block json ~kind:"audio" (fun media -> User_audio media)
   | "" -> Error "user_blocks block requires type"
   | other ->
     Error
@@ -395,7 +398,7 @@ let resolve_media_payload ~attachments kind media =
         (normalize_media_payload ~kind ~attachment_id:media.attachment_id
            ~declared_media_type:declared att.data)
 
-let media_block_to_oas ~attachments kind make_block media =
+let media_block_to_agent_core ~attachments kind make_block media =
   Result.map
     (fun (_att, media_type, data) -> make_block ~media_type ~data ())
     (resolve_media_payload ~attachments kind media)
@@ -455,13 +458,13 @@ let text_block_of_document
               ])
         in
         Ok
-          (Agent_sdk.Types.Text
+          (Agent_core.Types.Text
              (Printf.sprintf
                 "User-provided attachment metadata: %s\n\n%s"
                 metadata
                 text))
 
-let document_block_to_oas ~attachments media =
+let document_block_to_agent_core ~attachments media =
   match resolve_media_payload ~attachments "document" media with
   | Error _ as error -> error
   | Ok (att, media_type, data) ->
@@ -473,35 +476,35 @@ let document_block_to_oas ~attachments media =
              ~media_type
              data
        | Preserve_document ->
-           Ok (Agent_sdk.Types.document_block ~media_type ~data ()))
+           Ok (Agent_core.Types.document_block ~media_type ~data ()))
 
-let to_oas_blocks ~attachments blocks =
+let to_agent_core_blocks ~attachments blocks =
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
     | User_text text :: rest ->
         let text = String.trim text in
         let acc =
-          if text = "" then acc else Agent_sdk.Types.Text text :: acc
+          if text = "" then acc else Agent_core.Types.Text text :: acc
         in
         loop acc rest
     | User_image media :: rest -> (
         match
-          media_block_to_oas ~attachments "image"
+          media_block_to_agent_core ~attachments "image"
             (fun ~media_type ~data () ->
-               Agent_sdk.Types.image_block ~media_type ~data ())
+               Agent_core.Types.image_block ~media_type ~data ())
             media
         with
         | Ok block -> loop (block :: acc) rest
         | Error err -> Error err)
     | User_document media :: rest -> (
-        match document_block_to_oas ~attachments media with
+        match document_block_to_agent_core ~attachments media with
         | Ok block -> loop (block :: acc) rest
         | Error err -> Error err)
     | User_audio media :: rest -> (
         match
-          media_block_to_oas ~attachments "audio"
+          media_block_to_agent_core ~attachments "audio"
             (fun ~media_type ~data () ->
-               Agent_sdk.Types.audio_block ~media_type ~data ())
+               Agent_core.Types.audio_block ~media_type ~data ())
             media
         with
         | Ok block -> loop (block :: acc) rest

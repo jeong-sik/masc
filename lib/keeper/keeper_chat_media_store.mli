@@ -1,6 +1,6 @@
 (** Keeper_chat_media_store — content-addressed store for model-generated media.
 
-    RFC-0301: OAS streams model-generated media as [MediaDelta { media_type; data }];
+    RFC-0301: AGENT_CORE streams model-generated media as [MediaDelta { media_type; data }];
     the keeper-chat bridge persists it here and surfaces it by URL token instead of
     reducing it to a byte count. Generalizes the voice-clip token/serve pattern
     ([/api/v1/voice/audio/<token>]) to an arbitrary [media_type]. Files live under
@@ -10,7 +10,7 @@
     directory-size caps. *)
 
 type persist_error =
-  | Unsupported_source_type of Agent_sdk.Types.media_source_kind
+  | Unsupported_source_type of Agent_core.Types.media_source_kind
   | Invalid_base64 of string
   | Media_too_large of { size_bytes : int; max_bytes : int }
   | Write_failed of string
@@ -23,7 +23,7 @@ type media_category =
   | Document
   | Other
 
-(** [media_type] (IANA type from the OAS media block) -> file extension; unknown
+(** [media_type] (IANA type from the AGENT_CORE media block) -> file extension; unknown
     types fall back to ["bin"]. *)
 val ext_of_media_type : string -> string
 
@@ -70,12 +70,12 @@ val persist : base_dir:string -> media_type:string -> data:string -> string * st
     filesystem errors may carry internal paths. *)
 val persist_error_to_string : persist_error -> string
 
-(** [persist_media_source_result] decodes the OAS media source carrier first.
+(** [persist_media_source_result] decodes the AGENT_CORE media source carrier first.
     [Base64] is decoded to raw bytes before persisting; [Url] and [File_id] are
     rejected until this store has an explicit fetch/resolve implementation. *)
 val persist_media_source_result :
   base_dir:string ->
   media_type:string ->
-  source_type:Agent_sdk.Types.media_source_kind ->
+  source_type:Agent_core.Types.media_source_kind ->
   data:string ->
   (string * string, persist_error) result

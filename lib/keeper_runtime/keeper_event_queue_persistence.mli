@@ -1,7 +1,11 @@
 (** Durable per-Keeper Event Layer state.
 
-    Current writes use the [keeper.event_queue.state.v15]
-    [event-queue-v15.json] envelope: revision, pending stimuli, the latest
+    Current writes go to [event-queue-v17.json]. The envelope inside still
+    carries the [keeper.event_queue.state.v16] schema tag because the JSON
+    shape did not change: #29598 changed what a turn-attempt-terminal
+    operation id says, not the field layout around it. The filename is the
+    fresh-state device, the schema tag names the shape. The envelope holds
+    revision, pending stimuli, the latest
     projected transition, an operation-indexed ledger of older projected
     dispositions, at most one unprojected transition, and durable
     accepted-transfer target projections. Only this schema and the
@@ -11,6 +15,13 @@
     so its retained size is bounded by one complete state. Serializing that
     state on each transition is the intentional cost of recovery that does not
     infer missing sibling work from a delta. *)
+
+(** The durable filenames this binary reads and writes. Callers outside
+    OCaml — the deployment preflight script builds fixtures at these exact
+    names — read them from here instead of repeating the version. *)
+val snapshot_filename : string
+
+val transition_wal_filename : string
 
 type owner_identity
 type owner_identity_error
@@ -41,7 +52,6 @@ type exact_write_outcome =
 type accepted_cancellation = Keeper_event_queue_state.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -49,23 +59,21 @@ type accepted_cancellation = Keeper_event_queue_state.accepted_cancellation =
 type accepted_transfer = Keeper_event_queue_state.accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
-  ; target_generation : int
   ; target_trace_id : Keeper_id.Trace_id.t
   }
 
 type source_terminal_receipt = Keeper_event_queue_state.source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
+  | Turn_completed
   | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = Keeper_event_queue_state.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -112,6 +120,15 @@ val select_when_result :
   ready:(Keeper_event_queue.stimulus -> bool) ->
   (Keeper_event_queue_state.pending_selection option, string) result
 
+val connector_attention_conversation_batch_result :
+  base_path:string ->
+  keeper_name:string ->
+  primary:Keeper_event_queue_state.pending_selection ->
+  (Keeper_event_queue_state.pending_selection list, string) result
+(** Durable read wrapper over
+    {!Keeper_event_queue_state.connector_attention_conversation_batch}
+    (RFC-0377). *)
+
 val validate_pending_selection_result :
   base_path:string ->
   keeper_name:string ->
@@ -130,6 +147,7 @@ type snapshot_read_error_kind =
   | Invalid_path
   | Read_failed
   | Parse_failed
+  | Incoherent_read
 
 type snapshot_read_error =
   { kind : snapshot_read_error_kind
@@ -137,10 +155,21 @@ type snapshot_read_error =
   ; message : string
   }
 
-type snapshot_with_errors =
-  { pending : Keeper_event_queue.t
+type 'pending with_read_errors =
+  { pending : 'pending
   ; read_errors : snapshot_read_error list
   }
+(** A pending projection paired with the typed read errors that emptied it.
+    [read_errors = []] means [pending] is the durable truth; a non-empty list
+    means the durable state could not be read and [pending] is empty. *)
+
+type snapshot_with_errors = Keeper_event_queue.t with_read_errors
+
+type selections_with_errors =
+  Keeper_event_queue_state.pending_selection list with_read_errors
+(** The same read with each pending entry's exact source authority
+    ([source_snapshot_ref] input plus [admitted_revision]), so an operator
+    surface can address one entry without a second read. *)
 
 type durable_state_discovery =
   { keeper_names : string list
@@ -152,6 +181,29 @@ val discover_keeper_names_with_durable_state :
   base_path:string -> durable_state_discovery
 val load_snapshot_with_errors :
   base_path:string -> keeper_name:string -> snapshot_with_errors
+
+val load_selections_with_errors :
+  base_path:string -> keeper_name:string -> selections_with_errors
+(** {!load_snapshot_with_errors} projected through
+    {!Keeper_event_queue_state.pending_selections}: the same durable read and
+    the same typed read errors, keeping each entry's [admitted_revision]. *)
+
+val observe_snapshot_with_errors :
+  base_path:string -> keeper_name:string -> snapshot_with_errors
+(** Read-only operator projection of the pending queue. Unlike
+    {!load_snapshot_with_errors}, this observer never acquires the canonical
+    queue-owner transaction lock and never checkpoints or compacts the
+    transition WAL. It accepts only two identical full-state observations, so
+    a concurrent snapshot/WAL generation change is an explicit read error
+    rather than a healthy empty projection. *)
+
+module For_testing : sig
+  val observe_snapshot_with_errors_with_interleave :
+    between_samples:(unit -> unit) ->
+    base_path:string ->
+    keeper_name:string ->
+    snapshot_with_errors
+end
 
 val load_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
@@ -189,7 +241,6 @@ val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  current_owner_nonce:int ->
   applied_at:float ->
   cancellation:accepted_cancellation ->
   unit ->
@@ -202,7 +253,6 @@ val transfer_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  current_owner_nonce:int ->
   applied_at:float ->
   transfer:accepted_transfer ->
   unit ->
@@ -214,7 +264,6 @@ val ack_pending_source_terminal_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  current_owner_nonce:int ->
   acked_at:float ->
   source_terminal:accepted_source_terminal ->
   unit ->
@@ -226,7 +275,6 @@ val terminalize_pending_turn_attempt_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  current_owner_nonce:int ->
   applied_at:float ->
   selection:Keeper_event_queue_state.pending_selection ->
   detail:string ->
@@ -235,6 +283,17 @@ val terminalize_pending_turn_attempt_result :
 (** Atomically construct and commit a source-bearing terminal receipt for one
     failed admitted turn. The selection carries the exact source incarnation;
     no caller-provided prose or counter controls admission. *)
+
+val terminalize_pending_turn_completed_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  applied_at:float ->
+  selection:Keeper_event_queue_state.pending_selection ->
+  unit ->
+  (transition_result, string) result
+(** Atomically construct and commit a source-bearing completion receipt for one
+    successful admitted turn. *)
 
 val project_transition_outbox_result :
   append_before_retire:(outbox_entry -> (unit, string) result) ->
@@ -277,6 +336,16 @@ val reprioritize_pending_result :
 (** Source-incarnation-fenced priority change. Unrelated queue mutations do
     not invalidate the selected source. *)
 
+val defer_pending_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  selection:Keeper_event_queue_state.pending_selection ->
+  unit ->
+  (int64, string) result
+(** Durably rotate one exact transiently blocked source to the tail of its
+    current urgency lane. *)
+
 type enqueue_stimulus_result =
   | Enqueued
   | Already_present
@@ -306,16 +375,6 @@ val project_accepted_transfer_guarded_result :
     exact accepted transfer is not already durable. A replay therefore
     converges after target identity rotation, while a first projection cannot
     create state for an absent or replaced Keeper. *)
-
-val project_accepted_transfer_result :
-  after_commit:(Keeper_event_queue.t -> unit) ->
-  base_path:string ->
-  keeper_name:string ->
-  transfer:accepted_transfer ->
-  (transfer_projection_result, string) result
-(** Atomically persist target-side transfer accounting with the exact enqueue.
-    The accounting survives target consumption and makes later receipt replay
-    return [Transfer_already_projected] without a second target effect. *)
 
 val persist_snapshot :
   base_path:string -> keeper_name:string -> (unit -> Keeper_event_queue.t) -> unit

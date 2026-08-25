@@ -250,6 +250,78 @@ let test_repository_checkout_projection_ignores_symlinked_directory () =
   Alcotest.(check int) "symlink checkout excluded" 0 (List.length entries)
 ;;
 
+let test_repository_checkout_projection_shares_inspection_budget () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  let fake_bin = Filename.concat playground "fake-bin" in
+  ensure_dir fake_bin;
+  let fake_git = Filename.concat fake_bin "git" in
+  write_file fake_git "#!/bin/sh\nexec sleep 30\n";
+  Unix.chmod fake_git 0o755;
+  List.iter
+    (fun name ->
+       ensure_dir (Filename.concat playground ("repos/" ^ name ^ "/.git")))
+    [ "stalled-a"; "stalled-b" ];
+  let old_path = Sys.getenv "PATH" in
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv "PATH" old_path)
+    (fun () ->
+       Unix.putenv "PATH" (fake_bin ^ ":" ^ old_path);
+       let started_at = Unix.gettimeofday () in
+       let projection =
+         Keeper_sandbox_control.For_testing.repository_checkouts_json_with_budget
+           ~inspection_budget_sec:0.2
+           ~config
+           ~meta
+       in
+       let elapsed = Unix.gettimeofday () -. started_at in
+       Alcotest.(check string)
+         "projection reports the exhausted request budget"
+         "inspection_budget_exhausted"
+         (projection |> Json.member "state" |> Json.to_string);
+       Alcotest.(check int)
+         "both checkout identities remain visible"
+         2
+         (projection |> Json.member "entries" |> Json.to_list |> List.length);
+       Alcotest.(check bool)
+         "two stalled checkouts share one wall-clock budget"
+         true
+         (elapsed < 1.0))
+;;
+
+let test_repository_checkout_budget_starts_after_discovery () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  let checkout = Filename.concat playground "repos/fast-checkout" in
+  ensure_dir checkout;
+  ignore (run_git_or_fail ~cwd:checkout [ "init"; "-b"; "main" ]);
+  ignore (run_git_or_fail ~cwd:checkout [ "config"; "user.email"; "test@example.com" ]);
+  ignore (run_git_or_fail ~cwd:checkout [ "config"; "user.name"; "Test" ]);
+  ignore
+    (run_git_or_fail ~cwd:checkout [ "commit"; "--allow-empty"; "-m"; "initial" ]);
+  ignore
+    (run_git_or_fail
+       ~cwd:checkout
+       [ "remote"; "add"; "origin"; "https://example.invalid/fast-checkout.git" ]);
+  let projection =
+    Keeper_sandbox_control.For_testing
+    .repository_checkouts_json_with_budget_after_discovery
+      ~before_git_inspection:(fun () -> Unix.sleepf 0.6)
+      ~inspection_budget_sec:0.5
+      ~config
+      ~meta
+  in
+  Alcotest.(check string)
+    "catalog and filesystem discovery do not spend Git inspection budget"
+    "available"
+    (projection |> Json.member "state" |> Json.to_string);
+  let entry = projection |> Json.member "entries" |> Json.to_list |> List.hd in
+  Alcotest.(check string)
+    "fast checkout remains inspectable after slow discovery"
+    "available"
+    (entry |> Json.member "inspection_state" |> Json.to_string)
+;;
+
 let test_visible_scratch_read_resolves_to_private_storage () =
   setup
   @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
@@ -385,6 +457,110 @@ let test_repo_prefixed_missing_read_preserves_exact_input () =
     (Json.member "available_repos" json = `Null)
 ;;
 
+(* A keeper that guesses the host layout and one whose repos were never
+   materialized both got "directory does not exist", and the two need opposite
+   responses. Live fixture-keeper asked for
+   [workspace/yousleepwhen/masc] and retried (#23442).
+
+   The hint enumerates the playground's own [repos/]; it does not infer which
+   repo was meant. The last case pins that distinction: the file-path failure
+   keeps refusing to volunteer a repository list, which is a separate decision
+   this change does not touch. *)
+let test_cwd_rejection_names_the_materialized_repos () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  allow_repo ~config ~meta "masc";
+  (* The hint enumerates git checkouts measured under the workspace root, not
+     every directory under a prescribed [repos/]. A fixture without [.git] is a
+     plain directory — still a legal cwd, but not something the system reports
+     as a checkout. *)
+  write_file (Filename.concat playground "repos/masc/.git/HEAD") "ref: refs/heads/main\n";
+  write_file (Filename.concat playground "repos/masc/README.md") "readme\n";
+  let raw =
+    handle_read_file
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+            [ "cwd", `String "workspace/yousleepwhen/masc"
+            ; "path", `String "README.md"
+            ; "max_bytes", `Int 4096
+            ])
+  in
+  if parse_ok raw then Alcotest.failf "expected Read to fail, got ok: %s" raw;
+  let error = Option.value (parse_string "error" raw) ~default:raw in
+  let contains needle = String_util.contains_substring error needle in
+  Alcotest.(check bool) "names the cwd vocabulary" true (contains "repos/masc");
+  Alcotest.(check bool) "still says why it failed" true
+    (contains "cwd_not_directory")
+;;
+
+let test_cwd_rejection_says_when_nothing_is_materialized () =
+  setup
+  @@ fun ~config ~meta ~playground:_ ~publication_recovery:_ ->
+  allow_repo ~config ~meta "masc";
+  let raw =
+    handle_read_file
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+            [ "cwd", `String "repos/masc"
+            ; "path", `String "README.md"
+            ; "max_bytes", `Int 4096
+            ])
+  in
+  if parse_ok raw then Alcotest.failf "expected Read to fail, got ok: %s" raw;
+  let error = Option.value (parse_string "error" raw) ~default:raw in
+  Alcotest.(check bool) "distinguishes empty from wrong" true
+    (String_util.contains_substring error "no repository is materialized")
+;;
+
+let test_valid_repo_cwd_carries_no_hint () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  allow_repo ~config ~meta "masc";
+  write_file (Filename.concat playground "repos/masc/README.md") "readme\n";
+  let raw =
+    handle_read_file
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+            [ "cwd", `String "repos/masc"
+            ; "path", `String "README.md"
+            ; "max_bytes", `Int 4096
+            ])
+  in
+  if not (parse_ok raw) then Alcotest.failf "expected Read ok, got: %s" raw;
+  Alcotest.(check bool) "success carries no cwd advice" false
+    (String_util.contains_substring raw "available repo cwds")
+;;
+
+let test_missing_file_still_volunteers_no_repository_list () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  allow_repo ~config ~meta "masc";
+  write_file (Filename.concat playground "repos/masc/README.md") "readme\n";
+  let raw =
+    handle_read_file
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+            [ "path", `String "repos/masc/does_not_exist_xyz.ml"
+            ; "max_bytes", `Int 4096
+            ])
+  in
+  if parse_ok raw then Alcotest.failf "expected Read to fail, got ok: %s" raw;
+  Alcotest.(check bool) "no inferred repository list" true
+    (Json.member "available_repos" (parse raw) = `Null)
+;;
+
 let test_write_visible_scratch_path () =
   setup ~sandbox:Keeper_types_profile_sandbox.Docker ~always_allow:true
   @@ fun ~config ~meta ~playground ~publication_recovery ->
@@ -447,6 +623,22 @@ let () =
             "repo-prefixed missing read surfaces playground hint"
             `Quick
             test_repo_prefixed_missing_read_preserves_exact_input
+        ; Alcotest.test_case
+            "cwd rejection names the materialized repos"
+            `Quick
+            test_cwd_rejection_names_the_materialized_repos
+        ; Alcotest.test_case
+            "cwd rejection says when nothing is materialized"
+            `Quick
+            test_cwd_rejection_says_when_nothing_is_materialized
+        ; Alcotest.test_case
+            "valid repo cwd carries no hint"
+            `Quick
+            test_valid_repo_cwd_carries_no_hint
+        ; Alcotest.test_case
+            "missing file still volunteers no repository list"
+            `Quick
+            test_missing_file_still_volunteers_no_repository_list
         ] )
     ; ( "repository_checkouts"
       , [ Alcotest.test_case
@@ -457,6 +649,14 @@ let () =
             "ignores symlinked checkout directories"
             `Quick
             test_repository_checkout_projection_ignores_symlinked_directory
+        ; Alcotest.test_case
+            "shares one inspection budget across checkouts"
+            `Quick
+            test_repository_checkout_projection_shares_inspection_budget
+        ; Alcotest.test_case
+            "starts inspection budget after discovery"
+            `Quick
+            test_repository_checkout_budget_starts_after_discovery
         ] )
     ]
 ;;

@@ -73,19 +73,6 @@ import {
 
 // ── Utility functions ────────────────────────────────────
 
-export function resolveKeeperCurrentTaskLabel(
-  keeper: Keeper | null | undefined,
-): string {
-  const runtimeState = linkedRuntimeState(keeper)
-  if (!keeper) return 'unlinked'
-  if (runtimeState === 'offline') return 'offline'
-  if (!keeper.agent) return 'not_collected'
-  if (typeof keeper.agent.current_task === 'string' && keeper.agent.current_task.trim() !== '') {
-    return keeper.agent.current_task
-  }
-  return 'unassigned'
-}
-
 // ── Shared row component ─────────────────────────────────
 
 function SignalRow({ label, value, title }: { label: string; value: string | number; title?: string }) {
@@ -808,9 +795,6 @@ function fmtFixed(v: number | undefined, digits = 3): string {
 }
 
 // Helper: format an integer count or '-'
-function fmtCount(v: number | undefined): string | number {
-  return v != null ? v : '-'
-}
 
 interface SignalGroup {
   title: string
@@ -852,15 +836,8 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
   // are authoritative in KpiGrid to avoid duplication.
   const groups: SignalGroup[] = [
     {
-      title: '폴백',
-      rows: [
-        { label: '런타임 폴백', value: formatPct1(mw?.fallback_rate) },
-      ],
-    },
-    {
       title: '자율 행동 & 반응',
       rows: [
-        { label: '멘션 반응', value: fmtCount(keeper.mention_reactive_turn_count) },
         { label: '개입 비중', value: formatPct1(mw?.intervention_share) },
         { label: '턴당 개입', value: fmtFixed(mw?.intervention_per_turn, 2) },
       ],
@@ -900,7 +877,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
               <${TextInput}
                 type="search"
                 class="flex-1 min-w-0 !py-1.5 !px-2 !text-2xs"
-                placeholder="신호 지표 필터 (예: 폴백, 개입)"
+                placeholder="신호 지표 필터 (예: 개입)"
                 ariaLabel="런타임 신호 지표 필터"
                 value=${signalQuery}
                 onInput=${(event: Event) => {
@@ -938,7 +915,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
                   subtitle=${section.subtitle}
                   items=${section.items}
                   valueFormatter=${(value: number) => `${value}`}
-                  emptyLabel="집계가 아직 없습니다."
+                  emptyLabel="집계가 아직 없음"
                 />
               `)}
             </div>
@@ -1055,13 +1032,8 @@ function runtimeManifestDiagnosticsValue(trace: KeeperRuntimeTraceResponse): str
   const diagnostics = trace.manifest_scan_diagnostics
   if (diagnostics.state === 'unavailable') return 'unavailable'
   const invalid = diagnostics.invalid_manifest_row_count + diagnostics.invalid_json_row_count
-  if (
-    diagnostics.retired_event_count === 0
-    && diagnostics.unsupported_event_count === 0
-    && invalid === 0
-  ) return 'clean'
+  if (diagnostics.unsupported_event_count === 0 && invalid === 0) return 'clean'
   return [
-    `retired ${diagnostics.retired_event_count}`,
     `unsupported ${diagnostics.unsupported_event_count}`,
     `invalid ${invalid}`,
   ].join(' · ')
@@ -1072,10 +1044,9 @@ function runtimeManifestDiagnosticsTitle(trace: KeeperRuntimeTraceResponse): str
   if (diagnostics.state === 'unavailable') {
     return [diagnostics.error, diagnostics.schema].filter(Boolean).join('\n')
   }
-  const eventCounts = [
-    ...diagnostics.retired_event_counts.map(item => `retired:${item.event}=${item.count}`),
-    ...diagnostics.unsupported_event_counts.map(item => `unsupported:${item.event}=${item.count}`),
-  ]
+  const eventCounts = diagnostics.unsupported_event_counts.map(
+    item => `unsupported:${item.event}=${item.count}`,
+  )
   const sampleDetails = diagnostics.samples.map(sample =>
     [sample.kind, sample.event, sample.detail].filter(Boolean).join(':'))
   const overflow = diagnostics.unsupported_event_unattributed_count === 0
@@ -1122,7 +1093,7 @@ function clockEdgeTitle(edge: KeeperRuntimeLensClockEdge): string {
     `edge ${edge.edge_id}`,
     `trace ${edge.trace_id || '-'}`,
     `keeper ${edge.keeper_turn_id ?? '-'}`,
-    `oas ${edge.oas_turn_count ?? '-'}`,
+    `agentCore ${edge.agent_core_turn_count ?? '-'}`,
     edge.provider_attempt_id ? `provider ${edge.provider_attempt_id}` : null,
     edge.tool_batch_id ? `tool ${edge.tool_batch_id}` : null,
     edge.checkpoint_id ? `checkpoint ${edge.checkpoint_id}` : null,
@@ -1345,7 +1316,6 @@ export function RuntimeLensSection({
 
   const lens = trace.runtime_lens
   const lane = lens.axes.provider_lane
-  const claim = lens.axes.claim_scope
   const drift = lens.axes.config_drift
   const context = lens.axes.context
   const memory = lens.axes.memory
@@ -1362,7 +1332,7 @@ export function RuntimeLensSection({
   const swimlanes = [
     lens.swimlanes.keeper,
     lens.swimlanes.masc_policy_runtime,
-    lens.swimlanes.oas_agent,
+    lens.swimlanes.agent_core_agent,
     lens.swimlanes.provider,
     lens.swimlanes.tool_runtime,
     lens.swimlanes.memory_context,
@@ -1371,14 +1341,11 @@ export function RuntimeLensSection({
   return html`
     <div class="flex flex-col gap-3" data-testid="runtime-lens">
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-1.5">
-        <${SignalRow} label="keeper / agent turn" value=${`${clock.keeper_turn_id ?? '-'} / ${clock.max_oas_turn_count ?? '-'}`} />
+        <${SignalRow} label="keeper / agent turn" value=${`${clock.keeper_turn_id ?? '-'} / ${clock.max_agent_core_turn_count ?? '-'}`} />
         <${SignalRow} label="terminal event" value=${clock.terminal_event_present ? clock.terminal_event ?? 'present' : 'missing'} />
         <${SignalRow} label="runtime lane" value=${lane.resolved_lane ?? lane.status ?? 'unknown'} />
         <${SignalRow} label="payload role" value=${formatPayloadRole(lens.axes.payload_role)} />
         <${SignalRow} label="source clock" value=${formatSourceClock(lens.axes.source_clock)} />
-        <${SignalRow} label="claim scope" value=${claim.present ? `${claim.mode ?? 'unknown'} / ${claim.status}` : 'not observed'} />
-        <${SignalRow} label="claim excluded" value=${claim.excluded_count === null ? '-' : String(claim.excluded_count)} />
-        <${SignalRow} label="claim goals" value=${formatLensList(claim.effective_goal_ids)} />
         <${SignalRow} label="runtime drift" value=${drift.runtime_override ? `${drift.default_runtime_id ?? '-'} -> ${drift.live_runtime_id ?? '-'}` : drift.status} />
         <${SignalRow} label="override fields" value=${formatLensList(drift.override_fields)} />
         <${SignalRow} label="context compaction" value=${formatRatioPair({ numerator: context.context_compacted_count, denominator: context.context_compact_started_count })} />
@@ -1482,7 +1449,6 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const clusterVisible = clusterRaw && clusterRaw !== 'unknown' && clusterRaw !== 'default' && clusterRaw !== 'N/A'
   const observedFallback = toolAuditStateLabel(observedToolsEmptyState(keeper, auditSource))
   const metadataFallback = toolAuditStateLabel(auditMetadataState(keeper, auditSource))
-  const currentTaskLabel = resolveKeeperCurrentTaskLabel(keeper)
   const openToolsQuery = observedTools[0] ?? null
 
   return html`
@@ -1490,7 +1456,6 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       <${SignalRow} label="프로젝트 범위" value=${namespaceName} />
       <${SignalRow} label="프로젝트" value=${project} />
       ${clusterVisible ? html`<${SignalRow} label="클러스터" value=${clusterRaw} />` : null}
-      <${SignalRow} label="현재 태스크" value=${currentTaskLabel} />
       <${SignalRow} label="컨텍스트 출처" value=${keeper.context_source ?? keeper.context?.source ?? '-'} />
       <div class="flex justify-end mt-1">
         <${ActionButton}

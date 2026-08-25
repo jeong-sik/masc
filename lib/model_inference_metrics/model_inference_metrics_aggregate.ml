@@ -145,7 +145,6 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
          ; primary_coverage_stage
          ; primary_coverage_reason
          ; coverage_reason_counts
-         ; fallback_count = count_if (fun e -> e.fallback_applied) entries
          ; success_count
          ; error_count
          ; total_cost_usd =
@@ -398,81 +397,3 @@ let aggregate_buckets ~base_path ~window_min ~bucket_min =
    through another aggregation layer. Call sites that need exact
    percentiles should compute them from [recent_entries]. *)
 
-(* Entry-weighted mean over [models]. Returns [None] when every
-   contributing model returned [None] for the metric or when the total
-   weight collapses to zero (all entry_count = 0). *)
-let weighted_mean_opt (models : model_stats list) (f : model_stats -> float option)
-  : float option
-  =
-  let sum, weight =
-    List.fold_left
-      (fun (sum, weight) (m : model_stats) ->
-         match f m with
-         | Some v when m.entry_count > 0 ->
-           sum +. (v *. Float.of_int m.entry_count), weight + m.entry_count
-         | _ -> sum, weight)
-      (0.0, 0)
-      models
-  in
-  if weight = 0 then None else Some (sum /. Float.of_int weight)
-;;
-
-(* Sum of a [float option] projection across models.  Returns [None] iff
-   every contributing model returned [None] (distinguishing "no data"
-   from "reported and zero"). *)
-let summed_opt_float (models : model_stats list) (f : model_stats -> float option)
-  : float option
-  =
-  let total, reported =
-    List.fold_left
-      (fun (total, reported) (m : model_stats) ->
-         match f m with
-         | Some v -> total +. v, reported + 1
-         | None -> total, reported)
-      (0.0, 0)
-      models
-  in
-  if reported = 0 then None else Some total
-;;
-
-let provider_rollup (agg : aggregate) : provider_stats list =
-  let by_provider : (string, model_stats list) Hashtbl.t = Hashtbl.create 8 in
-  List.iter
-    (fun (m : model_stats) ->
-       match m.provider with
-       | None -> ()
-       | Some p ->
-         let existing =
-           match Hashtbl.find_opt by_provider p with
-           | Some v -> v
-           | None -> []
-         in
-         Hashtbl.replace by_provider p (m :: existing))
-    agg.models;
-  let rolled =
-    Hashtbl.fold
-      (fun provider models acc ->
-         let total_entries =
-           List.fold_left (fun n (m : model_stats) -> n + m.entry_count) 0 models
-         in
-         let rollup =
-           { ps_provider = provider
-           ; ps_entry_count = total_entries
-           ; ps_model_count = List.length models
-           ; ps_avg_tok_per_sec = weighted_mean_opt models (fun m -> m.avg_tok_per_sec)
-           ; ps_avg_prompt_tok_per_sec =
-               weighted_mean_opt models (fun m -> m.prompt_avg_tok_per_sec)
-           ; ps_avg_decode_tok_per_sec =
-               weighted_mean_opt models (fun m -> m.hw_decode_avg_tok_per_sec)
-           ; ps_avg_latency_ms = weighted_mean_opt models (fun m -> m.avg_latency_ms)
-           ; ps_p50_latency_ms = weighted_mean_opt models (fun m -> m.p50_latency_ms)
-           ; ps_p95_latency_ms = weighted_mean_opt models (fun m -> m.p95_latency_ms)
-           ; ps_total_cost_usd = summed_opt_float models (fun m -> m.total_cost_usd)
-           }
-         in
-         rollup :: acc)
-      by_provider
-      []
-  in
-  List.sort (fun a b -> Int.compare b.ps_entry_count a.ps_entry_count) rolled
-;;

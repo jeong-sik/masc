@@ -48,6 +48,19 @@ type token_lifetime =
             local MCP daemons that cannot easily refresh on expiry.
             The decision to use this lifetime is the caller's —
             this module never infers it from [agent_name]. *)
+  | Expires_in_hours of int
+        (** Token expires [hours] from now, whatever the auth config
+            says. For a client that outlives an operator session but
+            should still lose its bearer eventually — it can mint a
+            replacement on its next start. A window outside 1..8760
+            hours makes {!mint} return an error. *)
+
+val lifetime_of_flags :
+  no_expiry:bool -> expiry_hours:int option -> (token_lifetime, string) result
+(** The lifetime an operator asked for, read off the two command-line flags
+    that can name one. Naming both is an error rather than a precedence rule:
+    whichever flag lost would hand back a credential the operator did not ask
+    for. Naming neither leaves the workspace's own window. *)
 
 (** {1 Login report} *)
 
@@ -79,6 +92,14 @@ type t = {
 
 (** {1 Mint entry point} *)
 
+val read_persisted_token :
+  base_path:string -> agent_name:string -> string option
+(** The bearer [masc login] persisted for [agent_name] in this workspace, or
+    [None] when the file is absent or empty. Token persistence is otherwise
+    private to this module; the reader is exposed because a local client
+    should find its own credential where login wrote it rather than require
+    the operator to re-export it into every shell. *)
+
 val mint :
   base_path:string ->
   host:string ->
@@ -97,9 +118,10 @@ val mint :
       ["MASC_TOKEN"] or any operator-chosen variant). The server
       does not pick a default — the caller decides. The string is
       embedded verbatim in shell / JSON / text output.
-    - [~token_lifetime] selects between expiring and long-lived
-      credentials. The server does not infer this from
-      [agent_name] — the caller decides.
+    - [~token_lifetime] picks the expiry policy: the workspace's
+      own window, none at all, or a window the caller names. The
+      server does not infer this from [agent_name] — the caller
+      decides.
 
     {2 Side effects}
     - Initialises Mirage's default RNG on first call (idempotent

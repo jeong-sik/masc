@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Detect regression of hardcoded LLM model name prefixes in OCaml/TOML
-# under lib/ and oas/lib/.
+# under lib/ and agent_core/lib/.
 #
 # Why this gate exists:
 #   `fundamental_roadmap.md` Phase 2 calls out 40+ model-prefix matches
@@ -19,7 +19,7 @@
 #     "claude-4*", "gemini-1.5*", "gemini-2*"
 #
 # Allowed (never flagged):
-#   - Anything outside lib/ or oas/lib/ (tests, scripts, RFCs, configs).
+#   - Anything outside lib/ or agent_core/lib/ (tests, scripts, RFCs, configs).
 #   - Lines marked `(* keep-model-name *)` or `# keep-model-name`.
 #   - Entries listed in the allowlist file
 #     (scripts/lint/no-roadmap-stale-hardcoding.allowlist) as "path:line".
@@ -35,9 +35,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ALLOWLIST="${ROOT}/scripts/lint/no-roadmap-stale-hardcoding.allowlist"
 
-# Ranges scanned. oas/lib/ stays optional in case the repo layout
+# Ranges scanned. agent_core/lib/ stays optional in case the repo layout
 # changes; rg silently skips missing roots.
-ROOTS=("${ROOT}/lib" "${ROOT}/oas/lib")
+ROOTS=("${ROOT}/lib" "${ROOT}/agent_core/lib")
 
 PATTERN='"(gpt-4o|gpt-5|claude-3[-.]5-sonnet|claude-3-5|claude-4|gemini-1\.5|gemini-2)[a-zA-Z0-9_.-]*"'
 

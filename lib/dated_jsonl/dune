@@ -3,12 +3,14 @@
 (library
  (name dated_jsonl)
  (public_name masc.dated_jsonl)
- ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on;
- ; warning 32 (unused value declaration) stays off (pre-existing). Both
- ; live in the single (flags ...) stanza so the effective warning mask is
- ; not split across (flags)/(ocamlc_flags)/(ocamlopt_flags).
+ ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
+ ; Warning 32 used to be switched off here to grandfather pre-existing
+ ; unused values; the sweep finds none, so the exemption is gone and the
+ ; root dune's applies. Both flags live in the single (flags ...)
+ ; stanza so the effective warning mask is not split across
+ ; (flags)/(ocamlc_flags)/(ocamlopt_flags).
  (flags
-  (:standard -w -32 -w +4))
+  (:standard -w +33 -w +4 -w +37))
  (libraries
   fs_compat
   jsonl_writer

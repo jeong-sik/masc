@@ -1,14 +1,14 @@
 (** Boundary redaction SSOT.
 
-    External-surface emit sites (dashboard telemetry, OAS boundary,
-    operator log) must redact provider/model identity to a small set
-    of [public_label] values. The [private string] type prevents
-    callers from constructing arbitrary labels — the only labels are
-    the constructors exposed below.
+    Aggregate telemetry emit sites whose owning contract suppresses exact
+    provider/model identity use a small set of [public_label] values. The
+    [private string] type prevents callers from constructing arbitrary labels
+    — the only labels are the constructors exposed below.
 
     Internal observability paths (real provider tracking, internal
-    metrics) MUST NOT use this module — they should emit the real
-    string. RFC-0132 §3 enumerates the boundary classification.
+    metrics) and operator-owned exact execution evidence (receipts and turn
+    records) MUST NOT use this module — they should emit the observed value.
+    RFC-0132 §3 enumerates the boundary classification.
 
     Adding a new public label requires both: a new constructor here,
     and a row in RFC-0132 §3 explaining the surface that emits it. *)

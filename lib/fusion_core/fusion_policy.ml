@@ -9,11 +9,14 @@ type panel_group =
   { models : string list  (** provider.model ids *)
   ; label : string
       (** 패널 정체성 라벨 (RFC-0278). 같은 model을 다른 system_prompt로 여러 그룹에
-          둘 때(persona ensemble) 패널을 구분한다. ""(기본)이면 정체성=model 그대로
+          둘 때(identity ensemble) 패널을 구분한다. ""(기본)이면 정체성=model 그대로
           → legacy/단일-occurrence는 byte-identical. 정체성 derive는 [panelist_id]. *)
   ; system_prompt : string  (** 그룹 패널 모델 system prompt (config 필수) *)
   ; web_tools : bool  (** 그룹에 web_search/web_fetch 주입 여부 *)
   ; max_output_tokens : int option  (** 그룹 모델당 출력 토큰 예산 override *)
+  ; timeout_s : float option
+      (** 그룹 모델당 응답 데드라인(초). [None]이면 런타임/provider 설정이 그대로
+          적용된다 — preset은 그 위에 얹는 소비자 override지 두 번째 SSOT가 아니다. *)
   }
 [@@deriving show, eq]
 
@@ -26,6 +29,8 @@ type judge_spec =
   ; jsystem_prompt : string  (** 이 1차 심판의 lens (config 필수) *)
   ; jweb_tools : bool  (** web_search/web_fetch 주입 여부 *)
   ; jmax_output_tokens : int option  (** 출력 토큰 예산 override *)
+  ; jtimeout_s : float option
+      (** 이 1차 심판의 응답 데드라인(초). [None]이면 preset의 [judge_timeout_s]. *)
   }
 [@@deriving show, eq]
 
@@ -36,13 +41,14 @@ type preset =
       (** simple/refine/conditional 심판이자 JOJ의 meta-judge(reducer). (RFC-0283) *)
   ; judge_system_prompt : string
   ; judge_max_output_tokens : int option
+  ; judge_timeout_s : float option
+      (** 심판(single/refine/meta/stage-meta 및 [jtimeout_s] 없는 1차 심판)의 응답
+          데드라인(초). [None]이면 런타임/provider 설정. *)
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
   ; min_answered : int
       (** 심판 실행에 필요한 응답 패널 최소 수 (런타임 quorum). 기본 1. *)
-  ; fallback_judge_model : string option
-      (** Legacy observed value. Failures never trigger an automatic fallback call. *)
   }
 [@@deriving show, eq]
 
@@ -54,6 +60,14 @@ let default_staged_judge_group_size = 3
 let valid_max_output_tokens = function
   | None -> true
   | Some n -> n > 0
+
+(* 데드라인은 양수여야 한다. 0/음수는 "즉시 만료" 또는 "무한"으로 해석이 갈리는
+   값이라 로드 단계에서 거부한다 — 해석을 코드가 임의로 고르면 운영자가 의도한
+   예산과 집행되는 예산이 갈라진다. NaN/infinity도 같은 이유로 거부한다
+   (Float.is_finite). "제한 없음"의 표현은 키 생략([None])이다. *)
+let valid_timeout_s = function
+  | None -> true
+  | Some s -> Float.is_finite s && s > 0.0
 
 (* 모든 그룹의 모델을 평탄화 — 그룹순 × 그룹내 모델순 보존 (패널 fan-out 순서와 동일). *)
 let preset_models (p : preset) =
@@ -141,6 +155,17 @@ let preset_judge_prompts_present (p : preset) =
     (fun (j : judge_spec) -> String.length (String.trim j.jsystem_prompt) > 0)
     p.judges
 
+(* preset 전체(패널 그룹 · 심판 · 1차 심판)의 데드라인 중 유효하지 않은 첫 값.
+   세 축을 한 술어로 모으는 이유는 검증 순서가 아니라 누락 방지다: 축이 늘어날 때
+   호출처가 아니라 이 함수만 고치면 되고, 어느 축을 빼먹었는지가 한 곳에서 보인다. *)
+let preset_invalid_timeout (p : preset) : float option =
+  List.concat
+    [ List.map (fun (g : panel_group) -> g.timeout_s) p.panels
+    ; [ p.judge_timeout_s ]
+    ; List.map (fun (j : judge_spec) -> j.jtimeout_s) p.judges
+    ]
+  |> List.find_map (fun v -> if valid_timeout_s v then None else v)
+
 type staged_judge_group_error =
   | Staged_group_size_below_min of int
   | Staged_too_few_judges of
@@ -220,6 +245,8 @@ module Validated_preset = struct
     | Duplicate_panelist of string  (** 두 패널이 같은 정체성(panelist_id) *)
     | Bad_max_output_tokens of int
         (** 그룹/심판 출력 토큰 예산 override가 양수가 아님 *)
+    | Bad_timeout_s of float
+        (** 그룹/심판 응답 데드라인이 유한 양수가 아님 *)
     | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
     | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성(judge_id) (RFC-0283) *)
     | Min_answered_below_min of int
@@ -262,12 +289,15 @@ module Validated_preset = struct
                 with
                 | Some (Some n) -> Error (Bad_max_output_tokens n)
                 | Some None | None ->
-                  let total = List.length (preset_models p) in
-                  if p.min_answered < min_answered_floor
-                  then Error (Min_answered_below_min p.min_answered)
-                  else if p.min_answered > total
-                  then Error (Min_answered_above_max p.min_answered)
-                  else Ok p)))
+                  (match preset_invalid_timeout p with
+                   | Some s -> Error (Bad_timeout_s s)
+                   | None ->
+                     let total = List.length (preset_models p) in
+                     if p.min_answered < min_answered_floor
+                     then Error (Min_answered_below_min p.min_answered)
+                     else if p.min_answered > total
+                     then Error (Min_answered_above_max p.min_answered)
+                     else Ok p))))
 
   let preset (t : t) : preset = t
 

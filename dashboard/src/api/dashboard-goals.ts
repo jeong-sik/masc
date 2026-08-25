@@ -15,8 +15,6 @@ import type {
   GoalKeeperTrustLatestEvent,
   GoalKeeperTrustSummary,
   GoalDetailTimelineEvent,
-  GoalAttainmentProjection,
-  GoalCompletionSummary,
   GoalTaskSummary,
   GoalTreeNode,
   GoalTreeSummary,
@@ -161,61 +159,6 @@ function decodeGoalKeeperTrustSummary(raw: unknown): GoalKeeperTrustSummary | nu
   }
 }
 
-function decodeMetricEvaluation(raw: unknown): 'unevaluated' | 'absent' | undefined {
-  const s = asString(raw)
-  if (s === 'unevaluated') return 'unevaluated'
-  if (s === 'absent') return 'absent'
-  return undefined
-}
-
-function metricEvaluationForMetric(metric: string | null): 'unevaluated' | 'absent' {
-  return metric != null ? 'unevaluated' : 'absent'
-}
-
-function decodeGoalAttainmentProjection(
-  raw: unknown,
-  fallback: {
-    metric: string | null
-    targetValue: string | null
-    taskDoneCount: number
-    taskCount: number
-  },
-): GoalAttainmentProjection {
-  if (!isRecord(raw)) {
-    return {
-      state: 'unmeasured',
-      basis: 'unmeasured',
-      metric: fallback.metric,
-      metric_evaluation: metricEvaluationForMetric(fallback.metric),
-      target_value: fallback.targetValue,
-      target_parse_status: fallback.targetValue ? 'unparseable' : 'absent',
-      unit: 'unknown',
-      observed_value: null,
-      target_numeric: null,
-      attainment_pct: null,
-      task_done_count: fallback.taskDoneCount,
-      task_count: fallback.taskCount,
-      note: 'Attainment projection missing from payload.',
-    }
-  }
-  const metric = asNullableString(raw.metric) ?? fallback.metric
-  return {
-    state: asString(raw.state, 'unmeasured'),
-    basis: asString(raw.basis, 'unmeasured'),
-    metric,
-    metric_evaluation:
-      decodeMetricEvaluation(raw.metric_evaluation) ?? metricEvaluationForMetric(metric),
-    target_value: asNullableString(raw.target_value) ?? fallback.targetValue,
-    target_parse_status: asString(raw.target_parse_status, 'absent'),
-    unit: asString(raw.unit, 'unknown'),
-    observed_value: asNumber(raw.observed_value) ?? null,
-    target_numeric: asNumber(raw.target_numeric) ?? null,
-    attainment_pct: asInt(raw.attainment_pct) ?? null,
-    task_done_count: asInt(raw.task_done_count) ?? fallback.taskDoneCount,
-    task_count: asInt(raw.task_count) ?? fallback.taskCount,
-    note: asString(raw.note, ''),
-  }
-}
 
 function decodeNumberRecord(raw: unknown): Record<string, number> {
   if (!isRecord(raw)) return {}
@@ -246,24 +189,6 @@ function decodeGoalTaskSummary(
   }
 }
 
-function decodeGoalCompletionSummary(raw: unknown): GoalCompletionSummary | undefined {
-  if (!isRecord(raw)) return undefined
-  return {
-    state: asString(raw.state, 'unmeasured'),
-    pct: asInt(raw.pct) ?? null,
-    pct_source: asString(raw.pct_source, 'none'),
-    attainment_state: asString(raw.attainment_state, 'unmeasured'),
-    attainment_basis: asString(raw.attainment_basis, 'unmeasured'),
-    metric_evaluation: decodeMetricEvaluation(raw.metric_evaluation) ?? 'absent',
-    task_total: asInt(raw.task_total) ?? 0,
-    task_done: asInt(raw.task_done) ?? 0,
-    task_open: asInt(raw.task_open) ?? 0,
-    is_complete: asBoolean(raw.is_complete) ?? false,
-    is_terminal: asBoolean(raw.is_terminal) ?? false,
-    ready_to_request_completion: asBoolean(raw.ready_to_request_completion) ?? false,
-  }
-}
-
 function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id)
@@ -280,12 +205,6 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
   const targetValue = asNullableString(raw.target_value)
   const taskCount = asInt(raw.task_count) ?? tasks.length
   const taskDoneCount = asInt(raw.task_done_count) ?? 0
-  const attainment = decodeGoalAttainmentProjection(raw.attainment, {
-    metric,
-    targetValue,
-    taskDoneCount,
-    taskCount,
-  })
   return {
     id,
     title,
@@ -296,9 +215,6 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
     metric,
     target_value: targetValue,
     due_date: asNullableString(raw.due_date),
-    parent_goal_id: asNullableString(raw.parent_goal_id),
-    owner: asNullableString(raw.owner),
-    attainment,
     tasks,
     task_count: taskCount,
     task_done_count: taskDoneCount,
@@ -307,8 +223,9 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
       taskDoneCount,
       tasks,
     }),
-    completion_summary: decodeGoalCompletionSummary(raw.completion_summary),
-    timeline_events: Array.isArray(raw.timeline_events) ? raw.timeline_events : [],
+    timeline_events: asRecordArray(raw.timeline_events)
+      .map(decodeGoalDetailTimelineEvent)
+      .filter((event): event is GoalDetailTimelineEvent => event !== null),
     children,
     child_count: asInt(raw.child_count) ?? children.length,
     last_activity_at: asString(raw.last_activity_at, ''),
@@ -358,7 +275,6 @@ function decodeGoalDetailKeeper(raw: unknown): GoalDetailKeeper | null {
     name,
     agent_name: agentName,
     current_task_id: asNullableString(raw.current_task_id),
-    active_goal_ids: asStringArray(raw.active_goal_ids),
     sandbox_profile: sandboxProfile,
     network_mode: networkMode,
     runtime_id: runtimeName,

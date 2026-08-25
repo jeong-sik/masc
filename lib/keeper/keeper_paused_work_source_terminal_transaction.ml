@@ -1,14 +1,14 @@
 type request =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; source_receipt : Keeper_event_queue_state.source_terminal_receipt
   ; operator_operation_id : string
   }
 
 type failure =
   | Invalid_request of string
-  | Admission_busy of Keeper_turn_admission.autonomous_block
+  | Admission_busy of Keeper_owner.autonomous_block
+  | Owner_unavailable of string
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
   | Receipt_lock_failed of string
   | Receipt_read_failed of string
@@ -17,11 +17,6 @@ type failure =
   | Durable_meta_read_failed of string
   | Durable_meta_missing
   | Durable_owner_not_paused
-  | Durable_owner_dead_tombstone
-  | Durable_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Durable_owner_identity_changed
   | Source_queue_validation_failed of string
   | Committed_ack_failed of string
@@ -53,8 +48,10 @@ let failure_to_string = function
     "invalid Ack_source_terminal request: " ^ detail
   | Admission_busy block ->
     Printf.sprintf
-      "keeper_turn_admission_busy: operation=ack_source_terminal %s"
-      (Keeper_turn_admission.autonomous_block_to_string block)
+      "keeper_owner_busy: operation=ack_source_terminal %s"
+      (Keeper_owner.autonomous_block_to_string block)
+  | Owner_unavailable detail ->
+    "Ack_source_terminal Keeper owner unavailable: " ^ detail
   | Reservation_conflict owner ->
     "Ack_source_terminal lifecycle reservation conflict: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner
@@ -64,9 +61,8 @@ let failure_to_string = function
     "Ack_source_terminal receipt read failed: " ^ detail
   | Receipt_conflict receipt ->
     Printf.sprintf
-      "Ack_source_terminal operation ID conflicts with keeper=%s generation=%d requested_at=%.17g"
+      "Ack_source_terminal operation ID conflicts with keeper=%s requested_at=%.17g"
       receipt.keeper_name
-      receipt.expected_generation
       receipt.requested_at
   | Receipt_write_failed detail ->
     "Ack_source_terminal receipt write failed: " ^ detail
@@ -76,13 +72,6 @@ let failure_to_string = function
     "Ack_source_terminal durable Keeper metadata is missing"
   | Durable_owner_not_paused ->
     "Ack_source_terminal requires a paused Keeper"
-  | Durable_owner_dead_tombstone ->
-    "Ack_source_terminal cannot use a Dead tombstone"
-  | Durable_owner_nonce_changed { expected; actual } ->
-    Printf.sprintf
-      "Ack_source_terminal generation changed: expected %d, actual %d"
-      expected
-      actual
   | Durable_owner_identity_changed ->
     "Ack_source_terminal trace identity changed"
   | Source_queue_validation_failed detail ->
@@ -102,9 +91,7 @@ let error_to_string error =
 ;;
 
 let validate_request request =
-  if request.owner_nonce < 0
-  then Error "owner generation must not be negative"
-  else if Int64.compare request.source_incarnation 0L < 0
+  if Int64.compare request.source_incarnation 0L < 0
   then Error "source incarnation must not be negative"
   else if String.equal (String.trim request.source.post_id) ""
   then Error "source post id must not be empty"
@@ -133,15 +120,7 @@ let validate_paused_owner request (meta : Keeper_meta_contract.keeper_meta) =
       ~latched_reason:meta.latched_reason
   with
   | Keeper_lifecycle_admission.Active -> Error Durable_owner_not_paused
-  | Keeper_lifecycle_admission.Dead_tombstone ->
-    Error Durable_owner_dead_tombstone
-  | Keeper_lifecycle_admission.Paused _ ->
-    if Int.equal meta.runtime.nonce request.owner_nonce
-    then Ok meta
-    else
-      Error
-        (Durable_owner_nonce_changed
-           { expected = request.owner_nonce; actual = meta.runtime.nonce })
+  | Keeper_lifecycle_admission.Paused _ -> Ok meta
 ;;
 
 let validate_source_queue config ~keeper_name request =
@@ -178,7 +157,6 @@ let receipt_matches_request ~keeper_name request receipt =
   | Error _ -> false
   | Ok operation ->
     String.equal receipt.keeper_name keeper_name
-    && Int.equal receipt.expected_generation request.owner_nonce
     && String.equal receipt.operator_operation_id request.operator_operation_id
     && operation.source = request.source
     && Int64.equal operation.source_incarnation request.source_incarnation
@@ -198,7 +176,6 @@ let create_receipt config ~keeper_name request =
   Ok
     ({ keeper_name
      ; expected_trace_id = meta.runtime.trace_id
-     ; expected_generation = request.owner_nonce
      ; operator_operation_id = request.operator_operation_id
      ; requested_at = Time_compat.now ()
      ; operation =
@@ -213,7 +190,6 @@ let project_receipt config receipt =
   let source_terminal : Keeper_registry_event_queue.accepted_source_terminal =
     { source = operation.source
     ; source_incarnation = operation.source_incarnation
-    ; owner_nonce = receipt.Keeper_paused_work_disposition_receipt.expected_generation
     ; operator_operation_id = receipt.operator_operation_id
     ; source_receipt = operation.source_receipt
     }
@@ -236,21 +212,13 @@ let project_receipt config receipt =
   | None ->
     let* current = read_meta config receipt.keeper_name in
     let* () =
-      if not (Int.equal current.runtime.nonce receipt.expected_generation)
-      then
-        Error
-          (Durable_owner_nonce_changed
-             { expected = receipt.expected_generation
-             ; actual = current.runtime.nonce
-             })
-      else if not (Keeper_id.Trace_id.equal current.runtime.trace_id receipt.expected_trace_id)
+      if not (Keeper_id.Trace_id.equal current.runtime.trace_id receipt.expected_trace_id)
       then Error Durable_owner_identity_changed
       else Ok ()
     in
     Keeper_registry_event_queue.ack_pending_source_terminal_result
       ~base_path
       receipt.keeper_name
-      ~current_owner_nonce:current.runtime.nonce
       ~acked_at:receipt.requested_at
       ~source_terminal
     |> Result.map_error (fun detail -> Committed_ack_failed detail)
@@ -303,7 +271,6 @@ let ack_pending_under_admission config ~keeper_name request =
        Keeper_lifecycle_reservation.acquire
          ~base_path:config.Workspace.base_path
          ~keeper_name
-         ~expected_generation:request.owner_nonce
          ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
      with
      | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
@@ -337,12 +304,18 @@ let ack_pending_under_admission config ~keeper_name request =
 
 let ack_pending config ~keeper_name request =
   match
-    Keeper_turn_admission.run_if_free
+    Keeper_owner_registry.run_maintenance_if_idle
       ~base_path:config.Workspace.base_path
       ~keeper_name
       (fun () -> ack_pending_under_admission config ~keeper_name request)
   with
-  | `Ran outcome -> outcome
-  | `Busy block ->
+  | Ok (`Ran outcome) -> outcome
+  | Ok (`Busy block) ->
     Error { cause = Admission_busy block; reservation_release = None }
+  | Error error ->
+    Error
+      { cause =
+          Owner_unavailable (Keeper_owner_registry.command_error_to_string error)
+      ; reservation_release = None
+      }
 ;;

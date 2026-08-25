@@ -4,13 +4,17 @@
     need full-duplex.
 
     External surface:
-    - {b session record} ({!ws_session}) — concrete because
+    - {b session record} ({!ws_session}) — concrete, though nothing outside
+      this module names it today. The justification this replaces said
       [server_ws_standalone] passes session values to
-      {!read_inbound_message_frame} /
-      {!send_dashboard_or_raw_sse} and reaches the live
-      {!sessions} table directly.
+      [read_inbound_message_frame] / {!send_dashboard_or_raw_sse} and reaches
+      the live {!sessions} table directly. That module uses exactly two symbols
+      from here, {!mcp_websocket_handler} and {!max_inbound_message_bytes},
+      and [read_inbound_message_frame] is absent from the tree.
     - {b inbound size decisions}
-      ({!inbound_size_rejection}, {!inbound_size_decision}).
+      ({!inbound_dispatch_rejection}, {!inbound_dispatch_admission}) --
+      renamed from inbound_size_rejection / inbound_size_decision, which this
+      line still named.
     - {b SSE parse record} ({!parsed_sse_event}) — exposed
       so the regression test at
       [test/test_transport_integration] can pattern-match
@@ -23,8 +27,7 @@
       {!session_count}, {!sessions}, {!with_sessions_rw},
       {!next_id}).
     - {b inbound framing}
-      ({!read_inbound_message_frame},
-      {!max_inbound_dispatches_per_session},
+      ({!max_inbound_dispatches_per_session},
       {!try_begin_inbound_dispatch},
       {!finish_inbound_dispatch}).
     - {b dashboard JSON-RPC handlers}
@@ -34,7 +37,7 @@
     - {b outbound delivery}
       ({!send_to_session_result},
       {!send_dashboard_or_raw_sse},
-      {!parse_sse_dashboard_event}).
+      {!dashboard_event_of_external}).
 
     Internal helpers stay private at this boundary
     ([sha1], [sessions_mutex], [slice_index] +
@@ -52,8 +55,6 @@
     [update_ws_session_count_metric],
     [dashboard_auth_success_payload],
     [verify_dashboard_token],
-    [parse_cache] / [sse_data_prefix] /
-    [extract_sse_data_*],
     [dashboard_delta_payload_text_cache] /
     [dashboard_delta_payload_text_for_parsed] /
     [dashboard_delta_seq_notification] /
@@ -109,11 +110,9 @@ type ws_session = {
   dashboard_last_delta_at : float Atomic.t;
   inbound_dispatches : int Atomic.t;
 }
-(** Per-WS session state.  Concrete record because
-    [server_ws_standalone] threads the value through
-    {!read_inbound_message_frame} +
-    {!send_dashboard_or_raw_sse} and reaches the
-    {!sessions} table directly.  The dashboard handshake /
+(** Per-WS session state.  Concrete record; see the note on the external
+    surface at the top of this file for what that claim used to rest on and
+    what is actually true.  The dashboard handshake /
     ack state machine is tracked in the [dashboard_*] fields;
     see the [#10648] / dashboard-ws.v1 protocol notes in the
     .ml for the field semantics.
@@ -144,7 +143,7 @@ type parsed_sse_event = {
   payload : Yojson.Safe.t;
   broadcast_ts : float;
 }
-(** Result of {!parse_sse_dashboard_event}.  Exposed for
+(** Result of {!dashboard_event_of_external}.  Exposed for
     the [#10194] regression test which pattern-matches on
     [parsed.event_type] / [parsed.slice]. *)
 
@@ -196,10 +195,6 @@ val new_session : id:string -> wsd:Ws_direct_core.Endpoint.Wsd.t -> ws_session
     and the dashboard handshake state cleared.  Caller
     inserts the result into {!sessions} under
     {!with_sessions_rw}. *)
-
-val is_session_closed : ws_session -> bool
-(** [true] once the session has been closed locally or the httpun-ws writer
-    has shut down.  Safe to call from any fiber. *)
 
 val record_pong : ws_session -> unit
 (** Refresh [last_pong_at] on a received pong; the single liveness signal read
@@ -325,7 +320,7 @@ val send_to_session_result : string -> string -> send_outcome
 (** Sends [text] to the session named by id.  Returns
     {!Sent} / {!Session_gone} / {!Send_failed}. *)
 
-val send_dashboard_or_raw_sse : ws_session -> string -> bool
+val send_dashboard_or_raw_sse : ws_session -> Sse.external_event -> bool
 (** Pushes an SSE event payload to a dashboard-subscribed
     WS session — gates on {!session_is_backpressured}
     and per-slice subscription set.  Returns [true] if
@@ -333,16 +328,14 @@ val send_dashboard_or_raw_sse : ws_session -> string -> bool
     / slice mismatch — both keep the wire alive); [false]
     on a hard send failure. *)
 
-val parse_sse_dashboard_event :
-  string -> parsed_sse_event option
-(** Parses an SSE-formatted broadcast string into
-    {!parsed_sse_event}, or [None] when the wire format
-    does not match the expected ["data:" + JSON]
-    convention.  Internal cache collapses repeated parses
-    of the same physical buffer across the per-broadcast
-    fanout. *)
-
-(** {1 Dashboard JSON-RPC handlers} *)
+val dashboard_event_of_external :
+  Sse.external_event -> parsed_sse_event option
+(** Derives {!parsed_sse_event} from the bus payload
+    ({!Sse.external_event.ext_payload}), or [None] when
+    the event is not a dashboard-shaped object.  Reads the
+    broadcast value directly, so no SSE frame is parsed and
+    no cache is needed.  [broadcast_ts] is the bus emission
+    time, so every delta from one broadcast agrees. *)
 
 val dashboard_hello :
   base_path:string ->
@@ -404,9 +397,17 @@ val dashboard_ack :
 
 val valid_dashboard_slice : string -> bool
 (** Returns [true] for the canonical slice names
-    ([shell] / [execution] / [operator] / [transport] /
-    [namespace] / [composite] / [board] / [goals]).
-    Mirrored into {!dashboard_subscribe}'s validation. *)
+    ([execution] / [operator] / [transport] / [namespace] /
+    [composite]).  Mirrored into {!dashboard_subscribe}'s
+    validation.  Must equal the image of
+    {!dashboard_slice_for_sse_type}: a name accepted here but
+    absent there is a subscription no event can reach. *)
+
+val dashboard_slice_for_sse_type : string -> string option
+(** The slice an SSE event type is delivered on, or [None] to
+    raw-forward.  Exposed so a test can compare its image
+    against {!valid_dashboard_slice}; the two drifted apart
+    for a day after #27027 with nothing to catch it. *)
 
 val client_buffer_limit_bytes : unit -> int
 (** Resolved client-buffer threshold (in bytes) used by
@@ -492,9 +493,9 @@ val __test_dashboard_seq_value : ws_session -> int
     cross-domain gate can assert the final value equals the total number of
     allocations (no lost updates under true parallelism). *)
 
-val __test_dashboard_delta_payload_text_for_sse :
-  string -> dashboard_delta_payload_frame option
+val __test_dashboard_delta_payload_text_for_event :
+  Sse.external_event -> dashboard_delta_payload_frame option
 (** Test-only seam: serializes the shared dashboard/delta payload frame for
-    one SSE broadcast.  The returned text deliberately excludes the
+    one broadcast.  The returned text deliberately excludes the
     per-session seq so tests can prove payload serialization is cached by
     physical broadcast reference rather than multiplied by session count. *)

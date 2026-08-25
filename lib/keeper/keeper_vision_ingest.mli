@@ -1,6 +1,6 @@
 (** RFC-keeper-vision-delegation-tool §2.3 — write-boundary image eviction.
 
-    Replaces an [Agent_sdk.Types.Image] content block with a text placeholder
+    Replaces an [Agent_core.Types.Image] content block with a text placeholder
     whose handle keys the raw bytes in the per-keeper
     {!Multimodal.Vision_artifact_store}. Enforced at BOTH ingestion entry sites
     so the persisted checkpoint never holds inline base64 and rehydration
@@ -21,9 +21,6 @@ type mode =
   | Eager  (** site 1: run the vision sub-call now, embed the reading *)
   | Store_only  (** site 2: store + handle-only placeholder, no provider call *)
 
-val extraction_query : string
-(** The fixed exhaustive extraction query used by [Eager] (RFC §2.3-eager). *)
-
 val eager_read_eviction_reason_of_outcome
   :  Keeper_vision_tool.vision_outcome
   -> string option
@@ -36,8 +33,8 @@ val evict_blocks
   :  mode:mode
   -> policy:Keeper_types_profile.multimodal_policy
   -> keeper_name:string
-  -> Agent_sdk.Types.content_block list
-  -> Agent_sdk.Types.content_block list
+  -> Agent_core.Types.content_block list
+  -> Agent_core.Types.content_block list
 (** Site 1. Evict every [Image] in the list when [policy = Mm_delegate]; return
     the list unchanged otherwise. Images are fail-closed before store on
     base64 payload, size, and media type. [Eager] consults the
@@ -48,8 +45,8 @@ val evict_message
   :  mode:mode
   -> policy:Keeper_types_profile.multimodal_policy
   -> keeper_name:string
-  -> Agent_sdk.Types.message
-  -> Agent_sdk.Types.message
+  -> Agent_core.Types.message
+  -> Agent_core.Types.message
 (** Site 2. Same transform applied to a message's content blocks at the
     checkpoint write boundary. Use [Store_only] here — checkpoint writes must
     not block the turn fiber on a provider call. *)

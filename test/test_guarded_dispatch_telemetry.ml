@@ -43,8 +43,11 @@ let test_trace_id_thunk_is_callable () =
 ;;
 
 let test_register_metrics_idempotent () =
-  (* Calling twice must not raise (Otel_metric_store would otherwise reject
-     duplicate counter registration). *)
+  (* Concurrent and repeated calls must not raise (Otel_metric_store would
+     otherwise reject duplicate counter registration). *)
+  List.init 4 (fun _ ->
+    Domain.spawn Masc.Tool_telemetry.register_metrics)
+  |> List.iter Domain.join;
   Masc.Tool_telemetry.register_metrics ();
   Masc.Tool_telemetry.register_metrics ();
   (check bool) "register_metrics idempotent across repeated calls" true true

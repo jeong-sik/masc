@@ -9,6 +9,7 @@
  (public_name masc.masc_schedule)
  (wrapped false)
  (modules
+  schedule_contract_values
   schedule_domain
   schedule_occurrence_id
   schedule_supported_kinds
@@ -16,6 +17,8 @@
   schedule_service
   schedule_runner
   schedule_runner_status)
+ (flags
+  (:standard -w +4 -w +33))
  (libraries
   digestif
   masc_workspace
@@ -25,4 +28,6 @@
   masc_cancel_safe
   masc_random_id
   unix
-  yojson))
+  yojson)
+ (preprocess
+  (pps ppx_enumerate)))

@@ -164,61 +164,70 @@ describe('fetchDashboardGoalsTree decoding', () => {
     expect(result.tree[0]!.children[0]!.id).toBe('goal-child')
   })
 
-  it('decodes goal owner from the tree node payload', async () => {
+  it('decodes timeline events in the shape the goals endpoint serves and drops anything else', async () => {
+    // Wire shape: `tree_node_to_json` (lib/dashboard/dashboard_goals.ml) maps
+    // each goal_events.jsonl row through `goal_event_timeline_json`
+    // (lib/dashboard/dashboard_goals_types_timeline.ml), which emits
+    // {ts, kind, lane, title, summary, severity}. The first two rows below
+    // are that output verbatim for a goal_phase event and for an event type
+    // the normalizer has no title for. The third row is a ledger row as
+    // written by `emit_goal_event` (lib/workspace_goals.ml), which never
+    // reaches the wire; the decoder does not read that shape.
     getMock.mockResolvedValue({
       ...readyApprovalQueue,
       tree: [
-        validNode('goal-owned', 'Owned goal', { owner: 'dancer' }),
-        validNode('goal-unowned', 'Unowned goal'),
+        validNode('goal-1', 'Goal one', {
+          timeline_events: [
+            {
+              ts: '2026-08-05T01:00:00Z',
+              kind: 'goal_phase',
+              lane: 'goal',
+              title: 'Goal Phase',
+              summary: 'phase=blocked by sangsu',
+              severity: 'bad',
+            },
+            {
+              ts: '2026-08-07T18:42:22Z',
+              kind: 'goal_owner',
+              lane: 'goal',
+              title: 'Goal Event',
+              summary: 'goal_owner',
+              severity: 'ok',
+            },
+            {
+              ts: '2026-08-05T01:00:00Z',
+              goal_id: 'goal-1',
+              event_type: 'goal_phase',
+              payload: { phase: 'blocked', actor: 'sangsu' },
+            },
+          ],
+        }),
+        validNode('goal-2', 'Goal two'),
       ],
       summary: { ...emptySummary(), total_goals: 2, active_goals: 2 },
     })
 
     const result = await fetchDashboardGoalsTree()
 
-    expect(result.tree[0]!.owner).toBe('dancer')
-    expect(result.tree[1]!.owner).toBeNull()
-  })
-
-  it('backfills missing attainment metric_evaluation from metric presence', async () => {
-    getMock.mockResolvedValue({
-      ...readyApprovalQueue,
-      tree: [
-        validNode('goal-metric', 'Metric goal', {
-          metric: 'coverage %',
-          target_value: '80%',
-          attainment: {
-            state: 'attained',
-            basis: 'metric_target_percent',
-            metric: 'coverage %',
-            attainment_pct: 100,
-          },
-        }),
-      ],
-      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
-    })
-
-    const result = await fetchDashboardGoalsTree()
-
-    expect(result.tree[0]!.attainment.metric_evaluation).toBe('unevaluated')
-  })
-
-  it('marks missing attainment payload with declared metric as unevaluated', async () => {
-    getMock.mockResolvedValue({
-      ...readyApprovalQueue,
-      tree: [
-        validNode('goal-missing-attainment', 'Missing attainment', {
-          metric: 'coverage %',
-          target_value: '80%',
-        }),
-      ],
-      summary: { ...emptySummary(), total_goals: 1, active_goals: 1 },
-    })
-
-    const result = await fetchDashboardGoalsTree()
-
-    expect(result.tree[0]!.attainment.metric_evaluation).toBe('unevaluated')
-    expect(result.tree[0]!.attainment.note).toBe('Attainment projection missing from payload.')
+    expect(result.tree[0]!.timeline_events).toEqual([
+      {
+        ts: '2026-08-05T01:00:00Z',
+        kind: 'goal_phase',
+        lane: 'goal',
+        title: 'Goal Phase',
+        summary: 'phase=blocked by sangsu',
+        severity: 'bad',
+      },
+      {
+        ts: '2026-08-07T18:42:22Z',
+        kind: 'goal_owner',
+        lane: 'goal',
+        title: 'Goal Event',
+        summary: 'goal_owner',
+        severity: 'ok',
+      },
+    ])
+    expect(result.tree[1]!.timeline_events).toEqual([])
   })
 
   it('rejects a typed unavailable approval queue instead of decoding an empty tree', async () => {
@@ -284,7 +293,6 @@ describe('fetchDashboardGoalsTree decoding', () => {
           name: 'keeper-a',
           agent_name: 'agent-a',
           current_task_id: null,
-          active_goal_ids: ['goal-runtime'],
           sandbox_profile: 'workspace',
           network_mode: 'enabled',
           runtime_id: 'runtime-a',

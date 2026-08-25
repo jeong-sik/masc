@@ -13,8 +13,6 @@ type decision_record
 val make :
   cycle_id:string ->
   keeper_name:string ->
-  generation:int ->
-  ?snapshot:Keeper_measurement.measurement_snapshot ->
   turn_verdict:Keeper_world_observation.turn_verdict ->
   wall_clock:float ->
   ?tool_diversity_entropy:float ->
@@ -31,8 +29,9 @@ val recent : keeper_name:string -> limit:int -> decision_record list
 (** Serialize a decision record for JSONL output. *)
 val to_json : decision_record -> Yojson.Safe.t
 
-(** Flush buffered records to JSONL file.
-    Path: .masc/decision_audit/{keeper_name}/YYYY-MM/DD.jsonl
+(** Flush buffered records through a {!Dated_jsonl} store rooted at
+    [.masc/decision_audit/{keeper_name}], so the day file is the same
+    [YYYY-MM/DD.jsonl] the retention pruner resolves — UTC, not local time.
     Called periodically from heartbeat loop. *)
 val flush_if_needed : base_path:string -> keeper_name:string -> unit
 

@@ -1,3 +1,8 @@
+---
+rfc: "0277"
+status: Draft
+---
+
 # RFC-0277 — Fusion: 이종 패널 그룹(heterogeneous panel groups) + 발동 예산 제거
 
 - Status: Draft
@@ -5,7 +10,7 @@
 - Created: 2026-06-22
 - Parent: RFC-0252 (fusion-panel-judge-deliberation) — 본 RFC는 §6(게이트/예산)·§9(preset)을 개정한다.
 - Scope: `lib/fusion_core/` (preset/config/types), `lib/fusion/` (panel/orchestrator/tool), `bin/fusion_run.ml`, `config/runtime.toml` (`[fusion]`)
-- Boundary: OAS는 0줄 변경. judge/sink 계약 무변경. 심판은 preset당 1개 유지.
+- Boundary: agent_core는 0줄 변경. judge/sink 계약 무변경. 심판은 preset당 1개 유지.
 
 ---
 

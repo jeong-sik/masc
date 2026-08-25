@@ -14,17 +14,11 @@
 val public_mcp_surface_tools : string list
 (** Externally reachable MCP tools — the public surface. *)
 
-val schedule_request_surface_tools : string list
-(** Schedule request tools that read/create/cancel durable schedule rows. *)
-
 val public_schedule_surface_tools : string list
 (** Schedule tools visible to external MCP clients. *)
 
 val spawned_agent_surface_tools : string list
 (** Tools visible to spawned worker agents. *)
-
-val local_worker_surface_tools : string list
-(** Local worker container tools. *)
 
 val session_min_surface_tools : string list
 (** Minimum session tools (initialization only). *)

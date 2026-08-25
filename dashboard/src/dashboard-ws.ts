@@ -47,7 +47,6 @@ interface DashboardWsDiscovery {
   enabled?: boolean
   listening?: boolean
   reachable?: boolean
-  listen_status?: string | null
   ws_url?: string | null
   unavailable_reason?: string | null
   same_origin_upgrade_enabled?: boolean
@@ -227,20 +226,8 @@ function discoveryUnavailableReason(data: DashboardWsDiscovery): string {
   const serverReason = nonBlankString(data.unavailable_reason)
   if (serverReason) return serverReason
   if (data.enabled !== true) return 'disabled'
-  if (data.listening !== true) {
-    const listenStatus = nonBlankString(data.listen_status)
-    return listenStatus ? `not listening (${listenStatus})` : 'not listening'
-  }
-  if (!nonBlankString(data.ws_url)) {
-    const sameOriginWsUrl = nonBlankString(data.same_origin_ws_url)
-    if (sameOriginWsUrl && data.same_origin_upgrade_enabled !== true) {
-      return 'standalone websocket URL unavailable; same-origin upgrade disabled'
-    }
-    if (data.same_origin_upgrade_enabled === true) {
-      return 'same-origin websocket URL unavailable'
-    }
-    return 'websocket URL unavailable'
-  }
+  if (data.listening !== true) return 'not listening'
+  if (!nonBlankString(data.ws_url)) return 'websocket URL unavailable'
   return 'unavailable'
 }
 
@@ -248,28 +235,82 @@ function dashboardWsUnavailableMessage(reason?: string): string {
   return reason ? `dashboard websocket unavailable: ${reason}` : 'dashboard websocket unavailable'
 }
 
-// Phase 2 (PR-4.6): rAF accumulator for inbound WS messages.
+// Phase 2 (PR-4.6): accumulator for inbound WS messages.
 // Instead of processing every WS frame immediately (which can trigger
-// multiple signal writes / renders), we buffer them and flush on the
-// next animation frame.  This bounds update frequency to 60 Hz and
-// lets batch() coalesce all signal mutations in a single frame.
+// multiple signal writes / renders), we buffer them and flush together so a
+// burst produces one render rather than one per frame.
+//
+// While the tab paints, the next animation frame is the right moment: it
+// bounds update frequency to the display rate and lets batch() coalesce
+// every signal mutation into a single frame. A hidden tab never paints, so
+// requestAnimationFrame never fires there — measured at 0 callbacks over
+// 3.4s in a background tab. Scheduling the flush on rAF alone therefore
+// stopped inbound delivery entirely whenever the tab was in the background,
+// RPC replies included: the dashboard/hello reply sat in this queue until
+// sendRpc timed out (DASHBOARD_WS_RPC_TIMEOUT_MS), the socket closed, and
+// the reconnect hit the same wall. A monitoring dashboard is left in a
+// background tab by design, so that was its normal operating mode.
+//
+// While hidden there is no paint to batch against, so the flush runs on a
+// timer instead. Browsers clamp timers in hidden pages to roughly 1 Hz,
+// which is two orders of magnitude inside the RPC timeout.
 const pendingInbound: Array<string | unknown> = []
 let flushHandle = 0
+let flushHandleKind: 'frame' | 'timer' | null = null
+
+function documentIsHidden(): boolean {
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden'
+}
+
+function cancelScheduledFlush(): void {
+  if (!flushHandle) return
+  // Passing a timer handle to cancelAnimationFrame cancels nothing and
+  // leaves the callback armed, so the handle's origin picks the call rather
+  // than whichever canceller happens to be defined.
+  if (flushHandleKind === 'frame') cancelAnimationFrame(flushHandle)
+  else clearTimeout(flushHandle)
+  flushHandle = 0
+  flushHandleKind = null
+}
 
 function scheduleFlush(): void {
   if (flushHandle) return
-  if (typeof requestAnimationFrame === 'undefined') {
-    // Fallback for non-browser environments (e.g. vitest with happy-dom).
+  // requestAnimationFrame is also absent in non-browser environments
+  // (e.g. vitest with happy-dom), which takes the same timer path.
+  if (documentIsHidden() || typeof requestAnimationFrame === 'undefined') {
+    flushHandleKind = 'timer'
     flushHandle = setTimeout(() => {
       flushHandle = 0
+      flushHandleKind = null
       flushPending()
     }, 0) as unknown as number
     return
   }
+  flushHandleKind = 'frame'
   flushHandle = requestAnimationFrame(() => {
     flushHandle = 0
+    flushHandleKind = null
     flushPending()
   })
+}
+
+// A frame callback scheduled while the tab was visible never runs once the
+// tab stops painting, and the handle it left behind makes scheduleFlush() a
+// no-op — the queue would stay stranded for as long as the tab is hidden,
+// which is the same stall in a narrower window. Re-arm on the mechanism that
+// matches the new state, and on the way back deliver what accumulated
+// without waiting for the next frame.
+function handleVisibilityChange(): void {
+  const hidden = documentIsHidden()
+  if (hidden && flushHandleKind !== 'frame') return
+  cancelScheduledFlush()
+  if (pendingInbound.length === 0) return
+  if (hidden) scheduleFlush()
+  else flushPending()
+}
+
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 }
 
 function flushPending(): void {
@@ -286,27 +327,13 @@ function flushPending(): void {
 
 function clearPendingInbound(): void {
   pendingInbound.length = 0
-  if (flushHandle) {
-    if (typeof cancelAnimationFrame !== 'undefined') {
-      cancelAnimationFrame(flushHandle)
-    } else {
-      clearTimeout(flushHandle)
-    }
-    flushHandle = 0
-  }
+  cancelScheduledFlush()
 }
 
 /** Test-only helper: synchronously flush any pending inbound messages.
- *  Production code should never call this — the rAF loop owns timing. */
+ *  Production code should never call this — the scheduled flush owns timing. */
 export function flushPendingInbound(): void {
-  if (flushHandle) {
-    if (typeof cancelAnimationFrame !== 'undefined') {
-      cancelAnimationFrame(flushHandle)
-    } else {
-      clearTimeout(flushHandle)
-    }
-    flushHandle = 0
-  }
+  cancelScheduledFlush()
   flushPending()
 }
 
@@ -415,10 +442,9 @@ export function dashboardSlicesForRoute(routeState: DashboardRouteState): string
   }
   if (routeState.tab === 'workspace' && routeState.params.section === 'planning') {
     slices.add('execution')
-    slices.add('goals')
   }
-  // Board rows are actor/filter scoped (`voter`, blind-vote policy, author and
-  // hearth filters) and are loaded through refreshBoard's HTTP query. Raw board
+  // Board rows are actor/filter scoped (`voter`, author and hearth filters)
+  // and are loaded through refreshBoard's HTTP query. Raw board
   // events still reach the client and schedule/increment board refreshes through
   // sse-store; there is no unscoped board slice subscription.
   if (routeState.tab === 'monitoring') {
@@ -502,7 +528,7 @@ function scheduleReconnect(): void {
   reconnectAttempts += 1
   const exp = Math.min(reconnectAttempts, WS_RECONNECT_MAX_EXP)
   const backoff = Math.min(RECONNECT_MAX_MS, WS_RECONNECT_BASE_MS * Math.pow(2, exp))
-  const jitter = Math.random() * RECONNECT_JITTER_MS
+  const jitter = Math.random() * RECONNECT_JITTER_MS // real-randomness-needed: spreads simultaneous retries
   const delay = backoff + jitter
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null

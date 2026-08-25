@@ -1,4 +1,4 @@
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 module String_set = Set.Make (String)
 module String_map = Map.Make (String)
 
@@ -12,20 +12,25 @@ type admitted_lane =
   ; slots : admitted_slot list
   }
 
+type rejected_slot =
+  { lane_id : string
+  ; position : int
+  ; slot_id : string
+  ; target_ref : string
+  }
+
 type t =
   { resolver_snapshot : Exact_output.resolver_snapshot
+  ; declared_lanes : Runtime_schema.exact_output_lane_decl list
   ; exact_output_lanes : admitted_lane list
-  ; generation : int64
+  ; rejected_slots : rejected_slot list
+  ; required_lane_ids : string list
   }
 
 type publication_error =
   | Registry_not_published
   | Publication_busy
-  | Generation_exhausted
-  | Replacement_base_changed of
-      { expected_generation : int64 option
-      ; actual_generation : int64 option
-      }
+  | Replacement_base_changed
   | Blank_lane_id of { position : int }
   | Duplicate_lane_id of
       { position : int
@@ -47,12 +52,7 @@ type publication_error =
       ; slot_id : string
       ; cause : Exact_output.target_ref_error
       }
-  | Unknown_lane_slot of
-      { lane_id : string
-      ; position : int
-      ; slot_id : string
-      ; target_ref : string
-      }
+  | Required_lane_unavailable of { lane_id : string }
  
 type selected_slot =
   { slot_id : string
@@ -90,8 +90,9 @@ let ( let* ) = Result.bind
 
 let admit_lane_slots resolver_snapshot admitted_by_id
     (lane : Runtime_schema.exact_output_lane_decl) =
-  let rec loop position seen admitted_by_id admitted_slots = function
-    | [] -> Ok (List.rev admitted_slots, admitted_by_id)
+  let rec loop position seen admitted_by_id admitted_slots rejected_slots = function
+    | [] ->
+      Ok (List.rev admitted_slots, admitted_by_id, List.rev rejected_slots)
     | slot_id :: rest ->
       if String.equal (String.trim slot_id) ""
       then Error (Blank_lane_slot { lane_id = lane.id; position })
@@ -99,46 +100,54 @@ let admit_lane_slots resolver_snapshot admitted_by_id
       then Error (Duplicate_lane_slot { lane_id = lane.id; position; slot_id })
       else
         let admitted = String_map.find_opt slot_id admitted_by_id in
-        let* admitted_target, admitted_by_id =
-          match admitted with
-          | Some admitted_target -> Ok (admitted_target, admitted_by_id)
-          | None ->
-            (match Exact_output.admit_target_ref resolver_snapshot slot_id with
-             | Error (Exact_output.Target_ref_rejected cause) ->
-               Error
-                 (Invalid_lane_slot
-                    { lane_id = lane.id; position; slot_id; cause })
-             | Error (Exact_output.Target_not_in_catalog target_ref) ->
-               Error
-                 (Unknown_lane_slot
-                    { lane_id = lane.id; position; slot_id; target_ref })
-             | Ok admitted_target ->
-               Ok
-                 ( admitted_target
-                 , String_map.add slot_id admitted_target admitted_by_id ))
-        in
-        loop
-          (position + 1)
-          (String_set.add slot_id seen)
-          admitted_by_id
-          (({ slot_id; admitted_target } : admitted_slot) :: admitted_slots)
-          rest
+        (match admitted with
+         | Some admitted_target ->
+           loop
+             (position + 1)
+             (String_set.add slot_id seen)
+             admitted_by_id
+             (({ slot_id; admitted_target } : admitted_slot) :: admitted_slots)
+             rejected_slots
+             rest
+         | None ->
+           (match Exact_output.admit_target_ref resolver_snapshot slot_id with
+            | Error (Exact_output.Target_ref_rejected cause) ->
+              Error
+                (Invalid_lane_slot
+                   { lane_id = lane.id; position; slot_id; cause })
+            | Error (Exact_output.Target_not_in_catalog target_ref) ->
+              loop
+                (position + 1)
+                (String_set.add slot_id seen)
+                admitted_by_id
+                admitted_slots
+                ({ lane_id = lane.id; position; slot_id; target_ref }
+                 :: rejected_slots)
+                rest
+            | Ok admitted_target ->
+              loop
+                (position + 1)
+                (String_set.add slot_id seen)
+                (String_map.add slot_id admitted_target admitted_by_id)
+                (({ slot_id; admitted_target } : admitted_slot) :: admitted_slots)
+                rejected_slots
+                rest))
   in
   match lane.slot_ids with
   | [] -> Error (Empty_lane { lane_id = lane.id })
-  | slot_ids -> loop 1 String_set.empty admitted_by_id [] slot_ids
+  | slot_ids -> loop 1 String_set.empty admitted_by_id [] [] slot_ids
 ;;
 
 let admit_lanes ~admitted_by_id resolver_snapshot lanes =
-  let rec loop position seen admitted_by_id admitted_lanes = function
-    | [] -> Ok (List.rev admitted_lanes)
+  let rec loop position seen admitted_by_id admitted_lanes rejected_slots = function
+    | [] -> Ok (List.rev admitted_lanes, List.rev rejected_slots)
     | (lane : Runtime_schema.exact_output_lane_decl) :: rest ->
       if String.equal (String.trim lane.id) ""
       then Error (Blank_lane_id { position })
       else if String_set.mem lane.id seen
       then Error (Duplicate_lane_id { position; lane_id = lane.id })
       else
-        let* slots, admitted_by_id =
+        let* slots, admitted_by_id, lane_rejected_slots =
           admit_lane_slots resolver_snapshot admitted_by_id lane
         in
         loop
@@ -146,28 +155,44 @@ let admit_lanes ~admitted_by_id resolver_snapshot lanes =
           (String_set.add lane.id seen)
           admitted_by_id
           ({ id = lane.id; slots } :: admitted_lanes)
+          (List.rev_append lane_rejected_slots rejected_slots)
           rest
   in
-  loop 1 String_set.empty admitted_by_id [] lanes
+  loop 1 String_set.empty admitted_by_id [] [] lanes
 ;;
 
-let rec same_slot_ids (admitted_slots : admitted_slot list) declared_slot_ids =
-  match admitted_slots, declared_slot_ids with
+let rec same_slot_ids left_slot_ids right_slot_ids =
+  match left_slot_ids, right_slot_ids with
   | [], [] -> true
-  | admitted :: admitted_rest, declared :: declared_rest ->
-    String.equal admitted.slot_id declared
-    && same_slot_ids admitted_rest declared_rest
+  | left :: left_rest, right :: right_rest ->
+    String.equal left right && same_slot_ids left_rest right_rest
   | [], _ :: _ | _ :: _, [] -> false
 ;;
 
-let rec same_lane_declarations admitted_lanes declared_lanes =
-  match admitted_lanes, declared_lanes with
+let rec same_lane_declarations left_lanes right_lanes =
+  match left_lanes, right_lanes with
   | [], [] -> true
-  | admitted :: admitted_rest, declared :: declared_rest ->
-    String.equal admitted.id declared.Runtime_schema.id
-    && same_slot_ids admitted.slots declared.slot_ids
-    && same_lane_declarations admitted_rest declared_rest
+  | left :: left_rest, right :: right_rest ->
+    String.equal left.Runtime_schema.id right.Runtime_schema.id
+    && same_slot_ids left.slot_ids right.slot_ids
+    && same_lane_declarations left_rest right_rest
   | [], _ :: _ | _ :: _, [] -> false
+;;
+
+let validate_required_lanes required_lane_ids admitted_lanes =
+  let rec loop = function
+    | [] -> Ok ()
+    | lane_id :: rest ->
+      (match
+         List.find_opt
+           (fun (lane : admitted_lane) -> String.equal lane.id lane_id)
+           admitted_lanes
+       with
+       | Some { slots = _ :: _; _ } -> loop rest
+       | Some { slots = []; _ } | None ->
+         Error (Required_lane_unavailable { lane_id }))
+  in
+  loop required_lane_ids
 ;;
 
 let admitted_by_id admitted_lanes =
@@ -187,26 +212,24 @@ let with_publication_lock f =
   Fun.protect ~finally:(fun () -> Mutex.unlock publication_mutex) f
 ;;
 
-let next_generation = function
-  | None -> Ok 1L
-  | Some registry ->
-    if Int64.equal registry.generation Int64.max_int
-    then Error Generation_exhausted
-    else Ok (Int64.succ registry.generation)
-;;
-
-let publish ~lanes resolver_snapshot =
+let publish ?(required_lane_ids = []) ~lanes resolver_snapshot =
   with_publication_lock
   @@ fun () ->
   match !active_reservation with
   | Some _ -> Error Publication_busy
   | None ->
-    let previous = Atomic.get published in
-    let* exact_output_lanes =
+    let* exact_output_lanes, rejected_slots =
       admit_lanes ~admitted_by_id:String_map.empty resolver_snapshot lanes
     in
-    let* generation = next_generation previous in
-    let registry = { resolver_snapshot; exact_output_lanes; generation } in
+    let* () = validate_required_lanes required_lane_ids exact_output_lanes in
+    let registry =
+      { resolver_snapshot
+      ; declared_lanes = lanes
+      ; exact_output_lanes
+      ; rejected_slots
+      ; required_lane_ids
+      }
+    in
     Atomic.set published (Some registry);
     Ok registry
 ;;
@@ -234,23 +257,27 @@ let prepare_replacement ~lanes =
   | None, [] -> Ok { base; candidate = None }
   | None, _ :: _ -> Error Registry_not_published
   | Some previous, _ ->
-    if same_lane_declarations previous.exact_output_lanes lanes
+    if same_lane_declarations previous.declared_lanes lanes
     then Ok { base; candidate = Some previous }
     else (
-      let* exact_output_lanes =
+      let* exact_output_lanes, rejected_slots =
         admit_lanes
           ~admitted_by_id:(admitted_by_id previous.exact_output_lanes)
           previous.resolver_snapshot
           lanes
       in
-      let* generation = next_generation (Some previous) in
+      let* () =
+        validate_required_lanes previous.required_lane_ids exact_output_lanes
+      in
       Ok
         { base
         ; candidate =
             Some
               { resolver_snapshot = previous.resolver_snapshot
+              ; declared_lanes = lanes
               ; exact_output_lanes
-              ; generation
+              ; rejected_slots
+              ; required_lane_ids = previous.required_lane_ids
               }
         })
 ;;
@@ -262,7 +289,6 @@ let same_registry_identity left right =
   | None, Some _ | Some _, None -> false
 ;;
 
-let registry_generation = Option.map (fun registry -> registry.generation)
 
 let reserve_replacement prepared =
   with_publication_lock
@@ -274,11 +300,7 @@ let reserve_replacement prepared =
     if same_registry_identity prepared.base actual
     then reserve prepared.candidate
     else
-      Error
-        (Replacement_base_changed
-           { expected_generation = registry_generation prepared.base
-           ; actual_generation = registry_generation actual
-           })
+      Error Replacement_base_changed
 ;;
 
 let same_reservation left right = left.identity == right.identity
@@ -334,7 +356,7 @@ let abort_replacement reservation =
     Ok ()
   | Some _ | None -> Error Reservation_inactive
 ;;
-let generation registry = registry.generation
+let rejected_slots registry = registry.rejected_slots
 
 let resolve_lane registry ~lane_id =
   match
@@ -361,16 +383,8 @@ let resolve_lane registry ~lane_id =
 let publication_error_to_string = function
   | Registry_not_published -> "exact-output registry has not been published"
   | Publication_busy -> "exact-output registry publication is reserved"
-  | Generation_exhausted -> "exact-output registry generation is exhausted"
-  | Replacement_base_changed { expected_generation; actual_generation } ->
-    let show_generation = function
-      | None -> "unpublished"
-      | Some generation -> Int64.to_string generation
-    in
-    Printf.sprintf
-      "exact-output replacement base changed (expected generation %s, actual generation %s)"
-      (show_generation expected_generation)
-      (show_generation actual_generation)
+  | Replacement_base_changed ->
+    "exact-output replacement base changed since it was prepared"
   | Blank_lane_id { position } ->
     Printf.sprintf "exact-output lane %d has a blank id" position
   | Duplicate_lane_id { position; lane_id } ->
@@ -397,13 +411,10 @@ let publication_error_to_string = function
       position
       slot_id
       detail
-  | Unknown_lane_slot { lane_id; position; slot_id; target_ref } ->
+  | Required_lane_unavailable { lane_id } ->
     Printf.sprintf
-      "exact-output lane %S slot %d (%S): target %S is not in the frozen catalog"
+      "required exact-output lane %S has no admitted target in the frozen catalog"
       lane_id
-      position
-      slot_id
-      target_ref
 ;;
 
 let lane_resolution_error_to_string = function

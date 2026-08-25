@@ -1,4 +1,4 @@
-(** Keeper single-turn orchestration via OAS Agent.run().
+(** Keeper single-turn orchestration via Agent_core.Agent.run().
 
     This module is intentionally a compatibility facade: public types and
     entrypoints stay here while prompt metrics, result/error helpers, and
@@ -12,17 +12,17 @@ include module type of Keeper_agent_error
 module Contract_helpers = Keeper_agent_run_contract_helpers
 module Turn_helpers = Keeper_agent_run_turn_helpers
 
-(** Outcome of building the per-turn OAS raw-trace sink
+(** Outcome of building the per-turn AGENT_CORE raw-trace sink
     ([.masc/keepers/<name>/raw-traces/turn-*.jsonl]). [Sink_degraded] is
     the typed health record for trace-store failures: the turn still
     dispatches (untraced, so [run_result.trace_ref]/[run_validation] stay
     [None] for that turn) — trace-store state never fails a turn
     pre-dispatch. *)
 type raw_trace_sink_outcome =
-  | Sink_ready of Agent_sdk.Raw_trace.t
-  | Sink_degraded of Agent_sdk.Error.sdk_error
+  | Sink_ready of Agent_core.Raw_trace.t
+  | Sink_degraded of Agent_core.Error.t
 
-(** Typed reason for an autonomous Keeper run to release its lane after OAS
+(** Typed reason for an autonomous Keeper run to release its lane after AGENT_CORE
     completes a tool boundary. *)
 type durable_stimulus_summary = {
   pending_count : int;
@@ -36,7 +36,7 @@ type durable_stimulus_summary = {
     healthy cooperation from a keeper that never finishes a turn. *)
 
 type autonomous_yield_reason =
-  | Chat_waiting
+  | Operation_queued
   | Durable_stimulus_waiting of durable_stimulus_summary
 
 type autonomous_yield_request = {
@@ -54,8 +54,8 @@ val durable_stimulus_summary
 val durable_stimulus_summary_to_string : durable_stimulus_summary -> string
 
 val terminal_effect_boundary_decision
-  :  Keeper_tools_oas.terminal_effect_state
-  -> (Runtime_agent.cooperative_yield_decision, Agent_sdk.Error.sdk_error) result
+  :  Keeper_tools_agent_core.terminal_effect_state
+  -> (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
 (** Production boundary projection for Keeper tool results. Generic deferred
     tool transitions retain the normal durable-stimulus checkpoint; deferred
     external effects yield the current provider loop so their durable
@@ -64,13 +64,13 @@ val terminal_effect_boundary_decision
     envelope. *)
 
 module For_testing : sig
-  val sse_event_progress_kind : Agent_sdk.Types.sse_event -> string option
+  val sse_event_progress_kind : Agent_core.Types.sse_event -> string option
   val sse_event_watchdog_progress_kind :
-    Agent_sdk.Types.sse_event -> string option
+    Agent_core.Types.sse_event -> string option
   val registry_progress_on_event
     :  record_turn_progress:(string -> unit)
-    -> (Agent_sdk.Types.sse_event -> unit) option
-    -> Agent_sdk.Types.sse_event
+    -> (Agent_core.Types.sse_event -> unit) option
+    -> Agent_core.Types.sse_event
     -> unit
   val progress_keeper_tool_names_for_contract
     :  actual_keeper_tool_names:string list
@@ -79,14 +79,14 @@ module For_testing : sig
 
   val normalize_response_text_for_finalization
     :  runtime_id:string
-    -> initial_messages:Agent_sdk.Types.message list
+    -> initial_messages:Agent_core.Types.message list
     -> run_result:Runtime_agent.run_result
     -> text:string
     -> tool_names:string list
     -> unit
-    -> (string, Agent_sdk.Error.sdk_error) result
+    -> (string, Agent_core.Error.t) result
 
-  (** OAS raw-trace sink for keeper turns: a fresh per-turn file under
+  (** AGENT_CORE raw-trace sink for keeper turns: a fresh per-turn file under
       [Keeper_types_support.keeper_raw_trace_dir]. The dispatch section passes
       it into [Keeper_turn_driver.run_named] so
       [run_result.trace_ref]/[run_validation] are populated. *)
@@ -102,7 +102,7 @@ module For_testing : sig
   val raw_trace_for_dispatch
     :  config:Workspace.config
     -> meta:Keeper_meta_contract.keeper_meta
-    -> Agent_sdk.Raw_trace.t option
+    -> Agent_core.Raw_trace.t option
 
   (** Run reference-aware cleanup only after the current TurnRecord commit
       attempt. A missing/degraded sink is a no-op; cleanup failure is logged
@@ -110,7 +110,7 @@ module For_testing : sig
   val prune_raw_traces_after_turn_record
     :  config:Workspace.config
     -> meta:Keeper_meta_contract.keeper_meta
-    -> Agent_sdk.Raw_trace.t option
+    -> Agent_core.Raw_trace.t option
     -> unit
 
   val runtime_yield_reason
@@ -122,23 +122,35 @@ module For_testing : sig
     -> tool_call_detail list
     -> (string * int) option
 
-  val provider_transcript_admission
-    :  Agent_sdk.Types.message list
-    -> (unit, Agent_sdk.Error.sdk_error) result
+  (** Newest-first per-turn assistant texts; [Some streak] when the last
+      [threshold]+ consecutive turns carry the same non-blank text. *)
+  val repeated_assistant_text
+    :  threshold:int
+    -> string list
+    -> int option
 
   val dispatch_after_provider_transcript_admission
-    :  messages:Agent_sdk.Types.message list
-    -> dispatch:(unit -> ('a, Agent_sdk.Error.sdk_error) result)
-    -> ('a, Agent_sdk.Error.sdk_error) result
+    :  messages:Agent_core.Types.message list
+    -> dispatch:(unit -> ('a, Agent_core.Error.t) result)
+    -> ('a, Agent_core.Error.t) result
 
   (** Exact-run reference recorded on the turn record. Accepts a reference
-      whose session identity matches the keeper trace; the OAS runtime
+      whose session identity matches the keeper trace; the AGENT_CORE runtime
       identity carried by the reference is recorded, not compared, because it
       names a different identity space than the keeper agent name. *)
   val turn_record_raw_trace_run_ref
     :  expected_session_id:string
-    -> Agent_sdk.Raw_trace.run_ref
+    -> Agent_core.Raw_trace.run_ref
     -> (Turn_record.raw_trace_run_ref, string) result
+
+  val raw_trace_reference_for_turn
+    :  turn_trace_ref:Agent_core.Raw_trace.run_ref option
+    -> sink:Agent_core.Raw_trace.t option
+    -> Agent_core.Raw_trace.run_ref option
+  (** Which run this turn's TurnRecord names for retention. [turn_trace_ref] is
+      what the turn result reported and is absent on every failed turn; the
+      sink's last finished run covers that case, since a keeper sink holds one
+      turn. *)
 
 end
 
@@ -154,14 +166,13 @@ end
             and checkpoint message history, returns the final turn system prompt
     @param user_message The user's message to the keeper
     @param turn_kind Producer-owned lane identity for the durable turn record
-    @param user_blocks Optional structured user-authored OAS content blocks for
+    @param user_blocks Optional structured user-authored AGENT_CORE content blocks for
            the current turn. [user_message] remains the display/history
            fallback and must not contain raw media payloads.
     @param runtime_id Typed runtime profile name for model selection
      @param world_observation Structured keeper world snapshot used by
             advisory execution-progress checks. When omitted, the progress check
             does not infer world state from prompt text.
-    @param generation Current generation counter
     @param history_user_source Source label for user messages in history
     @param history_assistant_source Source label for assistant messages in history
     @param temperature Subsystem temperature fallback; a selected runtime model
@@ -169,7 +180,7 @@ end
     @param on_event Optional event callback
     @param trajectory_acc Optional trajectory accumulator for recording
     @param is_retry When [true], replays current user message without persisting
-    @param shared_context Optional shared OAS context for cross-turn state
+    @param shared_context Optional shared AGENT_CORE context for cross-turn state
     @param event_bus Optional MASC event bus *)
 val run_turn
   :  config:Workspace.config
@@ -181,18 +192,19 @@ val run_turn
   -> base_dir:string
   -> max_context:int
   -> build_turn_prompt:
-       (base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
+       (base_system_prompt:string -> messages:Agent_core.Types.message list -> turn_prompt)
   -> user_message:string
   -> turn_kind:Turn_record.turn_kind
-  -> ?user_blocks:Agent_sdk.Types.content_block list
+  -> ?user_blocks:Agent_core.Types.content_block list
   -> runtime_id:string
   -> ?world_observation:Keeper_world_observation.world_observation
-  -> generation:int
   -> ?history_user_source:string
   -> ?user_turn_record:Keeper_run_prompt.user_turn_record
   -> ?history_assistant_source:string
   -> ?temperature:float
-  -> ?on_event:(Agent_sdk.Types.sse_event -> unit)
+  -> ?on_event:(Agent_core.Types.sse_event -> unit)
+  -> ?on_tool_result_ready:(tool_call_id:string -> unit)
+  -> ?approval_gate:Keeper_tool_approval_gate.t
   -> ?trajectory_acc:Trajectory.accumulator
   -> ?degraded_retry_applied:bool
   -> ?degraded_retry_runtime:string
@@ -203,16 +215,15 @@ val run_turn
        (Keeper_turn_driver.deferred_runtime_lane -> unit)
   -> ?on_deferred_runtime_consumed:(unit -> unit)
   -> ?is_retry:bool
-  -> ?shared_context:Agent_sdk.Context.t
-  -> ?event_bus:Agent_sdk.Event_bus.t
+  -> ?shared_context:Agent_core.Context.t
+  -> ?event_bus:Agent_core.Event_bus.t
   -> ?trace_link:string * string
   -> ?continuation_channel:Keeper_continuation_channel.t
-  -> ?continuation_delivery_channel:Keeper_continuation_channel.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> ?autonomous_yield_requested:
        (unit -> (autonomous_yield_request option, string) result)
-       (* Evaluated only after a typed OAS tool boundary. Snapshot failures
+       (* Evaluated only after a typed AGENT_CORE tool boundary. Snapshot failures
           remain explicit errors. The chat lane never receives this hook. *)
-  -> ?on_checkpoint_stage:(Agent_sdk.Agent.checkpoint_stage -> unit)
+  -> ?on_checkpoint_stage:(Agent_core.Agent.checkpoint_stage -> unit)
   -> unit
-  -> (run_result, Agent_sdk.Error.sdk_error) result
+  -> (run_result, Agent_core.Error.t) result

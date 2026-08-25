@@ -1,8 +1,8 @@
 (** Keeper_internal_error — the [masc_internal_error] ADT, its JSON codec, and the reverse-direction
-    SDK envelope parser.
+    agent-core envelope parser.
 
     This is the structured *typed envelope* carried across the
-    [Agent_sdk.Error.Internal _] boundary for keeper turn failures.  It is the
+    [Agent_core.Error.Internal _] boundary for keeper turn failures.  It is the
     re-homed successor of the deleted runtime dispatch error helpers
     (RFC-0206 runtime purge): the dispatch engine that constructed many of these variants
     is gone, but the envelope itself outlives it — provider/turn failures still
@@ -24,6 +24,10 @@ let runtime_id_to_string (s : string) = s
    this value so recoverability cannot drift through duplicated literals. *)
 let capacity_backpressure_kind = "capacity_backpressure"
 let incomplete_tool_transcript_kind = "incomplete_tool_transcript"
+let provider_attempt_effect_fenced_kind = "provider_attempt_effect_fenced"
+let tool_correction_lost_kind = "tool_correction_lost"
+let accept_rejected_kind = "accept_rejected"
+let terminal_effect_failed_kind = "terminal_effect_failed"
 
 type provider_rejection = {
   provider_label : string;
@@ -50,36 +54,6 @@ let capacity_backpressure_source_of_string = function
 type capacity_retry_after =
   | Explicit of float
   | No_retry_hint
-
-(** Legacy diagnostic carried by persisted [Capacity_backpressure] envelopes.
-    It has no retry, admission, or lifecycle authority. *)
-type provider_cooldown_cause =
-  | Cooldown_provider_capacity
-  | Cooldown_soft_rate_limited
-  | Cooldown_server_error
-  | Cooldown_hard_quota
-  | Cooldown_terminal_failure
-  | Cooldown_provider_error
-  | Cooldown_rejected
-
-let provider_cooldown_cause_to_string = function
-  | Cooldown_provider_capacity -> "provider_capacity"
-  | Cooldown_soft_rate_limited -> "soft_rate_limited"
-  | Cooldown_server_error -> "server_error"
-  | Cooldown_hard_quota -> "hard_quota"
-  | Cooldown_terminal_failure -> "terminal_failure"
-  | Cooldown_provider_error -> "provider_error"
-  | Cooldown_rejected -> "rejected"
-
-let provider_cooldown_cause_of_string = function
-  | "provider_capacity" -> Some Cooldown_provider_capacity
-  | "soft_rate_limited" -> Some Cooldown_soft_rate_limited
-  | "server_error" -> Some Cooldown_server_error
-  | "hard_quota" -> Some Cooldown_hard_quota
-  | "terminal_failure" -> Some Cooldown_terminal_failure
-  | "provider_error" -> Some Cooldown_provider_error
-  | "rejected" -> Some Cooldown_rejected
-  | _ -> None
 
 type runtime_exhaustion_reason =
   | Connection_refused
@@ -198,15 +172,15 @@ let accept_response_shape_of_string = function
   | _ -> None
 ;;
 
-let accept_response_shape_of_agent_sdk = function
-  | Agent_sdk.Response_shape.Empty -> Accept_response_empty
-  | Agent_sdk.Response_shape.Thinking_only -> Accept_response_thinking_only
-  | Agent_sdk.Response_shape.Blank_text_only -> Accept_response_blank_text_only
-  | Agent_sdk.Response_shape.Tool_result_only -> Accept_response_tool_result_only
-  | Agent_sdk.Response_shape.Media_only -> Accept_response_media_only
-  | Agent_sdk.Response_shape.Mixed_without_deliverable_content ->
+let accept_response_shape_of_agent_core = function
+  | Agent_core.Response_shape.Empty -> Accept_response_empty
+  | Agent_core.Response_shape.Thinking_only -> Accept_response_thinking_only
+  | Agent_core.Response_shape.Blank_text_only -> Accept_response_blank_text_only
+  | Agent_core.Response_shape.Tool_result_only -> Accept_response_tool_result_only
+  | Agent_core.Response_shape.Media_only -> Accept_response_media_only
+  | Agent_core.Response_shape.Mixed_without_deliverable_content ->
     Accept_response_mixed_without_deliverable_content
-  | Agent_sdk.Response_shape.Has_deliverable_content ->
+  | Agent_core.Response_shape.Has_deliverable_content ->
     Accept_response_has_deliverable_content
 ;;
 
@@ -265,9 +239,6 @@ type masc_internal_error =
       source : capacity_backpressure_source;
       detail : string;
       retry_after : capacity_retry_after;
-      cooldown_cause : provider_cooldown_cause option;
-      (* Legacy diagnostic only. Current producers use [None]; decoded values
-         never grant retry, admission, or lifecycle authority. *)
     }
   | Resumable_cli_session of {
       runtime_id : string;
@@ -282,11 +253,11 @@ type masc_internal_error =
       (* RFC-0271 §4.5: typed provider stop_reason for the rejected response.
          [MaxTokens] on an empty/thinking_only shape marks a truncation (the
          shared output budget was exhausted, most often by thinking) and must be
-         distinguished from a clean [EndTurn] no-progress terminal — OAS gates
+         distinguished from a clean [EndTurn] no-progress terminal — AGENT_CORE gates
          its own [ended_without_deliverable_content] on [EndTurn] for exactly
          this reason. Groundwork only in this slice: threaded and serialized,
          not yet consumed by classification (§4.5 slices 2-3). *)
-      stop_reason : Agent_sdk.Types.stop_reason option;
+      stop_reason : Agent_core.Types.stop_reason option;
       reason : string;
     }
   | Internal_unhandled_exception of {
@@ -311,6 +282,17 @@ type masc_internal_error =
       effect_disposition : Tool_result.failure_effect_disposition;
       diagnostic : string;
     }
+  | Provider_attempt_effect_fenced of {
+      runtime_id : string;
+      effect_disposition : Keeper_provider_attempt_effect_core.t;
+      diagnostic : string;
+    }
+  | Tool_correction_lost of {
+      runtime_id : string;
+      effect_disposition : Keeper_provider_attempt_effect_core.t;
+      reject_count : int;
+      diagnostic : string;
+    }
   | Receipt_persistence_failed of {
       detail : string;
     }
@@ -321,19 +303,19 @@ type masc_internal_error =
       detail : string;
     }
 
-let masc_internal_error_prefix = "[masc_oas_error] "
+let masc_internal_error_prefix = "[masc_agent_core_error] "
 let runtime_runner_execute_site = "runtime_runner.execute"
 
 (* #9933: a keeper [blocker_info] detail string may carry a structured
-   [masc_oas_error] JSON payload — [masc_internal_error_prefix] above,
-   possibly wrapped by Agent_sdk.Error.to_string's "Internal error: ".
+   [masc_agent_core_error] JSON payload — [masc_internal_error_prefix] above,
+   possibly wrapped by Agent_core.Error.to_string's "Internal error: ".
    Truncating it at the narrative budget slices the JSON mid-key, so
    downstream consumers (dashboard, retry classifier, log search) lose the
    diagnostic fields (budget_sec, source, …). [cap_blocker_detail] keeps a
    payload that begins with the prefix up to
    [blocker_detail_structured_max_chars] and truncates plain narrative text
    to [blocker_detail_narrative_max_chars]. Idempotent. Applied where the
-   runtime builds last_blocker.detail
+   runtime builds a blocker detail string
    (keeper_unified_metrics_failure). *)
 let blocker_detail_narrative_max_chars = 200
 
@@ -342,15 +324,15 @@ let blocker_detail_narrative_max_chars = 200
    payload is pathological and we cap rather than store unbounded blobs. *)
 let blocker_detail_structured_max_chars = 2000
 
-let masc_oas_error_bare_prefix = String.trim masc_internal_error_prefix
-let masc_oas_error_wrapped_prefix = "Internal error: " ^ masc_oas_error_bare_prefix
+let masc_agent_core_error_bare_prefix = String.trim masc_internal_error_prefix
+let masc_agent_core_error_wrapped_prefix = "Internal error: " ^ masc_agent_core_error_bare_prefix
 
-let has_masc_oas_error_prefix (s : string) : bool =
+let has_masc_agent_core_error_prefix (s : string) : bool =
   let starts_with prefix =
     let pl = String.length prefix in
     String.length s >= pl && String.sub s 0 pl = prefix
   in
-  starts_with masc_oas_error_bare_prefix || starts_with masc_oas_error_wrapped_prefix
+  starts_with masc_agent_core_error_bare_prefix || starts_with masc_agent_core_error_wrapped_prefix
 
 let cap_blocker_detail (s : string) : string =
   (* +3 bytes of headroom for the "…" ellipsis suffix. *)
@@ -358,7 +340,7 @@ let cap_blocker_detail (s : string) : string =
     String_util.utf8_safe ~max_bytes:(max_chars + 3) ~suffix:"…" s
     |> String_util.to_string
   in
-  if has_masc_oas_error_prefix (String.trim s) then
+  if has_masc_agent_core_error_prefix (String.trim s) then
     if String.length s <= blocker_detail_structured_max_chars then s
     else truncate ~max_chars:blocker_detail_structured_max_chars s
   else truncate ~max_chars:blocker_detail_narrative_max_chars s
@@ -413,18 +395,12 @@ let masc_internal_error_to_json = function
         ("runtime_id", `String runtime_id);
         ("reason", runtime_exhaustion_reason_to_json reason);
       ]
-  | Capacity_backpressure { runtime_id; source; detail; retry_after; cooldown_cause } ->
+  | Capacity_backpressure { runtime_id; source; detail; retry_after } ->
     let runtime_id = runtime_id_to_string runtime_id in
     let retry_after_fields =
       match retry_after with
       | Explicit s -> [ "retry_after_sec", `Float s ]
       | No_retry_hint -> [ ("retry_after_sec", `Null) ]
-    in
-    let cooldown_cause_fields =
-      match cooldown_cause with
-      | Some cause ->
-        [ ("cooldown_cause", `String (provider_cooldown_cause_to_string cause)) ]
-      | None -> []
     in
     `Assoc
       ([
@@ -433,8 +409,7 @@ let masc_internal_error_to_json = function
          ("source", `String (capacity_backpressure_source_to_string source));
          ("detail", `String detail);
        ]
-      @ retry_after_fields
-      @ cooldown_cause_fields)
+      @ retry_after_fields)
   | Resumable_cli_session { runtime_id; detail; exit_code } ->
     let runtime_id = runtime_id_to_string runtime_id in
     `Assoc
@@ -466,7 +441,7 @@ let masc_internal_error_to_json = function
             (Option.map accept_response_shape_to_string response_shape) );
         ( "stop_reason",
           Json_util.string_opt_to_json
-            (Option.map Agent_sdk.Types.stop_reason_to_string stop_reason) );
+            (Option.map Agent_core.Types.stop_reason_to_string stop_reason) );
         ("reason", `String reason);
       ]
   | Internal_unhandled_exception { site; exn_repr; transport_error_kind } ->
@@ -507,6 +482,25 @@ let masc_internal_error_to_json = function
             (Tool_result.failure_effect_disposition_to_string effect_disposition)
         );
         ("diagnostic", `String diagnostic);
+      ]
+  | Provider_attempt_effect_fenced
+      { runtime_id; effect_disposition; diagnostic } ->
+    `Assoc
+      [ "kind", `String provider_attempt_effect_fenced_kind
+      ; "runtime_id", `String runtime_id
+      ; ( "effect_disposition"
+        , `String (Keeper_provider_attempt_effect_core.to_string effect_disposition) )
+      ; "diagnostic", `String diagnostic
+      ]
+  | Tool_correction_lost
+      { runtime_id; effect_disposition; reject_count; diagnostic } ->
+    `Assoc
+      [ "kind", `String tool_correction_lost_kind
+      ; "runtime_id", `String runtime_id
+      ; ( "effect_disposition"
+        , `String (Keeper_provider_attempt_effect_core.to_string effect_disposition) )
+      ; "reject_count", `Int reject_count
+      ; "diagnostic", `String diagnostic
       ]
   | Receipt_persistence_failed { detail } ->
     `Assoc
@@ -555,27 +549,19 @@ let accept_rejection_is_thinking_only_no_progress ~reason_kind ~response_shape =
   && response_shape = Some Accept_response_thinking_only
 
 let summary_of_masc_internal_error = function
-  | Capacity_backpressure { runtime_id; source; detail; retry_after; cooldown_cause } ->
+  | Capacity_backpressure { runtime_id; source; detail; retry_after } ->
       let retry_after_suffix =
         match retry_after with
         | Explicit value -> Printf.sprintf "; retry_after=%.1fs" value
         | No_retry_hint -> ""
       in
-      let cooldown_cause_suffix =
-        match cooldown_cause with
-        | Some cause ->
-          Printf.sprintf "; cooldown_cause=%s"
-            (provider_cooldown_cause_to_string cause)
-        | None -> ""
-      in
       Some
         (Printf.sprintf
-           "Capacity backpressure blocked runtime %s; source=%s; detail=%s%s%s"
+           "Capacity backpressure blocked runtime %s; source=%s; detail=%s%s"
            (runtime_id_to_string runtime_id)
            (capacity_backpressure_source_to_string source)
            detail
-           retry_after_suffix
-           cooldown_cause_suffix)
+           retry_after_suffix)
   | Accept_rejected
       {
         scope;
@@ -641,26 +627,91 @@ let summary_of_masc_internal_error = function
   | Internal_contract_rejected _
   | Incomplete_tool_transcript _
   | Terminal_effect_failed _
+  | Provider_attempt_effect_fenced _
+  | Tool_correction_lost _
   | Receipt_persistence_failed _
   | Gate_replay_repair_required _ -> None
 
-let kind_of_masc_internal_error = function
-  | Runtime_exhausted _ -> "runtime_exhausted"
-  | Capacity_backpressure _ -> capacity_backpressure_kind
-  | Resumable_cli_session _ -> "resumable_cli_session"
-  | Accept_rejected _ -> "accept_rejected"
-  | Internal_unhandled_exception _ -> "internal_unhandled_exception"
-  | Internal_bridge_exception _ -> "internal_bridge_exception"
-  | Internal_contract_rejected _ -> "internal_contract_rejected"
-  | Incomplete_tool_transcript _ -> incomplete_tool_transcript_kind
-  | Terminal_effect_failed _ -> "terminal_effect_failed"
-  | Receipt_persistence_failed _ -> "receipt_persistence_failed"
-  | Gate_replay_repair_required _ -> "gate_replay_repair_required"
+type wire_kind =
+  | Wire_runtime_exhausted
+  | Wire_capacity_backpressure
+  | Wire_resumable_cli_session
+  | Wire_accept_rejected
+  | Wire_internal_unhandled_exception
+  | Wire_internal_bridge_exception
+  | Wire_internal_contract_rejected
+  | Wire_incomplete_tool_transcript
+  | Wire_terminal_effect_failed
+  | Wire_provider_attempt_effect_fenced
+  | Wire_tool_correction_lost
+  | Wire_receipt_persistence_failed
+  | Wire_gate_replay_repair_required
+
+let wire_kind_of_masc_internal_error = function
+  | Runtime_exhausted _ -> Wire_runtime_exhausted
+  | Capacity_backpressure _ -> Wire_capacity_backpressure
+  | Resumable_cli_session _ -> Wire_resumable_cli_session
+  | Accept_rejected _ -> Wire_accept_rejected
+  | Internal_unhandled_exception _ -> Wire_internal_unhandled_exception
+  | Internal_bridge_exception _ -> Wire_internal_bridge_exception
+  | Internal_contract_rejected _ -> Wire_internal_contract_rejected
+  | Incomplete_tool_transcript _ -> Wire_incomplete_tool_transcript
+  | Terminal_effect_failed _ -> Wire_terminal_effect_failed
+  | Provider_attempt_effect_fenced _ -> Wire_provider_attempt_effect_fenced
+  | Tool_correction_lost _ -> Wire_tool_correction_lost
+  | Receipt_persistence_failed _ -> Wire_receipt_persistence_failed
+  | Gate_replay_repair_required _ -> Wire_gate_replay_repair_required
+
+let wire_kind_to_string = function
+  | Wire_runtime_exhausted -> "runtime_exhausted"
+  | Wire_capacity_backpressure -> capacity_backpressure_kind
+  | Wire_resumable_cli_session -> "resumable_cli_session"
+  | Wire_accept_rejected -> accept_rejected_kind
+  | Wire_internal_unhandled_exception -> "internal_unhandled_exception"
+  | Wire_internal_bridge_exception -> "internal_bridge_exception"
+  | Wire_internal_contract_rejected -> "internal_contract_rejected"
+  | Wire_incomplete_tool_transcript -> incomplete_tool_transcript_kind
+  | Wire_terminal_effect_failed -> terminal_effect_failed_kind
+  | Wire_provider_attempt_effect_fenced -> provider_attempt_effect_fenced_kind
+  | Wire_tool_correction_lost -> tool_correction_lost_kind
+  | Wire_receipt_persistence_failed -> "receipt_persistence_failed"
+  | Wire_gate_replay_repair_required -> "gate_replay_repair_required"
+
+(* Decoding scans this list through [wire_kind_to_string] rather than
+   repeating the strings, so encoder and decoder cannot spell a kind
+   differently. *)
+let all_wire_kinds =
+  [ Wire_runtime_exhausted
+  ; Wire_capacity_backpressure
+  ; Wire_resumable_cli_session
+  ; Wire_accept_rejected
+  ; Wire_internal_unhandled_exception
+  ; Wire_internal_bridge_exception
+  ; Wire_internal_contract_rejected
+  ; Wire_incomplete_tool_transcript
+  ; Wire_terminal_effect_failed
+  ; Wire_provider_attempt_effect_fenced
+  ; Wire_tool_correction_lost
+  ; Wire_receipt_persistence_failed
+  ; Wire_gate_replay_repair_required
+  ]
+
+let wire_kind_of_string wire =
+  List.find_opt
+    (fun kind -> String.equal (wire_kind_to_string kind) wire)
+    all_wire_kinds
+;;
+
+let kind_of_masc_internal_error error =
+  wire_kind_to_string (wire_kind_of_masc_internal_error error)
+;;
 
 let runtime_id_of_masc_internal_error = function
   | Runtime_exhausted { runtime_id; _ }
   | Capacity_backpressure { runtime_id; _ }
-  | Resumable_cli_session { runtime_id; _ } ->
+  | Resumable_cli_session { runtime_id; _ }
+  | Provider_attempt_effect_fenced { runtime_id; _ }
+  | Tool_correction_lost { runtime_id; _ } ->
       let runtime_id = runtime_id_to_string runtime_id in
       if String.equal (String.trim runtime_id) "" then "unknown"
       else runtime_id
@@ -704,6 +755,8 @@ let accept_no_progress_retry_kind = function
   | Internal_contract_rejected _
   | Incomplete_tool_transcript _
   | Terminal_effect_failed _
+  | Provider_attempt_effect_fenced _
+  | Tool_correction_lost _
   | Receipt_persistence_failed _
   | Gate_replay_repair_required _ ->
     None
@@ -714,12 +767,23 @@ let accept_rejection_has_no_progress_retry_hint err =
     true
   | None -> false
 
-let sdk_error_of_masc_internal_error err =
-  Agent_sdk.Error.Internal
-    (masc_internal_error_prefix ^ Yojson.Safe.to_string (masc_internal_error_to_json err))
+(* The typed value rides the carrier (RFC-0371 B12 §6.1(1)); the message
+   keeps the exact prefixed-JSON spelling so anything that only stringifies
+   — logs, receipts, persisted turn state — sees the same wire text as
+   before the carrier existed. *)
+type Agent_core.Error.carrier += Masc_internal of masc_internal_error
+
+let core_error_of_masc_internal_error err =
+  Agent_core.Error.Internal_carried
+    { message =
+        masc_internal_error_prefix
+        ^ Yojson.Safe.to_string (masc_internal_error_to_json err)
+    ; carrier = Masc_internal err
+    }
+
 
 (* ------------------------------------------------------------------ *)
-(* Reverse direction: SDK envelope -> typed variant.                  *)
+(* Reverse direction: agent-core envelope -> typed variant.                  *)
 (* ------------------------------------------------------------------ *)
 
 let parse_masc_internal_error_json (json : Yojson.Safe.t) :
@@ -780,29 +844,15 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                       ; "detail"
                       ; "retry_after_sec"
                       ]
-                      fields
-                    || exact_fields
-                         [ "kind"
-                         ; "runtime_id"
-                         ; "source"
-                         ; "detail"
-                         ; "retry_after_sec"
-                         ; "cooldown_cause"
-                         ]
-                         fields ->
+                      fields ->
                let retry_after =
                  match float_opt_of_assoc "retry_after_sec" json with
                  | None -> No_retry_hint
                  | Some s -> Explicit s
                in
-               let cooldown_cause =
-                 match string_opt_of_assoc "cooldown_cause" json with
-                 | Some raw -> provider_cooldown_cause_of_string raw
-                 | None -> None
-               in
                Some
                  (Capacity_backpressure
-                    { runtime_id; source; detail; retry_after; cooldown_cause })
+                    { runtime_id; source; detail; retry_after })
              | Some _ | None -> None)
           | _ -> None)
       | Some (`String "resumable_cli_session") -> (
@@ -834,7 +884,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                        accept_response_shape_of_string;
                    stop_reason =
                      Option.map
-                       Agent_sdk.Types.stop_reason_of_string
+                       Agent_core.Types.stop_reason_of_string
                        (string_opt_of_assoc "stop_reason" json);
                    reason;
                  })
@@ -902,6 +952,47 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                     { failure_class; effect_disposition; diagnostic })
              | _ -> None)
           | _ -> None)
+      | Some (`String kind)
+        when String.equal kind provider_attempt_effect_fenced_kind
+             && exact_fields
+                  [ "kind"; "runtime_id"; "effect_disposition"; "diagnostic" ]
+                  fields ->
+        (match
+           string_opt_of_assoc "runtime_id" json,
+           string_opt_of_assoc "effect_disposition" json,
+           string_opt_of_assoc "diagnostic" json
+         with
+         | Some runtime_id, Some effect_disposition, Some diagnostic ->
+           Option.map
+             (fun effect_disposition ->
+                Provider_attempt_effect_fenced
+                  { runtime_id; effect_disposition; diagnostic })
+             (Keeper_provider_attempt_effect_core.of_string effect_disposition)
+         | _ -> None)
+      | Some (`String kind)
+        when String.equal kind tool_correction_lost_kind
+             && exact_fields
+                  [ "kind"
+                  ; "runtime_id"
+                  ; "effect_disposition"
+                  ; "reject_count"
+                  ; "diagnostic"
+                  ]
+                  fields ->
+        (match
+           string_opt_of_assoc "runtime_id" json,
+           string_opt_of_assoc "effect_disposition" json,
+           List.assoc_opt "reject_count" fields,
+           string_opt_of_assoc "diagnostic" json
+         with
+         | Some runtime_id, Some effect_disposition, Some (`Int reject_count),
+           Some diagnostic ->
+           Option.map
+             (fun effect_disposition ->
+                Tool_correction_lost
+                  { runtime_id; effect_disposition; reject_count; diagnostic })
+             (Keeper_provider_attempt_effect_core.of_string effect_disposition)
+         | _ -> None)
       | Some (`String "receipt_persistence_failed") -> (
           match string_opt_of_assoc "detail" json with
           | Some detail -> Some (Receipt_persistence_failed { detail })
@@ -944,8 +1035,39 @@ let classify_masc_internal_error_of_string (raw : string) :
     (try parse_masc_internal_error_json (Yojson.Safe.from_string payload)
      with Yojson.Json_error _ -> None)
 
-let classify_masc_internal_error (err : Agent_sdk.Error.sdk_error) :
+let classify_masc_internal_error (err : Agent_core.Error.t) :
     masc_internal_error option =
+  let terminal_effect_failed ~effect_disposition ~diagnostic =
+    let effect_disposition =
+      match Agent_core.Error.terminal_effect_disposition effect_disposition with
+      | Agent_core.Tool_contract.Proven_pre_effect ->
+        Tool_result.Proven_pre_effect
+      | Agent_core.Tool_contract.Proven_post_effect ->
+        Tool_result.Proven_post_effect
+      | Agent_core.Tool_contract.Effect_outcome_unknown ->
+        Tool_result.Effect_outcome_unknown
+    in
+    Some
+      (Terminal_effect_failed
+         { failure_class = Tool_result.Runtime_failure
+         ; effect_disposition
+         ; diagnostic
+         })
+  in
   match err with
-  | Agent_sdk.Error.Internal msg -> classify_masc_internal_error_of_string msg
+  (* Live values carry the typed payload (RFC-0371 B12); the string parse
+     below stays as the boundary for persisted strings and for [Internal]
+     values from producers that predate the carrier. *)
+  | Agent_core.Error.Internal_carried { carrier = Masc_internal err; _ } -> Some err
+  | Agent_core.Error.Internal_carried { message; _ } ->
+    classify_masc_internal_error_of_string message
+  | Agent_core.Error.Internal msg -> classify_masc_internal_error_of_string msg
+  | Agent_core.Error.Agent
+      (Agent_core.Error.TerminalToolEffectFailed
+        { effect_disposition; detail; _ }) ->
+    terminal_effect_failed ~effect_disposition ~diagnostic:detail
+  | Agent_core.Error.Agent
+      (Agent_core.Error.TerminalToolDurabilityFailed
+        { effect_disposition; detail; _ }) ->
+    terminal_effect_failed ~effect_disposition ~diagnostic:detail
   | _ -> None

@@ -1,0 +1,178 @@
+name: PR Status Labels
+
+# Projects GitHub's own view of a pull request onto pr/* labels. The labels are a view:
+# nothing gates on them and nobody sets them by hand.
+#
+# Two of the four states cannot be reached any other way:
+#   - `mergeable` has no search qualifier. GitHub also cannot build a merge commit while a
+#     PR conflicts, so no new `pull_request` workflow starts: the checks freeze at whatever
+#     the last clean push produced, and a PR that conflicted from the start shows none at
+#     all. Either way the PR reads as a slow queue rather than a blocked branch.
+#   - Unresolved review threads have no search qualifier either, and answering them is a
+#     merge precondition here.
+# The two review-decision labels do duplicate the `review:` search qualifiers. They earn
+# their place by putting the state in the PR list itself; drop those two entries from the
+# SSOT if that stops being worth the duplication.
+#
+# Conflict state flips when main moves, and resolving a thread emits no webhook at all,
+# so PR events alone cannot keep this honest. push-to-main and the hourly sweep are the
+# repair loop, and they are what stops the labels from rotting into a lie.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, closed]
+  pull_request_review:
+    types: [submitted, dismissed]
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Single PR number. Leave empty to sweep every open PR.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-status-labels-${{ github.event.pull_request.number || inputs.pr_number || 'sweep' }}
+  cancel-in-progress: true
+
+jobs:
+  project:
+    name: Project PR state onto labels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/pull-request-labels.json
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/github-script@v9
+        env:
+          DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
+        with:
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+            const SSOT = JSON.parse(fs.readFileSync('.github/pull-request-labels.json', 'utf8'));
+            const PREFIX = SSOT.prefix;
+            const spec = SSOT.labels;
+            const defs = Object.values(spec);
+            const NAME = Object.fromEntries(Object.entries(spec).map(([k, v]) => [k, v.label]));
+
+            // This workflow is the only writer of pr/*, so there is no human-declared
+            // vocabulary to drift from and nothing to fail closed against. It creates what
+            // it is missing instead of waiting for someone to run a sync script.
+            const existing = new Map(
+              (await github.paginate(github.rest.issues.listLabelsForRepo, { owner, repo, per_page: 100 }))
+                .map((l) => [l.name, l]),
+            );
+            for (const d of defs) {
+              const cur = existing.get(d.label);
+              if (!cur) {
+                await github.rest.issues.createLabel({ owner, repo, name: d.label, color: d.color, description: d.description });
+              } else if (cur.color !== d.color || (cur.description || '') !== d.description) {
+                await github.rest.issues.updateLabel({ owner, repo, name: d.label, color: d.color, description: d.description });
+              }
+            }
+
+            const FIELDS = `
+              number state isDraft mergeable reviewDecision
+              labels(first: 100) { nodes { name } }
+              reviewThreads(first: 100) { pageInfo { hasNextPage } nodes { isResolved } }
+            `;
+
+            async function fetchOne(number) {
+              const q = `query($owner:String!,$repo:String!,$number:Int!){
+                repository(owner:$owner,name:$repo){ pullRequest(number:$number){ ${FIELDS} } } }`;
+              const r = await github.graphql(q, { owner, repo, number });
+              return r.repository.pullRequest;
+            }
+
+            async function fetchOpen() {
+              const q = `query($owner:String!,$repo:String!,$cursor:String){
+                repository(owner:$owner,name:$repo){
+                  pullRequests(states: OPEN, first: 50, after: $cursor){
+                    pageInfo { hasNextPage endCursor }
+                    nodes { ${FIELDS} } } } }`;
+              const out = [];
+              let cursor = null;
+              for (;;) {
+                const page = (await github.graphql(q, { owner, repo, cursor })).repository.pullRequests;
+                out.push(...page.nodes);
+                if (!page.pageInfo.hasNextPage) return out;
+                cursor = page.pageInfo.endCursor;
+              }
+            }
+
+            // GitHub computes the merge check lazily: the first read of a PR it has not
+            // looked at answers UNKNOWN and starts the work. Read once more before deciding.
+            async function settle(pr) {
+              if (pr.state !== 'OPEN' || pr.mergeable !== 'UNKNOWN') return pr;
+              await new Promise((r) => setTimeout(r, 4000));
+              return await fetchOne(pr.number);
+            }
+
+            // UNKNOWN and a truncated thread page are both "GitHub has not told us yet".
+            // Carrying the current answer forward beats flapping the label on every push.
+            function target(pr, current) {
+              if (pr.state !== 'OPEN') return new Set();
+              const want = new Set();
+              if (pr.mergeable === 'CONFLICTING') want.add(NAME.conflict);
+              else if (pr.mergeable === 'UNKNOWN' && current.has(NAME.conflict)) want.add(NAME.conflict);
+              if (pr.reviewDecision === 'APPROVED') want.add(NAME['review-approved']);
+              if (pr.reviewDecision === 'CHANGES_REQUESTED') want.add(NAME['review-changes']);
+              const threads = pr.reviewThreads;
+              if (threads.nodes.some((t) => !t.isResolved)) want.add(NAME.unresolved);
+              else if (threads.pageInfo.hasNextPage && current.has(NAME.unresolved)) want.add(NAME.unresolved);
+              return want;
+            }
+
+            async function reconcile(pr) {
+              const current = new Set(pr.labels.nodes.map((l) => l.name));
+              const want = target(pr, current);
+              const toRemove = [...current].filter((n) => n.startsWith(PREFIX) && !want.has(n));
+              const toAdd = [...want].filter((n) => !current.has(n));
+              try {
+                for (const name of toRemove)
+                  await github.rest.issues.removeLabel({ owner, repo, issue_number: pr.number, name })
+                    .catch((e) => { if (e.status !== 404) throw e; });
+                if (toAdd.length)
+                  await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: toAdd });
+              } catch (e) {
+                // A pull_request event from a fork hands this job a read-only token. The
+                // scheduled sweep runs with write and will catch the PR up.
+                if (e.status === 403) {
+                  core.warning(`no write access for #${pr.number}; the sweep will pick it up`);
+                  return { number: pr.number, skipped: 'read-only token' };
+                }
+                throw e;
+              }
+              return { number: pr.number, added: toAdd, removed: toRemove };
+            }
+
+            const dispatchNumber = (process.env.DISPATCH_PR_NUMBER || '').trim();
+            let prs;
+            if (context.payload.pull_request?.number) {
+              prs = [await fetchOne(context.payload.pull_request.number)];
+            } else if (dispatchNumber) {
+              const n = Number(dispatchNumber);
+              if (!Number.isInteger(n) || n <= 0) { core.setFailed(`invalid PR number: ${dispatchNumber}`); return; }
+              prs = [await fetchOne(n)];
+            } else {
+              prs = await fetchOpen();
+            }
+
+            let changed = 0;
+            for (const raw of prs) {
+              if (!raw) continue;
+              const r = await reconcile(await settle(raw));
+              if (r.added?.length || r.removed?.length) changed++;
+              core.info(JSON.stringify(r));
+            }
+            core.info(`scanned ${prs.length}, changed ${changed}`);

@@ -1,0 +1,29 @@
+{
+  "captured_at": "2026-08-19T08:35:00Z",
+  "purpose": "Broadcast 행 — '2 Keeper 수신 미측정'이던 수신 경로의 fleet 실측",
+  "method": "외부 MCP 클라이언트(codex-mcp-client)로 masc_broadcast를 1회 발신한 뒤, 그 본문의 고유 문자열이 keeper 턴 프롬프트에 실렸는지 wire capture에서 전수 검색했다. 발신과 수신을 서로 다른 스토어로 대조한다.",
+  "send": {
+    "tool": "masc_broadcast",
+    "at": "2026-08-19T06:21Z",
+    "request_id": "wmsg-df005ab89ebfeb4010288063c1e0b8a9",
+    "seq": 1824,
+    "marker": "task-403 (본문에만 등장하는 고유 토큰)"
+  },
+  "receive": {
+    "source": "<base-path>/.masc/wire-capture/2026-08/19.jsonl",
+    "prompt_occurrences": 445,
+    "distinct_keepers": 12,
+    "per_keeper": {
+      "rondo": 57, "adm-race-sf-000": 42, "adm-race-sf-001": 35, "sangsu": 33,
+      "analyst": 28, "adm-race-cf-001": 26, "adm-race-cf-000": 26,
+      "adm-race-cf-002": 25, "adm-race-sf-002": 25, "code-reviewer": 24,
+      "kidsnote": 21, "lane-smith": 20
+    },
+    "window": "2026-08-19T06:21:56Z ~ 2026-08-19T08:33:00Z"
+  },
+  "verdict": "단일 broadcast가 12개 keeper의 턴 프롬프트에 도달했다 — 종전 축이 요구하던 '2 Keeper 수신'을 넘어선다. 발신 06:21:56Z부터 2시간 11분에 걸쳐 계속 실리며, keeper마다 20~57회로 갈리는 것은 그 창 안에서 각자 돈 턴 수의 차이다.",
+  "caveats": {
+    "delivery_not_action": "프롬프트에 실렸다는 것이지 keeper가 그 내용에 따라 행동했다는 증거는 아니다. 실제로 이 broadcast가 요청한 task claim은 아직 0건이다.",
+    "single_send": "발신 1회에 대한 fan-out 측정이다. 동시 발신이나 폭주 시의 동작은 별도."
+  }
+}

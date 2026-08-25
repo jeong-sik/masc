@@ -61,6 +61,8 @@ let restart_launch_noop_enabled_for_test = Keeper_supervisor_restart_noop.enable
 let with_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.with_noop
 
 let launch_supervised_fiber_body
+      ?intake_token
+      ~lifecycle_token
       ~proactive_warmup_sec
       ctx
       (meta : keeper_meta)
@@ -71,6 +73,18 @@ let launch_supervised_fiber_body
   if restart_launch_noop_enabled_for_test ()
   then (* test no-op launch: nothing forked, but not a fork rejection *) Ok ()
   else (
+    let lifecycle_result = Atomic.make None in
+    let finish_lifecycle boundary terminalize =
+      let result =
+        Keeper_keepalive_launch_transaction.finish_lifecycle
+          ~boundary
+          ~base_path
+          ~keeper_name:meta.name
+          ~terminalize
+      in
+      Atomic.set lifecycle_result (Some result);
+      result
+    in
     (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs
      and break the initial proactive deadlock. *)
     let bootstrap_signal : Keeper_event_queue.stimulus =
@@ -80,14 +94,24 @@ let launch_supervised_fiber_body
       ; payload = Keeper_event_queue.Bootstrap
       }
     in
-    Keeper_registry_event_queue.enqueue ~base_path meta.name bootstrap_signal;
+    Keeper_registry_event_queue.enqueue
+      ?intake_token
+      ~base_path
+      meta.name
+      bootstrap_signal;
     let fork_body body =
       match
         Keeper_lane.fork
           ~sw:ctx.sw
           reg.lane
           ~run:body
-          ~cleanup:(fun _ -> Ok ())
+          ~cleanup:(fun _ ->
+            match Atomic.get lifecycle_result with
+            | Some result -> result
+            | None ->
+              finish_lifecycle
+                Keeper_keepalive_launch_transaction.Unexpected
+                (fun () -> Error "supervisor lane exited without terminal disposition"))
       with
       | Ok () -> Ok ()
       | Error error ->
@@ -111,16 +135,21 @@ let launch_supervised_fiber_body
         if owns_terminal_signal
         then (
           let _failure_reason_recorded =
-            Keeper_registry.set_failure_reason_exact
+            Keeper_registry.update_entry_exact_for_lifecycle
+              lifecycle_token
               reg
-              (Some (Keeper_registry.Exception detail))
+              (fun current ->
+                { current with
+                  last_failure_reason = Some (Keeper_registry.Exception detail)
+                })
             |> Keeper_registry.exact_update_succeeded
                  reg
                  ~site:"supervisor_lane_start_rejected.failure_reason"
           in
           let terminalized =
             match
-              Keeper_registry.dispatch_event_exact
+              Keeper_registry.dispatch_event_exact_for_lifecycle
+                lifecycle_token
                 reg
                 (Keeper_state_machine.Fiber_terminated
                    { outcome = detail; provider_id = None; http_status = None })
@@ -137,15 +166,22 @@ let launch_supervised_fiber_body
               false
           in
           let _crash_recorded =
-            Keeper_registry.record_crash_exact
+            Keeper_registry.update_entry_exact_for_lifecycle
+              lifecycle_token
               reg
-              (Time_compat.now ())
-              detail
+              (fun current ->
+                Keeper_registry_error_tracking.record_crash_entry
+                  current
+                  (Time_compat.now ())
+                  detail)
             |> Keeper_registry.exact_update_succeeded
                  reg
                  ~site:"supervisor_lane_start_rejected.crash_log"
           in
-          Keeper_registry_error_recording.record_exact reg detail;
+          Keeper_registry_error_recording.record_exact_for_lifecycle
+            lifecycle_token
+            reg
+            detail;
           if terminalized
           then
             publish_phase_lifecycle
@@ -154,7 +190,9 @@ let launch_supervised_fiber_body
               detail
               ()
           else
-            match Keeper_registry.unregister_exact reg with
+            match
+              Keeper_registry.unregister_exact_for_lifecycle lifecycle_token reg
+            with
             | Keeper_registry.Exact_unregistered ->
               Log.Keeper.error
                 "supervisor: removed non-terminalizable fork-rejected lane name=%s"
@@ -210,7 +248,7 @@ let launch_supervised_fiber_body
       Eio_guard.protect
         (fun () ->
            try
-             (* MASC owns the worker's input and durable callbacks, while OAS
+             (* MASC owns the worker's input and durable callbacks, while AGENT_CORE
                 owns target admission, dispatch, and advancement. The fork
                 itself lives in [Keeper_keepalive] so both lane-start paths
                 produce the same lane. *)
@@ -230,10 +268,12 @@ let launch_supervised_fiber_body
                     ctx
                     meta
                     reg.fiber_stop
-                    ~wakeup:reg.fiber_wakeup)
+                    ~wakeup:reg.fiber_wakeup
+                    ~cadence_sleeping:reg.cadence_sleeping)
                ~finally:stop_board_worker;
              (* A normal return is an explicit stop/shutdown path. Observed
                 idle/progress ages never rewrite it into a crash. *)
+             let terminalize_normal () =
                (match
                   Keeper_registry.dispatch_event
                     ~base_path
@@ -272,7 +312,14 @@ let launch_supervised_fiber_body
                    ~phase:Keeper_state_machine.Stopped
                    meta.name
                    "normal exit"
-                   ()
+                   ();
+               Ok ()
+             in
+             ignore
+               (finish_lifecycle
+                  Keeper_keepalive_launch_transaction.Graceful
+                  terminalize_normal
+                : (unit, string) result)
            with
            | Eio.Cancel.Cancelled cause ->
              (match Keeper_lane.classify_cancellation_cause cause with
@@ -286,6 +333,7 @@ let launch_supervised_fiber_body
                 Keeper_fiber_crash carries no payload — failure_reason is
                 pre-stored in registry by the raise site.
                 For unexpected exceptions, wrap in Exception variant. *)
+             let terminalize_crash () =
              let fr =
                match exn with
                | Keeper_registry.Keeper_fiber_crash ->
@@ -337,7 +385,14 @@ let launch_supervised_fiber_body
                  ~phase:Keeper_state_machine.Crashed
                  meta.name
                  reason
-                 ())
+                 ();
+             Ok ()
+             in
+             ignore
+               (finish_lifecycle
+                  Keeper_keepalive_launch_transaction.Unexpected
+                  terminalize_crash
+                : (unit, string) result))
         ~finally:(fun () ->
           (* Finally runs best-effort. Any exception raised here (including
            Eio.Cancel.Cancelled, which propagates during concurrent fiber
@@ -350,7 +405,15 @@ let launch_supervised_fiber_body
             Keeper_registry.cleanup_tracking ~base_path meta.name;
             Keeper_turn_attempt_observer.reset_keeper ~base_path ~keeper:meta.name;
             if not (Atomic.get resolved)
-            then
+            then (
+              let boundary =
+                if
+                  Shutdown.is_shutting_down_global ()
+                  || Atomic.get cancelled_by_shutdown_request
+                then Keeper_keepalive_launch_transaction.Graceful
+                else Keeper_keepalive_launch_transaction.Unexpected
+              in
+              let terminalize_unresolved () =
               if Shutdown.is_shutting_down_global ()
               then (
                 (* Issue #18901: graceful-shutdown branch. Tag the failure
@@ -465,44 +528,6 @@ let launch_supervised_fiber_body
 	                  ~base_path
                   meta.name
                   (Some (Keeper_registry.Fiber_unresolved Unexpected));
-                (* Keeper meta runtime [last_blocker] can remain null after an
-                 unresolved fiber. The diagnosis would otherwise stay buried in the
-                 crash registry but invisible on the per-keeper meta surface
-                 dashboards read.  Stamp the same cohort onto runtime so
-                 operators (and the dashboard "차단된 키퍼" card) see why a
-                 keeper is silent.  Best-effort: write_meta failure does not
-                 abort cleanup. *)
-                (match Keeper_registry.get ~base_path meta.name with
-                 | Some entry ->
-                   let stamped_meta =
-                     { entry.meta with
-                       runtime =
-                         { entry.meta.runtime with
-                           last_blocker =
-                             Some
-                               (blocker_info_of_class
-                                  ~detail:"fiber_unresolved"
-                                  Fiber_unresolved)
-                         }
-                     }
-                   in
-                   (match
-                      write_meta_with_merge
-                        ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-                        ctx.config
-                        stamped_meta
-                    with
-                    | Ok () -> ()
-                    | Error err ->
-                      Otel_metric_store.inc_counter
-                        Keeper_metrics.(to_string WriteMetaFailures)
-                        ~labels:[ "keeper", meta.name; "phase", "fiber_unresolved_stamp" ]
-                        ();
-                      Log.Keeper.warn
-                        "%s: fiber_unresolved meta stamp failed: %s"
-                        meta.name
-                        err)
-                 | None -> ());
                 let ts = Time_compat.now () in
                 Keeper_registry.record_crash ~base_path meta.name ts reason;
                 let rc =
@@ -529,7 +554,12 @@ let launch_supervised_fiber_body
                     ~phase:Keeper_state_machine.Crashed
                     meta.name
                     reason
-                    ()))
+                    ());
+                Ok ()
+              in
+              ignore
+                (finish_lifecycle boundary terminalize_unresolved
+                  : (unit, string) result)))
           with
           | Cleanup_completed -> ()
           | Cleanup_cancelled ->
@@ -565,13 +595,14 @@ let launch_supervised_fiber_body
     case nothing was forked, no [Started]/[Running] event may be published
     by the caller, and [done_p] has been resolved through the crash path. *)
 let launch_supervised_fiber
+      ?intake_token
+      ~lifecycle_token
       ~proactive_warmup_sec
-      ctx
-      (meta : keeper_meta)
-      (reg : Keeper_registry.registry_entry)
+  ctx
+  (meta : keeper_meta)
+  (reg : Keeper_registry.registry_entry)
   =
-  let base_path = ctx.config.base_path in
-  match Keeper_registry.prepare_fiber_launch ~base_path meta.name with
+  match Keeper_registry.prepare_fiber_launch_for_lifecycle lifecycle_token reg with
   | Error err ->
     (* Fail closed: a rejected [Fiber_started] (terminal state, invalid
        transition, precondition violation) means the registry refuses a
@@ -595,12 +626,33 @@ let launch_supervised_fiber
         ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Fiber_start_rejected))
         ]
       ();
-    Keeper_registry.set_failure_reason
-      ~base_path
-      meta.name
-      (Some (Keeper_registry.Exception reason));
-    Keeper_registry.record_crash ~base_path meta.name (Time_compat.now ()) reason;
-    Keeper_registry_error_recording.record ~base_path meta.name reason;
+    ignore
+      (Keeper_registry.update_entry_exact_for_lifecycle
+         lifecycle_token
+         reg
+         (fun current ->
+            { current with
+              last_failure_reason = Some (Keeper_registry.Exception reason)
+            })
+       |> Keeper_registry.exact_update_succeeded
+            reg
+            ~site:"supervisor_launch_rejected.failure_reason");
+    ignore
+      (Keeper_registry.update_entry_exact_for_lifecycle
+         lifecycle_token
+         reg
+         (fun current ->
+            Keeper_registry_error_tracking.record_crash_entry
+              current
+              (Time_compat.now ())
+              reason)
+       |> Keeper_registry.exact_update_succeeded
+            reg
+            ~site:"supervisor_launch_rejected.crash_log");
+    Keeper_registry_error_recording.record_exact_for_lifecycle
+      lifecycle_token
+      reg
+      reason;
     if
       Keeper_registry.resolve_done reg ~source:"supervisor_launch_rejected" (`Crashed reason)
       |> done_signal_of_registry_result
@@ -619,44 +671,20 @@ let launch_supervised_fiber
     (* Propagate the fork outcome: a rejected [Keeper_lane.fork] returns
        [Error] here so the caller suppresses the Started/Running lifecycle
        for a keeper whose lane was never forked. *)
-    launch_supervised_fiber_body ~proactive_warmup_sec ctx meta reg
+    launch_supervised_fiber_body
+      ?intake_token
+      ~lifecycle_token
+      ~proactive_warmup_sec
+      ctx
+      meta
+      reg
 ;;
-
-(* #10993: persona drift visibility.
-
-   [Keeper_identity.normalize_all_names ~check_persona:true] runs on
-   every dispatch via [Mcp_tool_runtime_workspace] (RFC P3-a
-   logging-only mode), but its [Persona_not_found] branch emits a
-   Log.Misc.warn that is hard to triage:
-
-   - WARN level (alert ROC blends with normal degradation noise).
-   - Per-event (24h sample: 11 events × 5 keepers vs the underlying
-     truth of 9 keepers permanently mis-configured), so operators can
-     not tell whether the gap is widening or stable.
-   - Lacks the per-keeper startup snapshot that would let an operator
-     run a quick \[ls personas/\] and reconcile.
-
-   Surface the gap once at supervise_keepalive entry — the code path
-   that actually puts the keeper into the registry. Behaviour is
-   unchanged (still proceeds with fallback) so the boot path stays
-   compatible with the current 9-missing-personas fleet; the value is
-   in turning a silent runtime drift into a single ERROR per keeper
-   per supervisor restart.
-
-   The visibility ERROR is bounded by fleet size (~14 keepers) and
-   only fires on first registration — the [is_registered] guard above
-   skips repeat calls. *)
-let persona_name_for_drift_check = Startup_helpers.persona_name_for_drift_check
-let persona_profile_path_for_drift_check =
-  Startup_helpers.persona_profile_path_for_drift_check
-;;
-
-let log_persona_drift_if_missing = Startup_helpers.log_persona_drift_if_missing
 
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_meta) =
   Keeper_supervisor_supervise_keepalive.supervise_keepalive
     ~publish_lifecycle
-    ~launch_supervised_fiber
+    ~launch_supervised_fiber:(fun ~intake_token ->
+      launch_supervised_fiber ~intake_token)
     ~proactive_warmup_sec
     ctx
     meta
@@ -665,7 +693,7 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_m
 (* ── Sweep and recover ───────────────────────────────────── *)
 
 (** Reconcile only orphaned or cleanly stopped durable keepers.
-    Running/Paused/Crashed/Dead entries are actively managed by sweep
+    Running/Paused/Crashed entries are actively managed by sweep
     and must NOT be re-launched by reconcile. Stopped entries with
     unresolved fibers (done_p = None) are also skipped — sweep will
     handle them once the fiber terminates. *)
@@ -679,12 +707,6 @@ let reconcile_keepalive_keepers ~load_or_materialize_keeper_meta (ctx : _ contex
     ~supervise_keepalive
     ~load_or_materialize_keeper_meta
     ctx
-;;
-
-(* Dead-tombstone cleanup submits a durable exact-lane finalization operation;
-   completion events/hooks are delivered from its durable receipt. *)
-let cleanup_dead_tombstone (ctx : _ context) (entry : Keeper_registry.registry_entry) =
-  Keeper_supervisor_cleanup_tombstone.cleanup_dead_tombstone ctx entry
 ;;
 
 (** Cohort key from structured failure_reason ADT.

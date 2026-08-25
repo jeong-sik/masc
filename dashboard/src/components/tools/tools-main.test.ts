@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DashboardKeeperWaitingInventory, DashboardScheduledAutomation } from '../../api'
+import type { DashboardKeeperWaitingInventory, DashboardScheduledAutomationProjection } from '../../api'
 
 type MockToolsResponse = {
   generated_at?: string
@@ -11,7 +11,6 @@ type MockToolsResponse = {
     distinct_tools_called: number
     never_called_count: number
   }
-  scheduled_automation?: DashboardScheduledAutomation
   keeper_waiting_inventory?: DashboardKeeperWaitingInventory
 }
 
@@ -21,6 +20,12 @@ const mocks = vi.hoisted(() => ({
   toolsData: { value: null as null | MockToolsResponse },
   toolsLoading: { value: false },
   toolsError: { value: null as string | null },
+  scheduledAutomationProjection: { value: null as null | DashboardScheduledAutomationProjection },
+}))
+
+vi.mock('../schedule/schedule-state', () => ({
+  scheduledAutomationProjection: mocks.scheduledAutomationProjection,
+  subscribeScheduledAutomationRefresh: () => () => {},
 }))
 
 vi.mock('./tool-state', () => ({
@@ -80,6 +85,7 @@ function waitingInventoryFixture(): DashboardKeeperWaitingInventory {
             keeper_name: 'sangsu',
             source: 'event_queue_pending',
             waiting_on: 'bootstrap',
+            what: '기동 직후 첫 턴',
             wake_producer: 'keeper_supervisor',
             next_action: 'keeper_drain_event_queue',
           },
@@ -107,6 +113,7 @@ describe('Tools', () => {
     mocks.toolsData.value = null
     mocks.toolsLoading.value = false
     mocks.toolsError.value = null
+    mocks.scheduledAutomationProjection.value = null
   })
 
   afterEach(() => {
@@ -138,17 +145,16 @@ describe('Tools', () => {
   })
 
   it('renders scheduled automation FSM projection', async () => {
-    mocks.toolsData.value = {
-      tool_inventory: { tools: [] },
-      tool_usage: {
-        registered_count: 0,
-        distinct_tools_called: 0,
-        never_called_count: 0,
-      },
-      scheduled_automation: {
+    mocks.scheduledAutomationProjection.value = {
+      state: 'available',
+      page: { visibleCount: 1, totalCount: 1, limit: 20, truncated: false },
+      data: {
         schema: 'masc.dashboard.scheduled_automation.v1',
         source: 'schedule_store',
         generated_at: '2026-06-13T00:00:00Z',
+        status: 'ok',
+        schedule_store_known: true,
+        schedule_store_read_error: null,
         request_count: 1,
         request_limit: 20,
         truncated: false,
@@ -188,6 +194,14 @@ describe('Tools', () => {
           },
         ],
       },
+    }
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        registered_count: 0,
+        distinct_tools_called: 0,
+        never_called_count: 0,
+      },
       keeper_waiting_inventory: waitingInventoryFixture(),
     }
 
@@ -206,7 +220,12 @@ describe('Tools', () => {
     expect(container.textContent).toContain('operator (human operator)')
     expect(container.textContent).toContain('Keeper Waiting Inventory')
     expect(container.textContent).toContain('sangsu')
-    expect(container.textContent).toContain('event queue pending')
+    // #30068 moved this panel onto the shared lane row, where a waiting
+    // source renders through LANE_SOURCE_LABELS instead of the raw enum.
+    // The row still names which queue the keeper is waiting on; only the
+    // wording changed.
+    expect(container.textContent).toContain('자율 이벤트')
+    expect(container.textContent).not.toContain('event queue pending')
     expect(container.querySelector('[data-schedule-id="sched-1"]')).not.toBeNull()
     expect(container.querySelector('.v2-lab-card')).not.toBeNull()
   })

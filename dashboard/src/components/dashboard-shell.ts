@@ -3,7 +3,7 @@ import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
 import type { ComponentType } from 'preact'
 import { useEffect, useMemo } from 'preact/hooks'
-import type { GroundedVerdict, RouteState, TabId } from '../types'
+import type { RouteState, TabId } from '../types'
 import type { DashboardFleetSafetyHealth, DashboardKeeperReactionLedgerHealth, DashboardRuntimeResolution, Keeper } from '../types'
 import {
   fetchDashboardRuntimeProbe,
@@ -19,7 +19,6 @@ import {
 import { isKeeperPaused } from '../lib/keeper-predicates'
 import { KEEPER_STATUS_LABEL_KO } from '../lib/keeper-operational-state'
 import { dashboardLoading, executionError, keepers, serverStatus, shellCounts, shellRuntimeResolution, tasksByStatus } from '../store'
-import { missionSnapshot, missionLoading } from '../mission-signals'
 import { namespaceTruth, namespaceTruthInitializing } from '../namespace-truth-store'
 import {
   configuredCountSourceLabel,
@@ -32,14 +31,10 @@ import { ErrorBoundary } from './common/error-boundary'
 import { TimeAgo } from './common/time-ago'
 import { LoadingState } from './common/feedback-state'
 import {
-  DASHBOARD_SURFACES,
   DASHBOARD_NAV_ITEMS,
-  PRIMARY_DASHBOARD_SURFACES,
   currentSectionForRoute,
-  visibleSectionItemsForTab,
 } from '../config/navigation'
 import { ObservatoryFilterBar } from './common/observatory-filter-bar'
-import { ChevronRight, ChevronLeft } from 'lucide-preact'
 import type { LucideIcon } from 'lucide-preact'
 import { ExternalLink } from 'lucide-preact'
 import { ScrollToTopButton } from './common/scroll-to-top'
@@ -49,8 +44,6 @@ import { unacknowledgedCount } from './common/error-notification-state'
 import { ErrorPanel } from './common/error-panel'
 import { Bell } from 'lucide-preact'
 import { ringFocusClasses } from './common/ring'
-import { SurfaceIcon } from './surface-icon'
-import { gateData } from './gate-signals'
 import { Breadcrumb, type BreadcrumbItem } from './common/breadcrumb'
 import { RouteLink } from './common/route-link'
 import {
@@ -58,11 +51,8 @@ import {
   WidgetSoloBar,
   widgetSoloUrlForRoute,
 } from './widget-solo'
-import {
-  CURRENT_KEEPER_FLEET_FACT_INVALID,
-  keeperFleetOperatorFactPresentation,
-  keeperFleetOperatorFacts,
-} from './keeper-fleet-operator-fact'
+import { keepersNotRunning } from './fleet-health-panel'
+import { ShieldAlert } from 'lucide-preact'
 
 const buildIdentityOpen = signal(false)
 const shellRuntimeProviderProbe = signal<DashboardRuntimeProbePayload | null>(null)
@@ -216,9 +206,9 @@ interface DashboardHealthInput {
   counts: {
     agents?: number
     tasks?: number
-    keepers: number
+    keepers?: number
     total_runtimes?: number
-    configured_keepers: number
+    configured_keepers?: number
   } | null
   namespaceTruthCounts?: {
     agents?: number
@@ -250,14 +240,13 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
   if (!fleetSafety) return null
   const fleet = fleetSafety.keeper_fleet_safety
   if (fleet?.status === 'ok') return null
-  const facts = keeperFleetOperatorFacts(fleet)
-  const fact = facts[0] ?? CURRENT_KEEPER_FLEET_FACT_INVALID
-  const presentation = keeperFleetOperatorFactPresentation(fact, fleet?.status)
+  const notRunning = keepersNotRunning(fleet)
   return {
     key: 'fleet-liveness-risk',
-    label: presentation.label,
+    label: 'Keeper fleet degraded',
     detail: [
       `status=${fleet?.status ?? 'current_fact_invalid'}`,
+      fleet?.reason ? `reason=${fleet.reason}` : null,
       fleet?.executable_keeper_fiber_count != null
         ? `executable_keeper_fiber_count=${fleet.executable_keeper_fiber_count}`
         : null,
@@ -283,19 +272,14 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
         ? `reaction_capacity_shortfall_count=${fleet.reaction_capacity_shortfall_count}`
         : null,
       fleet?.blocker ? `blocker=${fleet.blocker}` : null,
-      `keeper=${presentation.keeper}`,
-      presentation.taskId ? `task=${presentation.taskId}` : null,
-      `reason=${presentation.reason}`,
-      `execution_truth=${presentation.executionTruth}`,
-      `non_executable_cause=${presentation.nonExecutableCause}`,
-      // One chip speaks for the whole fleet, so it has to say when it is
-      // showing the most severe of several blocked keepers rather than the
-      // only one.
-      facts.length > 1 ? `blocked_keeper_fact_count=${facts.length}` : null,
-      `operator_action=${presentation.action}`,
+      // One chip speaks for the whole fleet, so it names every keeper that is
+      // not running rather than picking one to stand for the rest.
+      notRunning.length > 0 ? `not_running=${notRunning.join(' ')}` : null,
     ].filter((item): item is string => item != null).join(', '),
-    tone: presentation.tone,
-    Icon: presentation.Icon,
+    // Only a degraded fleet is a warning. Blocked, and a payload this
+    // normalizer could not read, are both bad.
+    tone: fleet?.status === 'degraded' ? 'warn' : 'bad',
+    Icon: ShieldAlert,
   }
 }
 
@@ -368,24 +352,23 @@ function chipRouteFor(key: string): DashboardHealthChipRoute | undefined {
 
 function runtimeProviderFailureChip(probe: DashboardRuntimeProbePayload | null | undefined): DashboardHealthChip | null {
   if (!probe) return null
-  const summary = probe.summary ?? null
-  const providers = probe.providers ?? []
+  const summary = probe.summary
+  const providers = probe.providers
   const failedProviders = providers.filter(provider => provider.reachable === false)
-  const failed = summary?.failed ?? failedProviders.length
+  const failed = summary.failed
   if (failed <= 0) return null
 
   const missingAuth = failedProviders.filter(provider => provider.status === 'missing_auth').length
-  const reachable = summary?.reachable ?? providers.filter(provider => provider.reachable === true).length
-  const probed = summary?.probed ?? providers.filter(provider => provider.reachable !== null && provider.reachable !== undefined).length
-  const skipped = summary?.skipped ?? providers.filter(provider => provider.status === 'skipped_cli').length
+  const reachable = summary.reachable
+  const probed = summary.probed
+  const skipped = summary.skipped
   const label = missingAuth > 0
     ? `Runtime auth missing ${missingAuth}`
     : reachable > 0
       ? `Runtime providers degraded ${reachable}/${Math.max(probed, reachable + failed)}`
       : `Runtime providers unreachable ${failed}`
   const failedDetails = failedProviders.slice(0, 3).map(provider => {
-    const runtimeId = provider.runtime_id ?? provider.provider_id ?? '(unknown runtime)'
-    return `${runtimeId}: ${provider.status ?? 'failed'}`
+    return `${provider.runtime_id}: ${provider.status}`
   })
   const hiddenFailed = Math.max(0, failedProviders.length - failedDetails.length)
   if (hiddenFailed > 0) {
@@ -604,7 +587,7 @@ export function DashboardHealthStrip({ hidden = false }: { hidden?: boolean }) {
       try {
         const response = await fetchDashboardRuntimeProbe(false, { signal: activeController.signal })
         if (!disposed) {
-          shellRuntimeProviderProbe.value = response.probe ?? null
+          shellRuntimeProviderProbe.value = response.probe
           shellRuntimeProviderProbeError.value = null
         }
       } catch (error) {
@@ -755,17 +738,25 @@ function formatUptimeSecondsHuman(
     surface the one-glance summary on hover and reserve the click for
     \"deep details\". \n renders verbatim in native tooltips. */
 function composeBuildBadgeTitle(
-  build: { release_version?: string | null; commit?: string | null; uptime_seconds?: number | null } | null | undefined,
+  build: {
+    release_version?: string | null
+    binary_commit?: string | null
+    repo_head_commit?: string | null
+    uptime_seconds?: number | null
+  } | null | undefined,
   fallbackVersion: string | null | undefined,
 ): string {
   if (!build && !fallbackVersion) return 'Build unavailable'
   const lines: string[] = ['Server build']
   const version = build?.release_version ?? fallbackVersion
   if (version != null && version !== '') {
-    const commit = build?.commit != null && build.commit !== ''
-      ? ` · ${shortCommit(build.commit)}`
-      : ' · dev'
-    lines.push(`  · v${version}${commit}`)
+    const binary = build?.binary_commit != null && build.binary_commit !== ''
+      ? shortCommit(build.binary_commit)
+      : 'binary commit unknown'
+    lines.push(`  · v${version} · ${binary}`)
+  }
+  if (build?.repo_head_commit != null && build.repo_head_commit !== '') {
+    lines.push(`  · Checkout ${shortCommit(build.repo_head_commit)}`)
   }
   const uptime = formatUptimeSecondsHuman(build?.uptime_seconds)
   if (uptime !== 'Unknown') {
@@ -779,9 +770,9 @@ export function BuildIdentityBadge() {
   const status = serverStatus.value
   const build = status?.build
   const label = build
-    ? `v${build.release_version} · ${shortCommit(build.commit)}`
+    ? `v${build.release_version} · ${build.binary_commit ? shortCommit(build.binary_commit) : 'binary unknown'}`
     : status?.version
-      ? `v${status.version} · dev`
+      ? `v${status.version} · binary unknown`
       : 'Build unavailable'
   const hoverTitle = composeBuildBadgeTitle(build, status?.version)
 
@@ -804,8 +795,11 @@ export function BuildIdentityBadge() {
               <${BuildInfoRow} label="Release">
                 <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
               <//>
-              <${BuildInfoRow} label="Commit">
-                <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.commit ?? 'git not detected (dev)'}</strong>
+              <${BuildInfoRow} label="Binary commit">
+                <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.binary_commit ?? 'Unknown (build identity absent)'}</strong>
+              <//>
+              <${BuildInfoRow} label="Checkout head">
+                <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.repo_head_commit ?? 'Unknown'}</strong>
               <//>
               <${BuildInfoRow} label="Server started">
                 <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : 'Unknown'}</strong>
@@ -828,72 +822,6 @@ export function BuildIdentityBadge() {
 
 
 
-/** Pure: gather the top-N attention-item summaries as tooltip lines so
-    hovering the bottom-left health dot answers "what are the N
-    things?" without a click. Reference UIs: Datadog monitor rollup
-    tooltip, Vercel deployment status footer, Gmail "2 unread" with
-    sender preview — all reveal the contributing items on hover so the
-    operator decides whether to navigate. Exposed for tests. */
-type AttentionPreviewInput = {
-  summary?: string | null
-  kind?: string | null
-  evidence_preview?: readonly string[] | null
-  grounded_verdict?: GroundedVerdict | null
-}
-
-function clipAttentionLine(raw: string, max: number): string {
-  return raw.length > max ? `${raw.slice(0, Math.max(0, max - 3))}...` : raw
-}
-
-function firstGroundedEvidencePreview(verdict?: GroundedVerdict | null): string | null {
-  const ref = verdict?.evidence.find(item => item.path.trim() !== '' && item.quote.trim() !== '')
-  if (!ref) return null
-  const location = typeof ref.line === 'number' ? `${ref.path}:${ref.line}` : ref.path
-  return `${location} ${ref.quote.trim()}`
-}
-
-export function summarizeAttentionPreview(
-  items: ReadonlyArray<AttentionPreviewInput>,
-  max = 3,
-): string[] {
-  // Two-pass: first filter to valid (non-empty summary or kind), then
-  // cap. This separates "skipped for noise" from "truncated for max"
-  // so the tail count only reflects genuinely pending items that
-  // didn't fit — never padding from null/empty rows.
-  const valid: string[] = []
-  for (const item of items) {
-    if (!item) continue
-    const summary = item.summary?.trim()
-    const kind = item.kind?.trim()
-    const base = (summary && summary !== '') ? summary : (kind && kind !== '' ? kind : '')
-    if (base === '') continue
-    const groundedEvidence = firstGroundedEvidencePreview(item.grounded_verdict)
-    const previewEvidence =
-      groundedEvidence
-      ?? item.evidence_preview?.map(value => value.trim()).find(value => value !== '')
-      ?? null
-    const raw = previewEvidence
-      ? `${clipAttentionLine(base, 45)} | ${clipAttentionLine(previewEvidence, 60)}`
-      : base
-    valid.push(clipAttentionLine(raw, previewEvidence ? 110 : 60))
-  }
-  if (valid.length <= max) return valid
-  return [...valid.slice(0, max), `... +${valid.length - max} more`]
-}
-
-/** Pure: compose the full title-attribute string for the health
-    indicator — label on the first line, attention previews indented
-    under it. Newlines render in native title tooltips on all major
-    browsers, so no HTML escaping or markup is needed. */
-function composeHealthIndicatorTitle(
-  label: string,
-  attentionLines: ReadonlyArray<string>,
-): string {
-  if (attentionLines.length === 0) return label
-  const indented = attentionLines.map(line => `  · ${line}`)
-  return [label, ...indented].join('\n')
-}
-
 function dashboardRouteBoundaryKey(routeState: RouteState): string {
   const params = routeState.params
   const parts = [
@@ -913,220 +841,6 @@ function dashboardRouteBoundaryKey(routeState: RouteState): string {
   }
 
   return parts.filter(Boolean).join(':')
-}
-
-function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
-  const live = dashboardWsReady.value
-  const snap = missionSnapshot.value
-  const attentionQueue = snap?.attention_queue ?? []
-  const attentionCount = attentionQueue.length
-
-  let dotClass: string
-  let label: string
-
-  if (!live) {
-    dotClass = 'bg-[var(--color-status-err)]'
-    label = 'Transport offline'
-  } else if (!snap) {
-    dotClass = 'bg-[var(--color-fg-muted)]'
-    label = missionLoading.value ? 'Mission loading' : 'Mission idle'
-  } else if (attentionCount > 0) {
-    dotClass = 'bg-[var(--color-status-warn)]'
-    label = `Mission attention ${attentionCount}`
-  } else {
-    dotClass = 'bg-[var(--color-status-ok)]'
-    label = 'Mission healthy'
-  }
-
-  const attentionLines = attentionCount > 0 ? summarizeAttentionPreview(attentionQueue) : []
-  const titleText = composeHealthIndicatorTitle(label, attentionLines)
-
-  const dot = html`<span class="block size-2 shrink-0 rounded-[var(--r-0)] ${dotClass} shadow-1"></span>`
-
-  if (collapsed) {
-    return html`<div class="v2-shell-panel flex justify-center" title=${titleText} role="img" aria-label=${label}>${dot}</div>`
-  }
-
-  return html`
-    <div class="v2-shell-panel flex items-center gap-2 px-1" role="status" aria-label=${label} title=${titleText}>
-      ${dot}
-      <span class="text-[var(--color-fg-muted)] truncate">${label}</span>
-    </div>
-  `
-}
-
-export function SideRail({
-  collapsed,
-  onToggle,
-  primaryOnly = true,
-}: {
-  collapsed?: boolean
-  onToggle?: () => void
-  primaryOnly?: boolean
-}) {
-  const currentTab = route.value.tab
-  const currentSection = currentSectionForRoute(route.value)
-  // Open keeper-approval count for the Approvals nav badge. Same signal the
-  // Approvals/Command surfaces read, so the badge tracks resolutions live.
-  const approvalQueueState = gateData.value?.approval_queue_state
-  const approvalQueueUnavailable =
-    approvalQueueState && approvalQueueState.state !== 'ready'
-      ? approvalQueueState
-      : null
-  const openApprovals =
-    approvalQueueState?.state === 'ready'
-      ? gateData.value?.approval_queue?.length ?? null
-      : null
-  const settingsSurface = DASHBOARD_SURFACES.find(surface => surface.id === 'settings')
-  const visibleSurfaces = primaryOnly
-    ? PRIMARY_DASHBOARD_SURFACES.filter(surface => surface.id !== 'settings')
-    : DASHBOARD_SURFACES.filter(surface => surface.hidden !== true && surface.id !== 'settings')
-  const settingsActive = currentTab === 'settings'
-
-  return html`
-    <nav class="v2-shell-surface flex flex-col h-full" aria-label="Dashboard navigation">
-      <div class="nav-brand v2-shell-toolbar flex ${collapsed ? 'flex-col items-center gap-1.5' : 'items-center justify-between'} border-b border-[var(--color-border-default)] px-2 pt-2 pb-2">
-        ${collapsed
-          ? html`
-            <!-- Collapsed brand = the keeper-v2 prototype's .nav-home logo box
-                 (v2.css:242): 38x38 volt-filled square, "M" monogram, glow. -->
-            <div class="nav-home" aria-hidden="true">M</div>
-          `
-          : html`
-            <div class="px-1 leading-none">
-              <div class="nb-title font-mono text-[var(--fs-9)] font-bold uppercase tracking-[var(--track-brand)] text-[var(--color-fg-disabled)]">MASC</div>
-              <div class="nb-sub mt-1 font-mono text-[var(--fs-11)] font-semibold uppercase tracking-[0.14em] text-[var(--color-fg-secondary)]">Cockpit</div>
-            </div>
-          `}
-        <button type="button"
-          class=${`v2-shell-action nav-collapse flex size-6 items-center justify-center rounded-[var(--r-0)] border border-transparent text-[var(--color-fg-muted)] cursor-pointer transition-[background-color,border-color,color] duration-[var(--t-med)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
-          aria-label=${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          onClick=${onToggle}
-          title=${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          ${collapsed ? html`<${ChevronRight} size=${14} />` : html`<${ChevronLeft} size=${14} />`}
-        </button>
-      </div>
-
-      <div class="flex-1 overflow-y-auto px-2 py-2">
-        ${!collapsed ? html`
-          <div class="nav-sec px-1 pb-1.5 font-mono text-[var(--fs-9)] font-bold uppercase tracking-[0.2em] text-[var(--color-fg-disabled)]">Surfaces</div>
-        ` : null}
-        <div class="flex flex-col gap-1">
-          ${visibleSurfaces.map(surface => {
-            const isSurfaceActive = surface.id === currentTab
-            const sections = visibleSectionItemsForTab(surface.id)
-
-            if (collapsed) {
-              return html`
-                <${RouteLink}
-                  tab=${surface.defaultTab}
-                  params=${surface.defaultParams}
-                  class="v2-shell-row nav-link-collapsed flex h-7 w-full items-center justify-center rounded-[var(--r-0)] border cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive ? 'active border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-secondary)]'}"
-                  title=${surface.label}
-                  aria-label=${surface.label}
-                  ariaCurrent=${isSurfaceActive ? 'page' : undefined}
-                >
-                  <span class="nav-icon ${surface.id === 'approvals' && (approvalQueueUnavailable || (openApprovals !== null && openApprovals > 0)) ? 'relative' : ''}" aria-hidden="true">
-                    <${SurfaceIcon} icon=${surface.icon} size=${15} />
-                    ${surface.id === 'approvals' && approvalQueueUnavailable
-                      ? html`<span
-                          class="ap-nav-badge"
-                          data-severity=${approvalQueueUnavailable.severity}
-                          title=${`${approvalQueueUnavailable.title}: ${approvalQueueUnavailable.operator_detail}`}
-                        >${approvalQueueUnavailable.icon}</span>`
-                      : surface.id === 'approvals' && openApprovals !== null && openApprovals > 0
-                        ? html`<span class="ap-nav-dot"></span>`
-                        : null}
-                  </span>
-                  <span class="sr-only">${surface.label}${surface.id === 'approvals' && approvalQueueUnavailable
-                    ? ` (${approvalQueueUnavailable.title}: ${approvalQueueUnavailable.operator_detail})`
-                    : surface.id === 'approvals' && openApprovals !== null && openApprovals > 0
-                      ? ` (${openApprovals} 대기)`
-                      : ''}</span>
-                <//>
-              `
-            }
-
-            return html`
-              <div class="nav-group v2-shell-panel flex flex-col gap-0.5 border-t border-[var(--color-border-divider)] pt-1 first:border-t-0 first:pt-0">
-                <${RouteLink}
-                  tab=${surface.defaultTab}
-                  params=${surface.defaultParams}
-                  class="v2-shell-row nav-link flex min-h-7 w-full items-center gap-1.5 rounded-[var(--r-0)] border px-1.5 py-1 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive ? 'active border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--color-fg-secondary)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent bg-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-secondary)]'}"
-                  ariaCurrent=${isSurfaceActive && sections.length === 0 ? 'page' : undefined}
-                >
-                  <span class="nav-icon flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)] ${isSurfaceActive ? 'bg-[var(--select-10)] text-[var(--select)]' : 'bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)]'}" aria-hidden="true">
-                    <${SurfaceIcon} icon=${surface.icon} size=${13} />
-                  </span>
-                  <div class="nav-label flex-1 min-w-0">
-                    <div class="truncate font-mono text-[var(--fs-11)] font-semibold uppercase leading-4 tracking-[var(--track-caps)] ${isSurfaceActive ? 'text-[var(--select)]' : ''}">${surface.label}</div>
-                  </div>
-                  ${surface.id === 'approvals' && approvalQueueUnavailable
-                    ? html`<span
-                        class="ap-nav-badge"
-                        data-testid="approvals-nav-unavailable"
-                        data-severity=${approvalQueueUnavailable.severity}
-                        title=${`${approvalQueueUnavailable.title}: ${approvalQueueUnavailable.operator_detail}`}
-                      >${approvalQueueUnavailable.icon}</span>`
-                    : surface.id === 'approvals' && openApprovals !== null && openApprovals > 0
-                      ? html`<span class="ap-nav-badge" data-testid="approvals-nav-badge" title=${`${openApprovals}건 승인 대기`}>${openApprovals}</span>`
-                      : null}
-                <//>
-
-                ${sections.length > 1 ? html`
-                  <div class="nav-sublist v2-shell-detail ml-2.5 flex flex-col gap-px border-l border-[var(--color-border-divider)] pl-2.5" role="list">
-                    ${sections.map(item => {
-                      const isSectionActive = isSurfaceActive && currentSection?.id === item.id
-                      return html`
-                        <div role="listitem">
-                          <${RouteLink}
-                            tab=${surface.id}
-                            params=${item.params}
-                            class="v2-shell-row nav-sublink block w-full rounded-[var(--r-0)] border px-2 py-0.5 text-left font-mono text-[var(--fs-10)] uppercase leading-5 tracking-[var(--track-sub)] cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSectionActive ? 'active border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-primary)]'}"
-                            ariaCurrent=${isSectionActive ? 'page' : undefined}
-                          >
-                            <div class="truncate">${item.label}</div>
-                          <//>
-                        </div>
-                      `
-                    })}
-                  </div>
-                ` : null}
-              </div>
-            `
-          })}
-        </div>
-      </div>
-
-      <div class="nav-footer v2-shell-panel flex shrink-0 flex-col gap-2 border-t border-[var(--color-border-default)] px-2 py-2">
-        ${settingsSurface ? html`
-          <${RouteLink}
-            tab=${settingsSurface.defaultTab}
-            params=${settingsSurface.defaultParams}
-            class=${collapsed
-              ? `v2-shell-row nav-link-collapsed nav-footer-settings flex h-7 w-full items-center justify-center rounded-[var(--r-0)] border cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${settingsActive ? 'active border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-secondary)]'}`
-              : `v2-shell-row nav-link nav-footer-settings flex min-h-7 w-full items-center gap-1.5 rounded-[var(--r-0)] border px-1.5 py-1 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${settingsActive ? 'active border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--color-fg-secondary)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent bg-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-secondary)]'}`}
-            ariaCurrent=${settingsActive ? 'page' : undefined}
-            title=${settingsSurface.label}
-            aria-label=${settingsSurface.label}
-          >
-            <span class="nav-icon ${collapsed ? '' : 'flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)]'} ${settingsActive ? 'bg-[var(--select-10)] text-[var(--select)]' : collapsed ? '' : 'bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)]'}" aria-hidden="true">
-              <${SurfaceIcon} icon=${settingsSurface.icon} size=${collapsed ? 15 : 13} />
-            </span>
-            ${collapsed
-              ? html`<span class="sr-only">${settingsSurface.label}</span>`
-              : html`
-                  <div class="nav-label flex-1 min-w-0">
-                    <div class="truncate font-mono text-[var(--fs-11)] font-semibold uppercase leading-4 tracking-[var(--track-caps)] ${settingsActive ? 'text-[var(--select)]' : ''}">${settingsSurface.label}</div>
-                  </div>
-                `}
-          <//>
-        ` : null}
-        <${HealthIndicator} collapsed=${collapsed} />
-      </div>
-    </nav>
-  `
 }
 
 export const TAB_SURFACE: Readonly<

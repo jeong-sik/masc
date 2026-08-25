@@ -19,21 +19,14 @@ type category =
   | Lifecycle
   | Directive
   | Heartbeat
-  | Presence
-  | Task
   | Tool
-  | Memory
-  | Telemetry
   | Routine
   | Boundary
-  | Uncategorized
+  | Turn
+  | Broadcast
 
 val category_to_string : category -> string
 (** Canonical lowercase wire label for a {!category}. *)
-
-val category_of_string_opt : string -> category option
-(** Parse a category from its wire label.  Returns [None] for
-    unrecognised input. *)
 
 val level_to_string : level -> string
 (** Convert level to string representation. *)
@@ -133,6 +126,20 @@ module Ring : sig
 
   val capacity : int
   (** Maximum number of entries retained in the in-memory dashboard ring. *)
+
+  type bounds = {
+    start_seq : int;
+    total : int;
+    dropped_before : bool;
+  }
+  (** Live-window bounds: sequences in [[start_seq, total)] are
+      answerable from the ring; anything below [start_seq] has been
+      evicted ([dropped_before]) and lives only in the daily JSONL
+      sink. Rides on the dashboard logs response so "no results"
+      cannot be mistaken for "it never happened" when the cause
+      merely predates the window. *)
+
+  val bounds : unit -> bounds
 
   val source_of_string : string -> source
   (** Inverse of {!source_to_string}.  Raises {!Entry_decode_error} on
@@ -284,8 +291,8 @@ module Jsonl_atomic : LOGGER
 module Mcp_transport : LOGGER
 module Startup : LOGGER
 module Model_inference_metrics : LOGGER
-module Oas_worker_exec : LOGGER
-module Oas_event : LOGGER
+module Runtime_agent : LOGGER
+module Agent_core_event : LOGGER
 module H2_gateway : LOGGER
 module Voice : LOGGER
 module Exec_tap : LOGGER

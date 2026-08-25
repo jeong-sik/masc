@@ -1,9 +1,9 @@
 (** Task-scoped tool helpers for keeper run tools. *)
 
-val task_scope_tool_names : string list
-
-val task_id_scope_of_tool_input :
-  tool_name:string -> Yojson.Safe.t -> string option
+(* [task_scope_tool_names] and [task_id_scope_of_tool_input] are the inner
+   steps of [task_id_scope_of_tool_call] below, which is the door callers use:
+   it takes the call and answers the scope. Nothing outside needs the name list
+   or the input-only form. *)
 
 val task_id_scope_of_tool_call :
   tool_name:string ->

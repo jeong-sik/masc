@@ -1,7 +1,6 @@
 (** Workspace identity helpers — session id, hostname, tty, and
     agent-name resolution. *)
 
-open Workspace_utils
 
 val generate_session_id : unit -> string
 (** Generate a 128-bit cryptographically random lowercase hex session ID.

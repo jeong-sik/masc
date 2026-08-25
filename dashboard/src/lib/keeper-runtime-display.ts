@@ -5,10 +5,7 @@ import { isKeeperPaused } from './keeper-predicates'
 // `fleet-tone` is leaf-level (it imports only `format-string`), so this
 // direction introduces no cycle.
 import { toKeeperPhaseToken, type KeeperPhaseToken } from './fleet-tone'
-import { HEARTBEAT_STALE_MS } from '../config/constants'
-
-/** Max seconds since last heartbeat to consider the keeper process alive. */
-const HEARTBEAT_ALIVE_THRESHOLD_S = HEARTBEAT_STALE_MS / 1000
+import { keeperHeartbeatStaleMs } from '../config/constants'
 
 export type KeeperActivitySource =
   | 'autonomous_action'
@@ -52,14 +49,13 @@ export interface KeeperPauseDisplay {
 
 type KeeperRuntimeDisplaySource = {
   runtime_id?: string | null
-  runtime_ref?: { group?: string | null; item?: string | null } | null
   runtime_canonical?: string | null
   selected_runtime_canonical?: string | null
 }
 
 type KeeperActivityDisplaySource = {
-  last_autonomous_action_at?: string | null
   last_heartbeat?: string | null
+  tool_audit_at?: string | null
   last_activity_at?: string | null
   last_activity_source?: Keeper['last_activity_source'] | null
   last_activity_ago_s?: number | null
@@ -97,10 +93,7 @@ export function keeperDisplayRuntime(
   const runtimeId = trimmed(source?.runtime_id)
   if (runtimeId) return { label: 'Runtime', value: runtimeId }
 
-  const group = trimmed(source?.runtime_ref?.group)
-  if (!group) return null
-  const item = trimmed(source?.runtime_ref?.item)
-  return { label: 'Runtime', value: item ? `${group}.${item}` : group }
+  return null
 }
 
 function timestampCandidate(
@@ -199,7 +192,7 @@ export function keeperActivityDisplay(
       keeper?.last_activity_at,
       activityDetail,
     ),
-    timestampCandidate('autonomous_action', '마지막 행동', keeper?.last_autonomous_action_at),
+    timestampCandidate('autonomous_action', '마지막 행동', keeper?.tool_audit_at),
     timestampCandidate('heartbeat', '하트비트', keeper?.last_heartbeat),
     // The ago_s fallback describes the same underlying activity as
     // last_activity_at — keep the source-derived label/detail instead of
@@ -273,8 +266,6 @@ function keeperLifecycleStatus(
       return 'running'
     case 'Failing':
       return 'failing'
-    case 'Overflowed':
-      return 'overflowed'
     case 'Compacting':
       return 'compacting'
     case 'HandingOff':
@@ -289,8 +280,6 @@ function keeperLifecycleStatus(
       return 'crashed'
     case 'Restarting':
       return 'restarting'
-    case 'Dead':
-      return 'dead'
     default:
       return null
   }
@@ -333,9 +322,6 @@ function transientProviderRuntimeText(value: string | null | undefined): boolean
 export function isKeeperAutoRecoverPause(keeper: Keeper | null | undefined): boolean {
   if (!keeper || !isKeeperPaused(keeper)) return false
   const blockerClass = keeper.runtime_blocker_class
-  if (blockerClass === 'turn_timeout') {
-    return true
-  }
   if (blockerClass === 'provider_runtime_error') {
     return (
       transientProviderRuntimeText(keeper.runtime_blocker_summary)
@@ -412,7 +398,7 @@ function refineOfflineStatus(keeper: Keeper | null | undefined): KeeperPhaseToke
   // (audit: `keeper_state_machine.ml:21-34` `phase_to_string` emits
   // only the 13 PascalCase phases, none of which lowercase to
   // `'inactive'`), so the guard was dead defensive.
-  if (keeper.last_heartbeat && isHeartbeatAlive(keeper.last_heartbeat)) {
+  if (keeper.last_heartbeat && isHeartbeatAlive(keeper, keeper.last_heartbeat)) {
     // Route through `keeperLifecycleStatus`, not `.toLowerCase()`. The
     // PascalCase phase names are not their own tokens: `'HandingOff'`
     // lowercases to `'handingoff'`, but the token is `'handoff'`. It was
@@ -427,30 +413,28 @@ function refineOfflineStatus(keeper: Keeper | null | undefined): KeeperPhaseToke
     return 'idle'
   }
 
-  const generation = keeper.generation ?? 0
   const turnCount = keeper.turn_count ?? 0
 
-  // Never ran a single turn or generation — never booted
-  if (generation === 0 && turnCount === 0) {
+  // Never ran a single turn — never booted
+  if (turnCount === 0) {
     return 'unbooted'
   }
 
   // Had activity before but now offline — stopped/crashed
-  if (generation > 0 || turnCount > 0) {
+  if (turnCount > 0) {
     return 'stopped'
   }
 
   return 'offline'
 }
 
-function isHeartbeatAlive(heartbeat: string): boolean {
+function isHeartbeatAlive(keeper: Keeper, heartbeat: string): boolean {
   const ts = new Date(heartbeat).getTime()
   if (Number.isNaN(ts)) return false
-  return (Date.now() - ts) / 1000 < HEARTBEAT_ALIVE_THRESHOLD_S
+  return Date.now() - ts < keeperHeartbeatStaleMs(keeper.heartbeat_stale_after_s)
 }
 
 const runtimeBlockerLabels = {
-  turn_timeout: '턴 응답 만료',
   runtime_exhausted: '런타임 후보 소진',
   provider_runtime_error: '런타임 호출 오류',
   fiber_unresolved: 'Fiber 미해결',
@@ -459,17 +443,21 @@ const runtimeBlockerLabels = {
   heartbeat_failures: '하트비트 실패',
   turn_failures: '턴 실패 반복',
   exception: '런타임 예외',
-  awaiting_operator: '운영자 조치 대기',
-  awaiting_sandbox_egress: '샌드박스 egress 대기',
-  supervisor_paused: 'Supervisor 일시정지',
-  synthetic_stall: '합성 상태 정체',
-  self_imposed_idle: '자체 대기',
-  sdk_context_window_exceeded: 'SDK 컨텍스트 윈도 초과',
-  sdk_unrecognized_stop_reason: 'SDK 미식별 정지 사유',
-  sdk_idle_detected: 'SDK Idle 감지',
-  sdk_guardrail_violation: 'SDK 가드레일 위반',
-  sdk_tripwire_violation: 'SDK Tripwire 위반',
-  sdk_exit_condition_met: 'SDK 종료 조건 충족',
+  agent_core_context_window_exceeded: 'Agent Core 컨텍스트 윈도 초과',
+  agent_core_unrecognized_stop_reason: 'Agent Core 미식별 정지 사유',
+  agent_core_guardrail_violation: 'Agent Core 가드레일 위반',
+  agent_core_tripwire_violation: 'Agent Core Tripwire 위반',
+  agent_core_input_required: 'Agent Core 입력 대기',
+  capacity_backpressure: '공급자 용량 초과',
+  gate_replay_repair_required: '승인 기록 복구 필요',
+  incomplete_tool_transcript: '도구 기록 깨짐',
+  internal_bridge_exception: '브리지 예외',
+  internal_contract_rejected: '내부 계약 거절',
+  internal_unhandled_exception: '처리하지 못한 예외',
+  provider_attempt_effect_fenced: '중복 실행 위험으로 차단',
+  receipt_persistence_failed: 'Receipt 저장 실패',
+  terminal_effect_failed: '마무리 처리 실패',
+  tool_correction_lost: '도구 수정 내용 유실',
 } satisfies Record<KeeperRuntimeBlockerClass, string>
 
 export function keeperRuntimeBlockerLabel(
@@ -485,9 +473,6 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   const runtimeBlocker = normalizeKeeperBlockerText(keeper.runtime_blocker_summary)
   if (runtimeBlocker && runtimeBlocker !== blockerClass) {
     return runtimeBlocker
-  }
-  if (blockerClass === 'turn_timeout') {
-    return '턴 실행 시간이 제한 시간을 초과했습니다.'
   }
   if (blockerClass === 'runtime_exhausted') {
     return '런타임 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.'
@@ -513,21 +498,6 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   if (blockerClass === 'exception') {
     return 'Keeper 런타임 예외가 기록되어 로그와 최근 turn 상태 확인이 필요합니다.'
   }
-  if (blockerClass === 'awaiting_operator') {
-    return '진행을 위해 운영자의 승인, 결정, 또는 게이트 해제가 필요합니다.'
-  }
-  if (blockerClass === 'awaiting_sandbox_egress') {
-    return '샌드박스 네트워크 또는 push egress 정책 때문에 keeper가 진행하지 못하고 있습니다.'
-  }
-  if (blockerClass === 'supervisor_paused') {
-    return 'Supervisor가 keeper를 일시정지한 상태라 재개 조건을 확인해야 합니다.'
-  }
-  if (blockerClass === 'synthetic_stall') {
-    return '실제 STATE 없이 합성된 진행 기록만 남아 최근 턴 산출물을 재확인해야 합니다.'
-  }
-  if (blockerClass === 'self_imposed_idle') {
-    return 'Keeper가 관찰 또는 대기만 계획하고 있어 다음 실행 지시가 필요할 수 있습니다.'
-  }
   return null
 }
 
@@ -541,8 +511,8 @@ export function keeperRecentActionLabel(
   keeper: Keeper | null | undefined,
   fallbackLastTurnAgoS?: number | null,
 ): string | null {
-  if (keeper?.last_autonomous_action_at) {
-    return `마지막 행동 · ${relativeTime(keeper.last_autonomous_action_at)}`
+  if (keeper?.tool_audit_at) {
+    return `마지막 행동 · ${relativeTime(keeper.tool_audit_at)}`
   }
   const seconds = keeper?.last_turn_ago_s ?? fallbackLastTurnAgoS
   return typeof seconds === 'number' && Number.isFinite(seconds)
@@ -589,6 +559,5 @@ export function keeperWorkPreview(keeper: Keeper | null | undefined): string | n
     keeper.recent_output_preview,
     keeper.recent_input_preview,
     keeper.last_proactive_preview,
-    keeper.agent?.current_task,
   )
 }

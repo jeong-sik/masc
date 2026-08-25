@@ -1,0 +1,29 @@
+{
+  "schema": "masc.keeper_feature_matrix.board_write_latency_minprobe.v1",
+  "captured_at": "2026-08-14T07:57:27Z",
+  "daemon": {
+    "version": "0.22.0",
+    "runtime_repo_head": "ff6a8fa6af",
+    "started_at": "2026-08-14T05:59:52Z",
+    "exe_build_mtime": "2026-08-14T04:55:36Z"
+  },
+  "method": "single masc_board_post -> single board read -> single admin delete -> 404 verify, timed with wall clock around curl; minimal probe chosen because three full board-interaction-matrix runs were stopped by shared rate buckets (issue 28730)",
+  "measurements": {
+    "post_201_seconds": 0.047,
+    "read_seconds": 0.063,
+    "delete_seconds": 0.191,
+    "post_after_delete_http": 404,
+    "post_id": "p-985058d50eff2867d84a779e6f84e115"
+  },
+  "historical_baseline": {
+    "source": "keeper-board-write-effect-boundary-live-2026-08-13T140550Z.json",
+    "post_201_seconds": 46.836,
+    "read_seconds": 92.007,
+    "delete_seconds": 27.081
+  },
+  "verdict": "board durable write/read/delete latency defect behaviorally resolved on the deployed binary (repairs 28620 and 28707 both merged before the 04:55:36Z build)",
+  "limits": [
+    "Single-shot probe, not the full interaction matrix — comment, vote, reaction, karma, and browser UI axes were not re-measured (blocked by shared rate buckets, issue 28730).",
+    "Latency numbers include local curl overhead; they bound the server effect from above."
+  ]
+}

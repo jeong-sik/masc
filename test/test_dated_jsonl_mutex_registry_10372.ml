@@ -1,18 +1,8 @@
-(** #10372 — pin the file-scope mutex registry contract.
-
-    Pre-fix [Dated_jsonl.create] minted a fresh [Eio.Mutex.t]
-    per call.  When two instances pointed at the same JSONL
-    directory, their mutexes did not serialize and concurrent
-    [append] could interleave.  Real-world trigger:
-    [oas_event_bridge.ml] re-creates the store on every relay
-    error while another fiber still holds the previous instance,
-    producing 1.52% line corruption (16/1056) on day 25 — all
-    [masc:oas_worker:build] payloads in the 4-8 KB range past
-    POSIX [PIPE_BUF].
+(** Pin the file-scope mutex registry contract.
 
     The registry forces every store rooted at the same canonical
     [base_dir] to share one mutex.  An explicit [?mutex] argument
-    still overrides, preserving test isolation patterns.
+    overrides the registry for isolated callers.
 
     Tests pin:
 

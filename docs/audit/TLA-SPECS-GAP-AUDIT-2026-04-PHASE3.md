@@ -48,7 +48,7 @@ The 8 specs are listed below in fan-out order, prioritised by hot-path proximity
 |---|---|
 | Spec | `specs/masc-ecosystem/MASCEcosystem.tla` (119 LOC) |
 | Critical safety property | (currently only `TypeOK` declared in cfg — first need a real safety inv) |
-| Subject of bug action | Agent/keeper/persona/workspace interaction. A plausible bug: a keeper accepts a task while another agent has it claimed |
+| Subject of bug action | Agent/keeper/keeper/workspace interaction. A plausible bug: a keeper accepts a task while another agent has it claimed |
 | Suggested `BugAction` | `DoubleClaim`: keeper sets `agent_tasks[k] = t` while `agent_tasks[a] = t` for some other `a` |
 | Prerequisite | Add `AtMostOneAgentPerTask` invariant before adding the bug action — current cfg invariants are too weak to catch the bug |
 | Owner | TBD |
@@ -142,6 +142,5 @@ This mirrors the OAS chain's Phase 4 deferral (`bridge_adoption` monotonic floor
 - PR #12132 — Phase 2 (Draft, as of writing)
 - `specs/keeper-state-machine/KeeperOASAdvanced.tla` — canonical Bug Model recipe
 - AGENT-LLM-A.md `TLA+ Bug Model 패턴 (Mutation Testing for Specs)`
-- `docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04-PHASE3.md` — sister chain Phase 3 (CI wire-up pattern)
 
 *Audit date: 2026-04-30 / Phase 3 of 4 / docs-only / fan-out enumeration*

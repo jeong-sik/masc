@@ -1,26 +1,10 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 type report = {
   agent_name : string;
   client_name : string;
   tool_name : string;
   transport : string;
   phase : string option;
+  cause : Failure_envelope.tool_host_cause;
   message : string;
   request_id : string option;
   session_id : string option;
@@ -28,13 +12,12 @@ type report = {
   timeout_ms : int option;
 }
 
-
 let stringish_member_opt json key =
   match Json_util.assoc_member_opt key json with
   | None | Some `Null -> None
-  | Some (`String value) -> String_util.trim_to_option value
+  | Some (`String value) -> String_util.trim_nonempty value
   | Some (`Int value) -> Some (Int.to_string value)
-  | Some (`Intlit value) -> String_util.trim_to_option value
+  | Some (`Intlit value) -> String_util.trim_nonempty value
   | Some (`Float value) -> Some (Printf.sprintf "%.0f" value)
   | Some _ -> None
 
@@ -42,6 +25,12 @@ let required_member json key =
   match stringish_member_opt json key with
   | Some value -> Ok value
   | None -> Error (Printf.sprintf "missing required field: %s" key)
+
+let required_cause json =
+  match Json_util.assoc_member_opt "cause_code" json with
+  | None | Some `Null -> Error "missing required field: cause_code"
+  | Some (`String code) -> Failure_envelope.tool_host_cause_of_code code
+  | Some _ -> Error "field cause_code must be a JSON string"
 
 let parse_timeout_ms json =
   match Json_util.assoc_member_opt "timeout_ms" json with
@@ -54,44 +43,46 @@ let parse_timeout_ms json =
 let report_of_yojson ?fallback_agent (json : Yojson.Safe.t) :
     (report, string) Result.t =
   match json with
-  | `Assoc _ -> (
-      match required_member json "tool_name", required_member json "message" with
-      | Ok tool_name, Ok message ->
-          let client_name =
-            match stringish_member_opt json "client_name" with
-            | Some value -> value
-            | None ->
-                Option.value
-                  ~default:"tool-host"
-                  (Option.bind fallback_agent String_util.trim_to_option)
-          in
-          let explicit_agent =
-            Option.bind (stringish_member_opt json "agent_name") String_util.trim_to_option
-          in
-          let fallback_agent = Option.bind fallback_agent String_util.trim_to_option in
-          let agent_name =
-            match explicit_agent with
-            | Some value -> value
-            | None -> Option.value ~default:client_name fallback_agent
-          in
-          let transport =
-            Option.value ~default:"mcp_http"
-              (stringish_member_opt json "transport")
-          in
-          Ok
-            {
-              agent_name;
-              client_name;
-              tool_name;
-              transport;
-              phase = stringish_member_opt json "phase";
-              message;
-              request_id = stringish_member_opt json "request_id";
-              session_id = stringish_member_opt json "session_id";
-              trace_id = stringish_member_opt json "trace_id";
-              timeout_ms = parse_timeout_ms json;
-            }
-      | Error msg, _ | _, Error msg -> Error msg)
+  | `Assoc _ ->
+      let open Result.Syntax in
+      let* tool_name = required_member json "tool_name" in
+      let* message = required_member json "message" in
+      let* cause = required_cause json in
+      let fallback_agent = Option.bind fallback_agent String_util.trim_nonempty in
+      (* DET-OK: pre-existing fallback semantics relocated from the match
+         spelling; no new default introduced. *)
+      let default_client_name = Option.value ~default:"tool-host" fallback_agent in
+      let client_name =
+        (* DET-OK: this is the pre-existing client fallback, not a new default. *)
+        Option.value ~default:default_client_name
+          (stringish_member_opt json "client_name")
+      in
+      (* DET-OK: pre-existing fallback semantics relocated from the match
+         spelling; no new default introduced. *)
+      let default_agent_name = Option.value ~default:client_name fallback_agent in
+      let agent_name =
+        (* DET-OK: this is the pre-existing agent fallback, not a new default. *)
+        Option.value ~default:default_agent_name
+          (stringish_member_opt json "agent_name")
+      in
+      let transport =
+        Option.value ~default:"mcp_http"
+          (stringish_member_opt json "transport")
+      in
+      Ok
+        {
+          agent_name;
+          client_name;
+          tool_name;
+          transport;
+          phase = stringish_member_opt json "phase";
+          cause;
+          message;
+          request_id = stringish_member_opt json "request_id";
+          session_id = stringish_member_opt json "session_id";
+          trace_id = stringish_member_opt json "trace_id";
+          timeout_ms = parse_timeout_ms json;
+        }
   | other ->
       Error
         (Printf.sprintf "request body must be a JSON object (received %s)"
@@ -104,7 +95,7 @@ let details_json (report : report) =
       ~transport:report.transport ?phase:report.phase
       ?request_id:report.request_id ?session_id:report.session_id
       ?trace_id:report.trace_id ?timeout_ms:report.timeout_ms
-      ~message:report.message ()
+      ~cause:report.cause ~message:report.message ()
   in
   Failure_envelope.attach_to_details
     (`Assoc
@@ -114,6 +105,9 @@ let details_json (report : report) =
            Some ("client_name", `String report.client_name);
            Some ("tool_name", `String report.tool_name);
            Some ("transport", `String report.transport);
+           Some
+             ( "cause_code"
+             , `String (Failure_envelope.tool_host_cause_code report.cause) );
            Option.map (fun value -> ("phase", `String value)) report.phase;
            Option.map (fun value -> ("request_id", `String value)) report.request_id;
            Option.map (fun value -> ("session_id", `String value)) report.session_id;
@@ -156,10 +150,3 @@ type assignment_snapshot = {
   assignment_id : string;
 }
 
-let record_assignment ?fs config (snapshot : assignment_snapshot) =
-  Telemetry_eio.track_tool_assigned ?fs config
-    ~agent_id:snapshot.agent_name
-    ~profile:snapshot.profile
-    ~tool_count:snapshot.tool_count
-    ~assignment_id:snapshot.assignment_id
-    ()

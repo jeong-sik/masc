@@ -13,7 +13,7 @@
      execute, and follow up on work.
 
 2. `Keeper Runtime`
-   - Keepers run on the OAS-backed `Agent.run` path.
+   - Keepers run on the agent core-backed `Agent.run` path.
    - Use keeper tools for lifecycle, status, and messaging.
 
 ## Rules

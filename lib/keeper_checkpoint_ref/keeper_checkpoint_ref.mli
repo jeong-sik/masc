@@ -1,19 +1,16 @@
 (** Exact identity of one canonical Keeper checkpoint payload. *)
 type t = private
   { trace_id : Keeper_id.Trace_id.t
-  ; generation : int
   ; turn_count : int
   ; sha256 : string
   }
 
 type create_error =
-  | Negative_generation of int
   | Negative_turn_count of int
   | Invalid_sha256 of string
 
 val create
   :  trace_id:Keeper_id.Trace_id.t
-  -> generation:int
   -> turn_count:int
   -> canonical_checkpoint_bytes:string
   -> (t, create_error) result
@@ -22,7 +19,6 @@ val create
 
 val of_persisted
   :  trace_id:Keeper_id.Trace_id.t
-  -> generation:int
   -> turn_count:int
   -> sha256:string
   -> (t, create_error) result

@@ -3,7 +3,12 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useCallback, useEffect, useRef } from 'preact/hooks'
 import { persistentSignal } from '../lib/persistent-signal'
-import { chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
+import {
+  chatExpandAutonomousRuns,
+  chatShowAutonomous,
+  chatShowInternal,
+  chatShowMetadata,
+} from '../lib/chat-view-prefs'
 import { ringFocusClasses } from './common/ring'
 import { Settings2, X } from 'lucide-preact'
 
@@ -273,10 +278,25 @@ const __TWEAKS_STYLE = `
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.06);
     user-select: none;
-    gap: 2px;
   }
   [data-theme="paper"] .twk-seg {
     background: rgba(0, 0, 0, 0.06);
+  }
+  /* Design's sliding selection pill (tweaks-panel.jsx .twk-seg-thumb). Paints
+   * what .twk-seg button.on used to paint, so the visual is unchanged; the
+   * buttons stay transparent and the thumb carries the state, matching the
+   * prototype's DOM. */
+  .twk-seg-thumb {
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.95);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+    transition: left 0.15s cubic-bezier(0.3, 0.7, 0.4, 1), width 0.15s;
+  }
+  [data-theme="paper"] .twk-seg-thumb {
+    background: #111;
   }
   .twk-seg button {
     appearance: none;
@@ -297,13 +317,47 @@ const __TWEAKS_STYLE = `
     transition: background 0.14s, color 0.14s;
   }
   .twk-seg button.on {
-    background: rgba(255, 255, 255, 0.95);
     color: #111;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
   }
   [data-theme="paper"] .twk-seg button.on {
-    background: #111;
     color: #fff;
+  }
+  /* Select fallback for over-long segment labels (design TweakSelect). Dark
+   * theme default with paper overrides, matching the sibling controls. */
+  .twk-field {
+    appearance: none;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    height: 26px;
+    padding: 0 8px;
+    border: 0.5px solid rgba(255, 255, 255, 0.18);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.08);
+    color: inherit;
+    font: inherit;
+    outline: none;
+  }
+  .twk-field:focus {
+    border-color: rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.14);
+  }
+  [data-theme="paper"] .twk-field {
+    border-color: rgba(0, 0, 0, 0.1);
+    background: rgba(255, 255, 255, 0.6);
+  }
+  [data-theme="paper"] .twk-field:focus {
+    border-color: rgba(0, 0, 0, 0.25);
+    background: rgba(255, 255, 255, 0.85);
+  }
+  select.twk-field {
+    padding-right: 22px;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='rgba(255,255,255,.5)' d='M0 0h10L5 6z'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+  }
+  [data-theme="paper"] select.twk-field {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='rgba(0,0,0,.5)' d='M0 0h10L5 6z'/></svg>");
   }
   .twk-toggle {
     position: relative;
@@ -368,11 +422,43 @@ interface TweakRadioProps<T extends string> {
   onChange: (value: T) => void
 }
 
-function TweakRadio<T extends string>({ label, value, options, onChange }: TweakRadioProps<T>) {
+export function TweakRadio<T extends string>({ label, value, options, onChange }: TweakRadioProps<T>) {
   const normalizedOpts = options.map((o) => (typeof o === 'object' && o !== null ? o : { value: o, label: o }))
+  // Design's segment-width budget (tweaks-panel.jsx TweakRadio): past ~16/~10
+  // chars per label the segments wrap mid-word, so the control falls back to a
+  // dropdown. Ported verbatim; current options are short enough to never hit it.
+  const maxLen = normalizedOpts.reduce((m, o) => Math.max(m, String(o.label).length), 0)
+  const fitsAsSegments = maxLen <= ({ 2: 16, 3: 10 }[normalizedOpts.length] ?? 0)
+  if (!fitsAsSegments) {
+    return html`
+      <${TweakRow} label=${label}>
+        <select
+          class="twk-field"
+          value=${value}
+          data-testid="twk-field-select"
+          onChange=${(e: Event) => onChange((e.target as HTMLSelectElement).value as T)}
+        >
+          ${normalizedOpts.map((o) => html`<option key=${o.value} value=${o.value}>${o.label}</option>`)}
+        </select>
+      <//>
+    `
+  }
+  const selectedIdx = Math.max(0, normalizedOpts.findIndex((o) => o.value === value))
+  // Design formula (tweaks-panel.jsx): left: 2px + idx * (100% - 4px) / n,
+  // width: (100% - 4px) / n. Distributed into plain percentage/px terms so the
+  // calc stays CSS Values 3-compatible (no `number * length` multiplication,
+  // which some CSSOM implementations — happy-dom included — reject).
+  const segN = normalizedOpts.length
+  const thumbLeft = `calc(${(selectedIdx * 100) / segN}% + ${2 - (selectedIdx * 4) / segN}px)`
+  const thumbWidth = `calc(${100 / segN}% - ${4 / segN}px)`
   return html`
     <${TweakRow} label=${label}>
       <div class="twk-seg" role="radiogroup" data-testid="twk-seg">
+        <div
+          class="twk-seg-thumb"
+          aria-hidden="true"
+          style=${{ left: thumbLeft, width: thumbWidth }}
+        ></div>
         ${normalizedOpts.map((o) => html`
           <button
             type="button"
@@ -577,8 +663,13 @@ export function TweaksPanel() {
           value=${tweaksTheme.value}
           options=${THEME_OPTIONS}
           onChange=${(v: Theme) => {
+            // The signal only. Writing the document attribute from here meant
+            // a third vocabulary on it -- 'dark' | 'paper' -- so choosing
+            // anything but paper wrote '' and erased a styleseed selection
+            // made through the theme switch (#22899). The app element reads
+            // this signal for its own data-theme; the document root belongs to
+            // main.ts and theme-switch.ts.
             tweaksTheme.value = v
-            document.documentElement.setAttribute('data-theme', v === 'paper' ? 'paper' : '')
           }}
         />
         <${TweakRadio}
@@ -622,6 +713,16 @@ export function TweaksPanel() {
           label="내부 메시지"
           value=${chatShowInternal.value}
           onChange=${(v: boolean) => { chatShowInternal.value = v }}
+        />
+        <${TweakToggle}
+          label="자율턴"
+          value=${chatShowAutonomous.value}
+          onChange=${(v: boolean) => { chatShowAutonomous.value = v }}
+        />
+        <${TweakToggle}
+          label="자율턴 펼침"
+          value=${chatExpandAutonomousRuns.value}
+          onChange=${(v: boolean) => { chatExpandAutonomousRuns.value = v }}
         />
 
         <${TweakSection} label="타이포" />

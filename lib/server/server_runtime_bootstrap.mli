@@ -10,30 +10,30 @@ val config_bootstrap_mode : unit -> [ `Auto | `Empty | `Skip ]
 val bootstrap_base_path_config_root : base_path:string -> unit
 val startup_config_resolution : base_path:string -> Config_dir_resolver.resolution
 
-val configure_oas_model_catalog_env :
+val configure_agent_core_model_catalog_env :
   ?env:(string -> string option) ->
-  ?agent_sdk_catalog:(unit -> Llm_provider.Model_catalog.t option) ->
+  ?agent_core_catalog:(unit -> Llm_provider.Model_catalog.t option) ->
   ?load_catalog:(string -> (Llm_provider.Model_catalog.t, string) result) ->
   ?set_catalog:(Llm_provider.Model_catalog.t -> unit) ->
   unit ->
   string option
-(** Install only an operator-supplied [OAS_MODEL_CATALOG] as a full catalog
-    replacement. Without it, require OAS's packaged catalog and leave it
+(** Install only an operator-supplied [AGENT_CORE_MODEL_CATALOG] as a full catalog
+    replacement. Without it, require AGENT_CORE's packaged catalog and leave it
     eligible for the deployment overlay. Config-root and executable-parent
     full catalogs are deliberately not discovered (RFC-0342 D1). *)
 
-val configure_oas_model_catalog_overlay :
+val configure_agent_core_model_catalog_overlay :
   ?config_root:string ->
   ?load_catalog:(string -> (Llm_provider.Model_catalog.t, string) result) ->
   ?set_overlay:(Llm_provider.Model_catalog.t -> unit) ->
   unit ->
   string option
-(** Install the deployment capability overlay (RFC-0342 D1 / RFC-OAS-036).
-    Resolves config-root [oas-models-overlay.toml] only; there is no parent
+(** Install the deployment capability overlay (RFC-0342 D1 / Agent Core contract).
+    Resolves config-root [agent-core-models-overlay.toml] only; there is no parent
     or env fallback. When present, the parsed overlay is installed with
     [Model_catalog.set_global_overlay], so [Model_catalog.global] serves the
     embedded catalog merged with the deployment's delta rows. An explicit
-    [OAS_MODEL_CATALOG] installed by {!configure_oas_model_catalog_env} keeps
+    [AGENT_CORE_MODEL_CATALOG] installed by {!configure_agent_core_model_catalog_env} keeps
     replacement precedence over the overlay. Returns the installed overlay path. An
     unreadable or invalid overlay raises [Env_config_core.Config_error]
     (fail-loud at boot, same as the full-catalog path). *)
@@ -91,15 +91,8 @@ module For_testing : sig
   val install_domain_pool_references : Domain_pool.t -> unit
 end
 
-val runtime_path_diagnostics :
-  ?input_base_path:string ->
-  Mcp_server.server_state ->
-  Server_base_path_diagnostics.t
-
 val restore_persisted_sessions : Mcp_server.server_state -> unit
 val bootstrap_server_state_blocking : Mcp_server.server_state -> unit
-val bootstrap_prompt_state : Mcp_server.server_state -> unit
-
 (** {1 Startup Tasks} *)
 
 val startup_prune_jsonl : Mcp_server.server_state -> unit
@@ -136,6 +129,8 @@ val startup_failure_disposition : state_ready:bool -> startup_failure_dispositio
 
 type owner_initialization_error =
   | Runtime_config_path_unavailable
+  | Run_registry_already_installed of
+      [ `Exact_lane | `Fusion | `Goal_verification | `Verification ]
   | Runtime_default_initialization_failed of Runtime.strict_init_error
   | Keeper_persistence_preparation_failed of
       Server_bootstrap_loops.keeper_persistence_prepare_error

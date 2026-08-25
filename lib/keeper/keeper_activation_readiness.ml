@@ -31,8 +31,6 @@ type pause_kind =
   | Active
   | Operator_paused
   | Unclassified_paused
-  | Dead_tombstone
-  | Transcript_corruption_reset_required
 
 let pause_kind (meta : Keeper_meta_contract.keeper_meta) =
   match
@@ -40,17 +38,11 @@ let pause_kind (meta : Keeper_meta_contract.keeper_meta) =
       ~paused:meta.paused
       ~latched_reason:meta.latched_reason
   with
-  | Keeper_lifecycle_admission.Dead_tombstone -> Dead_tombstone
   | Keeper_lifecycle_admission.Active -> Active
   | Keeper_lifecycle_admission.Paused latch ->
     (match latch with
      | Keeper_lifecycle_admission.Classified
          (Keeper_latched_reason.Operator_paused _) -> Operator_paused
-     | Keeper_lifecycle_admission.Classified Keeper_latched_reason.Dead_tombstone ->
-       Dead_tombstone
-     | Keeper_lifecycle_admission.Classified
-         Keeper_latched_reason.Transcript_corruption_reset_required ->
-       Transcript_corruption_reset_required
      | Keeper_lifecycle_admission.Unclassified -> Unclassified_paused)
 ;;
 
@@ -58,9 +50,6 @@ let pause_kind_to_wire = function
   | Active -> "active"
   | Operator_paused -> "operator_paused"
   | Unclassified_paused -> "unclassified_paused"
-  | Dead_tombstone -> "dead_tombstone"
-  | Transcript_corruption_reset_required ->
-    "transcript_corruption_reset_required"
 ;;
 
 type autonomous_activation =
@@ -109,19 +98,8 @@ let autonomous_blocker_to_wire = function
 let autonomous_hint (meta : Keeper_meta_contract.keeper_meta) = function
   | None -> None
   | Some
-      (Lifecycle_denied
-        (Keeper_lifecycle_admission.Autonomous_paused
-          (Keeper_lifecycle_admission.Classified
-            Keeper_latched_reason.Transcript_corruption_reset_required))) ->
-    Some
-      "reset the corrupted Keeper checkpoint before starting a new lane; \
-       generic resume is intentionally denied"
-  | Some
       (Lifecycle_denied (Keeper_lifecycle_admission.Autonomous_paused _)) ->
     Some "resume keeper before expecting autonomous keepalive or PR fan-out"
-  | Some
-      (Lifecycle_denied Keeper_lifecycle_admission.Autonomous_dead_tombstone) ->
-    Some "delete the dead tombstone and create a fresh Keeper before starting a new lane"
   | Some Autoboot_disabled ->
     if meta.autoboot_enabled
     then
@@ -216,15 +194,16 @@ let classify_owner_execution_with
         | None ->
           (match runtime with
            | Owner_unregistered -> Recoverable
+           (* [Stopped] is terminal. [Paused] is not terminal, but it is also
+              not executable. Both must be excluded before the live-fiber
+              fast path below. *)
            | Owner_registered
-               { phase = (Keeper_state_machine.Paused | Keeper_state_machine.Dead)
+               { phase =
+                   ( Keeper_state_machine.Paused
+                   | Keeper_state_machine.Stopped ) as phase
                ; _
                } ->
-             Paused_dead
-               (Runtime_terminal
-                  (match runtime with
-                   | Owner_registered { phase; _ } -> phase
-                   | Owner_unregistered -> assert false))
+             Paused_dead (Runtime_terminal phase)
            | Owner_registered { live_fiber = true; _ } -> Executable
            | Owner_registered { live_fiber = false; _ } -> Recoverable)))
 ;;
@@ -233,8 +212,31 @@ let classify_owner_execution =
   classify_owner_execution_with ~require_proactive:true
 ;;
 
-let classify_durable_demand_execution =
-  classify_owner_execution_with ~require_proactive:false
+let classify_durable_demand_execution
+      ~shutdown_operation_id
+      ~runtime
+      meta_result
+  =
+  match
+    classify_owner_execution_with
+      ~require_proactive:false
+      ~shutdown_operation_id
+      ~runtime
+      meta_result,
+    runtime,
+    meta_result
+  with
+  | Retained_disabled Retained_autoboot_disabled,
+    Owner_registered
+      { phase = Keeper_state_machine.Running; live_fiber = true; _ },
+    Ok meta
+      when (not meta.autoboot_enabled)
+           && (Keeper_lifecycle_gate_env.global ()).autonomous ->
+    (* [autoboot_enabled] controls whether an absent owner may be started. It
+       must not suppress an explicit durable wake for an owner that is already
+       running. Lifecycle and shutdown fences were resolved before this arm. *)
+    Executable
+  | truth, _, _ -> truth
 ;;
 
 let of_meta meta =
@@ -243,12 +245,6 @@ let of_meta meta =
   { ok; ready_for_unclaimed_backlog = ok; autonomous_activation }
 ;;
 
-let ready_for_unclaimed_backlog meta = (of_meta meta).ready_for_unclaimed_backlog
-
-let autonomous_check_value (activation : autonomous_activation) =
-  match activation.blocker with
-  | None -> "ok"
-  | Some blocker -> autonomous_blocker_to_wire blocker
 ;;
 
 let autonomous_activation_to_yojson (activation : autonomous_activation) =

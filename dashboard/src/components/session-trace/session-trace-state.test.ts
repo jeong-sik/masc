@@ -228,8 +228,12 @@ describe('scheduleSessionTraceReload', () => {
         ts: 1712400000,
         ts_iso: '2024-04-06T10:40:00Z',
         turn: 12,
-        content: 'new keeper thought',
-        content_length: 18,
+        content: null,
+        content_withheld: true,
+        observation: 'withheld',
+        reasoning_kind: 'thinking',
+        char_count: 18,
+        identity: { source: 'trajectory_block', block_index: 0 },
         redacted: false,
       }],
     })
@@ -247,7 +251,7 @@ describe('scheduleSessionTraceReload', () => {
 
     expect(dashboardApiMocks.fetchAgentTimeline).toHaveBeenCalledTimes(1)
     expect(dashboardApiMocks.fetchKeeperTrajectory).toHaveBeenCalledTimes(1)
-    expect(getTraceEvents('keeper-a')[0]?.summary).toBe('new keeper thought')
+    expect(getTraceEvents('keeper-a')[0]?.summary).toBe('[비공개 사고]')
   })
 
   it('ignores reload requests for closed trace slots', async () => {
@@ -284,7 +288,6 @@ describe('buildTraceEvents', () => {
           result: 'file contents',
           duration_ms: 50,
           gate: { status: 'pass' },
-          cost_usd: 0.001,
           error: null,
         }],
       },
@@ -353,7 +356,6 @@ describe('buildTraceEvents', () => {
           result: 'trajectory result',
           duration_ms: 50,
           gate: { status: 'pass' },
-          cost_usd: 0.001,
           error: null,
         }],
       },
@@ -374,6 +376,10 @@ describe('buildTraceEvents', () => {
           keeper_turn_id: 1,
           task_id: 'task-1',
           lane: 'runtime_mcp',
+          planned_index: 4,
+          batch_index: 1,
+          batch_size: 2,
+          execution_mode: 'concurrent',
         }],
       },
     )
@@ -383,6 +389,10 @@ describe('buildTraceEvents', () => {
     expect(toolEvents[0]!.toolResult).toBe('full file contents')
     expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory+tool_call_log')
     expect(toolEvents[0]!.detail.lane).toBe('runtime_mcp')
+    expect(toolEvents[0]!.detail.planned_index).toBe(4)
+    expect(toolEvents[0]!.detail.batch_index).toBe(1)
+    expect(toolEvents[0]!.detail.batch_size).toBe(2)
+    expect(toolEvents[0]!.detail.execution_mode).toBe('concurrent')
   })
 
   it('preserves trajectory duration when the richer tool-call row has no duration', () => {
@@ -409,7 +419,6 @@ describe('buildTraceEvents', () => {
           result: 'trajectory result',
           duration_ms: 812,
           gate: { status: 'pass' },
-          cost_usd: 0.001,
           error: null,
           execution_id: 'exec-1712397700000-duration',
         }],
@@ -469,6 +478,10 @@ describe('buildTraceEvents', () => {
           keeper_turn_id: 3,
           task_id: 'task-2',
           lane: 'runtime_mcp',
+          planned_index: 5,
+          batch_index: 2,
+          batch_size: 1,
+          execution_mode: 'serial',
         }],
       },
     )
@@ -477,6 +490,10 @@ describe('buildTraceEvents', () => {
     expect(events[0]!.toolName).toBe('Execute')
     expect(events[0]!.error).toBe('command exited 1')
     expect(events[0]!.detail.trace_origin).toBe('tool_call_log')
+    expect(events[0]!.detail.planned_index).toBe(5)
+    expect(events[0]!.detail.batch_index).toBe(2)
+    expect(events[0]!.detail.batch_size).toBe(1)
+    expect(events[0]!.detail.execution_mode).toBe('serial')
     expect(events[0]!.detail.lane).toBe('runtime_mcp')
   })
 
@@ -507,7 +524,6 @@ describe('buildTraceEvents', () => {
           result: 'trajectory result',
           duration_ms: 50,
           gate: { status: 'pass' },
-          cost_usd: 0.001,
           error: null,
           execution_id: 'exec-1712397700000-002a',
         }],
@@ -568,7 +584,6 @@ describe('buildTraceEvents', () => {
           result: 'a',
           duration_ms: 50,
           gate: { status: 'pass' },
-          cost_usd: 0.001,
           error: null,
           execution_id: 'exec-1712397700000-0001',
         }],
@@ -621,7 +636,6 @@ describe('buildTraceEvents', () => {
           result: 'legacy',
           duration_ms: 50,
           gate: { status: 'pass' },
-          cost_usd: 0.001,
           error: null,
         }],
       },
@@ -683,15 +697,57 @@ describe('buildTraceEvents', () => {
     expect(events[0]!.executionId).toBe('exec-1712397700000-00ff')
   })
 
+  it('preserves deferred composition rows without classifying them as failures', () => {
+    const events = buildTraceEvents(
+      {
+        agent: 'test',
+        period: { from: '', to: '' },
+        events: [],
+        summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 0 },
+      },
+      null,
+      {
+        keeper: 'test',
+        count: 1,
+        entries: [{
+          ts: 1712397700,
+          keeper: 'test',
+          tool: 'keeper_memory_write',
+          input: { title: 'wait' },
+          output: 'approval required',
+          success: false,
+          disposition: 'deferred',
+          duration_ms: 12,
+          execution_id: 'exec-deferred-composition',
+          result_bytes: 17,
+          truncated_to: 12,
+          composition_tool: 'keeper_compose_write',
+          composition_run_id: 'composition-run-1',
+          composition_node_id: 'write',
+          composition_execution: 'inline',
+        }],
+      },
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0]!.error).toBeNull()
+    expect(events[0]!.toolResult).toBe('approval required')
+    expect(events[0]!.detail.disposition).toBe('deferred')
+    expect(events[0]!.detail.result_bytes).toBe(17)
+    expect(events[0]!.detail.truncated_to).toBe(12)
+  })
+
 })
 
 describe('getTraceSummary', () => {
-  it('counts tool_call events and accumulates cost', () => {
+  // Trajectory-sourced tool calls carry no cost. The dollar figure in the trace
+  // summary comes from Agent Core lifecycle events, which are the only events that
+  // report a cost the provider actually charged.
+  it('counts tool_call events; the dollar total comes from Agent Core events only', () => {
     traceSlots.value = {
       'keeper-a': {
         events: [
-          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'read', detail: {}, cost_usd: 0.01 },
-          { id: '2', ts: 2000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'edit', detail: {}, cost_usd: 0.02 },
+          { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'read', detail: {} },
+          { id: '2', ts: 2000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'edit', detail: {} },
           { id: '3', ts: 3000, ts_iso: '', kind: 'broadcast', sourceLane: 'masc', summary: 'hello', detail: {} },
         ],
         loading: false,
@@ -706,10 +762,10 @@ describe('getTraceSummary', () => {
     const summary = getTraceSummary('keeper-a')
     expect(summary.tool_call_count).toBe(2)
     expect(summary.broadcast_count).toBe(1)
-    expect(summary.total_cost_usd).toBeCloseTo(0.03)
+    expect(summary.total_cost_usd).toBe(0)
   })
 
-  it('accumulates OAS tokens and cost from lifecycle events', () => {
+  it('accumulates Agent Core tokens and cost from lifecycle events', () => {
     traceSlots.value = {
       'agent-x': {
         events: [
@@ -718,7 +774,7 @@ describe('getTraceSummary', () => {
             ts: 1000,
             ts_iso: '',
             kind: 'lifecycle',
-            sourceLane: 'oas',
+            sourceLane: 'agentCore',
             summary: 'agent completed',
             detail: {
               input_tokens: 500,
@@ -734,7 +790,7 @@ describe('getTraceSummary', () => {
             ts: 2000,
             ts_iso: '',
             kind: 'lifecycle',
-            sourceLane: 'oas',
+            sourceLane: 'agentCore',
             summary: 'agent completed',
             detail: {
               input_tokens: 300,
@@ -755,16 +811,16 @@ describe('getTraceSummary', () => {
     }
 
     const summary = getTraceSummary('agent-x')
-    expect(summary.oas_input_tokens).toBe(800)
-    expect(summary.oas_output_tokens).toBe(230)
-    expect(summary.oas_cache_creation_tokens).toBe(50)
-    expect(summary.oas_cache_read_tokens).toBe(210)
-    expect(summary.oas_cache_miss_input_tokens).toBe(540)
+    expect(summary.agent_core_input_tokens).toBe(800)
+    expect(summary.agent_core_output_tokens).toBe(230)
+    expect(summary.agent_core_cache_creation_tokens).toBe(50)
+    expect(summary.agent_core_cache_read_tokens).toBe(210)
+    expect(summary.agent_core_cache_miss_input_tokens).toBe(540)
     expect(summary.total_cost_usd).toBeCloseTo(0.005)
     expect(summary.lifecycle_count).toBe(2)
   })
 
-  it('accumulates oas_tokens_saved from context compactions', () => {
+  it('accumulates agent_core_tokens_saved from context compactions', () => {
     traceSlots.value = {
       'agent-z': {
         events: [
@@ -772,8 +828,8 @@ describe('getTraceSummary', () => {
             id: 'c1',
             ts: 1000,
             ts_iso: '',
-            kind: 'oas_context',
-            sourceLane: 'oas',
+            kind: 'agent_core_context',
+            sourceLane: 'agentCore',
             summary: 'compact',
             detail: { before_tokens: 1000, after_tokens: 400 },
           },
@@ -781,8 +837,8 @@ describe('getTraceSummary', () => {
             id: 'c2',
             ts: 2000,
             ts_iso: '',
-            kind: 'oas_context',
-            sourceLane: 'oas',
+            kind: 'agent_core_context',
+            sourceLane: 'agentCore',
             summary: 'compact',
             detail: { before_tokens: 600, after_tokens: 300 },
           },
@@ -790,8 +846,8 @@ describe('getTraceSummary', () => {
             id: 'c3',
             ts: 3000,
             ts_iso: '',
-            kind: 'oas_context',
-            sourceLane: 'oas',
+            kind: 'agent_core_context',
+            sourceLane: 'agentCore',
             summary: 'compact (no-op)',
             detail: { before_tokens: 200, after_tokens: 200 },
           },
@@ -806,8 +862,8 @@ describe('getTraceSummary', () => {
     }
 
     const summary = getTraceSummary('agent-z')
-    expect(summary.oas_context_count).toBe(3)
-    expect(summary.oas_tokens_saved).toBe(900) // 600 + 300 + 0
+    expect(summary.agent_core_context_count).toBe(3)
+    expect(summary.agent_core_tokens_saved).toBe(900) // 600 + 300 + 0
   })
 
   it('counts durable llm_request and error_occurred events', () => {
@@ -819,7 +875,7 @@ describe('getTraceSummary', () => {
             ts: 1000,
             ts_iso: '',
             kind: 'lifecycle',
-            sourceLane: 'oas',
+            sourceLane: 'agentCore',
             summary: 'LLM 요청',
             detail: { durable_kind: 'llm_request', turn: 1, model: 'qwen', input_tokens: 100 },
           },
@@ -828,7 +884,7 @@ describe('getTraceSummary', () => {
             ts: 1500,
             ts_iso: '',
             kind: 'lifecycle',
-            sourceLane: 'oas',
+            sourceLane: 'agentCore',
             summary: 'LLM 요청',
             detail: { durable_kind: 'llm_request', turn: 2, model: 'qwen', input_tokens: 200 },
           },
@@ -837,8 +893,8 @@ describe('getTraceSummary', () => {
             ts: 2000,
             ts_iso: '',
             kind: 'lifecycle',
-            sourceLane: 'oas',
-            summary: 'OAS 에러',
+            sourceLane: 'agentCore',
+            summary: 'Agent Core 에러',
             detail: { durable_kind: 'error_occurred', turn: 2, error_domain: 'Api', detail: 'timeout' },
           },
         ],
@@ -852,8 +908,8 @@ describe('getTraceSummary', () => {
     }
 
     const summary = getTraceSummary('agent-y')
-    expect(summary.oas_llm_call_count).toBe(2)
-    expect(summary.oas_error_count).toBe(1)
+    expect(summary.agent_core_llm_call_count).toBe(2)
+    expect(summary.agent_core_error_count).toBe(1)
   })
 })
 
@@ -983,7 +1039,7 @@ describe('status filter', () => {
       'keeper-a': {
         events: [
           { id: '1', ts: 1000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'ok', detail: {} },
-          { id: '2', ts: 2000, ts_iso: '', kind: 'oas_tool', sourceLane: 'oas', summary: 'oas-ok', detail: {} },
+          { id: '2', ts: 2000, ts_iso: '', kind: 'agent_core_tool', sourceLane: 'agentCore', summary: 'agent-core-ok', detail: {} },
           { id: '3', ts: 3000, ts_iso: '', kind: 'tool_call', sourceLane: 'masc', summary: 'fail', detail: {}, error: 'err' },
         ],
         loading: false,

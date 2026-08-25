@@ -1,10 +1,5 @@
 ---
 status: reference
-last_verified: 2026-04-17
-code_refs:
-  - lib/keeper/keeper_agent_run.ml
-  - lib/keeper/keeper_post_turn.ml
-  - lib/keeper/keeper_checkpoint_store.ml
 ---
 
 # Checkpoint Truth and Replay RFC
@@ -16,8 +11,8 @@ code_refs:
 
 ## Related Documents
 
-- `../spec/13-oas-integration.md`
-- `../OAS-MASC-BOUNDARY.md`
+- `../spec/13-agent-core-integration.md`
+- `../agent core-MASC-BOUNDARY.md`
 - `../KEEPER-STATE-OWNERSHIP.md`
 - `./delta-checkpoint-read-path.md`
 - `../KEEPER-CONTINUITY-VALIDATION.md`
@@ -52,7 +47,7 @@ runtime 설계 차원에서 아래가 한 문서로 묶여 있지 않다.
 - general long-term memory 설계
 - cross-trace recall 설계
 - verifier proof bundle 전면 개편
-- OAS public API에 MASC domain semantics를 추가하는 것
+- agent core public API에 MASC domain semantics를 추가하는 것
 
 ## Terms
 
@@ -82,7 +77,7 @@ replay 시 중복 실행이 허용되지 않는 작업이 시작되는 지점.
 
 같은 keeper trace에 대해 충돌이 생기면 아래 순서로 truth를 본다.
 
-1. **OAS checkpoint**
+1. **agent core checkpoint**
    - runtime messages
    - turn count
    - usage stats
@@ -221,24 +216,24 @@ Replay rule:
 
 ### Load contract
 
-- restore path loads native OAS checkpoint first
+- restore path loads native agent core checkpoint first
 - fallback paths may exist for compatibility, but they must not redefine truth
 - read surfaces that summarize continuity must clearly indicate when they are derived rather than directly restored
 
 ## Invariants
 
-- **INV-OAS-CHK-001**: keeper runtime reconstruction starts from OAS checkpoint truth, not keeper summary text
-- **INV-OAS-CHK-002**: replay judges typed facts, not exact model prose
-- **INV-OAS-CHK-003**: class D side effects are never auto-replayed
-- **INV-OAS-CHK-004**: fork never overwrites the source checkpoint lineage
-- **INV-OAS-CHK-005**: domain read models may summarize checkpoint truth but may not supersede it
+- **INV-agent core-CHK-001**: keeper runtime reconstruction starts from agent core checkpoint truth, not keeper summary text
+- **INV-agent core-CHK-002**: replay judges typed facts, not exact model prose
+- **INV-agent core-CHK-003**: class D side effects are never auto-replayed
+- **INV-agent core-CHK-004**: fork never overwrites the source checkpoint lineage
+- **INV-agent core-CHK-005**: domain read models may summarize checkpoint truth but may not supersede it
 
 ## Implementation Landing Points
 
 Primary spec / contract:
 
-- `docs/spec/13-oas-integration.md`
-- `docs/OAS-MASC-BOUNDARY.md`
+- `docs/spec/13-agent-core-integration.md`
+- `docs/agent core-MASC-BOUNDARY.md`
 - `docs/KEEPER-STATE-OWNERSHIP.md`
 
 Primary code anchors:
@@ -262,7 +257,7 @@ Secondary design touchpoints:
 
 ### Phase 2
 
-- reduce keeper-owned wrapper state around OAS checkpoint/context
+- reduce keeper-owned wrapper state around agent core checkpoint/context
 - move replay-relevant state to typed after-turn facts
 
 ### Phase 3
@@ -288,8 +283,8 @@ Secondary design touchpoints:
   https://docs.langchain.com/oss/python/langgraph/use-time-travel ;
   확인일시 2026-04-12 ; 신뢰도 High
 - [근거] current MASC boundary state:
-  `docs/OAS-MASC-BOUNDARY.md` ,
-  `docs/spec/13-oas-integration.md` ;
+  `docs/agent core-MASC-BOUNDARY.md` ,
+  `docs/spec/13-agent-core-integration.md` ;
   확인일시 2026-04-12 ; 신뢰도 High
 - [근거] current keeper state ownership and validation contracts:
   `docs/KEEPER-STATE-OWNERSHIP.md` ,

@@ -14,15 +14,11 @@ type record_type =
   | Label_record
 
 val record_type_to_string : record_type -> string
-val record_type_of_string : string -> record_type option
-
 type label_verdict =
   | Approve_label
   | Reject_label
 
 val label_verdict_to_string : label_verdict -> string
-val label_verdict_of_string : string -> label_verdict option
-
 val verdict_to_string : Task.Anti_rationalization.verdict -> string
 val verdict_of_string : string -> Task.Anti_rationalization.verdict option
 
@@ -68,16 +64,10 @@ type calibration_example = {
 val get_store : unit -> Dated_jsonl.t
 (** Get or create the global verdict store at [data/verdicts/]. *)
 
-val reset_store_for_testing : unit -> unit
-(** Reset the store reference.  For testing only. *)
-
-val set_store : base_dir:string -> unit
-(** Set the process-local verdict store to an explicit isolated directory.
-    Used by offline eval tooling after verdict-store isolation checks and by
-    tests through [set_store_for_testing]. *)
-
-val set_store_for_testing : base_dir:string -> unit
-(** Compatibility alias for [set_store] used by tests. *)
+module For_testing : sig
+  val reset_store : unit -> unit
+  val set_store : base_dir:string -> unit
+end
 
 val absolute_workspace_base_path : ?cwd:string -> string -> string
 (** Normalize a workspace base path into the absolute path expected by offline
@@ -97,18 +87,6 @@ val resolve_record_verdicts_store :
     isolated store; [Error] = missing/colliding-with-live store dir. Pass [~cwd]
     in tests to make relative-path normalization deterministic. *)
 
-val resolve_record_verdicts_evaluator :
-  record_verdicts:bool ->
-  generator_runtime:string ->
-  evaluator_runtime:string option ->
-  cross_verifier_runtime:string option ->
-  (string option, string) result
-(** Decide which runtime label is passed to the verdict judge. When recording
-    verdicts, an explicit [evaluator_runtime] is trimmed and accepted, including
-    intentional same-model overrides. When omitted, [cross_verifier_runtime] must
-    be configured and distinct from [generator_runtime], so the default path does
-    not silently collapse cross-model evaluation to the generator. *)
-
 (** {1 Hashing} *)
 
 val notes_hash : task_title:string -> notes:string -> string
@@ -121,11 +99,11 @@ val record_verdict :
   task_id:string ->
   req:Task.Anti_rationalization.review_request ->
   result:Task.Anti_rationalization.review_result ->
-  ?on_harness_verdict:(Agent_sdk.Harness.verdict -> unit) ->
+  ?on_harness_verdict:(Agent_core.Harness.verdict -> unit) ->
   unit ->
   unit
 (** Append a verdict record to the JSONL store.
-    If [~on_harness_verdict] is provided, converts the record to an OAS
+    If [~on_harness_verdict] is provided, converts the record to an AGENT_CORE
     [Harness.verdict] and invokes the callback after persistence.
     This enables wiring to [Eval.add_verdict] or SSE event publishers. *)
 
@@ -152,10 +130,10 @@ val format_few_shot_block : calibration_example list -> string
 (** Format examples into a text block for prompt injection.
     Returns [""] for an empty list. *)
 
-(** {1 OAS Integration} *)
+(** {1 AGENT_CORE Integration} *)
 
-val to_harness_verdict : verdict_record -> Agent_sdk.Harness.verdict
-(** Convert a MASC verdict record to an OAS [Harness.verdict].
+val to_harness_verdict : verdict_record -> Agent_core.Harness.verdict
+(** Convert a MASC verdict record to an AGENT_CORE [Harness.verdict].
     [Approve] maps to [passed=true, score=1.0];
     [Reject _] maps to [passed=false, score=0.0] with gate detail. *)
 

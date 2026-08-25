@@ -278,16 +278,16 @@ let project_claimed_owner owner =
      | { receipt = { transition = Persistence.Transfer_accepted transfer; _ }; _ }
        :: _ ->
        (match
-          Keeper_turn_admission.run_transfer_intake_if_open
+          Keeper_shutdown_intake_fence.run_transfer_intake_if_open
             ~base_path
             ~from_keeper:keeper_name
             ~to_keeper:transfer.to_keeper
             (fun ~source_intake_token:_ ~target_intake_token ->
                project_open_owner ~target_intake_token ())
         with
-        | Keeper_turn_admission.Transfer_intake_committed result -> result
-        | Keeper_turn_admission.Transfer_intake_source_shutdown_reserved operation_id
-        | Keeper_turn_admission.Transfer_intake_target_shutdown_reserved operation_id ->
+        | Keeper_shutdown_intake_fence.Transfer_intake_committed result -> result
+        | Keeper_shutdown_intake_fence.Transfer_intake_source_shutdown_reserved operation_id
+        | Keeper_shutdown_intake_fence.Transfer_intake_target_shutdown_reserved operation_id ->
           Error (Owner_shutdown_reserved operation_id))
      | []
      | { receipt =
@@ -299,13 +299,13 @@ let project_claimed_owner owner =
        }
        :: _ ->
        (match
-          Keeper_turn_admission.run_durable_intake_if_open
+          Keeper_shutdown_intake_fence.run_durable_intake_if_open
             ~base_path
             ~keeper_name
             (fun _source_intake_token -> project_open_owner ())
         with
-        | Keeper_turn_admission.Intake_committed result -> result
-        | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+        | Keeper_shutdown_intake_fence.Intake_committed result -> result
+        | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
           Error (Owner_shutdown_reserved operation_id)))
 ;;
 
@@ -462,24 +462,4 @@ module For_testing = struct
     | Claim_acquired of 'a
     | Claim_already_held
 
-  let with_owner_claim ~base_path ~keeper_name f =
-    match Persistence.resolve_owner_identity ~base_path ~keeper_name with
-    | Error error -> Error (Owner_unavailable error)
-    | Ok owner ->
-      (match with_owner_claim owner f with
-       | Owner_claim_busy -> Ok Claim_already_held
-       | Owner_claim_acquired value -> Ok (Claim_acquired value))
-  ;;
-
-  let pending_transition_count_result ~base_path ~keeper_name =
-    match Persistence.resolve_owner_identity ~base_path ~keeper_name with
-    | Error error -> Error (Owner_unavailable error)
-    | Ok owner ->
-      let base_path = Persistence.owner_identity_base_path owner in
-      let keeper_name = Persistence.owner_identity_keeper_name owner in
-      (match Persistence.load_state_result ~base_path ~keeper_name with
-       | Ok state ->
-         Ok (List.length (Keeper_event_queue_state.transition_outbox state))
-       | Error detail -> Error (Outbox_unavailable detail))
-  ;;
 end

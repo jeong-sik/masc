@@ -6,8 +6,14 @@ type stage_part =
   | Redirect of Redirect_scope.t
 
 let file_redirect fd target mode =
+  (* A parsed command writes paths as it sees them. Nothing here knows which
+     filesystem that is, so the target stays untranslated and a sandboxed
+     dispatch refuses it rather than opening whatever this host has. *)
   Redirect_scope.File
-    { fd; target = Path_scope.classify ~raw:target ~cwd:"."; mode }
+    { fd
+    ; target = Redirect_scope.In_command_namespace (Path_scope.classify ~raw:target ~cwd:".")
+    ; mode
+    }
 ;;
 %}
 
@@ -15,12 +21,13 @@ let file_redirect fd target mode =
 
    Productions now cover simple commands, pipelines, env prefixes
    (recognized in bash.ml from leading WORD tokens), fd-to-fd redirects,
-   and file redirects. Subsequent PRs extend to subset guards that mint
-   Parsed.Too_complex rather than matching.
+   file redirects, and && / || between pipelines. Subsequent PRs extend
+   to subset guards that mint Parsed.Too_complex rather than matching.
 
-   The grammar emits a list of raw (bin, args, redirects) triples,
-   one per pipeline stage. bash.ml adapts the singleton case to
-   Shell_ir.Simple and the multi-stage case to Shell_ir.Pipeline.
+   The grammar emits a head pipeline plus connector-joined tails, each
+   pipeline a list of raw (bin, args, redirects) triples. bash.ml adapts
+   a lone stage to Shell_ir.Simple, several to Shell_ir.Pipeline, and a
+   non-empty tail to Shell_ir.Sequence.
 
    See RFC v5 (docs/rfc/RFC-0005). */
 
@@ -29,9 +36,12 @@ let file_redirect fd target mode =
 %token <int * int> FD_REDIRECT
 %token <int * Masc_exec.Redirect_scope.mode> FILE_REDIRECT_OP
 %token PIPE
+%token AND_IF
+%token OR_IF
+%token SEMICOLON
 %token EOF
 
-%start <((string * Masc_exec.Shell_ir.arg_meta) * (string * Masc_exec.Shell_ir.arg_meta) list * Masc_exec.Redirect_scope.t list) list> command
+%start <(((string * Masc_exec.Shell_ir.arg_meta) * (string * Masc_exec.Shell_ir.arg_meta) list * Masc_exec.Redirect_scope.t list) list * (Masc_exec.Shell_ir.connector * ((string * Masc_exec.Shell_ir.arg_meta) * (string * Masc_exec.Shell_ir.arg_meta) list * Masc_exec.Redirect_scope.t list) list) list)> command
 
 %%
 
@@ -63,5 +73,22 @@ stage:
       (bin, List.rev args, List.rev redirects)
     }
 
+pipeline:
+  | stages = separated_nonempty_list(PIPE, stage) { stages }
+
 command:
-  | stages = separated_nonempty_list(PIPE, stage) EOF { stages }
+  | head = pipeline rest = command_rest EOF
+    { (head, rest) }
+
+command_rest:
+  | /* empty */ { [] }
+  | SEMICOLON { [] }
+  | SEMICOLON head = pipeline rest = command_rest {
+      (Masc_exec.Shell_ir.Seq, head) :: rest
+    }
+  | AND_IF head = pipeline rest = command_rest {
+      (Masc_exec.Shell_ir.And_if, head) :: rest
+    }
+  | OR_IF head = pipeline rest = command_rest {
+      (Masc_exec.Shell_ir.Or_if, head) :: rest
+    }

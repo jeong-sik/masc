@@ -21,6 +21,31 @@ type parse_error =
   }
 [@@deriving show]
 
+type editor_transport =
+  | Endpoint
+  | Command
+
+type editor_semantics =
+  | Http_provider
+  | Official_client
+
+type editor_credential_policy =
+  | Credentials_optional
+  | Credentials_forbidden
+
+type editor_protocol =
+  { protocol : string
+  ; transport : editor_transport
+  ; semantics : editor_semantics
+  ; credential_policy : editor_credential_policy
+  ; requires_non_interactive : bool
+  }
+
+val editor_protocols : editor_protocol list
+(** Backend-owned protocols that the structured runtime editor may create.
+    Protocols that parse but cannot materialize as a production runtime are
+    deliberately absent. *)
+
 val parse_string : string -> (Runtime_schema.config, parse_error list) result
 (** Parse a TOML string into a Runtime config.
     Returns [Ok config] on success, [Error errors] with all
@@ -34,12 +59,10 @@ val parse_file : string -> (Runtime_schema.config, parse_error list) result
 val api_format_of_protocol : string -> (Runtime_schema.api_format, string) result
 (** Map a TOML protocol string to a {!Runtime_schema.api_format} variant. Only
     the canonical labels are accepted: [messages-cli], [messages-http],
-    [openai-compatible-cli], [openai-compatible-http], [ollama-http]. The
+    [openai-compatible-cli], [openai-compatible-http], [ollama-http],
+    [codex-app-server], and [claude-code]. The
     deprecated provider-letter aliases [provider_d-http] / [provider-d-cli]
     (renamed in v0.19.43) are rejected with an "unknown protocol" error — they
     are NOT silently canonicalized — so a checked-in config still using them
     fails to load. Locked by [test_legacy_protocol_alias_rejected]. *)
 
-val transport_of_provider :
-  Otoml.t -> string -> (Runtime_schema.transport, string) result
-(** Extract transport ([Http] or [Cli]) from a provider TOML table. *)

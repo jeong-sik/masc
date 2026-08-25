@@ -1,25 +1,21 @@
 let descriptor_for_tool_name tool_name =
-  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
+  let stripped = Tool_transport_prefix.strip tool_name in
   match Keeper_tool_descriptor.find_public stripped with
   | Some descriptor -> Some descriptor
   | None ->
     (match Keeper_tool_descriptor.descriptors_for_internal stripped with
      | descriptor :: _ -> Some descriptor
-     | [] ->
-       let internal_name =
-         match Keeper_tool_alias.canonical_internal_name tool_name with
-         | Some internal_name -> internal_name
-         | None -> stripped
-       in
-       (match Keeper_tool_descriptor.descriptors_for_internal internal_name with
-        | descriptor :: _ -> Some descriptor
-        | [] -> None))
+     | [] -> None)
 ;;
 
 let canonical_internal_name_for_tool_name tool_name =
   match descriptor_for_tool_name tool_name with
   | Some descriptor -> Some descriptor.Keeper_tool_descriptor.internal_name
-  | None -> Keeper_tool_alias.canonical_internal_name tool_name
+  | None ->
+    let stripped = Tool_transport_prefix.strip tool_name in
+    Option.map
+      Tool_schemas_misc.mcp_runtime_tool_name
+      (Tool_schemas_misc.mcp_runtime_operation_of_tool_name stripped)
 ;;
 
 let public_names_for_internal internal_name =
@@ -44,15 +40,6 @@ let public_names_for_allowed_internal_names internal_names =
   |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 ;;
 
-let is_public_mcp_surface_name tool_name =
-  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
-  match descriptor_for_tool_name stripped with
-  | Some descriptor ->
-    String.equal descriptor.Keeper_tool_descriptor.public_name stripped
-    && Tool_catalog.is_public_mcp stripped
-  | None -> false
-;;
-
 let capability_has kind tool_name =
   let descriptor = descriptor_for_tool_name tool_name in
   let descriptor_readonly_hint =
@@ -75,7 +62,7 @@ let capability_has kind tool_name =
 ;;
 
 let descriptor_and_input_for_tool_call ~tool_name ~input =
-  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
+  let stripped = Tool_transport_prefix.strip tool_name in
   match Keeper_tool_descriptor.find_public stripped with
   | Some descriptor ->
     Some
@@ -84,19 +71,11 @@ let descriptor_and_input_for_tool_call ~tool_name ~input =
   | None ->
     (match Keeper_tool_descriptor.descriptors_for_internal stripped with
      | descriptor :: _ -> Some (descriptor, input)
-     | [] ->
-       let internal_name =
-         match Keeper_tool_alias.canonical_internal_name tool_name with
-         | Some internal_name -> internal_name
-         | None -> stripped
-       in
-       (match Keeper_tool_descriptor.descriptors_for_internal internal_name with
-        | descriptor :: _ -> Some (descriptor, input)
-        | [] -> None))
+     | [] -> None)
 ;;
 
 let public_descriptor_and_name_for_tool_call tool_name =
-  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
+  let stripped = Tool_transport_prefix.strip tool_name in
   match Keeper_tool_descriptor.find_public stripped with
   | Some descriptor -> Some (stripped, descriptor)
   | None -> None
@@ -157,12 +136,6 @@ let validated_descriptor_and_input_for_tool_call ~tool_name ~input =
       (descriptor_and_input_for_tool_call ~tool_name ~input)
 ;;
 
-let readonly_for_tool_name tool_name =
-  match descriptor_for_tool_name tool_name with
-  | Some descriptor -> Keeper_tool_descriptor.readonly_static_hint descriptor
-  | None -> None
-;;
-
 let readonly_for_tool_call ~tool_name ~input =
   match descriptor_and_input_for_tool_call ~tool_name ~input with
   | Some (descriptor, input) ->
@@ -172,15 +145,33 @@ let readonly_for_tool_call ~tool_name ~input =
   | None -> None
 ;;
 
-let descriptors_for_tool_names tool_names =
-  let add_descriptor (seen, acc) descriptor =
-    if List.mem descriptor.Keeper_tool_descriptor.id seen
-    then seen, acc
-    else descriptor.id :: seen, descriptor :: acc
-  in
-  tool_names
-  |> List.filter_map descriptor_for_tool_name
-  |> List.fold_left add_descriptor ([], [])
-  |> snd
-  |> List.rev
+type runtime_decision_outcome =
+  | Route_hit of { internal : string }
+  | Already_internal of { canonical : string }
+  | Miss
+
+let runtime_decision name =
+  let stripped = Tool_transport_prefix.strip name in
+  match Keeper_tool_descriptor.find_public stripped with
+  | Some descriptor -> Route_hit { internal = descriptor.internal_name }
+  | None ->
+    (match descriptor_for_tool_name stripped with
+     | Some descriptor ->
+       Already_internal { canonical = descriptor.internal_name }
+     | None ->
+       (match
+          Tool_schemas_misc.mcp_runtime_operation_of_tool_name stripped
+        with
+        | Some operation ->
+          Already_internal
+            { canonical = Tool_schemas_misc.mcp_runtime_tool_name operation }
+        | None -> Miss))
 ;;
+
+let canonical_tool_name name =
+  match runtime_decision name with
+  | Route_hit { internal } -> internal
+  | Already_internal { canonical } -> canonical
+  | Miss -> name
+;;
+

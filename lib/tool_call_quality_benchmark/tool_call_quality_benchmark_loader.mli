@@ -50,8 +50,8 @@ val load_cases_from_file :
       category: <other>"]
     - [forbidden_tools] / [forbidden_selectors] /
       [required_selectors] / [arg_checks] default to empty lists.
-      [arg_checks] accepts either legacy [tool_name] or a structured
-      [selector] using the same schema as [required_selectors].
+      each [arg_checks] entry requires a structured [selector] using the
+      same schema as [required_selectors].
     - [recovery_policy] defaults to [None] (case has no recovery
       requirement)
 
@@ -93,7 +93,4 @@ val load_runs_from_file :
     | [route_evidence] | [None] |
     | [duration_ms] | [None] |
 
-    The [tool_name] vs [tool] alias is intentional — older
-    fixtures use [tool], newer ones use [tool_name].  Pinning
-    at the contract seam so a future "drop legacy tool field"
-    PR must touch this explicitly. *)
+    [tool_name] is the only accepted key. *)

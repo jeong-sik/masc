@@ -15,8 +15,8 @@
  (public_name masc.runtime_model)
  (wrapped false)
  (libraries
-  agent_sdk
-  agent_sdk.llm_provider
+  masc.agent_core
+  masc.agent_core.llm_provider
   masc.config
   masc_core
   masc_log

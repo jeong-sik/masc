@@ -8,7 +8,6 @@ function makeSummary(
   return {
     enabled: true,
     require_token: false,
-    default_role: 'reader',
     token_present: false,
     token_valid: false,
     token_agent: null,
@@ -58,7 +57,6 @@ describe('keeperDirectChatAccess', () => {
       makeSummary({
         effective_agent: 'bob',
         effective_role: 'worker',
-        default_role: 'worker',
         require_token: true,
         token_present: false,
       }),

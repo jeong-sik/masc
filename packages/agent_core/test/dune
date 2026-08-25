@@ -1,0 +1,832 @@
+(library
+ (name agent_core_test_deps)
+ (modules agent_core_test_deps)
+ (wrapped false)
+ (libraries
+  (re_export agent_core)
+  (re_export agent_core_strings)
+  (re_export llm_provider)
+  (re_export eio)
+  (re_export eio.unix)
+  (re_export eio_main)
+  (re_export yojson)
+  (re_export unix)
+  (re_export str)
+  (re_export fmt)
+  (re_export uri)
+  (re_export cohttp)
+  (re_export cohttp-eio)
+  (re_export mcp_protocol)
+  (re_export digestif)
+  (re_export optint)
+  (re_export re)
+  (re_export mirage-crypto-rng.unix)
+  (re_export ppx_deriving_yojson.runtime)))
+
+(executable
+ (name test_local_llm)
+ (modules test_local_llm)
+ (libraries agent_core_test_deps agent_core eio eio_main yojson))
+
+(executable
+ (name model_catalog_standalone_probe)
+ (modules model_catalog_standalone_probe)
+ (libraries agent_core_test_deps llm_provider))
+
+; --- AUTO-WIRED ORPHANS (fix/test-dune-orphans) ---
+; ---- (1) compile failures — not wired until bodies are fixed ----
+; The following files are NOT wired here because they fail to compile
+; against current main.  Bodies untouched per fix scope.  Tracked separately:
+;
+; ---- (2) pre-existing runtime failures — compile OK, runtest fails ----
+; The following suites compile but have pre-existing test failures.
+; They are excluded until the failures are fixed in separate PRs:
+;
+
+(tests
+ (names
+  test_metrics_aggregating
+  test_modality
+  test_capabilities
+  test_agent_card
+  test_agent_auto_dump
+  test_agent_lifecycle
+  test_agent_pipeline
+  test_agent_periodic_cleanup
+  test_agent_race
+  test_agent_core
+  test_agent_stream
+  test_agent_tool
+  test_agent_turn
+  test_agent_tools_index
+  test_api_dispatch
+  test_tool_execution
+  test_artifact_service
+  test_async_agent
+  test_atomic_write_race
+  test_backend_openai_codec
+  test_provider_agnostic_reasoning_replay
+  test_backend_glm_coverage
+  test_backend_gemini
+  test_snapshot_provider_serialization
+  test_thinking_control_dialects
+  test_body_timeout
+  test_builder_coverage
+  test_cache
+  test_canonical_tool
+  test_capabilities_wiring
+  test_checkpoint
+  test_checkpoint_store
+  test_clone
+  test_complete_ext
+  test_consumer
+  test_context
+  test_context_concurrency
+  test_context_flow_proof
+  test_contract
+  test_discovery
+  test_discovery_http
+  test_durable_event
+  test_e2e_v024
+  test_eio_cancellability
+  test_elicitation
+  test_error
+  test_error_domain
+  test_eval
+  test_eval_coverage
+  test_eval_stats
+  test_event_bus
+  test_event_envelope
+  test_schema_surface_index
+  test_fs_result
+  test_gemini_edge_cases
+  test_harness
+  test_harness_deep
+  test_hooks
+  test_hooks_integration
+  test_http_client
+  test_initial_messages
+  test_injection
+  test_integration
+  test_journal_bridge
+  test_llm_cache
+  test_llm_provider_error
+  test_log
+  test_mcp
+  test_mcp_coverage
+  test_mcp_deep
+  test_mcp_http
+  test_mcp_integration
+  test_mcp_session
+  test_metrics
+  test_model_catalog_default
+  test_model_catalog_overlay
+  test_module_check
+  test_multimodal
+  test_multivendor_events
+  test_multivendor_live
+  test_otel
+  test_otel_export
+  test_otel_tracer
+  test_pipeline
+  test_pipeline_common_coverage
+  test_pipeline_deep
+  test_pipeline_illegal_hook
+  test_pipeline_metrics
+  test_plan
+  test_provider
+  test_provider_admission
+  test_provider_failure_attribution
+  test_provider_catalog_coverage
+  test_provider_config
+  test_provider_runtime_binding
+  test_provider_registry
+  test_raw_trace
+  test_raw_trace_deep
+  test_retry
+  test_session
+  test_session_advanced
+  test_session_resume
+  test_sessions_cov2
+  test_sessions_types
+  test_sessions_types_deep
+  test_skill
+  test_skill_coverage
+  test_skill_coverage2
+  test_skill_discovery
+  test_skill_registry
+  test_stream_accumulator
+  test_streaming_cov
+  test_streaming_edge_cases
+  test_streaming_coverage
+  test_streaming_keepalive_idle
+  test_streaming_openai
+  test_streaming_summary
+  test_structured
+  test_structured_coverage
+  test_structured_deep
+  test_structured_ext
+  test_structured_stream
+  test_swiss_verdict_json
+  test_tool
+  test_tool_input_schema_fidelity
+  test_tool_input_validation
+  test_tool_middleware
+  test_tool_schema_decode_boundary
+  test_tracing
+  test_trajectory
+  test_trajectory_unit
+  test_turn_params
+  test_typed_tool
+  test_usage_accumulation
+  test_types
+  test_usability_v030
+  test_util)
+ (modules
+  model_catalog_test_support
+  provider_mock
+  test_metrics_aggregating
+  test_modality
+  test_capabilities
+  test_agent_card
+  test_agent_auto_dump
+  test_agent_lifecycle
+  test_agent_pipeline
+  test_agent_periodic_cleanup
+  test_agent_race
+  test_agent_core
+  test_agent_stream
+  test_agent_tool
+  test_agent_turn
+  test_agent_tools_index
+  test_api_dispatch
+  test_tool_execution
+  test_artifact_service
+  test_async_agent
+  test_atomic_write_race
+  test_backend_openai_codec
+  test_provider_agnostic_reasoning_replay
+  test_backend_glm_coverage
+  test_backend_gemini
+  test_snapshot_provider_serialization
+  test_thinking_control_dialects
+  test_body_timeout
+  test_builder_coverage
+  test_cache
+  test_canonical_tool
+  test_capabilities_wiring
+  test_checkpoint
+  test_checkpoint_store
+  test_clone
+  test_complete_ext
+  test_consumer
+  test_context
+  test_context_concurrency
+  test_context_flow_proof
+  test_contract
+  test_discovery
+  test_discovery_http
+  test_durable_event
+  test_e2e_v024
+  test_eio_cancellability
+  test_elicitation
+  test_error
+  test_error_domain
+  test_eval
+  test_eval_coverage
+  test_eval_stats
+  test_event_bus
+  test_event_envelope
+  test_schema_surface_index
+  test_fs_result
+  test_gemini_edge_cases
+  test_harness
+  test_harness_deep
+  test_hooks
+  test_hooks_integration
+  test_http_client
+  test_initial_messages
+  test_injection
+  test_integration
+  test_journal_bridge
+  test_llm_cache
+  test_llm_provider_error
+  test_log
+  test_mcp
+  test_mcp_coverage
+  test_mcp_deep
+  test_mcp_http
+  test_mcp_integration
+  test_mcp_session
+  test_metrics
+  test_model_catalog_default
+  test_model_catalog_overlay
+  test_module_check
+  test_multimodal
+  test_multivendor_events
+  test_multivendor_live
+  test_otel
+  test_otel_export
+  test_otel_tracer
+  test_pipeline
+  test_pipeline_common_coverage
+  test_pipeline_deep
+  test_pipeline_illegal_hook
+  test_pipeline_metrics
+  test_plan
+  test_provider
+  test_provider_admission
+  test_provider_failure_attribution
+  test_provider_catalog_coverage
+  test_provider_config
+  test_provider_runtime_binding
+  test_provider_registry
+  test_raw_trace
+  test_raw_trace_deep
+  test_retry
+  test_session
+  test_session_advanced
+  test_session_resume
+  test_sessions_cov2
+  test_sessions_types
+  test_sessions_types_deep
+  test_skill
+  test_skill_coverage
+  test_skill_coverage2
+  test_skill_discovery
+  test_skill_registry
+  test_stream_accumulator
+  test_streaming_cov
+  test_streaming_edge_cases
+  test_streaming_coverage
+  test_streaming_keepalive_idle
+  test_streaming_openai
+  test_streaming_summary
+  test_structured
+  test_structured_coverage
+  test_structured_deep
+  test_structured_ext
+  test_structured_stream
+  test_swiss_verdict_json
+  test_tool
+  test_tool_input_schema_fidelity
+  test_tool_input_validation
+  test_tool_middleware
+  test_tool_schema_decode_boundary
+  test_tracing
+  test_trajectory
+  test_trajectory_unit
+  test_turn_params
+  test_typed_tool
+  test_usage_accumulation
+  test_types
+  test_usability_v030
+  test_util)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)
+ (deps ../docs/example-capability-manifest.json ../models.toml)
+ (action
+  (run %{test})))
+
+; The recursive execution foundation is deliberately private until AGENT_CORE owns
+; its production writer. This regression suite uses Dune's library-internal
+; alias only inside the repository; no installed Agent_core API exposes it.
+
+(test
+ (name test_execution_journal)
+ (modules test_execution_journal)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)
+ (flags
+  (:standard -alias-deps))
+ (deps ../models.toml)
+ (action
+  (run %{test})))
+
+(test
+ (name test_execution_codec_executor)
+ (modules test_execution_codec_executor)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)
+ (flags
+  (:standard -alias-deps))
+ (deps ../models.toml)
+ (action
+  (run %{test})))
+
+(test
+ (name test_execution_event_store)
+ (modules test_execution_event_store)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest digestif eio_main)
+ (flags
+  (:standard -alias-deps))
+ (deps ../models.toml)
+ (action
+  (run %{test})))
+
+(test
+ (name test_execution_projection)
+ (modules test_execution_projection)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)
+ (flags
+  (:standard -alias-deps))
+ (deps ../models.toml)
+ (action
+  (run %{test})))
+
+(test
+ (name test_agent_ambient_execution)
+ (modules test_agent_ambient_execution)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)
+ (flags
+  (:standard -alias-deps))
+ (deps ../models.toml)
+ (action
+  (run %{test})))
+
+(test
+ (name test_execution_lane_writer)
+ (modules test_execution_lane_writer)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)
+ (flags
+  (:standard -alias-deps))
+ (deps ../models.toml)
+ (action
+  (run %{test})))
+
+; QCheck-based property tests
+
+(tests
+ (names
+  test_checkpoint_delta
+  test_context_properties
+  test_property
+  test_property_advanced
+  test_tool_set)
+ (modules
+  test_checkpoint_delta
+  test_context_properties
+  test_property
+  test_property_advanced
+  test_tool_set)
+ (libraries agent_core_test_deps agent_core alcotest qcheck-core qcheck-alcotest)
+ (deps ../models.toml)
+ (action
+  (run %{test})))
+
+; Tests with extra dependencies — kept as individual stanzas
+; so the grouped (tests (names ...)) above does not need to pull
+; them into the rest of the suite.
+
+(test
+ (name test_streaming)
+ (modules test_streaming)
+ (libraries agent_core_test_deps agent_core alcotest))
+
+(test
+ (name test_provider_complete)
+ (modules test_provider_complete)
+ (deps ../models.toml)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+
+(test
+ (name test_output_token_receipt)
+ (modules test_output_token_receipt)
+ (deps ../models.toml)
+ (libraries agent_core_test_deps llm_provider alcotest))
+
+(test
+ (name test_input_token_count)
+ (modules test_input_token_count)
+ (libraries agent_core_test_deps llm_provider alcotest))
+
+(test
+ (name test_anthropic_input_token_count)
+ (modules test_anthropic_input_token_count)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+
+(test
+ (name test_exact_output_single_surface)
+ (modules test_exact_output_single_surface)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+
+(test
+ (name test_exact_output_flow)
+ (modules test_exact_output_flow)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+
+(test
+ (name test_exact_output_validated_flow_evidence)
+ (modules test_exact_output_validated_flow_evidence)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest digestif eio_main))
+
+(test
+ (name test_exact_output_resolver_snapshot)
+ (modules test_exact_output_resolver_snapshot)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+
+(executable
+ (name check_public_mli_callbacks)
+ (modules check_public_mli_callbacks)
+ (libraries agent_core_test_deps compiler-libs.common))
+
+(rule
+ (alias runtest)
+ (deps
+  ../scripts/check-exact-output-single-surface.sh
+  ../scripts/check-exact-output-resolver-boundary.sh
+  ../lib/llm_provider/count_tokens_sync.mli
+  ../lib/llm_provider/http_client.mli
+  ../lib/llm_provider/exact_output_count_tokens.ml
+  ../lib/llm_provider/exact_output_count_tokens.mli
+  ../lib/llm_provider/exact_output_measurement_transport.ml
+  ../lib/llm_provider/exact_output_generation_receipt.ml
+  ../lib/llm_provider/exact_output_generation_receipt.mli
+  ../lib/llm_provider/http_client.ml
+  ../lib/llm_provider/exact_output.ml
+  ../lib/llm_provider/exact_output.mli
+  ../lib/llm_provider/exact_output_flow.ml
+  ../lib/llm_provider/exact_output_flow.mli
+  ../lib/llm_provider/exact_output_resolver.ml
+  ../lib/llm_provider/exact_output_resolver.mli
+  ../lib/llm_provider/exact_output_catalog_binding.ml
+  ../lib/llm_provider/exact_output_catalog_binding.mli
+  ../lib/llm_provider/exact_output_flow_admission.ml
+  ../lib/llm_provider/exact_output_flow_admission.mli
+  ../lib/llm_provider/exact_output_ready_admission.ml
+  ../lib/llm_provider/exact_output_ready_admission.mli
+  ../lib/llm_provider/exact_output_plan.ml
+  ../lib/llm_provider/complete_common.ml
+  ../lib/llm_provider/backend_anthropic.ml
+  ../lib/llm_provider/backend_ollama.ml
+  ../lib/llm_provider/backend_openai.ml
+  ../lib/llm_provider/backend_openai_serialize.ml
+  ../lib/llm_provider/backend_openai_responses.ml
+  ../lib/llm_provider/backend_gemini.ml
+  ../lib/llm_provider/backend_glm.ml
+  ../lib/llm_provider/capabilities.mli
+  ../lib/llm_provider/model_catalog.mli
+  ../lib/llm_provider/dune
+  fixtures/exact_output_single_surface/public_count_tokens_callback.mli.fixture
+  fixtures/exact_output_single_surface/public_callback_alias.mli.fixture
+  fixtures/exact_output_single_surface/public_callback_qualified_alias.mli.fixture
+  fixtures/exact_output_single_surface/public_callback_external_qualified_alias.mli.fixture
+  fixtures/exact_output_single_surface/public_callback_external_qualified_collision.mli.fixture
+  fixtures/exact_output_single_surface/public_callback_module_alias.mli.fixture
+  fixtures/exact_output_single_surface/public_callback_nested_module.mli.fixture
+  fixtures/exact_output_single_surface/public_callback_include.mli.fixture
+  fixtures/exact_output_single_surface/public_callback_include_typeof.mli.fixture
+  fixtures/exact_output_single_surface/public_callback_nested_include.mli.fixture
+  fixtures/exact_output_single_surface/public_callback_module_with.mli.fixture
+  fixtures/exact_output_single_surface/public_callback_duplicate_allowed.mli.fixture
+  fixtures/exact_output_single_surface/public_callback_unused_allowance.mli.fixture
+  fixtures/exact_output_single_surface/public_callback_allowance_origin.mli.fixture
+  fixtures/exact_output_single_surface/public_callback_allowance_moved.mli.fixture
+  fixtures/exact_output_single_surface/public_callback_unlabelled.mli.fixture
+  fixtures/exact_output_single_surface/public_http_client_callback.mli.fixture
+  fixtures/exact_output_single_surface/exact_transport_post_alias.ml.fixture
+  fixtures/exact_output_single_surface/exact_transport_local_open.ml.fixture
+  fixtures/exact_output_single_surface/exact_transport_module_alias.ml.fixture
+  fixtures/exact_output_single_surface/exact_transport_first_class_module.ml.fixture
+  fixtures/exact_output_single_surface/exact_transport_external_proxy_reexport.ml.fixture
+  fixtures/exact_output_single_surface/exact_transport_external_value_alias.ml.fixture
+  fixtures/exact_output_single_surface/exact_transport_constrained_value_alias.ml.fixture
+  fixtures/exact_output_single_surface/exact_transport_constrained_module_alias.ml.fixture
+  fixtures/exact_output_single_surface/exact_transport_legitimate_local_alias.ml.fixture)
+ (action
+  (progn
+   (run bash %{dep:../scripts/check-exact-output-single-surface.sh})
+   (run
+    bash
+    %{dep:../scripts/check-exact-output-resolver-boundary.sh}
+    %{dep:../lib/llm_provider/exact_output.ml}
+    %{dep:../lib/llm_provider/exact_output_flow.ml}
+    %{dep:../lib/llm_provider/exact_output_resolver.ml}
+    %{dep:../lib/llm_provider/exact_output_catalog_binding.ml}
+    %{dep:../lib/llm_provider/exact_output_flow_admission.ml}
+    %{dep:../lib/llm_provider/exact_output_ready_admission.ml}
+    %{dep:../lib/llm_provider/exact_output_plan.ml}
+    %{dep:../lib/llm_provider/complete_common.ml}
+    %{dep:../lib/llm_provider/backend_anthropic.ml}
+    %{dep:../lib/llm_provider/backend_ollama.ml}
+    %{dep:../lib/llm_provider/backend_openai.ml}
+    %{dep:../lib/llm_provider/backend_openai_serialize.ml}
+    %{dep:../lib/llm_provider/backend_openai_responses.ml}
+    %{dep:../lib/llm_provider/backend_gemini.ml}
+    %{dep:../lib/llm_provider/backend_glm.ml})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --check-exact-transport
+    %{dep:../lib/llm_provider/exact_output_measurement_transport.ml})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-exact-transport-violation
+    %{dep:fixtures/exact_output_single_surface/exact_transport_post_alias.ml.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --allow-callback-in
+    http_client.mli
+    "with_explicit_deadline|_|arrow(_,constr(unit),var(a))"
+    --allow-callback-in
+    count_tokens_sync.mli
+    "count_anthropic|?connection_cache|constr(Http_client.cache)"
+    --allow-callback-in
+    count_tokens_sync.mli
+    "measure_completion_request|?connection_cache|constr(Http_client.cache)"
+    --allow-callback-in
+    http_client.mli
+    "with_post_stream|~f|arrow(_,constr(Eio.Buf_read.t),var(a))"
+    --allow-callback-in
+    http_client.mli
+    "with_post_stream|?on_response_status|arrow(_,constr(int),constr(unit))"
+    --allow-callback-in
+    http_client.mli
+    "read_sse|~on_data|arrow(~event_type,constr(option,constr(string)),arrow(_,constr(string),constr(unit)))"
+    --allow-callback-in
+    http_client.mli
+    "read_ndjson|~on_line|arrow(_,constr(string),constr(unit))"
+    %{dep:../lib/llm_provider/count_tokens_sync.mli}
+    %{dep:../lib/llm_provider/http_client.mli})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --allow-callback-in
+    public_callback_duplicate_allowed.mli.fixture
+    "with_explicit_deadline|_|arrow(_,constr(unit),var(a))"
+    --expect-callback
+    %{dep:fixtures/exact_output_single_surface/public_callback_duplicate_allowed.mli.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-callback
+    %{dep:fixtures/exact_output_single_surface/public_count_tokens_callback.mli.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-callback
+    %{dep:fixtures/exact_output_single_surface/public_callback_alias.mli.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-callback
+    %{dep:fixtures/exact_output_single_surface/public_callback_qualified_alias.mli.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-callback
+    %{dep:fixtures/exact_output_single_surface/public_callback_external_qualified_alias.mli.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-callback
+    %{dep:fixtures/exact_output_single_surface/public_callback_external_qualified_collision.mli.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-callback
+    %{dep:fixtures/exact_output_single_surface/public_callback_module_alias.mli.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-callback
+    %{dep:fixtures/exact_output_single_surface/public_callback_nested_module.mli.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-callback
+    %{dep:fixtures/exact_output_single_surface/public_callback_include.mli.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-callback
+    %{dep:fixtures/exact_output_single_surface/public_callback_include_typeof.mli.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-callback
+    %{dep:fixtures/exact_output_single_surface/public_callback_nested_include.mli.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-callback
+    %{dep:fixtures/exact_output_single_surface/public_callback_module_with.mli.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-callback
+    %{dep:fixtures/exact_output_single_surface/public_callback_unlabelled.mli.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-callback
+    %{dep:fixtures/exact_output_single_surface/public_http_client_callback.mli.fixture})
+   (with-accepted-exit-codes
+    1
+    (run
+     %{exe:check_public_mli_callbacks.exe}
+     --allow-callback-in
+     public_callback_unused_allowance.mli.fixture
+     "unused|_|arrow(_,constr(unit),constr(unit))"
+     %{dep:fixtures/exact_output_single_surface/public_callback_unused_allowance.mli.fixture}))
+   (with-accepted-exit-codes
+    1
+    (run
+     %{exe:check_public_mli_callbacks.exe}
+     --allow-callback-in
+     public_callback_allowance_origin.mli.fixture
+     "with_explicit_deadline|_|arrow(_,constr(unit),var(a))"
+     %{dep:fixtures/exact_output_single_surface/public_callback_allowance_origin.mli.fixture}
+     %{dep:fixtures/exact_output_single_surface/public_callback_allowance_moved.mli.fixture}))
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-exact-transport-violation
+    %{dep:fixtures/exact_output_single_surface/exact_transport_local_open.ml.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-exact-transport-violation
+    %{dep:fixtures/exact_output_single_surface/exact_transport_module_alias.ml.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-exact-transport-violation
+    %{dep:fixtures/exact_output_single_surface/exact_transport_first_class_module.ml.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-exact-transport-violation
+    %{dep:fixtures/exact_output_single_surface/exact_transport_external_proxy_reexport.ml.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-exact-transport-violation
+    external-post-value-alias
+    %{dep:fixtures/exact_output_single_surface/exact_transport_external_value_alias.ml.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-exact-transport-violation
+    external-post-value-alias
+    %{dep:fixtures/exact_output_single_surface/exact_transport_constrained_value_alias.ml.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --expect-exact-transport-violation
+    external-transport-reexport
+    %{dep:fixtures/exact_output_single_surface/exact_transport_constrained_module_alias.ml.fixture})
+   (run
+    %{exe:check_public_mli_callbacks.exe}
+    --check-exact-transport
+    %{dep:fixtures/exact_output_single_surface/exact_transport_legitimate_local_alias.ml.fixture}))))
+
+(test
+ (name test_complete_http)
+ (modules test_complete_http)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main eio.mock))
+
+(test
+ (name test_http_client_cache)
+ (modules test_http_client_cache)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main eio.mock))
+
+; Own stanza: needs the mock clock/flow to drive deadline arithmetic without
+; wall-clock sleeping, and runs entirely on Eio_mock.Backend (no real IO).
+
+(test
+ (name test_sse_budget_anchor)
+ (modules test_sse_budget_anchor)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio.mock))
+
+(test
+ (name test_tls_config_cache)
+ (modules test_tls_config_cache)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest))
+
+(test
+ (name test_llm_provider_cov)
+ (modules test_llm_provider_cov)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest))
+
+(test
+ (name test_stop_reason_ssot)
+ (modules test_stop_reason_ssot)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest))
+
+(test
+ (name test_anthropic_reconcile)
+ (modules test_anthropic_reconcile)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest))
+
+(test
+ (name test_overflow_wire_e2e)
+ (modules test_overflow_wire_e2e)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest))
+
+(test
+ (name test_canonical_projections)
+ (modules test_canonical_projections)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest))
+
+(test
+ (name test_telemetry_event)
+ (modules test_telemetry_event)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+
+(test
+ (name test_telemetry_pipeline)
+ (modules test_telemetry_pipeline)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+
+(test
+ (name test_observability_default)
+ (modules test_observability_default)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+
+(test
+ (name test_agent_advanced)
+ (modules test_agent_advanced)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
+
+(test
+ (name test_api)
+ (modules test_api)
+ (libraries agent_core_test_deps agent_core alcotest))
+
+(test
+ (name test_builder)
+ (modules test_builder)
+ (libraries agent_core_test_deps agent_core alcotest eio_main))
+
+(test
+ (name test_full_pipeline_cov)
+ (modules test_full_pipeline_cov)
+ (libraries agent_core_test_deps agent_core alcotest cohttp-eio eio eio_main unix yojson))
+
+(test
+ (name test_event_integration)
+ (modules test_event_integration)
+ (libraries agent_core_test_deps agent_core alcotest cohttp-eio eio eio_main unix yojson))
+
+(test
+ (name test_guardrails_async)
+ (modules test_guardrails_async)
+ (libraries agent_core_test_deps agent_core alcotest eio eio_main))
+
+(test
+ (name test_agent_cancellation_tla_parity)
+ (modules test_agent_cancellation_tla_parity)
+ (libraries agent_core_test_deps agent_core alcotest))
+
+(tests
+ (names test_runtime_store_unit test_runtime_types)
+ (modules test_runtime_store_unit test_runtime_types)
+ (libraries agent_core_test_deps agent_core alcotest eio eio_main unix yojson)
+ (action
+  (run %{test})))
+
+(test
+ (name test_streaming_cut_cleanup)
+ (modules test_streaming_cut_cleanup)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio eio_main))
+
+(test
+ (name test_otel_tracer_fiber)
+ (modules test_otel_tracer_fiber)
+ (libraries agent_core_test_deps agent_core alcotest eio_main))
+
+(test
+ (name test_tls_cancellability)
+ (modules test_tls_cancellability)
+ (libraries
+  agent_core_test_deps
+  alcotest
+  eio
+  eio_main
+  tls
+  tls-eio
+  x509
+  mirage-crypto-rng.unix
+  domain-name
+  ptime))
+
+(test
+ (name test_media_document_admission)
+ (modules test_media_document_admission)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest fmt yojson))

@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0233", "0266", "0267"]
-implementation_prs: []
 ---
 
 ## 1. Problem
@@ -92,7 +91,7 @@ It does not hide the raw trace rows; raw evidence remains the source of truth.
 
 The turn inspector can later reuse the same projection for a per-turn view, but
 the first slice attaches to the session trace because that surface already
-merges timeline, trajectory, tool-call, and live OAS events.
+merges timeline, trajectory, tool-call, and live agent_core events.
 
 ### 3.4 Later Evaluator Loop
 

@@ -75,20 +75,31 @@ async function flushUi(): Promise<void> {
 
 function cssMediaBlock(css: string, query: string): string {
   const marker = `@media ${query}`
-  const markerIndex = css.indexOf(marker)
-  if (markerIndex < 0) throw new Error(`Missing CSS media query: ${query}`)
+  const blocks: string[] = []
+  let searchFrom = 0
 
-  const openingBrace = css.indexOf('{', markerIndex + marker.length)
-  if (openingBrace < 0) throw new Error(`Missing opening brace for CSS media query: ${query}`)
+  while (true) {
+    const markerIndex = css.indexOf(marker, searchFrom)
+    if (markerIndex < 0) break
 
-  let depth = 0
-  for (let index = openingBrace; index < css.length; index += 1) {
-    if (css[index] === '{') depth += 1
-    if (css[index] === '}') depth -= 1
-    if (depth === 0) return css.slice(markerIndex, index + 1)
+    const openingBrace = css.indexOf('{', markerIndex + marker.length)
+    if (openingBrace < 0) throw new Error(`Missing opening brace for CSS media query: ${query}`)
+
+    let depth = 0
+    let index = openingBrace
+    for (; index < css.length; index += 1) {
+      if (css[index] === '{') depth += 1
+      if (css[index] === '}') depth -= 1
+      if (depth === 0) break
+    }
+    if (depth !== 0) throw new Error(`Missing closing brace for CSS media query: ${query}`)
+
+    blocks.push(css.slice(markerIndex, index + 1))
+    searchFrom = index + 1
   }
 
-  throw new Error(`Missing closing brace for CSS media query: ${query}`)
+  if (blocks.length === 0) throw new Error(`Missing CSS media query: ${query}`)
+  return blocks.join('\n')
 }
 
 describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
@@ -140,23 +151,10 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
     }
   }
 
-  it('returns "상태 추정" for synthetic_stall when no composite is available', () => {
-    const note = rosterStateNote(
-      k({ runtime_blocker_class: 'synthetic_stall', runtime_blocker_summary: '합성 상태 정체' }),
-      null,
-      null,
-    )
-    expect(note).toEqual({
-      label: '상태 추정',
-      text: '합성 상태 정체',
-      kind: 'synthetic_stall',
-    })
-  })
-
   it('shows a pending approval gate before stale runtime blocker summaries', () => {
     const note = rosterStateNote(
       k({
-        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_class: 'stale_turn_timeout',
         runtime_blocker_summary: '턴 응답 만료',
         current_gate: {
           kind: 'approval_required',
@@ -189,7 +187,7 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
     const note = rosterStateNote(
       k({
         phase: 'Running',
-        runtime_blocker_class: 'synthetic_stall',
+        runtime_blocker_class: 'exception',
         runtime_blocker_summary: '잔여 marker',
       }),
       compositeWith(
@@ -204,8 +202,8 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
     )
     expect(note).toEqual({
       label: '이전 차단',
-      text: '이전 턴 차단 (synthetic_stall) — 현재는 실행 중',
-      kind: 'synthetic_stall',
+      text: '이전 턴 차단 (exception) — 현재는 실행 중',
+      kind: 'exception',
     })
   })
 
@@ -285,14 +283,14 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
 
   it('paused keeper surfaces its blocker reason in the state note', () => {
     const note = rosterStateNote(
-      k({ paused: true, runtime_blocker_class: 'supervisor_paused' }),
+      k({ paused: true, runtime_blocker_class: 'runtime_exhausted' }),
       null,
       null,
     )
     expect(note).toEqual({
       label: '일시정지 원인',
-      text: 'Supervisor가 keeper를 일시정지한 상태라 재개 조건을 확인해야 합니다.',
-      kind: 'supervisor_paused',
+      text: '런타임 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.',
+      kind: 'runtime_exhausted',
     })
   })
 
@@ -303,15 +301,6 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
       null,
     )
     expect(note).toBeNull()
-  })
-
-  it('offline keeper with assigned task shows interrupted work label', () => {
-    const note = rosterStateNote(
-      k({ phase: 'Crashed', status: 'offline', agent: { current_task: 'task-001', exists: true } }),
-      null,
-      null,
-    )
-    expect(note).toEqual({ label: '작업 중단', text: '할당된 작업이 있으나 keeper가 crashed 상태입니다' })
   })
 
   it('null keeper returns null', () => {
@@ -696,8 +685,8 @@ describe('fleetRuntimeEvidence', () => {
     expect(fleetRuntimeEvidence({
       name: 'sangsu',
       status: 'active',
-      runtime_canonical: 'oas.primary',
-    } as Keeper)).toEqual({ source: 'assigned', value: 'oas.primary' })
+      runtime_canonical: 'agentCore.primary',
+    } as Keeper)).toEqual({ source: 'assigned', value: 'agentCore.primary' })
   })
 
   it('returns an explicit unknown source when no assignment is projected', () => {
@@ -756,7 +745,6 @@ describe('AgentRoster live-only cards', () => {
         agent_name: 'codex-mcp-client',
         status: 'idle',
         last_heartbeat: '2026-04-23T09:59:00Z',
-        last_autonomous_action_at: '2026-04-23T09:58:00Z',
         last_activity_ago_s: 75,
         recent_output_preview: 'live runtime output preview',
         recent_input_preview: 'live runtime input preview',
@@ -789,7 +777,6 @@ describe('AgentRoster live-only cards', () => {
           agent_name: 'codex-mcp-client',
           current_work: 'stale keeper brief work',
           latest_tool_names: ['stale_tool'],
-          last_autonomous_action_at: '2026-04-23T06:00:00Z',
         },
       ],
       internal_signals: [],
@@ -848,6 +835,58 @@ describe('AgentRoster live-only cards', () => {
     expect(container.textContent).not.toContain('compact 임계 근접')
   })
 
+  it('annotates the observed context window next to the percentage (.fl-ctx-win)', async () => {
+    keepers.value = [
+      {
+        name: 'rondo',
+        agent_name: 'keeper-rondo-agent',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+        context_ratio: 0.62,
+        context_tokens: 79_360,
+        context_max: 128_000,
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const val = container.querySelector('.fl-ctx-val')
+    expect(val?.textContent).toContain('62%')
+    // Window annotation renders only from an actually-received context_max —
+    // never derived (mark, don't fake).
+    expect(val?.querySelector('.fl-ctx-win')?.textContent).toBe('/ 128.0K')
+  })
+
+  it('omits the window annotation when context_max was not received', async () => {
+    keepers.value = [
+      {
+        name: 'rondo',
+        agent_name: 'keeper-rondo-agent',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+        context_ratio: 0.4,
+        context_tokens: null,
+        context_max: null,
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const val = container.querySelector('.fl-ctx-val')
+    expect(val?.textContent).toContain('40%')
+    expect(val?.querySelector('.fl-ctx-win')).toBeNull()
+  })
+
   it('does not render the internal namespace-separation disclaimer strip', async () => {
     agents.value = [
       makeAgent({
@@ -881,13 +920,44 @@ describe('AgentRoster live-only cards', () => {
     expect(text).not.toMatch(/항목 \d+개 표시/)
     // the real, data-backed health pills stay.
     expect(container.querySelector('.fl-health')).not.toBeNull()
-    expect(text).toContain('runtime rows')
+    expect(text).toContain('normal rows')
+  })
+
+  it('labels active-band rows as normal instead of claiming all runtime-capable keepers', async () => {
+    keepers.value = [
+      {
+        name: 'healthy',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+      } as Keeper,
+      {
+        name: 'needs-attention',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+        runtime_blocker_class: 'fiber_unresolved',
+        runtime_blocker_summary: 'fiber_unresolved',
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const summary = container.querySelector('.fl-health')?.textContent ?? ''
+    expect(summary).toContain('정상 1')
+    expect(summary).toContain('주의 1')
+    expect(summary).not.toContain('런타임 가능')
   })
 
   it('renders the exact inference observation from the live operator projection', async () => {
     operatorSnapshot.value = {
       inference_inflight: {
-        boundary_owner: 'oas_runtime',
+        boundary_owner: 'agent_core_runtime',
         active: 4,
       },
     } as any
@@ -898,7 +968,7 @@ describe('AgentRoster live-only cards', () => {
 
     const observation = container.querySelector('[data-testid="fleet-inference-inflight"]')
     expect(observation?.textContent).toContain('4')
-    expect(observation?.textContent).toContain('oas_runtime')
+    expect(observation?.textContent).toContain('agent_core_runtime')
   })
 
   it('owns the Keeper Fleet h1 when the generic monitoring header is absent', async () => {
@@ -1634,11 +1704,10 @@ describe('AgentRoster live-only cards', () => {
         name: 'sangsu',
         agent_name: 'keeper-sangsu-agent',
         status: 'active',
-        runtime_canonical: 'oas.primary',
+        runtime_canonical: 'agentCore.primary',
         active_model: 'claude-code:auto',
         model: 'claude',
         last_heartbeat: '2026-04-24T17:54:00Z',
-        last_autonomous_action_at: '2026-04-24T12:00:00Z',
         last_activity_ago_s: 21_600,
         recent_output_preview: '지금 필요한 코드 변경을 바로 만들고 결과를 확인한다.',
         recent_tool_names: ['keeper_tasks_list'],
@@ -1654,9 +1723,8 @@ describe('AgentRoster live-only cards', () => {
     expect(text).toContain('sangsu')
     expect(text).toContain('하트비트')
     expect(text).toContain('6분 전')
-    expect(text).toContain('oas.primary')
+    expect(text).toContain('agentCore.primary')
     expect(text).not.toContain('claude-code:auto')
-    expect(text).not.toContain('마지막 행동 이후')
     expect(text).not.toContain('최근 모델claude')
   })
 
@@ -1818,7 +1886,12 @@ describe('AgentRoster live-only cards', () => {
   })
 
   it('keeps runtime provenance and actions in the 800px and 1024px layout', () => {
-    const css = readFileSync(resolve(__dirname, '../styles/keeper-v2/fleet.css'), 'utf8')
+    // Live roster responsive tiers moved from keeper-v2/fleet.css to
+    // v2-monitoring.css (.v2-monitoring-surface scope) in the 2026-08-23
+    // design re-sync; fleet.css now carries only the design mock's tiers
+    // (planned split, docs/DESIGN-PARITY.md).
+    const css = readFileSync(resolve(__dirname, '../styles/v2-monitoring.css'), 'utf8')
+    const fleetCss = readFileSync(resolve(__dirname, '../styles/keeper-v2/fleet.css'), 'utf8')
     const query = '(max-width: 1100px) and (min-width: 721px)'
     const responsiveBlock = cssMediaBlock(css, query)
     const tabletHeaderBlock = cssMediaBlock(css, '(max-width: 900px)')
@@ -1830,12 +1903,157 @@ describe('AgentRoster live-only cards', () => {
 
     expect(css).toContain('@media (max-width: 1500px) and (min-width: 1101px)')
     expect(responsiveBlock).toContain('--fl-cols: minmax(168px, 1.3fr) minmax(150px, 1fr) minmax(104px, 0.8fr) 160px')
-    expect(responsiveBlock).toContain('.fl-row .fl-ctx, .fl-row .fl-tool { display: none; }')
+    expect(responsiveBlock).toContain('.v2-monitoring-surface .fl-row .fl-ctx,')
+    expect(responsiveBlock).toContain('.v2-monitoring-surface .fl-row .fl-tool { display: none; }')
     expect(responsiveBlock).not.toContain('.fl-row .fl-runtime')
-    expect(tabletHeaderBlock).toContain('.fl-top { height: auto; flex-wrap: wrap;')
-    expect(tabletHeaderBlock).toContain('.fl-health { width: 100%; order: 3; }')
+    expect(tabletHeaderBlock).toContain('.v2-monitoring-surface .fl-top')
+    expect(tabletHeaderBlock).toContain('height: auto')
+    expect(tabletHeaderBlock).toContain('flex-wrap: wrap')
+    expect(tabletHeaderBlock).toContain('.v2-monitoring-surface .fl-health')
+    expect(tabletHeaderBlock).toContain('width: 100%')
+    expect(tabletHeaderBlock).toContain('order: 3')
     expect(css).toContain('@media (max-width: 720px)')
-    expect(css).toContain('.fl-attn-list')
-    expect(css).toContain('.fl-attn-item[data-sev="bad"]')
+    expect(fleetCss).toContain('.fl-attn-list')
+    expect(fleetCss).toContain('.fl-attn-item[data-sev="bad"]')
+  })
+})
+
+describe('AgentRoster keeper-v2 fleet.jsx parity chrome', () => {
+  let container: HTMLDivElement
+
+  function seedKeeperRow(overrides: Partial<Keeper> = {}): void {
+    agents.value = [makeAgent({ name: 'keeper-nick0cave-agent', status: 'active' })]
+    keepers.value = [
+      {
+        name: 'nick0cave',
+        agent_name: 'keeper-nick0cave-agent',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+        runtime_canonical: 'claude',
+        recent_tool_names: ['keeper_tasks_list', 'keeper_board_get'],
+        latest_tool_call_count: 2,
+        ...overrides,
+      } as Keeper,
+    ]
+  }
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    agents.value = []
+    keepers.value = []
+    executionLoaded.value = true
+    executionLoading.value = false
+    executionError.value = null
+    shellCounts.value = null
+    serverStatus.value = null
+    namespaceTruth.value = null
+    missionSnapshot.value = null
+    fleetCompositeSnapshot.value = null
+    operatorSnapshot.value = null
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    vi.useRealTimers()
+    agents.value = []
+    keepers.value = []
+    executionLoaded.value = false
+    executionLoading.value = false
+    executionError.value = null
+    shellCounts.value = null
+    serverStatus.value = null
+    namespaceTruth.value = null
+    missionSnapshot.value = null
+    fleetCompositeSnapshot.value = null
+    operatorSnapshot.value = null
+  })
+
+  it('groups the header create action under fl-top-actions with the design button class', async () => {
+    seedKeeperRow()
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const wrap = container.querySelector('.fl-top .fl-top-actions')
+    const create = wrap?.querySelector('[data-testid="keeper-create-entry"]')
+    expect(create?.classList.contains('fl-top-btn')).toBe(true)
+    expect(create?.classList.contains('primary')).toBe(true)
+  })
+
+  it('wraps keeper row actions in the design hover group and adds the chat deep link', async () => {
+    seedKeeperRow()
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const cell = container.querySelector('[data-testid="keeper-operations-row"] .fl-actcell') as HTMLElement
+    expect(cell.querySelector('.fl-actions [data-testid="keeper-action-buttons"]')).not.toBeNull()
+    const chat = cell.querySelector('a.fl-chat') as HTMLAnchorElement
+    expect(chat.getAttribute('href')).toContain('keepers')
+    expect(chat.getAttribute('href')).toContain('nick0cave')
+    expect(chat.getAttribute('title')).toContain('대화 콘솔 열기')
+  })
+
+  it('renders neither the actions group nor the chat link for an agent without a keeper runtime', async () => {
+    agents.value = [makeAgent({ name: 'taskmaster-proud-bear', status: 'active' })]
+    keepers.value = []
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="agent-only" />`, container)
+    })
+    await flushUi()
+
+    const cell = container.querySelector('[data-testid="keeper-operations-row"] .fl-actcell') as HTMLElement
+    expect(cell.querySelector('.fl-actions')).toBeNull()
+    expect(cell.querySelector('a.fl-chat')).toBeNull()
+  })
+
+  it('shows the bound runtime under the aside identity block only when assigned', async () => {
+    seedKeeperRow()
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+    expect(container.querySelector('.fl-as-id .fl-as-runtime')?.textContent).toBe('claude')
+
+    seedKeeperRow({ runtime_canonical: undefined, runtime_id: undefined })
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+    expect(container.querySelector('.fl-as-id .fl-as-runtime')).toBeNull()
+  })
+
+  it('lists recent tools as fl-toolrow rows and keeps the live count chip', async () => {
+    seedKeeperRow()
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const rows = container.querySelectorAll('.fl-tools .fl-toolrow')
+    expect(Array.from(rows).map(el => el.textContent)).toEqual([
+      'keeper_tasks_list',
+      'keeper_board_get',
+    ])
+    expect(container.textContent).toContain('2회 관찰됨')
+  })
+
+  it('renders the aside action bar from live keeper action visibility', async () => {
+    seedKeeperRow()
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const keys = Array.from(
+      container.querySelectorAll('[data-testid="fleet-aside-actions"] .fl-actbar .fl-btn'),
+    ).map(el => (el as HTMLElement).dataset.action)
+    expect(keys).toEqual(['pause', 'wakeup', 'shutdown'])
   })
 })

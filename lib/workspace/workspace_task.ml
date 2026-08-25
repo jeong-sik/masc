@@ -32,6 +32,7 @@ let delete_task_r config ~task_id : unit Masc_domain.masc_result =
     let after_commit () =
       Task_cache_invariant.clear_stale_agent_task_for_task
         config
+        ~cause:Task_cache_invariant.After_commit
         ~task_id
         ~status
         ~module_name:"workspace_task.delete_task_r"
@@ -205,6 +206,7 @@ let recover_owned_task_to_todo_r
       ; run_post_commit "task_cache_invariant" (fun () ->
           Task_cache_invariant.clear_stale_agent_task
             config
+            ~cause:Task_cache_invariant.After_commit
             ~agent_name:previous_assignee
             ~task_id
             ~status:Masc_domain.Todo
@@ -306,29 +308,20 @@ let link_task_execution_artifacts_r
           (match List.find_opt (fun (task : task) -> task.id = task_id) backlog.tasks with
            | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
            | Some task ->
-             let existing_contract =
-               ensure_task_contract_for_verification
-                 ?contract:task.contract
-                 ~title:task.title
-                 ~description:task.description
+             (* Only execution identity moves here. The contract is whatever the
+                task was created with, including absent. *)
+             let updated_links =
+               merge_execution_links
+                 task.execution_links
+                 ?session_id
+                 ?operation_id
                  ()
-             in
-             let updated_contract =
-               { existing_contract with
-                 links =
-                   merge_execution_links
-                     existing_contract.links
-                     ?session_id
-                     ?operation_id
-                     ()
-               }
-               |> normalize_task_contract
              in
              let new_tasks =
                List.map
                  (fun (candidate : task) ->
                     if candidate.id = task_id
-                    then { candidate with contract = Some updated_contract }
+                    then { candidate with execution_links = updated_links }
                     else candidate)
                  backlog.tasks
              in

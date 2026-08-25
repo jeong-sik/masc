@@ -61,9 +61,18 @@ type notification = {
 
 (** Subscription store *)
 module SubscriptionStore = struct
-  let subscriptions : (string, subscription) Hashtbl.t = Hashtbl.create 64
-  (* Use Queue for O(1) append instead of O(n) list append *)
-  let pending_notifications : (string, notification Queue.t) Hashtbl.t = Hashtbl.create 64
+  module StringMap = Map.Make (String)
+
+  type state =
+    { subscriptions : subscription StringMap.t
+    ; pending_notifications : notification list StringMap.t
+    }
+
+  let state =
+    Atomic.make
+      { subscriptions = StringMap.empty
+      ; pending_notifications = StringMap.empty
+      }
 
   (** Generate subscription ID *)
   let generate_id () : string =
@@ -78,72 +87,93 @@ module SubscriptionStore = struct
       filter;
       created_at = Time_compat.now ();
     } in
-    Hashtbl.add subscriptions sub.id sub;
+    Atomic_util.update state (fun current ->
+      { current with
+        subscriptions = StringMap.add sub.id sub current.subscriptions
+      });
     Log.Sub.info "%s subscribed to %s" subscriber (resource_type_to_string resource);
     sub
 
   (** Unsubscribe *)
   let unsubscribe (id : string) : bool =
-    if Hashtbl.mem subscriptions id then begin
-      Hashtbl.remove subscriptions id;
-      Hashtbl.remove pending_notifications id;
-      true
-    end else false
+    Lockfree_atomic.update_with_result state (fun current ->
+      if StringMap.mem id current.subscriptions
+      then
+        ( { subscriptions = StringMap.remove id current.subscriptions
+          ; pending_notifications =
+              StringMap.remove id current.pending_notifications
+          }
+        , true )
+      else current, false)
 
   (** Get subscription by ID *)
   let get (id : string) : subscription option =
-    Hashtbl.find_opt subscriptions id
+    StringMap.find_opt id (Atomic.get state).subscriptions
 
   (** Find subscriptions for a resource change *)
   let find_matching ~(resource : resource_type) ~(resource_id : string) : subscription list =
-    Hashtbl.fold (fun _ (sub : subscription) (acc : subscription list) ->
-      if sub.resource = resource then
-        match sub.filter with
-        | None -> sub :: acc  (* No filter = match all *)
-        | Some f when f = resource_id -> sub :: acc
-        | Some f when f = "*" -> sub :: acc
-        | _ -> acc
-      else acc
-    ) subscriptions []
+    StringMap.fold
+      (fun _ (sub : subscription) (acc : subscription list) ->
+        if sub.resource = resource
+        then
+          match sub.filter with
+          | None -> sub :: acc
+          | Some f when f = resource_id -> sub :: acc
+          | Some f when f = "*" -> sub :: acc
+          | _ -> acc
+        else acc)
+      (Atomic.get state).subscriptions
+      []
 
   (** Get all subscriptions for a subscriber *)
   let get_for_subscriber (subscriber : string) : subscription list =
-    Hashtbl.fold (fun _ sub acc ->
-      if sub.subscriber = subscriber then sub :: acc else acc
-    ) subscriptions []
+    StringMap.fold
+      (fun _ sub acc ->
+        if sub.subscriber = subscriber then sub :: acc else acc)
+      (Atomic.get state).subscriptions
+      []
 
   (** Queue notification for a subscription - O(1) with Queue *)
   let queue_notification (sub_id : string) (notif : notification) : unit =
-    let q = match Hashtbl.find_opt pending_notifications sub_id with
-      | Some q -> q
-      | None ->
-        let q = Queue.create () in
-        Hashtbl.add pending_notifications sub_id q;
-        q
-    in
-    Queue.add notif q
+    Atomic_util.update state (fun current ->
+      let pending =
+        Option.value
+          (StringMap.find_opt sub_id current.pending_notifications)
+          ~default:[]
+      in
+      { current with
+        pending_notifications =
+          StringMap.add sub_id (notif :: pending) current.pending_notifications
+      })
 
   (** Pop notifications for a subscription - returns all pending as list *)
   let pop_notifications (sub_id : string) : notification list =
-    match Hashtbl.find_opt pending_notifications sub_id with
-    | Some q ->
-      Hashtbl.remove pending_notifications sub_id;
-      Queue.fold (fun acc n -> n :: acc) [] q |> List.rev
-    | None -> []
+    Lockfree_atomic.update_with_result state (fun current ->
+      match StringMap.find_opt sub_id current.pending_notifications with
+      | Some notifications ->
+        ( { current with
+            pending_notifications =
+              StringMap.remove sub_id current.pending_notifications
+          }
+        , List.rev notifications )
+      | None -> current, [])
 
   (** List all subscriptions *)
   let list_all () : subscription list =
-    Hashtbl.fold (fun _ s acc -> s :: acc) subscriptions []
+    StringMap.fold
+      (fun _ subscription acc -> subscription :: acc)
+      (Atomic.get state).subscriptions
+      []
 
   (** Count subscriptions *)
   let count () : int =
-    Hashtbl.length subscriptions
+    StringMap.cardinal (Atomic.get state).subscriptions
 end
 
 (** Session registry bridge for notification harness.
     When set, notify_change also pushes events to all active agent sessions
     so agents can poll notifications without SSE subscription. *)
-let session_registry_ref : (Yojson.Safe.t -> int) option ref = ref None
+let session_registry : (Yojson.Safe.t -> int) option Atomic.t = Atomic.make None
 
 (** One-shot gate for the "registry not wired" message below. Keeps the
     log from flooding when callers on a hot path (Task.Tool,
@@ -153,19 +183,16 @@ let session_registry_ref : (Yojson.Safe.t -> int) option ref = ref None
 let unwired_warned = Atomic.make false
 
 let set_session_push_fn (fn : Yojson.Safe.t -> int) =
-  (match !session_registry_ref with
+  (match Atomic.exchange session_registry (Some fn) with
    | Some _ -> Log.Sub.warn "WARNING: session push fn already set, overwriting"
    | None -> ());
-  session_registry_ref := Some fn;
-  (* Reset the one-shot gate so a subsequent unwire (if any future
-     code paths clear the ref) would warn again. Current code never
-     clears the ref, but the reset keeps the gate honest. *)
+  (* Reset the one-shot gate so a future explicit unwire would warn again. *)
   Atomic.set unwired_warned false
 
 (** Push a structured event to all active agent sessions.
     Used by modules (e.g. Task.Tool) that lack direct Session.registry access. *)
 let push_event_to_sessions (event : Yojson.Safe.t) : unit =
-  match !session_registry_ref with
+  match Atomic.get session_registry with
   | Some push_fn ->
       (try let _ = push_fn event in ()
        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Sub.error "push_event failed: %s" (Printexc.to_string exn))
@@ -192,7 +219,7 @@ let notify_change ~(resource : resource_type) ~(change : change_type)
     SubscriptionStore.queue_notification sub.id notif
   ) subs;
   (* Bridge: also push to session queues for notification harness *)
-  (match !session_registry_ref with
+  (match Atomic.get session_registry with
    | Some push_fn ->
        let event = `Assoc [
          ("type", `String "masc/notification");

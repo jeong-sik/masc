@@ -112,7 +112,7 @@ let benchmark_results_dir_candidates (config : Workspace.config) =
     ]
   in
   dedupe_strings
-    (match String_util.trim_to_option (Option.value ~default:"" env_dir) with
+    (match String_util.trim_nonempty (Option.value ~default:"" env_dir) with
      | Some dir -> [ dir ]
      | None -> scoped_dirs)
   |> List.filter (fun path -> Sys.file_exists path && Sys.is_directory path)
@@ -424,12 +424,12 @@ let dashboard_perf_compute (config : Workspace.config) : Yojson.Safe.t =
               , Option.fold
                   ~none:`Null
                   ~some:dashboard_perf_row_json
-                  (row_by_name rows "oas_runtime_status") )
+                  (row_by_name rows "agent_core_runtime_status") )
             ; ( "runtime_single"
               , Option.fold
                   ~none:`Null
                   ~some:dashboard_perf_row_json
-                  (row_by_name rows "oas_runtime_single") )
+                  (row_by_name rows "agent_core_runtime_single") )
             ] )
       ; "benchmarks", `List (List.map dashboard_perf_row_json rows)
       ; ( "comparison"

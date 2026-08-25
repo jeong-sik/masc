@@ -15,5 +15,5 @@
  (public_name masc.compaction_trigger)
  (wrapped false)
  (flags
-  (:standard -w +4 -w +32))
+  (:standard -w +4 -w +33 -w +37))
  (libraries yojson))

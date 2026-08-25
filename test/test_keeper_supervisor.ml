@@ -8,25 +8,32 @@ module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
 module Keeper_types_profile = Masc.Keeper_types_profile
+module Keeper_owner_registry = Masc.Keeper_owner_registry
+module Workspace = Masc.Workspace
 module Reg = Masc.Keeper_registry
 module KT = Keeper_types
 module KR = Masc.Keeper_runtime
 module AQ = Masc.Keeper_approval_queue
+module AQT = Keeper_approval_queue_rules_types
 module KSM = Keeper_state_machine
 module KLH = Masc.Keeper_lifecycle_hooks
 module KA = Masc.Keeper_keepalive
 module KSR = Masc.Keeper_supervisor_reconcile_keepalive
 module KSS = Masc.Keeper_supervisor_supervise_keepalive
+module Chat_operation = Masc.Keeper_owner.Chat_operation
 module Supervisor_launch = Masc.Keeper_supervisor_launch
 module Lane = Masc.Keeper_lane
+module Memory_lane = Masc.Keeper_memory_lane
 module Shutdown_finalize = Masc.Keeper_shutdown_finalize
 module Shutdown_store = Masc.Keeper_shutdown_store
 module Shutdown_types = Masc.Keeper_shutdown_types
 module Subprocess_registry = Masc.Keeper_subprocess_registry
-module Tombstone_cleanup = Masc.Keeper_supervisor_cleanup_tombstone
+module Supervisor_cleanup = Masc.Keeper_supervisor_cleanup
 module Process_switch = Masc.Keeper_process_switch
 module Tool_accumulator = Masc.Keeper_tool_emission_hook
 module Latched_reason = Keeper_latched_reason
+module Lifecycle_reservation = Masc.Keeper_lifecycle_reservation
+module Launch_transaction = Masc.Keeper_keepalive_launch_transaction
 
 (* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
    unit projection over [resolve_with_policy] (production resolution path). *)
@@ -37,6 +44,25 @@ let aq_resolve ~base_path ~id ~decision =
 ;;
 
 let supervisor_agent_name = Sup.supervisor_agent_name
+
+let with_launch_token ~base_path ~keeper_name f =
+  match
+    Lifecycle_reservation.acquire
+      ~base_path
+      ~keeper_name
+      ~purpose:Lifecycle_reservation.Keepalive_launch
+  with
+  | Error (Lifecycle_reservation.Already_reserved owner) ->
+    fail
+      ("launch lifecycle already reserved: "
+       ^ Lifecycle_reservation.snapshot_to_string owner)
+  | Ok token ->
+    Fun.protect
+      ~finally:(fun () ->
+        ignore
+          (Lifecycle_reservation.release token
+            : Lifecycle_reservation.release_outcome))
+      (fun () -> f token)
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_supervisor_" "" in
@@ -84,6 +110,31 @@ let rec mkdir_p path =
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
+let install_owner_inventory_exn ~sw config =
+  match
+    Keeper_owner_registry.install_from_store
+      ~sw
+      ~operation_runner:None
+      ~on_turn_slot_released:None
+      config
+  with
+  | Ok _ -> ()
+  | Error error ->
+    fail (Keeper_owner_registry.install_error_to_string error)
+;;
+
+let create_owner_meta_exn config meta =
+  match
+    Keeper_owner_registry.create_meta
+      ~base_path:config.Workspace.base_path
+      meta
+  with
+  | Ok (Some _) -> ()
+  | Ok None -> fail "owner metadata creation removed its snapshot"
+  | Error error ->
+    fail (Keeper_owner_registry.command_error_to_string error)
+;;
+
 let resolve_done_for_test reg value =
   ignore (Reg.resolve_done reg ~source:"test_fixture" value);
   match
@@ -108,7 +159,6 @@ let with_config_dir f =
   let dir = temp_dir () in
   let config_dir = Filename.concat dir "config" in
   mkdir_p (Filename.concat config_dir "keepers");
-  mkdir_p (Filename.concat config_dir "personas");
   let original = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Fun.protect
     ~finally:(fun () ->
@@ -121,6 +171,8 @@ let with_config_dir f =
       f config_dir)
 
 let write_keeper_toml config_dir ~name =
+  let profile_dir = Filename.concat (Filename.concat config_dir "keepers") name in
+  mkdir_p profile_dir;
   write_file
     (Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml"))
     (Printf.sprintf
@@ -133,6 +185,8 @@ sandbox_profile = "local"
        name)
 
 let write_keeper_toml_with_instructions config_dir ~name ~instructions =
+  let profile_dir = Filename.concat (Filename.concat config_dir "keepers") name in
+  mkdir_p profile_dir;
   write_file
     (Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml"))
     (Printf.sprintf
@@ -153,6 +207,7 @@ let write_empty_keeper_toml config_dir ~name =
        {|
 [keeper]
 name = "%s"
+instructions = "test keeper"
 sandbox_profile = "local"
 proactive_enabled = false
 |}
@@ -195,48 +250,6 @@ let test_crash_log_empty_for_unknown () =
   Reg.For_testing.clear ();
   check int "empty crash log" 0
     (List.length (Reg.For_testing.crash_log_of ~base_path:"/tmp" "nonexistent"))
-
-let test_should_cleanup_dead_true () =
-  Reg.For_testing.clear ();
-  let _entry = Reg.For_testing.register ~base_path:"/tmp" "dead1"
-      (let json = `Assoc [
-        ("name", `String "dead1");
-        ("agent_name", `String "agent-dead1");
-        ("trace_id", `String "trace-dead1");
-        ("sandbox_profile", `String "local");
-        ("network_mode", `String "inherit");
-      ] in
-      match Keeper_meta_json_parse.meta_of_json json with
-      | Ok meta -> meta
-      | Error err -> fail err)
-  in
-  Reg.mark_dead ~base_path:"/tmp" "dead1" ~at:10.0;
-  let entry = Option.get (Reg.get ~base_path:"/tmp" "dead1") in
-  check bool "ttl exceeded" true
-    (Sup.should_cleanup_dead ~now:4000.0 ~dead_ttl_sec:3600.0 entry)
-
-let test_should_cleanup_dead_false_when_recent () =
-  Reg.For_testing.clear ();
-  let _entry = Reg.For_testing.register ~base_path:"/tmp" "dead2"
-      (let json = `Assoc [
-        ("name", `String "dead2");
-        ("agent_name", `String "agent-dead2");
-        ("trace_id", `String "trace-dead2");
-        ("sandbox_profile", `String "local");
-        ("network_mode", `String "inherit");
-      ] in
-      match Keeper_meta_json_parse.meta_of_json json with
-      | Ok meta -> meta
-      | Error err -> fail err)
-  in
-  Reg.mark_dead ~base_path:"/tmp" "dead2" ~at:100.0;
-  let entry = Option.get (Reg.get ~base_path:"/tmp" "dead2") in
-  check bool "ttl not exceeded" false
-    (Sup.should_cleanup_dead ~now:200.0 ~dead_ttl_sec:3600.0 entry)
-
-(* ── Property: backoff invariants ───────────────────────── *)
-
-(* ── Property: keep_last_n invariants ──────────────────── *)
 
 let test_keep_last_n_never_exceeds () =
   let n = 5 in
@@ -282,15 +295,21 @@ let test_done_signal_maps_registry_result () =
 (* Shared pure supervisor fixtures. *)
 
 let bp = "/tmp/test-supervisor-prop"
+(* sandbox_profile and network_mode left the meta JSON wire schema -- they
+   arrive from keeper.toml now, and meta_of_json rejects a document that still
+   carries them ("fields outside the current schema ... runtime reset
+   required"). This fixture only ever set them to the record defaults
+   ("local" / "inherit"), so dropping them changes nothing these cases assert.
+   test_keeper_keepalive_helpers made the same edit; this suite was outside CI,
+   so its copy kept the old shape (#28131). *)
 let make_meta name =
-  let json = `Assoc [
-    ("name", `String name);
-    ("agent_name", `String ("agent-" ^ name));
-    ("trace_id", `String ("trace-" ^ name));
-    ("sandbox_profile", `String "local");
-    ("network_mode", `String "inherit");
-  ] in
-  match Keeper_meta_json_parse.meta_of_json json with
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ ("name", `String name)
+        ; ("trace_id", `String ("trace-" ^ name))
+        ])
+  with
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
 
@@ -350,7 +369,7 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
             (aq_resolve
                ~base_path:base_dir
                ~id
-               ~decision:(AQ.Decision.Reject "test cleanup")))
+               ~decision:(AQT.Decision.Reject "test cleanup")))
         !approval_ids;
       cleanup_dir base_dir)
     (fun () ->
@@ -363,7 +382,7 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
       let clear = make_meta "hitl-clear" in
       List.iter
         (fun meta ->
-          match Keeper_meta_store.write_meta config meta with
+          match Keeper_meta_store.replace_snapshot config meta with
           | Ok () -> ()
           | Error err -> fail err)
         [ blocked; clear ];
@@ -377,7 +396,7 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
               ~base_path:config.base_path
               ()
           with
-          | Ok id -> id
+          | Ok submission -> submission.approval_id
           | Error error -> fail (AQ.storage_error_to_string error)
         in
         approval_ids := id :: !approval_ids
@@ -438,92 +457,6 @@ let ensure_test_runtime =
           | Ok () -> initialized := true
           | Error msg -> fail msg))
 
-let test_persona_drift_check_uses_toml_persona_name () =
-  with_config_dir @@ fun config_dir ->
-  let keepers_dir = Filename.concat config_dir "keepers" in
-  let executor_persona_dir =
-    Filename.concat (Filename.concat config_dir "personas") "executor"
-  in
-  mkdir_p executor_persona_dir;
-  write_file
-    (Filename.concat executor_persona_dir "profile.json")
-    {|{"name":"Executor","role":"execution"}|};
-  write_file
-    (Filename.concat keepers_dir "tech_glutton.toml")
-    {|
-[keeper]
-name = "tech_glutton"
-persona_name = "executor"
-instructions = "plan coding work"
-|};
-  match Sup.persona_name_for_drift_check (make_meta "tech_glutton") with
-  | Ok persona_name ->
-    check string "drift check honors TOML persona_name" "executor" persona_name
-  | Error error ->
-    fail (Keeper_types_profile.keeper_toml_load_error_to_string error)
-
-let test_persona_drift_check_preserves_invalid_config () =
-  with_config_dir @@ fun config_dir ->
-  let keepers_dir = Filename.concat config_dir "keepers" in
-  write_file
-    (Filename.concat keepers_dir "invalid.toml")
-    "[keeper\nname = \"invalid\"\n";
-  match Sup.persona_name_for_drift_check (make_meta "invalid") with
-  | Error _ -> ()
-  | Ok persona_name ->
-    fail
-      (Printf.sprintf
-         "invalid config must not fall back to persona identity %S"
-         persona_name)
-
-let test_persona_drift_path_points_to_profile_json () =
-  with_config_dir @@ fun config_dir ->
-  let expected =
-    Filename.concat
-      (Filename.concat (Filename.concat config_dir "personas") "executor")
-      "profile.json"
-  in
-  check
-    string
-    "profile path"
-    expected
-    (Sup.persona_profile_path_for_drift_check
-       ~base_path:(Filename.dirname (Filename.dirname config_dir))
-       "executor")
-
-let test_missing_persona_with_inline_toml_is_warn () =
-  with_config_dir @@ fun config_dir ->
-  let keepers_dir = Filename.concat config_dir "keepers" in
-  write_file
-    (Filename.concat keepers_dir "inline-only.toml")
-    {|
-[keeper]
-name = "inline-only"
-persona_name = "missing-profile"
-instructions = "inline keeper metadata is enough to run"
-|};
-  check
-    bool
-    "inline TOML missing profile is warn"
-    true
-    (match Sup.persona_drift_log_level_for_missing_profile
-             (make_meta "inline-only")
-     with
-     | Sup.Persona_drift_warn -> true
-     | Sup.Persona_drift_error -> false)
-
-let test_missing_persona_without_profile_or_toml_is_error () =
-  with_config_dir @@ fun _config_dir ->
-  check
-    bool
-    "missing profile without TOML is error"
-    true
-    (match Sup.persona_drift_log_level_for_missing_profile
-             (make_meta "missing-everywhere")
-     with
-     | Sup.Persona_drift_error -> true
-     | Sup.Persona_drift_warn -> false)
-
 let publication_recovery_registry env sw config =
   let registry_root =
     Eio.Path.(Eio.Stdenv.fs env / Masc.Workspace.masc_root_dir config)
@@ -571,6 +504,7 @@ let test_declarative_boot_materializes_instructions () =
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  install_owner_inventory_exn ~sw config;
   let ctx = keeper_runtime_context env sw config in
   Fun.protect
     ~finally:(fun () -> KR.stop_keepalive ~base_path:config.base_path name)
@@ -599,6 +533,7 @@ let test_declarative_boot_allows_empty_goal_links () =
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  install_owner_inventory_exn ~sw config;
   let ctx = keeper_runtime_context env sw config in
   Fun.protect
     ~finally:(fun () -> KR.stop_keepalive ~base_path:config.base_path name)
@@ -607,11 +542,16 @@ let test_declarative_boot_allows_empty_goal_links () =
        | Error err -> fail err
        | Ok resolution ->
          check bool "empty-goal keeper materialized" true resolution.materialized;
-         check (list string) "no active goal links" [] resolution.meta.active_goal_ids);
+         ());
       check bool "no boot failure recorded" true
         (Option.is_none (KR.boot_meta_failure_for ~base_path:config.base_path ~name)))
 
-let test_declarative_boot_does_not_materialize_incompatible_meta () =
+(* #29610: a persisted meta this binary cannot decode reads as absent. The
+   reader says so once at WARN, declarative startup proceeds as for a missing
+   meta, and the TOML declaration re-materialises the keeper: the unreadable
+   file is replaced by the materialized snapshot and the counters it carried
+   are gone. *)
+let test_declarative_boot_rematerializes_incompatible_meta () =
   with_config_dir @@ fun config_dir ->
   Eio_main.run @@ fun env ->
   ensure_test_runtime ();
@@ -625,9 +565,21 @@ let test_declarative_boot_does_not_materialize_incompatible_meta () =
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  install_owner_inventory_exn ~sw config;
   let ctx = keeper_runtime_context env sw config in
   let meta_path = Keeper_types_profile.keeper_meta_path config name in
-  (match Keeper_meta_store.write_meta config (make_meta name) with
+  let base_meta = make_meta name in
+  let accumulated =
+    {
+      base_meta with
+      runtime =
+        {
+          base_meta.runtime with
+          usage = { base_meta.runtime.usage with total_turns = 7 };
+        };
+    }
+  in
+  (match Keeper_meta_store.replace_snapshot config accumulated with
    | Ok () -> ()
    | Error err -> fail err);
   let incompatible_json =
@@ -637,24 +589,69 @@ let test_declarative_boot_does_not_materialize_incompatible_meta () =
   in
   Fs_compat.save_file meta_path (Yojson.Safe.to_string incompatible_json);
   let bytes_before = Fs_compat.load_file meta_path in
-  let original_error =
-    match Keeper_meta_store.read_meta config name with
-    | Error err -> err
-    | Ok _ -> fail "incompatible meta must fail before declarative startup"
-  in
-  (match KR.load_or_materialize_boot_meta ctx name with
+  let baseline = latest_log_seq () in
+  (match Keeper_meta_store.read_meta config name with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "incompatible meta was served as a keeper"
    | Error err ->
-     check string "startup propagates the original read error unchanged"
-       original_error err
-   | Ok _ -> fail "incompatible meta must not enter TOML materialization");
-  check string "startup leaves incompatible meta byte-for-byte unchanged"
-    bytes_before
-    (Fs_compat.load_file meta_path);
-  match KR.boot_meta_failure_for ~base_path:config.base_path ~name with
-  | None -> fail "expected incompatible meta boot failure to be recorded"
-  | Some failure ->
-    check string "typed startup cause remains meta_read_error" "meta_read_error"
-      (KR.boot_meta_failure_cause_label failure.cause)
+     fail ("incompatible meta was refused instead of read as absent: " ^ err));
+  Fun.protect
+    ~finally:(fun () -> KR.stop_keepalive ~base_path:config.base_path name)
+    (fun () ->
+      let resolution =
+        match KR.load_or_materialize_boot_meta ctx name with
+        | Error err -> fail err
+        | Ok resolution -> resolution
+      in
+      check bool "incompatible meta is re-materialized from the declaration"
+        true resolution.materialized;
+      check string "materialized meta carries the declaration's instructions"
+        "test keeper" resolution.meta.instructions;
+      check int "accumulated counters in the unreadable meta are lost" 0
+        resolution.meta.runtime.usage.total_turns;
+      let keeper_entries =
+        Log.Ring.recent
+          ~limit:1000
+          ~module_filter:"Keeper"
+          ~since_seq:baseline
+          ~order:`Oldest_first
+          ()
+      in
+      let count_exact level message =
+        keeper_entries
+        |> List.filter (fun (entry : Log.Ring.entry) ->
+             entry.level = level && String.equal entry.message message)
+        |> List.length
+      in
+      let expected_warn =
+        Printf.sprintf
+          "keeper meta unreadable at %s, treating as absent (accumulated \
+           counters in it are lost; the declaration re-materialises the \
+           keeper): invalid current keeper meta: fields outside the current \
+           schema: goal; runtime reset required"
+          meta_path
+      in
+      check int "the loss is named once, in the reader's WARN" 1
+        (count_exact Log.Warn expected_warn);
+      check int "the reader logs the recovery once the file is readable again" 1
+        (count_exact Log.Info
+           (Printf.sprintf "keeper meta parse recovered for %s" meta_path));
+      check bool "the materialized snapshot replaces the unreadable file" false
+        (String.equal bytes_before (Fs_compat.load_file meta_path));
+      (match Keeper_meta_store.read_meta config name with
+       | Ok (Some persisted) ->
+         let trace_id = Keeper_id.Trace_id.to_string persisted.runtime.trace_id in
+         check string "the persisted snapshot is the materialized keeper"
+           (Keeper_id.Trace_id.to_string resolution.meta.runtime.trace_id)
+           trace_id;
+         check bool "the fixture's trace id did not survive the replacement"
+           false
+           (String.equal trace_id ("trace-" ^ name))
+       | Ok None -> fail "materialized meta was not persisted"
+       | Error err -> fail err);
+      check bool "no boot failure recorded" true
+        (Option.is_none
+           (KR.boot_meta_failure_for ~base_path:config.base_path ~name)))
 
 let test_declarative_boot_records_typed_invalid_config_failure () =
   with_config_dir @@ fun config_dir ->
@@ -798,7 +795,7 @@ let test_reconcile_does_not_double_start_materialized_keeper () =
     | Error err -> fail err
   in
   let meta = { base_meta with paused = true; current_task_id = Some task_id } in
-  (match Keeper_meta_store.write_meta config meta with
+  (match Keeper_meta_store.replace_snapshot config meta with
    | Ok () -> ()
    | Error err -> fail err);
   let publish_lifecycle ~event:_ _name _detail () = () in
@@ -921,6 +918,8 @@ let test_supervise_keepalive_retains_sweep_owned_entries () =
   let launched = ref [] in
   let publish_lifecycle ~event:_ _name _detail () = () in
   let launch_supervised_fiber
+        ~intake_token:_
+        ~lifecycle_token:_
         ~proactive_warmup_sec:_
         _ctx
         _meta
@@ -985,6 +984,183 @@ let test_supervise_keepalive_retains_sweep_owned_entries () =
     (List.rev_map
        (fun (name, phase) -> name, KSM.phase_to_string phase)
        !launched)
+
+let test_supervise_recovery_requires_same_offline_generation () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun _env ->
+  let base_dir = Filename.dirname config_dir in
+  Fun.protect
+    ~finally:(fun () -> Reg.For_testing.clear ())
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let _init_msg =
+        Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name)
+      in
+      let name = "recoverable-offline-generation" in
+      let entry =
+        Reg.register_offline ~base_path:config.base_path name (make_meta name)
+      in
+      check bool "same Offline generation remains launchable" true
+        (KSS.For_testing.same_offline_generation ~expected:entry entry);
+      (match Reg.dispatch_event_exact entry KSM.Fiber_started with
+       | Ok _ -> ()
+       | Error error -> fail (KSM.transition_error_to_string error));
+      match Reg.get ~base_path:config.base_path name with
+      | None -> fail "generation fixture disappeared"
+      | Some running ->
+        check bool "advanced generation cannot be launched again" false
+          (KSS.For_testing.same_offline_generation ~expected:entry running))
+
+let test_supervise_keepalive_wakes_ready_operation_drain () =
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.For_testing.clear ();
+      KR.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       let clock = Eio.Stdenv.clock env in
+       let config = Masc.Workspace.default_config base_dir in
+       let _init_msg =
+         Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name)
+       in
+       let name = "supervised-operation-ready" in
+       let meta = make_meta name in
+       (match Keeper_meta_store.replace_snapshot config meta with
+        | Ok () -> ()
+        | Error detail -> fail ("failed to seed owner meta: " ^ detail));
+       let runner_ready = Atomic.make false in
+       let execution_count = ref 0 in
+       let executor_started, resolve_executor_started = Eio.Promise.create () in
+       let release_executor, resolve_release_executor = Eio.Promise.create () in
+       let operation_runner : Masc.Keeper_owner.operation_runner =
+         { ready =
+             (fun ~keeper_name ->
+                String.equal keeper_name name && Atomic.get runner_ready)
+         ; execute =
+             (fun ~sw:_ ~keeper_name ~claim ->
+                check string "executor keeper" name keeper_name;
+                incr execution_count;
+                match claim () with
+                | Error error ->
+                  fail (Masc.Keeper_owner.error_to_string error)
+                | Ok None -> fail "ready wake started an executor without a queued operation"
+                | Ok (Some operation) ->
+                  Eio.Promise.resolve resolve_executor_started operation.operation_id;
+                  Eio.Promise.await release_executor;
+                  Masc.Keeper_owner.Operation_succeeded
+                    { outcome_ref = "supervisor-ready-wake" })
+         ; on_execution_settled =
+             (fun ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ -> ())
+         }
+       in
+       (match
+          Masc.Keeper_owner_registry.install_from_store
+            ~sw
+            ~operation_runner:(Some operation_runner)
+            ~on_turn_slot_released:None
+            config
+        with
+        | Ok 1 -> ()
+        | Ok count -> failf "expected one owner, got %d" count
+        | Error error ->
+          fail (Masc.Keeper_owner_registry.install_error_to_string error));
+       let operation_id =
+         match Chat_operation.Operation_id.of_string "kmsg-supervisor-ready-wake" with
+         | Ok operation_id -> operation_id
+         | Error detail -> fail detail
+       in
+       let accepted =
+         match
+           Masc.Keeper_owner_registry.submit_operation
+             ~base_path:config.base_path
+             ~keeper_name:name
+             ~operation_id
+             ~source:(`Assoc [ "kind", `String "test" ])
+             ~input:(`Assoc [ "message", `String "wait for supervised readiness" ])
+         with
+         | Ok accepted -> accepted
+         | Error error ->
+           fail (Masc.Keeper_owner_registry.command_error_to_string error)
+       in
+       (match accepted.operation.state with
+        | Chat_operation.Queued -> ()
+        | state ->
+          fail
+            ("unready runner did not preserve Queued: "
+             ^ Chat_operation.state_to_string state));
+       Eio.Fiber.yield ();
+       check int "unready runner starts no operation child" 0 !execution_count;
+       let ctx = keeper_runtime_context env sw config in
+       let publish_lifecycle ~event:_ _name _detail () = () in
+       let launch_supervised_fiber
+             ~intake_token:_
+             ~lifecycle_token:_
+             ~proactive_warmup_sec:_
+             _ctx
+             _meta
+             (_entry : Reg.registry_entry)
+         =
+         Atomic.set runner_ready true;
+         Ok ()
+       in
+       KSS.supervise_keepalive
+         ~publish_lifecycle
+         ~launch_supervised_fiber
+         ~proactive_warmup_sec:0
+         ctx
+         meta;
+       let executor_started_in_time =
+         wait_until
+           ~clock
+           ~deadline:(Eio.Time.now clock +. 1.0)
+           (fun () -> Option.is_some (Eio.Promise.peek executor_started))
+       in
+       check
+         bool
+         "supervisor wake starts the queued operation before timeout"
+         true
+         executor_started_in_time;
+       let claimed_operation_id = Eio.Promise.await executor_started in
+       check
+         string
+         "supervisor wake claims the queued operation"
+         (Chat_operation.Operation_id.to_string operation_id)
+         (Chat_operation.Operation_id.to_string claimed_operation_id);
+       check int "supervisor wake starts exactly one operation child" 1 !execution_count;
+       (match
+          Masc.Keeper_owner_registry.run_autonomous_if_idle
+            ~base_path:config.base_path
+            ~keeper_name:name
+            (fun () -> ())
+        with
+        | Ok (`Busy _) -> ()
+        | Ok (`Ran ()) -> fail "autonomous work overtook the ready operation drain"
+       | Error error ->
+          fail (Masc.Keeper_owner_registry.command_error_to_string error));
+       Eio.Promise.resolve resolve_release_executor ();
+       let completed =
+         wait_until
+           ~clock
+           ~deadline:(Eio.Time.now clock +. 1.0)
+           (fun () ->
+              match
+                Masc.Keeper_owner_registry.exact_operation
+                  ~base_path:config.base_path
+                  ~keeper_name:name
+                  operation_id
+              with
+              | Ok (Some operation) -> Chat_operation.is_terminal operation.state
+              | Ok None
+              | Error _ -> false)
+       in
+       check bool "supervisor-woken operation reaches terminal state" true completed;
+       Eio.Fiber.yield ();
+       check int "completed drain was not duplicated" 1 !execution_count)
 
 let registered_entries names =
   Reg.For_testing.clear ();
@@ -1111,18 +1287,9 @@ let test_sweep_does_not_synthesize_gate_from_runtime_blocker () =
           base with
           paused = true;
           autoboot_enabled = true;
-          runtime =
-            {
-              base.runtime with
-              last_blocker =
-                Some
-                  (Keeper_meta_contract.blocker_info_of_class
-                     ~detail:"provider turn timed out"
-                     Keeper_meta_contract.Stale_turn_timeout);
-            };
         }
       in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let ctx : _ Keeper_types_profile.context =
@@ -1160,9 +1327,7 @@ let test_sweep_does_not_synthesize_gate_from_runtime_blocker () =
         | Ok None -> fail "expected persisted keeper meta"
         | Error err -> fail err
       in
-      check bool "sweep does not reinterpret pause" true persisted_meta.paused;
-      check bool "blocker remains diagnostic evidence" true
-        (Option.is_some persisted_meta.runtime.last_blocker))
+      check bool "sweep does not reinterpret pause" true persisted_meta.paused)
 
 let test_sweep_reports_pending_hitl_approval () =
   Eio_main.run @@ fun env ->
@@ -1179,7 +1344,7 @@ let test_sweep_reports_pending_hitl_approval () =
              (aq_resolve
                 ~base_path:base_dir
                 ~id
-                ~decision:(AQ.Decision.Reject "test cleanup")))
+                ~decision:(AQT.Decision.Reject "test cleanup")))
         !approval_id;
       Reg.For_testing.clear ();
       Masc.Keeper_runtime.reset_test_state base_dir;
@@ -1190,7 +1355,7 @@ let test_sweep_reports_pending_hitl_approval () =
       let _workspace = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       ignore (install_exn ~base_path:config.base_path);
       let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let id =
@@ -1202,7 +1367,7 @@ let test_sweep_reports_pending_hitl_approval () =
             ~base_path:config.base_path
             ()
         with
-        | Ok id -> id
+        | Ok submission -> submission.approval_id
         | Error error -> fail (AQ.storage_error_to_string error)
       in
       approval_id := Some id;
@@ -1231,7 +1396,7 @@ let test_sweep_reports_pending_hitl_approval () =
            ~keeper_name:name
          |> Result.get_ok
          |> fun count -> count > 0);
-      (match aq_resolve ~base_path:base_dir ~id ~decision:AQ.Decision.Approve with
+      (match aq_resolve ~base_path:base_dir ~id ~decision:AQT.Decision.Approve with
        | Ok () -> approval_id := None
        | Error err -> fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
       check bool "resolution removes pending request" false
@@ -1260,7 +1425,7 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       write_keeper_toml config_dir ~name;
       let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
@@ -1307,6 +1472,61 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       | None -> fail "expected restarted keeper in registry"
       | Some entry ->
           check int "restart count restored to attempt" 1 entry.restart_count)
+
+let test_restart_reopens_crash_aborted_librarian_lifecycle () =
+  with_restart_launch_noop @@ fun () ->
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  with_config_dir @@ fun config_dir ->
+  let base_dir = temp_dir () in
+  let name = "restart-reopens-librarian" in
+  Fun.protect
+    ~finally:(fun () ->
+      Memory_lane.For_testing.reset ();
+      Reg.For_testing.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      Memory_lane.For_testing.reset ();
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+      write_keeper_toml config_dir ~name;
+      let meta = make_meta name in
+      (match Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
+      resolve_done_for_test reg (`Crashed "ordinary crash");
+      (match Memory_lane.abort_librarian ~base_path:config.base_path ~keeper_name:name with
+       | Ok Memory_lane.Librarian_abort_idle -> ()
+       | Ok _ -> fail "empty crash-abort fixture unexpectedly owned Librarian work"
+       | Error error -> fail (Memory_lane.librarian_abort_error_to_string error));
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = supervisor_agent_name
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = Some (Eio.Stdenv.net env)
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
+        }
+      in
+      sweep_and_recover_no_materialize ctx;
+      (match Reg.get ~base_path:config.base_path name with
+       | Some entry ->
+         check bool "supervisor published replacement registry lane" true
+           (entry.done_p != reg.done_p)
+       | None -> fail "supervisor restart removed the Keeper registry entry");
+      match Memory_lane.submit ~base_path:config.base_path ~keeper_name:name (fun () -> ()) with
+      | Memory_lane.Ran_inline -> ()
+      | Memory_lane.Submitted | Memory_lane.Coalesced -> ()
+      | Memory_lane.Dropped -> fail "restarted Librarian submission was dropped"
+      | Memory_lane.Rejected_draining ->
+        fail "supervisor restart left the Librarian lifecycle fenced")
+;;
 
 let test_restart_path_emits_meta_unavailable_outcome_metric () =
   Eio_main.run @@ fun env ->
@@ -1368,178 +1588,6 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
       check bool "keeper unregistered after missing meta" false
         (Reg.is_registered ~base_path:config.base_path name))
 
-let test_restart_denies_persisted_dead_tombstone () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  with_config_dir @@ fun config_dir ->
-  let base_dir = temp_dir () in
-  let name = "restart-dead-tombstone-admission" in
-  Fun.protect
-    ~finally:(fun () ->
-      Reg.For_testing.clear ();
-      Masc.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      let _init_msg =
-        Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name)
-      in
-      write_keeper_toml config_dir ~name;
-      let active_meta = make_meta name in
-      let dead_meta =
-        { active_meta with
-          paused = true
-        ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
-        }
-      in
-      (match Keeper_meta_store.write_meta config dead_meta with
-       | Ok () -> ()
-       | Error err -> fail err);
-      let reg = Reg.For_testing.register ~base_path:config.base_path name active_meta in
-      resolve_done_for_test reg (`Crashed "crash before terminal persist");
-      Reg.restore_supervisor_state
-        ~base_path:config.base_path
-        name
-        ~restart_count:0
-        ~last_restart_ts:0.0
-        ~crash_log:[];
-      let attempt_labels = [ "keeper", name ] in
-      let denied_labels = [ "keeper", name; "outcome", "lifecycle_denied" ] in
-      let attempts_before =
-        Masc.Otel_metric_store.metric_value_or_zero
-          Keeper_metrics.(to_string RestartAttempts)
-          ~labels:attempt_labels
-          ()
-      in
-      let denied_before =
-        Masc.Otel_metric_store.metric_value_or_zero
-          Keeper_metrics.(to_string RestartOutcomes)
-          ~labels:denied_labels
-          ()
-      in
-      let ctx : _ Keeper_types_profile.context =
-        { config
-        ; agent_name = supervisor_agent_name
-        ; sw
-        ; clock = Eio.Stdenv.clock env
-        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
-        ; net = Some (Eio.Stdenv.net env)
-        ; publication_recovery_provider =
-            Masc_test_deps.publication_recovery_provider
-              (publication_recovery_registry env sw config)
-        }
-      in
-      sweep_and_recover_no_materialize ctx;
-      check (float 0.001) "terminal lane consumes no restart attempt"
-        attempts_before
-        (Masc.Otel_metric_store.metric_value_or_zero
-           Keeper_metrics.(to_string RestartAttempts)
-           ~labels:attempt_labels
-           ());
-      check (float 0.001) "typed lifecycle denial is observed"
-        (denied_before +. 1.0)
-        (Masc.Otel_metric_store.metric_value_or_zero
-           Keeper_metrics.(to_string RestartOutcomes)
-           ~labels:denied_labels
-           ());
-      match Reg.get ~base_path:config.base_path name with
-      | None -> fail "terminal registry entry unexpectedly disappeared"
-      | Some entry ->
-        check int "restart count unchanged" 0 entry.restart_count;
-        check bool "terminal registry phase is Dead" true
-          (entry.phase = Keeper_state_machine.Dead);
-        check bool "persisted tombstone meta becomes registry authority" true
-          (match entry.meta.latched_reason with
-           | Some Keeper_latched_reason.Dead_tombstone -> true
-           | Some _ | None -> false);
-        check bool "terminal transition records dead timestamp" true
-          (Option.is_some entry.dead_since_ts))
-
-let with_reap_ready_dead_keeper name f =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
-      Shutdown_finalize.For_testing.reset_completion_handler ();
-      Subprocess_registry.reset_for_testing ();
-      Masc.Keeper_process_switch.For_testing.clear ();
-      KLH.reset_for_testing ();
-      Reg.For_testing.clear ();
-      Masc.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
-      let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
-       | Ok () -> ()
-       | Error err -> fail err);
-      ignore (Reg.For_testing.register ~base_path:config.base_path name meta);
-      Reg.mark_dead ~base_path:config.base_path name ~at:0.0;
-      let completion_bus = Agent_sdk.Event_bus.create () in
-      Event_bus_slots.set_masc completion_bus;
-      Subprocess_registry.register_default_cleanup_hook ();
-      Shutdown_finalize.register_remove_pending_confirms_by_target
-        (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
-      Shutdown_finalize.register_completion_handler Tombstone_cleanup.handle_completion;
-      let run_sweep () =
-        Eio.Switch.run @@ fun sw ->
-        Sup.set_global_switch sw;
-        let ctx : _ Keeper_types_profile.context =
-          { config
-          ; agent_name = supervisor_agent_name
-          ; sw
-          ; clock = Eio.Stdenv.clock env
-          ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
-          ; net = Some (Eio.Stdenv.net env)
-          ; publication_recovery_provider =
-              Masc_test_deps.publication_recovery_provider
-                (publication_recovery_registry env sw config)
-          }
-        in
-        sweep_and_recover_no_materialize ctx
-      in
-      f ~config ~run_sweep)
-
-let event_label = function
-  | KLH.Tombstone_reaped -> "tombstone_reaped"
-  | KLH.Phase_transition _ -> "phase_transition"
-
-let test_sweep_and_recover_fires_tombstone_reaped_hook () =
-  KLH.reset_for_testing ();
-  let name = "tombstone-hook-keeper" in
-  let fired = ref [] in
-  KLH.register (fun ~keeper_id event ->
-    fired := (keeper_id, event_label event) :: !fired);
-  with_reap_ready_dead_keeper name @@ fun ~config ~run_sweep ->
-  run_sweep ();
-  check (list (pair string string))
-    "single Tombstone_reaped event"
-    [ (name, "tombstone_reaped") ] (List.rev !fired);
-  check bool "dead keeper unregistered after tombstone cleanup"
-    false (Reg.is_registered ~base_path:config.base_path name)
-
-let test_sweep_and_recover_swallows_failing_tombstone_hook () =
-  KLH.reset_for_testing ();
-  let name = "tombstone-failing-hook-keeper" in
-  let failing_hook_calls = ref 0 in
-  let later_hook_events = ref [] in
-  KLH.register (fun ~keeper_id:_ _ ->
-    incr failing_hook_calls;
-    raise (Failure "intentional tombstone hook failure"));
-  KLH.register (fun ~keeper_id event ->
-    later_hook_events := (keeper_id, event_label event) :: !later_hook_events);
-  with_reap_ready_dead_keeper name @@ fun ~config ~run_sweep ->
-  run_sweep ();
-  check int "failing hook invoked exactly once" 1 !failing_hook_calls;
-  check (list (pair string string))
-    "later hook still observes Tombstone_reaped"
-    [ (name, "tombstone_reaped") ] (List.rev !later_hook_events);
-  check bool "dead keeper still unregistered after failing hook"
-    false (Reg.is_registered ~base_path:config.base_path name)
 
 exception Synthetic_cleanup_failure
 
@@ -1566,58 +1614,6 @@ let test_supervisor_cleanup_suppresses_cancellation_and_classifies_failures () =
    [Started]/[Running], and the entry's done promise must resolve through
    the crash path so the sweep observes a typed outcome. Pre-fix the fiber
    forked and Running was published despite the reject. *)
-let test_launch_rejected_terminal_state_does_not_announce_running () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Reg.For_testing.clear ();
-      Masc.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
-      let name = "launch-reject-terminal" in
-      let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
-       | Ok () -> ()
-       | Error err -> fail err);
-      let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
-      Reg.mark_dead ~base_path:config.base_path name ~at:(Unix.gettimeofday ());
-      let ctx : _ Keeper_types_profile.context =
-        {
-          config;
-          agent_name = supervisor_agent_name;
-          sw;
-          clock = Eio.Stdenv.clock env;
-          proc_mgr = Some (Eio.Stdenv.process_mgr env);
-          net = Some (Eio.Stdenv.net env);
-          publication_recovery_provider =
-            Masc_test_deps.publication_recovery_provider
-              (publication_recovery_registry env sw config);
-        }
-      in
-      Sup.with_restart_launch_noop_for_test (fun () ->
-        match
-          Masc.Keeper_supervisor_launch.launch_supervised_fiber
-            ~proactive_warmup_sec:0 ctx meta reg
-        with
-        | Ok () -> fail "expected Fiber_started to be rejected in terminal state"
-        | Error _ -> ());
-      (match Reg.get_phase ~base_path:config.base_path name with
-       | Some Keeper_state_machine.Dead -> ()
-       | Some phase ->
-         fail
-           (Printf.sprintf "expected phase to stay Dead, got %s"
-              (Keeper_state_machine.phase_to_string phase))
-       | None -> fail "registry entry disappeared after rejected launch");
-      check bool "done promise resolved through the crash path"
-        true (Option.is_some (Eio.Promise.peek reg.done_p));
-      check bool "rejected launch closes lane join contract"
-        true (Reg.lane_has_exited reg))
-
 let test_supervised_stop_joins_board_attention_worker () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1634,7 +1630,7 @@ let test_supervised_stop_joins_board_attention_worker () =
       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
       let name = "supervised-board-worker-stop" in
       let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register_offline ~base_path:config.base_path name meta in
@@ -1650,17 +1646,21 @@ let test_supervised_stop_joins_board_attention_worker () =
               (publication_recovery_registry env sw config)
         }
       in
-      (match
-         Masc.Keeper_supervisor_launch.launch_supervised_fiber
-           ~proactive_warmup_sec:0
-           ctx
-           meta
-           reg
-       with
-       | Ok () -> ()
-       | Error error ->
-         fail
-           (Keeper_state_machine.transition_error_to_string error));
+      with_launch_token
+        ~base_path:config.base_path
+        ~keeper_name:name
+        (fun lifecycle_token ->
+           match
+             Masc.Keeper_supervisor_launch.launch_supervised_fiber
+               ~lifecycle_token
+               ~proactive_warmup_sec:0
+               ctx
+               meta
+               reg
+           with
+           | Ok () -> ()
+           | Error error ->
+             fail (Keeper_state_machine.transition_error_to_string error));
       let joined =
         Eio.Time.with_timeout_exn ctx.clock 5.0 (fun () ->
           Masc.Keeper_keepalive.stop_keepalive_and_await
@@ -1677,6 +1677,130 @@ let test_supervised_stop_joins_board_attention_worker () =
         "board-attention sibling joined with supervised lane"
         true
         (Reg.lane_has_exited reg))
+
+let test_supervised_stop_drains_librarian_before_terminal () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  ensure_test_runtime ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Memory_lane.For_testing.reset ();
+      Reg.For_testing.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+      let name = "supervised-librarian-drain" in
+      let meta = make_meta name in
+      (match Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      Memory_lane.init ~sw;
+      (match
+         Memory_lane.begin_librarian_lifecycle
+           ~base_path:config.base_path
+           ~keeper_name:name
+       with
+       | Ok () -> ()
+       | Error error -> fail (Memory_lane.lifecycle_open_error_to_string error));
+      let reg = Reg.register_offline ~base_path:config.base_path name meta in
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = supervisor_agent_name
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = Some (Eio.Stdenv.net env)
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
+        }
+      in
+      with_launch_token
+        ~base_path:config.base_path
+        ~keeper_name:name
+        (fun lifecycle_token ->
+           match
+             Masc.Keeper_supervisor_launch.launch_supervised_fiber
+               ~lifecycle_token
+               ~proactive_warmup_sec:0
+               ctx
+               meta
+               reg
+           with
+           | Ok () -> ()
+           | Error error -> fail (Keeper_state_machine.transition_error_to_string error));
+      let librarian_started, resolve_librarian_started = Eio.Promise.create () in
+      let librarian_release, resolve_librarian_release = Eio.Promise.create () in
+      let librarian_cancelled = ref false in
+      let librarian_completed = ref false in
+      (match
+         Memory_lane.submit
+           ~base_path:config.base_path
+           ~keeper_name:name
+           (fun () ->
+              Eio.Promise.resolve resolve_librarian_started ();
+              try
+                Eio.Promise.await librarian_release;
+                librarian_completed := true
+              with
+              | Eio.Cancel.Cancelled _ as exn ->
+                librarian_cancelled := true;
+                raise exn)
+       with
+       | Memory_lane.Submitted
+       | Memory_lane.Coalesced -> ()
+       | Memory_lane.Ran_inline
+       | Memory_lane.Dropped
+       | Memory_lane.Rejected_draining ->
+         fail "supervised Librarian fixture was not submitted");
+      Eio.Promise.await librarian_started;
+      let stop_done, resolve_stop_done = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Promise.resolve
+          resolve_stop_done
+          (Masc.Keeper_keepalive.stop_keepalive_and_await
+             ~base_path:config.base_path
+             name));
+      Eio.Time.sleep ctx.clock 0.05;
+      check bool
+        "supervised stop waits for accepted Librarian work"
+        true
+        (Option.is_none (Eio.Promise.peek stop_done));
+      check bool
+        "terminal promise stays pending until Librarian drain"
+        true
+        (Option.is_none (Eio.Promise.peek reg.done_p));
+      Eio.Promise.resolve resolve_librarian_release ();
+      let joined = Eio.Promise.await stop_done in
+      (match joined with
+       | Masc.Keeper_keepalive.Keeper_not_registered ->
+         fail "supervised Keeper disappeared before Librarian join"
+       | Masc.Keeper_keepalive.Keeper_joined
+           { lane_exit = { cleanup_error = None; _ }; terminal = `Stopped } -> ()
+       | Masc.Keeper_keepalive.Keeper_joined
+           { lane_exit = { cleanup_error = Some error; _ }; _ } ->
+         fail ("supervised Librarian cleanup failed: " ^ error)
+       | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
+         fail ("supervised Librarian stop resolved as crashed: " ^ reason));
+      check bool
+        "supervised stop preserves Librarian work"
+        false
+        !librarian_cancelled;
+      check bool
+        "supervised stop drains Librarian before terminal"
+        true
+        !librarian_completed;
+      check
+        (option int)
+        "supervised Librarian has no pending work after stop"
+        (Some 0)
+        (Memory_lane.For_testing.pending
+           ~base_path:config.base_path
+           ~keeper_name:name))
 
 (* Codex #24135 finding 5: a rejected [Keeper_lane.fork] (parent switch already
    cancelling, or [claim_start] refused) must propagate [Error] from
@@ -1704,7 +1828,7 @@ let test_launch_fork_rejection_does_not_announce_running () =
       in
       let name = "launch-fork-reject" in
       let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
@@ -1726,12 +1850,20 @@ let test_launch_fork_rejection_does_not_announce_running () =
               (publication_recovery_registry env sw config);
         }
       in
-      (match
-         Masc.Keeper_supervisor_launch.launch_supervised_fiber
-           ~proactive_warmup_sec:0 ctx meta reg
-       with
-       | Ok () -> fail "expected lane fork rejection to propagate as Error"
-       | Error _ -> ());
+      with_launch_token
+        ~base_path:config.base_path
+        ~keeper_name:name
+        (fun lifecycle_token ->
+           match
+             Masc.Keeper_supervisor_launch.launch_supervised_fiber
+               ~lifecycle_token
+               ~proactive_warmup_sec:0
+               ctx
+               meta
+               reg
+           with
+           | Ok () -> fail "expected lane fork rejection to propagate as Error"
+           | Error _ -> ());
       check bool
         "fork-rejected launch resolves done through the crash path"
         true
@@ -1777,12 +1909,20 @@ let test_fork_rejection_preserves_replacement_lane () =
               (publication_recovery_registry env sw config)
         }
       in
-      (match
-         Masc.Keeper_supervisor_launch.launch_supervised_fiber_body
-           ~proactive_warmup_sec:0 ctx meta rejected
-       with
-       | Ok () -> fail "expected rejected lane to propagate as Error"
-       | Error _ -> ());
+      with_launch_token
+        ~base_path:config.base_path
+        ~keeper_name:name
+        (fun lifecycle_token ->
+           match
+             Masc.Keeper_supervisor_launch.launch_supervised_fiber_body
+               ~lifecycle_token
+               ~proactive_warmup_sec:0
+               ctx
+               meta
+               rejected
+           with
+           | Ok () -> fail "expected rejected lane to propagate as Error"
+           | Error _ -> ());
       check bool
         "newer same-name lane remains the registry owner"
         true
@@ -1795,51 +1935,6 @@ let test_fork_rejection_preserves_replacement_lane () =
         (match Reg.get_phase ~base_path:config.base_path name with
          | Some KSM.Running -> true
          | Some _ | None -> false))
-
-let test_fork_rejection_unregisters_non_terminalizable_owner () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Reg.For_testing.clear ();
-      Masc.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
-      let name = "fork-reject-terminal-owner" in
-      let meta = make_meta name in
-      let rejected = Reg.For_testing.register ~base_path:config.base_path name meta in
-      Reg.mark_dead ~base_path:config.base_path name ~at:(Unix.gettimeofday ());
-      (match
-         Lane.reject_before_start rejected.lane ~reason:(Failure "pre-claimed for test")
-       with
-       | Ok () -> ()
-       | Error error -> fail (Lane.start_error_to_string error));
-      let ctx : _ Keeper_types_profile.context =
-        { config
-        ; agent_name = supervisor_agent_name
-        ; sw
-        ; clock = Eio.Stdenv.clock env
-        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
-        ; net = Some (Eio.Stdenv.net env)
-        ; publication_recovery_provider =
-            Masc_test_deps.publication_recovery_provider
-              (publication_recovery_registry env sw config)
-        }
-      in
-      (match
-         Masc.Keeper_supervisor_launch.launch_supervised_fiber_body
-           ~proactive_warmup_sec:0 ctx meta rejected
-       with
-       | Ok () -> fail "expected rejected terminal lane to propagate as Error"
-       | Error _ -> ());
-      check bool
-        "non-terminalizable exact owner is unregistered"
-        true
-        (Option.is_none (Reg.get ~base_path:config.base_path name)))
 
 let test_sweep_waits_for_lane_join_before_unregister () =
   Eio_main.run @@ fun env ->
@@ -1920,7 +2015,7 @@ let test_idle_duration_never_stops_keeper () =
             };
         }
       in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
@@ -1984,7 +2079,7 @@ let test_non_storm_crashed_restarts_normally () =
       let name = "non-storm-keeper" in
       write_keeper_toml config_dir ~name;
       let meta = make_meta name in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
@@ -2023,84 +2118,588 @@ let test_non_storm_crashed_restarts_normally () =
        | Ok None -> fail "meta missing"
        | Error err -> fail ("read_meta failed: " ^ err));
       (match Reg.get ~base_path:config.base_path name with
-       | Some entry ->
-         check bool "many prior restarts do not make Dead" false (entry.phase = KSM.Dead)
+       | Some _ -> ()
        | None -> fail "registry entry missing after ordinary restart"))
 
 (* Failure observations remain durable across lane unregister/restart without
    changing the Keeper's operator-controlled lifecycle state. *)
-let test_persisted_blocker_survives_unregister () =
+let test_active_librarian_abort_defers_then_retries_restart () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
+  ensure_test_runtime ();
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
       Reg.For_testing.clear ();
+      Memory_lane.For_testing.reset ();
       Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
-      let name = "failure-blocker-keeper" in
-      let meta = make_meta name in
-      let meta =
-        {
-          meta with
-          runtime =
-            {
-              meta.runtime with
-              last_blocker = Some (Keeper_meta_contract.blocker_info_of_class ~detail:"test-blocker" Keeper_meta_contract.Stale_turn_timeout);
-            };
-        }
-      in
-      (match Keeper_meta_store.write_meta config meta with
-       | Ok () -> ()
-       | Error err -> fail err);
-      let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
-      resolve_done_for_test reg (`Crashed "observed failure");
-      Reg.restore_supervisor_state ~base_path:config.base_path name
-        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
-      Reg.set_failure_reason ~base_path:config.base_path name
-        (Some (Reg.Stale_termination_storm { count = 5 }));
-      let ctx : _ Keeper_types_profile.context =
-        { config
-        ; agent_name = supervisor_agent_name
-        ; sw
-        ; clock = Eio.Stdenv.clock env
-        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
-        ; net = Some (Eio.Stdenv.net env)
-        ; publication_recovery_provider =
-            Masc_test_deps.publication_recovery_provider
-              (publication_recovery_registry env sw config)
-        }
-      in
-      sweep_and_recover_no_materialize ctx;
-      
-      (* Check if blocker is persisted *)
-      (match Keeper_meta_store.read_meta config name with
-       | Ok (Some m) ->
-           (match m.runtime.last_blocker with
-            | Some b ->
-                check string "meta.runtime.last_blocker" "test-blocker" b.detail;
-                check bool "meta.runtime.last_blocker.klass" true (b.klass = Keeper_meta_contract.Stale_turn_timeout)
-            | None -> fail "expected blocker after storm pause");
-       | Ok None -> fail "meta missing after storm pause"
-       | Error err -> fail ("read_meta failed: " ^ err));
-      
-      (* Unregister the keeper *)
-      Reg.For_testing.unregister ~base_path:config.base_path name;
-      
-      (* Read again and verify *)
-      (match Keeper_meta_store.read_meta config name with
-       | Ok (Some m) ->
-           (match m.runtime.last_blocker with
-            | Some b ->
-                check string "meta.runtime.last_blocker after unregister" "test-blocker" b.detail;
-                check bool "meta.runtime.last_blocker.klass after unregister" true (b.klass = Keeper_meta_contract.Stale_turn_timeout)
-            | None -> fail "expected blocker after unregister")
-       | Ok None -> fail "meta missing after unregister"
-       | Error err -> fail ("read_meta failed: " ^ err)))
+       let config = Masc.Workspace.default_config base_dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+       Memory_lane.For_testing.reset ();
+       Memory_lane.init ~sw;
+       let name = "librarian-restart-rollback" in
+       let meta = make_meta name in
+       let initial = Reg.For_testing.register ~base_path:config.base_path name meta in
+       (match
+          Reg.dispatch_event_exact
+            initial
+            (KSM.Fiber_terminated
+               { outcome = "fixture crash"; provider_id = None; http_status = None })
+        with
+        | Ok _ -> ()
+        | Error error -> fail (KSM.transition_error_to_string error));
+       let crashed =
+         match Reg.get ~base_path:config.base_path name with
+         | Some entry -> entry
+         | None -> fail "crashed restart fixture disappeared"
+       in
+       let started, set_started = Eio.Promise.create () in
+       let cancellation_seen, set_cancellation_seen = Eio.Promise.create () in
+       let release_cleanup, set_release_cleanup = Eio.Promise.create () in
+       let never, _set_never = Eio.Promise.create () in
+       (match
+          Memory_lane.submit ~base_path:config.base_path ~keeper_name:name (fun () ->
+            Eio.Promise.resolve set_started ();
+            try Eio.Promise.await never with
+            | Eio.Cancel.Cancelled _ as exn ->
+              Eio.Promise.resolve set_cancellation_seen ();
+              Eio.Cancel.protect (fun () -> Eio.Promise.await release_cleanup);
+              raise exn)
+        with
+        | Memory_lane.Submitted -> ()
+        | Memory_lane.Coalesced
+        | Memory_lane.Ran_inline
+        | Memory_lane.Dropped
+        | Memory_lane.Rejected_draining -> fail "active Librarian fixture was not submitted");
+       Eio.Promise.await started;
+       (match Memory_lane.abort_librarian ~base_path:config.base_path ~keeper_name:name with
+        | Ok Memory_lane.Librarian_abort_requested
+        | Ok Memory_lane.Librarian_abort_already_in_progress -> ()
+        | Ok _ -> fail "active Librarian abort did not commit cancellation"
+        | Error error -> fail (Memory_lane.librarian_abort_error_to_string error));
+       Eio.Promise.await cancellation_seen;
+       let run_restart (previous : Reg.registry_entry) =
+         Launch_transaction.run
+           ~base_path:config.base_path
+           ~keeper_name:name
+           ~register:(fun token intake_token ->
+             Reg.register_restarting_for_lifecycle
+               ~intake_token
+               token
+               ~base_path:config.base_path
+               name
+               meta)
+           ~rollback:(Launch_transaction.Restore_previous previous)
+           (fun _intake_token _token replacement -> replacement)
+       in
+       (match run_restart crashed with
+        | Error (Launch_transaction.Lifecycle_open_failed _) -> ()
+        | Error _ -> fail "restart deferred for an unexpected transaction reason"
+        | Ok _ -> fail "restart crossed an active cancelled Librarian owner");
+       (match Reg.get ~base_path:config.base_path name with
+        | Some current ->
+          check bool "deferred restart restores the crashed lane" true
+            (Lane.Id.equal (Lane.id current.lane) (Lane.id crashed.lane))
+        | None -> fail "deferred restart lost its durable crashed authority");
+       Eio.Promise.resolve set_release_cleanup ();
+       (match
+          Memory_lane.drain_and_join_librarian
+            ~base_path:config.base_path
+            ~keeper_name:name
+        with
+        | Error (Memory_lane.Librarian_interrupted _) -> ()
+        | Error error -> fail (Memory_lane.librarian_drain_error_to_string error)
+        | Ok _ -> fail "cancelled Librarian was reported as gracefully drained");
+       let replacement =
+         match run_restart crashed with
+         | Ok replacement -> replacement
+         | Error _ -> fail "next restart sweep did not reopen the exited Librarian owner"
+       in
+       check bool "retry installs a distinct restart lane" false
+         (Lane.Id.equal (Lane.id replacement.lane) (Lane.id crashed.lane));
+       ignore
+         (Memory_lane.drain_and_join_librarian
+            ~base_path:config.base_path
+            ~keeper_name:name
+           : (Memory_lane.librarian_drain_outcome,
+              Memory_lane.librarian_drain_error)
+               result))
+
+let test_unexpected_cleanup_cannot_close_reopened_librarian_lifecycle () =
+  Eio_main.run @@ fun _env ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Memory_lane.For_testing.reset ();
+      cleanup_dir base_dir)
+    (fun () ->
+       Memory_lane.For_testing.reset ();
+       let keeper_name = "unexpected-librarian-reopen" in
+       (match
+          Memory_lane.begin_librarian_lifecycle
+            ~base_path:base_dir
+            ~keeper_name
+        with
+        | Ok () -> ()
+        | Error error -> fail (Memory_lane.lifecycle_open_error_to_string error));
+       let replacement_opened = ref false in
+       (match
+          Launch_transaction.finish_lifecycle
+            ~boundary:Launch_transaction.Unexpected
+            ~base_path:base_dir
+            ~keeper_name
+            ~terminalize:(fun () ->
+              match
+                Memory_lane.begin_librarian_lifecycle
+                  ~base_path:base_dir
+                  ~keeper_name
+              with
+              | Ok () ->
+                replacement_opened := true;
+                Ok ()
+              | Error error ->
+                Error (Memory_lane.lifecycle_open_error_to_string error))
+        with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       check bool "terminal publication admitted replacement" true !replacement_opened;
+       match Memory_lane.submit ~base_path:base_dir ~keeper_name ignore with
+       | Memory_lane.Ran_inline -> ()
+       | Memory_lane.Submitted
+       | Memory_lane.Coalesced
+       | Memory_lane.Dropped
+       | Memory_lane.Rejected_draining ->
+         fail "stale unexpected cleanup closed the replacement lifecycle")
+;;
+
+let crashed_restart_fixture ~base_path name meta =
+  let initial = Reg.For_testing.register ~base_path name meta in
+  (match
+     Reg.dispatch_event_exact
+       initial
+       (KSM.Fiber_terminated
+          { outcome = "fixture crash"; provider_id = None; http_status = None })
+   with
+   | Ok _ -> ()
+   | Error error -> fail (KSM.transition_error_to_string error));
+  match Reg.get ~base_path name with
+  | Some entry -> entry
+  | None -> fail "crashed restart fixture disappeared"
+;;
+
+let register_restart ~base_path ~name ~meta token intake_token =
+  Reg.register_restarting_for_lifecycle
+    ~intake_token
+    token
+    ~base_path
+    name
+    meta
+;;
+
+let test_launch_callback_failure_rolls_back_restart_transaction () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  ensure_test_runtime ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.For_testing.clear ();
+      Memory_lane.For_testing.reset ();
+      Masc.Keeper_shutdown_intake_fence.For_testing.reset ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+       Memory_lane.For_testing.reset ();
+       let name = "librarian-launch-exception-rollback" in
+       let meta = make_meta name in
+       let crashed = crashed_restart_fixture ~base_path:config.base_path name meta in
+       (match
+          Launch_transaction.run
+            ~base_path:config.base_path
+            ~keeper_name:name
+            ~register:(register_restart ~base_path:config.base_path ~name ~meta)
+            ~rollback:(Launch_transaction.Restore_previous crashed)
+            (fun _intake_token _token _replacement ->
+              failwith "injected launch callback failure")
+        with
+        | Error
+            (Launch_transaction.Launch_failed
+               { librarian_abort_error = None; rollback_error = None; _ }) -> ()
+        | Error _ -> fail "launch exception produced the wrong transaction outcome"
+        | Ok _ -> fail "launch exception unexpectedly committed");
+       (match Reg.get ~base_path:config.base_path name with
+        | Some current ->
+          check bool "launch exception restores exact crashed authority" true
+            (Lane.Id.equal (Lane.id current.lane) (Lane.id crashed.lane))
+        | None -> fail "launch exception removed the durable restart authority");
+       (match Memory_lane.submit ~base_path:config.base_path ~keeper_name:name ignore with
+        | Memory_lane.Rejected_draining -> ()
+        | _ -> fail "failed launch left Librarian admission open");
+       match
+         Launch_transaction.run
+           ~base_path:config.base_path
+           ~keeper_name:name
+           ~register:(register_restart ~base_path:config.base_path ~name ~meta)
+           ~rollback:(Launch_transaction.Restore_previous crashed)
+           (fun _intake_token _token replacement -> replacement)
+       with
+       | Ok replacement ->
+         check bool "retry installs a fresh restart lane" false
+           (Lane.Id.equal (Lane.id replacement.lane) (Lane.id crashed.lane))
+       | Error _ -> fail "retry did not reopen the rolled-back Librarian lifecycle")
+;;
+
+let test_launch_callback_cancellation_rolls_back_restart_transaction () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  ensure_test_runtime ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.For_testing.clear ();
+      Memory_lane.For_testing.reset ();
+      Masc.Keeper_shutdown_intake_fence.For_testing.reset ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+       Memory_lane.For_testing.reset ();
+       let name = "librarian-launch-cancellation-rollback" in
+       let meta = make_meta name in
+       let crashed = crashed_restart_fixture ~base_path:config.base_path name meta in
+       let cancel_context, resolve_cancel_context = Eio.Promise.create () in
+       let launch_entered, resolve_launch_entered = Eio.Promise.create () in
+       let cancelled, resolve_cancelled = Eio.Promise.create () in
+       let never, _resolve_never = Eio.Promise.create () in
+       Eio.Fiber.fork ~sw (fun () ->
+         let saw_cancellation =
+           try
+             Eio.Cancel.sub (fun context ->
+               Eio.Promise.resolve resolve_cancel_context context;
+               ignore
+                 (Launch_transaction.run
+                    ~base_path:config.base_path
+                    ~keeper_name:name
+                    ~register:
+                      (register_restart ~base_path:config.base_path ~name ~meta)
+                    ~rollback:(Launch_transaction.Restore_previous crashed)
+                    (fun _intake_token _token _replacement ->
+                       Eio.Promise.resolve resolve_launch_entered ();
+                       Eio.Promise.await never)
+                   : (_, _) result);
+               false)
+           with
+           | Eio.Cancel.Cancelled _ -> true
+         in
+         Eio.Promise.resolve resolve_cancelled saw_cancellation);
+       let context = Eio.Promise.await cancel_context in
+       Eio.Promise.await launch_entered;
+       Eio.Cancel.cancel context (Failure "cancel injected launch callback");
+       check bool "launch cancellation propagates after rollback" true
+         (Eio.Promise.await cancelled);
+       (match Reg.get ~base_path:config.base_path name with
+        | Some current ->
+          check bool "launch cancellation restores exact crashed authority" true
+            (Lane.Id.equal (Lane.id current.lane) (Lane.id crashed.lane))
+        | None -> fail "launch cancellation removed the durable restart authority");
+       (match
+          Lifecycle_reservation.current
+            ~base_path:config.base_path
+            ~keeper_name:name
+        with
+        | None -> ()
+        | Some owner ->
+          fail
+            ("launch cancellation leaked lifecycle reservation: "
+             ^ Lifecycle_reservation.snapshot_to_string owner));
+       match Memory_lane.submit ~base_path:config.base_path ~keeper_name:name ignore with
+       | Memory_lane.Rejected_draining -> ()
+       | _ -> fail "cancelled launch left Librarian admission open")
+;;
+
+let test_register_cancellation_rolls_back_restart_transaction () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  ensure_test_runtime ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.For_testing.clear ();
+      Memory_lane.For_testing.reset ();
+      Masc.Keeper_shutdown_intake_fence.For_testing.reset ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+       Memory_lane.For_testing.reset ();
+       let name = "librarian-register-cancellation-rollback" in
+       let meta = make_meta name in
+       let crashed = crashed_restart_fixture ~base_path:config.base_path name meta in
+       let cancel_context, resolve_cancel_context = Eio.Promise.create () in
+       let registered, resolve_registered = Eio.Promise.create () in
+       let continue_registration, resolve_continue_registration = Eio.Promise.create () in
+       let cancelled, resolve_cancelled = Eio.Promise.create () in
+       Eio.Fiber.fork ~sw (fun () ->
+         let saw_cancellation =
+           try
+             Eio.Cancel.sub (fun context ->
+               Eio.Promise.resolve resolve_cancel_context context;
+               ignore
+                 (Launch_transaction.run
+                    ~base_path:config.base_path
+                    ~keeper_name:name
+                    ~register:(fun token intake_token ->
+                      match
+                        register_restart
+                          ~base_path:config.base_path
+                          ~name
+                          ~meta
+                          token
+                          intake_token
+                      with
+                      | Error _ as error -> error
+                      | Ok replacement as ok ->
+                        Eio.Promise.resolve resolve_registered replacement;
+                        Eio.Promise.await continue_registration;
+                        ok)
+                    ~rollback:(Launch_transaction.Restore_previous crashed)
+                    (fun _intake_token _token _replacement ->
+                      Eio.Fiber.yield ();
+                      failwith "pending registration cancellation was not delivered")
+                  : (_, _) result);
+               false)
+           with
+           | Eio.Cancel.Cancelled _ -> true
+         in
+         Eio.Promise.resolve resolve_cancelled saw_cancellation);
+       let context = Eio.Promise.await cancel_context in
+       let replacement = Eio.Promise.await registered in
+       Eio.Cancel.cancel context (Failure "cancel injected after registration commit");
+       Eio.Promise.resolve resolve_continue_registration ();
+       check bool "registration cancellation propagates after rollback" true
+         (Eio.Promise.await cancelled);
+       (match Reg.get ~base_path:config.base_path name with
+        | Some current ->
+          check bool "registration cancellation restores exact crashed authority" true
+            (Lane.Id.equal (Lane.id current.lane) (Lane.id crashed.lane));
+          check bool "registration cancellation removed replacement authority" false
+            (Lane.Id.equal (Lane.id current.lane) (Lane.id replacement.lane))
+        | None -> fail "registration cancellation removed durable restart authority");
+       match Memory_lane.submit ~base_path:config.base_path ~keeper_name:name ignore with
+       | Memory_lane.Rejected_draining -> ()
+       | _ -> fail "registration cancellation left Librarian admission open")
+;;
+
+let test_started_launch_exception_retains_registered_lane () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  ensure_test_runtime ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.For_testing.clear ();
+      Memory_lane.For_testing.reset ();
+      Masc.Keeper_shutdown_intake_fence.For_testing.reset ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+       let name = "started-launch-exception-retained" in
+       let meta = make_meta name in
+       let crashed = crashed_restart_fixture ~base_path:config.base_path name meta in
+       let started = ref None in
+       (match
+          Launch_transaction.run
+            ~base_path:config.base_path
+            ~keeper_name:name
+            ~register:(register_restart ~base_path:config.base_path ~name ~meta)
+            ~rollback:(Launch_transaction.Restore_previous crashed)
+            (fun _intake_token _token replacement ->
+               (match
+                  Lane.fork
+                    ~sw
+                    replacement.lane
+                    ~run:(fun _ -> ())
+                    ~cleanup:(fun _ -> Ok ())
+                with
+                | Ok () -> started := Some replacement
+                | Error error -> fail (Lane.start_error_to_string error));
+               failwith "post-fork observation failure")
+        with
+        | Error (Launch_transaction.Launch_failed { rollback_error = Some _; _ }) -> ()
+        | Error _ -> fail "started launch failure lost its retention evidence"
+        | Ok _ -> fail "started launch exception unexpectedly committed");
+       let expected = Option.get !started in
+       match Reg.get ~base_path:config.base_path name with
+       | Some current ->
+         check bool "started lane remains registry-owned" true
+           (Lane.Id.equal (Lane.id current.lane) (Lane.id expected.lane))
+       | None -> fail "started launch exception detached the live lane")
+;;
+
+let test_offline_launch_exception_retains_retryable_lane () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  ensure_test_runtime ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.For_testing.clear ();
+      Memory_lane.For_testing.reset ();
+      Masc.Keeper_shutdown_intake_fence.For_testing.reset ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+       let name = "offline-launch-exception-retry" in
+       let offline = Reg.register_offline ~base_path:config.base_path name (make_meta name) in
+       let run launch =
+         Launch_transaction.run
+           ~base_path:config.base_path
+           ~keeper_name:name
+           ~register:(fun _token _intake_token -> Ok offline)
+           ~rollback:Launch_transaction.Retain_registered
+           launch
+       in
+       (match
+          run (fun _intake_token _token _entry ->
+            failwith "injected pre-start callback failure")
+        with
+        | Error
+            (Launch_transaction.Launch_failed
+               { librarian_abort_error = None; rollback_error = None; _ }) -> ()
+        | Error _ -> fail "offline callback failure produced the wrong transaction outcome"
+        | Ok _ -> fail "offline callback failure unexpectedly committed");
+       (match Memory_lane.submit ~base_path:config.base_path ~keeper_name:name ignore with
+        | Memory_lane.Rejected_draining -> ()
+        | _ -> fail "pre-start Offline failure left Librarian admission open");
+       let forked = ref false in
+       (match
+          run (fun _intake_token _token entry ->
+            match
+              Lane.fork
+                ~sw
+                entry.lane
+                ~run:(fun _ -> forked := true)
+                ~cleanup:(fun _ -> Ok ())
+            with
+            | Ok () -> entry
+            | Error error -> fail (Lane.start_error_to_string error))
+        with
+        | Ok current ->
+          check bool "retry preserves exact Offline lane" true
+            (Lane.Id.equal (Lane.id current.lane) (Lane.id offline.lane))
+        | Error _ -> fail "retained Offline lane was not retryable");
+       Eio.Fiber.yield ();
+       check bool "retry started the retained Offline lane" true !forked)
+;;
+
+let test_restart_intake_epoch_survives_shutdown_overlap () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  ensure_test_runtime ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.For_testing.clear ();
+      Memory_lane.For_testing.reset ();
+      Masc.Keeper_shutdown_intake_fence.For_testing.reset ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+       Memory_lane.For_testing.reset ();
+       let name = "restart-intake-shutdown-overlap" in
+       let meta = make_meta name in
+       let crashed = crashed_restart_fixture ~base_path:config.base_path name meta in
+       let registered, resolve_registered = Eio.Promise.create () in
+       let continue_launch, resolve_continue_launch = Eio.Promise.create () in
+       let finished, resolve_finished = Eio.Promise.create () in
+       Eio.Fiber.fork ~sw (fun () ->
+         let result =
+           Launch_transaction.run
+             ~base_path:config.base_path
+             ~keeper_name:name
+             ~register:(fun token intake_token ->
+               match
+                 register_restart
+                   ~base_path:config.base_path
+                   ~name
+                   ~meta
+                   token
+                   intake_token
+               with
+               | Error _ as error -> error
+               | Ok replacement as ok ->
+                 Eio.Promise.resolve resolve_registered replacement;
+                 Eio.Promise.await continue_launch;
+                 ok)
+             ~rollback:(Launch_transaction.Restore_previous crashed)
+             (fun intake_token _token replacement ->
+               let bootstrap : Keeper_event_queue.stimulus =
+                 { post_id = "restart-intake-token-bootstrap"
+                 ; urgency = Keeper_event_queue.Normal
+                 ; arrived_at = Unix.gettimeofday ()
+                 ; payload = Keeper_event_queue.Bootstrap
+                 }
+               in
+               Masc.Keeper_registry_event_queue.enqueue
+                 ~intake_token
+                 ~base_path:config.base_path
+                 name
+                 bootstrap;
+               replacement)
+         in
+         Eio.Promise.resolve resolve_finished result);
+       let registered_entry = Eio.Promise.await registered in
+       let operation_id = Shutdown_types.Operation_id.generate () in
+       (match
+          Masc.Keeper_shutdown_intake_fence.begin_shutdown
+            ~base_path:config.base_path
+            ~keeper_name:name
+            ~operation_id
+        with
+        | Masc.Keeper_shutdown_intake_fence.Reserved _ -> ()
+        | Masc.Keeper_shutdown_intake_fence.Already_reserved _ ->
+          fail "fresh shutdown operation was already reserved");
+       Eio.Promise.resolve resolve_continue_launch ();
+       (match Eio.Promise.await finished with
+        | Ok launched ->
+          check bool "same registered lane crosses Librarian and launch handoff" true
+            (Lane.Id.equal (Lane.id launched.lane) (Lane.id registered_entry.lane))
+        | Error _ -> fail "create-wins restart epoch was rejected after registration");
+       (match
+          Masc.Keeper_shutdown_intake_fence.shutdown_operation_id
+            ~base_path:config.base_path
+            ~keeper_name:name
+        with
+        | Some actual ->
+          check bool "launch does not erase the later shutdown owner" true
+            (Shutdown_types.Operation_id.equal operation_id actual)
+        | None -> fail "launch erased the later shutdown reservation");
+       ignore
+         (Masc.Keeper_shutdown_intake_fence.rollback_shutdown
+            ~base_path:config.base_path
+            ~keeper_name:name
+            ~operation_id
+          : Masc.Keeper_shutdown_intake_fence.rollback_result))
+;;
 
 let () =
   run "keeper_supervisor" [
@@ -2109,25 +2708,13 @@ let () =
       test_case "at limit" `Quick test_keep_last_n_at_limit;
       test_case "over limit drops oldest" `Quick test_keep_last_n_over_limit;
     ];
-    "persona_drift", [
-      test_case "drift check honors TOML persona_name" `Quick
-        test_persona_drift_check_uses_toml_persona_name;
-      test_case "drift check preserves invalid config" `Quick
-        test_persona_drift_check_preserves_invalid_config;
-      test_case "drift path points to profile.json" `Quick
-        test_persona_drift_path_points_to_profile_json;
-      test_case "missing persona with inline TOML is WARN" `Quick
-        test_missing_persona_with_inline_toml_is_warn;
-      test_case "missing persona without TOML is ERROR" `Quick
-        test_missing_persona_without_profile_or_toml_is_error;
-    ];
     "boot_meta_materialization", [
       test_case "declarative boot preserves instructions" `Quick
         test_declarative_boot_materializes_instructions;
       test_case "declarative boot allows empty goal links" `Quick
         test_declarative_boot_allows_empty_goal_links;
-      test_case "declarative boot rejects incompatible persisted meta" `Quick
-        test_declarative_boot_does_not_materialize_incompatible_meta;
+      test_case "declarative boot re-materializes incompatible persisted meta" `Quick
+        test_declarative_boot_rematerializes_incompatible_meta;
       test_case "declarative boot records typed invalid-config failure" `Quick
         test_declarative_boot_records_typed_invalid_config_failure;
       test_case "reconcile materializes configured keeper without meta" `Quick
@@ -2142,13 +2729,15 @@ let () =
         test_reconcile_supervise_exception_continues;
       test_case "recoverable sweep-owned entries are not relaunched" `Quick
         test_supervise_keepalive_retains_sweep_owned_entries;
+      test_case "recoverable launch requires same Offline generation" `Quick
+        test_supervise_recovery_requires_same_offline_generation;
+      test_case "supervised readiness wakes queued owner operation" `Quick
+        test_supervise_keepalive_wakes_ready_operation_drain;
     ];
     "fiber_health", [
       test_case "unknown for unregistered" `Quick test_fiber_health_unknown;
       test_case "registry count zero" `Quick test_registry_count_initially_zero;
       test_case "crash_log empty" `Quick test_crash_log_empty_for_unknown;
-      test_case "should cleanup dead when ttl exceeded" `Quick test_should_cleanup_dead_true;
-      test_case "should not cleanup dead when recent" `Quick test_should_cleanup_dead_false_when_recent;
     ];
     "keep_last_n_properties", [
       test_case "never exceeds limit" `Quick test_keep_last_n_never_exceeds;
@@ -2182,39 +2771,43 @@ let () =
     "restart_metrics", [
       test_case "restart path emits attempt and started outcome metrics" `Quick
         test_restart_path_emits_attempt_and_started_outcome_metrics;
+      test_case "restart reopens crash-aborted Librarian lifecycle" `Quick
+        test_restart_reopens_crash_aborted_librarian_lifecycle;
       test_case "restart path emits missing-meta outcome metrics" `Quick
         test_restart_path_emits_meta_unavailable_outcome_metric;
-      test_case "restart denies persisted dead tombstone" `Quick
-        test_restart_denies_persisted_dead_tombstone;
-    ];
-    "dead_state_alert", [
-      test_case "sweep cleanup fires Tombstone_reaped hook" `Quick
-        test_sweep_and_recover_fires_tombstone_reaped_hook;
-      test_case "failing Tombstone_reaped hook is swallowed" `Quick
-        test_sweep_and_recover_swallows_failing_tombstone_hook;
+      test_case "active Librarian abort defers then retries restart" `Quick
+        test_active_librarian_abort_defers_then_retries_restart;
+      test_case "unexpected cleanup preserves reopened Librarian lifecycle" `Quick
+        test_unexpected_cleanup_cannot_close_reopened_librarian_lifecycle;
+      test_case "launch callback failure rolls back restart transaction" `Quick
+        test_launch_callback_failure_rolls_back_restart_transaction;
+      test_case "launch callback cancellation rolls back restart transaction" `Quick
+        test_launch_callback_cancellation_rolls_back_restart_transaction;
+      test_case "register cancellation rolls back restart transaction" `Quick
+        test_register_cancellation_rolls_back_restart_transaction;
+      test_case "started launch exception retains registered lane" `Quick
+        test_started_launch_exception_retains_registered_lane;
+      test_case "offline launch exception retains retryable lane" `Quick
+        test_offline_launch_exception_retains_retryable_lane;
+      test_case "restart intake epoch survives shutdown overlap" `Quick
+        test_restart_intake_epoch_survives_shutdown_overlap;
     ];
     "stale_storm_phase2", [
       test_case "supervisor cleanup suppresses cancellation and classifies failures" `Quick
         test_supervisor_cleanup_suppresses_cancellation_and_classifies_failures;
-      test_case "terminal-state launch reject does not announce Running" `Quick
-        test_launch_rejected_terminal_state_does_not_announce_running;
       test_case "supervised stop joins Board worker" `Quick
         test_supervised_stop_joins_board_attention_worker;
+      test_case "supervised stop drains Librarian before terminal" `Quick
+        test_supervised_stop_drains_librarian_before_terminal;
       test_case "lane fork reject does not announce Running" `Quick
         test_launch_fork_rejection_does_not_announce_running;
       test_case "fork reject preserves newer same-name lane" `Quick
         test_fork_rejection_preserves_replacement_lane;
-      test_case "fork reject unregisters non-terminalizable exact owner" `Quick
-        test_fork_rejection_unregisters_non_terminalizable_owner;
       test_case "sweep joins lane before unregister" `Quick
         test_sweep_waits_for_lane_join_before_unregister;
       test_case "idle duration never stops keeper" `Quick
         test_idle_duration_never_stops_keeper;
       test_case "non-storm Crashed still routes to restart (regression guard)" `Quick
         test_non_storm_crashed_restarts_normally;
-    ];
-    "failure_observation", [
-      test_case "persisted blocker survives unregister" `Quick
-        test_persisted_blocker_survives_unregister;
     ];
   ]

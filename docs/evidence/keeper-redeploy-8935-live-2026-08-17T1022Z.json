@@ -1,0 +1,85 @@
+{
+  "schema": "masc.redeploy_receipt.v1",
+  "captured_at": "2026-08-17T10:26:00Z",
+  "intent": "수리 3건(#28902/#28908/#28924) 병합 후 :8935 운영 인스턴스를 main head로 재배포하고, embedded binary identity의 live·browser 축을 실측으로 닫는다",
+  "operating_loop_restart_index": 5,
+  "prior_restart_note": "4회차(2026-08-17 02:36Z, checkout bd2e27e60b)가 이미 embedded stamp binary를 태우고 있었다 — 'binary unknown' 축은 그 시점에 사실상 닫혔고, 이 receipt가 브라우저 실측까지 완결한다",
+  "before": {
+    "health_captured_at": "2026-08-17T09:0xZ",
+    "version": "0.23.0",
+    "binary_commit": "bd2e27e60bf5a0a81bbcb479cf2ccf935585116e",
+    "binary_commit_source": "embedded",
+    "keeper_fibers": 15,
+    "bootable_keeper_count": 12,
+    "fleet_status": "degraded",
+    "fleet_blocker": "active_task_owner_without_executable_fiber",
+    "dashboard_surface": "stale"
+  },
+  "deploy": {
+    "target_sha": "1a8be94d618503090d5882193466d718b1456566",
+    "target_ref": "origin/main @ merge #28902",
+    "ancestry_confirmed": [
+      "45ba5ff756 (#28908)",
+      "a5f4d283fe (#28924)",
+      "1a8be94d61 (#28902 merge)"
+    ],
+    "build": "scripts/dune-local.sh build bin/main_eio.exe bin/deployment_preflight_helper.exe (exit 0)",
+    "dashboard_rebuild": "stamp 제거 후 scripts/build-dashboard-if-needed.sh — vite 8.52s, .build-stamp 2026-08-17T10:20:15Z (binary mtime보다 신선)"
+  },
+  "store_surgery": {
+    "reason": "#28902가 keeper_meta 필수 키 autonomous_instructions를 추가 — 기존 52필드 meta 85건이 새 파서에서 전부 거부됨 (enum 자동 복구는 missing key 미커버, lib/keeper/keeper_meta_store.ml)",
+    "archive": "/Users/dancer/me/.masc/_archive/keepers-pre-autonomous-instructions-20260817T102039Z",
+    "injected": 85,
+    "skipped": 0,
+    "injected_value": "\"autonomous_instructions\": null (writer의 None 표현과 동일)",
+    "post_verify": "85/85 파일 파싱 + 키 존재 확인, 기동 로그에 meta parse 실패 0건"
+  },
+  "preflight": "[runtime-deployment-preflight] OK: base_path=/Users/dancer/me schedule_ledgers=2 signal_files=14 signal_rows=1699 current_owners=18 in_progress=0",
+  "shutdown": {
+    "method": "SIGTERM to pid 10103",
+    "port_free_after_s": 1,
+    "drain_log_tail": [
+      "[2026-08-17 19:20:26] [INFO] [Keeper] registry: phase transition name=sangsu old=draining new=stopped event=drain_complete",
+      "[2026-08-17 19:20:26] [INFO] [Server] MASC MCP: Shutdown complete."
+    ]
+  },
+  "startup": {
+    "command": "nohup ./scripts/start-loopback.sh --with-keeper-bootstrap -- --eio > <base-path>/.masc/logs/masc-8935-20260817d.out.log",
+    "pid": 91263,
+    "defect_hit": "start-loopback.sh가 bash 3.2 + set -u에서 빈 passthrough 배열 확장으로 즉사 — '-- --eio'로 우회, 수리는 #28929",
+    "log": "<base-path>/.masc/logs/masc-8935-20260817d.out.log"
+  },
+  "after": {
+    "version": "0.23.0",
+    "binary_commit": "1a8be94d618503090d5882193466d718b1456566",
+    "binary_commit_source": "embedded",
+    "dashboard_surface": "ok",
+    "keeper_fibers": 12,
+    "bootable_keeper_count": 12,
+    "fleet_status": "degraded",
+    "fleet_blocker": "active_task_owner_without_executable_fiber (재기동 전과 동일 — 회귀 아님)",
+    "fiber_delta_note": "정지 전 15은 bootable 12 + mid-turn 3이었고, 재기동 후 12/12는 bootable 전원 복귀"
+  },
+  "browser": {
+    "topbar_text": "v0.23.0 · 1a8be94d61",
+    "capture": "playwright chromium, dashboard/?token=<admin>",
+    "screenshot_sha256": "06cc38d690217b7e8e97ae1653b91065bd986617afb2cf02b9716a113df7c72d",
+    "overview_render": "실행 중 KEEPER 12/85, 주의 26, Connected, 텔레메트리 소스 7/9·갭 0, 19:24 KST",
+    "anomaly_notes": [
+      "'Stored Bearer token is not verified' 배너 + Auth error 칩 — 브라우저 localStorage의 낡은 토큰 잔재 (08-14 관측과 동일 계열, 서버 회귀 아님)",
+      "Client WS · silent — 재기동 직후 관측, 후속 창에서 재확인 필요"
+    ]
+  },
+  "verdict": "PASS — embedded binary identity의 E4(health)·E5(browser TopBar) 축 종결. Track C의 'binary unknown'은 더 이상 사실이 아니다",
+  "remaining": [
+    "Client WS silent 재확인 (재기동 직후 관측)",
+    "keeper meta 스키마 확장 시 store 정합을 배포 절차에 상시 편입 (REDEPLOY-8935-RUNBOOK §4, PR #28927)"
+  ],
+  "incident": {
+    "what": "이 재기동이 진행 중이던 24h 사다리 run(canary-24h-ollama-b-20260816, 22:04 KST 종료 예정)의 turn 9(19:24 발화)를 서버 다운·keeper offline에 노출시켰다",
+    "mechanism": "graceful drain은 모든 keeper를 내리는데, canary keeper는 autoboot_disabled라 재기동 후 자동 복귀하지 않는다 — durable demand recovery가 'retained ... reason=autoboot_disabled'로 보존만 한다",
+    "recovery": "keeper-feature-matrix-pr-merge 세션이 수동 boot으로 복구 (~19:4x KST). turn 9 판정 대기 중 — 실패로 판명되면 24h rung 무효 가능",
+    "root_miss": "재기동 전 broadcast와 진행 중 장기 canary 확인을 하지 않았다 — 절차 결함으로 판정, REDEPLOY-8935-RUNBOOK에 사전 조율·사후 수동 boot 단계를 보강",
+    "verdict_pending": "해소 — turn 9는 수동 부팅 직후 정상 완결(19:4x KST), 24h rung 유효 지속. rung receipt에는 비계획 재시작 3회(01:58/02:29/19:20)+주입 restart 1회를 가로지른 완주로 기록될 예정"
+  }
+}

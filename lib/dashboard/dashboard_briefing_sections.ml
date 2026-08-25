@@ -47,10 +47,8 @@ let with_cache_lock f =
 (* ── For_test ───────────────────────────────────────────────────── *)
 
 module For_test = struct
-  let compact_session_json = Briefing_compactors.compact_session_json
   let compact_keeper_json = Briefing_compactors.compact_keeper_json
   let compact_agent_json = Briefing_compactors.compact_agent_json
-  let relevant_sessions_for_briefing = Briefing_compactors.relevant_sessions_for_briefing
   let collect_metadata_gaps = Briefing_gaps.collect_metadata_gaps
   let build_briefing_sections = Briefing_sections.build_briefing_sections
   let reset_cache () =
@@ -106,64 +104,17 @@ let annotate_delivery_state json ~cached ~stale ~refreshing ~last_error =
   |> upsert_field "refreshing" (`Bool refreshing)
   |> upsert_field "last_error" (Json_util.string_opt_to_json last_error)
 
-let operator_snapshot_json_ref : Dashboard_projection_cache.operator_snapshot_fn ref =
-  ref { Dashboard_projection_cache.snapshot = (fun ?actor:_ ?view:_ ?include_messages:_ ?include_keepers:_ ?include_summary_fields:_ ?lightweight_summary:_ _ctx ->
-    `Null) }
-
-let register_operator_snapshot_json fn =
-  operator_snapshot_json_ref := fn
-
 (* ── Compute ────────────────────────────────────────────────────── *)
 
 let compute_briefing_json ~actor_name ~config ~sw ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t) ~proc_mgr () =
-  let now_ts = Unix.gettimeofday () in
     let briefing_json =
       Dashboard_briefing.json ~actor:actor_name ~config ~sw ~clock ~proc_mgr ()
-    in
-    let ctx : _ Tool_operator.context =
-      {
-        config;
-        agent_name = actor_name;
-        sw;
-        clock;
-        proc_mgr;
-        net = None;
-        (* Briefing sections use the read-only snapshot projection only. *)
-        delegated_dispatch = None;
-        mcp_session_id = None;
-      }
-    in
-    let snapshot_json =
-      (* Reuse the same lightweight summary shape as the operator/mission
-         dashboard surfaces. The briefing only needs session status/events;
-         keeper metadata can come from briefing_json. Pulling keepers,
-         operator, and message payloads here duplicates the heaviest
-         snapshot path and can spike memory on workspaces with many keepers. *)
-      (!operator_snapshot_json_ref).snapshot ~actor:actor_name ~view:"summary"
-        ~include_messages:false ~include_keepers:false
-        ~include_summary_fields:false
-        ~lightweight_summary:true ctx
-    in
-    let scope_json =
-      match snapshot_json |> member_assoc "workspace" with
-      | `Assoc _ as value -> value
-      | _ -> snapshot_json |> member_assoc "workspace"
-    in
-    let current_namespace =
-      match String_util.option_trim (Some (scope_json |> string_field "project")) with
-      | Some value -> value
-      | None -> "default"
-    in
-    let sessions =
-      Briefing_compactors.relevant_sessions_for_briefing ~current_namespace
-        ~now_ts []
     in
     let keepers =
       match briefing_json |> member_assoc "keeper_briefs" with
       | `List items -> items
       | _ -> []
     in
-    let compact_sessions = take 3 (List.map Briefing_compactors.compact_session_json sessions) in
     let compact_keepers = take 3 (List.map Briefing_compactors.compact_keeper_json keepers) in
     let agents_json = Workspace.get_agents_raw config |> List.map Briefing_compactors.compact_agent_json in
     let compact_agents = take 5 agents_json in
@@ -194,11 +145,10 @@ let compute_briefing_json ~actor_name ~config ~sw ~(clock : [> float Eio.Time.cl
         ]
     in
     let metadata_gaps =
-      Briefing_gaps.collect_metadata_gaps ~sessions:compact_sessions ~keepers:compact_keepers
-        ~agents:compact_agents
+      Briefing_gaps.collect_metadata_gaps ~keepers:compact_keepers ~agents:compact_agents
     in
     let watch_summary, sections =
-      Briefing_sections.build_briefing_sections ~briefing_summary_json ~sessions:compact_sessions
+      Briefing_sections.build_briefing_sections ~briefing_summary_json
         ~agents:compact_agents ~recent_messages:messages_json ~metadata_gaps
     in
     let now_iso = Masc_domain.now_iso () in
@@ -224,7 +174,6 @@ let compute_briefing_json ~actor_name ~config ~sw ~(clock : [> float Eio.Time.cl
                 ( "project",
                   member_assoc "summary" briefing_json
                   |> member_assoc "project" );
-                ("crew_count", `Int (List.length sessions));
                 ("agent_count", `Int (List.length agents_json));
                 ("keeper_count", `Int (List.length keepers));
               ] );

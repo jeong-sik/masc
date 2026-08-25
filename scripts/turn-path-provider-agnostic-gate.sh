@@ -10,7 +10,7 @@
 # question to every turn step — does this step need to know provider IDENTITY,
 # or does a spec number suffice? Every accusation against the masc turn path
 # was refuted: the path was already agnostic, and all identity reads lived at
-# the OAS serialization boundary, where they belong. That result is a property
+# the AGENT_CORE serialization boundary, where they belong. That result is a property
 # worth keeping, not a snapshot. Serialization needs identity; deciding a turn
 # does not, and a single vendor branch here is how that separation erodes.
 #

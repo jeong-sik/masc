@@ -21,14 +21,13 @@ export const directOnly = signal(false)
 export const showHidden = signal(false)
 export const showDeprecated = signal(true)
 
-export type SurfaceFilter = 'all' | 'public_mcp' | 'agent' | 'keeper' | 'internal'
+export type SurfaceFilter = 'all' | 'public_mcp' | 'agent' | 'keeper'
 export const surfaceFilter = signal<SurfaceFilter>('all')
 
 export const SURFACE_MAP: Record<Exclude<SurfaceFilter, 'all'>, string[]> = {
   public_mcp: ['public_mcp'],
   agent: ['spawned_agent_mcp'],
   keeper: ['keeper'],
-  internal: ['local_worker'],
 }
 
 export const SURFACE_LABELS: Record<SurfaceFilter, string> = {
@@ -36,7 +35,6 @@ export const SURFACE_LABELS: Record<SurfaceFilter, string> = {
   public_mcp: 'MCP 공개',
   agent: '에이전트',
   keeper: '키퍼',
-  internal: '내부',
 }
 
 export async function loadTools() {

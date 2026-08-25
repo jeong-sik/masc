@@ -34,8 +34,6 @@ val record_mcp_server_operation_duration_sample :
     {!Otel_dispatch_hook.with_request_context}. *)
 
 module For_testing : sig
-  val arguments_of_params : Yojson.Safe.t -> Yojson.Safe.t
-
   val failure_observation :
     duration_ms:int ->
     Tool_result.result ->
@@ -66,11 +64,9 @@ type keeper_runtime_mcp_log_context = {
   model : string;
   trace_id : string option;
   session_id : string option;
-  generation : int option;
   turn : int option;
   keeper_turn_id : int option;
   task_id : string option;
-  goal_ids : string list option;
   sandbox_profile : string option;
   sandbox_root : string option;
   allowed_paths : string list option;
@@ -99,6 +95,7 @@ val record_runtime_mcp_keeper_tool_trace :
   arguments:Yojson.Safe.t ->
   message:string ->
   disposition:('completed, 'deferred, 'failed) Tool_result.disposition ->
+  execution_id:Ids.Execution_id.t ->
   duration_ms:int ->
   unit
 (** Persists a single tool-call trace row for the keeper.
@@ -112,6 +109,11 @@ val record_runtime_mcp_keeper_tool_trace :
     the tool call. *)
 
 (** {1 [tools/call] dispatcher} *)
+
+exception Managed_agent_translation_failed of string
+(** Raised by {!handle_call_tool_eio} when a managed-agent tool name cannot be
+    translated. The protocol layer answers it with [Invalid_params]; the payload
+    is the reason to report. *)
 
 val handle_call_tool_eio :
   execute_tool_eio:
@@ -138,7 +140,7 @@ val handle_call_tool_eio :
   ?internal_keeper_runtime:bool ->
   Mcp_server.server_state ->
   Yojson.Safe.t ->
-  Yojson.Safe.t ->
+  Mcp_server_eio_call_request.t ->
   Yojson.Safe.t
 (** Handles a [tools/call] JSON-RPC request.
 

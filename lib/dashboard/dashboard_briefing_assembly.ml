@@ -12,7 +12,7 @@ let keeper_tool_audit_json_fields config _registry_lookup keeper agent_name =
   let keeper_name =
     match member_assoc "name" keeper with
     | `String n ->
-        (match String_util.trim_to_option n with Some v -> v | None -> agent_name)
+        (match String_util.trim_nonempty n with Some v -> v | None -> agent_name)
     | _ -> agent_name
   in
   let fallback_latest =
@@ -20,19 +20,19 @@ let keeper_tool_audit_json_fields config _registry_lookup keeper agent_name =
   in
   let fallback_count = Json_util.assoc_int_opt "latest_tool_call_count" keeper in
   let fallback_source =
-    match String_util.trim_to_option (string_field "tool_audit_source" keeper) with
+    match String_util.trim_nonempty (string_field "tool_audit_source" keeper) with
     | Some _ as value -> value
     | None -> None
   in
   let fallback_action_source =
-    String_util.trim_to_option (string_field "latest_action_source" keeper)
+    String_util.trim_nonempty (string_field "latest_action_source" keeper)
   in
   let fallback_at =
-    String_util.trim_to_option (string_field "tool_audit_at" keeper)
+    String_util.trim_nonempty (string_field "tool_audit_at" keeper)
   in
   let file_snapshot =
     let keeper_updated_at =
-      String_util.trim_to_option (string_field "updated_at" keeper)
+      String_util.trim_nonempty (string_field "updated_at" keeper)
     in
     match
       Keeper_status_metrics.latest_tool_audit_snapshot_from_files config
@@ -60,7 +60,7 @@ let keeper_tool_audit_json_fields config _registry_lookup keeper agent_name =
               snapshot.tool_audit_at )
         | None ->
             (* Use per-keeper tool tracking as last-resort fallback *)
-            let tracked = Keeper_tools_oas.tool_usage_for_keeper agent_name in
+            let tracked = Keeper_tools_agent_core.tool_usage_for_keeper agent_name in
             if tracked <> [] then
               let names = List.map fst tracked in
               let total = List.fold_left (fun acc (_, e) -> acc + e.Keeper_types.count) 0 tracked in
@@ -90,7 +90,7 @@ let action_identity action =
     [
       string_field "action_type" action;
       string_field "target_type" action;
-      Option.value ~default:"none" (String_util.trim_to_option (string_field "target_id" action));
+      Option.value ~default:"none" (String_util.trim_nonempty (string_field "target_id" action));
       normalized_text_key (string_field "reason" action);
     ]
 
@@ -99,7 +99,7 @@ let incident_identity incident =
     [
       string_field "kind" incident;
       string_field "target_type" incident;
-      Option.value ~default:"none" (String_util.trim_to_option (string_field "target_id" incident));
+      Option.value ~default:"none" (String_util.trim_nonempty (string_field "target_id" incident));
       normalized_text_key (string_field "summary" incident);
     ]
 
@@ -113,54 +113,6 @@ let is_internal_attention incident =
 let is_internal_action action =
   Operator_digest_types.is_workspace_target_type
     (string_field "target_type" action)
-
-let incident_action_types kind =
-  match kind with
-  | "spawn_failure_present" -> [ "task_inject" ]
-  | "detached_actor_present"
-  | "empty_note_turn_present"
-  | "low_confidence_routing"
-  | "routing_escalation_present" -> [ "broadcast" ]
-  | "planned_worker_without_turn" -> [ "task_inject"; "broadcast" ]
-  | "local64_role_gap" -> [ "task_inject" ]
-  | "stalled_session" -> [ "namespace_pause" ]
-  | "command_issue_pressure"
-  | "command_routing_confidence"
-  | "command_quality_per_token"
-  | "command_verification_gate_failures"
-  | "command_rework_rate"
-  | "command_artifact_scope_drift"
-  | "command_cache_contention"
-  | "command_speculative_posture"
-  | "intent_blocked"
-  | "intent_handoff_ready" -> [ "broadcast" ]
-  | _ -> []
-
-let action_matches_incident incident action =
-  let target_type = string_field "target_type" incident in
-  let target_id = String_util.trim_to_option (string_field "target_id" incident) in
-  let action_target_type = string_field "target_type" action in
-  let action_target_id = String_util.trim_to_option (string_field "target_id" action) in
-  let same_target =
-    String.equal action_target_type target_type
-    &&
-    match target_id, action_target_id with
-    | Some left, Some right -> String.equal left right
-    | None, None -> true
-    | _ -> false
-  in
-  if not same_target then false
-  else
-    let incident_summary = normalized_text_key (string_field "summary" incident) in
-    let action_reason = normalized_text_key (string_field "reason" action) in
-    let reason_matches =
-      incident_summary <> "" && action_reason <> ""
-      && String.equal incident_summary action_reason
-    in
-    if reason_matches then true
-    else
-      let action_type = string_field "action_type" action in
-      List.mem action_type (incident_action_types (string_field "kind" incident))
 
 let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t list) =
   let all_entries = Keeper_registry.all ~base_path:config.base_path () in
@@ -184,24 +136,43 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
            let context_metrics_unavailable =
              member_assoc "context_metrics_unavailable" keeper
            in
+           (* Parsed once into the closed surface vocabulary rather than
+              compared as text twice. keeper_status_runtime's comment on that
+              type names this ranker as one of the two sites that re-classified
+              the string; the producer builds it exhaustively, so a status this
+              parser does not know is a producer/consumer mismatch, not a rank
+              to guess at (#29350). *)
+           let health =
+             Keeper_status_runtime.keeper_health_of_string_opt
+               (string_field "health_state" (member_assoc "diagnostic" keeper))
+           in
            let pressure_rank =
-             if Dashboard_utils.is_keeper_offline status then 3
-             else if
-               Option.exists
-                 (fun ratio -> ratio >= lane_pressure_ctx_ratio)
-                 context_ratio
-             then
-               2
-             else if status = "idle" then 1
-             else 0
+             match health with
+             (* Ranked by health rather than by the status word, which folded
+                stale, degraded and zombie together and then folded that into
+                offline here. A late heartbeat and a dead fiber are different
+                amounts of trouble. *)
+             | Some (Keeper_types.KH_offline | KH_zombie) -> 3
+             | Some (KH_healthy | KH_idle | KH_stale | KH_degraded)
+             | None ->
+               if
+                 Option.exists
+                   (fun ratio -> ratio >= lane_pressure_ctx_ratio)
+                   context_ratio
+               then 2
+               else (
+                 match health with
+                 | Some Keeper_types.KH_idle -> 1
+                 | Some (KH_healthy | KH_stale | KH_degraded | KH_zombie | KH_offline)
+                 | None -> 0)
            in
            Some
              {
                pressure_rank;
                last_seen_ts =
                  Dashboard_utils.parse_iso_opt
-                   (String_util.trim_to_option
-                      (match String_util.trim_to_option (string_field "last_autonomous_action_at" keeper) with
+                   (String_util.trim_nonempty
+                      (match String_util.trim_nonempty (string_field "tool_audit_at" keeper) with
                       | Some value -> value
                       | None -> string_field "updated_at" keeper))
                  |> Option.value ~default:0.0;
@@ -211,26 +182,31 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                       ("name", `String name);
                       ("agent_name", member_assoc "agent_name" keeper);
                       ("status", `String status);
-                      ("generation", member_assoc "generation" keeper);
                       ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
                       ("context_metrics_unavailable", context_metrics_unavailable);
                       ("last_turn_ago_s", member_assoc "last_turn_ago_s" keeper);
-                      ( "current_work",
-                        Json_util.string_opt_to_json
-                          (Dashboard_utils.string_list_of_json
-                             (member_assoc "active_goal_ids" keeper)
-                           |> function
-                           | current :: _ -> Some current
-                           | [] -> None) );
-                      ("last_autonomous_action_at", member_assoc "last_autonomous_action_at" keeper);
+                      ("current_work", member_assoc "current_task_id" keeper);
+                      ("tool_audit_at", member_assoc "tool_audit_at" keeper);
                       ("proactive_enabled", member_assoc "proactive_enabled" keeper);
                       ("paused", member_assoc "paused" keeper);
+                      (* The rank above is computed from [health], but the row it
+                         ranks did not carry it, so no reader could reproduce or
+                         explain the order -- and [status] was the only liveness
+                         word on this row, which is the fold this axis replaces.
+                         [phase] travels with it because operator surfaces ask
+                         two different questions: "is it running" (health) and
+                         "did an operator stop it" (phase). *)
+                      ("health",
+                       Json_util.option_to_yojson
+                         (fun value -> `String (Keeper_status_runtime.keeper_health_to_string value))
+                         health);
+                      ("phase", member_assoc "phase" keeper);
                       ("exclusion_reason",
                        Keeper_runtime.autoboot_exclusion_reason_opt_to_yojson
                          (Keeper_runtime.autoboot_exclusion_reason config name));
                     ]
                     @ keeper_tool_audit_json_fields config registry_lookup keeper
-                        (match String_util.trim_to_option (string_field "agent_name" keeper) with
+                        (match String_util.trim_nonempty (string_field "agent_name" keeper) with
                          | Some agent_name -> agent_name
                          | None -> name));
              })
@@ -240,14 +216,22 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
          else Float.compare right.last_seen_ts left.last_seen_ts)
   |> List.map (fun (row : keeper_context) -> row.json)
 
+(* An attention row and an action row are separate signals. The operator
+   digest gives no link between them: [recommended_action] is free-form JSON
+   an operator judgment wrote, and an attention item is a read-model
+   observation, so nothing in either says which one answers which. This used
+   to guess -- normalized-prose equality of the incident summary against the
+   action reason, else a hand-written kind -> action_type table -- and stamp
+   the single workspace recommendation onto every incident whose kind the
+   table happened to list. Both rows are still emitted; neither claims the
+   other. *)
 let build_internal_signals incidents actions =
   let internal_incidents =
     incidents
     |> List.filter is_internal_attention
     |> List.map (fun incident ->
-           let action = List.find_opt (action_matches_incident incident) actions in
            {
-             pressure_rank = severity_rank (string_field ~default:"warn" "severity" incident);
+             pressure_rank = Operator_digest_types.severity_rank_of_string (string_field ~default:"warn" "severity" incident);
              last_seen_ts = 0.0;
              json =
                `Assoc
@@ -259,25 +243,16 @@ let build_internal_signals incidents actions =
                    ("target_type", member_assoc "target_type" incident);
                    ("target_id", member_assoc "target_id" incident);
                    ("attention", incident);
-                   ("action", Json_util.option_to_yojson (fun value -> value) action);
+                   ("action", `Null);
                  ];
            })
-  in
-  let matched_internal_action_keys =
-    internal_incidents
-    |> List.filter_map (fun row ->
-           match member_assoc "action" row.json with
-           | `Assoc _ as action -> Some (action_identity action)
-           | _ -> None)
   in
   let internal_actions =
     actions
     |> List.filter is_internal_action
-    |> List.filter (fun action ->
-           not (List.mem (action_identity action) matched_internal_action_keys))
     |> List.map (fun action ->
            {
-             pressure_rank = severity_rank (string_field ~default:"warn" "severity" action);
+             pressure_rank = Operator_digest_types.severity_rank_of_string (string_field ~default:"warn" "severity" action);
              last_seen_ts = 0.0;
              json =
                `Assoc

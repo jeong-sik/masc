@@ -1,11 +1,5 @@
 ---
 status: runbook
-last_verified: 2026-05-13
-code_refs:
-  - scripts/keeper-production-readiness-gate.py
-  - scripts/keeper-runtime-truth-gate.sh
-  - docs/RELEASE-EVIDENCE.md
-  - docs/PERFORMANCE-SLO.md
 ---
 
 # Production Readiness Gates
@@ -33,7 +27,7 @@ Threshold:
 | MCP `tools/list` tool count | > 0 |
 | `masc_status` read path | PASS |
 | dashboard `mission` read path | PASS |
-| dashboard `namespace-truth` read path | PASS |
+| dashboard `project-snapshot` read path | PASS |
 
 ## Gate 2: Keeper Turn Evidence Chain
 
@@ -102,25 +96,26 @@ If a live environment cannot run the performance harness, the release evidence
 must say `blocked` or `not evaluated`; it must not silently treat missing
 performance data as green.
 
-## Gate 4: OAS Pin And Boundary
+## Gate 4: agent core Boundary
+
+`agent_core` is a source subtree in this workspace, not an independently
+released package. Dune owns dependency resolution; the gate owns the package
+shape that Dune's library graph does not describe.
 
 Commands:
 
 ```bash
-scripts/check-oas-pin.sh --local-only
-scripts/oas-drift-check.sh
+bash scripts/check-agent-core-boundary.sh
 ```
 
 Threshold:
 
 | metric | required value |
 |---|---:|
-| declared OAS base version | matches installed `agent_sdk` |
-| declared OAS SHA | matches local or remote API surface |
-| OAS API fingerprint drift | 0 |
-| MASC-specific semantics added to OAS | 0 |
+| `packages/agent_core` package shape (lib/dune, test/dune, models.toml, no symlink) | intact |
+| MASC-specific semantics added to agent core | 0 |
 
-OAS remains the generic runtime/proof layer.  MASC owns keeper runtime evidence,
+agent core remains the generic runtime/proof layer.  MASC owns keeper runtime evidence,
 operator semantics, and product promotion gates.
 
 ## Promotion Rule

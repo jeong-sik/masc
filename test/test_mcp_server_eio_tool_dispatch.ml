@@ -24,20 +24,10 @@ let cleanup_dir dir =
 
 let create_admin_token ?(agent_name = "stable-admin") base_path =
   match
-    Masc.Auth.create_token base_path ~agent_name ~role:Masc_domain.Admin
+    Auth.create_token base_path ~agent_name ~role:Masc_domain.Admin
   with
   | Ok (token, _cred) -> token
   | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
-
-let contains_substring s needle =
-  let s_len = String.length s in
-  let n_len = String.length needle in
-  let rec loop i =
-    if i + n_len > s_len then false
-    else if String.sub s i n_len = needle then true
-    else loop (i + 1)
-  in
-  if n_len = 0 then true else loop 0
 
 let extract_json_from_text text =
   try
@@ -94,6 +84,7 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
                  { Tool_result.class_ = Tool_result.Runtime_failure
                  ; message = "blocked-by-pre-hook"
                  ; data = `String "blocked-by-pre-hook"
+                 ; metadata = None
                  ; tool_name = name
                  ; duration_ms = 0.0
                  })

@@ -23,7 +23,7 @@ import { TextInput } from './common/input'
 import { Table, type TableColumn } from './common/table'
 import type { ManagedAsyncResource } from '../lib/async-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
-import { latestOasTelemetrySample } from '../oas-telemetry-store'
+import { latestAgentCoreTelemetrySample } from '../agent-core-telemetry-store'
 import { formatCost, formatNumber, formatPct1 } from '../lib/format-number'
 import { errorToString, MISSING_DATA_DASH } from '../lib/format-string'
 import { formatTimeHms } from '../lib/format-time'
@@ -34,6 +34,8 @@ import {
   runtimeCatalogRequestConfig as runtimeRequestConfigText,
   runtimeCatalogSnapshotFacts as runtimeSnapshotFactsText,
 } from '../lib/runtime-provider-summary'
+import { OfficialClientSessionPanel } from './official-client-session-panel'
+import { OfficialClientLoginProbe } from './official-client-login-probe'
 
 /**
  * Filters model metrics by case-insensitive substring match against
@@ -117,7 +119,7 @@ const COVERAGE_REASON_LABELS: Record<string, string> = {
 }
 
 const COVERAGE_STAGE_LABELS: Record<string, string> = {
-  oas: 'OAS',
+  agent_core: 'Agent Core',
   keeper: 'keeper',
   projection: 'projection',
   unknown: 'unknown stage',
@@ -150,11 +152,11 @@ function runtimeProviderTone(provider: DashboardRuntimeProviderSnapshot): string
   if (advertised === 'missing_auth' || advertised === 'unsupported' || advertised === 'offline') {
     return 'bad'
   }
+  if (advertised === 'configured_unverified') return 'warn'
   if (advertised === 'vertex_adc') {
     return 'warn'
   }
   if (provider.available === false) return 'bad'
-  if (provider.discovery?.healthy === false) return 'warn'
   if (provider.available === true) return 'ok'
   return 'warn'
 }
@@ -164,9 +166,10 @@ function runtimeStatusLabel(provider: DashboardRuntimeProviderSnapshot): string 
   if (advertised === 'missing_auth') return 'missing auth'
   if (advertised === 'unsupported') return 'unsupported'
   if (advertised === 'offline') return 'offline'
+  if (advertised === 'configured_unverified') return 'configured · unverified'
   if (provider.available === true) return 'available'
   if (provider.available === false) return 'unavailable'
-  return provider.discovery?.healthy === false ? 'degraded' : 'unknown'
+  return 'unknown'
 }
 
 function runtimeRequestToolChoiceText(provider: DashboardRuntimeProviderSnapshot): string | null {
@@ -470,7 +473,6 @@ function runtimeParameterDetailRows(
     detailRow('declared model', 'format', declaredFormat),
     detailRow('declared model', 'inputs', runtimeDeclaredInputText(provider)),
     detailRow('declared model', 'controls', runtimeDeclaredModelControlText(provider)),
-    detailRow('declared model', 'match prefixes', stringArrayText(declaredModel?.match_prefixes)),
     detailRow('binding', 'provider.model', textList([binding?.provider_id, binding?.model_id])),
     detailRow('binding', 'default', boolText(binding?.is_default)),
     detailRow('binding', 'concurrency', numberText(binding?.max_concurrent)),
@@ -510,8 +512,8 @@ function runtimeParameterDetailRows(
   ].filter((row): row is RuntimeParameterDetailRow => row !== null)
 }
 
-function providerProbeKey(probe: DashboardRuntimeProviderProbe): string | null {
-  return probe.runtime_id ?? null
+function providerProbeKey(probe: DashboardRuntimeProviderProbe): string {
+  return probe.runtime_id
 }
 
 function providerRuntimeKey(provider: DashboardRuntimeProviderSnapshot): string {
@@ -520,12 +522,21 @@ function providerRuntimeKey(provider: DashboardRuntimeProviderSnapshot): string 
 
 function runtimeProbeTone(probe: DashboardRuntimeProviderProbe | null | undefined): string {
   if (!probe) return 'neutral'
-  if (probe.reachable === true) return 'ok'
-  if (probe.status === 'skipped_cli') return 'neutral'
-  if (probe.status === 'missing_auth' || probe.status === 'auth_failed') return 'bad'
-  if (probe.status === 'network_error' || probe.status === 'server_error') return 'bad'
-  if (probe.reachable === false) return 'bad'
-  return 'warn'
+  switch (probe.status) {
+    case 'reachable':
+      return 'ok'
+    case 'skipped_cli':
+      return 'neutral'
+    case 'auth_failed':
+    case 'endpoint_not_found':
+    case 'server_error':
+    case 'http_error':
+    case 'invalid_execution_transport':
+    case 'invalid_endpoint':
+    case 'missing_auth':
+    case 'network_error':
+      return 'bad'
+  }
 }
 
 function runtimeProbeLabel(probe: DashboardRuntimeProviderProbe | null | undefined): string {
@@ -547,8 +558,10 @@ function runtimeProbeLabel(probe: DashboardRuntimeProviderProbe | null | undefin
       return 'cli skipped'
     case 'invalid_endpoint':
       return 'bad endpoint'
-    default:
-      return probe.status ?? 'unknown'
+    case 'invalid_execution_transport':
+      return 'bad transport'
+    case 'http_error':
+      return 'http error'
   }
 }
 
@@ -558,16 +571,15 @@ function runtimeProbeAuthLabel(probe: DashboardRuntimeProviderProbe | null | und
 }
 
 function runtimeProbeSummaryText(probe: DashboardRuntimeProbeResponse | null): string {
-  const summary = probe?.probe?.summary
+  const summary = probe?.probe.summary
   if (!summary) return 'live probe 없음'
-  return `Reachable ${summary.reachable ?? 0} · Failed ${summary.failed ?? 0} · Skipped ${summary.skipped ?? 0}`
+  return `Reachable ${summary.reachable} · Failed ${summary.failed} · Skipped ${summary.skipped}`
 }
 
 function providerProbeMap(probe: DashboardRuntimeProbeResponse | null): Map<string, DashboardRuntimeProviderProbe> {
   const map = new Map<string, DashboardRuntimeProviderProbe>()
-  for (const item of probe?.probe?.providers ?? []) {
-    const key = providerProbeKey(item)
-    if (key) map.set(key, item)
+  for (const item of probe?.probe.providers ?? []) {
+    map.set(providerProbeKey(item), item)
   }
   return map
 }
@@ -591,7 +603,6 @@ function modelMetricTone(metric: DashboardRuntimeModelMetric): string {
     if (rate < 0.85) return 'bad'
     if (rate < 0.95) return 'warn'
   }
-  if ((metric.fallback_count ?? 0) > 0) return 'warn'
   return 'ok'
 }
 
@@ -689,7 +700,7 @@ function recentEntryMissingLabel(
   // Goal: make "why is this cell empty?" observable instead of rendering an
   // opaque `--`. The `telemetry_reported`/`usage_reported` flags land earlier
   // in the response than `coverage_reason`, so they give the most direct
-  // signal when the cell is empty due to missing OAS timings vs. missing
+  // signal when the cell is empty due to missing Agent Core timings vs. missing
   // per-turn usage accounting.
   if (entry.outcome === 'error') return 'error-only'
   if (entry.usage_trust === 'untrusted') return 'untrusted'
@@ -821,7 +832,7 @@ export function RuntimeMonitor() {
   const probe = current.data?.probe ?? null
   const probeError = current.data?.probeError ?? null
   const providerProbes = providerProbeMap(probe)
-  const oasLatest = latestOasTelemetrySample.value
+  const agentCoreLatest = latestAgentCoreTelemetrySample.value
 
   // filterModelMetrics was called twice per render (no-results check + the
   // sorted list) with identical args. Memoize once and reuse so it runs at most
@@ -974,22 +985,19 @@ export function RuntimeMonitor() {
                   ${liveProbe?.error
                     ? html`<div class="text-2xs text-[var(--status-bad)]">${liveProbe.error}</div>`
                     : null}
-                  ${provider.discovery
-                    ? html`<div class="grid grid-cols-2 gap-3 text-xs text-[var(--color-fg-secondary)] pt-2 border-t border-[var(--color-border-default)]/50">
-                        <div>discovery · ${provider.discovery.healthy ? 'healthy' : 'degraded'}</div>
-                        <div class="min-w-0 truncate" title=${provider.discovery.discovered_model ?? MISSING_DATA_DASH}>
-                          discovered · ${provider.discovery.discovered_model ?? MISSING_DATA_DASH}
-                        </div>
-                        <div>ctx · ${formatNumber(provider.discovery.ctx_size)}</div>
-                        <div>slots · ${formatNumber(provider.discovery.busy_slots)}/${formatNumber(provider.discovery.total_slots)}</div>
-                        <div>idle · ${formatNumber(provider.discovery.idle_slots)}</div>
-                      </div>`
+                  ${(provider.protocol === 'codex-app-server' || provider.protocol === 'claude-code') && provider.runtime_id
+                    ? html`<${OfficialClientLoginProbe}
+                        runtimeId=${provider.runtime_id}
+                        configuredModel=${provider.model_api_name ?? provider.model_id}
+                      />`
                     : null}
                 </article>
               `})
             : html`<${EmptyState} message="runtime snapshot이 없습니다." compact />`}
         </div>
       <//>
+
+      <${OfficialClientSessionPanel} />
 
       <${SectionCard} label="런타임 메트릭">
         <div class="grid grid-cols-3 gap-3 mb-4">
@@ -1009,9 +1017,9 @@ export function RuntimeMonitor() {
             delta=${{ direction: 'flat', text: `${formatNumber(metrics?.models.reduce((sum, m) => sum + (m.total_tool_calls ?? 0), 0))} tool calls` }}
           />
         </div>
-        ${oasLatest
-          ? html`<div class="mb-3 text-2xs text-[var(--color-fg-muted)]" data-testid="oas-latest-telemetry-sample">
-              oas latest · ${oasLatest.provider_id} · ttfb ${formatNumber(oasLatest.ttfb_ms, 0)}ms · total ${formatNumber(oasLatest.total_duration_ms, 0)}ms${oasLatest.throughput_tokens_per_s != null ? ` · ${formatNumber(oasLatest.throughput_tokens_per_s, 1)} tok/s` : ''}${oasLatest.cost_usd != null ? ` · ${formatCost(oasLatest.cost_usd)}` : ''} · ${oasLatest.status_kind}
+        ${agentCoreLatest
+          ? html`<div class="mb-3 text-2xs text-[var(--color-fg-muted)]" data-testid="agent-core-latest-telemetry-sample">
+              agentCore latest · ${agentCoreLatest.provider_id} · ttfb ${formatNumber(agentCoreLatest.ttfb_ms, 0)}ms · total ${formatNumber(agentCoreLatest.total_duration_ms, 0)}ms${agentCoreLatest.throughput_tokens_per_s != null ? ` · ${formatNumber(agentCoreLatest.throughput_tokens_per_s, 1)} tok/s` : ''}${agentCoreLatest.cost_usd != null ? ` · ${formatCost(agentCoreLatest.cost_usd)}` : ''} · ${agentCoreLatest.status_kind}
             </div>`
           : null}
         <div class="flex items-center justify-end mb-2">
@@ -1055,7 +1063,7 @@ export function RuntimeMonitor() {
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
                       <strong class="text-sm text-[var(--color-fg-primary)]">${runtimeLabel}</strong>
-                      <span class="text-xs text-[var(--color-fg-muted)]">entries ${formatNumber(metric.entry_count)} · fallback ${formatNumber(metric.fallback_count)}</span>
+                      <span class="text-xs text-[var(--color-fg-muted)]">entries ${formatNumber(metric.entry_count)}</span>
                       ${metricCoverageText(metric)
                         ? html`<span class="text-2xs ${hasCoverageGap ? 'text-[var(--status-warn)]' : 'text-[var(--color-fg-muted)]'}">${metricCoverageText(metric)}</span>`
                         : null}

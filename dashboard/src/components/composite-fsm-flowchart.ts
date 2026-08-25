@@ -37,8 +37,7 @@ const MERMAID_COMPOSITE: string = `flowchart TB
     ksm_offline["Offline"] --> ksm_running["Running"]
     ksm_running --> ksm_failing["Failing"]
     ksm_failing --> ksm_running
-    ksm_running --> ksm_overflowed["Overflowed"]
-    ksm_overflowed --> ksm_compacting["Compacting"]
+    ksm_running --> ksm_compacting["Compacting"]
     ksm_compacting --> ksm_running
     ksm_running --> ksm_handingoff["HandingOff"]
     ksm_handingoff --> ksm_running
@@ -46,11 +45,9 @@ const MERMAID_COMPOSITE: string = `flowchart TB
     ksm_paused --> ksm_running
     ksm_running --> ksm_draining["Draining"]
     ksm_draining --> ksm_stopped["Stopped"]
-    ksm_stopped --> ksm_dead["Dead"]
     ksm_running --> ksm_crashed["Crashed"]
     ksm_crashed --> ksm_restarting["Restarting"]
     ksm_restarting --> ksm_running
-    ksm_restarting --> ksm_dead
   end
 
   %% ─ KTC (Turn cycle, 5 states) ──────────────────────────
@@ -98,9 +95,9 @@ const MERMAID_COMPOSITE: string = `flowchart TB
   classDef motion   fill:#1a1305,stroke:#a16207,color:#f59e0b
   classDef error    fill:#1e0a0a,stroke:#b91c1c,color:#fb7185
 
-  class ksm_stopped,ksm_dead terminal
+  class ksm_stopped terminal
   class ksm_running,ksm_paused,ktc_idle,kcl_idle,kmc_accumulating stable
-  class ksm_compacting,ksm_handingoff,ksm_overflowed,ksm_draining,ksm_restarting,ktc_prompting,ktc_executing,ktc_compacting,ktc_finalizing,kcl_selecting,kcl_trying,kmc_compacting motion
+  class ksm_compacting,ksm_handingoff,ksm_draining,ksm_restarting,ktc_prompting,ktc_executing,ktc_compacting,ktc_finalizing,kcl_selecting,kcl_trying,kmc_compacting motion
   class ksm_failing,ksm_crashed,kcl_exhausted error
 `
 

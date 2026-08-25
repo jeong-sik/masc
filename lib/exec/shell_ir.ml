@@ -26,9 +26,21 @@ type simple = {
   sandbox : Sandbox_target.t;
 }
 
+(* [Sequence] keeps its first command in a separate field so an empty
+   sequence is not representable. Each connector decides from the status of
+   whatever ran last, which is how a shell reads [a && b || c]. *)
+type connector =
+  | And_if
+  | Or_if
+  | Seq
+
 type t =
   | Simple of simple
   | Pipeline of t list
+  | Sequence of {
+      head : t;
+      tail : (connector * t) list;
+    }
 
 let rec pp_arg fmt = function
   | Lit (s, _) -> Format.fprintf fmt "%S" s
@@ -45,9 +57,21 @@ let pp_simple fmt s =
   Format.fprintf fmt "%a" Exec_program.pp s.bin;
   List.iter (fun a -> Format.pp_print_char fmt ' '; pp_arg fmt a) s.args
 
+let pp_connector fmt = function
+  | And_if -> Format.pp_print_string fmt " && "
+  | Or_if -> Format.pp_print_string fmt " || "
+  | Seq -> Format.pp_print_string fmt "; "
+
 let rec pp fmt = function
   | Simple s -> pp_simple fmt s
   | Pipeline parts ->
       Format.pp_print_list
         ~pp_sep:(fun fmt () -> Format.fprintf fmt " | ")
         pp fmt parts
+  | Sequence { head; tail } ->
+      pp fmt head;
+      List.iter
+        (fun (connector, part) ->
+          pp_connector fmt connector;
+          pp fmt part)
+        tail

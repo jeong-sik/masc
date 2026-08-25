@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0056", "0085", "0005", "0003"]
-implementation_prs: []
 ---
 
 # RFC-0178 — Types Sub-library Extraction with `_intf.ml` mli-only Surface
@@ -39,7 +38,7 @@ Measured 2026-05-26:
 
 ### 1.2 Coupling hypothesis
 
-`types_core.ml` aggregates types across at least 5 domains observed in source: keeper-side, runtime-side, OAS-side, shell-side, dashboard-side. Today every caller imports the entire 1,067-LoC module to use a single domain's types. This:
+`types_core.ml` aggregates types across at least 5 domains observed in source: keeper-side, runtime-side, agent_core-side, shell-side, dashboard-side. Today every caller imports the entire 1,067-LoC module to use a single domain's types. This:
 
 1. Inflates compile fan-out for unrelated changes (touching one keeper type recompiles runtime callers).
 2. Defeats the cycle-avoidance property `_intf.ml` would provide — when two sub-libraries each need the same type, only direct embedding works (or duplication).

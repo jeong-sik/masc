@@ -10,7 +10,7 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_agent_result
 
-let degraded_retry_runtime_of_wire ?(log_invalid = true) ~keeper_name raw =
+let degraded_retry_runtime_of_wire ~keeper_name raw =
   let trimmed = String.trim raw in
   if String.equal trimmed "" then None
   else
@@ -35,8 +35,7 @@ let degraded_retry_runtime_of_wire ?(log_invalid = true) ~keeper_name raw =
     match first_valid candidates with
     | Some _ as parsed -> parsed
     | None ->
-      if log_invalid then
-        Log.Keeper.warn ~keeper_name:keeper_name
+      Log.Keeper.warn ~keeper_name:keeper_name
           "execution_receipt degraded_retry_runtime %S is not a \
            qualified or re-qualifiable runtime name; dropping receipt field"
           raw;
@@ -45,7 +44,6 @@ let degraded_retry_runtime_of_wire ?(log_invalid = true) ~keeper_name raw =
 let finalize
     ~config
     ~meta
-    ~generation
     ~manifest_keeper_turn_id
     ~runtime_id
     ~keeper_visible_sandbox_root
@@ -58,9 +56,9 @@ let finalize
     ~runtime_rotation_attempts
     ~turn_result
     ~receipt_turn_count_ref
-    ~receipt_model_used_ref
     ~receipt_stop_reason_ref
     ~receipt_runtime_observation_ref
+    ~receipt_lane_attempt_index_ref
     ~receipt_response_text_present_ref
     () =
   (match turn_result with
@@ -68,9 +66,9 @@ let finalize
    | Error err ->
      let status, exception_kind =
        match err with
-       | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) ->
-         "timeout", Some "outer_oas_timeout"
-       | _ -> "error", Some "outer_oas_error"
+       | Agent_core.Error.Api (Llm_provider.Retry.Timeout _) ->
+         "timeout", Some "outer_agent_core_timeout"
+       | _ -> "error", Some "outer_agent_core_error"
      in
      Keeper_runtime_manifest
        .append_unfinished_provider_attempt_finished_best_effort
@@ -78,7 +76,7 @@ let finalize
          config
          runtime_manifest_context
          ~status
-         ~error:(Agent_sdk.Error.to_string err)
+         ~error:(Agent_core.Error.to_string err)
          ?exception_kind
          ());
   let receipt_ended_at = Masc_domain.now_iso () in
@@ -86,8 +84,10 @@ let finalize
     match turn_result with
     | Ok _ -> None, None
     | Error err ->
-      ( Some (Keeper_agent_error.sdk_error_kind_for_receipt err)
-      , Some (Agent_sdk.Error.to_string err) )
+      ( Some
+          (Agent_core.Error.(category err |> category_label)
+           |> Keeper_execution_receipt.error_kind_of_string)
+      , Some (Agent_core.Error.to_string err) )
   in
   let completion_contract_result
       : Keeper_execution_receipt.completion_contract_result =
@@ -103,15 +103,24 @@ let finalize
        | None ->
          Keeper_turn_disposition.to_wire Keeper_turn_disposition.Success)
     | Error err ->
-      Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err
+      Keeper_agent_error.terminal_reason_code_of_core_error_typed err
       |> Keeper_turn_terminal_code.to_wire
   in
   let runtime_observation : Runtime_observation.runtime_observation option =
     !receipt_runtime_observation_ref
   in
+  (* Truth source for cross-runtime failover: the lane walk's winning
+     candidate index ([Keeper_turn_driver.named_run_result.lane_attempt_index]),
+     not a per-runtime observation field. A winning index > 0 means this
+     turn settled on a later lane candidate after one or more earlier
+     candidates failed. A turn whose lane never produced a winner (total
+     exhaustion) leaves this ref at its fresh-per-turn default of 0, so a
+     failed turn never claims a fallback it never observed. *)
+  let lane_attempt_index = !receipt_lane_attempt_index_ref in
+  let lane_failover_applied = lane_attempt_index > 0 in
   (* #20936: the before_turn_params hook snapshots the final injected
      extra_system_context (digest + byte size) into the accumulator each
-     SDK turn; the receipt reports the last SDK turn's values. The SDK
+     agent-core turn; the receipt reports the last agent-core turn's values. Agent Core
      injects the assembled string verbatim, so computed and injected
      sizes coincide — they diverge only if an injection-side truncation
      layer ever appears. *)
@@ -128,22 +137,17 @@ let finalize
     { Keeper_execution_receipt.keeper_name = meta.name
     ; agent_name = meta.agent_name
     ; trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
-    ; generation
     ; turn_count = !receipt_turn_count_ref
-    ; oas_turn_count = !receipt_turn_count_ref
-    ; oas_dispatch_mode = Some "single_provider_agent_run"
-    ; oas_internal_runtime_disabled = true
+    ; agent_core_turn_count = !receipt_turn_count_ref
     ; current_task_id =
         Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id
-    ; goal_ids = meta.active_goal_ids
     ; outcome =
         (match turn_result with
          | Ok _ -> `Ok
          | Error err ->
-           Keeper_agent_error.receipt_outcome_kind_of_sdk_error err)
+           Keeper_agent_error.receipt_outcome_kind_of_core_error err)
     ; terminal_reason_code
     ; response_text_present = !receipt_response_text_present_ref
-    ; model_used = !receipt_model_used_ref
     ; completion_contract_result
     ; actionable_signal = acc.receipt_actionable_signal
     ; tool_surface =
@@ -158,15 +162,14 @@ let finalize
         (match runtime_observation with
          | Some obs -> List.length obs.attempts
          | None -> 0)
-    ; runtime_fallback_applied =
-        (match runtime_observation with
-         | Some obs -> obs.fallback_applied
-         | None -> false)
+    ; runtime_fallback_applied = lane_failover_applied
     ; runtime_outcome =
-        Keeper_agent_error.runtime_outcome_of_observation runtime_observation
-    ; oas_internal_runtime_allowed =
+        Keeper_agent_error.runtime_outcome_of_observation
+          ~lane_failover_applied
+          runtime_observation
+    ; agent_core_internal_runtime_allowed =
         (match runtime_observation with
-         | Some obs -> obs.oas_internal_runtime_allowed
+         | Some obs -> obs.agent_core_internal_runtime_allowed
          | None -> false)
     ; degraded_retry_applied
     ; degraded_retry_runtime =
@@ -219,7 +222,7 @@ let finalize
       ]
   in
   let append_receipt_manifest ?status ?decision ~site event =
-    let oas_turn_count = receipt.turn_count in
+    let agent_core_turn_count = receipt.turn_count in
     let status =
       match status with
       | Some status -> status
@@ -245,9 +248,9 @@ let finalize
     in
     Keeper_runtime_manifest.make ~ts:receipt.ended_at
       ~keeper_name:receipt.keeper_name ~agent_name:receipt.agent_name
-      ~trace_id:receipt.trace_id ~generation:receipt.generation
+      ~trace_id:receipt.trace_id
       ~keeper_turn_id:manifest_keeper_turn_id ~event
-      ?oas_turn_count
+      ?agent_core_turn_count
       ~runtime_id:(receipt.runtime_id)
       ~status ~decision ~receipt_path ?tool_call_log_path ()
     |> Keeper_runtime_manifest.append_best_effort ~site config
@@ -270,7 +273,7 @@ let finalize
     | Ok _, Ok () -> turn_result_with_operator_disposition
     | Ok _, Error err_msg ->
       Error
-        (Keeper_internal_error.sdk_error_of_masc_internal_error
+        (Keeper_internal_error.core_error_of_masc_internal_error
            (Keeper_internal_error.Receipt_persistence_failed
               { detail = err_msg }))
   in

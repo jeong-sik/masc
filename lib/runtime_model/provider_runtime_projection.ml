@@ -1,11 +1,11 @@
 (** Runtime provider projection for MASC-owned model labels.
 
-    OAS owns provider identity through [Agent_sdk.Provider_runtime_binding].
+    AGENT_CORE owns provider identity through [Agent_core.Provider_runtime_binding].
     This module only projects those bindings into MASC's local label and
     fallback conventions, so runtime callers do not depend on a MASC-owned
     provider adapter boundary. *)
 
-module Runtime_binding = Agent_sdk.Provider_runtime_binding
+module Runtime_binding = Agent_core.Provider_runtime_binding
 
 type runtime_kind =
   | Local
@@ -119,25 +119,11 @@ let profile_of_binding (binding : Runtime_binding.t) =
 
 let all_profiles () = Runtime_binding.all () |> List.map profile_of_binding
 
-let find_profile_by_alias label =
-  let normalized = normalize_label label in
-  match Runtime_binding.find normalized with
-  | Some binding -> Some (profile_of_binding binding)
-  | None ->
-    all_profiles ()
-    |> List.find_opt (fun profile ->
-      List.exists (fun alias -> String.equal alias normalized) profile.aliases)
-;;
-
 let find_profile_by_runtime_prefix label =
   let normalized = normalize_label label in
   all_profiles ()
   |> List.find_opt (fun profile ->
     String.equal (normalize_label profile.runtime_prefix) normalized)
-;;
-
-let runtime_prefix_of_provider_label label =
-  find_profile_by_alias label |> Option.map (fun profile -> profile.runtime_prefix)
 ;;
 
 let provider_profile_for_runtime_prefix = find_profile_by_runtime_prefix
@@ -233,7 +219,7 @@ let auto_label_for_binding (binding : Runtime_binding.t) =
 let participates_in_auto_detection (binding : Runtime_binding.t) =
   let profile = profile_of_binding binding in
   (* OpenRouter has no provider-wide default model; it needs an explicit
-     runtime_model despite being a normal OAS binding. Once OAS exposes that
+     runtime_model despite being a normal AGENT_CORE binding. Once AGENT_CORE exposes that
      as catalog data, this compatibility exception can disappear. *)
   profile.runtime_kind = Direct_api
   && not (String.equal (normalize_label profile.id) "openrouter")

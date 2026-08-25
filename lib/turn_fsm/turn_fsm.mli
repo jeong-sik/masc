@@ -62,10 +62,7 @@ val failure_reason_label : failure_reason -> string
 val to_tla_symbol : _ turn_state -> string
 val turn_state_label : _ turn_state -> string
 
-val pp_cancel_reason : Format.formatter -> cancel_reason -> unit
 val pp_failure_reason : Format.formatter -> failure_reason -> unit
-val pp_turn_state : Format.formatter -> _ turn_state -> unit
-
 type transition_action =
   | StartTurn
   | PhaseGateSkip
@@ -87,6 +84,11 @@ type transition_action =
   | TerminalStutter
 (** Runtime image of [KeeperTurnFSM.tla] [Next] actions. *)
 
+(** Every [transition_action] constructor. Exposed so the TLA+ parity guard can
+    walk the set; [transition_action_label] is exhaustive, so a new constructor
+    fails to compile there before it can be missed here. *)
+val all_transition_actions : transition_action list
+
 val transition_action_label : transition_action -> string
 
 type transition_context = {
@@ -95,8 +97,6 @@ type transition_context = {
 }
 (** Orthogonal stop-signal state for a transition.  Mirrors the TLA+ variable
     [stop_signaled] in [specs/keeper-turn-fsm/KeeperTurnFSM.tla]. *)
-
-val default_transition_context : transition_context
 
 type transition_violation = {
   from_state : string;
@@ -125,8 +125,6 @@ val assert_transition_allowed :
 
 type any_state = Any : _ turn_state -> any_state
 val any_state_label : any_state -> string
-val pp_any_state : Format.formatter -> any_state -> unit
-
 val all_symbols : string list
 val active_symbols : string list
 val terminal_symbols : string list

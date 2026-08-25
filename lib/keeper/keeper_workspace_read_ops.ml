@@ -65,10 +65,10 @@ let try_handle_with_outcome
        | Error msg -> Read_target_error msg
        | Ok () -> Read_target target)
   in
-  (* TEL-OK: read-op adapter delegates to Keeper_tool_execute_shell_ir/Exec_dispatch or the
+  (* TEL-OK: read-op adapter delegates to Keeper_tooling.Execute_shell_ir/Exec_dispatch or the
      sandbox read runner; execution telemetry stays with those runtime paths. *)
   let dispatch_host_shell_ir ~workdir ir =
-    Keeper_tool_execute_shell_ir.dispatch
+    Keeper_tooling.Execute_shell_ir.dispatch
       ~workdir
       ~sandbox:(Masc_exec.Sandbox_target.host ())
       ir
@@ -90,10 +90,22 @@ let try_handle_with_outcome
     match dispatch_host_shell_ir ~workdir ir with
     | Error (Gate_reject diagnostic) ->
       Keeper_tool_execution.failure (error_json ~fields diagnostic)
-    | Error Cannot_parse ->
-      Keeper_tool_execution.failure (error_json ~fields "Cannot parse command")
-    | Error Too_complex ->
-      Keeper_tool_execution.failure (error_json ~fields "Command too complex")
+    | Error (Cannot_parse reason) ->
+      Keeper_tool_execution.failure
+        (error_json
+           ~fields
+           (Printf.sprintf
+              "Cannot parse command: %s"
+              (Keeper_tooling.Execute_shell_ir.parse_reason_tag reason)))
+    | Error (Too_complex reason) ->
+      Keeper_tool_execution.failure
+        (error_json
+           ~fields
+           (Printf.sprintf
+              "Command too complex: %s. %s."
+              (Keeper_tooling.Execute_shell_ir.too_complex_reason_tag reason)
+              (Keeper_tooling.Subset_rewrite.to_string
+                 (Keeper_tooling.Subset_rewrite.of_reason reason))))
     | Error (Path_reject e) ->
       Keeper_tool_execution.failure
         (error_json ~fields:[ "blocked_cmd", `String cmd ] e)
@@ -105,15 +117,15 @@ let try_handle_with_outcome
   let run_readonly_in_sandbox ?(ok_exit_codes = [ 0 ]) ~target ~command_argv
       ~max_bytes ~timeout_sec () =
     (* Pre-flight parity with [Keeper_sandbox_read_backend.read_file]: verify
-       the host target exists before spawning a container, so a wrong
-       repos/<segment> guess fails with a precise host-path error instead of
-       burning a docker run that ends in "No such file or directory". *)
+       the host target exists before spawning a container, so a wrong path
+       guess fails with a precise host-path error instead of burning a docker
+       run that ends in "No such file or directory". *)
     if not (Sys.file_exists target) then
       Error
         (sandbox_read_error ~target
            (Printf.sprintf
-              "path_not_found: %s (host path does not exist; list repos/ to \
-               see your actual checkouts before searching)"
+              "path_not_found: %s (host path does not exist; list your \
+               workspace root to see what is actually there before searching)"
               target))
     else
       match
@@ -207,7 +219,7 @@ let try_handle_with_outcome
                 | Error (`Unknown executable) ->
                   path_error (Printf.sprintf "invalid executable: %S" executable)
                 | Ok bin ->
-                  let ir = Keeper_tool_execute_shell_ir.simple_bin bin argv in
+                  let ir = Keeper_tooling.Execute_shell_ir.simple_bin bin argv in
                   run_host_shell_ir
                     ~workdir:(host_search_workdir target)
                     ~cmd:op

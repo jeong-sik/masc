@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 module StringMap = Set_util.StringMap
 
 (** Tool_usage_log -- Durable call logging for non-public registered tools.
@@ -32,7 +15,7 @@ let is_non_public name = not (Tool_catalog.is_public_mcp name)
 
 (* -- Store management -- *)
 
-let store_ref : Dated_jsonl.t option ref = ref None
+let store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
 let source_name = "tool_usage"
 let source_producer = "tool_usage_log"
 let dashboard_surface = "/api/v1/dashboard/tools"
@@ -46,36 +29,18 @@ let freshness_slo_s = Masc_time_constants.hour
 
 let store_dir masc_root = Filename.concat masc_root "tool_usage"
 
+(* Opt-in: unset keeps everything. A malformed value now means the same here
+   as in every other store (#27110). *)
 let retention_days () =
-  (* Opt-in: see lib/keeper_tool_call_log.ml retention_days. *)
-  match Sys.getenv_opt "MASC_TOOL_USAGE_LOG_RETENTION_DAYS" with
-  | Some raw ->
-    (match int_of_string_opt (String.trim raw) with
-     | Some days when days > 0 -> Some days
-     | _ -> None)
-  | None -> None
+  match
+    Env_config_core.get_retention_days
+      ~default:Env_config_core.Retain_forever
+      "MASC_TOOL_USAGE_LOG_RETENTION_DAYS"
+  with
+  | Env_config_core.Retain_forever -> None
+  | Env_config_core.Prune_after_days days -> Some days
 
-let numeric_ts_field fields name =
-  match List.assoc_opt name fields with
-  | Some (`Float ts) -> Some ts
-  | Some (`Int ts) -> Some (Float.of_int ts)
-  | _ -> None
-
-let ts_of_record = function
-  | `Assoc fields -> (
-      match numeric_ts_field fields "ts_unix" with
-      | Some ts -> Some ts
-      | None -> (
-          match numeric_ts_field fields "ts" with
-          | Some ts -> Some ts
-          | None -> (
-              match numeric_ts_field fields "timestamp" with
-              | Some ts -> Some ts
-              | None -> (
-                  match List.assoc_opt "ts_iso" fields with
-                  | Some (`String iso) -> Masc_domain.parse_iso8601_opt iso
-                  | _ -> None))))
-  | _ -> None
+let ts_of_record = Dashboard_tool_source_freshness.latest_ts_of_record
 
 let latest_ts_of_entries entries =
   List.fold_left
@@ -85,45 +50,21 @@ let latest_ts_of_entries entries =
       | _ -> acc)
     None entries
 
-let freshness_fields ~now latest_ts =
-  match latest_ts with
-  | Some ts ->
-    [
-      ("latest_ts_unix", `Float ts);
-      ("latest_ts_iso", `String (Masc_domain.iso8601_of_unix_seconds ts));
-      ("latest_age_s", `Float (Stdlib.Float.max 0.0 (now -. ts)));
-    ]
-  | None ->
-    [
-      ("latest_ts_unix", `Null);
-      ("latest_ts_iso", `Null);
-      ("latest_age_s", `Null);
-    ]
+let freshness_fields = Dashboard_tool_source_freshness.freshness_fields
 
+(* The last of four bodies this file kept alongside
+   Dashboard_tool_source_freshness. They were identical but for freshness_slo_s
+   being a constant here and a parameter there, so one vocabulary had two
+   producers and adding a state to either left the other untouched (#27157). *)
 let source_health_fields ~now ~exists ~entry_count ~latest_ts ?coverage_gap () =
-  let health, stale_reason =
-    match coverage_gap with
-    | Some gap ->
-      ( "coverage_gap",
-        Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap )
-    | None ->
-      if not exists then ("missing", "store_missing")
-      else if entry_count = 0 then ("empty", "no_entries")
-      else
-        match latest_ts with
-        | None -> ("empty", "no_entries")
-        | Some ts ->
-          let latest_age_s = Stdlib.Float.max 0.0 (now -. ts) in
-          if Stdlib.Float.compare latest_age_s freshness_slo_s > 0 then
-            ("stale", "freshness_slo_exceeded")
-          else
-            ("ok", "")
-  in
-  [
-    ("health", `String health);
-    ( "stale_reason",
-      if String.equal stale_reason "" then `Null else `String stale_reason );
-  ]
+  Dashboard_tool_source_freshness.health_fields
+    ~now
+    ~exists
+    ~entry_count
+    ~latest_ts
+    ~freshness_slo_s
+    ?coverage_gap
+    ()
 
 let coverage_gaps masc_root =
   Telemetry_coverage_gap.read_recent ~masc_root ~n:50
@@ -134,14 +75,9 @@ let coverage_gaps masc_root =
 let latest_coverage_gap gaps =
   List.rev gaps |> List.find_opt (fun _ -> true)
 
-let coverage_gap_recovered ~latest_ts gap =
-  match latest_ts, ts_of_record gap with
-  | Some source_ts, Some gap_ts when Float.compare source_ts gap_ts >= 0 ->
-    true
-  | _ -> false
-
-let active_coverage_gaps ~latest_ts gaps =
-  List.filter (fun gap -> not (coverage_gap_recovered ~latest_ts gap)) gaps
+(* Was re-typed here; the kit owns it (#27157). coverage_gap_recovered goes
+   with it — this file only ever called it through active_coverage_gaps. *)
+let active_coverage_gaps = Dashboard_tool_source_freshness.active_coverage_gaps
 
 let synthetic_store_gap ~durable_store ~stale_reason ~error =
   let now = Time_compat.now () in
@@ -215,9 +151,9 @@ let init ?cluster_name ~base_path () =
      Fs_compat.mkdir_p dir;
      let retention_days = retention_days () in
      let store = Dated_jsonl.create ~base_dir:dir ?retention_days () in
-     store_ref := Some store
+     Atomic.set store_ref (Some store)
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-     store_ref := None;
+     Atomic.set store_ref None;
      Log.Misc.warn "tool_usage_log: init failed: %s" (Stdlib.Printexc.to_string exn);
      record_coverage_gap
        ~masc_root
@@ -250,7 +186,7 @@ let record_to_json ~tool_name ~disposition ~caller =
    the whole surface). Keeper-facing IO-failure handling is supplied at the
    install boundary (lib/server/server_bootstrap_maintenance.ml). *)
 let log_call ~on_io_failure ~tool_name ~disposition ~caller =
-  match !store_ref with
+  match Atomic.get store_ref with
   | None ->
       Log.Misc.debug "tool_usage_log: store not initialized, skipping %s" tool_name
   | Some store ->
@@ -300,7 +236,7 @@ let install ~on_io_failure =
 (* -- Read utilities (for analysis) -- *)
 
 let read_recent ?(n = 10_000) () : Yojson.Safe.t list =
-  match !store_ref with
+  match Atomic.get store_ref with
   | None -> []
   | Some store -> Dated_jsonl.read_recent store n
 

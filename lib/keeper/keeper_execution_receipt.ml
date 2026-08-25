@@ -57,7 +57,6 @@ type operator_disposition_kind =
   | Disp_pass_next_model
   | Disp_user_cancelled
   | Disp_skipped
-  | Disp_operator_reset_required
   | Disp_unknown
 
 let operator_disposition_kind_to_string = function
@@ -66,7 +65,6 @@ let operator_disposition_kind_to_string = function
   | Disp_pass_next_model -> "pass_next_model"
   | Disp_user_cancelled -> "user_cancelled"
   | Disp_skipped -> "skipped"
-  | Disp_operator_reset_required -> "operator_reset_required"
   | Disp_unknown -> "unknown"
 ;;
 
@@ -76,7 +74,6 @@ let operator_disposition_kind_of_string = function
   | "pass_next_model" -> Some Disp_pass_next_model
   | "user_cancelled" -> Some Disp_user_cancelled
   | "skipped" -> Some Disp_skipped
-  | "operator_reset_required" -> Some Disp_operator_reset_required
   | "unknown" -> Some Disp_unknown
   | _ -> None
 ;;
@@ -95,6 +92,10 @@ type operator_disposition_reason =
   | Reason_cancelled
   | Reason_phase_skipped
   | Reason_transcript_corruption
+  | Reason_provider_attempt_effect_fenced
+  | Reason_tool_correction_lost
+  | Reason_accept_rejected
+  | Reason_terminal_effect_failed
   | Reason_unmapped_runtime_state
 
 let operator_disposition_reason_to_string = function
@@ -111,6 +112,11 @@ let operator_disposition_reason_to_string = function
   | Reason_cancelled -> "cancelled"
   | Reason_phase_skipped -> "phase_skipped"
   | Reason_transcript_corruption -> "transcript_corruption"
+  | Reason_provider_attempt_effect_fenced ->
+    Keeper_internal_error.provider_attempt_effect_fenced_kind
+  | Reason_tool_correction_lost -> Keeper_internal_error.tool_correction_lost_kind
+  | Reason_accept_rejected -> Keeper_internal_error.accept_rejected_kind
+  | Reason_terminal_effect_failed -> Keeper_internal_error.terminal_effect_failed_kind
   | Reason_unmapped_runtime_state -> "unmapped_runtime_state"
 ;;
 
@@ -155,15 +161,43 @@ let operator_disposition (receipt : t)
   match terminal_reason with
   | _ when input_required -> Disp_pass, Reason_input_required
   | Keeper_terminal_reason.Transcript_corruption _ ->
-    Disp_operator_reset_required, Reason_transcript_corruption
+    (* An incomplete tool transcript no longer parks the Keeper: boot-time
+       tail recovery closes the open cycles a process death leaves, and the
+       turn otherwise follows the ordinary typed route. Keep the operator
+       alert with the typed reason rather than claiming a pause that no
+       longer happens. *)
+    Disp_unknown, Reason_transcript_corruption
+  | Keeper_terminal_reason.Provider_attempt_effect_fenced _ ->
+    (* Same-turn replay stays forbidden, and the runtime lifecycle remains
+       responsible for selecting a later turn. Keep the operator alert, but
+       classify the canonical typed failure instead of incrementing the
+       unmapped-state regression metric. *)
+    Disp_unknown, Reason_provider_attempt_effect_fenced
+  | Keeper_terminal_reason.Tool_correction_lost _ ->
+    (* Identical disposition to the fence above; only the label differs so a
+       lost correction (masc#28885) is countable apart from an ordinary
+       fenced provider failure. *)
+    Disp_unknown, Reason_tool_correction_lost
+  | Keeper_terminal_reason.Terminal_effect_failed _ ->
+    (* Third member of the same family: the turn's closing tool may or may not
+       have put something outside the process, so the turn is never replayed
+       and the stimulus behind it is retired rather than requeued. A human
+       decides what happened, which is why this sits with its siblings above
+       the retry-label guards — a degraded retry elsewhere in the turn must
+       not relabel an alert this one earns on its own. Until now it reached
+       the operator as an unmapped state (#29929). *)
+    Disp_unknown, Reason_terminal_effect_failed
   | Keeper_terminal_reason.Runtime_exhausted _ ->
     Disp_fail_open_next_runtime, Reason_runtime_exhausted
   | Keeper_terminal_reason.Capacity_backpressure _ ->
     (* The typed runtime route treats provider-capacity failure as retryable and
-       continues with another eligible runtime.  This receipt is written for
-       the failed pre-dispatch attempt before that rotation is reflected in
-       [runtime_fallback_applied], so it must neither claim a completed
-       fallback nor page a human. *)
+       continues with another eligible runtime.  [runtime_fallback_applied] is
+       derived from the lane walk's winning candidate index, which only
+       advances on a candidate that actually wins the turn — this receipt is
+       for the failed pre-dispatch attempt itself, so [runtime_fallback_applied]
+       stays false here even though the lane goes on to try a later
+       candidate. It must neither claim a completed fallback nor page a
+       human. *)
     Disp_fail_open_next_runtime, Reason_capacity_backpressure
   | _ when preflight_config_failure ->
     Disp_fail_open_next_runtime, Reason_preflight_config_error
@@ -197,6 +231,7 @@ let operator_disposition (receipt : t)
     Disp_fail_open_next_runtime, Reason_internal_error
   | Config_or_auth _
   | Provider_runtime_failure _
+  | Accept_rejected _
   | Pre_dispatch_success _
   | Unknown _ ->
     (* Generic fall-through. [Config_or_auth] and
@@ -223,6 +258,10 @@ let operator_disposition (receipt : t)
        | Config_or_auth _
        | Provider_runtime_failure _
        | Transcript_corruption _
+       | Provider_attempt_effect_fenced _
+       | Tool_correction_lost _
+       | Accept_rejected _
+       | Terminal_effect_failed _
        | Internal_error _
        | Unknown _ -> false)
     then Disp_pass, Reason_healthy
@@ -251,6 +290,28 @@ let operator_disposition (receipt : t)
            because the outcome is success — the runtime was simply not
            needed.  Previously unmapped (1062 WARN/day on 2026-05-24). *)
         Disp_pass, Reason_healthy
+      | _
+        when (match terminal_reason with
+              | Keeper_terminal_reason.Accept_rejected _ -> true
+              | Runtime_exhausted _
+              | Capacity_backpressure _
+              | Config_or_auth _
+              | Provider_runtime_failure _
+              | Transcript_corruption _
+              | Provider_attempt_effect_fenced _
+              | Tool_correction_lost _
+              | Terminal_effect_failed _
+              | Internal_error _
+              | Pre_dispatch_success _
+              | Unknown _ -> false) ->
+        (* Last, not first: the degraded-retry and fallback labels above say
+           what the system DID about the rejection, which is the more useful
+           fact when one of them applies — and today they claim 41 of the 42
+           accept rejections on record. This arm names the remaining case
+           instead of calling it an unclassified state. Not pageable: the
+           provider was healthy, MASC's own accept contract refused the
+           answer, and the keeper takes its next turn. *)
+        Disp_fail_open_next_runtime, Reason_accept_rejected
       | _ ->
         Otel_metric_store.inc_counter Keeper_metrics.(to_string ReceiptUnmappedDisposition) ();
         Otel_metric_store.inc_counter
@@ -298,10 +359,8 @@ let to_json_with_operator_disposition
       ~agent_name:receipt.agent_name
       ~trace_id:receipt.trace_id
       ~session_id:receipt.trace_id
-      ~generation:receipt.generation
       ?keeper_turn_id:receipt.turn_count
       ?task_id:receipt.current_task_id
-      ~goal_ids:receipt.goal_ids
       ~sandbox_profile:(Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)
       ?sandbox_root:receipt.sandbox_root
       ~network_mode:(Keeper_types_profile_sandbox.network_mode_to_string receipt.network_mode)
@@ -329,14 +388,9 @@ let to_json_with_operator_disposition
     ; "keeper_name", `String receipt.keeper_name
     ; "agent_name", `String receipt.agent_name
     ; "trace_id", `String receipt.trace_id
-    ; "generation", `Int receipt.generation
     ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count )
-    ; ( "oas_turn_count", Json_util.int_opt_to_json receipt.oas_turn_count )
-    ; ( "oas_dispatch_mode", string_opt_json receipt.oas_dispatch_mode )
-    ; ( "oas_internal_runtime_disabled"
-      , `Bool receipt.oas_internal_runtime_disabled )
+    ; ( "agent_core_turn_count", Json_util.int_opt_to_json receipt.agent_core_turn_count )
     ; ( "current_task_id", string_opt_json receipt.current_task_id )
-    ; "goal_ids", list_json receipt.goal_ids
     ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
     ; "terminal_reason_code", `String terminal_reason_code
     ; "operator_disposition", `String operator_disposition
@@ -344,7 +398,6 @@ let to_json_with_operator_disposition
     ; "runtime_contract", runtime_contract
     ; "action_radius", action_radius
     ; "response_text_present", `Bool receipt.response_text_present
-    ; "model_used", `Null
     ; ( "completion_contract_result"
       , `String (completion_contract_result_to_string receipt.completion_contract_result) )
     ; ( "actionable_signal"
@@ -371,7 +424,7 @@ let to_json_with_operator_disposition
           ; "attempt_count", `Int receipt.runtime_attempt_count
           ; "fallback_applied", `Bool receipt.runtime_fallback_applied
           ; "outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
-          ; "oas_internal_runtime_allowed", `Bool receipt.oas_internal_runtime_allowed
+          ; "agent_core_internal_runtime_allowed", `Bool receipt.agent_core_internal_runtime_allowed
           ; "degraded_retry_applied", `Bool receipt.degraded_retry_applied
           ; ( "degraded_retry_runtime"
             , match receipt.degraded_retry_runtime with
@@ -413,7 +466,6 @@ let to_json receipt =
    receipt evidence; it makes no watchdog or liveness claim for a keeper that
    did not produce a receipt. *)
 let needs_operator_broadcast = function
-  | Disp_operator_reset_required
   | Disp_unknown -> true
   | Disp_pass
   | Disp_fail_open_next_runtime
@@ -431,14 +483,12 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; "keeper_name", `String receipt.keeper_name
     ; "agent_name", `String receipt.agent_name
     ; "trace_id", `String receipt.trace_id
-    ; "generation", `Int receipt.generation
     ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count )
     ; "disposition", `String disposition_s
     ; "disposition_reason", `String reason_s
     ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
     ; "terminal_reason_code", `String terminal_reason_code
     ; ( "current_task_id", string_opt_json receipt.current_task_id )
-    ; "goal_ids", list_json receipt.goal_ids
     ; "response_text_present", `Bool receipt.response_text_present
     ; "runtime_id", `String (receipt.runtime_id)
     ; "runtime_outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
@@ -455,7 +505,6 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
           ; ( "network_mode"
             , `String (Keeper_types_profile_sandbox.network_mode_to_string receipt.network_mode) )
           ] )
-    ; "model_used", `Null
     ; ( "stop_reason"
       , match receipt.stop_reason with
         | Some value -> `String (stop_reason_to_string value)

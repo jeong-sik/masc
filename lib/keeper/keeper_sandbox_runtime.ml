@@ -1,8 +1,8 @@
 (** See .mli for contract.
 
-    Extracted from [Keeper_tool_command_runtime] (RFC-0006 Phase B-3b) so both
-    [Keeper_tool_command_runtime] (bash sandbox) and [Keeper_sandbox_read_backend] (read
-    sandbox) can preflight the host docker runtime against the
+    Shared by [Keeper_tool_execute_runtime] and
+    [Keeper_sandbox_read_backend] so both execution and read paths can
+    preflight the host docker runtime against the
     configured hardening requirements without forming a module
     dependency cycle. *)
 
@@ -792,27 +792,6 @@ let docker_preflight_to_yojson (preflight : docker_preflight) =
     ; ( "next_actions"
       , `List (List.map (fun action -> `String action) preflight.next_actions) )
     ]
-;;
-
-let docker_preflight_failure_message (preflight : docker_preflight) =
-  let reasons =
-    [ preflight.docker_runtime_error
-    ; preflight.hardening_error
-    ; preflight.image_error
-    ]
-    |> List.filter_map (fun item -> item)
-    |> List.filter (fun s -> s <> "")
-    |> Json_util.dedupe_keep_order
-  in
-  let next_actions =
-    match preflight.next_actions with
-    | [] -> ""
-    | actions -> " Next: " ^ String.concat " " actions
-  in
-  Printf.sprintf
-    "Docker sandbox preflight failed: %s.%s"
-    (String.concat "; " reasons)
-    next_actions
 ;;
 
 let ensure_keeper_sandbox_runtime_optional ?timeout_sec () =

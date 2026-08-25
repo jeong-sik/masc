@@ -28,7 +28,7 @@ include Server_mcp_transport_http_agui
 
 (** [safe_respond_with_string] is a local guard against the
     [Failure "invalid state, currently handling error"] race that
-    httpun raises when a client disconnects during a long OAS turn
+    httpun raises when a client disconnects during a long AGENT_CORE turn
     (2026-05-05 cycle9 FATAL incident).  All direct
     [Httpun.Reqd.respond_with_string] calls in this file use this
     wrapper instead of the raw httpun call. *)
@@ -39,7 +39,7 @@ let safe_respond_with_string reqd response body =
   | Failure msg ->
       Log.Server.warn
         "[mcp-http-post] respond_with_string skipped (reqd invalid state; \
-         2026-05-05 OAS cancel race): %s"
+         2026-05-05 AGENT_CORE cancel race): %s"
         msg
   | exn ->
       Log.Server.warn
@@ -59,7 +59,7 @@ let safe_respond_with_string reqd response body =
    is RFC-0100 PR-3's auto-upgrade work, not this PR.
 
    Same race-safe wrapping as {!safe_respond_with_string} — the
-   2026-05-05 OAS cancel-race exception class is caught and downgraded
+   2026-05-05 AGENT_CORE cancel-race exception class is caught and downgraded
    to a WARN. *)
 let safe_respond_chunked reqd response body =
   try
@@ -71,7 +71,7 @@ let safe_respond_chunked reqd response body =
   | Failure msg ->
       Log.Server.warn
         "[mcp-http-post] respond_chunked skipped (reqd invalid state; \
-         2026-05-05 OAS cancel race): %s"
+         2026-05-05 AGENT_CORE cancel race): %s"
         msg
   | exn ->
       Log.Server.warn
@@ -108,8 +108,6 @@ let body_tools_call_name body_str =
         | _ -> None)
     | _ -> None
   with Yojson.Json_error _ -> None
-
-let session_cookie_header = Server_mcp_transport_http_headers.session_cookie_header
 
 let session_cookie_headers = Server_mcp_transport_http_headers.session_cookie_headers
 
@@ -190,14 +188,20 @@ let should_stream_post_tools_call request body_str accept_mode =
       | None -> false)
   | _ -> false
 
-let inject_agent_name_into_body ?(rewrite_existing = false) ?(strip_token = false)
-    ~agent_name body_str =
+let inject_agent_name_into_body ?(rewrite_existing = false) ~agent_name body_str =
   Server_mcp_actor_injection.inject_agent_name_into_body ~rewrite_existing
-    ~strip_token ~agent_name body_str
+    ~agent_name body_str
 
 let body_with_canonical_http_actor ~base_path ~auth_token request body_str =
   let actor = Server_auth.dashboard_actor_for_request ~base_path request in
   Server_mcp_actor_injection.reduce ~actor ~auth_token body_str
+
+(* Auth-reject metric/log endpoint labels. Built on [profile_label]
+   so the label vocabulary cannot drift from the session module's
+   profile naming. *)
+let post_endpoint_label profile = "POST " ^ profile_label profile
+let get_endpoint_label profile = "GET " ^ profile_label profile
+let delete_endpoint_label profile = "DELETE " ^ profile_label profile
 
 let handle_post_mcp ~deps ?(profile = Full) request reqd =
   let request_authority = Server_request_authority.current_exn () in
@@ -259,10 +263,8 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
     let* () =
       match validate_protocol_version_continuity ~session_id request with
       | Ok () -> Ok ()
-      | Error msg ->
-          let body =
-            Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
-          in
+      | Error rejection ->
+          let body = protocol_version_rejection_body rejection in
           let headers =
             Httpun.Headers.of_list
               (("content-length", string_of_int (String.length body))
@@ -276,16 +278,15 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
       match auth_result with
       | Ok () -> Ok ()
       | Error failure ->
-          respond_mcp_error
-            ?data:(auth_failure_data failure)
-            ~code:Mcp_error_code.Auth_error
+          respond_mcp_auth_error
             ~deps
             ~request_authority
+            ~endpoint:(post_endpoint_label profile)
             request
             reqd
             ~session_id
             ~protocol_version
-            failure.message;
+            failure;
           Error ()
     in
     let otel_transport_context =
@@ -595,10 +596,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
       safe_respond_with_string reqd response msg
   | Ok () -> (
       match validate_protocol_version_continuity ~session_id request with
-      | Error msg ->
-          let body =
-            Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
-          in
+      | Error rejection ->
+          let body = protocol_version_rejection_body rejection in
           let headers =
             Httpun.Headers.of_list
               (("content-length", string_of_int (String.length body))
@@ -609,16 +608,15 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
       | Ok () ->
       (match auth_result with
       | Error failure ->
-          respond_mcp_error
-            ?data:(auth_failure_data failure)
-            ~code:Mcp_error_code.Auth_error
+          respond_mcp_auth_error
             ~deps
             ~request_authority
+            ~endpoint:(get_endpoint_label profile)
             request
             reqd
             ~session_id
             ~protocol_version
-            failure.message
+            failure
       | Ok () ->
           (match last_event_id with
           | Error error ->
@@ -773,16 +771,15 @@ let handle_get_operator_mcp ~deps request reqd =
   let base_path = deps.get_base_path () in
   match deps.verify_operator_mcp_auth ~base_path request with
   | Error failure ->
-      respond_mcp_error
-        ?data:(auth_failure_data failure)
-        ~code:Mcp_error_code.Auth_error
+      respond_mcp_auth_error
         ~deps
         ~request_authority
+        ~endpoint:(get_endpoint_label Operator_remote)
         request
         reqd
         ~session_id
         ~protocol_version
-        failure.message
+        failure
   | Ok () ->
       handle_get_mcp ~deps ~profile:Operator_remote request reqd
 
@@ -803,16 +800,15 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
   | Error failure ->
       let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
       let protocol_version = get_protocol_version_for_session ~session_id request in
-      respond_mcp_error
-        ?data:(auth_failure_data failure)
-        ~code:Mcp_error_code.Auth_error
+      respond_mcp_auth_error
         ~deps
         ~request_authority
+        ~endpoint:(delete_endpoint_label profile)
         request
         reqd
         ~session_id
         ~protocol_version
-        failure.message
+        failure
   | Ok () -> (
       match get_session_id_any request with
       | Some session_id -> (
@@ -826,10 +822,8 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
               safe_respond_with_string reqd response msg
           | Ok () -> (
               match validate_protocol_version_continuity ~session_id request with
-              | Error msg ->
-                  let body =
-                    Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
-                  in
+              | Error rejection ->
+                  let body = protocol_version_rejection_body rejection in
                   let protocol_version =
                     get_protocol_version_for_session ~session_id request
                   in

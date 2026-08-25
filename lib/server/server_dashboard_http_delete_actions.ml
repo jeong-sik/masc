@@ -139,7 +139,7 @@ let validate_agent_alias alias =
 let exact_agent_aliases agent_names =
   let aliases =
     agent_names
-    |> List.filter_map String_util.trim_to_option
+    |> List.filter_map String_util.trim_nonempty
     |> List.sort_uniq String.compare
   in
   let rec validate acc = function
@@ -369,8 +369,6 @@ let keeper_artifact_path config keeper_name artifact =
   match artifact with
   | Keeper_metrics_store_artifact ->
     Some (Keeper_types_support.keeper_metrics_dir config keeper_name)
-  | Keeper_generation_index_artifact ->
-    Some (Keeper_types_support.keeper_generation_index_path config keeper_name)
   | Keeper_decision_log_artifact ->
     Some (Keeper_types_support.keeper_decision_log_path config keeper_name)
   | Keeper_feedback_log_artifact ->
@@ -397,6 +395,11 @@ let keeper_artifact_path config keeper_name artifact =
          (Config_dir_resolver.keepers_dir_for_base_path
             ~base_path:config.Workspace.base_path)
          (keeper_name ^ ".toml"))
+  | Keeper_chat_store_artifact ->
+    Some
+      (Keeper_chat_store.chat_path
+         ~base_dir:config.Workspace.base_path
+         ~keeper_name)
   | Agent_artifact_bundle _ -> None
 ;;
 
@@ -435,12 +438,12 @@ let purge_dashboard_keeper_artifacts config operation =
                  successor keeper appending to the deleted inode, so no new
                  journal file would ever appear. *)
               Fs_compat.invalidate_cached_writer path
-            | Keeper_generation_index_artifact
             | Keeper_decision_log_artifact
             | Keeper_feedback_log_artifact
             | Keeper_runtime_directory_artifact
             | Keeper_memory_current_artifact
             | Keeper_configuration_artifact
+            | Keeper_chat_store_artifact
             | Agent_artifact_bundle _ -> ());
            (match remove_path_strict path with
             | Error _ as error -> error
@@ -449,12 +452,12 @@ let purge_dashboard_keeper_artifacts config operation =
                | Keeper_runtime_directory_artifact ->
                  Keeper_fs.invalidate_dir path
                | Keeper_metrics_store_artifact
-               | Keeper_generation_index_artifact
                | Keeper_decision_log_artifact
                | Keeper_feedback_log_artifact
                | Keeper_memory_current_artifact
                | Keeper_memory_journal_artifact
                | Keeper_configuration_artifact
+               | Keeper_chat_store_artifact
                | Agent_artifact_bundle _ -> ());
               Log.Keeper.debug
                 "dashboard Keeper purge artifact: keeper=%s path=%s outcome=%s"
@@ -468,7 +471,7 @@ let purge_dashboard_keeper_artifacts config operation =
     remove artifacts
   | Operator_stop_retain_meta
   | Operator_stop_remove_meta
-  | Dead_tombstone_cleanup ->
+  | Supervisor_cleanup ->
     Error "dashboard Keeper purge artifacts require a dashboard purge operation"
 ;;
 
@@ -510,15 +513,15 @@ let handle_dashboard_keeper_purge_completion config operation =
           Ok ()))
      | Operator_stop_retain_meta
      | Operator_stop_remove_meta
-     | Dead_tombstone_cleanup ->
+     | Supervisor_cleanup ->
        Error "dashboard purge completion does not belong to a dashboard purge operation")
 ;;
 
 let handle_keeper_lifecycle_completion config operation = function
   | Keeper_shutdown_types.Dashboard_keeper_purged ->
     handle_dashboard_keeper_purge_completion config operation
-  | Dead_tombstone_reaped as action ->
-    Keeper_supervisor_cleanup_tombstone.handle_completion config operation action
+  | Supervisor_cleaned as action ->
+    Keeper_supervisor_cleanup.handle_completion config operation action
 ;;
 
 let keeper_purge_resolve_status = function
@@ -528,7 +531,12 @@ let keeper_purge_resolve_status = function
   | Keeper_metadata_required _
   | Keeper_metadata_name_mismatch _
   | Keeper_agent_name_invalid _ -> `Conflict
+  | Keeper_lane_executing _ -> `Conflict
+  | Keeper_owner_unavailable _ -> `Service_unavailable
   | Keeper_operation_unreadable _ -> `Internal_server_error
+  (* Not 500: the record is readable and the state is exact. It is a conflict
+     the operator resolves by releasing the fence. *)
+  | Keeper_purge_blocked _ -> `Conflict
 ;;
 
 let keeper_purge_submit_status = function
@@ -538,10 +546,6 @@ let keeper_purge_submit_status = function
   | Existing_operation_lane_mismatch _
   | Existing_operation_intent_mismatch _ -> `Conflict
 ;;
-
-module For_testing = struct
-  let purge_dashboard_keeper_artifacts = purge_dashboard_keeper_artifacts
-end
 
 let respond_keeper_purge_operation_accepted ~request reqd operation =
   match operation.Keeper_shutdown_types.cleanup_intent.reason with
@@ -564,7 +568,7 @@ let respond_keeper_purge_operation_accepted ~request reqd operation =
       reqd
   | Operator_stop_retain_meta
   | Operator_stop_remove_meta
-  | Dead_tombstone_cleanup ->
+  | Supervisor_cleanup ->
     respond_error
       ~status:`Internal_server_error
       ~request
@@ -809,155 +813,5 @@ let add_delete_action_routes router =
                         "agent or keeper not found")))
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "agent_name")
-         )
-       ) request reqd)
-
-  (* ── Board moderation routes (Phase 2) ───────────────────────────── *)
-
-  |> Http.Router.post "/api/v1/dashboard/board/moderation/flag" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state agent_name req reqd ->
-         Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let json = Yojson.Safe.from_string body_str in
-             let target_kind_str =
-               Safe_ops.json_string_opt "target_kind" json
-               |> Option.value ~default:"post"
-             in
-             let target_kind =
-               Board_moderation.target_kind_of_string target_kind_str
-               |> Option.value ~default:Board_moderation.Target_post
-             in
-             let reason_str =
-               Safe_ops.json_string_opt "reason" json
-               |> Option.value ~default:"spam"
-             in
-             let reason =
-               Board_moderation.flag_reason_of_string reason_str
-               |> Option.value ~default:Board_moderation.Spam
-             in
-            (match Safe_ops.json_string_opt "target_id" json with
-             | None ->
-                  respond_error ~request:req reqd (invalid_request "target_id")
-             | Some target_id ->
-                  let reporter = agent_name in
-                   (match Board_moderation.flag ~target_kind ~target_id ~reporter ~reason with
-                    | Error msg ->
-                       Http.Response.json_value ~status:`Conflict ~request:req
-                         (`Assoc [("ok", `Bool false); ("error", `String msg)])
-                         reqd
-                    | Ok entry ->
-                       Http.Response.json_value ~compress:true ~request:req
-                         (`Assoc
-                            [
-                              ("ok", `Bool true);
-                              ("entry", Board_moderation.queue_entry_to_json entry);
-                            ])
-                         reqd))
-           with Yojson.Json_error _ ->
-             respond_error ~request:req reqd "invalid JSON body"
-         )
-       ) request reqd)
-
-  |> Http.Router.get "/api/v1/dashboard/board/moderation/queue" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state _agent_name req reqd ->
-         let resolved_param =
-           match Server_utils.query_param req "resolved" with
-           | Some "true"  -> Some true
-           | Some "false" -> Some false
-           | _            -> None
-         in
-         let entries = Board_moderation.get_queue ?resolved:resolved_param () in
-         let json = `Assoc [
-           ("ok",      `Bool true);
-           ("entries", `List (List.map Board_moderation.queue_entry_to_json entries));
-           ("count",   `Int (List.length entries));
-         ] in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-
-  |> Http.Router.post "/api/v1/dashboard/board/moderation/action" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun _state agent_name req reqd ->
-         Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let json = Yojson.Safe.from_string body_str in
-             let target_kind_str =
-               Safe_ops.json_string_opt "target_kind" json
-               |> Option.value ~default:"post"
-             in
-             let target_kind =
-               Board_moderation.target_kind_of_string target_kind_str
-               |> Option.value ~default:Board_moderation.Target_post
-             in
-             let action_str =
-               Safe_ops.json_string_opt "action" json
-               |> Option.value ~default:""
-             in
-               (match Board_moderation.action_kind_of_string action_str with
-                | None ->
-                  Http.Response.json_value ~status:`Bad_request ~request:req
-                    (`Assoc
-                       [
-                         ("ok", `Bool false);
-                         ( "error",
-                           `String
-                             ("unknown action: " ^ action_str
-                            ^ "; valid: approve, remove, hide, warn") );
-                       ])
-                    reqd
-              | Some action ->
-                  (match Safe_ops.json_string_opt "target_id" json with
-                   | None ->
-                       respond_error ~request:req reqd (invalid_request "target_id")
-                   | Some target_id ->
-                       let reason =
-                         Option.bind
-                           (Safe_ops.json_string_opt "reason" json)
-                           Board_moderation.flag_reason_of_string
-                       in
-                       let note = Safe_ops.json_string_opt "note" json in
-                       let actor = agent_name in
-                       (match Board_moderation.record_action ~target_kind ~target_id
-                                ~actor ~action ?reason ?note () with
-                        | Error msg ->
-                            Http.Response.json_value
-                              ~status:`Internal_server_error ~request:req
-                              (`Assoc
-                                 [("ok", `Bool false); ("error", `String msg)])
-                              reqd
-                        | Ok entry ->
-                            (* If the action is Remove, also delete from board *)
-                            let delete_result =
-                              if action = Board_moderation.Remove then
-                                (match target_kind with
-                                 | Board_moderation.Target_post ->
-                                     (match Board_dispatch.delete_post ~post_id:target_id with
-                                      | Ok () -> None
-                                      | Error e ->
-                                          Some (Board_tool.board_error_to_string e))
-                                 | Board_moderation.Target_comment ->
-                                     (* Comment removal not yet backed by dispatch; note only *)
-                                     None)
-                              else
-                                None
-                            in
-                            let extra =
-                              match delete_result with
-                              | None      -> []
-                              | Some warn -> [("delete_warning", `String warn)]
-                            in
-                            Http.Response.json_value ~compress:true ~request:req
-                              (`Assoc
-                                 ([ ("ok", `Bool true);
-                                    ( "entry",
-                                      Board_moderation.audit_entry_to_json entry
-                                    );
-                                  ]
-                                  @ extra))
-                              reqd)))
-           with Yojson.Json_error _ ->
-             respond_error ~request:req reqd "invalid JSON body"
          )
        ) request reqd)

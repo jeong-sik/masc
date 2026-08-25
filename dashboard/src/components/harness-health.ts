@@ -328,7 +328,7 @@ export function HarnessHealth() {
 
       <${SectionCard} label="감시 흐름도" class="section v2-lab-panel">
         ${!data || !flowSource ? html`
-          <${EmptySignal} text="감시 흐름 데이터가 없습니다." />
+          <${EmptySignal} text="감시 흐름 데이터 없음" />
         ` : html`
           <${HarnessFlowCard} data=${data} />
         `}
@@ -336,7 +336,7 @@ export function HarnessHealth() {
 
       <${SectionCard} label="평가 모델 건강도" class="section">
         ${!data || !cal ? html`
-          <${EmptySignal} text="평가 모델 데이터가 없습니다." />
+          <${EmptySignal} text="평가 모델 데이터 없음" />
         ` : html`
           <div class="space-y-4">
             <${RailHeader}
@@ -401,7 +401,7 @@ export function HarnessHealth() {
 
       <${SectionCard} label="압축 전 상태" class="section">
         ${!data ? html`
-          <${EmptySignal} text="압축 전 상태 데이터가 없습니다." />
+          <${EmptySignal} text="압축 전 상태 데이터 없음" />
         ` : html`
           <div class="space-y-4">
             <${RailHeader}
@@ -441,7 +441,7 @@ export function HarnessHealth() {
 
       <${SectionCard} label="세대 교체 기록" class="section">
         ${!data ? html`
-          <${EmptySignal} text="세대 교체 데이터가 없습니다." />
+          <${EmptySignal} text="세대 교체 데이터 없음" />
         ` : html`
           <div class="space-y-4">
             <${RailHeader}

@@ -21,7 +21,6 @@ import {
   traceSlots,
 } from './session-trace-state'
 import type { TraceSummary } from './session-trace-state'
-import { isOfflineStatus } from '../../lib/keeper-classifiers'
 
 // ── Summary bar ────────────────────────────────────────
 
@@ -29,41 +28,41 @@ function TraceSummaryBar({ summary }: { summary: TraceSummary }) {
   const s = summary
   if (
     s.tool_call_count === 0
-    && s.oas_tool_count === 0
-    && s.oas_turn_count === 0
-    && s.oas_context_count === 0
+    && s.agent_core_tool_count === 0
+    && s.agent_core_turn_count === 0
+    && s.agent_core_context_count === 0
     && s.broadcast_count === 0
     && s.task_completed_count === 0
-    && s.oas_input_tokens === 0
-    && s.oas_output_tokens === 0
-    && s.oas_cache_creation_tokens === 0
-    && s.oas_cache_read_tokens === 0
-    && s.oas_cache_miss_input_tokens === 0
-    && s.oas_llm_call_count === 0
-    && s.oas_error_count === 0
+    && s.agent_core_input_tokens === 0
+    && s.agent_core_output_tokens === 0
+    && s.agent_core_cache_creation_tokens === 0
+    && s.agent_core_cache_read_tokens === 0
+    && s.agent_core_cache_miss_input_tokens === 0
+    && s.agent_core_llm_call_count === 0
+    && s.agent_core_error_count === 0
   ) return null
 
   const items: string[] = []
   const cacheSeenTokens =
-    s.oas_cache_read_tokens + s.oas_cache_miss_input_tokens
+    s.agent_core_cache_read_tokens + s.agent_core_cache_miss_input_tokens
   const cacheHitPct =
     cacheSeenTokens > 0
-      ? Math.round((s.oas_cache_read_tokens / cacheSeenTokens) * 100)
+      ? Math.round((s.agent_core_cache_read_tokens / cacheSeenTokens) * 100)
       : null
   if (s.tool_call_count > 0) items.push(`도구 ${s.tool_call_count}회`)
-  if (s.oas_tool_count > 0) items.push(`OAS 도구 ${s.oas_tool_count}회`)
-  if (s.oas_turn_count > 0) items.push(`OAS 턴 ${s.oas_turn_count}건`)
-  if (s.oas_context_count > 0) items.push(`OAS 압축 ${s.oas_context_count}건`)
-  if (s.oas_tokens_saved > 0) items.push(`절약 ${s.oas_tokens_saved}tok`)
-  if (s.oas_input_tokens > 0 || s.oas_output_tokens > 0) {
-    items.push(`OAS 토큰 ${s.oas_input_tokens}→${s.oas_output_tokens}`)
+  if (s.agent_core_tool_count > 0) items.push(`Agent Core 도구 ${s.agent_core_tool_count}회`)
+  if (s.agent_core_turn_count > 0) items.push(`Agent Core 턴 ${s.agent_core_turn_count}건`)
+  if (s.agent_core_context_count > 0) items.push(`Agent Core 압축 ${s.agent_core_context_count}건`)
+  if (s.agent_core_tokens_saved > 0) items.push(`절약 ${s.agent_core_tokens_saved}tok`)
+  if (s.agent_core_input_tokens > 0 || s.agent_core_output_tokens > 0) {
+    items.push(`Agent Core 토큰 ${s.agent_core_input_tokens}→${s.agent_core_output_tokens}`)
   }
-  if (s.oas_cache_read_tokens > 0) items.push(`캐시 read ${s.oas_cache_read_tokens}tok`)
-  if (s.oas_cache_creation_tokens > 0) items.push(`캐시 write ${s.oas_cache_creation_tokens}tok`)
-  if (s.oas_cache_miss_input_tokens > 0) items.push(`캐시 miss ${s.oas_cache_miss_input_tokens}tok`)
+  if (s.agent_core_cache_read_tokens > 0) items.push(`캐시 read ${s.agent_core_cache_read_tokens}tok`)
+  if (s.agent_core_cache_creation_tokens > 0) items.push(`캐시 write ${s.agent_core_cache_creation_tokens}tok`)
+  if (s.agent_core_cache_miss_input_tokens > 0) items.push(`캐시 miss ${s.agent_core_cache_miss_input_tokens}tok`)
   if (cacheHitPct != null) items.push(`캐시 hit ${cacheHitPct}%`)
-  if (s.oas_llm_call_count > 0) items.push(`LLM 호출 ${s.oas_llm_call_count}회`)
-  if (s.oas_error_count > 0) items.push(`OAS 에러 ${s.oas_error_count}건`)
+  if (s.agent_core_llm_call_count > 0) items.push(`LLM 호출 ${s.agent_core_llm_call_count}회`)
+  if (s.agent_core_error_count > 0) items.push(`Agent Core 에러 ${s.agent_core_error_count}건`)
   if (s.task_completed_count > 0) items.push(`완료 ${s.task_completed_count}건`)
   if (s.task_claimed_count > 0) items.push(`할당 ${s.task_claimed_count}건`)
   if (s.broadcast_count > 0) items.push(`메시지 ${s.broadcast_count}건`)
@@ -158,11 +157,14 @@ function LiveIndicator({ events }: { events: readonly { ts: number }[] }) {
 interface SessionTraceViewProps {
   agentName: string
   isKeeper: boolean
-  keeperStatus?: string
-  keeperGeneration?: number
+  /** 빈 목록에 어떤 문장을 쓸지만 정한다. 예전에는 `keeper.status` 문자열을
+   *  받아 이 컴포넌트가 직접 분류했는데, 그 단어는 health 와 phase 를 한 번
+   *  접은 값이라 여기까지 오면 판정이 화면마다 갈렸다. 부모가 축을 읽어
+   *  답만 넘긴다. */
+  keeperOffline?: boolean
 }
 
-export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGeneration }: SessionTraceViewProps) {
+export function SessionTraceView({ agentName, isKeeper, keeperOffline }: SessionTraceViewProps) {
   const listRef = useRef<HTMLDivElement>(null)
 
   // Load on first mount. Clean up only when agentName changes (overlay closes).
@@ -219,12 +221,10 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
 
   // Empty state — contextual message based on keeper status
   if (events.length === 0) {
-    const isOffline = keeperStatus && isOfflineStatus(keeperStatus)
+    const isOffline = keeperOffline === true
     const msg = isOffline
-      ? '키퍼가 오프라인입니다. 기동하면 활동이 기록됩니다.'
-      : (keeperGeneration ?? 0) === 0
-        ? '아직 시작되지 않은 키퍼입니다. 활동 기록이 없습니다.'
-        : '현재 세대에서 기록된 활동이 없습니다.'
+      ? '오프라인 — 기동 시 기록 시작'
+      : '기록된 활동 없음'
     return html`
       <div class="py-4">
         <${EmptyState} message=${msg} compact />

@@ -4,7 +4,7 @@ import { Tools } from './tools/tools-main'
 import { HarnessHealth } from './harness-health'
 import { LabPerf } from './lab-perf'
 import { KeeperMemoryHealth } from './memory/keeper-memory-health'
-import { AuditIntegrity } from './memory/audit-integrity'
+import { SectionNav } from './common/section-nav'
 import { SurfaceHeader } from './common/surface-header'
 
 type LabSection =
@@ -12,7 +12,6 @@ type LabSection =
   | 'harness'
   | 'performance'
   | 'keeper-memory-health'
-  | 'audit-integrity'
 
 function currentSection(): LabSection {
   const section = route.value.params.section
@@ -20,7 +19,6 @@ function currentSection(): LabSection {
     section === 'harness'
     || section === 'performance'
     || section === 'keeper-memory-health'
-    || section === 'audit-integrity'
   ) {
     return section
   }
@@ -32,6 +30,7 @@ export function Lab() {
 
   return html`
     <div class="v2-lab-surface ss-surface bg-surface-page flex flex-col gap-6" data-testid="lab-surface">
+      <${SectionNav} tab="lab" current=${section} />
       <${SurfaceHeader} />
       ${section === 'tools' ? html`
         <${Tools} />
@@ -47,10 +46,6 @@ export function Lab() {
 
       ${section === 'keeper-memory-health' ? html`
         <${KeeperMemoryHealth} />
-      ` : null}
-
-      ${section === 'audit-integrity' ? html`
-        <${AuditIntegrity} />
       ` : null}
     </div>
   `

@@ -34,7 +34,6 @@ type credential_comparison =
   | Equal
   | Different of collision_log
 
-val collision_log_to_yojson : collision_log -> Yojson.Safe.t
 val constant_time_string_equal : string -> string -> bool
 (** Timing-resistant equality provided by {!Eqaf.equal}. Execution time
     depends on the input lengths, not their contents. Auth callers compare
@@ -42,8 +41,6 @@ val constant_time_string_equal : string -> string -> bool
 
 val compare_credentials :
   token_hash_prefix:string -> agent_credential -> agent_credential -> credential_comparison
-
-val emit_collision_event : collision_log -> unit
 
 (** {1 Token lookup} *)
 
@@ -64,15 +61,6 @@ val resolve_agent_from_token :
 
 (** {1 Raw token credential persistence} *)
 
-val expires_at_for_auth_config : auth_config -> string option
-
-val save_raw_token_credential_with_expiry :
-  string -> agent_name:string -> role:agent_role -> raw_token:string -> expires_at:string option ->
-  (agent_credential, masc_error) result
-(** Raw externally supplied tokens are opaque and preserve their exact bytes,
-    but must contain at least one non-whitespace character. They are hashed to
-    a fixed-width SHA-256 hex digest before storage or comparison. *)
-
 val save_raw_token_credential :
   string -> agent_name:string -> role:agent_role -> raw_token:string ->
   (agent_credential, masc_error) result
@@ -91,6 +79,14 @@ val create_token_without_expiry :
   string -> agent_name:string -> role:agent_role ->
   (string * agent_credential, masc_error) result
 
+val create_token_expiring_in :
+  string -> agent_name:string -> role:agent_role -> hours:int ->
+  (string * agent_credential, masc_error) result
+(** [create_token_expiring_in config ~agent_name ~role ~hours] returns a fresh
+    raw token whose credential expires [hours] from now, ignoring the auth
+    config's own window. Rejects a window outside 1..8760 hours rather than
+    raising, so a caller that computes the number can report the refusal. *)
+
 (** {1 Shared-token rotation} *)
 
 type rotation_outcome = {
@@ -98,27 +94,12 @@ type rotation_outcome = {
   rotated_agents : (string * (unit, masc_error) result) list;
 }
 
-val save_rotated_raw_token :
-  string -> agent_credential -> raw_token:string ->
-  (agent_credential, masc_error) result
-
-val rotate_shared_tokens_matching :
-  string -> include_agent:(string -> bool) -> rotation_outcome list
-
 val rotate_shared_tokens : string -> rotation_outcome list
 
 val rotate_shared_tokens_for_agents :
   string -> agent_names:string list -> rotation_outcome list
 
 (** {1 Bearer-token mismatch helpers} *)
-
-val record_bearer_token_mismatch : expected_agent:string -> actual_agent:string -> unit
-
-val bearer_token_owner_mismatch_message :
-  requested_agent:string -> token_owner:string -> string
-
-val missing_credential_error :
-  string -> agent_name:string -> token:string -> masc_error
 
 val verify_token_owner_alias :
   string -> agent_name:string -> token:string -> (agent_credential, masc_error) result

@@ -1,10 +1,10 @@
-.PHONY: all build dashboard dev-dashboard bonsai-dashboard bonsai-dashboard-if-available dev-bonsai-dashboard clean-bonsai-dashboard bonsai-dashboard-tokens build-all doc install-deps pin-external-deps sync-oas-pin-docs dev-setup run
+.PHONY: all build dashboard dev-dashboard bonsai-dashboard bonsai-dashboard-if-available dev-bonsai-dashboard clean-bonsai-dashboard bonsai-dashboard-tokens build-all doc install-deps pin-external-deps dev-setup run
 
 # Default target — OCaml + dashboard
 all: build-all
 
 # Build OCaml + dashboard (dashboard rebuilds only when sources changed)
-build: diagnostics-oas-pin
+build:
 	scripts/dune-local.sh build
 	@scripts/build-dashboard-if-needed.sh
 
@@ -77,12 +77,9 @@ doc:
 install-deps:
 	opam install . --deps-only --with-test -y
 
-# Align first-party opam pins (agent_sdk, grpc-direct, etc.) to repo SSOT.
+# Align external opam pins to repo SSOT.
 pin-external-deps:
 	bash scripts/opam-pin-external-deps.sh
-
-sync-oas-pin-docs:
-	bash scripts/sync-oas-pin-docs.sh
 
 # Development setup
 dev-setup: pin-external-deps install-deps

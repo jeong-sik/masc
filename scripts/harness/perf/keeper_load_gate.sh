@@ -47,11 +47,10 @@ INJECT_INTERVAL="${INJECT_INTERVAL:-0.3}"       # seconds between board posts
 INJECT_AUTHOR="${INJECT_AUTHOR:-operator}"
 THRESHOLD_MS="${THRESHOLD_MS:-250}"
 MAX_AMP="${MAX_AMP:-8}"
-PERSONA="${PERSONA:-analyst}"
-# Source root holding config/personas/<PERSONA>. Resolved from an explicit path,
-# never home-anchored (SSOT-R6): point it at a populated MASC root.
-PERSONA_SOURCE_ROOT="${MASC_PERSONA_SOURCE_ROOT:-}"
-BORROW_MODEL="${BORROW_MODEL:-deepseek-v4-flash}"  # must be an OAS catalog id_prefix
+KEEPER_PROMPT="${KEEPER_PROMPT:-analyst}"
+# Source root holding config/keepers/<KEEPER_PROMPT>.toml.
+KEEPER_SOURCE_ROOT="${MASC_KEEPER_SOURCE_ROOT:-}"
+BORROW_MODEL="${BORROW_MODEL:-deepseek-v4-flash}"  # must be an AGENT_CORE catalog id_prefix
 HOG_LEVELS="${HOG_LEVELS:-0 $((NCPU-1))}"       # host CPU hogs to sweep alongside keeper load
 
 RUN_ID="${RUN_ID:-keeperload-$(date +%Y%m%d_%H%M%S)-$$}"
@@ -68,8 +67,8 @@ Usage: $(basename "$0") [options]
   --threshold-ms N     max /health p95 under load before RED (default: $THRESHOLD_MS)
   --max-amp N          max p95 amplification before RED (default: $MAX_AMP)
   -h|--help            this help
-Requires: python3, curl, jq, and MASC_PERSONA_SOURCE_ROOT pointing at a
-populated MASC root (one that has config/personas/<persona>). Boots a server
+Requires: python3, curl, jq, and MASC_KEEPER_SOURCE_ROOT pointing at a
+populated MASC root with config/keepers/<name>.toml. Boots a server
 with real keeper turns against a network-free mock provider; no cloud
 credentials needed.
 EOF
@@ -202,7 +201,7 @@ measure_level() {
 }
 
 # ---- seed config ------------------------------------------------------------
-mkdir -p "$BASE_PATH/.masc/config/keepers" "$BASE_PATH/.masc/config/personas"
+mkdir -p "$BASE_PATH/.masc/config/keepers"
 # Disable MCP auth for this ephemeral local harness so the board injector can call
 # masc_board_post without a Bearer token. default_auth_config (types_auth.ml) is
 # enabled+require_token when no file exists, which 401s the injector. This base
@@ -211,20 +210,19 @@ mkdir -p "$BASE_PATH/.masc/auth"
 cat > "$BASE_PATH/.masc/auth/config.json" <<EOF
 {"enabled": false, "workspace_secret_hash": null, "require_token": false, "token_expiry_hours": 24}
 EOF
-if [[ -z "$PERSONA_SOURCE_ROOT" ]]; then
-  echo "ERROR: set MASC_PERSONA_SOURCE_ROOT to a populated MASC root (one that has" >&2
-  echo "       config/personas/$PERSONA), e.g. MASC_PERSONA_SOURCE_ROOT=<your-masc-root>" >&2
+if [[ -z "$KEEPER_SOURCE_ROOT" ]]; then
+  echo "ERROR: set MASC_KEEPER_SOURCE_ROOT to a populated MASC root" >&2
   exit 1
 fi
-if [[ -d "$PERSONA_SOURCE_ROOT/config/personas/$PERSONA" ]]; then
-  cp -R "$PERSONA_SOURCE_ROOT/config/personas/$PERSONA" "$BASE_PATH/.masc/config/personas/$PERSONA"
-else
-  echo "ERROR: persona dir not found: $PERSONA_SOURCE_ROOT/config/personas/$PERSONA" >&2; exit 1
+KEEPER_PROMPT_SOURCE="$KEEPER_SOURCE_ROOT/config/keepers/$KEEPER_PROMPT.toml"
+if [[ ! -f "$KEEPER_PROMPT_SOURCE" ]]; then
+  echo "ERROR: Keeper prompt not found: $KEEPER_PROMPT_SOURCE" >&2
+  exit 1
 fi
 MOCK_PORT="$(harness_pick_free_port)"
 cat > "$BASE_PATH/.masc/config/runtime.toml" <<EOF
 # Mock runtime: borrow a catalog-valid model id ($BORROW_MODEL is an
-# OAS catalog id_prefix) so init_default_strict's capability gate passes,
+# AGENT_CORE catalog id_prefix) so init_default_strict's capability gate passes,
 # but route the provider to the local network-free mock.
 [runtime]
 default = "mock.mockmodel"
@@ -249,7 +247,7 @@ max-concurrent = 64
 max-request-body-bytes = 524288
 EOF
 
-cat > "$BASE_PATH/.masc/config/oas-models-overlay.toml" <<EOF
+cat > "$BASE_PATH/.masc/config/agent-core-models-overlay.toml" <<EOF
 [[providers]]
 id = "mock"
 kind = "openai_compat"
@@ -278,18 +276,10 @@ model_id = "$BORROW_MODEL"
 EOF
 
 for ((k=1;k<=KEEPERS;k++)); do
-  cat > "$BASE_PATH/.masc/config/keepers/perf_keeper_${k}.toml" <<EOF
-[keeper]
-name = "perf_keeper_${k}"
-persona_name = "$PERSONA"
-goal = "Generate steady autonomous keeper load for the perf harness."
-autoboot_enabled = true
-proactive_enabled = true
-proactive_idle_sec = 1
-proactive_cooldown_sec = 1
-sandbox_profile = "local"
-instructions = "You are a load-generating test keeper. Each turn, do minimal work."
-EOF
+  # The source keeper's TOML already carries its instructions; copy it and
+  # rename so every perf keeper is a complete declaration in one file.
+  sed "s/^name = .*/name = \"perf_keeper_${k}\"/" \
+    "$KEEPER_PROMPT_SOURCE" > "$BASE_PATH/.masc/config/keepers/perf_keeper_${k}.toml"
 done
 
 # ---- start mock + server ----------------------------------------------------

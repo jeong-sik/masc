@@ -4,7 +4,7 @@
     내기 어렵다. 그래서 LLM이 내기 쉬운 자연스러운 JSON(named fields, [decision]은
     [{"kind": ...}] 태그 객체)을 받아 내부 타입으로 매핑하는 손-작성 파서를 둔다.
 
-    순수 함수 — agent_sdk 의존 없이 fusion_core에서 단위 테스트 가능. OAS의
+    순수 함수 — agent_core 의존 없이 fusion_core에서 단위 테스트 가능. AGENT_CORE의
     [tool_param list] schema 구성은 소비자(lib/fusion/fusion_judge)가 담당한다.
 
     기대 JSON 형태 (LLM 지시용, {!expected_json_doc}와 일치):

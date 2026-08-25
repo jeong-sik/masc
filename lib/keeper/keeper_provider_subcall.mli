@@ -10,9 +10,10 @@ type complete_fn =
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   config:Llm_provider.Provider_config.t ->
-  messages:Agent_sdk.Types.message list ->
+  messages:Agent_core.Types.message list ->
+  ?tools:Yojson.Safe.t list ->
   unit ->
-  (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
+  (Agent_core.Types.api_response, Llm_provider.Http_client.http_error) result
 
 val complete
   :  ?override:complete_fn
@@ -20,9 +21,16 @@ val complete
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> config:Llm_provider.Provider_config.t
-  -> messages:Agent_sdk.Types.message list
+  -> messages:Agent_core.Types.message list
+  -> ?tools:Yojson.Safe.t list
   -> unit
-  -> (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
-(** Production calls apply only
-    {!Keeper_runtime_resolved.body_timeout_override_sec} at the OAS Provider
+  -> (Agent_core.Types.api_response, Llm_provider.Http_client.http_error) result
+(** [tools] is forwarded to the provider unchanged. It exists so a caller
+    that needs to observe whether the model {e chooses} a tool can do so
+    through this boundary instead of reaching past it into
+    {!Llm_provider.Complete}: the boundary owns the resolved deadline, and a
+    caller that bypassed it to gain a parameter would silently lose that.
+
+    Production calls apply only
+    {!Keeper_runtime_resolved.body_timeout_override_sec} at the AGENT_CORE Provider
     boundary. No feature-local wall-clock timeout is installed. *)

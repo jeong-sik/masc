@@ -13,6 +13,9 @@ type api_format =
   | Messages_api
   | Chat_completions_api
   | Ollama_api
+  | Codex_app_server_runtime
+  | Antigravity_cli_runtime
+  | Claude_code_runtime
 [@@deriving show, eq]
 
 type transport =
@@ -44,8 +47,24 @@ type capabilities =
     per-provider HTTP header injection. *)
 let connect_timeout_s_key = "connect-timeout-s"
 
+type antigravity_effort =
+  | Antigravity_low
+  | Antigravity_medium
+  | Antigravity_high
+[@@deriving show, eq]
+
+type antigravity_cli_options =
+  { agent : string option
+  ; effort : antigravity_effort option
+  ; timeout_s : float
+  }
+[@@deriving show, eq]
+
 type provider =
   { id : string
+  ; enabled : bool
+    (** Whether bindings owned by this provider may be materialized. Omitted
+        [enabled] in TOML defaults to [true]. *)
   ; display_name : string
   ; protocol : string
   ; api_format : api_format
@@ -56,12 +75,15 @@ type provider =
   ; healthcheck_path : string option
   ; headers : (string * string) list option
   ; connect_timeout_s : float option
-    (** Per-provider override for the OAS connect + initial-response-headers
-      wall-clock timeout (seconds). [None] keeps the OAS kind-based default
+    (** Per-provider override for the AGENT_CORE connect + initial-response-headers
+      wall-clock timeout (seconds). [None] keeps the AGENT_CORE kind-based default
       (see [Llm_provider.Provider_config.default_connect_timeout_s]). Declared
       on the provider, not the model, because it is a transport property.
-      oas#2163, RFC-OAS-026 I2: MASC declares the budget; OAS owns enforcement
+      agent-core boundary, Agent Core contract I2: MASC declares the budget; AGENT_CORE owns enforcement
       and phase=Http_operation attribution. *)
+  ; antigravity_cli : antigravity_cli_options option
+    (** Typed [antigravity-cli] process options. Present exactly for providers
+        using that protocol; absent for every other transport. *)
   }
 [@@deriving show, eq]
 
@@ -71,7 +93,7 @@ type provider =
     Pinned on the model because the same physical model can be served by
     backends with different thinking-control wire shapes.
 
-    This re-exports the OAS capability enum so OAS variant changes break MASC
+    This re-exports the AGENT_CORE capability enum so AGENT_CORE variant changes break MASC
     compile instead of leaving a stale local mirror. *)
 type thinking_control_format =
   Llm_provider.Capabilities.thinking_control_format =
@@ -86,7 +108,15 @@ type thinking_control_format =
   | Enable_thinking
 [@@deriving show, eq]
 
-(** Per-model capabilities, mirroring OAS [Llm_provider.Capabilities] for the
+type reasoning_streaming_format =
+  Llm_provider.Capabilities.reasoning_streaming_format =
+  | Default_reasoning_streaming
+  | No_reasoning_streaming
+  | Delta_reasoning_field of string
+  | Template_reasoning_streaming
+[@@deriving show, eq]
+
+(** Per-model capabilities, mirroring AGENT_CORE [Llm_provider.Capabilities] for the
     fields callers branch on. Fields already present on {!model_spec}
     ([tools_support]/[thinking_support]/[max_context]/[streaming]) are not
     duplicated here, to avoid two-SSOT drift. *)
@@ -98,7 +128,10 @@ type model_capabilities =
   ; supports_parallel_tool_calls : bool
   ; supports_extended_thinking : bool
   ; supports_reasoning_budget : bool
+  ; declared_supports_reasoning_budget : bool option
   ; thinking_control_format : thinking_control_format
+  ; declared_thinking_control_format : thinking_control_format option
+  ; reasoning_streaming_format : reasoning_streaming_format option
   ; supports_image_input : bool
   ; supports_audio_input : bool
   ; supports_video_input : bool
@@ -127,7 +160,10 @@ let model_capabilities_default =
   ; supports_parallel_tool_calls = false
   ; supports_extended_thinking = false
   ; supports_reasoning_budget = false
+  ; declared_supports_reasoning_budget = None
   ; thinking_control_format = No_thinking_control
+  ; declared_thinking_control_format = None
+  ; reasoning_streaming_format = None
   ; supports_image_input = false
   ; supports_audio_input = false
   ; supports_video_input = false
@@ -149,16 +185,15 @@ let model_capabilities_default =
   }
 ;;
 
-(** [models.<id>] — capability declaration. [match_prefixes] empty = match only
-    exact [api_name] equality; non-empty = match any requested model id starting
-    with one of the prefixes (longest-prefix-first; resolver lives outside the
-    schema and is added only if a binding needs fuzzy resolution — RFC-0206 R4). *)
+(** [models.<id>] — capability declaration. A requested model id resolves by
+    exact [api_name] equality. RFC-0206 R4 forbids porting the longest-prefix
+    matcher until a binding actually requires fuzzy resolution. *)
 type model_spec =
   { id : string
   ; api_name : string
   ; tools_support : bool
   ; max_context : int option
-      (** [models.<id>.max-context] operator override. [None] means the OAS
+      (** [models.<id>.max-context] operator override. [None] means the AGENT_CORE
           capability catalog's max-context is the sole source; resolved via
           {!Runtime.resolve_max_context_of_runtime}, never read directly. *)
   ; thinking_support : bool
@@ -167,7 +202,7 @@ type model_spec =
   ; streaming : bool
   ; temperature : float option
     (** [temperature] — per-model sampling temperature for keeper turns. [None]
-        keeps the caller fallback ([MASC_KEEPER_UNIFIED_TEMP], then the OAS
+        keeps the caller fallback ([MASC_KEEPER_UNIFIED_TEMP], then the AGENT_CORE
         [agent_default] profile). [Some t] overrides it for every turn on this
         model. Required for models that reject the default value: e.g. Kimi K2.7
         (kimi-for-coding) accepts only temperature = 1.0 and rejects any other
@@ -176,17 +211,60 @@ type model_spec =
         symmetric to the [max-output-tokens]/[max_tokens] path. *)
   ; top_p : float option
     (** [top_p] — per-model nucleus sampling probability forwarded through the
-        materialized OAS [Provider_config]. [None] leaves the caller/OAS profile
+        materialized AGENT_CORE [Provider_config]. [None] leaves the caller/AGENT_CORE profile
         unchanged. *)
   ; top_k : int option
     (** [top_k] — per-model top-k sampling cap forwarded through the materialized
-        OAS [Provider_config]. [None] leaves the caller/OAS profile unchanged. *)
+        AGENT_CORE [Provider_config]. [None] leaves the caller/AGENT_CORE profile unchanged. *)
   ; min_p : float option
     (** [min_p] — per-model minimum probability sampling value forwarded through
-        the materialized OAS [Provider_config]. [None] leaves the caller/OAS
+        the materialized AGENT_CORE [Provider_config]. [None] leaves the caller/AGENT_CORE
         profile unchanged. *)
+  ; reasoning_effort : Llm_provider.Reasoning_effort.t option
+       [@equal fun a b -> a = b]
+    (* Reasoning_effort.t is a plain variant with no derived [equal];
+       structural equality is exactly right for it, and declaring it here
+       keeps the comparison inside masc rather than widening the AGENT_CORE
+       module's interface for one consumer. *)
+    (** [reasoning-effort] — per-model reasoning depth. Official-client
+        runtimes take no [enable_thinking]
+        ({!Keeper_official_client_host.resolve_reasoning_effort} rejects it
+        outright), so this is the only declared control over how much a
+        Claude Code / Codex / Antigravity turn reasons. [None] leaves the
+        turn at the caller default. Resolved via
+        {!Runtime.reasoning_effort_of_runtime_id} →
+        {!Runtime_inference.resolve_reasoning_effort}, symmetric to the
+        [temperature] path. *)
+  ; turn_timeout_s : float option
+    (** [turn-timeout-s] — per-model liveness window for one official-client
+        turn, in seconds. Codex, Claude, and Antigravity reset it on every
+        protocol message, so progressing turns have no wall-clock limit.
+        [None] keeps the provider value where one exists and the adapter default
+        otherwise.
+        Resolved via {!Runtime.turn_timeout_s_of_runtime_id} →
+        {!Runtime_inference.resolve_turn_timeout_s}. *)
+  ; max_prompt_bytes : int option
+    (** [max-prompt-bytes] — per-model ceiling on the history an official-client
+        start turn seeds its conversation with, in bytes.
+
+        An official-client turn 1 sends the whole projected history; from turn 2
+        the client owns the transcript and MASC sends only the goal. So a keeper
+        whose history outgrows the model's window cannot fail once — it fails on
+        turn 1, never reaches turn 2, and re-sends a larger history next cycle.
+        Recovery does not break the loop: a fresh session resets the counter,
+        which makes the next turn a start turn again.
+
+        Declared in bytes rather than derived from [max-context] because MASC
+        has no tokenizer: converting a token budget would need a
+        bytes-per-token constant with nothing to justify it, and a wrong
+        constant either truncates silently or overflows silently. This mirrors
+        [max-request-body-bytes] on the Agent_core side, which is likewise an
+        operator-declared byte cap.
+
+        [None] applies no ceiling, which is the behaviour every deployment has
+        today. Resolved via {!Runtime.max_prompt_bytes_of_runtime_id} →
+        {!Runtime_inference.resolve_max_prompt_bytes}. *)
   ; capabilities : model_capabilities option
-  ; match_prefixes : string list
   }
 [@@deriving show, eq]
 
@@ -195,6 +273,9 @@ type model_spec =
 type binding =
   { provider_id : string
   ; model_id : string
+  ; enabled : bool
+    (** Whether this provider x model binding may be materialized. Omitted
+        [enabled] in TOML defaults to [true]. *)
   ; is_default : bool
   ; wizard_default : bool
   ; max_concurrent : int option
@@ -203,6 +284,15 @@ type binding =
   ; price_output : float option
   ; keep_alive : string option
   ; num_ctx : int option
+  ; repeat_penalty : float option
+    (** Ollama [options.repeat_penalty]. Raises the cost of tokens already in
+        the window, which is the documented remedy for R1-style reasoning
+        models that restate the same thought until the turn dies. Declared per
+        binding because it is an Ollama-only option, like [num_ctx]. *)
+  ; repeat_last_n : int option
+    (** Ollama [options.repeat_last_n]: how many recent tokens
+        [repeat_penalty] looks back over. *)
+  ; return_progress : bool option
   }
 [@@deriving show, eq]
 
@@ -212,12 +302,8 @@ type binding =
     The declaration carries opaque runtime ids; resolution to materialized
     runtimes happens in [Runtime] so this module stays dependency-free. *)
 
-type lane_strategy = Ordered
-[@@deriving show, eq]
-
 type lane_decl =
   { id : string
-  ; strategy : lane_strategy
   ; candidate_ids : string list
   }
 [@@deriving show, eq]
@@ -238,18 +324,13 @@ type config =
   ; models : model_spec list
   ; bindings : binding list
   ; default_runtime_id : string option
-  ; cross_verifier_runtime_id : string option
-    (** [\[runtime\].cross_verifier] — runtime id for the anti-rationalization
-        evaluator. [None] inherits [\[runtime\].default]. Unknown ids are
-        rejected at load. *)
   ; keeper_assignments : (string * string) list
     (** [\[runtime.assignments\]] — keeper name → runtime id ["provider.model"].
-        runtime.toml is the sole SSOT for keeper→runtime assignment (persona⊥
-        {model,runtime}: persona JSON and keeper TOML no longer carry a runtime
-        selection). A keeper absent from this table routes to the default
+        runtime.toml is the sole SSOT for keeper-to-runtime assignment; keeper
+        TOML does not carry a runtime selector. A keeper absent from this table routes to the default
         runtime; an assignment to an unknown id is rejected at load
         ({!Runtime.load_list}), mirroring [\[runtime\].default] validation. The
-        id is an opaque binding key here — only the OAS adapter parses it into
+        id is an opaque binding key here — only the AGENT_CORE adapter parses it into
         provider/model/spec. *)
   ; media_failover : string list
     (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted
@@ -263,7 +344,7 @@ type config =
         Declarations are resolved against materialized runtimes at load time;
         an unknown candidate id is rejected like [\[runtime\].default]. *)
   ; exact_output_lane_decls : exact_output_lane_decl list
-    (** Raw ordered OAS target references from
+    (** Raw ordered AGENT_CORE target references from
         [\[runtime.exact_output_lanes.<id>\]]. MASC does not interpret them as
         provider/model runtime bindings. *)
   }

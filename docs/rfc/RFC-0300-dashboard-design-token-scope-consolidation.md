@@ -1,4 +1,5 @@
 ---
+rfc: "0300"
 title: RFC-0300 — Dashboard design-token scope consolidation (radius / shadow / type-scale)
 ---
 

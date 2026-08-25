@@ -1,34 +1,57 @@
-(** Keeper meta store I/O and CAS write helpers.
+(** Strict Keeper metadata snapshot storage.
 
     Included by [Keeper_types] so existing [Keeper_types.*] callers
-    keep their public API while durable meta storage is separated
-    from the compatibility facade. *)
-
-
-(** Hook invoked after each successful [write_meta] /
-    [write_meta_with_merge]. Reset by the runtime to keep
-    [Workspace_state] caches in sync. *)
-val runtime_meta_write_sync_hook :
-  Workspace.config -> Keeper_meta_contract.keeper_meta -> unit
-
-(** Replace [runtime_meta_write_sync_hook] with [f]. *)
-val register_runtime_meta_write_sync :
-  (Workspace.config -> Keeper_meta_contract.keeper_meta -> unit) -> unit
-
-(** Pre-compiled regex matching the CAS [meta version conflict]
-    error message. Exposed for symmetry — used internally by
-    [is_version_conflict_error]. *)
-val version_conflict_re : Re.re
+    keep their read API while writes are restricted to complete Owner
+    snapshots. *)
 
 (** Read a keeper meta JSON file at [path]. Returns [Ok None] when
     the file does not exist. Unknown top-level keys are rejected with a
-    reset-required error; the persisted file is never rewritten. *)
+    reset-required error.
+
+    Issue #28844: a non-canonical value in an enumerated field with a
+    canonical default (e.g. [last_proactive_outcome]) is auto-repaired in
+    place through the normal serializer and the read proceeds; all other
+    corruption keeps failing loud and the file is left untouched.
+    [ownership_root] scopes the durable directory-chain fsync of the repair
+    write when the caller knows the workspace root.
+
+    The parse-failure WARN is emitted on state transitions (new failure,
+    changed failure reason, recovery) per (site, path), not on every
+    repeated read of the same broken file. *)
 val read_meta_file_path :
-  string -> (Keeper_meta_contract.keeper_meta option, string) result
+  ?ownership_root:string ->
+  string ->
+  (Keeper_meta_contract.keeper_meta option, string) result
+
+(** Why the deployment gate rejects a persisted Keeper meta, split by what
+    the boot path does with the same file.  The two classes need different
+    operator action, so the split is typed here rather than read out of the
+    detail text. *)
+type current_meta_rejection =
+  | Unreadable of string
+      (** The file cannot be read or is not JSON.  [read_meta_file_path]
+          returns [Error] for it and the boot path refuses the Keeper
+          outright.  The lossless fix is restoring the file from backup. *)
+  | Not_current of string
+      (** The JSON does not decode as the current schema, even after the
+          enumerated-field repair.  The boot path reads it as absent and
+          re-materialises the Keeper from its declaration (#29610), losing
+          the accumulated counters and the persisted task binding.  The
+          lossless fix is stripping retired fields or filling missing ones. *)
+
+(** Deploy-gate twin of [read_meta_file_path]: the same decode decision
+    (exact decode, then the issue #28844 enumerated-field repair with a
+    redecode), shared with the runtime read so the two cannot drift, minus
+    the fail-open and the repair write.  [Ok ()] when the runtime would keep
+    the snapshot, directly or after repairing it in place, or when there is
+    no file at [path]; [Error] carries the class above and the same detail
+    the runtime logs.  The deployment preflight runs this between the
+    previous runtime's stop and the next one's start, so a rejection holds
+    the plane down until the operator repairs the file and redeploys. *)
+val validate_current_meta_file_result :
+  string -> (unit, current_meta_rejection) result
 
 (** [true] when [f] has an exact canonical Keeper-metadata interpretation. *)
-val is_keeper_meta_file : string -> bool
-
 (** List keeper names with persisted JSON in [.masc/keepers/].
     Sidecars filtered, names validated, sorted ascending. *)
 val persisted_keeper_names_result : Workspace.config -> (string list, string) result
@@ -40,6 +63,16 @@ val persisted_keeper_names : Workspace.config -> string list
     collapsed into an absent Keeper. *)
 val persisted_keeper_name_for_agent_name :
   Workspace.config -> agent_name:string -> (string option, string) result
+
+(** Resolve an exact configured [mention_target] against effective metadata.
+    The canonical filename and the same TOML-overlaid metadata snapshot are
+    returned together so delivery and pending-message classification use one
+    authority. Duplicate claims, configuration errors, and metadata read
+    failures are explicit errors. *)
+val persisted_keeper_for_mention_target :
+  Workspace.config ->
+  mention_target:string ->
+  ((string * Keeper_meta_contract.keeper_meta) option, string) result
 
 (** List keeper names declared in TOML config (overlay sources). *)
 val configured_keeper_names : Workspace.config -> string list
@@ -56,7 +89,8 @@ val effective_autoboot_enabled :
 
 (** Names of keepers eligible for the keepalive fiber set —
     autoboot enabled, not paused. Logs and excludes on read failure
-    (issue #8377). *)
+    (issue #8377); the WARN fires on failure-state transitions only
+    (issue #28844). *)
 val keepalive_keeper_names : Workspace.config -> string list
 
 (** Names of keepers expected to persist across sessions. Mirrors
@@ -76,7 +110,7 @@ val read_meta_resolved :
 val read_meta :
   Workspace.config -> string -> (Keeper_meta_contract.keeper_meta option, string) result
 
-(** Read persisted keeper meta and overlay TOML/persona defaults before
+(** Read persisted keeper meta and overlay Keeper configuration defaults before
     returning it. Status/list/operator surfaces should use this for
     TOML-owned fields such as [sandbox_profile] and [network_mode]. *)
 val read_effective_meta_resolved :
@@ -97,173 +131,52 @@ val read_meta_if_changed :
   last_mtime:float ->
   (Keeper_meta_contract.keeper_meta * float) option
 
-(** Atomic write of [persisted] to [path]; runs the
-    [runtime_meta_write_sync_hook] on success. *)
-val persist_meta :
-  Workspace.config -> string -> Keeper_meta_contract.keeper_meta -> (unit, string) result
+(** Durably replace the complete current snapshot. The per-Keeper Owner is the
+    only production caller and therefore the only write authority. Any failed
+    durability stage remains an error even when the renamed bytes are visible
+    in the current process. *)
+val replace_snapshot :
+  Workspace.config -> Keeper_meta_contract.keeper_meta -> (unit, string) result
 
-(** Persist [m] with a CAS bump on [meta_version]: the write is rejected
-    if the on-disk version has moved since [m] was read. There is no force
-    / bypass path — cumulative usage counters are a monotone invariant
-    (RFC-0225 §3.2, RFC-0237), so callers that lost a race must resolve the
-    conflict through {!write_meta_with_merge}, not overwrite the disk. *)
-val write_meta :
-  Workspace.config ->
-  Keeper_meta_contract.keeper_meta ->
-  (unit, string) result
+(** Durably remove the current snapshot for a Keeper deleted by its Owner. *)
+val remove_snapshot : Workspace.config -> name:string -> (unit, string) result
 
-(** Same CAS persistence as {!write_meta}, but does not invoke the runtime
-    registry-sync hook. This is reserved for a caller that reconstructed meta
-    from persistence and will immediately install it through the typed
-    persisted-sync registry boundary. *)
-val write_meta_deferred_runtime_sync :
-  Workspace.config ->
-  Keeper_meta_contract.keeper_meta ->
-  (unit, string) result
+(** The one process-local record of store problems, keyed by a typed site
+    and path. [should_report] is the write side (log-gating callers), the
+    snapshot functions are the read side — the dashboard projects the same
+    rows, so a failure is recorded once and read everywhere. *)
+module Problem_report_state : sig
+  type site =
+    | Meta_read
+    | Meta_read_changed
+    | Meta_repair
+    | Keepalive_scan
+    | Persistent_scan
 
-(** Lifecycle-owner variant of [write_meta]. The opaque reservation token is
-    checked against the same BasePath/name key before entering the per-path
-    CAS critical section. *)
-val write_meta_for_lifecycle :
-  Keeper_lifecycle_reservation.token ->
-  Workspace.config ->
-  Keeper_meta_contract.keeper_meta ->
-  (unit, string) result
+  type entry = {
+    site : site;
+    path : string;
+    detail : string;
+    first_observed : float;
+  }
 
-type identity_update_error =
-  | Identity_missing
-  | Identity_changed
-  | Identity_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
-  | Identity_read_failed of string
-  | Identity_write_failed of string
+  val should_report : site:site -> path:string -> detail:string -> bool
+  val note_recovered : site:site -> path:string -> bool
+  val clear : site:site -> path:string -> unit
+  val site_to_string : site -> string
+  val snapshot : unit -> entry list
+  val snapshot_to_yojson : unit -> Yojson.Safe.t
+  val reset : unit -> unit
+end
 
-val identity_update_error_to_string : identity_update_error -> string
+module For_testing : sig
+  val settle_durable_replace
+    :  string
+    -> (unit, Keeper_fs.durable_write_error) result
+    -> (unit, string) result
 
-(** Re-read and atomically update [name] only while its trace/generation
-    identity matches the caller's snapshot, so a replacement generation is
-    never overwritten. *)
-val update_meta_if_identity :
-  Workspace.config ->
-  name:string ->
-  trace_id:Keeper_id.Trace_id.t ->
-  generation:int ->
-  (Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta) ->
-  (Keeper_meta_contract.keeper_meta, identity_update_error) result
-
-type identity_remove_error =
-  | Remove_identity_missing
-  | Remove_identity_changed
-  | Remove_identity_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
-  | Remove_identity_read_failed of string
-  | Remove_identity_unlink_failed of string
-
-val identity_remove_error_to_string : identity_remove_error -> string
-
-(** Remove [name]'s meta only while the same trace/generation still occupies
-    the path. This shares the per-path lock used by [write_meta]. *)
-val remove_meta_if_identity :
-  Workspace.config ->
-  name:string ->
-  trace_id:Keeper_id.Trace_id.t ->
-  generation:int ->
-  (unit, identity_remove_error) result
-
-type exact_identity_error =
-  | Exact_identity_missing
-  | Exact_identity_changed
-  | Exact_meta_version_changed of
-      { expected : int
-      ; actual : int
-      }
-  | Exact_identity_read_failed of string
-  | Exact_identity_unlink_failed of string
-
-val exact_identity_error_to_string : exact_identity_error -> string
-
-(** Re-read [name] under its per-path lock and return it only while both its
-    trace/generation identity and [meta_version] still match the durable
-    lifecycle intent. *)
-val read_meta_if_exact_identity :
-  Workspace.config ->
-  name:string ->
-  trace_id:Keeper_id.Trace_id.t ->
-  generation:int ->
-  meta_version:int ->
-  (Keeper_meta_contract.keeper_meta, exact_identity_error) result
-
-(** Atomically unlink [name] only while both its trace/generation identity and
-    [meta_version] still match. A caller that observes a version conflict must
-    preserve the newer metadata and surface the lifecycle operation as
-    blocked. *)
-val remove_meta_if_exact_identity :
-  Workspace.config ->
-  name:string ->
-  trace_id:Keeper_id.Trace_id.t ->
-  generation:int ->
-  meta_version:int ->
-  (unit, exact_identity_error) result
-
-(** [true] iff [msg] matches [version_conflict_re]. *)
-val is_version_conflict_error : string -> bool
-
-(** Retry [write_meta] on CAS version conflicts using caller-declared
-    field ownership via [merge]. Use [Keeper_meta_merge.caller_wins]
-    for payload-wins writes, or a narrower merge such as
-    [Keeper_meta_merge.heartbeat_fields_from_disk] when concurrent
-    writers own specific fields. *)
-val write_meta_with_merge :
-  ?max_retries:int ->
-  merge:(latest:Keeper_meta_contract.keeper_meta -> caller:Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta) ->
-  Workspace.config ->
-  Keeper_meta_contract.keeper_meta ->
-  (unit, string) result
-
-val write_meta_with_merge_for_lifecycle :
-  Keeper_lifecycle_reservation.token ->
-  ?max_retries:int ->
-  merge:
-    (latest:Keeper_meta_contract.keeper_meta ->
-     caller:Keeper_meta_contract.keeper_meta ->
-     Keeper_meta_contract.keeper_meta) ->
-  Workspace.config ->
-  Keeper_meta_contract.keeper_meta ->
-  (unit, string) result
-
-(** [persist_compaction_decision config ~keeper_name ~decision] stamps [decision]
-    onto the durable on-disk [compaction_rt.last_decision], the field the
-    status and dashboard read paths surface as [last_compaction_decision].
-
-    Used by the reactive provider-overflow failure path, whose registry stamp is
-    in-memory only and whose turn-failure meta flush persists a pre-overflow meta
-    without the decision. Reads the current on-disk meta, stamps only
-    [last_decision], and writes back via {!write_meta_with_merge} so a CAS race
-    with a concurrent heartbeat/turn write re-applies the stamp. [`No_durable_meta]
-    reports that no on-disk meta exists to stamp (non-fatal); [Error] carries a
-    read/write failure. *)
-val persist_compaction_decision :
-  Workspace.config ->
-  keeper_name:string ->
-  decision:Keeper_meta_contract.compaction_runtime_decision ->
-  ([ `Persisted | `No_durable_meta ], string) result
-
-val persist_compaction_commit_projection :
-  Workspace.config ->
-  keeper_name:string ->
-  commit_count:int ->
-  ([ `Persisted | `No_durable_meta ], string) result
-(** Reconcile the status projection after a checkpoint compaction commit.
-    The committed checkpoint context is authoritative; this derived field is
-    monotonic so delayed writes cannot regress a newer projection. The caller
-    owns outcome classification and telemetry. *)
-
-val persist_transcript_corruption_pause :
-  Workspace.config ->
-  keeper_name:string ->
-  trace_id:Keeper_id.Trace_id.t ->
-  generation:int ->
-  ([ `Persisted | `No_durable_meta ], string) result
-(** Atomically update the existing fail-closed pause surface after structural
-    transcript corruption only while the exact turn trace/generation still owns
-    the Keeper name. A dead tombstone remains stronger and every other
-    live/pause state becomes typed reset-required state. No decoder, migration,
-    or automatic retry state is created. *)
+  val settle_durable_remove
+    :  string
+    -> (unit, Keeper_fs.durable_remove_error) result
+    -> (unit, string) result
+end

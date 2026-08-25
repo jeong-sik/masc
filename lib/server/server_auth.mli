@@ -21,16 +21,8 @@ val strip_suffix : suffix:string -> string -> string
 
 (** [Some trimmed] when non-empty, else [None]. *)
 
-val split_csv_nonempty : string -> string list
-(** Comma-separated split with empty entries dropped. *)
-
 (** {1 Bind host / loopback classification} *)
 
-val configured_bind_host : unit -> string
-(** Currently configured HTTP bind host (env / config). *)
-
-val ipaddr_is_loopback : (Ipaddr.V4.t, Ipaddr.V6.t) Ipaddr.v4v6 -> bool
-val ipaddr_is_unspecified : (Ipaddr.V4.t, Ipaddr.V6.t) Ipaddr.v4v6 -> bool
 val is_loopback_host : string -> bool
 val is_unspecified_host : string -> bool
 
@@ -41,16 +33,8 @@ val base_url_has_non_loopback_host : unit -> bool
 val http_auth_strict_enabled : unit -> bool
 (** [true] when strict HTTP token auth is enabled by config. *)
 
-val http_auth_bind_host : unit -> string
-(** Bind host used by HTTP auth checks (mirrors
-    [configured_bind_host]). *)
-
 val http_auth_bind_is_loopback : unit -> bool
 (** [true] when [http_auth_bind_host] is loopback. *)
-
-val strict_http_auth_error : string -> string
-(** Render the structured error message returned when a non-loopback
-    deployment is missing strict token auth. *)
 
 val ensure_strict_http_token_auth :
   endpoint:string -> Masc_domain.auth_config -> (Masc_domain.auth_config, string) result
@@ -58,9 +42,6 @@ val ensure_strict_http_token_auth :
     non-loopback it must carry a strict token configuration. *)
 
 (** {1 Token / agent extraction from requests} *)
-
-val bearer_token_from_header : string -> string option
-(** Extract the bearer token from an [Authorization] header value. *)
 
 val auth_token_from_request : Httpun.Request.t -> string option
 (** Token from [Authorization: Bearer …] on the request. *)
@@ -71,10 +52,6 @@ val request_carries_auth_credential : Httpun.Request.t -> bool
     distinguish a genuinely anonymous request from a credential that must fail
     closed during parsing or validation. *)
 
-val observer_sse_query_token_from_request : Httpun.Request.t -> string option
-(** Observer/presence/cursor SSE allows the token via query string for browser
-    EventSource. *)
-
 val observer_sse_auth_token_from_request : Httpun.Request.t -> string option
 (** Combined header-or-query lookup for the SSE observer endpoint. *)
 
@@ -84,13 +61,6 @@ val agent_from_request : Httpun.Request.t -> string option
 val internal_keeper_agent_from_request : Httpun.Request.t -> string option
 (** Agent name when the request is recognised as an internal keeper
     subprocess via the dedicated header. *)
-
-val resolve_agent_name_for_auth_raw :
-  base_path:string ->
-  Httpun.Request.t ->
-  token:string option -> (string option, Masc_domain.masc_error) result
-(** Resolve the agent name to use for permission checks given the
-    request and bearer [token].  [Ok None] means "no agent context". *)
 
 (** {1 MCP / observer / operator verification} *)
 
@@ -119,10 +89,6 @@ val verify_operator_mcp_auth :
 
 val request_actor_hint : Httpun.Request.t -> string option
 (** Caller-supplied actor hint for dashboard audit attribution. *)
-
-val sanitize_dashboard_actor_name : string -> string
-(** Strip non-printable characters and clamp length so the actor name
-    is safe to log / render. *)
 
 val record_dashboard_actor_fallback :
   Auth_error_kind.dashboard_actor_fallback -> unit
@@ -180,9 +146,16 @@ val sanitized_dashboard_actor_for_request :
 
 (** {1 Origin / CORS} *)
 
-val allow_anonymous_mutations : unit -> bool
-(** Re-reads [MASC_ALLOW_ANONYMOUS_MUTATIONS] on each call.
-    When [true] non-loopback mutations skip auth (test fixtures only). *)
+type configure_error = Already_configured
+
+val configure : Server_auth_config.t -> (unit, configure_error) result
+(** Install the boot-resolved authorization policy before request handlers are
+    constructed. Reinstalling the identical policy is an idempotent no-op so a
+    transient socket-bind retry can repeat bootstrap; a different policy is
+    rejected for the process lifetime. Request handlers cannot turn it into a
+    runtime control channel. *)
+
+val configure_error_to_string : configure_error -> string
 
 type browser_origin_admission =
   | Same_origin
@@ -205,12 +178,6 @@ val classify_request_origin :
 (** Classify the full case-insensitive [Origin] field set.  Exactly one field
     is parsed as one complete HTTP(S) serialized origin; repeated fields and
     partially consumed values are distinct fail-closed outcomes. *)
-
-val browser_origin_matches_request_authority :
-  request_authority:Server_request_authority.authority -> string -> bool
-(** Compare an HTTP(S) browser origin with the admitted request authority.
-    The explicit loopback development allowlist is accepted only when its
-    normalized host is also the admitted loopback host. *)
 
 val ensure_same_origin_browser_request :
   request_authority:Server_request_authority.authority ->
@@ -244,9 +211,14 @@ val http_status_of_auth_error :
     [H2.Status.t] at the use site — both protocols include this
     six-tag subset. *)
 
-val server_state : Mcp_server.server_state option ref
-(** Process-wide server state handle used by auth helpers when no
-    state is threaded through. *)
+val current_server_state : unit -> Mcp_server.server_state option
+(** Return the currently published process-wide server state snapshot. *)
+
+val publish_server_state : Mcp_server.server_state -> unit
+(** Atomically publish the initialized process-wide server state. *)
+
+val clear_server_state : unit -> unit
+(** Atomically remove the process-wide server state during shutdown/reset. *)
 
 val get_origin : Httpun.Request.t -> Httpun.Headers.value
 (** Return the one syntactically valid serialized [Origin], or ["*"] when the
@@ -284,11 +256,6 @@ val public_read_cors_headers :
 (** Header set for public-read responses (looser than the protected
     route policy). *)
 
-val respond_public_read_json :
-  ?status:Httpun.Status.t ->
-  Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
-(** Public-read JSON responder. *)
-
 val respond_public_read_json_value :
   ?status:Httpun.Status.t ->
   Httpun.Request.t -> Httpun.Reqd.t -> Yojson.Safe.t -> unit
@@ -303,16 +270,20 @@ val auth_error_headers :
     responses receive a plain Bearer challenge; MCP resource metadata is added
     only by MCP transport responders. *)
 
+val auth_error_cors_headers : Httpun.Request.t -> (string * string) list
+(** The CORS headers an auth-error response carries, for either protocol.
+
+    The origin goes through admission: an admitted one is reflected, and
+    anything else — absent, rejected, multiple, malformed — gets [vary: Origin]
+    and nothing more. H1 used to reflect [get_origin] instead, which answers
+    ["*"] with no Origin present and raises on a malformed one, so the same 401
+    left the server with different CORS headers depending on the protocol
+    (#28166). *)
+
 val respond_auth_error :
   Httpun.Request.t -> Httpun.Reqd.t -> Masc_domain.masc_error -> unit
 (** Compose [http_status_of_auth_error] + [auth_error_json] + generic Bearer
     challenge + CORS. *)
-
-val respond_agent_rate_limited :
-  rl_key:string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Send a 429 Too Many Requests response for a per-agent rate-limit
-    violation.  Includes [X-RateLimit-*] headers and CORS so browser
-    clients can inspect the response. *)
 
 val agent_rl_key_of_request : Httpun.Request.t -> string option
 (** Extract a per-agent rate-limit key from the request.  Prefers the
@@ -340,13 +311,6 @@ val with_admin_auth :
 
 val is_public_read_path : String.t -> bool
 (** [true] when [path] is on the public-read allowlist. *)
-
-val resolve_agent_name_for_auth :
-  base_path:string ->
-  Httpun.Request.t ->
-  token:string option -> (string option, Masc_domain.masc_error) result
-(** Public wrapper of [resolve_agent_name_for_auth_raw]; the raw form
-    is exposed for tests that exercise the underlying decision. *)
 
 val authorize_permission_request :
   base_path:string ->
@@ -390,10 +354,6 @@ val authorize_optional_token_bound_permission_request :
     return its canonical agent name. Malformed, empty, invalid, or
     underprivileged credentials are errors rather than anonymous fallbacks. *)
 
-val is_dashboard_bootstrap_path : string -> bool
-(** [true] when the path is part of the dashboard bootstrap surface
-    (allowed without bearer token while loopback). *)
-
 val not_initialized_response : string -> string
 (** JSON body returned when the server is up but [server_state] is
     not yet hydrated. *)
@@ -403,13 +363,6 @@ val with_public_read :
    Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Public-read combinator (no auth, looser CORS). *)
-
-val with_observer_sse_read_auth :
-  (Mcp_server.server_state ->
-   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Read combinator for browser EventSource endpoints that must accept
-    [token] in the query string when strict HTTP auth is active. *)
 
 val with_read_auth :
   (Mcp_server.server_state ->
@@ -449,4 +402,8 @@ val with_token_permission_auth :
 
 module For_testing : sig
   val admin_token_equal : string -> string -> bool
+  val snapshot_server_state : unit -> Mcp_server.server_state option
+  val restore_server_state : Mcp_server.server_state option -> unit
+  val snapshot_auth_config : unit -> Server_auth_config.t option
+  val restore_auth_config : Server_auth_config.t option -> unit
 end

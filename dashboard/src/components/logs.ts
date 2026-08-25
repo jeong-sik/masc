@@ -3,13 +3,17 @@ import type { VNode } from 'preact'
 import { signal } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-preact'
-import { fetchLogs, fetchProviderLogsCatalog, fetchProviderLogTail } from '../api/dashboard.js'
-import type {
-  LogEntry,
-  ProviderLogCatalogEntry,
-  ProviderLogsCatalogResponse,
-  ProviderLogTailResponse,
-} from '../api/dashboard.js'
+import { Effect, Option } from 'effect'
+import {
+  fetchLogs,
+  type LogCategory,
+  type LogEntry,
+  type LogLevel,
+  type LogsData,
+  type LogsError,
+  type LogsRequest,
+} from '../api/dashboard-logs'
+import { dashboardRuntime, type DashboardHttp } from '../api/effect-http'
 import { VirtualList } from './common/virtual-list'
 import { asRecord, asNullableString, mergeRouteRecord, hasRouteContext, type MutableRouteContext } from './common/normalize'
 import { TextInput } from './common/input'
@@ -18,7 +22,8 @@ import { Checkbox } from './common/checkbox'
 import { LogFilter } from './common/log-filter'
 import { RouteLink } from './common/route-link'
 import { KeeperBadge } from './keeper-badge'
-import { createAsyncResource, loaded } from '../lib/async-state'
+import { createEffectResource } from '../lib/effect-resource'
+import { remotePrevious } from '../lib/remote-data'
 import { toolCategory } from './tool-call-shared'
 import { StatusChip } from './common/status-chip'
 import {
@@ -32,9 +37,10 @@ import {
   routeLinksForContext,
   type IdeContextRouteLink,
 } from './ide/ide-context-lens'
-import type { LogsResponse } from '../api/schemas/logs'
-
-type LogData = LogsResponse
+interface LogData extends LogsData {
+  readonly pagedOlder: boolean
+  readonly noMoreOlder: boolean
+}
 
 export interface LogCauseCount {
   cause: string
@@ -54,23 +60,20 @@ export interface LogWindowSummary {
   topModules: LogModuleCount[]
 }
 
-const logResource = createAsyncResource<LogData>()
-const providerLogCatalogResource = createAsyncResource<ProviderLogsCatalogResponse>()
-const providerLogTailResource = createAsyncResource<ProviderLogTailResponse>()
-const levelFilter = signal('INFO')
+const logResource = createEffectResource<DashboardHttp, LogsError, LogData>(
+  dashboardRuntime,
+)
+const levelFilter = signal<LogLevel>('INFO')
 const moduleInput = signal('')
 const appliedModuleFilter = signal('')
 const autoRefresh = signal(true)
 const DEFAULT_LOG_LIMIT = 200
 const logLimit = signal(DEFAULT_LOG_LIMIT)
-const providerLogProvider = signal('')
-const providerLogLines = signal(200)
-const latestSeq = signal<number | null>(null)
-const categoryFilter = signal('')
 // Client-side display-kind filter for the primary toolbar chips
-// (전체/Tool/Turn/Lifecycle/Approval/Broadcast). Complementary to the
-// backend categoryFilter above: kind slices the streamed rows in the view
-// without re-querying, so switching kind is instant.
+// (전체/Tool/Turn/Lifecycle/Approval/Broadcast). The chips are the only
+// classification control: each kind is a projection of the producer's typed
+// category (see log-classification.ts), so a chip click yields exactly the
+// rows the server category filter would for the kind's categories.
 const kindFilter = signal<LogDisplayKind | ''>('')
 const hideFsmTransitions = signal(false)
 const expandedLogSeq = signal<number | null>(null)
@@ -81,17 +84,12 @@ const expandedLogSeq = signal<number | null>(null)
 // window (bounded memory, steady state), and once true the cap grows to cover
 // every shown row plus genuinely-new rows so neither path evicts history the
 // operator paged into.
-const pagedOlder = signal(false)
-const olderLoading = signal(false)
-const noMoreOlder = signal(false)
 
 const POLL_INTERVAL_MS = 3000
 const ESTIMATED_LOG_ROW_HEIGHT = 78
-const EMPTY_LOG_ENTRIES: LogEntry[] = []
+const EMPTY_LOG_ENTRIES: readonly LogEntry[] = []
 
 let moduleDebounceTimer: ReturnType<typeof setTimeout> | null = null
-let latestRequestId = 0
-let logQueryGeneration = 0
 
 function MetaTag({ children }: { children: unknown }) {
   return html`<${StatusChip} tone="neutral" uppercase=${false}>${children}</${StatusChip}>`
@@ -104,27 +102,23 @@ const LEVEL_COLORS: Record<string, string> = {
   ERROR: 'var(--color-status-err)',
 }
 
-const SOURCE_LABELS: Record<string, string> = {
+const SOURCE_LABELS: Record<LogEntry['source'], string> = {
   structured: 'structured',
   legacy_stderr: 'stderr',
   legacy_traceln: 'trace line',
   client_tool_host: 'client tool-host',
-  sse: 'sse',
 }
 
-const CATEGORY_LABELS: Record<string, string> = {
+const CATEGORY_LABELS: Record<LogCategory, string> = {
   fsm: 'FSM',
   lifecycle: 'Lifecycle',
   directive: 'Directive',
   heartbeat: 'Heartbeat',
-  presence: 'Presence',
-  task: 'Task',
   tool: 'Tool',
-  memory: 'Memory',
-  telemetry: 'Telemetry',
   routine: 'Routine',
   boundary: 'Boundary',
-  uncategorized: 'Uncategorized',
+  turn: 'Turn',
+  broadcast: 'Broadcast',
 }
 
 const LOG_KIND_FILTERS: readonly { value: LogDisplayKind | ''; label: string }[] = [
@@ -135,21 +129,16 @@ const LOG_KIND_FILTERS: readonly { value: LogDisplayKind | ''; label: string }[]
   { value: 'approval', label: 'Approval' },
   { value: 'broadcast', label: 'Broadcast' },
 ]
-// Backend log category, surfaced in the advanced (details) menu so the
-// provider-log category filter is preserved while the primary toolbar uses
-// the client-side display-kind chips above.
-const LOG_CATEGORY_OPTIONS: readonly { value: string; label: string }[] = [
-  { value: '', label: '전체 카테고리' },
-  { value: 'tool', label: 'tool' },
-  { value: 'task', label: 'task' },
-  { value: 'lifecycle', label: 'lifecycle' },
-  { value: 'directive', label: 'directive' },
-  { value: 'telemetry', label: 'telemetry' },
-]
+// Backend log category, surfaced in the advanced (details) menu while the
+// primary toolbar uses the client-side display-kind chips above.
+const LOG_LEVELS: readonly LogLevel[] = ['DEBUG', 'INFO', 'WARN', 'ERROR']
 
-function categoryLabel(category: string | null | undefined): string | null {
-  if (!category) return null
-  return CATEGORY_LABELS[category] ?? category
+function isLogLevel(value: string): value is LogLevel {
+  return LOG_LEVELS.some(level => level === value)
+}
+
+function categoryLabel(category: LogCategory): string {
+  return CATEGORY_LABELS[category]
 }
 
 const LOG_KIND_LABELS: Record<LogDisplayKind, string> = {
@@ -158,12 +147,10 @@ const LOG_KIND_LABELS: Record<LogDisplayKind, string> = {
   lifecycle: 'LIFECYCLE',
   approval: 'APPROVAL',
   broadcast: 'BROADCAST',
-  telemetry: 'TELEMETRY',
-  task: 'TASK',
   log: 'LOG',
 }
 
-type LoadMode = 'reset' | 'delta'
+type LoadMode = 'reset' | 'delta' | 'older'
 type FailureEnvelope = {
   surface: string
   entity_kind: string
@@ -177,24 +164,24 @@ type FailureEnvelope = {
 }
 
 function normalizedLevel(entry: LogEntry): string {
-  // RFC-0079: backend now emits a typed level via Log.Ring.entry_to_json.
-  // The schema rejects rows without `level`, so the read-side fallback
-  // chain (`normalized_level || level || 'INFO'`) is gone.
-  return entry.level.toUpperCase()
+  return entry.level
 }
 
-function sortLogEntries(entries: LogEntry[]): LogEntry[] {
+function sortLogEntries(entries: readonly LogEntry[]): LogEntry[] {
   return [...entries].sort((a, b) => b.seq - a.seq)
 }
 
-function latestLogSeq(entries: LogEntry[]): number | null {
-  if (entries.length === 0) return null
-  return entries.reduce((max, entry) => Math.max(max, entry.seq), entries[0]?.seq ?? 0)
+function latestLogSeq(entries: readonly LogEntry[]): Option.Option<number> {
+  const first = entries[0]
+  if (first === undefined) return Option.none()
+  return Option.some(
+    entries.reduce((max, entry) => Math.max(max, entry.seq), first.seq),
+  )
 }
 
 export function mergeLogEntries(
-  current: LogEntry[],
-  incoming: LogEntry[],
+  current: readonly LogEntry[],
+  incoming: readonly LogEntry[],
   maxEntries: number,
 ): LogEntry[] {
   const merged = new Map<number, LogEntry>()
@@ -226,8 +213,8 @@ export function deltaMergeCap(
   return current.length + freshCount
 }
 
-function sourceLabel(source: string): string {
-  return SOURCE_LABELS[source] ?? (source || '(unknown source)')
+function sourceLabel(source: LogEntry['source']): string {
+  return SOURCE_LABELS[source]
 }
 
 function logSeverity(entry: LogEntry): 'ok' | 'warn' | 'bad' | 'busy' | 'info' {
@@ -236,18 +223,18 @@ function logSeverity(entry: LogEntry): 'ok' | 'warn' | 'bad' | 'busy' | 'info' {
   if (level === 'WARN') return 'warn'
   const kind = logDisplayKind(entry)
   if (kind === 'tool') return 'busy'
-  if (kind === 'telemetry' || kind === 'broadcast') return 'info'
+  if (kind === 'broadcast') return 'info'
   return 'ok'
 }
 
 function keeperLabel(entry: LogEntry, details: Record<string, unknown> | null): string {
-  const keeper = entry.keeper_name?.trim()
-  if (keeper) return keeper
+  const keeper = entry.keeperName
+  if (keeper !== 'system') return keeper
   const clientName = detailLabel(details, 'client_name')
   if (clientName) return clientName
-  const moduleName = entry.module?.trim()
+  const moduleName = entry.module.trim()
   if (moduleName) return moduleName
-  return '(root)'
+  return 'system'
 }
 
 function formatLogClock(ts: string): string {
@@ -266,7 +253,7 @@ function formatLogClock(ts: string): string {
 }
 
 function logTimestampMs(entry: LogEntry): number | null {
-  const ms = Date.parse(entry.ts)
+  const ms = Date.parse(entry.timestamp)
   return Number.isFinite(ms) ? ms : null
 }
 
@@ -370,7 +357,9 @@ function topCounts(map: Map<string, number>, limit = 3): LogCauseCount[] {
     .slice(0, limit)
 }
 
-export function summarizeLogWindow(entries: LogEntry[]): LogWindowSummary {
+export function summarizeLogWindow(
+  entries: readonly LogEntry[],
+): LogWindowSummary {
   const causes = new Map<string, number>()
   const modules = new Map<string, number>()
   let errors = 0
@@ -437,7 +426,7 @@ function renderLogMessage(entry: LogEntry): string {
   return failure ? `${message} (${failure.summary})` : message
 }
 
-function sourceTone(source: string): string {
+function sourceTone(source: LogEntry['source']): string {
   switch (source) {
     case 'client_tool_host':
       return 'text-[var(--color-accent-fg)] bg-[var(--accent-10)] border-[var(--accent-22)]'
@@ -450,153 +439,103 @@ function sourceTone(source: string): string {
   }
 }
 
-function selectableProviderLogs(
-  catalog: ProviderLogsCatalogResponse | undefined,
-): ProviderLogCatalogEntry[] {
-  return (catalog?.providers ?? []).filter(provider =>
-    provider.enabled && typeof provider.path === 'string' && provider.path.trim() !== '',
+function baseLogsRequest(): LogsRequest {
+  return {
+    limit: logLimit.value,
+    level: levelFilter.value,
+    module: appliedModuleFilter.value || undefined,
+    excludeCategories: hideFsmTransitions.value ? ['fsm'] : undefined,
+  }
+}
+
+function oldestLogSeq(entries: readonly LogEntry[]): Option.Option<number> {
+  const first = entries[0]
+  if (first === undefined) return Option.none()
+  return Option.some(
+    entries.reduce((min, entry) => Math.min(min, entry.seq), first.seq),
   )
 }
 
-function providerLogOptionLabel(provider: ProviderLogCatalogEntry): string {
-  const pathLabel = lastPathSegment(provider.path ?? undefined)
-  return pathLabel ? `${provider.display_name} - ${pathLabel}` : provider.display_name
-}
-
-async function loadLogs(mode: LoadMode = 'reset') {
-  const requestId = ++latestRequestId
-
-  if (mode === 'reset') {
-    logQueryGeneration += 1
-    pagedOlder.value = false
-    noMoreOlder.value = false
-    return logResource.load(async () => {
-      const resp = await fetchLogs({
-        limit: logLimit.value,
-        level: levelFilter.value,
-        module: appliedModuleFilter.value || undefined,
-        category: categoryFilter.value || undefined,
-        exclude_category: hideFsmTransitions.value ? 'fsm' : undefined,
-      })
-      const entries = sortLogEntries(resp.entries).slice(0, Math.max(1, logLimit.value))
-      latestSeq.value = latestLogSeq(entries)
-      return {
-        ...resp,
-        entries,
-        total: resp.total,
-      }
-    })
-  }
-
-  // delta mode — update existing loaded data
-  try {
-    const resp = await fetchLogs({
-      limit: logLimit.value,
-      level: levelFilter.value,
-      module: appliedModuleFilter.value || undefined,
-      since_seq: latestSeq.value ?? undefined,
-      category: categoryFilter.value || undefined,
-      exclude_category: hideFsmTransitions.value ? 'fsm' : undefined,
-    })
-    if (requestId !== latestRequestId) return
-
-    const s = logResource.state.value
-    const currentEntries = s.status === 'loaded' ? s.data.entries : []
-    const incoming = sortLogEntries(resp.entries)
-    const cap = deltaMergeCap(currentEntries, incoming, pagedOlder.value, logLimit.value)
-    const nextEntries = mergeLogEntries(currentEntries, incoming, cap)
-
-    latestSeq.value = latestLogSeq(nextEntries)
-    logResource.state.value = loaded({
-      ...resp,
-      entries: nextEntries,
-      total: resp.total,
-    })
-  } catch {
-    if (requestId !== latestRequestId) return
-    // Delta failures don't overwrite loaded state — keep existing data visible
+function resetLogData(response: LogsData): LogData {
+  return {
+    ...response,
+    entries: sortLogEntries(response.entries).slice(
+      0,
+      Math.max(1, logLimit.value),
+    ),
+    pagedOlder: false,
+    noMoreOlder: false,
   }
 }
 
-function oldestLogSeq(entries: readonly LogEntry[]): number | null {
-  if (entries.length === 0) return null
-  return entries.reduce((min, entry) => Math.min(min, entry.seq), entries[0]?.seq ?? 0)
-}
-
-// "load older" backward paging: fetch entries strictly older than the smallest
-// seq currently shown and append them. The merge cap here covers current + newly
-// loaded rows so this merge keeps them, and [pagedOlder] then makes the delta
-// poller grow its cap so it does not trim them on the next poll.
-export async function loadOlder() {
-  const s = logResource.state.value
-  if (s.status !== 'loaded') return
-  const currentEntries = s.data.entries
-  const oldest = oldestLogSeq(currentEntries)
-  if (oldest === null || oldest <= 0) {
-    noMoreOlder.value = true
-    return
-  }
-  if (olderLoading.value) return
-  const startedGeneration = logQueryGeneration
-  olderLoading.value = true
-  try {
-    const resp = await fetchLogs({
-      limit: logLimit.value,
-      level: levelFilter.value,
-      module: appliedModuleFilter.value || undefined,
-      before_seq: oldest,
-      category: categoryFilter.value || undefined,
-      exclude_category: hideFsmTransitions.value ? 'fsm' : undefined,
-    })
-    if (startedGeneration !== logQueryGeneration) return
-    const incoming = sortLogEntries(resp.entries)
-    if (incoming.length === 0) {
-      noMoreOlder.value = true
-      return
-    }
-    const latestState = logResource.state.value
-    if (latestState.status !== 'loaded') return
-    const latestEntries = latestState.data.entries
-    const cap = latestEntries.length + incoming.length
-    const nextEntries = mergeLogEntries(latestEntries, incoming, cap)
-    // Mark the view as paged-open so the delta poller grows its cap for new
-    // rows instead of slicing the just-loaded older rows back off.
-    pagedOlder.value = true
-    // latestSeq stays untouched: older paging only extends the tail, the
-    // newest-cursor for delta polling is unaffected.
-    logResource.state.value = loaded({
-      ...latestState.data,
-      entries: nextEntries,
-      total: resp.total,
-    })
-  } catch {
-    // Keep existing data on failure; the affordance stays available for retry.
-  } finally {
-    olderLoading.value = false
-  }
-}
-
-async function loadProviderLogCatalog() {
-  return providerLogCatalogResource.load(async () => {
-    const resp = await fetchProviderLogsCatalog()
-    const selectable = selectableProviderLogs(resp)
-    const stillSelected = selectable.some(provider => provider.id === providerLogProvider.value)
-    if (!stillSelected) {
-      providerLogProvider.value = selectable[0]?.id ?? ''
-    }
-    return resp
-  })
-}
-
-async function loadSelectedProviderLog() {
-  const provider = providerLogProvider.value
-  if (!provider) {
-    providerLogTailResource.reset()
-    return
-  }
-  return providerLogTailResource.load(() =>
-    fetchProviderLogTail(provider, { lines: providerLogLines.value }),
+function mergeDeltaLogData(current: LogData, response: LogsData): LogData {
+  const incoming = sortLogEntries(response.entries)
+  const cap = deltaMergeCap(
+    current.entries,
+    incoming,
+    current.pagedOlder,
+    logLimit.value,
   )
+  return {
+    ...response,
+    entries: mergeLogEntries(current.entries, incoming, cap),
+    pagedOlder: current.pagedOlder,
+    noMoreOlder: current.noMoreOlder,
+  }
+}
+
+function mergeOlderLogData(current: LogData, response: LogsData): LogData {
+  const incoming = sortLogEntries(response.entries)
+  if (incoming.length === 0) {
+    return { ...current, noMoreOlder: true }
+  }
+  return {
+    ...response,
+    entries: mergeLogEntries(
+      current.entries,
+      incoming,
+      current.entries.length + incoming.length,
+    ),
+    pagedOlder: true,
+    noMoreOlder: false,
+  }
+}
+
+async function loadLogs(mode: LoadMode = 'reset'): Promise<void> {
+  const state = logResource.state.value
+  if (mode !== 'reset' && state._tag === 'Loading') return
+
+  const current = Option.getOrUndefined(remotePrevious(state))
+
+  const request = baseLogsRequest()
+  let program: Effect.Effect<LogData, LogsError, DashboardHttp>
+  switch (mode) {
+    case 'reset':
+      program = fetchLogs(request).pipe(Effect.map(resetLogData))
+      break
+    case 'delta':
+      if (current === undefined) return
+      program = fetchLogs({
+        ...request,
+        sinceSeq: Option.getOrUndefined(latestLogSeq(current.entries)),
+      }).pipe(Effect.map(response => mergeDeltaLogData(current, response)))
+      break
+    case 'older': {
+      if (current === undefined) return
+      const beforeSeq = Option.getOrUndefined(oldestLogSeq(current.entries))
+      if (beforeSeq === undefined || beforeSeq <= 0 || current.noMoreOlder) return
+      program = fetchLogs({ ...request, beforeSeq }).pipe(
+        Effect.map(response => mergeOlderLogData(current, response)),
+      )
+      break
+    }
+  }
+
+  await logResource.load(program)
+}
+
+export function loadOlder(): Promise<void> {
+  return loadLogs('older')
 }
 
 // Pretty-print a nested details value as a JSON code block body, matching the
@@ -752,7 +691,7 @@ function renderLogKindGrid(
 
 function renderLogRow(entry: LogEntry) {
   const level = normalizedLevel(entry)
-  const source = entry.source || '(unknown source)'
+  const source = entry.source
   const details = entryDetails(entry)
   const clientName = detailLabel(details, 'client_name')
   const toolName = detailLabel(details, 'tool_name') ?? detailLabel(details, 'tool')
@@ -766,7 +705,7 @@ function renderLogRow(entry: LogEntry) {
   const sourceClass = sourceTone(source)
   const renderedMessage = renderLogMessage(entry)
   const routeLinks = logRouteLinks(entry)
-  const category = categoryLabel(entry.category)
+  const category = entry.category === null ? undefined : categoryLabel(entry.category)
   const displayKind = logDisplayKind(entry)
   const severity = logSeverity(entry)
   const identity = keeperLabel(entry, details)
@@ -809,7 +748,7 @@ function renderLogRow(entry: LogEntry) {
           expandedLogSeq.value = isExpanded ? null : entry.seq
         }}
       >
-        <span class="v2-logs-time lg-time mono">${formatLogClock(entry.ts)}</span>
+        <span class="v2-logs-time lg-time mono">${formatLogClock(entry.timestamp)}</span>
         <span class="v2-logs-who lg-who">
           <${KeeperBadge} id=${identity} variant="sigil" size="md" title=${identity} />
           <span class="v2-logs-identity lg-kid" title=${identity}>${identity}</span>
@@ -833,7 +772,7 @@ function renderLogRow(entry: LogEntry) {
               <div><span>level</span><b style=${{ color: LEVEL_COLORS[level] ?? 'inherit' }}>${level}</b></div>
               <div><span>module</span><b>${entry.module || '(root)'}</b></div>
               <div><span>source</span><b>${sourceLabel(source)}</b></div>
-              <div><span>timestamp</span><b>${entry.ts.replace('T', ' ').replace('Z', '')}</b></div>
+              <div><span>timestamp</span><b>${entry.timestamp.replace('T', ' ').replace('Z', '')}</b></div>
             </div>
             <div class="v2-logs-tags">
               <${StatusChip} tone=${sourceClass}>${sourceLabel(source)}</${StatusChip}>
@@ -893,119 +832,31 @@ function lastPathSegment(path: string | undefined): string | null {
 
 function renderLogProvenance(data: LogData | undefined) {
   if (!data) return null
-  const scope = data.retention?.scope
-  const store = lastPathSegment(data.retention?.durable_store)
-  const latestSeq = typeof data.latest_seq === 'number' ? String(data.latest_seq) : null
-  const generatedAt = data.generated_at_iso?.replace('T', ' ').replace('Z', '')
-
-  if (!data.source && !scope && !store && !latestSeq && !generatedAt) return null
+  const scope = data.retention.scope
+  const store = lastPathSegment(data.retention.durableStore)
+  const latestSeq = Option.getOrUndefined(latestLogSeq(data.entries))
+  const generatedAt = data.generatedAt.replace('T', ' ').replace('Z', '')
 
   return html`
     <div class="flex flex-wrap items-center gap-1.5" data-testid="logs-provenance">
-      ${data.source ? renderSummaryChip('source', data.source, 'info') : null}
-      ${scope ? renderSummaryChip('scope', scope) : null}
-      ${latestSeq ? renderSummaryChip('seq', latestSeq) : null}
+      ${renderSummaryChip('source', data.source, 'info')}
+      ${renderSummaryChip('scope', scope)}
+      ${latestSeq !== undefined ? renderSummaryChip('seq', latestSeq) : null}
       ${store ? html`
         <${StatusChip}
           tone="neutral"
           uppercase=${false}
         >store ${store}</${StatusChip}>
       ` : null}
-      ${generatedAt ? renderSummaryChip('at', generatedAt) : null}
-    </div>
-  `
-}
-
-function renderProviderLogPanel() {
-  const catalogState = providerLogCatalogResource.state.value
-  const catalog = catalogState.status === 'loaded' ? catalogState.data : undefined
-  const configuredProviders = catalog?.providers ?? []
-  const selectableProviders = selectableProviderLogs(catalog)
-  const selectedProvider =
-    selectableProviders.find(provider => provider.id === providerLogProvider.value) ?? null
-  const tailState = providerLogTailResource.state.value
-  const tail = tailState.status === 'loaded' ? tailState.data : undefined
-  const tailText = tail?.entries.map(entry => entry.text).join('\n') ?? ''
-  const disabledCount = configuredProviders.filter(provider => !provider.enabled).length
-
-  if (
-    catalogState.status === 'idle'
-    || (configuredProviders.length === 0 && catalogState.status !== 'error')
-  ) {
-    return null
-  }
-
-  return html`
-    <div class="v2-logs-provider-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
-      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-divider)] px-3 py-2">
-        <div class="flex flex-wrap items-center gap-2 text-2xs">
-          <${StatusChip} tone="info" uppercase=${false}>provider logs</${StatusChip}>
-          ${selectedProvider
-            ? html`<${StatusChip} tone="neutral" uppercase=${false}>${selectedProvider.protocol}</${StatusChip}>`
-            : null}
-          ${selectedProvider?.path
-            ? html`<${StatusChip} tone="neutral" uppercase=${false}>${lastPathSegment(selectedProvider.path)}</${StatusChip}>`
-            : null}
-          ${disabledCount > 0
-            ? html`<${StatusChip} tone="warn" uppercase=${false}>disabled ${disabledCount}</${StatusChip}>`
-            : null}
-        </div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          ${selectableProviders.length > 0
-            ? html`
-              <${Select}
-                class="logs-select px-3 py-2 text-xs"
-                name="provider-log-provider"
-                ariaLabel="Provider log"
-                value=${providerLogProvider.value}
-                options=${selectableProviders.map(provider => ({
-                  value: provider.id,
-                  label: providerLogOptionLabel(provider),
-                }))}
-                onInput=${(value: string) => { providerLogProvider.value = value }}
-              />
-              <${Select}
-                class="logs-select px-3 py-2 text-xs"
-                name="provider-log-lines"
-                ariaLabel="Provider log lines"
-                value=${String(providerLogLines.value)}
-                options=${['50', '100', '200', '500', '1000', '3000']}
-                onInput=${(value: string) => { providerLogLines.value = parseInt(value, 10) }}
-              />
-              <button
-                type="button"
-                class="logs-refresh-btn rounded-[var(--r-1)] border border-[var(--accent-22)] bg-[var(--accent-10)] px-3 py-2 text-2xs font-medium text-[var(--color-accent-fg)]"
-                onClick=${() => { void loadSelectedProviderLog() }}
-                disabled=${tailState.status === 'loading'}
-              >
-                ${tailState.status === 'loading' ? '...' : 'tail'}
-              </button>
-            `
-            : null}
-        </div>
-      </div>
-
-      ${catalogState.status === 'error'
-        ? html`<div class="px-3 py-3 text-xs text-[var(--err-fg)]">${catalogState.message}</div>`
-        : null}
-      ${catalog?.error
-        ? html`<div class="px-3 py-3 text-xs text-[var(--err-fg)]">${catalog.error}</div>`
-        : null}
-      ${selectableProviders.length === 0 && catalogState.status === 'loaded'
-        ? html`<div class="px-3 py-3 text-xs text-[var(--color-fg-muted)]">runtime.toml provider log tail is disabled.</div>`
-        : null}
-      ${tailState.status === 'error'
-        ? html`<div class="px-3 py-3 text-xs text-[var(--err-fg)]">${tailState.message}</div>`
-        : null}
-      ${selectedProvider && tailState.status !== 'error'
-        ? html`
-          <pre
-            class="m-0 max-h-72 min-h-32 overflow-auto whitespace-pre-wrap break-words px-3 py-3 font-mono text-2xs leading-relaxed text-[var(--color-fg-primary)]"
-            data-testid="provider-log-tail"
-          >${tailState.status === 'loading' && !tail ? 'loading...' : tailText}</pre>
-        `
-        : null}
+      ${renderSummaryChip('at', generatedAt)}
+      ${data.ring.droppedBefore ? html`
+        <${StatusChip}
+          tone="warn"
+          uppercase=${false}
+          title=${`링 시작 seq ${data.ring.startSeq} · 이전 기록은 ${data.retention.durableStore}에 있습니다`}
+          data-testid="logs-ring-dropped"
+        >seq ${data.ring.startSeq} 이전은 창 밖</${StatusChip}>
+      ` : null}
     </div>
   `
 }
@@ -1019,7 +870,6 @@ export function LogViewer() {
         clearInterval(pollId)
         pollId = null
       }
-      latestSeq.value = null
       logResource.reset()
       void loadLogs('reset')
       if (!autoRefresh.value) return
@@ -1033,7 +883,6 @@ export function LogViewer() {
     const unsubscribeLevel = levelFilter.subscribe(restart)
     const unsubscribeModule = appliedModuleFilter.subscribe(restart)
     const unsubscribeLimit = logLimit.subscribe(restart)
-    const unsubscribeCategory = categoryFilter.subscribe(restart)
     const unsubscribeHideFsm = hideFsmTransitions.subscribe(restart)
     const unsubscribeAutoRefresh = autoRefresh.subscribe(restart)
 
@@ -1044,9 +893,9 @@ export function LogViewer() {
       unsubscribeLevel()
       unsubscribeModule()
       unsubscribeLimit()
-      unsubscribeCategory()
       unsubscribeHideFsm()
       unsubscribeAutoRefresh()
+      logResource.cancel()
     }
   }, [])
 
@@ -1057,50 +906,12 @@ export function LogViewer() {
     }
   }, [])
 
-  useEffect(() => {
-    providerLogCatalogResource.reset()
-    providerLogTailResource.reset()
-    void loadProviderLogCatalog()
-  }, [])
-
-  useEffect(() => {
-    let pollId: ReturnType<typeof setInterval> | null = null
-
-    const restart = () => {
-      if (pollId) {
-        clearInterval(pollId)
-        pollId = null
-      }
-      providerLogTailResource.reset()
-      void loadSelectedProviderLog()
-      if (!autoRefresh.value || !providerLogProvider.value) return
-      pollId = setInterval(() => {
-        void loadSelectedProviderLog()
-      }, POLL_INTERVAL_MS)
-    }
-
-    restart()
-
-    const unsubscribeProvider = providerLogProvider.subscribe(restart)
-    const unsubscribeLines = providerLogLines.subscribe(restart)
-    const unsubscribeAutoRefresh = autoRefresh.subscribe(restart)
-
-    return () => {
-      if (pollId) {
-        clearInterval(pollId)
-      }
-      unsubscribeProvider()
-      unsubscribeLines()
-      unsubscribeAutoRefresh()
-    }
-  }, [])
-
   const s = logResource.state.value
-  const logData = s.status === 'loaded' ? s.data : undefined
+  const logData = Option.getOrUndefined(remotePrevious(s))
   const logEntries = logData?.entries ?? EMPTY_LOG_ENTRIES
   const logTotal = logData?.total ?? 0
-  const logLoading = s.status === 'loading'
-  const logError = s.status === 'error' ? s.message : null
+  const logLoading = s._tag === 'Initial' || s._tag === 'Loading'
+  const logError = s._tag === 'Failure' ? s.error.message : undefined
   // summarizeLogWindow iterates the full entries array (counts errors/warnings,
   // builds cause/module Maps). When logData is loaded the entries ref is stable
   // across unrelated re-renders (toolbar interactions, polling status flips);
@@ -1116,18 +927,15 @@ export function LogViewer() {
     : '0.0'
   const currentFilterLabel =
     LOG_KIND_FILTERS.find(filter => filter.value === kindFilter.value)?.label
-    ?? LOG_CATEGORY_OPTIONS.find(option => option.value === categoryFilter.value)?.label
     ?? '전체'
   // kindFilter is a preact signal: reading .value subscribes this render,
   // so a plain derivation recomputes on kind change without a memo dep.
   const visibleEntries = kindFilter.value === ''
     ? logEntries
     : logEntries.filter(entry => logDisplayKind(entry) === kindFilter.value)
-  let emptyMessage = '조건에 맞는 로그가 없습니다.'
+  let emptyMessage = '조건에 맞는 로그 없음'
   if (logLoading) emptyMessage = '로그를 불러오는 중...'
   else if (kindFilter.value !== '') emptyMessage = '해당하는 이벤트 없음'
-  const providerDiagnostics = renderProviderLogPanel()
-
   return html`
     <div class="logs-viewer v2-logs-surface lg">
       <section class="v2-logs-panel" aria-label="로그 뷰어">
@@ -1189,16 +997,9 @@ export function LogViewer() {
                     { value: 'WARN', label: 'WARN+' },
                     { value: 'ERROR', label: 'ERROR' },
                   ]}
-                  onInput=${(v: string) => { levelFilter.value = v }}
-                />
-
-                <${Select}
-                  class="logs-select px-3 py-2 text-xs"
-                  name="log-category"
-                  ariaLabel="카테고리"
-                  value=${categoryFilter.value}
-                  options=${LOG_CATEGORY_OPTIONS}
-                  onInput=${(v: string) => { categoryFilter.value = v }}
+                  onInput=${(value: string) => {
+                    if (isLogLevel(value)) levelFilter.value = value
+                  }}
                 />
 
                 <${TextInput}
@@ -1258,11 +1059,8 @@ export function LogViewer() {
               class="logs-refresh-btn v2-logs-refresh"
               aria-label="새로고침"
               onClick=${() => {
-                latestSeq.value = null
                 logResource.reset()
                 void loadLogs('reset')
-                void loadProviderLogCatalog()
-                void loadSelectedProviderLog()
               }}
               disabled=${logLoading}
             >
@@ -1285,19 +1083,6 @@ export function LogViewer() {
               ${renderLogSummary(summary)}
             </div>
           </details>
-          ${providerDiagnostics
-            ? html`
-              <details class="v2-logs-diagnostics" data-testid="logs-provider-diagnostics">
-                <summary>
-                  <span>Provider diagnostics</span>
-                  <span class="mono">runtime.toml log tail</span>
-                </summary>
-                <div class="v2-logs-diagnostics-body">
-                  ${providerDiagnostics}
-                </div>
-              </details>
-            `
-            : null}
         </div>
 
         <div class="v2-logs-table-header lg-colhd">
@@ -1328,7 +1113,7 @@ export function LogViewer() {
         ${logEntries.length > 0
           ? html`
               <div class="v2-logs-load-older flex items-center justify-center px-4 py-3">
-                ${noMoreOlder.value
+                ${logData?.noMoreOlder
                   ? html`<span class="text-2xs text-[var(--color-fg-muted)]">더 오래된 기록이 없습니다.</span>`
                   : html`
                       <button
@@ -1336,9 +1121,9 @@ export function LogViewer() {
                         class="logs-refresh-btn rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs font-medium text-[var(--color-fg-muted)]"
                         data-testid="logs-load-older"
                         onClick=${() => { void loadOlder() }}
-                        disabled=${olderLoading.value}
+                        disabled=${logLoading}
                       >
-                        ${olderLoading.value ? '불러오는 중...' : '이전 기록 더 보기'}
+                        ${logLoading ? '불러오는 중...' : '이전 기록 더 보기'}
                       </button>
                     `}
               </div>

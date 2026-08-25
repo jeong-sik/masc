@@ -50,14 +50,14 @@ export function evaluateProcessTrace({
   const recent = events.slice(0, RECENT_EVENT_LIMIT)
   const failures = recent.filter(isFailureEvent)
 
-  if (failures.length > 0 || summary.oas_error_count > 0) {
+  if (failures.length > 0 || summary.agent_core_error_count > 0) {
     findings.push({
       id: 'recent-failure-boundary',
       severity: 'action',
       title: 'Failure boundary first',
       detail: 'Recent trace evidence contains a failure, so the next process move should pin the failing boundary before broad exploration continues.',
       action: 'Inspect latest error',
-      evidence: compactEvidence(failures, summary.oas_error_count > 0 ? [`OAS errors ${summary.oas_error_count}`] : []),
+      evidence: compactEvidence(failures, summary.agent_core_error_count > 0 ? [`Agent Core errors ${summary.agent_core_error_count}`] : []),
     })
   }
 
@@ -76,7 +76,7 @@ export function evaluateProcessTrace({
     })
   }
 
-  if (summary.oas_context_count > 0 || summary.oas_tokens_saved > 0) {
+  if (summary.agent_core_context_count > 0 || summary.agent_core_tokens_saved > 0) {
     findings.push({
       id: 'context-pressure',
       severity: 'warning',
@@ -84,13 +84,13 @@ export function evaluateProcessTrace({
       detail: 'The trace includes context compaction, so the safer process move is to preserve the current decision boundary before opening a wider search.',
       action: 'Checkpoint or split scope',
       evidence: [
-        `context compactions ${summary.oas_context_count}`,
-        summary.oas_tokens_saved > 0 ? `tokens saved ${summary.oas_tokens_saved}` : '',
+        `context compactions ${summary.agent_core_context_count}`,
+        summary.agent_core_tokens_saved > 0 ? `tokens saved ${summary.agent_core_tokens_saved}` : '',
       ].filter(Boolean),
     })
   }
 
-  const totalTools = summary.tool_call_count + summary.oas_tool_count
+  const totalTools = summary.tool_call_count + summary.agent_core_tool_count
   if (totalTools >= TOOL_CHURN_THRESHOLD && summary.task_completed_count === 0) {
     findings.push({
       id: 'tool-churn-no-completion',
@@ -124,7 +124,7 @@ function isFailureEvent(event: UnifiedTraceEvent): boolean {
 }
 
 function eventToolName(event: UnifiedTraceEvent): string | null {
-  if (event.kind !== 'tool_call' && event.kind !== 'oas_tool') return null
+  if (event.kind !== 'tool_call' && event.kind !== 'agent_core_tool') return null
   const fromField = typeof event.toolName === 'string' ? event.toolName.trim() : ''
   if (fromField) return fromField
   const fromDetail = typeof event.detail.tool_name === 'string' ? event.detail.tool_name.trim() : ''

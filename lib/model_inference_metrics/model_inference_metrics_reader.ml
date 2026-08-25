@@ -168,7 +168,6 @@ let merge_exact_inference decision cost =
       value_or
         ~preferred:cost.reasoning_tokens
         ~fallback:decision.reasoning_tokens
-  ; fallback_applied = decision.fallback_applied
   ; cost_usd = value_or ~preferred:cost.cost_usd ~fallback:decision.cost_usd
   ; tool_call_count = decision.tool_call_count
   ; tools_used = decision.tools_used
@@ -316,7 +315,7 @@ let coverage_stage_of_entry (entry : raw_entry) : string option =
     then Some "unknown"
     else (
       match entry.usage_reported, entry.telemetry_reported with
-      | Some false, _ | _, Some false -> Some "oas"
+      | Some false, _ | _, Some false -> Some "agent_core"
       | _ ->
         (match coverage_reason_of_entry entry with
          | Some _ -> Some "unknown"

@@ -1,13 +1,10 @@
 (** Receipt-first [Resume_owner] transaction for a paused Keeper lane. *)
 
 type request =
-  { owner_nonce : int
-  ; operator_operation_id : string
-  }
+  { operator_operation_id : string }
 
 type projection_stage =
   | Durable_meta
-  | Registry_meta
   | Registry_transition
 
 type failure =
@@ -19,19 +16,9 @@ type failure =
   | Receipt_write_failed of string
   | Durable_meta_read_failed of string
   | Durable_meta_missing
-  | Durable_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Durable_owner_identity_changed
   | Durable_owner_not_paused
-  | Durable_owner_dead_tombstone
-  | Durable_owner_transcript_reset_required
   | Registry_owner_missing
-  | Registry_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Registry_owner_identity_changed
   | Registry_owner_not_paused of Keeper_state_machine.phase
   | Projection_failed of
@@ -58,6 +45,7 @@ type success =
   ; projection : projection
   ; reservation_release : Keeper_lifecycle_reservation.release_outcome
   }
+
 
 val error_to_string : error -> string
 

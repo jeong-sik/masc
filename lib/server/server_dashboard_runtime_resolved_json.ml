@@ -2,7 +2,7 @@
    model, and max-context is actually applied" (bugs #14/#15/#36):
 
    - #15: max-context previously diverged across three sources (runtime.toml
-     override, OAS hardcoded defaults, OAS capability catalog cap). This
+     override, AGENT_CORE hardcoded defaults, AGENT_CORE capability catalog cap). This
      document reports the one value [Runtime.max_context_of_runtime] resolves,
      plus which of [override]/[capability]/[override_clamped_by_capability]
      produced it ([Runtime.resolve_max_context_of_runtime]).
@@ -26,6 +26,11 @@ let runtime_resolution_json (rt : Runtime.t) : Yojson.Safe.t =
            "runtime resolved projection invariant violated: runtime %S has no max-context resolution"
            rt.id)
   in
+  (* TEL-OK: read-only projection into the response document; the boot path is
+     where a blocked runtime is logged. *)
+  let dispatch_blocker =
+    Runtime.keeper_dispatch_blocker (Runtime.keeper_dispatch_readiness rt)
+  in
   `Assoc
     [ "id", `String rt.id
     ; "provider", `String rt.provider.display_name
@@ -35,6 +40,15 @@ let runtime_resolution_json (rt : Runtime.t) : Yojson.Safe.t =
     ; "max_output_tokens", int_opt_json (Runtime.max_output_tokens_of_runtime_id rt.id)
     ; "is_local", `Bool (Runtime.is_local_runtime rt)
     ; "is_default", `Bool rt.binding.is_default
+      (* masc#28404: a runtime can be declared, materialized, and listed here
+         while being impossible to assign to a keeper. Boot validation judges
+         only reachable ids, so that state used to have no observer — the
+         operator saw a runtime in this list, tried to assign it, and only then
+         learned it was blocked. Reported per runtime rather than as a separate
+         endpoint so "what is applied" and "what could be applied" are read from
+         one document. *)
+    ; "keeper_dispatchable", `Bool (Option.is_none dispatch_blocker)
+    ; "keeper_dispatch_blocked_reason", string_opt_json dispatch_blocker
     ]
 ;;
 
@@ -52,13 +66,11 @@ let lane_json (lane : Runtime_lane.t) : Yojson.Safe.t =
     ]
 ;;
 
-let resolved_assignment_json
-      (resolution : [ `Lane of Runtime_lane.t | `Single_runtime of Runtime.t | `Missing ])
+let resolved_assignment_json (resolution : [ `Lane of Runtime_lane.t | `Missing ])
   : Yojson.Safe.t
   =
   match resolution with
   | `Lane lane -> `Assoc [ "kind", `String "lane"; "id", `String (Runtime_lane.id lane) ]
-  | `Single_runtime rt -> `Assoc [ "kind", `String "single_runtime"; "id", `String rt.id ]
   | `Missing -> `Assoc [ "kind", `String "missing"; "id", `Null ]
 ;;
 
@@ -67,13 +79,16 @@ let resolved_assignment_json
    Duplicating that exact fallback here (rather than only reporting explicit
    assignments) is bug #14's fix — the resolved document must match what a
    turn actually dispatches to. *)
+let assignment_target (default : Runtime.t option) (keeper_name : string)
+  : string * string option
+  =
+  match Runtime.runtime_id_for_keeper keeper_name with
+  | Some id when String.trim id <> "" -> "explicit", Some (String.trim id)
+  | Some _ | None -> "default", Option.map (fun (rt : Runtime.t) -> rt.id) default
+;;
+
 let assignment_json (default : Runtime.t option) (keeper_name : string) : Yojson.Safe.t =
-  let explicit_id = Runtime.runtime_id_for_keeper keeper_name in
-  let assignment_source, runtime_id =
-    match explicit_id with
-    | Some id when String.trim id <> "" -> "explicit", Some (String.trim id)
-    | Some _ | None -> "default", Option.map (fun (rt : Runtime.t) -> rt.id) default
-  in
+  let assignment_source, runtime_id = assignment_target default keeper_name in
   let resolved =
     match runtime_id with
     | Some id -> resolved_assignment_json (Runtime.resolve_assignment id)
@@ -96,6 +111,29 @@ let all_keeper_names ~(config : Workspace.config) : string list =
   assigned @ registered |> List.sort_uniq String.compare
 ;;
 
+(* Declared lanes plus the lanes an assignment resolves to on its own. A keeper
+   assigned to a bare runtime id dispatches through a lane that no
+   [\[runtime.lanes\]] table declares, and reporting only declared lanes would
+   hide that lane's candidates from the document that is supposed to say what
+   dispatch will do. *)
+let dispatchable_lanes ~(config : Workspace.config) (default : Runtime.t option)
+  : Runtime_lane.t list
+  =
+  let declared = Runtime.lanes () in
+  let seen = List.map Runtime_lane.id declared in
+  let implicit =
+    all_keeper_names ~config
+    |> List.filter_map (fun keeper -> snd (assignment_target default keeper))
+    |> List.filter_map (fun id ->
+      match Runtime.resolve_assignment id with
+      | `Lane lane when not (List.mem (Runtime_lane.id lane) seen) -> Some lane
+      | `Lane _ | `Missing -> None)
+    |> List.sort_uniq (fun a b ->
+      String.compare (Runtime_lane.id a) (Runtime_lane.id b))
+  in
+  declared @ implicit
+;;
+
 let build ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t =
   let default = Runtime.get_default_runtime () in
   `Assoc
@@ -107,7 +145,7 @@ let build ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t =
         | Some rt -> runtime_resolution_json rt
         | None -> `Null )
     ; "runtimes", `List (List.map runtime_resolution_json (Runtime.get_runtimes ()))
-    ; "lanes", `List (List.map lane_json (Runtime.lanes ()))
+    ; "lanes", `List (List.map lane_json (dispatchable_lanes ~config default))
     ; ( "assignments"
       , `List (List.map (assignment_json default) (all_keeper_names ~config)) )
     ]

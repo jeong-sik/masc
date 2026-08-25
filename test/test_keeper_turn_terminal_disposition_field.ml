@@ -1,4 +1,4 @@
-(** RFC-0047 PR-2 invariant: every [Keeper_turn_terminal.t]
+(** Every [Keeper_turn_terminal.t]
     constructed via the public surface populates [disposition]
     consistently with the legacy [code] string field, i.e.
 
@@ -20,14 +20,14 @@ let check_invariant label (t : T.t) =
 ;;
 
 (* Cover every public constructor + assorted wire shapes (canonical
-   app codes, legacy persisted wires, sdk-error wires, and unmapped
+   app codes, legacy persisted wires, core-error wires, and unmapped
    strings) so the invariant survives PR-4's removal of the
    [normalize_code] producer-side preprocessor. *)
 let constructor_cases : (string * T.t) list =
   [ "success", T.success ()
   ; "of_code/runtime_stop_not_final/completed", T.of_code "completed"
-  ; "of_code/sdk_error/api_error_timeout", T.of_code "api_error_timeout"
-  ; "of_code/sdk_error/api_error_overloaded", T.of_code "api_error_overloaded"
+  ; "of_code/core_error/api_error_timeout", T.of_code "api_error_timeout"
+  ; "of_code/core_error/api_error_overloaded", T.of_code "api_error_overloaded"
   ; "of_code/unknown", T.of_code "totally_unmapped"
   ; "of_code/empty", T.of_code ""
   ; "of_code/turn_wall_clock", T.of_code "turn_wall_clock_timeout"

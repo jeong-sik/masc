@@ -18,9 +18,10 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   and is backed by the dashboard runtime config API rather than prototype globals.
 - Approvals are already represented by `dashboard/src/components/approvals/approvals-surface.ts`
   and use the live approval queue API.
-- Schedule automation data is already exposed by `/api/v1/dashboard/tools` as
-  `scheduled_automation` with request rows, derived counts, wake readiness,
-  keeper next action/tool, approval policy, payload metadata, and last wake.
+- Schedule automation data is already exposed by
+  `/api/v1/dashboard/scheduled-automation` with request rows, derived counts,
+  wake readiness, keeper next action/tool, approval policy, payload metadata,
+  and last wake.
 - The Tools surface already hosts the schedule automation projection under
   `예약 자동화 FSM`.
 
@@ -229,11 +230,7 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   canonical `#settings` route.
 - Logs was audited as a current-dashboard live surface rather than a standalone
   fixture import. The route keeps `/api/v1/dashboard/logs` as the primary event
-  stream, exposes stable row/filter selectors for verification, and moves
-  provider-log tail output behind an explicit collapsed `Provider diagnostics`
-  disclosure whenever `/api/v1/dashboard/provider-logs` has configured
-  providers, so operational support logs do not sit above the primary stream by
-  default.
+  stream and exposes stable row/filter selectors for verification.
 - Keepers/Fleet was audited route-by-route against the standalone `FleetSurface`
   rhythm. The current backed route already renders the live fleet summary band,
   compact roster, selected conversation, lifecycle/utility command bar, context
@@ -295,7 +292,7 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
 - The standalone Composer/Copilot flow still has richer microphone/STT
   affordances than the current dashboard. Board/ops Composer now covers command
   grouping and visible binary attachment metadata, and CopilotDock now covers
-  backed co-view context, route-specific starters, selected-keeper Keepers
+  backed co-view context, route-specific starters, selected Keeper context
   context, Keepers FAB suppression, and mobile full-width dock fallback for
   persisted desktop floating state. Voice/STT should not be copied until there
   is a real audio capture/transcription/send contract.
@@ -332,9 +329,8 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   repository metadata, workspace diff rows, activity/bridge-event APIs, cursor
   stream state, and Execute output stream rather than importing fixture globals.
 - Logs now has a first-pass audit. Remaining Logs work should stay constrained
-  to live `/api/v1/dashboard/logs` and `/api/v1/dashboard/provider-logs`
-  contracts; do not add synthetic provider tails, static log fixtures, or
-  local-only remediation controls above the primary event stream.
+  to the live `/api/v1/dashboard/logs` contract; do not add static log fixtures
+  or local-only remediation controls above the primary event stream.
 - The standalone memory inspector still has prototype-only pinned facts, store
   composition, scope toggles, and recall timeline controls. Current coverage is
   intentionally limited to the backed Memory OS projections
@@ -457,7 +453,7 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   same-origin WebSocket metadata, so this was recorded as residual transport
   diagnostics rather than a schedule-card regression.
 - CopilotDock Vitest: `src/components/copilot-dock.test.ts` passes (17 tests),
-  covering selected-keeper Keepers context, fleet fallback, route-specific
+  covering selected Keeper context, fleet fallback, route-specific
   starter prompt selection, rendered empty-state starter buttons, normalized
   field tone classes, stream surface-context posting, and keeper picker flow.
 - Work Vitest: `src/components/work.test.ts` passes (11 tests), covering
@@ -695,7 +691,7 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
 - Fusion source-split live API check: `curl -fsS
   'http://127.0.0.1:8935/api/v1/dashboard/fusion-runs'` returned `count: 0`.
   The unfiltered recent board fetch
-  `curl -fsS 'http://127.0.0.1:8935/api/v1/dashboard/board?sort_by=recent&limit=500&blind_votes=true'`
+  `curl -fsS 'http://127.0.0.1:8935/api/v1/dashboard/board?sort_by=recent&limit=500'`
   returned five fusion board-sink posts, while the persisted-Board-filter shape
   with `exclude_system=true` returned zero. This is the regression the
   dedicated Fusion board fetch avoids.
@@ -706,7 +702,7 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   five run rows, selected run `fus-bece178da21a3182769258485ddb0c47`, live
   `PR #21805 BLOCKER Resolution` detail text, no old `No fusion runs found`
   copy, no framework overlay, no horizontal overflow, and Refresh requests for
-  `/api/v1/dashboard/board?sort_by=recent&limit=500&voter=dashboard&blind_votes=true`
+  `/api/v1/dashboard/board?sort_by=recent&limit=500&voter=dashboard`
   without `exclude_system`.
 - Fusion source-split mobile rendered smoke: the same `agent-browser` session
   at `390x844` verified the KPI stack, run list/detail after scrolling the
@@ -740,7 +736,7 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   `0.19.47`, and fresh uptime. `curl -fsS
   'http://127.0.0.1:8935/api/v1/dashboard/fusion-runs'` returned `count: 0`,
   while the unfiltered board fetch
-  `curl -fsS 'http://127.0.0.1:8935/api/v1/dashboard/board?sort_by=recent&limit=500&voter=dashboard&blind_votes=true'`
+  `curl -fsS 'http://127.0.0.1:8935/api/v1/dashboard/board?sort_by=recent&limit=500&voter=dashboard'`
   returned five Fusion board-sink posts in a 500-row sample.
 - Fusion source-reconciliation rendered smoke: `agent-browser` loaded the
   worktree Vite server with
@@ -1235,7 +1231,7 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   `/tmp/masc-approvals-inline-detail-mobile-20260621.png`. Browser page errors
   were empty. Console output was limited to Vite debug connection lines.
 - Fusion live empty-state smoke: `curl -fsS
-  'http://127.0.0.1:8935/api/v1/dashboard/board?limit=200&voter=dashboard&blind_votes=true'
+  'http://127.0.0.1:8935/api/v1/dashboard/board?limit=200&voter=dashboard'
   | jq` found zero posts with `meta.source = "fusion"` or
   `meta.fusion_deliberation`, and `curl -fsS
   'http://127.0.0.1:8935/api/v1/dashboard/fusion-runs'` returned `count: 0`.
@@ -1250,40 +1246,32 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   `/tmp/masc-fusion-empty-mobile-20260621.png`. Browser page errors were empty;
   console noise was limited to Vite debug and one slow-frame warning per
   viewport.
-- Logs Vitest after the provider-diagnostics audit:
-  `src/components/logs.test.ts` passes (9 tests), including stable
+- Logs Vitest after the live-stream audit:
+  `src/components/logs.test.ts` passes, including stable
   `logs-row`/category-filter selectors, Code route links from structured log
-  evidence, unsafe absolute-path rejection, provider-log tail rendering from a
-  configured provider path, and the new default-collapsed
-  `logs-provider-diagnostics` disclosure.
-- Dashboard TypeScript after the Logs provider-diagnostics audit:
+  evidence, and unsafe absolute-path rejection.
+- Dashboard TypeScript after the Logs live-stream audit:
   `pnpm exec tsc --noEmit --pretty false` passes.
-- Dashboard lint after the Logs provider-diagnostics audit: `pnpm lint`
+- Dashboard lint after the Logs live-stream audit: `pnpm lint`
   passes.
-- Dashboard production build after the Logs provider-diagnostics audit:
+- Dashboard production build after the Logs live-stream audit:
   `pnpm build` passes with the same existing Vite warnings: unresolved
   dashboard font assets, dynamic/static import chunk warnings, large chunks,
   and the Node `module.register()` deprecation warning.
 - Logs live rendered smoke: `curl -fsS 'http://127.0.0.1:8935/health?full=1'`
   returned status `ok`, `curl -fsS
   'http://127.0.0.1:8935/api/v1/dashboard/logs?limit=20&level=INFO'`
-  returned live `masc_log_ring` rows, and `curl -fsS
-  'http://127.0.0.1:8935/api/v1/dashboard/provider-logs'` returned
-  `providers: []`. `agent-browser` loaded the worktree Vite server with
+  returned live `masc_log_ring` rows. `agent-browser` loaded the worktree Vite server with
   `MASC_DASHBOARD_PROXY_TARGET=http://127.0.0.1:8935` at
   `http://127.0.0.1:5192/dashboard/#logs`. Desktop `1440x1000` and mobile
   `390x844` both verified title `MASC · Logs`, canonical hash `#logs`, h1
   `이벤트 로그`, 200 live rows, provenance including `masc_log_ring` and
-  `dashboard_logs`, no provider diagnostics panel for the empty live provider
-  catalog, Tool category filter changing the stream from `200` to `0`, All
-  restoring `200`, no framework overlay, and no horizontal overflow.
+  `dashboard_logs`, Tool category filter changing the stream from `200` to `0`,
+  All restoring `200`, no framework overlay, and no horizontal overflow.
 - Logs rendered screenshots: `/tmp/masc-logs-live-stream-desktop-20260621.png`
   and `/tmp/masc-logs-live-stream-mobile-20260621.png`. Browser page errors
   were empty; console noise was Vite debug plus existing PerformanceMonitor
-  slow-frame warnings. Browser network stubbing was attempted for provider-log
-  catalog/tail but did not affect the same-origin fetch in `agent-browser`, so
-  the configured-provider collapsed state is covered by Vitest rather than the
-  live rendered smoke.
+  slow-frame warnings.
 - Board mobile-clearance Vitest after the master-detail audit:
   `src/styles/board-v2.test.ts` and
   `src/components/board/board-surface.test.ts` pass together with
@@ -1302,7 +1290,7 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
 - Board mobile-clearance live rendered smoke: `curl -fsS
   'http://127.0.0.1:8935/health?full=1'` returned status `ok`, effective MASC
   root `/Users/dancer/me/.masc`, and `curl -fsS
-  'http://127.0.0.1:8935/api/v1/dashboard/board?limit=20&voter=dashboard&blind_votes=true'`
+  'http://127.0.0.1:8935/api/v1/dashboard/board?limit=20&voter=dashboard'`
   returned 20 live posts. `agent-browser` loaded the worktree Vite server with
   `MASC_DASHBOARD_PROXY_TARGET=http://127.0.0.1:8935` at
   `http://127.0.0.1:5193/dashboard/#board`. Mobile `390x844` verified title
@@ -1347,7 +1335,7 @@ Source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2`, `/Users/dancer/Dow
 
 ### Should Stay Out Of Scope
 
-- No OAS/provider/model transport logic should be added to the dashboard for visual parity. OAS remains the provider/model/transport boundary; this pass only changes MASC dashboard layout state and CSS.
+- No agent core/provider/model transport logic should be added to the dashboard for visual parity. agent core remains the provider/model/transport boundary; this pass only changes MASC dashboard layout state and CSS.
 - No local-only prototype state should be copied into runtime-backed keeper surfaces. If a v2 (26) control has no durable MASC API, keep it read-only, hidden, or explicitly marked as unsupported rather than stubbing it.
 - No local absolute path default such as `/Users/dancer/me` should be introduced in frontend or OCaml runtime code for this visual work.
 
@@ -1359,7 +1347,7 @@ Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/composer.
 
 - Kept the runtime-backed `ChatComposer` as the single owner of attachments, voice input, queueing, abort, and send client action IDs instead of copying standalone prototype state.
 - Scoped phone composer parity to `.kw-composer-inner` CSS: tighter box geometry, 16px mobile textarea font, denser tools, compact send button, truncated hint line, bounded attachment tray, and mobile-safe draft chip overflow.
-- Tightened mobile context drawer spacing in `.kw-mobile-rail-drawer` without changing keeper/OAS runtime boundaries.
+- Tightened mobile context drawer spacing in `.kw-mobile-rail-drawer` without changing keeper/agent core runtime boundaries.
 
 ### Still Missing Vs v2 (26)
 
@@ -1427,7 +1415,7 @@ Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/fleet.jsx`, `/Users
 ### Implemented In Current Worktree
 
 - Narrowed the visual-parity source guard to the objective's concrete risks: local absolute paths, downloaded artifact paths, `default_base`, and direct frontend env reads.
-- Removed the over-broad raw `MASC_` / `OAS_` substring ban from the guard. Legitimate MASC identifiers and boundary documentation strings should not fail a visual parity guard; OAS coupling remains governed by code ownership and explicit provider/transport changes, not by a raw substring heuristic.
+- Removed the over-broad raw `MASC_` / `AGENT_CORE_` substring ban from the guard. Legitimate MASC identifiers and boundary documentation strings should not fail a visual parity guard; agent core coupling remains governed by code ownership and explicit provider/transport changes, not by a raw substring heuristic.
 
 ### Still Missing Vs v2 (26)
 
@@ -1485,7 +1473,7 @@ Additional source reviewed: `/Users/dancer/Downloads/v2 (26)/keeper-v2/keeper-co
 - Moved the mobile “운영 상세” surface closer to the v2 full-detail pattern: full-height content, sticky top identity/action bar, a narrow 56px section rail, content-only scrolling, safe-area padding, and denser active section cards.
 - Closed the follow-up CSS affordance gap on the 56px mobile section rail: `kw-detail-section-tab` is now explicitly `inline-flex` and center-aligned, so the narrow rail does not depend on browser defaults or inherited flex behavior.
 - Matched the mobile keeper config overlay to the v2 full-screen treatment: no phone-side drawer chrome, `100dvh` height, safe-area header/content padding, contained scroll, dark overlay, and 16px form controls to avoid mobile zoom.
-- Kept all detail/config content backed by existing `KeeperDetailBody`, `KeeperDetailSectionRail`, and `KeeperConfigPanel`; no prototype-local config state, fake keeper data, or OAS/provider logic was copied.
+- Kept all detail/config content backed by existing `KeeperDetailBody`, `KeeperDetailSectionRail`, and `KeeperConfigPanel`; no prototype-local config state, fake keeper data, or agent core/provider logic was copied.
 - Extended `dashboard/src/styles/keeper-workspace-mobile.test.ts` source guards so the mobile detail/config surface remains explicit and runtime-owned.
 
 ### Still Missing Vs v2 (26)

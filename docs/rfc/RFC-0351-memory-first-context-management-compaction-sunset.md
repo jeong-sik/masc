@@ -3,11 +3,8 @@ rfc: 0351
 title: Memory-first context management and compaction sunset
 status: Draft
 created: 2026-07-20
-authors: [yousleepwhen, claude]
-issues: [25461, 25462, 25463]
-relates: [RFC-0000 Goal 3, RFC-0233, RFC-0244, RFC-0247, RFC-0259, RFC-0332]
-implementation_prs: []
-evidence: knowledge/research/2026-07-20-memory-first-context-management-adversarial-design.md, knowledge/research/2026-07-20-memory-first-context-experiment-log.md (~/me worktree feature/memory-first-context-design)
+author: [yousleepwhen, claude]
+
 ---
 
 # RFC-0351 — Memory-first context management and compaction sunset
@@ -35,7 +32,7 @@ evidence: knowledge/research/2026-07-20-memory-first-context-management-adversar
 2. **결정론 층에 남는 것은 판단이 아니다**: (a) 타입 수명(thinking=턴 스코프, tool_result=사이클 스코프), (b) 예산 산술(정수 비교), (c) 프로토콜 경계(tool_use/tool_result 쌍, provider replay 계약). 어디에도 중요도 점수·문자열 분류·휴리스틱 임계값이 없다.
 3. **어떤 단일 계층도 유일한 context manager가 되지 않는다.** fleet-freeze의 교훈은 "overflow 시점에 모든 축소 리스크가 몰린 단일 LLM 서브콜"이었다.
 4. **죽일 대상에 투자하지 않는다.** 컴팩션 파이프라인은 수리 최소화(무한루프 종결 등 안전만) 후 동결한다. 결정론적 floor(#25281 계열)도 신규 투자하지 않는다 — assembly가 floor를 대체한다.
-5. **경계 유지**: OAS는 MASC를 모른다. 필요한 OAS 표면(typed overflow, replay 계약, caller-assembled messages)은 이미 존재하며, provider별 replay 정책 교정은 capability 데이터 정정이다.
+5. **경계 유지**: agent_core는 MASC를 모른다. 필요한 agent_core 표면(typed overflow, replay 계약, caller-assembled messages)은 이미 존재하며, provider별 replay 정책 교정은 capability 데이터 정정이다.
 
 ## 3. 목표 아키텍처 (5층 ordering)
 
@@ -44,7 +41,7 @@ L1 Write   모델이 memory tool 로 직접 기록(주 경로) + 예산 게이�
 L2 Judge   consolidation = LLM-judged merge/forget (중복 병합의 유일 결정자, RFC-0332 준수)
 L3 Select  검색 기반 recall 주입 (bulk 500/500 전량 주입 은퇴; RFC-0244 계열/pgvector)
 L4 Flush   예산 근접 시 memory flush silent turn (openclaw shape) — 떨어져 나갈 내용의 durable 저장 유도
-L5 Budget  매턴 조립 예산: persona + dynamic + Select 결과 + 최근 창(구조 경계 존중) ≤ budget
+L5 Budget  매턴 조립 예산: keeper + dynamic + Select 결과 + 최근 창(구조 경계 존중) ≤ budget
            초과 시 결정론적 축소 순서(Select 주입분 → 오래된 최근 창)로 재조립. history 재작성 없음.
 ```
 
@@ -58,12 +55,14 @@ L5 Budget  매턴 조립 예산: persona + dynamic + Select 결과 + 최근 창(
 
 | 타입 | 수명 | 근거 |
 |---|---|---|
-| assistant thinking | **턴 스코프** — 진행 중 tool 루프 안에서만 유지 (provider replay 계약 준수: OAS `reasoning_dialect.replay_policy`) | reasoning 모델 일반 계약("reasoning을 다음 턴에 되돌려 보내지 마라"); rondo 47.4% 실측 |
+| assistant thinking | **턴 스코프** — 진행 중 tool 루프 안에서만 유지 (provider replay 계약 준수: agent_core `reasoning_dialect.replay_policy`) | reasoning 모델 일반 계약("reasoning을 다음 턴에 되돌려 보내지 마라"); rondo 47.4% 실측 |
 | tool_result | **사이클 스코프** — 닫힌 사이클은 조립 시 축약/스필 대상 (Anthropic "microcompact/tool-result clearing = safest touch") | rondo 23.3% |
 | assistant/user text | 의미 콘텐츠 — L1/L2가 memory로 추출, 최근 창 밖에서는 조립에서 제외 | |
 | wake marker 등 무정보 자극 | **비영속** — §5 | analyst ×359 |
 
-Provider별 replay 정책이 `Preserve_always`로 선언된 모델(예: mimo 계열)은 공식 문서 재검증 후 turn-스코프 정책으로 교정한다(OAS capability 데이터 정정, 별도 검증 진행 중). 문서가 실제로 cross-turn replay를 요구하면 예외로 존중한다.
+tool_result 의 사이클 스코프에는 최후예외가 하나 있다 (#28845): tail-window cut 이 `Newest_atom_exceeds_available` 로 거부될 때 — 최신 원자가 분할 불가능한 채로 히스토리 예산 전체보다 클 때 — 조립은 경계를 최신 원자 너머로 옮겨 딱 한 번 재시도한다. 이번 턴이 막 생산한 결과도 마커로 강등되어 나간다. 턴을 실패시키는 것보다 주소로 남기는 쪽이 낫다는 판단이며, 그 외의 경로에서는 현재 턴 제외가 그대로 유지된다.
+
+Provider별 replay 정책이 `Preserve_always`로 선언된 모델(예: mimo 계열)은 공식 문서 재검증 후 turn-스코프 정책으로 교정한다(agent_core capability 데이터 정정, 별도 검증 진행 중). 문서가 실제로 cross-turn replay를 요구하면 예외로 존중한다.
 
 ## 5. Persistence 정책 — 무정보 턴은 영구 transcript를 만들지 않는다 (#25462)
 
@@ -96,7 +95,7 @@ S4 전까지 typed trigger(`Provider_overflow | Manual`)와 partition/evidence/C
 - 결정론적 floor(#25281)의 신규 완성 (assembly가 대체; 열린 PR 처분은 S3 시점 재평가)
 - write-side jaccard/문자열 dedup (RFC-0332 기각 유지)
 - **memory lane 의 delivery accounting / due-backlog 인프라** — L1이 모델 tool call 주도로 바뀌면서 불필요해진다. 배달 보증 계층을 만드는 대신 드롭이 발생할 수 있는 구조 자체를 없앤다. `Keeper_memory_lane`은 librarian 보조 추출 전용으로 축소 유지하되, 그 경로의 유실은 계측(counter)만 하고 인프라 투자는 하지 않는다.
-- OAS에 MASC 개념 유입 (replay 교정은 provider capability 데이터 정정일 뿐)
+- agent_core에 MASC 개념 유입 (replay 교정은 provider capability 데이터 정정일 뿐)
 
 ## 9. 리스크
 

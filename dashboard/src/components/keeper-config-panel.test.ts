@@ -3,6 +3,7 @@ import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KeeperConfig, KeeperHookSlot } from '../types'
 import {
+  AUTONOMOUS_WAKE_PROMPT_MAX_BYTES,
   buildRuntimePayload,
   coerceNetworkMode,
   coerceSandboxProfile,
@@ -14,6 +15,7 @@ import {
   keeperConfigControlInventory,
   keeperRuntimeConfigCanWrite,
   keeperRuntimeConfigWriteUnsupportedReason,
+  parseAutonomousWakePromptDraft,
   parseMaxContextOverrideDraft,
   type HookSlotEntry,
   type RuntimeDraft,
@@ -32,9 +34,9 @@ function makeSlot(overrides: Partial<KeeperHookSlot> = {}): KeeperHookSlot {
 function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
   return {
     name: 'keeper-sangsu',
-    active_goal_ids: ['goal-runtime'],
     autoboot_enabled: true,
     max_context_override: null,
+    autonomous_wake_prompt: null,
     sandbox_profile: 'local',
     network_mode: 'inherit',
     sandbox_last_error: null,
@@ -60,13 +62,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     proactive: {
       enabled: true,
     },
-    drift: {
-      status: 'wired',
-      enabled: true,
-      min_turn_gap: 4,
-      count_total: 2,
-      last_reason: 'board quiet',
-    },
     hooks: {
       scope: 'keeper_runtime_composite',
       slots: {},
@@ -81,20 +76,15 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     workspace: {
       mention_targets: ['sangsu'],
       bound_workspace_ids: ['default'],
-      active_goal_ids: ['goal-runtime'],
-      active_goals: [
-        { id: 'goal-runtime', title: 'Ship runtime clarity' },
-      ],
-      active_goal_count: 1,
-      missing_active_goal_ids: [],
     },
     sources: {
       live_meta_path: '/tmp/.masc/keepers/keeper-sangsu/live.json',
       default_manifest_path: '/tmp/config/keepers/default.toml',
       default_source_kind: 'toml',
-      precedence: ['live_meta', 'toml', 'persona'],
+      precedence: ['live_meta', 'keeper_config'],
       has_live_override: true,
       override_fields: ['prompt.instructions'],
+      override_field_sources: [],
     },
     metrics: {
       generation: 3,
@@ -120,7 +110,7 @@ describe('filterHookSlots', () => {
   const entries: HookSlotEntry[] = [
     ['pre_tool_call', makeSlot({ source: 'builtin', gates: ['typed_input', 'path_scope'] })],
     ['post_turn', makeSlot({ source: 'override', effects: ['handoff_auto'] })],
-    ['compaction_watcher', makeSlot({ source: 'persona', features: ['snapshot'] })],
+    ['compaction_watcher', makeSlot({ source: 'keeper', features: ['snapshot'] })],
     ['orphan', makeSlot({ source: 'builtin' })],
   ]
 
@@ -138,7 +128,7 @@ describe('filterHookSlots', () => {
   })
 
   it('matches by source substring', () => {
-    const result = filterHookSlots(entries, 'persona')
+    const result = filterHookSlots(entries, 'keeper')
     expect(result.map(([name]) => name)).toEqual(['compaction_watcher'])
   })
 
@@ -245,12 +235,12 @@ describe('keeperRuntimeConfigCanWrite', () => {
     expect(keeperRuntimeConfigWriteUnsupportedReason(base)).toBeNull()
   })
 
-  it('allows persona-backed config when a valid keeper name is present', () => {
+  it('allows config without a manifest path when a valid Keeper name is present', () => {
     const base = makeKeeperConfig()
     const c = makeKeeperConfig({
       sources: {
         ...base.sources,
-        default_source_kind: 'persona',
+        default_source_kind: null,
         default_manifest_path: '/tmp/config/keepers/default.toml',
       },
     })
@@ -319,11 +309,6 @@ describe('keeperConfigControlInventory', () => {
       method: 'GET',
       endpoint: '/api/v1/providers',
     })
-    expect(findItem('goals', c, 'kcf-goals-catalog-filter').contracts).toContainEqual({
-      kind: 'api',
-      method: 'GET',
-      endpoint: '/api/v1/dashboard/goals',
-    })
     expect(findItem('health', c, 'kcf-health-directives').contracts).toContainEqual({
       kind: 'api',
       method: 'POST',
@@ -335,10 +320,10 @@ describe('keeperConfigControlInventory', () => {
   it('classifies runtime-backed controls from the manifest writer guard', () => {
     const toml = makeKeeperConfig()
     const base = makeKeeperConfig()
-    const persona = makeKeeperConfig({
+    const promptOnly = makeKeeperConfig({
       sources: {
         ...base.sources,
-        default_source_kind: 'persona',
+        default_source_kind: null,
         default_manifest_path: null,
       },
     })
@@ -357,7 +342,7 @@ describe('keeperConfigControlInventory', () => {
       operation: 'runtime_id',
     })
 
-    const runtimeAssignment = findItem('runtime', persona, 'kcf-runtime-assignment')
+    const runtimeAssignment = findItem('runtime', promptOnly, 'kcf-runtime-assignment')
     expect(runtimeAssignment.kind).toBe('live-write')
   })
 
@@ -393,16 +378,16 @@ describe('keeperConfigControlInventory', () => {
 
   it('keeps lifecycle directives live when runtime manifest writes are unsupported', () => {
     const base = makeKeeperConfig()
-    const persona = makeKeeperConfig({
+    const promptOnly = makeKeeperConfig({
       sources: {
         ...base.sources,
-        default_source_kind: 'persona',
+        default_source_kind: null,
         default_manifest_path: null,
       },
     })
 
-    expect(findItem('policy', persona, 'kcf-policy-proactive').kind).toBe('live-write')
-    expect(findItem('health', persona, 'kcf-health-directives').kind).toBe('live-write')
+    expect(findItem('policy', promptOnly, 'kcf-policy-proactive').kind).toBe('live-write')
+    expect(findItem('health', promptOnly, 'kcf-health-directives').kind).toBe('live-write')
   })
 
   it('marks hooks as read-only global state plus browser-local filtering, not a fake editor', () => {
@@ -416,9 +401,9 @@ describe('keeperConfigControlInventory', () => {
 function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
   const base: KeeperConfig = {
     name: 'test-keeper',
-    active_goal_ids: [],
     autoboot_enabled: true,
     max_context_override: null,
+    autonomous_wake_prompt: null,
     sandbox_profile: 'local',
     network_mode: 'inherit',
     allowed_paths: [],
@@ -428,15 +413,10 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
     proactive: {
       enabled: false,
     } as KeeperConfig['proactive'],
-    drift: {} as KeeperConfig['drift'],
     runtime: {} as KeeperConfig['runtime'],
     workspace: {
       mention_targets: [],
       bound_workspace_ids: [],
-      active_goal_ids: [],
-      active_goals: [],
-      active_goal_count: 0,
-      missing_active_goal_ids: [],
     },
     sources: {} as KeeperConfig['sources'],
     metrics: {} as KeeperConfig['metrics'],
@@ -463,6 +443,34 @@ describe('initRuntimeDraftFromConfig — sandbox fields', () => {
     })
     const draft = initRuntimeDraftFromConfig(c)
     expect(draft.runtime_id).toBe('runpod_mtp.qwen36-35b-a3b-mtp')
+  })
+
+  it('uses the declarative proactive value when live meta has drifted', () => {
+    const base = makeKeeperConfigForSandbox()
+    const c = makeKeeperConfigForSandbox({
+      proactive: { enabled: true },
+      sources: {
+        ...base.sources,
+        override_field_sources: [{
+          field: 'proactive.enabled',
+          source: 'live_meta',
+          live_source: 'runtime_overlay',
+          default_source: 'toml',
+          default_source_kind: 'toml',
+          default_manifest_path: '/tmp/config/keepers/rtprobe.toml',
+          default_manifest_exists: true,
+          default_missing: false,
+          default_value: false,
+          live_value: true,
+        }],
+      },
+    })
+
+    expect(initRuntimeDraftFromConfig(c).proactive_enabled).toBe(false)
+    expect(buildRuntimePayload({
+      ...initRuntimeDraftFromConfig(c),
+      proactive_enabled: true,
+    }, c)).toEqual({ proactive_enabled: true })
   })
 
   it('defaults sandbox fields when config is missing them', () => {
@@ -546,42 +554,20 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     expect(payload.sandbox_profile).toBeUndefined()
   })
 
-  it('emits active_goal_ids when goal bindings change', () => {
-    const c = makeKeeperConfigForSandbox({
-      active_goal_ids: ['goal-a'],
-      workspace: {
-        mention_targets: [],
-        bound_workspace_ids: [],
-        active_goal_ids: ['goal-a'],
-        active_goals: [{ id: 'goal-a', title: 'Goal A' }],
-        active_goal_count: 1,
-        missing_active_goal_ids: [],
-      },
-    })
-    const payload = buildRuntimePayload(draftFrom(c, {
-      active_goal_ids: ['goal-b', 'goal-c'],
-    }), c)
-    expect(payload.active_goal_ids).toEqual(['goal-b', 'goal-c'])
-  })
-
   it('normalizes line-based runtime list drafts through one path', () => {
     const c = makeKeeperConfigForSandbox({
       allowed_paths: ['workspace/masc'],
       workspace: {
         mention_targets: ['sangsu'],
         bound_workspace_ids: [],
-        active_goal_ids: [],
-        active_goals: [],
-        active_goal_count: 0,
-        missing_active_goal_ids: [],
       },
     })
     const payload = buildRuntimePayload(draftFrom(c, {
-      allowed_paths_text: 'workspace/masc\n workspace/oas \nworkspace/oas\n',
+      allowed_paths_text: 'workspace/masc\n workspace/agentCore \nworkspace/agentCore\n',
       mention_targets_text: 'alpha\n beta \nalpha\n',
     }), c)
 
-    expect(payload.allowed_paths).toEqual(['workspace/masc', 'workspace/oas'])
+    expect(payload.allowed_paths).toEqual(['workspace/masc', 'workspace/agentCore'])
     expect(payload.mention_targets).toEqual(['alpha', 'beta'])
   })
 
@@ -590,10 +576,6 @@ describe('buildRuntimePayload — sandbox diffing', () => {
       workspace: {
         mention_targets: ['sangsu'],
         bound_workspace_ids: [],
-        active_goal_ids: [],
-        active_goals: [],
-        active_goal_count: 0,
-        missing_active_goal_ids: [],
       },
     })
     const payload = buildRuntimePayload(draftFrom(c, {
@@ -645,6 +627,51 @@ describe('buildRuntimePayload — sandbox diffing', () => {
   })
 })
 
+describe('autonomous wake prompt draft', () => {
+  function draftFrom(config: KeeperConfig, overrides: Partial<RuntimeDraft> = {}): RuntimeDraft {
+    return { ...initRuntimeDraftFromConfig(config), ...overrides }
+  }
+
+  it('treats a blank draft as inherit (null) and trims whitespace', () => {
+    expect(parseAutonomousWakePromptDraft('')).toEqual({ ok: true, value: null })
+    expect(parseAutonomousWakePromptDraft('   \n ')).toEqual({ ok: true, value: null })
+    expect(parseAutonomousWakePromptDraft('  진행 상황 요약부터.  '))
+      .toEqual({ ok: true, value: '진행 상황 요약부터.' })
+  })
+
+  it('rejects a draft over the byte bound (bytes, not code points)', () => {
+    const atBound = 'a'.repeat(AUTONOMOUS_WAKE_PROMPT_MAX_BYTES)
+    expect(parseAutonomousWakePromptDraft(atBound)).toEqual({ ok: true, value: atBound })
+    expect(parseAutonomousWakePromptDraft(atBound + 'b')).toMatchObject({ ok: false })
+    // 한글 3B/char: 683 chars = 2049 bytes — over the bound while
+    // string length (683) stays far under it.
+    expect(parseAutonomousWakePromptDraft('가'.repeat(683))).toMatchObject({ ok: false })
+  })
+
+  it('omits the field when unchanged, sends the trimmed value when set', () => {
+    const c = makeKeeperConfigForSandbox({ autonomous_wake_prompt: null })
+    expect(buildRuntimePayload(draftFrom(c), c).autonomous_wake_prompt).toBeUndefined()
+    const payload = buildRuntimePayload(
+      draftFrom(c, { autonomous_wake_prompt: ' 백로그를 확인하고 하나 진행해. ' }),
+      c,
+    )
+    expect(payload.autonomous_wake_prompt).toBe('백로그를 확인하고 하나 진행해.')
+  })
+
+  it('sends null to clear an existing keeper override', () => {
+    const c = makeKeeperConfigForSandbox({ autonomous_wake_prompt: '기존 오버라이드' })
+    const payload = buildRuntimePayload(draftFrom(c, { autonomous_wake_prompt: '' }), c)
+    expect(payload.autonomous_wake_prompt).toBeNull()
+  })
+
+  it('round-trips the config value into the draft', () => {
+    const set = makeKeeperConfigForSandbox({ autonomous_wake_prompt: '오버라이드' })
+    expect(initRuntimeDraftFromConfig(set).autonomous_wake_prompt).toBe('오버라이드')
+    const unset = makeKeeperConfigForSandbox({ autonomous_wake_prompt: null })
+    expect(initRuntimeDraftFromConfig(unset).autonomous_wake_prompt).toBe('')
+  })
+})
+
 const mocks = vi.hoisted(() => {
   const goalFixtureOkColor = '#4ade80'
   return {
@@ -663,7 +690,6 @@ const mocks = vi.hoisted(() => {
           metric: null,
           target_value: null,
           due_date: null,
-          parent_goal_id: null,
           tasks: [],
           task_count: 0,
           task_done_count: 0,
@@ -680,7 +706,6 @@ const mocks = vi.hoisted(() => {
       ],
       summary: {
         total_goals: 1,
-        active_goals: 1,
         phase_counts: { executing: 1 },
         total_tasks: 0,
         done_tasks: 0,
@@ -730,7 +755,7 @@ const mocks = vi.hoisted(() => {
             always_ignored_sampling_params: [],
           },
           request_config: {
-            source: 'oas-provider-config',
+            source: 'agent-core-provider-config',
             provider_kind: 'openai_compat',
             request_path: '/chat/completions',
             request_path_targets_responses_api: false,
@@ -785,7 +810,6 @@ const mocks = vi.hoisted(() => {
                 supports_response_format_json: true,
                 supports_structured_output: true,
               },
-              match_prefixes: ['Qwen/'],
             },
             binding: {
               provider_id: 'runpod_mtp',
@@ -799,7 +823,7 @@ const mocks = vi.hoisted(() => {
             },
           },
           effective_capabilities: {
-            source: 'oas-provider-config-model',
+            source: 'agent-core-provider-config-model',
             max_context_tokens: 131072,
             max_output_tokens: 65536,
             supports_tools: true,
@@ -855,6 +879,7 @@ vi.mock('../api/keeper', () => ({
 }))
 
 vi.mock('../store', () => ({
+  keepers: storeMocks.keepers,
   refreshKeeperRuntimeStatus: mocks.refreshKeeperRuntimeStatus,
 }))
 
@@ -862,16 +887,40 @@ vi.mock('./common/toast', () => ({
   showToast: mocks.showToast,
 }))
 
+const githubIdentityMocks = vi.hoisted(() => ({
+  fetchKeeperGithubIdentity: vi.fn(async () => ({
+    ok: true as const,
+    keeper: 'keeper-sangsu',
+    hostname: 'github.com',
+    config_dir: '/tmp/base/.masc/keepers/keeper-sangsu/github-cli',
+    projected_token_env_names: [],
+    stored: { authenticated: true, login: 'masc-sangsu-bot', error: null },
+    effective: { authenticated: false, login: null, error: null },
+    effective_probe_scope: 'host_process_credential_only' as const,
+    checked_at_unix: 1786000000,
+  })),
+  streamKeeperGithubLogin: vi.fn(async () => undefined),
+}))
+
+// The panel reads the fleet-roster row (koreanName / sandbox_target /
+// created_at) for its top bar and identity tab. A plain value holder is enough:
+// tests assign `storeMocks.keepers.value = [...]` before render.
+const storeMocks = vi.hoisted(() => ({
+  keepers: { value: [] as Array<Record<string, unknown>> },
+}))
+
+vi.mock('../api/dashboard-keeper-github', () => ({
+  fetchKeeperGithubIdentity: githubIdentityMocks.fetchKeeperGithubIdentity,
+  streamKeeperGithubLogin: githubIdentityMocks.streamKeeperGithubLogin,
+}))
+
 import {
   KeeperConfigPanel,
-  buildKcfAssemblySegments,
-  filterGoalOptions,
   keeperConfigSubscriptionCountsForTests,
   loadKeeperConfig,
   resetKeeperConfig,
 } from './keeper-config-panel'
 import { resetRuntimeCatalog } from '../lib/runtime-catalog-resource'
-import type { GoalTreeNode } from '../types'
 
 async function flush() {
   await new Promise(resolve => setTimeout(resolve, 0))
@@ -908,6 +957,9 @@ describe('KeeperConfigPanel', () => {
     mocks.pauseKeeper.mockClear()
     mocks.resumeKeeper.mockClear()
     mocks.wakeKeeper.mockClear()
+    githubIdentityMocks.fetchKeeperGithubIdentity.mockClear()
+    githubIdentityMocks.streamKeeperGithubLogin.mockClear()
+    storeMocks.keepers.value = []
   })
 
   afterEach(() => {
@@ -917,18 +969,41 @@ describe('KeeperConfigPanel', () => {
     resetRuntimeCatalog()
   })
 
+  it('exposes the keeper GitHub CLI identity under the 권한·샌드박스 tab', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    // The identity tab is active by default; the GitHub account card must not
+    // leak outside its owning tab.
+    expect(container.textContent).not.toContain('GitHub CLI 계정')
+
+    selectKcfTab(container, '권한·샌드박스')
+    await flush()
+    await flush()
+
+    expect(container.textContent).toContain('GitHub CLI 계정')
+    expect(container.textContent).toContain('호스트 자격 증명 확인')
+    expect(githubIdentityMocks.fetchKeeperGithubIdentity).toHaveBeenCalledWith(
+      'keeper-sangsu',
+      'github.com',
+      expect.any(AbortSignal),
+    )
+    await flush()
+    expect(container.textContent).toContain('@masc-sangsu-bot')
+    expect(container.textContent).toContain('연결 안 됨')
+  })
+
   it('separates editable prompt controls from read-only runtime metadata', async () => {
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
     await flush()
     await flush()
 
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(1)
-    expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(1)
     expect(mocks.fetchRuntimeProfiles).not.toHaveBeenCalled()
 
     // identity tab (default): edit-scope callout + source provenance.
     expect(container.textContent).toContain('편집 가능 범위')
-    expect(container.textContent).toContain('runtime.toml')
     expect(container.textContent).toContain('[runtime.assignments]')
     expect(container.textContent).toContain('/tmp/config/keepers/default.toml')
     expect(container.textContent).toContain('/tmp/.masc/keepers/keeper-sangsu/live.json')
@@ -942,18 +1017,12 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('RunPod MTP')
     expect(container.textContent).toContain('Qwen/Qwen3-32B')
     expect(container.textContent).toContain('effective')
-    expect(container.textContent).toContain('source:oas-provider-config-model')
+    expect(container.textContent).toContain('source:agent-core-provider-config-model')
     expect(container.textContent).toContain('request')
     expect(container.textContent).toContain('think:on')
     expect(container.textContent).toContain('policy')
     expect(container.textContent).toContain('wire:chat_template_kwargs')
     expect(container.textContent).toContain('활성 런타임')
-
-    // goals tab: assigned goal-store bindings.
-    selectKcfTab(container, '목표')
-    await flush()
-    expect(container.textContent).toContain('active_goal_ids')
-    expect(container.textContent).toContain('Ship runtime clarity')
 
     // health tab: runtime liveness / registry diagnostics.
     selectKcfTab(container, '상태·진단')
@@ -1040,7 +1109,7 @@ describe('KeeperConfigPanel', () => {
     await flush()
     await flush()
 
-    expect(mocks.resumeKeeper).toHaveBeenCalledWith('keeper-sangsu', 3)
+    expect(mocks.resumeKeeper).toHaveBeenCalledWith('keeper-sangsu')
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(2)
     expect(container.textContent).toContain('running')
     expect(container.textContent).toContain('alive')
@@ -1060,16 +1129,16 @@ describe('KeeperConfigPanel', () => {
     expect(keeperConfigSubscriptionCountsForTests()).toEqual({ reset: 0, update: 0 })
   })
 
-  it('allows runtime config assignment writes when keeper name is valid even if persona-backed', async () => {
+  it('allows runtime config assignment writes when Keeper name is valid without a manifest path', async () => {
     const base = makeKeeperConfig()
-    const personaConfig = makeKeeperConfig({
+    const promptOnlyConfig = makeKeeperConfig({
       sources: {
         ...base.sources,
-        default_source_kind: 'persona',
+        default_source_kind: null,
         default_manifest_path: null,
       },
     })
-    mocks.fetchKeeperConfig.mockResolvedValueOnce(personaConfig)
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(promptOnlyConfig)
 
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
     await flush()
@@ -1098,13 +1167,6 @@ describe('KeeperConfigPanel', () => {
     expect(container.querySelector('textarea[aria-label="mention_targets"]')).not.toBeNull()
     expect(container.textContent).toContain('allowed_paths')
     expect(container.textContent).toContain('/tmp/workspace')
-
-    selectKcfTab(container, '목표')
-    await flush()
-    expect(container.querySelector('input[aria-label="goal 검색"]')).not.toBeNull()
-    expect(container.querySelectorAll('.kcf-goal').length).toBe(1)
-    expect(container.textContent).toContain('goal-runtime')
-    expect(container.textContent).toContain('live write')
 
     const runtimeSave = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('런타임 설정 저장'),
@@ -1350,6 +1412,62 @@ describe('KeeperConfigPanel', () => {
     )
   })
 
+  it('edits proactive policy from TOML truth when live meta has drifted', async () => {
+    const base = makeKeeperConfig()
+    const drifted = makeKeeperConfig({
+      proactive: { enabled: true },
+      sources: {
+        ...base.sources,
+        override_fields: ['proactive.enabled'],
+        override_field_sources: [{
+          field: 'proactive.enabled',
+          source: 'live_meta',
+          live_source: 'runtime_overlay',
+          default_source: 'toml',
+          default_source_kind: 'toml',
+          default_manifest_path: '/tmp/config/keepers/rtprobe.toml',
+          default_manifest_exists: true,
+          default_missing: false,
+          default_value: false,
+          live_value: true,
+        }],
+      },
+    })
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(drifted)
+    mocks.patchKeeperConfig.mockResolvedValueOnce(makeKeeperConfig({
+      proactive: { enabled: true },
+    }))
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    expect(container.textContent).toContain('프로액티브 설정 드리프트')
+    expect(container.textContent).toContain('TOML OFF / live meta ON')
+
+    selectKcfTab(container, '실행 정책')
+    await flush()
+    const proactive = container.querySelector('button[aria-label="프로액티브 활성"]') as HTMLButtonElement | null
+    expect(proactive?.getAttribute('aria-checked')).toBe('false')
+    expect(container.textContent).toContain('TOML OFF / live meta ON')
+
+    proactive?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    expect(proactive?.getAttribute('aria-checked')).toBe('true')
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('런타임 설정 저장'),
+    )
+    saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+
+    expect(mocks.patchKeeperConfig).toHaveBeenCalledWith(
+      'keeper-sangsu',
+      { proactive_enabled: true },
+    )
+  })
+
   it('blocks an invalid max-context override instead of silently clearing it', async () => {
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
     await flush()
@@ -1363,7 +1481,7 @@ describe('KeeperConfigPanel', () => {
     maxContext!.dispatchEvent(new Event('input', { bubbles: true }))
     await flush()
 
-    expect(container.textContent).toContain('컨텍스트 오버라이드는 양의 정수여야 합니다')
+    expect(container.textContent).toContain('양의 정수만 허용 (0 = 해제)')
     const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('런타임 설정 저장'),
     )
@@ -1397,60 +1515,6 @@ describe('KeeperConfigPanel', () => {
     await loadKeeperConfig('keeper-sangsu', { force: true })
 
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(2)
-  })
-
-  it('filters the goals catalogue by the search input and shows an empty state', async () => {
-    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
-    await flush()
-    await flush()
-
-    selectKcfTab(container, '목표')
-    await flush()
-
-    const search = container.querySelector('input[aria-label="goal 검색"]') as HTMLInputElement | null
-    expect(search).not.toBeNull()
-    // default fixture goal (goal-runtime · Ship runtime clarity) is shown
-    expect(container.querySelectorAll('.kcf-goal').length).toBe(1)
-
-    // non-matching query → empty state + "0 표시"
-    search!.value = 'zzz-no-match'
-    search!.dispatchEvent(new Event('input', { bubbles: true }))
-    await flush()
-    expect(container.querySelectorAll('.kcf-goal').length).toBe(0)
-    expect(container.textContent).toContain('검색 결과 없음')
-    expect(container.textContent).toContain('0 표시')
-
-    // matching id substring → goal reappears, counter updates
-    search!.value = 'goal-runtime'
-    search!.dispatchEvent(new Event('input', { bubbles: true }))
-    await flush()
-    expect(container.querySelectorAll('.kcf-goal').length).toBe(1)
-    expect(container.textContent).toContain('1 표시')
-  })
-
-  it('renders the keeper-scoped prompt assembly trace with an override win badge', async () => {
-    // Real server override_fields are dot-namespaced; mark instructions.
-    const base = makeKeeperConfig()
-    mocks.fetchKeeperConfig.mockResolvedValueOnce(
-      makeKeeperConfig({
-        sources: { ...base.sources, override_fields: ['prompt.instructions'], has_live_override: true },
-      }),
-    )
-    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
-    await flush()
-    await flush()
-
-    selectKcfTab(container, '프롬프트')
-    await flush()
-
-    expect(container.textContent).toContain('조립 추적')
-    expect(container.querySelector('.kasm')).not.toBeNull()
-    // 3 base blocks + instructions + goals = 5 segments
-    expect(container.querySelectorAll('.kasm-seg').length).toBe(3)
-    // only prompt.instructions is overridden → exactly one win badge
-    const winBadges = container.querySelectorAll('.kasm-seg-win')
-    expect(winBadges.length).toBe(1)
-    expect(winBadges[0]!.textContent).toContain('매니페스트 덮어씀')
   })
 
   it('resets runtime draft when switching from keeper A to keeper B to prevent stale settings leakage', async () => {
@@ -1508,46 +1572,149 @@ describe('KeeperConfigPanel', () => {
   })
 })
 
-describe('filterGoalOptions', () => {
-  const goals = [
-    { id: 'goal-alpha', title: 'Stabilize runtime' },
-    { id: 'goal-beta', title: 'Improve dashboard' },
-  ] as unknown as GoalTreeNode[]
+// keeper-v2 design vocabulary (prototypes/keeper-v2/keeper-config.jsx +
+// organisms-5.jsx parity): top-bar kr/sandbox badges, avatar block, 표시 이름
+// field, 파생 사실, fallback chain, kcf-dead removal notes, kcf-paths editor,
+// set-link navigation. Every assertion reads a live signal — the roster row
+// (storeMocks.keepers) or the loaded KeeperConfig — never a static mock.
+describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
+  let container: HTMLDivElement
 
-  it('returns all goals for an empty or whitespace query', () => {
-    expect(filterGoalOptions(goals, '')).toHaveLength(2)
-    expect(filterGoalOptions(goals, '   ')).toHaveLength(2)
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    resetKeeperConfig()
+    resetRuntimeCatalog()
+    mocks.fetchKeeperConfig.mockClear()
+    mocks.fetchRuntimeProviders.mockClear()
+    storeMocks.keepers.value = []
   })
 
-  it('matches title or id case-insensitively', () => {
-    expect(filterGoalOptions(goals, 'RUNTIME').map((g) => g.id)).toEqual(['goal-alpha'])
-    expect(filterGoalOptions(goals, 'beta').map((g) => g.id)).toEqual(['goal-beta'])
-    expect(filterGoalOptions(goals, 'dashboard').map((g) => g.id)).toEqual(['goal-beta'])
-    expect(filterGoalOptions(goals, 'zzz')).toHaveLength(0)
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    resetKeeperConfig()
+    storeMocks.keepers.value = []
+  })
+
+  it('renders koreanName + sandbox badges in the top bar from the roster row', async () => {
+    storeMocks.keepers.value = [{
+      name: 'keeper-sangsu',
+      koreanName: '상수',
+      sandbox_target: '/workspace/keepers/keeper-sangsu',
+      created_at: '2026-01-04T00:00:00Z',
+    }]
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    expect(container.querySelector('.kcf-top-kr')?.textContent).toBe('상수')
+    const sandbox = container.querySelector('.kcf-top-sandbox')
+    expect(sandbox?.textContent).toContain('/workspace/keepers/keeper-sangsu')
+  })
+
+  it('omits kr/sandbox badges when the roster row has none', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    expect(container.querySelector('.kcf-top-kr')).toBeNull()
+    expect(container.querySelector('.kcf-top-sandbox')).toBeNull()
+  })
+
+  it('identity tab renders the avatar block, read-only 표시 이름 field, and 파생 사실', async () => {
+    storeMocks.keepers.value = [{
+      name: 'keeper-sangsu',
+      koreanName: '상수',
+      sandbox_target: '/workspace/keepers/keeper-sangsu',
+      created_at: '2026-01-04T00:00:00Z',
+    }]
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    // Avatar: sigil preview is live (kSlot/kSigil derivation); the portrait
+    // picker renders disabled with the design's 기획 badge (no avatar API).
+    const upload = container.querySelector('.kav-portraits .kav-por.kav-upload') as HTMLButtonElement | null
+    expect(upload).toBeTruthy()
+    expect(upload?.disabled).toBe(true)
+    expect(container.querySelector('.kav .kcf-plan')?.textContent).toContain('기획')
+
+    // 표시 이름: real display name, read-only (no rename writer).
+    const nameInput = container.querySelector('.kcf-idrow .kcf-field input.kcf-input') as HTMLInputElement | null
+    expect(nameInput).toBeTruthy()
+    expect(nameInput?.readOnly).toBe(true)
+    expect(nameInput?.value).toBe('상수')
+
+    // 파생 사실: sandbox target + creation time + runtime profile, all live.
+    const facts = container.querySelector('.kcf-facts')
+    expect(facts?.textContent).toContain('/workspace/keepers/keeper-sangsu')
+    expect(facts?.textContent).toContain('2026-01-04T00:00:00Z')
+    expect(container.textContent).toContain('tier-group.keeper_unified')
+  })
+
+  it('policy tab carries the kcf-dead removal notes for deleted gates and handoff', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '실행 정책')
+    await flush()
+
+    const dead = container.querySelectorAll('.kcf-dead')
+    expect(dead.length).toBe(2)
+    expect(container.textContent).toContain('ratio / message / token 게이트')
+    expect(container.textContent).toContain('Handoff_triggered')
+  })
+
+  it('runtime tab renders the fallback candidate chain from runtime_options', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '런타임')
+    await flush()
+
+    const items = Array.from(container.querySelectorAll('.kcf-chain-item')).map(el => el.textContent)
+    expect(items).toEqual(['tier-group.keeper_unified', 'tier.resilient_breaker'])
+  })
+
+  it('access tab edits allowed_paths through the design kcf-paths block with the effective line', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '권한·샌드박스')
+    await flush()
+
+    const textarea = container.querySelector('.kcf-paths textarea.kcf-text') as HTMLTextAreaElement | null
+    expect(textarea).toBeTruthy()
+    expect(textarea?.value).toBe('/tmp/workspace')
+    expect(container.querySelector('.kcf-path-eff')?.textContent).toContain('/tmp/workspace')
+  })
+
+  it('hooks tab links external-effect calls to the Gate queue via set-link', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '훅')
+    await flush()
+
+    const link = container.querySelector('.kc-inh-note .set-link')
+    expect(link?.textContent).toContain('Gate 큐')
+  })
+
+  it('prompt tab routes global prompt editing through the design set-link', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '프롬프트')
+    await flush()
+
+    const link = container.querySelector('[data-testid="kcf-prompt-global-edit-link"]')
+    expect(link?.classList.contains('set-link')).toBe(true)
   })
 })
 
-describe('buildKcfAssemblySegments', () => {
-  it('builds base + manifest/override + goals segments from real config provenance', () => {
-    const base = makeKeeperConfig()
-    const c = makeKeeperConfig({
-      sources: { ...base.sources, override_fields: ['prompt.instructions'] },
-    })
-    const segs = buildKcfAssemblySegments(c)
-    expect(segs.map((s) => s.src)).toEqual(['base', 'override', 'goals'])
-    const instrSeg = segs.find((s) => s.field.includes('instructions'))
-    expect(instrSeg?.win).toBe(true)
-    expect(instrSeg?.src).toBe('override')
-  })
-
-  it('omits empty prompt fields and the goals segment when there are no active goals', () => {
-    const base = makeKeeperConfig()
-    const c = makeKeeperConfig({
-      prompt: { ...base.prompt, instructions: '' },
-      workspace: { ...base.workspace, active_goals: [] },
-    })
-    const segs = buildKcfAssemblySegments(c)
-    expect(segs.map((s) => s.field)).toEqual(['공유 시스템'])
-    expect(segs.every((s) => s.src === 'base')).toBe(true)
-  })
-})

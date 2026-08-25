@@ -1,0 +1,19 @@
+name = "masc_tool_help"
+description = """
+Return canonical help text, parameters, and metadata for a specific MASC \
+tool by name."""
+additional_properties = false
+
+[[params]]
+name = "tool_name"
+type = "string"
+required = true
+description = "Exact MCP tool name to explain"
+
+[help]
+short_description = "Return canonical help and metadata for a specific MASC tool."
+when_to_use = "Use when you need the concise description, visibility, and detailed guidance for one tool."
+details_markdown = "Returns the canonical short description, visibility metadata, and detailed help for a specific tool."
+doc_refs = ["docs/KEEPER-USER-MANUAL.md"]
+prompt_hints = ["Pair with prompt 'tool_help' when you want a ready-to-use explanation."]
+examples = ["name='keeper_task_done'", "name='masc_plan_set_task'"]

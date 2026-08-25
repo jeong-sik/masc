@@ -16,6 +16,14 @@ type t =
   | No_handler
 [@@deriving show, eq]
 
+(* The dispatch paths all decide the outcome from the same thing: whether
+   the handler produced a result. Deriving it here keeps that decision, and
+   the label it maps to, in one place. *)
+let of_result_option = function
+  | Some _ -> Handled
+  | None -> No_handler
+;;
+
 let to_string = function
   | Handled -> "handled"
   | No_handler -> "no_handler"

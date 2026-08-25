@@ -98,22 +98,6 @@ let q_value_in_params value start stop =
   in
   Option.value ~default:1.0 (loop start)
 
-let param_exists value start stop target =
-  let rec loop start =
-    if start >= stop then
-      false
-    else
-      let next =
-        match index_char value ';' start stop with
-        | Some idx -> idx
-        | None -> stop
-      in
-      let param_start, param_stop = trim_span value start next in
-      equal_ascii_ci_span value param_start param_stop target
-      || (next < stop && loop (next + 1))
-  in
-  loop start
-
 let encoding_matches_span value start stop token =
   let token_stop, params_start =
     match index_char value ';' start stop with
@@ -146,46 +130,45 @@ let accepts_encoding_header ~token = function
 let accepts_zstd_header header =
   accepts_encoding_header ~token:"zstd" header
 
-let accepts_zstd_dict_header = function
-  | None -> false
-  | Some accept_encoding ->
-      let stop = String.length accept_encoding in
-      let segment_matches start stop =
-        let token_stop, params_start =
-          match index_char accept_encoding ';' start stop with
-          | Some idx -> idx, idx + 1
-          | None -> stop, stop
-        in
-        let token_start, token_stop = trim_span accept_encoding start token_stop in
-        q_value_in_params accept_encoding params_start stop > 0.0
-        && (equal_ascii_ci_span accept_encoding token_start token_stop "zstd-dict"
-            || (equal_ascii_ci_span accept_encoding token_start token_stop "zstd"
-                && param_exists accept_encoding params_start stop "dict=masc"))
-      in
-      let rec loop start =
-        if start >= stop then
-          false
-        else
-          let next =
-            match index_char accept_encoding ',' start stop with
-            | Some idx -> idx
-            | None -> stop
-          in
-          segment_matches start next || (next < stop && loop (next + 1))
-      in
-      loop 0
+let accepts_gzip_header header =
+  accepts_encoding_header ~token:"gzip" header
+
+(* What the client will accept, in server preference order.
+
+   Closed on purpose: before this type existed the negotiation was
+   [if not (accepts_zstd ...) then send identity], so a single unsupported
+   token collapsed into "no compression at all". One dashboard telemetry
+   response measured 7,540 bytes to a zstd client and 1,095,519 bytes to
+   everyone else — 145x — because zstd is offered only by Chrome 123+ and
+   Firefox 126+ in secure contexts, while Safari, curl, and programmatic
+   clients speak gzip. Making the vocabulary a variant means adding an encoding
+   forces every branch here to place it, rather than leaving a fallthrough that
+   silently means identity. *)
+type negotiated_encoding =
+  | Prefer_zstd
+  | Prefer_gzip
+  | Identity_only
+
+let negotiate_encoding accept_encoding =
+  if accepts_zstd_header accept_encoding then Prefer_zstd
+  else if accepts_gzip_header accept_encoding then Prefer_gzip
+  else Identity_only
 
 let compress_body ?(level = 3) ?(compress = true) ~accept_encoding body =
-  if not compress then
-    body, []
-  else if not (accepts_zstd_header accept_encoding) then
-    body, [ vary_accept_encoding ]
+  if not compress then body, []
   else
-    match Compression_codec.compress ~level body with
-    | Compression_codec.Unchanged payload -> payload, [ vary_accept_encoding ]
-    | Compression_codec.Compressed { payload; encoding } ->
+    match negotiate_encoding accept_encoding with
+    | Identity_only -> body, [ vary_accept_encoding ]
+    | Prefer_zstd -> (
+      match Compression_codec.compress ~level body with
+      | Compression_codec.Unchanged payload -> payload, [ vary_accept_encoding ]
+      | Compression_codec.Compressed { payload; encoding } ->
         ( payload
-        , [
-            ("content-encoding", Compression_codec.content_encoding encoding);
-            vary_accept_encoding;
-          ] )
+        , [ ("content-encoding", Compression_codec.content_encoding encoding)
+          ; vary_accept_encoding
+          ] ))
+    | Prefer_gzip -> (
+      match Compression_gzip.compress body with
+      | Compression_gzip.Unchanged payload -> payload, [ vary_accept_encoding ]
+      | Compression_gzip.Compressed payload ->
+        (payload, [ ("content-encoding", "gzip"); vary_accept_encoding ]))

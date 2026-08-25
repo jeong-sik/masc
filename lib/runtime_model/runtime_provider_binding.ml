@@ -7,18 +7,12 @@
 
     @stability Internal *)
 
-module Runtime_binding = Agent_sdk.Provider_runtime_binding
+module Runtime_binding = Agent_core.Provider_runtime_binding
 
 let normalize_provider_id provider_id =
   String.trim provider_id
   |> String.lowercase_ascii
   |> String.map (fun c -> if c = '-' then '_' else c)
-;;
-
-let runtime_binding_of_label label =
-  match Runtime_binding.find label with
-  | Some _ as found -> found
-  | None -> Runtime_binding.find (normalize_provider_id label)
 ;;
 
 let provider_name_of_kind (kind : Llm_provider.Provider_config.provider_kind) =
@@ -28,20 +22,15 @@ let provider_name_of_kind (kind : Llm_provider.Provider_config.provider_kind) =
   Llm_provider.Provider_registry.provider_name_of_config cfg
 ;;
 
-let runtime_prefix_of_provider_kind kind =
-  let provider_name = provider_name_of_kind kind in
-  match runtime_binding_of_label provider_name with
-  | Some binding -> binding.Runtime_binding.id
-  | None -> provider_name
-;;
-
 let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
   match Runtime_binding.binding_for_provider_config cfg with
   | Some binding -> binding.Runtime_binding.id
   | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
 ;;
 
-let provider_health_key_of_config (cfg : Llm_provider.Provider_config.t) =
+(* Two bindings can share a provider, so the model and base URL come along:
+   the label has to say which endpoint a call actually reached. *)
+let provider_endpoint_label_of_config (cfg : Llm_provider.Provider_config.t) =
   match cfg.kind with
   | Llm_provider.Provider_config.OpenAI_compat ->
     let base_url = String.trim cfg.base_url in
@@ -86,47 +75,6 @@ let local_runtime_label runtime_id =
   match default_local_openai_runtime_provider_id () with
   | Some provider_id -> provider_id ^ ":" ^ runtime_id
   | None -> runtime_id
-;;
-
-let default_local_runtime_label () =
-  match default_local_openai_runtime_provider_id () with
-  | Some provider_id -> provider_id ^ ":auto"
-  | None -> "auto"
-;;
-
-let registry_default_base_url provider_name =
-  let registry = Llm_provider.Provider_registry.default () in
-  match Llm_provider.Provider_registry.find registry provider_name with
-  | Some entry -> entry.defaults.base_url
-  | None -> ""
-;;
-
-let provider_config_of_runtime_label label =
-  let cfg_of_kind ~kind ~model_id ~base_url =
-    Llm_provider.Provider_config.make ~kind ~model_id ~base_url ()
-  in
-  match Provider_kind_resolver.resolve label with
-  | Provider_kind_resolver.Registered { provider_name; model_id; kind } ->
-    let base_url = registry_default_base_url provider_name in
-    Some (cfg_of_kind ~kind ~model_id ~base_url)
-  | Provider_kind_resolver.Custom_url { model_id; base_url } ->
-    Some
-      (cfg_of_kind
-         ~kind:Llm_provider.Provider_config.OpenAI_compat
-         ~model_id
-         ~base_url)
-  | Provider_kind_resolver.Unknown _ -> None
-;;
-
-let runtime_health_key_of_label label =
-  provider_config_of_runtime_label label
-  |> Option.map provider_health_key_of_config
-;;
-
-let runtime_health_keys_of_labels labels =
-  labels
-  |> List.filter_map runtime_health_key_of_label
-  |> List.sort_uniq String.compare
 ;;
 
 let runtime_id_of_label label =
@@ -174,12 +122,6 @@ let provider_name_matches_kind_default provider_name kind =
   String.equal
     (normalize_provider_id provider_name)
     (normalize_provider_id (provider_name_of_kind kind))
-;;
-
-let display_provider_name provider_name =
-  match runtime_binding_of_label provider_name with
-  | Some binding -> binding.Runtime_binding.id
-  | None -> String.trim provider_name
 ;;
 
 let default_headers_for_kind (kind : Llm_provider.Provider_config.provider_kind) =

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Boundary ratchet: counts known MASC/OAS boundary violations.
+# Boundary ratchet: counts known MASC/AGENT_CORE boundary violations.
 # Fails if any count exceeds its baseline, preventing new violations.
 # Lower baselines as violations are fixed.
 set -euo pipefail
@@ -93,15 +93,15 @@ check_forbidden_active() {
 }
 
 # V2: MASC-specific importance_scores in keeper working_context wrapper
-# These wrap OAS Context.t with domain-specific scoring that should
-# be handled by OAS custom closures instead.
+# These wrap AGENT_CORE Context.t with domain-specific scoring that should
+# be handled by AGENT_CORE custom closures instead.
 check "V2-importance-scores" 0 \
   'importance_scores' \
   "lib/keeper/"
 
 # V4: MASC domain marker constant definitions (message content pollution)
 # Allowed: keeper_working_context.ml (goal_prefix),
-#          context_compact_oas.ml (memory_summary_prefix),
+#          context_compact_agent_core.ml (memory_summary_prefix),
 #          tool_goals.ml (goal_prefix)
 check "V4-marker-definitions" 0 \
   'let goal_prefix\|let memory_summary_prefix' \
@@ -119,13 +119,7 @@ check_forbidden_active "V4b-retired-state-protocol-zero-pin" \
   "sidecars/" \
   "viewer/src/" \
   "config/prompts/" \
-  "config/personas/"
-
-# V6: OAS lifecycle orchestration from keeper_agent_run
-# Oas_worker.run_named calls should be isolated to a thin bridge.
-check "V6-oas-orchestration" 0 \
-  'Oas_worker\.run_named' \
-  "lib/keeper/keeper_agent_run.ml"
+  "config/keepers/"
 
 # V7: retired command-semantics authorization must not return.
 check_forbidden_active "V7-retired-command-semantics-gates" \
@@ -211,7 +205,7 @@ check_forbidden_active "V7i-retired-dispatch-tool-search-heuristics" \
 # V7j: one failed call cannot create state that blocks, suppresses, or rewrites
 # a later tool call. Exact results remain independent observations.
 check_forbidden_active "V7j-retired-consecutive-tool-failure-guard" \
-  'Keeper_tool_retry_state|keeper_tool_retry_state|Keeper_tool_hook_error_state|keeper_tool_hook_error_state|MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES|max_consecutive_tool_failures|workflow_rejection_recovery_fields|workflow_rejection_recovery_instruction|self_correction_required|retry_skipped|ToolsOasDeterministicFailures|transient_mutex_contention_error_class' \
+  'Keeper_tool_retry_state|keeper_tool_retry_state|Keeper_tool_hook_error_state|keeper_tool_hook_error_state|MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES|max_consecutive_tool_failures|workflow_rejection_recovery_fields|workflow_rejection_recovery_instruction|self_correction_required|retry_skipped|ToolsAgent_coreDeterministicFailures|transient_mutex_contention_error_class' \
   "lib/" \
   "bin/" \
   "test/" \
@@ -223,7 +217,7 @@ check_forbidden_active "V7j-retired-consecutive-tool-failure-guard" \
 # idempotency, inferred path keys, or a generic mutation boundary must not be
 # reintroduced as behavioral retry/authorization classifiers.
 check_forbidden_active "V7k-retired-dispatch-effect-inference" \
-  'read_only_retry|readonly_retry|MASC_TOOL_READONLY_RETRY_LIMIT|masc_path_blocked|oas_descriptor_of_masc_tool|MutationBoundaryReached|mutation_boundary_reached|is_idempotent.*is_read_only|idempotent[[:space:]]*=[[:space:]]*readonly|Tool_capability\.Idempotent,[[:space:]]*Some[[:space:]]+true' \
+  'read_only_retry|readonly_retry|MASC_TOOL_READONLY_RETRY_LIMIT|masc_path_blocked|agent_core_descriptor_of_masc_tool|MutationBoundaryReached|mutation_boundary_reached|is_idempotent.*is_read_only|idempotent[[:space:]]*=[[:space:]]*readonly|Tool_capability\.Idempotent,[[:space:]]*Some[[:space:]]+true' \
   "lib/" \
   "bin/" \
   "test/" \
@@ -290,17 +284,17 @@ check_forbidden_active "V7o-retired-keeper-payload-outcome-classifier" \
   "lib/keeper/keeper_tool_dispatch_runtime.ml" \
   "lib/keeper/keeper_tool_dispatch_runtime.mli"
 
-# V7p: the MASC/OAS tool-result bridge receives an opaque typed result. Tool
+# V7p: the MASC/AGENT_CORE tool-result bridge receives an opaque typed result. Tool
 # identity and message JSON must not override externalization or failure class.
 check_forbidden_active "V7p-tool-bridge-message-and-product-semantics" \
   'Board_post_get|masc_board_post_get|success_result_preserves_full_content|tool_error_metadata_from_json_message|tool_error_class_of_string|json_recoverable|json_error_class' \
   "lib/tool_bridge.ml" \
   "lib/tool_bridge.mli"
 
-# V7q: timeout control flow comes from Agent SDK/provider constructors and
+# V7q: timeout control flow comes from agent-core/provider constructors and
 # typed timeout phases, never diagnostics embedded in message prose.
 check_forbidden_active "V7q-timeout-message-semantics" \
-  'Keeper_oas_timeout_message|is_structural_oas_timeout_message|api_error_oas_agent_execution_timeout' \
+  'Keeper_agent_core_timeout_message|is_structural_agent_core_timeout_message|api_error_agent_core_agent_execution_timeout' \
   "lib/keeper/" \
   "lib/keeper_runtime/"
 
@@ -364,11 +358,11 @@ check_forbidden_active "V7x-retired-task-and-recording-message-heuristics" \
   "lib/keeper_runtime/keeper_recording_error_state.mli" \
   "test/"
 
-# V7y: Keeper execution carries producer-owned typed data. The OAS/MCP
+# V7y: Keeper execution carries producer-owned typed data. The AGENT_CORE/MCP
 # projection must never reconstruct it from raw output strings or revive the
 # retired product-marker/workflow parsers.
 check_forbidden_active "V7y-retired-keeper-raw-output-reinterpretation" \
-  'structured_error_payload|metadata_from_assoc|nested_payload_of_json|tool_exec_result_markers|Keeper_tools_oas_(markers|workflow|json)|data:[[:space:]]*\(`String result\.raw_output\)' \
+  'structured_error_payload|metadata_from_assoc|nested_payload_of_json|tool_exec_result_markers|Keeper_tools_agent_core_(markers|workflow|json)|data:[[:space:]]*\(`String result\.raw_output\)' \
   "lib/keeper/" \
   "lib/mcp_server_eio_execute.ml" \
   "test/"
@@ -390,10 +384,10 @@ check_forbidden_active "V7aa-retired-multimodal-rollout-gates" \
   "config/" \
   "test/"
 
-# V8: Direct OAS Agent.state mutation from keeper code
+# V8: Direct Agent_core.Agent.state mutation from keeper code
 # Baseline 0: legacy keeper_extend_turns.ml was removed.
 check "V8-agent-state-mutation" 0 \
-  'Agent\.set_state\|Agent_sdk\.Agent\.state[^_]' \
+  'Agent\.set_state\|Agent_core\.Agent\.state[^_]' \
   "lib/keeper/"
 
 # V9: MASC_LLAMA env var coupling (should migrate to MASC_LOCAL_*)
@@ -402,7 +396,7 @@ check "V9-masc-llama-envvar" 0 \
   'MASC_LLAMA' \
   "lib/"
 
-# V10: OAS-owned provider filters must not be re-owned outside compatibility loaders/scrubbers.
+# V10: AGENT_CORE-owned provider filters must not be re-owned outside compatibility loaders/scrubbers.
 check_forbidden_outside "V10-provider-filter-ownership" \
   'allowed_providers' \
   "lib/" \
@@ -411,12 +405,6 @@ check_forbidden_outside "V10-provider-filter-ownership" \
   "lib/keeper/keeper_config.ml" \
   "lib/keeper/keeper_config_text.ml" \
   "lib/keeper/keeper_config_text.mli"
-
-# V12: oas-runtime session root literal must stay inside the runtime path adapter.
-check_forbidden_outside "V12-oas-runtime-layout" \
-  '"oas-runtime"' \
-  "lib/" \
-  "lib/local/worker_container.ml"
 
 if [[ "$rc" -eq 0 ]]; then
   echo "BOUNDARY: all checks within baseline"

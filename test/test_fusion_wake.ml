@@ -64,6 +64,16 @@ let int_field label fields key =
          (Yojson.Safe.to_string json))
 ;;
 
+let number_field label fields key =
+  match field label fields key with
+  | `Float value -> value
+  | `Int value -> Float.of_int value
+  | json ->
+    fail
+      (Printf.sprintf "%s.%s: expected number, got %s" label key
+         (Yojson.Safe.to_string json))
+;;
+
 let bool_field label fields key =
   match field label fields key with
   | `Bool value -> value
@@ -111,10 +121,9 @@ let with_isolated_eio_base_path prefix f =
   Unix.mkdir base_dir 0o700;
   let old_base = Sys.getenv_opt "MASC_BASE_PATH" in
   let old_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
-  let old_registry = Fusion_run_registry.global () in
+  let registry = Fusion_run_registry.create () in
   Fun.protect
     ~finally:(fun () ->
-      Fusion_run_registry.set_global old_registry;
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
       restore_env "MASC_BASE_PATH" old_base;
@@ -123,16 +132,16 @@ let with_isolated_eio_base_path prefix f =
     (fun () ->
       Unix.putenv "MASC_BASE_PATH" base_dir;
       Unix.putenv "MASC_BASE_PATH_INPUT" base_dir;
-      Fusion_run_registry.set_global (Fusion_run_registry.create ());
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      Eio.Switch.run @@ fun sw -> f env sw base_dir)
+      Eio.Switch.run @@ fun sw -> f env sw base_dir registry)
 ;;
 
 let with_isolated_base_path prefix f =
-  with_isolated_eio_base_path prefix (fun _env _sw base_dir -> f base_dir)
+  with_isolated_eio_base_path prefix (fun _env _sw base_dir registry ->
+    f base_dir registry)
 ;;
 
 let make_meta ?(name = "fusion-keeper") () : Keeper_meta_contract.keeper_meta =
@@ -199,6 +208,7 @@ let fusion_tool_policy () : Fusion_policy.t =
     ; system_prompt = "panel system prompt"
     ; web_tools = false
     ; max_output_tokens = None
+    ; timeout_s = None
     }
   in
   let preset : Fusion_policy.preset =
@@ -207,9 +217,9 @@ let fusion_tool_policy () : Fusion_policy.t =
     ; judge = "judge.model"
     ; judge_system_prompt = "judge system prompt"
     ; judge_max_output_tokens = None
+    ; judge_timeout_s = None
     ; judges = []
     ; min_answered = Fusion_policy.default_min_answered
-    ; fallback_judge_model = None
     }
   in
   { enabled = true
@@ -220,6 +230,7 @@ let fusion_tool_policy () : Fusion_policy.t =
 ;;
 
 let scheduled_wake
+      ?(occurrence_id = "schedule-occurrence:test")
       ?(schedule_instance_id = "instance-sched-1")
       ?(schedule_id = "sched-1")
       ?(due_at = 3000.0)
@@ -229,7 +240,15 @@ let scheduled_wake
       ()
   : Keeper_event_queue.scheduled_wake
   =
-  { schedule_instance_id; schedule_id; due_at; payload_digest; title; message }
+  { occurrence_id
+  ; schedule_instance_id
+  ; schedule_id
+  ; due_at
+  ; payload_digest
+  ; title
+  ; message
+  ; result_delivery = None
+  }
 ;;
 
 let schedule_stimulus ?schedule_id ?due_at ?payload_digest ?title ?message ()
@@ -395,11 +414,12 @@ let discord_channel =
     ~parent_channel_id:None
     ~thread_id:None
     ~user_id:"user-3"
+    ()
   |> Result.get_ok
 ;;
 
 let test_emit_success_projects_board_chat_and_registry () =
-  with_isolated_base_path "fusion-success-sink" (fun base_dir ->
+  with_isolated_base_path "fusion-success-sink" (fun base_dir registry ->
     let keeper = "fusion-keeper" in
     let run_id = Printf.sprintf "fus-success-%d" (Random.bits ()) in
     let question = "Which implementation should ship?" in
@@ -420,11 +440,11 @@ let test_emit_success_projects_board_chat_and_registry () =
           { role = Fusion_types.Single; synthesis; usage = judge_usage }
       ]
     in
-    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id ~keeper
-      ~preset:"unit-test" ~started_at:2.0;
+    Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:"unit-test" ~topology:Fusion_types.Simple
+      ~started_at:2.0;
     let result =
-      Fusion_sink.emit ~base_dir ~keeper ~run_id ~channel:discord_channel ~question ~panel
-        ~judge:(Ok synthesis) ~judges ~judge_usage
+      Fusion_sink.emit ~registry ~base_dir ~keeper ~run_id ~channel:discord_channel
+        ~question ~panel ~judge:(Ok synthesis) ~judges ~judge_usage
     in
     check bool "emit succeeds" true (Result.is_ok result);
     let post =
@@ -447,6 +467,8 @@ let test_emit_success_projects_board_chat_and_registry () =
     check bool "meta.source is not duplicated" false (List.mem_assoc "source" meta);
     check bool "meta.run_id is not duplicated" false (List.mem_assoc "run_id" meta);
     check string "meta.question" question (string_field "board.meta" meta "question");
+    check (float 0.000001) "meta.started_at" 2.0
+      (number_field "board.meta" meta "started_at");
     (match list_field "board.meta" meta "panel" with
      | [ panel_json ] ->
        let p = assoc_fields "board.meta.panel[0]" panel_json in
@@ -518,8 +540,9 @@ let test_emit_success_projects_board_chat_and_registry () =
        check string "chat fusion block run id" run_id block_run_id
      | None -> fail "chat lane should carry a Fusion block for the board evidence");
     let replay =
-      Fusion_sink.emit ~base_dir ~keeper ~run_id ~channel:discord_channel ~question ~panel
-        ~judge:(Ok synthesis) ~judges ~judge_usage
+      Fusion_sink.emit ~registry ~base_dir ~keeper ~run_id
+        ~channel:discord_channel ~question ~panel ~judge:(Ok synthesis) ~judges
+        ~judge_usage
     in
     check bool "same completion replay succeeds" true (Result.is_ok replay);
     let posts_for_run =
@@ -545,9 +568,9 @@ let test_emit_success_projects_board_chat_and_registry () =
             ~base_path:base_dir
             ~keeper_name:keeper));
     let conflicting_replay =
-      Fusion_sink.emit ~base_dir ~keeper ~run_id ~channel:discord_channel
-        ~question:(question ^ " changed") ~panel ~judge:(Ok synthesis) ~judges
-        ~judge_usage
+      Fusion_sink.emit ~registry ~base_dir ~keeper ~run_id
+        ~channel:discord_channel ~question:(question ^ " changed") ~panel
+        ~judge:(Ok synthesis) ~judges ~judge_usage
     in
     check bool "changed completion replay is rejected" true
       (Result.is_error conflicting_replay);
@@ -569,23 +592,97 @@ let test_emit_success_projects_board_chat_and_registry () =
          (Keeper_event_queue_persistence.load
             ~base_path:base_dir
             ~keeper_name:keeper));
-    match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
-    | Some { Fusion_run_registry.status = Completed { ok = true; _ }; _ } -> ()
-    | Some { Fusion_run_registry.status = Completed { ok = false; _ }; _ } ->
-      fail "fusion run should complete ok=true"
+    match Fusion_run_registry.get registry ~run_id with
+    | Some
+        { Fusion_run_registry.status =
+            Fusion_run_registry.Completed Fusion_run_registry.Succeeded
+        ; _
+        } -> ()
+    | Some
+        { Fusion_run_registry.status =
+            Fusion_run_registry.Completed (Fusion_run_registry.Failed _)
+        ; _
+        } ->
+      fail "fusion run should complete successfully"
     | Some { Fusion_run_registry.status = Running; _ } ->
       fail "fusion run should not remain running"
     | None -> fail "fusion run should remain visible")
 ;;
 
+(* 취소가 실제로 [Fusion_cancelled] 로 키퍼에게 도달하는지 — 이 파일의 기존
+   cancellation 테스트는 stimulus 를 손으로 만들어 코덱과 렌더러만 확인했고, 그래서
+   "아무도 그 terminal 을 생산하지 않는다" 를 통과시켰다. 실제로 오랫동안 생산자가
+   0 이었고 취소된 run 은 전부 [Fusion_failed] 로 도착했다. 이 테스트는 sink 의 실제
+   실패 투영 경로를 태워 durable 큐에 들어간 terminal 을 읽는다. *)
+let test_cancelled_delivery_reaches_the_keeper_as_cancelled () =
+  with_isolated_base_path "fusion-cancel" (fun base_dir registry ->
+    let keeper = Printf.sprintf "fusion-cancel-%d" (Random.bits ()) in
+    let run_id = Printf.sprintf "fus-cancel-%d" (Random.bits ()) in
+    Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:"trio"
+      ~topology:Fusion_types.Simple ~started_at:1.0;
+    let result =
+      Fusion_sink.emit_failure ~registry ~base_dir ~keeper ~run_id
+        ~channel:discord_channel
+        ~failure:
+          (Fusion_sink.Cancelled { reason = "operator stop"; cancelled_by = "vincent" })
+    in
+    check bool "cancellation projects" true (Result.is_ok result);
+    (match
+       Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper
+       |> Keeper_event_queue.dequeue
+     with
+     | Some ({ payload = Keeper_event_queue.Fusion_completed fc; _ }, _) ->
+       (match fc.terminal with
+        | Keeper_event_queue.Fusion_cancelled -> ()
+        | Keeper_event_queue.Fusion_failed _ ->
+          fail "a cancelled run must not arrive as a judge failure"
+        | Keeper_event_queue.Fusion_succeeded _ -> fail "cancellation arrived as success")
+     | Some _ -> fail "unexpected durable stimulus kind"
+     | None -> fail "cancellation must be durably queued");
+    (* registry wire 는 계속 문자열 code 를 싣는다(대시보드가 읽는다) — 다만 그 값이
+       typed 실패에서 파생된다. *)
+    match Fusion_run_registry.get registry ~run_id with
+    | Some { status = Fusion_run_registry.Completed (Fusion_run_registry.Failed { code; _ }); _ }
+      -> check string "registry code derives from the typed failure" "cancelled" code
+    | _ -> fail "registry must record the run as failed with its code")
+;;
+
+(* 대조군: 심판 실패는 여전히 [Fusion_failed] 로 간다. 이게 없으면 위 테스트는
+   "모든 실패를 cancelled 로 보내도" 통과한다. *)
+let test_judge_failure_still_reaches_the_keeper_as_failed () =
+  with_isolated_base_path "fusion-failed" (fun base_dir registry ->
+    let keeper = Printf.sprintf "fusion-failed-%d" (Random.bits ()) in
+    let run_id = Printf.sprintf "fus-failed-%d" (Random.bits ()) in
+    Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:"trio"
+      ~topology:Fusion_types.Simple ~started_at:1.0;
+    let result =
+      Fusion_sink.emit_failure ~registry ~base_dir ~keeper ~run_id
+        ~channel:discord_channel ~failure:(Fusion_sink.Computation_failed "boom")
+    in
+    check bool "failure projects" true (Result.is_ok result);
+    match
+      Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper
+      |> Keeper_event_queue.dequeue
+    with
+    | Some ({ payload = Keeper_event_queue.Fusion_completed fc; _ }, _) ->
+      (match fc.terminal with
+       | Keeper_event_queue.Fusion_failed _ -> ()
+       | Keeper_event_queue.Fusion_cancelled ->
+         fail "a computation failure must not arrive as a cancellation"
+       | Keeper_event_queue.Fusion_succeeded _ -> fail "failure arrived as success")
+    | Some _ -> fail "unexpected durable stimulus kind"
+    | None -> fail "failure must be durably queued")
+;;
+
 let test_wake_durable_commit_carries_channel () =
-  with_isolated_base_path "fusion-wake-durable" (fun base_dir ->
+  with_isolated_base_path "fusion-wake-durable" (fun base_dir _registry ->
     let keeper = Printf.sprintf "fusion-wake-%d" (Random.bits ()) in
     let run_id = Printf.sprintf "fus-wake-%d" (Random.bits ()) in
     let result =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
-        ~channel:discord_channel ~ok:true
-        ~resolved_answer:"WAKE-DURABLE-ANSWER" ~board_post_id:"post-wake-1"
+        ~channel:discord_channel
+        ~terminal:(Keeper_event_queue.Fusion_succeeded "WAKE-DURABLE-ANSWER")
+        ~board_post_id:"post-wake-1"
     in
     check bool "wake commits durably" true (Result.is_ok result);
     (match
@@ -604,7 +701,7 @@ let test_wake_durable_commit_carries_channel () =
      | None -> fail "completion stimulus must be durably persisted with its channel");
     let replay =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
-        ~channel:discord_channel ~ok:true ~resolved_answer:"WAKE-DURABLE-ANSWER"
+        ~channel:discord_channel ~terminal:(Keeper_event_queue.Fusion_succeeded "WAKE-DURABLE-ANSWER")
         ~board_post_id:"post-wake-1"
     in
     check bool "exact-recipient replay accepts the committed recipient" true
@@ -630,7 +727,7 @@ let test_wake_durable_commit_carries_channel () =
 ;;
 
 let test_wake_fail_closed_rejects_conflicting_delivery () =
-  with_isolated_base_path "fusion-wake-failclosed" (fun base_dir ->
+  with_isolated_base_path "fusion-wake-failclosed" (fun base_dir _registry ->
     let keeper = Printf.sprintf "fusion-wake-fc-%d" (Random.bits ()) in
     let run_id = Printf.sprintf "fus-wake-fc-%d" (Random.bits ()) in
     let board_post_id = "post-wake-fc-1" in
@@ -652,8 +749,7 @@ let test_wake_fail_closed_rejects_conflicting_delivery () =
      | Error e -> fail (Printf.sprintf "seeding the conflicting durable row should commit: %s" e));
     let result =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
-        ~channel:discord_channel ~ok:true
-        ~resolved_answer:"REAL-ANSWER" ~board_post_id
+        ~channel:discord_channel ~terminal:(Keeper_event_queue.Fusion_succeeded "REAL-ANSWER") ~board_post_id
     in
     check bool "conflicting durable commit fails the wake" true (Result.is_error result))
 ;;
@@ -663,7 +759,7 @@ let test_wake_fail_closed_rejects_conflicting_delivery () =
    the explicit obligation channel, so two Keepers sharing a [run_id] keep
    isolated completions with their own channels. *)
 let test_wake_isolates_keeper_run_identity () =
-  with_isolated_base_path "fusion-wake-isolation" (fun base_dir ->
+  with_isolated_base_path "fusion-wake-isolation" (fun base_dir _registry ->
     let run_id = Printf.sprintf "fus-iso-%d" (Random.bits ()) in
     let keeper_a = Printf.sprintf "fusion-iso-a-%d" (Random.bits ()) in
     let keeper_b = Printf.sprintf "fusion-iso-b-%d" (Random.bits ()) in
@@ -674,19 +770,18 @@ let test_wake_isolates_keeper_run_identity () =
         ~parent_channel_id:None
         ~thread_id:None
         ~user_id:"user-7"
+        ()
       |> Result.get_ok
     in
     (match
        Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper:keeper_a
-         ~run_id ~channel:discord_channel ~ok:true
-         ~resolved_answer:"ANSWER-A" ~board_post_id:"post-iso-a"
+         ~run_id ~channel:discord_channel ~terminal:(Keeper_event_queue.Fusion_succeeded "ANSWER-A") ~board_post_id:"post-iso-a"
      with
      | Ok () -> ()
      | Error e -> fail (Printf.sprintf "keeper-a wake must commit: %s" e));
     (match
        Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper:keeper_b
-         ~run_id ~channel:channel_b ~ok:true
-         ~resolved_answer:"ANSWER-B" ~board_post_id:"post-iso-b"
+         ~run_id ~channel:channel_b ~terminal:(Keeper_event_queue.Fusion_succeeded "ANSWER-B") ~board_post_id:"post-iso-b"
      with
      | Ok () -> ()
      | Error e -> fail (Printf.sprintf "keeper-b wake must commit: %s" e));
@@ -728,7 +823,7 @@ let test_wake_isolates_keeper_run_identity () =
    Keeper name, so the currently registered lane legitimately owns pending
    completions of that Keeper. *)
 let test_completion_wake_commits_durably_across_lane_replacement () =
-  with_isolated_base_path "fusion-wake-lane-replacement" (fun base_dir ->
+  with_isolated_base_path "fusion-wake-lane-replacement" (fun base_dir _registry ->
     Keeper_registry.For_testing.clear ();
     Fun.protect
       ~finally:Keeper_registry.For_testing.clear
@@ -745,8 +840,7 @@ let test_completion_wake_commits_durably_across_lane_replacement () =
          in
          let result =
            Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
-             ~channel:discord_channel ~ok:true
-             ~resolved_answer:"REPLACED-LANE-ANSWER" ~board_post_id:"post-replaced"
+             ~channel:discord_channel ~terminal:(Keeper_event_queue.Fusion_succeeded "REPLACED-LANE-ANSWER") ~board_post_id:"post-replaced"
          in
          check bool "completion commits despite replaced live lane" true
            (Result.is_ok result);
@@ -776,24 +870,24 @@ let test_completion_wake_commits_durably_across_lane_replacement () =
    a replay carrying a *different* Board identity for the same run is an
    identity conflict that fails closed and leaves the committed row intact. *)
 let test_wake_board_recovery_keeps_canonical_identity () =
-  with_isolated_base_path "fusion-wake-board-recovery" (fun base_dir ->
+  with_isolated_base_path "fusion-wake-board-recovery" (fun base_dir _registry ->
     let keeper = Printf.sprintf "fusion-board-recovery-%d" (Random.bits ()) in
     let run_id = Printf.sprintf "fus-board-recovery-%d" (Random.bits ()) in
     let first =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
-        ~channel:discord_channel ~ok:true ~resolved_answer:"RECOVERED-ANSWER"
+        ~channel:discord_channel ~terminal:(Keeper_event_queue.Fusion_succeeded "RECOVERED-ANSWER")
         ~board_post_id:"post-canonical"
     in
     check bool "completion commits with Board evidence" true (Result.is_ok first);
     let replay =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
-        ~channel:discord_channel ~ok:true ~resolved_answer:"RECOVERED-ANSWER"
+        ~channel:discord_channel ~terminal:(Keeper_event_queue.Fusion_succeeded "RECOVERED-ANSWER")
         ~board_post_id:"post-canonical"
     in
     check bool "canonical replay is idempotent" true (Result.is_ok replay);
     let conflicting =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
-        ~channel:discord_channel ~ok:true ~resolved_answer:"RECOVERED-ANSWER"
+        ~channel:discord_channel ~terminal:(Keeper_event_queue.Fusion_succeeded "RECOVERED-ANSWER")
         ~board_post_id:"post-divergent"
     in
     check bool "divergent Board identity fails closed" true
@@ -816,7 +910,7 @@ let test_wake_board_recovery_keeps_canonical_identity () =
 ;;
 
 let test_completion_stimulus_persists_without_live_registry () =
-  with_isolated_base_path "fusion-wake-offline" (fun base_dir ->
+  with_isolated_base_path "fusion-wake-offline" (fun base_dir _registry ->
     let keeper = Printf.sprintf "fusion-offline-%d" (Random.bits ()) in
     let stimulus = fusion_stimulus ~run_id:"fus-offline" () in
     Keeper_keepalive_signal.wakeup_keeper
@@ -837,7 +931,8 @@ let test_completion_stimulus_persists_without_live_registry () =
 ;;
 
 let test_tool_handle_async_success_projects_running_then_completed () =
-  with_isolated_eio_base_path "fusion-tool-async-success" (fun env sw base_dir ->
+  with_isolated_eio_base_path "fusion-tool-async-success"
+    (fun env sw base_dir registry ->
     let keeper = "fusion-tool-keeper" in
     let question = "Which async fusion path should ship?" in
     let resolved_answer = "Ship the async handler path with typed sink evidence." in
@@ -875,7 +970,7 @@ let test_tool_handle_async_success_projects_running_then_completed () =
     let response =
       Fusion_tool.For_test.handle_with_compute ~compute ~sw
         ~net:(Eio.Stdenv.net env) ~base_dir ~keeper ~now_unix:4.0
-        ~policy:(fusion_tool_policy ())
+        ~policy:(fusion_tool_policy ()) ~registry
         ~args:(`Assoc [ ("prompt", `String question) ])
         ()
     in
@@ -891,7 +986,7 @@ let test_tool_handle_async_success_projects_running_then_completed () =
       (contains
          ~needle:"No need to poll masc_fusion_status"
          (string_field "fusion_tool.response" response_fields "delivery"));
-    (match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
+    (match Fusion_run_registry.get registry ~run_id with
      | Some { keeper = observed_keeper; preset; status = Fusion_run_registry.Running; _ } ->
        check string "running keeper" keeper observed_keeper;
        check string "running preset" "unit" preset
@@ -902,7 +997,7 @@ let test_tool_handle_async_success_projects_running_then_completed () =
     Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 2.0 (fun () ->
       Eio.Promise.await computed_promise;
       let rec await_projection () =
-        match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
+        match Fusion_run_registry.get registry ~run_id with
         | Some { Fusion_run_registry.status = Completed _; _ } -> ()
         | Some { Fusion_run_registry.status = Running; _ } | None ->
           Eio.Fiber.yield ();
@@ -952,10 +1047,18 @@ let test_tool_handle_async_success_projects_running_then_completed () =
        check string "chat fusion block post id" post_id block_post_id;
        check string "chat fusion block run id" run_id block_run_id
      | None -> fail "chat lane should carry a Fusion block after async completion");
-    match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
-    | Some { Fusion_run_registry.status = Completed { ok = true; _ }; _ } -> ()
-    | Some { Fusion_run_registry.status = Completed { ok = false; _ }; _ } ->
-      fail "fusion run should complete ok=true"
+    match Fusion_run_registry.get registry ~run_id with
+    | Some
+        { Fusion_run_registry.status =
+            Fusion_run_registry.Completed Fusion_run_registry.Succeeded
+        ; _
+        } -> ()
+    | Some
+        { Fusion_run_registry.status =
+            Fusion_run_registry.Completed (Fusion_run_registry.Failed _)
+        ; _
+        } ->
+      fail "fusion run should complete successfully"
     | Some { Fusion_run_registry.status = Running; _ } ->
       fail "fusion run should not remain Running after background success"
     | None -> fail "fusion run should remain visible after background success")
@@ -1018,6 +1121,14 @@ let () =
             "scheduled wake is actionable (non-empty, carries message)"
             `Quick
             test_scheduled_wake_is_actionable
+        ; test_case
+            "cancelled delivery reaches the keeper as cancelled"
+            `Quick
+            test_cancelled_delivery_reaches_the_keeper_as_cancelled
+        ; test_case
+            "judge failure still reaches the keeper as failed"
+            `Quick
+            test_judge_failure_still_reaches_the_keeper_as_failed
         ] )
     ]
 ;;

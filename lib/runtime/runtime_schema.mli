@@ -11,6 +11,9 @@ type api_format =
   | Messages_api
   | Chat_completions_api
   | Ollama_api
+  | Codex_app_server_runtime
+  | Antigravity_cli_runtime
+  | Claude_code_runtime
 [@@deriving show, eq]
 
 type transport =
@@ -35,8 +38,24 @@ type capabilities =
 
 val connect_timeout_s_key : string
 
+type antigravity_effort =
+  | Antigravity_low
+  | Antigravity_medium
+  | Antigravity_high
+[@@deriving show, eq]
+
+type antigravity_cli_options =
+  { agent : string option
+  ; effort : antigravity_effort option
+  ; timeout_s : float
+  }
+[@@deriving show, eq]
+
 type provider =
   { id : string
+  ; enabled : bool
+    (** Whether bindings owned by this provider may be materialized. Omitted
+        [enabled] in TOML defaults to [true]. *)
   ; display_name : string
   ; protocol : string
   ; api_format : api_format
@@ -47,18 +66,20 @@ type provider =
   ; healthcheck_path : string option
   ; headers : (string * string) list option
   ; connect_timeout_s : float option
-    (** Per-provider override for the OAS connect + initial-response-headers
-      wall-clock timeout (seconds). [None] keeps the OAS kind-based default
+    (** Per-provider override for the AGENT_CORE connect + initial-response-headers
+      wall-clock timeout (seconds). [None] keeps the AGENT_CORE kind-based default
       (see [Llm_provider.Provider_config.default_connect_timeout_s]). Declared
       on the provider, not the model, because it is a transport property.
-      oas#2163, RFC-OAS-026 I2: MASC declares the budget; OAS owns enforcement
+      agent-core boundary, Agent Core contract I2: MASC declares the budget; AGENT_CORE owns enforcement
       and phase=Http_operation attribution. *)
+  ; antigravity_cli : antigravity_cli_options option
+    (** Present exactly when [protocol = "antigravity-cli"]. *)
   }
 [@@deriving show, eq]
 
 (** {1 Layer 2: Model} *)
 
-(** Re-exported from OAS so thinking-control capability drift is
+(** Re-exported from AGENT_CORE so thinking-control capability drift is
     compiler-checked. *)
 type thinking_control_format =
   Llm_provider.Capabilities.thinking_control_format =
@@ -73,6 +94,14 @@ type thinking_control_format =
   | Enable_thinking
 [@@deriving show, eq]
 
+type reasoning_streaming_format =
+  Llm_provider.Capabilities.reasoning_streaming_format =
+  | Default_reasoning_streaming
+  | No_reasoning_streaming
+  | Delta_reasoning_field of string
+  | Template_reasoning_streaming
+[@@deriving show, eq]
+
 type model_capabilities =
   { max_output_tokens : int option
   ; supports_tool_choice : bool
@@ -81,7 +110,13 @@ type model_capabilities =
   ; supports_parallel_tool_calls : bool
   ; supports_extended_thinking : bool
   ; supports_reasoning_budget : bool
+  ; declared_supports_reasoning_budget : bool option
+      (** Exact TOML presence. [None] preserves an Agent Core catalog value. *)
   ; thinking_control_format : thinking_control_format
+  ; declared_thinking_control_format : thinking_control_format option
+      (** Exact TOML presence. [None] preserves an Agent Core catalog value. *)
+  ; reasoning_streaming_format : reasoning_streaming_format option
+      (** Exact streaming side-channel for this transport binding. *)
   ; supports_image_input : bool
   ; supports_audio_input : bool
   ; supports_video_input : bool
@@ -112,7 +147,7 @@ type model_spec =
   ; api_name : string
   ; tools_support : bool
   ; max_context : int option
-      (** [models.<id>.max-context] operator override. [None] means the OAS
+      (** [models.<id>.max-context] operator override. [None] means the AGENT_CORE
           capability catalog's max-context is the sole source; resolved via
           {!Runtime.resolve_max_context_of_runtime}, never read directly. *)
   ; thinking_support : bool
@@ -123,8 +158,11 @@ type model_spec =
   ; top_p : float option
   ; top_k : int option
   ; min_p : float option
+  ; reasoning_effort : Llm_provider.Reasoning_effort.t option
+       [@equal fun a b -> a = b]
+  ; turn_timeout_s : float option
+  ; max_prompt_bytes : int option
   ; capabilities : model_capabilities option
-  ; match_prefixes : string list
   }
 [@@deriving show, eq]
 
@@ -133,13 +171,16 @@ type model_spec =
 type binding =
   { provider_id : string
   ; model_id : string
+  ; enabled : bool
+    (** Whether this provider x model binding may be materialized. Omitted
+        [enabled] in TOML defaults to [true]. *)
   ; is_default : bool
   ; wizard_default : bool
   ; max_concurrent : int option
   ; max_request_body_bytes : int option
         (** Serialized request-body ceiling for this binding, in bytes.
 
-            OAS validates this knob and [max_concurrent] together in one function
+            AGENT_CORE validates this knob and [max_concurrent] together in one function
             ([Llm_provider] admission declaration) and enforces this one before
             POST: it serializes the body, measures it, and returns a typed
             [Request_body_too_large] when the declared ceiling is exceeded. That
@@ -152,6 +193,9 @@ type binding =
   ; price_output : float option
   ; keep_alive : string option
   ; num_ctx : int option
+  ; repeat_penalty : float option
+  ; repeat_last_n : int option
+  ; return_progress : bool option
   }
 [@@deriving show, eq]
 
@@ -161,12 +205,8 @@ type binding =
     Declarations carry opaque runtime ids; [Runtime] resolves them to
     materialized runtimes at load time. *)
 
-type lane_strategy = Ordered
-[@@deriving show, eq]
-
 type lane_decl =
   { id : string
-  ; strategy : lane_strategy
   ; candidate_ids : string list
   }
 [@@deriving show, eq]
@@ -184,16 +224,12 @@ type config =
   ; models : model_spec list
   ; bindings : binding list
   ; default_runtime_id : string option
-  ; cross_verifier_runtime_id : string option
-    (** [\[runtime\].cross_verifier] — runtime id for the anti-rationalization
-        evaluator (cross-model task verification). [None] inherits
-        [\[runtime\].default]. Unknown ids are rejected at load. *)
   ; keeper_assignments : (string * string) list
     (** [\[runtime.assignments\]] — keeper name → runtime id ["provider.model"].
-        Sole SSOT for keeper→runtime assignment (persona⊥{model,runtime}). A
+        Sole SSOT for keeper-to-runtime assignment. A
         keeper absent from this table routes to the default runtime; an
         assignment to an unknown id is rejected at load. The id is an opaque
-        binding key (only the OAS adapter parses it into provider/model/spec). *)
+        binding key (only the AGENT_CORE adapter parses it into provider/model/spec). *)
   ; media_failover : string list
     (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted
         when a turn's input modality (image/audio/document) exceeds the assigned
@@ -206,7 +242,7 @@ type config =
         Declarations are resolved against materialized runtimes at load time;
         an unknown candidate id is rejected like [\[runtime\].default]. *)
   ; exact_output_lane_decls : exact_output_lane_decl list
-    (** Raw ordered OAS target references from
+    (** Raw ordered AGENT_CORE target references from
         [\[runtime.exact_output_lanes.<id>\]]. *)
   }
 [@@deriving show, eq]

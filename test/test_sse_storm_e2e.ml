@@ -1,5 +1,8 @@
 open Alcotest
 
+module Official_client_session_store =
+  Masc.Keeper_official_client_session_store
+
 type http_result = {
   status: int option;
   headers: (string * string) list;
@@ -213,9 +216,13 @@ let dashboard_dev_token ~port =
              , List.assoc_opt "actor" fields
              , List.assoc_opt "role" fields )
            with
+           (* [Server_routes_http_dashboard_dev_token.dashboard_dev_role] is
+              [Masc_domain.Admin] since #28354; this arm still required the
+              pre-#28354 [worker] and so failed every run against a server that
+              honours the current contract. *)
            | ( Some (`String token)
              , Some (`String "dashboard")
-             , Some (`String "worker") )
+             , Some (`String "admin") )
              when String.trim token <> "" ->
              token
            | _ ->
@@ -357,6 +364,8 @@ provider_ref = "deepseek"
 model_id = "deepseek-v4-flash"
 |}
 
+let main_eio_test_admin_token = "sse-storm-admin-token"
+
 let seed_server_config ~base_path =
   let masc_dir = Filename.concat base_path ".masc" in
   let config_dir = Filename.concat masc_dir "config" in
@@ -364,14 +373,14 @@ let seed_server_config ~base_path =
   ensure_dir config_dir;
   List.iter
     (fun name -> ensure_dir (Filename.concat config_dir name))
-    [ "keepers"; "personas"; "prompts" ];
+    [ "keepers"; "prompts" ];
   let runtime_dst = Filename.concat config_dir "runtime.toml" in
   if not (Sys.file_exists runtime_dst) then
     let oc = open_out runtime_dst in
     Fun.protect
       ~finally:(fun () -> close_out_noerr oc)
       (fun () -> output_string oc runtime_seed);
-  let overlay_dst = Filename.concat config_dir "oas-models-overlay.toml" in
+  let overlay_dst = Filename.concat config_dir "agent-core-models-overlay.toml" in
   if not (Sys.file_exists overlay_dst) then
     let oc = open_out overlay_dst in
     Fun.protect
@@ -392,11 +401,12 @@ let with_server f =
     Unix.openfile log_file [Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC] 0o644
   in
   let env =
-    merge_env_overrides ~remove:[ "OAS_MODEL_CATALOG" ]
+    merge_env_overrides ~remove:[ "AGENT_CORE_MODEL_CATALOG" ]
       [
         ("MASC_BASE_PATH", base_path);
         ("MASC_BASE_PATH_INPUT", base_path);
-        ("MASC_AUTONOMY_ENABLED", "0");
+        ("MASC_ADMIN_TOKEN", main_eio_test_admin_token);
+        ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
       ]
@@ -453,7 +463,7 @@ let publish_masc_broadcast ~port ~auth_token ~session_id =
               ; ( "arguments"
                 , `Assoc
                     [ "agent_name", `String "dashboard"
-                    ; "message", `String "sse-ag-ui-wire-encoding"
+                    ; "content", `String "sse-ag-ui-wire-encoding"
                     ] )
               ] )
         ])
@@ -660,23 +670,208 @@ let test_ag_ui_frames_are_wire_encoded () =
               event_id))
     first_masc_events
 
-let test_dashboard_dev_token_cannot_call_admin_route () =
+(* A credential the server accepts as a genuine non-admin caller. The loopback
+   dashboard dev-token used to serve that role here, but #28354 issues it as
+   [Masc_domain.Admin], so probing a CanAdmin gate with it stopped proving the
+   gate exists. Mint the negative probe explicitly instead of borrowing a
+   credential whose role is someone else's decision. *)
+let create_worker_token base_path ~agent_name =
+  match Auth.create_token base_path ~agent_name ~role:Masc_domain.Worker with
+  | Ok (raw_token, _) -> raw_token
+  | Error error ->
+    fail ("create_token failed: " ^ Masc_domain.masc_error_to_string error)
+
+let gate_mode_post ~port ~token =
+  run_curl
+    ~headers:
+      [ ("Accept", "application/json")
+      ; ("Authorization", "Bearer " ^ token)
+      ; ("Content-Type", "application/json")
+      ]
+    ~method_:"POST"
+    ~body:"{}"
+    ~max_time:2.0
+    ~port
+    ~path:"/api/v1/dashboard/gate/mode"
+    ()
+
+let test_gate_mode_route_is_admin_gated () =
+  with_server @@ fun ~port ~auth_token ~base_path ->
+  let worker_token = create_worker_token base_path ~agent_name:"sse-storm-worker" in
+  check_status
+    "Worker token denied CanAdmin route"
+    403
+    (gate_mode_post ~port ~token:worker_token);
+  (* The dashboard dev-token is Admin since #28354, so it clears authorization
+     and the empty body is what the route rejects. Asserting "not 403" rather
+     than a specific success code keeps this pinned to the authorization
+     decision, which is the subject, and leaves the request schema free to
+     change. *)
+  match (gate_mode_post ~port ~token:auth_token).status with
+  | Some 403 -> fail "dashboard dev-token was denied a CanAdmin route (#28354 issues it as Admin)"
+  | Some _ -> ()
+  | None -> fail "dashboard dev-token gate/mode request produced no HTTP status"
+
+let check_operation_error label expected_code result =
+  match Yojson.Safe.from_string result.body with
+  | `Assoc fields ->
+    (match List.assoc_opt "error" fields with
+     | Some (`String code) -> check string label expected_code code
+     | _ -> fail (label ^ ": missing typed operation error: " ^ result.body))
+  | _ -> fail (label ^ ": non-object operation error: " ^ result.body)
+  | exception Yojson.Json_error detail ->
+    fail (label ^ ": invalid JSON operation error: " ^ detail)
+;;
+
+let test_dashboard_dev_token_can_use_keeper_operation_routes () =
   with_server @@ fun ~port ~auth_token ~base_path:_ ->
-  let result =
+  let headers =
+    [ "Accept", "application/json"
+    ; "Authorization", "Bearer " ^ auth_token
+    ; "Content-Type", "application/json"
+    ]
+  in
+  let operation_path =
+    "/api/v1/keepers/absent-keeper/chat/operations/kmsg-worker-auth"
+  in
+  let get_result =
+    run_curl ~headers ~max_time:2.0 ~port ~path:operation_path ()
+  in
+  check_status "dashboard Worker operation lookup reaches handler" 404 get_result;
+  check_operation_error
+    "dashboard Worker operation lookup typed error"
+    "unknown_operation"
+    get_result;
+  let cancel_result =
     run_curl
-      ~headers:
-        [ ("Accept", "application/json")
-        ; ("Authorization", "Bearer " ^ auth_token)
-        ; ("Content-Type", "application/json")
-        ]
+      ~headers
       ~method_:"POST"
       ~body:"{}"
       ~max_time:2.0
       ~port
-      ~path:"/api/v1/dashboard/gate/mode"
+      ~path:(operation_path ^ "/cancel")
       ()
   in
-  check_status "dashboard Worker token denied CanAdmin route" 403 result
+  check_status "dashboard Worker operation cancel reaches handler" 404 cancel_result;
+  check_operation_error
+    "dashboard Worker operation cancel typed error"
+    "unknown_operation"
+    cancel_result
+;;
+
+let test_official_client_recovery_uses_real_admin_route () =
+  with_server @@ fun ~port ~auth_token ~base_path ->
+  let keeper_name = "official-client-http-fixture" in
+  let claim =
+    Official_client_session_store.claim
+      ~base_path
+      ~keeper_name
+      ~expected:None
+      ~client_kind:Official_client_session_store.Codex
+      ~owner_epoch:"11111111-1111-4111-8111-111111111111"
+      ~runtime_id:"codex.codex"
+      ~tool_surface_sha256:
+        (Official_client_session_store.tool_surface_sha256
+           ~native_posture:Runtime_native_tools.codex_default
+           [])
+      ~updated_at:1.0
+    |> Result.get_ok
+  in
+  let recovery =
+    Official_client_session_store.require_recovery
+      ~base_path
+      ~keeper_name
+      ~expected:claim
+      ~failure:Official_client_session_store.Protocol_failed
+      ~detail:"real HTTP recovery fixture"
+      ~required_at:2.0
+    |> Result.get_ok
+  in
+  let recovery_id =
+    match recovery.phase with
+    | Official_client_session_store.Recovery_required required -> required.recovery_id
+    | Official_client_session_store.Ready
+    | Official_client_session_store.Start _
+    | Official_client_session_store.Active _
+    | Official_client_session_store.Turn_inflight _
+    | Official_client_session_store.Settled _ ->
+      fail "HTTP fixture did not enter recovery-required"
+  in
+  let session_path =
+    "/api/v1/runtime/sessions/official-client?keeper_name=" ^ keeper_name
+  in
+  (* Probe with a minted Worker rather than the dashboard dev-token: #28354
+     issues that token as Admin, so it now reads this route successfully and
+     would turn the assertion into a claim about nothing. *)
+  let worker_token =
+    create_worker_token base_path ~agent_name:"sse-storm-recovery-worker"
+  in
+  let worker =
+    run_curl
+      ~headers:[ "Authorization", "Bearer " ^ worker_token ]
+      ~max_time:2.0
+      ~port
+      ~path:session_path
+      ()
+  in
+  check_status "Worker cannot read official-client recovery" 403 worker;
+  let admin_headers =
+    [ "Accept", "application/json"
+    ; "Authorization", "Bearer " ^ main_eio_test_admin_token
+    ; "Content-Type", "application/json"
+    ]
+  in
+  let before =
+    run_curl ~headers:admin_headers ~max_time:2.0 ~port ~path:session_path ()
+  in
+  check_status "Admin reads official-client recovery" 200 before;
+  let open Yojson.Safe.Util in
+  check string
+    "real route recovery phase"
+    "recovery_required"
+    (Yojson.Safe.from_string before.body
+     |> member "session"
+     |> member "phase"
+     |> member "kind"
+     |> to_string);
+  let body =
+    `Assoc
+      [ "keeper_name", `String keeper_name
+      ; "recovery_id", `String recovery_id
+      ; "resolution", `String "restart_fresh"
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let resolved =
+    run_curl
+      ~headers:admin_headers
+      ~method_:"POST"
+      ~body
+      ~max_time:2.0
+      ~port
+      ~path:"/api/v1/runtime/sessions/official-client/resolve"
+      ()
+  in
+  check_status "Admin resolves official-client recovery" 200 resolved;
+  let refreshed =
+    run_curl ~headers:admin_headers ~max_time:2.0 ~port ~path:session_path ()
+  in
+  check_status "Admin refreshes official-client session" 200 refreshed;
+  let refreshed_json = Yojson.Safe.from_string refreshed.body in
+  check string
+    "real route refreshed phase"
+    "ready"
+    (refreshed_json |> member "session" |> member "phase" |> member "kind"
+     |> to_string);
+  check string
+    "real route persisted recovery fence"
+    recovery_id
+    (refreshed_json
+     |> member "session"
+     |> member "last_recovery_resolution"
+     |> member "recovery_id"
+     |> to_string)
+
 let test_ag_ui_rejects_reconnect_then_recovers () =
   with_server @@ fun ~port ~auth_token ~base_path:_ ->
   let sid = initialize_mcp_session ~port ~auth_token in
@@ -758,9 +953,17 @@ let () =
     [
       ( "auth"
       , [ test_case
-            "dev-token cannot call admin route"
+            "gate/mode is admin gated"
             `Slow
-            test_dashboard_dev_token_cannot_call_admin_route
+            test_gate_mode_route_is_admin_gated
+        ; test_case
+            "dev-token can use Keeper operation routes"
+            `Slow
+            test_dashboard_dev_token_can_use_keeper_operation_routes
+        ; test_case
+            "official-client recovery uses real CanAdmin route"
+            `Slow
+            test_official_client_recovery_uses_real_admin_route
         ] )
     ; ("mcp", [test_case "follow-up reconnect accepted" `Slow test_mcp_reconnect_stays_accepted])
      ; ( "ag_ui"

@@ -6,7 +6,6 @@ type phase = Keeper_state_machine_phase.phase =
   | Offline
   | Running
   | Failing
-  | Overflowed
   | Compacting
   | HandingOff
   | Draining
@@ -14,7 +13,6 @@ type phase = Keeper_state_machine_phase.phase =
   | Stopped
   | Crashed
   | Restarting
-  | Dead
 
 let phase_to_string = Keeper_state_machine_phase.phase_to_string
 let phase_of_string = Keeper_state_machine_phase.phase_of_string
@@ -32,7 +30,6 @@ type conditions =
   ; handoff_active : bool
   ; operator_paused : bool
   ; stop_requested : bool
-  ; dead_tombstone_latched : bool
   ; restart_requested : bool
   ; drain_complete : bool
   ; credential_archived : bool
@@ -48,7 +45,6 @@ let default_conditions =
   ; handoff_active = false
   ; operator_paused = false
   ; stop_requested = false
-  ; dead_tombstone_latched = false
   ; restart_requested = false
   ; drain_complete = false
   ; credential_archived = false
@@ -81,7 +77,6 @@ type event =
   | Handoff_started
   | Handoff_completed of
       { new_trace_id : string
-      ; generation : int
       }
   | Handoff_failed of { reason : string }
   | Operator_pause
@@ -113,7 +108,7 @@ let event_to_string = function
   | Compaction_completed -> "compaction_completed"
   | Compaction_failed r -> Printf.sprintf "compaction_failed(%s)" r.reason
   | Handoff_started -> "handoff_started"
-  | Handoff_completed r -> Printf.sprintf "handoff_completed(gen=%d)" r.generation
+  | Handoff_completed _ -> "handoff_completed"
   | Handoff_failed r -> Printf.sprintf "handoff_failed(%s)" r.reason
   | Operator_pause -> "operator_pause"
   | Operator_resume -> "operator_resume"
@@ -160,10 +155,9 @@ type entry_action =
       { event_name : string
       ; detail : string
       }
-  | Mark_dead_tombstone
   | Cleanup_and_unregister
   | Trigger_immediate_cleanup
-  | Cancel_pending_oas
+  | Cancel_pending_agent_core
 
 (* ── Transition Types ──────────────────────────────────── *)
 
@@ -217,35 +211,26 @@ let transition_error_to_string = function
    compiler-checked-exhaustive pattern already established in
    [can_execute_turn] below.
 
-   Terminal source phases (Stopped/Dead) keep [_ -> false] because
-   the semantic IS "any phase, including future ones, is unreachable from a
-   terminal state" — the wildcard correctly captures the universal denial.
-   The universal [_, Dead -> true] arm is kept because an explicit durable
-   tombstone can terminate any non-terminal phase. *)
+   The terminal source phase [Stopped] keeps [_ -> false] because the semantic
+   IS "any phase, including future ones, is unreachable from a terminal
+   state" — the wildcard correctly captures the universal denial. *)
 let can_transition ~from_phase ~to_phase =
   match from_phase, to_phase with
   (* Terminal states accept nothing *)
   | Stopped, _ -> false
-  | Dead, _ -> false
-  (* An explicit durable tombstone can terminate any non-terminal keeper.
-     Runtime failure and restart observations cannot synthesize it. *)
-  | _, Dead -> true
   (* Offline -> Running | Stopped | Draining (stop while not yet started) *)
   | Offline, (Running | Stopped | Draining) -> true
   | ( Offline
     , ( Offline
       | Failing
-      | Overflowed
-      | Compacting
+          | Compacting
       | HandingOff
       | Paused
       | Crashed
       | Restarting ) ) -> false
-  (* Running -> buffer states, Paused, Stopped, Crashed (fiber death),
-     Overflowed (prompt exceeded provider budget) *)
+  (* Running -> buffer states, Paused, Stopped, Crashed (fiber death). *)
   | ( Running
     , ( Failing
-      | Overflowed
       | Compacting
       | HandingOff
       | Draining
@@ -255,21 +240,12 @@ let can_transition ~from_phase ~to_phase =
   | Running, (Offline | Running | Restarting) -> false
   (* Failing -> Running (recovery) | Crashed (threshold) | Draining (stop)
      | Paused (operator can pause for investigation)
-     | Overflowed (context overflow distinct from generic failure)
      | Compacting (post-turn compaction can run while the keeper remains in
      the health-failing lane; completion returns to Failing if the health latch
      is still set). *)
-  | Failing, (Running | Overflowed | Compacting | Crashed | Draining | Paused) -> true
+  | Failing, (Running | Compacting | Crashed | Draining | Paused) -> true
   | ( Failing
     , (Offline | Failing | HandingOff | Stopped | Restarting) ) ->
-    false
-  (* Overflowed -> Running (operator_clear resolves the overflow in-place)
-     | Compacting (auto-recovery, the default next step)
-     | Paused (explicit operator pause)
-     | Draining (operator stop) | Crashed (fiber died). *)
-  | Overflowed, (Running | Compacting | Paused | Draining | Crashed) -> true
-  | ( Overflowed
-    , (Offline | Failing | Overflowed | HandingOff | Stopped | Restarting) ) ->
     false
   (* Compacting -> Running (done or failed; the durable Keeper Lane owns any
      exact-source retry after failure)
@@ -277,13 +253,13 @@ let can_transition ~from_phase ~to_phase =
      | Failing (hb fail / guardrail during)
      | Crashed (fatal) | Draining (operator stop during). *)
   | Compacting, (Running | Failing | Crashed | Draining | Paused) -> true
-  | Compacting, (Offline | Overflowed | Compacting | HandingOff | Stopped | Restarting) -> false
+  | Compacting, (Offline | Compacting | HandingOff | Stopped | Restarting) -> false
   (* HandingOff -> Running (done) | Failing | Crashed
      | Draining (operator stop during handoff)
      | Paused (operator pause during handoff) *)
   | HandingOff, (Running | Failing | Crashed | Draining | Paused) -> true
   | ( HandingOff
-    , (Offline | Overflowed | Compacting | HandingOff | Stopped | Restarting) )
+    , (Offline | Compacting | HandingOff | Stopped | Restarting) )
     -> false
   (* Draining -> Stopped (done) | Crashed (fatal during drain) *)
   | Draining, (Stopped | Crashed) -> true
@@ -291,20 +267,18 @@ let can_transition ~from_phase ~to_phase =
     , ( Offline
       | Running
       | Failing
-      | Overflowed
-      | Compacting
+          | Compacting
       | HandingOff
       | Draining
       | Paused
       | Restarting ) ) -> false
   (* Paused -> Running (resume) | latent states exposed by resume
-     (Failing/Overflowed/HandingOff/Restarting/Offline) | Draining (stop)
+     (Failing/HandingOff/Restarting/Offline) | Draining (stop)
      | Stopped (remove) | Crashed (fiber can die while keeper is paused)
-     | Compacting (operator invoked masc_keeper_compact on paused keeper
-     to clear an overflow-induced pause).
+     | Compacting (operator invoked masc_keeper_compact on a paused keeper).
 
      Operator_resume only clears [operator_paused]; it intentionally does not
-     erase already-observed launch, health, overflow, handoff, or restart conditions.
+     erase already-observed launch, health, handoff, or restart conditions.
      If one of those latches still derives a non-running phase, accepting the
      transition lets the registry commit the resume intent and surface the real
      blocker instead of rejecting the event and leaving the keeper permanently
@@ -312,8 +286,7 @@ let can_transition ~from_phase ~to_phase =
   | ( Paused
     , ( Running
       | Failing
-      | Overflowed
-      | Compacting
+          | Compacting
       | HandingOff
       | Draining
       | Stopped
@@ -321,15 +294,13 @@ let can_transition ~from_phase ~to_phase =
       | Offline
       | Restarting ) ) -> true
   | Paused, Paused -> false
-  (* Crashed -> Restarting (backoff done). Dead is covered by the global
-     hard-stop/budget terminal transition above. *)
+  (* Crashed -> Restarting (backoff done). *)
   | Crashed, Restarting -> true
   | ( Crashed
     , ( Offline
       | Running
       | Failing
-      | Overflowed
-      | Compacting
+          | Compacting
       | HandingOff
       | Draining
       | Paused
@@ -339,17 +310,16 @@ let can_transition ~from_phase ~to_phase =
      | Draining (stop_requested persists) | Paused (operator_paused persists) *)
   | Restarting, (Running | Crashed | Draining | Paused) -> true
   | ( Restarting
-    , (Offline | Failing | Overflowed | Compacting | HandingOff | Stopped | Restarting) )
+    , (Offline | Failing | Compacting | HandingOff | Stopped | Restarting) )
     -> false
 ;;
 
 let can_execute_turn = function
-  | Running | Failing | Overflowed | Compacting | HandingOff -> true
+  | Running | Failing | Compacting | HandingOff -> true
   | Offline
   | Draining
   | Paused
   | Stopped
   | Crashed
-  | Restarting
-  | Dead -> false
+  | Restarting -> false
 ;;

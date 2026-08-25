@@ -7,19 +7,17 @@ updated: 2026-07-01
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0020", "0203", "0223", "0226", "connector-deferred-reply-via-chat-queue"]
-implementation_prs: [22818, 22825]
+related: ["0020", "0203", "0223", "0226"]
 ---
 
 # RFC: Connector ambient attention wake
 
 ## 1. Problem
 
-`RFC-connector-deferred-reply-via-chat-queue` closed the **dispatched** half: a
-connector message that passes the trigger policy (e.g. an @mention) runs a keeper
-turn (or, when busy, is queued and answered after the slot frees). This RFC closes
-the **ambient** half, the §2 non-goal that RFC deferred to "a separate RFC, the
-RFC-0020 frame".
+Keeper Owner chat operations close the **dispatched** half: a connector message
+that passes the trigger policy (e.g. an @mention) runs a keeper turn, or remains
+Queued until the Owner can claim it. This RFC closes the **ambient** half in the
+RFC-0020 frame.
 
 An **ambient** connector message — one the trigger policy filters out (default
 `Mention_or_thread`, `lib/server/server_discord_in_process_gateway.ml:30`) — takes the
@@ -199,7 +197,7 @@ and operator digest honest and to support the content read.
   outbound are coupled to the wake; do not ship the wake alone.
 - **Double-processing with the dispatched fix** — a message that is both queued
   (dispatched) and recorded (ambient) must not drive two turns. Resolution keys on
-  `dedupe_key` / `event_id`; the chat-queue path already sets
+  `dedupe_key` / `event_id`; the Owner operation path already sets
   `connector_user_line_recorded_upstream = true` (`lib/server/server_bootstrap_loops.ml:1088`)
   to avoid re-recording.
 - **Approval_pending shadowing** — the `Approval_pending` hard gate returns

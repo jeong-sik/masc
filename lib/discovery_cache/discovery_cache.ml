@@ -1,6 +1,6 @@
-(** Discovery_cache — cached wrapper over OAS Provider Discovery.
+(** Discovery_cache — cached wrapper over AGENT_CORE Provider Discovery.
 
-    All probing logic lives in OAS. This module adds:
+    All probing logic lives in AGENT_CORE. This module adds:
     - TTL-based caching (30s default)
     - Convenience queries (any_local_healthy, idle/busy counts)
     - Eio capability injection (set_env at server init)
@@ -79,20 +79,4 @@ let cache_age_seconds () =
 
 (* ── Convenience queries ─────────────────────────────────── *)
 
-let idle_slot_count () =
-  let endpoints = get_cached_or_refresh () in
-  List.fold_left (fun acc (e : endpoint_info) ->
-    match e.slots with
-    | Some s -> acc + s.idle
-    | None -> acc) 0 endpoints
-
-let busy_slot_count () =
-  let endpoints = get_cached_or_refresh () in
-  List.fold_left (fun acc (e : endpoint_info) ->
-    match e.slots with
-    | Some s -> acc + s.busy
-    | None -> acc) 0 endpoints
-
-(* ── JSON (delegates to OAS) ─────────────────────────────── *)
-
-let endpoint_to_json = Llm_provider.Discovery.endpoint_status_to_json
+(* ── JSON (delegates to AGENT_CORE) ─────────────────────────────── *)

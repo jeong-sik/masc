@@ -4,7 +4,7 @@ module Tool_result = Tool_result
 module Tool_dispatch = Tool_dispatch
 module Time_compat = Time_compat
 module Keeper_tool_execution = Masc.Keeper_tool_execution
-module Keeper_tools_oas = Masc.Keeper_tools_oas
+module Keeper_tools_agent_core = Masc.Keeper_tools_agent_core
 
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
@@ -48,6 +48,7 @@ let test_error_plain_string () =
   let start = Time_compat.now () in
   let r =
     Tool_result.error
+      ~failure_class:Tool_result.Runtime_failure
       ~tool_name:"masc_transition"
       ~start_time:start
       "Something went wrong"
@@ -63,6 +64,7 @@ let test_error_plain_string () =
 let test_plain_dispatch_failure_does_not_infer_from_message () =
   let r =
     Tool_result.error
+      ~failure_class:Tool_result.Runtime_failure
       ~tool_name:"masc_transition"
       ~start_time:0.0
       "[SystemError] IO error: Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)"
@@ -79,7 +81,7 @@ let test_plain_dispatch_failure_does_not_infer_from_message () =
 let test_plain_dispatch_failure_honors_explicit_failure_class () =
   let r =
     Tool_result.error
-      ~failure_class:(Some Tool_result.Transient_error)
+      ~failure_class:Tool_result.Dependency_unavailable
       ~tool_name:"masc_transition"
       ~start_time:0.0
       "[SystemError] IO error: Failed to acquire distributed lock for key: tasks:.backlog"
@@ -87,10 +89,57 @@ let test_plain_dispatch_failure_honors_explicit_failure_class () =
   Alcotest.(check bool) "failure" false (Tool_result.is_success r);
   Alcotest.(check string)
     "failure class"
-    "transient_error"
+    "dependency_unavailable"
     (match (Tool_result.failure_class r) with
      | Some cls -> Tool_result.tool_failure_class_to_string cls
      | None -> "none")
+;;
+
+let test_legacy_transient_failure_class_decodes_as_dependency () =
+  match Tool_result.tool_failure_class_of_string "transient_error" with
+  | Some Tool_result.Dependency_unavailable -> ()
+  | Some class_ ->
+    Alcotest.failf
+      "legacy class decoded as %s"
+      (Tool_result.tool_failure_class_to_string class_)
+  | None -> Alcotest.fail "legacy persisted failure class was lost"
+;;
+
+let test_legacy_derived_failure_class_decodes_and_writes_canonical () =
+  match
+    Tool_result.tool_failure_class_of_yojson
+      (`List [ `String "Transient_error" ])
+  with
+  | Ok Tool_result.Dependency_unavailable ->
+    Alcotest.(check string)
+      "new writes use the canonical constructor"
+      {|["Dependency_unavailable"]|}
+      (Tool_result.tool_failure_class_to_yojson
+         Tool_result.Dependency_unavailable
+       |> Yojson.Safe.to_string)
+  | Ok class_ ->
+    Alcotest.failf
+      "legacy derived class decoded as %s"
+      (Tool_result.tool_failure_class_to_string class_)
+  | Error error -> Alcotest.failf "legacy derived class was rejected: %s" error
+;;
+
+let test_persisted_terminal_effect_legacy_class_remains_readable () =
+  let persisted =
+    `Assoc
+      [ "kind", `String "terminal_effect_failed"
+      ; "failure_class", `String "transient_error"
+      ; "effect_disposition", `String "effect_outcome_unknown"
+      ; "diagnostic", `String "legacy receipt"
+      ]
+  in
+  match Keeper_internal_error.parse_masc_internal_error_json persisted with
+  | Some
+      (Keeper_internal_error.Terminal_effect_failed
+        { failure_class = Tool_result.Dependency_unavailable; _ }) ->
+    ()
+  | Some _ -> Alcotest.fail "legacy receipt decoded to the wrong internal error"
+  | None -> Alcotest.fail "legacy persisted terminal effect was dropped"
 ;;
 
 let test_exception_message_does_not_infer_failure_class () =
@@ -113,7 +162,7 @@ let test_exception_message_does_not_infer_failure_class () =
 let test_exception_boundary_honors_explicit_failure_class () =
   let r =
     Tool_result.of_exn
-      ~failure_class:Tool_result.Transient_error
+      ~failure_class:Tool_result.Dependency_unavailable
       ~tool_name:"masc_transition"
       ~start_time:0.0
       (Invalid_argument
@@ -122,7 +171,7 @@ let test_exception_boundary_honors_explicit_failure_class () =
   Alcotest.(check bool) "failure" false (Tool_result.is_success r);
   Alcotest.(check string)
     "failure class"
-    "transient_error"
+    "dependency_unavailable"
     (match (Tool_result.failure_class r) with
      | Some cls -> Tool_result.tool_failure_class_to_string cls
      | None -> "none")
@@ -134,6 +183,7 @@ let test_error_message_cannot_override_failure_class () =
   in
   let r =
     Tool_result.error
+      ~failure_class:Tool_result.Runtime_failure
       ~tool_name:"keeper_task_done"
       ~start_time:0.0
       message
@@ -250,7 +300,7 @@ let test_message_json_roundtrip () =
 let test_dispatch_structured () =
   (* Register a test handler *)
   register_test_tool ~tool_name:"__test_tool" ~handler:(fun ~name ~args:_ ->
-    Some (tool_ok ~tool_name:name {|{"result":"ok"}|}));
+    tool_ok ~tool_name:name {|{"result":"ok"}|});
   let token =
     match Tool_dispatch.mint_token ~name:"__test_tool" with
     | Ok t -> t
@@ -326,10 +376,19 @@ let test_make_err_of_exn_classifies_constructor () =
   | Tool_result.Failed f ->
     Alcotest.(check string)
       "Timeout classified as transient"
-      "transient_error"
+      "dependency_unavailable"
       (Tool_result.tool_failure_class_to_string f.class_)
   | Tool_result.Completed _ -> Alcotest.fail "make_err_of_exn returned Completed"
   | Tool_result.Deferred _ -> Alcotest.fail "make_err_of_exn returned Deferred"
+;;
+
+let test_cancelled_timeout_classifies_as_dependency_unavailable () =
+  Alcotest.(check string)
+    "wrapped timeout is not an operator cancellation"
+    "dependency_unavailable"
+    (Eio.Cancel.Cancelled Eio.Time.Timeout
+     |> Tool_result.classify_from_exception
+     |> Tool_result.tool_failure_class_to_string)
 ;;
 
 let test_disposition_preserves_typed_payload () =
@@ -364,16 +423,16 @@ let test_deferred_is_distinct_and_projects_one_way () =
   Alcotest.(check bool) "not completed" false (Tool_result.is_success result);
   Alcotest.(check bool) "deferred" true (Tool_result.is_deferred result);
   Alcotest.(check bool) "not failed" false (Tool_result.is_failed result);
-  match Masc.Tool_bridge.to_oas_typed_result result with
-  | Ok { Agent_sdk.Types._meta = Some (`Assoc fields); _ } ->
+  match Masc.Tool_bridge.to_agent_core_typed_result result with
+  | Ok { Agent_core.Types._meta = Some (`Assoc fields); _ } ->
     Alcotest.(check (option string))
-      "opaque OAS marker"
+      "opaque AGENT_CORE marker"
       (Some "deferred")
       (match List.assoc_opt "masc.tool_disposition" fields with
        | Some (`String value) -> Some value
        | Some _ | None -> None)
-  | Ok _ -> Alcotest.fail "deferred OAS projection omitted metadata"
-  | Error _ -> Alcotest.fail "deferred OAS projection became an error"
+  | Ok _ -> Alcotest.fail "deferred AGENT_CORE projection omitted metadata"
+  | Error _ -> Alcotest.fail "deferred AGENT_CORE projection became an error"
 ;;
 
 let test_disposition_wire_decoder_is_strict () =
@@ -492,6 +551,14 @@ let () =
             `Quick
             test_plain_dispatch_failure_honors_explicit_failure_class
         ; Alcotest.test_case
+            "legacy transient failure class remains readable"
+            `Quick
+            test_legacy_transient_failure_class_decodes_as_dependency
+        ; Alcotest.test_case
+            "legacy persisted terminal effect remains readable"
+            `Quick
+            test_persisted_terminal_effect_legacy_class_remains_readable
+        ; Alcotest.test_case
             "exception message does not infer failure_class"
             `Quick
             test_exception_message_does_not_infer_failure_class
@@ -536,6 +603,14 @@ let () =
             "make_err_of_exn classifies by constructor"
             `Quick
             test_make_err_of_exn_classifies_constructor
+        ; Alcotest.test_case
+            "cancelled timeout remains dependency unavailable"
+            `Quick
+            test_cancelled_timeout_classifies_as_dependency_unavailable
+        ; Alcotest.test_case
+            "legacy derived failure class is read-compatible"
+            `Quick
+            test_legacy_derived_failure_class_decodes_and_writes_canonical
         ; Alcotest.test_case
             "disposition preserves typed payload"
             `Quick

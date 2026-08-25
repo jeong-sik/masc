@@ -1,0 +1,19 @@
+name = "masc_fusion_status"
+description = """
+Read the status of out-of-band fusion deliberations started by masc_fusion. \
+With no argument, lists tracked runs (in-progress and recently completed); \
+with a run_id, returns that single run. Each run reports keeper, preset, \
+started_at (unix seconds), and status (running | completed | failed); failed \
+runs also carry error and failure_code. Prefer waiting for the completion \
+wake over polling this tool — the result reaches you without it. Read-only — \
+does not start a deliberation. In-memory and server-lifetime: runs do not \
+survive a restart."""
+additional_properties = false
+
+[[params]]
+name = "run_id"
+type = "string"
+description = """
+Optional fusion run id (the run_id returned by masc_fusion). When given, \
+returns that single run's status; when omitted, lists every tracked run \
+(in-progress and recently completed)."""

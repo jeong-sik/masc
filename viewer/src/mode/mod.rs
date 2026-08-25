@@ -301,10 +301,6 @@ impl Plugin for ModePlugin {
             .add_systems(OnExit(ViewerMode::Social), exit_masc_panel)
             .add_systems(OnEnter(ViewerMode::Experiment), enter_masc_panel)
             .add_systems(OnExit(ViewerMode::Experiment), exit_masc_panel)
-            .add_systems(
-                Update,
-                refresh_trpg_widget_status.run_if(in_state(ViewerMode::Trpg)),
-            )
             .add_systems(Update, poll_mode_transition)
             .add_systems(Update, sync_masc_panel_connection_status);
     }
@@ -334,7 +330,6 @@ fn on_enter_home(buffer: Res<ModeTransitionBuffer>) {
         // Bind back-to-home button
         bind_back_button(&doc, &buffer.pending);
         bind_debug_controls(&doc);
-        bind_new_game_controls(&doc);
 
         // Hide loading screen once Bevy is initialized
         if let Some(loading) = doc.get_element_by_id("loading-screen") {
@@ -392,7 +387,6 @@ fn enter_trpg() {
         clear_trpg_dom(&doc);
         bind_debug_controls(&doc);
         bind_view_options(&doc);
-        bind_new_game_controls(&doc);
         let workspace = crate::config::current_workspace_id();
         set_current_workspace_id(&doc, &workspace);
         bind_workspace_controls(&doc);
@@ -1375,67 +1369,9 @@ fn bind_dedup_status_toggle(doc: &web_sys::Document) {
     cb.forget();
 }
 
-#[cfg(target_arch = "wasm32")]
-pub(super) fn generate_workspace_id() -> String {
-    let millis = js_sys::Date::now() as i64;
-    let rand = (js_sys::Math::random() * 1000.0).floor() as i64;
-    format!("adventure-{}-{:03}", millis, rand)
-}
 
-#[cfg(target_arch = "wasm32")]
-pub(super) fn set_new_game_status(doc: &web_sys::Document, message: &str) {
-    if let Some(el) = doc.get_element_by_id("new-game-status") {
-        let escaped = html_escape(message);
-        if el.inner_html() == escaped {
-            return;
-        }
-        el.set_inner_html(&escaped);
-    }
-}
 
-#[cfg(target_arch = "wasm32")]
-pub(super) fn set_new_game_preflight_status(doc: &web_sys::Document, message: &str) {
-    if let Some(el) = doc.get_element_by_id("new-game-preflight") {
-        el.set_inner_html(&format!(
-            "<span class=\"preflight-muted\">{}</span>",
-            html_escape(message)
-        ));
-    }
-}
 
-#[cfg(target_arch = "wasm32")]
-fn set_new_game_preflight_rows(doc: &web_sys::Document, rows: &[transport_classify::PreflightRow]) {
-    if let Some(el) = doc.get_element_by_id("new-game-preflight") {
-        let html = rows
-            .iter()
-            .map(|row| {
-                let state_text = if row.ok { "OK" } else { "FAIL" };
-                let state_class = if row.ok {
-                    "preflight-state preflight-ok"
-                } else {
-                    "preflight-state preflight-fail"
-                };
-                let hint_html = match &row.hint {
-                    Some(h) if !row.ok => format!(
-                        "<div class=\"preflight-hint\">{}</div>",
-                        html_escape(h)
-                    ),
-                    _ => String::new(),
-                };
-                format!(
-                    "<div class=\"preflight-row\"><span class=\"{state_class}\">{state_text}</span><span>{label}: {detail}</span>{hint_html}</div>",
-                    state_class = state_class,
-                    state_text = state_text,
-                    label = html_escape(&row.label),
-                    detail = html_escape(&row.detail),
-                    hint_html = hint_html,
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("");
-        el.set_inner_html(&html);
-    }
-}
 
 #[cfg(target_arch = "wasm32")]
 pub(super) fn set_current_workspace_id(doc: &web_sys::Document, workspace_id: &str) {
@@ -1446,7 +1382,6 @@ pub(super) fn set_current_workspace_id(doc: &web_sys::Document, workspace_id: &s
     }
     remember_recent_workspace(&workspace);
     sync_workspace_controls(doc, &workspace);
-    refresh_trpg_ops_snapshots(doc);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1619,128 +1554,8 @@ pub(super) fn unique_non_empty(mut values: Vec<String>) -> Vec<String> {
     out
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
-pub(super) fn assign_keepers_to_actor_ids(
-    actor_ids: &[String],
-    dm_keeper: &str,
-    player_keepers: &[String],
-) -> Result<Vec<(String, String)>, String> {
-    if actor_ids.is_empty() {
-        return Err("세션 party actor_id를 읽지 못했습니다.".to_string());
-    }
-    if player_keepers.len() < actor_ids.len() {
-        return Err(format!(
-            "player keeper가 부족합니다. actor {}명에 keeper {}명만 선택되었습니다.",
-            actor_ids.len(),
-            player_keepers.len()
-        ));
-    }
 
-    let mut assigned = Vec::with_capacity(actor_ids.len());
-    let mut used_keepers = vec![dm_keeper.trim().to_string()];
 
-    for (idx, actor_id) in actor_ids.iter().enumerate() {
-        let keeper = player_keepers
-            .get(idx)
-            .map(|name| name.trim().to_string())
-            .filter(|name| !name.is_empty())
-            .ok_or_else(|| format!("actor {}에 할당할 keeper가 비어 있습니다.", actor_id))?;
-
-        if keeper == dm_keeper {
-            return Err(format!(
-                "DM keeper와 player keeper는 중복될 수 없습니다: {}",
-                keeper
-            ));
-        }
-        if used_keepers.iter().any(|name| name == &keeper) {
-            return Err(format!(
-                "player keeper는 모두 유일해야 합니다. 중복: {}",
-                keeper
-            ));
-        }
-        used_keepers.push(keeper.clone());
-        assigned.push((actor_id.clone(), keeper));
-    }
-
-    Ok(assigned)
-}
-
-#[cfg(target_arch = "wasm32")]
-fn format_round_plan_for_display(dm_keeper: &str, players: &[(String, String)]) -> String {
-    let mut lines = vec![format!("DM: {}", dm_keeper)];
-    if players.is_empty() {
-        lines.push("Players: -".to_string());
-        return lines.join(" · ");
-    }
-    let player_text = players
-        .iter()
-        .map(|(actor_id, keeper)| format!("{}→{}", actor_id, keeper))
-        .collect::<Vec<_>>()
-        .join(", ");
-    lines.push(format!("Players: {}", player_text));
-    lines.join(" · ")
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) fn set_round_run_fields(
-    doc: &web_sys::Document,
-    dm_keeper: &str,
-    actor_ids: &[String],
-    player_map: &std::collections::HashMap<String, String>,
-) {
-    if let Some(el) = doc
-        .get_element_by_id("round-run-dm")
-        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
-    {
-        el.set_value(dm_keeper);
-    }
-    if let Some(el) = doc
-        .get_element_by_id("round-run-phase")
-        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
-    {
-        el.set_value("round");
-    }
-    if let Some(el) = doc
-        .get_element_by_id("round-run-timeout")
-        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
-    {
-        el.set_value("45");
-    }
-    if let Some(el) = doc
-        .get_element_by_id("round-run-lang")
-        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
-    {
-        el.set_value("ko");
-    }
-
-    let player_pairs = actor_ids
-        .iter()
-        .filter_map(|actor_id| player_map.get(actor_id).map(|keeper| (actor_id, keeper)))
-        .map(|(actor_id, keeper)| format!("{}={}", actor_id, keeper))
-        .collect::<Vec<_>>();
-    if let Some(el) = doc
-        .get_element_by_id("round-run-players")
-        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
-    {
-        el.set_value(&player_pairs.join(","));
-    }
-
-    let summary_pairs = actor_ids
-        .iter()
-        .filter_map(|actor_id| {
-            player_map
-                .get(actor_id)
-                .map(|keeper| (actor_id.clone(), keeper.clone()))
-        })
-        .collect::<Vec<(String, String)>>();
-    if let Some(summary) = doc.get_element_by_id("round-run-summary") {
-        summary.set_text_content(Some(&format_round_plan_for_display(
-            dm_keeper,
-            &summary_pairs,
-        )));
-        let _ = summary.set_attribute("style", "display:block");
-    }
-}
 
 mod transport_classify;
 
@@ -1757,21 +1572,6 @@ use workspace_hub::{
     refresh_workspaces_from_server, remember_recent_workspace, sync_workspace_controls,
 };
 
-#[path = "../../../archive/trpg/viewer/trpg_controls.rs"]
-#[cfg(target_arch = "wasm32")]
-mod trpg_controls;
-#[cfg(target_arch = "wasm32")]
-use trpg_controls::{
-    actor_admin_set_status, actor_admin_workspace_id, bind_new_game_controls,
-    refresh_actor_admin_list, refresh_trpg_ops_snapshots,
-};
-
-/// Refresh TRPG widget status counters (narrative, party, history, dedup).
-/// On non-wasm targets this is a no-op; on wasm32 it delegates to `trpg_controls`.
-fn refresh_trpg_widget_status() {
-    #[cfg(target_arch = "wasm32")]
-    trpg_controls::refresh_trpg_widget_status();
-}
 
 #[cfg(target_arch = "wasm32")]
 fn set_element_text(doc: &web_sys::Document, id: &str, text: &str) {
@@ -1946,28 +1746,9 @@ fn seed_masc_panel_snapshot(mode: ViewerMode, doc: web_sys::Document) {
     });
 }
 
-#[cfg(target_arch = "wasm32")]
-fn count_mode_events(mode: ViewerMode, event_log: &crate::sse::masc_bridge::MascEventLog) -> usize {
-    match mode {
-        ViewerMode::Monitor => event_log.entries.len(),
-        ViewerMode::Experiment => event_log
-            .entries
-            .iter()
-            .filter(|entry| entry.event_type.starts_with("experiment_"))
-            .count(),
-        ViewerMode::Social => event_log
-            .entries
-            .iter()
-            .filter(|entry| entry.event_type == "broadcast")
-            .count(),
-        _ => 0,
-    }
-}
-
 fn sync_masc_panel_connection_status(
     mode: Res<State<ViewerMode>>,
     connection: Res<ConnectionStatus>,
-    event_log: Option<Res<crate::sse::masc_bridge::MascEventLog>>,
 ) {
     #[cfg(target_arch = "wasm32")]
     {
@@ -1982,27 +1763,15 @@ fn sync_masc_panel_connection_status(
             return;
         };
 
-        let mode_event_count = event_log
-            .as_ref()
-            .map(|log| count_mode_events(current_mode, log))
-            .unwrap_or(0);
-
         let (status_class, text) = match &*connection {
+            // No event count: the MASC SSE stream that fed it opened routes the
+            // server does not serve, and its plumbing is gone (#27343). The
+            // panels are seeded by their own HTTP snapshot fetches instead.
             ConnectionStatus::Connected => match current_mode {
-                ViewerMode::Social if mode_event_count == 0 => {
+                ViewerMode::Social => {
                     ("status-connected", "연결됨 · 게시글 폴링 중".to_string())
                 }
-                ViewerMode::Social => (
-                    "status-connected",
-                    format!("연결됨 · 게시글 폴링 + 알림 {}건", mode_event_count),
-                ),
-                _ if mode_event_count == 0 => {
-                    ("status-connected", "연결됨 · 이벤트 대기 중".to_string())
-                }
-                _ => (
-                    "status-connected",
-                    format!("연결됨 · 이벤트 {}건 수신", mode_event_count),
-                ),
+                _ => ("status-connected", "연결됨 · 이벤트 대기 중".to_string()),
             },
             ConnectionStatus::Connecting => ("status-connecting", "연결 중...".to_string()),
             ConnectionStatus::Reconnecting(attempt, max) => (
@@ -2017,7 +1786,7 @@ fn sync_masc_panel_connection_status(
         el.set_text_content(Some(&text));
     }
 
-    let _ = (&mode, &connection, &event_log);
+    let _ = (&mode, &connection);
 }
 
 // ─── Generic MASC Panel Enter/Exit ───────────
@@ -2144,41 +1913,4 @@ mod tests {
         assert_eq!(ViewerMode::Trpg.panel_id(), None);
     }
 
-    #[test]
-    fn assign_keepers_success_with_unique_names() {
-        let actors = vec!["p01".to_string(), "p02".to_string()];
-        let keepers = vec!["grimja".to_string(), "luna".to_string()];
-        let assigned =
-            assign_keepers_to_actor_ids(&actors, "dm-keeper", &keepers).expect("assignment ok");
-        assert_eq!(
-            assigned,
-            vec![
-                ("p01".to_string(), "grimja".to_string()),
-                ("p02".to_string(), "luna".to_string())
-            ]
-        );
-    }
-
-    #[test]
-    fn assign_keepers_fails_when_players_are_missing() {
-        let actors = vec!["p01".to_string(), "p02".to_string(), "p03".to_string()];
-        let keepers = vec!["grimja".to_string(), "luna".to_string()];
-        let err = assign_keepers_to_actor_ids(&actors, "dm-keeper", &keepers)
-            .expect_err("must fail on keeper shortage");
-        assert!(err.contains("부족"), "unexpected error: {err}");
-    }
-
-    #[test]
-    fn assign_keepers_fails_on_duplicate_or_dm_collision() {
-        let actors = vec!["p01".to_string(), "p02".to_string()];
-        let dup = vec!["grimja".to_string(), "grimja".to_string()];
-        let err_dup =
-            assign_keepers_to_actor_ids(&actors, "dm-keeper", &dup).expect_err("duplicate keeper");
-        assert!(err_dup.contains("중복"), "unexpected error: {err_dup}");
-
-        let dm_collision = vec!["dm-keeper".to_string(), "luna".to_string()];
-        let err_dm = assign_keepers_to_actor_ids(&actors, "dm-keeper", &dm_collision)
-            .expect_err("dm collision must fail");
-        assert!(err_dm.contains("DM keeper"), "unexpected error: {err_dm}");
-    }
 }

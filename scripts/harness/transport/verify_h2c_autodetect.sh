@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 # E2E: Verify HTTP/1.1 and h2c auto-detection.
 #
-# When MASC_USE_H2=1, the server should accept both HTTP/2 (h2c)
-# and HTTP/1.1 connections on the same port via MSG_PEEK-based
-# protocol detection.
+# In auto mode the server accepts both HTTP/2 prior-knowledge (h2c) and
+# HTTP/1.1 connections on the same port via protocol detection.
 #
 # Tests:
 #   1. HTTP/1.1 health check works (baseline)
-#   2. HTTP/2 h2c health check works (if MASC_USE_H2=1)
-#   3. Both protocols on same port (if serve_auto is active)
+#   2. HTTP/2 h2c health check works
+#   3. The runtime reports the exact auto listener mode
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/harness/transport/common.sh
@@ -19,6 +18,33 @@ HARNESS_NAME="h2c-autodetect"
 require_server
 
 echo "--- h2c Auto-detect E2E ---"
+
+token="$(transport_auth_token)"
+auth_args=()
+if [[ -n "$token" ]]; then
+  auth_args=(-H "Authorization: Bearer ${token}")
+fi
+transport_health_json=""
+listener_mode=""
+for _ in {1..25}; do
+  transport_health_json="$(
+    curl -fsS --max-time 5 "${auth_args[@]}" \
+      "${MASC_HTTP_BASE_URL}/api/v1/dashboard/transport-health" 2>/dev/null || true
+  )"
+  listener_mode="$(
+    jq -er '.http2.listener_mode' <<<"$transport_health_json" 2>/dev/null || true
+  )"
+  if [[ -n "$listener_mode" ]]; then
+    break
+  fi
+  sleep 1
+done
+if [[ "$listener_mode" != "auto" ]]; then
+  fail "HTTP listener mode" "expected auto, got ${listener_mode:-missing}"
+  summary
+  exit 1
+fi
+pass "HTTP listener reports auto mode"
 
 # Test 1: HTTP/1.1 always works
 if curl -sf --http1.1 "${MASC_HTTP_BASE_URL}/health" >/dev/null 2>&1; then
@@ -34,19 +60,24 @@ h2pk_proto=$(curl -sf -o /dev/null -w '%{http_version}' --http2-prior-knowledge 
 if [ "$h2pk_proto" = "2" ] || [ "$h2pk_proto" = "2.0" ]; then
   pass "h2c prior-knowledge health check (proto: ${h2pk_proto})"
 else
-  skip "h2c prior-knowledge" "proto=${h2pk_proto} (MASC_USE_H2 may not be set)"
+  fail "h2c prior-knowledge" "proto=${h2pk_proto}"
 fi
 
 # Test 3: MCP POST over h2c (the actual production path)
-h2_mcp_code=$(curl -sf --max-time 5 --http2-prior-knowledge -X POST "${MASC_HTTP_BASE_URL}/mcp" \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json' \
-  -d '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"h2c-harness","version":"1.0"}},"id":1}' \
-  -o /dev/null -w '%{http_code}' 2>&1 || echo "0")
+if ! h2_mcp_code="$(
+  curl -sS --max-time 5 --http2-prior-knowledge -X POST "${MASC_HTTP_BASE_URL}/mcp" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    "${auth_args[@]}" \
+    -d '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"h2c-harness","version":"1.0"}},"id":1}' \
+    -o /dev/null -w '%{http_code}' 2>/dev/null
+)"; then
+  h2_mcp_code="transport_error"
+fi
 if [ "$h2_mcp_code" = "200" ]; then
   pass "MCP initialize over h2c (status: ${h2_mcp_code})"
 else
-  skip "MCP over h2c" "status=${h2_mcp_code} (h2c may not be enabled)"
+  fail "MCP over h2c" "status=${h2_mcp_code}"
 fi
 
 # Test 4: HTTP/1.1 SSE endpoint (most critical path)

@@ -9,15 +9,13 @@
     2. For each accepted [Message_create] event, looks up the
        channel→keeper binding
        ({!Channel_gate_discord_state.keeper_for_channel_result}), runs the
-       keeper turn through {!Channel_gate.handle_inbound_streaming},
-       projects redacted text snapshots by posting/editing one Discord
-       reply, and falls back to
-       {!Channel_gate_discord_state.send_message} when streaming never
-       starts or fails.
+       message through the Channel Gate into a durable Keeper operation.
+       Operation progress projects redacted text snapshots by posting/editing
+       one Discord reply, then completes connector delivery before the
+       operation becomes terminal.
 
-    Always-on by design: there is no [MASC_DISCORD_BUILTIN]-style
-    toggle. The legacy Python sidecar is gone — there is no
-    fallback path to switch back to. If
+    Always-on by design: there is no toggle and no fallback transport to
+    switch to. If
     [DISCORD_BOT_TOKEN] is unset the gateway logs a warning and
     skips startup; the server still boots normally.
 

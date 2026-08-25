@@ -1,0 +1,38 @@
+{
+  "captured_at": "2026-08-19T06:30:00Z",
+  "purpose": "Goal 행 live 축 — goal 스토어와 이벤트 로그 실측",
+  "sources": {
+    "snapshot": "<base-path>/.masc/goals.json",
+    "events": "<base-path>/.masc/goal_events.jsonl"
+  },
+  "snapshot": {
+    "goals": 44,
+    "phase_distribution": { "completed": 16, "dropped": 11, "executing": 9, "blocked": 8 },
+    "goals_with_owner": 18,
+    "fields": ["id", "title", "phase", "owner", "priority", "metric", "target_value", "due_date", "parent_goal_id", "created_at", "updated_at", "last_review_at", "last_review_note"]
+  },
+  "events": {
+    "total": 75,
+    "by_type": { "goal_phase": 57, "goal_owner": 18 },
+    "distinct_goals": 53,
+    "range": "2026-07-28T03:57Z ~ 2026-08-18T06:52Z",
+    "last_7_days": 41,
+    "phase_actors": { "sangsu": 32, "full-cycle-probe": 6, "admin": 5, "rondo": 3, "codex-mcp-client": 3 },
+    "owner_assignees": { "sangsu": 9, "taskmaster": 1, "kidsnote": 1, "analyst": 1, "rw-e0-collab-202608-coord": 1 }
+  },
+  "transition_history_gap": {
+    "goals_with_phase_events": 48,
+    "goals_with_more_than_one_phase_event": 3,
+    "observed_transitions": {
+      "executing->completed": 3,
+      "dropped->executing": 2,
+      "paused->executing": 1,
+      "completed->dropped": 1,
+      "completed->completed": 1,
+      "completed->executing": 1
+    },
+    "reading": "phase 이벤트 payload는 {phase, actor}뿐이고 previous_phase가 없다. goal 48개 중 45개는 phase 이벤트가 단 1건이라, 그 goal이 어떤 경로로 그 상태에 도달했는지 이벤트만으로는 복원되지 않는다. 전이 6종은 phase 이벤트가 2건 이상인 goal 3개에서만 나온 것."
+  },
+  "verdict": "live 축 부분 충족: goal 44개가 4개 phase에 분포하고 owner가 18개에 배정돼 있으며, 최근 7일에 이벤트 41건이 기록될 만큼 살아 있는 경로다. 다만 phase 전이 이력은 대부분의 goal에서 복원 불가 — 상태 변화 추적이 필요한 검증(예: reconciliation 정합)은 이 스토어만으로 못 한다.",
+  "method_note": "goal_phase payload에는 previous_phase 필드가 없다. 있다고 가정하면 전이가 전부 (None -> X)로 잡혀 '초기 진입 26건' 같은 잘못된 그림이 나온다."
+}

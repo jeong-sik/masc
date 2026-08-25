@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 module Workspace = Workspace_core
 
 (** Tool_task - Core task CRUD operations
@@ -42,13 +25,11 @@ type context = {
 type task_owner_hooks =
   { is_keeper_agent_identity : Workspace.config -> agent_name:string -> bool
   ; sync_current_task_binding : Workspace.config -> agent_name:string -> unit
-  ; active_goal_phases_for_agent : Workspace.config -> agent_name:string -> string list
   }
 
 let default_task_owner_hooks =
   { is_keeper_agent_identity = (fun _ ~agent_name:_ -> false)
   ; sync_current_task_binding = (fun _ ~agent_name:_ -> ())
-  ; active_goal_phases_for_agent = (fun _ ~agent_name:_ -> [])
   }
 ;;
 
@@ -61,11 +42,6 @@ open Tool_args
 let task_log_warn ~task_id fmt =
   Stdlib.Format.ksprintf
     (fun message -> Log.Task.warn "task_id=%s %s" task_id message)
-    fmt
-
-let task_log_error ~task_id fmt =
-  Stdlib.Format.ksprintf
-    (fun message -> Log.Task.error "task_id=%s %s" task_id message)
     fmt
 
 let task_agent_log_warn ~agent_name fmt =
@@ -89,7 +65,7 @@ let result_to_response ~tool_name ~start_time = function
   | Ok msg -> Tool_result.ok ~tool_name ~start_time msg
   | Error e ->
       Tool_result.error
-        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~failure_class:Tool_result.Workflow_rejection
         ~tool_name ~start_time
         (Masc_domain.masc_error_to_string e)
 
@@ -146,14 +122,21 @@ include Tool_task_contract_gate
 
 let handle_add_task ?created_by ~tool_name ~start_time ctx args =
   let valid_keys =
-    [ "title"; "priority"; "description"; "goal_id"; "contract"; "predecessor_task_id" ]
+    [ "title"
+    ; "priority"
+    ; "description"
+    ; "goal_id"
+    ; "contract"
+    ; "predecessor_task_id"
+    ; "skills"
+    ]
   in
   let unknown = unknown_args ~valid_keys args in
   if Stdlib.List.length unknown > 0 then
     (* RFC-0189: schema rejection — operator passed unknown
        argument names. [Workflow_rejection]. *)
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       (Printf.sprintf
         "Unknown argument(s): %s. Valid: %s"
@@ -176,6 +159,16 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
     | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
     | _ -> None
   in
+  (* Skill directory names under <base-path>/.masc/skills/. Blank entries are
+     dropped rather than stored: a name that trims to nothing can never match
+     a directory, and keeping it would put an empty item in the prompt line
+     the keeper reads. *)
+  let skills =
+    Safe_ops.json_string_list "skills" args
+    |> List.filter_map (fun name ->
+      let trimmed = String.trim name in
+      if String.equal trimmed "" then None else Some trimmed)
+  in
   let contract_result = parse_task_contract args in
   (* BUG-009/010: Validate title and priority *)
   let trimmed_title = String.trim title in
@@ -183,12 +176,12 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
      caller-input violations. [Workflow_rejection]. *)
   if String.equal trimmed_title "" then
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       "Task title cannot be empty or whitespace-only"
   else if priority < 1 || priority > 5 then
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       (Printf.sprintf "Priority must be between 1 and 5, got %d" priority)
   else if Option.is_some goal_id
@@ -202,7 +195,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
                        String.equal goal.id (Option.value ~default:"" goal_id)))
   then
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       (* DET-OK: same guarded branch — goal_id is [Some _]. *)
       (Printf.sprintf "Unknown goal_id '%s'" (Option.value ~default:"" goal_id))
@@ -210,7 +203,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
     match contract_result with
     | Error error ->
         Tool_result.error
-          ~failure_class:(Some Tool_result.Workflow_rejection)
+          ~failure_class:Tool_result.Workflow_rejection
           ~tool_name ~start_time error
     | Ok contract ->
         let add_result =
@@ -222,6 +215,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
           Workspace.add_task_with_result ?contract
             ?goal_id
             ?predecessor_task_id
+            ~skills
             ~created_by ctx.config ~title:trimmed_title
             ~priority ~description
         in
@@ -245,7 +239,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
              ()
          | Error err ->
            Tool_result.error
-             ~failure_class:(Some Tool_result.Workflow_rejection)
+             ~failure_class:Tool_result.Workflow_rejection
              ~tool_name
              ~start_time
              (Workspace.add_task_error_to_string err))
@@ -259,7 +253,7 @@ let handle_set_goal ~tool_name ~start_time ctx args =
   let unknown = unknown_args ~valid_keys args in
   if Stdlib.List.length unknown > 0 then
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       (Printf.sprintf "Unknown argument(s): %s. Valid: %s"
         (String.concat ", " unknown)
@@ -269,12 +263,12 @@ let handle_set_goal ~tool_name ~start_time ctx args =
     let goal_id = String.trim (get_string args "goal_id" "") in
     if String.equal task_id "" then
       Tool_result.error
-        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~failure_class:Tool_result.Workflow_rejection
         ~tool_name ~start_time
         "task_id is required and cannot be empty"
     else if String.equal goal_id "" then
       Tool_result.error
-        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~failure_class:Tool_result.Workflow_rejection
         ~tool_name ~start_time
         "goal_id is required and cannot be empty"
     else (
@@ -292,7 +286,7 @@ let handle_set_goal ~tool_name ~start_time ctx args =
           ()
       | Error err ->
         Tool_result.error
-          ~failure_class:(Some Tool_result.Workflow_rejection)
+          ~failure_class:Tool_result.Workflow_rejection
           ~tool_name ~start_time
           (Task_goal_assignment.set_task_goal_error_to_string err))
 
@@ -304,7 +298,7 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
   in
   if Stdlib.List.length tasks_json = 0 then
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       "tasks array is empty or missing"
   else
@@ -320,14 +314,11 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
     let contract =
       match Json_util.assoc_member_opt "contract" t with
       | None | Some `Null -> Ok None
-      | Some (`Assoc _ as json) -> (
-          match Masc_domain.task_contract_of_yojson json with
-          | Ok contract -> Ok (Some contract)
-          | Error error ->
-              Error
-                (Printf.sprintf "item[%d]: invalid contract payload: %s" idx
-                   error))
-      | Some _ -> Error (Printf.sprintf "item[%d]: contract must be an object" idx)
+      | Some json ->
+        parse_task_contract_object json
+        |> Result.map Option.some
+        |> Result.map_error (fun error ->
+          Printf.sprintf "item[%d]: invalid contract payload: %s" idx error)
     in
     if String.equal title "" then
       Error (Printf.sprintf "item[%d]: title cannot be empty" idx)
@@ -359,7 +350,7 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
   let errors = List.filter_map (function Error e -> Some e | Ok _ -> None) validated in
   if Stdlib.List.length errors > 0 then
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       (Printf.sprintf "Validation failed:\n%s" (String.concat "\n" errors))
   else
@@ -390,7 +381,7 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
          ()
      | Error err ->
        Tool_result.error
-         ~failure_class:(Some Tool_result.Workflow_rejection)
+         ~failure_class:Tool_result.Workflow_rejection
          ~tool_name
          ~start_time
          (Workspace.batch_add_tasks_error_to_string err))
@@ -404,7 +395,7 @@ let handle_claim ~tool_name ~start_time ctx args =
      agent_name alone; gate added no real authorization. *)
   if Option.is_some (Json_util.assoc_member_opt "agent_role" args) then
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       "agent_role is no longer supported"
   else
@@ -428,50 +419,17 @@ let handle_claim ~tool_name ~start_time ctx args =
    | Error e -> task_log_warn ~task_id "task claim failed for %s: %s" task_id (Masc_domain.masc_error_to_string e));
   result_to_response ~tool_name ~start_time result
 
-(* Look up the current Goal_store phase for each goal id in the agent's
-   active_goal_ids. Returns a list of "<goal_id>=<phase>" strings, e.g.
-   ["goal-1777967605002-004b=executing"; "goal-other=completed"].
-
-   This is consumed only by [format_no_eligible] below, to give the LLM
-   the *current* goal phase instead of letting it infer "completed goal"
-   from the bare excluded_count. See PR body for the velvet-hammer
-   misdiagnosis that motivated this surface. *)
-let active_goal_phases_for_agent ctx =
-  (current_task_owner_hooks ()).active_goal_phases_for_agent
-    ctx.config
-    ~agent_name:ctx.agent_name
-
 let no_eligible_diagnostics_json =
   Tool_task_no_eligible.no_eligible_diagnostics_json
 let no_eligible_exclusion_summary =
   Tool_task_no_eligible.no_eligible_exclusion_summary
 
-let format_no_eligible
-      ctx
-      ~excluded_count
-      ~scope_excluded_count
-  =
-  let diagnostics =
-    no_eligible_exclusion_summary ~scope_excluded_count
-  in
-  match active_goal_phases_for_agent ctx with
-  | [] ->
-      Printf.sprintf
-        "No eligible tasks available (blocked/excluded: %d). This agent has no \
-         active_goal_ids — every open task is out of scope. Operator should \
-         configure active_goal_ids via the owner runtime. %s"
-        excluded_count
-        diagnostics
-  | phases ->
-      Printf.sprintf
-        "No eligible tasks available (blocked/excluded: %d). active goal \
-         phases: [%s]. NOTE: excluded ≠ completed. If every phase above is \
-         'executing', the cause is goal-scope mismatch — open tasks are \
-         scoped to a goal not in this agent's active_goal_ids — not goal \
-         completion. %s"
-        excluded_count
-        (String.concat ", " phases)
-        diagnostics
+let format_no_eligible ctx ~excluded_count ~scope_excluded_count =
+  ignore ctx;
+  Printf.sprintf
+    "No eligible tasks available (blocked/excluded: %d). %s"
+    excluded_count
+    (no_eligible_exclusion_summary ~scope_excluded_count)
 
 let handle_claim_next ~tool_name ~start_time ctx _args =
   (* #18965 — removed [is_agent_session_bound] hard gate (same rationale as
@@ -518,43 +476,6 @@ let handle_claim_next ~tool_name ~start_time ctx _args =
        "no claimable task", "agent not allowed", "permission denied"
        — all caller-actionable. [Workflow_rejection]. *)
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       (Printf.sprintf "Error: %s" e)
-
-let handle_release ~tool_name ~start_time ctx args =
-  let task_id = get_string args "task_id" "" in
-  match validate_task_id task_id with
-  | Error e -> result_to_response ~tool_name ~start_time (Error e)
-  | Ok task_id ->
-  let expected_version = get_int_opt args "expected_version" in
-  let tasks = Workspace.get_tasks_raw ctx.config in
-  let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
-  let handoff_context =
-    parse_handoff_context ~agent_name:ctx.agent_name
-      ~action:Masc_domain.Release args
-  in
-  (match handoff_context with
-   | Error error ->
-       (* RFC-0189: handoff_context parse error from caller payload. *)
-       Tool_result.error
-         ~failure_class:(Some Tool_result.Workflow_rejection)
-         ~tool_name ~start_time error
-   | Ok handoff_context ->
-       if strict_release_requires_handoff task_opt && Option.is_none handoff_context
-       then
-         Tool_result.error
-           ~failure_class:(Some Tool_result.Workflow_rejection)
-           ~tool_name ~start_time
-           "Strict task release requires handoff_context.summary"
-       else
-         let result =
-           Workspace.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
-             ?expected_version ?handoff_context ()
-         in
-         Result.iter
-           (fun _ ->
-              sync_owner_current_task_binding ctx;
-              sync_planning_current_task_with_owned_task ctx)
-           result;
-         result_to_response ~tool_name ~start_time result)

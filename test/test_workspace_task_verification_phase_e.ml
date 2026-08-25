@@ -20,7 +20,9 @@ let dummy_task ?contract ?handoff_context () : Masc_domain.task =
   ; handoff_context
   ; cycle_count = 0
   ; reclaim_policy = None
+  ; execution_links = Masc_domain.no_execution_links
   ; do_not_reclaim_reason = None
+  ; skills = []
   }
 
 let test_analysis_only_with_plain_notes_keeps_notes () =
@@ -53,7 +55,6 @@ let test_contracted_task_keeps_requirements_out_of_submitted_refs () =
     ; required_evidence = [ "test_keeper_lifecycle PASS" ]
     ; inspect_gate_evidence = []
     ; verify_gate_evidence = [ "PR #18810 merged" ]
-    ; links = { operation_id = None; session_id = None }
     }
   in
   let task = dummy_task ~contract () in

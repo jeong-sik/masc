@@ -8,23 +8,9 @@ let trim_opt = Env_config_core.trim_opt
 let configured_bind_host () =
   Env_config_core.masc_host ()
 
-let ipaddr_is_loopback = function
-  | Ipaddr.V4 addr ->
-      let octets = Ipaddr.V4.to_octets addr in
-      String.length octets = 4 && Char.code octets.[0] = 127
-  | Ipaddr.V6 addr ->
-      Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
-
-let ipaddr_is_unspecified = function
-  | Ipaddr.V4 addr -> Ipaddr.V4.compare addr Ipaddr.V4.any = 0
-  | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
-
 let is_loopback_host = Masc_network_defaults.is_loopback_host
 
-let is_unspecified_host host =
-  match Ipaddr.of_string (String.trim host) with
-  | Ok ip -> ipaddr_is_unspecified ip
-  | Error _ -> false
+let is_unspecified_host = Masc_network_defaults.is_unspecified_host
 
 let base_url_has_non_loopback_host () =
   match Env_config_core.masc_http_base_url_result () with
@@ -38,9 +24,6 @@ let http_auth_strict_enabled () =
   Env_config.Transport.http_auth_strict_env_enabled ()
   || not (is_loopback_host (configured_bind_host ()))
   || base_url_has_non_loopback_host ()
-
-let http_auth_bind_host () =
-  configured_bind_host ()
 
 let http_auth_bind_is_loopback () =
   is_loopback_host (configured_bind_host ())
@@ -143,10 +126,6 @@ let observer_sse_query_credential_from_request request =
             | Some token -> Parsed_credential token
             | None -> Malformed_credential raw))
   | _ -> Absent_credential
-
-let observer_sse_query_token_from_request request =
-  observer_sse_query_credential_from_request request
-  |> token_of_request_auth_credential
 
 let observer_sse_auth_credential_from_request request =
   match request_auth_credential_from_request request with
@@ -541,9 +520,6 @@ let sanitized_dashboard_actor_for_request ~base_path request =
       if String.equal sanitized "" then None else Some sanitized
   | None -> None
 
-let split_csv_nonempty raw =
-  raw |> String.split_on_char ',' |> List.filter_map String_util.trim_nonempty
-
 type browser_origin_admission =
   | Same_origin
   | Allowed_dev_origin
@@ -558,30 +534,35 @@ type request_origin_admission =
   | Multiple_origins
   | Malformed_origin
 
-(* Re-reads the env var on each call so MASC_ALLOW_ANONYMOUS_MUTATIONS
-   can be toggled without restarting the server process. *)
-let allow_anonymous_mutations () =
-  match Sys.getenv_opt "MASC_ALLOW_ANONYMOUS_MUTATIONS" with
-  | Some ("1" | "true") -> true
-  | _ -> false
+type configure_error = Already_configured
 
-let default_loopback_dev_mutation_origins =
-  Masc_network_defaults.vite_dev_default_origins
+type resolved_config_state =
+  | Unconfigured
+  | Configured of Server_auth_config.t
 
-let configured_loopback_dev_mutation_origins () =
-  match Sys.getenv_opt "MASC_HTTP_DEV_MUTATION_ORIGINS" with
-  | Some raw -> split_csv_nonempty raw
-  | None -> default_loopback_dev_mutation_origins
+let resolved_config = Atomic.make Unconfigured
 
-let parse_configured_dev_origins () =
-  let rec parse_all parsed = function
-    | [] -> Ok (List.rev parsed)
-    | raw :: rest ->
-      (match Server_request_authority.parse_serialized_origin raw with
-       | Ok origin -> parse_all (origin :: parsed) rest
-       | Error `Malformed -> Error raw)
-  in
-  parse_all [] (configured_loopback_dev_mutation_origins ())
+let rec configure config =
+  let current = Atomic.get resolved_config in
+  match current with
+  | Configured installed ->
+    if Server_auth_config.equal installed config
+    then Ok ()
+    else Error Already_configured
+  | Unconfigured ->
+    if Atomic.compare_and_set resolved_config current (Configured config)
+    then Ok ()
+    else configure config
+;;
+
+let configure_error_to_string = function
+  | Already_configured -> "HTTP authorization policy is already configured"
+;;
+
+let current_resolved_config () =
+  match Atomic.get resolved_config with
+  | Configured config -> config
+  | Unconfigured -> Server_auth_config.fail_closed
 ;;
 
 let allowlisted_dev_origin_matches_request ~request_authority origin =
@@ -590,16 +571,8 @@ let allowlisted_dev_origin_matches_request ~request_authority origin =
   if not (is_loopback_host request_host && is_loopback_host origin_host)
   then false
   else
-    match parse_configured_dev_origins () with
-    | Ok configured ->
-      List.exists
-        (Server_request_authority.serialized_origin_equal origin)
-        configured
-    | Error malformed ->
-      Log.Auth.warn
-        "rejecting dev Origin because MASC_HTTP_DEV_MUTATION_ORIGINS contains a malformed serialized origin: %S"
-        malformed;
-      false
+    Server_auth_config.loopback_dev_mutation_origins (current_resolved_config ())
+    |> List.exists (Server_request_authority.serialized_origin_equal origin)
 ;;
 
 let admission_of_serialized_origin ~request_authority origin =
@@ -626,15 +599,6 @@ let classify_request_origin ~request_authority request =
              admission_of_serialized_origin ~request_authority parsed
          })
   | _ -> Multiple_origins
-;;
-
-let browser_origin_matches_request_authority ~request_authority origin =
-  match Server_request_authority.parse_serialized_origin origin with
-  | Error `Malformed -> false
-  | Ok parsed ->
-    (match admission_of_serialized_origin ~request_authority parsed with
-     | Same_origin | Allowed_dev_origin -> true
-     | Rejected -> false)
 ;;
 
 let ascii_is_whitespace = function
@@ -696,7 +660,9 @@ let ensure_same_origin_browser_request ~request_authority request :
        when referer_matches_request_authority ~request_authority referer ->
        Ok ()
      | [] | [ _ ] | _ :: _ :: _ ->
-       if allow_anonymous_mutations () then Ok ()
+       if
+         Server_auth_config.allow_anonymous_mutations (current_resolved_config ())
+       then Ok ()
        else
          Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
            { reason = Missing_token
@@ -785,8 +751,14 @@ let http_status_of_auth_error = function
   | Masc_domain.RateLimitExceeded _ -> `Too_many_requests
   | Masc_domain.CacheError _ -> `Internal_server_error
 
-(** Server state - initialized at startup *)
-let server_state : Mcp_server.server_state option ref = ref None
+(** Server state - initialized at startup.  The published handle is replaced
+    atomically so request domains never race a plain ref read with startup or
+    shutdown publication. *)
+let server_state : Mcp_server.server_state option Atomic.t = Atomic.make None
+
+let current_server_state () = Atomic.get server_state
+let publish_server_state state = Atomic.set server_state (Some state)
+let clear_server_state () = Atomic.set server_state None
 
 (** CORS origin *)
 exception Invalid_origin_header
@@ -854,10 +826,6 @@ let public_read_cors_headers request =
      | None -> [ ("vary", "Origin") ])
   | _ -> raise Invalid_origin_header
 
-let respond_public_read_json ?(status = `OK) request reqd body =
-  Http_server_eio.Response.json ~status
-    ~request ~extra_headers:(public_read_cors_headers request) body reqd
-
 let respond_public_read_json_value ?(status = `OK) request reqd value =
   Http_server_eio.Response.json_value ~status
     ~request ~extra_headers:(public_read_cors_headers request) value reqd
@@ -881,14 +849,31 @@ let auth_error_headers ~(status : Httpun.Status.t) ~cors =
   | `Unauthorized -> ("www-authenticate", "Bearer") :: cors
   | _ -> cors
 
+(* One CORS answer for an auth error, whichever protocol asked.
+
+   H1 used to reflect [get_origin], which answers "*" when the request carries
+   no Origin and raises on a malformed one; H2 has always run the origin
+   through admission and emitted only [vary: Origin] when nothing was admitted.
+   Same 401, same typed code, same bearer challenge, different CORS headers
+   (#28166). Admission is the answer that holds: a 401 is not the place to hand
+   an unadmitted origin permission to read the response, and a malformed Origin
+   header should not raise out of the error responder. *)
+let auth_error_cors_headers request =
+  match Server_request_authority.current () with
+  | None -> [ "vary", "Origin" ]
+  | Some request_authority ->
+    (match public_read_cors_origin_opt ~request_authority request with
+     | Some origin -> cors_headers origin
+     | None -> [ "vary", "Origin" ])
+;;
+
 let respond_auth_error request reqd err =
   let status = http_status_of_auth_error err in
-  let origin = get_origin request in
   let body = auth_error_json err in
   let headers =
     Httpun.Headers.of_list
       (("content-length", string_of_int (String.length body))
-       :: auth_error_headers ~status ~cors:(cors_headers origin))
+       :: auth_error_headers ~status ~cors:(auth_error_cors_headers request))
   in
   let response = Httpun.Response.create ~headers (status :> Httpun.Status.t) in
   Httpun.Reqd.respond_with_string reqd response body
@@ -939,7 +924,7 @@ let check_agent_rate_limit request reqd =
 let admin_token_equal = Eqaf.equal
 
 let with_admin_auth handler request reqd =
-  match !server_state with
+  match current_server_state () with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
       let admin_token = Env_config_core.admin_token_opt () in
@@ -1141,34 +1126,12 @@ let rec with_public_read handler request reqd =
   if strict && not (is_public_read_path path) then
     with_read_auth handler request reqd
   else
-    match !server_state with
+    match current_server_state () with
     | None -> Http_server_eio.Response.json (not_initialized_response path) reqd
     | Some state -> handler state request reqd
 
-and with_observer_sse_read_auth handler request reqd =
-  let strict = http_auth_strict_enabled () in
-  let path = Http_server_eio.Request.path request in
-  if strict && not (is_public_read_path path) then
-    match !server_state with
-    | None -> Http_server_eio.Response.json (not_initialized_response path) reqd
-    | Some state ->
-      let base_path = (Mcp_server.workspace_config state).base_path in
-      (match verify_mcp_observer_stream_auth ~base_path request with
-       | Ok _ ->
-         (match check_agent_rate_limit request reqd with
-          | Ok () -> handler state request reqd
-          | Error () -> ())
-       | Error err ->
-         Http_server_eio.Response.json
-           ~status:`Unauthorized
-           ~extra_headers:(auth_error_headers ~status:`Unauthorized ~cors:[])
-           (auth_error_json err)
-           reqd)
-  else
-    with_public_read handler request reqd
-
 and with_read_auth handler request reqd =
-  match !server_state with
+  match current_server_state () with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
@@ -1180,7 +1143,7 @@ and with_read_auth handler request reqd =
       | Error err -> respond_auth_error request reqd err)
 
 and with_permission_auth ~permission handler request reqd =
-  match !server_state with
+  match current_server_state () with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
@@ -1192,7 +1155,7 @@ and with_permission_auth ~permission handler request reqd =
       | Error err -> respond_auth_error request reqd err)
 
 and with_tool_auth ~tool_name handler request reqd =
-  match !server_state with
+  match current_server_state () with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
@@ -1211,7 +1174,7 @@ and with_tool_auth ~tool_name handler request reqd =
       | Error err -> respond_auth_error request reqd err)
 
 and with_tool_actor_auth ~tool_name handler request reqd =
-  match !server_state with
+  match current_server_state () with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
     let base_path = (Mcp_server.workspace_config state).base_path in
@@ -1230,7 +1193,7 @@ and with_tool_actor_auth ~tool_name handler request reqd =
      | Error err -> respond_auth_error request reqd err)
 
 and with_token_permission_auth ~permission handler request reqd =
-  match !server_state with
+  match current_server_state () with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
       let base_path = (Mcp_server.workspace_config state).base_path in
@@ -1243,4 +1206,17 @@ and with_token_permission_auth ~permission handler request reqd =
 
 module For_testing = struct
   let admin_token_equal = admin_token_equal
+  let snapshot_server_state = current_server_state
+  let restore_server_state state = Atomic.set server_state state
+
+  let snapshot_auth_config () =
+    match Atomic.get resolved_config with
+    | Unconfigured -> None
+    | Configured config -> Some config
+  ;;
+
+  let restore_auth_config = function
+    | None -> Atomic.set resolved_config Unconfigured
+    | Some config -> Atomic.set resolved_config (Configured config)
+  ;;
 end

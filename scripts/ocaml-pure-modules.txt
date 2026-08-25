@@ -1,0 +1,19 @@
+# Modules whose implementations are pure decision cores. Registry growth is
+# the one-way ratchet: a registered module may not call canonical env, clock,
+# random, filesystem, Eio, mutation, or logging APIs.
+lib/subsystem_health_state.ml
+lib/keeper/keeper_runtime_trust_snapshot_core.ml
+lib/keeper_runtime/keeper_event_queue_state.ml
+lib/config/env_config_snapshot_core.ml
+packages/agent_core/lib/llm_provider/provider_registry_state.ml
+packages/agent_core/lib/llm_provider/provider_admission_state.ml
+packages/agent_core/lib/llm_provider/complete_stream_state.ml
+lib/server/server_runtime_param_request.ml
+lib/server/server_prompt_override_request.ml
+lib/mcp_server_eio_call_request.ml
+lib/client_registry_state.ml
+lib/schedule/schedule_domain.ml
+lib/turn_fsm/turn_fsm.ml
+lib/types/masc_domain.ml
+lib/workspace/workspace_task_lifecycle.ml
+lib/runtime/runtime_lane_preference_state.ml

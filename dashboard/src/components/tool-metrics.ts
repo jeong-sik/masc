@@ -167,12 +167,11 @@ export function ToolMetrics() {
         <div class="text-2xs text-[var(--color-fg-muted)] mb-3">
           서버 시작 이후 메모리 기반 집계. 재시작 시 초기화됩니다.
         </div>
-        <div class="grid grid-cols-[repeat(5,minmax(0,1fr))] gap-3 max-[880px]:grid-cols-[repeat(2,minmax(0,1fr))]">
+        <div class="grid grid-cols-[repeat(4,minmax(0,1fr))] gap-3 max-[880px]:grid-cols-[repeat(2,minmax(0,1fr))]">
           <${StatTile} label="총 호출 수" value=${String(data.total_calls)} status="brass" />
           <${StatTile} label="사용된 도구" value=${String(data.distinct_tools_called)} status="ok" delta=${{ direction: 'up', text: '활성' }} />
           <${StatTile} label="미사용 도구" value=${String(data.never_called_count)} status=${data.never_called_count > 0 ? 'warn' : 'ok'} delta=${data.never_called_count > 0 ? { direction: 'flat', text: '유휴' } : undefined} />
-          <${StatTile} label="등록됨 (v2)" value=${String(data.registered_count)} status="brass" />
-          <${StatTile} label="Dispatch v2" value=${data.dispatch_v2_enabled ? 'ON' : 'OFF'} status=${data.dispatch_v2_enabled ? 'ok' : 'crit'} delta=${data.dispatch_v2_enabled ? { direction: 'up', text: '활성' } : { direction: 'down', text: '비활성' }} />
+          <${StatTile} label="등록됨" value=${String(data.registered_count)} status="brass" />
         </div>
 
         <div class="tool-metrics-sections">
@@ -221,7 +220,7 @@ export function ToolMetrics() {
                   </div>
                 ` : null}
                 ${filtered.length === 0 ? html`
-                  <p class="muted">조건에 맞는 도구가 없습니다.</p>
+                  <p class="muted">조건에 맞는 도구 없음</p>
                 ` : html`
                   <${BarChart}
                     items=${filtered}

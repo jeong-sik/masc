@@ -1,0 +1,59 @@
+{
+  "schema": "masc.keeper_feature_matrix.dashboard_browser_evidence.v1",
+  "captured_at": "2026-08-14T00:35:00Z",
+  "browser": "chromium",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "source_url": "http://127.0.0.1:8935/dashboard",
+  "deployed_identity": {
+    "label": "v0.21.2 · 427b00defa",
+    "commit_source": "runtime_repo_head",
+    "embedded_binary_commit_known": false
+  },
+  "interaction": {
+    "start_url": "http://127.0.0.1:8935/dashboard#overview",
+    "start_title": "MASC · Overview",
+    "action": "click the exact Monitor navigation button",
+    "end_url": "http://127.0.0.1:8935/dashboard#monitoring?section=agents",
+    "end_title": "MASC · Keeper Fleet"
+  },
+  "observations": {
+    "overview_running_keeper_text": "8 / 26",
+    "top_status_running_text": "7 실행 중",
+    "monitor_runtime_available": 7,
+    "monitor_paused": 18,
+    "monitor_stopped": 0,
+    "monitor_attention": 3,
+    "console_errors": [],
+    "failed_requests": []
+  },
+  "screenshots": [
+    {
+      "surface": "overview",
+      "path": "/Users/dancer/me/reports/masc-live-dashboard-20260814-0934.png",
+      "sha256": "97ab5b4f149784dee9d4866058ccb8a0688ba3b82342a8785091e5a6bd696cec",
+      "pixel_width": 1440,
+      "pixel_height": 1000
+    },
+    {
+      "surface": "monitor",
+      "path": "/Users/dancer/me/reports/masc-live-dashboard-monitor-20260814-0935.png",
+      "sha256": "44c51d745e1257e3a8479f4ca1c296cfdd05dfa68eefe7a91c060578b417af25",
+      "pixel_width": 1440,
+      "pixel_height": 1000
+    }
+  ],
+  "verdict": {
+    "navigation": "pass",
+    "transport": "pass",
+    "count_consistency": "fail",
+    "source_status": "fixed by merged PR #28683",
+    "deployed_status": "stale 0.21.2 surface; fix not live"
+  },
+  "limits": [
+    "This proves a rendered count mismatch on the deployed browser surface, not a current-main source regression.",
+    "The displayed commit is runtime_repo_head metadata and is not an embedded binary build SHA."
+  ]
+}

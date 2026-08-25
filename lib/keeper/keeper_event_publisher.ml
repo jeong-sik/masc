@@ -2,22 +2,22 @@
 
     Publishes the current keeper lifecycle and runtime audit events to the
     MASC-owned Event_bus. Events follow dot-separated snake_case naming per
-    OAS Custom-name convention.
+    AGENT_CORE Custom-name convention.
 
-    Every publish routes to [Event_bus_slots.get_masc ()] so the OAS/MASC
-    layer boundary is preserved. OAS's [event_bus.mli:103-107]
-    explicitly warns against publishing domain events onto OAS's bus.
+    Every publish routes to [Event_bus_slots.get_masc ()] so the AGENT_CORE/MASC
+    layer boundary is preserved. AGENT_CORE's [event_bus.mli:103-107]
+    explicitly warns against publishing domain events onto AGENT_CORE's bus.
 
     SSE wire-name translation is owned by the relay, not this module.
 
     @since 2.90.0 (bus-separated since 2.353.0) *)
 
-(* Route every publish to the MASC-owned bus. This closes the OAS boundary
-   violation where MASC was publishing Custom("masc:...") onto OAS's shared
+(* Route every publish to the MASC-owned bus. This closes the AGENT_CORE boundary
+   violation where MASC was publishing Custom("masc:...") onto AGENT_CORE's shared
    bus. *)
 let masc_publish event =
   match Event_bus_slots.get_masc () with
-  | Some mb -> Agent_sdk_metrics_bridge.publish mb event
+  | Some mb -> Runtime_event_bus.publish mb event
   | None ->
     Log.Misc.warn "MASC observation event was not published: event bus is not initialized"
 
@@ -28,18 +28,19 @@ let masc_publish event =
     Event names are pinned by
     {!Keeper_lifecycle_events.all_event_names}, which covers both the
     custom verbs (\[started\] / \[reconciled\] / \[restarted\] /
-    \[dead_cleaned\] / \[purged\] / \[admission_denied\]) and
+    \[supervisor_cleaned\] / \[purged\] / \[admission_denied\]) and
     the phase-derived names (\[stopped\] / \[crashed\] / \[dead\] /
     \[running\]).
 
     Issue #8575: the previous docstring listed only five names, so
     operators silently missed the cleanup and recovery events
-    (\[reconciled\] / \[dead_cleaned\] / \[admission_denied\]) — exactly the events that signal supervisor
+    (\[reconciled\] / \[supervisor_cleaned\] / \[admission_denied\]) — exactly the events that signal supervisor
     recovery actions where observability matters most. Subscribe to
     {!Keeper_lifecycle_events.all_event_names} to receive the full
-    stream; the sync test in [test_types.ml ::
-    lifecycle_events_ssot] asserts every literal still emitted by
-    [Keeper_supervisor] / [Keeper_keepalive] lives in the SSOT. *)
+    stream.  A sync test asserting every literal emitted by
+    [Keeper_supervisor] / [Keeper_keepalive] lives in the SSOT was cited
+    here as [test_types.ml :: lifecycle_events_ssot]; neither the file
+    nor the test exists (#22071). *)
 (* #8856 / #8605 family: [event] is now the unified
    [Keeper_lifecycle_events.lifecycle_event] variant -- typos at the
    16 supervisor/keepalive call sites fail to compile. JSON wire
@@ -67,7 +68,7 @@ let publish_keeper_lifecycle
     ("timestamp", `Float (Time_compat.now ()));
   ] in
   masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("masc.keeper.lifecycle", payload)))
+    (Agent_core.Event_bus.mk_event (Custom ("masc.keeper.lifecycle", payload)))
 
 (** {1 Audit Ledger Events} *)
 
@@ -96,7 +97,7 @@ let publish_audit_event ~id ~ts ~actor ~kind ?target ~summary ~severity
     ("severity", `String severity);
     ("payload", payload_json);
   ] in
-  masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("masc.audit_event", event_payload)))
+  masc_publish (Agent_core.Event_bus.mk_event (Custom ("masc.audit_event", event_payload)))
 
 (** {1 Runtime Execution Telemetry Events} *)
 
@@ -113,7 +114,6 @@ let publish_runtime_execution_built
     ~max_context
     ~effective_budget
     ~temperature
-    ~generation
   =
   let payload =
     `Assoc
@@ -122,9 +122,8 @@ let publish_runtime_execution_built
       ; ("max_context", `Int max_context)
       ; ("max_context_resolution", `String (string_of_int effective_budget))
       ; ("temperature", `Float temperature)
-      ; ("generation", `Int generation)
       ; ("timestamp", `Float (Time_compat.now ()))
       ]
   in
   masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("telemetry_event", payload)))
+    (Agent_core.Event_bus.mk_event (Custom ("telemetry_event", payload)))

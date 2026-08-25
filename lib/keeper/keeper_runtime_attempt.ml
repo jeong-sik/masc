@@ -1,4 +1,4 @@
-(** SDK error mapping for keeper-managed provider attempts. *)
+(** agent-core error mapping for keeper-managed provider attempts. *)
 
 let capacity_backpressure_source_to_failure_scope = function
   | Keeper_internal_error.Provider_capacity ->
@@ -85,7 +85,7 @@ let provider_error_to_http_error = function
     Llm_provider.Http_client.NetworkError
       { message = detail; kind = Llm_provider.Http_client.Unknown }
 
-let sdk_error_to_runtime_outcome err =
+let core_error_to_runtime_outcome err =
   match Keeper_internal_error.classify_masc_internal_error err with
   | Some (Keeper_internal_error.Resumable_cli_session { detail; _ }) ->
     Some
@@ -113,7 +113,7 @@ let sdk_error_to_runtime_outcome err =
   | Some _
   | None ->
     (match err with
-     | Agent_sdk.Error.Api api_err ->
+     | Agent_core.Error.Api api_err ->
        let http_err =
          match api_err with
          | Llm_provider.Retry.InvalidRequest { message; _ } ->
@@ -143,31 +143,30 @@ let sdk_error_to_runtime_outcome err =
            http_error ~code:529 ~body:message
          | NetworkError { message; kind } ->
            Llm_provider.Http_client.NetworkError { message; kind }
-         | Timeout { message } ->
-           Llm_provider.Http_client.NetworkError
-             { message; kind = Llm_provider.Http_client.Timeout }
+         | Timeout { message; phase } ->
+           (* [Http_client.Timeout] is the ETIMEDOUT transport kind, but
+              [Retry.Timeout] also covers Admission, Queue, First_token and
+              Capacity_backpressure waits that never touched a socket.
+              [TimeoutError] carries the phase, so route there and keep it. *)
+           Llm_provider.Http_client.TimeoutError
+             { message
+             ; phase =
+                 (* DET-OK: [Unknown_timeout] is agent core's own constructor for an
+                    unattributed timeout — it names the absence, not a real phase. *)
+                 Option.value phase ~default:Llm_provider.Http_client.Unknown_timeout
+             }
        in
        Some (Runtime_attempt_fsm.Call_err http_err)
-     | Agent_sdk.Error.Provider provider_err ->
+     | Agent_core.Error.Provider provider_err ->
        Some (Runtime_attempt_fsm.Call_err (provider_error_to_http_error provider_err))
-     | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason { reason }) ->
+     | Agent_core.Error.Agent (Agent_core.Error.UnrecognizedStopReason { reason }) ->
        Some
          (Runtime_attempt_fsm.Call_err
             (Llm_provider.Http_client.AcceptRejected { reason }))
-    | Agent_sdk.Error.Config
-        (Agent_sdk.Error.InvalidConfig { field = "runtime_mcp_auth"; detail }) ->
-       Some
-         (Runtime_attempt_fsm.Call_err
-            (Llm_provider.Http_client.AcceptRejected { reason = detail }))
-     | Agent_sdk.Error.Agent _
-     | Agent_sdk.Error.Config _
-     | Agent_sdk.Error.Mcp _
-     | Agent_sdk.Error.Serialization _
-     | Agent_sdk.Error.Io _
-     | Agent_sdk.Error.Orchestration _
-     | Agent_sdk.Error.Internal _ -> None)
-
-let sdk_error_is_resumable_cli_session err =
-  match Keeper_internal_error.classify_masc_internal_error err with
-  | Some (Keeper_internal_error.Resumable_cli_session _) -> true
-  | _ -> false
+    | Agent_core.Error.Agent _
+     | Agent_core.Error.Config _
+     | Agent_core.Error.Mcp _
+     | Agent_core.Error.Serialization _
+     | Agent_core.Error.Io _
+     | Agent_core.Error.Orchestration _
+     | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> None)

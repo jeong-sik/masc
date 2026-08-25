@@ -29,22 +29,21 @@ let sample_record
   : Turn_record.t
   =
   { execution_ids = []
-  ; keeper = "rondo"
-  ; agent_name = "rondo-agent"
-  ; generation = 7
+  ; keeper = "beta"
+  ; agent_name = "beta-agent"
   ; turn_kind = Turn_record.Direct
   ; trace_id = sample_trace
   ; absolute_turn
   ; turn_ref = Ids.Turn_ref.make ~trace_id:sample_trace ~absolute_turn
   ; blocks =
-      [ { Turn_record.block = Prompt_block_id.Persona
+      [ { Turn_record.block = Prompt_block_id.Keeper_instructions
         ; bytes = 4
         ; digest = digest_of_label "aaaa"
         }
       ]
   ; input_components = Some [ { component = Turn_record.Tool_schemas; bytes = 8192 } ]
   ; runtime_profile = "glm-coding.glm-5-turbo"
-  ; model = Some "glm-5-turbo"
+  ; selected_model = Some "glm-5-turbo"
   ; finish_reason = Some "completed"
   ; context_window
   ; price_input_per_million = None
@@ -53,6 +52,7 @@ let sample_record
   ; ttfrc_ms = None
   ; request_wire_observation =
       Some { runtime_profile = "glm-coding.glm-5-turbo"; body_bytes = 560_513 }
+  ; model_input_window = None
   ; raw_trace_run_ref = None
   ; sampling =
       { temperature = None
@@ -122,7 +122,7 @@ let test_measured_record_projects () =
   with_temp_workspace (fun config ->
     let record = sample_record () in
     append_record config record;
-    let fields = Projection.context_fields ~config ~keeper_name:"rondo" ~current_trace_id:sample_trace in
+    let fields = Projection.context_fields ~config ~keeper_name:"beta" ~current_trace_id:sample_trace in
     (match field fields "context_tokens" with
      | `Int tokens -> check int "tokens" 18_000 tokens
      | _ -> fail "context_tokens is not an int");
@@ -159,7 +159,7 @@ let test_newest_record_wins () =
   with_temp_workspace (fun config ->
     append_record config (sample_record ~absolute_turn:1 ~input_tokens:(Some 100) ());
     append_record config (sample_record ~absolute_turn:2 ~input_tokens:(Some 200) ());
-    let fields = Projection.context_fields ~config ~keeper_name:"rondo" ~current_trace_id:sample_trace in
+    let fields = Projection.context_fields ~config ~keeper_name:"beta" ~current_trace_id:sample_trace in
     match field fields "context_tokens" with
     | `Int tokens -> check int "newest tokens" 200 tokens
     | _ -> fail "context_tokens is not an int")
@@ -168,14 +168,14 @@ let test_newest_record_wins () =
 let test_record_without_usage_is_typed () =
   with_temp_workspace (fun config ->
     append_record config (sample_record ~input_tokens:None ());
-    let fields = Projection.context_fields ~config ~keeper_name:"rondo" ~current_trace_id:sample_trace in
+    let fields = Projection.context_fields ~config ~keeper_name:"beta" ~current_trace_id:sample_trace in
     check_not_observed fields ~reason:"turn_record_without_usage")
 ;;
 
 let test_undecodable_newest_line_is_typed () =
   with_temp_workspace (fun config ->
-    append_raw config ~keeper_name:"rondo" (`Assoc [ "schema", `String "future" ]);
-    let fields = Projection.context_fields ~config ~keeper_name:"rondo" ~current_trace_id:sample_trace in
+    append_raw config ~keeper_name:"beta" (`Assoc [ "schema", `String "future" ]);
+    let fields = Projection.context_fields ~config ~keeper_name:"beta" ~current_trace_id:sample_trace in
     check_not_observed fields ~reason:"turn_record_undecodable")
 ;;
 
@@ -185,7 +185,7 @@ let test_undecodable_newest_line_is_typed () =
 let test_malformed_raw_tail_is_undecodable_not_previous_row () =
   with_temp_workspace (fun config ->
     append_record config (sample_record ());
-    let store = Masc.Keeper_types_support.keeper_turn_record_store config "rondo" in
+    let store = Masc.Keeper_types_support.keeper_turn_record_store config "beta" in
     let base_dir = Dated_jsonl.base_dir store in
     let day_files =
       Sys.readdir base_dir
@@ -204,7 +204,7 @@ let test_malformed_raw_tail_is_undecodable_not_previous_row () =
        output_string channel "not a json line\n";
        close_out channel
      | files -> failf "expected exactly one day file, found %d" (List.length files));
-    let fields = Projection.context_fields ~config ~keeper_name:"rondo" ~current_trace_id:sample_trace in
+    let fields = Projection.context_fields ~config ~keeper_name:"beta" ~current_trace_id:sample_trace in
     check_not_observed fields ~reason:"turn_record_undecodable")
 ;;
 
@@ -214,7 +214,7 @@ let test_previous_trace_row_is_typed_absent () =
     let fields =
       Projection.context_fields
         ~config
-        ~keeper_name:"rondo"
+        ~keeper_name:"beta"
         ~current_trace_id:"trace-1780648779957-99999"
     in
     check_not_observed fields ~reason:"turn_record_trace_mismatch")
@@ -223,13 +223,49 @@ let test_previous_trace_row_is_typed_absent () =
 let test_missing_window_keeps_tokens_without_ratio () =
   with_temp_workspace (fun config ->
     append_record config (sample_record ~context_window:None ());
-    let fields = Projection.context_fields ~config ~keeper_name:"rondo" ~current_trace_id:sample_trace in
+    let fields = Projection.context_fields ~config ~keeper_name:"beta" ~current_trace_id:sample_trace in
     (match field fields "context_tokens" with
      | `Int tokens -> check int "tokens survive" 18_000 tokens
      | _ -> fail "context_tokens is not an int");
     check bool "ratio is null without a window" true
       (field fields "context_ratio" = `Null);
     check bool "max is null without a window" true (field fields "context_max" = `Null))
+;;
+
+(* The projection writes these fields and Tui_decode reads them, but each side
+   had only its own tests: the producer checked what it emitted and the decoder
+   checked hand-written JSON. A field the producer stopped emitting therefore
+   left both suites green while the Live Context surface fell back to zeros
+   (#29320). Every shape the producer can emit is decoded here. *)
+let decodes fields =
+  Masc.Tui_decode.decode_context_observation
+    ~expected_trace_id:sample_trace
+    (`Assoc fields)
+;;
+
+let test_every_projected_shape_decodes () =
+  with_temp_workspace (fun config ->
+    (* absence: no store at all *)
+    let absent =
+      Projection.context_fields ~config ~keeper_name:"nobody" ~current_trace_id:sample_trace
+    in
+    (match decodes absent with
+     | Ok _ -> ()
+     | Error detail -> failf "typed absence must decode: %s" detail);
+    (* measurement: a record on the current trace *)
+    append_record config (sample_record ());
+    let measured =
+      Projection.context_fields ~config ~keeper_name:"beta" ~current_trace_id:sample_trace
+    in
+    (match decodes measured with
+     | Ok _ -> ()
+     | Error detail -> failf "measured observation must decode: %s" detail);
+    (* the two shapes are distinguishable, or decoding both proves nothing *)
+    check
+      bool
+      "absence and measurement are different payloads"
+      true
+      (absent <> measured))
 ;;
 
 let () =
@@ -251,6 +287,8 @@ let () =
             test_previous_trace_row_is_typed_absent
         ; test_case "missing window keeps tokens without ratio" `Quick
             test_missing_window_keeps_tokens_without_ratio
+        ; test_case "every projected shape decodes" `Quick
+            test_every_projected_shape_decodes
         ] )
     ]
 ;;

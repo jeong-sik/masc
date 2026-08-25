@@ -1,0 +1,27 @@
+name = "masc_tasks"
+description = """
+List tasks in backlog with their status and assignee. Defaults to active \
+tasks (todo/claimed/in_progress/awaiting_verification). Use \
+include_done/include_cancelled or status to filter. awaiting_verification \
+tasks are pending a completion-authority verdict and are not claimable agent \
+work. Output includes task ID, title, priority, assignee, timestamps. Tip: \
+Look for status='todo' tasks to claim."""
+
+[[params]]
+name = "status"
+type = "string"
+description = """
+Optional status filter: \
+todo|claimed|in_progress|awaiting_verification|done|cancelled"""
+
+[[params]]
+name = "include_done"
+type = "boolean"
+description = "Include done tasks (default: false)"
+default = false
+
+[[params]]
+name = "include_cancelled"
+type = "boolean"
+description = "Include cancelled tasks (default: false)"
+default = false

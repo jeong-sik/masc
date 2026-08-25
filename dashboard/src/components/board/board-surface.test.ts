@@ -1,5 +1,5 @@
 import { h } from 'preact'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/preact'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/preact'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   BOARD_DETAIL_WIDTH_DEFAULT,
@@ -14,7 +14,7 @@ import { route } from '../../router'
 import { createPost } from '../../api'
 import { requestBoardContextInference } from '../../api/board'
 import { dispatchOperatorAction, operatorSnapshot } from '../../operator-store'
-import { PAGE_SIZE, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, categoryVisibleLimits, contentCategory, selectedBoardPostId, boardFilterMode, boardComposerMode } from './board-state'
+import { PAGE_SIZE, feedVisibleLimit, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, contentCategory, selectedBoardPostId, boardComposerMode } from './board-state'
 import { resetBoardLatencyMetrics } from '../../board-metrics'
 import type { BoardPost, OperatorSnapshot } from '../../types'
 
@@ -52,6 +52,7 @@ vi.mock('../../api', () => ({
   commentPost: vi.fn(),
   createPost: vi.fn(),
   sendBroadcast: vi.fn(),
+  broadcastReceiptMessage: vi.fn(() => 'broadcast receipt'),
 }))
 
 vi.mock('../../api/actions', () => ({
@@ -62,6 +63,12 @@ vi.mock('../../api/board', () => ({
   requestBoardContextInference: vi.fn(),
   fetchBoardReactionState: vi.fn().mockResolvedValue({
     summaries: [],
+    supportedEmojis: ['👍', '❤️', '🎉', '🚀', '👀', '😕', '👏', '🔥'],
+  }),
+  // The feed asks for its rows together; a bar only fetches its own when this
+  // one fails, which is the path fetchBoardReactionState above still covers.
+  fetchBoardReactionsBatch: vi.fn().mockResolvedValue({
+    byTargetId: new Map(),
     supportedEmojis: ['👍', '❤️', '🎉', '🚀', '👀', '😕', '👏', '🔥'],
   }),
   toggleReaction: vi.fn(),
@@ -135,7 +142,6 @@ function snapshotWithKeepers(keepers: Array<{
     sessions: [],
     keepers,
     recent_messages: [],
-    pending_confirms: [],
     available_actions: [],
   } as unknown as OperatorSnapshot
 }
@@ -210,6 +216,7 @@ describe('BoardSurface Component', () => {
     await Promise.resolve()
     vi.unstubAllGlobals()
     resetBoardLatencyMetrics()
+    feedVisibleLimit.value = PAGE_SIZE
     clearLocalStorage()
   })
 
@@ -249,14 +256,7 @@ describe('BoardSurface Component', () => {
     ]
     boardFlairsError.value = false
     resetBoardLatencyMetrics()
-    categoryVisibleLimits.value = {
-      article: PAGE_SIZE,
-      review: PAGE_SIZE,
-      notice: PAGE_SIZE,
-      system: PAGE_SIZE,
-    }
     selectedBoardPostId.value = null
-    boardFilterMode.value = 'all'
     boardComposerMode.value = 'post'
     operatorSnapshot.value = snapshotWithKeepers([
       { name: 'sangsu', status: 'active' },
@@ -397,21 +397,18 @@ describe('BoardSurface Component', () => {
     expect(screen.queryByTestId('bd-mention-detail')).toBeNull()
   })
 
-  it('keeps v2 workspace panels for category cards', () => {
+  it('renders one unified feed in server order instead of fixed category sections', () => {
     boardPosts.value = [
-      makePost({ id: 'post-1', title: '기술 탐색: test topic', body: 'content', author: 'keeper' }),
+      makePost({ id: 'notice-first', title: '먼저 온 알림', author: 'keeper', post_kind: 'automation' }),
+      makePost({ id: 'article-second', title: '나중에 온 글', author: 'keeper', post_kind: 'direct' }),
     ]
-    const { container } = render(h(BoardSurface, null))
-    expect(container.querySelectorAll('.v2-workspace-panel').length).toBeGreaterThanOrEqual(1)
-  })
 
-  it('applies StyleSeed surface/card classes', () => {
-    boardPosts.value = [
-      makePost({ id: 'post-1', title: '기술 탐색: test topic', body: 'content', author: 'keeper' }),
-    ]
-    const { container } = render(h(BoardSurface, null))
-    expect(container.querySelector('.v2-board-surface.ss-surface.bg-surface-page.text-text-primary')).not.toBeNull()
-    expect(container.querySelectorAll('.v2-workspace-panel.ss-card').length).toBeGreaterThanOrEqual(1)
+    render(h(BoardSurface, null))
+
+    const feed = screen.getByTestId('bd-unified-feed')
+    const titles = Array.from(feed.querySelectorAll('.bd-post-title')).map(node => node.textContent)
+    expect(titles).toEqual(['먼저 온 알림', '나중에 온 글'])
+    expect(screen.queryByRole('navigation', { name: '글/분석 게시글 페이지' })).not.toBeInTheDocument()
   })
 
   it('applies the v2 board summary class on focus surfaces', () => {
@@ -486,6 +483,26 @@ describe('BoardSurface Component', () => {
     expect(screen.getByRole('link', { name: 'ani1999' })).toHaveAttribute('href')
   })
 
+  it('asks for the reactions of every drawn row in one request', async () => {
+    const { fetchBoardReactionsBatch, fetchBoardReactionState } = await import('../../api/board')
+    vi.mocked(fetchBoardReactionsBatch).mockClear()
+    vi.mocked(fetchBoardReactionState).mockClear()
+    boardPosts.value = [
+      makePost({ id: 'post-a', title: 'A', body: 'a', author: 'ani1999' }),
+      makePost({ id: 'post-b', title: 'B', body: 'b', author: 'ani1999' }),
+      makePost({ id: 'post-c', title: 'C', body: 'c', author: 'ani1999' }),
+    ]
+
+    render(h(BoardSurface, null))
+    await waitFor(() => expect(fetchBoardReactionsBatch).toHaveBeenCalled())
+
+    expect(fetchBoardReactionsBatch).toHaveBeenCalledTimes(1)
+    expect(fetchBoardReactionsBatch).toHaveBeenCalledWith('post', ['post-a', 'post-b', 'post-c'])
+    // The per-row read is the fallback for when the batch fails, so a healthy
+    // batch must leave it untouched -- otherwise the batch saved nothing.
+    expect(fetchBoardReactionState).not.toHaveBeenCalled()
+  })
+
   it('renders embedded reaction summaries on post cards', () => {
     boardPosts.value = [
       makePost({
@@ -540,42 +557,6 @@ describe('BoardSurface Component', () => {
     expect(screen.getByText('flair:insight')).toBeInTheDocument()
   })
 
-  it('renders moderation status badge on post cards', () => {
-    boardPosts.value = [
-      makePost({
-        id: 'post-flagged',
-        title: 'Needs moderation',
-        body: 'content',
-        author: 'ani1999',
-        report_count: 2,
-        moderation_status: 'flagged',
-      }),
-    ]
-
-    render(h(BoardSurface, null))
-
-    expect(screen.getByText('모더레이션 대기')).toBeInTheDocument()
-  })
-
-  it('renders vote-blind post scores as hidden until voting', () => {
-    boardPosts.value = [
-      makePost({
-        id: 'post-blind',
-        title: 'Blind score',
-        body: 'content',
-        author: 'ani1999',
-        votes: null,
-        vote_balance: null,
-        vote_blind: true,
-        vote_blind_reason: 'vote_before_score',
-      }),
-    ]
-
-    render(h(BoardSurface, null))
-
-    expect(screen.getByLabelText('점수 투표 후 공개')).toHaveTextContent(/투표 후 공개/)
-  })
-
   it('renders sub-board rail and filters posts by sub-board', () => {
     boardHearths.value = [
       { name: 'ops', count: 1 },
@@ -609,7 +590,6 @@ describe('BoardSurface Component', () => {
     expect(hearthScroll?.querySelectorAll('[data-testid^="bd-sub-hearth-"]')).toHaveLength(9)
     expect(hearthScroll?.querySelector('[data-testid="bd-sub-hearth-9"]')).not.toBeNull()
     expect(container.querySelector('.bd-sub-more')).toBeNull()
-    expect(queueSection?.querySelector('[data-testid="bd-queue-mod"]')).not.toBeNull()
     expect(queueSection?.querySelector('[data-testid="bd-queue-mentions"]')).not.toBeNull()
   })
 
@@ -631,20 +611,6 @@ describe('BoardSurface Component', () => {
     expect(within(queue).queryByText('2')).not.toBeInTheDocument()
   })
 
-  it('renders filter chips for all posts and moderation', () => {
-    boardPosts.value = [
-      makePost({ id: 'post-mod', title: 'Mod', body: 'mod', author: 'keeper', moderation_status: 'flagged' }),
-    ]
-
-    render(h(BoardSurface, null))
-
-    expect(screen.getByTestId('bd-filter-all')).toBeInTheDocument()
-    expect(screen.getByTestId('bd-filter-mod')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByTestId('bd-filter-mod'))
-    expect(boardFilterMode.value).toBe('mod')
-  })
-
   it('changes the server-backed board sort mode from the feed head', () => {
     boardPosts.value = [
       makePost({ id: 'post-sort', title: 'Sort target', body: 'content', author: 'keeper', post_kind: 'direct' }),
@@ -657,7 +623,6 @@ describe('BoardSurface Component', () => {
     fireEvent.change(sort, { target: { value: 'discussed' } })
 
     expect(boardSortMode.value).toBe('discussed')
-    expect(categoryVisibleLimits.value.article).toBe(PAGE_SIZE)
   })
 
   it('renders permalink, trackback, context inference, and X share actions for a post', () => {
@@ -959,44 +924,37 @@ describe('BoardSurface Component', () => {
     expect(screen.queryByText('System Post')).not.toBeInTheDocument()
   })
 
-  it('uses shared cursor pagination for category expansion', () => {
+  it('uses one shared cursor pagination for the unified feed', () => {
     boardPosts.value = Array.from({ length: PAGE_SIZE + 1 }, (_, index) => makePost({
       id: `post-${index}`,
-      title: `기술 탐색: topic ${index}`,
-      body: 'exploration content here',
+      title: `post ${index}`,
+      body: 'content',
       author: 'keeper',
-      post_kind: 'direct',
+      post_kind: index % 2 === 0 ? 'direct' : 'automation',
     }))
 
     render(h(BoardSurface, null))
 
-    const nav = screen.getByRole('navigation', { name: '글/분석 게시글 페이지' })
-    expect(nav).toBeInTheDocument()
-    expect(nav.textContent).toContain('표시')
+    expect(screen.getByRole('navigation', { name: '전체 게시글 페이지' }).textContent)
+      .toContain(`${PAGE_SIZE} / ${PAGE_SIZE + 1}`)
     fireEvent.click(screen.getByRole('button', { name: /더 보기/ }))
-
-    expect(categoryVisibleLimits.value.article).toBe(PAGE_SIZE * 2)
+    expect(feedVisibleLimit.value).toBe(PAGE_SIZE * 2)
   })
 
-  it('lets category pagination collapse an expanded category', () => {
-    categoryVisibleLimits.value = {
-      article: PAGE_SIZE * 2,
-      review: PAGE_SIZE,
-      notice: PAGE_SIZE,
-      system: PAGE_SIZE,
-    }
+  it('lets unified feed pagination collapse after expansion', () => {
+    feedVisibleLimit.value = PAGE_SIZE * 2
     boardPosts.value = Array.from({ length: PAGE_SIZE * 2 + 1 }, (_, index) => makePost({
       id: `post-${index}`,
-      title: `기술 탐색: topic ${index}`,
-      body: 'exploration content here',
+      title: `post ${index}`,
+      body: 'content',
       author: 'keeper',
       post_kind: 'direct',
     }))
 
     render(h(BoardSurface, null))
-    fireEvent.click(screen.getByRole('button', { name: '줄이기' }))
 
-    expect(categoryVisibleLimits.value.article).toBe(PAGE_SIZE)
+    fireEvent.click(screen.getByRole('button', { name: '줄이기' }))
+    expect(feedVisibleLimit.value).toBe(PAGE_SIZE)
   })
 
   it('renders the operator author sigil with the "OP" glyph and .op modifier', () => {
@@ -1085,7 +1043,7 @@ describe('BoardSurface Component', () => {
 
     const button = screen.getByTestId('bd-context-infer-post-non-keeper') as HTMLButtonElement
     expect(button).toBeDisabled()
-    expect(button).toHaveAttribute('title', '맥락 추론을 실행할 등록된 keeper가 없습니다')
+    expect(button).toHaveAttribute('title', '맥락 추론을 실행할 등록된 keeper 없음')
   })
 
   it('enables context inference button for non-keeper authored posts and uses first keeper as fallback', async () => {

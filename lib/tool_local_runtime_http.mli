@@ -12,8 +12,7 @@
       {!split_http_body_and_status}).
 
     {b Include runtime:} starts with [include Tool_local_runtime_core]
-    so siblings ({!Tool_local_runtime_bench},
-    {!Tool_local_runtime_verify}, {!Tool_local_runtime_probe})
+    so siblings ({!Tool_local_runtime_verify}, {!Tool_local_runtime_probe})
     receive the core surface transitively via
     [include Tool_local_runtime_http].
 
@@ -24,10 +23,6 @@ include module type of struct
 end
 
 (** {1 String / JSON helpers} *)
-
-(** [trim_to_option raw] returns [Some s] iff [s = String.trim raw]
-    is non-empty, else [None].  Used for "treat empty string as
-    missing" semantics on JSON / shell inputs. *)
 
 val int_member : Yojson.Safe.t -> string -> int option
 (** [int_member json key] reads [json.key] as an int.  Accepts both
@@ -151,12 +146,3 @@ val http_post_json_text_with_status :
     {!http_post_json_text_with_status_with_headers} with no extra
     headers. *)
 
-val http_post_json_with_status :
-  timeout_sec:int ->
-  url:string ->
-  body_json:string ->
-  ((int option * Yojson.Safe.t), string) Result.t
-(** [http_post_json_with_status ~timeout_sec ~url ~body_json] composes
-    {!http_post_json_text_with_status} + [Yojson.Safe.from_string].
-    Returns [Error "invalid json from <url>: <msg>"] on parse
-    failure. *)

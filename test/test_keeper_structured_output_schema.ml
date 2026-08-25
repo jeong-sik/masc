@@ -63,8 +63,8 @@ let allows_additional_properties schema =
 
 let has_no_response_format provider_cfg =
   match provider_cfg.Llm_provider.Provider_config.response_format with
-  | Agent_sdk.Types.Off -> true
-  | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false
+  | Agent_core.Types.Off -> true
+  | Agent_core.Types.JsonMode | Agent_core.Types.JsonSchema _ -> false
 ;;
 let test_operator_remote_tool_name_ssot_matches_remote_schemas () =
   let schema_names =
@@ -82,9 +82,6 @@ let test_operator_remote_tool_name_ssot_matches_remote_schemas () =
     "operator remote exported names"
     (List.sort String.compare Tool_name.Operator_remote_name.all_strings)
     (List.sort String.compare Operator_tool.remote_tool_names);
-  check bool "chat recovery cannot bypass operator profile" false
-    (Tool_catalog.allow_direct_call "masc_operator_chat_recovery_resolve")
-  ;
   check bool "Board quarantine recovery cannot bypass operator profile" false
     (Tool_catalog.allow_direct_call
        "masc_operator_board_attention_quarantine_requeue")
@@ -199,7 +196,7 @@ let test_librarian_dropped_schema_is_closed () =
 ;;
 
 (* The reviewer config must reach json_object-only providers. Counterfactual
-   first: a native schema request on a Glm-kind config is rejected by the OAS
+   first: a native schema request on a Glm-kind config is rejected by the AGENT_CORE
    contract — that rejection is exactly what left every task nonterminal
    fleet-wide on a Glm evaluator runtime (2026-07-21). The reviewer transform
    must therefore request no wire format at all and validate on Glm. *)
@@ -223,7 +220,7 @@ let test_anti_rationalization_reviewer_config_reaches_glm () =
 let test_anti_rationalization_reviewer_config_clears_preset_response_format () =
   let preset =
     { (glm_provider_config ()) with
-      response_format = Agent_sdk.Types.JsonMode
+      response_format = Agent_core.Types.JsonMode
     }
   in
   let reviewer =

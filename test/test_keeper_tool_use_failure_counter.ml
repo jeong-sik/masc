@@ -1,11 +1,11 @@
 (* test/test_keeper_tool_use_failure_counter.ml
 
-   #9919: verify that [post_tool_use_failure] in keeper_hooks_oas
+   #9919: verify that [post_tool_use_failure] in keeper_hooks_agent_core
    emits a proper Otel_metric_store counter with [keeper] and [tool]
    labels instead of the degenerate legacy heuristic metric
    that produced 51 identical 1-bit rows in production. *)
 
-module H = Masc.Keeper_hooks_oas
+module H = Masc.Keeper_hooks_agent_core
 module Metrics = Masc.Otel_metric_store
 
 let counter_for ~keeper ~tool =
@@ -16,7 +16,7 @@ let counter_for ~keeper ~tool =
 
 let test_metric_name_matches_convention () =
   (* Otel_metric_store _total suffix + masc_ prefix follow the existing
-     counter naming in keeper_hooks_oas.  A rename would break
+     counter naming in keeper_hooks_agent_core.  A rename would break
      dashboards and historical aggregate readers. *)
   Alcotest.(check string)
     "tool_use_failure counter uses canonical masc_*_total name"

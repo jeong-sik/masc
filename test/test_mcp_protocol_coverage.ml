@@ -242,6 +242,57 @@ let test_classify_wildcard_rejected () =
    Test Runners
    ============================================================ *)
 
+
+(* ============================================================
+   make_response resultType (SEP-2322, revision 2026-07-28)
+   ============================================================ *)
+
+let result_member resp =
+  match resp with
+  | `Assoc fields -> List.assoc_opt "result" fields
+  | _ -> None
+
+let result_type_of fields =
+  match List.assoc_opt "resultType" fields with
+  | Some (`String s) -> Some s
+  | _ -> None
+
+let test_make_response_adds_complete () =
+  let resp =
+    Mcp_transport_protocol.make_response ~id:(`Int 1) (`Assoc [ "ok", `Bool true ])
+  in
+  match result_member resp with
+  | Some (`Assoc fields) ->
+    check (option string) "resultType defaults to complete" (Some "complete")
+      (result_type_of fields);
+    check bool "original members preserved" true (List.mem_assoc "ok" fields)
+  | _ -> fail "result must remain an object"
+
+let test_make_response_preserves_existing_result_type () =
+  let resp =
+    Mcp_transport_protocol.make_response ~id:(`Int 2)
+      (`Assoc [ "resultType", `String "input_required" ])
+  in
+  match result_member resp with
+  | Some (`Assoc fields) ->
+    check (option string) "an explicit resultType is not overwritten"
+      (Some "input_required") (result_type_of fields);
+    check int "resultType appears once" 1
+      (List.length (List.filter (fun (k, _) -> String.equal k "resultType") fields))
+  | _ -> fail "result must remain an object"
+
+let test_make_response_envelope_intact () =
+  let resp = Mcp_transport_protocol.make_response ~id:(`Int 7) (`Assoc []) in
+  match resp with
+  | `Assoc fields ->
+    check (option string) "jsonrpc version" (Some "2.0")
+      (match List.assoc_opt "jsonrpc" fields with
+       | Some (`String v) -> Some v
+       | _ -> None);
+    check bool "id echoed" true
+      (match List.assoc_opt "id" fields with Some (`Int 7) -> true | _ -> false)
+  | _ -> fail "response must be an object"
+
 let () =
   run "Mcp_transport_protocol Coverage" [
     "constants", [
@@ -307,5 +358,10 @@ let () =
       test_case "rejected" `Quick test_classify_rejected;
       test_case "none rejected" `Quick test_classify_none_rejected;
       test_case "wildcard rejected" `Quick test_classify_wildcard_rejected;
+    ];
+    "make_response resultType", [
+      test_case "adds complete" `Quick test_make_response_adds_complete;
+      test_case "keeps input_required" `Quick test_make_response_preserves_existing_result_type;
+      test_case "envelope intact" `Quick test_make_response_envelope_intact;
     ];
   ]

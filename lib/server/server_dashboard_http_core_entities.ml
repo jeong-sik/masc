@@ -33,24 +33,22 @@ let dashboard_agent_json (agent : Masc_domain.agent) =
     ; "capabilities", `List (List.map (fun item -> `String item) agent.capabilities)
     ; "emoji", `String profile.emoji
     ; "koreanName", `String profile.korean_name
-    ; "model", `Null
-    ; "traits", `List (List.map (fun t -> `String t) profile.traits)
-    ; "interests", `List (List.map (fun i -> `String i) profile.interests)
-    ; "activityLevel", Json_util.float_opt_to_json profile.activity_level
-    ; "primaryValue", Json_util.string_opt_to_json profile.primary_value
     ]
 ;;
 
 let dashboard_message_json (message : Masc_domain.message) =
   `Assoc
-    [ "from", `String message.from_agent
+    [ "request_id", `String message.request_id
+    ; ( "mention_delivery"
+      , `String
+          (Masc_domain.message_mention_delivery_to_string message.mention_delivery) )
+    ; "from", `String message.from_agent
     ; "type", `String message.msg_type
     ; "content", `String message.content
     ; "mention", Json_util.string_opt_to_json message.mention
     ; "timestamp", `String message.timestamp
     ; "trace_context", Json_util.string_opt_to_json message.trace_context
     ; "expires_at", Json_util.float_opt_to_json message.expires_at
-    ; "relevance", `String message.relevance
     ; "seq", `Int message.seq
     ]
 ;;

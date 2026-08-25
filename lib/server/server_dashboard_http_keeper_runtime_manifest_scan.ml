@@ -16,38 +16,38 @@ type runtime_manifest_scan =
   ; returned_rows : Keeper_runtime_manifest.t Queue.t
   ; provider_attempt_rows : Keeper_runtime_manifest.t Queue.t
   ; event_counts : (string, int) Hashtbl.t
-  ; mutable total_rows : int
-  ; mutable has_terminal : bool
-  ; mutable terminal_keeper_turn_ids : int list
-  ; mutable max_oas_turn_count : int option
-  ; mutable keeper_turn_ids : int list
-  ; mutable event_bus_count : int
-  ; mutable event_bus_correlation_ids : string list
-  ; mutable event_bus_run_ids : string list
-  ; mutable context_compact_started_count : int
-  ; mutable context_compacted_count : int
-  ; mutable last_compaction : Yojson.Safe.t option
-  ; mutable latest_provider_lane_decision : Yojson.Safe.t option
-  ; mutable latest_provider_lane_row : Keeper_runtime_manifest.t option
-  ; mutable latest_pre_dispatch_blocked_row : Keeper_runtime_manifest.t option
-  ; mutable payload_role_counts : (string, int) Hashtbl.t
-  ; mutable source_clock_counts : (string, int) Hashtbl.t
-  ; mutable context_injected_count : int
-  ; mutable context_compacted_event_count : int
-  ; mutable provider_started_count : int
-  ; mutable provider_finished_count : int
-  ; mutable provider_terminal_row : Keeper_runtime_manifest.t option
-  ; mutable latest_context_injected_row : Keeper_runtime_manifest.t option
-  ; mutable latest_context_compacted_row : Keeper_runtime_manifest.t option
-  ; mutable dag_edges : (string * string) list
-  ; mutable scanned_lines : int
+  ; total_rows : int
+  ; has_terminal : bool
+  ; terminal_keeper_turn_ids : int list
+  ; max_agent_core_turn_count : int option
+  ; keeper_turn_ids : int list
+  ; event_bus_count : int
+  ; event_bus_correlation_ids : string list
+  ; event_bus_run_ids : string list
+  ; context_compact_started_count : int
+  ; context_compacted_count : int
+  ; last_compaction : Yojson.Safe.t option
+  ; latest_provider_lane_decision : Yojson.Safe.t option
+  ; latest_provider_lane_row : Keeper_runtime_manifest.t option
+  ; latest_pre_dispatch_blocked_row : Keeper_runtime_manifest.t option
+  ; payload_role_counts : (string, int) Hashtbl.t
+  ; source_clock_counts : (string, int) Hashtbl.t
+  ; context_injected_count : int
+  ; context_compacted_event_count : int
+  ; provider_started_count : int
+  ; provider_finished_count : int
+  ; provider_terminal_row : Keeper_runtime_manifest.t option
+  ; latest_context_injected_row : Keeper_runtime_manifest.t option
+  ; latest_context_compacted_row : Keeper_runtime_manifest.t option
+  ; dag_edges : (string * string) list
+  ; scanned_lines : int
   ; scan_line_limit : int
   ; scan_scope : string
   ; unsupported_event_counts : (string, int) Hashtbl.t
-  ; mutable unsupported_event_count : int
-  ; mutable unsupported_event_unattributed_count : int
-  ; mutable invalid_manifest_row_count : int
-  ; mutable invalid_json_row_count : int
+  ; unsupported_event_count : int
+  ; unsupported_event_unattributed_count : int
+  ; invalid_manifest_row_count : int
+  ; invalid_json_row_count : int
   ; diagnostic_samples : manifest_scan_diagnostic Queue.t
   }
 
@@ -72,7 +72,7 @@ let make_runtime_manifest_scan ~path ~limit ~scan_line_limit ~scan_scope =
   ; total_rows = 0
   ; has_terminal = false
   ; terminal_keeper_turn_ids = []
-  ; max_oas_turn_count = None
+  ; max_agent_core_turn_count = None
   ; keeper_turn_ids = []
   ; event_bus_count = 0
   ; event_bus_correlation_ids = []
@@ -126,17 +126,32 @@ let increment_bounded_count table ~capacity key =
 ;;
 
 let record_manifest_scan_diagnostic scan diagnostic =
-  (match diagnostic with
-   | Unsupported_event_row event ->
-     scan.unsupported_event_count <- scan.unsupported_event_count + 1;
-     if not (increment_bounded_count scan.unsupported_event_counts ~capacity:scan.limit event)
-     then
-       scan.unsupported_event_unattributed_count <-
-         scan.unsupported_event_unattributed_count + 1
-   | Invalid_manifest_row _ ->
-     scan.invalid_manifest_row_count <- scan.invalid_manifest_row_count + 1
-   | Invalid_json_row _ -> scan.invalid_json_row_count <- scan.invalid_json_row_count + 1);
-  push_bounded scan.diagnostic_samples scan.limit diagnostic
+  let scan =
+    match diagnostic with
+    | Unsupported_event_row event ->
+      (* [increment_bounded_count] mutates the shared [unsupported_event_counts]
+         table and reports whether the event fit under the capacity bound; the
+         unattributed counter absorbs the ones that did not. *)
+      let attributed =
+        increment_bounded_count
+          scan.unsupported_event_counts
+          ~capacity:scan.limit
+          event
+      in
+      { scan with
+        unsupported_event_count = scan.unsupported_event_count + 1
+      ; unsupported_event_unattributed_count =
+          (if attributed
+           then scan.unsupported_event_unattributed_count
+           else scan.unsupported_event_unattributed_count + 1)
+      }
+    | Invalid_manifest_row _ ->
+      { scan with invalid_manifest_row_count = scan.invalid_manifest_row_count + 1 }
+    | Invalid_json_row _ ->
+      { scan with invalid_json_row_count = scan.invalid_json_row_count + 1 }
+  in
+  push_bounded scan.diagnostic_samples scan.limit diagnostic;
+  scan
 ;;
 
 let sorted_count_rows table key_to_string =
@@ -195,23 +210,25 @@ let max_int_opt current value =
   | Some existing -> Some (max existing value)
 
 let update_runtime_manifest_scan scan (row : Keeper_runtime_manifest.t) =
-  scan.total_rows <- scan.total_rows + 1;
   push_bounded scan.returned_rows scan.limit row;
   increment_event_count scan row.Keeper_runtime_manifest.event;
-  (match
-     let decision = row.Keeper_runtime_manifest.decision in
-     let clock_refs = Json_util.assoc_member_opt "clock_refs" decision in
-     match clock_refs with
-     | Some (`Assoc _ as refs) ->
-       let event_id = Json_util.get_string refs "event_id" in
-       let parent_event_id = Json_util.get_string refs "parent_event_id" in
-       (match event_id, parent_event_id with
-        | Some eid, Some peid -> Some (peid, eid)
-        | _ -> None)
-     | None | Some _ -> None
-   with
-   | Some edge -> scan.dag_edges <- edge :: scan.dag_edges
-   | None -> ());
+  let scan = { scan with total_rows = scan.total_rows + 1 } in
+  let scan =
+    match
+       let decision = row.Keeper_runtime_manifest.decision in
+       let clock_refs = Json_util.assoc_member_opt "clock_refs" decision in
+       match clock_refs with
+       | Some (`Assoc _ as refs) ->
+         let event_id = Json_util.get_string refs "event_id" in
+         let parent_event_id = Json_util.get_string refs "parent_event_id" in
+         (match event_id, parent_event_id with
+          | Some eid, Some peid -> Some (peid, eid)
+          | _ -> None)
+      | None | Some _ -> None
+    with
+    | Some edge -> { scan with dag_edges = edge :: scan.dag_edges }
+    | None -> scan
+  in
   (match
      Json_util.assoc_member_opt "payload_role" row.Keeper_runtime_manifest.decision
    with
@@ -248,59 +265,90 @@ let update_runtime_manifest_scan scan (row : Keeper_runtime_manifest.t) =
     | None -> 0
   in
   Hashtbl.replace scan.source_clock_counts source_clock (current + 1);
-  (match row.Keeper_runtime_manifest.keeper_turn_id with
-   | Some value -> scan.keeper_turn_ids <- value :: scan.keeper_turn_ids
-   | None -> ());
-  (match row.Keeper_runtime_manifest.oas_turn_count with
-   | Some value -> scan.max_oas_turn_count <- max_int_opt scan.max_oas_turn_count value
-   | None -> ());
-  (match row.Keeper_runtime_manifest.event with
-   | Keeper_runtime_manifest.Turn_finished ->
-     scan.has_terminal <- true;
-     (match row.Keeper_runtime_manifest.keeper_turn_id with
+  let scan =
+    match row.Keeper_runtime_manifest.keeper_turn_id with
+    | Some value -> { scan with keeper_turn_ids = value :: scan.keeper_turn_ids }
+    | None -> scan
+  in
+  let scan =
+    match row.Keeper_runtime_manifest.agent_core_turn_count with
+    | Some value ->
+      { scan with
+        max_agent_core_turn_count =
+          max_int_opt scan.max_agent_core_turn_count value
+      }
+    | None -> scan
+  in
+  match row.Keeper_runtime_manifest.event with
+  | Keeper_runtime_manifest.Turn_finished ->
+    let scan = { scan with has_terminal = true } in
+    (match row.Keeper_runtime_manifest.keeper_turn_id with
+     | Some value ->
+       { scan with
+         terminal_keeper_turn_ids = value :: scan.terminal_keeper_turn_ids
+       }
+     | None -> scan)
+  | Keeper_runtime_manifest.Provider_lane_resolved ->
+    { scan with
+      latest_provider_lane_decision = Some row.Keeper_runtime_manifest.decision
+    ; latest_provider_lane_row = Some row
+    }
+  | Keeper_runtime_manifest.Pre_dispatch_blocked ->
+    { scan with latest_pre_dispatch_blocked_row = Some row }
+  | Keeper_runtime_manifest.Context_injected ->
+    { scan with
+      context_injected_count = scan.context_injected_count + 1
+    ; latest_context_injected_row = Some row
+    }
+  | Keeper_runtime_manifest.Context_compacted ->
+    { scan with
+      context_compacted_event_count = scan.context_compacted_event_count + 1
+    ; latest_context_compacted_row = Some row
+    }
+  | Keeper_runtime_manifest.Event_bus_correlated ->
+    let decision = row.Keeper_runtime_manifest.decision in
+    let scan =
+      { scan with
+        event_bus_count = scan.event_bus_count + 1
+      ; context_compact_started_count =
+          scan.context_compact_started_count
+          + Option.value
+              (Json_util.get_int decision "context_compact_started_count")
+              ~default:0
+      ; context_compacted_count =
+          scan.context_compacted_count
+          + Option.value
+              (Json_util.get_int decision "context_compacted_count")
+              ~default:0
+      }
+    in
+    let scan =
+      match Json_util.get_string decision "correlation_id" with
       | Some value ->
-        scan.terminal_keeper_turn_ids <- value :: scan.terminal_keeper_turn_ids
-      | None -> ())
-   | Keeper_runtime_manifest.Provider_lane_resolved ->
-     scan.latest_provider_lane_decision <- Some row.Keeper_runtime_manifest.decision;
-     scan.latest_provider_lane_row <- Some row
-   | Keeper_runtime_manifest.Pre_dispatch_blocked ->
-     scan.latest_pre_dispatch_blocked_row <- Some row
-   | Keeper_runtime_manifest.Context_injected ->
-     scan.context_injected_count <- scan.context_injected_count + 1;
-     scan.latest_context_injected_row <- Some row
-   | Keeper_runtime_manifest.Context_compacted ->
-     scan.context_compacted_event_count <- scan.context_compacted_event_count + 1;
-     scan.latest_context_compacted_row <- Some row
-   | Keeper_runtime_manifest.Event_bus_correlated ->
-     let decision = row.Keeper_runtime_manifest.decision in
-     scan.event_bus_count <- scan.event_bus_count + 1;
-     (match Json_util.get_string decision "correlation_id" with
-      | Some value -> scan.event_bus_correlation_ids <- value :: scan.event_bus_correlation_ids
-      | None -> ());
-     (match Json_util.get_string decision "run_id" with
-      | Some value -> scan.event_bus_run_ids <- value :: scan.event_bus_run_ids
-      | None -> ());
-     scan.context_compact_started_count <-
-       scan.context_compact_started_count
-       + Option.value
-           (Json_util.get_int decision "context_compact_started_count")
-           ~default:0;
-     scan.context_compacted_count <-
-       scan.context_compacted_count
-       + Option.value (Json_util.get_int decision "context_compacted_count")
-           ~default:0;
-     (match Json_util.assoc_member_opt "last_compaction" decision with
-      | Some (`Assoc _ as obj) -> scan.last_compaction <- Some obj
-      | _ -> ())
-   | Keeper_runtime_manifest.Provider_attempt_started ->
-     scan.provider_started_count <- scan.provider_started_count + 1;
-     push_bounded scan.provider_attempt_rows scan.limit row
-   | Keeper_runtime_manifest.Provider_attempt_finished ->
-     scan.provider_finished_count <- scan.provider_finished_count + 1;
-     scan.provider_terminal_row <- Some row;
-     push_bounded scan.provider_attempt_rows scan.limit row
-   | _ -> ())
+        { scan with
+          event_bus_correlation_ids = value :: scan.event_bus_correlation_ids
+        }
+      | None -> scan
+    in
+    let scan =
+      match Json_util.get_string decision "run_id" with
+      | Some value ->
+        { scan with event_bus_run_ids = value :: scan.event_bus_run_ids }
+      | None -> scan
+    in
+    (match Json_util.assoc_member_opt "last_compaction" decision with
+     | Some (`Assoc _ as obj) -> { scan with last_compaction = Some obj }
+     | _ -> scan)
+  | Keeper_runtime_manifest.Provider_attempt_started ->
+    push_bounded scan.provider_attempt_rows scan.limit row;
+    { scan with provider_started_count = scan.provider_started_count + 1 }
+  | Keeper_runtime_manifest.Provider_attempt_finished ->
+    push_bounded scan.provider_attempt_rows scan.limit row;
+    { scan with
+      provider_finished_count = scan.provider_finished_count + 1
+    ; provider_terminal_row = Some row
+    }
+  | _ -> scan
 
 let manifest_identity_matches ?turn_id keeper_name trace_id
     (identity : Keeper_runtime_manifest.row_identity) =
@@ -325,9 +373,9 @@ let read_runtime_manifest_scan ~config ~keeper_name ~trace_id ?turn_id ~limit ()
       ~scan_scope:"tail"
   in
   Dated_jsonl.load_tail_lines path ~max_lines:scan_line_limit
-  |> List.iter
-       (fun line ->
-          scan.scanned_lines <- scan.scanned_lines + 1;
+  |> List.fold_left
+       (fun scan line ->
+          let scan = { scan with scanned_lines = scan.scanned_lines + 1 } in
           try
             let json = Yojson.Safe.from_string line in
             match Keeper_runtime_manifest.decode_persisted_row json with
@@ -337,10 +385,10 @@ let read_runtime_manifest_scan ~config ~keeper_name ~trace_id ?turn_id ~limit ()
             | Ok (Keeper_runtime_manifest.Unsupported_row (identity, unsupported))
               when manifest_identity_matches ?turn_id keeper_name trace_id identity ->
               record_manifest_scan_diagnostic scan (Unsupported_event_row unsupported)
-            | Ok _ -> ()
+            | Ok _ -> scan
             | Error detail ->
               record_manifest_scan_diagnostic scan (Invalid_manifest_row detail)
           with
           | Yojson.Json_error msg | Yojson.Safe.Util.Type_error (msg, _) ->
-            record_manifest_scan_diagnostic scan (Invalid_json_row msg));
-  scan
+            record_manifest_scan_diagnostic scan (Invalid_json_row msg))
+       scan

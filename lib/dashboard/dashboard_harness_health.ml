@@ -20,7 +20,7 @@ type harness_verdict_item =
   ; fallback_reason : string option
   }
 
-type pre_compact_event =
+type pre_compact_event = Keeper_compact_policy.pre_compact_event =
   { timestamp : float
   ; keeper_name : string
   ; checkpoint_bytes : int
@@ -36,7 +36,7 @@ type pre_compact_event =
     owns; they do not claim to represent a provider-specific HTTP request body.
 
     [message_count] and [role_counts] include the synthesized user turn
-    that OAS will append from [~goal], matching the wire-level message
+    that AGENT_CORE will append from [~goal], matching the wire-level message
     list the LLM will receive. *)
 type wake_payload_event =
   { timestamp : float
@@ -67,6 +67,14 @@ let max_recent_verdicts = 8
 let max_signal_scan = 500
 let runtime_stale_after_s = 30. *. 60.
 let evaluator_stale_after_s = 12. *. Masc_time_constants.hour
+
+(* Fraction of an evaluator's verdicts that came back Invalid_verdict or
+   Evaluator_unavailable before the rail stops reading Healthy. The two
+   thresholds above are named, this one was a bare 0.8 at its comparison, so
+   the number nobody had to look at was the one that decides whether four
+   failures in five still read as fine. Named here so changing it is a
+   reviewed edit. *)
+let evaluator_fallback_warning_ratio = 0.8
 
 let pre_compact_store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
 let pre_compact_store_mu = Eio.Mutex.create ()
@@ -165,14 +173,27 @@ let date_bounds ?since ?until () =
   since, until
 ;;
 
-let read_store_records store ?since ?until () =
+(* Both branches read at most [max_signal_scan] rows. They did not: the
+   unfiltered branch was bounded and the filtered one was not, so supplying a
+   date — which a caller does to narrow the result — removed the row cap and
+   scanned every day-file in range. A one-sided bound widens further, since the
+   missing side is filled with 2020-01-01 / 2099-12-31 below.
+
+   [read_range_recent] is the bounded reader for a date range and takes the
+   same cap the unfiltered branch already uses. *)
+let read_store_records store ?since ?until ~f () =
   let since, until = date_bounds ?since ?until () in
   if since = "" && until = ""
-  then Dated_jsonl.read_recent store max_signal_scan
+  then Dated_jsonl.filter_map_recent store max_signal_scan ~f
   else (
     let start_date = if since = "" then "2020-01-01" else since in
     let end_date = if until = "" then "2099-12-31" else until in
-    Dated_jsonl.read_range store ~since:start_date ~until:end_date)
+    Dated_jsonl.filter_map_range_recent
+      store
+      ~since:start_date
+      ~until:end_date
+      max_signal_scan
+      ~f)
 ;;
 
 let has_any_records store = Dated_jsonl.read_recent store 1 <> []
@@ -343,13 +364,6 @@ let required_float fields key =
   else Error (Printf.sprintf "field %S must be finite" key)
 ;;
 
-let required_bool fields key =
-  let* value = required_member fields key in
-  match value with
-  | `Bool value -> Ok value
-  | _ -> Error (Printf.sprintf "field %S must be a boolean" key)
-;;
-
 let required_role_counts fields =
   let* value = required_member fields "role_counts" in
   match value with
@@ -373,22 +387,6 @@ let wake_payload_record_json (event : wake_payload_event) =
   `Assoc
     [ "record_type", `String wake_payload_record_type
     ; "timestamp", `Float event.timestamp
-    ; "keeper_name", `String event.keeper_name
-    ; "trace_id", `String event.trace_id
-    ; "turn_index", `Int event.turn_index
-    ; "context_window", `Int event.context_window
-    ; "system_prompt_bytes", `Int event.system_prompt_bytes
-    ; "tool_schema_json_bytes", `Int event.tool_schema_json_bytes
-    ; "message_content_bytes", `Int event.message_content_bytes
-    ; "message_count", `Int event.message_count
-    ; "role_counts", role_counts_to_json event.role_counts
-    ; "tool_count", `Int event.tool_count
-    ]
-;;
-
-let wake_payload_event_json (event : wake_payload_event) =
-  `Assoc
-    [ "timestamp", `Float event.timestamp
     ; "keeper_name", `String event.keeper_name
     ; "trace_id", `String event.trace_id
     ; "turn_index", `Int event.turn_index
@@ -468,9 +466,13 @@ let wake_payload_record_identity json =
 let read_recent_verdicts ?since ?until ?(limit = max_recent_verdicts) ()
   : harness_verdict_item list
   =
-  let records = read_store_records (Eval_calibration.get_store ()) ?since ?until () in
   let verdicts : harness_verdict_item list =
-    records |> List.filter_map verdict_item_of_json
+    read_store_records
+      (Eval_calibration.get_store ())
+      ?since
+      ?until
+      ~f:verdict_item_of_json
+      ()
   in
   let verdicts =
     List.sort
@@ -496,10 +498,13 @@ let read_recent_verdicts_for_agents
   then []
   else (
     let is_wanted name = List.exists (String.equal name) wanted in
-    let records = read_store_records (Eval_calibration.get_store ()) ?since ?until () in
     let verdicts : harness_verdict_item list =
-      records
-      |> List.filter_map verdict_item_of_json
+      read_store_records
+        (Eval_calibration.get_store ())
+        ?since
+        ?until
+        ~f:verdict_item_of_json
+        ()
       |> List.filter (fun verdict -> is_wanted verdict.agent_name)
     in
     let verdicts =
@@ -512,9 +517,13 @@ let read_recent_verdicts_for_agents
 ;;
 
 let read_pre_compact_events ?since ?until () =
-  let records = read_store_records (get_pre_compact_store ()) ?since ?until () in
   let events : pre_compact_event list =
-    records |> List.filter_map pre_compact_event_of_json
+    read_store_records
+      (get_pre_compact_store ())
+      ?since
+      ?until
+      ~f:pre_compact_event_of_json
+      ()
   in
   List.sort
     (fun (left : pre_compact_event) (right : pre_compact_event) ->
@@ -523,20 +532,25 @@ let read_pre_compact_events ?since ?until () =
 ;;
 
 let read_wake_payload_events ?since ?until () =
-  let records = read_store_records (get_wake_payload_store ()) ?since ?until () in
   let events : wake_payload_event list =
-    records
-    |> List.filter_map (fun json ->
-      match wake_payload_event_of_json json with
-      | Ok event -> Some event
-      | Error detail ->
-        let keeper_name, trace_id = wake_payload_record_identity json in
-        Log.Harness.warn
-          "[wake_payload] rejected persisted record keeper=%s trace=%s: %s"
-          keeper_name
-          trace_id
-          detail;
-        None)
+    read_store_records
+      (get_wake_payload_store ())
+      ?since
+      ?until
+      ~f:(fun json ->
+        match wake_payload_event_of_json json with
+        | Ok event -> Some event
+        | Error detail ->
+          let keeper_name, trace_id = wake_payload_record_identity json in
+          (* Unconditional per-row warn: no quota and no early stop, so it does
+             not care that the reader calls this newest-first. *)
+          Log.Harness.warn
+            "[wake_payload] rejected persisted record keeper=%s trace=%s: %s"
+            keeper_name
+            trace_id
+            detail;
+          None)
+      ()
   in
   List.sort
     (fun (left : wake_payload_event) (right : wake_payload_event) ->
@@ -605,7 +619,12 @@ let read_keeper_metric_records ?since ?until (config : Workspace.config) keeper_
     let since, until = date_bounds ?since ?until () in
     let start_date = if since = "" then "2020-01-01" else since in
     let end_date = if until = "" then "2099-12-31" else until in
-    Dated_jsonl.read_range store ~since:start_date ~until:end_date
+    (* Same cap as the unfiltered branch below; see [read_store_records]. *)
+    Dated_jsonl.read_range_recent
+      store
+      ~since:start_date
+      ~until:end_date
+      max_signal_scan
   | None, None -> Dated_jsonl.read_recent store max_signal_scan
 ;;
 
@@ -673,7 +692,9 @@ let evaluator_status ~calibration latest_timestamp =
       let fallback_ratio =
         float_of_int fallback_count /. float_of_int (max 1 total_verdicts)
       in
-      if fallback_ratio > 0.8 then Warning else Healthy)
+      if fallback_ratio > evaluator_fallback_warning_ratio
+      then Warning
+      else Healthy)
 ;;
 
 let latest_timestamp_of_verdicts (verdicts : harness_verdict_item list) =
@@ -855,10 +876,6 @@ let record_wake_payload
     ~message_count
     ~role_counts
     ~tool_count
-;;
-
-let recent_verdicts_json ?since ?until () =
-  `List (List.map verdict_item_json (read_recent_verdicts ?since ?until ()))
 ;;
 
 let recent_pre_compact_json

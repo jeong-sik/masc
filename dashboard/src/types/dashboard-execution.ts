@@ -25,7 +25,6 @@ export type DashboardAuthErrorCode =
 export interface DashboardShellAuthSummary {
   enabled: boolean
   require_token: boolean
-  default_role?: string | null
   token_present: boolean
   token_valid: boolean
   token_agent?: string | null
@@ -48,11 +47,8 @@ export interface DashboardConfigResolution {
   status: 'ready' | 'warn' | 'invalid_env' | 'missing'
   warnings: string[]
   config_root: DashboardConfigResolutionItem
-  runtime_authoring: DashboardConfigResolutionItem
-  runtime: DashboardConfigResolutionItem
   prompts: DashboardConfigResolutionItem
   keepers: DashboardConfigResolutionItem
-  personas: DashboardConfigResolutionItem
 }
 
 export interface DashboardRuntimeDiagnostic {
@@ -205,112 +201,16 @@ export interface DashboardKeeperReactionLedgerHealth {
 
 export const DASHBOARD_KEEPER_FLEET_OPERATOR_SCHEMA = 'masc.keeper_fleet_operator.v1' as const
 
-export const DASHBOARD_BLOCKED_KEEPER_REASONS = [
-  'durable_paused_autoboot_enabled',
-  'meta_read_error',
-  'not_bootable',
-  'missing_meta',
-  'config_invalid',
-  'sandbox_profile_required',
-  'materialization_failed',
-  'phase_offline',
-  'phase_running',
-  'phase_failing',
-  'phase_overflowed',
-  'phase_compacting',
-  'phase_handing_off',
-  'phase_draining',
-  'phase_paused',
-  'phase_stopped',
-  'phase_crashed',
-  'phase_restarting',
-  'phase_dead',
-  'keeper_bootstrap_disabled',
-  'not_registered',
-  'not_running',
-  'no_keeper_binding',
-  'current_fact_invalid',
-] as const
-
-export const DASHBOARD_KEEPER_FLEET_OPERATOR_ACTIONS = [
-  'resume_or_leave_paused',
-  'repair_keeper_meta_file',
-  'add_keeper_toml_or_disable_stale_autoboot_meta',
-  'run_keeper_up_or_recreate_meta',
-  'repair_keeper_toml_config',
-  'add_sandbox_profile_to_keeper_toml',
-  'inspect_keeper_autoboot_logs',
-  'enable_keeper_bootstrap_or_start_manually',
-  'inspect_dead_keeper_root_cause',
-  'restart_or_disable_stopped_keeper',
-  'start_or_recover_keeper',
-  'inspect_capacity_accounting',
-  'repair_failing_keeper',
-  'recover_context_overflow',
-  'wait_for_compaction',
-  'wait_for_handoff',
-  'wait_for_keeper_drain',
-  'inspect_crashed_keeper',
-  'wait_for_keeper_restart',
-  'create_keeper_or_reassign_task',
-  'inspect_current_keeper_fact',
-] as const
-
-export const DASHBOARD_KEEPER_EXECUTION_TRUTHS = [
-  'executable',
-  'recoverable',
-  'retained_disabled',
-  'paused_dead',
-  'shutdown_fenced',
-  'unknown',
-] as const
-
-export const DASHBOARD_KEEPER_NON_EXECUTABLE_CAUSES = [
-  'owner_absent_from_snapshot',
-  'owner_unregistered',
-  'no_keeper_binding',
-  'fiber_dead',
-  'lane_exited',
-  'completion_settled',
-  'autoboot_disabled',
-  'proactive_disabled',
-  'lifecycle_denied',
-  'runtime_terminal',
-  'shutdown_fenced',
-  'metadata_unavailable',
-  'runtime_not_live',
-  'current_fact_invalid',
-] as const
-
-export type DashboardBlockedKeeperReason = typeof DASHBOARD_BLOCKED_KEEPER_REASONS[number]
-export type DashboardKeeperFleetOperatorAction =
-  typeof DASHBOARD_KEEPER_FLEET_OPERATOR_ACTIONS[number]
-export type DashboardKeeperExecutionTruth = typeof DASHBOARD_KEEPER_EXECUTION_TRUTHS[number]
-export type DashboardKeeperNonExecutableCause =
-  typeof DASHBOARD_KEEPER_NON_EXECUTABLE_CAUSES[number]
-
-export interface DashboardBlockedKeeperFact {
-  keeper_name: string | null
-  agent_name: string | null
-  task_id: string | null
-  task_status: string | null
-  reason: DashboardBlockedKeeperReason
-  action: DashboardKeeperFleetOperatorAction
-  execution_truth: DashboardKeeperExecutionTruth
-  non_executable_cause: DashboardKeeperNonExecutableCause
-  operator_action_type: string | null
-  operator_tool_name: string | null
-  operator_action_confirm_required: boolean | null
-}
-
 export interface DashboardFleetPressureHealth {
   schema: typeof DASHBOARD_KEEPER_FLEET_OPERATOR_SCHEMA
   status: 'ok' | 'degraded' | 'blocked'
   reason: string | null
   blocker?: string | null
-  blocked_keeper_count: number
-  blocked_keepers: DashboardBlockedKeeperFact[]
   bootable_keeper_count?: number | null
+  // Which keepers are not running is this list minus executable_keeper_names.
+  // The server reports both and does not precompute the difference.
+  autoboot_enabled_keeper_names?: string[] | null
+  executable_keeper_names?: string[] | null
   running_keeper_fiber_count?: number | null
   failing_keeper_fiber_count?: number | null
   recovering_keeper_fiber_count?: number | null
@@ -374,7 +274,6 @@ export interface DashboardReadinessPillar {
   key: string
   label: string
   status: 'ok' | 'warn' | 'bad' | string
-  score: number
   summary: string
   blocking_reasons: string[]
   metrics?: Record<string, number>
@@ -382,7 +281,6 @@ export interface DashboardReadinessPillar {
 
 export interface DashboardReadinessSummary {
   status: 'ok' | 'warn' | 'bad' | string
-  score: number
   decision_required_count: number
   blocking_count: number
   pillars: DashboardReadinessPillar[]
@@ -453,6 +351,11 @@ export interface DashboardNamespaceTruthResponse {
 export interface ServerBuildIdentity {
   release_version: string
   commit?: string | null
+  commit_source?: string | null
+  binary_commit?: string | null
+  binary_commit_source?: string | null
+  repo_head_commit?: string | null
+  repo_head_commit_source?: string | null
   started_at: string
   uptime_seconds: number
 }
@@ -463,21 +366,12 @@ type DashboardExecutionContinuityState = 'healthy' | 'warning' | 'critical'
 type DashboardExecutionQueueKind = 'operation' | 'keeper'
 
 export interface DashboardExecutionSummary {
-  // `active_sessions` / `blocked_sessions` were the session-era pair, replaced
-  // by the `*_operations` fields below. Their producers went with the team
-  // session surfaces in #6363, so both had been permanently absent from every
-  // response since — declared, normalized, and never populated.
   active_operations?: number
   blocked_operations?: number
-  runtime_pressure?: number
   worker_alerts?: number
   continuity_alerts?: number
   priority_items?: number
-  todo_tasks?: number
-  claimed_tasks?: number
-  running_tasks?: number
   done_tasks?: number
-  cancelled_tasks?: number
   keepers?: number
 }
 
@@ -543,7 +437,6 @@ export interface DashboardExecutionContinuityBrief {
   note: string
   focus: string
   last_signal_at?: string | null
-  last_autonomous_action_at?: string | null
   generation?: number
   turn_count?: number
   context_ratio?: number | null
@@ -563,6 +456,9 @@ export interface DashboardExecutionContinuityBrief {
 }
 
 export interface DashboardExecutionResponse {
+  execution_publication_epoch?: string
+  execution_publication_generation?: number
+  execution_invalidated?: boolean
   generated_at?: string
   status?: ServerStatus
   summary?: DashboardExecutionSummary
@@ -647,22 +543,6 @@ export interface GoalTaskSummary {
   unassigned: number
   completion_pct: number | null
   by_status: Record<string, number>
-}
-
-export interface GoalCompletionSummary {
-  state: string
-  pct: number | null
-  pct_source: string
-  attainment_state: string
-  attainment_basis: string
-  /** Mirror of {@link GoalAttainmentProjection.metric_evaluation} (task-1743). */
-  metric_evaluation: 'unevaluated' | 'absent'
-  task_total: number
-  task_done: number
-  task_open: number
-  is_complete: boolean
-  is_terminal: boolean
-  ready_to_request_completion: boolean
 }
 
 export interface GoalFsmProjection {
@@ -751,9 +631,6 @@ export interface GoalTreeMetricProjection {
   metric: string | null
   target_value: string | null
   due_date: string | null
-  parent_goal_id: string | null
-  owner: string | null
-  attainment: GoalAttainmentProjection
 }
 
 export interface GoalTreeTaskProjection {
@@ -761,11 +638,10 @@ export interface GoalTreeTaskProjection {
   task_count: number
   task_done_count: number
   task_summary?: GoalTaskSummary
-  completion_summary?: GoalCompletionSummary
 }
 
 export interface GoalTreeActivityProjection {
-  timeline_events: unknown[]
+  timeline_events: GoalDetailTimelineEvent[]
   last_activity_at: string
   stagnation_seconds: number | null
   activity_observation: GoalFsmProjection['activity_observation']
@@ -796,29 +672,6 @@ export interface GoalTreeNode extends
   child_count: number
 }
 
-export interface GoalAttainmentProjection {
-  state: 'attained' | 'in_progress' | 'not_started' | 'unmeasured' | string
-  basis: 'goal_phase' | 'linked_tasks' | 'metric_target_percent' | 'metric_target_count' | 'unmeasured' | string
-  metric: string | null
-  /**
-   * Whether the declared metric was actually evaluated (task-1743).
-   * 'unevaluated': a metric is declared but no evaluator produced a value —
-   * attainment_pct is task-derived, not a metric measurement.
-   * 'absent': no metric is declared. Distinguishes an unmeasured metric from
-   * a genuine measured zero.
-   */
-  metric_evaluation: 'unevaluated' | 'absent'
-  target_value: string | null
-  target_parse_status: 'absent' | 'parseable' | 'unparseable' | 'invalid_target' | 'unsupported_metric' | 'no_linked_tasks' | string
-  unit: 'percent' | 'count' | 'unknown' | string
-  observed_value: number | null
-  target_numeric: number | null
-  attainment_pct: number | null
-  task_done_count: number
-  task_count: number
-  note: string
-}
-
 export interface GoalTreeSummary {
   total_goals: number
   active_goals: number
@@ -839,7 +692,6 @@ export interface GoalDetailKeeper {
   name: string
   agent_name: string
   current_task_id: string | null
-  active_goal_ids: string[]
   sandbox_profile: string
   network_mode: string
   runtime_id: string

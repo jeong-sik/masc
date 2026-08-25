@@ -88,6 +88,14 @@ type status =
   | Consumed of consumed_state
   | Quarantine of quarantine_state
 
+type status_view =
+  | Direct_resumable of resumable_status
+  | Requeued_resumable of
+      { resumable : resumable_status
+      ; quarantine : quarantine_state
+      }
+  | Suspended_quarantine of quarantine_state
+
 type candidate =
   { candidate_id : string
   ; keeper_name : string
@@ -118,7 +126,10 @@ type record_acceptance =
 
 exception Candidate_unavailable of string
 
-let schema_version = 3
+(* v4: post_created candidate identity became the typed event key
+   (keeper, kind, post_id) — v3 rows hash volatile fields and fail the
+   read-time identity check, so v3 ledgers are retired at deploy, not read. *)
+let schema_version = 4
 
 let quarantine_failure_category_to_string = function
   | Candidate_membership_conflict -> "candidate_membership_conflict"
@@ -145,17 +156,14 @@ let quarantine_failure_category_of_string = function
   | _ -> None
 ;;
 
-let resumable_status = function
-  | Pending pending -> Some (Resumable_pending pending)
-  | Judged judged -> Some (Resumable_judged judged)
-  | Consumed consumed -> Some (Resumable_consumed consumed)
-  | Quarantine { quarantine; phase = Requeued _ } -> Some quarantine.prior_status
-  | Quarantine { phase = (Quarantined | Requeue_requested _); _ } -> None
-;;
-
-let quarantine_state = function
-  | Quarantine state -> Some state
-  | Pending _ | Judged _ | Consumed _ -> None
+let status_view = function
+  | Pending pending -> Direct_resumable (Resumable_pending pending)
+  | Judged judged -> Direct_resumable (Resumable_judged judged)
+  | Consumed consumed -> Direct_resumable (Resumable_consumed consumed)
+  | Quarantine ({ quarantine; phase = Requeued _ } as state) ->
+    Requeued_resumable { resumable = quarantine.prior_status; quarantine = state }
+  | Quarantine ({ phase = (Quarantined | Requeue_requested _); _ } as state) ->
+    Suspended_quarantine state
 ;;
 
 let status_of_resumable = function
@@ -207,28 +215,54 @@ let queue_reaction_to_yojson (reaction : Board_dispatch.board_reaction_change) =
     ]
 ;;
 
+let queue_vote_to_yojson (vote : Board_dispatch.board_vote_change) =
+  let target_kind, target_id =
+    match vote.target with
+    | Board_dispatch.Vote_on_post post_id -> "post", post_id
+    | Board_dispatch.Vote_on_comment comment_id -> "comment", comment_id
+  in
+  `Assoc
+    [ "target_kind", `String target_kind
+    ; "target_id", `String target_id
+    ; "target_author", `String vote.target_author
+    ; "voter", `String vote.voter
+    ; "direction", `String (Board.vote_direction_to_string vote.direction)
+    ]
+;;
+
 let signal_kind_to_string = function
   | Board_dispatch.Board_post_created -> "post_created"
   | Board_dispatch.Board_comment_added -> "comment_added"
   | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
+  | Board_dispatch.Board_vote_cast _ -> "vote_cast"
 ;;
 
+(* Candidate rows written before votes became a signal carry exactly the
+   eight keys below, so [vote] is added only on a vote row rather than as a
+   ninth always-present key; [signal_of_yojson] expects it by kind. *)
 let signal_to_yojson (signal : Board_dispatch.board_signal) =
   `Assoc
-    [ "kind", `String (signal_kind_to_string signal.kind)
-    ; "post_id", `String signal.post_id
-    ; "author", `String signal.author
-    ; "title", `String signal.title
-    ; "content", `String signal.content
-    ; "hearth", Json_util.option_to_yojson (fun value -> `String value) signal.hearth
-    ; "updated_at", Json_util.option_to_yojson (fun value -> `Float value) signal.updated_at
-    ; ( "reaction"
-      , match signal.kind with
-        | Board_dispatch.Board_reaction_changed reaction ->
-          queue_reaction_to_yojson reaction
-        | Board_dispatch.Board_post_created | Board_dispatch.Board_comment_added ->
-          `Null )
-    ]
+    ([ "kind", `String (signal_kind_to_string signal.kind)
+     ; "post_id", `String signal.post_id
+     ; "author", `String signal.author
+     ; "title", `String signal.title
+     ; "content", `String signal.content
+     ; "hearth", Json_util.option_to_yojson (fun value -> `String value) signal.hearth
+     ; "updated_at", Json_util.option_to_yojson (fun value -> `Float value) signal.updated_at
+     ; ( "reaction"
+       , match signal.kind with
+         | Board_dispatch.Board_reaction_changed reaction ->
+           queue_reaction_to_yojson reaction
+         | Board_dispatch.Board_post_created
+         | Board_dispatch.Board_comment_added
+         | Board_dispatch.Board_vote_cast _ -> `Null )
+     ]
+     @
+     match signal.kind with
+     | Board_dispatch.Board_vote_cast vote -> [ "vote", queue_vote_to_yojson vote ]
+     | Board_dispatch.Board_post_created
+     | Board_dispatch.Board_comment_added
+     | Board_dispatch.Board_reaction_changed _ -> [])
 ;;
 
 let json_string_list values =
@@ -260,9 +294,7 @@ let keeper_context_to_yojson (meta : Keeper_meta_contract.keeper_meta) =
          ; "keeper_record_id", Json_util.option_to_yojson Ids.Keeper_id.to_yojson meta.id
          ; ( "keeper_runtime_uid"
            , Json_util.option_to_yojson Keeper_id.uid_to_yojson meta.keeper_id )
-         ; "persona", Json_util.option_to_yojson (fun value -> `String value) meta.persona
          ; "instructions", `String meta.instructions
-         ; "active_goal_ids", json_string_list meta.active_goal_ids
          ; ( "current_task_id"
            , Json_util.option_to_yojson
                (fun task_id -> `String (Keeper_id.Task_id.to_string task_id))
@@ -271,15 +303,64 @@ let keeper_context_to_yojson (meta : Keeper_meta_contract.keeper_meta) =
          ])
 ;;
 
-let candidate_id_of_signal ~keeper_name signal =
+let candidate_id_of_signal ~keeper_name (signal : Board_dispatch.board_signal) =
   let identity =
-    `Assoc
-      [ "keeper_name", `String keeper_name
-      ; "signal", signal_to_yojson signal
-      ]
-    |> Yojson.Safe.to_string
+    match signal.kind with
+    | Board_dispatch.Board_post_created ->
+      (* Identity is the typed event key only. The world-observation backlog
+         scanner re-synthesizes [Board_post_created] with the post's *current*
+         [updated_at] on every cycle, so any volatile field (updated_at,
+         content) in this hash defeats [Candidate_already_present] idempotence:
+         one post minted 68 candidates = 68 model judgments (#28607). *)
+      `Assoc
+        [ "keeper_name", `String keeper_name
+        ; "kind", `String (signal_kind_to_string signal.kind)
+        ; "post_id", `String signal.post_id
+        ]
+    | Board_dispatch.Board_comment_added
+    | Board_dispatch.Board_reaction_changed _
+    | Board_dispatch.Board_vote_cast _ ->
+      `Assoc
+        [ "keeper_name", `String keeper_name
+        ; "signal", signal_to_yojson signal
+        ]
   in
-  Digestif.SHA256.(digest_string identity |> to_hex)
+  Digestif.SHA256.(digest_string (Yojson.Safe.to_string identity) |> to_hex)
+;;
+
+(* Must stay in lockstep with [candidate_id_of_signal]: two signals are
+   identity-equal exactly when that function hashes them identically for the
+   same keeper. [record] uses this to converge a re-scanned signal whose
+   volatile fields (updated_at, content) drifted onto the persisted candidate. *)
+let signal_identity_equal
+      (left : Board_dispatch.board_signal)
+      (right : Board_dispatch.board_signal)
+  =
+  match left.kind, right.kind with
+  | Board_dispatch.Board_post_created, Board_dispatch.Board_post_created ->
+    String.equal left.post_id right.post_id
+  | Board_dispatch.Board_comment_added, Board_dispatch.Board_comment_added ->
+    left = right
+  | Board_dispatch.Board_reaction_changed _, Board_dispatch.Board_reaction_changed _ ->
+    left = right
+  | Board_dispatch.Board_vote_cast _, Board_dispatch.Board_vote_cast _ -> left = right
+  | Board_dispatch.Board_post_created,
+    ( Board_dispatch.Board_comment_added
+    | Board_dispatch.Board_reaction_changed _
+    | Board_dispatch.Board_vote_cast _ )
+  | Board_dispatch.Board_comment_added,
+    ( Board_dispatch.Board_post_created
+    | Board_dispatch.Board_reaction_changed _
+    | Board_dispatch.Board_vote_cast _ )
+  | Board_dispatch.Board_reaction_changed _,
+    ( Board_dispatch.Board_post_created
+    | Board_dispatch.Board_comment_added
+    | Board_dispatch.Board_vote_cast _ )
+  | Board_dispatch.Board_vote_cast _,
+    ( Board_dispatch.Board_post_created
+    | Board_dispatch.Board_comment_added
+    | Board_dispatch.Board_reaction_changed _ ) ->
+    false
 ;;
 
 let of_board_evidence
@@ -738,25 +819,60 @@ let parse_reaction json =
     }
 ;;
 
-let signal_of_yojson json =
-  let context = "candidate.signal" in
+let parse_vote json =
+  let context = "candidate.signal.vote" in
   let* fields = assoc ~context json in
   let* () =
     exact_fields
       ~context
-      [ "kind"
-      ; "post_id"
-      ; "author"
-      ; "title"
-      ; "content"
-      ; "hearth"
-      ; "updated_at"
-      ; "reaction"
-      ]
+      [ "target_kind"; "target_id"; "target_author"; "voter"; "direction" ]
       fields
   in
+  let* target_kind_json = field ~context "target_kind" fields in
+  let* target_kind = string_json ~context:(context ^ ".target_kind") target_kind_json in
+  let* target_id_json = field ~context "target_id" fields in
+  let* target_id = string_json ~context:(context ^ ".target_id") target_id_json in
+  let* target =
+    match target_kind with
+    | "post" -> Ok (Board_dispatch.Vote_on_post target_id)
+    | "comment" -> Ok (Board_dispatch.Vote_on_comment target_id)
+    | other -> Error (Printf.sprintf "unknown vote target kind %S" other)
+  in
+  let* target_author_json = field ~context "target_author" fields in
+  let* target_author =
+    string_json ~context:(context ^ ".target_author") target_author_json
+  in
+  let* voter_json = field ~context "voter" fields in
+  let* voter = string_json ~context:(context ^ ".voter") voter_json in
+  let* direction_json = field ~context "direction" fields in
+  let* direction_raw = string_json ~context:(context ^ ".direction") direction_json in
+  let* direction =
+    match Board.vote_direction_of_string_opt direction_raw with
+    | Some direction -> Ok direction
+    | None -> Error (Printf.sprintf "unknown vote direction %S" direction_raw)
+  in
+  Ok { Board_dispatch.target = target; target_author; voter; direction }
+;;
+
+let signal_base_fields =
+  [ "kind"; "post_id"; "author"; "title"; "content"; "hearth"; "updated_at"; "reaction" ]
+;;
+
+let signal_of_yojson json =
+  let context = "candidate.signal" in
+  let* fields = assoc ~context json in
   let* kind_json = field ~context "kind" fields in
   let* kind_raw = string_json ~context:(context ^ ".kind") kind_json in
+  (* A vote row carries the extra [vote] key; every other kind carries exactly
+     the base keys, which is also the shape of rows written before votes became
+     a signal. *)
+  let* expected_fields =
+    match kind_raw with
+    | "vote_cast" -> Ok (signal_base_fields @ [ "vote" ])
+    | "post_created" | "comment_added" | "reaction_changed" -> Ok signal_base_fields
+    | value -> Error (Printf.sprintf "unknown Board signal kind %S" value)
+  in
+  let* () = exact_fields ~context expected_fields fields in
   let* reaction_json = field ~context "reaction" fields in
   let* kind =
     match kind_raw, reaction_json with
@@ -765,7 +881,11 @@ let signal_of_yojson json =
     | "reaction_changed", (`Assoc _ as json) ->
       let* reaction = parse_reaction json in
       Ok (Board_dispatch.Board_reaction_changed reaction)
-    | "post_created", _ | "comment_added", _ ->
+    | "vote_cast", `Null ->
+      let* vote_json = field ~context "vote" fields in
+      let* vote = parse_vote vote_json in
+      Ok (Board_dispatch.Board_vote_cast vote)
+    | "post_created", _ | "comment_added", _ | "vote_cast", _ ->
       Error "non-reaction Board signal must carry reaction=null"
     | "reaction_changed", _ -> Error "reaction_changed signal requires reaction object"
     | value, _ -> Error (Printf.sprintf "unknown Board signal kind %S" value)
@@ -1063,22 +1183,24 @@ let optional_string_of_yojson ~context = function
     Ok ()
 ;;
 
+let keeper_context_current_fields =
+  [ "lane_keeper_name"
+  ; "agent_name"
+  ; "keeper_record_id"
+  ; "keeper_runtime_uid"
+  ; "instructions"
+  ; "current_task_id"
+  ; "mention_keeper_ids"
+  ]
+;;
+
 let validate_keeper_context ~keeper_name json =
   let context = "candidate.judgment_request.keeper_context" in
   let* fields = assoc ~context json in
   let* () =
     exact_fields
       ~context
-      [ "lane_keeper_name"
-      ; "agent_name"
-      ; "keeper_record_id"
-      ; "keeper_runtime_uid"
-      ; "persona"
-      ; "instructions"
-      ; "active_goal_ids"
-      ; "current_task_id"
-      ; "mention_keeper_ids"
-      ]
+      keeper_context_current_fields
       fields
   in
   let* lane_keeper_name_json = field ~context "lane_keeper_name" fields in
@@ -1111,16 +1233,6 @@ let validate_keeper_context ~keeper_name json =
     optional_string_of_yojson
       ~context:(context ^ ".keeper_runtime_uid")
       keeper_runtime_uid
-  in
-  let* persona = field ~context "persona" fields in
-  let* () =
-    optional_string_of_yojson ~context:(context ^ ".persona") persona
-  in
-  let* active_goal_ids = field ~context "active_goal_ids" fields in
-  let* () =
-    string_list_of_yojson
-      ~context:(context ^ ".active_goal_ids")
-      active_goal_ids
   in
   let* current_task_id = field ~context "current_task_id" fields in
   let* () =
@@ -1394,6 +1506,15 @@ type ledger_stat_key =
   ; stat_size : int
   }
 
+(* Compared field by field rather than with [=], so each field has a named
+   reader the compiler can see. *)
+let ledger_stat_key_equal left right =
+  Int.equal left.stat_dev right.stat_dev
+  && Int.equal left.stat_ino right.stat_ino
+  && Float.equal left.stat_mtime right.stat_mtime
+  && Int.equal left.stat_size right.stat_size
+;;
+
 let ledger_stat_key_opt path =
   match Unix.stat path with
   | stats ->
@@ -1434,7 +1555,8 @@ let load_candidates ~base_path ~keeper_name =
        the read; a concurrent rewrite lands as a new inode and skips the
        store, so the next call re-reads. *)
     (match before, ledger_stat_key_opt path with
-     | Some key_before, Some key_after when key_before = key_after ->
+     | Some key_before, Some key_after
+       when ledger_stat_key_equal key_before key_after ->
        Stdlib.Mutex.protect candidate_read_memo_mutex (fun () ->
          Hashtbl.replace candidate_read_memo path (key_before, candidates))
      | Some _, (Some _ | None) | None, (Some _ | None) -> ());
@@ -1517,11 +1639,12 @@ let record ~base_path candidate =
          (fun candidates ->
             match find_candidate candidates candidate.candidate_id with
             | None -> Ok (Some candidate, Recorded candidate)
-            | Some existing when existing.signal = candidate.signal ->
+            | Some existing
+              when signal_identity_equal existing.signal candidate.signal ->
               Ok (None, Duplicate existing)
             | Some _ ->
               Error
-                "candidate identity conflict: the same candidate_id has a different Board signal")
+                "candidate identity conflict: the same candidate_id has a different Board signal identity")
      with
      | Ok result -> result
      | Error detail -> Record_error detail)
@@ -1578,9 +1701,10 @@ let resumable_with_delivery_failure resumable failure =
 ;;
 
 let candidate_with_delivery_failure current failure =
-  match resumable_status current.status with
-  | None -> current
-  | Some resumable ->
+  match status_view current.status with
+  | Suspended_quarantine _ -> current
+  | Direct_resumable resumable
+  | Requeued_resumable { resumable; _ } ->
     let updated = resumable_with_delivery_failure resumable failure in
     if updated = resumable
     then current
@@ -1606,8 +1730,9 @@ let record_judgment ~base_path candidate judgment =
            "Board attention candidate not found: %s"
            candidate.candidate_id)
     | Some current ->
-      (match resumable_status current.status with
-       | Some (Resumable_pending _) ->
+      (match status_view current.status with
+       | Direct_resumable (Resumable_pending _)
+       | Requeued_resumable { resumable = Resumable_pending _; _ } ->
          let updated =
            { current with
              status =
@@ -1617,17 +1742,23 @@ let record_judgment ~base_path candidate judgment =
            }
          in
          Ok (Some updated, updated)
-       | Some (Resumable_judged judged)
+       | Direct_resumable (Resumable_judged judged)
+       | Requeued_resumable
+           { resumable = Resumable_judged judged; _ }
          when same_judgment judged.judgment judgment ->
          Ok (None, current)
-       | Some (Resumable_consumed consumed)
+       | Direct_resumable (Resumable_consumed consumed)
+       | Requeued_resumable
+           { resumable = Resumable_consumed consumed; _ }
          when same_judgment consumed.judgment judgment ->
          Ok (None, current)
-       | Some (Resumable_judged _ | Resumable_consumed _) ->
+       | Direct_resumable (Resumable_judged _ | Resumable_consumed _)
+       | Requeued_resumable
+           { resumable = (Resumable_judged _ | Resumable_consumed _); _ } ->
          Error
            ("Board attention candidate judgment conflict: "
             ^ candidate.candidate_id)
-       | None ->
+       | Suspended_quarantine _ ->
          Error
            ("Quarantined Board attention candidate cannot be judged: "
             ^ candidate.candidate_id)))
@@ -1642,8 +1773,10 @@ let mark_consumed ~base_path candidate judgment delivery =
            "Board attention candidate not found: %s"
            candidate.candidate_id)
     | Some current ->
-      (match resumable_status current.status with
-       | Some (Resumable_judged judged)
+      (match status_view current.status with
+       | Direct_resumable (Resumable_judged judged)
+       | Requeued_resumable
+           { resumable = Resumable_judged judged; _ }
          when same_judgment judged.judgment judgment ->
          let updated =
            { current with
@@ -1654,18 +1787,23 @@ let mark_consumed ~base_path candidate judgment delivery =
            }
          in
          Ok (Some updated, updated)
-       | Some (Resumable_consumed consumed)
+       | Direct_resumable (Resumable_consumed consumed)
+       | Requeued_resumable
+           { resumable = Resumable_consumed consumed; _ }
          when same_judgment consumed.judgment judgment
               && consumed.delivery = delivery -> Ok (None, current)
-       | Some (Resumable_pending _) ->
+       | Direct_resumable (Resumable_pending _)
+       | Requeued_resumable { resumable = Resumable_pending _; _ } ->
          Error
            ("Pending Board attention candidate cannot be consumed: "
             ^ candidate.candidate_id)
-       | Some (Resumable_judged _ | Resumable_consumed _) ->
+       | Direct_resumable (Resumable_judged _ | Resumable_consumed _)
+       | Requeued_resumable
+           { resumable = (Resumable_judged _ | Resumable_consumed _); _ } ->
          Error
            ("Board attention candidate consumption conflict: "
             ^ candidate.candidate_id)
-       | None ->
+       | Suspended_quarantine _ ->
          Error
            ("Quarantined Board attention candidate cannot be consumed: "
             ^ candidate.candidate_id)))
@@ -1755,12 +1893,10 @@ let quarantine
       Error ("Board attention candidate not found: " ^ candidate.candidate_id)
     | Some current ->
       let prior_status =
-        match resumable_status current.status with
-        | Some status -> status
-        | None ->
-          (match current.status with
-           | Quarantine state -> state.quarantine.prior_status
-           | Pending _ | Judged _ | Consumed _ -> assert false)
+        match status_view current.status with
+        | Direct_resumable status
+        | Requeued_resumable { resumable = status; _ } -> status
+        | Suspended_quarantine state -> state.quarantine.prior_status
       in
       let requested =
         { quarantine_id
@@ -1967,10 +2103,14 @@ let record_and_wake ~base_path candidate =
     Ok { candidate = persisted; persistence = Candidate_recorded; wake }
   | Duplicate persisted ->
     let* wake =
-      match resumable_status persisted.status with
-      | Some (Resumable_pending _ | Resumable_judged _) ->
+      match status_view persisted.status with
+      | Direct_resumable (Resumable_pending _ | Resumable_judged _)
+      | Requeued_resumable
+          { resumable = (Resumable_pending _ | Resumable_judged _); _ } ->
         request_worker persisted
-      | Some (Resumable_consumed _) | None -> Ok Wake_not_required
+      | Direct_resumable (Resumable_consumed _)
+      | Requeued_resumable { resumable = Resumable_consumed _; _ }
+      | Suspended_quarantine _ -> Ok Wake_not_required
     in
     Ok
       { candidate = persisted
@@ -1979,50 +2119,80 @@ let record_and_wake ~base_path candidate =
       }
 ;;
 
+type judgment_delivery_outcome =
+  | Delivered of candidate
+  | Candidate_absent
+      (** The candidate this partition's [Completed] item names is not in the
+          live ledger. A retire moves the whole candidate store aside as one
+          directory (scripts/check-runtime-deployment-preflight.sh); it never
+          leaves a tombstone the live ledger can read back, so this cannot
+          distinguish "retired" from any other cause a candidate is gone —
+          both mean the same thing for this delivery: it cannot succeed on a
+          retry of the identical request, because the row it would update no
+          longer exists. Every other failure below stays a typed [Error],
+          because those represent a live candidate in an unexpected state,
+          which is a bug this function must keep reporting loudly rather than
+          quietly resolve. *)
+
 let apply_judgment_and_deliver ~base_path ~keeper_name ~candidate_id ~judgment =
   let* candidates = load_candidates ~base_path ~keeper_name in
-  let* candidate =
-    match find_candidate candidates candidate_id with
-    | Some candidate -> Ok candidate
-    | None -> Error ("Board attention candidate not found: " ^ candidate_id)
-  in
-  let* judged_candidate =
-    match resumable_status candidate.status with
-    | Some (Resumable_pending _) ->
-      record_judgment ~base_path candidate judgment
-    | Some (Resumable_judged judged)
-      when same_judgment judged.judgment judgment ->
-      Ok candidate
-    | Some (Resumable_consumed consumed)
-      when same_judgment consumed.judgment judgment ->
-      Ok candidate
-    | Some (Resumable_judged _ | Resumable_consumed _) ->
-      Error ("Board attention candidate judgment conflicts with worker result: " ^ candidate_id)
-    | None ->
-      Error
-        ("Quarantined or requeue-requested Board attention candidate cannot be settled: "
-         ^ candidate_id)
-  in
-  match resumable_status judged_candidate.status with
-  | Some (Resumable_consumed _) ->
-    normalize_requeued_consumed ~base_path ~keeper_name ~candidate_id
-  | Some (Resumable_pending _) ->
-    Error ("Board attention candidate remained Pending after judgment commit: " ^ candidate_id)
-  | Some (Resumable_judged judged) ->
-    let* delivered = consume_judged ~base_path judged_candidate judged in
-    (match resumable_status delivered.status with
-     | Some (Resumable_consumed _) ->
-       normalize_requeued_consumed ~base_path ~keeper_name ~candidate_id
-     | Some (Resumable_pending _ | Resumable_judged _) ->
-       Error
-         ("Board attention candidate delivery did not reach Consumed: "
-          ^ candidate_id)
-     | None ->
-       Error
-         ("Board attention candidate became quarantined during delivery: "
-          ^ candidate_id))
-  | None ->
-    Error
-      ("Quarantined or requeue-requested Board attention candidate cannot be settled: "
-       ^ candidate_id)
+  match find_candidate candidates candidate_id with
+  | None -> Ok Candidate_absent
+  | Some candidate ->
+    let* judged_candidate =
+      match status_view candidate.status with
+      | Direct_resumable (Resumable_pending _)
+      | Requeued_resumable { resumable = Resumable_pending _; _ } ->
+        record_judgment ~base_path candidate judgment
+      | Direct_resumable (Resumable_judged judged)
+      | Requeued_resumable
+          { resumable = Resumable_judged judged; _ }
+        when same_judgment judged.judgment judgment ->
+        Ok candidate
+      | Direct_resumable (Resumable_consumed consumed)
+      | Requeued_resumable
+          { resumable = Resumable_consumed consumed; _ }
+        when same_judgment consumed.judgment judgment ->
+        Ok candidate
+      | Direct_resumable (Resumable_judged _ | Resumable_consumed _)
+      | Requeued_resumable
+          { resumable = (Resumable_judged _ | Resumable_consumed _); _ } ->
+        Error ("Board attention candidate judgment conflicts with worker result: " ^ candidate_id)
+      | Suspended_quarantine _ ->
+        Error
+          ("Quarantined or requeue-requested Board attention candidate cannot be settled: "
+           ^ candidate_id)
+    in
+    let* delivered_candidate =
+      match status_view judged_candidate.status with
+      | Direct_resumable (Resumable_consumed _)
+      | Requeued_resumable { resumable = Resumable_consumed _; _ } ->
+        normalize_requeued_consumed ~base_path ~keeper_name ~candidate_id
+      | Direct_resumable (Resumable_pending _)
+      | Requeued_resumable { resumable = Resumable_pending _; _ } ->
+        Error ("Board attention candidate remained Pending after judgment commit: " ^ candidate_id)
+      | Direct_resumable (Resumable_judged judged)
+      | Requeued_resumable
+          { resumable = Resumable_judged judged; _ } ->
+        let* delivered = consume_judged ~base_path judged_candidate judged in
+        (match status_view delivered.status with
+         | Direct_resumable (Resumable_consumed _)
+         | Requeued_resumable { resumable = Resumable_consumed _; _ } ->
+           normalize_requeued_consumed ~base_path ~keeper_name ~candidate_id
+         | Direct_resumable (Resumable_pending _ | Resumable_judged _)
+         | Requeued_resumable
+             { resumable = (Resumable_pending _ | Resumable_judged _); _ } ->
+           Error
+             ("Board attention candidate delivery did not reach Consumed: "
+              ^ candidate_id)
+         | Suspended_quarantine _ ->
+           Error
+             ("Board attention candidate became quarantined during delivery: "
+              ^ candidate_id))
+      | Suspended_quarantine _ ->
+        Error
+          ("Quarantined or requeue-requested Board attention candidate cannot be settled: "
+           ^ candidate_id)
+    in
+    Ok (Delivered delivered_candidate)
 ;;

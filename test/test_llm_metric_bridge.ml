@@ -106,7 +106,7 @@ let test_metric_store_registers_otel_source_once () =
     true
     (Metrics.otel_source_registered_for_test ())
 
-let test_sink_records_oas_callbacks () =
+let test_sink_records_agent_core_callbacks () =
   let sink : Llm_provider.Metrics.t = Bridge.make_sink () in
   let model_id = Printf.sprintf "bridge-test-model-%d" (Unix.getpid ()) in
   let provider = "bridge-test-provider" in
@@ -157,7 +157,10 @@ let test_sink_records_oas_callbacks () =
   sink.on_cache_hit ~model_id;
   sink.on_cache_miss ~model_id;
   sink.on_request_start ~model_id;
-  sink.on_error ~model_id ~error:"ignored-freeform-error";
+  sink.on_error
+    ~model_id
+    ~message:"ignored-freeform-error"
+    ~reason:Llm_provider.Metrics.Unknown;
   sink.on_retry ~provider ~model_id ~attempt:2;
   sink.on_circuit_state ~provider ~model_id ~provider_key
     ~state:Llm_provider.Metrics.Circuit_open;
@@ -584,7 +587,11 @@ let test_error_records_genai_exception_span_signal () =
     ~emit_event:(fun ~name ~attrs -> events := (name, attrs) :: !events)
     ~emit_attrs:(fun ~attrs -> span_attrs := attrs @ !span_attrs)
     ~set_status:(fun status -> span_status := Some status)
-    (fun () -> Bridge.emit_error ~model_id ~error:"deadline exceeded after 30s");
+    (fun () ->
+      Bridge.emit_error
+        ~model_id
+        ~message:"deadline exceeded after 30s"
+        ~reason:Llm_provider.Metrics.Timeout);
   (match !span_status with
    | Some { Opentelemetry.Span_status.message; code } ->
      Alcotest.(check string)
@@ -735,7 +742,7 @@ let test_request_latency_uses_provider_seen_from_status () =
     ~before
     ~delta:1.0
 
-let test_error_reason_labels_are_bounded () =
+let test_error_reason_labels_use_typed_reason () =
   let model_id =
     Printf.sprintf "bridge-error-reason-%d" (Unix.getpid ())
   in
@@ -750,8 +757,18 @@ let test_error_reason_labels_are_bounded () =
     metric Metrics.metric_llm_provider_errors_by_reason
       ~labels:(reason_labels "rate_limit")
   in
-  Bridge.emit_error ~model_id ~error:"deadline exceeded after 30s";
-  Bridge.emit_error ~model_id ~error:"HTTP 429 rate limit exceeded";
+  Bridge.emit_error
+    ~model_id
+    ~message:"deadline exceeded after 30s"
+    ~reason:Llm_provider.Metrics.Timeout;
+  Bridge.emit_error
+    ~model_id
+    ~message:"HTTP 429 rate limit exceeded"
+    ~reason:Llm_provider.Metrics.Rate_limit;
+  Bridge.emit_error
+    ~model_id
+    ~message:"request completed latency_ms=3429"
+    ~reason:Llm_provider.Metrics.Unknown;
   check_metric_delta "timeout reason +1"
     Metrics.metric_llm_provider_errors_by_reason
     ~labels:(reason_labels "timeout") ~before:before_timeout ~delta:1.0;
@@ -770,8 +787,8 @@ let () =
             test_metric_store_exports_otel_samples;
           Alcotest.test_case "metric store registers OTel source once" `Quick
             test_metric_store_registers_otel_source_once;
-          Alcotest.test_case "sink records OAS callbacks" `Quick
-            test_sink_records_oas_callbacks;
+          Alcotest.test_case "sink records AGENT_CORE callbacks" `Quick
+            test_sink_records_agent_core_callbacks;
           Alcotest.test_case "streaming metrics ignore invalid ms" `Quick
             test_streaming_metrics_ignore_invalid_ms;
           Alcotest.test_case
@@ -810,7 +827,7 @@ let () =
             test_request_latency_positive_ms_does_not_clamp;
           Alcotest.test_case "request latency uses provider seen from status" `Quick
             test_request_latency_uses_provider_seen_from_status;
-          Alcotest.test_case "error reason labels are bounded" `Quick
-            test_error_reason_labels_are_bounded;
+          Alcotest.test_case "error reason labels use typed reason" `Quick
+            test_error_reason_labels_use_typed_reason;
         ] );
     ]

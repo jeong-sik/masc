@@ -13,10 +13,9 @@
 - `http_only`
   - `MASC_GRPC_ENABLED=0`
   - `MASC_WS_ENABLED=0`
-  - `MASC_WEBRTC_ENABLED=0`
   - MCP read-path와 dashboard cache baseline 확인
 - `default`
-  - live HTTP + WebSocket + WebRTC startup 확인
+  - live HTTP + WebSocket startup 확인
   - gRPC는 기본적으로 꺼 둔다
 
 기본 base path는 현재 repo root다. 즉 live `.masc` 상태와 keeper runtime surface를 같이 검증한다.

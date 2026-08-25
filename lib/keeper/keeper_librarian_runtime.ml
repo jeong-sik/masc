@@ -1,6 +1,6 @@
 (** Runtime adapter for LLM-owned current Memory OS selection. *)
 
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 
 let exact_lane_id = "librarian_exact"
 
@@ -83,8 +83,22 @@ let select_recent_messages ~max_messages messages =
   drop drop_count messages
 ;;
 
+let prompt_input_for_librarian (inp : Keeper_librarian.input) =
+  let max_messages = prompt_max_messages () in
+  { inp with
+    messages =
+      select_recent_messages
+        ~max_messages
+        inp.messages
+  ; counterpart_observations =
+      select_recent_messages
+        ~max_messages
+        inp.counterpart_observations
+  }
+;;
+
 let message role text =
-  Agent_sdk.Types.make_message ~role [ Agent_sdk.Types.Text text ]
+  Agent_core.Types.make_message ~role [ Agent_core.Types.Text text ]
 ;;
 
 type exact_setup_error =
@@ -112,17 +126,13 @@ type extraction_error =
   | Exact_setup_failed of exact_setup_error
   | Exact_execution_failed of exact_execution_error
   | Domain_output_invalid of string
-  | Memory_snapshot_write_failed of string
+  | Memory_snapshot_write_failed of
+      { detail : string
+      ; selected_slot : string
+      }
 
-type extraction_error_kind =
-  | Prompt_render_failure
-  | Execution_clock_unavailable
-  | Exact_setup_failure
-  | Exact_execution_failure
-  | Domain_output_invalid
-  | Memory_snapshot_write_failure
-
-let extraction_error_kind = function
+let extraction_error_kind : extraction_error -> Keeper_memory_os_current.librarian_failure_kind
+  = function
   | Prompt_render_failed _ -> Prompt_render_failure
   | Execution_clock_unavailable -> Execution_clock_unavailable
   | Exact_setup_failed _ -> Exact_setup_failure
@@ -169,8 +179,18 @@ let extraction_error_to_string = function
       detail
   | Domain_output_invalid detail ->
     "librarian domain output invalid: " ^ detail
-  | Memory_snapshot_write_failed detail ->
+  | Memory_snapshot_write_failed { detail; selected_slot = _ } ->
     "memory os current snapshot write failed: " ^ detail
+;;
+
+let selected_slot_of_extraction_error = function
+  | Memory_snapshot_write_failed { selected_slot; _ } -> Some selected_slot
+  | Prompt_render_failed _
+  | Execution_clock_unavailable
+  | Exact_setup_failed _
+  | Exact_execution_failed _
+  | Domain_output_invalid _ ->
+    None
 ;;
 
 let should_record_cadence_backoff_after_error = function
@@ -195,25 +215,28 @@ let render_prompt key variables =
   | Error message -> Error (Printf.sprintf "%s: %s" key message)
 ;;
 
-let messages_and_input_for_librarian (inp : Keeper_librarian.input) =
-  let input =
-    { inp with
-      messages =
-        select_recent_messages
-          ~max_messages:(prompt_max_messages ())
-          inp.messages
-    }
-  in
+let render_librarian_prompt input =
+  render_prompt
+    Prompt_names.librarian
+    (Keeper_librarian.prompt_variables input)
+;;
+
+let prompt_and_input_for_librarian (inp : Keeper_librarian.input) =
+  let input = prompt_input_for_librarian inp in
   let open Result.Syntax in
   (* One asset, one message: the librarian's role statement lives at the top
      of the selection prompt it is rendered with, so there is no second file
      to keep in step. *)
-  let+ user =
-    render_prompt
-      Prompt_names.librarian
-      (Keeper_librarian.prompt_variables input)
+  let+ prompt =
+    render_librarian_prompt input
   in
-  input, [ message Agent_sdk.Types.User user ]
+  input, prompt
+;;
+
+let messages_and_input_for_librarian inp =
+  Result.map
+    (fun (input, prompt) -> input, [ message Agent_core.Types.User prompt ])
+    (prompt_and_input_for_librarian inp)
 ;;
 
 let messages_for_librarian inp =
@@ -308,7 +331,7 @@ let exact_execution_error error =
       "unexpected_callback_failure"
     | Flow_exact_execution_failed { candidate; cause; evidence } ->
       Printf.sprintf
-        "oas_execution_failed: %s"
+        "agent_core_execution_failed: %s"
         (Keeper_exact_flow_detail.execution_failure_detail
            ~candidate
            ~cause
@@ -317,87 +340,56 @@ let exact_execution_error error =
   { outward_effect; detail }
 ;;
 
-let extract_with_exact_output_classified
-      ?clock
+let execute_exact_output_classified
+      ~clock
       ~net
-      (inp : Keeper_librarian.input)
-  : (Keeper_librarian.selection, extraction_error) result
+      ~(selected_input : Keeper_librarian.input)
+      ~messages
   =
   let open Result.Syntax in
-  match clock with
-  | None -> Error Execution_clock_unavailable
-  | Some clock ->
-    let* selected_input, messages =
-      messages_and_input_for_librarian inp
-      |> Result.map_error (fun detail -> Prompt_render_failed detail)
-    in
-    let* attempt = prepare_attempt messages in
-    let validate flow_success =
-      let output = Exact_output.flow_success_output flow_success in
-      match
-        Keeper_librarian.selection_of_json_result
-          selected_input
-          output.output
-      with
-      | Ok selection -> Exact_output.Accept selection
-      | Error error -> Exact_output.Reject_and_advance error
-    in
-    (match
-       Exact_output.execute_flow_once
-         ~net
-         ~clock
-         ~before_measurement_dispatch:(fun _ -> Ok ())
-         ~on_measurement_terminal:(fun _ -> Ok ())
-         ~before_dispatch:(fun _ -> Ok ())
-         ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
-         ~validate
-         attempt
-     with
-     | Ok success -> Ok success.accepted
-     | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
-       Error (Exact_execution_failed (exact_execution_error cause))
-     | Error
-         (Exact_output.Flow_semantic_candidates_exhausted
-            { rejections; _ }) ->
-       let rejection =
-         List.fold_left
-           (fun _ rejection -> rejection)
-           rejections.first
-           rejections.rest
-       in
-       Error
-         (Domain_output_invalid
-            (Keeper_librarian.parse_error_to_string rejection.rejection)))
-;;
-
-let extract_and_commit_with_exact_output_classified
-      ?clock
-      ~net
-      ~keepers_dir
-      ~keeper_id
-      ~expected_revision
-      inp
-  =
-  let open Result.Syntax in
-  let* selection =
-    extract_with_exact_output_classified ?clock ~net inp
+  let* attempt = prepare_attempt messages in
+  let validate flow_success =
+    let output = Exact_output.flow_success_output flow_success in
+    match
+      Keeper_librarian.selection_of_json_result
+        selected_input
+        output.output
+    with
+    | Ok selection -> Exact_output.Accept (selection, output.output)
+    | Error error -> Exact_output.Reject_and_advance error
   in
-  Keeper_memory_os_current.replace
-    ?clock
-    ~dropped_statements:selection.dropped
-    ~keepers_dir
-    ~keeper_id
-    ~expected_revision
-    ~now:(Time_compat.now ())
-    ~source:
-      { kind = Keeper_memory_os_current.Librarian
-      ; trace_id = input_trace_id inp
-      ; generation = inp.generation
-      }
-    ~facts:selection.facts
-    ()
-  |> Result.map_error (fun detail ->
-    Memory_snapshot_write_failed detail)
+  match
+    Exact_output.execute_flow_once
+      ~net
+      ~clock
+      ~before_measurement_dispatch:(fun _ -> Ok ())
+      ~on_measurement_terminal:(fun _ -> Ok ())
+      ~before_dispatch:(fun _ -> Ok ())
+      ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      ~validate
+      attempt
+  with
+  | Ok success ->
+    let selected_slot =
+      success.transport_success
+      |> Exact_output.flow_success_candidate
+      |> fun candidate -> candidate.visit.identity.candidate_id
+    in
+    Ok (success.accepted, selected_slot)
+  | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
+    Error (Exact_execution_failed (exact_execution_error cause))
+  | Error
+      (Exact_output.Flow_semantic_candidates_exhausted
+         { rejections; _ }) ->
+    let rejection =
+      List.fold_left
+        (fun _ rejection -> rejection)
+        rejections.first
+        rejections.rest
+    in
+    Error
+      (Domain_output_invalid
+         (Keeper_librarian.parse_error_to_string rejection.rejection))
 ;;
 
 (* A failure while no current snapshot exists means the keeper is running
@@ -406,7 +398,13 @@ let extract_and_commit_with_exact_output_classified
    recall and the failure only stales it. Both the classified [Error] path
    and the exception catch in [run_best_effort] route through this rule so
    an exception cannot demote a starving keeper's failure back to WARN. *)
-let log_failure_with_snapshot_severity ~keepers_dir ~keeper_id detail =
+(* A failed pass leaves no snapshot, so the commit journal line never runs and
+   the attempt would otherwise exist only as a log line and an in-memory
+   counter — neither survives a process restart, which is what made #26729
+   undiagnosable from disk afterwards. Every failure path routes here so the
+   log severity and the recorded line resolve snapshot presence from the same
+   read and cannot disagree about one instant. *)
+let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail ~cadence_deferred =
   let snapshot_absent =
     match
       Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
@@ -422,7 +420,64 @@ let log_failure_with_snapshot_severity ~keepers_dir ~keeper_id detail =
   in
   if snapshot_absent
   then Log.Keeper.error ~keeper_name:keeper_id "%s" message
-  else Log.Keeper.warn ~keeper_name:keeper_id "%s" message
+  else Log.Keeper.warn ~keeper_name:keeper_id "%s" message;
+  Keeper_memory_os_current.append_librarian_failure
+    ~keepers_dir
+    ~keeper_id
+    ~now:(Time_compat.now ())
+    ~trace_id
+    ~kind
+    ~detail
+    ~snapshot_present:(not snapshot_absent)
+    ~cadence_deferred
+;;
+
+let current_selection_registry_summary = function
+  | None -> `Assoc [ "present", `Bool false; "fact_count", `Int 0 ]
+  | Some (current : Keeper_librarian.current_selection) ->
+    `Assoc
+      [ "present", `Bool true
+      ; "fact_count", `Int (List.length current.facts)
+      ]
+;;
+
+let exact_input_payload (inp : Keeper_librarian.input) =
+  `Assoc
+    [ "turn_ref", Ids.Turn_ref.to_yojson inp.turn_ref
+    ; "keeper_instructions", `String inp.keeper_instructions
+    ; "max_recall_fact_bytes", `Int inp.max_recall_fact_bytes
+    ; ( "rendered_prompt_variables"
+      , `Assoc
+          (List.map
+             (fun (name, value) -> name, `String value)
+             (Keeper_librarian.prompt_variables inp)) )
+    ]
+;;
+
+let completed_output
+      ~(inp : Keeper_librarian.input)
+      ~exact_output
+      (snapshot : Keeper_memory_os_current.t)
+  =
+  `Assoc
+    [ "exact_output", exact_output
+    ; "before", current_selection_registry_summary inp.current
+    ; ( "after"
+      , `Assoc
+          [ "revision", `Int snapshot.revision
+          ; "updated_at", `Float snapshot.updated_at
+          ; "fact_count", `Int (List.length snapshot.facts)
+          ; ( "change"
+            , `Assoc
+                [ "added_count", `Int (List.length snapshot.change.added)
+                ; "removed_count", `Int (List.length snapshot.change.removed)
+                ; "retained", `Int snapshot.change.retained
+                ] )
+          ] )
+    ]
+;;
+
+let failed_output = `Assoc []
 ;;
 
 let run_best_effort
@@ -437,44 +492,183 @@ let run_best_effort
     try
       match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
       | Some net, Some clock ->
-        (match
-           extract_and_commit_with_exact_output_classified
-             ~clock
-             ~net
-             ~keepers_dir
-             ~keeper_id
-             ~expected_revision
-             inp
+        let registry = Exact_lane_run_registry.global () in
+        let run_id = Random_id.prefixed ~prefix:"librarian-exact-" ~bytes:16 in
+        let started_at = Time_compat.now () in
+        let started_at_monotonic = Eio.Time.now clock in
+        let current_fact_count =
+          match inp.current with
+          | None -> 0
+          | Some current -> List.length current.facts
+        in
+        let prompt_input = prompt_input_for_librarian inp in
+        Exact_lane_run_registry.register_running
+          registry
+          ~run_id
+          ~lane:Exact_lane_run_registry.Librarian
+          ~actor:keeper_id
+          ~started_at
+          ~input:
+            (Exact_lane_run_registry.Exact_input
+               (`Assoc
+                  [ "actual_input", exact_input_payload prompt_input
+                  ; "message_count", `Int (List.length prompt_input.messages)
+                  ; "current_fact_count", `Int current_fact_count
+                  ; ( "max_recall_fact_bytes"
+                    , `Int prompt_input.max_recall_fact_bytes )
+                  ]));
+        let complete ?selected_slot outcome output =
+          let elapsed_s = Eio.Time.now clock -. started_at_monotonic in
+          let completion =
+            Exact_lane_run_registry.mark_completed
+              registry
+              ~run_id
+              ~outcome
+              ~elapsed_s
+              ~selected_slot
+              ~output
+          in
+          match completion with
+          | Ok () -> ()
+          | Error error ->
+            Log.Keeper.error
+              ~keeper_name:keeper_id
+              "librarian exact-run observation completion failed run_id=%s: %s"
+              run_id
+              (Exact_lane_run_registry.completion_error_to_string error)
+        in
+        (try
+           let result =
+             let open Result.Syntax in
+             let* prompt =
+               render_librarian_prompt prompt_input
+               |> Result.map_error (fun detail -> Prompt_render_failed detail)
+             in
+             let* (selection, exact_output), selected_slot =
+               execute_exact_output_classified
+                 ~clock
+                 ~net
+                 ~selected_input:prompt_input
+                 ~messages:[ message Agent_core.Types.User prompt ]
+             in
+             let+ snapshot =
+               Keeper_memory_os_current.replace
+               ~clock
+               ~dropped_statements:selection.dropped
+               ~keepers_dir
+               ~keeper_id
+               ~expected_revision
+               ~now:(Time_compat.now ())
+               ~source:
+                 { kind = Keeper_memory_os_current.Librarian
+                 ; trace_id = input_trace_id inp
+                 }
+               ~facts:selection.facts
+               ()
+             |> Result.map_error (fun detail ->
+               Memory_snapshot_write_failed { detail; selected_slot })
+             in
+             snapshot, exact_output, selected_slot
+           in
+           match result with
+           | Ok (snapshot, exact_output, selected_slot) ->
+             complete
+               ~selected_slot
+               Exact_lane_run_registry.Succeeded
+               (completed_output ~inp ~exact_output snapshot);
+             cadence_record_success ~keeper_id ~trace_id;
+             Log.Keeper.info
+               ~keeper_name:keeper_id
+               "memory os librarian committed current snapshot revision=%d facts=%d added=%d removed=%d"
+               snapshot.revision
+               (List.length snapshot.facts)
+               (List.length snapshot.change.added)
+               (List.length snapshot.change.removed)
+           | Error error ->
+             let detail = extraction_error_to_string error in
+             complete
+               ?selected_slot:(selected_slot_of_extraction_error error)
+               (Exact_lane_run_registry.Failed
+                  { code = "librarian_failed"
+                  ; detail =
+                      "Librarian pass failed; inspect the operator logs and Memory journal"
+                  })
+               failed_output;
+             Otel_metric_store.inc_counter
+               Keeper_metrics.(to_string MemoryOsLibrarianFailures)
+               ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
+               ();
+             let deferred = should_record_cadence_backoff_after_error error in
+             if deferred then cadence_record_attempt ~keeper_id ~trace_id;
+             record_failure
+               ~keepers_dir
+               ~keeper_id
+               ~trace_id
+               ~kind:(extraction_error_kind error)
+               ~detail:
+                 (Printf.sprintf
+                    "memory os librarian failed lane=%s: %s; cadence deferred=%b"
+                    exact_lane_id
+                    detail
+                    deferred)
+               ~cadence_deferred:deferred
          with
-         | Ok snapshot ->
-           cadence_record_success ~keeper_id ~trace_id;
-           Log.Keeper.info
-             ~keeper_name:keeper_id
-             "memory os librarian committed current snapshot revision=%d facts=%d added=%d removed=%d"
-             snapshot.revision
-             (List.length snapshot.facts)
-             (List.length snapshot.change.added)
-             (List.length snapshot.change.removed)
-         | Error error ->
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string MemoryOsLibrarianFailures)
-             ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
-             ();
-           let deferred = should_record_cadence_backoff_after_error error in
-           if deferred then cadence_record_attempt ~keeper_id ~trace_id;
-           log_failure_with_snapshot_severity
-             ~keepers_dir
-             ~keeper_id
-             (Printf.sprintf
-                "memory os librarian failed lane=%s: %s; cadence deferred=%b"
-                exact_lane_id
-                (extraction_error_to_string error)
-                deferred))
+         (* A cancelled pass reached the lane registry and stopped there, so the
+            journal — the record of what the librarian did on this keeper —
+            showed the same silence for a pass killed mid-flight as for a turn
+            on which the librarian never ran. Measured live on 2026-08-07: 11
+            of 23 completed librarian lane runs cancelled, none of them
+            represented in the journal.
+
+            The write runs under [Eio.Cancel.protect] because the surrounding
+            context is already cancelled; without it the append would be
+            cancelled in turn and record nothing, which is the failure it
+            exists to close. *)
+         | Eio.Cancel.Cancelled _ as exn ->
+           complete
+             Exact_lane_run_registry.Cancelled
+             failed_output;
+           Eio.Cancel.protect (fun () ->
+             record_failure
+               ~keepers_dir
+               ~keeper_id
+               ~trace_id
+               ~kind:Keeper_memory_os_current.Lane_cancelled
+               ~detail:
+                 (Printf.sprintf
+                    "memory os librarian cancelled lane=%s before commit"
+                    exact_lane_id)
+                 (* Cancellation is not the pass declining its own turn, so the
+                    cadence counter remains due. A later turn can schedule a
+                    new pass, but it does not replay this immutable input;
+                    graceful lifecycle boundaries therefore drain accepted
+                    work instead of cancelling it. *)
+               ~cadence_deferred:false);
+           raise exn
+         | exn ->
+           complete
+             (Exact_lane_run_registry.Failed
+                { code = "librarian_raised"
+                ; detail =
+                    "Librarian raised; inspect the operator logs and Memory journal"
+                })
+             failed_output;
+           raise exn)
+      (* Missing Eio context is a failed pass like any other: the keeper's
+         memory does not advance. It was previously a bare WARN with no record,
+         which hid a restart-shaped outage behind the same silence as a healthy
+         idle turn. *)
       | _ ->
-        Log.Keeper.warn
-          ~keeper_name:keeper_id
-          "memory os librarian skipped: Eio net/clock context unavailable lane=%s"
-          exact_lane_id
+        record_failure
+          ~keepers_dir
+          ~keeper_id
+          ~trace_id
+          ~kind:Keeper_memory_os_current.Runtime_context_unavailable
+          ~detail:
+            (Printf.sprintf
+               "memory os librarian skipped: Eio net/clock context unavailable lane=%s"
+               exact_lane_id)
+          ~cadence_deferred:false
     with
     | Eio.Cancel.Cancelled _ as error -> raise error
     | exn ->
@@ -482,11 +676,15 @@ let run_best_effort
         Keeper_metrics.(to_string MemoryOsLibrarianFailures)
         ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
         ();
-      log_failure_with_snapshot_severity
+      record_failure
         ~keepers_dir
         ~keeper_id
-        (Printf.sprintf
-           "memory os librarian failed lane=%s: %s"
-           exact_lane_id
-           (Printexc.to_string exn)))
+        ~trace_id
+        ~kind:Keeper_memory_os_current.Unhandled_exception
+        ~detail:
+          (Printf.sprintf
+             "memory os librarian failed lane=%s: %s"
+             exact_lane_id
+             (Printexc.to_string exn))
+        ~cadence_deferred:false)
 ;;

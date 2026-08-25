@@ -1,27 +1,17 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
-
 (** Mcp_tool_runtime_board — MCP server-local board tool runtime
     (recall, board, conversation).
     Returns [Some (Tool_result.result)] if handled, [None] otherwise.
 
     RFC-0062 Phase 4c-2: handlers now return [Tool_result.result] directly
     instead of [(bool * string)]. *)
+
+(* Board content reaches SSE subscribers as JSON. A byte-based cut lands
+   mid-character on Korean (3 bytes per syllable) and emits an invalid
+   sequence; Issue #7690 fixed the same shape in [Audit_log.preview]. *)
+let board_notification_content_max_bytes = 200
+
+let board_notification_content content =
+  String_util.utf8_prefix ~max_bytes:board_notification_content_max_bytes content
 
 let emit_activity config ~kind ~actor ?subject ?(tags = []) ~payload () =
   try
@@ -116,7 +106,7 @@ let json_upsert_meta_string_field name value fields =
     caller supplied an identity field whose canonical form disagrees
     with the runtime contract's [agent_name].  Pre-fix the caller's
     value was accepted unconditionally; the counter makes spoof
-    attempts (or persona/system-prompt confusion) visible to
+    attempts (or Keeper instruction confusion) visible to
     operators instead of leaving them as silent audit drift.
 
     Cardinality is bounded by the small board write surface and identity fields
@@ -163,7 +153,7 @@ let record_identity_raw_surface field raw canonical fields =
     1. Empty / "anonymous" -> fill from [agent_name].
     2. Caller's canonical equals ctx canonical -> keep the caller's
        canonicalisation (same keeper, possibly different surface form
-       like [keeper-velvet-hammer-agent] vs [velvet-hammer]).
+       like [keeper-example-keeper-agent] vs [example-keeper]).
     3. Caller's canonical disagrees -> rewrite the field to ctx
        canonical, preserve the caller's claim in
        [meta.<field>_caller_claim] for forensics, and increment
@@ -171,7 +161,7 @@ let record_identity_raw_surface field raw canonical fields =
 
     Lenient mode (rewrite + preserve) is preferred over strict
     fail-closed because the LLM occasionally supplies a wrong
-    [author] under persona confusion; rejecting the call would
+    [author] under Keeper instruction confusion; rejecting the call would
     break the chain and lose the post entirely, while the rewrite
     preserves the post with correct attribution and surfaces the
     drift to metrics. *)
@@ -246,9 +236,14 @@ let ensure_board_post_author ~agent_name arguments =
   enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
     ~agent_name arguments
 
-let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~sw ~clock ~name ~start_time =
-  (* fire-and-forget: unused params kept for interface contract with callers *)
-  ignore (config, state, sw, clock, start_time);
+(* [sw] and [clock] used to sit here beside the others, under an [ignore] and a
+   comment calling all five "unused params kept for interface contract with
+   callers". Three of the five -- [config], [state] and [start_time] -- are used
+   in this function, and there is no interface contract: [dispatch] has one
+   caller, a direct call from [Mcp_tool_runtime], and the sibling handlers take
+   a different shape (~tool_name ~start_time ctx). What the [ignore] did was
+   suppress the warning that would have named [sw] and [clock] as dead. *)
+let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~name ~start_time =
   let arguments =
     match name with
     | "masc_board_post" | "masc_board_post_update" ->
@@ -309,7 +304,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           ("type", `String "masc/board_post");
           ("author", `String author);
           ("author_identity", Server_utils.board_actor_identity_json author);
-          ("content", `String (String.sub content 0 (min 200 (String.length content))));
+          ("content", `String (board_notification_content content));
           ("post_id", `String (Option.value post_id ~default:"unknown"));
           ("timestamp", `String (Masc_domain.now_iso ()));
         ] in
@@ -378,7 +373,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
           ("author", `String author);
           ("author_identity", Server_utils.board_actor_identity_json author);
           ("post_id", `String post_id);
-          ("content", `String (String.sub content 0 (min 200 (String.length content))));
+          ("content", `String (board_notification_content content));
           ("timestamp", `String (Masc_domain.now_iso ()));
         ] in
         Mcp_server.sse_broadcast state notification;
@@ -512,7 +507,14 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   | "masc_board_sub_board_list"
   | "masc_board_sub_board_get"
   | "masc_board_sub_board_update"
-  | "masc_board_sub_board_delete" ->
+  | "masc_board_sub_board_delete"
+  (* masc_board_post_update runs through the same author-identity rewrite as
+     masc_board_post above; masc_board_cleanup is the admin retention pass.
+     Both were routable by [Board_tool.handle_tool] all along but had no arm
+     here, so the MCP endpoint misreported them as
+     "Unknown tool (registry inconsistency)". *)
+  | "masc_board_post_update"
+  | "masc_board_cleanup" ->
       Some (Board_tool.handle_tool name arguments)
 
   | _ -> None

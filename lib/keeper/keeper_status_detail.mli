@@ -1,12 +1,10 @@
 (** Single-keeper status detail handler.
 
-    Owns the [keeper_status] tool dispatch. The list / trajectory / eval
-    handlers are in [Keeper_status]; this module only handles the per-keeper
-    detail view.
+    Owns the [keeper_status] tool dispatch; this module handles the
+    per-keeper detail view.
 
     Selective .mli — internal helpers ([latest_metrics_json],
-    [model_observability_json], the
-    [resolve_status_target] dispatch helpers, etc.) stay private. *)
+    [model_observability_json], dispatch helpers, etc.) stay private. *)
 
 type tool_result = Keeper_types_profile.tool_result
 
@@ -15,10 +13,12 @@ type tail_order = Keeper_status_options_defaults.tail_order =
   | Oldest_first
   | Newest_first
 
-(** Parse the [tail_order] argument from a tool-call JSON.
-    Defaults to [Oldest_first] when missing and rejects values outside the
-    public schema enum. *)
-val tail_order_of_args : Yojson.Safe.t -> (tail_order, string) result
+(** Whether a keeper with this (possibly alias-spelled) name exists, using
+    the same candidate spellings and effective-meta read as the status
+    resolver. [Ok false] covers unknown and invalid names; [Error] is a
+    store read failure. *)
+val keeper_exists_config :
+  config:Workspace.config -> string -> (bool, string) result
 
 val tail_order_to_string : tail_order -> string
 
@@ -28,10 +28,6 @@ val all_tail_orders : tail_order list
 
 (** Variant labels used in tool-input enum schemas. *)
 val valid_tail_order_strings : string list
-
-(** Apply [tail_order] to a list of items. Identity for
-    [Oldest_first], [List.rev] for [Newest_first]. *)
-val apply_tail_order : tail_order -> 'a list -> 'a list
 
 (** [keeper_status] tool handler. Builds a fresh observation so time-derived,
     file-backed, registry, queue, and sandbox fields cannot be frozen behind

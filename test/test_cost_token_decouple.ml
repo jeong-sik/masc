@@ -18,7 +18,7 @@
 
 open Alcotest
 
-module H = Masc.Keeper_hooks_oas
+module H = Masc.Keeper_hooks_agent_core
 module Trust = Keeper_usage_trust
 
 let string_field payload key =
@@ -84,7 +84,7 @@ let payload
     ~task_id:None
     ~trace_id:"test-trace"
     ~keeper_turn_id:1
-    ~oas_turn_ordinal:0
+    ~agent_core_turn_ordinal:0
     ~model:"test-model"
     ~input_tokens
     ~output_tokens
@@ -125,7 +125,7 @@ let test_untrusted_tokens_zero_cost_stays_zero () =
   in
   check (float 1e-9) "zero cost stays 0.0" 0.0 (float_field p "cost_usd");
   check string "cost source is independent of token validity"
-    "oas_cost_unreported" (string_field p "cost_usd_source");
+    "agent_core_cost_unreported" (string_field p "cost_usd_source");
   check string "usage_trust still untrusted" "untrusted"
     (string_field p "usage_trust");
   check int "negative input remains visible" (-1) (int_field p "input_tokens")
@@ -134,7 +134,7 @@ let test_trusted_tokens_positive_cost_unchanged () =
   (* Regression guard: the always-trusted path is unaffected. *)
   let p =
     H.cost_event_payload ~agent_name:"test_agent" ~task_id:None
-      ~trace_id:"test-trace" ~keeper_turn_id:1 ~oas_turn_ordinal:0
+      ~trace_id:"test-trace" ~keeper_turn_id:1 ~agent_core_turn_ordinal:0
       ~model:"test-model"
       ~input_tokens:100 ~output_tokens:50 ~cost_usd:0.0042
       ~usage_trust:Trust.Usage_trusted ()
@@ -145,8 +145,8 @@ let test_trusted_tokens_positive_cost_unchanged () =
     (string_field p "cost_usd_source");
   check string "trusted positive cost => reported" "reported"
     (string_field p "cost_status");
-  check int "zero-based OAS ordinal is retained" 0
-    (int_field p "oas_turn_ordinal")
+  check int "zero-based AGENT_CORE ordinal is retained" 0
+    (int_field p "agent_core_turn_ordinal")
 
 let test_trusted_tokens_include_cache_delta () =
   let p =
@@ -210,7 +210,7 @@ let test_missing_usage_is_explicit_null () =
   check_null_field missing "cache_read_tokens"
 
 let test_native_decode_rate_uses_current_field_only () =
-  let timings : Agent_sdk.Types.inference_timings =
+  let timings : Agent_core.Types.inference_timings =
     { prompt_n = None
     ; prompt_ms = None
     ; prompt_per_second = None
@@ -220,7 +220,7 @@ let test_native_decode_rate_uses_current_field_only () =
     ; cache_n = None
     }
   in
-  let telemetry : Agent_sdk.Types.inference_telemetry =
+  let telemetry : Agent_core.Types.inference_telemetry =
     { system_fingerprint = None
     ; timings = Some timings
     ; reasoning_tokens = None
@@ -242,7 +242,7 @@ let test_native_decode_rate_uses_current_field_only () =
       ~task_id:None
       ~trace_id:"test-trace"
       ~keeper_turn_id:1
-      ~oas_turn_ordinal:0
+      ~agent_core_turn_ordinal:0
       ~model:"test-model"
       ~input_tokens:10
       ~output_tokens:5
@@ -256,6 +256,55 @@ let test_native_decode_rate_uses_current_field_only () =
     50.0
     (float_field payload "hw_decode_tokens_per_second");
   check_absent_field payload "provider_tokens_per_second"
+;;
+
+(* RFC-0382: llama-server/Ollama wire timings carry [cache_n] (KV-cache
+   reused prompt tokens) and [prompt_n] (freshly prefilled prompt tokens).
+   Both must land on the cost-ledger payload so the per-turn KV reuse ratio
+   is reconstructible from the ledger alone. *)
+let test_timings_cache_fields_land_on_payload () =
+  let timings : Agent_core.Types.inference_timings =
+    { prompt_n = Some 26
+    ; prompt_ms = Some 709.5
+    ; prompt_per_second = Some 36.6
+    ; predicted_n = Some 512
+    ; predicted_ms = Some 54893.4
+    ; predicted_per_second = Some 9.3
+    ; cache_n = Some 1741
+    }
+  in
+  let telemetry : Agent_core.Types.inference_telemetry =
+    { system_fingerprint = None
+    ; timings = Some timings
+    ; reasoning_tokens = None
+    ; request_latency_ms = None
+    ; peak_memory_gb = None
+    ; provider_kind = None
+    ; reasoning_effort = None
+    ; canonical_model_id = None
+    ; reasoning_source = None
+    ; effective_context_window = None
+    ; provider_internal_action_count = None
+    ; ttfrc_ms = None
+    ; prefill_ms = None
+    }
+  in
+  let payload =
+    H.cost_event_payload
+      ~agent_name:"test_agent"
+      ~task_id:None
+      ~trace_id:"test-trace"
+      ~keeper_turn_id:1
+      ~agent_core_turn_ordinal:0
+      ~model:"qwen3.8-27b"
+      ~input_tokens:26
+      ~output_tokens:512
+      ~cost_usd:0.0
+      ~telemetry
+      ()
+  in
+  check int "cache_n" 1741 (int_field payload "cache_n");
+  check int "prompt_n" 26 (int_field payload "prompt_n")
 ;;
 
 let () =
@@ -287,5 +336,7 @@ let () =
             test_missing_usage_is_explicit_null;
           test_case "native decode rate uses current field only" `Quick
             test_native_decode_rate_uses_current_field_only;
+          test_case "timings cache_n/prompt_n land on payload" `Quick
+            test_timings_cache_fields_land_on_payload;
         ] );
     ]

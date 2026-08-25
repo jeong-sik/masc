@@ -1,137 +1,127 @@
 # Dashboard API Contract
 
-> Schema at the boundary. Drift = hard error, not `undefined` access.
+> Parse external data once. Business logic receives domain values, not wire
+> guesses.
 
-## Why this exists
+## Contract
 
-On 2026-04-15 the FSM Hub started rendering with
-`Cannot read properties of undefined (reading 'data_record')`. The
-`/api/v1/keepers/:name/composite` response had shipped without a
-`recovery` field for weeks — PR #7334 removed it from the OCaml backend
-(`lib/keeper/keeper_composite_observer.ml`). The dashboard TypeScript
-`interface KeeperCompositeSnapshot` still declared the field as
-required, and every unit test used a mock fixture that also declared
-it. No test exercised the real fetch path.
+Every response consumed under `dashboard/src/api/` must pass through an
+explicit schema in `dashboard/src/api/schemas/` before it reaches a component
+or domain function.
 
-PR #7412 patched the symptom with a hand-rolled
-`normalizeKeeperCompositeSnapshot` that backfilled the missing fields.
-That stopped the bleed but didn't stop the next drift. This contract
-generalizes the fix into a rule.
+- The schema owns both runtime decoding and the TypeScript output type:
+  `Schema.Schema.Type<typeof ResponseSchema>`.
+- API programs return `Effect.Effect<DomainValue, TypedError, Service>`.
+- Response interfaces, response casts, post-parse normalizers, permissive
+  defaults, and generic `get<T>` at feature call sites are not allowed.
+- Missing required fields, excess fields, invalid numbers, and unknown closed
+  variants fail with a feature-specific schema-drift error.
+- Request builders may keep dedicated input types. This contract governs
+  external response data.
 
-## The rule
+## Functional boundary
 
-Every module under `dashboard/src/api/` MUST route its fetch response
-through an explicit schema exported from `dashboard/src/api/schemas/`.
+The standard runtime is Effect v3. Use `Effect`, `Schema`, `Option`, and
+`Either` from `effect`; do not introduce another Option, Result, or schema
+representation.
 
-- The schema is the **single source of truth** for both runtime
-  validation and the TypeScript type: `type T = v.InferOutput<typeof Schema>`.
-- No hand-written `interface` for API response shapes. (Input types
-  for request builders stay as interfaces; the rule applies to
-  response parsing.)
-- The fetch helper calls `parse...` / `v.safeParse` before returning.
-  Parse failure throws a typed error (e.g. `CompositeSchemaDriftError`)
-  carrying the valibot issue list with paths.
-- Backward tolerance — optional fields, legacy aliases, enum fallbacks —
-  lives **in the schema**, not in a post-hoc normalizer.
+```text
+HTTP / SSE / WebSocket / Storage unknown
+  -> Effect Schema decode
+  -> domain value or closed domain variant
+  -> pure decision / projection
+  -> ViewModel
+  -> Preact
+```
 
-## Library: valibot (locked)
+- Use `Schema.OptionFromNullOr` or `Schema.OptionFromNullishOr` when absence is
+  part of the wire contract.
+- Resolve absence at the use-case boundary when the business operation needs a
+  value. Preserve `Option<A>` only when absence itself has product meaning.
+- Compose with `map`, `flatMap`, and `match`; do not repeatedly convert the
+  same Option to `null` or `undefined` across layers.
+- Browser I/O and `Effect.run*` belong to runtime adapters. Pure business
+  modules do not import browser globals or start effects.
+- Transport, decode, and feature failures remain distinct tagged errors until
+  the outer view/logging boundary maps them to operator text.
 
-- Small (5-15 KB tree-shaken), designed for modular imports.
-- `v.InferOutput<typeof Schema>` derives the TS type.
-- Named imports only: `import { object, boolean, picklist } from 'valibot'`
-  — no default or barrel imports. Bundle size delta must be stated in
-  every PR that touches schemas.
-- Do not reintroduce zod / hand-rolled validators. If a schema need
-  exceeds valibot's surface, raise it as a follow-up issue before
-  adding another dep.
+## Decoder policy
 
-## Drift policy
+Decode with all errors enabled and excess properties rejected. Endpoint
+schemas describe the exact producer currently shipped by this repository.
 
-When the backend changes a response shape:
+- Do not accept legacy aliases or repair old payloads in the frontend.
+- Do not collapse unknown enum values to a plausible default.
+- An additive producer field is a contract change because excess properties
+  are rejected. The producer, schema fixture, and consumer must land together;
+  a server-only additive response change is not compatible with this client.
+- If backend and dashboard must change together, update the producer fixture,
+  schema, and consumer in the same PR.
+- If an independently deployed producer is incompatible, fail visibly and
+  track the producer correction as its own issue/PR.
 
-1. **If the PR lives in this repo** — it updates the matching
-   schema in the same commit. A schema change that adds or removes
-   a field is a reviewer-visible delta.
-2. **If the dashboard ships before the backend catches up** — the
-   parse throws `...SchemaDriftError`. The dashboard logs at `error`
-   level and shows the operator view as unavailable. We do NOT
-   silently backfill to a plausible default.
-3. **Unknown enum values** — use `v.fallback` where forward-compat
-   matters (new state variants landing on backend first). A
-   well-named fallback is safer than a hard error when the frontend
-   lags by days, but every `v.fallback` must have a comment explaining
-   why hard-fail isn't acceptable here.
+## Async resource policy
 
-## Pilot endpoint
+Preact controllers expose one discriminated `RemoteData<E, A>` signal:
 
-`/api/v1/keepers/:name/composite` — see
-`dashboard/src/api/schemas/keeper-composite.ts`. The schema defines:
+- `Initial`
+- `Loading { previous: Option<A> }`
+- `Success { value: A }`
+- `Failure { error: E, previous: Option<A> }`
 
-- Phase / turn / decision / runtime / compaction enums with explicit
-  fallback for unknown values (backend may ship new states before
-  frontend).
-- Structural contract for `measurement`, `invariants`, `last_outcome`.
-- `CompositeSchemaDriftError` with issue paths for debuggability.
+Reads use latest-wins cancellation. A cancelled or older request cannot update
+state. Unmount disposes subscriptions, timers, and the active Effect fiber.
+Components must not maintain parallel `data`, `loading`, `error`, or inflight
+Promise state for the same resource.
 
-The pilot landed in the same PR that removed the dead recovery UI
-surface and retired the #7412 normalizer. Tests live in
-`dashboard/src/components/fsm-hub.integration.test.ts` under the
-`composite snapshot schema` describe block.
+## Incremental conversion
 
-## Rollout
+Campaign progress and the shrinking legacy allowlists are tracked in #28260;
+each migration PR links that issue and marks only its completed slice.
 
-Other endpoints migrate in follow-up PRs (tracked in #7441). One PR
-per endpoint or per tightly related group, never a mega-migration.
-Each migration PR:
+Each PR converts a complete endpoint or tightly related endpoint group:
 
-1. Adds `dashboard/src/api/schemas/<endpoint>.ts`.
-2. Replaces the response `interface` with `InferOutput<typeof Schema>`.
-3. Routes the fetch through the schema's `parse*` function.
-4. Adds at least one positive shape test and one drift-rejection test
-   to the relevant integration test file.
-5. States the bundle size delta in the PR description.
+1. Lock the producer shape with a positive fixture and drift cases.
+2. Replace that endpoint's decoder with Effect Schema.
+3. Return an Effect program from its API module.
+4. Feed one `RemoteData` state from the feature controller.
+5. Remove the endpoint's previous schema, nullable state, normalizer, and
+   compatibility helper in the same PR.
 
-## Endpoint notes
+Untouched endpoints may retain their current Valibot implementation while the
+sequence is in progress. New endpoints and migrated endpoints use Effect
+Schema only; a single endpoint never mixes both implementations.
 
-- `GET /api/v1/keepers/:name/chat/history` — each message object may carry
-  an optional `delivery_key` field: the exact delivery identity persisted by
-  the idempotent append-once write paths, e.g.
-  `{"kind":"direct_request","request_id":"kmsg-..."}` (other `kind` values:
-  `async_request` with `request_id`, `queue_receipts` with `receipt_ids`).
-  Rows written by the plain append paths omit the field entirely. The
-  dashboard reconciles optimistic rows using exact typed identity:
-  `request_id` for direct/async delivery, or an intersecting `receipt_ids`
-  value for queue delivery. If neither side carries a delivery key, an exact
-  non-empty `turn_ref` match is the final fallback. It never reconciles by
-  role/text. Consumers MUST treat `delivery_key` as optional (absent on
-  legacy and plain-append rows).
+## Verification
+
+Every converted boundary includes:
+
+- a complete current-wire success case;
+- missing, excess, malformed, and unknown-variant failures;
+- nullish-to-Option assertions where applicable;
+- typed transport-error and schema-error propagation;
+- cancellation and stale-completion coverage for its resource;
+- a production bundle assertion proving Schema/runtime code does not enter the
+  initial static closure unless the boot route requires it.
+
+The PR description records focused tests, typecheck, lint, production build,
+and bundle impact. Exact-head CI remains the merge authority.
+
+## Endpoint note
+
+`GET /api/v1/keepers/:name/chat/history` may include `delivery_key` only for
+rows written through idempotent operation paths. Plain append rows omit it.
+Consumers correlate accepted operations by exact `operation_id`; omission is
+a real domain case, not a value to backfill.
+
+Every history row — including autonomous-turn rows projected from typed turn
+records rather than the chat store — must carry a non-blank `id`. The schema
+(`keeper-chat-history.ts`) requires it and drops any row without one without
+an error surface. #29108 restored the autonomous projection's id after it was
+lost to a refactor that predated the required-id contract.
 
 ## Non-goals
 
-- OCaml → TypeScript codegen. Evaluated separately; parity with a
-  running OCaml signature is hard to maintain without infrastructure
-  we don't yet own.
-- Schema-first mocking for all tests. Integration tests still prefer
-  fixtures that match the schema, but unit tests for pure derivers
-  continue to use mock observation data.
-- Validating request bodies. The backend is the source of truth for
-  request schemas; duplicating them in the dashboard is waste.
-
-## FAQ
-
-**Why reject on drift instead of normalize?**
-Because #7412 showed what silent normalization buys us — the dashboard
-stays up, but it renders a panel whose state can never change, and the
-mismatch lives in the codebase until someone notices by eye. A hard
-error forces the drift into a review instead of a render.
-
-**What about the cost of a parse per fetch?**
-Parsing the composite payload with the valibot schema is on the order
-of microseconds in the hot path. The composite endpoint is already
-8-second cache-bound on the backend (#7443); dashboard-side parse cost
-is below the noise floor.
-
-**What if I need to accept legacy shapes during a rollout window?**
-Encode the tolerance in the schema with `v.union` /
-`v.optional` / `v.fallback` and add a comment citing the date
-the tolerance can be removed. Do not add a pre-parse normalizer.
+- OCaml-to-TypeScript schema code generation.
+- Duplicating backend request validation in the dashboard.
+- Changing backend wire contracts as part of a frontend-only conversion.

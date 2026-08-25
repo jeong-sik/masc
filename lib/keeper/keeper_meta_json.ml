@@ -10,22 +10,22 @@ include Keeper_meta_json_current_schema
 
 let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
   let rt = m.runtime in
-  (* Most policy fields are TOML-only. Identity/personality fields plus
+  (* Most policy fields are TOML-only. Identity/instruction fields plus
      multimodal_policy are persisted as the effective runtime snapshot so
      dashboards, checkpoint writers, and meta readers do not see a blank or
      downgraded keeper between TOML load and prompt render. *)
   object_of_field_values
-    [ Name, `String m.name
+    [ Schema, `String "masc.keeper_meta.v1"
+    ; Name, `String m.name
     ; Agent_name, `String m.agent_name
-    ; ( Persona
-      , match m.persona with
+    ; Instructions, `String m.instructions
+    ; ( Autonomous_instructions
+      , match m.autonomous_instructions with
         | Some s -> `String s
         | None -> `Null )
-    ; Instructions, `String m.instructions
     ; Trace_id, `String (Keeper_id.Trace_id.to_string rt.trace_id)
     ; Multimodal_policy, `String (multimodal_policy_to_string m.multimodal_policy)
     ; Trace_history, `List (List.map (fun s -> `String s) rt.trace_history)
-    ; Generation, `Int rt.nonce
     ; Last_handoff_ts, `Float rt.last_handoff_ts
     ; Created_at, `String m.created_at
     ; Updated_at, `String m.updated_at
@@ -52,26 +52,9 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; Last_proactive_reason, `String rt.proactive_rt.last_reason
     ; Last_proactive_preview, `String rt.proactive_rt.last_preview
     ; Consecutive_noop_count, `Int rt.proactive_rt.consecutive_noop_count
-    ; Last_compaction_check_ts, `Float rt.compaction_rt.last_check_ts
-    ; ( Last_compaction_decision
-      , `String (compaction_runtime_decision_to_string rt.compaction_rt.last_decision)
-      )
-    ; Active_goal_ids, `List (List.map (fun s -> `String s) m.active_goal_ids)
-    ; Last_autonomous_action_at, `String rt.last_autonomous_action_at
-    ; Autonomous_action_count, `Int rt.autonomous_action_count
-    ; Autonomous_turn_count, `Int rt.autonomous_turn_count
-    ; Autonomous_text_turn_count, `Int rt.autonomous_text_turn_count
-    ; Autonomous_tool_turn_count, `Int rt.autonomous_tool_turn_count
-    ; Board_reactive_turn_count, `Int rt.board_reactive_turn_count
-    ; Mention_reactive_turn_count, `Int rt.mention_reactive_turn_count
-    ; Noop_turn_count, `Int rt.noop_turn_count
     ; ( Message_scope_ack_id
       , match rt.message_scope_ack_id with
         | Some id -> `String id
-        | None -> `Null )
-    ; ( Last_blocker
-      , match rt.last_blocker with
-        | Some info -> blocker_info_to_json info
         | None -> `Null )
     ; ( Last_runtime_attempt
       , match rt.last_runtime_attempt with
@@ -89,10 +72,36 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , match m.keeper_id with
         | Some uid -> Keeper_id.uid_to_yojson uid
         | None -> `Null )
-    ; Oas_env, `Assoc (List.map (fun (k, v) -> k, `String v) m.oas_env)
-    ; Meta_version, `Int m.meta_version
+    ; Agent_core_env, `Assoc (List.map (fun (k, v) -> k, `String v) m.agent_core_env)
     ]
 ;;
+
+module Snapshot_digest = struct
+  type t = string
+
+  let is_lower_hex = function
+    | '0' .. '9'
+    | 'a' .. 'f' -> true
+    | _ -> false
+  ;;
+
+  let of_meta meta =
+    meta
+    |> meta_to_json
+    |> Yojson.Safe.to_string
+    |> Digestif.SHA256.digest_string
+    |> Digestif.SHA256.to_hex
+  ;;
+
+  let of_string value =
+    if String.length value = 64 && String.for_all is_lower_hex value
+    then Ok value
+    else Error "metadata snapshot digest must be exactly 64 lowercase hexadecimal characters"
+  ;;
+
+  let to_string value = value
+  let equal = String.equal
+end
 
 include Keeper_meta_json_parse
 

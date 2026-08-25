@@ -9,7 +9,7 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-val handle_time_now : args:Yojson.Safe.t -> string
+val handle_time_now : args:Yojson.Safe.t -> Yojson.Safe.t
 
 val handle_tools_list : meta:keeper_meta -> args:Yojson.Safe.t -> string
 
@@ -31,20 +31,30 @@ type connector_post_replay =
       { input : Yojson.Safe.t
       ; channel_id : string
       ; content : string
+      ; mention_user_ids : string list
       }
   | Replay_slack_post of
       { input : Yojson.Safe.t
       ; channel_id : string
+      ; thread_ts : string option
       ; content : string
       ; blocks : Yojson.Safe.t list
+      ; mention_user_ids : string list
       }
 
 val connector_post_replay_of_gate_input :
   Yojson.Safe.t -> (connector_post_replay, string) result
 (** Decode the exact durable connector request emitted by
     [handle_surface_post_with_outcome]. The original JSON value is retained
-    and used for one-shot Gate consumption; content and blocks are never
-    truncated or reconstructed for replay. *)
+    and used for one-shot Gate consumption; content, blocks, and the exact
+    validated mention allowlist are never truncated or reconstructed for
+    replay. *)
+
+val connector_post_replay_target :
+  connector_post_replay -> Keeper_surface_post.post_target
+(** Recover the exact terminal surface target carried by the durable request.
+    Host replay uses this receipt to settle the enclosing turn as an external
+    effect instead of delivering a second assistant reply. *)
 
 val replay_connector_post_with_outcome :
   config:Workspace.config ->
@@ -85,12 +95,17 @@ val handle_context_status
   -> args:Yojson.Safe.t
   -> string
 
-val handle_memory_search
+val handle_memory_write_with_outcome
   :  config:Workspace.config
   -> meta:keeper_meta
-  -> ctx_work:working_context
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> ?gate_context:(unit -> Keeper_gate.causal_context)
+  -> ?gate_grant:Keeper_gate.cycle_grant
   -> args:Yojson.Safe.t
-  -> string
+  -> unit
+  -> Keeper_tool_execution.t
+(** Validate [args], consume the external-effect Gate for the exact Memory OS
+    mutation, and only then invoke the memory producer. *)
 
 val handle_library_search_with_outcome
   : meta:keeper_meta -> args:Yojson.Safe.t -> Keeper_tool_execution.t
@@ -150,15 +165,6 @@ val handle_voice_with_outcome
   -> args:Yojson.Safe.t
   -> unit
   -> Keeper_tool_execution.t
-
-(** [handle_task] dispatches to [Keeper_tool_task_runtime.handle_keeper_task_tool]
-    by [name]. Caller must pass a name in the task / broadcast cluster. *)
-val handle_task
-  :  config:Workspace.config
-  -> meta:keeper_meta
-  -> name:string
-  -> args:Yojson.Safe.t
-  -> string
 
 (** RFC-0182 §3.1 — [handle_masc_task_with_outcome] is the descriptor-projection
     cluster handler for [masc_task_*] tools (add_task / batch_add_tasks /
@@ -227,10 +233,25 @@ val handle_masc_agent_timeline_with_outcome
   : config:Workspace.config -> meta:keeper_meta -> name:string -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
 
+val handle_keeper_spawn_with_outcome
+  :  name:string
+  -> args:Yojson.Safe.t
+  -> Keeper_tool_execution.t
+(** The four spawn tools, reached through the turn's registry.
+
+    Answers with a refusal outside a turn: there is nowhere for a process to
+    live that a later call could reach, and saying so beats creating a registry
+    nothing else can find. *)
+
 (** RFC-0234 — [handle_masc_schedule_with_outcome] is the descriptor-projection
     cluster handler for [masc_schedule_*] tools. *)
 val handle_masc_schedule_with_outcome
-  : config:Workspace.config -> meta:keeper_meta -> name:string -> args:Yojson.Safe.t
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> unit
   -> Keeper_tool_execution.t
 
 (** RFC-0252 — [handle_masc_fusion_with_outcome] is the in-process handler for the
@@ -328,21 +349,6 @@ val handle_masc_keeper_with_outcome
   -> args:Yojson.Safe.t
   -> unit
   -> Keeper_tool_execution.t
-
-(** Dispatch the local-runtime descriptor cluster. The arbitrary-network
-    Ollama probe crosses the neutral external-effect Gate with the exact
-    operation identity and complete input; other registered local-runtime
-    operations retain their existing dispatch behavior. *)
-val handle_masc_local_runtime
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> ?continuation_channel:Keeper_continuation_channel.t
-  -> ?gate_context:(unit -> Keeper_gate.causal_context)
-  -> ?gate_grant:Keeper_gate.cycle_grant
-  -> name:string
-  -> args:Yojson.Safe.t
-  -> unit
-  -> string
 
 val handle_masc_local_runtime_with_outcome
   :  config:Workspace.config

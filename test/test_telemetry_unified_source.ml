@@ -22,7 +22,7 @@ let roundtrip_all_variants () =
     Tool_call_io,             "Tool_call_io";
     Trajectory_tool_call,     "Trajectory_tool_call";
     Tool_usage,               "Tool_usage";
-    Oas_event,                "Oas_event";
+    Agent_core_event,                "Agent_core_event";
     Execution_receipt,        "Execution_receipt";
     Goal_event,               "Goal_event";
     Tool_metric,              "Tool_metric";

@@ -1,14 +1,22 @@
 (** Dashboard dev-token issuance and role-aware rotation.
 
     Rotation is a resumable transaction:
-    journal -> credential revocation -> Worker credential -> public raw token
+    journal -> credential revocation -> Admin credential -> public raw token
     -> journal removal. A failure after the journal write leaves the exact raw
     token available for an idempotent retry. *)
 
 let ( let* ) = Result.bind
 
 let dashboard_dev_actor_name = "dashboard"
-let dashboard_dev_role = Masc_domain.Worker
+
+(* The loopback dev-token is the local operator's own session. The endpoint
+   answers exact loopback Hosts only and is absent under strict-auth, and any
+   process on this machine can already read [.masc/auth/*.token] — a Worker
+   ceiling here was friction, not a boundary: admin-gated dashboard surfaces
+   refused the bootstrapped session while a hand-pasted admin bearer died on
+   the next role-aware rotation. Remote and OAuth dashboard authentication
+   are unaffected. *)
+let dashboard_dev_role = Masc_domain.Admin
 
 type dashboard_dev_token =
   { raw : string
@@ -67,7 +75,7 @@ let token_error_to_string = function
     Printf.sprintf "revoke dashboard credential %S: %s" agent_name detail
   | Credential_rotation_failed error ->
     Printf.sprintf
-      "persist dashboard Worker credential: %s"
+      "persist dashboard credential: %s"
       (Masc_domain.masc_error_to_string error)
   | Token_file_write_failed { path; detail } ->
     Printf.sprintf "persist dashboard dev-token %s: %s" path detail

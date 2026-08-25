@@ -21,6 +21,11 @@ type verification_submission =
   ; assignee : string
   ; verification_id : string
   ; evidence_refs : string list
+  ; (* Set when the submission superseded a pending one, so the record it
+       replaced can be removed after the commit. The task points only at the
+       new id; leaving the old file behind would show the dashboard a request
+       no task is waiting on. *)
+    superseded_verification_id : string option
   }
 
 (* Workspace-visible wording for a committed transition, or [None] when the
@@ -448,6 +453,16 @@ let transition_task_outcome_r
                  ; assignee
                  ; verification_id
                  ; evidence_refs = verification_submission_evidence_refs
+                 ; superseded_verification_id =
+                     (match task.task_status with
+                      | Masc_domain.AwaitingVerification
+                          { verification_id = superseded; _ } ->
+                        Some superseded
+                      | Masc_domain.Todo
+                      | Masc_domain.Claimed _
+                      | Masc_domain.InProgress _
+                      | Masc_domain.Done _
+                      | Masc_domain.Cancelled _ -> None)
                  }
            | ( ( Masc_domain.Claim
                | Masc_domain.Start
@@ -465,6 +480,7 @@ let transition_task_outcome_r
              commit so agents that cache the task don't emit stale broadcasts
              referencing the old status. *)
           Task_cache_invariant.clear_stale_agent_task config
+            ~cause:Task_cache_invariant.After_commit
             ~agent_name ~task_id ~status:new_status
             ~module_name:"transition_task_r";
           update_local_agent_state config ~agent_name (fun agent ->
@@ -505,10 +521,15 @@ let transition_task_outcome_r
            | None -> ()
            | Some content ->
              (try
-                let (_ : Workspace_broadcast.broadcast_delivery) =
-                  broadcast config ~from_agent:agent_name ~content
-                in
-                ()
+                match broadcast ~audience:System_record config ~from_agent:agent_name ~content with
+                | Ok _ -> ()
+                | Error error ->
+                  Log.TaskState.error
+                    "task transition committed but broadcast was not persisted task_id=%s agent=%s action=%s detail=%s"
+                    task_id
+                    agent_name
+                    action_s
+                    (broadcast_error_to_string error)
               with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn ->
@@ -705,7 +726,29 @@ let transition_task_outcome_r
   in
   (match !committed_verification_submission with
    | None -> ()
-   | Some { task; assignee; verification_id; evidence_refs } ->
+   | Some { task; assignee; verification_id; evidence_refs; superseded_verification_id }
+     ->
+     (* Order matters: remove the superseded record before announcing the new
+        one, so no reader woken by the notification can see two open requests
+        for one task. A failed removal leaves a request no task points at --
+        visible in the dashboard, refused by [decide_verdict] on the id -- which
+        is why it degrades rather than failing the committed transition. *)
+     (match superseded_verification_id with
+      | None -> ()
+      | Some superseded ->
+        (match
+           (Atomic.get Workspace_hooks.verification_delete_request_fn) config
+             ~verification_id:superseded
+         with
+         | Ok () -> ()
+         | Error detail ->
+           Log.TaskState.error
+             "verification supersede delete degraded after commit task_id=%s \
+              superseded=%s replaced_by=%s detail=%s"
+             task_id
+             superseded
+             verification_id
+             detail));
      (try
         (Atomic.get Workspace_hooks.verification_notify_submit_fn)
           config
@@ -769,6 +812,7 @@ let commit_verdict_r
       ~task_id
       ~verification_id
       ?(notes = "")
+      ?evaluator_runtime
       ()
   : transition_outcome Masc_domain.masc_result
   =
@@ -853,13 +897,32 @@ let commit_verdict_r
            in
            let producer = decided.Workspace_task_lifecycle.producer in
            let verification_id = decided.Workspace_task_lifecycle.verification_id in
+           let rejection_handoff =
+             match verdict with
+             | Masc_domain.Verdict_approved -> None
+             | Masc_domain.Verdict_rejected { reason } ->
+               Some
+                 { Masc_domain.summary = reason
+                 ; reason = Some reason
+                 ; next_step = None
+                 ; failure_mode = None
+                 ; reclaim_policy = None
+                 ; evidence_refs = [ verification_id ]
+                 ; updated_at = Some now
+                 ; updated_by = Some authority_actor
+                 }
+           in
            let new_backlog =
              { backlog with
                tasks =
                  List.map
                    (fun (t : task) ->
                       if String.equal t.id task_id
-                      then { t with task_status = new_status }
+                      then
+                        { t with
+                          task_status = new_status
+                        ; handoff_context = rejection_handoff
+                        }
                       else t)
                    backlog.tasks
              }
@@ -886,6 +949,7 @@ let commit_verdict_r
              | None ->
                Task_cache_invariant.clear_stale_agent_task
                  config
+                 ~cause:Task_cache_invariant.After_commit
                  ~agent_name:producer
                  ~task_id
                  ~status:new_status
@@ -895,6 +959,42 @@ let commit_verdict_r
               task. *)
            (match new_status with
             | Masc_domain.Done { assignee; _ } ->
+              (* The observation surface has the same gap the completion metric
+                 below records: a verdict does not pass through the agent
+                 transition surface, so nothing emitted the audit entry or the
+                 [Task_completed] telemetry for a task finished this way. The
+                 audit trail stopped at [submit_for_verification] and never said
+                 who approved the completion. RFC-0323 G-3 already states that a
+                 Done produced by an approval verdict is a Done like any other,
+                 and the actor is the record's assignee — the authority is not an
+                 agent. [authority] rides in the details so the trail keeps the
+                 provenance the actor field cannot carry. *)
+              run_post_commit "transition_observation" (fun () ->
+                observe_task_transition
+                  config
+                  ~agent_name:assignee
+                  ~task_id
+                  ~transition:Masc_domain.Done_action
+                  ~details:
+                    (let base =
+                       task_transition_details
+                         ~from_status:task.task_status
+                         ~to_status:new_status
+                         ?notes:(if notes = "" then None else Some notes)
+                         ?duration_ms:
+                           (Some
+                              (max
+                                 0
+                                 (int_of_float
+                                    ((Time_compat.now ()
+                                      -. task_started_at_unix task.task_status)
+                                     *. 1000.0))))
+                         ()
+                     in
+                     match base with
+                     | `Assoc fields ->
+                       `Assoc (fields @ [ "authority", `String authority_actor ])
+                     | other -> other));
               run_post_commit "terminal_reconciliation" (fun () ->
                 match
                   (Atomic.get Workspace_hooks.task_terminal_committed_fn)
@@ -941,6 +1041,18 @@ let commit_verdict_r
              | Masc_domain.Verdict_approved -> Event_kind.Task.Approved
              | Masc_domain.Verdict_rejected _ -> Event_kind.Task.Rejected
            in
+           (* [authority_actor] is a fresh id per review, so it identifies the
+              run and nothing else — grouping 74 verdicts by it yields 74 groups.
+              [evaluator_runtime] is the config key that bound the provider and
+              model which judged, so it is the axis a verdict history can
+              actually be aggregated on. It was already computed and carried in
+              the review notes blob; every structured projection dropped it.
+              [None] for a human operator verdict, where no evaluator ran. *)
+           let evaluator_runtime_field =
+             match evaluator_runtime with
+             | None -> []
+             | Some runtime -> [ "evaluator_runtime", `String runtime ]
+           in
            let authority_fields =
              [ "task_id", `String task_id
              ; "authority_kind", `String authority_kind
@@ -948,6 +1060,7 @@ let commit_verdict_r
              ; "producer", `String producer
              ; "verification_id", `String verification_id
              ]
+             @ evaluator_runtime_field
            in
            (* The task status deliberately stays a small lifecycle sum: a
               rejection returns the producer to [InProgress]. Keep the

@@ -27,7 +27,7 @@ let fact ?(claim = "claim") () :
 ;;
 
 let source kind =
-  { Current.kind; trace_id = "trace"; generation = 7 }
+  { Current.kind; trace_id = "trace" }
 ;;
 
 let replace
@@ -315,6 +315,48 @@ let test_recall_read_failure_injects_no_block () =
   check string "unreadable snapshot injects no recall block" "" rendered
 ;;
 
+(* The recall byte budget is read at render time, so a snapshot that was
+   within budget when written can exceed it later — the budget is an env
+   knob, and facts accumulate. That arm injects nothing rather than a
+   truncated block, and it is the only recall path that discards facts it
+   successfully read. *)
+let test_recall_over_budget_injects_no_block () =
+  with_temp_keepers
+  @@ fun keepers_dir ->
+  let prompt_dir = Filename.concat keepers_dir "prompts" in
+  Unix.mkdir prompt_dir 0o755;
+  Prompt_registry.set_markdown_dir prompt_dir;
+  Prompt_registry.load_prompts_from_directory prompt_dir;
+  ignore (replace ~keepers_dir ~facts:[ fact ~claim:(String.make 256 'y') () ] () |> require_ok);
+  let key = Env_config.KeeperMemoryOs.recall_facts_max_bytes_env_key in
+  let previous = Sys.getenv_opt key in
+  let restore () =
+    match previous with
+    | Some value -> Unix.putenv key value
+    | None -> Unix.putenv key ""
+  in
+  Fun.protect ~finally:restore (fun () ->
+    Unix.putenv key "16";
+    let rendered =
+      Masc.Keeper_memory_os_recall.render_context
+        ~keepers_dir
+        ~keeper_id:"keeper"
+        ~now:240.0
+        ()
+    in
+    check string "over-budget recall injects no block" "" rendered);
+  Unix.putenv key "1048576";
+  let rendered_within_budget =
+    Masc.Keeper_memory_os_recall.render_context
+      ~keepers_dir
+      ~keeper_id:"keeper"
+      ~now:240.0
+      ()
+  in
+  check bool "same snapshot renders when the budget allows it" true
+    (String.length rendered_within_budget > 0)
+;;
+
 let test_snapshot_write_rejects_rendered_fact_payload_over_budget () =
   with_temp_keepers @@ fun keepers_dir ->
   match
@@ -540,7 +582,7 @@ let test_journal_recreated_after_purge_sequence () =
 let test_purge_plan_removes_memory_sidecars () =
   let module Shutdown = Masc.Keeper_shutdown_types in
   let context =
-    { Shutdown.requested_name = "keeper"; agent_name = "keeper"; meta_version = 1 }
+    { Shutdown.requested_name = "keeper"; agent_name = "keeper" }
   in
   let plan = Shutdown.dashboard_purge_artifact_plan ~keeper_name:"keeper" context in
   let contains artifact = List.exists (fun entry -> entry = artifact) plan in
@@ -637,6 +679,10 @@ let () =
             "recall read failure injects no block"
             `Quick
             test_recall_read_failure_injects_no_block
+        ; test_case
+            "recall over budget injects no block"
+            `Quick
+            test_recall_over_budget_injects_no_block
         ; test_case
             "snapshot rejects rendered facts over budget"
             `Quick

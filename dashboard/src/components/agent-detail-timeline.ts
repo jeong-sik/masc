@@ -16,12 +16,30 @@ import { formatMsCompact } from '../lib/format-number'
 import { toolCategory, durationColor, formatArgs } from './tool-call-shared'
 import type { AgentTimelineEvent } from '../api'
 
+type TimelineEventCategory = 'all' | 'task' | 'tool_call' | 'broadcast' | 'joined' | 'other'
+
+// 이 도메인에서 접두사를 묻는 유일한 자리. task_claimed / task_started /
+// task_completed / task_cancelled 는 tool_agent_timeline.ml:140-195 가 만든다.
+export function timelineEventCategory(type: string): Exclude<TimelineEventCategory, 'all'> {
+  if (type.startsWith('task_')) return 'task'
+  if (type === 'tool_call') return 'tool_call'
+  if (type === 'broadcast') return 'broadcast'
+  if (type === 'joined') return 'joined'
+  return 'other'
+}
+
+// 아이콘은 카테고리를 따른다. 예전에는 여기서 task_ 접두사를 한 번 더
+// 물었는데, 그 질문의 답은 아래 timelineEventCategory 가 이미 갖고 있다.
+const ICON_BY_CATEGORY: Readonly<Record<Exclude<TimelineEventCategory, 'all'>, string>> = {
+  joined: 'J',
+  task: 'T',
+  broadcast: 'M',
+  tool_call: 'W',
+  other: 'E',
+}
+
 function timelineEventIcon(type: string): string {
-  if (type === 'joined') return 'J'
-  if (type.startsWith('task_')) return 'T'
-  if (type === 'broadcast') return 'M'
-  if (type === 'tool_call') return 'W'
-  return 'E'
+  return ICON_BY_CATEGORY[timelineEventCategory(type)]
 }
 
 export function timelineEventLabel(type: string): string {
@@ -48,15 +66,6 @@ function SummaryBadge({ children }: { children: unknown }) {
 // deliberately coarse so chips stay compact even as new event types
 // are added server-side.
 
-type TimelineEventCategory = 'all' | 'task' | 'tool_call' | 'broadcast' | 'joined' | 'other'
-
-function timelineEventCategory(type: string): Exclude<TimelineEventCategory, 'all'> {
-  if (type.startsWith('task_')) return 'task'
-  if (type === 'tool_call') return 'tool_call'
-  if (type === 'broadcast') return 'broadcast'
-  if (type === 'joined') return 'joined'
-  return 'other'
-}
 
 function timelineEventSearchText(evt: AgentTimelineEvent): string {
   const parts: string[] = [evt.type, timelineEventLabel(evt.type)]
@@ -111,7 +120,7 @@ export function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: n
   // (keeper.tool_exec producer, #23540); absent/other = external MCP dispatch.
   const isKeeperInTurn = d.source === 'keeper_in_turn'
   const keeperTurnId = typeof d.keeper_turn_id === 'number' ? d.keeper_turn_id : null
-  const oasTurn = typeof d.oas_turn === 'number' ? d.oas_turn : null
+  const agentCoreTurn = typeof d.agent_core_turn === 'number' ? d.agent_core_turn : null
 
   return html`
     <div class="v2-monitoring-row flex flex-col py-1.5 px-2 rounded-[var(--r-1)] hover:bg-[var(--color-bg-elevated)] transition-colors" key=${idx} style=${{ animation: 'activityFadeIn 0.25s var(--ease-out)' }}>
@@ -133,7 +142,7 @@ export function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: n
           ? html`<span class="text-2xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-secondary)]" data-tool-source="keeper_in_turn" title="keeper가 자기 턴 안에서 실행한 도구">턴 내</span>`
           : null}
         ${keeperTurnId != null
-          ? html`<span class="text-2xs font-mono text-[var(--color-fg-secondary)]" data-keeper-turn-id=${keeperTurnId} title="Keeper 절대 턴과 그 안의 모델 스텝">턴 ${keeperTurnId}${oasTurn != null ? ` · 스텝 ${oasTurn}` : ''}</span>`
+          ? html`<span class="text-2xs font-mono text-[var(--color-fg-secondary)]" data-keeper-turn-id=${keeperTurnId} title="Keeper 절대 턴과 그 안의 모델 스텝">턴 ${keeperTurnId}${agentCoreTurn != null ? ` · 스텝 ${agentCoreTurn}` : ''}</span>`
           : null}
         <span class="flex-1"></span>
         ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}

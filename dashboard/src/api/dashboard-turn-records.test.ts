@@ -49,6 +49,9 @@ function payload(...entries: ReturnType<typeof entry>[]) {
     durable_store: '.masc/keepers/sangsu/turn-records',
     dashboard_surface: '/api/v1/keepers/:name/turn-records',
     freshness_slo_s: 300,
+    live_turn_in_progress: false,
+    live_turn_started_at_unix: null,
+    live_turn_last_progress_at_unix: null,
     latest_ts_unix: 1_700_000_000,
     latest_ts_iso: '2023-11-14T22:13:20Z',
     latest_age_s: 10,
@@ -157,6 +160,11 @@ describe('keeper turn record cache token counts', () => {
     await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
       '유효하지 않은 keeper turn record payload',
     )
+
+    getMock.mockResolvedValue(payload(entry({ selected_model: ' ' })))
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
   })
 
   it('projects the record identity fields the writer always emits', async () => {
@@ -178,7 +186,7 @@ describe('keeper turn record cache token counts', () => {
       path: '/keepers/sangsu/raw-traces/turn-1.jsonl',
       start_seq: 1,
       end_seq: 4,
-      agent_name: 'oas-ollama_cloud.deepseek-v4-flash',
+      agent_name: 'agent-core-ollama_cloud.deepseek-v4-flash',
       session_id: 'trace-1',
     }
     getMock.mockResolvedValue(payload(entry({ raw_trace_run_ref: run_ref })))
@@ -241,8 +249,8 @@ describe('keeper turn record cache token counts', () => {
     )
   })
 
-  it('rejects fields outside the exact current nested record', async () => {
-    getMock.mockResolvedValue(payload(entry({ lease_id: 'retired' })))
+  it('rejects the retired unversioned model field', async () => {
+    getMock.mockResolvedValue(payload(entry({ model: 'runtime' })))
 
     await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
       '유효하지 않은 keeper turn record payload',
@@ -279,6 +287,66 @@ describe('keeper turn record cache token counts', () => {
 
   it('rejects a turn_ref that disagrees with trace_id and absolute_turn', async () => {
     getMock.mockResolvedValue(payload(entry({ turn_ref: 'trace-1#8' })))
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+})
+
+describe('keeper turn record live-turn envelope', () => {
+  // #28216 made the server emit live_turn_in_progress / started_at /
+  // last_progress_at unconditionally. Until the decoder recognised the
+  // three fields its exact-envelope check rejected the whole response, so
+  // every turn-records load failed with an invalid-payload error.
+  it('decodes a response whose live turn is in progress', async () => {
+    const raw = payload(entry())
+    Object.assign(raw, {
+      live_turn_in_progress: true,
+      live_turn_started_at_unix: 1_700_000_020,
+      live_turn_last_progress_at_unix: 1_700_000_028,
+    })
+    getMock.mockResolvedValue(raw)
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response).toMatchObject({
+      live_turn_in_progress: true,
+      live_turn_started_at_unix: 1_700_000_020,
+      live_turn_last_progress_at_unix: 1_700_000_028,
+    })
+  })
+
+  it('keeps the idle envelope (false with both timestamps null)', async () => {
+    getMock.mockResolvedValue(payload(entry()))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response).toMatchObject({
+      live_turn_in_progress: false,
+      live_turn_started_at_unix: null,
+      live_turn_last_progress_at_unix: null,
+    })
+  })
+
+  it('rejects a missing live_turn_in_progress field', async () => {
+    const raw = payload(entry())
+    delete (raw as Record<string, unknown>).live_turn_in_progress
+    getMock.mockResolvedValue(raw)
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects a live turn whose timestamps disagree with in_progress', async () => {
+    const raw = payload(entry())
+    Object.assign(raw, {
+      live_turn_in_progress: true,
+      live_turn_started_at_unix: null,
+      live_turn_last_progress_at_unix: null,
+    })
+    getMock.mockResolvedValue(raw)
 
     await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
       '유효하지 않은 keeper turn record payload',
@@ -324,7 +392,7 @@ describe('keeper turn record final input composition', () => {
   it('carries typed content components through the decoder', async () => {
     getMock.mockResolvedValue(payload(entry({
       input_components: [
-        { component: 'prompt.persona', bytes: 1200 },
+        { component: 'prompt.keeper_instructions', bytes: 1200 },
         { component: 'tool_schemas', bytes: 64000 },
         { component: 'message_tool_result', bytes: 2800 },
       ],
@@ -333,7 +401,7 @@ describe('keeper turn record final input composition', () => {
     const response = await fetchKeeperTurnRecords('sangsu')
 
     expect(response.entries[0]?.record.input_components).toEqual([
-      { component: 'prompt.persona', bytes: 1200 },
+      { component: 'prompt.keeper_instructions', bytes: 1200 },
       { component: 'tool_schemas', bytes: 64000 },
       { component: 'message_tool_result', bytes: 2800 },
     ])
@@ -403,7 +471,7 @@ describe('keeper turn record final input composition', () => {
   it('accepts only current unique blocks with lowercase sha256 digests', async () => {
     getMock.mockResolvedValue(payload(entry({
       blocks: [{
-        block: 'persona',
+        block: 'keeper_instructions',
         bytes: 4,
         digest: 'a'.repeat(64),
       }],
@@ -411,18 +479,18 @@ describe('keeper turn record final input composition', () => {
 
     const response = await fetchKeeperTurnRecords('sangsu')
     expect(response.entries[0]?.record.blocks).toEqual([{
-      block: 'persona',
+      block: 'keeper_instructions',
       bytes: 4,
       digest: 'a'.repeat(64),
     }])
   })
 
   it.each([
-    { blocks: [{ block: 'persona', bytes: 4, digest: 'A'.repeat(64) }] },
+    { blocks: [{ block: 'keeper_instructions', bytes: 4, digest: 'A'.repeat(64) }] },
     {
       blocks: [
-        { block: 'persona', bytes: 4, digest: 'a'.repeat(64) },
-        { block: 'persona', bytes: 5, digest: 'b'.repeat(64) },
+        { block: 'keeper_instructions', bytes: 4, digest: 'a'.repeat(64) },
+        { block: 'keeper_instructions', bytes: 5, digest: 'b'.repeat(64) },
       ],
     },
   ])('rejects malformed or duplicate current blocks', async ({ blocks }) => {
@@ -431,5 +499,56 @@ describe('keeper turn record final input composition', () => {
     await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
       '유효하지 않은 keeper turn record payload',
     )
+  })
+})
+
+describe('turn-records health: live vs ok (masc#28720)', () => {
+  it('accepts a live keeper whose newest finished record is past the SLO', async () => {
+    // The live case that used to be reported as 'ok'. taskmaster on 2026-08-14:
+    // latest_age_s 539.99 against a 420s SLO with a turn running. The decoder
+    // recomputed the age, called the response a contract violation, and the
+    // memory inspector rendered "유효하지 않은 keeper turn record payload".
+    getMock.mockResolvedValue({
+      ...payload(entry()),
+      freshness_slo_s: 420,
+      latest_age_s: 540,
+      live_turn_in_progress: true,
+      live_turn_started_at_unix: 1_700_000_100,
+      live_turn_last_progress_at_unix: 1_700_000_200,
+      health: 'live',
+    })
+    const response = await fetchKeeperTurnRecords('sangsu')
+    expect(response.health).toBe('live')
+    expect(response.entries.length).toBe(1)
+  })
+
+  it("accepts a keeper's first turn: live with no records yet", async () => {
+    getMock.mockResolvedValue({
+      ...payload(),
+      latest_ts_unix: null,
+      latest_ts_iso: null,
+      latest_age_s: null,
+      live_turn_in_progress: true,
+      live_turn_started_at_unix: 1_700_000_100,
+      live_turn_last_progress_at_unix: 1_700_000_200,
+      health: 'live',
+    })
+    const response = await fetchKeeperTurnRecords('sangsu')
+    expect(response.health).toBe('live')
+    expect(response.entries.length).toBe(0)
+  })
+
+  it('rejects live without a turn actually running', async () => {
+    getMock.mockResolvedValue({ ...payload(entry()), health: 'live' })
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow()
+  })
+
+  it('still rejects ok when the newest record is past the SLO', async () => {
+    getMock.mockResolvedValue({
+      ...payload(entry()),
+      freshness_slo_s: 420,
+      latest_age_s: 540,
+    })
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow()
   })
 })

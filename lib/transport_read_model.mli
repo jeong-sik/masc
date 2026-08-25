@@ -9,7 +9,8 @@
 
     All hostname / IP / URI manipulation helpers stay private —
     operator-visible surface is the {!http_context} record + its
-    constructors + the two JSON projections. *)
+    constructors + the two JSON projections + the configured
+    host/port env readers. *)
 
 (** {1 HTTP context} *)
 
@@ -85,14 +86,23 @@ val context_from_env :
        [http://example.com:8000/] propagates correctly into
        JSON output. *)
 
+(** {1 Configured endpoint readers} *)
+
+val configured_http_port : unit -> int
+(** [configured_http_port ()] returns the configured HTTP port from the
+    runtime environment ({!Env_config_core.masc_http_port_int}). *)
+
+val configured_http_host : unit -> string
+(** [configured_http_host ()] returns the configured HTTP host from the
+    runtime environment ({!Env_config_core.masc_host}). *)
+
 (** {1 JSON projections} *)
 
 val websocket_discovery_json : http_context -> Yojson.Safe.t
 (** [websocket_discovery_json ctx] returns the WebSocket
     discovery payload used by browser dashboards to learn the
     same-origin [ws://]/[wss://] upgrade URL.  Includes the
-    legacy standalone configured-port + runtime-listening fields
-    when [ctx.include_configured] is [true]. *)
+    [configured] field when [ctx.include_configured] is [true]. *)
 
 val transport_status_json : http_context -> Yojson.Safe.t
 (** [transport_status_json ctx] returns the full transport
@@ -106,14 +116,5 @@ val transport_status_json : http_context -> Yojson.Safe.t
     Default ([false]) hides the configured fields so dashboard
     UI does not leak operator-only knobs. *)
 
-type webrtc_status =
-  { ice_server_urls : string list
-  ; pending_offers : int
-  ; active_peers : int
-  ; live_connections : int
-  ; connected_channels : int
-  }
-
 val register_grpc_service_name : string -> unit
 val register_grpc_health_service_name : string -> unit
-val register_webrtc_status : (unit -> webrtc_status) -> unit

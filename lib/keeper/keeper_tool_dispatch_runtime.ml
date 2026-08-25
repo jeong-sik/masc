@@ -67,8 +67,12 @@ let descriptor_route_invariant_error ~keeper_name ~tool_name descriptor =
       ; "runtime_handler", runtime_handler
       ]
     ();
+  (* The invariant break is a Runtime_failure by construction; deriving the
+     level from that same class keeps the log honest if the classification
+     ever changes (#28895 review). *)
+  let failure_class = Tool_result.Runtime_failure in
   Log.Keeper.emit
-    Log.Error
+    (Tool_result.log_level_of_failure_class failure_class)
     ~keeper_name
     ~category:Log.Tool
     ~details:
@@ -81,12 +85,104 @@ let descriptor_route_invariant_error ~keeper_name ~tool_name descriptor =
          ])
     "keeper descriptor route resolved but its typed runtime handler returned no result";
   Keeper_tool_execution.failure_data
-    ~class_:Tool_result.Runtime_failure
+    ~class_:failure_class
     ~message:(Yojson.Safe.to_string payload)
     payload
 ;;
 
 (* ── Tool execution dispatch ──────────────────────────────────── *)
+
+let runtime_context
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_work
+      ?turn_sandbox_factory
+      ?sw
+      ?clock
+      ?proc_mgr
+      ?net
+      ?mcp_session_id
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ()
+  =
+  Keeper_tool_runtime.
+    { config
+    ; meta
+    ; publication_recovery
+    ; ctx_work
+    ; turn_sandbox_factory
+    ; sw
+    ; clock
+    ; proc_mgr
+    ; net
+    ; mcp_session_id
+    ; continuation_channel
+    ; gate_context
+    ; gate_grant
+    }
+;;
+
+let execute_keeper_tool_descriptor_with_outcome
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~(publication_recovery :
+          Keeper_publication_recovery_availability.turn_context)
+      ~(ctx_work : working_context)
+      ?turn_sandbox_factory
+      ?sw
+      ?clock
+      ?proc_mgr
+      ?net
+      ?mcp_session_id
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~(descriptor : Keeper_tool_descriptor.t)
+      ~(input : Yojson.Safe.t)
+      ()
+  =
+  match Keeper_tool_descriptor.find_id descriptor.id with
+  | Some canonical when canonical == descriptor ->
+    let context =
+      runtime_context
+        ~config
+        ~meta
+        ~publication_recovery
+        ~ctx_work
+        ?turn_sandbox_factory
+        ?sw
+        ?clock
+        ?proc_mgr
+        ?net
+        ?mcp_session_id
+        ?continuation_channel
+        ?gate_context
+        ?gate_grant
+        ()
+    in
+    (match Keeper_tool_runtime.handle context ~descriptor ~args:input with
+     | Some execution -> execution
+     | None ->
+       descriptor_route_invariant_error
+         ~keeper_name:meta.name
+         ~tool_name:descriptor.internal_name
+         descriptor)
+  | Some _ | None ->
+    let data =
+      `Assoc
+        [ "ok", `Bool false
+        ; "error", `String "noncanonical_keeper_tool_descriptor"
+        ; "descriptor_id", `String descriptor.id
+        ]
+    in
+    Keeper_tool_execution.failure_data
+      ~class_:Tool_result.Runtime_failure
+      ~message:(Yojson.Safe.to_string data)
+      data
+;;
 
 let execute_keeper_tool_call_with_outcome
       ~(config : Workspace.config)
@@ -112,24 +208,21 @@ let execute_keeper_tool_call_with_outcome
   =
   let args = input in
        let keeper_tool_runtime_context =
-         Keeper_tool_runtime.
-                       { config
-                       ; meta
-                       ; publication_recovery
-                       ; ctx_work
-                       ; turn_sandbox_factory
-           ; (* RFC-0182 Phase 5 PR-A.2: Eio resources threaded from
-                caller via labeled ? params.  Callers without Eio
-                context (OAS handler, tests) leave them unset. *)
-             sw
-           ; clock
-           ; proc_mgr
-           ; net
-           ; mcp_session_id
-           ; continuation_channel
-           ; gate_context
-           ; gate_grant
-           }
+         runtime_context
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_work
+           ?turn_sandbox_factory
+           ?sw
+           ?clock
+           ?proc_mgr
+           ?net
+           ?mcp_session_id
+           ?continuation_channel
+           ?gate_context
+           ?gate_grant
+           ()
        in
        let descriptor_dispatch =
          match

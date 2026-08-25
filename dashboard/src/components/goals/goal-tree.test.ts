@@ -72,23 +72,6 @@ function makeGoal(id: string, title: string, children: GoalTreeNode[] = []): Goa
     metric: null,
     target_value: null,
     due_date: null,
-    parent_goal_id: null,
-    owner: null,
-    attainment: {
-      state: 'unmeasured',
-      basis: 'unmeasured',
-      metric: null,
-      metric_evaluation: 'absent',
-      target_value: null,
-      target_parse_status: 'absent',
-      unit: 'unknown',
-      observed_value: null,
-      target_numeric: null,
-      attainment_pct: null,
-      task_done_count: 0,
-      task_count: 0,
-      note: '',
-    },
     tasks: [],
     task_count: 0,
     task_done_count: 0,
@@ -170,20 +153,6 @@ describe('GoalTree', () => {
       ...makeGoal('goal-ready', 'Ready goal'),
       task_count: 1,
       task_done_count: 1,
-      completion_summary: {
-        state: 'ready_for_completion',
-        pct: 100,
-        pct_source: 'linked_tasks',
-        attainment_state: 'attained',
-        attainment_basis: 'linked_tasks',
-        metric_evaluation: 'absent',
-        task_total: 1,
-        task_done: 1,
-        task_open: 0,
-        is_complete: false,
-        is_terminal: false,
-        ready_to_request_completion: true,
-      },
     } satisfies GoalTreeNode
     const treePayload: DashboardGoalsTreeResponse = {
       approval_queue_state: { state: 'ready' },
@@ -228,47 +197,17 @@ describe('GoalTree', () => {
       .toContain('requested completion')
   })
 
-  it('does not render unevaluated metric completion pct as goal progress truth', async () => {
-    const goal = {
-      ...makeGoal('goal-unevaluated', 'Unevaluated metric goal'),
-      metric: '신규 3축 갭 해소 PR 수',
-      target_value: '6',
-      task_count: 15,
-      task_done_count: 5,
-      attainment: {
-        state: 'in_progress',
-        basis: 'metric_target_count',
-        metric: '신규 3축 갭 해소 PR 수',
-        metric_evaluation: 'unevaluated',
-        target_value: '6',
-        target_parse_status: 'parseable',
-        unit: 'count',
-        observed_value: 5,
-        target_numeric: 6,
-        attainment_pct: 83,
-        task_done_count: 5,
-        task_count: 15,
-        note: 'Derived from completed linked tasks against a count target.',
-      },
-      completion_summary: {
-        state: 'in_progress',
-        pct: 83,
-        pct_source: 'attainment',
-        attainment_state: 'in_progress',
-        attainment_basis: 'metric_target_count',
-        metric_evaluation: 'unevaluated',
-        task_total: 15,
-        task_done: 5,
-        task_open: 9,
-        is_complete: false,
-        is_terminal: false,
-        ready_to_request_completion: false,
-      },
-    } satisfies GoalTreeNode
+  it('renders a verifying goal with phase label, filter chip, and summary count', async () => {
+    const goal = { ...makeGoal('goal-verifying', 'Verifying goal'), phase: 'verifying' }
     const treePayload: DashboardGoalsTreeResponse = {
       approval_queue_state: { state: 'ready' },
       tree: [goal],
-      summary: { ...emptySummary(), total_goals: 1, active_goals: 1, total_tasks: 15, done_tasks: 5 },
+      summary: {
+        ...emptySummary(),
+        total_goals: 1,
+        active_goals: 1,
+        phase_counts: { verifying: 1 },
+      },
     }
     const detailPayload: DashboardGoalDetailResponse = {
       goal,
@@ -281,18 +220,14 @@ describe('GoalTree', () => {
     mocks.fetchDashboardGoalsTree.mockResolvedValue(treePayload)
     mocks.fetchDashboardGoalDetail.mockResolvedValue(detailPayload)
 
-    const { container } = render(html`<${GoalTree} />`)
+    render(html`<${GoalTree} />`)
 
     await waitFor(() => {
       expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id'))
-        .toBe('goal-unevaluated')
+        .toBe('goal-verifying')
     })
-    const completion = container.querySelector('[data-goal-completion-summary]') as HTMLElement | null
-    expect(completion).not.toBeNull()
-    expect(completion?.textContent).toContain('metric unevaluated')
-    expect(completion?.textContent).not.toContain('83%')
-    expect(completion?.querySelector('[data-goal-completion-metric-evaluation="unevaluated"]'))
-      .not.toBeNull()
+    // Tree node badge and the phase filter chip both render the Korean label.
+    expect(screen.getAllByText('검증 중').length).toBeGreaterThanOrEqual(2)
   })
 
   it('renders a loading indicator while the goal tree is refreshing', async () => {

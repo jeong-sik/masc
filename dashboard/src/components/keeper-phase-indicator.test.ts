@@ -6,13 +6,12 @@ import { PHASE_STYLES, getPhaseStyle, pipelineStageDetailLabel } from './keeper-
 // ================================================================
 
 describe('PHASE_STYLES', () => {
-  it('has all 12 phases', () => {
+  it('has all 10 phases', () => {
     const phases = Object.keys(PHASE_STYLES)
-    expect(phases).toHaveLength(12)
+    expect(phases).toHaveLength(10)
     expect(phases).toContain('Offline')
     expect(phases).toContain('Running')
     expect(phases).toContain('Failing')
-    expect(phases).toContain('Overflowed')
     expect(phases).toContain('Compacting')
     expect(phases).toContain('HandingOff')
     expect(phases).toContain('Draining')
@@ -20,7 +19,6 @@ describe('PHASE_STYLES', () => {
     expect(phases).toContain('Stopped')
     expect(phases).toContain('Crashed')
     expect(phases).toContain('Restarting')
-    expect(phases).toContain('Dead')
   })
 
   it('each phase has label, color, bg, border, glow, icon', () => {
@@ -105,7 +103,7 @@ describe('getPhaseStyle', () => {
   })
 
   it('returns correct style for all phases', () => {
-    const phases: string[] = ['Offline', 'Running', 'Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed', 'Restarting', 'Dead']
+    const phases: string[] = ['Offline', 'Running', 'Failing', 'Compacting', 'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed', 'Restarting']
     for (const phase of phases) {
       const style = getPhaseStyle(phase)
       expect(style.label).toBeTruthy()
@@ -118,7 +116,6 @@ describe('pipelineStageDetailLabel', () => {
   it('renders operator-facing labels for offline detail reasons', () => {
     expect(pipelineStageDetailLabel('launch_pending_no_fiber')).toBe('기동 대기')
     expect(pipelineStageDetailLabel('clean_stop_terminal')).toBe('정상 정지')
-    expect(pipelineStageDetailLabel('dead_tombstone_terminal')).toBe('Dead tombstone')
     expect(pipelineStageDetailLabel('structural_failure_terminal')).toBe('구조 실패')
   })
 

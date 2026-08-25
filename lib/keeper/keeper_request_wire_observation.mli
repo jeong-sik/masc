@@ -1,9 +1,9 @@
-(** Keeper_request_wire_observation — the serialized request body size OAS
+(** Keeper_request_wire_observation — the serialized request body size AGENT_CORE
     admitted for one keeper turn.
 
-    OAS's provider-specific serialization observer measures admitted requests;
+    AGENT_CORE's provider-specific serialization observer measures admitted requests;
     a refused request instead carries the same exact size in
-    [Agent_sdk.Retry.Request_body_too_large.actual_bytes]. Nothing MASC already
+    [Agent_core.Retry.Request_body_too_large.actual_bytes]. Nothing MASC already
     computes substitutes:
     [Keeper_context_core_accessors.serialize_context] covers
     [{system_prompt, messages}] and excludes tool schemas and every
@@ -11,10 +11,10 @@
     from a byte ceiling — measured 07-28/29, of 3,234 turns that died on the
     byte cap, 2,964 (91.7%) were under 50% token utilization at that moment.
 
-    OAS invokes this observer after provider-specific serialization, after every
+    AGENT_CORE invokes this observer after provider-specific serialization, after every
     stream-field injection, and after its own serialized-body admission check,
     so [body_bytes] is the exact admitted count. The observation is diagnostic:
-    OAS reports a rejecting or raising callback as typed failure evidence and
+    AGENT_CORE reports a rejecting or raising callback as typed failure evidence and
     does not rewrite the provider result. The rejected-request projection is
     handled at the typed provider-attempt result boundary, not by this metric
     observer. *)
@@ -39,7 +39,7 @@ val observer :
   keeper_name:string ->
   runtime_id:string ->
   max_request_body_bytes:int ->
-  Agent_sdk.Agent.pre_dispatch_serialization_observer
+  Agent_core.Agent.pre_dispatch_serialization_observer
 (** [observer ?on_observation ~keeper_name ~runtime_id
     ~max_request_body_bytes] records [body_bytes] under {!metric}, forwards the
     same exact boundary value to [on_observation], and admits the observation.

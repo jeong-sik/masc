@@ -82,10 +82,11 @@ let keeper_meta name =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [
+          (* [runtime_id] left JSON meta before 28ef484a39 closed the schema
+             against unknown fields; [agent_name] is derived canonically by
+             Masc_test_deps. Spelling either here failed the decoder. *)
           ("name", `String name);
-          ("agent_name", `String (name ^ "-agent"));
           ("trace_id", `String ("trace-" ^ name));
-          ("runtime_id", `String Masc.(Keeper_config.default_runtime_id ()));
         ])
   with
   | Ok meta -> meta
@@ -94,8 +95,7 @@ let keeper_meta name =
 let transition ?(prev_phase = KSM.Running) ?(new_phase = KSM.Paused)
     ?(selected_event = KSM.Operator_pause) () : Audit.transition_record =
   {
-    Audit.snapshot = None;
-    events_fired = [ selected_event ];
+    Audit.events_fired = [ selected_event ];
     selected_event;
     prev_phase;
     new_phase;
@@ -158,6 +158,86 @@ let test_record_and_read_multiple_turns () =
       check int (Printf.sprintf "turn %d id" idx) expected_id turn.Audit.turn_id)
     turns
 
+(* [recent_completed_turns] answers from the per-keeper in-memory ring when one
+   exists and falls through to [recent_completed_turns_from_store] otherwise —
+   the state a keeper is in after a restart. The store branch scans one shared
+   JSONL store and keeps only rows whose [keeper] field matches.
+
+   That branch was unguarded: dropping its keeper-name comparison left the
+   whole suite green, because every case here records under a single keeper and
+   reads back through the ring. Clearing the rings after recording (the store
+   keeps its rows) routes the read down the store branch. *)
+let test_store_branch_filters_by_keeper () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Audit.For_testing.reset_state ();
+      cleanup_dir base_dir)
+    (fun () ->
+      (* No sink path: [recent_completed_turns_from_store] returns [] when one
+         is configured, which would make this test vacuous. *)
+      with_env "MASC_KEEPER_TRANSITION_LOG" "" (fun () ->
+        with_env "MASC_BASE_PATH" base_dir (fun () ->
+          with_env "MASC_BASE_PATH_INPUT" base_dir (fun () ->
+            Audit.For_testing.reset_state ();
+            let record keeper_name turn_id =
+              Audit.record_completed_turn
+                ~keeper_name
+                {
+                  Audit.turn_id;
+                  started_at = float_of_int (turn_id * 10);
+                  ended_at = float_of_int ((turn_id * 10) + 5);
+                  outcome = Audit.Turn_failed;
+                }
+            in
+            (* Interleaved, so a reader that ignores the filter cannot pass by
+               ordering luck: the other keeper's rows sit between the wanted
+               ones at every position. *)
+            record "keeper-a" 1;
+            record "keeper-b" 2;
+            record "keeper-a" 3;
+            record "keeper-b" 4;
+            record "keeper-a" 5;
+            (* Drop the rings only; the JSONL rows written above survive. *)
+            Audit.For_testing.reset_state ();
+            let ids keeper_name =
+              Audit.recent_completed_turns ~keeper_name ~limit:10
+              |> List.map (fun turn -> turn.Audit.turn_id)
+              |> List.sort compare
+            in
+            check (list int) "store branch returns only keeper-a's turns"
+              [ 1; 3; 5 ] (ids "keeper-a");
+            check (list int) "store branch returns only keeper-b's turns"
+              [ 2; 4 ] (ids "keeper-b")))))
+
+(* The ring branch keys by keeper name, so its filtering is structural. Pinned
+   separately because the two branches answer the same question differently. *)
+let test_completed_turns_are_filtered_by_keeper () =
+  Audit.For_testing.reset_state ();
+  let record keeper_name turn_id =
+    Audit.record_completed_turn
+      ~keeper_name
+      {
+        Audit.turn_id;
+        started_at = float_of_int (turn_id * 10);
+        ended_at = float_of_int ((turn_id * 10) + 5);
+        outcome = Audit.Turn_failed;
+      }
+  in
+  (* Interleaved so a reader that ignores the filter cannot pass by ordering
+     luck: the other keeper's rows sit between the wanted ones. *)
+  record "keeper-a" 1;
+  record "keeper-b" 2;
+  record "keeper-a" 3;
+  record "keeper-b" 4;
+  record "keeper-a" 5;
+  let ids keeper_name =
+    Audit.recent_completed_turns ~keeper_name ~limit:10
+    |> List.map (fun turn -> turn.Audit.turn_id)
+  in
+  check (list int) "only keeper-a's turns, newest first" [ 5; 3; 1 ] (ids "keeper-a");
+  check (list int) "only keeper-b's turns, newest first" [ 4; 2 ] (ids "keeper-b")
+
 let test_ring_capacity_limit () =
   Audit.For_testing.reset_state ();
   let keeper_name = "capacity-keeper" in
@@ -213,7 +293,7 @@ let test_transition_json_preserves_observation_only () =
   check string "new phase" "paused" (json |> member "new_phase" |> to_string);
   check string "outcome" "applied"
     (json |> member "transition_outcome" |> to_string);
-  check int "transition JSON has only observed fields" 8
+  check int "transition JSON has only observed fields" 7
     (match json with `Assoc fields -> List.length fields | _ -> 0)
 
 let test_runtime_trust_timeline_carries_transition_observation () =
@@ -259,6 +339,10 @@ let test_turn_fsm_emit_transition_appends_wal_row () =
       let sink = Filename.concat base_dir "transition-audit.jsonl" in
       with_env "MASC_KEEPER_TRANSITION_LOG" sink (fun () ->
           KTF.emit_transition
+            ~ctx:
+              { KTF.stop_signaled_before = false
+              ; stop_signaled_after = false
+              }
             ~keeper_name:"turn-fsm-wal-keeper"
             ~turn_id:42
             ~prev:KTF.Streaming
@@ -269,15 +353,58 @@ let test_turn_fsm_emit_transition_appends_wal_row () =
             check string "keeper" "turn-fsm-wal-keeper"
               (json |> member "keeper" |> to_string);
             let row = json |> member "turn_fsm_transition" in
-            check int "turn_id" 42 (row |> member "turn_id" |> to_int);
-            check string "prev_state" "streaming"
-              (row |> member "prev_state" |> to_string);
-            check string "new_state" "completing"
-              (row |> member "new_state" |> to_string);
-            check string "action" "StreamComplete"
-              (row |> member "action" |> to_string)
+            (match Audit.turn_fsm_transition_of_json row with
+             | Error error -> fail error
+             | Ok transition ->
+               check int "turn_id" 42 transition.turn_fsm_turn_id;
+               check string "prev_state" "streaming"
+                 transition.turn_fsm_prev_state;
+               check string "new_state" "completing"
+                 transition.turn_fsm_new_state;
+               check string "action" "StreamComplete"
+                 transition.turn_fsm_action;
+               check (option bool) "stop before" (Some false)
+                 transition.turn_fsm_stop_signaled_before;
+               check (option bool) "stop after" (Some false)
+                 transition.turn_fsm_stop_signaled_after)
           | rows ->
             failf "expected one turn_fsm_transition row, got %d" (List.length rows)))
+
+let test_turn_fsm_transition_decoder_is_exact () =
+  let record : Audit.turn_fsm_transition_record =
+    { turn_fsm_turn_id = 7
+    ; turn_fsm_prev_state = "streaming"
+    ; turn_fsm_new_state = "completing"
+    ; turn_fsm_action = "StreamComplete"
+    ; turn_fsm_stop_signaled_before = None
+    ; turn_fsm_stop_signaled_after = Some false
+    ; turn_fsm_wall_clock_at = 123.5
+    }
+  in
+  let json = Audit.turn_fsm_transition_to_json record in
+  (match Audit.turn_fsm_transition_of_json json with
+   | Error error -> fail error
+   | Ok decoded -> check bool "serializer round-trip" true (decoded = record));
+  let fields =
+    match json with
+    | `Assoc fields -> fields
+    | _ -> fail "turn_fsm_transition serializer must return an object"
+  in
+  let expect_error label candidate =
+    match Audit.turn_fsm_transition_of_json candidate with
+    | Error _ -> ()
+    | Ok _ -> failf "%s unexpectedly decoded" label
+  in
+  expect_error "unknown field" (`Assoc (("unexpected", `Null) :: fields));
+  expect_error "missing field" (`Assoc (List.remove_assoc "action" fields));
+  expect_error
+    "wrong optional bool type"
+    (`Assoc
+      (("stop_signaled_before", `String "false")
+       :: List.remove_assoc "stop_signaled_before" fields));
+  expect_error
+    "duplicate field"
+    (`Assoc (("action", `String "shadow") :: fields))
 
 (* ── Async append queue ─────────────────────────────────────────── *)
 
@@ -550,6 +677,10 @@ let () =
         [
           test_case "empty store" `Quick test_recent_completed_turns_empty_store;
           test_case "record and read multiple" `Quick test_record_and_read_multiple_turns;
+          test_case "completed turns are filtered by keeper" `Quick
+            test_completed_turns_are_filtered_by_keeper;
+          test_case "store branch filters by keeper" `Quick
+            test_store_branch_filters_by_keeper;
           test_case "ring capacity limit" `Quick test_ring_capacity_limit;
           test_case "ring ordering newest first" `Quick test_ring_ordering_is_newest_first;
           test_case "limit respected" `Quick test_limit_respected;
@@ -562,6 +693,8 @@ let () =
             test_runtime_trust_timeline_carries_transition_observation;
           test_case "turn FSM emit appends WAL row" `Quick
             test_turn_fsm_emit_transition_appends_wal_row;
+          test_case "turn FSM decoder requires the exact current shape" `Quick
+            test_turn_fsm_transition_decoder_is_exact;
         ] );
       ( "async_append_queue",
         [

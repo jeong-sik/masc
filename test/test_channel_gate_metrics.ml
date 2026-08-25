@@ -36,22 +36,19 @@ let test_record_attempt_tracks_connector_diagnostics () =
       Metrics.record_attempt ~channel ~workspace_id:"workspace-b" ~keeper:"luna"
         ~duration_ms:0
         (Metrics.Validation_error "content is required");
-      Metrics.record_attempt ~channel ~workspace_id:"workspace-b" ~keeper:"luna"
-        ~duration_ms:0 Metrics.Duplicate;
       let stats =
         Metrics.snapshot ()
         |> List.find (fun (row : Metrics.channel_stats) ->
                String.equal row.channel channel)
       in
-      check int "message_count includes duplicates" 3 stats.message_count;
+      check int "message_count" 2 stats.message_count;
       check int "success_count" 1 stats.success_count;
-      check int "error_count excludes duplicates" 1 stats.error_count;
-      check int "duplicate_count" 1 stats.duplicate_count;
+      check int "error_count" 1 stats.error_count;
       check int "validation_error_count" 1 stats.validation_error_count;
       check int "workspace_count counts unique workspaces" 2 stats.workspace_count;
       check string "last_keeper trimmed" "luna" stats.last_keeper;
       check_error_kind "last_error_kind" "validation" stats.last_error_kind;
-      check string "last_outcome" "duplicate" stats.last_outcome;
+      check string "last_outcome" "validation_error" stats.last_outcome;
       check string "last_workspace_id" "workspace-b" stats.last_workspace_id)
 
 let test_record_internal_error_exn_tracks_internal_failures () =
@@ -60,7 +57,7 @@ let test_record_internal_error_exn_tracks_internal_failures () =
       Metrics.record_internal_error_exn
         ~channel
         ~workspace_id:"workspace-z"
-        ~keeper:"  sangsu  "
+        ~keeper:"  alpha  "
         ~duration_ms:42
         (Failure "boom");
       let stats =
@@ -71,7 +68,7 @@ let test_record_internal_error_exn_tracks_internal_failures () =
       check int "message_count" 1 stats.message_count;
       check int "error_count" 1 stats.error_count;
       check int "internal_error_count" 1 stats.internal_error_count;
-      check string "last_keeper trimmed" "sangsu" stats.last_keeper;
+      check string "last_keeper trimmed" "alpha" stats.last_keeper;
       check string "last_error redacted" "internal error" stats.last_error;
       check_error_kind "last_error_kind" "internal" stats.last_error_kind;
       check string "last_outcome" "internal_error" stats.last_outcome)
@@ -127,9 +124,9 @@ let test_record_validation_error_metric_falls_back_for_invalid_json () =
 let test_snapshot_json_reports_health_and_latency () =
   with_eio (fun () ->
       let channel = unique_channel "discord-json" in
-      Metrics.record_attempt ~channel ~workspace_id:"workspace-1" ~keeper:"sangsu"
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-1" ~keeper:"alpha"
         ~duration_ms:10_500 Metrics.Success;
-      Metrics.record_attempt ~channel ~workspace_id:"workspace-1" ~keeper:"sangsu"
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-1" ~keeper:"alpha"
         ~duration_ms:11_500
         (Metrics.Keeper_error "upstream timeout");
       let json = Metrics.snapshot_json () in
@@ -142,9 +139,14 @@ let test_snapshot_json_reports_health_and_latency () =
         (row |> U.member "slow_count" |> U.to_int);
       check int "slow_rate_pct" 100
         (row |> U.member "slow_rate_pct" |> U.to_int);
-      check int "success_rate_pct ignores duplicates" 50
+      check int "success_rate_pct" 50
         (row |> U.member "success_rate_pct" |> U.to_int);
-      check string "health" "failing"
+      (* The wire now carries Health_status.to_string. This channel's worst
+         rung used to go out as "failing", a word the shared vocabulary did
+         not declare, so a reader decoding it landed on Unknown and ranked it
+         alongside Degraded. of_string still accepts "failing", so payloads
+         written by older builds decode where they always meant to (#27560). *)
+      check string "health" "error"
         (row |> U.member "health" |> U.to_string);
        check string "last_error" "upstream timeout"
          (row |> U.member "last_error" |> U.to_string))
@@ -154,7 +156,7 @@ let test_snapshot_json_includes_workspace_bindings () =
       let channel = unique_channel "discord-bindings" in
       Metrics.record_attempt ~channel ~workspace_id:"workspace-alpha" ~keeper:"luna"
         ~duration_ms:120 Metrics.Success;
-      Metrics.record_attempt ~channel ~workspace_id:"workspace-beta" ~keeper:"sangsu"
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-beta" ~keeper:"alpha"
         ~duration_ms:0
         (Metrics.Keeper_error "keeper offline");
       let json = Metrics.snapshot_json () in
@@ -175,11 +177,11 @@ let test_snapshot_json_includes_workspace_bindings () =
       in
       check string "alpha keeper" "luna"
         (alpha |> U.member "keeper" |> U.to_string);
-      check string "alpha health" "healthy"
+      check string "alpha health" "ok"
         (alpha |> U.member "health" |> U.to_string);
       check string "beta last error" "keeper offline"
         (beta |> U.member "last_error" |> U.to_string);
-      check string "beta health" "failing"
+      check string "beta health" "error"
         (beta |> U.member "health" |> U.to_string))
 
 let test_events_json_filters_newest_first () =
@@ -190,7 +192,7 @@ let test_events_json_filters_newest_first () =
       Metrics.record_attempt ~channel ~workspace_id:"workspace-a" ~keeper:"luna"
         ~duration_ms:0
         (Metrics.Keeper_error "upstream timeout");
-      Metrics.record_attempt ~channel ~workspace_id:"workspace-b" ~keeper:"sangsu"
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-b" ~keeper:"alpha"
         ~duration_ms:0
         (Metrics.Validation_error "content is required");
       let json = Metrics.events_json ~channel ~keeper:"luna" ~limit:5 () in
@@ -224,12 +226,51 @@ let test_workspace_tracking_is_bounded () =
       check int "workspace_count capped" 256 stats.workspace_count;
       check string "last_workspace_id still updates" "workspace-300" stats.last_workspace_id)
 
+
+(* The accumulators are values now, so each attempt rebinds the channel row
+   rather than writing through it. Two carry-forward rules have to survive
+   that: a blank keeper keeps the previous one, and [last_workspace_id]
+   tracks the newest non-blank workspace. Both used to be conditional writes
+   that simply skipped; as record updates they need an explicit else-branch,
+   which is the easiest thing to get wrong. *)
+let test_record_attempt_carries_previous_keeper_and_workspace () =
+  with_eio (fun () ->
+      let channel = unique_channel "carry-forward" in
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-first"
+        ~keeper:"luna" ~duration_ms:5 Metrics.Success;
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-second"
+        ~keeper:"   " ~duration_ms:0 Metrics.Success;
+      let stats =
+        Metrics.snapshot ()
+        |> List.find (fun (row : Metrics.channel_stats) ->
+               String.equal row.channel channel)
+      in
+      check int "both attempts counted" 2 stats.message_count;
+      check string "blank keeper keeps the previous one" "luna" stats.last_keeper;
+      check string "workspace advances to the newest" "workspace-second"
+        stats.last_workspace_id;
+      check int "both workspaces tracked" 2 stats.workspace_count;
+      Metrics.record_attempt ~channel ~workspace_id:"   " ~keeper:"sol"
+        ~duration_ms:0 Metrics.Success;
+      let stats =
+        Metrics.snapshot ()
+        |> List.find (fun (row : Metrics.channel_stats) ->
+               String.equal row.channel channel)
+      in
+      check string "non-blank keeper replaces it" "sol" stats.last_keeper;
+      check string "blank workspace leaves the previous one" "workspace-second"
+        stats.last_workspace_id;
+      check int "blank workspace is not tracked" 2 stats.workspace_count)
+;;
+
 let () =
   Alcotest.run "Channel_gate_metrics"
     [
       ( "metrics",
         [
           test_case "error kind round trip" `Quick test_error_kind_round_trip;
+  test_case "carries the previous keeper and workspace" `Quick
+    test_record_attempt_carries_previous_keeper_and_workspace;
           test_case "records connector diagnostics" `Quick
             test_record_attempt_tracks_connector_diagnostics;
           test_case "records internal exception diagnostics" `Quick

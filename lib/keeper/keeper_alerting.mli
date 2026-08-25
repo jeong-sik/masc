@@ -15,12 +15,6 @@ open Keeper_memory
 
 (** {1 Usage Merging} *)
 
-(** Merge two API usage records by summing all fields. *)
-val merge_usage :
-  Agent_sdk.Types.api_usage ->
-  Agent_sdk.Types.api_usage ->
-  Agent_sdk.Types.api_usage
-
 (** {1 Included: Keeper_alerting_path} *)
 
 val project_root_of_config : Workspace.config -> string

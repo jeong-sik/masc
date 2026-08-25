@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0077", "0088", "0098"]
-implementation_prs: [15933]
 ---
 
 # RFC-0112: Typed JSON parse boundary — eliminate silent-drop fallback across read sites

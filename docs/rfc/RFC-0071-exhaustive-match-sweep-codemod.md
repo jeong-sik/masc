@@ -8,7 +8,6 @@ author: yousleepwhen
 supersedes: []
 superseded_by: null
 related: ["0042", "0068"]
-implementation_prs: [14881,14923,14930,14936,14942,14945,14965,14969,14974,14984,14987,14990,14997,15003,15006,15012]
 ---
 
 # RFC-0071: Exhaustive Match Sweep Codemod — Eliminate N-of-M `_ -> false/None` Anti-Pattern
@@ -108,7 +107,7 @@ rg -n --type ocaml 'type\s+[a-z_]+_(state|phase|disposition|class)\s*=' lib/ \
 
 본 RFC 와 함께 lands 되는 inventory 산출물 (§4 Phase 0):
 
-- `docs/rfc/RFC-0071-inventory.csv` — `(file, line, rhs, triage_class_guess)` 4-열. 1044 행. CSV 가 *RFC main spec 의 부속 자료* (RFC-0047 의 `RFC-0047-caller-inventory.txt` 선례).
+- `docs/rfc/RFC-0071-inventory.csv` — `(file, line, rhs, triage_class_guess)` 4-열. 1044 행. CSV 가 *RFC main spec 의 부속 자료*.
   - `triage_class_guess` 는 Phase 0 의 *추정* 라벨 (전 행 `unclassified` 로 seed). Phase 2 codemod 가 `.cmt` 타입 AST 기반으로 `ctor_type` 과 최종 `triage_class` 를 *산출* 한다 — 즉 `ctor_type_guess` 는 별도 CSV 컬럼이 아니라 codemod 출력물의 필드. Phase 0 CSV 는 행 enumerate 만 책임진다.
 
 ### 2.2 Triage classification (RFC §3.1 가 규칙 정의)
@@ -365,7 +364,7 @@ Sibling site count: N.
 1. **`.cmt` 의존성 vs ppxlib 만으로 가능?** — scrutinee 타입 추론을 `.cmt` 없이 syntactic heuristic 으로 할 수 있나? Phase 2 구현 PR 에서 결론. Default: `.cmt` 사용 (정확도 우선).
 2. **Phase 3 의 PR 단위가 *type* 인가 *file* 인가?** — Default: type. memory feedback 의 type+arm 처방 그대로. 단, 한 PR 의 diff 가 너무 크면 (>30 파일) file 분할 허용.
 3. **(a) Intentional 의 주석 형식** — `(* WORKAROUND: open-variant scrutinee *)` vs `(* INTENTIONAL: ... *)`? Default: 전자 (AGENT-LLM-A.md 의 WORKAROUND 주석 규약 재사용).
-4. **Inventory CSV 의 long-term 위치** — `docs/rfc/RFC-0071-inventory.csv` 부속 자료 vs `data/` 의 generated artifact? Default: 부속 자료. RFC-0047 의 `RFC-0047-caller-inventory.txt` 선례.
+4. **Inventory CSV 의 long-term 위치** — `docs/rfc/RFC-0071-inventory.csv` 부속 자료 vs `data/` 의 generated artifact? Default: 부속 자료.
 
 ## 9. Rollback
 

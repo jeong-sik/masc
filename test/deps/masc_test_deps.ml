@@ -71,18 +71,18 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         else String.sub candidate 0 64
       in
       let default_value = function
+        | Schema.Schema -> `String "masc.keeper_meta.v1"
         | Schema.Name -> `String name
         | Schema.Agent_name ->
           `String (Masc.Keeper_identity.keeper_agent_name name)
-        | Schema.Persona -> `Null
         | Schema.Instructions -> `String ""
+        | Schema.Autonomous_instructions -> `String ""
         | Schema.Trace_id -> `String trace_id
         | Schema.Multimodal_policy ->
           `String
             (Masc.Keeper_types_profile.multimodal_policy_to_string
                Masc.Keeper_types_profile.default_multimodal_policy)
         | Schema.Trace_history -> `List []
-        | Schema.Generation -> `Int 1
         | Schema.Last_handoff_ts -> `Float 0.
         | Schema.Created_at | Schema.Updated_at ->
           `String "1970-01-01T00:00:00Z"
@@ -99,38 +99,25 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         | Schema.Last_compaction_after_tokens
         | Schema.Proactive_count_total
         | Schema.Proactive_visible_count_total
-        | Schema.Consecutive_noop_count
-        | Schema.Autonomous_action_count
-        | Schema.Autonomous_turn_count
-        | Schema.Autonomous_text_turn_count
-        | Schema.Autonomous_tool_turn_count
-        | Schema.Board_reactive_turn_count
-        | Schema.Mention_reactive_turn_count
-        | Schema.Noop_turn_count
-        | Schema.Meta_version -> `Int 0
+        | Schema.Consecutive_noop_count -> `Int 0
         | Schema.Total_cost_usd
         | Schema.Last_turn_ts
         | Schema.Last_compaction_ts
         | Schema.Last_proactive_ts
-        | Schema.Last_visible_proactive_ts
-        | Schema.Last_compaction_check_ts -> `Float 0.
+        | Schema.Last_visible_proactive_ts -> `Float 0.
         | Schema.Last_proactive_outcome ->
           `String
             (Masc.Keeper_meta_contract.proactive_cycle_outcome_to_string
                Masc.Keeper_meta_contract.Proactive_never_started)
         | Schema.Last_proactive_reason
-        | Schema.Last_proactive_preview
-        | Schema.Last_autonomous_action_at -> `String ""
-        | Schema.Last_compaction_decision -> `String "initialized"
-        | Schema.Active_goal_ids -> `List []
+        | Schema.Last_proactive_preview -> `String ""
         | Schema.Message_scope_ack_id
-        | Schema.Last_blocker
         | Schema.Last_runtime_attempt
         | Schema.Latched_reason
         | Schema.Current_task_id
         | Schema.Keeper_id -> `Null
         | Schema.Paused -> `Bool false
-        | Schema.Oas_env -> `Assoc []
+        | Schema.Agent_core_env -> `Assoc []
       in
       let field_values =
         List.map

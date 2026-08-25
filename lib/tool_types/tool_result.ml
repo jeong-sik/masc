@@ -1,30 +1,22 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Structured tool result type for MASC. *)
 
 type tool_failure_class =
-  | Transient_error (** Network/timeout/rate-limit — retryable *)
+  | Dependency_unavailable (** A required external dependency was unavailable. *)
   | Policy_rejection
       (** Permission, guardrail, validation reject (RFC-0062 §3.2) — permanent.
           Covers caller-input/argument validation, not only auth/boundary. *)
-  | Runtime_failure (** Internal error/bug — non-retryable *)
-  | Workflow_rejection (** Business rule violation — non-retryable *)
+  | Runtime_failure (** Internal error/bug. *)
+  | Workflow_rejection (** Business rule violation. *)
+  | Operator_cancelled
+      (** An operator interrupted the work (#28810). *)
 [@@deriving yojson, show]
+
+let derived_tool_failure_class_of_yojson = tool_failure_class_of_yojson
+
+let tool_failure_class_of_yojson = function
+  | `List [ `String "Transient_error" ] -> Ok Dependency_unavailable
+  | json -> derived_tool_failure_class_of_yojson json
+;;
 
 type failure_effect_disposition =
   | Proven_pre_effect
@@ -45,31 +37,32 @@ let failure_effect_disposition_of_string = function
 ;;
 
 let tool_failure_class_to_string = function
-  | Transient_error -> "transient_error"
+  | Dependency_unavailable -> "dependency_unavailable"
   | Policy_rejection -> "policy_rejection"
   | Runtime_failure -> "runtime_failure"
   | Workflow_rejection -> "workflow_rejection"
+  | Operator_cancelled -> "operator_cancelled"
 ;;
 
 let tool_failure_class_of_string = function
-  | "transient_error" -> Some Transient_error
+  | "dependency_unavailable" | "transient_error" -> Some Dependency_unavailable
   | "policy_rejection" -> Some Policy_rejection
   | "runtime_failure" -> Some Runtime_failure
   | "workflow_rejection" -> Some Workflow_rejection
+  | "operator_cancelled" -> Some Operator_cancelled
   | _ -> None
 ;;
 
-let is_retryable = function
-  | Transient_error -> true
-  | Policy_rejection | Runtime_failure | Workflow_rejection -> false
-;;
-
 let log_level_of_failure_class = function
-  | Workflow_rejection | Policy_rejection | Transient_error -> Log.Warn
+  | Workflow_rejection
+  | Policy_rejection
+  | Dependency_unavailable
+  | Operator_cancelled ->
+    Log.Warn
   | Runtime_failure -> Log.Error
 ;;
 
-(** Lightweight observation of an MCP/OAS wire response.  This is not a MASC
+(** Lightweight observation of an MCP/AGENT_CORE wire response.  This is not a MASC
     execution disposition: the external protocol cannot represent [Deferred],
     so callers must never use this projection as the internal outcome SSOT. *)
 type tool_call_outcome = Ok | Error | Unknown
@@ -90,8 +83,10 @@ let log_level_of_tool_call_outcome = function
     be passed explicitly at the catch boundary. *)
 let classify_from_exception (exn : exn) : tool_failure_class =
   match exn with
-  | Eio.Time.Timeout -> Transient_error
-  | Eio.Cancel.Cancelled _ -> Transient_error
+  | Eio.Time.Timeout
+  | Eio.Cancel.Cancelled Eio.Time.Timeout ->
+    Dependency_unavailable
+  | Eio.Cancel.Cancelled _ -> Operator_cancelled
   | Invalid_argument _ -> Runtime_failure
   | Failure _ -> Runtime_failure
   | _ -> Runtime_failure
@@ -129,6 +124,7 @@ type failure_payload =
   { class_ : tool_failure_class
   ; message : string
   ; data : Yojson.Safe.t
+  ; metadata : Yojson.Safe.t option
   ; tool_name : string
   ; duration_ms : float
   }
@@ -173,15 +169,16 @@ let to_json (result : result) : Yojson.Safe.t =
        ; "duration_ms", `Float duration_ms
        ]
        @ Option.fold ~none:[] ~some:(fun value -> [ "metadata", value ]) metadata)
-  | Failed { class_; message; data; tool_name; duration_ms } ->
+  | Failed { class_; message; data; metadata; tool_name; duration_ms } ->
     `Assoc
-      [ "failure_class", `String (tool_failure_class_to_string class_)
-      ; "disposition", `String disposition
-      ; "data", data
-      ; "message", `String message
-      ; "tool_name", `String tool_name
-      ; "duration_ms", `Float duration_ms
-      ]
+      ([ "failure_class", `String (tool_failure_class_to_string class_)
+       ; "disposition", `String disposition
+       ; "data", data
+       ; "message", `String message
+       ; "tool_name", `String tool_name
+       ; "duration_ms", `Float duration_ms
+       ]
+       @ Option.fold ~none:[] ~some:(fun value -> [ "metadata", value ]) metadata)
 ;;
 
 let tool_name : result -> string = function
@@ -201,8 +198,15 @@ let data : result -> Yojson.Safe.t = function
 ;;
 
 let metadata : result -> Yojson.Safe.t option = function
-  | Completed { metadata; _ } | Deferred { metadata; _ } -> metadata
-  | Failed _ -> None
+  | Completed { metadata; _ }
+  | Deferred { metadata; _ }
+  | Failed { metadata; _ } -> metadata
+;;
+
+let with_metadata metadata : result -> result = function
+  | Completed payload -> Completed { payload with metadata = Some metadata }
+  | Deferred payload -> Deferred { payload with metadata = Some metadata }
+  | Failed payload -> Failed { payload with metadata = Some metadata }
 ;;
 
 let is_success : result -> bool = function
@@ -232,14 +236,14 @@ let ok ~tool_name ~start_time message_str : result =
   Completed { data = `String message_str; metadata = None; tool_name; duration_ms }
 ;;
 
-let error ?(failure_class = None) ~tool_name ~start_time message_str : result =
+let error ~failure_class ~tool_name ~start_time message_str : result =
   let end_time = Time_compat.now () in
   let duration_ms = (end_time -. start_time) *. 1000.0 in
-  let class_ = Option.value ~default:Runtime_failure failure_class in
   Failed
-    { class_
+    { class_ = failure_class
     ; message = message_str
     ; data = `String message_str
+    ; metadata = None
     ; tool_name
     ; duration_ms
     }
@@ -259,7 +263,14 @@ let of_exn ?failure_class ~tool_name ~start_time exn : result =
       tool_name
       (Stdlib.Printexc.to_string exn)
   in
-  Failed { class_; message; data = `String message; tool_name; duration_ms }
+  Failed
+    { class_
+    ; message
+    ; data = `String message
+    ; metadata = None
+    ; tool_name
+    ; duration_ms
+    }
 ;;
 
 (** {1 Typed constructors (RFC-0189)}
@@ -278,9 +289,17 @@ let make_deferred ~tool_name ~start_time ?(data = `Null) ?metadata () : result =
   Deferred { data; metadata; tool_name; duration_ms }
 ;;
 
-let make_err ~tool_name ~class_ ~start_time ?(data = `Null) message_str : result =
+let make_err
+      ~tool_name
+      ~class_
+      ~start_time
+      ?(data = `Null)
+      ?metadata
+      message_str
+  : result
+  =
   let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
-  Failed { class_; message = message_str; data; tool_name; duration_ms }
+  Failed { class_; message = message_str; data; metadata; tool_name; duration_ms }
 ;;
 
 let make_err_of_exn ?class_ ~tool_name ~start_time exn : result =
@@ -296,7 +315,14 @@ let make_err_of_exn ?class_ ~tool_name ~start_time exn : result =
       tool_name
       (Stdlib.Printexc.to_string exn)
   in
-  Failed { class_; message; data = `String message; tool_name; duration_ms }
+  Failed
+    { class_
+    ; message
+    ; data = `String message
+    ; metadata = None
+    ; tool_name
+    ; duration_ms
+    }
 ;;
 
 (** {1 Class-specialised constructors}

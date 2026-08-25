@@ -74,7 +74,12 @@ val validate_initialize_params : Yojson.Safe.t option -> (unit, string) result
 (** {1 JSON-RPC Response Builders} *)
 
 val make_response : id:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
-(** [make_response ~id result] builds [{jsonrpc:"2.0", id, result}]. *)
+(** [make_response ~id result] builds [{jsonrpc:"2.0", id, result}].
+
+    When [result] is an object without a [resultType] member, ["complete"]
+    is inserted (SEP-2322, protocol revision 2026-07-28).  A [result] that
+    already carries [resultType] is passed through unchanged, so a handler
+    can answer ["input_required"] for a Multi Round-Trip turn. *)
 
 val make_error :
   ?data:Yojson.Safe.t ->

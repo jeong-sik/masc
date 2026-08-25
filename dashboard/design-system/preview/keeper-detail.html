@@ -89,7 +89,7 @@
     /* Preview-only frame — represents the keeper detail card slotted
        into the overlay's flex centre. Production renders a full
        `<KeeperDetailPage>` (keeper-detail.ts) here; we show a compact
-       attribution stack + signal lines + persona summary so the
+       attribution stack + signal lines + instruction summary so the
        overlay's centring/isolation behaviour is exercised. */
     .kd-card {
       width: 320px;
@@ -176,14 +176,14 @@
     .kd-signal.warn .v { color: var(--warn); }
     .kd-signal.ok .v   { color: var(--ok); }
 
-    .kd-persona {
+    .kd-instructions {
       font: var(--type-caption);
       color: var(--color-fg-muted);
       line-height: 1.45;
       padding-top: 4px;
       border-top: 1px dashed var(--color-border-default);
     }
-    .kd-persona em {
+    .kd-instructions em {
       color: var(--color-accent-fg);
       font-style: normal;
       font-family: var(--font-mono);
@@ -419,7 +419,7 @@
                   <div class="kd-signal ok"><span class="k">budget</span><span class="v">47%</span></div>
                 </div>
 
-                <p class="kd-persona">
+                <p class="kd-instructions">
                   <em>sangsu</em> · "code-strategist who reviews diffs before
                   shipping; insists on a TLA-class invariant for every state machine."
                 </p>

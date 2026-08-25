@@ -10,7 +10,6 @@ type lsp_process = {
   stdin_w : [ Eio.Flow.sink_ty | Eio.Resource.close_ty ] Eio.Std.r;
   stdout_r : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r;
   stderr_r : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r;
-  mutable next_id : int;
 }
 
 type spawn_error =
@@ -27,8 +26,6 @@ val command_for_lang : string -> (string * string list) option
 val lang_of_path : string -> string
 
 (** Allocate a fresh JSON-RPC request ID for this process. *)
-val alloc_id : lsp_process -> int
-
 (** Write a JSON-RPC message to the process stdin with Content-Length framing. *)
 val write_message : lsp_process -> string -> unit
 

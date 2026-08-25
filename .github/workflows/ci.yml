@@ -2,12 +2,34 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [develop]
+  schedule:
+    # main is checked on a timer, not once per merge. Merges land every 5.7
+    # minutes (254 commits in the 24h to 2026-08-24T01:00Z) and a run takes
+    # 22-34 minutes, so per-commit main runs need 4.4 runs in flight at all
+    # times -- 53 job slots -- to keep up, and they never did. Keying them by
+    # github.sha stopped the collapsing that produced 148 cancellations and
+    # zero verdicts, and replaced it with a queue: at 2026-08-24T01:20Z there
+    # were 50 CI runs waiting, 26 of them main pushes for commits already in
+    # main, sitting ahead of the 24 pull_request runs that are the actual
+    # merge gate. A verdict on a commit that is already merged blocks nothing,
+    # so it is the one that gives up its slot.
+    #
+    # The group below pins scheduled runs to one shared key with
+    # cancel-in-progress false, so GitHub keeps at most one running and one
+    # pending: the timer cannot outrun the build no matter how often it fires.
+    - cron: '*/30 * * * *'
   pull_request:
-    branches: [main, develop]
-    # ready_for_review must re-evaluate Draft-only dependency allowances on the
-    # exact same head; otherwise an ephemeral review ref could retain a green
-    # CI Gate after the PR becomes mergeable.
+    # No base filter. The filter matches the *base* branch, so a stacked PR --
+    # one opened against another PR's branch rather than main -- did not start
+    # this workflow at all. Those PRs collected only the handful of checks other
+    # workflows contribute and reached review with no compile or test evidence;
+    # on 2026-08-14 five of them sat that way at once. A stack is how work over
+    # 20k tokens is supposed to arrive here, so the shape that needs evidence
+    # most was the one getting none.
+    #
+    # Drafts stay cheap through pr-live-gate. ready_for_review starts the exact
+    # source and real-world product gates once the author asks for a verdict.
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch: {}
 
@@ -17,24 +39,27 @@ permissions:
   pull-requests: read
 
 concurrency:
-  # On main pushes each commit gets its own group (keyed by sha) so successive
-  # merges do not abort each other's CI — every commit gets a verification
-  # window. On PRs and non-main pushes, supersede outdated runs as before
-  # (group keyed by ref so synchronize cancels the older run).
+  # Branch/PR runs verify the current branch state: a newer push supersedes the
+  # older run, so the older one cancels.
+  #
+  # Scheduled main runs share one key with cancel-in-progress false, so GitHub
+  # holds at most one running and one pending. The timer fires every 30 minutes
+  # and a run takes 22-34, so a firing that lands on a busy pool is dropped
+  # rather than queued behind the one already working. That is the cap the
+  # per-commit trigger never had.
+  #
+  # workflow_dispatch on main keys by commit: a dispatch is asked for by hand
+  # about one specific sha, so it gets its own group and is not collapsed into
+  # whatever the timer happens to be doing.
   group: >-
-    ${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{
-      github.event_name == 'push' && github.ref_name == 'main' && github.sha
-      || github.head_ref || github.ref_name || github.run_id
+    ${{ github.workflow }}-${{ github.event_name }}-${{
+      github.event.pull_request.number
+      || (github.event_name == 'schedule' && 'main-timer')
+      || (github.ref == 'refs/heads/main' && github.sha)
+      || github.ref_name
+      || github.run_id
     }}
-  # Code-changing and ready-for-review PR events supersede older CI for the
-  # same PR. Pushes to the same branch also supersede older post-merge CI
-  # EXCEPT for main pushes — main commits are independent state that must each
-  # be verified (background:
-  # #14668 / #14670, 30+ main runs cancelled before TLA could complete on
-  # 2026-05-11). State-only readiness is enforced by PR Automation against the
-  # existing head CI Gate. Ready-for-review is the exception: Draft-only
-  # dependency allowances must be revoked and rechecked before merge.
-  cancel-in-progress: ${{ (github.event_name == 'push' && github.ref_name != 'main') || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened","ready_for_review"]'), github.event.action)) }}
+  cancel-in-progress: ${{ (github.event_name == 'push' && github.ref != 'refs/heads/main') || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened","ready_for_review"]'), github.event.action)) }}
 
 jobs:
   pr-sync-check:
@@ -47,8 +72,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          # Full history so origin/<base> and the PR head commit exist locally;
-          # the version-drift gate below reads dune-project from both refs.
+          # Full history so origin/<base>, the PR head, and the synthetic merge
+          # commit all exist locally for identity and version-truth checks.
           fetch-depth: 0
 
       - name: Verify PR sync
@@ -57,13 +82,27 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BASE_REF: origin/${{ github.base_ref }}
+          VERSION_REF: HEAD
         run: |
           chmod +x scripts/check-pr-sync.sh
           scripts/check-pr-sync.sh \
             --head-branch "$PR_HEAD_REF" \
             --pr-number "$PR_NUMBER" \
             --base-ref "$BASE_REF" \
+            --version-ref "$VERSION_REF" \
             --expected-head-sha "$PR_HEAD_SHA"
+
+      # Reports, never gates. A CI failure does not say whether the author
+      # caused it: on 2026-08-22 main was red for ~100 minutes and thirteen
+      # open PRs inherited the same five failures, with an adversarial review
+      # on one recording "causality is not established" (#29332).
+      - name: Report base health
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          chmod +x scripts/report-base-health.sh
+          scripts/report-base-health.sh "$BASE_REF" "${{ github.repository }}"
 
   pr-live-gate:
     name: PR Live Gate
@@ -84,15 +123,40 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_REF_PROTECTED: ${{ github.ref_protected }}
+          SOURCE_SHA: ${{ github.sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
 
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            expected_workflow_ref="${GITHUB_REPOSITORY}/.github/workflows/ci.yml@refs/heads/main"
+            if [ "$EVENT_REF" != "refs/heads/main" ]; then
+              echo "::error::Trusted dispatch requires refs/heads/main, got $EVENT_REF"
+              exit 1
+            fi
+            if [ "$EVENT_REF_PROTECTED" != "true" ]; then
+              echo "::error::Trusted dispatch requires a protected main ref"
+              exit 1
+            fi
+            if [ "$WORKFLOW_REF" != "$expected_workflow_ref" ]; then
+              echo "::error::Trusted dispatch workflow mismatch: expected=$expected_workflow_ref actual=$WORKFLOW_REF"
+              exit 1
+            fi
+            if [ "$WORKFLOW_SHA" != "$SOURCE_SHA" ]; then
+              echo "::error::Trusted dispatch workflow/source mismatch: workflow=$WORKFLOW_SHA source=$SOURCE_SHA"
+              exit 1
+            fi
+          fi
+
           if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
-            # This workflow only listens to branch pushes for main/develop
-            # (`on.push.branches` above) plus workflow_dispatch. Tag pushes do
-            # not start this workflow, so NON_PR here cannot force Build and
-            # Test for tags.
+            # This workflow only listens to develop pushes (`on.push.branches`
+            # above), the main timer, and workflow_dispatch. Tag pushes do not
+            # start this workflow, so NON_PR here cannot force Build and Test
+            # for tags.
             echo "run_heavy=true" >> "$GITHUB_OUTPUT"
             echo "live_is_draft=false" >> "$GITHUB_OUTPUT"
             echo "live_state=NON_PR" >> "$GITHUB_OUTPUT"
@@ -134,8 +198,6 @@ jobs:
           # got a chance to run. Two visible failures from that gap this week:
           # - masc #15531 (Tool_args / Tool_result sub-lib extract) merged
           #   main in a non-building state; recovered by #15540.
-          # - oas #1596 (turn_ready_tool_names signature narrow) — same shape,
-          #   recovered by oas #1599.
           # Running heavy CI on draft PRs costs minutes but catches both
           # classes of regression *before* the admin-merge decision instead
           # of after, when the only remaining lever is fix-forward.
@@ -165,7 +227,7 @@ jobs:
       lib_deps: ${{ steps.scope.outputs.lib_deps }}
       doc_truth: ${{ steps.scope.outputs.doc_truth }}
       tla: ${{ steps.scope.outputs.tla }}
-      oas_pin: ${{ steps.scope.outputs.oas_pin }}
+      agent_core: ${{ steps.scope.outputs.agent_core }}
       spec_refs: ${{ steps.scope.outputs.spec_refs }}
       nav_event_parity: ${{ steps.scope.outputs.nav_event_parity }}
       shell_ir: ${{ steps.scope.outputs.shell_ir }}
@@ -181,6 +243,7 @@ jobs:
         id: scope
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF: ${{ github.ref }}
           GITHUB_BASE_REF: ${{ github.base_ref }}
           GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GITHUB_BEFORE: ${{ github.event.before }}
@@ -189,7 +252,7 @@ jobs:
           set -euo pipefail
 
           emit_all_true() {
-            for key in build lint dashboard health health_snapshot lib_deps doc_truth tla oas_pin spec_refs nav_event_parity shell_ir keeper_cwd; do
+            for key in build lint dashboard health health_snapshot lib_deps doc_truth tla agent_core spec_refs nav_event_parity shell_ir keeper_cwd; do
               echo "${key}=true" >> "$GITHUB_OUTPUT"
             done
           }
@@ -244,7 +307,7 @@ jobs:
           lib_deps=false
           doc_truth=false
           tla=false
-          oas_pin=false
+          agent_core=false
           spec_refs=false
           nav_event_parity=false
           shell_ir=false
@@ -259,15 +322,15 @@ jobs:
           # line 1206), so any code-bearing PR that does NOT set build=true
           # merges with a green "CI Gate" while the Build job (dune compile)
           # never ran. The prefix list below (bin/ lib/ test/ proto/ config/)
-          # missed build-graph dirs examples/ ppx/ ppx_tla/ test_lib/ tools/
+          # missed build-graph dirs ppx/ ppx_tla/ test_lib/ tools/
           # and the root dune file, so a PR touching only those compiled
           # nowhere yet reported success. Match any OCaml/dune source plus C
           # foreign stubs by suffix so new source dirs are covered without
           # editing this list, and keep explicit prefixes for Dune-declared
           # non-source deps (e.g. tools/tlc_test_gen/test/fixtures/*.tla).
-          # Over-triggering on dune-excluded dirs (archive/, dashboard_bonsai/
-          # per the root dune (dirs ...) stanza) is harmless: the Build job
-          # runs but dune build skips those dirs.
+          # Over-triggering on dune-excluded dirs (dashboard_bonsai/ per the
+          # root dune (dirs ...) stanza) is harmless: the Build job runs but
+          # dune build skips those dirs.
           # scripts/harness/ stays a prefix match (not suffix): the Build and
           # Test job executes scripts/harness/contract/run_all.sh, so any
           # harness file — including non-.sh/.json ones and future extensions —
@@ -280,7 +343,7 @@ jobs:
           # runtime.toml, so a fixture edit changes test input while matching
           # none of the suffixes above (.toml is not .ml/.json/.sh) and the
           # Build job would skip.
-          if has_match '^(bin/|lib/|test/|proto/|config/|tools/|scripts/harness/|scripts/fixtures/|dune-project$|dune-workspace$|.*\.opam$|.*\.ml$|.*\.mli$|.*\.mll$|.*\.mly$|.*\.c$|.*\.h$|.*\.json$|.*\.sh$|(.*/)?dune$)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|tools/|scripts/harness/|scripts/fixtures/|scripts/keeper-full-lifecycle-evidence\.py$|scripts/ci/check_env_reads_below_config\.py$|dune-project$|dune-workspace$|.*\.opam$|.*\.ml$|.*\.mli$|.*\.mll$|.*\.mly$|.*\.c$|.*\.h$|.*\.json$|.*\.sh$|(.*/)?dune$)'; then
             build=true
           fi
 
@@ -300,6 +363,26 @@ jobs:
             dashboard=true
           fi
 
+          # SSE wire surface -> Dashboard coupling (#28925 audit, defect (a)).
+          # A lib-only PR that changes an SSE payload shape used to skip the
+          # Dashboard job entirely, so dashboard/src/schemas/sse.ts (a closed
+          # event-type allowlist that silently drops unknown shapes) was never
+          # exercised against the new wire — exactly the PR shape this gate
+          # exists to catch. The list below is every file that constructs or
+          # broadcasts a dashboard-wire SSE payload, derived by census:
+          #   rg -ln 'Sse\.broadcast' lib bin           # direct hub callers
+          #   rg -ln 'Mcp_server\.sse_broadcast' lib    # indirect via callback
+          # plus the payload-shape owners lib/sse_event/ (atd SSOT),
+          # lib/sse.ml (envelope/framing + bridge hook wiring), and the
+          # payload-builder modules those callers delegate to
+          # (keeper_event_bridge_error_json, dashboard_agent_core_bridge,
+          # server_dashboard_http_core). Deliberately NOT lib/ wholesale:
+          # the Dashboard job costs ~15min and most lib churn cannot move
+          # the wire. Re-run the census above when adding a new emitter.
+          if has_match '^(bin/main_eio\.ml$|lib/sse\.mli?$|lib/sse_jsonrpc_filter\.mli?$|lib/sse_event/|lib/progress\.ml$|lib/mcp_server\.ml$|lib/mcp_server_eio_call_tool\.ml$|lib/mcp_server_eio_protocol\.ml$|lib/mcp_tool_runtime_comm\.ml$|lib/mcp_tool_runtime_board\.ml$|lib/runtime/dashboard_agent_core_bridge\.ml$|lib/fusion/fusion_sink\.ml$|lib/server/(masc_grpc_service|server_bootstrap_loops|server_dashboard_http_core|server_dashboard_http_execution_surfaces|server_dashboard_http_keeper_api|server_dashboard_http_namespace_truth|server_ide_http|server_mcp_transport_ws|server_routes_http_routes_activity|server_routes_http_routes_dashboard|server_runtime_bootstrap)\.ml$|lib/keeper/(keeper_approval_queue|keeper_chat_broadcast|keeper_compact_policy|keeper_event_bridge|keeper_event_bridge_error_json|keeper_gate|keeper_heartbeat_loop_in_turn_pulse|keeper_heartbeat_snapshot|keeper_hooks_agent_core|keeper_registry|keeper_registry_broadcast|keeper_tool_composition_surface|keeper_tools_agent_core_handler_telemetry|keeper_unified_metrics_broadcast|keeper_waiting_inventory_broadcast)\.ml$)'; then
+            dashboard=true
+          fi
+
           if has_match '^(bin/|lib/|test/|proto/|config/|\.ci/health-baseline\.json$|dune-project$|.*\.opam$|scripts/health_snapshot\.sh$|scripts/anti-fake-audit\.sh$|scripts/base-policy-audit\.sh$)'; then
             health=true
           fi
@@ -312,16 +395,16 @@ jobs:
             lib_deps=true
           fi
 
-          if has_match '^(docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|.*\.opam$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|scripts/sync-oas-pin-manifests\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$)'; then
+          if has_match '^(docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|.*\.opam$|quickstart\.sh$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/quickstart-smoke\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/keeper-full-lifecycle-evidence\.py$|scripts/install\.sh$)'; then
             doc_truth=true
           fi
 
-          if has_match '^(specs/.*\.(tla|cfg)$|specs/Makefile$|lib/keeper/|lib/keeper_registry/|lib/oas_.*\.ml$|Makefile$)'; then
+          if has_match '^(specs/.*\.(tla|cfg)$|specs/Makefile$|lib/keeper/|lib/keeper_registry/|Makefile$)'; then
             tla=true
           fi
 
-          if has_match '^(ci/check-oas-pin\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/oas-drift-check\.sh$|scripts/oas-api-surface\.json$|scripts/sync-oas-pin-docs\.sh$|scripts/sync-oas-pin-manifests\.sh$|lib/keeper/keeper_event_bridge\.ml$|test/test_keeper_execution_join\.ml$|test/test_keeper_hooks_oas_introspection\.ml$|dune-project$|.*\.opam$|masc\.opam\.locked$|docs/KEEPER-USER-MANUAL\.md$|docs/OAS-UTILIZATION-AUDIT\.md$)'; then
-            oas_pin=true
+          if has_match '^(\.github/workflows/ci\.yml$|packages/agent_core/|packages/(dune|dune-file|dune-project)$|lib/(.*/)?(dune|dune-file|[^/]+\.inc)$|lib/keeper/(keeper_event_bridge|keeper_execution_join|hitl_summary_worker|keeper_hooks_agent_core(_introspection)?|keeper_run_tools[^/]*)\.mli?$|scripts/(check-agent-core-boundary\.sh|audit-sublib-cycle\.py|ci-run-focused-tests\.sh)$|test/(dune|test_agent_core_boundary\.sh|test_keeper_execution_join\.ml|test_keeper_hooks_agent_core_introspection\.ml|test_hitl_summary_worker\.ml|stanzas/test_keeper_execution_join\.inc|stanzas/test_hitl_summary_worker\.inc)$|(dune|dune-file)$|dune-project$|dune-workspace$|.*\.opam$|masc\.opam\.locked$)'; then
+            agent_core=true
           fi
 
           if has_match '^(specs/.*\.tla$|lib/.*\.mli?$|test/.*\.mli?$|src/.*\.mli?$|scripts/lint/spec-line-refs\.(sh|allowlist)$)'; then
@@ -340,6 +423,15 @@ jobs:
             keeper_cwd=true
           fi
 
+
+          # Agent Core owns non-source build inputs such as models.toml. Its
+          # focused behavior suite and resolved graph must not be reported as
+          # gate-skipped merely because the generic suffix classifier missed
+          # one of those inputs.
+          if [ "${agent_core}" = true ]; then
+            build=true
+          fi
+
           if [ "${ci_core}" = true ]; then
             # Self-reference guard: edits to this workflow or local actions
             # set ci_core=true above, then force the core CI surfaces below.
@@ -351,7 +443,7 @@ jobs:
             health_snapshot=true
             lib_deps=true
             doc_truth=true
-            oas_pin=true
+            agent_core=true
             shell_ir=true
             keeper_cwd=true
             # Note: dashboard/spec_refs/tla stay path-scoped. Pure CI
@@ -359,6 +451,7 @@ jobs:
             # guard lanes and Health, but they should not fan out into every
             # feature surface.
           fi
+
 
           echo "build=${build}" >> "$GITHUB_OUTPUT"
           echo "lint=${lint}" >> "$GITHUB_OUTPUT"
@@ -368,14 +461,14 @@ jobs:
           echo "lib_deps=${lib_deps}" >> "$GITHUB_OUTPUT"
           echo "doc_truth=${doc_truth}" >> "$GITHUB_OUTPUT"
           echo "tla=${tla}" >> "$GITHUB_OUTPUT"
-          echo "oas_pin=${oas_pin}" >> "$GITHUB_OUTPUT"
+          echo "agent_core=${agent_core}" >> "$GITHUB_OUTPUT"
           echo "spec_refs=${spec_refs}" >> "$GITHUB_OUTPUT"
           echo "nav_event_parity=${nav_event_parity}" >> "$GITHUB_OUTPUT"
           echo "shell_ir=${shell_ir}" >> "$GITHUB_OUTPUT"
           echo "keeper_cwd=${keeper_cwd}" >> "$GITHUB_OUTPUT"
-
-          printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s lib_deps=%s doc_truth=%s tla=%s oas_pin=%s nav_event_parity=%s shell_ir=%s keeper_cwd=%s\n' \
-            "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${lib_deps}" "${doc_truth}" "${tla}" "${oas_pin}" "${nav_event_parity}" "${shell_ir}" "${keeper_cwd}"
+          
+          printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s lib_deps=%s doc_truth=%s tla=%s agent_core=%s nav_event_parity=%s shell_ir=%s keeper_cwd=%s\n' \
+            "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${lib_deps}" "${doc_truth}" "${tla}" "${agent_core}" "${nav_event_parity}" "${shell_ir}" "${keeper_cwd}"
 
   meta:
     name: Meta Guards
@@ -402,10 +495,19 @@ jobs:
         if: github.event_name == 'pull_request' && github.base_ref == 'main'
         env:
           BASE_REF: origin/${{ github.base_ref }}
-          HEAD_REF: ${{ github.event.pull_request.head.sha }}
+          # actions/checkout checks out the pull request's synthetic merge
+          # commit.  Release truth must be evaluated on that merge result:
+          # an untouched stale head legitimately inherits dune-project from
+          # current main, while a real downgrade remains present in HEAD.
+          HEAD_REF: HEAD
         run: |
           chmod +x scripts/check-release-train-guard.sh
-          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --depth=100 --tags
+          # No --depth here. This guard only runs `git show` and `git tag`, so
+          # it never needed one -- but `git fetch --depth=N` writes
+          # .git/shallow, which is repository-global state. It ran first and
+          # left the clone shallow for the hygiene step below, which does walk
+          # ancestry. That is the trigger for #27365 / #26938 / #27384.
+          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --tags
           scripts/check-release-train-guard.sh \
             --base "$BASE_REF" \
             --head "$HEAD_REF"
@@ -417,7 +519,14 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.sha }}
         run: |
           chmod +x scripts/check-pr-hygiene.sh
-          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --depth=100
+          # No --depth. `git fetch --depth=100` grafts origin/<base> at 100
+          # commits, and rev-list then reports everything older than that graft
+          # as reachable only from HEAD -- so a long-lived branch had hundreds
+          # of main's own commits attributed to it (#27365, #26938, #27384).
+          # merge-base still returns a real commit, so the shallow-boundary
+          # recovery added in #27277 never engages. The checkout above already
+          # fetched full history; truncating it here only removed information.
+          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}"
           scripts/check-pr-hygiene.sh \
             --base "$BASE_REF" \
             --head "$HEAD_REF" \
@@ -427,43 +536,88 @@ jobs:
       - name: Run deploy preflight safety contract
         run: bash test/test_deploy_preflight.sh
 
-      # Deleting a prompt asset is a server-side change that leaves the
-      # dashboard's key strings syntactically valid, so a panel keeps rendering
-      # a block that silently resolves to empty. #26823 folded keeper.world,
-      # keeper.capabilities and keeper.constitution into keeper.system and the
-      # config panel kept decoding all three. Unconditional: the drift appears
-      # when either config/prompts or dashboard/src moves.
+      # Dashboard prompt keys must resolve to current prompt assets or registry
+      # constants. Run this whenever either side of that contract changes.
       - name: Check dashboard prompt keys
         run: bash scripts/audit-dashboard-prompt-keys.sh
+
+      # An odoc reference is not checked by the compiler, so a rename or a
+      # deletion leaves {!foo} syntactically valid and silently wrong. One sweep
+      # found nine: mcp_prompt_surface justified a concrete record with a
+      # function that module does not have, server_mcp_transport_ws named an
+      # absent read_inbound_message_frame three times as the reason ws_session
+      # is exposed, and three files wrote {!Foo.ml}, which reads as a value
+      # named ml inside Foo. Seconds, and the renaming PR sees it.
+      - name: Check odoc references
+        run: python3 scripts/audit-odoc-refs.py
+
+      # Phase 4 of the TLA audit chain called for this wire-up and it never
+      # landed, so the ratchet ran nowhere and its baseline drifted to 98
+      # against a 47-file inventory — a floor no tree could meet (#27578).
+      - name: Check TLA bug-model ratchet
+        run: bash scripts/tla-bug-model-ratchet.sh
+
+      # A route that authorizes against a tool name the catalog never registered
+      # is closed to every credential, admin included, and the denial reads as a
+      # role problem. POST /api/v1/prompts shipped that way with a working
+      # dashboard editor in front of it (#29085).
+      - name: Check route tool catalog registration
+        run: bash scripts/audit-route-tool-catalog.sh
+
+      # Eleven repo-scanning audits that existed and never ran. scripts/ holds
+      # 182 scripts and ci.yml called 63 of them; these are the audit/check
+      # ones that read only tracked files, so CI can run them as-is. The rest
+      # of the unwired set either reads a live .masc runtime (credential and
+      # fleet audits, meaningless on a runner) or needs a tool the image lacks
+      # (valgrind), and stays out.
+      # Its own step because it takes arguments, which the loop below cannot
+      # pass. The walk used to descend into every worktree and never finish,
+      # which is why an audit this specific sat unwired (#27386); at ~6s it is
+      # cheaper than most steps here.
+      - name: Run dead-surface ratchet
+        run: python3 scripts/audit-dead-surface.py --exports --ratchet
+
+      - name: Run repo audit scripts
+        run: |
+          # No `set -e`: every script runs and the failures are reported
+          # together. Aborting on the first one hid the rest behind it and
+          # skipped the twelve steps after this one, so a single stale string
+          # cost a CI round per audit instead of one round for all of them.
+          failed=()
+          for s in \
+            audit-unwired-audits.sh \
+            verify-test-registration.py \
+            audit-catchall.sh \
+            audit-cross-module-exhaustive-match.sh \
+            audit-path-ssot.sh \
+            audit-tla-cfg-orphan.sh \
+            check_silent_failure.sh \
+            check-board-attention-exact-flow-boundary.sh \
+            check-compaction-exact-flow-boundary.sh \
+            check-keeper-turn-content-boundary.sh \
+            check-opam-lock-covers-deps.sh \
+            check-tool-error-format.sh \
+            check-turn-records-envelope-parity.sh \
+            check-variants.sh
+          do
+            echo "::group::$s"
+            case "$s" in
+              *.py) python3 "scripts/$s" || failed+=("$s") ;;
+              *)    bash "scripts/$s" || failed+=("$s") ;;
+            esac
+            echo "::endgroup::"
+          done
+          if ((${#failed[@]} > 0)); then
+            printf 'repo audit scripts failed: %s\n' "${failed[*]}" >&2
+            exit 1
+          fi
 
       - name: Check doc truth
         if: needs.changes.outputs.doc_truth == 'true'
         run: |
-          chmod +x scripts/check-doc-truth.sh scripts/sync-oas-pin-docs.sh scripts/audit-keeper-tool-boundary-matrix.sh
+          chmod +x scripts/check-doc-truth.sh scripts/audit-keeper-tool-boundary-matrix.sh
           scripts/check-doc-truth.sh
-          scripts/sync-oas-pin-docs.sh --check
           scripts/audit-keeper-tool-boundary-matrix.sh
-
-      - name: Check OAS pin manifests
-        if: needs.changes.outputs.oas_pin == 'true'
-        run: |
-          chmod +x scripts/check-oas-pin.sh
-          bash test/test_oas_pin_ref.sh
-          bash test/test_check_oas_pin_exact.sh
-          scripts/check-oas-pin.sh --local-only
-
-      - name: Check OAS API surface source
-        if: needs.changes.outputs.oas_pin == 'true'
-        env:
-          ALLOW_REVIEW_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true && contains(github.event.pull_request.labels.*.name, 'blocked-on-oas') }}
-        run: |
-          chmod +x scripts/oas-drift-check.sh
-          if [[ "$ALLOW_REVIEW_REF" == "true" ]]; then
-            echo "::notice::Draft PR blocked on OAS: validating the explicit upstream review ref"
-            scripts/oas-drift-check.sh --allow-review-ref
-          else
-            scripts/oas-drift-check.sh
-          fi
 
       - name: Run report self-test
         if: needs.changes.outputs.lib_deps == 'true'
@@ -506,24 +660,34 @@ jobs:
           chmod +x scripts/check-sandbox-dune-version.sh
           scripts/check-sandbox-dune-version.sh
 
+      - name: Check agent core ownership boundary
+        run: |
+          bash scripts/check-agent-core-boundary.sh
+          bash test/test_agent_core_boundary.sh
+
       - name: Meta bug-class gates (SSOT, SIL, STR, BND)
         run: |
           chmod +x scripts/ci/*.sh
           echo "=== Running meta bug-class gates (see #9516 #9517 #9519 #9521) ==="
           bash scripts/ci/check-ssot-spawn-drift.sh
           bash scripts/check-spec-truth.sh
+          python3 scripts/ci/check-spec-file-refs.py
           bash scripts/ci/check-silent-failure-patterns.sh
+          python3 scripts/ci/check_h2_route_auth_parity.py
+          python3 scripts/ci/check_exact_field_decoder_preflight.py
+          python3 scripts/ci/check_env_reads_below_config.py --self-test
+          python3 scripts/ci/check_model_prefix_inheritance.py
           bash scripts/ci/check-enum-string-safety.sh
-          bash scripts/ci/check-masc-oas-boundary.sh
-          bash scripts/check-oas-internals.sh
+          python3 scripts/ci/check-env-snapshot-default-drift.py
           bash scripts/ci/check-publication-recovery-test-boundary.sh
           bash scripts/ci/check-tla-variant-sync.sh
           bash scripts/ci/check-tla-harness-coverage.sh
           bash scripts/ci/check-telemetry-coverage.sh
           bash scripts/ci/check-determinism-contract.sh
+          bash scripts/ci/check-tui-render-purity.sh
           bash scripts/audit-hardcoding-truth.sh --fail-on-confirmed
           bash scripts/ci/check-credential-audits.sh
-          bash scripts/ci/check-persona-profile-placeholders.sh
+          bash scripts/ci/check-keeper-instructions-placeholders.sh
           bash scripts/ci/check-accept-fd-lifecycle.sh
           bash scripts/ci/check-actor-consumer-wired.sh
           bash scripts/ci/check-log-severity-anti-patterns.sh
@@ -618,11 +782,19 @@ jobs:
   build:
     name: Build and Test
     runs-on: ubuntu-latest
+    # Focused group deadlines total 93 minutes when agent-core is selected
+    # (paused-work 10, board-attention-worker 3, normal 20, newly-wired 5,
+    # mcp-tool-matrix 15, agent-core 15, operator-control 10, sse 15).
+    # Setup and the dune build take 12 minutes (run 32634585750: 10:45:48 to
+    # 10:57:15), so a run where every group uses its full budget ends at
+    # 105 minutes. The job timeout sits above that so scripts/ci-run-tests.sh
+    # prints its timeout diagnostics before GitHub ends the job.
+    timeout-minutes: 110
     needs: [pr-live-gate, changes]
-    # Main-push safety-net (mirrors `dashboard` job below). Non-PR events
-    # (branch push to main/develop, workflow_dispatch) always run Build and Test
-    # so a lib/ regression introduced by a non-build-path change (e.g. a dashboard-only
-    # merge) is detected on the next main push instead of persisting silently
+    # Main safety-net (mirrors `dashboard` job below). Non-PR events (develop
+    # push, the main timer, workflow_dispatch) always run Build and Test so a
+    # lib/ regression introduced by a non-build-path change (e.g. a dashboard-only
+    # merge) is detected on the next timer run instead of persisting silently
     # behind a green "CI Gate" — ci-gate check() treats a skipped required job as
     # PASS. Tag pushes do not start this workflow because `on.push.branches`
     # excludes tags. PR events keep the build-scope gate (cost saving)
@@ -634,10 +806,10 @@ jobs:
     # Test execution policy (hard-required focused suites):
     #   - `continue-on-error` is intentionally absent: compile failures and
     #     every focused test suite are merge-blocking.
-    #   - Each suite runs exactly once. scripts/ci-run-tests.sh only reports
+    #   - Each suite runs exactly once. scripts/ci-run-tests.sh reports
     #     heartbeat, disk pressure, process state, and failure diagnostics.
-    #   - GitHub Actions owns the outer workflow lifecycle; this job does not
-    #     impose a second deadline on individual commands or the suite.
+    #   - Focused groups have explicit fail-closed deadlines; this job timeout
+    #     is the final safety boundary for setup, compilation, and all suites.
     steps:
       - name: Free disk space
         # ubuntu-latest starts with roughly 14 GB free but preinstalls the
@@ -655,11 +827,15 @@ jobs:
           set -euo pipefail
           echo "Disk before cleanup:"
           df -h /
-          sudo rm -rf /usr/local/lib/android || true
-          sudo rm -rf /usr/share/dotnet || true
-          sudo rm -rf /opt/ghc /usr/local/.ghcup || true
-          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
-          sudo docker image prune --all --force || true
+          cleanup_pids=()
+          sudo rm -rf /usr/local/lib/android & cleanup_pids+=("$!")
+          sudo rm -rf /usr/share/dotnet & cleanup_pids+=("$!")
+          sudo rm -rf /opt/ghc /usr/local/.ghcup & cleanup_pids+=("$!")
+          sudo rm -rf /opt/hostedtoolcache/CodeQL & cleanup_pids+=("$!")
+          sudo docker image prune --all --force & cleanup_pids+=("$!")
+          for cleanup_pid in "${cleanup_pids[@]}"; do
+            wait "${cleanup_pid}" || true
+          done
           echo "Disk after cleanup:"
           df -h /
 
@@ -668,8 +844,6 @@ jobs:
 
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain
-        with:
-          dune-cache-save: "true"
 
       - name: Pin external OCaml dependencies
         uses: ./.github/actions/pin-ocaml-deps
@@ -706,11 +880,11 @@ jobs:
       - name: Build
         id: build_step
         env:
-          # Group 1 links hundreds of native test executables against the full
-          # masc_test_deps graph. Serializing this build bounds concurrent
-          # native-link disk pressure without changing the test backend or
-          # dropping native Domain/C-stub coverage.
-          DUNE_JOBS: "1"
+          # Public ubuntu-latest runners provide four CPUs and 16 GB RAM. Use
+          # all four for the compile-only graph; focused behavior suites below
+          # remain serial because some own fixed ports and shared fixtures.
+          # Disk pressure is handled by the cleanup step before checkout.
+          DUNE_JOBS: "4"
         # NO continue-on-error: dune build is deterministic and must hard-fail.
         # Focused test execution steps below are also required: any failing
         # suite fails the Build and Test job and blocks merge via the CI Gate.
@@ -750,6 +924,41 @@ jobs:
           wait "${heartbeat_pid}" 2>/dev/null || true
           exit "${build_status}"
 
+      - name: Check direct environment reads against config floor
+        # The checker derives the dependency floor from `dune describe`, so it
+        # belongs in the sole job that installs the OCaml/Dune toolchain. Run
+        # Python under `opam exec` because bare `dune` is not on PATH in CI.
+        run: opam exec -- python3 scripts/ci/check_env_reads_below_config.py
+
+      - name: Run source quickstart onboarding smoke
+        run: scripts/quickstart-smoke.sh
+
+      - name: Run typed functional-core boundary audit
+        env:
+          OCAML_BOUNDARY_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'workflow_dispatch' && 'origin/main' || '' }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}"
+            # This job checks out shallow (no fetch-depth), so fetching the
+            # base branch brings its tip and nothing behind it. The ratchet
+            # wants pull_request.base.sha, which is an ancestor of that tip on
+            # a PR whose base branch has moved on, so it stays absent and the
+            # ratchet hard-fails with "base revision is unavailable". Fetch the
+            # exact commit; depth 1 is enough because the ratchet only reads
+            # two files at that revision, never its history.
+            if ! git cat-file -e "${OCAML_BOUNDARY_BASE_REF}^{commit}" 2>/dev/null; then
+              bash scripts/ci/git-fetch-retry.sh \
+                origin "${OCAML_BOUNDARY_BASE_REF}" --depth=1
+            fi
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            bash scripts/ci/git-fetch-retry.sh \
+              origin \
+              "+refs/heads/main:refs/remotes/origin/main"
+          fi
+          opam exec -- dune build --root . @tools/ocaml_boundary_audit/runtest
+          bash scripts/ocaml-boundary-ratchet.sh
+
       - name: Run runtime deployment preflight self-test
         if: ${{ always() && steps.build_step.outcome == 'success' }}
         env:
@@ -763,7 +972,7 @@ jobs:
           chmod +x scripts/check-keeper-event-queue-projection-boundary.sh
           scripts/check-keeper-event-queue-projection-boundary.sh
 
-      - name: Sublib boundary gate against real dune graph (RFC-0056 G1)
+      - name: Library boundaries against resolved Dune graphs
         # The self-test (in the Meta Guards job) only validates the checker
         # against synthetic fixtures. This step runs the SAME checker against
         # the REAL dependency graph emitted by `dune describe`, asserting that
@@ -782,19 +991,65 @@ jobs:
         # describe sexp to the pure-python checker via --describe-file.
         # See: docs/rfc/RFC-0056-incremental-sublib-extraction.md G1, #19824.
         run: |
-          opam exec -- dune describe --root . > "$RUNNER_TEMP/sublib-describe.sexp"
-          python3 scripts/audit-sublib-cycle.py --describe-file "$RUNNER_TEMP/sublib-describe.sexp"
+          opam exec -- dune describe workspace \
+            --root . --format sexp --lang 0.1 \
+            > "$RUNNER_TEMP/sublib-describe.sexp"
+          python3 scripts/audit-sublib-cycle.py \
+            --describe-file "$RUNNER_TEMP/sublib-describe.sexp"
 
-      - name: Runtime TOML validity gate
-        # RFC-0058 §9: config/keeper_runtime.toml is the authoring SSOT.
-        # runtime.json is no longer generated or committed, so the old
-        # runtime_materialize CLI is retired. This focused test renders
-        # the TOML in memory, validates the declarative catalog, and
-        # proves config/runtime.json has not reappeared as a tracked
-        # second source of truth.
-        # See: test/test_runtime_config_validity.ml.
-        run: |
-          opam exec -- dune build --root . @test/runtest-test_runtime_config_validity
+          # Restrict Dune's project roots to Agent Core, then inspect the
+          # resolved dependency closure. Installed dependencies are explicit
+          # `local false` nodes; any `local true` library owned elsewhere in
+          # the workspace is a reverse MASC dependency. --with-pps also places
+          # compile-time PPX libraries in this restricted closure.
+          opam exec -- dune describe workspace packages/agent_core \
+            --root . --format sexp --lang 0.1 --with-pps \
+            > "$RUNNER_TEMP/agent-core-describe.sexp"
+          python3 scripts/audit-sublib-cycle.py \
+            --describe-file "$RUNNER_TEMP/agent-core-describe.sexp" \
+            --closed-source-root packages/agent_core \
+            --required-local-library masc.agent_core
+
+          # Every file below packages/agent_core already triggers this Build
+          # proof. A Dune include could move a library stanza to an arbitrary
+          # file outside that classifier, so use Dune's own parser/formatter
+          # and keep the package plus active ancestor Dune files include-free.
+          # Introducing the first include necessarily changes a classified
+          # dune file, so this check closes the input set inductively.
+          for control_file in packages dune-project dune-workspace packages/dune-project; do
+            if [[ -L "$control_file" ]]; then
+              echo "agent-core boundary: symlinked control input is forbidden: $control_file" >&2
+              exit 1
+            fi
+          done
+          while IFS= read -r dune_file; do
+            if [[ -L "$dune_file" ]]; then
+              echo "agent-core boundary: symlinked Dune input is forbidden: $dune_file" >&2
+              exit 1
+            fi
+            if [[ "$(head -c 20 "$dune_file")" == '(* -*- tuareg -*- *)' ]]; then
+              echo "agent-core boundary: OCaml-syntax Dune file is forbidden: $dune_file" >&2
+              exit 1
+            fi
+            formatted="$RUNNER_TEMP/agent-core-formatted.dune"
+            opam exec -- dune format-dune-file "$dune_file" > "$formatted"
+            if rg -n '^[[:space:]]*\((dynamic_)?include([[:space:]]|$)' "$formatted"; then
+              echo "agent-core boundary: Dune include stanza is forbidden: $dune_file" >&2
+              exit 1
+            fi
+          done < <(
+            {
+              find packages/agent_core -type f \
+                \( -name dune -o -name dune-file \) -print
+              printf '%s\n' dune
+              [[ ! -f packages/dune && ! -L packages/dune ]] \
+                || printf '%s\n' packages/dune
+              [[ ! -f dune-file && ! -L dune-file ]] \
+                || printf '%s\n' dune-file
+              [[ ! -f packages/dune-file && ! -L packages/dune-file ]] \
+                || printf '%s\n' packages/dune-file
+            } | LC_ALL=C sort -u
+          )
 
       - name: Run workspace backlog revision ratchet
         # The backlog revision is stamped once at the commit point; this suite
@@ -806,84 +1061,13 @@ jobs:
         # #26445) that predate this PR. Alcotest exits non-zero when
         # the name matches no suite, so a suite rename cannot silently
         # unwire this step.
+        # claim_next is wired for the same reason: the single-claim refusal
+        # carries its own correction hint (masc_transition action=release),
+        # which keeper.md no longer restates. An unrun assertion would let
+        # that hint rot back out of the message.
         run: |
           opam exec -- dune exec --root . test/test_workspace_coverage.exe -- test revision
-
-      - name: Run MCP authentication contract suites
-        # @check compiles these suites but never runs them. Exercise both the
-        # dual-auth admission path and the typed HTTP/JSON-RPC auth envelope so
-        # a transport can neither lose the code nor pass with dead assertions.
-        run: |
-          opam exec -- dune build --root . \
-            @test/runtest-test_auth \
-            @test/runtest-test_auth_oauth \
-            @test/runtest-test_server_oauth_protocol \
-            @test/runtest-test_server_auth_dashboard_actor_resolution \
-            @test/runtest-test_error_body_wire_shape \
-            @test/runtest-test_tool_registry_consistency \
-            @test/runtest-test_tool_spec
-
-      - name: Run keeper lane launch-order AST suite
-        # Asserts on lib/keeper sources through Ast_grep, so @check cannot run
-        # it. It sat outside every target list while one of its counts was
-        # already wrong, which is how the two lane-start paths drifted into
-        # forking different sidecar sets.
-        run: |
-          opam exec -- dune build --root . \
-            @test/runtest-test_keeper_keepalive_launch_order_ast
-
-      - name: Run paused-work transfer and source-ACK suites
-        id: paused_work_transfer_and_operator_suites
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ALCOTEST_QUICK_TESTS: "1"
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_turn_outcome @test/runtest-test_keeper_paused_work_transfer_transaction @test/runtest-test_keeper_paused_work_source_terminal_transaction @test/runtest-test_keeper_paused_work_operator"
-
-      - name: Run keeper autonomous chat-activity suite
-        id: keeper_autonomous_chat_activity_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_autonomous_turn_source"
-
-      - name: Run keeper autoboot ownership suite
-        id: keeper_autoboot_ownership_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_autoboot_single_owner"
-
-      # NOTE: the "Shell IR differential-safety harness gate" step was removed
-      # here. #24332 (nonhierarchical Gate refactor) retired the entire
-      # shell_ir risk/typed subsystem (Shell_ir_risk, Shell_ir_typed,
-      # checked_shell_ir — now zero consumers; exec risk moved to the Gate),
-      # including lib/exec/test/test_shell_ir_differential.ml. The orphaned
-      # gate built @lib/exec/test/runtest-test_shell_ir_differential, an empty
-      # alias, hard-failing main (issue #24352). Restoring is infeasible (the
-      # tested subsystem is gone); removing the dead gate completes #24332.
-      - name: Env knob catalog drift gate
-        # Detects when lib/config/env_config_*.ml has been edited
-        # (new MASC_* env var added, doc reworded, knob removed) but
-        # docs/runtime-tunables.md was not regenerated. The catalog
-        # is purely derivative and should never drift from source.
-        # See: bin/env_knob_catalog.ml, issue #10733.
-        run: |
-          opam exec -- dune exec --root . ./bin/env_knob_catalog.exe -- \
-            docs/runtime-tunables.md
-          if ! git diff --exit-code docs/runtime-tunables.md; then
-            echo "::error::docs/runtime-tunables.md is stale relative to lib/config/env_config_*.ml. Run 'dune exec ./bin/env_knob_catalog.exe -- docs/runtime-tunables.md' locally and commit the result."
-            exit 1
-          fi
+          opam exec -- dune exec --root . test/test_workspace_coverage.exe -- test claim_next
 
       - name: SSE TypeScript codegen drift gate
         # RFC-0004 Phase A0.2 PR-2: dashboard/src/schemas/sse_event_generated.ts
@@ -896,343 +1080,32 @@ jobs:
           chmod +x dashboard/scripts/gen-sse-types.sh
           opam exec -- dashboard/scripts/gen-sse-types.sh --check
 
-      # The former catch-all `dune test` gate mixed executable behavior tests
-      # with source-text, log-wording, and TLA text-parity assertions. Those
-      # implementation-shape checks made main permanently red after legitimate
-      # refactors without identifying a runtime regression. `@check` above
-      # still compiles every test target; the authoritative runtime, operator,
-      # transport, SSE, and contract suites below remain executable gates.
-
-      - name: Run dashboard behavior contracts
-        id: dashboard_behavior_contracts
+      # Compile-only @check above and this runner form one authority: the
+      # runner asks Dune for @test/runtest, which is every test stanza in
+      # test/ that is not turned off by its own enabled_if, and compares what
+      # fails against test/ci-known-failures.txt.
+      #
+      # It replaced 26 steps that named 894 aliases by hand plus a 1,000-line
+      # script that named them again. A suite absent from those lists was not
+      # run and nothing reported it: six suites rotted behind hard cuts that
+      # way and were found in #29880, #29883 and #29887 only because someone
+      # went looking for them. The default here is to run.
+      - name: Run the OCaml test suite
+        id: ocaml_test_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-dashboard-http-behavior-contracts"
+        run: scripts/ci-run-test-suite.sh
 
-      - name: Run OAS pin behavior suite
-        id: oas_pin_behavior_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' && needs.changes.outputs.oas_pin == 'true' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          oas_pin_targets="@test/runtest-test_keeper_hooks_oas_introspection @test/runtest-test_keeper_execution_join @test/runtest-test_hitl_summary_worker"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${oas_pin_targets}"
-
-      - name: Run model inference metrics suite
-        id: model_inference_metrics_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_model_inference_metrics"
-
-      # Completion-authority rejection routing and verification-evidence
-      # projection are executable behavior, not implementation shape: the
-      # suite asserts routed identities and stored payloads, never source
-      # text or log wording. It stayed compile-only under @check, so
-      # regression tests added there (#26625, #26657) never ran.
-      - name: Run verification behavior suite
-        id: verification_behavior_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_verification"
-
-      # The tool-call quality benchmark scores keeper runs against selectors
-      # declared in benchmarks/data/tool_call_quality_cases.json. Those
-      # selectors name descriptors in the live keeper registry, so deleting or
-      # re-tagging a descriptor turns a stale case definition into a keeper
-      # quality score instead of an error (#26811). The suite existed in
-      # test/dune but was never listed here, so nothing it asserts has been
-      # running; the registry coherence gate it now carries only counts once
-      # this step does.
-      - name: Run tool-call quality benchmark suite
-        id: tool_call_quality_benchmark_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_tool_call_quality_benchmark"
-
-      # MCP identity is session-bound behavior: compile-only coverage cannot
-      # prove that the complete handshake -> start -> status -> transition
-      # path preserves one identity through the durable Task lifecycle. The
-      # Keeper prompt target separately proves caller-owned config projection.
-      - name: Run MCP session Task lifecycle and Keeper prompt config suites
-        id: mcp_session_task_lifecycle_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          identity_targets="@test/runtest-test_client_identity @test/runtest-test_mcp_session_task_lifecycle @test/runtest-test_keeper_sandbox_docker_cwd_response"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${identity_targets}"
-
-      # Goal store durability: the suite drives a real workspace and asserts
-      # on-disk bytes, not source text — the read path stays lenient while a
-      # write over an undecodable store must be refused and must leave both
-      # goals.json and its .last-good mirror untouched. Compile-only under
-      # @check leaves that refusal ungated.
-      - name: Run goal store durability suite
-        id: goal_store_durability_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_goal_store"
-
-      # Goal phase projection: active_goal_ids records assignment and is never
-      # cleared when a goal reaches a terminal phase, so both prompt surfaces
-      # have to consult the store's phase. The suite seeds one goal per phase in
-      # a real workspace and asserts the rendered sets, which compile-only under
-      # @check does not exercise.
-      - name: Run keeper goal phase projection suite
-        id: keeper_goal_phase_projection_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_goal_phase_projection"
-
-      # Keeper tool descriptor registry: the suite pins each cluster tool's
-      # keeper_model_projection and asserts that Operator_only tools are absent
-      # from the autonomous Keeper bundle. Compile-only under @check leaves both
-      # ungated, so a projection change reaches Keepers without a failing check.
-      - name: Run keeper tool descriptor registry integrity suite
-        id: keeper_tool_descriptor_registry_integrity_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_tool_descriptor_registry_integrity"
-
-      # Schedule occurrence reclaim: an occurrence the consumer durably accepted
-      # is [Execution_dispatched] until a correlated completion path settles it,
-      # so nothing in the scheduler finishes it on its own. The suite drives a
-      # real workspace to that state and asserts the reclaim sweep settles it
-      # only on positive consumer evidence — a held occurrence and an unreadable
-      # consumer must both leave it untouched. Compile-only under @check leaves
-      # every one of those branches ungated, and no schedule suite ran here
-      # before (issue #26685).
-      - name: Run schedule runner suite
-        id: schedule_runner_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_schedule_runner @test/runtest-test_schedule_store @test/runtest-test_schedule_consumer_dispatch"
-
-      # Keeper registry hardening: identity resolution and goal-reconciliation
-      # routing are executable behavior — the suite drives a real workspace and
-      # asserts which Keeper a durable stimulus is addressed to, never source
-      # text. It is the only suite covering
-      # [Keeper_goal_reconciliation_wake], so that routing stays ungated under
-      # @check.
-      - name: Run keeper registry hardening suite
-        id: keeper_registry_hardening_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_registry_hardening"
-
-      # Keeper unified prompt surface: asserts what a Keeper is actually handed
-      # on a turn. The schedule wake row carries two ids with different
-      # meanings — occurrence_id is a one-way SHA-256 that no tool accepts, and
-      # schedule_id is the durable pointer resolved with masc_schedule_get — so
-      # a projection that drops the pointer is a silent capability loss with no
-      # compile-time signal. @check cannot see it: the wake type still compiles
-      # either way.
-      # Named for what it runs: the targets below are the unified verification
-      # surface and schedule tool wiring, not a prompt suite. The previous name
-      # ("keeper unified prompt surface suite") read as prompt coverage in the
-      # job log while no prompt assertion executed anywhere in CI.
-      - name: Run keeper unified verification surface and schedule wiring suites
-        id: keeper_unified_verification_surface_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_unified_verification_surface @test/runtest-test_schedule_tool_wiring"
-
-      # Every keeper turn is built from the assembled system prompt, and until
-      # now no prompt assertion ran in CI: these suites existed in test/dune but
-      # appeared in no runtest target, so they were compile-only under @check.
-      # The golden target pins the assembled bytes, which is what makes a
-      # prompt-assembly refactor provable rather than eyeballed.
-      - name: Run keeper prompt assembly suites
-        id: keeper_prompt_assembly_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          prompt_targets="@test/runtest-test_keeper_system_prompt_bytes @test/runtest-test_keeper_prompt_metrics @test/runtest-test_keeper_surface_presence_prompt"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${prompt_targets}"
-
-      - name: Run board attention suite
-        id: board_attention_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          board_attention_targets="@test/runtest-test_keeper_board_attention_worker @test/runtest-test_keeper_board_attention_partition @test/runtest-test_keeper_board_attention_candidate"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${board_attention_targets}"
-
-      - name: Run tool blob retention suite
-        id: tool_blob_retention_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          tool_blob_targets="@test/runtest-test_tool_blob_store @test/runtest-test_keeper_tool_call_log @test/runtest-test_keeper_wire_capture"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${tool_blob_targets}"
-
-      - name: Run runtime provider agent suite
-        id: runtime_provider_agent_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_runtime_provider_auth_headers"
-
-      - name: Run host FD pressure contract suite
-        id: host_fd_pressure_contract_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          bash test/test_monitor_system_health_paths.sh
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_host_fd_pressure_poller"
-
-      - name: Run Keeper request-cap suite
-        id: keeper_request_cap_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          request_cap_targets="@test/runtest-test_runtime_config_validity @test/runtest-test_keeper_turn_driver_failover @test/runtest-test_keeper_vision_tool @test/runtest-test_runtime_modality_reroute @test/runtest-test_runtime_model_input_tail_window"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${request_cap_targets}"
-
-      - name: Run operator control suite
-        id: operator_control_suite
-        # Run regardless of earlier test failures, but only after a successful
-        # compile, so every suite gets a chance to report and the job fails if
-        # any suite fails.
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          ALCOTEST_QUICK_TESTS: "1"
-          CI_TEST_HEARTBEAT_SEC: 15
-          MASC_LOCAL_RUNTIMES_JSON: '[{"base_url":"http://127.0.0.1:8085","max_concurrency":4}]'
-          MASC_KEEPER_MSG_TIMEOUT_MAX_SEC: "10"
-          MASC_E2E_TESTS: "true"
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          operator_targets="@test/runtest-test_operator_control_snapshot_state @test/runtest-test_operator_control_snapshot @test/runtest-test_operator_control_snapshot_cache @test/runtest-test_model_map_of_keeper_rows"
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${operator_targets}"
-
-      - name: Run SSE unit and reconnect suites
-        id: sse_reconnect_e2e
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-          MASC_E2E_TESTS: "true"
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_sse_coverage @test/runtest-test_ag_ui_coverage @test/runtest-test_sse_storm_e2e"
-
-      # Keeper prompt and tool-bundle contracts. Both suites assert on rendered
-      # prompt text and on a meta the production decoder must accept, and both
-      # went red without a failing check: @check compiles them and no runtest
-      # target ran them. masc#24651 and masc#26123 removed prompt directives and
-      # masc#26823 re-wrapped the merged asset; the assertions drifted silently
-      # through all three.
-      - name: Run keeper prompt and tool-bundle contract suites
-        id: keeper_prompt_contract_suites
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
-        env:
-          ME_ROOT: /tmp/me
-          CI_TEST_HEARTBEAT_SEC: 15
-          DUNE_JOBS: 1
-        run: |
-          mkdir -p /tmp/me
-          chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune build --root . @test/runtest-test_keeper_wake_turn_context @test/runtest-test_warn_root_causes"
+      # The step prints the failed assertions; this keeps everything around
+      # them. Without it the full output lived only in RUNNER_TEMP and went
+      # with the runner, so a red suite could not be diagnosed after the fact
+      # (#30117).
+      - name: Upload the test suite log
+        if: ${{ always() && steps.ocaml_test_suite.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-suite-log
+          path: ${{ runner.temp }}/test-suite.log
+          if-no-files-found: warn
 
       - name: Run transport harness suite
         id: transport_harness_suite
@@ -1249,7 +1122,6 @@ jobs:
           chmod +x scripts/harness/transport/verify_grpc_subscribe.sh
           chmod +x scripts/harness/transport/verify_h2c_autodetect.sh
           chmod +x scripts/harness/transport/verify_ws.sh
-          chmod +x scripts/harness/transport/verify_webrtc_signaling.sh
           chmod +x scripts/harness/lib/server_bootstrap.sh
           scripts/ci-run-tests.sh "bash scripts/harness/transport/run_all.sh"
 
@@ -1293,12 +1165,62 @@ jobs:
             _build/default/bin/main_eio.exe \
             .release-evidence/main-release-evidence.md
 
+      - name: Generate trusted-dispatch release evidence bundle
+        if: >-
+          github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/main' &&
+          github.ref_protected == true
+        run: |
+          chmod +x scripts/release-evidence.sh
+          mkdir -p .release-evidence
+          scripts/release-evidence.sh \
+            _build/default/bin/main_eio.exe \
+            .release-evidence/trusted-dispatch-release-evidence.md
+
+      - name: Verify Keeper full-lifecycle evidence bundle
+        if: >-
+          (github.event_name == 'pull_request') ||
+          (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          (
+            github.event_name == 'workflow_dispatch' &&
+            github.ref == 'refs/heads/main' &&
+            github.ref_protected == true
+          )
+        run: |
+          python3 scripts/keeper-full-lifecycle-evidence.py \
+            --verify \
+            --output-dir .release-evidence/keeper-full-lifecycle
+
+      - name: Upload PR release evidence
+        if: ${{ always() && github.event_name == 'pull_request' && steps.build_step.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-evidence-pr-${{ github.event.pull_request.number }}
+          path: .release-evidence/
+          include-hidden-files: true
+
       - name: Upload main release evidence
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.build_step.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: release-evidence-main
           path: .release-evidence/
+          include-hidden-files: true
+
+      - name: Upload trusted-dispatch release evidence
+        if: >-
+          ${{
+            always() &&
+            github.event_name == 'workflow_dispatch' &&
+            github.ref == 'refs/heads/main' &&
+            github.ref_protected == true &&
+            steps.build_step.outcome == 'success'
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-evidence-dispatch-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .release-evidence/
+          include-hidden-files: true
 
       - name: Config diagnostic drift report
         if: ${{ always() && steps.build_step.outcome == 'success' }}
@@ -1360,6 +1282,11 @@ jobs:
           chmod +x scripts/check-feature-flag-consistency.sh
           scripts/check-feature-flag-consistency.sh
 
+      - name: Check Keeper runtime setting registry
+        run: |
+          chmod +x scripts/check-keeper-runtime-setting-registry.sh
+          scripts/check-keeper-runtime-setting-registry.sh
+
       - name: Check TOML syntax
         run: |
           chmod +x scripts/check-toml-syntax.sh
@@ -1379,7 +1306,7 @@ jobs:
           chmod +x scripts/validate-prompt-paths.sh
           scripts/validate-prompt-paths.sh
 
-      - name: Check MASC/OAS boundary ratchet
+      - name: Check Agent core boundary
         run: |
           chmod +x scripts/check-boundary-guard.sh
           scripts/check-boundary-guard.sh
@@ -1404,15 +1331,17 @@ jobs:
   dashboard:
     name: Dashboard
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     needs: [pr-live-gate, changes]
-    # PR mode: stay path-scoped (dashboard=true only when dashboard/ changes).
-    # Non-PR events (push to main/develop, schedule, workflow_dispatch):
+    # PR mode: stay path-scoped (dashboard=true when dashboard/ changes, or
+    # when a lib-side SSE wire-surface file changes — see the wire-surface
+    # census block in the `changes` job; #28925 audit defect (a)).
+    # Non-PR events (develop push, the main timer, workflow_dispatch):
     # ignore path scope and always run, so a dashboard test regression
     # introduced by a non-dashboard-path change (e.g. a shared-type refactor,
     # or a dashboard-touching PR merged via admin fast-track while
-    # the dashboard job was red) is detected on the next main/develop push
-    # rather than persisting silently. Same main-push safety-net pattern as
+    # the dashboard job was red) is detected on the next timer run
+    # rather than persisting silently. Same main safety-net pattern as
     # tla-main.yml; root cause:
     # keeper-fsm-specs.test.ts / keeper-composite.test.ts sat red on main
     # after #14252/#14380 because no main-push run re-checked them.
@@ -1421,6 +1350,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      # The gate counts with ripgrep, and its counts swallowed a missing binary
+      # as zero, so this job passed on a runner without rg while real drift sat
+      # in the tree (#27965). The script now refuses to run without it; install
+      # it so the refusal never triggers here.
+      - name: Install ripgrep
+        run: |
+          bash scripts/ci/apt-refresh.sh
+          sudo apt-get install -y -qq ripgrep
 
       - name: Run drift gate
         run: scripts/dashboard-drift-check.sh
@@ -1453,9 +1391,49 @@ jobs:
         working-directory: dashboard
         run: pnpm run typecheck
 
+      # Nothing ran pnpm lint before this, which is how three
+      # no-nested-ternary errors reached main and stayed there (#29054).
+      - name: ESLint
+        working-directory: dashboard
+        run: pnpm lint
+
       - name: Run dashboard tests
         working-directory: dashboard
         run: pnpm test
+
+      - name: Install Playwright Chromium
+        working-directory: dashboard
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run Keeper queued-stream Playwright E2E
+        id: keeper_queued_stream_e2e
+        working-directory: dashboard
+        env:
+          KEEPER_QUEUED_STREAM_ARTIFACT_DIR: ${{ runner.temp }}/keeper-queued-stream
+        run: pnpm test:e2e:queued-stream
+
+      - name: Upload Keeper queued-stream screenshots
+        if: ${{ always() && !cancelled() && steps.keeper_queued_stream_e2e.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: keeper-queued-stream-screenshots
+          path: ${{ runner.temp }}/keeper-queued-stream/*.png
+          if-no-files-found: warn
+
+      - name: Run Keeper lane-timeline Playwright E2E
+        id: keeper_lane_timeline_e2e
+        working-directory: dashboard
+        env:
+          KEEPER_LANE_TIMELINE_ARTIFACT_DIR: ${{ runner.temp }}/keeper-lane-timeline
+        run: pnpm test:e2e:keeper-lane
+
+      - name: Upload Keeper lane-timeline screenshots
+        if: ${{ always() && !cancelled() && steps.keeper_lane_timeline_e2e.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: keeper-lane-timeline-screenshots
+          path: ${{ runner.temp }}/keeper-lane-timeline/*.png
+          if-no-files-found: warn
 
   structure-ratchet:
     name: OCaml Structure Ratchet
@@ -1479,11 +1457,17 @@ jobs:
         if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
         run: scripts/stringly-boundary-ratchet.sh
 
-      - name: Run OAS boundary ratchet
+      - name: Run model-prose scanner self-test
+        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
+        run: python3 scripts/model-prose-scan.py --self-test
+
+      - name: Run model-prose ratchet
+        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
+        run: scripts/model-prose-ratchet.sh
+
+      - name: Run exact-flow boundary checks
         if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.dashboard == 'true'
         run: |
-          scripts/test_oas_boundary_ratchet.sh
-          scripts/oas-boundary-ratchet.sh
           scripts/check-hitl-exact-flow-boundary.sh --self-test
           scripts/check-hitl-exact-flow-boundary.sh --check
 
@@ -1564,6 +1548,12 @@ jobs:
           make -C specs check-buggy
 
   ci-gate:
+    # Named for the one required check in main's branch protection. A second
+    # job used to carry that name and do nothing but copy this job's result:
+    # it existed to merge two authorities, and #29458 removed the other one
+    # (the Keeper real-world lane) without collapsing the wrapper. Every run
+    # then spent a runner restating a verdict, and every failure was reported
+    # twice.
     name: CI Gate
     runs-on: ubuntu-latest
     needs: [pr-sync-check, pr-live-gate, changes, meta, build, lint, dashboard, health, structure-ratchet, shell-ir-ratchet, tla-specs]
@@ -1601,6 +1591,12 @@ jobs:
           #     execution is HARD REQUIRED as well. Each test step lacks
           #     continue-on-error, so a test failure fails the Build and Test
           #     job and blocks merge.
+          # A cancelled job did not fail — it did not run. Both block, because
+          # a check that never ran cannot be evidence of anything, but they are
+          # printed apart: over the last 20 CI runs the job conclusions were 110
+          # success, 45 cancelled and 4 failure, so "FAIL dashboard cancelled"
+          # was the line a reader met eleven times more often than a real
+          # failure, and it sends them looking for a defect in the diff.
           check() {
             local name=$1
             local result=$2
@@ -1609,6 +1605,9 @@ jobs:
               printf 'PASS  %-20s %s\n' "$name" "$result"
             elif [[ "$mode" == "advisory" ]]; then
               printf 'WARN  %-20s %s (advisory, not blocking)\n' "$name" "$result"
+            elif [[ "$result" == "cancelled" ]]; then
+              printf 'STOP  %-20s cancelled — never ran, re-run to decide\n' "$name"
+              fail=1
             else
               printf 'FAIL  %-20s %s\n' "$name" "$result"
               fail=1

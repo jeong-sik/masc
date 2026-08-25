@@ -3,7 +3,7 @@
     Set once during server startup (main_eio.ml), read from any context.
 
     Uses Atomic.t (lock-free WORM pattern): each field is written once at
-    init and read many times from Eio fibers, CI tests, and OAS callbacks.
+    init and read many times from Eio fibers, CI tests, and AGENT_CORE callbacks.
     No mutex needed — Atomic.get/set are single-instruction operations. *)
 
 type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
@@ -73,11 +73,6 @@ let set_clock clock =
 
 let set_mono_clock mc =
   Atomic.set current_mono_clock (Some mc)
-
-let get_mono_clock () : (Eio.Time.Mono.ty Eio.Resource.t, string) result =
-  match Atomic.get current_mono_clock with
-  | Some mc -> Ok mc
-  | None -> Error "Eio mono_clock not initialized"
 
 let get_mono_clock_opt () =
   Atomic.get current_mono_clock
@@ -202,6 +197,11 @@ let https_error message = Error message
 
 let build_https_connector_result () =
   try
+    (* The TLS handshake draws from the process-global RNG default; guard
+       it here like llm_provider's tls_client_config does, so a binary
+       whose first TLS contact is this connector cannot die on
+       No_default_generator (#28896). *)
+    Crypto_rng.ensure_default ();
     match Ca_certs.authenticator () with
     | Error (`Msg msg) -> https_error ("CA certs unavailable: " ^ msg)
     | Error _ -> https_error "CA certs unavailable: unknown error"

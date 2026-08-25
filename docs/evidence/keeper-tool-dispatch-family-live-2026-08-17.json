@@ -1,0 +1,51 @@
+{
+ "schema": "masc.keeper.tool_dispatch_family.live.v1",
+ "measured_at": "2026-08-17T08:47:00Z",
+ "live_endpoint": "http://127.0.0.1:8935",
+ "server_commit": "bd2e27e60b",
+ "keeper": {
+  "name": "canary-10t-glmc-52-20260817",
+  "runtime": "glm-coding.glm-5.2"
+ },
+ "protocol": "Operator chat turns instructed the keeper; every claim is backed by the server tool_call log and a durable-store or independent read. Same operator-instructed/keeper-executed disclosure as keeper-board-family-live-2026-08-17.json.",
+ "broadcast": {
+  "request_id": "m5-live-broadcast-1",
+  "tool_call_log_line": 6660,
+  "tool": "keeper_broadcast",
+  "outcome": "ok",
+  "durable_message": "<base-path>/.masc/messages/000001573_keeper-canary-10t-glmc-52-20260817-agent_wmsg-964dbe5d234e349b4b2dcc43aa6ca3b0_broadcast.json",
+  "seq": 1573,
+  "scope": "send path only; two-keeper reception remains unmeasured"
+ },
+ "parallel_two_calls_one_turn": {
+  "request_id": "m5-live-parallel-1",
+  "keeper_turn": 23,
+  "tool_call_log_lines": [
+   6686,
+   6687
+  ],
+  "tools": [
+   "masc_dashboard",
+   "keeper_tasks_list"
+  ],
+  "same_second": "2026-08-17 17:45:10 KST",
+  "scope": "two tool calls inside one keeper turn; serial-vs-concurrent execution mode not discriminated"
+ },
+ "composition_read_then_dependent_write": {
+  "request_id": "m5-live-compose-1",
+  "tool_call_log_lines": [
+   6750,
+   6757
+  ],
+  "sequence": "masc_board_post_get (read comment count=1) -> masc_board_comment whose content embeds that count",
+  "new_comment_id": "c-30830867da3b02e8c6b4d0c907a23a01",
+  "post_id": "p-57b9db4db1933c9d791006347b4c078b"
+ },
+ "server_tool_call_log": {
+  "file": "<base-path>/.masc/logs/start-masc-nohup-20260817c.log",
+  "all_outcomes": "ok"
+ },
+ "notes": [
+  "Operator-instructed, keeper-executed — proves the keeper tool dispatch path, not autonomous initiative."
+ ]
+}

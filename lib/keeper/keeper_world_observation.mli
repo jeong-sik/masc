@@ -21,7 +21,16 @@ type pending_board_event_kind =
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed of board_reaction_event
+  | Board_vote_cast of Board_dispatch.board_vote_change
+      (** A vote landed on a post or comment this Keeper wrote. Payload-carrying
+          like {!Completion_authority_rejected}: the voter and direction are the
+          fact the row states, and [post_id] is the post the vote belongs to
+          (the parent post for a comment vote). *)
   | Fusion_completed
+  | Delegate_completed
+      (** A turn this Keeper asked another Keeper to run has ended. Like
+          {!Fusion_completed} the row carries the answer itself, because the
+          asker has nowhere else to read it mid-cycle. *)
   | Schedule_due of Keeper_event_queue.scheduled_wake
       (** The consumed wake, kept typed. The exact occurrence key is
           [(schedule_id, due_at, payload_digest)]; [schedule_id] alone can point
@@ -30,13 +39,12 @@ type pending_board_event_kind =
           wake, not its only copy. Carrying the record mirrors
           {!Keeper_event_queue.Connector_attention}'s pointer discipline and
           {!Completion_authority_rejected}'s payload-carrying shape below. *)
-  | External_attention
-  | Goal_assigned
-      (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids];
-          the assignment edge surfaces as actionable turn input. *)
-  | Goal_reconciliation_ready
-      (** All linked Tasks are terminal; the Keeper must re-read SSOT and
-          choose completion, blocking, or follow-up work. *)
+  | External_attention of Keeper_counterpart_observation.t
+      (** A typed projection of the host-authored connector identity and the
+          untrusted speaker content. Unlike the flat event preview, it keeps
+          identity visible in the current Keeper prompt. The Librarian reads
+          the same producer-owned attention record through its bounded durable
+          projection. *)
   | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
       (** A system LLM completion authority rejected this Keeper's evidence. *)
   | Task_cancelled of Keeper_event_queue.task_cancellation
@@ -70,7 +78,7 @@ type pending_board_event = {
 (** [false] for a scheduled-work or system-authority carrier that shares the
     historical observation container but must not be projected as Board activity.
 
-    This partition decides prompt placement, contributes to turn admission,
+    This partition decides prompt placement, contributes to Owner turn selection,
     and feeds the classifier. {!Keeper_unified_prompt} renders only
     [is_scheduled_automation_event] events under Scheduled Automation,
     [is_completion_authority_rejection_event] events under their own completion
@@ -84,9 +92,7 @@ type pending_board_event = {
     it to [Scheduled_automation_stimulus] independently of this partition
     ([scheduled_automation.due_ready_count] is a separate live-store
     observation, not the stimulus's trigger; it can already be zero once
-    dispatch begins). [Goal_reconciliation_ready] has no dedicated event-queue
-    trigger, so classifying an isolated reconciliation event [false] also
-    removes [Board_event_pending] and suppresses its intended reactive turn.
+    dispatch begins).
 
     A new event kind placed on the wrong side compiles cleanly and fails
     silently. Classify by its source contract and pin the answer in a test. *)
@@ -140,9 +146,10 @@ type world_observation = {
   unclaimed_task_count : int;
   (** Number of unclaimed tasks in the workspace backlog. *)
 
-  claimable_task_count : int;
-  (** Number of unclaimed tasks this keeper can claim with its current tool
-      surface. This is a matched subset of [unclaimed_task_count]. *)
+  claimable_tasks : Keeper_world_observation_inputs.claimable_task_identity list;
+  (** Typed identities of the tasks this keeper can claim with its current tool
+      surface, from the same authoritative backlog read as
+      [unclaimed_task_count]. *)
 
   failed_task_count : int;
   (** Number of failed/cancelled tasks in the workspace backlog. *)
@@ -176,7 +183,26 @@ type world_observation = {
       [pending_board_events] tracks OTHER authors' unseen posts and advances
       past them, so without this field a keeper never observes its own
       published posts in-prompt. Raw observation only — no dedup gate. *)
+
+  fleet_messages : Keeper_world_observation_message_scope.fleet_message list;
+  (** Keeper broadcasts projected into this transcript, newest
+      [Keeper_config.keeper_fleet_messages_max] in arrival order. Standing
+      context with no acknowledgement cursor: the reactive lanes admit only
+      rows addressed to this keeper, so a projected broadcast would otherwise
+      reach the dashboard and never the prompt. Disjoint from
+      [pending_messages] by construction. *)
+
+  own_recent_actions : Keeper_own_recent_actions.turn list;
+  (** This keeper's own tool calls from its newest
+      [Keeper_config.keeper_own_recent_turns_max] turns, oldest turn first,
+      each turn's calls in the order they ran. An autonomous turn otherwise
+      carries no record of what this keeper already did, so a finished task
+      gets claimed again and a rejected call gets repeated. *)
 }
+
+val claimable_task_count : world_observation -> int
+(** The exact derived count of [claimable_tasks]. It is not stored separately,
+    so count and rows cannot represent different snapshots. *)
 
 type keeper_cycle_channel =
   | Reactive
@@ -190,6 +216,7 @@ type event_queue_trigger =
   | Completion_authority_rejection_stimulus
   | Task_cancellation_stimulus
   | Manual_compaction_stimulus
+  | Workspace_message_stimulus
 
 (** Typed reason for running a keeper cycle. Each variant corresponds to
     exactly one code path in {!keeper_cycle_decision}. *)
@@ -203,6 +230,7 @@ type turn_reason =
   | Completion_authority_rejection_pending
   | Task_cancellation_pending
   | Manual_compaction_pending
+  | Workspace_message_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Task_backlog of { unclaimed : int; failed : int }
@@ -278,11 +306,6 @@ val collect_board_events_without_advancing_cursor :
   meta:Keeper_meta_contract.keeper_meta ->
   pending_board_event list * int * int
 
-val board_signal_match :
-  meta:Keeper_meta_contract.keeper_meta ->
-  signal:Board_dispatch.board_signal ->
-  board_signal_match
-
 (** RFC-0266: build the actionable [pending_board_event] for a completed async
     [masc_fusion] deliberation. Surfaces the sink's board result as a just-arrived
     event so the woken turn can inspect it as neutral Board context.
@@ -322,12 +345,6 @@ val pending_board_event_of_stimulus :
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_event_queue.stimulus ->
   (pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
-
-val read_scheduled_automation_observation :
-  keeper_name:string option ->
-  config:Workspace.config ->
-  now:float ->
-  scheduled_automation_observation
 
 (** Build a world observation from workspace state and keeper metadata.
 
@@ -369,5 +386,3 @@ val keeper_cycle_decision :
   ?event_queue_triggers:event_queue_trigger list ->
   meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
 
-val should_run_keeper_cycle :
-  meta:Keeper_meta_contract.keeper_meta -> world_observation -> bool

@@ -12,9 +12,9 @@
     {b Include runtime:} starts with [include Operator_control_snapshot]
     so {!Operator_control}'s [include] propagates the snapshot
     surface (notably the [\\'a context] type) through.  Internal
-    helpers ([judgment_surface_enums], [normalize_judgment_*],
+    helpers ([normalize_judgment_*],
     [default_fresh_ttl_sec], [normalize_action_target_type],
-    [default_target_type_for], [require_payload_field]) stay
+    [default_target_type_for]) stay
     private. *)
 
 include module type of struct
@@ -61,10 +61,12 @@ type action_request = {
 }
 (** Parsed operator action — output of {!action_request_of_args}. *)
 
-val canonical_action_type : string -> string
-(** [canonical_action_type t] is the remaining parser seam for
-    action-type normalization. Historical aliases are intentionally no
-    longer accepted here; callers must use canonical action types. *)
+val require_payload_field :
+  Yojson.Safe.t -> string -> string -> (string, string) result
+(** [require_payload_field payload key error] reads a string [key] from
+    [payload], or returns [Error error] when it is absent or not a string.
+    Exported so the action handlers in {!Operator_control} state the
+    requirement once instead of repeating the match at each site. *)
 
 val generate_confirm_token :
   clock:_ Eio.Time.clock -> Workspace.config -> (string, string) result
@@ -107,12 +109,10 @@ val normalize_request_target_type :
     Empty [target_type] is replaced by the action-type default.
     Invalid inputs return the canonical operator-target validation error. *)
 
-val delegated_tool_for : string -> string
+val delegated_tool_for : string -> (string, string) result
 (** [delegated_tool_for action_type] returns the tool name for an
-    action_type by lookup into
-    {!Operator_pending_confirm.available_actions}; returns
-    ["unknown"] when no match exists.  Used for confirm-step routing
-    so the JSON contract knows which tool will receive the call. *)
+    action type from {!Operator_pending_confirm.available_actions} or rejects
+    an action without a registered tool contract. *)
 
 val confirm_required : string -> bool
 (** Re-export of {!Operator_action_catalog.requires_confirmation}. Pinned here

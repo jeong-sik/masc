@@ -23,7 +23,7 @@
 let () = Mirage_crypto_rng_unix.use_default ()
 
 open Alcotest
-module Auth = Masc.Auth
+module Auth = Auth
 
 let setup_test_workspace () =
   let unique_id =

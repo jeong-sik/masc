@@ -1,7 +1,6 @@
 (** Runtime-resolution and dashboard tools projections extracted from the
     dashboard HTTP facade. *)
 
-open Dashboard_http_helpers
 
 let take = Server_dashboard_http_runtime_info_json.take
 type dashboard_runtime_probe_cache_entry =
@@ -270,7 +269,7 @@ let git_rev_parse_short_probe dir =
          ~timeout_sec:git_rev_parse_short_probe_timeout_sec
          argv
      with
-     | Unix.WEXITED 0, output -> String_util.trim_to_option output
+     | Unix.WEXITED 0, output -> String_util.trim_nonempty output
      | _ -> None)
 ;;
 
@@ -306,7 +305,7 @@ let maybe_refresh_git_rev_parse_short_in_background dir =
 ;;
 
 let git_rev_parse_short path =
-  match String_util.trim_to_option path with
+  match String_util.trim_nonempty path with
   | None -> None
   | Some dir when not (Sys.file_exists dir) -> None
   | Some dir ->
@@ -364,7 +363,7 @@ let git_probe_trimmed dir args =
       ~timeout_sec:git_rev_parse_short_probe_timeout_sec
       argv
   with
-  | Unix.WEXITED 0, output -> String_util.trim_to_option output
+  | Unix.WEXITED 0, output -> String_util.trim_nonempty output
   | _ -> None
 ;;
 
@@ -374,7 +373,7 @@ let parse_ahead_behind raw =
     |> String.trim
     |> String.split_on_char '\t'
     |> List.concat_map (String.split_on_char ' ')
-    |> List.filter_map String_util.trim_to_option
+    |> List.filter_map String_util.trim_nonempty
   with
   | [ ahead; behind ] ->
     (match int_of_string_opt ahead, int_of_string_opt behind with
@@ -461,7 +460,7 @@ let maybe_refresh_git_upstream_status_in_background dir =
 ;;
 
 let git_upstream_status path =
-  match String_util.trim_to_option path with
+  match String_util.trim_nonempty path with
   | None -> None
   | Some dir when not (Sys.file_exists dir) -> None
   | Some dir ->
@@ -634,7 +633,7 @@ let path_item_json ~source path =
 ;;
 
 let normalized_path_opt path =
-  match String_util.trim_to_option path with
+  match String_util.trim_nonempty path with
   | None -> None
   | Some path ->
     let normalized =
@@ -705,20 +704,15 @@ let runtime_diagnostics_json () =
               ; "signal", `String signal
               ; "message", `String message
               ])
-      | None
-        when String_util.contains_substring
-               message "repairing state and rewriting canonical JSON" ->
-        Some
-          (`Assoc
-              [ "ts", `String entry.ts
-              ; "kind", `String "state_repair"
-              ; "message", `String message
-              ])
+      (* Two needles were removed from this classifier because nothing in the
+         repository produces them: "repairing state and rewriting canonical
+         JSON" (whole state_repair arm) and "parse error:
+         Types_core.agent.last_seen". A guard with no producer classifies
+         nothing and only pins the phrasing of future log lines
+         (RFC-0371 §3.7). *)
       | None
         when String_util.contains_substring message "invalid agent JSON"
-             || String_util.contains_substring message "repaired agent JSON"
-             || String_util.contains_substring
-                  message "parse error: Types_core.agent.last_seen" ->
+             || String_util.contains_substring message "repaired agent JSON" ->
         Some
           (`Assoc
               [ "ts", `String entry.ts
@@ -737,7 +731,7 @@ let runtime_diagnostics_json () =
       0
       diagnostics
   in
-  `List diagnostics, count "external_signal", count "state_repair", count "agent_state"
+  `List diagnostics, count "external_signal", count "agent_state"
 ;;
 
 type dashboard_runtime_provider_probe =
@@ -775,15 +769,19 @@ let dashboard_runtime_append_probe_path base ~suffix =
 
 let dashboard_runtime_probe_url ~(api_format : Runtime_schema.api_format) base_url =
   match api_format with
+  | Runtime_schema.Codex_app_server_runtime
+  | Runtime_schema.Claude_code_runtime
+  | Runtime_schema.Antigravity_cli_runtime -> None
   | Runtime_schema.Ollama_api ->
     let base = dashboard_runtime_trim_trailing_slashes base_url in
-    if String.ends_with ~suffix:"/api/tags" base
-    then base
-    else if String.ends_with ~suffix:"/api" base
-    then base ^ "/tags"
-    else base ^ "/api/tags"
+    Some
+      (if String.ends_with ~suffix:"/api/tags" base
+       then base
+       else if String.ends_with ~suffix:"/api" base
+       then base ^ "/tags"
+       else base ^ "/api/tags")
   | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api ->
-      dashboard_runtime_append_probe_path base_url ~suffix:"/models"
+    Some (dashboard_runtime_append_probe_path base_url ~suffix:"/models")
 ;;
 
 let dashboard_runtime_url_for_json raw =
@@ -805,11 +803,10 @@ let dashboard_runtime_provider_auth_kind = function
   | Some (Runtime_schema.Inline _) -> "inline"
 ;;
 
-let dashboard_runtime_header_is_auth name =
-  match String.lowercase_ascii (String.trim name) with
-  | "authorization" | "x-api-key" | "api-key" | "x-auth-token" -> true
-  | _ -> false
-;;
+(* One list, owned by [Runtime_adapter] — the module that strips these from
+   [Provider_config.headers]. A separate copy here meant the dashboard could
+   hide a header the adapter still forwarded. *)
+let dashboard_runtime_header_is_auth = Runtime_adapter.is_auth_header_key
 
 let dashboard_runtime_non_auth_headers (provider : Runtime_schema.provider) =
   match provider.headers with
@@ -820,19 +817,19 @@ let dashboard_runtime_non_auth_headers (provider : Runtime_schema.provider) =
 
 let dashboard_runtime_credential_value = function
   | Runtime_schema.Env key ->
-    (match Option.bind (Sys.getenv_opt key) String_util.trim_to_option with
+    (match Option.bind (Sys.getenv_opt key) String_util.trim_nonempty with
      | Some value -> Ok value
      | None -> Error (Printf.sprintf "env credential %s is empty or unset" key))
   | Runtime_schema.File path ->
     (try
-       match Fs_compat.load_file path |> String_util.trim_to_option with
+       match Fs_compat.load_file path |> String_util.trim_nonempty with
        | Some value -> Ok value
        | None -> Error (Printf.sprintf "credential file %s is empty" path)
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn -> Error (Printf.sprintf "credential file %s: %s" path (Printexc.to_string exn)))
   | Runtime_schema.Inline value ->
-    (match String_util.trim_to_option value with
+    (match String_util.trim_nonempty value with
      | Some value -> Ok value
      | None -> Error "inline credential is empty")
 ;;
@@ -884,6 +881,9 @@ let dashboard_runtime_model_count_of_body ~(api_format : Runtime_schema.api_form
   try
     let json = Yojson.Safe.from_string body in
     match api_format with
+    | Runtime_schema.Codex_app_server_runtime
+    | Runtime_schema.Claude_code_runtime
+    | Runtime_schema.Antigravity_cli_runtime -> None
     | Runtime_schema.Ollama_api -> dashboard_runtime_list_member_len "models" json
     | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api ->
       (match dashboard_runtime_list_member_len "data" json with
@@ -983,19 +983,28 @@ let dashboard_runtime_provider_probe_json
       ~error:"CLI runtimes do not expose an HTTP reachability endpoint"
       ()
   | Runtime_schema.Http endpoint_url ->
-    let probe_url = dashboard_runtime_probe_url ~api_format:rt.provider.api_format endpoint_url in
-    let probe_url_json = dashboard_runtime_url_for_json probe_url in
-    if not (dashboard_runtime_http_url_valid probe_url)
-    then
+    begin match dashboard_runtime_probe_url ~api_format:rt.provider.api_format endpoint_url with
+     | None ->
       make
-        ~probe_url:probe_url_json
         ~auth_present:false
-        ~status:"invalid_endpoint"
+        ~status:"invalid_execution_transport"
         ~reachable:(Some false)
         ~skipped:false
-        ~error:"runtime endpoint is not an absolute http(s) URL"
+        ~error:"codex-app-server must use the official CLI transport"
         ()
-    else (
+     | Some probe_url ->
+      let probe_url_json = dashboard_runtime_url_for_json probe_url in
+      if not (dashboard_runtime_http_url_valid probe_url)
+      then
+        make
+          ~probe_url:probe_url_json
+          ~auth_present:false
+          ~status:"invalid_endpoint"
+          ~reachable:(Some false)
+          ~skipped:false
+          ~error:"runtime endpoint is not an absolute http(s) URL"
+          ()
+      else (
       match dashboard_runtime_probe_headers rt.provider with
       | Error error ->
         make
@@ -1044,12 +1053,54 @@ let dashboard_runtime_provider_probe_json
              ~skipped:false
              ~error
              ()))
+    end
+;;
+
+let dashboard_runtime_probe_representatives runtimes =
+  let _, representatives_rev =
+    List.fold_left
+      (fun (seen, representatives_rev) (runtime : Runtime.t) ->
+         if Set_util.StringSet.mem runtime.provider.id seen
+         then seen, representatives_rev
+         else
+           ( Set_util.StringSet.add runtime.provider.id seen
+           , runtime :: representatives_rev ))
+      (Set_util.StringSet.empty, [])
+      runtimes
+  in
+  List.rev representatives_rev
+;;
+
+let dashboard_runtime_project_provider_probe (runtime : Runtime.t) probe =
+  let json =
+    match probe.json with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "runtime_id", _ -> "runtime_id", `String runtime.id
+             | "model_id", _ -> "model_id", `String runtime.model.id
+             | "model_api_name", _ ->
+               "model_api_name", `String runtime.model.api_name
+             | field -> field)
+           fields)
+    | json -> json
+  in
+  { probe with json; runtime_id = runtime.id }
 ;;
 
 let dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes =
-  (* Probe each runtime concurrently when a server switch is reachable (the
+  (* Probe one representative per provider concurrently when a server switch
+     is reachable (the
      production background-refresh fiber / boot warm, or a switch-bearing
-     test). Each probe is an independent runtime/URL/HTTP connection with no
+     test). Models bound to one provider share its transport, credentials,
+     protocol, and metadata endpoint, so repeating the same GET for every
+     model creates duplicate load and duplicate-looking failures without new
+     reachability evidence. The representative result is projected back onto
+     every runtime row below so the public schema and exact runtime-id join stay
+     unchanged.
+
+     Each provider probe is an independent URL/HTTP connection with no
      shared mutable state, so the work is embarrassingly parallel and latency
      collapses from [sum latencies] to [max latencies] -- a dead runtime no
      longer serializes the probes after it.
@@ -1075,28 +1126,47 @@ let dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes =
 
      Without a switch (unit tests, no Eio scheduler) it falls back to a
      sequential [List.map] so deterministic ordering and test seams hold. *)
-  let probes =
+  let representatives = dashboard_runtime_probe_representatives runtimes in
+  let provider_probes =
     match Eio_context.get_switch_opt () with
-    | None -> List.map dashboard_runtime_provider_probe_json runtimes
+    | None -> List.map dashboard_runtime_provider_probe_json representatives
     | Some _sw ->
       Eio.Fiber.List.map
         ~max_fibers:dashboard_runtime_probe_max_fibers
         dashboard_runtime_provider_probe_json
-        runtimes
+        representatives
+  in
+  let probes_by_provider =
+    List.map2
+      (fun (runtime : Runtime.t) probe -> runtime.provider.id, probe)
+      representatives
+      provider_probes
+  in
+  let probes =
+    List.map
+      (fun (runtime : Runtime.t) ->
+         let probe = List.assoc runtime.provider.id probes_by_provider in
+         dashboard_runtime_project_provider_probe runtime probe)
+      runtimes
   in
   let count pred = probes |> List.filter pred |> List.length in
   let skipped = count (fun p -> p.skipped) in
   let reachable = count (fun p -> Option.equal Bool.equal p.reachable (Some true)) in
   let failed = count (fun p -> Option.equal Bool.equal p.reachable (Some false)) in
   let probed = List.length probes - skipped in
-  let status =
+  (* Published on the shared vocabulary. Spelled as this function's own words,
+     three of the four rungs — [reachable], [no_http_runtimes], [unreachable] —
+     were absent from it and arrived at readers as [Unknown], which ranks the
+     same as [Degraded]: every probe failing read no worse than some failing,
+     and a workspace with nothing to probe read as troubled (#27560). *)
+  let status : Health_status.t =
     if failed = 0 && probed > 0
-    then "reachable"
+    then Health_status.Ok
     else if failed = 0
-    then "no_http_runtimes"
+    then Health_status.Idle
     else if reachable > 0
-    then "degraded"
-    else "unreachable"
+    then Health_status.Degraded
+    else Health_status.Unavailable
   in
   let errors =
     probes
@@ -1108,7 +1178,7 @@ let dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes =
   in
   `Assoc
     [ "source", `String runtime_inventory_source
-    ; "status", `String status
+    ; "status", `String (Health_status.to_string status)
     ; "probe_ok", `Bool (failed = 0)
     ; "checked_at", `String (Masc_domain.now_iso ())
     ; ( "summary"
@@ -1396,16 +1466,32 @@ let runtime_http_transport_is_loopback url =
   Uri.of_string url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
 ;;
 
+(* Closed over the transports a runtime can have. The dashboard label used to
+   be derived from the serialized name with a wildcard, so "http" reached
+   "cloud" implicitly and a fourth transport kind would have joined it in
+   silence. Both mappings are exhaustive now; the wire strings are unchanged. *)
+type runtime_transport_kind =
+  | Kind_cli
+  | Kind_local
+  | Kind_http
+
 let runtime_kind_of_transport = function
-  | Runtime_schema.Cli _ -> "cli"
-  | Runtime_schema.Http url when runtime_http_transport_is_loopback url -> "local"
-  | Runtime_schema.Http _ -> "http"
+  | Runtime_schema.Cli _ -> Kind_cli
+  | Runtime_schema.Http url when runtime_http_transport_is_loopback url -> Kind_local
+  | Runtime_schema.Http _ -> Kind_http
 ;;
 
+let runtime_kind_to_string = function
+  | Kind_cli -> "cli"
+  | Kind_local -> "local"
+  | Kind_http -> "http"
+;;
+
+(* The operator-facing bucket: a non-loopback HTTP endpoint is remote. *)
 let runtime_dashboard_kind_of_runtime_kind = function
-  | "local" -> "local"
-  | "cli" -> "cli"
-  | _ -> "cloud"
+  | Kind_local -> "local"
+  | Kind_cli -> "cli"
+  | Kind_http -> "cloud"
 ;;
 
 let runtime_auth_kind_of_credential = function
@@ -1510,9 +1596,48 @@ let response_format_json : Llm_provider.Types.response_format -> Yojson.Safe.t =
 ;;
 
 let runtime_request_config_json (rt : Runtime.t) =
-  let cfg = rt.provider_config in
-  `Assoc
-    [ "source", `String "oas-provider-config"
+  match rt.execution with
+  | Runtime_execution.Codex_app_server config ->
+    `Assoc
+      [ "source", `String "official-client-runtime"
+      ; "execution", `String "codex_app_server"
+      ; "model", Json_util.string_opt_to_json config.model
+      ; "timeout_s", `Float config.timeout_s
+      ; "verified", `Bool false
+      ]
+  | Runtime_execution.Antigravity_cli config ->
+    `Assoc
+      [ "source", `String "official-client-runtime"
+      ; "execution", `String "antigravity_cli"
+      ; "model", `String config.model
+      ; "agent", Json_util.string_opt_to_json config.agent
+      ; ( "effort"
+        , Json_util.string_opt_to_json
+            (Option.map
+               (function
+                 | Runtime_antigravity.Low -> "low"
+                 | Runtime_antigravity.Medium -> "medium"
+                 | Runtime_antigravity.High -> "high")
+               config.effort) )
+      ; "execution_mode", `String "plan"
+      ; "sandbox", `Bool true
+      ; "disable_slash_commands", `Bool true
+      ; "timeout_s", `Float config.timeout_s
+      ; "verified", `Bool false
+      ]
+  | Runtime_execution.Claude_code config ->
+    `Assoc
+      [ "source", `String "official-client-runtime"
+      ; "execution", `String "claude_code"
+      ; "model", Json_util.string_opt_to_json config.model
+      ; "timeout_s", `Float config.timeout_s
+      ; "execution_mode", `String "masc_mcp_only"
+      ; "tool_owner", `String "masc_mcp"
+      ; "verified", `Bool false
+      ]
+  | Runtime_execution.Agent_core cfg ->
+    `Assoc
+    [ "source", `String "agent_core-provider-config"
     ; "provider_kind", `String (Llm_provider.Provider_config.string_of_provider_kind cfg.kind)
     ; "request_path", `String cfg.request_path
     ; ( "request_path_targets_responses_api"
@@ -1544,6 +1669,7 @@ let runtime_request_config_json (rt : Runtime.t) =
     ; "keep_alive", Json_util.string_opt_to_json cfg.keep_alive
     ; "internal_model_rotation_count", Json_util.int_opt_to_json cfg.internal_model_rotation_count
     ; "num_ctx", Json_util.int_opt_to_json cfg.num_ctx
+    ; "return_progress", `Bool cfg.return_progress
     ; "seed", Json_util.int_opt_to_json cfg.seed
     ; "has_previous_response_id", `Bool (Option.is_some cfg.previous_response_id)
     ; "connect_timeout_s", Json_util.float_opt_to_json cfg.connect_timeout_s
@@ -1554,6 +1680,9 @@ let runtime_api_format_wire : Runtime_schema.api_format -> string = function
   | Runtime_schema.Messages_api -> "messages"
   | Runtime_schema.Chat_completions_api -> "chat-completions"
   | Runtime_schema.Ollama_api -> "ollama"
+  | Runtime_schema.Codex_app_server_runtime -> "codex-app-server"
+  | Runtime_schema.Antigravity_cli_runtime -> "antigravity-cli"
+  | Runtime_schema.Claude_code_runtime -> "claude-code"
 ;;
 
 let runtime_provider_behavior_capabilities_json
@@ -1640,7 +1769,6 @@ let runtime_declared_spec_json (rt : Runtime.t) =
           ; "top_k", Json_util.int_opt_to_json rt.model.top_k
           ; "min_p", Json_util.float_opt_to_json rt.model.min_p
           ; "capabilities", runtime_declared_model_capabilities_json rt.model.capabilities
-          ; "match_prefixes", Json_util.json_string_list rt.model.match_prefixes
           ] )
     ; ( "binding"
       , `Assoc
@@ -1652,12 +1780,35 @@ let runtime_declared_spec_json (rt : Runtime.t) =
           ; "price_output", Json_util.float_opt_to_json rt.binding.price_output
           ; "keep_alive", Json_util.string_opt_to_json rt.binding.keep_alive
           ; "num_ctx", Json_util.int_opt_to_json rt.binding.num_ctx
+          ; "return_progress", Json_util.bool_opt_to_json rt.binding.return_progress
           ] )
     ]
 ;;
 
 let effective_capabilities_json (rt : Runtime.t) =
-  match Llm_provider.Provider_config.capabilities_for_config_model rt.provider_config with
+  match rt.execution with
+  | Runtime_execution.Codex_app_server _ ->
+    `Assoc
+      [ "source", `String "unverified"
+      ; "execution", `String "codex_app_server"
+      ; "verified", `Bool false
+      ]
+  | Runtime_execution.Antigravity_cli _ ->
+    `Assoc
+      [ "source", `String "unverified"
+      ; "execution", `String "antigravity_cli"
+      ; "verified", `Bool false
+      ]
+  | Runtime_execution.Claude_code _ ->
+    `Assoc
+      [ "source", `String "unverified"
+      ; "execution", `String "claude_code"
+      ; "execution_mode", `String "masc_mcp_only"
+      ; "tool_owner", `String "masc_mcp"
+      ; "verified", `Bool false
+      ]
+  | Runtime_execution.Agent_core provider_config ->
+   (match Llm_provider.Provider_config.capabilities_for_config_model provider_config with
   | None -> `Null
   | Some caps ->
     let accepted_reasoning_efforts =
@@ -1674,7 +1825,7 @@ let effective_capabilities_json (rt : Runtime.t) =
       | Some models -> Json_util.json_string_list models
     in
     `Assoc
-      [ "source", `String "oas-provider-config-model"
+      [ "source", `String "agent_core-provider-config-model"
       ; "max_context_tokens", Json_util.int_opt_to_json caps.max_context_tokens
       ; "max_output_tokens", Json_util.int_opt_to_json caps.max_output_tokens
       ; "supports_tools", `Bool caps.supports_tools
@@ -1720,7 +1871,7 @@ let effective_capabilities_json (rt : Runtime.t) =
       ; "supports_code_execution", `Bool caps.supports_code_execution
       ; "emits_usage_tokens", `Bool caps.emits_usage_tokens
       ; "supported_models", supported_models
-      ]
+      ])
 ;;
 
 let runtime_parameter_policy_json (rt : Runtime.t) =
@@ -1730,19 +1881,38 @@ let runtime_parameter_policy_json (rt : Runtime.t) =
     |> List.map Llm_provider.Capabilities.sampling_parameter_to_string
     |> Json_util.json_string_list
   in
-  let dialect = RD.for_provider_config rt.provider_config in
-  let sampling_candidates = RD.sampling_params_ignored_when_thinking dialect in
-  let ignored_sampling_params =
-    List.filter
-      (fun field -> RD.ignores_sampling_param dialect ~enable_thinking:None field)
-      sampling_candidates
-  in
-  let always_ignored_sampling_params =
-    List.filter
-      (fun field -> RD.ignores_sampling_param dialect ~enable_thinking:(Some false) field)
-      sampling_candidates
-  in
-  `Assoc
+  match rt.execution with
+  | Runtime_execution.Codex_app_server _ ->
+    `Assoc
+      [ "source", `String "official-client-owned"
+      ; "execution", `String "codex_app_server"
+      ]
+  | Runtime_execution.Antigravity_cli _ ->
+    `Assoc
+      [ "source", `String "official-client-owned"
+      ; "execution", `String "antigravity_cli"
+      ]
+  | Runtime_execution.Claude_code _ ->
+    `Assoc
+      [ "source", `String "official-client-owned"
+      ; "execution", `String "claude_code"
+      ; "execution_mode", `String "masc_mcp_only"
+      ; "tool_owner", `String "masc_mcp"
+      ]
+  | Runtime_execution.Agent_core provider_config ->
+    let dialect = RD.for_provider_config provider_config in
+    let sampling_candidates = RD.sampling_params_ignored_when_thinking dialect in
+    let ignored_sampling_params =
+      List.filter
+        (fun field -> RD.ignores_sampling_param dialect ~enable_thinking:None field)
+        sampling_candidates
+    in
+    let always_ignored_sampling_params =
+      List.filter
+        (fun field -> RD.ignores_sampling_param dialect ~enable_thinking:(Some false) field)
+        sampling_candidates
+    in
+    `Assoc
     [ "reasoning_toggle_wire", `String (RD.toggle_wire_to_string dialect.toggle_wire)
     ; "reasoning_replay_policy", `String (RD.replay_policy_to_string dialect.replay_policy)
     ; "requires_reasoning_replay_on_tool_call", `Bool (RD.requires_reasoning_replay_on_tool_call dialect)
@@ -1754,6 +1924,16 @@ let runtime_parameter_policy_json (rt : Runtime.t) =
 
 let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
   let runtime_kind = runtime_kind_of_transport rt.provider.transport in
+  let is_official_client_runtime =
+    match rt.execution with
+    | Runtime_execution.Codex_app_server _
+    | Runtime_execution.Claude_code _
+    | Runtime_execution.Antigravity_cli _ -> true
+    | Runtime_execution.Agent_core _ -> false
+  in
+  let runtime_status =
+    if is_official_client_runtime then "configured_unverified" else "configured"
+  in
   let models = [ rt.model.api_name ] in
   let capabilities_declared, caps =
     match rt.model.capabilities with
@@ -1775,15 +1955,15 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "protocol", `String rt.provider.protocol
     ; "transport", `String (runtime_transport_string rt.provider.transport)
     ; "kind", `String (runtime_dashboard_kind_of_runtime_kind runtime_kind)
-    ; "runtime_kind", `String runtime_kind
+    ; "runtime_kind", `String (runtime_kind_to_string runtime_kind)
     ; "auth_kind", `String (runtime_auth_kind_of_credential rt.provider.credentials)
-    ; "status", `String "configured"
-    ; "available", `Bool true
+    ; "status", `String runtime_status
+    ; "available", `Bool (not is_official_client_runtime)
     ; "is_default_runtime", `Bool (Option.equal String.equal default_id (Some rt.id))
     ; "max_context", `Int (Runtime.max_context_of_runtime rt)
-    ; "tools_support", `Bool rt.model.tools_support
-    ; "thinking_support", `Bool rt.model.thinking_support
-    ; "streaming", `Bool rt.model.streaming
+    ; "tools_support", `Bool (rt.model.tools_support && not is_official_client_runtime)
+    ; "thinking_support", `Bool (rt.model.thinking_support && not is_official_client_runtime)
+    ; "streaming", `Bool (rt.model.streaming && not is_official_client_runtime)
       (* Per-model sampling temperature override ([models.<id>].temperature).
          [`Null] when unset (the runtime keeps the fleet fallback). Read-only
          projection for the dashboard runtime capability card. *)
@@ -1827,6 +2007,16 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "effective_capabilities", effective_capabilities_json rt
     ; "parameter_policy", runtime_parameter_policy_json rt
     ; "request_config", runtime_request_config_json rt
+    ; ( "verification"
+      , if is_official_client_runtime
+        then
+          `Assoc
+            [ "status", `String "unverified"
+            ; "measured", `Bool false
+            ; "evidence", `Null
+            ; "reason", `String "no_successful_runtime_observation"
+            ]
+        else `Null )
     ; "declared_spec", runtime_declared_spec_json rt
     ; "model_count", `Int (List.length models)
     ; "models", Json_util.json_string_list models
@@ -1998,7 +2188,7 @@ let runtime_resolution_json (config : Workspace.config) =
     | None -> false
     | Some server_repo_path -> server_workspace_mismatch ~server_repo_path config
   in
-  let diagnostics, signal_count, repair_count, agent_issue_count =
+  let diagnostics, signal_count, agent_issue_count =
     runtime_diagnostics_json ()
   in
   let add_source_mismatch_warning acc =
@@ -2144,11 +2334,6 @@ let runtime_resolution_json (config : Workspace.config) =
       :: acc
     else acc
   in
-  let add_repair_warning acc =
-    if repair_count > 0
-    then Printf.sprintf "Recent workspace-state repair events detected (%d)." repair_count :: acc
-    else acc
-  in
   let add_agent_issue_warning acc =
     if agent_issue_count > 0
     then
@@ -2166,7 +2351,6 @@ let runtime_resolution_json (config : Workspace.config) =
     |> add_server_workspace_mismatch_warning
     |> add_prompt_dir_mismatch_warning
     |> add_signal_warning
-    |> add_repair_warning
     |> add_agent_issue_warning
     |> List.rev
   in
@@ -2323,7 +2507,6 @@ let dashboard_tools_warming_json ~actor =
           ; "distinct_tools_called", `Int 0
           ; "top_20", `List []
           ; "never_called_count", `Int 0
-          ; "dispatch_v2_enabled", `Bool false
           ; "registered_count", `Int 0
           ; "source", `String "dashboard_cache_warming"
           ; "health", `String "warming"
@@ -2335,794 +2518,6 @@ let dashboard_tools_warming_json ~actor =
     ]
 ;;
 
-let schedule_projection_request_limit = 20
-
-let unix_iso_json ts = `String (Masc_domain.iso8601_of_unix_seconds ts)
-
-let unix_iso_option_json = function
-  | None -> `Null
-  | Some ts -> unix_iso_json ts
-;;
-
-let schedule_status_count schedules status =
-  List.fold_left
-    (fun count (request : Schedule_domain.schedule_request) ->
-      if request.status = status then count + 1 else count)
-    0 schedules
-;;
-
-let schedule_counts_json schedules =
-  `Assoc
-    (List.map
-       (fun status ->
-         ( Schedule_domain.schedule_status_to_string status
-         , `Int (schedule_status_count schedules status) ))
-       Schedule_domain.all_schedule_statuses)
-;;
-
-type schedule_payload_support =
-  | Supported
-  | Unsupported
-  | Unknown
-
-let schedule_payload_support (request : Schedule_domain.schedule_request) =
-  match Schedule_payload_projection.support_status request with
-  | Schedule_payload_projection.Supported -> Supported
-  | Schedule_payload_projection.Unsupported -> Unsupported
-  | Schedule_payload_projection.Unknown -> Unknown
-;;
-
-let schedule_payload_support_to_string = function
-  | Supported -> "supported"
-  | Unsupported -> "unsupported"
-  | Unknown -> "unknown"
-;;
-
-let schedule_payload_support_status request =
-  schedule_payload_support request |> schedule_payload_support_to_string
-;;
-
-let schedule_payload_support_json schedules =
-  Schedule_payload_projection.support_summary_to_yojson schedules
-;;
-
-let schedule_request_active (request : Schedule_domain.schedule_request) =
-  not (Schedule_domain.is_terminal request.status)
-;;
-
-let schedule_due_candidate (request : Schedule_domain.schedule_request) =
-  match request.status with
-  | Schedule_domain.Scheduled | Schedule_domain.Due ->
-    true
-  | Schedule_domain.Running
-  | Schedule_domain.Succeeded
-  | Schedule_domain.Failed
-  | Schedule_domain.Cancelled
-  | Schedule_domain.Expired ->
-    false
-;;
-
-let schedule_next_due_at schedules =
-  schedules
-  |> List.filter schedule_due_candidate
-  |> List.fold_left
-       (fun acc (request : Schedule_domain.schedule_request) ->
-         match acc with
-         | None -> Some request.due_at
-         | Some ts -> Some (min ts request.due_at))
-       None
-;;
-
-let schedule_fsm_state schedules =
-  let count status = schedule_status_count schedules status in
-  if count Schedule_domain.Running > 0
-  then "running"
-  else if count Schedule_domain.Due > 0
-  then "due"
-  else if count Schedule_domain.Scheduled > 0
-  then "scheduled"
-  else "idle"
-;;
-
-let wake_record_dashboard_json (wake : Schedule_domain.wake_record) =
-  match Schedule_domain.wake_record_to_yojson wake with
-  | `Assoc fields ->
-    `Assoc
-      (fields
-       @ [ "started_at_iso", unix_iso_json wake.started_at
-         ; "finished_at_iso", unix_iso_option_json wake.finished_at
-         ])
-  | other -> other
-;;
-
-let schedule_dispatch_receipt_dashboard_json
-  (wake : Schedule_domain.wake_record option)
-  =
-  match wake with
-  | None -> `Null
-  | Some wake ->
-    (match wake.Schedule_domain.detail with
-     | None -> `Null
-     | Some detail ->
-    (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
-     | Ok receipt ->
-       (match Server_schedule_consumers.dispatch_receipt_to_yojson receipt with
-        | `Assoc fields -> `Assoc (("projection_status", `String "recognized") :: fields)
-        | other -> other)
-     | Error reason ->
-       `Assoc
-         [ "projection_status", `String "unrecognized_detail"
-         ; "reason", `String reason
-         ]))
-;;
-
-let schedule_queue_read_error_dashboard_json
-  (error : Keeper_event_queue_persistence.snapshot_read_error)
-  =
-  `Assoc
-    [ "kind", `String (Keeper_event_queue_persistence.snapshot_read_error_kind_to_string error.kind)
-    ; ( "path"
-      , match error.path with
-        | None -> `Null
-        | Some path -> `String path )
-    ; "message", `String error.message
-    ]
-;;
-
-let schedule_queue_match
-  ~(schedule_instance_id : string)
-  ~(schedule_id : string)
-  ~(due_at : float)
-  ~(payload_digest : string)
-  ~(post_id : string)
-  ~(stimulus_label : string)
-  (queue : Keeper_event_queue.t)
-  =
-  queue
-  |> Keeper_event_queue.to_list
-  |> List.find_opt (fun (stimulus : Keeper_event_queue.stimulus) ->
-    String.equal stimulus.post_id post_id
-    && String.equal (Keeper_event_queue.payload_kind_label stimulus.payload) stimulus_label
-    &&
-    match stimulus.payload with
-    | Keeper_event_queue.Schedule_due wake ->
-      String.equal wake.schedule_instance_id schedule_instance_id
-      && String.equal wake.schedule_id schedule_id
-      && Float.equal wake.due_at due_at
-      && String.equal wake.payload_digest payload_digest
-    | _ -> false)
-;;
-
-let schedule_queue_match_fields ~now bucket (stimulus : Keeper_event_queue.stimulus) =
-  let scheduled_wake =
-    match stimulus.payload with
-    | Keeper_event_queue.Schedule_due wake -> Some wake
-    | _ -> None
-  in
-  [ "matched_bucket", `String bucket
-  ; "matched_post_id", `String stimulus.post_id
-  ; "matched_payload_kind", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
-  ; "matched_arrived_at", `Float stimulus.arrived_at
-  ; "matched_arrived_at_iso", unix_iso_json stimulus.arrived_at
-  ; ( "matched_schedule_id"
-    , match scheduled_wake with
-      | Some wake -> `String wake.schedule_id
-      | None -> `Null )
-  ; ( "matched_schedule_instance_id"
-    , match scheduled_wake with
-      | Some wake -> `String wake.schedule_instance_id
-      | None -> `Null )
-  ; ( "matched_due_at"
-    , match scheduled_wake with
-      | Some wake -> `Float wake.due_at
-      | None -> `Null )
-  ; ( "matched_due_at_iso"
-    , match scheduled_wake with
-      | Some wake -> unix_iso_json wake.due_at
-      | None -> `Null )
-  ; ( "matched_payload_digest"
-    , match scheduled_wake with
-      | Some wake -> `String wake.payload_digest
-      | None -> `Null )
-  ; "matched_age_seconds", `Float (Float.max 0.0 (now -. stimulus.arrived_at))
-  ]
-;;
-
-let schedule_keeper_queue_evidence_dashboard_json
-  ~now
-  (config : Workspace.config)
-  (wake : Schedule_domain.wake_record option)
-  =
-  match wake with
-  | None -> `Null
-  | Some wake ->
-    (match wake.Schedule_domain.detail with
-     | None -> `Null
-     | Some detail ->
-       (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
-        | Error reason ->
-          `Assoc
-            [ "projection_status", `String "unrecognized_receipt"
-            ; "reason", `String reason
-            ]
-        | Ok
-            (Server_schedule_consumers.Keeper_wake_enqueued
-              { keeper_name
-              ; schedule_instance_id = _
-              ; schedule_id
-              ; urgency = _
-              ; post_id
-              ; queue
-              ; stimulus
-              ; stimulus_id = _
-              ; reaction_ledger_status = _
-              ; occurrence_status = _
-              ; activation_outcome = _
-              }) ->
-          let due_at = wake.Schedule_domain.due_at in
-          let payload_digest = wake.Schedule_domain.payload_digest in
-          let snapshot =
-            Keeper_event_queue_persistence.load_snapshot_with_errors
-              ~base_path:config.Workspace_utils.base_path
-              ~keeper_name
-          in
-          let pending_match =
-            schedule_queue_match
-              ~schedule_instance_id:wake.schedule_instance_id
-              ~schedule_id
-              ~due_at
-              ~payload_digest
-              ~post_id
-              ~stimulus_label:stimulus snapshot.pending
-          in
-          let read_errors =
-            List.map schedule_queue_read_error_dashboard_json snapshot.read_errors
-          in
-          let base_fields =
-            [ "source", `String "durable_event_queue_snapshot"
-            ; "queue", `String queue
-            ; "stimulus", `String stimulus
-            ; "keeper_name", `String keeper_name
-            ; "schedule_instance_id", `String wake.schedule_instance_id
-            ; "schedule_id", `String schedule_id
-            ; "post_id", `String post_id
-            ; "wake_due_at", `Float due_at
-            ; "wake_due_at_iso", unix_iso_json due_at
-            ; "wake_payload_digest", `String payload_digest
-            ; "pending_count", `Int (Keeper_event_queue.length snapshot.pending)
-            ; "read_errors", `List read_errors
-            ]
-          in
-          (match pending_match, snapshot.read_errors with
-           | Some match_, _ ->
-             `Assoc
-               (("projection_status", `String "matched_pending")
-                :: base_fields
-                @ schedule_queue_match_fields ~now "pending" match_)
-           | None, _ :: _ ->
-             `Assoc (("projection_status", `String "read_error") :: base_fields)
-           | None, [] ->
-             `Assoc (("projection_status", `String "not_found") :: base_fields))))
-;;
-
-let schedule_keeper_reaction_evidence_dashboard_json
-  (config : Workspace.config)
-  (wake : Schedule_domain.wake_record option)
-  =
-  match wake with
-  | None -> `Null
-  | Some wake ->
-    (match wake.Schedule_domain.detail with
-     | None -> `Null
-     | Some detail ->
-       (match Server_schedule_consumers.dispatch_receipt_of_detail detail with
-        | Error reason ->
-          `Assoc
-            [ "projection_status", `String "unrecognized_receipt"
-            ; "reason", `String reason
-            ]
-        | Ok
-            (Server_schedule_consumers.Keeper_wake_enqueued
-              { keeper_name
-              ; schedule_instance_id
-              ; schedule_id
-              ; urgency = _
-              ; post_id
-              ; queue = _
-              ; stimulus
-              ; stimulus_id
-              ; reaction_ledger_status = _
-              ; occurrence_status = _
-              ; activation_outcome = _
-              }) ->
-          let base_fields =
-            [ "source", `String "keeper_reaction_ledger"
-            ; "keeper_name", `String keeper_name
-            ; "schedule_instance_id", `String schedule_instance_id
-            ; "schedule_id", `String schedule_id
-            ; "post_id", `String post_id
-            ; "stimulus", `String stimulus
-            ; ( "reaction_kind"
-              , `String
-                  (Keeper_reaction_ledger.reaction_kind_to_string
-                     Keeper_reaction_ledger.Turn_started) )
-            ; ( "stimulus_kind"
-              , `String
-                  (Keeper_reaction_ledger.stimulus_kind_to_string
-                     Keeper_reaction_ledger.Schedule_due) )
-            ]
-          in
-          (match stimulus_id with
-           | None ->
-             `Assoc
-               (("projection_status", `String "missing_stimulus_id")
-                :: ("reason", `String "dispatch receipt predates stimulus_id projection")
-                :: base_fields)
-           | Some stimulus_id ->
-             let evidence_fields
-                   (evidence : Keeper_reaction_ledger.event_queue_reaction_evidence)
-               =
-               [ "stimulus_id", `String stimulus_id
-                  ; "stimulus_seen", `Bool evidence.stimulus_seen
-                  ; "turn_started_seen", `Bool evidence.turn_started_seen
-                  ; "event_queue_ack_seen", `Bool evidence.event_queue_ack_seen
-                  ; ( "event_queue_cancelled_seen"
-                    , `Bool evidence.event_queue_cancelled_seen )
-                  ; "matched_record_count", `Int evidence.matched_record_count
-                  ; ( "quarantined_record_count"
-                    , `Int evidence.quarantined_record_count )
-                  ; ( "stimulus_recorded_at"
-                    , match evidence.stimulus_recorded_at with
-                      | None -> `Null
-                      | Some ts -> `Float ts )
-                  ; ( "stimulus_recorded_at_iso"
-                    , unix_iso_option_json evidence.stimulus_recorded_at )
-                  ; ( "turn_started_recorded_at"
-                    , match evidence.turn_started_recorded_at with
-                      | None -> `Null
-                      | Some ts -> `Float ts )
-                  ; ( "turn_started_recorded_at_iso"
-                    , unix_iso_option_json evidence.turn_started_recorded_at )
-                  ; ( "event_queue_ack_recorded_at"
-                    , match evidence.event_queue_ack_recorded_at with
-                      | None -> `Null
-                      | Some ts -> `Float ts )
-                  ; ( "event_queue_ack_recorded_at_iso"
-                    , unix_iso_option_json evidence.event_queue_ack_recorded_at )
-                  ; ( "event_queue_cancelled_recorded_at"
-                    , match evidence.event_queue_cancelled_recorded_at with
-                      | None -> `Null
-                      | Some ts -> `Float ts )
-                  ; ( "event_queue_cancelled_recorded_at_iso"
-                    , unix_iso_option_json
-                        evidence.event_queue_cancelled_recorded_at )
-                  ; ( "latest_recorded_at"
-                    , match evidence.latest_recorded_at with
-                      | None -> `Null
-                      | Some ts -> `Float ts )
-                  ; ( "latest_recorded_at_iso"
-                    , unix_iso_option_json evidence.latest_recorded_at )
-                  ]
-             in
-             let projection_json ?reason ?(extra_fields=[]) status evidence =
-               let reason_fields =
-                 match reason with
-                 | Some value -> [ "reason", `String value ]
-                 | None -> []
-               in
-               `Assoc
-                 (("projection_status", `String status)
-                  :: base_fields
-                  @ evidence_fields evidence
-                  @ reason_fields
-                  @ extra_fields)
-             in
-             (match
-                Keeper_reaction_ledger.event_queue_reaction_evidence_result
-                  ~base_path:config.Workspace_utils.base_path
-                  ~keeper_name
-                  ~stimulus_id
-              with
-              | Error Keeper_reaction_ledger.Evidence_invalid_stimulus_id ->
-                let error =
-                  Keeper_reaction_ledger.Evidence_invalid_stimulus_id
-                in
-                `Assoc
-                  (("projection_status", `String "invalid_stimulus_id")
-                   :: ( "reason"
-                      , `String
-                          (Keeper_reaction_ledger
-                           .event_queue_reaction_evidence_error_to_string
-                             error) )
-                   :: base_fields
-                   @ [ "stimulus_id", `String stimulus_id ])
-              | Error (Keeper_reaction_ledger.Evidence_read_error _ as error) ->
-                `Assoc
-                  (("projection_status", `String "read_error")
-                   :: ( "reason"
-                      , `String
-                          (Keeper_reaction_ledger
-                           .event_queue_reaction_evidence_error_to_string
-                             error) )
-                   :: base_fields
-                   @ [ "stimulus_id", `String stimulus_id ])
-              | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
-                let projection_status =
-                  if
-                    evidence.event_queue_ack_seen
-                    && evidence.event_queue_cancelled_seen
-                  then "conflicting_terminal_evidence"
-                  else if evidence.event_queue_cancelled_seen
-                  then "matched_terminal_cancelled"
-                  else if evidence.event_queue_ack_seen
-                  then "matched_consumed_ack"
-                  else if evidence.turn_started_seen
-                  then "matched_turn_started"
-                  else if evidence.stimulus_seen
-                  then "matched_stimulus"
-                  else "not_found"
-                in
-                projection_json projection_status evidence
-              | Ok
-                  (Keeper_reaction_ledger.Evidence_quarantined
-                    { evidence; first_reason }) ->
-                projection_json
-                  ~reason:
-                    (Keeper_reaction_ledger.row_quarantine_reason_to_string
-                       first_reason)
-                  "quarantined"
-                  evidence))))
-;;
-
-let schedule_signal_projection_limit = 20
-
-let schedule_signal_payload_kind_json (signal : Schedule_runner.wake_signal) =
-  match signal.payload with
-  | `Assoc fields ->
-    (match List.assoc_opt "kind" fields with
-     | Some (`String kind) -> `String kind
-     | _ -> `Null)
-  | _ -> `Null
-;;
-
-let schedule_signal_dashboard_json (signal : Schedule_runner.wake_signal) =
-  let kind = Schedule_runner.signal_kind_to_string signal.kind in
-  `Assoc
-    [ ( "occurrence_id"
-      , `String (Schedule_occurrence_id.to_string signal.occurrence_id) )
-    ; "kind", `String kind
-    ; "event_type", `String kind
-    ; "schedule_instance_id", `String signal.schedule_instance_id
-    ; "schedule_id", `String signal.schedule_id
-    ; "emitted_at", `Float signal.emitted_at
-    ; "emitted_at_iso", unix_iso_json signal.emitted_at
-    ; "due_at", `Float signal.due_at
-    ; "due_at_iso", unix_iso_json signal.due_at
-    ; "payload_digest", `String signal.payload_digest
-    ; "payload_kind", schedule_signal_payload_kind_json signal
-    ]
-;;
-
-type schedule_signal_projection_entry =
-  | Decoded_schedule_signal of Schedule_runner.wake_signal
-  | Schedule_signal_decode_error of int * string
-
-let schedule_signal_decode_error_dashboard_json ordinal error =
-  `Assoc [ "ordinal", `Int ordinal; "error", `String error ]
-;;
-
-let schedule_signal_rows_and_errors config limit =
-  let entries =
-    Dated_jsonl.read_recent
-      (Dated_jsonl.create ~base_dir:(Schedule_runner.signals_dir config) ())
-      limit
-    |> List.mapi (fun ordinal json ->
-      match Schedule_runner.wake_signal_of_yojson json with
-      | Ok signal -> Decoded_schedule_signal signal
-      | Error error -> Schedule_signal_decode_error (ordinal, error))
-  in
-  List.fold_right
-    (fun entry (signals, errors) ->
-       match entry with
-       | Decoded_schedule_signal signal -> signal :: signals, errors
-       | Schedule_signal_decode_error (ordinal, error) ->
-         signals, schedule_signal_decode_error_dashboard_json ordinal error :: errors)
-    entries
-    ([], [])
-;;
-
-let schedule_request_dashboard_json
-  ~now
-  ~config
-  ?last_wake
-  (request : Schedule_domain.schedule_request)
-  =
-  let next_due_at =
-    match request.status with
-    | Schedule_domain.Scheduled | Schedule_domain.Due -> Some request.due_at
-    | Schedule_domain.Running
-    | Schedule_domain.Succeeded
-    | Schedule_domain.Failed
-    | Schedule_domain.Cancelled
-    | Schedule_domain.Expired ->
-      None
-  in
-  let payload_target, payload_summary =
-    Schedule_payload_projection.target_summary request
-  in
-  `Assoc
-    [ "schedule_instance_id", `String request.schedule_instance_id
-    ; "schedule_id", `String request.schedule_id
-    ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
-    ; "source", `String (Schedule_domain.schedule_source_to_string request.source)
-    ; "requested_by", Schedule_domain.actor_to_yojson request.requested_by
-    ; "scheduled_by", Schedule_domain.actor_to_yojson request.scheduled_by
-    ; "requested_at", `Float request.requested_at
-    ; "requested_at_iso", unix_iso_json request.requested_at
-    ; "due_at", `Float request.due_at
-    ; "due_at_iso", unix_iso_json request.due_at
-    ; ( "next_due_at"
-      , match next_due_at with
-        | None -> `Null
-        | Some ts -> `Float ts )
-    ; "next_due_at_iso", unix_iso_option_json next_due_at
-    ; "expires_at", (match request.expires_at with None -> `Null | Some ts -> `Float ts)
-    ; "expires_at_iso", unix_iso_option_json request.expires_at
-    ; "recurrence", Schedule_domain.recurrence_to_yojson request.recurrence
-    ; "recurrence_kind", `String (Schedule_domain.recurrence_kind_to_string request.recurrence)
-    ; "recurrence_summary", `String (Schedule_domain.recurrence_summary request.recurrence)
-    ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
-    ; ( "payload_kind"
-      , match Schedule_payload_projection.kind request with
-        | None -> `Null
-        | Some kind -> `String kind )
-    ; "payload_support", `String (schedule_payload_support_status request)
-    ; ( "payload_dispatch_tool"
-        (* Display getter: use the non-logging result variant. The logging
-           [dispatch_tool_for_request] emits a WARN per unsupported row on every
-           dashboard poll (terminal accept-then-die rows → ~600 WARN/5000 log
-           lines); the genuine dispatch failure is logged once by the scheduler
-           runner, not here. *)
-      , match Schedule_payload_projection.dispatch_tool_for_request_result request with
-        | Ok tool_name -> `String tool_name
-        | Error _ -> `Null )
-    ; ( "payload_target"
-      , match payload_target with
-        | None -> `Null
-        | Some target -> `String target )
-    ; ( "payload_summary"
-      , match payload_summary with
-        | None -> `Null
-        | Some summary -> `String summary )
-    ; ( "last_wake"
-      , match last_wake with
-        | None -> `Null
-        | Some wake -> wake_record_dashboard_json wake )
-    ; "dispatch_receipt", schedule_dispatch_receipt_dashboard_json last_wake
-    ; "keeper_queue_evidence", schedule_keeper_queue_evidence_dashboard_json ~now config last_wake
-    ; ( "keeper_reaction_evidence"
-      , schedule_keeper_reaction_evidence_dashboard_json config last_wake )
-    ]
-;;
-
-let live_supported_evidence_ids_limit = 8
-
-let schedule_live_supported_non_terminal_evidence_json schedules =
-  let
-    ( supported_request_count
-    , supported_non_terminal_count
-    , supported_live_count
-    , supported_terminal_or_expired_count
-    , unsupported_request_count
-    , unknown_request_count
-    , terminal_or_expired_count
-    , matched_ids )
-    =
-    List.fold_left
-      (fun
-        ( supported_count
-        , supported_non_terminal
-        , supported_live
-        , supported_terminal_or_expired
-        , unsupported_count
-        , unknown_count
-        , terminal_or_expired
-        , ids )
-        (request : Schedule_domain.schedule_request)
-       ->
-         let live_row = schedule_request_active request in
-         let terminal_or_expired_row = not live_row in
-         let terminal_or_expired =
-           if terminal_or_expired_row then terminal_or_expired + 1 else terminal_or_expired
-         in
-         match schedule_payload_support request with
-         | Supported ->
-           let non_terminal = not (Schedule_domain.is_terminal request.status) in
-           let supported_non_terminal =
-             if non_terminal then supported_non_terminal + 1 else supported_non_terminal
-           in
-           if live_row
-           then (
-             let ids =
-               if List.length ids < live_supported_evidence_ids_limit
-               then request.schedule_id :: ids
-               else ids
-             in
-             ( supported_count + 1
-             , supported_non_terminal
-             , supported_live + 1
-             , supported_terminal_or_expired
-             , unsupported_count
-             , unknown_count
-             , terminal_or_expired
-             , ids ))
-           else
-             ( supported_count + 1
-             , supported_non_terminal
-             , supported_live
-             , supported_terminal_or_expired + 1
-             , unsupported_count
-             , unknown_count
-             , terminal_or_expired
-             , ids )
-         | Unsupported ->
-           ( supported_count
-           , supported_non_terminal
-           , supported_live
-           , supported_terminal_or_expired
-           , unsupported_count + 1
-           , unknown_count
-           , terminal_or_expired
-           , ids )
-         | Unknown ->
-           ( supported_count
-           , supported_non_terminal
-           , supported_live
-           , supported_terminal_or_expired
-           , unsupported_count
-           , unknown_count + 1
-           , terminal_or_expired
-           , ids ))
-      (0, 0, 0, 0, 0, 0, 0, [])
-      schedules
-  in
-  let request_count = List.length schedules in
-  let projection_status =
-    if supported_live_count > 0
-    then "matched_supported_non_terminal"
-    else if supported_request_count = 0 && request_count > 0
-    then "no_supported_payload_rows"
-    else "no_supported_non_terminal"
-  in
-  let reason =
-    if supported_live_count > 0
-    then "live schedule_store contains supported non-terminal rows"
-    else if supported_request_count = 0 && request_count > 0
-    then "current live schedule_store has no rows with a supported payload kind"
-    else "supported rows are currently terminal"
-  in
-  `Assoc
-    [ "schema", `String "masc.dashboard.scheduled_automation.live_supported_non_terminal_evidence.v1"
-    ; "source", `String "schedule_store"
-    ; "projection_status", `String projection_status
-    ; ( "criteria"
-      , `String
-          "payload_support=supported && status is non-terminal" )
-    ; "reason", `String reason
-    ; "request_count", `Int request_count
-    ; "supported_request_count", `Int supported_request_count
-    ; "supported_non_terminal_count", `Int supported_non_terminal_count
-    ; "supported_live_count", `Int supported_live_count
-    ; "supported_terminal_or_expired_count", `Int supported_terminal_or_expired_count
-    ; "unsupported_request_count", `Int unsupported_request_count
-    ; "unknown_request_count", `Int unknown_request_count
-    ; "terminal_or_expired_count", `Int terminal_or_expired_count
-    ; ( "matched_schedule_ids"
-      , `List (List.map (fun schedule_id -> `String schedule_id) (List.rev matched_ids)) )
-    ; "matched_schedule_id_limit", `Int live_supported_evidence_ids_limit
-    ]
-;;
-
-let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
-  (* Read-only projection; the schedule store remains the status SSOT. *)
-  let now = Unix.gettimeofday () in
-  let signal_rows, signal_errors =
-    schedule_signal_rows_and_errors config schedule_signal_projection_limit
-  in
-  let base_fields =
-    [ "schema", `String "masc.dashboard.scheduled_automation.v1"
-    ; "source", `String "schedule_store"
-    ; "generated_at", `String (Masc_domain.now_iso ())
-    ; "signal_source", `String "schedule_runner_signals"
-    ; "signal_count", `Int (List.length signal_rows)
-    ; "signal_error_count", `Int (List.length signal_errors)
-    ; "signal_limit", `Int schedule_signal_projection_limit
-    ; "signals", `List (List.map schedule_signal_dashboard_json signal_rows)
-    ; "signal_errors", `List signal_errors
-    ]
-  in
-  match Schedule_store.read_state_result config with
-  | Error err ->
-    let read_error =
-      "schedule store read failed: " ^ Schedule_store.read_error_to_string err
-    in
-    `Assoc
-      (base_fields
-       @ [ "status", `String "unknown"
-         ; "schedule_store_known", `Bool false
-         ; "schedule_store_read_error", `String read_error
-         ; "request_count", `Null
-         ; "request_limit", `Int schedule_projection_request_limit
-         ; "truncated", `Bool false
-         ; "counts", `Null
-         ; "payload_support", `Null
-         ; "live_supported_non_terminal_evidence", `Null
-         ; ( "fsm"
-           , `Assoc
-               [ "state", `String "unknown"
-               ; "active_count", `Null
-               ; "terminal_count", `Null
-               ; "next_due_at", `Null
-               ] )
-         ; "requests", `List []
-         ])
-  | Ok state ->
-    let schedules = state.schedules in
-    let active_count =
-      List.fold_left
-        (fun count request ->
-           if schedule_request_active request then count + 1 else count)
-        0 schedules
-    in
-    let terminal_count = List.length schedules - active_count in
-    let payload_support = schedule_payload_support_json schedules in
-    let sorted =
-      schedules
-      |> List.sort (fun left right ->
-        match
-          ( schedule_request_active left
-          , schedule_request_active right
-          , compare left.due_at right.due_at )
-        with
-        | true, false, _ -> -1
-        | false, true, _ -> 1
-        | _, _, due_cmp when due_cmp <> 0 -> due_cmp
-        | _ -> String.compare left.schedule_id right.schedule_id)
-    in
-    let request_rows = take schedule_projection_request_limit sorted in
-    `Assoc
-      (base_fields
-       @ [ "status", `String "ok"
-         ; "schedule_store_known", `Bool true
-         ; "schedule_store_read_error", `Null
-         ; "request_count", `Int (List.length schedules)
-         ; "request_limit", `Int schedule_projection_request_limit
-         ; "truncated", `Bool (List.length schedules > schedule_projection_request_limit)
-         ; "counts", schedule_counts_json schedules
-         ; "payload_support", payload_support
-         ; ( "live_supported_non_terminal_evidence"
-           , schedule_live_supported_non_terminal_evidence_json schedules )
-         ; ( "fsm"
-           , `Assoc
-               [ "state", `String (schedule_fsm_state schedules)
-               ; "active_count", `Int active_count
-               ; "terminal_count", `Int terminal_count
-               ; "next_due_at", unix_iso_option_json (schedule_next_due_at schedules)
-               ] )
-         ; ( "requests"
-           , `List
-               (List.map
-                  (fun (request : Schedule_domain.schedule_request) ->
-                     let last_wake =
-                       Schedule_store.last_wake_for_schedule_instance state
-                         ~schedule_instance_id:
-                           request.Schedule_domain.schedule_instance_id
-                         ~schedule_id:request.Schedule_domain.schedule_id
-                     in
-                     schedule_request_dashboard_json ~now ~config ?last_wake request)
-                  request_rows) )
-         ])
-;;
 
 let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojson.Safe.t =
   let actor_name = dashboard_actor_name actor in
@@ -3172,19 +2567,12 @@ let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojso
       ]
   in
   let attach_live_tools_projections json =
-    let scheduled_automation =
-      run Tools_compute (fun () -> scheduled_automation_dashboard_json config)
-    in
     let keeper_waiting_inventory =
       run Tools_compute (fun () -> Server_keeper_waiting_inventory.dashboard_json config)
     in
     match json with
     | `Assoc fields ->
-      `Assoc
-        (fields
-         @ [ "scheduled_automation", scheduled_automation
-           ; "keeper_waiting_inventory", keeper_waiting_inventory
-           ])
+      `Assoc (fields @ [ "keeper_waiting_inventory", keeper_waiting_inventory ])
     | other -> other
   in
   let cached =

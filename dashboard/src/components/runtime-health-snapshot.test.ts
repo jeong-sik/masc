@@ -109,7 +109,6 @@ function providerPayload(overrides: Record<string, unknown> = {}) {
             preserve_thinking: true,
             thinking_support: true,
             max_thinking_budget: 4096,
-            match_prefixes: ['Qwen/'],
             capabilities: {
               thinking_control_format: 'chat-template-kwargs',
               max_output_tokens: 8192,
@@ -198,15 +197,16 @@ function providerPayload(overrides: Record<string, unknown> = {}) {
 function probePayload(overrides: Record<string, unknown> = {}) {
   return {
     generated_at: '2026-06-06T07:24:08Z',
+    refreshed_at_unix: 1780730648,
+    cache_ttl_sec: 30,
+    cache_age_sec: 0,
     cache_hit: false,
+    refresh_state: 'served_stale',
     probe: {
       source: 'runtime.toml',
       status: 'reachable',
       checked_at: '2026-06-06T07:24:08Z',
       probe_ok: true,
-      server_url: 'https://runpod.example/v1',
-      ps_endpoint: 'https://runpod.example/v1/models',
-      generate_endpoint: 'https://runpod.example/v1/chat/completions',
       summary: {
         runtimes: 1,
         probed: 1,
@@ -219,16 +219,31 @@ function probePayload(overrides: Record<string, unknown> = {}) {
         {
           runtime_id: 'runpod_mtp.qwen',
           provider_id: 'runpod_mtp',
+          provider_display_name: 'RunPod MTP',
+          model_id: 'qwen',
           model_api_name: 'Qwen/Qwen3-32B',
+          protocol: 'openai-compatible-http',
+          runtime_kind: 'http',
+          transport: 'http',
+          auth_kind: 'env:RUNPOD_API_KEY',
           status: 'reachable',
           reachable: true,
           http_status: 200,
           latency_ms: 42,
+          model_count: 1,
+          content_type: 'application/json',
+          downloaded_bytes: 128,
           credential_required: true,
           auth_present: true,
+          endpoint_url: 'https://runpod.example/v1',
           probe_url: 'https://runpod.example/v1/models',
+          error: null,
+          checked_at: '2026-06-06T07:24:08Z',
         },
       ],
+      errors: [],
+      observations: ['runtime.toml provider reachability: 1 reachable, 0 failed, 0 skipped'],
+      limitations: ['Probe checks provider metadata endpoints only; it does not send a completion request.'],
       ...overrides,
     },
   }
@@ -376,7 +391,7 @@ describe('RuntimeHealthSnapshot', () => {
         status: 'degraded',
         degraded: true,
         operator_action_required: true,
-        terminal_reason: 'missing_oas_catalog_models',
+        terminal_reason: 'missing_agent_core_catalog_models',
         message: 'runtime catalog degraded boot',
         config_path: '/tmp/masc-test/runtime.toml',
         configured_default_runtime_id: 'glm-coding.glm-5-turbo',
@@ -402,7 +417,7 @@ describe('RuntimeHealthSnapshot', () => {
         dropped_media_failover: [],
         dropped_lane_candidates: [],
         dropped_lanes: [],
-        next_action: 'Add deployment rows to oas-models-overlay.toml (or upstream OAS).',
+        next_action: 'Add deployment rows to agent-core-models-overlay.toml (or upstream Agent Core).',
       },
     })
     const { RuntimeHealthSnapshot } = await import('./runtime-health-snapshot')
@@ -415,11 +430,11 @@ describe('RuntimeHealthSnapshot', () => {
 
     expect(container.textContent).toContain('startup')
     expect(container.textContent).toContain('2 catalog gaps')
-    expect(container.textContent).toContain('missing_oas_catalog_models')
+    expect(container.textContent).toContain('missing_agent_core_catalog_models')
     expect(container.textContent).toContain('effective default: glm-coding.glm-5-turbo')
     expect(container.textContent).toContain('disabled runtimes: mimo.mimo-v2.5-pro, mimo.mimo-v2.5')
     expect(container.textContent).toContain('missing catalog: mimo.mimo-v2.5-pro, mimo.mimo-v2.5')
-    expect(container.textContent).toContain('next: Add deployment rows to oas-models-overlay.toml (or upstream OAS).')
+    expect(container.textContent).toContain('next: Add deployment rows to agent-core-models-overlay.toml (or upstream Agent Core).')
   })
 
   it('uses force=1 when the operator clicks Live probe', async () => {

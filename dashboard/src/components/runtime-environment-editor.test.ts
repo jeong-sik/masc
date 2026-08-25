@@ -2,7 +2,10 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
+import type {
+  DashboardRuntimeProviderSnapshot,
+  RuntimeTomlEditorProtocol,
+} from '../api/dashboard'
 import { RuntimeEnvironmentEditor } from './runtime-environment-editor'
 import { keepers } from '../store'
 import type { Keeper } from '../types/core'
@@ -17,6 +20,16 @@ const runtimeCatalogMock = vi.hoisted(() => ({
   },
   loadRuntimeCatalog: vi.fn(),
 }))
+
+const providerProtocols: RuntimeTomlEditorProtocol[] = [
+  {
+    protocol: 'openai-compatible-http',
+    transport: 'endpoint',
+    semantics: 'http_provider',
+    credential_policy: 'optional',
+    requires_non_interactive: false,
+  },
+]
 
 vi.mock('../lib/runtime-catalog-resource', () => ({
   findRuntimeCatalogEntry: (
@@ -86,6 +99,7 @@ function mountEditor(
   render(
     html`<${RuntimeEnvironmentEditor}
       sourceText=${options.sourceText ?? sourceTextWithQuotedAssignments}
+      providerProtocols=${providerProtocols}
       section="assignments"
       onRoutingChange=${() => {}}
       onAssignmentChange=${options.onAssignmentChange ?? (() => {})}
@@ -188,7 +202,6 @@ describe('RuntimeEnvironmentEditor assignments section', () => {
 
 const sourceWithCapabilities = `[runtime]
 default = "ollama_cloud.minimax-m3"
-cross_verifier = "ollama_cloud.flash-nojson"
 
 [providers.ollama_cloud]
 display-name = "Ollama Cloud"
@@ -236,6 +249,7 @@ function mountSection(
   render(
     html`<${RuntimeEnvironmentEditor}
       sourceText=${sourceText}
+      providerProtocols=${providerProtocols}
       section=${section}
       onRoutingChange=${() => {}}
       onAssignmentChange=${() => {}}
@@ -257,7 +271,7 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
     expect(text).toContain('multimodal')
     // No effort/thinking-control-format chip: the models list has no runtime
     // binding to resolve a catalog entry against, and the raw
-    // thinking-control-format key is inert (OAS never reads it — masc #21521).
+    // thinking-control-format key is inert (Agent Core never reads it — masc #21521).
     expect(text).not.toContain('effort:')
 
     render(null, container)
@@ -291,10 +305,10 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
       supports_response_format_json: true,
       supports_structured_output: true,
       supports_multimodal_inputs: true,
-      source: 'oas-provider-config-model',
+      source: 'agent-core-provider-config-model',
       models: ['minimax-m3-api'],
       effective_capabilities: {
-        source: 'oas-provider-config-model',
+        source: 'agent-core-provider-config-model',
         max_context_tokens: 524288,
         max_output_tokens: 65536,
         supports_tools: true,
@@ -311,7 +325,7 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
         supported_models: ['minimax-m3-api'],
       },
       request_config: {
-        source: 'oas-provider-config-model',
+        source: 'agent-core-provider-config-model',
         provider_kind: 'openai_compat',
         request_path_targets_responses_api: true,
         enable_thinking: true,
@@ -337,7 +351,6 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
             supports_response_format_json: true,
             supports_structured_output: true,
           },
-          match_prefixes: [],
         },
         binding: {
           provider_id: 'ollama_cloud',
@@ -372,7 +385,7 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
     expect(text).toContain('Ollama Cloud')
     expect(text).toContain('model')
     expect(text).toContain('minimax-m3-api')
-    expect(text).toContain('source:oas-provider-config-model')
+    expect(text).toContain('source:agent-core-provider-config-model')
     expect(text).toContain('kind:openai_compat')
     expect(text).toContain('responses-api')
     expect(text).toContain('api:chat-completions')

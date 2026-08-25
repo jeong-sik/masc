@@ -4,32 +4,13 @@
 
 include Board_core_persist
 
-let rollback_fresh_comment store ~(comment : comment) ~(previous_post : post) =
-  with_lock store (fun () ->
-    let post_key = Post_id.to_string comment.post_id in
-    let comment_key = Comment_id.to_string comment.id in
-    Hashtbl.remove store.comments comment_key;
-    (match Hashtbl.find_opt store.comments_by_post post_key with
-     | None -> ()
-     | Some ids ->
-       (match List.filter (fun id -> not (String.equal id comment_key)) ids with
-        | [] -> Hashtbl.remove store.comments_by_post post_key
-        | filtered -> Hashtbl.replace store.comments_by_post post_key filtered));
-    (match Hashtbl.find_opt store.posts post_key with
-     | None -> ()
-     | Some current ->
-       let updated_at =
-         if Stdlib.Float.equal current.updated_at comment.created_at
-         then previous_post.updated_at
-         else current.updated_at
-       in
-       Hashtbl.replace
-         store.posts
-         post_key
-         { current with reply_count = max 0 (current.reply_count - 1); updated_at });
-    invalidate_post_caches store;
-    invalidate_comment_caches store)
-;;
+(* Every id parse and policy check in this module already returns
+   [(_, board_error) result] and the failure is always forwarded unchanged, so
+   the arms that spell that out by hand ([| Error e -> Error e]) are
+   [Result.bind] written out. Binding them keeps the happy path at one
+   indentation level. *)
+let ( let* ) = Result.bind
+
 
 let get_post store ~post_id : (post, board_error) Result.t =
   maybe_sweep store;
@@ -221,106 +202,129 @@ let add_comment_with_audience
   =
   maybe_sweep store;
   (* Validate all IDs first *)
-  match Post_id.of_string post_id with
-  | Error e -> Error e
-  | Ok pid ->
-    (match Agent_id.of_string author with
-     | Error e -> Error e
-     | Ok author_id ->
-       let parent_result =
-         match parent_id with
-         | None -> Ok None
-         | Some p ->
-           (match Comment_id.of_string p with
-            | Ok cid -> Ok (Some cid)
-            | Error e -> Error e)
-       in
-       (match parent_result with
-        | Error e -> Error e
-        | Ok parent_cid ->
-          (* Validate content *)
-          if ttl_hours < 0
-          then Error (Validation_error "ttl_hours must be non-negative")
-          else if String.length content = 0
-          then Error (Validation_error "Content cannot be empty")
-          else
-            match Board_audience.audience_for_comment ~content with
-            | Error _ as error -> error
-            | Ok audience ->
-            let board_result =
-              with_lock store (fun () ->
-                (* Verify post exists *)
-                match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
-                | None -> Error (Post_not_found post_id)
-                | Some post ->
-                  match
-                    validate_sub_board_post_policy_unlocked
-                      store
-                      ~author_id
-                      ~hearth:post.hearth
-                  with
-                      | Error e -> Error e
-                      | Ok () ->
-                    let now = Time_compat.now () in
-                    let comment =
-                      { id = Comment_id.generate ()
-                      ; post_id = pid
-                      ; parent_id = parent_cid
-                      ; author = author_id
-                      ; content
-                      ; created_at = now
-                      ; expires_at =
-                          (if ttl_hours = 0
-                           then 0.0
-                           else
-                             now
-                             +. (Stdlib.Float.of_int ttl_hours
-                                 *. Masc_time_constants.hour))
-                      ; votes_up = 0
-                      ; votes_down = 0
-                      }
-                    in
-                    Hashtbl.add store.comments (Comment_id.to_string comment.id) comment;
-                    (* Update comments_by_post index *)
-                    let post_key = Post_id.to_string pid in
-                    let existing =
-                      Hashtbl.find_opt store.comments_by_post post_key
-                      |> Option.value ~default:[]
-                    in
-                    Hashtbl.replace
-                      store.comments_by_post
-                      post_key
-                      (Comment_id.to_string comment.id :: existing);
-                    (* Update post reply count and updated_at *)
-                    Hashtbl.replace
-                      store.posts
-                      post_key
-                      { post with reply_count = post.reply_count + 1; updated_at = now };
-                    mark_dirty_post store post_key;
-                    mark_dirty_comment store (Comment_id.to_string comment.id);
-                    invalidate_post_caches store;
-                    invalidate_comment_caches store;
-                    Ok (comment, post, posts_jsonl_unlocked store))
-            in
-            match board_result with
-            | Ok (comment, previous_post, posts_jsonl) ->
-              (match
-                 with_persist_lock store (fun () ->
-                   match append_comment comment with
-                   | Error _ as e -> e
-                   | Ok () ->
-                     save_posts_jsonl posts_jsonl;
-                     Ok ())
-               with
-               | Ok () ->
-                 with_lock store (fun () ->
-                   mark_dirty_post store (Post_id.to_string comment.post_id);
-                   mark_dirty_comment store (Comment_id.to_string comment.id));
-                 Ok { comment; audience }
-               | Error e ->
-                 rollback_fresh_comment store ~comment ~previous_post;
-                 Error e)
-            | Error _ as e -> e))
+  let* pid = Post_id.of_string post_id in
+  let* author_id = Agent_id.of_string author in
+  let* parent_cid =
+    match parent_id with
+    | None -> Ok None
+    | Some p ->
+      let* cid = Comment_id.of_string p in
+      Ok (Some cid)
+  in
+  (* Validate content *)
+  if ttl_hours < 0
+  then Error (Validation_error "ttl_hours must be non-negative")
+  else if String.length content = 0
+  then Error (Validation_error "Content cannot be empty")
+  else
+    let* audience = Board_audience.audience_for_comment ~content in
+    (* Write-ahead (PR #28934 class, #28952): validate under [with_lock]
+       with no mutation, durably append outside any lock, then commit
+       under [with_lock] from a fresh read. The previous shape mutated
+       first and appended second, so a racing [flush_dirty] could
+       snapshot-write a comment whose durable append was about to fail
+       and be rolled back — reviving it from the snapshot on restart.
+       If staging rejects or the append fails, nothing was mutated, so
+       there is nothing to roll back. *)
+    let staged =
+      with_lock store (fun () ->
+        match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+        | None -> Error (Post_not_found post_id)
+        | Some post ->
+          (match
+             validate_sub_board_post_policy_unlocked
+               store
+               ~author_id
+               ~hearth:post.hearth
+           with
+           | Error e -> Error e
+           | Ok () ->
+             let now = Time_compat.now () in
+             Ok
+               { id = Comment_id.generate ()
+               ; post_id = pid
+               ; parent_id = parent_cid
+               ; author = author_id
+               ; content
+               ; created_at = now
+               ; expires_at =
+                   (if ttl_hours = 0
+                    then 0.0
+                    else
+                      now
+                      +. (Stdlib.Float.of_int ttl_hours
+                          *. Masc_time_constants.hour))
+               ; votes_up = 0
+               ; votes_down = 0
+               }))
+    in
+    (match staged with
+     | Error _ as e -> e
+     | Ok comment ->
+       (match with_persist_lock store (fun () -> append_comment comment) with
+        | Error _ as e -> e
+        | Ok () ->
+          let committed =
+            with_lock store (fun () ->
+              (* Commit from a fresh read: the post can change or vanish
+                 while the append is in flight; bumping the stale staged
+                 copy would clobber a concurrent unrelated mutation. The
+                 policy is re-checked for the same reason — it can flip
+                 while the append is in flight, and commit is the
+                 authoritative gate. *)
+              match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+              | None -> Error (Post_not_found post_id)
+              | Some post ->
+                (match
+                   validate_sub_board_post_policy_unlocked
+                     store
+                     ~author_id
+                     ~hearth:post.hearth
+                 with
+                 | Error _ as e -> e
+                 | Ok () ->
+                   let post_key = Post_id.to_string pid in
+                   let comment_key = Comment_id.to_string comment.id in
+                   Hashtbl.add store.comments comment_key comment;
+                   let existing =
+                     Hashtbl.find_opt store.comments_by_post post_key
+                     |> Option.value ~default:[]
+                   in
+                   Hashtbl.replace
+                     store.comments_by_post
+                     post_key
+                     (comment_key :: existing);
+                   Hashtbl.replace
+                     store.posts
+                     post_key
+                     { post with
+                       reply_count = post.reply_count + 1
+                     ; updated_at =
+                         (* Never move [updated_at] backwards: a
+                            concurrent mutation can land between staging
+                            and commit with a newer timestamp. *)
+                         Stdlib.Float.max post.updated_at comment.created_at
+                     };
+                   mark_dirty_post store post_key;
+                   mark_dirty_comment store comment_key;
+                   invalidate_post_caches store;
+                   invalidate_comment_caches store;
+                   Ok { comment; audience }))
+          in
+          (match committed with
+           | Ok _ as ok -> ok
+           | Error _ as e ->
+             (* The durable append won but the commit lost (post deleted
+                or policy flipped mid-append), so the appended row is an
+                orphan on disk. Rewrite the comments snapshot to dispose
+                of it — the snapshot cannot contain the orphan because
+                it never reached memory. If the rewrite itself fails,
+                the next successful snapshot rewrite disposes of the
+                row; until then reply-count recalculation on load skips
+                comments whose post is gone, so the orphan cannot
+                distort counts. *)
+             rewrite_comments store;
+             e)))
 ;;
 
 let add_comment store ~post_id ~author ~content ?parent_id ?ttl_hours () =
@@ -686,9 +690,10 @@ let append_sub_board (sb : sub_board) =
   try
     ensure_masc_dir ();
     let path = sub_boards_path () in
-    Fs_compat.append_file path (Yojson.Safe.to_string (sub_board_to_yojson sb) ^ "\n")
+    Fs_compat.append_file path (Yojson.Safe.to_string (sub_board_to_yojson sb) ^ "\n");
+    Ok ()
   with
-  | Sys_error msg -> record_persist_error ~where:"append_sub_board" msg
+  | Sys_error msg -> persist_io_error ~where:"append_sub_board" msg
 ;;
 
 let valid_slug_pattern = Re.Pcre.re {|^[a-z0-9][a-z0-9_-]*$|} |> Re.compile
@@ -722,7 +727,14 @@ let create_sub_board
       (match parse_sub_board_members ~owner:owner_id members with
        | Error e -> Error e
        | Ok members ->
-         let result =
+         (* Write-ahead (#29004, same class as #28934/#28952): validate
+            under [with_lock] with no mutation, durably append outside
+            the store mutex, then commit under [with_lock] from a fresh
+            read. The previous shape mutated first and swallowed the
+            append error ([record_persist_error] + unit): a failed
+            append still returned [Ok sb] whose sub-board existed only
+            in memory and vanished on restart. *)
+         let staged =
            with_lock store (fun () ->
              if Hashtbl.mem store.sub_boards_by_slug slug
              then
@@ -730,7 +742,7 @@ let create_sub_board
                  (Already_exists (Printf.sprintf "Sub-board slug %S already exists" slug))
              else (
                  let id = Sub_board_id.generate () in
-                 let sb =
+                 Ok
                    { id
                    ; slug
                    ; name = String.trim name
@@ -740,17 +752,38 @@ let create_sub_board
                    ; access
                    ; created_at = Time_compat.now ()
                    ; post_count = 0
-                   }
-                 in
-                 Hashtbl.replace store.sub_boards (Sub_board_id.to_string id) sb;
-                 Hashtbl.replace store.sub_boards_by_slug slug (Sub_board_id.to_string id);
-                 Ok sb))
+                   }))
          in
-         (match result with
+         (match staged with
+          | Error _ as e -> e
           | Ok sb ->
-            with_persist_lock store (fun () -> append_sub_board sb);
-            Ok sb
-          | Error _ as e -> e)))
+            (match with_persist_lock store (fun () -> append_sub_board sb) with
+             | Error _ as e -> e
+             | Ok () ->
+               let committed =
+                 with_lock store (fun () ->
+                   if Hashtbl.mem store.sub_boards_by_slug slug
+                   then
+                     Error
+                       (Already_exists
+                          (Printf.sprintf "Sub-board slug %S already exists" slug))
+                   else (
+                     Hashtbl.replace store.sub_boards (Sub_board_id.to_string sb.id) sb;
+                     Hashtbl.replace
+                       store.sub_boards_by_slug
+                       slug
+                       (Sub_board_id.to_string sb.id);
+                     Ok sb))
+               in
+               (match committed with
+                | Ok _ as ok -> ok
+                | Error _ as e ->
+                  (* Lost a same-slug race after the append: the orphan
+                     row would shadow the winner on restart (the loader
+                     is last-row-wins per slug), so rewrite the snapshot
+                     from the committed store now. *)
+                  rewrite_sub_boards store;
+                  e)))))
 ;;
 
 

@@ -3,6 +3,8 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_runtime_trust_timeline
 
+module Trust_core = Keeper_runtime_trust_snapshot_core
+
 (** Short-lived cache for [snapshot_json]. The result is expensive to compute
     (tail-reads decision log, tool-call log, receipts, approval audit, and
     pending approvals) and is requested repeatedly by dashboard renders. The
@@ -12,64 +14,78 @@ module Snapshot_cache = struct
   type key =
     { base_path : string
     ; keeper_name : string
-    ; generation : int
     ; last_turn_ts : float
     ; approval_queue_revision : int
     }
+
+  (* [Hashtbl.Make] rather than the polymorphic table: [last_turn_ts] is a
+     float, and the generic hash of a float is not the tool for a cache whose
+     whole job is to notice that a keeper moved. Naming each field here is
+     also what states that all five take part in the key -- with the generic
+     table the compiler could see no field being read at all. *)
+  module Key = struct
+    type t = key
+
+    let equal left right =
+      String.equal left.base_path right.base_path
+      && String.equal left.keeper_name right.keeper_name
+      && Float.equal left.last_turn_ts right.last_turn_ts
+      && Int.equal left.approval_queue_revision right.approval_queue_revision
+    ;;
+
+    (* [Float.equal] treats -0. and 0. as equal and NaN as equal to itself;
+       [Hashtbl.hash] normalises both the same way, so equal keys hash alike. *)
+    let hash key =
+      Hashtbl.hash
+        ( key.base_path
+        , key.keeper_name
+        , key.last_turn_ts
+        , key.approval_queue_revision )
+    ;;
+  end
+
+  module Table = Hashtbl.Make (Key)
 
   type entry =
     { value : Yojson.Safe.t
     ; expires_at : float
     }
 
-  let tbl : (key, entry) Hashtbl.t = Hashtbl.create 64
+  let tbl : entry Table.t = Table.create 64
   let mu = Stdlib.Mutex.create ()
   let ttl_sec = 0.5
   let max_size = 256
 
   let clear_expired ~now =
     let expired =
-      Hashtbl.fold (fun k e acc -> if e.expires_at <= now then k :: acc else acc) tbl []
+      Table.fold (fun k e acc -> if e.expires_at <= now then k :: acc else acc) tbl []
     in
-    List.iter (Hashtbl.remove tbl) expired
-
-  let clear () =
-    Stdlib.Mutex.protect mu (fun () -> Hashtbl.clear tbl)
+    List.iter (Table.remove tbl) expired
 
   let get ~now key =
     Stdlib.Mutex.protect mu (fun () ->
-        match Hashtbl.find_opt tbl key with
+        match Table.find_opt tbl key with
         | Some entry when entry.expires_at > now -> Some entry.value
         | _ -> None)
 
   let set ~now key value =
     Stdlib.Mutex.protect mu (fun () ->
         clear_expired ~now;
-        if Hashtbl.length tbl >= max_size
+        if Table.length tbl >= max_size
         then (
           (* Cap memory: drop expired entries, and if still full clear the
              whole table rather than keeping stale entries. *)
           clear_expired ~now;
-          if Hashtbl.length tbl >= max_size then Hashtbl.clear tbl);
-        Hashtbl.replace tbl key { value; expires_at = now +. ttl_sec })
+          if Table.length tbl >= max_size then Table.clear tbl);
+        Table.replace tbl key { value; expires_at = now +. ttl_sec })
 end
 
 module Completion_contract_result = Keeper_completion_contract_result_label
 
-let completion_contract_result_from_receipt receipt =
-  match json_string_opt_member "completion_contract_result" receipt with
-  | Some raw -> Completion_contract_result.of_string raw
-  | None -> None
-;;
-
 let terminal_reason_from_decision json =
   match json_member "terminal_reason" json with
   | `Assoc _ as terminal_reason -> Keeper_turn_terminal.of_json terminal_reason
-  | _ ->
-      Option.map
-        (fun code ->
-          Keeper_turn_terminal.of_code ~source:"decision_log" code)
-        (json_string_opt_member "terminal_reason_code" json)
+  | _ -> None
 
 let terminal_reason_from_receipt receipt =
   Option.map
@@ -92,7 +108,7 @@ let disposition_of_typed_runtime_blocker_class blocker_class =
   match blocker_class with
   | Keeper_meta_contract.Stale_turn_timeout ->
       Keeper_turn_disposition.Turn_wall_clock_timeout
-  | Keeper_meta_contract.Sdk_input_required ->
+  | Keeper_meta_contract.Agent_core_input_required ->
       Keeper_turn_disposition.Input_required
   | Keeper_meta_contract.Runtime_exhausted _ ->
       Keeper_turn_disposition.Provider_error
@@ -103,17 +119,34 @@ let disposition_of_typed_runtime_blocker_class blocker_class =
   | Keeper_meta_contract.Fiber_unresolved ->
       Keeper_turn_disposition.Provider_error
         Keeper_turn_terminal_code.Fiber_unresolved
-  | Keeper_meta_contract.Sdk_context_window_exceeded
-  | Keeper_meta_contract.Sdk_unrecognized_stop_reason
-  | Keeper_meta_contract.Sdk_guardrail_violation
-  | Keeper_meta_contract.Sdk_tripwire_violation ->
+  | Keeper_meta_contract.Agent_core_context_window_exceeded
+  | Keeper_meta_contract.Agent_core_unrecognized_stop_reason
+  | Keeper_meta_contract.Agent_core_guardrail_violation
+  | Keeper_meta_contract.Agent_core_tripwire_violation
+  | Keeper_meta_contract.Internal_unhandled_exception
+  | Keeper_meta_contract.Internal_bridge_exception
+  | Keeper_meta_contract.Internal_contract_rejected
+  | Keeper_meta_contract.Incomplete_tool_transcript
+  | Keeper_meta_contract.Terminal_effect_failed
+  | Keeper_meta_contract.Provider_attempt_effect_fenced
+  | Keeper_meta_contract.Tool_correction_lost
+  | Keeper_meta_contract.Receipt_persistence_failed
+  | Keeper_meta_contract.Gate_replay_repair_required ->
     Keeper_turn_disposition.Provider_error
-      (Keeper_turn_terminal_code.Sdk_error raw_blocker_class)
+      (Keeper_turn_terminal_code.of_core_error_wire raw_blocker_class)
 
 let disposition_of_runtime_blocker_class raw_blocker_class =
   match Keeper_meta_contract.blocker_class_of_serialized_string raw_blocker_class with
   | Some blocker_class -> disposition_of_typed_runtime_blocker_class blocker_class
-  | None -> Keeper_turn_disposition.Unknown { raw_error = "unknown_error" }
+  | None ->
+    (* Keep the class that did not decode. Replacing it with "unknown_error"
+       made every unrecognised blocker look alike on the alert and in the
+       operator broadcast, and [Keeper_status_bridge_blocker] emits three
+       classes this decoder does not know -- heartbeat_failures, turn_failures,
+       stale_termination_storm -- so the erasure is what production hits, not a
+       corrupt-state edge (#25797). [Unknown] carries no typed authority either
+       way; what it carries is the string a reader needs to see. *)
+    Keeper_turn_disposition.Unknown { raw_error = raw_blocker_class }
 
 let terminal_reason_from_runtime_blocker_fields runtime_blocker_fields =
   match assoc_string_opt "runtime_blocker_class" runtime_blocker_fields with
@@ -162,13 +195,14 @@ let current_receipt_for_runtime_state ~meta ~runtime_blocker_fields
   then None
   else latest_receipt
 
-let runtime_blocker_timeline_ts ~meta ~runtime_blocker_fields latest_receipt =
+let runtime_blocker_timeline_ts ~observed_at_unix ~meta
+    ~runtime_blocker_fields latest_receipt =
   if
     runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
       latest_receipt
     && meta.runtime.usage.last_turn_ts > 0.0
   then meta.runtime.usage.last_turn_ts
-  else Time_compat.now ()
+  else observed_at_unix
 
 let latest_terminal_reason_opt ~meta ~runtime_blocker_fields ~latest_decision
     ~latest_receipt =
@@ -264,12 +298,6 @@ let pending_approval_projection_with_reader
         error = Some error;
       }
 
-let pending_approval_projection ~base_path ~keeper_name =
-  pending_approval_projection_with_reader
-    ~read_pending:
-      Keeper_approval_queue.list_pending_dashboard_json_for_workspace
-    ~base_path ~keeper_name
-
 let approval_queue_attention_of_projection
       ~base_path
       (projection : pending_approval_projection)
@@ -283,54 +311,6 @@ let approval_queue_attention_of_projection
       ; reason = "approval queue projection has no current state"
       }
 
-let disposition_of_snapshot ~pending_approval_projection
-    ~runtime_blocker_fields =
-  let blocker_class = assoc_string_opt "runtime_blocker_class" runtime_blocker_fields in
-  let blocker_summary =
-    assoc_string_opt "runtime_blocker_summary" runtime_blocker_fields
-  in
-  let sandbox_summary =
-    match blocker_summary with
-    | Some summary when String_util.contains_substring_ci summary "sandbox" ->
-        Some ("Alert", "sandbox_violation")
-    | _ -> None
-  in
-  match pending_approval_projection.count with
-  | None -> ("Alert", "approval_queue_unavailable")
-  | Some pending_approval_count when pending_approval_count > 0 ->
-      ("Alert", "pending_operator_decision")
-  | Some _ ->
-    match blocker_class with
-    | Some raw_blocker_class -> (
-      match
-        Keeper_meta_contract.blocker_class_of_serialized_string raw_blocker_class
-      with
-      | Some (Keeper_meta_contract.Runtime_exhausted _) ->
-          ("Alert", "runtime_exhausted")
-      | Some _ | None -> (
-        match sandbox_summary with
-        | Some disposition -> disposition
-        | None -> ("Alert", "critical_block")))
-    | None -> (
-      match sandbox_summary with
-      | Some disposition -> disposition
-      | None -> ("Pass", "healthy"))
-
-let operator_disposition_of_display ~disposition ~disposition_reason =
-  match disposition with
-  | "Pass" -> ("pass", disposition_reason)
-  | "Blocked" | "Pause" -> ("fail_open_next_runtime", disposition_reason)
-  | "Alert" | _ -> ("unknown", disposition_reason)
-
-let display_disposition_of_operator ~operator_disposition
-    ~operator_disposition_reason =
-  Keeper_operator_disposition_display.of_wire ~operator_disposition
-    ~operator_disposition_reason
-
-let display_disposition_requires_attention = function
-  | "Blocked" | "Pause" | "Alert" -> true
-  | _ -> false
-
 let receipt_operator_disposition receipt =
   match
     ( json_string_opt_member "operator_disposition" receipt,
@@ -340,80 +320,54 @@ let receipt_operator_disposition receipt =
   | Some disposition, None -> Some (disposition, "")
   | None, _ -> None
 
-let effective_disposition_fields ~approval_queue_available
-    ~fallback_disposition ~fallback_reason
-    latest_receipt =
-  match
-    if approval_queue_available
-    then Option.bind latest_receipt receipt_operator_disposition
-    else None
-  with
-  | Some (operator_disposition, operator_disposition_reason) ->
-      let disposition, disposition_reason =
-        display_disposition_of_operator ~operator_disposition
-          ~operator_disposition_reason
-      in
-      ( disposition,
-        disposition_reason,
-        operator_disposition,
-        operator_disposition_reason )
-  | None ->
-      let operator_disposition, operator_disposition_reason =
-        operator_disposition_of_display ~disposition:fallback_disposition
-          ~disposition_reason:fallback_reason
-      in
-      ( fallback_disposition,
-        fallback_reason,
-        operator_disposition,
-        operator_disposition_reason )
+let approval_queue_state_of_projection
+    (projection : pending_approval_projection) =
+  match projection.count, projection.error with
+  | Some count, None -> Trust_core.Approval_queue_available count
+  | _, Some _ | None, None -> Trust_core.Approval_queue_unavailable
+;;
 
-let attention_reason_or_disposition ~needs_attention ~disposition_reason
-    attention_fields =
-  match assoc_string_opt "attention_reason" attention_fields with
-  | Some _ as value -> value
-  | None when needs_attention -> Some disposition_reason
-  | None -> None
+let trust_model_of_observations ~pending_approval_projection
+    ~runtime_blocker_fields ~latest_receipt ~latest_next_action
+    ~attention_fields =
+  Trust_core.decide
+    { approval_queue =
+        approval_queue_state_of_projection pending_approval_projection
+    ; runtime_blocker_class =
+        assoc_string_opt "runtime_blocker_class" runtime_blocker_fields
+    ; runtime_blocker_summary =
+        assoc_string_opt "runtime_blocker_summary" runtime_blocker_fields
+    ; receipt_operator_disposition =
+        Option.bind latest_receipt receipt_operator_disposition
+    ; attention_needs_attention =
+        assoc_bool_default "needs_attention" ~default:false attention_fields
+    ; attention_reason = assoc_string_opt "attention_reason" attention_fields
+    ; attention_next_human_action =
+        assoc_string_opt "next_human_action" attention_fields
+    ; terminal_next_human_action = latest_next_action
+    }
+;;
 
-let next_human_action_or_terminal ~needs_attention ~latest_next_action
-    attention_fields =
-  match assoc_string_opt "next_human_action" attention_fields with
-  | Some _ as value -> value
-  | None when needs_attention -> latest_next_action
-  | None -> None
-
-let disposition_fields_json ~(config : Workspace.config) ~(meta : keeper_meta) :
-    Yojson.Safe.t =
-  let pending_approval_projection =
-    pending_approval_projection ~base_path:config.base_path
-      ~keeper_name:meta.name
-  in
-  let runtime_blocker_fields =
-    Keeper_status_bridge.runtime_blocker_fields_json config meta
-  in
-  let disposition, disposition_reason =
-    disposition_of_snapshot ~pending_approval_projection
-      ~runtime_blocker_fields
-  in
-  let latest_receipt = Keeper_execution_receipt.latest_json config meta.name in
-  let disposition, disposition_reason, _, _ =
-    effective_disposition_fields
-      ~approval_queue_available:(Option.is_none pending_approval_projection.error)
-      ~fallback_disposition:disposition
-      ~fallback_reason:disposition_reason latest_receipt
-  in
-  `Assoc
-    [
-      ("disposition", `String disposition);
-      ("disposition_reason", `String disposition_reason);
-    ]
+let trust_model_json_fields (model : Trust_core.t) =
+  [ "disposition", `String model.disposition
+  ; "disposition_reason", `String model.disposition_reason
+  ; "operator_disposition", `String model.operator_disposition
+  ; "operator_disposition_reason", `String model.operator_disposition_reason
+  ; "needs_attention", `Bool model.needs_attention
+  ; "attention_reason", Json_util.string_opt_to_json model.attention_reason
+  ; "next_human_action", Json_util.string_opt_to_json model.next_human_action
+  ]
+;;
 
 let decision_log_persistence_surface = "keeper_runtime_trust_decision_log"
 
 let report_decision_log_read_drop ~reason ~path ~detail =
+
+  let reason_wire = Read_drop_reason.to_wire reason in
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
       Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
-        ~labels:[("surface", decision_log_persistence_surface); ("reason", reason)]
+        ~labels:[("surface", decision_log_persistence_surface); ("reason", reason_wire)]
         ())
     ~surface:decision_log_persistence_surface
     ~reason
@@ -453,18 +407,18 @@ let latest_decision_json ~(config : Workspace.config) ~(keeper_name : string) :
                let reason =
                  match (index, completion) with
                  | 0, Keeper_memory.Partial_last_line ->
-                     Safe_ops.persistence_read_drop_reason_tail_partial_write
+                     Read_drop_reason.Tail_partial_write
                  | 0, Keeper_memory.Complete
                  | _, Keeper_memory.Partial_last_line
                  | _, Keeper_memory.Complete ->
-                     Safe_ops.persistence_read_drop_reason_entry_load_error
+                     Read_drop_reason.Entry_load_error
                in
                report_decision_log_read_drop ~reason ~path ~detail;
                None
            | (`Assoc _ as json) -> Some json
            | _ ->
                report_decision_log_read_drop
-                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~reason:Read_drop_reason.Invalid_payload
                  ~path
                  ~detail:"decision log row is not a JSON object";
                None)
@@ -575,11 +529,12 @@ let approval_state_json ~pending_approval_projection
         | None -> `Null );
     ]
 
-let approval_queue_unavailable_timeline_event pending_approval_projection =
+let approval_queue_unavailable_timeline_event ~observed_at_unix
+    pending_approval_projection =
   match pending_approval_projection.error with
   | None -> None
   | Some (error : Keeper_approval_queue.storage_error) ->
-      let ts_unix = Time_compat.now () in
+      let ts_unix = observed_at_unix in
       Some
         (`Assoc
           [
@@ -694,11 +649,12 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
         Json_util.string_opt_to_json (Option.bind latest_receipt (json_string_opt_member "ended_at")) );
     ]
 
-let latest_causal_event_summary ~meta ~latest_decision ~latest_receipt
-    ~latest_tool_call ~latest_approval_audit ~runtime_blocker_fields
-    ~next_human_action =
-  let observed_at_unix =
-    runtime_blocker_timeline_ts ~meta ~runtime_blocker_fields latest_receipt
+let latest_causal_event_summary ~observed_at_unix ~meta ~latest_decision
+    ~latest_receipt ~latest_tool_call ~latest_approval_audit
+    ~runtime_blocker_fields ~next_human_action =
+  let blocker_ts_unix =
+    runtime_blocker_timeline_ts ~observed_at_unix ~meta
+      ~runtime_blocker_fields latest_receipt
   in
   let blocker_observation_only =
     not
@@ -706,7 +662,6 @@ let latest_causal_event_summary ~meta ~latest_decision ~latest_receipt
          latest_receipt)
   in
   let task_id = Keeper_runtime_contract.current_task_id_opt meta in
-  let goal_ids = meta.active_goal_ids in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   [
     terminal_reason_timeline_event ~latest_decision ~latest_receipt;
@@ -714,8 +669,9 @@ let latest_causal_event_summary ~meta ~latest_decision ~latest_receipt
     Option.bind latest_receipt receipt_timeline_event;
     Option.bind latest_tool_call tool_call_timeline_event;
     Option.bind latest_approval_audit approval_event_timeline_event;
-    blocker_timeline_event ~ts_unix:observed_at_unix ~observed_at_unix
-      ~runtime_blocker_fields ?task_id ~goal_ids
+    blocker_timeline_event ~ts_unix:blocker_ts_unix
+      ~observed_at_unix:blocker_ts_unix
+      ~runtime_blocker_fields ?task_id
       ~trace_id ~next_human_action
       ~observation_only:blocker_observation_only ();
   ]
@@ -723,40 +679,58 @@ let latest_causal_event_summary ~meta ~latest_decision ~latest_receipt
   |> sort_timeline_events
   |> fun events -> latest_causal_from_timeline (`List events)
 
-let summary_json ~(config : Workspace.config) ~(meta : keeper_meta) =
+let approval_audit_rows_or_fail = function
+  | Ok rows -> rows
+  | Error error ->
+    failwith
+      ("approval audit unavailable: "
+       ^ Keeper_approval.Audit.read_error_to_string error)
+;;
+
+type raw_observations =
+  { latest_decision : Yojson.Safe.t option
+  ; latest_tool_call : Yojson.Safe.t option
+  ; latest_receipt : Yojson.Safe.t option
+  ; latest_approval_audit : Yojson.Safe.t option
+  ; pending_approval_projection : pending_approval_projection
+  ; runtime_blocker_fields : (string * Yojson.Safe.t) list
+  ; attention_fields : (string * Yojson.Safe.t) list
+  ; observed_at_unix : float
+  }
+
+type raw_snapshot =
+  { observations : raw_observations
+  ; registry_entry : Keeper_registry.registry_entry option
+  ; runtime_contract : Yojson.Safe.t
+  ; recent_tool_call_rows : Yojson.Safe.t list
+  ; recent_approval_audit_rows : Yojson.Safe.t list
+  ; recent_transition_rows : Yojson.Safe.t list
+  }
+
+let collect_raw_observations_with_pending_reader
+    ~(read_pending :
+       base_path:string ->
+       (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result)
+    ~approval_audit_limit ~(config : Workspace.config) ~(meta : keeper_meta) =
   let latest_decision = latest_decision_json ~config ~keeper_name:meta.name in
   let latest_tool_call = latest_tool_call_json ~keeper_name:meta.name in
   let latest_receipt = latest_receipt_json ~config ~keeper_name:meta.name in
+  let recent_approval_audit_rows =
+    Keeper_approval.Audit.read_recent ~base_path:config.base_path
+      ~keeper_name:meta.name ~n:approval_audit_limit ()
+    |> approval_audit_rows_or_fail
+  in
   let latest_approval_audit =
-    match
-      Keeper_approval_queue.read_recent_audit ~base_path:config.base_path
-        ~keeper_name:meta.name ~n:1 ()
-    with
+    match recent_approval_audit_rows with
     | json :: _ -> Some json
     | [] -> None
   in
   let pending_approval_projection =
-    pending_approval_projection ~base_path:config.base_path
-      ~keeper_name:meta.name
+    pending_approval_projection_with_reader ~read_pending
+      ~base_path:config.base_path ~keeper_name:meta.name
   in
   let runtime_blocker_fields =
     Keeper_status_bridge.runtime_blocker_fields_json config meta
-  in
-  let latest_receipt_for_runtime_state =
-    current_receipt_for_runtime_state ~meta ~runtime_blocker_fields
-      latest_receipt
-  in
-  let latest_terminal_reason =
-    latest_terminal_reason_opt ~meta ~runtime_blocker_fields ~latest_decision
-      ~latest_receipt
-  in
-  let latest_terminal_reason_json =
-    latest_terminal_reason
-    |> Option.map Keeper_turn_terminal.to_json
-    |> Option.value ~default:`Null
-  in
-  let latest_next_action =
-    Option.bind latest_terminal_reason (fun reason -> reason.next_action)
   in
   let attention_fields =
     Keeper_status_bridge.attention_fields_json_with_approval_queue
@@ -766,79 +740,103 @@ let summary_json ~(config : Workspace.config) ~(meta : keeper_meta) =
          ~base_path:config.base_path
          pending_approval_projection)
   in
-  let fallback_disposition, fallback_disposition_reason =
-    disposition_of_snapshot ~pending_approval_projection
-      ~runtime_blocker_fields
+  let observed_at_unix = Time_compat.now () in
+  ( { latest_decision
+    ; latest_tool_call
+    ; latest_receipt
+    ; latest_approval_audit
+    ; pending_approval_projection
+    ; runtime_blocker_fields
+    ; attention_fields
+    ; observed_at_unix
+    }
+  , recent_approval_audit_rows )
+;;
+
+let collect_summary_raw ~(config : Workspace.config) ~(meta : keeper_meta) =
+  collect_raw_observations_with_pending_reader
+    ~read_pending:
+      Keeper_approval_queue.list_pending_dashboard_json_for_workspace
+    ~approval_audit_limit:1 ~config ~meta
+  |> fst
+;;
+
+let summary_json_of_raw ~(meta : keeper_meta) (raw : raw_observations) =
+  let latest_receipt_for_runtime_state =
+    current_receipt_for_runtime_state ~meta
+      ~runtime_blocker_fields:raw.runtime_blocker_fields raw.latest_receipt
   in
-  let disposition, disposition_reason, operator_disposition,
-      operator_disposition_reason =
-    effective_disposition_fields ~fallback_disposition
-      ~approval_queue_available:(Option.is_none pending_approval_projection.error)
-      ~fallback_reason:fallback_disposition_reason
-      latest_receipt_for_runtime_state
+  let latest_terminal_reason =
+    latest_terminal_reason_opt ~meta
+      ~runtime_blocker_fields:raw.runtime_blocker_fields
+      ~latest_decision:raw.latest_decision ~latest_receipt:raw.latest_receipt
   in
-  let needs_attention =
-    assoc_bool_default "needs_attention" ~default:false attention_fields
-    || display_disposition_requires_attention disposition
+  let latest_terminal_reason_json =
+    latest_terminal_reason
+    |> Option.map Keeper_turn_terminal.to_json
+    |> Option.value ~default:`Null
   in
-  let attention_reason =
-    attention_reason_or_disposition ~needs_attention ~disposition_reason
-      attention_fields
+  let latest_next_action =
+    Option.bind latest_terminal_reason (fun reason -> reason.next_action)
   in
-  let next_human_action =
-    next_human_action_or_terminal ~needs_attention ~latest_next_action
-      attention_fields
+  let trust_model =
+    trust_model_of_observations
+      ~pending_approval_projection:raw.pending_approval_projection
+      ~runtime_blocker_fields:raw.runtime_blocker_fields
+      ~latest_receipt:latest_receipt_for_runtime_state
+      ~latest_next_action ~attention_fields:raw.attention_fields
   in
   let execution_summary =
-    execution_summary_json ~meta ~latest_receipt
+    execution_summary_json ~meta ~latest_receipt:raw.latest_receipt
   in
   let approval_state =
-    approval_state_json ~pending_approval_projection ~latest_approval_audit
+    approval_state_json
+      ~pending_approval_projection:raw.pending_approval_projection
+      ~latest_approval_audit:raw.latest_approval_audit
   in
   let latest_causal_event =
     match
-      approval_queue_unavailable_timeline_event pending_approval_projection
+      approval_queue_unavailable_timeline_event
+        ~observed_at_unix:raw.observed_at_unix
+        raw.pending_approval_projection
     with
     | Some event -> event
     | None ->
-        latest_causal_event_summary ~meta ~latest_decision ~latest_receipt
-          ~latest_tool_call ~latest_approval_audit
-          ~runtime_blocker_fields ~next_human_action
+        latest_causal_event_summary ~observed_at_unix:raw.observed_at_unix
+          ~meta ~latest_decision:raw.latest_decision
+          ~latest_receipt:raw.latest_receipt
+          ~latest_tool_call:raw.latest_tool_call
+          ~latest_approval_audit:raw.latest_approval_audit
+          ~runtime_blocker_fields:raw.runtime_blocker_fields
+          ~next_human_action:trust_model.next_human_action
   in
   `Assoc
-    [
-      ("disposition", `String disposition);
-      ("disposition_reason", `String disposition_reason);
-      ("operator_disposition", `String operator_disposition);
-      ("operator_disposition_reason", `String operator_disposition_reason);
-      ("needs_attention", `Bool needs_attention);
-      ("attention_reason", Json_util.string_opt_to_json attention_reason);
-      ("next_human_action", Json_util.string_opt_to_json next_human_action);
-      ("approval_queue_state", pending_approval_projection.state);
-      ("approval", approval_state);
-      ("execution", execution_summary);
-      ("latest_terminal_reason", latest_terminal_reason_json);
-      ("latest_next_action", Json_util.string_opt_to_json latest_next_action);
-      ("latest_causal_event", latest_causal_event);
-    ]
+    (trust_model_json_fields trust_model
+     @ [ ("approval_queue_state", raw.pending_approval_projection.state)
+       ; ("approval", approval_state)
+       ; ("execution", execution_summary)
+       ; ("latest_terminal_reason", latest_terminal_reason_json)
+       ; ("latest_next_action", Json_util.string_opt_to_json latest_next_action)
+       ; ("latest_causal_event", latest_causal_event)
+       ])
 
-let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
-    ~latest_tool_call ~latest_approval_audit ~runtime_blocker_fields
-    ~next_human_action ~pending_approval_projection =
+let summary_json ~(config : Workspace.config) ~(meta : keeper_meta) =
+  collect_summary_raw ~config ~meta |> summary_json_of_raw ~meta
+;;
+
+let causal_timeline_json ~observed_at_unix ~recent_tool_call_rows
+    ~recent_approval_audit_rows ~recent_transition_rows ~meta
+    ~latest_decision ~latest_receipt ~latest_tool_call
+    ~latest_approval_audit ~runtime_blocker_fields ~next_human_action
+    ~pending_approval_projection =
   let tool_events =
-    Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:6 ()
-    |> List.filter_map tool_call_timeline_event
+    List.filter_map tool_call_timeline_event recent_tool_call_rows
   in
   let approval_events =
-    Keeper_approval_queue.read_recent_audit ~base_path ~keeper_name:meta.name
-      ~n:8 ()
-    |> List.filter_map approval_event_timeline_event
+    List.filter_map approval_event_timeline_event recent_approval_audit_rows
   in
   let transition_events =
-    match Keeper_transition_audit.recent_transitions_json
-            ~keeper_name:meta.name ~limit:6 with
-    | `List items -> items |> List.filter_map transition_timeline_event
-    | _ -> []
+    List.filter_map transition_timeline_event recent_transition_rows
   in
   let decision_events =
     (match latest_decision with
@@ -858,10 +856,10 @@ let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
   in
   let blocker_events =
     let task_id = Keeper_runtime_contract.current_task_id_opt meta in
-    let goal_ids = meta.active_goal_ids in
     let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-    let observed_at_unix =
-      runtime_blocker_timeline_ts ~meta ~runtime_blocker_fields latest_receipt
+    let blocker_ts_unix =
+      runtime_blocker_timeline_ts ~observed_at_unix ~meta
+        ~runtime_blocker_fields latest_receipt
     in
     let blocker_observation_only =
       not
@@ -869,8 +867,9 @@ let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
            latest_receipt)
     in
     [
-      blocker_timeline_event ~ts_unix:observed_at_unix ~observed_at_unix
-        ~runtime_blocker_fields ?task_id ~goal_ids
+      blocker_timeline_event ~ts_unix:blocker_ts_unix
+        ~observed_at_unix:blocker_ts_unix
+        ~runtime_blocker_fields ?task_id
         ~trace_id ~next_human_action
         ~observation_only:blocker_observation_only ()
     ]
@@ -907,7 +906,7 @@ let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
   let approval_queue_state_events =
     List.filter_map Fun.id
       [
-        approval_queue_unavailable_timeline_event
+        approval_queue_unavailable_timeline_event ~observed_at_unix
           pending_approval_projection;
       ]
   in
@@ -920,7 +919,7 @@ let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
   |> take 12
   |> fun items -> `List items
 
-let snapshot_json_inner_with_pending_reader
+let collect_raw_snapshot_with_pending_reader
     ~(read_pending :
        base_path:string ->
        (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result)
@@ -928,31 +927,45 @@ let snapshot_json_inner_with_pending_reader
   let registry_entry =
     Keeper_registry.get ~base_path:config.base_path meta.name
   in
-  let latest_decision = latest_decision_json ~config ~keeper_name:meta.name in
-  let latest_tool_call = latest_tool_call_json ~keeper_name:meta.name in
-  let latest_receipt = latest_receipt_json ~config ~keeper_name:meta.name in
-  let latest_approval_audit =
+  let runtime_contract =
+    Keeper_runtime_contract.runtime_observability_contract_json ~config meta
+  in
+  let recent_tool_call_rows =
+    Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:6 ()
+  in
+  let recent_transition_rows =
     match
-      Keeper_approval_queue.read_recent_audit ~base_path:config.base_path
-        ~keeper_name:meta.name ~n:1 ()
+      Keeper_transition_audit.recent_transitions_json
+        ~keeper_name:meta.name ~limit:6
     with
-    | json :: _ -> Some json
-    | [] -> None
+    | `List items -> items
+    | _ -> []
   in
-  let pending_approval_projection =
-    pending_approval_projection_with_reader ~read_pending
-      ~base_path:config.base_path ~keeper_name:meta.name
+  let observations, recent_approval_audit_rows =
+    collect_raw_observations_with_pending_reader ~read_pending
+      ~approval_audit_limit:8 ~config ~meta
   in
-  let runtime_blocker_fields =
-    Keeper_status_bridge.runtime_blocker_fields_json config meta
-  in
+  { observations
+  ; registry_entry
+  ; runtime_contract
+  ; recent_tool_call_rows
+  ; recent_approval_audit_rows
+  ; recent_transition_rows
+  }
+;;
+
+let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
+  let observations = raw.observations in
   let latest_receipt_for_runtime_state =
-    current_receipt_for_runtime_state ~meta ~runtime_blocker_fields
-      latest_receipt
+    current_receipt_for_runtime_state ~meta
+      ~runtime_blocker_fields:observations.runtime_blocker_fields
+      observations.latest_receipt
   in
   let latest_terminal_reason =
-    latest_terminal_reason_opt ~meta ~runtime_blocker_fields ~latest_decision
-      ~latest_receipt
+    latest_terminal_reason_opt ~meta
+      ~runtime_blocker_fields:observations.runtime_blocker_fields
+      ~latest_decision:observations.latest_decision
+      ~latest_receipt:observations.latest_receipt
   in
   let latest_terminal_reason_json =
     latest_terminal_reason
@@ -963,114 +976,105 @@ let snapshot_json_inner_with_pending_reader
     Option.bind latest_terminal_reason (fun reason -> reason.next_action)
   in
   let selected_model =
-    selected_model_of_latest_decision_or_receipt latest_decision latest_receipt
-  in
-  let attention_fields =
-    Keeper_status_bridge.attention_fields_json_with_approval_queue
-      config
-      meta
-      (approval_queue_attention_of_projection
-         ~base_path:config.base_path
-         pending_approval_projection)
+    selected_model_of_latest_decision_or_receipt observations.latest_decision
+      observations.latest_receipt
   in
   let runtime_phase =
-    match registry_entry with
+    match raw.registry_entry with
     | Some entry -> `String (Keeper_state_machine.phase_to_string entry.phase)
     | None -> `Null
   in
-  let runtime_contract =
-    Keeper_runtime_contract.runtime_observability_contract_json ~config meta
-  in
-  let fallback_disposition, fallback_disposition_reason =
-    disposition_of_snapshot ~pending_approval_projection
-      ~runtime_blocker_fields
-  in
-  let disposition, disposition_reason, operator_disposition,
-      operator_disposition_reason =
-    effective_disposition_fields ~fallback_disposition
-      ~approval_queue_available:(Option.is_none pending_approval_projection.error)
-      ~fallback_reason:fallback_disposition_reason
-      latest_receipt_for_runtime_state
-  in
-  let needs_attention =
-    assoc_bool_default "needs_attention" ~default:false attention_fields
-    || display_disposition_requires_attention disposition
-  in
-  let attention_reason =
-    attention_reason_or_disposition ~needs_attention ~disposition_reason
-      attention_fields
-  in
-  let next_human_action =
-    next_human_action_or_terminal ~needs_attention ~latest_next_action
-      attention_fields
+  let trust_model =
+    trust_model_of_observations
+      ~pending_approval_projection:observations.pending_approval_projection
+      ~runtime_blocker_fields:observations.runtime_blocker_fields
+      ~latest_receipt:latest_receipt_for_runtime_state ~latest_next_action
+      ~attention_fields:observations.attention_fields
   in
   let approval_state =
-    approval_state_json ~pending_approval_projection ~latest_approval_audit
+    approval_state_json
+      ~pending_approval_projection:observations.pending_approval_projection
+      ~latest_approval_audit:observations.latest_approval_audit
   in
   let execution_summary =
-    execution_summary_json ~meta ~latest_receipt
+    execution_summary_json ~meta ~latest_receipt:observations.latest_receipt
   in
   let causal_timeline =
-    causal_timeline_json ~base_path:config.base_path ~meta ~latest_decision
-      ~latest_receipt
-      ~latest_tool_call ~latest_approval_audit
-      ~runtime_blocker_fields ~next_human_action
-      ~pending_approval_projection
+    causal_timeline_json
+      ~observed_at_unix:observations.observed_at_unix
+      ~recent_tool_call_rows:raw.recent_tool_call_rows
+      ~recent_approval_audit_rows:raw.recent_approval_audit_rows
+      ~recent_transition_rows:raw.recent_transition_rows ~meta
+      ~latest_decision:observations.latest_decision
+      ~latest_receipt:observations.latest_receipt
+      ~latest_tool_call:observations.latest_tool_call
+      ~latest_approval_audit:observations.latest_approval_audit
+      ~runtime_blocker_fields:observations.runtime_blocker_fields
+      ~next_human_action:trust_model.next_human_action
+      ~pending_approval_projection:observations.pending_approval_projection
   in
   let latest_causal_event =
     latest_causal_from_timeline causal_timeline
   in
   `Assoc
-    [
-      ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-      ("generation", `Int meta.runtime.nonce);
-      ( "turn_id",
-        match
-          latest_turn_id ~registry_entry ~latest_decision ~latest_tool_call
-            ~latest_receipt
-        with
-        | Some turn_id -> `Int turn_id
-        | None -> `Null );
-      ("phase", runtime_phase);
-      ("raw_phase", runtime_phase);
-      ("current_task_id", Json_util.string_opt_to_json (Keeper_runtime_contract.current_task_id_opt meta));
-      ("goal_id", Json_util.string_opt_to_json (Keeper_runtime_contract.primary_goal_id_opt meta));
-      ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
-      ("active_model", Json_util.string_opt_to_json selected_model);
-      ("selected_model", Json_util.string_opt_to_json selected_model);
-      ("runtime_contract", runtime_contract);
-      ("runtime_blockers", `Assoc runtime_blocker_fields);
-      ("disposition", `String disposition);
-      ("disposition_reason", `String disposition_reason);
-      ("operator_disposition", `String operator_disposition);
-      ("operator_disposition_reason", `String operator_disposition_reason);
-      ("needs_attention", `Bool needs_attention);
-      ("attention_reason", Json_util.string_opt_to_json attention_reason);
-      ("next_human_action", Json_util.string_opt_to_json next_human_action);
-      ("approval_queue_state", pending_approval_projection.state);
-      ("approval", approval_state);
-      ("execution", execution_summary);
-      ("latest_terminal_reason", latest_terminal_reason_json);
-      ("latest_next_action", Json_util.string_opt_to_json latest_next_action);
-      ( "pending_approval_count",
-        match pending_approval_projection.count with
-        | Some count -> `Int count
-        | None -> `Null );
-      ( "pending_approvals",
-        match pending_approval_projection.entries with
-        | Some entries -> `List entries
-        | None -> `Null );
-      ("latest_decision", Option.value ~default:`Null latest_decision);
-      ("latest_tool_call", Option.value ~default:`Null latest_tool_call);
-      ("latest_receipt", Option.value ~default:`Null latest_receipt);
-      ("latest_causal_event", latest_causal_event);
-      ("causal_timeline", causal_timeline);
-      ( "last_event_bus_correlation",
-        match registry_entry with
-        | Some entry ->
-            Json_util.string_opt_to_json entry.last_event_bus_correlation
-        | None -> `Null );
-    ]
+    ([ ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
+     ; ( "turn_id"
+       , match
+           latest_turn_id ~registry_entry:raw.registry_entry
+             ~latest_decision:observations.latest_decision
+             ~latest_tool_call:observations.latest_tool_call
+             ~latest_receipt:observations.latest_receipt
+         with
+         | Some turn_id -> `Int turn_id
+         | None -> `Null )
+     ; ("phase", runtime_phase)
+     ; ("raw_phase", runtime_phase)
+     ; ( "current_task_id"
+       , Json_util.string_opt_to_json
+           (Keeper_runtime_contract.current_task_id_opt meta) )
+     ; ("active_model", Json_util.string_opt_to_json selected_model)
+     ; ("selected_model", Json_util.string_opt_to_json selected_model)
+     ; ("runtime_contract", raw.runtime_contract)
+     ; ("runtime_blockers", `Assoc observations.runtime_blocker_fields)
+     ]
+     @ trust_model_json_fields trust_model
+     @ [ ("approval_queue_state", observations.pending_approval_projection.state)
+       ; ("approval", approval_state)
+       ; ("execution", execution_summary)
+       ; ("latest_terminal_reason", latest_terminal_reason_json)
+       ; ("latest_next_action", Json_util.string_opt_to_json latest_next_action)
+       ; ( "pending_approval_count"
+         , match observations.pending_approval_projection.count with
+           | Some count -> `Int count
+           | None -> `Null )
+       ; ( "pending_approvals"
+         , match observations.pending_approval_projection.entries with
+           | Some entries -> `List entries
+           | None -> `Null )
+       ; ( "latest_decision"
+         , Option.value ~default:`Null observations.latest_decision )
+       ; ( "latest_tool_call"
+         , Option.value ~default:`Null observations.latest_tool_call )
+       ; ( "latest_receipt"
+         , Option.value ~default:`Null observations.latest_receipt )
+       ; ("latest_causal_event", latest_causal_event)
+       ; ("causal_timeline", causal_timeline)
+       ; ( "last_event_bus_correlation"
+         , match raw.registry_entry with
+           | Some entry ->
+               Json_util.string_opt_to_json entry.last_event_bus_correlation
+           | None -> `Null )
+       ])
+;;
+
+let snapshot_json_inner_with_pending_reader
+    ~(read_pending :
+       base_path:string ->
+       (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result)
+    ~(config : Workspace.config) ~(meta : keeper_meta) =
+  collect_raw_snapshot_with_pending_reader ~read_pending ~config ~meta
+  |> snapshot_json_of_raw ~meta
+;;
 
 let snapshot_json_inner ~(config : Workspace.config) ~(meta : keeper_meta) =
   snapshot_json_inner_with_pending_reader
@@ -1082,7 +1086,6 @@ let snapshot_json ~(config : Workspace.config) ~(meta : keeper_meta) =
   let cache_key =
     { Snapshot_cache.base_path = config.base_path
     ; keeper_name = meta.name
-    ; generation = meta.runtime.nonce
     ; last_turn_ts = meta.runtime.usage.last_turn_ts
     ; approval_queue_revision =
         Keeper_approval_queue.store_revision_for_workspace
@@ -1098,7 +1101,6 @@ let snapshot_json ~(config : Workspace.config) ~(meta : keeper_meta) =
       value
 
 module For_testing = struct
-  let clear_snapshot_cache = Snapshot_cache.clear
   let snapshot_json_inner_with_pending_reader =
     snapshot_json_inner_with_pending_reader
 end

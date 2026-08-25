@@ -37,8 +37,9 @@ let record_persistence_read_drop ~reason () =
     ()
 
 let report_persistence_read_drop ~reason ~path ~detail =
+  let reason_wire = Read_drop_reason.to_wire reason in
   Safe_ops.report_persistence_read_drop
-    ~on_drop:(fun () -> record_persistence_read_drop ~reason ())
+    ~on_drop:(fun () -> record_persistence_read_drop ~reason:reason_wire ())
     ~surface:persistence_surface
     ~reason
     ~path
@@ -188,7 +189,7 @@ type chat_message = {
          are rejected at the read boundary. *)
   role : Role.t;
   content : string;
-  ts : float option;
+  ts : float;
   attachments : attachment list option;
   tool_call_id : string option;
   tool_call_name : string option;
@@ -228,22 +229,37 @@ type chat_message = {
          stream response represented by this row. [None] means pre-K1f row or
          no lifecycle proof. Malformed persisted values are reported and read
          as [None], keeping the row valid. *)
-  delivery_key : Keeper_chat_delivery_identity.delivery_key option;
-      (* The exact delivery identity persisted by the idempotent append-once
-         paths.  [None] on rows written by the plain append paths and on rows
-         written before this field existed.  A malformed persisted value is
-         reported as a persistence read drop and reads as [None]; the row
-         stays valid. *)
+  delivery_provenance :
+    Keeper_chat_delivery_identity.delivery_provenance option;
+      (* The exact delivery identity and transcript slot persisted atomically
+         by the idempotent append-once paths.  [None] on rows written by the
+         plain append paths and on rows written before this pair existed.  A
+         malformed persisted value is reported as a persistence read drop and
+         reads as [None]; the row stays valid. *)
 }
 
+(* The GitHub CLI credential ([hosts.yml]) lives outside the generic keeper
+   secret projection roots (see [Keeper_github_identity]), so the plain
+   [snapshot] never captured it and a [gh] token could reach chat rows
+   unmasked (#28925 gap 2). The execute-output path already snapshots it
+   ([Keeper_tool_execute_runtime]); this brings the chat sink to parity. *)
 let redaction_for ~base_dir ~keeper_name =
-  Keeper_secret_redaction.snapshot ~base_path:base_dir ~keeper_name
+  Keeper_secret_redaction.snapshot_with_additional_secret_files
+    ~additional_secret_files:
+      (Keeper_github_identity.secret_files_of_base_path
+         ~base_path:base_dir
+         ~keeper_name)
+    ~base_path:base_dir
+    ~keeper_name
 
 let redact_attachment redaction att =
   { att with data = Keeper_secret_redaction.redact_text redaction att.data }
 
 let persisted_attachment_ref (att : attachment) =
-  let digest = Digest.to_hex (Digest.string att.data) in
+  (* SHA-256, not Stdlib.Digest (MD5): this is attachment content identity,
+     not a display checksum (#26720). Nothing reads the digest back out of the
+     URI — [att.id] is the locator — so rows written before this keep working. *)
+  let digest = Digestif.SHA256.(digest_string att.data |> to_hex) in
   Printf.sprintf "masc://attachment/%s/%s" att.id digest
 
 let persisted_attachment (att : attachment) =
@@ -261,11 +277,9 @@ let redact_string_opt redaction =
 let redact_trace_json redaction json =
   (* Caller-supplied trace tool args/results can carry a secret embedded in a
      key name (e.g. a header/param used as a dict key), not only in values.
-     Use the SSOT JSON redactor for keys and values so the traversal policy has
-     a single owner. *)
-  json
-  |> Keeper_secret_redaction.redact_json_keys redaction
-  |> Keeper_secret_redaction.redact_json redaction
+     [redact_json] covers both, so the traversal policy is the redactor's and
+     not assembled here. *)
+  Keeper_secret_redaction.redact_json redaction json
 
 let redact_table_cell redaction = function
   | Keeper_chat_blocks.Cell_text value ->
@@ -274,12 +288,12 @@ let redact_table_cell redaction = function
     Keeper_chat_blocks.Cell_value { v = redact_string redaction v; num; muted }
 
 let redact_trace_step redaction = function
-  | Keeper_chat_blocks.Trace_think { text; content_withheld; ts; oas_block_index } ->
+  | Keeper_chat_blocks.Trace_think { text; content_withheld; ts; agent_core_block_index } ->
     Keeper_chat_blocks.Trace_think
       { text = (if content_withheld then "" else redact_string redaction text)
       ; content_withheld
       ; ts = redact_string_opt redaction ts
-      ; oas_block_index
+      ; agent_core_block_index
       }
   | Keeper_chat_blocks.Trace_reason { text; detail; ts } ->
     Keeper_chat_blocks.Trace_reason
@@ -288,7 +302,7 @@ let redact_trace_step redaction = function
       ; ts = redact_string_opt redaction ts
       }
   | Keeper_chat_blocks.Trace_tool
-      { name; tool_call_id; status; dur; args; result; ts; oas_block_index } ->
+      { name; tool_call_id; status; dur; args; result; ts; agent_core_block_index } ->
     Keeper_chat_blocks.Trace_tool
       { name = redact_string redaction name
       ; tool_call_id = redact_string_opt redaction tool_call_id
@@ -297,7 +311,7 @@ let redact_trace_step redaction = function
       ; args = Option.map (redact_trace_json redaction) args
       ; result = Option.map (redact_trace_json redaction) result
       ; ts = redact_string_opt redaction ts
-      ; oas_block_index
+      ; agent_core_block_index
       }
 
 let redact_block redaction = function
@@ -384,9 +398,9 @@ let redact_block redaction = function
     Keeper_chat_blocks.Fusion { board_post_id; run_id }
   | Keeper_chat_blocks.Status { kind } ->
     Keeper_chat_blocks.Status { kind }
-  | Keeper_chat_blocks.Trace { trace } ->
+  | Keeper_chat_blocks.Trace { trace; omitted } ->
     Keeper_chat_blocks.Trace
-      { trace = List.map (redact_trace_step redaction) trace }
+      { trace = List.map (redact_trace_step redaction) trace; omitted }
   | Keeper_chat_blocks.Thinking { content; redacted } ->
     Keeper_chat_blocks.Thinking
       { content = redact_string redaction content; redacted }
@@ -413,15 +427,11 @@ let redact_message redaction msg =
     audio;
   }
 
-let opt_string_field key = function
-  | None -> []
-  | Some value -> [ (key, `String value) ]
-
 let speaker_fields = function
   | None -> []
   | Some sp ->
-      opt_string_field "speaker_id" sp.speaker_id
-      @ opt_string_field "speaker_name" sp.speaker_name
+      Json_util.string_field_if_present "speaker_id" sp.speaker_id
+      @ Json_util.string_field_if_present "speaker_name" sp.speaker_name
       @ [ ("speaker_authority", `String (authority_label sp.speaker_authority)) ]
 
 (* RFC-0235 P1: nested ["audio"] assoc so the clip stays one unit on the
@@ -477,7 +487,7 @@ let stream_lifecycle_fields = function
 let parse_stream_lifecycle ~path json =
   let invalid detail =
     report_persistence_read_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+      ~reason:Read_drop_reason.Invalid_payload
       ~path ~detail;
     None
   in
@@ -511,7 +521,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
     ?tool_call_name ?surface ?conversation_id ?external_message_id ?workspace_id
     ?speaker
     ?audio ?blocks ?(mentions = []) ?(kind = Row_kind.Utterance) ?turn_ref
-    ?stream_lifecycle ?delivery_key ?transcript_slot ()
+    ?stream_lifecycle ?provenance ()
     : string =
   let surface_field =
     match surface with
@@ -581,30 +591,30 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
     @ attachment_fields
     @ mention_fields
     @ kind_field
-    @ opt_string_field "tool_call_id" tool_call_id
-    @ opt_string_field "tool_call_name" tool_call_name
+    @ Json_util.string_field_if_present "tool_call_id" tool_call_id
+    @ Json_util.string_field_if_present "tool_call_name" tool_call_name
     @ surface_field
-    @ opt_string_field "conversation_id" conversation_id
-    @ opt_string_field "external_message_id" external_message_id
-    @ opt_string_field "workspace_id" workspace_id
+    @ Json_util.string_field_if_present "conversation_id" conversation_id
+    @ Json_util.string_field_if_present "external_message_id" external_message_id
+    @ Json_util.string_field_if_present "workspace_id" workspace_id
     @ speaker_fields speaker
     @ audio_fields audio
     @ blocks_fields blocks
-    @ opt_string_field "turn_ref" (Option.map Ids.Turn_ref.to_string turn_ref)
+    @ Json_util.string_field_if_present "turn_ref" (Option.map Ids.Turn_ref.to_string turn_ref)
     @ stream_lifecycle_fields stream_lifecycle
-    @ (match delivery_key with
+    @ (match provenance with
        | None -> []
        | Some value ->
-         [ ( "delivery_key"
-           , Keeper_chat_delivery_identity.delivery_key_to_yojson value ) ])
-    @ (match transcript_slot with
-       | None -> []
-       | Some value ->
-         [ ( "transcript_slot"
-           , Keeper_chat_delivery_identity.transcript_slot_to_yojson value ) ])
+         Keeper_chat_delivery_identity.delivery_provenance_fields value)
   in
   Yojson.Safe.to_string (`Assoc all_fields)
 
+(* The append-once reader. It answers "does this exact delivery already have
+   a row?", so an undecodable row cannot be skipped: skipping one would
+   answer "no" for a delivery that is in fact present and append a duplicate.
+   Hence [Error] here fails the whole transaction, unlike the row reader in
+   [parse_line], which only needs to render. Both decode the pair through
+   [delivery_provenance_of_fields]; only the failure policy differs. *)
 let provenance_of_line ~line_number line =
   let fail detail =
     Error
@@ -617,40 +627,24 @@ let provenance_of_line ~line_number line =
     match Yojson.Safe.from_string line with
     | `Assoc fields ->
       (match
-         List.assoc_opt "delivery_key" fields,
-         List.assoc_opt "transcript_slot" fields
+         Keeper_chat_delivery_identity.delivery_provenance_of_fields fields
        with
-       | None, None -> Ok None
-       | Some _, None | None, Some _ ->
-         fail "delivery_key and transcript_slot must appear together"
-       | Some delivery_key_json, Some transcript_slot_json ->
-         (match
-            Keeper_chat_delivery_identity.delivery_key_of_yojson
-              delivery_key_json,
-            Keeper_chat_delivery_identity.transcript_slot_of_yojson
-              transcript_slot_json,
-            List.assoc_opt "id" fields
-          with
-          | Ok delivery_key, Ok transcript_slot, Some (`String row_id)
-            when not (String.equal (String.trim row_id) "") ->
-            Ok (Some (delivery_key, transcript_slot, row_id))
-          | Error detail, _, _ | _, Error detail, _ -> fail detail
-          | _, _, _ -> fail "provenance row requires a nonblank id"))
+       | Error detail -> fail detail
+       | Ok None -> Ok None
+       | Ok (Some provenance) ->
+         (match List.assoc_opt "id" fields with
+          | Some (`String row_id) when not (String.equal (String.trim row_id) "") ->
+            Ok (Some (provenance, row_id))
+          | _ -> fail "provenance row requires a nonblank id"))
     | _ -> fail "row must be a JSON object"
   with
   | Yojson.Json_error detail -> fail detail
 ;;
 
 module Provenance_key = struct
-  type t =
-    Keeper_chat_delivery_identity.delivery_key
-    * Keeper_chat_delivery_identity.transcript_slot
+  type t = Keeper_chat_delivery_identity.delivery_provenance
 
-  let equal (left_key, left_slot) (right_key, right_slot) =
-    Keeper_chat_delivery_identity.delivery_key_equal left_key right_key
-    && Keeper_chat_delivery_identity.transcript_slot_equal left_slot right_slot
-  ;;
-
+  let equal = Keeper_chat_delivery_identity.delivery_provenance_equal
   let hash = Hashtbl.hash
 end
 
@@ -662,12 +656,11 @@ type indexed_provenance =
 
 let provenance_index_of_existing existing =
   let index = Provenance_index.create 16 in
-  let add_provenance (delivery_key, transcript_slot, row_id) =
-    let key = delivery_key, transcript_slot in
-    match Provenance_index.find_opt index key with
-    | None -> Provenance_index.add index key (Unique_provenance row_id)
+  let add_provenance (provenance, row_id) =
+    match Provenance_index.find_opt index provenance with
+    | None -> Provenance_index.add index provenance (Unique_provenance row_id)
     | Some (Unique_provenance _ | Duplicate_provenance) ->
-      Provenance_index.replace index key Duplicate_provenance
+      Provenance_index.replace index provenance Duplicate_provenance
   in
   existing
   |> String.split_on_char '\n'
@@ -686,24 +679,24 @@ let provenance_index_of_existing existing =
   |> Result.map (fun () -> index)
 ;;
 
-let find_indexed_provenance index ~delivery_key ~transcript_slot =
-  match Provenance_index.find_opt index (delivery_key, transcript_slot) with
+let find_indexed_provenance index ~provenance =
+  match Provenance_index.find_opt index provenance with
   | None -> Ok None
   | Some (Unique_provenance row_id) -> Ok (Some row_id)
   | Some Duplicate_provenance ->
     Error "duplicate Keeper chat delivery provenance rows"
 ;;
 
-let find_provenance existing ~delivery_key ~transcript_slot =
+let find_provenance existing ~provenance =
   let ( let* ) = Result.bind in
   let* index = provenance_index_of_existing existing in
-  find_indexed_provenance index ~delivery_key ~transcript_slot
+  find_indexed_provenance index ~provenance
 ;;
 
-let append_line_once path ~delivery_key ~transcript_slot ~row_id line =
+let append_line_once path ~provenance ~row_id line =
   match
     Fs_compat.update_private_file_durable_locked_result path (fun existing ->
-      match find_provenance existing ~delivery_key ~transcript_slot with
+      match find_provenance existing ~provenance with
       | Error detail -> None, Error detail
       | Ok (Some existing_row_id) ->
         None, Ok (Already_present { row_id = existing_row_id })
@@ -760,7 +753,23 @@ let append_chat_payload_durable path payload =
 let normalize_tool_args args =
   if String.trim args = "" then "{}" else args
 
-let normalize_tool_call_id ~position call_id =
+(* Two questions were sharing one answer.
+
+   "What did the provider call this?" is a record. It can be unanswered, and
+   the log writer already answers an empty call_id by omitting the field
+   ([keeper_event_bridge.ml:199]). Synthesising "tc-<position>" here made the
+   two writers disagree about the same execution, and the dashboard join
+   matches on that id alone, so the step stayed pending forever (#21894).
+   {!Tool_invocation_ref} states the rule directly: correlation identity is
+   never inferred from names, arguments, timestamps, or hashes.
+
+   "Where does this turn's reply go?" is a delivery address. It has to
+   resolve — [Ids.Execution_id.of_string] takes a string — and position is a
+   legitimate answer because the slot is this store's own. *)
+let provider_tool_call_id call_id =
+  if String.trim call_id = "" then None else Some call_id
+
+let delivery_slot_id ~position call_id =
   if String.trim call_id = "" then Printf.sprintf "tc-%d" position else call_id
 
 (* RFC-0232 §3.3: the append IS the parse boundary.  Mentions are
@@ -813,7 +822,7 @@ let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
           encode_line ~role:Role.Tool
             ~content:(normalize_tool_args tc.args)
             ~ts
-            ~tool_call_id:(normalize_tool_call_id ~position tc.call_id)
+            ?tool_call_id:(provider_tool_call_id tc.call_id)
             ~tool_call_name:tc.call_name
             ?surface ?conversation_id ?turn_ref ())
         tool_calls
@@ -881,7 +890,7 @@ let append_user_and_tool_calls_result ~base_dir ~keeper_name ~(user_content : st
            encode_line ~role:Role.Tool
              ~content:(normalize_tool_args tc.args)
              ~ts
-             ~tool_call_id:(normalize_tool_call_id ~position tc.call_id)
+             ?tool_call_id:(provider_tool_call_id tc.call_id)
              ~tool_call_name:tc.call_name
              ?surface ?conversation_id ?turn_ref ())
         tool_calls
@@ -915,7 +924,7 @@ let append_tool_calls_result ~base_dir ~keeper_name ~(tool_calls : tool_call lis
            encode_line ~role:Role.Tool
              ~content:(normalize_tool_args tc.args)
              ~ts
-             ~tool_call_id:(normalize_tool_call_id ~position tc.call_id)
+             ?tool_call_id:(provider_tool_call_id tc.call_id)
              ~tool_call_name:tc.call_name
              ?surface ?conversation_id ?turn_ref ())
         tool_calls
@@ -960,7 +969,7 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
           encode_line ~role:Role.Tool
             ~content:(normalize_tool_args tc.args)
             ~ts
-            ~tool_call_id:(normalize_tool_call_id ~position tc.call_id)
+            ?tool_call_id:(provider_tool_call_id tc.call_id)
             ~tool_call_name:tc.call_name
             ?surface ?conversation_id ?turn_ref ())
         tool_calls
@@ -1000,7 +1009,12 @@ let append_lines_once ?(reject_partial_after_result = false) path ~delivery_key
           | [] -> Ok (found, List.rev additions)
           | ({ transcript_slot; row_id; line = _ } as candidate) :: rest ->
             (match
-               find_indexed_provenance index ~delivery_key ~transcript_slot
+               find_indexed_provenance
+                 index
+                 ~provenance:
+                   { Keeper_chat_delivery_identity.delivery_key
+                   ; transcript_slot
+                   }
              with
              | Error detail -> Error detail
              | Ok (Some existing_row_id) ->
@@ -1072,7 +1086,7 @@ let tool_call_append_lines ~ts ~surface ~conversation_id ~turn_ref ~delivery_key
       tool_calls =
   List.mapi
     (fun ordinal tc ->
-       let call_id = normalize_tool_call_id ~position:ordinal tc.call_id in
+       let call_id = delivery_slot_id ~position:ordinal tc.call_id in
        let transcript_slot =
          Keeper_chat_delivery_identity.Tool_call
            { execution_id = Ids.Execution_id.of_string call_id; ordinal }
@@ -1091,8 +1105,8 @@ let tool_call_append_lines ~ts ~surface ~conversation_id ~turn_ref ~delivery_key
              ?surface
              ?conversation_id
              ?turn_ref
-             ~delivery_key
-             ~transcript_slot
+             ~provenance:
+               { Keeper_chat_delivery_identity.delivery_key; transcript_slot }
              ()
        })
     tool_calls
@@ -1126,7 +1140,7 @@ let append_tool_calls_once
         Keeper_chat_delivery_identity.Tool_call
           { execution_id =
               Ids.Execution_id.of_string
-                (normalize_tool_call_id
+                (delivery_slot_id
                    ~position:ordinal
                    (List.nth tool_calls ordinal).call_id)
           ; ordinal
@@ -1186,8 +1200,8 @@ let append_assistant_message_once
         ?blocks
         ?turn_ref
         ?stream_lifecycle
-        ~delivery_key
-        ~transcript_slot
+        ~provenance:
+          { Keeper_chat_delivery_identity.delivery_key; transcript_slot }
         ()
     in
     let tool_lines =
@@ -1281,7 +1295,11 @@ let append_user_message_once
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let row_id = mint_message_id ~ts in
-    let transcript_slot = Keeper_chat_delivery_identity.Accepted_user in
+    let provenance =
+      { Keeper_chat_delivery_identity.delivery_key
+      ; transcript_slot = Keeper_chat_delivery_identity.Accepted_user
+      }
+    in
     let line =
       encode_line
         ~role:Role.User
@@ -1295,11 +1313,10 @@ let append_user_message_once
         ?workspace_id
         ?speaker
         ~mentions:(user_line_mentions ~extra_mentions content)
-        ~delivery_key
-        ~transcript_slot
+        ~provenance
         ()
     in
-    append_line_once path ~delivery_key ~transcript_slot ~row_id line
+    append_line_once path ~provenance ~row_id line
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -1323,8 +1340,10 @@ let parse_line ~file_path (line : string) : chat_message option =
     in
     let content = Json_util.get_string_with_default json ~key:"content" ~default:"" in
     let ts =
-      (try Some ((match Json_util.assoc_member_opt "ts" json with Some (`Float f) -> f | _ -> 0.0))
-       with Eio.Cancel.Cancelled _ as e -> raise e | _ -> None) in
+      match Json_util.assoc_member_opt "ts" json with
+      | Some (`Float f) -> Some f
+      | Some _ | None -> None
+    in
     let opt_string key =
       match Json_util.assoc_member_opt key json with
       | Some (`String value) when String.trim value <> "" -> Some value
@@ -1342,7 +1361,7 @@ let parse_line ~file_path (line : string) : chat_message option =
               (* Unknown/invalid surface payload: surface it and keep the
                  row as unscoped chat content. *)
               report_persistence_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
                 ~detail:(Printf.sprintf "invalid surface field: %s" detail);
               None)
@@ -1362,7 +1381,7 @@ let parse_line ~file_path (line : string) : chat_message option =
               (* Unknown authority label: surface it instead of guessing
                  a class; the row itself stays valid. *)
               report_persistence_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
                 ~detail:
                   (Printf.sprintf "unknown speaker_authority %S" label);
@@ -1374,7 +1393,7 @@ let parse_line ~file_path (line : string) : chat_message option =
                (* id/name without an authority class never comes from our
                   writer; report so the producer gets fixed. *)
                report_persistence_read_drop
-                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~reason:Read_drop_reason.Invalid_payload
                  ~path:file_path
                  ~detail:"speaker_id/speaker_name without speaker_authority");
           None
@@ -1407,7 +1426,7 @@ let parse_line ~file_path (line : string) : chat_message option =
                (* audio without token+mime is malformed; drop the field but
                   keep the row (text-only render). *)
                report_persistence_read_drop
-                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~reason:Read_drop_reason.Invalid_payload
                  ~path:file_path
                  ~detail:"audio field missing token/mime";
                None)
@@ -1419,17 +1438,18 @@ let parse_line ~file_path (line : string) : chat_message option =
           let atts = List.filter_map (fun att_json ->
             match att_json with
             | `Assoc _ ->
-                (try
-                  let id = Json_util.get_string_with_default att_json ~key:"id" ~default:"" in
-                  let att_type = Json_util.get_string_with_default att_json ~key:"type" ~default:"" in
-                  let name = Json_util.get_string_with_default att_json ~key:"name" ~default:"" in
-                  let size = (match Json_util.assoc_member_opt "size" att_json with
-                    | Some (`Int i) -> i | _ -> 0) in
-                  let mime_type = Json_util.get_string_with_default att_json ~key:"mime_type" ~default:"" in
-                  let data = Json_util.get_string_with_default att_json ~key:"data" ~default:"" in
-                  if id = "" || data = "" then None
-                  else Some { id; att_type; name; size; mime_type; data }
-                with _ -> None)
+                (* No guard: Json_util getters absorb type errors into their
+                   defaults, so this body is total — the catch that wrapped it
+                   could only hide asynchronous exceptions. *)
+                let id = Json_util.get_string_with_default att_json ~key:"id" ~default:"" in
+                let att_type = Json_util.get_string_with_default att_json ~key:"type" ~default:"" in
+                let name = Json_util.get_string_with_default att_json ~key:"name" ~default:"" in
+                let size = (match Json_util.assoc_member_opt "size" att_json with
+                  | Some (`Int i) -> i | _ -> 0) in
+                let mime_type = Json_util.get_string_with_default att_json ~key:"mime_type" ~default:"" in
+                let data = Json_util.get_string_with_default att_json ~key:"data" ~default:"" in
+                if id = "" || data = "" then None
+                else Some { id; att_type; name; size; mime_type; data }
             | _ -> None
           ) att_list in
           if atts = [] then None else Some atts
@@ -1452,7 +1472,7 @@ let parse_line ~file_path (line : string) : chat_message option =
                   | None ->
                       report_persistence_read_drop
                         ~reason:
-                          Safe_ops.persistence_read_drop_reason_invalid_payload
+                          Read_drop_reason.Invalid_payload
                         ~path:file_path
                         ~detail:
                           (Printf.sprintf "empty mention entry %S" value);
@@ -1460,14 +1480,14 @@ let parse_line ~file_path (line : string) : chat_message option =
               | _ ->
                   report_persistence_read_drop
                     ~reason:
-                      Safe_ops.persistence_read_drop_reason_invalid_payload
+                      Read_drop_reason.Invalid_payload
                     ~path:file_path
                     ~detail:"non-string mention entry";
                   None)
             items
       | Some _ ->
           report_persistence_read_drop
-            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~reason:Read_drop_reason.Invalid_payload
             ~path:file_path
             ~detail:"mentions field is not a list";
           []
@@ -1480,7 +1500,7 @@ let parse_line ~file_path (line : string) : chat_message option =
           | Some _ as blocks -> blocks
           | None ->
               report_persistence_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
                 ~detail:"invalid blocks field";
               None)
@@ -1498,7 +1518,7 @@ let parse_line ~file_path (line : string) : chat_message option =
           | Some kind -> kind
           | None ->
               report_persistence_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
                 ~detail:(Printf.sprintf "unknown chat row kind %S" label);
               Row_kind.Utterance)
@@ -1513,7 +1533,7 @@ let parse_line ~file_path (line : string) : chat_message option =
           | Some _ as tr -> tr
           | None ->
               report_persistence_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
                 ~detail:(Printf.sprintf "invalid turn_ref %S" s);
               None)
@@ -1524,23 +1544,28 @@ let parse_line ~file_path (line : string) : chat_message option =
       | Some stream_lifecycle_json ->
           parse_stream_lifecycle ~path:file_path stream_lifecycle_json
     in
-    let delivery_key =
+    let delivery_provenance =
       (* Same read-drop convention as [turn_ref]: a malformed persisted
-         value is surfaced and reads as [None] — the row stays valid. *)
-      match Json_util.assoc_member_opt "delivery_key" json with
-      | None -> None
-      | Some delivery_key_json -> (
+         value is surfaced and reads as [None] — the row stays valid.
+         This reader only renders, so it can carry on without the
+         provenance; [provenance_of_line] decodes the same pair through
+         the same function but must fail its transaction instead, because
+         a skipped row there would answer "not appended yet" for a
+         delivery that is already on disk. *)
+      match json with
+      | `Assoc fields -> (
           match
-            Keeper_chat_delivery_identity.delivery_key_of_yojson
-              delivery_key_json
+            Keeper_chat_delivery_identity.delivery_provenance_of_fields fields
           with
-          | Ok key -> Some key
+          | Ok None -> None
+          | Ok (Some provenance) -> Some provenance
           | Error detail ->
               report_persistence_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path:file_path
-                ~detail:(Printf.sprintf "invalid delivery_key: %s" detail);
+                ~detail:(Printf.sprintf "invalid delivery provenance: %s" detail);
               None)
+      | _ -> None
     in
     let has_structured_payload =
       Option.is_some audio
@@ -1549,7 +1574,7 @@ let parse_line ~file_path (line : string) : chat_message option =
     in
     if role_label = "" || (content = "" && not has_structured_payload) then (
       report_persistence_read_drop
-        ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+        ~reason:Read_drop_reason.Invalid_payload
         ~path:file_path
         ~detail:"chat row missing role and readable text/structured payload";
       None)
@@ -1560,33 +1585,42 @@ let parse_line ~file_path (line : string) : chat_message option =
              semantics (watermark, pending, rendering); surface it
              instead of carrying an untyped row. *)
           report_persistence_read_drop
-            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~reason:Read_drop_reason.Invalid_payload
             ~path:file_path
             ~detail:(Printf.sprintf "unknown chat row role %S" role_label);
           None
       | Some Role.Tool when tool_call_name = None ->
           report_persistence_read_drop
-            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~reason:Read_drop_reason.Invalid_payload
             ~path:file_path
             ~detail:"tool chat row missing non-empty tool_call_name";
           None
       | Some role ->
-          (match opt_string "id" with
-           | None ->
+          (match opt_string "id", ts with
+           | None, _ ->
                report_persistence_read_drop
-                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~reason:Read_drop_reason.Invalid_payload
                  ~path:file_path
                  ~detail:"chat row missing nonblank id";
                None
-           | Some id ->
+           | Some _, None ->
+               (* [encode_line] always writes a float [ts]; a row without one
+                  cannot be ordered, paged or joined, so it is dropped. *)
+               report_persistence_read_drop
+                 ~reason:Read_drop_reason.Invalid_payload
+                 ~path:file_path
+                 ~detail:"chat row missing float ts";
+               None
+           | Some id, Some ts ->
                Some
                  { id; role; content; ts; attachments; tool_call_id;
                    tool_call_name; surface; conversation_id;
                    external_message_id; workspace_id; speaker; audio; blocks;
-                   mentions; kind; turn_ref; stream_lifecycle; delivery_key })
+                   mentions; kind; turn_ref; stream_lifecycle;
+                   delivery_provenance })
   with Yojson.Json_error detail ->
     report_persistence_read_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~reason:Read_drop_reason.Json_syntax_error
       ~path:file_path
       ~detail;
     None
@@ -1602,11 +1636,11 @@ let is_tool_message (msg : chat_message) = Role.equal msg.role Role.Tool
 
 (* Old rows without either causal identity can become unrenderable when a
    window evicts their owning user row. Current tool-only continuations carry
-   [turn_ref] or an idempotent [delivery_key] and remain valid even when they
+   [turn_ref] or idempotent [delivery_provenance] and remain valid even when they
    are the first retained row. *)
 let drop_leading_orphan_tool_messages messages =
   let rec split anonymous_tools = function
-    | ({ turn_ref = None; delivery_key = None; _ } as msg) :: rest
+    | ({ turn_ref = None; delivery_provenance = None; _ } as msg) :: rest
       when is_tool_message msg ->
       split (msg :: anonymous_tools) rest
     | rest -> List.rev anonymous_tools, rest
@@ -1702,12 +1736,7 @@ let load_page ~base_dir ~keeper_name ?before () : page =
       match before with
       | None -> (size, fun (_ : chat_message) -> true)
       | Some b ->
-          (* Rows without ts (legacy) are unorderable and stay
-             unreachable through paging; the tail window still serves
-             them. *)
-          ( find_cut ~path ~size ~before:b,
-            fun (m : chat_message) ->
-              match m.ts with Some t -> t < b | None -> false )
+          (find_cut ~path ~size ~before:b, fun (m : chat_message) -> m.ts < b)
     in
     let from = if upto > tail_read_bytes then upto - tail_read_bytes else 0 in
     (* Single pass: keep a running window of the last [max_history]
@@ -1747,7 +1776,7 @@ let load_page ~base_dir ~keeper_name ?before () : page =
   with
   | Sys_error detail ->
       report_persistence_read_drop
-        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+        ~reason:Read_drop_reason.Entry_load_error
         ~path
         ~detail;
       { messages = []; has_more = false }
@@ -1770,7 +1799,7 @@ let load_all ~base_dir ~keeper_name : chat_message list =
     match Safe_ops.read_file_safe path with
     | Error detail ->
       report_persistence_read_drop
-        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+        ~reason:Read_drop_reason.Entry_load_error
         ~path
         ~detail;
       []
@@ -1847,7 +1876,7 @@ let chat_stream_contract_json ~trace_lookup_available ~trace_block
   let field key value = (key, value) in
   let string_field key value = field key (`String value) in
   let base_fields =
-    opt_string_field "turn_ref" (Option.map Ids.Turn_ref.to_string m.turn_ref)
+    Json_util.string_field_if_present "turn_ref" (Option.map Ids.Turn_ref.to_string m.turn_ref)
   in
   match m.stream_lifecycle with
   | Some (_ :: _ as events) ->
@@ -1861,7 +1890,7 @@ let chat_stream_contract_json ~trace_lookup_available ~trace_block
              (`List (List.map (fun label -> `String label) labels))
          ]
         @ stream_delivery_receipt_field "server_lifecycle_replay_only"
-        @ opt_string_field "event_name" (last_opt labels)
+        @ Json_util.string_field_if_present "event_name" (last_opt labels)
         @ base_fields)
   | None | Some [] -> (
       match m.turn_ref with
@@ -1910,9 +1939,8 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
            ([ ("id", `String m.id);
               ("role", `String (Role.to_label m.role));
               ("content", `String m.content);
-            ] @ (match m.ts with
-                 | Some t -> [("ts", `Float t)]
-                 | None -> [])
+              ("ts", `Float m.ts);
+            ]
               (* Dashboard history: surface the writer-declared kind for
                  non-utterance rows so a reload can tell a transport
                  failure apart from keeper speech. *)
@@ -1920,14 +1948,14 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
                  | Row_kind.Utterance -> []
                  | Row_kind.Transport_failure ->
                      [ ("kind", `String (Row_kind.to_label m.kind)) ])
-              @ opt_string_field "tool_call_id" m.tool_call_id
-              @ opt_string_field "tool_call_name" m.tool_call_name
+              @ Json_util.string_field_if_present "tool_call_id" m.tool_call_id
+              @ Json_util.string_field_if_present "tool_call_name" m.tool_call_name
               @ (match m.surface with
                  | None -> []
                  | Some s -> [ ("surface", Surface_ref.to_json s) ])
-              @ opt_string_field "conversation_id" m.conversation_id
-              @ opt_string_field "external_message_id" m.external_message_id
-              @ opt_string_field "workspace_id" m.workspace_id
+              @ Json_util.string_field_if_present "conversation_id" m.conversation_id
+              @ Json_util.string_field_if_present "external_message_id" m.external_message_id
+              @ Json_util.string_field_if_present "workspace_id" m.workspace_id
               @ speaker_fields m.speaker
               @ (match m.attachments with
                  | None | Some [] -> []
@@ -1950,27 +1978,24 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
                       ~trace_block m )
                 ]
               @ blocks_fields_of_list (blocks_with_trace_block ~trace_block m)
-              @ opt_string_field "turn_ref"
+              @ Json_util.string_field_if_present "turn_ref"
                   (Option.map Ids.Turn_ref.to_string m.turn_ref)
-              (* Expose the persisted delivery identity so the dashboard can
-                 reconcile a history reload against its optimistic turn rows
-                 on the exact [delivery_key.request_id]. *)
-              @ (match m.delivery_key with
+              (* Preserve the persisted provenance pair at the HTTP boundary.
+                 Dashboard convergence uses the same atomic identity as the
+                 append-once store instead of reconstructing a slot from role. *)
+              @ (match m.delivery_provenance with
                  | None -> []
-                 | Some key ->
-                     [ ( "delivery_key"
-                       , Keeper_chat_delivery_identity.delivery_key_to_yojson
-                           key ) ])))
+                 | Some provenance ->
+                     Keeper_chat_delivery_identity.delivery_provenance_fields
+                       provenance)))
        messages)
 
-(* RFC-0233 §7: a turn's transcript derived by an exact join on the
-   persisted [turn_ref] ("<trace_id>#<absolute_turn>"). The inspector
-   needs the operator request that opened the turn and the keeper reply
-   it produced; both are stamped with the same turn_ref by
-   {!append_turn} on the dashboard reply path
-   (server_routes_http_keeper_stream.ml). Tool rows are excluded — they
-   carry only the call args, while the full tool I/O (input + output) is
-   surfaced by the tool-call store keyed on [execution_id]. *)
+(* RFC-0233 §7: a turn's terminal assistant row is selected by exact persisted
+   [turn_ref] ("<trace_id>#<absolute_turn>"). Direct/queued accepted-user rows
+   are persisted before the turn exists, so they carry no [turn_ref]; they join
+   through the same typed delivery key and the [Accepted_user] transcript slot.
+   Tool rows are excluded — they carry only the call args, while the full tool
+   I/O is surfaced by the tool-call store keyed on [execution_id]. *)
 type turn_transcript = {
   user : chat_message list;
   assistant : chat_message list;
@@ -1978,22 +2003,48 @@ type turn_transcript = {
 
 let transcript_of_messages (messages : chat_message list) ~turn_ref :
     turn_transcript =
-  let matches (m : chat_message) =
+  let matches_turn_ref (m : chat_message) =
     match m.turn_ref with
     | Some tr -> Ids.Turn_ref.equal tr turn_ref
     | None -> false
   in
+  let assistant_delivery_keys =
+    List.filter_map
+      (fun (m : chat_message) ->
+         match m.role, m.delivery_provenance with
+         | ( Role.Assistant
+           , Some
+               { Keeper_chat_delivery_identity.delivery_key
+               ; transcript_slot = Keeper_chat_delivery_identity.Terminal_assistant
+               } )
+           when matches_turn_ref m ->
+           Some delivery_key
+         | (Role.Assistant | Role.User | Role.Tool), _ -> None)
+      messages
+  in
+  let matches_accepted_user_delivery (m : chat_message) =
+    match m.role, m.delivery_provenance with
+    | ( Role.User
+      , Some
+          { Keeper_chat_delivery_identity.delivery_key
+          ; transcript_slot = Keeper_chat_delivery_identity.Accepted_user
+          } ) ->
+      List.exists
+        (Keeper_chat_delivery_identity.delivery_key_equal delivery_key)
+        assistant_delivery_keys
+    | (Role.Assistant | Role.User | Role.Tool), _ -> false
+  in
   let user, assistant =
     List.fold_left
       (fun (user, assistant) (m : chat_message) ->
-        if not (matches m) then (user, assistant)
-        else
-          match m.role with
-          | Role.User -> (m :: user, assistant)
-          | Role.Assistant -> (user, m :: assistant)
-          (* Tool rows join via execution_id in the tool-call store, not
-             via the transcript. *)
-          | Role.Tool -> (user, assistant))
+         match m.role with
+         | Role.User when matches_turn_ref m || matches_accepted_user_delivery m ->
+           m :: user, assistant
+         | Role.Assistant when matches_turn_ref m -> user, m :: assistant
+         | Role.User | Role.Assistant | Role.Tool ->
+           (* Tool rows join via execution_id in the tool-call store, not
+              via the transcript. *)
+           user, assistant)
       ([], []) messages
   in
   { user = List.rev user; assistant = List.rev assistant }
@@ -2002,8 +2053,8 @@ let transcript_line_to_json (m : chat_message) : Yojson.Safe.t =
   `Assoc
     ([ ("role", `String (Role.to_label m.role));
        ("content", `String m.content);
+       ("ts", `Float m.ts);
      ]
-    @ (match m.ts with Some t -> [ ("ts", `Float t) ] | None -> [])
       (* Surface the writer-declared kind so the inspector can tell a
          transport failure apart from a real keeper utterance, exactly as
          the chat history endpoint does — a failure marker is never quoted

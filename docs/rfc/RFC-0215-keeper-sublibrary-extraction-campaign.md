@@ -8,7 +8,6 @@ author: jeong-sik (with Claude Opus 4.8)
 supersedes: []
 superseded_by: null
 related: ["0056", "0086", "0042", "0205"]
-implementation_prs: []
 ---
 
 # RFC-0215 — Keeper sub-library extraction campaign
@@ -70,14 +69,14 @@ The distinct flat-ns mega-lib modules keeper reaches (the G1 cycle risk) cluster
 into the execution / observability mesh:
 
 ```
-Admission_queue Agent_sdk_metrics_bridge Agent_sdk_response Approval_callbacks
+Admission_queue Runtime_event_bus Approval_callbacks
 Audit_log Auth Board Board_core_classify Board_dispatch Config
 Context_compact_oas Inference_inflight_observation
 Drift_guard Eval_gate Eval_harness Exec_core Failure_envelope
 Inference_utils Llm_metric_bridge
 Lockfree_atomic Masc_context_injector Masc_eio_env Masc_event_bus
 Masc_oas_bridge Memory_hooks Memory_oas_bridge Observability_redact
-Persona_dispatch_ref Progress Otel_metric_store Otel_metric_hotpath
+Keeper_dispatch_ref Progress Otel_metric_store Otel_metric_hotpath
 Runtime_observation Runtime_observation_query_operation Runtime_params
 Server_startup_state Shutdown Sse Task Telemetry_coverage_gap
 Timeout_policy Tool_agent Tool_agent_timeline
@@ -171,10 +170,10 @@ handful of flat-ns refs that are **not** of the cluster's own domain. That
 inversion — callback or interface, per the dependency-direction rule — is a
 separate PR that ships *before* the `dune` stanza.
 
-2026-06-05 correction: the former split persona implementation
+2026-06-05 correction: the former split keeper implementation
 module has been removed from current `main`; it is no longer an extraction
-candidate. Keep the public persona profile tools on the existing
-`keeper_persona` path instead of reviving a separate authoring module.
+candidate. Keep the public Keeper tools on the existing
+`keeper_keeper` path instead of reviving a separate authoring module.
 
 ## 5. Extraction sequence
 
@@ -192,7 +191,7 @@ Fan-in is shown for context but does not gate extraction.
 | 7 | execution (`keeper_agent_run_*`, `keeper_tool_*`, `keeper_sandbox_*`, `keeper_run_*`) | ~70 | highest | last — the mesh hub |
 
 **Recommended first extraction: registry (`keeper_registry_*`).** It is now the
-lowest live fan-out cluster after removing the retired split persona
+lowest live fan-out cluster after removing the retired split keeper
 module from the extraction queue. Its 6 refs are shared-infra modules that
 several future clusters also reach, so an infra-facing interface built for
 registry amortizes across registry, error-classify, and runtime-binding. The

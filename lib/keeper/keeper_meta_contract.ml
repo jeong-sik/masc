@@ -24,28 +24,11 @@ type proactive_cycle_outcome =
 
 (* -- Runtime types (moved into agent_runtime_state) -- *)
 
-type compaction_runtime_decision = Compaction_runtime_decision of string
-
-let compaction_runtime_decision_to_string (Compaction_runtime_decision value) = value
-let compaction_runtime_decision_of_string value = Compaction_runtime_decision value
-
-(* SSOT for the API/dashboard projection of [last_compaction_decision]: the
-   decision string, or [`Null] when empty. keeper_status.ml and
-   dashboard_http_keeper.ml share this null-guard so the policy is defined once
-   (previously copied verbatim across both — issue #25323). keeper_meta_json.ml
-   serializes the raw string for its own on-disk representation and does not use
-   this guard. *)
-let compaction_decision_json_or_null decision : Yojson.Safe.t =
-  let s = compaction_runtime_decision_to_string decision in
-  if String.trim s = "" then `Null else `String s
-
 type compaction_runtime =
   { count : int
   ; last_ts : float
   ; last_before_tokens : int
   ; last_after_tokens : int
-  ; last_check_ts : float
-  ; last_decision : compaction_runtime_decision
   }
 
 type proactive_runtime =
@@ -98,7 +81,7 @@ type blocker_class =
   | Fiber_unresolved
     (** 2026-05-05: turn fiber finished without invoking [resolve_done]
         (cancelled mid-turn, raised an exception not handled by the
-        body, or the OAS request returned but the keeper switch tore
+        body, or the AGENT_CORE request returned but the keeper switch tore
         down before completion bookkeeping ran).  Maps 1:1 to the
         supervisor's [Keeper_registry.Fiber_unresolved] observation key, so
         blocker_class stamping mirrors the same diagnosis on keeper_meta. *)
@@ -111,22 +94,53 @@ type blocker_class =
         per-keeper meta lacked a structured blocker class for the majority
         cohort during a fleet stall (observed: 6/14 keepers in
         cohort=stale_turn_timeout). *)
-  | Sdk_context_window_exceeded
-  | Sdk_unrecognized_stop_reason
-  | Sdk_guardrail_violation
-  | Sdk_tripwire_violation
-  | Sdk_input_required
+  | Agent_core_context_window_exceeded
+  | Agent_core_unrecognized_stop_reason
+  | Agent_core_guardrail_violation
+  | Agent_core_tripwire_violation
+  | Agent_core_input_required
+  | Internal_unhandled_exception
+    (** RFC-0159 follow-up (task-194): unhandled internal exception escaped the
+        turn driver.  Previously [blocker_class_of_core_error] returned [None]
+        for this variant, so dashboards/operators could not distinguish an
+        unhandled internal failure from a clean turn. *)
+  | Internal_bridge_exception
+    (** Internal bridge (AGENT_CORE/stream) exception escaped the turn driver. *)
+  | Internal_contract_rejected
+    (** Internal contract was rejected by the turn driver. *)
+  | Incomplete_tool_transcript
+    (** Tool transcript was quarantined as incomplete. *)
+  | Terminal_effect_failed
+    (** A terminal tool effect failed after the turn's terminal outcome. *)
+  | Provider_attempt_effect_fenced
+    (** A provider failure cannot be retried without risking a duplicate effect. *)
+  | Tool_correction_lost
+    (** The fenced turn also carried typed pre_tool_use rejections: the
+        model's correction round-trip was the casualty (masc#28885). *)
+  | Receipt_persistence_failed
+    (** Execution receipt persistence failed. *)
+  | Gate_replay_repair_required
+    (** Gate replay repair was required for an approval/effect. *)
 
 let blocker_class_to_string = function
   | Runtime_exhausted _ -> "runtime_exhausted"
   | Capacity_backpressure -> "capacity_backpressure"
   | Fiber_unresolved -> "fiber_unresolved"
   | Stale_turn_timeout -> "stale_turn_timeout"
-  | Sdk_context_window_exceeded -> "sdk_context_window_exceeded"
-  | Sdk_unrecognized_stop_reason -> "sdk_unrecognized_stop_reason"
-  | Sdk_guardrail_violation -> "sdk_guardrail_violation"
-  | Sdk_tripwire_violation -> "sdk_tripwire_violation"
-  | Sdk_input_required -> "sdk_input_required"
+  | Agent_core_context_window_exceeded -> "agent_core_context_window_exceeded"
+  | Agent_core_unrecognized_stop_reason -> "agent_core_unrecognized_stop_reason"
+  | Agent_core_guardrail_violation -> "agent_core_guardrail_violation"
+  | Agent_core_tripwire_violation -> "agent_core_tripwire_violation"
+  | Agent_core_input_required -> "agent_core_input_required"
+  | Internal_unhandled_exception -> "internal_unhandled_exception"
+  | Internal_bridge_exception -> "internal_bridge_exception"
+  | Internal_contract_rejected -> "internal_contract_rejected"
+  | Incomplete_tool_transcript -> "incomplete_tool_transcript"
+  | Terminal_effect_failed -> "terminal_effect_failed"
+  | Provider_attempt_effect_fenced -> "provider_attempt_effect_fenced"
+  | Tool_correction_lost -> "tool_correction_lost"
+  | Receipt_persistence_failed -> "receipt_persistence_failed"
+  | Gate_replay_repair_required -> "gate_replay_repair_required"
 ;;
 
 let blocker_class_of_serialized_string = function
@@ -134,11 +148,20 @@ let blocker_class_of_serialized_string = function
   | "capacity_backpressure" -> Some Capacity_backpressure
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "stale_turn_timeout" -> Some Stale_turn_timeout
-  | "sdk_context_window_exceeded" -> Some Sdk_context_window_exceeded
-  | "sdk_unrecognized_stop_reason" -> Some Sdk_unrecognized_stop_reason
-  | "sdk_guardrail_violation" -> Some Sdk_guardrail_violation
-  | "sdk_tripwire_violation" -> Some Sdk_tripwire_violation
-  | "sdk_input_required" -> Some Sdk_input_required
+  | "agent_core_context_window_exceeded" -> Some Agent_core_context_window_exceeded
+  | "agent_core_unrecognized_stop_reason" -> Some Agent_core_unrecognized_stop_reason
+  | "agent_core_guardrail_violation" -> Some Agent_core_guardrail_violation
+  | "agent_core_tripwire_violation" -> Some Agent_core_tripwire_violation
+  | "agent_core_input_required" -> Some Agent_core_input_required
+  | "internal_unhandled_exception" -> Some Internal_unhandled_exception
+  | "internal_bridge_exception" -> Some Internal_bridge_exception
+  | "internal_contract_rejected" -> Some Internal_contract_rejected
+  | "incomplete_tool_transcript" -> Some Incomplete_tool_transcript
+  | "terminal_effect_failed" -> Some Terminal_effect_failed
+  | "provider_attempt_effect_fenced" -> Some Provider_attempt_effect_fenced
+  | "tool_correction_lost" -> Some Tool_correction_lost
+  | "receipt_persistence_failed" -> Some Receipt_persistence_failed
+  | "gate_replay_repair_required" -> Some Gate_replay_repair_required
   | _ -> None
 ;;
 
@@ -181,56 +204,6 @@ type blocker_info = {
 
 let blocker_info_of_class ?(detail = "") klass = { klass; detail }
 
-let blocker_info_to_json (info : blocker_info) : Yojson.Safe.t =
-  let klass_payload = match info.klass with
-    | Runtime_exhausted reason ->
-      `Assoc [ "name", `String "runtime_exhausted"
-             ; "reason", runtime_exhaustion_reason_to_json reason
-             ]
-    | _ -> `String (blocker_class_to_string info.klass)
-  in
-  let fields =
-    [ "klass", klass_payload
-    ; "detail", `String info.detail
-    ]
-  in
-  `Assoc fields
-;;
-
-let blocker_info_of_json (json : Yojson.Safe.t) : blocker_info option =
-  match json with
-  | `Null -> None
-  | `Assoc fields ->
-    let klass =
-      match List.assoc_opt "klass" fields with
-      | Some (`String s) -> blocker_class_of_serialized_string s
-      | Some (`Assoc kfields) ->
-        (match List.assoc_opt "name" kfields with
-         | Some (`String "runtime_exhausted") ->
-           let reason =
-             match List.assoc_opt "reason" kfields with
-             | Some r ->
-               (match runtime_exhaustion_reason_of_json r with
-                | Some r -> r
-                | None -> Other_detail "runtime_exhausted")
-             | None -> Other_detail "runtime_exhausted"
-           in
-           Some (Runtime_exhausted reason)
-         | Some (`String s) -> blocker_class_of_serialized_string s
-         | _ -> None)
-      | _ -> None
-    in
-    (match klass with
-     | None -> None
-     | Some klass ->
-       let detail = match List.assoc_opt "detail" fields with
-         | Some (`String s) -> s
-         | _ -> ""
-       in
-       Some { klass; detail })
-  | _ -> None
-;;
-
 type runtime_attempt_record =
   { provider_id : string
   ; http_status : int option
@@ -244,22 +217,6 @@ let runtime_attempt_outcome_to_json = function
     `Assoc [ "kind", `String "failure"; "message", `String message ]
 ;;
 
-let runtime_attempt_outcome_of_json = function
-  | `Assoc fields ->
-    (match List.assoc_opt "kind" fields with
-     | Some (`String "success") -> Some `Success
-     | Some (`String "failure") ->
-       (match List.assoc_opt "message" fields with
-        | Some (`String message) -> Some (`Failure message)
-        (* DET-OK: retired attempt rows encoded failure without a message;
-           keep the lossy historical record instead of dropping it. *)
-        | _ -> Some (`Failure ""))
-     | _ -> None)
-  | `String "success" -> Some `Success
-  | `String "failure" -> Some (`Failure "")
-  | _ -> None
-;;
-
 let runtime_attempt_record_to_json (record : runtime_attempt_record) : Yojson.Safe.t =
   `Assoc
     [ "provider_id", `String record.provider_id
@@ -270,41 +227,6 @@ let runtime_attempt_record_to_json (record : runtime_attempt_record) : Yojson.Sa
     ; "outcome", runtime_attempt_outcome_to_json record.outcome
     ; "timestamp", `Float record.timestamp
     ]
-;;
-
-let runtime_attempt_record_of_json (json : Yojson.Safe.t)
-  : runtime_attempt_record option
-  =
-  match json with
-  | `Null -> None
-  | `Assoc fields ->
-    let provider_id =
-      match List.assoc_opt "provider_id" fields with
-      | Some (`String value) -> Some value
-      | _ -> None
-    in
-    let http_status =
-      match List.assoc_opt "http_status" fields with
-      | Some (`Int status) -> Some status
-      | Some `Null | None -> None
-      | _ -> None
-    in
-    let outcome =
-      match List.assoc_opt "outcome" fields with
-      | Some value -> runtime_attempt_outcome_of_json value
-      | None -> None
-    in
-    let timestamp =
-      match List.assoc_opt "timestamp" fields with
-      | Some (`Float value) -> Some value
-      | Some (`Int value) -> Some (float_of_int value)
-      | _ -> None
-    in
-    (match provider_id, outcome, timestamp with
-     | Some provider_id, Some outcome, Some timestamp ->
-       Some { provider_id; http_status; outcome; timestamp }
-     | _ -> None)
-  | _ -> None
 ;;
 
 type usage_metrics =
@@ -344,19 +266,9 @@ type agent_runtime_state =
   { usage : usage_metrics
   ; compaction_rt : compaction_runtime
   ; proactive_rt : proactive_runtime
-  ; nonce : int
   ; trace_id : Keeper_id.Trace_id.t
   ; trace_history : string list
   ; last_handoff_ts : float
-  ; last_autonomous_action_at : string
-  ; autonomous_action_count : int
-  ; autonomous_turn_count : int
-  ; autonomous_text_turn_count : int
-  ; autonomous_tool_turn_count : int
-  ; board_reactive_turn_count : int
-  ; mention_reactive_turn_count : int
-  ; noop_turn_count : int
-  ; last_blocker : blocker_info option
   ; last_runtime_attempt : runtime_attempt_record option
   ; message_scope_ack_id : string option
     (** Stable chat-row id of the newest message-scope row actually injected
@@ -368,8 +280,12 @@ type keeper_meta =
     id : Ids.Keeper_id.t option [@default None]
   ; name : string
   ; agent_name : string
-  ; persona : string option
   ; instructions : string
+  ; autonomous_instructions : string option
+    (** Per-keeper autonomous-turn instructions. When non-empty and the turn
+        channel is Scheduled_autonomous, this replaces [instructions] in the
+        system prompt. When absent, autonomous turns fall back to
+        [instructions] — zero behavioral change for keepers that don't set it. *)
   ; (* -- Policy -- *)
     sandbox_profile : Keeper_types_profile.sandbox_profile
   ; sandbox_image : string option
@@ -384,13 +300,12 @@ type keeper_meta =
   ; (* -- Performance & Limits -- *)
     max_context_override : int option
   ; (* -- Operational control (top-level, not runtime) -- *)
-    active_goal_ids : string list
-  ; paused : bool
+    paused : bool
   ; latched_reason : Keeper_latched_reason.t option
-    (** Typed companion to [paused]. Explicit operator pause, terminal
-        dead-tombstone, and transcript-corruption reset-required paths may write
-        it. [None] while paused is a fail-closed unclassified state that
-        requires operator action. *)
+    (** Typed companion to [paused]. Explicit operator pause and
+        transcript-corruption reset-required paths may write it. [None] while
+        paused is a fail-closed unclassified state that requires operator
+        action. *)
   ; autoboot_enabled : bool
   ; current_task_id : Keeper_id.Task_id.t option
     (** Currently claimed task ID for cost attribution.
@@ -403,58 +318,21 @@ type keeper_meta =
     runtime : agent_runtime_state
   ; (* -- Identity & concurrency -- *)
     keeper_id : Keeper_id.Uid.t option
-  ; oas_env : (string * string) list
-  ; meta_version : int
+  ; agent_core_env : (string * string) list
+  ; tool_groups : string list option
+    (** RFC-0389: declared [keeper.tools.groups] from the keeper TOML profile.
+        [None] means no declaration → the full model surface ([All]). When set,
+        the per-turn tool bundle is narrowed to the declared groups (plus the
+        always-retained Core/Meta groups). *)
   }
 
-let mark_transcript_corruption_reset_required (m : keeper_meta) : keeper_meta =
-  { m with
-    paused = true
-  ; latched_reason = Some Keeper_latched_reason.Transcript_corruption_reset_required
-  ; updated_at = now_iso ()
-  }
-;;
-
-(* Sanctioned generic unpause transform. Reset-required transcript and terminal
-   dead-tombstone latches are deliberately immutable here. A dead identity is
-   deleted and recreated rather than revived. *)
+(* Sanctioned generic unpause transform. Every latch this type can carry is an
+   explicit operator pause, so resume clears it. *)
 let mark_resumed (m : keeper_meta) : keeper_meta =
-  match m.latched_reason with
-  | Some
-      ( Keeper_latched_reason.Transcript_corruption_reset_required
-      | Keeper_latched_reason.Dead_tombstone ) ->
-    m
-  | Some (Keeper_latched_reason.Operator_paused _)
-  | None ->
-    { m with
-      paused = false
-    ; latched_reason = None
-    ; runtime = { m.runtime with last_blocker = None }
-    }
-;;
-
-(* Write-boundary invariant: terminal/reset-required latches must co-occur
-   with [paused = true]. Admission denies them by latch identity even if a
-   stale writer cleared [paused], so reject that split instead of repairing it
-   silently. *)
-let terminal_latch_pause_violation (m : keeper_meta) : string option =
-  (* Exhaustive on [latched_reason] for the [paused = false] rows (no [_]
-     catch-all): a future terminal latch variant must force a decision here
-     rather than silently escaping the write-boundary guard. A non-terminal
-     latch with [paused = false] is admission-[Active] (recoverable), so it is
-     not a violation. [paused = true] is always consistent with any latch. *)
-  match m.paused, m.latched_reason with
-  | false,
-    Some
-      (( Keeper_latched_reason.Dead_tombstone
-       | Keeper_latched_reason.Transcript_corruption_reset_required ) as reason) ->
-    Some
-      (Printf.sprintf
-         "keeper %s: paused=false with terminal/reset-required latch %s"
-         m.name
-         (Keeper_latched_reason.to_wire reason))
-  | false, (Some (Keeper_latched_reason.Operator_paused _) | None) -> None
-  | true, _ -> None
+  { m with
+    paused = false
+  ; latched_reason = None
+  }
 ;;
 
 let apply_profile_default opt current =
@@ -511,7 +389,6 @@ let effective_meta_of_profile_defaults
       in
       Ok
         { meta with
-          persona = apply_profile_default_opt defaults.persona_name meta.persona;
           proactive =
             { enabled =
                 apply_profile_default defaults.proactive_enabled
@@ -519,6 +396,9 @@ let effective_meta_of_profile_defaults
             };
           instructions =
             apply_profile_default defaults.instructions meta.instructions;
+          autonomous_instructions =
+            apply_profile_default_opt defaults.autonomous_instructions
+              meta.autonomous_instructions;
           autoboot_enabled =
             apply_profile_default defaults.autoboot_enabled
               meta.autoboot_enabled;
@@ -526,8 +406,6 @@ let effective_meta_of_profile_defaults
             (match defaults.mention_targets with
              | [] -> meta.mention_targets
              | targets -> targets);
-          active_goal_ids =
-            apply_profile_default defaults.active_goal_ids meta.active_goal_ids;
           max_context_override =
             apply_profile_default_opt defaults.max_context_override
               meta.max_context_override;
@@ -551,10 +429,12 @@ let effective_meta_of_profile_defaults
           always_allow =
             apply_profile_default_opt defaults.always_allow
               meta.always_allow;
-          oas_env =
-            (match defaults.oas_env with
-             | [] -> meta.oas_env
+          agent_core_env =
+            (match defaults.agent_core_env with
+             | [] -> meta.agent_core_env
              | env -> env);
+          tool_groups =
+            apply_profile_default_opt defaults.tool_groups meta.tool_groups;
         }
 ;;
 
@@ -573,12 +453,9 @@ let effective_meta_result ~base_path (meta : keeper_meta) : (keeper_meta, string
   | Ok defaults -> effective_meta_of_profile_defaults defaults meta
 ;;
 
-(* persona⊥{model,runtime}: a keeper's runtime is assigned in runtime.toml
-   ([[runtime.assignments]], the sole SSOT), keyed by keeper name — NOT read
-   from the persona profile [model] field. An unassigned keeper falls to the
-   default runtime (the designed fallback; RFC-0206 §2.1 fail-fast still applies
-   to the default itself). The id is opaque here; only the OAS adapter parses
-   it. *)
+(* A keeper's runtime is assigned in runtime.toml ([[runtime.assignments]],
+   the sole SSOT), keyed by keeper name. An unassigned keeper uses the default
+   runtime. The id is opaque here; only the AGENT_CORE adapter parses it. *)
 let runtime_id_of_meta (meta : keeper_meta) =
   match Runtime.runtime_id_for_keeper meta.name with
   | Some runtime_id when String.trim runtime_id <> "" -> String.trim runtime_id
@@ -644,8 +521,6 @@ let () =
 
 (* -- Updater helpers -- *)
 
-let now_iso () = Masc_domain.now_iso ()
-
 let map_runtime (f : agent_runtime_state -> agent_runtime_state) (m : keeper_meta)
   : keeper_meta
   =
@@ -681,35 +556,3 @@ let map_compaction_rt (f : compaction_runtime -> compaction_runtime) (m : keeper
   { m with runtime = { m.runtime with compaction_rt = f m.runtime.compaction_rt } }
 ;;
 
-let map_proactive_rt (f : proactive_runtime -> proactive_runtime) (m : keeper_meta)
-  : keeper_meta
-  =
-  { m with runtime = { m.runtime with proactive_rt = f m.runtime.proactive_rt } }
-;;
-
-let removed_keeper_model_arg_names = [ "models"; "allowed_models"; "active_model" ]
-
-let reject_removed_model_args ~tool_name (args : Yojson.Safe.t) =
-  let present =
-    removed_keeper_model_arg_names
-    |> List.filter (fun key ->
-      (* A legacy arg counts as "present" only when supplied with a real value.
-         [assoc_member_opt] returns [None] for an absent key; the prior
-         [| _ -> true] arm classified that [None] as present, so a request
-         that simply omitted all three keys (e.g. the [{name}] used by base
-         autoboot materialization) was rejected as if it had passed them.
-         Absent ([None]) and explicit-null are both "not supplied". *)
-      match Json_util.assoc_member_opt key args with
-      | None | Some `Null -> false
-      | Some _ -> true)
-  in
-  match present with
-  | [] -> Ok ()
-  | fields ->
-    Error
-      (Printf.sprintf
-         "removed keeper model args for %s: %s. Use runtime_id; concrete \
-          provider/model identity is resolved from the default runtime."
-         tool_name
-         (String.concat ", " fields))
-;;

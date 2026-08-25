@@ -4,11 +4,10 @@ import type { KeeperConversationEntry } from './types'
 // Per-keeper "last-seen" cursor. The stored value is the newest chat entry
 // `ts` (unix seconds) the operator has actually observed in that keeper's
 // transcript — NOT wall-clock time. Anchoring on the entry ts (rather than
-// Date.now()) keeps the cursor immune to client/server clock skew and makes
-// the since-last-seen digest deterministic: the server echoes the same
-// since_unix it was queried with.
+// Date.now()) keeps the cursor immune to client/server clock skew, so the
+// unread divider lands on the same entry on every device.
 //
-// Storage/normalize conventions are cloned from keeper-chat-pending.ts
+// Storage/normalize conventions are cloned from keeper-chat-operations-local.ts
 // (try/catch storage() wrapper, normalize-on-read dropping malformed values,
 // a _clear...ForTests reset). The reactive signal is the render source of
 // truth; localStorage is the durability layer.

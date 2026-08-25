@@ -406,8 +406,6 @@ let test_delete_post_rewrites_persisted_snapshots () =
     0
     (Hashtbl.length store.dirty_comment_ids)
 
-(** {1 JSON serialisation} *)
-
 let test_karma_event_json_fields () =
   let post = create_post_exn ~author:"alice" ~content:"json test" in
   let pid = Board.Post_id.to_string post.id in

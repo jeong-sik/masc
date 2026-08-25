@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0044", "0062", "0063", "0071"]
-implementation_prs: [15054]
 ---
 
 # RFC-0077 — Write-side silent failure: typed propagation
@@ -42,7 +41,7 @@ keeper_supervisor.ml:2061      auto-resume meta write failed             -> warn
 keeper_turn_runtime_budget.ml:675  overflow pause write_meta failed      -> warn + continue
 keeper_agent_memory_episode.ml:103 episode_create failed                 -> error log + None
 keeper_agent_memory_episode.ml:192 failed_turn_episode_create failed     -> error log + None
-keeper_checkpoint_store.ml:279     OAS snapshot archive write failed     -> warn + drop archive
+keeper_checkpoint_store.ml:279     agent_core snapshot archive write failed     -> warn + drop archive
 keeper_crash_persistence.ml:135    crash persistence write failed        -> warn + lose crash record
 keeper_approval_queue.ml:430       upsert_rule: save failed              -> warn + in-memory only
 keeper_alerting.ml:554             alert JSONL write failed              -> error + drop alert
@@ -164,7 +163,7 @@ This is *behavior change at migration boundaries only*. PR-1 alone is byte-compa
 
 - **Q1**: Should `Read_drop_reason.t` (RFC-0044) and `Write_failure_reason.t` (this RFC) unify into `Persistence_failure_reason.t` with read/write phantom-type discriminator? **Decision**: defer. Unification is mechanical once both RFCs reach `Active`. Premature unification couples migration cadence.
 - **Q2**: `Meta_cas_conflict` retry policy — caller-level retry vs cycle-level retry? RFC-0026 (Work-Conserving Admission) suggests cycle-level. **Decision**: per-migration in PR-2 sub-steps.
-- **Q3**: How to handle the cross-module case `keeper_agent_memory_episode.ml` calling into `Workspace` / OAS? Result must propagate through the boundary or be absorbed at the boundary with explicit `Episode_create_error` annotation. **Decision**: PR-3 surfaces this question in the sub-PR.
+- **Q3**: How to handle the cross-module case `keeper_agent_memory_episode.ml` calling into `Workspace` / agent_core? Result must propagate through the boundary or be absorbed at the boundary with explicit `Episode_create_error` annotation. **Decision**: PR-3 surfaces this question in the sub-PR.
 
 ## 8. Acceptance
 

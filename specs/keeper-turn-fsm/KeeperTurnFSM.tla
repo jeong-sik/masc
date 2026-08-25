@@ -11,13 +11,13 @@
 \* Sibling specs cover orthogonal angles:
 \*   - KeeperTurnCycle (3-axis: turn_phase / decision_stage / runtime_state)
 \*     models cross-axis synchronization for the *live* observation record.
-\*   - KeeperOASAdvanced models the OAS bridge cancel/error boundary.
+\*   - Agent Core bridge tests cover the cancel/error boundary.
 \*
 \* This spec is the COMPOSITE of "turn state" + "receipt outcome" + "stop
 \* signal" — the only place in the corpus where ReceiptIsAuthoritative
 \* and StopSignalRespected are jointly checkable. That is the
 \* load-bearing reason it is not redundant with KeeperTurnCycle (which
-\* has no receipt axis) or KeeperOASAdvanced (which has no per-turn
+\* has no receipt axis) or the Agent Core bridge tests (which have no per-turn
 \* state lattice).
 \*
 \* OCaml <-> TLA+ mapping:

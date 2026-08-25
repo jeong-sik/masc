@@ -23,12 +23,6 @@
     - docs/rfc/RFC-0203-discord-builtin-gateway.md §Modules
     - Discord Developer Docs — Gateway v10 opcodes and lifecycle *)
 
-(** {1 Identity} *)
-
-(** The protocol version we speak. Pinned, single-valued (Discord
-    promises v10 stability; future bumps are a separate RFC). *)
-val protocol_version : int  (** [10]. *)
-
 (** {1 Opcodes — closed sum of the ones we handle} *)
 
 (** Discord Gateway opcodes. Closed sum: only the opcodes this client

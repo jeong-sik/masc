@@ -3,7 +3,7 @@ import {
   SCHED_CADENCE,
   SCHED_CADENCE_ORDER,
   SCHED_TERMINAL,
-  SCHED_TERMINAL_NORMALIZED,
+  SCHED_TERMINAL_SET,
   cadenceOfRecurrenceKind,
   parseRecurrenceKind,
   type Cadence,
@@ -11,11 +11,14 @@ import {
 } from './schedule-constants'
 
 describe('parseRecurrenceKind', () => {
-  it('accepts the closed backend recurrence set (case/space-insensitive)', () => {
+  it('accepts only the exact closed backend recurrence set', () => {
     expect(parseRecurrenceKind('one_shot')).toBe('one_shot')
-    expect(parseRecurrenceKind('Interval')).toBe('interval')
-    expect(parseRecurrenceKind('  daily ')).toBe('daily')
+    expect(parseRecurrenceKind('interval')).toBe('interval')
+    expect(parseRecurrenceKind('daily')).toBe('daily')
     expect(parseRecurrenceKind('cron')).toBe('cron')
+    expect(parseRecurrenceKind('oneshot')).toBeNull()
+    expect(parseRecurrenceKind('Interval')).toBeNull()
+    expect(parseRecurrenceKind('  daily ')).toBeNull()
   })
 
   it('returns null for anything outside the set — never a permissive default', () => {
@@ -50,10 +53,10 @@ describe('cadence display specs', () => {
   })
 })
 
-describe('SCHED_TERMINAL_NORMALIZED', () => {
-  it('is the lowercased projection of SCHED_TERMINAL (one source, live casing)', () => {
-    expect(SCHED_TERMINAL_NORMALIZED).toEqual(new Set(SCHED_TERMINAL.map(status => status.toLowerCase())))
-    expect(SCHED_TERMINAL_NORMALIZED.has('cancelled')).toBe(true)
-    expect(SCHED_TERMINAL_NORMALIZED.has('scheduled')).toBe(false)
+describe('SCHED_TERMINAL_SET', () => {
+  it('is the exact set projected from SCHED_TERMINAL', () => {
+    expect(SCHED_TERMINAL_SET).toEqual(new Set(SCHED_TERMINAL))
+    expect(SCHED_TERMINAL_SET.has('cancelled')).toBe(true)
+    expect(SCHED_TERMINAL_SET.has('scheduled')).toBe(false)
   })
 })

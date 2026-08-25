@@ -39,19 +39,19 @@ describe('buildCompositeFsmMermaid', () => {
     expect(src).toContain('kcl_idle["idle"]')
   })
 
-  it('covers the full KSM state surface (13 phases)', () => {
+  it('covers the full KSM state surface (11 phases)', () => {
     const ksm = [
-      'Offline', 'Running', 'Failing', 'Overflowed', 'Compacting',
+      'Offline', 'Running', 'Failing', 'Compacting',
       'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed',
-      'Restarting', 'Dead',
+      'Restarting',
     ]
     for (const label of ksm) {
       expect(src).toContain(`"${label}"`)
     }
   })
 
-  it('tags Stopped and Dead as terminal states', () => {
-    expect(src).toMatch(/class .*ksm_stopped.*ksm_dead.*terminal/)
+  it('tags Stopped as the terminal state', () => {
+    expect(src).toMatch(/class .*ksm_stopped.*terminal/)
   })
 
   it('does not emit duplicate top-level node ids (no un-prefixed collisions)', () => {

@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { cleanup, render, screen, waitFor } from '@testing-library/preact'
+import { cleanup, render, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { DashboardKeeperWaitingInventory } from '../../api'
@@ -10,9 +10,13 @@ const mocks = vi.hoisted(() => ({
   unregisterPush: vi.fn(),
 }))
 
-vi.mock('../../api', () => ({
-  fetchKeeperWaitingInventory: mocks.fetchKeeperWaitingInventory,
-}))
+vi.mock('../../api', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../api')>()
+  return {
+    ...actual,
+    fetchKeeperWaitingInventory: mocks.fetchKeeperWaitingInventory,
+  }
+})
 vi.mock('../../sse-store', () => ({
   registerKeeperWaitingInventoryRefresh: vi.fn((refresh: (keeperName: string) => void) => {
     mocks.refresh = refresh
@@ -43,6 +47,7 @@ function inventory(): DashboardKeeperWaitingInventory {
         keeper_name: 'kidsnote',
         source: 'event_queue_pending',
         waiting_on: 'schedule_due',
+        what: '예약 실행 시각 도래 · daily-news',
         next_action: 'keeper_consume_event',
       }],
     }],
@@ -60,8 +65,14 @@ describe('KeeperLaneSection', () => {
     mocks.fetchKeeperWaitingInventory.mockResolvedValue(inventory())
     render(html`<${KeeperLaneSection} keeper=${{ name: 'kidsnote', agent_name: 'agent-kidsnote' }} />`)
 
-    await waitFor(() => expect(screen.getByText('처리 대기 중')).toBeTruthy())
-    expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(1)
+    // Wait on the two things this test is named for -- the push registration and
+    // the first read -- rather than on a caption. The previous wait was for the
+    // literal '처리 대기 중', which a copy sweep renamed to '대기 중'; the test
+    // then timed out on a component that was working.
+    await waitFor(() => {
+      expect(mocks.refresh).not.toBeNull()
+      expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(1)
+    })
 
     mocks.refresh?.('rondo')
     expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(1)

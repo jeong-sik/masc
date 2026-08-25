@@ -107,7 +107,6 @@ type pending_approval =
   ; request_context : Yojson.Safe.t option
   ; task_id : string option
   ; goal_id : string option
-  ; goal_ids : string list
   ; continuation_channel : Keeper_continuation_channel.t
   ; audit_base_path : string
   ; summary_status : summary_status
@@ -121,7 +120,6 @@ module Decision : sig
   type t =
     | Approve
     | Reject of string
-    | Edit of Yojson.Safe.t
 end
 
 type decision = Decision.t
@@ -130,6 +128,19 @@ type decision_source =
   | Always_allowed
   | Auto_judge
   | Human_operator
+
+(** Which standing authority produced an [Always_allowed] decision.
+    [decision_source] answers who decided; this answers under what. The four
+    are not interchangeable: [Exact_always_rule] and [One_shot_resolution] are
+    an operator acting on one request, while [Keeper_always_allow] and
+    [Workspace_always_allow] are blanket permissions that were granted once and
+    then applied to everything afterwards. Recording only [Always_allowed]
+    leaves an audit reader unable to tell those apart. *)
+type authorization_source =
+  | One_shot_resolution
+  | Exact_always_rule
+  | Keeper_always_allow
+  | Workspace_always_allow
 
 (** An immutable exact Always Allowed rule. Its identity is the workspace-local
     Keeper, opaque operation identity, and complete normalized effect input;
@@ -163,15 +174,14 @@ type rule_store_error =
   ; reason : string
   }
 
-type resolution_result = { remembered_rule : approval_rule option }
-
 val advisory_judgment_to_string : advisory_judgment -> string
 val advisory_judgment_values : string list
 val advisory_judgment_of_string : string -> advisory_judgment option
 val approval_decision_to_string : decision -> string
 val decision_source_to_string : decision_source -> string
 val decision_source_of_string : string -> decision_source option
-val string_opt_of_json : Yojson.Safe.t -> string option
+val authorization_source_to_string : authorization_source -> string
+val authorization_source_of_string : string -> authorization_source option
 val bool_member : string -> Yojson.Safe.t -> default:bool -> bool
 val rule_match_to_yojson : rule_match -> Yojson.Safe.t
 

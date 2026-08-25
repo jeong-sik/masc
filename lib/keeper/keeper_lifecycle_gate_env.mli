@@ -1,7 +1,7 @@
 (** RFC-0297 Phase 1 (P0-1): impure shell + SSOT resolver for the keeper
     lifecycle gates. The gate LOGIC stays in the pure {!Keeper_lifecycle_gate};
     this module owns the env read and the [keeper_meta] projection
-    (RFC-OAS-024 pure-core / impure-shell). Every call site resolves a gate
+    (Agent Core contract pure-core / impure-shell). Every call site resolves a gate
     through {!enabled}, so the enabled decision is never re-derived inline. *)
 
 (** Global lifecycle kill-switches read from the feature-flag registry

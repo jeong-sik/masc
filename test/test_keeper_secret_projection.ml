@@ -53,16 +53,6 @@ let read_file path =
   really_input_string ic (in_channel_length ic)
 ;;
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop i =
-    if nlen = 0 then true
-    else if i + nlen > hlen then false
-    else if String.sub haystack i nlen = needle then true
-    else loop (i + 1)
-  in
-  loop 0
 ;;
 
 let assoc_member name = function
@@ -174,9 +164,9 @@ let test_env_and_files_project_to_docker_args () =
   | Ok projection ->
     let args = String.concat " " projection.docker_args in
     Alcotest.(check bool) "raw secret not in argv" false
-      (contains_substring args "projected_secret");
+      (String_util.contains_substring args "projected_secret");
     Alcotest.(check bool) "ssh file mounted read-only" true
-      (contains_substring
+      (String_util.contains_substring
          args
          (ssh_path ^ ":/home/keeper/.ssh/id_ed25519:ro"));
     (match env_file_arg projection.docker_args with
@@ -186,9 +176,9 @@ let test_env_and_files_project_to_docker_args () =
        Alcotest.(check bool)
          "env file content"
          true
-         (contains_substring env "SERVICE_TOKEN=projected_secret\n");
+         (String_util.contains_substring env "SERVICE_TOKEN=projected_secret\n");
        Alcotest.(check bool) "no product-specific env synthesized" false
-         (contains_substring env "GIT_CONFIG_GLOBAL=");
+         (String_util.contains_substring env "GIT_CONFIG_GLOBAL=");
        projection.cleanup ();
        Alcotest.(check bool) "env file cleaned up" false (Sys.file_exists env_file))
 ;;
@@ -219,7 +209,7 @@ let test_secret_dir_override_uses_keeper_subdir () =
           | None -> Alcotest.fail "missing --env-file"
           | Some env_file ->
             Alcotest.(check bool) "override env content" true
-              (contains_substring (read_file env_file) "SERVICE_TOKEN=override\n");
+              (String_util.contains_substring (read_file env_file) "SERVICE_TOKEN=override\n");
             projection.cleanup ()))
 ;;
 
@@ -239,7 +229,7 @@ let test_base_secret_env_and_files_project_to_keeper_docker_args () =
   match
     Keeper_secret_projection.docker_args_for_keeper
       ~base_path:base
-      ~keeper_name:"idealist"
+      ~keeper_name:"fixture-keeper"
       ~container_name:"container"
       ()
   with
@@ -250,14 +240,14 @@ let test_base_secret_env_and_files_project_to_keeper_docker_args () =
      | Some env_file ->
        let env = read_file env_file in
        Alcotest.(check bool) "base token projected" true
-         (contains_substring env "SERVICE_TOKEN=base-token\n");
+         (String_util.contains_substring env "SERVICE_TOKEN=base-token\n");
        Alcotest.(check bool) "no product-specific env projected" false
-         (contains_substring env "GIT_CONFIG_GLOBAL="));
+         (String_util.contains_substring env "GIT_CONFIG_GLOBAL="));
     let args = String.concat " " projection.docker_args in
     Alcotest.(check bool) "base ssh file mounted" true
-      (contains_substring args (ssh_path ^ ":/home/keeper/.ssh/id_ed25519:ro"));
+      (String_util.contains_substring args (ssh_path ^ ":/home/keeper/.ssh/id_ed25519:ro"));
     Alcotest.(check bool) "no generated product config mounted" false
-      (contains_substring args ":/tmp/masc-runtime/.masc/gitconfig:ro");
+      (String_util.contains_substring args ":/tmp/masc-runtime/.masc/gitconfig:ro");
     projection.cleanup ()
 ;;
 
@@ -266,7 +256,7 @@ let test_keeper_secret_overrides_base_secret_entries () =
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   with_env "MASC_SECRET_DIR" "" @@ fun () ->
   let base_root = base_secret_root_default ~base in
-  let keeper_root = secret_root_default ~base ~keeper_name:"idealist" in
+  let keeper_root = secret_root_default ~base ~keeper_name:"fixture-keeper" in
   let base_ssh =
     Filename.concat
       (Filename.concat base_root "files")
@@ -284,7 +274,7 @@ let test_keeper_secret_overrides_base_secret_entries () =
   match
     Keeper_secret_projection.docker_args_for_keeper
       ~base_path:base
-      ~keeper_name:"idealist"
+      ~keeper_name:"fixture-keeper"
       ~container_name:"container"
       ()
   with
@@ -295,14 +285,14 @@ let test_keeper_secret_overrides_base_secret_entries () =
      | Some env_file ->
        let env = read_file env_file in
        Alcotest.(check bool) "keeper token wins" true
-         (contains_substring env "SERVICE_TOKEN=keeper-token\n");
+         (String_util.contains_substring env "SERVICE_TOKEN=keeper-token\n");
        Alcotest.(check bool) "base token omitted" false
-         (contains_substring env "SERVICE_TOKEN=base-token\n"));
+         (String_util.contains_substring env "SERVICE_TOKEN=base-token\n"));
     let args = String.concat " " projection.docker_args in
     Alcotest.(check bool) "keeper ssh mount wins" true
-      (contains_substring args (keeper_ssh ^ ":/home/keeper/.ssh/id_ed25519:ro"));
+      (String_util.contains_substring args (keeper_ssh ^ ":/home/keeper/.ssh/id_ed25519:ro"));
     Alcotest.(check bool) "base ssh mount omitted" false
-      (contains_substring args (base_ssh ^ ":/home/keeper/.ssh/id_ed25519:ro"));
+      (String_util.contains_substring args (base_ssh ^ ":/home/keeper/.ssh/id_ed25519:ro"));
     projection.cleanup ()
 ;;
 
@@ -421,7 +411,7 @@ let test_local_env_inherits_base_secret_without_product_rewrite () =
     Keeper_secret_projection.local_env_for_keeper
       ~host_env
       ~base_path:base
-      ~keeper_name:"idealist"
+      ~keeper_name:"fixture-keeper"
       ()
   with
   | Error err -> Alcotest.fail err
@@ -453,7 +443,7 @@ let test_invalid_env_name_rejects () =
   | Ok _ -> Alcotest.fail "expected invalid env name rejection"
   | Error err ->
     Alcotest.(check bool) "mentions invalid env name" true
-      (contains_substring err "invalid keeper secret env name")
+      (String_util.contains_substring err "invalid keeper secret env name")
 ;;
 
 let test_symlink_file_rejects () =
@@ -478,7 +468,7 @@ let test_symlink_file_rejects () =
   | Ok _ -> Alcotest.fail "expected symlink rejection"
   | Error err ->
     Alcotest.(check bool) "mentions symlink" true
-      (contains_substring err "symlink")
+      (String_util.contains_substring err "symlink")
 ;;
 
 let test_symlink_env_dir_rejects () =
@@ -505,7 +495,7 @@ let test_symlink_env_dir_rejects () =
        | Ok _ -> Alcotest.fail "expected env directory symlink rejection"
        | Error err ->
          Alcotest.(check bool) "mentions symlink" true
-           (contains_substring err "symlink"))
+           (String_util.contains_substring err "symlink"))
 ;;
 
 let test_dashboard_status_absent_root () =
@@ -567,9 +557,9 @@ let test_dashboard_status_redacts_values () =
   Alcotest.(check (list string)) "env names" [ "SECOND_SERVICE_TOKEN"; "SERVICE_TOKEN" ]
     (json_string_list "env_names" json);
   Alcotest.(check bool) "raw env value redacted" false
-    (contains_substring raw "ghs_dashboard_secret");
+    (String_util.contains_substring raw "ghs_dashboard_secret");
   Alcotest.(check bool) "shared env value redacted" false
-    (contains_substring raw "ghs_shared_dashboard_secret");
+    (String_util.contains_substring raw "ghs_shared_dashboard_secret");
   let roots = json_list "effective_roots" json in
   Alcotest.(check int) "effective root count" 2 (List.length roots);
   (match roots with
@@ -598,7 +588,7 @@ let test_dashboard_status_reports_projection_error () =
   in
   Alcotest.(check string) "status" "error" (json_string "status" json);
   Alcotest.(check bool) "mentions invalid env name" true
-    (contains_substring (Yojson.Safe.to_string json) "invalid keeper secret env name")
+    (String_util.contains_substring (Yojson.Safe.to_string json) "invalid keeper secret env name")
 ;;
 
 let test_set_and_delete_env_entry_updates_projection () =
@@ -641,9 +631,9 @@ let test_set_and_delete_env_entry_updates_projection () =
   Alcotest.(check string) "status" "ready" (json_string "status" json);
   Alcotest.(check int) "effective env count" 1 (json_int "env_count" json);
   Alcotest.(check bool) "shared value redacted" false
-    (contains_substring (Yojson.Safe.to_string json) "ghs_shared_from_ui");
+    (String_util.contains_substring (Yojson.Safe.to_string json) "ghs_shared_from_ui");
   Alcotest.(check bool) "keeper value redacted" false
-    (contains_substring (Yojson.Safe.to_string json) "ghs_keeper_from_ui");
+    (String_util.contains_substring (Yojson.Safe.to_string json) "ghs_keeper_from_ui");
   (match
      Keeper_secret_projection.delete_env_entry
        ~base_path:base
@@ -687,7 +677,7 @@ let test_set_env_entry_rejects_invalid_inputs () =
    | Ok () -> Alcotest.fail "expected invalid env name rejection"
    | Error msg ->
      Alcotest.(check bool) "mentions env name" true
-       (contains_substring msg "invalid keeper secret env name"));
+       (String_util.contains_substring msg "invalid keeper secret env name"));
   (match
      Keeper_secret_projection.set_env_entry
        ~base_path:base
@@ -699,7 +689,7 @@ let test_set_env_entry_rejects_invalid_inputs () =
    | Ok () -> Alcotest.fail "expected multiline value rejection"
    | Error msg ->
      Alcotest.(check bool) "mentions single-line" true
-       (contains_substring msg "single-line"))
+       (String_util.contains_substring msg "single-line"))
 ;;
 
 let test_set_and_delete_file_entry_updates_projection () =
@@ -751,9 +741,9 @@ let test_set_and_delete_file_entry_updates_projection () =
   Alcotest.(check string) "status" "ready" (json_string "status" json);
   Alcotest.(check int) "effective file count" 1 (json_int "file_count" json);
   Alcotest.(check bool) "shared file value redacted" false
-    (contains_substring (Yojson.Safe.to_string json) "SHARED");
+    (String_util.contains_substring (Yojson.Safe.to_string json) "SHARED");
   Alcotest.(check bool) "keeper file value redacted" false
-    (contains_substring (Yojson.Safe.to_string json) "KEEPER");
+    (String_util.contains_substring (Yojson.Safe.to_string json) "KEEPER");
   (match
      Keeper_secret_projection.docker_args_for_keeper
        ~base_path:base
@@ -765,9 +755,9 @@ let test_set_and_delete_file_entry_updates_projection () =
    | Ok projection ->
      let args = String.concat " " projection.docker_args in
      Alcotest.(check bool) "keeper file mount wins" true
-       (contains_substring args (keeper_path ^ ":" ^ container_path ^ ":ro"));
+       (String_util.contains_substring args (keeper_path ^ ":" ^ container_path ^ ":ro"));
      Alcotest.(check bool) "shared file mount omitted" false
-       (contains_substring args (shared_path ^ ":" ^ container_path ^ ":ro"));
+       (String_util.contains_substring args (shared_path ^ ":" ^ container_path ^ ":ro"));
      projection.cleanup ());
   (match
      Keeper_secret_projection.delete_file_entry
@@ -796,7 +786,7 @@ let test_set_and_delete_file_entry_updates_projection () =
    | Ok projection ->
      let args = String.concat " " projection.docker_args in
      Alcotest.(check bool) "shared file mount inherited" true
-       (contains_substring args (shared_path ^ ":" ^ container_path ^ ":ro"));
+       (String_util.contains_substring args (shared_path ^ ":" ^ container_path ^ ":ro"));
      projection.cleanup ());
   (match
      Keeper_secret_projection.delete_file_entry
@@ -825,7 +815,7 @@ let test_set_file_entry_rejects_invalid_inputs () =
    | Ok () -> Alcotest.fail "expected relative path rejection"
    | Error msg ->
      Alcotest.(check bool) "mentions absolute path" true
-       (contains_substring msg "absolute"));
+       (String_util.contains_substring msg "absolute"));
   (match
      Keeper_secret_projection.set_file_entry
        ~base_path:base
@@ -837,7 +827,7 @@ let test_set_file_entry_rejects_invalid_inputs () =
    | Ok () -> Alcotest.fail "expected traversal rejection"
    | Error msg ->
      Alcotest.(check bool) "mentions path component" true
-       (contains_substring msg "invalid keeper secret file path component"));
+       (String_util.contains_substring msg "invalid keeper secret file path component"));
   (match
      Keeper_secret_projection.set_file_entry
        ~base_path:base
@@ -848,7 +838,7 @@ let test_set_file_entry_rejects_invalid_inputs () =
    with
    | Ok () -> Alcotest.fail "expected NUL value rejection"
    | Error msg ->
-     Alcotest.(check bool) "mentions NUL" true (contains_substring msg "NUL"))
+     Alcotest.(check bool) "mentions NUL" true (String_util.contains_substring msg "NUL"))
 ;;
 
 let test_env_value_leading_hash_rejects () =
@@ -867,7 +857,7 @@ let test_env_value_leading_hash_rejects () =
   | Ok _ -> Alcotest.fail "expected leading-hash env value rejection"
   | Error err ->
     Alcotest.(check bool) "mentions docker env-file comment" true
-      (contains_substring err "docker --env-file")
+      (String_util.contains_substring err "docker --env-file")
 ;;
 
 let test_base_keeper_scope_mutation_rejected () =

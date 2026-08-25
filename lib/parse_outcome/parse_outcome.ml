@@ -37,8 +37,3 @@ let map (f : 'a -> 'b) (o : 'a t) : 'b t =
   match o with
   | Ok x -> Ok (f x)
   | Error _ as e -> e
-
-let to_option (o : 'a t) : 'a option =
-  match o with
-  | Ok x -> Some x
-  | Error _ -> None

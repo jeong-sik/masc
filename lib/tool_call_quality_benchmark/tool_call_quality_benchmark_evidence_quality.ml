@@ -1,7 +1,3 @@
-module Hashtbl = Stdlib.Hashtbl
-module List = Stdlib.List
-module String = Stdlib.String
-
 open Tool_call_quality_benchmark_types
 
 let semantic_selectors (benchmark_case : benchmark_case) =

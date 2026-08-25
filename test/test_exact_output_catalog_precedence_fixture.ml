@@ -1,4 +1,4 @@
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 module Registry = struct
   include Runtime_exact_output_registry
   include Runtime_exact_output_registry.For_testing
@@ -41,6 +41,7 @@ let replacement_target = "replacement-only-target"
 let replacement_runtime_target = "replacement_provider.replacement"
 let replacement_secondary_runtime_target = "replacement_provider.secondary"
 let replacement_secondary_target = "replacement-secondary-target"
+let unbound_target = "unbound-target"
 
 let catalog_toml
       ?(api_key_env = "")
@@ -120,21 +121,30 @@ let replacement_catalog =
     ()
 ;;
 
+let replacement_catalog_with_unbound_target =
+  replacement_catalog
+  ^ Printf.sprintf
+      "\n[[targets]]\nid = %S\nprovider_ref = \"replacement_provider\"\nmodel_id = \"missing-model\"\n"
+      unbound_target
+;;
+
 let runtime_toml
       ?hitl_slots
+      ?compaction_slots
       ?runtime_lane_candidates
       ?(include_board_attention = true)
       ?(include_hitl_auto_judge = true)
       lane_target
   =
-  let runtime_route, runtime_lane =
+  (* The lane declaration alone is what this fixture exercises; no [runtime]
+     scalar key points at it. *)
+  let runtime_lane =
     match runtime_lane_candidates with
-    | None -> "", ""
+    | None -> ""
     | Some candidates ->
-      ( "cross_verifier = \"verifiers\"\n"
-      , Printf.sprintf
-          "\n[runtime.lanes.verifiers]\nstrategy = \"ordered\"\ncandidates = [%s]\n"
-          (candidates |> List.map (Printf.sprintf "%S") |> String.concat ", ") )
+      Printf.sprintf
+        "\n[runtime.lanes.verifiers]\nstrategy = \"ordered\"\ncandidates = [%s]\n"
+        (candidates |> List.map (Printf.sprintf "%S") |> String.concat ", ")
   in
   let board_attention_lane =
     if include_board_attention
@@ -154,6 +164,7 @@ let runtime_toml
     else ""
   in
   let base =
+    let compaction_slots = Option.value ~default:[ lane_target ] compaction_slots in
     (Printf.sprintf
        {|[providers.replacement_provider]
 protocol = "openai-compatible-http"
@@ -183,13 +194,11 @@ max-request-body-bytes = 65536
 
 [runtime]
 default = "replacement_provider.replacement"
-%s
 
 [runtime.exact_output_lanes.compaction_exact]
-slots = [%S]
+slots = [%s]
 |}
-       runtime_route
-       lane_target)
+       (compaction_slots |> List.map (Printf.sprintf "%S") |> String.concat ", "))
     ^ board_attention_lane
     ^ runtime_lane
     ^ hitl_auto_judge_lane
@@ -218,7 +227,7 @@ let load_snapshot ~getenv catalog =
   let io : Exact_output.resolver_io = { getenv } in
   match Exact_output.load_resolver_snapshot ~io ~catalog () with
   | Ok snapshot -> snapshot
-  | Error _ -> Alcotest.fail "OAS control snapshot must load"
+  | Error _ -> Alcotest.fail "AGENT_CORE control snapshot must load"
 ;;
 
 let load_control_snapshot catalog = load_snapshot ~getenv:(fun _ -> Ok None) catalog
@@ -226,7 +235,7 @@ let load_control_snapshot catalog = load_snapshot ~getenv:(fun _ -> Ok None) cat
 let require_admitted snapshot target_id =
   match Exact_output.admit_target_ref snapshot target_id with
   | Ok _ -> ()
-  | Error _ -> Alcotest.failf "OAS control target %S must be admitted" target_id
+  | Error _ -> Alcotest.failf "AGENT_CORE control target %S must be admitted" target_id
 ;;
 
 let require_not_admitted snapshot target_id =
@@ -263,21 +272,8 @@ let require_reservation_inactive label = function
   | Ok () -> Alcotest.failf "%s accepted an inactive reservation" label
 ;;
 
-let require_replacement_base_changed label ~expected_generation ~actual_generation =
-  function
-  | Error
-      (Registry.Replacement_base_changed
-         { expected_generation = actual_expected
-         ; actual_generation = actual_actual
-         }) ->
-    Alcotest.(check (option int64))
-      (label ^ " expected generation")
-      expected_generation
-      actual_expected;
-    Alcotest.(check (option int64))
-      (label ^ " actual generation")
-      actual_generation
-      actual_actual
+let require_replacement_base_changed label = function
+  | Error Registry.Replacement_base_changed -> ignore label
   | Error error ->
     Alcotest.failf
       "%s returned the wrong failure: %s"
@@ -379,10 +375,10 @@ let test_closed_registry_transaction () =
        "not-committed transaction failed: %s"
        (Registry.publication_error_to_string error));
   let unchanged = current_registry "transaction fence leaked after abort" in
-  Alcotest.(check int64)
-    "abort preserves generation"
-    (Registry.generation baseline)
-    (Registry.generation unchanged);
+  Alcotest.(check bool)
+    "abort preserves the published registry"
+    true
+    (baseline == unchanged);
   require_transaction_lane
     "abort preserves lane"
     ~lane_id:"transaction-a"
@@ -399,10 +395,10 @@ let test_closed_registry_transaction () =
        "committed transaction failed: %s"
        (Registry.publication_error_to_string error));
   let committed = current_registry "transaction fence leaked after commit" in
-  Alcotest.(check int64)
-    "commit advances generation once"
-    (Int64.succ (Registry.generation baseline))
-    (Registry.generation committed);
+  Alcotest.(check bool)
+    "commit replaces the published registry"
+    true
+    (not (baseline == committed));
   require_transaction_lane
     "commit publishes final lane"
     ~lane_id:"transaction-b"
@@ -561,10 +557,10 @@ let test_runtime_after_rename_converges_state () =
          "replacement_provider.alternate"
          (Runtime.get_default_runtime_id ());
        let converged = current_registry "after-rename transaction fence leaked" in
-       Alcotest.(check int64)
-         "after-rename registry advances generation once"
-         (Int64.succ (Registry.generation baseline))
-         (Registry.generation converged);
+       Alcotest.(check bool)
+         "after-rename registry replaces the published one"
+         true
+         (not (baseline == converged));
        require_transaction_lane
          "after-rename registry converges to B"
          ~lane_id:"transaction-b"

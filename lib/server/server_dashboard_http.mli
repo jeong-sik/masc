@@ -45,30 +45,7 @@ type approval_resolve_http_error =
 val approval_resolve_http_error_to_string :
   approval_resolve_http_error -> string
 
-val approval_resolve_decision_required_message : string
-
 (** {1 Board / memory / Gate HTTP entries} *)
-
-val handle_repository_observation_snapshot :
-  sw:Eio.Switch.t ->
-  clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  Httpun.Request.t ->
-  Httpun.Reqd.t ->
-  unit
-
-val dashboard_board_json :
-  ?config:Workspace.config ->
-  ?hearth:string ->
-  ?author_filter:string ->
-  ?sort_by:Board_dispatch.sort_order ->
-  ?exclude_system:bool ->
-  ?exclude_automation:bool ->
-  ?limit:int ->
-  ?offset:int ->
-  ?voter:string ->
-  ?blind_votes:bool ->
-  unit ->
-  Yojson.Safe.t
 
 val dashboard_memory_http_json :
   ?config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
@@ -78,6 +55,19 @@ val dashboard_gate_http_json :
 
 val dashboard_gate_tool_events_http_json :
   Httpun.Request.t -> base_path:string -> Yojson.Safe.t
+
+val dashboard_scheduled_automation_http_json :
+  config:Workspace.config -> Yojson.Safe.t
+(** Schedule projection for [GET /api/v1/dashboard/scheduled-automation],
+    cached and offloaded. Both the HTTP/1 router and the H2 gateway call this
+    rather than the projection directly, so the two transports cannot serve
+    different data or drift on cache policy. *)
+
+val dashboard_scheduled_automation_query_http_json :
+  config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
+(** Query-aware owner for the scheduled-automation route. With no [schedule_id]
+    it delegates to {!dashboard_scheduled_automation_http_json}; an exact lookup
+    reads the schedule store without populating a client-controlled cache key. *)
 
 val dashboard_proof_http_json :
   config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
@@ -110,12 +100,6 @@ val dashboard_planning_http_json :
   config:Workspace.config -> Yojson.Safe.t
 
 val dashboard_goals_tree_http_json :
-  config:Workspace.config -> Yojson.Safe.t
-
-val dashboard_goals_snapshot_json :
-  config:Workspace.config -> Yojson.Safe.t
-
-val dashboard_ide_snapshot_json :
   config:Workspace.config -> Yojson.Safe.t
 
 val dashboard_goal_detail_http_json :

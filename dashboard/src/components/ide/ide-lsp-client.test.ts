@@ -6,6 +6,7 @@ import {
   lspDiagnosticSnapshot,
   lspStatusSnapshot,
   parseLspStatusSnapshot,
+  publishLspScope,
   resolveLspDiagnosticFilePath,
 } from './ide-lsp-client'
 import {
@@ -59,6 +60,19 @@ class MockWebSocket {
   }
 }
 
+const MOCK_WORKSPACE_ROOT = '/workspace/masc'
+
+async function completeHandshake(socket: MockWebSocket): Promise<void> {
+  socket.open()
+  const initialize = JSON.parse(socket.sent[0]!) as { id: number }
+  socket.message({
+    id: initialize.id,
+    result: { masc: { workspaceRoot: MOCK_WORKSPACE_ROOT } },
+  })
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
 function installWebSocketMock(): void {
   mockSockets.length = 0
   vi.stubGlobal('WebSocket', MockWebSocket)
@@ -71,6 +85,9 @@ afterEach(() => {
   lspDiagnosticSnapshot.value = new Map()
   lspStatusSnapshot.value = EMPTY_LSP_STATUS_SNAPSHOT
   mockSockets.length = 0
+  // The published scope is process-wide, so a case that declares one must not
+  // decide what the next case connects with.
+  publishLspScope({ repoId: null, codebase: null, keeper: null })
 })
 
 describe('resolveLspDiagnosticFilePath', () => {
@@ -215,10 +232,12 @@ describe('LspConnection', () => {
     const conn = new LspConnection(() => {}, () => {})
     conn.connect()
     const socket = mockSockets[0]!
-    socket.open()
+    await completeHandshake(socket)
 
     const hover = conn.requestHover('lib/keeper/current.ml', 0, 0)
-    expect(socket.sent).toHaveLength(2)
+    // initialize, initialized, then the document request: a document cannot
+    // be named until the handshake reports the workspace tree.
+    expect(socket.sent).toHaveLength(3)
 
     socket.close({ code: 1011, reason: 'server restart', wasClean: false })
 
@@ -231,14 +250,16 @@ describe('LspConnection', () => {
     const conn = new LspConnection(() => {}, () => {})
     conn.connect()
     const oldSocket = mockSockets[0]!
-    oldSocket.open()
+    await completeHandshake(oldSocket)
 
     conn.connect()
     const currentSocket = mockSockets[1]!
-    currentSocket.open()
+    await completeHandshake(currentSocket)
 
     const hover = conn.requestHover('lib/keeper/current.ml', 0, 0)
-    expect(currentSocket.sent).toHaveLength(2)
+    // initialize, initialized, then the document request: a document cannot
+    // be named until the handshake reports the workspace tree.
+    expect(currentSocket.sent).toHaveLength(3)
 
     oldSocket.close({ code: 1006, wasClean: false })
     oldSocket.message({ id: 3, result: { contents: 'stale' } })
@@ -352,6 +373,85 @@ describe('LspConnection', () => {
     conn.dispose()
   })
 
+  // The connection URL is how the server learns which codebase this editor is
+  // looking at: it picks both the annotation partition the overlay reads and
+  // the tree our repo-relative document paths resolve against. Without it the
+  // server had to guess, and read the wrong store.
+  it('declares the repository scope on the connection URL', () => {
+    installWebSocketMock()
+    publishLspScope({
+      repoId: 'masc',
+      codebase: 'github.com_jeong-sik_masc',
+      keeper: null,
+    })
+    const conn = new LspConnection(() => {}, () => {})
+    conn.connect()
+    const url = new URL(mockSockets[0]!.url)
+    expect(url.searchParams.get('repo_id')).toBe('masc')
+    expect(url.searchParams.get('codebase')).toBe('github.com_jeong-sik_masc')
+    conn.dispose()
+  })
+
+  it('declares a keeper workspace without fabricating an overlay scope', () => {
+    installWebSocketMock()
+    publishLspScope({ repoId: null, codebase: null, keeper: 'analyst' })
+    const conn = new LspConnection(() => {}, () => {})
+    conn.connect()
+    const url = mockSockets[0]!.url
+    expect(url).toContain('keeper=analyst')
+    expect(url).not.toContain('codebase=')
+    conn.dispose()
+  })
+
+  it('declares no scope when none is published', () => {
+    installWebSocketMock()
+    publishLspScope({ repoId: null, codebase: null, keeper: null })
+    const conn = new LspConnection(() => {}, () => {})
+    conn.connect()
+    expect(mockSockets[0]!.url).toMatch(/\/api\/v1\/ide\/lsp$/)
+    conn.dispose()
+  })
+
+  // A repo-relative path prefixed with `file://` is not an absolute URI — its
+  // first segment lands in the authority slot — so the server rejected the
+  // document as outside its workspace and answered empty.
+  it('names documents with an absolute URI under the advertised root', async () => {
+    installWebSocketMock()
+    publishLspScope({
+      repoId: 'masc',
+      codebase: 'github.com_jeong-sik_masc',
+      keeper: null,
+    })
+    const conn = new LspConnection(() => {}, () => {})
+    conn.connect()
+    const socket = mockSockets[0]!
+    await completeHandshake(socket)
+
+    void conn.requestCodeLenses('lib/keeper/current.ml')
+    const request = JSON.parse(socket.sent[socket.sent.length - 1]!) as {
+      params: { textDocument: { uri: string } }
+    }
+    expect(request.params.textDocument.uri).toBe(
+      `file://${MOCK_WORKSPACE_ROOT}/lib/keeper/current.ml`,
+    )
+    conn.dispose()
+  })
+
+  // Before the handshake reports the tree there is no way to name a document,
+  // so a request must be skipped rather than sent with a guessed path.
+  it('sends no document request before the workspace root is known', async () => {
+    installWebSocketMock()
+    const conn = new LspConnection(() => {}, () => {})
+    conn.connect()
+    const socket = mockSockets[0]!
+    socket.open()
+
+    const lenses = await conn.requestCodeLenses('lib/keeper/current.ml')
+    expect(lenses.size).toBe(0)
+    expect(socket.sent).toHaveLength(1)
+    conn.dispose()
+  })
+
   it('routes notification send failures through reconnect instead of throwing', async () => {
     vi.useFakeTimers()
     installWebSocketMock()
@@ -361,7 +461,10 @@ describe('LspConnection', () => {
     const socket = mockSockets[0]!
     socket.open()
     const initialize = JSON.parse(socket.sent[0]!) as { id: number }
-    socket.message({ id: initialize.id, result: {} })
+    socket.message({
+      id: initialize.id,
+      result: { masc: { workspaceRoot: MOCK_WORKSPACE_ROOT } },
+    })
     await Promise.resolve()
 
     expect(socket.sent).toHaveLength(2)

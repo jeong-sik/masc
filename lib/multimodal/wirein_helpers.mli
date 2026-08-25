@@ -10,7 +10,7 @@
     - {!extract_raw_artifacts} — pull raw artifact JSON from a
       [working_context] bag.
     - {!upsert_workspace_meta} — record a workspace summary into
-      the OAS Checkpoint working_context.
+      the AGENT_CORE Checkpoint working_context.
 
     The wire-in body lives directly inside [Keeper_post_turn] (see
     [apply_multimodal_wirein] there) so we mirror the A5/A6 layout.

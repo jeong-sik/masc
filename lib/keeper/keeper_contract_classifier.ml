@@ -28,7 +28,7 @@ let of_keeper_world_observation
   : world_observation
   =
   {
-    unclaimed_task_count = observation.claimable_task_count;
+    unclaimed_task_count = Keeper_world_observation.claimable_task_count observation;
     board_activity_count =
       List.fold_left
         (fun count event ->
@@ -64,10 +64,3 @@ let classify_actionable_signal o =
   else if o.task_cancellation_count > 0 then Has_task_cancellation
   else if o.board_activity_count > 0 then Has_board_activity
   else No_actionable_signal
-
-let is_actionable = function
-  | No_actionable_signal -> false
-  | Has_unclaimed_tasks
-  | Has_completion_authority_rejection
-  | Has_task_cancellation
-  | Has_board_activity -> true

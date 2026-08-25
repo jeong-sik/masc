@@ -6,7 +6,7 @@
  (wrapped false)
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on. + unused-value ratchet (warning 32)
  (flags
-  (:standard -w +4 -w +32))
+  (:standard -w +4 -w +33 -w +37))
  (modules
   ide_annotation_types
   ide_annotations
@@ -18,8 +18,6 @@
  (libraries
   unix
   eio
-  mtime
-  mtime.clock.os
   yojson
   uuidm
   fs_compat
@@ -27,4 +25,5 @@
   masc.attribution
   masc.masc_process
   masc.agent_observation
-  masc.masc_exec))
+  masc.masc_exec
+  masc_core))

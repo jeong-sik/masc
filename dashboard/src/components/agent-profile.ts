@@ -19,7 +19,6 @@ import { formatTokens } from '../lib/format-number'
 import { MISSING_DATA_DASH } from '../lib/format-string'
 import { findKeeper } from '../lib/keeper-utils'
 import { isSubmitEnter } from '../lib/keyboard'
-import { autonomyHint } from './keeper-detail-ctx-utils'
 import { AgentAvatar } from './overview/agent-avatar'
 import {
   agents,
@@ -30,6 +29,7 @@ import {
   fetchWorkspaceMessages,
   fetchTaskHistory,
   sendBroadcast,
+  broadcastReceiptMessage,
   fetchAgentTimeline,
   fetchAgentRelations,
   currentDashboardActor,
@@ -161,9 +161,12 @@ async function submitMention(target: string): Promise<void> {
   if (!target || !text) return
   sendingMention.value = true
   try {
-    await sendBroadcast(currentDashboardActor(), `@${target} ${text}`)
+    const receipt = await sendBroadcast(currentDashboardActor(), `@${target} ${text}`)
     mentionText.value = ''
-    showToast(`${target}에게 전송`, 'success')
+    showToast(
+      receipt.ok ? `${target}에게 전송` : broadcastReceiptMessage(receipt),
+      receipt.ok ? 'success' : 'warning',
+    )
     void loadProfile(target)
   } catch (err) {
     showToast(err instanceof Error ? err.message : '실패', 'error')
@@ -214,9 +217,7 @@ function CharacterPlate({ name }: { name: string }) {
   const activityLabel = keeperActivity?.label ?? '마지막 확인'
   const ctxRatio = keeper?.context_ratio
   const ctxPct = ctxRatio != null ? Math.round(ctxRatio * 100) : null
-  const generation = keeper?.generation
   const keeperIdent = keeperIdentityHint(keeper?.name, keeper?.agent_name)
-  const signalTruth = brief?.signal_truth
   const isKeeper = keeper != null
   const workerState = worker?.state
   const workerFocus = worker?.focus
@@ -231,11 +232,7 @@ function CharacterPlate({ name }: { name: string }) {
         <${AgentAvatar}
           name=${name}
           status=${headerStatus}
-          traits=${agent?.traits}
           size="xl"
-          currentWork=${currentWork}
-          activityAge=${lastActivity}
-          signalTruth=${signalTruth}
         />
         ${isKeeper ? html`<div class="text-3xs font-bold tracking-[1.5px] text-[var(--ff-gold)] uppercase text-center">KEEPER</div>` : null}
       </div>
@@ -247,7 +244,6 @@ function CharacterPlate({ name }: { name: string }) {
             ${displayName}
           </h2>
           ${koreanName ? html`<span class="text-base text-[var(--color-fg-muted)]">(${koreanName})</span>` : ''}
-          ${generation != null ? html`<span class="text-sm font-bold text-[var(--color-accent-fg)] bg-[var(--accent-10)] border border-[var(--accent-30)] px-1.5 py-px tabular-nums rounded-[var(--r-1)]" title="세대 번호 — 핸드오프마다 증가 (레벨/등급 아님)">Gen.${generation}</span>` : null}
         </div>
 
         <div class="flex items-center gap-1.5 flex-wrap">
@@ -296,9 +292,7 @@ function CharacterPlate({ name }: { name: string }) {
         ${isKeeper ? html`
           <${StatGrid} cols=${4} items=${[
             { label: 'CTX', value: ctxPct != null ? `${ctxPct}%` : MISSING_DATA_DASH, delta: keeper.context_tokens != null && keeper.context_max != null ? { direction: 'flat' as const, text: `${formatTokens(keeper.context_tokens)} / ${formatTokens(keeper.context_max)}` } : undefined },
-            { label: '세대', value: generation ?? 0 },
             { label: '턴', value: keeper.turn_count ?? 0 },
-            { label: '자율 턴', value: keeper.autonomous_turn_count ?? 0, delta: autonomyHint(keeper.autonomous_turn_count, keeper.proactive_enabled) ? { direction: 'flat' as const, text: autonomyHint(keeper.autonomous_turn_count, keeper.proactive_enabled) } : undefined },
           ]} />
         ` : html`
           <${StatGrid} cols=${4} items=${[

@@ -45,67 +45,6 @@ let assoc_keys_sorted j =
 
 (* Session JSON helper — minimal shape that the compactor
    navigates through. *)
-let session_fixture ?(session_id = "s-1") ?(project = "workspace-A")
-    ?(workspace_id = "workspace-A") ?(goal = "ship feature") ?(status = "active")
-    ?(summary_status = "active") ?(comm_mode = "async")
-    ?(broadcast = 3) ?(recent = []) () =
-  `Assoc
-    [
-      ("session_id", json_string session_id);
-      ( "status",
-        `Assoc
-          [
-            ( "session",
-              `Assoc
-                [
-                  ("project", json_string project);
-                  ("workspace_id", json_string workspace_id);
-                  ("goal", json_string goal);
-                  ("status", json_string status);
-                  ("agent_names", `List [ json_string "a1" ]);
-                ] );
-            ( "summary",
-              `Assoc
-                [
-                  ("status", json_string summary_status);
-                  ("elapsed_sec", `Int 120);
-                  ("progress_pct", `Float 0.42);
-                  ("done_delta_total", `Int 7);
-                ] );
-            ( "team_health",
-              `Assoc
-                [
-                  ("status", json_string "healthy");
-                  ("active_agents_count", `Int 2);
-                  ("required_agents", `Int 3);
-                ] );
-            ( "communication_metrics",
-              `Assoc
-                [
-                  ("mode", json_string comm_mode);
-                  ("broadcast_count", `Int broadcast);
-                ] );
-          ] );
-      ("recent_events", `List recent);
-    ]
-
-let recent_event ?(event_type = "task_done") ?(ts_iso = "2026-05-05T03:00:00Z")
-    ?(actor = "alice") ?(task_title = "do thing")
-    ?(result = "ok") ?(reason = "") () =
-  `Assoc
-    [
-      ("event_type", json_string event_type);
-      ("ts_iso", json_string ts_iso);
-      ( "detail",
-        `Assoc
-          [
-            ("actor", json_string actor);
-            ("task_title", json_string task_title);
-            ("result", json_string result);
-            ("reason", json_string reason);
-          ] );
-    ]
-
 let keeper_fixture ?(name = "k-1") ?(status = "active")
     ?(agent_name = "claude-1") ?(generation = 2) ?(context_ratio = 0.42)
     ?(current_task = "do thing") ?(last_reply_status = "replied")
@@ -116,19 +55,17 @@ let keeper_fixture ?(name = "k-1") ?(status = "active")
       ("name", json_string name);
       ("status", json_string status);
       ("agent_name", json_string agent_name);
-      ("generation", `Int generation);
       ("context_ratio", `Float context_ratio);
       ("last_turn_ago_s", `Float 30.0);
       ("compaction_count", `Int 1);
       ("handoff_count_total", `Int 0);
-      ("active_goal_ids", `List [ json_string "g1"; json_string "g2" ]);
       ( "diagnostic",
         `Assoc
           [
             ("last_reply_status", json_string last_reply_status);
             ("last_reply_preview", json_string last_reply_preview);
           ] );
-      ("agent", `Assoc [ ("current_task", json_string current_task) ]);
+      ("current_task_id", json_string current_task);
     ]
 
 let agent_fixture ?(name = "a-1") ?(agent_type = "claude")
@@ -155,211 +92,6 @@ let int_of j = match j with `Int n -> n | _ -> -1
 
 (* ── (1) relevant_sessions_for_briefing ────────────────────── *)
 
-let test_relevant_empty_namespace_matches_all () =
-  (* When current_namespace is "" (or whitespace), trim_to_option
-     returns None, and workspace_matches always returns true. *)
-  let s = session_fixture ~project:"any-workspace" () in
-  let result =
-    C.relevant_sessions_for_briefing ~current_namespace:""
-      ~now_ts:0.0 [ s ]
-  in
-  assert (List.length result = 1)
-
-let test_relevant_namespace_matching_keeps () =
-  let s = session_fixture ~project:"workspace-X" ~status:"active"
-              ~summary_status:"active" () in
-  let result =
-    C.relevant_sessions_for_briefing ~current_namespace:"workspace-X"
-      ~now_ts:0.0 [ s ]
-  in
-  assert (List.length result = 1)
-
-let test_relevant_namespace_mismatch_drops () =
-  let s = session_fixture ~project:"workspace-X" ~status:"active" () in
-  let result =
-    C.relevant_sessions_for_briefing ~current_namespace:"workspace-Y"
-      ~now_ts:0.0 [ s ]
-  in
-  assert (result = [])
-
-let test_relevant_workspace_id_fallback_when_project_blank () =
-  (* If project is blank, fall back to workspace_id for matching. *)
-  let s =
-    session_fixture ~project:"" ~workspace_id:"workspace-Z"
-      ~status:"active" ~summary_status:"active" ()
-  in
-  let result =
-    C.relevant_sessions_for_briefing ~current_namespace:"workspace-Z"
-      ~now_ts:0.0 [ s ]
-  in
-  assert (List.length result = 1)
-
-let test_relevant_dead_status_drops () =
-  let s =
-    session_fixture ~project:"workspace-A" ~status:"failed"
-      ~summary_status:"failed" ~recent:[] ()
-  in
-  let result =
-    C.relevant_sessions_for_briefing ~current_namespace:"workspace-A"
-      ~now_ts:0.0 [ s ]
-  in
-  assert (result = [])
-
-let test_relevant_live_status_case_insensitive_trim () =
-  let s =
-    session_fixture ~project:"workspace-A"
-      ~summary_status:"  RUNNING  " ~status:"  RUNNING  " ()
-  in
-  let result =
-    C.relevant_sessions_for_briefing ~current_namespace:"workspace-A"
-      ~now_ts:0.0 [ s ]
-  in
-  assert (List.length result = 1)
-
-let test_relevant_recent_event_within_hour_keeps_dead_session () =
-  (* Session is dead, but a recent_event ts is within 3600s of
-     now_ts → still kept. *)
-  let now_ts = 1_714_953_600.0 in (* 2026-05-05 ish *)
-  let recent_ts_iso =
-    let tm = Unix.gmtime (now_ts -. 1800.0) in
-    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-      (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-      tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
-  in
-  let s =
-    session_fixture ~project:"workspace-A" ~status:"failed"
-      ~summary_status:"failed"
-      ~recent:[ recent_event ~ts_iso:recent_ts_iso () ] ()
-  in
-  let result =
-    C.relevant_sessions_for_briefing ~current_namespace:"workspace-A"
-      ~now_ts [ s ]
-  in
-  assert (List.length result = 1)
-
-let test_relevant_recent_event_outside_hour_drops_dead_session () =
-  let now_ts = 1_714_953_600.0 in
-  let stale_ts_iso =
-    let tm = Unix.gmtime (now_ts -. 7200.0) in
-    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-      (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-      tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
-  in
-  let s =
-    session_fixture ~project:"workspace-A" ~status:"failed"
-      ~summary_status:"failed"
-      ~recent:[ recent_event ~ts_iso:stale_ts_iso () ] ()
-  in
-  let result =
-    C.relevant_sessions_for_briefing ~current_namespace:"workspace-A"
-      ~now_ts [ s ]
-  in
-  assert (result = [])
-
-(* ── (2) compact_session_json strict shape ─────────────────── *)
-
-let test_compact_session_strict_keys () =
-  let s = session_fixture () in
-  let out = C.compact_session_json s in
-  let expected_keys =
-    List.sort compare
-      [
-        "session_id"; "goal"; "project"; "status"; "agent_names";
-        "elapsed_sec"; "progress_pct"; "done_delta_total";
-        "team_health"; "active_agents_count"; "required_agents";
-        "communication_mode"; "broadcast_count";
-        "communication_summary"; "last_event";
-      ]
-  in
-  assert (assoc_keys_sorted out = expected_keys)
-
-let test_compact_session_communication_summary_format () =
-  (* "%s · broadcast %d" *)
-  let s =
-    session_fixture ~comm_mode:"async" ~broadcast:7 ()
-  in
-  let out = C.compact_session_json s in
-  match out with
-  | `Assoc kv ->
-      let summary =
-        match List.assoc_opt "communication_summary" kv with
-        | Some (`String s) -> s
-        | _ -> ""
-      in
-      assert (summary = "async \xc2\xb7 broadcast 7")
-  | _ -> assert false
-
-(* ── (3) nullable last_event when recent_events empty ─────── *)
-
-let test_compact_session_last_event_empty_is_null () =
-  let s = session_fixture ~recent:[] () in
-  let out = C.compact_session_json s in
-  match out with
-  | `Assoc kv -> (
-      match List.assoc_opt "last_event" kv with
-      | Some `Null -> ()
-      | _ -> assert false)
-  | _ -> assert false
-
-let test_compact_session_last_event_uses_latest () =
-  (* When multiple recent_events present, last_event mirrors the
-     LAST element of the list (List.rev pattern in impl). *)
-  let s =
-    session_fixture
-      ~recent:
-        [
-          recent_event ~event_type:"first" ~actor:"alice"
-            ~task_title:"first task" ();
-          recent_event ~event_type:"latest" ~actor:"bob"
-            ~task_title:"latest task" ();
-        ]
-      ()
-  in
-  let out = C.compact_session_json s in
-  match out with
-  | `Assoc kv -> (
-      match List.assoc_opt "last_event" kv with
-      | Some (`Assoc le) ->
-          assert (
-            (List.assoc_opt "event_type" le = Some (`String "latest")));
-          assert (
-            (List.assoc_opt "actor" le = Some (`String "bob")));
-          assert (List.assoc_opt "source" le = None)
-      | _ -> assert false)
-  | _ -> assert false
-
-let test_compact_session_goal_default_when_blank () =
-  (* Goal field is null when JSON is blank/Null. *)
-  let s =
-    `Assoc
-      [
-        ("session_id", `String "s1");
-        ( "status",
-          `Assoc
-            [
-              ( "session",
-                `Assoc
-                  [
-                    ("project", `String "workspace-A");
-                    ("status", `String "active");
-                    ("goal", `String "");
-                    ("agent_names", `List []);
-                  ] );
-              ("summary", `Assoc [ ("status", `String "active") ]);
-              ("team_health", `Assoc []);
-              ("communication_metrics", `Assoc []);
-            ] );
-        ("recent_events", `List []);
-      ]
-  in
-  let out = C.compact_session_json s in
-  match out with
-  | `Assoc kv ->
-      assert (List.assoc_opt "goal" kv = Some `Null)
-  | _ -> assert false
-
-(* ── (4) compact_keeper_json strict shape ─────────────────── *)
-
 let test_compact_keeper_strict_keys () =
   let k = keeper_fixture () in
   let out = C.compact_keeper_json k in
@@ -369,7 +101,6 @@ let test_compact_keeper_strict_keys () =
         "name"; "status"; "agent_name"; "generation"; "context_ratio";
         "last_turn_ago_s"; "compaction_count"; "handoff_count_total";
         "current_task"; "last_reply_status"; "last_reply_preview";
-        "active_goal_ids";
       ]
   in
   assert (assoc_keys_sorted out = expected_keys)
@@ -510,19 +241,6 @@ let _ = int_of
 (* ── runner ───────────────────────────────────────────────── *)
 
 let () =
-  test_relevant_empty_namespace_matches_all ();
-  test_relevant_namespace_matching_keeps ();
-  test_relevant_namespace_mismatch_drops ();
-  test_relevant_workspace_id_fallback_when_project_blank ();
-  test_relevant_dead_status_drops ();
-  test_relevant_live_status_case_insensitive_trim ();
-  test_relevant_recent_event_within_hour_keeps_dead_session ();
-  test_relevant_recent_event_outside_hour_drops_dead_session ();
-  test_compact_session_strict_keys ();
-  test_compact_session_communication_summary_format ();
-  test_compact_session_last_event_empty_is_null ();
-  test_compact_session_last_event_uses_latest ();
-  test_compact_session_goal_default_when_blank ();
   test_compact_keeper_strict_keys ();
   test_compact_keeper_max_len_truncation ();
   test_compact_keeper_missing_scalars_are_null ();

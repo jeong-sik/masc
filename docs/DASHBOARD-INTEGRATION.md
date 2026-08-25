@@ -1,11 +1,5 @@
 ---
 status: reference
-last_verified: 2026-05-20
-code_refs:
-  - dashboard/src/config/navigation.ts
-  - dashboard/src/components/status.ts
-  - dashboard/src/components/work.ts
-  - dashboard/src/components/lab.ts
 ---
 
 # Dashboard Integration Spec (v1 Shell)
@@ -116,30 +110,26 @@ code_refs:
 - Tool Monitor default view는 full telemetry/full quality panels를 나란히 터뜨리지 않고 tool success, failures, attention tools, failure categories, and lane links만 먼저 보여준다.
 - Evidence Timeline default view는 Activity Graph card panels를 자동으로 붙이지 않는다. Activity Graph는 `#monitoring?section=observatory&view=activity`, Live는 `#monitoring?section=observatory&view=live`에서만 열린다.
 - Transport/Feature/Diagnostics 상세는 Monitor daily default가 아니라 diagnostics/admin 성격이다. Monitor에는 degraded badge나 diagnostic link만 노출한다.
-- Runtime & Runtime default view는 OAS/runtime signal을 먼저 보여주고 `transport-health`, `diagnostics`, `feature-health`를 hidden diagnostics link 묶음으로 노출한다.
+- Runtime & Runtime default view는 agent core/runtime signal을 먼저 보여주고 `transport-health`, `diagnostics`, `feature-health`를 hidden diagnostics link 묶음으로 노출한다.
 
 ## Canonical Read Models
 - `GET /api/v1/dashboard/shell`
   - overview + runtime shell metadata
-- `GET /api/v1/dashboard/namespace-truth`
-  - journey / agents / shared namespace truth
+- `GET /api/v1/dashboard/project-snapshot`
+  - journey / agents / shared project snapshot
   - goal navigator runtime status
 - `GET /api/v1/activity/graph`
   - observatory investigation graph
 - `GET /api/v1/dashboard/telemetry/summary`, `GET /api/v1/dashboard/telemetry?source=tool_call_io`
   - Tool Monitor evidence-log lens and source freshness metadata
-- `GET /api/v1/dashboard/oas/telemetry/recent`, `GET /api/v1/dashboard/oas/telemetry/summary`
-  - in-process OAS runtime-lane sample cache; payloads expose `dashboard_surface`, `source`, and `retention.durable_replay_surface` so operators can distinguish cache state from durable `oas_event` replay
+- `GET /api/v1/dashboard/agent core/telemetry/recent`, `GET /api/v1/dashboard/agent core/telemetry/summary`
+  - in-process agent core runtime-lane sample cache; payloads expose `dashboard_surface`, `source`, and `retention.durable_replay_surface` so operators can distinguish cache state from durable `agent_core_event` replay
 - `GET /api/v1/dashboard/memory-subsystems`
   - cognition memory sub-view read model
 - `GET /api/v1/attribution/summary`
   - fleet-health attribution view
 - `GET /api/v1/dashboard/transport-health`
   - runtime transport health + connection freshness view
-- `GET /api/v1/dashboard/keeper-feature-proof`
-  - keeper autonomy feature proof gates, including 24h turn-span and web-search tool evidence
-  - tool gates count only calls from known keeper names and expose `keeper_evidence.provenance_scope=known_keeper_tool_call_log`, per-tool successful/failing keepers, sandbox/network modes, task IDs, and goal IDs
-  - read-only CLI equivalent: `masc-keeper-feature-proof --base-path <runtime-root>`
 - `GET /api/v1/models/metrics`, `GET /api/v1/dashboard/keeper-costs`
   - runtime cost/latency view
 - `GET /api/v1/dashboard/keeper-decisions`
@@ -196,7 +186,7 @@ code_refs:
 
 ## SSE Expectations
 - SSE는 freshness transport다. canonical hydration source는 REST projection이다.
-- dashboard observer session은 live `oas:*` tail과 durable replay를 함께 본다.
+- dashboard observer session은 live `agent_core:*` tail과 durable replay를 함께 본다.
 - 현재 v1 shell이 직접 반응하는 최소 이벤트 클래스:
   - `broadcast`
   - `task_*`

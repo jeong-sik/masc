@@ -18,8 +18,6 @@ val is_self_author
     with {!Keeper_identity.Keeper_id.equal} — the single source of truth
     for "is this author one of us?". *)
 
-val is_keeper_authored_message : string -> bool
-
 type pending_kind =
   | Mention
   | Scope
@@ -32,6 +30,14 @@ type pending_message = {
 }
 (** One unacknowledged lane row. Stable [message_id] is the exact durable
     acknowledgement cursor; list order is persisted source order. *)
+
+type fleet_message = {
+  fleet_speaker : string;
+  fleet_content : string;
+}
+(** One keeper broadcast projected into this keeper's transcript. No message
+    id: the layer carries no acknowledgement cursor, so nothing keys off row
+    identity. List order is persisted source order. *)
 
 val pairs_of_kind : pending_kind -> pending_message list -> (string * string) list
 val has_kind : pending_kind -> pending_message list -> bool
@@ -77,8 +83,10 @@ val render_recent_direct_conversation_context
   -> string
 
 (** Pure source-ordered classification after the optional durable ack row.
-    Paired direct turns are acknowledged only by an assistant utterance with
-    the same typed [turn_ref]; an unrelated assistant row never clears input. *)
+    Paired turns are acknowledged by an assistant utterance with the same
+    typed [turn_ref], or by a terminal assistant transcript row with the same
+    typed delivery key. An unrelated assistant row and a transport-failure row
+    never clear input. *)
 val pending_messages_of_messages
   :  ?ack_id:string
   -> targets:string list
@@ -103,7 +111,25 @@ val pending_scope_of_messages
   -> Keeper_chat_store.chat_message list
   -> (string * string) list
 
-val collect_message_scope
+(** [fleet_messages_of_messages ~limit ~targets messages] returns the newest
+    [limit] keeper broadcasts projected into this transcript, in arrival order.
+    A row qualifies when it is a user line on the [Surface_ref.Broadcast]
+    (fleet fanout) or [Surface_ref.Agent] (direct keeper delivery) surface
+    that the lane classifier places in no reactive lane — the lanes take its
+    [Some], this layer takes its [None], so the same row cannot reach both.
+    [limit <= 0] returns
+    the empty list. No watermark: unlike the lanes this is standing context,
+    and lane acknowledgement only advances on autonomous turns. Pure. *)
+val fleet_messages_of_messages
+  :  limit:int
+  -> targets:string list
+  -> Keeper_chat_store.chat_message list
+  -> fleet_message list
+
+(** Loads the transcript once and derives both the reactive lanes and the fleet
+    layer from the same rows. *)
+val collect_message_scope_and_fleet
   :  config:Workspace.config
   -> meta:keeper_meta
-  -> pending_message list
+  -> fleet_limit:int
+  -> pending_message list * fleet_message list

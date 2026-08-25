@@ -6,9 +6,8 @@ let manifest ~event ~decision ~links =
   ; M.keeper_name = "test-keeper"
   ; M.agent_name = None
   ; M.trace_id = "trace/test"
-  ; M.generation = None
   ; M.keeper_turn_id = Some 1
-  ; M.oas_turn_count = Some 1
+  ; M.agent_core_turn_count = Some 1
   ; M.logical_seq = None
   ; M.event
   ; M.runtime_id = None
@@ -181,6 +180,41 @@ let test_compaction_evidence_public_projection () =
     evidence
     (json |> member "decision" |> member "exact_evidence")
 
+(* Runtime attempt attribution (#28871): the driver's per-candidate walk
+   records the attempted candidate as decision.runtime_id (with idx, and
+   error_kind on failures) while the row's top-level runtime_id stays the
+   lane id. The public projection must let those three keys through, or
+   intra-lane failover becomes unreadable on every API consumer. *)
+let test_runtime_attempt_attribution_public_projection () =
+  let decision =
+    `Assoc
+      [ ("idx", `Int 1)
+      ; ("runtime_id", `String "glm-coding.glm-5-turbo")
+      ; ("error_kind", `String "api")
+      ; ("not_allowlisted_probe", `String "must-not-leak")
+      ; ( "clock_refs"
+        , `Assoc [ ("edge_id", `String "e1"); ("lane", `String "L1") ] )
+      ]
+  in
+  let json =
+    manifest ~event:M.Runtime_failed ~decision ~links:(links ())
+    |> M.public_to_json
+  in
+  let open Yojson.Safe.Util in
+  let projected = json |> member "decision" in
+  Alcotest.(check int)
+    "idx retained" 1 (projected |> member "idx" |> to_int);
+  Alcotest.(check string)
+    "attempted candidate retained"
+    "glm-coding.glm-5-turbo"
+    (projected |> member "runtime_id" |> to_string);
+  Alcotest.(check string)
+    "error_kind retained" "api" (projected |> member "error_kind" |> to_string);
+  Alcotest.(check bool)
+    "projection still redacts unknown keys"
+    true
+    (projected |> member "not_allowlisted_probe" = `Null)
+
 let test_current_compaction_evidence_read_boundary () =
   let evidence = canonical_compaction_evidence () in
   let row decision =
@@ -285,6 +319,8 @@ let () =
             test_is_complete_turn
         ; Alcotest.test_case "compaction evidence public projection" `Quick
             test_compaction_evidence_public_projection
+        ; Alcotest.test_case "runtime attempt attribution public projection" `Quick
+            test_runtime_attempt_attribution_public_projection
         ; Alcotest.test_case "current evidence read boundary" `Quick
             test_current_compaction_evidence_read_boundary
         ] )

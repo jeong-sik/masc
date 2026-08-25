@@ -1,0 +1,45 @@
+{
+  "schema": "masc.keeper_feature_pr_transition.v1",
+  "captured_at": "2026-08-13T13:42:18Z",
+  "main_head": "f473c0e8bf7d582b6d990ffbd25e24c68584c9bb",
+  "pull_requests": {
+    "28574": {
+      "state": "MERGED",
+      "head": "c9df777b836477c9a60ecf89fe9e3b3e70e4a770",
+      "merge_commit": "0d2609fa9b4daec7102f83cdf9cb696c0c1ffa49",
+      "merged_at": "2026-08-13T13:37:01Z",
+      "exact_head_build_and_test": "SUCCESS",
+      "exact_head_keeper_real_world_gate": "SUCCESS",
+      "exact_head_ci_gate": "SUCCESS"
+    },
+    "28597": {
+      "state": "MERGED",
+      "head": "abe0e09c2b4cd43398f14533858b24913f06371b",
+      "merge_commit": "f473c0e8bf7d582b6d990ffbd25e24c68584c9bb",
+      "merged_at": "2026-08-13T13:38:53Z",
+      "exact_head_build_and_test": "SUCCESS",
+      "exact_head_keeper_real_world_gate": "SUCCESS",
+      "exact_head_ci_gate": "SUCCESS"
+    },
+    "28470": {
+      "state": "OPEN",
+      "head": "2da9e2ad7afa40870940c8a1b6ed319b9193fc8e",
+      "rebased_on": "f473c0e8bf7d582b6d990ffbd25e24c68584c9bb",
+      "mergeable": true,
+      "ci": "STARTING"
+    },
+    "28488": {
+      "state": "OPEN",
+      "head": "7b1b921c534585f35e4a42ce29061abe7f08f259",
+      "rebased_on": "f473c0e8bf7d582b6d990ffbd25e24c68584c9bb",
+      "mergeable": true,
+      "ci": "STARTING"
+    },
+    "28596": {
+      "state": "OPEN",
+      "head": "e9a300ed0c73569adbeadf12b651772a3707a816",
+      "mergeable": true,
+      "ci": "STARTING"
+    }
+  }
+}

@@ -9,7 +9,9 @@ let member key = function
 ;;
 
 let test_initialize_handshake_is_read_only () =
-  let result = Lsp.initialize_result_json () in
+  (* The handshake also has to hand the client the tree its document URIs
+     resolve against; a browser client cannot know the host path otherwise. *)
+  let result = Lsp.initialize_result_json ~workspace_root:"/workspace/masc" () in
   let capabilities =
     match member "capabilities" result with
     | Some (`Assoc fields) -> fields
@@ -119,6 +121,50 @@ let test_file_uri_resolution_rejects_symlink_escape () =
          "symlink target outside workspace rejected"
          None
          (Lsp.resolve_relative ~base ("file://" ^ link)))
+;;
+
+let document_params ~uri line =
+  `Assoc
+    [ "textDocument", `Assoc [ "uri", `String uri ]
+    ; "position", `Assoc [ "line", line ]
+    ]
+;;
+
+let test_document_request_is_resolved_once () =
+  let base = "/workspace/masc" in
+  let uri = "file:///workspace/masc/lib/server.ml" in
+  match Lsp.resolve_document_request ~anchor:base (document_params ~uri (`Int 7)) with
+  | Error _ -> fail "expected an in-workspace document request"
+  | Ok request ->
+    check string "URI retained" uri request.uri;
+    check string "relative path resolved" "lib/server.ml" request.relative_path;
+    check (option int) "line resolved" (Some 7) request.line;
+    (match request.language with
+     | Lsp.Known_lang "ocaml" -> ()
+     | Lsp.Known_lang language -> failf "unexpected language: %s" language
+     | Lsp.Unknown_lang -> fail "expected the .ml language to resolve")
+;;
+
+let test_document_request_keeps_decode_failures_typed () =
+  let base = "/workspace/masc" in
+  let missing_uri = `Assoc [ "position", `Assoc [ "line", `Int 1 ] ] in
+  (match Lsp.resolve_document_request ~anchor:base missing_uri with
+   | Error Lsp.Missing_document_uri -> ()
+   | Error Lsp.Document_uri_outside_workspace ->
+     fail "missing URI must not be classified as an out-of-workspace path"
+   | Ok _ -> fail "missing URI must fail decoding");
+  let outside_uri = "file:///tmp/outside.ml" in
+  (match
+     Lsp.resolve_document_request ~anchor:base (document_params ~uri:outside_uri (`Int 1))
+   with
+   | Error Lsp.Document_uri_outside_workspace -> ()
+   | Error Lsp.Missing_document_uri ->
+     fail "outside URI must not be classified as missing"
+   | Ok _ -> fail "outside URI must fail decoding");
+  let inside_uri = "file:///workspace/masc/lib/server.ml" in
+  match Lsp.resolve_document_request ~anchor:base (document_params ~uri:inside_uri (`Int (-1))) with
+  | Error _ -> fail "negative line must not invalidate a document path"
+  | Ok request -> check (option int) "negative line is absent" None request.line
 ;;
 
 let test_dispatch_workers_are_parallelized () =
@@ -278,6 +324,39 @@ let test_write_and_unknown_methods_rejected () =
      Alcotest.fail "unknown method must stay diagnostic, not coerce")
 ;;
 
+(* One method, one table. definition, references, documentSymbol,
+   documentHighlight and inlayHint were written in both after RFC-0378 rung E
+   turned them into plain relays, so two lists decided the same thing about the
+   same method (#28686). *)
+let test_relayed_and_handled_tables_are_disjoint () =
+  let handled = Lsp.handled_lsp_methods () |> List.map fst in
+  let relayed = Lsp.relayed_lsp_methods () |> List.map fst in
+  let both = List.filter (fun m -> List.mem m handled) relayed in
+  check (list string) "no method is named by both tables" [] (List.sort String.compare both);
+  (* The five still forward — from the catalog's Read_only classification, not
+     from a second copy of their names. *)
+  List.iter
+    (fun m ->
+      check bool (m ^ " forwards from the catalog") true
+        (Lsp.classify_forwarded_method m = Lsp.Forward_read_only))
+    [ "textDocument/definition"
+    ; "textDocument/references"
+    ; "textDocument/documentSymbol"
+    ; "textDocument/documentHighlight"
+    ; "textDocument/inlayHint"
+    ]
+;;
+
+(* Every relayed method resolves to exactly the disposition its table row
+   declares, so the table is the decision and not a hint. *)
+let test_relayed_table_drives_the_decision () =
+  List.iter
+    (fun (method_, expected) ->
+      check bool (method_ ^ " matches its row") true
+        (Lsp.classify_forwarded_method method_ = expected))
+    (Lsp.relayed_lsp_methods ())
+;;
+
 let require_handled_method_class method_ expected =
   match Lsp.classify_handled_lsp_method method_ with
   | Some actual ->
@@ -375,6 +454,7 @@ let test_code_actions_have_no_workspace_edit () =
          let actions =
            Lsp_overlay_provider.code_actions
              ~base_dir
+             ~codebase:(Some "github.com_other_repo")
              ~file_path:"a.ml"
              ~line:0
              ~diagnostics:[]
@@ -401,6 +481,10 @@ let () =
             test_file_uri_resolution_is_workspace_scoped
         ; test_case "file uri resolution rejects symlink escape" `Quick
             test_file_uri_resolution_rejects_symlink_escape
+        ; test_case "document request resolves once" `Quick
+            test_document_request_is_resolved_once
+        ; test_case "document request decode failures stay typed" `Quick
+            test_document_request_keeps_decode_failures_typed
         ; test_case "dispatch workers are parallelized" `Quick
             test_dispatch_workers_are_parallelized
         ; test_case "/api/v1/ide/lsp is a Ws upgrade route" `Quick
@@ -422,6 +506,10 @@ let () =
             test_write_and_unknown_methods_rejected
         ; test_case "handled method catalog is classified" `Quick
             test_handled_lsp_method_catalog_is_classified
+        ; test_case "relayed and handled tables are disjoint" `Quick
+            test_relayed_and_handled_tables_are_disjoint
+        ; test_case "relayed table drives the decision" `Quick
+            test_relayed_table_drives_the_decision
         ; test_case "unknown language is typed" `Quick test_unknown_language_is_typed
         ; test_case "overlay code actions carry no write edit" `Quick
             test_code_actions_have_no_workspace_edit

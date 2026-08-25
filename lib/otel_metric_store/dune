@@ -11,8 +11,10 @@
   otel_metric_key
   otel_metric_names
   otel_metric_store_core
-  otel_oas_metric_names
+  otel_agent_core_metric_names
   otel_policy_metric_names
   otel_runtime_metric_names
   otel_transport_metric_names)
+ (flags
+  (:standard -w +4 -w +33))
  (libraries eio mtime mtime.clock masc_log))

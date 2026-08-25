@@ -14,7 +14,7 @@ open Alcotest
 
 module Http_transport = Server_mcp_transport_http
 module Actor_injection = Server_mcp_actor_injection
-module Auth = Masc.Auth
+module Auth = Auth
 
 let setup_test_workspace () =
   let unique_id =
@@ -216,7 +216,7 @@ let test_actor_injection_reducer_skips_absent_actor () =
 
 let test_actor_injection_reducer_rewrites_with_http_auth () =
   let body =
-    {|{"jsonrpc":"2.0","method":"tools/call","params":{"name":"masc_keeper_status","arguments":{"_agent_name":"dashboard","token":"stale-token","name":"sangsu"}},"id":1}|}
+    {|{"jsonrpc":"2.0","method":"tools/call","params":{"name":"masc_keeper_status","arguments":{"_agent_name":"dashboard","name":"alpha"}},"id":1}|}
   in
   let args =
     Actor_injection.reduce ~actor:(Some "codex") ~auth_token:(Some "token") body
@@ -225,9 +225,7 @@ let test_actor_injection_reducer_rewrites_with_http_auth () =
   let open Yojson.Safe.Util in
   check (option string) "actor reducer rewrites _agent_name" (Some "codex")
     (member "_agent_name" args |> to_string_option);
-  check (option string) "actor reducer strips stale token" None
-    (member "token" args |> to_string_option);
-  check (option string) "actor reducer preserves target name" (Some "sangsu")
+  check (option string) "actor reducer preserves target name" (Some "alpha")
     (member "name" args |> to_string_option)
 
 let test_body_with_canonical_http_actor_uses_token_owner () =
@@ -251,7 +249,7 @@ let test_body_with_canonical_http_actor_uses_token_owner () =
       in
       let request = Httpun.Request.create ~headers `POST "/mcp" in
       let body =
-        {|{"jsonrpc":"2.0","method":"tools/call","params":{"name":"masc_keeper_status","arguments":{"_agent_name":"dashboard","token":"stale-token","name":"sangsu"}},"id":1}|}
+        {|{"jsonrpc":"2.0","method":"tools/call","params":{"name":"masc_keeper_status","arguments":{"_agent_name":"dashboard","name":"alpha"}},"id":1}|}
       in
       let args =
         Http_transport.body_with_canonical_http_actor ~base_path:dir
@@ -264,7 +262,7 @@ let test_body_with_canonical_http_actor_uses_token_owner () =
         (member "_agent_name" args |> to_string_option);
       check (option string) "http auth strips stale argument token" None
         (member "token" args |> to_string_option);
-      check (option string) "tool target arg preserved" (Some "sangsu")
+      check (option string) "tool target arg preserved" (Some "alpha")
         (member "name" args |> to_string_option))
 
 (* ============================================================

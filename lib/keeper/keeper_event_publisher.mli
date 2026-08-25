@@ -1,11 +1,11 @@
 (** Keeper_event_publisher — MASC Event_bus publishers for runtime events.
 
     Publishes the current keeper lifecycle and runtime audit events to the
-    **MASC-owned** Event_bus. Events follow the OAS Custom-name convention.
+    **MASC-owned** Event_bus. Events follow the AGENT_CORE Custom-name convention.
 
-    Every publish routes to {!Event_bus_slots.get_masc} so the OAS/MASC
-    layer boundary is preserved.  OAS's [event_bus.mli:103-107]
-    explicitly warns against publishing domain events onto OAS's bus.
+    Every publish routes to {!Event_bus_slots.get_masc} so the AGENT_CORE/MASC
+    layer boundary is preserved.  AGENT_CORE's [event_bus.mli:103-107]
+    explicitly warns against publishing domain events onto AGENT_CORE's bus.
 
     SSE wire-name translation is done by the relay, not here.
 
@@ -38,7 +38,7 @@ val publish_keeper_lifecycle :
     Subscribe to {!Keeper_lifecycle_events.all_event_names} to
     receive the full stream.  Issue #8575: prior docstring
     listed only five names, so operators silently missed
-    cleanup / recovery events ([reconciled], [dead_cleaned]) —
+    cleanup / recovery events ([reconciled], [supervisor_cleaned]) —
     exactly the events that signal supervisor recovery actions
     where observability matters most. *)
 
@@ -69,5 +69,4 @@ val publish_runtime_execution_built :
   max_context:int ->
   effective_budget:int ->
   temperature:float ->
-  generation:int ->
   unit

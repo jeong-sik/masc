@@ -1,84 +1,59 @@
-// MASC Dashboard — System logs / provider logs / dashboard config fetchers.
-// Extracted from dashboard.ts (domain split). Public symbols re-exported
-// from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
+import { Effect } from 'effect'
 
-import { get } from './core'
-import { ensureDevToken } from './dev-token'
-import type { DashboardConfigResponse } from './schemas/dashboard-config'
-import type { LogsResponse } from './schemas/logs'
-import type {
-  ProviderLogsCatalogResponse,
-  ProviderLogTailResponse,
-} from './schemas/provider-logs'
+import {
+  DashboardHttp,
+  type DashboardTransportError,
+} from './effect-http'
+import {
+  decodeLogsData,
+  type LogCategory,
+  type LogLevel,
+  type LogsData,
+  type LogsSchemaDriftError,
+} from './schemas/logs'
 
-export async function fetchLogs(opts?: {
-  limit?: number
-  level?: string
-  module?: string
-  since_seq?: number
-  before_seq?: number
-  category?: string
-  exclude_category?: string
-}): Promise<LogsResponse> {
+export type { LogCategory, LogEntry, LogLevel, LogsData } from './schemas/logs'
+export { decodeLogsData, LogsSchemaDriftError } from './schemas/logs'
+
+export interface LogsRequest {
+  readonly limit?: number
+  readonly level?: LogLevel
+  readonly module?: string
+  readonly sinceSeq?: number
+  readonly beforeSeq?: number
+  readonly category?: LogCategory
+  readonly excludeCategories?: readonly LogCategory[]
+}
+
+export type LogsError = DashboardTransportError | LogsSchemaDriftError
+
+function logsPath(request: LogsRequest): string {
   const params = new URLSearchParams()
-  if (opts?.limit) params.set('limit', String(opts.limit))
-  if (opts?.level) params.set('level', opts.level)
-  if (opts?.module) params.set('module', opts.module)
-  if (typeof opts?.since_seq === 'number' && opts.since_seq >= 0) {
-    params.set('since_seq', String(opts.since_seq))
+  if (request.limit !== undefined) params.set('limit', String(request.limit))
+  if (request.level !== undefined) params.set('level', request.level)
+  if (request.module !== undefined && request.module !== '') {
+    params.set('module', request.module)
   }
-  if (typeof opts?.before_seq === 'number' && opts.before_seq >= 0) {
-    params.set('before_seq', String(opts.before_seq))
+  if (request.sinceSeq !== undefined && request.sinceSeq >= 0) {
+    params.set('since_seq', String(request.sinceSeq))
   }
-  if (opts?.category) params.set('category', opts.category)
-  if (opts?.exclude_category) params.set('exclude_category', opts.exclude_category)
-  const qs = params.toString()
-  const raw = await get<unknown>(`/api/v1/dashboard/logs${qs ? `?${qs}` : ''}`)
-  const { parseLogsResponse } = await import('./schemas/logs')
-  return parseLogsResponse(raw)
+  if (request.beforeSeq !== undefined && request.beforeSeq >= 0) {
+    params.set('before_seq', String(request.beforeSeq))
+  }
+  if (request.category !== undefined) params.set('category', request.category)
+  if (request.excludeCategories !== undefined && request.excludeCategories.length > 0) {
+    params.set('exclude_category', request.excludeCategories.join(','))
+  }
+  const query = params.toString()
+  return `/api/v1/dashboard/logs${query === '' ? '' : `?${query}`}`
 }
 
-export async function fetchProviderLogsCatalog(): Promise<ProviderLogsCatalogResponse> {
-  const raw = await get<unknown>('/api/v1/dashboard/provider-logs')
-  const { parseProviderLogsCatalogResponse } = await import('./schemas/provider-logs')
-  return parseProviderLogsCatalogResponse(raw)
-}
-
-export async function fetchProviderLogTail(
-  provider: string,
-  opts?: { lines?: number },
-): Promise<ProviderLogTailResponse> {
-  const params = new URLSearchParams()
-  params.set('provider', provider)
-  if (opts?.lines) params.set('lines', String(opts.lines))
-  const raw = await get<unknown>(`/api/v1/dashboard/provider-logs/tail?${params.toString()}`)
-  const { parseProviderLogTailResponse } = await import('./schemas/provider-logs')
-  return parseProviderLogTailResponse(raw)
-}
-
-export async function fetchDashboardConfig(): Promise<DashboardConfigResponse> {
-  await ensureDevToken()
-  const raw = await get<unknown>('/api/v1/dashboard/config')
-  const { parseDashboardConfigResponse } = await import('./schemas/dashboard-config')
-  return parseDashboardConfigResponse(raw)
-}
-
-/** Parse runtime context-ratio thresholds from the dashboard config response.
-    Falls back to the compiled defaults when keys are missing or malformed. */
-export function parseContextThresholds(
-  data: DashboardConfigResponse,
-  defaults: { critical: number; warn: number; compacting: number },
-): { critical: number; warn: number; compacting: number } {
-  const cat = data.categories.dashboard ?? []
-  const find = (env: string): number | null => {
-    const entry = cat.find(e => e.env === env)
-    if (!entry || entry.value == null) return null
-    const n = parseFloat(entry.value)
-    return Number.isFinite(n) ? n : null
-  }
-  return {
-    critical: find('MASC_DASHBOARD_CTX_HANDOFF_IMMINENT') ?? defaults.critical,
-    warn: find('MASC_DASHBOARD_CTX_PREPARING') ?? defaults.warn,
-    compacting: find('MASC_DASHBOARD_CTX_COMPACTING') ?? defaults.compacting,
-  }
+export function fetchLogs(
+  request: LogsRequest = {},
+): Effect.Effect<LogsData, LogsError, DashboardHttp> {
+  return Effect.gen(function*() {
+    const http = yield* DashboardHttp
+    const raw = yield* http.getUnknown(logsPath(request))
+    return yield* decodeLogsData(raw)
+  })
 }

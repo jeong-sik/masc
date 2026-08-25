@@ -14,8 +14,6 @@ open Opentelemetry
 
 let ( let@ ) = ( @@ )
 let spf = Printf.sprintf
-let set_headers = Config.Env.set_headers
-let get_headers = Config.Env.get_headers
 (* Library [Opentelemetry.GC_metrics] sampling was removed here: it emitted
    process.runtime.ocaml.gc.* series that duplicated the richer masc_gc_*
    gauges exported through Otel_metric_store (and consumed by the Grafana
@@ -483,8 +481,8 @@ let setup_ ~sw ?stop ?config env : unit =
   OT.Collector.set_backend backend
 ;;
 
-let setup ?stop ?config ?(enable = true) ~sw env =
-  if enable then setup_ ~sw ?stop ?config env
+let setup ?stop ?config ~sw env =
+  setup_ ~sw ?stop ?config env
 ;;
 
 let remove_backend () =
@@ -492,14 +490,3 @@ let remove_backend () =
   OT.Collector.remove_backend ~on_done:ignore ()
 ;;
 
-let with_setup ?stop ?config ?(enable = true) f env =
-  if enable
-  then
-    Switch.run
-    @@ fun sw ->
-    snd
-    @@ Fiber.pair
-         (fun () -> setup_ ~sw ?stop ?config env)
-         (fun () -> Eio_guard.protect ~finally:(fun () -> remove_backend ()) f)
-  else f ()
-;;

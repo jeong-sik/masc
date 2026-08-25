@@ -72,12 +72,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pixel-avatar[data-status] { animation: none; }
-  .pixel-avatar--has-blocker {
-    animation: none;
-    box-shadow: 0 0 0 2px rgb(var(--err-glow) / .6);
-  }
-  .activity-dot--live-pulse { animation: none; }
+  .sigil.heartbeat { animation: none; }
   .pulse-working { animation: none; }
   .pipeline-stage-node.active.stage-thinking .pipeline-stage-dot { animation: none; }
   .pipeline-stage-badge.stage-thinking { animation: none; }

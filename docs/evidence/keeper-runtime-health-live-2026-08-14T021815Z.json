@@ -1,0 +1,78 @@
+{
+  "schema": "masc.keeper_feature_matrix.live_refresh.v1",
+  "captured_at": "2026-08-14T02:18:15Z",
+  "source_truth": {
+    "upstream_main_at_capture": "686007ea1d02002b201c881aea4b409a385c3b8b",
+    "live_runtime_checkout": "13dd32a37a",
+    "live_commit_source": "runtime_repo_head",
+    "embedded_binary_commit_known": false,
+    "not_yet_in_live_checkout": {
+      "28694": "686007ea1d",
+      "28701": "a3a3ef8c480b475fd0dd7a1c4c22bc33d188ae7d"
+    }
+  },
+  "live": {
+    "status": "ok",
+    "overall_status": "degraded",
+    "version": "0.22.0",
+    "started_at": "2026-08-14T02:07:29Z",
+    "uptime_seconds_at_health_capture": 646,
+    "effective_base_path": "/Users/dancer/me",
+    "effective_masc_root": "/Users/dancer/me/.masc",
+    "fleet": {
+      "status": "ok",
+      "bootable": 8,
+      "running": 8,
+      "executable": 8,
+      "target_reaction_capacity": 8,
+      "failing": 0,
+      "recovering": 0,
+      "operator_action_required": false
+    },
+    "queue": {
+      "status": "warning",
+      "pending": 1,
+      "runnable": 1,
+      "runnable_keeper": "sangsu",
+      "oldest_age_seconds": 233.4330759048462,
+      "stale_after_seconds": 600.0,
+      "read_error_count": 0,
+      "operator_action_required": false
+    }
+  },
+  "browser": {
+    "captured_at": "2026-08-14T02:19:21Z",
+    "source_url": "http://127.0.0.1:8935/dashboard",
+    "interaction": "Overview to exact visible Monitor button to Keeper Fleet",
+    "deployed_label": "v0.22.0 · 13dd32a37a",
+    "overview": {
+      "running_keeper": "8 / 26"
+    },
+    "monitor": {
+      "legacy_band_label": "런타임 가능",
+      "legacy_band_count": 9,
+      "attention_count": 1
+    },
+    "console_errors": [],
+    "page_errors": [],
+    "verdict": {
+      "navigation": "pass",
+      "transport": "pass",
+      "repair_28694_deployed": false,
+      "count_semantics": "not_reconciled"
+    },
+    "screenshot": {
+      "path": "/Users/dancer/me/reports/masc-live-dashboard-monitor-20260814-1119.png",
+      "sha256": "bcbaee2d22f82964e3ce00a5aebb7a58346d26c76bccaa78603a6a98ad83a8ed",
+      "pixel_width": 1440,
+      "pixel_height": 1000
+    }
+  },
+  "limits": [
+    "The health commit is runtime_repo_head metadata, not an embedded binary build SHA.",
+    "The queue sample is below its stale threshold and is not a duration verdict.",
+    "The live checkout predates merged dashboard repair 28694 and repair PR 28701.",
+    "PR 28700 merged 44 seconds after this health capture and is intentionally absent from the source cutoff above.",
+    "The Monitor count is recorded as observed; this evidence does not infer its denominator."
+  ]
+}

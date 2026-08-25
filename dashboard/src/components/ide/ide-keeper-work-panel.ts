@@ -124,18 +124,6 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
               ${TaskRouteLinks(currentTask, summary.currentGoalId, summary.displayName)}
             </div>
           `
-          : summary.currentTaskId
-            ? html`
-              <div class="ide-keeper-work-card v2-ide-card">
-                <div class="ide-keeper-work-card-top">
-                  <span>${summary.currentTaskId}</span>
-                  <span>runtime</span>
-                </div>
-                <strong>keeper runtime current task</strong>
-                <span>task row not present in execution projection</span>
-                ${RuntimeTaskRouteLinks(summary.currentTaskId, summary.currentGoalId, summary.displayName)}
-              </div>
-            `
           : html`<div class="ide-keeper-work-empty">no active keeper task in dashboard state</div>`}
         ${QueuedTaskCards(queuedTasks, summary.currentGoalId, summary.displayName)}
         ${currentGoal
@@ -214,7 +202,7 @@ function GoalProgressCard(
         <span>${goalPhaseLabel(goal.phase)}</span>
       </div>
       <strong title=${goal.title}>${goal.title}</strong>
-      <div class="ide-keeper-work-goal-bar" aria-hidden="true" title="Linked task count only; metric attainment is not available on this IDE summary card.">
+      <div class="ide-keeper-work-goal-bar" aria-hidden="true" title="끝난 하위 작업 수. 목표 지표를 잰 값이 아닙니다.">
         <span style=${{ width: `${pctValue}%` }} />
       </div>
       <div class="ide-keeper-work-goal-meta">
@@ -245,14 +233,6 @@ function TaskRouteLinks(task: Task, fallbackGoalId: string | null, keeperId: str
     telemetry: execution.hasTelemetry,
     keeperId,
   }), 'Keeper task operational links')
-}
-
-function RuntimeTaskRouteLinks(taskId: string, goalId: string | null, keeperId: string) {
-  return KeeperWorkRouteLinks(routeLinksForContext({
-    goalId: goalId ?? undefined,
-    taskId,
-    keeperId,
-  }), 'Keeper runtime task links')
 }
 
 function KeeperWorkRouteLinks(
@@ -288,14 +268,8 @@ function taskExecutionRouteContext(task: Task): {
   readonly telemetryQuery: string | null
   readonly hasTelemetry: boolean
 } {
-  const sessionId = firstNonEmptyString(
-    task.execution_links?.session_id,
-    task.contract?.links?.session_id,
-  )
-  const operationId = firstNonEmptyString(
-    task.execution_links?.operation_id,
-    task.contract?.links?.operation_id,
-  )
+  const sessionId = firstNonEmptyString(task.execution_links?.session_id)
+  const operationId = firstNonEmptyString(task.execution_links?.operation_id)
   return {
     sessionId,
     operationId,
@@ -360,18 +334,11 @@ export function keeperWorkSummary(
 ): KeeperWorkSummary {
   const displayName = normalizedKeeperName(keeperName)
   const keeper = findKeeper(displayName, keeperList)
-  const explicitCurrentTaskId = firstNonEmptyString(keeper?.agent?.current_task)
   const assigneeTasks = taskList
     .filter(task => taskMatchesKeeper(task, displayName, keeper))
     .filter(task => task.status !== 'done' && task.status !== 'cancelled')
-  const currentTaskById = explicitCurrentTaskId
-    ? taskList.find(task => task.id === explicitCurrentTaskId) ?? null
-    : null
-  const activeTasks = uniqTasks(currentTaskById ? [currentTaskById, ...assigneeTasks] : assigneeTasks)
-  const currentTaskId = firstNonEmptyString(
-    explicitCurrentTaskId,
-    activeTasks[0]?.id,
-  )
+  const activeTasks = uniqTasks(assigneeTasks)
+  const currentTaskId = firstNonEmptyString(activeTasks[0]?.id)
   const currentTask = currentTaskId
     ? activeTasks.find(task => task.id === currentTaskId) ?? null
     : activeTasks[0] ?? null

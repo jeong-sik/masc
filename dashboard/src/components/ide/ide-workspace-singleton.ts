@@ -53,3 +53,16 @@ export function resetIdeDataWorkspaceStoreForTest(): void {
     instance = null
   }
 }
+
+/** RFC-0378 §5.3b: convert a catalog repository id into the canonical
+ *  codebase slug — the one wire key IDE reads and writes address. Null
+ *  when the repository is unknown or has no canonical remote. */
+export function codebaseForRepositoryId(repoId: string | null | undefined): string | null {
+  const id = repoId?.trim()
+  if (!id) return null
+  return (
+    getIdeDataWorkspaceStore()
+      .repositories()
+      .find(repository => repository.id === id)?.codebase ?? null
+  )
+}

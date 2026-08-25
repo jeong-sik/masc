@@ -4,10 +4,9 @@
     rationale.  Notes:
 
     - Fresh read per call.
-    - The currently-hardcoded values
-      ([Cleanup.managed_sleep_sec], [Shell_timeout.Cleanup_rm]) are
-      exposed as getters that return the historical literal —
-      enabling future env-override without behavior change. *)
+    - [Shell_timeout.Cleanup_rm] is still a hardcoded literal exposed
+      as a getter; it has callers, so the getter is the seam an
+      env-override would use. *)
 
 open Env_config_core
 
@@ -62,8 +61,6 @@ module Cleanup = struct
       (max 10
          (get_int ~default:300 "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"))
 
-  (* P2c will optionally wire an env var; today the literal stands. *)
-  let managed_sleep_sec () = 3600
 end
 
 (* --------------------------------------------------------------- *)
@@ -166,132 +163,3 @@ module Shell_timeout = struct
          | None -> global_default_sec)
 end
 
-(* --------------------------------------------------------------- *)
-(* Diagnostics / observability surface                                  *)
-(* --------------------------------------------------------------- *)
-
-(* Helper: does an env var currently exist (non-empty after trim)? *)
-let env_is_set name =
-  match Env_config_core.raw_value_opt name with
-  | Some v -> String.trim v <> ""
-  | None -> false
-
-(* Convenience builders for [{ value, source, env_var }] entries. *)
-let entry_env_overridable ~env_var (value : Yojson.Safe.t) : Yojson.Safe.t =
-  let source = if env_is_set env_var then "env" else "default" in
-  `Assoc
-    [ "value", value
-    ; "source", `String source
-    ; "env_var", `String env_var
-    ]
-
-let entry_hardcoded (value : Yojson.Safe.t) : Yojson.Safe.t =
-  `Assoc
-    [ "value", value
-    ; "source", `String "hardcoded"
-    ; "env_var", `Null
-    ]
-
-let bool_v b : Yojson.Safe.t = `Bool b
-let int_v i : Yojson.Safe.t = `Int i
-let float_v f : Yojson.Safe.t = `Float f
-let string_v s : Yojson.Safe.t = `String s
-
-let raw_hardening () : Yojson.Safe.t =
-  `Assoc
-    [ "pids_limit",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_PIDS_LIMIT"
-        (int_v (Hardening.pids_limit ()))
-    ; "nofile_limit",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_NOFILE_LIMIT"
-        (int_v (Hardening.nofile_limit ()))
-    ; "memory",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_MEMORY"
-        (string_v (Hardening.memory ()))
-    ; "tmpfs_size",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_TMPFS_SIZE"
-        (string_v (Hardening.tmpfs_size ()))
-    ; "relax_fs",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_RELAX_FS"
-        (bool_v (Hardening.relax_fs ()))
-    ; "seccomp_profile",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_SECCOMP_PROFILE"
-        (string_v (Hardening.seccomp_profile ()))
-    ; "require_rootless",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS"
-        (bool_v (Hardening.require_rootless ()))
-    ; "require_userns",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
-        (bool_v (Hardening.require_userns ()))
-    ]
-
-let raw_cleanup () : Yojson.Safe.t =
-  `Assoc
-    [ "enabled",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_CLEANUP_ENABLED"
-        (bool_v (Cleanup.enabled ()))
-    ; "interval_sec",
-      entry_env_overridable
-        ~env_var:"MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"
-        (float_v (Cleanup.interval_sec ()))
-    ; "managed_sleep_sec",
-      entry_hardcoded (int_v (Cleanup.managed_sleep_sec ()))
-    ]
-
-let raw_runtime () : Yojson.Safe.t =
-  `Assoc
-    [ "docker_image",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
-        (string_v (Runtime.docker_image ()))
-    ; "docker_playground_enabled",
-      entry_env_overridable ~env_var:"MASC_KEEPER_DOCKER_PLAYGROUND"
-        (bool_v (Runtime.docker_playground_enabled ()))
-    ; "docker_playground_container_root",
-      entry_env_overridable
-        ~env_var:"MASC_KEEPER_DOCKER_PLAYGROUND_ROOT"
-        (string_v (Runtime.docker_playground_container_root ()))
-    ]
-
-let raw_preflight () : Yojson.Safe.t =
-  `Assoc
-    [ "enabled",
-      entry_env_overridable
-        ~env_var:"MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
-        (bool_v (Preflight.enabled ()))
-    ]
-
-let raw_shell_timeout () : Yojson.Safe.t =
-  let bucket_entry b =
-    let key = Shell_timeout.bucket_key b in
-    let value = float_v (Shell_timeout.timeout_sec ~bucket:b ()) in
-    let entry =
-      entry_env_overridable
-        ~env_var:(Shell_timeout.per_bucket_env_var ~bucket:b)
-        value
-    in
-    key, entry
-  in
-  `Assoc (List.map bucket_entry (Shell_timeout.known_buckets ()))
-
-let raw_section () : Yojson.Safe.t =
-  `Assoc
-    [ "hardening", raw_hardening ()
-    ; "cleanup", raw_cleanup ()
-    ; "runtime", raw_runtime ()
-    ; "preflight", raw_preflight ()
-    ; "shell_timeout", raw_shell_timeout ()
-    ]
-
-let derived_section () : Yojson.Safe.t =
-  `Assoc
-    [ "read_only_rootfs_args",
-      `List (List.map (fun s -> `String s)
-               (Hardening.read_only_rootfs_args ()))
-    ; "tmpfs_mount", `String (Hardening.tmpfs_mount ())
-    ]
-
-let effective_config_json () : Yojson.Safe.t =
-  `Assoc
-    [ "raw", raw_section ()
-    ; "derived", derived_section ()
-    ]

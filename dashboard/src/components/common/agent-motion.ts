@@ -50,11 +50,10 @@ function boardPreview(post: BoardPost): string {
 }
 
 function keeperPreview(keeper: Keeper): string {
-  const generation = keeper.generation ?? '?'
   const ratio = formatPct(keeper.context_ratio, '?')
   return keeper.last_heartbeat
-    ? `Heartbeat gen=${generation} ctx=${ratio}`
-    : `Keeper snapshot gen=${generation} ctx=${ratio}`
+    ? `Heartbeat ctx=${ratio}`
+    : `Keeper snapshot ctx=${ratio}`
 }
 
 export function buildAgentMotion(

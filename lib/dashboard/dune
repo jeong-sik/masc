@@ -4,9 +4,10 @@
  (name masc_dashboard)
  (public_name masc.dashboard)
  (wrapped false)
- (flags :standard -open Masc)
+ (flags :standard -open Masc -w +33)
  (libraries
   masc
+  masc.tool_schemas_specs
   yojson
   otoml
   base64
@@ -34,7 +35,6 @@
   grpc-direct-core
   h2
   h2-eio
-  ocaml-webrtc
   eio
   eio_main
   eio.unix
@@ -46,9 +46,9 @@
   fmt
   cohttp
   cohttp-eio
-  agent_sdk
-  agent_sdk.base
-  agent_sdk.llm_provider
+  masc.agent_core
+  masc.agent_core.base
+  masc.agent_core.llm_provider
   masc.tool_types
   masc.time_codec
   masc.attribution
@@ -75,6 +75,7 @@
   masc.discovery_cache
   masc.local_runtime_pool
   masc.keeper_contract
+  masc.keeper_approval
   masc.compaction_trigger
   masc.bounded_event_dedupe
   masc.tool_catalog_surfaces
@@ -127,7 +128,6 @@
   masc.prompt_registry
   masc.mcp_transport_protocol
   masc.mcp_session
-  masc.response
   masc.ag_ui
   opentelemetry
   opentelemetry.client
@@ -135,7 +135,6 @@
   ambient-context-eio
   masc.shared_audit
   masc.shared_types
-  masc.resilience
   masc.multimodal
   masc.repo_manager
   masc.parse_outcome)

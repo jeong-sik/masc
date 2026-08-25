@@ -1,8 +1,8 @@
 ; Fusion_core — pure, standalone-testable core of the panel+judge deliberation
 ; loop (RFC-0252). Typed contracts (Fusion_types) + deterministic gate
 ; (Fusion_policy) + TOML config (Fusion_config) + judge JSON parse. No
-; OAS/keeper/board deps, so the alcotest links in seconds without dragging the
-; main masc library. OAS/keeper integration lives in lib/fusion/ (part of masc).
+; AGENT_CORE/keeper/board deps, so the alcotest links in seconds without dragging the
+; main masc library. AGENT_CORE/keeper integration lives in lib/fusion/ (part of masc).
 
 (include_subdirs no)
 
@@ -10,6 +10,6 @@
  (name masc_fusion_core)
  (public_name masc.fusion_core)
  (wrapped false)
- (libraries fs_compat masc_log yojson otoml)
+ (libraries fs_compat masc_log masc.run_registry_core yojson otoml)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

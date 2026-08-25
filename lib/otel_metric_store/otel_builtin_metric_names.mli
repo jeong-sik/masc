@@ -34,21 +34,21 @@ val metric_telemetry_observe_failures : string
 (** #10358 (c1): total times [lib/workspace.ml]'s lifecycle hook caught
     [Stdlib.Effect.Unhandled] and dropped its Audit_log + Telemetry
     pair because dispatch happened outside an Eio scheduler. Labels:
-    [event_family] (one of [agent_lifecycle] / [task_transition] /
-    [accountability]) and [event_kind] (the variant). For
+    [event_family] (one of [agent_lifecycle] / [task_transition])
+    and [event_kind] (the variant). For
     [agent_lifecycle], [event_kind] is one of [join] / [rejoin] /
-    [leave] (3 values). For both [task_transition] and
-    [accountability], [event_kind] uses the 8
+    [leave] (3 values). For [task_transition],
+    [event_kind] uses the 8
     [Masc_domain.task_action_to_string] values: [claim] / [start] /
     [done] / [cancel] / [release] / [submit_for_verification] /
-    [approve] / [reject]. Cardinality bound: 19 series (3 + 8 + 8).
+    [approve] / [reject]. Cardinality bound: 11 series (3 + 8).
     Non-zero rate means a production path is firing the lifecycle
     outside an Eio fiber and the corresponding audit/telemetry rows
     are missing — the silent root cause behind the [#10358] 5-tag → 2-tag
     durable-ledger attrition. *)
 val metric_workspace_telemetry_drop : string
 
-include module type of Otel_oas_metric_names
+include module type of Otel_agent_core_metric_names
 
 include module type of Otel_runtime_metric_names
 
@@ -77,11 +77,9 @@ include module type of Otel_policy_metric_names
 (** Total supervisor restart outcomes. Labels:
     [keeper, outcome]. Outcome is one of [started | meta_unavailable]. *)
 
-val metric_oas_bus_capacity : string
+val metric_agent_core_bus_capacity : string
 (** Gauge: total queue capacity for live subscribers grouped by
     [bus], [purpose], [capacity], and [overflow]. *)
-
-val metric_oas_bridge_unmigrated_payload_kind : string
 
 (** #9632: subprocess executions that exceeded their configured
     timeout. Labels: [program, timeout_sec]. *)
@@ -107,16 +105,16 @@ include module type of Otel_identity_metric_names
 
 include module type of Otel_transport_metric_names
 
-(** [masc_keeper_oas_run_timeout_total] counter incremented in the
+(** [masc_keeper_agent_core_run_timeout_total] counter incremented in the
     runtime FSM each time an [Agent.run] / [run_stream] returns
     [Llm_provider.Retry.Timeout]. The [source] label is typed provider
-    timeout phase when OAS exposes one, otherwise [provider]. Free-form
+    timeout phase when AGENT_CORE exposes one, otherwise [provider]. Free-form
     timeout messages are not reparsed into [max_execution_time] labels.
 
     Labels: runtime, provider, source. *)
 (* Centralized metric constants for inline string replacement. *)
 
-(** Counter incremented when an OAS after-turn response is accepted but
+(** Counter incremented when an AGENT_CORE after-turn response is accepted but
     its response model field is empty. This tracks malformed or partial
     provider response metadata. *)
 val metric_after_turn_response_model_empty : string
@@ -133,3 +131,9 @@ val metric_telemetry_cache_rescans : string
 (** #20677: bytes folded by incremental telemetry readers.  Labels:
     [store]. *)
 val metric_telemetry_scanned_bytes : string
+
+(** A keeper lifecycle event reached the dashboard cache patcher without a
+    decodable [event]/[keeper_name] pair, so the cache invalidation it carried
+    was dropped. Declared rather than emitted bare so the 0-cell exports while
+    the fleet is healthy. *)
+val metric_keeper_lifecycle_malformed : string

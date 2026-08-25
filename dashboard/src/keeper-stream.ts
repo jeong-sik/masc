@@ -1,13 +1,21 @@
+import { keeperStreamContract } from './keeper-stream-contract'
+import {
+  operationDeliveryProvenance,
+  isOperationDeliveryProvenance,
+  toolCallDeliveryProvenance,
+} from './keeper-delivery-provenance'
 import {
   formatKeeperVisibleReply,
   keeperTurnOutcomeSuppressesReply,
   normalizeKeeperConversationDetails,
+  normalizeKeeperExternalEffectTarget,
 } from './keeper-message'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
 import type { KeeperChatStreamEvent } from './api'
 import type { KeeperConversationDetails } from './types'
 import {
   appendAssistantDelta,
+  appendThreadEntry,
   promoteAssistantTextToProgress,
   appendAssistantToolTraceArgsDelta,
   setAssistantToolTraceArgsSnapshot,
@@ -20,15 +28,14 @@ import {
   markAssistantToolTraceEnded,
   markAssistantToolTraceErrored,
   clearActiveStream,
-  clearActiveStreamRequestId,
-  releaseActiveStreamRequestId,
   activeStreamEntryId,
+  activeStreamOperationId,
   activeStreamRequestId,
   getStreamController,
-  keeperClientObservedSseStreamContract,
   keeperThreads,
   keeperSending,
   keeperStreamStartedAt,
+  liveSendOwnsRequest,
   setRecordValue,
   upsertKeeperToolApproval,
   dropKeeperToolApproval,
@@ -39,27 +46,58 @@ import {
   toolEntryIdFromCallId,
 } from './tool-call-output-store'
 import { STREAMING_THINKING_PREVIEW_CHARS } from './config/constants'
-import { updatePendingKeeperChatAssistantDraft } from './keeper-chat-pending'
-import { isKeeperChatReceiptId, parseKeeperQueueRevision } from './lib/keeper-chat-receipt'
+import { updateTrackedKeeperChatAssistantDraft } from './keeper-chat-operations-local'
 
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
-export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'cancelled'])
 export const KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS = 100
 
-const pendingOasToolBlockIndexes = new Map<string, number>()
-const pendingOasTextBlockIndexes = new Map<string, number>()
+const pendingAgentCoreToolBlockIndexes = new Map<string, number>()
+const pendingAgentCoreTextBlockIndexes = new Map<string, number>()
 type ScheduledFlushHandle = ReturnType<typeof setTimeout>
 interface PendingThinkingState {
   chunks: string[]
   preview: string
-  oasBlockIndex?: number
+  agentCoreBlockIndex?: number
   flushHandle: ScheduledFlushHandle | null
 }
 
 const pendingThinkingDeltas = new Map<string, PendingThinkingState>()
 
+// AG-UI text messages are delivered at-least-once: a WS/SSE reconnect can
+// replay a message's START/CONTENT/END, and an overlapping observer socket can
+// re-deliver the same operation event. TEXT_MESSAGE_CONTENT carries a messageId
+// but no per-chunk sequence, so the reducer keys idempotency on messageId — a
+// completed message is never re-applied, and a re-START of the in-flight message
+// restarts its buffer instead of appending on top. The terminal reply is an
+// absolute snapshot (already idempotent), which is why only streaming text
+// doubled before this guard.
+interface TextMessageStreamState {
+  activeMessageId: string | null
+  endedMessageIds: Set<string>
+}
+
+const textMessageStreamStates = new Map<string, TextMessageStreamState>()
+
 function streamEntryKey(keeperName: string, assistantEntryId: string): string {
   return `${keeperName}\u0000${assistantEntryId}`
+}
+
+function textMessageStreamState(keeperName: string, assistantEntryId: string): TextMessageStreamState {
+  const key = streamEntryKey(keeperName, assistantEntryId)
+  let state = textMessageStreamStates.get(key)
+  if (!state) {
+    state = { activeMessageId: null, endedMessageIds: new Set() }
+    textMessageStreamStates.set(key, state)
+  }
+  return state
+}
+
+function textStreamMessageId(value: unknown): string | null {
+  return typeof value === 'string' && value ? value : null
+}
+
+function clearTextMessageStreamState(keeperName: string, assistantEntryId: string): void {
+  textMessageStreamStates.delete(streamEntryKey(keeperName, assistantEntryId))
 }
 
 function scheduleThinkingFlush(callback: () => void): ScheduledFlushHandle {
@@ -70,7 +108,7 @@ function cancelStreamFlush(handle: ScheduledFlushHandle): void {
   clearTimeout(handle)
 }
 
-function sameOasBlockIndex(left: number | undefined, right: number | undefined): boolean {
+function sameAgentCoreBlockIndex(left: number | undefined, right: number | undefined): boolean {
   return left === undefined ? right === undefined : left === right
 }
 
@@ -86,12 +124,12 @@ function fullPendingThinkingText(pending: PendingThinkingState): string {
 }
 
 function persistActiveAssistantDraft(keeperName: string, assistantEntryId: string): void {
-  const requestId = activeStreamRequestId(keeperName)
-  if (!requestId) return
   const entry = (keeperThreads.value[keeperName] ?? [])
     .find(candidate => candidate.id === assistantEntryId) ?? null
   if (!entry) return
-  updatePendingKeeperChatAssistantDraft(requestId, entry)
+  const deliveryKey = entry.deliveryProvenance?.delivery_key
+  if (deliveryKey?.kind !== 'operation') return
+  updateTrackedKeeperChatAssistantDraft(deliveryKey.operation_id, entry)
 }
 
 function flushPendingThinkingDeltas(
@@ -108,14 +146,14 @@ function flushPendingThinkingDeltas(
   }
   if (mode === 'preview') {
     setAssistantThinkingSnapshot(keeperName, assistantEntryId, pending.preview, {
-      oasBlockIndex: pending.oasBlockIndex,
+      agentCoreBlockIndex: pending.agentCoreBlockIndex,
     })
     persistActiveAssistantDraft(keeperName, assistantEntryId)
     return
   }
   pendingThinkingDeltas.delete(key)
   setAssistantThinkingSnapshot(keeperName, assistantEntryId, fullPendingThinkingText(pending), {
-    oasBlockIndex: pending.oasBlockIndex,
+    agentCoreBlockIndex: pending.agentCoreBlockIndex,
   })
   persistActiveAssistantDraft(keeperName, assistantEntryId)
 }
@@ -133,12 +171,12 @@ function enqueueThinkingDelta(
   keeperName: string,
   assistantEntryId: string,
   delta: string,
-  meta: { oasBlockIndex?: number } = {},
+  meta: { agentCoreBlockIndex?: number } = {},
 ): void {
   if (!delta.trim()) return
   const key = streamEntryKey(keeperName, assistantEntryId)
   let pending = pendingThinkingDeltas.get(key)
-  if (pending && !sameOasBlockIndex(pending.oasBlockIndex, meta.oasBlockIndex)) {
+  if (pending && !sameAgentCoreBlockIndex(pending.agentCoreBlockIndex, meta.agentCoreBlockIndex)) {
     flushPendingThinkingDeltas(keeperName, assistantEntryId)
     pending = undefined
   }
@@ -147,7 +185,7 @@ function enqueueThinkingDelta(
     pending = {
       chunks: [text],
       preview: text,
-      oasBlockIndex: meta.oasBlockIndex,
+      agentCoreBlockIndex: meta.agentCoreBlockIndex,
       flushHandle: null,
     }
     pendingThinkingDeltas.set(key, pending)
@@ -176,8 +214,9 @@ export function _resetKeeperStreamBuffersForTests(): void {
     }
   }
   pendingThinkingDeltas.clear()
-  pendingOasToolBlockIndexes.clear()
-  pendingOasTextBlockIndexes.clear()
+  pendingAgentCoreToolBlockIndexes.clear()
+  pendingAgentCoreTextBlockIndexes.clear()
+  textMessageStreamStates.clear()
 }
 
 export interface KeeperThreadAbortResult {
@@ -231,11 +270,11 @@ function recordStreamProtocolError(
   }
 }
 
-function oasToolBlockKey(keeperName: string, assistantEntryId: string, toolCallId: string): string {
+function agentCoreToolBlockKey(keeperName: string, assistantEntryId: string, toolCallId: string): string {
   return `${keeperName}\u0000${assistantEntryId}\u0000${toolCallId}`
 }
 
-function rememberOasToolBlockIndex(
+function rememberAgentCoreToolBlockIndex(
   keeperName: string,
   assistantEntryId: string,
   toolCallId: string,
@@ -243,57 +282,57 @@ function rememberOasToolBlockIndex(
 ): void {
   const id = nonBlankToolCallId(toolCallId)
   if (!id || index === undefined) return
-  pendingOasToolBlockIndexes.set(oasToolBlockKey(keeperName, assistantEntryId, id), index)
+  pendingAgentCoreToolBlockIndexes.set(agentCoreToolBlockKey(keeperName, assistantEntryId, id), index)
 }
 
-function takeOasToolBlockIndex(
+function takeAgentCoreToolBlockIndex(
   keeperName: string,
   assistantEntryId: string,
   toolCallId: string,
 ): number | undefined {
-  const key = oasToolBlockKey(keeperName, assistantEntryId, toolCallId)
-  const index = pendingOasToolBlockIndexes.get(key)
-  pendingOasToolBlockIndexes.delete(key)
+  const key = agentCoreToolBlockKey(keeperName, assistantEntryId, toolCallId)
+  const index = pendingAgentCoreToolBlockIndexes.get(key)
+  pendingAgentCoreToolBlockIndexes.delete(key)
   return index
 }
 
-function forgetOasToolBlockIndexByIndex(
+function forgetAgentCoreToolBlockIndexByIndex(
   keeperName: string,
   assistantEntryId: string,
   index: number | undefined,
 ): void {
   if (index === undefined) return
   const prefix = `${keeperName}\u0000${assistantEntryId}\u0000`
-  for (const [key, value] of pendingOasToolBlockIndexes.entries()) {
-    if (key.startsWith(prefix) && value === index) pendingOasToolBlockIndexes.delete(key)
+  for (const [key, value] of pendingAgentCoreToolBlockIndexes.entries()) {
+    if (key.startsWith(prefix) && value === index) pendingAgentCoreToolBlockIndexes.delete(key)
   }
 }
 
-function clearPendingOasToolBlockIndexesForEntry(keeperName: string, assistantEntryId: string): void {
+function clearPendingAgentCoreToolBlockIndexesForEntry(keeperName: string, assistantEntryId: string): void {
   const prefix = `${keeperName}\u0000${assistantEntryId}\u0000`
-  for (const key of pendingOasToolBlockIndexes.keys()) {
-    if (key.startsWith(prefix)) pendingOasToolBlockIndexes.delete(key)
+  for (const key of pendingAgentCoreToolBlockIndexes.keys()) {
+    if (key.startsWith(prefix)) pendingAgentCoreToolBlockIndexes.delete(key)
   }
 }
 
-function rememberOasTextBlockIndex(
+function rememberAgentCoreTextBlockIndex(
   keeperName: string,
   assistantEntryId: string,
   index: number | undefined,
 ): void {
   if (index === undefined) return
-  pendingOasTextBlockIndexes.set(streamEntryKey(keeperName, assistantEntryId), index)
+  pendingAgentCoreTextBlockIndexes.set(streamEntryKey(keeperName, assistantEntryId), index)
 }
 
-function takeOasTextBlockIndex(keeperName: string, assistantEntryId: string): number | undefined {
+function takeAgentCoreTextBlockIndex(keeperName: string, assistantEntryId: string): number | undefined {
   const key = streamEntryKey(keeperName, assistantEntryId)
-  const index = pendingOasTextBlockIndexes.get(key)
-  pendingOasTextBlockIndexes.delete(key)
+  const index = pendingAgentCoreTextBlockIndexes.get(key)
+  pendingAgentCoreTextBlockIndexes.delete(key)
   return index
 }
 
-function clearPendingOasTextBlockIndex(keeperName: string, assistantEntryId: string): void {
-  pendingOasTextBlockIndexes.delete(streamEntryKey(keeperName, assistantEntryId))
+function clearPendingAgentCoreTextBlockIndex(keeperName: string, assistantEntryId: string): void {
+  pendingAgentCoreTextBlockIndexes.delete(streamEntryKey(keeperName, assistantEntryId))
 }
 
 function normalizeStreamUsage(raw: unknown): NonNullable<KeeperConversationDetails['usage']> | null {
@@ -316,6 +355,33 @@ function normalizeStreamUsage(raw: unknown): NonNullable<KeeperConversationDetai
   return usage
 }
 
+// Delta usage carries cumulative counters for only the fields the wire
+// reported, and normalizeStreamUsage null-fills the base trio — so replacing
+// the whole usage object would erase the start snapshot with nulls. Overlay
+// the reported (non-null) counters onto what is already known, mirroring the
+// producer-side replace-fold, and rederive the total from its parts.
+function mergeStreamUsage(
+  previous: KeeperConversationDetails['usage'],
+  next: NonNullable<KeeperConversationDetails['usage']>,
+): NonNullable<KeeperConversationDetails['usage']> {
+  const merged: NonNullable<KeeperConversationDetails['usage']> = { ...(previous ?? {}) }
+  for (const key of [
+    'inputTokens',
+    'outputTokens',
+    'totalTokens',
+    'cacheCreationInputTokens',
+    'cacheReadInputTokens',
+    'costUsd',
+  ] as const) {
+    const value = next[key]
+    if (value !== null && value !== undefined) merged[key] = value
+  }
+  if (merged.inputTokens != null && merged.outputTokens != null) {
+    merged.totalTokens = merged.inputTokens + merged.outputTokens
+  }
+  return merged
+}
+
 function mergeAssistantStreamDetails(
   keeperName: string,
   assistantEntryId: string,
@@ -326,7 +392,9 @@ function mergeAssistantStreamDetails(
     details: {
       ...(entry.details ?? {}),
       ...patch,
-      usage: patch.usage ?? entry.details?.usage ?? null,
+      usage: patch.usage
+        ? mergeStreamUsage(entry.details?.usage, patch.usage)
+        : entry.details?.usage ?? null,
       rawPayload: entry.details?.rawPayload,
     },
   }))
@@ -337,6 +405,7 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
   if (!keeperName) return null
   const controller = getStreamController(keeperName)
   const entryId = activeStreamEntryId(keeperName)
+  const operationId = activeStreamOperationId(keeperName)
   const requestId = activeStreamRequestId(keeperName)
   console.debug(`[keeper-stream] aborting stream for ${keeperName}${entryId ? ` (entry=${entryId})` : ''}${requestId ? ` request=${requestId}` : ''}`)
   if (controller) controller.abort()
@@ -350,12 +419,14 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
       error: null,
       timestamp: new Date().toISOString(),
     })
-    clearPendingOasToolBlockIndexesForEntry(keeperName, entryId)
-    clearPendingOasTextBlockIndex(keeperName, entryId)
+    clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, entryId)
+    clearPendingAgentCoreTextBlockIndex(keeperName, entryId)
   }
-  clearActiveStream(keeperName)
-  setRecordValue(keeperSending, keeperName, false)
-  setRecordValue(keeperStreamStartedAt, keeperName, null)
+  if (operationId) clearActiveStream(keeperName, operationId)
+  if (activeStreamEntryId(keeperName) === null) {
+    setRecordValue(keeperSending, keeperName, false)
+    setRecordValue(keeperStreamStartedAt, keeperName, null)
+  }
   return {
     keeperName,
     entryId,
@@ -364,10 +435,118 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
   }
 }
 
+export interface KeeperOperationTurnEvent {
+  operationId: string
+  event: KeeperChatStreamEvent
+}
+
+type KeeperStreamEventSource =
+  | { kind: 'direct' }
+  | { kind: 'operation'; operationId: string }
+
+/** Apply a server-pushed operation event only to the assistant bubble carrying
+ * the exact operation id. Another browser can synthesize the bubble and later
+ * fold it into the committed transcript using the same durable identity. */
+export function applyKeeperOperationTurnEvent(
+  name: string,
+  operation: KeeperOperationTurnEvent,
+): string | null {
+  const keeperName = name.trim()
+  const operationId = operation.operationId.trim()
+  if (!keeperName || !operationId) return null
+
+  // The server broadcasts every operation event to every session, including the
+  // one that issued the send and is already applying the same turn off its own
+  // response stream. [delivery] cannot tell the two apart: the direct stream
+  // stamps the accepted operation id onto the bubble it is streaming into
+  // (keeper-actions [stampPlaceholderRequestId]) and leaves it in 'streaming',
+  // which is exactly the state this function treats as "still open, keep
+  // writing". Both transports carry the same event: one Option.iter in
+  // server_routes_http_keeper_stream hands a single AG-UI event to
+  // Keeper_chat_broadcast.operation_event and publish_operation_live_event, so
+  // the deltas are byte-identical and TEXT_MESSAGE_CONTENT has no per-chunk
+  // sequence to dedupe on (messageId alone cannot: it is per message, not per
+  // chunk). Applying both to one bubble appends twice, and the broadcast copy
+  // starts after the direct stream has already written some deltas, so the two
+  // runs sit out of phase and the operator reads interleaved fragments
+  // ("오퍼레이터가 비" + "레이터가 비유/").
+  // Live-send ownership already records which request this session is
+  // streaming itself, so consult that rather than inferring it from state.
+  if (liveSendOwnsRequest(operationId)) return null
+
+  const entries = keeperThreads.value[keeperName] ?? []
+  const matched = [...entries].reverse().find(
+    entry => entry.role === 'assistant'
+      && isOperationDeliveryProvenance(
+        entry.deliveryProvenance,
+        operationId,
+        'terminal_assistant',
+      ),
+  )
+  if (
+    matched
+    && matched.delivery !== 'queued'
+    && matched.delivery !== 'sending'
+    && matched.delivery !== 'streaming'
+    && matched.delivery !== 'interrupted'
+  ) {
+    return null
+  }
+  const entryId = matched?.id ?? `operation-turn-${operationId}`
+
+  if (!matched) {
+    appendThreadEntry(keeperName, {
+      id: entryId,
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: keeperName,
+      text: '',
+      rawText: null,
+      timestamp: null,
+      deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_assistant'),
+      delivery: 'sending',
+      streamState: 'opening',
+      streamContract: keeperStreamContract(
+        'sse_event',
+        'backend_stream_event',
+        { eventName: 'keeper_chat_operation_event', requestId: operationId },
+      ),
+      details: null,
+    })
+  } else if (matched.delivery === 'queued') {
+    updateThreadEntry(keeperName, entryId, entry => ({
+      ...entry,
+      text: '',
+      rawText: null,
+      delivery: 'sending',
+      streamState: 'opening',
+    }))
+  }
+
+  const error = applyKeeperStreamEvent(
+    keeperName,
+    entryId,
+    operation.event,
+    { kind: 'operation', operationId },
+  )
+  if (error) {
+    finalizeAssistantEntry(keeperName, entryId, {
+      text: `Keeper request failed: ${error}`,
+      rawText: error,
+      delivery: 'error',
+      streamState: null,
+      error,
+      timestamp: new Date().toISOString(),
+    })
+  }
+  return error
+}
+
 export function applyKeeperStreamEvent(
   keeperName: string,
   assistantEntryId: string,
   event: KeeperChatStreamEvent,
+  source: KeeperStreamEventSource = { kind: 'direct' },
 ): string | null {
   const applyTextDelta = (payload: unknown): void => {
     if (typeof payload !== 'string') return
@@ -384,7 +563,7 @@ export function applyKeeperStreamEvent(
         ...entry,
         streamState: 'finalizing',
         delivery: 'streaming',
-        streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName }),
+        streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName }),
       }
     })
   }
@@ -396,10 +575,27 @@ export function applyKeeperStreamEvent(
         assistantEntryId,
         'opening',
         'sending',
-        keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'RUN_STARTED' }),
+        keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'RUN_STARTED' }),
       )
       return null
-    case 'TEXT_MESSAGE_START':
+    case 'TEXT_MESSAGE_START': {
+      const messageId = textStreamMessageId(event.messageId)
+      const streamState = textMessageStreamState(keeperName, assistantEntryId)
+      if (messageId !== null && streamState.endedMessageIds.has(messageId)) {
+        // Replay of a completed message: the transcript already holds its text.
+        return null
+      }
+      if (messageId !== null && messageId === streamState.activeMessageId) {
+        // Duplicate in-flight START (reconnect/observer replay): restart this
+        // message's buffer so re-sent content re-accumulates identically instead
+        // of appending on top of the partial text already shown.
+        updateThreadEntry(keeperName, assistantEntryId, entry => ({
+          ...entry,
+          text: '',
+          rawText: '',
+        }))
+      }
+      streamState.activeMessageId = messageId
       // Flush any buffered thinking deltas before entering the text phase so a
       // pending scheduled flush cannot run later and revert streamState to
       // 'thinking' after text streaming has begun. Mirrors TEXT_MESSAGE_END and
@@ -410,22 +606,44 @@ export function applyKeeperStreamEvent(
         assistantEntryId,
         'streaming',
         'streaming',
-        keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'TEXT_MESSAGE_START' }),
+        keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'TEXT_MESSAGE_START' }),
       )
       return null
+    }
     case 'TEXT_MESSAGE_CONTENT': {
+      const messageId = textStreamMessageId(event.messageId)
+      if (messageId !== null) {
+        const streamState = textMessageStreamState(keeperName, assistantEntryId)
+        if (streamState.endedMessageIds.has(messageId)) {
+          // Content re-delivered after the message ended: already rendered.
+          return null
+        }
+        if (streamState.activeMessageId !== null && streamState.activeMessageId !== messageId) {
+          // Content for a different message than the one in flight: stale copy.
+          return null
+        }
+        // Adopt the id when START was coalesced away by the guards above.
+        streamState.activeMessageId = messageId
+      }
       applyTextDelta(event.delta)
       return null
     }
-    case 'TEXT_MESSAGE_END':
+    case 'TEXT_MESSAGE_END': {
+      const messageId = textStreamMessageId(event.messageId)
+      if (messageId !== null) {
+        const streamState = textMessageStreamState(keeperName, assistantEntryId)
+        streamState.endedMessageIds.add(messageId)
+        if (streamState.activeMessageId === messageId) streamState.activeMessageId = null
+      }
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
+      clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, assistantEntryId)
       markFinalizingIfLive('TEXT_MESSAGE_END')
       return null
+    }
     case 'TOOL_CALL_START': {
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       const toolCallId = nonBlankToolCallId(event.toolCallId)
-      const toolName = (event.toolCallName ?? event.name)?.trim()
+      const toolName = event.toolCallName?.trim()
       if (!toolCallId || !toolName) {
         recordStreamProtocolError(
           keeperName,
@@ -435,12 +653,22 @@ export function applyKeeperStreamEvent(
         return null
       }
       promoteAssistantTextToProgress(keeperName, assistantEntryId, {
-        oasBlockIndex: takeOasTextBlockIndex(keeperName, assistantEntryId),
+        agentCoreBlockIndex: takeAgentCoreTextBlockIndex(keeperName, assistantEntryId),
       })
+      const assistantEntry = (keeperThreads.value[keeperName] ?? [])
+        .find(entry => entry.id === assistantEntryId)
+      const toolSteps = assistantEntry?.traceSteps?.filter(step => step.kind === 'tool') ?? []
+      const existingOrdinal = toolSteps.findIndex(step => step.toolCallId === toolCallId)
+      const toolOrdinal = existingOrdinal >= 0 ? existingOrdinal : toolSteps.length
+      const deliveryProvenance = toolCallDeliveryProvenance(
+        assistantEntry?.deliveryProvenance,
+        toolCallId,
+        toolOrdinal,
+      )
       appendAssistantToolTraceStep(keeperName, assistantEntryId, {
         toolCallId,
         name: toolName,
-        oasBlockIndex: takeOasToolBlockIndex(keeperName, assistantEntryId, toolCallId),
+        agentCoreBlockIndex: takeAgentCoreToolBlockIndex(keeperName, assistantEntryId, toolCallId),
       })
       // Insert above the live assistant bubble so the final reply text
       // stays the last entry in the transcript.
@@ -452,9 +680,10 @@ export function applyKeeperStreamEvent(
         text: '',
         rawText: '',
         timestamp: new Date().toISOString(),
+        deliveryProvenance,
         delivery: 'streaming',
         streamState: 'streaming',
-        streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'TOOL_CALL_START' }),
+        streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'TOOL_CALL_START' }),
         details: null,
       })
       return null
@@ -500,29 +729,79 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (toolCallId) {
+        updateThreadEntry(keeperName, toolEntryIdFromCallId(toolCallId), entry => {
+          if (entry.delivery === 'delivered') return entry
+          return {
+            ...entry,
+            delivery: 'streaming',
+            streamState: 'streaming',
+            streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'TOOL_CALL_END' }),
+          }
+        })
+      }
+      return null
+    }
+    case 'CUSTOM': {
+      const customEventName: string = event.name
+      if (event.name === 'KEEPER_TOOL_RESULT_READY') {
+        const toolCallId = nonBlankToolCallId(event.value.tool_call_id)
+        if (!toolCallId) return 'KEEPER_TOOL_RESULT_READY missing tool_call_id'
         markAssistantToolTraceEnded(keeperName, assistantEntryId, toolCallId)
         updateThreadEntry(keeperName, toolEntryIdFromCallId(toolCallId), entry => ({
           ...entry,
           delivery: 'delivered',
           streamState: null,
-          streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'TOOL_CALL_END' }),
+          streamContract: keeperStreamContract(
+            'sse_event',
+            'backend_stream_event',
+            { eventName: 'KEEPER_TOOL_RESULT_READY' },
+          ),
         }))
+        return null
       }
-      return null
-    }
-    case 'CUSTOM': {
-      const customValue = isRecord(event.value) ? event.value : null
+      if (event.name === 'KEEPER_CHAT_OPERATION_ACCEPTED') {
+        const operationId = event.value.operation_id.trim()
+        if (!operationId) return 'Keeper operation acceptance is missing operation_id.'
+        const queued = event.value.state === 'Queued'
+        updateThreadEntry(keeperName, assistantEntryId, entry => ({
+          ...entry,
+          deliveryProvenance: operationDeliveryProvenance(
+            operationId,
+            'terminal_assistant',
+          ),
+          text: queued ? 'Queued' : entry.text,
+          rawText: queued ? 'Queued' : entry.rawText,
+          delivery: queued ? 'queued' : 'sending',
+          streamState: queued ? null : 'opening',
+          streamContract: keeperStreamContract(
+            'sse_event',
+            'backend_stream_event',
+            { eventName: 'KEEPER_CHAT_OPERATION_ACCEPTED', requestId: operationId },
+          ),
+        }))
+        return null
+      }
+      if (event.name === 'KEEPER_CONNECTED') {
+        setAssistantStreamState(
+          keeperName,
+          assistantEntryId,
+          'streaming',
+          'streaming',
+          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONNECTED' }),
+        )
+        return null
+      }
       if (event.name === 'KEEPER_TOOL_APPROVAL_REQUESTED') {
-        const toolCallId = nonBlankToolCallId(asString(customValue?.tool_call_id))
+        const toolCallId = nonBlankToolCallId(event.value.tool_call_id)
         if (!toolCallId) return 'KEEPER_TOOL_APPROVAL_REQUESTED missing tool_call_id'
-        const toolName = asString(customValue?.tool_call_name) ?? ''
-        const question = asString(customValue?.question) ?? ''
+        const toolName = event.value.tool_call_name
+        const question = event.value.question
         if (!toolName) return 'KEEPER_TOOL_APPROVAL_REQUESTED missing tool_call_name'
         if (!question) return 'KEEPER_TOOL_APPROVAL_REQUESTED missing question'
         upsertKeeperToolApproval(keeperName, {
           toolCallId,
           toolName,
-          args: asString(customValue?.args) ?? '',
+          args: event.value.args,
           question,
           askedAtMs: Date.now(),
           timeoutSec: null,
@@ -534,9 +813,9 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_TOOL_APPROVAL_SETTLED') {
-        const toolCallId = nonBlankToolCallId(asString(customValue?.tool_call_id))
+        const toolCallId = nonBlankToolCallId(event.value.tool_call_id)
         if (!toolCallId) return 'KEEPER_TOOL_APPROVAL_SETTLED missing tool_call_id'
-        const outcome = asString(customValue?.outcome) ?? ''
+        const outcome = event.value.outcome
         if (!outcome) return 'KEEPER_TOOL_APPROVAL_SETTLED missing outcome'
         // A settle for a call this view never drew (e.g. answered from another
         // window, or a re-hydrated wait whose REQUESTED predates this view)
@@ -561,7 +840,7 @@ export function applyKeeperStreamEvent(
           assistantEntryId,
           'streaming',
           'streaming',
-          keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_STREAM_MESSAGE_START' }),
+          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_STREAM_MESSAGE_START' }),
         )
         return null
       }
@@ -580,7 +859,7 @@ export function applyKeeperStreamEvent(
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_STOP') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
-        clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
+        clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, assistantEntryId)
         markFinalizingIfLive('KEEPER_STREAM_MESSAGE_STOP')
         return null
       }
@@ -590,71 +869,63 @@ export function applyKeeperStreamEvent(
           assistantEntryId,
           'streaming',
           'streaming',
-          keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_STREAM_PING' }),
+          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_STREAM_PING' }),
         )
         return null
       }
       if (event.name === 'KEEPER_CONTENT_BLOCK_START') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
-        const oasBlockIndex = asNumber(value?.index) ?? asNumber(value?.block_index)
+        const agentCoreBlockIndex = asNumber(value?.index)
         const contentType = asString(value?.content_type)
         const toolCallId = asString(value?.tool_call_id)
         const toolName = asString(value?.tool_call_name)
         if (contentType === 'text') {
-          rememberOasTextBlockIndex(keeperName, assistantEntryId, oasBlockIndex)
+          rememberAgentCoreTextBlockIndex(keeperName, assistantEntryId, agentCoreBlockIndex)
         }
         if (toolCallId && toolName) {
-          rememberOasToolBlockIndex(keeperName, assistantEntryId, toolCallId, oasBlockIndex)
+          rememberAgentCoreToolBlockIndex(keeperName, assistantEntryId, toolCallId, agentCoreBlockIndex)
         }
         setAssistantStreamState(
           keeperName,
           assistantEntryId,
           'streaming',
           'streaming',
-          keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONTENT_BLOCK_START' }),
+          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONTENT_BLOCK_START' }),
         )
         return null
       }
       if (event.name === 'KEEPER_CONTENT_BLOCK_STOP') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
-        forgetOasToolBlockIndexByIndex(
+        forgetAgentCoreToolBlockIndexByIndex(
           keeperName,
           assistantEntryId,
-          asNumber(value?.index) ?? asNumber(value?.block_index),
+          asNumber(value?.index),
         )
         setAssistantStreamState(
           keeperName,
           assistantEntryId,
           'streaming',
           'streaming',
-          keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONTENT_BLOCK_STOP' }),
+          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONTENT_BLOCK_STOP' }),
         )
         return null
       }
       if (event.name === 'KEEPER_THINKING_DELTA') {
         const value = isRecord(event.value) ? event.value : null
-        const delta = value
-          ? (typeof value.delta === 'string'
-              ? value.delta
-              : typeof value.text === 'string'
-                ? value.text
-                : undefined)
-          : typeof event.value === 'string'
-            ? event.value
-            : undefined
-        const oasBlockIndex = value
-          ? asNumber(value.index) ?? asNumber(value.block_index)
+        const delta = value && typeof value.delta === 'string'
+          ? value.delta
           : undefined
-        if (delta) enqueueThinkingDelta(keeperName, assistantEntryId, delta, { oasBlockIndex })
+        const agentCoreBlockIndex = value ? asNumber(value.index) : undefined
+        if (delta) enqueueThinkingDelta(keeperName, assistantEntryId, delta, { agentCoreBlockIndex })
         else {
           setAssistantStreamState(
             keeperName,
             assistantEntryId,
             'thinking',
             'streaming',
-            keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_THINKING_DELTA' }),
+            keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_THINKING_DELTA' }),
           )
         }
         return null
@@ -662,10 +933,10 @@ export function applyKeeperStreamEvent(
       if (event.name === 'KEEPER_STREAM_PROTOCOL_ERROR') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
-        forgetOasToolBlockIndexByIndex(
+        forgetAgentCoreToolBlockIndexByIndex(
           keeperName,
           assistantEntryId,
-          asNumber(value?.index) ?? asNumber(value?.block_index),
+          asNumber(value?.index),
         )
         recordStreamProtocolError(
           keeperName,
@@ -682,7 +953,7 @@ export function applyKeeperStreamEvent(
             assistantEntryId,
             'thinking',
             'streaming',
-            keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_THINKING_SIGNATURE_DELTA' }),
+            keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_THINKING_SIGNATURE_DELTA' }),
           )
         }
         return null
@@ -694,92 +965,8 @@ export function applyKeeperStreamEvent(
           assistantEntryId,
           'streaming',
           'streaming',
-          keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_MEDIA_DELTA' }),
+          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_MEDIA_DELTA' }),
         )
-        return null
-      }
-      if (event.name === 'KEEPER_QUEUE_REQUEST') {
-        flushPendingThinkingDeltas(keeperName, assistantEntryId)
-        setAssistantStreamState(
-          keeperName,
-          assistantEntryId,
-          'opening',
-          'queued',
-          keeperClientObservedSseStreamContract('queue_event', 'queue_request_event', { eventName: 'KEEPER_QUEUE_REQUEST' }),
-        )
-        return null
-      }
-      if (event.name === 'KEEPER_CHAT_QUEUED') {
-        flushPendingThinkingDeltas(keeperName, assistantEntryId)
-        const queued = isRecord(event.value) ? event.value : null
-        const receiptId = asString(queued?.receipt_id, '').trim()
-        const revision = parseKeeperQueueRevision(queued?.queue_revision)
-        const pendingCount = asNumber(queued?.pending_count)
-        const inflightCount = asNumber(queued?.inflight_count)
-        const recoveryRequiredCount = asNumber(queued?.recovery_required_count)
-        const inFlightLane = asString(queued?.in_flight_lane, '').trim()
-        const inFlightStartedAt = asNumber(queued?.in_flight_started_at)
-        const hasInFlightMetadata =
-          inFlightLane.length > 0 || typeof inFlightStartedAt === 'number'
-        const shutdownOperationId = (() => {
-          const raw = queued?.shutdown_operation_id
-          if (raw === null) return null
-          if (typeof raw !== 'string') return undefined
-          const normalized = raw.trim()
-          return normalized.length > 0 ? normalized : undefined
-        })()
-        if (
-          !isKeeperChatReceiptId(receiptId)
-          || revision === undefined
-          || typeof pendingCount !== 'number'
-          || !Number.isSafeInteger(pendingCount)
-          || pendingCount < 1
-          || typeof inflightCount !== 'number'
-          || !Number.isSafeInteger(inflightCount)
-          || inflightCount < 0
-          || typeof recoveryRequiredCount !== 'number'
-          || !Number.isSafeInteger(recoveryRequiredCount)
-          || recoveryRequiredCount < 0
-          || (hasInFlightMetadata
-            && (
-              inFlightLane.length === 0
-              || typeof inFlightStartedAt !== 'number'
-              || !Number.isFinite(inFlightStartedAt)
-              || inFlightStartedAt < 0
-            ))
-        ) {
-          return 'Keeper queue acceptance is missing its durable receipt metadata.'
-        }
-        if (shutdownOperationId === undefined) {
-          return 'Keeper queue acceptance has invalid shutdown operation metadata.'
-        }
-        updateThreadEntry(keeperName, assistantEntryId, entry => ({
-          ...entry,
-          text: recoveryRequiredCount > 0
-            ? `${keeperName}의 이전 메시지 상태를 확인해야 해요. 새 메시지는 안전하게 대기 중입니다.`
-            : shutdownOperationId
-              ? `${keeperName}가 종료 중이에요. 다시 활동을 시작하면 이 메시지를 처리합니다.`
-              : `${keeperName}가 다른 작업을 처리 중이에요. 메시지는 대기열에 추가했습니다.`,
-          delivery: 'queued',
-          streamState: null,
-          details: {
-            ...(entry.details ?? {}),
-            queueReceiptId: receiptId,
-            queueShutdownOperationId: shutdownOperationId,
-            queueRevision: revision,
-            queuePendingCount: pendingCount,
-            queueInflightCount: inflightCount,
-            queueRecoveryRequiredCount: recoveryRequiredCount,
-            queueInFlightLane: inFlightLane || null,
-            queueInFlightStartedAt:
-              typeof inFlightStartedAt === 'number' ? inFlightStartedAt : null,
-            queueState: 'pending',
-          },
-          streamContract: keeperClientObservedSseStreamContract('queue_event', 'queue_request_event', {
-            eventName: 'KEEPER_CHAT_QUEUED',
-            reason: `durable receipt ${receiptId}`,
-          }),
-        }))
         return null
       }
       if (event.name === 'KEEPER_CONTINUATION_CHECKPOINT') {
@@ -801,90 +988,48 @@ export function applyKeeperStreamEvent(
           rawText: rawText || entry.rawText,
           delivery: 'delivered',
           streamState: null,
-          streamContract: keeperClientObservedSseStreamContract('queue_event', 'queue_request_event', {
+          streamContract: keeperStreamContract('sse_event', 'backend_terminal_event', {
             eventName: 'KEEPER_CONTINUATION_CHECKPOINT',
           }),
         }))
         return null
       }
-      if (event.name === 'KEEPER_REQUEST_TERMINAL') {
+      if (event.name === 'KEEPER_EXTERNAL_EFFECT_COMPLETED') {
+        // The reply was already delivered by a terminal surface post, so
+        // there is no assistant text — finalize as a terminal control status
+        // instead of leaving the entry streaming. The event value names the
+        // real delivery target.
+        const externalEffectTarget = normalizeKeeperExternalEffectTarget(
+          event.value.target,
+        )
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
-        const terminal = isRecord(event.value) ? event.value : null
-        const terminalRequestId = asString(terminal?.request_id, '').trim()
-        const currentRequestId = activeStreamRequestId(keeperName)
-        const status = asString(terminal?.status, '').trim()
-        if (currentRequestId && terminalRequestId !== currentRequestId) {
-          return null
-        }
-        if (!TERMINAL_REQUEST_STATUSES.has(status)) {
-          return null
-        }
-        clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
-        if (terminalRequestId) releaseActiveStreamRequestId(terminalRequestId)
-        else clearActiveStreamRequestId(keeperName)
-        const ok = terminal?.ok === true
-        if (status === 'cancelled') {
-          const message =
-            asString(terminal?.message, '').trim() || KEEPER_MESSAGE_CANCELLED_TEXT
-          updateThreadEntry(keeperName, assistantEntryId, entry => ({
-            ...entry,
-            text: KEEPER_MESSAGE_CANCELLED_TEXT,
-            rawText: message,
-            delivery: 'cancelled',
-            streamState: null,
-            error: null,
-            streamContract: keeperClientObservedSseStreamContract('queue_event', 'backend_terminal_event', {
-              eventName: 'KEEPER_REQUEST_TERMINAL',
-              requestId: terminalRequestId,
-            }),
-          }))
-          return null
-        }
-        const failed =
-          !ok && ['error', 'lost'].includes(status)
-        if (failed) {
-          const message =
-            asString(terminal?.message, '').trim() || 'Keeper request failed'
-          updateThreadEntry(keeperName, assistantEntryId, entry => ({
-            ...entry,
-            text: entry.text || `Keeper request failed: ${message}`,
-            rawText: entry.rawText || message,
-            delivery: 'error',
-            streamState: null,
-            error: message,
-            streamContract: keeperClientObservedSseStreamContract('queue_event', 'backend_terminal_event', {
-              eventName: 'KEEPER_REQUEST_TERMINAL',
-              requestId: terminalRequestId,
-              reason: message,
-            }),
-          }))
-          return message
-        }
-        if (status === 'done' && terminal?.ok !== false) {
-          updateThreadEntry(keeperName, assistantEntryId, entry => {
-            const delivery =
-              entry.delivery === 'no_reply'
-                || (entry.delivery === 'queued'
-                  && keeperTurnOutcomeSuppressesReply(entry.details?.turnOutcome))
-                ? entry.delivery
-                : 'delivered'
-            return {
-              ...entry,
-              delivery,
-              streamState: null,
-              error: null,
-              streamContract: keeperClientObservedSseStreamContract('queue_event', 'backend_terminal_event', {
-                eventName: 'KEEPER_REQUEST_TERMINAL',
-                requestId: terminalRequestId,
-              }),
-            }
-          })
-        }
+        updateThreadEntry(keeperName, assistantEntryId, entry => ({
+          ...entry,
+          details: {
+            ...(entry.details ?? {}),
+            turnOutcome: 'external_effect_completed',
+            externalEffectTarget,
+          },
+          text: '',
+          delivery: 'delivered',
+          streamState: null,
+          streamContract: keeperStreamContract('sse_event', 'backend_terminal_event', {
+            eventName: 'KEEPER_EXTERNAL_EFFECT_COMPLETED',
+          }),
+        }))
         return null
       }
       if (event.name === 'KEEPER_REPLY_DETAILS') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const details = normalizeKeeperConversationDetails(event.value)
+        if (
+          !details
+          || typeof event.value.reply !== 'string'
+          || !details.turnOutcome
+          || !details.turnRef
+        ) {
+          return 'Keeper reply details event is malformed.'
+        }
         if (details) {
           updateThreadEntry(keeperName, assistantEntryId, entry => {
             const mergedDetails: KeeperConversationDetails = {
@@ -920,20 +1065,59 @@ export function applyKeeperStreamEvent(
             }
           })
         }
+        return null
       }
+      // A name this build does not draw is not a reason to end the reply.
+      // keeper-actions.ts throws on any string returned here, so a server that
+      // adds an event the client has not learned yet stops the stream and the
+      // answer never lands -- which is what KEEPER_TOOL_APPROVAL_REQUESTED did
+      // on 2026-08-24, after #30059 added it on the server and here. The
+      // events this file does draw each return null above; reaching this line
+      // means the frame carried nothing this view renders, so it is dropped
+      // and named once for whoever wires it next.
+      console.debug('keeper stream: no view for custom event', customEventName)
       return null
     }
     case 'RUN_FINISHED':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
-      clearPendingOasTextBlockIndex(keeperName, assistantEntryId)
+      clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, assistantEntryId)
+      clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
+      clearTextMessageStreamState(keeperName, assistantEntryId)
+      if (source.kind !== 'operation') return null
+      updateThreadEntry(keeperName, assistantEntryId, entry => {
+        if (!isOperationDeliveryProvenance(
+          entry.deliveryProvenance,
+          source.operationId,
+          'terminal_assistant',
+        )) {
+          return entry
+        }
+        const delivery =
+          entry.delivery === 'no_reply'
+            || (entry.delivery === 'queued'
+              && keeperTurnOutcomeSuppressesReply(entry.details?.turnOutcome))
+            ? entry.delivery
+            : 'delivered'
+        return {
+          ...entry,
+          delivery,
+          streamState: null,
+          error: null,
+          streamContract: keeperStreamContract(
+            'sse_event',
+            'backend_terminal_event',
+            { eventName: 'RUN_FINISHED', requestId: source.operationId },
+          ),
+        }
+      })
       return null
     case 'RUN_ERROR':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
-      clearPendingOasTextBlockIndex(keeperName, assistantEntryId)
+      clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, assistantEntryId)
+      clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
+      clearTextMessageStreamState(keeperName, assistantEntryId)
       return asString(event.message, '').trim() || 'Keeper stream failed'
     default:
-      return null
+      return 'Unsupported Keeper stream event'
   }
 }

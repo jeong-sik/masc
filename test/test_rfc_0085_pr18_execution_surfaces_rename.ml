@@ -30,11 +30,13 @@ let renames =
   ; ( "lib/server/server_dashboard_http_namespace_truth.ml"
     , "_namespace_truth_snapshot_hash_mu"
     , "namespace_truth_snapshot_hash_mu" )
-  ; ( "lib/server/server_dashboard_http_namespace_truth_support.ml"
-    , "_last_good_pending_confirm_summary"
-    , "last_good_pending_confirm_summary" )
   ]
 ;;
+
+(* last_good_pending_confirm_summary was the eighth. The binding is gone from
+   lib/ entirely, so the half of this guard that asks for the new name was
+   asking a deleted line to still be there. A rename guard covers renames; a
+   removal is not one. *)
 
 let test_old_underscore_names_gone () =
   List.iter

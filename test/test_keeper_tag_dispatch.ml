@@ -6,16 +6,6 @@
 open Alcotest
 open Masc
 
-let contains_substring s needle =
-  let s_len = String.length s in
-  let n_len = String.length needle in
-  let rec loop i =
-    if i + n_len > s_len then false
-    else if String.sub s i n_len = needle then true
-    else loop (i + 1)
-  in
-  if n_len = 0 then true else loop 0
-
 (* Temp directory setup matching test_keeper_task_dispatch.ml pattern. *)
 let with_workspace f =
   Eio_main.run @@ fun _env ->
@@ -86,7 +76,7 @@ let test_other_inline_blocked () =
     match dispatch_inline config "masc_agents" with
     | Some tr when not (Tool_result.is_success tr) ->
         check bool "error mentions MCP context" true
-          (contains_substring (Tool_result.message tr) "requires MCP session context")
+          (String_util.contains_substring (Tool_result.message tr) "requires MCP session context")
     | Some _tr ->
         fail "masc_agents should remain blocked in keeper context"
     | None ->

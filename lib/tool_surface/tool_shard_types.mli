@@ -1,8 +1,5 @@
 (** Tool_shard_types — pure Keeper schema families and enum-string mirrors. *)
 
-val sort_order_enum_strings : string list
-(** Hand-mirrored from [Board_dispatch.valid_sort_order_strings] (#8513). *)
-
 val memory_search_source_enum_strings : string list
 (** Hand-mirrored from [Keeper_tool_memory_runtime.valid_memory_search_source_strings]
     (#8484). *)
@@ -10,9 +7,6 @@ val memory_search_source_enum_strings : string list
 val fs_write_mode_enum_strings : string list
 (** Hand-mirrored from [Keeper_tool_filesystem_runtime.valid_fs_write_mode_strings]
     (#8490). *)
-
-val vote_direction_enum_strings : string list
-(** Hand-mirrored from [Board_votes.valid_vote_direction_strings] (#8506). *)
 
 (** {1 Schema selection} *)
 
@@ -44,9 +38,14 @@ val voice_tools : Masc_domain.tool_schema list
 
 val library_tools : Masc_domain.tool_schema list
 
+val keeper_surface_post_description : string
+(** Canonical description projected into Keeper model and help surfaces. *)
+
+val max_rich_blocks : int
+(** Canonical maximum number of top-level Slack Block Kit blocks per message. *)
+
 val surface_tools : Masc_domain.tool_schema list
-(** keeper_surface_read lane reading (RFC-0223 P3). *)
-(** Library tool schemas. *)
+(** Surface read/post schemas projected into help and dispatch registries. *)
 
 val taskboard_tools : Masc_domain.tool_schema list
 (** Taskboard tool schemas. *)

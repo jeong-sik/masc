@@ -6,7 +6,6 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
     expect(toKeeperPhase('offline')).toBe('Offline')
     expect(toKeeperPhase('running')).toBe('Running')
     expect(toKeeperPhase('failing')).toBe('Failing')
-    expect(toKeeperPhase('overflowed')).toBe('Overflowed')
     expect(toKeeperPhase('compacting')).toBe('Compacting')
     expect(toKeeperPhase('handing_off')).toBe('HandingOff')
     expect(toKeeperPhase('draining')).toBe('Draining')
@@ -14,13 +13,11 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
     expect(toKeeperPhase('stopped')).toBe('Stopped')
     expect(toKeeperPhase('crashed')).toBe('Crashed')
     expect(toKeeperPhase('restarting')).toBe('Restarting')
-    expect(toKeeperPhase('dead')).toBe('Dead')
   })
 
   it('accepts PascalCase input for forward compatibility', () => {
     expect(toKeeperPhase('Offline')).toBe('Offline')
     expect(toKeeperPhase('Running')).toBe('Running')
-    expect(toKeeperPhase('Overflowed')).toBe('Overflowed')
     expect(toKeeperPhase('HandingOff')).toBe('HandingOff')
   })
 
@@ -71,13 +68,6 @@ describe('normalizeKeepers phase field', () => {
     expect(keeper?.phase).toBe('HandingOff')
   })
 
-  it('normalizes overflowed to Overflowed', () => {
-    const [keeper] = normalizeKeepers([
-      { name: 'overflow-test', status: 'active', phase: 'overflowed' },
-    ])
-    expect(keeper?.phase).toBe('Overflowed')
-  })
-
   it('returns null for unknown phase', () => {
     const [keeper] = normalizeKeepers([
       { name: 'unknown-test', status: 'active', phase: 'bogus' },
@@ -98,6 +88,22 @@ describe('normalizeKeepers phase field', () => {
     ])
     expect(keeper?.status).toBe('active')
     expect(keeper?.phase).toBe('Running')
+  })
+})
+
+describe('normalizeKeepers heartbeat cadence', () => {
+  it('preserves the server-resolved Keeper freshness contract', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'cadence-test',
+        status: 'active',
+        keeper_keepalive_interval_s: 30,
+        heartbeat_stale_after_s: 120,
+      },
+    ])
+
+    expect(keeper?.keeper_keepalive_interval_s).toBe(30)
+    expect(keeper?.heartbeat_stale_after_s).toBe(120)
   })
 })
 
@@ -370,7 +376,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
         sandbox_target: 'docker',
         blocked_task_count: 2,
         goal_progress: {
-          active_goal_count: 1,
           linked_task_count: 4,
           done_task_count: 1,
           open_task_count: 3,
@@ -467,11 +472,11 @@ describe('normalizeKeepers lifecycle metrics', () => {
         trust: {
           disposition: 'Alert',
           operator_disposition: 'pause_runtime',
-          operator_disposition_reason: 'turn_timeout',
+          operator_disposition_reason: 'stale_turn_timeout',
           needs_attention: true,
-          attention_reason: 'turn_timeout',
+          attention_reason: 'stale_turn_timeout',
           latest_terminal_reason: {
-            code: 'turn_timeout',
+            code: 'stale_turn_timeout',
             source: 'execution_receipt',
             severity: 'bad',
             summary: 'Turn execution exceeded the keeper turn deadline',
@@ -485,11 +490,11 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(keeper?.trust).toMatchObject({
       disposition: 'Alert',
       operator_disposition: 'pause_runtime',
-      operator_disposition_reason: 'turn_timeout',
+      operator_disposition_reason: 'stale_turn_timeout',
       needs_attention: true,
-      attention_reason: 'turn_timeout',
+      attention_reason: 'stale_turn_timeout',
       latest_terminal_reason: {
-        code: 'turn_timeout',
+        code: 'stale_turn_timeout',
         source: 'execution_receipt',
         severity: 'bad',
         summary: 'Turn execution exceeded the keeper turn deadline',
@@ -498,7 +503,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       latest_next_action: 'inspect_runtime_blocker',
     })
     expect(keeper?.stop_cause).toMatchObject({
-      code: 'turn_timeout',
+      code: 'stale_turn_timeout',
       source: 'terminal_reason_code',
       summary: 'Turn execution exceeded the keeper turn deadline',
       next_action: 'inspect_runtime_blocker',
@@ -510,7 +515,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       {
         name: 'blocked-keeper',
         status: 'active',
-        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_class: 'stale_turn_timeout',
         runtime_blocker_summary: 'turn has not made progress',
         trust: {
           latest_terminal_reason: {
@@ -524,7 +529,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     ])
 
     expect(keeper?.stop_cause).toMatchObject({
-      code: 'turn_timeout',
+      code: 'stale_turn_timeout',
       source: 'runtime_blocker_class',
       summary: 'turn has not made progress',
     })
@@ -604,7 +609,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       {
         name: 'runtime-keeper',
         status: 'active',
-        runtime_id: 'oas-keeper_unified',
+        runtime_id: 'agent-core-keeper_unified',
         selected_runtime_canonical: 'primary',
         primary_model: 'openai:gpt-5.4',
         active_model: 'gpt-5.4',
@@ -626,16 +631,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
               selected_model: 'anthropic:claude-sonnet',
               attempt_count: 2,
               outcome: 'passed_to_next_model',
-              strategy: 'round_robin',
-              fallback_applied: true,
-              fallback_hops: 1,
-              fallback_events: [
-                {
-                  from_model_id: 'openai:gpt-5.4',
-                  to_model_id: 'anthropic:claude-sonnet',
-                  reason: 'turn_timeout',
-                },
-              ],
             },
           },
         ],
@@ -643,7 +638,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
     ])
 
     expect(keeper).toMatchObject({
-      runtime_id: 'oas-keeper_unified',
+      runtime_id: 'agent-core-keeper_unified',
       runtime_canonical: 'primary',
       selected_runtime_canonical: 'primary',
       active_model_label: null,
@@ -656,10 +651,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
       runtime_id: 'primary',
       runtime_attempt_count: 2,
       runtime_outcome: 'passed_to_next_model',
-      runtime_strategy: 'round_robin',
-      fallback_applied: true,
-      fallback_hops: 1,
-      fallback_reason: 'turn_timeout',
     })
   })
 
@@ -683,7 +674,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
               actual_input_tokens: 1000,
               attributed_bytes: 1160,
               segments: {
-                'prompt.persona': { bytes: 320, fingerprint: null },
+                'prompt.keeper_instructions': { bytes: 320, fingerprint: null },
                 message_user: { bytes: 210, fingerprint: null },
                 message_tool_use: { bytes: 90, fingerprint: null },
                 message_tool_result: { bytes: 540, fingerprint: null },
@@ -700,7 +691,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       actual_input_tokens: 1000,
       attributed_bytes: 1160,
       segments: {
-        'prompt.persona': { bytes: 320, fingerprint: null },
+        'prompt.keeper_instructions': { bytes: 320, fingerprint: null },
         message_user: { bytes: 210, fingerprint: null },
         message_tool_use: { bytes: 90, fingerprint: null },
         message_tool_result: { bytes: 540, fingerprint: null },
@@ -796,10 +787,9 @@ describe('normalizeKeepers lifecycle metrics', () => {
         keepalive_running: true,
         pause_state: 'paused',
         runtime_blocker_state: 'blocked',
-        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_class: 'stale_turn_timeout',
         runtime_blocker_summary: 'Provider turn timed out.',
         last_blocker: 'missing social headers',
-        last_autonomous_action_at: '2026-04-04T14:08:35Z',
         created_at: '2026-04-03T14:59:29Z',
         updated_at: '2026-04-04T14:08:35Z',
         last_activity_ago_s: 42,
@@ -811,10 +801,9 @@ describe('normalizeKeepers lifecycle metrics', () => {
       keepalive_running: true,
       pause_state: 'paused',
       runtime_blocker_state: 'blocked',
-      runtime_blocker_class: 'turn_timeout',
+      runtime_blocker_class: 'stale_turn_timeout',
       runtime_blocker_summary: 'Provider turn timed out.',
       last_blocker: 'missing social headers',
-      last_autonomous_action_at: '2026-04-04T14:08:35Z',
       created_at: '2026-04-03T14:59:29Z',
       updated_at: '2026-04-04T14:08:35Z',
       last_activity_ago_s: 42,
@@ -837,14 +826,14 @@ describe('normalizeKeeperTrustTerminalReason — exported helper', () => {
 
   it('returns a full terminal reason when code is present', () => {
     const result = normalizeKeeperTrustTerminalReason({
-      code: 'turn_timeout',
+      code: 'stale_turn_timeout',
       source: 'execution_receipt',
       severity: 'bad',
       summary: 'keeper exceeded the turn deadline',
       next_action: 'inspect_runtime_blocker',
     })
     expect(result).toEqual({
-      code: 'turn_timeout',
+      code: 'stale_turn_timeout',
       source: 'execution_receipt',
       severity: 'bad',
       summary: 'keeper exceeded the turn deadline',

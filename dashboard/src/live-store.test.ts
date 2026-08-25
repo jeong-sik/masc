@@ -42,8 +42,8 @@ describe('eventKindColor', () => {
     expect(eventKindColor(makeEntry({ kind: 'system' }))).toBe('live-event-system')
   })
 
-  it('returns system class for oas kind', () => {
-    expect(eventKindColor(makeEntry({ kind: 'oas' }))).toBe('live-event-system')
+  it('returns system class for agentCore kind', () => {
+    expect(eventKindColor(makeEntry({ kind: 'agentCore' }))).toBe('live-event-system')
   })
 
   it('returns system class when kind is undefined', () => {
@@ -70,8 +70,6 @@ describe('eventKindTone', () => {
 
   it('uses eventType precedence before kind fallback', () => {
     expect(eventKindTone(makeEntry({ eventType: 'broadcast' }))).toBe('info')
-    expect(eventKindTone(makeEntry({ eventType: 'task_update', kind: 'system' }))).toBe('ok')
-    expect(eventKindTone(makeEntry({ eventType: 'keeper_guardrail', kind: 'tasks' }))).toBe('warn')
     expect(eventKindTone(makeEntry({ eventType: 'board_delete', kind: 'board' }))).toBe('bad')
   })
 
@@ -88,18 +86,6 @@ describe('eventKindTone', () => {
 describe('journalEventKindLabel', () => {
   it('returns "broadcast" for broadcast eventType', () => {
     expect(journalEventKindLabel(makeEntry({ eventType: 'broadcast' }))).toBe('broadcast')
-  })
-
-  it('returns "joined" for agent_bound eventType', () => {
-    expect(journalEventKindLabel(makeEntry({ eventType: 'agent_bound' }))).toBe('joined')
-  })
-
-  it('returns "left" for agent_unbound eventType', () => {
-    expect(journalEventKindLabel(makeEntry({ eventType: 'agent_unbound' }))).toBe('left')
-  })
-
-  it('returns "task" for task_update eventType', () => {
-    expect(journalEventKindLabel(makeEntry({ eventType: 'task_update' }))).toBe('task')
   })
 
   it('returns "post" for board_post eventType', () => {
@@ -126,10 +112,6 @@ describe('journalEventKindLabel', () => {
     expect(journalEventKindLabel(makeEntry({ eventType: 'keeper_compaction' }))).toBe('compact')
   })
 
-  it('returns "guardrail" for keeper_guardrail eventType', () => {
-    expect(journalEventKindLabel(makeEntry({ eventType: 'keeper_guardrail' }))).toBe('guardrail')
-  })
-
   it('returns "phase" for keeper_phase_changed eventType', () => {
     expect(journalEventKindLabel(makeEntry({ eventType: 'keeper_phase_changed' }))).toBe('phase')
   })
@@ -140,7 +122,7 @@ describe('journalEventKindLabel', () => {
   })
 
   it('falls back to "task" for tasks kind without matching eventType', () => {
-    expect(journalEventKindLabel(makeEntry({ eventType: 'oas_task', kind: 'tasks' }))).toBe('task')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'agent_core_tool', kind: 'tasks' }))).toBe('task')
   })
 
   it('falls back to "keeper" for keepers kind without matching eventType', () => {
@@ -148,7 +130,7 @@ describe('journalEventKindLabel', () => {
   })
 
   it('returns "system" as final fallback', () => {
-    expect(journalEventKindLabel(makeEntry({ eventType: 'oas_tool' }))).toBe('system')
+    expect(journalEventKindLabel(makeEntry({ eventType: 'agent_core_tool' }))).toBe('system')
   })
 
   it('returns "system" when both kind and eventType are undefined', () => {

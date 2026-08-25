@@ -11,19 +11,15 @@ type sizes = {
   tool_count : int;
 }
 
-val role_key : Agent_sdk.Types.role -> string
+val role_key : Agent_core.Types.role -> string
 
-val bytes_of_content_block : Agent_sdk.Types.content_block -> int
-
-val bytes_of_message_content : Agent_sdk.Types.message -> int
-
-val bytes_of_tool_schema_json : Agent_sdk.Tool.t list -> int
+val bytes_of_message_content : Agent_core.Types.message -> int
 
 val role_counts_with_pending_user :
-  Agent_sdk.Types.message list -> (string * int) list
+  Agent_core.Types.message list -> (string * int) list
 
 (** Compute exact component-content byte counts and role distribution for a keeper
-    turn about to invoke [Keeper_turn_driver.run_named]. OAS will synthesize the
+    turn about to invoke [Keeper_turn_driver.run_named]. AGENT_CORE will synthesize the
     pending User message from [~user_blocks] when present, otherwise from
     [~user_message]; [message_count] and [role_counts] include that turn.
 
@@ -36,9 +32,9 @@ val role_counts_with_pending_user :
     Invariant: [message_count = sum_of_role_counts result.role_counts]. *)
 val compute_sizes :
   system_prompt:string ->
-  tools:Agent_sdk.Tool.t list ->
-  history_messages:Agent_sdk.Types.message list ->
-  ?user_blocks:Agent_sdk.Types.content_block list ->
+  tools:Agent_core.Tool.t list ->
+  history_messages:Agent_core.Types.message list ->
+  ?user_blocks:Agent_core.Types.content_block list ->
   user_message:string ->
   unit ->
   sizes

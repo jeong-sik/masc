@@ -3,7 +3,7 @@
     listing and file reads live under Execute. *)
 
 module Workspace = Masc.Workspace
-module Keeper_tool_command_runtime = Masc.Keeper_tool_command_runtime
+module Keeper_workspace_ops = Masc.Keeper_workspace_ops
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_types = Keeper_types
@@ -88,7 +88,7 @@ let assert_error_contains ~needle raw =
     (String_util.contains_substring error needle)
 
 let invoke ~config ~meta args =
-  Keeper_tool_command_runtime.handle_tool_search_files ~turn_sandbox_factory:None
+  Keeper_workspace_ops.handle_tool_search_files ~turn_sandbox_factory:None
     ~config ~meta ~args
 
 let test_rg_host_includes_via () =

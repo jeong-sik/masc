@@ -9,7 +9,6 @@ function makePrompt(overrides: Partial<DashboardPromptItem> & { key: string }): 
     category: 'keeper',
     description: '',
     current: '',
-    default: null,
     effective: '',
     file_value: null,
     override_value: null,
@@ -57,13 +56,6 @@ const PROMPTS: DashboardPromptItem[] = [
     file_path: 'config/prompts/verification.md',
     char_count: 50,
   }),
-  makePrompt({
-    key: 'worker',
-    category: 'worker',
-    description: 'Local worker standing rules',
-    file_path: 'config/prompts/worker.md',
-    char_count: 70,
-  }),
 ]
 
 describe('PromptBookPanel', () => {
@@ -100,7 +92,6 @@ describe('PromptBookPanel', () => {
     expect(libFam?.textContent).toContain('별도 계열')
     expect(families.some(fam => fam.textContent?.includes('Verification'))).toBe(true)
     expect(families.some(fam => fam.textContent?.includes('Judge'))).toBe(true)
-    expect(families.some(fam => fam.textContent?.includes('Worker'))).toBe(true)
 
     // keeper turn family is displayed first (order 1)
     expect(families[0]?.textContent).toContain('keeper 턴 · 계열')
@@ -113,10 +104,8 @@ describe('PromptBookPanel', () => {
       { key: 'keeper', category: 'keeper' },
       { key: 'judge.board', category: 'judge' },
       { key: 'judge.effect', category: 'judge' },
-      { key: 'judge.catchup', category: 'judge' },
       { key: 'librarian', category: 'librarian' },
       { key: 'verification', category: 'verification' },
-      { key: 'worker', category: 'worker' },
     ]
     render(
       html`<${PromptBookPanel}
@@ -129,7 +118,6 @@ describe('PromptBookPanel', () => {
     const catalog = container.querySelector('[data-testid="prompt-book-catalog"]')
     const families = Array.from(catalog?.querySelectorAll('.pb-cat-fam') ?? [])
     expect(families.some(fam => fam.textContent?.includes('Other'))).toBe(false)
-    expect(families.some(fam => fam.textContent?.includes('Worker'))).toBe(true)
     expect(families.some(fam => fam.textContent?.includes('keeper 턴'))).toBe(true)
   })
 
@@ -147,20 +135,20 @@ describe('PromptBookPanel', () => {
   it('does not infer a family from key or file-name substrings', () => {
     render(html`<${PromptBookPanel} prompts=${[
       makePrompt({
-        key: 'housekeeper.worker-lookalike',
+        key: 'housekeeper.judge-lookalike',
         category: 'protocol-drift',
         file_path: 'config/prompts/judge-but-not-category.md',
       }),
     ]} />`, container)
     expect(container.textContent).toContain('Other · 기타')
-    expect(container.textContent).not.toContain('Worker · 로컬 워커')
     expect(container.textContent).not.toContain('keeper 턴 · 계열')
+    expect(container.textContent).not.toContain('Judge')
   })
 
   it('renders an empty state when no prompts are loaded', () => {
     render(html`<${PromptBookPanel} prompts=${[]} loading=${false} />`, container)
     expect(container.querySelector('[data-testid="prompt-book-panel"]')).not.toBeNull()
-    expect(container.textContent).toContain('표시할 프롬프트가 없습니다')
+    expect(container.textContent).toContain('표시할 프롬프트 없음')
     expect(container.querySelector('[data-testid="prompt-book-catalog"]')).toBeNull()
   })
 })

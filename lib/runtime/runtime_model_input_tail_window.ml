@@ -9,13 +9,19 @@ let preamble_text =
    request. The full history is preserved in the durable checkpoint and \
    surfaces through the memory system when relevant."
 
-let preamble_message : Agent_sdk.Types.message =
-  { role = Agent_sdk.Types.User
-  ; content = [ Agent_sdk.Types.Text preamble_text ]
+let preamble_message : Agent_core.Types.message =
+  { role = Agent_core.Types.User
+  ; content = [ Agent_core.Types.Text preamble_text ]
   ; name = None
   ; tool_call_id = None
   ; metadata = [ (preamble_marker_key, `Bool true) ]
   }
+;;
+
+let is_synthetic_preamble (message : Agent_core.Types.message) =
+  match List.assoc_opt preamble_marker_key message.metadata with
+  | Some (`Bool true) -> true
+  | Some _ | None -> false
 ;;
 
 type budget_error =
@@ -30,9 +36,21 @@ type budget_error =
       }
 
 type projection =
-  { messages : Agent_sdk.Types.message list
+  { messages : Agent_core.Types.message list
   ; dropped_atoms : int
+  ; atom_count : int
   }
+
+type window_observation =
+  { transmitted_atoms : int
+  ; total_atoms : int
+  }
+
+let observe ~history_atom_count (projection : projection) =
+  { transmitted_atoms = projection.atom_count - projection.dropped_atoms
+  ; total_atoms = history_atom_count
+  }
+;;
 
 let budget_error_to_string = function
   | Reservation_exceeds_capacity
@@ -51,20 +69,36 @@ let budget_error_to_string = function
       newest_atom_bytes
 ;;
 
+(* Both constructors say one thing: this candidate's declared ceiling cannot
+   carry material this turn has to transmit. That is a per-candidate capacity
+   bound, not a defect in the request -- keeper_turn_driver.ml states the same
+   rationale for the provider-raised case, "a later lane candidate with a
+   larger context window can still serve the same turn" -- so it is named with
+   the constructor the lane loop already rotates on rather than a new one.
+
+   [limit] is [None] because it is tokens (keeper_turn_runtime_budget reads it
+   as [Provider_overflow { limit_tokens }]) and this window measures bytes.
+   Reporting a byte figure there would be read as a token count. *)
+let budget_error_to_core_error error =
+  Agent_core.Error.Api
+    (Llm_provider.Retry.ContextOverflow
+       { message = budget_error_to_string error; limit = None })
+;;
+
 (* A message is pinned when it must survive every cut: [System] entries
    (defensive — the runtime carries the system prompt out of band) and any
    message with extra-system-context provenance. [Invalid]/[Duplicate]
    provenance still means the per-turn context assembler authored the
    message, so it is pinned rather than exposed to the cut on a malformed
    tag. *)
-let is_extra_context (msg : Agent_sdk.Types.message) =
+let is_extra_context (msg : Agent_core.Types.message) =
   match
-    Agent_sdk.Types.Extra_system_context_provenance.classify msg.metadata
+    Agent_core.Types.Extra_system_context_provenance.classify msg.metadata
   with
-  | Agent_sdk.Types.Extra_system_context_provenance.Absent -> false
-  | Agent_sdk.Types.Extra_system_context_provenance.Present
-  | Agent_sdk.Types.Extra_system_context_provenance.Invalid
-  | Agent_sdk.Types.Extra_system_context_provenance.Duplicate -> true
+  | Agent_core.Types.Extra_system_context_provenance.Absent -> false
+  | Agent_core.Types.Extra_system_context_provenance.Present
+  | Agent_core.Types.Extra_system_context_provenance.Invalid
+  | Agent_core.Types.Extra_system_context_provenance.Duplicate -> true
 ;;
 
 type label =
@@ -75,22 +109,22 @@ type label =
    open a new atom; [Tool] joins the atom of the assistant that issued the
    call, so both sides of a tool exchange always share one label. A leading
    orphan [Tool] run (possible only on a history that was already cut
-   upstream of OAS) becomes atom 0 so it is dropped with the first cut
+   upstream of AGENT_CORE) becomes atom 0 so it is dropped with the first cut
    rather than transmitted headless. *)
-let annotate (messages : Agent_sdk.Types.message list) :
-  (Agent_sdk.Types.message * label) list * int
+let annotate (messages : Agent_core.Types.message list) :
+  (Agent_core.Types.message * label) list * int
   =
   let labelled_rev, atom_count =
     List.fold_left
-      (fun (acc, count) (msg : Agent_sdk.Types.message) ->
+      (fun (acc, count) (msg : Agent_core.Types.message) ->
          if is_extra_context msg
          then ((msg, Pinned) :: acc, count)
          else (
            match msg.role with
-           | Agent_sdk.Types.System -> ((msg, Pinned) :: acc, count)
-           | Agent_sdk.Types.User | Agent_sdk.Types.Assistant ->
+           | Agent_core.Types.System -> ((msg, Pinned) :: acc, count)
+           | Agent_core.Types.User | Agent_core.Types.Assistant ->
              ((msg, Atom count) :: acc, count + 1)
-           | Agent_sdk.Types.Tool ->
+           | Agent_core.Types.Tool ->
              if count = 0
              then ((msg, Atom 0) :: acc, 1)
              else ((msg, Atom (count - 1)) :: acc, count)))
@@ -98,6 +132,18 @@ let annotate (messages : Agent_sdk.Types.message list) :
       messages
   in
   (List.rev labelled_rev, atom_count)
+;;
+
+let first_atom_at_or_after messages ~message_index =
+  let labelled, atom_count = annotate messages in
+  let rec scan position = function
+    | [] -> atom_count
+    | (_, label) :: rest ->
+      (match label with
+       | Atom index when position >= message_index -> index
+       | Atom _ | Pinned -> scan (position + 1) rest)
+  in
+  scan 0 labelled
 ;;
 
 (* [suffix.(i)] is the measured size of atoms [i .. atom_count - 1];
@@ -116,6 +162,109 @@ let atom_suffix_bytes ~measure_message_bytes ~atom_count labelled =
     suffix.(index) <- suffix.(index + 1) + per_atom.(index)
   done;
   (per_atom, suffix)
+;;
+
+let next_shrink_capacity_bytes
+    ?(allow_empty_history = false)
+    ~measure_message_bytes
+    ~target_capacity_bytes
+    messages =
+  let rejected_window_bytes =
+    List.fold_left
+      (fun total message -> total + measure_message_bytes message)
+      0
+      messages
+  in
+  (* A provider-bound list may already contain the preamble materialized by a
+     previous cut. It is generated framing, not a durable conversation atom;
+     never let it become the oldest removable atom of the next retry. *)
+  let shrinkable_messages =
+    List.filter (fun message -> not (is_synthetic_preamble message)) messages
+  in
+  let labelled, atom_count = annotate shrinkable_messages in
+  if atom_count = 0
+  then None
+  else (
+    let pinned_bytes =
+      List.fold_left
+        (fun total (message, label) ->
+           match label with
+           | Pinned -> total + measure_message_bytes message
+           | Atom _ -> total)
+        0
+        labelled
+    in
+    let preamble_bytes = measure_message_bytes preamble_message in
+    let undroppable_bytes = pinned_bytes + preamble_bytes in
+    let _, suffix =
+      atom_suffix_bytes ~measure_message_bytes ~atom_count labelled
+    in
+    let full_atom_bytes = suffix.(0) in
+    let target_atom_bytes = target_capacity_bytes - undroppable_bytes in
+    let required_atom_capacity bytes = max 1 bytes in
+    let rec first_boundary_at_or_below_target drop =
+      if drop >= atom_count
+      then None
+      else (
+        let retained = required_atom_capacity suffix.(drop) in
+        if retained < full_atom_bytes && retained <= target_atom_bytes
+        then Some retained
+        else first_boundary_at_or_below_target (drop + 1))
+    in
+    let newest_atom_bytes =
+      required_atom_capacity suffix.(atom_count - 1)
+    in
+    let retained_atom_bytes =
+      match first_boundary_at_or_below_target 1 with
+      | Some bytes -> Some bytes
+      | None when newest_atom_bytes < full_atom_bytes ->
+        (* The policy target may be below the indivisible newest atom. Clamp
+           upward to that atom's boundary rather than returning a capacity
+           that the projection must reject locally. *)
+        Some newest_atom_bytes
+      | None when allow_empty_history -> Some 0
+      | None -> None
+    in
+    Option.bind retained_atom_bytes (fun retained ->
+      let framed_capacity = undroppable_bytes + retained in
+      (* Removing an atom is not sufficient when the retained suffix starts
+         with Assistant/Tool: [project] then adds the synthetic User preamble.
+         Never retry a size-driven refusal with framing that is equal to or
+         larger than the exact window the provider already rejected. *)
+      if framed_capacity < rejected_window_bytes
+      then Some framed_capacity
+      else None))
+;;
+
+let minimum_capacity_bytes ~measure_message_bytes messages =
+  let rejected_window_bytes =
+    List.fold_left
+      (fun total message -> total + measure_message_bytes message)
+      0
+      messages
+  in
+  let shrinkable_messages =
+    List.filter (fun message -> not (is_synthetic_preamble message)) messages
+  in
+  let labelled, atom_count = annotate shrinkable_messages in
+  if atom_count = 0
+  then None
+  else (
+    let pinned_bytes =
+      List.fold_left
+        (fun total (message, label) ->
+           match label with
+           | Pinned -> total + measure_message_bytes message
+           | Atom _ -> total)
+        0
+        labelled
+    in
+    let floor_capacity_bytes =
+      pinned_bytes + measure_message_bytes preamble_message
+    in
+    if floor_capacity_bytes < rejected_window_bytes
+    then Some floor_capacity_bytes
+    else None)
 ;;
 
 (* Smallest multiple of [atoms_per_window] whose remaining suffix fits
@@ -149,7 +298,7 @@ let exact_drop ~available_bytes ~atom_count suffix =
   scan 0
 ;;
 
-let assemble ~drop ~messages labelled =
+let assemble ~allow_empty_history ~atom_count ~drop ~messages labelled =
   if drop = 0
   then messages
   else (
@@ -163,7 +312,7 @@ let assemble ~drop ~messages labelled =
     in
     let first_kept_atom_role =
       List.find_map
-        (fun ((msg : Agent_sdk.Types.message), label) ->
+        (fun ((msg : Agent_core.Types.message), label) ->
            match label with
            | Atom _ -> Some msg.role
            | Pinned -> None)
@@ -171,17 +320,19 @@ let assemble ~drop ~messages labelled =
     in
     let kept = List.map fst kept_labelled in
     match first_kept_atom_role with
-    | Some Agent_sdk.Types.User | None -> kept
-    | Some Agent_sdk.Types.Assistant
-    | Some Agent_sdk.Types.Tool
-    | Some Agent_sdk.Types.System -> preamble_message :: kept)
+    | None when allow_empty_history && drop >= atom_count -> preamble_message :: kept
+    | Some Agent_core.Types.User | None -> kept
+    | Some Agent_core.Types.Assistant
+    | Some Agent_core.Types.Tool
+    | Some Agent_core.Types.System -> preamble_message :: kept)
 ;;
 
 let project_with_drop
+    ?(allow_empty_history = false)
     ~measure_message_bytes
     ~capacity_bytes
     ~reserved_bytes
-    (messages : Agent_sdk.Types.message list)
+    (messages : Agent_core.Types.message list)
   : (projection, budget_error) result
   =
   let labelled, atom_count = annotate messages in
@@ -202,33 +353,47 @@ let project_with_drop
   let preamble_bytes = measure_message_bytes preamble_message in
   let undroppable_bytes = pinned_bytes + preamble_bytes in
   let available_bytes = capacity_bytes - reserved_bytes - undroppable_bytes in
-  if available_bytes <= 0
+  if available_bytes < 0 || (available_bytes = 0 && not allow_empty_history)
   then
     Error
       (Reservation_exceeds_capacity
          { capacity_bytes; reserved_bytes; undroppable_bytes })
   else if atom_count = 0
-  then Ok { messages; dropped_atoms = 0 }
+  then Ok { messages; dropped_atoms = 0; atom_count }
   else (
     let per_atom, suffix =
       atom_suffix_bytes ~measure_message_bytes ~atom_count labelled
     in
     match quantized_drop ~available_bytes ~atom_count suffix with
-    | Some drop -> Ok { messages = assemble ~drop ~messages labelled; dropped_atoms = drop }
+    | Some drop ->
+      Ok
+        { messages =
+            assemble ~allow_empty_history ~atom_count ~drop ~messages labelled
+        ; dropped_atoms = drop
+        ; atom_count
+        }
     | None ->
       let drop = exact_drop ~available_bytes ~atom_count suffix in
-      if drop >= atom_count
+      if drop >= atom_count && not allow_empty_history
       then
         Error
           (Newest_atom_exceeds_available
              { available_bytes; newest_atom_bytes = per_atom.(atom_count - 1) })
-      else Ok { messages = assemble ~drop ~messages labelled; dropped_atoms = drop })
+      else
+        Ok
+          { messages =
+              assemble ~allow_empty_history ~atom_count ~drop ~messages labelled
+          ; dropped_atoms = drop
+          ; atom_count
+          })
 ;;
 
-let project ~measure_message_bytes ~capacity_bytes ~reserved_bytes messages =
+let project ?(allow_empty_history = false) ~measure_message_bytes ~capacity_bytes
+    ~reserved_bytes messages =
   Result.map
     (fun projection -> projection.messages)
     (project_with_drop
+       ~allow_empty_history
        ~measure_message_bytes
        ~capacity_bytes
        ~reserved_bytes

@@ -16,6 +16,17 @@ module Turn_up_config = Masc.Keeper_turn_up_config_persistence
    lives in the main [masc] library. Same pattern as test_keeper_lifecycle_registry_dispatch. *)
 module Keeper_runtime = Masc.Keeper_runtime
 
+let with_owner_inventory config f =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  (match Masc.Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.fail (Masc.Keeper_owner_registry.install_error_to_string error));
+  f ()
+;;
+
 let temp_dir () =
   let path = Filename.temp_file "keeper-effective-meta-" "" in
   Sys.remove path;
@@ -79,15 +90,6 @@ let restore_env name = function
   | Some value -> Unix.putenv name value
   | None -> Unix.putenv name ""
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  let rec loop index =
-    index + needle_len <= haystack_len
-    && (String.sub haystack index needle_len = needle || loop (index + 1))
-  in
-  needle_len = 0 || loop 0
-
 let json_string_field key = function
   | `Assoc fields -> (
       match List.assoc_opt key fields with
@@ -148,7 +150,7 @@ let seed_runtime_meta config name =
   match Masc_test_deps.meta_of_json_fixture json with
   | Error err -> Alcotest.fail err
   | Ok meta -> (
-      match Store.write_meta config meta with
+      match Store.replace_snapshot config meta with
       | Ok () -> meta
   | Error err -> Alcotest.failf "write_meta failed: %s" err)
 
@@ -158,10 +160,13 @@ let write_keeper_toml ~keepers_dir ~name ~sandbox_profile ~instructions =
     (Printf.sprintf
        {|[keeper]
 sandbox_profile = "%s"
-instructions = "%s"
+instructions = %S
 |}
        sandbox_profile
        instructions)
+
+let write_keeper_agent ~keepers_dir ~name instructions =
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local" ~instructions
 
 let status_instructions_with ?(agent_name = "test-agent") ?name config =
   let args =
@@ -223,6 +228,34 @@ let resolved_keeper_name config name =
   | Ok resolved -> resolved
   | Error err -> Alcotest.failf "resolve_keeper_name_config failed: %s" err
 
+(* RFC-0371 B4: typed existence for the channel-gate routes. Pins that the
+   new keeper_exists_config answers through the same candidate spellings as
+   the status resolver, and that unknown and invalid names are a typed
+   [Ok false] — the answer the removed "keeper not found" substring
+   classifier used to reverse-engineer out of a rendered error. *)
+let test_keeper_exists_config_answers_typed () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "existsprobe" in
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+    ~instructions:"exists probe instructions";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let exists raw =
+    match Status_detail.keeper_exists_config ~config raw with
+    | Ok value -> value
+    | Error err -> Alcotest.failf "keeper_exists_config failed: %s" err
+  in
+  Alcotest.(check bool) "canonical name exists" true (exists name);
+  Alcotest.(check bool)
+    "agent alias spelling exists"
+    true
+    (exists "keeper-existsprobe-agent");
+  Alcotest.(check bool) "unknown name is Ok false" false (exists "no-such-keeper");
+  Alcotest.(check bool)
+    "invalid name is Ok false, not an error"
+    false
+    (exists "not/a valid;name")
+
 let test_status_resolves_keeper_alias_names () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "aliasprobe" in
@@ -259,10 +292,11 @@ let test_keeper_surface_resolves_alias_names () =
 
 let test_toml_overlay_reaches_effective_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
-  let name = "analyst" in
+  let name = "delta" in
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
+instructions = "Analyze carefully."
 sandbox_profile = "docker"
 |};
   let config = Workspace.default_config base in
@@ -280,25 +314,59 @@ sandbox_profile = "docker"
         "none"
         (Profile.network_mode_to_string meta.network_mode)
 
-let test_profile_identity_snapshot_reaches_meta_json () =
-  with_config_dir @@ fun ~base ~config_dir ~keepers_dir ->
-  let name = "probe" in
-  let persona_dir = Filename.concat (Filename.concat config_dir "personas") name in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|{
-  "persona_name": "probe",
-  "display_name": "Probe",
-  "keeper": {
-    "instructions": "profile instructions"
-  }
-}
-|};
+(* The direct-turn path holds profile defaults it loaded once and overlays with
+   them, rather than re-reading the profile per use: two reads inside one turn
+   could otherwise disagree. That is why the overlay is reachable on its own and
+   not only through [effective_meta_result], which loads and applies together.
+
+   Persisted runtime meta omits TOML-owned fields, so a turn reading it raw sees
+   the wrong sandbox — the overlay is what makes the turn's meta effective. *)
+let test_profile_defaults_overlay_applies_without_reloading () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "overlay-once" in
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-persona_name = "probe"
+instructions = "Analyze carefully."
+sandbox_profile = "docker"
+|};
+  let config = Workspace.default_config base in
+  let persisted = seed_runtime_meta config name in
+  match Profile.load_keeper_profile_defaults_result_for_base_path ~base_path:base name with
+  | Error error ->
+    Alcotest.failf
+      "profile defaults load failed: %s"
+      (Profile.keeper_toml_load_error_to_string error)
+  | Ok defaults ->
+    (match
+       Masc.Keeper_meta_contract.effective_meta_of_profile_defaults defaults persisted
+     with
+     | Error error -> Alcotest.failf "overlay failed: %s" error
+     | Ok effective ->
+       Alcotest.(check string)
+         "overlay carries the TOML sandbox onto persisted meta"
+         "docker"
+         (Profile.sandbox_profile_to_string effective.sandbox_profile);
+       (* The same defaults applied twice must land on the same meta: the turn
+          reuses one load, so the overlay cannot depend on when it runs. *)
+       (match
+          Masc.Keeper_meta_contract.effective_meta_of_profile_defaults defaults persisted
+        with
+        | Error error -> Alcotest.failf "second overlay failed: %s" error
+        | Ok again ->
+          Alcotest.(check string)
+            "reapplying the same defaults is stable"
+            (Profile.sandbox_profile_to_string effective.sandbox_profile)
+            (Profile.sandbox_profile_to_string again.sandbox_profile)))
+;;
+
+let test_keeper_instructions_reach_meta_json () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "probe" in
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+instructions = "keeper instructions"
 sandbox_profile = "local"
 multimodal_policy = "delegate"
 |};
@@ -308,22 +376,14 @@ multimodal_policy = "delegate"
   | Error err -> Alcotest.failf "read_effective_meta failed: %s" err
   | Ok None -> Alcotest.fail "expected seeded keeper meta"
   | Ok (Some meta) ->
-      Alcotest.(check (option string))
-        "persona overlays from profile"
-        (Some "probe")
-        meta.persona;
       Alcotest.(check string)
-        "instructions overlays from profile"
-        "profile instructions"
+        "instructions overlay from Keeper AGENT"
+        "keeper instructions"
         meta.instructions;
       let json = Masc.Keeper_meta_json.meta_to_json meta in
       Alcotest.(check (option string))
-        "meta json keeps persona snapshot"
-        (Some "probe")
-        (json_string_field "persona" json);
-      Alcotest.(check (option string))
         "meta json keeps instructions snapshot"
-        (Some "profile instructions")
+        (Some "keeper instructions")
         (json_string_field "instructions" json);
       Alcotest.(check (option string))
         "meta json keeps multimodal policy"
@@ -346,26 +406,20 @@ multimodal_policy = "delegate"
         Yojson.Safe.from_string (Profile.tool_result_body status_result)
       in
       Alcotest.(check (option string))
-        "status keeps persona snapshot"
-        (Some "probe")
-        (json_string_field "persona" status_json);
-      Alcotest.(check (option string))
         "status keeps instructions snapshot"
-        (Some "profile instructions")
+        (Some "keeper instructions")
         (json_string_field "instructions" status_json)
 
 let test_ensure_keeper_meta_persists_toml_identity_snapshot () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
-  let name = "masc-improver" in
+  let name = "omicron-improver" in
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-persona_name = "masc-improver"
-sandbox_profile = "docker"
 instructions = "Improve MASC autonomously"
+sandbox_profile = "docker"
 proactive_enabled = true
 allowed_paths = ["workspace/yousleepwhen/masc"]
-active_goal_ids = ["goal-masc-improver"]
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -378,20 +432,19 @@ active_goal_ids = ["goal-masc-improver"]
   let stale =
     {
       persisted with
-      persona = Some "analyst";
       instructions = "stale instructions";
       proactive = { enabled = false };
       allowed_paths = [ "/tmp/stale-local-path" ];
-      active_goal_ids = [ "stale-goal" ];
     }
   in
-  (match Store.write_meta config stale with
+  (match Store.replace_snapshot config stale with
    | Ok () -> ()
    | Error err -> Alcotest.failf "write stale meta failed: %s" err);
   let returned =
-    match Keeper_runtime.ensure_keeper_meta config name with
-    | Ok meta -> meta
-    | Error err -> Alcotest.failf "ensure_keeper_meta failed: %s" err
+    with_owner_inventory config (fun () ->
+      match Keeper_runtime.ensure_keeper_meta config name with
+      | Ok meta -> meta
+      | Error err -> Alcotest.failf "ensure_keeper_meta failed: %s" err)
   in
   let disk_json = Yojson.Safe.from_file (Profile.keeper_meta_path config name) in
   let leaked_config_keys =
@@ -408,14 +461,6 @@ active_goal_ids = ["goal-masc-improver"]
     "disk meta contains only current fields"
     []
     leaked_config_keys;
-  Alcotest.(check (option string))
-    "disk meta keeps persona snapshot"
-    (Some "masc-improver")
-    (json_string_field "persona" disk_json);
-  Alcotest.(check (option string))
-    "returned persona is TOML canonical"
-    (Some "masc-improver")
-    returned.persona;
   Alcotest.(check string)
     "returned instructions are TOML canonical"
     "Improve MASC autonomously"
@@ -432,20 +477,12 @@ active_goal_ids = ["goal-masc-improver"]
     "returned allowed_paths is TOML canonical"
     [ "workspace/yousleepwhen/masc" ]
     returned.allowed_paths;
-  Alcotest.(check (list string))
-    "returned active_goal_ids is TOML canonical"
-    [ "goal-masc-improver" ]
-    returned.active_goal_ids
+  ()
 
 let test_ensure_keeper_meta_preserves_live_usage_during_reconcile () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "reconcile-live-usage" in
-  write_file
-    (Filename.concat keepers_dir (name ^ ".toml"))
-    {|[keeper]
-sandbox_profile = "local"
-instructions = "fresh instructions"
-|};
+  write_keeper_agent ~keepers_dir ~name "fresh instructions";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   let persisted =
@@ -455,44 +492,47 @@ instructions = "fresh instructions"
     | Error err -> Alcotest.failf "read_meta failed: %s" err
   in
   let stale = { persisted with instructions = "stale instructions" } in
-  (match Store.write_meta config stale with
+  (match Store.replace_snapshot config stale with
    | Ok () -> ()
    | Error err -> Alcotest.failf "write stale meta failed: %s" err);
-  let observed =
-    {
-      stale with
-      runtime =
-        {
-          stale.runtime with
-          usage =
-            {
-              stale.runtime.usage with
-              last_input_tokens = 123;
-              last_output_tokens = 4;
-              last_total_tokens = 127;
-              last_usage_reported_at = Some 1_700_000_000.0;
-            };
-        };
-    }
-  in
   Masc.Keeper_registry.For_testing.clear ();
   Fun.protect
     ~finally:Masc.Keeper_registry.For_testing.clear
     (fun () ->
-      ignore
-        (Masc.Keeper_registry.For_testing.register
-           ~base_path:config.base_path
-           name
-           observed);
+      ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path name stale);
       let reconciled =
-        match Keeper_runtime.ensure_keeper_meta config name with
-        | Ok meta -> meta
-        | Error err -> Alcotest.failf "ensure_keeper_meta failed: %s" err
+        with_owner_inventory config (fun () ->
+          (match
+             Masc.Keeper_owner_registry.apply_meta
+               ~base_path:config.base_path
+               ~keeper_name:name
+               (Masc.Keeper_owner_reducer.Add_usage
+                  { turns = 0
+                  ; input_tokens = 0
+                  ; output_tokens = 0
+                  ; total_tokens = 0
+                  ; cost_usd = 0.0
+                  ; last_turn_ts = stale.runtime.usage.last_turn_ts
+                  ; last_input_tokens = 123
+                  ; last_output_tokens = 4
+                  ; last_total_tokens = 127
+                  ; last_usage_reported_at = Some 1_700_000_000.0
+                  ; last_latency_ms = stale.runtime.usage.last_latency_ms
+                  })
+           with
+           | Ok (Some _) -> ()
+           | Ok None -> Alcotest.fail "owner usage commit removed metadata"
+           | Error error ->
+             Alcotest.fail
+               (Masc.Keeper_owner_registry.command_error_to_string error));
+          match Keeper_runtime.ensure_keeper_meta config name with
+          | Ok meta -> meta
+          | Error err -> Alcotest.failf "ensure_keeper_meta failed: %s" err)
       in
-      Masc.Keeper_registry.update_meta_from_persisted
-        ~base_path:config.base_path
-        name
-        reconciled;
+      Alcotest.(check int)
+        "reconcile result preserves live observed input"
+        123
+        reconciled.runtime.usage.last_input_tokens;
       match Masc.Keeper_registry.get ~base_path:config.base_path name with
       | Some entry ->
         Alcotest.(check string)
@@ -515,6 +555,7 @@ let test_turn_setup_uses_effective_meta () =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
+instructions = "Prepare the turn."
 sandbox_profile = "docker"
 |};
   let config = Workspace.default_config base in
@@ -543,10 +584,11 @@ sandbox_profile = "docker"
 
 let test_keepalive_meta_selection_overlays_disk_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
-  let name = "taskmaster" in
+  let name = "fixture-keeper" in
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
+instructions = "Coordinate the work."
 sandbox_profile = "docker"
 network_mode = "inherit"
 |};
@@ -611,7 +653,7 @@ let test_missing_sandbox_profile_fails_loud_for_profile_source () =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-instructions = "missing sandbox profile"
+instructions = "Missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -621,7 +663,7 @@ instructions = "missing sandbox profile"
       Alcotest.(check bool)
         "error names missing sandbox_profile"
         true
-        (contains_substring ~needle:"sandbox_profile is required" err)
+        (String_util.string_contains_substring ~needle:"sandbox_profile is required" err)
 
 let test_keeper_up_rejects_profile_source_without_sandbox_profile () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
@@ -629,7 +671,7 @@ let test_keeper_up_rejects_profile_source_without_sandbox_profile () =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-instructions = "missing sandbox profile"
+instructions = "Missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -653,7 +695,7 @@ instructions = "missing sandbox profile"
   Alcotest.(check bool)
     "keeper_up error names missing sandbox_profile"
     true
-    (contains_substring
+    (String_util.string_contains_substring
        ~needle:"sandbox_profile is required"
        (Profile.tool_result_body result))
 
@@ -860,7 +902,7 @@ let test_status_rejects_tail_order_outside_schema () =
   Alcotest.(check bool)
     "error names exact allowed values"
     true
-    (contains_substring
+    (String_util.string_contains_substring
        ~needle:"allowed: oldest_first, newest_first"
        (Profile.tool_result_body result))
 
@@ -883,7 +925,7 @@ let test_status_rejects_malformed_options () =
     Alcotest.(check bool)
       (label ^ " explains the rejected field")
       true
-      (contains_substring ~needle (Profile.tool_result_body result))
+      (String_util.string_contains_substring ~needle (Profile.tool_result_body result))
   in
   check_rejected
     "tail bytes below schema minimum"
@@ -1092,67 +1134,73 @@ let test_status_reads_live_registry_each_call () =
         (Some "second live error")
         (json_string_field "sandbox_last_error" (status ())))
 
-let test_status_surfaces_chat_queue_runtime () =
+let test_status_surfaces_chat_operation_runtime () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
-  let name = "chatqueue-status" in
+  let name = "chat-operation-status" in
   write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
-    ~instructions:"chat queue status";
+    ~instructions:"chat operation status";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   Eio_main.run @@ fun _env ->
-  (* Mirror production: the status handler runs under [Eio_main.run] with the
-     guard enabled (bin/main_eio.ml), so the durable queue snapshot is read.
-     Disable on exit so other (non-Eio) cases keep reporting [`Null]. *)
   Eio_guard.enable ();
-  Masc.Keeper_chat_queue.For_testing.reset ();
   Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_chat_queue.For_testing.reset ();
-      Eio_guard.disable ())
+    ~finally:Eio_guard.disable
     (fun () ->
-      let report =
-        Masc.Keeper_chat_queue.configure_persistence ~base_path:config.base_path
-      in
-      Alcotest.(check int)
-        "queue persistence config has no load errors"
-        0
-        (List.length report.load_errors);
+      Eio.Switch.run @@ fun sw ->
       (match
-         Masc.Keeper_chat_queue.enqueue
-           ~keeper_name:name
-           {
-             Masc.Keeper_chat_queue.content = "queued status probe";
-             user_blocks = [];
-             attachments = [];
-             timestamp = 1.0;
-             source =
-               Masc.Keeper_chat_queue.Dashboard
-                 { thread_id = "keeper:meta-overlay" };
-             user_row_origin = Masc.Keeper_chat_store.Needs_append;
-           }
+         Masc.Keeper_owner_registry.install_from_store
+           ~sw
+           ~operation_runner:None
+           ~on_turn_slot_released:None
+           config
        with
-       | Ok _receipt -> ()
-       | Error err ->
-           Alcotest.failf "queue enqueue failed: %s"
-             (Masc.Keeper_chat_queue.mutation_error_to_string err));
+       | Ok 1 -> ()
+       | Ok count -> Alcotest.failf "expected one owner, got %d" count
+       | Error error ->
+         Alcotest.fail
+           (Masc.Keeper_owner_registry.install_error_to_string error));
+      let operation_id =
+        match
+          Masc.Keeper_owner.Chat_operation.Operation_id.of_string
+            "kmsg-status-probe"
+        with
+        | Ok operation_id -> operation_id
+        | Error detail -> Alcotest.fail detail
+      in
+      (match
+         Masc.Keeper_owner_registry.submit_operation
+           ~base_path:config.base_path
+           ~keeper_name:name
+           ~operation_id
+           ~source:(`Assoc [ "kind", `String "dashboard" ])
+           ~input:(`Assoc [ "message", `String "queued status probe" ])
+       with
+       | Ok acceptance ->
+         Alcotest.(check string)
+           "operation remains queued without an executor"
+           "queued"
+           (Masc.Keeper_owner.Chat_operation.state_to_string
+              acceptance.operation.state)
+       | Error error ->
+         Alcotest.fail
+           (Masc.Keeper_owner_registry.command_error_to_string error));
       let status_json = status_json_with ~name config in
-      let chat_queue = json_assoc_field "chat_queue" status_json in
+      let chat_operations = json_assoc_field "chat_operations" status_json in
       Alcotest.(check (option int))
-        "status exposes pending chat queue depth"
+        "status exposes queued operation depth"
         (Some 1)
-        (json_int_field "pending_messages" chat_queue);
+        (json_int_field "queued_count" chat_operations);
       Alcotest.(check (option bool))
-        "status exposes durable chat queue replay flag"
+        "status exposes owner projection availability"
         (Some true)
-        (json_bool_field "durable_replay_enabled" chat_queue))
-
+        (json_bool_field "snapshot_available" chat_operations))
 let test_keeper_list_row_surfaces_effective_meta_errors () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "badprofile" in
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-instructions = "missing sandbox profile"
+instructions = "Missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -1171,13 +1219,51 @@ instructions = "missing sandbox profile"
              (List.mem_assoc "effective_meta_error" fields)
        | _ -> Alcotest.fail "expected object row")
 
+let test_config_snapshot_does_not_fallback_to_raw_meta () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "bad-config-snapshot" in
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+instructions = "Missing sandbox profile"
+|};
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  match Dashboard_http_keeper_snapshot.keeper_config_json config name with
+  | `Not_found, _ -> Alcotest.fail "expected a typed unavailable config snapshot"
+  | `OK, json ->
+    Alcotest.(check (option string))
+      "snapshot preserves the raw keeper identity"
+      (Some name)
+      (json_string_field "name" json);
+    Alcotest.(check bool)
+      "effective config is explicitly unavailable"
+      true
+      (json_field "effective_config" json = Some `Null);
+    Alcotest.(check bool)
+      "raw sandbox defaults are not projected as effective"
+      true
+      (json_field "sandbox_profile" json = None);
+    Alcotest.(check bool)
+      "typed config error remains visible"
+      true
+      (match json_field "config_error" json with
+       | Some (`Assoc _) -> true
+       | Some _ | None -> false);
+    Alcotest.(check bool)
+      "raw source provenance remains visible"
+      true
+      (match json_field "sources" json with
+       | Some (`Assoc _) -> true
+       | Some _ | None -> false)
+
 let test_keeper_list_error_row_preserves_keepalive_state () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "badprofile-running" in
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-instructions = "missing sandbox profile"
+instructions = "Missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   let meta = seed_runtime_meta config name in
@@ -1203,8 +1289,13 @@ let () =
           Alcotest.test_case "TOML sandbox overlay reaches effective meta"
             `Quick test_toml_overlay_reaches_effective_meta;
           Alcotest.test_case
+            "profile-defaults overlay applies without reloading the profile"
+            `Quick test_profile_defaults_overlay_applies_without_reloading;
+          Alcotest.test_case "keeper_exists_config answers existence typed"
+            `Quick test_keeper_exists_config_answers_typed;
+          Alcotest.test_case
             "profile identity snapshot reaches meta JSON"
-            `Quick test_profile_identity_snapshot_reaches_meta_json;
+            `Quick test_keeper_instructions_reach_meta_json;
           Alcotest.test_case
             "ensure keeper meta persists TOML identity snapshot"
             `Quick test_ensure_keeper_meta_persists_toml_identity_snapshot;
@@ -1246,10 +1337,13 @@ let () =
             `Quick test_status_tracks_persisted_meta_without_updated_at;
           Alcotest.test_case "status reads live registry each call" `Quick
             test_status_reads_live_registry_each_call;
-          Alcotest.test_case "status surfaces chat queue runtime" `Quick
-            test_status_surfaces_chat_queue_runtime;
+          Alcotest.test_case "status surfaces chat operation runtime" `Quick
+            test_status_surfaces_chat_operation_runtime;
           Alcotest.test_case "keeper list surfaces effective meta errors"
             `Quick test_keeper_list_row_surfaces_effective_meta_errors;
+          Alcotest.test_case
+            "config snapshot never falls back to raw effective fields"
+            `Quick test_config_snapshot_does_not_fallback_to_raw_meta;
           Alcotest.test_case
             "keeper list error row preserves keepalive state"
             `Quick test_keeper_list_error_row_preserves_keepalive_state;

@@ -9,7 +9,6 @@ supersedes: []
 superseded_by: null
 related: ["0051", "0056", "0085"]
 extends: "0136"
-implementation_prs: [16701, 16709, 16751]
 ---
 
 # RFC-0136 Phase 4 — Retry Loop Body Decomposition

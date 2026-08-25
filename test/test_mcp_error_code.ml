@@ -96,6 +96,65 @@ let test_wire_codes_in_range () =
           C.pp t code)
     C.all
 
+(* MCP revision 2026-07-28 pins this body, field for field: a client reading a
+   4xx decides from it whether it is talking to a modern server or a legacy
+   one. A missing [data.supported] does not degrade the error, it reclassifies
+   the whole server, so each field is asserted rather than the string as a
+   whole. *)
+let test_unsupported_protocol_version_body_shape () =
+  let body =
+    C.unsupported_protocol_version_body ~requested:"1900-01-01"
+      ~supported:[ "2026-07-28"; "2025-11-25" ]
+  in
+  let fields =
+    match Yojson.Safe.from_string body with
+    | `Assoc fields -> fields
+    | _ -> Alcotest.fail "body is not a JSON object"
+  in
+  (match List.assoc_opt "jsonrpc" fields with
+  | Some (`String v) -> Alcotest.(check string) "jsonrpc" "2.0" v
+  | _ -> Alcotest.fail "jsonrpc version missing");
+  (match List.assoc_opt "id" fields with
+  | Some `Null -> ()
+  | _ ->
+      Alcotest.fail
+        "id must be null: the header is rejected before the request id is read");
+  let err =
+    match List.assoc_opt "error" fields with
+    | Some (`Assoc err) -> err
+    | _ -> Alcotest.fail "error object missing"
+  in
+  (match List.assoc_opt "code" err with
+  | Some (`Int code) ->
+      Alcotest.(check int) "code fixed by the spec, not by this server" (-32022) code
+  | _ -> Alcotest.fail "error.code missing");
+  (match List.assoc_opt "message" err with
+  | Some (`String m) ->
+      Alcotest.(check string) "message" "Unsupported protocol version" m
+  | _ -> Alcotest.fail "error.message missing");
+  let data =
+    match List.assoc_opt "data" err with
+    | Some (`Assoc data) -> data
+    | _ ->
+        Alcotest.fail
+          "error.data missing — without it the response is not a recognized \
+           modern error and the client falls back to initialize"
+  in
+  (match List.assoc_opt "supported" data with
+  | Some (`List vs) ->
+      Alcotest.(check (list string))
+        "supported list is what the client retries from"
+        [ "2026-07-28"; "2025-11-25" ]
+        (List.map
+           (function
+             | `String s -> s
+             | _ -> Alcotest.fail "supported entry is not a string")
+           vs)
+  | _ -> Alcotest.fail "data.supported missing");
+  match List.assoc_opt "requested" data with
+  | Some (`String r) -> Alcotest.(check string) "requested echoed back" "1900-01-01" r
+  | _ -> Alcotest.fail "data.requested missing"
+
 let test_round_trip_well_known () =
   (* [of_wire_code] returns [None] for [Quiet] because the
      reason/recovered payload is not derivable from the integer alone.
@@ -196,6 +255,38 @@ let test_sse_get_registers_before_streaming_response () =
   assert_order "generic SSE GET validates before 200 stream" http;
   assert_order "AG-UI SSE validates before 200 stream" agui
 
+(* JSON-RPC 2.0 §5 allows a null id only when the id could not be read.
+   Asserted over [C.all] rather than a hand-listed set, so a new code
+   that quietly answers true is caught here as well as by the exhaustive
+   match in the module. *)
+let test_allows_null_request_id_only_for_unreadable_id () =
+  let allowed = List.filter C.allows_null_request_id C.all in
+  Alcotest.(check int) "exactly three codes allow a null id" 3 (List.length allowed);
+  Alcotest.(check bool) "Parse_error" true (C.allows_null_request_id C.Parse_error);
+  Alcotest.(check bool) "Invalid_request" true (C.allows_null_request_id C.Invalid_request);
+  (* Third since the MCP 2026-07-28 version check: the declared version is
+     read from the [MCP-Protocol-Version] header and rejected there, so the
+     JSON-RPC body — and the id inside it — is never parsed. Same §5 condition
+     as the other two, reached by a different route. A future rejection driven
+     by the [_meta] key instead does parse the body, and would have to carry
+     the id. *)
+  Alcotest.(check bool) "Unsupported_protocol_version" true
+    (C.allows_null_request_id C.Unsupported_protocol_version)
+;;
+
+let test_allows_null_request_id_rejects_answered_requests () =
+  List.iter
+    (fun code ->
+      match code with
+      | C.Parse_error | C.Invalid_request | C.Unsupported_protocol_version -> ()
+      | other ->
+        Alcotest.(check bool)
+          (Printf.sprintf "%s must carry the request id" (Format.asprintf "%a" C.pp other))
+          false
+          (C.allows_null_request_id other))
+    C.all
+;;
+
 let () =
   Alcotest.run "Mcp_error_code"
     [
@@ -204,10 +295,19 @@ let () =
           test_case "unique" `Quick test_wire_codes_unique;
           test_case "in-range" `Quick test_wire_codes_in_range;
           test_case "round-trip (well-known)" `Quick test_round_trip_well_known;
+          test_case "unsupported protocol version body (MCP 2026-07-28)" `Quick
+            test_unsupported_protocol_version_body_shape;
           test_case "unknown returns None" `Quick
             test_of_wire_unknown_returns_none;
           test_case "Quiet round-trip drops payload" `Quick
             test_quiet_round_trip_loses_payload;
+        ] );
+      ( "null-request-id",
+        [
+          test_case "only unreadable-id codes allow null" `Quick
+            test_allows_null_request_id_only_for_unreadable_id;
+          test_case "every answered request keeps its id" `Quick
+            test_allows_null_request_id_rejects_answered_requests;
         ] );
       ( "messages-and-status",
         [

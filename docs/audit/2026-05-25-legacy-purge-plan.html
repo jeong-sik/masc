@@ -426,12 +426,6 @@
             <td>Backstop grep is clean for <code>Keeper_types.keeper_memory_bank_path</code>, <code>Keeper_types.keeper_progress_path</code>, and <code>Keeper_types.keeper_decision_log_path</code>. The branch has been merged into <code>origin/main</code>.</td>
           </tr>
           <tr>
-            <td><code>Keeper_types.write_meta_with_retry</code> wrapper</td>
-            <td><span class="status done">merged #18422</span></td>
-            <td>Delete the payload-wins CAS retry wrapper from <code>Keeper_meta_store</code> and the public <code>Keeper_types</code> facade. Callers now use <code>write_meta_with_merge</code> with an explicit <code>Keeper_meta_merge.caller_wins</code> strategy.</td>
-            <td><code>rg "write_meta_with_retry" lib test docs</code> returns no matches on the PR branch. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
-          </tr>
-          <tr>
             <td><code>Keeper_tools_oas.tool_call_entry</code> re-export</td>
             <td><span class="status done">draft PR #18423</span></td>
             <td>Remove the old dashboard-facing record-type alias from <code>Keeper_tools_oas</code>. The usage view now returns <code>Keeper_types.tool_call_entry</code> directly, and dashboard fallback code reads the canonical record labels.</td>
@@ -822,9 +816,9 @@
             <td>Backstop grep is clean for active <code>lib/</code> and <code>test/</code> callers except the intentional removal note in <code>tool_result</code> itself. Focused Dune was blocked by the machine-wide bare-Dune guard; format, diff, and structure ratchets passed.</td>
           </tr>
           <tr>
-            <td>Keeper/persona dispatch-ref tuple bridges</td>
+            <td>Keeper/keeper dispatch-ref tuple bridges</td>
             <td><span class="status now">draft PR #18906</span></td>
-            <td>Move <code>Keeper_dispatch_ref</code> and <code>Persona_dispatch_ref</code> from <code>(bool * string) option</code> to <code>Tool_result.result option</code>, leaving only the final in-process runtime string projection.</td>
+            <td>Move <code>Keeper_dispatch_ref</code> and <code>Keeper_dispatch_ref</code> from <code>(bool * string) option</code> to <code>Tool_result.result option</code>, leaving only the final in-process runtime string projection.</td>
             <td>Backstop is clean for <code>lib/*dispatch_ref*</code>, <code>lib/tool_keeper*</code>, and <code>lib/keeper/keeper_tag_dispatch.mli</code>. Local Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>

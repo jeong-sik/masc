@@ -1,4 +1,4 @@
-(** Keeper_unified_turn — Single entry point for keeper turns via OAS Agent.run().
+(** Keeper_unified_turn — Single entry point for keeper turns via Agent_core.Agent.run().
 
     Replaces the 3-path dispatcher (social/scheduled-autonomous/autonomy) with a unified
     observe -> prompt -> Agent.run(tools, guardrails, hooks) loop.
@@ -16,7 +16,7 @@ val decide_degraded_retry
   :  base_runtime:string
   -> effective_runtime:string
   -> attempted_runtimes:string list
-  -> Agent_sdk.Error.sdk_error
+  -> Agent_core.Error.t
   -> degraded_retry_decision
 
 (** Summary of event-bus signals observed during a single keeper turn.
@@ -29,12 +29,12 @@ type turn_event_bus_summary =
   ; payload_kinds : string list
   }
 
-(** Fold the drained OAS event-bus events for a single keeper turn into
+(** Fold the drained AGENT_CORE event-bus events for a single keeper turn into
     the signals MASC currently consumes. *)
-val summarize_turn_event_bus : Agent_sdk.Event_bus.event list -> turn_event_bus_summary
+val summarize_turn_event_bus : Agent_core.Event_bus.event list -> turn_event_bus_summary
 
 val turn_event_bus_evidence_detail : turn_event_bus_summary -> string
-(** Compact forensic string for observed OAS events around a typed overflow. *)
+(** Compact forensic string for observed AGENT_CORE events around a typed overflow. *)
 
 (** Turn-local tool-event pairing state used to detect event-bus integrity
     failures. Exposed for targeted tests. *)
@@ -45,12 +45,12 @@ val create_turn_tool_event_tracker : unit -> turn_tool_event_tracker
 val record_turn_tool_events
   :  keeper_name:string
   -> turn_tool_event_tracker
-  -> Agent_sdk.Event_bus.event list
+  -> Agent_core.Event_bus.event list
   -> turn_tool_event_tracker
 
 val turn_tool_event_integrity_error
   :  turn_tool_event_tracker
-  -> Agent_sdk.Error.sdk_error option
+  -> Agent_core.Error.t option
 
 (** Project the initial keeper turn context budget from the routed runtime's
     prevalidated resolution, so lifecycle context math matches the provider
@@ -100,7 +100,7 @@ val next_fail_open_runtime_for_turn
   :  base_runtime:string
   -> effective_runtime:string
   -> attempted_runtimes:string list
-  -> Agent_sdk.Error.sdk_error
+  -> Agent_core.Error.t
   -> Keeper_error_classify.degraded_retry option
 
 (** Record the streaming-cancel observation shared by the Eio.Cancel handler.
@@ -109,28 +109,21 @@ val next_fail_open_runtime_for_turn
 val record_streaming_cancelled_observation
   :  config:Workspace.config
   -> run_meta:Keeper_meta_contract.keeper_meta
-  -> run_generation:int
   -> runtime_id:string
   -> keeper_turn_id:int
   -> unit
   -> unit
 
-type source_disposition =
-  | Follow_failure_route
-  | Pause_after_transcript_corruption of { detail : string }
-(** A failed turn normally follows its typed retry/rotate/escalate route —
-    including every provider capacity failure. The automatic
+type source_disposition = Follow_failure_route
+(** Every failed turn follows its typed retry/rotate/escalate route — provider
+    capacity failures and an incomplete tool transcript alike. The automatic
     overflow-compaction recovery that used to branch here was removed (#26546)
     because it had never produced a committed compaction on record. #26545
     bounds conversation history only; whole-request provider fit is tracked in
-    #26551.
-    [Pause_after_transcript_corruption] is terminal for automatic execution:
-    typed transcript admission rejected before provider dispatch, so the
-    heartbeat durably pauses the Keeper and consumes the selected source into an
-    operator-reset-required escalation with no retry successor. *)
+    #26551. *)
 
 type turn_failure =
-  { error : Agent_sdk.Error.sdk_error
+  { error : Agent_core.Error.t
   ; runtime_id : string
   ; route : Keeper_runtime_failure_route.route
   ; source_disposition : source_disposition
@@ -140,8 +133,18 @@ type turn_failure =
     The heartbeat queue transitions from this value; it must not reconstruct a
     possibly rotated runtime from Keeper meta. *)
 
+type continuation_route_disposition =
+  | Continuation_route_addressed
+  | Continuation_route_not_addressed
+(** Whether the turn's completed terminal surface post landed on the exact
+    channel that woke it. The connector-attention ledger maps addressed to a
+    resolved mention and not-addressed to an ignored one. *)
+
 type turn_success =
-  | Turn_completed of Keeper_meta_contract.keeper_meta
+  | Turn_completed of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; continuation_route : continuation_route_disposition
+      }
   | Turn_checkpointed of Keeper_meta_contract.keeper_meta
   | Turn_input_required of Keeper_meta_contract.keeper_meta
   | Turn_cancelled of Keeper_meta_contract.keeper_meta
@@ -153,12 +156,6 @@ type turn_success =
     non-executable phase remain distinct so a durable source cannot be
     acknowledged as completed work. *)
 
-val turn_success_of_stop_reason
-  :  meta:Keeper_meta_contract.keeper_meta
-  -> Runtime_agent.stop_reason
-  -> turn_success
-(** Total typed projection used at the successful runtime boundary. *)
-
 val manual_compaction_preemption_request
   :  wake:Keeper_registry.wake_reason
   -> now:float
@@ -169,6 +166,26 @@ val manual_compaction_preemption_request
     pending. The summary names that exact runtime stimulus as the next
     source; a turn already consuming manual compaction never yields to itself. *)
 
+val hitl_replay_preemption_request
+  :  resolution_deliverable:(Keeper_event_queue.hitl_resolution -> bool)
+  -> now:float
+  -> Keeper_event_queue.t
+  -> Keeper_agent_run.autonomous_yield_request option
+(** Pure post-tool boundary decision (#28809): yield the in-flight source when
+    a queued [Hitl_resolved] passes [resolution_deliverable]. The runtime
+    predicate accepts only an approved resolution whose one-shot grant is
+    still unspent, so a resolution already threaded into the current turn
+    (grant consumed at tool-bundle build) never preempts its own run. *)
+
+val hitl_replay_yield_request
+  :  base_path:string
+  -> keeper_name:string
+  -> (Keeper_agent_run.autonomous_yield_request option, string) result
+(** [hitl_replay_preemption_request] over the keeper's durable queue snapshot
+    with the runtime deliverability predicate (approval left the pending map,
+    grant durably unspent). *)
+
+
 val run_keeper_cycle
   :  before_dispatch_authority:(unit -> (unit, string) result)
   -> ?deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane
@@ -178,13 +195,11 @@ val run_keeper_cycle
   -> publication_recovery_provider:
        Keeper_publication_recovery_availability.provider
   -> observation:Keeper_world_observation.world_observation
-  -> generation:int
   -> wake:Keeper_registry.wake_reason
   -> turn_decision:Keeper_world_observation.keeper_cycle_decision
-  -> ?shared_context:Agent_sdk.Context.t
-  -> ?event_bus:Agent_sdk.Event_bus.t
+  -> ?shared_context:Agent_core.Context.t
+  -> ?event_bus:Agent_core.Event_bus.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
-  -> ?continuation_delivery_channel:Keeper_continuation_channel.t
   -> unit
   -> (turn_success, turn_failure) result
 
@@ -198,7 +213,6 @@ val run_keeper_cycle
     @param config Workspace configuration
     @param meta Current keeper metadata
     @param observation World state snapshot
-    @param generation Current generation counter
     @param wake What triggered this turn (#16, 38-bug campaign PR-5):
     reactive stimulus batch or the proactive cadence tick. Installed on
     [current_turn_observation] via [Keeper_registry.mark_turn_started] so

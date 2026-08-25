@@ -33,7 +33,7 @@ end
 (** Tool execution identifier — RFC-0233. Minted exactly once at the
     dispatch boundary for each tool execution and stamped into every
     store that records that execution (tool_calls JSONL, trajectory;
-    oas-event join lands in RFC-0233 PR-2), so one physical execution
+    agent_core-event join lands in RFC-0233 PR-2), so one physical execution
     renders as one logical row regardless of how many stores observed
     it. Timestamp-prefixed ([exec-<ms>-<seq>]) — lexicographic order
     within a process tracks mint order. *)

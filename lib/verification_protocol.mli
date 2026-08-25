@@ -37,18 +37,6 @@ val notify_submit_for_verification :
     Used by callers that have already created the board post via
     {!create_submit_request} but need a separate SSE broadcast. *)
 
-val on_submit_for_verification :
-  config:Workspace.config ->
-  task:Masc_domain.task ->
-  assignee:string ->
-  verification_id:string ->
-  evidence_refs:string list ->
-  (unit, string) result
-(** [on_submit_for_verification ...] is the combined wrapper:
-    {!create_submit_request} + {!notify_submit_for_verification}.
-    Returns the result of the persist step; SSE notify runs only
-    on success. *)
-
 (** {1 Task verdict notifications} *)
 
 val notify_approve_verification :
@@ -75,6 +63,24 @@ val notify_reject_verification :
     carry typed provenance.
     State-free. *)
 
+val notify_stalled_verification :
+  authority:Masc_domain.completion_authority ->
+  task_id:string ->
+  verification_id:string ->
+  gate:string ->
+  detail:string ->
+  unit
+(** Board projection for every review that completed [Not_reviewed]: no
+    verdict was committed and the authority schedules no further attempt, so
+    without this post the only surface is the bounded run registry and the
+    task waits invisibly. The post names the task, the
+    verification id, the gate, and the two forward paths that exist today —
+    the assignee resubmitting through [submit_for_verification] (a legal
+    transition from [AwaitingVerification] that supersedes this
+    verification), or an operator HITL verdict. Visibility only: no
+    scheduling state, no retry obligation. A board write failure is logged
+    and does not affect the review outcome. *)
+
 module For_testing : sig
   val verdict_event_json :
     authority:Masc_domain.completion_authority ->
@@ -83,5 +89,16 @@ module For_testing : sig
     verdict:Masc_domain.completion_verdict ->
     notes:string ->
     timestamp:float ->
+    Yojson.Safe.t
+
+  val stalled_board_content :
+    task_id:string -> verification_id:string -> gate:string -> detail:string -> string
+
+  val stalled_metadata :
+    authority:Masc_domain.completion_authority ->
+    task_id:string ->
+    verification_id:string ->
+    gate:string ->
+    detail:string ->
     Yojson.Safe.t
 end

@@ -1,60 +1,31 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Central Tool Dispatch Registry.
 
     Production MCP tool names route through {!Tool_name} and the module-tag
     registry. Mutable handler registrations remain only for dispatch
-    execution; they are not used for token validation or discovery.
+    execution; they are not used for token validation or discovery. *)
 
-    RFC-0084 host-config-cleanup-J removed the [MASC_DISPATCH_V2]
-    feature flag and the alternate match chain it gated.  The Hashtbl dispatch
-    path is now the only code path. *)
-
-(** Unified handler type: every tool call is [name * args -> result option].
-    [None] means "this handler does not know this tool" (should not happen
-    when lookups go through the registry, but kept for compatibility).
-    RFC-0189 PR-2: handlers return the typed {!Tool_result.result}; the
-    legacy {!Tool_result.result} record is gone. *)
-type handler = name:string -> args:Yojson.Safe.t -> Tool_result.result option
+(** Registered handlers are total for their exact registry key. Missing
+    handlers are represented by the registry lookup, not by a second optional
+    result returned from a matched handler. *)
+type handler = name:string -> args:Yojson.Safe.t -> Tool_result.result
 
 (** Central registry — populated once during server initialisation. *)
 let registry : (string, handler) Hashtbl.t = Hashtbl.create 256
 
 (** Mutex protecting all mutable state in this module.
-    Uses Eio_guard for dual-mode (pre/post Eio runtime) locking. *)
-let dispatch_mu = Eio.Mutex.create ()
-let with_dispatch_rw f = Eio_guard.with_mutex dispatch_mu f
-let with_dispatch_ro f = Eio_guard.with_mutex_ro dispatch_mu f
+
+    Registration and snapshot reads are short and never perform Eio effects,
+    so a system mutex is the correct cross-domain boundary.  [Eio_guard]
+    deliberately skips locking before the Eio runtime starts and rejects raw
+    Domain callers after startup; either behavior is unsound for this
+    process-global registry. *)
+let dispatch_mu = Stdlib.Mutex.create ()
+let with_dispatch_rw f = Stdlib.Mutex.protect dispatch_mu f
+let with_dispatch_ro f = Stdlib.Mutex.protect dispatch_mu f
 
 (** Register a single tool name → handler mapping. *)
 let register ~tool_name ~(handler : handler) =
   with_dispatch_rw (fun () -> Hashtbl.replace registry tool_name handler)
-
-(** Bulk-register every tool name from a schema list to the same handler.
-    This is the primary registration path — it extracts names from the
-    module's published schemas, ensuring the registry is always in sync
-    with the advertised tool list. *)
-let register_module ~(schemas : Masc_domain.tool_schema list) ~(handler : handler) =
-  with_dispatch_rw (fun () ->
-    List.iter
-      (fun (schema : Masc_domain.tool_schema) ->
-        Hashtbl.replace registry schema.name handler)
-      schemas)
 
 (** {2 Dispatch Hooks And Observers}
 
@@ -63,7 +34,7 @@ let register_module ~(schemas : Masc_domain.tool_schema list) ~(handler : handle
     Multiple hooks are supported — they execute in registration order.
 
     - Pre-hook returning [Some result] short-circuits (handler is skipped).
-      Use case: permission checks (Sprint 3), request logging.
+      Use cases include permission checks and request logging.
     - Dispatch observers receive the final typed outcome for telemetry,
       metrics, and audit logging. *)
 
@@ -134,7 +105,7 @@ let identity_span_wrapper : span_wrapper =
 let surface_of_tool_name name =
   let name = String.lowercase_ascii (String.trim name) in
   if String.starts_with ~prefix:"masc_" name
-     || String.starts_with ~prefix:"mcp__masc__" name
+     || Tool_transport_prefix.has name
   then "mcp"
   else if String.starts_with ~prefix:"keeper_" name
   then "keeper"
@@ -157,6 +128,7 @@ let clear_hooks () =
     First [Reject] wins (short-circuit). [Proceed] replaces args for
     subsequent hooks and the final handler. *)
 let run_pre_hooks ~name ~args =
+  let hooks = with_dispatch_ro (fun () -> !pre_hooks) in
   let rec go current_args = function
     | [] -> (None, current_args)
     | hook :: rest ->
@@ -165,7 +137,7 @@ let run_pre_hooks ~name ~args =
        | Proceed new_args -> go new_args rest
        | Pass -> go current_args rest)
   in
-  go args !pre_hooks
+  go args hooks
 
 (** Run observers in order against the typed dispatch outcome.
     Each hook is invoked for its side-effects; mutation of the
@@ -176,30 +148,23 @@ let run_pre_hooks ~name ~args =
 let run_dispatch_observers
     (outcome : Dispatch_outcome.t)
     (result : Tool_result.result option) : unit =
-  List.iter (fun hook -> hook outcome result) !dispatch_observers
+  let observers = with_dispatch_ro (fun () -> !dispatch_observers) in
+  List.iter (fun hook -> hook outcome result) observers
 
-(** RFC-0084 §2.2 + RFC-0085 PR-14 — Single dispatch entry.
-
-    Inlines what used to be a three-step file-private chain
-    ([dispatch] -> [dispatch_structured] -> [guarded_dispatch]) into
-    one function so the lifecycle reads top-to-bottom:
+(** Single dispatch entry. The lifecycle is:
 
       1. injected span wrapper         (4-tuple emission; identity by default,
                                          [Tool_telemetry.with_span] at runtime)
       2. pre-hook chain                (reject / coerce-args)
       3. registry lookup + handler     (handler exception capture)
-      4. observer fan-out              ([run_dispatch_observers])
-
-    PR-11 already removed the three-step chain from the public mli.
-    PR-14 finishes the consolidation by removing the file-private
-    indirection — each step had exactly one caller, so the layering
-    was pure overhead. *)
+      4. observer fan-out              ([run_dispatch_observers]) *)
 let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result option =
+  let span_wrapper = with_dispatch_ro (fun () -> !span_wrapper_ref) in
   let result, _outcome =
     (* Injected telemetry span wrapper (default identity). The composition
        root registers [Tool_telemetry.with_span] so this lib stays free of
        the Otel/Otel_metric_store stack. *)
-    !span_wrapper_ref
+    span_wrapper
       ~tool_name:token.name
       ~surface:(surface_of_tool_name token.name)
       (fun _trace_id_thunk ->
@@ -208,10 +173,10 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result optio
         match run_pre_hooks ~name ~args with
         | (Some _ as blocked, _) -> blocked
         | (None, coerced_args) ->
-          (match Hashtbl.find_opt registry name with
+          (match with_dispatch_ro (fun () -> Hashtbl.find_opt registry name) with
            | Some handler ->
              let start_time = Time_compat.now () in
-             (try handler ~name ~args:coerced_args
+             (try Some (handler ~name ~args:coerced_args)
               with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn -> Some (Tool_result.make_err_of_exn ~tool_name:name ~start_time exn))
@@ -220,27 +185,19 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result optio
       (* Finalization is done inline because [Tool_dispatch] cannot depend on
          [Tool_dispatch_emit] without creating a dependency cycle.  Observers
          receive the exact handler result and cannot mutate it. *)
-      let typed_outcome : Dispatch_outcome.t =
-        match r with
-        | Some _ -> Handled
-        | None -> No_handler
-      in
+      let typed_outcome = Dispatch_outcome.of_result_option r in
       run_dispatch_observers typed_outcome r;
-      let outcome =
-        match r with
-        | Some _ -> "handled"
-        | None -> "no_handler"
-      in
-      r, outcome)
+      r, Dispatch_outcome.to_string typed_outcome)
   in
   result
 ;;
 
 (** Number of registered tool names. *)
-let registered_count () = Hashtbl.length registry
+let registered_count () = with_dispatch_ro (fun () -> Hashtbl.length registry)
 
 (** Check whether a tool name is registered. *)
-let is_registered name = Hashtbl.mem registry name
+let is_registered name =
+  with_dispatch_ro (fun () -> Hashtbl.mem registry name)
 
 (** {2 Module Tag Dispatch}
 
@@ -256,7 +213,7 @@ type module_tag = Tool_tag_types.module_tag =
   | Mod_run
   | Mod_compact
   | Mod_agent | Mod_task | Mod_state
-  | Mod_control | Mod_agent_timeline | Mod_schedule | Mod_misc
+  | Mod_control | Mod_agent_timeline | Mod_schedule | Mod_spawn | Mod_misc
   | Mod_library | Mod_external
   | Mod_inline
   | Mod_keeper_task
@@ -275,10 +232,6 @@ let register_module_tag ~(schemas : Masc_domain.tool_schema list) ~tag =
     List.iter (fun (s : Masc_domain.tool_schema) ->
       Hashtbl.replace tag_registry s.name tag;
       Hashtbl.replace schema_registry s.name s.input_schema) schemas)
-
-(** Register a single tool name with a tag (for modules without schema exports). *)
-let register_name_tag ~tool_name ~tag =
-  with_dispatch_rw (fun () -> Hashtbl.replace tag_registry tool_name tag)
 
 let lookup_tag name = with_dispatch_ro (fun () -> Hashtbl.find_opt tag_registry name)
 

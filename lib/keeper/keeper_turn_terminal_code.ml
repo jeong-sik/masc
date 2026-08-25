@@ -3,6 +3,13 @@
    See [.mli] for the public contract. This file holds the type
    definition and the wire-format serialisation. *)
 
+(* Typed observation derived where the original agent-core error is still
+   in hand, carried alongside the verbatim wire (RFC-0371 §6.1(3)). [None]
+   on values rehydrated from persisted wire strings — their consumers keep
+   the string parse as the persistence-boundary fallback. *)
+type agent_core_timeout =
+  { phase : Llm_provider.Http_client.timeout_phase option }
+
 type t =
   | Healthy
   | Stale_termination_storm
@@ -13,7 +20,10 @@ type t =
   | Turn_overflow_failure
   | Operator_interrupt
   | Exception_unhandled of string
-  | Sdk_error of string
+  | Agent_core_error of
+      { wire : string
+      ; timeout : agent_core_timeout option
+      }
 
 let to_wire = function
   | Healthy -> "healthy"
@@ -25,7 +35,7 @@ let to_wire = function
   | Turn_overflow_failure -> "turn_overflow_failure"
   | Operator_interrupt -> "operator_interrupt"
   | Exception_unhandled _ -> "exception"
-  | Sdk_error wire -> wire
+  | Agent_core_error { wire; _ } -> wire
 ;;
 
 let of_wire_exact = function
@@ -39,4 +49,5 @@ let of_wire_exact = function
   | _ -> None
 ;;
 
-let of_sdk_error_wire wire = Sdk_error wire
+let of_core_error_wire wire = Agent_core_error { wire; timeout = None }
+let of_core_error ~wire ~timeout = Agent_core_error { wire; timeout }

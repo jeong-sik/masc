@@ -1,3 +1,8 @@
+---
+rfc: "memory-os-bounded-context-and-librarian-curator"
+status: Draft
+---
+
 # RFC: Memory OS 2.0 — bounded working set 전송 계약과 librarian curator 계약
 
 - Status: Draft
@@ -21,7 +26,7 @@ transition-audit 원장(`.masc/transition-audit/2026-07/31.jsonl`) 실측:
 - **P-1 전송 계약 부재.** 히스토리 전체를 매 턴 전송한다. 크기에 상한 계약이 없으므로 overflow는 사고가 아니라 이 설계의 도달점이다. 현행 완화책은 request-body cap(초과 시 거절)과 컴팩션(LLM 요약)뿐이다.
 - **P-2 탈출구가 탈출 대상과 같은 자원을 요구.** 컴팩션은 LLM 호출이고, 그 호출이 필요로 하는 컨텍스트·쿼터가 바로 고갈된 자원이다. 5슬롯 rotation 전멸이 그 구조의 실측이다.
 - **P-3 침묵 망각.** librarian 계약(`lib/keeper/keeper_librarian.ml`)은 `retained_memory_ids` + `new_claims`이며, 템플릿이 명문화하듯 "Any current memory ID you omit is forgotten immediately". 생략이 삭제 연산이라 의도적 망각과 모델 태만을 구분할 수 없고, lineage와 사유가 남지 않는다. 빈 retain 한 번이면 전 기억이 소실되고 복구 경로가 없다.
-- **P-4 persona-blind.** librarian 프롬프트 변수는 `current_memory`, `conversation_history` 둘뿐이다(`keeper_librarian.ml:121-125`). 시스템 템플릿은 변수 0개의 범용 한 줄이다. "이 persona에게 무엇이 중요한가"를 판단할 재료가 입력에 없다.
+- **P-4 keeper-blind.** librarian 프롬프트 변수는 `current_memory`, `conversation_history` 둘뿐이다(`keeper_librarian.ml:121-125`). 시스템 템플릿은 변수 0개의 범용 한 줄이다. "이 keeper에게 무엇이 중요한가"를 판단할 재료가 입력에 없다.
 - **P-5 뭉치기(consolidation) 부재.** 현행 템플릿 규칙 "Never recreate an omitted existing fact as a new claim merely to reword it"이 병합·응축을 사실상 금지한다. `keeper.librarian.memory_consolidation.md`, `keeper.librarian.episode_extraction.md` 템플릿은 코드 참조 0의 화석이다(Memory Bank 제거 잔재).
 - **P-6 저널 부재.** `keeper_memory_os_current.ml`이 매 커밋 `change`(added/removed/retained)를 계산해 snapshot에 쓰지만 다음 revision이 덮어쓴다. 이전 상태와 변경 사유는 파괴된다(per-keeper 디렉토리 실측 empty).
 - 감사 P1-1(coalesce로 의미 있는 turn 유실 가능)은 P-3과 결합해 침묵 손실을 키운다.
@@ -37,7 +42,7 @@ transition-audit 원장(`.masc/transition-audit/2026-07/31.jsonl`) 실측:
 
 | 층 | 내용 | 계약 |
 |---|---|---|
-| Working set (전송) | system + persona + facts + 최근 K턴 원문 | 매 턴 payload는 이 조합으로만 구성. 크기가 구성상 유계 |
+| Working set (전송) | system + keeper + facts + 최근 K턴 원문 | 매 턴 payload는 이 조합으로만 구성. 크기가 구성상 유계 |
 | Archive (보존) | append-only turn 로그 (tool_use/tool_result 원문 포함) | 절대 전체 전송하지 않음. 재작성 금지. 조회는 도구로 |
 | Knowledge (지식) | memory-current facts | librarian이 소유, CAS 커밋 (현행 유지) |
 
@@ -55,7 +60,7 @@ transition-audit 원장(`.masc/transition-audit/2026-07/31.jsonl`) 실측:
 
 ### 3.3 Librarian curator 계약
 
-librarian의 정의는 한 줄이다: **persona와 최근 N턴 맥락을 보고, keeper 대신 일기를 써주는 존재.** 무엇이 중요했는지를 문장으로 판단하고 문장으로 남긴다 — 숫자 기준의 수집기가 아니라 기억의 정리자다. 표현력과 서술이 저장 형식이다.
+librarian의 정의는 한 줄이다: **keeper와 최근 N턴 맥락을 보고, keeper 대신 일기를 써주는 존재.** 무엇이 중요했는지를 문장으로 판단하고 문장으로 남긴다 — 숫자 기준의 수집기가 아니라 기억의 정리자다. 표현력과 서술이 저장 형식이다.
 
 현행 계약을 교체하지 않고 **완성**한다. 순수 diff는 둘뿐이다: `dropped`의 reason 필드, 그리고 총체성 검증.
 
@@ -71,9 +76,9 @@ librarian의 정의는 한 줄이다: **persona와 최근 N턴 맥락을 보고,
 - 현행 "reword 금지" 규칙은 "drop+add 쌍 밖에서의 재작성 금지"로 개정한다.
 - 커밋 실패 비용: CAS no-commit 후 다음 cadence(3 meaningful 턴)에 재시도 — 데이터 손실이 아니라 1사이클 지연이다. 스키마가 현행과 거의 동형이므로 로컬 소형 모델의 준수율 리스크도 현행 수준이다.
 
-### 3.4 Persona 주입
+### 3.4 Keeper 주입
 
-librarian 입력에 keeper persona(keeper toml SSOT)를 변수로 추가한다. 중요도·응축·망각 판단을 "이 persona에게"로 조건화한다. 주의: live 템플릿은 `.masc/config/prompts/`의 런타임 오버라이드다 — repo 템플릿만 고치면 라이브 동작이 바뀌지 않는다(SSOT 이원화 확인 필요).
+librarian 입력에 Keeper instructions를 변수로 추가한다. 중요도·응축·망각 판단을 "이 keeper에게"로 조건화한다. 주의: live 템플릿은 `.masc/config/prompts/`의 런타임 오버라이드다 — repo 템플릿만 고치면 라이브 동작이 바뀌지 않는다(SSOT 이원화 확인 필요).
 
 ### 3.5 Memory journal — 기억의 실록
 
@@ -106,7 +111,7 @@ working set이 "구성상 유계"이려면 모든 항이 유계여야 한다. K�
 | 제거되는 흐름 | 추가되는 것 |
 |---|---|
 | 컴팩션 요약 루프 (807 실패/일을 만든 그 흐름) | journal — append-only 관측 파일 1 (제어 흐름 소비자 없음) |
-| request-body cap 거절 루프 (§4.6 재평가) | persona — 프롬프트 변수 1 |
+| request-body cap 거절 루프 (§4.6 재평가) | keeper — 프롬프트 변수 1 |
 | 빈-retain 침묵 전멸 경로 | `dropped.reason` 필드 1 + 총체성 검증 1 |
 | 화석 템플릿 2종 | (없음) |
 
@@ -115,10 +120,10 @@ working set이 "구성상 유계"이려면 모든 항이 유계여야 한다. K�
 ## 4. 이행 단계
 
 1. **PR-A** journal (§3.5) — 계약 불변, `change` 영속화만. 소규모.
-2. **PR-B** persona 변수 주입 (§3.4) — 계약 불변, 템플릿+변수.
+2. **PR-B** keeper 변수 주입 (§3.4) — 계약 불변, 템플릿+변수.
 3. **PR-C** exact 실패 타이핑 + compaction terminal phase (§3.6 이행기, #26533과 정합).
 4. curator ops 계약 교체 (§3.3) — 스키마·파서·검증·템플릿. 하네스로 준수율 측정 동반.
-5. 전송 계약 (§3.1) — K/M 결정(선행 측정: OAS checkpoint JSON에서 tool result 비중 실측), elision, archive 조회 도구.
+5. 전송 계약 (§3.1) — K/M 결정(선행 측정: agent_core checkpoint JSON에서 tool result 비중 실측), elision, archive 조회 도구.
 6. 숙청 — compaction_exact lane, 화석 템플릿 2종(`memory_consolidation`, `episode_extraction`), request-body cap 재평가(§3.1이 상한을 구성으로 보장하면 거절 cap은 중복 gate).
 
 ## 5. 비제안
@@ -156,7 +161,7 @@ working set이 "구성상 유계"이려면 모든 항이 유계여야 한다. K�
 | AGM belief revision, Levi identity (1985) | revision = contraction ∘ expansion | "교정 = drop + add"의 이론적 근거 — 최소 연산 집합이 원리적으로 완비 |
 | HippoRAG 1/2 (2024–25) | KG 해마 인덱스 + PPR 연상 검색, continual learning | §6 future scope(연관 recall)의 후보 기술. 수치 랭킹 내장이라 도입 시 §5 경계 논의 필수 |
 | OpenClaw (2025–26) | 기억=마크다운 파일: MEMORY.md(큐레이션 장기) + 일일 노트(일화), **오늘+어제만 로드**, 배경 "Dreaming" 응고화 | 3층 분리·시간형 K·librarian의 대규모 배포 선례. 코어에 vector DB·수치 스코어 없음 — 극단 심플 계보의 생존 증명 |
-| Hermes Agent (Nous, 2026-02) | profile별 fact 저장(SQLite FTS5 검색) + SOUL.md 정체성 문서 + 성공/실패 학습 | facts 저장 + 결정론 검색(FTS)의 선례. SOUL.md = persona 주입(§3.4)의 선례 |
+| Hermes Agent (Nous, 2026-02) | profile별 fact 저장(SQLite FTS5 검색) + SOUL.md 정체성 문서 + 성공/실패 학습 | facts 저장 + 결정론 검색(FTS)의 선례. SOUL.md = keeper 주입(§3.4)의 선례 |
 | 2025–26 서베이 계열 | "working memory는 검색 문제가 아니라 **context-budget 문제**"; 기억 lifecycle = formation/evolution/retrieval | R1·§3.7 예산과 일치. Ebbinghaus류 수치 망각 곡선은 불채택 |
 
 수렴 관찰: 일곱 독립 계보(MemGPT/Letta, Mem0, Generative Agents, CLS, AGM, OpenClaw, Hermes)가 — 2026년 최다 배포 에이전트 두 개를 포함해 — 같은 형태로 수렴한다: **유계 작업 기억 + 작은 큐레이션 기억 + append-only 원장 + 배경 판단자의 소수 연산 + 필요시 검색.** 본 RFC가 새로 발명하는 기제는 없다 — 이 수렴 형태를 masc에 이미 있는 파일들(checkpoint, memory-current, keeper toml)에 그대로 사상하며, 신규물은 journal 파일 하나다.

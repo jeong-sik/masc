@@ -8,9 +8,9 @@ module W = Multimodal.Workspace
 module A = Multimodal.Artifact
 module Aid = Shared_types.Artifact_id
 
-let workspace_getter : (unit -> W.t) ref = ref (fun () -> W.empty)
+let workspace_getter = Atomic.make (fun () -> W.empty)
 
-let bind_workspace_getter f = workspace_getter := f
+let bind_workspace_getter f = Atomic.set workspace_getter f
 
 (* Tier D3 — server-side filter helpers for /api/v1/multimodal/list.
 
@@ -86,7 +86,7 @@ let artifact_passes
   kind_ok && created_by_ok && q_ok
 
 let list_response ?kind_filter ?created_by_filter ?query () =
-  let ws = !workspace_getter () in
+  let ws = Atomic.get workspace_getter () in
   let arts = W.all ws in
   let json_arts = List.map A.any_to_json arts in
   let filtered =
@@ -108,7 +108,7 @@ let list_response ?kind_filter ?created_by_filter ?query () =
 let parse_id id_str = Aid.of_string id_str
 
 let artifact_response ~id_str =
-  let ws = !workspace_getter () in
+  let ws = Atomic.get workspace_getter () in
   match parse_id id_str with
   | Error e ->
       ( `Assoc
@@ -133,7 +133,7 @@ let aid_list_to_json lst =
   `List (List.map (fun a -> `String (Aid.to_string a)) lst)
 
 let provenance_response ~id_str =
-  let ws = !workspace_getter () in
+  let ws = Atomic.get workspace_getter () in
   match parse_id id_str with
   | Error e ->
       ( `Assoc

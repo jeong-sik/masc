@@ -1,14 +1,14 @@
 (** Tests for [handle_file_write] mode=patch.
 
     RFC-0006 Phase A.4 — string-replace edit mode added so the
-    Provider_a Code [Edit] cognate can be wired through OAS dual
+    Provider_a Code [Edit] cognate can be wired through AGENT_CORE dual
     registration. *)
 
 module Workspace = Masc.Workspace
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_tool_filesystem_runtime = Masc.Keeper_tool_filesystem_runtime
 module Keeper_registry = Masc.Keeper_registry
-module Keeper_tool_alias = Masc.Keeper_tool_alias
+module Keeper_tool_descriptor = Masc.Keeper_tool_descriptor
 module Keeper_types = Keeper_types
 module Keeper_alerting_path = Masc.Keeper_alerting_path
 module Fs_compat = Fs_compat
@@ -152,7 +152,7 @@ let public_fs_edit_call
       ~publication_recovery
       args
   =
-  let args = Keeper_tool_alias.translate_input ~public args in
+  let args = Keeper_tool_descriptor.translate_input ~public args in
   handle_file_write
     ~turn_sandbox_factory:None
     ~config

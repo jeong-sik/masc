@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Dashboard_tool_source_freshness -- source freshness metadata helpers. *)
 
 let numeric_ts_field fields name =
@@ -144,7 +127,7 @@ let metadata_fields ~source_name ~source_producer ~dashboard_surface
 let keeper_tool_call_io_fields ~dashboard_surface () =
   metadata_fields
     ~source_name:"tool_call_io"
-    ~source_producer:"keeper_hooks_oas|mcp_server_eio_call_tool"
+    ~source_producer:"keeper_hooks_agent_core|mcp_server_eio_call_tool"
     ~dashboard_surface
     ~freshness_slo_s:300.0
     ~durable_store:

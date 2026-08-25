@@ -50,7 +50,7 @@ let docker_failure_message_internal
       && String_util.contains_substring output "No such file or directory"
     then
       " hint=cwd_not_directory: create or repair the sandbox repo checkout first, \
-       then retry with cwd=repos/<repo>."
+       then retry with that directory as cwd."
     else ""
   in
   let mount_failure_context =

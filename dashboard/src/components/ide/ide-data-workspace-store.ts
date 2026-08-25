@@ -1,4 +1,4 @@
-import { signal, effect, untracked } from '@preact/signals'
+import { computed, signal, effect, untracked } from '@preact/signals'
 import {
   activeIdeFile,
   activeIdeFocus,
@@ -10,6 +10,7 @@ import {
   sameIdeWorkspaceIdentity,
   synchronizeIdeWorkspaceIdentity,
 } from './ide-state'
+import { publishLspScope } from './ide-lsp-client'
 import { activeKeeperName } from '../../keeper-state'
 import { route } from '../../router'
 import { selectedTask } from '../goals/task-detail-selection'
@@ -44,7 +45,6 @@ import {
 } from './file-tree-store'
 import {
   fetchIdeAnnotations,
-  ideScopeFromKeeperLane,
   type IdeAnnotation,
 } from '../../api/ide'
 import { registerIdeWorkspaceRefresh } from '../../sse-store'
@@ -235,51 +235,50 @@ export function retainCurrentWorkspaceFetchIssues(
   })
 }
 
-function isManagedMirrorRepository(repository: Repository): boolean {
-  const localPath = repository.local_path.replace(/\\/g, '/')
-  return localPath === `.masc/repos/${repository.id}`
-    || localPath.startsWith('.masc/repos/')
-    || localPath.includes('/.masc/repos/')
-}
-
-// Reviewer #13232: detect Windows drive-letter absolute paths
-// (e.g. "C:/Users/.../repo" or "D:\\projects\\repo") after
-// backslash normalization so workspace repos on Windows are not
-// classified as managed mirrors and dropped from IDE default
-// selection.  Posix absolute paths still match via the
-// leading-slash branch.
-const WINDOWS_DRIVE_LETTER_PREFIX = /^[A-Za-z]:\//
-function isWorkspaceRepository(repository: Repository): boolean {
-  const localPath = repository.local_path.replace(/\\/g, '/')
-  const isAbsolute =
-    localPath.startsWith('/') ||
-    WINDOWS_DRIVE_LETTER_PREFIX.test(localPath)
-  return isAbsolute && !localPath.includes('/.masc/')
-}
-
 /** Repo is not reachable — server reported it as missing or unknown. */
 const UNREACHABLE_WORKSPACE_SOURCES: ReadonlySet<string> = new Set([
   'repository_missing',
   'repository_unknown',
 ])
 
-export function selectPreferredIdeRepositoryId(
+// RFC-0378 §5.4: the viewer's explicit choice is the only selection
+// authority — nothing infers "the repo the human cares about" from path
+// shape. The choice persists per viewer; when neither the live selection
+// nor the persisted one is usable, the honest answer is no selection.
+const ACTIVE_REPOSITORY_STORAGE_KEY = 'masc.ide.activeRepositoryId'
+
+function readPersistedRepositoryId(): string | null {
+  if (typeof window === 'undefined' || window.localStorage === undefined) return null
+  try {
+    return window.localStorage.getItem(ACTIVE_REPOSITORY_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+function persistRepositoryId(repoId: string | null): void {
+  if (typeof window === 'undefined' || window.localStorage === undefined) return
+  try {
+    if (repoId) window.localStorage.setItem(ACTIVE_REPOSITORY_STORAGE_KEY, repoId)
+    else window.localStorage.removeItem(ACTIVE_REPOSITORY_STORAGE_KEY)
+  } catch {
+    // Viewer storage unavailable — the selection stays session-local.
+  }
+}
+
+export function resolveActiveIdeRepositoryId(
   repositories: ReadonlyArray<Repository>,
   current: string | null,
+  persisted: string | null,
   excludeIds?: ReadonlySet<string>,
 ): string | null {
-  if (current && !excludeIds?.has(current) && repositories.some(repository => repository.id === current)) {
-    return current
-  }
-
-  const candidates = excludeIds && excludeIds.size > 0
-    ? repositories.filter(r => !excludeIds.has(r.id))
-    : repositories
-
-  return candidates.find(isWorkspaceRepository)?.id
-    ?? candidates.find(repository => !isManagedMirrorRepository(repository))?.id
-    ?? candidates[0]?.id
-    ?? null
+  const usable = (id: string | null): id is string =>
+    id !== null
+    && !excludeIds?.has(id)
+    && repositories.some(repository => repository.id === id)
+  if (usable(current)) return current
+  if (usable(persisted)) return persisted
+  return null
 }
 
 export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
@@ -296,6 +295,14 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   const workspaceBasePathSignal = signal<string | null>(null)
   const repositoriesSignal = signal<ReadonlyArray<Repository>>([])
   const activeRepositoryIdSignal = signal<string | null>(null)
+  // Repository list refreshes may mint or correct a codebase without changing
+  // the selected repo id. Depend on the selected slug itself so only that
+  // identity change re-runs observation fetches; unrelated catalog refreshes
+  // remain inert.
+  const selectedCodebaseSignal = computed(() => {
+    const repoId = activeRepositoryIdSignal.value
+    return repositoriesSignal.value.find(repository => repository.id === repoId)?.codebase ?? null
+  })
   const annotationsSignal = signal<ReadonlyArray<IdeAnnotation>>([])
   const currentWorkspaceIssues = (): ReadonlyArray<WorkspaceFetchIssue> =>
     workspaceIssuesSignal.peek()
@@ -351,7 +358,12 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   const applyRepositories = (repositories: ReadonlyArray<Repository>): void => {
     const current = activeRepositoryIdSignal.value
     repositoriesSignal.value = repositories
-    activeRepositoryIdSignal.value = selectPreferredIdeRepositoryId(repositories, current, unreachableRepoIds)
+    activeRepositoryIdSignal.value = resolveActiveIdeRepositoryId(
+      repositories,
+      current,
+      readPersistedRepositoryId(),
+      unreachableRepoIds,
+    )
   }
 
   const refreshRepositories = async (): Promise<ReadonlyArray<Repository>> => {
@@ -402,7 +414,8 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     const keeper = activeKeeperName.value
     const repoId = activeRepositoryIdSignal.value
     const task = selectedTask.value
-    const workspaceIdentity = ideWorkspaceIdentityForSelection(repoId, keeper)
+    const selectedCodebase = selectedCodebaseSignal.value
+    const workspaceIdentity = ideWorkspaceIdentityForSelection(repoId, keeper, selectedCodebase)
     const workspaceIdentityChanged = !sameIdeWorkspaceIdentity(
       activeIdeWorkspaceIdentity.peek(),
       workspaceIdentity,
@@ -461,17 +474,12 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
 
     const keeperParam = keeper || undefined
     const opts = { keeper: keeperParam, repoId, signal, includeDiff: true }
-    // IDE observation routes require one explicit scope. Repository scope is
-    // authoritative when configured; otherwise a selected keeper can read its
-    // own orphan observation lane without fabricating a repository identity.
-    const ideOpts = repoId
-      ? { keeper: keeperParam, repoId, signal }
-      : {
-          keeper: keeperParam,
-          repoId,
-          scope: ideScopeFromKeeperLane(keeperParam),
-          signal,
-        }
+    const codebase = selectedCodebase
+    // IDE observations have one address: the server-issued codebase slug.
+    // A keeper-only workspace still loads its tree, but does not invent an
+    // observation store when no repository is selected.
+    const ideOpts = { keeper: keeperParam, codebase, signal }
+    publishLspScope({ repoId: repoId ?? null, codebase, keeper: keeperParam ?? null })
     workspaceIssuesSignal.value = retainCurrentWorkspaceFetchIssues(currentWorkspaceIssues(), {
       filePath: requestedFilePath,
       keeper: keeperParam ?? null,
@@ -497,16 +505,23 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       workspaceSourceSignal.value = source
       workspaceBasePathSignal.value = basePath
 
-      // Self-healing: if the selected repo is unreachable (missing .git,
-      // path does not exist, etc.), exclude it and auto-switch to the next
-      // preferred repo so the IDE does not land on a blank screen.
+      // Self-healing without guessing (RFC-0378 §5.4): when the selected
+      // repo is unreachable, fall back to the persisted choice if it is
+      // still usable — otherwise clear the selection. The empty state is
+      // the honest answer; auto-switching to "the next preferred repo"
+      // was the path-shape heuristic this store no longer has.
       if (repoId && UNREACHABLE_WORKSPACE_SOURCES.has(source.kind)) {
         unreachableRepoIds.add(repoId)
-        const repos = repositoriesSignal.value
-        const nextId = selectPreferredIdeRepositoryId(repos, null, unreachableRepoIds)
-        if (nextId && nextId !== repoId) {
+        const nextId = resolveActiveIdeRepositoryId(
+          repositoriesSignal.value,
+          null,
+          readPersistedRepositoryId(),
+          unreachableRepoIds,
+        )
+        if (nextId !== repoId) {
+          persistRepositoryId(nextId)
           activeRepositoryIdSignal.value = nextId
-          return  // effect will re-fire with the new repoId
+          return  // effect will re-fire with the new selection (or none)
         }
       }
 
@@ -671,31 +686,35 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
         // the region read only after that load has committed; doing both in
         // parallel let a slower file response mark a valid region response as
         // stale before it could populate the ownership projection.
-        documentStore.loadRegions(filePath, ideOpts).then(() => {
-          if (signal.aborted || documentStore.document().file_path !== filePath) return
-          for (const region of documentStore.regions()) {
-            ownershipStore.ingest({
-              file_path: region.file_path,
-              line_start: region.line_start,
-              line_end: region.line_end,
-              keeper_id: region.keeper_id,
-              timestamp_ms: region.timestamp_ms,
-              // Regions prove that a keeper operated on this code range, but the
-              // wire contract deliberately does not infer a more specific edit
-              // operation such as create/refactor/revert.
-              kind: 'observed',
+        if (codebase) {
+          documentStore.loadRegions(filePath, ideOpts).then(() => {
+            if (signal.aborted || documentStore.document().file_path !== filePath) return
+            for (const region of documentStore.regions()) {
+              ownershipStore.ingest({
+                file_path: region.file_path,
+                line_start: region.line_start,
+                line_end: region.line_end,
+                keeper_id: region.keeper_id,
+                timestamp_ms: region.timestamp_ms,
+                // Regions prove that a keeper operated on this code range, but the
+                // wire contract deliberately does not infer a more specific edit
+                // operation such as create/refactor/revert.
+                kind: 'observed',
+              })
+            }
+            clearIssue('regions', { filePath, keeper: keeperParam ?? null, repoId })
+          }).catch(error => {
+            if (signal.aborted) return
+            recordIssue('regions', error, {
+              filePath,
+              keeper: keeperParam ?? null,
+              repoId,
+              fallbackMessage: 'IDE regions fetch failed',
             })
-          }
-          clearIssue('regions', { filePath, keeper: keeperParam ?? null, repoId })
-        }).catch(error => {
-          if (signal.aborted) return
-          recordIssue('regions', error, {
-            filePath,
-            keeper: keeperParam ?? null,
-            repoId,
-            fallbackMessage: 'IDE regions fetch failed',
           })
-        })
+        } else {
+          clearIssue('regions', { filePath, keeper: keeperParam ?? null, repoId })
+        }
       } else {
         documentStore.invalidate()
         const currentFocus = activeIdeFocus.peek()
@@ -790,20 +809,27 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       diffRowsSignal.value = []
     }
 
-    // Load annotations
-    fetchIdeAnnotations({ file_path: filePath, goal_id: task?.goal_id ?? undefined, task_id: task?.id ?? undefined }, ideOpts).then(annotations => {
-      if (signal.aborted) return
-      clearIssue('annotations', { filePath, keeper: keeperParam ?? null, repoId })
-      annotationsSignal.value = annotations
-    }).catch(error => {
-      if (signal.aborted) return
-      recordIssue('annotations', error, {
-        filePath,
-        keeper: keeperParam ?? null,
-        repoId,
-        fallbackMessage: 'IDE annotations fetch failed',
+    // Annotations are code facts. Without a server-issued codebase slug there
+    // is no store to query, so fail closed locally instead of issuing an
+    // unscoped request that the server must reject.
+    if (codebase) {
+      fetchIdeAnnotations({ file_path: filePath, goal_id: task?.goal_id ?? undefined, task_id: task?.id ?? undefined }, ideOpts).then(annotations => {
+        if (signal.aborted) return
+        clearIssue('annotations', { filePath, keeper: keeperParam ?? null, repoId })
+        annotationsSignal.value = annotations
+      }).catch(error => {
+        if (signal.aborted) return
+        recordIssue('annotations', error, {
+          filePath,
+          keeper: keeperParam ?? null,
+          repoId,
+          fallbackMessage: 'IDE annotations fetch failed',
+        })
       })
-    })
+    } else {
+      annotationsSignal.value = []
+      clearIssue('annotations', { filePath, keeper: keeperParam ?? null, repoId })
+    }
   }
 
   // Re-run fetches on navigation-signal changes. Reading the signals
@@ -843,6 +869,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     repositories: () => repositoriesSignal.value,
     activeRepositoryId: () => activeRepositoryIdSignal.value,
     setActiveRepositoryId: (repoId: string | null) => {
+      persistRepositoryId(repoId)
       activeRepositoryIdSignal.value = repoId
     },
     subscribeActiveRepositoryId: (listener: () => void) =>

@@ -22,7 +22,7 @@ let register_wake_target config keeper_name =
   with
   | Error msg -> fail ("keeper meta parse failed: " ^ msg)
   | Ok meta ->
-    (match Keeper_meta_store.write_meta config meta with
+    (match Keeper_meta_store.replace_snapshot config meta with
      | Ok () -> ()
      | Error detail -> fail ("keeper meta write failed: " ^ detail))
 ;;
@@ -83,16 +83,26 @@ let schedule_tool_name action =
   schema.name
 ;;
 
-let schedule_ctx config : Tool_schedule.context =
+let schedule_ctx ?continuation_channel config : Tool_schedule.context =
   { config
   ; agent_name = "scheduler-agent"
+  ; stamp_keeper_wake_result_delivery =
+      (fun ~payload ->
+         Schedule_payload_projection.set_keeper_wake_result_delivery
+           ~payload
+           ~channel:continuation_channel)
   ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
   }
 ;;
 
-let dispatch_exn config action args =
+let dispatch_exn ?continuation_channel config action args =
   let name = schedule_tool_name action in
-  match Tool_schedule.dispatch (schedule_ctx config) ~name ~args with
+  match
+    Tool_schedule.dispatch
+      (schedule_ctx ?continuation_channel config)
+      ~name
+      ~args
+  with
   | Some result -> result
   | None -> fail ("schedule dispatch returned None: " ^ name)
 ;;
@@ -133,6 +143,15 @@ let create_service_exn config ~schedule_id ~due_at ~payload ?recurrence () =
   with
   | Ok request -> request
   | Error err -> fail (Schedule_service.service_error_to_string err)
+;;
+
+(* [required] is absent when nothing is mandatory and a list otherwise, so
+   read both shapes into the one fact the callers below want. *)
+let required_names (schema : Yojson.Safe.t) =
+  let open Yojson.Safe.Util in
+  match schema |> member "required" with
+  | `Null -> []
+  | value -> value |> to_list |> List.map to_string
 ;;
 
 let test_flat_tool_surface () =
@@ -177,17 +196,20 @@ let test_flat_tool_surface () =
   let open Yojson.Safe.Util in
   check bool "create schema is closed" false
     (create_schema.input_schema |> member "additionalProperties" |> to_bool);
-  check int "create schema has no mandatory policy field" 0
-    (create_schema.input_schema |> member "required" |> to_list |> List.length);
+  (* Assert the fact -- which fields the schema makes mandatory -- rather than
+     the JSON shape it uses to say "none". The pre-TOML builder always emitted
+     [required] and defaulted it to [[]]; the TOML builder omits the key when
+     nothing is required. Both are legal JSON Schema and no reader in this
+     repo reads the key, so this test should not be the thing that decides
+     between them. It failed on the shape while the fact was unchanged. *)
+  check (list string) "create schema makes no field mandatory" []
+    (required_names create_schema.input_schema);
   let get_schema : Masc_domain.tool_schema =
     (schedule_definition Tool_schemas_schedule.Get_request).schema
   in
   check (list string) "get requires the durable schedule pointer"
     [ "schedule_id" ]
-    (get_schema.input_schema
-     |> member "required"
-     |> to_list
-     |> List.map to_string)
+    (required_names get_schema.input_schema)
 ;;
 
 let test_create_list_get_cancel () =
@@ -203,6 +225,13 @@ let test_create_list_get_cancel () =
     (Tool_result.data create |> member "status" |> to_string);
   check string "created payload support" "supported"
     (Tool_result.data create |> member "payload_support" |> to_string);
+  check string "no continuation stamps an explicit no-delivery policy" "none"
+    (Tool_result.data create
+     |> member "payload"
+     |> member "body"
+     |> member "result_delivery"
+     |> member "policy"
+     |> to_string);
   let list_result =
     dispatch_exn config Tool_schemas_schedule.List_requests
       (`Assoc [ "limit", `Int 10 ])
@@ -231,6 +260,91 @@ let test_create_list_get_cancel () =
      |> member "schedule"
      |> member "status"
      |> to_string)
+;;
+
+let test_creation_boundary_owns_result_delivery_destination () =
+  with_config
+  @@ fun config ->
+  let channel =
+    match Keeper_continuation_channel.dashboard ~thread_id:"dashboard-thread-42" with
+    | Ok channel -> channel
+    | Error detail -> fail detail
+  in
+  let forged_channel =
+    match Keeper_continuation_channel.dashboard ~thread_id:"forged-thread" with
+    | Ok channel -> channel
+    | Error detail -> fail detail
+  in
+  let payload =
+    `Assoc
+      [ "kind", `String Schedule_supported_kinds.keeper_wake
+      ; "schema_version", `Int 1
+      ; ( "body"
+        , `Assoc
+            [ "keeper_name", `String "schedule-keeper"
+            ; "message", `String "return the result to the invoking thread"
+            ; ( "result_delivery"
+              , `Assoc
+                  [ "policy", `String "reply_to_origin"
+                  ; "channel", Keeper_continuation_channel.to_yojson forged_channel
+                  ] )
+            ; "result_delivery", `Assoc [ "policy", `String "none" ]
+            ] )
+      ]
+  in
+  let result =
+    dispatch_exn
+      ~continuation_channel:channel
+      config
+      Tool_schemas_schedule.Create_request
+      (`Assoc
+        [ "schedule_id", `String "sched-owned-result-destination"
+        ; "due_at_unix", `Float 200.0
+        ; "payload", payload
+        ])
+  in
+  check bool "routed schedule creation succeeds" true
+    (Tool_result.is_success result);
+  let open Yojson.Safe.Util in
+  let stored_delivery =
+    Tool_result.data result
+    |> member "payload"
+    |> member "body"
+    |> member "result_delivery"
+  in
+  check string "creation boundary selects reply-to-origin" "reply_to_origin"
+    (stored_delivery |> member "policy" |> to_string);
+  check bool "exact invoking route is persisted" true
+    (Yojson.Safe.equal
+       (stored_delivery |> member "channel")
+       (Keeper_continuation_channel.to_yojson channel));
+  let stored_body_fields =
+    Tool_result.data result
+    |> member "payload"
+    |> member "body"
+    |> to_assoc
+  in
+  check int "forged duplicate delivery fields are replaced once" 1
+    (List.fold_left
+       (fun count (name, _) ->
+          if String.equal name "result_delivery" then count + 1 else count)
+       0
+       stored_body_fields);
+  let request =
+    match
+      Schedule_store.get_schedule
+        config
+        ~schedule_id:"sched-owned-result-destination"
+    with
+    | Some request -> request
+    | None -> fail "routed schedule was not persisted"
+  in
+  (match Schedule_payload_projection.result_delivery request with
+   | Ok (Some persisted) ->
+     check bool "typed projection preserves exact route" true
+       (Keeper_continuation_channel.same_route channel persisted)
+   | Ok None -> fail "routed schedule lost its result destination"
+   | Error detail -> fail detail)
 ;;
 
 let test_get_recurring_schedule_after_accept_advance () =
@@ -428,6 +542,60 @@ let test_unknown_payload_is_rejected_before_persistence () =
   check (float 0.001) "unsupported metric increments" (before +. 1.0) after
 ;;
 
+(* The body used to take anything: an unknown key was persisted at creation
+   and then dropped by the consumer, which is how a live schedule ended up
+   carrying a channel_id no dispatch ever saw (#25689). *)
+let test_unknown_body_field_is_rejected_before_persistence () =
+  with_config
+  @@ fun config ->
+  let result =
+    dispatch_exn config Tool_schemas_schedule.Create_request
+      (`Assoc
+        [ "schedule_id", `String "sched-unknown-body-field"
+        ; "due_at_unix", `Float 200.0
+        ; "payload_kind", `String "masc.keeper_wake"
+        ; ( "payload_body"
+          , `Assoc
+              [ "keeper_name", `String "alpha"
+              ; "message", `String "wake up"
+              ; "channel_id", `String "C123"
+              ] )
+        ; "requested_by_id", `String "operator"
+        ; "scheduled_by_id", `String "scheduler-agent"
+        ])
+  in
+  check bool "unknown body field rejected" false (Tool_result.is_success result);
+  check bool "the error names the field" true
+    (String_util.contains_substring (Tool_result.message result) "channel_id");
+  check int "nothing persisted" 0
+    (List.length (Schedule_store.read_state config).schedules)
+;;
+
+let test_known_body_fields_still_create () =
+  with_config
+  @@ fun config ->
+  let result =
+    dispatch_exn config Tool_schemas_schedule.Create_request
+      (`Assoc
+        [ "schedule_id", `String "sched-known-body-fields"
+        ; "due_at_unix", `Float 200.0
+        ; "payload_kind", `String "masc.keeper_wake"
+        ; ( "payload_body"
+          , `Assoc
+              [ "keeper_name", `String "alpha"
+              ; "message", `String "wake up"
+              ; "title", `String "a title"
+              ; "urgency", `String "normal"
+              ] )
+        ; "requested_by_id", `String "operator"
+        ; "scheduled_by_id", `String "scheduler-agent"
+        ; "allow_unregistered_keeper", `Bool true
+        ])
+  in
+  check bool "every declared field is accepted" true
+    (Tool_result.is_success result)
+;;
+
 let test_payload_contracts_are_schema_only () =
   let contracts =
     Schedule_payload_projection.supported_contracts_to_yojson ()
@@ -520,7 +688,7 @@ let test_due_signal_and_dashboard_projection () =
      check string "persisted signal request" signal.schedule_id persisted.schedule_id
    | Error detail -> failf "persisted wake signal did not decode: %s" detail);
   let dashboard =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
   in
   let open Yojson.Safe.Util in
   check string "dashboard status" "ok" (dashboard |> member "status" |> to_string);
@@ -574,6 +742,11 @@ let test_keeper_wake_target_validation_is_inside_creation_fence () =
   let ctx : Tool_schedule.context =
     { config
     ; agent_name = "scheduler-agent"
+    ; stamp_keeper_wake_result_delivery =
+        (fun ~payload ->
+           Schedule_payload_projection.set_keeper_wake_result_delivery
+             ~payload
+             ~channel:None)
     ; admit_keeper_wake_creation
     }
   in
@@ -605,22 +778,22 @@ let test_keeper_wake_creation_respects_shutdown_fence () =
   let base_path = config.Workspace.base_path in
   let operation_id = Keeper_shutdown_types.Operation_id.generate () in
   (match
-     Keeper_turn_admission.begin_shutdown
+     Keeper_shutdown_intake_fence.begin_shutdown
        ~base_path
        ~keeper_name
        ~operation_id
    with
-   | Keeper_turn_admission.Shutdown_reserved _ -> ()
-   | Keeper_turn_admission.Shutdown_already_reserved _ ->
+   | Keeper_shutdown_intake_fence.Reserved _ -> ()
+   | Keeper_shutdown_intake_fence.Already_reserved _ ->
      fail "fresh shutdown fence was already reserved");
   Fun.protect
     ~finally:(fun () ->
       ignore
-        (Keeper_turn_admission.rollback_shutdown
+        (Keeper_shutdown_intake_fence.rollback_shutdown
            ~base_path
            ~keeper_name
            ~operation_id
-         : Keeper_turn_admission.rollback_shutdown_result))
+         : Keeper_shutdown_intake_fence.rollback_result))
     (fun () ->
        let result =
          dispatch_exn config Tool_schemas_schedule.Create_request
@@ -641,11 +814,95 @@ let test_keeper_wake_creation_respects_shutdown_fence () =
          (List.length (Schedule_store.read_state config).schedules))
 ;;
 
+(* A schedule-ledger read failure must reach the operator as "we could not
+   read it", never as zero schedules. The projection reports it as a typed
+   fact: status unknown, every count null, and the reason carried alongside. *)
+let test_projection_reports_read_failure_as_unknown () =
+  with_config
+  @@ fun config ->
+  Workspace_core.write_text
+    config
+    (Filename.concat (Workspace_utils.masc_dir config) "schedules.json")
+    "{not-json";
+  let dashboard =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
+  in
+  let open Yojson.Safe.Util in
+  check string "status is unknown" "unknown"
+    (dashboard |> member "status" |> to_string);
+  check bool "store is not claimed as known" false
+    (dashboard |> member "schedule_store_known" |> to_bool);
+  check bool "read error is reported" true
+    (String_util.contains_substring
+       (dashboard |> member "schedule_store_read_error" |> to_string)
+       "schedule store read failed");
+  check bool "counts stay null rather than zero" true
+    (dashboard |> member "counts" = `Null);
+  check bool "request_count stays null rather than zero" true
+    (dashboard |> member "request_count" = `Null);
+  check bool "fsm active_count stays null rather than zero" true
+    (dashboard |> member "fsm" |> member "active_count" = `Null)
+;;
+
+(* The projection used to ride along inside the tool inventory, so any surface
+   that needed schedule state pulled the whole tool registry. It now has its
+   own route and must not reappear as a nested field. *)
+let test_tools_response_no_longer_carries_the_projection () =
+  with_config
+  @@ fun config ->
+  let tools = Server_dashboard_http_runtime_info.dashboard_tools_http_json config in
+  let fields =
+    match tools with
+    | `Assoc fields -> List.map fst fields
+    | _ -> failf "tools projection is not an object"
+  in
+  check bool "scheduled_automation is not nested in tools" false
+    (List.mem "scheduled_automation" fields)
+;;
+
+let test_tool_response_carries_structured_recurrence () =
+  with_config
+  @@ fun config ->
+  (* The dashboard projection and the tool response describe the same
+     `schedule_request`. Sending only `recurrence_kind` here made the client
+     rebuild the structure from flattened strings, with an unknown-shape
+     fallback at the end of that chain. *)
+  let recurrence = Schedule_domain.Interval { interval_sec = 60 } in
+  let _request =
+    create_service_exn
+      config
+      ~schedule_id:"sched-structured-recurrence"
+      ~due_at:200.0
+      ~payload:(keeper_wake_payload "every minute")
+      ~recurrence
+      ()
+  in
+  let listed =
+    dispatch_exn config Tool_schemas_schedule.List_requests (`Assoc [])
+  in
+  let open Yojson.Safe.Util in
+  let entry =
+    Tool_result.data listed
+    |> member "schedules"
+    |> to_list
+    |> List.find (fun item ->
+      match item |> member "schedule_id" with
+      | `String id -> String.equal id "sched-structured-recurrence"
+      | _ -> false)
+  in
+  check bool "recurrence is present" true (entry |> member "recurrence" <> `Null);
+  check string "recurrence matches the domain serialiser"
+    (Yojson.Safe.to_string (Schedule_domain.recurrence_to_yojson recurrence))
+    (Yojson.Safe.to_string (entry |> member "recurrence"))
+;;
+
 let () =
   run "Schedule_tool_wiring"
     [ ( "wiring"
       , [ test_case "flat tool surface" `Quick test_flat_tool_surface
         ; test_case "create list get cancel" `Quick test_create_list_get_cancel
+        ; test_case "creation boundary owns result delivery destination" `Quick
+            test_creation_boundary_owns_result_delivery_destination
         ; test_case "get recurring schedule after accept advance" `Quick
             test_get_recurring_schedule_after_accept_advance
         ; test_case "create accepts explicit ISO-8601 offset" `Quick
@@ -656,6 +913,10 @@ let () =
             test_unregistered_wake_target_rejected
         ; test_case "unknown payload rejected before persistence" `Quick
             test_unknown_payload_is_rejected_before_persistence
+        ; test_case "unknown body field rejected before persistence" `Quick
+            test_unknown_body_field_is_rejected_before_persistence
+        ; test_case "every declared body field still creates" `Quick
+            test_known_body_fields_still_create
         ; test_case "payload contracts are schema only" `Quick
             test_payload_contracts_are_schema_only
         ; test_case "keeper wake schema validation" `Quick
@@ -664,10 +925,16 @@ let () =
             test_due_signal_and_dashboard_projection
         ; test_case "schedule store error is explicit" `Quick
             test_schedule_store_error_is_explicit
+        ; test_case "projection reports read failure as unknown" `Quick
+            test_projection_reports_read_failure_as_unknown
+        ; test_case "tools response no longer carries the projection" `Quick
+            test_tools_response_no_longer_carries_the_projection
         ; test_case "Keeper wake target validation is fenced" `Quick
             test_keeper_wake_target_validation_is_inside_creation_fence
         ; test_case "Keeper wake creation respects shutdown fence" `Quick
             test_keeper_wake_creation_respects_shutdown_fence
+        ; test_case "tool response carries structured recurrence" `Quick
+            test_tool_response_carries_structured_recurrence
         ] )
     ]
 ;;

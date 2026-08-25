@@ -12,7 +12,7 @@ import { journal } from '../../sse'
 import { isErrorJournalEntry } from '../../journal-entry'
 import type { JournalEntry, JournalEventType } from '../../types'
 
-type FilterKind = 'all' | 'heartbeat' | 'message' | 'oas_turn' | 'tool' | 'error' | 'lifecycle'
+type FilterKind = 'all' | 'heartbeat' | 'message' | 'agent_core_turn' | 'tool' | 'error' | 'lifecycle'
 
 const activeFilter = signal<FilterKind>('all')
 const autoScroll = signal(true)
@@ -21,7 +21,7 @@ const FILTER_CHIPS: { key: FilterKind; label: string }[] = [
   { key: 'all', label: '전체' },
   { key: 'heartbeat', label: '하트비트' },
   { key: 'message', label: '메시지/보드' },
-  { key: 'oas_turn', label: 'OAS 턴' },
+  { key: 'agent_core_turn', label: 'Agent Core 턴' },
   { key: 'tool', label: '도구' },
   { key: 'error', label: '오류' },
   { key: 'lifecycle', label: '라이프사이클' },
@@ -37,14 +37,14 @@ function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boolean {
       return et === 'keeper_heartbeat'
     case 'message':
       return et === 'broadcast' || et === 'board_post' || et === 'board_comment'
-    case 'oas_turn':
-      return et === 'oas_turn'
+    case 'agent_core_turn':
+      return et === 'agent_core_turn'
     case 'tool':
-      return et === 'keeper_tool_call' || et === 'oas_tool'
+      return et === 'keeper_tool_call' || et === 'agent_core_tool'
     case 'error':
-      return et === 'keeper_guardrail' || isErrorJournalEntry(entry)
+      return isErrorJournalEntry(entry)
     case 'lifecycle':
-      return et === 'agent_bound' || et === 'agent_unbound' || et === 'keeper_handoff' || et === 'keeper_compaction' || et === 'keeper_phase_changed' || et === 'oas_context' || et === 'oas_event' || et === 'oas_task'
+      return et === 'keeper_handoff' || et === 'keeper_compaction' || et === 'keeper_phase_changed' || et === 'agent_core_context' || et === 'agent_core_event'
     default:
       return true
   }
@@ -56,28 +56,20 @@ function eventKindBadgeTone(entry: JournalEntry): EventBadgeTone {
   switch (eventType) {
     case 'keeper_heartbeat':
       return 'ok'
-    case 'oas_turn':
+    case 'agent_core_turn':
       return 'info'
-    case 'oas_tool':
+    case 'agent_core_tool':
       return 'warn'
-    case 'oas_context':
+    case 'agent_core_context':
       return 'neutral'
-    case 'oas_event':
-    case 'oas_task':
-      return 'info'
-    case 'agent_bound':
-    case 'agent_unbound':
+    case 'agent_core_event':
       return 'info'
     case 'keeper_handoff':
       return 'info'
     case 'keeper_compaction':
       return 'warn'
-    case 'keeper_guardrail':
-      return 'bad'
     case 'broadcast':
       return 'info'
-    case 'task_update':
-      return 'ok'
     case 'board_post':
     case 'board_comment':
       return 'info'
@@ -89,18 +81,13 @@ function eventKindBadgeTone(entry: JournalEntry): EventBadgeTone {
 function eventKindLabel(eventType: JournalEventType | undefined): string {
   switch (eventType) {
     case 'keeper_heartbeat': return 'HB'
-    case 'oas_turn': return 'TURN'
-    case 'oas_tool': return 'TOOL'
-    case 'oas_context': return 'CTX'
-    case 'oas_event': return 'OAS'
-    case 'oas_task': return 'TASK'
-    case 'agent_bound': return 'JOIN'
-    case 'agent_unbound': return 'LEFT'
+    case 'agent_core_turn': return 'TURN'
+    case 'agent_core_tool': return 'TOOL'
+    case 'agent_core_context': return 'CTX'
+    case 'agent_core_event': return 'Agent Core'
     case 'keeper_handoff': return 'HAND'
     case 'keeper_compaction': return 'COMP'
-    case 'keeper_guardrail': return 'GUARD'
     case 'broadcast': return 'CAST'
-    case 'task_update': return 'TASK'
     case 'board_post': return 'POST'
     case 'board_comment': return 'CMNT'
     case 'unknown': return 'SYS'

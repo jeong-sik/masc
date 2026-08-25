@@ -2,26 +2,77 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+type keeper_quiet_reason =
+  | Proactive_disabled
+  | Keepalive_not_running
+  | Starting_up
+  | Never_started
+
+val keeper_quiet_reason_to_string : keeper_quiet_reason -> string
+(** Wire form of the keeper diagnostic's [quiet_reason]. The dashboard's
+    [KeeperQuietReason] union must list exactly these strings; an unlisted one
+    is dropped when the diagnostic is normalised. *)
+
+type keeper_next_action_path =
+  | Auto_restart
+  | Recover
+  | Probe
+  | Direct_message
+
+val keeper_next_action_path_to_string : keeper_next_action_path -> string
+
+val keeper_next_action_path_of_string_opt :
+  string -> keeper_next_action_path option
+(** Strict inverse of {!keeper_next_action_path_to_string}.
+
+    [None] outside the published vocabulary: a reader that cannot spell an
+    action says so rather than resolving it to whichever action happens to be
+    first, which would paint an operator's screen for work that was never
+    asked for. *)
+(** Wire form of the keeper diagnostic's [next_action_path]. The dashboard's
+    [KeeperNextActionPath] union must list exactly these strings; an unlisted
+    one makes it reject the whole diagnostic. *)
+
 val active_model_of_meta : keeper_meta -> string
 val active_model_label_of_meta : keeper_meta -> string
 val string_of_fiber_health : fiber_health -> string
-(** Parse the "status" field of an agent-status snapshot blob (produced by
-    {!parse_agent_status}) into the closed [Masc_domain.agent_status] ADT.
-    An absent agent-registry record is represented by an empty object; the
-    snapshot has no separate existence flag.
-    Returns [None] when the field is absent or not one of the four canonical
-    lowercase labels, so callers classify the closed domain exhaustively
-    instead of comparing string literals. *)
-val agent_runtime_status_opt : Yojson.Safe.t -> Masc_domain.agent_status option
+val keeper_heartbeat_stale_after_s :
+  keepalive_interval_s:float -> snapshot_interval_s:float -> float
+(** Operator-facing Keeper freshness window. The persisted heartbeat producer
+    is bounded by both the cycle cadence and the snapshot cadence, so the
+    window follows the slower resolved cadence plus one minute of scheduling /
+    transport jitter. The ordinary-agent 120-second floor is preserved. *)
+val keeper_turn_record_freshness_slo_s : keepalive_interval_s:float -> float
+(** Turn-record freshness window.  A record is emitted after a Keeper cycle,
+    so the SLO covers the configured sleep cadence plus two minutes of cycle
+    execution/scheduling slack while preserving the historical 300-second
+    floor for short cadences. *)
+val keeper_turn_record_source_health :
+  skipped_rows:int ->
+  live_turn_in_progress:bool ->
+  latest_age_s:float option ->
+  freshness_slo_s:float ->
+  string * string
+(** Classify the turn-record source as one of ["ok"], ["live"], ["stale"],
+    ["empty"] or ["incompatible"], with the reason string that goes on the wire
+    ([""] for the two healthy ones).
 
-val agent_runtime_has_live_signal : Yojson.Safe.t -> bool
-val parse_agent_status : Workspace.config -> agent_name:string -> Yojson.Safe.t
-val keeper_reply_snapshot_of_history :
-  Yojson.Safe.t list -> Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t
-
+    ["live"] and ["ok"] are separate answers on purpose. A running turn has not
+    written its record yet, so the age of the newest finished one says nothing
+    about whether the store is keeping up; ["ok"] additionally asserts that age
+    is inside the SLO. Both used to report ["ok"], and the dashboard, which
+    recomputes the age to check the response against its contract, read a live
+    keeper's over-SLO age as a violation and dropped the whole payload
+    (#28720). Live-turn progress and stall diagnosis stay on the turn
+    observation surface. Incompatible stored rows remain fail-visible. *)
+val keeper_metric_producer_active : base_path:string -> bool
+(** [true] while a registered Keeper is inside a live turn, or while a failed
+    turn's lane is in its legitimate inter-cycle cadence sleep. These are the
+    two intervals in which the next metrics-ledger append is still owned by a
+    live producer even when the prior row exceeds its age-only SLO. *)
 val keeper_diagnostic_json :
+  config:Workspace.config ->
   meta:keeper_meta ->
-  agent_status:Yojson.Safe.t ->
   keepalive_running:bool ->
   history_items:Yojson.Safe.t list ->
   now_ts:float ->
@@ -34,32 +85,11 @@ val augment_keeper_diagnostic_json :
   Yojson.Safe.t ->
   Yojson.Safe.t
 
-val keeper_health_to_string : keeper_health -> string
-
-(** Strict parse: returns [None] when the wire string is not one of the
-    seven canonical keeper_health labels so drift is visible at the
-    call site. *)
-val keeper_health_of_string_opt : string -> keeper_health option
-
-val keeper_continuity_to_string : keeper_continuity -> string
-
-val keeper_health_state :
-  ?fiber_health:fiber_health ->
-  ?keepalive_interval_s:float ->
-  meta:keeper_meta ->
-  keepalive_running:bool ->
-  agent_status:Yojson.Safe.t ->
-  quiet_reason:string option ->
-  unit ->
-  keeper_health
-
-(** Keeper display status derived from (keeper_health x agent_status). Closed so
-    consumers that classify it match exhaustively. "paused" is an operator
-    override applied above this layer, not a member of this domain. *)
+(** Keeper display status derived from keeper health. Closed so consumers that
+    classify it match exhaustively. "paused" is an operator override applied
+    above this layer, not a member of this domain. *)
 type surface_status =
   | Surface_active
-  | Surface_busy
-  | Surface_listening
   | Surface_inactive
   | Surface_offline
   | Surface_idle
@@ -85,8 +115,24 @@ val control_plane_status_to_string : control_plane_status -> string
     stays a rejected parse rather than an accepted default. *)
 val control_plane_status_of_string_opt : string -> control_plane_status option
 
+val keeper_health_to_string : keeper_health -> string
+
+val keeper_health_of_string_opt : string -> keeper_health option
+(** Strict inverse of {!keeper_health_to_string}; [None] outside the published
+    vocabulary. Callers that must resolve a value anyway go through
+    {!keeper_diagnostic_health}, which falls to [KH_offline] with a warning. *)
+(** Wire spelling of a health reading. *)
+
+val keeper_diagnostic_health :
+  diagnostic:Yojson.Safe.t -> source:string -> keeper_health
+(** Health as the diagnostic reports it.
+
+    An unreadable [health_state] resolves to [KH_offline] with a warning, not
+    to a healthy-looking value: the reader could not tell, and a keeper that
+    cannot be read is not a keeper that is fine. [source] names the caller in
+    that warning. *)
+
 val keeper_surface_status :
-  agent_status:Yojson.Safe.t ->
   diagnostic:Yojson.Safe.t ->
   string
 
@@ -95,6 +141,6 @@ val keeper_surface_status :
 val pipeline_stage_of_phase : Keeper_state_machine.phase -> string
 
 (** Human/operator-facing explanation for the lossy [pipeline_stage] label.
-    For example, [Offline], [Stopped], and [Dead] all map to ["offline"],
-    but their detail strings remain distinct. *)
+    For example, [Offline] and [Stopped] both map to ["offline"], but their
+    detail strings remain distinct. *)
 val pipeline_stage_detail_of_phase : Keeper_state_machine.phase -> string

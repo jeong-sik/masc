@@ -4,4 +4,4 @@
 (test
  (name test_discord_rest_client)
  (modules test_discord_rest_client)
- (libraries alcotest yojson masc.gate))
+ (libraries alcotest yojson masc.gate masc.string_util))

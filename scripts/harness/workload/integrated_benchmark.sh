@@ -4,6 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
+# Keep the existing control benchmark as the zero-configuration path. The
+# collaboration phase performs live mutations and therefore requires callers
+# to opt in with their isolated runtime/credential environment already set.
 DEFAULT_PHASES="control"
 PHASES="${INTEGRATED_BENCH_PHASES:-$DEFAULT_PHASES}"
 OUTPUT_DIR="${INTEGRATED_BENCH_OUTPUT_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/masc-integrated-benchmark.XXXXXX")}"
@@ -23,6 +26,9 @@ require_tools() {
 
 phase_script() {
   case "$1" in
+    collaboration)
+      printf '%s\n' "$ROOT_DIR/scripts/harness/workload/keeper_multi_collaboration_acceptance.sh"
+      ;;
     control)
       printf '%s\n' "$ROOT_DIR/scripts/harness/workload/agent_swarm_live.sh"
       ;;

@@ -7,7 +7,6 @@ type runtime = {
   max_concurrency : int;
   active_slots : int;
   queue_depth : int;
-  latency_ema_ms : float option;
   failure_streak : int;
   cooldown_until : float option;
   last_error : string option;
@@ -23,7 +22,6 @@ type runtime_snapshot = {
   max_concurrency : int;
   active_slots : int;
   queue_depth : int;
-  latency_ema_ms : float option;
   failure_streak : int;
   cooldown_until : float option;
   last_error : string option;
@@ -37,21 +35,12 @@ type pool_state = {
   runtimes : runtime list;
   fingerprint : string;
   parse_errors : string list;
-  measured_ceiling : int option;
 }
 
 let default_pool_label = "local64"
 let default_parallel_hint = 12
 
 let wall_now () = Unix.gettimeofday ()
-
-let float_of_env_default name ~default =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some raw ->
-      match float_of_string_opt (String.trim raw) with
-      | Some value when value > 0.0 -> value
-      | _ -> default
 
 let cooldown_seconds () =
   match Env_config.Worker.local_runtime_cooldown_sec_opt () with
@@ -73,15 +62,14 @@ let empty_pool = {
   runtimes = [];
   fingerprint = "";
   parse_errors = [];
-  measured_ceiling = None;
 }
 
-let pool : pool_state ref = ref empty_pool
-let pool_mu = Eio.Mutex.create ()
+let pool : pool_state Atomic.t = Atomic.make empty_pool
+let pool_mu = Stdlib.Mutex.create ()
 
-let with_pool_lock f = Eio_guard.with_mutex pool_mu f
+let with_pool_lock f = Stdlib.Mutex.protect pool_mu f
 
-let reset () = with_pool_lock (fun () -> pool := empty_pool)
+let reset () = with_pool_lock (fun () -> Atomic.set pool empty_pool)
 
 let parse_int_opt raw =
   int_of_string_opt ((String.trim raw))
@@ -131,11 +119,10 @@ let runtime_of_discovery_status (status : Discovery_cache.endpoint_info) =
     max_concurrency = max_concurrency_of_discovery_status status;
     active_slots = 0;
     queue_depth = 0;
-    latency_ema_ms = None;
     failure_streak = if status.healthy then 0 else 1;
     cooldown_until = unavailable;
     last_error =
-      if status.healthy then None else Some "oas discovery marked endpoint unhealthy";
+      if status.healthy then None else Some "agent_core discovery marked endpoint unhealthy";
     total_started = 0;
     total_success = 0;
     total_failure = 0;
@@ -152,7 +139,6 @@ let runtime_of_endpoint_url base_url =
         ~default:default_parallel_hint;
     active_slots = 0;
     queue_depth = 0;
-    latency_ema_ms = None;
     failure_streak = 0;
     cooldown_until = None;
     last_error = None;
@@ -177,7 +163,6 @@ let runtime_to_snapshot (runtime : runtime) =
     max_concurrency = runtime.max_concurrency;
     active_slots = runtime.active_slots;
     queue_depth = runtime.queue_depth;
-    latency_ema_ms = runtime.latency_ema_ms;
     failure_streak = runtime.failure_streak;
     cooldown_until = runtime.cooldown_until;
     last_error = runtime.last_error;
@@ -194,42 +179,6 @@ let refresh_runtime_metrics (runtime : runtime) =
       { runtime with queue_depth; cooldown_until = None; failure_streak = 0 }
   | _ -> { runtime with queue_depth }
 
-let normalize_runtime_json json =
-  let base_url = Json_util.get_string json "base_url" |> trim_opt in
-  match base_url with
-  | None -> Error "runtime.base_url is required"
-  | Some base_url ->
-      let id =
-        Json_util.get_string json "id" |> trim_opt
-        |> Option.value ~default:(runtime_id_of_base_url base_url)
-      in
-      let model = Json_util.get_string json "model" |> trim_opt in
-      let max_concurrency =
-        match json |> Json_util.assoc_member_opt "max_concurrency" with
-        | Some (`Int value) -> max 1 value
-        | Some (`Intlit raw) -> (
-            match parse_int_opt raw with
-            | Some value -> max 1 value
-            | None -> default_parallel_hint)
-        | _ -> default_parallel_hint
-      in
-      Ok
-        {
-          id;
-          base_url;
-          model;
-          max_concurrency;
-          active_slots = 0;
-          queue_depth = 0;
-          latency_ema_ms = None;
-          failure_streak = 0;
-          cooldown_until = None;
-          last_error = None;
-          total_started = 0;
-          total_success = 0;
-          total_failure = 0;
-        }
-
 let default_runtime () =
   let base_url = Env_config.Local_runtime.server_url in
   {
@@ -240,7 +189,6 @@ let default_runtime () =
       int_of_env_default "LLAMA_SERVER_PARALLEL_HINT" ~default:default_parallel_hint;
     active_slots = 0;
     queue_depth = 0;
-    latency_ema_ms = None;
     failure_streak = 0;
     cooldown_until = None;
     last_error = None;
@@ -248,31 +196,6 @@ let default_runtime () =
     total_success = 0;
     total_failure = 0;
   }
-
-let runtime_from_endpoint base_url =
-  {
-    id = runtime_id_of_base_url base_url;
-    base_url;
-    model = trim_opt (Env_config.Local_runtime.worker_model_opt ());
-    max_concurrency =
-      int_of_env_default "LLAMA_SERVER_PARALLEL_HINT"
-        ~default:default_parallel_hint;
-    active_slots = 0;
-    queue_depth = 0;
-    latency_ema_ms = None;
-    failure_streak = 0;
-    cooldown_until = None;
-    last_error = None;
-    total_started = 0;
-    total_success = 0;
-    total_failure = 0;
-  }
-
-let parse_llm_endpoints raw =
-  raw
-  |> String.split_on_char ','
-  |> List.filter_map (fun item -> trim_opt (Some item))
-  |> List.map runtime_from_endpoint
 
 let current_fingerprint () =
   String.concat "||"
@@ -299,8 +222,8 @@ let load_runtimes_from_env () =
       if runtimes = [] then ([ default_runtime () ], []) else (runtimes, [])
 
 (* ensure_loaded: the only function that may yield (debug_log calls Log.LocalWorker.debug).
-   Yield happens AFTER the ref swap, so callers reading !pool after this
-   function returns see a consistent snapshot.
+   Yield happens AFTER the atomic swap, so later callers see a consistent
+   snapshot.
 
    The [load_runtimes_from_env] call and the fingerprint paired with it
    must be captured atomically: both functions read environment
@@ -315,7 +238,8 @@ let load_runtimes_from_env () =
 let ensure_loaded () =
   let fingerprint = current_fingerprint () in
   let needs_reload =
-    with_pool_lock (fun () -> not (String.equal fingerprint (!pool).fingerprint))
+    with_pool_lock (fun () ->
+      not (String.equal fingerprint (Atomic.get pool).fingerprint))
   in
   if needs_reload then begin
     let loaded, errors = load_runtimes_from_env () in
@@ -324,9 +248,10 @@ let ensure_loaded () =
       let refreshed = List.map refresh_runtime_metrics loaded in
       let reloaded =
         with_pool_lock (fun () ->
-          let state = !pool in
+          let state = Atomic.get pool in
           if not (String.equal fingerprint state.fingerprint) then begin
-            pool := { state with runtimes = refreshed; fingerprint; parse_errors = errors };
+            Atomic.set pool
+              { runtimes = refreshed; fingerprint; parse_errors = errors };
             true
           end else
             false)
@@ -342,56 +267,30 @@ let ensure_loaded () =
         fingerprint loaded_fingerprint
   end else begin
     with_pool_lock (fun () ->
-      let state = !pool in
+      let state = Atomic.get pool in
       let refreshed = List.map refresh_runtime_metrics state.runtimes in
-      pool := { state with runtimes = refreshed })
+      Atomic.set pool { state with runtimes = refreshed })
   end
 
 let parse_errors () =
   ensure_loaded ();
-  with_pool_lock (fun () -> (!pool).parse_errors)
+  with_pool_lock (fun () -> (Atomic.get pool).parse_errors)
 
 let snapshots () =
   ensure_loaded ();
-  with_pool_lock (fun () -> List.map runtime_to_snapshot (!pool).runtimes)
-
-let configured_capacity () =
-  snapshots ()
-  |> List.fold_left
-       (fun acc (runtime : runtime_snapshot) -> acc + runtime.max_concurrency)
-       0
-
-let healthy_runtime_count () =
-  snapshots ()
-  |> List.fold_left
-       (fun acc (runtime : runtime_snapshot) ->
-         match runtime.cooldown_until with
-         | Some until_ts when until_ts > Time_compat.now () -> acc
-         | _ -> acc + 1)
-       0
-
-let allocated_slots () =
-  snapshots ()
-  |> List.fold_left
-       (fun acc (runtime : runtime_snapshot) -> acc + runtime.active_slots)
-       0
-
-let measured_ceiling () = with_pool_lock (fun () -> (!pool).measured_ceiling)
-
-let record_measured_ceiling value =
   with_pool_lock (fun () ->
-    let state = !pool in
-    let bounded = max 0 value in
-    let new_ceiling =
-      match state.measured_ceiling with
-      | Some current -> Some (max current bounded)
-      | None -> Some bounded
-    in
-    pool := { state with measured_ceiling = new_ceiling })
+    List.map runtime_to_snapshot (Atomic.get pool).runtimes)
+
+module For_testing = struct
+  let install_pool runtimes =
+    let fingerprint = current_fingerprint () in
+    with_pool_lock (fun () ->
+      Atomic.set pool { empty_pool with runtimes; fingerprint })
+end
 
 (* [acquire] / [release] / [model_label_of_assignment] removed 2026-05-05 —
    zero production callers; see [docs/audit-responses/2026-05-05-dashboard-heuristic.md]
-   §7.1. If leasing semantics return, design at the OAS runtime layer per RFC-0026. *)
+   §7.1. If leasing semantics return, design at the AGENT_CORE runtime layer per RFC-0026. *)
 
 let snapshot_to_yojson (snapshot : runtime_snapshot) =
   `Assoc
@@ -402,7 +301,6 @@ let snapshot_to_yojson (snapshot : runtime_snapshot) =
       ("max_concurrency", `Int snapshot.max_concurrency);
       ("active_slots", `Int snapshot.active_slots);
       ("queue_depth", `Int snapshot.queue_depth);
-      ("latency_ema_ms", Json_util.float_opt_to_json snapshot.latency_ema_ms);
       ("failure_streak", `Int snapshot.failure_streak);
       ("cooldown_until", Json_util.float_opt_to_json snapshot.cooldown_until);
       ("last_error", Json_util.string_opt_to_json snapshot.last_error);

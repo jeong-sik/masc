@@ -86,13 +86,13 @@ describe('parseKeeperCompositeSnapshot', () => {
   })
 
   // Every phase string the backend can emit, per
-  // `Keeper_state_machine.phase_to_string` (13 ctors, lowercase
+  // `Keeper_state_machine.phase_to_string` (11 ctors, lowercase
   // snake_case). The schema must round-trip each one verbatim.
   it('round-trips every phase the backend can emit', () => {
     for (const phase of [
-      'offline', 'running', 'failing', 'overflowed', 'compacting',
+      'offline', 'running', 'failing', 'compacting',
       'handing_off', 'draining', 'paused', 'stopped', 'crashed',
-      'restarting', 'dead',
+      'restarting',
     ]) {
       const result = parseKeeperCompositeSnapshot({ ...VALID_SNAPSHOT, phase })
       expect(result.phase).toBe(phase)
@@ -281,14 +281,22 @@ describe('parseKeeperCompositeSnapshot', () => {
           outcome: 'exhausted',
           degraded_retry_applied: false,
           degraded_retry_runtime: null,
-          fallback_reason: 'turn_timeout',
+          fallback_reason: 'stale_turn_timeout',
+        },
+        claim_attempt: {
+          present: false,
+          source: 'keeper_task_claim_tool_call',
+          status: 'not_observed',
+          result: null,
+          claimed_task_id: null,
+          claimed_goal_id: null,
         },
       },
     })
 
     expect(result.execution?.latest_receipt_present).toBe(true)
     expect(result.execution?.terminal_reason_code).toBe('config_error')
-    expect(result.execution?.runtime?.fallback_reason).toBe('turn_timeout')
+    expect(result.execution?.claim_attempt.present).toBe(false)
     expect(result.execution?.error?.message_preview).toContain('fallback_runtime')
   })
 
@@ -407,7 +415,7 @@ describe('parseKeeperCompositeSnapshot', () => {
 
   it('parses collapsed_from when Stable hides a raw keeper phase', () => {
     // `Stable` is the TLA+ composite projection of seven raw keeper phases
-    // (Offline/Paused/Stopped/Crashed/Restarting/Dead). The runtime
+    // (Offline/Paused/Stopped/Crashed/Restarting). The runtime
     // observer does not emit it today; the schema supports it for a planned
     // backend that surfaces the collapse with the raw phase in `collapsed_from`.
     const result = parseKeeperCompositeSnapshot({

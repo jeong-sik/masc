@@ -12,13 +12,11 @@
     Callers can interleave these types freely with the source
     modules' types.
 
-    Internal: ~50+ helpers stay private — \[effective_cluster_name],
-    \[unique_strings], \[credential_state],
-    \[safe_resolve_agent_name] / \[safe_current_task] / \[safe_get_agents] /
-    the deliverable-conflict scanners (\[todo_task_has_completed_deliverable_conflict],
-    \[todo_completed_deliverable_conflicts]),
-    \[resolve_current_binding], \[planning_context_state],
-    \[assertion_kind_to_string], \[all_assertion_kinds], plus per-tool handlers
+    Internal: ~50+ helpers stay private — [effective_cluster_name],
+    [unique_trimmed_nonblank], [credential_state],
+    [safe_resolve_agent_name] / [safe_current_task] / [safe_get_agents],
+    [resolve_current_binding], [planning_context_state],
+    [assertion_kind_to_string], [all_assertion_kinds], plus per-tool handlers
     ([handle_status], [handle_init],
     [handle_check], [handle_assertion]).
     All consumed only inside {!dispatch}'s pipeline. *)
@@ -46,14 +44,14 @@ type assertion_kind = Workspace_assertions.assertion_kind =
 
 (** [assertion_kind_to_string k] returns the canonical lowercase
     label for [k].  Re-export of
-    {!Workspace_assertions.assertion_kind_to_string}; pinned for
-    behaviour-tests under {!test/test_types}. *)
+    {!Workspace_assertions.assertion_kind_to_string}.  No suite pins
+    this label set today. *)
 val assertion_kind_to_string : assertion_kind -> string
 
 (** [all_assertion_kinds] is the canonical witness list — one
     entry per {!assertion_kind} constructor.  Re-export of
-    {!Workspace_assertions.all_assertion_kinds}; pinned for
-    behaviour-tests under {!test/test_types}. *)
+    {!Workspace_assertions.all_assertion_kinds}.  No suite pins the
+    witness list against the constructor set today. *)
 val all_assertion_kinds : assertion_kind list
 
 (** [valid_assertion_strings] is the canonical list of

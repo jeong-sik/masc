@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  parseOasPayload,
-  parseOasPayloadOrNull,
-  OAS_PAYLOAD_EVENT_TYPES,
-  type TypedOasPayload,
+  parseAgentCorePayload,
+  parseAgentCorePayloadOrNull,
+  AGENT_CORE_PAYLOAD_EVENT_TYPES,
+  type TypedAgentCorePayload,
 } from './sse-event-payload'
 import {
   writeAgentCompletedPayload,
   writeAgentFailedPayload,
+  writeAgentInputRequiredPayload,
   writeAgentStartedPayload,
+  writeAgentYieldedPayload,
   writeContentReplacementKeptPayload,
   writeContentReplacementReplacedPayload,
   writeContextCompactStartedPayload,
@@ -28,11 +30,29 @@ import {
  *  array<->union parity test.  Keeping the inventory in one place guarantees
  *  a new kind forces an update here instead of slipping through with a
  *  partial round-trip. */
-const ALL_PAYLOAD_CASES: TypedOasPayload[] = [
+const ALL_PAYLOAD_CASES: TypedAgentCorePayload[] = [
   { kind: 'agent_started', payload: { agent_name: 'a', task_id: 't' } },
   {
     kind: 'agent_completed',
     payload: { agent_name: 'a', task_id: 't', elapsed_s: 1 },
+  },
+  {
+    kind: 'agent_yielded',
+    payload: { agent_name: 'a', task_id: 't', turn: 1, elapsed_s: 1 },
+  },
+  {
+    kind: 'agent_input_required',
+    payload: {
+      agent_name: 'a',
+      task_id: 't',
+      elapsed_s: 1,
+      request_id: 'request-1',
+      participant_name: 'operator',
+      question: 'Continue?',
+      schema: null,
+      timeout_s: null,
+      created_at: 1,
+    },
   },
   {
     kind: 'agent_failed',
@@ -107,12 +127,16 @@ const ALL_PAYLOAD_CASES: TypedOasPayload[] = [
   },
 ]
 
-function serializePayload(payload: TypedOasPayload): Record<string, unknown> {
+function serializePayload(payload: TypedAgentCorePayload): Record<string, unknown> {
   switch (payload.kind) {
     case 'agent_started':
       return writeAgentStartedPayload(payload.payload)
     case 'agent_completed':
       return writeAgentCompletedPayload(payload.payload)
+    case 'agent_yielded':
+      return writeAgentYieldedPayload(payload.payload)
+    case 'agent_input_required':
+      return writeAgentInputRequiredPayload(payload.payload)
     case 'agent_failed':
       return writeAgentFailedPayload(payload.payload)
     case 'tool_called':
@@ -142,15 +166,15 @@ function serializePayload(payload: TypedOasPayload): Record<string, unknown> {
   }
 }
 
-function roundTripPayload(original: TypedOasPayload): TypedOasPayload | null {
+function roundTripPayload(original: TypedAgentCorePayload): TypedAgentCorePayload | null {
   const raw = serializePayload(original)
-  const result = parseOasPayload(`oas:${original.kind}`, raw)
+  const result = parseAgentCorePayload(`agent_core:${original.kind}`, raw)
   return result.success ? result.data : null
 }
 
-describe('parseOasPayload', () => {
-  it('parses oas:agent_started payload', () => {
-    const result = parseOasPayload('oas:agent_started', {
+describe('parseAgentCorePayload', () => {
+  it('parses agent_core:agent_started payload', () => {
+    const result = parseAgentCorePayload('agent_core:agent_started', {
       agent_name: 'alpha',
       task_id: 'task_42',
     })
@@ -163,8 +187,8 @@ describe('parseOasPayload', () => {
     expect(data.payload.task_id).toBe('task_42')
   })
 
-  it('parses oas:agent_completed payload', () => {
-    const result = parseOasPayload('oas:agent_completed', {
+  it('parses agent_core:agent_completed payload', () => {
+    const result = parseAgentCorePayload('agent_core:agent_completed', {
       agent_name: 'beta',
       task_id: 'task_99',
       elapsed_s: 12.5,
@@ -179,8 +203,64 @@ describe('parseOasPayload', () => {
     expect(data.payload.elapsed_s).toBe(12.5)
   })
 
-  it('parses oas:agent_failed payload with all typed error fields', () => {
-    const result = parseOasPayload('oas:agent_failed', {
+  it('parses agent_core:agent_yielded without projecting completion', () => {
+    const result = parseAgentCorePayload('agent_core:agent_yielded', {
+      agent_name: 'beta',
+      task_id: 'task_99',
+      turn: 3,
+      elapsed_s: 12.5,
+    })
+    expect(result.success).toBe(true)
+    if (!result.success || result.data.kind !== 'agent_yielded') return
+    expect(result.data.payload).toEqual({
+      agent_name: 'beta',
+      task_id: 'task_99',
+      turn: 3,
+      elapsed_s: 12.5,
+    })
+  })
+
+  it('parses agent_core:agent_input_required with the typed request', () => {
+    const result = parseAgentCorePayload('agent_core:agent_input_required', {
+      agent_name: 'beta',
+      task_id: 'task_99',
+      elapsed_s: 12.5,
+      request_id: 'request-1',
+      participant_name: 'operator',
+      question: 'Continue?',
+      schema: { type: 'boolean' },
+      timeout_s: 30,
+      created_at: 1_000,
+    })
+    expect(result.success).toBe(true)
+    if (!result.success || result.data.kind !== 'agent_input_required') return
+    expect(result.data.payload.request_id).toBe('request-1')
+    expect(result.data.payload.question).toBe('Continue?')
+    expect(result.data.payload.schema).toEqual({ type: 'boolean' })
+  })
+
+  it('rejects malformed non-terminal agent outcomes', () => {
+    expect(parseAgentCorePayload('agent_core:agent_yielded', {
+      agent_name: 'beta',
+      task_id: 'task_99',
+      turn: '3',
+      elapsed_s: 12.5,
+    }).success).toBe(false)
+    expect(parseAgentCorePayload('agent_core:agent_input_required', {
+      agent_name: 'beta',
+      task_id: 'task_99',
+      elapsed_s: 12.5,
+      request_id: 'request-1',
+      participant_name: null,
+      question: 42,
+      schema: null,
+      timeout_s: null,
+      created_at: 1_000,
+    }).success).toBe(false)
+  })
+
+  it('parses agent_core:agent_failed payload with all typed error fields', () => {
+    const result = parseAgentCorePayload('agent_core:agent_failed', {
       agent_name: 'gamma',
       task_id: 'task_7',
       elapsed_s: 3.0,
@@ -207,7 +287,7 @@ describe('parseOasPayload', () => {
   })
 
   it('rejects non-string agent_failed.error via the atdgen error path', () => {
-    const result = parseOasPayload('oas:agent_failed', {
+    const result = parseAgentCorePayload('agent_core:agent_failed', {
       agent_name: 'gamma',
       task_id: 'task_7',
       elapsed_s: 3.0,
@@ -218,8 +298,8 @@ describe('parseOasPayload', () => {
     expect(result.error.issues[0]?.message).toMatch(/string/)
   })
 
-  it('parses oas:tool_called payload', () => {
-    const result = parseOasPayload('oas:tool_called', {
+  it('parses agent_core:tool_called payload', () => {
+    const result = parseAgentCorePayload('agent_core:tool_called', {
       agent_name: 'alpha',
       tool_name: 'bash',
     })
@@ -231,8 +311,8 @@ describe('parseOasPayload', () => {
     expect(data.payload.tool_name).toBe('bash')
   })
 
-  it('parses oas:tool_completed payload', () => {
-    const result = parseOasPayload('oas:tool_completed', {
+  it('parses agent_core:tool_completed payload', () => {
+    const result = parseAgentCorePayload('agent_core:tool_completed', {
       agent_name: 'alpha',
       tool_name: 'bash',
     })
@@ -245,8 +325,8 @@ describe('parseOasPayload', () => {
     expect(data.payload.tool_name).toBe('bash')
   })
 
-  it('parses oas:turn_started payload', () => {
-    const result = parseOasPayload('oas:turn_started', {
+  it('parses agent_core:turn_started payload', () => {
+    const result = parseAgentCorePayload('agent_core:turn_started', {
       agent_name: 'alpha',
       turn: 3,
     })
@@ -258,8 +338,8 @@ describe('parseOasPayload', () => {
     expect(data.payload.turn).toBe(3)
   })
 
-  it('parses oas:turn_completed payload', () => {
-    const result = parseOasPayload('oas:turn_completed', {
+  it('parses agent_core:turn_completed payload', () => {
+    const result = parseAgentCorePayload('agent_core:turn_completed', {
       agent_name: 'alpha',
       turn: 3,
     })
@@ -271,8 +351,8 @@ describe('parseOasPayload', () => {
     expect(data.payload.turn).toBe(3)
   })
 
-  it('parses oas:turn_ready payload', () => {
-    const result = parseOasPayload('oas:turn_ready', {
+  it('parses agent_core:turn_ready payload', () => {
+    const result = parseAgentCorePayload('agent_core:turn_ready', {
       agent_name: 'alpha',
       turn: 1,
       count: 2,
@@ -287,8 +367,8 @@ describe('parseOasPayload', () => {
     expect(result.data.payload.tool_names).toEqual(['bash'])
   })
 
-  it('parses oas:handoff_requested payload', () => {
-    const result = parseOasPayload('oas:handoff_requested', {
+  it('parses agent_core:handoff_requested payload', () => {
+    const result = parseAgentCorePayload('agent_core:handoff_requested', {
       from_agent: 'alpha',
       to_agent: 'beta',
       reason: 'load',
@@ -303,8 +383,8 @@ describe('parseOasPayload', () => {
     expect(data.payload.reason).toBe('load')
   })
 
-  it('parses oas:handoff_completed payload', () => {
-    const result = parseOasPayload('oas:handoff_completed', {
+  it('parses agent_core:handoff_completed payload', () => {
+    const result = parseAgentCorePayload('agent_core:handoff_completed', {
       from_agent: 'alpha',
       to_agent: 'beta',
       elapsed_s: 0.5,
@@ -317,16 +397,16 @@ describe('parseOasPayload', () => {
     expect(data.payload.elapsed_s).toBe(0.5)
   })
 
-  it('parses oas:context_compacted to the 4 wire fields and does not surface an unmodeled runtime', () => {
+  it('parses agent_core:context_compacted to the 4 wire fields and does not surface an unmodeled runtime', () => {
     // The context_compacted wire format has exactly 4 fields
     // (lib/sse_event/sse_event.atd context_compacted_payload). A stray runtime
     // key on the wire must be ignored, not surfaced as a phantom field.
-    const result = parseOasPayload('oas:context_compacted', {
+    const result = parseAgentCorePayload('agent_core:context_compacted', {
       agent_name: 'alpha',
       before_tokens: 1000,
       after_tokens: 800,
       phase: 'summarize',
-      runtime: 'oas-runtime',
+      runtime: 'agent-core-runtime',
     })
     expect(result.success).toBe(true)
     if (!result.success) return
@@ -339,8 +419,8 @@ describe('parseOasPayload', () => {
     expect('runtime' in data.payload).toBe(false)
   })
 
-  it('parses oas:context_compact_started payload', () => {
-    const result = parseOasPayload('oas:context_compact_started', {
+  it('parses agent_core:context_compact_started payload', () => {
+    const result = parseAgentCorePayload('agent_core:context_compact_started', {
       agent_name: 'alpha',
       trigger: 'threshold',
     })
@@ -351,8 +431,8 @@ describe('parseOasPayload', () => {
     expect(result.data.payload.trigger).toBe('threshold')
   })
 
-  it('parses oas:content_replacement_replaced payload', () => {
-    const result = parseOasPayload('oas:content_replacement_replaced', {
+  it('parses agent_core:content_replacement_replaced payload', () => {
+    const result = parseAgentCorePayload('agent_core:content_replacement_replaced', {
       tool_use_id: 'tu1',
       preview: 'preview',
       original_chars: 100,
@@ -365,8 +445,8 @@ describe('parseOasPayload', () => {
     expect(result.data.payload.preview).toBe('preview')
   })
 
-  it('parses oas:content_replacement_kept payload', () => {
-    const result = parseOasPayload('oas:content_replacement_kept', {
+  it('parses agent_core:content_replacement_kept payload', () => {
+    const result = parseAgentCorePayload('agent_core:content_replacement_kept', {
       tool_use_id: 'tu1',
       seen_count_after: 1,
     })
@@ -377,8 +457,8 @@ describe('parseOasPayload', () => {
     expect(result.data.payload.seen_count_after).toBe(1)
   })
 
-  it('parses oas:slot_scheduler_observed payload', () => {
-    const result = parseOasPayload('oas:slot_scheduler_observed', {
+  it('parses agent_core:slot_scheduler_observed payload', () => {
+    const result = parseAgentCorePayload('agent_core:slot_scheduler_observed', {
       max_slots: 4,
       active: 2,
       available: 2,
@@ -393,14 +473,14 @@ describe('parseOasPayload', () => {
   })
 
   it('rejects an unknown event type', () => {
-    const result = parseOasPayload('oas:unknown_event', { x: 1 })
+    const result = parseAgentCorePayload('agent_core:unknown_event', { x: 1 })
     expect(result.success).toBe(false)
     if (result.success) return
-    expect(result.error.issues[0]?.eventType).toBe('oas:unknown_event')
+    expect(result.error.issues[0]?.eventType).toBe('agent_core:unknown_event')
   })
 
   it('rejects a malformed payload', () => {
-    const result = parseOasPayload('oas:agent_started', {
+    const result = parseAgentCorePayload('agent_core:agent_started', {
       agent_name: 'alpha',
       task_id: 42,
     })
@@ -410,12 +490,12 @@ describe('parseOasPayload', () => {
   })
 
   it('rejects a missing required field', () => {
-    const result = parseOasPayload('oas:agent_started', { agent_name: 'alpha' })
+    const result = parseAgentCorePayload('agent_core:agent_started', { agent_name: 'alpha' })
     expect(result.success).toBe(false)
   })
 
   it('returns null for parseOrNull on failure', () => {
-    expect(parseOasPayloadOrNull('oas:agent_started', {})).toBeNull()
+    expect(parseAgentCorePayloadOrNull('agent_core:agent_started', {})).toBeNull()
   })
 
   it('round-trips through write/read for every handled payload kind', () => {
@@ -427,8 +507,8 @@ describe('parseOasPayload', () => {
     }
   })
 
-  it('has parity between OAS_PAYLOAD_EVENT_TYPES and TypedOasPayload kind union', () => {
-    const fromArray = new Set(OAS_PAYLOAD_EVENT_TYPES)
+  it('has parity between AGENT_CORE_PAYLOAD_EVENT_TYPES and TypedAgentCorePayload kind union', () => {
+    const fromArray = new Set(AGENT_CORE_PAYLOAD_EVENT_TYPES)
     const fromUnion = new Set(ALL_PAYLOAD_CASES.map(c => c.kind))
     expect(fromArray).toEqual(fromUnion)
   })

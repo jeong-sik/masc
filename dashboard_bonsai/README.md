@@ -129,5 +129,5 @@ dashboard_bonsai/
 
 - **Lift-and-shift, not redesign**: 레이아웃/IA 변경 금지. UI 개편은 Phase N+1.
 - **Pixel parity**: ±2px / hex 동일. 그 외는 버그.
-- **OAS 경계**: `agent_sdk` 무변경. 프론트-서버는 JSON over HTTP + SSE만.
+- **Agent Core 경계**: `agent_core` 무변경. 프론트-서버는 JSON over HTTP + SSE만.
 - **핸들러 JSON 계약 고정**: `lib/dashboard/*.ml`은 수정 금지, typed record로만 refactor.

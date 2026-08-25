@@ -5,8 +5,6 @@
     Depends on Server_dashboard_http_json_utils, Server_dashboard_compact_receipt_json,
     Server_dashboard_fleet_readiness, and various Keeper modules. *)
 
-open Masc_domain
-open Server_utils
 
 let json_member = Server_dashboard_http_json_utils.json_member
 let json_string key json = Json_util.get_string json key
@@ -51,41 +49,97 @@ let claim_status_of_output output =
   | None -> "observed"
 ;;
 
-let composite_claim_scope_absent =
+let composite_claim_attempt_absent =
   `Assoc
     [ "present", `Bool false
     ; "source", `String "keeper_task_claim_tool_call"
     ; "status", `String "not_observed"
     ; "result", `Null
-    ; "mode", `Null
-    ; "scoped", `Null
-    ; "active_goal_ids", `List []
-    ; "effective_goal_ids", `List []
-    ; "excluded_count", `Null
     ; "claimed_task_id", `Null
     ; "claimed_goal_id", `Null
     ]
 ;;
 
-let composite_claim_scope_json ~keeper_name =
-  let entries = Keeper_tool_call_log.read_recent ~keeper_name ~n:100 () in
-  match
-    entries
-    |> List.find_opt (fun json ->
-      String.equal (Option.value ~default:"" (json_string "tool" json))
-        "keeper_task_claim")
-  with
-  | None -> composite_claim_scope_absent
+(* Rows one keeper's claim lookup considers, and the fleet-wide window that
+   covers it. [read_recent ~keeper_name ~n] over-scans by
+   [read_over_scan_factor] before its keeper filter, so a shared read of
+   [claim_window_rows] covers exactly what a per-keeper [read_recent ~n:100]
+   would have read. *)
+let claim_rows_per_keeper = 100
+
+let claim_window_rows =
+  claim_rows_per_keeper * Keeper_tool_call_log.read_over_scan_factor
+;;
+
+(* One fleet-wide tail of tool-call rows, read once and shared by every keeper
+   in the same composite envelope.
+
+   [composite_claim_attempt_json] used to read its own window per keeper. Every
+   such read pulls [claim_window_rows] rows from the single shared tool-call
+   store, so the fleet envelope — which calls this once per keeper — read and
+   parsed the same rows once per keeper: identical bytes, identical parse
+   trees, N times, to answer N questions one read answers for all of them. On
+   the store this was measured against, rows average 6.8 KB.
+
+   Constructed only by [read_claim_window] so a caller cannot pass a list that
+   was filtered, reordered, or read with a different window. *)
+type claim_window = Claim_window of Yojson.Safe.t list
+
+let read_claim_window () =
+  Claim_window (Keeper_tool_call_log.read_recent_rows ~n:claim_window_rows ())
+;;
+
+let row_is_task_claim json =
+  (* The tool name is a string on the wire; [Keeper_tooling.Name] is the typed
+     vocabulary that owns it, so the comparison goes through the variant rather
+     than a literal. A renamed or removed constructor then fails to compile
+     instead of silently matching nothing. *)
+  match Option.bind (json_string "tool" json) Keeper_tooling.Name.of_string with
+  | Some Keeper_tooling.Name.Task_claim -> true
+  | Some
+      ( Keeper_tooling.Name.Broadcast
+      | Keeper_tooling.Name.Task_create
+      | Keeper_tooling.Name.Task_done
+      | Keeper_tooling.Name.Tasks_audit
+      | Keeper_tooling.Name.Tasks_list )
+  | None -> false
+;;
+
+(* The latest claim, not the first one a scan meets.
+
+   [Keeper_tool_call_log.read_recent] and [read_recent_rows] both return rows
+   oldest-first (dated_jsonl.mli: "the newest [n] entries in chronological
+   order (oldest first)"), so the [List.find_opt] this replaces returned the
+   *oldest* claim in the window. It went unnoticed because
+   [filter_rows_for_keeper] rings a busy keeper down to its last
+   [claim_rows_per_keeper] rows, which usually trims the older claim away and
+   leaves the newer one to be found by accident; a quiet keeper keeps both and
+   reports the superseded task. Measured on one live Keeper (46 rows in
+   window, nothing trimmed) reported task-305 while it had claimed task-306.
+   See #28437.
+
+   Ordering is row order, which is what the store documents and what the
+   previous code relied on. The row's own [ts] is deliberately not consulted:
+   that would make append order and timestamp order two competing authorities
+   for "latest". *)
+let latest_task_claim_row (Claim_window rows) ~keeper_name =
+  Keeper_tool_call_log.filter_rows_for_keeper
+    ~keeper_name
+    ~n:claim_rows_per_keeper
+    rows
+  |> List.fold_left
+       (fun latest json -> if row_is_task_claim json then Some json else latest)
+       None
+;;
+
+let composite_claim_attempt_json ~claim_window ~keeper_name =
+  match latest_task_claim_row claim_window ~keeper_name with
+  | None -> composite_claim_attempt_absent
   | Some call ->
     let output =
       match parse_tool_call_output call with
       | Some (`Assoc _ as output) -> output
       | _ -> `Assoc []
-    in
-    let claim_scope =
-      match json_assoc "claim_scope" output with
-      | Some value -> value
-      | None -> `Assoc []
     in
     let claimed_task = json_assoc "claimed_task" output in
     `Assoc
@@ -93,19 +147,6 @@ let composite_claim_scope_json ~keeper_name =
       ; "source", `String "keeper_task_claim_tool_call"
       ; "status", `String (claim_status_of_output output)
       ; "result", Json_util.string_opt_to_json (json_string "result" output)
-      ; "mode", Json_util.string_opt_to_json (json_string "mode" claim_scope)
-      ; ( "scoped",
-          match json_bool "scoped" claim_scope with
-          | Some value -> `Bool value
-          | None -> `Null )
-      ; ( "active_goal_ids",
-          Json_util.json_string_list
-            (Json_util.get_string_list claim_scope "active_goal_ids") )
-      ; ( "effective_goal_ids",
-          Json_util.json_string_list
-            (Json_util.get_string_list claim_scope "effective_goal_ids") )
-      ; ( "excluded_count",
-          Json_util.int_opt_to_json (json_int "excluded_count" claim_scope) )
       ; ( "claimed_task_id",
           match claimed_task with
           | Some task -> Json_util.string_opt_to_json (json_string "task_id" task)
@@ -172,8 +213,8 @@ let composite_config_drift_json ~config ~keeper_name =
       ]
 ;;
 
-let composite_execution_receipt_json ~(config : Workspace.config) ~keeper_name =
-  let claim_scope = composite_claim_scope_json ~keeper_name in
+let composite_execution_receipt_json ~(config : Workspace.config) ~claim_window ~keeper_name =
+  let claim_attempt = composite_claim_attempt_json ~claim_window ~keeper_name in
   let config_drift = composite_config_drift_json ~config ~keeper_name in
   match Keeper_execution_receipt.latest_json config keeper_name with
   | None ->
@@ -190,7 +231,7 @@ let composite_execution_receipt_json ~(config : Workspace.config) ~keeper_name =
       ; "duration_ms", `Null
       ; "error", `Null
       ; "runtime", `Null
-      ; "claim_scope", claim_scope
+      ; "claim_attempt", claim_attempt
       ; "config_drift", config_drift
       ]
   | Some receipt ->
@@ -214,7 +255,7 @@ let composite_execution_receipt_json ~(config : Workspace.config) ~keeper_name =
         , Json_util.float_opt_to_json (json_float "duration_ms" action_radius) )
       ; "error", compact_receipt_error_json receipt
       ; "runtime", compact_receipt_runtime_json receipt
-      ; "claim_scope", claim_scope
+      ; "claim_attempt", claim_attempt
       ; "config_drift", config_drift
       ]
 ;;
@@ -232,12 +273,6 @@ let string_opt_is_any value candidates =
 let string_opt_present value =
   match Option.map String.trim value with
   | Some value -> value <> ""
-  | None -> false
-;;
-
-let string_opt_has_prefix value ~prefix =
-  match lower_string_opt value with
-  | Some value -> string_has_prefix ~prefix value
   | None -> false
 ;;
 
@@ -287,9 +322,9 @@ let composite_execution_config_blocked execution =
 ;;
 
 let composite_execution_claim_no_eligible execution =
-  match json_member "claim_scope" execution with
-  | `Assoc _ as claim_scope ->
-    string_opt_is_any (json_string "status" claim_scope) [ "no_eligible" ]
+  match json_member "claim_attempt" execution with
+  | `Assoc _ as claim_attempt ->
+    string_opt_is_any (json_string "status" claim_attempt) [ "no_eligible" ]
   | _ -> false
 ;;
 
@@ -402,15 +437,15 @@ let composite_runtime_attention ~snapshot ~execution =
     if not execution_current
     then None
     else if composite_execution_claim_no_eligible execution
-    then Some "claim_scope_no_eligible"
+    then Some "claim_no_eligible"
     else if not blocked
     then None
     else
       (match json_string "operator_disposition_reason" execution with
-       | Some value -> String_util.trim_to_option value
+       | Some value -> String_util.trim_nonempty value
        | _ ->
          (match json_string "terminal_reason_code" execution with
-          | Some value -> String_util.trim_to_option value
+          | Some value -> String_util.trim_nonempty value
           | _ when needs_attention && composite_execution_config_drift execution ->
             Some "keeper_runtime_override_drift"
           | _ -> Some "runtime_blocked"))

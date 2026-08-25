@@ -79,16 +79,6 @@ val active_coverage_gaps :
 (** Filter coverage gaps down to the entries still active for the
     current source timestamp. *)
 
-val coverage_gaps_for_store :
-  source_name:string ->
-  durable_store:string ->
-  Yojson.Safe.t list
-(** Read the most recent 50 telemetry coverage-gap entries
-    (via {!Telemetry_coverage_gap.read_recent}) under
-    [<dirname durable_store>] and filter them down to entries
-    whose [source] field equals [source_name]. Returns the
-    empty list when [durable_store] is empty. *)
-
 val metadata_fields :
   source_name:string ->
   source_producer:string ->
@@ -117,7 +107,7 @@ val keeper_tool_call_io_fields :
 (** Convenience wrapper around {!metadata_fields} for the keeper
     tool-call I/O source:
     - [source_name = "tool_call_io"]
-    - [source_producer = "keeper_hooks_oas|mcp_server_eio_call_tool"]
+    - [source_producer = "keeper_hooks_agent_core|mcp_server_eio_call_tool"]
     - [freshness_slo_s = 300.0] (5 minutes)
     - [durable_store] resolved via
       [Keeper_tool_call_log.store_dir] (defaulting to ["" ] when

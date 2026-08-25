@@ -6,19 +6,6 @@ module Mcp_eio = Masc.Mcp_server_eio
 module Mcp_server = Masc.Mcp_server
 module Recovery_test = Fs_compat_test_support.Publication_recovery_for_testing
 
-let contains_substring text fragment =
-  let text_len = String.length text in
-  let fragment_len = String.length fragment in
-  let rec loop index =
-    if fragment_len = 0
-    then true
-    else if index + fragment_len > text_len
-    then false
-    else if String.sub text index fragment_len = fragment
-    then true
-    else loop (index + 1)
-  in
-  loop 0
 ;;
 
 let restore_env name = function
@@ -63,7 +50,7 @@ let test_masc_start_tilde_rejects_empty_initial_home () =
       Alcotest.(check bool)
         "reports missing HOME"
         true
-        (contains_substring message "HOME is required to expand '~'"))
+        (String_util.contains_substring message "HOME is required to expand '~'"))
 ;;
 
 let test_masc_start_surfaces_claim_failure_after_task_commit () =
@@ -116,7 +103,7 @@ let test_masc_start_surfaces_claim_failure_after_task_commit () =
         (Tool_result.failure_class result
          |> Option.map Tool_result.tool_failure_class_to_string);
       Alcotest.(check bool) "claim failure is explicit" true
-        (contains_substring (Tool_result.message result) "claim failed");
+        (String_util.contains_substring (Tool_result.message result) "claim failed");
       let data = Tool_result.data result in
       Alcotest.(check string) "created task remains a post-effect"
         "proven_post_effect"
@@ -125,7 +112,7 @@ let test_masc_start_surfaces_claim_failure_after_task_commit () =
         "task-002"
         Yojson.Safe.Util.(data |> member "task_id" |> to_string);
       Alcotest.(check bool) "committed task result is preserved" true
-      (contains_substring
+      (String_util.contains_substring
            Yojson.Safe.Util.(data |> member "primary_result" |> to_string)
            "Added task-002"))
 ;;
@@ -188,7 +175,7 @@ let test_masc_start_surfaces_current_task_failure_after_claim_commit () =
             "task-001"
             Yojson.Safe.Util.(data |> member "task_id" |> to_string);
           Alcotest.(check bool) "committed task result is preserved" true
-            (contains_substring
+            (String_util.contains_substring
                Yojson.Safe.Util.(data |> member "primary_result" |> to_string)
                "Added task-001")))
 ;;

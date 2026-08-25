@@ -19,7 +19,7 @@ let update f =
   Mutex.lock mutex;
   let next =
     try f !workspace_ref
-    with exn ->
+    with exn ->  (* cancel-guard-ok: re-raises below *)
       Mutex.unlock mutex;
       raise exn
   in

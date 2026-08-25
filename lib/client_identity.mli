@@ -1,21 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-module Random = Stdlib.Random
-
 (** Agent Identity - Unified agent identification for MCP sessions
 
     @since 0.5.0
@@ -48,7 +30,7 @@ type t = {
   user_id : string option;
   capabilities : string list;
   registered_at : float;
-  mutable last_seen : float;
+  last_seen : float;
   metadata : (string * string) list;
 }
 
@@ -69,23 +51,6 @@ val generate_session_key : unit -> string
 val from_mcp_params : Yojson.Safe.t -> t
 val anonymous : unit -> t
 
-(** {1 Identity Registry} *)
-
-module Registry : sig
-  type registry
-
-  val create : unit -> registry
-  val register : registry -> t -> t
-  val find_by_session : registry -> string -> t option
-  val find_by_name : registry -> string -> t option
-  val touch : registry -> string -> unit -> unit
-  val unregister : registry -> string -> unit
-  val list_all : registry -> t list
-  (** All explicitly registered identities. [last_seen] remains observation
-      data and is not used as lifecycle authority. *)
-  val count : registry -> int
-end
-
 (** {1 Utilities} *)
 
 val has_capability : t -> string -> bool
@@ -97,4 +62,3 @@ val same_agent : t -> t -> bool
 val channel_to_yojson : channel -> Yojson.Safe.t
 val channel_of_yojson : Yojson.Safe.t -> (channel, string) Result.t
 val to_yojson : t -> Yojson.Safe.t
-

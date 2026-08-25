@@ -1,4 +1,4 @@
-(** Keeper_unified_turn — Single entry point for keeper cycles via OAS Agent.run().
+(** Keeper_unified_turn — Single entry point for keeper cycles via Agent_core.Agent.run().
 
     Replaces the 3-path dispatcher (social/proactive/autonomy) with a unified
     observe -> prompt -> Agent.run(tools, guardrails, hooks) loop.
@@ -15,21 +15,40 @@ include Keeper_turn_helpers
 include Keeper_turn_runtime_budget
 include Keeper_unified_turn_types
 
-(* RFC-0132 PR-2: removed dead [runtime_lane_label] (0 callers). *)
 
 include Keeper_unified_turn_phase_plan
 
 type source_disposition =
   | Follow_failure_route
-  | Pause_after_transcript_corruption of { detail : string }
 
 type turn_failure =
-  { error : Agent_sdk.Error.sdk_error
+  { error : Agent_core.Error.t
   ; runtime_id : string
   ; route : Keeper_runtime_failure_route.route
   ; source_disposition : source_disposition
   ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
   }
+
+exception Owner_meta_commit_failed of string
+
+let commit_turn_runtime_or_raise ~config ~before ~after =
+  match
+    Keeper_owner_registry.commit_turn_runtime
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:before.Keeper_meta_contract.name
+      ~before
+      ~after
+  with
+  | Ok (Some committed) -> committed
+  | Ok None ->
+    raise
+      (Owner_meta_commit_failed
+         "Keeper Owner removed metadata during failed-turn commit")
+  | Error error ->
+    raise
+      (Owner_meta_commit_failed
+         (Keeper_owner_registry.command_error_to_string error))
+;;
 
 let turn_failure_of_error
       ~runtime_id
@@ -53,10 +72,16 @@ let turn_failure_of_error
     }
 ;;
 
-let transcript_corruption error =
+let execution_boundary_of_turn_failure error =
   match Keeper_internal_error.classify_masc_internal_error error with
-  | Some (Keeper_internal_error.Incomplete_tool_transcript { detail; _ }) ->
-    Some detail
+  | Some
+      ( Keeper_internal_error.Incomplete_tool_transcript _
+      | Keeper_internal_error.Gate_replay_repair_required _ ) ->
+    (* Both failures are produced by MASC — the first over the transcript MASC
+       persisted, the second after host replay and before provider dispatch.
+       The shared [Agent_core.Error.Internal] carrier must not misattribute
+       either local boundary to AGENT_CORE. *)
+    Keeper_runtime_failure_route.Masc_execution
   | Some
       ( Keeper_internal_error.Runtime_exhausted _
       | Keeper_internal_error.Capacity_backpressure _
@@ -66,53 +91,34 @@ let transcript_corruption error =
       | Keeper_internal_error.Internal_bridge_exception _
       | Keeper_internal_error.Internal_contract_rejected _
       | Keeper_internal_error.Terminal_effect_failed _
-      | Keeper_internal_error.Receipt_persistence_failed _
-      | Keeper_internal_error.Gate_replay_repair_required _ )
+      | Keeper_internal_error.Provider_attempt_effect_fenced _
+      | Keeper_internal_error.Tool_correction_lost _
+      | Keeper_internal_error.Receipt_persistence_failed _ )
   | None ->
-    None
+    Keeper_runtime_failure_route.Agent_core_execution
 ;;
 
-let execution_boundary_of_turn_failure ~transcript_corruption error =
-  match
-    transcript_corruption,
-    Keeper_internal_error.classify_masc_internal_error error
-  with
-  | Some _, (Some _ | None) ->
-    Keeper_runtime_failure_route.Masc_execution
-  | None, Some (Keeper_internal_error.Gate_replay_repair_required _) ->
-    (* This failure is produced by MASC after host replay and before provider
-       dispatch. The shared [Agent_sdk.Error.Internal] carrier must not
-       misattribute that local replay boundary to OAS. *)
-    Keeper_runtime_failure_route.Masc_execution
-  | None,
-    Some
-      ( Keeper_internal_error.Runtime_exhausted _
-      | Keeper_internal_error.Capacity_backpressure _
-      | Keeper_internal_error.Resumable_cli_session _
-      | Keeper_internal_error.Accept_rejected _
-      | Keeper_internal_error.Internal_unhandled_exception _
-      | Keeper_internal_error.Internal_bridge_exception _
-      | Keeper_internal_error.Internal_contract_rejected _
-      | Keeper_internal_error.Incomplete_tool_transcript _
-      | Keeper_internal_error.Terminal_effect_failed _
-      | Keeper_internal_error.Receipt_persistence_failed _ )
-  | None, None ->
-    Keeper_runtime_failure_route.Oas_execution
-;;
+type continuation_route_disposition =
+  | Continuation_route_addressed
+  | Continuation_route_not_addressed
 
 type turn_success =
-  | Turn_completed of keeper_meta
+  | Turn_completed of
+      { meta : keeper_meta
+      ; continuation_route : continuation_route_disposition
+      }
   | Turn_checkpointed of keeper_meta
   | Turn_input_required of keeper_meta
   | Turn_cancelled of keeper_meta
   | Turn_skipped of keeper_meta
 
-let turn_success_of_stop_reason ~meta = function
-  | Runtime_agent.Completed -> Turn_completed meta
-  | Runtime_agent.Yielded_to_chat_waiting _
+let turn_success_of_stop_reason ~meta ~continuation_route = function
+  | Runtime_agent.Completed -> Turn_completed { meta; continuation_route }
+  | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Awaiting_external_effect _
-  | Runtime_agent.Yielded_after_repeated_tool_call _ ->
+  | Runtime_agent.Yielded_after_repeated_tool_call _
+  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
     Turn_checkpointed meta
   | Runtime_agent.InputRequired _ -> Turn_input_required meta
 ;;
@@ -121,9 +127,12 @@ let chat_yield_request ~base_path ~keeper_name =
   match Keeper_registry.get ~base_path keeper_name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" keeper_name)
   | Some _ ->
-    if Keeper_turn_admission.chat_waiting ~base_path ~keeper_name
-    then Ok (Some Keeper_agent_run.{ reason = Chat_waiting })
-    else Ok None
+    (match Keeper_owner_registry.operation_projection ~base_path ~keeper_name with
+     | Error error -> Error (Keeper_owner_registry.lookup_error_to_string error)
+     | Ok operations ->
+       if operations.Keeper_owner.queued_count > 0
+       then Ok (Some Keeper_agent_run.{ reason = Operation_queued })
+       else Ok None)
 ;;
 
 let autonomous_yield_request ~base_path ~keeper_name =
@@ -159,10 +168,10 @@ let is_manual_compaction_payload = function
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
-  | Keeper_event_queue.Goal_assigned _
-  | Keeper_event_queue.Goal_reconciliation_ready _
   | Keeper_event_queue.Completion_authority_rejected _
-  | Keeper_event_queue.Task_cancelled _ ->
+  | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Workspace_message _
+  | Keeper_event_queue.Delegate_completed _ ->
     false
 ;;
 
@@ -214,7 +223,7 @@ let manual_compaction_yield_request ~wake ~base_path ~keeper_name =
     Option.iter
       (fun (request : Keeper_agent_run.autonomous_yield_request) ->
          match request.reason with
-         | Keeper_agent_run.Chat_waiting -> ()
+         | Keeper_agent_run.Operation_queued -> ()
          | Keeper_agent_run.Durable_stimulus_waiting summary ->
            Log.Keeper.info
              ~keeper_name
@@ -224,23 +233,124 @@ let manual_compaction_yield_request ~wake ~base_path ~keeper_name =
     Ok request
 ;;
 
+(* #28809: an approved Gate resolution whose one-shot grant is still unspent
+   is not an ordinary queued successor — it is the durable continuation of an
+   already-deferred external effect, and the in-flight source may itself be
+   the checkpoint that effect belongs to. Waiting for the source terminal can
+   therefore starve the replay behind an arbitrarily long run. Deliverability
+   is decided by the injected predicate; the wake payloads need no
+   self-exclusion here because a resolution threaded into the current turn
+   has its grant consumed at tool-bundle build, before this boundary probe
+   can run, so it already fails the unspent check. *)
+let hitl_replay_preemption_request ~resolution_deliverable ~now pending =
+  let stimuli = Keeper_event_queue.to_list pending in
+  match
+    List.find_opt
+      (fun (stimulus : Keeper_event_queue.stimulus) ->
+         match stimulus.payload with
+         | Keeper_event_queue.Hitl_resolved resolution ->
+           resolution_deliverable resolution
+         | Keeper_event_queue.Board_signal _
+         | Keeper_event_queue.Board_attention _
+         | Keeper_event_queue.Bootstrap
+         | Keeper_event_queue.Fusion_completed _
+         | Keeper_event_queue.Schedule_due _
+         | Keeper_event_queue.Connector_attention _
+         | Keeper_event_queue.Manual_compaction_requested
+         | Keeper_event_queue.Completion_authority_rejected _
+         | Keeper_event_queue.Task_cancelled _
+         | Keeper_event_queue.Workspace_message _
+         | Keeper_event_queue.Delegate_completed _ -> false)
+      stimuli
+  with
+  | None -> None
+  | Some selected ->
+    let summary = Keeper_agent_run.durable_stimulus_summary ~now pending in
+    Some
+      Keeper_agent_run.
+        { reason =
+            Durable_stimulus_waiting
+              { summary with
+                head = Some selected
+              ; head_age_sec = Float.max 0. (now -. selected.arrived_at)
+              }
+        }
+;;
+
+(* Deliverable means the approval has left the pending map (the decision is
+   durable) and its grant is still unspent. A rejected resolution carries no
+   grant to starve: it reaches the model through ordinary selection or the
+   turn-start projection, so it never preempts a run. *)
+let approved_resolution_deliverable
+      ~base_path
+      (resolution : Keeper_event_queue.hitl_resolution)
+  =
+  match resolution.decision with
+  | Keeper_event_queue.Hitl_rejected _ -> false
+  | Keeper_event_queue.Hitl_approved ->
+    (match
+       Keeper_approval_queue.get_pending_entry_for_workspace
+         ~base_path
+         ~id:resolution.approval_id
+     with
+     | Ok (Some _) | Error _ -> false
+     | Ok None ->
+       (match
+          Keeper_approval_queue.approved_resolution_state
+            ~base_path
+            ~id:resolution.approval_id
+        with
+        | Ok Keeper_approval_queue.Resolution_unconsumed -> true
+        | Ok Keeper_approval_queue.Resolution_consumed | Error _ -> false))
+;;
+
+let hitl_replay_yield_request ~base_path ~keeper_name =
+  match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+  | Error _ as error -> error
+  | Ok pending ->
+    let request =
+      hitl_replay_preemption_request
+        ~resolution_deliverable:(approved_resolution_deliverable ~base_path)
+        ~now:(Time_compat.now ())
+        pending
+    in
+    Option.iter
+      (fun (request : Keeper_agent_run.autonomous_yield_request) ->
+         match request.reason with
+         | Keeper_agent_run.Operation_queued -> ()
+         | Keeper_agent_run.Durable_stimulus_waiting summary ->
+           Log.Keeper.info
+             ~keeper_name
+             "autonomous source turn yields to an approved Gate resolution: %s"
+             (Keeper_agent_run.durable_stimulus_summary_to_string summary))
+      request;
+    Ok request
+;;
+
 let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
   match wake with
   (* A nonempty [Woken] is the event queue input already selected for this
-     turn. It may yield for chat delivery. An explicit owner-lane manual
-     compaction is the sole successor allowed to preempt at a persisted
-     post-tool boundary; the selected source remains pending and resumes after
-     compaction. Other queued successors still wait for the source terminal. *)
+     turn. It may yield for chat delivery. Two successors may preempt at a
+     persisted post-tool boundary: an explicit owner-lane manual compaction,
+     and an approved Gate resolution whose grant is still unspent (#28809 —
+     the source may be the very checkpoint that resolution continues). The
+     selected source remains pending and resumes after the preemptor. Other
+     queued successors still wait for the source terminal. *)
   | Keeper_registry.Woken (_ :: _) ->
     fun () ->
       (match chat_yield_request ~base_path ~keeper_name with
        | Error _ as error -> error
        | Ok (Some _) as request -> request
        | Ok None ->
-         manual_compaction_yield_request
-           ~wake
-           ~base_path
-           ~keeper_name)
+         (match
+            manual_compaction_yield_request
+              ~wake
+              ~base_path
+              ~keeper_name
+          with
+          | Error _ as error -> error
+          | Ok (Some _) as request -> request
+          | Ok None -> hitl_replay_yield_request ~base_path ~keeper_name))
   | Keeper_registry.Proactive_tick | Keeper_registry.Woken [] ->
     fun () -> autonomous_yield_request ~base_path ~keeper_name
   (* Not reachable, same reason as in [manual_compaction_preemption_request]:
@@ -250,6 +360,18 @@ let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
      arrived here should step aside on the same terms. *)
   | Keeper_registry.Chat_request ->
     fun () -> autonomous_yield_request ~base_path ~keeper_name
+;;
+
+let continuation_channel_of_wake = function
+  | Keeper_registry.Woken [ payload ] ->
+    (match Keeper_event_queue.continuation_channel_of_payload payload with
+     | Some channel when Keeper_continuation_channel.is_routable channel ->
+       Some channel
+     | Some _ | None -> None)
+  | Keeper_registry.Woken []
+  | Keeper_registry.Woken (_ :: _ :: _)
+  | Keeper_registry.Proactive_tick
+  | Keeper_registry.Chat_request -> None
 ;;
 
 
@@ -262,13 +384,11 @@ let run_keeper_cycle
       ~(publication_recovery_provider :
           Keeper_publication_recovery_availability.provider)
       ~(observation : Keeper_world_observation.world_observation)
-      ~(generation : int)
       ~(wake : Keeper_registry.wake_reason)
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ?shared_context
       ?event_bus
       ?hitl_resolution
-      ?continuation_delivery_channel
       ()
   : (turn_success, turn_failure) result
   =
@@ -280,8 +400,8 @@ let run_keeper_cycle
   with
   | Error failure ->
     let error =
-      Agent_sdk.Error.Config
-        (Agent_sdk.Error.InvalidConfig
+      Agent_core.Error.Config
+        (Agent_core.Error.InvalidConfig
            { field = "keeper.publication_recovery_scope"
            ; detail =
                Keeper_publication_recovery_scope.failure_to_string failure
@@ -307,9 +427,18 @@ let run_keeper_cycle
   (* 0. Phase gate + state-aware runtime routing.
      The gate owns turn executability; select_runtime remains a total helper
      so dashboards/tests can inspect the same routing contract for blocked
-     phases like Overflowed. *)
+     phases. *)
   let registry_base_path = config.base_path in
   let exact_failure_execution = ref None in
+  (* Quota expiry is wall-clock provider evidence. Freeze this observation so
+     shaping and dispatch share one ordered runtime suffix. NDT-OK. *)
+  let quota_snapshot_now = Unix.gettimeofday () in
+  let deferred_runtime_lane =
+    Option.map
+      (Keeper_turn_driver.quota_ordered_deferred_runtime_lane
+         ~now:quota_snapshot_now)
+      deferred_runtime_lane
+  in
   (* Decide turn_id at function entry so phase-gate and runtime-routing
      terminal paths can include it in the receipt and observability stream. *)
   let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
@@ -317,7 +446,6 @@ let run_keeper_cycle
     { manifest_keeper_name = meta.name
     ; manifest_agent_name = Some meta.agent_name
     ; manifest_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
-    ; manifest_generation = Some generation
     ; manifest_keeper_turn_id = Some keeper_turn_id
     }
   in
@@ -362,7 +490,6 @@ let run_keeper_cycle
           [
             ( "channel",
               `String (Keeper_world_observation.channel_to_string channel) );
-            ("usage_total_turns", `Int meta.runtime.usage.total_turns);
           ])
       Keeper_runtime_manifest.Turn_started
   in
@@ -386,7 +513,7 @@ let run_keeper_cycle
 
      State-aware runtime routing resumes inside [main_path]. *)
   let main_path (turn_state : Keeper_unified_turn_execution.turn_state)
-    : (turn_success, Agent_sdk.Error.sdk_error) result
+    : (turn_success, Agent_core.Error.t) result
       * Keeper_unified_turn_execution.turn_state
     =
       let effective_runtime_id =
@@ -415,7 +542,7 @@ let run_keeper_cycle
           ~decision:(`Assoc [ "reason", `String "runtime" ])
           Keeper_runtime_manifest.Runtime_routed
       in
-      (* Concrete runtime health/capacity is owned by OAS/provider adapters.
+      (* Concrete runtime health/capacity is owned by AGENT_CORE/provider adapters.
          Keeper routing no longer rewrites runtimes from provider cooldown or
          process-queue probes. *)
       (match None with
@@ -448,12 +575,21 @@ let run_keeper_cycle
                    (fun consume -> consume ())
                    on_deferred_runtime_consumed)
               deferred_runtime_lane;
+            (* The wire code stays exactly what the typed encoder produced.
+               [record_pre_dispatch_terminal_observation] already records that
+               the turn never dispatched, in three typed fields:
+               [completion_contract_result = Completion_not_dispatched],
+               [runtime_outcome = Runtime_not_dispatched] and
+               [runtime_attempt_count = 0]. A "pre_dispatch_" prefix on top of
+               those said nothing new, and it broke the one consumer that
+               reads this field: [Keeper_terminal_reason.of_wire] compares
+               against ["config_error"] by equality, so the decorated form
+               fell through to [Unknown] and every pre-dispatch config failure
+               reached the operator as an unmapped runtime state (#29929). *)
             let terminal_reason_code =
-              Printf.sprintf
-                "pre_dispatch_%s"
-                (Keeper_agent_error.terminal_reason_code_of_sdk_error err)
+              Keeper_agent_error.terminal_reason_code_of_core_error err
             in
-            let error_message = Agent_sdk.Error.to_string err in
+            let error_message = Agent_core.Error.to_string err in
             Log.Keeper.error
               ~keeper_name:meta.name
               "%s: pre_dispatch failed: %s"
@@ -462,14 +598,14 @@ let run_keeper_cycle
             record_pre_dispatch_terminal_observation
               ~config
               ~meta
-              ~generation
               ~runtime_id:effective_runtime_runtime_name
               ~outcome:`Error
               ~terminal_reason_code
               ~activity_kind:"keeper.turn_blocked"
               ~trajectory_outcome:(Trajectory.Failed terminal_reason_code)
               ~error_kind:
-                (Keeper_execution_receipt.error_kind_of_string (sdk_error_kind err))
+                (Keeper_execution_receipt.error_kind_of_string
+                   Agent_core.Error.(category err |> category_label))
               ~error_message
               ~keeper_turn_id
               ();
@@ -482,7 +618,9 @@ let run_keeper_cycle
                   }
               | _ ->
                 Keeper_turn_fsm.Failure_provider_error
-                  { kind = sdk_error_kind err; detail = error_message }
+                  { kind = Agent_core.Error.(category err |> category_label)
+                  ; detail = error_message
+                  }
             in
             Keeper_turn_fsm.emit_transition
               ~keeper_name:meta.name
@@ -512,8 +650,7 @@ let run_keeper_cycle
               ~runtime_id:initial_execution.runtime_id
               ~max_context:initial_execution.max_context
               ~effective_budget:initial_execution.max_context_resolution.effective_budget
-              ~temperature:initial_execution.temperature
-              ~generation;
+              ~temperature:initial_execution.temperature;
             let turn_id = keeper_turn_id in
             let (_ : Keeper_turn_attempt_observer.start_observation) =
               Keeper_turn_attempt_observer.record_turn_start
@@ -541,7 +678,18 @@ let run_keeper_cycle
                  Keeper_world_observation_inputs.read_current_task ~config ~meta
                in
                let active_goal_summaries =
-                 Keeper_unified_prompt.active_goal_summaries ~config ~meta
+                 Keeper_unified_prompt.active_goal_summaries_of_store ~config
+               in
+               (* The briefing is pinned, so it is bounded here rather than
+                  left to the model input projection, which can only cut the
+                  conversation window. Sized from the runtime's own declared
+                  input ceiling: a runtime that declares none gets no bound,
+                  the same answer its projection gives it. Rotation to a larger
+                  lane only makes this conservative. *)
+               let context_budget_bytes =
+                 Runtime.declared_input_byte_ceiling_of_runtime_id effective_runtime_id
+                 |> Option.map (fun cap ->
+                   cap * Keeper_config.keeper_context_briefing_share_percent () / 100)
                in
                let { Keeper_unified_prompt.system_prompt; world_state; user_message } =
                  Keeper_unified_prompt.build_prompt
@@ -551,6 +699,7 @@ let run_keeper_cycle
                    ~turn_decision
                    ~current_task
                    ~active_goal_summaries
+                   ?context_budget_bytes
                    ~observation
                    ()
                in
@@ -569,7 +718,7 @@ let run_keeper_cycle
                    ~masc_root
                    ~keeper_name:meta.name
                    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                   ~generation:meta.runtime.nonce ()
+                   ()
                in
                (* RFC-0225 §3.3: one carrier per cycle. The pre-request hook
                   writes the effective turn policy here; the decision records
@@ -584,15 +733,15 @@ let run_keeper_cycle
                  =
                  (* The observation frame rides [dynamic_context]: rebuilt fresh
                     every turn and composed into the per-turn system prompt, so
-                    it never enters the persisted OAS conversation. Persisting
+                    it never enters the persisted AGENT_CORE conversation. Persisting
                     it as a user message re-fed the model its own observations
                     (943/945 identical frames in one live checkpoint, #25193)
                     and starved compaction. Persisted user content is utterances
                     only (wake marker + HITL resolutions). *)
                  { system_prompt; dynamic_context = world_state }
                in
-               (* 5. Run via OAS Agent.run() with transient-error retry.
-                  The turn-local OAS Event_bus preserves factual
+               (* 5. Run via Agent_core.Agent.run() with transient-error retry.
+                  The turn-local AGENT_CORE Event_bus preserves factual
                   ToolCalled/ToolCompleted pairing and drives
                   Streaming⇄Awaiting_tool_result FSM transitions. It does
                   not infer tool effects or veto retry. *)
@@ -643,31 +792,20 @@ let run_keeper_cycle
          block clears the field, preventing stale state on idle keepers. *)
                Keeper_registry.mark_turn_started ~base_path:config.base_path ~wake meta.name;
                let meta =
-                 match Keeper_registry.get ~base_path:config.base_path meta.name with
-                 | Some entry ->
-                   let () =
-                     match
-                       write_meta_with_merge
-                         ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-                         config
-                         entry.meta
-                     with
-                     | Ok () -> ()
-                     | Error err ->
-                       Otel_metric_store.inc_counter
-                         Keeper_metrics.(to_string WriteMetaFailures)
-                         ~labels:[ "keeper", entry.meta.name; "phase", Keeper_oas_execution_error_phase.(to_label Turn_start) ]
-                         ();
-                       Log.Keeper.warn
-                         ~keeper_name:entry.meta.name
-                         "%s: turn-start write_meta_with_merge failed: %s"
-                         entry.meta.name
-                         err
-                   in
-                   entry.meta
-                 | None -> meta
+                 match
+                   Keeper_owner_registry.get
+                     ~base_path:config.base_path
+                     ~keeper_name:meta.name
+                 with
+                 | Ok owner ->
+                   (match (Keeper_owner.projection owner).meta with
+                    | Some latest -> latest
+                    | None -> meta)
+                 | Error _ -> meta
                in
-               Keeper_registry.mark_turn_measurement ~base_path:config.base_path meta.name;
+               Keeper_registry.mark_turn_measurement
+                 ~base_path:config.base_path
+                 meta.name;
                (match Keeper_registry.get ~base_path:config.base_path meta.name with
                 | Some { current_turn_observation = Some { measurement = Some _; _ }; _ }
                   ->
@@ -713,9 +851,9 @@ let run_keeper_cycle
                        ()
                  in
                  match
-                   Keeper_context_runtime.timed (fun () ->
+                   Inference_utils.timed (fun () ->
                      match Eio_context.get_clock () with
-                     | Error msg -> Error (Agent_sdk.Error.Internal msg), turn_state
+                     | Error msg -> Error (Agent_core.Error.Internal msg), turn_state
                      | Ok clock ->
                        start_background_turn_event_bus_drain ~clock;
                        let { Keeper_unified_turn_retry_setup.current_turn_phase_elapsed_ms }
@@ -729,7 +867,7 @@ let run_keeper_cycle
                            ; base_dir
                            ; build_turn_prompt
                            ; channel
-                           ; continuation_delivery_channel
+                           ; continuation_channel = continuation_channel_of_wake wake
                            ; hitl_resolution
                            ; cleanup
                            ; config
@@ -737,7 +875,6 @@ let run_keeper_cycle
                            ; event_bus
                            ; event_bus_integrity_error_snapshot
                            ; tool_completed_count_snapshot
-                           ; generation
                            ; keeper_turn_id
                            ; meta
                            ; turn_ctx_cell
@@ -853,13 +990,13 @@ let run_keeper_cycle
                        ~config
                        ~keeper_name:meta.name
                        trajectory_acc
-                       (Trajectory.Failed (Agent_sdk.Error.to_string err));
-                  let e_str = Agent_sdk.Error.to_string err in
+                       (Trajectory.Failed (Agent_core.Error.to_string err));
+                  let e_str = Agent_core.Error.to_string err in
                   let is_transient = EC.is_transient_network_error err in
                   (match err with
-                      | Agent_sdk.Error.Api (Timeout _) ->
+                      | Agent_core.Error.Api (Timeout _) ->
                         Otel_metric_store.inc_counter
-                          Keeper_metrics.(to_string OasTimeoutClassifications)
+                          Keeper_metrics.(to_string Agent_coreTimeoutClassifications)
                           ~labels:[ "classification", "transient_network" ]
                           ()
                       | _ -> ());
@@ -892,7 +1029,9 @@ let run_keeper_cycle
                         match Keeper_turn_driver.classify_masc_internal_error err with
                          | _ ->
                            Keeper_turn_fsm.Failure_provider_error
-                             { kind = sdk_error_kind err; detail = short_preview e_str }
+                             { kind = Agent_core.Error.(category err |> category_label)
+                             ; detail = short_preview e_str
+                             }
                      in
                      Keeper_turn_fsm.emit_transition
                        ~keeper_name:meta.name
@@ -904,13 +1043,35 @@ let run_keeper_cycle
                     then Log.Keeper.warn
                     else Log.Keeper.error
                   in
+                  (* masc#28762: [final_execution.runtime_id] names the
+                     deferred-lane assignment this cycle was budgeted under,
+                     not necessarily the concrete candidate
+                     [attempt_runtime_candidates] actually dispatched —
+                     [Runtime_lane_preference] sticky ordering can route a
+                     lane keyed by one runtime id to a different candidate
+                     first (observed 2026-08-15T11:49Z: the lane-entry
+                     runtime was consistently logged while a
+                     sticky-reordered sibling candidate actually dispatched,
+                     so this log named the untried lane key instead of the
+                     runtime that actually errored).
+                     [keeper_cycle_failed_runtime_attribution] reports the
+                     dispatched candidate's own id when a same-turn
+                     deferral hint is available. *)
+                  let runtime_attribution =
+                    keeper_cycle_failed_runtime_attribution
+                      ~deferred_runtime_lane:turn_state.deferred_runtime_lane
+                      ~execution_runtime_id:final_execution.runtime_id
+                  in
                   log_keeper_cycle_failed
                     ~keeper_name:meta.name
-                    "%s: keeper cycle FAILED runtime=%s max_context=%d context_budget=%d \
+                    ~category:Log.Turn
+                    "%s: keeper cycle FAILED runtime=%s deferred_next_runtime=%s \
+                     max_context=%d context_budget=%d \
                      primary_budget=%d requested_override=%s system_and_user_bytes=%d \
                      latency=%dms%s error=%s"
                     meta.name
-                    final_execution.runtime_id
+                    runtime_attribution.reported_runtime_id
+                    runtime_attribution.deferred_next_runtime_id
                     final_execution.max_context
                     final_execution.max_context_resolution.effective_budget
                     final_execution.max_context_resolution.primary_budget
@@ -938,8 +1099,8 @@ let run_keeper_cycle
                      else "")
                     (short_preview e_str);
                   Otel_metric_store.inc_counter
-                    Keeper_metrics.(to_string OasExecutionErrors)
-                    ~labels:[ "keeper", meta.name; "phase", Keeper_oas_execution_error_phase.(to_label Cycle_failed) ]
+                    Keeper_metrics.(to_string Agent_coreExecutionErrors)
+                    ~labels:[ "keeper", meta.name; "phase", Keeper_agent_core_execution_error_phase.(to_label Cycle_failed) ]
                     ();
                   let updated_meta =
                     Keeper_unified_metrics.update_metrics_from_failure
@@ -947,10 +1108,10 @@ let run_keeper_cycle
                       ~latency_ms
                       ~observation
                       ~reason:e_str
-                      ~sdk_error:err
+                      ~core_error:err
                       ()
                   in
-                  let e_str = Agent_sdk.Error.to_string err in
+                  let e_str = Agent_core.Error.to_string err in
                   let terminal_reason =
                     Keeper_turn_terminal.of_failure
                       ~raw_error:e_str
@@ -981,71 +1142,36 @@ let run_keeper_cycle
                     ~error:e_str
                     ~terminal_reason
                     ();
-                  (* #9769 root fix: heartbeat-field-merge prevents the
-             turn-failure retry from clobbering heartbeat-owned fields metadata fields, which was the
-dominant source of the observed CAS race exhaustion after
-             keeper OAS timeout. *)
-                  (match
-                     write_meta_with_merge
-                       ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-                       config
-                       updated_meta
-                   with
-                   | Ok () -> ()
-                   | Error msg ->
-                     Otel_metric_store.inc_counter
-                       Keeper_metrics.(to_string WriteMetaFailures)
-                       ~labels:
-                         [ "keeper", updated_meta.name
-                         ; ( "phase"
-                           , if is_version_conflict_error msg
-                             then "turn_failure_cas_race"
-                             else "turn_failure" )
-                         ]
-                       ();
-                     if is_version_conflict_error msg
-                     then
-                       Log.Keeper.warn
-                         ~keeper_name:updated_meta.name
-                         "write_meta lost CAS race after retries (turn failure path): %s"
-                         msg
-                     else
-                       Log.Keeper.error
-                         ~keeper_name:updated_meta.name
-                         "write_meta failed after unified turn failure: %s"
-                         msg);
+                  commit_turn_runtime_or_raise
+                    ~config
+                    ~before:meta
+                    ~after:updated_meta
+                  |> ignore;
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string WriteMetaCycleFailures)
                     ~labels:[ "keeper", meta.name; "site", Keeper_write_meta_cycle_failure_site.(to_label Turn_failure) ]
                     ();
-                  (* Route the failure (total over sdk_error), retain the exact
+                  (* Route the failure (total over core_error), retain the exact
                      final execution identity, and record typed failure plus
                      telemetry here. Exhausted failures remain visible without
                      dispatching a second LLM call. *)
-                  let transcript_corruption = transcript_corruption err in
                   let failure_route =
                     Keeper_runtime_failure_route.route_of_error
-                      ~boundary:
-                        (execution_boundary_of_turn_failure
-                           ~transcript_corruption
-                           err)
+                      ~boundary:(execution_boundary_of_turn_failure err)
                       err
                   in
-                  let source_disposition, turn_state =
-                    match transcript_corruption with
-                    | Some detail ->
-                      Pause_after_transcript_corruption { detail }, turn_state
-                    | None ->
-                      (* Capacity failures (context overflow, request-body
-                         caps, serving-input rejection) follow the ordinary
-                         typed failure route. The automatic overflow-compaction
-                         recovery that used to branch here was removed
-                         (#26546) because it never produced a committed
-                         compaction on record. #26545 bounds conversation
-                         history only; whole-request provider fit is tracked
-                         separately in #26551. *)
-                      Follow_failure_route, turn_state
-                  in
+                  (* Every failure follows the ordinary typed route, including
+                     an incomplete tool transcript: a past structural defect is
+                     evidence, not a scheduling gate. Boot-time
+                     [Keeper_transcript_tail_recovery] closes the open cycles a
+                     process death leaves behind. Capacity failures (context
+                     overflow, request-body caps, serving-input rejection) also
+                     route here; the automatic overflow-compaction recovery
+                     that used to branch was removed (#26546) because it never
+                     produced a committed compaction on record. #26545 bounds
+                     conversation history only; whole-request provider fit is
+                     tracked separately in #26551. *)
+                  let source_disposition = Follow_failure_route in
                   exact_failure_execution :=
                     Some
                       ( final_execution.runtime_id
@@ -1085,27 +1211,31 @@ dominant source of the observed CAS race exhaustion after
                    | Error missing_err -> Error missing_err, turn_state
                    | Ok final_execution ->
                      finalize_trajectory_acc
-                       ~config
-                       ~keeper_name:meta.name
-                       trajectory_acc
-                       Trajectory.Completed;
+                          ~config
+                          ~keeper_name:meta.name
+                          trajectory_acc
+                          Trajectory.Completed;
                   (* SSOT: success-path terminal FSM transitions
                      (Streaming -> Completing -> Done) are emitted once inside
                      [Keeper_unified_turn_success.handle]. Do not duplicate them
                      here; this is the sole caller of that function. *)
                   let success =
+                    let execution_outcome =
+                      Keeper_execution_outcome.create
+                        ~lane:(Keeper_execution_outcome.Autonomous channel)
+                        result
+                    in
                     Keeper_unified_turn_success.handle
                       ~config
                       ~meta
                       ~turn_ctx_cell
                       ~observation
-                      ~channel
                       ~latency_ms
                       ~degraded_retry_applied
                       ~degraded_retry_runtime
                       ~fallback_reason
                       ~keeper_turn_id
-                      result
+                      execution_outcome
                   in
                   (match success with
                    | Keeper_unified_turn_success.Completed updated_meta ->
@@ -1114,11 +1244,28 @@ dominant source of the observed CAS race exhaustion after
                        { turn_state with cycle_completed = true }
                      in
                      post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
+                     let continuation_route =
+                       match
+                         ( continuation_channel_of_wake wake
+                         , result.Keeper_agent_run.terminal_effect_receipt )
+                       with
+                       | ( Some channel
+                         , Some
+                             (Keeper_tool_execution.Surface_post_completed
+                                target) )
+                         when Keeper_surface_post.matches_continuation_route
+                                target
+                                channel ->
+                         Continuation_route_addressed
+                       | _ -> Continuation_route_not_addressed
+                     in
                      Ok
                        (turn_success_of_stop_reason
                           ~meta:updated_meta
+                          ~continuation_route
                           result.Keeper_agent_run.stop_reason),
-                     turn_state)))))
+                     turn_state))))
+                     )
   in
   let append_phase_gate_decision_for_gate turn_plan turn_state =
     Keeper_unified_turn_manifest.append_phase_gate_decision
@@ -1132,7 +1279,6 @@ dominant source of the observed CAS race exhaustion after
     Keeper_unified_turn_phase_gate.decide_and_record
       ~config
       ~meta
-      ~generation
       ~keeper_turn_id
       ~append_phase_gate_decision:append_phase_gate_decision_for_gate
       ~turn_state

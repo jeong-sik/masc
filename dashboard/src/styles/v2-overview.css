@@ -24,7 +24,7 @@
 }
 
 .v2-overview-alerts ul > li,
-.v2-overview-alerts .chip,
+.v2-overview-alerts .tag-chip,
 .v2-overview-ticker-card,
 .v2-overview-keepers li,
 .v2-cockpit-route {
@@ -97,6 +97,20 @@
 
 .v2-overview-kpis {
   container-type: inline-size;
+}
+
+/* The vendored .ov-kpis strip (keeper-v2/surfaces.css) draws its cell dividers
+   with the 1px-gap technique: the container paints --border-soft and the cells
+   paint over it, so any grid track without a cell renders as a bare band.
+   The prototype fills its 6 columns exactly; the live overview renders 7 KPIs
+   (pinned by `renders exactly 7 cross-surface KPI cells`), so the trailing one
+   sat alone on a second row beside five empty tracks. Span it across the rest
+   of its row to close the strip. This holds at every configured column count
+   (6 desktop / 3 / 2 narrow) because 7 leaves exactly one trailing cell in
+   each; adding an 8th KPI trips the count test above, which is the signal to
+   revisit this rule rather than the place to bump a number. */
+.v2-overview-kpis > .ov-kpi:last-child {
+  grid-column: 1 / -1;
 }
 
 .v2-overview-attention,

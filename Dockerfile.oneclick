@@ -5,7 +5,7 @@
 # fresh clone produces a runnable image. First build is slow (OCaml 5.5 + deps).
 #
 # The server binary and deployment overlay come from the same tree; the base
-# capability catalog is embedded by OAS. On Apple Silicon this builds a native
+# capability catalog is embedded by AGENT_CORE. On Apple Silicon this builds a native
 # arm64 image (no emulation).
 
 # ---- Stage 1: OCaml server from source --------------------------------------
@@ -27,11 +27,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 USER opam
 WORKDIR /src
 
-# Copy only the pin scripts + opam metadata first so the expensive dependency
-# layer is cached across ordinary source edits. opam-pin-external-deps.sh sources
-# its sibling oas-agent-sdk-pin.sh, so both must be present (matches the CI cache
-# key in .github/actions/setup-ocaml-toolchain, which hashes both scripts).
-COPY --chown=opam:opam scripts/opam-pin-external-deps.sh scripts/oas-agent-sdk-pin.sh scripts/
+# Copy the external pin script + opam metadata first so the expensive
+# dependency layer is cached across ordinary source edits.
+COPY --chown=opam:opam scripts/opam-pin-external-deps.sh scripts/
 COPY --chown=opam:opam dune-project masc.opam ./
 RUN opam update -y \
     && chmod +x scripts/opam-pin-external-deps.sh \

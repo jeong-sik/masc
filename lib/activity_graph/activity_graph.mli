@@ -49,6 +49,10 @@ end
 
 (** {1 SSE wire encoding} *)
 
+(** The directory this store occupies under [.masc]. Readers of the same
+    store name it from here instead of spelling the literal. *)
+val store_dirname : string
+
 val format_sse_event : event -> string
 (** Renders [value] as a single SSE frame:
     [id: <seq>\nevent: activity\ndata: <json>\n\n].
@@ -84,14 +88,21 @@ val list_events :
   ?kinds:string list ->
   after_seq:int ->
   limit:int ->
+  keep:(event -> bool) ->
   unit ->
   event list
-(** Reads the persisted log, applies the [kinds] filter, and
-    returns the page of events strictly after [after_seq] up
-    to [limit] entries.  When [after_seq = 0] the page is
-    the {b last} [limit] entries (newest-first dashboard
-    initial load); otherwise it is the next [limit] forward
-    (catch-up tail). *)
+(** Reads the persisted log, applies the [kinds] filter and
+    [keep], and returns the page of events strictly after
+    [after_seq] up to [limit] entries.  When [after_seq = 0]
+    the page is the {b last} [limit] entries (newest-first
+    dashboard initial load); otherwise it is the next [limit]
+    forward (catch-up tail).
+
+    [keep] runs before the page is cut, so [limit] counts
+    events the caller asked for rather than events the log
+    happened to hold. A caller that filters afterwards has no
+    value of [limit] that means "this agent's newest N": the
+    page fills with whatever the workspace was busy doing. *)
 
 (** {1 JSON projections} *)
 
@@ -105,8 +116,7 @@ val json_response :
 (** Polling-friendly JSON envelope: [generated_at_iso],
     [dashboard_surface], [source], [retention], [query],
     [events], [count], [total_matching_events], [after_seq],
-    [next_after_seq], [limit], [workspace_id] (kept as ["default"]
-    for backward-compat), [kinds], [latest_seq], and
+    [next_after_seq], [limit], [kinds], [latest_seq], and
     [latest_matching_seq].  [next_after_seq] is the seq of the
     last returned event so the caller can resume cleanly on the
     next poll.  [latest_seq] is the max of the persisted counter
@@ -142,6 +152,23 @@ val agent_spans_json :
     to "now".  Returns [`Assoc [agents; spans; time_range;
     window]]. *)
 
+type cache_stats = {
+  past_day_files : int;  (** parsed day files held *)
+  past_day_records : int;  (** events across them *)
+}
+
+val cache_stats : unit -> cache_stats
+(** What the past-day parse cache is holding right now.
+
+    Exists because sizing it from outside the process meant taking RSS,
+    reading [live_words] off /health, and multiplying the on-disk JSONL by a
+    guessed parse factor -- an estimate good to within a factor of two, which
+    settles nothing. [past_day_records] is the number a retention change
+    moves.
+
+    A read rather than a gauge: this module has no metric dependency, and the
+    caller that already exports gauges decides how often to look. *)
+
 module For_testing : sig
   val reset_current_day_cache_for_testing : unit -> unit
   (** Clears the boundary-keyed current-day parse cache and its
@@ -151,13 +178,7 @@ module For_testing : sig
   (** Clears the [(path, mtime) -> event list] past-day cache. *)
 
   val current_day_parsed_line_count : unit -> int
-  (** Number of non-blank lines folded through the *incremental delta*
-      path since the last reset (excludes the initial cold-miss full
-      parse and the invalid-UTF-8 / shrink fallback rescans). Lets a
-      test prove that appending [n] lines behind a warm cache parses
-      exactly [n] lines, not the whole file. *)
 
-  val current_day_cache_entry_count : unit -> int
   val past_day_cache_entry_count : unit -> int
 
   val current_day_path : Workspace_utils.config -> string

@@ -12,7 +12,7 @@
     - [<masc_root>/tool_calls/]              — Full I/O for keeper tool calls
     - [<masc_root>/trajectories/<keeper>/]   — Keeper trajectory tool-call rows
     - [<masc_root>/tool_usage/]              — Non-public registered tool calls
-    - [<masc_root>/oas-events/]              — Durable OAS native/custom events
+    - [<masc_root>/agent-core-events/]              — Durable AGENT_CORE native/custom events
     - [<masc_root>/keepers/<name>/execution-receipts/]
                                              — Keeper execution receipts
     - [<base_path>/data/tool-metrics/]       — Tool duration/success metrics
@@ -24,7 +24,7 @@ type source = Telemetry_unified_source.source =
   | Tool_call_io
   | Trajectory_tool_call
   | Tool_usage
-  | Oas_event
+  | Agent_core_event
   | Execution_receipt
   | Goal_event
   | Tool_metric
@@ -77,11 +77,7 @@ let extract_ts (json : Yojson.Safe.t) : float =
        |> Option.value ~default:0.0)
   | _ -> 0.0
 
-let day_string_of_unix_seconds ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf "%04d-%02d-%02d"
-    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-
+let day_string_of_unix_seconds ts = Jsonl_writer.day_key ~ts
 let effective_day_window ?since_ts ?until_ts () =
   match since_ts, until_ts with
   | None, None -> None
@@ -123,11 +119,25 @@ let latest_ts_of_entries (entries : Yojson.Safe.t list) : float option =
       if ts > 0.0 then max_ts_opt acc ts else acc)
     None entries
 
+(* How many newest rows a freshness probe scans. Rows are append-ordered by
+   time, but a row can carry no usable timestamp, so the probe takes the max
+   over a small window rather than trusting the newest row alone. *)
+let latest_ts_probe_rows = 64
+
+(* Projects each scanned row to its timestamp instead of returning the parsed
+   rows: this runs once per store, and the summary path runs it once per
+   keeper, so retaining [latest_ts_probe_rows] trees per store made the
+   resident set scale with keeper count — the axis RFC-0372 §5 gates Phase 2
+   on. Same value as [latest_ts_of_entries] over the same window. *)
 let latest_store_ts source dir label : float option =
   if not (Sys.file_exists dir) then None
   else
     match Dated_jsonl.create ~base_dir:dir () with
-    | store -> latest_ts_of_entries (Dated_jsonl.read_recent store 64)
+    | store ->
+      Dated_jsonl.filter_map_recent store latest_ts_probe_rows ~f:(fun json ->
+        let ts = extract_ts json in
+        if ts > 0.0 then Some ts else None)
+      |> List.fold_left max_ts_opt None
     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
     | exception exn ->
       observe_source_read_failure_exn source ~site:"latest_store_ts" exn;
@@ -152,7 +162,8 @@ let freshness_fields ~now latest_ts =
     [ ("latest_ts_unix", `Null); ("latest_ts_iso", `Null); ("latest_age_s", `Null) ]
 
 let source_health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
-    ?(optional_when_missing = false) ?(read_error = false) ?coverage_gap () =
+    ?(optional_when_missing = false) ?(read_error = false)
+    ?(producer_active = false) ?coverage_gap () =
   match coverage_gap with
   | Some gap ->
     [
@@ -178,7 +189,7 @@ let source_health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
         | None -> ("empty", "no_entries")
         | Some ts ->
           let latest_age_s = max 0.0 (now -. ts) in
-          if latest_age_s > freshness_slo_s then
+          if latest_age_s > freshness_slo_s && not producer_active then
             ("stale", "freshness_slo_exceeded")
           else ("ok", "")
     in
@@ -191,7 +202,7 @@ let source_health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
 let source_optional_when_missing = function
   | Goal_event -> true
   | Keeper_metric | Agent_event | Tool_call_io | Trajectory_tool_call
-  | Tool_usage | Oas_event | Execution_receipt | Tool_metric -> false
+  | Tool_usage | Agent_core_event | Execution_receipt | Tool_metric -> false
 
 let coverage_gap_recovered ~latest_ts gap =
   match latest_ts, extract_ts gap with
@@ -222,10 +233,6 @@ let coverage_gap_status_fields gaps source ~latest_ts =
 
 (* ── Semantic duplicate suppression ───────────────── *)
 
-let assoc_field name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
-
 let string_field name json =
   match Json_field.string json name |> Json_field.to_option with
   | None -> None
@@ -234,48 +241,16 @@ let string_field name json =
     if value = "" then None else Some value
 ;;
 
-let bool_field name json =
-  Json_field.bool json name |> Json_field.to_option
-;;
+module Execution_id_set = Set.Make (String)
 
-let drop_prefix prefix value =
-  if String.starts_with ~prefix value then
-    String.sub value (String.length prefix)
-      (String.length value - String.length prefix)
-  else value
-
-let drop_suffix suffix value =
-  if String.ends_with ~suffix value then
-    String.sub value 0 (String.length value - String.length suffix)
-  else value
-
-let canonical_actor_name value =
-  value
-  |> String.trim
-  |> drop_prefix "keeper-"
-  |> drop_suffix "-agent"
-
-type tool_call_signature = {
-  actor : string;
-  tool : string;
-  success : bool option;
-  ts : float;
-}
-
-let tool_call_signature ?success ~actor ~tool ~ts () =
-  let actor = canonical_actor_name actor in
-  let tool = String.trim tool in
-  if actor = "" || tool = "" || ts <= 0.0 then None
-  else Some { actor; tool; success; ts }
-
-let tool_call_io_signature json =
+(* Both streams report the same physical tool call. [execution_id] is the
+   RFC-0233 join key: minted once at the MCP dispatch boundary, written to
+   the tool_calls row and carried on the [Tool_called] event for the same
+   execution. A row without one is not matched against — an unidentified
+   event is kept, because nothing proves it is a duplicate. *)
+let tool_call_io_execution_id json =
   match string_field "source" json with
-  | Some "tool_call_io" ->
-    (match string_field "keeper" json, string_field "tool" json with
-     | Some actor, Some tool ->
-       tool_call_signature ?success:(bool_field "success" json) ~actor ~tool
-         ~ts:(extract_ts json) ()
-     | _ -> None)
+  | Some "tool_call_io" -> string_field "execution_id" json
   | _ -> None
 
 let tool_called_detail_from_fields fields =
@@ -292,38 +267,25 @@ let tool_called_event_detail json =
   | Some "agent_event", `Assoc fields -> tool_called_detail_from_fields fields
   | _ -> None
 
-let keeper_tool_called_signature json =
+let keeper_tool_called_execution_id json =
   match tool_called_event_detail json with
   | None -> None
-  | Some detail ->
-    (match string_field "agent_id" detail, string_field "tool_name" detail with
-     | Some actor, Some tool ->
-       tool_call_signature ?success:(bool_field "success" detail) ~actor ~tool
-         ~ts:(extract_ts json) ()
-     | _ -> None)
-
-let same_tool_call_signature left right =
-  String.equal left.actor right.actor
-  && String.equal left.tool right.tool
-  &&
-  (match left.success, right.success with
-   | Some a, Some b -> Bool.equal a b
-   | None, None -> true
-   | Some _, None | None, Some _ -> false)
-  && abs_float (left.ts -. right.ts) <= 5.0
+  | Some detail -> string_field "execution_id" detail
 
 let suppress_shadow_keeper_tool_events entries =
-  let tool_call_io =
-    List.filter_map tool_call_io_signature entries
+  let logged_executions =
+    entries
+    |> List.filter_map tool_call_io_execution_id
+    |> List.fold_left (fun acc id -> Execution_id_set.add id acc) Execution_id_set.empty
   in
-  if tool_call_io = [] then entries
+  if Execution_id_set.is_empty logged_executions
+  then entries
   else
     List.filter
       (fun json ->
-        match keeper_tool_called_signature json with
-        | None -> true
-        | Some signature ->
-          not (List.exists (same_tool_call_signature signature) tool_call_io))
+         match keeper_tool_called_execution_id json with
+         | None -> true
+         | Some execution_id -> not (Execution_id_set.mem execution_id logged_executions))
       entries
 
 (* ── Entry tagging ──────────────────────────────────── *)
@@ -384,7 +346,7 @@ let matches_keeper name (json : Yojson.Safe.t) : bool =
           | _ -> false)
       | _ -> false
     in
-    (* keeper_metric: "name" field; tool_call_io: "keeper"; oas_event: "agent_name" *)
+    (* keeper_metric: "name" field; tool_call_io: "keeper"; agent_core_event: "agent_name" *)
     check "name"
     || check "keeper"
     || check "keeper_name"
@@ -443,6 +405,46 @@ let matches_scope ?session_id ?operation_id ?worker_run_id (json : Yojson.Safe.t
    than reintroducing an unbounded scan. *)
 let unbounded_window_scan_cap = 50_000
 
+(* RFC-0372 — the per-REQUEST ceiling, as opposed to [unbounded_window_scan_cap]
+   above which is per STORE. The distinction is the defect: with nine sources,
+   three fanning out per keeper, a per-store cap lets one request materialise
+   ~30 x 50k entries, and adding a keeper raises that ceiling. A bound that
+   grows with the data it bounds is not a bound.
+
+   [read_limit] is abstract in the mli so "unbounded" cannot be constructed.
+   Phase 1 of RFC-0372 caps what a caller may ask for; Phase 2 makes the
+   allowance span stores instead of applying to each.
+
+   The ceiling is measured, not chosen. Phase 1 picked 10_000 provisionally;
+   request_cost_gate (Mode C, 8 keepers x 20k entries) then measured peak RSS
+   against it on this same reader:
+
+     n =  2_000 ->  80.2 MB, 0.49 s
+     n =  5_000 -> 129.4 MB, 1.03 s
+     n = 10_000 -> 185.1 MB, 2.29 s
+
+   That is roughly 13 KB of heap per entry (a ~25x expansion over the 521-byte
+   JSON rows) on top of a ~54 MB fixed cost. 10_000 buys a 5 MB response for
+   185 MB of heap; 2_000 keeps the response near 1 MB and the heap near 80 MB,
+   and it matches [default_windowed_telemetry_limit] so the widest default
+   request is also the widest possible one. Callers needing more paginate via
+   [offset]. *)
+let max_read_entries = 2_000
+
+let default_read_entries = 100
+
+type read_limit = int (* invariant: 1 <= v <= max_read_entries *)
+
+let read_limit_of_int n =
+  if n <= 0 then default_read_entries
+  else if n > max_read_entries then max_read_entries
+  else n
+;;
+
+let read_limit_to_int limit = limit
+
+let default_read_limit = default_read_entries
+
 (* Shared read path for directory-backed Dated_jsonl stores. Always routes
    through the tail-bounded readers ([read_recent] / [read_range_recent]) so a
    wide window or an "unlimited" ([n] <= 0) request cannot parse the whole
@@ -459,6 +461,36 @@ let bounded_entries_for_window store ~n ?since_ts ?until_ts () =
   in
   List.filter (within_requested_window ?since_ts ?until_ts) entries
 
+(* RFC-0372 Phase 2 — merge per-store slices while holding only the newest
+   [target] entries.
+
+   [List.concat_map] materialises every store's slice before anything is
+   trimmed, so the working set scales with store count: at 8 keepers the
+   per-keeper sources alone hold 8x what the caller asked for, and each added
+   keeper adds another multiple. Folding with a trim after each store keeps the
+   working set at O(target + one store's slice).
+
+   The merged result is unchanged. Each store is already newest-first, so an
+   entry beyond a store's own newest [target] is older than that store's newest
+   [target] and cannot reach the merged head. Trimming per store therefore
+   discards only entries that the final [take_first target] would have dropped
+   anyway.
+
+   [target <= 0] keeps the old concat behaviour; callers inside this module
+   always pass a positive limit since Phase 1, but the guard keeps the helper
+   total. *)
+let merge_newest_bounded ~target ~read items =
+  if target <= 0 then List.concat_map read items
+  else
+    List.fold_left
+      (fun acc item ->
+         match read item with
+         | [] -> acc
+         | slice -> sort_newest_first (slice @ acc) |> take_first target)
+      []
+      items
+;;
+
 let read_fixed_source dir source ~n ?since_ts ?until_ts () : Yojson.Safe.t list =
   match classify_store_dir source ~site:"read_fixed_source_dir" dir with
   | Store_missing | Store_invalid -> []
@@ -472,6 +504,33 @@ let read_fixed_source dir source ~n ?since_ts ?until_ts () : Yojson.Safe.t list 
       observe_source_read_failure_exn source ~site:"read_fixed_source" exn;
       []
 
+(* The probe stage of [read_keeper_metrics_fast_top] needs one number per
+   keeper directory: the newest timestamp that directory can offer. Reading its
+   rows and keeping them made the resident set scale with keeper count — up to
+   64 parsed rows per directory, held for every directory at once, at the
+   ~13 KB per entry this module measured above. That is the axis RFC-0372 §5
+   makes the Phase 2 gate: adding a keeper must not raise the ceiling.
+
+   Projecting to the timestamp during the read costs one float per row instead
+   of one tree. Store classification and failure handling mirror
+   {!read_fixed_source} exactly, including that only [Dated_jsonl.create] is
+   guarded — a read that raises still propagates. Entries are not tagged
+   because nothing downstream sees them. *)
+let probe_latest_ts dir source ~n : float option =
+  match classify_store_dir source ~site:"probe_latest_ts_dir" dir with
+  | Store_missing | Store_invalid -> None
+  | Store_directory ->
+    match Dated_jsonl.create ~base_dir:dir () with
+    | store ->
+      Dated_jsonl.filter_map_recent store n ~f:(fun json ->
+        let ts = extract_ts json in
+        if ts > 0.0 then Some ts else None)
+      |> List.fold_left max_ts_opt None
+    | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+    | exception exn ->
+      observe_source_read_failure_exn source ~site:"probe_latest_ts" exn;
+      None
+
 (* ── Read keeper metrics (per-keeper directories) ───── *)
 
 let read_keeper_metrics ~masc_root ?keeper_name ?since_ts ?until_ts ~n () :
@@ -481,27 +540,25 @@ let read_keeper_metrics ~masc_root ?keeper_name ?since_ts ?until_ts ~n () :
     | None -> dirs
     | Some name -> List.filter (fun (k, _) -> String.equal k name) dirs
   in
-  List.concat_map (fun (_name, dir) ->
-    read_fixed_source dir Keeper_metric ~n ?since_ts ?until_ts ()
-  ) dirs
+  merge_newest_bounded ~target:n dirs ~read:(fun (_name, dir) ->
+    read_fixed_source dir Keeper_metric ~n ?since_ts ?until_ts ())
 
 let read_keeper_metrics_fast_top ~masc_root ~n () : Yojson.Safe.t list =
   let target = n + 1 in
-  let probe_limit = min 64 target in
+  let probe_limit = min latest_ts_probe_rows target in
   let dirs = discover_keeper_metric_dirs masc_root in
   let probes =
     List.filter_map
       (fun (name, dir) ->
-        let entries = read_fixed_source dir Keeper_metric ~n:probe_limit () in
-        match latest_ts_of_entries entries with
+        match probe_latest_ts dir Keeper_metric ~n:probe_limit with
         | None -> None
-        | Some latest_ts -> Some (name, dir, latest_ts, entries))
+        | Some latest_ts -> Some (name, dir, latest_ts))
       dirs
-    |> List.sort (fun (_, _, a, _) (_, _, b, _) -> Float.compare b a)
+    |> List.sort (fun (_, _, a) (_, _, b) -> Float.compare b a)
   in
   let rec loop acc = function
     | [] -> acc
-    | (_name, dir, latest_ts, probe_entries) :: rest ->
+    | (_name, dir, latest_ts) :: rest ->
       let acc = sort_newest_first acc |> take_first target in
       let cutoff =
         if List.length acc < target then None
@@ -510,10 +567,11 @@ let read_keeper_metrics_fast_top ~masc_root ~n () : Yojson.Safe.t list =
       (match cutoff with
        | Some ts when latest_ts < ts -> acc
        | _ ->
-         let entries =
-           if target <= probe_limit then probe_entries
-           else read_fixed_source dir Keeper_metric ~n:target ()
-         in
+         (* Re-read rather than reusing probe rows. Holding them to save this
+            read for small [target] is what made the probe cost scale with
+            keeper count; the cutoff above already skips most directories, so
+            the reads this adds are the ones that contribute to the result. *)
+         let entries = read_fixed_source dir Keeper_metric ~n:target () in
          loop (sort_newest_first (entries @ acc) |> take_first target) rest)
   in
   loop [] probes
@@ -533,8 +591,8 @@ let read_execution_receipts ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
     | None -> dirs
     | Some name -> List.filter (fun (k, _) -> String.equal k name) dirs
   in
-  List.concat_map
-    (fun (_name, dir) ->
+  merge_newest_bounded ~target:n dirs
+    ~read:(fun (_name, dir) ->
       try
         let store = Dated_jsonl.create ~base_dir:dir () in
         dated_jsonl_entries store ~n ?since_ts ?until_ts ()
@@ -547,7 +605,6 @@ let read_execution_receipts ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
         Log.Telemetry.warn
           "read_execution_receipts: store open failed for %s" dir;
         [])
-    dirs
 
 let read_trajectory_file path ~max_lines ?since_ts ?until_ts () =
   if
@@ -605,7 +662,7 @@ let trace_file_within_since ~since_ts path =
   | Some since ->
     (match Unix.stat path with
      | st -> st.Unix.st_mtime >= since
-     | exception _ -> true)
+     | exception _ -> true)  (* cancel-guard-ok: guards a blocking syscall: no Eio cancellation point *)
 
 let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
     : Yojson.Safe.t list =
@@ -621,8 +678,8 @@ let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
      from being unbounded (the freeze cause). *)
   let max_lines = if n <= 0 then unbounded_window_scan_cap else n in
   let entries =
-    List.concat_map
-      (fun (_name, dir) ->
+    merge_newest_bounded ~target:max_lines dirs
+      ~read:(fun (_name, dir) ->
         protect_source_read Trajectory_tool_call
           ~site:"read_trajectory_tool_calls_readdir" ~default:[] (fun () ->
           Sys.readdir dir
@@ -634,7 +691,6 @@ let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
                read_trajectory_file
                  (Filename.concat dir name)
                  ~max_lines ?since_ts ?until_ts ())))
-      dirs
   in
   let entries = sort_newest_first entries in
   let entries = if n <= 0 then entries else take_first n entries in
@@ -672,23 +728,43 @@ let read_goal_events ~masc_root ?since_ts ?until_ts ~n () : Yojson.Safe.t list =
 
 let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
     ?keeper_name ?session_id ?operation_id ?worker_run_id ?since_ts ?until_ts
-    ?(n = 100) ?(offset = 0) () : read_result =
-  let limited = n > 0 in
+    ?(limit = default_read_limit) ?(offset = 0) () : read_result =
+  (* [n] is positive by construction ([read_limit]), so the former
+     [limited = n > 0] branch — and with it the unbounded per_source = 0 path
+     that let one request scan every store to its own cap — is gone. *)
+  let n = read_limit_to_int limit in
   let has_filter =
     Option.is_some keeper_name || Option.is_some session_id
     || Option.is_some operation_id || Option.is_some worker_run_id
     || Option.is_some since_ts || Option.is_some until_ts
   in
   let per_source =
-    if not limited then 0
-    else if has_filter then max (n + offset) ((n + offset) * 2)
+    if has_filter then max (n + offset) ((n + offset) * 2)
     else n + offset + 1
   in
+  (* Applied per source, before merging, so the bounded merge below keeps the
+     newest [per_source] entries that SURVIVE filtering. Filtering after the
+     merge (as this did previously) would let a trimmed merge drop entries the
+     filter would have kept, so the predicate has to travel with the read. *)
+  let keep json =
+    let keeper_ok =
+      match keeper_name with
+      | None -> true
+      | Some name ->
+        (match json with
+         | `Assoc fields ->
+           (match List.assoc_opt "source" fields with
+            | Some (`String "keeper_metric") -> true (* already filtered by dir *)
+            | _ -> matches_keeper name json)
+         | _ -> true)
+    in
+    keeper_ok && matches_scope ?session_id ?operation_id ?worker_run_id json
+  in
   let all_entries =
-    List.concat_map (fun source ->
-      match source with
+    merge_newest_bounded ~target:per_source sources ~read:(fun source ->
+      (match source with
       | Keeper_metric ->
-        if limited && Option.is_none keeper_name && not has_filter then
+        if Option.is_none keeper_name && not has_filter then
           read_keeper_metrics_fast_top ~masc_root ~n ()
         else
           read_keeper_metrics ~masc_root ?keeper_name ?since_ts ?until_ts
@@ -702,32 +778,17 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
       | Goal_event ->
         read_goal_events ~masc_root ?since_ts ?until_ts ~n:per_source ()
       (* Fixed-path sources: Agent_event, Tool_call_io, Tool_usage,
-         Oas_event, Tool_metric use directory-based storage. *)
-      | Agent_event | Tool_call_io | Tool_usage | Oas_event | Tool_metric ->
+         Agent_core_event, Tool_metric use directory-based storage. *)
+      | Agent_event | Tool_call_io | Tool_usage | Agent_core_event | Tool_metric ->
         match fixed_store_dir ~masc_root ~base_path source with
         | Some dir ->
           read_fixed_source dir source ~n:per_source ?since_ts ?until_ts ()
-        | None -> []
-    ) sources
+        | None -> [])
+      |> List.filter keep)
   in
   (* Filter by keeper_name for non-keeper-metric sources *)
-  let filtered = match keeper_name with
-    | None -> all_entries
-    | Some name ->
-      List.filter (fun json ->
-        match json with
-        | `Assoc fields ->
-          (match List.assoc_opt "source" fields with
-           | Some (`String "keeper_metric") -> true  (* already filtered *)
-           | _ -> matches_keeper name json)
-        | _ -> true
-      ) all_entries
-  in
-  let filtered =
-    List.filter
-      (fun json -> matches_scope ?session_id ?operation_id ?worker_run_id json)
-      filtered
-  in
+  (* [keep] already ran per source inside the merge above. *)
+  let filtered = all_entries in
   let filtered =
     if List.mem Agent_event sources && List.mem Tool_call_io sources then
       suppress_shadow_keeper_tool_events filtered
@@ -736,17 +797,14 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
   (* Sort by timestamp descending (newest first) *)
   let sorted = sort_newest_first filtered in
   let total_matching_entries = List.length sorted in
-  let entries =
-    if not limited || total_matching_entries <= offset + n then sorted
-    else sorted |> List.drop offset |> take_first n
-  in
-  { entries; total_matching_entries; truncated = limited && total_matching_entries > offset + n }
+  let entries = sorted |> List.drop offset |> take_first n in
+  { entries; total_matching_entries; truncated = total_matching_entries > offset + n }
 
 let read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
-    ?operation_id ?worker_run_id ?since_ts ?until_ts ?n ?offset () :
+    ?operation_id ?worker_run_id ?since_ts ?until_ts ?limit ?offset () :
     Yojson.Safe.t list =
   (read_unified_result ~base_path ~masc_root ?sources ?keeper_name ?session_id
-     ?operation_id ?worker_run_id ?since_ts ?until_ts ?n ?offset ()).entries
+     ?operation_id ?worker_run_id ?since_ts ?until_ts ?limit ?offset ()).entries
 
 (* ── Summary ────────────────────────────────────────── *)
 
@@ -911,7 +969,10 @@ let goal_event_summary_stats ~masc_root =
     in
     (List.length entries, latest_ts_of_entries entries)
 
-let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
+let summary_json ?keeper_keepalive_interval_s
+    ?(keeper_metric_producer_active = false) ~base_path ~masc_root ()
+  : Yojson.Safe.t
+  =
   let now = Unix.gettimeofday () in
   let coverage_gaps = Telemetry_coverage_gap.read_recent ~masc_root ~n:50 in
   let keeper_dirs = discover_keeper_metric_dirs masc_root in
@@ -939,8 +1000,16 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
       None keeper_dirs
   in
   let source_json_and_count source =
-    let freshness_slo_s = source_freshness_slo_s source in
-    let metadata_fields = source_metadata_fields ~base_path ~masc_root source in
+    let freshness_slo_s =
+      source_freshness_slo_s ?keeper_keepalive_interval_s source
+    in
+    let metadata_fields =
+      source_metadata_fields
+        ?keeper_keepalive_interval_s
+        ~base_path
+        ~masc_root
+        source
+    in
     let keeper_dir_fields dirs =
       [
         ( "keepers",
@@ -970,12 +1039,14 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
                     keeper_dirs) );
              ("keeper_count", `Int (List.length keeper_dirs));
              ("entry_count", `Int keeper_total);
+             ("producer_active", `Bool keeper_metric_producer_active);
           ]
           @ metadata_fields
           @ coverage_gap_fields
           @ freshness_fields ~now keeper_latest_ts
           @ source_health_fields ~now ~exists ~entry_count:keeper_total
               ~latest_ts:keeper_latest_ts ~freshness_slo_s
+              ~producer_active:keeper_metric_producer_active
               ~optional_when_missing:(source_optional_when_missing source)
               ?coverage_gap ()),
         keeper_total )
@@ -1023,7 +1094,7 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
               ~read_error ?coverage_gap ()),
         count )
     | Execution_receipt ->
-      let keepers_root = Filename.concat masc_root "keepers" in
+      let keepers_root = Filename.concat masc_root Common.keepers_runtime_dirname in
       let dirs = discover_execution_receipt_dirs masc_root in
       let dir_state =
         classify_store_dir Execution_receipt
@@ -1086,8 +1157,8 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
               ?coverage_gap ()),
         count )
     (* Fixed-path sources: Agent_event, Tool_call_io, Tool_usage,
-       Oas_event, Tool_metric use directory-based storage. *)
-    | Agent_event | Tool_call_io | Tool_usage | Oas_event | Tool_metric ->
+       Agent_core_event, Tool_metric use directory-based storage. *)
+    | Agent_event | Tool_call_io | Tool_usage | Agent_core_event | Tool_metric ->
       let dir = match fixed_store_dir ~masc_root ~base_path source with
         | Some d -> d | None -> "" in
       let dir_state =

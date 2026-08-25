@@ -6,8 +6,6 @@ type t =
   ; repo_version : string option [@default None]
   ; commit : string option [@default None]
   ; commit_source : string option [@default None]
-  ; commit_unix_ts : float option [@default None]
-  ; commit_age_seconds : int option [@default None]
   ; binary_commit : string option [@default None]
   ; binary_commit_source : string option [@default None]
   ; binary_commit_unix_ts : float option [@default None]
@@ -88,7 +86,7 @@ let git_probe_from_root repo_root =
       Log.Identity.warn "git_probe_from_root unexpected: %s" (Printexc.to_string exn);
       None
   in
-  Option.bind output String_util.trim_to_option
+  Option.bind output String_util.trim_nonempty
 ;;
 
 let observe_probe_failure ~site exn =
@@ -141,7 +139,7 @@ let parse_dune_project_version raw =
         line
         (String.length prefix)
         (String.length line - String.length prefix - String.length ")")
-      |> String_util.trim_to_option
+      |> String_util.trim_nonempty
     else None)
 ;;
 
@@ -174,7 +172,7 @@ let decimal_digits_only s =
 let max_reasonable_commit_unix_ts = 4_102_444_800L
 
 let parse_commit_unix_ts_output raw =
-  match String_util.trim_to_option raw with
+  match String_util.trim_nonempty raw with
   | None -> None
   | Some s when not (decimal_digits_only s) -> None
   | Some s ->
@@ -196,7 +194,7 @@ let parse_commit_unix_ts_output raw =
     while every fix-PR shipped to main.  Health endpoint had no signal
     that the running binary was behind, so the operator (rightly)
     re-asked the same diagnostic prompt 7 times before noticing.
-    Surfacing [commit_unix_ts] on /health closes that loop without
+    Surfacing [binary_commit_unix_ts] on /health closes that loop without
     requiring the dashboard to fetch anything from the git remote. *)
 let probe_commit_unix_ts commit_hash_opt =
   match commit_hash_opt with
@@ -249,12 +247,9 @@ let probe_commit_unix_ts commit_hash_opt =
     List.find_map probe_one repo_roots
 ;;
 
-let resolve_commit ~env_value ~probe =
-  match env_value with
-  | Some raw ->
-    (match String_util.trim_to_option raw with
-     | Some commit -> Some commit
-     | None -> probe ())
+let resolve_commit ~embedded ~probe =
+  match Option.bind embedded String_util.trim_nonempty with
+  | Some commit -> Some commit
   | None -> probe ()
 ;;
 
@@ -267,22 +262,30 @@ type commit_resolution =
   ; repo_head_commit_source : string option
   }
 
-let build_env_commit_source = "env:MASC_BUILD_GIT_COMMIT"
+let embedded_commit_source = "embedded"
 let runtime_repo_head_source = "runtime_repo_head"
 
-let resolve_commit_details ~env_value ~probe =
-  let binary_commit = Option.bind env_value String_util.trim_to_option in
+let resolve_commit_details ~embedded ~probe =
+  (* The binary's own testimony wins: the embedded hash is stamped by the
+     build rule from the checkout being compiled, while the repo-head probe
+     describes the source tree next to the process, which moves
+     independently of the binary. *)
+  let binary_commit, binary_commit_source =
+    match Option.bind embedded String_util.trim_nonempty with
+    | Some commit -> Some commit, Some embedded_commit_source
+    | None -> None, None
+  in
   let repo_head_commit = probe () in
   let commit, commit_source =
     match binary_commit, repo_head_commit with
-    | Some commit, _ -> Some commit, Some build_env_commit_source
+    | Some commit, _ -> Some commit, binary_commit_source
     | None, Some commit -> Some commit, Some runtime_repo_head_source
     | None, None -> None, None
   in
   { commit
   ; commit_source
   ; binary_commit
-  ; binary_commit_source = Option.map (fun _ -> build_env_commit_source) binary_commit
+  ; binary_commit_source
   ; repo_head_commit
   ; repo_head_commit_source = Option.map (fun _ -> runtime_repo_head_source) repo_head_commit
   }
@@ -303,29 +306,26 @@ let resolved_executable_dir = Filename.dirname resolved_executable_path
 
 (** Commit hashes — eagerly resolved at startup.
     Not using [Eio.Lazy] because this is called from tests without Eio context.
-    Env var check + git probe are fast and side-effect-free. *)
+    Embedded stamp + git probe are fast and side-effect-free. *)
 let commit_resolution =
   resolve_commit_details
-    ~env_value:(Env_config_core.build_git_commit_opt ())
+    ~embedded:Build_commit_generated.commit
     ~probe:probe_git_commit
 ;;
 
 let resolved_repo_root = probe_repo_root ()
 let repo_root () = resolved_repo_root
 let repo_version = Option.bind resolved_repo_root probe_repo_version
-let commit_unix_ts = probe_commit_unix_ts commit_resolution.commit
 let binary_commit_unix_ts = probe_commit_unix_ts commit_resolution.binary_commit
 let repo_head_commit_unix_ts = probe_commit_unix_ts commit_resolution.repo_head_commit
 
 let current () =
   let now = Unix.gettimeofday () in
-  { release_version = Version.version
-  ; binary_version = Version.version
+  { release_version = Runtime_build_version.current
+  ; binary_version = Runtime_build_version.current
   ; repo_version
   ; commit = commit_resolution.commit
   ; commit_source = commit_resolution.commit_source
-  ; commit_unix_ts
-  ; commit_age_seconds = age_seconds ~now commit_unix_ts
   ; binary_commit = commit_resolution.binary_commit
   ; binary_commit_source = commit_resolution.binary_commit_source
   ; binary_commit_unix_ts

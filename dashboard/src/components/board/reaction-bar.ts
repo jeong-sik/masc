@@ -11,12 +11,20 @@ export function ReactionBar({
   compact = false,
   initialSummaries,
   supportedEmojis,
+  summariesArriving = false,
 }: {
   targetType: BoardReactionTargetType
   targetId: string
   compact?: boolean
   initialSummaries?: BoardReactionSummary[]
   supportedEmojis?: readonly string[]
+  /**
+   * The caller is fetching this bar's state along with its siblings and will
+   * hand it over. Without this the bar fetches its own on mount, which is what
+   * a page of them was doing: one request per row while the batch was still in
+   * flight, so the batch saved nothing.
+   */
+  summariesArriving?: boolean
 }) {
   const hasInitialState =
     initialSummaries !== undefined && supportedEmojis !== undefined && supportedEmojis.length > 0
@@ -54,7 +62,7 @@ export function ReactionBar({
           }
         })
     }
-    if (!hasInitialState) refresh()
+    if (!hasInitialState && !summariesArriving) refresh()
     const unsubscribe = lastEvent.subscribe(event => {
       if (event?.type !== 'reaction_changed') return
       if (event.target_type === targetType && event.target_id === targetId) {
@@ -65,7 +73,7 @@ export function ReactionBar({
       cancelled = true
       unsubscribe()
     }
-  }, [targetType, targetId, hasInitialState])
+  }, [targetType, targetId, hasInitialState, summariesArriving])
 
   const summaryByEmoji = useMemo(() => {
     const map = new Map<string, BoardReactionSummary>()
@@ -116,7 +124,7 @@ export function ReactionBar({
         `
       })}
       <span class="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        ${statusMessage || (supportedEmojiCatalog === null ? '리액션 종류를 불러오는 중입니다' : '')}
+        ${statusMessage || (supportedEmojiCatalog === null ? '불러오는 중…' : '')}
       </span>
     </div>
   `

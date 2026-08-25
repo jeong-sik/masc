@@ -1,6 +1,6 @@
 (** Structured terminal-reason surface for keeper turn ledgers.
 
-    RFC-0047 PR-3: the [code: string] field is removed; the typed
+    The [code: string] field is removed; the typed
     [disposition] field is the SSOT. [code : t -> string] is provided
     as an accessor for callers that still need the wire string
     (Otel_metric_store labels, JSON, dashboard chips). [severity / summary /
@@ -20,7 +20,7 @@ type severity = Keeper_turn_disposition.severity =
 
 type t =
   { disposition : Keeper_turn_disposition.t
-    (** Typed operator-facing disposition. SSOT after RFC-0047 PR-3.
+    (** Typed operator-facing disposition SSOT.
           [severity / summary / next_action] are derived from this
           field at construction time. The wire-format string
           (previously [t.code]) is now [Keeper_turn_terminal.code t]. *)
@@ -43,7 +43,7 @@ val of_code : ?source:string -> ?summary:string -> ?next_action:string -> string
 (** Typed constructor. Skips the wire→[Keeper_turn_disposition.t]
     decode step that [of_code] performs; useful for producers that
     have already committed to a typed disposition (e.g. wrapping an
-    SDK error code as [Provider_error (Sdk_error _)] without losing
+    agent-core error code as [Provider_error (Agent_core_error _)] without losing
     the typed identity in an [Unknown { raw_error = _ }] fallback). *)
 val of_disposition
   :  ?source:string
@@ -55,7 +55,7 @@ val of_disposition
 val of_failure
   :  ?tool_call_count:int
   -> raw_error:string
-  -> Agent_sdk.Error.sdk_error
+  -> Agent_core.Error.t
   -> t
 
 val to_json : t -> Yojson.Safe.t

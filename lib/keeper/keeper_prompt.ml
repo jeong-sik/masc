@@ -1,5 +1,5 @@
-(** Keeper_prompt — System prompts, personality evolution, and text processing
-    for keeper agents. OAS-aligned: these functions define agent identity and
+(** Keeper_prompt — System prompts, Keeper instructions, and text processing
+    for keeper agents. AGENT_CORE-aligned: these functions define agent identity and
     text output. *)
 
 open Keeper_types
@@ -23,9 +23,7 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
   Mention.any_mentioned ~targets content
 
 
-(* [keeper] declares no template variables, so it is read directly.
-   The former [render_world_prompt] carried a render-failure fallback for a
-   template that never had a variable to render. *)
+(* [keeper] declares no template variables, so it is read directly. *)
 let system_prompt_body () : string =
   Prompt_registry.get_prompt Prompt_names.keeper
 
@@ -73,14 +71,7 @@ let build_keeper_system_prompt
      All keepers share the same <system> text, so keeper-specific blocks come
      after it and the shared prefix stays maximal.
 
-     Identity is stated once, immediately after the shared prefix. There used
-     to be a second identity block at the tail, justified as surviving
-     compaction truncation of the first (#20409). That justification does not
-     hold: compaction operates on conversation history and never reads or
-     rewrites the system prompt, which is rebuilt whole for every turn. Two
-     identity blocks meant two places to keep in agreement and a prompt
-     sentence that pointed a keeper at a tail block holding no identity at
-     all. *)
+     Identity is stated once, immediately after the shared prefix. *)
   let identity_block =
     if keeper_name = "" then ""
     else
@@ -104,21 +95,11 @@ let build_keeper_system_prompt
       (* ── Keeper-specific blocks ─────────────────────────────── *)
       identity_block;
       workspace_block;
-      (* Operator instructions and the goals open right now. Named for what it
-         carries: the previous <identity> tag held neither a name nor anything
-         else identifying, while the block above holds all of it. *)
+      (* Operator instructions and the goals open right now. *)
       "<instructions>";
       custom;
       active_goals_block;
       "</instructions>";
     ]
-
-let append_trait_clause ~(base : string) ~(clause : string) : string =
-  let b = String.trim base in
-  let c = String.trim clause in
-  if c = "" then b
-  else if b = "" then c
-  else if String_util.contains_substring_ci b c then b
-  else Printf.sprintf "%s; %s" b c
 
 include Keeper_text_processing

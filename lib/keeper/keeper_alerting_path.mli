@@ -33,9 +33,6 @@ val normalize_allowed_path_for_check :
 (** [true] iff [path] resolves under [root_norm]. *)
 val is_within_root_norm : root_norm:string -> string -> bool
 
-val is_within_allowed_norms :
-  target_norm:string -> string list -> bool
-
 type confined_path
 (** A path projected to one concrete allowed root. The constructor is hidden so
     callers cannot manufacture an absolute or parent-relative capability path. *)
@@ -115,9 +112,6 @@ val confined_containment_path : confined_path -> string
 (** Canonical containment projection computed exactly once by the resolver
     using the requested endpoint semantics. *)
 val confined_endpoint_components : confined_path -> string list
-(** Validated canonical endpoint components relative to [confined_root]. This
-    is the endpoint SSOT for capability traversal and patch-source identity. *)
-val confined_endpoint_relative_path : confined_path -> string
 (** Display projection derived from [confined_endpoint_components]. Callers
     must not split this string to reconstruct capability traversal. *)
 
@@ -221,10 +215,6 @@ val playground_path_of_keeper : string -> string
 
 (** Sandbox host root path for [meta]. *)
 val sandbox_path_of_meta : meta:Keeper_meta_contract.keeper_meta -> string
-
-(** Sandbox bundle paths (root and repos/) for [meta]. *)
-val sandbox_bundle_paths_of_meta :
-  meta:Keeper_meta_contract.keeper_meta -> string list
 
 val ensure_sandbox_bundle :
   config:Workspace.config ->

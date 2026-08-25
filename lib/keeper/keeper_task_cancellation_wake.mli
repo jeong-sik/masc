@@ -3,10 +3,6 @@
     Cancellation is the one terminal Task outcome with no reader. Completion
     posts a verdict to Board and submission posts a request, but a cancellation
     wrote a backlog field and an activity row and stopped there.
-    {!Keeper_goal_reconciliation_wake} does not cover it: that path targets the
-    owner of the Task's Goal, so a Task with no Goal link reaches no one. On the
-    reference workspace no Task carried a Goal link at all, which made the
-    existing terminal wake unreachable for every one of them.
 
     The author is resolved from [created_by]. A self-cancellation enqueues
     nothing: the author already knows. *)
@@ -25,7 +21,7 @@ type outcome =
   | Author_not_a_keeper of { author : string }
       (** [created_by] resolves to no Keeper lane — an operator or a client id.
           Not an error: there is no lane to wake. A Keeper whose shutdown
-          finalized with a retained dead tombstone still presents a lane here
+          finalized while retaining its meta still presents a lane here
           and is not filtered out: that decision belongs to the durable intake
           gate in {!Keeper_registry_event_queue}, which admits every retention
           other than [Remove_meta] for all stimulus producers alike. *)

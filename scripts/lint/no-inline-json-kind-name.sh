@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
-# no-inline-json-kind-name.sh — Block inline `let json_kind_name :
-# Yojson.Safe.t -> string = function` definitions in lib/. Use
-# Json_util.kind_name (declared in lib/core/json_util.ml) instead.
+# no-inline-json-kind-name.sh — Block inline `Yojson.Safe.t -> string`
+# kind classifiers in lib/. Use Json_util.kind_name (declared in
+# lib/core/json_util.ml) instead.
+#
+# Matched by shape, not by identifier. The pattern used to require the
+# name `json_kind_name`, so a copy under any other name passed while
+# this script printed OK. Five did, under kind_label,
+# kind_name_of_json, yojson_variant_name and two spellings of
+# kind_name. One says so in its own comment (ide_annotation_types.ml):
+# "Name [kind_label] (not [json_kind_name]) slips the
+# no-inline-json-kind-name lint regex".
 #
 # Rationale: PR #16534 (initial 6-site dedup) + #16546 (yojson 3.0
 # dead-arm cleanup, 22 sites) + #16572 (final 11-site dedup)
@@ -23,17 +31,27 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
+# Each entry's dune declares yojson-only dependencies (RFC-0056 leaf
+# isolation), so reaching Json_util would mean adding masc_core and
+# breaking that invariant. Verified per dune, not assumed.
 ALLOWLIST=(
   # SSOT definition — the canonical helper itself.
   "lib/core/json_util.ml"
 
-  # RFC-0056 yojson-only sub-libraries (leaf isolation).  Adding
-  # masc_core to these libs would break the dependency-graph
-  # invariant that the autonomous/multimodal sub-libs
-  # remain consumable by lightweight downstream tooling without
-  # pulling the whole masc_core surface.
-  "lib/autonomous/stimulus.ml"
+  # masc_multimodal — (libraries shared_types unix yojson fs_compat
+  # digestif eio masc_random_id); no masc_core.
   "lib/multimodal/payload.ml"
+  "lib/multimodal/artifact.ml"
+
+  # masc_ide and shared_audit — same leaf shape, same constraint. Both
+  # were invisible to this lint until it matched by shape.
+  "lib/ide/ide_annotation_types.ml"
+  "lib/shared_audit/envelope.ml"
+
+  # json_field reports OCaml variant names rather than JSON type names
+  # on purpose: its .mli documents got = "intlit" / "list" / "assoc"
+  # and test_json_field pins them. Not a copy of the canonical mapping.
+  "lib/json_field/json_field.ml"
 )
 
 matches_file=$(mktemp)
@@ -45,7 +63,7 @@ scan_status=0
 
 if command -v rg >/dev/null 2>&1; then
   rg --line-number --no-heading --type ocaml \
-    'let json_kind_name : Yojson\.Safe\.t -> string = function' \
+    'let [a-z_][A-Za-z0-9_]* : Yojson\.Safe\.t -> string = function' \
     lib/ >"$matches_file" 2>"$errors_file" || scan_status=$?
   if [[ $scan_status -gt 1 ]]; then
     echo "ERROR: ripgrep failed while scanning inline json_kind_name definitions" >&2
@@ -54,7 +72,7 @@ if command -v rg >/dev/null 2>&1; then
   fi
 else
   grep -RInE --include='*.ml' \
-    'let json_kind_name : Yojson\.Safe\.t -> string = function' \
+    'let [a-z_][A-Za-z0-9_]* : Yojson\.Safe\.t -> string = function' \
     lib/ >"$matches_file" 2>"$errors_file" || scan_status=$?
   if [[ $scan_status -gt 1 ]]; then
     echo "ERROR: grep failed while scanning inline json_kind_name definitions" >&2
@@ -76,13 +94,13 @@ while IFS= read -r match; do
   done
   [[ $skip -eq 1 ]] && continue
 
-  echo "ERROR: inline json_kind_name definition (use Json_util.kind_name): $match"
+  echo "ERROR: inline Yojson kind classifier (use Json_util.kind_name): $match"
   count=$((count + 1))
 done < "$matches_file"
 
 if [[ $count -gt 0 ]]; then
   echo ""
-  echo "Found $count inline json_kind_name definition(s) outside the allowlist."
+  echo "Found $count inline Yojson kind classifier(s) outside the allowlist."
   echo ""
   echo "Migration guide:"
   echo "  1. Delete the 9-line inline definition."
@@ -98,5 +116,5 @@ if [[ $count -gt 0 ]]; then
   exit 1
 fi
 
-echo "OK: no inline json_kind_name definitions found outside allowlist"
+echo "OK: no inline Yojson kind classifiers outside allowlist"
 exit 0

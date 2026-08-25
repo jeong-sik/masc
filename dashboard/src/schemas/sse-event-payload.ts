@@ -1,4 +1,4 @@
-// Typed boundary for OAS event payloads using atdgen-generated decoders.
+// Typed boundary for Agent Core event payloads using atdgen-generated decoders.
 //
 // The SSE wire format wraps a typed payload inside an envelope
 // (see lib/sse_event/sse_event.ml wrap_envelope).  This module parses the
@@ -9,13 +9,15 @@
 // Unknown event types and malformed payloads are rejected with a structured
 // error; the caller decides whether to drop the event or fall back.
 
-import { OAS_EVENT_PREFIX } from '../config/constants'
+import { agentCoreEventSuffix } from '../lib/sse-event-type'
 import { assertExhaustive } from '../lib/exhaustive'
 
 import {
   readAgentCompletedPayload,
   readAgentFailedPayload,
+  readAgentInputRequiredPayload,
   readAgentStartedPayload,
+  readAgentYieldedPayload,
   readContentReplacementKeptPayload,
   readContentReplacementReplacedPayload,
   readContextCompactStartedPayload,
@@ -30,7 +32,9 @@ import {
   readTurnStartedPayload,
   type AgentCompletedPayload,
   type AgentFailedPayload,
+  type AgentInputRequiredPayload,
   type AgentStartedPayload,
+  type AgentYieldedPayload,
   type ContentReplacementKeptPayload,
   type ContentReplacementReplacedPayload,
   type ContextCompactStartedPayload,
@@ -45,30 +49,32 @@ import {
   type TurnStartedPayload,
 } from './sse_event_generated'
 
-export type OasPayloadParseIssue = {
+export type AgentCorePayloadParseIssue = {
   eventType: string
   message: string
 }
 
-export type OasPayloadParseSuccess<T> = {
+export type AgentCorePayloadParseSuccess<T> = {
   success: true
   data: T
 }
 
-export type OasPayloadParseFailure = {
+export type AgentCorePayloadParseFailure = {
   success: false
-  error: { issues: OasPayloadParseIssue[] }
+  error: { issues: AgentCorePayloadParseIssue[] }
 }
 
-export type OasPayloadParseResult<T> =
-  | OasPayloadParseSuccess<T>
-  | OasPayloadParseFailure
+export type AgentCorePayloadParseResult<T> =
+  | AgentCorePayloadParseSuccess<T>
+  | AgentCorePayloadParseFailure
 
-/** Closed union of every OAS event payload the dashboard knows how to parse.
+/** Closed union of every Agent Core event payload the dashboard knows how to parse.
  *  New payload kinds are added here together with their atdgen reader. */
-export type TypedOasPayload =
+export type TypedAgentCorePayload =
   | { kind: 'agent_started'; payload: AgentStartedPayload }
   | { kind: 'agent_completed'; payload: AgentCompletedPayload }
+  | { kind: 'agent_yielded'; payload: AgentYieldedPayload }
+  | { kind: 'agent_input_required'; payload: AgentInputRequiredPayload }
   | { kind: 'agent_failed'; payload: AgentFailedPayload }
   | { kind: 'tool_called'; payload: ToolCalledPayload }
   | { kind: 'tool_completed'; payload: ToolCompletedPayload }
@@ -86,12 +92,12 @@ export type TypedOasPayload =
 /** Discriminant extracted from the closed union.  Keeping the kind literal in
  *  one place (the union above) eliminates the manual array/switch duplication
  *  that previously required touching three sites for every new payload kind. */
-export type OasPayloadKind = TypedOasPayload['kind']
+export type AgentCorePayloadKind = TypedAgentCorePayload['kind']
 
 type PayloadReader<T> = (raw: unknown, context?: unknown) => T
 
 type ReaderMap = {
-  [K in OasPayloadKind]: PayloadReader<Extract<TypedOasPayload, { kind: K }>['payload']>
+  [K in AgentCorePayloadKind]: PayloadReader<Extract<TypedAgentCorePayload, { kind: K }>['payload']>
 }
 
 /** Exhaustive map from payload kind to its atdgen reader.  The mapped type
@@ -100,6 +106,8 @@ type ReaderMap = {
 const READERS: ReaderMap = {
   agent_started: readAgentStartedPayload,
   agent_completed: readAgentCompletedPayload,
+  agent_yielded: readAgentYieldedPayload,
+  agent_input_required: readAgentInputRequiredPayload,
   agent_failed: readAgentFailedPayload,
   tool_called: readToolCalledPayload,
   tool_completed: readToolCompletedPayload,
@@ -116,20 +124,20 @@ const READERS: ReaderMap = {
 }
 
 /** Runtime inventory derived from the reader keys.  The type assertion is
- *  safe because ReaderMap's keys are exactly OasPayloadKind. */
-export const OAS_PAYLOAD_EVENT_TYPES = Object.keys(READERS) as readonly OasPayloadKind[]
+ *  safe because ReaderMap's keys are exactly AgentCorePayloadKind. */
+export const AGENT_CORE_PAYLOAD_EVENT_TYPES = Object.keys(READERS) as readonly AgentCorePayloadKind[]
 
-type OasPayloadEventType = (typeof OAS_PAYLOAD_EVENT_TYPES)[number]
+type AgentCorePayloadEventType = (typeof AGENT_CORE_PAYLOAD_EVENT_TYPES)[number]
 
-function isOasPayloadEventType(value: string): value is OasPayloadEventType {
-  return (OAS_PAYLOAD_EVENT_TYPES as readonly string[]).includes(value)
+function isAgentCorePayloadEventType(value: string): value is AgentCorePayloadEventType {
+  return (AGENT_CORE_PAYLOAD_EVENT_TYPES as readonly string[]).includes(value)
 }
 
-function ok<T>(data: T): OasPayloadParseSuccess<T> {
+function ok<T>(data: T): AgentCorePayloadParseSuccess<T> {
   return { success: true, data }
 }
 
-function fail(eventType: string, message: string): OasPayloadParseFailure {
+function fail(eventType: string, message: string): AgentCorePayloadParseFailure {
   return { success: false, error: { issues: [{ eventType, message }] } }
 }
 
@@ -137,7 +145,7 @@ function tryRead<T>(
   eventType: string,
   reader: PayloadReader<T>,
   raw: unknown,
-): OasPayloadParseResult<T> {
+): AgentCorePayloadParseResult<T> {
   try {
     return ok(reader(raw, raw))
   } catch (err) {
@@ -146,24 +154,22 @@ function tryRead<T>(
   }
 }
 
-function buildPayload<K extends OasPayloadKind>(
+function buildPayload<K extends AgentCorePayloadKind>(
   kind: K,
-  payload: TypedOasPayload['payload'],
-): TypedOasPayload {
-  return { kind, payload } as unknown as TypedOasPayload
+  payload: TypedAgentCorePayload['payload'],
+): TypedAgentCorePayload {
+  return { kind, payload } as unknown as TypedAgentCorePayload
 }
 
-/** Parse an OAS event payload into a typed, discriminated union.
+/** Parse an Agent Core event payload into a typed, discriminated union.
  *  Returns a structured error if the event type is unknown or the payload
  *  fails atdgen validation. */
-export function parseOasPayload(
+export function parseAgentCorePayload(
   eventType: string,
   raw: unknown,
-): OasPayloadParseResult<TypedOasPayload> {
-  const suffix = eventType.startsWith(OAS_EVENT_PREFIX)
-    ? eventType.slice(OAS_EVENT_PREFIX.length)
-    : eventType
-  if (!isOasPayloadEventType(suffix)) {
+): AgentCorePayloadParseResult<TypedAgentCorePayload> {
+  const suffix = agentCoreEventSuffix(eventType)
+  if (!isAgentCorePayloadEventType(suffix)) {
     return fail(eventType, `No typed payload reader for event type "${eventType}"`)
   }
 
@@ -171,6 +177,8 @@ export function parseOasPayload(
     case 'context_compacted':
     case 'agent_started':
     case 'agent_completed':
+    case 'agent_yielded':
+    case 'agent_input_required':
     case 'agent_failed':
     case 'tool_called':
     case 'tool_completed':
@@ -185,30 +193,30 @@ export function parseOasPayload(
     case 'slot_scheduler_observed': {
       const result = tryRead(eventType, READERS[suffix] as PayloadReader<unknown>, raw)
       if (!result.success) return result
-      return ok(buildPayload(suffix, result.data as TypedOasPayload['payload']))
+      return ok(buildPayload(suffix, result.data as TypedAgentCorePayload['payload']))
     }
   }
-  return assertExhaustive(suffix, 'OasPayloadKind')
+  return assertExhaustive(suffix, 'AgentCorePayloadKind')
 }
 
 /** Convenience wrapper that returns the typed payload or null.
  *  Use this when the caller intends to drop malformed events silently. */
-export function parseOasPayloadOrNull(
+export function parseAgentCorePayloadOrNull(
   eventType: string,
   raw: unknown,
-): TypedOasPayload | null {
-  const result = parseOasPayload(eventType, raw)
+): TypedAgentCorePayload | null {
+  const result = parseAgentCorePayload(eventType, raw)
   return result.success ? result.data : null
 }
 
 /** Convenience wrapper that returns the typed payload or throws.
  *  Use this only when a parse failure should be treated as an unrecoverable
  *  invariant violation. */
-export function parseOasPayloadStrict(
+export function parseAgentCorePayloadStrict(
   eventType: string,
   raw: unknown,
-): TypedOasPayload {
-  const result = parseOasPayload(eventType, raw)
+): TypedAgentCorePayload {
+  const result = parseAgentCorePayload(eventType, raw)
   if (!result.success) {
     throw new SSEPayloadParseError(result.error.issues)
   }
@@ -216,7 +224,7 @@ export function parseOasPayloadStrict(
 }
 
 export class SSEPayloadParseError extends Error {
-  constructor(public readonly issues: readonly OasPayloadParseIssue[]) {
+  constructor(public readonly issues: readonly AgentCorePayloadParseIssue[]) {
     super(`SSE payload parse error: ${issues.map(i => i.message).join('; ')}`)
     this.name = 'SSEPayloadParseError'
   }

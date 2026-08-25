@@ -52,21 +52,16 @@ let wrong_value = function
 ;;
 
 let nullable_field_names =
-  [ "persona"
-  ; "message_scope_ack_id"
-  ; "last_blocker"
+  [ "message_scope_ack_id"
   ; "last_runtime_attempt"
   ; "latched_reason"
   ; "current_task_id"
   ; "keeper_id"
+  ; "autonomous_instructions"
   ]
 ;;
 
 let test_current_writer_roundtrip_and_keyset () =
-  check int
-    "current schema has 53 fields"
-    53
-    (List.length Keeper_meta_json.current_field_names);
   let meta =
     match Keeper_meta_json_parse.meta_of_json (current_json ()) with
     | Ok meta -> meta
@@ -148,6 +143,13 @@ let test_every_outside_field_has_one_classification () =
       (current_json () |> replace_field key (`String "ignored-value")))
 ;;
 
+let test_retired_active_goal_ids_requires_reset () =
+  expect_rejected
+    "retired active_goal_ids"
+    (current_json ()
+     |> replace_field "active_goal_ids" (`List [ `String "goal-a" ]))
+;;
+
 let test_retired_compaction_failure_authority_requires_reset () =
   expect_rejected
     "retired compaction failure authority"
@@ -161,16 +163,18 @@ let () =
     [ ( "current-schema"
       , [ test_case "writer roundtrip and keyset" `Quick
             test_current_writer_roundtrip_and_keyset
-        ; test_case "all 53 fields are required" `Quick
+        ; test_case "every field is required" `Quick
             test_every_current_field_is_required
-        ; test_case "all 53 duplicate fields reject" `Quick
+        ; test_case "every duplicate is rejected" `Quick
             test_every_duplicate_is_rejected
-        ; test_case "all 53 fields reject a wrong type" `Quick
+        ; test_case "every field rejects a wrong type" `Quick
             test_every_field_rejects_a_wrong_type
         ; test_case "nullability is exact" `Quick
             test_nullability_is_exact
         ; test_case "outside fields share one classification" `Quick
             test_every_outside_field_has_one_classification
+        ; test_case "retired active_goal_ids requires reset" `Quick
+            test_retired_active_goal_ids_requires_reset
         ; test_case
             "retired compaction failure authority requires reset"
             `Quick

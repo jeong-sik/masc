@@ -29,7 +29,10 @@ let make_meta name =
       (`Assoc
         [
           ("name", `String name);
-          ("agent_name", `String ("agent-" ^ name));
+          (* The canonical form is the identity module's, not a literal
+             prefix: this fixture drifted and the suite has been failing at
+             construction, unnoticed because it is not in the CI list. *)
+          ("agent_name", `String (Keeper_identity.keeper_agent_name name));
           ("trace_id", `String ("trace-" ^ name));
           ("allowed_paths", `List [ `String "*" ]);
         ])
@@ -57,7 +60,6 @@ let with_env body =
     ~finally:(fun () -> Fs_compat.remove_tree base)
     (fun () ->
       Keeper_registry.For_testing.clear ();
-      Keeper_turn_admission.For_testing.reset ();
       body ~base)
 ;;
 
@@ -100,10 +102,14 @@ let test_interrupt_cancels_turn () =
      | Eio.Cancel.Cancelled _ -> ()));
   Eio.Promise.await registered;
   (match Keeper_registry.interrupt_current_turn ~base_path:base name with
-   | `Cancelled turn_id ->
+   | Keeper_registry.Exact_turn_cancelled turn_id ->
      check "turn_id is 1" (turn_id = 1);
      check "turn fibre cancelled" (Eio.Promise.await cancelled)
-   | `No_turn_in_flight -> check "expected an in-flight turn" false);
+   | Keeper_registry.Exact_no_turn_in_flight ->
+     check "expected an in-flight turn" false
+   | Keeper_registry.Exact_turn_cancel_failed { detail; _ } ->
+     Printf.printf "  cancel failed: %s\n%!" detail;
+     check "cancellation must not fail here" false);
   let entry = Option.get (Keeper_registry.get ~base_path:base name) in
   check "switch cleared" (Atomic.get entry.current_turn_switch = None)
 ;;
@@ -120,13 +126,36 @@ let test_interrupt_no_turn_is_noop () =
   check
     "no in-flight turn"
     (match Keeper_registry.interrupt_current_turn ~base_path:base name with
-     | `Cancelled _ -> false
-     | `No_turn_in_flight -> true)
+     | Keeper_registry.Exact_no_turn_in_flight -> true
+     | Keeper_registry.Exact_turn_cancelled _
+     | Keeper_registry.Exact_turn_cancel_failed _ -> false)
+;;
+
+(* An unregistered name is a failed cancellation, not an idle Keeper. Reporting
+   it as [Exact_no_turn_in_flight] told an operator the turn was already gone
+   when the registry never held it. *)
+let test_unknown_keeper_is_a_failure_not_idle () =
+  Printf.printf "Test: interrupting an unregistered Keeper reports failure\n%!";
+  with_env
+  @@ fun ~base ->
+  Eio_main.run
+  @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  check
+    "unregistered name reports cancel_failed"
+    (match
+       Keeper_registry.interrupt_current_turn ~base_path:base "never-registered"
+     with
+     | Keeper_registry.Exact_turn_cancel_failed { turn_id = None; _ } -> true
+     | Keeper_registry.Exact_turn_cancel_failed _
+     | Keeper_registry.Exact_no_turn_in_flight
+     | Keeper_registry.Exact_turn_cancelled _ -> false)
 ;;
 
 let () =
   test_interrupt_cancels_turn ();
   test_interrupt_no_turn_is_noop ();
+  test_unknown_keeper_is_a_failure_not_idle ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

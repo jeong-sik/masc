@@ -12,6 +12,8 @@ type t =
   | TurnCompleted
   | FailureRoute
   | IdleSeconds
+  | InFlightElapsedSeconds
+  | SinceLastProgressSeconds
   | StreamProjectionEventCutoff
   | MetricEmitDropped
   | ContextMaxObserved
@@ -37,7 +39,6 @@ type t =
   | ToolUnderusedAllowedCount
   | ToolUnderusedAllowed
   | PathRejection
-  | IdeOrphanWrites
   | PathResolverIdentityMismatch
   | KeeperMetaOverlayDrift
   | HeartbeatSuccesses
@@ -52,7 +53,6 @@ type t =
   | ApprovalQueueFailures
   | ApprovalResolutionSignal
   | ProfileLoadFailures
-  | CompactAuditFailures
   | FsFailures
   | PersistencePreparationStageDuration
   | PersistencePreparationExamined
@@ -63,11 +63,12 @@ type t =
   | CrashPersistenceFailures
   | KeepaliveSignalFailures
   | BoardSignalRoutedTotal
+  | BoardSignalCursorDeferredTotal
   | BoardSignalDeliveryTotal
   | BoardSignalNoWakeTotal
   | BoardSignalAttentionCandidateTotal
   | MetaJsonFailures
-  | ToolsOasFailures
+  | ToolsAgent_coreFailures
   | TurnUpUpdateFailures
   | AgentToolDispatchRuntimeFailures
   | PromptFailures
@@ -87,16 +88,15 @@ type t =
   | UnexpectedToolPartialTolerance
   | ToolCallTotal
   | ProfileConfigConflicts
-  | OasTimeoutClassifications
+  | Agent_coreTimeoutClassifications
   | NoToolProvider
   | ProactiveOutcome
   | TaskLoadFailures
   | ToolSelectionFailures
   | ReconcileFailures
   | DecisionAuditFlushFailures
-  | OasCancel
+  | Agent_coreCancel
   | ClaimAutoProvision
-  | PersonaDriftMissing
   | WorkspaceInitFailures
   | PresenceSyncFailures
   | StaleStormPaused
@@ -106,7 +106,7 @@ type t =
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
   | TurnMetricsSnapshotFailures
-  | OasExecutionErrors
+  | Agent_coreExecutionErrors
   | MemoryOsLibrarianFailures
   | MemoryActivityEmitFailures
   | SupervisorSweepFailures
@@ -120,11 +120,12 @@ type t =
   | CheckpointFailures
   | DecisionAuditRingOverflows
   | HitlSummaryOutcomes
-  | OasEnvKeyRejections
+  | Agent_coreEnvKeyRejections
   | MemoryLaneUnitFailures
   | MemoryLaneSubmitted
   | MemoryLaneRanInline
   | MemoryLaneDropped
+  | MemoryLaneRejectedDraining
   | MemoryLaneCoalesced
   | MemoryLanePending
   | MemoryLaneInFlight
@@ -137,7 +138,7 @@ type t =
   | PersonNoteStoreFailures
   | KeeperMaterializationFailures
   | ObservationQueryFailures
-  | OasOnStop
+  | Agent_coreOnStop
   | InvariantViolations
   | FsmEdgeTransitions
   | TurnFsmTransitions
@@ -153,7 +154,7 @@ type t =
   | UnsupportedStimulus
   | RestartAttempts
   | RestartOutcomes
-  | OasRunTimeout
+  | Agent_coreRunTimeout
   | RuntimeSelected
   | RuntimeRotation
   | ToolUseFailure
@@ -191,6 +192,7 @@ type t =
   | WireCaptureResponseSuppressed
   | WireCaptureWriteFailures
   | WireCaptureRecordSkipped
+  | StreamTextDeltaDedup
 
 val to_string : t -> string
 

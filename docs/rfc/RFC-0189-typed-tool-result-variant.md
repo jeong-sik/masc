@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0062", "0044", "0077", "0088", "0179"]
-implementation_prs: []
 ---
 
 # RFC-0189 — Typed `Tool_result.result` variant

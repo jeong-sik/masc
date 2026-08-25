@@ -23,7 +23,8 @@
     transmitted list is rebuilt from durable state every turn, so demoting
     everything eagerly would re-store thousands of blobs per turn. Instead
     the unmodified history first chooses the authoritative window cut. {!plan}
-    substitutes a saturating placeholder only below that cut, the window cuts
+    substitutes a saturating placeholder below the caller's age boundary (the
+    keeper's assembly uses the current turn, see {!plan}), the window cuts
     again against the smaller messages, and {!materialize} stores only the
     messages that survived. The real marker is never larger than the
     placeholder, so a request that fit the plan still fits after
@@ -34,7 +35,7 @@ type pending
     [tool_use_id], which is stable across the cut. *)
 
 type plan_result =
-  { messages : Agent_sdk.Types.message list
+  { messages : Agent_core.Types.message list
         (** [messages] with each planned demotion replaced by a saturating
             placeholder marker. Physically the input list when nothing was
             planned. *)
@@ -42,9 +43,9 @@ type plan_result =
   }
 
 val plan
-  :  measure_message_bytes:(Agent_sdk.Types.message -> int)
+  :  measure_message_bytes:(Agent_core.Types.message -> int)
   -> demote_before:int
-  -> Agent_sdk.Types.message list
+  -> Agent_core.Types.message list
   -> plan_result
 (** Choose demotions and substitute upper-bound placeholders. Pure: no I/O or
     hashing. The byte budget stays in the cut; this function receives only the
@@ -57,19 +58,26 @@ val plan
       never serializes [content], so replacing [content] would free nothing
       while this function credited a reduction — an under-estimate, the
       direction that lets a materialized request exceed the cap.
-    - {!Tool_output.decode_from_oas} reports [Not_marker]. [Decoded] is already
+    - {!Tool_output.decode_from_agent_core} reports [Not_marker]. [Decoded] is already
       demoted; [Invalid_marker] is marker-shaped content that failed to parse
       and is left exactly as-is rather than being stored as a blob, which would
       make a corrupt payload content-addressed and permanent.
-    - its atom index is below [demote_before], which must be [dropped_atoms]
-      from {!Runtime_model_input_tail_window.project_with_drop} on the same
-      unmodified message list. The demotion boundary therefore moves only when
-      the authoritative raw cut moves; appending one turn cannot rewrite the
-      previous request's retained prefix.
+    - its atom index is below [demote_before], an atom index into this same
+      unmodified message list. The caller owns where that boundary sits and
+      owns the consequence: a boundary that moves on every message rewrites the
+      transmitted prefix on every request and costs the provider's prompt
+      cache, so callers pick one that moves at the rate the conversation
+      itself does. The keeper's assembly uses the turn — results the current
+      turn produced are what it is reasoning over, results from earlier turns
+      were already reported elsewhere — which moves once per turn. One
+      exception: when the raw cut refuses because the newest atom alone
+      exceeds the budget, the assembly retries once with the boundary past
+      the newest atom, so the turn's own results leave as markers rather than
+      failing the turn (#28845).
     - the placeholder measures strictly smaller than the message does now.
       This replaces a size threshold: the encoded marker runs from about 125
       bytes to 1,154 depending on the preview's bytes, because
-      {!Tool_output.encode_for_oas} escapes the preview and the JSON encoder
+      {!Tool_output.encode_for_agent_core} escapes the preview and the JSON encoder
       escapes it again, so any fixed floor is wrong for one of the two ends.
 
     [measure_message_bytes] must be the encoder the window will use. The bound
@@ -77,7 +85,7 @@ val plan
     by restating the marker's format here. *)
 
 type materialize_outcome =
-  { messages : Agent_sdk.Types.message list
+  { messages : Agent_core.Types.message list
   ; reverted : int
         (** Planned demotions whose blob write failed and whose body was
             restored. Non-zero means the list is larger than the plan the cut
@@ -87,7 +95,7 @@ type materialize_outcome =
 val materialize
   :  store:Tool_blob_store.t
   -> pending:pending list
-  -> Agent_sdk.Types.message list
+  -> Agent_core.Types.message list
   -> materialize_outcome
 (** Store the bodies of the demotions still present in [messages] and swap
     their placeholders for real markers. Demotions the cut removed are not
@@ -99,10 +107,10 @@ val materialize
 
     On blob lifetime: these blobs have no durable referrer, because the copy
     that carries the marker is never persisted. That is safe rather than
-    overlooked. {!Tool_blob_maintenance} deletes only at the quiescent startup
-    boundary and only hashes that were already candidates in a previous
-    complete scan, while this function re-stores the same content-addressed
-    bytes on every turn the demotion is transmitted. The body is still verbatim
-    in the checkpoint, so the blob is derived data that the next turn restores.
-    Nothing needs adding to [durable_consumer_basenames]: no reference is
-    persisted. *)
+    overlooked. Offline {!Tool_blob_maintenance} runs only under the exclusive
+    BasePath process lease and deletes only hashes that were already candidates
+    in a previous complete scan, while this function re-stores the same
+    content-addressed bytes on every turn the demotion is transmitted. The body
+    is still verbatim in the checkpoint, so the blob is derived data that the
+    next turn restores. Nothing needs adding to [durable_consumer_basenames]: no
+    reference is persisted. *)

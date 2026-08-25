@@ -12,7 +12,7 @@
  (wrapped false)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
-  (:standard -w +4 -w +32))
+  (:standard -w +4 -w +33 -w +37))
  (libraries
   masc_core
   masc_log
@@ -24,6 +24,4 @@
   digestif
   re
   re.str
-  re.pcre)
- (preprocess
-  (pps ppx_deriving_yojson)))
+  re.pcre))

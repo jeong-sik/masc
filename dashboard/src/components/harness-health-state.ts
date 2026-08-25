@@ -155,7 +155,7 @@ function processHarnessEvent(evt: unknown): void {
   const type = typeof event.type === 'string' ? event.type : ''
   const payload = decodeEventPayload(evt)
 
-  if (type === 'oas:masc:harness:verdict_recorded') {
+  if (type === 'agent_core:masc:harness:verdict_recorded') {
     if (!payload) return
     const nextItem: HarnessVerdictItem = {
       timestamp: asNumber(payload.timestamp) ?? Date.now() / 1000,
@@ -189,7 +189,7 @@ function processHarnessEvent(evt: unknown): void {
     scheduleHarnessReload()
   }
 
-  if (type === 'oas:masc:harness:pre_compact') {
+  if (type === 'agent_core:masc:harness:pre_compact') {
     if (!payload) return
     const checkpointBytes = asNumber(payload.checkpoint_bytes)
     const messageCount = asNumber(payload.message_count)
@@ -230,7 +230,7 @@ function processHarnessEvent(evt: unknown): void {
   }
 
   if (
-    type === 'oas:masc:harness:handoff'
+    type === 'agent_core:masc:harness:handoff'
     || type === 'keeper_handoff'
     || type === 'masc/keeper_handoff'
   ) {

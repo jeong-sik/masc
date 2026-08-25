@@ -4,7 +4,6 @@ include Operator_digest
 
 (* Keeper runtime identity fields extracted to
    [Operator_control_snapshot_identity_fields] (godfile decomp). *)
-let non_empty_trimmed_string_opt = Operator_control_snapshot_identity_fields.non_empty_trimmed_string_opt
 let keeper_runtime_identity_fields = Operator_control_snapshot_identity_fields.keeper_runtime_identity_fields
 (* action_result_status + confirmation_state + action_log_entry types,
    stringifiers, and persistence helpers extracted to
@@ -17,20 +16,9 @@ let get_payload args =
   Json_util.get_object args "payload" |> Option.value ~default:(`Assoc [])
 ;;
 
-let merge_json_objects left right =
-  match left, right with
-  | `Assoc left_fields, `Assoc right_fields -> `Assoc (left_fields @ right_fields)
-  | `Assoc left_fields, _ -> `Assoc left_fields
-  | _, `Assoc right_fields -> `Assoc right_fields
-  | _, _ -> `Assoc []
-;;
-
-(* remote_confirm_ttl_seconds + runtime-status alignment helpers
+(* remote_confirm_ttl_seconds + context helpers
    extracted to [Operator_control_snapshot_runtime_status] (godfile decomp). *)
 let remote_confirm_ttl_seconds = Operator_control_snapshot_runtime_status.remote_confirm_ttl_seconds
-let runtime_status_from_live_signal = Operator_control_snapshot_runtime_status.runtime_status_from_live_signal
-let health_state_allows_runtime_status_override = Operator_control_snapshot_runtime_status.health_state_allows_runtime_status_override
-let align_keeper_runtime_status = Operator_control_snapshot_runtime_status.align_keeper_runtime_status
 let remote_client_type_of_context = Operator_control_snapshot_runtime_status.remote_client_type_of_context
 let operator_server_profile_json = Operator_control_snapshot_runtime_status.operator_server_profile_json
 
@@ -107,6 +95,27 @@ let with_keeper_slot ~sem ~name f =
 ;;
 
 let compact_keeper_runtime_trust_json = Operator_control_snapshot_trust.compact_keeper_runtime_trust_json
+
+(* Returns the persisted heartbeat timestamp JSON and, when the heartbeat
+   ledger could not be read, the typed unavailable reason.  The error is
+   surfaced separately from [last_heartbeat] so an unreadable ledger is not
+   relabeled as an absent/missing heartbeat by downstream consumers. *)
+let persisted_last_heartbeat_json config keeper_name =
+  match
+    Keeper_heartbeat_persisted_snapshot.latest
+      ~config
+      ~keeper_name
+  with
+  | Ok (Some snapshot) -> (`String snapshot.timestamp, None)
+  | Ok None -> (`Null, None)
+  | Error error ->
+    Log.Dashboard.warn
+      "operator snapshot heartbeat read failed for keeper %s: %s"
+      keeper_name
+      error;
+    (`Null, Some error)
+;;
+
 let keepers_json
       ?keeper_names
       ?(include_recent_activity = false)
@@ -117,6 +126,18 @@ let keepers_json
     match keeper_names with
     | Some n -> n
     | None -> Keeper_meta_store.keeper_names config
+  in
+  let keeper_keepalive_interval_s =
+    Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
+    |> float_of_int
+  in
+  let keeper_snapshot_interval_s =
+    Runtime_params.get Runtime_settings.keeper_snapshot_sec |> float_of_int
+  in
+  let heartbeat_stale_after_s =
+    Keeper_status_runtime.keeper_heartbeat_stale_after_s
+      ~keepalive_interval_s:keeper_keepalive_interval_s
+      ~snapshot_interval_s:keeper_snapshot_interval_s
   in
   (* Parallel keeper I/O with concurrency cap: at most
      _keeper_snapshot_max_concurrency fibers run simultaneously.
@@ -150,7 +171,6 @@ let keepers_json
             (* Per-sub-op timing for #8822: attribute ~3100ms snapshot cost.
               Threshold 300ms — lower than outer 500ms for more data. *)
             let dt_meta = ref 0.0 in
-            let dt_agent = ref 0.0 in
             let dt_ka = ref 0.0 in
             let dt_audit = ref 0.0 in
             let dt_profile = ref 0.0 in
@@ -161,12 +181,11 @@ let keepers_json
             if total_work > 0.3
             then
               Log.Dashboard.info
-                "[keepers_json:%s] sub-op: meta=%.0fms agent=%.0fms ka=%.0fms \
+                "[keepers_json:%s] sub-op: meta=%.0fms ka=%.0fms \
                  audit=%.0fms profile=%.0fms phase=%.0fms trust=%.0fms activity=%.0fms \
                  total=%.0fms"
                 name
                 (!dt_meta *. 1000.0)
-                (!dt_agent *. 1000.0)
                 (!dt_ka *. 1000.0)
                 (!dt_audit *. 1000.0)
                 (!dt_profile *. 1000.0)
@@ -184,6 +203,9 @@ let keepers_json
                   dt_meta := Time_compat.now () -. t0;
                   if lightweight && meta.paused
                   then (
+                    let last_heartbeat, heartbeat_observation_error =
+                      persisted_last_heartbeat_json config meta.name
+                    in
                     let t_ph = Time_compat.now () in
                     let phase_str =
                       match
@@ -223,6 +245,14 @@ let keepers_json
                                     Keeper_status_runtime.Cp_paused) )
                            ; "paused", `Bool true
                            ; "turn_count", `Int meta.runtime.usage.total_turns
+                           ; ( "keeper_keepalive_interval_s"
+                             , `Float keeper_keepalive_interval_s )
+                           ; ( "keeper_snapshot_interval_s"
+                             , `Float keeper_snapshot_interval_s )
+                           ; "heartbeat_stale_after_s", `Float heartbeat_stale_after_s
+                           ; "last_heartbeat", last_heartbeat
+                           ; ( "heartbeat_observation_error"
+                             , Json_util.string_opt_to_json heartbeat_observation_error )
                            ; "updated_at", `String meta.updated_at
                            ; "created_at", `String meta.created_at
                            ]
@@ -231,16 +261,6 @@ let keepers_json
                            @ Keeper_status_bridge.attention_fields_json config meta
                            @ [ "runtime_trust", runtime_trust ])))
                   else (
-                    let t_agent = Time_compat.now () in
-                    let agent_status_cache_ttl_s = 2.0 in
-                    let agent_json =
-                      let cache_key = "kas:" ^ meta.agent_name in
-                      Dashboard_cache.get_or_compute cache_key ~ttl:agent_status_cache_ttl_s (fun () ->
-                        Keeper_status_runtime.parse_agent_status
-                          config
-                          ~agent_name:meta.agent_name)
-                    in
-                    dt_agent := Time_compat.now () -. t_agent;
                     let t_ka = Time_compat.now () in
                     let keepalive_running =
                       Keeper_status_bridge.runtime_keepalive_running config meta
@@ -282,8 +302,8 @@ let keepers_json
                     in
                     let diagnostic =
                       Keeper_status_runtime.keeper_diagnostic_json
+                        ~config
                         ~meta
-                        ~agent_status:agent_json
                         ~keepalive_running
                         ~history_items:[]
                         ~now_ts
@@ -291,6 +311,9 @@ let keepers_json
                            ~keepalive_running
                            ~keepalive_started_at
                            ~now_ts
+                    in
+                    let last_heartbeat =
+                      U.member "last_heartbeat" diagnostic
                     in
                     let t_audit = Time_compat.now () in
                     let audit_json =
@@ -317,22 +340,13 @@ let keepers_json
                       Json_util.get_string audit_json "tool_audit_at"
                     in
                     dt_audit := Time_compat.now () -. t_audit;
-                    let surface_status =
-                      Keeper_status_runtime.keeper_surface_status
-                        ~agent_status:agent_json
-                        ~diagnostic
-                    in
-                    let aligned_status =
+                    let status =
                       if meta.paused
                       then
                         Keeper_status_runtime.control_plane_status_to_string
                           Keeper_status_runtime.Cp_paused
                       else
-                        align_keeper_runtime_status
-                          ~surface_status
-                          ~diagnostic
-                          ~agent_status_json:agent_json
-                          ~keepalive_running
+                        Keeper_status_runtime.keeper_surface_status ~diagnostic
                     in
                     let t_phase = Time_compat.now () in
                     let registry_phase =
@@ -390,12 +404,16 @@ let keepers_json
                          ; ( "trace_id"
                            , `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                            )
-                         ; "status", `String aligned_status
+                         ; "status", `String status
                          ; "paused", `Bool meta.paused
                          ; "pause_state", `String (if meta.paused then "paused" else "active")
-                         ; "agent", agent_json
-                         ; "generation", `Int meta.runtime.nonce
                          ; "turn_count", `Int meta.runtime.usage.total_turns
+                         ; ( "keeper_keepalive_interval_s"
+                           , `Float keeper_keepalive_interval_s )
+                         ; ( "keeper_snapshot_interval_s"
+                           , `Float keeper_snapshot_interval_s )
+                         ; "heartbeat_stale_after_s", `Float heartbeat_stale_after_s
+                         ; "last_heartbeat", last_heartbeat
                          ; "last_turn_ago_s", Json_util.float_opt_to_json last_turn_ago_s
                          ; "last_handoff_ago_s", Json_util.float_opt_to_json last_handoff_ago_s
                          ; "last_proactive_ago_s", Json_util.float_opt_to_json last_proactive_ago_s
@@ -405,28 +423,6 @@ let keepers_json
                          @ keeper_runtime_identity_fields meta
                          @ [ "keepalive_running", `Bool keepalive_running
                            ; "next_model_hint", `Null
-                           ; ( "active_goal_ids"
-                             , `List
-                                 (List.map
-                                    (fun goal_id -> `String goal_id)
-                                    meta.active_goal_ids) )
-                           ; ( "last_autonomous_action_at"
-                             , if String.trim meta.runtime.last_autonomous_action_at = ""
-                               then `Null
-                               else `String meta.runtime.last_autonomous_action_at )
-                           ; ( "autonomous_action_count"
-                             , `Int meta.runtime.autonomous_action_count )
-                           ; ( "autonomous_turn_count"
-                             , `Int meta.runtime.autonomous_turn_count )
-                           ; ( "autonomous_text_turn_count"
-                             , `Int meta.runtime.autonomous_text_turn_count )
-                           ; ( "autonomous_tool_turn_count"
-                             , `Int meta.runtime.autonomous_tool_turn_count )
-                           ; ( "board_reactive_turn_count"
-                             , `Int meta.runtime.board_reactive_turn_count )
-                           ; ( "mention_reactive_turn_count"
-                             , `Int meta.runtime.mention_reactive_turn_count )
-                           ; "noop_turn_count", `Int meta.runtime.noop_turn_count
                            ; ( "latest_tool_names"
                              , `List
                                  (List.map (fun value -> `String value) latest_tool_names)
@@ -456,10 +452,6 @@ let keepers_json
                                     String.trim meta.runtime.proactive_rt.last_preview
                                   in
                                   if value = "" then None else Some value) )
-                           ; ( "last_blocker"
-                             , match meta.runtime.last_blocker with
-                               | Some info -> Keeper_meta_contract.blocker_info_to_json info
-                               | None -> `Null )
                            ; "updated_at", `String meta.updated_at
                            ; "created_at", `String meta.created_at
                            ; ( "recent_activity"
@@ -612,10 +604,16 @@ let snapshot_json
           let workspace_attention =
             build_workspace_attention_items config |> List.sort compare_attention
           in
-          let workspace_recommendation_items = workspace_recommendations config in
+          (* #26144 moved actions out of the fallback read model: this layer
+             observes and does not recommend. The summary is constant here --
+             count=0, top_action=null, provenance="fallback",
+             authoritative=false. It used to read
+             [workspace_recommendations config], which that change had already
+             emptied to [fun _ -> []], so the config argument was only making a
+             constant look derived. *)
           [ "attention_summary", summary_of_attention_items workspace_attention
           ; ( "recommendation_summary"
-            , summary_of_recommendations ~actor:actor_name workspace_recommendation_items )
+            , summary_of_recommendations ~actor:actor_name [] )
           ])
         else [])
     in
@@ -687,9 +685,7 @@ in
          @ (let confirm_scope =
               timed "pending_confirms" (fun () -> pending_confirm_scope ?actor config)
             in
-            [ ( "pending_confirms"
-              , `List (List.map pending_confirm_to_yojson confirm_scope.visible_entries) )
-            ; ( "pending_confirm_envelope"
+            [ ( "pending_confirm_envelope"
               , `Assoc
                   [ ( "items"
                     , `List
@@ -697,8 +693,6 @@ in
                     )
                   ; "summary", pending_confirm_summary_json_of_scope confirm_scope
                   ] )
-            ; ( "pending_confirm_summary"
-              , pending_confirm_summary_json_of_scope confirm_scope )
             ])
          @ [ "available_actions", available_actions_json
            ; ( "recent_actions"
@@ -710,9 +704,8 @@ in
     if elapsed_total > 1.0
     then (
       Log.Dashboard.info
-        "[snapshot_json] total: %.0fms (sessions=%d keepers=%d)"
+        "[snapshot_json] total: %.0fms (keepers=%d)"
         (elapsed_total *. 1000.0)
-        0
         (List.length keeper_names);
       List.iter
         (fun (label, dt) ->

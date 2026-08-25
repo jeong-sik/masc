@@ -28,13 +28,50 @@ type resolve_error =
       ; agent_name : string
       ; detail : string
       }
+  | Keeper_owner_unavailable of
+      { keeper_name : string
+      ; detail : string
+      }
   | Keeper_operation_unreadable of
       { keeper_name : string
       ; operation_id : Keeper_shutdown_types.Operation_id.t
       ; detail : string
       }
+  | Keeper_purge_blocked of
+      { keeper_name : string
+      ; operation_id : Keeper_shutdown_types.Operation_id.t
+      ; detail : string
+      }
+  | Keeper_lane_executing of
+      { keeper_name : string
+      ; phase : string
+      ; live_turn_id : int option
+      }
 
 let resolve_error_to_string = function
+  | Keeper_purge_blocked { keeper_name; operation_id; detail } ->
+    Printf.sprintf
+      "keeper purge %s is blocked and will not resume on its own: keeper=%s \
+       failure=%s; release the admission fence with an operator supersession, \
+       then reissue the purge"
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
+      keeper_name
+      detail
+  | Keeper_lane_executing { keeper_name; phase; live_turn_id } ->
+    (match live_turn_id with
+     | None ->
+       Printf.sprintf
+         "dashboard Keeper purge refused while the lane is executing: \
+          keeper=%s phase=%s. Stop or pause the Keeper first."
+         keeper_name
+         phase
+     | Some turn_id ->
+       Printf.sprintf
+         "dashboard Keeper purge refused while a turn is in flight: keeper=%s \
+          phase=%s turn=%d. Let the turn finish, or stop the Keeper first."
+         keeper_name
+         phase
+         turn_id)
   | Empty_requested_name -> "dashboard Keeper purge requires a non-empty target name"
   | Invalid_requested_name { requested_name; detail } ->
     Printf.sprintf
@@ -63,6 +100,11 @@ let resolve_error_to_string = function
       "dashboard Keeper purge metadata has an invalid agent owner: keeper=%s agent=%S error=%s"
       keeper_name
       agent_name
+      detail
+  | Keeper_owner_unavailable { keeper_name; detail } ->
+    Printf.sprintf
+      "dashboard Keeper purge cannot read Owner shutdown state: keeper=%s error=%s"
+      keeper_name
       detail
   | Keeper_operation_unreadable { keeper_name; operation_id; detail } ->
     Printf.sprintf
@@ -101,7 +143,30 @@ let resolve (config : Workspace.config) requested_name =
            (Keeper_metadata_unreadable { keeper_name; metadata_path; detail })
        | Ok (Some meta) when String.equal meta.name keeper_name ->
          (match Workspace.validate_agent_name meta.agent_name with
-          | Ok _ -> Ok (Some { requested_name; keeper_name; meta })
+          | Ok _ ->
+            (* Two signals, because the two lanes admit turns differently. The
+               autonomous cycle only enters through a phase [can_execute_turn]
+               admits, but the chat lane runs
+               [run_keeper_invocation_turn_admitted] and never changes phase —
+               [mark_turn_started] writes [current_turn_observation] and leaves
+               [phase] alone. A phase-only guard therefore reads a Paused
+               Keeper answering a chat message as purgeable. *)
+            (match Keeper_registry.get ~base_path:config.base_path keeper_name with
+             | Some entry when Keeper_state_machine.can_execute_turn entry.phase ->
+               Error
+                 (Keeper_lane_executing
+                    { keeper_name
+                    ; phase = Keeper_state_machine.phase_to_string entry.phase
+                    ; live_turn_id = None
+                    })
+             | Some { current_turn_observation = Some observation; phase; _ } ->
+               Error
+                 (Keeper_lane_executing
+                    { keeper_name
+                    ; phase = Keeper_state_machine.phase_to_string phase
+                    ; live_turn_id = Some observation.turn_id
+                    })
+             | Some _ | None -> Ok (Some { requested_name; keeper_name; meta }))
           | Error detail ->
             Error
               (Keeper_agent_name_invalid
@@ -126,13 +191,19 @@ let existing_operation (config : Workspace.config) requested_name =
   | Ok (_, None) -> Ok None
   | Ok (_, Some keeper_name) ->
     let snapshot =
-      Keeper_turn_admission.snapshot_for
+      Keeper_owner_registry.shutdown_operation_id
         ~base_path:config.base_path
         ~keeper_name
     in
-    (match snapshot.snapshot_shutdown_operation_id with
-     | None -> Ok None
-     | Some operation_id ->
+    (match snapshot with
+     | Error error ->
+       Error
+         (Keeper_owner_unavailable
+            { keeper_name
+            ; detail = Keeper_owner_registry.lookup_error_to_string error
+            })
+     | Ok None -> Ok None
+     | Ok (Some operation_id) ->
        (match Keeper_shutdown_store.load ~config ~keeper_name operation_id with
         | Error error ->
           Error
@@ -142,17 +213,37 @@ let existing_operation (config : Workspace.config) requested_name =
                ; detail = Keeper_shutdown_store.error_to_string error
                })
         | Ok operation ->
-          Ok
-            (match operation.cleanup_intent.reason with
-             | Keeper_shutdown_types.Dashboard_keeper_purge _ -> Some operation
-             | Operator_stop_retain_meta
-             | Operator_stop_remove_meta
-             | Dead_tombstone_cleanup -> None)))
+          (match operation.cleanup_intent.reason with
+           | Keeper_shutdown_types.Dashboard_keeper_purge _ ->
+             (match operation.phase with
+              | Keeper_shutdown_types.Blocked failure ->
+                Error
+                  (Keeper_purge_blocked
+                     { keeper_name
+                     ; operation_id
+                     ; detail =
+                         Printf.sprintf
+                           "%s: %s"
+                           (Keeper_shutdown_types.failure_stage_to_string
+                              failure.Keeper_shutdown_types.stage)
+                           failure.Keeper_shutdown_types.detail
+                     })
+              | Prepared
+              | Joining_lanes
+              | Joined_idle
+              | Finalizing_tasks _
+              | Cleanup_ready _
+              | Reconciliation_required _
+              | Finalized _
+              | Superseded _ -> Ok (Some operation))
+           | Operator_stop_retain_meta
+           | Operator_stop_remove_meta
+           | Supervisor_cleanup -> Ok None)))
 ;;
 
 let submit ~config ~actor ({ requested_name; keeper_name; meta } : target) =
   let context : Keeper_shutdown_types.dashboard_purge_context =
-    { requested_name; agent_name = meta.agent_name; meta_version = meta.meta_version }
+    { requested_name; agent_name = meta.agent_name }
   in
   let request : Keeper_shutdown_prepare_join.request =
     { actor

@@ -61,12 +61,6 @@ val backend_exists :
 val backend_list_keys :
   config -> prefix:string -> (string list, Backend_types.error) result
 
-val backend_get_all :
-  config -> prefix:string -> ((string * string) list, Backend_types.error) result
-
-val backend_set_if_not_exists :
-  config -> key:string -> value:string -> (bool, Backend_types.error) result
-
 val backend_acquire_lock :
   config -> key:string -> ttl_seconds:int -> owner:string ->
   (bool, Backend_types.error) result
@@ -74,13 +68,6 @@ val backend_acquire_lock :
 val backend_release_lock :
   config -> key:string -> owner:string ->
   (bool, Backend_types.error) result
-
-val backend_extend_lock :
-  config -> key:string -> ttl_seconds:int -> owner:string ->
-  (bool, Backend_types.error) result
-
-val backend_health_check :
-  config -> (Backend_types.health_result, Backend_types.error) result
 
 (** Returns [Ok n] where [n] is the number of subscribers notified
     (forwarded from [Pubsub_mem.publish]). *)

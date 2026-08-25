@@ -1,4 +1,3 @@
-open Server_dashboard_http_keeper_api_types
 open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_runtime_lens_swimlane
 
@@ -24,13 +23,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
       read_runtime_manifest_scan ~config ~keeper_name ~trace_id
         ~turn_id:selected_turn_id ~limit:scan.limit ()
   in
-  let claim_scope =
-    Server_dashboard_http_keeper_runtime_lens_summaries.claim_scope_summary_json
-      ~keeper_name
-      ~trace_id
-      ?turn_id
-      ()
-  in
   let config_drift =
     Server_dashboard_http_keeper_runtime_lens_summaries.config_drift_summary_json
       ~config
@@ -39,7 +31,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
   let gaps =
     Server_dashboard_http_keeper_runtime_lens_gaps.runtime_lens_gaps
       ~terminal_event_present
-      ~claim_scope
       ~config_drift
       scan
   in
@@ -60,7 +51,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
           [
             ("trace_id", `String trace_id);
             ("keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id);
-            ("max_oas_turn_count", Json_util.int_opt_to_json scan.max_oas_turn_count);
+            ("max_agent_core_turn_count", Json_util.int_opt_to_json scan.max_agent_core_turn_count);
             ("terminal_event_present", `Bool terminal_event_present);
             ( "terminal_event",
               if terminal_event_present then `String "turn_finished" else `Null );
@@ -129,7 +120,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                          (fun row -> row.Keeper_runtime_manifest.status)
                          scan.provider_terminal_row) );
                 ] );
-            ("claim_scope", claim_scope);
             ("config_drift", config_drift);
             ( "context",
               `Assoc
@@ -189,9 +179,9 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                        (if has_provider_lane then "resolved" else "empty"))
                 ~synthetic_events:[]
             );
-            ( "oas_agent",
-              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"oas_agent"
-                ~label:"OAS"
+            ( "agent_core_agent",
+              runtime_lens_swimlane_json swimlane_scan gaps ~lane:"agent_core_agent"
+                ~label:"AGENT_CORE"
                 ~events:
                   [
                     Keeper_runtime_manifest.Checkpoint_loaded;

@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0107"]
-implementation_prs: [15991]
 ---
 
 # RFC-0097 — Keeper sandbox container reuse
@@ -81,7 +80,7 @@ When the runtime-failure-storm at 2026-05-16 18:08-18:15 fired,
 12+ keepers retried tier rotations in lockstep, each retry spawning
 a fresh container. Host FD usage crossed `kern.maxfiles` (491_520),
 ENFILE returned for `fstatat`/`execve`/`fork`, and unrelated
-subsystems (cost emitter, OAS event bridge, keeper runtime manifest
+subsystems (cost emitter, agent_core event bridge, keeper runtime manifest
 appender, git worktree checks) all failed simultaneously. The system
 took ~10 minutes to drain.
 

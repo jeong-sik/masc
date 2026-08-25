@@ -5,7 +5,6 @@ status: Implemented
 created: 2026-05-14
 updated: 2026-07-13
 author: vincent
-implementation_prs: [15207, 15268, 15271]
 ---
 
 # RFC-0080 — Registered descriptors are the tool-surface SSOT

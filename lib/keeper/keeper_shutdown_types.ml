@@ -30,34 +30,32 @@ end
 
 type meta_disposition =
   | Retain_operator_pause
-  | Retain_dead_tombstone
   | Remove_meta
 
 type dashboard_purge_context =
   { requested_name : string
   ; agent_name : string
-  ; meta_version : int
   }
 
 type cleanup_reason =
   | Operator_stop_retain_meta
   | Operator_stop_remove_meta
-  | Dead_tombstone_cleanup
+  | Supervisor_cleanup
   | Dashboard_keeper_purge of dashboard_purge_context
 
 type completion_action =
-  | Dead_tombstone_reaped
+  | Supervisor_cleaned
   | Dashboard_keeper_purged
 
 type dashboard_purge_artifact =
   | Keeper_metrics_store_artifact
-  | Keeper_generation_index_artifact
   | Keeper_decision_log_artifact
   | Keeper_feedback_log_artifact
   | Keeper_runtime_directory_artifact
   | Keeper_memory_current_artifact
   | Keeper_memory_journal_artifact
   | Keeper_configuration_artifact
+  | Keeper_chat_store_artifact
   | Agent_artifact_bundle of string list
 
 type completion_receipt =
@@ -130,6 +128,7 @@ type join_evidence =
 type cleanup_evidence =
   { settled_task_ids : Keeper_id.Task_id.t list
   ; pending_confirms_removed : int
+  ; meta_snapshot_digest : Keeper_meta_json.Snapshot_digest.t
   }
 
 type finalization_evidence =
@@ -142,6 +141,7 @@ type finalization_evidence =
   }
 
 type supersession =
+  | Operator_blocked_purge_released of { actor : string }
   | Operator_metadata_update of { actor : string }
   | Operator_reconciliation_accepted of
       { actor : string
@@ -150,6 +150,7 @@ type supersession =
 
 type phase =
   | Prepared
+  | Joining_lanes
   | Joined_idle
   | Finalizing_tasks of Keeper_id.Task_id.t list
   | Cleanup_ready of cleanup_evidence
@@ -165,7 +166,6 @@ type t =
   ; keeper_name : string
   ; lane_ownership : lane_ownership
   ; trace_id : Keeper_id.Trace_id.t
-  ; generation : int
   ; actor : string
   ; cleanup_intent : cleanup_intent
   ; turn_disposition : turn_disposition
@@ -194,7 +194,7 @@ type invariant_error =
   | Finalized_completion_mismatch of cleanup_reason * completion_receipt
   | Superseded_cleanup_reason_mismatch of cleanup_reason
 
-let schema_version = 7
+let schema_version = 8
 
 let requires_admission_fence operation =
   match operation.phase with
@@ -203,6 +203,7 @@ let requires_admission_fence operation =
       { completion = (Completion_not_requested | Completion_delivered _); _ }
   | Superseded _ -> false
   | Prepared
+  | Joining_lanes
   | Joined_idle
   | Finalizing_tasks _
   | Cleanup_ready _
@@ -210,54 +211,41 @@ let requires_admission_fence operation =
   | Blocked _ -> true
 ;;
 
-let meta_disposition_to_string = function
-  | Retain_operator_pause -> "retain_operator_pause"
-  | Retain_dead_tombstone -> "retain_dead_tombstone"
-  | Remove_meta -> "remove_meta"
-;;
-
-let meta_disposition_of_string = function
-  | "retain_operator_pause" -> Ok Retain_operator_pause
-  | "retain_dead_tombstone" -> Ok Retain_dead_tombstone
-  | "remove_meta" -> Ok Remove_meta
-  | value -> Error (Printf.sprintf "unknown Keeper shutdown meta disposition: %S" value)
-;;
-
 let cleanup_reason_label = function
   | Operator_stop_retain_meta -> "operator_stop_retain_meta"
   | Operator_stop_remove_meta -> "operator_stop_remove_meta"
-  | Dead_tombstone_cleanup -> "dead_tombstone_cleanup"
+  | Supervisor_cleanup -> "supervisor_cleanup"
   | Dashboard_keeper_purge _ -> "dashboard_keeper_purge"
 ;;
 
 let meta_disposition_of_cleanup_reason = function
   | Operator_stop_retain_meta -> Retain_operator_pause
-  | Dead_tombstone_cleanup -> Retain_dead_tombstone
+  | Supervisor_cleanup -> Remove_meta
   | Operator_stop_remove_meta
   | Dashboard_keeper_purge _ -> Remove_meta
 ;;
 
 let completion_action_to_string = function
-  | Dead_tombstone_reaped -> "dead_tombstone_reaped"
+  | Supervisor_cleaned -> "supervisor_cleaned"
   | Dashboard_keeper_purged -> "dashboard_keeper_purged"
 ;;
 
 let completion_action_of_string = function
-  | "dead_tombstone_reaped" -> Ok Dead_tombstone_reaped
+  | "supervisor_cleaned" -> Ok Supervisor_cleaned
   | "dashboard_keeper_purged" -> Ok Dashboard_keeper_purged
   | value -> Error (Printf.sprintf "unknown Keeper shutdown completion action: %S" value)
 ;;
 
 let completion_action_equal left right =
   match left, right with
-  | Dead_tombstone_reaped, Dead_tombstone_reaped
+  | Supervisor_cleaned, Supervisor_cleaned
   | Dashboard_keeper_purged, Dashboard_keeper_purged -> true
-  | Dead_tombstone_reaped, Dashboard_keeper_purged
-  | Dashboard_keeper_purged, Dead_tombstone_reaped -> false
+  | Supervisor_cleaned, Dashboard_keeper_purged
+  | Dashboard_keeper_purged, Supervisor_cleaned -> false
 ;;
 
 let completion_action_of_cleanup_reason = function
-  | Dead_tombstone_cleanup -> Some Dead_tombstone_reaped
+  | Supervisor_cleanup -> Some Supervisor_cleaned
   | Dashboard_keeper_purge _ -> Some Dashboard_keeper_purged
   | Operator_stop_retain_meta
   | Operator_stop_remove_meta -> None
@@ -315,8 +303,7 @@ let validate operation =
       let expected_meta_removed =
         match meta_disposition_of_cleanup_reason operation.cleanup_intent.reason with
         | Remove_meta -> true
-        | Retain_operator_pause
-        | Retain_dead_tombstone -> false
+        | Retain_operator_pause -> false
       in
       if not (Bool.equal evidence.meta_removed expected_meta_removed)
       then
@@ -345,7 +332,7 @@ let validate operation =
           | Registered_lane _,
             ( Operator_stop_retain_meta
             | Operator_stop_remove_meta
-            | Dead_tombstone_cleanup ) -> false
+            | Supervisor_cleanup ) -> false
         in
         if accumulator_drop_required && not evidence.accumulator_dropped
         then Error Required_accumulator_not_dropped
@@ -366,10 +353,20 @@ let validate operation =
       (match operation.cleanup_intent.reason with
        | Operator_stop_retain_meta -> Ok ()
        | ( Operator_stop_remove_meta
-         | Dead_tombstone_cleanup
+         | Supervisor_cleanup
          | Dashboard_keeper_purge _ ) as cleanup_reason ->
          Error (Superseded_cleanup_reason_mismatch cleanup_reason))
+    | Superseded (Operator_blocked_purge_released _) ->
+      (* The mirror of the arm above: this release exists only for a purge, so
+         every other intent is as wrong here as a purge is there. *)
+      (match operation.cleanup_intent.reason with
+       | Dashboard_keeper_purge _ -> Ok ()
+       | ( Operator_stop_retain_meta
+         | Operator_stop_remove_meta
+         | Supervisor_cleanup ) as cleanup_reason ->
+         Error (Superseded_cleanup_reason_mismatch cleanup_reason))
     | Prepared
+    | Joining_lanes
     | Joined_idle
     | Finalizing_tasks _
     | Cleanup_ready _
@@ -415,43 +412,41 @@ let dashboard_purge_context_equal
   =
   String.equal left.requested_name right.requested_name
   && String.equal left.agent_name right.agent_name
-  && Int.equal left.meta_version right.meta_version
 ;;
 
 let cleanup_reason_equal left right =
   match left, right with
   | Operator_stop_retain_meta, Operator_stop_retain_meta
   | Operator_stop_remove_meta, Operator_stop_remove_meta
-  | Dead_tombstone_cleanup, Dead_tombstone_cleanup -> true
+  | Supervisor_cleanup, Supervisor_cleanup -> true
   | Dashboard_keeper_purge left, Dashboard_keeper_purge right ->
     dashboard_purge_context_equal left right
   | Operator_stop_retain_meta,
     ( Operator_stop_remove_meta
-    | Dead_tombstone_cleanup
+    | Supervisor_cleanup
     | Dashboard_keeper_purge _ )
   | Operator_stop_remove_meta,
     ( Operator_stop_retain_meta
-    | Dead_tombstone_cleanup
+    | Supervisor_cleanup
     | Dashboard_keeper_purge _ )
-  | Dead_tombstone_cleanup,
+  | Supervisor_cleanup,
     ( Operator_stop_retain_meta
     | Operator_stop_remove_meta
     | Dashboard_keeper_purge _ )
   | Dashboard_keeper_purge _,
     ( Operator_stop_retain_meta
     | Operator_stop_remove_meta
-    | Dead_tombstone_cleanup ) ->
+    | Supervisor_cleanup ) ->
     false
 ;;
 
 let dashboard_purge_artifact_plan ~keeper_name context =
   let agent_aliases =
     [ context.requested_name; keeper_name; context.agent_name ]
-    |> List.filter_map String_util.trim_to_option
+    |> List.filter_map String_util.trim_nonempty
     |> List.sort_uniq String.compare
   in
   [ Keeper_metrics_store_artifact
-  ; Keeper_generation_index_artifact
   ; Keeper_decision_log_artifact
   ; Keeper_feedback_log_artifact
   ; Keeper_runtime_directory_artifact
@@ -463,6 +458,12 @@ let dashboard_purge_artifact_plan ~keeper_name context =
   ; Keeper_memory_current_artifact
   ; Keeper_memory_journal_artifact
   ; Keeper_configuration_artifact
+    (* The chat store is a top-level per-keeper file
+       (.masc/keeper_chat/<name>.jsonl), so it sits outside the runtime
+       directory removed above. Without an explicit entry a purged keeper
+       leaves its conversation behind and a later keeper with the same name
+       reads it as its own history. *)
+  ; Keeper_chat_store_artifact
   ; Agent_artifact_bundle agent_aliases
   ]
 ;;
@@ -486,7 +487,6 @@ let immutable_fields_equal left right =
   && String.equal left.keeper_name right.keeper_name
   && lane_ownership_equal left.lane_ownership right.lane_ownership
   && Keeper_id.Trace_id.equal left.trace_id right.trace_id
-  && Int.equal left.generation right.generation
   && String.equal left.actor right.actor
   && cleanup_intent_equal left.cleanup_intent right.cleanup_intent
   && turn_disposition_equal left.turn_disposition right.turn_disposition
@@ -504,6 +504,22 @@ let admission_lane_of_string = function
   | "chat" -> Ok Chat
   | value -> Error (Printf.sprintf "unknown Keeper shutdown admission lane: %S" value)
 ;;
+
+(* Projection for status surfaces: the phase name only, no payload. A
+   consumer waiting for the operation to reach a terminal reads this; the
+   evidence carried by [Finalized]/[Cleanup_ready] stays in the record. *)
+let phase_to_string = function
+  | Prepared -> "prepared"
+  | Joining_lanes -> "joining_lanes"
+  | Joined_idle -> "joined_idle"
+  | Finalizing_tasks _ -> "finalizing_tasks"
+  | Cleanup_ready _ -> "cleanup_ready"
+  | Reconciliation_required _ -> "reconciliation_required"
+  | Finalized _ -> "finalized"
+  | Blocked _ -> "blocked"
+  | Superseded _ -> "superseded"
+;;
+
 
 let failure_stage_to_string = function
   | Task_discovery -> "task_discovery"

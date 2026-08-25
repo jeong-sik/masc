@@ -1,4 +1,4 @@
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 
 let ( let* ) = Result.bind
 let lane_id = "board_attention_exact"
@@ -61,7 +61,7 @@ type prepared =
   }
 
 let message role text =
-  Agent_sdk.Types.make_message ~role [ Agent_sdk.Types.Text text ]
+  Agent_core.Types.make_message ~role [ Agent_core.Types.Text text ]
 ;;
 
 let messages candidate =
@@ -73,7 +73,7 @@ let messages candidate =
       Prompt_names.judge_board
       [ "judgment_request_json", Yojson.Safe.to_string request ]
   in
-  Ok [ message Agent_sdk.Types.User prompt ]
+  Ok [ message Agent_core.Types.User prompt ]
 ;;
 
 let flow_candidates selected_slots =
@@ -94,18 +94,32 @@ let flow_candidates selected_slots =
 
 let prepare ~base_path:_ ~keeper_name:_ ~net candidate =
   match
-    ( Keeper_board_attention_candidate.resumable_status
+    ( Keeper_board_attention_candidate.status_view
         candidate.Keeper_board_attention_candidate.status
     , net )
   with
-  | ( None
-    | Some
+  | ( Keeper_board_attention_candidate.Suspended_quarantine _
+    | Keeper_board_attention_candidate.Direct_resumable
         (Keeper_board_attention_candidate.Resumable_judged _
-        | Keeper_board_attention_candidate.Resumable_consumed _) ), _ ->
+        | Keeper_board_attention_candidate.Resumable_consumed _)
+    | Keeper_board_attention_candidate.Requeued_resumable
+        { resumable =
+            (Keeper_board_attention_candidate.Resumable_judged _
+            | Keeper_board_attention_candidate.Resumable_consumed _)
+        ; _
+        } ), _ ->
     Error Candidate_not_pending
-  | Some (Keeper_board_attention_candidate.Resumable_pending _), None ->
+  | ( Keeper_board_attention_candidate.Direct_resumable
+        (Keeper_board_attention_candidate.Resumable_pending _)
+    | Keeper_board_attention_candidate.Requeued_resumable
+        { resumable = Keeper_board_attention_candidate.Resumable_pending _; _ }
+    ), None ->
     Error Network_unavailable
-  | Some (Keeper_board_attention_candidate.Resumable_pending _), Some net ->
+  | ( Keeper_board_attention_candidate.Direct_resumable
+        (Keeper_board_attention_candidate.Resumable_pending _)
+    | Keeper_board_attention_candidate.Requeued_resumable
+        { resumable = Keeper_board_attention_candidate.Resumable_pending _; _ }
+    ), Some net ->
     let* messages =
       messages candidate
       |> Result.map_error (fun detail -> Prompt_contract_unavailable detail)
@@ -357,8 +371,36 @@ let observe_terminal prepared result =
 ;;
 
 let execute_current ?clock ~before_dispatch ~before_advance prepared =
+  let registry = Exact_lane_run_registry.global () in
+  let run_id = Random_id.prefixed ~prefix:"exact-board-attention-" ~bytes:16 in
+  let started_at = Time_compat.now () in
+  Exact_lane_run_registry.register_running
+    registry
+    ~run_id
+    ~lane:Exact_lane_run_registry.Board_attention
+    ~actor:prepared.candidate.keeper_name
+    ~started_at
+    ~input:(Exact_lane_run_registry.Exact_input prepared.candidate.judgment_request);
+  let complete outcome output =
+    match
+      Exact_lane_run_registry.mark_completed
+        registry
+        ~run_id
+        ~outcome
+        ~elapsed_s:(Time_compat.now () -. started_at)
+        ~selected_slot:None
+        ~output
+    with
+    | Ok () -> ()
+    | Error error ->
+      Log.Keeper.error
+        ~keeper_name:prepared.candidate.keeper_name
+        "board-attention exact-run observation completion failed run_id=%s: %s"
+        run_id
+        (Exact_lane_run_registry.completion_error_to_string error)
+  in
   let bound = ref None in
-  let oas_before_dispatch receipt =
+  let agent_core_before_dispatch receipt =
     let current = attempt_provenance receipt in
     let* () =
       match !bound with
@@ -372,7 +414,7 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
     bound := Some current;
     Ok ()
   in
-  let oas_before_advance ~failed ~next =
+  let agent_core_before_advance ~failed ~next =
     let* () =
       before_advance
         ~failed:(advance_source_of_failure failed)
@@ -415,30 +457,51 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
       Error (Exact_execution_failed (evidence_provenance evidence))
   in
   let result =
-    match
-      Exact_output.execute_flow_once
-        ~net:prepared.net
-        ?clock
-        ~before_measurement_dispatch:(fun _ -> Ok ())
-        ~on_measurement_terminal:(fun _ -> Ok ())
-        ~before_dispatch:oas_before_dispatch
-        ~before_advance:oas_before_advance
-        ~validate
-        prepared.attempt
+    try
+      match
+        Exact_output.execute_flow_once
+          ~net:prepared.net
+          ?clock
+          ~before_measurement_dispatch:(fun _ -> Ok ())
+          ~on_measurement_terminal:(fun _ -> Ok ())
+          ~before_dispatch:agent_core_before_dispatch
+          ~before_advance:agent_core_before_advance
+          ~validate
+          prepared.attempt
+      with
+      | Ok success -> Ok success.accepted
+      | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
+        terminal_error cause
+      | Error
+          (Exact_output.Flow_semantic_candidates_exhausted { rejections; _ }) ->
+        let rejection =
+          List.fold_left
+            (fun _ rejection -> rejection)
+            rejections.first
+            rejections.rest
+        in
+        Error rejection.rejection
     with
-    | Ok success -> Ok success.accepted
-    | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
-      terminal_error cause
-    | Error
-        (Exact_output.Flow_semantic_candidates_exhausted { rejections; _ }) ->
-      let rejection =
-        List.fold_left
-          (fun _ rejection -> rejection)
-          rejections.first
-          rejections.rest
-      in
-      Error rejection.rejection
+    | Eio.Cancel.Cancelled _ as exn ->
+      complete Exact_lane_run_registry.Cancelled `Null;
+      raise exn
+    | exn ->
+      complete
+        (Exact_lane_run_registry.Failed
+           { code = "board_attention_raised"; detail = Printexc.to_string exn })
+        `Null;
+      raise exn
   in
+  (match result with
+   | Ok judgment ->
+     complete
+       Exact_lane_run_registry.Succeeded
+       (Keeper_board_attention_candidate.judgment_to_yojson judgment)
+   | Error _ ->
+     let code = result |> terminal_outcome |> terminal_outcome_to_string in
+     complete
+       (Exact_lane_run_registry.Failed { code; detail = code })
+       (`Assoc [ "terminal_outcome", `String code ]));
   observe_terminal prepared result;
   result
 ;;

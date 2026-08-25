@@ -46,7 +46,6 @@ type grader =
 (* ================================================================ *)
 
 type tool_expectation = {
-  tool_name : string;            (** Legacy diagnostic label / exact tool fallback *)
   selector : Eval_tool_selector.t;    (** Descriptor-aware selector to match *)
   required : bool;               (** Must this tool be called? *)
   max_calls : int option;        (** Max times this tool should be called *)
@@ -60,10 +59,6 @@ type tool_expectation = {
 type ownership =
   | Self_owned
   | Foreign
-
-let ownership_to_string = function
-  | Self_owned -> "self_owned"
-  | Foreign -> "foreign"
 
 type scenario = {
   id : string;                        (** Unique scenario identifier *)
@@ -87,7 +82,12 @@ type grader_result = {
   grader_desc : string;
   score : float;           (** 0.0-1.0 *)
   weight : float;
-  passed : bool;           (** score >= 0.5 *)
+  passed : bool;
+      (** The grader's own predicate, not a cut on [score]:
+          [apply_deterministic_grader] sets it from the match result and
+          [check_tool_expectations_with_evidence] from
+          [required_ok && max_ok]. [score] is derived from it (1.0 / 0.0),
+          not the other way round. *)
   detail : string;         (** Why this score was given *)
 }
 
@@ -97,7 +97,10 @@ type eval_run = {
   trace_id : string;        (** Trajectory trace_id for this run *)
   scores : grader_result list;
   weighted_score : float;   (** Weighted average of all grader scores *)
-  passed : bool;            (** weighted_score >= pass_threshold *)
+  passed : bool;
+      (** Supplied by whoever builds the run. No [pass_threshold] exists in
+          this module, and nothing here constructs an [eval_run] — the
+          verdict is the runner's, and [summarize_runs] only counts it. *)
   tool_calls_made : string list;
   total_turns : int;
   total_cost_usd : float option;
@@ -226,26 +229,36 @@ let check_tool_expectations expectations actual_calls =
 (* Score computation                                                 *)
 (* ================================================================ *)
 
-(** Compute weighted average score from grader results. *)
-let weighted_score (results : grader_result list) : float =
-  let total_weight = List.fold_left (fun acc r -> acc +. r.weight) 0.0 results in
-  if total_weight = 0.0 then 0.0
-  else
-    let weighted_sum = List.fold_left (fun acc r -> acc +. (r.score *. r.weight)) 0.0 results in
-    weighted_sum /. total_weight
+(** Compute pass@k: the chance that a [k]-run sample drawn from [n] recorded
+    runs, [c] of which passed, contains at least one pass.
 
-(** Compute pass@k: probability that at least one of k runs passes.
-    Formula: 1 - C(n-c, k) / C(n, k)
-    where n = total runs, c = passing runs, k = sample size.
+    [1 - C(n-c, k) / C(n, k)] — the sample is drawn without replacement, so
+    the failing runs are chosen from a shrinking pool.
 
-    Simplified: if all k runs available, pass@k = 1 - (1-p)^k
-    where p = c/n (empirical pass rate). *)
+    Evaluated as the running product [(n-c-i) / (n-i)] for [i] in [0, k), which
+    is the same ratio with no binomial materialised, so nothing overflows at
+    the run counts a suite produces.
+
+    [1 - (1 - c/n)^k] is the with-replacement reading and understates this:
+    it lets the same failing run be drawn [k] times. At n=5, c=1, k=3 it
+    reports 0.488 against a true 0.6, and at n=5, c=4, k=3 it reports 0.992
+    when the answer is exactly 1 — a single failing run cannot fill a 3-run
+    sample. *)
 let compute_pass_at_k ~(k : int) ~(n : int) ~(c : int) : float =
-  if n = 0 || k = 0 then 0.0
+  if n <= 0 || k <= 0 then 0.0
   else if c >= n then 1.0
   else
-    let p = float_of_int c /. float_of_int n in
-    1.0 -. (1.0 -. p) ** float_of_int (min k n)
+    let k = min k n in
+    let failing = n - c in
+    if failing < k then 1.0
+    else
+      let rec ratio i acc =
+        if i >= k then acc
+        else
+          ratio (i + 1)
+            (acc *. float_of_int (failing - i) /. float_of_int (n - i))
+      in
+      1.0 -. ratio 0 1.0
 
 (** Compute standard deviation of scores (consistency metric). *)
 let score_std_dev (scores : float list) : float =
@@ -342,12 +355,6 @@ let summarize_runs ~(scenario : scenario) ~(k : int) (runs : eval_run list) : ev
 (* JSON serialization                                                *)
 (* ================================================================ *)
 
-let match_mode_to_string = function
-  | Exact -> "exact"
-  | Contains -> "contains"
-  | Regex p -> Printf.sprintf "regex(%s)" p
-  | NotContains -> "not_contains"
-
 let grader_result_to_json (r : grader_result) : Yojson.Safe.t =
   `Assoc [
     ("grader", `String r.grader_desc);
@@ -382,7 +389,6 @@ let eval_result_to_json (r : eval_result) : Yojson.Safe.t =
     ("mean_score", `Float r.mean_score);
     ("consistency", `Float r.consistency);
     ("total_cost_usd", Json_util.float_opt_to_json r.total_cost_usd);
-    ("num_runs", `Int (List.length r.runs));
     ("ci95_low", `Float r.ci95_low);
     ("ci95_high", `Float r.ci95_high);
     ("min_runs_met", `Bool r.min_runs_met);
@@ -398,19 +404,6 @@ let suite_result_to_json (r : eval_suite_result) : Yojson.Safe.t =
     ("total_cost_usd", Json_util.float_opt_to_json r.total_cost_usd);
     ("total_runs", `Int r.total_runs);
     ("results", `List (List.map eval_result_to_json r.results));
-  ]
-
-let scenario_to_json (s : scenario) : Yojson.Safe.t =
-  `Assoc [
-    ("id", `String s.id);
-    ("name", `String s.name);
-    ("description", `String s.description);
-    ("category", `String s.category);
-    ("goal", `String s.goal);
-    ("tags", `List (List.map (fun s -> `String s) s.tags));
-    ("ownership", `String (ownership_to_string s.ownership));
-    ("graders", `Int (List.length s.graders));
-    ("tool_expectations", `Int (List.length s.tool_expectations));
   ]
 
 (* ================================================================ *)
@@ -502,29 +495,19 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
       | Some (`List items) ->
           List.filter_map (fun te ->
             try
-              let legacy_tool =
-                match Json_util.get_string te "tool" with
-                | Some tool -> tool
-                | None -> (
-                  match Json_util.get_string te "tool_name" with
-                  | Some tool_name -> tool_name
-                  | None -> "")
-              in
+              (* [selector] is the only accepted spelling, and a selector
+                 that fails to decode is dropped rather than downgraded to a
+                 name match -- that downgrade turns a malformed selector into
+                 a silently weaker expectation. *)
               let selector =
                 match Json_util.assoc_member_opt "selector" te with
-                | Some selector_json -> (
-                    match Eval_tool_selector.of_yojson selector_json with
-                    | Ok selector -> selector
-                    | Error _ -> Eval_tool_selector.Tool_name legacy_tool)
-                | None -> Eval_tool_selector.Tool_name legacy_tool
+                | Some selector_json -> Eval_tool_selector.of_yojson selector_json
+                | None -> Error "tool_expectation requires a selector"
               in
-              let tool_name =
-                if String.trim legacy_tool = ""
-                then Eval_tool_selector.label selector
-                else legacy_tool
-              in
+              match selector with
+              | Error _ -> None
+              | Ok selector ->
               Some {
-                tool_name;
                 selector;
                 required = (match Json_util.assoc_member_opt "required" te with
                   | Some (`Bool b) -> b | _ -> false);
@@ -595,6 +578,13 @@ let load_scenarios_from_file (path : string) : (scenario list, string) result =
 (* ================================================================ *)
 
 (** Generate a human-readable report from suite results. *)
+(* The scenario badge in the human-facing report says PASS when at least half
+   the runs passed. It is a display cut on [pass_at_k], not a contract: the
+   number it summarises is printed on the next line, and no caller branches on
+   the badge. Named so the rule is reviewable rather than a literal inside a
+   Printf. *)
+let scenario_pass_at_k_threshold = 0.5
+
 let report_to_string (r : eval_suite_result) : string =
   let buf = Buffer.create 2048 in
   let add = Buffer.add_string buf in
@@ -609,7 +599,7 @@ let report_to_string (r : eval_suite_result) : string =
        (cost_to_string r.total_cost_usd));
 
   List.iter (fun (er : eval_result) ->
-    let status = if er.pass_at_k >= 0.5 then "PASS" else "FAIL" in
+    let status = if er.pass_at_k >= scenario_pass_at_k_threshold then "PASS" else "FAIL" in
     add (Printf.sprintf "[%s] %s (%s)\n" status er.scenario.name er.scenario.category);
     add
       (Printf.sprintf "  pass@k=%.2f  mean=%.2f  consistency=%.3f  cost=%s\n"

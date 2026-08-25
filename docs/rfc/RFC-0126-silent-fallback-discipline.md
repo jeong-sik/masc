@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0106", "0042", "0088", "0127"]
-implementation_prs: [15959, 16000, 16019, 16024, 16189]
 ---
 
 ## Progress audit (2026-05-21)
@@ -49,13 +48,13 @@ introducing PR, treat as part of Phase 1 cluster).
   Phase 2b accuracy (AST surface more reliable than grep).
 - **Phase 4** — CI hard-fail. Final closure step.
 
-### Pending — Phase 1 OAS upstream
+### Pending — Phase 1 agent_core
 
-§6.1.b' notes that labels **C2 / C3 / V16** require an OAS upstream
+§6.1.b' notes that labels **C2 / C3 / V16** require an agent_core change
 PR before masc-side adaptation can land. RFC-0126 author flagged a
-sibling OAS RFC: `RFC-OAS-XYZ: Event_bus per-subscriber backpressure
+sibling agent_core RFC: `RFC-agent_core-XYZ: Event_bus per-subscriber backpressure
 override + Memory.long_term_backend Result.t boundary`. Not yet
-filed in OAS repo.
+filed against agent_core.
 
 ### Related RFC
 
@@ -212,23 +211,23 @@ audit doc `.tmp/memory-compacting-analysis.html` 가 작성 시점(01:22) 에 �
 | V | 위치 | 클러스터 매핑 | RFC §5 권고 |
 |---|---|---|---|
 | V15 (LOW) | `memory_jsonl.ml:69-95 parse_line` | A (wildcard parse drop) + E (warn 있고 counter 부재) | §5.1 OPTION A — closed-vocab `{empty_line / no_key / not_assoc / json_parse_error}` reason label, counter 추가. **iter 48 (PR pending) 흡수.** |
-| V16 (LOW) | `memory_jsonl.ml:120-219 long_term_backend` | B (Result.t asymmetry) | **OAS upstream 의존** — `Agent_sdk.Memory.long_term_backend` 타입이 OAS 정의. masc 단독 fix 불가. OAS-side sibling RFC 후보. |
+| V16 (LOW) | `memory_jsonl.ml:120-219 long_term_backend` | B (Result.t asymmetry) | **agent_core 의존** — `Agent_sdk.Memory.long_term_backend` 타입이 agent_core 정의. masc 단독 fix 불가. agent_core-side sibling RFC 후보. |
 | V09 (MED) | `keeper_compact_policy.ml compaction_decision` | H (type API drift) — *spiral 외* | RFC sub-issue: `Skipped_no_checkpoint` 를 wrapper variant 로 분리 또는 policy 내부 생성. invasive, 별도 RFC 후보. |
 
 V09 는 본 RFC scope 밖 (silent fallback 아니라 type API drift). 별도 RFC issue 후보.
 
 #### 6.1.b' Audit Phase 0/1 masc-side completeness (iter 49 closure)
 
-`oas-internal-audit.html` 의 C1-C3 label, 그리고 V16, 위 표의 OAS upstream 의존 항목들을 모두 묶으면:
+`agent_core-internal-audit.html` 의 C1-C3 label, 그리고 V16, 위 표의 agent_core 의존 항목들을 모두 묶으면:
 
 | label | 위치 | masc Phase 0/1 가능? | upstream block |
 |---|---|---|---|
 | C1 (pair-repair counter) | masc-side `keeper_compact_audit.ml` | 가능 — iter 24 PR #15792 머지 완료 | — |
-| C2 (Event_bus subscribe per-subscriber policy/buffer) | masc-side `agent_sdk_metrics_bridge.ml:58-59` | **불가** | `Agent_sdk.Event_bus.subscribe` 시그니처가 per-subscriber `?policy/?buffer_size` 미노출 |
-| C3 (retrieve contract typed) | masc-side `memory_jsonl.ml` 답습 | **불가** | `Agent_sdk.Memory.long_term_backend.retrieve : key → Yojson option` — `Result.t` 도입은 OAS 단에서 |
+| C2 (Event_bus subscribe per-subscriber policy/buffer) | masc-side `runtime_event_bus.ml:58-59` | **불가** | `Agent_sdk.Event_bus.subscribe` 시그니처가 per-subscriber `?policy/?buffer_size` 미노출 |
+| C3 (retrieve contract typed) | masc-side `memory_jsonl.ml` 답습 | **불가** | `Agent_sdk.Memory.long_term_backend.retrieve : key → Yojson option` — `Result.t` 도입은 agent_core 단에서 |
 | V16 (retrieve/query Result.t) | masc-side `memory_jsonl.ml` 답습 | **불가** | C3 와 동일 upstream contract |
 
-→ audit Phase 0/1 의 masc-side fix-able 라벨 (C1, V01-V15, V17) 은 **모두 처리 완료** (또는 §6.1.b 의 V09 같이 별도 RFC 후보). 남은 C2/C3/V16 은 OAS upstream PR + masc 후속 어댑테이션 2-step 시퀀스 필요. OAS-side sibling RFC 권고 (제목 예시: "RFC-OAS-XYZ: Event_bus per-subscriber backpressure override + Memory.long_term_backend Result.t boundary").
+→ audit Phase 0/1 의 masc-side fix-able 라벨 (C1, V01-V15, V17) 은 **모두 처리 완료** (또는 §6.1.b 의 V09 같이 별도 RFC 후보). 남은 C2/C3/V16 은 agent_core PR + masc 후속 어댑테이션 2-step 시퀀스 필요. agent_core-side sibling RFC 권고 (제목 예시: "RFC-agent_core-XYZ: Event_bus per-subscriber backpressure override + Memory.long_term_backend Result.t boundary").
 
 #### 6.1.c Non-spiral observability extension (cluster G)
 

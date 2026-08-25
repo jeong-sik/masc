@@ -11,5 +11,5 @@ val build
   -> from_runtime:string
   -> retry:Keeper_error_classify.degraded_retry
   -> outcome:Keeper_execution_receipt.runtime_rotation_outcome
-  -> Agent_sdk.Error.sdk_error
+  -> Agent_core.Error.t
   -> Keeper_execution_receipt.runtime_rotation_attempt

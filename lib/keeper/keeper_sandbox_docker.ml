@@ -131,14 +131,6 @@ type docker_shell_result =
   ; cwd : string
   }
 
-(** Normalize a Docker invocation result into the common [(status, output)]
-    pair used by shell-op handlers.  [Error] maps to a synthetic
-    [WEXITED 127] so callers can treat both branches uniformly. *)
-let docker_result_pair = function
-  | Ok (result : docker_shell_result) -> result.status, result.output
-  | Error msg -> Unix.WEXITED 127, msg
-;;
-
 (* docker run --rm wall-clock covers spawn + container
    cold start + actual cmd + drain. The floor is hardcoded at 20s because
    the hang modes (docker daemon stall, container start stall, command
@@ -327,22 +319,6 @@ let docker_run_argv
   @ [ image; "bash"; "-l"; "-s" ]
 ;;
 
-let optional_ro_mount ~host ~container =
-  if host = ""
-  then []
-  else if not (Sys.file_exists host)
-  then
-    (* Log the skipped mount so operators can distinguish "mount
-       deliberately omitted" from "mount expected but path missing"
-       when debugging container-internal file access failures. *)
-    ( Log.Keeper.debug
-        "optional_ro_mount skipped: host path %S does not exist (container=%S)"
-        host
-        container
-    ; [] )
-  else [ "-v"; host ^ ":" ^ container ^ ":ro" ]
-;;
-
 let sandbox_error_json ~(config : Workspace.config) ~(meta : keeper_meta) message =
   Keeper_registry_error_recording.record ~base_path:config.base_path meta.name message;
   error_json message
@@ -385,7 +361,7 @@ let validate_docker_dispatch_context
         in
         match Exec_policy.parse_string_to_ir ~mode:Tool_execute validation_cmd with
         | Ok validation_ir ->
-          Keeper_tool_execute_shell_ir.validate_paths
+          Keeper_tooling.Execute_shell_ir.validate_paths
             ~workdir:cwd
             validation_ir
         | Error reason ->
@@ -524,7 +500,23 @@ let run_docker_shell_command_with_status_internal
                         | Error err ->
                           sandbox_error ("docker_shell_failed: secret_projection: " ^ err)
                         | Ok secret_projection ->
-                          let argv =
+                          (match
+                             Keeper_github_identity.docker_args_for_tool
+                               ~config
+                               ~keeper_name:meta.name
+                               ~container_masc_dir:
+                                 (Keeper_sandbox_runtime_setup.container_masc_dir
+                                    ~container_root)
+                           with
+                           | Error err ->
+                             Eio_guard.protect
+                               ~finally:(fun () -> secret_projection.cleanup ())
+                               (fun () ->
+                                  sandbox_error
+                                    ("docker_shell_failed: github_identity_invalid: "
+                                     ^ err))
+                           | Ok github_identity ->
+                             let argv =
                             docker_run_argv
                               ~config
                               ~meta
@@ -538,11 +530,13 @@ let run_docker_shell_command_with_status_internal
                               ~gid
                               ~seccomp_args
                               ~identity_mounts
-                              ~secret_args:secret_projection.docker_args
+                              ~secret_args:
+                                (secret_projection.docker_args
+                                 @ github_identity.args)
                               ~image
                               ~ttl_sec:(docker_oneshot_ttl_sec ~timeout_sec)
-                          in
-                          (try
+                             in
+                             (try
                              let run_once () =
                                Keeper_turn_sandbox_runtime.run_argv_with_stdin_and_status_split
                                  ~timeout_sec
@@ -550,7 +544,10 @@ let run_docker_shell_command_with_status_internal
                                  argv
                              in
                              Eio_guard.protect
-                               ~finally:(fun () -> secret_projection.cleanup ())
+                               ~finally:(fun () ->
+                                 Fun.protect
+                                   ~finally:(fun () -> secret_projection.cleanup ())
+                                   github_identity.cleanup)
                                (fun () ->
                                   let status, stdout, stderr =
                                     Eio_guard.protect
@@ -598,7 +595,7 @@ let run_docker_shell_command_with_status_internal
                                   "docker_shell_failed: unix_error: %s: %s(%s)"
                                   (Unix.error_message code)
                                   fn
-                                  arg)))))))
+                                  arg))))))))
 ;;
 
 let run_docker_shell_command_with_status =

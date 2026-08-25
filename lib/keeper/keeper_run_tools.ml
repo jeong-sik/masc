@@ -11,9 +11,9 @@ open Keeper_agent_result
 open Keeper_agent_error
 open Keeper_agent_prompt_metrics
 
-(** Mutable accumulator for OAS hook callbacks.
+(** Mutable accumulator for AGENT_CORE hook callbacks.
 
-    OAS hooks (before_turn, on_tool_executed) cannot return values, so
+    AGENT_CORE hooks (before_turn, on_tool_executed) cannot return values, so
     they write into this single mutable record during Agent.run execution.
     After execution completes, {!freeze} produces an immutable snapshot. *)
 type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
@@ -29,6 +29,7 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   ; mutable prompt_blocks : Turn_record.prompt_block list
   ; mutable extra_system_context_digest : string option
   ; mutable extra_system_context_size : int option
+  ; mutable assistant_turn_texts : string list
   }
 
 type hook_outputs = Keeper_run_tools_hook_accumulator.hook_outputs =
@@ -48,22 +49,23 @@ let freeze = Keeper_run_tools_hook_accumulator.freeze
 
     Hook mutations flow through {!acc}, receipt refs are kept for
     facade post-processing writes, and [agent_ref] is created locally
-    at the OAS call site. *)
+    at the AGENT_CORE call site. *)
 type agent_setup = Keeper_run_tools_hooks.agent_setup =
-  { tools : Agent_sdk.Tool.t list
+  { tools : Agent_core.Tool.t list
   ; cleanup : unit -> unit
-  ; terminal_effect_state : unit -> Keeper_tools_oas.terminal_effect_state
+  ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; user_message : string
-  ; hooks : Agent_sdk.Hooks.hooks
-  ; model_input_projection : Agent_sdk.Agent.model_input_projection
+  ; hooks : Agent_core.Hooks.hooks
+  ; model_input_projection : Agent_core.Agent.model_input_projection
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list
-  ; final_oas_turn_ordinal_ref : int option ref
+  ; final_agent_core_turn_ordinal_ref : int option ref
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
+  ; receipt_lane_attempt_index_ref : int ref
   ; receipt_response_text_present_ref : bool ref
   }
 

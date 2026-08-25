@@ -6,7 +6,10 @@
 let keeper_api_prefix = "/api/v1/keepers/"
 let keeper_suffix_config = "/config"
 let keeper_suffix_secrets = "/secrets"
+let keeper_suffix_github_identity = "/github-identity"
+let keeper_suffix_github_login = "/github-login"
 let keeper_suffix_boot = "/boot"
+let keeper_suffix_up = "/up"
 let keeper_suffix_shutdown = "/shutdown"
 let keeper_suffix_reset = "/reset"
 let keeper_suffix_clear = "/clear"
@@ -14,10 +17,14 @@ let keeper_suffix_checkpoints = "/checkpoints"
 let keeper_suffix_runtime_trace = "/runtime-trace"
 let keeper_suffix_directive = "/directive"
 let keeper_suffix_paused_work = "/paused-work"
-let keeper_suffix_catchup_judge = "/catchup-judge"
-
-let keeper_chat_receipt_state_json = Keeper_chat_receipt_projection.state_json
-let keeper_chat_receipt_json = Keeper_chat_receipt_projection.receipt_json
+let keeper_suffix_raw_traces = "/raw-traces"
+let keeper_suffix_raw_trace = "/raw-trace"
+let keeper_suffix_memory_journal = "/memory-journal"
+let keeper_suffix_turn_records = "/turn-records"
+let keeper_suffix_file_changes = "/file-changes"
+let keeper_suffix_fusion = "/fusion"
+let keeper_suffix_operator_note = "/operator-note"
+let keeper_suffix_trajectory = "/trajectory"
 
 let cache_key_string_segment value =
   Printf.sprintf "s%d:%s" (String.length value) value
@@ -59,11 +66,6 @@ let keeper_runtime_trace_cache_key (config : Workspace.config) name ?trace_id
     limit
 ;;
 
-type keeper_chat_recovery_route =
-  { keeper_name : string
-  ; receipt_id : string
-  }
-
 type keeper_board_attention_quarantine_route =
   { keeper_name : string
   ; partition_id : string
@@ -72,35 +74,20 @@ type keeper_board_attention_quarantine_route =
 type keeper_post_route_kind =
   | Keeper_post_config
   | Keeper_post_secrets
+  | Keeper_post_github_login
   | Keeper_post_boot
+  | Keeper_post_up
   | Keeper_post_shutdown
   | Keeper_post_reset
   | Keeper_post_clear
   | Keeper_post_checkpoints
   | Keeper_post_directive
   | Keeper_post_paused_work
-  | Keeper_post_catchup_judge
-  | Keeper_post_chat_recovery of keeper_chat_recovery_route
+  | Keeper_post_fusion
+  | Keeper_post_operator_note
   | Keeper_post_board_attention_quarantine_recovery of
       keeper_board_attention_quarantine_route
   | Keeper_post_unknown
-
-let keeper_chat_recovery_route req_path : keeper_chat_recovery_route option =
-  if not (String.starts_with ~prefix:keeper_api_prefix req_path)
-  then None
-  else
-    let rest =
-      String.sub
-        req_path
-        (String.length keeper_api_prefix)
-        (String.length req_path - String.length keeper_api_prefix)
-    in
-    match String.split_on_char '/' rest with
-    | [ keeper_name; "chat"; "receipts"; receipt_id; "recovery" ]
-      when not (String.equal keeper_name "") && not (String.equal receipt_id "") ->
-      Some { keeper_name; receipt_id }
-    | _ -> None
-;;
 
 let keeper_board_attention_quarantine_route req_path =
   if not (String.starts_with ~prefix:keeper_api_prefix req_path)
@@ -126,17 +113,13 @@ let keeper_board_attention_quarantine_route req_path =
 ;;
 
 let classify_keeper_post_route req_path =
-  match
-    keeper_chat_recovery_route req_path,
-    keeper_board_attention_quarantine_route req_path
-  with
-  | Some route, _ -> Keeper_post_chat_recovery route
-  | None, Some route ->
+  match keeper_board_attention_quarantine_route req_path with
+  | Some route ->
     Keeper_post_board_attention_quarantine_recovery route
-  | None, None
+  | None
     when not (String.starts_with ~prefix:keeper_api_prefix req_path) ->
     Keeper_post_unknown
-  | None, None ->
+  | None ->
     let plen = String.length keeper_api_prefix in
     let tlen = String.length req_path in
     let ends_with suffix =
@@ -145,14 +128,17 @@ let classify_keeper_post_route req_path =
     in
     if ends_with keeper_suffix_config then Keeper_post_config
     else if ends_with keeper_suffix_secrets then Keeper_post_secrets
+    else if ends_with keeper_suffix_github_login then Keeper_post_github_login
     else if ends_with keeper_suffix_boot then Keeper_post_boot
+    else if ends_with keeper_suffix_up then Keeper_post_up
     else if ends_with keeper_suffix_shutdown then Keeper_post_shutdown
     else if ends_with keeper_suffix_reset then Keeper_post_reset
     else if ends_with keeper_suffix_clear then Keeper_post_clear
     else if ends_with keeper_suffix_checkpoints then Keeper_post_checkpoints
     else if ends_with keeper_suffix_directive then Keeper_post_directive
+    else if ends_with keeper_suffix_operator_note then Keeper_post_operator_note
     else if ends_with keeper_suffix_paused_work then Keeper_post_paused_work
-    else if ends_with keeper_suffix_catchup_judge then Keeper_post_catchup_judge
+    else if ends_with keeper_suffix_fusion then Keeper_post_fusion
     else Keeper_post_unknown
 
 let keeper_path_ends_with req_path suffix =
@@ -163,6 +149,8 @@ let keeper_path_ends_with req_path suffix =
   && String.starts_with ~prefix:keeper_api_prefix req_path
   && String.ends_with ~suffix req_path
 
+let is_valid_keeper_name = Keeper_config.validate_name
+
 let extract_keeper_name_for_suffix req_path suffix =
   let plen = String.length keeper_api_prefix in
   let slen = String.length suffix in
@@ -170,28 +158,45 @@ let extract_keeper_name_for_suffix req_path suffix =
     String.trim
       (String.sub req_path plen (String.length req_path - plen - slen))
   in
-  let valid =
-    String.length raw > 0
-    && String.length raw <= 128
-    && String.to_seq raw
-       |> Seq.for_all (fun c ->
-            (c >= 'a' && c <= 'z')
-            || (c >= 'A' && c <= 'Z')
-            || (c >= '0' && c <= '9')
-            || c = '_' || c = '-')
-  in
-  if valid then raw else ""
+  if is_valid_keeper_name raw then raw else ""
 
 let is_keeper_checkpoints_get_path req_path =
   keeper_path_ends_with req_path keeper_suffix_checkpoints
 
-let is_keeper_runtime_trace_get_path req_path =
-  keeper_path_ends_with req_path keeper_suffix_runtime_trace
-
 let is_keeper_paused_work_get_path req_path =
   keeper_path_ends_with req_path keeper_suffix_paused_work
 
-let trim_to_opt = String_util.trim_to_option
+(* [include_thinking] is not in the path, so the caller reads it and passes it
+   here: this table is where a route's permission is decided, and deciding it
+   somewhere else is how the two doors ended up different.
+
+   `/raw-trace` requires CanAdmin because it returns hidden reasoning.
+   `/trajectory?include_thinking=true` returns the same reasoning and required
+   nothing, so the admin gate on the first door was reachable around. Same
+   data, same gate. *)
+let keeper_get_permission ?(include_thinking = false) req_path =
+  if keeper_path_ends_with req_path keeper_suffix_trajectory && include_thinking
+  then Some Masc_domain.CanAdmin
+  else if keeper_path_ends_with req_path keeper_suffix_turn_records
+  then Some Masc_domain.CanReadState
+  else if
+    is_keeper_checkpoints_get_path req_path
+    || is_keeper_paused_work_get_path req_path
+    || keeper_path_ends_with req_path keeper_suffix_github_identity
+  then Some Masc_domain.CanAdmin
+  else if
+    keeper_path_ends_with req_path keeper_suffix_raw_traces
+    || keeper_path_ends_with req_path keeper_suffix_raw_trace
+    || keeper_path_ends_with req_path keeper_suffix_memory_journal
+    (* Same data, same gate: [/file-changes] returns the exact text a keeper
+       wrote to a file, which is part of what the raw trace above already
+       holds. A lighter gate here would be a second door onto the first
+       door's content. *)
+    || keeper_path_ends_with req_path keeper_suffix_file_changes
+  then Some Masc_domain.CanAdmin
+  else None
+
+let trim_to_opt = String_util.trim_nonempty
 
 let truncate_text ~max_chars text =
   let len = String.length text in
@@ -201,25 +206,15 @@ let truncate_text ~max_chars text =
     String_util.utf8_safe ~max_bytes:max_chars ~suffix:"…" text
     |> String_util.to_string
 
-let latest_preview_of_messages (messages : Agent_sdk.Types.message list) =
+let latest_preview_of_messages (messages : Agent_core.Types.message list) =
   messages
   |> List.rev
-  |> List.find_map (fun (message : Agent_sdk.Types.message) ->
-       if message.role = Agent_sdk.Types.System then None
+  |> List.find_map (fun (message : Agent_core.Types.message) ->
+       if message.role = Agent_core.Types.System then None
        else
-         Agent_sdk.Types.text_of_message message
+         Agent_core.Types.text_of_message message
          |> trim_to_opt
          |> Option.map (truncate_text ~max_chars:180))
-
-let is_valid_keeper_name name =
-  String.length name > 0
-  && String.length name <= 128
-  && String.to_seq name
-     |> Seq.for_all (fun c ->
-          (c >= 'a' && c <= 'z')
-          || (c >= 'A' && c <= 'Z')
-          || (c >= '0' && c <= '9')
-          || c = '_' || c = '-')
 
 let extract_keeper_name_for_post req_path suffix =
   let plen = String.length keeper_api_prefix in
@@ -243,7 +238,7 @@ let unique_present_paths paths =
   paths
   |> List.filter_map (fun value ->
        match value with
-       | Some path -> String_util.trim_to_option path
+       | Some path -> String_util.trim_nonempty path
        | _ -> None)
   |> Json_util.dedupe_keep_order
 
@@ -289,8 +284,7 @@ let runtime_trace_redacts_provider_model_key key =
   (not (runtime_trace_keeps_provider_attempt_provenance_key key))
   &&
   (string_contains_substring key "provider"
-   || string_contains_substring key "model"
-   || String.equal key "configured_labels")
+   || string_contains_substring key "model")
 
 let rec runtime_trace_public_json = function
   | `Assoc fields ->
@@ -303,56 +297,7 @@ let rec runtime_trace_public_json = function
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
       value
 
-let tool_call_output_text_opt json =
-  match Json_util.assoc_member_opt "output" json with
-  | Some (`String value) -> Some value
-  | Some (`Assoc _ as output) -> (
-    match Json_util.assoc_member_opt "_blob" output with
-    | Some blob -> Json_util.get_string blob "preview"
-    | None -> None)
-  | None | Some _ -> None
-
-let parse_tool_output_json_opt json =
-  match tool_call_output_text_opt json with
-  | None -> None
-  | Some output -> (
-    match Safe_ops.parse_json_safe ~context:"runtime_lens.tool_output" output with
-    | Ok parsed -> Some parsed
-    | Error _ -> None)
-
-let tool_call_runtime_contract json =
-  match Json_util.assoc_member_opt "runtime_contract" json with
-  | Some contract -> contract
-  | None -> `Assoc []
-
-let tool_call_matches_trace ?turn_id ~keeper_name ~trace_id json =
-  let contract = tool_call_runtime_contract json in
-  let keeper_matches =
-    match Json_util.get_string json "keeper" with
-    | Some keeper -> String.equal keeper keeper_name
-    | None -> true
-  in
-  let trace_matches =
-    match
-      ( Json_util.get_string json "trace_id",
-        Json_util.get_string contract "trace_id" )
-    with
-    | Some value, _ | _, Some value -> String.equal value trace_id
-    | None, None -> false
-  in
-  let turn_matches =
-    match turn_id with
-    | None -> true
-    | Some wanted ->
-      Json_util.assoc_int_opt "keeper_turn_id" json = Some wanted
-      || Json_util.assoc_int_opt "keeper_turn_id" contract = Some wanted
-  in
-  keeper_matches && trace_matches && turn_matches
-
 let first_string_opt values =
-  List.find_map (fun value -> value) values
-
-let first_int_opt values =
   List.find_map (fun value -> value) values
 
 let string_has_prefix = Server_dashboard_http_json_utils.string_has_prefix
@@ -370,67 +315,6 @@ let claim_status_of_output output =
   | None when string_has_prefix ~prefix:"Error:" result -> "error"
   | None when result = "" -> "unknown"
   | None -> "observed"
-
-let claim_scope_summary_absent =
-  `Assoc
-    [ ("present", `Bool false)
-    ; ("source", `String "keeper_task_claim_tool_call")
-    ; ("status", `String "not_observed")
-    ; ("result", `Null)
-    ; ("mode", `Null)
-    ; ("scoped", `Null)
-    ; ("active_goal_ids", `List [])
-    ; ("effective_goal_ids", `List [])
-    ; ("fallback_reason", `Null)
-    ; ("matched_goal_id", `Null)
-    ; ("excluded_count", `Null)
-    ; ("claimed_task_id", `Null)
-    ; ("claimed_goal_id", `Null)
-    ; ("trace_id", `Null)
-    ; ("keeper_turn_id", `Null)
-    ]
-
-let internal_history_json_to_trajectory_line (json : Yojson.Safe.t)
-    : Trajectory.trajectory_line option =
-  let source = Safe_ops.json_string ~default:"" "source" json in
-  (* History rows persist message text as typed [content_blocks], not a flat
-     [content] string (Keeper_context_core_message_json: "Structured
-     content_blocks is the only supported message-content shape"). Reading a
-     flat [content] field decoded to "" for every persisted internal_assistant
-     row, so the whole keeper reasoning history was skipped and invisible in the
-     dashboard trace. Use the SSOT extractor (shared with history routing /
-     memory recall) so content_blocks rows decode to their text. *)
-  let content = Keeper_context_core.text_of_history_jsonl_json json in
-  if source <> "internal_assistant" || String.trim content = "" then None
-  else
-    let ts =
-      match Safe_ops.json_float_opt "ts_unix" json with
-      | Some value when value > 0.0 -> value
-      | _ ->
-          match Safe_ops.json_float_opt "timestamp" json with
-          | Some value when value > 0.0 -> value
-          | _ -> 0.0
-    in
-    if ts <= 0.0 then None
-    else
-      let ts_iso =
-        match Safe_ops.json_string_opt "ts_iso" json with
-        | Some value when Option.is_some (String_util.trim_to_option value) -> value
-        | _ ->
-            match Safe_ops.json_string_opt "ts" json with
-            | Some value when Option.is_some (String_util.trim_to_option value) -> value
-            | _ -> Masc_domain.iso8601_of_unix_seconds ts
-      in
-      Some
-        (Trajectory.Thinking
-           {
-             ts;
-             ts_iso;
-             turn = Safe_ops.json_int ~default:0 "turn" json;
-             content;
-             content_length = String.length content;
-             redacted = Safe_ops.json_bool ~default:false "redacted" json;
-           })
 
 let runtime_manifest_public_json row =
   Keeper_runtime_manifest.public_to_json row

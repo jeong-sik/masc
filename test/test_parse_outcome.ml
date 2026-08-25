@@ -46,12 +46,6 @@ let test_map () =
   in
   check int "map increments" 8 (match r with Ok v -> v | Error _ -> -1)
 
-let test_to_option () =
-  check (option int) "Ok -> Some"
-    (Some 5) (Parse_outcome.to_option (Ok 5));
-  check (option int) "Error -> None"
-    None (Parse_outcome.to_option (Error (`Other (Failure "x"))))
-
 (* RFC-0145 §Design — cancellation MUST re-raise. We drive an Eio
    fiber and cancel it from a sibling; inside the cancelled context
    the parser raises Cancelled which parse_safe must propagate. *)
@@ -87,7 +81,6 @@ let () =
           test_case "of_exn classifies Failure as `Other" `Quick test_of_exn_other;
           test_case "bind" `Quick test_bind;
           test_case "map" `Quick test_map;
-          test_case "to_option" `Quick test_to_option;
         ] );
       ( "cancellation",
         [

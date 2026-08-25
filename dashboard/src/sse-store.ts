@@ -6,8 +6,8 @@
 // async imports, signal-only updates).
 
 import {
-  pauseQueuedOasRuntimeIngress,
-  resumeQueuedOasRuntimeIngress,
+  pauseQueuedAgentCoreRuntimeIngress,
+  resumeQueuedAgentCoreRuntimeIngress,
   normalizeSSEDispatchType,
 } from './sse'
 import {
@@ -18,19 +18,16 @@ import {
 import type {
   BoardPost,
   DashboardExecutionResponse,
-  DashboardMemoryResponse,
-  DashboardPlanningResponse,
-  DashboardShellResponse,
+  KeeperApprovalAuditReceipt,
   SSEEvent,
 } from './types'
 import type * as TransportHealth from './components/transport-health'
 import {
   keeperHeartbeats,
   invalidateDashboardCache,
-  hydrateBoardSnapshot,
-  hydrateShellSnapshot,
+  invalidateExecutionSnapshotGeneration,
   hydrateExecutionSnapshot,
-  hydratePlanningSnapshot,
+  resetExecutionSnapshotGeneration,
   refreshDashboard,
   refreshExecution,
   refreshBoard,
@@ -53,18 +50,17 @@ import {
 } from './namespace-truth-store'
 import { mergeServerStatus } from './store-normalizers'
 import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
-import { operatorSnapshot, operatorWorkspaceDigest } from './operator-signals'
-import { compositeTick, hydrateFleetCompositeSnapshot } from './composite-signals'
+import { operatorError, operatorSnapshot, operatorWorkspaceDigest } from './operator-signals'
+import { compositeTick } from './composite-signals'
 import { isRecord } from './lib/type-guards'
-import {
-  hydrateGoalTreeObservationError,
-  hydrateGoalTreeSnapshot,
-} from './goal-tree-state'
+import { normalizeKeeperApprovalAuditReceipt } from './lib/keeper-approval-audit'
 import { showToast } from './components/common/toast'
 import type { ErrorCode } from './types/error'
-import { parseOasPayloadOrNull } from './schemas/sse-event-payload'
-import { hydrateOasTelemetrySample } from './oas-telemetry-store'
+import { parseAgentCorePayloadOrNull } from './schemas/sse-event-payload'
+import { hydrateAgentCoreTelemetrySample } from './agent-core-telemetry-store'
+import { sseEventFamily, withoutMascNamespace } from './lib/sse-event-type'
 import {
+  SSE_APPROVAL_AUDIT_EVENT,
   SSE_APPROVAL_PENDING_EVENT,
   SSE_APPROVAL_RESOLVED_EVENT,
   SSE_APPROVAL_SUMMARY_UPDATED_EVENT,
@@ -86,6 +82,20 @@ import {
 let _refreshGateFn: ((opts?: { force?: boolean }) => void) | null = null
 export function registerGateRefresh(fn: (opts?: { force?: boolean }) => void): void {
   _refreshGateFn = fn
+}
+
+let _observeGateAuditReceiptFn: ((
+  receipts: KeeperApprovalAuditReceipt[],
+  context: { id: string | null; transport: 'sse' },
+) => void) | null = null
+
+export function registerGateAuditReceiptObserver(
+  fn: (
+    receipts: KeeperApprovalAuditReceipt[],
+    context: { id: string | null; transport: 'sse' },
+  ) => void,
+): void {
+  _observeGateAuditReceiptFn = fn
 }
 
 let _refreshOperatorFn: (() => void) | null = null
@@ -112,7 +122,6 @@ export function registerKeeperTurnRefresh(fn: (keeperName: string) => void): voi
 // their authoritative re-read here instead of reconstructing queue state from
 // event deltas.
 const _refreshKeeperWaitingInventoryFns = new Set<(keeperName: string) => void>()
-const pendingKeeperChatReceiptRefreshNames = new Set<string>()
 export function registerKeeperWaitingInventoryRefresh(
   fn: (keeperName: string) => void,
 ): () => void {
@@ -120,23 +129,27 @@ export function registerKeeperWaitingInventoryRefresh(
   return () => _refreshKeeperWaitingInventoryFns.delete(fn)
 }
 
-type KeeperCompactionRefreshReason = 'source_changed' | 'ready' | 'failed'
-const _refreshKeeperCompactionFns = new Set<(
-  keeperName: string,
-  reason: KeeperCompactionRefreshReason,
-) => void>()
-export function registerKeeperCompactionRefresh(
-  fn: (keeperName: string, reason: KeeperCompactionRefreshReason) => void,
-): () => void {
-  _refreshKeeperCompactionFns.add(fn)
-  return () => _refreshKeeperCompactionFns.delete(fn)
-}
-
 const _refreshActivityFns = new Set<() => void>()
 export function registerActivityRefresh(fn: () => void): () => void {
   _refreshActivityFns.add(fn)
   return () => {
     _refreshActivityFns.delete(fn)
+  }
+}
+
+const _refreshWorkspaceMessageFns = new Set<() => void>()
+export function registerWorkspaceMessagesRefresh(fn: () => void): () => void {
+  _refreshWorkspaceMessageFns.add(fn)
+  return () => {
+    _refreshWorkspaceMessageFns.delete(fn)
+  }
+}
+
+const _refreshInternalAgentFns = new Set<() => void>()
+export function registerInternalAgentRefresh(fn: () => void): () => void {
+  _refreshInternalAgentFns.add(fn)
+  return () => {
+    _refreshInternalAgentFns.delete(fn)
   }
 }
 
@@ -166,6 +179,18 @@ export function registerBoardHearthsRefresh(fn: () => void): () => void {
   _refreshBoardHearthsFn = fn
   return () => {
     if (_refreshBoardHearthsFn === fn) _refreshBoardHearthsFn = null
+  }
+}
+
+// The fusion detail browser reads the board-sink posts, not the run registry,
+// and post_created carries only a 200-char preview with no meta — so the run's
+// panels and judge cannot be built from the event. Refetch instead, which is
+// what the surface's manual Refresh does (#21822).
+let _refreshFusionBoardFn: (() => void) | null = null
+export function registerFusionBoardRefresh(fn: () => void): () => void {
+  _refreshFusionBoardFn = fn
+  return () => {
+    if (_refreshFusionBoardFn === fn) _refreshFusionBoardFn = null
   }
 }
 
@@ -206,17 +231,16 @@ interface SimpleRoute {
 // corresponding server emitter exists in lib/ are kept; dead keys were
 // removed after cross-referencing the OCaml sources under lib/.
 const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
-  // Agent lifecycle — emitted by lib/mcp_tool_runtime_workspace.ml
-  agent_bound:         { target: 'execution' },
-  agent_unbound:       { target: 'execution' },
   // Broadcasts — emitted by lib/mcp_tool_runtime_comm.ml
   broadcast:           { target: 'execution' },
   // Keeper lifecycle (also triggers operator refresh via handler)
   keeper_handoff:       { target: 'execution', force: true },
   keeper_compaction:    { target: 'execution', force: true },
-  keeper_guardrail:     { target: 'execution', force: true },
   keeper_phase_changed: { target: 'execution', force: true },
-  keeper_turn_complete: { target: 'execution', force: true },
+  // A turn-complete hook precedes the durable TurnRecord commit and does not
+  // mutate the execution cache. The selected Keeper is refreshed through the
+  // scoped status reader in [handleKeeperLifecycle]; the proactive canonical
+  // execution snapshot updates the roster without a per-turn global rebuild.
   // Board content — emitted by lib/mcp_tool_runtime_board.ml
   board_post:          { target: 'board' },
   'masc/board_post':    { target: 'board' },
@@ -237,6 +261,7 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   // Without this entry the live WS router dropped the event and the run-status
   // panel only refreshed on the ~120s periodic poll / route revisit (RFC-0266 Phase 4).
   fusion_run_status:    { target: 'fusion' },
+  internal_agent_runs_changed: { target: 'internalAgents', debounceMs: 0 },
 }
 
 const BOARD_HEARTH_REFRESH_EVENTS = new Set([
@@ -262,6 +287,9 @@ const REFRESH_FNS: Record<RefreshTarget, () => void> = {
     for (const fn of _refreshActivityFns) fn()
   },
   fusion:    () => { void refreshFusionRuns() },
+  internalAgents: () => {
+    for (const fn of _refreshInternalAgentFns) fn()
+  },
   ide:       () => {
     for (const fn of _refreshIdeFns) fn()
   },
@@ -274,6 +302,14 @@ function scheduleTargetRefresh(
 ): void {
   if (!routeWantsRefreshTarget(route.value, target)) return
   scheduleRefresh(target, fn, delayMs)
+}
+
+function scheduleFusionBoardRefresh(delayMs = SSE_DEFAULT_DEBOUNCE_MS): void {
+  if (!_refreshFusionBoardFn) return
+  if (!routeWantsRefreshTarget(route.value, 'fusion')) return
+  scheduleRefresh('fusion-board', () => {
+    _refreshFusionBoardFn?.()
+  }, delayMs)
 }
 
 function scheduleBoardHearthsRefresh(delayMs = SSE_DEFAULT_DEBOUNCE_MS): void {
@@ -289,10 +325,9 @@ function scheduleBoardHearthsRefresh(delayMs = SSE_DEFAULT_DEBOUNCE_MS): void {
 // catches edits whose per-call event was coalesced). All already reach the
 // dashboard live; the IDE just never listened. keeper_tool_call already exists
 // in the fixed event-type allowlist (schemas/sse.ts) and is broadcast by
-// lib/keeper_tools_oas_handler_telemetry.ml.
+// lib/keeper_tools_agent_core_handler_telemetry.ml.
 const IDE_WORKSPACE_REFRESH_EVENTS = new Set([
   'keeper_tool_call',
-  'keeper_tool_skipped',
   'keeper_turn_complete',
 ])
 
@@ -319,12 +354,12 @@ function scheduleIdeCursorRefresh(): void {
 // --- Named handlers for complex events ---
 
 const KEEPER_LIFECYCLE_EVENTS = new Set([
-  'keeper_handoff', 'keeper_compaction', 'keeper_turn_complete', 'keeper_guardrail',
+  'keeper_handoff', 'keeper_compaction', 'keeper_turn_complete',
   'keeper_phase_changed',
 ])
 
 function normalizeMascEventType(type: string): string {
-  return type.startsWith('masc/') ? type.slice('masc/'.length) : type
+  return withoutMascNamespace(type)
 }
 
 /** Hydrate project-snapshot signals directly from a push payload — zero HTTP fetch. */
@@ -332,32 +367,58 @@ function handleNamespaceTruthSnapshot(payload: unknown): void {
   try {
     const normalized = normalizeNamespaceTruth(payload)
     namespaceTruth.value = normalized
+    namespaceTruthError.value = null
     serverStatus.value = mergeServerStatus(
       serverStatus.value,
       normalized.root.status ?? null,
     )
   } catch (err) {
-    // Mirrors the transport-health P2 fix below: hydration failures are
-    // operator-actionable (UI shows stale data + falls back to HTTP), not
-    // background-debug, so they get console.warn instead of console.debug.
-    console.warn('[server-push] project-snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
+    const detail = err instanceof Error ? err.message : 'invalid project snapshot'
+    namespaceTruth.value = null
+    namespaceTruthError.value = detail
+    console.warn('[server-push] project-snapshot hydration failed', detail)
   }
 }
 
 /** Hydrate execution signals directly from a push payload — zero HTTP fetch. */
 function handleExecutionSnapshot(payload: unknown): void {
   try {
+    if (!isRecord(payload)) throw new Error('execution snapshot payload is invalid')
+    if (payload.execution_invalidated === true) {
+      const epoch = payload.execution_publication_epoch
+      const generation = payload.execution_publication_generation
+      if (
+        typeof epoch !== 'string'
+        || epoch.trim() === ''
+        || typeof generation !== 'number'
+        || !Number.isSafeInteger(generation)
+        || generation < 0
+        || !invalidateExecutionSnapshotGeneration(epoch, generation)
+      ) {
+        throw new Error('execution invalidation generation is invalid')
+      }
+      void refreshExecution({ force: true })
+      return
+    }
     hydrateExecutionSnapshot(payload as DashboardExecutionResponse)
   } catch (err) {
     console.warn('[server-push] execution snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
   }
 }
 
+function failOperatorSnapshotHydration(detail: string): void {
+  operatorSnapshot.value = null
+  operatorError.value = detail
+}
+
 function handleOperatorSnapshot(payload: unknown): void {
   try {
     operatorSnapshot.value = normalizeOperatorSnapshot(payload)
+    operatorError.value = null
   } catch (err) {
-    console.warn('[server-push] operator snapshot hydration failed', err instanceof Error ? err.message : '')
+    const detail = err instanceof Error ? err.message : 'invalid operator snapshot'
+    failOperatorSnapshotHydration(detail)
+    console.warn('[server-push] operator snapshot hydration failed', detail)
   }
 }
 
@@ -412,7 +473,7 @@ function handleKeeperLifecycle(event: { type: string; name?: string }): void {
     scheduleRefresh('operator', () => _refreshOperatorFn?.(), SSE_KEEPER_OPERATOR_DEBOUNCE_MS)
   }
 
-  // keeper_turn_complete is an SDK-hook event that can precede the durable
+  // keeper_turn_complete is an agent-core hook event that can precede the durable
   // TurnRecord commit, so it refreshes status only. Transcript freshness is
   // driven by the post-commit keeper_chat_appended invalidation.
   if (normalizeMascEventType(event.type) === 'keeper_turn_complete') {
@@ -463,19 +524,21 @@ function handleReconnect(): void {
   // If the server is still warming up after restart, the first fetch may fail.
   // Schedule a single retry after 3s to cover the warm-up window.
   invalidateDashboardCache()
-  pauseQueuedOasRuntimeIngress()
+  resetExecutionSnapshotGeneration()
+  void refreshExecution({ force: true })
+  pauseQueuedAgentCoreRuntimeIngress()
   void hydrateAfterReconnect()
     .finally(() => {
-      resumeQueuedOasRuntimeIngress()
+      resumeQueuedAgentCoreRuntimeIngress()
     })
 }
 
 async function hydrateAfterReconnect(): Promise<void> {
   try {
-    const { replayOasRuntimeTelemetry } = await import('./oas-runtime-store')
-    await replayOasRuntimeTelemetry()
+    const { replayAgentCoreRuntimeTelemetry } = await import('./agent-core-runtime-store')
+    await replayAgentCoreRuntimeTelemetry()
   } catch (err) {
-    console.warn('[server-push] reconnect OAS replay failed', err instanceof Error ? err.message : err)
+    console.warn('[server-push] reconnect Agent Core replay failed', err instanceof Error ? err.message : err)
   }
   requestNamespaceTruthNow()
   // Recover approval-queue state that may have changed while disconnected: the
@@ -583,19 +646,19 @@ function eventMatchesActiveBoardFilters(event: SSEEvent): boolean {
 }
 
 export function routeServerPushEvent(event: SSEEvent): void {
-  if (event.type === 'oas:context_compacted') {
-    const keeperName = event.agent_name?.trim() ?? ''
-    if (keeperName) {
-      for (const refresh of _refreshKeeperCompactionFns) {
-        refresh(keeperName, 'source_changed')
-      }
-    }
-  }
   if (hydrateServerPushEvent(event)) {
     return
   }
 
   const routedType = normalizeSSEDispatchType(event.type)
+  if (
+    normalizeMascEventType(routedType) === 'broadcast'
+    || routedType === 'workspace_message_delivery_changed'
+  ) {
+    scheduleRefresh('workspace-messages', () => {
+      for (const refresh of _refreshWorkspaceMessageFns) refresh()
+    })
+  }
   const simpleRoute = SIMPLE_ROUTES[routedType]
   if (simpleRoute) {
     const refreshFn =
@@ -610,6 +673,9 @@ export function routeServerPushEvent(event: SSEEvent): void {
     if (BOARD_HEARTH_REFRESH_EVENTS.has(routedType)) {
       scheduleBoardHearthsRefresh(simpleRoute.debounceMs)
     }
+  }
+  if (routedType === 'fusion_run_status') {
+    scheduleTargetRefresh('internalAgents', REFRESH_FNS.internalAgents, 0)
   }
 
   for (const { prefix, target } of PREFIX_ROUTES) {
@@ -642,7 +708,30 @@ export function routeServerPushEvent(event: SSEEvent): void {
     || event.type === SSE_APPROVAL_SUMMARY_UPDATED_EVENT
 
   if (
-    event.type.startsWith('decision_')
+    (event.type === SSE_APPROVAL_PENDING_EVENT
+      || event.type === SSE_APPROVAL_RESOLVED_EVENT
+      || event.type === SSE_APPROVAL_AUDIT_EVENT)
+    && isRecord(event.payload)
+  ) {
+    const receipt = normalizeKeeperApprovalAuditReceipt(event.payload.audit)
+    const receiptMatchesEnvelope = receipt !== null && (
+      (event.type === SSE_APPROVAL_PENDING_EVENT && receipt.event === 'pending')
+      || (event.type === SSE_APPROVAL_RESOLVED_EVENT && receipt.event === 'resolved')
+      || (
+        event.type === SSE_APPROVAL_AUDIT_EVENT
+        && (receipt.event === 'grant_consumed' || receipt.event === 'gate_allowed')
+      )
+    )
+    if (receipt !== null && receiptMatchesEnvelope) {
+      const id = typeof event.payload.id === 'string' && event.payload.id.trim() !== ''
+        ? event.payload.id
+        : null
+      _observeGateAuditReceiptFn?.([receipt], { id, transport: 'sse' })
+    }
+  }
+
+  if (
+    sseEventFamily(event.type) === 'decision'
     || event.type === 'runtime_param_changed'
     || approvalRefreshEvent
   ) {
@@ -659,7 +748,7 @@ export function routeServerPushEvent(event: SSEEvent): void {
 }
 
 export function hydrateServerPushEvent(event: SSEEvent): boolean {
-  if ((event.type === 'project_snapshot' || event.type === 'namespace_truth_snapshot') && event.payload) {
+  if (event.type === 'project_snapshot' && event.payload) {
     handleNamespaceTruthSnapshot(event.payload)
     return true
   }
@@ -669,12 +758,13 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     return true
   }
 
-  if (event.type === 'operator_snapshot' && event.payload) {
-    const payload = isRecord(event.payload) ? event.payload : null
-    if (!payload) {
+  if (event.type === 'operator_snapshot') {
+    if (!isRecord(event.payload)) {
+      failOperatorSnapshotHydration('operator snapshot payload is invalid')
       requestOperatorSnapshotRefresh('operator_snapshot_invalid_payload')
       return true
     }
+    const payload = event.payload
     const epoch = payload.snapshot_epoch
     const generation = payload.snapshot_generation
     const computeSequence = payload.snapshot_compute_sequence
@@ -689,6 +779,7 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
       || typeof terminalSequence !== 'number'
       || !Number.isSafeInteger(terminalSequence)
     ) {
+      failOperatorSnapshotHydration('operator snapshot ordering is missing')
       requestOperatorSnapshotRefresh('operator_snapshot_missing_ordering')
       return true
     }
@@ -744,6 +835,7 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
         latestOperatorSnapshotComputeSequence = computeSequence
       }
       if (payload.status === 'invalidated') {
+        failOperatorSnapshotHydration('operator snapshot invalidated')
         requestOperatorSnapshotRefresh('operator_snapshot_invalidation')
         return true
       }
@@ -760,8 +852,8 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     return true
   }
 
-  if (event.type === 'oas:agent_failed') {
-    const parsed = parseOasPayloadOrNull(event.type, event.payload)
+  if (event.type === 'agent_core:agent_failed') {
+    const parsed = parseAgentCorePayloadOrNull(event.type, event.payload)
     if (!parsed || parsed.kind !== 'agent_failed') return false
     const { payload: p } = parsed
     void import('./components/common/error-notification')
@@ -786,9 +878,9 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
 
   // The payload is the sample itself (schema-validated at the boundary), so
   // the read model hydrates from the push directly — zero HTTP fetch. The
-  // runtime monitor renders latestOasTelemetrySample; nothing to refresh.
-  if (event.type === 'oas_telemetry_sample') {
-    hydrateOasTelemetrySample(event)
+  // runtime monitor renders latestAgentCoreTelemetrySample; nothing to refresh.
+  if (event.type === 'agent_core_telemetry_sample') {
+    hydrateAgentCoreTelemetrySample(event)
     return true
   }
 
@@ -824,43 +916,15 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     const keeperName = event.keeper_name?.trim() ?? ''
     if (keeperName) {
       for (const refresh of _refreshKeeperWaitingInventoryFns) refresh(keeperName)
-      if (event.queue_kind === 'chat_queue') {
-        pendingKeeperChatReceiptRefreshNames.add(keeperName)
-        scheduleRefresh(
-          'keeper_chat_receipts',
-          () => {
-            const keeperNames = Array.from(pendingKeeperChatReceiptRefreshNames)
-            pendingKeeperChatReceiptRefreshNames.clear()
-            void import('./keeper-runtime')
-              .then(mod => Promise.all(
-                keeperNames.map(name => mod.reconcileKeeperChatReceipts(name)),
-              ))
-              .catch(err => {
-                console.warn(
-                  '[server-push] keeper chat receipt reconciliation unavailable',
-                  err instanceof Error ? err.message : err,
-                )
-              })
-          },
-          SSE_KEEPER_THREAD_DEBOUNCE_MS,
-        )
-      }
     }
     return true
   }
 
-  if (event.type === 'keeper_compaction_snapshots_changed') {
-    const keeperName = event.keeper_name?.trim() ?? ''
-    if (keeperName && (event.status === 'ready' || event.status === 'failed')) {
-      for (const refresh of _refreshKeeperCompactionFns) {
-        refresh(keeperName, event.status)
-      }
-    }
-    return true
-  }
-
-  if (event.type === 'post_created' && handleBoardPostCreated(event)) {
-    return true
+  if (event.type === 'post_created') {
+    // Before the board branch: the fusion surface needs the refetch whether or
+    // not the board could prepend, and the prepend path returns early.
+    scheduleFusionBoardRefresh()
+    if (handleBoardPostCreated(event)) return true
   }
 
   return false
@@ -870,10 +934,9 @@ function eventPayloadRecord(payload: unknown): Record<string, unknown> {
   return isRecord(payload) ? payload : { payload }
 }
 
-export function hydrateDashboardSlice(slice: string, payload: unknown, eventType?: string): void {
+export function hydrateDashboardSlice(_slice: string, payload: unknown, eventType?: string): void {
   switch (eventType) {
     case 'project_snapshot':
-    case 'namespace_truth_snapshot':
     case 'execution_snapshot':
     case 'operator_snapshot':
     case 'operator_digest':
@@ -889,49 +952,7 @@ export function hydrateDashboardSlice(slice: string, payload: unknown, eventType
     return
   }
 
-  switch (slice) {
-    case 'shell':
-      hydrateShellSnapshot(payload as DashboardShellResponse, { light: true, preserveAuth: true })
-      return
-    case 'namespace':
-      hydrateServerPushEvent({ type: 'project_snapshot', payload } as SSEEvent)
-      return
-    case 'execution':
-      hydrateServerPushEvent({ type: 'execution_snapshot', payload } as SSEEvent)
-      return
-    case 'operator': {
-      const record = payload as { snapshot?: unknown; digest?: unknown }
-      if (record.snapshot) {
-        hydrateServerPushEvent({ type: 'operator_snapshot', payload: record.snapshot } as SSEEvent)
-      }
-      if (record.digest) {
-        hydrateServerPushEvent({ type: 'operator_digest', payload: record.digest } as SSEEvent)
-      }
-      return
-    }
-    case 'transport':
-      hydrateServerPushEvent({ type: 'transport_health_snapshot', payload } as SSEEvent)
-      return
-    case 'board':
-      hydrateBoardSnapshot(payload as DashboardMemoryResponse)
-      return
-    case 'goals': {
-      if (!payload || typeof payload !== 'object') return
-      const record = payload as { planning?: unknown; tree?: unknown; loop?: unknown }
-      if (record.planning) {
-        hydratePlanningSnapshot(record.planning as DashboardPlanningResponse)
-      }
-      if (record.tree && !hydrateGoalTreeSnapshot(record.tree)) {
-        hydrateGoalTreeObservationError(
-          new Error('Goal Store push tree payload was malformed'),
-        )
-      }
-      return
-    }
-    case 'composite':
-      hydrateFleetCompositeSnapshot(payload)
-      return
-  }
+  // Dashboard deltas require an event type so the typed handler is explicit.
 }
 
 // --- WebSocket server-push reaction setup ---
@@ -963,9 +984,12 @@ let _periodicId: ReturnType<typeof setInterval> | null = null
 export function startPeriodicRefresh(): void {
   if (_periodicId) return
   _periodicId = setInterval(() => {
-    if (!dashboardWsReady.value) {
-      invalidateDashboardCache()
-    }
+    // Fallback only. While the WS is delivering, every route surface this
+    // would refetch is already hydrated by push, so firing anyway just
+    // duplicates the traffic. Previously only invalidateDashboardCache()
+    // was gated and the two refresh calls ran unconditionally.
+    if (dashboardWsReady.value) return
+    invalidateDashboardCache()
     requestNamespaceTruth()
     void refreshActiveRoute().catch(err =>
       console.warn('[periodic] route refresh failed', err instanceof Error ? err.message : err),

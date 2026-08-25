@@ -42,17 +42,20 @@ let streaming_update_min_interval_sec = 3.0
    ceiling. *)
 let default_http_timeout_sec = Masc_http_client.default_request_timeout_sec
 
-let user_agent = "masc-slack-bot/0.1 (https://github.com/jeong-sik/masc)"
+let user_agent =
+  Printf.sprintf
+    "masc-slack-bot/%s (https://github.com/jeong-sik/masc)"
+    Build_version.current
+;;
 
 let auth_headers ~token =
   [ ("Authorization", "Bearer " ^ token); ("User-Agent", user_agent) ]
 
-let parse_json_safe s =
-  try Some (Yojson.Safe.from_string s) with Yojson.Json_error _ -> None
-
-let field_opt name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
+(* [Safe_ops.parse_json_safe] is the parser for this shape: it trims, treats an
+   empty body as an empty object, repairs UTF-8, and hands back the decoder's
+   message. The copy that used to sit here did none of that and dropped the
+   message, so a malformed connector response arrived as a bare [None]. *)
+let parse_json_safe s = Gate_rest_json.parse ~context:"slack_rest_client" s
 
 let build_post_message_request ~token ~channel_id ~text ?thread_ts () =
   let url = "https://slack.com/api/chat.postMessage" in
@@ -77,22 +80,22 @@ let build_post_message_request ~token ~channel_id ~text ?thread_ts () =
    transport-level 2xx check, branch on Slack's [ok] flag. *)
 let parse_post_json_response ~body =
   match parse_json_safe body with
-  | None -> Error (Other ("response not JSON: " ^ body))
-  | Some json ->
+  | Error msg -> Error (Other (Printf.sprintf "response rejected (%s): %s" msg body))
+  | Ok json ->
     let ok =
-      match field_opt "ok" json with Some (`Bool b) -> b | _ -> false
+      match Gate_rest_json.bool_field "ok" json with Some b -> b | None -> false
     in
     if not ok then
       let err =
-        match field_opt "error" json with
-        | Some (`String e) -> e
-        | _ -> "unknown error"
+        match Gate_rest_json.string_field "error" json with
+        | Some e -> e
+        | None -> "unknown error"
       in
       Error (Slack_api { error = err })
     else
-      (match field_opt "ts" json with
-       | Some (`String ts) -> Ok ts
-       | _ -> Error (Other "ok=true but missing 'ts'"))
+      (match Gate_rest_json.string_field "ts" json with
+       | Some ts -> Ok ts
+       | None -> Error (Other "ok=true but missing 'ts'"))
 
 let parse_post_response ~status ~body =
   if status < 200 || status >= 300 then Error (Http_status { code = status; body })
@@ -124,17 +127,17 @@ let parse_update_response ~status ~body =
   if status < 200 || status >= 300 then Error (Http_status { code = status; body })
   else
     match parse_json_safe body with
-    | None -> Error (Other ("response not JSON: " ^ body))
-    | Some json ->
+    | Error msg -> Error (Other (Printf.sprintf "response rejected (%s): %s" msg body))
+    | Ok json ->
         let ok =
-          match field_opt "ok" json with Some (`Bool b) -> b | _ -> false
+          match Gate_rest_json.bool_field "ok" json with Some b -> b | None -> false
         in
         if ok then Ok ()
         else
           let err =
-            match field_opt "error" json with
-            | Some (`String e) -> e
-            | _ -> "update failed"
+            match Gate_rest_json.string_field "error" json with
+            | Some e -> e
+            | None -> "update failed"
           in
           Error (Slack_api { error = err })
 
@@ -169,31 +172,94 @@ let parse_auth_test_response ~status ~body =
   if status < 200 || status >= 300 then Error (Http_status { code = status; body })
   else
     match parse_json_safe body with
-    | None -> Error (Other ("response not JSON: " ^ body))
-    | Some json ->
+    | Error msg -> Error (Other (Printf.sprintf "response rejected (%s): %s" msg body))
+    | Ok json ->
       let ok =
-        match field_opt "ok" json with Some (`Bool b) -> b | _ -> false
+        match Gate_rest_json.bool_field "ok" json with Some b -> b | None -> false
       in
       if not ok then
         let err =
-          match field_opt "error" json with
-          | Some (`String e) -> e
-          | _ -> "auth.test failed"
+          match Gate_rest_json.string_field "error" json with
+          | Some e -> e
+          | None -> "auth.test failed"
         in
         Error (Slack_api { error = err })
       else
-        (match field_opt "user_id" json with
-         | Some (`String user_id) ->
-           let team_id =
-             match field_opt "team_id" json with
-             | Some (`String t) -> Some t
-             | _ -> None
-           in
+        (match Gate_rest_json.string_field "user_id" json with
+         | Some user_id ->
+           let team_id = Gate_rest_json.string_field "team_id" json in
            Ok { user_id; team_id }
-         | _ -> Error (Other "ok=true but missing 'user_id'"))
+         | None -> Error (Other "ok=true but missing 'user_id'"))
 
 let auth_test ?clock ?(timeout_sec = default_http_timeout_sec) ~token () =
   let (url, headers, body) = build_auth_test_request ~token in
   match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_auth_test_response ~status ~body
+
+(* users.info — resolve one user's profile names for inbound identity
+   rendering (issue #28376). Slack Web API accepts form-encoded POST for this
+   method; ids come from Slack's own events ([A-Z0-9], no URL escaping
+   needed). A missing [users:read] scope surfaces as [Slack_api]. *)
+type user_info_ok = {
+  user_id : string;
+  name : string option;
+  real_name : string option;
+  display_name : string option;
+}
+
+let build_users_info_request ~token ~user_id =
+  let url = "https://slack.com/api/users.info" in
+  let headers =
+    ("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+    :: auth_headers ~token
+  in
+  (url, headers, "user=" ^ user_id)
+
+let parse_users_info_response ~status ~body =
+  if status < 200 || status >= 300 then Error (Http_status { code = status; body })
+  else
+    match parse_json_safe body with
+    | Error msg -> Error (Other (Printf.sprintf "response rejected (%s): %s" msg body))
+    | Ok json ->
+      let ok =
+        match Gate_rest_json.bool_field "ok" json with Some b -> b | None -> false
+      in
+      if not ok then
+        let err =
+          match Gate_rest_json.string_field "error" json with
+          | Some e -> e
+          | None -> "users.info failed"
+        in
+        Error (Slack_api { error = err })
+      else
+        (match Gate_rest_json.object_field "user" json with
+         | Some user ->
+           (match Gate_rest_json.string_field "id" user with
+            | Some user_id ->
+              (* Blank profile fields are represented as absent, not as empty
+                 labels a renderer would print verbatim. *)
+              let non_blank = function
+                | Some s when String.trim s <> "" -> Some s
+                | Some _ | None -> None
+              in
+              let profile = Gate_rest_json.object_field "profile" user in
+              let profile_field key =
+                Option.bind profile (fun p ->
+                  non_blank (Gate_rest_json.string_field key p))
+              in
+              Ok
+                { user_id
+                ; name = non_blank (Gate_rest_json.string_field "name" user)
+                ; real_name = profile_field "real_name"
+                ; display_name = profile_field "display_name"
+                }
+            | None -> Error (Other "ok=true but missing user.id"))
+         | None -> Error (Other "ok=true but missing 'user'"))
+
+let users_info ?clock ?(timeout_sec = default_http_timeout_sec) ~token ~user_id
+    () =
+  let (url, headers, body) = build_users_info_request ~token ~user_id in
+  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
+  | Error msg -> Error (Network msg)
+  | Ok (status, body) -> parse_users_info_response ~status ~body

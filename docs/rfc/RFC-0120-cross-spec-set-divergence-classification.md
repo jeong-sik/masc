@@ -8,14 +8,13 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0072", "0113", "0114", "0115", "0116", "0117", "0118", "0119"]
-implementation_prs: []
 ---
 
 # RFC-0120: Cross-spec set-name divergence — 3-class classification framework (STALE / DELIBERATE / NAME COLLISION)
 
 ## §1 Problem (caller-context)
 
-`docs/tla-audit/cross-spec-3-divergences-classify-2026-05-12.md` 가 iter 40 scanner (`scripts/audit-tla-annotation-drift.sh --check-cross-spec`) 결과 7 divergence instance 를 3 set name 에서 6 spec 에 걸쳐 발견. 본 RFC 는 이 audit 의 classification framework 를 *RFC-level commit*.
+iter 40 scanner (`scripts/audit-tla-annotation-drift.sh --check-cross-spec`) 가 7 divergence instance 를 3 set name 에서 6 spec 에 걸쳐 발견. 본 RFC 는 그 결과의 classification framework 를 *RFC-level commit*.
 
 ### Scanner output (실측, iter 41)
 

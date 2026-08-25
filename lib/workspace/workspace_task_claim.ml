@@ -7,11 +7,8 @@
 open Masc_domain
 include Workspace_utils
 include Workspace_state
-open Workspace_backlog
-open Workspace_identity
 include Workspace_broadcast
 open Workspace_backlog
-open Workspace_identity
 
 let clear_reclaim_decision (task : Masc_domain.task) =
   match task.reclaim_policy with
@@ -37,23 +34,44 @@ let active_owned_task_ids_for_agent config ~agent_name (backlog : Masc_domain.ba
   |> List.sort_uniq String.compare
 ;;
 
-let active_ownership_conflict_message ~agent_name ~requested_task_id task_ids =
+let held_task_label (task : Masc_domain.task) =
+  Printf.sprintf "[P%d] %s: %s" task.priority task.id task.title
+;;
+
+(* One constraint, two entry points, one sentence.
+
+   [claim_next] and a claim by task_id refuse the same thing, and they said
+   different things about it. [claim_next] named the route -- the tool, the
+   action, and the field release requires -- while a claim by task_id said
+   "Agent X has task(s) in progress: task-149; task-148 was not claimed." and
+   stopped. The Keeper prompt describes this refusal as one that "names both the
+   Task you hold and how to hand it back", which was true of one path and false
+   of the other.
+
+   The path that said nothing is the one Keepers actually hit: 38 of the week's
+   77 claim rejections, and one agent walked task-145, 146, 148, 150 and 154 in
+   turn while holding task-149 -- the run of refusals the same prompt paragraph
+   predicts. The requested task_id is no longer restated, because the caller
+   passed it. *)
+let held_tasks_refusal_message ~agent_name held_tasks =
   Printf.sprintf
-    "Agent %s has task(s) in progress: %s; %s was not claimed."
+    "%s already holds %s. Finish it, or hand it back with masc_transition \
+     action=release and a handoff_context.summary, before claiming different work."
     agent_name
-    (String.concat ", " task_ids)
-    requested_task_id
+    (String.concat ", " (List.map held_task_label held_tasks))
 ;;
 
 let active_ownership_conflict_for_claim config ~agent_name ~requested_task_id
     (backlog : Masc_domain.backlog) =
-  match
+  let held_ids =
     active_owned_task_ids_for_agent config ~agent_name backlog
     |> List.filter (fun task_id -> not (String.equal task_id requested_task_id))
+  in
+  match
+    List.filter (fun (task : Masc_domain.task) -> List.mem task.id held_ids) backlog.tasks
   with
   | [] -> None
-  | task_ids ->
-    Some (active_ownership_conflict_message ~agent_name ~requested_task_id task_ids)
+  | held_tasks -> Some (held_tasks_refusal_message ~agent_name held_tasks)
 ;;
 
 (** Result-returning version of claim_task for type-safe error handling. *)
@@ -178,13 +196,14 @@ let claim_task_r config ~agent_name ~task_id ()
            write_backlog
              ~after_commit:(fun () ->
                Task_cache_invariant.clear_stale_agent_task config
+                 ~cause:Task_cache_invariant.After_commit
                  ~agent_name ~task_id ~status:claimed_task.task_status
                  ~module_name:"claim_task_r.claimed_ok")
              config new_backlog;
            Workspace_task_classify.update_local_agent_state config ~agent_name (fun agent ->
              { agent with status = Busy; current_task = Some task_id });
            let _ =
-             broadcast
+             broadcast ~audience:System_record
                config
                ~from_agent:agent_name
                ~content:(Printf.sprintf "Claimed %s" task_id)

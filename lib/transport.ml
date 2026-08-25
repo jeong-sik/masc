@@ -37,7 +37,6 @@ type protocol =
   | Grpc
   | Sse
   | Ws
-  | Webrtc
 
 let protocol_to_string = function
   | JsonRpc -> "json-rpc"
@@ -45,7 +44,6 @@ let protocol_to_string = function
   | Grpc -> "grpc"
   | Sse -> "sse"
   | Ws -> "ws"
-  | Webrtc -> "webrtc"
 
 let protocol_of_string = function
   | "json-rpc" | "jsonrpc" -> Some JsonRpc
@@ -53,15 +51,7 @@ let protocol_of_string = function
   | "grpc" -> Some Grpc
   | "sse" -> Some Sse
   | "ws" | "websocket" -> Some Ws
-  | "webrtc" -> Some Webrtc
   | _ -> None
-
-(** Transport binding configuration *)
-type binding = {
-  protocol: protocol;
-  url: string;
-  options: (string * string) list;
-}
 
 (** Standard JSON-RPC 2.0 error codes *)
 module ErrorCodes = struct
@@ -186,91 +176,49 @@ module Rest = struct
   let openapi_bearer_security =
     `List [ `Assoc [ ("bearerAuth", `List []) ] ]
 
-  (** Issue #8687: strict parser. Returns [None] when [name] is not in the
-      curated catalog so unregistered operations become operator-visible
-      rather than silently inheriting [Conditional_bearer]. Same shape as
-      #8615/#8670/#8682 SSOT parsers. *)
-  let auth_mode_of_operation_opt = function
-    | "masc_websocket_discovery" -> Some Public
-    | "webrtc_offer" | "webrtc_answer" -> Some Same_origin_or_bearer
-    | "masc_broadcast"
-    | "masc_operator_action"
-    | "masc_operator_confirm" -> Some Bearer_required
-    | "masc_status"
-    | "masc_tasks"
-    | "masc_messages"
-    | "masc_operator_snapshot"
-    | "masc_operator_digest"
-    | "masc_agent_card" -> Some Conditional_bearer
-    | _ -> None
-
-  (** Back-compat wrapper: callers (OpenAPI doc generation) still receive a
-      concrete [auth_mode] but a warning is logged so the catalog drift is
-      operator-visible. Issue #8687. *)
-  let auth_mode_of_operation name =
-    match auth_mode_of_operation_opt name with
-    | Some mode -> mode
-    | None ->
-        Log.Transport.warn
-          "auth_mode_of_operation: %S not in catalog → Conditional_bearer fallback (#8687)" name;
-        Conditional_bearer
-
   let auth_mode_of_mcp_path () = Conditional_bearer
 
+  type rest_binding = {
+    operation : string;
+    auth_mode : auth_mode;
+    routes : (http_method * string) list;
+  }
+
+  (** Each REST-bound operation carries its auth mode on the same row, so the
+      OpenAPI projection never meets a bound operation without a mode. *)
   let operation_rest_bindings =
     [
-      ("masc_status", [ (GET, "/api/v1/status") ]);
-      ("masc_tasks", [ (GET, "/api/v1/tasks") ]);
-      ("masc_messages", [ (GET, "/api/v1/messages") ]);
-      ("masc_operator_snapshot", [ (GET, "/api/v1/operator") ]);
-      ("masc_operator_digest", [ (GET, "/api/v1/operator/digest") ]);
-      ("masc_operator_action", [ (POST, "/api/v1/operator/action") ]);
-      ("masc_operator_confirm", [ (POST, "/api/v1/operator/confirm") ]);
-      ("masc_websocket_discovery", [ (GET, "/ws") ]);
-      ("webrtc_offer", [ (POST, "/webrtc/offer") ]);
-      ("webrtc_answer", [ (POST, "/webrtc/answer") ]);
-      ("masc_broadcast", [ (POST, "/api/v1/broadcast") ]);
-      ("masc_agent_card", [ (GET, "/.well-known/agent.json") ]);
+      { operation = "masc_status"; auth_mode = Conditional_bearer;
+        routes = [ (GET, "/api/v1/status") ] };
+      { operation = "masc_tasks"; auth_mode = Conditional_bearer;
+        routes = [ (GET, "/api/v1/tasks") ] };
+      { operation = "masc_messages"; auth_mode = Conditional_bearer;
+        routes = [ (GET, "/api/v1/messages") ] };
+      { operation = "masc_operator_snapshot"; auth_mode = Conditional_bearer;
+        routes = [ (GET, "/api/v1/operator") ] };
+      { operation = "masc_operator_digest"; auth_mode = Conditional_bearer;
+        routes = [ (GET, "/api/v1/operator/digest") ] };
+      { operation = "masc_operator_action"; auth_mode = Bearer_required;
+        routes = [ (POST, "/api/v1/operator/action") ] };
+      { operation = "masc_operator_confirm"; auth_mode = Bearer_required;
+        routes = [ (POST, "/api/v1/operator/confirm") ] };
+      { operation = "masc_websocket_discovery"; auth_mode = Public;
+        routes = [ (GET, "/ws") ] };
+      { operation = "masc_broadcast"; auth_mode = Bearer_required;
+        routes = [ (POST, "/api/v1/broadcast") ] };
+      { operation = "masc_agent_card"; auth_mode = Conditional_bearer;
+        routes = [ (GET, "/.well-known/agent.json") ] };
     ]
+
+  let rest_binding_of_operation name =
+    List.find_opt
+      (fun (binding : rest_binding) -> String.equal binding.operation name)
+      operation_rest_bindings
 
   let actual_rest_bindings_for_operation name =
-    operation_rest_bindings
-    |> List.find_map (fun (operation, bindings) ->
-           if String.equal operation name then Some bindings else None)
-    |> Option.value ~default:[]
-
-  let same_rest_route ~http_method ~path (method_, candidate_path) =
-    String.equal (String.uppercase_ascii (String.trim http_method))
-      (method_to_string method_)
-    && String.equal path candidate_path
-
-  let operation_of_actual_rest_route ~http_method ~path =
-    operation_rest_bindings
-    |> List.find_map (fun (operation, bindings) ->
-           if List.exists (same_rest_route ~http_method ~path) bindings then
-             Some operation
-           else None)
-
-  let legacy_rest_route_operations =
-    [
-      ("GET", "/", "masc_status");
-      ("POST", "/broadcast", "masc_broadcast");
-      ("GET", "/.well-known/agent-card.json", "masc_agent_card");
-    ]
-
-  let operation_of_legacy_rest_route ~http_method ~path =
-    legacy_rest_route_operations
-    |> List.find_map (fun (method_, candidate_path, operation) ->
-           if
-             String.equal (String.uppercase_ascii (String.trim http_method)) method_
-             && String.equal path candidate_path
-           then Some operation
-           else None)
-
-  let operation_of_rest_route ~http_method ~path =
-    match operation_of_actual_rest_route ~http_method ~path with
-    | Some _ as operation -> operation
-    | None -> operation_of_legacy_rest_route ~http_method ~path
+    match rest_binding_of_operation name with
+    | Some binding -> binding.routes
+    | None -> []
 
   let auth_response_entries mode =
     match mode with
@@ -305,10 +253,10 @@ module Rest = struct
     with
     | Some schema -> Some schema
     | None ->
-      Sdk_tool_contract.sdk_bindings
-      |> List.find_opt (fun (binding : Sdk_tool_contract.sdk_tool_binding) ->
+      Agent_core_tool_contract.agent_core_bindings
+      |> List.find_opt (fun (binding : Agent_core_tool_contract.agent_core_tool_binding) ->
              String.equal binding.canonical_operation name)
-      |> Option.map (fun (binding : Sdk_tool_contract.sdk_tool_binding) ->
+      |> Option.map (fun (binding : Agent_core_tool_contract.agent_core_tool_binding) ->
              { Masc_domain.name
              ; description = binding.description
              ; input_schema = binding.input_schema
@@ -339,8 +287,6 @@ module Rest = struct
         [
           "masc_transport_status";
           "masc_websocket_discovery";
-          "webrtc_offer";
-          "webrtc_answer";
         ] );
       ( "tasks",
         [
@@ -380,11 +326,11 @@ module Rest = struct
     |> Option.value ~default:[ "masc" ]
 
   let parameters_from_schema (schema : Yojson.Safe.t) =
-    let required = Sdk_tool_contract.required_names schema in
-    Sdk_tool_contract.property_map schema
+    let required = Agent_core_tool_contract.required_names schema in
+    Agent_core_tool_contract.property_map schema
     |> List.map (fun (name, property_schema) ->
            let description =
-             Sdk_tool_contract.string_member "description" property_schema
+             Agent_core_tool_contract.string_member "description" property_schema
              |> Option.value
                   ~default:(Printf.sprintf "%s parameter" name)
            in
@@ -400,8 +346,8 @@ module Rest = struct
   let operation_catalog_entry name (schema : Masc_domain.tool_schema) =
     let entry = help_entry name in
     let aliases =
-      Sdk_tool_contract.sdk_aliases_for_operation name
-      |> List.map Sdk_tool_contract.sdk_alias_json
+      Agent_core_tool_contract.agent_core_aliases_for_operation name
+      |> List.map Agent_core_tool_contract.agent_core_alias_json
     in
     let rest_bindings =
       actual_rest_bindings_for_operation name
@@ -421,7 +367,7 @@ module Rest = struct
         ("inputSchema", schema.input_schema);
         ("tags", list_json (tags_for_operation name));
         ("x-mcp-tool", `Assoc (Tool_catalog.metadata_to_fields name));
-        ("x-agent-sdk", `Assoc [ ("aliases", `List aliases) ]);
+        ("x-agent-core", `Assoc [ ("aliases", `List aliases) ]);
         ("x-rest-bindings", `List rest_bindings);
       ]
 
@@ -480,9 +426,8 @@ module Rest = struct
         ("description", `String "JSON-RPC success or error envelope.");
       ]
 
-  let rest_operation_json name method_ (schema : Masc_domain.tool_schema) =
+  let rest_operation_json ~auth_mode name method_ (schema : Masc_domain.tool_schema) =
     let entry = help_entry name in
-    let auth_mode = auth_mode_of_operation name in
     let base_fields =
       [
         ("summary", `String entry.short_description);
@@ -541,7 +486,7 @@ module Rest = struct
       Yojson.Safe.t =
     let mcp_auth_mode = auth_mode_of_mcp_path () in
     let operation_entries =
-      Sdk_tool_contract.core_remote_operation_names
+      Agent_core_tool_contract.core_remote_operation_names
       |> List.filter_map (fun name ->
              match find_schema name with
              | Some schema -> Some (name, schema)
@@ -552,9 +497,9 @@ module Rest = struct
         (fun (name, schema) -> operation_catalog_entry name schema)
         operation_entries
     in
-    let sdk_tools =
-      List.map Sdk_tool_contract.sdk_alias_json
-        Sdk_tool_contract.sdk_bindings
+    let agent_core_tools =
+      List.map Agent_core_tool_contract.agent_core_alias_json
+        Agent_core_tool_contract.agent_core_bindings
     in
     let components_schemas =
       operation_entries
@@ -572,10 +517,15 @@ module Rest = struct
     in
     List.iter
       (fun (name, schema) ->
-        actual_rest_bindings_for_operation name
-        |> List.iter (fun (method_, path) ->
-               add_path_method path (method_json_key method_)
-                 (rest_operation_json name method_ schema)))
+        match rest_binding_of_operation name with
+        | None -> ()
+        | Some binding ->
+            List.iter
+              (fun (method_, path) ->
+                add_path_method path (method_json_key method_)
+                  (rest_operation_json ~auth_mode:binding.auth_mode name method_
+                     schema))
+              binding.routes)
       operation_entries;
     add_path_method "/mcp" "post"
       (`Assoc
@@ -617,7 +567,7 @@ module Rest = struct
           ("x-auth-description", `String (auth_mode_description mcp_auth_mode));
           ("security", openapi_bearer_security);
           ("x-mcp-operations", `List operation_catalog);
-          ("x-agent-sdk-tools", `List sdk_tools);
+          ("x-agent-core-tools", `List agent_core_tools);
         ]);
     let path_entries =
       Hashtbl.to_seq path_table
@@ -636,10 +586,10 @@ module Rest = struct
           `Assoc
             [
               ("title", `String "MASC Agent Control Contract");
-              ("version", `String Version.version);
+              ("version", `String Runtime_build_version.current);
               ( "description",
                 `String
-                  "Internal OAS export for MASC MCP agent control. Use x-mcp-operations for canonical MCP operation metadata and x-agent-sdk-tools for the current SDK-facing projections." );
+                  "Internal AGENT_CORE export for MASC MCP agent control. Use x-mcp-operations for canonical MCP operation metadata and x-agent-core-tools for the current agent-core projections." );
             ] );
         ( "servers",
           `List
@@ -679,26 +629,6 @@ module Rest = struct
         | (method_, path) :: _ -> (method_, path)
         | [] -> (POST, "/mcp"))
 
-  (** Parse REST request to internal request *)
-  let parse_request ~http_method ~path ~query_params ~body : request =
-    let method_name =
-      match operation_of_rest_route ~http_method ~path with
-      | Some operation -> operation
-      | None -> (
-          match http_method, path with
-          | _, p
-            when String.starts_with ~prefix:"/api/v1/tools/" p
-                 && String.length p > 14 ->
-              String.sub p 14 (String.length p - 14)
-          | _ -> "unknown")
-    in
-    let params = match body with
-      | "" -> `Assoc query_params
-      | s -> (match Safe_ops.parse_json_safe ~context:"http_transport" s with
-              | Ok json -> json | Error _ -> `Assoc query_params)
-    in
-    { id = None; method_name; params; headers = [] }
-
   (** Generate OpenAPI-style endpoint documentation *)
   let generate_openapi_paths () : Yojson.Safe.t =
     match generate_openapi_document () with
@@ -708,70 +638,6 @@ module Rest = struct
         | None -> `Assoc [])
     | _ -> `Assoc []
 end
-
-(** Get available bindings for current MASC instance *)
-let get_bindings ~host ~port : binding list =
-  let base_url = Printf.sprintf "http://%s:%d" host port in
-  let bindings =
-    [
-      { protocol = Sse; url = Printf.sprintf "%s/sse" base_url; options = [] };
-      { protocol = JsonRpc; url = Printf.sprintf "%s/mcp" base_url; options = [] };
-      { protocol = Rest; url = Printf.sprintf "%s/api/v1" base_url; options = [] };
-    ]
-  in
-  let bindings =
-    if Env_config.Transport.grpc_enabled () then
-      bindings
-      @ [
-          {
-            protocol = Grpc;
-            url =
-              Printf.sprintf "grpc://%s:%d" host
-                Env_config.Transport.grpc_port;
-            options = [ ("health_service", "grpc.health.v1.Health") ];
-          };
-        ]
-    else
-      bindings
-  in
-  let bindings =
-    if Env_config.Transport.ws_enabled () then
-      bindings
-      @ [
-          {
-            protocol = Ws;
-            url = Printf.sprintf "ws://%s:%d/ws" host port;
-            options =
-              [ ("mode", "same_origin_upgrade")
-              ; ("discovery_path", "/ws")
-              ; ("standalone_port", string_of_int Env_config.Transport.ws_port)
-              ];
-          };
-        ]
-    else
-      bindings
-  in
-  if Env_config.Transport.webrtc_enabled () then
-    bindings
-    @ [
-        {
-          protocol = Webrtc;
-          url = Printf.sprintf "%s/webrtc" base_url;
-          options =
-            [ ("offer_path", "/webrtc/offer"); ("answer_path", "/webrtc/answer") ];
-        };
-      ]
-  else
-    bindings
-
-(** Bindings to JSON (for Agent Card) *)
-let bindings_to_json (bindings : binding list) : Yojson.Safe.t =
-  `List (List.map (fun b ->
-    `Assoc [
-      ("protocol", `String (protocol_to_string b.protocol));
-      ("url", `String b.url);
-    ]
-  ) bindings)
 
 (** Atomic statistics for monitoring *)
 module Stats = struct

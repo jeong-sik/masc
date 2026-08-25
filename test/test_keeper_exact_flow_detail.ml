@@ -1,14 +1,24 @@
 (** Unit tests for the shared exact-output flow error rendering. *)
 
 module Detail = Masc.Keeper_exact_flow_detail
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 
 let test_execution_cause_detail () =
   Alcotest.(check string)
     "refused"
-    "serialized request refused (http_status=413)"
+    "provider refused (http_status=413 refusal=request_body_refused)"
     (Detail.execution_cause_detail
-       (Exact_output.Serialized_request_refused { http_status = 413 }));
+       (Exact_output.Provider_response_refused
+          { http_status = 413; refusal = Exact_output.Request_body_refused }));
+  (* The line an operator reads when a lane dies on quota. It carried neither
+     the status nor the kind while a 429 was classified as a bare
+     [Completion_failed]. *)
+  Alcotest.(check string)
+    "rate limited"
+    "provider refused (http_status=429 refusal=rate_limited)"
+    (Detail.execution_cause_detail
+       (Exact_output.Provider_response_refused
+          { http_status = 429; refusal = Exact_output.Rate_limited }));
   Alcotest.(check string)
     "completion"
     "completion failed"
@@ -90,6 +100,56 @@ let test_raw_response_excerpt_cuts_on_utf8_boundary () =
     (Astring.String.is_infix ~affix:"301 bytes total" rendered)
 ;;
 
+(* The eleven distinct execution causes reach the advance line through
+   [execution_cause_detail]. The execution-failed branch of
+   the execution-failed branch cannot be built here — [flow_attempt_snapshot] is a
+   private agent-core type with no constructor — so what is pinned is that every
+   cause the renderer can receive still renders apart from every other. A
+   single shared label is what made the eleven indistinguishable in the log,
+   and this fails if any two collapse onto the same string. *)
+let test_every_execution_cause_renders_distinctly () =
+  let causes : Exact_output.execution_error_cause list =
+    [ Attempt_already_started
+    ; Clock_required_for_timeout
+    ; Frozen_request_mismatch
+    ; Completion_failed
+    ; Provider_response_refused { http_status = 413; refusal = Request_body_refused }
+    ; Provider_response_refused { http_status = 429; refusal = Rate_limited }
+    ; Provider_response_refused { http_status = 529; refusal = Overloaded }
+    ; Provider_response_refused { http_status = 500; refusal = Server_error }
+    ; Provider_response_refused { http_status = 401; refusal = Auth_failed }
+    ; Provider_response_refused { http_status = 403; refusal = Authorization_refused }
+    ; Provider_response_refused { http_status = 402; refusal = Payment_required }
+    ; Provider_response_refused { http_status = 400; refusal = Invalid_request }
+    ; Provider_response_refused { http_status = 404; refusal = Not_found }
+    ; Provider_response_refused { http_status = 400; refusal = Context_overflow }
+    ; Provider_response_refused { http_status = 400; refusal = Input_capacity }
+    ; Provider_response_refused { http_status = 400; refusal = Network_error }
+    ; Provider_response_refused { http_status = 408; refusal = Timeout }
+    ; Incomplete_output
+    ; Missing_output
+    ; Ambiguous_output 3
+    ; Unexpected_output_content
+    ; Invalid_json_output
+    ; Internal_non_json_output
+    ]
+  in
+  let rendered = List.map Detail.execution_cause_detail causes in
+  let unique = List.sort_uniq String.compare rendered in
+  Alcotest.(check int)
+    "every cause keeps its own wording"
+    (List.length causes)
+    (List.length unique);
+  (* The two an operator most needs to tell apart: a provider that refused the
+     call outright versus one that answered but ran out of output budget. *)
+  Alcotest.(check bool)
+    "quota refusal and truncated output are not the same string"
+    false
+    (String.equal
+       (Detail.execution_cause_detail Completion_failed)
+       (Detail.execution_cause_detail Incomplete_output))
+;;
+
 let () =
   Alcotest.run
     "keeper_exact_flow_detail"
@@ -106,5 +166,7 @@ let () =
             test_raw_response_excerpt_redacts_secrets
         ; Alcotest.test_case "raw response cuts on utf8 boundary" `Quick
             test_raw_response_excerpt_cuts_on_utf8_boundary
+        ; Alcotest.test_case "every execution cause renders distinctly" `Quick
+            test_every_execution_cause_renders_distinctly
         ] )
     ]

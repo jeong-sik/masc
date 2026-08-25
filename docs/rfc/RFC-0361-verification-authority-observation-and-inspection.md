@@ -1,9 +1,15 @@
+---
+rfc: "0361"
+status: Draft
+---
+
 # RFC-0361: 완료 권한의 관측과 조회
 
 Status: Draft
 Author: Claude Opus 5 (1M context)
 Date: 2026-08-05
-Related: #26914, #26915, RFC-0284 (fusion judge observation record)
+Related: #26914, #26915, RFC-0284 (fusion judge observation record), constitution (PR #29140)
+Amended: 2026-08-19 — D7 (keeper급 standalone 격상) 추가, Non-goal §2 해석 정정
 
 ## Problem
 
@@ -68,6 +74,8 @@ $ git -C .masc/playground/kidsnote/repos/kidsnote_web_inapp \
 이 RFC는 그 결정을 유지한다. 완료 기준은 그대로 LLM 판단이 갖는다. 바꾸는 것은 그 판단자가 무엇을 볼 수 있고 무엇이 기록되는가다.
 
 **판정자를 키퍼로 만들지 않는다.** 커밋 `6df3c383`(2026-07-30)이 `config/keepers/verifier.toml`을 삭제하며 키퍼 verifier를 의도적으로 제거했다("A Keeper is not a verifier"). 키퍼 레지스트리 등록·자기 샌드박스·task action·라이프사이클/heartbeat·페르소나 toml 중 무엇도 추가하지 않는다.
+
+**(2026-08-19 개정)** 위 금지 다섯 가지는 그대로 유지된다. 바뀌는 것은 해석이다: "키퍼가 아니다"를 "프로세스 경계가 없는 무관리 in-process fiber다"로 읽었던 현 상태를 정정한다. constitution (PR #29140 — main 미머지, 해당 PR의 `docs/constitution.xml`)은 Verifier를 "내부 Standalone LLM Agent"로 정의하고 keeper급 실행체를 요구한다. "키퍼 등록 금지"와 "실행체 격상"은 양립한다 — 레지스트리·샌드박스·페르소나 없이 lane·identity·lifecycle·관측만 격상하는 것이 D7의 목표다.
 
 **Task FSM과 verdict 타입을 바꾸지 않는다.** `completion_verdict = Verdict_approved | Verdict_rejected of { reason }` 에 새 variant를 넣지 않는다. 거부 시 `AwaitingVerification → InProgress` 복귀도 유지한다 — 루프가 작동하는 모습이다.
 
@@ -161,7 +169,7 @@ list_runs / get / run_to_yojson / replay / max_completed_retained
 
 새 저장소를 만들지 않고 그 journal을 확장한다:
 1. 실패 경로에도 라인을 쓴다 — `change` 없이 `outcome=failed` + 실패 코드.
-2. `source`에 판단 입력 요약을 추가 — persona id, 입력 message 수, 후보/유지/폐기 건수.
+2. `source`에 판단 입력 요약을 추가 — Keeper instruction digest, 입력 message 수, 후보/유지/폐기 건수.
 
 근거: #26729(librarian constraint가 운영자 지시를 덮음) 진단 시 결과 스냅샷만으로는 "왜 이 constraint가 생겼나"를 역추적할 수 없었다.
 
@@ -173,6 +181,28 @@ list_runs / get / run_to_yojson / replay / max_completed_retained
 
 라이브러리안은 웹 대시보드에 표면이 **아예 없다**. `dashboard.ml:115 format_librarian_status`는 CLI/MCP `masc_dashboard` 텍스트 렌더러이고, 노출하는 것은 `ON|OFF|INVALID` + fleet 전체 실패 카운터(재시작 시 리셋)뿐이다. D5의 journal을 읽는 read-only 뷰를 추가한다.
 
+### D7 — Verifier의 keeper급 standalone 격상 (2026-08-19 개정)
+
+**동기.** Constitution (PR #29140)은 Verifier를 "내부 Standalone LLM Agent"로 정의하고 keeper급 실행체를 요구한다. 현행 구현(`lib/completion_authority_agent.ml` — application-owned LLM agent, verdict는 LLM이 `lib/task/anti_rationalization.ml` 경유로 내림, evaluator runtime은 `[runtime].cross_verifier`)은 세 가지 점에서 그에 미달한다:
+
+- **랜덤 actor.** `authority_actor`는 판정마다 `Random_id.prefixed ~prefix:"system-llm-agent-" ~bytes:16`으로 새로 태어난다(`completion_authority_agent.ml:461`). D3이 `evaluator_runtime` 투영으로 provider+model 축을 복구했지만 actor 축은 여전히 1회용이다 — 캘리브레이션·이력·감사를 계산할 모집단이 없다. D3의 관측 쿼리가 모을 "판정 주체" 집계가 영원히 74/74로 흩어진다.
+- **무관리 fiber.** 판정 fiber는 keeper lifecycle 없이 돌고, 재시도는 fixed-interval maintenance pulse(`schedule_retry` / `retry_interval_sec`)다. 프로세스 restart 시 in-flight review의 fiber는 증발하고 남는 것은 `verification_run_registry`의 `running` 레코드뿐인데, 그것을 재개하는 주체가 없다. 완료 판정 — task 전이의 최종 게이트 — 의 증거가 restart 경계에서 단절된다.
+- **관측 범위의 task 한정.** `verification_run_registry`는 task 전용이다. constitution이 요구하는 Goal Verifier가 판정을 시작하면 그 verdict는 registry 밖이다.
+
+**"키퍼"와 "keeper급 standalone"의 구별.** Non-goal §2의 금지 다섯 가지(레지스트리 등록·자기 샌드박스·task action·heartbeat·페르소나 toml)는 전부 유지한다. keeper급 standalone은 그 다섯 가지 없이 실행체 특성만 갖는다: 전용 lane, 고정 identity, supervised lifecycle, 관측 레코드. 선례는 이미 repo에 있다 — `lib/exact_lane_run_registry.ml`의 Librarian·Hitl_auto_judge·Board_attention·Compaction이 키퍼 등록 없이 `[runtime.exact_output_lanes.*]`의 frozen-order slot lane 위에서 실행된다.
+
+결정 넷:
+
+(a) **전용 exact-output lane `verifier_exact` 등록과 frozen-order slot failover.** `[runtime.exact_output_lanes.verifier_exact]`에 slots를 선언하고 판정 호출은 lane을 거쳐 선언 순서대로 failover한다. `[runtime].cross_verifier`의 단일 runtime 바인딩(`runtime.toml:17`)은 lane의 첫 슬롯으로 흡수하거나 lane이 참조하는 이름으로 남긴다 — 어느 쪽이든 provider 선택의 SSOT는 하나여야 하며, 구현 슬라이스에서 택한다. 고정 순서 failover는 Librarian·Compaction과 같은 계약이다.
+
+(b) **고정 authority identity.** `authority_actor`를 판정마다 랜덤이 아닌 고정 문자열(예: lane id와 같은 `verifier_exact`)로 바꾼다. run 식별은 기존 `verification_id`가 계속 맡고, actor는 집계·캘리브레이션·감사의 축이 된다.
+
+(c) **Supervised lifecycle + restart 시 in-flight review 복구.** 판정 fiber를 supervisor 아래에 두고, 기동 시 `verification_run_registry`의 `running` 레코드를 스캔해 재개한다. 재개는 재실행이다 — 판정은 멱등(같은 스냅샷 + 라이브 조회를 다시 판정) — 하되 `verification_id`를 유지해 레코드의 연속성을 지킨다. fixed-interval retry는 유지하되 supervisor의 재시작 정책 아래로 통합한다.
+
+(d) **관측 레코드의 goal verdict 확장 — 의존 명시.** Constitution의 Verifier는 task와 goal 양쪽을 판정한다. `verification_run_registry`를 goal verdict까지 커버하도록 확장할지는 **B1-B3 Goal Verifier 게이트 구현 결과에 따라 결정한다**: goal 판정이 `Completion_authority_agent` 경로를 타면 registry 확장, 별도 게이트면 별도 registry 또는 공통 스키마. 이 개정은 의존만 고정하고 선택은 미결로 남긴다.
+
+**하지 않는 것 (Non-goal 재확인).** (a)–(d) 어디에도 키퍼 레지스트리 등록, `config/keepers/verifier.toml` 부활, heartbeat, 전용 샌드박스, task action이 없다. 커밋 `6df3c383`의 "A Keeper is not a verifier"는 유지된다.
+
 ## Sequencing
 
 | # | 내용 | 상태 |
@@ -182,8 +212,11 @@ list_runs / get / run_to_yojson / replay / max_completed_retained
 | 3 | D3 집계 축 — 투영 한 줄로 축소 | #26964 |
 | 4 | D1 + D2 도구 표면 + 프롬프트 | 미착수 |
 | 5 | D5 + D6 라이브러리안 journal + 뷰 | 미착수 |
+| 6 | D7 (a) `verifier_exact` lane 등록 + frozen-order failover | 미착수 (B7 1단계) |
+| 7 | D7 (b)(c) 고정 identity + supervised lifecycle + restart 복구 | 미착수 (B7 2단계) |
+| 8 | D7 (d) goal verdict 관측 확장 | B1-B3 Goal Verifier 게이트 결과 대기 |
 
-도구를 먼저 주면 관측 없이 감사 불가능한 판정자가 된다. record → 화면 → 축 → 도구 순으로, 도구가 켜지는 시점에는 이미 볼 수 있는 상태여야 한다.
+도구를 먼저 주면 관측 없이 감사 불가능한 판정자가 된다. record → 화면 → 축 → 도구 순으로, 도구가 켜지는 시점에는 이미 볼 수 있는 상태여야 한다. 6·7 단계는 이 순서와 무관하다 — lane과 lifecycle은 판정 표면이 아니라 실행체 배선이며, 기존 1·3단계의 관측(record + `evaluator_runtime` 축)이 이미 머지되어 있으므로 격상 후에도 record-first 원칙을 위반하지 않는다.
 
 4·5 단계는 이 문서가 머지되는 시점에 착수하지 않았다. 특히 4 단계는 D2 의 미결 사항(스냅샷과 라이브 조회를 함께 줄 때 "제출 시점 immutable" 불변식을 어떻게 표현할지)을 먼저 정해야 한다.
 

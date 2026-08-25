@@ -3,6 +3,7 @@ import { keeperRuntimeTraceRefreshNonce } from './keeper-runtime-trace-refresh'
 import { fetchKeeperComposite, fetchKeeperRuntimeTrace } from '../api/keeper'
 import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
 import { DEFAULT_PANEL_REFRESH_MS, setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { compositeTick } from '../composite-signals'
 import { errorMessageOr } from '../lib/format-string'
 import {
   applyFetchFailed,
@@ -51,7 +52,20 @@ export function useKeeperCompositeEvidence(keeperName: string): KeeperDetailEvid
       }
     }
     void refresh()
-    const cleanup = setupVisibleAutoRefresh(refresh, DEFAULT_PANEL_REFRESH_MS)
+    const cleanup = setupVisibleAutoRefresh(refresh, DEFAULT_PANEL_REFRESH_MS, {
+      // keeper_composite_changed is signal-only freshness transport: the
+      // registry broadcasts a {name, ts_unix} envelope and subscribers
+      // re-fetch the authoritative payload. See composite-signals.ts.
+      subscribeToPush: (onPush) => {
+        let seen = compositeTick.value.ts_unix
+        return compositeTick.subscribe((tick) => {
+          if (tick.name !== keeperName) return
+          if (tick.ts_unix === seen) return
+          seen = tick.ts_unix
+          onPush()
+        })
+      },
+    })
     return () => {
       cancelled = true
       controller.abort()

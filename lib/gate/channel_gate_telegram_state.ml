@@ -14,4 +14,14 @@ include
       let binding_audit_path_env_names =
         [ "TELEGRAM_BINDING_AUDIT_PATH"; "MASC_TELEGRAM_BINDING_AUDIT_PATH" ]
       let stale_after_env_name = "MASC_TELEGRAM_STATUS_STALE_SEC"
+
+      (* Telegram has no guilds, but the binding rows have always carried an
+         empty guild_id and the dashboard reads that shape. *)
+      let guild_id_field = Channel_gate_binding_store.Include_empty
+
+      (* The sidecar long-polls getUpdates rather than sleeping between
+         passes, so it reports no interval. *)
+      let default_poll_interval_sec = 0.0
+
+      let extra_status_fields _live_status = []
     end)

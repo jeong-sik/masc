@@ -15,27 +15,49 @@ let freshness_slo_s = Server_dashboard_http_core_cache.freshness_slo_s
 let keeper_hot_path_cache_ttl_s = 30.0
 let keeper_composite_cache_ttl_s = 5.0
 
-(* Bounded dashboard hydration defaults for the operator compaction inspector.
-   These cap best-effort filesystem scans; [scan_truncated] in the response makes
-   the bound observable when there are more manifest segments than scanned. *)
-let compaction_snapshot_default_limit =
-  Env_config.KeeperCompactionSnapshots.default_limit
+let tool_calls_fleet_cache_revision_mu = Stdlib.Mutex.create ()
+let tool_calls_fleet_cache_revisions : (string, int) Hashtbl.t = Hashtbl.create 4
+
+let tool_calls_fleet_cache_key ~masc_root =
+  let key = Printf.sprintf "keeper:tool-calls:fleet-rows:%s" masc_root in
+  let revision = Keeper_tool_call_log.committed_revision () in
+  Stdlib.Mutex.protect tool_calls_fleet_cache_revision_mu (fun () ->
+    match Hashtbl.find_opt tool_calls_fleet_cache_revisions masc_root with
+    | Some previous when previous = revision -> ()
+    | Some _ | None ->
+      (* Publish the observed revision only after the old value is gone.
+         Otherwise a concurrent reader can observe the new revision between
+         [replace] and [invalidate], treat the cache as current, and return the
+         stale rows for the full TTL. *)
+      Dashboard_cache.invalidate key;
+      Hashtbl.replace tool_calls_fleet_cache_revisions masc_root revision);
+  key
 ;;
-
-let compaction_snapshot_max_limit = Env_config.KeeperCompactionSnapshots.max_limit
-
-let compaction_snapshot_manifest_scan_min_files =
-  Env_config.KeeperCompactionSnapshots.manifest_scan_min_files
-;;
-
-let compaction_snapshot_manifest_scan_limit_multiplier =
-  Env_config.KeeperCompactionSnapshots.manifest_scan_limit_multiplier
-;;
-
-let compaction_snapshot_manifest_scan_max_bytes = 64 * 1024 * 1024
 
 (* Maximum number of trajectory/trace entries returned per query. *)
 let trajectory_max_limit = 500
+
+(* [/file-changes] answers over a trailing time window rather than a row count.
+
+   A count was tried first and could not say what it had covered:
+   [Keeper_tool_call_log.read_recent] fills [n] rows for one keeper by scanning
+   a multiple of [n] fleet rows, so asking for 500 of one keeper's calls
+   returned 454 on 2026-08-24 and asking for 5,000 returned 1,409 -- and a
+   caller cannot tell a keeper that made no more calls from a scan that
+   stopped short.
+   [read_window] has no row cap, so everything in the window is in the answer
+   and the window is a fact the response can state.
+
+   The ceiling is what the read costs, not what the log keeps. [read_window]
+   parses every row in the date files the window touches, so the cost is a
+   straight line in days: measured against a server holding 2026-08-22..24,
+   one keeper's changes took 4.4s over 24h, 8.3s over 48h and 11.0s over 72h.
+   The log retains 30 days, and asking for all of them would be about two
+   minutes inside one request. Three days is what an operator can wait for.
+   Reading further back is a different feature and wants an index, not a
+   wider scan. *)
+let file_changes_default_window_hours = 24.0
+let file_changes_max_window_hours = 72.0
 
 (* Maximum per-keeper entries for /tool-calls; also sizes the shared
    fleet-row window that per-keeper responses derive from. *)
@@ -45,21 +67,6 @@ let cached_assoc_body_or_self cached fields =
   match List.assoc_opt "body" fields with
   | Some body -> body
   | None -> cached
-;;
-
-let json_string_opt = function
-  | Some value -> `String value
-  | None -> `Null
-;;
-
-let json_float_opt = function
-  | Some value -> `Float value
-  | None -> `Null
-;;
-
-let json_time_iso_opt = function
-  | Some value -> `String (Masc_domain.iso8601_of_unix_seconds value)
-  | None -> `Null
 ;;
 
 type state_diagram_runtime_projection =
@@ -181,11 +188,13 @@ let memory_os_change_json (change : Keeper_memory_os_current.change) =
     ]
 ;;
 
+let memory_os_keepers_dir (config : Workspace.config) =
+  Config_dir_resolver.keepers_dir_for_base_path
+    ~base_path:config.Workspace.base_path
+;;
+
 let memory_os_dashboard_json ~(config : Workspace.config) ~keeper_id =
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path
-      ~base_path:config.Workspace.base_path
-  in
+  let keepers_dir = memory_os_keepers_dir config in
   let snapshot, read_error =
     match
       Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id
@@ -214,7 +223,6 @@ let memory_os_dashboard_json ~(config : Workspace.config) ~keeper_id =
                  | Keeper_memory_os_current.Librarian -> "librarian"
                  | Explicit_write -> "explicit_write") )
           ; "trace_id", `String source.trace_id
-          ; "generation", `Int source.generation
           ] )
   in
   let current_facts = List.length facts in
@@ -243,936 +251,6 @@ let memory_os_dashboard_json ~(config : Workspace.config) ~keeper_id =
           ] )
     ; "change", change
     ]
-;;
-
-let compaction_snapshot_take n xs =
-  let rec loop remaining acc = function
-    | [] -> List.rev acc
-    | _ when remaining <= 0 -> List.rev acc
-    | x :: rest -> loop (remaining - 1) (x :: acc) rest
-  in
-  loop n [] xs
-;;
-
-type compaction_snapshot_read_error =
-  { scope : string
-  ; error : string
-  }
-
-let compaction_snapshot_read_error ~scope ~error = { scope; error }
-
-let compaction_snapshot_read_error_json { scope; error } =
-  `Assoc [ "scope", `String scope; "error", `String error ]
-;;
-
-let compaction_snapshot_read_errors_json errors =
-  `List (List.map compaction_snapshot_read_error_json errors)
-;;
-
-let log_compaction_snapshot_read_errors ~keeper_id errors =
-  List.iter
-    (fun { scope; error } ->
-      Log.Dashboard.warn
-        "compaction_snapshots: keeper=%s scope=%s error=%s"
-        keeper_id scope error)
-    errors
-;;
-
-let compaction_snapshot_unix_error_message err fn arg =
-  Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err)
-;;
-
-let compaction_snapshot_scope_path ~base_dir path =
-  let base_prefix =
-    if String.ends_with ~suffix:Filename.dir_sep base_dir
-    then base_dir
-    else base_dir ^ Filename.dir_sep
-  in
-  if String.equal path base_dir
-  then "."
-  else if String.starts_with ~prefix:base_prefix path
-  then
-    String.sub path (String.length base_prefix) (String.length path - String.length base_prefix)
-  else Filename.basename path
-;;
-
-let runtime_manifest_file_scope ~base_dir path =
-  "runtime_manifest_file:" ^ compaction_snapshot_scope_path ~base_dir path
-;;
-
-let runtime_manifest_row_scope ~base_dir path line_no =
-  Printf.sprintf "runtime_manifest_row:%s:%d"
-    (compaction_snapshot_scope_path ~base_dir path)
-    line_no
-;;
-
-let safe_regular_file_info ~base_dir path =
-  try
-    let st = Unix.stat path in
-    if st.Unix.st_kind = Unix.S_REG
-    then Some (st.Unix.st_mtime, st.Unix.st_size), []
-    else None, []
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Unix.Unix_error (Unix.ENOENT, _, _) -> None, []
-  | Unix.Unix_error (err, fn, arg) ->
-    ( None
-    , [ compaction_snapshot_read_error
-          ~scope:(runtime_manifest_file_scope ~base_dir path)
-          ~error:(compaction_snapshot_unix_error_message err fn arg)
-      ] )
-  | exn ->
-    ( None
-    , [ compaction_snapshot_read_error
-          ~scope:(runtime_manifest_file_scope ~base_dir path)
-          ~error:(Printexc.to_string exn)
-      ] )
-;;
-
-let is_runtime_manifest_segment_file name =
-  Filename.check_suffix name Keeper_runtime_manifest.manifest_file_suffix
-  ||
-  match String.rindex_opt name '.' with
-  | None -> false
-  | Some dot ->
-    let rotation = String.sub name (dot + 1) (String.length name - dot - 1) in
-    rotation <> ""
-    && String.for_all (fun c -> c >= '0' && c <= '9') rotation
-    && Filename.check_suffix
-         (String.sub name 0 dot)
-         Keeper_runtime_manifest.manifest_file_suffix
-;;
-
-let runtime_manifest_paths ~config ~keeper_id ~limit =
-  let dir = Keeper_runtime_manifest.base_dir config ~keeper_name:keeper_id in
-  let scan_limit =
-    max compaction_snapshot_manifest_scan_min_files
-      (limit * compaction_snapshot_manifest_scan_limit_multiplier)
-  in
-  try
-    let st = Unix.stat dir in
-    if st.Unix.st_kind <> Unix.S_DIR
-    then
-      ( []
-      , [ compaction_snapshot_read_error
-            ~scope:("runtime_manifest_dir:" ^ keeper_id)
-            ~error:"path is not a directory"
-        ]
-      , false )
-    else
-      let entries, read_errors =
-        Sys.readdir dir
-        |> Array.to_list
-        |> List.filter is_runtime_manifest_segment_file
-        |> List.fold_left
-             (fun (entries, read_errors) file ->
-        let path = Filename.concat dir file in
-        let file_info, errors = safe_regular_file_info ~base_dir:dir path in
-        let entries =
-          match file_info with
-          | Some (mtime, size) -> (path, mtime, size) :: entries
-          | None -> entries
-        in
-        entries, List.rev_append errors read_errors)
-             ([], [])
-      in
-      let sorted_entries =
-        List.sort (fun (_, a, _) (_, b, _) -> Float.compare b a) entries
-      in
-      let rec select selected_count selected_bytes selected = function
-        | [] -> List.rev selected, false
-        | _ when selected_count >= scan_limit -> List.rev selected, true
-        | (path, _, size) :: rest ->
-          if selected_bytes + size > compaction_snapshot_manifest_scan_max_bytes
-          then List.rev selected, true
-          else
-            select
-              (selected_count + 1)
-              (selected_bytes + size)
-              (path :: selected)
-              rest
-      in
-      let selected_paths, scan_truncated = select 0 0 [] sorted_entries in
-      ( selected_paths
-      , List.rev read_errors
-      , scan_truncated )
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Unix.Unix_error (Unix.ENOENT, _, _) -> [], [], false
-  | Unix.Unix_error (err, fn, arg) ->
-    ( []
-    , [ compaction_snapshot_read_error
-          ~scope:("runtime_manifest_dir:" ^ keeper_id)
-          ~error:(compaction_snapshot_unix_error_message err fn arg)
-      ]
-    , false )
-  | exn ->
-    ( []
-    , [ compaction_snapshot_read_error
-          ~scope:("runtime_manifest_dir:" ^ keeper_id)
-          ~error:(Printexc.to_string exn)
-      ]
-    , false )
-;;
-
-let read_runtime_manifest_rows ~base_dir path =
-  try
-    let compaction_snapshot_manifest_event_name = function
-      | `Assoc fields -> (
-          match List.assoc_opt "event" fields with
-          | Some (`String event) -> Some event
-          | _ -> None)
-      | _ -> None
-    in
-    let parse_manifest_row line_no rows read_errors json =
-      match Keeper_runtime_manifest.of_json json with
-      | Ok row -> row :: rows, read_errors
-      | Error msg ->
-        ( rows
-        , compaction_snapshot_read_error
-            ~scope:(runtime_manifest_row_scope ~base_dir path line_no)
-            ~error:msg
-          :: read_errors )
-    in
-    let input = open_in_bin path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr input)
-      (fun () ->
-    let rec loop line_no rows read_errors =
-      match input_line input with
-      | line ->
-        let trimmed = String.trim line in
-        if String.equal trimmed ""
-        then loop line_no rows read_errors
-        else
-          let next_line_no = line_no + 1 in
-          (try
-        let json = Yojson.Safe.from_string trimmed in
-        (match compaction_snapshot_manifest_event_name json with
-         | Some event -> (
-           match Keeper_runtime_manifest.classify_compaction_snapshot_event event with
-           | Keeper_runtime_manifest.Compaction_snapshot_known_unrelated ->
-             loop next_line_no rows read_errors
-           | Keeper_runtime_manifest.Compaction_snapshot_relevant
-           | Keeper_runtime_manifest.Compaction_snapshot_unknown ->
-             let rows, read_errors =
-               parse_manifest_row next_line_no rows read_errors json
-             in
-             loop next_line_no rows read_errors)
-         | None ->
-           let rows, read_errors =
-             parse_manifest_row next_line_no rows read_errors json
-           in
-           loop next_line_no rows read_errors)
-      with
-          | Yojson.Json_error msg | Yojson.Safe.Util.Type_error (msg, _) ->
-            loop next_line_no rows
-              (compaction_snapshot_read_error
-                 ~scope:(runtime_manifest_row_scope ~base_dir path next_line_no)
-                 ~error:msg
-               :: read_errors))
-      | exception End_of_file -> List.rev rows, List.rev read_errors
-    in
-    loop 0 [] [])
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    ( []
-    , [ compaction_snapshot_read_error
-          ~scope:(runtime_manifest_file_scope ~base_dir path)
-          ~error:(Printexc.to_string exn)
-      ]
-    )
-;;
-
-let compaction_snapshot_clock_refs decision =
-  match Json_util.assoc_member_opt "clock_refs" decision with
-  | Some (`Assoc _ as clock_refs) -> Some clock_refs
-  | _ -> None
-;;
-
-let compaction_snapshot_clock_string decision key =
-  match compaction_snapshot_clock_refs decision with
-  | Some clock_refs -> Json_util.assoc_string_opt key clock_refs
-  | None -> None
-;;
-
-let compaction_snapshot_links_json (links : Keeper_runtime_manifest.links) =
-  `Assoc
-    [ "receipt_path", Json_util.string_opt_to_json links.receipt_path
-    ; "checkpoint_path", Json_util.string_opt_to_json links.checkpoint_path
-    ; "tool_call_log_path", Json_util.string_opt_to_json links.tool_call_log_path
-    ]
-;;
-
-let compaction_snapshot_display_runtime ~source ~runtime_id ~compaction_source =
-  match runtime_id with
-  | Some value when String.trim value <> "" -> value
-  | Some _ | None ->
-    (match compaction_source with
-     | Some value when String.trim value <> "" -> value
-     | Some _ | None -> source)
-;;
-
-type compaction_snapshot_item =
-  { id : string
-  ; keeper_id : string
-  ; ts_iso : string
-  ; ts_unix : float option
-  ; trace_id : string option
-  ; keeper_turn_id : int option
-  ; source : string
-  ; trigger : string
-  ; runtime_id : string option
-  ; before_tokens : int option
-  ; after_tokens : int option
-  ; saved_tokens : int option
-  ; compaction_id : string option
-  ; compaction_source : string option
-  ; compaction_outcome : string option
-  ; cause : string option
-  ; status : string
-  ; links : Yojson.Safe.t
-  ; exact_evidence : Yojson.Safe.t option
-  ; reinjection_observation : Yojson.Safe.t
-  }
-
-let compaction_snapshot_item_json (item : compaction_snapshot_item) =
-  `Assoc
-    [ "id", `String item.id
-    ; "keeper", `String item.keeper_id
-    ; "ts_iso", `String item.ts_iso
-    ; "ts_unix", Json_util.float_opt_to_json item.ts_unix
-    ; "trace_id", Json_util.string_opt_to_json item.trace_id
-    ; "keeper_turn_id", Json_util.int_opt_to_json item.keeper_turn_id
-    ; "source", `String item.source
-    ; "trigger", `String item.trigger
-    ; "runtime_id", Json_util.string_opt_to_json item.runtime_id
-    ; ( "display_runtime"
-      , `String
-          (compaction_snapshot_display_runtime
-             ~source:item.source
-             ~runtime_id:item.runtime_id
-             ~compaction_source:item.compaction_source)
-      )
-    ; "before_tokens", Json_util.int_opt_to_json item.before_tokens
-    ; "after_tokens", Json_util.int_opt_to_json item.after_tokens
-    ; "saved_tokens", Json_util.int_opt_to_json item.saved_tokens
-    ; "compaction_id", Json_util.string_opt_to_json item.compaction_id
-    ; "compaction_source", Json_util.string_opt_to_json item.compaction_source
-    ; "compaction_outcome", Json_util.string_opt_to_json item.compaction_outcome
-    ; "cause", Json_util.string_opt_to_json item.cause
-    ; "status", `String item.status
-    ; "links", item.links
-    ; ( "exact_evidence"
-      , match item.exact_evidence with
-        | Some evidence -> evidence
-        | None -> `Null )
-    ; "reinjection_observation", item.reinjection_observation
-    ]
-;;
-
-type compaction_reinjection_state =
-  | Not_linked
-  | Awaiting_load
-  | Checkpoint_not_loaded
-  | Loaded_not_injected
-  | Reinserted
-  | Sequence_incomplete
-  | Sequence_reversed
-  | Duplicate_receipt
-
-let compaction_reinjection_state_to_string = function
-  | Not_linked -> "not_linked"
-  | Awaiting_load -> "awaiting_load"
-  | Checkpoint_not_loaded -> "checkpoint_not_loaded"
-  | Loaded_not_injected -> "loaded_not_injected"
-  | Reinserted -> "reinserted"
-  | Sequence_incomplete -> "sequence_incomplete"
-  | Sequence_reversed -> "sequence_reversed"
-  | Duplicate_receipt -> "duplicate_receipt"
-;;
-
-let compaction_not_linked_observation_json =
-  `Assoc
-    [ "state", `String (compaction_reinjection_state_to_string Not_linked)
-    ; "keeper_turn_id", `Null
-    ; "checkpoint_loaded_receipts", `Int 0
-    ; "context_injected_receipts", `Int 0
-    ]
-;;
-
-type compaction_receipt_kind =
-  | Checkpoint_load of bool option
-  | Context_injection
-
-type compaction_receipt =
-  { index : int
-  ; keeper_turn_id : int option
-  ; kind : compaction_receipt_kind
-  }
-
-let compaction_reinjection_observation_json ~manifest_rows ~row_index row =
-  let observation state ?keeper_turn_id ~loads ~injections () =
-    `Assoc
-      [ "state", `String (compaction_reinjection_state_to_string state)
-      ; "keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id
-      ; "checkpoint_loaded_receipts", `Int loads
-      ; "context_injected_receipts", `Int injections
-      ]
-  in
-  match row.Keeper_runtime_manifest.links.checkpoint_path with
-  | None -> compaction_not_linked_observation_json
-  | Some checkpoint_path ->
-    let receipts =
-      manifest_rows
-      |> List.filter_map (fun (index, (candidate : Keeper_runtime_manifest.t)) ->
-        if index <= row_index
-           || not (String.equal candidate.Keeper_runtime_manifest.trace_id row.trace_id)
-           || candidate.links.checkpoint_path <> Some checkpoint_path
-        then None
-        else
-          match candidate.event with
-          | Keeper_runtime_manifest.Checkpoint_loaded ->
-            Some
-              { index
-              ; keeper_turn_id = candidate.keeper_turn_id
-              ; kind =
-                  Checkpoint_load
-                    (Json_util.get_bool
-                       candidate.decision
-                       "loaded_checkpoint_present")
-              }
-          | Keeper_runtime_manifest.Context_injected ->
-            Some
-              { index
-              ; keeper_turn_id = candidate.keeper_turn_id
-              ; kind = Context_injection
-              }
-          | _ -> None)
-    in
-    (match receipts with
-     | [] -> observation Awaiting_load ~loads:0 ~injections:0 ()
-     | first :: _ ->
-       let turn_receipts =
-         List.filter
-           (fun receipt -> receipt.keeper_turn_id = first.keeper_turn_id)
-           receipts
-       in
-       let loads, injections =
-         List.fold_left
-           (fun (loads, injections) receipt ->
-             match receipt.kind with
-             | Checkpoint_load _ -> receipt :: loads, injections
-             | Context_injection -> loads, receipt :: injections)
-           ([], [])
-           turn_receipts
-       in
-       let state =
-         match loads, injections, first.keeper_turn_id with
-         | _, _, None -> Sequence_incomplete
-         | _ :: _ :: _, _, _ | _, _ :: _ :: _, _ -> Duplicate_receipt
-         | [ { kind = Checkpoint_load (Some true); index = load_index; _ } ]
-         , [ { index = injection_index; _ } ]
-         , _ ->
-           if load_index < injection_index then Reinserted else Sequence_reversed
-         | [ { kind = Checkpoint_load (Some true); _ } ], [], _ ->
-           Loaded_not_injected
-         | [ { kind = Checkpoint_load (Some false); _ } ], [], _ ->
-           Checkpoint_not_loaded
-         | _ -> Sequence_incomplete
-       in
-       observation
-         state
-         ?keeper_turn_id:first.keeper_turn_id
-         ~loads:(List.length loads)
-         ~injections:(List.length injections)
-         ())
-;;
-
-let compaction_saved_tokens before_tokens after_tokens =
-  match before_tokens, after_tokens with
-  | Some before_tokens, Some after_tokens -> Some (max 0 (before_tokens - after_tokens))
-  | _ -> None
-;;
-
-let compaction_event_bus_snapshot_json ~keeper_id (row : Keeper_runtime_manifest.t) =
-  match Json_util.assoc_member_opt "last_compaction" row.decision with
-  | Some (`Assoc _ as compaction) ->
-    let before_tokens = Json_util.get_int compaction "before_tokens" in
-    let after_tokens = Json_util.get_int compaction "after_tokens" in
-    let saved_tokens =
-      match Json_util.get_int compaction "tokens_freed" with
-      | Some tokens -> Some tokens
-      | None -> compaction_saved_tokens before_tokens after_tokens
-    in
-    let trigger =
-      Json_util.get_string compaction "phase_hint"
-      (* DET-OK: manifest projection fallback only; a missing phase hint maps to
-         a stable UI label and does not drive keeper policy. *)
-      |> Option.value ~default:"event_bus_context_compacted"
-    in
-    Some
-      (compaction_snapshot_item_json
-         { id =
-             Printf.sprintf "manifest:%s:%s:%s" row.trace_id
-               (Keeper_runtime_manifest.event_kind_to_string row.event)
-               row.ts
-         ; keeper_id
-         ; ts_iso = row.ts
-         ; ts_unix = Masc_domain.parse_iso8601_opt row.ts
-         ; trace_id = Some row.trace_id
-         ; keeper_turn_id = row.keeper_turn_id
-         ; source = "runtime_manifest"
-         ; trigger
-         ; runtime_id = row.runtime_id
-         ; before_tokens
-         ; after_tokens
-         ; saved_tokens
-         ; compaction_id = compaction_snapshot_clock_string row.decision "compaction_id"
-         ; compaction_source =
-             compaction_snapshot_clock_string row.decision "compaction_source"
-         ; compaction_outcome = None
-         ; cause = None
-         ; status = row.status
-         ; links = compaction_snapshot_links_json row.links
-         ; exact_evidence = None
-         ; reinjection_observation = compaction_not_linked_observation_json
-         })
-  | _ ->
-    (match Json_util.get_int row.decision "context_compacted_count" with
-     | Some count when count > 0 ->
-       let compaction_source =
-         compaction_snapshot_clock_string row.decision "compaction_source"
-       in
-       Some
-         (compaction_snapshot_item_json
-            { id =
-                Printf.sprintf "manifest:%s:%s:%s" row.trace_id
-                  (Keeper_runtime_manifest.event_kind_to_string row.event)
-                  row.ts
-            ; keeper_id
-            ; ts_iso = row.ts
-            ; ts_unix = Masc_domain.parse_iso8601_opt row.ts
-            ; trace_id = Some row.trace_id
-            ; keeper_turn_id = row.keeper_turn_id
-            ; source = "runtime_manifest"
-            ; trigger =
-                Option.value
-                  ~default:"event_bus_context_compacted"
-                  compaction_source
-            ; runtime_id = row.runtime_id
-            ; before_tokens = None
-            ; after_tokens = None
-            ; saved_tokens = None
-            ; compaction_id = compaction_snapshot_clock_string row.decision "compaction_id"
-            ; compaction_source
-            ; compaction_outcome = None
-            ; cause = None
-            ; status = row.status
-            ; links = compaction_snapshot_links_json row.links
-            ; exact_evidence = None
-            ; reinjection_observation = compaction_not_linked_observation_json
-            })
-     | Some _ | None -> None)
-;;
-
-let compaction_context_snapshot_json
-      ~keeper_id
-      ~manifest_rows
-      ~row_index
-      (row : Keeper_runtime_manifest.t)
-  =
-  (* TEL-OK: read-only dashboard projection; compaction telemetry is emitted by
-     the keeper runtime/event bridge that produced the manifest row. *)
-  if Keeper_runtime_manifest.status_is_skipped row
-  then None
-  else
-    let before_tokens = Json_util.get_int row.decision "before_tokens" in
-    let after_tokens = Json_util.get_int row.decision "after_tokens" in
-    let compaction_source =
-      compaction_snapshot_clock_string row.decision "compaction_source"
-    in
-    Some
-      (compaction_snapshot_item_json
-         { id =
-             Printf.sprintf "manifest:%s:%s:%s" row.trace_id
-               (Keeper_runtime_manifest.event_kind_to_string row.event)
-               row.ts
-         ; keeper_id
-         ; ts_iso = row.ts
-         ; ts_unix = Masc_domain.parse_iso8601_opt row.ts
-         ; trace_id = Some row.trace_id
-         ; keeper_turn_id = row.keeper_turn_id
-         ; source = "runtime_manifest"
-         (* DET-OK: manifest projection fallback only; a missing source maps to
-            a stable UI label and does not drive keeper policy. *)
-         ; trigger = Option.value ~default:"context_compacted" compaction_source
-         ; runtime_id = row.runtime_id
-         ; before_tokens
-         ; after_tokens
-         ; saved_tokens = compaction_saved_tokens before_tokens after_tokens
-         ; compaction_id = compaction_snapshot_clock_string row.decision "compaction_id"
-         ; compaction_source
-         ; compaction_outcome =
-             Json_util.get_string
-               row.decision
-               Keeper_runtime_manifest.compaction_outcome_key
-         ; cause = Json_util.get_string row.decision "error"
-         ; status = row.status
-         ; links = compaction_snapshot_links_json row.links
-         ; exact_evidence =
-             Json_util.assoc_member_opt
-               Keeper_compaction_evidence.exact_evidence_key
-               row.decision
-         ; reinjection_observation =
-             compaction_reinjection_observation_json
-               ~manifest_rows
-               ~row_index
-               row
-         })
-;;
-
-let compaction_snapshot_of_manifest_row
-      ~keeper_id
-      ~manifest_rows
-      (row_index, (row : Keeper_runtime_manifest.t))
-  =
-  match row.event with
-  | Keeper_runtime_manifest.Event_bus_correlated ->
-    compaction_event_bus_snapshot_json ~keeper_id row
-  | Keeper_runtime_manifest.Context_compacted ->
-    compaction_context_snapshot_json ~keeper_id ~manifest_rows ~row_index row
-  | _ -> None
-;;
-
-let compaction_snapshot_manifest_sort_value (row : Keeper_runtime_manifest.t) =
-  match Masc_domain.parse_iso8601_opt row.ts with
-  | Some ts -> ts
-  (* DET-OK: dashboard projection only. A malformed manifest timestamp is not
-     used for keeper policy; sorting it last keeps the response deterministic
-     while the row-level read_errors surface malformed JSON/shape issues. *)
-  | None -> 0.0
-;;
-
-let keeper_meta_compaction_snapshot_json ~config ~keeper_id =
-  match Keeper_meta_store.read_meta config keeper_id with
-  | Ok (Some meta) ->
-    let rt = meta.runtime.compaction_rt in
-    if rt.count <= 0 || rt.last_ts <= 0.0
-    then None, []
-    else
-      let before_tokens = Some rt.last_before_tokens in
-      let after_tokens = Some rt.last_after_tokens in
-      ( Some
-          (compaction_snapshot_item_json
-             { id = "keeper_meta:last_compaction"
-             ; keeper_id
-             ; ts_iso = Masc_domain.iso8601_of_unix_seconds rt.last_ts
-             ; ts_unix = Some rt.last_ts
-             ; trace_id = None
-             ; keeper_turn_id = None
-             ; source = "keeper_meta"
-             ; trigger =
-                 Keeper_meta_contract.compaction_runtime_decision_to_string
-                   rt.last_decision
-             ; runtime_id = None
-             ; before_tokens
-             ; after_tokens
-             ; saved_tokens = compaction_saved_tokens before_tokens after_tokens
-             ; compaction_id = None
-             ; compaction_source = None
-             ; compaction_outcome = None
-             ; cause = None
-             ; status = "latest"
-             ; links = `Assoc []
-             ; exact_evidence = None
-             ; reinjection_observation = compaction_not_linked_observation_json
-             })
-      , [] )
-  | Ok None -> None, []
-  | Error msg ->
-    ( None
-    , [ compaction_snapshot_read_error
-          ~scope:("keeper_meta:" ^ keeper_id)
-          ~error:msg
-      ] )
-;;
-
-let compaction_snapshots_json ~config ~keeper_id ~limit =
-  let limit = limit |> max 1 |> min compaction_snapshot_max_limit in
-  let manifest_base_dir =
-    Keeper_runtime_manifest.base_dir config ~keeper_name:keeper_id
-  in
-  let manifest_paths, path_read_errors, path_scan_truncated =
-    runtime_manifest_paths ~config ~keeper_id ~limit
-  in
-  let rows_and_errors =
-    List.map (read_runtime_manifest_rows ~base_dir:manifest_base_dir) manifest_paths
-  in
-  let manifest_rows =
-    rows_and_errors
-    |> List.rev
-    |> List.map fst
-    |> List.concat
-  in
-  let manifest_read_errors =
-    path_read_errors
-    @ (List.map snd rows_and_errors |> List.concat)
-  in
-  let scan_truncated = path_scan_truncated in
-  let manifest_items =
-    let manifest_rows = List.mapi (fun index row -> index, row) manifest_rows in
-    manifest_rows
-    |> List.sort (fun a b ->
-      Float.compare
-        (compaction_snapshot_manifest_sort_value (snd b))
-        (compaction_snapshot_manifest_sort_value (snd a)))
-    |> List.filter_map
-         (compaction_snapshot_of_manifest_row ~keeper_id ~manifest_rows)
-    |> compaction_snapshot_take limit
-  in
-  let items, read_errors =
-    match manifest_items with
-    | [] ->
-      let meta_item, meta_read_errors =
-        keeper_meta_compaction_snapshot_json ~config ~keeper_id
-      in
-      (match meta_item with
-       | Some item -> [ item ], manifest_read_errors @ meta_read_errors
-       | None -> [], manifest_read_errors @ meta_read_errors)
-    | _ -> manifest_items, manifest_read_errors
-  in
-  log_compaction_snapshot_read_errors ~keeper_id read_errors;
-  `Assoc
-    [ "schema", `String "keeper.compaction_snapshots.v1"
-    ; "keeper", `String keeper_id
-    ; "source", `String "runtime_manifest|keeper_meta"
-    ; "producer", `String "keeper_runtime_manifest|keeper_meta_store"
-    ; "limit", `Int limit
-    ; "count", `Int (List.length items)
-    ; "read_error_count", `Int (List.length read_errors)
-    ; "read_errors", compaction_snapshot_read_errors_json read_errors
-    ; "scan_truncated", `Bool scan_truncated
-    ; "items", `List items
-    ]
-;;
-
-type compaction_snapshot_cache_entry =
-  { body : Yojson.Safe.t
-  ; refreshed_at : float
-  }
-
-let compaction_snapshot_cache :
-    (string, compaction_snapshot_cache_entry) Hashtbl.t =
-  Hashtbl.create 16
-;;
-
-(* [true] means a force-refresh arrived while the current scan was running, so
-   completion must schedule exactly one trailing scan. *)
-let compaction_snapshot_refreshes : (string, bool) Hashtbl.t = Hashtbl.create 16
-let compaction_snapshot_cache_mu = Stdlib.Mutex.create ()
-let compaction_snapshot_cache_max_entries = 128
-
-let with_compaction_snapshot_cache_lock f =
-  Stdlib.Mutex.lock compaction_snapshot_cache_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock compaction_snapshot_cache_mu)
-    f
-;;
-
-let compaction_snapshot_cache_key config keeper_id limit =
-  String.concat "\x00" [ config.Workspace.base_path; keeper_id; string_of_int limit ]
-;;
-
-let compaction_snapshot_with_hydration_status status = function
-  | `Assoc fields ->
-    `Assoc
-      (("hydration_status", `String status)
-       :: List.remove_assoc "hydration_status" fields)
-  | body -> body
-;;
-
-let compaction_snapshot_empty_json ~keeper_id ~limit ~status ~read_errors =
-  `Assoc
-    [ "schema", `String "keeper.compaction_snapshots.v1"
-    ; "keeper", `String keeper_id
-    ; "source", `String "runtime_manifest|keeper_meta"
-    ; "producer", `String "keeper_runtime_manifest|keeper_meta_store"
-    ; "limit", `Int limit
-    ; "count", `Int 0
-    ; "read_error_count", `Int (List.length read_errors)
-    ; ( "read_errors"
-      , `List
-          (List.map
-             (fun error ->
-               `Assoc
-                 [ "scope", `String "background_hydration"
-                 ; "error", `String error
-                 ])
-             read_errors) )
-    ; "scan_truncated", `Bool false
-    ; "items", `List []
-    ; "hydration_status", `String status
-    ]
-;;
-
-let broadcast_compaction_snapshot_refresh ~keeper_id ~status =
-  match
-    Sse.broadcast
-      (`Assoc
-         [ "type", `String "keeper_compaction_snapshots_changed"
-         ; "keeper_name", `String keeper_id
-         ; "status", `String status
-         ; "ts_unix", `Float (Time_compat.now ())
-         ])
-  with
-  | () -> ()
-  | exception Eio.Cancel.Cancelled _ -> ()
-  | exception exn ->
-    Log.Dashboard.warn
-      "keeper compaction snapshot completion broadcast failed: keeper=%s status=%s error=%s"
-      keeper_id status (Printexc.to_string exn)
-;;
-
-let finish_compaction_snapshot_refresh key ~keeper_id body =
-  let refresh_again =
-    with_compaction_snapshot_cache_lock (fun () ->
-      let refresh_again =
-        match Hashtbl.find_opt compaction_snapshot_refreshes key with
-        | Some pending -> pending
-        | None ->
-          Log.Dashboard.warn
-            "keeper compaction snapshot refresh completed without an in-flight marker: keeper=%s"
-            keeper_id;
-          false
-      in
-      if not (Hashtbl.mem compaction_snapshot_cache key)
-      then
-        Server_utils.evict_oldest_if_full
-          ~max_entries:compaction_snapshot_cache_max_entries
-          ~age_of:(fun entry -> entry.refreshed_at)
-          compaction_snapshot_cache;
-      Hashtbl.replace compaction_snapshot_cache key
-        { body; refreshed_at = Time_compat.now () };
-      Hashtbl.remove compaction_snapshot_refreshes key;
-      refresh_again)
-  in
-  let status =
-    match body with
-    | `Assoc fields ->
-      (match List.assoc_opt "hydration_status" fields with
-       | Some (`String value) -> value
-       | _ -> "failed")
-    | _ -> "failed"
-  in
-  broadcast_compaction_snapshot_refresh ~keeper_id ~status;
-  refresh_again
-;;
-
-let rec start_compaction_snapshot_refresh
-    ~config
-    ~keeper_id
-    ~limit
-    ~force_refresh
-    key
-  =
-  let admitted =
-    with_compaction_snapshot_cache_lock (fun () ->
-      if Hashtbl.mem compaction_snapshot_refreshes key
-      then begin
-        if force_refresh
-        then Hashtbl.replace compaction_snapshot_refreshes key true;
-        false
-      end
-      else begin
-        Hashtbl.add compaction_snapshot_refreshes key false;
-        true
-      end)
-  in
-  if not admitted
-  then true
-  else
-    match Eio_context.get_switch_opt () with
-    | None ->
-      with_compaction_snapshot_cache_lock (fun () ->
-        Hashtbl.remove compaction_snapshot_refreshes key);
-      false
-    | Some sw ->
-      let run () =
-        let finish body =
-          let refresh_again =
-            finish_compaction_snapshot_refresh key ~keeper_id body
-          in
-          if refresh_again
-          then
-            ignore
-              (start_compaction_snapshot_refresh ~config ~keeper_id ~limit
-                 ~force_refresh:false key)
-        in
-        match
-          Domain_pool_ref.submit_io_or_inline (fun () ->
-            compaction_snapshots_json ~config ~keeper_id ~limit)
-        with
-        | body ->
-          finish
-            (compaction_snapshot_with_hydration_status "ready" body)
-        | exception Eio.Cancel.Cancelled _ ->
-          with_compaction_snapshot_cache_lock (fun () ->
-            Hashtbl.remove compaction_snapshot_refreshes key)
-        | exception exn ->
-          let error = Printexc.to_string exn in
-          Log.Dashboard.warn
-            "keeper compaction snapshot hydration failed: keeper=%s error=%s"
-            keeper_id error;
-          finish
-            (compaction_snapshot_empty_json ~keeper_id ~limit ~status:"failed"
-               ~read_errors:[ error ])
-      in
-      (match Eio.Fiber.fork ~sw run with
-       | () -> true
-       | exception exn ->
-         with_compaction_snapshot_cache_lock (fun () ->
-           Hashtbl.remove compaction_snapshot_refreshes key);
-         Log.Dashboard.warn
-           "keeper compaction snapshot background fork failed: keeper=%s error=%s"
-           keeper_id (Printexc.to_string exn);
-         false)
-;;
-
-let cached_compaction_snapshots_json
-    ~config
-    ~keeper_id
-    ~limit
-    ~force_refresh
-  =
-  let limit = limit |> max 1 |> min compaction_snapshot_max_limit in
-  let key = compaction_snapshot_cache_key config keeper_id limit in
-  let now = Time_compat.now () in
-  let cached =
-    with_compaction_snapshot_cache_lock (fun () ->
-      Hashtbl.find_opt compaction_snapshot_cache key)
-  in
-  let stale =
-    match cached with
-    | None -> true
-    | Some entry -> now -. entry.refreshed_at >= keeper_hot_path_cache_ttl_s
-  in
-  let scheduled =
-    if force_refresh || stale
-    then
-      start_compaction_snapshot_refresh ~config ~keeper_id ~limit ~force_refresh
-        key
-    else true
-  in
-  match cached with
-  | Some entry -> entry.body
-  | None when scheduled ->
-    compaction_snapshot_empty_json ~keeper_id ~limit ~status:"warming"
-      ~read_errors:[]
-  | None ->
-    compaction_snapshot_empty_json ~keeper_id ~limit ~status:"failed"
-      ~read_errors:[ "background refresh context unavailable" ]
 ;;
 
 let cached_keeper_runtime_trace_json config name ?trace_id ?turn_id ~limit () =
@@ -1292,10 +370,13 @@ let keeper_chat_history_freshness config name =
 ;;
 
 (* The canonical autonomous User/Assistant/Tool exchange lives in the Keeper's
-   OAS checkpoint, not as duplicate chat-store rows. This read projection uses
+   AGENT_CORE checkpoint, not as duplicate chat-store rows. This read projection uses
    typed turn identity only for stable dashboard grouping and exact raw-trace
    lookup; it is not the Keeper's semantic continuity mechanism. Final text
-   and work trace come from the same exact OAS run. *)
+   and work trace come from the same exact AGENT_CORE run. The [id] is required:
+   the dashboard history schema drops any row without one. Its value is a pure
+   schema satisfier -- the dashboard re-mints its entry id from
+   [autonomous_turn.turn_id] and never reads this field. *)
 let autonomous_turn_json (turn : Keeper_autonomous_turn_source.turn) =
   let trace_fields =
     match turn.trace with
@@ -1303,10 +384,11 @@ let autonomous_turn_json (turn : Keeper_autonomous_turn_source.turn) =
     | trace ->
       [ ( "blocks"
         , Keeper_chat_blocks.blocks_to_yojson
-            [ Keeper_chat_blocks.Trace { trace } ] ) ]
+            [ Keeper_chat_blocks.Trace { trace; omitted = 0 } ] ) ]
   in
   `Assoc
-    ([ "role", `String "assistant"
+    ([ "id", `String ("autonomous:" ^ turn.turn_id)
+     ; "role", `String "assistant"
      ; "ts", `Float turn.started_at
      ; ( "content"
        , match turn.final_text with
@@ -1317,27 +399,28 @@ let autonomous_turn_json (turn : Keeper_autonomous_turn_source.turn) =
      @ trace_fields)
 ;;
 
+let keeper_chat_trace_blocks config name =
+  match Keeper_meta_store.read_meta config name with
+  | Ok (Some m) ->
+    Some
+      (Server_dashboard_http_keeper_api_trace.chat_trace_block_by_turn_ref
+         ~max_lines:trajectory_max_limit
+         ~config
+         ~keeper_name:name
+         ~allowed_trace_ids:(keeper_chat_allowed_trace_ids m))
+  | Ok None -> None
+  | Error err ->
+    Log.Keeper.warn
+      "dashboard keeper chat history: read_meta failed for %s; trace enrichment skipped: %s"
+      name
+      err;
+    None
+;;
+
 let keeper_chat_history_json config name =
   let base_dir = (config : Workspace.config).base_path in
   let messages = Keeper_chat_store.load ~base_dir ~keeper_name:name in
-  let trace_block_by_turn_ref =
-    match Keeper_meta_store.read_meta config name with
-    | Ok (Some m) ->
-      Some
-        (Server_dashboard_http_keeper_api_trace.chat_trace_block_by_turn_ref
-           ~max_lines:trajectory_max_limit
-           ~max_internal_lines:trajectory_max_limit
-           ~config
-           ~keeper_name:name
-           ~allowed_trace_ids:(keeper_chat_allowed_trace_ids m))
-    | Ok None -> None
-    | Error err ->
-      Log.Keeper.warn
-        "dashboard keeper chat history: read_meta failed for %s; trace enrichment skipped: %s"
-        name
-        err;
-      None
-  in
+  let trace_block_by_turn_ref = keeper_chat_trace_blocks config name in
   let chat_rows = Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref messages in
   (* Appended, not merged by timestamp: the client already sorts the whole
      transcript by [ts] and breaks ties by original index, and rows the chat
@@ -1357,6 +440,53 @@ let keeper_chat_history_json config name =
       name
       (List.length autonomous_rows);
     other
+;;
+
+(* Direct-conversation rows older than [before], one [Keeper_chat_store] window
+   at a time. Separate from [keeper_chat_history_json] rather than a mode of it,
+   because the two answer different questions:
+
+   - /chat/history is the transcript: the tail window plus every autonomous turn
+     the retention root still holds ([Keeper_raw_trace_retention.history_limit]).
+   - this is the walk backwards through direct rows the tail window evicted.
+     Autonomous turns are excluded on purpose -- they are bounded by retention,
+     not by this window, so the first transcript fetch already carried every one
+     that exists. Repeating them per page would duplicate rows the client holds.
+
+   [next_before] is the cursor for the following page, computed here so the
+   caller does not reimplement the rule: the oldest [ts] among the returned
+   rows, or [null] for an empty page. The fold tolerates a row carrying no [ts]
+   by skipping it, which today cannot happen -- [Keeper_chat_store.parse_line]
+   maps an absent [ts] to [Some 0.0] rather than [None] (see the store's own
+   [quiet_line_ts], which maps the same absence to [None]). That disagreement
+   is tracked separately; this fold is written against the documented type so
+   it stays correct when the store's decoder is repaired.
+
+   Uncached: pages are user-initiated and [load_page] is already bounded I/O
+   (binary-search probes plus one window slice). A cache keyed by cursor would
+   add entries per click without a measured hot path asking for it. *)
+let keeper_chat_history_page_json config name ~before =
+  let base_dir = (config : Workspace.config).base_path in
+  let { Keeper_chat_store.messages; has_more } =
+    Keeper_chat_store.load_page ~base_dir ~keeper_name:name ?before ()
+  in
+  let trace_block_by_turn_ref = keeper_chat_trace_blocks config name in
+  let next_before =
+    List.fold_left
+      (fun acc ({ ts; _ } : Keeper_chat_store.chat_message) ->
+        match acc with
+        | None -> Some ts
+        | Some a -> Some (Float.min a ts))
+      None
+      messages
+  in
+  `Assoc
+    [ "schema", `String "masc.keeper_chat_history.page.v1"
+    ; ( "messages"
+      , Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref messages )
+    ; "has_more", `Bool has_more
+    ; "next_before", (match next_before with Some t -> `Float t | None -> `Null)
+    ]
 ;;
 
 let cached_keeper_chat_history_json config name =
@@ -1501,21 +631,6 @@ let cached_keeper_composite_json config name =
   | other -> `OK, other
 ;;
 
-let keeper_chat_receipt_route req_path =
-  if not (String.starts_with ~prefix:keeper_api_prefix req_path)
-  then None
-  else
-    let rest =
-      String.sub req_path (String.length keeper_api_prefix)
-        (String.length req_path - String.length keeper_api_prefix)
-    in
-    match String.split_on_char '/' rest with
-    | [ keeper_name; "chat"; "receipts"; receipt_id ]
-      when keeper_name <> "" && receipt_id <> "" ->
-      Some (keeper_name, receipt_id)
-    | _ -> None
-;;
-
 let handle_keeper_get_subroutes state req request reqd =
   let req_path = Http.Request.path req in
   let prefix = keeper_api_prefix in
@@ -1530,35 +645,8 @@ let handle_keeper_get_subroutes state req request reqd =
     let slen = String.length suffix in
     String.trim (String.sub req_path plen (tlen - plen - slen))
   in
-  match keeper_chat_receipt_route req_path with
-  | Some (name, raw_receipt_id) ->
-    if not (Keeper_config.validate_name name)
-    then
-      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
-        (error_json (Printf.sprintf "invalid keeper name: %s" name))
-    else
-      (match Keeper_chat_queue.Receipt_id.of_string raw_receipt_id with
-       | Error message ->
-         Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
-           (error_json message)
-       | Ok receipt_id ->
-         (match Keeper_chat_queue.lookup_receipt ~keeper_name:name ~receipt_id with
-          | Error error ->
-            Server_auth.respond_json_value_with_cors ~status:`Service_unavailable
-              request reqd
-              (error_json (Keeper_chat_queue.mutation_error_to_string error))
-          | Ok { receipt = None; _ } ->
-            Server_auth.respond_json_value_with_cors ~status:`Not_found request reqd
-              (error_json "keeper chat receipt not found")
-          | Ok { revision; receipt = Some receipt } ->
-            Server_auth.respond_json_value_with_cors ~status:`OK request reqd
-              (keeper_chat_receipt_json ~keeper_name:name ~revision receipt)))
-  | None ->
-  if ends_with "/digest" then (
-    (* Keeper catch-up digest (since-last-seen). Inherits the enclosing
-       prefix_get "/api/v1/keepers/" + with_public_read gating, same as the
-       sibling arms below; no separate router wiring. *)
-    let name = extract_name "/digest" in
+  if ends_with keeper_suffix_github_identity then (
+    let name = extract_name keeper_suffix_github_identity in
     if name = "" then
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
         (error_json "missing keeper name")
@@ -1566,24 +654,59 @@ let handle_keeper_get_subroutes state req request reqd =
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
         (error_json (Printf.sprintf "invalid keeper name: %s" name))
     else
-      match Server_utils.query_param req "since_unix" with
-      | None ->
-        Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
-          (error_json "missing required query param: since_unix")
-      | Some raw ->
-        (match float_of_string_opt (String.trim raw) with
-         | None ->
-           Server_auth.respond_json_value_with_cors ~status:`Bad_request request
-             reqd
-             (error_json "since_unix must be a unix-seconds float")
-         | Some since_unix ->
-           let config = Mcp_server.workspace_config state in
-           let digest =
-             Keeper_catchup_digest.build ~base_path:config.base_path
-               ~keeper_name:name ~since_unix ~now_unix:(Time_compat.now ())
-           in
+      let config = Mcp_server.workspace_config state in
+      match Keeper_meta_store.read_meta config name with
+      | Error message ->
+        Server_auth.respond_json_value_with_cors ~status:`Internal_server_error request reqd
+          (error_json message)
+      | Ok None ->
+        Server_auth.respond_json_value_with_cors ~status:`Not_found request reqd
+          (error_json (Printf.sprintf "keeper %S not found" name))
+      | Ok (Some _) ->
+        let hostname =
+          match Server_utils.query_param req "hostname" with
+          | Some hostname -> hostname
+          | None -> "github.com"
+        in
+        (match
+           Keeper_github_identity.observe
+             ~config
+             ~keeper_name:name
+             ~hostname
+         with
+         | Error message ->
+           Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+             (error_json message)
+         | Ok observation ->
            Server_auth.respond_json_value_with_cors ~status:`OK request reqd
-             (Keeper_catchup_digest.to_json digest)))
+             (Keeper_github_identity.observation_to_yojson observation)))
+  else if ends_with "/chat/history/page" then
+    (* Checked before "/chat/history": [ends_with] would not confuse the two,
+       but keeping the longer suffix first means adding a third sub-route later
+       cannot silently shadow this one. *)
+    let name = extract_name "/chat/history/page" in
+    if name = "" then
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+        (error_json "missing keeper name")
+    else if not (Keeper_config.validate_name name) then
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+        (error_json (Printf.sprintf "invalid keeper name: %s" name))
+    else (
+      (* Absent [before] means the newest window -- the same rows /chat/history
+         serves, minus the autonomous turns. Present but unparseable is a client
+         bug, not a request for the newest page, so it is rejected rather than
+         silently treated as absent. *)
+      match Server_utils.query_param req "before" with
+      | Some raw when float_of_string_opt (String.trim raw) = None ->
+        Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+          (error_json "before must be a unix-seconds float")
+      | before_raw ->
+        let before =
+          Option.bind before_raw (fun raw -> float_of_string_opt (String.trim raw))
+        in
+        let config = Mcp_server.workspace_config state in
+        Server_auth.respond_json_value_with_cors ~status:`OK request reqd
+          (keeper_chat_history_page_json config name ~before))
   else if ends_with "/chat/history" then
     let name = extract_name "/chat/history" in
     if name = "" then
@@ -1630,6 +753,56 @@ let handle_keeper_get_subroutes state req request reqd =
         match st with `OK -> `OK | `Not_found -> `Not_found
       in
       Http.Response.json_value ~status ~compress:true ~request:req json reqd
+  else if ends_with keeper_suffix_file_changes then
+    let name = extract_name keeper_suffix_file_changes in
+    if String.length name = 0 then
+      respond_error reqd "keeper name is required"
+    else if not (Keeper_config.validate_name name) then
+      (* A name that cannot belong to a keeper is refused rather than looked
+         up. The window filters rows by an equal string, so a typo would
+         otherwise come back as an empty answer -- indistinguishable from a
+         real keeper that changed nothing. *)
+      respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
+    else
+      (* A window that cannot be read is refused, not replaced by the default.
+         Answering [?window_hours=abc] over the last day would report a period
+         the caller did not ask for, under a field saying it did. Too wide a
+         window is different: it is clamped, and the response states the
+         window it actually covered. *)
+      match
+        match Server_utils.query_param req "window_hours" with
+        | None -> Ok file_changes_default_window_hours
+        | Some raw -> (
+            match float_of_string_opt (String.trim raw) with
+            | Some hours when hours > 0.0 ->
+                Ok (Float.min hours file_changes_max_window_hours)
+            | Some _ | None ->
+                Error (Printf.sprintf "window_hours must be a positive number: %s" raw))
+      with
+      | Error detail -> respond_error reqd detail
+      | Ok window_hours ->
+      let rows = Keeper_tool_call_log.read_window ~keeper_name:name ~window_hours () in
+      let tally = Keeper_tool_call_file_change.classify_all rows in
+      let json =
+        `Assoc
+          [ ("keeper", `String name)
+            (* The window this answer covers, and how many of the keeper's
+               calls fell inside it. Both are stated because the changes alone
+               do not say what was looked at: no changes in an hour and no
+               calls in an hour are different facts. *)
+          ; ("window_hours", `Float window_hours)
+          ; ("calls_in_window", `Int (List.length rows))
+          ; ( "changes"
+            , `List (List.map Keeper_tool_call_file_change.to_json tally.Keeper_tool_call_file_change.changes) )
+            (* Both counts ride the answer rather than a log line. A reader
+               drawing changes has to be able to say that a turn wrote more
+               than it can show: over_budget rows are changes whose text the
+               log did not keep. *)
+          ; ("over_budget", `Int tally.Keeper_tool_call_file_change.over_budget)
+          ; ("malformed", `Int tally.Keeper_tool_call_file_change.malformed)
+          ]
+      in
+      Http.Response.json_value ~status:`OK ~compress:true ~request:req json reqd
   else if ends_with keeper_suffix_paused_work then
     Server_dashboard_http_keeper_paused_work.handle_get state req reqd
   else if ends_with keeper_suffix_runtime_trace then
@@ -1701,10 +874,9 @@ let handle_keeper_get_subroutes state req request reqd =
               Time_compat.now ()
               -. (float_of_int window_hours *. Masc_time_constants.hour)
             in
-            let read_result =
-              Trajectory.read_entries_since_result ~masc_root ~keeper_name:name ~since
+            let entries =
+              Trajectory.read_entries_since ~masc_root ~keeper_name:name ~since
             in
-            let entries = read_result.Trajectory.entries in
             let tools = Trajectory.aggregate_tool_stats entries in
             let timeline = Trajectory.hourly_timeline entries in
             let latest_ts =
@@ -1754,7 +926,7 @@ let handle_keeper_get_subroutes state req request reqd =
               ("source", `String "trajectory_tool_call");
               ( "producer",
                 `String
-                  "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
+                  "keeper_hooks_agent_core.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
               ("durable_store", `String (Trajectory.trajectories_dir masc_root name));
               ("dashboard_surface", `String dashboard_surface);
               ("freshness_slo_s", `Float freshness_slo_s);
@@ -1767,14 +939,6 @@ let handle_keeper_get_subroutes state req request reqd =
               ("health", `String health);
               ( "stale_reason",
                 if stale_reason = "" then `Null else `String stale_reason );
-              ( "gate_decode",
-                `Assoc
-                  [
-                    ( "parsed_gate_count",
-                      `Int read_result.Trajectory.gate_decode.parsed_gate_count );
-                    ( "legacy_default_count",
-                      `Int read_result.Trajectory.gate_decode.legacy_default_count );
-                  ] );
               ("coverage_gaps", `List coverage_gaps);
               ("tools", `List (List.map Trajectory.tool_stat_to_json tools));
               ("timeline", `List (List.map Trajectory.hourly_bucket_to_json timeline));
@@ -1813,7 +977,7 @@ let handle_keeper_get_subroutes state req request reqd =
       let fleet_rows =
         match
           Dashboard_cache.get_or_compute
-            (Printf.sprintf "keeper:tool-calls:fleet-rows:%s" masc_root)
+            (tool_calls_fleet_cache_key ~masc_root)
             ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
               Domain_pool_ref.submit_cpu_or_inline (fun () ->
                 `List
@@ -1889,7 +1053,7 @@ let handle_keeper_get_subroutes state req request reqd =
                 ("source", `String "tool_call_io");
                 ( "producer",
                   `String
-                    "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
+                    "keeper_hooks_agent_core.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
                 ("durable_store", `String (Filename.concat masc_root "tool_calls"));
                 ("dashboard_surface", `String dashboard_surface);
                 ("freshness_slo_s", `Float freshness_slo_s);
@@ -1946,30 +1110,175 @@ let handle_keeper_get_subroutes state req request reqd =
        | Error (`Io msg) ->
          Http.Response.json_value ~status:`Internal_server_error
            (`Assoc [ ("error", `String msg) ]) reqd)
-  else if ends_with "/compaction-snapshots" then
-    let name = extract_name "/compaction-snapshots" in
-    if String.length name = 0 then
-      respond_error reqd "keeper name is required"
-    else if not (Keeper_config.validate_name name) then
+  else if ends_with "/memory-journal" then
+    (* Why this keeper's memory looks the way it does. The librarian's passes
+       reach disk here — committed and failed alike since RFC-0361 Part 5 — and
+       the internal-agents monitor could show that a pass ran but not what it
+       decided. A failed pass is the case an operator actually opens. *)
+    let name = extract_name "/memory-journal" in
+    if not (Keeper_config.validate_name name)
+    then
       Http.Response.json_value ~status:`Bad_request
         (`Assoc
-           [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])
+           [ "error", `String (Printf.sprintf "invalid keeper name: %s" name) ])
         reqd
-    else
+    else (
       let limit =
-        Server_utils.int_query_param req "limit" ~default:compaction_snapshot_default_limit
-        |> max 1 |> min compaction_snapshot_max_limit
+        Server_utils.int_query_param req "limit" ~default:50 |> max 1 |> min 500
       in
       let config = Mcp_server.workspace_config state in
-      let force_refresh =
-        Server_utils.bool_query_param req "refresh" ~default:false
+      let keepers_dir = memory_os_keepers_dir config in
+      let lines =
+        Keeper_memory_os_current.read_journal_tail
+          ~keepers_dir
+          ~keeper_id:name
+          ~limit
       in
-      let json =
-        cached_compaction_snapshots_json ~config ~keeper_id:name ~limit
-          ~force_refresh
+      let undecodable =
+        List.length (List.filter (function Error _ -> true | Ok _ -> false) lines)
       in
       Http.Response.json_value ~compress:true ~request:req
-        json reqd
+        (`Assoc
+           [ "keeper", `String name
+           ; "dashboard_surface", `String "/api/v1/keepers/:name/memory-journal"
+           ; "returned", `Int (List.length lines)
+           ; (* Reported rather than hidden: a journal this build cannot fully
+                read is a different observation from a shorter one. *)
+             "undecodable_lines", `Int undecodable
+           ; ( "entries"
+             , `List (List.map Keeper_memory_os_current.journal_line_to_json lines) )
+           ])
+        reqd)
+  else if ends_with "/operator-note" then
+    (* RFC-0366. Read-only here: the operator asks whether a note is pending or
+       which turn consumed it. The write surface belongs to the operator control
+       plane and is a separate change. *)
+    let name = extract_name "/operator-note" in
+    (match
+       Keeper_operator_note.read ~config:(Mcp_server.workspace_config state) ~keeper:name
+     with
+     | Ok note ->
+       Http.Response.json_value ~compress:true ~request:req
+         (`Assoc
+            [ "keeper", `String name
+            ; "dashboard_surface", `String "/api/v1/keepers/:name/operator-note"
+            ; "pending", `Bool (Option.is_none note.consumed_at)
+            ; "note", Keeper_operator_note.to_json note
+            ])
+         reqd
+     | Error (Keeper_operator_note.No_note as error) ->
+       Http.Response.json_value ~status:`Not_found
+         (`Assoc
+            [ "error", `String (Keeper_operator_note.read_error_to_string error) ])
+         reqd
+     | Error error ->
+       Http.Response.json_value ~status:`Bad_request
+         (`Assoc
+            [ "error", `String (Keeper_operator_note.read_error_to_string error) ])
+         reqd)
+  else if ends_with "/last-prompt" then
+    (* What this keeper was actually told, as text. The turn record keeps each
+       block's bytes and digest — how much, never what. The blocks are stable
+       turn to turn, so the last assembly is also the preview of the next. *)
+    let name = extract_name "/last-prompt" in
+    (match
+       Keeper_prompt_capture.read ~config:(Mcp_server.workspace_config state) ~keeper:name
+     with
+     | Ok capture ->
+       Http.Response.json_value ~compress:true ~request:req
+         (match Keeper_prompt_capture.to_json capture with
+          | `Assoc fields ->
+            `Assoc
+              (("keeper", `String name)
+               :: ("dashboard_surface", `String "/api/v1/keepers/:name/last-prompt")
+               :: fields)
+          | json -> json)
+         reqd
+     | Error (Keeper_prompt_capture.Not_captured as error) ->
+       Http.Response.json_value ~status:`Not_found
+         (`Assoc
+            [ "error", `String (Keeper_prompt_capture.read_error_to_string error) ])
+         reqd
+     | Error error ->
+       Http.Response.json_value ~status:`Bad_request
+         (`Assoc
+            [ "error", `String (Keeper_prompt_capture.read_error_to_string error) ])
+         reqd)
+  else if ends_with "/raw-traces" then
+    (* The turn record already carries a raw_trace_run_ref naming this file;
+       until now nothing served it, so the pointer reached the dashboard type
+       and the content had no route. Listing is separate from reading because a
+       turn file runs to hundreds of records and an operator picks one first. *)
+    let name = extract_name "/raw-traces" in
+    let limit =
+      Server_utils.int_query_param req "limit" ~default:25 |> max 1 |> min 200
+    in
+    (match Keeper_raw_trace_reader.list_turns
+             ~config:(Mcp_server.workspace_config state)
+             ~keeper:name
+             ~limit
+     with
+     | Error error ->
+       Http.Response.json_value ~status:`Bad_request
+         (`Assoc
+            [ "error", `String (Keeper_raw_trace_reader.read_error_to_string error) ])
+         reqd
+     | Ok turns ->
+       Http.Response.json_value ~compress:true ~request:req
+         (`Assoc
+            [ "keeper", `String name
+            ; "count", `Int (List.length turns)
+            ; ( "turns"
+              , `List (List.map Keeper_raw_trace_reader.turn_summary_to_json turns) )
+            ; "dashboard_surface", `String "/api/v1/keepers/:name/raw-traces"
+            ])
+         reqd)
+  else if ends_with "/raw-trace" then
+    (* One turn's records. [file] is a handle from the listing, never a path;
+       the reader rejects anything that could leave the keeper's directory
+       rather than normalizing it. *)
+    let name = extract_name "/raw-trace" in
+    let offset = Server_utils.int_query_param req "offset" ~default:0 |> max 0 in
+    let limit =
+      Server_utils.int_query_param req "limit" ~default:200 |> max 1 |> min 2000
+    in
+    (* A missing [file] is a caller that named no turn. Defaulting it to the
+       empty string would route that request into the reader's file-name
+       validation and report it as an invalid name, which describes a different
+       mistake than the one made. *)
+    (match Server_utils.query_param req "file" with
+     | None ->
+       Http.Response.json_value ~status:`Bad_request
+         (`Assoc [ "error", `String "file is required; list turns at /raw-traces" ])
+         reqd
+     | Some file ->
+       (match Keeper_raw_trace_reader.read_turn
+                ~config:(Mcp_server.workspace_config state)
+                ~keeper:name
+                ~file
+                ~offset
+                ~limit
+        with
+     | Error (Keeper_raw_trace_reader.No_such_turn _ as error) ->
+       Http.Response.json_value ~status:`Not_found
+         (`Assoc
+            [ "error", `String (Keeper_raw_trace_reader.read_error_to_string error) ])
+         reqd
+     | Error error ->
+       Http.Response.json_value ~status:`Bad_request
+         (`Assoc
+            [ "error", `String (Keeper_raw_trace_reader.read_error_to_string error) ])
+         reqd
+     | Ok records ->
+       Http.Response.json_value ~compress:true ~request:req
+         (match Keeper_raw_trace_reader.turn_records_to_json records with
+          | `Assoc fields ->
+            `Assoc
+              (("keeper", `String name)
+               :: ("dashboard_surface", `String "/api/v1/keepers/:name/raw-trace")
+               :: fields)
+          | json -> json)
+         reqd))
   else if ends_with "/turn-records" then
     (* RFC-0233 §2.3 PR-4: serve TurnRecords with server-side
        consecutive-pair block diffs so the dashboard stays a renderer
@@ -1988,6 +1297,13 @@ let handle_keeper_get_subroutes state req request reqd =
         |> max 1 |> min trajectory_max_limit
       in
       let config = (Mcp_server.workspace_config state) in
+      let turn_record_freshness_slo_s =
+        Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
+        |> float_of_int
+        |> fun keepalive_interval_s ->
+        Keeper_status_runtime.keeper_turn_record_freshness_slo_s
+          ~keepalive_interval_s
+      in
       let store = Keeper_types_support.keeper_turn_record_store config name in
       let raw_rows = Dated_jsonl.read_recent store limit in
       (* Strict decode: malformed rows are counted and reported, never
@@ -2041,15 +1357,28 @@ let handle_keeper_get_subroutes state req request reqd =
         | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
         | None -> None
       in
-      let health, stale_reason =
-        match latest_age_s with
-        | None when skipped_rows > 0 ->
-            ("incompatible", "incompatible_rows")
-        | None -> ("empty", "no_entries")
-        | Some age when age > freshness_slo_s ->
-            ("stale", "freshness_slo_exceeded")
-        | Some _ -> ("ok", "")
+      let live_turn =
+        match Keeper_registry.get ~base_path:config.base_path name with
+        | Some { current_turn_observation = Some observation; _ } ->
+          Some observation
+        | Some _ | None -> None
       in
+      let health, stale_reason =
+        Keeper_status_runtime.keeper_turn_record_source_health
+          ~skipped_rows
+          ~live_turn_in_progress:(Option.is_some live_turn)
+          ~latest_age_s
+          ~freshness_slo_s:turn_record_freshness_slo_s
+      in
+      (* turn-records envelope: keys begin — see
+         scripts/check-turn-records-envelope-parity.sh. The dashboard decoder
+         rejects a response whose key set is not exactly its allowlist, so a
+         field added here and nowhere else turns the whole payload into null
+         and the turn-records and Memory OS panels go blank. That happened
+         twice (#26799, #28216) and both times ended in adding the missing key
+         afterwards. The markers let a check compare this list against
+         dashboard/src/api/dashboard-turn-records.ts without guessing where the
+         literal starts. *)
       let json = `Assoc [
         ("keeper", `String name);
         ("count", `Int (List.length records));
@@ -2062,7 +1391,16 @@ let handle_keeper_get_subroutes state req request reqd =
                (Workspace.masc_root_dir config)
                (Printf.sprintf "keepers/%s/turn-records" name)) );
         ("dashboard_surface", `String "/api/v1/keepers/:name/turn-records");
-        ("freshness_slo_s", `Float freshness_slo_s);
+        ("freshness_slo_s", `Float turn_record_freshness_slo_s);
+        ("live_turn_in_progress", `Bool (Option.is_some live_turn));
+        ( "live_turn_started_at_unix",
+          match live_turn with
+          | Some observation -> `Float observation.started_at
+          | None -> `Null );
+        ( "live_turn_last_progress_at_unix",
+          match live_turn with
+          | Some observation -> `Float observation.last_progress_at
+          | None -> `Null );
         ("latest_ts_unix", Json_util.float_opt_to_json latest_ts);
         ( "latest_ts_iso",
           match latest_ts with
@@ -2077,7 +1415,7 @@ let handle_keeper_get_subroutes state req request reqd =
             ~config:(Mcp_server.workspace_config state)
             ~keeper_id:name );
         ("entries", `List entries);
-      ] in
+      ] (* turn-records envelope: keys end *) in
       Http.Response.json_value ~compress:true ~request:req json reqd
   else if ends_with "/turn-transcript" then
     (* RFC-0233 §7: serve one keeper turn's operator request + keeper
@@ -2158,11 +1496,6 @@ let handle_keeper_get_subroutes state req request reqd =
              ~default:2000
            |> max 0 |> min 10000
          in
-         let content_max_len =
-           Server_utils.int_query_param req "content_max_len"
-             ~default:Trajectory.default_thinking_truncation
-           |> max 0 |> min 50000
-         in
          let include_thinking =
            Server_utils.bool_query_param req "include_thinking"
              ~default:false
@@ -2173,13 +1506,12 @@ let handle_keeper_get_subroutes state req request reqd =
          in
          let cache_key =
            Printf.sprintf
-             "keeper:trajectory:%s:%s:%s:%d:%d:%d:%b:%d"
+             "keeper:trajectory:%s:%s:%s:%d:%d:%b:%d"
              (Workspace.masc_root_dir config)
              name
              trace_id
              limit
              result_max_len
-             content_max_len
              include_thinking
              tail_scan_lines
          in
@@ -2191,18 +1523,14 @@ let handle_keeper_get_subroutes state req request reqd =
                  Trajectory.read_recent_lines ~masc_root ~keeper_name:m.name
                    ~trace_id ~max_lines:tail_scan_lines
                in
-               let all_lines =
-                 if include_thinking then
-                   merge_keeper_trace_lines ~config ~trace_id trajectory_lines
-                 else
-                   trajectory_lines
-               in
-               (* Filter out thinking entries if not requested *)
+               (* Reasoning evidence comes only from the metadata-only
+                  trajectory producer. Internal assistant history is never
+                  reclassified into this surface. *)
                let lines =
-                 if include_thinking then all_lines
+                 if include_thinking then trajectory_lines
                  else List.filter (function
                    | Trajectory.Tool_call _ -> true
-                   | Trajectory.Thinking _ -> false) all_lines
+                   | Trajectory.Withheld_thinking _ -> false) trajectory_lines
                in
                let total = List.length lines in
                let recent =
@@ -2214,14 +1542,10 @@ let handle_keeper_get_subroutes state req request reqd =
                `Assoc [
                  ("keeper", `String name);
                  ("trace_id", `String trace_id);
-                 ("generation", `Int m.runtime.nonce);
                  ("total_entries", `Int total);
-                 ("total_entries_scope", `String "tail");
-                 ("total_entries_exact", `Bool false);
-                 ("tail_scan_lines", `Int tail_scan_lines);
                  ("showing", `Int (List.length recent));
                  ("entries", `List (List.map
-                   (Trajectory.trajectory_line_to_json ~result_max_len ~content_max_len) recent));
+                   (Trajectory.trajectory_line_to_json ~result_max_len) recent));
                ]))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd)

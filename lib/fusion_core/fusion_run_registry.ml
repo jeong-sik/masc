@@ -1,308 +1,179 @@
-(* Fusion — in-memory run registry for in-progress + recent fusion visibility
-   (RFC-0266 §7 Phase 2/Phase D). The fusion tool registers a run [Running] at
-   fork start and the sink/failure path marks it [Completed] on finish, so an
-   operator surface (masc_fusion_status tool = Phase 3, dashboard = Phase 4)
-   can show what is deliberating now and what just finished — instead of run_id
-   only living in the caller's tool-result.
-
-   Lock-free Atomic + CAS; optional append-only JSONL backing under
-   [<base-path>/.masc/fusion-runs.jsonl] so history survives server restart.
-   Server-lifetime: a fork that dies on server shutdown takes its registry entry
-   with it, so no orphan [Running] survives a restart (RFC-0266 §10 #4).
-
-   This module never wakes a keeper (that is the WAKE half, Phase 1). Recording
-   a run is the visibility half and is intentionally side-effect-free beyond
-   the in-memory table and the append-only log. *)
+type outcome =
+  | Succeeded
+  | Failed of
+      { reason : string
+      ; code : string
+      }
 
 type run_status =
   | Running
-  | Completed of {
-      ok : bool;
-      (* ok=false일 때의 사람-가독 사유 + 안정 분류 태그. 2026-07-01 사고에서
-         상태 표면(masc_fusion_status/SSE)이 status="failed"만 나르는 바람에
-         키퍼가 원인을 얻을 tool-reachable 경로가 없었다 (mli 참조). *)
-      failure : string option;
-      failure_code : string option;
+  | Completed of outcome
+
+type run =
+  { run_id : string
+  ; keeper : string
+  ; preset : string
+  ; topology : Fusion_types.fusion_topology
+  ; started_at : float
+  ; status : run_status
+  }
+
+module Payload = struct
+  (* [topology] 는 요청이 고른 심의 위상이다. registry 가 보관하는 이유는 이것이
+     완료 후에도 필요한 유일한 자리이기 때문이다 — obligation payload 에도 있지만
+     그 레코드는 배달 직후 제거되므로, 완료된 run 의 위상을 되읽을 곳이 없어진다. *)
+  type registration =
+    { keeper : string
+    ; preset : string
+    ; topology : Fusion_types.fusion_topology
     }
 
-type run = {
-  run_id : string;
-  keeper : string;
-  preset : string;
-  started_at : float;  (* unix seconds from the keeper clock at fork start *)
-  status : run_status;
-}
+  type completion = outcome
 
-type t = {
-  runs : run list Atomic.t;
-  path : string option;
-}
+  let name = "fusion_run_registry"
+  let running_noun = "run(s)"
+  let restart_reason = "worker fibers do not survive server restart"
+  let completed_retention = `Latest 64
 
-(* Recent-history retention for [Completed] runs. [Running] runs are never
-   evicted (active state must stay accurate). NOTE: 이전 주석은 [Running]이
-   "per-hour fusion budget (RFC-0252 §10)으로 bounded"라고 주장했으나 그 budget은
-   PR #22051에서 제거되어 존재하지 않는다 — 현재 fusion 호출률 제한은 없다(설계
-   미결정, 집계만 한다는 운영 원칙과 정합). This is a log-retention bound, not a
-   symptom cap — it stops the table from growing without limit over a long
-   server lifetime. *)
-let max_completed_retained = 64
+  let registration_to_yojson registration =
+    `Assoc
+      [ "keeper", `String registration.keeper
+      ; "preset", `String registration.preset
+      ; ( "topology"
+        , `String (Fusion_types.fusion_topology_to_string registration.topology) )
+      ]
+  ;;
 
-let create ?path () : t = { runs = Atomic.make []; path }
+  let registration_of_yojson json =
+    let ( let* ) = Result.bind in
+    let* fields = Run_registry_core.Json.object_fields json in
+    (* [exact_fields] 라 topology 없는 예전 레코드는 여기서 Error 가 되고 replay 가
+       그 줄만 스킵한다(경고 1줄). 레거시 폴백을 두지 않는 이유는 registry 가 캐시성
+       데이터이기 때문이다 — running 은 재시작으로 이미 무효고 완료분은 Latest 64
+       보존이다. 폴백을 두면 "위상 미상" 이라는 새 상태를 UI 까지 끌고 가야 한다. *)
+    let* () =
+      Run_registry_core.Json.exact_fields
+        ~required:[ "keeper"; "preset"; "topology" ]
+        fields
+    in
+    let* keeper = Run_registry_core.Json.string_field "keeper" fields in
+    let* preset = Run_registry_core.Json.string_field "preset" fields in
+    let* topology_wire = Run_registry_core.Json.string_field "topology" fields in
+    match Fusion_types.fusion_topology_of_string topology_wire with
+    | None -> Error (Printf.sprintf "unknown fusion topology %S" topology_wire)
+    | Some topology -> Ok { keeper; preset; topology }
+  ;;
 
-let is_running (r : run) =
-  match r.status with
-  | Running -> true
-  | Completed _ -> false
+  let completion_to_yojson = function
+    | Succeeded -> `Assoc [ "outcome", `String "succeeded" ]
+    | Failed { reason; code } ->
+      `Assoc
+        [ "outcome", `String "failed"
+        ; "reason", `String reason
+        ; "code", `String code
+        ]
+  ;;
+
+  let completion_of_yojson json =
+    let ( let* ) = Result.bind in
+    let* fields = Run_registry_core.Json.object_fields json in
+    let* label = Run_registry_core.Json.string_field "outcome" fields in
+    match label with
+    | "succeeded" ->
+      let* () =
+        Run_registry_core.Json.exact_fields ~required:[ "outcome" ] fields
+      in
+      Ok Succeeded
+    | "failed" ->
+      let* () =
+        Run_registry_core.Json.exact_fields
+          ~required:[ "outcome"; "reason"; "code" ]
+          fields
+      in
+      let* reason = Run_registry_core.Json.string_field "reason" fields in
+      let* code = Run_registry_core.Json.string_field "code" fields in
+      Ok (Failed { reason; code })
+    | other -> Error (Printf.sprintf "unknown fusion outcome %S" other)
+  ;;
+end
+
+module Store = Run_registry_core.Make (Payload)
+
+type t = Store.t
+
+let storage_filename = "fusion-runs.jsonl"
+let create = Store.create
+let replay = Store.replay
+let max_completed_retained = Store.max_completed_retained
+let cut_replay_log = Store.cut_replay_log
+
+let register_running t ~run_id ~keeper ~preset ~topology ~started_at =
+  Store.register t ~id:run_id ~started_at
+    ~registration:{ Payload.keeper; preset; topology }
 ;;
 
-(* Keep every [Running] run plus the [max_completed_retained] most recent
-   [Completed] runs (newest [started_at] first). *)
-let prune (runs : run list) : run list =
-  let running, completed = List.partition is_running runs in
-  let recent_completed =
-    completed
-    |> List.sort (fun a b -> Float.compare b.started_at a.started_at)
-    |> List.filteri (fun i _ -> i < max_completed_retained)
+let mark_completed t ~run_id ~outcome =
+  match Store.complete t ~id:run_id ~completion:outcome with
+  | `Completed -> ()
+  | `Unknown -> ()
+  | `Persistence_failed failure -> raise (Sys_error failure.detail)
+;;
+
+let run_of_entry (entry : Store.entry) =
+  let status =
+    match entry.status with
+    | Store.Running -> Running
+    | Store.Completed outcome -> Completed outcome
   in
-  running @ recent_completed
+  { run_id = entry.id
+  ; keeper = entry.registration.keeper
+  ; preset = entry.registration.preset
+  ; topology = entry.registration.topology
+  ; started_at = entry.started_at
+  ; status
+  }
 ;;
 
-let rec update (t : t) (f : run list -> run list) =
-  let cur = Atomic.get t.runs in
-  let next = f cur in
-  if not (Atomic.compare_and_set t.runs cur next) then update t f
-;;
+let list_runs t = List.map run_of_entry (Store.list_entries t)
+let get t ~run_id = Option.map run_of_entry (Store.get t ~id:run_id)
 
-let append_event t event =
-  match t.path with
-  | None -> ()
-  | Some path ->
-    (try Fs_compat.append_jsonl path (Fusion_run_registry_event.to_yojson event) with
-     | exn ->
-       Log.Misc.warn
-         "fusion_run_registry: append failed for %s: %s"
-         path
-         (Printexc.to_string exn))
-;;
-
-let register_running t ~run_id ~keeper ~preset ~started_at =
-  append_event
-    t
-    (Fusion_run_registry_event.Register { run_id; keeper; preset; started_at });
-  update t (fun runs ->
-    let run = { run_id; keeper; preset; started_at; status = Running } in
-    (* defensive: a re-registered run_id replaces its prior entry *)
-    let without_dup = List.filter (fun r -> not (String.equal r.run_id run_id)) runs in
-    prune (run :: without_dup))
-;;
-
-let mark_completed (t : t) ~run_id ?failure ?failure_code ~ok () =
-  append_event t
-    (Fusion_run_registry_event.Complete { run_id; ok; failure; failure_code });
-  update t (fun runs ->
-    runs
-    |> List.map (fun r ->
-         if String.equal r.run_id run_id
-         then { r with status = Completed { ok; failure; failure_code } }
-         else r)
-    |> prune)
-;;
-
-let list_runs (t : t) : run list =
-  Atomic.get t.runs |> List.sort (fun a b -> Float.compare b.started_at a.started_at)
-;;
-
-let get (t : t) ~run_id : run option =
-  List.find_opt (fun r -> String.equal r.run_id run_id) (Atomic.get t.runs)
-;;
-
-(* Stable status vocabulary shared by every fusion-run surface (Phase 3 keeper
-   tool, Phase 4 dashboard route, the [fusion_run_status] SSE event). Hand-
-   written rather than [@@deriving] so the on-wire labels stay
-   "running"/"completed"/"failed" regardless of the variant shape — a consumer
-   never reconstructs run state from the variant, only reads these labels. *)
 let status_label = function
   | Running -> "running"
-  | Completed { ok = true; _ } -> "completed"
-  | Completed { ok = false; _ } -> "failed"
+  | Completed Succeeded -> "completed"
+  | Completed (Failed _) -> "failed"
 ;;
 
-(* The single per-run JSON object. The HTTP list endpoint, the SSE delta, and the
-   keeper status tool all serialize a run through here so the field set and the
-   status label never drift between surfaces. *)
-let run_to_yojson (r : run) : Yojson.Safe.t =
+let run_to_yojson run =
   let base =
-    [ ("run_id", `String r.run_id)
-    ; ("keeper", `String r.keeper)
-    ; ("preset", `String r.preset)
-    ; ("started_at", `Float r.started_at)
-    ; ("status", `String (status_label r.status))
+    [ "run_id", `String run.run_id
+    ; "keeper", `String run.keeper
+    ; "preset", `String run.preset
+    ; "topology", `String (Fusion_types.fusion_topology_to_string run.topology)
+    ; "started_at", `Float run.started_at
+    ; "status", `String (status_label run.status)
     ]
   in
-  (* 실패 사유는 additive 필드로만 싣는다 — 기존 소비자(tool/HTTP/SSE/프론트)의
-     필드 집합은 그대로 유지된다. *)
   let failure_fields =
-    match r.status with
-    | Running | Completed { ok = true; _ } -> []
-    | Completed { ok = false; failure; failure_code } ->
-      List.filter_map
-        (fun (k, v) -> Option.map (fun s -> (k, `String s)) v)
-        [ ("error", failure); ("failure_code", failure_code) ]
+    match run.status with
+    | Running | Completed Succeeded -> []
+    | Completed (Failed { reason; code }) ->
+      [ "error", `String reason; "failure_code", `String code ]
   in
   `Assoc (base @ failure_fields)
 ;;
 
-(* Replay helpers — used to hydrate the in-memory table from disk at boot. *)
-let apply_event runs = function
-  | Fusion_run_registry_event.Register { run_id; keeper; preset; started_at } ->
-    let run = { run_id; keeper; preset; started_at; status = Running } in
-    let without_dup = List.filter (fun r -> not (String.equal r.run_id run_id)) runs in
-    run :: without_dup
-  | Fusion_run_registry_event.Complete { run_id; ok; failure; failure_code } ->
-    List.map
-      (fun r ->
-         if String.equal r.run_id run_id
-         then { r with status = Completed { ok; failure; failure_code } }
-         else r)
-      runs
+type global_install_error = Already_installed
+
+module Global = Run_registry_core.Global (struct
+    type nonrec t = t
+
+    let initial = create ()
+  end)
+
+let global = Global.current
+
+let install_global registry =
+  match Global.install registry with
+  | Ok () -> Ok ()
+  | Error Global.Already_installed -> Error Already_installed
 ;;
-
-let drop_replayed_running runs =
-  let running, completed = List.partition is_running runs in
-  (match running with
-   | [] -> ()
-   | stale ->
-     Log.Misc.warn
-       "fusion_run_registry: dropped %d replayed running run(s); worker fibers do not \
-        survive server restart"
-       (List.length stale));
-  completed
-;;
-
-let parse_event_line ~path ~line_no line =
-  match String.trim line with
-  | "" -> Ok None
-  | line ->
-    (match
-       try Ok (Yojson.Safe.from_string line) with
-       | Yojson.Json_error msg -> Error ("invalid JSON: " ^ msg)
-     with
-     | Error msg -> Error msg
-     | Ok json ->
-       (match Fusion_run_registry_event.of_yojson json with
-        | Ok event -> Ok (Some event)
-        | Error msg -> Error msg))
-    |> Result.map_error (fun msg ->
-      Printf.sprintf "%s:%d: %s" path line_no msg)
-;;
-
-let events_of_run (run : run) =
-  let register =
-    Fusion_run_registry_event.Register
-      { run_id = run.run_id
-      ; keeper = run.keeper
-      ; preset = run.preset
-      ; started_at = run.started_at
-      }
-  in
-  match run.status with
-  | Running -> [ register ]
-  | Completed { ok; failure; failure_code } ->
-    [ register
-    ; Fusion_run_registry_event.Complete
-        { run_id = run.run_id; ok; failure; failure_code }
-    ]
-;;
-
-let compact_replay_log path runs =
-  let events =
-    runs
-    |> List.sort (fun a b -> Float.compare a.started_at b.started_at)
-    |> List.concat_map events_of_run
-  in
-  let content =
-    events
-    |> List.map Fusion_run_registry_event.to_jsonl
-    |> String.concat ""
-  in
-  try
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg ->
-      Log.Misc.warn "fusion_run_registry: replay compaction failed for %s: %s" path msg
-  with
-  | exn ->
-    Log.Misc.warn
-      "fusion_run_registry: replay compaction raised for %s: %s"
-      path
-      (Printexc.to_string exn)
-;;
-
-let fold_replay_events path =
-  if not (Fs_compat.file_exists path)
-  then [], [], false
-  else (
-    try
-      let (events, malformed, _line_no), _boundary =
-        Fs_compat.fold_appended_lines
-          ~path
-          ~from:0
-          ~init:([], [], 1)
-          ~f:(fun (events, malformed, line_no) line ->
-            match parse_event_line ~path ~line_no line with
-            | Ok None -> events, malformed, line_no + 1
-            | Ok (Some event) -> event :: events, malformed, line_no + 1
-            | Error msg -> events, msg :: malformed, line_no + 1)
-      in
-      let should_compact =
-        match Fs_compat.file_size path with
-        | Some size when _boundary < size ->
-          Log.Misc.warn
-            "fusion_run_registry: replay left unterminated tail in %s (%d/%d bytes \
-             consumed)"
-            path
-            _boundary
-            size;
-          false
-        | Some _ -> true
-        | None ->
-          Log.Misc.warn "fusion_run_registry: replay stat failed after streaming %s" path;
-          false
-      in
-      List.rev events, List.rev malformed, should_compact
-    with
-    | exn ->
-      Log.Misc.warn
-        "fusion_run_registry: replay stream failed for %s: %s"
-        path
-        (Printexc.to_string exn);
-      [], [], false)
-;;
-
-let replay path : t =
-  let events, malformed, should_compact = fold_replay_events path in
-  (match malformed with
-   | [] -> ()
-   | first :: _ as errors ->
-     Log.Misc.warn
-       "fusion_run_registry: skipped %d malformed replay line(s); first=%s"
-       (List.length errors)
-       first);
-  let runs =
-    List.fold_left apply_event [] events
-    |> drop_replayed_running
-    |> prune
-  in
-  if should_compact then compact_replay_log path runs;
-  { runs = Atomic.make runs; path = Some path }
-;;
-
-(* Process-wide registry the fusion tool/sink write to (server-lifetime). Tests
-   use a fresh [create ()] for state isolation, avoiding a reset backdoor.
-   The backing path is set at server boot via [set_global] after replaying the
-   persisted JSONL. *)
-let global_atomic : t Atomic.t = Atomic.make (create ())
-
-let global () : t = Atomic.get global_atomic
-
-let set_global (t : t) = Atomic.set global_atomic t

@@ -21,12 +21,10 @@ val next_fail_open_runtime_for_turn :
   base_runtime:string ->
   effective_runtime:string ->
   attempted_runtimes:string list ->
-  Agent_sdk.Error.sdk_error ->
+  Agent_core.Error.t ->
   EC.degraded_retry option
 (** Same-turn retries use the generic keeper-assignable rotation catalog plus
     any explicit [fallback_runtime] hint. *)
-
-val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
 
 type degraded_retry_decision =
   | No_degraded_retry
@@ -41,7 +39,7 @@ type 'a degraded_retry_prepare_result =
   | Degraded_retry_setup_failed of {
       retry : EC.degraded_retry;
       reason : string;
-      fail_open_err : Agent_sdk.Error.sdk_error;
+      fail_open_err : Agent_core.Error.t;
     }
 
 type 'a degraded_retry_step =
@@ -49,7 +47,7 @@ type 'a degraded_retry_step =
   | Degraded_retry_step_setup_failed of {
       retry : EC.degraded_retry;
       reason : string;
-      fail_open_err : Agent_sdk.Error.sdk_error;
+      fail_open_err : Agent_core.Error.t;
     }
   | Degraded_retry_step_prepared of {
       retry : EC.degraded_retry;
@@ -61,13 +59,13 @@ val decide_degraded_retry :
   base_runtime:string ->
   effective_runtime:string ->
   attempted_runtimes:string list ->
-  Agent_sdk.Error.sdk_error ->
+  Agent_core.Error.t ->
   degraded_retry_decision
 
 val prepare_degraded_retry_allowed :
   current_runtime_id:string ->
   attempt:int ->
-  err:Agent_sdk.Error.sdk_error ->
+  err:Agent_core.Error.t ->
   retry:EC.degraded_retry ->
   publish_cascade_resolution:
     (runtime_id:string ->
@@ -75,11 +73,11 @@ val prepare_degraded_retry_allowed :
      reason:string ->
      next_runtime:string option ->
      attempt:int ->
-     Agent_sdk.Error.sdk_error ->
+     Agent_core.Error.t ->
      unit) ->
   emit_runtime_selected:(runtime_id:string -> fallback_reason:string -> unit) ->
   emit_runtime_rotation:(from_runtime:string -> to_runtime:string -> reason:string -> unit) ->
-  setup_runtime:(string -> ('a, Agent_sdk.Error.sdk_error) result) ->
+  setup_runtime:(string -> ('a, Agent_core.Error.t) result) ->
   'a degraded_retry_prepare_result
 (** Shared setup path for allowed degraded-runtime retries. The selector must
     provide a non-empty [next_runtime]; an empty target is converted into a
@@ -90,7 +88,7 @@ val plan_degraded_retry_step :
   current_runtime_id:string ->
   attempted_runtimes:string list ->
   attempt:int ->
-  err:Agent_sdk.Error.sdk_error ->
+  err:Agent_core.Error.t ->
   allow_retry:(EC.degraded_retry -> bool) ->
   publish_cascade_resolution:
     (runtime_id:string ->
@@ -98,11 +96,11 @@ val plan_degraded_retry_step :
      reason:string ->
      next_runtime:string option ->
      attempt:int ->
-     Agent_sdk.Error.sdk_error ->
+     Agent_core.Error.t ->
      unit) ->
   emit_runtime_selected:(runtime_id:string -> fallback_reason:string -> unit) ->
   emit_runtime_rotation:(from_runtime:string -> to_runtime:string -> reason:string -> unit) ->
-  setup_runtime:(string -> ('a, Agent_sdk.Error.sdk_error) result) ->
+  setup_runtime:(string -> ('a, Agent_core.Error.t) result) ->
   'a degraded_retry_step
 (** Shared degraded-runtime retry step for unified turns and direct
     no-progress turns. Callers supply their acceptance policy
@@ -115,7 +113,7 @@ val yield_before_direct_no_progress_retry : unit -> unit
     transient-network backoff. *)
 
 val direct_no_progress_retry_reason :
-  Agent_sdk.Error.sdk_error -> EC.degraded_retry_reason option
+  Agent_core.Error.t -> EC.degraded_retry_reason option
 (** Return a direct-message no-progress retry reason for accept rejections that
     are safe to rotate before surfacing an error. *)
 
@@ -123,7 +121,7 @@ val direct_no_progress_retry_decision :
   base_runtime:string ->
   effective_runtime:string ->
   attempted_runtimes:string list ->
-  Agent_sdk.Error.sdk_error ->
+  Agent_core.Error.t ->
   degraded_retry_decision
 (** Retry decision for direct-message no-progress accept rejections. Read-only
     no-progress remains terminal here because it already consumed tool
@@ -136,14 +134,14 @@ val run_direct_no_progress_retry_loop :
   current_turn_phase_elapsed_ms:(float option -> int * int option) ->
   now_s:(unit -> float) ->
   setup_retry_runtime:
-    (string -> (runtime_execution, Agent_sdk.Error.sdk_error) result) ->
+    (string -> (runtime_execution, Agent_core.Error.t) result) ->
   publish_cascade_resolution:
     (runtime_id:string ->
      decision:Keeper_unified_turn_cascade_resolution.cascade_decision_kind ->
      reason:string ->
      next_runtime:string option ->
      attempt:int ->
-     Agent_sdk.Error.sdk_error ->
+     Agent_core.Error.t ->
      unit) ->
   emit_runtime_selected:(runtime_id:string -> fallback_reason:string -> unit) ->
   emit_runtime_rotation:(from_runtime:string -> to_runtime:string -> reason:string -> unit) ->
@@ -151,7 +149,7 @@ val run_direct_no_progress_retry_loop :
     (from_runtime:string ->
      retry:EC.degraded_retry ->
      rotation_attempt:Keeper_execution_receipt.runtime_rotation_attempt ->
-     fail_open_err:Agent_sdk.Error.sdk_error ->
+     fail_open_err:Agent_core.Error.t ->
      unit) ->
   before_retry:(unit -> unit) ->
   run_once:
@@ -162,9 +160,9 @@ val run_direct_no_progress_retry_loop :
      fallback_reason:EC.degraded_retry_reason option ->
      runtime_rotation_attempts:
        Keeper_execution_receipt.runtime_rotation_attempt list ->
-     ('a, Agent_sdk.Error.sdk_error) result) ->
+     ('a, Agent_core.Error.t) result) ->
   unit ->
-  ('a * int, Agent_sdk.Error.sdk_error) result
+  ('a * int, Agent_core.Error.t) result
 (** Execute the direct-message no-progress retry loop with injected side
     effects. The initial provider attempt receives the same typed runtime
     execution record as every retry, so its context budget cannot diverge from
@@ -186,11 +184,11 @@ val merge_turn_event_bus_summary :
   turn_event_bus_summary -> turn_event_bus_summary -> turn_event_bus_summary
 
 val summarize_turn_event_bus :
-  Agent_sdk.Event_bus.event list -> turn_event_bus_summary
+  Agent_core.Event_bus.event list -> turn_event_bus_summary
 
 val turn_event_bus_evidence_detail :
   turn_event_bus_summary -> string
-(** Compact forensic string for observed OAS events around a typed provider
+(** Compact forensic string for observed AGENT_CORE events around a typed provider
     failure. *)
 
 type capacity_refusal =
@@ -205,7 +203,7 @@ type capacity_refusal =
     typed evidence is an HTTP status. Missing measurements are never invented. *)
 
 val capacity_refusal_of_error :
-  Agent_sdk.Error.sdk_error ->
+  Agent_core.Error.t ->
   capacity_refusal option
 (** Project the canonical capacity transition onto the token/byte refusal axes. *)
 
@@ -230,9 +228,9 @@ type capacity_transition =
     typed non-compacting facts; they are never guessed into a capacity limit. *)
 
 val capacity_transition_of_error :
-  Agent_sdk.Error.sdk_error ->
+  Agent_core.Error.t ->
   capacity_transition
-(** Total classifier over typed SDK errors. This function does not inspect
+(** Total classifier over typed agent-core errors. This function does not inspect
     rendered error prose and does not select a provider, model, or failover. *)
 
 val current_keeper_meta :
@@ -241,34 +239,6 @@ val current_keeper_meta :
   keeper_meta
 (** Read the latest meta from the registry, falling back to the given
     [fallback_meta] when the registry entry is missing. *)
-
-type post_turn_resilience_handles = {
-  resilience_audit_store : Shared_audit.Store.t option;
-  resilience_strategy_executor : Resilience.Recovery.strategy_executor option;
-  sync_lifecycle_meta :
-    Keeper_context_runtime.post_turn_lifecycle ->
-    Keeper_context_runtime.post_turn_lifecycle;
-}
-(** Runtime handles for the feature-flagged post-turn resilience wire-in.
-
-    When [MASC_RESILIENCE] is off or the audit store cannot be opened, both
-    handles are [None] and [sync_lifecycle_meta] is identity. Failure strategies
-    record explicit evidence without rewriting Keeper lifecycle; therefore
-    [sync_lifecycle_meta] remains identity when execution is enabled as well. *)
-
-val resilience_audit_dir :
-  config:Workspace.config ->
-  keeper_name:string ->
-  string
-(** Per-keeper audit root for resilience recovery envelopes. *)
-
-val post_turn_resilience_handles :
-  config:Workspace.config ->
-  meta:keeper_meta ->
-  post_turn_resilience_handles
-(** Create per-turn resilience audit/executor handles. The audit store is
-    per keeper to respect [Shared_audit.Store]'s single-writer chain
-    contract. *)
 
 val resolved_max_context_for_turn
   :  meta:keeper_meta

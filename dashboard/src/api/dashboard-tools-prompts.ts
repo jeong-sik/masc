@@ -6,6 +6,7 @@ import { get, post, type AbortableRequestOptions } from './core'
 import { ensureDevToken } from './dev-token'
 import type { TelemetryFreshnessMetadata } from './dashboard-shared'
 import type { DashboardConfigResolution, DashboardRuntimeResolution } from '../types'
+import type { DashboardRuntimeProbeResponse } from './schemas/runtime-probe'
 
 // --- Tool metrics (P4 Phase 4.5) ---
 
@@ -14,7 +15,6 @@ export interface DashboardToolInventoryItem {
   description: string
   category: string
   category_description?: string | null
-  enabled_in_current_mode: boolean
   direct_call_allowed: boolean
   required_permission?: string | null
   doc_refs: string[]
@@ -51,14 +51,15 @@ export interface ToolMetricsResponse extends TelemetryFreshnessMetadata {
   top_20: ToolMetricsTopEntry[]
   never_called_count: number
   tool_distribution?: { total: number; public: number; visible: number; hidden: number } | null
-  dispatch_v2_enabled: boolean
   registered_count: number
 }
 
 export interface DashboardScheduledAutomationFsm {
   state: string
-  active_count: number
-  terminal_count: number
+  /** null when the server reported no count — it sends null for every count
+   *  when the schedule ledger read failed. Never render null as 0. */
+  active_count: number | null
+  terminal_count: number | null
   next_due_at?: string | null
 }
 
@@ -125,6 +126,7 @@ export type DashboardScheduledAutomationDispatchReceipt =
       schedule_id: string
       urgency: string
       post_id: string
+      result_delivery_policy?: 'none' | 'reply_to_origin'
     } & DashboardScheduledAutomationOccurrenceActivation)
   | {
       projection_status: 'unrecognized_detail'
@@ -208,6 +210,8 @@ export interface DashboardScheduledAutomationSignal {
 export interface DashboardScheduledAutomationRequest {
   schedule_id: string
   status: 'scheduled' | 'due' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'expired'
+  /** Alias that makes clear this FSM tracks schedule dispatch, not result delivery. */
+  dispatch_status?: DashboardScheduledAutomationRequest['status']
   source: string
   requested_by?: DashboardScheduledAutomationActor | null
   scheduled_by?: DashboardScheduledAutomationActor | null
@@ -269,18 +273,25 @@ export interface DashboardScheduledAutomationLiveSupportedNonTerminalEvidence {
   matched_schedule_id_limit?: number
 }
 
+/** Served by GET /api/v1/dashboard/scheduled-automation. Counts are nullable
+ *  because the server reports a schedule-ledger read failure as null counts
+ *  plus [schedule_store_read_error], and that distinction has to survive the
+ *  decoder. */
 export interface DashboardScheduledAutomation {
   schema?: string
   source?: string
   generated_at?: string
-  request_count: number
-  request_limit: number
+  schedule_store_known?: boolean
+  schedule_store_read_error?: string | null
+  status?: string
+  request_count: number | null
+  request_limit: number | null
   truncated: boolean
   signal_source?: string
   signal_count?: number
   signal_limit?: number
   signals?: DashboardScheduledAutomationSignal[]
-  counts: Record<string, number>
+  counts: Record<string, number> | null
   payload_support?: DashboardScheduledAutomationPayloadSupport
   warnings?: string[]
   live_supported_non_terminal_evidence?: DashboardScheduledAutomationLiveSupportedNonTerminalEvidence
@@ -290,31 +301,25 @@ export interface DashboardScheduledAutomation {
 
 export type DashboardKeeperWaitingSource =
   | 'event_queue_pending'
-  | 'chat_queue_pending'
-  | 'chat_queue_inflight'
-  | 'chat_queue_recovery_required'
-  | 'chat_queue_persistence_blocked'
+  | 'chat_operation_queued'
+  | 'chat_operation_running'
   | 'hitl_pending'
   | 'external_attention'
   | 'fusion_running'
   | 'schedule_waiting'
-  | 'turn_admission_waiting'
-  | 'turn_admission_shutdown'
+  | 'owner_shutdown'
   | 'operator_pending_confirm'
   | 'read_error'
 
 export const DASHBOARD_KEEPER_WAITING_SOURCE_VALUES = [
   'event_queue_pending',
-  'chat_queue_pending',
-  'chat_queue_inflight',
-  'chat_queue_recovery_required',
-  'chat_queue_persistence_blocked',
+  'chat_operation_queued',
+  'chat_operation_running',
   'hitl_pending',
   'external_attention',
   'fusion_running',
   'schedule_waiting',
-  'turn_admission_waiting',
-  'turn_admission_shutdown',
+  'owner_shutdown',
   'operator_pending_confirm',
   'read_error',
 ] as const satisfies ReadonlyArray<DashboardKeeperWaitingSource>
@@ -345,6 +350,11 @@ export interface DashboardKeeperWaitingRow {
   keeper_name?: string | null
   source: DashboardKeeperWaitingSource
   waiting_on: string
+  /** Operator sentence the server derives from the row's typed fields
+   *  (`server_keeper_waiting_inventory.ml`); the default reading of a row.
+   *  `waiting_on` / `wake_producer` / `next_action` / `detail` are the raw
+   *  vocabulary behind the technical disclosure. */
+  what: string
   wake_producer?: string | null
   since?: number | null
   since_iso?: string | null
@@ -391,8 +401,6 @@ export interface DashboardKeeperWaitingKeeper {
       active_tool_count?: number
     } | null
   } | null
-  /** @deprecated Use source_next_actions; retained while older consumers migrate. */
-  next_action?: string | null
 }
 
 export interface DashboardKeeperWaitingInventory {
@@ -495,7 +503,6 @@ export interface DashboardToolsResponse {
   runtime_resolution?: DashboardRuntimeResolution
   tool_inventory: DashboardToolInventoryResponse
   tool_usage: ToolMetricsResponse
-  scheduled_automation?: DashboardScheduledAutomation
   keeper_waiting_inventory?: DashboardKeeperWaitingInventory
   keeper_background?: DashboardKeeperBackground
 }
@@ -537,132 +544,70 @@ export interface DashboardScheduleRunnerStatus {
   last_error_age_sec?: number | null
 }
 
+export interface DashboardKeeperQueueStorageIntegrity {
+  schema?: string
+  status: string
+  counts_complete: boolean
+  read_error_count: number
+  transition_outbox_count: number
+  operator_action_required: boolean
+}
+
+export interface DashboardKeeperQueueWorkLiveness {
+  schema?: string
+  status: string
+  state: 'idle' | 'backlogged' | 'blocked' | 'stalled' | 'unknown'
+  runnable_backlog_count: number
+  runnable_oldest_age_seconds: number | null
+  stale_after_seconds: number | null
+  operator_action_required: boolean
+}
+
+export interface DashboardKeeperEventQueueHealth {
+  schema?: string
+  status: string
+  operator_action_required: boolean
+  status_reasons: string[]
+  backlog_clean: boolean
+  storage_integrity: DashboardKeeperQueueStorageIntegrity | null
+  work_liveness: DashboardKeeperQueueWorkLiveness | null
+}
+
+export type DashboardFullHealthSnapshotStatus =
+  | 'ready'
+  | 'warming'
+  | 'stale'
+  | 'timeout'
+  | 'error'
+
+export interface DashboardFullHealthSnapshot {
+  status: DashboardFullHealthSnapshotStatus
+  stale_reason: string | null
+  last_good_available: boolean
+  component_timed_out: boolean
+}
+
 export interface DashboardFullHealthResponse {
   health_detail?: string
+  overall_status?: string | null
+  operator_action_required?: boolean | null
+  operator_action_reasons?: string[]
+  full_health_snapshot?: DashboardFullHealthSnapshot | null
   schedule_runner?: DashboardScheduleRunnerStatus | null
+  keeper_event_queue?: DashboardKeeperEventQueueHealth | null
 }
 
-// --- Runtime probe (KV-cache / model load probe) ---
+// --- Runtime provider reachability probe ---
 
-interface DashboardRuntimeProbeLoadedModel {
-  name?: string | null
-  model?: string | null
-  size_vram_bytes?: number | null
-  context_length?: number | null
-  expires_at?: string | null
-}
-
-interface DashboardRuntimeProbeRun {
-  run_index: number
-  http_status?: number | null
-  wall_clock_ms?: number | null
-  total_duration_ms?: number | null
-  load_duration_ms?: number | null
-  prompt_eval_count?: number | null
-  prompt_eval_duration_ms?: number | null
-  prompt_tokens_per_second?: number | null
-  eval_count?: number | null
-  eval_duration_ms?: number | null
-  generation_tokens_per_second?: number | null
-  done?: boolean | null
-  done_reason?: string | null
-  thinking_present?: boolean
-  response_preview?: string | null
-  response_chars?: number | null
-  error?: string | null
-}
-
-interface DashboardRuntimeProbeAssessment {
-  signal?: string | null
-  baseline_run_index?: number | null
-  best_repeat_run_index?: number | null
-  baseline_prompt_eval_duration_ms?: number | null
-  best_repeat_prompt_eval_duration_ms?: number | null
-  prompt_eval_duration_reduction_ratio?: number | null
-  note?: string | null
-  limitation?: string | null
-}
-
-export interface DashboardRuntimeProviderProbe {
-  runtime_id?: string | null
-  provider_id?: string | null
-  provider_display_name?: string | null
-  model_id?: string | null
-  model_api_name?: string | null
-  protocol?: string | null
-  runtime_kind?: string | null
-  transport?: string | null
-  auth_kind?: string | null
-  credential_required?: boolean | null
-  auth_present?: boolean | null
-  status?: string | null
-  reachable?: boolean | null
-  http_status?: number | null
-  latency_ms?: number | null
-  model_count?: number | null
-  content_type?: string | null
-  downloaded_bytes?: number | null
-  endpoint_url?: string | null
-  probe_url?: string | null
-  error?: string | null
-  checked_at?: string | null
-}
-
-export interface DashboardRuntimeProviderProbeSummary {
-  runtimes?: number
-  probed?: number
-  reachable?: number
-  failed?: number
-  skipped?: number
-  default_runtime_id?: string | null
-}
-
-export interface DashboardRuntimeProbePayload {
-  source?: string
-  status?: string | null
-  checked_at?: string | null
-  summary?: DashboardRuntimeProviderProbeSummary | null
-  providers?: DashboardRuntimeProviderProbe[]
-  server_url?: string
-  ps_endpoint?: string
-  generate_endpoint?: string
-  configured_default_model?: string | null
-  requested_model?: string | null
-  effective_model?: string | null
-  probe_runs_requested?: number
-  probe_runs_completed?: number
-  max_tokens?: number
-  keep_alive?: string | null
-  timeout_sec?: number
-  ps_timeout_sec?: number
-  prompt_chars?: number
-  prompt_preview?: string
-  ps_http_status_before?: number | null
-  ps_http_status_after?: number | null
-  loaded_models_before?: DashboardRuntimeProbeLoadedModel[]
-  loaded_models_after?: DashboardRuntimeProbeLoadedModel[]
-  model_loaded_before_probe?: boolean
-  model_loaded_after_probe?: boolean
-  runs?: DashboardRuntimeProbeRun[]
-  kv_cache_assessment?: DashboardRuntimeProbeAssessment | null
-  observations?: string[]
-  errors?: string[]
-  limitations?: string[]
-  probe_ok?: boolean
-}
-
-export interface DashboardRuntimeProbeResponse {
-  generated_at?: string
-  refreshed_at_unix?: number
-  cache_ttl_sec?: number
-  cache_age_sec?: number
-  cache_hit?: boolean
-  // Non-blocking route freshness tag. 'served_stale' / 'warming_up' mean a
-  // background refresh was scheduled and the fresh value arrives on the next
-  // poll — a force=1 ("Live probe") response is not guaranteed to be fresh.
-  refresh_state?: 'fresh' | 'recent' | 'served_stale' | 'warming_up'
-  probe?: DashboardRuntimeProbePayload | null
-}
+export type {
+  DashboardRuntimeProviderProbeStatus,
+  DashboardRuntimeProbeStatus,
+  DashboardRuntimeProbeRefreshState,
+  DashboardRuntimeProviderProbe,
+  DashboardRuntimeProviderProbeSummary,
+  DashboardRuntimeProbePayload,
+  DashboardRuntimeProbeResponse,
+} from './schemas/runtime-probe'
 
 export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
   return get('/api/v1/tool-metrics')
@@ -674,7 +619,9 @@ export async function fetchDashboardRuntimeProbe(
 ): Promise<DashboardRuntimeProbeResponse> {
   const query = force ? '?force=1' : ''
   await ensureDevToken()
-  return get(`/api/v1/dashboard/runtime-probe${query}`, { signal: opts?.signal })
+  const raw = await get<unknown>(`/api/v1/dashboard/runtime-probe${query}`, { signal: opts?.signal })
+  const { parseDashboardRuntimeProbeResponse } = await import('./schemas/runtime-probe')
+  return parseDashboardRuntimeProbeResponse(raw)
 }
 
 export async function fetchDashboardFullHealth(
@@ -768,73 +715,105 @@ export function normalizeFullHealthResponse(
   raw: DashboardFullHealthResponse,
 ): DashboardFullHealthResponse {
   const scheduleRunner = normalizeScheduleRunnerStatus(raw.schedule_runner)
+  const keeperEventQueue = normalizeKeeperEventQueueHealth(raw.keeper_event_queue)
+  const fullHealthSnapshot = normalizeFullHealthSnapshot(raw.full_health_snapshot)
   return {
     ...raw,
+    overall_status: typeof raw.overall_status === 'string' ? raw.overall_status : null,
+    operator_action_required:
+      typeof raw.operator_action_required === 'boolean' ? raw.operator_action_required : null,
+    operator_action_reasons: Array.isArray(raw.operator_action_reasons)
+      ? raw.operator_action_reasons.filter((value): value is string => typeof value === 'string')
+      : [],
+    full_health_snapshot: fullHealthSnapshot,
     ...(scheduleRunner ? { schedule_runner: scheduleRunner } : {}),
+    ...(keeperEventQueue ? { keeper_event_queue: keeperEventQueue } : {}),
+  }
+}
+
+const FULL_HEALTH_SNAPSHOT_STATUSES: ReadonlySet<DashboardFullHealthSnapshotStatus> = new Set([
+  'ready',
+  'warming',
+  'stale',
+  'timeout',
+  'error',
+])
+
+function normalizeFullHealthSnapshot(raw: unknown): DashboardFullHealthSnapshot | null {
+  const record = asRecord(raw)
+  if (!record) return null
+  const status = typeof record.status === 'string' ? record.status : null
+  if (!status || !FULL_HEALTH_SNAPSHOT_STATUSES.has(status as DashboardFullHealthSnapshotStatus)) {
+    return null
+  }
+  const staleReason = record.stale_reason
+  if (
+    !(staleReason === null || typeof staleReason === 'string')
+    || typeof record.last_good_available !== 'boolean'
+    || typeof record.component_timed_out !== 'boolean'
+  ) {
+    return null
+  }
+  return {
+    status: status as DashboardFullHealthSnapshotStatus,
+    stale_reason: staleReason,
+    last_good_available: record.last_good_available,
+    component_timed_out: record.component_timed_out,
+  }
+}
+
+function normalizeKeeperEventQueueHealth(raw: unknown): DashboardKeeperEventQueueHealth | null {
+  const record = asRecord(raw)
+  if (!record) return null
+  const storage = asRecord(record.storage_integrity)
+  const work = asRecord(record.work_liveness)
+  const workState = work?.state
+  const normalizedWorkState: DashboardKeeperQueueWorkLiveness['state'] =
+    workState === 'idle'
+      || workState === 'backlogged'
+      || workState === 'blocked'
+      || workState === 'stalled'
+      ? workState
+      : 'unknown'
+  return {
+    schema: typeof record.schema === 'string' ? record.schema : undefined,
+    status: typeof record.status === 'string' ? record.status : 'unknown',
+    operator_action_required: record.operator_action_required === true,
+    status_reasons: Array.isArray(record.status_reasons)
+      ? record.status_reasons.filter((value): value is string => typeof value === 'string')
+      : [],
+    backlog_clean: record.backlog_clean === true,
+    storage_integrity: storage
+      ? {
+          schema: typeof storage.schema === 'string' ? storage.schema : undefined,
+          status: typeof storage.status === 'string' ? storage.status : 'unknown',
+          counts_complete: storage.counts_complete === true,
+          read_error_count: typeof storage.read_error_count === 'number' ? storage.read_error_count : 0,
+          transition_outbox_count:
+            typeof storage.transition_outbox_count === 'number' ? storage.transition_outbox_count : 0,
+          operator_action_required: storage.operator_action_required === true,
+        }
+      : null,
+    work_liveness: work
+      ? {
+          schema: typeof work.schema === 'string' ? work.schema : undefined,
+          status: typeof work.status === 'string' ? work.status : 'unknown',
+          state: normalizedWorkState,
+          runnable_backlog_count:
+            typeof work.runnable_backlog_count === 'number' ? work.runnable_backlog_count : 0,
+          runnable_oldest_age_seconds:
+            typeof work.runnable_oldest_age_seconds === 'number' ? work.runnable_oldest_age_seconds : null,
+          stale_after_seconds:
+            typeof work.stale_after_seconds === 'number' ? work.stale_after_seconds : null,
+          operator_action_required: work.operator_action_required === true,
+        }
+      : null,
   }
 }
 
 export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promise<DashboardToolsResponse> {
   await ensureDevToken()
   const raw = await get<DashboardToolsResponse>('/api/v1/dashboard/tools', { signal: opts?.signal })
-  const normalizeScheduledAutomation = (
-    rawAutomation: DashboardScheduledAutomation,
-  ): DashboardScheduledAutomation => {
-    const requests =
-      rawAutomation.requests && Array.isArray(rawAutomation.requests) ? rawAutomation.requests : []
-    const counts =
-      rawAutomation.counts
-      && typeof rawAutomation.counts === 'object'
-      && !Array.isArray(rawAutomation.counts)
-        ? rawAutomation.counts
-        : {}
-    const signals =
-      rawAutomation.signals && Array.isArray(rawAutomation.signals) ? rawAutomation.signals : []
-    const warnings =
-      rawAutomation.warnings && Array.isArray(rawAutomation.warnings)
-        ? rawAutomation.warnings.filter(warning => typeof warning === 'string')
-        : []
-    const fsm =
-      rawAutomation.fsm && typeof rawAutomation.fsm === 'object'
-        ? {
-            state:
-              typeof rawAutomation.fsm.state === 'string' && rawAutomation.fsm.state.trim() !== ''
-                ? rawAutomation.fsm.state
-                : 'unknown',
-            active_count:
-              typeof rawAutomation.fsm.active_count === 'number'
-                ? rawAutomation.fsm.active_count
-                : 0,
-            terminal_count:
-              typeof rawAutomation.fsm.terminal_count === 'number'
-                ? rawAutomation.fsm.terminal_count
-                : 0,
-            next_due_at: rawAutomation.fsm.next_due_at,
-          }
-        : {
-            state: 'unknown',
-            active_count: 0,
-            terminal_count: 0,
-            next_due_at: null,
-          }
-    return {
-      ...rawAutomation,
-      request_count:
-        typeof rawAutomation.request_count === 'number'
-          ? rawAutomation.request_count
-          : requests.length,
-      request_limit:
-        typeof rawAutomation.request_limit === 'number'
-          ? rawAutomation.request_limit
-          : requests.length,
-      truncated: typeof rawAutomation.truncated === 'boolean' ? rawAutomation.truncated : false,
-      counts,
-      signals,
-      requests,
-      warnings,
-      fsm,
-    }
-  }
   const normalizedTools = raw.tool_inventory?.tools?.map(t => ({
     ...t,
     category: t.category ?? 'uncategorized',
@@ -848,9 +827,6 @@ export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promi
   const normalizedWaitingInventory = raw.keeper_waiting_inventory
     ? normalizeKeeperWaitingInventory(raw.keeper_waiting_inventory)
     : undefined
-  const normalizedScheduledAutomation = raw.scheduled_automation
-    ? normalizeScheduledAutomation(raw.scheduled_automation)
-    : undefined
   return {
     ...raw,
     tool_inventory: {
@@ -859,9 +835,6 @@ export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promi
     },
     ...(normalizedWaitingInventory
       ? { keeper_waiting_inventory: normalizedWaitingInventory }
-      : {}),
-    ...(normalizedScheduledAutomation
-      ? { scheduled_automation: normalizedScheduledAutomation }
       : {}),
   }
 }
@@ -880,14 +853,13 @@ export async function fetchKeeperWaitingInventory(
 
 // --- Prompts (override management) ---
 
-export type PromptSource = 'override' | 'file' | 'default' | 'missing'
+export type PromptSource = 'override' | 'file' | 'missing'
 
 export interface DashboardPromptItem {
   key: string
   category: string
   description: string
   current: string
-  default: string | null
   effective: string
   file_value: string | null
   override_value: string | null

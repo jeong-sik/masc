@@ -1,6 +1,19 @@
 # MASC Keeper Sandbox
 # Runtime environment for keeper agents executing Bash/Read/Edit tools.
 #
+# Base: masc.opam pins `"ocaml" {= "5.5.0"}`. The previous
+# `ubuntu:24.04` + `opam switch create ocaml-system` combination resolved to
+# the distribution compiler (4.x), so `opam install --deps-only` for this repo
+# could never succeed there. The upstream opam image ships the pinned compiler
+# already built, which also removes a 20-40 minute compiler build from every
+# image rebuild.
+#
+# Dependencies are baked into the image rather than installed at run time:
+# keeper tool dispatch runs each turn in a fresh `docker run --rm` container
+# with `--read-only` rootfs and `--cap-drop=ALL` (see
+# keeper_sandbox_docker.ml `docker_run_argv`), so a keeper cannot install
+# anything at run time. Whatever a keeper needs to build must already be here.
+#
 # Hardening notes:
 # - When docker_hardened is enabled, override at runtime:
 #     MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS=false
@@ -8,42 +21,112 @@
 # - The host docker socket is typically mounted for DinD operations.
 # - Keeper GitHub/SSH credential bundles are projected at /tmp/keeper-creds.
 
-FROM ubuntu:24.04
+FROM ocaml/opam:ubuntu-24.04-ocaml-5.5
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    OPAMROOT=/opt/opam
+USER root
+ENV DEBIAN_FRONTEND=noninteractive
 
+# GitHub CLI ships from its own apt repository. The Ubuntu archive package
+# trails upstream by months, and keepers authenticate and drive PRs through
+# `gh`, so the client is pinned to the vendor channel instead.
 RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+ && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+ && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+ && printf 'deb [arch=%s signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\n' \
+      "$(dpkg --print-architecture)" > /etc/apt/sources.list.d/github-cli.list \
+ && apt-get update \
  && apt-get install -y --no-install-recommends \
       bash \
-      ca-certificates \
       coreutils \
-      curl \
       findutils \
+      g++ \
       gcc \
-      git \
       gh \
+      git \
       jq \
+      less \
       make \
       nodejs \
       npm \
-      ocaml-nox \
-      opam \
       openssh-client \
+      patch \
+      pkg-config \
       python3 \
+      python3-venv \
       ripgrep \
+      rsync \
       tree \
+      unzip \
+      zip \
+      m4 \
+      libev-dev \
+      libgmp-dev \
+      libprotobuf-dev \
+      libsqlite3-dev \
+      libssl-dev \
+      libzstd-dev \
+      protobuf-compiler \
+      zlib1g-dev \
  && rm -rf /var/lib/apt/lists/*
+# The -dev packages above are the depexts opam reports for this dependency set
+# (`opam install --deps-only --depext-only --dry-run`): libgmp-dev,
+# libprotobuf-dev, libsqlite3-dev, libssl-dev, pkg-config, protobuf-compiler.
+# They are installed here rather than by opam because the image build runs as a
+# non-root user at that point and the container has no package manager access
+# at run time.
 
-# Install dune 3.22 via opam.
-# Ubuntu 24.04's ocaml-dune apt package provides dune 3.14 only;
-# the repo dune-project requires (lang dune 3.22).
-RUN opam init --disable-sandboxing --root "$OPAMROOT" --bare -y \
- && opam switch create default ocaml-system --root "$OPAMROOT" -y \
- && opam install --root "$OPAMROOT" -y dune.3.22.0 ppxlib ppx_deriving_yojson ppx_let ppx_deriving bisect_ppx ocaml-protoc-plugin \
- && rm -rf "$OPAMROOT/repo" "$OPAMROOT/.opam-switch/sources"
+# MASC_KEEPER_DOCKER_PLAYGROUND_ROOT defaults to /home/keeper/playground and is
+# supplied as a bind mount. The container runs as the host uid/gid
+# (`--user <uid>:<gid>`), which matches no image account, so the mount point is
+# created up front and left group/other writable.
+RUN mkdir -p /home/keeper/playground && chmod 0777 /home/keeper /home/keeper/playground
 
-ENV PATH="/opt/opam/default/bin:${PATH}"
+USER opam
+
+# Only the package metadata is copied: the dependency set is what belongs in
+# the image, and copying sources would pin the image to one commit of the repo
+# a keeper is about to clone itself.
+#
+# The pins are replayed explicitly. Seven dependencies (mcp_protocol,
+# grpc-direct, grpc-direct-core, ws-direct-core/-eio/-gluten and
+# a bisect_ppx fork) are absent from opam-repository, so `--deps-only` alone
+# fails to solve. opam does not apply the lock file's `pin-depends:` on its own
+# here — see opam-pin-from-lock.sh for what was tried and how each option
+# failed.
+# --chown: COPY writes as root, but this stage runs as `opam`, so the cleanup
+# at the end of the RUN below cannot remove root-owned files.
+COPY --chown=opam:opam masc.opam masc.opam.locked /tmp/masc/
+COPY --chown=opam:opam scripts/opam-pin-from-lock.sh /tmp/opam-pin-from-lock.sh
+# --with-test pulls alcotest / qcheck-* / bisect_ppx, which masc.opam declares
+# under {with-test}. Without it `dune build @check` fails on 258 test stanzas:
+# a keeper that cannot run the suite cannot verify its own change.
+RUN sh /tmp/opam-pin-from-lock.sh /tmp/masc/masc.opam.locked \
+ && opam install --deps-only --with-test --yes /tmp/masc/masc.opam \
+ && opam clean -a -c -s --logs \
+ && rm -rf /tmp/masc /tmp/opam-pin-from-lock.sh
+
+USER root
+
+# Tool dispatch invokes `bash -c`, which reads neither a login profile nor an
+# opam environment, so `eval $(opam env)` never runs. Exporting the switch
+# variables here is what makes the installed packages visible: with only the
+# binaries on PATH, dune runs but every `(libraries yojson ...)` stanza fails
+# with "Library not found" because dune resolves libraries through
+# OPAM_SWITCH_PREFIX.
+#
+# The switch name is fixed by the base image tag above (ocaml-5.5 yields switch
+# "5.5"). The check below fails the build if that stops holding, instead of
+# shipping an image whose dune silently cannot see any library.
+ENV OPAM_SWITCH_PREFIX=/home/opam/.opam/5.5 \
+    OCAML_TOPLEVEL_PATH=/home/opam/.opam/5.5/lib/toplevel \
+    OCAMLTOP_INCLUDE_PATH=/home/opam/.opam/5.5/lib/toplevel \
+    CAML_LD_LIBRARY_PATH=/home/opam/.opam/5.5/lib/stublibs:/home/opam/.opam/5.5/lib/ocaml/stublibs:/home/opam/.opam/5.5/lib/ocaml \
+    PATH=/home/opam/.opam/5.5/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+RUN test -d "${OPAM_SWITCH_PREFIX}/lib/yojson" \
+ || { echo "opam switch prefix drift: ${OPAM_SWITCH_PREFIX} has no lib/yojson" >&2; exit 1; }
 
 VOLUME ["/tmp/keeper-creds"]
 

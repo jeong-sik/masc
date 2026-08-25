@@ -13,12 +13,27 @@ type read_result = {
 }
 
 val fixed_store_dir : masc_root:string -> base_path:string -> source -> string option
-val source_freshness_slo_s : source -> float
+val source_freshness_slo_s : ?keeper_keepalive_interval_s:float -> source -> float
 val source_producer : source -> string
+
 val source_dashboard_surface : source -> string
-val source_durable_store : masc_root:string -> base_path:string -> source -> string
-val source_metadata_fields : base_path:string -> masc_root:string -> source -> (string * Yojson.Safe.t) list
-val replay_retention_json : base_path:string -> masc_root:string -> sources:source list -> Yojson.Safe.t
+(** The route this source is read back through. Producers used to spell the
+    path out where they reported a coverage gap, so the declared surface and
+    the reported one could disagree with nothing comparing them. *)
+val source_metadata_fields :
+  ?keeper_keepalive_interval_s:float ->
+  base_path:string ->
+  masc_root:string ->
+  source ->
+  (string * Yojson.Safe.t) list
+
+val replay_retention_json :
+  ?keeper_keepalive_interval_s:float ->
+  base_path:string ->
+  masc_root:string ->
+  sources:source list ->
+  unit ->
+  Yojson.Safe.t
 
 type store_dir_state =
   | Store_missing

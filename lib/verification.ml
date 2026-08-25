@@ -6,45 +6,35 @@
 
     Design:
     - File-based storage under .masc/verifications/
-    - Criteria-based checking (schema, contains, custom)
+    - Exact operator-authored completion criteria
     - Cross-agent enforcement (worker cannot verify own output)
     - Integration with existing task lifecycle
 *)
 
 open Result.Syntax
 
-(** A verification criterion. One constructor, because one is what is
-    produced: [Verification_protocol.submit_request_spec] builds the list with
-    [List.map (fun s -> Custom s)] over the task's completion contract, and
-    [Completion_authority_agent.completion_contract_of_request] accepts only
-    [Custom].
+type criterion = string
+[@@deriving eq]
 
-    Three more used to sit here — [Schema_match], [Contains] and
-    [Not_contains]. Nothing ever constructed them; their only appearance
-    outside this module was the arm that rejected them with "criteria[i] is not
-    a persisted custom completion contract". Verifying a deliverable by testing
-    whether its text contains a substring was never wired, and the wire tag is
-    kept so the JSON shape does not change. *)
-type criterion = Custom of string  (** Natural-language criterion for a verifier *)
-[@@deriving show, eq]
-
-let criterion_to_yojson = function
-  | Custom s ->
-      `Assoc [("type", `String "custom"); ("description", `String s)]
+let criterion_to_yojson criterion = `String criterion
 
 let criterion_of_yojson = function
-  | `Assoc fields ->
-      (match List.assoc_opt "type" fields with
-       | Some (`String "custom") ->
-           let* description =
-             match List.assoc_opt "description" fields with
-             | Some (`String s) -> Ok s
-             | _ -> Error "custom requires 'description' string field"
-           in
-           Ok (Custom description)
-       | Some (`String t) -> Error (Printf.sprintf "unknown criterion type: %s" t)
-       | _ -> Error "criterion requires 'type' field")
-  | _ -> Error "criterion must be a JSON object"
+  | `String criterion when not (String.equal (String.trim criterion) "") ->
+    Ok criterion
+  | `String _ -> Error "criterion must be a non-empty string"
+  | _ -> Error "criterion must be a string"
+
+(** A stored file the current schema cannot read.
+
+    Kept as a value rather than collapsed into a failure. A request that cannot
+    be parsed says nothing about the requests beside it, so it must not decide
+    their fate: [list_requests] returns these alongside the ones it did read,
+    and the caller reports both. Nothing here is shaped to accept a superseded
+    schema — an unreadable file stays unreadable, it just stops being fatal. *)
+type unreadable_request = {
+  unreadable_path: string;
+  unreadable_detail: string;
+}
 
 (** Verification request *)
 type verification_request = {
@@ -54,6 +44,17 @@ type verification_request = {
   criteria: criterion list;
   worker: string;           (** Agent who produced the output *)
   created_at: float;
+}
+
+(** What one pass over the request directory found.
+
+    Both fields are reported. Returning only [readable] would drop the rest
+    silently; returning an error for the whole scan lets one file decide for
+    every other. The directory being unenumerable is still an error, because
+    then neither list is known. *)
+type request_scan = {
+  readable: verification_request list;
+  unreadable: unreadable_request list;
 }
 
 (** Serialization *)
@@ -135,50 +136,33 @@ let verifications_dir = Workspace_verification_store.verifications_dir
 let request_path base_path req_id =
   Workspace_verification_store.request_path base_path req_id
 
-(* [list_requests] used to walk [verifications/*.json] on every dashboard
-   refresh: one [Safe_ops.list_dir_safe] for the directory followed by
-   [Safe_ops.read_json_eio] per file (the per-file [load_request] in the
-   filter_map below).  Dashboard layers — [Dashboard_verification.proof_compose],
-   [summary_json], [requests_json] — and verification HTTP routes all funnel
-   into this scan.  PR #19015 collapsed two scans into one within the proof
-   compose, but each cache miss still pays N+1 disk reads.
+type verification_directory =
+  | Missing_directory
+  | Present_directory
 
-   This storage-level cache keeps the most-recent parsed list addressed by
-   [(base_path, dir mtime)].  When the directory has not changed since the
-   last scan, the cache returns the previously-parsed list — a single
-   [Unix.stat] syscall — and skips the readdir + per-file open chain.
-
-   Single-entry [Atomic.t] is sufficient because production deployments run
-   a single [base_path] per MASC server instance.  Multi-tenant workloads
-   would alternate cache misses but never serve stale data — the mtime guard
-   detects directory churn from any source (file create/update/delete all
-   bump [st_mtime]).  Write paths below ([save_request]) additionally
-   invalidate the cache explicitly to close the sub-second mtime resolution
-   race on fast filesystems. *)
-type list_requests_cache_entry = {
-  cache_base_path : string;
-  dir_mtime : float;
-  results : verification_request list;
-}
-
-let list_requests_cache : list_requests_cache_entry option Atomic.t =
-  Atomic.make None
-
-let invalidate_list_requests_cache () =
-  Atomic.set list_requests_cache None
-
-let dir_mtime_opt dir =
-  try Some (Unix.stat dir).Unix.st_mtime with
-  | Unix.Unix_error _ | Sys_error _ -> None
+let verification_directory dir =
+  try
+    let (_ : Unix.stats) = Unix.stat dir in
+    Ok Present_directory
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Missing_directory
+  | Eio.Cancel.Cancelled _ as error -> raise error
+  | exn ->
+    Keeper_fd_pressure.note_exception ~site:"verification.list_requests.stat" exn;
+    Error
+      (Printf.sprintf
+         "verification request directory unavailable at %s: %s"
+         dir
+         (Printexc.to_string exn))
 
 let save_request base_path req =
   try
+    let json = request_to_yojson req in
+    let* _validated = request_of_yojson json in
     let dir = verifications_dir base_path in
     Fs_compat.mkdir_p dir;
-    let json = request_to_yojson req in
     let path = request_path base_path req.id in
     let* () = Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) in
-    invalidate_list_requests_cache ();
     Ok req.id
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -197,7 +181,6 @@ let delete_request base_path req_id =
   try
     let path = request_path base_path req_id in
     if Sys.file_exists path then Sys.remove path;
-    invalidate_list_requests_cache ();
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -216,6 +199,12 @@ let load_request base_path req_id =
   else
     Error (Printf.sprintf "Verification %s not found" req_id)
 
+let unreadable_to_yojson { unreadable_path; unreadable_detail } =
+  `Assoc
+    [ ("path", `String unreadable_path);
+      ("detail", `String unreadable_detail);
+    ]
+
 let list_requests_uncached base_path =
   let surface = "verification" in
   let observe_drop ~reason =
@@ -223,67 +212,50 @@ let list_requests_uncached base_path =
       ~labels:[("surface", surface); ("reason", reason)] ()
   in
   let report_drop ~reason ~path ~detail =
+    let reason_wire = Read_drop_reason.to_wire reason in
     Safe_ops.report_persistence_read_drop
-      ~on_drop:(fun () -> observe_drop ~reason)
+      ~on_drop:(fun () -> observe_drop ~reason:reason_wire)
       ~surface
       ~reason
       ~path
       ~detail
   in
   let dir = verifications_dir base_path in
-  let dir_exists =
-    try Sys.file_exists dir with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Keeper_fd_pressure.note_exception ~site:"verification.list_requests.exists" exn;
-      report_drop
-        ~reason:Safe_ops.persistence_read_drop_reason_list_dir_error
-        ~path:dir
-        ~detail:(Printexc.to_string exn);
-      false
-  in
-  if not dir_exists then
-    []
-  else
-    match Safe_ops.list_dir_safe dir with
-    | Error detail ->
-      report_drop ~reason:Safe_ops.persistence_read_drop_reason_list_dir_error ~path:dir ~detail;
-      []
-    | Ok files ->
-      files
-      |> List.filter (fun f -> Filename.check_suffix f ".json")
-      |> List.filter_map (fun f ->
-          let id = Filename.chop_suffix f ".json" in
-          Safe_ops.result_to_option_logged
-            ~on_drop:(fun () ->
-              observe_drop ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error)
-            ~surface
-            ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
-            ~path:(Filename.concat dir f)
-            (load_request base_path id))
+  match Safe_ops.list_dir_safe dir with
+  | Error detail ->
+    report_drop ~reason:Read_drop_reason.List_dir_error ~path:dir ~detail;
+    Error (Printf.sprintf "verification request directory unreadable: %s" detail)
+  | Ok files ->
+    let files = List.filter (fun f -> Filename.check_suffix f ".json") files in
+    let rec load readable unreadable = function
+      | [] -> Ok { readable = List.rev readable; unreadable = List.rev unreadable }
+      | file :: rest ->
+        let id = Filename.chop_suffix file ".json" in
+        (match load_request base_path id with
+         | Ok request -> load (request :: readable) unreadable rest
+         | Error detail ->
+           let path = Filename.concat dir file in
+           report_drop
+             ~reason:Read_drop_reason.Entry_load_error
+             ~path
+             ~detail;
+           load
+             readable
+             ({ unreadable_path = path; unreadable_detail = detail } :: unreadable)
+             rest)
+    in
+    load [] [] files
 
-(* Public entry: check the mtime-keyed cache before the readdir + N+1 open
-   chain.  A cache hit returns the previously-parsed list after a single
-   [Unix.stat] syscall; cache miss falls through to [list_requests_uncached]
-   and refreshes the entry.  See [list_requests_cache] above for the design. *)
+let empty_scan = { readable = []; unreadable = [] }
+
+(* Public entry: read the current directory and every current-schema request.
+   Content identity is not inferred from filesystem timestamps. *)
 let list_requests base_path =
   let dir = verifications_dir base_path in
-  match dir_mtime_opt dir with
-  | None ->
-      (* Directory missing or stat failed — defer to the uncached path so
-         the existing directory check and explicit error reporting run. *)
-      list_requests_uncached base_path
-  | Some mtime -> (
-      match Atomic.get list_requests_cache with
-      | Some entry
-        when String.equal entry.cache_base_path base_path
-             && Float.equal entry.dir_mtime mtime ->
-          entry.results
-      | _ ->
-          let results = list_requests_uncached base_path in
-          Atomic.set list_requests_cache
-            (Some { cache_base_path = base_path; dir_mtime = mtime; results });
-          results)
+  match verification_directory dir with
+  | Error detail -> Error detail
+  | Ok Missing_directory -> Ok empty_scan
+  | Ok Present_directory -> list_requests_uncached base_path
 
 (** High-level API *)
 

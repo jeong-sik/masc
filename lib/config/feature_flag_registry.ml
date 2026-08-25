@@ -34,18 +34,18 @@ type flag = {
     with the same default value. *)
 let all_flags : flag list = [
   (* ── Transport ────────────────────────────────────────────── *)
+  (* Off by default since 2026-08-25. The server's own transport-health
+     projection reported subscribers 0 and events_delivered 0 for the whole
+     time it has been listening, while websocket carries primary_path and SSE
+     carries the broadcasts. Set MASC_GRPC_ENABLED=1 to bring it back; nothing
+     else moved, so that is the whole of the undo. *)
   { env_name = "MASC_GRPC_ENABLED";
-    description = "gRPC transport server";
-    default = true; category = "transport";
+    description = "gRPC transport server (off by default; nothing has subscribed)";
+    default = false; category = "transport";
     lifecycle = Active };
 
   { env_name = "MASC_WS_ENABLED";
     description = "WebSocket transport server";
-    default = true; category = "transport";
-    lifecycle = Active };
-
-  { env_name = "MASC_WEBRTC_ENABLED";
-    description = "WebRTC DataChannel transport (opt-out via =0)";
     default = true; category = "transport";
     lifecycle = Active };
 
@@ -60,9 +60,6 @@ let all_flags : flag list = [
     lifecycle = Active };
 
   (* ── Tool Surface ─────────────────────────────────────────── *)
-  (* RFC-0084 host-config-cleanup-J — MASC_DISPATCH_V2 entry removed.
-     The Hashtbl dispatch path is the only path. *)
-
   { env_name = Env_config_core.parse_warn_env_key;
     description = "Escalate malformed env parses to Config_error";
     default = false; category = "tool";
@@ -100,7 +97,7 @@ let all_flags : flag list = [
     lifecycle = Active };
 
   { env_name = "MASC_KEEPER_WIRE_CAPTURE";
-    description = "Default-off diagnostic MASC-to-OAS request/response wire capture";
+    description = "Default-off diagnostic MASC-to-AGENT_CORE request/response wire capture";
     default = false; category = "keeper";
     lifecycle = Experimental };
 
@@ -147,6 +144,9 @@ let find_opt env_name =
 let runtime_value flag =
   get_bool ~default:flag.default flag.env_name
 
+let runtime_value_strict flag =
+  get_bool_strict ~default:flag.default flag.env_name
+
 (** Source: "env", "boot_override", or "default". *)
 let runtime_source flag =
   Config_boot_overrides.source flag.env_name
@@ -156,6 +156,14 @@ let runtime_source flag =
 let get_bool env_name =
   match find_opt env_name with
   | Some flag -> runtime_value flag
+  | None ->
+      raise
+        (Config_error
+           (Printf.sprintf "feature flag %s is not registered" env_name))
+
+let get_bool_strict env_name =
+  match find_opt env_name with
+  | Some flag -> runtime_value_strict flag
   | None ->
       raise
         (Config_error

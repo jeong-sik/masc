@@ -6,24 +6,24 @@
     @since 0.122.0 *)
 
 (** Detect transient network errors eligible for retry.
-    Uses structured [Agent_sdk.Error.sdk_error] pattern matching. *)
-val is_transient_network_error : Agent_sdk.Error.sdk_error -> bool
+    Uses structured [Agent_core.Error.t] pattern matching. *)
+val is_transient_network_error : Agent_core.Error.t -> bool
 
 (** [true] when a typed internal runner exception preserves a transient
     transport failure raised inside {!Keeper_turn_driver.runtime_runner_execute_site}.
     Legacy internal exception envelopes without [transport_error_kind] are
     diagnostic-only and are not parsed heuristically. *)
-val is_transient_internal_runner_error : Agent_sdk.Error.sdk_error -> bool
+val is_transient_internal_runner_error : Agent_core.Error.t -> bool
 
 (** Detect request body parse errors from either the provider or the API
     (e.g. Ollama yyjson rejecting a malformed request body or the API
     rejecting invalid JSON). The typed distinction is used for observability
     and runtime rotation; it never exempts a committed mutation from explicit
     partial-commit handling. *)
-val is_server_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
+val is_server_rejected_parse_error : Agent_core.Error.t -> bool
 
 (** [true] for provider-side request-body parse rejections. *)
-val is_provider_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
+val is_provider_rejected_parse_error : Agent_core.Error.t -> bool
 
 (** [true] only for an accepted provider response whose wire contract failed:
     the [Provider_wire_error] kinds (malformed, unknown event, incomplete,
@@ -33,60 +33,60 @@ val is_provider_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
     Used to select the diagnostic log suffix in the turn-failure path.
     Candidate rotation eligibility and consecutive-failure accounting are
     determined by {!Keeper_runtime_attempt}, not by this predicate. *)
-val is_provider_wire_error : Agent_sdk.Error.sdk_error -> bool
+val is_provider_wire_error : Agent_core.Error.t -> bool
 
 (** [true] for model/API-side request-body parse rejections reported as
     [InvalidRequest]. *)
-val is_model_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
+val is_model_rejected_parse_error : Agent_core.Error.t -> bool
 
 (** [true] for API-side 400 rejections ([Api (InvalidRequest _)]): the
     provider refused the request body itself (malformed payload, orphan
     tool-call residues), so same-turn retry is futile. Rendered provider text
     carries no recovery authority. *)
-val is_invalid_request_error : Agent_sdk.Error.sdk_error -> bool
+val is_invalid_request_error : Agent_core.Error.t -> bool
 
 (** [true] for a 0-byte empty completion: the provider ended the turn with a
     modeled, non-overflow stop_reason but returned no content.  Only the two
-    typed OAS shapes for this condition match (see the .ml); the unmodeled
-    stop_reason shape that OAS intentionally reports as non-retryable
+    typed AGENT_CORE shapes for this condition match (see the .ml); the unmodeled
+    stop_reason shape that AGENT_CORE intentionally reports as non-retryable
     [InvalidRequest] does not. *)
-val is_empty_completion_error : Agent_sdk.Error.sdk_error -> bool
+val is_empty_completion_error : Agent_core.Error.t -> bool
 
 (** [true] when the keeper should preserve liveness and skip consecutive
-    failure counting, even if same-turn retry is still disabled. Typed OAS
+    failure counting, even if same-turn retry is still disabled. Typed AGENT_CORE
     turn-limit and execution-time observations are included defensively so a
     boundary regression cannot promote them into Keeper lifecycle authority. *)
-val is_auto_recoverable_turn_error : Agent_sdk.Error.sdk_error -> bool
+val is_auto_recoverable_turn_error : Agent_core.Error.t -> bool
 
 (** [true] for accept-rejected responses tagged by the built-in keeper
     progress contract as no usable text/tool/non-terminal progress. *)
-val is_accept_no_usable_progress_error : Agent_sdk.Error.sdk_error -> bool
+val is_accept_no_usable_progress_error : Agent_core.Error.t -> bool
 
 (** [true] when the turn runner should record the immediate
     ["keeper cycle FAILED"] line as WARN instead of ERROR. This controls log
     severity only; it grants no retry, admission, pause, or blocker authority. *)
-val should_warn_keeper_cycle_failed : Agent_sdk.Error.sdk_error -> bool
+val should_warn_keeper_cycle_failed : Agent_core.Error.t -> bool
 
 (** [true] for a typed API context overflow ([ContextOverflow]) only.  An
     [Error.Agent (UnrecognizedStopReason _)] is not classified here even when it
     carries an overflow token: see the note in the implementation. *)
-val is_context_overflow : Agent_sdk.Error.sdk_error -> bool
+val is_context_overflow : Agent_core.Error.t -> bool
 
-(** [true] when the error is an OAS [InputRequired] — the agent paused
+(** [true] when the error is an AGENT_CORE [InputRequired] — the agent paused
     to request human input.  Not a failure; a special stop condition. *)
-val is_input_required_error : Agent_sdk.Error.sdk_error -> bool
+val is_input_required_error : Agent_core.Error.t -> bool
 
-(** Extract the [InputRequired] payload from an [sdk_error], if any.
+(** Extract the [InputRequired] payload from an [core_error], if any.
     Typed companion to {!is_input_required_error} — callers that need
     the [input_required] record (request_id, question, …) avoid a
     separate pattern match plus [assert false] when the predicate
     has already filtered for the constructor. *)
 val extract_input_required
-  :  Agent_sdk.Error.sdk_error
-  -> Agent_sdk.Error.input_required option
+  :  Agent_core.Error.t
+  -> Agent_core.Error.input_required option
 
 (** [true] when an error represents terminal runtime exhaustion. *)
-val is_runtime_exhausted_error : Agent_sdk.Error.sdk_error -> bool
+val is_runtime_exhausted_error : Agent_core.Error.t -> bool
 
 (** Classification of why a degraded retry is being attempted. Closed
     set; producer-side is [keeper_error_classify]. Wire form is the
@@ -106,24 +106,12 @@ type degraded_retry_reason =
 
 val degraded_retry_reason_to_string : degraded_retry_reason -> string
 
-val normalized_runtime_id : catalog_names:string list -> string -> string
-(** Normalize a runtime name for rotation matching.
-    All runtime names are plain provider:model strings. *)
-
 type degraded_retry =
   { next_runtime : string
   ; fallback_reason : degraded_retry_reason
   }
 
-(** Opportunistically fail open to a broader runtime when the current
-    effective runtime is temporarily unavailable (for example cooldown /
-    phase-buffer bootstrap fallback). *)
-val fallback_runtime_for_unavailable_profile :
-  base_runtime:string ->
-  effective_runtime:string ->
-  string option
-
-(** Classifies an SDK error into a fallback reason label when the runtime
+(** Classifies an agent-core error into a fallback reason label when the runtime
     failure is recoverable via [fallback_runtime] or [degraded_rotation].
     Returns [None] for terminal errors (e.g. generic accept-rejected,
     ambiguous post-commit) that should not trigger same-turn escalation. A
@@ -142,14 +130,7 @@ val fallback_runtime_for_unavailable_profile :
     [degraded_retry_after_recoverable_error] or
     [degraded_rotation_after_recoverable_error]. *)
 val recoverable_runtime_failure_reason :
-  Agent_sdk.Error.sdk_error -> degraded_retry_reason option
-
-(** Returns the one-shot degraded retry lane for recoverable whole-runtime
-    failures. Already-degraded lanes do not broaden further. *)
-val degraded_retry_after_recoverable_error :
-  effective_runtime:string ->
-  Agent_sdk.Error.sdk_error ->
-  degraded_retry option
+  Agent_core.Error.t -> degraded_retry_reason option
 
 (** Returns the next untried runtime in the same-turn recovery group for a
     whole-runtime failure. Uses the default degraded rotation candidate set
@@ -174,14 +155,14 @@ val degraded_rotation_after_recoverable_error :
   base_runtime:string ->
   effective_runtime:string ->
   attempted_runtimes:string list ->
-  Agent_sdk.Error.sdk_error ->
+  Agent_core.Error.t ->
   degraded_retry option
 
-val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool
+val is_provider_timeout_error : Agent_core.Error.t -> bool
 (** True when [err] is a typed provider-timeout class failure. Live caller:
     [keeper_unified_turn.ml] degraded-retry classification. *)
 
-val is_receipt_lost_error : Agent_sdk.Error.sdk_error -> bool
+val is_receipt_lost_error : Agent_core.Error.t -> bool
 (** True when [err] indicates a receipt-lost failure (the provider
     confirmed completion but the response payload was lost in transit).
     Live caller: [keeper_unified_turn.ml] failure-reason classification

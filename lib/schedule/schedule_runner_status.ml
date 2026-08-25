@@ -168,10 +168,6 @@ let record_tick_crash ~started_at ~finished_at error =
 
 let snapshot () = with_lock (fun () -> !state)
 
-let option_float_json = function
-  | None -> `Null
-  | Some value -> `Float value
-;;
 
 let option_int_counts_json = function
   | None -> `Null
@@ -244,7 +240,7 @@ let snapshot_to_yojson ?now ?stale_after_sec snapshot =
   let age_field name timestamp =
     match now with
     | None -> name, `Null
-    | Some now -> name, option_float_json (option_age ~now timestamp)
+    | Some now -> name, Json_util.float_opt_to_json (option_age ~now timestamp)
   in
   `Assoc
     [ "schema", `String "masc.schedule.runner_status.v1"
@@ -254,15 +250,15 @@ let snapshot_to_yojson ?now ?stale_after_sec snapshot =
     ; "success_count", `Int snapshot.success_count
     ; "failure_count", `Int snapshot.failure_count
     ; "crash_count", `Int snapshot.crash_count
-    ; "last_tick_started_at", option_float_json snapshot.last_tick_started_at
-    ; "last_tick_finished_at", option_float_json snapshot.last_tick_finished_at
-    ; "last_success_at", option_float_json snapshot.last_success_at
-    ; "last_error_at", option_float_json snapshot.last_error_at
+    ; "last_tick_started_at", Json_util.float_opt_to_json snapshot.last_tick_started_at
+    ; "last_tick_finished_at", Json_util.float_opt_to_json snapshot.last_tick_finished_at
+    ; "last_success_at", Json_util.float_opt_to_json snapshot.last_success_at
+    ; "last_error_at", Json_util.float_opt_to_json snapshot.last_error_at
     ; ( "last_error"
       , match snapshot.last_error with
         | None -> `Null
         | Some error -> `String error )
-    ; "last_duration_sec", option_float_json snapshot.last_duration_sec
+    ; "last_duration_sec", Json_util.float_opt_to_json snapshot.last_duration_sec
     ; "last_counts", option_int_counts_json snapshot.last_counts
     ; ( "stale_after_sec"
       , match stale_after_sec with

@@ -25,6 +25,12 @@ jobs:
           - os: ubuntu-latest
             arch: linux-x64
             may-fail: false
+          # aarch64 Linux 타깃. Raspberry Pi 5 / arm64 SBC 에 바이너리를 그대로
+          # 내려받아 실행하기 위한 것으로, 기기에서 직접 빌드하지 않는다.
+          # ubuntu-24.04-arm 은 public repo 에서 4vCPU 로 제공된다.
+          - os: ubuntu-24.04-arm
+            arch: linux-arm64
+            may-fail: false
 
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.may-fail }}
@@ -45,16 +51,12 @@ jobs:
       - name: Setup OCaml
         uses: ./.github/actions/setup-ocaml-toolchain
 
-      - name: Pin private dependencies
-        run: |
-          chmod +x scripts/opam-pin-external-deps.sh
-          scripts/opam-pin-external-deps.sh --with-compact-protocol
-
-
       - name: Install native dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install libpq openssl@3
+          # ripgrep 은 evidence 번들의 Grep 도구 시나리오가 요구한다.
+          # Linux 는 별도 스텝에서 apt 로 넣는다.
+          brew install flock gmp libpq openssl@3 zstd ripgrep
 
           libpq_prefix="$(brew --prefix libpq)"
           openssl_prefix="$(brew --prefix openssl@3)"
@@ -72,14 +74,29 @@ jobs:
             echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
           } >> "$GITHUB_ENV"
 
+      - name: Pin private dependencies
+        run: |
+          chmod +x scripts/opam-pin-external-deps.sh
+          # --with-bisect 는 --with-test 와 짝이다. bisect_ppx 의 opam 제약이
+          # ocaml < 5.0 이라, pin 없이 테스트 의존성을 풀면 solver 가
+          # OCaml 5.5.0 아래에서 해를 못 찾는다.
+          scripts/opam-pin-external-deps.sh --with-compact-protocol --with-bisect
+
       - name: Refresh apt index
         if: runner.os == 'Linux'
         run: bash scripts/ci/apt-refresh.sh
 
+      # release-evidence.sh 의 도구 표면 시나리오가 Grep 도구를 통해 rg 를
+      # 호출한다. ci.yml 은 잡마다 설치하지만 release.yml 에는 없었고,
+      # 러너 이미지에 rg 가 없으면 "rg executable not found" 로 번들이 깨진다.
+      - name: Install ripgrep
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y -qq ripgrep
+
       - name: Install dependencies
         run: |
           for attempt in 1 2 3; do
-            opam install . --deps-only -y && break
+            opam install . --deps-only --with-test -y && break
             if [ "$attempt" -eq 3 ]; then
               echo "opam install failed after ${attempt} attempts"
               exit 1
@@ -93,6 +110,9 @@ jobs:
           opam exec -- dune build --release \
             bin/main_eio.exe \
             bin/deployment_preflight_helper.exe
+
+      - name: Source quickstart onboarding smoke
+        run: scripts/quickstart-smoke.sh
 
       - name: Release binary smoke (boot + README drift)
         run: |
@@ -144,7 +164,7 @@ jobs:
 
       - name: Verify advertised release assets
         run: |
-          for arch in macos-arm64 linux-x64; do
+          for arch in macos-arm64 linux-x64 linux-arm64; do
             for asset in \
               "masc-$arch" \
               "masc-deployment-preflight-helper-$arch" \
@@ -168,7 +188,7 @@ jobs:
             | sort -z \
             | xargs -0 sha256sum > SHA256SUMS
           (cd ../config && sha256sum runtime.toml) >> SHA256SUMS
-          (cd ../config && sha256sum oas-models-overlay.toml) >> SHA256SUMS
+          (cd ../config && sha256sum agent-core-models-overlay.toml) >> SHA256SUMS
           # Team preset files, keyed by their repo-relative path so
           # `install.sh --team` can verify each seeded file (presets/<name>/...).
           (cd .. && for m in presets/*/manifest.txt; do

@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Tool_agent_timeline - Unified agent activity timeline.
 
     Collects events from multiple data sources and merges them into
@@ -224,12 +207,15 @@ let task_events (config : Workspace.config) ~agent_name :
 (* Collect broadcast messages from agent *)
 let message_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
+  (* [limit] counts THIS agent's messages. Reading a global window and
+     filtering afterwards made it count everyone's, so a busy fleet crowded
+     this agent out of its own timeline before the filter ran. *)
   let messages =
-    Workspace.get_messages_raw config ~since_seq:0 ~limit
+    Workspace.get_messages_matching config ~since_seq:0 ~limit
+      ~keep:(fun (m : Masc_domain.message) ->
+        identity_matches ~agent_name m.from_agent)
   in
   messages
-  |> List.filter (fun (m : Masc_domain.message) ->
-         identity_matches ~agent_name m.from_agent)
   |> List.filter_map (fun (m : Masc_domain.message) ->
          match parse_iso_timestamp m.timestamp with
          | Some ts ->
@@ -254,19 +240,6 @@ let message_events (config : Workspace.config) ~agent_name ~limit :
    exactly the recent events the tool contracts to surface (period.to = now)
    whenever a keeper exceeds the per-source cap. Mirrors [build_timeline]'s
    tail-keep on the merged list, and preserves the source's ascending order. *)
-let take_last n xs =
-  if n <= 0 then []
-  else
-    let len = List.length xs in
-    if len <= n then xs
-    else
-      let rec skip k = function
-        | [] -> []
-        | _ :: rest when k > 0 -> skip (k - 1) rest
-        | remaining -> remaining
-      in
-      skip (len - n) xs
-
 (* Collect tool call events from Activity Graph. Two producers feed this
    source: the external MCP dispatch path ([tool.called]) and the keeper
    in-turn execution hook ([keeper.tool_exec], #23540 — without it a keeper
@@ -274,13 +247,9 @@ let take_last n xs =
    tool_name/success/duration_ms payload contract projected below. *)
 let tool_call_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
-  (* `list_events` limits globally before we filter by actor, so fetch a
-     wider bounded window to reduce the chance that busy-workspace activity from
-     other agents crowds out this agent's tool events. *)
-  let scan_limit =
-    let expanded = if limit <= 0 then 0 else limit * 10 in
-    min 1000 (max limit expanded)
-  in
+  (* [keep] runs inside the read, so [limit] counts THIS agent's tool events.
+     The multiplied window this replaced could only reduce the chance that a
+     busy workspace crowded them out, never remove it. *)
   let all_events =
     Activity_graph.list_events config
       ~kinds:
@@ -288,11 +257,11 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
            Activity_graph.tool_execution_event_kind_to_string
            Activity_graph.all_tool_execution_event_kinds)
       ~after_seq:0
-      ~limit:scan_limit
+      ~limit
+      ~keep:(activity_event_matches_agent ~agent_name)
       ()
   in
   all_events
-  |> List.filter (activity_event_matches_agent ~agent_name)
   |> List.filter_map (fun (e : Activity_graph.event) ->
        let ts = Float.of_int e.ts_ms /. 1000.0 in
        let tool_name =
@@ -308,7 +277,7 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
        let error_str = Safe_ops.json_string_opt "error" e.payload in
        let source_str = Safe_ops.json_string_opt "source" e.payload in
        let keeper_turn_id = Safe_ops.json_int_opt "keeper_turn_id" e.payload in
-       let oas_turn = Safe_ops.json_int_opt "oas_turn" e.payload in
+       let agent_core_turn = Safe_ops.json_int_opt "agent_core_turn" e.payload in
        let task_id = Safe_ops.json_string_opt "task_id" e.payload in
        let provider = Safe_ops.json_string_opt "provider" e.payload in
        let typed_outcome = Yojson.Safe.Util.member "typed_outcome" e.payload in
@@ -326,32 +295,27 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
                  ("error", Json_util.string_opt_to_json error_str);
                  ("source", Json_util.string_opt_to_json source_str);
                  ("keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id);
-                 ("oas_turn", Json_util.int_opt_to_json oas_turn);
+                 ("agent_core_turn", Json_util.int_opt_to_json agent_core_turn);
                  ("task_id", Json_util.string_opt_to_json task_id);
                  ("provider", Json_util.string_opt_to_json provider);
                  ("typed_outcome", typed_outcome);
                ];
          })
-  |> take_last limit
 
 (* Collect turn-completed events from Activity Graph *)
 let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
-  let scan_limit =
-    let expanded = if limit <= 0 then 0 else limit * 10 in
-    min 1000 (max limit expanded)
-  in
   let all_events =
     Activity_graph.list_events config
-      ~kinds:["keeper.turn_completed"] ~after_seq:0 ~limit:scan_limit ()
+      ~kinds:["keeper.turn_completed"] ~after_seq:0 ~limit
+      ~keep:(activity_event_matches_agent ~agent_name) ()
   in
   all_events
-  |> List.filter (activity_event_matches_agent ~agent_name)
   |> List.filter_map (fun (e : Activity_graph.event) ->
        let ts = Float.of_int e.ts_ms /. 1000.0 in
        (* Pure-shape JSON access via Safe_ops: no exception swallow, no
           performative [Cancelled] re-raise. Behavior parity with the prior
-          [try ... |> to_X with _ -> default] pattern on missing/wrong-typed
+          [try ... |> to_X with _ -> default] pattern (* cancel-guard-ok: prose *) on missing/wrong-typed
           fields; widens acceptance to string-coerced numerics per the
           codebase convention documented in Safe_ops.json_*_opt. *)
        let keeper_name = Safe_ops.json_string ~default:"unknown" "keeper_name" e.payload in
@@ -421,14 +385,13 @@ let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
                  ("tools_used", `List (List.map (fun s -> `String s) tools_used));
                ] @ optional_fields);
          })
-  |> take_last limit
 
 (* Neutral projection of one keeper chat line for the timeline. The chat
    store (.masc/keeper_chat/<keeper>.jsonl) lives in the keeper subsystem,
    and this tool module must not reference it (RFC-0194 §3 tool -> keeper
-   boundary). So a keeper-aware caller reads the store, drops tool rows and
-   rows without a timestamp, and passes the surviving user/assistant lines
-   in as [chat_line] values via [build_timeline]'s [load_chat]. This module
+   boundary). So a keeper-aware caller reads the store, drops tool rows, and
+   passes the surviving user/assistant lines in as [chat_line] values via
+   [build_timeline]'s [load_chat]. This module
    only maps that neutral data into timeline events. *)
 type chat_line = {
   cl_role : string;  (** "user" | "assistant" *)
@@ -480,13 +443,13 @@ let build_timeline ?(load_chat = fun ~agent_name:_ -> ([] : chat_line list))
       if include_tasks then task_events config ~agent_name
       else []
     in
-    let msg_evts = message_events config ~agent_name ~limit:200 in
+    let msg_evts = message_events config ~agent_name ~limit in
     let tool_evts =
-      if include_tool_calls then tool_call_events config ~agent_name ~limit:200
+      if include_tool_calls then tool_call_events config ~agent_name ~limit
       else []
     in
     let turn_evts =
-      turn_completed_events config ~agent_name ~limit:200
+      turn_completed_events config ~agent_name ~limit
     in
     let chat_evts = chat_events (load_chat ~agent_name) in
     agent_evts @ task_evts @ msg_evts @ tool_evts @ turn_evts
@@ -693,10 +656,11 @@ let handle_agent_timeline ?load_chat ~tool_name ~start_time (ctx : context) args
   =
   let agent_name = get_string args "agent_name" "" in
   if String.length agent_name = 0 then
-    Tool_result.make_err
+    error_result_typed
       ~tool_name
-      ~class_:Tool_result.Workflow_rejection
       ~start_time
+      ~failure_class:Tool_result.Workflow_rejection
+      ~code:Validation_error
       "agent_name is required"
   else
     let since_hours = get_float args "since_hours" 24.0 in

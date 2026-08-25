@@ -77,11 +77,14 @@ describe('createCodeDocumentStore', () => {
       content: 'export {}',
     })
 
-    await store.loadRegions('a.ts', { keeper: 'sangsu', repoId: 'masc' })
+    await store.loadRegions('a.ts', {
+      keeper: 'sangsu',
+      codebase: 'github.com_jeong-sik_masc',
+    })
 
     expect(fetchIdeRegionsMock).toHaveBeenCalledWith('a.ts', {
       keeper: 'sangsu',
-      repoId: 'masc',
+      codebase: 'github.com_jeong-sik_masc',
     })
   })
 

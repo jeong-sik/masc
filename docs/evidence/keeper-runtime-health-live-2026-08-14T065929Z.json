@@ -1,0 +1,119 @@
+{
+  "schema": "masc.keeper_feature_matrix.live_refresh.v1",
+  "captured_at": "2026-08-14T06:59:29Z",
+  "source_truth": {
+    "upstream_main_at_capture": "ff6a8fa6af",
+    "live_runtime_checkout": "ff6a8fa6af",
+    "live_commit_source": "runtime_repo_head",
+    "embedded_binary_commit_known": false,
+    "not_yet_in_live_checkout": [],
+    "note": "runtime checkout equals upstream main at capture; the running binary was started 2026-08-14T05:59:52Z and the health commit is runtime_repo_head metadata, not an embedded build SHA"
+  },
+  "live": {
+    "version": "0.22.0",
+    "started_at": "2026-08-14T05:59:52Z",
+    "uptime_seconds_at_health_capture": 3576,
+    "overall_status": "degraded",
+    "operator_action_reasons": [
+      "keeper_reaction_ledger:reaction_ledger_pending_stimulus",
+      "keeper_reaction_ledger:durable_event_queue_stale",
+      "keeper_event_queue:runnable_backlog",
+      "keeper_event_queue:runnable_backlog_stale"
+    ],
+    "effective_base_path": "/Users/dancer/me",
+    "effective_masc_root": "/Users/dancer/me/.masc",
+    "fleet": {
+      "running": 8,
+      "failing": 0,
+      "recovering": 0,
+      "executable": 8,
+      "bootable": 8,
+      "paused": 19,
+      "operator_action_required": false
+    },
+    "queue": {
+      "status": "degraded",
+      "total_count": 5,
+      "runnable_backlog_count": 5,
+      "runnable_oldest_age_seconds": 2343.182614803314,
+      "runnable_by_keeper": [
+        {
+          "keeper_name": "rondo",
+          "pending_count": 2,
+          "total_count": 2,
+          "oldest_age_seconds": 568.2204608917236
+        },
+        {
+          "keeper_name": "sangsu",
+          "pending_count": 3,
+          "total_count": 3,
+          "oldest_age_seconds": 2343.182614803314
+        }
+      ],
+      "stale_after_seconds": 600.0,
+      "read_error_count": 0
+    },
+    "earlier_backlog_sample_0648Z": {
+      "kidsnote_pending": 1,
+      "kidsnote_oldest_age_seconds": 1925.09,
+      "sangsu_pending": 2,
+      "sangsu_oldest_age_seconds": 2046.86,
+      "note": "kidsnote consumed its event between 06:48Z and this capture; sangsu backlog grew from 2 to 3 and its oldest event kept aging past the 600s stale threshold"
+    }
+  },
+  "browser": {
+    "base_url": "http://127.0.0.1:8935/dashboard?agent=dashboard-admin&token=15250bd23835fcdbe24e14f47709f958e5d65152d83784ae645532a16140f228",
+    "build_label": "v0.22.0 · ff6a8fa6af",
+    "overview_running": "실행 중 KEEPER\n8 / 27",
+    "monitor_url": "http://127.0.0.1:8935/dashboard?agent=dashboard-admin#monitoring?section=agents",
+    "monitor": {
+      "interesting": [
+        "정상 rows 7 · 전이 rows 0 · 일시정지 rows 19 · 중지 rows 2",
+        "주의 필요 · 1",
+        "정상 · 28",
+        "canary-runtime-failover-20260814-0730",
+        "Revision 2531, unclaimed 62, claimable 60, 8 fibers. 세계 상태 동일 — claimable 60개 task 모두 기존 infra 블로커(task-213 등)에 의해 blocked 상태이며 신규 라우팅 가능한 …"
+      ],
+      "hasLegacyRuntimeCount": false,
+      "hasLegacyAttention": false
+    },
+    "console_errors": [
+      "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    ],
+    "page_errors": [],
+    "screenshots": {
+      "overview": {
+        "path": "/Users/dancer/me/reports/masc-live-dashboard-overview-20260814T065724Z.png",
+        "sha256": "86df696c06fec61caa61faba52eca7c7580d06a2d5f7154612d964194176fd04"
+      },
+      "monitor": {
+        "path": "/Users/dancer/me/reports/masc-live-dashboard-monitor-20260814T065724Z.png",
+        "sha256": "0066a004eb28a32afaa1d41cdccad4347fd4048242515b43a94bb1f1b8a5ca44"
+      }
+    },
+    "captured_at": "2026-08-14T06:57:24Z",
+    "interaction": "Overview to visible Monitor control to Keeper Fleet",
+    "verdict": {
+      "dashboard_repair_28694": "typed band chips (정상 7 · 일시정지 19 · 중지 2 · 주의 1) rendered; legacy 런타임 가능 N wording absent",
+      "deployment": "build label v0.22.0 · ff6a8fa6af equals upstream main",
+      "taskmaster": "주의 필요 band, context pressure 82% (105.4K/128.0K)",
+      "observed_auth_failure": "Client WS disconnected + Auth error badge + Stored Bearer token banner + two 401 console errors — reproduced only when the page URL carried the pre-restart admin token from MASC_DASHBOARD_URL (zshenv), which the 05:59:52Z restart rotated out",
+      "attribution": "stale environment token, not a clean-path product defect; fail-closed behavior worked as designed"
+    },
+    "clean_context_probe": {
+      "captured_at": "2026-08-14T07:11Z",
+      "url": "http://127.0.0.1:8935/dashboard",
+      "websocket": "ws://127.0.0.1:8935/ws opened and stayed connected",
+      "console_401_count": 0,
+      "auth_banner": false,
+      "localStorage_token": false
+    }
+  },
+  "limits": [
+    "The health commit is runtime_repo_head metadata, not an embedded binary build SHA.",
+    "Queue and fleet numbers are point-in-time snapshots, not duration verdicts.",
+    "The three 주의 counts (top chip 41, Overview card 19, Monitor band 1) have different unexplained denominators; recorded as observation only.",
+    "The 06:57Z WS/auth failure is attributed to a stale MASC_DASHBOARD_URL token in the user environment; the 07:11Z clean-context probe opened the WebSocket without errors."
+  ]
+}

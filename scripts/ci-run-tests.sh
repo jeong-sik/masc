@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# CI test observer. The workflow job owns the outer execution boundary.
-# This script reports progress and diagnostics, but never terminates or retries
-# the command it observes.
+# CI test observer. Commands run exactly once. Callers may set a finite
+# CI_TEST_TIMEOUT_SEC; expiry captures the active process tree, terminates it,
+# and fails closed with exit 124. No retry path exists.
 
 mktemp_ci_log() {
   local tmp_dir="${TMPDIR:-/tmp}"
@@ -24,7 +24,20 @@ else
 fi
 
 HEARTBEAT_SEC="${CI_TEST_HEARTBEAT_SEC:-30}"
-START_EPOCH="$(date +%s)"
+TEST_TIMEOUT_SEC="${CI_TEST_TIMEOUT_SEC:-0}"
+TEST_TIMEOUT_GRACE_SEC="${CI_TEST_TIMEOUT_GRACE_SEC:-5}"
+
+# Injectable clock: CI_TEST_NOW_CMD overrides the epoch source so tests can
+# drive the deadline with a fake clock instead of the wall clock.
+now_epoch() {
+  if [[ -n "${CI_TEST_NOW_CMD:-}" ]]; then
+    eval "${CI_TEST_NOW_CMD}"
+  else
+    date +%s
+  fi
+}
+
+START_EPOCH="$(now_epoch)"
 TEST_LOG_FILE="${CI_TEST_LOG_FILE:-$(mktemp_ci_log)}"
 DUNE_SOURCEROOT="${DUNE_SOURCEROOT:-$(pwd -P)}"
 export DUNE_SOURCEROOT
@@ -41,6 +54,11 @@ DISK_PRESSURE_REPORTED=0
 if [[ -z "${HEARTBEAT_SEC}" || "${HEARTBEAT_SEC}" -le 0 ]]; then
   HEARTBEAT_SEC=30
 fi
+if [[ ! "${TEST_TIMEOUT_SEC}" =~ ^[0-9]+$ ]]; then
+  echo "[ci-run] ERROR: CI_TEST_TIMEOUT_SEC must be a non-negative integer" >&2
+  exit 2
+fi
+TEST_TIMEOUT_SEC="$((10#${TEST_TIMEOUT_SEC}))"
 if [[ -z "${CI_TEST_DISK_MIN_AVAILABLE_MB}" || "${CI_TEST_DISK_MIN_AVAILABLE_MB}" -lt 0 ]]; then
   CI_TEST_DISK_MIN_AVAILABLE_MB=1024
 fi
@@ -54,7 +72,7 @@ iso_now() {
 
 elapsed_sec() {
   local now
-  now="$(date +%s)"
+  now="$(now_epoch)"
   echo $((now - START_EPOCH))
 }
 
@@ -194,9 +212,67 @@ kill_active_cmd_tree() {
   while IFS= read -r pid; do
     [[ -n "${pid}" ]] && tree_pids+=("${pid}")
   done < <(active_cmd_tree_pids)
+  signal_pid_snapshot "${signal}" "${tree_pids[@]}"
+  signal_active_cmd_group "${signal}"
+}
+
+signal_pid_snapshot() {
+  local signal="$1"
+  shift
+  local tree_pids=("$@")
   local idx=0
   for (( idx=${#tree_pids[@]}-1; idx>=0; idx-- )); do
     kill "-${signal}" "${tree_pids[idx]}" >/dev/null 2>&1 || true
+  done
+}
+
+pid_snapshot_has_survivor() {
+  local pid=""
+  for pid in "$@"; do
+    if kill -0 "${pid}" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+signal_active_cmd_group() {
+  local signal="$1"
+  if [[ "${ACTIVE_CMD_PGID:-}" =~ ^[0-9]+$ ]]; then
+    kill "-${signal}" -- "-${ACTIVE_CMD_PGID}" >/dev/null 2>&1 || true
+  fi
+}
+
+active_cmd_group_has_survivor() {
+  [[ "${ACTIVE_CMD_PGID:-}" =~ ^[0-9]+$ ]] \
+    && kill -0 -- "-${ACTIVE_CMD_PGID}" >/dev/null 2>&1
+}
+
+active_snapshot_or_group_has_survivor() {
+  pid_snapshot_has_survivor "$@" || active_cmd_group_has_survivor
+}
+
+terminate_active_cmd_tree() {
+  local tree_pids=()
+  local pid=""
+  while IFS= read -r pid; do
+    [[ -n "${pid}" ]] && tree_pids+=("${pid}")
+  done < <(active_cmd_tree_pids)
+  local deadline=$(( $(now_epoch) + TEST_TIMEOUT_GRACE_SEC ))
+  signal_pid_snapshot TERM "${tree_pids[@]}"
+  signal_active_cmd_group TERM
+  while active_snapshot_or_group_has_survivor "${tree_pids[@]}" \
+        && [[ "$(now_epoch)" -lt "${deadline}" ]]; do
+    sleep 1
+  done
+  # Descendants can be reparented when the root shell handles TERM and exits.
+  # Recheck the saved tree, not only the root PID, before escalating.
+  signal_pid_snapshot KILL "${tree_pids[@]}"
+  signal_active_cmd_group KILL
+  local kill_deadline=$(( $(now_epoch) + 2 ))
+  while active_snapshot_or_group_has_survivor "${tree_pids[@]}" \
+        && [[ "$(now_epoch)" -lt "${kill_deadline}" ]]; do
+    sleep 0.1
   done
 }
 
@@ -216,29 +292,49 @@ trap 'cleanup; exit 143' TERM
 run_observed() {
   local cmd="$1"
   local status=0
-  local next_disk_check=$(( $(date +%s) + CI_TEST_DISK_CHECK_SEC ))
+  local command_start_epoch
+  command_start_epoch="$(now_epoch)"
+  local timed_out=0
+  local next_disk_check=$(( $(now_epoch) + CI_TEST_DISK_CHECK_SEC ))
 
   tail -n 0 -f "${TEST_LOG_FILE}" &
   ACTIVE_LOG_TAIL_PID=$!
+  # A dedicated process group lets timeout cleanup reach descendants even if
+  # the root shell exits and reparents them, or process-tree inspection fails.
+  set -m
   bash -l -s <<< "${cmd}" >> "${TEST_LOG_FILE}" 2>&1 &
   ACTIVE_CMD_PID=$!
-  ACTIVE_CMD_PGID="$(ps -o pgid= -p "${ACTIVE_CMD_PID}" 2>/dev/null | tr -d '[:space:]')"
+  ACTIVE_CMD_PGID="${ACTIVE_CMD_PID}"
+  set +m
 
   while kill -0 "${ACTIVE_CMD_PID}" >/dev/null 2>&1; do
-    local now_epoch
-    now_epoch="$(date +%s)"
-    if [[ "${now_epoch}" -ge "${next_disk_check}" ]]; then
-      next_disk_check=$((now_epoch + CI_TEST_DISK_CHECK_SEC))
+    local now_val
+    now_val="$(now_epoch)"
+    if [[ "${now_val}" -ge "${next_disk_check}" ]]; then
+      next_disk_check=$((now_val + CI_TEST_DISK_CHECK_SEC))
       if [[ "${DISK_PRESSURE_REPORTED}" -eq 0 ]] && disk_pressure_detected; then
         DISK_PRESSURE_REPORTED=1
         log_line "[ci-observe] disk_pressure $(disk_pressure_detail)"
         diag_dump "disk_pressure_observed"
       fi
     fi
+    if [[ "${TEST_TIMEOUT_SEC}" -gt 0 ]] \
+       && [[ $((now_val - command_start_epoch)) -ge "${TEST_TIMEOUT_SEC}" ]]; then
+      log_line "[ci-observe] timeout timeout_sec=${TEST_TIMEOUT_SEC}"
+      diag_dump "timeout_${TEST_TIMEOUT_SEC}s"
+      terminate_active_cmd_tree
+      timed_out=1
+      break
+    fi
     sleep 1
   done
 
-  wait "${ACTIVE_CMD_PID}" || status=$?
+  if [[ "${timed_out}" -eq 1 ]]; then
+    wait "${ACTIVE_CMD_PID}" >/dev/null 2>&1 || true
+    status=124
+  else
+    wait "${ACTIVE_CMD_PID}" || status=$?
+  fi
   kill "${ACTIVE_LOG_TAIL_PID}" >/dev/null 2>&1 || true
   wait "${ACTIVE_LOG_TAIL_PID}" >/dev/null 2>&1 || true
   ACTIVE_CMD_PID=""
@@ -249,6 +345,7 @@ run_observed() {
 
 log_line "[ci-run] command: ${TEST_CMD}"
 log_line "[ci-run] heartbeat_sec=${HEARTBEAT_SEC}"
+log_line "[ci-run] timeout_sec=${TEST_TIMEOUT_SEC}"
 log_line "[ci-run] disk_min_available_mb=${CI_TEST_DISK_MIN_AVAILABLE_MB} disk_check_sec=${CI_TEST_DISK_CHECK_SEC}"
 log_line "[ci-run] started_at=$(iso_now)"
 log_line "[ci-run] log_file=${TEST_LOG_FILE}"
@@ -260,8 +357,12 @@ hb_pid=$!
 status=0
 run_observed "$(effective_test_cmd)" || status=$?
 if [[ "${status}" -ne 0 ]]; then
-  diag_dump "nonzero_exit_${status}"
-  log_line "[ci-run] ERROR: test command failed with exit=${status}"
+  if [[ "${status}" -eq 124 ]]; then
+    log_line "[ci-run] ERROR: test command timed out after ${TEST_TIMEOUT_SEC}s"
+  else
+    diag_dump "nonzero_exit_${status}"
+    log_line "[ci-run] ERROR: test command failed with exit=${status}"
+  fi
   exit "${status}"
 fi
 

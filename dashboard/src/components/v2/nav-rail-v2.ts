@@ -18,9 +18,11 @@ type NavEntry = SurfaceEntry | 'sep'
 
 // Prototype SURFACES order/labels/icons, mapped to live TabIds.
 //   prototype work→workspace, monitor→monitoring, ide→code; rest 1:1.
-// Groups mirror the 2026-07 standalone export's rail DOM: 개요 |
-// Keepers · Registry · Monitor | 작업 · 승인 · 예약 | 보드 · Fusion · 로그 |
-// IDE · 커넥터 (설정 stays in the footer slot below the spacer).
+// Groups mirror the keeper-v2 prototype rail (shell.jsx, #29046): 개요 |
+// Keepers · Registry · Monitor | 작업 · Gate · 예약 | 보드 · Fusion · 로그 |
+// IDE · 커넥터 | 명령 · Lab (설정 stays in the footer slot below the spacer).
+// The 2026-07 standalone export predates the prototype's 명령/Lab group; the
+// in-repo prototype is the design SSOT the parity probes measure.
 const SURFACES = [
   { tab: 'overview', label: '개요', icon: 'grid' },
   'sep',
@@ -29,7 +31,7 @@ const SURFACES = [
   { tab: 'monitoring', label: 'Monitor', icon: 'monitor' },
   'sep',
   { tab: 'workspace', label: '작업', icon: 'target' },
-  { tab: 'approvals', label: '승인', icon: 'shield' },
+  { tab: 'approvals', label: 'Gate', icon: 'shield' },
   { tab: 'schedule', label: '예약', icon: 'clock' },
   'sep',
   { tab: 'board', label: '보드', icon: 'board' },
@@ -38,6 +40,9 @@ const SURFACES = [
   'sep',
   { tab: 'code', label: 'IDE', icon: 'code' },
   { tab: 'connectors', label: '커넥터', icon: 'plug' },
+  'sep',
+  { tab: 'command', label: '명령', icon: 'term' },
+  { tab: 'lab', label: 'Lab', icon: 'flask' },
 ] as const satisfies readonly NavEntry[]
 
 export interface NavBadges {
@@ -57,8 +62,6 @@ const SURFACE_LABEL = Object.fromEntries(
 
 const NON_RAIL_SURFACE_LABEL: Readonly<Record<NonRailTabId, string>> = {
   cockpit: 'MASC Cockpit',
-  command: 'Command',
-  lab: 'Lab',
   settings: '설정',
 }
 
@@ -73,8 +76,9 @@ export function surfaceLabel(tab: TabId): string {
 
 // On phones the rail collapses to a bottom tab bar: the operator's daily loop
 // (home / agents / work / approvals) gets first-class tabs; the rest live behind
-// a 더보기 sheet so no tab drops below the 44px hit target (prototype shell.jsx).
-const MOBILE_PRIMARY: readonly TabId[] = ['overview', 'workspace', 'keepers', 'approvals']
+// a 더보기 sheet so no tab drops below the 44px hit target (prototype shell.jsx
+// MOBILE_PRIMARY order: overview · keepers · work · approvals).
+const MOBILE_PRIMARY: readonly TabId[] = ['overview', 'keepers', 'workspace', 'approvals']
 const SURFACE_ENTRIES: readonly SurfaceEntry[] = SURFACES.filter((entry): entry is RailEntry => entry !== 'sep')
 
 export function NavRailV2({ badges, mobile = false }: { badges?: NavBadges; mobile?: boolean }) {

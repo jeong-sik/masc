@@ -1,6 +1,6 @@
 open Masc
 
-module EO = Agent_sdk.Exact_output
+module EO = Agent_core.Exact_output
 
 type server_behavior =
   | Reply of string

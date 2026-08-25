@@ -30,6 +30,17 @@ val register_counter : name:string -> help:string -> ?labels:label list -> unit 
     histograms have no honest pre-first-sample value and stay lazy. *)
 val declare_counter : string -> string
 
+(** [declare_gauge name] registers the unlabeled zero cell for a gauge whose
+    process-start value is truthfully zero, and returns [name]. *)
+val declare_gauge : string -> string
+
+(** Canonical companion counter name emitted by {!observe_histogram}. *)
+val histogram_count_name : string -> string
+
+(** [declare_histogram name] registers both the zero-valued sum and its
+    canonical zero-valued observation counter, then returns [name]. *)
+val declare_histogram : string -> string
+
 val register_gauge : name:string -> help:string -> ?labels:label list -> unit -> unit
 val register_histogram : name:string -> help:string -> ?labels:label list -> unit -> unit
 val inc_counter : string -> ?labels:label list -> ?delta:float -> unit -> unit
@@ -52,6 +63,3 @@ val metric_total : string -> float
     the lock. *)
 val snapshot : unit -> metric list
 
-(** The most recent EDEADLK backtrace captured by the store lock. [None]
-    until the first re-entrant lock failure. *)
-val last_deadlock_backtrace_for_test : unit -> string option

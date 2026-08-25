@@ -3,21 +3,9 @@
 include Otel_metric_names
 
 
-(* #10097: a provider cannot carry keeper-bound runtime MCP tools that
-   need request-scoped auth headers.  Every time
-   oas_worker_exec_transport strips such a tool, this counter
-   increments with the [provider] and [tool] labels so dashboards can
-   track WHICH provider strips WHICH tools and at WHAT rate.  Paired
-   with a once-per-session WARN log ([fingerprint]-deduplicated) so
-   the operator sees the structural fact exactly once while the
-   counter carries the frequency signal.
-
-   RFC-0058 §2.4 / Phase 5.4 big-bang rename: the old
-   the legacy `masc_<provider>_mcp_tool_omission_total` time series is RETIRED.
-   Operators must point Grafana queries to the new
-   `masc_provider_mcp_tool_omission_total{provider="<provider_slug>"}`
-   series.  No dual-emit alias — the rename is intentional to keep
-   provider identity out of the metric name. *)
+(* A provider cannot carry Keeper-bound runtime MCP tools that require
+   request-scoped authorization headers. This counter records each omitted
+   tool with the runtime and tool labels. *)
 
 (* #9520: durable coverage-gap records must also have an alertable
    Otel_metric_store surface.  The labels deliberately avoid raw paths and
@@ -42,26 +30,23 @@ let metric_tool_assignment_telemetry_failures =
 let metric_telemetry_observe_failures = Otel_metric_store_core.declare_counter "masc_telemetry_observe_failures_total"
 
 (* #10358 (c1): observability for the silent [Effect.Unhandled] catch-all
-   in [lib/workspace.ml] [observe_agent_lifecycle] / [observe_task_transition_event] /
-   [Keeper_accountability.record_task_transition].  Those three try/with
-   sites swallow the exception that fires when the lifecycle hook is
-   dispatched from a non-Eio context (test path, bootstrap, certain HTTP
-   handlers).  Before this counter, the entire Audit_log + Telemetry pair
-   silently disappeared, exactly matching the 5-tag → 2-tag attrition
-   ledger pattern (only [tool_called] survives because it is wired on a
-   different fiber-bearing path).  Labels: [event_family] (one of
-   [agent_lifecycle] / [task_transition] / [accountability]) and
-   [event_kind] (the lifecycle/transition variant). [event_kind] for
-   [agent_lifecycle] is one of [join] / [rejoin] / [leave] (3 values).
-   [event_kind] for both [task_transition] and [accountability] uses the
-   8 [Masc_domain.task_action_to_string] values: [claim] / [start] /
-   [done] / [cancel] / [release] / [submit_for_verification] / [approve]
-   / [reject]. Both vocabularies are bounded so series cardinality is at
-   most 19 (3 + 8 + 8). *)
+   in [lib/workspace.ml] [observe_agent_lifecycle] /
+   [observe_task_transition_event].  Those try/with sites swallow the
+   exception that fires when the lifecycle hook is dispatched from a
+   non-Eio context (test path, bootstrap, certain HTTP handlers).  Before
+   this counter, the entire Audit_log + Telemetry pair silently
+   disappeared.  Labels: [event_family] (one of [agent_lifecycle] /
+   [task_transition]) and [event_kind] (the lifecycle/transition
+   variant). [event_kind] for [agent_lifecycle] is one of [join] /
+   [rejoin] / [leave] (3 values). [event_kind] for [task_transition]
+   uses the 8 [Masc_domain.task_action_to_string] values: [claim] /
+   [start] / [done] / [cancel] / [release] / [submit_for_verification]
+   / [approve] / [reject]. Both vocabularies are bounded so series
+   cardinality is at most 11 (3 + 8). *)
 let metric_workspace_telemetry_drop = Otel_metric_store_core.declare_counter "masc_workspace_telemetry_drop_total"
 
-(* Per-caller observation of genuine inner OAS timeout exceptions. *)
-include Otel_oas_metric_names
+(* Per-caller observation of genuine inner AGENT_CORE timeout exceptions. *)
+include Otel_agent_core_metric_names
 
 
 include Otel_runtime_metric_names
@@ -93,10 +78,7 @@ include Otel_policy_metric_names
    [Keeper_supervisor.sweep_and_recover] will respawn the fiber. Without
    the strike→crash promotion these failures repeated silently for
    hours (4h+ zombie keepers observed 2026-04-26). *)
-let metric_oas_bus_capacity = "masc_oas_bus_capacity"
-let metric_oas_bridge_unmigrated_payload_kind =
-  Otel_metric_store_core.declare_counter "masc_oas_bridge_unmigrated_payload_kind_total"
-;;
+let metric_agent_core_bus_capacity = "masc_agent_core_bus_capacity"
 
 let metric_process_timeout = Otel_metric_store_core.declare_counter "masc_process_timeout_total"
 let metric_build_identity_probe_failures = Otel_metric_store_core.declare_counter "masc_build_identity_probe_failures_total"
@@ -115,11 +97,11 @@ include Otel_identity_metric_names
    (a single-character typo creates a new invisible metric). *)
 
 (* Centralized metric constants for inline string replacement.
-   keeper_hooks_oas.ml, keeper_guards.ml, keeper_execution_receipt.ml,
+   keeper_hooks_agent_core.ml, keeper_guards.ml, keeper_execution_receipt.ml,
    keeper_tool_execute_runtime.ml, keeper_sandbox_docker.ml,
    keeper_heartbeat_snapshot.ml,
    keeper_unified_metrics.ml. *)
-(* OAS after-turn response metadata was accepted but omitted its response model
+(* AGENT_CORE after-turn response metadata was accepted but omitted its response model
    field. This is provider response-shape telemetry, not keeper policy
    telemetry. *)
 let metric_after_turn_response_model_empty = Otel_metric_store_core.declare_counter "masc_after_turn_response_model_empty_total"
@@ -140,3 +122,12 @@ let metric_telemetry_cache_rescans =
   Otel_metric_store_core.declare_counter "masc_telemetry_summary_cache_rescans_total"
 let metric_telemetry_scanned_bytes =
   Otel_metric_store_core.declare_counter "masc_telemetry_snapshot_scanned_bytes_total"
+
+(* The dashboard cache patcher drops a lifecycle event it cannot decode and
+   bumps this so `rate(...)` sees the encoding regression. It was emitted with
+   a bare string at both of its call sites, which is the one thing
+   [declare_counter] exists to prevent: an unfired counter that is never
+   registered is absent from /metrics rather than 0, so an alert written
+   against it cannot be validated until the failure it watches for happens. *)
+let metric_keeper_lifecycle_malformed =
+  Otel_metric_store_core.declare_counter "masc_keeper_lifecycle_malformed_total"

@@ -7,7 +7,7 @@ type t =
 
 val classify :
   usage_reported:bool ->
-  usage:Agent_sdk.Types.api_usage ->
+  usage:Agent_core.Types.api_usage ->
   t
 
 val to_string : t -> string

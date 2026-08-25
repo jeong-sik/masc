@@ -1,35 +1,9 @@
 (** Keeper Runtime — keeper reconciliation and supervisor runtime.
 
-    Reconciles persisted keeper meta against on-disk personality / TOML and
+    Reconciles persisted keeper meta against on-disk Keeper configuration and
     materialises boot-time defaults; supplies the supervisor sweep used by the
     server-owned Keeper bootstrap. Runtime-only mutable state stays behind
     keeper runtime/execution modules. *)
-
-(** {1 Personality compare helpers}
-
-    [String.trim]-based compare alone produced a re-sync storm
-    (see #10479): the persisted text exceeds
-    [Keeper_config.prompt_render_max_bytes] for some keepers, which the
-    read path normalises while [target_will] keeps the raw value.  These
-    helpers normalise both sides before diffing so reconcile is
-    idempotent. *)
-
-val personality_text_equal : string -> string -> bool
-(** [true] when two personality fields compare equal under the same
-    byte-cap normalisation the prompt renderer uses. *)
-
-val personality_field_diff_entry :
-  string -> string -> string -> string option
-(** [(field, current, target)] -> human-readable diff line, or [None]
-    when the field already compares equal. *)
-
-val personality_diff_summary : (string * string * string) list -> string list
-(** Render a list of [(field, current, target)] tuples as diff lines. *)
-
-val personality_field_diff_summary :
-  field:string -> current:string -> target:string -> string option
-(** Single-field convenience wrapper around
-    [personality_field_diff_entry]. *)
 
 (** {1 Boot meta materialization} *)
 
@@ -126,15 +100,6 @@ val canonicalize_if_keeper : Workspace.config -> string -> string
     redirect path stops being load-bearing. (PR-3b1, AuthIdentityFSM
     invariant I1 IdentityBindsToken.) *)
 
-val apply_default : 'a option -> 'a -> 'a
-(** [apply_default opt default] returns [v] when [opt = Some v], else
-    [default]. *)
-
-val apply_default_opt : 'a option -> 'a option -> 'a option
-(** [apply_default_opt primary fallback] returns [primary] when it is
-    [Some], else [fallback]. *)
-
-
 val effective_declarative_runtime_id :
   Keeper_types_profile.keeper_profile_defaults ->
   Keeper_meta_contract.keeper_meta -> string
@@ -154,17 +119,6 @@ val load_or_materialize_boot_meta :
     surfaces whether the meta was materialised from defaults. *)
 
 (** {1 Supervisor sweep state} *)
-
-val supervisor_sweep_running : string -> bool
-(** [true] when a supervisor sweep is currently registered for the
-    keeper. *)
-
-val stop_supervisor_sweep : string -> unit
-(** Stop and forget the supervisor sweep for [keeper_name]; idempotent. *)
-
-val update_supervisor_sweep_interval : string -> float -> bool
-(** Adjust the sweep interval for an active sweep.  Returns [false] when
-    the keeper has no active sweep. *)
 
 val start_supervisor_sweep :
   [> float Eio.Time.clock_ty ] Keeper_types_profile.context -> unit

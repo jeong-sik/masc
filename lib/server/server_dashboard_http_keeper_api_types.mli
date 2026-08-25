@@ -14,7 +14,10 @@ val keeper_api_prefix : string
 (** Per-route URL suffixes for the keeper API. *)
 val keeper_suffix_config : string
 val keeper_suffix_secrets : string
+val keeper_suffix_github_identity : string
+val keeper_suffix_github_login : string
 val keeper_suffix_boot : string
+val keeper_suffix_up : string
 val keeper_suffix_shutdown : string
 val keeper_suffix_reset : string
 val keeper_suffix_clear : string
@@ -22,25 +25,17 @@ val keeper_suffix_checkpoints : string
 val keeper_suffix_runtime_trace : string
 val keeper_suffix_directive : string
 val keeper_suffix_paused_work : string
-val keeper_suffix_catchup_judge : string
+val keeper_suffix_fusion : string
+val keeper_suffix_operator_note : string
 
-val keeper_chat_receipt_state_json :
-  Keeper_chat_queue.receipt_state -> Yojson.Safe.t
-
-val keeper_chat_receipt_json :
-  keeper_name:string ->
-  revision:int64 ->
-  Keeper_chat_queue.receipt_view ->
-  Yojson.Safe.t
-
+val keeper_suffix_file_changes : string
+(** [GET /api/v1/keepers/<name>/file-changes] — the files this keeper wrote,
+    read back out of the tool-call log. *)
 (** {1 Dashboard cache keys} *)
 
 val cache_key_string_segment : string -> string
 (** Length-prefixed cache key segment so delimiter characters in the value
     cannot create key collisions. *)
-
-val cache_key_string_opt_segment : string option -> string
-(** [None] and [Some ""] produce distinct segments. *)
 
 val keeper_config_cache_key : Workspace.config -> string -> string
 (** Cache key for [/api/v1/keepers/<name>/config]. Used by both read and
@@ -60,11 +55,6 @@ val keeper_runtime_trace_cache_key :
 (** Cache key for [/api/v1/keepers/<name>/runtime-trace]. Optional query
     fields are tagged so absent values cannot collide with literal payloads. *)
 
-type keeper_chat_recovery_route =
-  { keeper_name : string
-  ; receipt_id : string
-  }
-
 type keeper_board_attention_quarantine_route =
   { keeper_name : string
   ; partition_id : string
@@ -73,15 +63,17 @@ type keeper_board_attention_quarantine_route =
 type keeper_post_route_kind =
   | Keeper_post_config
   | Keeper_post_secrets
+  | Keeper_post_github_login
   | Keeper_post_boot
+  | Keeper_post_up
   | Keeper_post_shutdown
   | Keeper_post_reset
   | Keeper_post_clear
   | Keeper_post_checkpoints
   | Keeper_post_directive
   | Keeper_post_paused_work
-  | Keeper_post_catchup_judge
-  | Keeper_post_chat_recovery of keeper_chat_recovery_route
+  | Keeper_post_fusion
+  | Keeper_post_operator_note
   | Keeper_post_board_attention_quarantine_recovery of
       keeper_board_attention_quarantine_route
   | Keeper_post_unknown
@@ -90,21 +82,27 @@ type keeper_post_route_kind =
 val classify_keeper_post_route : string -> keeper_post_route_kind
 (** Map a request path to its [keeper_post_route_kind]. *)
 
-val keeper_path_ends_with : string -> string -> bool
-(** [keeper_path_ends_with path suffix]: helper used by the classifier. *)
-
 val extract_keeper_name_for_suffix : string -> string -> string
 (** [extract_keeper_name_for_suffix path suffix] returns the keeper name
     from a path of shape [/api/v1/keepers/<name>/<suffix>]. *)
 
-val is_keeper_checkpoints_get_path : string -> bool
-(** [true] for [GET /api/v1/keepers/<name>/checkpoints] paths. *)
-
-val is_keeper_runtime_trace_get_path : string -> bool
 (** [true] for [GET /api/v1/keepers/<name>/runtime-trace] paths. *)
 
 val is_keeper_paused_work_get_path : string -> bool
 (** [true] for authenticated [GET /api/v1/keepers/<name>/paused-work] paths. *)
+
+val keeper_get_permission
+  :  ?include_thinking:bool
+  -> string
+  -> Masc_domain.permission option
+(** The permission a GET on this keeper subroute requires. [include_thinking]
+    comes from the query string, which the path alone does not carry: a
+    trajectory asked for with hidden reasoning needs the same [CanAdmin] that
+    [/raw-trace] needs, because it returns the same thing. *)
+(** Mandatory token-bound permission for sensitive keeper GET sub-routes.
+    Exact turn evidence requires [CanReadState]. Raw retained traces, Memory OS
+    change journals, checkpoint state, and paused-work operator state require
+    [CanAdmin]. [None] leaves the route on its existing public-read policy. *)
 
 (** {1 Trajectory preview helpers} *)
 
@@ -115,13 +113,13 @@ val truncate_text : max_chars:int -> string -> string
 (** Truncate [text] to [max_chars] (UTF-8 safe). *)
 
 val latest_preview_of_messages :
-  Agent_sdk.Types.message list -> string option
+  Agent_core.Types.message list -> string option
 (** Latest assistant-text preview suitable for the dashboard list view. *)
 
 (** {1 Keeper name validation} *)
 
 val is_valid_keeper_name : String.t -> bool
-(** [true] when [name] passes the shared keeper-name character class. *)
+(** [true] when [name] passes {!Keeper_config.validate_name}. *)
 
 val extract_keeper_name_for_post : string -> string -> string
 (** [extract_keeper_name_for_post path suffix]: variant used by the
@@ -149,13 +147,6 @@ val provider_attempt_row_json :
 val string_contains_substring : string -> string -> bool
 (** Pure: naive substring presence test. *)
 
-val runtime_trace_keeps_provider_attempt_provenance_key : string -> bool
-(** Pure: allowlist for provider/model-related decision keys in
-    runtime-trace responses. *)
-
-val runtime_trace_redacts_provider_model_key : string -> bool
-(** Pure: redact-by-substring policy for the runtime-trace public surface. *)
-
 val runtime_trace_public_json : Yojson.Safe.t -> Yojson.Safe.t
 (** Pure: recursively redact provider/model identity fields from runtime
     trace JSON before returning to external dashboards. *)
@@ -165,21 +156,9 @@ val runtime_trace_public_json : Yojson.Safe.t -> Yojson.Safe.t
     Pure helpers for extracting fields out of trajectory tool-call JSON
     records. Used by the runtime-lens response builders. *)
 
-val tool_call_output_text_opt : Yojson.Safe.t -> string option
-val parse_tool_output_json_opt : Yojson.Safe.t -> Yojson.Safe.t option
-val tool_call_runtime_contract : Yojson.Safe.t -> Yojson.Safe.t
-
-val tool_call_matches_trace :
-  ?turn_id:int ->
-  keeper_name:string ->
-  trace_id:string ->
-  Yojson.Safe.t ->
-  bool
-
 (** {1 Option list + string utilities} *)
 
 val first_string_opt : string option list -> string option
-val first_int_opt : int option list -> int option
 val string_has_prefix : prefix:string -> string -> bool
 
 (** {1 Claim tool-call summary} *)
@@ -187,15 +166,8 @@ val string_has_prefix : prefix:string -> string -> bool
 val claim_status_of_output : Yojson.Safe.t -> string
 (** Pure: classify a keeper_task_claim tool-call output JSON. *)
 
-val claim_scope_summary_absent : Yojson.Safe.t
 (** Pure constant: JSON record returned when no matching claim was
     observed. *)
-
-val internal_history_json_to_trajectory_line :
-  Yojson.Safe.t -> Trajectory.trajectory_line option
-(** Pure: decode one [internal_assistant] history JSON line into a
-    [Trajectory.Thinking] record. Returns [None] when the line is missing
-    required fields or originates from a non-internal source. *)
 
 val runtime_manifest_public_json :
   Keeper_runtime_manifest.t -> Yojson.Safe.t

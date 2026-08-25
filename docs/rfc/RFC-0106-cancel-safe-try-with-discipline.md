@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0072", "0097", "0101", "0126"]
-implementation_prs: [15894, 15904, 15917, 15919, 15920, 15925, 16949, 16951]
 ---
 
 ## Progress audit (2026-05-21)
@@ -124,7 +123,6 @@ string regex 가 try-with scope 를 인식 못 하는 근본 한계 → ppxlib `
 
 - *Cancelled 외* 의 typed exception (예: `Eio.Io`, `Unix.Unix_error`) 분류는 본 RFC 범위 밖. 본 RFC 는 *cancellation propagation* 만 다룬다.
 - 일반 OCaml `match | exn ->` (try-with 가 아닌 단순 match) 는 본 RFC 무관 — try-with 와 syntactic 구분 가능하다.
-- `Fun.protect` finally 도 본 RFC 무관 — 그건 RFC `lint-fun-protect.sh` 가 별도로 다룬다.
 
 ## 5. Evidence
 

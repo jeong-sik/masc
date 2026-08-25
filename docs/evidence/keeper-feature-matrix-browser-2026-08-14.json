@@ -1,0 +1,39 @@
+{
+  "schema": "masc.keeper_feature_matrix.browser_render_evidence.v1",
+  "captured_at": "2026-08-14T08:37:42Z",
+  "browser": "chromium",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "full_page": true,
+  "document": {
+    "path": "docs/design/keeper-feature-state-matrix-2026-08-13.html",
+    "title": "MASC Keeper 기능 상태·증거 매트릭스",
+    "section_count": 8,
+    "feature_row_count": 44,
+    "runtime_provider_row_count": 8,
+    "team_scenario_row_count": 12,
+    "feature_status_counts": {
+      "verified": 2,
+      "partial": 32,
+      "source": 6,
+      "missing": 2,
+      "blocked": 2
+    },
+    "body_horizontal_overflow": false,
+    "interaction_checks": {
+      "feature_search": "#28713 -> visible rows: Parallel Tool",
+      "status_filter_blocked": "blocked -> 2 rows: Surface/Discord, Operations/Observability"
+    },
+    "console_errors": [],
+    "page_errors": []
+  },
+  "screenshot": {
+    "path": "/Users/dancer/me/reports/keeper-feature-state-matrix-render-20260814T083742Z.png",
+    "sha256": "5e0d8dfed4c3f27aa93e4ae4f2800fc1e22b77f3765dbedc35a93cfe89310b12",
+    "pixel_width": 1440,
+    "pixel_height": 12205
+  },
+  "verdict": "pass"
+}

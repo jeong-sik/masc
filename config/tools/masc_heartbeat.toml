@@ -1,0 +1,6 @@
+name = "masc_heartbeat"
+description = """
+Publish the caller's heartbeat observation. Heartbeats are telemetry only \
+and do not grant another component authority to stop, evict, or release the \
+caller's work."""
+additional_properties = false

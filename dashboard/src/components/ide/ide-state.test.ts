@@ -5,6 +5,7 @@ import {
   focusIdeContextAnchor,
   focusIdeFile,
   ideContextFocus,
+  sameIdeWorkspaceIdentity,
   synchronizeIdeWorkspaceIdentity,
 } from './ide-state'
 
@@ -73,5 +74,16 @@ describe('ide-state', () => {
 
     expect(activeIdeFile.value).toBe('src/runtime/router.ts')
     expect(ideContextFocus.value?.line).toBeUndefined()
+  })
+
+  it('treats a codebase refresh as a repository workspace identity change', () => {
+    expect(sameIdeWorkspaceIdentity(
+      { kind: 'repository', repoId: 'masc', codebase: 'github.com_old_masc' },
+      { kind: 'repository', repoId: 'masc', codebase: 'github.com_new_masc' },
+    )).toBe(false)
+    expect(sameIdeWorkspaceIdentity(
+      { kind: 'repository', repoId: 'masc' },
+      { kind: 'repository', repoId: 'masc', codebase: null },
+    )).toBe(true)
   })
 })

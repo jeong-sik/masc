@@ -25,7 +25,7 @@ extract_port_from_url() {
   fi
 }
 
-DEFAULT_SEED_PORT="$(extract_port_from_url "${LLAMA_POOL_SEED_URL:-${OAS_LOCAL_LLM_URL:-${LLAMA_SERVER_URL:-}}}")"
+DEFAULT_SEED_PORT="$(extract_port_from_url "${LLAMA_POOL_SEED_URL:-${AGENT_CORE_LOCAL_LLM_URL:-${LLAMA_SERVER_URL:-}}}")"
 SEED_PORT="${LLAMA_POOL_SEED_PORT:-$DEFAULT_SEED_PORT}"
 
 if ! command -v jq >/dev/null 2>&1; then
@@ -47,7 +47,7 @@ EOF
 
 require_seed_port() {
   if [ -z "${SEED_PORT:-}" ]; then
-    echo "Missing seed runtime port. Set LLAMA_POOL_SEED_PORT or LLAMA_POOL_SEED_URL/OAS_LOCAL_LLM_URL/LLAMA_SERVER_URL." >&2
+    echo "Missing seed runtime port. Set LLAMA_POOL_SEED_PORT or LLAMA_POOL_SEED_URL/AGENT_CORE_LOCAL_LLM_URL/LLAMA_SERVER_URL." >&2
     exit 1
   fi
 }

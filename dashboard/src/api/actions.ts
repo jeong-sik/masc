@@ -1,12 +1,101 @@
 import { get, post } from './core'
-import { callMcpTool } from './mcp'
+import {
+  callMcpTool,
+  mcpCallFailureDisposition,
+  mcpStructuredContentFromError,
+} from './mcp'
 
 // --- Control Dock ---
 
-export async function sendBroadcast(_actorHint: string, message: string): Promise<void> {
-  await callMcpTool('masc_broadcast', {
-    message,
-  })
+export type BroadcastSendReceipt = {
+  ok: boolean
+  requestId: string | null
+  deliveryKind: 'passive' | 'accepted' | 'already_accepted' | 'pending' | 'deferred' | 'rejected' | 'outcome_unknown'
+  reason: string | null
+  workspacePersisted: boolean | null
+}
+
+export function broadcastReceiptMessage(receipt: BroadcastSendReceipt): string {
+  if (receipt.ok) return 'Message sent.'
+  if (receipt.deliveryKind === 'outcome_unknown') {
+    return 'Broadcast outcome unknown. Do not resend until the workspace timeline is checked.'
+  }
+  const reason = receipt.reason ? `: ${receipt.reason}` : ''
+  return `Workspace message persisted; Keeper intake ${receipt.deliveryKind}${reason}. Do not resend. request_id=${receipt.requestId}`
+}
+
+function parseBroadcastReceipt(receipt: unknown): BroadcastSendReceipt {
+  if (typeof receipt !== 'object' || receipt === null || Array.isArray(receipt)) {
+    throw new Error('Broadcast returned a malformed delivery receipt.')
+  }
+  const fields = receipt as Record<string, unknown>
+  const requestId = typeof fields.request_id === 'string' ? fields.request_id : ''
+  const delivery = fields.mention_delivery
+  if (
+    typeof fields.ok !== 'boolean'
+    || !requestId
+    || typeof delivery !== 'object'
+    || delivery === null
+    || Array.isArray(delivery)
+  ) {
+    throw new Error('Broadcast returned a malformed delivery receipt.')
+  }
+  const deliveryFields = delivery as Record<string, unknown>
+  const kind = deliveryFields.kind
+  if (
+    kind !== 'passive'
+    && kind !== 'accepted'
+    && kind !== 'already_accepted'
+    && kind !== 'pending'
+    && kind !== 'deferred'
+    && kind !== 'rejected'
+  ) {
+    throw new Error('Broadcast returned a malformed delivery receipt.')
+  }
+  const expectedOk = kind === 'passive' || kind === 'accepted' || kind === 'already_accepted'
+  if (fields.ok !== expectedOk) {
+    throw new Error('Broadcast returned a contradictory delivery receipt.')
+  }
+  return {
+    ok: fields.ok,
+    requestId,
+    deliveryKind: kind,
+    reason: typeof deliveryFields.reason === 'string' ? deliveryFields.reason : null,
+    workspacePersisted: true,
+  }
+}
+
+export async function sendBroadcast(_actorHint: string, content: string): Promise<BroadcastSendReceipt> {
+  try {
+    const text = await callMcpTool('masc_broadcast', { content })
+    return parseBroadcastReceipt(JSON.parse(text))
+  } catch (error) {
+    const structured = mcpStructuredContentFromError(error)
+    if (structured != null) {
+      try {
+        return parseBroadcastReceipt(structured)
+      } catch {
+        // A contradictory or malformed response cannot prove that the
+        // workspace commit did not happen. Preserve uncertainty instead of
+        // encouraging a duplicate resend.
+        return {
+          ok: false,
+          requestId: null,
+          deliveryKind: 'outcome_unknown',
+          reason: 'Broadcast returned a malformed delivery receipt.',
+          workspacePersisted: null,
+        }
+      }
+    }
+    if (mcpCallFailureDisposition(error) !== 'outcome_unknown') throw error
+    return {
+      ok: false,
+      requestId: null,
+      deliveryKind: 'outcome_unknown',
+      reason: error instanceof Error ? error.message : 'unknown transport failure',
+      workspacePersisted: null,
+    }
+  }
 }
 
 export async function fetchWorkspaceMessages(limit = 40): Promise<string[]> {

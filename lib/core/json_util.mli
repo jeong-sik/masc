@@ -44,6 +44,24 @@ val require_bool : Yojson.Safe.t -> string -> (bool, string) result
 val json_string_list : string list -> Yojson.Safe.t
 (** [json_string_list xs] creates JSON string array *)
 
+val string_assoc_to_json : (string * string) list -> Yojson.Safe.t
+(** [string_assoc_to_json fields] builds an object whose every member is a
+    string. *)
+
+val string_assoc_of_json :
+  Yojson.Safe.t -> ((string * string) list, string) result
+(** [string_assoc_of_json json] reads an object back into string pairs,
+    preserving field order.  Returns an explicit error when [json] is not an
+    object or any member is not a string; malformed metadata is never silently
+    dropped. *)
+
+val string_field_if_present :
+  string -> string option -> (string * Yojson.Safe.t) list
+(** [string_field_if_present key opt] returns [[ (key, `String v) ]] for
+    [Some v] and [[]] for [None], so the key is absent from the built
+    object rather than present as null.  Contrast {!string_opt_field},
+    which always emits the key. *)
+
 (** {1 Option serialization helpers}
 
     Canonical [None -> `Null] converters for building JSON. *)
@@ -91,8 +109,10 @@ val assoc_int_opt : string -> Yojson.Safe.t -> int option
 val assoc_bool_opt : string -> Yojson.Safe.t -> bool option
 (** [assoc_bool_opt name json] extracts bool field *)
 
-val assoc_float_opt : string -> Yojson.Safe.t -> float option
-(** [assoc_float_opt name json] extracts float field, coerces int to float *)
+val assoc_object_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
+(** [assoc_object_opt name json] extracts the [`Assoc] field [name],
+    returning [None] when the field is missing, null, or not an object.
+    Same result as {!get_object} with the arguments in assoc-family order. *)
 
 val find_assoc_row_by_string_field :
   field:string -> value:string -> Yojson.Safe.t -> Yojson.Safe.t option

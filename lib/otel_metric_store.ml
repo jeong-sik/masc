@@ -7,7 +7,7 @@
 include Otel_metric_store_core
 include Otel_metric_names
 include Otel_builtin_metric_names
-include Otel_oas_metric_names
+include Otel_agent_core_metric_names
 include Otel_runtime_metric_names
 include Otel_core_metric_names
 include Otel_policy_metric_names

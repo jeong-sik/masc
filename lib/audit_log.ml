@@ -68,6 +68,13 @@ let preview ?(max_len = 200) (value : string) =
   String_util.utf8_safe ~max_bytes:(max_len + 3) ~suffix:"..." value
   |> String_util.to_string
 
+(* [audit_summary] renders raw detail fields, so it cannot reuse [preview]'s
+   "..." suffix, but it needs the same character-boundary cut. *)
+let audit_summary_field_max_bytes = 80
+
+let audit_summary_field value =
+  String_util.utf8_prefix ~max_bytes:audit_summary_field_max_bytes value
+
 (** {1 Serialization} *)
 
 let gate_audit_decision_to_string = function
@@ -220,14 +227,6 @@ let entry_of_json_r (json : Yojson.Safe.t) : (audit_entry, string) result =
     let snippet = preview (Yojson.Safe.to_string redacted) in
     Error (Printf.sprintf "%s | json: %s" (Printexc.to_string exn) snippet)
 
-(** Lenient wrapper: logs warning and returns option for backward compat *)
-let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
-  match entry_of_json_r json with
-  | Ok entry -> Some entry
-  | Error reason ->
-      Log.Misc.warn "audit_log: entry parse failed: %s" reason;
-      None
-
 (** {1 File Operations} *)
 
 type config = Workspace_utils.config
@@ -247,8 +246,12 @@ type config = Workspace_utils.config
 let audit_store_cache : Dated_jsonl.t StringMap.t ref = ref StringMap.empty
 let audit_store_cache_mu = Eio.Mutex.create ()
 
+(* The directory this store occupies under [.masc]. Exposed so readers of the
+   same store name it from here instead of spelling the literal. *)
+let store_dirname = "audit"
+
 let get_audit_store (config : config) : Dated_jsonl.t =
-  let base = Filename.concat (Workspace_utils.masc_dir config) "audit" in
+  let base = Filename.concat (Workspace_utils.masc_dir config) store_dirname in
   Eio_guard.with_mutex audit_store_cache_mu (fun () ->
     match StringMap.find_opt base !audit_store_cache with
     | Some store -> store
@@ -257,18 +260,21 @@ let get_audit_store (config : config) : Dated_jsonl.t =
       audit_store_cache := StringMap.add base store !audit_store_cache;
       store)
 
-(** Parse JSON list into audit entries. Logs first 5 failures individually,
-    then a summary. Returns only successfully parsed entries. *)
+(** How many individual corrupt-entry failures {!collect_entries} reports
+    before it switches to a suppressed count in the summary. *)
 let max_logged_errors = 5
 
-let parse_entries (jsons : Yojson.Safe.t list) : audit_entry list =
-  (* Logging side effects (per-entry corrupt-entry ERROR, rate-limited
-     by [max_logged_errors]) are kept inside the fold body — they are
-     observably equivalent to the original [List.iter] order. *)
+(* Takes decode results rather than rows. [read_entries] decodes during the
+   read so the parsed trees are not all held at once, and the reader calls its
+   projection newest-first — so the rate-limited logging below must stay out of
+   the projection, or which five failures get reported would flip. Folding over
+   the returned (chronological) list keeps the reported set and the [#N]
+   numbering identical to reading the whole window first. *)
+let collect_entries (decoded : (audit_entry, string) result list) :
+    audit_entry list =
   let ok_rev, err_count =
     List.fold_left
-      (fun (ok, errc) json ->
-        match entry_of_json_r json with
+      (fun (ok, errc) -> function
         | Ok entry -> (entry :: ok, errc)
         | Error reason ->
             let errc = errc + 1 in
@@ -276,11 +282,11 @@ let parse_entries (jsons : Yojson.Safe.t list) : audit_entry list =
               Log.Misc.error "audit_log: corrupt entry (#%d): %s" errc reason;
             (ok, errc))
       ([], 0)
-      jsons
+      decoded
   in
   if err_count > 0 then
     Log.Misc.error "audit_log: %d/%d entries failed to parse (possible corruption)%s"
-      err_count (List.length jsons)
+      err_count (List.length decoded)
       (if err_count > max_logged_errors
        then Printf.sprintf " (%d more suppressed)" (err_count - max_logged_errors)
        else "");
@@ -290,7 +296,80 @@ let parse_entries (jsons : Yojson.Safe.t list) : audit_entry list =
     Structural parse failures go through [parse_entries] ERROR path. *)
 let read_entries ?(n = 10_000) (config : config) : audit_entry list =
   let store = get_audit_store config in
-  Dated_jsonl.read_recent store n |> parse_entries
+  Dated_jsonl.filter_map_recent store n ~f:(fun json ->
+    Some (entry_of_json_r json))
+  |> collect_entries
+
+(* The bounds below are compared against day-file names, so this has to be the
+   key [Jsonl_writer] wrote them with. Formatting it here a second time meant a
+   change to the writer's layout would silently narrow every audit range
+   instead of failing (#29358).
+
+   The year guard stays: [day_key] is total and formats out-of-range years
+   into a string that no longer sorts against the stored names, and this
+   function's [None] is what tells the caller the bound is unusable. *)
+let utc_date_of_timestamp timestamp =
+  match Unix.gmtime timestamp with
+  | tm ->
+    let year = tm.Unix.tm_year + 1900 in
+    if year < 0 || year > 9999
+    then None
+    else Some (Jsonl_writer.day_key ~ts:timestamp)
+  | exception Invalid_argument _
+  | exception Unix.Unix_error _ -> None
+;;
+
+let optional_date_bound = function
+  | None -> Some None
+  | Some timestamp ->
+    Option.map (fun date -> Some date) (utc_date_of_timestamp timestamp)
+;;
+
+(* [n] counts entries that satisfy [keep]. {!read_entries} counts rows read, so
+   a caller that filters afterwards has to guess how wide a window its matches
+   need — the audit store carries every agent's actions, and one busy agent
+   fills any fixed guess. *)
+(* Day-file names sort lexicographically, so these two bound the range from
+   outside: no stored day can precede the first or follow the second. They mean
+   "this side is unbounded", which is why an absent [since]/[until] maps onto
+   them rather than onto a narrower guess. *)
+let earliest_day_bound = "0000-01-01"
+let latest_day_bound = "9999-12-31"
+
+let read_entries_matching ?(n = 10_000) ?since ?until ~keep (config : config)
+  : audit_entry list
+  =
+  let store = get_audit_store config in
+  (* Corrupt rows are collected but not counted: they are not entries the
+     caller asked for, and letting them consume the budget would make [n] mean
+     "matches, unless the store is damaged". They still reach
+     [collect_entries] so corruption keeps being reported. *)
+  let malformed = ref [] in
+  let select json =
+      match entry_of_json_r json with
+      | Ok entry when keep entry -> Some (Ok entry)
+      | Ok _ -> None
+      | Error _ as corrupt ->
+        malformed := corrupt :: !malformed;
+        None
+  in
+  let matched =
+    match optional_date_bound since, optional_date_bound until with
+    | Some since_day, Some until_day
+      when Option.is_some since_day || Option.is_some until_day ->
+      (* DET-OK: range identities, not a guess at a missing value. *)
+      let since_bound = Option.value ~default:earliest_day_bound since_day in
+      let until_bound = Option.value ~default:latest_day_bound until_day in
+      Dated_jsonl.collect_matching_range
+        store
+        ~since:since_bound
+        ~until:until_bound
+        n
+        ~f:select
+    | Some _, Some _ | None, _ | _, None ->
+      Dated_jsonl.collect_matching store n ~f:select
+  in
+  collect_entries (List.rev !malformed @ matched)
 
 (** Append a single entry to the audit log (thread-safe via Dated_jsonl). *)
 let append_entry (config : config) (entry : audit_entry) =
@@ -305,8 +384,14 @@ let append_entry (config : config) (entry : audit_entry) =
     Format: [aud-<16-hex-ms>-<8-hex-content-hash>] *)
 let audit_entry_id ~timestamp ~agent_id ~action =
   let ms = Int64.of_float (timestamp *. 1000.0) in
-  let hash = Digest.to_hex (Digest.string (agent_id ^ action_to_string action
-                                           ^ Printf.sprintf "%.6f" timestamp)) in
+  (* SHA-256, not Stdlib.Digest (MD5): this suffix is the collision boundary
+     for an audit key, and it is truncated to 32 bits on top (#26720). *)
+  let hash =
+    Digestif.SHA256.(
+      digest_string
+        (agent_id ^ action_to_string action ^ Printf.sprintf "%.6f" timestamp)
+      |> to_hex)
+  in
   Printf.sprintf "aud-%016Lx-%s" ms (String.sub hash 0 8)
 
 (** Map outcome + action to O2 severity string. *)
@@ -351,7 +436,7 @@ let audit_summary ~action ~details =
   let extract_str key =
     match details with
     | `Assoc fields -> (match List.assoc_opt key fields with
-      | Some (`String v) -> Some (String.sub v 0 (min (String.length v) 80))
+      | Some (`String v) -> Some (audit_summary_field v)
       | _ -> None)
     | _ -> None
   in
@@ -370,7 +455,7 @@ let audit_summary ~action ~details =
          let rec loop acc = function
            | [] -> Some (List.rev acc)
            | `String v :: rest ->
-             loop (String.sub v 0 (min (String.length v) 80) :: acc) rest
+             loop (audit_summary_field v :: acc) rest
            | _ :: _ -> None
          in
          loop [] values
@@ -495,33 +580,31 @@ let audit_event_json (entry : audit_entry) =
   in
   `Assoc fields
 
+(* One predicate for the query filters, so the read and the projection cannot
+   disagree about what the caller asked for. A reader that counts matches needs
+   this decision before it pages; leaving it inside the projection is what made
+   the endpoint read a multiple of [limit] and hope. *)
+let audit_entry_matches ?actor ?kind ?severity ?since ?until (entry : audit_entry)
+  =
+  (match actor with
+   | None -> true
+   | Some value -> String.equal entry.agent_id (String.trim value))
+  && (match kind with
+      | None -> true
+      | Some value ->
+        String.starts_with ~prefix:(String.trim value)
+          (action_to_string entry.action))
+  && (match since with None -> true | Some value -> entry.timestamp >= value)
+  && (match until with None -> true | Some value -> entry.timestamp <= value)
+  && (match severity with
+      | None -> true
+      | Some value ->
+        String.equal (audit_event_severity entry) (String.trim value))
+
 let audit_events_response_json ?actor ?kind ?severity ?since ?until ~limit
     (entries : audit_entry list) =
   let filtered =
-    entries
-    |> (match actor with
-        | None -> Fun.id
-        | Some value ->
-            let actor = String.trim value in
-            List.filter (fun entry -> String.equal entry.agent_id actor))
-    |> (match kind with
-        | None -> Fun.id
-        | Some value ->
-            let kind = String.trim value in
-            List.filter (fun entry ->
-                String.starts_with ~prefix:kind (action_to_string entry.action)))
-    |> (match since with
-        | None -> Fun.id
-        | Some value -> List.filter (fun entry -> entry.timestamp >= value))
-    |> (match until with
-        | None -> Fun.id
-        | Some value -> List.filter (fun entry -> entry.timestamp <= value))
-    |> (match severity with
-        | None -> Fun.id
-        | Some value ->
-            let severity = String.trim value in
-            List.filter (fun entry ->
-                String.equal (audit_event_severity entry) severity))
+    List.filter (audit_entry_matches ?actor ?kind ?severity ?since ?until) entries
   in
   let total = List.length filtered in
   let drop_n = max 0 (total - limit) in
@@ -667,29 +750,24 @@ type stats = {
 
 let get_stats (config : config) =
   let store = get_audit_store config in
-  (* Read a large window to compute stats *)
-  let entries = Dated_jsonl.read_recent store 100_000 in
-  let count = List.length entries in
-  let oldest = ref None in
-  let newest = ref None in
-  List.iter (fun json ->
-    (match Safe_ops.json_float_opt "timestamp" json with
-     | Some ts ->
-       if !oldest = None then oldest := Some ts;
-       newest := Some ts
-     | None -> ())
-  ) entries;
+  (* Read a large window to compute stats. Project each row to its timestamp
+     during the read: this window is 100k rows and the three values below are
+     all that survives, so materialising the parsed trees costs gigabytes that
+     are discarded immediately. [Some] wraps every row so [total_entries] still
+     counts rows that carry no timestamp. *)
+  let timestamps =
+    Dated_jsonl.filter_map_recent store 100_000 ~f:(fun json ->
+      Some (Safe_ops.json_float_opt "timestamp" json))
+  in
   {
-    total_entries = count;
+    total_entries = List.length timestamps;
     file_size_bytes = 0; (* no longer a single file *)
-    oldest_timestamp = !oldest;
-    newest_timestamp = !newest;
+    (* Chronological order, so the first timestamp present is the oldest and
+       the last one present is the newest. *)
+    oldest_timestamp = List.find_map Fun.id timestamps;
+    newest_timestamp =
+      List.fold_left
+        (fun newest ts -> match ts with Some _ -> ts | None -> newest)
+        None
+        timestamps;
   }
-
-let stats_to_json (s : stats) : Yojson.Safe.t =
-  `Assoc [
-    ("total_entries", `Int s.total_entries);
-    ("file_size_bytes", `Int s.file_size_bytes);
-    ("oldest_timestamp", Json_util.float_opt_to_json s.oldest_timestamp);
-    ("newest_timestamp", Json_util.float_opt_to_json s.newest_timestamp);
-  ]

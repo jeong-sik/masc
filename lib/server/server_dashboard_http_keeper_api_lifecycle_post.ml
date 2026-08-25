@@ -102,6 +102,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
   let suffix_result =
     match action with
     | "boot" -> Ok keeper_suffix_boot
+    | "up" -> Ok keeper_suffix_up
     | "shutdown" -> Ok keeper_suffix_shutdown
     | "reset" -> Ok keeper_suffix_reset
     | "clear" -> Ok keeper_suffix_clear
@@ -119,32 +120,28 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
     let workspace_scope = Mcp_server.workspace_scope state in
     let config = workspace_scope.config in
     let persist_keeper_pause () =
-      match Keeper_meta_store.read_meta config name with
-      | Ok (Some meta) when meta.paused -> true
-      | Ok (Some meta) ->
-           let updated_meta =
-             { meta with
-               paused = true
-             ; updated_at = Keeper_meta_contract.now_iso ()
-             }
-           in
-           (match
-              Keeper_meta_store.write_meta_with_merge
-                ~merge:Keeper_meta_merge.caller_wins config updated_meta
-            with
-            | Ok () -> true
-            | Error err ->
-              Log.Keeper.warn
-                "keeper %s pause: write_meta failed: %s"
-                name
-                err;
-              false)
-      (* Issue #8391 HIGH #1: split [Ok None] (meta vanished) from
-         [Error _] (IO/parse failure) so lifecycle pause persistence after
-         clear/shutdown cannot silently disappear. *)
-      | Ok None ->
+      match Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name:name with
+      | Ok owner
+        when Option.exists
+               (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.paused)
+               (Keeper_owner.projection owner).meta ->
+        true
+      | Ok _ ->
+        (match
+           Keeper_owner_registry.apply_meta
+             ~base_path:config.base_path
+             ~keeper_name:name
+             (Keeper_owner_reducer.Pause
+                { reason =
+                    Keeper_latched_reason.Operator_paused
+                      { operator_actor = Keeper_latched_reason.Keeper_down }
+                ; updated_at = Keeper_meta_contract.now_iso ()
+                })
+         with
+         | Ok (Some _) -> true
+         | Ok None ->
           Log.Keeper.warn
-            "keeper %s pause: meta missing — skipping paused-state persist"
+            "keeper %s pause: owner metadata missing — skipping paused-state persist"
             name;
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string PausedStatePersistErrors)
@@ -152,15 +149,29 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                      ("reason", "meta_missing")]
             ();
           false
-      | Error err ->
+         | Error error ->
+           Log.Keeper.error
+             "keeper %s pause: owner command failed: %s"
+             name
+             (Keeper_owner_registry.command_error_to_string error);
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string PausedStatePersistErrors)
+             ~labels:
+               [ ( "phase"
+                 , Keeper_paused_state_persist_phase.(to_label Lifecycle_pause_persist) )
+               ; "reason", "owner_command_error"
+               ]
+             ();
+           false)
+      | Error lookup_error ->
           Log.Keeper.error
-            "keeper %s pause: read_meta failed: %s"
+            "keeper %s pause: owner lookup failed: %s"
             name
-            err;
+            (Keeper_owner_registry.lookup_error_to_string lookup_error);
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string PausedStatePersistErrors)
             ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Lifecycle_pause_persist));
-                     ("reason", "read_meta_error")]
+                     ("reason", "owner_lookup_error")]
             ();
           false
     in
@@ -182,6 +193,24 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
           match body_str with
           | None ->
               Error "request body is required for clear"
+          | Some raw -> (
+              try
+                let parsed = Yojson.Safe.from_string raw in
+                match parsed with
+                | `Assoc fields ->
+                    Ok (`Assoc (("name", `String name) :: List.remove_assoc "name" fields))
+                | _ ->
+                    Error "request body must be a JSON object"
+              with
+              | Yojson.Json_error err ->
+                  Error (Printf.sprintf "invalid json: %s" err)))
+      | "up" -> (
+          (* The body carries the create-or-update settings (instructions,
+             mention_targets, ...). Empty body still dispatches name-only so
+             the contract's own validation — not this route — decides what a
+             bare up means. *)
+          match body_str with
+          | None | Some "" -> Ok (`Assoc [("name", `String name)])
           | Some raw -> (
               try
                 let parsed = Yojson.Safe.from_string raw in
@@ -239,8 +268,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                    ~latched_reason:meta.latched_reason
                with
                | Keeper_lifecycle_admission.Paused _ -> Boot_operator_paused
-               | Keeper_lifecycle_admission.Active
-               | Keeper_lifecycle_admission.Dead_tombstone -> Boot_allowed)
+               | Keeper_lifecycle_admission.Active -> Boot_allowed)
         in
         (match boot_preflight with
          | Boot_meta_read_failed error ->

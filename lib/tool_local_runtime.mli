@@ -11,8 +11,6 @@
     - {!Tool_local_runtime_http}: HTTP helpers (curl wrappers, JSON
       member access).
     - {!Tool_local_runtime_verify}: runtime contract verification.
-    - {!Tool_local_runtime_bench}: concurrency benchmark.
-    - {!Tool_local_runtime_status}: runtime pool status reporting.
     - {!Tool_local_runtime_probe}: native Ollama timing / KV
       inference probe.
 
@@ -20,83 +18,11 @@
     kept on {!Tool_local_runtime_core}; this top-level module no
     longer re-exports that surface.
 
-    Internal: 5 [handle_*] functions ([handle_models],
-    [handle_runtime_status], [handle_runtime_verify],
-    [handle_runtime_bench], [handle_runtime_ollama_probe]) plus
-    the [Tool_spec.register] side-effect block stay private.  The
-    .mli pins the dispatch / schemas contract — handler bodies are
-    free to refactor. *)
-
-(** {1 Status / verify / probe / bench re-exports} *)
-
-val runtime_status_json :
-  ?include_models:bool -> unit -> Yojson.Safe.t
-(** Re-export of {!Tool_local_runtime_status.runtime_status_json}. *)
-
-val runtime_verify_json :
-  ?runtime_pool:string ->
-  ?expected_slots:int ->
-  ?expected_ctx:int ->
-  ?expected_model:string ->
-  unit ->
-  Yojson.Safe.t
-(** Re-export of {!Tool_local_runtime_verify.runtime_verify_json}. *)
-
-val runtime_ollama_probe_json :
-  ?server_url:string ->
-  ?model:string ->
-  ?prompt:string ->
-  ?probe_runs:int ->
-  ?keep_alive:string ->
-  ?max_tokens:int ->
-  ?think_mode:Tool_local_runtime_probe.ollama_probe_think_mode ->
-  ?timeout_sec:int ->
-  ?ps_timeout_sec:int ->
-  ?generate_when_unloaded:bool ->
-  ?run_generate:bool ->
-  unit ->
-  Yojson.Safe.t
-(** Re-export of {!Tool_local_runtime_probe.runtime_ollama_probe_json}.
-    All parameters are optional with defaults: [probe_runs = 2],
-    [max_tokens = 16], [think_mode = Think_auto],
-    [timeout_sec = 6] (positive explicit values are preserved),
-    [ps_timeout_sec = 2],
-    [generate_when_unloaded = true], [run_generate = true].  Per
-    PR #20479 spirit: the tool itself (ollama [OLLAMA_LOAD_TIMEOUT])
-    owns hang protection; callers do not observe these timeouts. *)
-
-val run_bench :
-  ?model_id:string ->
-  ?runtime_pool:string ->
-  parallelism:int ->
-  rounds:int ->
-  prompt:string ->
-  max_tokens:int ->
-  timeout_sec:int ->
-  unit ->
-  (Yojson.Safe.t, string) Result.t
-(** Re-export of {!Tool_local_runtime_bench.run_bench}. *)
-
-val provider_health_reachable : status:int option -> bool
-(** Re-export of {!Tool_local_runtime_verify.provider_health_reachable}. *)
-
-val ollama_loaded_models_of_ps_json :
-  Yojson.Safe.t -> [> `Assoc of (string * Yojson.Safe.t) list ] list
-(** Re-export of
-    {!Tool_local_runtime_probe.ollama_loaded_models_of_ps_json}. *)
-
-val ollama_probe_run_of_generate_json :
-  run_index:int ->
-  http_status:int option ->
-  wall_clock_ms:int ->
-  Yojson.Safe.t ->
-  Tool_local_runtime_probe.ollama_probe_run
-(** Re-export of
-    {!Tool_local_runtime_probe.ollama_probe_run_of_generate_json}. *)
-
-val kv_cache_assessment_json : Yojson.Safe.t list -> Yojson.Safe.t
-(** Re-export of
-    {!Tool_local_runtime_probe.kv_cache_assessment_json}. *)
+    The two [handle_*] functions [dispatch] routes to
+    ([handle_runtime_verify], [handle_runtime_ollama_probe]) plus the
+    [Tool_spec.register] side-effect block stay private.  The .mli pins
+    the dispatch / schemas contract. Probe and verification helpers remain on
+    their owning modules instead of being re-exported here. *)
 
 (** {1 MCP dispatch contract} *)
 

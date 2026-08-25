@@ -35,17 +35,15 @@ type keeper_model_projection =
   | Transport_alias of { projected_by : string }
 
 (** Typed display group for Keeper capability discovery. *)
-type keeper_tool_group =
-  | Execute_group
-  | Search_files_group
-  | Filesystem_group
-  | Board_group
-  | Voice_group
-  | Workspace_group
-  | Surface_group
-  | Memory_group
-  | Meta_group
-  | Core_group
+type keeper_tool_group = Keeper_tool_group.t
+
+(** Per-Keeper model tool surface (RFC-0389). [All] is the current behavior:
+    every model-visible descriptor. [Declared] narrows the surface to the
+    declared groups; [Core_group] and [Meta_group] are always retained so a
+    Keeper can always introspect its own surface. *)
+type tool_surface =
+  | All
+  | Declared of { groups : keeper_tool_group list }
 
 (** Provenance of the descriptor input schema. A missing canonical cluster
     schema excludes that descriptor from model projection and is reported by
@@ -56,6 +54,40 @@ type input_schema_source =
   | Keeper_projection
 
 type readonly_of_input = Yojson.Safe.t -> bool option
+
+type ordinary_execution_mode =
+  | Serial
+  | Concurrent
+
+type execution =
+  | Ordinary of ordinary_execution_mode
+  | Terminal
+(** Descriptor-owned execution contract. Read-only classification does not
+    imply concurrency safety, and terminal concurrent execution is not
+    representable. *)
+
+(** Closed execution-semantics classification of one tool call: whether the
+    call is itself a multi-call execution unit (RFC-0386). [Atomic_tool] runs
+    one capability per call. [Composition_tool] runs one fixed, validated
+    catalog plan inline. [Async_composition_tool] covers durable async
+    composition submissions and their status/cancel controls.
+    [Batch_plan_tool] runs one model-defined plan as a dependency DAG. This
+    axis is orthogonal to {!execution}: kind classifies what a call contains,
+    execution classifies how that call runs. *)
+type tool_kind =
+  | Atomic_tool
+  | Composition_tool
+  | Async_composition_tool
+  | Batch_plan_tool
+
+(** Descriptor-owned output contract for typed composition. [Opaque_output]
+    cannot be referenced by another plan node. [Json_output] carries a schema
+    in the closed composable-output subset checked by [Keeper_tool_plan.create]:
+    exact JSON types, object properties/required/boolean additionalProperties,
+    and homogeneous array items. Unsupported JSON Schema keywords fail closed. *)
+type composable_output =
+  | Opaque_output
+  | Json_output of { schema : Yojson.Safe.t }
 
 type identity_validation =
   | Validate_once_before_translation
@@ -109,6 +141,7 @@ type runtime_handler =
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
+  | Tool_keeper_spawn_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -119,9 +152,7 @@ type runtime_handler =
 type policy =
   { readonly_of_input : readonly_of_input
   ; readonly_hint : bool option
-  ; retryable : bool
   ; cwd_scope : string option
-  ; inline_safe : bool
   ; polling_read : bool
   }
 
@@ -136,6 +167,9 @@ type t =
   ; description : string
   ; input_schema : Yojson.Safe.t
   ; model_output_projection : Tool_output.model_projection
+  ; composable_output : composable_output
+  ; execution : execution
+  ; tool_kind : tool_kind
   ; policy : policy
   ; executor : executor
   ; backend : backend
@@ -155,7 +189,18 @@ val executor_to_string : executor -> string
 val backend_to_string : backend -> string
 val sandbox_to_string : sandbox -> string
 val keeper_tool_group_to_string : keeper_tool_group -> string
+
+(** Convert raw TOML group names to a [tool_surface].
+    [None] or empty list → [All] (inherit, no narrowing).
+    Unknown names are logged and silently excluded (fail-open). *)
+val tool_groups_to_surface : string list option -> tool_surface
+
 val runtime_handler_to_string : runtime_handler -> string
+val tool_kind_to_string : tool_kind -> string
+
+(** Strict parse of {!tool_kind_to_string} output. Unknown strings are an
+    error, never a fallback classification. *)
+val tool_kind_of_string : string -> (tool_kind, string) result
 
 (** [public_descriptors] is the LLM-native public surface. Each descriptor has
     exactly one [public_name]. *)
@@ -169,6 +214,12 @@ val public_descriptors : t list
     LLM-native vs workspace origin. *)
 val all_descriptors : unit -> t list
 
+(** Resolve the process-owned canonical descriptor for [id]. Callers that
+    accept descriptor records from another layer must resolve through this
+    function before treating execution, schema, or policy fields as runtime
+    authority. *)
+val find_id : string -> t option
+
 (** Objective schema-shape errors that prevent model projection. Empty means
     the descriptor has a resolved object schema whose structural fields are
     well-formed. *)
@@ -179,17 +230,25 @@ val model_schema_errors : t -> string list
     missing/structurally invalid schemas are excluded. *)
 val model_visible_descriptors : unit -> t list
 
-(** Exact schema projection admitted by the Keeper model surface. *)
-val model_visible_schemas : unit -> Masc_domain.tool_schema list
+(** RFC-0389: the model-visible descriptors narrowed to [surface]. [All]
+    returns every model-visible descriptor (pre-feature behaviour); [Declared]
+    keeps only the declared groups plus the always-retained Core/Meta. This is
+    the descriptor-level projection [make_tool_bundle] consumes so a declared
+    Keeper's actual turn payload narrows. *)
+val model_visible_descriptors_for_surface : surface:tool_surface -> t list
+
+(** Exact schema projection admitted by the Keeper model surface.
+
+    [All] returns every model-visible descriptor (the current behavior).
+    [Declared { groups }] narrows the surface to the declared groups, always
+    retaining [Core_group] and [Meta_group] (RFC-0389). *)
+val model_visible_schemas :
+  surface:tool_surface -> Masc_domain.tool_schema list
 
 (** The sole active Keeper model name. Empty only for an exact
     [Operator_only], [Transport_alias], or a descriptor without a resolved
     schema. *)
 val keeper_model_names : t -> string list
-
-(** Names admitted by the Keeper execution/candidate boundary. A preferred
-    public descriptor admits its public name and internal handler route. *)
-val keeper_candidate_names : t -> string list
 
 (** Every name owned by a descriptor, including transport-alias names. This is
     for name-integrity checks, never Keeper execution admission. *)
@@ -214,10 +273,6 @@ val translate_input_for_descriptor : t -> Yojson.Safe.t -> Yojson.Safe.t
 (** Descriptor-owned read-only projection. The returned names are internal
     handler names whose descriptor policy declares a static read-only hint. *)
 val readonly_internal_names : unit -> string list
-
-(** Descriptor-owned inline-safe projection. The returned names are internal
-    MASC tools safe for keeper use without an MCP session context. *)
-val keeper_safe_inline_names : unit -> string list
 
 val public_input_schema : string -> Yojson.Safe.t option
 val translate_input : public:string -> Yojson.Safe.t -> Yojson.Safe.t

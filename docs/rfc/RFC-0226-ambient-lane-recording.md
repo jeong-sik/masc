@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0203", "0223"]
-implementation_prs: ["20771"]
 ---
 
 # RFC-0226: Ambient lane recording — record ≠ trigger

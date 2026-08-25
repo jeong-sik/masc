@@ -11,15 +11,25 @@ open Server_routes_http_keeper_stream
 
 include Server_routes_http_routes_dashboard_setup
 
-module Keeper_chat_pending = Server_dashboard_http_keeper_chat_pending
+module Keeper_chat_operations = Server_dashboard_http_keeper_chat_operations
 module Keeper_event_queue_operator =
   Server_dashboard_http_keeper_event_queue_operator
+module Official_client_session = Server_dashboard_official_client_session
+module Official_client_probe = Server_dashboard_official_client_probe
 
 let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
 let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 let live_cache_ttl_s = Server_dashboard_http_core_cache.live_cache_ttl_s
-let realtime_cache_ttl_s = Server_dashboard_http_core_cache.realtime_cache_ttl_s
 let feature_health_cache_ttl_s = Server_dashboard_http_core_cache.feature_health_cache_ttl_s
+let exact_lane_run_permission = Masc_domain.CanAdmin
+let runtime_probe_read_permission = Masc_domain.CanReadState
+
+(* The panel draws a table; a page an operator can actually scan is ~50 rows.
+   The ceiling exists so a caller cannot ask for the whole store back and
+   reinstate the 246 MB response this paging replaced. *)
+let exact_lane_run_page_default = 50
+let exact_lane_run_page_max = 200
+let exact_lane_run_detail_prefix = "/api/v1/dashboard/exact-lane-runs/"
 
 let dashboard_actor_cache_segment state req =
   dashboard_actor_for_request
@@ -36,6 +46,19 @@ let dashboard_error_json ?ok message =
   in
   `Assoc fields
 
+let fusion_run_list_response ~registry =
+  Server_dashboard_fusion_run_projection.list_response
+    ~generated_at:(Masc_domain.now_iso ())
+    ~registry
+;;
+
+let fusion_run_detail_response ~registry ~path =
+  Server_dashboard_fusion_run_projection.detail_response
+    ~generated_at:(Masc_domain.now_iso ())
+    ~registry
+    ~path
+;;
+
 let respond_dashboard_error ?(status = `Bad_request) ?request ?ok reqd message =
   Http.Response.json_value ?request ~status
     (dashboard_error_json ?ok message)
@@ -45,6 +68,49 @@ let respond_dashboard_ok ?request reqd =
   Http.Response.json_value ?request ~compress:true
     (`Assoc [ ("ok", `Bool true) ])
     reqd
+
+let respond_official_client_session_result request reqd = function
+  | Ok json -> Http.Response.json_value ~compress:true ~request json reqd
+  | Error
+      ({ Official_client_session.kind; code; message } :
+        Official_client_session.error) ->
+    let status =
+      match kind with
+      | Bad_request -> `Bad_request
+      | Conflict -> `Conflict
+      | Service_unavailable -> `Service_unavailable
+    in
+    Http.Response.json_value
+      ~status
+      ~request
+      (`Assoc
+        [ "schema", `String "masc.dashboard.official-client-session.error.v1"
+        ; "ok", `Bool false
+        ; "error_code", `String code
+        ; "error", `String message
+        ])
+      reqd
+
+let respond_official_client_probe_result request reqd = function
+  | Ok json -> Http.Response.json_value ~compress:true ~request json reqd
+  | Error
+      ({ Official_client_probe.kind; code; message } : Official_client_probe.error) ->
+    let status =
+      match kind with
+      | Bad_request -> `Bad_request
+      | Not_found -> `Not_found
+      | Service_unavailable -> `Service_unavailable
+    in
+    Http.Response.json_value
+      ~status
+      ~request
+      (`Assoc
+        [ "schema", `String "masc.dashboard.official-client-probe.error.v1"
+        ; "ok", `Bool false
+        ; "error_code", `String code
+        ; "error", `String message
+        ])
+      reqd
 
 let execute_output_heartbeat_s = 15.0
 
@@ -161,13 +227,86 @@ let handle_execute_output_stream ~sw ~clock request reqd =
     request
     reqd
 
-let runtime_config_raw_json ~path ~source_text ~reloaded =
+let runtime_editor_protocol_json (protocol : Runtime_toml.editor_protocol) =
+  let transport =
+    match protocol.transport with
+    | Runtime_toml.Endpoint -> "endpoint"
+    | Runtime_toml.Command -> "command"
+  in
+  let semantics =
+    match protocol.semantics with
+    | Runtime_toml.Http_provider -> "http_provider"
+    | Runtime_toml.Official_client -> "official_client"
+  in
+  let credential_policy =
+    match protocol.credential_policy with
+    | Runtime_toml.Credentials_optional -> "optional"
+    | Runtime_toml.Credentials_forbidden -> "forbidden"
+  in
+  `Assoc
+    [ "protocol", `String protocol.protocol
+    ; "transport", `String transport
+    ; "semantics", `String semantics
+    ; "credential_policy", `String credential_policy
+    ; "requires_non_interactive", `Bool protocol.requires_non_interactive
+    ]
+;;
+
+let keeper_setting_payload source_text =
+  match Keeper_toml_loader.parse_toml source_text with
+  | Error detail ->
+    ( `Assoc
+        [ "valid", `Bool false
+        ; "parse_error", `String detail
+        ; "issues", `List []
+        ]
+    , `List []
+    , `Assoc
+        [ "status", `String "invalid"
+        ; "configured_count", `Int 0
+        ; "requires_restart", `Bool false
+        ; "pending_keys", `List []
+        ; "applied_keys", `List []
+        ; "preempted_keys", `List []
+        ; "applied_at", `Null
+        ] )
+  | Ok doc ->
+    ( Keeper_runtime_config.validation_report_to_yojson
+        (Keeper_runtime_config.validate_doc doc)
+    , Keeper_runtime_config.settings_projection_to_yojson doc
+    , Keeper_runtime_config.overlay_application_to_yojson doc )
+;;
+
+let runtime_config_application_json ~operation ~routing_applied_at overlay =
+  `Assoc
+    [ "operation", `String operation
+    ; ( "routing"
+      , `Assoc
+          [ "status", `String (if Option.is_some routing_applied_at then "applied" else "active")
+          ; "requires_restart", `Bool false
+          ; ( "applied_at"
+            , match routing_applied_at with
+              | Some value -> `String value
+              | None -> `Null )
+          ] )
+    ; "keeper_overlay", overlay
+    ]
+;;
+
+let runtime_config_raw_json ~path ~source_text ~operation ~routing_applied_at =
+  let validation, keeper_settings, overlay = keeper_setting_payload source_text in
   `Assoc
     [ ("ok", `Bool true)
     ; ("path", `String path)
     ; ("file_name", `String "runtime.toml")
     ; ("source_text", `String source_text)
-    ; ("reloaded", `Bool reloaded)
+    ; ( "application"
+      , runtime_config_application_json ~operation ~routing_applied_at overlay )
+    ; "validation", validation
+    ; "keeper_setting_schema", Keeper_runtime_config.setting_schema_to_yojson ()
+    ; "keeper_settings", keeper_settings
+    ; ( "provider_protocols"
+      , `List (List.map runtime_editor_protocol_json Runtime_toml.editor_protocols) )
     ]
 
 (* Line count for the audit [lines] metric. [String.split_on_char '\n'] counts a
@@ -197,17 +336,14 @@ let parse_runtime_config_raw_body body_str =
 
 type runtime_route_lane =
   | Runtime_default
-  | Runtime_cross_verifier
   | Runtime_media_failover
 
 let runtime_route_lane_to_string = function
   | Runtime_default -> "default"
-  | Runtime_cross_verifier -> "cross_verifier"
   | Runtime_media_failover -> "media_failover"
 
 let parse_runtime_route_lane = function
   | "default" -> Ok Runtime_default
-  | "cross_verifier" -> Ok Runtime_cross_verifier
   | "media_failover" -> Ok Runtime_media_failover
   | lane -> Error (Printf.sprintf "unknown runtime routing lane: %s" lane)
 
@@ -293,14 +429,12 @@ let runtime_config_path_error_status message =
   else `Internal_server_error
 
 type runtime_config_write_operation =
-  | Runtime_config_reload
   | Runtime_config_raw_save
   | Runtime_config_routing of runtime_route_lane * string option
   | Runtime_config_routing_list of runtime_route_lane * string list
   | Runtime_config_assignment of string * string option
 
 let runtime_config_write_operation_details = function
-  | Runtime_config_reload -> [ ("operation", `String "reload") ]
   | Runtime_config_raw_save -> [ ("operation", `String "raw_save") ]
   | Runtime_config_routing (lane, runtime_id) ->
     [ ("operation", `String "routing")
@@ -315,6 +449,7 @@ let runtime_config_write_operation_details = function
     (match runtime_id with
      | None -> []
      | Some id -> [ ("runtime_id", `String id) ])
+
   | Runtime_config_routing_list (lane, runtime_ids) ->
     [ ("operation", `String "routing")
     ; ("lane", `String (runtime_route_lane_to_string lane))
@@ -334,6 +469,35 @@ let runtime_config_write_operation_details = function
     (match runtime_id with
      | None -> []
      | Some id -> [ ("runtime_id", `String id) ])
+
+let runtime_config_write_operation_label = function
+  | Runtime_config_raw_save -> "raw_save"
+  | Runtime_config_routing _ | Runtime_config_routing_list _ -> "routing"
+  | Runtime_config_assignment _ -> "assignment"
+;;
+
+let keeper_validation_error_message report =
+  match
+    List.find_opt
+      (fun issue -> issue.Keeper_runtime_config.severity = Keeper_runtime_config.Error)
+      report.Keeper_runtime_config.issues
+  with
+  | Some issue -> Printf.sprintf "%s: %s" issue.key issue.detail
+  | None -> "Keeper runtime setting validation failed"
+;;
+
+let respond_keeper_validation_error ~request reqd report =
+  Http.Response.json_value
+    ~status:`Bad_request
+    ~request
+    (`Assoc
+      [ "ok", `Bool false
+      ; "error", `String (keeper_validation_error_message report)
+      ; "validation", Keeper_runtime_config.validation_report_to_yojson report
+      ; "keeper_setting_schema", Keeper_runtime_config.setting_schema_to_yojson ()
+      ])
+    reqd
+;;
 
 let audit_runtime_config_write state agent_name ?path ~operation ~text ~outcome () =
   try
@@ -365,7 +529,11 @@ let respond_runtime_config_reload state agent_name ~operation request reqd =
     audit_runtime_config_write state agent_name ~path ~operation ~text:saved_text
       ~outcome:Audit_log.Success ();
     Http.Response.json_value ~compress:true ~request
-      (runtime_config_raw_json ~path ~source_text:saved_text ~reloaded:true)
+      (runtime_config_raw_json
+         ~path
+         ~source_text:saved_text
+         ~operation:(runtime_config_write_operation_label operation)
+         ~routing_applied_at:(Some (Masc_domain.now_iso ())))
       reqd
   | Error msg ->
     respond_dashboard_error
@@ -421,6 +589,10 @@ module For_testing = struct
     | Recovery_not_requested
 
   let gate_mode_change_json = gate_mode_change_json
+  let exact_lane_run_permission = exact_lane_run_permission
+  let runtime_probe_read_permission = runtime_probe_read_permission
+  let fusion_run_detail_response = fusion_run_detail_response
+  let fusion_run_list_response = fusion_run_list_response
 end
 
 let handle_gate_mode_body state operator_name request reqd body_str =
@@ -657,23 +829,156 @@ let add_routes ~sw ~clock router =
      Fusion_run_registry.run_to_yojson so the shape matches the SSE delta. *)
   |> Http.Router.get "/api/v1/dashboard/fusion-runs" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let runs = Fusion_run_registry.list_runs (Fusion_run_registry.global ()) in
+         let json =
+           fusion_run_list_response ~registry:(Fusion_run_registry.global ())
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
+  |> Http.Router.prefix_get
+       Server_dashboard_fusion_run_projection.detail_prefix
+       (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let status, json =
+           fusion_run_detail_response
+             ~registry:(Fusion_run_registry.global ())
+             ~path:(Http.Request.path req)
+         in
+         Http.Response.json_value
+           ~status:(status :> Httpun.Status.t)
+           ~compress:true
+           ~request:req
+           json
+           reqd
+       ) request reqd)
+  (* RFC-0361 D4: read-only snapshot of the completion-authority review registry
+     (in-progress + recently completed). Sibling of the fusion route above and
+     shaped identically; each run serializes through the shared
+     Verification_run_registry.run_to_yojson so the panel and any later SSE delta
+     read one shape. Registry reads are O(runs) in-memory, so no Dashboard_cache
+     layer. *)
+  |> Http.Router.get "/api/v1/dashboard/verification-runs" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let runs =
+           Verification_run_registry.list_runs (Verification_run_registry.global ())
+         in
          let json =
            `Assoc
              [ ("generated_at", `String (Masc_domain.now_iso ()))
              ; ("count", `Int (List.length runs))
-             ; ("runs", `List (List.map Fusion_run_registry.run_to_yojson runs))
+             ; ("runs", `List (List.map Verification_run_registry.run_to_yojson runs))
              ]
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/goal-verification-runs" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let runs =
+           Goal_verification_run_registry.list_runs
+             (Goal_verification_run_registry.global ())
+         in
+         let json =
+           `Assoc
+             [ ("generated_at", `String (Masc_domain.now_iso ()))
+             ; ("count", `Int (List.length runs))
+             ; ( "runs"
+               , `List
+                   (List.map
+                      Goal_verification_run_registry.run_to_yojson
+                      runs) )
+             ]
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
+  (* Paged, and without either exact payload. Serving every retained run with
+     its payloads made this one response 246 MB for 5,908 runs — the whole
+     rendered prompt of every lane run, to draw a table of timestamps — and the
+     panel re-fetched it on every internal_agent_runs_changed event. A page
+     carries identity and outcome; [exact-lane-runs/<run_id>] carries the
+     payloads for the one run an operator opened. *)
+  |> Http.Router.get "/api/v1/dashboard/exact-lane-runs" (fun request reqd ->
+       with_token_permission_auth ~permission:exact_lane_run_permission
+         (fun _state _agent_name req reqd ->
+         let limit =
+           Server_utils.int_query_param req "limit" ~default:exact_lane_run_page_default
+           |> Server_utils.clamp ~min_v:1 ~max_v:exact_lane_run_page_max
+         in
+         (* Both halves of the cursor or neither: a started_at without its
+            run_id cannot break a tie, and silently paging from a half-given
+            boundary would skip runs recorded in the same float second. *)
+         let before =
+           match
+             ( Option.bind (Server_utils.query_param req "before_started_at") float_of_string_opt
+             , Server_utils.query_param req "before_run_id" )
+           with
+           | Some started_at, Some run_id when not (String.equal (String.trim run_id) "") ->
+             Ok (Some (started_at, run_id))
+           | None, None -> Ok None
+           | _ -> Error "before_started_at and before_run_id must be given together"
+         in
+         match before with
+         | Error message -> respond_dashboard_error ~request:req reqd message
+         | Ok before ->
+           let page =
+             Exact_lane_run_registry.recent_runs
+               (Exact_lane_run_registry.global ())
+               ~limit
+               ~before
+           in
+           let json =
+             `Assoc
+               [ ("generated_at", `String (Masc_domain.now_iso ()))
+               ; ("count", `Int (List.length page.runs))
+               ; ("total", `Int page.total)
+               ; ("has_more", `Bool page.has_more)
+               ; ( "runs"
+                 , `List
+                     (List.map Exact_lane_run_registry.run_summary_to_yojson page.runs) )
+               ]
+           in
+           Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
+  |> Http.Router.prefix_get "/api/v1/dashboard/exact-lane-runs/" (fun request reqd ->
+       with_token_permission_auth ~permission:exact_lane_run_permission
+         (fun _state _agent_name req reqd ->
+         let run_id =
+           String.length exact_lane_run_detail_prefix
+           |> fun offset ->
+           let target = Uri.path (Uri.of_string req.Httpun.Request.target) in
+           if String.length target <= offset
+           then ""
+           else String.sub target offset (String.length target - offset)
+         in
+         let run_id = Uri.pct_decode run_id in
+         if String.equal (String.trim run_id) ""
+         then respond_dashboard_error ~request:req reqd "run_id is required"
+         else (
+           match
+             Exact_lane_run_registry.get (Exact_lane_run_registry.global ()) ~run_id
+           with
+           | None ->
+             respond_dashboard_error
+               ~status:`Not_found
+               ~request:req
+               reqd
+               ("no retained exact-lane run named " ^ run_id)
+           | Some run ->
+             Http.Response.json_value
+               ~compress:true
+               ~request:req
+               (`Assoc
+                  [ ("generated_at", `String (Masc_domain.now_iso ()))
+                  ; ("run", Exact_lane_run_registry.run_to_yojson run)
+                  ])
+               reqd)
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/workspace" (fun request reqd ->
        with_public_read handle_dashboard_workspace request reqd)
-  (* Dev-only Worker bearer for the dashboard UI. Served exclusively when the
-     server binds to loopback and strict-auth env overrides are disabled, so
-     that a LAN deployment never hands out a credential over the wire. The
-     token is canonicalized to the [dashboard] actor and persisted at
-     [.masc/auth/dashboard.token]. *)
+  (* Dev-only bearer for the dashboard UI, minted at the role named by
+     [Server_routes_http_dashboard_dev_token.dashboard_dev_role]. Served
+     exclusively when the server binds to loopback and strict-auth env
+     overrides are disabled, so that a LAN deployment never hands out a
+     credential over the wire. The token is canonicalized to the [dashboard]
+     actor and persisted at [.masc/auth/dashboard.token]. *)
   |> Http.Router.get "/api/v1/dashboard/dev-token" (fun request reqd ->
        if (not (http_auth_bind_is_loopback ()))
           || http_auth_strict_enabled () then
@@ -726,7 +1031,7 @@ let add_routes ~sw ~clock router =
          let json = dashboard_runtime_probe_http_json ~force () in
          Http.Response.json_value ~compress:true ~request:req json reqd
        in
-       with_tool_auth ~tool_name:"masc_runtime_ollama_probe" handle request reqd)
+       with_permission_auth ~permission:runtime_probe_read_permission handle request reqd)
   |> Http.Router.get "/api/v1/dashboard/runtime-defaults" (fun request reqd ->
        (* Structured, already-resolved runtime defaults / model routing for the
           Settings surface. Read-only projection of the runtime.toml SSOT
@@ -753,13 +1058,53 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd)
          request reqd)
+  |> Http.Router.get "/api/v1/runtime/sessions/official-client" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           let keeper_name =
+             Option.value
+               (Server_utils.query_param req "keeper_name")
+               ~default:""
+           in
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           respond_official_client_session_result
+             req
+             reqd
+             (Official_client_session.snapshot ~base_path ~keeper_name))
+         request reqd)
+  |> Http.Router.post "/api/v1/runtime/official-client/probe" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             let base_path = (Mcp_server.workspace_config state).base_path in
+             respond_official_client_probe_result
+               req
+               reqd
+               (Official_client_probe.probe_body ~base_path ~body)))
+         request reqd)
+  |> Http.Router.post "/api/v1/runtime/sessions/official-client/resolve" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             respond_official_client_session_result
+               req
+               reqd
+               (Official_client_session.resolve_body
+                  ~config:(Mcp_server.workspace_config state)
+                  ~actor:agent_name
+                  ~body)))
+         request reqd)
   |> Http.Router.get "/api/v1/runtime/config/raw" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun _state _agent_name req reqd ->
            match Runtime.load_config_text () with
            | Ok (path, source_text) ->
              Http.Response.json_value ~compress:true ~request:req
-               (runtime_config_raw_json ~path ~source_text ~reloaded:false)
+               (runtime_config_raw_json
+                  ~path
+                  ~source_text
+                  ~operation:"read"
+                  ~routing_applied_at:None)
                reqd
            | Error msg ->
              respond_dashboard_error
@@ -786,6 +1131,55 @@ let add_routes ~sw ~clock router =
              respond_dashboard_error ~status:`Internal_server_error
                ~request:req reqd msg)
          request reqd)
+  |> Http.Router.post "/api/v1/runtime/config/raw/preview" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             match parse_runtime_config_raw_body body_str with
+             | Error msg ->
+               respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+             | Ok source_text ->
+               (match Keeper_runtime_config.validate_source_text source_text with
+                | Error msg ->
+                  respond_dashboard_error
+                    ~status:`Bad_request
+                    ~request:req
+                    reqd
+                    ("runtime config parse failed: " ^ msg)
+                | Ok report ->
+                  let schema_ok =
+                    Keeper_runtime_config.validation_report_is_valid report
+                  in
+                  (* The raw-save path (Runtime.save_config_text) rejects text
+                     that parses and passes the keeper schema but fails the
+                     runtime parser. Run that same precondition here so can_save
+                     cannot advertise a save guaranteed to fail. Mirror the save
+                     order: the runtime check only runs once the schema is
+                     valid. *)
+                  let runtime_error =
+                    if schema_ok
+                    then (
+                      match Runtime.validate_config_text source_text with
+                      | Ok () -> None
+                      | Error msg -> Some msg)
+                    else None
+                  in
+                  let can_save = schema_ok && Option.is_none runtime_error in
+                  Http.Response.json_value
+                    ~compress:true
+                    ~request:req
+                    (`Assoc
+                      [ "ok", `Bool true
+                      ; "can_save", `Bool can_save
+                      ; "validation", Keeper_runtime_config.validation_report_to_yojson report
+                      ; ( "runtime_validation"
+                        , match runtime_error with
+                          | None -> `Null
+                          | Some msg -> `String msg )
+                      ; "keeper_setting_schema", Keeper_runtime_config.setting_schema_to_yojson ()
+                      ])
+                    reqd)))
+         request reqd)
   |> Http.Router.post "/api/v1/runtime/config/raw" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state agent_name req reqd ->
@@ -798,15 +1192,33 @@ let add_routes ~sw ~clock router =
                   audit trail (actor + path + size) on top of the CanAdmin gate.
                   The config body is deliberately excluded: runtime.toml can carry
                   provider secrets (RFC-0132 redaction). *)
-               (match Runtime.save_config_text source_text with
+               (match Keeper_runtime_config.validate_source_text source_text with
                 | Error msg ->
                   audit_runtime_config_write state agent_name
                     ~operation:Runtime_config_raw_save ~text:source_text
                     ~outcome:(Audit_log.Failure msg) ();
-                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok () ->
-                  respond_runtime_config_reload state agent_name
-                    ~operation:Runtime_config_raw_save req reqd)
+                  respond_dashboard_error
+                    ~status:`Bad_request
+                    ~request:req
+                    reqd
+                    ("runtime config parse failed: " ^ msg)
+                | Ok report
+                  when not (Keeper_runtime_config.validation_report_is_valid report) ->
+                  let detail = keeper_validation_error_message report in
+                  audit_runtime_config_write state agent_name
+                    ~operation:Runtime_config_raw_save ~text:source_text
+                    ~outcome:(Audit_log.Failure detail) ();
+                  respond_keeper_validation_error ~request:req reqd report
+                | Ok _ ->
+                  (match Runtime.save_config_text source_text with
+                   | Error msg ->
+                     audit_runtime_config_write state agent_name
+                       ~operation:Runtime_config_raw_save ~text:source_text
+                       ~outcome:(Audit_log.Failure msg) ();
+                     respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+                   | Ok () ->
+                     respond_runtime_config_reload state agent_name
+                       ~operation:Runtime_config_raw_save req reqd))
            )
          ) request reqd)
   |> Http.Router.post "/api/v1/runtime/config/routing" (fun request reqd ->
@@ -831,20 +1243,6 @@ let add_routes ~sw ~clock router =
              | Ok (Runtime_route_runtime_id (Runtime_default, None)) ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd
                  "default runtime_id required"
-             | Ok (Runtime_route_runtime_id (Runtime_cross_verifier, runtime_id)) ->
-               (match Runtime.set_runtime_cross_verifier ~runtime_id () with
-                | Error msg ->
-                  audit_runtime_config_write state agent_name
-                    ~operation:
-                      (Runtime_config_routing (Runtime_cross_verifier, runtime_id))
-                    ~text:body_str
-                    ~outcome:(Audit_log.Failure msg) ();
-                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok () ->
-                  respond_runtime_config_reload state agent_name
-                    ~operation:
-                      (Runtime_config_routing (Runtime_cross_verifier, runtime_id))
-                    req reqd)
              | Ok (Runtime_route_runtime_id (Runtime_media_failover, _)) ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd
                  "media_failover runtime_ids required"
@@ -974,10 +1372,14 @@ let add_routes ~sw ~clock router =
              Log.Ring.recent ~limit ~min_level ~module_filter ?since_seq
                ?before_seq ?category_filter ?exclude_category ()
            in
+           (* Bounds read after the slice: seqs are monotonic, so the
+              window can only have grown — never claims more history
+              than the slice actually had available. *)
+           let ring_bounds = Log.Ring.bounds () in
            let json =
              dashboard_logs_json ~config:(Mcp_server.workspace_config state) ~limit
                ~level_filter ~applied_level ~min_level ~module_filter ~since_seq
-               ~before_seq ~category_filter ~exclude_category entries
+               ~before_seq ~category_filter ~exclude_category ~ring_bounds entries
            in
            Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -1066,20 +1468,6 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/namespace-truth" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let timing = Server_timing.create () in
-         (* RFC-0138 Phase 3 Step 3: wait-free read via
-            [Dashboard_snapshot.current ()].namespace_truth when the
-            refresh fiber has populated it.  Cold start (or refresh
-            spawned without ~state) falls through to the synchronous
-            namespace-truth path inside the timing measurement. *)
-         let json =
-           Server_dashboard_snapshot_select.select_project_snapshot_json
-             ~state ~sw ~clock ~timing req
-         in
-         Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
-       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution" (fun request reqd ->
        with_public_read (fun state req reqd ->
          (* The default execution surface is a large proactive cached snapshot.
@@ -1125,15 +1513,10 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/audit-integrity" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let base_path = (Mcp_server.workspace_config state).base_path in
-         let cache_key = Printf.sprintf "audit_integrity:%s" base_path in
+  |> Http.Router.get "/api/v1/dashboard/runtime-observables" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               Server_dashboard_http_audit_integrity.audit_integrity_http_json
-                 ~base_path))
+           Server_dashboard_http_runtime_observables.runtime_observables_http_json ()
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -1155,8 +1538,6 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd
              (handle_gate_mode_body state operator_name request reqd))
          request reqd)
-  |> Http.Router.get "/api/v1/dashboard/repository-observation-snapshot" (fun request reqd ->
-       Server_dashboard_http.handle_repository_observation_snapshot ~sw ~clock request reqd)
   |> Http.Router.get "/api/v1/dashboard/proof" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json =
@@ -1194,18 +1575,17 @@ let add_routes ~sw ~clock router =
              (handle_gate_rule_delete_body state request reqd))
          request reqd)
 
-  (* Dashboard SSE hydrates the same caches, so this path services HTTP
-     fallbacks before SSE attaches and explicit tab refreshes. *)
   |> Http.Router.get "/api/v1/operator" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let cache_key =
-           Printf.sprintf "operator_snapshot:%s"
-             (Mcp_server.workspace_config state).base_path
-         in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:realtime_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               operator_snapshot_http_json ~state ~sw ~clock req))
+           operator_snapshot_http_json
+             ~state
+             ~sw
+             ~clock
+             ~broadcast_snapshot:
+               Server_dashboard_http_execution_surfaces
+               .broadcast_operator_snapshot
+             req
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -1359,6 +1739,18 @@ let add_routes ~sw ~clock router =
            in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)
+  (* Schedule projection, served by its owner. The no-query aggregate keeps its
+     shared live cache; an exact schedule_id lookup reads the same ledger and
+     row encoder without adding a client-controlled cache key. *)
+  |> Http.Router.get "/api/v1/dashboard/scheduled-automation" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let json =
+           Server_dashboard_http.dashboard_scheduled_automation_query_http_json
+             ~config:(Mcp_server.workspace_config state)
+             req
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/briefing/sections" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json =
@@ -1413,41 +1805,16 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/keeper-feature-proof" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let window_hours =
-           match Server_utils.query_param req "window_hours" with
-           | Some s ->
-             (match float_of_string_opt s with
-              | Some value when Float.is_finite value ->
-                Some (max 0.1 (min 168.0 value))
-              | Some _ | None -> None)
-           | None -> None
-         in
-         let config = (Mcp_server.workspace_config state) in
-         let cache_key =
-           Printf.sprintf "keeper_feature_proof:%s:%s"
-             config.base_path
-             (match window_hours with
-              | Some w -> Printf.sprintf "%.2f" w
-              | None -> "-")
-         in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               Dashboard_keeper_feature_proof.json
-                 ~config ?window_hours ()))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/transport-health" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let cache_key = "transport_health" in
-         let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_transport_health_http_json ~state))
-         in
+         (* No route cache here. The producer is not a computation — it reads a
+            published cell and derives cache_state, stale_reason and
+            stale_age_ms from it. A second 30s cache in front of that served
+            the previous "fresh" payload after the inner surface had gone to an
+            error state, and froze stale_age_ms, so a client watching the age
+            saw it stand still while the surface aged (#27652). Every other
+            route cache on this router wraps an actual computation. *)
+         let json = dashboard_transport_health_http_json ~state in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/perf" (fun request reqd ->
@@ -1561,18 +1928,18 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/oas/telemetry/recent" (fun request reqd ->
+  |> Http.Router.get "/api/v1/dashboard/agent_core/telemetry/recent" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let provider = oas_telemetry_provider_param req in
-         let limit = oas_telemetry_limit_param req in
-         let json = Dashboard_oas_bridge.recent_json ?provider ~limit () in
+         let provider = agent_core_telemetry_provider_param req in
+         let limit = agent_core_telemetry_limit_param req in
+         let json = Dashboard_agent_core_bridge.recent_json ?provider ~limit () in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/oas/telemetry/summary" (fun request reqd ->
+  |> Http.Router.get "/api/v1/dashboard/agent_core/telemetry/summary" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let provider = oas_telemetry_provider_param req in
-         let limit = oas_telemetry_limit_param req in
-         let json = Dashboard_oas_bridge.summary_json ?provider ~limit () in
+         let provider = agent_core_telemetry_provider_param req in
+         let limit = agent_core_telemetry_limit_param req in
+         let json = Dashboard_agent_core_bridge.summary_json ?provider ~limit () in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
 
@@ -1610,62 +1977,81 @@ let add_routes ~sw ~clock router =
          )
        ) request reqd)
 
-  |> Http.Router.prefix_get "/api/v1/keepers/chat/requests/" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_keeper_delegate_status"
-         (fun state caller _req reqd ->
-           handle_keeper_chat_request_result ~caller state request reqd)
-         request reqd)
-
-  |> Http.Router.prefix_post "/api/v1/keepers/chat/requests/" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_keeper_delegate_cancel"
-         (fun state caller _req reqd ->
-           handle_keeper_chat_request_cancel ~caller state request reqd)
-         request reqd)
-
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
-       match
-         Keeper_event_queue_operator.pending_get_route
-           (Http.Request.path request)
-       with
-       | Some keeper_name ->
+       match Keeper_chat_operations.get_route (Http.Request.path request) with
+       | Some route ->
          with_token_permission_auth
-           ~permission:Keeper_event_queue_operator.operator_permission
-           (fun state _agent_name _req reqd ->
-             Keeper_event_queue_operator.handle_get
-               state
-               request
-               reqd
-               ~keeper_name)
-           request reqd
+           ~permission:Keeper_chat_operations.read_permission
+           (fun state _agent_name req reqd ->
+             Keeper_chat_operations.handle_get state req reqd route)
+           request
+           reqd
        | None ->
-       match Keeper_chat_pending.pending_get_route (Http.Request.path request) with
-       | Some keeper_name ->
-         with_token_permission_auth
-           ~permission:Keeper_chat_pending.operator_permission
-           (fun state _agent_name _req reqd ->
-             Keeper_chat_pending.handle_get state request reqd ~keeper_name)
-           request reqd
-       | None ->
-         if
-           Keeper_api.is_keeper_checkpoints_get_path (Http.Request.path request)
-           || Keeper_api.is_keeper_paused_work_get_path (Http.Request.path request)
-         then
-           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (match
+            Keeper_api.keeper_get_permission
+              ~include_thinking:
+                (Server_utils.bool_query_param request "include_thinking"
+                   ~default:false)
+              (Http.Request.path request)
+          with
+          | Some permission ->
+           with_token_permission_auth ~permission
              (fun state _agent_name req reqd ->
                Keeper_api.handle_keeper_get_subroutes state req request reqd
              ) request reqd
-         else
+          | None ->
            with_public_read (fun state req reqd ->
              Keeper_api.handle_keeper_get_subroutes state req request reqd
-           ) request reqd)
+           ) request reqd))
 
   |> Http.Router.post "/api/v1/keepers/turn/interrupt" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
          handle_keeper_turn_interrupt state request reqd) request reqd)
 
+  (* Answers a tool call the keeper is holding. Same authority as interrupting
+     a turn: both decide what a running turn is allowed to do next. *)
+  |> Http.Router.post "/api/v1/keepers/tool-approval" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
+         handle_keeper_tool_approval state request reqd) request reqd)
+
+  (* Lists the tool calls keepers are holding, so a wait whose owning stream
+     watcher is gone can still be answered instead of only timing out
+     (masc#30034). Read authority follows the operator snapshot (public
+     read): the listing names what is being asked; answering stays behind
+     the authed POST above. *)
+  |> Http.Router.get "/api/v1/keepers/tool-approvals" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         handle_keeper_tool_approvals_list state request reqd) request reqd)
+
+  (* The per-keeper approval stance the gate consults per call. Reading the
+     overrides is a public-read projection like the listing above; setting
+     one decides what a running turn may do next, so it carries the same
+     authority as answering a held call. *)
+  |> Http.Router.get "/api/v1/keepers/tool-approval-mode" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         handle_keeper_tool_approval_mode_get state request reqd) request reqd)
+  |> Http.Router.post "/api/v1/keepers/tool-approval-mode" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
+         handle_keeper_tool_approval_mode_set state request reqd) request reqd)
+
   (* Keeper POST sub-routes. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->
+       match Keeper_chat_operations.mutation_route (Http.Request.path request) with
+       | Some route ->
+         with_token_permission_auth
+           ~permission:Keeper_chat_operations.mutation_permission
+           (fun state _agent_name req reqd ->
+             Http.Request.read_body_async reqd (fun body_str ->
+               Keeper_chat_operations.handle_mutation
+                 state
+                 req
+                 reqd
+                 route
+                 body_str))
+           request
+           reqd
+       | None ->
        match Keeper_event_queue_operator.route (Http.Request.path request) with
        | Some keeper_name ->
          with_token_permission_auth
@@ -1681,37 +2067,7 @@ let add_routes ~sw ~clock router =
                  body_str))
            request reqd
        | None ->
-       match Keeper_chat_pending.pending_mutation_route (Http.Request.path request) with
-       | Some (keeper_name, receipt_id, mutation) ->
-         with_token_permission_auth
-           ~permission:Keeper_chat_pending.operator_permission
-           (fun state agent_name req reqd ->
-             Http.Request.read_body_async reqd (fun body_str ->
-               Keeper_chat_pending.handle_mutation_post
-                 state
-                 ~actor:agent_name
-                 req
-                 reqd
-                 ~keeper_name
-                 ~raw_receipt_id:receipt_id
-                 ~mutation
-                 body_str))
-           request reqd
-       | None ->
        match Keeper_api.classify_keeper_post_route (Http.Request.path request) with
-       | Keeper_api.Keeper_post_chat_recovery { keeper_name; receipt_id } ->
-            with_token_permission_auth ~permission:Masc_domain.CanAdmin
-             (fun state agent_name req reqd ->
-               Http.Request.read_body_async reqd (fun body_str ->
-                 Keeper_api.handle_keeper_chat_recovery_post
-                   state
-                   agent_name
-                   req
-                   reqd
-                   ~keeper_name
-                   ~raw_receipt_id:receipt_id
-                   body_str))
-             request reqd
        | Keeper_api.Keeper_post_board_attention_quarantine_recovery
            { keeper_name; partition_id } ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
@@ -1740,11 +2096,25 @@ let add_routes ~sw ~clock router =
                  Keeper_api.handle_keeper_secrets_post state req reqd body_str
                )
              ) request reqd
+       | Keeper_api.Keeper_post_github_login ->
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+             (fun state _agent_name req reqd ->
+               Keeper_api.handle_keeper_github_login_post state req reqd)
+             request reqd
        | Keeper_api.Keeper_post_boot ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->
                Keeper_api.handle_keeper_lifecycle_post ~sw ~clock ~tool_name:"masc_keeper_up"
                  ~action:"boot" state agent_name req reqd
+             ) request reqd
+       | Keeper_api.Keeper_post_up ->
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+             (fun state agent_name req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                   Keeper_api.handle_keeper_lifecycle_post ~body_str ~sw ~clock
+                     ~tool_name:"masc_keeper_up" ~action:"up"
+                     state agent_name req reqd
+               )
              ) request reqd
        | Keeper_api.Keeper_post_shutdown ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
@@ -1789,11 +2159,19 @@ let add_routes ~sw ~clock router =
                  Keeper_api.handle_keeper_paused_work_post state req reqd body_str
                )
              ) request reqd
-       | Keeper_api.Keeper_post_catchup_judge ->
+       | Keeper_api.Keeper_post_fusion ->
            with_tool_auth ~tool_name:"masc_fusion"
              (fun state req reqd ->
                Http.Request.read_body_async reqd (fun body_str ->
-                 Keeper_api.handle_keeper_catchup_judge_post state req reqd body_str
+                 Keeper_api.handle_keeper_fusion_post state req reqd body_str
+               )
+             ) request reqd
+       | Keeper_api.Keeper_post_operator_note ->
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+             (fun state agent_name req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 Keeper_api.handle_keeper_operator_note_post
+                   state agent_name req reqd body_str
                )
              ) request reqd
        | Keeper_api.Keeper_post_unknown ->

@@ -1,9 +1,9 @@
 (** Durable, capacity-agnostic Board-attention judgment partitions.
 
     Every currently-unassigned non-terminal candidate receives one singleton
-    root. MASC owns candidate membership and this durable state machine. OAS
+    root. MASC owns candidate membership and this durable state machine. AGENT_CORE
     owns admission, dispatch, and advancement; this module persists only opaque
-    attempt provenance supplied by OAS. Runtime transitions append one
+    attempt provenance supplied by AGENT_CORE. Runtime transitions append one
     cursor-fenced row. Only process-start recovery canonically compacts the
     history. *)
 
@@ -30,7 +30,7 @@ type exact_provenance =
   ; plan_fingerprint : string
   ; request_body_sha256 : string
   }
-(** Opaque OAS attempt identity. MASC compares and persists these fields but
+(** Opaque AGENT_CORE attempt identity. MASC compares and persists these fields but
     never derives provider, model, tier, retry, or failover policy from them. *)
 
 type candidate_visit =
@@ -41,13 +41,13 @@ type candidate_visit =
   ; catalog_evidence_sha256 : string
   ; target_identity_fingerprint : string
   }
-(** OAS-selected successor visit before an attempt exists. It deliberately has
+(** AGENT_CORE-selected successor visit before an attempt exists. It deliberately has
     no call id, request plan, body hash, provider, model, or credential. *)
 
 type advance_source =
   | Executed_failure of exact_provenance
   | Predispatch_rejection of candidate_visit
-(** Opaque source of one OAS advancement. A predispatch rejection has no
+(** Opaque source of one AGENT_CORE advancement. A predispatch rejection has no
     execution receipt and therefore carries only its candidate visit. *)
 
 type running_progress =
@@ -161,8 +161,8 @@ val bind_before_dispatch :
   (exact_transition, string) result
 (** Cursor-fenced durable [before_dispatch] callback. The call moves
     [Unbound -> Bound]. An idempotent repeat retains the same binding so only
-    [Fsync_completed] authorizes OAS dispatch. An [Advancing] partition accepts
-    only the OAS-selected successor slot. *)
+    [Fsync_completed] authorizes AGENT_CORE dispatch. An [Advancing] partition accepts
+    only the AGENT_CORE-selected successor slot. *)
 
 val record_before_advance :
   worker_epoch:Worker_epoch.t ->
@@ -171,10 +171,10 @@ val record_before_advance :
   source:advance_source ->
   next:candidate_visit ->
   (exact_transition, string) result
-(** Atomically persist every OAS-selected advancement. Executed failure starts
+(** Atomically persist every AGENT_CORE-selected advancement. Executed failure starts
     from its exact binding; predispatch rejection carries only its immutable
     candidate visit and may advance an existing [Advancing.next]. [next] is
-    OAS-selected, never a MASC successor decision. Only [Fsync_completed]
+    AGENT_CORE-selected, never a MASC successor decision. Only [Fsync_completed]
     authorizes advancement. *)
 
 val complete :

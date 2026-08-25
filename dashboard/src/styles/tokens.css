@@ -113,12 +113,8 @@
   --k-rama-border: rgb(138 106 160 / .35);
   --k-rama-ring:   0 0 0 1px rgb(138 106 160 / .45), 0 0 8px rgb(138 106 160 / .35);
 
-  /* RFC-0168: per-provider color palette + soft/border variants
-     were removed in the big-bang sweep. No production consumers
-     existed (the tokens were referenced only in their own
-     generator + tests). If a provider-distinct visual treatment is
-     needed in the future, derive it from runtime palette entries
-     (operator-supplied) rather than a hardcoded palette. */
+  /* A provider-distinct visual treatment derives from runtime palette
+     entries (operator-supplied), never from a hardcoded vendor roster. */
 
   /* Diff — muted overlay tints on top of bg */
   --diff-add:     rgb(107 158 107 / .08);
@@ -449,7 +445,10 @@ code, kbd, samp, pre, .mono { font-family: var(--font-mono); }
 
 /* Buttons — minimal chrome */
 button, .btn {
-  font: inherit;
+  /* No `font: inherit` here. Tailwind's preflight already gives every <button>
+     the inherited font, and the shorthand's line-height component pinned the
+     button to the 1.55 prose leading, which is what made the design's dense
+     button-built rows (log lines, chips, kanban cards) grow ~10%. */
   background: transparent;
   color: var(--fg-2);
   border: 1px solid var(--line-2);

@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0064", "0179"]
-implementation_prs: []
 ---
 
 # RFC-0182 — masc_* Workspace Tool Descriptor Projection + Tool_spec SSOT Consolidation
@@ -96,7 +95,7 @@ After the body merged (PR #18726 → renumber #18731), a 5-prong dead/live audit
 | Verdict | Tools | Decision |
 |---|---|---|
 | **dead** (no handler, no live caller) | `masc_execute`, `masc_execute_dry_run`, `masc_admin_cleanup`, `masc_admin_reset`, `masc_gc_force`, `masc_workspace_delete`, `masc_force_unbind` | delete tool_catalog metadata; do not migrate |
-| **dead** (after ambiguous decision) | `masc_spawn` (dispatch explicitly removed with comment `"masc_spawn removed: vendor-specific agent spawning belongs to OAS domain"` at `mcp_tool_runtime.ml:287`; metadata and test fixture left behind) | delete metadata + test fixture (completes the in-progress cleanup) |
+| **dead** (after ambiguous decision) | `masc_spawn` (dispatch explicitly removed with comment `"masc_spawn removed: vendor-specific agent spawning belongs to agent_core domain"` at `mcp_tool_runtime.ml:287`; metadata and test fixture left behind) | delete metadata + test fixture (completes the in-progress cleanup) |
 | **live at audit time** | `masc_bind`, `masc_unbind`, `masc_broadcast`, `masc_messages`, `channel_gate`, `masc_set_param` plus one subsequently retired membership mutation entry | migrate surviving entries to `Tool_spec.register`; descriptor projection added |
 | **deferred** (separate RFC) | `masc_portal_open`, `masc_portal_close`, `masc_portal_send` | live, but dispatch is at `mcp_server_eio_protocol.ml` protocol level — not in-process. This RFC's cluster-variant pattern does not fit. Tracked for a separate RFC (RFC-0183 candidate). Excluded from this RFC's scope. |
 
@@ -115,7 +114,7 @@ Add 113 entries to `internal_descriptors` in `lib/keeper/agent_tool_descriptor.m
 | Cluster | Tools | Cluster variant |
 |---|---|---|
 | `masc_board_*` (incl. sub_board) | ~20 | `Tool_masc_board_dispatch` |
-| `masc_keeper_*` / `masc_persona_*` | ~19 | `Tool_masc_keeper_dispatch` |
+| `masc_keeper_*` | ~19 | `Tool_masc_keeper_dispatch` |
 | `masc_plan_*` / `masc_note_*` | ~8 | `Tool_masc_plan_dispatch` |
 | `masc_workspace_*` (workspace status/heartbeat/goal) | ~8 | `Tool_masc_workspace_dispatch` |
 | `masc_task_*` | ~7 | `Tool_masc_task_dispatch` |
@@ -170,7 +169,7 @@ masc_workspace_delete        — no handler, no dispatch, no live caller
 masc_force_unbind        — no handler, no dispatch, no live caller
 masc_spawn              — dispatch explicitly removed (mcp_tool_runtime.ml:287
                           comment `"masc_spawn removed: vendor-specific agent
-                          spawning belongs to OAS domain"`), metadata+test left
+                          spawning belongs to agent_core domain"`), metadata+test left
                           behind. This RFC completes the cleanup.
 ```
 
@@ -257,12 +256,12 @@ Implementation PR target diff: ~1200-1800 LoC, ~8-9 files (`agent_tool_descripto
 The original §11 had three open architectural questions. The post-merge audit (§2a) and user decision chain resolved them as follows:
 
 - **Q1 (module layout)** — *resolved*: existing dispatchers only. Keep approval dispatch in the keeper-owned surface (`Keeper_tool_surface` / `Keeper_tool_in_process_runtime`). The immutable tool-family catalog is not a runtime authorization dispatcher. `masc_set_param` stays with `mcp_tool_runtime.ml`. Rationale in §3.2.
-- **Q2 (`channel_gate` rename)** — *resolved*: keep as-is. The audit (§2a) confirmed `channel_gate` is live with HTTP subsystem dispatch (`server_routes_http_routes_channel_gate.ml`). Renaming would force prompt/persona/config updates with no architectural benefit; the unconventional name is preserved for backward compatibility. Migration is to `Tool_spec.register` only.
+- **Q2 (`channel_gate` rename)** — *resolved*: keep as-is. The audit (§2a) confirmed `channel_gate` is live with HTTP subsystem dispatch (`server_routes_http_routes_channel_gate.ml`). Renaming would force prompt/keeper/config updates with no architectural benefit; the unconventional name is preserved for backward compatibility. Migration is to `Tool_spec.register` only.
 - **Q3 (`masc_set_param` visibility)** — *resolved*: keep `Hidden`. The audit confirmed live HTTP dispatch with admin auth (`server_routes_http_routes_activity.ml:with_tool_auth`). Visibility-level isolation reflects the original design intent (internal HTTP runtime-parameter mutation route). Registered as `Tool_spec.create ~visibility:Hidden ~required_permission:(Some CanAdmin)`.
 
 ## 12. Phase 5 — Eio plumbing for remaining 9 tools (post-#18823)
 
-After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverage), the remaining 9 unprojected tools all require Eio resources (`sw`, `clock`, `proc_mgr`, `net`, `mcp_session_id`) that are not present in the current `Keeper_dispatch_ref.dispatch` / `Workspace_dispatch_ref.dispatch` / `Persona_dispatch_ref.dispatch` signatures.
+After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverage), the remaining 9 unprojected tools all require Eio resources (`sw`, `clock`, `proc_mgr`, `net`, `mcp_session_id`) that are not present in the current `Keeper_dispatch_ref.dispatch` / `Workspace_dispatch_ref.dispatch` / `Keeper_dispatch_ref.dispatch` signatures.
 
 ### 12.1 Tools blocked on Eio context
 
@@ -270,8 +269,8 @@ After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverag
 |---|---|---|
 | `masc_keeper_up` | `start_keepalive ~sw ~clock` | `Keeper_keepalive.start_keepalive` (lib/keeper/keeper_keepalive.ml:451) |
 | `masc_keeper_msg` | `Keeper_msg_async.submit ~clock ~sw` + Turn dispatch | `Tool_keeper_ops.handle_keeper_msg` (lib/tool_keeper_ops.ml:438) |
-| `masc_keeper_create_from_persona` | `execute_keeper_up` → Turn lifecycle | `Tool_keeper_ops.handle_keeper_create_from_persona` |
-| `masc_persona_generate` | retired on main | no backing function |
+| `masc_keeper_up` | `execute_keeper_up` → Turn lifecycle | `Tool_keeper_ops.handle_keeper_create_from_keeper` |
+| `masc_keeper_generate` | retired on main | no backing function |
 | `masc_operator_snapshot` | `Operator_control.context` (sw/clock/proc_mgr/net/mcp_session_id) | `Tool_operator.dispatch` |
 | `masc_operator_digest` | same | same |
 | `masc_operator_action` | same | same |
@@ -306,7 +305,7 @@ After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverag
 
 | Cluster | Mechanism | Notes |
 |---|---|---|
-| `masc_keeper_{up,msg,create_from_persona}` | Keeper_dispatch_ref signature extension (Tool_keeper-side registration) | Same dispatch-ref pattern; ref signature adds `~sw ~clock ~proc_mgr ~net` |
+| `masc_keeper_{up,msg,create_from_keeper}` | Keeper_dispatch_ref signature extension (Tool_keeper-side registration) | Same dispatch-ref pattern; ref signature adds `~sw ~clock ~proc_mgr ~net` |
 | `masc_operator_*` (5) | New `Operator_dispatch_ref` OR direct `Tool_operator.dispatch` import | Tool_operator is in lib/, sits LATE.  Direct import from Agent_tool_in_process_runtime closes cycle (Tool_operator → Operator_control → Keeper_runtime → ...).  Use dispatch-ref. |
 
 ### 12.4 Estimated PR sizes
@@ -336,7 +335,7 @@ Each sub-PR independently mergeable, gated by PR-A.
 From the 17-iter /loop session that built PR #18823:
 
 1. `Eio_guard.with_mutex` (Eio.Mutex.create) — pure inside [`Keeper_status_detail`](../../lib/keeper/keeper_status_detail.ml).  Did NOT block status projection.
-2. Persona authoring schema/save/generate surfaces are retired on main; persona creation now routes through `masc_keeper_create_from_persona`, and the former persona-generate turn-driver cycle has no backing function.
+2. Keeper authoring schema/save/generate surfaces are retired on main; keeper creation now routes through `masc_keeper_up`, and the former keeper-generate turn-driver cycle has no backing function.
 3. `Keeper_turn_up.handle_keeper_up` surface ctx.config-only BUT `start_keepalive` transitively requires Eio.  Cannot ctx-free.
 4. `handle_keeper_repair` carried `ignore (ctx.sw, ctx.clock, ctx.config)` warning-suppression scaffolding — was phantom dependency, real body returns stub.
 

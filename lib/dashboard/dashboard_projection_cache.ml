@@ -4,11 +4,13 @@
     operator snapshot. Reuse short-lived actor-scoped cache entries so warm
     refresh loops and repeated navigation do not recompute identical reads. *)
 
-let cache_partition_segment (_config : Workspace_utils.config) = "default"
+(* Same partition the server-side dashboard cache uses: the directory the
+   cached state lives in, not a constant (#24504). *)
+let cache_partition_segment (config : Workspace_utils.config) =
+  Workspace_utils.masc_root_dir config
 
 let actor_cache_key (config : Workspace_utils.config) prefix actor_name =
-  Printf.sprintf "%s:%s:%s:%s" prefix config.base_path
-    (cache_partition_segment config) actor_name
+  Printf.sprintf "%s:%s:%s" prefix (cache_partition_segment config) actor_name
 
 let normalize_actor_name = function
   | Some value ->
@@ -24,6 +26,10 @@ let snapshot_generation_observer : (int -> unit) option Atomic.t = Atomic.make N
 
 let register_snapshot_generation_observer observer =
   Atomic.set snapshot_generation_observer (Some observer)
+;;
+
+let snapshot_invalidation_generation () =
+  Atomic.get snapshot_invalidation_generation_ref
 ;;
 
 let with_snapshot_publication_generation f =

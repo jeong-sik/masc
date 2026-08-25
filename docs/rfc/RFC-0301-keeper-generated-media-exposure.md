@@ -1,3 +1,8 @@
+---
+rfc: "0301"
+status: Draft
+---
+
 # RFC-0301: Keeper 생성 미디어(이미지/오디오) 대시보드 노출
 
 - Status: Draft
@@ -12,17 +17,17 @@
 
 ### 1.1 경계 분석 — 데이터는 어디까지 오는가
 
-OAS는 미디어 데이터를 **완전히 surface한다** (MASC는 OAS를 소비; OAS는 MASC를 모름):
+agent_core는 미디어 데이터를 **완전히 surface한다** (MASC는 agent_core를 소비; agent_core는 MASC를 모름):
 
-- 스트리밍 델타: `oas/lib/llm_provider/types.ml:462-471` `MediaDelta { media_type; source_type; data : string }` — 주석: "Carries the block-level media_type and source_type alongside the data payload ... the accumulator records the metadata (idempotent across chunks) and concatenates data."
+- 스트리밍 델타: `agent_core/lib/llm_provider/types.ml:462-471` `MediaDelta { media_type; source_type; data : string }` — 주석: "Carries the block-level media_type and source_type alongside the data payload ... the accumulator records the metadata (idempotent across chunks) and concatenates data."
 - 최종 content block: 동 `types.ml:278-292` `Image / Document / Audio of { media_type; data : string; source_type }`.
 - `media_source_kind = Base64 | Url | File_id` (`types.ml:225-228`).
 
-즉 **OAS는 실제 페이로드(base64/url/file_id)를 전달**한다. OAS 측 변경은 필요 없다.
+즉 **agent_core는 실제 페이로드(base64/url/file_id)를 전달**한다. agent_core 측 변경은 필요 없다.
 
 ### 1.2 근본 원인 — pre-RFC MASC 브릿지가 데이터를 카운트로 축소
 
-pre-RFC MASC가 OAS 스트림을 키퍼 채팅 이벤트로 변환하는 브릿지에서
+pre-RFC MASC가 agent_core 스트림을 키퍼 채팅 이벤트로 변환하는 브릿지에서
 **데이터를 byte-count로 축소**했다. 이 RFC의 구현은 byte-count emit을
 제거하고, block별 누적 후 `ContentBlockStop`/`MessageStop`에서 persist한
 `media_ref` URL emit으로 교체한다:
@@ -42,7 +47,7 @@ lib/keeper/keeper_chat_events.ml (current)
 - turn persist path가 같은 stream에서 생성 미디어를 `Image`/`Voice`/`Attach` block으로 저장해 reload-visible하게 만든다.
 - `dashboard/src/types/core.ts:837,835`의 `ChatImageBlock`/`ChatVoiceBlock`는 reload path에서 저장된 block을 렌더하는 재사용 대상이다.
 
-이는 **"telemetry-as-fix" 안티패턴이 프로토콜 shape에 박힌 형태**다 — 데이터 채널이어야 할 자리에 카운트(관측치)를 넣었다. 데이터는 OAS에서 가용했으나 경계에서 의도적으로 버려졌다.
+이는 **"telemetry-as-fix" 안티패턴이 프로토콜 shape에 박힌 형태**다 — 데이터 채널이어야 할 자리에 카운트(관측치)를 넣었다. 데이터는 agent_core에서 가용했으나 경계에서 의도적으로 버려졌다.
 
 ### 1.3 영향 범위
 
@@ -53,7 +58,7 @@ lib/keeper/keeper_chat_events.ml (current)
 
 목표:
 1. 모델 생성 미디어를 키퍼 채팅에 라이브 + reload 양쪽에서 노출.
-2. 경계 규칙 준수: OAS 변경 없이 MASC 소비 측에서 해결.
+2. 경계 규칙 준수: agent_core 변경 없이 MASC 소비 측에서 해결.
 3. count-only 안티패턴 제거 (augment가 아니라 replace).
 
 비목표:
@@ -103,9 +108,9 @@ lib/keeper/keeper_chat_events.ml (current)
 
 ## 5. 의존성 / 경계
 
-- OAS: 변경 없음 (데이터 이미 surface). pin bump 불요.
+- agent_core: 변경 없음 (데이터 이미 surface). pin bump 불요.
 - RFC-0235/0236 voice transport 인프라 재사용/일반화. RFC-0164 voice tool 추상화와 토큰/route 정합 유지.
-- 경계: MASC↔OAS 브릿지(`keeper_chat_oas_stream_bridge`)가 유일한 변경 진입점. lane-per-keeper 격리 불변.
+- 경계: MASC↔agent_core 브릿지(`keeper_chat_oas_stream_bridge`)가 유일한 변경 진입점. lane-per-keeper 격리 불변.
 
 ## 6. 검증 방법
 

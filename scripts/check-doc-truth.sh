@@ -88,16 +88,21 @@ changelog_latest_release="$(sed -n 's/^## \[\([0-9][^]]*\)\].*/\1/p' CHANGELOG.m
 [[ "$spec_baseline" == "$package_version" ]] || \
   fail "SPEC-INDEX snapshot baseline ($spec_baseline) != current package version ($package_version)"
 
-require_contains docs/MCP-TEMPLATE.md '"command": "masc-stdio"'
-require_not_contains docs/MCP-TEMPLATE.md '"args": ["--stdio"]'
+require_contains docs/MCP-TEMPLATE.md 'bearer_token_env_var = "MASC_TOKEN"'
+require_contains docs/MCP-TEMPLATE.md 'Authorization: Bearer ${MASC_TOKEN}'
+require_not_contains docs/MCP-TEMPLATE.md '"command": "masc-stdio"'
+
+require_contains quickstart.sh 'TEAM="none"'
+require_contains quickstart.sh 'mcp-client.env'
+require_contains quickstart.sh '--client-env MASC_TOKEN'
+require_contains .github/workflows/ci.yml 'run: scripts/quickstart-smoke.sh'
+require_contains .github/workflows/release.yml 'run: scripts/quickstart-smoke.sh'
+require_contains docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md "jq '{status,auth_change,agent_name,role,raw_token_file,dashboard_url,mcp_url,mcp_client}'"
+require_not_contains docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md '.codex_mcp'
+require_not_contains docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md 'token_bound_admin_http_ready'
+[[ ! -e Formula/masc.rb ]] || fail "stale Homebrew Formula must not be restored"
 
 require_not_contains docs/TUI-GUIDE.md './start-masc.sh --tui'
-
-require_contains docs/QUICK-START.md '"method":"initialize"'
-require_contains docs/QUICK-START.md 'Mcp-Session-Id: ${SESSION_ID}'
-require_contains docs/QUICK-START.md '수동 제어가 필요해도 기본 온보딩은 `masc_start(path=...)` 를 유지한다.'
-require_contains docs/QUICK-START.md '운영 기준은 항상 `<base-path>/.masc`다.'
-require_contains docs/QUICK-START.md 'scripts/release-evidence.sh _build/default/bin/main_eio.exe .release-evidence/local-release-evidence.md'
 
 require_contains README.md 'docs/RELEASE-EVIDENCE.md'
 require_not_contains README.md '/api/v1/command-plane'
@@ -122,7 +127,7 @@ require_contains docs/spec/01-system-overview.md '### 7.3 Dashboard and Operator
 
 require_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/events'
 require_contains docs/spec/09-server-transport.md '`MASC_USE_H2` | `auto`'
-require_contains docs/spec/09-server-transport.md '`MASC_GRPC_ENABLED` | 1'
+require_contains docs/spec/09-server-transport.md '`MASC_GRPC_ENABLED` | 0'
 require_not_contains docs/spec/09-server-transport.md 'GET /api/v1/activity/feed'
 require_not_contains docs/spec/09-server-transport.md '| Workspace | `/api/v1/workspace/*`'
 
@@ -135,13 +140,13 @@ require_contains docs/spec/10-dashboard.md '`INV-DASH-004`: connection failure i
 # retirement notices were deleted on purpose, but a doc edit that re-describes
 # a removed surface as current is the exact drift this file exists to catch.
 require_not_contains docs/spec/10-dashboard.md '| `/api/v1/command-plane` | GET |'
-require_not_contains docs/OAS-MASC-BOUNDARY.md 'lib/team_session/'
+require_not_contains docs/AGENT-CORE-BOUNDARY.md 'lib/team_session/'
 
 docs_to_scan=(
   README.md
+  README.ko.md
   ROADMAP.md
   docs/PRODUCT-OPERATING-PLAN.md
-  docs/QUICK-START.md
   docs/MCP-TEMPLATE.md
   docs/TUI-GUIDE.md
   docs/spec/SPEC-INDEX.md
@@ -175,4 +180,3 @@ fi
 
 printf 'Doc truth OK: front-door docs and key specs are aligned with current repo truth\n'
 
-scripts/check-doc-code-refs.sh

@@ -7,17 +7,16 @@ updated: 2026-06-17
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0243", "0244", "0247"]
-implementation_prs: []
+related: ["0244", "0247"]
 ---
 
 # RFC-0251 — Memory OS: record well, do not value
 
 ## §0 Context — the scoring layer was never proven, and cannot be
 
-Three RFCs built a valuation layer on the keeper Memory OS:
+A valuation layer was built on the keeper Memory OS in three steps:
 
-- **RFC-0243** made `confidence` mutable (write-side EMA upsert).
+- `confidence` became mutable (write-side EMA upsert).
 - **RFC-0244** ranks recall by `score_fact` = confidence × access-recency ×
   truth-recency × stale-penalty × access-factor.
 - **RFC-0247** added decay / forgetting / promotion machinery on top.
@@ -115,7 +114,7 @@ decide between them; the implementing PR must pick one and say why.**
 ## §4 Phasing
 
 1. **This RFC** — correct the SSOT so parallel keepers stop rebuilding the score
-   layer from RFC-0243/0244/0247. Mark the valuation sections of those three as
+   layer from RFC-0244/0247. Mark the valuation sections of those three as
    superseded by RFC-0251 (amend their `superseded_by`/related on merge).
 2. **Recall de-scoring** — remove `score_fact` from recall; order by seed
    overlap; drop the `confidence=/score=` annotation. Read-side only.

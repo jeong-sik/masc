@@ -146,7 +146,7 @@ type chat_message = {
           are rejected at the read boundary. *)
   role : Role.t;
   content : string;
-  ts : float option;
+  ts : float;
   attachments : attachment list option;
   tool_call_id : string option;
   tool_call_name : string option;
@@ -202,13 +202,21 @@ type chat_message = {
           the writer could not prove lifecycle events. Malformed persisted
           values are reported as persistence read drops and read as [None];
           the row stays valid. *)
-  delivery_key : Keeper_chat_delivery_identity.delivery_key option;
-      (** The exact delivery identity persisted by the idempotent append-once
-          paths ({!append_user_message_once} /
+  delivery_provenance :
+    Keeper_chat_delivery_identity.delivery_provenance option;
+      (** The exact delivery identity and transcript slot persisted atomically
+          by the idempotent append-once paths ({!append_user_message_once} /
           {!append_assistant_message_once}).  [None] on rows written by the
-          plain append paths and on rows written before this field existed.
+          plain append paths and on rows written before this pair existed.
+
           A malformed persisted value is reported as a persistence read drop
-          and reads as [None]; the row stays valid. *)
+          and reads as [None] here; the row stays valid. That leniency is
+          local to reading rows out. The append-once paths decode the same
+          persisted pair to answer "is this delivery already on disk?", and
+          there an undecodable row fails the whole append instead — skipping
+          it would append a duplicate. So a row this field cannot decode is
+          not merely cosmetic: it blocks every later append to that keeper's
+          file until the row is repaired or removed. *)
 }
 
 (** {1 I/O} *)
@@ -435,8 +443,8 @@ val load_page :
 
 (** {1 Serialisation} *)
 
-(** JSON array of messages. Entries without a timestamp omit the
-    [ts] field; [tool_call_id] / [tool_call_name] /
+(** JSON array of messages. Every entry carries [ts];
+    [tool_call_id] / [tool_call_name] /
     [conversation_id] / [external_message_id] / [workspace_id] /
     [speaker_id] / [speaker_name] / [speaker_authority] appear only
     when present. [surface] is the sole lane identity. [delivery_key] appears
@@ -452,13 +460,13 @@ val to_json_array :
 
 (** {1 Turn transcript (RFC-0233 §7)} *)
 
-(** A keeper turn's transcript, derived by an exact join on the persisted
-    [turn_ref]. [user] holds the operator request line(s) that opened the
-    turn; [assistant] holds the keeper response line(s) (utterance and
-    typed transport-failure markers). Tool rows are excluded — their full
-    I/O is surfaced by the tool-call store keyed on [execution_id]. Both
-    lists are empty when no persisted row carries the requested
-    [turn_ref] (old rows, redacted, or outside the retained window). *)
+(** A keeper turn's transcript. The terminal assistant row is selected by
+    exact persisted [turn_ref]; an accepted-user row may join either by that
+    same [turn_ref] or by the assistant's exact typed delivery provenance.
+    [assistant] includes utterances and typed transport-failure markers. Tool
+    rows are excluded — their full I/O is surfaced by the tool-call store keyed
+    on [execution_id]. Both lists are empty when no persisted row carries the
+    requested [turn_ref] (old rows, redacted, or outside the retained window). *)
 type turn_transcript = {
   user : chat_message list;
   assistant : chat_message list;
@@ -466,11 +474,11 @@ type turn_transcript = {
 
 val transcript_of_messages :
   chat_message list -> turn_ref:Ids.Turn_ref.t -> turn_transcript
-(** [transcript_of_messages msgs ~turn_ref] partitions the rows whose
-    persisted [turn_ref] equals [turn_ref] into operator [user] lines and
-    keeper [assistant] lines, preserving input order. A row with a
-    different or absent [turn_ref] is excluded — exact-key join only, no
-    timestamp-window fuzzing (RFC-0233 §7 "no fuzzy attribution"). Pass
+(** [transcript_of_messages msgs ~turn_ref] selects keeper [assistant] lines
+    whose persisted [turn_ref] equals [turn_ref], then includes operator [user]
+    lines carrying either that [turn_ref] or the same typed delivery key in an
+    [Accepted_user] provenance slot. Input order is preserved. There is no
+    timestamp/text fallback (RFC-0233 §7 "no fuzzy attribution"). Pass
     {!load}-produced messages so the content is already the redacted view
     (RFC-0132); this function does not re-redact. *)
 

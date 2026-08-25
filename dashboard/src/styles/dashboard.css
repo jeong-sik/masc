@@ -234,7 +234,7 @@
   overflow: hidden;
 }
 
-.ide-plane-statusbar-meta .chip {
+.ide-plane-statusbar-meta .tag-chip {
   max-width: 11rem;
   min-width: 0;
   overflow: hidden;

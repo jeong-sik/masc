@@ -3,7 +3,7 @@
 # Meta-issue: #9516
 #
 # CONTRACT: masc no longer owns a provider-specific CLI spawn mapping.
-# Provider execution belongs to OAS/runtime bindings and MASC model runtimes.
+# Provider execution belongs to AGENT_CORE/runtime bindings and MASC model runtimes.
 
 set -euo pipefail
 

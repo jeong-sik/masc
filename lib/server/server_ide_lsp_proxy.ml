@@ -9,7 +9,6 @@
     - Per-connection Eio.Switch.run for scoped lifecycle *)
 
 open Server_auth
-open Server_utils
 module Http = Http_server_eio
 module Ws_endpoint = Ws_direct_core.Endpoint
 module Ws_wsd = Ws_direct_core.Endpoint.Wsd
@@ -46,6 +45,17 @@ end
 type resolved_lang =
   | Known_lang of string
   | Unknown_lang
+
+type document_request_error =
+  | Missing_document_uri
+  | Document_uri_outside_workspace
+
+type resolved_document_request =
+  { uri : string
+  ; relative_path : string
+  ; line : int option
+  ; language : resolved_lang
+  }
 
 (** Per-connection state shared across frame handler and relay fibers.
 
@@ -158,8 +168,6 @@ module Lsp_method_catalog = struct
     ]
   ;;
 
-  let handled_methods = List.map (fun (e : entry) -> e.method_) entries
-
   let of_string method_ =
     List.find_map
       (fun entry ->
@@ -206,6 +214,11 @@ type conn_state =
   ; wsd : Ws_wsd.t
   ; base_path : string
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t
+  ; store_scope : Server_ide_scope.ide_scope option
+        (* The IDE observation scope declared on this connection's URL, in
+           the same vocabulary the REST routes use. [None] = the client
+           declared none, so this connection addresses no annotation store
+           and gets language-server passthrough only. *)
   ; workspace_root : string ref
   ; send_queue : ws_send_msg Eio.Stream.t
   ; dispatch_queue : inbound_dispatch_msg Eio.Stream.t
@@ -218,9 +231,40 @@ type conn_state =
 
 let base_path_of_state state = (Mcp_server.workspace_config state).base_path
 
-let process_snapshot cs =
-  Eio.Mutex.use_ro cs.process_mutex (fun () ->
-    Hashtbl.fold (fun lang_id proc acc -> (lang_id, proc) :: acc) cs.processes [])
+(* The store directory this connection addresses. Threaded into every
+   overlay read so the reader cannot land in a store the client never
+   named — the defect that had overlay reads served from the orphan
+   directory while keeper writes accumulated under [by-url/<slug>/]. *)
+let overlay_codebase cs = Option.map Server_ide_scope.codebase_of_ide_scope cs.store_scope
+;;
+
+(* What this connection addresses, read from its URL before the socket is
+   upgraded. Two independent axes: the overlay store directory comes from
+   the IDE scope ([codebase], resolved by the same [Server_ide_scope]
+   the REST routes use, so the two surfaces share one vocabulary), and
+   the workspace tree that document paths are relative to
+   comes from the workspace axis parameters ([repo_id]/[keeper]) resolved
+   by [resolve_workspace_base]. RFC-0378 §5.3b: the scope carries the
+   slug itself — the old full-URL spelling that could name a store
+   without a tree died with that vocabulary. *)
+let lsp_connection_addressing ~state ~uri =
+  match Server_ide_scope.resolve_optional_ide_scope_for_query ~state ~uri with
+  | Error err -> Error err
+  | Ok scope ->
+    (* RFC-0378 §5.3b: the scope names the overlay store; the workspace
+       tree anchor is the separate workspace axis, resolved from its own
+       parameters. The old full-URL scope that could name a store
+       without a tree died with that spelling. *)
+    let anchor, _source =
+      Server_routes_http_routes_workspace.resolve_workspace_base ~state ~uri
+    in
+    Ok (scope, anchor)
+;;
+
+(* A stored annotation's [file_path] is relative to the workspace tree the
+   client opened, which is also the anchor its document URIs resolve
+   against — not the directory that holds the store. *)
+let document_root cs = !(cs.workspace_root)
 ;;
 
 let find_process cs lang_id =
@@ -583,8 +627,16 @@ let initialize_capabilities_json () =
     ]
 ;;
 
-let initialize_result_json () =
-  `Assoc [ "capabilities", initialize_capabilities_json () ]
+(* [workspaceRoot] is a MASC extension on the initialize result. Without it
+   a browser client has no way to name a document: it knows the path it
+   browsed (repo-relative) but not the host tree that path hangs off, so it
+   cannot form the absolute [file:] URI the protocol requires. Advertising
+   the resolved root closes that gap without inventing a URI convention. *)
+let initialize_result_json ~workspace_root () =
+  `Assoc
+    [ "capabilities", initialize_capabilities_json ()
+    ; "masc", `Assoc [ "workspaceRoot", `String workspace_root ]
+    ]
 ;;
 
 (** Extract client request ID from JSON-RPC message fields. *)
@@ -606,6 +658,21 @@ let extract_line params =
         | _ -> None)
      | _ -> None)
   | _ -> None
+;;
+
+let resolve_document_request ~anchor params =
+  match extract_uri params with
+  | None -> Error Missing_document_uri
+  | Some uri ->
+    (match resolve_relative ~base:anchor uri with
+     | None -> Error Document_uri_outside_workspace
+     | Some relative_path ->
+       let line =
+         match extract_line params with
+         | Some line when line >= 0 -> Some line
+         | Some _ | None -> None
+       in
+       Ok { uri; relative_path; line; language = resolve_lang relative_path })
 ;;
 
 (** Ensure LSP process exists for a language.
@@ -721,20 +788,18 @@ let forward_notification cs lang_id method_ params =
 
 let forward_document_sync_notification cs method_ params =
   let wire_method = lsp_method_to_string method_ in
-  match extract_uri params with
-  | None -> ()
-  | Some uri ->
-    (match resolve_relative ~base:cs.base_path uri with
-     | None -> ()
-     | Some relative ->
-       if method_ = Did_save
-       then
-         Lsp_overlay_provider.invalidate_cache
-           ~base_dir:cs.base_path
-           ~file_path:relative;
-       (match resolve_lang relative with
-        | Unknown_lang -> ()
-        | Known_lang lang_id -> forward_notification cs lang_id wire_method params))
+  match resolve_document_request ~anchor:(document_root cs) params with
+  | Error _ -> ()
+  | Ok request ->
+    if method_ = Did_save
+    then
+      Lsp_overlay_provider.invalidate_cache
+        ~base_dir:cs.base_path
+        ~codebase:(overlay_codebase cs)
+        ~file_path:request.relative_path;
+    (match request.language with
+     | Unknown_lang -> ()
+     | Known_lang lang_id -> forward_notification cs lang_id wire_method params)
 ;;
 
 (* Read-only method allowlist for the catch-all forwarder (task-1692). The
@@ -753,51 +818,81 @@ type method_disposition =
   | Reject_write_adjacent
   | Unknown_forwarded_method of string
 
+(* Methods this proxy does not answer itself, and what happens to them.
+
+   The catalog above owns every method the proxy can answer; this table owns
+   the rest. The five that RFC-0378 rung E turned into plain relays —
+   definition, references, documentSymbol, documentHighlight, inlayHint — used
+   to be spelled here as well as there, which is two places deciding the same
+   thing about the same method. [classify_forwarded_method] now asks the
+   catalog first, so they appear once, and
+   [test_forwarded_methods_are_not_also_catalog_methods] fails if a method
+   comes to be named twice again (#28686). *)
+type relay_disposition =
+  | Relay_read_only
+  | Deny_write_adjacent
+
+let relayed_methods =
+  [ "textDocument/signatureHelp", Relay_read_only
+  ; "textDocument/declaration", Relay_read_only
+  ; "textDocument/typeDefinition", Relay_read_only
+  ; "textDocument/implementation", Relay_read_only
+  ; "textDocument/documentColor", Relay_read_only
+  ; "textDocument/colorPresentation", Relay_read_only
+  ; "textDocument/documentLink", Relay_read_only
+  ; "textDocument/selectionRange", Relay_read_only
+  ; "textDocument/linkedEditingRange", Relay_read_only
+  ; "textDocument/moniker", Relay_read_only
+  ; "textDocument/prepareCallHierarchy", Relay_read_only
+  ; "textDocument/prepareTypeHierarchy", Relay_read_only
+  ; "textDocument/semanticTokens/full", Relay_read_only
+  ; "textDocument/semanticTokens/full/delta", Relay_read_only
+  ; "textDocument/semanticTokens/range", Relay_read_only
+    (* Denied explicitly rather than left to the unknown branch, so the refusal
+       says "not permitted" instead of "unrecognized". *)
+  ; "textDocument/rename", Deny_write_adjacent
+  ; "textDocument/prepareRename", Deny_write_adjacent
+  ; "textDocument/formatting", Deny_write_adjacent
+  ; "textDocument/rangeFormatting", Deny_write_adjacent
+  ; "textDocument/onTypeFormatting", Deny_write_adjacent
+  ; "textDocument/willSaveWaitUntil", Deny_write_adjacent
+  ; "workspace/executeCommand", Deny_write_adjacent
+  ; "workspace/applyEdit", Deny_write_adjacent
+  ]
+;;
+
 let classify_forwarded_method method_ =
-  match method_ with
-  | "textDocument/signatureHelp"
-  | "textDocument/declaration"
-  | "textDocument/typeDefinition"
-  | "textDocument/implementation"
-  | "textDocument/documentColor"
-  | "textDocument/colorPresentation"
-  | "textDocument/documentLink"
-  | "textDocument/selectionRange"
-  | "textDocument/linkedEditingRange"
-  | "textDocument/moniker"
-  | "textDocument/prepareCallHierarchy"
-  | "textDocument/prepareTypeHierarchy"
-  | "textDocument/semanticTokens/full"
-  | "textDocument/semanticTokens/full/delta"
-  | "textDocument/semanticTokens/range" -> Forward_read_only
-  (* Everything else — textDocument/rename, prepareRename, formatting,
-     rangeFormatting, onTypeFormatting, willSaveWaitUntil,
-     workspace/executeCommand, workspace/applyEdit — is denied explicitly.
-     Unrecognized methods preserve their wire spelling for diagnostics. *)
-  | "textDocument/rename"
-  | "textDocument/prepareRename"
-  | "textDocument/formatting"
-  | "textDocument/rangeFormatting"
-  | "textDocument/onTypeFormatting"
-  | "textDocument/willSaveWaitUntil"
-  | "workspace/executeCommand"
-  | "workspace/applyEdit" -> Reject_write_adjacent
-  (* workspace/symbol and the LSP */resolve methods intentionally stay out of
-     the forward set: their payloads do not carry a [textDocument.uri], and this
-     multi-language proxy has no SSOT for selecting one server process. They are
-     rejected below as [Unknown_forwarded_method] with the original method name. *)
-  | unknown -> Unknown_forwarded_method unknown
+  match lsp_method_of_string method_ with
+  (* A catalog method reaching the relay path is one the dispatch above has no
+     arm for. Its classification already says whether the language server may
+     answer it. Mutation, Lifecycle and Status are all handled before this
+     point; refusing them here is the answer that cannot be wrong. *)
+  | Some catalog_method ->
+    (match lsp_method_classification catalog_method with
+     | Lsp_method_catalog.Read_only -> Forward_read_only
+     | Lsp_method_catalog.Mutation
+     | Lsp_method_catalog.Lifecycle
+     | Lsp_method_catalog.Status -> Reject_write_adjacent)
+  | None ->
+    (* workspace/symbol and the LSP */resolve methods are deliberately absent
+       from both tables: their payloads carry no [textDocument.uri], and this
+       multi-language proxy has no SSOT for choosing a server process. They
+       arrive here as [Unknown_forwarded_method] with their wire spelling. *)
+    (match List.assoc_opt method_ relayed_methods with
+     | Some Relay_read_only -> Forward_read_only
+     | Some Deny_write_adjacent -> Reject_write_adjacent
+     | None -> Unknown_forwarded_method method_)
 ;;
 
 (** Handle textDocument/codeLens — merge LSP response with MASC overlays. *)
 let handle_codelens cs params id =
-  match extract_uri params with
-  | None -> send_response cs id (`List [])
-  | Some uri ->
+  match resolve_document_request ~anchor:(document_root cs) params with
+  | Error _ -> send_response cs id (`List [])
+  | Ok request ->
     let base = cs.base_path in
-    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
-    let masc = Lsp_overlay_provider.codelenses ~base_dir:base ~file_path:relative in
-    (match resolve_lang relative with
+    let relative = request.relative_path in
+    let masc = Lsp_overlay_provider.codelenses ~base_dir:base ~codebase:(overlay_codebase cs) ~file_path:relative in
+    (match request.language with
      | Unknown_lang -> send_response cs id (`List masc)
      | Known_lang lang_id ->
       match ensure_lsp_process cs lang_id with
@@ -819,48 +914,18 @@ let handle_codelens cs params id =
          | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
 ;;
 
-(** Handle textDocument/inlayHint — merge LSP response with MASC overlays. *)
-let handle_inlay_hint cs params id =
-  match extract_uri params with
-  | None -> send_response cs id (`List [])
-  | Some uri ->
-    let base = cs.base_path in
-    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
-    let masc = Lsp_overlay_provider.inlay_hints ~base_dir:base ~file_path:relative in
-    (match resolve_lang relative with
-     | Unknown_lang -> send_response cs id (`List masc)
-     | Known_lang lang_id ->
-      match ensure_lsp_process cs lang_id with
-      | Error msg ->
-        note_overlay_only cs ~lang_id ~error:msg;
-        send_response cs id (`List masc)
-      | Ok proc ->
-        let promise =
-          Lsp_message_router.send_request
-            cs.router
-            proc
-            ~method_:(lsp_method_to_string InlayHint)
-            ~params
-            ~client_id:(req_id_to_int id)
-        in
-        (match Eio.Promise.await promise with
-         | Ok (`List items) -> send_response cs id (`List (items @ masc))
-         | Ok other -> send_response cs id other
-         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
-;;
-
-(** Handle textDocument/diagnostic — merge LSP response with MASC diagnostics. *)
 let handle_diagnostic cs params id =
-  match extract_uri params with
-  | None -> send_response cs id (`Assoc [ "items", `List [] ])
-  | Some uri ->
+  match resolve_document_request ~anchor:(document_root cs) params with
+  | Error _ -> send_response cs id (`Assoc [ "items", `List [] ])
+  | Ok request ->
     let base = cs.base_path in
-    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
-    (match resolve_lang relative with
+    let relative = request.relative_path in
+    (match request.language with
      | Unknown_lang ->
       let diags =
         Lsp_overlay_provider.diagnostics
           ~base_dir:base
+          ~codebase:(overlay_codebase cs)
           ~file_path:relative
           ~lsp_diagnostics:[]
       in
@@ -872,6 +937,7 @@ let handle_diagnostic cs params id =
         let diags =
           Lsp_overlay_provider.diagnostics
             ~base_dir:base
+            ~codebase:(overlay_codebase cs)
             ~file_path:relative
             ~lsp_diagnostics:[]
         in
@@ -895,6 +961,7 @@ let handle_diagnostic cs params id =
            let merged =
              Lsp_overlay_provider.diagnostics
                ~base_dir:base
+               ~codebase:(overlay_codebase cs)
                ~file_path:relative
                ~lsp_diagnostics:existing
            in
@@ -905,25 +972,33 @@ let handle_diagnostic cs params id =
 
 (** Handle textDocument/hover — enrich LSP response with MASC annotations. *)
 let handle_hover cs params id =
-  match extract_uri params with
-  | None -> send_response cs id `Null
-  | Some uri ->
+  match resolve_document_request ~anchor:(document_root cs) params with
+  | Error _ -> send_response cs id `Null
+  | Ok request ->
     let base = cs.base_path in
-    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
-    let line = extract_line params |> Option.value ~default:(-1) in
-    (match resolve_lang relative with
+    let relative = request.relative_path in
+    (match request.language with
      | Unknown_lang ->
-      if line >= 0 && Lsp_overlay_provider.has_annotations_at_line ~base_dir:base ~file_path:relative ~line
-      then (
-        let enriched =
-          Lsp_overlay_provider.enrich_hover
-            ~base_dir:base
-            ~file_path:relative
-            ~line
-            (`Assoc [ ("contents", `Assoc [ ("kind", `String "markdown"); ("value", `String "") ]) ])
-        in
-        send_response cs id enriched)
-      else send_response cs id `Null
+      (match request.line with
+       | Some line
+         when Lsp_overlay_provider.has_annotations_at_line
+                ~base_dir:base
+                ~codebase:(overlay_codebase cs)
+                ~file_path:relative
+                ~line ->
+         let enriched =
+           Lsp_overlay_provider.enrich_hover
+             ~base_dir:base
+             ~codebase:(overlay_codebase cs)
+             ~file_path:relative
+             ~line
+             (`Assoc
+                [ ( "contents"
+                  , `Assoc [ ("kind", `String "markdown"); ("value", `String "") ] )
+                ])
+         in
+         send_response cs id enriched
+       | Some _ | None -> send_response cs id `Null)
      | Known_lang lang_id ->
       match ensure_lsp_process cs lang_id with
       | Error msg ->
@@ -932,19 +1007,25 @@ let handle_hover cs params id =
            broke the client on an unavailable LSP. Mirrors the unknown-lang
            branch above. *)
         note_overlay_only cs ~lang_id ~error:msg;
-        if line >= 0
-           && Lsp_overlay_provider.has_annotations_at_line ~base_dir:base
-                ~file_path:relative ~line
-        then
-          send_response cs id
-            (Lsp_overlay_provider.enrich_hover ~base_dir:base ~file_path:relative
-               ~line
-               (`Assoc
-                  [ ( "contents"
-                    , `Assoc
-                        [ ("kind", `String "markdown"); ("value", `String "") ] )
-                  ]))
-        else send_response cs id `Null
+        (match request.line with
+         | Some line
+           when Lsp_overlay_provider.has_annotations_at_line
+                  ~base_dir:base
+                  ~codebase:(overlay_codebase cs)
+                  ~file_path:relative
+                  ~line ->
+           send_response cs id
+             (Lsp_overlay_provider.enrich_hover
+                ~base_dir:base
+                ~codebase:(overlay_codebase cs)
+                ~file_path:relative
+                ~line
+                (`Assoc
+                   [ ( "contents"
+                     , `Assoc
+                         [ ("kind", `String "markdown"); ("value", `String "") ] )
+                   ]))
+         | Some _ | None -> send_response cs id `Null)
       | Ok proc ->
         let promise =
           Lsp_message_router.send_request
@@ -956,99 +1037,32 @@ let handle_hover cs params id =
         in
         (match Eio.Promise.await promise with
          | Ok result ->
-           if line >= 0
-           then
-             send_response cs id
-               (Lsp_overlay_provider.enrich_hover
-                  ~base_dir:base
-                  ~file_path:relative
-                  ~line
-                  result)
-           else send_response cs id result
+           (match request.line with
+            | Some line ->
+              send_response cs id
+                (Lsp_overlay_provider.enrich_hover
+                   ~base_dir:base
+                   ~codebase:(overlay_codebase cs)
+                   ~file_path:relative
+                   ~line
+                   result)
+            | None -> send_response cs id result)
          | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
 ;;
 
-(** Handle textDocument/definition — merge LSP response with MASC annotation links. *)
-let handle_definition cs params id =
-  match extract_uri params with
-  | None -> send_response cs id (`List [])
-  | Some uri ->
-    let base = cs.base_path in
-    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
-    let line = extract_line params |> Option.value ~default:(-1) in
-    let masc =
-      if line >= 0 then
-        Lsp_overlay_provider.definition_links ~base_dir:base ~file_path:relative ~line
-      else []
-    in
-    (match resolve_lang relative with
-     | Unknown_lang -> send_response cs id (`List masc)
-     | Known_lang lang_id ->
-      match ensure_lsp_process cs lang_id with
-      | Error msg ->
-        note_overlay_only cs ~lang_id ~error:msg;
-        send_response cs id (`List masc)
-      | Ok proc ->
-        let promise =
-          Lsp_message_router.send_request
-            cs.router proc
-            ~method_:(lsp_method_to_string Definition)
-            ~params ~client_id:(req_id_to_int id)
-        in
-        (match Eio.Promise.await promise with
-         | Ok (`List items) -> send_response cs id (`List (items @ masc))
-         | Ok other -> send_response cs id other
-         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
-;;
-
-(** Handle textDocument/references — merge LSP response with MASC annotation locations. *)
-let handle_references cs params id =
-  match extract_uri params with
-  | None -> send_response cs id (`List [])
-  | Some uri ->
-    let base = cs.base_path in
-    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
-    let line = extract_line params |> Option.value ~default:(-1) in
-    let masc =
-      if line >= 0 then
-        Lsp_overlay_provider.reference_locations
-          ~base_dir:base ~file_path:relative ~line ~include_declaration:true
-      else []
-    in
-    (match resolve_lang relative with
-     | Unknown_lang -> send_response cs id (`List masc)
-     | Known_lang lang_id ->
-      match ensure_lsp_process cs lang_id with
-      | Error msg ->
-        note_overlay_only cs ~lang_id ~error:msg;
-        send_response cs id (`List masc)
-      | Ok proc ->
-        let promise =
-          Lsp_message_router.send_request
-            cs.router proc
-            ~method_:(lsp_method_to_string References)
-            ~params ~client_id:(req_id_to_int id)
-        in
-        (match Eio.Promise.await promise with
-         | Ok (`List items) -> send_response cs id (`List (items @ masc))
-         | Ok other -> send_response cs id other
-         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
-;;
-
-(** Handle textDocument/completion — merge LSP response with MASC annotation snippets. *)
 let handle_completion cs params id =
-  match extract_uri params with
-  | None -> send_response cs id (`List [])
-  | Some uri ->
+  match resolve_document_request ~anchor:(document_root cs) params with
+  | Error _ -> send_response cs id (`List [])
+  | Ok request ->
     let base = cs.base_path in
-    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
-    let line = extract_line params |> Option.value ~default:(-1) in
+    let relative = request.relative_path in
     let masc =
-      if line >= 0 then
-        Lsp_overlay_provider.completion_items ~base_dir:base ~file_path:relative ~line
-      else []
+      match request.line with
+      | Some line ->
+        Lsp_overlay_provider.completion_items ~base_dir:base ~codebase:(overlay_codebase cs) ~file_path:relative ~line
+      | None -> []
     in
-    (match resolve_lang relative with
+    (match request.language with
      | Unknown_lang -> send_response cs id (`List masc)
      | Known_lang lang_id ->
       match ensure_lsp_process cs lang_id with
@@ -1070,19 +1084,19 @@ let handle_completion cs params id =
 
 (** Handle textDocument/codeAction — inject MASC annotation actions. *)
 let handle_code_action cs params id =
-  match extract_uri params with
-  | None -> send_response cs id (`List [])
-  | Some uri ->
+  match resolve_document_request ~anchor:(document_root cs) params with
+  | Error _ -> send_response cs id (`List [])
+  | Ok request ->
     let base = cs.base_path in
-    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
-    let line = extract_line params |> Option.value ~default:(-1) in
+    let relative = request.relative_path in
     let masc =
-      if line >= 0 then
+      match request.line with
+      | Some line ->
         Lsp_overlay_provider.code_actions
-          ~base_dir:base ~file_path:relative ~line ~diagnostics:[]
-      else []
+          ~base_dir:base ~codebase:(overlay_codebase cs) ~file_path:relative ~line ~diagnostics:[]
+      | None -> []
     in
-    (match resolve_lang relative with
+    (match request.language with
      | Unknown_lang -> send_response cs id (`List masc)
      | Known_lang lang_id ->
       match ensure_lsp_process cs lang_id with
@@ -1102,43 +1116,14 @@ let handle_code_action cs params id =
          | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
 ;;
 
-(** Handle textDocument/documentSymbol — inject MASC annotation symbols. *)
-let handle_document_symbol cs params id =
-  match extract_uri params with
-  | None -> send_response cs id (`List [])
-  | Some uri ->
-    let base = cs.base_path in
-    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
-    let masc = Lsp_overlay_provider.document_symbols ~base_dir:base ~file_path:relative in
-    (match resolve_lang relative with
-     | Unknown_lang -> send_response cs id (`List masc)
-     | Known_lang lang_id ->
-      match ensure_lsp_process cs lang_id with
-      | Error msg ->
-        note_overlay_only cs ~lang_id ~error:msg;
-        send_response cs id (`List masc)
-      | Ok proc ->
-        let promise =
-          Lsp_message_router.send_request
-            cs.router proc
-            ~method_:(lsp_method_to_string Document_symbol)
-            ~params ~client_id:(req_id_to_int id)
-        in
-        (match Eio.Promise.await promise with
-         | Ok (`List items) -> send_response cs id (`List (items @ masc))
-         | Ok other -> send_response cs id other
-         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
-;;
-
-(** Handle textDocument/foldingRange — inject MASC annotation folding ranges. *)
 let handle_folding_range cs params id =
-  match extract_uri params with
-  | None -> send_response cs id (`List [])
-  | Some uri ->
+  match resolve_document_request ~anchor:(document_root cs) params with
+  | Error _ -> send_response cs id (`List [])
+  | Ok request ->
     let base = cs.base_path in
-    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
-    let masc = Lsp_overlay_provider.folding_ranges ~base_dir:base ~file_path:relative in
-    (match resolve_lang relative with
+    let relative = request.relative_path in
+    let masc = Lsp_overlay_provider.folding_ranges ~base_dir:base ~codebase:(overlay_codebase cs) ~file_path:relative in
+    (match request.language with
      | Unknown_lang -> send_response cs id (`List masc)
      | Known_lang lang_id ->
       match ensure_lsp_process cs lang_id with
@@ -1158,40 +1143,6 @@ let handle_folding_range cs params id =
          | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
 ;;
 
-(** Handle textDocument/documentHighlight — highlight related MASC annotations. *)
-let handle_document_highlight cs params id =
-  match extract_uri params with
-  | None -> send_response cs id (`List [])
-  | Some uri ->
-    let base = cs.base_path in
-    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
-    let line = extract_line params |> Option.value ~default:(-1) in
-    let masc =
-      if line >= 0 then
-        Lsp_overlay_provider.document_highlights ~base_dir:base ~file_path:relative ~line
-      else []
-    in
-    (match resolve_lang relative with
-     | Unknown_lang -> send_response cs id (`List masc)
-     | Known_lang lang_id ->
-      match ensure_lsp_process cs lang_id with
-      | Error msg ->
-        note_overlay_only cs ~lang_id ~error:msg;
-        send_response cs id (`List masc)
-      | Ok proc ->
-        let promise =
-          Lsp_message_router.send_request
-            cs.router proc
-            ~method_:(lsp_method_to_string Document_highlight)
-            ~params ~client_id:(req_id_to_int id)
-        in
-        (match Eio.Promise.await promise with
-         | Ok (`List items) -> send_response cs id (`List (items @ masc))
-         | Ok other -> send_response cs id other
-         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
-;;
-
-(** Dispatch an incoming LSP message to the appropriate handler. *)
 let dispatch_message cs msg =
   if Atomic.get cs.disconnected
   then ()
@@ -1220,9 +1171,19 @@ let dispatch_message cs msg =
                  | _ -> cs.base_path)
               | _ -> cs.base_path
             in
-            let root = workspace_root_for_initialize ~base_path:cs.base_path root_uri in
-            cs.workspace_root := root;
-            send_response cs n (initialize_result_json ())
+            (* A scope declared on the connection URL is authoritative: it
+               already fixed both the store and the tree document paths
+               are relative to. Letting [rootUri] move the anchor afterwards
+               would decouple the two again, which is how document keys came
+               to be expressed against one root and stored against another.
+               Without a declared scope the client's [rootUri] still decides,
+               as before. *)
+            (match cs.store_scope with
+             | Some _ -> ()
+             | None ->
+               cs.workspace_root
+               := workspace_root_for_initialize ~base_path:cs.base_path root_uri);
+            send_response cs n (initialize_result_json ~workspace_root:!(cs.workspace_root) ())
           | Some Initialized, _ -> ()
           | Some Shutdown, Some n -> send_response cs n `Null
           | Some Exit, _ -> disconnect cs
@@ -1241,15 +1202,10 @@ let dispatch_message cs msg =
           (* MASC-overlay-aware handlers *)
           | Some Hover, Some n -> handle_hover cs params n
           | Some CodeLens, Some n -> handle_codelens cs params n
-          | Some InlayHint, Some n -> handle_inlay_hint cs params n
           | Some Diagnostic, Some n -> handle_diagnostic cs params n
-          | Some Definition, Some n -> handle_definition cs params n
-          | Some References, Some n -> handle_references cs params n
           | Some Completion, Some n -> handle_completion cs params n
           | Some CodeAction, Some n -> handle_code_action cs params n
-          | Some Document_symbol, Some n -> handle_document_symbol cs params n
           | Some Folding_range, Some n -> handle_folding_range cs params n
-          | Some Document_highlight, Some n -> handle_document_highlight cs params n
           | _ ->
             (match id_opt with
              | Some n ->
@@ -1267,32 +1223,27 @@ let dispatch_message cs msg =
                     Mcp_error_code.(to_wire_code Method_not_found)
                     ("Read-only LSP proxy: unknown method not permitted: " ^ unknown)
                 | Forward_read_only ->
-                  (match extract_uri params with
-                   | None ->
+                  (match resolve_document_request ~anchor:(document_root cs) params with
+                   | Error Missing_document_uri ->
                      send_error cs n
                        Mcp_error_code.(to_wire_code Method_not_found)
                        ("Unhandled method: " ^ method_str)
-                   | Some uri ->
-                     (* Resolve the URI explicitly: an out-of-workspace or malformed
-                        URI ([None]) is rejected here rather than collapsed to a
-                        path, so the forward is only reached for a resolved
-                        in-workspace file. *)
-                     (match resolve_relative ~base:cs.base_path uri with
-                      | None ->
+                   | Error Document_uri_outside_workspace ->
+                     send_error
+                       cs
+                       n
+                       Mcp_error_code.(to_wire_code Invalid_params)
+                       "Path is outside the workspace"
+                   | Ok request ->
+                     (match request.language with
+                      | Known_lang lang_id ->
+                        forward_request cs lang_id method_str params n
+                      | Unknown_lang ->
                         send_error
                           cs
                           n
                           Mcp_error_code.(to_wire_code Invalid_params)
-                          "Path is outside the workspace"
-                      | Some relative ->
-                        (match resolve_lang relative with
-                         | Known_lang lang_id -> forward_request cs lang_id method_str params n
-                         | Unknown_lang ->
-                           send_error
-                             cs
-                             n
-                             Mcp_error_code.(to_wire_code Invalid_params)
-                             ("No LSP server for: " ^ relative)))))
+                          ("No LSP server for: " ^ request.relative_path))))
              | None -> ()))
        (* No method field *)
        | None, Some n -> send_error cs n Mcp_error_code.(to_wire_code Invalid_request) "Missing method field"
@@ -1345,6 +1296,19 @@ let add_routes ~sw ~clock router =
                | None ->
                  Log.Server.warn "LSP WebSocket: no proc_mgr available"
                | Some proc_mgr ->
+                 let uri = Uri.of_string request.Httpun.Request.target in
+                 (match lsp_connection_addressing ~state ~uri with
+                  | Error err ->
+                    Http.Response.json_value
+                      ~status:`Bad_request
+                      ~request
+                      (`Assoc
+                         [ "ok", `Bool false
+                         ; "error", `String err.Server_ide_scope.message
+                         ; "code", `String err.Server_ide_scope.code
+                         ])
+                      reqd
+                  | Ok (store_scope, workspace_base) ->
                  (* RFC-0281: drive the upgraded connection via the shared
                     attachment SSOT.  The previous code built [ws_conn] and
                     [ignore]d it (never calling Gluten [upgrade]), so frames
@@ -1376,7 +1340,8 @@ let add_routes ~sw ~clock router =
                           ; wsd
                           ; base_path = base_path_of_state state
                           ; proc_mgr
-                          ; workspace_root = ref (base_path_of_state state)
+                          ; store_scope
+                          ; workspace_root = ref workspace_base
                           ; send_queue =
                               Eio.Stream.create
                                 Lsp_proxy_limits.outbound_send_queue_capacity
@@ -1405,7 +1370,7 @@ let add_routes ~sw ~clock router =
                           ())
                   with
                   | Ok () -> ()
-                  | Error e -> Log.Server.warn "WebSocket upgrade failed: %s" e)))
+                  | Error e -> Log.Server.warn "WebSocket upgrade failed: %s" e))))
            request
            reqd)
       router
@@ -1424,6 +1389,19 @@ module For_testing = struct
     | Unknown_lang
 
   let resolve_lang = resolve_lang
+
+  type nonrec document_request_error = document_request_error =
+    | Missing_document_uri
+    | Document_uri_outside_workspace
+
+  type nonrec resolved_document_request = resolved_document_request =
+    { uri : string
+    ; relative_path : string
+    ; line : int option
+    ; language : resolved_lang
+    }
+
+  let resolve_document_request = resolve_document_request
 
   (* task-1691: the LSP health type + its pure wire projection. *)
   type health = lang_health =
@@ -1459,9 +1437,14 @@ module For_testing = struct
     Option.map lsp_method_classification (lsp_method_of_string method_)
   ;;
 
-  type lang = resolved_lang =
-    | Known_lang of string
-    | Unknown_lang
+  let relayed_lsp_methods () =
+    List.map
+      (fun (method_, relay) ->
+         ( method_
+         , match relay with
+           | Relay_read_only -> Forward_read_only
+           | Deny_write_adjacent -> Reject_write_adjacent ))
+      relayed_methods
+  ;;
 
-  let resolve_lang = resolve_lang
 end

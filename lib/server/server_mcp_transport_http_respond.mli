@@ -152,3 +152,50 @@ val respond_mcp_error :
     [extra_headers] are prepended; {!json_headers} append.  The
     function never raises; response writes go through the module's
     guarded response helper. *)
+
+(** [mcp_auth_reject_details ~endpoint ~claimed_agent ~token_presented
+    ~session_id failure] is the pure structured-log payload for one
+    rejected MCP auth attempt. [reason] mirrors the typed
+    [auth_error_code]; the raw bearer never appears — only
+    [token_presented]. Exposed for tests. *)
+val mcp_auth_reject_details :
+  endpoint:string ->
+  claimed_agent:string option ->
+  token_presented:bool ->
+  session_id:string option ->
+  Server_mcp_transport_http_types.auth_failure ->
+  Yojson.Safe.t
+
+(** [record_mcp_auth_reject ~endpoint ~claimed_agent ~token_presented
+    ~session_id failure] emits the [Log.Auth] reject event and
+    increments [masc_mcp_auth_rejects_total{endpoint,reason}]. Every
+    transport that turns an {!Server_mcp_transport_http_types.auth_failure}
+    into a client-visible 401 must call this exactly once — before it
+    a rejected bearer left no server-side trace at all (2026-08-18
+    live finding: all external MCP credentials stale, zero log lines,
+    zero audit records, empty session store). Transports with their
+    own response plumbing — the h2 gateway and the WebSocket upgrade
+    path — call this directly. *)
+val record_mcp_auth_reject :
+  endpoint:string ->
+  claimed_agent:string option ->
+  token_presented:bool ->
+  session_id:string option ->
+  Server_mcp_transport_http_types.auth_failure ->
+  unit
+
+(** [respond_mcp_auth_error ~deps ~request_authority ~endpoint request
+    reqd ~session_id ~protocol_version failure] records the reject
+    (see {!record_mcp_auth_reject}) and writes the standard
+    [Auth_error] JSON-RPC envelope via {!respond_mcp_error}. The
+    httpun MCP handlers' single reject path. *)
+val respond_mcp_auth_error :
+  deps:Server_mcp_transport_http_types.deps ->
+  request_authority:Server_request_authority.authority ->
+  endpoint:string ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  session_id:string ->
+  protocol_version:string ->
+  Server_mcp_transport_http_types.auth_failure ->
+  unit

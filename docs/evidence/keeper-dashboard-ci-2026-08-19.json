@@ -1,0 +1,36 @@
+{
+  "captured_at": "2026-08-19T10:18:00Z",
+  "purpose": "Dashboard 행 ci 축 — CI에 대시보드 잡이 실재하고 완주하는지 실측",
+  "job_definition": {
+    "file": ".github/workflows/ci.yml:2201",
+    "name": "Dashboard",
+    "runner": "ubuntu-latest",
+    "timeout_minutes": 20,
+    "needs": ["pr-live-gate", "changes"],
+    "scoping": "PR에서는 경로 스코프(dashboard/ 변경 또는 lib측 SSE wire-surface 파일 변경 시). main/develop push·schedule·workflow_dispatch에서는 스코프를 무시하고 항상 실행 — 비대시보드 변경이 대시보드 테스트를 깨뜨려도 다음 main push에서 잡힌다."
+  },
+  "observed_run": {
+    "run_id": 32229508742,
+    "pr": 29096,
+    "conclusion": "success",
+    "started": "2026-08-19T07:49:52Z",
+    "completed": "2026-08-19T08:06:21Z",
+    "duration_minutes": 16.5,
+    "successful_steps": 20
+  },
+  "what_it_actually_runs": [
+    "Run drift gate",
+    "TypeScript typecheck",
+    "Run dashboard tests (pnpm test)",
+    "Install Playwright Chromium",
+    "Run Keeper queued-stream Playwright E2E",
+    "Run Keeper lane-timeline Playwright E2E",
+    "Upload Keeper queued-stream screenshots",
+    "Upload Keeper lane-timeline screenshots"
+  ],
+  "verdict": "ci 축 충족 — 타입 검사·단위 테스트·Playwright E2E 2종이 한 잡에서 돌고, 08-19 07:49~08:06Z 실행이 20 스텝 전부 성공으로 완주했다. 스크린샷 아티팩트도 업로드된다.",
+  "caveats": {
+    "path_scoped_on_pr": "PR에서는 대시보드 경로가 바뀌어야 돈다. 이 실측도 대시보드를 고친 PR(#29096)에서 나온 것이다.",
+    "main_push_safety_net": "그 대신 main/develop push에서는 무조건 돌게 돼 있어, 경로 밖 변경이 대시보드를 깨뜨려도 다음 push에서 드러난다. 근거는 잡 주석이 인용하는 과거 사고(keeper-fsm-specs.test.ts·keeper-composite.test.ts가 main에서 red로 방치됨)."
+  }
+}

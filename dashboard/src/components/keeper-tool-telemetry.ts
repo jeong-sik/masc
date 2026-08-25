@@ -8,7 +8,7 @@ import { fetchKeeperToolStats } from '../api/dashboard'
 import type { ToolStat, HourlyBucket, ToolStatsResponse, TelemetryFreshnessMetadata } from '../api/dashboard'
 import { lastEvent } from '../sse'
 import { toolCategory, durationColor, normalizeToolName } from './tool-call-shared'
-import { formatCost, formatMsCompact } from '../lib/format-number'
+import { formatMsCompact } from '../lib/format-number'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { TextInput } from './common/input'
 import { SectionCap } from './common/section-cap'
@@ -231,7 +231,6 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
     `
   }
 
-  const totalCost = s.tools.reduce((sum, t) => sum + t.total_cost_usd, 0)
   const maxCount = s.tools[0]?.call_count ?? 1
 
   // Find tools with highest p95
@@ -254,11 +253,6 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
         <${StatusChip} tone="neutral" uppercase=${false} class="gap-1 py-1">
           <span class="font-mono font-medium text-[var(--color-fg-secondary)]">${s.totalEntries}</span> 호출
         <//>
-        ${totalCost > 0 ? html`
-          <${StatusChip} tone="info" uppercase=${false} class="gap-1 py-1">
-            <span class="font-mono font-medium text-[var(--color-accent-fg)]">${formatCost(totalCost)}</span>
-          <//>
-        ` : null}
         <${StatusChip} tone="neutral" uppercase=${false} class="gap-1 py-1 text-[var(--color-fg-disabled)]">
           ${s.windowHours}h 기간
         <//>

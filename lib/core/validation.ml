@@ -13,35 +13,41 @@
     for security monitoring and debugging.
 *)
 
-(** MAGI: Validation rejection counters for observability *)
-let rejection_count = Atomic.make 0
-let last_rejection_time = ref 0.0
+(** MAGI: Validation rejection counters for observability.
+
+    Keep the related values in one immutable snapshot.  A count Atomic beside a
+    plain timestamp ref allowed cross-domain readers to observe a count from one
+    rejection and a timestamp from another (and the ref itself was a data race). *)
+type rejection_stats =
+  { count : int
+  ; last_rejection_time : float
+  }
+
+let rejection_stats =
+  Atomic.make { count = 0; last_rejection_time = 0.0 }
 
 (** Get validation statistics *)
 let get_rejection_stats () =
-  (Atomic.get rejection_count, !last_rejection_time)
+  let snapshot = Atomic.get rejection_stats in
+  snapshot.count, snapshot.last_rejection_time
 
 (** Reset validation statistics *)
 let reset_rejection_stats () =
-  Atomic.set rejection_count 0;
-  last_rejection_time := 0.0
+  Atomic.set rejection_stats { count = 0; last_rejection_time = 0.0 }
 
 (** Internal: Log validation rejection at WARN level *)
 let log_rejection ~validator ~input ~reason =
-  Atomic.incr rejection_count;
-  last_rejection_time := Time_compat.now ();
-  (* Truncate input for log safety *)
-  let safe_input = String_util.utf8_safe ~max_bytes:35 ~suffix:"..." input |> String_util.to_string in
+  let now = Time_compat.now () in
+  Atomic_util.update rejection_stats (fun snapshot ->
+    { count = snapshot.count + 1; last_rejection_time = now });
+  let safe_input =
+    String_util.utf8_safe ~max_bytes:35 ~suffix:"..." input
+    |> String_util.to_string
+    |> String.map (fun char ->
+      if Char.code char < 0x20 || Char.code char = 0x7f then '?' else char)
+  in
   Log.Misc.warn "%s rejected input '%s': %s"
     validator safe_input reason
-
-(* #9787: LLMs emit ids wrapped in stray ASCII quotes ('task-031'). Caller
-   re-runs strict validation on the inner; smart quotes left untouched. *)
-let try_strip_outer_quotes s =
-  let len = String.length s in
-  if len >= 2 && s.[0] = s.[len - 1] && (s.[0] = '\'' || s.[0] = '"') then
-    Some (String.sub s 1 (len - 2))
-  else None
 
 (** Agent ID validation *)
 module Agent_id : sig
@@ -67,30 +73,16 @@ end = struct
     else if String.contains s '.' && String.starts_with s ~prefix:".." then
       Error "agent_id cannot contain path traversal"
     else if not (Re.execp valid_pattern s) then
-      Error (Printf.sprintf "agent_id contains invalid characters: %s (only a-z, A-Z, 0-9, _, -, : allowed)" s)
+      Error "agent_id contains characters outside [A-Za-z0-9_:-]"
     else
       Ok s
 
   let validate s =
-    let log_and_err reason =
-      log_rejection ~validator:"Agent_id" ~input:s ~reason;
-      Error reason
-    in
     match strict s with
     | Ok t -> Ok t
-    | Error orig_reason ->
-        match try_strip_outer_quotes s with
-        | Some inner ->
-            (match strict inner with
-             | Ok t ->
-                 Log.Misc.info
-                   "Agent_id: stripped surrounding quotes (#9787): '%s' -> '%s'"
-                   s inner;
-                 Ok t
-             | Error _ ->
-                 log_and_err
-                   "agent_id appears wrapped in surrounding quotes; supply the bare id without quotes")
-        | None -> log_and_err orig_reason
+    | Error reason ->
+      log_rejection ~validator:"Agent_id" ~input:s ~reason;
+      Error reason
 
   let to_string t = t
   let of_string_unsafe s = s
@@ -118,30 +110,16 @@ end = struct
     else if String.contains s '.' && String.starts_with s ~prefix:".." then
       Error "task_id cannot contain path traversal"
     else if not (Re.execp valid_pattern s) then
-      Error (Printf.sprintf "task_id contains invalid characters: %s (only a-z, A-Z, 0-9, _, -, : allowed)" s)
+      Error "task_id contains characters outside [A-Za-z0-9_:-]"
     else
       Ok s
 
   let validate s =
-    let log_and_err reason =
-      log_rejection ~validator:"Task_id" ~input:s ~reason;
-      Error reason
-    in
     match strict s with
     | Ok t -> Ok t
-    | Error orig_reason ->
-        match try_strip_outer_quotes s with
-        | Some inner ->
-            (match strict inner with
-             | Ok t ->
-                 Log.Misc.info
-                   "Task_id: stripped surrounding quotes (#9787): '%s' -> '%s'"
-                   s inner;
-                 Ok t
-             | Error _ ->
-                 log_and_err
-                   "task_id appears wrapped in surrounding quotes; supply the bare id without quotes")
-        | None -> log_and_err orig_reason
+    | Error reason ->
+      log_rejection ~validator:"Task_id" ~input:s ~reason;
+      Error reason
 
   let to_string t = t
   let of_string_unsafe s = s

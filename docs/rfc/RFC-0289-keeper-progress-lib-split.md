@@ -1,3 +1,8 @@
+---
+rfc: "0289"
+status: Draft
+---
+
 # RFC-0289: Extract progress-classification into its own library for a single substantive-evidence owner
 
 - Status: Draft
@@ -109,7 +114,7 @@ one-liners in sync.
 ## Open questions
 
 - Exact module closure for `Keeper_tool_name`/`Keeper_tool_resolution` (do they
-  pull in OAS/registry state that should stay in `masc`?).
+  pull in agent_core/registry state that should stay in `masc`?).
 - Whether `turn_effect` / `empty_queue_reason` travel with the classification
   layer or stay in `masc` (they are detector-FSM concerns, not classification).
 

@@ -1,0 +1,7 @@
+(include_subdirs no)
+
+(library
+ (name run_registry_core)
+ (public_name masc.run_registry_core)
+ (wrapped false)
+ (libraries eio fs_compat masc_core masc_log threads unix yojson))

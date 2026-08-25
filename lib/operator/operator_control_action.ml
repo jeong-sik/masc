@@ -4,14 +4,25 @@ type 'a context = 'a Tool_operator.context
 
 open Result.Syntax
 
-let judgment_surface_enums =
-  [ "command.namespace"; "intervene" ]
+(* The two surfaces a judgment can be recorded against. Closed, because every
+   per-surface policy below has to answer for each one: the freshness TTL used
+   to be selected by matching the normalized string with a wildcard default of
+   120s, an arm no caller could reach — [normalize_judgment_surface] rejects
+   everything else before the TTL is asked for. A third surface now breaks
+   compilation where the policy lives instead of silently getting 120s. *)
+type judgment_surface =
+  | Command_namespace
+  | Intervene
+
+let judgment_surface_to_string = function
+  | Command_namespace -> "command.namespace"
+  | Intervene -> "intervene"
+;;
 
 let normalize_judgment_surface value =
-  let normalized = String.trim value |> String.lowercase_ascii in
-  match normalized with
-  | "command.namespace" -> Ok "command.namespace"
-  | "intervene" -> Ok normalized
+  match String.trim value |> String.lowercase_ascii with
+  | "command.namespace" -> Ok Command_namespace
+  | "intervene" -> Ok Intervene
   | _ -> Error "surface must be one of command.namespace, intervene"
 
 let normalize_judgment_target_type value =
@@ -21,11 +32,9 @@ let normalize_judgment_target_type value =
       Ok (Operator_judgment.target_type_to_string target_type, target_type)
   | None -> Error Operator_action_constants.workspace_target_type_error
 
-let default_fresh_ttl_sec surface =
-  match surface with
-  | "command.namespace" -> 60
-  | "intervene" -> 300
-  | _ -> 120
+let default_fresh_ttl_sec = function
+  | Command_namespace -> 60
+  | Intervene -> 300
 
 let judgment_write_json (ctx : 'a context) args =
   let* surface = normalize_judgment_surface (get_string args "surface" "") in
@@ -44,7 +53,24 @@ let judgment_write_json (ctx : 'a context) args =
     in
     let fresh_until_unix = now_unix +. float_of_int fresh_ttl_sec in
     let fresh_until = Masc_domain.iso8601_of_unix_seconds fresh_until_unix in
-    let confidence = get_float args "confidence" 0.5 in
+    (* No default. An omitted [confidence] used to become 0.5, which put "the
+       judge did not say" and "the judge is half sure" on one number in the
+       operator digest. The schema declares the field required with bounds; a
+       caller that omits it or sends something else is told which field. *)
+    let* confidence =
+      match Json_util.assoc_member_opt "confidence" args with
+      | Some (`Float value) -> Ok value
+      | Some (`Int value) -> Ok (float_of_int value)
+      | Some _ -> Error "confidence must be a number between 0.0 and 1.0"
+      | None -> Error "confidence is required"
+    in
+    let* confidence =
+      if Float.is_finite confidence
+         && Float.compare confidence 0.0 >= 0
+         && Float.compare confidence 1.0 <= 0
+      then Ok confidence
+      else Error "confidence must be a number between 0.0 and 1.0"
+    in
     let keeper_name =
       match get_string_opt args "keeper_name" with
       | Some raw ->
@@ -57,7 +83,7 @@ let judgment_write_json (ctx : 'a context) args =
     in
     let recommended_action = Json_util.get_object args "recommended_action" in
     let judgment =
-      Operator_judgment.record ctx.config ~surface
+      Operator_judgment.record ctx.config ~surface:(judgment_surface_to_string surface)
         ~target_type:judgment_target_type ~target_id ~summary ~confidence
         ?model_name:(get_string_opt args "model_name")
         ?runtime_name:(get_string_opt args "runtime_name")
@@ -81,7 +107,7 @@ let judgment_latest_json (_ctx : 'a context) args =
   let require_fresh = get_bool args "require_fresh" true in
   let judgment =
     match
-      Operator_judgment.latest_active _ctx.config ~surface
+      Operator_judgment.latest_active _ctx.config ~surface:(judgment_surface_to_string surface)
         ~target_type:judgment_target_type ~target_id
     with
     | Some value when (not require_fresh) || Operator_judgment.is_fresh value ->
@@ -139,7 +165,7 @@ let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
       let token = "opc_" ^ String.sub (Auth.generate_token ()) 0 32 in
       let exists =
         raw_pending_confirms config
-        |> List.exists (fun entry -> String.equal entry.token token)
+        |> List.exists (fun entry -> String.equal entry.confirm_token token)
       in
       if exists then begin
         (* Exponential backoff: 1ms, 2ms, 4ms, ... up to ~512ms *)
@@ -186,8 +212,6 @@ let normalize_request_target_type (request : action_request) =
   in
   Ok { request with target_type }
 
-(** Resolve tool name for an action_type. Looks up available_actions first,
-    falls back to legacy mapping for unlisted actions. *)
 let delegated_tool_for action_type =
   match
     List.find_opt
@@ -195,8 +219,8 @@ let delegated_tool_for action_type =
         String.equal a.action_type action_type)
       Operator_pending_confirm.available_actions
   with
-  | Some action -> action.tool_name
-  | None -> "unknown"
+  | Some action -> Ok action.tool_name
+  | None -> Error (Printf.sprintf "unsupported action_type: %s" action_type)
 
 let confirm_required = Operator_action_catalog.requires_confirmation
 

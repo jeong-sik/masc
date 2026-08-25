@@ -7,15 +7,28 @@
 
 open Result.Syntax
 
+(* RFC-0361 D7(b): fixed authority identity — every judgement carries the
+   same actor string (the [verifier_exact] lane id) so verdicts aggregate by
+   actor; run identity stays with the per-review [verification_id]. *)
+let authority_actor = Runtime.verifier_exact_lane_id
+
 type runtime =
   { config : Workspace_utils_backend_setup.config
   ; sw : Eio.Switch.t
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; wake : Eio.Condition.t
-  ; pending : bool Atomic.t
+  ; sweep_pending : bool Atomic.t
+      (** A whole-backlog read is due. Boot recovery and a failed backlog read
+          are the only things that need one: they have no key to aim at. *)
+  ; targets : review_key list Atomic.t
+      (** Verifications a submission or a retryable deferral asked for by name.
+          The submission hook already receives [task], [assignee] and
+          [verification_id]; carrying them here is what keeps one submission
+          from re-reviewing every other awaiting Task. *)
   ; retry_scheduled : bool Atomic.t
   ; retry_interval_sec : float
   ; in_flight : review_key list Atomic.t
+  ; review_slots : Eio.Semaphore.t
   }
 
 and review_key =
@@ -50,6 +63,39 @@ let release_review (runtime : runtime) key =
     then ()
     else if Atomic.compare_and_set runtime.in_flight current next
     then ()
+    else loop ()
+  in
+  loop ()
+;;
+
+(** What one wake of the daemon is allowed to look at. A submission and a
+    retryable deferral both name the verification they mean, so they get
+    [Targets]. Boot and a failed backlog read have nothing to name, so they get
+    [Whole_backlog]. Keeping the two apart is what stops one submission from
+    re-reviewing every other awaiting Task. *)
+type scan_scope =
+  | Whole_backlog
+  | Targets of review_key list
+
+(* Pure: the awaiting entries one scope admits. [Whole_backlog] admits all of
+   them; [Targets] admits only the named keys, and names a key at most once even
+   if it was requested repeatedly before the daemon woke. *)
+let entries_in_scope ~scope entries =
+  match scope with
+  | Whole_backlog -> entries
+  | Targets keys ->
+    List.filter
+      (fun (key, _) -> List.exists (review_key_equal key) keys)
+      entries
+;;
+
+let take_targets (runtime : runtime) =
+  let rec loop () =
+    let current = Atomic.get runtime.targets in
+    if current = []
+    then []
+    else if Atomic.compare_and_set runtime.targets current []
+    then current
     else loop ()
   in
   loop ()
@@ -122,7 +168,6 @@ let review_notes
              ; "task_id", `String request.task_id
              ; "worker", `String request.worker
              ; "created_at", `Float request.created_at
-             ; "criteria_count", `Int (List.length request.criteria)
              ] )
        ; ( "submitted_evidence_metadata"
          , Workspace_verification_store.submitted_evidence_access_metadata_to_yojson
@@ -161,9 +206,7 @@ let required_string_list_field ~context name fields =
 let completion_contract_of_request
       (request : Verification.verification_request)
   =
-  let completion_contract =
-    List.map (fun (Verification.Custom description) -> description) request.criteria
-  in
+  let completion_contract = request.criteria in
   let completion_contract =
     match completion_contract with
     | [] -> None
@@ -272,7 +315,8 @@ let prepare_review
             (`Assoc
                [ "verification_request", Verification.request_to_yojson request
                ; ( "submitted_evidence_access"
-                 , Workspace_verification_store.submitted_evidence_access_to_yojson
+                 , Workspace_verification_store
+                    .submitted_evidence_access_transport_to_yojson
                      evidence_access )
                ])
         in
@@ -295,15 +339,21 @@ let prepare_review
 type process_outcome =
   | Committed
   | Deferred
+  | Retryable_deferred
 
-let defer ~task_id ~verification_id ~authority ~reason =
+let process_outcome_of_evaluator_retryable = function
+  | Some true -> Retryable_deferred
+  | Some false | None -> Deferred
+;;
+
+let defer ?(evaluator_retryable = None) ~task_id ~verification_id ~authority ~reason () =
   Log.Misc.warn
     "system LLM completion authority deferred task_id=%s verification_id=%s authority=%s reason=%s"
     task_id
     verification_id
     (Masc_domain.completion_authority_actor authority)
     reason;
-  Deferred
+  process_outcome_of_evaluator_retryable evaluator_retryable
 ;;
 
 let observe_rejection_wakeup
@@ -387,6 +437,11 @@ let observe_rejection_wakeup
       detail
 ;;
 
+(* Returns the control-flow outcome the scan loop acts on, paired with the
+   observation outcome recorded for this review. [on_commit] is the exact
+   semantic verdict produced by the evaluator. Infrastructure failures never
+   call this function. A failed commit is its own outcome because the verdict
+   was decided but never reached the Task. *)
 let commit_verdict
       (runtime : runtime)
       (task : Masc_domain.task)
@@ -396,6 +451,8 @@ let commit_verdict
       ~verdict
       ~notes
       ~verdict_label
+      ~on_commit
+      ~(evaluator_runtime : string option)
   =
   match
     Workspace.commit_verdict_r
@@ -405,6 +462,7 @@ let commit_verdict
       ~task_id:task.id
       ~verification_id
       ~notes
+      ?evaluator_runtime
       ()
   with
   | Ok _ ->
@@ -424,13 +482,11 @@ let commit_verdict
       verification_id
       (Masc_domain.completion_authority_actor authority)
       verdict_label;
-    Committed
+    Committed, on_commit
   | Error error ->
-    defer
-      ~task_id:task.id
-      ~verification_id
-      ~authority
-      ~reason:(Masc_domain.masc_error_to_string error)
+    let detail = Masc_domain.masc_error_to_string error in
+    ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail ()
+    , Verification_run_registry.Commit_failed { detail } )
 ;;
 
 let process_task_once
@@ -439,8 +495,46 @@ let process_task_once
       ~assignee
       ~verification_id
   =
-  let agent_run_id = Random_id.prefixed ~prefix:"system-llm-agent-" ~bytes:16 in
-  let authority = Masc_domain.System_llm_agent { agent_run_id } in
+  (* RFC-0361 D7(b): fixed identity, not a per-judgement random mint — see
+     [authority_actor] above. *)
+  let authority = Masc_domain.System_llm_agent { agent_run_id = authority_actor } in
+  (* Register before any work. Every exit below records through [complete],
+     including paths that produce no semantic verdict. *)
+  let registry = Verification_run_registry.global () in
+  let started_at = Eio.Time.now runtime.clock in
+  let tools = ref [] in
+  let on_tool_result ~input result =
+    tools :=
+      Verification_run_registry.observe_tool_result
+        ~input
+        ~finished_at:(Eio.Time.now runtime.clock)
+        result
+      :: !tools
+  in
+  Verification_run_registry.register_running
+    registry
+    ~verification_id
+    ~task_id:task.id
+    ~producer:assignee
+    ~authority_kind:(Masc_domain.completion_authority_kind authority)
+    ~authority_actor:(Masc_domain.completion_authority_actor authority)
+    ~started_at;
+  let complete ?evaluator_runtime (process_outcome, outcome) =
+    Verification_run_registry.mark_completed
+      registry
+      ~verification_id
+      ~outcome
+      ~tools:(List.rev !tools)
+      ?evaluator_runtime
+      ~elapsed_s:(Eio.Time.now runtime.clock -. started_at)
+      ();
+    process_outcome
+  in
+  let defer_unavailable ~stage ~detail =
+    complete
+      ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail ()
+      , Verification_run_registry.Infrastructure_unavailable { stage; detail } )
+  in
   try
     match
       prepare_review
@@ -451,51 +545,77 @@ let process_task_once
         ~authority
     with
     | Error reason ->
-      let rejection_reason = "completion evidence contract invalid: " ^ reason in
-      commit_verdict
-        runtime
-        task
-        ~assignee
-        ~verification_id
-        ~authority
-        ~verdict:(Masc_domain.Verdict_rejected { reason = rejection_reason })
-        ~notes:rejection_reason
-        ~verdict_label:"rejected_contract"
+      defer_unavailable
+        ~stage:Verification_run_registry.Review_preparation
+        ~detail:reason
     | Ok prepared ->
-      (* The lookup surface is bound to the producer under review, so the same
-         judge gets a different root on the next task. [assignee] is the worker
-         the evidence snapshot was materialized against — [prepare_review]
-         rejects the request when it disagrees with [request.worker], so the
-         two cannot name different trees. *)
-      let lookup_tools =
-        Verification_authority_tools.create
-          ~base_path:runtime.config.base_path
-          ~producer:assignee
-      in
-      let result =
-        Task.Anti_rationalization.review
-          ~base_path:runtime.config.base_path
-          ~sw:(Some runtime.sw)
-          ~lookup:
-            (Task.Anti_rationalization.Lookup_tools
-               { schemas = Verification_authority_tools.schemas lookup_tools
-               ; dispatch = Verification_authority_tools.dispatch lookup_tools
-               })
-          ?completion_contract:prepared.completion_contract
-          ~required_evidence:prepared.required_artifacts
-          ~verify_gate_evidence:[]
-          prepared.review_request
-      in
-      (match result.verdict with
+      (match
+         Verification_authority_tools.create
+           ~config:runtime.config
+           ~producer:assignee
+       with
+       | Error reason ->
+         defer_unavailable
+           ~stage:Verification_run_registry.Lookup_surface
+           ~detail:reason
+       | Ok lookup_tools ->
+         (match Verification_authority_tools.root_layout lookup_tools with
+          | Error reason ->
+            defer_unavailable
+              ~stage:Verification_run_registry.Lookup_surface
+              ~detail:reason
+          | Ok root_layout ->
+            let lookup =
+              Task.Anti_rationalization.Lookup_tools
+                { schemas = Verification_authority_tools.schemas lookup_tools
+                ; dispatch = Verification_authority_tools.dispatch lookup_tools
+                ; root_layout
+                }
+            in
+            let result =
+              Task.Anti_rationalization.review
+                ~base_path:runtime.config.base_path
+                ~sw:(Some runtime.sw)
+                ~lookup
+                ?completion_contract:prepared.completion_contract
+                ~required_evidence:prepared.required_artifacts
+                ~on_tool_result
+                prepared.review_request
+            in
+            let evaluator_runtime = result.evaluator_runtime in
+            match result.verdict with
        | None ->
-         defer
+         let gate = Task.Anti_rationalization.gate_to_string result.gate in
+         (* Both arms are real descriptions, not a default standing in for an
+            unknown: the reviewer's own fallback text when it produced one, the
+            gate name when it did not. Written as a match so neither arm hides
+            inside an [Option.value ~default]. *)
+         let detail =
+           match result.fallback_reason with
+           | Some reason -> reason
+           | None -> gate
+         in
+         (* No verdict means nobody judged this submission. The registry row
+            alone reaches no one, so the outcome is always promoted to the
+            Board, where the producer Keeper and the operator both read it and
+            decide whether to resubmit. The authority does not decide that on
+            their behalf. *)
+         Verification_protocol.notify_stalled_verification
+           ~authority
            ~task_id:task.id
            ~verification_id
-           ~authority
-           ~reason:
-             (Option.value
-                result.fallback_reason
-                ~default:(Task.Anti_rationalization.gate_to_string result.gate))
+           ~gate
+           ~detail;
+         complete
+           ~evaluator_runtime
+           ( defer
+               ~evaluator_retryable:result.evaluator_error_retryable
+               ~task_id:task.id
+               ~verification_id
+               ~authority
+               ~reason:detail
+               ()
+           , Verification_run_registry.Not_reviewed { gate; detail } )
        | Some review_verdict ->
          let verdict = completion_verdict_of_review review_verdict in
          let notes =
@@ -505,52 +625,108 @@ let process_task_once
              ~result
              ~authority
          in
-         commit_verdict
-           runtime
-           task
-           ~assignee
-           ~verification_id
-           ~authority
-           ~verdict
-           ~notes
-           ~verdict_label:
-             (Task.Anti_rationalization.verdict_constructor_name review_verdict))
+         let on_commit =
+           match verdict with
+           | Masc_domain.Verdict_approved -> Verification_run_registry.Approved
+           | Masc_domain.Verdict_rejected { reason } ->
+             Verification_run_registry.Rejected { reason }
+         in
+         complete
+           ~evaluator_runtime
+           (commit_verdict
+              runtime
+              task
+              ~assignee
+              ~verification_id
+              ~authority
+              ~verdict
+              ~notes
+              ~verdict_label:
+                (Task.Anti_rationalization.verdict_constructor_name review_verdict)
+              ~on_commit
+              ~evaluator_runtime:(Some evaluator_runtime))))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    defer
-      ~task_id:task.id
-      ~verification_id
-      ~authority
-      ~reason:(Printexc.to_string exn)
+    let detail = Printexc.to_string exn in
+    complete
+      ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail ()
+      , Verification_run_registry.Raised { detail } )
 ;;
 
-let request_scan (runtime : runtime) =
-  Atomic.set runtime.pending true;
+(* Boot and a failed backlog read have no key to aim at. Everything else does,
+   and must use [request_review] instead. *)
+let request_sweep (runtime : runtime) =
+  Atomic.set runtime.sweep_pending true;
   Eio.Condition.broadcast runtime.wake
 ;;
 
-let schedule_retry (runtime : runtime) =
+let request_review (runtime : runtime) key =
+  let rec loop () =
+    let current = Atomic.get runtime.targets in
+    if List.exists (review_key_equal key) current
+    then ()
+    else if Atomic.compare_and_set runtime.targets current (key :: current)
+    then ()
+    else loop ()
+  in
+  loop ();
+  Eio.Condition.broadcast runtime.wake
+;;
+
+let schedule_retry (runtime : runtime) key =
   if Atomic.compare_and_set runtime.retry_scheduled false true
   then
     Eio.Fiber.fork ~sw:runtime.sw (fun () ->
       Eio.Time.sleep runtime.clock runtime.retry_interval_sec;
       Atomic.set runtime.retry_scheduled false;
-      request_scan runtime)
+      request_review runtime key)
+;;
+
+let schedule_sweep_retry (runtime : runtime) =
+  if Atomic.compare_and_set runtime.retry_scheduled false true
+  then
+    Eio.Fiber.fork ~sw:runtime.sw (fun () ->
+      Eio.Time.sleep runtime.clock runtime.retry_interval_sec;
+      Atomic.set runtime.retry_scheduled false;
+      request_sweep runtime)
 ;;
 
 let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verification_id =
   let key = { task_id = task.id; verification_id } in
   if claim_review runtime key
   then (
+    (* A retryable evaluator failure has no producer action that can legally
+       advance the Task: it is still [AwaitingVerification]. Re-arm the
+       application-owned scan after the durable run/Board observation is
+       recorded. Non-retryable deferrals keep the existing producer/operator
+       contract, and restart recovery still comes from [start]'s initial
+       pending scan. *)
     let outcome =
       Fun.protect
         ~finally:(fun () -> release_review runtime key)
         (fun () -> process_task_once runtime task ~assignee ~verification_id)
     in
     match outcome with
+    | Retryable_deferred ->
+      Log.Misc.info
+        "system LLM completion authority scheduled retry task_id=%s verification_id=%s interval_sec=%.1f"
+        task.id
+        verification_id
+        runtime.retry_interval_sec;
+      schedule_retry runtime key
     | Committed -> ()
-    | Deferred -> schedule_retry runtime)
+    | Deferred ->
+      (* Nothing schedules another look at this key: the scope rule admits it
+         again only through a fresh submission, or through the sweep, which is
+         armed at boot and after a failed backlog read rather than on a timer.
+         So the Task sits in [AwaitingVerification] until a producer or operator
+         acts, and this is the one line that says so — at the level its
+         retryable sibling above already uses. *)
+      Log.Misc.info
+        "system LLM completion authority settled without retry; producer or operator owns the next move task_id=%s verification_id=%s"
+        task.id
+        verification_id)
   else
     Log.Misc.debug
       "system LLM completion authority skipped duplicate in-flight review task_id=%s verification_id=%s"
@@ -558,35 +734,54 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
       verification_id
 ;;
 
-let process_pending (runtime : runtime) =
+let process_scope (runtime : runtime) ~scope =
   match Workspace_backlog.read_backlog_r runtime.config with
   | Error detail ->
     Log.Misc.error
       "system LLM completion authority backlog read failed; pending tasks remain unresolved: %s"
       detail;
-    schedule_retry runtime
+    (* The read failed, so which keys are awaiting is unknown. Re-read the whole
+       backlog rather than guess. *)
+    schedule_sweep_retry runtime
   | Ok backlog ->
+    let entries =
+      List.filter_map
+        (fun (task : Masc_domain.task) ->
+           match task.task_status with
+           | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
+             Some ({ task_id = task.id; verification_id }, (task, assignee))
+           | Masc_domain.Todo
+           | Masc_domain.Claimed _
+           | Masc_domain.InProgress _
+           | Masc_domain.Done _
+           | Masc_domain.Cancelled _ -> None)
+        backlog.tasks
+    in
     List.iter
-      (fun (task : Masc_domain.task) ->
-         match task.task_status with
-         | Masc_domain.AwaitingVerification { assignee; verification_id; _ } ->
-           Eio.Fiber.fork ~sw:runtime.sw (fun () ->
-             process_task runtime task ~assignee ~verification_id)
-         | Masc_domain.Todo
-         | Masc_domain.Claimed _
-         | Masc_domain.InProgress _
-         | Masc_domain.Done _
-         | Masc_domain.Cancelled _ -> ())
-      backlog.tasks
+      (fun (key, (task, assignee)) ->
+         Eio.Fiber.fork ~sw:runtime.sw (fun () ->
+           Eio.Semaphore.acquire runtime.review_slots;
+           (* fun-protect-finally-ok: [Eio.Semaphore.release] is
+              non-suspending and must return the bounded review slot on
+              normal completion, exception, or cancellation. *)
+           Fun.protect
+             ~finally:(fun () -> Eio.Semaphore.release runtime.review_slots)
+             (fun () ->
+                process_task runtime task ~assignee ~verification_id:key.verification_id)))
+      (entries_in_scope ~scope entries)
 ;;
 
 let run (runtime : runtime) : [ `Stop_daemon ] =
   Eio.Condition.loop_no_mutex runtime.wake (fun () ->
-    if Atomic.exchange runtime.pending false
-    then (
-      process_pending runtime;
-      None)
-    else None)
+    (* Targets first: a named verification is the common case and costs one
+       backlog read for the batch that accumulated since the last wake. The
+       sweep stays for boot and for a failed read, which have no key to aim at. *)
+    (match take_targets runtime with
+     | [] -> ()
+     | (_ :: _) as keys -> process_scope runtime ~scope:(Targets keys));
+    if Atomic.exchange runtime.sweep_pending false
+    then process_scope runtime ~scope:Whole_backlog;
+    None)
 ;;
 
 let install_callback (runtime : runtime) =
@@ -604,7 +799,7 @@ let install_callback (runtime : runtime) =
            "system LLM completion authority rejected empty verification id task_id=%s"
            task.id
        else (
-         request_scan runtime;
+         request_review runtime { task_id = task.id; verification_id };
          Log.Misc.info
            "system LLM completion authority scheduled task_id=%s verification_id=%s producer=%s"
            task.id
@@ -619,10 +814,12 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
     ; sw
     ; clock
     ; wake = Eio.Condition.create ()
-    ; pending = Atomic.make true
+    ; sweep_pending = Atomic.make true
+    ; targets = Atomic.make []
     ; retry_scheduled = Atomic.make false
     ; retry_interval_sec = Env_config.Timeouts.maintenance_pulse_interval_sec
     ; in_flight = Atomic.make []
+    ; review_slots = Eio.Semaphore.make 4
     }
   in
   let owner = Some runtime in
@@ -656,7 +853,27 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
 ;;
 
 module For_testing = struct
+  let authority_actor = authority_actor
   let evidence_refs_of_output = evidence_refs_of_output
   let completion_verdict_of_review = completion_verdict_of_review
   let review_notes = review_notes
+
+  type nonrec process_outcome = process_outcome =
+    | Committed
+    | Deferred
+    | Retryable_deferred
+
+  let process_outcome_of_evaluator_retryable =
+    process_outcome_of_evaluator_retryable
+
+  type nonrec review_key = review_key =
+    { task_id : string
+    ; verification_id : string
+    }
+
+  type nonrec scan_scope = scan_scope =
+    | Whole_backlog
+    | Targets of review_key list
+
+  let entries_in_scope = entries_in_scope
 end

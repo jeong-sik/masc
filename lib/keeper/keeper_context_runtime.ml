@@ -26,14 +26,14 @@ let serialized_bytes = Keeper_context_core.serialized_bytes
 let checkpoint_of_context = Keeper_context_core.checkpoint_of_context
 let resume_checkpoint_of_context =
   Keeper_context_core.resume_checkpoint_of_context
-let oas_context_of_context = Keeper_context_core.oas_context_of_context
+let agent_core_context_of_context = Keeper_context_core.agent_core_context_of_context
 let system_prompt_of_context = Keeper_context_core.system_prompt_of_context
 let messages_of_context = Keeper_context_core.messages_of_context
 let create = Keeper_context_core.create
 let set_system_prompt = Keeper_context_core.set_system_prompt
 let append = Keeper_context_core.append
 let append_many = Keeper_context_core.append_many
-let sync_oas_context = Keeper_context_core.sync_oas_context
+let sync_agent_core_context = Keeper_context_core.sync_agent_core_context
 let role_to_string = Keeper_context_core.role_to_string
 let role_of_string_opt = Keeper_context_core.role_of_string_opt
 let message_to_json = Keeper_context_core.message_to_json
@@ -42,14 +42,9 @@ let serialize_context = Keeper_context_core.serialize_context
 let create_session = Keeper_context_core.create_session
 let persist_message = Keeper_context_core.persist_message
 
-let timed = Keeper_context_core.timed
-let zero_usage = Keeper_context_core.zero_usage
-let usage_of_response = Keeper_context_core.usage_of_response
-let total_tokens = Keeper_context_core.total_tokens
-
 let log_keeper_exn = Keeper_context_core.log_keeper_exn
-let context_of_oas_checkpoint = Keeper_context_core.context_of_oas_checkpoint
-let save_oas_checkpoint = Keeper_context_core.save_oas_checkpoint
+let context_of_agent_core_checkpoint = Keeper_context_core.context_of_agent_core_checkpoint
+let save_agent_core_checkpoint = Keeper_context_core.save_agent_core_checkpoint
 let load_context_from_checkpoint = Keeper_context_core.load_context_from_checkpoint
 
 (* ================================================================ *)
@@ -79,11 +74,10 @@ let compaction_decision_prepared =
 
 type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
   updated_meta : keeper_meta;
-  checkpoint : Agent_sdk.Checkpoint.t option;
+  checkpoint : Agent_core.Checkpoint.t option;
   handoff_json : Yojson.Safe.t option;
   handoff_attempted : bool;
   handoff_failure_reason : string option;
-  turn_generation : int;
   checkpoint_bytes : int;
   message_count : int;
 }
@@ -92,7 +86,7 @@ type max_context_resolution = {
   requested_override : int option;
   primary_budget : int;
   runtime_budget : int;
-  (* Where [runtime_budget] came from: the OAS capability catalog, a
+  (* Where [runtime_budget] came from: the AGENT_CORE capability catalog, a
      runtime.toml override, or that override clamped by the capability.
      [None] only on the legacy ordered-label path when no label resolved and
      the precomputed default budget filled in. Dropping this rendered a
@@ -167,8 +161,7 @@ let context_budget_json_of_resolution
     ]
 ;;
 
-let apply_post_turn_lifecycle_with_resilience_handles =
-  Keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles
+let apply_post_turn_lifecycle = Keeper_post_turn.apply_post_turn_lifecycle
 
 let record_lifecycle_dispatch_rejection ~keeper_name ~origin event ~error =
   Otel_metric_store.inc_counter
@@ -253,7 +246,6 @@ let dispatch_post_turn_lifecycle_events
         ~keeper_name
         (Keeper_state_machine.Handoff_completed
            {
-             generation = lifecycle.updated_meta.runtime.nonce;
              new_trace_id =
                Keeper_id.Trace_id.to_string
                  lifecycle.updated_meta.runtime.trace_id;
@@ -276,29 +268,6 @@ let dispatch_post_turn_lifecycle_events
 (* ================================================================ *)
 
 let generate_trace_id = Keeper_identity.generate_trace_id
-
-let keeper_board_write_tool_names =
-  [ "masc_board_post"
-  ; "masc_board_comment"
-  ; "masc_board_vote"
-  ; "masc_board_curation_submit"
-  ]
-
-let canonical_tool_name name = Keeper_tool_resolution.canonical_tool_name name
-
-let keeper_tool_name_matches tool name =
-  String.equal (canonical_tool_name name) tool
-
-let keeper_action_kind_of_tool_names tool_names =
-  [ "masc_board_post", "post"
-  ; "masc_board_comment", "comment"
-  ; "masc_board_vote", "vote"
-  ; "masc_board_curation_submit", "curation"
-  ]
-  |> List.find_map (fun (tool, action_kind) ->
-    if List.exists (keeper_tool_name_matches tool) tool_names then Some action_kind
-    else None)
-  |> Option.value ~default:"none"
 
 let effective_model_labels_for_turn (m : keeper_meta) : string list =
   (* Provider selection is runtime.toml SSOT; the former ~provider_filter
@@ -390,25 +359,6 @@ let resolve_max_context_resolution_for_runtime_id
   | Some runtime ->
     resolve_max_context_resolution_for_runtime ~requested_override runtime
 
-let resolve_max_context_resolution_of_meta (m : keeper_meta)
-    : max_context_resolution =
-  (* Projection-only compatibility path for manual compaction, operator/status,
-     dashboard, and tool surfaces that do not yet return typed capacity errors.
-     Actual direct/unified turn admission uses
-     [resolve_max_context_resolution_for_runtime_id] and never falls through
-     this ordered-label/default path.
-
-     [effective_model_labels_for_turn] projects through
-     [Provider_runtime_projection.default_execution_model_strings], which ignores
-     the runtime id and returns the GLOBAL preferred labels (an RFC-0206
-     single-binding artifact), so on its own the budget would size against
-     [runtime].default and could admit prompts exceeding a smaller per-keeper
-     model's window. Prepend the routed id so these remaining projections prefer
-     it until their typed hard-cut removes this fallback API. *)
-  let labels = runtime_id_of_meta m :: effective_model_labels_for_turn m in
-  resolve_max_context_resolution
-    ~requested_override:m.max_context_override labels
-
 let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =
   Mention.any_mentioned ~targets content
@@ -416,26 +366,6 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
 (* Delegate to Keeper_prompt — single source of truth for keeper prompts. *)
 let build_keeper_system_prompt = Keeper_prompt.build_keeper_system_prompt
 
-let append_trait_clause = Keeper_prompt.append_trait_clause
 
 
 include Keeper_text_processing
-
-let memory_check_default_json () : Yojson.Safe.t =
-  `Assoc [
-    ("performed", `Bool false);
-    ("query_kind", `String "none");
-    ("expected_topic", `Null);
-    ("candidate_count", `Int 0);
-    ("initial_score", `Float 0.0);
-    ("final_score", `Float 0.0);
-    ("threshold", `Float 0.18);
-    ("passed", `Bool true);
-    ("best_match", `Null);
-    ("correction_applied", `Bool false);
-    ("correction_success", `Bool false);
-    ("prompt_fallback_applied", `Bool false);
-    ("prompt_fallback_success", `Bool false);
-    ("deterministic_fallback_applied", `Bool false);
-    ("recall_fallback_applied", `Bool false);
-  ]

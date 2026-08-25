@@ -47,18 +47,11 @@ let keeper_wake_urgencies =
   ]
 ;;
 
-let keeper_wake_urgency_to_string = function
-  | Keeper_wake_immediate -> "immediate"
-  | Keeper_wake_normal -> "normal"
-  | Keeper_wake_low -> "low"
-
 let keeper_wake_urgency_of_string value =
   match List.find_opt (fun spec -> String.equal spec.label value) keeper_wake_urgencies with
   | Some spec -> Ok spec.value
   | None -> Error (Printf.sprintf "unknown urgency: %s" value)
 ;;
-
-let keeper_wake_target_name_pattern = Safe_identifier.portable_name_pattern
 
 let valid_keeper_wake_target_name =
   Safe_identifier.is_portable_name

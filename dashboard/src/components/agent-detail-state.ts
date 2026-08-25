@@ -10,7 +10,7 @@ import {
   tasks,
 } from '../store'
 import { findKeeper } from '../lib/keeper-utils'
-import { currentDashboardActor, fetchWorkspaceMessages, fetchTaskHistory, sendBroadcast, fetchAgentTimeline, type AgentTimelineResponse } from '../api'
+import { broadcastReceiptMessage, currentDashboardActor, fetchWorkspaceMessages, fetchTaskHistory, sendBroadcast, fetchAgentTimeline, type AgentTimelineResponse } from '../api'
 import { callMcpTool } from '../api/mcp'
 import { journal } from '../sse'
 import { route, navigate } from '../router'
@@ -241,9 +241,12 @@ export async function submitMention(): Promise<void> {
 
   sendingMention.value = true
   try {
-    await sendBroadcast(currentDashboardActor(), `@${target} ${text}`)
+    const receipt = await sendBroadcast(currentDashboardActor(), `@${target} ${text}`)
     mentionText.value = ''
-    showToast(`${target}에게 멘션 전송 완료`, 'success')
+    showToast(
+      receipt.ok ? `${target}에게 멘션 전송 완료` : broadcastReceiptMessage(receipt),
+      receipt.ok ? 'success' : 'warning',
+    )
     void refreshAgentDetail()
   } catch (err) {
     const msg = err instanceof Error ? err.message : '멘션 전송 실패'

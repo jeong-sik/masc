@@ -9,11 +9,6 @@ type link_goalless_task_to_goal_error =
   | Already_linked_to_goals of string list
   | Link_write_failed of goal_task_links_write_error
 
-val goal_task_links_write_error_to_string : goal_task_links_write_error -> string
-
-val link_goalless_task_to_goal_error_to_string :
-  link_goalless_task_to_goal_error -> string
-
 (** Build a reverse index from goal_id to its linked tasks.
 
     [goal_task_links] is the authoritative source of goal-task
@@ -34,6 +29,14 @@ val tasks_for_goal
   :  (string, Masc_domain.task list) Hashtbl.t
   -> goal_id:string
   -> Masc_domain.task list
+
+(** Goals linked to one task — the reverse of {!tasks_for_goal}, over the
+    index {!build_task_goal_index_for_config} returns. [[]] means the task
+    carries no goal link. *)
+val goals_for_task
+  :  (string, string list) Hashtbl.t
+  -> task_id:string
+  -> string list
 
 (** Count open (non-terminal) tasks for a goal using a pre-built index.
     O(k) where k = tasks linked to the goal, instead of O(n) full scan. *)
@@ -56,12 +59,16 @@ val goal_task_links_path : Workspace_utils_backend_setup.config -> string
 
 (** Read the persistent goal-task link registry. Missing registry files are
     treated as an empty link set. *)
-val read_goal_task_links :
-  Workspace_utils_backend_setup.config -> (string * string list) list
-
+(** Goal-task links, distinguishing an empty registry from an unreadable one.
+    {!read_goal_task_links} folds both into [[]], which makes a damaged
+    registry read as "nothing is linked". A caller that renders links must be
+    able to tell those apart. *)
 val read_goal_task_links_r :
   Workspace_utils_backend_setup.config ->
   ((string * string list) list, string) result
+
+val read_goal_task_links :
+  Workspace_utils_backend_setup.config -> (string * string list) list
 
 (** Persist the goal-task link registry. *)
 val write_goal_task_links :
@@ -74,19 +81,12 @@ val write_goal_task_links_result :
   (string * string list) list ->
   (unit, goal_task_links_write_error) result
 
-(** Remove all links for [goal_id] under the goal-task-links file lock. *)
-val prune_links_for_goal :
-  Workspace_utils_backend_setup.config -> goal_id:string -> unit
-
 val prune_links_for_goal_result :
   Workspace_utils_backend_setup.config ->
   goal_id:string ->
   (unit, goal_task_links_write_error) result
 
 (** Add one task-to-goal link to the persistent registry. *)
-val link_task_to_goal :
-  Workspace_utils_backend_setup.config -> goal_id:string -> task_id:string -> unit
-
 val link_task_to_goal_result :
   Workspace_utils_backend_setup.config ->
   goal_id:string ->
@@ -120,10 +120,6 @@ val link_goalless_task_to_goal :
   goal_id:string ->
   task_id:string ->
   (unit, link_goalless_task_to_goal_error) result
-
-(** Add multiple task-to-goal links to the persistent registry. *)
-val link_tasks_to_goals :
-  Workspace_utils_backend_setup.config -> (string * string option) list -> unit
 
 val link_tasks_to_goals_result :
   Workspace_utils_backend_setup.config ->

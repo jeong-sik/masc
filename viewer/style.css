@@ -1767,17 +1767,6 @@ body.wasm-dom-fallback #bevy-canvas {
     text-transform: uppercase;
 }
 
-.char-persona {
-    font-family: var(--font-ui);
-    font-size: 9px;
-    color: #8fa2bf;
-    line-height: 1.35;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 210px;
-}
-
 .class-icon {
     font-size: 12px;
     line-height: 1;
@@ -2063,49 +2052,6 @@ body.wasm-dom-fallback #bevy-canvas {
 /* Skills list */
 .skills-list {
     padding: 0 2px;
-}
-
-.traits-list {
-    padding: 0 2px;
-}
-
-.trait-row {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 4px 4px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
-}
-
-.trait-row:last-child {
-    border-bottom: none;
-}
-
-.trait-main {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.trait-icon {
-    font-size: 11px;
-    line-height: 1;
-    width: 14px;
-    text-align: center;
-}
-
-.trait-name {
-    font-family: var(--font-ui);
-    font-size: 10px;
-    color: var(--text-primary);
-    letter-spacing: 0.2px;
-}
-
-.trait-desc {
-    font-family: var(--font-ui);
-    font-size: 9px;
-    color: var(--text-dim);
-    line-height: 1.35;
 }
 
 .skill-row {

@@ -1,7 +1,7 @@
 // MASC Dashboard — Gate / HITL transport and normalization boundary.
 // Public symbols are re-exported from dashboard.ts.
 
-import { ApiRequestError, get, post, withRetries } from './core'
+import { ApiRequestError, get, post, runRequest } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asString } from '../components/common/normalize'
 import {
   asNullableIsoTimestamp,
@@ -10,6 +10,7 @@ import {
   normalizeKeeperExactAttempt,
 } from './board'
 import { normalizeKeeperResolvedApprovalDecision } from '../lib/keeper-approval-decision'
+import { normalizeKeeperApprovalAuditReceipt } from '../lib/keeper-approval-audit'
 import type {
   KeeperApprovalRule,
   DashboardGateResponse,
@@ -17,12 +18,15 @@ import type {
   KeeperApprovalQueueRowViolation,
   KeeperResolvedApprovalItem,
   KeeperResolvedApprovalPage,
+  KeeperResolvedApprovalState,
   KeeperApprovalQueueState,
+  KeeperApprovalRulesState,
   KeeperAutoJudgeRearmExpectation,
   GateDecisionSource,
   GateJudgeLane,
   GateMode,
   GateModeStatus,
+  KeeperApprovalAuditReceipt,
 } from '../types'
 import type { AbortableRequestOptions } from './core'
 
@@ -77,66 +81,147 @@ function normalizeApprovalQueueState(raw: unknown): KeeperApprovalQueueState {
 
 function normalizeKeeperApprovalRule(raw: unknown): KeeperApprovalRule | null {
   if (!isRecord(raw)) return null
-  const id = asString(raw.id, '').trim()
-  const keeperName = asString(raw.keeper_name, '').trim()
-  const toolName = asString(raw.tool_name, '').trim()
-  if (!id || !keeperName || !toolName) return null
+  const keys = Object.keys(raw).sort()
+  const expectedKeys = [
+    'created_at',
+    'created_by',
+    'expires_at',
+    'id',
+    'keeper_name',
+    'request_fingerprint',
+    'source_approval_id',
+    'tool_name',
+  ]
+  if (keys.length !== expectedKeys.length || keys.some((key, index) => key !== expectedKeys[index])) {
+    return null
+  }
+  const id = typeof raw.id === 'string' ? raw.id.trim() : ''
+  const keeperName = typeof raw.keeper_name === 'string' ? raw.keeper_name.trim() : ''
+  const toolName = typeof raw.tool_name === 'string' ? raw.tool_name.trim() : ''
+  const requestFingerprint = typeof raw.request_fingerprint === 'string'
+    ? raw.request_fingerprint
+    : ''
+  const createdAt = typeof raw.created_at === 'number' ? raw.created_at : Number.NaN
+  const createdBy = typeof raw.created_by === 'string' && raw.created_by.trim() !== ''
+    ? raw.created_by
+    : undefined
+  const sourceApprovalId =
+    typeof raw.source_approval_id === 'string' && raw.source_approval_id.trim() !== ''
+      ? raw.source_approval_id
+      : undefined
+  const expiresAt = raw.expires_at === null
+    ? null
+    : typeof raw.expires_at === 'number' && Number.isFinite(raw.expires_at)
+      ? raw.expires_at
+      : undefined
+  if (
+    !id
+    || !keeperName
+    || !toolName
+    || !/^[a-f0-9]{64}$/.test(requestFingerprint)
+    || !Number.isFinite(createdAt)
+    || createdAt < 0
+    || createdBy === undefined
+    || sourceApprovalId === undefined
+    || expiresAt === undefined
+    || (expiresAt !== null && expiresAt <= createdAt)
+  ) return null
   return {
     id,
     keeper_name: keeperName,
     tool_name: toolName,
-    request_fingerprint: asNullableString(raw.request_fingerprint) ?? undefined,
-    created_at: asNullableIsoTimestamp(raw.created_at),
-    created_by: asNullableString(raw.created_by),
-    source_approval_id: asNullableString(raw.source_approval_id),
+    request_fingerprint: requestFingerprint,
+    created_at: createdAt,
+    created_by: createdBy,
+    source_approval_id: sourceApprovalId,
+    expires_at: expiresAt,
   }
+}
+
+function normalizeApprovalRulesState(raw: unknown): KeeperApprovalRulesState {
+  if (!isRecord(raw)) return gateSnapshotProtocolDrift('approval_rules_state is not an object')
+  if (raw.state === 'ready' && Object.keys(raw).length === 1) return { state: 'ready' }
+  if (
+    raw.state === 'unavailable'
+    && typeof raw.error === 'string'
+    && raw.error.trim() !== ''
+    && Object.keys(raw).length === 2
+  ) {
+    return { state: 'unavailable', error: raw.error }
+  }
+  return gateSnapshotProtocolDrift('approval_rules_state is not a current closed variant')
 }
 
 function normalizeGateModeValue(raw: unknown): GateMode | null {
   return raw === 'manual' || raw === 'auto_judge' || raw === 'always_allow' ? raw : null
 }
 
-function normalizeGateMode(raw: unknown): GateModeStatus | undefined {
-  if (!isRecord(raw)) return undefined
-  const mode = normalizeGateModeValue(raw.mode)
-  if (!mode) {
-    return {
-      mode: 'manual',
-      state: 'invalid',
-      read_error: `unsupported Gate mode: ${String(raw.mode)}`,
-    }
-  }
-  return {
-    mode,
-    configured: asBoolean(raw.configured) ?? undefined,
-    state: asNullableString(raw.state) ?? undefined,
-    read_error: asNullableString(raw.read_error) ?? undefined,
-  }
+function hasExactKeys(raw: Record<string, unknown>, expected: string[]): boolean {
+  const keys = Object.keys(raw).sort()
+  const sortedExpected = [...expected].sort()
+  return keys.length === sortedExpected.length
+    && keys.every((key, index) => key === sortedExpected[index])
 }
 
-/** Parse the closed `judge_lane` variant emitted by `dashboard_gate.ml`.
- *  Returns undefined for an absent field (older server) or a shape outside
- *  the contract — the header then simply omits the judge model. */
-function normalizeGateJudgeLane(raw: unknown): GateJudgeLane | undefined {
-  if (!isRecord(raw)) return undefined
+function normalizeGateMode(raw: unknown): GateModeStatus {
+  if (!isRecord(raw)) return gateSnapshotProtocolDrift('hitl.gate_mode is not an object')
+  const mode = normalizeGateModeValue(raw.mode)
+  if (!mode || typeof raw.configured !== 'boolean') {
+    return gateSnapshotProtocolDrift('hitl.gate_mode has an invalid mode or configured flag')
+  }
+  if (raw.state === 'ready' && hasExactKeys(raw, ['mode', 'configured', 'state'])) {
+    return { mode, configured: raw.configured, state: 'ready' }
+  }
+  if (
+    mode === 'auto_judge'
+    && raw.state === 'unavailable'
+    && typeof raw.read_error === 'string'
+    && raw.read_error.trim() !== ''
+    && hasExactKeys(raw, ['mode', 'configured', 'state', 'read_error'])
+  ) {
+    return { mode, configured: raw.configured, state: 'unavailable', read_error: raw.read_error }
+  }
+  if (
+    mode === 'manual'
+    && raw.configured === true
+    && raw.state === 'invalid'
+    && typeof raw.read_error === 'string'
+    && raw.read_error.trim() !== ''
+    && hasExactKeys(raw, ['mode', 'configured', 'state', 'read_error'])
+  ) {
+    return { mode, configured: true, state: 'invalid', read_error: raw.read_error }
+  }
+  return gateSnapshotProtocolDrift('hitl.gate_mode is not a current closed variant')
+}
+
+function normalizeGateJudgeLane(raw: unknown): GateJudgeLane {
+  if (!isRecord(raw)) return gateSnapshotProtocolDrift('hitl.judge_lane is not an object')
   const laneId = asString(raw.lane_id, '').trim()
-  if (!laneId) return undefined
-  if (raw.status === 'available' && Array.isArray(raw.slots)) {
+  if (!laneId) return gateSnapshotProtocolDrift('hitl.judge_lane.lane_id is invalid')
+  if (
+    raw.status === 'available'
+    && Array.isArray(raw.slots)
+    && hasExactKeys(raw, ['status', 'lane_id', 'slots'])
+  ) {
     const slots = raw.slots.filter(
       (slot): slot is string => typeof slot === 'string' && slot.trim() !== '',
     )
-    if (slots.length === 0 || slots.length !== raw.slots.length) return undefined
+    if (slots.length === 0 || slots.length !== raw.slots.length) {
+      return gateSnapshotProtocolDrift('hitl.judge_lane.slots is invalid')
+    }
     return { status: 'available', lane_id: laneId, slots }
   }
-  if (raw.status === 'unavailable') {
+  if (raw.status === 'unavailable' && hasExactKeys(raw, ['status', 'lane_id', 'reason'])) {
     const reason = asString(raw.reason, '').trim()
-    return reason ? { status: 'unavailable', lane_id: laneId, reason } : undefined
+    if (reason) return { status: 'unavailable', lane_id: laneId, reason }
   }
-  return undefined
+  return gateSnapshotProtocolDrift('hitl.judge_lane is not a current closed variant')
 }
 
-function normalizeHitlStatus(raw: unknown): DashboardGateResponse['hitl'] | undefined {
-  if (!isRecord(raw)) return undefined
+function normalizeHitlStatus(raw: unknown): DashboardGateResponse['hitl'] {
+  if (!isRecord(raw) || !hasExactKeys(raw, ['gate_mode', 'judge_lane'])) {
+    return gateSnapshotProtocolDrift('hitl is not the current exact object')
+  }
   return {
     gate_mode: normalizeGateMode(raw.gate_mode),
     judge_lane: normalizeGateJudgeLane(raw.judge_lane),
@@ -151,61 +236,92 @@ function normalizeGateDecisionSource(raw: unknown): GateDecisionSource | null {
 
 function normalizeKeeperResolvedApprovalItem(raw: unknown): KeeperResolvedApprovalItem | null {
   if (!isRecord(raw)) return null
+  if (!hasExactKeys(raw, [
+    'id',
+    'event',
+    'keeper_name',
+    'tool_name',
+    'decision',
+    'decision_kind',
+    'decision_reason',
+    'resolved_at',
+    'turn_id',
+    'task_id',
+    'goal_id',
+    'goal_ids',
+    'actor',
+    'decision_source',
+    'summary_status',
+    'exact_attempt',
+  ])) return null
   const id = asString(raw.id, '').trim()
   const keeperName = asString(raw.keeper_name, '').trim()
   const toolName = asString(raw.tool_name, '').trim()
-  if (!id || !keeperName || !toolName) return null
-  const ruleMatch = isRecord(raw.rule_match)
-    ? {
-        rule_id: asNullableString(raw.rule_match.rule_id),
-      }
+  const decisionRaw = typeof raw.decision === 'string' ? raw.decision.trim() : ''
+  const decision = normalizeKeeperResolvedApprovalDecision(
+    typeof raw.decision_kind === 'string' ? raw.decision_kind : null,
+  )
+  const decisionReason = raw.decision_reason === null
+    ? null
+    : typeof raw.decision_reason === 'string' && raw.decision_reason.trim() !== ''
+      ? raw.decision_reason.trim()
+      : undefined
+  const resolvedAt = asNullableIsoTimestamp(raw.resolved_at)
+  const turnId = raw.turn_id === null ? null : asInt(raw.turn_id)
+  const taskId = raw.task_id === null ? null : asNullableString(raw.task_id)
+  const goalId = raw.goal_id === null ? null : asNullableString(raw.goal_id)
+  const goalIds = Array.isArray(raw.goal_ids)
+    && raw.goal_ids.every(value => typeof value === 'string' && value.trim() !== '')
+    ? raw.goal_ids as string[]
     : null
-  const decisionRaw = asNullableString(raw.decision)
-  const decisionKind = asNullableString(raw.decision_kind)
-  const decisionReason = asNullableString(raw.decision_reason)
-  // Judge evidence rides on resolved audit events written since #26126;
-  // older events project the members as null. Absent stays null (nothing was
-  // recorded); a present-but-malformed blob rejects the row like any other
-  // contract violation instead of silently degrading to "not recorded".
-  let summaryStatus: KeeperResolvedApprovalItem['summary_status'] = null
-  if (raw.summary_status !== undefined && raw.summary_status !== null) {
-    summaryStatus = normalizeHitlSummaryStatus(raw.summary_status)
-    if (summaryStatus === null) return null
-  }
-  let exactAttempt: KeeperResolvedApprovalItem['exact_attempt'] = null
-  if (raw.exact_attempt !== undefined && raw.exact_attempt !== null) {
-    exactAttempt = normalizeKeeperExactAttempt(raw.exact_attempt)
-    if (exactAttempt === null) return null
-  }
+  const actor = raw.actor === null
+    ? null
+    : typeof raw.actor === 'string' && raw.actor.trim() !== ''
+      ? raw.actor.trim()
+      : undefined
+  const decisionSource = normalizeGateDecisionSource(raw.decision_source)
+  const summaryStatus = normalizeHitlSummaryStatus(raw.summary_status)
+  const exactAttempt = normalizeKeeperExactAttempt(raw.exact_attempt)
+  if (
+    raw.event !== 'resolved'
+    || !id
+    || !keeperName
+    || !toolName
+    || !decisionRaw
+    || !decision
+    || decisionReason === undefined
+    || (decision === 'approve' && decisionReason !== null)
+    || (decision === 'reject' && decisionReason === null)
+    || resolvedAt === null
+    || (turnId !== null && (turnId === undefined || turnId < 0))
+    || (taskId !== null && !taskId)
+    || (goalId !== null && !goalId)
+    || goalIds === null
+    || actor === undefined
+    || !decisionSource
+    || summaryStatus === null
+    || exactAttempt === null
+  ) return null
   return {
     id,
     keeper_name: keeperName,
     tool_name: toolName,
-    decision: normalizeKeeperResolvedApprovalDecision(decisionKind),
+    decision,
     decision_raw: decisionRaw,
     decision_reason: decisionReason,
-    resolved_at: asNullableIsoTimestamp(raw.resolved_at),
-    turn_id: asInt(raw.turn_id),
-    task_id: asNullableString(raw.task_id),
-    goal_id: asNullableString(raw.goal_id),
-    goal_ids: Array.isArray(raw.goal_ids)
-      ? raw.goal_ids.filter((value): value is string => typeof value === 'string')
-      : [],
-    decision_source: normalizeGateDecisionSource(raw.decision_source),
-    rule_match: ruleMatch,
+    resolved_at: resolvedAt,
+    turn_id: turnId,
+    task_id: taskId,
+    goal_id: goalId,
+    goal_ids: goalIds,
+    actor,
+    decision_source: decisionSource,
     summary_status: summaryStatus,
     exact_attempt: exactAttempt,
   }
 }
 
-/**
- * Page bounds for the resolved history. Returns null when the server did not
- * send them or sent them incompletely — an older server during a rolling
- * deploy, for instance. Null must render as "completeness unknown", never as
- * "this is everything": presenting a slice as the whole history is the defect
- * this field exists to remove, so a partial page is rejected outright rather
- * than filled in with defaults.
- */
+/** Decode the exact page bounds that make resolved-history completeness explicit. */
 function normalizeKeeperResolvedApprovalPage(
   raw: unknown,
 ): KeeperResolvedApprovalPage | null {
@@ -237,10 +353,25 @@ function normalizeKeeperResolvedApprovalPage(
   }
 }
 
+function normalizeKeeperResolvedApprovalState(raw: unknown): KeeperResolvedApprovalState {
+  if (!isRecord(raw)) return gateSnapshotProtocolDrift('recent_resolved_state is not an object')
+  if (raw.state === 'ready' && hasExactKeys(raw, ['state'])) return { state: 'ready' }
+  if (
+    raw.state === 'unavailable'
+    && raw.stage === 'list_recent_resolved'
+    && typeof raw.error === 'string'
+    && raw.error.trim() !== ''
+    && hasExactKeys(raw, ['state', 'stage', 'error'])
+  ) {
+    return { state: 'unavailable', stage: raw.stage, error: raw.error.trim() }
+  }
+  return gateSnapshotProtocolDrift('recent_resolved_state is not a current closed variant')
+}
+
 export function fetchDashboardGate(
   opts?: FetchDashboardGateOptions,
 ): Promise<DashboardGateResponse> {
-  return withRetries('fetchDashboardGate', async () => {
+  return runRequest('fetchDashboardGate', async () => {
     const query = opts?.force ? '?force=1' : ''
     const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/gate${query}`, {
       signal: opts?.signal,
@@ -257,11 +388,8 @@ export function fetchDashboardGate(
       if (!Array.isArray(raw.approval_queue)) {
         return gateSnapshotProtocolDrift('ready approval_queue must be an array')
       }
-      // A contract-violating row is quarantined as a visible placeholder
-      // instead of failing the whole snapshot (#26094): one drifted row used
-      // to blank the entire queue — the surface an operator needs precisely
-      // when rows are drifting. Identity fields are best-effort salvage so
-      // the placeholder still names the pending request.
+      // Preserve the exact valid rows and expose every invalid row as a typed
+      // violation with the identity fields that can be decoded safely.
       const accepted: KeeperApprovalQueueItem[] = []
       raw.approval_queue.forEach((item, index) => {
         const normalized = normalizeKeeperApprovalQueueItem(item)
@@ -279,17 +407,43 @@ export function fetchDashboardGate(
       })
       approvalQueue = accepted
     }
-    const recentResolved = Array.isArray(raw.recent_resolved)
-      ? raw.recent_resolved
-          .map(item => normalizeKeeperResolvedApprovalItem(item))
-          .filter((item): item is KeeperResolvedApprovalItem => item !== null)
-      : []
-    const recentResolvedPage = normalizeKeeperResolvedApprovalPage(raw.recent_resolved_page)
-    const approvalRules = Array.isArray(raw.approval_rules)
-      ? raw.approval_rules
-          .map(item => normalizeKeeperApprovalRule(item))
-          .filter((item): item is KeeperApprovalRule => item !== null)
-      : []
+    const recentResolvedState = normalizeKeeperResolvedApprovalState(raw.recent_resolved_state)
+    let recentResolved: KeeperResolvedApprovalItem[] | null
+    let recentResolvedPage: KeeperResolvedApprovalPage | null
+    if (recentResolvedState.state === 'unavailable') {
+      if (raw.recent_resolved !== null || raw.recent_resolved_page !== null) {
+        return gateSnapshotProtocolDrift('unavailable resolved history must use null rows and page')
+      }
+      recentResolved = null
+      recentResolvedPage = null
+    } else {
+      if (!Array.isArray(raw.recent_resolved)) {
+        return gateSnapshotProtocolDrift('ready recent_resolved must be an array')
+      }
+      const normalized = raw.recent_resolved.map(item => normalizeKeeperResolvedApprovalItem(item))
+      if (normalized.some(item => item === null)) {
+        return gateSnapshotProtocolDrift('recent_resolved contains an invalid row')
+      }
+      recentResolved = normalized as KeeperResolvedApprovalItem[]
+      recentResolvedPage = normalizeKeeperResolvedApprovalPage(raw.recent_resolved_page)
+      if (recentResolvedPage === null) {
+        return gateSnapshotProtocolDrift('ready recent_resolved_page is invalid')
+      }
+      if (recentResolvedPage.returned !== recentResolved.length) {
+        return gateSnapshotProtocolDrift('recent_resolved_page.returned does not match row count')
+      }
+    }
+    const approvalRulesState = normalizeApprovalRulesState(raw.approval_rules_state)
+    if (!Array.isArray(raw.approval_rules)) {
+      return gateSnapshotProtocolDrift('approval_rules must be an array')
+    }
+    const approvalRules = raw.approval_rules.map(item => normalizeKeeperApprovalRule(item))
+    if (approvalRules.some(rule => rule === null)) {
+      return gateSnapshotProtocolDrift('approval_rules contains an invalid rule')
+    }
+    if (approvalRulesState.state === 'unavailable' && approvalRules.length !== 0) {
+      return gateSnapshotProtocolDrift('unavailable approval_rules must be empty')
+    }
     return {
       generated_at: asNullableIsoTimestamp(raw.generated_at) ?? undefined,
       note: typeof raw.note === 'string' && raw.note.trim() !== '' ? raw.note.trim() : undefined,
@@ -298,26 +452,120 @@ export function fetchDashboardGate(
       approval_queue_violations: approvalQueueViolations,
       recent_resolved: recentResolved,
       recent_resolved_page: recentResolvedPage,
-      approval_rules: approvalRules,
+      recent_resolved_state: recentResolvedState,
+      approval_rules: approvalRules as KeeperApprovalRule[],
+      approval_rules_state: approvalRulesState,
       hitl: normalizeHitlStatus(raw.hitl),
     }
   })
 }
 
-export function resolveGateApproval(
-  id: string,
-  decision: 'approve' | 'reject',
-  rememberRule?: boolean,
-  reason?: string,
-  ruleExpiresAt?: number,
-): Promise<{ ok: boolean; id: string; decision: 'approve' | 'reject'; rule_id?: string | null }> {
-  return post('/api/v1/dashboard/gate/resolve', {
-    id,
-    decision,
-    remember_rule: rememberRule,
-    reason,
-    rule_expires_at: ruleExpiresAt,
+export type GateApprovalResolution =
+  | { decision: 'approve'; rememberRule: boolean; ruleExpiresAt?: number }
+  | { decision: 'reject'; reason: string }
+
+export interface ResolveGateApprovalResponse {
+  ok: true
+  id: string
+  decision: 'approve' | 'reject'
+  rule_id: string | null
+  audit_receipts: KeeperApprovalAuditReceipt[]
+}
+
+export interface DeleteGateApprovalRuleResponse {
+  ok: true
+  id: string
+  audit: KeeperApprovalAuditReceipt
+}
+
+function gateMutationProtocolDrift(path: string, detail: string): never {
+  throw new ApiRequestError({
+    method: 'POST',
+    path,
+    detail: `invalid Gate mutation response: ${detail}`,
+    errorCode: 'protocol_drift',
   })
+}
+
+function decodeResolveGateApprovalResponse(
+  raw: unknown,
+  requestedId: string,
+  requestedDecision: 'approve' | 'reject',
+): ResolveGateApprovalResponse {
+  const path = '/api/v1/dashboard/gate/resolve'
+  if (!isRecord(raw) || !hasExactKeys(raw, [
+    'ok',
+    'id',
+    'decision',
+    'rule_id',
+    'audit_receipts',
+  ])) return gateMutationProtocolDrift(path, 'fields must be exact')
+  if (raw.ok !== true || raw.id !== requestedId || raw.decision !== requestedDecision) {
+    return gateMutationProtocolDrift(path, 'committed identity does not match the request')
+  }
+  const ruleId = raw.rule_id === null
+    ? null
+    : typeof raw.rule_id === 'string' && raw.rule_id.trim() !== ''
+      ? raw.rule_id
+      : gateMutationProtocolDrift(path, 'rule_id must be null or non-blank')
+  if (!Array.isArray(raw.audit_receipts)) {
+    return gateMutationProtocolDrift(path, 'audit_receipts must be an array')
+  }
+  const auditReceipts = raw.audit_receipts.map(normalizeKeeperApprovalAuditReceipt)
+  if (auditReceipts.some(receipt => receipt === null)) {
+    return gateMutationProtocolDrift(path, 'audit_receipts contains an invalid receipt')
+  }
+  const actualEvents = (auditReceipts as KeeperApprovalAuditReceipt[])
+    .map(receipt => receipt.event)
+  const isResolutionOnly = actualEvents.length === 1 && actualEvents[0] === 'resolved'
+  const isRuleCreationAndResolution = ruleId !== null
+    && actualEvents.length === 2
+    && actualEvents[0] === 'rule_created'
+    && actualEvents[1] === 'resolved'
+  if (!isResolutionOnly && !isRuleCreationAndResolution) {
+    return gateMutationProtocolDrift(path, 'audit_receipts do not match the committed mutation')
+  }
+  return {
+    ok: true,
+    id: requestedId,
+    decision: requestedDecision,
+    rule_id: ruleId,
+    audit_receipts: auditReceipts as KeeperApprovalAuditReceipt[],
+  }
+}
+
+function decodeDeleteGateApprovalRuleResponse(
+  raw: unknown,
+  requestedId: string,
+): DeleteGateApprovalRuleResponse {
+  const path = '/api/v1/dashboard/gate/rules/delete'
+  if (!isRecord(raw) || !hasExactKeys(raw, ['ok', 'id', 'audit'])) {
+    return gateMutationProtocolDrift(path, 'fields must be exact')
+  }
+  const audit = normalizeKeeperApprovalAuditReceipt(raw.audit)
+  if (
+    raw.ok !== true
+    || raw.id !== requestedId
+    || audit === null
+    || audit.event !== 'rule_deleted'
+  ) {
+    return gateMutationProtocolDrift(path, 'committed identity or audit receipt is invalid')
+  }
+  return { ok: true, id: raw.id, audit }
+}
+
+export async function resolveGateApproval(
+  id: string,
+  resolution: GateApprovalResolution,
+): Promise<ResolveGateApprovalResponse> {
+  const raw = await post<unknown>('/api/v1/dashboard/gate/resolve', {
+    id,
+    decision: resolution.decision,
+    remember_rule: resolution.decision === 'approve' ? resolution.rememberRule : false,
+    reason: resolution.decision === 'reject' ? resolution.reason : undefined,
+    rule_expires_at: resolution.decision === 'approve' ? resolution.ruleExpiresAt : undefined,
+  })
+  return decodeResolveGateApprovalResponse(raw, id, resolution.decision)
 }
 
 export function retryGateAutoJudge(
@@ -327,10 +575,11 @@ export function retryGateAutoJudge(
   return post('/api/v1/dashboard/gate/retry', { id, ...expected })
 }
 
-export function deleteGateApprovalRule(
+export async function deleteGateApprovalRule(
   id: string,
-): Promise<{ ok: boolean; id: string }> {
-  return post('/api/v1/dashboard/gate/rules/delete', { id })
+): Promise<DeleteGateApprovalRuleResponse> {
+  const raw = await post<unknown>('/api/v1/dashboard/gate/rules/delete', { id })
+  return decodeDeleteGateApprovalRuleResponse(raw, id)
 }
 
 export interface SetGateModeResponse {

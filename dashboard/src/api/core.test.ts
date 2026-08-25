@@ -14,6 +14,7 @@ import {
   getStoredToken,
   getStoredTokenMeta,
   post,
+  readCacheMode,
   runOperatorAction,
   setStoredToken,
   subscribeStoredTokenChanges,
@@ -41,14 +42,14 @@ describe('stored token metadata', () => {
     setStoredToken('loopback-dev-token', {
       source: 'dev',
       actor: 'dashboard',
-      role: 'worker',
+      role: 'admin',
     })
 
     expect(getStoredToken()).toBe('loopback-dev-token')
     expect(getStoredTokenMeta()).toEqual({
       source: 'dev',
       actor: 'dashboard',
-      role: 'worker',
+      role: 'admin',
     })
     expect(currentDashboardActor()).toBe('dashboard')
     expect(authHeaders()).toMatchObject({
@@ -75,7 +76,7 @@ describe('stored token metadata', () => {
     setStoredToken('manual-token', {
       source: 'dev',
       actor: 'dashboard',
-      role: 'worker',
+      role: 'admin',
     })
     clearStoredToken()
     clearStoredToken()
@@ -89,7 +90,7 @@ describe('stored token metadata', () => {
     })
     expect(listener).toHaveBeenNthCalledWith(2, {
       token: 'manual-token',
-      meta: { source: 'dev', actor: 'dashboard', role: 'worker' },
+      meta: { source: 'dev', actor: 'dashboard', role: 'admin' },
     })
     expect(listener).toHaveBeenNthCalledWith(3, {
       token: null,
@@ -168,6 +169,45 @@ describe('post', () => {
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(init.cache).toBe('no-store')
+  })
+
+  it('lets a measured polling route revalidate against the server', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"entries":[]}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await get('/api/v1/dashboard/board')
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(init.cache).toBe('no-cache')
+  })
+
+  // Several callers build their path as `${route}?${qs}`. Matching the path as
+  // given would leave every one of them on `no-store` while the unparameterised
+  // caller revalidated -- a difference no route-level reasoning would predict.
+  it('keeps a route revalidating when the caller appends a query string', () => {
+    expect(readCacheMode('/api/v1/dashboard/telemetry?window=1h')).toBe('no-cache')
+  })
+
+  // The mirror failure: a prefix match would sweep in this sibling, which was
+  // never measured for byte-identical repeats.
+  it('does not extend a listed route to its sub-routes', () => {
+    expect(readCacheMode('/api/v1/dashboard/telemetry/summary')).toBe('no-store')
+  })
+
+  // This route repeats byte-identically, so it looks eligible on traffic
+  // grounds alone. It is excluded because its body names environment variables
+  // and host paths, and listing it is what would persist them to disk.
+  it('keeps the secret-bearing composite route out of the browser cache', () => {
+    expect(readCacheMode('/api/v1/keepers/composite')).toBe('no-store')
+  })
+
+  it('leaves an unrecognised route on the conservative default', () => {
+    expect(readCacheMode('/api/v1/some/route/added/later')).toBe('no-store')
   })
 
   it('keeps board voter resolution scoped to query params', () => {
@@ -397,6 +437,25 @@ describe('get bootstrap warm-up mapping', () => {
     expect(data.message).toContain('warming up')
   })
 
+  // The server answers /api/v1/dashboard/* warm-up reads with
+  // {"status":"initializing"} (server_auth.ml not_initialized_response), not
+  // {"error":"not initialized"}. Until 2026-08-22 that envelope flowed into
+  // the execution store as an empty fleet.
+  it('maps the dashboard status:initializing envelope to the execution initializing payload', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"status":"initializing","message":"Server is warming up"}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const data = await get<{ status?: { project?: string }; keepers?: unknown[] }>('/api/v1/dashboard/execution')
+
+    expect(data.status?.project).toBe('initializing')
+    expect(data.keepers).toEqual([])
+  })
+
   it('maps dashboard shell not-initialized errors to an empty bootstrap shell payload', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('{"error":"not initialized"}', {
@@ -481,7 +540,9 @@ describe('get bootstrap warm-up mapping', () => {
     expect(data.message).toContain('warming up')
   })
 
-  it('remaps namespace/workspace-truth aliases the same as project-snapshot', async () => {
+  // The namespace-truth route used to answer here too, with a handler
+  // byte-identical to project-snapshot's and no caller fetching it (masc#27664).
+  it('does not remap the retired namespace-truth route', async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
       Promise.resolve(
         new Response('{"error":"not initialized"}', {
@@ -495,13 +556,8 @@ describe('get bootstrap warm-up mapping', () => {
     expect(canonical.status).toBe('initializing')
     expect(canonical.message).toContain('warming up')
 
-    const legacyNamespace = await get<{ status?: string; message?: string }>('/api/v1/dashboard/namespace-truth')
-    expect(legacyNamespace.status).toBe('initializing')
-    expect(legacyNamespace.message).toContain('warming up')
-
-    const data = await get<{ status?: string; message?: string }>('/api/v1/dashboard/workspace-truth')
-    expect(data.status).toBe('initializing')
-    expect(data.message).toContain('warming up')
+    const retired = await get<{ status?: string; error?: string }>('/api/v1/dashboard/namespace-truth')
+    expect(retired.status).toBeUndefined()
   })
 
   it('maps execution not-initialized 5xx to empty execution payload', async () => {

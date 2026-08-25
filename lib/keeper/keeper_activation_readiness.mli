@@ -39,8 +39,6 @@ type pause_kind =
   | Active
   | Operator_paused
   | Unclassified_paused
-  | Dead_tombstone
-  | Transcript_corruption_reset_required
 
 val pause_kind : Keeper_meta_contract.keeper_meta -> pause_kind
 val pause_kind_to_wire : pause_kind -> string
@@ -62,12 +60,6 @@ type t =
   }
 
 val of_meta : Keeper_meta_contract.keeper_meta -> t
-
-val ready_for_unclaimed_backlog : Keeper_meta_contract.keeper_meta -> bool
-
-val autonomous_check_value : autonomous_activation -> string
-
-val autonomous_blocker_to_wire : autonomous_blocker -> string
 
 val owner_runtime_of_registry_entry :
   Keeper_registry.registry_entry option -> owner_runtime
@@ -95,8 +87,10 @@ val classify_durable_demand_execution :
   (Keeper_meta_contract.keeper_meta, string) result ->
   owner_execution_truth
 (** Classify activation for an already-persisted explicit demand such as a due
-    schedule or HITL continuation. Lifecycle, shutdown, and autoboot policy
-    still apply, but [proactive_enabled] does not: that flag controls
-    unsolicited scheduled-autonomous turns, not reactive durable work. *)
+    schedule or HITL continuation. Lifecycle and shutdown policy still apply.
+    [autoboot_enabled] controls recovery of an absent owner, but does not block
+    an owner that is already running. [proactive_enabled] does not apply: that
+    flag controls unsolicited scheduled-autonomous turns, not reactive durable
+    work. *)
 
 val to_yojson : t -> Yojson.Safe.t

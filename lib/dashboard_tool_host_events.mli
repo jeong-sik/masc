@@ -25,6 +25,7 @@ type report = {
   tool_name : string;
   transport : string;
   phase : string option;
+  cause : Failure_envelope.tool_host_cause;
   message : string;
   request_id : string option;
   session_id : string option;
@@ -35,9 +36,9 @@ type report = {
 val report_of_yojson :
   ?fallback_agent:string -> Yojson.Safe.t -> (report, string) Result.t
 (** [report_of_yojson ?fallback_agent json] parses a tool-host failure
-    JSON payload.  Required fields: [tool_name], [message] (both
-    extracted via stringish coercion — `String / `Int / `Intlit /
-    `Float all map to a string).
+    JSON payload. Required fields: [tool_name], [message], and the current-only
+    [cause_code]. The first two use stringish coercion; [cause_code] must name
+    one of {!Failure_envelope.tool_host_cause} exactly.
 
     Optional fields default with operator-visible literals:
     - [client_name]: [fallback_agent] (trimmed) or "tool-host"
@@ -47,10 +48,9 @@ val report_of_yojson :
       audit logs.
     - [transport]: "mcp_http"
 
-    Returns [Error] for non-object payloads ("request body must be a
-    JSON object") and missing required fields ("missing required
-    field: <name>") — the wording is part of the HTTP 400 response
-    body and operator runbooks grep on it. *)
+    Returns [Error] for non-object payloads, missing required fields, and
+    unknown cause codes. The cause is resolved at this HTTP boundary; internal
+    consumers never classify [message] prose. *)
 
 val details_json : report -> Yojson.Safe.t
 (** [details_json report] returns the JSON object suitable for
@@ -86,16 +86,3 @@ type assignment_snapshot = {
   assignment_id : string;
 }
 
-val record_assignment :
-  ?fs:'fs ->
-  Workspace_utils.config ->
-  assignment_snapshot ->
-  unit
-(** [record_assignment ?fs config snapshot] forwards to
-    {!Telemetry_eio.track_tool_assigned}.  No callers today, but the
-    surface is exposed because the dashboard tool-assignment card is a
-    documented adjacent feature (see the dashboard runbook entry on
-    "tool-assigned vs tool-host-failure correlation").  Hiding it
-    would force a future "wire up the assignment event" PR to either
-    re-implement the telemetry call or to first reopen the surface —
-    same calculus as cycle 82 (dashboard_tool_source_freshness). *)

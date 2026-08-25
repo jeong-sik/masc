@@ -10,21 +10,40 @@ open Keeper_agent_prompt_metrics
 
 type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator
 
+type tool_observer_serialization = (unit -> unit) -> unit
+
+let create_tool_observer_serialization () : tool_observer_serialization =
+  let mutex = Eio.Mutex.create () in
+  fun observe ->
+    Eio.Mutex.lock mutex;
+    (* The enclosing Agent-core hook reports a failed observer and continues.
+       [use_rw] would poison the per-run mutex on that reported exception and
+       reject every later completion. [Fun.protect] keeps the non-suspending
+       unlock exception-safe without masking cancellation across the observer's
+       file locks and durable writes. *)
+    (* fun-protect-finally-ok: [Eio.Mutex.unlock] is non-suspending and releases
+       only the observer-serialization mutex acquired immediately above. *)
+    Fun.protect
+      ~finally:(fun () -> Eio.Mutex.unlock mutex)
+      observe
+;;
+
 type agent_setup =
-  { tools : Agent_sdk.Tool.t list
+  { tools : Agent_core.Tool.t list
   ; cleanup : unit -> unit
-  ; terminal_effect_state : unit -> Keeper_tools_oas.terminal_effect_state
+  ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; user_message : string
-  ; hooks : Agent_sdk.Hooks.hooks
-  ; model_input_projection : Agent_sdk.Agent.model_input_projection
+  ; hooks : Agent_core.Hooks.hooks
+  ; model_input_projection : Agent_core.Agent.model_input_projection
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list
-  ; final_oas_turn_ordinal_ref : int option ref
+  ; final_agent_core_turn_ordinal_ref : int option ref
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
+  ; receipt_lane_attempt_index_ref : int ref
   ; receipt_response_text_present_ref : bool ref
   }
 
@@ -33,30 +52,33 @@ type ctx =
   ; agent_name : string
   ; all_tool_names : string list
   ; compute_tool_surface :
-      turn:int -> current_tool_choice:Agent_sdk.Types.tool_choice option -> unit ->
+      turn:int -> current_tool_choice:Agent_core.Types.tool_choice option -> unit ->
       string list * turn_lane
   ; record_tool_assignment :
       turn:int -> tool_list:string list -> lane:turn_lane -> unit
   ; config : Workspace.config
   ; keeper_tools_cleanup : unit -> unit
-  ; terminal_effect_state : unit -> Keeper_tools_oas.terminal_effect_state
+  ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; keeper_turn_id : int
+  ; turn_kind : Turn_record.turn_kind
   ; meta : Keeper_meta_contract.keeper_meta
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
     (* RFC-0225 §3.3: per-run carrier; written by the pre-request hook
-       below, read by the post-tool hooks in Keeper_hooks_oas. *)
-  ; final_oas_turn_ordinal_ref : int option ref
+       below, read by the post-tool hooks in Keeper_hooks_agent_core. *)
+  ; final_agent_core_turn_ordinal_ref : int option ref
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
+  ; receipt_lane_attempt_index_ref : int ref
   ; receipt_response_text_present_ref : bool ref
-  ; tools : Agent_sdk.Tool.t list
+  ; on_tool_result_ready : (tool_call_id:string -> unit) option
+  ; tools : Agent_core.Tool.t list
   }
 
 let relax_strict_tool_choice_for_keeper = function
-  | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) ->
-    Some Agent_sdk.Types.Auto
+  | Some (Agent_core.Types.Any | Agent_core.Types.Tool _) ->
+    Some Agent_core.Types.Auto
   | other -> other
 
 let project_model_input ~base_path ~gate_replay_evidence messages =
@@ -70,11 +92,21 @@ let relative_path_has_segment_prefix prefix raw =
   String.equal raw prefix || String.starts_with ~prefix:(prefix ^ "/") raw
 ;;
 
+(* "scratch" is gone: no code ever created that directory, and the tool schema
+   that taught it ('repos/X' or 'scratch/X') is removed in this change. It only
+   ever mattered for a path a model invented from that sentence.
+
+   "repos" stays for now. Removing it changes how {file_path; cwd} pairs anchor
+   — the enclosing function decides whether a relative path is already
+   workspace-rooted or is relative to cwd, and it can only decide that from a
+   fixed vocabulary. That is the same layout assumption this work removes
+   elsewhere, so it needs the resolver the tools themselves use rather than a
+   shorter list. Separate change. *)
 let sandbox_rooted_relative_path raw =
   Filename.is_relative raw
   && List.exists
        (fun prefix -> relative_path_has_segment_prefix prefix raw)
-       [ "repos"; "scratch"; Common.masc_dirname; "playground" ]
+       [ "repos"; Common.masc_dirname; "playground" ]
 ;;
 
 let non_empty_string_member name input =
@@ -96,37 +128,71 @@ let non_empty_string_member name input =
    relative shape therefore anchors at [sandbox_root]; absolute paths pass
    through untouched, and a pathless tool call stays a keeper-timeline fact
    at [base_path]. *)
-let observation_file_path_from_tool_input ~base_path ~sandbox_root input =
+let observation_file_path_from_tool_input ~sandbox_root input =
   let under_sandbox p = Filename.concat sandbox_root p in
   match Tool_input_path.tool_input_file_path input with
-  | None -> base_path
+  | None -> None
   | Some p when Filename.is_relative p ->
-    if sandbox_rooted_relative_path p
-    then under_sandbox p
-    else (
-      match non_empty_string_member "cwd" input with
-      | Some cwd when Filename.is_relative cwd ->
-        under_sandbox (Filename.concat cwd p)
-      | Some cwd -> Filename.concat cwd p
-      | None -> under_sandbox p)
-  | Some p -> p
+    Some
+      (if sandbox_rooted_relative_path p
+       then under_sandbox p
+       else (
+         match non_empty_string_member "cwd" input with
+         | Some cwd when Filename.is_relative cwd ->
+           under_sandbox (Filename.concat cwd p)
+         | Some cwd -> Filename.concat cwd p
+         | None -> under_sandbox p))
+  | Some p -> Some p
 ;;
 
-let observation_partition_for_tool_input ~config ~meta ~kind input =
+(* Returns where the tool fact belongs (RFC-0378 §5.1). A call that names
+   no file is [Pathless] — a keeper-timeline fact with no document — and
+   never touches the resolver; a call that names one gets the resolver's
+   attribution, minted once here and carried as a parsed value. *)
+let annotation_attribution_from_tool_input input =
+  let codebase =
+    match Yojson.Safe.Util.member "codebase" input with
+    | `String value -> value
+    | _ -> ""
+  in
+  let path =
+    match Yojson.Safe.Util.member "file_path" input with
+    | `String value -> value
+    | _ -> ""
+  in
+  match Agent_observation.Code_address.v ~codebase ~path with
+  | Ok address ->
+    Agent_observation.File
+      (Agent_observation.Addressed { address; checkout = None })
+  | Error reason ->
+    Agent_observation.File
+      (Agent_observation.Unaddressed
+         { reason = Agent_observation.Unattributed.Unmintable reason
+         ; attempted_path = path
+         })
+;;
+
+let observation_attribution_for_tool_input ?(tool_name = "") ~config ~meta input =
+  if String.equal tool_name "keeper_ide_annotate"
+  then annotation_attribution_from_tool_input input
+  else
   let base_dir = Keeper_alerting_path.project_root_of_config config in
   let sandbox_root =
     Keeper_tool_shared_runtime.keeper_observation_sandbox_root ~config ~meta
   in
-  let file_path =
-    observation_file_path_from_tool_input ~base_path:base_dir ~sandbox_root input
-    |> Keeper_tool_shared_runtime.keeper_observation_host_path_of_visible_path
-         ~config
-         ~meta
-  in
-  Keeper_tool_filesystem_runtime.resolve_partition_for_write
-    ~base_dir
-    ~kind
-    ~file_path
+  match observation_file_path_from_tool_input ~sandbox_root input with
+  | None -> Agent_observation.Pathless
+  | Some visible ->
+    let host_path =
+      Keeper_tool_shared_runtime.keeper_observation_host_path_of_visible_path
+        ~config
+        ~meta
+        visible
+    in
+    Agent_observation.File
+      (Keeper_tool_filesystem_runtime.resolve_write_attribution
+         ~base_dir
+         ~file_path:host_path)
 ;;
 
 let assemble_hooks
@@ -135,11 +201,10 @@ let assemble_hooks
       ~(turn_system_prompt : string)
       ~(user_message : string)
       ~(dynamic_context : string)
-      ~(history_messages : Agent_sdk.Types.message list)
+      ~(history_messages : Agent_core.Types.message list)
       ~(prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics)
-      ~(shared_context : Agent_sdk.Context.t)
+      ~(shared_context : Agent_core.Context.t)
       ~(start_turn_count : int)
-      ~(generation : int)
       ~(runtime_id_string : string)
       ~is_retry:(_ : bool)
       ~(config_root : string)
@@ -149,7 +214,7 @@ let assemble_hooks
       ?runtime_manifest_context
       ?runtime_manifest_append
       ()
-  : (agent_setup, Agent_sdk.Error.sdk_error) result
+  : (agent_setup, Agent_core.Error.t) result
   =
   let acc = ctx.acc in
   let compute_tool_surface = ctx.compute_tool_surface in
@@ -162,13 +227,15 @@ let assemble_hooks
   let keeper_tools_cleanup = ctx.keeper_tools_cleanup in
   let terminal_effect_state = ctx.terminal_effect_state in
   let keeper_turn_id = ctx.keeper_turn_id in
+  let turn_kind = ctx.turn_kind in
   let meta = ctx.meta in
   let turn_ctx_cell = ctx.turn_ctx_cell in
-  let final_oas_turn_ordinal_ref = ctx.final_oas_turn_ordinal_ref in
+  let final_agent_core_turn_ordinal_ref = ctx.final_agent_core_turn_ordinal_ref in
   let receipt_turn_count_ref = ctx.receipt_turn_count_ref in
   let receipt_model_used_ref = ctx.receipt_model_used_ref in
   let receipt_stop_reason_ref = ctx.receipt_stop_reason_ref in
   let receipt_runtime_observation_ref = ctx.receipt_runtime_observation_ref in
+  let receipt_lane_attempt_index_ref = ctx.receipt_lane_attempt_index_ref in
   let receipt_response_text_present_ref = ctx.receipt_response_text_present_ref in
   let tools = ctx.tools in
   let all_tool_names = ctx.all_tool_names in
@@ -187,140 +254,146 @@ let assemble_hooks
       acc
       initial_schema_filter;
     let meta_ref = ref acc.meta in
+    (* Explicitly concurrent tools complete in sibling fibers. Their tool bodies
+       stay concurrent, but the post-tool observer is one transaction: it
+       refreshes [acc.meta], appends the receipt detail, derives the fallback
+       turn identity, and emits the observation/activity pair. A per-run Eio
+       mutex gives those effects one order without introducing a process-global
+       gate or serializing tool execution itself. *)
+    let serialize_tool_observer = create_tool_observer_serialization () in
     let base_hooks =
-      Keeper_hooks_oas.make_hooks
+      Keeper_hooks_agent_core.make_hooks
         ~config
         ~meta_ref
         ~turn_ctx_cell
-        ~generation
         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ~keeper_turn_id
-        ~on_after_turn_ordinal:(fun turn -> final_oas_turn_ordinal_ref := Some turn)
+        ~on_after_turn_ordinal:(fun turn -> final_agent_core_turn_ordinal_ref := Some turn)
+        ~on_after_turn_response:
+          (fun ~response ->
+             Keeper_run_tools_hook_accumulator.record_assistant_turn_text
+               acc
+               response)
+        ?on_tool_result_ready:ctx.on_tool_result_ready
         ?trajectory_acc
         ~on_tool_executed:
           (fun
             ~tool_name ~input ~output_text ~success ~duration_ms ~provider ~typed_outcome ->
-          let route_evidence =
-            Keeper_tool_call_log.route_evidence_json_of_tool_io
-              ~tool_name
-              ~input
-              ~output_text
-          in
-          let progress_io_fingerprints =
-            Keeper_tool_progress_identity.digest_tool_io
-              ~tool_name
-              ~input
-              ~output_text
-          in
-          (match Keeper_registry.get ~base_path:config.base_path meta.name with
-           | Some entry ->
-             acc.meta <- entry.meta;
-             meta_ref := entry.meta
-           | None -> ());
-          let execution_outcome =
-            if success then Tool_result.Ok else Tool_result.Error
-          in
-          let task_id =
-            Keeper_run_tools_task_scope.task_id_scope_of_tool_call
-              ~tool_name
-              ~input
-              ~meta:acc.meta
-          in
-          acc.tool_calls
-          <- { tool_name
-             ; provider
-             ; execution_outcome
-             ; typed_outcome
-             ; latency_ms = duration_ms
-             ; task_id
-             ; route_evidence
-             ; input_fingerprint =
-                 Option.map
-                   (fun (d : Keeper_tool_progress_identity.io_fingerprints) ->
-                      d.input_fingerprint)
-                   progress_io_fingerprints
-             ; output_fingerprint =
-                 Option.map
-                   (fun (d : Keeper_tool_progress_identity.io_fingerprints) ->
-                      d.output_fingerprint)
-                   progress_io_fingerprints
-             }
-             :: acc.tool_calls;
-          (* Emit neutral agent observation events; UI adapters subscribe separately. *)
-          (let typed_outcome_str =
-             match typed_outcome with
-             | Some Keeper_tool_outcome.Progress -> "progress"
-             | Some (Keeper_tool_outcome.No_progress _) -> "no_progress"
-             | Some (Keeper_tool_outcome.Error _) -> "error"
-             | None -> Tool_result.string_of_tool_call_outcome execution_outcome
-           in
-           let turn_id =
-             match acc.meta.Keeper_meta_contract.current_task_id with
-             | Some t -> Keeper_id.Task_id.to_string t
-             | None -> "turn-" ^ string_of_int (List.length acc.tool_calls)
-           in
-           (* task-1733: resolve the partition from the tool's actual edited
-              file (input.path / input.file_path, with explicit cwd honoured
-              for relative paths), not from the [.masc] runtime root.
-              #23469: relative shapes anchor at this keeper's playground
-              sandbox root, matching the file tools' own resolution. *)
-           let partition, _ =
-             observation_partition_for_tool_input
-               ~config
-               ~meta:acc.meta
-               ~kind:"tool_event"
-               input
-           in
-           Agent_observation.emit_tool_event
-             { base_path = config.base_path
-             ; partition
-             ; tool_name
-             ; keeper_id = acc.meta.name
-             ; turn_id
-             ; outcome = Tool_result.string_of_tool_call_outcome execution_outcome
-             ; typed_outcome = typed_outcome_str
-             ; duration_ms
-             ; output_text
-             ; input
-             };
-           (* #23540: keeper in-turn tool executions never reached the
-              activity log ([tool.called] is emitted only by the external MCP
-              path), so the agent timeline reported tool_calls = 0 for any
-              keeper working through its own turn. *)
-           Keeper_tool_activity.emit_tool_exec
-             ~config
-             ~meta:acc.meta
-             ~tool_name
-             ~success
-             ~duration_ms:(int_of_float (Float.round duration_ms))
-             ~typed_outcome
-             ~provider
-             ~keeper_turn_id:(Some keeper_turn_id)
-             ~oas_turn:acc.current_turn
-             ~task_id
-             ()))
+            serialize_tool_observer (fun () ->
+              let route_evidence =
+                Keeper_tool_call_log.route_evidence_json_of_tool_io
+                  ~tool_name
+                  ~input
+                  ~output_text
+              in
+              let progress_io_fingerprints =
+                Keeper_tool_progress_identity.digest_tool_io
+                  ~tool_name
+                  ~input
+                  ~output_text
+              in
+              (match Keeper_registry.get ~base_path:config.base_path meta.name with
+               | Some entry ->
+                 acc.meta <- entry.meta;
+                 meta_ref := entry.meta
+               | None -> ());
+              let execution_outcome =
+                if success then Tool_result.Ok else Tool_result.Error
+              in
+              let task_id =
+                Keeper_run_tools_task_scope.task_id_scope_of_tool_call
+                  ~tool_name
+                  ~input
+                  ~meta:acc.meta
+              in
+              acc.tool_calls
+              <- { tool_name
+                 ; provider
+                 ; execution_outcome
+                 ; typed_outcome
+                 ; latency_ms = duration_ms
+                 ; task_id
+                 ; route_evidence
+                 ; input_fingerprint =
+                     Option.map
+                       (fun (d : Keeper_tool_progress_identity.io_fingerprints) ->
+                          d.input_fingerprint)
+                       progress_io_fingerprints
+                 ; output_fingerprint =
+                     Option.map
+                       (fun (d : Keeper_tool_progress_identity.io_fingerprints) ->
+                          d.output_fingerprint)
+                       progress_io_fingerprints
+                 }
+                 :: acc.tool_calls;
+              (* Emit neutral agent observation events; UI adapters subscribe separately. *)
+              (let typed_outcome_str =
+                 match typed_outcome with
+                 | Some Keeper_tool_outcome.Progress -> "progress"
+                 | Some (Keeper_tool_outcome.No_progress _) -> "no_progress"
+                 | Some (Keeper_tool_outcome.Error _) -> "error"
+                 | None -> Tool_result.string_of_tool_call_outcome execution_outcome
+               in
+               let turn_id =
+                 match acc.meta.Keeper_meta_contract.current_task_id with
+                 | Some t -> Keeper_id.Task_id.to_string t
+                 | None -> "turn-" ^ string_of_int (List.length acc.tool_calls)
+               in
+               (* task-1733: attribute from the tool's actual edited file
+                  (input.path / input.file_path, with explicit cwd honoured
+                  for relative paths), not from the [.masc] runtime root.
+                  #23469: relative shapes anchor at this keeper's playground
+                  sandbox root, matching the file tools' own resolution. *)
+               let attribution =
+                 observation_attribution_for_tool_input
+                   ~tool_name
+                   ~config
+                   ~meta:acc.meta
+                   input
+               in
+               Agent_observation.emit_tool_event
+                 { base_path = config.base_path
+                 ; attribution
+                 ; tool_name
+                 ; keeper_id = acc.meta.name
+                 ; turn_id
+                 ; outcome = Tool_result.string_of_tool_call_outcome execution_outcome
+                 ; typed_outcome = typed_outcome_str
+                 ; duration_ms
+                 ; output_text
+                 ; input
+                 };
+               (* #23540: keeper in-turn tool executions never reached the
+                  activity log ([tool.called] is emitted only by the external MCP
+                  path), so the agent timeline reported tool_calls = 0 for any
+                  keeper working through its own turn. *)
+               Keeper_tool_activity.emit_tool_exec
+                 ~config
+                 ~meta:acc.meta
+                 ~tool_name
+                 ~success
+                 ~duration_ms:(int_of_float (Float.round duration_ms))
+                 ~typed_outcome
+                 ~provider
+                 ~keeper_turn_id:(Some keeper_turn_id)
+                 ~agent_core_turn:acc.current_turn
+                 ~task_id
+                 ())))
         ()
     in
-    let before_turn_hook : Agent_sdk.Hooks.hooks =
-      { Agent_sdk.Hooks.empty with
+    let before_turn_hook : Agent_core.Hooks.hooks =
+      { Agent_core.Hooks.empty with
         before_turn_params =
           Some
             (fun event ->
               match event with
-              | Agent_sdk.Hooks.BeforeTurnParams
+              | Agent_core.Hooks.BeforeTurnParams
                   { turn; current_params; messages; last_tool_results; _ } ->
                 let hook_t0 = Time_compat.now () in
                 acc.current_turn <- turn;
-                (* RFC-0045: signal an SDK-turn boundary so the in-turn FSM
-                  fields ([turn_phase], [runtime_state], [decision_stage])
-                  are reset before the hook writes [Runtime_selecting] /
-                  [Decision_tool_policy_selected] / [Turn_prompting] below.
-                  The MASC keeper-turn boundary ([mark_turn_started]) only
-                  fires once per [Agent_sdk.run_loop] call; every additional
-                  SDK turn inside that loop must use this entry point or
-                  [validate_turn_phase_transition] rejects the transition
-                  from the previous SDK turn's [Turn_finalizing] terminal. *)
-                Keeper_registry.mark_sdk_turn_started
+                (* Reset the in-turn FSM before this hook writes the next agent-core
+                   turn's runtime, policy, and prompt phases. *)
+                Keeper_registry.mark_agent_core_turn_started
                   ~base_path:config.base_path
                   meta.name;
                 let runtime_seed =
@@ -353,6 +426,27 @@ let assemble_hooks
                 let record_block block text =
                   recorded_blocks := (block, text) :: !recorded_blocks
                 in
+                (* A round that follows tool results must read to the model as
+                   "the tools returned", not "someone spoke again": the
+                   assembly rides the wire as a trailing User-role message,
+                   and re-broadcasting the world state there made models
+                   re-answer it on every round of a tool loop (task-514,
+                   2026-08-24 one keeper — 36 single-call rounds restating one
+                   answer). Which blocks still ride a post-tool round is the
+                   typed declaration [Prompt_block_id.injected_on_post_tool_round];
+                   the filter sits at assembly below so a new recording site
+                   cannot bypass it.
+
+                   The predicate is the position of the conversation's last
+                   message, not [last_tool_results]: that hook payload reports
+                   the last Tool message anywhere in history, so it is
+                   non-empty for almost every turn of a keeper that has ever
+                   used a tool, and gating on it suppressed the world state on
+                   the first round of ordinary turns (live: one keeper's turn 15,
+                   2026-08-24 08:08Z). *)
+                let post_tool_round =
+                  Keeper_run_prompt.ends_with_tool_results messages
+                in
                 (if String.trim dynamic_context <> ""
                  then
                    record_block Prompt_block_id.Dynamic_context dynamic_context);
@@ -366,35 +460,90 @@ let assemble_hooks
                     ~current_tool_choice:current_params.tool_choice
                     ()
                 in
-                (match
-                   (* Memory OS recall — advisory block rendered from every
-                      persisted current fact in stored order (read side; the
-                      write side is the librarian current-selection pass).
-                      Opt-in via MASC_KEEPER_MEMORY_OS_RECALL. *)
-                   (* Off-main: recall reads the current snapshot via synchronous
-                      file I/O, which would starve the main Eio domain and HOL
-                      sibling keepers. Read-side only, no module-level mutable
-                      state, so it is domain-safe on the shared pool. *)
-                   Domain_pool_ref.submit_io_or_inline (fun () ->
-                     Keeper_memory_os_recall.render_if_enabled
-                       ~keepers_dir:memory_os_keepers_dir
-                       ~keeper_id:meta.name
-                       ~now:(Time_compat.now ())
-                       ())
-                 with
-                 | None -> ()
-                 | Some block -> record_block Prompt_block_id.Memory_os_recall block);
+                (if not post_tool_round
+                 then
+                   match
+                     (* Memory OS recall — advisory block rendered from every
+                        persisted current fact in stored order (read side; the
+                        write side is the librarian current-selection pass).
+                        Opt-in via MASC_KEEPER_MEMORY_OS_RECALL. The read is
+                        skipped, not just filtered, on post-tool rounds: the
+                        block would be dropped at assembly anyway and the file
+                        I/O is per round. *)
+                     (* Off-main: recall reads the current snapshot via synchronous
+                        file I/O, which would starve the main Eio domain and HOL
+                        sibling keepers. Read-side only, no module-level mutable
+                        state, so it is domain-safe on the shared pool. *)
+                     Domain_pool_ref.submit_io_or_inline (fun () ->
+                       Keeper_memory_os_recall.render_if_enabled
+                         ~keepers_dir:memory_os_keepers_dir
+                         ~keeper_id:meta.name
+                         ~now:(Time_compat.now ())
+                         ())
+                   with
+                   | None -> ()
+                   | Some block -> record_block Prompt_block_id.Memory_os_recall block);
+                (* RFC-0366: last in assembly order. It is the most recent fact
+                   the keeper has, and when it disagrees with an earlier block
+                   the later text is the one that reads as current. Stamped
+                   consumed only after the block is assembled, so a turn that
+                   fails before this point does not burn the note. *)
+                let consumed_operator_note =
+                  match Keeper_operator_note.pending ~config ~keeper:meta.name with
+                  | None -> false
+                  | Some note ->
+                    (match Keeper_operator_note.render note with
+                     | None -> false
+                     | Some block ->
+                       record_block Prompt_block_id.Operator_note block;
+                       true)
+                in
+                let turn_blocks =
+                  let blocks = List.rev !recorded_blocks in
+                  if post_tool_round
+                  then
+                    List.filter
+                      (fun (block, _) ->
+                         Prompt_block_id.injected_on_post_tool_round block)
+                      blocks
+                  else blocks
+                in
                 let extra_system_context_assembly =
                   Keeper_run_prompt.assemble_extra_system_context
                     ~existing_extra_system_context:
                       current_params.extra_system_context
-                    ~blocks:(List.rev !recorded_blocks)
+                    ~blocks:turn_blocks
                 in
                 let ctx = extra_system_context_assembly.extra_system_context in
                 let recorded_blocks_for_receipt =
                   extra_system_context_assembly.blocks
                 in
-                (* OAS treats [None] in AdjustParams as "keep the base
+                (* The assembled text exists only here. The turn record keeps
+                   each block's bytes and digest, which answers "how much" but
+                   never "what", so an operator asking what this keeper is being
+                   told had no answer short of the provider's wire log. Capture
+                   overwrites one file per keeper: the blocks are stable turn to
+                   turn, so the turn that just assembled is what the next one
+                   will assemble, and keeping only the last bounds the store. *)
+                (* An empty post-tool assembly is not an injection: writing it
+                   would overwrite the first-round capture — the one that says
+                   what this keeper was actually told — with nothing. *)
+                (if recorded_blocks_for_receipt <> []
+                 then
+                   Keeper_prompt_capture.write
+                     ~config
+                     ~keeper:meta.name
+                     ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                     ~absolute_turn:turn
+                     ~blocks:recorded_blocks_for_receipt
+                     ~assembled:ctx);
+                if consumed_operator_note
+                then
+                  Keeper_operator_note.mark_consumed
+                    ~config
+                    ~keeper:meta.name
+                    ~absolute_turn:turn;
+                (* AGENT_CORE treats [None] in AdjustParams as "keep the base
                    config", so strict choices must be explicitly relaxed.
                    Tools remain available, but the model may finish without
                    another forced tool call. *)
@@ -419,25 +568,24 @@ let assemble_hooks
                 Keeper_tool_call_log.set_turn_context
                   ~cell:turn_ctx_cell
                   ~agent_name:meta.agent_name
+                  ~turn_kind
                   ~lane:
                     (Keeper_agent_tool_surface.turn_lane_to_string lane)
                   ?tool_choice:
                     (Option.map
                        (fun choice ->
                           Yojson.Safe.to_string
-                            (Agent_sdk.Types.tool_choice_to_json choice))
+                            (Agent_core.Types.tool_choice_to_json choice))
                        tool_choice)
                   ~thinking_enabled:thinking_enabled_effective
                   ?thinking_budget:current_params.thinking_budget
                   ~prompt_fingerprint:prompt_metrics.fingerprint
                   ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                   ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                  ~generation
                   ~turn
                   ~keeper_turn_id
                   ?task_id:
                     (Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id)
-                  ~goal_ids:meta.active_goal_ids
                   ~sandbox_profile:
                     (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile)
                   ~sandbox_root:
@@ -474,19 +622,19 @@ let assemble_hooks
                  Keeper_registry.mark_turn_provider_attempt_started
                    ~base_path:config.base_path
                    meta.name);
-                (* RFC-0233 PR-3 + #20936: snapshot this SDK turn's
+                (* RFC-0233 PR-3 + #20936: snapshot this agent-core turn's
                    assembly into the accumulator the receipt/TurnRecord
                    writer reads. Appended blocks hash their raw appended
-                   text; Persona reuses the prompt-metrics fingerprint
+                   text; Keeper instructions reuse the prompt-metrics fingerprint
                    (sha256 of the sanitized rendered system prompt) —
                    the digest the prompt store already records. *)
                 let sha256_hex text =
                   Digestif.SHA256.(digest_string text |> to_hex)
                 in
-                let persona_blocks =
+                let keeper_instruction_blocks =
                   match prompt_metrics.system_prompt_segment.fingerprint with
                   | Some digest ->
-                    [ { Turn_record.block = Prompt_block_id.Persona
+                    [ { Turn_record.block = Prompt_block_id.Keeper_instructions
                       ; bytes = prompt_metrics.system_prompt_segment.bytes
                       ; digest
                       }
@@ -494,7 +642,7 @@ let assemble_hooks
                   | None -> []
                 in
                 acc.prompt_blocks
-                <- persona_blocks
+                <- keeper_instruction_blocks
                    @ List.map
                        (fun (block, text) ->
                           { Turn_record.block
@@ -506,14 +654,12 @@ let assemble_hooks
                 acc.extra_system_context_size <- Option.map String.length ctx;
                 (match runtime_manifest_context, runtime_manifest_append with
                  | Some manifest_context, Some append_manifest ->
-                   let post_tool_context =
-                     last_tool_results <> []
-                   in
+                   let post_tool_context = post_tool_round in
                    append_manifest
                      (Keeper_runtime_manifest.make_for_context
                         manifest_context
                         ~event:Keeper_runtime_manifest.Context_injected
-                        ~oas_turn_count:turn
+                        ~agent_core_turn_count:turn
                         ~runtime_id:runtime_id_string
                         ~status:
                           (if post_tool_context
@@ -523,7 +669,7 @@ let assemble_hooks
                           (Keeper_runtime_manifest.with_payload_role
                              ~payload_role:Keeper_runtime_manifest.Model_input
                              (`Assoc
-                               [ ( "sdk_turn", `Int turn )
+                               [ ( "agent_core_turn", `Int turn )
                                ; ( "post_tool_context_injection",
                                    `Bool post_tool_context )
                                ; ( "last_tool_result_count",
@@ -539,7 +685,7 @@ let assemble_hooks
                                ]))
                         ())
                  | _ -> ());
-                (* Phase O observability: capture the effective OAS request
+                (* Phase O observability: capture the effective AGENT_CORE request
                    boundary after keeper-owned context injection has finalized
                    [extra_system_context]. *)
                 Keeper_wire_capture.capture_request
@@ -548,7 +694,7 @@ let assemble_hooks
                   ~keeper_name:meta.name
                   ~turn_id:keeper_turn_id
                   ~trace_id:meta.runtime.trace_id
-                  ~sdk_turn:turn
+                  ~agent_core_turn:turn
                   ~system_prompt:turn_system_prompt
                   ~extra_system_context:ctx
                   ~user_message
@@ -556,15 +702,15 @@ let assemble_hooks
                   ~tools
                   ();
                 Eio.Fiber.yield ();
-                Agent_sdk.Hooks.AdjustParams
+                Agent_core.Hooks.AdjustParams
                   { current_params with
                     extra_system_context = ctx
                   ; tool_choice
                   }
-              | _event -> Agent_sdk.Hooks.Continue)
+              | _event -> Agent_core.Hooks.Continue)
       }
     in
-    let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
+    let hooks = Agent_core.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
     let model_input_projection messages =
       (* Stored Tool results are already the canonical provider-bound
          representation. Fetching their bytes here would undo externalization
@@ -584,11 +730,12 @@ let assemble_hooks
       ; gate_replay_evidence
       ; acc
       ; all_tool_names
-      ; final_oas_turn_ordinal_ref
+      ; final_agent_core_turn_ordinal_ref
       ; receipt_turn_count_ref
       ; receipt_model_used_ref
       ; receipt_stop_reason_ref
       ; receipt_runtime_observation_ref
+      ; receipt_lane_attempt_index_ref
       ; receipt_response_text_present_ref
       }
 ;;

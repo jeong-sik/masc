@@ -12,9 +12,7 @@
     runtime→Runtime 숙청: 이전의 phase_recovery / phase_buffer /
     tool_action / phase_routing 구분은 모두 동일한 default Runtime 으로
     수렴하는 죽은 추상화였으므로 이 단일 thunk 로 collapse 되었다.
-    @since v2.128.0
-    @since RFC-0066 Phase 1: changed from a string value to a thunk
-    (issue #14624). *)
+    @since v2.128.0 *)
 val default_runtime_id : unit -> string
 
 (** Validate one persisted/requested context override value. This is a
@@ -24,7 +22,7 @@ val validate_max_context_override_value : int -> (int, string) result
 
 val default_proactive_enabled : bool
 
-(** Maximum bytes of personality text included in the rendered keeper prompt.
+(** Maximum bytes of Keeper instructions included in the rendered prompt.
     Drives [normalize_prompt_text] when called from prompt rendering.
     NOTE: persistence layer does NOT enforce this — disk JSON may hold
     longer values; the cap applies at prompt build time. *)
@@ -54,9 +52,6 @@ val int_of_env_default : string -> default:int -> min_v:int -> max_v:int -> int
 (** Parse a float env var with default and clamping. *)
 val float_of_env_default : string -> default:float -> min_v:float -> max_v:float -> float
 
-(** Clamp an integer to [min_v, max_v]. *)
-val clamp_int : int -> min_v:int -> max_v:int -> int
-
 (** {1 Name Validation} *)
 
 (** Validate a keeper name with the shared portable-name grammar. *)
@@ -64,25 +59,6 @@ val validate_name : string -> bool
 
 val invalid_name_error : string -> string
 (** Canonical explanation for a value rejected by {!validate_name}. *)
-
-(** {1 Removed Key Detection} *)
-
-(** Field names that are no longer accepted in keeper creation/update input. *)
-val removed_keeper_input_key_names : string list
-
-(** Field names that are no longer accepted in keeper message input. *)
-
-(** Return which [keys] are present as top-level keys in the JSON object. *)
-val present_json_keys : string list -> Yojson.Safe.t -> string list
-
-(** Reject removed keeper input keys.  Returns [Error msg] listing the offending fields. *)
-val reject_removed_keeper_input_keys :
-  ?allow_sandbox_fields:bool ->
-  tool_name:string ->
-  Yojson.Safe.t ->
-  (unit, string) result
-
-(** Reject removed keeper message input keys. *)
 
 (** {1 UTF-8 Safety} *)
 
@@ -105,18 +81,44 @@ val normalize_prompt_text : max_bytes:int -> string -> string
     keeper's own latest posts the world observation carries per turn. *)
 val keeper_board_own_recent_max : unit -> int
 
+(** Fleet-message context layer (see .ml): how many projected keeper broadcasts
+    the world observation carries per turn. Cursor-independent — no watermark. *)
+val keeper_fleet_messages_max : unit -> int
+
+val keeper_context_briefing_share_percent : unit -> int
+(** Share (percent) of the runtime's declared request-body cap that the
+    world-state briefing may occupy. The briefing is pinned, so this is what
+    stops it from crowding out the turn it briefs. *)
+
+val keeper_own_recent_turns_max : unit -> int
+(** Past turns of this keeper's own tool calls replayed into the world
+    observation. Autonomous turns carried no record of what the keeper had
+    already done, so it re-claimed finished tasks and repeated malformed
+    calls. *)
+
 val keeper_bootstrap_proactive_warmup_sec : unit -> int
 val keeper_bootstrap_stagger_step_sec : unit -> int
 val keeper_bootstrap_retry_interval_sec : unit -> int
 
 val keeper_batch_limit : unit -> int
 
+(** Completed board-attention partitions settled per owner turn before the
+    remainder defers to a continuation wake (see
+    Keeper_board_attention_worker.max_completed_settlements_per_owner_turn). *)
+val keeper_board_attention_settlements_per_turn : unit -> int
+
 val keeper_unified_temperature : unit -> float
-val keeper_unified_max_tokens : unit -> int
 
 val keeper_status_fast_default : unit -> bool
 
 val keeper_enable_thinking : unit -> bool
+
+(** Ceiling on tool-continuation rounds in one keeper turn. [None] leaves the
+    AGENT_CORE run loop unbounded, which is what it was. Reaching the ceiling
+    fails the run with [ToolRoundLimitExceeded] rather than returning a
+    truncated run as a finished one. Hot-reloadable via
+    [keeper.turn.max_tool_rounds]; 0 means unbounded. *)
+val keeper_max_tool_rounds : unit -> int option
 
 (** {1 Runtime Param Handles}
 

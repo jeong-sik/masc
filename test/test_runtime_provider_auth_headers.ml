@@ -30,6 +30,7 @@ let with_env key value f =
 
 let runpod_provider =
   { Runtime_schema.id = "runpod_mtp"
+  ; enabled = true
   ; display_name = "RunPod"
   ; protocol = "openai-compatible-http"
   ; api_format = Chat_completions_api
@@ -40,6 +41,7 @@ let runpod_provider =
   ; healthcheck_path = None
   ; headers = None
   ; connect_timeout_s = None
+  ; antigravity_cli = None
   }
 
 let qwen_model =
@@ -55,13 +57,16 @@ let qwen_model =
   ; top_p = None
   ; top_k = None
   ; min_p = None
+  ; reasoning_effort = None
+  ; turn_timeout_s = None
+  ; max_prompt_bytes = None
   ; capabilities = None
-  ; match_prefixes = []
   }
 
 let runpod_binding =
   { Runtime_schema.provider_id = "runpod_mtp"
   ; model_id = "qwen"
+  ; enabled = true
   ; is_default = true
   ; wizard_default = false
   ; max_concurrent = None
@@ -70,6 +75,9 @@ let runpod_binding =
   ; price_output = None
   ; keep_alive = None
   ; num_ctx = None
+  ; repeat_penalty = None
+  ; repeat_last_n = None
+  ; return_progress = None
   }
 
 let runtime_toml_with_credentials ?(provider_extra = "") ?(model_extra = "") credentials =
@@ -175,6 +183,54 @@ let test_runtime_toml_threads_provider_connect_timeout () =
        failf "expected one provider/binding, got %d/%d"
          (List.length providers)
          (List.length bindings))
+
+(* A declared credential header must not survive into Provider_config.headers:
+   auth travels as [api_key] and AGENT_CORE merges it at request time, so a copy here
+   duplicates the secret. The strip used to know only authorization and
+   x-api-key, while the dashboard's separate list also knew api-key and
+   x-auth-token — so the dashboard hid exactly the header the adapter kept
+   forwarding. *)
+let test_declared_credential_headers_never_reach_provider_config () =
+  let content =
+    runtime_toml_with_credentials
+      ~provider_extra:
+        {|[providers.runpod_mtp.headers]
+"api-key" = "sk-declared-secret"
+"x-auth-token" = "tok-declared-secret"
+"x-trace-hint" = "keep-me"
+|}
+      inline_credentials
+  in
+  match Runtime_toml.parse_string content with
+  | Error errors ->
+    failf
+      "expected runtime TOML provider headers to parse: %s"
+      (String.concat "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.bindings with
+     | [ binding ] ->
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Error msg -> failf "unexpected adapter error: %s" msg
+        | Ok provider_cfg ->
+          let keys =
+            List.map
+              (fun (key, _) -> String.lowercase_ascii (String.trim key))
+              provider_cfg.headers
+          in
+          List.iter
+            (fun secret_key ->
+               check bool
+                 (Printf.sprintf "%s is stripped from provider config" secret_key)
+                 false
+                 (List.exists (String.equal secret_key) keys))
+            [ "api-key"; "x-auth-token" ];
+          check bool "a non-credential header survives" true
+            (List.exists (String.equal "x-trace-hint") keys))
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
 
 let test_runtime_toml_threads_model_sampling_config () =
   let content =
@@ -314,8 +370,89 @@ max-concurrent = 1
             && String.equal err.message
                  "unknown protocol \"openai-http\": expected one of \
                   messages-cli, messages-http, openai-compatible-cli, \
-                  openai-compatible-http, ollama-http")
+                  openai-compatible-http, ollama-http, codex-app-server, \
+                  claude-code, antigravity-cli")
          errors)
+
+let test_runtime_toml_editor_protocol_inventory_is_backend_owned () =
+  let render (protocol : Runtime_toml.editor_protocol) =
+    let transport =
+      match protocol.transport with
+      | Runtime_toml.Endpoint -> "endpoint"
+      | Runtime_toml.Command -> "command"
+    in
+    let semantics =
+      match protocol.semantics with
+      | Runtime_toml.Http_provider -> "http_provider"
+      | Runtime_toml.Official_client -> "official_client"
+    in
+    let credential_policy =
+      match protocol.credential_policy with
+      | Runtime_toml.Credentials_optional -> "optional"
+      | Runtime_toml.Credentials_forbidden -> "forbidden"
+    in
+    Printf.sprintf
+      "%s:%s:%s:%s:%b"
+      protocol.protocol
+      transport
+      semantics
+      credential_policy
+      protocol.requires_non_interactive
+  in
+  check
+    (list string)
+    "only production-materializable protocols are offered"
+    [ "messages-http:endpoint:http_provider:optional:false"
+    ; "openai-compatible-http:endpoint:http_provider:optional:false"
+    ; "ollama-http:endpoint:http_provider:optional:false"
+    ; "codex-app-server:command:official_client:forbidden:true"
+    ; "claude-code:command:official_client:forbidden:true"
+    ]
+    (List.map render Runtime_toml.editor_protocols)
+;;
+
+let test_runtime_toml_rejects_reserved_provider_and_model_ids () =
+  let cases =
+    [ ( "provider"
+      , "providers.runtime"
+      , {|
+[providers.runtime]
+display-name = "Reserved"
+protocol = "openai-compatible-http"
+endpoint = "https://example.invalid/v1"
+|} )
+    ; ( "model"
+      , "models.routes"
+      , {|
+[models.routes]
+api-name = "reserved"
+max-context = 1024
+|} )
+    ]
+  in
+  List.iter
+    (fun (kind, path, content) ->
+       match Runtime_toml.parse_string content with
+       | Ok _ -> failf "expected reserved %s id to fail" kind
+       | Error errors -> check_parse_error_contains errors path "reserved top-level")
+    cases
+;;
+
+let test_runtime_toml_rejects_obsolete_top_level_namespaces () =
+  List.iter
+    (fun namespace ->
+       let content = Printf.sprintf "[%s]\nlegacy = true\n" namespace in
+       match Runtime_toml.parse_string content with
+       | Ok _ -> failf "expected obsolete namespace %s to fail" namespace
+       | Error errors ->
+         check_parse_error
+           errors
+           namespace
+           (Printf.sprintf
+              "obsolete top-level namespace %S is not supported"
+              namespace))
+    [ "system"; "routes"; "profiles" ]
+;;
 
 let test_runtime_toml_accepts_messages_caching_capability () =
   let content =
@@ -820,7 +957,6 @@ let test_runtime_adapter_keeps_auth_out_of_headers () =
     ; models = [ qwen_model ]
     ; bindings = [ runpod_binding ]
     ; default_runtime_id = Some "runpod_mtp.qwen"
-    ; cross_verifier_runtime_id = None
     ; keeper_assignments = []
     ; media_failover = []
     ; lane_decls = []
@@ -853,7 +989,6 @@ let test_runtime_adapter_filters_toml_auth_headers () =
     ; models = [ qwen_model ]
     ; bindings = [ runpod_binding ]
     ; default_runtime_id = Some "runpod_mtp.qwen"
-    ; cross_verifier_runtime_id = None
     ; keeper_assignments = []
     ; media_failover = []
     ; lane_decls = []
@@ -887,7 +1022,6 @@ let provider_cfg () =
     ; models = [ qwen_model ]
     ; bindings = [ runpod_binding ]
     ; default_runtime_id = Some "runpod_mtp.qwen"
-    ; cross_verifier_runtime_id = None
     ; keeper_assignments = []
     ; media_failover = []
     ; lane_decls = []
@@ -903,7 +1037,7 @@ let provider_cfg () =
    The adapter must stamp the runtime.toml [providers.<id>] table name into
    [Provider_config.provider_id]: it is the capability-catalog qualification
    key ([capability_provider_label] prefers it over the wire kind), and the
-   OAS contract (provider_config.mli, capabilities_for_config_model) only
+   AGENT_CORE contract (provider_config.mli, capabilities_for_config_model) only
    accepts an exact provider-scoped row once a provider is declared. Without
    it every OpenAI-compatible endpoint collapsed into the "openai_compat"
    label, which no catalog row carries — the 2026-07-15 boot-gate wipeout
@@ -960,9 +1094,59 @@ max_context_tokens = 160000
             provider-scoped row required)"
        | None -> ())
 
+let test_declared_thinking_capabilities_override_catalog () =
+  with_model_catalog
+    {|
+[[models]]
+id_prefix = "qwen"
+provider_name = "runpod_mtp"
+supports_system_prompt = true
+supports_reasoning = true
+supports_reasoning_budget = true
+thinking_control_format = "ollama_think"
+|}
+    (fun () ->
+       let runtime_caps =
+         { Runtime_schema.model_capabilities_default with
+           supports_reasoning_budget = false
+         ; thinking_control_format = Runtime_schema.No_thinking_control
+         ; declared_thinking_control_format = Some Runtime_schema.No_thinking_control
+         ; reasoning_streaming_format =
+             Some (Runtime_schema.Delta_reasoning_field "reasoning_content")
+         }
+       in
+       let model = { qwen_model with capabilities = Some runtime_caps } in
+       let cfg =
+         { Runtime_schema.providers = [ runpod_provider ]
+         ; models = [ model ]
+         ; bindings = [ runpod_binding ]
+         ; default_runtime_id = Some "runpod_mtp.qwen"
+         ; keeper_assignments = []
+         ; media_failover = []
+         ; lane_decls = []
+         ; exact_output_lane_decls = []
+         }
+       in
+       let provider_cfg =
+         match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
+         | Ok provider_cfg -> provider_cfg
+         | Error msg -> failf "unexpected adapter error: %s" msg
+       in
+       match Llm_provider.Provider_config.capabilities_for_config_model provider_cfg with
+       | None -> fail "declared thinking capability override should resolve"
+       | Some caps ->
+         check bool "declared thinking control wins" true
+           (caps.thinking_control_format
+            = Llm_provider.Capabilities.No_thinking_control);
+         check bool "declared reasoning budget wins" false caps.supports_reasoning_budget;
+         check bool "sparse system prompt preserves catalog" true caps.supports_system_prompt;
+         check bool "declared transport stream parser wins" true
+           (caps.reasoning_streaming_format
+            = Llm_provider.Capabilities.Delta_reasoning_field "reasoning_content"))
+
 (* Audit F2: TOML keep-alive / num-ctx must reach the wire-level
    Provider_config. Before the fix the adapter dropped both binding
-   fields, so keep_alive fell back to OAS_OLLAMA_KEEP_ALIVE / "-1" and
+   fields, so keep_alive fell back to AGENT_CORE_OLLAMA_KEEP_ALIVE / "-1" and
    num_ctx to the Ollama Modelfile default. *)
 let ollama_keep_alive_runtime_toml =
   {|
@@ -1028,7 +1212,6 @@ let runtime_or_fail ?(provider = runpod_provider) () =
     ; models = [ qwen_model ]
     ; bindings = [ runpod_binding ]
     ; default_runtime_id = Some "runpod_mtp.qwen"
-    ; cross_verifier_runtime_id = None
     ; keeper_assignments = []
     ; media_failover = []
     ; lane_decls = []
@@ -1036,8 +1219,34 @@ let runtime_or_fail ?(provider = runpod_provider) () =
     }
   in
   match Runtime.of_binding cfg runpod_binding with
-  | Some runtime -> runtime
-  | None -> fail "expected runtime binding to materialize"
+  | Ok runtime -> runtime
+  | Error reason ->
+    failf
+      "expected runtime binding to materialize: %s"
+      (Runtime.string_of_drop_reason reason)
+
+let test_runtime_of_binding_preserves_failure_reason () =
+  let cfg =
+    { Runtime_schema.providers = [ runpod_provider ]
+    ; models = [ qwen_model ]
+    ; bindings = [ runpod_binding ]
+    ; default_runtime_id = Some "runpod_mtp.qwen"
+    ; keeper_assignments = []
+    ; media_failover = []
+    ; lane_decls = []
+    ; exact_output_lane_decls = []
+    }
+  in
+  match Runtime.of_binding cfg { runpod_binding with enabled = false } with
+  | Ok _ -> fail "expected disabled binding materialization to fail"
+  | Error Runtime.Binding_disabled ->
+    check string "disabled binding reason"
+      "binding is disabled by runtime.toml"
+      (Runtime.string_of_drop_reason Runtime.Binding_disabled)
+  | Error other ->
+    failf
+      "expected Binding_disabled, got %s"
+      (Runtime.string_of_drop_reason other)
 
 let with_dashboard_probe_http_get hook f =
   Server_dashboard_http_runtime_info.set_dashboard_runtime_provider_http_get_for_tests
@@ -1152,16 +1361,62 @@ let test_dashboard_runtime_probe_reachability_contracts () =
   let runtime = runtime_or_fail ~provider () in
   assert_dashboard_runtime_probe_missing_auth runtime
 
+let test_dashboard_runtime_probe_groups_models_by_provider () =
+  let second_model =
+    { qwen_model with Runtime_schema.id = "qwen-2"; api_name = "qwen-2" }
+  in
+  let second_binding =
+    { runpod_binding with
+      Runtime_schema.model_id = second_model.id
+    ; is_default = false
+    }
+  in
+  let config =
+    { Runtime_schema.providers = [ runpod_provider ]
+    ; models = [ qwen_model; second_model ]
+    ; bindings = [ runpod_binding; second_binding ]
+    ; default_runtime_id = Some "runpod_mtp.qwen"
+    ; keeper_assignments = []
+    ; media_failover = []
+    ; lane_decls = []
+    ; exact_output_lane_decls = []
+    }
+  in
+  let runtime binding =
+    match Runtime.of_binding config binding with
+    | Ok runtime -> runtime
+    | Error reason ->
+      failf "expected grouped runtime to materialize: %s" (Runtime.string_of_drop_reason reason)
+  in
+  let calls = ref 0 in
+  let json =
+    with_dashboard_probe_http_get
+      (fun ~url:_ ~headers:_ ~timeout_sec:_ ->
+         incr calls;
+         Ok (200, [ "content-type", "application/json" ], {|{"data":[]}|}))
+      (fun () ->
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
+           ~default_id:"runpod_mtp.qwen"
+           [ runtime runpod_binding; runtime second_binding ])
+  in
+  check int "one provider metadata request" 1 !calls;
+  let providers = Yojson.Safe.Util.(member "providers" json |> to_list) in
+  check (list string) "runtime rows preserved"
+    [ "runpod_mtp.qwen"; "runpod_mtp.qwen-2" ]
+    (List.map Yojson.Safe.Util.(fun row -> member "runtime_id" row |> to_string) providers);
+  check int "reachable runtime projections" 2
+    Yojson.Safe.Util.(member "summary" json |> member "reachable" |> to_int)
+
 let test_runtime_agent_terminal_observation_uses_runtime_identity () =
   let config =
     Runtime_agent.default_config
-      ~name:"oas-runpod_mtp.qwen"
+      ~name:"agent_core-runpod_mtp.qwen"
       ~provider_cfg:(provider_cfg ())
       ~system_prompt:""
       ~tools:[]
   in
   let config =
-    { config with description = Some "runtime:runpod_mtp.qwen/runtime" }
+    { config with runtime_id = Some "runpod_mtp.qwen" }
   in
   let observation =
     Runtime_agent.For_testing.runtime_observation_for_completed_config
@@ -1178,13 +1433,13 @@ let test_runtime_agent_terminal_observation_uses_runtime_identity () =
 let test_runtime_agent_terminal_error_observation_marks_failed_attempt () =
   let config =
     Runtime_agent.default_config
-      ~name:"oas-runpod_mtp.qwen"
+      ~name:"agent_core-runpod_mtp.qwen"
       ~provider_cfg:(provider_cfg ())
       ~system_prompt:""
       ~tools:[]
   in
   let config =
-    { config with description = Some "runtime:runpod_mtp.qwen/runtime" }
+    { config with runtime_id = Some "runpod_mtp.qwen" }
   in
   let error = "Not found: OpenAI-compatible endpoint returned 404" in
   let observation =
@@ -1206,6 +1461,17 @@ let test_runtime_agent_terminal_error_observation_marks_failed_attempt () =
   check string "runtime outcome" "failed"
     (Keeper_execution_receipt.runtime_outcome_to_string
        (Keeper_agent_error.runtime_outcome_of_observation
+          ~lane_failover_applied:false
+          (Some observation)));
+  (* The failed-attempt observation is unchanged, but a lane walk that
+     landed this attempt on a later candidate (lane_failover_applied)
+     always reports the turn as passed-to-next-model — that signal comes
+     from the lane walk, not from anything on the observation. *)
+  check string "runtime outcome reflects lane failover truth, not observation shape"
+    "passed_to_next_model"
+    (Keeper_execution_receipt.runtime_outcome_to_string
+       (Keeper_agent_error.runtime_outcome_of_observation
+          ~lane_failover_applied:true
           (Some observation)))
 
 let test_runtime_agent_context_preserves_max_tokens_intent () =
@@ -1214,7 +1480,7 @@ let test_runtime_agent_context_preserves_max_tokens_intent () =
       let check_builder_max_tokens expected max_tokens =
         let config =
           Runtime_agent.default_config
-            ~name:"oas-runpod_mtp.qwen"
+            ~name:"agent_core-runpod_mtp.qwen"
             ~provider_cfg:(provider_cfg ())
             ~system_prompt:""
             ~tools:[]
@@ -1226,45 +1492,15 @@ let test_runtime_agent_context_preserves_max_tokens_intent () =
             ~config
             ()
         in
-        match Agent_sdk.Builder.build_safe builder with
-        | Error err -> fail (Agent_sdk.Error.to_string err)
+        match Agent_core.Builder.build_safe builder with
+        | Error err -> fail (Agent_core.Error.to_string err)
         | Ok agent ->
           check (option int) "builder max_tokens intent" expected
-            (Agent_sdk.Agent.state agent).config.max_tokens;
-          Eio.Switch.on_release sw (fun () -> Agent_sdk.Agent.close agent)
+            (Agent_core.Agent.state agent).config.max_tokens;
+          Eio.Switch.on_release sw (fun () -> Agent_core.Agent.close agent)
       in
       check_builder_max_tokens None None;
       check_builder_max_tokens (Some 2048) (Some 2048)))
-
-let test_runtime_agent_lifecycle_attrs_preserve_max_tokens_intent () =
-  let config =
-    Runtime_agent.default_config
-      ~name:"oas-runpod_mtp.qwen"
-      ~provider_cfg:(provider_cfg ())
-      ~system_prompt:""
-      ~tools:[]
-  in
-  let fields = Runtime_agent.Lifecycle_for_testing.provider_attrs config in
-  check (option (of_pp Yojson.Safe.pp)) "omitted lifecycle value"
-    (Some `Null)
-    (List.assoc_opt "max_tokens" fields);
-  check (option string) "omitted lifecycle source"
-    (Some "omitted")
-    (Option.bind
-       (List.assoc_opt "max_tokens_source" fields)
-       Yojson.Safe.Util.to_string_option);
-  let explicit_fields =
-    Runtime_agent.Lifecycle_for_testing.provider_attrs
-      { config with max_tokens = Some 2048 }
-  in
-  check (option (of_pp Yojson.Safe.pp)) "explicit lifecycle value"
-    (Some (`Int 2048))
-    (List.assoc_opt "max_tokens" explicit_fields);
-  check (option string) "explicit lifecycle source"
-    (Some "explicit_override")
-    (Option.bind
-       (List.assoc_opt "max_tokens_source" explicit_fields)
-       Yojson.Safe.Util.to_string_option)
 
 let test_runtime_agent_context_preserves_provider_sampling_config () =
   let provider_cfg =
@@ -1276,7 +1512,7 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
   in
   let config =
     Runtime_agent.default_config
-      ~name:"oas-runpod_mtp.qwen"
+      ~name:"agent_core-runpod_mtp.qwen"
       ~provider_cfg
       ~system_prompt:""
       ~tools:[]
@@ -1292,25 +1528,25 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
           ~config
           ()
       in
-      match Agent_sdk.Builder.build_safe builder with
-      | Error err -> fail (Agent_sdk.Error.to_string err)
+      match Agent_core.Builder.build_safe builder with
+      | Error err -> fail (Agent_core.Error.to_string err)
       | Ok agent ->
-        let agent_config = (Agent_sdk.Agent.state agent).config in
+        let agent_config = (Agent_core.Agent.state agent).config in
         check (option (float 0.0001)) "builder top_p" (Some 0.91)
           agent_config.top_p;
         check (option int) "builder top_k" (Some 42) agent_config.top_k;
         check (option (float 0.0001)) "builder min_p" (Some 0.07)
           agent_config.min_p;
         Eio.Switch.on_release sw (fun () ->
-          Agent_sdk.Agent.close agent)));
+          Agent_core.Agent.close agent)));
   let checkpoint =
-    { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
+    { Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version
     ; session_id = "session"
-    ; agent_name = "oas-runpod_mtp.qwen"
+    ; agent_name = "agent_core-runpod_mtp.qwen"
     ; model = "qwen"
     ; system_prompt = Some ""
     ; messages = []
-    ; usage = Agent_sdk.Types.empty_usage
+    ; usage = Agent_core.Types.empty_usage
     ; turn_count = 3
     ; created_at = 0.0
     ; tools = []
@@ -1323,10 +1559,10 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
     ; reasoning_effort = None
     ; enable_thinking = None
     ; preserve_thinking = None
-    ; response_format = (Agent_sdk.Types.default_config ~model:"qwen").response_format
+    ; response_format = (Agent_core.Types.default_config ~model:"qwen").response_format
     ; thinking_budget = None
     ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create_sync ()
+    ; context = Agent_core.Context.create_sync ()
     ; mcp_sessions = []
     ; working_context = None
     }
@@ -1349,24 +1585,24 @@ let test_runtime_agent_context_resume_patches_stale_response_format_to_base_cont
   let provider_cfg_with_response_format =
     let base = provider_cfg () in
     { base with
-      Llm_provider.Provider_config.response_format = Agent_sdk.Types.JsonMode
+      Llm_provider.Provider_config.response_format = Agent_core.Types.JsonMode
     }
   in
   let config =
     Runtime_agent.default_config
-      ~name:"oas-runpod_mtp.qwen"
+      ~name:"agent_core-runpod_mtp.qwen"
       ~provider_cfg:provider_cfg_with_response_format
       ~system_prompt:""
       ~tools:[]
   in
   let checkpoint =
-    { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
+    { Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version
     ; session_id = "session"
-    ; agent_name = "oas-runpod_mtp.qwen"
+    ; agent_name = "agent_core-runpod_mtp.qwen"
     ; model = "qwen"
     ; system_prompt = Some ""
     ; messages = []
-    ; usage = Agent_sdk.Types.empty_usage
+    ; usage = Agent_core.Types.empty_usage
     ; turn_count = 3
     ; created_at = 0.0
     ; tools = []
@@ -1379,10 +1615,10 @@ let test_runtime_agent_context_resume_patches_stale_response_format_to_base_cont
     ; reasoning_effort = None
     ; enable_thinking = None
     ; preserve_thinking = None
-    ; response_format = Agent_sdk.Types.Off
+    ; response_format = Agent_core.Types.Off
     ; thinking_budget = None
     ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create_sync ()
+    ; context = Agent_core.Context.create_sync ()
     ; mcp_sessions = []
     ; working_context = None
     }
@@ -1392,12 +1628,12 @@ let test_runtime_agent_context_resume_patches_stale_response_format_to_base_cont
     provider_cfg_with_response_format.Llm_provider.Provider_config.response_format
   in
   check bool "resume patches checkpoint response_format to base contract" true
-    (prepared.patched_checkpoint.Agent_sdk.Checkpoint.response_format
+    (prepared.patched_checkpoint.Agent_core.Checkpoint.response_format
      = expected_response_format)
 
 let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
   let tool =
-    Agent_sdk.Tool.create
+    Agent_core.Tool.create
       ~name:"probe_tool"
       ~description:"probe tool"
       ~parameters:[]
@@ -1405,7 +1641,7 @@ let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
   in
   let config =
     Runtime_agent.default_config
-      ~name:"oas-runpod_mtp.qwen"
+      ~name:"agent_core-runpod_mtp.qwen"
       ~provider_cfg:(provider_cfg ())
       ~system_prompt:""
       ~tools:[ tool ]
@@ -1418,17 +1654,17 @@ let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
           ~config
           ()
       in
-      match Agent_sdk.Builder.build_safe builder with
-      | Error err -> fail (Agent_sdk.Error.to_string err)
+      match Agent_core.Builder.build_safe builder with
+      | Error err -> fail (Agent_core.Error.to_string err)
       | Ok agent ->
-        let agent_config = (Agent_sdk.Agent.state agent).config in
+        let agent_config = (Agent_core.Agent.state agent).config in
         check
           (option string)
           "tool_choice remains unset"
           None
-          (Option.map Agent_sdk.Types.show_tool_choice agent_config.tool_choice);
+          (Option.map Agent_core.Types.show_tool_choice agent_config.tool_choice);
         Eio.Switch.on_release sw (fun () ->
-          Agent_sdk.Agent.close agent)))
+          Agent_core.Agent.close agent)))
 
 let fresh_loopback_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
@@ -1540,13 +1776,13 @@ let context_fit_runtime_config base_url =
     ~tools:[]
 
 let context_fit_checkpoint () =
-  { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
+  { Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version
   ; session_id = "context-fit-session"
   ; agent_name = "context-fit-fixture"
   ; model = "context-fit-fixture"
   ; system_prompt = Some "stale"
   ; messages = []
-  ; usage = Agent_sdk.Types.empty_usage
+  ; usage = Agent_core.Types.empty_usage
   ; turn_count = 3
   ; created_at = 0.0
   ; tools = []
@@ -1559,18 +1795,18 @@ let context_fit_checkpoint () =
   ; reasoning_effort = None
   ; enable_thinking = None
   ; preserve_thinking = None
-  ; response_format = Agent_sdk.Types.Off
+  ; response_format = Agent_core.Types.Off
   ; thinking_budget = None
   ; cache_system_prompt = false
-  ; context = Agent_sdk.Context.create_sync ()
+  ; context = Agent_core.Context.create_sync ()
   ; mcp_sessions = []
   ; working_context = None
   }
 
 let check_context_fit_overflow = function
-  | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.ContextOverflow { limit = Some 512; _ })) ->
+  | Error (Agent_core.Error.Api (Agent_core.Retry.ContextOverflow { limit = Some 512; _ })) ->
     ()
-  | Error error -> fail (Agent_sdk.Error.to_string error)
+  | Error error -> fail (Agent_core.Error.to_string error)
   | Ok _ -> fail "overflowed request must not reach completion dispatch"
 
 let test_runtime_agent_fresh_build_enforces_native_context_fit () =
@@ -1581,11 +1817,11 @@ let test_runtime_agent_fresh_build_enforces_native_context_fit () =
     let agent =
       match Runtime_agent.build ~sw ~net ~config with
       | Ok agent -> agent
-      | Error error -> fail (Agent_sdk.Error.to_string error)
+      | Error error -> fail (Agent_core.Error.to_string error)
     in
     Fun.protect
-      ~finally:(fun () -> Agent_sdk.Agent.close agent)
-      (fun () -> Agent_sdk.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
+      ~finally:(fun () -> Agent_core.Agent.close agent)
+      (fun () -> Agent_core.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
   in
   check (list string) "fresh request paths" [ "/v1/messages/count_tokens" ] paths
 
@@ -1603,21 +1839,21 @@ let test_runtime_agent_resume_enforces_native_context_fit () =
           ~checkpoint:(context_fit_checkpoint ())
       with
       | Ok agent -> agent
-      | Error error -> fail (Agent_sdk.Error.to_string error)
+      | Error error -> fail (Agent_core.Error.to_string error)
     in
     Fun.protect
-      ~finally:(fun () -> Agent_sdk.Agent.close agent)
-      (fun () -> Agent_sdk.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
+      ~finally:(fun () -> Agent_core.Agent.close agent)
+      (fun () -> Agent_core.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
   in
   check (list string) "resumed request paths" [ "/v1/messages/count_tokens" ] paths
 
 let projection_messages marker messages =
   let project_block = function
-    | Agent_sdk.Types.Text _ -> Agent_sdk.Types.Text marker
+    | Agent_core.Types.Text _ -> Agent_core.Types.Text marker
     | block -> block
   in
   List.map
-    (fun (message : Agent_sdk.Types.message) ->
+    (fun (message : Agent_core.Types.message) ->
       { message with content = List.map project_block message.content })
     messages
 
@@ -1650,14 +1886,14 @@ let run_projection_case ~resume =
     let agent =
       match agent with
       | Ok agent -> agent
-      | Error error -> fail (Agent_sdk.Error.to_string error)
+      | Error error -> fail (Agent_core.Error.to_string error)
     in
     Fun.protect
-      ~finally:(fun () -> Agent_sdk.Agent.close agent)
+      ~finally:(fun () -> Agent_core.Agent.close agent)
       (fun () ->
-         match Agent_sdk.Agent.run ~sw agent canonical_marker with
+         match Agent_core.Agent.run ~sw agent canonical_marker with
          | Ok _ -> ()
-         | Error error -> fail (Agent_sdk.Error.to_string error))
+         | Error error -> fail (Agent_core.Error.to_string error))
   in
   check int "projection executes once" 1 !projection_calls;
   check
@@ -1708,14 +1944,14 @@ let run_pre_dispatch_serialization_observer_case ~resume =
     let agent =
       match agent with
       | Ok agent -> agent
-      | Error error -> fail (Agent_sdk.Error.to_string error)
+      | Error error -> fail (Agent_core.Error.to_string error)
     in
     Fun.protect
-      ~finally:(fun () -> Agent_sdk.Agent.close agent)
+      ~finally:(fun () -> Agent_core.Agent.close agent)
       (fun () ->
-         match Agent_sdk.Agent.run ~sw agent "observe exact request bytes" with
+         match Agent_core.Agent.run ~sw agent "observe exact request bytes" with
          | Ok _ -> ()
-         | Error error -> fail (Agent_sdk.Error.to_string error))
+         | Error error -> fail (Agent_core.Error.to_string error))
   in
   let completion_body = List.assoc "/v1/messages" requests in
   check
@@ -1730,17 +1966,18 @@ let test_runtime_agent_fresh_observes_pre_dispatch_serialization () =
 let test_runtime_agent_resume_observes_pre_dispatch_serialization () =
   run_pre_dispatch_serialization_observer_case ~resume:true
 
-(* RFC-OAS-026 §4.6: a configured stream-idle deadline with no resolvable clock
+(* Agent Core contract §4.6: a configured stream-idle deadline with no resolvable clock
    must fail loudly rather than silently disarm the only I2-legitimate
    streaming timeout. *)
 let test_clock_failfast_returns_typed_error_when_idle_set_without_clock () =
   match
     Runtime_agent.For_testing.decide_clock_for_idle
       ~stream_idle_timeout_s:(Some 120.0)
+      ~first_event_timeout_s:None
       ~process_clock:(Error "process runtime not initialised")
       ~ctx_clock:None
   with
-  | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail })) ->
+  | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })) ->
     check string "field" "stream_idle_timeout_s" field;
     check
       bool
@@ -1753,14 +1990,15 @@ let test_clock_failfast_returns_typed_error_when_idle_set_without_clock () =
     fail
       (Printf.sprintf
          "expected InvalidConfig stream_idle_timeout_s, got %s"
-         (Agent_sdk.Error.to_string err))
+         (Agent_core.Error.to_string err))
   | Ok _ -> fail "expected typed error when idle is configured but no clock resolves"
 
 let test_clock_failfast_opt_out_when_no_idle_no_clock () =
-  (* Legitimate opt-out: no idle deadline + no clock stays None, no raise. *)
+  (* Legitimate opt-out: no streaming deadline + no clock stays None, no raise. *)
   let clock =
     Runtime_agent.For_testing.decide_clock_for_idle
       ~stream_idle_timeout_s:None
+      ~first_event_timeout_s:None
       ~process_clock:(Error "no runtime")
       ~ctx_clock:None
   in
@@ -1769,7 +2007,52 @@ let test_clock_failfast_opt_out_when_no_idle_no_clock () =
      | Ok None -> true
      | Ok (Some _) | Error _ -> false)
 
-(* ── Runtime.decide_capability_gate (OAS catalog binding gate) ── *)
+(* RFC-OAS-037: the first-event (TTFT/prefill) bound has the same clock
+   dependency as the idle bound — configured without a resolvable clock it
+   must fail loudly, naming its own knob. *)
+let test_clock_failfast_returns_typed_error_when_first_event_set_without_clock () =
+  match
+    Runtime_agent.For_testing.decide_clock_for_idle
+      ~stream_idle_timeout_s:None
+      ~first_event_timeout_s:(Some 600.0)
+      ~process_clock:(Error "process runtime not initialised")
+      ~ctx_clock:None
+  with
+  | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })) ->
+    check string "field" "first_event_timeout_s" field;
+    check
+      bool
+      "message identifies the configured first-event deadline with no clock"
+      true
+      (String.starts_with
+         ~prefix:"runtime_agent: first_event_timeout_s configured"
+         detail)
+  | Error err ->
+    fail
+      (Printf.sprintf
+         "expected InvalidConfig first_event_timeout_s, got %s"
+         (Agent_core.Error.to_string err))
+  | Ok _ ->
+    fail "expected typed error when first-event is configured but no clock resolves"
+
+let test_clock_failfast_names_idle_when_both_deadlines_set () =
+  (* Both knobs configured: the error names the idle knob (its arm is
+     checked first); the point pinned here is that SOME typed error fires,
+     not a silent disarm. *)
+  match
+    Runtime_agent.For_testing.decide_clock_for_idle
+      ~stream_idle_timeout_s:(Some 120.0)
+      ~first_event_timeout_s:(Some 600.0)
+      ~process_clock:(Error "no runtime")
+      ~ctx_clock:None
+  with
+  | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; _ })) ->
+    check string "field" "stream_idle_timeout_s" field
+  | Error err ->
+    fail (Printf.sprintf "expected InvalidConfig, got %s" (Agent_core.Error.to_string err))
+  | Ok _ -> fail "expected typed error when both deadlines set without clock"
+
+(* ── Runtime.decide_capability_gate (AGENT_CORE catalog binding gate) ── *)
 
 let mentions ~sub s =
   let ls = String.length sub and lc = String.length s in
@@ -1819,6 +2102,10 @@ let () =
         ] )
     ; ( "provider_config"
       , [ test_case
+            "runtime binding materialization preserves failure reason"
+            `Quick
+            test_runtime_of_binding_preserves_failure_reason
+        ; test_case
             "adapter stamps declared provider id"
             `Quick
             test_adapter_stamps_declared_provider_id
@@ -1830,6 +2117,10 @@ let () =
             "bare catalog row stays fail-closed for declared provider"
             `Quick
             test_bare_catalog_row_stays_fail_closed_for_declared_provider
+        ; test_case
+            "declared thinking capabilities override catalog"
+            `Quick
+            test_declared_thinking_capabilities_override_catalog
         ; test_case
             "runtime adapter carries auth in api_key only"
             `Quick
@@ -1863,6 +2154,10 @@ let () =
             `Quick
             test_runtime_toml_threads_model_sampling_config
         ; test_case
+            "declared credential headers never reach provider config"
+            `Quick
+            test_declared_credential_headers_never_reach_provider_config
+        ; test_case
             "runtime TOML rejects non-positive provider connect timeout"
             `Quick
             test_runtime_toml_rejects_non_positive_provider_connect_timeout
@@ -1874,6 +2169,18 @@ let () =
             "runtime TOML rejects legacy protocol aliases"
             `Quick
             test_runtime_toml_rejects_legacy_protocol_aliases
+        ; test_case
+            "runtime TOML editor protocol inventory is backend-owned"
+            `Quick
+            test_runtime_toml_editor_protocol_inventory_is_backend_owned
+        ; test_case
+            "runtime TOML rejects reserved provider and model ids"
+            `Quick
+            test_runtime_toml_rejects_reserved_provider_and_model_ids
+        ; test_case
+            "runtime TOML rejects obsolete top-level namespaces"
+            `Quick
+            test_runtime_toml_rejects_obsolete_top_level_namespaces
         ; test_case
             "runtime TOML reads uses-messages-caching capability"
             `Quick
@@ -1935,10 +2242,6 @@ let () =
             `Quick
             test_runtime_agent_context_preserves_max_tokens_intent
         ; test_case
-            "runtime lifecycle attrs preserve max_tokens intent"
-            `Quick
-            test_runtime_agent_lifecycle_attrs_preserve_max_tokens_intent
-        ; test_case
             "runtime agent context preserves provider sampling config"
             `Quick
             test_runtime_agent_context_preserves_provider_sampling_config
@@ -1979,12 +2282,24 @@ let () =
             `Quick
             test_dashboard_runtime_probe_reachability_contracts
         ; test_case
-            "clock fail-fast raises when idle set without clock (RFC-OAS-026)"
+            "dashboard runtime probe groups models by provider"
+            `Quick
+            test_dashboard_runtime_probe_groups_models_by_provider
+        ; test_case
+            "clock fail-fast raises when idle set without clock (Agent Core contract)"
             `Quick
             test_clock_failfast_returns_typed_error_when_idle_set_without_clock
         ; test_case
             "clock fail-fast opt-out when no idle no clock"
             `Quick
             test_clock_failfast_opt_out_when_no_idle_no_clock
+        ; test_case
+            "clock fail-fast raises when first-event set without clock (RFC-OAS-037)"
+            `Quick
+            test_clock_failfast_returns_typed_error_when_first_event_set_without_clock
+        ; test_case
+            "clock fail-fast names idle when both deadlines set"
+            `Quick
+            test_clock_failfast_names_idle_when_both_deadlines_set
         ] )
     ]

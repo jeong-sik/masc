@@ -73,7 +73,7 @@ The correct shape is:
 
 ```
 issue_king turn
-  └─ OAS Agent.run_stream_blocks / run_blocks
+  └─ agent core Agent.run_stream_blocks / run_blocks
        └─ Pipeline.run_turn
             └─ LLM provider response → ToolUse { name = "Execute"; input }
                  └─ Agent_tools.execute_tools
@@ -84,7 +84,7 @@ issue_king turn
 
 The validation entry point in MASC is:
 
-- `lib/keeper/keeper_tools_oas_handler.ml:94` (`pre_validate_input`)
+- `lib/keeper/keeper_tools_agent_core_handler.ml:94` (`pre_validate_input`)
 - calls `lib/keeper/keeper_tool_descriptor_resolution.ml:112-122`
 - calls `lib/tool_input_validation.ml:350-463` (`validation_action`)
 - which calls `unsupported_arg_names` at `lib/tool_input_validation.ml:116-124`
@@ -99,9 +99,9 @@ The field name `args` is used in several places, but it is **never** a valid fie
 
 Gemini sends tool-call arguments under the key `functionCall.args`:
 
-- Request: `oas/lib/llm_provider/backend_gemini.ml:177`
-- Response: `oas/lib/llm_provider/backend_gemini.ml:436`
-- Streaming: `oas/lib/llm_provider/streaming.ml:977`
+- Request: `agent core/lib/llm_provider/backend_gemini.ml:177`
+- Response: `agent core/lib/llm_provider/backend_gemini.ml:436`
+- Streaming: `agent core/lib/llm_provider/streaming.ml:977`
 
 The parser unwraps `args` into `ToolUse.input`:
 
@@ -119,11 +119,11 @@ If the LLM emits tool-call-like JSON inside a text block, e.g.:
 {"name": "Execute", "args": {"command": "git status"}}
 ```
 
-the OAS `tool_use_recovery.ml:103-144` does **not** recognize the `args` shape. It recognizes `input`, `arguments`, `parameters`, `tool_calls/function`, and bare `function`, but not `args`. The call would stay as text and not execute — unless MASC later parses it again somewhere else. However, if some intermediate layer tries to execute the text block as a tool call, the `args` field would reach validation.
+the agent core `tool_use_recovery.ml:103-144` does **not** recognize the `args` shape. It recognizes `input`, `arguments`, `parameters`, `tool_calls/function`, and bare `function`, but not `args`. The call would stay as text and not execute — unless MASC later parses it again somewhere else. However, if some intermediate layer tries to execute the text block as a tool call, the `args` field would reach validation.
 
-### 4.3 OAS bridge flattens the schema
+### 4.3 agent core bridge flattens the schema
 
-When MASC exposes `Execute` to OAS agents:
+When MASC exposes `Execute` to agent core agents:
 
 - `masc/lib/tool_bridge.ml:150-210` (`params_of_json_schema`)
 - `masc/lib/runtime/runtime_agent.ml:1143-1178` (`run_with_masc_tools`)
@@ -137,9 +137,9 @@ MASC does not normalize `execute_command`, `Bash`, `Shell`, `cmd`, `command`,
 tool-name boundaries must produce the canonical typed call directly. Any
 non-canonical field that reaches MASC is rejected explicitly.
 
-### 4.5 Persona / prompt examples
+### 4.5 Keeper / prompt examples
 
-The `issue_king` persona (`config/personas/issue_king/profile.json`) explicitly instructs:
+The `issue_king` keeper (`config/keepers/issue_king/AGENT.md`) explicitly instructs:
 
 > "PR 생성은 준비된 작업 브랜치에서 git push 후 별도 실행 축이 아니라 Execute typed argv 경로로 수행한다."
 
@@ -159,7 +159,7 @@ This is correct, but if any few-shot example, memory, or older prompt template s
 
 The exact upstream source is **not yet proven** without a raw provider response or captured `ToolUse.input`. Given the current code, the defensible scenarios are:
 
-1. **Model hallucinated `args`** — the flattened OAS bridge schema plus a confused prompt caused the model to emit `{"args": ...}` instead of the canonical `{"argv": ["program", ...]}`.
+1. **Model hallucinated `args`** — the flattened agent core bridge schema plus a confused prompt caused the model to emit `{"args": ...}` instead of the canonical `{"argv": ["program", ...]}`.
 2. **Retired shape emitted** — the model called `Execute` while using a `command`, `args`, or `executable` field learned from another tool contract.
 3. **Provider parser edge case** — possible only if capture proves a provider parser returned `ToolUse.input = {"args": ...}`. The normal Gemini non-streaming and streaming paths already unwrap `functionCall.args` into the inner object, so Gemini should not be treated as the leading suspect without that evidence.
 
@@ -173,10 +173,10 @@ The error says **`args`**, not `command`/`cmd`, which is consistent with a model
 
 Add temporary logging in the provider parser for the runtime used by `issue_king`:
 
-- If OpenAI-compatible: `oas/lib/llm_provider/backend_openai_parse.ml:268-286`
-- If Anthropic: `oas/lib/llm_provider/backend_anthropic.ml` / `oas/lib/llm_provider/api_common.ml:145-149`
-- If Gemini: `oas/lib/llm_provider/backend_gemini.ml:433-438`
-- If Ollama: `oas/lib/llm_provider/backend_ollama.ml:215-239`
+- If OpenAI-compatible: `agent core/lib/llm_provider/backend_openai_parse.ml:268-286`
+- If Anthropic: `agent core/lib/llm_provider/backend_anthropic.ml` / `agent core/lib/llm_provider/api_common.ml:145-149`
+- If Gemini: `agent core/lib/llm_provider/backend_gemini.ml:433-438`
+- If Ollama: `agent core/lib/llm_provider/backend_ollama.ml:215-239`
 
 Log the raw response JSON and the resulting `ToolUse.input` before it reaches MASC.
 
@@ -213,13 +213,13 @@ Search `.masc/trajectories/`, `logs/`, or telemetry for the affected `issue_king
 
 ### Structural improvements
 
-4. **Preserve `additionalProperties: false` in the OAS bridge**
-   - Modify `lib/tool_bridge.ml` / `params_of_json_schema` to carry the closed-schema constraint into the OAS tool description, so the model is less likely to hallucinate extra fields.
+4. **Preserve `additionalProperties: false` in the agent core bridge**
+   - Modify `lib/tool_bridge.ml` / `params_of_json_schema` to carry the closed-schema constraint into the agent core tool description, so the model is less likely to hallucinate extra fields.
 
-5. **Add a typed pre-check before OAS bridge**
+5. **Add a typed pre-check before agent core bridge**
    - For `Execute`, validate/coerce the input immediately after provider parsing and before exposing it to the model loop, so bad shapes fail fast with a clearer error.
 
-6. **Audit persona/memory examples**
+6. **Audit keeper/memory examples**
    - Search all `.json` / `.toml` / `.md` under `config/` for any `Execute` example that uses `args`, `command`, or `cmd`, and replace with `executable`/`argv`.
 
 ---
@@ -229,17 +229,17 @@ Search `.masc/trajectories/`, `logs/`, or telemetry for the affected `issue_king
 | File | Why |
 |---|---|
 | `config/keepers/issue_king.toml` | Provider/runtime binding for `issue_king`, and its own `instructions` block |
-| `config/personas/issue_king/profile.json` | Prompt examples mentioning Execute |
+| `config/keepers/issue_king/AGENT.md` | Prompt examples mentioning Execute |
 | `config/keepers/*.toml` | Prompt examples — each keeper carries its own `instructions`; the former shared `base.toml` is gone |
-| `oas/lib/llm_provider/backend_gemini.ml` | If provider is Gemini, check `args` unwrap |
-| `oas/lib/llm_provider/backend_openai_parse.ml` | If provider is OpenAI-compatible |
-| `oas/lib/llm_provider/backend_anthropic.ml` | If provider is Anthropic |
-| `oas/lib/llm_provider/backend_ollama.ml` | If provider is Ollama |
-| `oas/lib/agent/agent_tool_name_alias.ml` | Existing alias/normalization logic |
-| `oas/lib/agent/tool_use_recovery.ml` | Add `args` recognition |
+| `agent core/lib/llm_provider/backend_gemini.ml` | If provider is Gemini, check `args` unwrap |
+| `agent core/lib/llm_provider/backend_openai_parse.ml` | If provider is OpenAI-compatible |
+| `agent core/lib/llm_provider/backend_anthropic.ml` | If provider is Anthropic |
+| `agent core/lib/llm_provider/backend_ollama.ml` | If provider is Ollama |
+| `agent core/lib/agent/agent_tool_name_alias.ml` | Existing alias/normalization logic |
+| `agent core/lib/agent/tool_use_recovery.ml` | Add `args` recognition |
 | `masc/lib/tool_bridge.ml` | Schema flattening issue |
 | `masc/lib/keeper/keeper_tool_descriptor_resolution.ml` | Where validation is invoked |
-| `masc/lib/keeper/keeper_tools_oas_handler.ml` | Pre-validation hook |
+| `masc/lib/keeper/keeper_tools_agent_core_handler.ml` | Pre-validation hook |
 | `masc/lib/tool_input_validation.ml` | Error origin; add diagnostic logging |
 | `masc/lib/tool_surface/tool_shard_types_schemas_execute.ml` | Canonical Execute schema |
 | `masc/lib/keeper/keeper_tool_execute_typed_input.ml` | Typed parsing rejection logic |

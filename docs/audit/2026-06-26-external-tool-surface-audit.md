@@ -1,14 +1,5 @@
 ---
 status: draft
-last_verified: 2026-06-26
-code_refs:
-  - docs/design/tool-execution-substrate-plan.md
-  - docs/rfc/RFC-0290-keeper-background-wait-tool.md
-  - docs/KEEPER-CAPABILITY-MATRIX.md
-  - lib/keeper/keeper_tool_descriptor.ml
-  - lib/keeper/keeper_world_observation.ml
-  - lib/keeper/keeper_heartbeat_stimulus_intake.ml
-  - lib/process/process_eio_detached.ml
 ---
 
 # External Tool Surface Audit
@@ -43,10 +34,10 @@ GitHub PR and issue work goes through `Execute` with typed `gh` argv.
 
 Status: keep blocked
 
-`docs/design/tool-execution-substrate-plan.md` already rejects `Gh_cli` and
-`Oas_bridge` executors. The current descriptor implementation matches that
-decision: `lib/keeper/keeper_tool_descriptor.ml` exposes only `Shell_ir`,
-`Filesystem`, and `In_process`. That is the right boundary.
+`Gh_cli` and `Oas_bridge` executors were rejected. The current descriptor
+implementation matches that decision: `lib/keeper/keeper_tool_descriptor.ml`
+exposes only `Shell_ir`, `Filesystem`, and `In_process`. That is the right
+boundary.
 
 Operational impact: adding a `gh_pr_comment` or `jira_ticket_update` tool would
 create another product API that must duplicate Shell IR risk classification,

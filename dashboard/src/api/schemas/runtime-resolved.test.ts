@@ -13,6 +13,8 @@ const validRuntime = {
   max_output_tokens: null,
   is_local: false,
   is_default: true,
+  keeper_dispatchable: true,
+  keeper_dispatch_blocked_reason: null,
 } as const
 
 const validLane = {
@@ -61,6 +63,32 @@ describe('runtime-resolved schema', () => {
   it('rejects a lane missing the sticky fields (schema drift guard)', () => {
     const { preferred_candidate: _candidate, preferred_at_ts: _ts, ...lane } = validLane
     expect(() => parseRuntimeResolvedResponse({ ...responseWith(validRuntime), lanes: [lane] }))
+      .toThrow(RuntimeResolvedSchemaDriftError)
+  })
+
+  it('carries the blocker for a runtime no keeper can be assigned to', () => {
+    const blocked = {
+      ...validRuntime,
+      keeper_dispatchable: false,
+      keeper_dispatch_blocked_reason:
+        'no positive max-request-body-bytes; declare [local.dormant].max-request-body-bytes',
+    }
+    const parsed = parseRuntimeResolvedResponse(responseWith(blocked))
+    expect(parsed.runtimes[0]?.keeper_dispatchable).toBe(false)
+    expect(parsed.runtimes[0]?.keeper_dispatch_blocked_reason)
+      .toContain('max-request-body-bytes')
+  })
+
+  it('rejects a runtime missing the dispatch fields (schema drift guard)', () => {
+    // Required, not optional: a runtime that omits these is a server old enough
+    // not to know whether it is assignable, and reading that as "dispatchable"
+    // would hide masc#28404 in the one document meant to expose it.
+    const {
+      keeper_dispatchable: _dispatchable,
+      keeper_dispatch_blocked_reason: _reason,
+      ...runtime
+    } = validRuntime
+    expect(() => parseRuntimeResolvedResponse(responseWith(runtime)))
       .toThrow(RuntimeResolvedSchemaDriftError)
   })
 })

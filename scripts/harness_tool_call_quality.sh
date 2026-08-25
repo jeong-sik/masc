@@ -24,7 +24,6 @@ SERVER_PID=""
 LIVE_RUN_DIR=""
 TARGET_DIR=""
 CONFIG_DIR=""
-PERSONAS_DIR=""
 RAW_DIR=""
 SERVER_LOG=""
 LAST_TOOL_RAW=""
@@ -261,30 +260,17 @@ ${prompt}
 EOF
 }
 
-write_benchmark_persona_profile() {
-  local persona_name="$1"
-  local keeper_profile="$2"
-  local persona_dir profile_path
-  local display_name role trait instructions
-
+benchmark_instructions() {
+  local keeper_profile="$1"
   case "${keeper_profile}" in
     bench-analyst)
-      display_name="Benchmark Analyst"
-      role="Repeatable tool-quality analyst"
-      trait="Deterministic evidence-first analyst"
-      instructions="너는 tool-quality benchmark 전용 analyst keeper다. 같은 입력에서 같은 근거와 같은 도구 선택이 반복되도록 행동한다. 허용된 도구가 필요할 때만 호출하고, text-only로 해결 가능하면 도구를 호출하지 않는다. 답은 짧고 구조적으로 유지하고, 최종 판단은 evidence 기반으로만 내린다."
+      printf '%s\n' "너는 tool-quality benchmark 전용 analyst keeper다. 같은 입력에서 같은 근거와 같은 도구 선택이 반복되도록 행동한다. 필요한 도구만 호출하고, text-only로 해결 가능하면 도구를 호출하지 않는다. 답은 짧고 구조적으로 유지하고, 최종 판단은 evidence 기반으로만 내린다."
       ;;
     bench-executor)
-      display_name="Benchmark Executor"
-      role="Repeatable tool-quality executor"
-      trait="Deterministic completion-focused executor"
-      instructions="너는 tool-quality benchmark 전용 executor keeper다. 같은 입력에서는 가능한 한 같은 순서와 같은 최소 도구 집합으로 과제를 끝낸다. 필요한 도구만 호출하고, max_tool_calls 안에서 끝내는 것을 우선한다. 실패하면 무작정 반복하지 말고 한 번 다른 경로로 회복한 뒤 바로 마무리한다. 최종 출력은 완료 여부와 핵심 evidence만 남긴다."
+      printf '%s\n' "너는 tool-quality benchmark 전용 executor keeper다. 같은 입력에서는 가능한 한 같은 순서와 같은 최소 도구 집합으로 과제를 끝낸다. 필요한 도구만 호출하고, max_tool_calls 안에서 끝내는 것을 우선한다. 실패하면 무작정 반복하지 말고 한 번 다른 경로로 회복한 뒤 바로 마무리한다. 최종 출력은 완료 여부와 핵심 evidence만 남긴다."
       ;;
     bench-verifier)
-      display_name="Benchmark Verifier"
-      role="Repeatable tool-quality verifier"
-      trait="Deterministic recovery-focused verifier"
-      instructions="너는 tool-quality benchmark 전용 verifier keeper다. 같은 입력에서 같은 검증 절차를 반복 가능하게 수행한다. 검증이 필요하면 측정 가능한 evidence를 우선하고, 실패 후 회복이 필요하면 다른 도구나 다른 인자로 한 번만 전환한다. 추측으로 통과시키지 않는다. 출력은 pass/fail와 미충족 조건을 명확히 남긴다."
+      printf '%s\n' "너는 tool-quality benchmark 전용 verifier keeper다. 같은 입력에서 같은 검증 절차를 반복 가능하게 수행한다. 검증이 필요하면 측정 가능한 evidence를 우선하고, 실패 후 회복이 필요하면 다른 도구나 다른 인자로 한 번만 전환한다. 추측으로 통과시키지 않는다. 출력은 pass/fail와 미충족 조건을 명확히 남긴다."
       ;;
     *)
       echo "unknown benchmark keeper profile: ${keeper_profile}" >&2
@@ -292,26 +278,6 @@ write_benchmark_persona_profile() {
       ;;
   esac
 
-  persona_dir="${PERSONAS_DIR}/${persona_name}"
-  profile_path="${persona_dir}/profile.json"
-  mkdir -p "${persona_dir}"
-  jq -n \
-    --arg name "${display_name}" \
-    --arg role "${role}" \
-    --arg trait "${trait}" \
-    --arg instructions "${instructions}" \
-    --arg mention "${keeper_profile}" \
-    '{
-      name: $name,
-      role: $role,
-      trait: $trait,
-      keeper: {
-        instructions: $instructions,
-        mention_targets: [$mention],
-        proactive_enabled: false,
-        telemetry_feedback_enabled: false
-      }
-    }' > "${profile_path}"
 }
 
 prepare_live_environment() {
@@ -323,10 +289,9 @@ prepare_live_environment() {
   RAW_DIR="${LIVE_RUN_DIR}/raw"
   TARGET_DIR="${LIVE_RUN_DIR}/target"
   CONFIG_DIR="${LIVE_RUN_DIR}/config"
-  PERSONAS_DIR="${LIVE_RUN_DIR}/personas"
   SERVER_LOG="${LIVE_RUN_DIR}/server.log"
 
-  mkdir -p "${RAW_DIR}" "${TARGET_DIR}" "${CONFIG_DIR}" "${PERSONAS_DIR}"
+  mkdir -p "${RAW_DIR}" "${TARGET_DIR}" "${CONFIG_DIR}"
   cp -R "${ROOT_DIR}/config/." "${CONFIG_DIR}"
 
   if [[ -z "${PORT}" ]]; then
@@ -339,14 +304,13 @@ start_live_server() {
   local bootstrap_log="${LIVE_RUN_DIR}/bootstrap.log"
   (
     export MASC_CONFIG_DIR="${CONFIG_DIR}"
-    export MASC_PERSONAS_DIR="${PERSONAS_DIR}"
     export MASC_LOG_FILE="${SERVER_LOG}"
-    export MASC_AUTONOMY_ENABLED="0"
+    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
     export MASC_KEEPER_BOOTSTRAP_ENABLED="0"
     export GRAPHQL_API_KEY=""
     export GRAPHQL_URL="http://127.0.0.1:9/graphql"
-    export OAS_MCP_SERVERS_CONFIG="mcp_servers={}"
+    export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
     exec "${ROOT_DIR}/scripts/run-local.sh" \
       --target-dir "${TARGET_DIR}" \
       --port "${PORT}" \
@@ -354,14 +318,13 @@ start_live_server() {
   ) >"${bootstrap_log}" 2>&1
   (
     export MASC_CONFIG_DIR="${CONFIG_DIR}"
-    export MASC_PERSONAS_DIR="${PERSONAS_DIR}"
     export MASC_LOG_FILE="${SERVER_LOG}"
-    export MASC_AUTONOMY_ENABLED="0"
+    export MASC_KEEPER_AUTONOMOUS_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"
     export MASC_KEEPER_BOOTSTRAP_ENABLED="0"
     export GRAPHQL_API_KEY=""
     export GRAPHQL_URL="http://127.0.0.1:9/graphql"
-    export OAS_MCP_SERVERS_CONFIG="mcp_servers={}"
+    export AGENT_CORE_MCP_SERVERS_CONFIG="mcp_servers={}"
     exec "${ROOT_DIR}/scripts/run-local.sh" --target-dir "${TARGET_DIR}" --port "${PORT}"
   ) >"${launch_log}" 2>&1 &
   SERVER_PID="$!"
@@ -605,7 +568,7 @@ run_live_case() {
   local repeat_index="$4"
   local case_json="$5"
 
-  local case_id keeper_name run_slug run_dir persona_name runtime_id
+  local case_id keeper_name run_slug run_dir runtime_id instructions
   local message create_args create_json status_before_json status_after_json
   local request_json request_id result_json msg_payload final_output tool_log_json
   local tool_calls_json metrics_json prompt_fingerprint tool_surface_fingerprint
@@ -616,27 +579,28 @@ run_live_case() {
   case_id="$(printf '%s' "${case_json}" | jq -r '.id')"
   run_slug="$(slugify "${provider}-${model}-${keeper_profile}-${case_id}-r${repeat_index}")"
   keeper_name="bench-${run_slug}"
-  persona_name="${keeper_name}"
   runtime_id="${provider}.${model}"
   run_dir="${RAW_DIR}/${keeper_name}"
   mkdir -p "${run_dir}"
 
-  write_benchmark_persona_profile "${persona_name}" "${keeper_profile}"
+  instructions="$(benchmark_instructions "${keeper_profile}")"
   message="$(build_case_message "${case_json}")"
 
   create_args="$(jq -cn \
-    --arg persona_name "${persona_name}" \
+    --arg name "${keeper_name}" \
+    --arg instructions "${instructions}" \
     --arg runtime_id "${runtime_id}" \
     --argjson allowed_paths "$(jq -cn --arg path "${WORKSPACE_ROOT}" '[ $path ]')" \
     '{
-      persona_name: $persona_name,
+      name: $name,
+      instructions: $instructions,
       runtime_id: $runtime_id,
       autoboot_enabled: false,
       proactive_enabled: false,
       allowed_paths: $allowed_paths
     }')"
 
-  if ! call_mcp_tool 2000 "masc_keeper_create_from_persona" "${create_args}" 45; then
+  if ! call_mcp_tool 2000 "masc_keeper_up" "${create_args}" 45; then
     local create_error
     create_error="$(tool_error_text)"
     jq -cn \

@@ -10,7 +10,7 @@
     context within a turn.  The runtime can still execute from different cwd
     values via [Keeper_turn_sandbox_runtime.container_cwd_of_host].
 
-    Background: pre-PR-3b, [keeper_tools_oas.make_tool_bundle] inspected
+    Background: pre-PR-3b, [keeper_tools_agent_core.make_tool_bundle] inspected
     [meta.sandbox_profile] eagerly at turn-start.  The factory still creates
     runtimes lazily at each call site, but freezes its construction meta so
     path resolution and dispatch use one sandbox profile for the whole turn.
@@ -61,10 +61,6 @@ val resolve_opt :
   resolve_result
 (** [No_factory] when [t option] is [None]. Otherwise delegates to {!resolve}.
     Lets call sites distinguish "factory missing" from "Local profile". *)
-
-val container_cwd_of_host_opt : t option -> host_cwd:string -> string option
-(** Pure Docker CWD projection for response shaping. Unlike {!resolve_opt},
-    this does not create or memoize a turn sandbox runtime. *)
 
 val cleanup : t -> unit
 (** Tears down every runtime created via {!resolve}.  Idempotent. *)

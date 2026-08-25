@@ -92,23 +92,6 @@ describe('IdeKeeperWorkPanel', () => {
     expect(summary.activeTaskCount).toBe(1)
   })
 
-  it('keeps runtime current_task visible when the task row is absent', () => {
-    const summary = keeperWorkSummary('sangsu', [keeperFixture()], [])
-
-    expect(summary.currentTaskId).toBe('task-151')
-    expect(summary.currentTask).toBeNull()
-    expect(summary.activeTaskCount).toBe(1)
-
-    keepers.value = [keeperFixture()]
-    tasks.value = []
-
-    render(h(IdeKeeperWorkPanel, { keeperName: 'sangsu' }), container)
-
-    expect(container.textContent).toContain('task-151')
-    expect(container.textContent).toContain('keeper runtime current task')
-    expect(container.textContent).not.toContain('no active keeper task')
-  })
-
   it('shows the current task goal task count and links back to planning', () => {
     keepers.value = [keeperFixture()]
     goals.value = [goalFixture()]
@@ -269,10 +252,6 @@ function keeperFixture(): Keeper {
     status: 'running',
     phase: 'Failing',
     needs_attention: true,
-    agent: {
-      name: 'keeper-sangsu-agent',
-      current_task: 'task-151',
-    },
     trust: {
       needs_attention: true,
       latest_terminal_reason: {

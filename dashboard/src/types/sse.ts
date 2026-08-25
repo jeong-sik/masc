@@ -3,13 +3,8 @@ import type { BoardActorIdentity, BoardPost } from './core'
 // --- SSE Events ---
 
 export type SSEEventType =
-  | 'agent_bound'
-  | 'masc/agent_bound'
-  | 'agent_unbound'
-  | 'masc/agent_unbound'
   | 'broadcast'
   | 'masc/broadcast'
-  | 'task_update'
   | 'board_post'
   | 'masc/board_post'
   | 'board_comment'
@@ -28,60 +23,52 @@ export type SSEEventType =
   | 'masc/keeper_handoff'
   | 'keeper_compaction'
   | 'masc/keeper_compaction'
-  | 'keeper_guardrail'
-  | 'masc/keeper_guardrail'
   | 'keeper_phase_changed'
   | 'keeper_composite_changed'
   | 'keeper_chat_appended'
-  | 'keeper_chat_turn_progress'
+  | 'keeper_chat_operation_event'
   | 'keeper_waiting_inventory_changed'
-  | 'keeper_compaction_snapshots_changed'
-  | 'oas_telemetry_sample'
+  | 'agent_core_telemetry_sample'
   | 'ide_cursor_changed'
   | 'keeper_tool_call'
   | 'masc/keeper_tool_call'
-  | 'keeper_tool_skipped'
+  | 'keeper_tool_call_evidence_committed'
   | 'keeper_turn_complete'
   | 'masc/keeper_turn_complete'
   // RFC-0266 Phase 4: fusion run-status transitions pushed to the dashboard.
   | 'fusion_run_status'
-  | 'client_input_approved'
-  | 'client_input_rejected'
-  | 'client_input_updated'
+  | 'internal_agent_runs_changed'
   | 'runtime_param_changed'
   | 'approval:pending'
   | 'approval:resolved'
+  | 'approval:audit'
   | 'approval:summary_updated'
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   | 'gate_mode_changed'
   // Task claim notifications. Emitted by lib/task/tool_task_handlers.ml.
   | 'masc/task_claimed'
-  // OAS bridge events (relayed from Event_bus via oas_sse_bridge)
-  | 'oas:masc:keeper:lifecycle'
-  | 'oas:masc:trust_updated'
-  | 'oas:masc:reputation_changed'
-  | 'oas:agent_started'
-  | 'oas:agent_completed'
-  | 'oas:agent_failed'
-  | 'oas:tool_called'
-  | 'oas:tool_completed'
-  | 'oas:turn_started'
-  | 'oas:turn_completed'
-  | 'oas:handoff_requested'
-  | 'oas:handoff_completed'
-  | 'oas:context_compacted'
-  | 'oas:task_state_changed'
+  // Agent Core bridge events (relayed from Event_bus via agent_core_sse_bridge)
+  | 'agent_core:masc:keeper:lifecycle'
+  | 'agent_core:agent_started'
+  | 'agent_core:agent_completed'
+  | 'agent_core:agent_failed'
+  | 'agent_core:tool_called'
+  | 'agent_core:tool_completed'
+  | 'agent_core:turn_started'
+  | 'agent_core:turn_completed'
+  | 'agent_core:handoff_requested'
+  | 'agent_core:handoff_completed'
+  | 'agent_core:context_compacted'
   // Harness observability events (#3165)
-  | 'oas:masc:harness:verdict_recorded'
-  | 'oas:masc:harness:pre_compact'
-  | 'oas:masc:harness:handoff'
-  // Forward-compat: the dashboard parser accepts any `oas:*` event so
+  | 'agent_core:masc:harness:verdict_recorded'
+  | 'agent_core:masc:harness:pre_compact'
+  | 'agent_core:masc:harness:handoff'
+  // Forward-compat: the dashboard parser accepts any `agent_core:*` event so
   // newer runtime bridges do not get dropped at the schema boundary.
-  | `oas:${string}`
+  | `agent_core:${string}`
   // Server-push snapshot events (proactive cache broadcasts)
   | 'project_snapshot'
-  | 'namespace_truth_snapshot'
   | 'execution_snapshot'
   | 'operator_snapshot'
   | 'operator_digest'
@@ -90,7 +77,7 @@ export type SSEEventType =
   | 'audit_event'
   | 'masc/audit_event'
   | 'masc:audit_event'
-  | 'oas:masc:audit_event'
+  | 'agent_core:masc:audit_event'
 
 export type JournalSeverity = 'debug' | 'info' | 'warn' | 'error' | 'unknown'
 // Closed set of journal sources. `'unknown'` is a first-class variant
@@ -111,19 +98,12 @@ export type JournalSource = 'structured' | 'legacy_stderr' | 'legacy_traceln' | 
 
 export type AttributionOrigin = 'det' | 'nondet'
 
-// Known gate identifiers. Kept open ('string') so new gates can emit without
-// a client update, but enumerating canonical values gives us autocomplete and
-// catches typos.
-export type AttributionGate =
-  | 'verification'
-  | 'exec_policy'
-  | 'accountability'
-  | 'keeper_fsm'
-  | 'oas_completion'
-  | 'agent_lifecycle'
-  | 'task_transition'
-  | 'worker_dev_tools'
-  | string
+// The gate a backend attribution record carries. Open by contract: a new
+// gate emits without a client update. The union of named values that used to
+// sit here ended in '| string', which absorbs every other string, so it
+// caught no typo and gave no exhaustiveness — only the appearance of both.
+// The gates masc actually emits live in attribution-panel's KNOWN_GATES.
+export type AttributionGate = string
 
 // Gate decision outcome. Discriminated union — exhaustive switch on 'kind'.
 export type AttributionOutcome =
@@ -187,7 +167,7 @@ export interface SSEEvent {
   saved_tokens?: number
   // Waiting-inventory invalidation queue kind. The event carries no rows or
   // revision ID; consumers re-read the authoritative projection.
-  queue_kind?: 'chat_queue' | 'event_queue'
+  queue_kind?: 'chat_operation' | 'event_queue'
   trigger?: string
   runtime?: string
   provider_id?: string
@@ -208,6 +188,16 @@ export interface SSEEvent {
   tool_args_preview?: string
   tool_output_preview?: string
   tool_io_redacted?: boolean
+  composition_tool?: string
+  composition_run_id?: string
+  composition_node_id?: string
+  composition_execution?: 'inline' | 'async'
+  parent_tool_use_id?: string
+  tool_use_id?: string
+  planned_index?: number
+  batch_index?: number
+  batch_size?: number
+  execution_mode?: 'serial' | 'concurrent'
   reason_code?: string
   turn?: number
   phase?: string
@@ -223,7 +213,13 @@ export interface SSEEvent {
   cost_usd?: number
   tool_calls_made?: number
   total_turns?: number
-  // OAS bridge payload (generic container for Event_bus events).
+  // Per-turn cache observability (RFC-0382). `cache_read_tokens` is
+  // usage-reported (cloud providers); `cache_n`/`prompt_n` are wire timings
+  // (llama-server, Ollama): KV-reused vs freshly prefilled prompt tokens.
+  cache_read_tokens?: number | null
+  cache_n?: number | null
+  prompt_n?: number | null
+  // Agent Core bridge payload (generic container for Event_bus events).
   payload?: Record<string, unknown> | string
   // Wall-clock time attached to runtime events such as masc/task_claimed.
   timestamp?: number
@@ -233,10 +229,10 @@ export interface SSEEvent {
   actor?: string
   changed_at?: string
   kind?: string
-  // OAS envelope — attached to every oas:* event by oas_sse_bridge since 2.260.0.
+  // Agent Core envelope — attached to every agent_core:* event by agent_core_sse_bridge since 2.260.0.
   // Used to join events into causal chains in the dashboard journal.
   correlation_id?: string
-  // OAS envelope per-run identifier (one per Agent.run invocation).
+  // Agent Core envelope per-run identifier (one per Agent.run invocation).
   run_id?: string
   // Gate attribution envelope — structured verdict metadata. Emitters
   // attach this alongside existing reason/reason_code fields since 2.261.0.
@@ -256,12 +252,9 @@ export interface SSEEvent {
   // duration_sec?, device_id? }`. Optional; assistant transcript rows
   // render a user-gesture play button when present.
   audio?: SSEAudioClip
-  // keeper_chat_turn_progress: live tool-call progress for queued/
-  // consumer-side turns. `kind` is 'tool_call_start' | 'tool_call_end';
-  // receipt_ids carries the queue-lane producer identity so a live progress
-  // placeholder converges with the persisted transcript row at turn end.
-  tool_call_id?: string
-  receipt_ids?: string[]
+  // keeper_chat_operation_event: the same AG-UI payload used by the accepted
+  // stream, correlated to exactly one durable operation.
+  ag_ui_event?: unknown
 }
 
 // RFC-0235 P1: nested audio payload inside `keeper_chat_appended` events.
@@ -279,10 +272,7 @@ export interface SSEAudioClip {
 // --- Journal ---
 
 export type JournalEventType =
-  | 'agent_bound'
-  | 'agent_unbound'
   | 'broadcast'
-  | 'task_update'
   | 'board_post'
   | 'board_comment'
   | 'board_delete'
@@ -290,14 +280,12 @@ export type JournalEventType =
   | 'keeper_heartbeat'
   | 'keeper_handoff'
   | 'keeper_compaction'
-  | 'keeper_guardrail'
   | 'keeper_phase_changed'
   | 'keeper_tool_call'
-  | 'oas_tool'
-  | 'oas_turn'
-  | 'oas_context'
-  | 'oas_task'
-  | 'oas_event'
+  | 'agent_core_tool'
+  | 'agent_core_turn'
+  | 'agent_core_context'
+  | 'agent_core_event'
   | 'unknown'
 
 export interface JournalEntry {
@@ -307,7 +295,7 @@ export interface JournalEntry {
   timestamp: number
   severity?: JournalSeverity
   source?: JournalSource
-  kind?: 'board' | 'tasks' | 'keepers' | 'system' | 'oas'
+  kind?: 'board' | 'tasks' | 'keepers' | 'system' | 'agentCore'
   eventType?: JournalEventType
   author?: string
   preview?: string
@@ -315,13 +303,13 @@ export interface JournalEntry {
   sessionId?: string
   operationId?: string
   workerRunId?: string
-  // OAS envelope — propagated from oas_sse_bridge so the journal can group
+  // Agent Core envelope — propagated from agent_core_sse_bridge so the journal can group
   // consecutive entries belonging to the same logical run.
   correlationId?: string
-  // OAS envelope per-run identifier (one per Agent.run invocation).
+  // Agent Core envelope per-run identifier (one per Agent.run invocation).
   runId?: string
-  // OAS envelope event timestamp (Unix epoch seconds, from envelope, not local clock).
-  oasTs?: number
+  // Agent Core envelope event timestamp (Unix epoch seconds, from envelope, not local clock).
+  agentCoreTs?: number
 }
 
 // --- Sort modes ---

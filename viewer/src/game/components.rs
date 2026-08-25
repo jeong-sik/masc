@@ -50,8 +50,6 @@ pub struct Actor {
     pub name: String,
     pub class: String,
     pub archetype: String,
-    pub persona: String,
-    pub traits: Vec<String>,
     pub hp: i32,
     pub max_hp: i32,
     pub mp: i32,

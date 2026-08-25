@@ -17,5 +17,3 @@ val aggregate_buckets :
   window_min:int ->
   bucket_min:int ->
   (model_bucketed list * cost_read_diagnostics, Dated_jsonl.read_error) result
-
-val provider_rollup : aggregate -> provider_stats list

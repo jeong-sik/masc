@@ -1,13 +1,13 @@
-(** LLM-backed keeper context compaction over the OAS exact-output surface.
+(** LLM-backed keeper context compaction over the AGENT_CORE exact-output surface.
     See keeper_compaction_llm_summarizer.mli. MASC owns the domain plan while
-    OAS owns frozen target admission, dispatch, and receipt provenance. *)
+    AGENT_CORE owns frozen target admission, dispatch, and receipt provenance. *)
 
 module Schema = Keeper_structured_output_schema
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 module String_set = Set.Make (String)
 
 type message_text_source =
-  { role : Agent_sdk.Types.role
+  { role : Agent_core.Types.role
   ; text_blocks : string list
   }
 
@@ -77,6 +77,7 @@ type summarization_failure =
   | Exact_execution_authority_rejected
   | Exact_flow_already_started
   | Exact_execution_terminal of Keeper_compaction_outcome.exact_execution_terminal
+  | No_reducible_boundary
   | Invalid_plan
 
 type summarizer =
@@ -85,7 +86,7 @@ type summarizer =
 
 let compaction_summary_metadata_key = "masc.compaction.bounded_summary"
 
-let message role text : Agent_sdk.Types.message = Agent_sdk.Types.text_message role text
+let message role text : Agent_core.Types.message = Agent_core.Types.text_message role text
 
 let messages_of_unit = function
   | Keeper_compaction_unit.Ordinary_message message -> [ message ]
@@ -109,20 +110,20 @@ let option_json project = function
   | Some value -> project value
 
 let tool_failure_kind_string = function
-  | Agent_sdk.Types.Validation_error -> "validation_error"
-  | Agent_sdk.Types.Recoverable_tool_error -> "recoverable_tool_error"
-  | Agent_sdk.Types.Non_retryable_tool_error -> "non_retryable_tool_error"
-  | Agent_sdk.Types.Reported_tool_error -> "reported_tool_error"
-  | Agent_sdk.Types.Unattributed_tool_error -> "unattributed_tool_error"
+  | Agent_core.Types.Validation_error -> "validation_error"
+  | Agent_core.Types.Recoverable_tool_error -> "recoverable_tool_error"
+  | Agent_core.Types.Non_retryable_tool_error -> "non_retryable_tool_error"
+  | Agent_core.Types.Reported_tool_error -> "reported_tool_error"
+  | Agent_core.Types.Unattributed_tool_error -> "unattributed_tool_error"
 
 let tool_error_class_string = function
-  | Agent_sdk.Types.Transient -> "transient"
-  | Agent_sdk.Types.Deterministic -> "deterministic"
-  | Agent_sdk.Types.Unknown -> "unknown"
+  | Agent_core.Types.Transient -> "transient"
+  | Agent_core.Types.Deterministic -> "deterministic"
+  | Agent_core.Types.Unknown -> "unknown"
 
 let tool_result_outcome_json = function
-  | Agent_sdk.Types.Tool_succeeded -> `Assoc [ "kind", `String "succeeded" ]
-  | Agent_sdk.Types.Tool_failed { failure_kind; error_class } ->
+  | Agent_core.Types.Tool_succeeded -> `Assoc [ "kind", `String "succeeded" ]
+  | Agent_core.Types.Tool_failed { failure_kind; error_class } ->
     `Assoc
       [ "kind", `String "failed"
       ; "failure_kind", `String (tool_failure_kind_string failure_kind)
@@ -136,16 +137,16 @@ type semantic_projection_error =
 let rec semantic_content_blocks_json blocks =
   let rec loop projected_rev = function
     | [] -> Ok (`List (List.rev projected_rev))
-    | Agent_sdk.Types.Text text :: rest ->
+    | Agent_core.Types.Text text :: rest ->
       loop
         (`Assoc [ "type", `String "text"; "text", `String text ] :: projected_rev)
         rest
-    | ( Agent_sdk.Types.Thinking _
-      | Agent_sdk.Types.ReasoningDetails _
-      | Agent_sdk.Types.RedactedThinking _ )
+    | ( Agent_core.Types.Thinking _
+      | Agent_core.Types.ReasoningDetails _
+      | Agent_core.Types.RedactedThinking _ )
       :: rest ->
       loop projected_rev rest
-    | Agent_sdk.Types.ToolUse { id; name; input } :: rest ->
+    | Agent_core.Types.ToolUse { id; name; input } :: rest ->
       loop
         (`Assoc
            [ "type", `String "tool_use"
@@ -155,7 +156,7 @@ let rec semantic_content_blocks_json blocks =
            ]
          :: projected_rev)
         rest
-    | Agent_sdk.Types.ToolResult
+    | Agent_core.Types.ToolResult
         { tool_use_id; content; outcome; json; content_blocks }
       :: rest ->
       (match semantic_optional_content_blocks_json content_blocks with
@@ -172,7 +173,7 @@ let rec semantic_content_blocks_json blocks =
               ]
             :: projected_rev)
            rest)
-    | (Agent_sdk.Types.Image _ | Agent_sdk.Types.Document _ | Agent_sdk.Types.Audio _)
+    | (Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _)
       :: _ ->
       Error Unsupported_media
   in
@@ -182,13 +183,13 @@ and semantic_optional_content_blocks_json = function
   | None -> Ok `Null
   | Some blocks -> semantic_content_blocks_json blocks
 
-let semantic_message_json (message : Agent_sdk.Types.message) =
+let semantic_message_json (message : Agent_core.Types.message) =
   match semantic_content_blocks_json message.content with
   | Error _ as error -> error
   | Ok content_blocks ->
     Ok
       (`Assoc
-         [ "role", `String (Agent_sdk.Types.role_to_string message.role)
+         [ "role", `String (Agent_core.Types.role_to_string message.role)
          ; "content_blocks", content_blocks
          ; "name", option_json (fun value -> `String value) message.name
          ; "tool_call_id", option_json (fun value -> `String value) message.tool_call_id
@@ -211,18 +212,18 @@ let message_text_source role blocks =
       if List.exists (fun text -> String.trim text <> "") text_blocks
       then Some { role; text_blocks }
       else None
-    | Agent_sdk.Types.Text text :: rest ->
+    | Agent_core.Types.Text text :: rest ->
       loop (text :: text_blocks_rev) rest
-    | ( Agent_sdk.Types.Thinking _
-      | Agent_sdk.Types.ReasoningDetails _
-      | Agent_sdk.Types.RedactedThinking _ )
+    | ( Agent_core.Types.Thinking _
+      | Agent_core.Types.ReasoningDetails _
+      | Agent_core.Types.RedactedThinking _ )
       :: rest ->
       loop text_blocks_rev rest
-    | ( Agent_sdk.Types.ToolUse _
-      | Agent_sdk.Types.ToolResult _
-      | Agent_sdk.Types.Image _
-      | Agent_sdk.Types.Document _
-      | Agent_sdk.Types.Audio _ )
+    | ( Agent_core.Types.ToolUse _
+      | Agent_core.Types.ToolResult _
+      | Agent_core.Types.Image _
+      | Agent_core.Types.Document _
+      | Agent_core.Types.Audio _ )
       :: _ ->
       None
   in
@@ -231,17 +232,17 @@ let message_text_source role blocks =
 let cycle_has_tool_protocol messages =
   let has_tool_use =
     List.exists
-      (fun (message : Agent_sdk.Types.message) ->
+      (fun (message : Agent_core.Types.message) ->
         List.exists
-          (function Agent_sdk.Types.ToolUse _ -> true | _ -> false)
+          (function Agent_core.Types.ToolUse _ -> true | _ -> false)
           message.content)
       messages
   in
   let has_tool_result =
     List.exists
-      (fun (message : Agent_sdk.Types.message) ->
+      (fun (message : Agent_core.Types.message) ->
         List.exists
-          (function Agent_sdk.Types.ToolResult _ -> true | _ -> false)
+          (function Agent_core.Types.ToolResult _ -> true | _ -> false)
           message.content)
       messages
   in
@@ -249,13 +250,13 @@ let cycle_has_tool_protocol messages =
 
 let eligible_source ~first_user_seen source_index = function
   | Keeper_compaction_unit.Ordinary_message
-      ({ role = (Agent_sdk.Types.User | Agent_sdk.Types.Assistant)
+      ({ role = (Agent_core.Types.User | Agent_core.Types.Assistant)
        ; content
        ; name = None
        ; tool_call_id = None
        ; metadata = []
        } as message)
-    when message.role <> Agent_sdk.Types.User || first_user_seen ->
+    when message.role <> Agent_core.Types.User || first_user_seen ->
     (match message_text_source message.role content with
      | Some source -> Some { source_index; payload = Message_text source }
      | None -> None)
@@ -288,7 +289,7 @@ let eligible_sources units =
         ||
         match unit_ with
         | Keeper_compaction_unit.Ordinary_message
-            { role = Agent_sdk.Types.User; _ } -> true
+            { role = Agent_core.Types.User; _ } -> true
         | Keeper_compaction_unit.Ordinary_message _
         | Keeper_compaction_unit.Closed_tool_cycle _ ->
           false
@@ -306,8 +307,8 @@ let has_eligible_units units = eligible_sources units <> []
 
 let prior_summary source_index = function
   | Keeper_compaction_unit.Ordinary_message
-      { role = Agent_sdk.Types.Assistant
-      ; content = [ Agent_sdk.Types.Text text ]
+      { role = Agent_core.Types.Assistant
+      ; content = [ Agent_core.Types.Text text ]
       ; name = None
       ; tool_call_id = None
       ; metadata = [ key, `Bool true ]
@@ -396,7 +397,7 @@ let eligible_units_json (sources : eligible_source list) =
              ; "kind", `String "message_text"
              ; ( "role"
                , `String
-                   (Agent_sdk.Types.role_to_string role) )
+                   (Agent_core.Types.role_to_string role) )
              ; "text_blocks", `List (List.map (fun text -> `String text) text_blocks)
              ]
          | Closed_tool_cycle { semantic_json; _ } ->
@@ -454,7 +455,7 @@ let messages_for_plan ~window =
       (first_index + 1)
       max_keep_from
   in
-  [ message Agent_sdk.Types.System system; message Agent_sdk.Types.User user ]
+  [ message Agent_core.Types.System system; message Agent_core.Types.User user ]
 
 let ( let* ) = Result.bind
 
@@ -530,7 +531,7 @@ let summary_message summary =
   (* Current-format derived state, not a compatibility marker. The exact field
      identifies the one rolling summary consumed by [planning_window_for_units].
      Its blast radius is planning and in-place replacement only. *)
-  { (message Agent_sdk.Types.Assistant summary) with
+  { (message Agent_core.Types.Assistant summary) with
     metadata = [ compaction_summary_metadata_key, `Bool true ]
   }
 
@@ -636,7 +637,7 @@ let largest_fitting_window ~keeper_name ~selected_slots window =
   in
   (* Every candidate contains the same prior summary and an exact prefix of the
      same raw JSON window. Increasing [count] only appends source bytes to the
-     messages handed to OAS, so the exact serialized size is monotone. Binary
+     messages handed to AGENT_CORE, so the exact serialized size is monotone. Binary
      search avoids repeatedly serializing every growing prefix. *)
   let rec search best low high =
     if low > high
@@ -683,7 +684,6 @@ let plan_preserves_exact_future_progress
 
 type prepared_lane =
   { window : planning_window
-  ; registry_generation : int64
   ; ordered_slot_ids : string list
   ; selected_slots : Runtime_exact_output_registry.selected_slot list
   ; flow_attempt : Exact_output.flow_attempt
@@ -707,13 +707,14 @@ let observe_flow_attempt_receipt
   }
 ;;
 
-let terminal_of_observation cause (observation : attempt_observation) =
+let terminal_of_observation ?detail cause (observation : attempt_observation) =
   Keeper_compaction_outcome.
     { cause
     ; slot_id = observation.slot_id
     ; call_id = observation.call_id
     ; plan_fingerprint = observation.receipt_plan_fingerprint
     ; request_body_sha256 = observation.receipt_request_body_sha256
+    ; detail
     }
 ;;
 
@@ -774,15 +775,13 @@ let prepare_lane
   let* window =
     planning_window_for_units units |> Result.map_error (fun _ -> Invalid_plan)
   in
-  let registry_generation = Runtime_exact_output_registry.generation registry in
   match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
   | Error
         (Runtime_exact_output_registry.Exact_lane_unconfigured
            { lane_id = missing_lane_id }) ->
       Log.Keeper.warn
         ~keeper_name
-        "compaction exact lane is unconfigured generation=%Ld lane_id=%s"
-        registry_generation
+        "compaction exact lane is unconfigured lane_id=%s"
         missing_lane_id;
       Error Exact_lane_unconfigured
   | Error
@@ -790,11 +789,15 @@ let prepare_lane
            { lane_id = empty_lane_id }) ->
       Log.Keeper.warn
         ~keeper_name
-        "compaction exact lane has no admitted opaque slots generation=%Ld lane_id=%s"
-        registry_generation
+        "compaction exact lane has no admitted opaque slots lane_id=%s"
         empty_lane_id;
       Error Exact_target_selection_failed
   | Ok { selected_slots } ->
+    let* () =
+      if planning_window_has_valid_boundary window
+      then Ok ()
+      else Error No_reducible_boundary
+    in
     let* window =
       largest_fitting_window ~keeper_name ~selected_slots window
     in
@@ -813,8 +816,7 @@ let prepare_lane
         | Error _ ->
           Log.Keeper.warn
             ~keeper_name
-            "compaction exact flow admission rejected generation=%Ld lane_id=%s candidate_count=%d"
-            registry_generation
+            "compaction exact flow admission rejected lane_id=%s candidate_count=%d"
             lane_id
             (List.length candidates);
           Error Exact_admission_failed
@@ -823,14 +825,12 @@ let prepare_lane
            | Error _ ->
              Log.Keeper.error
                ~keeper_name
-               "compaction exact flow identity allocation failed generation=%Ld lane_id=%s"
-               registry_generation
+               "compaction exact flow identity allocation failed lane_id=%s"
                lane_id;
              Error Exact_attempt_start_failed
            | Ok flow_attempt ->
              Ok
                { window
-               ; registry_generation
                ; ordered_slot_ids =
                    List.map
                      (fun (slot : Runtime_exact_output_registry.selected_slot) ->
@@ -870,16 +870,80 @@ let summarization_failure_of_callback = function
   | Authority_rejected -> Exact_execution_authority_rejected
 ;;
 
+let summarization_failure_detail = function
+  | Exact_lane_unconfigured -> "exact_lane_unconfigured"
+  | Exact_target_selection_failed -> "exact_target_selection_failed"
+  | Exact_admission_failed -> "exact_admission_failed"
+  | Exact_attempt_start_failed -> "exact_attempt_start_failed"
+  | Exact_execution_context_unavailable -> "exact_execution_context_unavailable"
+  | Exact_execution_authority_absent -> "exact_execution_authority_absent"
+  | Exact_execution_authority_rejected -> "exact_execution_authority_rejected"
+  | Exact_flow_already_started -> "exact_flow_already_started"
+  | Exact_execution_terminal terminal ->
+    Keeper_compaction_outcome.exact_execution_terminal_to_string terminal
+  | No_reducible_boundary -> "no_reducible_boundary"
+  | Invalid_plan -> "invalid_plan"
+;;
+
 let execute_prepared_lane_current
       ~keeper_name
       ~net
       ?clock
       ?before_dispatch_authority
+      ?(observation_registry = Exact_lane_run_registry.global ())
       prepared_lane
   =
-  (* Process-local derived state only. It identifies the exact OAS candidate
+  let registry = observation_registry in
+  let run_id = Random_id.prefixed ~prefix:"exact-compaction-" ~bytes:16 in
+  let started_at = Time_compat.now () in
+  let prior_summary =
+    match prepared_lane.window.prior_summary with
+    | None -> `Null
+    | Some prior ->
+      `Assoc
+        [ Schema.compaction_plan_field_unit_index, `Int prior.source_index
+        ; "text", `String prior.text
+        ]
+  in
+  Exact_lane_run_registry.register_running
+    registry
+    ~run_id
+    ~lane:Exact_lane_run_registry.Compaction
+    ~actor:keeper_name
+    ~started_at
+    ~input:
+      (Exact_lane_run_registry.Exact_input
+         (`Assoc
+         [ "slot_ids", `List (List.map (fun id -> `String id) prepared_lane.ordered_slot_ids)
+         ; "prior_summary", prior_summary
+         ; ( "window_units"
+           , eligible_units_json (planning_window_sources prepared_lane.window) )
+         ]));
+  let complete outcome output =
+    match
+      Exact_lane_run_registry.mark_completed
+        registry
+        ~run_id
+        ~outcome
+        ~elapsed_s:(Time_compat.now () -. started_at)
+        ~selected_slot:None
+        ~output
+    with
+    | Ok () -> ()
+    | Error error ->
+      (* The exact-lane registry is an observation plane, not compaction's
+         lifecycle authority. Its durable completion must never replace a
+         typed provider/domain terminal with an exception, otherwise the
+         Keeper source remains eligible and can be dispatched again. *)
+      Log.Keeper.error
+        ~keeper_name
+        "compaction exact-run observation completion failed run_id=%s: %s"
+        run_id
+        (Exact_lane_run_registry.completion_error_to_string error)
+  in
+  (* Process-local derived state only. It identifies the exact AGENT_CORE candidate
      whose dispatch callback passed, so cancellation can retain that source.
-     It is not persisted and does not compete with OAS execution ownership. *)
+     It is not persisted and does not compete with AGENT_CORE execution ownership. *)
   let authorized_observation = ref None in
   let before_dispatch candidate =
     let observation = observe_flow_attempt_receipt candidate in
@@ -953,7 +1017,7 @@ let execute_prepared_lane_current
     with
     | Eio.Cancel.Cancelled _ as cancellation ->
       let raw_bt = Printexc.get_raw_backtrace () in
-      (* OAS owns execution state; MASC retains only the source-authority
+      (* AGENT_CORE owns execution state; MASC retains only the source-authority
          observation. Cancellation is fiber teardown, not a compaction result:
          returning a typed terminal made the heartbeat record a schedule failure
          even though [Cycle.Cancelled] records none. Preserve the authorized
@@ -967,7 +1031,14 @@ let execute_prepared_lane_current
              observation.slot_id
              observation.call_id)
         !authorized_observation;
+      complete Exact_lane_run_registry.Cancelled `Null;
       Printexc.raise_with_backtrace cancellation raw_bt
+    | exn ->
+      complete
+        (Exact_lane_run_registry.Failed
+           { code = "compaction_raised"; detail = Printexc.to_string exn })
+        `Null;
+      raise exn
   in
   let project_execution () =
   match execution with
@@ -1013,13 +1084,22 @@ let execute_prepared_lane_current
         (Exact_output.Flow_execution_terminal
           { cause =
               Exact_output.Flow_exact_execution_failed
-                { candidate; _ }
+                { candidate; cause; evidence }
           ; _
           })) ->
     let observation = observe_flow_attempt_receipt candidate in
+    (* The sibling consumer of this same branch (hitl_summary_worker) already
+       renders [cause] through Keeper_exact_flow_detail; compaction discarded
+       it in the pattern, so its terminal named the call and never the reason.
+       Measured on a live compaction that spent 470 s on glm-coding.glm-5-turbo
+       — a slot completing 97% of its work elsewhere — and left four
+       identifiers with no way to ask why. *)
     Error
       (Exact_execution_terminal
          (terminal_of_observation
+            ~detail:
+              (Keeper_exact_flow_detail.execution_failure_detail
+                 ~candidate ~cause ~evidence)
             Keeper_compaction_outcome.Exact_execution_failed
             observation))
   | `Flow
@@ -1056,7 +1136,33 @@ let execute_prepared_lane_current
       ; exact_execution_evidence = exact_execution_evidence flow_success
       }
   in
-  project_execution ()
+  let result = project_execution () in
+  (match result with
+   | Ok completed ->
+     let evidence = completed.exact_execution_evidence in
+     complete
+       Exact_lane_run_registry.Succeeded
+       (`Assoc
+          [ ( "summary_excerpt"
+            , `String
+                (Observability_redact.redact_preview
+                   ~max_len:512
+                   completed.plan.summary) )
+          ; "keep_from_unit_index", `Int completed.plan.keep_from_unit_index
+          ; "slot_id", `String evidence.slot_id
+          ; "call_id", `String evidence.call_id
+          ; "target_identity_fingerprint", `String evidence.target_identity_fingerprint
+          ; "catalog_generation_fingerprint", `String evidence.catalog_generation_fingerprint
+          ; "catalog_evidence_sha256", `String evidence.catalog_evidence_sha256
+          ; "plan_fingerprint", `String evidence.plan_fingerprint
+          ; "request_body_sha256", `String evidence.receipt_request_body_sha256
+          ])
+   | Error failure ->
+     let detail = summarization_failure_detail failure in
+     complete
+       (Exact_lane_run_registry.Failed { code = "compaction_failed"; detail })
+       `Null);
+  result
 ;;
 
 let execute_prepared_lane
@@ -1064,6 +1170,7 @@ let execute_prepared_lane
       ~net
       ?clock
       ?before_dispatch_authority
+      ?observation_registry
       prepared_lane
   =
   execute_prepared_lane_current
@@ -1071,6 +1178,7 @@ let execute_prepared_lane
     ~net
     ?clock
     ?before_dispatch_authority
+    ?observation_registry
     prepared_lane
 ;;
 
@@ -1180,6 +1288,7 @@ let exact_execution_terminal ~cause (evidence : exact_execution_evidence) =
     ; call_id = evidence.call_id
     ; plan_fingerprint = evidence.plan_fingerprint
     ; request_body_sha256 = evidence.receipt_request_body_sha256
+    ; detail = None
     }
 ;;
 
@@ -1197,7 +1306,6 @@ module For_testing = struct
   ;;
 
   let flow_slot_ids prepared_lane = prepared_lane.ordered_slot_ids
-  let registry_generation prepared_lane = prepared_lane.registry_generation
 
   let attempt_observations prepared_lane =
     let evidence : Exact_output.flow_evidence =

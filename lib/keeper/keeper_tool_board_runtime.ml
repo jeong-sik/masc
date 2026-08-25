@@ -26,10 +26,17 @@ let without_if_revision = function
 
 let snapshot_execution_of_response result response =
   let data = Snapshot_protocol.to_yojson response in
-  match result.Keeper_tool_execution.disposition with
-  | Tool_result.Completed _ -> Keeper_tool_execution.success_data data
-  | Tool_result.Deferred _ -> Keeper_tool_execution.deferred_data data
-  | Tool_result.Failed _ -> result
+  match response, result.Keeper_tool_execution.disposition with
+  | Snapshot_protocol.Unchanged _,
+    (Tool_result.Completed _ | Tool_result.Deferred _) ->
+    Keeper_tool_execution.deferred_data data
+  | Snapshot_protocol.Snapshot _, Tool_result.Completed _ ->
+    Keeper_tool_execution.success_data data
+  | Snapshot_protocol.Snapshot _, Tool_result.Deferred _ ->
+    Keeper_tool_execution.deferred_data data
+  | (Snapshot_protocol.Snapshot _ | Snapshot_protocol.Unchanged _),
+    Tool_result.Failed _ ->
+    result
 ;;
 
 module For_testing = struct

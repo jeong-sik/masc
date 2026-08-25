@@ -25,7 +25,6 @@ open Alcotest
 
 module KB = Env_config_keeper.KeeperBootstrap
 module Boot = Server_bootstrap_loops.For_testing
-module Chat_queue = Masc.Keeper_chat_queue
 
 let approx = float 0.001
 
@@ -59,19 +58,19 @@ let test_polling_floor () =
 let test_autoboot_warmup_jitter_is_bounded_not_linear () =
   let names =
     [
-      "analyst";
-      "executor";
-      "issue_king";
+      "delta";
+      "omega";
+      "kappa_keeper";
       "janitor";
-      "masc-improver";
-      "nick0cave";
-      "qa-king";
-      "ramarama";
-      "sangsu";
-      "scholar";
-      "taskmaster";
-      "tech_glutton";
-      "velvet-hammer";
+      "omicron-improver";
+      "theta0";
+      "mu-king";
+      "nu";
+      "alpha";
+      "iota";
+      "fixture-keeper";
+      "pi_glutton";
+      "xi-hammer";
       "verifier";
     ]
   in
@@ -107,7 +106,7 @@ let test_warmup_hash_pinned_cross_platform () =
   check int "verifier hash mod 100 (Int32 djb2)" 25 (warmup "verifier");
   check int "designer hash mod 100 (Int32 djb2)" 74 (warmup "designer");
   check int "developer hash mod 100 (Int32 djb2)" 15 (warmup "developer");
-  check int "analyst hash mod 100 (Int32 djb2)" 73 (warmup "analyst");
+  check int "delta hash mod 100 (Int32 djb2)" 3 (warmup "delta");
   check int "janitor hash mod 100 (Int32 djb2)" 4 (warmup "janitor")
 
 let test_autoboot_warmup_is_order_independent () =
@@ -156,61 +155,6 @@ let test_autoboot_warmup_is_order_independent () =
   check bool "stagger produces ≥3 distinct warmups across 10 names" true
     (distinct >= 3)
 
-let test_discord_queue_projection_matches_gateway_context () =
-  let queued : Chat_queue.queued_message =
-    {
-      content = "hello";
-      user_blocks = [];
-      attachments = [];
-      timestamp = 0.0;
-      source =
-        Chat_queue.Discord
-          { channel_id = "discord-channel-1"; user_id = "discord-user-9" };
-      user_row_origin = Masc.Keeper_chat_store.Already_persisted_upstream;
-    }
-  in
-  let projection = Boot.queued_chat_projection queued in
-  check string "connector label" "discord" projection.payload_channel;
-  check string "actor id" "discord-user-9" projection.payload_channel_user_id;
-  check string "workspace id uses Discord channel id" "discord-channel-1"
-    projection.payload_channel_workspace_id;
-  check string "agent identity matches gate channel actor"
-    "gate:discord:discord-channel-1:discord-user-9"
-    projection.agent_name
-
-let test_slack_queue_projection_matches_gateway_context () =
-  let queued : Chat_queue.queued_message =
-    { content = "hello"
-    ; user_blocks = []
-    ; attachments = []
-    ; timestamp = 0.0
-    ; source =
-        Chat_queue.Slack
-          { channel_id = "C-SLACK"
-          ; user_id = "U-SLACK"
-          ; user_name = "Slack User"
-          ; team_id = Some "T-SLACK"
-          ; thread_ts = Some "171.001"
-          }
-    ; user_row_origin = Masc.Keeper_chat_store.Already_persisted_upstream
-    }
-  in
-  let projection = Boot.queued_chat_projection queued in
-  check string "connector label" "slack" projection.payload_channel;
-  check string "actor id" "U-SLACK" projection.payload_channel_user_id;
-  check string "actor name" "Slack User" projection.payload_channel_user_name;
-  check string "workspace id uses Slack channel id" "C-SLACK"
-    projection.payload_channel_workspace_id;
-  check string "agent identity matches gate channel actor"
-    "gate:slack:C-SLACK:U-SLACK" projection.agent_name;
-  match Chat_queue.continuation_channel_of_message_source queued.source with
-  | Keeper_continuation_channel.Slack { team_id; channel_id; thread_ts; user_id } ->
-    check (option string) "team retained" (Some "T-SLACK") team_id;
-    check string "channel retained" "C-SLACK" channel_id;
-    check (option string) "thread retained" (Some "171.001") thread_ts;
-    check string "user retained" "U-SLACK" user_id
-  | _ -> fail "Slack source must project to a Slack continuation"
-
 let () =
   run "env_config_keeper_bootstrap_intervals"
     [
@@ -236,12 +180,5 @@ let () =
             test_autoboot_warmup_is_order_independent;
           test_case "Int32 hash pinned cross-platform (#13155 §L)" `Quick
             test_warmup_hash_pinned_cross_platform;
-        ] );
-      ( "queued chat projection",
-        [
-          test_case "Discord queue source keeps connector context" `Quick
-            test_discord_queue_projection_matches_gateway_context;
-          test_case "Slack queue source keeps connector context" `Quick
-            test_slack_queue_projection_matches_gateway_context;
         ] );
     ]

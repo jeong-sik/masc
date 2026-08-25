@@ -1,0 +1,9 @@
+(rule
+ (alias runtest)
+ (deps coverage_test_names.txt ../../scripts/gen-coverage-test-stanza.sh)
+ (action
+  (progn
+   (with-stdout-to
+    coverage_tests.inc.generated
+    (run ../../scripts/gen-coverage-test-stanza.sh coverage_test_names.txt))
+   (diff coverage_tests.inc coverage_tests.inc.generated))))

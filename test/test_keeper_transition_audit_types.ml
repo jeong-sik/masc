@@ -5,8 +5,7 @@ module FSM = Keeper_state_machine
 
 let test_transition_json_preserves_observed_facts () =
   let record : T.transition_record =
-    { snapshot = None
-    ; events_fired = [ FSM.Operator_pause ]
+    { events_fired = [ FSM.Operator_pause ]
     ; selected_event = FSM.Operator_pause
     ; prev_phase = FSM.Running
     ; new_phase = FSM.Paused
@@ -22,7 +21,7 @@ let test_transition_json_preserves_observed_facts () =
   check string "outcome" "applied" (json |> member "transition_outcome" |> to_string);
   check (float 1e-9) "decision timestamp" 1.25
     (json |> member "wall_clock_at_decision" |> to_float);
-  check int "transition JSON has only observed fields" 8
+  check int "transition JSON has only observed fields" 7
     (match json with `Assoc fields -> List.length fields | _ -> 0)
 ;;
 

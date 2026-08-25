@@ -13,7 +13,6 @@ export type ToolStat = {
   avg_duration_ms: number
   p95_duration_ms: number
   max_duration_ms: number
-  total_cost_usd: number
   last_used_at: string
 }
 
@@ -43,7 +42,6 @@ function decodeToolStat(raw: unknown): ToolStat | null {
     avg_duration_ms: asNumber(raw.avg_duration_ms, 0),
     p95_duration_ms: asNumber(raw.p95_duration_ms, 0),
     max_duration_ms: asNumber(raw.max_duration_ms, 0),
-    total_cost_usd: asNumber(raw.total_cost_usd, 0),
     last_used_at: asString(raw.last_used_at, ''),
   }
 }

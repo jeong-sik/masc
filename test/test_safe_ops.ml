@@ -77,15 +77,6 @@ let has_prefix ~prefix value =
   String.length value >= prefix_len
   && String.equal prefix (String.sub value 0 prefix_len)
 
-let contains_substring ~needle value =
-  let needle_len = String.length needle in
-  let value_len = String.length value in
-  let rec loop i =
-    i + needle_len <= value_len
-    && (String.equal needle (String.sub value i needle_len) || loop (i + 1))
-  in
-  String.equal needle "" || loop 0
-
 let test_parse_json_safe_rate_limits_repeated_utf8_repair_logs () =
   let open Safe_ops in
   reset_persistence_utf8_repair_stats_for_tests ();
@@ -374,7 +365,7 @@ let test_get_env_bool_logged_invalid_redacts_value () =
   let logs =
     Log.Ring.recent ~limit:20 ~module_filter:"Misc" ~since_seq:baseline ()
     |> List.filter (fun (entry : Log.Ring.entry) ->
-      contains_substring ~needle:"MASC_TEST_BOOL_SECRET_VAR" entry.message)
+      String_util.string_contains_substring ~needle:"MASC_TEST_BOOL_SECRET_VAR" entry.message)
   in
   check int "invalid bool warning emitted" 1 (List.length logs);
   let message =
@@ -383,9 +374,9 @@ let test_get_env_bool_logged_invalid_redacts_value () =
     | _ -> fail "expected exactly one invalid bool warning"
   in
   check bool "raw value is redacted" false
-    (contains_substring ~needle:"secret-token-value" message);
+    (String_util.string_contains_substring ~needle:"secret-token-value" message);
   check bool "redaction is explicit" true
-    (contains_substring ~needle:"value redacted" message)
+    (String_util.string_contains_substring ~needle:"value redacted" message)
 
 
 (* json_int_opt *)
@@ -515,6 +506,38 @@ let test_parse_json_safe_long_invalid () =
   let result = parse_json_safe ~context:"test" long_str in
   check bool "Error on long invalid" true (Result.is_error result)
 
+
+(* [emit_persistence_utf8_repair_metric] runs the caller-installed hook
+   inside the caller's fiber. It used to catch every exception and log,
+   which absorbed [Eio.Cancel.Cancelled] and left the fiber running past a
+   cancellation it was told to honour. The hook is reached through the
+   public repair entry point, so the behaviour is testable from here. *)
+
+let invalid_utf8 = "ok\xffbad"
+
+let test_metric_hook_cancellation_propagates () =
+  Safe_ops.set_persistence_utf8_repair_metric_hook (fun () ->
+    raise (Eio.Cancel.Cancelled (Failure "probe")));
+  let raised =
+    match Safe_ops.repair_utf8_text_with_stats invalid_utf8 with
+    | _ -> false
+    | exception Eio.Cancel.Cancelled _ -> true
+    | exception _ -> false
+  in
+  Safe_ops.set_persistence_utf8_repair_metric_hook (fun () -> ());
+  check bool "Cancelled from the metric hook reaches the caller" true raised
+
+let test_metric_hook_other_exception_is_absorbed () =
+  Safe_ops.set_persistence_utf8_repair_metric_hook (fun () ->
+    failwith "hook is broken");
+  let completed =
+    match Safe_ops.repair_utf8_text_with_stats invalid_utf8 with
+    | _ -> true
+    | exception _ -> false
+  in
+  Safe_ops.set_persistence_utf8_repair_metric_hook (fun () -> ());
+  check bool "a broken hook still does not fail the repair" true completed
+
 let () =
   run "Safe_ops" [
     "int_of_string_safe", [
@@ -618,6 +641,12 @@ let () =
       test_case "present" `Quick test_json_string_list_present;
       test_case "missing" `Quick test_json_string_list_missing;
       test_case "wrong type" `Quick test_json_string_list_wrong_type;
+    ];
+    "metric hook", [
+      test_case "Cancelled propagates" `Quick
+        test_metric_hook_cancellation_propagates;
+      test_case "other exceptions absorbed" `Quick
+        test_metric_hook_other_exception_is_absorbed;
     ];
     "json_stringified_coercion", [
       test_case "int from stringified int" `Quick test_json_int_coerces_stringified_int;

@@ -1,0 +1,298 @@
+{
+  "schema": "masc.keeper_multi_collaboration_missions.v1",
+  "acceptance_authority": "real_world_product_outcomes",
+  "minimum_keeper_count": 5,
+  "approaches_apply_to_each_mission": true,
+  "execution_approaches": [
+    {
+      "id": "A",
+      "name": "hermetic_typed_contract",
+      "method": "Typed unit/integration tests plus deterministic fault injection verify the state machine, persistence ordering, strict codecs, and recovery invariants.",
+      "required_evidence": ["exact source SHA", "CI test target", "typed assertion or injected fault receipt"]
+    },
+    {
+      "id": "B",
+      "name": "isolated_exact_revision_realworld",
+      "method": "An isolated exact-revision server drives real providers, five roles, durable product state, and a real-backend browser without API interception.",
+      "required_evidence": ["binary/source digest", "raw tool and state receipts", "Dashboard screenshot"]
+    },
+    {
+      "id": "C",
+      "name": "shared_shadow_duration_canary",
+      "method": "A shared or shadow canary repeats the mission across 10 turns and 1h, 2h, 4h, and 24h tiers with restart/failover and per-occurrence receipts.",
+      "required_evidence": ["served_by attribution", "duration and restart receipts", "queue and Dashboard cross-check"]
+    }
+  ],
+  "roles": [
+    "coordinator",
+    "builder-a",
+    "builder-b",
+    "reviewer",
+    "researcher"
+  ],
+  "operator_required_tools": [
+    "masc_keeper_up",
+    "masc_keeper_down",
+    "masc_keeper_msg",
+    "masc_keeper_delegate_status",
+    "masc_keeper_status",
+    "masc_agent_timeline",
+    "masc_goal_upsert",
+    "masc_goal_list",
+    "masc_goal_transition",
+    "masc_add_task",
+    "masc_tasks",
+    "masc_task_history",
+    "masc_board_post",
+    "masc_board_search",
+    "masc_board_post_get",
+    "masc_schedule_create",
+    "masc_schedule_get"
+  ],
+  "keeper_required_tools": [
+    "keeper_tasks_list",
+    "keeper_task_claim",
+    "keeper_task_done",
+    "keeper_memory_write",
+    "tool_write_file",
+    "keeper_ide_annotate",
+    "masc_board_comment",
+    "masc_board_post",
+    "masc_goal_list",
+    "masc_fusion",
+    "masc_schedule_get",
+    "keeper_compose_mission-snapshot",
+    "keeper_compose_background-snapshot",
+    "keeper_composition_status",
+    "tool_execute"
+  ],
+  "missions": [
+    {
+      "id": "RW01",
+      "phase": "bootstrap",
+      "name": "five_keeper_role_fleet",
+      "actors": ["coordinator", "builder-a", "builder-b", "reviewer", "researcher"],
+      "capabilities": ["Keeper", "Goal"],
+      "user_story": "서로 다른 책임을 가진 다섯 Keeper가 같은 Goal 범위에서 모두 실행 가능하다.",
+      "assertions": ["all_keepers_live", "role_identity_preserved", "runtime_assignment_serving_observed"],
+      "evidence": ["health.json", "keeper-status/*.json", "observations/runtime-serving-by-role.json"]
+    },
+    {
+      "id": "RW02",
+      "phase": "bootstrap",
+      "name": "shared_goal_open_set",
+      "actors": ["coordinator", "builder-a", "builder-b", "reviewer", "researcher"],
+      "capabilities": ["Goal", "Task"],
+      "user_story": "owner 없는 공유 Goal이 모든 Keeper에게 같은 open set으로 보이고 모든 작업이 그 Goal identity를 유지한다.",
+      "assertions": ["goal_visible", "goal_shared_open_set_visible", "tasks_linked_to_goal"],
+      "evidence": ["observations/goals.json", "observations/tasks.json"]
+    },
+    {
+      "id": "RW03",
+      "phase": "parallel_wave",
+      "name": "parallel_distinct_task_work",
+      "actors": ["builder-a", "builder-b", "researcher"],
+      "capabilities": ["Task", "Board"],
+      "user_story": "세 Keeper가 서로 다른 Task를 병렬로 진행하며 한 Keeper의 지연이 나머지를 막지 않는다.",
+      "assertions": ["parallel_wave_completed", "parallel_keeper_overlap_observed", "multiple_task_owners_visible"],
+      "evidence": ["turns/parallel-*.json", "observations/task-history-*.json"]
+    },
+    {
+      "id": "RW04",
+      "phase": "parallel_wave",
+      "name": "board_comment_handoff",
+      "actors": ["coordinator", "builder-a", "builder-b", "reviewer", "researcher"],
+      "capabilities": ["Board", "Comment"],
+      "user_story": "공통 Board thread에서 계획, 구현, 검토, 연구 결과가 댓글로 합쳐진다.",
+      "assertions": ["board_thread_visible", "multi_author_comments_visible"],
+      "evidence": ["observations/board-search.json", "observations/board-post.json"]
+    },
+    {
+      "id": "RW05",
+      "phase": "parallel_wave",
+      "name": "ide_artifact_task_evidence",
+      "actors": ["builder-a", "builder-b"],
+      "capabilities": ["IDE", "Task"],
+      "user_story": "구현 Keeper가 실제 파일을 만들고 IDE annotation과 Task evidence로 같은 결과를 연결한다.",
+      "assertions": ["ide_annotation_observed", "task_evidence_submitted"],
+      "evidence": ["observations/timeline-builder-a.json", "observations/timeline-builder-b.json", "observations/task-history-*.json"]
+    },
+    {
+      "id": "RW06",
+      "phase": "parallel_wave",
+      "name": "fusion_while_peers_progress",
+      "actors": ["researcher", "builder-a", "builder-b"],
+      "capabilities": ["Fusion", "Task", "Board"],
+      "user_story": "Fusion이 비동기로 실행되는 동안 다른 Keeper들의 Task와 Board 진행이 완료된다.",
+      "assertions": ["fusion_started", "peer_progress_during_fusion"],
+      "evidence": ["observations/tool-calls-researcher.json", "observations/timeline-researcher.json", "turns/parallel-*.json"]
+    },
+    {
+      "id": "RW07",
+      "phase": "async_sources",
+      "name": "schedule_wake_interleaves",
+      "actors": ["coordinator", "reviewer"],
+      "capabilities": ["Schedule", "Task", "Board", "Comment"],
+      "user_story": "예약 wake가 도착해도 이미 진행 중인 Task와 Board 협업이 계속된다.",
+      "assertions": ["schedule_terminal_visible", "scheduled_wake_progress_visible"],
+      "evidence": ["observations/schedule.json", "keeper-status/coordinator-after-schedule.json"]
+    },
+    {
+      "id": "RW08",
+      "phase": "failure_isolation",
+      "name": "deterministic_tool_rejection_recovery",
+      "actors": ["builder-b"],
+      "capabilities": ["IDE", "Board", "Comment"],
+      "user_story": "잘못된 IDE 입력 하나가 거부되어도 다음 source에서 같은 Keeper가 정상 작업을 계속한다.",
+      "assertions": ["invalid_tool_turn_settled", "same_keeper_recovered"],
+      "evidence": ["turns/invalid-tool.json", "turns/recovery-after-invalid.json", "observations/board-post.json"]
+    },
+    {
+      "id": "RW09",
+      "phase": "failure_isolation",
+      "name": "fleet_failure_isolation",
+      "actors": ["builder-b", "coordinator", "reviewer"],
+      "capabilities": ["Keeper", "Task", "Board"],
+      "user_story": "한 Keeper의 거부/복구 과정 중에도 다른 Keeper의 독립 작업 결과가 남는다.",
+      "assertions": ["same_keeper_recovered", "unaffected_peers_progressed"],
+      "evidence": ["turns/*.json", "observations/tasks.json", "observations/board-post.json"]
+    },
+    {
+      "id": "RW10",
+      "phase": "restart",
+      "name": "restart_context_continuity",
+      "actors": ["coordinator"],
+      "capabilities": ["Keeper", "Context", "Board", "Comment"],
+      "user_story": "coordinator 재시작 뒤에도 이전 대화의 비밀 표식을 다시 제시하지 않고 회수한다.",
+      "assertions": ["restart_succeeded", "context_secret_recalled"],
+      "evidence": ["turns/parallel-coordinator.json", "turns/context-after-restart.json", "keeper-status/coordinator-after-restart.json"]
+    },
+    {
+      "id": "RW11",
+      "phase": "restart",
+      "name": "durable_memory_continuity",
+      "actors": ["coordinator"],
+      "capabilities": ["Memory", "Context", "Board"],
+      "user_story": "재시작 전 기록한 Keeper memory가 재시작 후 제품 결과에 다시 사용된다.",
+      "assertions": ["memory_write_observed", "context_secret_recalled"],
+      "evidence": ["keeper-status/coordinator-before-restart.json", "observations/timeline-coordinator.json", "observations/board-post.json"]
+    },
+    {
+      "id": "RW12",
+      "phase": "verification",
+      "name": "completion_authority_boundary",
+      "actors": ["builder-a", "builder-b", "reviewer"],
+      "capabilities": ["Task", "Gate"],
+      "user_story": "작업 결과는 직접 done 처리되지 않고 evidence 제출 뒤 typed completion authority 상태로 간다.",
+      "assertions": ["task_evidence_submitted", "no_illegal_direct_done"],
+      "evidence": ["observations/tasks.json", "observations/task-history-*.json", "observations/timeline-builder-*.json"]
+    },
+    {
+      "id": "RW13",
+      "phase": "contention",
+      "name": "single_task_claim_contention",
+      "actors": ["builder-a", "builder-b"],
+      "capabilities": ["Task", "Owner"],
+      "user_story": "동일 Task에 대한 동시 claim 중 하나만 소유권을 얻고 중복 효과가 발생하지 않는다.",
+      "assertions": ["contention_single_owner", "contention_loser_continued"],
+      "evidence": ["turns/contention-*.json", "observations/task-history-contention.json"]
+    },
+    {
+      "id": "RW14",
+      "phase": "verification",
+      "name": "goal_task_reconciliation",
+      "actors": ["coordinator", "reviewer"],
+      "capabilities": ["Goal", "Task", "Board"],
+      "user_story": "Task 상태와 Board 검토 결과가 Goal 관측에서 사라지지 않는다.",
+      "assertions": ["goal_visible", "tasks_linked_to_goal", "reviewer_progress_visible"],
+      "evidence": ["observations/goals.json", "observations/tasks.json", "observations/board-post.json"]
+    },
+    {
+      "id": "RW15",
+      "phase": "verification",
+      "name": "all_surface_interleave",
+      "actors": ["coordinator", "builder-a", "builder-b", "reviewer", "researcher"],
+      "capabilities": ["Schedule", "Task", "Board", "Goal", "IDE", "Comment", "Fusion", "Memory", "Context"],
+      "user_story": "모든 주요 surface가 한 미션 안에서 함께 사용되고 어떤 하나도 전체 흐름을 독점하지 않는다.",
+      "assertions": ["all_surfaces_observed", "unaffected_peers_progressed"],
+      "evidence": ["bundle.json", "keeper-status/*.json", "observations/*.json"]
+    },
+    {
+      "id": "RW16",
+      "phase": "verification",
+      "name": "correlated_product_outcome_bundle",
+      "actors": ["coordinator", "builder-a", "builder-b", "reviewer", "researcher"],
+      "capabilities": ["Keeper", "Evidence"],
+      "user_story": "Goal, Task, Board, Schedule, Fusion, IDE, Memory 결과가 하나의 mission id와 source SHA로 다시 검증된다.",
+      "assertions": ["correlation_marker_complete", "artifact_bundle_complete"],
+      "evidence": ["bundle.json", "bundle.md", "raw/*.json"]
+    },
+    {
+      "id": "RW17",
+      "phase": "tool_composition",
+      "name": "typed_inline_and_async_tool_composition",
+      "actors": ["coordinator", "builder-a", "builder-b", "reviewer", "researcher"],
+      "capabilities": ["Tool", "Parallel Tool", "Async Tool", "Batch Tool", "TOML", "Dashboard", "Observability"],
+      "user_story": "TOML로 선언한 합성 도구가 실제 Keeper turn에서 병렬 read batch, 순차 typed dataflow, durable async 실행을 수행하고 각 action의 정확한 입출력과 실행 맥락을 Dashboard store에 남긴다.",
+      "assertions": [
+        "composition_inline_observed",
+        "composition_parallel_schedule_observed",
+        "composition_sequential_dataflow_observed",
+        "composition_async_observed",
+        "composition_turn_context_observed",
+        "composition_dashboard_browser_observed"
+      ],
+      "evidence": ["observations/tool-calls-*.json", "turns/parallel-*.json", "browser/keeper-composition-inspector.json", "browser/keeper-composition-inspector.png"]
+    },
+    {
+      "id": "RW18",
+      "phase": "long_continuity",
+      "name": "same_keeper_eleven_linked_turn_restart_recall",
+      "actors": ["coordinator"],
+      "capabilities": ["MultiTurn", "Memory", "Context", "Restart", "Tool Composition"],
+      "user_story": "같은 Keeper가 서로 다른 runtime turn identity를 가진 11개 요청 turn을 순서대로 완료하고 첫 turn의 secret을 반복 입력받지 않은 채 중간 Board 연쇄와 재시작 뒤 기억을 복원한다.",
+      "assertions": ["same_keeper_eleven_linked_turns", "context_secret_recalled"],
+      "evidence": ["turns/continuity-*.json", "turns/context-after-restart.json", "observations/board-post.json"]
+    },
+    {
+      "id": "RW20",
+      "phase": "delivery_proof",
+      "name": "poc_request_to_executed_artifact",
+      "actors": ["researcher", "builder-a", "reviewer"],
+      "capabilities": ["Keeper", "Board", "Sandbox", "Execute"],
+      "user_story": "게시된 PoC 요구가 구현으로 이어지고, 완성 주장은 파일 존재가 아니라 실제 실행 로그로 증명되며, 독립 리뷰가 그 실행 출력 토큰을 그대로 인용한다.",
+      "assertions": ["poc_execution_proof_observed", "poc_review_cites_execution"],
+      "evidence": ["observations/board-post.json", "observations/tool-calls-builder-a.json"]
+    },
+    {
+      "id": "RW21",
+      "phase": "adversarial_dialogue",
+      "name": "restate_then_rebut_debate",
+      "actors": ["builder-a", "builder-b", "reviewer"],
+      "capabilities": ["Keeper", "Board"],
+      "user_story": "한 Keeper의 주장을 상대 Keeper가 board에서 직접 읽어 재진술로 이해를 증명한 뒤 반박하고, 제3 Keeper의 판정이 그 반박 토큰을 인용한다. 재진술·인용 토큰은 각 응답자의 prompt에 주어지지 않는다.",
+      "assertions": ["debate_restatement_faithful", "debate_verdict_cites_rebuttal"],
+      "evidence": ["observations/board-post.json", "turns/debate-rebut.json"]
+    },
+    {
+      "id": "RW22",
+      "phase": "coverage_proof",
+      "name": "declared_scope_full_coverage",
+      "actors": ["researcher", "builder-a", "builder-b", "reviewer"],
+      "capabilities": ["Goal", "Task", "Verification", "Cross-Verification", "Sandbox", "Execute", "Log"],
+      "user_story": "선언한 대상 범위의 모든 케이스가 실제 동작으로 증명된다. 케이스는 서로 다른 변환이라 상수를 출력하는 스크립트는 아무것도 덮지 못한다. 구현자와 시험자가 각자 Task를 claim해 Goal에 연결하고 keeper_task_done으로 evidence를 제출하며, 독립 completion authority가 두 Task를 awaiting_verification에서 done으로 넘겨야 한다 — 제출은 완료가 아니다. 검증자는 선언된 범위와 실행이 낸 결과를 대조한다. 부분 실행은 통과하지 못한다.",
+      "assertions": ["qa_coverage_execution_observed", "qa_coverage_passes_verification", "qa_coverage_review_matches_spec"],
+      "evidence": ["observations/board-post.json", "observations/tool-calls-builder-b.json"]
+    },
+    {
+      "id": "RW23",
+      "phase": "goal_verification",
+      "name": "goal_verifier_refute_reenter_prove",
+      "actors": ["coordinator", "reviewer"],
+      "capabilities": ["Goal", "Verification", "Cross-Verification", "Sandbox", "Dashboard", "Browser", "Restart"],
+      "user_story": "Goal 완료는 독립 verifier가 owner playground의 실제 artifact를 읽은 판정으로만 일어난다. 실패 artifact는 Proof_refuted와 Executing 복귀를 만들고, 같은 Goal의 수정 artifact는 새 run으로 재진입해 Proof_proven과 Completed를 만든다. 최종 ledger run ID, durable evaluator/tool run, 실제 backend Dashboard의 펼친 verification_read_file 행과 screenshot이 같은 Goal/run을 가리켜야 한다.",
+      "assertions": ["goal_verifier_refutation_observed", "goal_verifier_reentry_proven", "goal_verifier_dashboard_browser_observed"],
+      "evidence": ["observations/goal-verifier-task-refuted.json", "observations/goal-verifier-task-proven.json", "observations/goal-verifier-refuted.json", "observations/goal-verifier-proven.json", "observations/goal-verification-runs.json", "browser/goal-verification-run-proof.json", "browser/goal-verification-run-proof.png"]
+    }
+  ]
+}

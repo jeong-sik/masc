@@ -1,0 +1,20 @@
+name = "keeper_spawn_read"
+description = "Read what a spawned process has written so far. Returns the bytes after the given offset and the offset to continue from, so reading twice sees each byte once. If the buffer bound discarded bytes before the requested offset, the answer says how many rather than closing the gap silently."
+additional_properties = false
+
+[[params]]
+name = "handle"
+type = "string"
+required = true
+description = "Handle returned by keeper_spawn."
+
+[[params]]
+name = "stream"
+type = "string"
+enum = ["stdout", "stderr"]
+description = "Which stream to read. Defaults to stdout."
+
+[[params]]
+name = "from"
+type = "integer"
+description = "Offset to read from, as returned by a previous read. Defaults to the start of the stream."

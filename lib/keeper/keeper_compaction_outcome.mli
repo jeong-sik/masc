@@ -22,10 +22,18 @@ type exact_execution_terminal =
   ; call_id : string
   ; plan_fingerprint : string
   ; request_body_sha256 : string
+  ; detail : string option
+        (** The provider's own account of the failure, when the terminal came
+            from a flow that carries one. The four identifiers above say which
+            call failed; they cannot say why, so a compaction that lost 470
+            seconds on a slot healthy everywhere else left no answer anywhere.
+            [None] where the terminal has no such account — the rendering then
+            is exactly what it was before this field existed. *)
   }
 
 type no_compaction_reason =
   | No_eligible_history
+  | No_reducible_boundary
   | Invalid_structural_source
   | Exact_lane_unconfigured
       (** The configured runtime has no exact-output lane for compaction. This
@@ -33,7 +41,7 @@ type no_compaction_reason =
           checkpoint source, not a stochastic provider failure. *)
   | Exact_execution_terminal of exact_execution_terminal
       (** Typed outcome of one completed exact-output execution. The retained
-          OAS slot/call identity is evidence only; it creates no second claim,
+          AGENT_CORE slot/call identity is evidence only; it creates no second claim,
           durable replay barrier, or commit authority. *)
 
 type no_compaction =

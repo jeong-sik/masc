@@ -79,7 +79,7 @@ let observe_phase_dwell ~keeper_name ~from_label =
   | Some prev_at ->
     let now = Unix.gettimeofday () in
     let dwell = Float.max 0.0 (now -. prev_at) in
-    (* Cancel-aware: bare [try ... with _ -> ()] would swallow
+    (* Cancel-aware: bare [try ... with _ -> ()] would swallow (* cancel-guard-ok: prose; the code below routes through Safe_ops.protect *)
        [Eio.Cancel.Cancelled] and break switch teardown. *)
     Safe_ops.protect ~default:() (fun () ->
       Otel_metric_store.observe_histogram
@@ -148,44 +148,41 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
              state_label);
         "unclassified"
   in
-  let stop_label =
+  let stop_signaled_before, stop_signaled_after, stop_label =
     match ctx with
     | Some c ->
-        Printf.sprintf " stop_before=%b stop_after=%b"
-          c.stop_signaled_before c.stop_signaled_after
-    | None -> ""
+      ( Some c.stop_signaled_before
+      , Some c.stop_signaled_after
+      , Printf.sprintf
+          " stop_before=%b stop_after=%b"
+          c.stop_signaled_before
+          c.stop_signaled_after )
+    | None -> None, None, ""
   in
-  let stop_details =
-    match ctx with
-    | Some c ->
-      [ "stop_signaled_before", `Bool c.stop_signaled_before
-      ; "stop_signaled_after", `Bool c.stop_signaled_after
-      ]
-    | None -> []
-  in
-  Log.Keeper.emit
-    Log.Info
-    ~keeper_name
-    ~turn_id
-    ~category:Log.Fsm
-    ~details:
-      (`Assoc
-        ([ "from_state", `String prev_label
-         ; "to_state", `String state_label
-         ; "action", `String action_label
-         ]
-         @ stop_details))
-    (Printf.sprintf "[fsm:transition] %s -> %s action=%s%s" prev_label state_label action_label stop_label);
-  Keeper_transition_audit.record_turn_fsm_transition
-    ~keeper_name
+  let transition : Keeper_transition_audit.turn_fsm_transition_record =
     { turn_fsm_turn_id = turn_id
     ; turn_fsm_prev_state = prev_label
     ; turn_fsm_new_state = state_label
     ; turn_fsm_action = action_label
-    ; turn_fsm_stop_signaled_before = Option.map (fun c -> c.stop_signaled_before) ctx
-    ; turn_fsm_stop_signaled_after = Option.map (fun c -> c.stop_signaled_after) ctx
+    ; turn_fsm_stop_signaled_before = stop_signaled_before
+    ; turn_fsm_stop_signaled_after = stop_signaled_after
     ; turn_fsm_wall_clock_at = now
-    };
+    }
+  in
+  Log.Keeper.emit
+    Log.Info
+    ~keeper_name
+    ~turn_id:transition.turn_fsm_turn_id
+    ~category:Log.Fsm
+    ~details:
+      (`Assoc
+        [ ( "turn_fsm_transition"
+          , Keeper_transition_audit.turn_fsm_transition_to_json transition )
+        ])
+    (Printf.sprintf "[fsm:transition] %s -> %s action=%s%s" prev_label state_label action_label stop_label);
+  Keeper_transition_audit.record_turn_fsm_transition
+    ~keeper_name
+    transition;
   Otel_metric_store.inc_counter Keeper_metrics.(to_string TurnFsmTransitions)
     ~labels:
       [ ("from", prev_label);

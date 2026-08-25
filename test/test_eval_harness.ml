@@ -99,8 +99,7 @@ let test_regex_no_match () =
 (* ================================================================ *)
 
 let tool_expect ?max_calls ?(required = true) tool_name =
-  { Eval_harness.tool_name
-  ; selector = Eval_tool_selector.Tool_name tool_name
+  { Eval_harness.selector = Eval_tool_selector.Tool_name tool_name
   ; required
   ; max_calls
   ; args_contain = None
@@ -147,8 +146,7 @@ let test_tool_expect_max_calls_exceeded () =
 
 let test_tool_expect_descriptor_selector () =
   let expectations : Eval_harness.tool_expectation list = [
-    { tool_name = "agent profile lookup"
-    ; selector = Eval_tool_selector.Descriptor_id "masc.agent.card"
+    { selector = Eval_tool_selector.Descriptor_id "masc.agent.card"
     ; required = false
     ; max_calls = Some 0
     ; args_contain = None
@@ -197,6 +195,28 @@ let test_pass_at_k_some_pass () =
 let test_pass_at_k_edge_zero_n () =
   let p = Eval_harness.compute_pass_at_k ~k:1 ~n:0 ~c:0 in
   Alcotest.(check (float 0.01)) "zero n" 0.0 p
+
+(* The four cases above all sit where the unbiased estimator
+   1 - C(n-c,k)/C(n,k) and the plug-in 1 - (1-c/n)^k agree: c >= n, c = 0,
+   k = 1, and n = 0. They cannot see which one is implemented. These pick
+   points where the two disagree, which is what the .mli promises. *)
+
+let test_pass_at_k_is_unbiased_not_plug_in () =
+  (* 1 - C(4,3)/C(5,3) = 1 - 4/10 = 0.6. The plug-in gives
+     1 - (1 - 1/5)^3 = 0.488. *)
+  let p = Eval_harness.compute_pass_at_k ~k:3 ~n:5 ~c:1 in
+  Alcotest.(check (float 0.001)) "n=5 c=1 k=3" 0.6 p
+
+let test_pass_at_k_unbiased_half_passing () =
+  (* 1 - C(5,2)/C(10,2) = 1 - 10/45 = 0.7778. Plug-in: 0.75. *)
+  let p = Eval_harness.compute_pass_at_k ~k:2 ~n:10 ~c:5 in
+  Alcotest.(check (float 0.001)) "n=10 c=5 k=2" 0.7778 p
+
+let test_pass_at_k_certain_when_failures_below_k () =
+  (* Only one of five runs failed, so every 3-run sample contains a pass:
+     C(1,3) = 0 and pass@3 is exactly 1. The plug-in reports 0.992. *)
+  let p = Eval_harness.compute_pass_at_k ~k:3 ~n:5 ~c:4 in
+  Alcotest.(check (float 0.001)) "n=5 c=4 k=3 is certain" 1.0 p
 
 (* ================================================================ *)
 (* Test: scenario_of_json parsing                                    *)
@@ -260,7 +280,8 @@ let test_parse_full_scenario () =
     "setup_messages": ["You are a keeper agent"],
     "expected_outcome": "Command should be blocked",
     "tool_expectations": [
-      {"tool": "tool_execute", "required": true, "max_calls": 1}
+      {"selector": {"type": "tool_name", "value": "tool_execute"},
+       "required": true, "max_calls": 1}
     ],
     "graders": [
       {"type": "contains", "field": "result", "expected": "gated", "weight": 1.0, "description": "check gated"}
@@ -297,26 +318,30 @@ let test_parse_regex_grader () =
        | _ -> Alcotest.fail "Expected Deterministic grader")
   | Error e -> Alcotest.fail (Printf.sprintf "Parse failed: %s" e)
 
-let test_parse_tool_expectation_tool_name_fallback () =
+let test_parse_tool_expectation_requires_a_selector () =
+  (* A bare tool_name used to become a Tool_name selector. Only the structured
+     [selector] is read now, so an entry without one is not an expectation. *)
   let json = Yojson.Safe.from_string {|{
-    "id": "tool-name-fallback",
-    "goal": "Test legacy tool_name fallback",
+    "id": "tool-name-only",
+    "goal": "An entry carrying only tool_name",
     "tool_expectations": [
-      {"tool_name": "keeper_task_claim", "required": true}
+      {"tool_name": "keeper_task_claim", "required": true},
+      {"selector": {"type": "tool_name", "value": "keeper_task_done"},
+       "required": true}
     ]
   }|} in
   match Eval_harness.scenario_of_json json with
   | Ok s ->
       (match s.Eval_harness.tool_expectations with
        | [ expectation ] ->
-           Alcotest.(check string) "legacy label" "keeper_task_claim"
-             expectation.Eval_harness.tool_name;
            (match expectation.Eval_harness.selector with
             | Eval_tool_selector.Tool_name tool_name ->
-                Alcotest.(check string) "selector fallback" "keeper_task_claim"
-                  tool_name
+                Alcotest.(check string) "only the selector entry survives"
+                  "keeper_task_done" tool_name
             | _ -> Alcotest.fail "Expected Tool_name selector")
-       | _ -> Alcotest.fail "Expected exactly one tool expectation")
+       | other ->
+           Alcotest.failf "Expected exactly one tool expectation, got %d"
+             (List.length other))
   | Error e -> Alcotest.fail (Printf.sprintf "Parse failed: %s" e)
 
 let test_parse_model_grader () =
@@ -352,6 +377,51 @@ let test_load_missing_file () =
 (* ================================================================ *)
 (* Test: report_to_string                                            *)
 (* ================================================================ *)
+
+(* The scenario badge is a cut on pass_at_k at
+   [scenario_pass_at_k_threshold]. Only the PASS side was covered, so the
+   literal could have been anything below 0.8 without a test noticing. *)
+let test_report_badge_flips_at_the_threshold () =
+  let scenario : Eval_harness.scenario = {
+    id = "test-002"; name = "Threshold"; description = "";
+    category = "general"; goal = "test";
+    setup_messages = []; expected_outcome = "";
+    tool_expectations = []; graders = [];
+    tags = [];
+    ownership = Eval_harness.Foreign;
+  } in
+  let result_at pass_at_k : Eval_harness.eval_result = {
+    scenario;
+    pass_at_k;
+    mean_score = 0.5;
+    consistency = 1.0;
+    total_cost_usd = None;
+    ci95_low = 0.5;
+    ci95_high = 0.5;
+    min_runs_met = false;
+    runs = [];
+  } in
+  let render pass_at_k =
+    Eval_harness.report_to_string
+      { Eval_harness.suite_name = "threshold";
+        started_at = 0.0;
+        ended_at = 0.0;
+        results = [ result_at pass_at_k ];
+        overall_pass_rate = pass_at_k;
+        total_cost_usd = None;
+        total_runs = 0;
+      }
+  in
+  let contains hay needle =
+    let nl = String.length needle and hl = String.length hay in
+    let rec at i = i + nl <= hl && (String.sub hay i nl = needle || at (i + 1)) in
+    at 0
+  in
+  let t = Eval_harness.scenario_pass_at_k_threshold in
+  Alcotest.(check bool) "at the threshold the badge is PASS" true
+    (contains (render t) "[PASS]");
+  Alcotest.(check bool) "just below the threshold the badge is FAIL" true
+    (contains (render (t -. 0.01)) "[FAIL]")
 
 let test_report_to_string () =
   let scenario : Eval_harness.scenario = {
@@ -419,6 +489,12 @@ let () =
       Alcotest.test_case "none pass" `Quick test_pass_at_k_none_pass;
       Alcotest.test_case "some pass" `Quick test_pass_at_k_some_pass;
       Alcotest.test_case "edge zero n" `Quick test_pass_at_k_edge_zero_n;
+      Alcotest.test_case "unbiased, not plug-in" `Quick
+        test_pass_at_k_is_unbiased_not_plug_in;
+      Alcotest.test_case "unbiased with half passing" `Quick
+        test_pass_at_k_unbiased_half_passing;
+      Alcotest.test_case "certain when failures below k" `Quick
+        test_pass_at_k_certain_when_failures_below_k;
     ]);
     ("scenario_parsing", [
       Alcotest.test_case "minimal" `Quick test_parse_minimal_scenario;
@@ -428,8 +504,8 @@ let () =
         test_parse_rejects_invalid_ownership;
       Alcotest.test_case "full scenario" `Quick test_parse_full_scenario;
       Alcotest.test_case "regex grader" `Quick test_parse_regex_grader;
-      Alcotest.test_case "tool_name fallback" `Quick
-        test_parse_tool_expectation_tool_name_fallback;
+      Alcotest.test_case "tool expectation requires a selector" `Quick
+        test_parse_tool_expectation_requires_a_selector;
       Alcotest.test_case "model grader" `Quick test_parse_model_grader;
     ]);
     ("file_loading", [
@@ -437,5 +513,7 @@ let () =
     ]);
     ("report", [
       Alcotest.test_case "report_to_string" `Quick test_report_to_string;
+      Alcotest.test_case "report badge flips at the threshold" `Quick
+        test_report_badge_flips_at_the_threshold;
     ]);
   ]

@@ -1,9 +1,11 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { fireEvent } from '@testing-library/preact'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { DashboardKeeperWaitingInventory } from '../../api'
+import type { Keeper } from '../../types'
+import { KeeperLaneStrip } from '../keeper-workspace/keeper-lane-strip'
 import { KeeperLaneInventoryPanel, KeeperWaitingInventoryPanel } from './keeper-waiting-inventory-panel'
 
 function inventoryFixture(): DashboardKeeperWaitingInventory {
@@ -21,11 +23,10 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
     global_pending_confirm_count: 1,
     source_counts: {
       event_queue_pending: 1,
-      chat_queue_inflight: 1,
-      chat_queue_recovery_required: 1,
+      chat_operation_running: 1,
+      chat_operation_queued: 1,
       schedule_waiting: 1,
-      turn_admission_waiting: 1,
-      turn_admission_shutdown: 1,
+      owner_shutdown: 1,
     },
     keepers: [
       {
@@ -34,51 +35,41 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
         waiting_count: 3,
         sources: {
           event_queue_pending: 1,
-          chat_queue_inflight: 1,
-          chat_queue_recovery_required: 1,
+          chat_operation_running: 1,
+          chat_operation_queued: 1,
         },
         waiting_on: [
           {
             keeper_name: 'sangsu',
             source: 'event_queue_pending',
             waiting_on: 'bootstrap',
+            what: '기동 직후 첫 턴',
             wake_producer: 'keeper_supervisor',
             since_iso: '2026-07-04T00:00:00Z',
             next_action: 'keeper_drain_event_queue',
           },
           {
             keeper_name: 'sangsu',
-            source: 'chat_queue_inflight',
-            waiting_on: 'dashboard',
-            wake_producer: 'keeper_chat_queue_store',
+            source: 'chat_operation_running',
+            waiting_on: 'keeper_turn',
+            what: '운영자와 진행 중인 대화',
+            wake_producer: 'keeper_owner_actor',
             since_iso: '2026-07-04T00:02:00Z',
-            next_action: 'keeper_chat_turn_terminal_receipt',
+            next_action: 'keeper_owner_settle_operation',
             detail: {
-              queue_index: 0,
-              receipt_id: 'chatq_00000000-0000-4000-8000-000000000001',
-              lifecycle: {
-                state: 'inflight',
-                lease_id: 'lease_00000000-0000-4000-8000-000000000002',
-                started_at_iso: '2026-07-04T00:02:30Z',
-              },
+              operation_id: 'kmsg-operation-running',
             },
           },
           {
             keeper_name: 'sangsu',
-            source: 'chat_queue_recovery_required',
-            waiting_on: 'dashboard',
-            wake_producer: 'keeper_chat_queue_store',
+            source: 'chat_operation_queued',
+            waiting_on: 'owner_fifo',
+            what: '운영자 채팅 1건 대기',
+            wake_producer: 'keeper_owner_actor',
             since_iso: '2026-07-04T00:03:00Z',
-            next_action: 'resolve_keeper_chat_queue_recovery',
+            next_action: 'keeper_owner_start_fifo_head',
             detail: {
-              queue_index: 0,
-              receipt_id: 'chatq_00000000-0000-4000-8000-000000000003',
-              lifecycle: {
-                state: 'recovery_required',
-                lease_id: 'lease_00000000-0000-4000-8000-000000000004',
-                started_at_iso: '2026-07-04T00:02:45Z',
-                dispatchable: false,
-              },
+              queued_count: 2,
             },
           },
         ],
@@ -88,16 +79,17 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
         state: 'busy',
         waiting_count: 1,
         sources: {
-          turn_admission_waiting: 1,
+          chat_operation_running: 1,
         },
         waiting_on: [
           {
             keeper_name: 'busy-one',
-            source: 'turn_admission_waiting',
-            waiting_on: 'chat',
-            wake_producer: 'keeper_turn_admission',
+            source: 'chat_operation_running',
+            waiting_on: 'keeper_turn',
+            what: '운영자와 진행 중인 대화',
+            wake_producer: 'keeper_owner_actor',
             since_iso: '2026-07-04T00:02:00Z',
-            next_action: 'turn_slot_release',
+            next_action: 'keeper_owner_settle_operation',
           },
         ],
       },
@@ -112,14 +104,15 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
         state: 'deferred',
         waiting_count: 1,
         sources: {
-          turn_admission_shutdown: 1,
+          owner_shutdown: 1,
         },
         waiting_on: [
           {
             keeper_name: 'stopping-one',
-            source: 'turn_admission_shutdown',
+            source: 'owner_shutdown',
             waiting_on: 'shutdown',
-            wake_producer: 'keeper_turn_admission',
+            what: '종료 정리 중',
+            wake_producer: 'keeper_owner_actor',
             next_action: 'keeper_shutdown_finalize',
             detail: {
               shutdown_operation_id: 'shutdown-op-7',
@@ -133,12 +126,21 @@ function inventoryFixture(): DashboardKeeperWaitingInventory {
       {
         source: 'schedule_waiting',
         waiting_on: 'masc.board_post',
+        what: '예약 실행 · masc.board_post',
         wake_producer: 'schedule_runner',
         due_at_iso: '2026-07-04T01:00:00Z',
         next_action: 'schedule_runner_dispatch',
       },
     ],
   }
+}
+
+function keeperFixture(overrides: Partial<Keeper> = {}): Keeper {
+  return {
+    name: 'sangsu',
+    agent_name: 'agent-sangsu',
+    ...overrides,
+  } as Keeper
 }
 
 describe('KeeperWaitingInventoryPanel', () => {
@@ -162,30 +164,25 @@ describe('KeeperWaitingInventoryPanel', () => {
     expect(container.textContent).toContain('sangsu')
     expect(container.textContent).toContain('busy-one')
     expect(container.textContent).toContain('busy')
-    expect(container.textContent).toContain('turn admission waiting')
-    expect(container.textContent).toContain('producer keeper turn admission')
-    expect(container.textContent).toContain('turn slot release')
-    expect(container.textContent).toContain('turn admission shutdown')
-    expect(container.textContent).toContain('keeper shutdown finalize')
-    expect(container.textContent).toContain('shutdown operation shutdown-op-7')
-    expect(container.textContent).toContain('admission fenced')
-    expect(container.querySelector('[data-keeper-shutdown-operation-id="shutdown-op-7"]')).not.toBeNull()
-    const shutdownChip = [...container.querySelectorAll('[data-status-chip]')]
-      .find(chip => chip.textContent?.trim() === 'turn admission shutdown')
-    expect(shutdownChip?.getAttribute('data-status-chip-tone')).toBe('info')
-    expect(container.textContent).toContain('event queue pending')
-    expect(container.textContent).toContain('producer keeper supervisor')
-    expect(container.textContent).toContain('producer keeper supervisor')
-    expect(container.textContent).toContain('chatq_00000000-0000-4000-8000-000000000001')
-    expect(container.textContent).toContain('lease_00000000-0000-4000-8000-000000000002')
-    expect(container.textContent).toContain('state inflight')
-    expect(container.textContent).toContain('chat queue recovery required')
-    expect(container.textContent).toContain('resolve keeper chat queue recovery')
-    expect(container.textContent).toContain('state recovery required')
-    expect(container.textContent).toContain('lease_00000000-0000-4000-8000-000000000004')
+    // The operator sentence is the default reading; the raw wire vocabulary
+    // stays behind the 기술 상세 toggle.
+    expect(container.textContent).toContain('기동 직후 첫 턴')
+    expect(container.textContent).toContain('운영자와 진행 중인 대화')
+    expect(container.textContent).toContain('운영자 채팅 1건 대기')
+    expect(container.textContent).toContain('종료 정리 중')
     expect(container.textContent).toContain('Global waiting')
     expect(container.textContent).toContain('masc.board_post')
     expect(container.textContent).not.toContain('idle-one')
+    expect(container.textContent).not.toContain('keeper_owner_actor')
+
+    fireEvent.click(container.querySelector('[data-testid="keeper-lane-dev-toggle"]') as HTMLButtonElement)
+    const devText = container.textContent ?? ''
+    expect(devText).toContain('keeper_owner_actor')
+    expect(devText).toContain('keeper_owner_settle_operation')
+    expect(devText).toContain('keeper_supervisor')
+    expect(devText).toContain('kmsg-operation-running')
+    expect(devText).toContain('shutdown-op-7')
+    expect(devText).toContain('admission_fenced')
   })
 
   it('renders unavailable state without crashing', () => {
@@ -194,30 +191,57 @@ describe('KeeperWaitingInventoryPanel', () => {
     expect(container.textContent).toContain('waiting inventory unavailable')
   })
 
-  it('expands the active receipt rows instead of hiding reload correlation ids', () => {
+  it('renders every row oldest-first with no client-side cap', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-04T00:10:00Z'))
     const inventory = inventoryFixture()
     const keeper = inventory.keepers[0]
     if (!keeper) throw new Error('fixture keeper missing')
-    keeper.waiting_on = Array.from({ length: 7 }, (_, index) => ({
-      keeper_name: keeper.keeper_name,
-      source: 'chat_queue_pending',
-      waiting_on: 'slack',
-      wake_producer: 'keeper_chat_queue',
-      next_action: 'keeper_chat_consumer_drain',
-      detail: {
-        queue_index: index,
-        receipt_id: `chatq_00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
-        lifecycle: { state: 'pending' },
+    // Out of order on purpose: the newest row first, the oldest last.
+    keeper.waiting_on = [
+      {
+        keeper_name: keeper.keeper_name,
+        source: 'chat_operation_queued',
+        waiting_on: 'owner_fifo',
+        what: '운영자 채팅 1건 대기',
+        wake_producer: 'keeper_owner_actor',
+        since_iso: '2026-07-04T00:09:00Z',
+        next_action: 'keeper_owner_start_fifo_head',
       },
-    }))
+      {
+        keeper_name: keeper.keeper_name,
+        source: 'chat_operation_running',
+        waiting_on: 'keeper_turn',
+        what: '운영자와 진행 중인 대화',
+        wake_producer: 'keeper_owner_actor',
+        since_iso: '2026-07-04T00:05:00Z',
+        next_action: 'keeper_owner_settle_operation',
+      },
+      {
+        keeper_name: keeper.keeper_name,
+        source: 'event_queue_pending',
+        waiting_on: 'bootstrap',
+        what: '기동 직후 첫 턴',
+        wake_producer: 'keeper_supervisor',
+        since_iso: '2026-07-04T00:00:00Z',
+        next_action: 'keeper_drain_event_queue',
+      },
+    ]
     keeper.waiting_count = keeper.waiting_on.length
 
     render(html`<${KeeperWaitingInventoryPanel} inventory=${inventory} />`, container)
 
-    expect(container.textContent).not.toContain('chatq_00000000-0000-4000-8000-000000000006')
-    fireEvent.click(container.querySelector('[data-expand-waiting-rows]') as HTMLButtonElement)
-    expect(container.textContent).toContain('chatq_00000000-0000-4000-8000-000000000006')
-    expect(container.querySelector('[data-collapse-waiting-rows]')).not.toBeNull()
+    const sangsuLane = container.querySelector('[data-keeper-lane="sangsu"]')!
+    const rows = Array.from(sangsuLane.querySelectorAll('[data-testid="keeper-lane-waiting-row"]'))
+    expect(rows.map(row => row.getAttribute('data-waiting-on'))).toEqual([
+      'bootstrap',
+      'keeper_turn',
+      'owner_fifo',
+    ])
+    // All three rows render — no slice cap.
+    expect(rows.length).toBe(3)
+    expect(container.querySelector('[data-expand-waiting-rows]')).toBeNull()
+    vi.useRealTimers()
   })
 
   it('renders unknown pending-confirm count when the store read failed', () => {
@@ -228,6 +252,7 @@ describe('KeeperWaitingInventoryPanel', () => {
       {
         source: 'read_error',
         waiting_on: 'operator_pending_confirm_store',
+        what: '대기 기록 읽기 실패 · operator_pending_confirm_store',
         wake_producer: 'read_model_reader',
         next_action: 'repair_operator_pending_confirms',
       },
@@ -237,7 +262,8 @@ describe('KeeperWaitingInventoryPanel', () => {
 
     expect(container.textContent).toContain('unmapped confirmsunknown')
     expect(container.textContent).toContain('operator_pending_confirm_store')
-    expect(container.textContent).toContain('repair operator pending confirms')
+    fireEvent.click(container.querySelector('[data-testid="keeper-lane-dev-toggle"]') as HTMLButtonElement)
+    expect(container.textContent).toContain('repair_operator_pending_confirms')
   })
 
   it('renders unknown keeper count when discovery failed', () => {
@@ -248,6 +274,7 @@ describe('KeeperWaitingInventoryPanel', () => {
       {
         source: 'read_error',
         waiting_on: 'keeper_meta_store',
+        what: '대기 기록 읽기 실패 · keeper_meta_store',
         wake_producer: 'read_model_reader',
         next_action: 'repair_keeper_meta_store',
       },
@@ -257,7 +284,33 @@ describe('KeeperWaitingInventoryPanel', () => {
 
     expect(container.textContent).toContain('keepersunknown')
     expect(container.textContent).toContain('keeper_meta_store')
-    expect(container.textContent).toContain('repair keeper meta store')
+    fireEvent.click(container.querySelector('[data-testid="keeper-lane-dev-toggle"]') as HTMLButtonElement)
+    expect(container.textContent).toContain('repair_keeper_meta_store')
+  })
+
+  it('uses the same waiting-row component as the keeper lane strip', () => {
+    const inventory = inventoryFixture()
+    render(html`<${KeeperWaitingInventoryPanel} inventory=${inventory} />`, container)
+    const fleetRows = container.querySelectorAll('[data-testid="keeper-lane-waiting-row"]')
+    expect(fleetRows.length).toBeGreaterThan(0)
+
+    const laneHost = document.createElement('div')
+    document.body.appendChild(laneHost)
+    render(html`
+      <${KeeperLaneStrip}
+        keeper=${keeperFixture()}
+        inventory=${inventory}
+        ready=${true}
+        loading=${false}
+        error=${null}
+      />
+    `, laneHost)
+    const stripRows = laneHost.querySelectorAll('[data-testid="keeper-lane-waiting-row"]')
+    expect(stripRows.length).toBeGreaterThan(0)
+    // Both surfaces emit the same row testid from the shared LaneWaitingRow.
+    expect(fleetRows[0]!.tagName).toBe(stripRows[0]!.tagName)
+    render(null, laneHost)
+    laneHost.remove()
   })
 })
 
@@ -279,12 +332,12 @@ describe('KeeperLaneInventoryPanel', () => {
 
     const cards = container.querySelectorAll('[data-testid="keeper-lane-card"]')
     expect(cards).toHaveLength(4)
-    expect(container.querySelector('[data-keeper-lane="sangsu"]')?.textContent).toContain('event queue pending')
-    expect(container.querySelector('[data-keeper-lane="busy-one"]')?.textContent).toContain('turn admission waiting')
+    expect(container.querySelector('[data-keeper-lane="sangsu"]')?.textContent).toContain('기동 직후 첫 턴')
+    expect(container.querySelector('[data-keeper-lane="busy-one"]')?.textContent).toContain('운영자와 진행 중인 대화')
     expect(container.querySelector('[data-keeper-lane="idle-one"]')?.textContent).toContain('no keeper-specific waiting rows')
-    expect(container.querySelector('[data-keeper-lane="stopping-one"]')?.textContent).toContain('turn admission shutdown')
+    expect(container.querySelector('[data-keeper-lane="stopping-one"]')?.textContent).toContain('종료 정리 중')
     expect(container.textContent).toContain('Global lane evidence')
-    expect(container.textContent).toContain('producer schedule runner')
+    expect(container.textContent).toContain('masc.board_post')
   })
 
   it('surfaces missing wake producer and next action evidence explicitly', () => {
@@ -299,6 +352,7 @@ describe('KeeperLaneInventoryPanel', () => {
             keeper_name: 'partial-lane',
             source: 'external_attention',
             waiting_on: 'discord:ops',
+            what: 'discord:ops 멘션',
             wake_producer: null,
             next_action: '',
           },
@@ -310,8 +364,10 @@ describe('KeeperLaneInventoryPanel', () => {
 
     expect(container.textContent).toContain('partial-lane')
     expect(container.textContent).toContain('discord:ops')
-    expect(container.textContent).toContain('producer wake producer missing')
-    expect(container.textContent).toContain('next action missing')
+    fireEvent.click(container.querySelector('[data-testid="keeper-lane-dev-toggle"]') as HTMLButtonElement)
+    expect(container.textContent).toContain('wake ·')
+    expect(container.textContent).toContain('미기록')
+    expect(container.textContent).toContain('다음 동작 ·')
   })
 
   it('renders unavailable lane evidence without inventing fallback rows', () => {

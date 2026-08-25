@@ -20,7 +20,7 @@ interface UnifiedStatusResult {
    *  `statusBadgeTone` (`components/common/status-badge.ts`), whose switch
    *  was written for task states: it answers `warn` for `running`, `ok`
    *  for `active`, and falls to `neutral` for `crashed` / `dead` /
-   *  `overflowed` / `compacting` / `handoff` / `draining` / `restarting` /
+   *  `compacting` / `handoff` / `draining` / `restarting` /
    *  `unbooted`. A crashed keeper therefore rendered grey there and red on
    *  the fleet panel.
    *
@@ -32,7 +32,7 @@ interface UnifiedStatusResult {
 /** The keeper vocabulary wins whenever the status is a keeper token.
  *
  *  `statusLabel` is the generic status vocabulary (tasks, connectors,
- *  fusion runs, board moderation). Where the two keyspaces overlap they
+ *  fusion runs). Where the two keyspaces overlap they
  *  disagree — `compacting` is `컴팩팅` there and `압축 중` in the keeper
  *  SSOT, `handoff` is `핸드오프` vs `인계 중`, `running` is `진행 중` vs
  *  `실행 중` — so the agent detail header used to disagree with the
@@ -139,8 +139,8 @@ export function resolveUnifiedStatus(
 
   // Every keeper lifecycle token the hand-written arms above do not
   // special-case. Without this the arms covered 4 of the 12 `KeeperPhase`
-  // values, and `Failing` / `Overflowed` / `Draining` / `Stopped` /
-  // `Crashed` / `Restarting` / `Dead` / `unbooted` all fell to `unknown` —
+  // values, and `Failing` / `Draining` / `Stopped` /
+  // `Crashed` / `Restarting` / `unbooted` all fell to `unknown` —
   // so the agent detail header rendered `확인 필요` next to a phase badge
   // that said `중지` or `종료됨` for the same keeper (`agent-detail.ts`
   // renders both badges on one line). Measured 2026-07-27: 8 of 12.

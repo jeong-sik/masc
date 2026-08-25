@@ -81,6 +81,10 @@ let assoc_string key fields =
   | _ -> None
 ;;
 
+let remove_all_assoc key fields =
+  List.filter (fun (name, _) -> not (String.equal name key)) fields
+;;
+
 let required_string_field name fields =
   match List.assoc_opt name fields with
   | Some (`String value) ->
@@ -135,7 +139,111 @@ let keeper_wake_schema_version_error ~creation schema_version =
   else Error (keeper_wake_kind ^ " only supports schema_version=1")
 ;;
 
+let result_delivery_of_body body =
+  let ( let* ) = Result.bind in
+  match List.assoc_opt "result_delivery" body with
+  | None -> Ok None
+  | Some (`Assoc fields) ->
+    let names = List.map fst fields in
+    if List.length names <> List.length (List.sort_uniq String.compare names)
+    then Error (keeper_wake_kind ^ " body.result_delivery has duplicate fields")
+    else
+      (match List.assoc_opt "policy" fields with
+       | Some (`String "none") ->
+         if names = [ "policy" ]
+         then Ok None
+         else Error (keeper_wake_kind ^ " result_delivery none has unknown fields")
+       | Some (`String "reply_to_origin") ->
+         if
+           List.sort String.compare names
+           <> [ "channel"; "policy" ]
+         then
+           Error
+             (keeper_wake_kind
+              ^ " result_delivery reply_to_origin requires only policy and channel")
+         else
+           let* channel_json =
+             match List.assoc_opt "channel" fields with
+             | Some value -> Ok value
+             | None -> Error (keeper_wake_kind ^ " result_delivery requires channel")
+           in
+           let* channel = Keeper_continuation_channel.of_yojson channel_json in
+           if Keeper_continuation_channel.is_routable channel
+           then Ok (Some channel)
+           else Error (keeper_wake_kind ^ " result delivery channel must be routable")
+       | Some (`String policy) ->
+         Error (keeper_wake_kind ^ " unknown result_delivery policy " ^ policy)
+       | Some _ | None ->
+         Error (keeper_wake_kind ^ " result_delivery requires string policy"))
+  | Some _ -> Error (keeper_wake_kind ^ " body.result_delivery must be an object")
+;;
+
+let set_keeper_wake_result_delivery ~payload ~channel =
+  match payload with
+  | `Assoc fields ->
+    (match assoc_string "kind" fields with
+     | Some raw_kind when classify_kind raw_kind = Some Keeper_wake ->
+       (match List.assoc_opt "body" fields with
+        | Some (`Assoc body) ->
+          let channel =
+            match channel with
+            | Some channel when Keeper_continuation_channel.is_routable channel ->
+              Some channel
+            | Some _ | None -> None
+          in
+          let result_delivery =
+            match channel with
+            | None -> `Assoc [ "policy", `String "none" ]
+            | Some channel ->
+              `Assoc
+                [ "policy", `String "reply_to_origin"
+                ; "channel", Keeper_continuation_channel.to_yojson channel
+                ]
+          in
+          let body =
+            ("result_delivery", result_delivery)
+            :: remove_all_assoc "result_delivery" body
+          in
+          Ok
+            (`Assoc
+               (("body", `Assoc body) :: remove_all_assoc "body" fields))
+        | Some _ | None ->
+          Error (keeper_wake_kind ^ " payload.body must be an object"))
+     | Some _ -> Ok payload
+     | None -> Error "payload.kind is required")
+  | _ -> Error "payload must be a JSON object"
+;;
+
+(* Every field this contract reads. The body used to accept anything: an
+   unknown key was persisted at creation and then dropped by the consumer,
+   which is how a live schedule ended up carrying a channel_id that no
+   dispatch ever saw (#25689). [result_delivery] already closed its own
+   fields; this closes the body around it. *)
+let keeper_wake_body_fields =
+  [ "keeper_name"; "message"; "title"; "urgency"; "result_delivery" ]
+
+let unknown_keeper_wake_body_fields body =
+  List.filter
+    (fun (name, _) ->
+      not (List.exists (String.equal name) keeper_wake_body_fields))
+    body
+  |> List.map fst
+  |> List.sort_uniq String.compare
+
 let validate_keeper_wake_body body =
+  let ( let* ) = Result.bind in
+  let* () =
+    match unknown_keeper_wake_body_fields body with
+    | [] -> Ok ()
+    | unknown ->
+      Error
+        (Printf.sprintf
+           "%s payload body has unknown field(s): %s (known: %s)"
+           keeper_wake_kind
+           (String.concat ", " unknown)
+           (String.concat ", " keeper_wake_body_fields))
+  in
+  let* _ = result_delivery_of_body body in
   match assoc_string "keeper_name" body, assoc_string "message" body with
   | None, _ -> Error (keeper_wake_kind ^ " payload requires non-empty body.keeper_name")
   | _, None -> Error (keeper_wake_kind ^ " payload requires non-empty body.message")
@@ -203,11 +311,6 @@ let validate_request_payload_for_creation_detailed ~payload =
   | _ -> Error (Creation_invalid_payload "payload must be a JSON object")
 ;;
 
-let validate_request_payload_for_creation ~payload =
-  validate_request_payload_for_creation_detailed ~payload
-  |> Result.map_error creation_rejection_message
-;;
-
 let creation_keeper_wake_target ~payload =
   match payload with
   | `Assoc fields ->
@@ -241,10 +344,6 @@ let dispatch_view_detailed request =
     in
     Ok (Keeper_wake, view)
   | None -> Error (Dispatch_unsupported_kind view.raw_kind)
-;;
-
-let dispatch_view request =
-  dispatch_view_detailed request |> Result.map_error dispatch_rejection_message
 ;;
 
 let log_projection_error (request : Schedule_domain.schedule_request) ~surface message =
@@ -416,5 +515,14 @@ let target_summary request =
     None, None
 ;;
 
+let result_delivery request =
+  let ( let* ) = Result.bind in
+  let* view = payload_view request in
+  match classify_kind view.raw_kind with
+  | Some Keeper_wake -> result_delivery_of_body view.body
+  | None -> Ok None
+;;
+
 let body_required_string view name = required_string_field name view.body
 let body_optional_string view name = optional_string_field name view.body
+let body_result_delivery view = result_delivery_of_body view.body

@@ -55,9 +55,9 @@ let with_temp_dir f =
 
 let test_inline_roundtrip () =
   let s = "hello world\n" in
-  let encoded = O.encode_for_oas (O.Inline s) in
+  let encoded = O.encode_for_agent_core (O.Inline s) in
   Alcotest.(check string) "inline encode = identity" s encoded;
-  match O.decode_from_oas encoded with
+  match O.decode_from_agent_core encoded with
   | O.Not_marker ->
       (* Raw text is not a marker: the content is the string itself,
          already asserted identical above. *)
@@ -73,12 +73,12 @@ let test_stored_roundtrip () =
       ~mime:"text/plain"
   in
   let original = O.Stored artifact_ref in
-  let encoded = O.encode_for_oas original in
+  let encoded = O.encode_for_agent_core original in
   Alcotest.(check bool)
     "encoded starts with marker"
     true
     (O.is_marker encoded);
-  match O.decode_from_oas encoded with
+  match O.decode_from_agent_core encoded with
   | O.Decoded { sha256 = decoded_sha; bytes; preview; mime } ->
       Alcotest.(check string) "sha256" sha256 decoded_sha;
       Alcotest.(check int) "bytes" 128934 bytes;
@@ -113,12 +113,12 @@ let test_encoded_marker_stays_under_externalization_threshold () =
       let store = B.create ~base_path:dir in
       let threshold = Masc.Tool_bridge.default_externalize_threshold_bytes in
       let payload = String.make (threshold + 1) '"' in
-      let encoded = B.put store ~bytes:payload ~mime:"text/plain" |> O.encode_for_oas in
+      let encoded = B.put store ~bytes:payload ~mime:"text/plain" |> O.encode_for_agent_core in
       Alcotest.(check bool)
         "marker stays below default externalization threshold"
         true
         (String.length encoded <= threshold);
-      match O.decode_from_oas encoded with
+      match O.decode_from_agent_core encoded with
       | O.Decoded { preview; _ } ->
         Alcotest.(check int) "preview remains documented cap" 200 (String.length preview)
       | O.Not_marker -> Alcotest.fail "expected Decoded"
@@ -141,7 +141,7 @@ let test_decode_non_marker () =
   in
   List.iter
     (fun s ->
-      match O.decode_from_oas s with
+      match O.decode_from_agent_core s with
       | O.Not_marker -> ()
       | O.Decoded _ ->
           Alcotest.failf "expected Not_marker for %S" s
@@ -154,14 +154,21 @@ let test_decode_malformed_marker () =
      old silent Inline fallback, a malformed marker is now a visible, typed
      [Invalid_marker] outcome; the caller decides what to do with the raw
      text. *)
-  let bad = "[masc:blob garbage that cannot scanf]" in
-  match O.decode_from_oas bad with
-  | O.Invalid_marker { detail } ->
-      Alcotest.(check bool)
-        "detail explains the failure" true (String.length detail > 0)
-  | O.Not_marker ->
-      Alcotest.fail "malformed marker must surface as Invalid_marker"
-  | O.Decoded _ -> Alcotest.fail "malformed should NOT decode as Stored"
+  let bad_markers =
+    [ "[masc:blob sha256=garbage that cannot scanf]"
+    ; "[masc:blob sha256=garbage]"
+    ]
+  in
+  List.iter
+    (fun bad ->
+       match O.decode_from_agent_core bad with
+       | O.Invalid_marker { detail } ->
+         Alcotest.(check bool)
+           "detail explains the failure" true (String.length detail > 0)
+       | O.Not_marker ->
+         Alcotest.fail "malformed marker must surface as Invalid_marker"
+       | O.Decoded _ -> Alcotest.fail "malformed should NOT decode as Stored")
+    bad_markers
 
 (* --- Tool_blob_store basic --- *)
 
@@ -310,7 +317,7 @@ let test_sharding_layout () =
 (* Fixtures here hold a handful of small files and compete with no startup
    watchdog, so they scan unbounded; the budget path has its own tests. *)
 let maintenance_ok ~base_path ~mode =
-  match M.run ~base_path ~mode ~budget:M.Unbounded with
+  match M.run ~base_path ~mode with
   | Ok report -> report
   | Error error ->
     Alcotest.failf "maintenance failed: %s" (M.error_to_string error)
@@ -341,7 +348,7 @@ let test_maintenance_keeps_live_and_deletes_stable_dead_after_restart () =
         (Yojson.Safe.to_string
            (`Assoc
              [ "consumer", `String "Tool_bridge"
-             ; "output_ref", `String (O.encode_for_oas (O.Stored live))
+             ; "output_ref", `String (O.encode_for_agent_core (O.Stored live))
              ])
          ^ "\n");
       let replay_sidecar =
@@ -356,7 +363,7 @@ let test_maintenance_keeps_live_and_deletes_stable_dead_after_restart () =
            (`Assoc
              [ "approval_id", `String "approval-maintenance"
              ; ( "outcome"
-               , `String (O.encode_for_oas (O.Stored replay_live)) )
+               , `String (O.encode_for_agent_core (O.Stored replay_live)) )
              ]));
       let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
       Alcotest.(check int) "union includes both consumers" 2 observed.live_references;
@@ -411,7 +418,7 @@ let test_maintenance_keeps_wire_capture_reference_within_retention () =
            (`Assoc
              [ "kind", `String "response"
              ; ( "response_text"
-               , `String (O.encode_for_oas (O.Stored captured)) )
+               , `String (O.encode_for_agent_core (O.Stored captured)) )
              ])
          ^ "\n");
       let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
@@ -455,9 +462,9 @@ let test_maintenance_rejects_uncoordinated_cluster_roots () =
         cluster_capture
         (Yojson.Safe.to_string
            (`Assoc
-             [ "response_text", `String (O.encode_for_oas (O.Stored blob)) ])
+             [ "response_text", `String (O.encode_for_agent_core (O.Stored blob)) ])
          ^ "\n");
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates ~budget:M.Unbounded with
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
        | Error
            (M.Clustered_durable_roots_uncoordinated
              { path; entries }) ->
@@ -497,8 +504,8 @@ let test_maintenance_malformed_reference_fails_closed () =
           "gate/malformed.jsonl"
       in
       Fs_compat.mkdir_p (Filename.dirname source);
-      Fs_compat.save_file source "{\"output\":\"[masc:blob garbage]\"}\n";
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates ~budget:M.Unbounded with
+      Fs_compat.save_file source "{\"output\":\"[masc:blob sha256=garbage]\"}\n";
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
        | Error (M.Malformed_artifact_reference { path; line; _ }) ->
          Alcotest.(check string) "exact malformed source" source path;
          Alcotest.(check int) "exact malformed line" 1 line
@@ -510,6 +517,75 @@ let test_maintenance_malformed_reference_fails_closed () =
       Alcotest.(check (option string))
         "blob retained on malformed reference"
         (Some "must survive malformed source")
+        (fetch_ok store ~sha256:blob.sha256))
+
+let test_maintenance_noncanonical_reference_fails_closed () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let blob =
+        B.put store ~bytes:"must survive noncanonical source" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let source =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "gate/noncanonical.json"
+      in
+      Fs_compat.mkdir_p (Filename.dirname source);
+      Fs_compat.save_file
+        source
+        (Yojson.Safe.to_string
+           (`String
+             (O.encode_for_agent_core (O.Stored blob) ^ " trailing text")));
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
+       | Error (M.Malformed_artifact_reference { path; line; offset; _ }) ->
+         Alcotest.(check string) "exact noncanonical source" source path;
+         Alcotest.(check int) "exact malformed line" 1 line;
+         Alcotest.(check int) "whole-value offset" 0 offset
+       | Error error ->
+         Alcotest.failf
+           "unexpected maintenance error: %s"
+           (M.error_to_string error)
+       | Ok _ -> Alcotest.fail "noncanonical reference reached deletion");
+      Alcotest.(check (option string))
+        "blob retained on noncanonical reference"
+        (Some "must survive noncanonical source")
+        (fetch_ok store ~sha256:blob.sha256))
+
+let test_maintenance_ignores_marker_embedded_in_prose () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let blob =
+        B.put store ~bytes:"unreferenced output" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let source =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "gate/prompt.json"
+      in
+      Fs_compat.mkdir_p (Filename.dirname source);
+      Fs_compat.save_file
+        source
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ ( "content"
+               , `String
+                   ("documentation example: "
+                    ^ O.encode_for_agent_core (O.Stored blob)) )
+             ]));
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "embedded marker is not a live reference"
+        0
+        observed.live_references;
+      Alcotest.(check int)
+        "prose does not claim blob ownership"
+        1
+        observed.candidates_recorded;
+      Alcotest.(check (option string))
+        "observe-only scan retains candidate"
+        (Some "unreferenced output")
         (fetch_ok store ~sha256:blob.sha256))
 
 let test_maintenance_does_not_scan_repository_mirrors () =
@@ -544,6 +620,44 @@ let test_maintenance_does_not_scan_repository_mirrors () =
         None
         (fetch_ok store ~sha256:blob.sha256))
 
+let test_maintenance_does_not_scan_trajectory_previews () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let blob =
+        B.put store ~bytes:"not owned by a trajectory preview" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let trajectory_source =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "trajectories/keeper-a/trace.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname trajectory_source);
+      let marker = O.encode_for_agent_core (O.Stored blob) in
+      Fs_compat.save_file
+        trajectory_source
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ ( "result"
+               , `String
+                   (String.sub marker 0 (min 120 (String.length marker))
+                    ^ "...") )
+             ])
+         ^ "\n");
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "trajectory preview is not a live reference"
+        0
+        observed.live_references;
+      Alcotest.(check int)
+        "trajectory preview does not claim blob ownership"
+        1
+        observed.candidates_recorded;
+      Alcotest.(check (option string))
+        "observe-only scan retains trajectory candidate"
+        (Some "not owned by a trajectory preview")
+        (fetch_ok store ~sha256:blob.sha256))
+
 let test_maintenance_rechecks_candidate_referenced_before_startup () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -563,7 +677,7 @@ let test_maintenance_rechecks_candidate_referenced_before_startup () =
         durable_consumer
         (Yojson.Safe.to_string
            (`Assoc
-             [ "output_ref", `String (O.encode_for_oas (O.Stored candidate)) ])
+             [ "output_ref", `String (O.encode_for_agent_core (O.Stored candidate)) ])
          ^ "\n");
       let swept =
         maintenance_ok
@@ -630,6 +744,95 @@ let test_maintenance_keeps_normalized_tool_call_blob_reference () =
         (Some "normalized tool-call output")
         (fetch_ok store ~sha256:reference.sha256))
 
+let test_maintenance_follows_typed_result_manifest () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let child =
+        B.put_durable store ~bytes:"manifest-owned child" ~mime:"text/plain"
+      in
+      let structured_content =
+        `Assoc [ "output_artifact", O.normalized_artifact_ref_to_json child ]
+      in
+      let manifest_payload =
+        O.artifact_manifest_to_json
+          ~content:(Yojson.Safe.to_string structured_content)
+          ~structured_content
+        |> Yojson.Safe.to_string
+      in
+      let manifest =
+        B.put_durable
+          store
+          ~bytes:manifest_payload
+          ~mime:O.artifact_manifest_mime
+      in
+      let checkpoint =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "keepers/keeper-a/checkpoint.json"
+      in
+      Fs_compat.mkdir_p (Filename.dirname checkpoint);
+      Fs_compat.save_file
+        checkpoint
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ ( "tool_result"
+               , `String (O.encode_for_agent_core (O.Stored manifest)) ) ]));
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "checkpoint marker roots manifest and child"
+        2
+        observed.live_references;
+      Alcotest.(check int) "manifest graph has no candidates" 0 observed.candidates_recorded;
+      let swept =
+        maintenance_ok ~base_path ~mode:M.Delete_previous_candidates
+      in
+      Alcotest.(check int) "manifest graph survives the second pass" 0 swept.deleted;
+      Alcotest.(check (option string))
+        "manifest-owned child remains readable"
+        (Some "manifest-owned child")
+        (fetch_ok store ~sha256:child.sha256))
+
+let test_maintenance_rejects_malformed_typed_result_manifest () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let survivor =
+        B.put_durable store ~bytes:"survive malformed manifest" ~mime:"text/plain"
+      in
+      let malformed =
+        O.artifact_manifest_to_json
+          ~content:"malformed"
+          ~structured_content:
+            (`Assoc
+               [ ( "output_artifact"
+                 , `Assoc [ "_blob", `Assoc [ "sha256", `String survivor.sha256 ] ]
+                 )
+               ])
+        |> Yojson.Safe.to_string
+      in
+      let manifest =
+        B.put_durable store ~bytes:malformed ~mime:O.artifact_manifest_mime
+      in
+      let checkpoint =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "keepers/keeper-a/checkpoint.json"
+      in
+      Fs_compat.mkdir_p (Filename.dirname checkpoint);
+      Fs_compat.save_file
+        checkpoint
+        (Yojson.Safe.to_string
+           (`String (O.encode_for_agent_core (O.Stored manifest))));
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
+       | Error (M.Artifact_manifest_invalid { sha256; _ }) ->
+         Alcotest.(check string) "exact malformed manifest" manifest.sha256 sha256
+       | Error error ->
+         Alcotest.failf "unexpected maintenance error: %s" (M.error_to_string error)
+       | Ok _ -> Alcotest.fail "malformed typed manifest reached deletion");
+      Alcotest.(check (option string))
+        "malformed manifest abort preserves unrelated blobs"
+        (Some "survive malformed manifest")
+        (fetch_ok store ~sha256:survivor.sha256))
+
 let test_maintenance_malformed_normalized_blob_fails_closed () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -654,7 +857,7 @@ let test_maintenance_malformed_normalized_blob_fails_closed () =
                    ] )
              ])
          ^ "\n");
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates ~budget:M.Unbounded with
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
        | Error
            (M.Malformed_structured_artifact_reference
              { path; line; _ }) ->
@@ -669,6 +872,63 @@ let test_maintenance_malformed_normalized_blob_fails_closed () =
         "malformed normalized reference retains every blob"
         (Some "survive malformed normalized ref")
         (fetch_ok store ~sha256:reference.sha256))
+
+let test_maintenance_ignores_route_evidence_artifact_schema () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let reference =
+        B.put store ~bytes:"schema-safe live artifact" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let tool_call_log =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "tool_calls/2026-08/25.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname tool_call_log);
+      let artifact_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "output_artifact"
+                  , `Assoc
+                      [ "type", `String "object"
+                      ; ( "properties"
+                        , `Assoc
+                            [ ( "_blob"
+                              , `Assoc [ "type", `String "object" ] )
+                            ] )
+                      ] )
+                ] )
+          ]
+      in
+      Fs_compat.save_file
+        tool_call_log
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ ( "route_evidence"
+               , `Assoc
+                   [ ( "composable_output"
+                     , `Assoc
+                         [ "kind", `String "json"
+                         ; "schema", artifact_schema
+                         ] )
+                   ] )
+             ; ( "artifact_refs"
+               , `List [ O.normalized_artifact_ref_to_json reference ] )
+             ])
+         ^ "\n");
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "route schema is not an artifact and the durable root remains live"
+        1
+        observed.live_references;
+      Alcotest.(check int)
+        "live artifact is not recorded as a deletion candidate"
+        0
+        observed.candidates_recorded)
+;;
 
 let test_maintenance_truncated_normalized_blob_fails_closed () =
   with_temp_dir (fun base_path ->
@@ -695,7 +955,7 @@ let test_maintenance_truncated_normalized_blob_fails_closed () =
       Fs_compat.save_file
         tool_call_log
         ("{\"output\":" ^ complete_reference);
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates ~budget:M.Unbounded with
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
        | Error
            (M.Malformed_structured_artifact_reference
              { path; line; _ }) ->
@@ -722,7 +982,7 @@ let test_maintenance_unlink_failure_is_typed () =
       Fs_compat.mkdir_p shard_dir;
       Unix.mkdir (Filename.concat shard_dir sha256) 0o755;
       ignore (maintenance_ok ~base_path ~mode:M.Observe_only);
-      match M.run ~base_path ~mode:M.Delete_previous_candidates ~budget:M.Unbounded with
+      match M.run ~base_path ~mode:M.Delete_previous_candidates with
       | Error
           (M.Blob_delete_failed
             { Tool_blob_store.sha256 = actual; _ }) ->
@@ -732,104 +992,6 @@ let test_maintenance_unlink_failure_is_typed () =
           "unexpected unlink error: %s"
           (M.error_to_string error)
       | Ok _ -> Alcotest.fail "unlink failure was silently skipped")
-
-(* --- Scan budget --- *)
-
-(* One durable consumer holding one live reference, plus one unreferenced
-   blob. A complete scan sees the live reference and records exactly one
-   candidate; a scan that stops before reading the consumer would see zero
-   live references and record both blobs as candidates. *)
-let with_one_live_and_one_dead_blob f =
-  with_temp_dir (fun base_path ->
-      let store = B.create ~base_path in
-      let live =
-        B.put store ~bytes:"live budget fixture output" ~mime:"text/plain"
-        |> stored_ref_exn
-      in
-      let dead =
-        B.put store ~bytes:"dead budget fixture output" ~mime:"text/plain"
-        |> stored_ref_exn
-      in
-      let durable_consumer =
-        Filename.concat
-          (Common.masc_dir_from_base_path ~base_path)
-          "keepers/keeper-a/sessions/history.jsonl"
-      in
-      Fs_compat.mkdir_p (Filename.dirname durable_consumer);
-      Fs_compat.save_file
-        durable_consumer
-        (Yojson.Safe.to_string
-           (`Assoc [ "output_ref", `String (O.encode_for_oas (O.Stored live)) ])
-         ^ "\n");
-      f ~base_path ~store ~live ~dead)
-
-let expired_budget () =
-  M.Bounded_by { deadline_epoch_seconds = Unix.gettimeofday () -. 1.0 }
-
-let test_maintenance_exhausted_budget_is_a_typed_error () =
-  with_one_live_and_one_dead_blob (fun ~base_path ~store:_ ~live:_ ~dead:_ ->
-      match
-        M.run
-          ~base_path
-          ~mode:M.Delete_previous_candidates
-          ~budget:(expired_budget ())
-      with
-      | Error (M.Scan_budget_exhausted { files_scanned; _ }) ->
-        Alcotest.(check int)
-          "aborted before reading any durable file"
-          0
-          files_scanned
-      | Error error ->
-        Alcotest.failf
-          "expected Scan_budget_exhausted, got: %s"
-          (M.error_to_string error)
-      | Ok _ -> Alcotest.fail "expired budget completed a full scan")
-
-(* The safety property the budget must not break: a partial scan sees fewer
-   live references than exist, so writing its candidate set would mark a
-   referenced blob for deletion on the next pass. *)
-let test_maintenance_exhausted_budget_leaves_candidate_snapshot_untouched () =
-  with_one_live_and_one_dead_blob (fun ~base_path ~store:_ ~live:_ ~dead ->
-      let complete = maintenance_ok ~base_path ~mode:M.Observe_only in
-      Alcotest.(check int) "complete scan records one candidate" 1
-        complete.candidates_recorded;
-      let snapshot_path = M.candidate_snapshot_path ~base_path in
-      let after_complete_scan = Fs_compat.load_file_opt snapshot_path in
-      Alcotest.(check bool)
-        "complete scan wrote a candidate snapshot"
-        true
-        (Option.is_some after_complete_scan);
-      (match
-         M.run
-           ~base_path
-           ~mode:M.Delete_previous_candidates
-           ~budget:(expired_budget ())
-       with
-       | Error (M.Scan_budget_exhausted _) -> ()
-       | Error error ->
-         Alcotest.failf
-           "expected Scan_budget_exhausted, got: %s"
-           (M.error_to_string error)
-       | Ok _ -> Alcotest.fail "expired budget completed a full scan");
-      Alcotest.(check (option string))
-        "partial scan did not rewrite the candidate snapshot"
-        after_complete_scan
-        (Fs_compat.load_file_opt snapshot_path);
-      Alcotest.(check bool)
-        "partial scan deleted nothing"
-        true
-        (Sys.file_exists
-           (Filename.concat
-              (Filename.concat (B.root_dir (B.create ~base_path))
-                 (String.sub dead.O.sha256 0 2))
-              dead.O.sha256)))
-
-let test_maintenance_unbounded_budget_still_completes () =
-  with_one_live_and_one_dead_blob (fun ~base_path ~store:_ ~live:_ ~dead:_ ->
-      let report = maintenance_ok ~base_path ~mode:M.Observe_only in
-      Alcotest.(check int) "one live reference" 1 report.live_references;
-      Alcotest.(check int) "two blobs observed" 2 report.blobs_observed;
-      Alcotest.(check int) "one candidate" 1 report.candidates_recorded)
 
 let test_maintenance_rejects_symbolic_link_shard () =
   with_temp_dir (fun base_path ->
@@ -841,7 +1003,7 @@ let test_maintenance_rejects_symbolic_link_shard () =
         (Filename.concat outside (String.make 64 'a'))
         "outside";
       Unix.symlink outside (Filename.concat (B.root_dir store) "aa");
-      match M.run ~base_path ~mode:M.Observe_only ~budget:M.Unbounded with
+      match M.run ~base_path ~mode:M.Observe_only with
       | Error (M.Blob_listing_failed { Tool_blob_store.path; _ }) ->
         Alcotest.(check string)
           "exact symbolic-link shard"
@@ -865,7 +1027,7 @@ let test_maintenance_rejects_symbolic_link_durable_source () =
         outside
         (Yojson.Safe.to_string
            (`Assoc
-             [ "output_ref", `String (O.encode_for_oas (O.Stored blob)) ]));
+             [ "output_ref", `String (O.encode_for_agent_core (O.Stored blob)) ]));
       let linked_source =
         Filename.concat
           (Common.masc_dir_from_base_path ~base_path)
@@ -873,7 +1035,7 @@ let test_maintenance_rejects_symbolic_link_durable_source () =
       in
       Fs_compat.mkdir_p (Filename.dirname linked_source);
       Unix.symlink outside linked_source;
-      (match M.run ~base_path ~mode:M.Observe_only ~budget:M.Unbounded with
+      (match M.run ~base_path ~mode:M.Observe_only with
        | Error (M.Durable_source_stat_failed { path; _ }) ->
          Alcotest.(check string) "exact linked source" linked_source path
        | Error error ->
@@ -905,7 +1067,7 @@ let test_maintenance_rejects_symbolic_link_candidate_snapshot () =
              ]));
       Sys.remove candidate_path;
       Unix.symlink outside candidate_path;
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates ~budget:M.Unbounded with
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
        | Error (M.Candidate_snapshot_read_failed { path; _ }) ->
          Alcotest.(check string) "exact linked snapshot" candidate_path path
        | Error error ->
@@ -1103,6 +1265,14 @@ let () =
             `Quick
             test_maintenance_malformed_reference_fails_closed;
           Alcotest.test_case
+            "maintenance noncanonical reference fails closed"
+            `Quick
+            test_maintenance_noncanonical_reference_fails_closed;
+          Alcotest.test_case
+            "maintenance ignores marker embedded in prose"
+            `Quick
+            test_maintenance_ignores_marker_embedded_in_prose;
+          Alcotest.test_case
             "maintenance keeps wire-capture reference within retention"
             `Quick
             test_maintenance_keeps_wire_capture_reference_within_retention;
@@ -1115,6 +1285,10 @@ let () =
             `Quick
             test_maintenance_does_not_scan_repository_mirrors;
           Alcotest.test_case
+            "maintenance ignores trajectory previews"
+            `Quick
+            test_maintenance_does_not_scan_trajectory_previews;
+          Alcotest.test_case
             "maintenance rechecks candidate referenced before startup"
             `Quick
             test_maintenance_rechecks_candidate_referenced_before_startup;
@@ -1123,9 +1297,21 @@ let () =
             `Quick
             test_maintenance_keeps_normalized_tool_call_blob_reference;
           Alcotest.test_case
+            "maintenance follows typed result manifest"
+            `Quick
+            test_maintenance_follows_typed_result_manifest;
+          Alcotest.test_case
+            "maintenance rejects malformed typed result manifest"
+            `Quick
+            test_maintenance_rejects_malformed_typed_result_manifest;
+          Alcotest.test_case
             "maintenance malformed normalized blob fails closed"
             `Quick
             test_maintenance_malformed_normalized_blob_fails_closed;
+          Alcotest.test_case
+            "maintenance ignores route evidence artifact schema"
+            `Quick
+            test_maintenance_ignores_route_evidence_artifact_schema;
           Alcotest.test_case
             "maintenance truncated normalized blob fails closed"
             `Quick
@@ -1146,18 +1332,6 @@ let () =
             "maintenance rejects symbolic-link candidate snapshot"
             `Quick
             test_maintenance_rejects_symbolic_link_candidate_snapshot;
-          Alcotest.test_case
-            "maintenance exhausted budget is a typed error"
-            `Quick
-            test_maintenance_exhausted_budget_is_a_typed_error;
-          Alcotest.test_case
-            "maintenance exhausted budget leaves candidate snapshot untouched"
-            `Quick
-            test_maintenance_exhausted_budget_leaves_candidate_snapshot_untouched;
-          Alcotest.test_case
-            "maintenance unbounded budget still completes"
-            `Quick
-            test_maintenance_unbounded_budget_still_completes;
         ] );
       ( "atomicity",
         [

@@ -15,12 +15,18 @@ val audience_for_post
   -> (audience, board_error) result
 (** Parse the immutable audience of a new post. A [Direct] post requires exact
     targets; a targetless or broadcast Direct post is rejected before
-    persistence. Malformed target syntax also fails closed. *)
+    persistence. A target candidate {!Agent_id.of_string} rejects is read as
+    prose, not as a failed address, so it neither becomes a target nor rejects
+    the post. *)
 
 val audience_for_comment : content:string -> (audience, board_error) result
 (** An unaddressed comment belongs to [Thread_participants]. *)
 
 val audience_for_reaction : audience
 (** Reactions are structural thread activity and carry no textual address. *)
+
+val audience_for_vote : audience
+(** Votes are structural thread activity too; the keeper router selects the
+    voted-on author from the signal payload. *)
 
 val audience_label : audience -> string

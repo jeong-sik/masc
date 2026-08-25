@@ -77,6 +77,21 @@ let tool_success_of_record record =
   | Some value -> value
   | None -> false
 
+let tool_record_is_deferred record =
+  Safe_ops.json_string_opt "disposition" record = Some "deferred"
+
+(* Every producer writes [result_bytes] (the [log_call] callers in
+   keeper_hooks_agent_core, keeper_tool_composition_surface and
+   mcp_server_eio_call_tool all pass it).  A row without it is malformed:
+   it is dropped from every aggregate and counted in [malformed]. *)
+let result_bytes_of_record record =
+  match record with
+  | `Assoc fields ->
+    (match List.assoc_opt "result_bytes" fields with
+     | Some (`Int bytes) -> Some bytes
+     | _ -> None)
+  | _ -> None
+
 let hour_key_of_record record =
   let hour_of_unix ts =
     let tm = Unix.gmtime ts in
@@ -133,7 +148,7 @@ let source_metadata_fields () =
   Dashboard_tool_source_freshness.keeper_tool_call_io_fields
     ~dashboard_surface ()
 
-let empty_summary ~window_hours ~n ~sampling_mode =
+let empty_summary ~window_hours ~n ~sampling_mode ~deferred ~malformed =
   `Assoc
     (source_metadata_fields ()
     @ [ ("generated_at", `String (Masc_domain.now_iso ()))
@@ -149,6 +164,8 @@ let empty_summary ~window_hours ~n ~sampling_mode =
     ; ("total", `Int 0)
     ; ("success", `Int 0)
     ; ("failure", `Int 0)
+    ; ("deferred", `Int deferred)
+    ; ("malformed", `Int malformed)
     ; ("success_rate", `Float 0.0)
     ; ("by_tool", `List [])
     ; ("by_keeper", `List [])
@@ -171,8 +188,19 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     | _ ->
       (Keeper_tool_call_log.read_recent ~n (), "recent_n", None)
   in
+  let deferred_records, records = List.partition tool_record_is_deferred records in
+  let deferred = List.length deferred_records in
+  let malformed, records =
+    List.fold_left
+      (fun (malformed, acc) record ->
+        match result_bytes_of_record record with
+        | Some result_bytes -> (malformed, (record, result_bytes) :: acc)
+        | None -> (malformed + 1, acc))
+      (0, []) records
+  in
+  let records = List.rev records in
   if records = [] then
-    empty_summary ~window_hours ~n ~sampling_mode
+    empty_summary ~window_hours ~n ~sampling_mode ~deferred ~malformed
   else
   let total = ref 0 in
   let success = ref 0 in
@@ -204,7 +232,7 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
   in
   (* error category -> count *)
   let failure_cats : (string, int ref) Hashtbl.t = Hashtbl.create 32 in
-  List.iter (fun record ->
+  List.iter (fun (record, output_chars) ->
     incr total;
     (* [tool] and [keeper] become bucket keys in the dashboard
        histogram.  A bare "unknown" bucket appears in the same column
@@ -229,25 +257,6 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
          | Some (`Int i) -> Float.of_int i
          | _ -> 0.0)
       | _ -> 0.0
-    in
-    let output_chars = match record with
-      | `Assoc fields ->
-        (match List.assoc_opt "result_bytes" fields with
-         | Some (`Int i) -> i
-         | _ ->
-           (* Fallback for old entries that pre-date [result_bytes].
-              Output may be either an inline string (legacy) or a
-              normalized blob object {"_blob":{...,"bytes":N,...}}
-              (new format introduced when marker double-escape was
-              eliminated from the telemetry layer). *)
-           (match List.assoc_opt "output" fields with
-            | Some (`String s) -> String.length s
-            | Some (`Assoc [("_blob", `Assoc blob)]) ->
-              (match List.assoc_opt "bytes" blob with
-               | Some (`Int n) -> n
-               | _ -> 0)
-            | _ -> 0))
-      | _ -> 0
     in
     let was_truncated = match record with
       | `Assoc fields -> List.assoc_opt "truncated_to" fields <> None
@@ -400,6 +409,8 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     ("total", `Int total_n);
     ("success", `Int success_n);
     ("failure", `Int (total_n - success_n));
+    ("deferred", `Int deferred);
+    ("malformed", `Int malformed);
     ("success_rate", `Float (Float.round (rate *. 100.0) /. 100.0));
     ("by_tool", `List by_tool);
     ("by_keeper", `List by_keeper);

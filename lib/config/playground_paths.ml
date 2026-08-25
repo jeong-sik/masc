@@ -21,7 +21,7 @@ let all_playgrounds_prefix : string =
 
 (** Strip the [keeper-...-agent] canonical wrapper when present,
     returning the inner short name.  E.g.
-    ["keeper-masc-improver-agent"] -> ["masc-improver"].
+    ["keeper-example-keeper-agent"] -> ["example-keeper"].
 
     The MCP session resolver generates canonical names via
     [keeper_agent_name] in [keeper_types_profile.ml], but playground
@@ -114,11 +114,42 @@ let parse_playground_file_path ~base_path ~abs_path =
             }
       in
       match String.split_on_char '/' rel with
-      | ".masc" :: "playground" :: "docker" :: keeper_name :: segments ->
+      (* Pattern position cannot call a function, so the segment is bound and
+         compared against the SSOT in a guard rather than written inline. *)
+      | dir :: "playground" :: "docker" :: keeper_name :: segments
+        when String.equal dir Common.masc_dirname ->
         safe_relative keeper_name segments
-      | ".masc" :: "playground" :: keeper_name :: segments ->
+      | dir :: "playground" :: keeper_name :: segments
+        when String.equal dir Common.masc_dirname ->
         safe_relative keeper_name segments
       | _ -> None
+;;
+
+(* The [repos/<repo_id>/<rel>] anchor inside one keeper's bundle.
+
+   Split out because two callers reach it from different starting points: the
+   absolute parser below arrives after stripping the playground prefix, and a
+   producer that already knows whose bundle it is holds the bundle-relative
+   form directly -- an action_radius target_path is written that way, and the
+   sandbox flavour changes where the bundle lives on disk, not what the path
+   inside it looks like. Reconstructing an absolute path just to strip it
+   again would make the caller assert a layout it does not know. *)
+let parse_bundle_relative_repo_path_segments = function
+  | "repos" :: repo :: rest when repo <> "" && rest <> [] ->
+    Some (repo, String.concat "/" rest)
+  | _ -> None
+;;
+
+let parse_bundle_relative_repo_path bundle_relative =
+  parse_bundle_relative_repo_path_segments (String.split_on_char '/' bundle_relative)
+;;
+
+(* The inverse. Written here so the [repos] segment has one spelling: a caller
+   that built the path itself would be a second place that decides what the
+   anchor looks like, and the parser above would stop being the authority the
+   moment they disagreed. *)
+let bundle_relative_repo_path ~repo_id relative_path =
+  String.concat "/" [ "repos"; repo_id; relative_path ]
 ;;
 
 (* RFC-0128 §4.5 — parse a sandbox playground absolute file path back
@@ -159,14 +190,20 @@ let parse_playground_repo_path ~base_path ~abs_path =
          Layouts accepted:
            .masc/playground/<keeper>/repos/<id>/<rel>          (Local)
            .masc/playground/docker/<keeper>/repos/<id>/<rel>   (Docker) *)
+      (* The Docker reading is tried first and the Local one is the fallback,
+         which is what the two ordered patterns used to do. It matters for a
+         keeper actually named "docker": [.masc/playground/docker/repos/<id>/x]
+         is that keeper's file, and reading the name as the Docker marker would
+         lose it. *)
+      let after_keeper = function _keeper :: rest -> Some rest | [] -> None in
+      let repo_path segments =
+        Option.bind (after_keeper segments) parse_bundle_relative_repo_path_segments
+      in
       match segs with
       | ".masc" :: "playground" :: rest -> (
-        match rest with
-        | "docker" :: _keeper :: "repos" :: repo :: r
-          when repo <> "" && r <> [] ->
-          Some (repo, String.concat "/" r)
-        | _keeper :: "repos" :: repo :: r when repo <> "" && r <> [] ->
-          Some (repo, String.concat "/" r)
-        | _ -> None)
+        let docker_reading =
+          match rest with "docker" :: below -> repo_path below | _ -> None
+        in
+        match docker_reading with Some found -> Some found | None -> repo_path rest)
       | _ -> None
 ;;

@@ -1,11 +1,12 @@
 open Alcotest
 
-module TR = Masc.Keeper_tool_resolution
+module TR = Masc.Keeper_tool_descriptor_resolution
 
 (** RFC-0084 §1.4, §6.2 — runtime routing projection.
 
-    [Keeper_tool_resolution.runtime_decision] is the SSOT entry for runtime
-    tool-name routing. [Keeper_tool_resolution.canonical_tool_name] is the
+    [Keeper_tool_descriptor_resolution.runtime_decision] is the SSOT entry for
+    runtime tool-name routing.
+    [Keeper_tool_descriptor_resolution.canonical_tool_name] is the
     pure string projection over that typed decision.
 
     Test corpus: a deterministic set of names covering the three outcome
@@ -13,8 +14,8 @@ module TR = Masc.Keeper_tool_resolution
     edge cases (empty string, all-internal, all-public).
 
     For each name, assert:
-      canonical_string(Keeper_tool_resolution.runtime_decision name)
-        = Keeper_tool_resolution.canonical_tool_name name
+      canonical_string(Keeper_tool_descriptor_resolution.runtime_decision name)
+        = Keeper_tool_descriptor_resolution.canonical_tool_name name
 *)
 
 let names_to_probe =

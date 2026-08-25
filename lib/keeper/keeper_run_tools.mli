@@ -11,11 +11,16 @@ open Keeper_agent_result
 open Keeper_agent_error
 open Keeper_agent_prompt_metrics
 
-(** Mutable accumulator for OAS hook callbacks.
+(** Mutable accumulator for AGENT_CORE hook callbacks.
 
-    OAS hooks (before_turn, on_tool_executed) cannot return values, so
+    AGENT_CORE hooks (before_turn, on_tool_executed) cannot return values, so
     they write into this single mutable record during Agent.run execution.
-    After execution completes, {!freeze} produces an immutable snapshot. *)
+    After execution completes, {!freeze} produces an immutable snapshot.
+    Concurrent tool completions serialize the whole [on_tool_executed]
+    observation transaction per run; observers must therefore remain bounded
+    and must not perform open-ended I/O while holding that boundary. The
+    observer body remains cancellable; only releasing the per-run mutex is an
+    exception-safe, non-suspending finalizer. *)
 type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
@@ -29,9 +34,12 @@ type hook_accumulator =
   ; mutable prompt_blocks : Turn_record.prompt_block list
   ; mutable extra_system_context_digest : string option
   ; mutable extra_system_context_size : int option
+  ; mutable assistant_turn_texts : string list
+    (** One entry per completed provider turn, newest first: the turn's [Text]
+        blocks concatenated in emission order, "" when the turn emitted none. *)
   }
 
-(** Immutable snapshot of hook outputs after OAS execution completes. *)
+(** Immutable snapshot of hook outputs after AGENT_CORE execution completes. *)
 type hook_outputs =
   { out_meta : Keeper_meta_contract.keeper_meta
   ; out_tool_calls : tool_call_detail list
@@ -49,22 +57,23 @@ val freeze : hook_accumulator -> hook_outputs
 
     Hook mutations flow through {!acc}, receipt refs are kept for
     facade post-processing writes, and [agent_ref] is created locally
-    at the OAS call site. *)
+    at the AGENT_CORE call site. *)
 type agent_setup =
-  { tools : Agent_sdk.Tool.t list
+  { tools : Agent_core.Tool.t list
   ; cleanup : unit -> unit
-  ; terminal_effect_state : unit -> Keeper_tools_oas.terminal_effect_state
+  ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; user_message : string
-  ; hooks : Agent_sdk.Hooks.hooks
-  ; model_input_projection : Agent_sdk.Agent.model_input_projection
+  ; hooks : Agent_core.Hooks.hooks
+  ; model_input_projection : Agent_core.Agent.model_input_projection
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list
-  ; final_oas_turn_ordinal_ref : int option ref
+  ; final_agent_core_turn_ordinal_ref : int option ref
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
+  ; receipt_lane_attempt_index_ref : int ref
   ; receipt_response_text_present_ref : bool ref
   }
 
@@ -80,12 +89,12 @@ val prepare_agent_setup
   -> turn_system_prompt:string
   -> user_message:string
   -> dynamic_context:string
-  -> history_messages:Agent_sdk.Types.message list
-  -> shared_context:Agent_sdk.Context.t
-  -> context_injector:Agent_sdk.Hooks.context_injector
+  -> history_messages:Agent_core.Types.message list
+  -> shared_context:Agent_core.Context.t
+  -> context_injector:Agent_core.Hooks.context_injector
   -> start_turn_count:int
-  -> generation:int
   -> keeper_turn_id:int
+  -> turn_kind:Turn_record.turn_kind
   -> runtime_id:string
   -> is_retry:bool
   -> config_root:string
@@ -94,6 +103,7 @@ val prepare_agent_setup
   -> ?runtime_manifest_context:Keeper_runtime_manifest.turn_context
   -> ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit)
   -> ?continuation_channel:Keeper_continuation_channel.t
+  -> ?on_tool_result_ready:(tool_call_id:string -> unit)
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> unit
-  -> (agent_setup, Agent_sdk.Error.sdk_error) result
+  -> (agent_setup, Agent_core.Error.t) result

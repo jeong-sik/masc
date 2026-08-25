@@ -47,8 +47,3 @@ val bind : 'a t -> ('a -> 'b t) -> 'b t
 
 val map : ('a -> 'b) -> 'a t -> 'b t
 (** Functorial map over [Ok]. *)
-
-val to_option : 'a t -> 'a option
-(** [to_option o] discards the error payload.
-    Provided as a *migration shim* for sites that currently return
-    [option] — new code should pattern-match on the [error] instead. *)

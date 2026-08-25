@@ -1,18 +1,13 @@
 ---
 status: live
-last_verified: 2026-06-29
-code_refs:
-  - lib/keeper/
-  - lib/mcp_server.ml
-  - lib/keeper/keeper_supervisor.ml
 ---
 
 # Product Operating Plan
 
-> Current package version: v0.21.2
-> Latest changelog entry: v0.21.2 (2026-07-20)
-> Latest published GitHub release: v0.21.1 (2026-07-20)
-> Updated: 2026-07-03
+> Current package version: v0.24.0
+> Latest changelog entry: v0.24.0 (2026-08-22)
+> Latest published GitHub release: v0.24.0 (2026-08-22)
+> Updated: 2026-08-16
 > Release line: pre-1.0 (`0.y.z`)
 
 ## Product Scope
@@ -45,7 +40,7 @@ The front-door promise is level 1. Levels 2-3 are supported surfaces.
 | Auth and API contract posture | Not done for product promise | Advanced / supporting | `docs/PRODUCT-REVIEW.md` | non-local default is still too weak, REST contract is not crisp | design + narrow hardening slices |
 | Config introspection | Working but split | Supporting | `masc_config`, `/api/v1/dashboard/config`, open issues `#3364`, `#3365`, `#3363` | read contract is duplicated and not yet centralized enough to promise as SSOT | centralize config and expose one canonical read-only snapshot |
 | Release evidence and local proof | Working | Front door | `docs/RELEASE-EVIDENCE.md`, `scripts/release-evidence.sh`, release workflow artifact | deployment-specific proof is still env-gated | keep release/main evidence bundle attached to artifacts |
-| Release and doc truth | Working | Front door | doc truth lane + version truth + OAS pin doc sync | release/doc changes previously bypassed runtime gates | keep build/lint/health tied to release/doc/version changes |
+| Release and doc truth | Working | Front door | doc truth lane + version truth + agent core pin doc sync | release/doc changes previously bypassed runtime gates | keep build/lint/health tied to release/doc/version changes |
 
 Status legend:
 
@@ -58,48 +53,93 @@ Status legend:
 
 ### Labels
 
-Each new issue should end with:
+Classification is declared in the issue body and projected onto labels. Nothing else sets them.
 
-- exactly one `type:*`
-- exactly one `area:*`
-- exactly one `target:*`
-- optional `release-blocker`
-- optional `product-gap`
-- temporary `triage-required` while the issue is missing one of the required planning labels
+````text
+```masc-triage
+kind: defect
+area: turn
+impact: breaks-continuity
+root: silent
+must-do: true
+```
+````
 
-Canonical label set:
+The vocabulary SSOT is `.github/issue-taxonomy.json`. The `Issue Taxonomy` workflow reads the block,
+validates every value against that file, and reconciles the labels. It never invents a label:
+if the repository drifts from the SSOT the run fails and names the missing labels.
+`APPLY=1 bash scripts/sync-issue-labels.sh` puts the repository back in line.
 
-| Group | Labels |
-|------|--------|
-| Type | `type:bug`, `type:friction`, `type:feature`, `type:architecture`, `type:docs` |
-| Area | `area:workspace collaboration`, `area:supervised-execution`, `area:dashboard`, `area:operator`, `area:transport`, `area:config`, `area:ci`, `area:docs`, `area:experimental` |
-| Target | `target:now`, `target:next`, `target:later` |
-| Gates | `release-blocker`, `product-gap` |
-| Root cause | `root-cause:SSOT`, `root-cause:TEL`, `root-cause:BND`, `root-cause:SIL`, `root-cause:VAR`, `root-cause:STR`, `root-cause:DET` |
+| Axis | Cardinality | Values |
+|------|-------------|--------|
+| `kind` | exactly one | `defect` `gap` `capability` `erosion` `inquiry` |
+| `area` | exactly one | `turn` `continuity` `collab` `goal-task` `verification` `tools` `runtime` `transport` `dashboard` `connector` `observability` `persistence` `ci` |
+| `impact` | exactly one | `breaks-continuity` `breaks-collab` `blinds-operator` `degrades` `internal` |
+| `root` | zero or more | `ssot` `silent` `string` `variant` `boundary` `telemetry` `det` `ndt` |
+| `must-do` | flag | `true` when the product promise is broken right now |
 
-`root-cause:*` is optional and applied per `docs/spec/16-root-cause-rubric.md`. Multiple labels are allowed: empirical sweep 2026-04-19 found 60% of issues match two or more categories (e.g. a boundary violation that also silently swallows errors). Unlike `type:*` / `area:*` / `target:*`, missing a `root-cause:*` label is not a triage violation — the rubric only applies when a structural marker matches.
+Two rules settle the overlaps the table cannot spell out:
 
-Triage defaults:
+- `area` is where the fix lands, not where the symptom shows. A panel rendering a stale metric is
+  `dashboard` when the panel is wrong and `observability` when the metric is.
+- `impact` takes the highest row that applies. The values are ordered, so an issue that both blinds the
+  operator and stops turns is `breaks-continuity`.
 
-- `target:now`
-  - current product promise is broken or untrustworthy
-- `target:next`
-  - advanced workflow improvement after the front door is reliable
-- `target:later`
-  - large extraction, long architecture cleanup, or speculative platform work
+### Priority comes from impact, not from an assertion
+
+`impact` is ordered, and that order is the priority order:
+
+1. `breaks-continuity` - turns stop, or a keeper cannot recall its own last ten turns
+2. `breaks-collab` - keepers stop reaching each other, or output lands where nobody reads it
+3. `blinds-operator` - it runs, but nobody can see it
+4. `degrades` - friction, performance, or accuracy
+5. `internal` - development flow only
+
+There is no separate priority or scheduling label. Severity is derived from which product failure the issue
+causes, so it can be argued about with evidence instead of asserted. A roadmap decides *when* work happens;
+a label decides *what is at stake*.
+
+`root` is optional and follows `docs/spec/16-root-cause-rubric.md`. A missing `root` is not a triage
+violation; the rubric only applies when a structural marker actually matches. Multiple values are allowed,
+and overlap is real - a boundary violation that also swallows errors takes both - but it is rare in the
+intake we actually have: on 2026-08-22, 48 of the 820 open issues that declare `root` name two or more,
+and 401 declare none. This paragraph used to quote 60% from the 2026-04-19 sweep; that number stopped
+describing the repository.
 
 ### Issue intake
 
-Use issue forms, not blank issues, for normal product work.
+Humans file through the issue form; keepers file with `gh issue create`. Both produce the same fenced
+`masc-triage` block, so there is one format and one parser. An issue filed without the block gets a comment
+naming the expected shape, and no labels. Do not pass `--label` to `gh issue create`: labels set that way
+have no declaration behind them, and the sweep takes them off again.
 
-- `type:bug`
-  - broken behavior, regression, incorrect truth
-- `type:friction`
-  - usable but annoying or confusing workflow
-- `type:feature`
-  - new capability or missing affordance
+The workflow also sweeps every open issue once an hour, because the `issues` events do not all arrive - 62
+issues were filed on 2026-08-21 against 16 workflow runs. The sweep, not the event, is what keeps labels
+and bodies in agreement. It touches only the issues where the two disagree, so a quiet repository produces
+no comments and no notifications.
 
-Mark `product-gap` when code exists but the product promise still should not be trusted.
+### PR status labels
+
+The `Issue Taxonomy` workflow skips pull requests outright: `kind`/`area`/`impact` describe a problem and a
+PR is an answer. Practice disagrees - on 2026-08-22, 15 of 29 open PRs and 13 of the last 30 merged ones
+carried taxonomy labels, applied by hand at `gh pr create --label` time. Nothing declares those and nothing
+reconciles them, so they are the one place in this model where a label asserts a classification with no
+source behind it. Either the hand-labelling stops or PRs get a declaration of their own; today it is
+neither.
+
+What a PR does carry by machine is `pr/*`, projected from GitHub's own view of it by the `PR Status Labels`
+workflow out of `.github/pull-request-labels.json`.
+
+| Label | Set when |
+|-------|----------|
+| `pr/conflict` | `mergeable` is `CONFLICTING`. GitHub cannot build a merge commit in that state, so no new `pull_request` workflow starts and the checks stop updating - a PR that conflicted from the start shows none at all (#29332) |
+| `pr/review-changes` | the review decision is `CHANGES_REQUESTED` |
+| `pr/review-approved` | the review decision is `APPROVED` |
+| `pr/unresolved` | at least one review thread is still open |
+
+Nothing gates on these and nobody sets them by hand. Conflict flips when main moves and resolving a thread
+emits no webhook at all, so the workflow sweeps every open PR on push-to-main and once an hour as well as
+on PR and review events.
 
 ### PR rules
 
@@ -123,7 +163,7 @@ Each PR should link at least one issue and state which promise it affects:
 - while pre-1.0, `0.y.0` carries one promise train
 - `0.y.z` releases stabilize the current promise only
 - `1.0.0` stays reserved until the front-door promise is trustworthy without release-truth caveats
-- do not tag with open `release-blocker`
+- do not tag with open `must-do` issues
 - do not tag if version truth is broken across `dune-project`, `masc.opam`, `ROADMAP.md`, and `CHANGELOG.md`
 
 ## 6-8 Week Tracks

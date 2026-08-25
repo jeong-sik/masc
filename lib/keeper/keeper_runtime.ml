@@ -6,35 +6,6 @@ open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile
 
-(** #10061: compare personality text fields ignoring leading/trailing
-    whitespace.  The TOML heredoc parser drops the newline before the
-    closing triple-quote; the state JSON writer preserves the in-
-    memory value.  That 1-byte drift drives a re-sync storm on every
-    hot-reload tick unless the compare normalizes whitespace.
-
-    Layer 1 (personality SSOT unification, see
-    [planning/2026-04-25-keeper-identity-canonicalization-rfc.md]):
-    [String.trim] alone is insufficient — when the persisted text
-    exceeds [Keeper_config.prompt_render_max_bytes] (e.g. a 357-byte
-    [instructions]), the read path normalises to ~319 bytes, while
-    [target_instructions] computed from
-    [apply_default defaults.instructions meta.instructions] keeps the
-    raw 357-byte value.  trim-only compare flagged that 38-byte gap as
-    drift on every reconcile tick (~2880 redundant writes/day).
-    Apply the same byte-cap normalisation on both sides so write
-    preserves disk-of-record (raw bytes), but compare uses the
-    capped form that the prompt actually renders.  Disk data is
-    preserved; loop terminates. *)
-let personality_text_equal =
-  Keeper_runtime_personality_diff.personality_text_equal
-let personality_field_diff_entry =
-  Keeper_runtime_personality_diff.personality_field_diff_entry
-let personality_diff_summary =
-  Keeper_runtime_personality_diff.personality_diff_summary
-let personality_field_diff_summary =
-  Keeper_runtime_personality_diff.personality_field_diff_summary
-
-
 type boot_meta_resolution = {
   meta : keeper_meta;
   materialized : bool;
@@ -165,7 +136,11 @@ type autoboot_exclusion = {
 }
 
 let autoboot_exclusion_reason config name =
-  match read_meta_file_path (keeper_meta_path config name) with
+  match
+    read_meta_file_path
+      ~ownership_root:config.Workspace.base_path
+      (keeper_meta_path config name)
+  with
   | Ok (Some meta) ->
     if meta.paused then Some Paused
     else
@@ -254,7 +229,7 @@ let sandbox_profile_required_boot_error ~keeper_name ~manifest_path =
 let effective_declarative_runtime_id
     (_defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) =
-  (* persona⊥{model,runtime}: the keeper's runtime is assigned in runtime.toml,
+  (* The keeper's runtime is assigned in runtime.toml,
      not in [defaults].  Delegate to {!Keeper_meta_contract.runtime_id_of_meta}
      (the dispatcher) so the declare/status view and the wire share ONE source
      by construction — divergence is structurally impossible, not convention-
@@ -272,10 +247,13 @@ let keeper_meta_persistent_drift_categories
     ~(target : keeper_meta) =
   List.filter_map Fun.id
     [
-      drift_if "persona" (current.persona <> target.persona);
       drift_if "instructions"
-        (not (personality_text_equal current.instructions target.instructions));
-      drift_if "oas_env" (current.oas_env <> target.oas_env);
+        (not
+           (Keeper_runtime_instructions.text_equal
+              current.instructions target.instructions));
+      drift_if "autonomous_instructions"
+        (current.autonomous_instructions <> target.autonomous_instructions);
+      drift_if "agent_core_env" (current.agent_core_env <> target.agent_core_env);
     ]
 
 let keeper_meta_overlay_drift_categories
@@ -285,9 +263,6 @@ let keeper_meta_overlay_drift_categories
   List.filter_map Fun.id
     [
       drift_if "proactive" (current.proactive <> target.proactive);
-      drift_if "active_goal_ids"
-        (Option.is_some defaults.active_goal_ids
-         && current.active_goal_ids <> target.active_goal_ids);
       drift_if "autoboot_enabled"
         (current.autoboot_enabled <> target.autoboot_enabled);
       drift_if "mention_targets"
@@ -331,7 +306,7 @@ let ensure_keeper_meta_with_cause config name =
     (
     (* Re-sync ALL declarative keeper fields from profile/env defaults on bootstrap.
        Persisted meta may have stale values from a previous session;
-       persona config (TOML) plus explicit env overrides are the source of truth.
+       Keeper config plus explicit env overrides are the source of truth.
        Fields where TOML has [Some v] are overwritten; [None] keeps runtime value. *)
     let defaults_result =
       profile_defaults_result_for_config config meta.name
@@ -340,32 +315,29 @@ let ensure_keeper_meta_with_cause config name =
     | Error error ->
         Error (profile_defaults_boot_error ~keeper_name:meta.name error)
     | Ok defaults ->
-    let target_persona = apply_default_opt defaults.persona_name meta.persona in
-
     (* --- Proactive --- *)
     let target_proactive =
       apply_default defaults.proactive_enabled Keeper_config.default_proactive_enabled in
-    (* --- Personality --- *)
+    (* --- Keeper instructions --- *)
     let target_instructions = apply_default defaults.instructions meta.instructions in
+    let target_autonomous_instructions =
+      apply_default_opt defaults.autonomous_instructions meta.autonomous_instructions
+    in
 
     (* --- Policy --- *)
     let target_autoboot_enabled =
       apply_default defaults.autoboot_enabled meta.autoboot_enabled in
     let target_mention_targets =
       match defaults.mention_targets with [] -> meta.mention_targets | xs -> xs in
-    let target_active_goal_ids =
-      apply_default defaults.active_goal_ids meta.active_goal_ids in
     (* Defense-in-depth (#11080 sibling): keeper sandbox_profile MUST be
        declared. The previous behaviour silently fell through to
        [default_sandbox_profile = Local] when TOML omitted the key,
        which strips docker isolation from any operator who forgets to
-       set it (or copies a stale persona JSON: persona profiles are
-       declared elsewhere as not allowed to own this field). Reject at
+       set it. Reject at
        reconcile time so the keeper visibly fails to boot rather than
        running un-sandboxed.
 
-       Persona-only keepers cannot satisfy this check today and must
-       gain a TOML wrapper that sets [sandbox_profile]. The
+       Every Keeper must declare a TOML sandbox profile. The
        [Keeper_types_profile.default_sandbox_profile] constant is left
        in place because other read paths (JSON parser, env override,
        turn_up_args) still need a value when reading already-persisted
@@ -400,22 +372,25 @@ let ensure_keeper_meta_with_cause config name =
     let target_always_allow =
       apply_default_opt defaults.always_allow meta.always_allow
     in
-    (* --- OAS Env --- *)
-    let target_oas_env =
-      match defaults.oas_env with
-      | [] -> meta.oas_env
+    (* --- AGENT_CORE Env --- *)
+    let target_agent_core_env =
+      match defaults.agent_core_env with
+      | [] -> meta.agent_core_env
       | env -> env
+    in
+    (* --- RFC-0389 tool surface --- *)
+    let target_tool_groups =
+      apply_default_opt defaults.tool_groups meta.tool_groups
     in
     let overlayed =
       { meta with
-        persona = target_persona;
         proactive = {
           enabled = target_proactive;
         };
         instructions = target_instructions;
+        autonomous_instructions = target_autonomous_instructions;
         autoboot_enabled = target_autoboot_enabled;
         mention_targets = target_mention_targets;
-        active_goal_ids = target_active_goal_ids;
         sandbox_profile = target_sandbox_profile;
         sandbox_image = target_sandbox_image;
         network_mode = target_network_mode;
@@ -423,7 +398,8 @@ let ensure_keeper_meta_with_cause config name =
         telemetry_feedback_enabled = target_tf_enabled;
         telemetry_feedback_window_hours = target_tf_window;
         always_allow = target_always_allow;
-        oas_env = target_oas_env;
+        agent_core_env = target_agent_core_env;
+        tool_groups = target_tool_groups;
       }
     in
     (* Keep the runtime snapshot honest as well as the live overlay for fields
@@ -438,13 +414,7 @@ let ensure_keeper_meta_with_cause config name =
         ~target:overlayed
     in
     emit_keeper_meta_overlay_drift ~keeper_name:meta.name overlay_cats;
-    (* Keep the runtime snapshot honest as well as the live overlay.  The
-       previous overlay-only path made operators see stale JSON forever
-       (for example persona=analyst while TOML declared masc-improver),
-       which hid prompt/tool/autonomy drift from health and bootstrap
-       checks. TOML-only [active_goal_ids] is overlaid in the returned meta but
-       does not trigger
-       a runtime JSON rewrite by themselves. *)
+    (* Keep the runtime snapshot honest as well as the live overlay. *)
     let cats =
       keeper_meta_persistent_drift_categories
         ~defaults
@@ -458,23 +428,47 @@ let ensure_keeper_meta_with_cause config name =
         meta.name;
       let updated_at = now_iso () in
       let effective_updated = { overlayed with updated_at } in
-      let persisted_updated =
-        { effective_updated with
-          active_goal_ids =
-            (match defaults.active_goal_ids with
-             | Some _ -> []
-             | None -> target_active_goal_ids)
-        }
-      in
-      match write_meta_deferred_runtime_sync config persisted_updated with
-      | Ok () -> Ok { effective_updated with meta_version = effective_updated.meta_version + 1 }
-      | Error e ->
+      let persisted_updated = effective_updated in
+      match
+        Keeper_owner_registry.apply_meta
+          ~base_path:config.base_path
+          ~keeper_name:persisted_updated.name
+          (Keeper_owner_reducer.Update_profile
+             { instructions = persisted_updated.instructions
+             ; autonomous_instructions = persisted_updated.autonomous_instructions
+             ; sandbox_profile = persisted_updated.sandbox_profile
+             ; sandbox_image = persisted_updated.sandbox_image
+             ; network_mode = persisted_updated.network_mode
+             ; allowed_paths = persisted_updated.allowed_paths
+             ; mention_targets = persisted_updated.mention_targets
+             ; proactive_enabled = persisted_updated.proactive.enabled
+             ; max_context_override = persisted_updated.max_context_override
+             ; autoboot_enabled = persisted_updated.autoboot_enabled
+             ; telemetry_feedback_enabled = persisted_updated.telemetry_feedback_enabled
+             ; telemetry_feedback_window_hours =
+                 persisted_updated.telemetry_feedback_window_hours
+             ; always_allow = persisted_updated.always_allow
+             ; agent_core_env = persisted_updated.agent_core_env
+             ; updated_at = persisted_updated.updated_at
+             })
+      with
+      | Ok (Some committed) ->
+        Ok committed
+      | Ok None ->
+        Error
+          (boot_meta_error
+             Meta_read_error
+             (Printf.sprintf
+                "ensure_keeper_meta: owner metadata disappeared for %s"
+                effective_updated.name))
+      | Error error ->
+        let detail = Keeper_owner_registry.command_error_to_string error in
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[("keeper", effective_updated.name); ("phase", "ensure_meta_resync")]
           ();
-        Log.Keeper.warn "ensure_keeper_meta: write_meta re-sync failed: %s" e;
-        Ok overlayed
+        Log.Keeper.warn "ensure_keeper_meta: owner re-sync failed: %s" detail;
+        Error (boot_meta_error Meta_read_error detail)
     end
     else Ok overlayed))
   | Ok None ->
@@ -591,18 +585,6 @@ let stop_supervisor_sweep base_path =
       Hashtbl.remove supervisor_sweeps base_path
     | None -> ())
 
-let update_supervisor_sweep_interval base_path interval_sec =
-  with_sweeps_ro (fun () ->
-    match Hashtbl.find_opt supervisor_sweeps base_path with
-    | Some pulse ->
-      let rhythm : Pulse.rhythm =
-        { base_s = interval_sec; min_s = interval_sec;
-          max_s = interval_sec; quiet = (0, 0) }
-      in
-      Pulse.set_rhythm pulse rhythm;
-      true
-    | None -> false)
-
 let start_supervisor_sweep ctx =
   let base_path = ctx.config.base_path in
   if supervisor_sweep_running base_path then ()
@@ -637,10 +619,10 @@ let start_supervisor_sweep ctx =
               (* Enumerate every phase so the compiler flags any new
                  variant added to [Keeper_state_machine.phase]. TOML
                  hot-reload only reconciles Running keepers; the other
-                 other phases skip (a Stopped/Crashed/Dead
+                 other phases skip (a Stopped/Crashed
                  keeper has no in-memory meta to update; a Compacting
                  or HandingOff keeper is mid-transition and reconcile
-                 would race; Offline / Paused / Failing / Overflowed /
+                 would race; Offline / Paused / Failing /
                  Draining / Restarting are all transient or paused
                  states). A future phase (e.g. Migrating, Healing)
                  would silently skip reconcile under [_ -> ()] without
@@ -654,16 +636,7 @@ let start_supervisor_sweep ctx =
                        entry.name
                        (ensure_keeper_meta_with_cause ctx.config entry.name)
                    with
-                   | Ok updated_meta ->
-                       (* Propagate the updated meta back into the registry so
-                          subsequent turns observe the new runtime_id (and
-                          any other reconciled fields) immediately.  Without
-                          this the file is updated but the in-memory
-                          [registry_entry.meta] stays stale until restart. *)
-                       Keeper_registry.update_meta_from_persisted
-                         ~base_path
-                         entry.name
-                         updated_meta
+                   | Ok _ -> ()
                    | Error e ->
                        Log.Keeper.warn
                          "TOML reconcile failed for %s: %s"
@@ -671,15 +644,13 @@ let start_supervisor_sweep ctx =
                          e)
               | Keeper_state_machine.Offline
               | Keeper_state_machine.Failing
-              | Keeper_state_machine.Overflowed
               | Keeper_state_machine.Compacting
               | Keeper_state_machine.HandingOff
               | Keeper_state_machine.Draining
               | Keeper_state_machine.Paused
               | Keeper_state_machine.Stopped
               | Keeper_state_machine.Crashed
-              | Keeper_state_machine.Restarting
-              | Keeper_state_machine.Dead -> ())
+              | Keeper_state_machine.Restarting -> ())
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Otel_metric_store.inc_counter
                Keeper_metrics.(to_string TomlReconcileSweepFailures)

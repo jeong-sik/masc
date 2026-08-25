@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0077", "0088", "0110"]
-implementation_prs: [15927]
 ---
 
 # RFC-0111: Goal mint atomicity — auto-goal uniqueness invariant at write boundary
@@ -138,14 +137,14 @@ P3 가 핵심 — concurrent mint 의 race window 가 진짜 닫힘. P5 는 cap 
 ## §5 Non-goals
 
 - **외부 protocol** (예: MCP `masc_goal_upsert` 의 wire schema 변경) — 본 RFC 는 *내부 mint API* 만. wire schema 는 별도.
-- **Goal-Keeper relation lifecycle** (예: keeper down 시 goal 처리) — RFC-OAS 또는 별도.
+- **Goal-Keeper relation lifecycle** (예: keeper down 시 goal 처리) — RFC-agent_core 또는 별도.
 - **Janitor 의 *idle* sweep 정책 자체** — Cap 의 의미 분리만, 정책 변경 아님.
 
 ## §6 Risk & rollback
 
 - **Risk 1**: P2 `Goal.t.source` 필드 추가가 disk format 변경. 옛 binary 가 새 format goal 읽기 가능해야 함. → P2 의 yojson decoder 가 missing `source` 필드 = default `Auto_system` 로 fallback (RFC-OAS-008 패턴).
 - **Risk 2**: P3 의 Eio.Mutex 가 mint-rate hot path 에 lock contention. → mint 는 (현재 측정) 분당 < 10 calls — overhead 무시 가능. RFC-0107 의 per-path Eio.Mutex 패턴 차용.
-- **Risk 3**: Legacy goal 의 `(auto)` 접미사 가 janitor sweep 의미 carry. P4 에서 sweep 결정이 `source` 기반으로 바뀌면 옛 goal sweep 제외 가능. → P4 migration step: 옛 goal scan, title 에 `(auto)` 있고 `source = Auto_system "legacy"` 면 `source = Auto_keeper_repair { keeper_name = <derive> }` 로 in-place 갱신.
+- **Risk 3**: Legacy goal 의 `(auto)` 접미사 가 janitor sweep 의미 carry. P4 에서 sweep 결정이 `source` 기반으로 바뀌면 옛 goal sweep 제외 가능. → P4 migration step: 옛 goal scan, title 에 `(auto)` 있고 `source = Auto_system "legacy"` 면 `source = Auto_keeper_repair { name = <derive> }` 로 in-place 갱신.
 
 Rollback: 각 Phase 별 단일 PR. P3 revert 가능 (mint API legacy path 한 PR 안에서 보존). P5 cap 분리 도 두 env knob 모두 default 값 유지하면 behavior unchanged.
 

@@ -201,7 +201,7 @@ let () =
   in
   let result = Masc_exec.Exec_dispatch.dispatch_pipeline stages in
   assert (String.trim result.stdout = "y");
-  assert (result.status <> Unix.WEXITED 124)
+  assert (result.status <> Process_eio.timed_out_status)
 
 (* --- dispatch forwards pipeline captured output chunks --- *)
 
@@ -295,7 +295,7 @@ let () =
       ~on_output_chunk:(fun chunk -> chunks := chunk :: !chunks)
       [ upstream_stage; timeout_stage ]
   in
-  assert (result.status = Unix.WEXITED 124);
+  assert (result.status = Process_eio.timed_out_status);
   assert (result.stdout = "visible");
   let streamed_stdout =
     List.rev !chunks
@@ -479,7 +479,21 @@ let () =
   in
   assert (result.status = Unix.WEXITED 1);
   assert (result.stdout = "");
-  assert (result.stderr = "nested pipeline not supported in native dispatch")
+  (* The message names what is missing rather than what is unsupported: a
+     stage that is itself a pipeline or a sequence needs a subshell. *)
+  let mentions_subshell haystack =
+    let needle = "subshell" in
+    let n = String.length needle in
+    let rec scan i =
+      if i + n > String.length haystack
+      then false
+      else if String.sub haystack i n = needle
+      then true
+      else scan (i + 1)
+    in
+    scan 0
+  in
+  assert (mentions_subshell result.stderr)
 
 (* --- dispatch_simple propagates sandbox runner (SND-05 regression) --- *)
 
@@ -549,7 +563,10 @@ let () =
           [
             Masc_exec.Redirect_scope.Fd_to_fd { src = 2; dst = 1 };
             Masc_exec.Redirect_scope.File
-              { fd = 1; target = dev_null; mode = Masc_exec.Redirect_scope.Write };
+              { fd = 1
+              ; target = Masc_exec.Redirect_scope.In_command_namespace dev_null
+              ; mode = Masc_exec.Redirect_scope.Write
+              };
           ];
         sandbox = docker_sandbox;
       }
@@ -581,7 +598,10 @@ let () =
         redirects =
           [
             Masc_exec.Redirect_scope.File
-              { fd = 2; target = dev_null; mode = Masc_exec.Redirect_scope.Write };
+              { fd = 2
+              ; target = Masc_exec.Redirect_scope.In_command_namespace dev_null
+              ; mode = Masc_exec.Redirect_scope.Write
+              };
           ];
         sandbox = docker_sandbox;
       }
@@ -619,7 +639,7 @@ let () =
             Masc_exec.Redirect_scope.File
               {
                 fd = 1;
-                target = unsupported_target;
+                target = Masc_exec.Redirect_scope.In_command_namespace unsupported_target;
                 mode = Masc_exec.Redirect_scope.Write;
               };
           ];
@@ -901,7 +921,10 @@ let () =
           redirects =
             [
               Masc_exec.Redirect_scope.File
-                { fd = 2; target = dev_null; mode = Masc_exec.Redirect_scope.Write };
+                { fd = 2
+              ; target = Masc_exec.Redirect_scope.In_command_namespace dev_null
+              ; mode = Masc_exec.Redirect_scope.Write
+              };
             ];
           sandbox = docker_sandbox;
         };
@@ -968,7 +991,7 @@ let () =
       }
   in
   match
-    Keeper_tool_execute_shell_ir.dispatch
+    Keeper_tooling.Execute_shell_ir.dispatch
       ~workdir:"/tmp"
       ~sandbox:(Masc_exec.Sandbox_target.host ())
       ir
@@ -978,5 +1001,103 @@ let () =
     assert (String.trim result.stdout = "adapter")
   | Error _ -> assert false
 
+(* Witness, not inference. A redirect surface has advertised something its
+   executor could not do before -- a file mode that errored out before the
+   process was ever spawned -- so a literal stdin is proved by a child that
+   read it and said so. [cat] with no arguments reads stdin: if the bytes do
+   not reach it, the output is empty or the read blocks, and either fails. *)
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "cat" |> Result.get_ok in
+  let content = "hello from a heredoc\n" in
+  let ir =
+    Simple
+      { bin
+      ; args = []
+      ; env = []
+      ; cwd = None
+      ; redirects = [ Masc_exec.Redirect_scope.Literal { bytes = content } ]
+      ; sandbox = Masc_exec.Sandbox_target.host ()
+      }
+  in
+  match
+    Keeper_tooling.Execute_shell_ir.dispatch
+      ~workdir:"/tmp"
+      ~sandbox:(Masc_exec.Sandbox_target.host ())
+      ~timeout_sec:10.
+      ir
+  with
+  | Ok result ->
+    if result.status <> Unix.WEXITED 0
+    then failwith "cat must exit zero when its stdin is a literal";
+    if result.stdout <> content
+    then
+      failwith
+        (Printf.sprintf
+           "the literal must reach the child verbatim: wanted %S, got %S"
+           content
+           result.stdout)
+  | Error _ -> failwith "a literal stdin must not be refused"
+;;
+
+(* [shell_command_gate.mli] says the facade refuses a nested pipeline so
+   callers need no flatten policy of their own.  That was true of
+   [lower_typed_pipeline], whose input is a [simple list] and cannot nest, and
+   false of [gate_typed], which takes any [Shell_ir.t].  Measured 2026-08-24:
+   [Pipeline [Pipeline [a; b]; c]] handed to [Execute_shell_ir.dispatch] ran.
+   [Unsupported_nested_pipeline] existed, had a tag, and was produced nowhere. *)
+let () =
+  with_eio @@ fun () ->
+  let module Adapter = Keeper_tooling.Execute_shell_ir in
+  let module Gate = Masc_exec_command_gate.Shell_command_gate in
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
+  let stage text =
+    Simple
+      { bin
+      ; args = [ Lit (text, default_meta) ]
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Masc_exec.Sandbox_target.host ()
+      }
+  in
+  let refusal_tag = function
+    | Adapter.Too_complex reason -> "too_complex:" ^ Adapter.too_complex_reason_tag reason
+    | Adapter.Cannot_parse reason -> "cannot_parse:" ^ Adapter.parse_reason_tag reason
+    | Adapter.Gate_reject diagnostic -> "gate_reject:" ^ diagnostic
+    | Adapter.Path_reject diagnostic -> "path_reject:" ^ diagnostic
+  in
+  let dispatch ir =
+    Adapter.dispatch
+      ~workdir:"/tmp"
+      ~sandbox:(Masc_exec.Sandbox_target.host ())
+      ir
+  in
+  (match dispatch (Pipeline [ Pipeline [ stage "a"; stage "b" ]; stage "c" ]) with
+   | Error (Adapter.Too_complex Gate.Unsupported_nested_pipeline) -> ()
+   | Error other ->
+     failwith
+       (Printf.sprintf
+          "a nested pipeline must be refused as unsupported_nested_pipeline, got %s"
+          (refusal_tag other))
+   | Ok _ -> failwith "a nested pipeline must not reach dispatch");
+  (* [Pipeline] documents "length >= 2" and the type does not hold it, so the
+     gate is where a one-stage pipeline stops. *)
+  (match dispatch (Pipeline [ stage "alone" ]) with
+   | Error (Adapter.Cannot_parse Gate.Parse_error) -> ()
+   | Error other ->
+     failwith
+       (Printf.sprintf
+          "a one-stage pipeline must be refused as cannot_parse, got %s"
+          (refusal_tag other))
+   | Ok _ -> failwith "a one-stage pipeline must not reach dispatch");
+  (* A flat pipeline is untouched by any of this. *)
+  match dispatch (Pipeline [ stage "a"; stage "b" ]) with
+  | Ok _ -> ()
+  | Error other ->
+    failwith (Printf.sprintf "a flat pipeline must still run, got %s" (refusal_tag other))
+;;
 let () =
   Printf.printf "p7_exec_dispatch: all tests passed.\n"

@@ -6,8 +6,8 @@
     types. *)
 
 (* [masc] is a wrapped library, so reach the new module through its
-   namespace (the same pattern existing tests use, e.g. [Masc.Auth]).
-   [Llm_provider] comes from agent_sdk.llm_provider and is bound directly. *)
+   namespace (the same pattern existing tests use, e.g. [Auth]).
+   [Llm_provider] comes from agent_core.llm_provider and is bound directly. *)
 module Provider_http_error = Masc.Provider_http_error
 
 let msg = Alcotest.(check string)

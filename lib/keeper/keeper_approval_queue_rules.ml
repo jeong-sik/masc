@@ -34,15 +34,11 @@ let rec atomic_update atomic f =
 
 let pending : pending_approval SMap.t Atomic.t = Atomic.make SMap.empty
 
-let id_rng = Random.State.make_self_init ()
-let id_rng_mu = Stdlib.Mutex.create ()
-
-let make_generated_id prefix =
-  let uuid =
-    Stdlib.Mutex.protect id_rng_mu (fun () -> Uuidm.v4_gen id_rng ())
-  in
-  prefix ^ "_" ^ Uuidm.to_string uuid
-;;
+(* This module used to own an RNG and a mutex to reimplement what [Random_id]
+   already provides. Its own entropy source meant the guarantee here was
+   whatever [Random.State.make_self_init] gives, separate from the one the
+   other 28 call sites rely on. *)
+let make_generated_id prefix = prefix ^ "_" ^ Random_id.uuid_v7 ()
 
 (* Rule reads and writes include Eio file operations and are also reached by
    synchronous dashboard/test callers. Both contexts therefore share one
@@ -60,11 +56,12 @@ let rules_path ~base_path () =
 let approval_rules_persistence_surface = "keeper_approval_rules"
 
 let report_rules_read_drop ~reason ~path ~detail =
+  let reason_wire = Read_drop_reason.to_wire reason in
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
       Otel_metric_store.inc_counter
         Otel_metric_store.metric_persistence_read_drops
-        ~labels:[ "surface", approval_rules_persistence_surface; "reason", reason ]
+        ~labels:[ "surface", approval_rules_persistence_surface; "reason", reason_wire ]
         ())
     ~surface:approval_rules_persistence_surface
     ~reason
@@ -129,7 +126,7 @@ let load_rules_unlocked ~base_path () =
        | Ok _ as result -> result
        | Error reason ->
          report_rules_read_drop
-           ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+           ~reason:Read_drop_reason.Invalid_payload
            ~path
            ~detail:reason;
          Error { path; reason })
@@ -145,7 +142,7 @@ let load_rules_unlocked ~base_path () =
              (rule_json_preview entry)
          in
          report_rules_read_drop
-           ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+           ~reason:Read_drop_reason.Invalid_payload
            ~path
            ~detail;
          Error { path; reason = detail })
@@ -163,13 +160,13 @@ let load_rules_unlocked ~base_path () =
             (rule_json_preview json)
         in
         report_rules_read_drop
-          ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+          ~reason:Read_drop_reason.Invalid_payload
           ~path
           ~detail:reason;
         Error { path; reason }
       | Error reason ->
         report_rules_read_drop
-          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~reason:Read_drop_reason.Entry_load_error
           ~path
           ~detail:reason;
         Error { path; reason })
@@ -178,7 +175,7 @@ let load_rules_unlocked ~base_path () =
   | exn ->
     let reason = Printexc.to_string exn in
     report_rules_read_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~reason:Read_drop_reason.Entry_load_error
       ~path
       ~detail:reason;
     Error { path; reason }

@@ -22,7 +22,7 @@
   atomic_orphan_size_class)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
-  (:standard -w +4 -w +32))
+  (:standard -w +4 -w +33 -w +37))
  (libraries eio eio.unix unix yojson uuidm digestif optint cstruct)
  (foreign_stubs
   (language c)
@@ -34,7 +34,7 @@
  (modules fs_compat)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
-  (:standard -w +4 -w +32))
+  (:standard -w +4))
  (libraries
   fs_compat_internal
   eio
@@ -51,7 +51,7 @@
   capability_write_for_testing
   capability_exact_read_for_testing)
  (flags
-  (:standard -w +4 -w +32))
+  (:standard -w +4))
  (libraries
   fs_compat
   fs_compat_internal

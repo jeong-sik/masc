@@ -145,16 +145,6 @@ let run_curl_get ?(max_time_sec = 1) ~port ~path () =
   (try Sys.remove body_file with _ -> ());
   { status; body; curl_exit; stderr }
 
-let contains_substr needle haystack =
-  let n = String.length needle in
-  let h = String.length haystack in
-  let rec loop i =
-    if i + n > h then false
-    else if String.sub haystack i n = needle then true
-    else loop (i + 1)
-  in
-  n = 0 || loop 0
-
 let normalize_mcp_body body =
   let lines = String.split_on_char '\n' body |> List.map trim_cr in
   let prefix = "data: " in
@@ -196,7 +186,7 @@ let wait_for_health ~port ~timeout_s =
     else
       let res = run_curl_get ~max_time_sec:1 ~port ~path:"/health" () in
       match res.status with
-      | Some 200 when contains_substr "\"state_ready\":true" res.body -> true
+      | Some 200 when String_util.contains_substring res.body "\"state_ready\":true" -> true
       | _ ->
           Unix.sleepf 0.1;
           loop ()
@@ -249,7 +239,7 @@ let with_server f =
   let env =
     merge_env_overrides
       [
-        ("MASC_AUTONOMY_ENABLED", "0");
+        ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
         ("MASC_POST_SSE_KEEPALIVE_SEC", "1.0");
@@ -317,12 +307,12 @@ let rec call_status_until_ready ~port ~retries_left =
   match (result.status, retries_left) with
   | Some 500, retries
     when retries > 0
-         && contains_substr "Server state not initialized" result.body ->
+         && String_util.contains_substring result.body "Server state not initialized" ->
       Unix.sleepf 0.5;
       call_status_until_ready ~port ~retries_left:(retries - 1)
   | Some 503, retries
     when retries > 0
-         && contains_substr "Server is starting up, not ready yet" result.body ->
+         && String_util.contains_substring result.body "Server is starting up, not ready yet" ->
       Unix.sleepf 0.5;
       call_status_until_ready ~port ~retries_left:(retries - 1)
   | _ -> result
@@ -336,9 +326,9 @@ let test_post_tools_call_streams_sse_framing () =
   let result = call_status_until_ready ~port ~retries_left:40 in
   require_http_ok "streaming tools/call" result;
   check int "curl exits cleanly" 0 result.curl_exit;
-  check bool "prime event sent" true (contains_substr "retry: 3000" result.body);
+  check bool "prime event sent" true (String_util.contains_substring result.body "retry: 3000");
   check bool "message event sent" true
-    (contains_substr "event: message" result.body);
+    (String_util.contains_substring result.body "event: message");
   let json = parse_json_body "streaming tools/call" result in
   check bool "json-rpc error absent" true (json |> U.member "error" = `Null);
   check bool "tool succeeded" false
@@ -362,12 +352,12 @@ let rec join_until_ready ~port ~retries_left =
   match (result.status, retries_left) with
   | Some 500, retries
     when retries > 0
-         && contains_substr "Server state not initialized" result.body ->
+         && String_util.contains_substring result.body "Server state not initialized" ->
       Unix.sleepf 0.5;
       join_until_ready ~port ~retries_left:(retries - 1)
   | Some 503, retries
     when retries > 0
-         && contains_substr "Server is starting up, not ready yet" result.body ->
+         && String_util.contains_substring result.body "Server is starting up, not ready yet" ->
       Unix.sleepf 0.5;
       join_until_ready ~port ~retries_left:(retries - 1)
   | _ -> result
@@ -386,9 +376,9 @@ let test_post_tools_call_preserves_explicit_tool_agent_name () =
     |> U.member "text" |> U.to_string
   in
   check bool "explicit tool agent_name preserved" true
-    (contains_substr "Type: gemini" text);
+    (String_util.contains_substring text "Type: gemini");
   check bool "header actor not used as tool target agent_name" false
-    (contains_substr "Type: dashboard-header-actor" text)
+    (String_util.contains_substring text "Type: dashboard-header-actor")
 
 let () =
   run "mcp_post_sse_e2e"

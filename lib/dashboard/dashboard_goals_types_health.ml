@@ -31,26 +31,33 @@ let keeper_name_of_assignee metas assignee =
 
 let goal_fsm_state_kind = function
   | Goal_phase.Executing -> "executing"
-  | Goal_phase.Blocked -> "blocked"
-  | Goal_phase.Paused -> "paused"
+  | Goal_phase.Verifying -> "verifying"
   | Goal_phase.Completed -> "completed"
   | Goal_phase.Dropped -> "dropped"
 
 let goal_fsm_next_actions ~goal_phase =
   [
     Goal_phase.Request_complete;
-    Goal_phase.Pause;
-    Goal_phase.Resume;
-    Goal_phase.Block;
-    Goal_phase.Unblock;
     Goal_phase.Drop;
     Goal_phase.Reopen;
+    (* RFC-0387 stage 2: the verifier's proof commits are the only moves out
+       of [Verifying]; on every other phase they are invalid and the filter
+       below drops them. Criterion verdicts are phase-neutral ([Already]), so
+       they never read as a next step. *)
+    Goal_phase.Record_proof_proven;
+    Goal_phase.Record_proof_refuted;
   ]
   |> List.filter (fun action ->
          match
            Goal_phase.decide_transition ~phase:goal_phase ~action
          with
-         | Ok _ -> true
+         (* Next actions are the ones that move the goal. [Already] is accepted
+            by the tool but changes nothing, and listing "pause" under a paused
+            goal reads as a step that is still to come. Written as an explicit
+            arm because [Ok _] would have absorbed the new outcome and widened
+            this list without a compiler error. *)
+         | Ok (Goal_phase.Move_to _) -> true
+         | Ok (Goal_phase.Already _) -> false
          | Error _ -> false)
   |> List.map Goal_phase.action_to_string
 

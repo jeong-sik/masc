@@ -1,6 +1,5 @@
 (** Structured terminal-reason surface for keeper turn ledgers.
 
-    RFC-0047 PR-3:
     - [code: string] field removed; [disposition] is the SSOT.
     - [severity_of_code / summary_of_code / next_action_of_code]
       substring classifiers deleted; severity / summary / next_action
@@ -82,22 +81,24 @@ let of_failure ?(tool_call_count = 0) ~raw_error err =
         | Keeper_turn_driver.Internal_contract_rejected _
         | Keeper_turn_driver.Incomplete_tool_transcript _
         | Keeper_turn_driver.Terminal_effect_failed _
+        | Keeper_turn_driver.Provider_attempt_effect_fenced _
+        | Keeper_turn_driver.Tool_correction_lost _
         | Keeper_turn_driver.Receipt_persistence_failed _
         | Keeper_turn_driver.Gate_replay_repair_required _ ) ->
       of_disposition
         ~source:"typed_error"
         (Keeper_turn_disposition.Provider_error
-           (Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err))
+           (Keeper_agent_error.terminal_reason_code_of_core_error_typed err))
     | None ->
       (* The driver classifier returned None, meaning err is a generic
-         [Agent_sdk.Error.t] not in the masc_internal_error family.
+         [Agent_core.Error.t] not in the masc_internal_error family.
          Route through the typed bridge instead of catching [_ ->
          ...] silently (anti-pattern #2). The bridge matches every
-         [Agent_sdk.Error.t] variant exhaustively. *)
+         [Agent_core.Error.t] variant exhaustively. *)
       of_disposition
         ~source:"typed_error"
         (Keeper_turn_disposition.Provider_error
-           (Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err))
+           (Keeper_agent_error.terminal_reason_code_of_core_error_typed err))
 ;;
 
 let of_code ?source ?summary ?next_action code =

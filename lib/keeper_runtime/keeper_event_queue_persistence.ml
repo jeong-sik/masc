@@ -27,7 +27,6 @@ type exact_write_outcome =
 type accepted_cancellation = State.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -35,23 +34,21 @@ type accepted_cancellation = State.accepted_cancellation =
 type accepted_transfer = State.accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
-  ; target_generation : int
   ; target_trace_id : Keeper_id.Trace_id.t
   }
 
 type source_terminal_receipt = State.source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
+  | Turn_completed
   | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = State.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -78,7 +75,13 @@ type transfer_projection_result = State.transfer_projection_result =
   | Transfer_already_projected
 
 
-let snapshot_filename = "event-queue-v15.json"
+(* v17: #29598 dropped owner_nonce from the turn-attempt-terminal operation
+   id, so a v16 snapshot written by the previous binary carries ids this
+   binary no longer generates ("turn-attempt-terminal:1:16:..." against
+   "turn-attempt-terminal:16:..."). Replay detection matches on that id, so
+   reading the old snapshot would let one source-terminal apply twice. Fresh
+   state on a new filename, per the #29553 precedent — no compat reader. *)
+let snapshot_filename = "event-queue-v17.json"
 let transition_wal_filename = "event-queue-transitions-v6.jsonl"
 
 let owner_error_to_string = Owner_lock.resolve_error_to_string
@@ -154,35 +157,6 @@ let save_json_atomic_with ~strict_parent_sync path json =
 let save_json_atomic = save_json_atomic_with ~strict_parent_sync:false
 let save_json_atomic_strict = save_json_atomic_with ~strict_parent_sync:true
 
-let save_json_atomic_strict_staged_with ~save path json =
-  match
-    try Ok (Fs_compat.mkdir_p (Filename.dirname path)) with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printexc.to_string exn)
-  with
-  | Error _ as error -> error
-  | Ok () ->
-    let content =
-      json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
-    in
-    (match save path content with
-     | Ok () -> Ok Fsync_completed
-     | Error (failure : Fs_compat.atomic_replace_failure) ->
-       let detail = Fs_compat.atomic_replace_failure_to_string failure in
-       (match failure.stage with
-        | Fs_compat.Before_rename ->
-          (match failure.exception_ with
-           | Eio.Cancel.Cancelled _ ->
-             Printexc.raise_with_backtrace failure.exception_ failure.backtrace
-           | _ -> Error detail)
-        | Fs_compat.After_rename ->
-          Ok (Visible_sync_unconfirmed detail)))
-;;
-
-let save_json_atomic_strict_staged =
-  save_json_atomic_strict_staged_with ~save:Fs_compat.save_file_atomic_strict_staged
-;;
-
 let save_state_unlocked_with ~strict_parent_sync owner state =
   let keeper_name = keeper_name_of_owner owner in
   let path = snapshot_path_of_owner owner in
@@ -201,29 +175,11 @@ let save_state_unlocked_with ~strict_parent_sync owner state =
 let save_state_unlocked = save_state_unlocked_with ~strict_parent_sync:false
 let save_state_unlocked_strict = save_state_unlocked_with ~strict_parent_sync:true
 
-let save_state_unlocked_strict_staged_with ~save owner state =
-  let keeper_name = keeper_name_of_owner owner in
-  let path = snapshot_path_of_owner owner in
-  match save_json_atomic_strict_staged_with ~save path (State.to_yojson state) with
-  | Ok outcome -> Ok outcome
-  | Error message ->
-    Error
-      (Printf.sprintf
-         "failed to persist keeper=%s path=%s: %s"
-         keeper_name
-         path
-         message)
-;;
-
-let save_state_unlocked_strict_staged =
-  save_state_unlocked_strict_staged_with
-    ~save:Fs_compat.save_file_atomic_strict_staged
-;;
-
 type snapshot_read_error_kind =
   | Invalid_path
   | Read_failed
   | Parse_failed
+  | Incoherent_read
 
 type snapshot_read_error =
   { kind : snapshot_read_error_kind
@@ -235,6 +191,7 @@ let snapshot_read_error_kind_to_string = function
   | Invalid_path -> "invalid_path"
   | Read_failed -> "read_failed"
   | Parse_failed -> "parse_failed"
+  | Incoherent_read -> "incoherent_read"
 ;;
 
 let reset_required_message ~path ~surface detail =
@@ -273,31 +230,42 @@ let schema_field = function
 ;;
 
 type primary_snapshot =
-  | Primary_missing
+  | Primary_absent
+  | Primary_unreadable of string
+      (** The file is there and this binary cannot decode it. Boot treats this
+          exactly like [Primary_absent] — see [fail_open] below — but the health
+          probe has to tell the two apart, because an unreadable queue and an
+          empty queue look identical from the outside and only one of them
+          means stimuli were lost. *)
   | Primary_current of State.t
 
 let read_primary_current_unlocked owner =
   let path = snapshot_path_of_owner owner in
   match read_json_if_present path with
   | Error _ as error -> error
-  | Ok None -> Ok Primary_missing
+  | Ok None -> Ok Primary_absent
   | Ok (Some json) ->
+    (* Fail open. A snapshot this binary cannot decode is an absent snapshot:
+       the queue starts empty and the WAL replays on top, which is the same
+       path a first boot takes. Refusing instead stopped the whole fleet three
+       times on 2026-08-23, every time on a field or variant this binary had
+       itself stopped writing, and every time with nothing pending. What is
+       lost is the pending stimuli and the idempotence ledger in the
+       unreadable file; the WARN below is the record of that loss. *)
+    let fail_open detail =
+      Log.Keeper.warn
+        "event queue snapshot unreadable at %s, starting from an empty queue \
+         (pending stimuli and the disposition ledger in it are lost): %s"
+        path
+        detail;
+      Ok (Primary_unreadable detail)
+    in
     (match schema_field json with
-     | Error message ->
-       Error
-         (reset_required_message
-            ~path
-            ~surface:"event queue snapshot"
-            message)
+     | Error message -> fail_open message
      | Ok _ ->
        (match State.of_yojson json with
         | Ok state -> Ok (Primary_current state)
-        | Error message ->
-          Error
-            (reset_required_message
-               ~path
-               ~surface:"event queue snapshot"
-               message)))
+        | Error message -> fail_open message))
 ;;
 
 let read_primary_unlocked = read_primary_current_unlocked
@@ -496,13 +464,40 @@ let replay_transition_wal_read_only_unlocked ?(wal_only = false) owner state =
     state
 ;;
 
-let load_state_unlocked owner =
+let load_state_unlocked_with_primary_detail owner =
+  let from_empty detail =
+    Result.map
+      (fun state -> state, detail)
+      (replay_transition_wal_unlocked ~wal_only:true owner State.empty)
+  in
   match read_primary_unlocked owner with
   | Error _ as error -> error
   | Ok (Primary_current state) ->
-    replay_transition_wal_unlocked owner state
-  | Ok Primary_missing ->
-    replay_transition_wal_unlocked ~wal_only:true owner State.empty
+    Result.map (fun state -> state, None) (replay_transition_wal_unlocked owner state)
+  | Ok Primary_absent -> from_empty None
+  | Ok (Primary_unreadable detail) -> from_empty (Some detail)
+;;
+
+let load_state_unlocked owner =
+  Result.map fst (load_state_unlocked_with_primary_detail owner)
+;;
+
+let load_state_result_with_primary_detail ~base_path ~keeper_name =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         load_state_unlocked_with_primary_detail owner)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue state load raised keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            (snapshot_path_of_owner owner)
+            (Printexc.to_string exn)))
 ;;
 
 let load_state_result ~base_path ~keeper_name =
@@ -529,9 +524,10 @@ let load_existing_state_result ~base_path ~keeper_name =
          match read_primary_unlocked owner with
          | Error _ as error -> error
          | Ok (Primary_current state) -> replay_transition_wal_unlocked owner state
-         | Ok Primary_missing when durable_state_exists_unlocked owner ->
+         | Ok (Primary_absent | Primary_unreadable _)
+           when durable_state_exists_unlocked owner ->
            replay_transition_wal_unlocked ~wal_only:true owner State.empty
-         | Ok Primary_missing ->
+         | Ok (Primary_absent | Primary_unreadable _) ->
            Error
              (Printf.sprintf
                 "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
@@ -549,29 +545,33 @@ let load_existing_state_result ~base_path ~keeper_name =
             (Printexc.to_string exn)))
 ;;
 
+let read_state_read_only_unlocked ~require_existing owner =
+  match read_primary_unlocked owner with
+  | Error _ as error -> error
+  | Ok (Primary_current state) ->
+    replay_transition_wal_read_only_unlocked owner state
+  | Ok (Primary_absent | Primary_unreadable _)
+    when require_existing && not (durable_state_exists_unlocked owner) ->
+    Error
+      (Printf.sprintf
+         "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
+         (keeper_name_of_owner owner)
+         (snapshot_path_of_owner owner)
+         (transition_wal_path_of_owner owner))
+  | Ok (Primary_absent | Primary_unreadable _) ->
+    replay_transition_wal_read_only_unlocked
+      ~wal_only:true
+      owner
+      State.empty
+;;
+
 let validate_state_read_only_result_with ~require_existing ~base_path ~keeper_name =
   match resolve_owner ~base_path ~keeper_name with
   | Error _ as error -> error
   | Ok owner ->
     (try
        Owner_lock.with_durable_lock owner (fun () ->
-         match read_primary_unlocked owner with
-         | Error _ as error -> error
-         | Ok (Primary_current state) ->
-           replay_transition_wal_read_only_unlocked owner state
-         | Ok Primary_missing
-           when require_existing && not (durable_state_exists_unlocked owner) ->
-           Error
-             (Printf.sprintf
-                "event queue durable state is missing keeper=%s snapshot_path=%s wal_path=%s"
-                (keeper_name_of_owner owner)
-                (snapshot_path_of_owner owner)
-                (transition_wal_path_of_owner owner))
-         | Ok Primary_missing ->
-           replay_transition_wal_read_only_unlocked
-             ~wal_only:true
-             owner
-             State.empty)
+         read_state_read_only_unlocked ~require_existing owner)
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
@@ -581,6 +581,62 @@ let validate_state_read_only_result_with ~require_existing ~base_path ~keeper_na
             (keeper_name_of_owner owner)
             (snapshot_path_of_owner owner)
             (Printexc.to_string exn)))
+;;
+
+type read_only_observation_error =
+  | Observation_read_failed of string
+  | Observation_changed of
+      { keeper_name : string
+      ; first_revision : int64
+      ; second_revision : int64
+      }
+
+let read_only_observation_error_to_string = function
+  | Observation_read_failed message -> message
+  | Observation_changed { keeper_name; first_revision; second_revision } ->
+    Printf.sprintf
+      "event queue changed during lock-free observation keeper=%s first_revision=%Ld second_revision=%Ld"
+      keeper_name
+      first_revision
+      second_revision
+;;
+
+let stable_read_only_observation ~keeper_name first second =
+  if State.to_yojson first = State.to_yojson second
+  then Ok second
+  else
+    Error
+      (Observation_changed
+         { keeper_name
+         ; first_revision = State.revision first
+         ; second_revision = State.revision second
+         })
+;;
+
+let observe_state_read_only_typed_with ~between_samples ~base_path ~keeper_name =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error message -> Error (Observation_read_failed message)
+  | Ok owner ->
+    (try
+       Result.bind
+         (read_state_read_only_unlocked ~require_existing:false owner
+          |> Result.map_error (fun message -> Observation_read_failed message))
+         (fun first ->
+            between_samples ();
+            Result.bind
+              (read_state_read_only_unlocked ~require_existing:false owner
+               |> Result.map_error (fun message -> Observation_read_failed message))
+              (stable_read_only_observation ~keeper_name first))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Observation_read_failed
+            (Printf.sprintf
+               "event queue lock-free observation raised keeper=%s path=%s: %s"
+               (keeper_name_of_owner owner)
+               (snapshot_path_of_owner owner)
+               (Printexc.to_string exn))))
 ;;
 
 let validate_state_read_only_result ~base_path ~keeper_name =
@@ -598,10 +654,6 @@ let validate_existing_state_read_only_result ~base_path ~keeper_name =
 ;;
 
 
-let queue_of_stimuli stimuli =
-  List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty stimuli
-;;
-
 let load_with_projection ~projection ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map projection
 ;;
@@ -614,10 +666,13 @@ let load_pending_result ~base_path ~keeper_name =
   load_result ~base_path ~keeper_name
 ;;
 
-type snapshot_with_errors =
-  { pending : Keeper_event_queue.t
+type 'pending with_read_errors =
+  { pending : 'pending
   ; read_errors : snapshot_read_error list
   }
+
+type snapshot_with_errors = Keeper_event_queue.t with_read_errors
+type selections_with_errors = State.pending_selection list with_read_errors
 
 let diagnose_snapshot_read_error ~base_path ~keeper_name message =
   match resolve_owner ~base_path ~keeper_name with
@@ -647,14 +702,64 @@ let diagnose_snapshot_read_error ~base_path ~keeper_name message =
      | None -> [ { kind = Parse_failed; path = None; message } ])
 ;;
 
-let load_snapshot_with_errors ~base_path ~keeper_name =
-  match load_state_result ~base_path ~keeper_name with
-  | Ok state -> { pending = State.pending state; read_errors = [] }
+let load_with_read_errors ~projection ~base_path ~keeper_name =
+  match load_state_result_with_primary_detail ~base_path ~keeper_name with
+  | Ok (state, None) -> { pending = projection state; read_errors = [] }
+  | Ok (state, Some detail) ->
+    (* The keeper booted on an empty queue and kept running; what it lost is
+       still a read error, and the fleet summary is where an operator sees it. *)
+    { pending = projection state
+    ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name detail
+    }
   | Error message ->
-    { pending = Keeper_event_queue.empty
+    { pending = projection State.empty
     ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name message
     }
 ;;
+
+let load_snapshot_with_errors ~base_path ~keeper_name =
+  load_with_read_errors ~projection:State.pending ~base_path ~keeper_name
+;;
+
+let load_selections_with_errors ~base_path ~keeper_name =
+  load_with_read_errors ~projection:State.pending_selections ~base_path ~keeper_name
+;;
+
+let observe_snapshot_with_errors_with ~between_samples ~base_path ~keeper_name =
+  match
+    observe_state_read_only_typed_with
+      ~between_samples
+      ~base_path
+      ~keeper_name
+  with
+  | Ok state -> { pending = State.pending state; read_errors = [] }
+  | Error (Observation_read_failed message) ->
+    { pending = Keeper_event_queue.empty
+    ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name message
+    }
+  | Error (Observation_changed _ as error) ->
+    { pending = Keeper_event_queue.empty
+    ; read_errors =
+        [ { kind = Incoherent_read
+          ; path = None
+          ; message = read_only_observation_error_to_string error
+          }
+        ]
+    }
+;;
+
+let observe_snapshot_with_errors ~base_path ~keeper_name =
+  observe_snapshot_with_errors_with
+    ~between_samples:(fun () -> ())
+    ~base_path
+    ~keeper_name
+;;
+
+module For_testing = struct
+  let observe_snapshot_with_errors_with_interleave =
+    observe_snapshot_with_errors_with
+  ;;
+end
 
 type durable_state_discovery =
   { keeper_names : string list
@@ -745,7 +850,7 @@ let commit_transform_unlocked
              (* [load_state_unlocked] above replayed the transition WAL, so
                 [next] already carries that transition's pending mutation and
                 its transition outbox, and the snapshot just written persists
-                both (schema v15). Retire the WAL here, paired with the revision
+                both (schema v16). Retire the WAL here, paired with the revision
                 bump that absorbed it. Leaving it behind is what latches the
                 owner: the next load replays an already-absorbed row against
                 the advanced revision, [commit_transition] rejects it on
@@ -786,55 +891,6 @@ let commit_transform
             (Printexc.to_string exn)))
 ;;
 
-let commit_exact_transform_unlocked
-      ?(save_state = save_state_unlocked_strict_staged)
-      owner
-      ~after_commit
-      transform
-  =
-  match load_state_unlocked owner with
-  | Error _ as error -> error
-  | Ok current ->
-    (match transform current with
-     | Error _ as error -> error
-     | Ok (next, value) ->
-       let next =
-         if next == current then Ok next else bump_revision next
-       in
-       (match next with
-        | Error _ as error -> error
-        | Ok next ->
-          (match save_state owner next with
-           | Error _ as error -> error
-           | Ok outcome ->
-             after_commit (State.pending next);
-             Ok (value, outcome))))
-;;
-
-let commit_exact_transform
-      ?save_state
-      ~base_path
-      ~keeper_name
-      ~after_commit
-      transform
-  =
-  match resolve_owner ~base_path ~keeper_name with
-  | Error _ as error -> error
-  | Ok owner ->
-    (try
-       Owner_lock.with_durable_lock owner (fun () ->
-         commit_exact_transform_unlocked ?save_state owner ~after_commit transform)
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "event queue exact transaction raised keeper=%s path=%s: %s"
-            (keeper_name_of_owner owner)
-            (snapshot_path_of_owner owner)
-            (Printexc.to_string exn)))
-;;
-
 let update_checked_result ?(after_commit = fun () -> ()) ~base_path ~keeper_name f =
   commit_transform
     ~base_path
@@ -856,6 +912,17 @@ let reprioritize_pending_result
   =
   commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
     State.reprioritize_pending ~selection ~urgency state)
+;;
+
+let defer_pending_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~selection
+      ()
+  =
+  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+    State.defer_pending ~selection state)
 ;;
 
 type enqueue_stimulus_result =
@@ -912,26 +979,6 @@ let project_accepted_transfer_guarded_result
          | Ok () -> Ok (next, Transfer_projection_result result)))
 ;;
 
-let project_accepted_transfer_result
-      ~after_commit
-      ~base_path
-      ~keeper_name
-      ~transfer
-  =
-  let projection =
-    project_accepted_transfer_guarded_result
-      ~authorize_first_projection:(fun () -> (Ok () : (unit, string) result))
-      ~after_commit
-      ~base_path
-      ~keeper_name
-      ~transfer
-  in
-  Result.bind projection (function
-    | Transfer_projection_result result -> Ok result
-    | First_projection_rejected _ ->
-      Error "unguarded transfer projection rejected its unconditional authority")
-;;
-
 let update_result ?after_commit ~base_path ~keeper_name f =
   update_checked_result ?after_commit ~base_path ~keeper_name (fun queue -> Ok (f queue))
 ;;
@@ -961,6 +1008,13 @@ let select_when_result ~base_path ~keeper_name ~ready =
   match load_state_result ~base_path ~keeper_name with
   | Error _ as error -> error
   | Ok state -> Ok (State.select_when ~ready state)
+;;
+
+let connector_attention_conversation_batch_result ~base_path ~keeper_name ~primary =
+  match load_state_result ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok state ->
+    Ok (State.connector_attention_conversation_batch ~primary state)
 ;;
 
 let validate_pending_selection_result ~base_path ~keeper_name ~selection =
@@ -1085,7 +1139,6 @@ let cancel_pending_accepted_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
-      ~current_owner_nonce
       ~applied_at
       ~cancellation
       ()
@@ -1102,7 +1155,6 @@ let cancel_pending_accepted_result
              owner
              ~after_commit
              (State.cancel_pending_accepted
-                ~current_owner_nonce
                 ~applied_at
                 ~cancellation)
              state
@@ -1121,7 +1173,6 @@ let transfer_pending_accepted_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
-      ~current_owner_nonce
       ~applied_at
       ~transfer
       ()
@@ -1138,7 +1189,6 @@ let transfer_pending_accepted_result
              owner
              ~after_commit
              (State.transfer_pending_accepted
-                ~current_owner_nonce
                 ~applied_at
                 ~transfer)
              state
@@ -1157,7 +1207,6 @@ let ack_pending_source_terminal_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
-      ~current_owner_nonce
       ~acked_at
       ~source_terminal
       ()
@@ -1174,7 +1223,6 @@ let ack_pending_source_terminal_result
              owner
              ~after_commit
              (State.ack_pending_source_terminal
-                ~current_owner_nonce
                 ~applied_at:acked_at
                 ~source_terminal)
              state
@@ -1189,14 +1237,11 @@ let ack_pending_source_terminal_result
             (Printexc.to_string exn)))
 ;;
 
-let terminalize_pending_turn_attempt_result
+let terminalize_pending_turn_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
-      ~current_owner_nonce
-      ~applied_at
-      ~selection
-      ~detail
+      ~transition
       ()
   =
   match resolve_owner ~base_path ~keeper_name with
@@ -1210,11 +1255,7 @@ let terminalize_pending_turn_attempt_result
            commit_transition_unlocked
              owner
              ~after_commit
-             (State.terminalize_pending_turn_attempt
-                ~current_owner_nonce
-                ~applied_at
-                ~selection
-                ~detail)
+             transition
              state
            |> Result.map fst)
      with
@@ -1222,9 +1263,49 @@ let terminalize_pending_turn_attempt_result
      | exn ->
        Error
          (Printf.sprintf
-            "event queue pending turn-attempt terminalization raised keeper=%s: %s"
+            "event queue pending turn terminalization raised keeper=%s: %s"
             (keeper_name_of_owner owner)
             (Printexc.to_string exn)))
+;;
+
+let terminalize_pending_turn_attempt_result
+      ?after_commit
+      ~base_path
+      ~keeper_name
+      ~applied_at
+      ~selection
+      ~detail
+      ()
+  =
+  terminalize_pending_turn_result
+    ?after_commit
+    ~base_path
+    ~keeper_name
+    ~transition:
+      (State.terminalize_pending_turn_attempt
+         ~applied_at
+         ~selection
+         ~detail)
+    ()
+;;
+
+let terminalize_pending_turn_completed_result
+      ?after_commit
+      ~base_path
+      ~keeper_name
+      ~applied_at
+      ~selection
+      ()
+  =
+  terminalize_pending_turn_result
+    ?after_commit
+    ~base_path
+    ~keeper_name
+    ~transition:
+      (State.terminalize_pending_turn_completed
+         ~applied_at
+         ~selection)
+    ()
 ;;
 
 let mark_transition_projected_result state ~transition_id =
@@ -1322,10 +1403,6 @@ let min_float_opt left right =
   | Some left, Some right -> Some (Float.min left right)
 ;;
 
-let json_of_float_opt = function
-  | None -> `Null
-  | Some value -> `Float value
-;;
 
 let age_seconds_json ~now = function
   | None -> `Null
@@ -1405,9 +1482,9 @@ let keeper_summary_json ~now (summary : keeper_summary) =
     ; "owner_lifecycle", `String (owner_lifecycle_wire summary.owner_lifecycle)
     ; "pending_count", `Int summary.pending_count
     ; "total_count", `Int summary.pending_count
-    ; "oldest_arrived_at_unix", json_of_float_opt summary.pending_oldest
+    ; "oldest_arrived_at_unix", Json_util.float_opt_to_json summary.pending_oldest
     ; "oldest_age_seconds", age_seconds_json ~now summary.pending_oldest
-    ; "pending_oldest_arrived_at_unix", json_of_float_opt summary.pending_oldest
+    ; "pending_oldest_arrived_at_unix", Json_util.float_opt_to_json summary.pending_oldest
     ; "pending_oldest_age_seconds", age_seconds_json ~now summary.pending_oldest
     ; "transition_outbox_count", `Int summary.outbox_count
     ; "counts_complete", `Bool summary.counts_complete
@@ -1583,30 +1660,27 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
     ; "total_count", `Int pending_count
     ; "transition_outbox_count", `Int outbox_count
     ; "counts_complete", `Bool counts_complete
-    ; "oldest_arrived_at_unix", json_of_float_opt oldest
+    ; "oldest_arrived_at_unix", Json_util.float_opt_to_json oldest
     ; "oldest_age_seconds", age_seconds_json ~now oldest
-    ; "runnable_pending_count", `Int runnable.pending_count
     ; "runnable_backlog_count", `Int runnable.pending_count
-    ; "runnable_oldest_arrived_at_unix", json_of_float_opt runnable.oldest
+    ; "runnable_oldest_arrived_at_unix", Json_util.float_opt_to_json runnable.oldest
     ; "runnable_oldest_age_seconds", age_seconds_json ~now runnable.oldest
     ; ( "runnable_by_keeper"
       , `List
           (runnable.keepers
            |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
-    ; "recoverable_pending_count", `Int recoverable.pending_count
     ; "recoverable_backlog_count", `Int recoverable.pending_count
-    ; "recoverable_oldest_arrived_at_unix", json_of_float_opt recoverable.oldest
+    ; "recoverable_oldest_arrived_at_unix", Json_util.float_opt_to_json recoverable.oldest
     ; "recoverable_oldest_age_seconds", age_seconds_json ~now recoverable.oldest
     ; ( "recoverable_by_keeper"
       , `List
           (recoverable.keepers
            |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
-    ; "retained_disabled_pending_count", `Int retained_disabled.pending_count
     ; "retained_disabled_backlog_count", `Int retained_disabled.pending_count
     ; ( "retained_disabled_oldest_arrived_at_unix"
-      , json_of_float_opt retained_disabled.oldest )
+      , Json_util.float_opt_to_json retained_disabled.oldest )
     ; ( "retained_disabled_oldest_age_seconds"
       , age_seconds_json ~now retained_disabled.oldest )
     ; ( "retained_disabled_by_keeper"
@@ -1614,19 +1688,17 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
           (retained_disabled.keepers
            |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
-    ; "paused_dead_pending_count", `Int paused_dead.pending_count
     ; "paused_dead_backlog_count", `Int paused_dead.pending_count
-    ; "paused_dead_oldest_arrived_at_unix", json_of_float_opt paused_dead.oldest
+    ; "paused_dead_oldest_arrived_at_unix", Json_util.float_opt_to_json paused_dead.oldest
     ; "paused_dead_oldest_age_seconds", age_seconds_json ~now paused_dead.oldest
     ; ( "paused_dead_by_keeper"
       , `List
           (paused_dead.keepers
            |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
-    ; "shutdown_fenced_pending_count", `Int shutdown_fenced.pending_count
     ; "shutdown_fenced_backlog_count", `Int shutdown_fenced.pending_count
     ; ( "shutdown_fenced_oldest_arrived_at_unix"
-      , json_of_float_opt shutdown_fenced.oldest )
+      , Json_util.float_opt_to_json shutdown_fenced.oldest )
     ; ( "shutdown_fenced_oldest_age_seconds"
       , age_seconds_json ~now shutdown_fenced.oldest )
     ; ( "shutdown_fenced_by_keeper"
@@ -1634,9 +1706,8 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
           (shutdown_fenced.keepers
            |> List.filter (fun (summary : keeper_summary) -> summary.pending_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
-    ; "unclassified_pending_count", `Int unclassified.pending_count
     ; "unclassified_count", `Int unclassified.pending_count
-    ; "unclassified_oldest_arrived_at_unix", json_of_float_opt unclassified.oldest
+    ; "unclassified_oldest_arrived_at_unix", Json_util.float_opt_to_json unclassified.oldest
     ; "unclassified_oldest_age_seconds", age_seconds_json ~now unclassified.oldest
     ; ( "unclassified_by_keeper"
       , `List

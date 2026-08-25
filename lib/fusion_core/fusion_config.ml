@@ -11,6 +11,9 @@ type config_error =
   | Missing_judge_model of string
   | Invalid_staged_judge_group_size of int
   | Invalid_max_output_tokens of string * int
+  | Invalid_timeout_s of string * float
+      (** (preset 이름, 데드라인): 유한 양수가 아닌 panel_timeout_s/judge_timeout_s/
+          1차 심판 timeout_s *)
   | Missing_default_preset of string
   | Judge_panel_prompt_missing of string  (** preset 이름; JOJ 1차 심판 prompt 누락 (RFC-0283) *)
   | Duplicate_judge of string * string  (** (preset 이름, 중복 judge 정체성) (RFC-0283) *)
@@ -26,6 +29,12 @@ let disabled : Fusion_policy.t =
   ; presets = []
   }
 
+(* 데드라인 키는 [~strict:false]로 읽는다. TOML에서 [120]과 [120.0]은 타입이
+   다르지만 운영자 의도는 같은 초 값이고, 정수를 쓴 preset이 Toml_type_error로
+   로드 전체를 깨뜨릴 이유가 없다. 값 자체의 유효성(유한 양수)은 여기서 판정하지
+   않고 [Fusion_policy.valid_timeout_s] 한 곳이 진다 — 검증 SSOT는 policy다. *)
+let find_timeout_s tbl path = Otoml.find_opt tbl (Otoml.get_float ~strict:false) path
+
 (* 패널 그룹 한 개 파싱. 그룹 sub-table(새 [[...panels]] 문법)에도, preset table
    자체(legacy flat 문법의 desugar)에도 동일하게 적용된다 — 두 문법이 같은 키
    이름(panel/label/panel_system_prompt/web_tools)을
@@ -40,6 +49,7 @@ let parse_group (tbl : Otoml.t) : Fusion_policy.panel_group =
   ; web_tools = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "web_tools" ]
   ; max_output_tokens =
       Otoml.find_opt tbl Otoml.get_integer [ "max_output_tokens_per_panel" ]
+  ; timeout_s = find_timeout_s tbl [ "panel_timeout_s" ]
   }
 
 (* JOJ 1차 심판 한 명 파싱 (RFC-0283). [[fusion.presets.NAME.judges]] sub-table의
@@ -53,6 +63,7 @@ let parse_judge_spec (tbl : Otoml.t) : Fusion_policy.judge_spec =
       Otoml.find_or ~default:"" tbl Otoml.get_string [ "system_prompt" ]
   ; jweb_tools = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "web_tools" ]
   ; jmax_output_tokens = Otoml.find_opt tbl Otoml.get_integer [ "max_output_tokens" ]
+  ; jtimeout_s = find_timeout_s tbl [ "timeout_s" ]
   }
 
 let parse_min_answered _name tbl =
@@ -75,13 +86,11 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
   let judge_max_output_tokens =
     Otoml.find_opt tbl Otoml.get_integer [ "judge_max_output_tokens" ]
   in
+  let judge_timeout_s = find_timeout_s tbl [ "judge_timeout_s" ] in
   let judges =
     match Otoml.find_opt tbl (Otoml.get_array Otoml.get_value) [ "judges" ] with
     | Some entries -> List.map parse_judge_spec entries
     | None -> []
-  in
-  let fallback_judge_model =
-    Otoml.find_opt tbl Otoml.get_string [ "fallback_judge_model" ]
   in
   (* 런타임 quorum. 미설정 시 [default_min_answered] = 기존 동작(>= 1 응답이면 심판 실행).
      허용 범위는 1 이상 패널 모델 총합 이하; 검증 SSOT는 Validated_preset.of_preset. *)
@@ -92,9 +101,9 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
       ; judge
       ; judge_system_prompt
       ; judge_max_output_tokens
+      ; judge_timeout_s
       ; judges
       ; min_answered
-      ; fallback_judge_model
       }
     in
     (* 검증 SSOT는 Validated_preset.of_preset (RFC-0280). config는 그 [invalid]에 preset
@@ -113,6 +122,7 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
            Duplicate_panelist (name, id)
          | Fusion_policy.Validated_preset.Bad_max_output_tokens v ->
            Invalid_max_output_tokens (name, v)
+         | Fusion_policy.Validated_preset.Bad_timeout_s v -> Invalid_timeout_s (name, v)
          | Fusion_policy.Validated_preset.Judge_panel_prompt_missing ->
            Judge_panel_prompt_missing name
          | Fusion_policy.Validated_preset.Duplicate_judge id ->

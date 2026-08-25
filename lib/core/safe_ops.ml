@@ -84,8 +84,13 @@ let emit_persistence_utf8_repair_metric () =
   match Atomic.get persistence_utf8_repair_metric_hook with
   | None -> ()
   | Some hook ->
-      (try hook ()
-       with exn ->
+      (try hook () with
+       | Eio.Cancel.Cancelled _ as e ->
+         (* A metric hook runs inside the caller's fiber. Absorbing
+            [Cancelled] here would leave the switch waiting on a fiber that
+            already decided to stop. Same treatment as [protect] above. *)
+         Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
+       | exn ->
          Log.Misc.warn
            "persistence UTF-8 repair metric hook failed: %s"
            (Printexc.to_string exn))
@@ -351,15 +356,30 @@ let parse_json_safe ~context str : (Yojson.Safe.t, string) result =
 (** Read file contents with error handling.
     Uses Eio-native I/O via Fs_compat when available (after set_fs),
     falls back to blocking I/O in non-Eio contexts. *)
-let read_file_safe path : (string, string) result =
-  if not (Sys.file_exists path) then
-    Error (Printf.sprintf "File not found: %s" path)
+type read_file_error =
+  | File_not_found of string
+  | Read_failed of
+      { path : string
+      ; detail : string
+      }
+
+let read_file_error_to_string = function
+  | File_not_found path -> Printf.sprintf "File not found: %s" path
+  | Read_failed { path; detail } -> Printf.sprintf "Failed to read %s: %s" path detail
+
+(* Typed variant so consumers that branch on "was the file missing" match a
+   constructor instead of re-deriving the condition from the rendered
+   message's prefix (RFC-0371 B10). *)
+let read_file_result path : (string, read_file_error) result =
+  if not (Sys.file_exists path) then Error (File_not_found path)
   else
     try Ok (Fs_compat.load_file path)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | e ->
-      Error (Printf.sprintf "Failed to read %s: %s" path (Printexc.to_string e))
+    | e -> Error (Read_failed { path; detail = Printexc.to_string e })
+
+let read_file_safe path : (string, string) result =
+  read_file_result path |> Result.map_error read_file_error_to_string
 
 (** Safe integer parsing *)
 let int_of_string_safe str = int_of_string_opt str
@@ -395,19 +415,13 @@ let read_json_file_logged ~label path : Yojson.Safe.t option =
     Log.Misc.warn "[%s] failed to read JSON from %s: %s" label path msg;
     None
 
-let persistence_read_drop_reason_list_dir_error = "list_dir_error"
-let persistence_read_drop_reason_entry_load_error = "entry_load_error"
-let persistence_read_drop_reason_invalid_payload = "invalid_payload"
-let persistence_read_drop_reason_json_syntax_error = "json_syntax_error"
-
 (* The last line of an append-only file was still being written when a tail
    reader reached it. Kept apart from [entry_load_error] because it is not a
    loss: the reader falls through to the previous complete line and the next
    read sees the row whole. Same not-a-loss family as RFC-0134's
    [concurrent_removal] and [transient_fd_pressure]. *)
-let persistence_read_drop_reason_tail_partial_write = "tail_partial_write"
-
 let report_persistence_read_drop ~on_drop ~surface ~reason ~path ~detail =
+  let reason = Read_drop_reason.to_wire reason in
   Log.Misc.warn "[%s] persistence read drop (%s) path=%s: %s"
     surface reason path detail;
   on_drop ()
@@ -416,11 +430,12 @@ let report_persistence_read_drop ~on_drop ~surface ~reason ~path ~detail =
    callback existed so callers could supply the counter, and every JSONL
    surface supplied the same one. *)
 let report_persistence_read_drop_counted ~surface ~reason ~path ~detail =
+  let reason_wire = Read_drop_reason.to_wire reason in
   report_persistence_read_drop
     ~on_drop:(fun () ->
       Otel_metric_store_core.inc_counter
         Otel_metric_names.metric_persistence_read_drops
-        ~labels:[ ("surface", surface); ("reason", reason) ]
+        ~labels:[ ("surface", surface); ("reason", reason_wire) ]
         ())
     ~surface ~reason ~path ~detail
 
@@ -605,20 +620,10 @@ let json_bool_opt key json =
   | `String s -> parse_bool_string s
   | _ -> None
 
-let json_list key json =
-  match safe_member key json with
-  | `List l -> l
-  | _ -> []
-
 let json_list_opt key json =
   match safe_member key json with
   | `List l -> Some l
   | _ -> None
-
-let json_assoc key json =
-  match safe_member key json with
-  | `Assoc a -> a
-  | _ -> []
 
 let json_member_opt key json =
   match safe_member key json with

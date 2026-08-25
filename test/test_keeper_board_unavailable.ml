@@ -343,6 +343,108 @@ let test_transient_intake_retains_pending_source_and_blocks_dispatch () =
     (Keeper_event_queue.length settled)
 ;;
 
+(* (4) A transiently unavailable entry must not hold the cycle for the entries
+   behind it. The test above seeds one stimulus, so withdrawal has nothing to
+   fall through to and the blocked-dispatch contract is unchanged. This one
+   seeds two: the head read fails transiently, and the cycle must still render
+   and consume the entry behind it.
+
+   Against the pre-fix intake this fails at the first assertion — a transient
+   head returned [consumed_stimuli = []] and every entry behind it waited for
+   the head to become readable, for as long as that took. *)
+let test_transient_head_does_not_block_the_entry_behind_it () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run
+  @@ fun sw ->
+  let base_path = fresh_test_base_path () in
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  Keeper_registry.For_testing.clear ();
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 0;
+      Keeper_registry.For_testing.clear ())
+  @@ fun () ->
+  let meta = test_meta "transient-head" in
+  let config = Workspace.default_config base_path in
+  let ctx : _ Keeper_types_profile.context =
+    { config
+    ; agent_name = "board-unavailable-test"
+    ; sw
+    ; clock = Eio.Stdenv.clock env
+    ; proc_mgr = None
+    ; net = None
+    ; publication_recovery_provider =
+        Masc_test_deps.non_runtime_publication_recovery_provider
+    }
+  in
+  ignore (Keeper_registry.For_testing.register ~base_path meta.name meta);
+  let create_source label =
+    match
+      Board_dispatch.create_post
+        ~author:"external-author"
+        ~content:label
+        ~post_kind:Board.Human_post
+        ~visibility:Board.Internal
+        ()
+    with
+    | Ok post -> Board.Post_id.to_string post.id
+    | Error error ->
+      failf "failed to create Board source: %s" (Board.show_board_error error)
+  in
+  let head_post_id = create_source "head source, read fails transiently" in
+  let trailing_post_id = create_source "trailing source, read succeeds" in
+  let seed post_id =
+    match
+      Keeper_registry_event_queue.enqueue_durable_result
+        ~base_path
+        meta.name
+        { (poison_board_signal_stimulus ()) with post_id }
+    with
+    | Ok () -> ()
+    | Error message -> failf "failed to seed durable stimulus: %s" message
+  in
+  seed head_post_id;
+  seed trailing_post_id;
+  (* Exactly one forced transient read: the head. The entry behind it reads
+     normally, so any consumption observed below came from the fall-through
+     and not from the forcing hook running out. *)
+  Keeper_heartbeat_stimulus_intake.For_testing.force_transient_board_reads 1;
+  let intake =
+    Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx
+      ~meta_after_triage:meta
+      ~pending_board_events:[]
+  in
+  check int "the entry behind the transient head is consumed" 1
+    intake.consumed_stimulus_count;
+  (match intake.consumed_stimuli with
+   | [ consumed ] ->
+     check string "the consumed entry is the trailing one, not the head"
+       trailing_post_id consumed.Keeper_event_queue.post_id
+   | other ->
+     failf "expected exactly one consumed stimulus, got %d" (List.length other));
+  check bool "a cycle that consumed an entry reports no intake error" true
+    (Option.is_none intake.event_queue_intake_error);
+  check
+    bool
+    "provider dispatch proceeds on the entry that could be rendered"
+    true
+    (Keeper_heartbeat_loop.should_run_turn_after_event_intake
+       ~scheduled:true
+       ~event_queue_intake_error:intake.event_queue_intake_error);
+  let queued =
+    match Keeper_registry_event_queue.snapshot_result ~base_path meta.name with
+    | Ok queue -> queue
+    | Error message -> failf "failed to reload durable queue: %s" message
+  in
+  check int "withdrawal drops nothing: both entries are still durable" 2
+    (Keeper_event_queue.length queued)
+;;
+
 let () =
   run
     "keeper_board_unavailable"
@@ -371,6 +473,10 @@ let () =
             "pending source is retained and provider dispatch is blocked"
             `Quick
             test_transient_intake_retains_pending_source_and_blocks_dispatch
+        ; test_case
+            "a transient head does not block the entry behind it"
+            `Quick
+            test_transient_head_does_not_block_the_entry_behind_it
         ] )
     ]
 ;;

@@ -11,9 +11,7 @@
     Two additional helpers
     ({!active_task_assignee}, {!assigned_task_ids}) are used by
     [tool_workspace] for assignee-aware filtering outside the
-    rendering path. Deliverable completion-claim detection now
-    lives in {!Task_completion_claim} (shared with
-    {!Verification_protocol}).
+    rendering path.
 
     All formatting helpers (icons, badges, take-items,
     bool-flag) stay private — the rendered string is the
@@ -59,11 +57,11 @@ val status_summary_string :
   in_progress_count:int ->
   done_count:int ->
   cancelled_count:int ->
-  todo_conflict_task_ids:string list ->
   binding:Workspace_types.current_binding ->
   planning_state:Workspace_types.planning_context_state ->
   attention_items:string list ->
   state:Masc_domain.workspace_state ->
+  task_goal_index:(string, string list) Hashtbl.t ->
   backlog:Masc_domain.backlog ->
   string
 (** [status_summary_string] renders the full [masc_status]
@@ -90,7 +88,7 @@ val status_summary_string :
     4. Snapshot line (counters)
     5. You-line (agent / bound / owned / current)
     6. Task binding line (assigned set / drift reason)
-    7. Planning lines (missing-task / deliverable-conflict)
+    7. Planning lines (missing-task)
     8. Credential line (only when required)
     9. Attention block (only when non-empty)
     10. Players block (capped at 40)

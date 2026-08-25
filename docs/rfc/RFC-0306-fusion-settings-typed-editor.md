@@ -8,8 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0283", "0298", "0300"]
-implementation_prs:
-  - "fix/fusion-settings-layout" # Phase 0 — layout regression fix (set-line CSS + set-card-b-wide)
 ---
 
 # RFC-0306 — Typed, comment-preserving fusion settings editor
@@ -90,9 +88,9 @@ in Phase 0. This RFC covers the remaining editability work.
    (`GET /api/v1/providers` → `fetchRuntimeProviders` → `runtimeSelectOptionsFromCatalog`),
    the same source the default-runtime select already uses. `runtime_id` is
    `provider.model`.
-5. **MASC → OAS stays one-way.** Model resolution uses the existing MASC→OAS
-   catalog path (OAS embedded catalog plus deployment overlay; `Runtime_oas_runner`,
-   `Fusion_oas`). No new coupling; OAS remains unaware of fusion.
+5. **MASC → agent_core stays one-way.** Model resolution uses the existing MASC→agent_core
+   catalog path (agent_core embedded catalog plus deployment overlay; `Runtime_oas_runner`,
+   `Fusion_oas`). No new coupling; agent_core remains unaware of fusion.
 6. **No silent failure.** Every write step returns `result`; failures produce a
    JSON error body plus an audit `Failure` record, mirroring
    `save_config_text` (`server_routes_http_routes_dashboard.ml:562`).
@@ -222,8 +220,8 @@ Each phase is independently mergeable and keeps main deployable.
   file unchanged (atomic write not reached).
 - **Frontend (vitest)**: populate form from a JSON fixture; produce the patch;
   render a server error payload to field-level messages.
-- **Boundary**: no new `masc → oas` reference beyond the existing catalog path;
-  OAS has no fusion reference.
+- **Boundary**: no new `masc → agent_core` reference beyond the existing catalog path;
+  agent_core has no fusion reference.
 
 ## 7. Resolved questions
 
@@ -246,6 +244,6 @@ Each phase is independently mergeable and keeps main deployable.
 
 Per the product boundary rule, this surface is entirely **deterministic /
 declarative**: typed config in, validated TOML out, no heuristic and no LLM
-judgment. The only external boundary is the MASC→OAS model catalog read, which is
+judgment. The only external boundary is the MASC→agent_core model catalog read, which is
 unchanged. Observability (audit records, reload confirmation) is retained from the
 existing raw path.

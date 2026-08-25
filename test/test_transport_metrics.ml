@@ -38,6 +38,15 @@ let with_env name value_opt f =
       | None -> Unix.putenv name "");
       f ())
 
+let check_assoc_keys label expected = function
+  | `Assoc fields ->
+    check
+      (list string)
+      label
+      (List.sort String.compare expected)
+      (fields |> List.map fst |> List.sort String.compare)
+  | _ -> fail (label ^ ": expected object")
+
 (* ============================================================
    Initialization
    ============================================================ *)
@@ -47,10 +56,8 @@ let test_init () =
     Otel_metric_store.snapshot ()
     |> List.exists (fun (m : Otel_metric_store.metric) -> String.equal m.name name)
   in
-  (* Counters zero-fill at module init (declare_counter); gauges and
-     histograms are lazy — they appear on first set/observe.  The
-     registration sweep this test originally asserted died with the
-     retired scrape backend (RFC-0217). *)
+  (* Counters zero-fill at module init; gauges and histograms appear on first
+     set or observation. *)
   check bool "http accept counter zero-filled" true
     (has_metric "masc_http_accepts_total");
   TM.set_grpc_active_streams 0;
@@ -65,8 +72,8 @@ let test_init () =
    ============================================================ *)
 
 let test_sse_sessions () =
-  TM.set_sse_sessions ~kind:"observer" 10;
-  TM.set_sse_sessions ~kind:"agent_stream" 5;
+  TM.set_sse_sessions ~kind:TM.Observer 10;
+  TM.set_sse_sessions ~kind:TM.Agent_stream 5;
   let obs = Otel_metric_store.metric_value_or_zero "masc_sse_sessions_total"
     ~labels:[("kind", "observer")] () in
   let workspace = Otel_metric_store.metric_value_or_zero "masc_sse_sessions_total"
@@ -167,10 +174,24 @@ let test_grpc_events_dropped () =
     3.0 (after -. before)
 
 let test_grpc_runtime_listening_cache () =
+  (* [grpc_listening] is [grpc_enabled () && runtime_listening], and the flag
+     is off by default, so the runtime half only shows with the config half
+     named. The test used to rely on the default being on, which made it a
+     test of two things while reading as a test of one. *)
+  let previous = Sys.getenv_opt "MASC_GRPC_ENABLED" in
+  Unix.putenv "MASC_GRPC_ENABLED" "1";
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "MASC_GRPC_ENABLED" (Option.value previous ~default:"0"))
+    (fun () ->
+      TM.set_grpc_runtime_listening true;
+      check bool "grpc listening uses runtime cache" true (TM.grpc_listening ());
+      TM.set_grpc_runtime_listening false;
+      check bool "grpc listening resets" false (TM.grpc_listening ()));
+  (* And the config half alone is not enough either. *)
   TM.set_grpc_runtime_listening true;
-  check bool "grpc listening uses runtime cache" true (TM.grpc_listening ());
-  TM.set_grpc_runtime_listening false;
-  check bool "grpc listening resets" false (TM.grpc_listening ())
+  check bool "a disabled flag keeps it not listening" false (TM.grpc_listening ());
+  TM.set_grpc_runtime_listening false
 
 let test_ws_sessions () =
   TM.set_ws_sessions 4;
@@ -216,22 +237,12 @@ let test_ws_dashboard_hello_latency () =
 let test_ws_enabled_blank_env_matches_runtime () =
   with_env "MASC_WS_ENABLED" (Some "") (fun () ->
     check bool "transport metrics treats blank as enabled" true
-      (TM.ws_enabled ());
-    check bool "runtime server treats blank as enabled" true
-      (Server_ws_standalone.is_enabled ()))
+      (TM.ws_enabled ()))
 
 let test_ws_enabled_normalized_env_matches_runtime () =
   with_env "MASC_WS_ENABLED" (Some " FALSE ") (fun () ->
     check bool "transport metrics normalizes false env" false
-      (TM.ws_enabled ());
-    check bool "runtime server normalizes false env" false
-      (Server_ws_standalone.is_enabled ()))
-
-let test_ws_runtime_listening_cache () =
-  TM.set_ws_runtime_listening true;
-  check bool "ws listening uses runtime cache" true (TM.ws_listening ());
-  TM.set_ws_runtime_listening false;
-  check bool "ws listening resets" false (TM.ws_listening ())
+      (TM.ws_enabled ()))
 
 let test_http_listener_state_json () =
   let accepts_before =
@@ -331,40 +342,116 @@ let test_transport_health_json () =
        ~last_event_id:0);
   TM.set_grpc_active_streams 1;
   TM.set_grpc_subscribers 2;
-  Otel_metric_store.set_gauge Otel_metric_store.metric_oas_sse_relay_queue_depth 4.0;
-  Otel_metric_store.inc_counter Otel_metric_store.metric_oas_sse_relay_retries
+  Otel_metric_store.set_gauge Otel_metric_store.metric_agent_core_sse_relay_queue_depth 4.0;
+  Otel_metric_store.inc_counter Otel_metric_store.metric_agent_core_sse_relay_retries
     ~labels:[ ("stage", "append") ] ~delta:2.0 ();
-  Otel_metric_store.inc_counter Otel_metric_store.metric_oas_sse_relay_retries
+  Otel_metric_store.inc_counter Otel_metric_store.metric_agent_core_sse_relay_retries
     ~labels:[ ("stage", "broadcast") ] ~delta:1.0 ();
-  Otel_metric_store.inc_counter Otel_metric_store.metric_oas_sse_relay_drops
+  Otel_metric_store.inc_counter Otel_metric_store.metric_agent_core_sse_relay_drops
     ~labels:[ ("stage", "queue") ] ~delta:3.0 ();
-  Otel_metric_store.inc_counter Otel_metric_store.metric_oas_sse_relay_drops
+  Otel_metric_store.inc_counter Otel_metric_store.metric_agent_core_sse_relay_drops
     ~labels:[ ("stage", "append") ] ~delta:1.0 ();
   Otel_metric_store.inc_counter Keeper_metrics.(to_string LifecycleDispatchRejections)
     ~labels:[ ("event", "compaction_started") ] ~delta:2.0 ();
-  let hello_latency_sum_before =
-    Otel_metric_store.metric_total Otel_metric_store.metric_ws_dashboard_hello_latency_seconds
-  in
-  let hello_latency_count_before =
-    Otel_metric_store.metric_total
-      (Otel_metric_store.metric_ws_dashboard_hello_latency_seconds ^ "_count")
-  in
-  let external_fanout_count_before =
-    Otel_metric_store.metric_total
-      (Otel_metric_store.metric_sse_external_fanout_duration_seconds ^ "_count")
-  in
-  TM.observe_ws_dashboard_hello_latency ~success:true 0.125;
   Masc.Sse.broadcast (`Assoc [ ("type", `String "transport-test") ]);
   Masc.Sse.sync_transport_snapshot ~force:true ();
-  let json = TM.transport_health_json ~config in
+  with_env "MASC_USE_H2" (Some "h1_only") (fun () ->
+    ignore (Env_config.Transport.configure_h2_from_env ()););
+  let json =
+    with_env "MASC_USE_H2" (Some "h2_only") (fun () ->
+      TM.transport_health_json ())
+  in
   let sse_json = json |> U.member "sse" in
   let streamable_json = json |> U.member "streamable_http" in
   let grpc_json = json |> U.member "grpc" in
   let ws_json = json |> U.member "websocket" in
-  let webrtc_json = json |> U.member "webrtc" in
-  let cluster_json = json |> U.member "cluster" in
+  let http2_json = json |> U.member "http2" in
   let summary_json = json |> U.member "summary" in
   let agent_health_json = json |> U.member "agent_health" in
+  check_assoc_keys
+    "transport-health exact top-level keys"
+    [ "summary"
+    ; "sse"
+    ; "grpc"
+    ; "websocket"
+    ; "streamable_http"
+    ; "http2"
+    ; "agent_health"
+    ; "generated_at"
+    ]
+    json;
+  check_assoc_keys
+    "summary exact keys"
+    [ "primary_path"; "queue_pressure"; "external_fanout_targets" ]
+    summary_json;
+  check_assoc_keys
+    "grpc exact keys"
+    [ "configured"
+    ; "listening"
+    ; "port"
+    ; "active_streams"
+    ; "subscribers"
+    ; "heartbeat_avg_seconds"
+    ; "events_delivered"
+    ; "events_dropped"
+    ]
+    grpc_json;
+  check_assoc_keys
+    "SSE exact keys"
+    [ "sessions_observer"
+    ; "sessions_agent_stream"
+    ; "sessions_presence"
+    ; "sessions_total"
+    ; "external_subscribers"
+    ; "broadcast_avg_seconds"
+    ; "broadcast_count"
+    ; "queue_avg_depth"
+    ; "queue_max_depth"
+    ; "relay_queue_depth"
+    ; "relay_retry_total"
+    ; "relay_retry_append"
+    ; "relay_retry_broadcast"
+    ; "relay_drop_total"
+    ; "relay_drop_queue"
+    ; "relay_drop_append"
+    ; "relay_drop_broadcast"
+    ; "hot_sessions"
+    ]
+    sse_json;
+  check_assoc_keys
+    "WebSocket exact keys"
+    [ "configured"
+    ; "listening"
+    ; "mode"
+    ; "sessions"
+    ; "relay_source"
+    ; "delivery"
+    ]
+    ws_json;
+  check_assoc_keys
+    "WebSocket delivery exact keys"
+    [ "bytes_cache_hits"
+    ; "bytes_cache_misses"
+    ; "client_acks"
+    ; "throttled_deliveries"
+    ; "client_buffered_bytes_sum"
+    ; "client_buffered_bytes_count"
+    ]
+    (ws_json |> U.member "delivery");
+  check_assoc_keys
+    "streamable HTTP exact keys"
+    [ "endpoint"
+    ; "observer_stream"
+    ; "presence_stream"
+    ; "supports_post"
+    ; "supports_sse_upgrade"
+    ; "auth_rejects_total"
+    ]
+    streamable_json;
+  check_assoc_keys
+    "HTTP/2 exact keys"
+    [ "listener_mode"; "multiplex_ready" ]
+    http2_json;
   check int "observer sessions" 1
     (sse_json |> U.member "sessions_observer" |> U.to_int);
   check int "agent_stream sessions" 1
@@ -381,54 +468,8 @@ let test_transport_health_json () =
     (sse_json |> U.member "relay_retry_total" |> U.to_int);
   check int "relay drops total" 4
     (sse_json |> U.member "relay_drop_total" |> U.to_int);
-  check bool "external fanout avg surfaced" true
-    (match sse_json |> U.member "external_fanout_avg_seconds" with
-     | `Float _ | `Int _ -> true
-     | _ -> false);
-  check bool "external fanout count surfaced" true
-    (match sse_json |> U.member "external_fanout_count" with
-     | `Int _ -> true
-     | _ -> false);
-  check bool "external fanout count advances" true
-    (float_of_int (sse_json |> U.member "external_fanout_count" |> U.to_int)
-     >= external_fanout_count_before +. 1.0);
-  check bool "external fanout sum surfaced" true
-    (match sse_json |> U.member "external_fanout_sum_seconds" with
-     | `Float _ | `Int _ -> true
-     | _ -> false);
-  check bool "streamable http configured field exists" true
-    (match streamable_json |> U.member "configured" with
-    | `Bool _ -> true
-    | _ -> false);
-  check bool "streamable http protocol_capable field exists" true
-    (match streamable_json |> U.member "protocol_capable" with
-    | `Bool _ -> true
-    | _ -> false);
-  check bool "streamable http auth_policy_present field exists" true
-    (match streamable_json |> U.member "auth_policy_present" with
-    | `Bool _ -> true
-    | _ -> false);
-  let streamable_listener_json = streamable_json |> U.member "listener" in
-  check bool "streamable http listener object exists" true
-    (match streamable_listener_json with `Assoc _ -> true | _ -> false);
-  check bool "streamable http listener status exists" true
-    (match streamable_listener_json |> U.member "status" with
-    | `String _ -> true
-    | _ -> false);
-  check bool "streamable http active connection count exists" true
-    (match streamable_listener_json |> U.member "active_connections" with
-    | `Int _ -> true
-    | _ -> false);
   check string "presence stream endpoint" "/events/presence"
     (streamable_json |> U.member "presence_stream" |> U.to_string);
-  check bool "legacy SSE endpoint is not advertised" true
-    (match streamable_json |> U.member "legacy_sse_endpoint" with
-    | `Null -> true
-    | _ -> false);
-  check bool "legacy messages endpoint is not advertised" true
-    (match streamable_json |> U.member "legacy_messages_endpoint" with
-    | `Null -> true
-    | _ -> false);
   check int "grpc active streams" 1
     (grpc_json |> U.member "active_streams" |> U.to_int);
   check int "grpc subscribers" 2
@@ -438,71 +479,44 @@ let test_transport_health_json () =
      | `Int _ -> true | _ -> false);
   check bool "grpc listening field exists" true
     (match grpc_json |> U.member "listening" with `Bool _ -> true | _ -> false);
-  check bool "grpc reachable field exists" true
-    (match grpc_json |> U.member "reachable" with `Bool _ -> true | _ -> false);
-  check bool "grpc listen_status field exists" true
-    (match grpc_json |> U.member "listen_status" with `String _ -> true | _ -> false);
   check bool "websocket listening field exists" true
     (match ws_json |> U.member "listening" with `Bool _ -> true | _ -> false);
-  check bool "websocket reachable field exists" true
-    (match ws_json |> U.member "reachable" with `Bool _ -> true | _ -> false);
-  check bool "ws listen_status field exists" true
-    (match ws_json |> U.member "listen_status" with `String _ -> true | _ -> false);
   check bool "websocket section exists" true
     (match ws_json with `Assoc _ -> true | _ -> false);
-  check bool "webrtc section exists" true
-    (match webrtc_json with `Assoc _ -> true | _ -> false);
-  check bool "webrtc configured field exists" true
-    (match webrtc_json |> U.member "configured" with `Bool _ -> true | _ -> false);
-  check bool "webrtc signaling_available field exists" true
-    (match webrtc_json |> U.member "signaling_available" with `Bool _ -> true | _ -> false);
-  check bool "webrtc signaling_mode field exists" true
-    (match webrtc_json |> U.member "signaling_mode" with `String _ -> true | _ -> false);
-  check string "workspace id" "default"
-    (cluster_json |> U.member "workspace_id" |> U.to_string);
+  check string "http2 reports the startup mode" "h1_only"
+    (http2_json |> U.member "listener_mode" |> U.to_string);
+  check bool "h1-only is not multiplex ready" false
+    (http2_json |> U.member "multiplex_ready" |> U.to_bool);
   check bool "summary primary path exists" true
     (String.length (summary_json |> U.member "primary_path" |> U.to_string) > 0);
-  check string "summary queue pressure reflects relay drops" "high"
+  (* The fixture queues 4 events and records 4 lifetime relay drops. Nothing is
+     backing up -- 4 is under the watch threshold -- so the reading is steady.
+     It used to be "high" because a lifetime drop counter fed this field, and
+     that counter never decrements, so one drop held the reading there until
+     the process restarted (#27652). The drops are still reported, as totals. *)
+  check string "queue pressure reads the current depth" "steady"
     (summary_json |> U.member "queue_pressure" |> U.to_string);
+  check int "the lifetime relay drops are still reported" 4
+    (sse_json |> U.member "relay_drop_total" |> U.to_int);
   check int "agent lifecycle dispatch rejections surfaced" 2
     (agent_health_json
      |> U.member "lifecycle_dispatch_rejections_total"
      |> U.to_int);
-  (* The [delivery] sub-object surfaces WS cache/ack/throttle counters
-     inline so the dashboard can render operational state without
-     querying external telemetry directly.  Producing metrics may not be registered
-     yet in this standalone PR, so presence (not value) is the contract
-     this test enforces. *)
   let delivery_json = ws_json |> U.member "delivery" in
   check bool "websocket delivery sub-object present" true
     (match delivery_json with `Assoc _ -> true | _ -> false);
   List.iter (fun (field, label) ->
     check bool (Printf.sprintf "%s field present (int)" label) true
       (match delivery_json |> U.member field with `Int _ -> true | _ -> false))
-    [ "parse_cache_hits", "parse_cache_hits"
-    ; "parse_cache_misses", "parse_cache_misses"
-    ; "bytes_cache_hits", "bytes_cache_hits"
+    [ "bytes_cache_hits", "bytes_cache_hits"
     ; "bytes_cache_misses", "bytes_cache_misses"
     ; "client_acks", "client_acks"
     ; "throttled_deliveries", "throttled_deliveries"
     ; "client_buffered_bytes_count", "client_buffered_bytes_count"
-    ; "hello_latency_count", "hello_latency_count"
     ];
   check bool "client_buffered_bytes_sum field present (float)" true
     (match delivery_json |> U.member "client_buffered_bytes_sum" with
      | `Float _ | `Int _ -> true | _ -> false);
-  check bool "hello_latency_sum_seconds field present (float)" true
-    (match delivery_json |> U.member "hello_latency_sum_seconds" with
-     | `Float _ | `Int _ -> true | _ -> false);
-  check bool "hello latency count is aggregated into health json" true
-    (float_of_int (delivery_json |> U.member "hello_latency_count" |> U.to_int)
-     >= hello_latency_count_before +. 1.0);
-  check bool "hello latency sum is aggregated into health json" true
-    ((match delivery_json |> U.member "hello_latency_sum_seconds" with
-      | `Float f -> f
-      | `Int i -> float_of_int i
-      | _ -> 0.0)
-     >= hello_latency_sum_before +. 0.125);
   ignore (Masc.Sse.close_all_clients ());
   cleanup_dir base_dir
 
@@ -511,6 +525,13 @@ let test_transport_health_json () =
    ============================================================ *)
 
 let test_grpc_listen_status_lifecycle () =
+  (* The status string is independent of the flag; [grpc_listening] is not, so
+     the enabling half is named here rather than inherited from a default. *)
+  let previous = Sys.getenv_opt "MASC_GRPC_ENABLED" in
+  Unix.putenv "MASC_GRPC_ENABLED" "1";
+  Fun.protect ~finally:(fun () ->
+    Unix.putenv "MASC_GRPC_ENABLED" (Option.value previous ~default:"0"))
+  @@ fun () ->
   check string "grpc status after init" "not_started"
     (Atomic.get TM.grpc_listen_status);
   TM.set_grpc_listen_status "listening";
@@ -524,43 +545,88 @@ let test_grpc_listen_status_lifecycle () =
     (Atomic.get TM.grpc_listen_status);
   check bool "grpc listening returns false" false (TM.grpc_listening ())
 
-let test_ws_listen_status_lifecycle () =
-  check string "ws status after init" "not_started"
-    (Atomic.get TM.ws_listen_status);
-  TM.set_ws_listen_status "listening";
-  TM.set_ws_runtime_listening true;
-  check string "ws status after listening" "listening"
-    (Atomic.get TM.ws_listen_status);
-  check bool "ws listening returns true" true (TM.ws_listening ());
-  TM.set_ws_listen_status "stopped";
-  TM.set_ws_runtime_listening false;
-  check string "ws status after stopped" "stopped"
-    (Atomic.get TM.ws_listen_status);
-  check bool "ws listening returns false" false (TM.ws_listening ())
-
 let test_listen_status_bind_failed () =
   TM.set_grpc_listen_status "bind_failed";
   TM.set_grpc_runtime_listening false;
-  TM.set_ws_listen_status "bind_failed";
-  TM.set_ws_runtime_listening false;
   check bool "grpc not listening on bind_failed" false (TM.grpc_listening ());
-  check bool "ws not listening on bind_failed" false (TM.ws_listening ());
   check string "grpc status is bind_failed" "bind_failed"
-    (Atomic.get TM.grpc_listen_status);
-  check string "ws status is bind_failed" "bind_failed"
-    (Atomic.get TM.ws_listen_status)
+    (Atomic.get TM.grpc_listen_status)
 
 let test_listen_status_disabled () =
   TM.set_grpc_listen_status "disabled";
-  TM.set_ws_listen_status "disabled";
   check string "grpc status disabled" "disabled"
-    (Atomic.get TM.grpc_listen_status);
-  check string "ws status disabled" "disabled"
-    (Atomic.get TM.ws_listen_status)
+    (Atomic.get TM.grpc_listen_status)
 
 (* ============================================================
    Test Runner
    ============================================================ *)
+
+(* Pressure has to answer "is anything backing up right now". Reading it off a
+   lifetime drop counter froze it at "high" after the first drop, so the depths
+   below could no longer move it either way (#27652). *)
+let test_queue_pressure_tracks_current_depth () =
+  Eio_main.run @@ fun _env ->
+  let pressure_at depth =
+    Otel_metric_store.set_gauge
+      Otel_metric_store.metric_agent_core_sse_relay_queue_depth
+      (float_of_int depth);
+    TM.transport_health_json ()
+    |> U.member "summary"
+    |> U.member "queue_pressure"
+    |> U.to_string
+  in
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_agent_core_sse_relay_drops
+    ~labels:[ ("stage", "queue") ]
+    ~delta:7.0
+    ();
+  check string "an empty queue is steady even after drops" "steady" (pressure_at 0);
+  check string "a filling queue is watched" "watch" (pressure_at 8);
+  check string "a deep queue is high" "high" (pressure_at 32);
+  check string "and it comes back down" "steady" (pressure_at 0)
+;;
+
+(* The wire words and the type are one set. A value the producer can emit and
+   the reader cannot name is exactly the drift this pair was split to stop, so
+   both directions are walked rather than spot-checked (#27652). *)
+let test_summary_words_round_trip () =
+  List.iter
+    (fun kind ->
+       let word = Masc.Transport_metrics.primary_path_kind_to_string kind in
+       Alcotest.(check bool)
+         (Printf.sprintf "primary_path %s round trips" word)
+         true
+         (Masc.Transport_metrics.primary_path_kind_of_string word = Some kind))
+    [ Masc.Transport_metrics.Grpc_subscribe
+    ; Masc.Transport_metrics.Websocket
+    ; Masc.Transport_metrics.Sse
+    ; Masc.Transport_metrics.Streamable_http
+    ];
+  List.iter
+    (fun kind ->
+       let word = Masc.Transport_metrics.queue_pressure_kind_to_string kind in
+       Alcotest.(check bool)
+         (Printf.sprintf "queue_pressure %s round trips" word)
+         true
+         (Masc.Transport_metrics.queue_pressure_kind_of_string word = Some kind))
+    [ Masc.Transport_metrics.Steady
+    ; Masc.Transport_metrics.Watch
+    ; Masc.Transport_metrics.High
+    ]
+;;
+
+(* A word from outside the set does not become a value. Before the split the
+   TUI printed whatever arrived in this field. *)
+let test_unknown_summary_word_is_refused () =
+  Alcotest.(check bool)
+    "an unknown primary_path is refused"
+    true
+    (Masc.Transport_metrics.primary_path_kind_of_string "carrier_pigeon" = None);
+  Alcotest.(check bool)
+    "an unknown queue_pressure is refused"
+    true
+    (Masc.Transport_metrics.queue_pressure_kind_of_string "panicking" = None)
+;;
 
 let () =
   run "Transport_metrics" [
@@ -591,8 +657,6 @@ let () =
         test_ws_enabled_blank_env_matches_runtime;
       test_case "normalized env matches runtime" `Quick
         test_ws_enabled_normalized_env_matches_runtime;
-      test_case "runtime listening cache" `Quick
-        test_ws_runtime_listening_cache;
     ]);
     ("http_listener", [
       test_case "primary listener state json" `Quick
@@ -604,12 +668,17 @@ let () =
     ]);
     ("json", [
       test_case "transport_health_json structure" `Quick test_transport_health_json;
+      test_case "queue pressure tracks the current depth" `Quick
+        test_queue_pressure_tracks_current_depth;
+    ]);
+    ("summary vocabulary", [
+      test_case "wire words round trip" `Quick test_summary_words_round_trip;
+      test_case "an unknown word is refused" `Quick
+        test_unknown_summary_word_is_refused;
     ]);
     ("listen_status", [
       test_case "grpc listen_status lifecycle" `Quick
         test_grpc_listen_status_lifecycle;
-      test_case "ws listen_status lifecycle" `Quick
-        test_ws_listen_status_lifecycle;
       test_case "listen_status bind_failed" `Quick
         test_listen_status_bind_failed;
       test_case "listen_status disabled" `Quick

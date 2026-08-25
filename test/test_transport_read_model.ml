@@ -36,6 +36,20 @@ let with_ws_same_origin_ready f =
   TM.set_ws_same_origin_runtime_ready true;
   Fun.protect ~finally:(fun () -> TM.set_ws_same_origin_runtime_ready false) f
 
+(* [Uri.host] reads the leading dotted quad of "127.0.0.1.example.com" as an
+   IPv4 literal and pushes the rest into the path, so the host field derived
+   from it can name a different machine than the base_url the same context
+   publishes. Every URL this module emits is built by appending to base_url,
+   so a client reaches whatever base_url says (#29806). *)
+let test_context_from_env_host_matches_the_published_base_url () =
+  with_env "MASC_HTTP_BASE_URL" (Some "http://127.0.0.1.example.com/root") (fun () ->
+      let ctx = TRM.context_from_env () in
+      check string "host is what the URL check ran on" "127.0.0.1" ctx.host;
+      check string
+        "base_url names that same host; the rest folds into the path"
+        "http://127.0.0.1/.example.com/root"
+        ctx.base_url)
+
 let test_websocket_discovery_http_shape_extends_tool_shape () =
   let tool_json = TRM.websocket_discovery_json (make_context ()) in
   let http_json =
@@ -58,13 +72,6 @@ let test_transport_status_http_shape_extends_tool_shape () =
     true
     (match
        Yojson.Safe.Util.(http_json |> member "grpc" |> member "configured")
-     with
-    | `Bool _ -> true
-    | _ -> false);
-  check bool "http webrtc surface adds configured"
-    true
-    (match
-       Yojson.Safe.Util.(http_json |> member "webrtc" |> member "configured")
      with
     | `Bool _ -> true
     | _ -> false);
@@ -106,13 +113,6 @@ let test_transport_status_http_shape_extends_tool_shape () =
      with
     | `Bool _ -> true
     | _ -> false);
-  check bool "webrtc surface exposes signaling availability"
-    true
-    (match
-       Yojson.Safe.Util.(http_json |> member "webrtc" |> member "signaling_available")
-     with
-    | `Bool _ -> true
-    | _ -> false);
   check bool "tool and http transport status match after stripping configured"
      true (tool_json = strip_configured http_json)
 
@@ -128,10 +128,7 @@ let test_transport_status_reports_streamable_http_protocol () =
 let test_websocket_discovery_uses_same_origin_url () =
   with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
     with_ws_same_origin_ready (fun () ->
-      TM.set_ws_runtime_listening true;
-      Fun.protect
-        ~finally:(fun () -> TM.set_ws_runtime_listening false)
-        (fun () ->
+      (
           let json = TRM.websocket_discovery_json (make_context ()) in
           check string "mode" "same_origin"
             Yojson.Safe.Util.(json |> member "mode" |> to_string);
@@ -139,24 +136,15 @@ let test_websocket_discovery_uses_same_origin_url () =
             Yojson.Safe.Util.(json |> member "upgrade_path" |> to_string);
           check string "ws_url uses same-origin listener" "ws://127.0.0.1:8935/ws"
             Yojson.Safe.Util.(json |> member "ws_url" |> to_string);
-          check string "standalone bind host is explicit" "127.0.0.1"
-            Yojson.Safe.Util.(json |> member "standalone_bind_host" |> to_string);
           check bool "same-origin upgrade is marked enabled" true
             Yojson.Safe.Util.(json |> member "same_origin_upgrade_enabled" |> to_bool);
-          check bool "same-origin reachability is explicit" true
-            Yojson.Safe.Util.(json |> member "same_origin_reachable" |> to_bool);
-          check string "standalone diagnostic is retained" "ws://127.0.0.1:8937/"
-            Yojson.Safe.Util.(json |> member "standalone_ws_url" |> to_string);
           check string "same-origin retained for diagnostics" "ws://127.0.0.1:8935/ws"
             Yojson.Safe.Util.(json |> member "same_origin_ws_url" |> to_string))))
 
 let test_websocket_discovery_advertises_same_origin_ws_to_remote_host () =
   with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
     with_ws_same_origin_ready (fun () ->
-      TM.set_ws_runtime_listening true;
-      Fun.protect
-        ~finally:(fun () -> TM.set_ws_runtime_listening false)
-        (fun () ->
+      (
           let ctx =
             TRM.make_http_context
               ~base_url:"http://192.0.2.10:8935"
@@ -164,19 +152,8 @@ let test_websocket_discovery_advertises_same_origin_ws_to_remote_host () =
               ()
           in
           let json = TRM.websocket_discovery_json ctx in
-          check bool "standalone process is listening" true
-            Yojson.Safe.Util.(json |> member "standalone_listening" |> to_bool);
-          check bool "remote host cannot reach loopback standalone listener" false
-            Yojson.Safe.Util.(
-              json |> member "request_host_can_reach_standalone" |> to_bool);
           check bool "same-origin listener is reachable from request origin" true
             Yojson.Safe.Util.(json |> member "reachable" |> to_bool);
-          check bool "request host reachability is explicit" false
-            Yojson.Safe.Util.(
-              json |> member "request_host_can_reach_standalone" |> to_bool);
-          check string "standalone diagnostic still reports bind URL"
-            "ws://127.0.0.1:8937/"
-            Yojson.Safe.Util.(json |> member "standalone_ws_url" |> to_string);
           check string "primary client ws_url uses same-origin"
             "ws://192.0.2.10:8935/ws"
             Yojson.Safe.Util.(json |> member "ws_url" |> to_string);
@@ -186,23 +163,8 @@ let test_websocket_discovery_advertises_same_origin_ws_to_remote_host () =
              | `Null -> true
              | _ -> false))))
 
-let test_websocket_discovery_distinguishes_standalone_from_same_origin () =
-  with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
-    with_ws_same_origin_ready (fun () ->
-      TM.set_ws_runtime_listening false;
-      let json = TRM.websocket_discovery_json (make_context ()) in
-      check bool "enabled still advertises configured websocket" true
-        Yojson.Safe.Util.(json |> member "enabled" |> to_bool);
-      check bool "same-origin upgrade makes primary listener available" true
-        Yojson.Safe.Util.(json |> member "listening" |> to_bool);
-      check bool "same-origin upgrade makes primary websocket reachable" true
-        Yojson.Safe.Util.(json |> member "reachable" |> to_bool);
-      check bool "standalone listener state remains explicit" false
-        Yojson.Safe.Util.(json |> member "standalone_listening" |> to_bool)))
-
 let test_websocket_discovery_waits_for_same_origin_dispatcher () =
   with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
-    TM.set_ws_runtime_listening false;
     TM.set_ws_same_origin_runtime_ready false;
     let ctx =
       TRM.make_http_context
@@ -349,8 +311,6 @@ let () =
              test_websocket_discovery_uses_same_origin_url;
            test_case "websocket remote host gets same-origin URL" `Quick
              test_websocket_discovery_advertises_same_origin_ws_to_remote_host;
-           test_case "websocket standalone state stays explicit" `Quick
-             test_websocket_discovery_distinguishes_standalone_from_same_origin;
            test_case "websocket waits for same-origin dispatcher" `Quick
              test_websocket_discovery_waits_for_same_origin_dispatcher;
            test_case "websocket HTTPS diagnostic URL" `Quick
@@ -376,5 +336,7 @@ let () =
             test_normalize_advertised_host_canonicalizes_ipv6_loopback;
           test_case "preserve noncanonical 127 alias" `Quick
             test_normalize_advertised_host_preserves_noncanonical_127_alias;
+          test_case "env host matches the published base url" `Quick
+            test_context_from_env_host_matches_the_published_base_url;
         ] );
     ]

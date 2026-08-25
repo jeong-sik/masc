@@ -1,12 +1,12 @@
 (** [masc_checkpoint_purge] — offline deterministic checkpoint purge
     (RFC-0351 S1).
 
-    Loads the canonical OAS checkpoint for one trace, applies
+    Loads the canonical AGENT_CORE checkpoint for one trace, applies
     {!Masc.Keeper_checkpoint_purge.purge} (duplicate collapse, unsigned
     reasoning strip, tool-result content clear — no LLM involved), and prints
     a per-rule report. Dry-run by default; [--apply] backs the original file
     up byte-exact and saves the purged checkpoint through
-    [Keeper_checkpoint_store.save_oas_classified] (locked, structure-validated,
+    [Keeper_checkpoint_store.save_agent_core_classified] (locked, structure-validated,
     watermark-checked; [turn_count] is unchanged so the save lands as an
     equal-watermark re-save).
 
@@ -71,7 +71,7 @@ let load_error_text = function
   | Store.Store_error detail -> "store error: " ^ detail
   | Store.Parse_error detail -> "parse error: " ^ detail
   | Store.Io_error detail -> "io error: " ^ detail
-  | Store.Sdk_other_error detail -> "sdk error: " ^ detail
+  | Store.Agent_core_error detail -> "sdk error: " ^ detail
 
 let read_file_bytes path =
   match In_channel.with_open_bin path In_channel.input_all with
@@ -141,17 +141,17 @@ let () =
     | None -> Config_dir_resolver.base_path_or_cwd ()
   in
   let session_dir = Filename.concat (Filename.concat base_path "traces") trace in
-  let checkpoint_path = Store.oas_checkpoint_path ~session_dir ~session_id:trace in
+  let checkpoint_path = Store.agent_core_checkpoint_path ~session_dir ~session_id:trace in
   if not (Sys.file_exists checkpoint_path)
   then error ("no canonical checkpoint at " ^ checkpoint_path);
   let original_bytes = read_file_bytes checkpoint_path in
-  match Store.load_oas ~session_dir ~session_id:trace with
+  match Store.load_agent_core ~session_dir ~session_id:trace with
   | Error load_error -> error (load_error_text load_error)
   | Ok checkpoint ->
     (match Purge.purge ~config:!config checkpoint with
      | Error purge_error -> error (purge_error_text purge_error)
      | Ok (purged, report) ->
-       let purged_bytes = Agent_sdk.Checkpoint.to_string purged in
+       let purged_bytes = Agent_core.Checkpoint.to_string purged in
        let before_len = String.length original_bytes in
        let after_len = String.length purged_bytes in
        Printf.printf "trace: %s\n" trace;
@@ -195,7 +195,7 @@ let () =
          let backup_path = Filename.concat backup_dir (trace ^ ".json") in
          write_file_bytes backup_path original_bytes;
          Printf.printf "backup: %s (%d bytes)\n" backup_path before_len;
-         (match Store.save_oas_classified ~session_dir purged with
+         (match Store.save_agent_core_classified ~session_dir purged with
           | Error detail -> error ("save failed (backup retained): " ^ detail)
           | Ok (Store.Stale_noop { incoming_turn_count; known_turn_count }) ->
             error

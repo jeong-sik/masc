@@ -167,13 +167,6 @@ let () =
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               check string "file source" "file"
                 (Prompt_registry.prompt_source "keeper.reply_guidelines"));
-          test_case "validate_required_prompt_files detects missing file" `Quick
-            (fun () ->
-              with_registry @@ fun ~dir:_ ~prompts_dir ->
-              Sys.remove (Filename.concat prompts_dir "test.templated.md");
-              let missing = Prompt_registry.validate_required_prompt_files () in
-              check bool "missing file found" true
-                (List.mem_assoc "test.templated" missing));
         ] );
       ( "rendering",
         [
@@ -314,7 +307,7 @@ let () =
                      with Not_found -> false)
               | Ok () -> fail "should reject unknown template variable");
           test_case
-            "legacy bare STATE/NEXT/BDI override map is rejected observably"
+            "invalid persisted override object is rejected observably"
             `Quick
             (fun () ->
               with_registry @@ fun ~dir ~prompts_dir:_ ->
@@ -329,12 +322,12 @@ let () =
               Unix.mkdir masc_dir 0o755;
               write_file
                 (prompt_overrides_path dir)
-                {|{"keeper":"[STATE] NEXT Constraints BDI"}|};
+                {|{"unexpected":"value"}|};
               Prompt_registry.restore_overrides dir;
               check (float 0.0001) "restore rejection counted"
                 (before +. 1.0)
                 (override_restore_failure_count ());
-              check string "legacy override not applied"
+              check string "invalid override not applied"
                 (fixture "keeper")
                 (Prompt_registry.get_prompt "keeper"));
           test_case "matching contract revision round-trips and applies" `Quick
@@ -488,24 +481,18 @@ let () =
              declared template_variables"
             `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
-              (* keeper declares [template_variables: []], matching
-                 config/prompts/keeper.md. Its predecessor
-                 keeper.constitution dropped
-                 [template_variables: [state_block_instruction]] in
-                 masc#23929 along with the retired STATE-block protocol, so
-                 a persisted operator override can still carry that
-                 placeholder syntax. It must not be treated as "no
-                 variables declared, anything goes". *)
+              (* [keeper] declares an exact empty variable set, so any
+                 placeholder is invalid. *)
               match
                 Prompt_registry.set_override "keeper"
-                  "Legacy rules {{state_block_instruction}} more text"
+                  "Rules {{undeclared_variable}} more text"
               with
               | Error msg ->
                   check bool "mentions the stray placeholder" true
                     (try
                        ignore
                          (Str.search_forward
-                            (Str.regexp_string "state_block_instruction")
+                            (Str.regexp_string "undeclared_variable")
                             msg 0);
                        true
                      with Not_found -> false)
@@ -537,7 +524,7 @@ let () =
               Unix.mkdir masc_dir 0o755;
               write_file
                 (prompt_overrides_path dir)
-                {|{"keeper":"Legacy STATE rules {{state_block_instruction}}"}|};
+                {|{"keeper":"Rules {{undeclared_variable}}"}|};
               Prompt_registry.restore_overrides dir;
               check (float 0.0001) "restore rejection counted"
                 (before +. 1.0)
@@ -558,15 +545,14 @@ let () =
                 (Lib.Keeper_prompt.system_prompt_body ()));
           test_case
             "system_prompt_body falls back to file when a persisted \
-             override still carries the retired {{state_block_instruction}} \
-             placeholder"
+             override contains an undeclared placeholder"
             `Quick (fun () ->
               with_registry @@ fun ~dir ~prompts_dir:_ ->
               let masc_dir = Filename.concat dir ".masc" in
               Unix.mkdir masc_dir 0o755;
               write_file
                 (prompt_overrides_path dir)
-                {|{"keeper":"Legacy STATE rules {{state_block_instruction}}"}|};
+                {|{"keeper":"Rules {{undeclared_variable}}"}|};
               Prompt_registry.restore_overrides dir;
               check string "system_prompt_body ignores the rejected override"
                 (fixture "keeper")

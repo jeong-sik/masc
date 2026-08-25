@@ -1,22 +1,5 @@
 ---
 status: reference
-last_verified: 2026-06-21
-code_refs:
-  - lib/keeper_tooling/keeper_tool_execute_shell_ir.ml
-  - lib/keeper/keeper_tool_execute_runtime.ml
-  - lib/exec_policy/exec_policy.ml
-  - lib/config/env_config_core.ml
-  - lib/config/env_config_runtime.ml
-  - lib/config/feature_flag_registry.ml
-  - lib/config/env_config_sandbox.ml
-  - lib/keeper/keeper_tool_surface_ops.ml
-  - lib/workspace/workspace_gc.ml
-  - lib/workspace/workspace_utils_paths_backend.ml
-  - lib/keeper/keeper_chat_queue.ml
-  - lib/keeper/keeper_msg_async.ml
-  - scripts/check-feature-flag-consistency.sh
-  - scripts/check-ssot.sh
-  - scripts/audit-path-ssot.sh
 ---
 
 # Productization Blockers Adversarial Audit
@@ -75,13 +58,10 @@ must not reintroduce this policy layer.
 
 **Evidence**:
 
-- `docs/runtime-tunables.md:17-19` reports 355 unique knobs and only 21/204 typed getter classifications.
-- `docs/runtime-tunables.md:32` documents `MASC_DISABLE_HITL` defaulting to true.
 - `lib/config/env_config_core.ml:500-506` implements that default.
 - `scripts/check-feature-flag-consistency.sh:24-36` leaves `CALLS` empty, so duplicate-default detection never inspects real calls.
 - `scripts/check-feature-flag-consistency.sh:64-68` scans only registry calls plus direct `get_bool` calls in `env_config_core.ml`; it misses direct `get_bool` calls in sibling config modules.
 - Local run reports `MASC_KEEPER_DOCKER_PLAYGROUND` as stale, while `lib/config/env_config_sandbox.ml:88` and `lib/config/feature_flag_registry.ml:133` show it is live and registered.
-- `lib/config/env_config_runtime.ml:337-339`, `lib/config/feature_flag_registry.ml:202-204`, and `docs/runtime-tunables.md:209` disagree on the `MASC_CDAL_GATE_ENABLED` default text/value.
 
 **Impact**:
 
@@ -101,7 +81,6 @@ This is a product-control problem. A product operator cannot reason about the ru
 **Evidence**:
 
 - `lib/workspace/workspace_gc.ml:70-87`, `319-340`, and `364-419` use `Sys.readdir`, `Sys.remove`, `Sys.is_directory`, and `Unix.rmdir` inside workspace GC.
-- `lib/keeper/keeper_chat_queue.ml:354-371` scans the keepers directory and loads snapshots during persistence setup.
 - `lib/keeper/keeper_msg_async.ml:268-291` scans async request records for GC.
 - `lib/workspace/workspace_utils_paths_backend.ml:199-209` exposes a shared `list_dir` helper that uses `Sys.readdir` directly for local backends.
 
@@ -154,7 +133,7 @@ This creates inconsistent parse semantics, inconsistent invalid-value telemetry,
 **Fix direction**:
 
 - Move these readers into `Env_config_runtime` or a shared typed parser module under `lib/config`.
-- Require all user/operator-facing env vars to appear in `runtime-tunables.md` from generated metadata, not manual side effects.
+- Require user/operator-facing env vars to project from their typed runtime owners through `masc_config`.
 - Allow direct `Sys.getenv_opt` only at process bootstrap, secret projection, or test fakes, with comments explaining the boundary.
 
 ### 6. Keeper fleet isolation looks improved, but must remain a P0 gate
@@ -164,7 +143,6 @@ This creates inconsistent parse semantics, inconsistent invalid-value telemetry,
 **Evidence**:
 
 - `lib/keeper/keeper_msg_async.ml:535-546` fails only the active request switch for cancellation.
-- `lib/keeper/keeper_chat_queue.ml:350-371` uses per-entry mutexes after a shared registry read.
 - Prior code comments in keeper transition/memory-lane areas indicate known work to avoid shared flush/stall behavior.
 
 **Impact**:

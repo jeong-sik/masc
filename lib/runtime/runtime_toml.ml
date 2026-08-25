@@ -3,10 +3,11 @@
     Re-homed from the deleted [Runtime_declarative_parser]. Parses RFC-0058
     layers 1-3 plus [[runtime].default] into a self-standing
     {!Runtime_schema.config}. Reserved top-level namespaces: providers,
-    models, runtime, web_search (plus the dropped routing namespaces system,
-    routes, profiles, which are still reserved so they are never mistaken for a
-    provider table). Any other top-level table is a provider table, with
-    sub-tables as model bindings.
+    models, runtime, web_search. Dropped routing namespaces system, routes, and
+    profiles are rejected rather than ignored. A top-level table whose name
+    [\[providers\]] declares carries that provider's model bindings as
+    sub-tables; every other top-level table belongs to a different parser and is
+    left alone.
 
     Routing layers are intentionally NOT parsed (see {!Runtime_toml} mli):
     Layer 4 aliases, Layer 5 routes/system/profiles, and the
@@ -104,28 +105,105 @@ let partition_results
 
 (* --- Protocol string -> Runtime_schema.api_format --- *)
 
-let canonical_protocol_of_protocol = function
-  | "messages-cli" | "messages-http" | "openai-compatible-cli"
-  | "openai-compatible-http" | "ollama-http" as protocol -> Some protocol
-  | _ -> None
+type editor_transport =
+  | Endpoint
+  | Command
+
+type editor_semantics =
+  | Http_provider
+  | Official_client
+
+type editor_credential_policy =
+  | Credentials_optional
+  | Credentials_forbidden
+
+type editor_protocol =
+  { protocol : string
+  ; transport : editor_transport
+  ; semantics : editor_semantics
+  ; credential_policy : editor_credential_policy
+  ; requires_non_interactive : bool
+  }
+
+type protocol_declaration =
+  { protocol : string
+  ; api_format : Runtime_schema.api_format
+  ; editor : editor_protocol option
+  }
+
+let http_editor protocol =
+  Some
+    { protocol
+    ; transport = Endpoint
+    ; semantics = Http_provider
+    ; credential_policy = Credentials_optional
+    ; requires_non_interactive = false
+    }
+;;
+
+let official_client_editor protocol =
+  Some
+    { protocol
+    ; transport = Command
+    ; semantics = Official_client
+    ; credential_policy = Credentials_forbidden
+    ; requires_non_interactive = true
+    }
+;;
+
+let hidden_protocol protocol api_format =
+  { protocol; api_format; editor = None }
+;;
+
+let http_protocol protocol api_format =
+  { protocol; api_format; editor = http_editor protocol }
+;;
+
+let official_client_protocol protocol api_format =
+  { protocol; api_format; editor = official_client_editor protocol }
+;;
+
+let protocol_declarations =
+  [ hidden_protocol "messages-cli" Runtime_schema.Messages_api
+  ; http_protocol "messages-http" Runtime_schema.Messages_api
+  ; hidden_protocol "openai-compatible-cli" Runtime_schema.Chat_completions_api
+  ; http_protocol
+      "openai-compatible-http"
+      Runtime_schema.Chat_completions_api
+  ; http_protocol "ollama-http" Runtime_schema.Ollama_api
+  ; official_client_protocol
+      "codex-app-server"
+      Runtime_schema.Codex_app_server_runtime
+  ; official_client_protocol "claude-code" Runtime_schema.Claude_code_runtime
+  ; hidden_protocol "antigravity-cli" Runtime_schema.Antigravity_cli_runtime
+  ]
+;;
+
+let protocol_declaration protocol =
+  List.find_opt
+    (fun declaration -> String.equal declaration.protocol protocol)
+    protocol_declarations
+;;
+
+let editor_protocols = List.filter_map (fun declaration -> declaration.editor) protocol_declarations
+
+let canonical_protocol_of_protocol protocol =
+  Option.map (fun declaration -> declaration.protocol) (protocol_declaration protocol)
 ;;
 
 let unknown_protocol_error s =
   Printf.sprintf
-    "unknown protocol %S: expected one of messages-cli, messages-http, \
-     openai-compatible-cli, openai-compatible-http, ollama-http"
+    "unknown protocol %S: expected one of %s"
     s
+    (String.concat ", " (List.map (fun declaration -> declaration.protocol) protocol_declarations))
 ;;
 
 let api_format_of_protocol (s : string)
   : (Runtime_schema.api_format, string) result
   =
-  match s with
-  | "messages-cli" | "messages-http" -> Ok Runtime_schema.Messages_api
-  | "openai-compatible-cli" | "openai-compatible-http" ->
-    Ok Runtime_schema.Chat_completions_api
-  | "ollama-http" -> Ok Runtime_schema.Ollama_api
-  | _ -> Error (unknown_protocol_error s)
+  match protocol_declaration s with
+  | Some declaration -> Ok declaration.api_format
+  | None -> Error (unknown_protocol_error s)
 ;;
 
 (* --- Transport extraction --- *)
@@ -142,6 +220,55 @@ let transport_of_provider (tbl : Otoml.t) (id : string)
     Error (Printf.sprintf "provider %s: cannot specify both 'endpoint' and 'command'" id)
   | None, None ->
     Error (Printf.sprintf "provider %s: must specify either 'endpoint' or 'command'" id)
+;;
+
+let active_top_level_namespaces = [ "providers"; "models"; "runtime"; "web_search" ]
+let obsolete_top_level_namespaces = [ "system"; "routes"; "profiles" ]
+let reserved_namespaces = active_top_level_namespaces @ obsolete_top_level_namespaces
+let is_reserved name = List.mem name reserved_namespaces
+
+(* Provider ids stay dot-free: a Runtime id is the literal string
+   "<provider>.<model>", so a dot inside the provider id would make that
+   compound ambiguous. Model ids admit '.' because they carry upstream API
+   model names verbatim (gpt-5.3-codex-spark, mimo-v2.5), written as quoted
+   TOML keys that Otoml already parses. *)
+let valid_runtime_id_component ~allow_dot value =
+  let length = String.length value in
+  length > 0
+  &&
+  let rec loop index =
+    if index = length
+    then true
+    else (
+      match value.[index] with
+      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> loop (index + 1)
+      | '.' when allow_dot -> loop (index + 1)
+      | _ -> false)
+  in
+  loop 0
+;;
+
+let runtime_id_charset ~allow_dot =
+  if allow_dot then "[A-Za-z0-9._-]+" else "[A-Za-z0-9_-]+"
+;;
+
+let validate_runtime_id_component ~allow_dot ~kind ~path value =
+  if not (valid_runtime_id_component ~allow_dot value)
+  then
+    Error
+      (error
+         path
+         (Printf.sprintf "%s id must match %s" kind (runtime_id_charset ~allow_dot)))
+  else if is_reserved value
+  then
+    Error
+      (error
+         path
+         (Printf.sprintf
+            "%s id %S collides with a reserved top-level runtime.toml namespace"
+            kind
+            value))
+  else Ok ()
 ;;
 
 (* --- Layer 1: Providers --- *)
@@ -189,47 +316,46 @@ let parse_credential (tbl : Otoml.t) (path : string)
      | t -> Error (error (path ^ ".type") (Printf.sprintf "unknown credential type %S" t)))
 ;;
 
-(* Deprecation notices fire once per process per [path.capabilities.key], not
-   once per parse. runtime.toml is re-parsed on every keeper boot, so a per-parse
-   warning flooded the WARN log — one observed day carried ~315 of these (25% of
-   the live WARN volume) from a handful of deprecated capability keys across
-   providers, drowning genuine warnings. The notice still surfaces once so an
-   operator can remove the ignored field; only the per-parse repetition is
-   dropped, so no signal is lost. *)
-let deprecation_notice_seen : (string, unit) Hashtbl.t = Hashtbl.create 16
-let deprecation_notice_seen_mu = Stdlib.Mutex.create ()
+let capability_keys =
+  [ "supports-inline-tools"; "argv-prompt-preflight"; "uses-messages-caching" ]
+;;
 
-let parse_capabilities ~(path : string) (tbl : Otoml.t) : Runtime_schema.capabilities =
-  let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
-  let warn_deprecated key =
-    match Otoml.find_opt tbl Fun.id [ key ] with
-    | None -> ()
-    | Some _ ->
-      let notice_key = path ^ ".capabilities." ^ key in
-      let should_warn =
-        Stdlib.Mutex.protect deprecation_notice_seen_mu (fun () ->
-          if Hashtbl.mem deprecation_notice_seen notice_key
-          then false
-          else (
-            Hashtbl.replace deprecation_notice_seen notice_key ();
-            true))
-      in
-      if should_warn
-      then
-        Log.Runtime.warn
-          "runtime_toml: %s.capabilities.%s is deprecated and ignored; runtime-MCP capability is resolved from OAS provider bindings"
-          path
-          key
+(** Parse a [providers.<id>.capabilities] sub-table. Every key must be one of
+    {!capability_keys}; any other key fails the load so a stale or misspelled
+    capability is never silently dropped. *)
+let parse_capabilities ~(path : string) (tbl : Otoml.t)
+  : (Runtime_schema.capabilities, parse_error list) result
+  =
+  let path = path ^ ".capabilities" in
+  let unknown_key_errors =
+    match tbl with
+    | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+      List.concat_map
+        (fun (key, _) ->
+           if List.mem key capability_keys
+           then []
+           else
+             error
+               (path ^ "." ^ key)
+               (Printf.sprintf
+                  "unknown capabilities key %S; expected %s"
+                  key
+                  (String.concat ", " capability_keys)))
+        entries
+    | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+    | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+    | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+    | Otoml.TomlTableArray _ -> error path "capabilities must be a TOML table"
   in
-  List.iter
-    warn_deprecated
-    [ "supports-runtime-mcp-tools"
-    ; "supports-runtime-tool-events"
-    ];
-  { Runtime_schema.supports_inline_tools = b "supports-inline-tools"
-  ; argv_prompt_preflight = b "argv-prompt-preflight"
-  ; uses_anthropic_caching = b "uses-messages-caching"
-  }
+  if unknown_key_errors <> []
+  then Error unknown_key_errors
+  else (
+    let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
+    Ok
+      { Runtime_schema.supports_inline_tools = b "supports-inline-tools"
+      ; argv_prompt_preflight = b "argv-prompt-preflight"
+      ; uses_anthropic_caching = b "uses-messages-caching"
+      })
 ;;
 
 (** Parse a [providers.<id>.headers] sub-table into a sorted association
@@ -264,10 +390,102 @@ let parse_headers (tbl : Otoml.t) (path : string) : (string * string) list =
     List.sort (fun (a, _) (b, _) -> String.compare a b) pairs
 ;;
 
+let antigravity_cli_option_keys = [ "agent"; "effort"; "timeout-s" ]
+
+let antigravity_forbidden_option_keys =
+  [ "execution-mode"; "sandbox"; "disable-slash-commands" ]
+;;
+
+let antigravity_optional_string ~(path : string) (tbl : Otoml.t) key =
+  match typed_find "a string" path tbl key Otoml.get_string with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when String.trim value = "" ->
+    Error (error (path ^ "." ^ key) (key ^ " must be non-empty when present"))
+  | Ok (Some value) when not (String.equal value (String.trim value)) ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (key ^ " must not have leading or trailing whitespace"))
+  | Ok (Some value) -> Ok (Some value)
+;;
+
+let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
+    (api_format : Runtime_schema.api_format)
+  : (Runtime_schema.antigravity_cli_options option, parse_error list) result
+  =
+  match api_format with
+  | Antigravity_cli_runtime ->
+    let authority_error =
+      List.find_opt
+        (fun key -> Option.is_some (Otoml.find_opt tbl Fun.id [ key ]))
+        antigravity_forbidden_option_keys
+      |> Option.map (fun key ->
+        error
+          (path ^ "." ^ key)
+          (Printf.sprintf "unsupported antigravity-cli provider field %S" key))
+    in
+    (match authority_error with
+     | Some error -> Error error
+     | None ->
+    let agent_result = antigravity_optional_string ~path tbl "agent" in
+    let effort_result = antigravity_optional_string ~path tbl "effort" in
+    let timeout_result =
+      match
+        strict_float_find path tbl "timeout-s"
+        |> positive_finite_float_opt_field ~path ~key:"timeout-s"
+      with
+      | Error _ as error -> error
+      | Ok None ->
+        Error
+          (error
+             (path ^ ".timeout-s")
+             "timeout-s is required for protocol antigravity-cli")
+      | Ok (Some timeout_s) -> Ok timeout_s
+    in
+    (match agent_result, effort_result, timeout_result with
+     | Error errors, _, _ | _, Error errors, _ | _, _, Error errors -> Error errors
+     | Ok agent, Ok effort, Ok timeout_s ->
+       let effort_result =
+         match effort with
+         | None -> Ok None
+         | Some "low" -> Ok (Some Runtime_schema.Antigravity_low)
+         | Some "medium" -> Ok (Some Runtime_schema.Antigravity_medium)
+         | Some "high" -> Ok (Some Runtime_schema.Antigravity_high)
+         | Some value ->
+           Error
+             (error
+                (path ^ ".effort")
+                (Printf.sprintf "effort must be low, medium, or high; got %S" value))
+       in
+       (match effort_result with
+        | Error errors -> Error errors
+        | Ok effort -> Ok (Some { Runtime_schema.agent; effort; timeout_s }))))
+  | Messages_api
+  | Chat_completions_api
+  | Ollama_api
+  | Codex_app_server_runtime
+  | Claude_code_runtime ->
+    (match
+       List.find_opt
+         (fun key -> Option.is_some (Otoml.find_opt tbl Fun.id [ key ]))
+         (antigravity_cli_option_keys @ antigravity_forbidden_option_keys)
+     with
+     | None -> Ok None
+     | Some key ->
+       Error
+         (error
+            (path ^ "." ^ key)
+            (Printf.sprintf "%s is valid only for protocol antigravity-cli" key)))
+;;
+
 let parse_provider (id : string) (tbl : Otoml.t)
   : (Runtime_schema.provider, parse_error list) result
   =
   let path = Printf.sprintf "providers.%s" id in
+  let enabled_result =
+    typed_find "a boolean" path tbl "enabled" Otoml.get_boolean
+  in
   let display_name =
     match Otoml.find_opt tbl Otoml.get_string [ "display-name" ] with
     | Some n -> n
@@ -301,12 +519,15 @@ let parse_provider (id : string) (tbl : Otoml.t)
         Result.map Option.some (parse_credential cred_tbl (path ^ ".credentials"))
       | None -> Ok None
     in
-    (match credentials_result with
-     | Error errs -> Error errs
-     | Ok credentials ->
-       let capabilities =
-         Otoml.find_opt tbl Fun.id [ "capabilities" ]
-         |> Option.map (parse_capabilities ~path)
+    let antigravity_cli_result = antigravity_cli_options ~path tbl api_format in
+    (match credentials_result, antigravity_cli_result with
+     | Error errs, _ | _, Error errs -> Error errs
+     | Ok credentials, Ok antigravity_cli ->
+       let capabilities_result =
+         match Otoml.find_opt tbl Fun.id [ "capabilities" ] with
+         | None -> Ok None
+         | Some capabilities_tbl ->
+           Result.map Option.some (parse_capabilities ~path capabilities_tbl)
        in
        let healthcheck_result =
          match Otoml.find_opt tbl Fun.id [ "healthcheck" ] with
@@ -333,18 +554,23 @@ let parse_provider (id : string) (tbl : Otoml.t)
          | None -> None
          | Some h_tbl -> Some (parse_headers h_tbl (path ^ ".headers"))
        in
-       (* Optional per-provider connect/headers timeout override (oas#2163).
-          Absent (most providers) leaves the OAS kind-based default in force. *)
+       (* Optional per-provider connect/headers timeout override (agent-core boundary).
+          Absent (most providers) leaves the AGENT_CORE kind-based default in force. *)
        let connect_timeout_key = Runtime_schema.connect_timeout_s_key in
        let connect_timeout_result =
          strict_float_find path tbl connect_timeout_key
          |> positive_finite_float_opt_field ~path ~key:connect_timeout_key
        in
-       (match healthcheck_result, connect_timeout_result with
-        | Error errs, _ | _, Error errs -> Error errs
-        | Ok healthcheck_path, Ok connect_timeout_s ->
+       (match
+          capabilities_result, enabled_result, healthcheck_result, connect_timeout_result
+        with
+        | Error errs, _, _, _ | _, Error errs, _, _ | _, _, Error errs, _ | _, _, _, Error errs
+          -> Error errs
+        | Ok capabilities, Ok enabled_opt, Ok healthcheck_path, Ok connect_timeout_s ->
+          let enabled = match enabled_opt with Some value -> value | None -> true in
           Ok
             { Runtime_schema.id
+            ; enabled
             ; display_name
             ; protocol
             ; api_format
@@ -355,6 +581,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
             ; healthcheck_path
             ; headers
             ; connect_timeout_s
+            ; antigravity_cli
             }))
 ;;
 
@@ -365,7 +592,19 @@ let parse_providers (toml : Otoml.t)
   | None -> Ok []
   | Some providers_tbl ->
     let entries = Otoml.get_table providers_tbl in
-    partition_results (List.map (fun (id, tbl) -> parse_provider id tbl) entries)
+    partition_results
+      (List.map
+         (fun (id, tbl) ->
+            match
+              validate_runtime_id_component
+                ~allow_dot:false
+                ~kind:"provider"
+                ~path:("providers." ^ id)
+                id
+            with
+            | Error _ as error -> error
+            | Ok () -> parse_provider id tbl)
+         entries)
 ;;
 
 (* --- Layer 2: Models --- *)
@@ -388,7 +627,7 @@ let exact_non_empty_string_opt_field ~(path : string) (tbl : Otoml.t) (key : str
 let parse_thinking_control_format ~(path : string) ~(token : string option) (raw : string)
   : (Runtime_schema.thinking_control_format, parse_error list) result
   =
-  (* Mirrors the OAS catalog contract (oas#2484): [Chat_template_token]
+  (* Mirrors the AGENT_CORE catalog contract (agent-core boundary): [Chat_template_token]
      carries its token, so a chat-template-token declaration without a
      [thinking-control-token] key — or a blank/padded token, or a token on a
      non-token format — fails the load instead of detonating per request. *)
@@ -459,10 +698,27 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
       error
         (path ^ "." ^ retired_native_streaming_key)
         (Printf.sprintf
-           "%s was removed; streaming support is derived from the OAS model catalog"
+           "%s was removed; streaming support is derived from the AGENT_CORE model catalog"
            retired_native_streaming_key)
   in
   let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
+  let b_opt key = Otoml.find_opt tbl Otoml.get_boolean [ key ] in
+  let reasoning_streaming_format_result =
+    match typed_find "string" path tbl "reasoning-streaming-format" Otoml.get_string with
+    | Error errors -> Error errors
+    | Ok None -> Ok None
+    | Ok (Some raw) ->
+      (match Llm_provider.Capability_vocab.reasoning_streaming_format_of_string raw with
+       | Some format -> Ok (Some format)
+       | None ->
+         Error
+           (error
+              (path ^ ".reasoning-streaming-format")
+              (Printf.sprintf
+                 "unknown reasoning-streaming-format %S — expected %s"
+                 raw
+                 Llm_provider.Capability_vocab.reasoning_streaming_format_syntax)))
+  in
   let b_default_true key = Otoml.find_or ~default:true tbl Otoml.get_boolean [ key ] in
   let positive_int_opt_field key =
     match Otoml.find_opt tbl Otoml.get_integer [ key ] with
@@ -492,11 +748,11 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
                \"chat-template-token\""))
     | Ok (Some raw), Ok token -> parse_thinking_control_format ~path ~token raw
   in
-  match thinking_control_format_result, retired_key_errors with
-  | Error errors, retired_key_errors ->
+  match thinking_control_format_result, reasoning_streaming_format_result, retired_key_errors with
+  | Error errors, _, retired_key_errors | _, Error errors, retired_key_errors ->
     Error (errors @ retired_key_errors)
-  | Ok _, _ :: _ -> Error retired_key_errors
-  | Ok thinking_control_format, [] ->
+  | Ok _, Ok _, _ :: _ -> Error retired_key_errors
+  | Ok thinking_control_format, Ok reasoning_streaming_format, [] ->
     Ok
       { Runtime_schema.max_output_tokens = positive_int_opt_field "max-output-tokens"
       ; supports_tool_choice = b "supports-tool-choice"
@@ -505,7 +761,13 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
       ; supports_parallel_tool_calls = b "supports-parallel-tool-calls"
       ; supports_extended_thinking = b "supports-extended-thinking"
       ; supports_reasoning_budget = b "supports-reasoning-budget"
+      ; declared_supports_reasoning_budget = b_opt "supports-reasoning-budget"
       ; thinking_control_format
+      ; declared_thinking_control_format =
+          (match Otoml.find_opt tbl Fun.id [ "thinking-control-format" ] with
+           | None -> None
+           | Some _ -> Some thinking_control_format)
+      ; reasoning_streaming_format
       ; supports_image_input = b "supports-image-input"
       ; supports_audio_input = b "supports-audio-input"
       ; supports_video_input = b "supports-video-input"
@@ -574,6 +836,56 @@ let bounded_number_opt_field
             key
             lower
             upper
+            value))
+;;
+
+(* Read the optional per-model [reasoning-effort]. Parsed into the typed
+   effort at load time rather than carried as a string: an unknown value is
+   an operator typo, and rejecting it here means no later consumer has to
+   decide what an unparseable effort means. *)
+let reasoning_effort_opt_field ~(path : string) (tbl : Otoml.t)
+  : (Llm_provider.Reasoning_effort.t option, parse_error list) result
+  =
+  match Otoml.find_opt tbl Otoml.get_string [ "reasoning-effort" ] with
+  | None -> Ok None
+  | Some raw ->
+    (match Llm_provider.Reasoning_effort.of_string raw with
+     | Some effort -> Ok (Some effort)
+     | None ->
+       Error
+         [ { path
+           ; message =
+               Printf.sprintf
+                 "reasoning-effort %S is not a known effort; expected one of %s"
+                 raw
+                 Llm_provider.Reasoning_effort.values_for_log
+           }
+         ])
+;;
+
+(* Read the optional per-model [turn-timeout-s]. Named distinctly from the
+   antigravity provider key [timeout-s] because the two sit at different layers
+   and the model value wins: an operator reading a config with both should be
+   able to tell which one bounds the turn without consulting the resolver. *)
+(* Unlike the other float fields, [0] is meaningful here rather than invalid:
+   it declares that no deadline is installed, so the spawned client decides
+   when its own turn ends. Absent stays distinct from [0] — absent keeps the
+   adapter default, [0] removes the bound — so the two cannot be confused
+   downstream. Negative and non-finite remain rejected. *)
+let turn_timeout_opt_field ~(path : string) (tbl : Otoml.t)
+  : (float option, parse_error list) result
+  =
+  match number_opt_field ~path ~key:"turn-timeout-s" tbl with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when value >= 0.0 && Float.is_finite value -> Ok (Some value)
+  | Ok (Some value) ->
+    Error
+      (error
+         (path ^ ".turn-timeout-s")
+         (Printf.sprintf
+            "turn-timeout-s must be a non-negative finite number (0 removes \
+             the deadline), got %g"
             value))
 ;;
 
@@ -667,7 +979,7 @@ let parse_model (id : string) (tbl : Otoml.t)
        | None -> id)
   in
   (* [max-context] is an explicit operator override, not a required field: a
-     runtime whose model is covered by the OAS capability catalog can leave it
+     runtime whose model is covered by the AGENT_CORE capability catalog can leave it
      unset and inherit the catalog's max-context (see
      [Runtime.resolve_max_context_of_runtime]). An operator-supplied value
      must still be positive; [materialize_config] fail-closes at load time on
@@ -693,31 +1005,15 @@ let parse_model (id : string) (tbl : Otoml.t)
       | Some t ->
         Result.map Option.some (parse_model_capabilities ~path:(path ^ ".capabilities") t)
     in
-    let match_prefixes =
-      match Otoml.find_opt tbl Fun.id [ "match-prefixes" ] with
-      | None -> []
-      | Some v ->
-        (* RFC-0145 — narrow to the only exception [Otoml.get_array]
-           raises on a wrong-typed value.  Unrelated runtime exceptions
-           propagate. *)
-        (try
-           Otoml.get_array Otoml.get_string v
-           |> List.filter_map (fun s ->
-             let trimmed = String.trim s in
-             if String.length trimmed = 0
-             then (
-               Log.Runtime.warn "runtime_toml: %s.match-prefixes contains empty entry, ignoring" path;
-               None)
-             else Some trimmed)
-         with
-         | Otoml.Type_error _ ->
-           Log.Runtime.warn "runtime_toml: %s.match-prefixes — expected string array, ignoring" path;
-           [])
-    in
     let temperature_result = temperature_opt_field ~path tbl in
     let top_p_result = probability_opt_field ~path ~key:"top-p" tbl in
     let top_k_result = positive_int_opt_field ~path ~key:"top-k" tbl in
     let min_p_result = probability_opt_field ~path ~key:"min-p" tbl in
+    let reasoning_effort_result = reasoning_effort_opt_field ~path tbl in
+    let turn_timeout_result = turn_timeout_opt_field ~path tbl in
+    let max_prompt_bytes_result =
+      positive_int_opt_field ~path ~key:"max-prompt-bytes" tbl
+    in
     let ( let* ) = Result.bind in
     let* max_context = max_context_result in
     let* capabilities = capabilities_result in
@@ -725,6 +1021,9 @@ let parse_model (id : string) (tbl : Otoml.t)
     let* top_p = top_p_result in
     let* top_k = top_k_result in
     let* min_p = min_p_result in
+    let* reasoning_effort = reasoning_effort_result in
+    let* turn_timeout_s = turn_timeout_result in
+    let* max_prompt_bytes = max_prompt_bytes_result in
     match sampling_capability_errors ~path ~capabilities ~top_k ~min_p with
     | _ :: _ as errors -> Error errors
     | [] ->
@@ -741,9 +1040,10 @@ let parse_model (id : string) (tbl : Otoml.t)
         ; top_p
         ; top_k
         ; min_p
-        ; capabilities
-        ; match_prefixes
-        })
+        ; reasoning_effort
+        ; turn_timeout_s
+        ; max_prompt_bytes
+        ; capabilities        })
 ;;
 
 let parse_models (toml : Otoml.t)
@@ -753,20 +1053,44 @@ let parse_models (toml : Otoml.t)
   | None -> Ok []
   | Some models_tbl ->
     let entries = Otoml.get_table models_tbl in
-    partition_results (List.map (fun (id, tbl) -> parse_model id tbl) entries)
+    partition_results
+      (List.map
+         (fun (id, tbl) ->
+            match
+              validate_runtime_id_component
+                ~allow_dot:true
+                ~kind:"model"
+                ~path:("models." ^ id)
+                id
+            with
+            | Error _ as error -> error
+            | Ok () -> parse_model id tbl)
+         entries)
 ;;
 
 (* --- Reserved namespace detection --- *)
 
-(* The dropped routing namespaces (system, routes, profiles) remain
-   reserved: keeping them out of the provider-table scan ensures a stale
-   [[routes]]/[[profiles]] table in an existing runtime.toml is silently
-   ignored rather than misread as a provider with bogus model bindings. *)
-let reserved_namespaces =
-  [ "providers"; "models"; "system"; "routes"; "profiles"; "runtime"; "web_search" ]
+let reject_obsolete_top_level_namespaces (toml : Otoml.t)
+  : (unit, parse_error list) result
+  =
+  let top_entries = Otoml.get_table toml in
+  let errors =
+    List.filter_map
+      (fun namespace ->
+         if List.mem_assoc namespace top_entries
+         then
+           Some
+             { path = namespace
+             ; message =
+                 (Printf.sprintf
+                    "obsolete top-level namespace %S is not supported"
+                    namespace)
+             }
+         else None)
+      obsolete_top_level_namespaces
+  in
+  if errors = [] then Ok () else Error errors
 ;;
-
-let is_reserved (name : string) : bool = List.mem name reserved_namespaces
 
 (* --- Layer 3: Bindings from provider tables --- *)
 
@@ -795,6 +1119,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
      An explicit non-positive value is a configuration error: 0 was historically
      used as an omission sentinel, and negative values are meaningless. Reject
      them at load time rather than silently downgrading to "no cap". *)
+  let enabled_result = typed_find "a boolean" path tbl "enabled" Otoml.get_boolean in
   let is_default_result = typed_find "a boolean" path tbl "is-default" Otoml.get_boolean in
   let wizard_default_result =
     typed_find "a boolean" path tbl "wizard-default" Otoml.get_boolean
@@ -812,11 +1137,11 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
               n))
     | Error _ as e -> e
   in
-  (* Paired with max-concurrent on purpose: OAS validates both in one admission
+  (* Paired with max-concurrent on purpose: AGENT_CORE validates both in one admission
      declaration and enforces this one before POST by serializing, measuring and
      returning a typed Request_body_too_large. Only max-concurrent was declarable
-     here, so the byte ceiling could not be expressed at all and the OAS gate
-     passed every size. Same shape as its sibling, including the >= 1 rule OAS
+     here, so the byte ceiling could not be expressed at all and the AGENT_CORE gate
+     passed every size. Same shape as its sibling, including the >= 1 rule AGENT_CORE
      already enforces on the declaration. *)
   let max_request_body_bytes_result =
     match typed_find "an integer" path tbl "max-request-body-bytes" Otoml.get_integer with
@@ -836,7 +1161,35 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   let price_output_result = typed_find "a float" path tbl "price-output" Otoml.get_float in
   let keep_alive_result = typed_find "a string" path tbl "keep-alive" Otoml.get_string in
   let num_ctx_result = typed_find "an integer" path tbl "num-ctx" Otoml.get_integer in
+  let repeat_penalty_result =
+    match typed_find "a float" path tbl "repeat-penalty" Otoml.get_float with
+    | Ok (Some value) when Float.compare value 0.0 <= 0 ->
+      Error
+        (error
+           (path ^ ".repeat-penalty")
+           (Printf.sprintf
+              "repeat-penalty must be greater than 0 (1.0 disables the penalty); got %g"
+              value))
+    | other -> other
+  in
+  let repeat_last_n_result =
+    match typed_find "an integer" path tbl "repeat-last-n" Otoml.get_integer with
+    | Ok (Some value) when value < -1 ->
+      Error
+        (error
+           (path ^ ".repeat-last-n")
+           (Printf.sprintf
+              "repeat-last-n must be -1 (whole context), 0 (disabled), or a positive \
+               window; got %d"
+              value))
+    | other -> other
+  in
+  let return_progress_result =
+    typed_find "a boolean" path tbl "return-progress" Otoml.get_boolean
+  in
   let ( let* ) = Result.bind in
+  let* enabled_opt = enabled_result in
+  let enabled = match enabled_opt with Some value -> value | None -> true in
   let* is_default_opt = is_default_result in
   let is_default = Option.value is_default_opt ~default:false (* DET-OK: fallback to false if omitted *) in
   let* wizard_default_opt = wizard_default_result in
@@ -850,9 +1203,13 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   let* price_output = price_output_result in
   let* keep_alive = keep_alive_result in
   let* num_ctx = num_ctx_result in
+  let* repeat_penalty = repeat_penalty_result in
+  let* repeat_last_n = repeat_last_n_result in
+  let* return_progress = return_progress_result in
   Ok
     { Runtime_schema.provider_id
     ; model_id
+    ; enabled
     ; is_default
     ; wizard_default
     ; max_concurrent
@@ -861,6 +1218,9 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     ; price_output
     ; keep_alive
     ; num_ctx
+    ; repeat_penalty
+    ; repeat_last_n
+    ; return_progress
     }
 ;;
 
@@ -890,16 +1250,35 @@ let parse_provider_table (provider_id : string) (tbl : Otoml.t)
        entries)
 ;;
 
+(* Top-level table names that own a binding group, taken from the [\[providers\]]
+   keys as written rather than from successfully parsed providers: a malformed
+   provider row must be reported as a provider error, not silently reclassify its
+   bindings as some other namespace. *)
+let declared_provider_ids (toml : Otoml.t) : string list =
+  match Otoml.find_opt toml Fun.id [ "providers" ] with
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) -> List.map fst entries
+  | Some _ | None -> []
+;;
+
 let parse_bindings (toml : Otoml.t)
   : (Runtime_schema.binding list, parse_error list) result
   =
   let top_entries = Otoml.get_table toml in
-  (* Only top-level tables can describe a provider; scalar / array entries
-     (e.g. an operator-authored ["comment = ..."]) would crash
-     [Otoml.get_table] in [parse_provider_table]. *)
+  let declared = declared_provider_ids toml in
+  (* A top-level table describes a provider's bindings only when [\[providers\]]
+     declares that provider. The namespace used to be defined by exclusion —
+     anything not on the reserved list — which made every unrelated config
+     section a phantom binding group: [\[voice.tts\]] and [\[fusion.presets\]]
+     each parsed as a binding whose provider did not exist, and the loader had to
+     drop unresolved bindings quietly for boot to survive them. That silence is
+     what hid a real dangling reference (masc#28403). Naming the namespace
+     positively lets {!Runtime.load_list} treat an unresolved binding as the typo
+     it is. Scalar / array entries are still excluded because
+     [parse_provider_table] would crash on them. *)
   let provider_tables =
     List.filter
-      (fun (name, value) -> (not (is_reserved name)) && is_toml_table value)
+      (fun (name, value) ->
+        (not (is_reserved name)) && is_toml_table value && List.mem name declared)
       top_entries
   in
   Result.map
@@ -929,7 +1308,7 @@ let extract_after_all_errors_guard ~label = function
 ;;
 
 (* [[runtime.assignments]] — keeper name → runtime id ["provider.model"]. The
-   sole SSOT for keeper→runtime assignment (persona⊥{model,runtime}). Each
+   sole SSOT for keeper-to-runtime assignment. Each
    value must be a TOML string (an opaque runtime id resolved later against the
    binding list at {!Runtime.load_list}). A non-string value is a parse error,
    not a silent drop — an operator typo (e.g. an inline table) must fail loud
@@ -963,13 +1342,11 @@ let parse_keeper_assignments (toml : Otoml.t)
 
 type runtime_section =
   { default_runtime_id : string option
-  ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   }
 
 let empty_runtime_section =
   { default_runtime_id = None
-  ; cross_verifier_runtime_id = None
   ; media_failover = []
   }
 ;;
@@ -1011,14 +1388,6 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
               | Ok default_runtime_id ->
                 { section with default_runtime_id = Some default_runtime_id }, errs
               | Error e -> section, errs @ e)
-           | "cross_verifier" ->
-             (match
-                parse_runtime_string_leaf ~path:"runtime.cross_verifier" ~key value
-              with
-              | Ok cross_verifier_runtime_id ->
-                { section with cross_verifier_runtime_id = Some cross_verifier_runtime_id },
-                errs
-              | Error e -> section, errs @ e)
            | "media_failover" ->
              (match parse_runtime_media_failover ~path:"runtime.media_failover" value with
               | Ok media_failover -> { section with media_failover }, errs
@@ -1032,7 +1401,7 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
              (* Parsed by [parse_lanes] after the runtime section is shaped. *)
              section, errs
            | "exact_output_lanes" ->
-             (* Parsed separately as raw OAS target references. *)
+             (* Parsed separately as raw AGENT_CORE target references. *)
              section, errs
            | _ when is_toml_table value ->
              (* [runtime.<profile>] tables are reserved for runtime profiles and
@@ -1045,7 +1414,6 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                    ("runtime." ^ key)
                    (Printf.sprintf
                       "unknown [runtime] key %S; expected default, \
-                       cross_verifier, \
                        media_failover, [runtime.lanes], \
                        [runtime.exact_output_lanes], [runtime.assignments], or a \
                        table-valued [runtime.<profile>]"
@@ -1059,22 +1427,13 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
 ;;
 
 (* [\[runtime.lanes.<id>\]] — ordered failover candidate lists. Each lane is a
-   table with [strategy] (only "ordered" supported) and [candidates] (array of
-   runtime ids). Candidate ids are resolved against materialized runtimes at
-   load time, not here, so the parser returns declarations only. *)
+   table with [candidates] (array of runtime ids). Candidate ids are resolved
+   against materialized runtimes at load time, not here, so the parser returns
+   declarations only. *)
 let parse_lane ~(id : string) (tbl : Otoml.t)
   : (Runtime_schema.lane_decl, parse_error list) result
   =
   let path = Printf.sprintf "runtime.lanes.%s" id in
-  let strategy_result =
-    match Otoml.find_opt tbl Otoml.get_string [ "strategy" ] with
-    | None | Some "ordered" -> Ok Runtime_schema.Ordered
-    | Some other ->
-      Error
-        (error
-           (path ^ ".strategy")
-           (Printf.sprintf "unsupported lane strategy %S" other))
-  in
   let candidate_ids_result =
     match Otoml.find_opt tbl Fun.id [ "candidates" ] with
     | None -> Error (error (path ^ ".candidates") "lane candidates is required")
@@ -1088,12 +1447,12 @@ let parse_lane ~(id : string) (tbl : Otoml.t)
                  "lane candidates must be an array of string runtime ids; got %s"
                  msg)))
   in
-  match strategy_result, candidate_ids_result with
-  | Error e, _ | _, Error e -> Error e
-  | Ok strategy, Ok candidate_ids ->
+  match candidate_ids_result with
+  | Error e -> Error e
+  | Ok candidate_ids ->
     if candidate_ids = []
     then Error (error path "lane must have at least one candidate")
-    else Ok { Runtime_schema.id; strategy; candidate_ids }
+    else Ok { Runtime_schema.id; candidate_ids }
 ;;
 
 let parse_lanes (toml : Otoml.t) : (Runtime_schema.lane_decl list, parse_error list) result =
@@ -1203,6 +1562,7 @@ let parse_exact_output_lanes (toml : Otoml.t)
 ;;
 
 let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) result =
+  let obsolete_namespaces_result = reject_obsolete_top_level_namespaces toml in
   let providers_result = parse_providers toml in
   let models_result = parse_models toml in
   let runtime_section_result = parse_runtime_section toml in
@@ -1212,7 +1572,8 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let exact_output_lanes_result = parse_exact_output_lanes toml in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
-    errs providers_result
+    errs obsolete_namespaces_result
+    @ errs providers_result
     @ errs models_result
     @ errs runtime_section_result
     @ errs assignments_result
@@ -1249,7 +1610,6 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       ; models
       ; bindings
       ; default_runtime_id = runtime_section.default_runtime_id
-      ; cross_verifier_runtime_id = runtime_section.cross_verifier_runtime_id
       ; keeper_assignments
       ; media_failover = runtime_section.media_failover
       ; lane_decls

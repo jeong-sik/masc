@@ -10,14 +10,14 @@ prose is never a state transport.
 
 | Concern | Owner | Canonical representation |
 |---|---|---|
-| Transcript, provider turn, checkpoint, context reduction | OAS | OAS context and checkpoint types |
+| Transcript, provider turn, checkpoint, context reduction | agent core | agent core context and checkpoint types |
 | Keeper lifecycle and per-keeper lane position | MASC | keeper lifecycle FSM, event queue, and checkpoint reference |
 | Goal and task state | MASC | goal/task stores and typed transitions |
 | Board, HITL, connector, scheduler, and Fusion state | MASC | each domain's typed store and events |
-| What happened during a turn | MASC/OAS boundary | tool results, execution receipts, and turn records |
+| What happened during a turn | MASC/agent core boundary | tool results, execution receipts, and turn records |
 | Long-term recall | MASC | memory records written through the memory API |
 
-MASC may consume OAS runtime primitives. OAS must not import MASC domain
+MASC may consume agent core runtime primitives. agent core must not import MASC domain
 concepts or interpret MASC-specific message formats.
 
 ## Continuity Contract
@@ -42,7 +42,7 @@ goals, or progress with typed provenance, but they never drive a transition.
 - No model-authored prose envelope is a state transport.
 - No parser, stripper, sidecar, dashboard field, or compatibility reader may
   promote assistant text into runtime state.
-- No persona-introspection record or UI projection may act as lifecycle truth.
+- No keeper-introspection record or UI projection may act as lifecycle truth.
 - No state transition is inferred by matching model text.
 - No duplicate state cache is derived from an assistant reply.
 
@@ -57,7 +57,7 @@ A continuity claim is accepted only when the matching CI-owned artifact passes:
 | Claim | Enforced evidence |
 |---|---|
 | the intended lane received the typed wake/assignment event | `test_keeper_wake_turn_context.ml`, `test_keeper_event_queue.ml` |
-| replay uses the expected OAS checkpoint prefix and typed blocks | `test_keeper_replay_checkpoint.ml`, `test_pbt_context_overflow.ml` |
+| replay uses the expected agent core checkpoint prefix and typed blocks | `test_keeper_replay_checkpoint.ml`, `test_pbt_context_overflow.ml` |
 | domain mutations carry tool outcomes or transition receipts | `test_keeper_unified_verification_surface.ml`, `test_keeper_state_machine.ml` |
 | a checkpoint save is durable, monotone, and reloadable | `test_keeper_checkpoint_stale_guard.ml` |
 | another Keeper lane continues while one lane is busy | `test_keeper_turn_admission.ml`, `test_keeper_chat_consumer_delivery.ml` |

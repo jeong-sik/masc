@@ -23,23 +23,30 @@ open Keeper_agent_prompt_metrics
    prompt was accepted, an 800 KB prompt was refused with
    {"code":"1261","message":"Prompt exceeds max length"}, and 300 KB of
    poorly-tokenising content was refused. 64 KB of history on top of the
-   ~41 KB remainder of the bundle stays well below the nearest refusal. *)
-let gate_history_budget_bytes = 64 * 1024
+   ~41 KB remainder of the bundle stays well below the nearest refusal.
 
-let tool_use_ids_of_message (message : Agent_sdk.Types.message) =
+   2026-08-09: that "~41 KB remainder" was [completed_tool_calls], which this
+   fix never bounded, and it grew to 791,432 B of an 860,589 B bundle. The
+   judge slot refused it with the same code 1261 quoted above and 45 of 52
+   hitl_auto_judge runs failed. The budget now lives in
+   [Keeper_gate_causal_context] and both axes read it, so the premise this
+   comment rests on cannot decay on one axis while the other holds. *)
+let gate_history_budget_bytes = Keeper_gate_causal_context.evidence_budget_bytes
+
+let tool_use_ids_of_message (message : Agent_core.Types.message) =
   List.filter_map
-    (fun (block : Agent_sdk.Types.content_block) ->
+    (fun (block : Agent_core.Types.content_block) ->
        match block with
-       | Agent_sdk.Types.ToolUse { id; _ } -> Some id
+       | Agent_core.Types.ToolUse { id; _ } -> Some id
        | _ -> None)
     message.content
 ;;
 
-let tool_result_ids_of_message (message : Agent_sdk.Types.message) =
+let tool_result_ids_of_message (message : Agent_core.Types.message) =
   List.filter_map
-    (fun (block : Agent_sdk.Types.content_block) ->
+    (fun (block : Agent_core.Types.content_block) ->
        match block with
-       | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
+       | Agent_core.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
        | _ -> None)
     message.content
 ;;
@@ -48,7 +55,7 @@ let tool_result_ids_of_message (message : Agent_sdk.Types.message) =
    out. The count is carried into the bundle: a judge that cannot tell it was
    handed a partial view weighs partial evidence as if it were complete, and
    the prompt already asks it to name absent context in its rationale. *)
-let gate_history_slice (messages : Agent_sdk.Types.message list) =
+let gate_history_slice (messages : Agent_core.Types.message list) =
   let sized =
     List.map
       (fun message ->
@@ -90,6 +97,128 @@ let gate_causal_initial
     ]
 ;;
 
+let skill_catalog_config_error detail =
+  Agent_core.Error.Config
+    (Agent_core.Error.InvalidConfig { field = "skills"; detail })
+;;
+
+let skill_catalog_io_error ~op ~path exn =
+  Agent_core.Error.Io
+    (Agent_core.Error.FileOpFailed
+       { op; path; detail = Printexc.to_string exn })
+;;
+
+let skills_dir_of_base_path ~base_path =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) "skills"
+;;
+
+(* A directory under skills/ that carries no SKILL.md is not a skill and is
+   skipped: in the Agent Skills layout the file is the declaration, and a
+   half-installed directory should not take the whole tool surface down. A
+   SKILL.md that exists but fails to parse is a config error — the operator
+   declared a skill and masc cannot honour it. *)
+let load_skill_catalog ~base_path =
+  let skills_dir = skills_dir_of_base_path ~base_path in
+  match
+    try Ok (Fs_compat.exact_path_kind skills_dir) with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (skill_catalog_io_error ~op:"inspect" ~path:skills_dir exn)
+  with
+  | Error _ as error -> error
+  | Ok Fs_compat.Exact_missing -> Ok Keeper_skill_catalog.empty
+  | Ok (Fs_compat.Exact_kind Unix.S_DIR) ->
+    (match
+       try Ok (List.sort String.compare (Fs_compat.read_dir skills_dir)) with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Error (skill_catalog_io_error ~op:"read_dir" ~path:skills_dir exn)
+     with
+     | Error _ as error -> error
+     | Ok entries ->
+       let rec collect documents = function
+         | [] -> Ok (List.rev documents)
+         | entry :: rest ->
+           let skill_md =
+             Filename.concat (Filename.concat skills_dir entry) "SKILL.md"
+           in
+           (match
+              try Ok (Fs_compat.exact_path_kind skill_md) with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn ->
+                Error (skill_catalog_io_error ~op:"inspect" ~path:skill_md exn)
+            with
+            | Error _ as error -> error
+            | Ok (Fs_compat.Exact_kind Unix.S_REG) ->
+              (match
+                 try Ok (Fs_compat.load_file skill_md) with
+                 | Eio.Cancel.Cancelled _ as exn -> raise exn
+                 | exn ->
+                   Error (skill_catalog_io_error ~op:"read" ~path:skill_md exn)
+               with
+               | Error _ as error -> error
+               | Ok contents -> collect ((entry, contents) :: documents) rest)
+            | Ok
+                ( Fs_compat.Exact_missing
+                | Fs_compat.Exact_unknown
+                | Fs_compat.Exact_kind
+                    ( Unix.S_DIR
+                    | Unix.S_CHR
+                    | Unix.S_BLK
+                    | Unix.S_LNK
+                    | Unix.S_FIFO
+                    | Unix.S_SOCK ) ) -> collect documents rest)
+       in
+       (match collect [] entries with
+        | Error _ as error -> error
+        | Ok documents ->
+          (match Keeper_skill_catalog.of_documents documents with
+           | Ok catalog -> Ok catalog
+           | Error error ->
+             Error
+               (skill_catalog_config_error
+                  (Keeper_skill_catalog.error_to_string error)))))
+  | Ok
+      (Fs_compat.Exact_kind
+        ( Unix.S_REG
+        | Unix.S_CHR
+        | Unix.S_BLK
+        | Unix.S_LNK
+        | Unix.S_FIFO
+        | Unix.S_SOCK )) ->
+    Error (skill_catalog_config_error "skills path is not a directory")
+  | Ok Fs_compat.Exact_unknown ->
+    Error (skill_catalog_config_error "skills path kind is unavailable")
+;;
+
+let expected_model_tool_names ~skill_catalog ~model_visible_descriptors =
+  let descriptor_names =
+    model_visible_descriptors
+    |> List.concat_map Keeper_tool_descriptor.keeper_model_names
+  in
+  let entries = Keeper_skill_catalog.composition_entries skill_catalog in
+  let composition_names =
+    List.map Keeper_tool_composition_catalog.tool_name entries
+  in
+  (* The shared async controls join the surface when any skill declares an
+     async composition. *)
+  let control_names =
+    if
+      List.exists
+        (fun (entry : Keeper_tool_composition_catalog.entry) ->
+          entry.execution = Keeper_tool_composition_catalog.Async)
+        entries
+    then
+      [ Keeper_tool_composition_catalog.status_tool_name
+      ; Keeper_tool_composition_catalog.cancel_tool_name
+      ]
+    else []
+  in
+  List.sort_uniq
+    String.compare
+    (Keeper_tool_composition_surface.plan_execute_tool_name
+     :: (descriptor_names @ composition_names @ control_names))
+;;
+
 let prepare_agent_setup
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -102,12 +231,12 @@ let prepare_agent_setup
       ~(turn_system_prompt : string)
       ~(user_message : string)
       ~(dynamic_context : string)
-      ~(history_messages : Agent_sdk.Types.message list)
-      ~(shared_context : Agent_sdk.Context.t)
-      ~(context_injector : Agent_sdk.Hooks.context_injector)
+      ~(history_messages : Agent_core.Types.message list)
+      ~(shared_context : Agent_core.Context.t)
+      ~(context_injector : Agent_core.Hooks.context_injector)
       ~(start_turn_count : int)
-      ~(generation : int)
       ~(keeper_turn_id : int)
+      ~(turn_kind : Turn_record.turn_kind)
       ~(runtime_id : string)
       ~(is_retry : bool)
       ~(config_root : string)
@@ -116,9 +245,10 @@ let prepare_agent_setup
       ?runtime_manifest_context
       ?runtime_manifest_append
       ?continuation_channel
+      ?on_tool_result_ready
       ?hitl_resolution
       ()
-  : (Keeper_run_tools_hooks.agent_setup, Agent_sdk.Error.sdk_error) result
+  : (Keeper_run_tools_hooks.agent_setup, Agent_core.Error.t) result
   =
   let ( let* ) = Result.bind in
   let runtime_id_string = runtime_id in
@@ -135,6 +265,7 @@ let prepare_agent_setup
            ~dynamic_context)
   in
   let agent_name = meta.agent_name in
+  let* skill_catalog = load_skill_catalog ~base_path:config.base_path in
   let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =
     { meta
     ; tool_calls = []
@@ -151,16 +282,17 @@ let prepare_agent_setup
     ; prompt_blocks = []
     ; extra_system_context_digest = None
     ; extra_system_context_size = None
+    ; assistant_turn_texts = []
     }
   in
   let
-    { Keeper_tools_oas.tools = keeper_tools
+    { Keeper_tools_agent_core.tools = keeper_tools
     ; cleanup = keeper_tools_cleanup
     ; terminal_effect_state
     ; gate_replay_delivery
     }
     =
-    Keeper_tools_oas_bundle.make_tool_bundle
+    Keeper_tools_agent_core_bundle.make_tool_bundle
       ~config
       ~meta
       ~publication_recovery
@@ -168,11 +300,13 @@ let prepare_agent_setup
       ?continuation_channel
       ~gate_context
       ?hitl_resolution
+      ~skill_catalog
+      ~turn_ctx_cell
       ()
   in
   let replay_delivery =
     Option.map
-      (fun { Keeper_tools_oas.approval_id; outcome } ->
+      (fun { Keeper_tools_agent_core.approval_id; outcome } ->
          approval_id, outcome)
       gate_replay_delivery
   in
@@ -189,7 +323,7 @@ let prepare_agent_setup
            "keeper tool cleanup after Gate replay repair failure raised: %s"
            (Printexc.to_string exn));
       Error
-        (Keeper_internal_error.sdk_error_of_masc_internal_error
+        (Keeper_internal_error.core_error_of_masc_internal_error
            (Keeper_internal_error.Gate_replay_repair_required
               { approval_id
               ; operation
@@ -288,12 +422,10 @@ let prepare_agent_setup
     - invalid_schema_count
   in
   let all_tool_names =
-    List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) keeper_tools
+    List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) keeper_tools
   in
   let expected_model_names =
-    model_visible_descriptors
-    |> List.concat_map Keeper_tool_descriptor.keeper_model_names
-    |> List.sort_uniq String.compare
+    expected_model_tool_names ~skill_catalog ~model_visible_descriptors
   in
   let actual_model_names = List.sort_uniq String.compare all_tool_names in
   let all_model_eligible_tools_visible =
@@ -338,7 +470,7 @@ let prepare_agent_setup
     in
     ()
   in
-  let final_oas_turn_ordinal_ref : int option ref = ref None in
+  let final_agent_core_turn_ordinal_ref : int option ref = ref None in
   let receipt_turn_count_ref : int option ref = ref None in
   let receipt_model_used_ref : string option ref = ref None in
   let receipt_stop_reason_ref : Runtime_agent.stop_reason option ref =
@@ -349,6 +481,7 @@ let prepare_agent_setup
     =
     ref None
   in
+  let receipt_lane_attempt_index_ref : int ref = ref 0 in
   let receipt_response_text_present_ref = ref false in
   let compute_tool_surface
         ~turn:_
@@ -364,7 +497,7 @@ let prepare_agent_setup
       then Lane_tool_optional
       else (
         match current_tool_choice with
-        | Some Agent_sdk.Types.None_ -> Lane_tool_disabled
+        | Some Agent_core.Types.None_ -> Lane_tool_disabled
         | _ -> Lane_text_only)
     in
     (schema_filter, lane)
@@ -380,21 +513,24 @@ let prepare_agent_setup
     ; keeper_tools_cleanup
     ; terminal_effect_state
     ; keeper_turn_id
+    ; turn_kind
     ; meta
     ; turn_ctx_cell
-    ; final_oas_turn_ordinal_ref
+    ; final_agent_core_turn_ordinal_ref
     ; receipt_turn_count_ref
     ; receipt_model_used_ref
     ; receipt_stop_reason_ref
     ; receipt_runtime_observation_ref
+    ; receipt_lane_attempt_index_ref
     ; receipt_response_text_present_ref
+    ; on_tool_result_ready
     ; tools
     }
   in
   Keeper_run_tools_hooks.assemble_hooks
     ~ctx ~session ~turn_system_prompt ~user_message ~dynamic_context
     ~history_messages ~prompt_metrics ~shared_context
-    ~start_turn_count ~generation
+    ~start_turn_count
     ~runtime_id_string ~is_retry
     ~config_root ~runtime_config_path
     ~trajectory_acc

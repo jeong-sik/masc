@@ -58,40 +58,37 @@ type sse_connect_guard_state = {
 let sse_connect_guard_by_session :
     sse_connect_guard_state SMap.t Atomic.t = Atomic.make SMap.empty
 
-let env_float_or ~name ~default =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some raw -> (
-      Option.value ~default (float_of_string_opt raw))
+(* Read through Env_config_runtime like every other knob. This file used to
+   carry its own Sys.getenv_opt wrappers, the one place in the server that did
+   not (#28910); the values and the env-var names are unchanged.
 
-let env_int_or ~name ~default =
-  match Sys.getenv_opt name with
-  | None -> default
-  | Some raw -> (
-      Option.value ~default:default (int_of_string_opt raw))
+   The three knobs are read through [Re_read] thunks, not the cached toplevel
+   bindings: the disable contract ([<= 0] disables the guard, negative values
+   included) is pinned by tests that set the env var and call the same reader
+   the transport uses (task-538). Reading per check also makes a future
+   hot-reload of these knobs possible without restarting the server. *)
+let sse_reconnect_min_interval_s () =
+  Env_config_runtime.Sse_connect_guard.Re_read.reconnect_min_interval_seconds ()
 
-let sse_reconnect_min_interval_s =
-  env_float_or ~name:"MASC_SSE_RECONNECT_MIN_INTERVAL_S" ~default:1.0
+let sse_connect_window_s () = Env_config_runtime.Sse_connect_guard.Re_read.connect_window_seconds ()
 
-let sse_connect_window_s =
-  env_float_or ~name:"MASC_SSE_CONNECT_WINDOW_S" ~default:60.0
-
-let sse_connect_max_in_window =
-  env_int_or ~name:"MASC_SSE_CONNECT_MAX_IN_WINDOW" ~default:10
+let sse_connect_max_in_window () = Env_config_runtime.Sse_connect_guard.Re_read.connect_max_in_window ()
 
 let guard_deadline state =
+  let min_interval_s = sse_reconnect_min_interval_s () in
+  let window_s = sse_connect_window_s () in
   let session_deadline =
-    if sse_reconnect_min_interval_s <= 0.0 || state.last_connect_at < 0.0 then
+    if min_interval_s <= 0.0 || state.last_connect_at < 0.0 then
       neg_infinity
     else
-      state.last_connect_at +. sse_reconnect_min_interval_s
+      state.last_connect_at +. min_interval_s
   in
   let window_deadline =
-    if sse_connect_window_s <= 0.0 then
+    if window_s <= 0.0 then
       neg_infinity
     else
       match state.connect_times with
-      | latest :: _ -> latest +. sse_connect_window_s
+      | latest :: _ -> latest +. window_s
       | [] -> neg_infinity
   in
   Float.max session_deadline window_deadline
@@ -286,8 +283,9 @@ let run_sse_pumps ~sw ~(stop_promise : unit Eio.Promise.t)
       Eio.Promise.await stop_promise))
 
 let prune_connect_times ~now times =
-  if sse_connect_window_s <= 0.0 then times
-  else List.filter (fun ts -> now -. ts <= sse_connect_window_s) times
+  let window_s = sse_connect_window_s () in
+  if window_s <= 0.0 then times
+  else List.filter (fun ts -> now -. ts <= window_s) times
 
 let check_sse_connect_guard session_id =
   let now = Time_compat.now () in
@@ -305,22 +303,25 @@ let check_sse_connect_guard session_id =
       | None -> { last_connect_at = -.1.0; connect_times = [] }
     in
     let recent = state.connect_times in
+    let min_interval_s = sse_reconnect_min_interval_s () in
     let session_wait_s =
-      if sse_reconnect_min_interval_s <= 0.0 then
+      if min_interval_s <= 0.0 then
         0.0
       else
-        sse_reconnect_min_interval_s -. (now -. state.last_connect_at)
+        min_interval_s -. (now -. state.last_connect_at)
     in
     if session_wait_s > 0.0 then begin
       result := Error (Sse_reject_reason.Session_cooldown, session_wait_s);
       map
     end else begin
+      let window_s = sse_connect_window_s () in
+      let max_in_window = sse_connect_max_in_window () in
       let window_wait_s =
-        if sse_connect_window_s <= 0.0 || sse_connect_max_in_window <= 0 then
+        if window_s <= 0.0 || max_in_window <= 0 then
           0.0
-        else if List.length recent >= sse_connect_max_in_window then
+        else if List.length recent >= max_in_window then
           match List.rev recent with
-          | oldest :: _ -> sse_connect_window_s -. (now -. oldest)
+          | oldest :: _ -> window_s -. (now -. oldest)
           | [] -> 0.0
         else
           0.0

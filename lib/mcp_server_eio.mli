@@ -17,11 +17,7 @@
 
 (** {1 Types} *)
 
-(** Server state - same as Mcp_server.server_state for compatibility *)
 type server_state = Mcp_server.server_state
-
-(** JSON-RPC request (re-exported for convenience) *)
-type jsonrpc_request = Mcp_server.jsonrpc_request
 
 (** Tool exposure profile for streamable HTTP endpoints. *)
 type tool_profile =
@@ -29,27 +25,14 @@ type tool_profile =
   | Managed_agent
   | Operator_remote
 
-(** {1 JSON-RPC Helpers (re-exported)} *)
-
-val is_jsonrpc_response : Yojson.Safe.t -> bool
-val get_id : jsonrpc_request -> Yojson.Safe.t
-val is_valid_request_id : Yojson.Safe.t -> bool
-val validate_initialize_params : Yojson.Safe.t option -> (unit, string) result
-
-(** JSON helper: field existence check (re-exported) *)
-val has_field : string -> Yojson.Safe.t -> bool
-
-(** JSON helper: get field as Yojson (re-exported) *)
-val get_field : string -> Yojson.Safe.t -> Yojson.Safe.t option
-
 (** {1 Network Context} *)
 
-(** Type alias for Eio network capability (Generic + Unix for Agent SDK) *)
+(** Type alias for the Eio network capability used by agent core. *)
 type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
 
 (** Set the Eio network reference for server-side network calls.
     Must be called from main_eio.ml during server initialization.
-    Requires Generic + Unix capabilities for Agent SDK compatibility.
+    Requires Generic and Unix capabilities for agent-core calls.
     @param net Eio network capability *)
 val set_net : [> `Generic | `Unix] Eio.Net.ty Eio.Resource.t -> unit
 

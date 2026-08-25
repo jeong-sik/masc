@@ -5,12 +5,11 @@ open Activity_graph_types
 type node_acc = {
   node_id : string;
   node_kind : string;
-  mutable label : string;
-  mutable status : node_status;
-  mutable weight : int;
-  mutable semantic_weight : float;
-  mutable last_event_at : string;
-  mutable meta : Yojson.Safe.t;
+  label : string;
+  status : node_status;
+  weight : int;
+  last_event_at : string;
+  meta : Yojson.Safe.t;
 }
 
 type edge_acc = {
@@ -18,10 +17,10 @@ type edge_acc = {
   source : string;
   target : string;
   edge_kind : string;
-  mutable weight : int;
-  mutable active : bool;
-  mutable last_event_at : string;
-  mutable meta : Yojson.Safe.t;
+  weight : int;
+  active : bool;
+  last_event_at : string;
+  meta : Yojson.Safe.t;
 }
 
 let entity_node_id (value : entity_ref) = value.kind ^ ":" ^ value.id
@@ -37,39 +36,30 @@ let is_generic_status = function
   | Todo | Claimed | In_progress | Done | Cancelled
   | Posted | Discussed | Workspace -> false
 
-(* Semantic weight multiplier by event kind.
-   Completion events score high; routine lifecycle events score low. *)
-let semantic_multiplier kind =
-  match tool_execution_event_kind_of_string kind with
-  | Some (External_tool_called | Keeper_in_turn_tool_executed) -> 0.3
-  | None ->
-    (match kind with
-  | "task.done" | "task.approved" -> 5.0
-  | "task.created" | "task.claimed" -> 3.0
-  | "board.posted" | "board.voted" -> 2.0
-  | "task.started" | "task.released" | "task.cancelled" -> 1.5
-  | "message.broadcast" | "message.mentioned" -> 1.0
-  | "board.commented" -> 1.0
-  | "agent.session_bound" -> 0.5
-  | "keeper.compaction" -> 0.5
-     | "keeper.turn_completed" -> 0.4
-     | _ -> 1.0)
-
 let ensure_node (nodes : (string, node_acc) Hashtbl.t) ~(id : string)
     ~(kind : string) ~(label : string)
-    ~(status : node_status) ~(ts_iso : string) ~(meta : Yojson.Safe.t)
-    ~(sw_delta : float) =
+    ~(status : node_status) ~(ts_iso : string) ~(meta : Yojson.Safe.t) =
   match Hashtbl.find_opt nodes id with
   | Some node ->
-      node.weight <- node.weight + 1;
-      node.semantic_weight <- node.semantic_weight +. sw_delta;
-      node.last_event_at <- ts_iso;
-      if node.label = id || node.label = "" then node.label <- label;
-      if status <> Unset
-         && (not (is_generic_status status) || is_generic_status node.status)
-      then
-        node.status <- status;
-      if meta <> default_meta then node.meta <- meta
+      (* The table owns the node, so an update is a rebind rather than an
+         in-place write. Every field below reads [node] from before this
+         event, which is what the in-place form observed too. *)
+      Hashtbl.replace nodes id
+        {
+          node with
+          weight = node.weight + 1;
+          last_event_at = ts_iso;
+          label =
+            (if node.label = id || node.label = "" then label else node.label);
+          status =
+            (if
+               status <> Unset
+               && (not (is_generic_status status)
+                  || is_generic_status node.status)
+             then status
+             else node.status);
+          meta = (if meta <> default_meta then meta else node.meta);
+        }
   | None ->
       Hashtbl.add nodes id
         {
@@ -78,13 +68,12 @@ let ensure_node (nodes : (string, node_acc) Hashtbl.t) ~(id : string)
           label;
           status;
           weight = 1;
-          semantic_weight = sw_delta;
           last_event_at = ts_iso;
           meta;
         }
 
 let ensure_entity_node (nodes : (string, node_acc) Hashtbl.t) value
-    ~fallback_status ~ts_iso ~meta ~sw_delta =
+    ~fallback_status ~ts_iso ~meta =
   let node_id = entity_node_id value in
   let label =
     match payload_string "label" meta with
@@ -92,7 +81,7 @@ let ensure_entity_node (nodes : (string, node_acc) Hashtbl.t) value
     | None -> value.id
   in
   ensure_node nodes ~id:node_id ~kind:value.kind ~label ~status:fallback_status
-    ~ts_iso ~meta ~sw_delta;
+    ~ts_iso ~meta;
   node_id
 
 let ensure_edge (edges : (string, edge_acc) Hashtbl.t) ~source ~target ~kind
@@ -100,10 +89,14 @@ let ensure_edge (edges : (string, edge_acc) Hashtbl.t) ~source ~target ~kind
   let edge_id = source ^ "|" ^ kind ^ "|" ^ target in
   match Hashtbl.find_opt edges edge_id with
   | Some edge ->
-      edge.weight <- edge.weight + 1;
-      edge.active <- active;
-      edge.last_event_at <- ts_iso;
-      if meta <> default_meta then edge.meta <- meta
+      Hashtbl.replace edges edge_id
+        {
+          edge with
+          weight = edge.weight + 1;
+          active;
+          last_event_at = ts_iso;
+          meta = (if meta <> default_meta then meta else edge.meta);
+        }
   | None ->
       Hashtbl.add edges edge_id
         {
@@ -117,20 +110,21 @@ let ensure_edge (edges : (string, edge_acc) Hashtbl.t) ~source ~target ~kind
           meta;
         }
 
+(* The graph anchor a broadcast points at. It used to be minted from
+   [event.workspace_id], which every writer set to the literal "default", so
+   the field distinguished nothing and the belongs_to edge it produced said
+   only that every node belongs to the one place. The field is gone; the
+   anchor stays because "broadcast" needs a target (#29396 A14). *)
+let broadcast_anchor_node_id = "workspace:default"
+
 let reduce_event ~nodes ~edges (value : event) =
-  let sw = semantic_multiplier value.kind in
-  let workspace_node_id = "workspace:" ^ value.workspace_id in
-  ensure_node nodes ~id:workspace_node_id ~kind:"workspace" ~label:value.workspace_id
-    ~status:Workspace ~ts_iso:value.ts_iso ~meta:default_meta ~sw_delta:sw;
   let actor_id =
     match value.actor with
     | Some actor ->
         let id =
           ensure_entity_node nodes actor ~fallback_status:Active
-            ~ts_iso:value.ts_iso ~meta:value.payload ~sw_delta:sw
+            ~ts_iso:value.ts_iso ~meta:value.payload
         in
-        ensure_edge edges ~source:id ~target:workspace_node_id ~kind:"belongs_to"
-          ~active:true ~ts_iso:value.ts_iso ~meta:default_meta;
         Some id
     | None -> None
   in
@@ -139,10 +133,8 @@ let reduce_event ~nodes ~edges (value : event) =
     | Some subject ->
         let id =
           ensure_entity_node nodes subject ~fallback_status:Observed
-            ~ts_iso:value.ts_iso ~meta:value.payload ~sw_delta:sw
+            ~ts_iso:value.ts_iso ~meta:value.payload
         in
-        ensure_edge edges ~source:id ~target:workspace_node_id ~kind:"belongs_to"
-          ~active:true ~ts_iso:value.ts_iso ~meta:default_meta;
         Some id
     | None -> None
   in
@@ -150,7 +142,7 @@ let reduce_event ~nodes ~edges (value : event) =
     match subject_id with
     | Some id -> (
         match Hashtbl.find_opt nodes id with
-        | Some node -> node.status <- status
+        | Some node -> Hashtbl.replace nodes id { node with status }
         | None -> ())
     | None -> ()
   in
@@ -158,7 +150,7 @@ let reduce_event ~nodes ~edges (value : event) =
     match actor_id with
     | Some id -> (
         match Hashtbl.find_opt nodes id with
-        | Some node -> node.status <- status
+        | Some node -> Hashtbl.replace nodes id { node with status }
         | None -> ())
     | None -> ()
   in
@@ -221,7 +213,7 @@ let reduce_event ~nodes ~edges (value : event) =
               (ensure_entity_node nodes
                  { kind = "agent"; id = name }
                  ~fallback_status:Active ~ts_iso:value.ts_iso
-                 ~meta:value.payload ~sw_delta:sw)
+                 ~meta:value.payload)
         | None -> actor_id
       in
       (match (completer_id, subject_id) with
@@ -239,7 +231,11 @@ let reduce_event ~nodes ~edges (value : event) =
   | "message.broadcast" ->
       (match actor_id with
       | Some source ->
-          ensure_edge edges ~source ~target:workspace_node_id ~kind:"broadcasts"
+          ensure_node nodes ~id:broadcast_anchor_node_id ~kind:"workspace"
+            ~label:"default" ~status:Workspace ~ts_iso:value.ts_iso
+            ~meta:default_meta;
+          ensure_edge edges ~source ~target:broadcast_anchor_node_id
+            ~kind:"broadcasts"
             ~active:false ~ts_iso:value.ts_iso ~meta:value.payload
       | None -> ())
   | "message.mentioned" ->

@@ -198,13 +198,11 @@ let live_turn_phase (entry : Keeper_registry.registry_entry) =
            Keeper_registry.Packed Turn_finalizing
        | Keeper_state_machine.Running
        | Keeper_state_machine.Failing
-       | Keeper_state_machine.Overflowed
        | Keeper_state_machine.Offline
        | Keeper_state_machine.Paused
        | Keeper_state_machine.Stopped
        | Keeper_state_machine.Crashed
-       | Keeper_state_machine.Restarting
-       | Keeper_state_machine.Dead ->
+       | Keeper_state_machine.Restarting ->
            Keeper_registry.Packed Turn_idle)
 
 let live_decision_stage (entry : Keeper_registry.registry_entry) =
@@ -253,15 +251,13 @@ let run_state_of_entry (entry : Keeper_registry.registry_entry) ~last_skip
          })
   | Keeper_state_machine.Offline
   | Keeper_state_machine.Failing
-  | Keeper_state_machine.Overflowed
   | Keeper_state_machine.Compacting
   | Keeper_state_machine.HandingOff
   | Keeper_state_machine.Draining
   | Keeper_state_machine.Paused
   | Keeper_state_machine.Stopped
   | Keeper_state_machine.Crashed
-  | Keeper_state_machine.Restarting
-  | Keeper_state_machine.Dead ->
+  | Keeper_state_machine.Restarting ->
     Suspended entry.phase
 
 (* [wake_kind] + [stimulus_kinds] pair shared by [run_state_to_json]'s
@@ -273,9 +269,9 @@ let wake_reason_kind_and_stimuli (wake : Keeper_registry.wake_reason) : string *
   | Keeper_registry.Proactive_tick -> "proactive_tick", []
   | Keeper_registry.Woken stimuli ->
     "woken", List.map Keeper_event_queue.payload_kind_label stimuli
-  (* A chat turn is admitted from the chat queue, not selected from the event
-     queue, so it carries no stimuli. The empty list is the accurate answer,
-     not a placeholder. *)
+  (* A chat turn is claimed from the Owner's durable operation ledger, not
+     selected from the event queue, so it carries no stimuli. The empty list is
+     the accurate answer, not a placeholder. *)
   | Keeper_registry.Chat_request -> "chat_request", []
 
 let run_state_to_json (rs : run_state) : Yojson.Safe.t =
@@ -557,9 +553,6 @@ let phase_condition_rows (c : Keeper_state_machine.conditions) : phase_condition
     { key; label; priority; value; phase }
   in
   [
-    row "dead_tombstone" "Dead: durable tombstone" 1
-      c.dead_tombstone_latched
-      Keeper_state_machine.Dead;
     row "stopped_clean_drain" "Stopped: clean drain complete" 2
       (c.stop_requested && c.drain_complete
        && not c.compaction_active && not c.handoff_active)

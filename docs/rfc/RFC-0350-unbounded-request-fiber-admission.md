@@ -1,3 +1,8 @@
+---
+rfc: "0350"
+status: Draft
+---
+
 # RFC-0350 — Unbounded request-fiber admission (durable queue + lifecycle-sibling worker + typed saturation)
 
 - Status: Draft
@@ -7,7 +12,7 @@
 
 ## 0. Summary
 
-07-17 인시던트 총평(레인 보고서)이 지목한 무제한 fork 4개 레인 중 board attention judge는 durable candidate + lifecycle-sibling 직렬 worker + candidate당 singleton exact flow로 수리됐다. MASC는 입력과 durable callback만 소유하고, target admission·provider-attempt dispatch·advance는 OAS가 소유한다. provider max-concurrent dead knob도 OAS `Provider_admission.with_admission` 배선으로 수리됐다. **나머지 3개 — fusion run fork, keeper_msg 요청 fork, HTTP/MCP accept/request fiber — 는 2026-07-18 fresh grep 기준 여전히 무제한이다.**
+07-17 인시던트 총평(레인 보고서)이 지목한 무제한 fork 4개 레인 중 board attention judge는 durable candidate + lifecycle-sibling 직렬 worker + candidate당 singleton exact flow로 수리됐다. MASC는 입력과 durable callback만 소유하고, target admission·provider-attempt dispatch·advance는 agent_core가 소유한다. provider max-concurrent dead knob도 agent_core `Provider_admission.with_admission` 배선으로 수리됐다. **나머지 3개 — fusion run fork, keeper_msg 요청 fork, HTTP/MCP accept/request fiber — 는 2026-07-18 fresh grep 기준 여전히 무제한이다.**
 
 본 RFC는 이 3개 갭에 같은 구조적 경계를 적용한다: **(1) backlog는 살아있는 fiber가 아니라 durable store에, (2) 실행은 owner lane의 직렬(또는 고정 소수 워커) drain이 독점, (3) 포화는 생산자에게 typed signal로 되돌린다.** RFC-0277이 문서화한 `cap ≠ backpressure` 교훈에 따라 임의 숫자 rate cap은 재도입하지 않는다. 숫자 상한이 불가피한 지점(HTTP 동시 연결)은 typed saturation signal + 명시적 거부 응답(503/Retry-After)으로 처리하고 silent drop을 금지한다.
 
@@ -43,8 +48,8 @@ board attention은 이 모드의 **첫 번째** 발현이었고 durable candidat
 
 ### 1.5 repo가 이미 받아들인 경계 패턴 (선례)
 
-1. **board attention judge** (#25045 계열): 생산자는 durable candidate 기록 + typed wake 요청만 하고, Keeper lifecycle의 sibling worker가 candidate를 하나씩 직렬 drain한다. 각 candidate는 singleton exact flow이며 MASC는 immutable 입력과 before-dispatch/before-advance durable callback만 소유한다. target admission·provider-attempt dispatch·advance는 OAS가 소유하고, MASC에는 batch/TTL 또는 provider 재시도 정책이 없다. record 경로는 모델 호출을 fork하지 않는다.
-2. **provider max-concurrent**: dead knob을 OAS `Provider_admission.with_admission` (`oas/lib/llm_provider/provider_admission.mli:26-33`)에 배선 — 초과분은 drop이 아니라 slot 대기.
+1. **board attention judge** (#25045 계열): 생산자는 durable candidate 기록 + typed wake 요청만 하고, Keeper lifecycle의 sibling worker가 candidate를 하나씩 직렬 drain한다. 각 candidate는 singleton exact flow이며 MASC는 immutable 입력과 before-dispatch/before-advance durable callback만 소유한다. target admission·provider-attempt dispatch·advance는 agent_core가 소유하고, MASC에는 batch/TTL 또는 provider 재시도 정책이 없다. record 경로는 모델 호출을 fork하지 않는다.
+2. **provider max-concurrent**: dead knob을 agent_core `Provider_admission.with_admission` (`agent_core/lib/llm_provider/provider_admission.mli:26-33`)에 배선 — 초과분은 drop이 아니라 slot 대기.
 3. **HITL Gate Auto Judge**: atomic claim-set + durable queue + chained drain (`keeper_gate.ml:304` `claim_auto_judge`, claim-set 타입 :283-294) — 보고서가 "구조적으로 올바르게 bounded된 유일한 LLM 레인"으로 확인한 exemplar.
 
 본 RFC는 새 패턴을 발명하지 않고 이 세 선례를 3개 갭에 이식한다.
@@ -53,7 +58,7 @@ board attention은 이 모드의 **첫 번째** 발현이었고 durable candidat
 
 - `per_hour_budget` 또는 어떤 시간당/분당 숫자 rate cap의 재도입 (RFC-0277 문서화 결정, §1.2).
 - RFC-0192가 retire한 MASC 소유 **provider-attempt** admission queue의 부활 — 레이어가 다르다 (§6).
-- OAS 강제 의미론 변경. provider-attempt 동시성은 OAS 소유로 유지 (RFC-0000 §2 Boundary Law).
+- agent_core 강제 의미론 변경. provider-attempt 동시성은 agent_core 소유로 유지 (RFC-0000 §2 Boundary Law).
 - 단일 Eio 도메인 수렴 자체의 해소 (별도 프로그램; 본 RFC는 무제한 fiber **생성**이 그 수렴을 증폭시키는 것만 차단한다).
 - SSE/세션 플레인 한도 (이미 bounded: max_clients 200, per-client 256 버퍼 등).
 - board attention·librarian·supervisor backoff 등 보고서의 다른 갭 — 각자의 RFC/PR이 소유.
@@ -123,8 +128,8 @@ board attention은 이 모드의 **첫 번째** 발현이었고 durable candidat
 
 - **RFC-0000 §1.2 (Four Laws)**: §3이 정합성 근거. 특히 LAW 4 "Fiber ≠ Durable job"이 이 3개 갭의 공통 위반 지점이다.
 - **RFC-0277 / RFC-0000 §3.7 (Fusion 경계 계약) (#22051)**: `per_hour_budget` 삭제 결정을 유지한다. 본 RFC는 rate cap을 재도입하지 않는다 — fusion의 경계는 "허용 run 수"가 아니라 "실행 소유권(단일 drain)"이다. §4.A의 Saturated 신호는 cap이 아니라 대기 상태의 typed 표면화다.
-- **RFC-0153 (Withdrawn)**: MASC↔OAS **runtime-attempt** 레이어를 다뤘다 (saturation은 측정·표시하되 provider call의 pre-dispatch 거부는 안 함). 본 RFC는 그 한 층 위 — 요청 진입 경계(도구 호출, keeper_msg submit, TCP accept) — 에서 동작하며 OAS 측 attempt 의미론은 건드리지 않는다. dead scaffold `OllamaSaturationSkip` (`lib/keeper_metrics/keeper_metrics.ml:104,322`)는 현상 유지; 배선/삭제는 본 RFC 범위 밖.
-- **RFC-0192 (Retired)**: MASC 소유 **provider-attempt** admission queue + 누적 대기 예산을 retire했다. 본 RFC는 이를 되살리지 않는다 — keeper와 provider 사이에 어떤 큐도 삽입하지 않고, provider 용량 소유는 OAS에 남는다. 여기서의 큐는 masc 자신의 요청 경계에 대한 것으로, RFC-0192가 규정한 계약("provider-attempt timeout/progress는 provider/runtime 경계 소유")과 충돌하지 않는다.
+- **RFC-0153 (Withdrawn)**: MASC↔agent_core **runtime-attempt** 레이어를 다뤘다 (saturation은 측정·표시하되 provider call의 pre-dispatch 거부는 안 함). 본 RFC는 그 한 층 위 — 요청 진입 경계(도구 호출, keeper_msg submit, TCP accept) — 에서 동작하며 agent_core 측 attempt 의미론은 건드리지 않는다. dead scaffold `OllamaSaturationSkip` (`lib/keeper_metrics/keeper_metrics.ml:104,322`)는 현상 유지; 배선/삭제는 본 RFC 범위 밖.
+- **RFC-0192 (Retired)**: MASC 소유 **provider-attempt** admission queue + 누적 대기 예산을 retire했다. 본 RFC는 이를 되살리지 않는다 — keeper와 provider 사이에 어떤 큐도 삽입하지 않고, provider 용량 소유는 agent_core에 남는다. 여기서의 큐는 masc 자신의 요청 경계에 대한 것으로, RFC-0192가 규정한 계약("provider-attempt timeout/progress는 provider/runtime 경계 소유")과 충돌하지 않는다.
 - **레인 보고서 (2026-07-17)**: 갭 인벤토리와 일반 실패 모드의 출처. 보고서 정오표가 확인한 2개 후속 RFC(masc#25055 Draft)와의 중첩 여부는 리뷰 시점에 대조한다 — 본 RFC는 보고서의 무제한 fork 3개 레인만을 스코프로 하며, 다른 후속 RFC가 같은 레인을 다루면 본 RFC가 그쪽에 양보하거나 병합한다.
 
 ## 7. NEEDS_DECISION (본 RFC는 값을 결정하지 않는다)

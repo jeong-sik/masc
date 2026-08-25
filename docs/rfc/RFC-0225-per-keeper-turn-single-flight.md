@@ -2,8 +2,7 @@
 rfc: "0225"
 title: "Per-keeper turn single-flight admission"
 status: Draft
-relates: "RFC-0153 (tier admission), 2026-06-10 voice repeat RCA (~/me/reports/2026-06-10-masc-voice-repeat-rca.md)"
-date: 2026-06-10
+created: 2026-06-10
 ---
 
 # RFC-0225: Per-keeper turn single-flight admission
@@ -30,8 +29,8 @@ Measured on 2026-06-10 (sangsu, session `trace-1780648779957-00000`): a
 - **Checkpoint clobber** — both lanes share one trace_id-keyed checkpoint
   file (`keeper_run_context.ml:101-112`); finalize is last-writer-wins
   (`keeper_agent_run_finalize_response.ml:112-127`). The autonomous lane's
-  07:11:50Z save (oas turn_count=1355) overwrote the chat lane's 07:10:38Z
-  save (oas=1324) which contained the entire voice conversation — user-visible
+  07:11:50Z save (agent_core turn_count=1355) overwrote the chat lane's 07:10:38Z
+  save (agent_core=1324) which contained the entire voice conversation — user-visible
   as "the keeper forgot what it just said".
 - **Meta regression** — `update_direct_turn_meta` writes a stale
   snapshot+1 (`keeper_turn.ml:57-80`), regressing `total_turns` 385→370 and
@@ -79,7 +78,7 @@ Admission is the primary fix; the writes are corrected so a future bypass
 cannot corrupt state silently:
 
 - Checkpoint save becomes versioned CAS: refuse (and log at Error) when the
-  on-disk oas `turn_count` is **newer** than the snapshot being saved
+  on-disk agent_core `turn_count` is **newer** than the snapshot being saved
   (`keeper_agent_run_finalize_response.ml`).
 - `update_direct_turn_meta` becomes monotonic: read-modify-write under the
   meta CAS with `max` instead of stale-snapshot+1 (`keeper_turn.ml:57-80`).

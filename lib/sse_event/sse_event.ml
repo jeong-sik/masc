@@ -1,9 +1,7 @@
 (* RFC-0004 Phase A0.1 PR-1 — typed SSE event wrapper.
 
    Bridges atd-generated payload types (see [Sse_event_t],
-   [Sse_event_j]) and the manual envelope wrap that replicates
-   [lib/runtime/runtime_event_bridge.wrap_event] (lines 507-531) +
-   [json_string_opt] (lines 25-27) semantics.
+   [Sse_event_j]) and the manual envelope wrap.
 
    The envelope is intentionally hand-rolled in OCaml rather than
    declared in atd because [json_string_opt] coerces [Some ""] to
@@ -13,9 +11,8 @@
 
 (** Envelope metadata fields common to every SSE event.
 
-    Field semantics match [runtime_event_bridge.wrap_event]: optional
-    string fields use [json_string_opt] (empty string → null), and
-    [turn] uses plain [option fold] (None → null). *)
+    Optional string fields use [json_string_opt] (empty string →
+    null), and [turn] uses plain [option fold] (None → null). *)
 type envelope_meta =
   { event_type : string
   ; ts_unix : float
@@ -38,12 +35,12 @@ let json_string_opt = function
   | _ -> `Null
 ;;
 
-(** Wrap a typed payload with the standard envelope.  Returns the
-    same field shape and order as [wrap_event] so its output is
-    byte-identical when serialized via [Yojson.Safe.to_string]. *)
+(** Wrap a typed payload with the standard envelope.  Field order is
+    fixed by the [`Assoc] literal below and is part of the wire
+    contract. *)
 let wrap_envelope (meta : envelope_meta) (payload : Yojson.Safe.t) : Yojson.Safe.t =
   `Assoc
-    [ "type", `String ("oas:" ^ meta.event_type)
+    [ "type", `String ("agent_core:" ^ meta.event_type)
     ; "event_type", `String meta.event_type
     ; "ts_unix", `Float meta.ts_unix
     ; "correlation_id", `String meta.correlation_id
@@ -61,10 +58,7 @@ let wrap_envelope (meta : envelope_meta) (payload : Yojson.Safe.t) : Yojson.Safe
 (** Emit a full [agent_started] envelope as JSON.
 
     [agent_name] and [task_id] in the envelope are populated from the
-    same values as the payload — this matches the
-    [runtime_event_bridge] AgentStarted arm at lines 556-560 which
-    passes [~agent_name ~task_id] to [wrap_event] alongside the
-    payload [`Assoc]. *)
+    same values as the payload, so consumers can read either. *)
 let agent_started
       ~(ts_unix : float)
       ~(correlation_id : string)
@@ -204,7 +198,7 @@ let turn_completed
 
 (** Emit a [turn_ready] envelope.  The wrapper computes [count] from
     [List.length tool_names] and [names_hash] as the first 16 chars
-    of [Digest.to_hex (Digest.string (String.concat "\n" tool_names))],
+    of the SHA-256 hex of [String.concat "\n" tool_names],
     matching runtime arm at runtime_event_bridge.ml:615-624 (pre-PR-3). *)
 let turn_ready
       ~(ts_unix : float)
@@ -216,7 +210,7 @@ let turn_ready
   : Yojson.Safe.t
   =
   let names_hash =
-    Digest.to_hex (Digest.string (String.concat "\n" tool_names))
+    Digestif.SHA256.(digest_string (String.concat "\n" tool_names) |> to_hex)
   in
   let payload_json =
     let p : Sse_event_t.turn_ready_payload =
@@ -465,10 +459,9 @@ let slot_scheduler_observed
 
 (** Append a caller-supplied addendum to an atd-emitted record JSON.
 
-    Used by [agent_completed] and [agent_failed] to splice the
-    runtime-local Result/Error projection ([result_fields] /
-    [error_fields]) onto the typed base record without forcing the
-    leaf event library to depend on [Agent_sdk] variant types.
+    Used by [agent_completed] to splice the runtime-local success-response
+    projection ([response_fields]) onto the typed base record without forcing
+    the leaf event library to depend on [Agent_core] response types.
 
     Field order is [<base record fields in atd declaration order> @
     <addendum>], which matches the previous inline `Assoc path in
@@ -489,8 +482,8 @@ let merge_addendum_into_record
 (** Emit an [agent_completed] envelope.  The runtime arm in
     [runtime_event_bridge.ml] retains its [observe_inference_cost]
     side effect (Otel_metric_store histogram) and invokes
-    [agent_completed_result_fields result] to project the
-    [Agent_sdk] [Result.t] into the [result_fields] addendum. *)
+    [agent_completed_response_fields response] to project the successful
+    [Agent_core] response into the [response_fields] addendum. *)
 let agent_completed
       ~(ts_unix : float)
       ~(correlation_id : string)
@@ -498,7 +491,7 @@ let agent_completed
       ~(agent_name : string)
       ~(task_id : string)
       ~(elapsed_s : float)
-      ~(result_fields : (string * Yojson.Safe.t) list)
+      ~(response_fields : (string * Yojson.Safe.t) list)
   : Yojson.Safe.t
   =
   let base_json =
@@ -507,7 +500,7 @@ let agent_completed
     in
     Yojson.Safe.from_string (Sse_event_j.string_of_agent_completed_payload p)
   in
-  let payload_json = merge_addendum_into_record base_json result_fields in
+  let payload_json = merge_addendum_into_record base_json response_fields in
   wrap_envelope
     { event_type = "agent_completed"
     ; ts_unix
@@ -522,14 +515,9 @@ let agent_completed
     payload_json
 ;;
 
-(** Emit an [agent_failed] envelope.  All five error fields are
-    encoded in the atd schema; the caller passes the simple
-    projections directly. *)
-let agent_failed
-      ?caused_by
-      ~(ts_unix : float)
-      ~(correlation_id : string)
-      ~(run_id : string)
+(** Encode the typed [agent_failed] payload independently from its delivery
+    envelope. *)
+let agent_failed_payload
       ~(agent_name : string)
       ~(task_id : string)
       ~(elapsed_s : float)
@@ -538,33 +526,18 @@ let agent_failed
       ~(error_code : string)
       ~(error_retryable : bool)
       ~(error_detail : Yojson.Safe.t)
-      ()
   : Yojson.Safe.t
   =
-  let payload_json =
-    let p : Sse_event_t.agent_failed_payload =
-      { agent_name
-      ; task_id
-      ; elapsed_s
-      ; error
-      ; error_domain
-      ; error_code
-      ; error_retryable
-      ; error_detail
-      }
-    in
-    Yojson.Safe.from_string (Sse_event_j.string_of_agent_failed_payload p)
-  in
-  wrap_envelope
-    { event_type = "agent_failed"
-    ; ts_unix
-    ; correlation_id
-    ; run_id
-    ; caused_by
-    ; agent_name = Some agent_name
-    ; task_id = Some task_id
-    ; turn = None
-    ; tool_name = None
+  let p : Sse_event_t.agent_failed_payload =
+    { agent_name
+    ; task_id
+    ; elapsed_s
+    ; error
+    ; error_domain
+    ; error_code
+    ; error_retryable
+    ; error_detail
     }
-    payload_json
+  in
+  Yojson.Safe.from_string (Sse_event_j.string_of_agent_failed_payload p)
 ;;

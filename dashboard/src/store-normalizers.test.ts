@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   mergeMessages,
   normalizeDashboardRuntimeResolution,
+  normalizeAgent,
+  normalizeDashboardConfigResolution,
   normalizeExecutionQueueItem,
   normalizeMessage,
   normalizeTask,
@@ -13,6 +15,12 @@ import type { Message } from './types'
 const configItem = { path: '/tmp/masc', source: 'test', exists: true }
 const build = {
   release_version: 'dev',
+  commit: 'checkout-fallback',
+  commit_source: 'runtime_repo_head',
+  binary_commit: null,
+  binary_commit_source: null,
+  repo_head_commit: 'checkout-fallback',
+  repo_head_commit_source: 'runtime_repo_head',
   started_at: '2026-05-17T00:00:00Z',
   uptime_seconds: 12,
 }
@@ -101,6 +109,33 @@ describe('normalizeExecutionQueueItem', () => {
         summary: 'no provider can satisfy tool surface',
       },
     })
+  })
+})
+
+describe('normalizeAgent', () => {
+  // The server renamed this field to session_bound_at in #19656 (2026-06-01)
+  // while the dashboard kept reading joined_at, so the agent roster rendered
+  // an empty bind time from then on.
+  it('reads the bind time the server sends', () => {
+    const agent = normalizeAgent({ name: 'garnet', session_bound_at: '2026-06-01T00:00:00Z' })
+    expect(agent?.session_bound_at).toBe('2026-06-01T00:00:00Z')
+  })
+})
+
+describe('normalizeDashboardConfigResolution', () => {
+  // Config_dir_resolver.to_json sends exactly these five keys. The normalizer
+  // also required runtime_authoring and runtime, which are not fields of the
+  // server's resolution record, so every real response normalized to null and
+  // the config resolution panel never received data.
+  it('accepts the payload Config_dir_resolver actually sends', () => {
+    const resolution = normalizeDashboardConfigResolution({
+      status: 'ready',
+      warnings: [],
+      config_root: { path: '/w/.masc/config', exists: true, source: 'derived' },
+      prompts: { path: '/w/.masc/config/prompts', exists: true, source: 'derived' },
+      keepers: { path: '/w/.masc/keepers', exists: true, source: 'derived' },
+    })
+    expect(resolution?.config_root.path).toBe('/w/.masc/config')
   })
 })
 
@@ -226,6 +261,19 @@ describe('mergeMessages', () => {
 })
 
 describe('normalizeDashboardRuntimeResolution fleet safety', () => {
+  it('preserves binary and checkout identities as separate runtime facts', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw())
+
+    expect(result?.build).toMatchObject({
+      commit: 'checkout-fallback',
+      commit_source: 'runtime_repo_head',
+      binary_commit: null,
+      binary_commit_source: null,
+      repo_head_commit: 'checkout-fallback',
+      repo_head_commit_source: 'runtime_repo_head',
+    })
+  })
+
   it('projects only the active stream and body timeout fields', () => {
     const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
       keeper_runtime: {
@@ -368,7 +416,7 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
           pause_kind: 'operator_paused',
           paused_elapsed_sec: 12,
           last_blocker: {
-            klass: 'turn_timeout',
+            klass: 'stale_turn_timeout',
             detail: 'turn exceeded budget',
           },
           missing_pause_root_cause: false,
@@ -393,29 +441,6 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         paused_autoboot_enabled_keeper_count: 13,
         target_reaction_capacity_count: 14,
         operator_action_required: true,
-        blocked_keeper_count: 2,
-        blocked_keepers: [
-          {
-            keeper_name: 'analyst',
-            reason: 'durable_paused_autoboot_enabled',
-            action: 'resume_or_leave_paused',
-            execution_truth: 'paused_dead',
-            non_executable_cause: 'lifecycle_denied',
-            operator_action_type: null,
-            operator_tool_name: null,
-            operator_action_confirm_required: null,
-          },
-          {
-            keeper_name: 'rondo',
-            reason: 'phase_restarting',
-            action: 'wait_for_keeper_restart',
-            execution_truth: 'recoverable',
-            non_executable_cause: 'fiber_dead',
-            operator_action_type: null,
-            operator_tool_name: null,
-            operator_action_confirm_required: null,
-          },
-        ],
       },
       keeper_reaction_ledger: {
         status: 'ok',
@@ -442,7 +467,7 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
           name: 'analyst',
           pause_kind: 'operator_paused',
           last_blocker: {
-            klass: 'turn_timeout',
+            klass: 'stale_turn_timeout',
           },
         }],
       },
@@ -463,23 +488,6 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         paused_autoboot_enabled_keeper_count: 13,
         target_reaction_capacity_count: 14,
         operator_action_required: true,
-        blocked_keeper_count: 2,
-        blocked_keepers: [
-          {
-            keeper_name: 'analyst',
-            reason: 'durable_paused_autoboot_enabled',
-            action: 'resume_or_leave_paused',
-            execution_truth: 'paused_dead',
-            non_executable_cause: 'lifecycle_denied',
-          },
-          {
-            keeper_name: 'rondo',
-            reason: 'phase_restarting',
-            action: 'wait_for_keeper_restart',
-            execution_truth: 'recoverable',
-            non_executable_cause: 'fiber_dead',
-          },
-        ],
       },
       keeper_reaction_ledger: {
         status: 'ok',
@@ -491,34 +499,6 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
     })
   })
 
-  it('collapses a malformed Keeper operator item into one bad current fact', () => {
-    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
-      keeper_fleet_safety: {
-        schema: 'masc.keeper_fleet_operator.v1',
-        status: 'degraded',
-        blocker: 'reaction_capacity_below_target',
-        blocked_keeper_count: 1,
-        blocked_keepers: [{
-          keeper_name: 'sangsu',
-          reason: 'phase_failing',
-          action: 'unsupported_action',
-        }],
-        operator_action_required: true,
-      },
-    }))
-
-    expect(result?.fleet_safety?.keeper_fleet_safety).toMatchObject({
-      status: 'blocked',
-      blocker: 'current_fact_invalid',
-      blocked_keeper_count: 1,
-      operator_action_required: true,
-      blocked_keepers: [{
-        keeper_name: null,
-        reason: 'current_fact_invalid',
-        action: 'inspect_current_keeper_fact',
-      }],
-    })
-  })
 
   it('keeps reaction-ledger health even when other fleet safety fields are absent', () => {
     const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({

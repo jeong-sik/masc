@@ -20,6 +20,4 @@ val create_stderr_tempfile : unit -> string * Unix.file_descr
 
 val remove_temp_file_quietly : string -> unit
 
-val read_stderr_capture : string -> string
-
 val captured_stderr_or_empty : string option -> string

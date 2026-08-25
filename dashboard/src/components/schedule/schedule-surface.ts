@@ -1,6 +1,7 @@
 // Dedicated Schedule surface.
 //
-// Two views over one schedule projection (data.scheduled_automation):
+// Two views over one schedule projection, read from the shared schedule
+// resource (GET /api/v1/dashboard/scheduled-automation):
 //   · 캘린더 — the always-on polling strip (interval) above a day agenda
 //     (scheduled + oneshot). Ported from the keeper-v2 prototype (schedule.jsx).
 //   · 목록   — the mature diagnostic list/cards/signal feed in
@@ -13,6 +14,11 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import type { DashboardScheduledAutomation } from '../../api'
+import {
+  fetchDashboardScheduledAutomationLookup,
+  type DashboardScheduledAutomationLookup,
+} from '../../api/dashboard-scheduled-automation'
+import { replaceRoute, route } from '../../router'
 import { ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { StatusChip } from '../common/status-chip'
@@ -23,7 +29,7 @@ import {
   ScheduleAside,
   ScheduledAutomationPanel,
   SchDetail,
-  normalizedScheduleStatus,
+  scheduleWireValue,
 } from '../tools/scheduled-automation-panel'
 import type { Cadence } from '../v2/schedule-constants'
 import { CadenceSummary, ScheduleCalendar, cadenceCounts, cadenceOfRequest } from './schedule-agenda'
@@ -31,15 +37,26 @@ import { countQueueDrainMisses } from './queue-drain-status'
 import {
   loadTools,
   toolsData,
-  toolsError,
-  toolsLoading,
 } from '../tools/tool-state'
+import {
+  loadScheduledAutomation,
+  scheduledAutomationError,
+  scheduledAutomationLoading,
+  scheduledAutomationProjection,
+  subscribeScheduledAutomationRefresh,
+} from './schedule-state'
 import { pruneSchedules } from '../../api/dashboard-schedule'
 
 type ScheduleView = 'calendar' | 'list'
 
-function countLabel(count: number): string {
-  return count.toLocaleString()
+type ExactScheduleState =
+  | { kind: 'idle' }
+  | { kind: 'loading'; scheduleId: string }
+  | { kind: 'resolved'; lookup: DashboardScheduledAutomationLookup }
+  | { kind: 'failed'; scheduleId: string; reason: string }
+
+function countLabel(count: number | null): string {
+  return count === null ? '—' : count.toLocaleString()
 }
 
 // Narrow the projection handed to the list view so the cadence chip filters
@@ -57,42 +74,55 @@ function filterAutomationByCadence(
 }
 
 function countByStatus(
-  automation: DashboardScheduledAutomation | null,
+  automation: DashboardScheduledAutomation,
   statuses: readonly string[],
 ): number {
-  if (!automation) return 0
-  const normalizedStatuses = statuses.map(normalizedScheduleStatus)
-  const fromCounts = normalizedStatuses.reduce((sum, status) => sum + (automation.counts?.[status] ?? 0), 0)
+  const wireStatuses = statuses.map(scheduleWireValue)
+  const fromCounts = wireStatuses.reduce(
+    (sum, status) => sum + (automation.counts?.[status] ?? 0),
+    0,
+  )
   const fromRequests = (automation.requests ?? [])
-    .filter(request => normalizedStatuses.includes(normalizedScheduleStatus(request.status)))
+    .filter(request => wireStatuses.includes(scheduleWireValue(request.status)))
     .length
   return Math.max(fromCounts, fromRequests)
 }
 
 export function ScheduleSurface() {
   const data = toolsData.value
-  const automation = data?.scheduled_automation ?? null
+  // Schedule rows come from the schedule projection; the keeper diagnostics
+  // panels below still read the tool inventory, which is why both are loaded.
+  const projection = scheduledAutomationProjection.value
+  const automation = projection?.state === 'available' ? projection.data : null
+  const page = projection?.state === 'available' ? projection.page : null
+  const projectionError = projection?.state === 'unavailable' ? projection.reason : null
   const waitingInventory = data?.keeper_waiting_inventory ?? null
   const keeperBackground = data?.keeper_background ?? null
-  const loading = toolsLoading.value
-  const error = toolsError.value
-  const scheduledCount = countByStatus(automation, ['scheduled'])
-  const dueCount = countByStatus(automation, ['due'])
-  const runningCount = countByStatus(automation, ['running'])
-  const dueRunning = dueCount + runningCount
+  const loading = scheduledAutomationLoading.value
+  const error = scheduledAutomationError.value
+  const blockingError = automation ? null : projectionError ?? error
+  const scheduledCount = automation ? countByStatus(automation, ['scheduled']) : null
+  const dueCount = automation ? countByStatus(automation, ['due']) : null
+  const runningCount = automation ? countByStatus(automation, ['running']) : null
+  const dueRunning = dueCount === null || runningCount === null
+    ? null
+    : dueCount + runningCount
   const requests = automation?.requests ?? []
-  const totalCount = requests.length
+  const routeScheduleId = route.value.params.schedule_id ?? null
+  const inPageRequest = routeScheduleId === null
+    ? null
+    : requests.find(request => request.schedule_id === routeScheduleId) ?? null
+  const totalCount = page?.totalCount ?? null
   const cadCounts = cadenceCounts(requests)
   // Scheduled keeper wakes that were dispatched but are in neither queue AND
   // never recorded as reacted — the drain-miss the calendar surfaces per row.
-  const queueMisses = countQueueDrainMisses(requests)
+  const queueMisses = automation ? countQueueDrainMisses(requests) : null
 
   const [view, setView] = useState<ScheduleView>('calendar')
   const [cadenceFilter, setCadenceFilter] = useState<Cadence | null>(null)
   const [pruning, setPruning] = useState(false)
-  // Detail-overlay selection is lifted here so the calendar view, the list
-  // panel, and the operations aside all drive the same overlay.
-  const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
+  const selectedScheduleId = routeScheduleId
+  const [exactSchedule, setExactSchedule] = useState<ExactScheduleState>({ kind: 'idle' })
   // Keeper-lane wake evidence + background are large operator diagnostics
   // (a card per keeper, dozens of lane rows). Collapsed AND unmounted by default
   // so the schedule stays the light, primary content; the panels only mount when
@@ -100,19 +130,52 @@ export function ScheduleSurface() {
   const [diagOpen, setDiagOpen] = useState(false)
 
   useEffect(() => {
-    if (!toolsData.value && !toolsLoading.value) {
-      void loadTools()
-    }
+    const stopScheduleRefresh = subscribeScheduledAutomationRefresh()
+    // Tool inventory is still needed for the keeper waiting/background panels.
+    if (!toolsData.value) void loadTools()
+    return stopScheduleRefresh
   }, [])
+
+  useEffect(() => {
+    if (
+      selectedScheduleId === null
+      || projection?.state !== 'available'
+      || inPageRequest !== null
+    ) {
+      setExactSchedule({ kind: 'idle' })
+      return
+    }
+    const controller = new AbortController()
+    setExactSchedule({ kind: 'loading', scheduleId: selectedScheduleId })
+    void fetchDashboardScheduledAutomationLookup(selectedScheduleId, {
+      signal: controller.signal,
+    })
+      .then(lookup => { setExactSchedule({ kind: 'resolved', lookup }) })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return
+        setExactSchedule({
+          kind: 'failed',
+          scheduleId: selectedScheduleId,
+          reason: error instanceof Error ? error.message : String(error),
+        })
+      })
+    return () => { controller.abort() }
+  }, [selectedScheduleId, projection?.state, inPageRequest !== null])
+
+  function selectSchedule(scheduleId: string | null) {
+    const params = { ...route.value.params }
+    if (scheduleId === null) delete params.schedule_id
+    else params.schedule_id = scheduleId
+    replaceRoute('schedule', params)
+  }
 
   function switchView(next: ScheduleView) {
     // Clear selection so a drawer opened in one view does not linger into the
     // other (the list panel renders its own overlay from the same id).
-    setSelectedScheduleId(null)
+    selectSchedule(null)
     setView(next)
   }
 
-  const refresh = (): Promise<void> => loadTools()
   async function handlePrune() {
     if (
       !window.confirm(
@@ -125,7 +188,7 @@ export function ScheduleSurface() {
     try {
       const result = await pruneSchedules()
       showToast(`완료된 예약 ${result.pruned_count.toLocaleString()}개를 정리했습니다.`, 'success')
-      await refresh()
+      await loadScheduledAutomation({ fresh: true })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.error('[ScheduleSurface] prune failed:', error)
@@ -136,10 +199,33 @@ export function ScheduleSurface() {
   }
   // In the calendar view the list panel is unmounted, so the surface owns the
   // overlay; the list panel renders its own overlay from the same selection.
-  const selectedRequest =
-    view === 'calendar' && selectedScheduleId
-      ? requests.find(request => request.schedule_id === selectedScheduleId) ?? null
+  const exactRequest =
+    exactSchedule.kind === 'resolved'
+    && exactSchedule.lookup.status === 'found'
+    && exactSchedule.lookup.scheduleId === selectedScheduleId
+      ? exactSchedule.lookup.request
       : null
+  const selectedRequest =
+    view === 'calendar' && selectedScheduleId !== null
+      ? inPageRequest ?? exactRequest
+      : null
+  const exactLookupMessage = (() => {
+    if (selectedScheduleId === null) return null
+    if (exactSchedule.kind === 'loading' && exactSchedule.scheduleId === selectedScheduleId) {
+      return '정확한 예약을 조회하는 중입니다.'
+    }
+    if (exactSchedule.kind === 'failed' && exactSchedule.scheduleId === selectedScheduleId) {
+      return exactSchedule.reason
+    }
+    if (
+      exactSchedule.kind !== 'resolved'
+      || exactSchedule.lookup.scheduleId !== selectedScheduleId
+      || exactSchedule.lookup.status === 'found'
+    ) return null
+    return exactSchedule.lookup.status === 'not_found'
+      ? 'schedule store에서 정확한 예약을 찾지 못했습니다.'
+      : exactSchedule.lookup.reason
+  })()
 
   return html`
     <main class="ov ov-2col sch-surf" data-screen-label="예약" data-testid="schedule-surface">
@@ -162,16 +248,22 @@ export function ScheduleSurface() {
           </div>
         </header>
 
-        ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}
+        ${error || projectionError
+          ? html`
+              <div data-testid=${projectionError ? 'schedule-projection-unavailable' : undefined}>
+                <${ErrorState} message=${error ?? projectionError ?? ''} class="mb-4" />
+              </div>
+            `
+          : null}
 
         <section class="ov-kpis" style=${{ gridTemplateColumns: 'repeat(4, 1fr)' }} aria-label="예약 요약">
           <div class="ov-kpi">
             <div class="ov-kpi-k">예약됨</div>
-            <div class=${`ov-kpi-v ${scheduledCount > 0 ? 'info' : ''}`}>${countLabel(scheduledCount)}</div>
+            <div class=${`ov-kpi-v ${scheduledCount !== null && scheduledCount > 0 ? 'info' : ''}`}>${countLabel(scheduledCount)}</div>
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">due · 실행</div>
-            <div class=${`ov-kpi-v ${dueRunning > 0 ? 'warn' : ''}`}>${countLabel(dueRunning)}</div>
+            <div class=${`ov-kpi-v ${dueRunning !== null && dueRunning > 0 ? 'warn' : ''}`}>${countLabel(dueRunning)}</div>
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">총 예약</div>
@@ -180,13 +272,35 @@ export function ScheduleSurface() {
           <div class="ov-kpi" data-testid="schedule-kpi-queue-miss">
             <div class="ov-kpi-k">큐 누락</div>
             <div
-              class=${`ov-kpi-v ${queueMisses > 0 ? 'warn' : 'ok'}`}
+              class=${`ov-kpi-v ${queueMisses === null ? '' : queueMisses > 0 ? 'warn' : 'ok'}`}
               title="dispatch됐으나 pending 큐에도 없고 keeper 반응 기록도 없는 예약 실행 수 — 실행 누락"
             >${countLabel(queueMisses)}</div>
           </div>
         </section>
 
-        <div class="sch-viewbar" data-testid="schedule-viewbar">
+        ${page
+          ? html`
+              <div class="mb-3 text-2xs text-[var(--color-fg-muted)]" data-testid="schedule-page-metadata">
+                ${`표시 ${page.visibleCount.toLocaleString()} / 전체 ${page.totalCount.toLocaleString()} · 최대 ${page.limit.toLocaleString()}${page.truncated ? ' · 일부만 표시' : ''}`}
+              </div>
+            `
+          : null}
+
+        ${exactLookupMessage
+          ? html`
+              <div class="ov-card mb-3 text-xs text-[var(--color-fg-muted)]" data-testid="schedule-exact-lookup-status">
+                <span class="mono">${selectedScheduleId}</span> · ${exactLookupMessage}
+              </div>
+            `
+          : null}
+
+        ${blockingError
+          ? html`
+              <div class="ov-card mb-4 text-sm text-[var(--color-fg-muted)]" data-testid="schedule-ledger-unknown">
+                schedule projection을 확인할 수 없어 예약 수와 일정을 표시할 수 없습니다.
+              </div>
+            `
+          : html`<div class="sch-viewbar" data-testid="schedule-viewbar">
           <div class="sch-viewseg" role="tablist" aria-label="예약 뷰">
             <button
               type="button"
@@ -206,22 +320,25 @@ export function ScheduleSurface() {
             >≡ 목록</button>
           </div>
           <${CadenceSummary} counts=${cadCounts} active=${cadenceFilter} onFilter=${setCadenceFilter} />
-        </div>
+        </div>`}
 
-        ${loading && !automation
+        ${blockingError
+          ? null
+          : loading && !automation
           ? html`<${LoadingState}>예약 자동화 projection 불러오는 중...<//>`
           : view === 'calendar'
             ? html`<${ScheduleCalendar}
                 requests=${requests}
                 nowMs=${Date.now()}
                 cadenceFilter=${cadenceFilter}
-                onOpen=${setSelectedScheduleId}
+                onOpen=${selectSchedule}
               />`
             : html`<${ScheduledAutomationPanel}
                 automation=${automation ? filterAutomationByCadence(automation, cadenceFilter) : automation}
                 variant="v2"
                 selectedScheduleId=${selectedScheduleId}
-                onSelectSchedule=${setSelectedScheduleId}
+                selectedRequest=${inPageRequest ?? exactRequest}
+                onSelectSchedule=${selectSchedule}
               />`}
 
         ${'' /* Secondary diagnostics live BELOW the schedule and are unmounted
@@ -265,17 +382,17 @@ export function ScheduleSurface() {
             : null}
         </section>
       </div>
-      ${automation
+      ${automation && scheduledCount !== null && dueRunning !== null && totalCount !== null
         ? html`<${ScheduleAside}
             requests=${automation.requests ?? []}
             sum=${{ scheduled: scheduledCount, dueRunning, total: totalCount }}
-            onOpen=${setSelectedScheduleId}
+            onOpen=${selectSchedule}
           />`
         : null}
       ${selectedRequest
         ? html`<${SchDetail}
             request=${selectedRequest}
-            onClose=${() => setSelectedScheduleId(null)}
+            onClose=${() => selectSchedule(null)}
           />`
         : null}
     </main>

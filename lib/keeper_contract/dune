@@ -5,12 +5,13 @@
  (public_name masc.keeper_contract)
  (wrapped false)
  (modules
-  keeper_accountability_claim_types
   keeper_transition_audit_types
   keeper_world_observation_turn_types
   keeper_approval_queue_rules_types
   keeper_invariant
   keeper_path_rejection)
+ (flags
+  (:standard -w +4 -w +33))
  (libraries
   eio
   masc.keeper_registry

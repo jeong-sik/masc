@@ -605,7 +605,8 @@ let test_backlog_to_yojson_with_tasks () =
     created_at = "2024-01-15T12:00:00Z";
     created_by = None;
     predecessor_task_id = None;
-    contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
+    contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
+    skills = [];
   } in
   let b : Masc_domain.backlog = { tasks = [task]; last_updated = "2024-01-15T12:00:00Z"; version = 2 } in
   let json = Masc_domain.backlog_to_yojson b in
@@ -915,7 +916,7 @@ let test_agent_credential_of_yojson_role_string_admin () =
 let test_agent_credential_of_yojson_role_string_worker () =
   let json =
     current_agent_credential_json
-      ~agent_name:"nick0cave"
+      ~agent_name:"theta0"
       ~token:"t"
       ~role:"worker"
       ~created_at:"2026-04-23T08:07:00Z"
@@ -1013,11 +1014,8 @@ let test_auth_config_of_yojson_ok () =
 let test_auth_config_of_yojson_error () =
   let json = `Int 42 in
   match Masc_domain.auth_config_of_yojson json with
-  | Ok config ->
-    check bool "enabled defaults true" true config.enabled;
-    check bool "require_token defaults false" false config.require_token;
-    check int "expiry defaults 24" 24 config.token_expiry_hours
-  | Error e -> fail ("expected tolerant default, got: " ^ e)
+  | Error _ -> ()
+  | Ok _ -> fail "non-object auth configuration must be rejected"
 
 (* ============================================================
    permissions Tests
@@ -1154,11 +1152,23 @@ let test_masc_error_agent_invalid_name () =
   in
   check bool "nonempty" true (String.length s > 0)
 
+(* The message named the next tool to call ("Claim/start it first") until
+   #26123 stopped the runtime choosing the agent's next tool. It now reports the
+   task and the state it is in and leaves the choice to the caller. Assert that
+   shape - identifier plus state - rather than the prescription, and assert the
+   prescription stays out so re-adding it fails here. *)
 let test_masc_error_task_not_claimed () =
   let s = Masc_domain.masc_error_to_string (Masc_domain.Task (Masc_domain.Task_error.NotClaimed "t1")) in
-  check bool "contains claim guidance" true
-    (try let _ = Str.search_forward (Str.regexp "Claim/start it first") s 0 in true
-     with Not_found -> false)
+  let contains needle =
+    try
+      let _ = Str.search_forward (Str.regexp_string needle) s 0 in
+      true
+    with
+    | Not_found -> false
+  in
+  check bool "names the task" true (contains "t1");
+  check bool "names the state" true (contains "todo");
+  check bool "does not prescribe the next tool" false (contains "Claim/start it first")
 
 let test_masc_error_task_invalid_state () =
   let s = Masc_domain.masc_error_to_string (Masc_domain.Task (Masc_domain.Task_error.InvalidState "cancelled")) in
@@ -1317,6 +1327,22 @@ let test_rate_limit_config_of_yojson_defaults () =
     check int "default per_minute" 10 c.per_minute
   | Error e -> fail ("expected Ok with defaults: " ^ e)
 
+let test_rate_limit_config_of_yojson_rejects_wrong_field_type () =
+  let json = `Assoc [ "per_minute", `String "120" ] in
+  match Masc_domain.rate_limit_config_of_yojson json with
+  | Error message ->
+    check bool "field is named" true
+      (String_util.contains_substring message "rate_limit.per_minute")
+  | Ok _ -> fail "wrongly typed rate-limit field silently used the default"
+
+let test_rate_limit_config_of_yojson_rejects_mixed_agent_array () =
+  let json = `Assoc [ "priority_agents", `List [ `String "admin"; `Int 7 ] ] in
+  match Masc_domain.rate_limit_config_of_yojson json with
+  | Error message ->
+    check bool "element index is named" true
+      (String_util.contains_substring message "priority_agents[1]")
+  | Ok _ -> fail "wrongly typed priority-agent element was silently dropped"
+
 (* ============================================================
    tool_result_to_yojson Tests
    ============================================================ *)
@@ -1361,7 +1387,8 @@ let test_task_to_yojson () =
     created_at = "2024-01-15T12:00:00Z";
     created_by = None;
     predecessor_task_id = None;
-    contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
+    contract = None; execution_links = Masc_domain.no_execution_links; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
+    skills = [];
   } in
   let json = Masc_domain.task_to_yojson t in
   match json with
@@ -1409,7 +1436,9 @@ let test_task_reclaim_gate_ignores_free_text_without_policy () =
     handoff_context = None;
     cycle_count = 9;
     reclaim_policy = None;
+    execution_links = Masc_domain.no_execution_links;
     do_not_reclaim_reason = Some "worktree path not found";
+    skills = [];
   } in
   match Masc_domain.task_claim_decision t with
   | Masc_domain.Claim_available Masc_domain.Claim_ready -> ()
@@ -1434,7 +1463,9 @@ let test_task_reclaim_gate_blocks_only_typed_policy () =
     handoff_context = None;
     cycle_count = 0;
     reclaim_policy = Some Masc_domain.Block_reclaim;
+    execution_links = Masc_domain.no_execution_links;
     do_not_reclaim_reason = Some "operator hard stop";
+    skills = [];
   } in
   match Masc_domain.task_claim_decision t with
   | Masc_domain.Claim_available Masc_domain.Claim_ready -> ()
@@ -1464,7 +1495,9 @@ let test_task_claim_awaiting_verification_is_pending_verdict () =
     handoff_context = None;
     cycle_count = 0;
     reclaim_policy = None;
+    execution_links = Masc_domain.no_execution_links;
     do_not_reclaim_reason = None;
+    skills = [];
   } in
   (match Masc_domain.task_claim_decision t with
    | Masc_domain.Claim_unavailable
@@ -1512,7 +1545,9 @@ let test_task_claim_next_action_todo_policy_block_still_claims () =
     handoff_context = None;
     cycle_count = 0;
     reclaim_policy = Some Masc_domain.Block_reclaim;
+    execution_links = Masc_domain.no_execution_links;
     do_not_reclaim_reason = Some "operator hard stop";
+    skills = [];
   } in
   match Masc_domain.task_claim_next_action t with
   | Masc_domain.Claim_now ->
@@ -1526,6 +1561,23 @@ let test_task_claim_next_action_todo_policy_block_still_claims () =
 (* ============================================================
    Test Runners
    ============================================================ *)
+
+(* Every agent_status must rank, and the ranks must be distinct — a
+   serialized status is ranked by decoding it, so an unranked constructor
+   would sort as if it were garbage. The string ranker this replaced had an
+   arm for "idle" (never produced) and none for "inactive" (the real fourth
+   constructor). *)
+let test_agent_status_rank_covers_every_constructor () =
+  let ranks =
+    List.map Masc_domain.agent_status_rank Masc_domain.all_agent_statuses
+  in
+  Alcotest.(check int) "one rank per constructor"
+    (List.length Masc_domain.all_agent_statuses) (List.length ranks);
+  let sorted = List.sort_uniq Int.compare ranks in
+  Alcotest.(check int) "ranks are distinct" (List.length ranks)
+    (List.length sorted);
+  Alcotest.(check bool) "no constructor ranks 0" true
+    (not (List.exists (Int.equal 0) ranks))
 
 let () =
   run "Types Coverage" [
@@ -1773,6 +1825,10 @@ let () =
       test_case "to_yojson" `Quick test_rate_limit_config_to_yojson;
       test_case "of_yojson ok" `Quick test_rate_limit_config_of_yojson_ok;
       test_case "of_yojson defaults" `Quick test_rate_limit_config_of_yojson_defaults;
+      test_case "of_yojson rejects wrong type" `Quick
+        test_rate_limit_config_of_yojson_rejects_wrong_field_type;
+      test_case "of_yojson rejects mixed array" `Quick
+        test_rate_limit_config_of_yojson_rejects_mixed_agent_array;
     ];
     "tool_result", [
       test_case "to_yojson success" `Quick test_tool_result_to_yojson_success;
@@ -1788,5 +1844,9 @@ let () =
     "task_claim", [
       test_case "awaiting verification waits for verdict" `Quick
         test_task_claim_awaiting_verification_is_pending_verdict;
+    ];
+    "agent_status_rank", [
+      test_case "every constructor ranks distinctly" `Quick
+        test_agent_status_rank_covers_every_constructor;
     ];
   ]

@@ -1,26 +1,24 @@
-(** MASC Agent Transport — protocol selection for MASC workspace.
-
-    Agents communicate with the MASC workspace server via one of:
-    - [Http] — existing HTTP/SSE transport (default, backward compatible).
-    - [Grpc] — gRPC transport using grpc-direct h2c.
-    - [Local] — direct filesystem-based Workspace calls (in-process).
-
-    Selection order:
-    1. Explicit [~transport] parameter on API calls.
-    2. [MASC_AGENT_TRANSPORT] env var ("grpc", "http", "local").
-    3. Default: [Local] (file-based, same as before). *)
+(** MASC agent transport selection. *)
 
 (** Transport kind. *)
 type t =
   | Http    (** HTTP/SSE to MASC server. *)
   | Grpc    (** gRPC (h2c) to MASC gRPC workspace port. *)
   | Ws      (** WebSocket to MASC server. *)
-  | Webrtc  (** WebRTC DataChannel for P2P agent communication. *)
   | Local   (** Direct Workspace filesystem calls (in-process). *)
 
-(** Resolve transport from env var [MASC_AGENT_TRANSPORT].
-    Returns [Local] when unset or unrecognized. *)
+(** Resolve [MASC_AGENT_TRANSPORT]. An absent variable selects [Local]; every
+    present value must exactly match [http], [grpc], [ws], or [local]. *)
 val from_env : unit -> t
+
+(** Resolve [MASC_AGENT_TRANSPORT] and publish the first typed value for all
+    subsequent calls in this process. Concurrent or repeated calls return the
+    first published value. Server startup calls this before creating fibers or
+    listeners. *)
+val configure_from_env : unit -> t
 
 (** String representation for logging. *)
 val to_string : t -> string
+
+(** Operator snapshot entry projected from the same typed process resolution. *)
+val snapshot_entry : Env_config_snapshot_collector.t

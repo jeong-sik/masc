@@ -6,7 +6,9 @@
 
     @since 0.1.0 *)
 
-(** {1 Types} (re-exported from Mcp_tool_runtime_types) *)
+(** {1 Types}
+
+    Re-exported from [Mcp_tool_runtime_types]. *)
 
 type tool_result = Mcp_tool_runtime_types.tool_result
 

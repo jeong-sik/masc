@@ -7,6 +7,7 @@
 
 (library
  (name masc_exec_command_gate)
+ (flags :standard -w +32)
  (public_name masc.masc_exec_command_gate)
  (wrapped true)
- (libraries masc_exec masc_exec_bash_parser logs))
+ (libraries masc_exec masc_exec_bash_parser masc_log))

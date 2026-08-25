@@ -1,24 +1,21 @@
+import { keeperStreamContract } from './keeper-stream-contract'
+import {
+  newKeeperChatOperationId,
+  operationDeliveryProvenance,
+  sameDeliveryProvenance,
+} from './keeper-delivery-provenance'
 import { callMcpTool } from './api/mcp'
 import { runOperatorAction } from './api/core'
 import {
-  cancelKeeperChatPendingReceipt,
-  editKeeperChatPendingReceipt,
-  cancelQueuedKeeperMessage,
+  cancelKeeperChatOperation,
+  fetchKeeperChatOperation,
   fetchKeeperChatHistory,
-  fetchKeeperChatPending,
-  fetchKeeperChatReceipt,
-  moveKeeperChatPendingReceiptToEnd,
-  resolveKeeperChatRecovery,
-  fetchQueuedKeeperMessageResult,
   fetchKeeperToolApprovals,
   interruptKeeperTurn as apiInterruptKeeperTurn,
-  isTerminalQueuedKeeperMessage,
-  queuedKeeperMessageError,
-  queuedKeeperMessageToReply,
   streamKeeperMessage,
 } from './api/keeper'
+import type { KeeperStreamSurfaceContext } from './api/keeper'
 import { answerKeeperToolApproval } from './api/keeper'
-import type { KeeperChatPendingAttachment } from './api/keeper'
 import { fetchKeeperToolCalls } from './api/dashboard'
 import {
   markToolCallOutputsHydrated,
@@ -27,11 +24,8 @@ import {
   recordToolCallOutputs,
 } from './tool-call-output-store'
 import { asString, isRecord } from './components/common/normalize'
-import { keeperTurnOutcomeSuppressesReply } from './keeper-message'
-import { invalidateDashboardCache, refreshDashboard, shellAuthSummary } from './store'
+import { invalidateDashboardCache, refreshDashboard } from './store'
 import { isAbortError } from './lib/async-state'
-import { dashboardAuthAccess } from './lib/dashboard-auth-access'
-import { compareKeeperQueueRevisions } from './lib/keeper-chat-receipt'
 import type {
   ChatBlock,
   KeeperConversationAttachment,
@@ -59,23 +53,18 @@ import {
   attachKeeperAudioClip,
   chatHistoryEntriesFromRest,
   clearActiveStream,
-  clearActiveStreamRequestId,
   finalizeAssistantEntry,
-  keeperClientObservedSseStreamContract,
-  keeperStreamContract,
-  releaseActiveStreamRequestId,
   mergeServerHistoryEntries,
   normalizeKeeperProbeResult,
   normalizeKeeperRecoverResult,
   normalizeStatusDetail,
   removeThreadEntries,
   liveSendOwnsRequest,
+  markLiveSendRequestAccepted,
   releaseLiveSendRequest,
   setActiveStream,
-  setActiveStreamRequestId,
   setRecordValue,
   setStatusDetail,
-  updateThreadEntry,
   settleKeeperToolApproval,
   updateKeeperToolApproval,
   upsertKeeperToolApproval,
@@ -84,20 +73,19 @@ import {
   abortKeeperThreadMessage,
   applyKeeperStreamEvent,
   flushPendingKeeperStreamDeltas,
-  TERMINAL_REQUEST_STATUSES,
 } from './keeper-stream'
 import {
   KEEPER_HISTORY_TAIL_MESSAGES,
 } from './config/constants'
 import {
-  hasPendingKeeperChatRequest,
-  pendingKeeperChatRequestsForKeeper,
-  pendingKeeperChatAssistantDraftFromEntry,
-  removePendingKeeperChatRequest,
-  type PendingKeeperChatRequest,
-  updatePendingKeeperChatAssistantDraft,
-  upsertPendingKeeperChatRequest,
-} from './keeper-chat-pending'
+  hasTrackedKeeperChatOperation,
+  trackedKeeperChatOperationsForKeeper,
+  trackedKeeperChatAssistantDraftFromEntry,
+  removeTrackedKeeperChatOperation,
+  type TrackedKeeperChatOperation,
+  updateTrackedKeeperChatAssistantDraft,
+  upsertTrackedKeeperChatOperation,
+} from './keeper-chat-operations-local'
 
 type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
 
@@ -117,6 +105,9 @@ interface KeeperInterjectCommand {
   readonly kind: KeeperInterjectActionKind
   readonly keeperName: string
   readonly message?: string
+  /** Wire shape of `surface_context` on /api/v1/keepers/chat/stream; rendered
+   *  into the keeper prompt by keeper_turn.surface_context_fields. */
+  readonly surfaceContext?: KeeperStreamSurfaceContext
 }
 
 async function refreshDashboardState(): Promise<void> {
@@ -180,15 +171,15 @@ export function cancelKeeperThreadRequest(
   const existing = pendingKeeperThreadCancels.get(id)
   if (existing) return existing
   const promise = (opts.signal
-    ? cancelQueuedKeeperMessage(id, { signal: opts.signal })
-    : cancelQueuedKeeperMessage(id))
+    ? cancelKeeperChatOperation(name, id, { signal: opts.signal })
+    : cancelKeeperChatOperation(name, id))
     .then(result => {
-      if (result.status === 'cancelled') {
-        removePendingKeeperChatRequest(id)
-        releaseActiveStreamRequestId(id)
+      if (result.state.kind === 'cancelled') {
+        removeTrackedKeeperChatOperation(id)
+        releaseLiveSendRequest(id)
       }
       setRecordValue(keeperActionErrors, name, null)
-      return result.status
+      return 'cancelled' as const
     })
     .catch((err) => {
       const message = keeperThreadCancelFailureMessage(name, id, err)
@@ -227,7 +218,7 @@ export async function interruptKeeperTurn(keeperName: string): Promise<boolean> 
   try {
     const result = await apiInterruptKeeperTurn(name)
     setRecordValue(keeperActionErrors, name, null)
-    return result.cancelled
+    return result.signalled
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.warn('[keeper] interrupt turn failed', { keeperName: name, message })
@@ -314,7 +305,9 @@ export async function dispatchKeeperInterjectAction(command: KeeperInterjectComm
   if (command.kind === 'send') {
     const message = command.message?.trim() ?? ''
     if (!message) throw new Error('INTERJECT send requires a message.')
-    await sendKeeperThreadMessage(keeperName, message)
+    await sendKeeperThreadMessage(keeperName, message, {
+      surfaceContext: command.surfaceContext,
+    })
     return
   }
 
@@ -345,6 +338,10 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
     } catch {
       parsed = null
     }
+    const { normalizeKeeperStatusPayloadDeliveryProvenance } = await import(
+      './api/schemas/keeper-chat-delivery-provenance'
+    )
+    parsed = normalizeKeeperStatusPayloadDeliveryProvenance(parsed)
     const detail = normalizeStatusDetail(keeperName, text, parsed)
     setStatusDetail(keeperName, detail)
     return detail
@@ -363,66 +360,16 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
 // the merge are the fresher copy, and re-merging mid-session would
 // race the in-flight stream entries.
 const hydratedChatKeepers = new Set<string>()
-const keeperReceiptReconciliationGeneration = new Map<string, number>()
-const pendingTerminalTranscriptConvergence = new Map<string, Map<string, string | null>>()
-const terminalTranscriptConvergenceFlights = new Map<string, Promise<string[]>>()
 
 /** Test-only: reset the once-per-keeper hydration guard. */
 export function _resetChatHydrationForTests(): void {
   hydratedChatKeepers.clear()
-  keeperReceiptReconciliationGeneration.clear()
-  pendingTerminalTranscriptConvergence.clear()
-  terminalTranscriptConvergenceFlights.clear()
 }
 
-async function fetchAndMergeKeeperChatHistory(keeperName: string): Promise<Set<string>> {
+async function fetchAndMergeKeeperChatHistory(keeperName: string): Promise<void> {
   const history = await fetchKeeperChatHistory(keeperName)
   if (history.length > 0) {
     mergeServerHistoryEntries(keeperName, chatHistoryEntriesFromRest(keeperName, history))
-  }
-  return new Set(history.flatMap(message => (
-    message.role === 'assistant' && message.turn_ref?.trim()
-      ? [message.turn_ref.trim()]
-      : []
-  )))
-}
-
-async function convergeTerminalTranscript(keeperName: string): Promise<string[]> {
-  const existing = terminalTranscriptConvergenceFlights.get(keeperName)
-  if (existing) return existing
-  const flight = (async (): Promise<string[]> => {
-    const targets = new Map(pendingTerminalTranscriptConvergence.get(keeperName) ?? [])
-    if (targets.size === 0) return []
-    try {
-      const assistantTurnRefs = await fetchAndMergeKeeperChatHistory(keeperName)
-      const current = pendingTerminalTranscriptConvergence.get(keeperName)
-      const failures: string[] = []
-      for (const [receiptId, outcomeRef] of targets) {
-        if (outcomeRef && assistantTurnRefs.has(outcomeRef)) {
-          current?.delete(receiptId)
-        } else if (!outcomeRef) {
-          failures.push(`transcript convergence for ${receiptId} has no outcome_ref`)
-        } else {
-          failures.push(
-            `transcript convergence for ${receiptId} did not find turn_ref ${outcomeRef}`,
-          )
-        }
-      }
-      if (current?.size === 0) pendingTerminalTranscriptConvergence.delete(keeperName)
-      return failures
-    } catch (err) {
-      return [
-        `transcript convergence for ${[...targets.keys()].join(', ')}: ${err instanceof Error ? err.message : 'history lookup failed'}`,
-      ]
-    }
-  })()
-  terminalTranscriptConvergenceFlights.set(keeperName, flight)
-  try {
-    return await flight
-  } finally {
-    if (terminalTranscriptConvergenceFlights.get(keeperName) === flight) {
-      terminalTranscriptConvergenceFlights.delete(keeperName)
-    }
   }
 }
 
@@ -456,7 +403,6 @@ export async function hydrateKeeperChatHistory(
   } finally {
     setRecordValue(keeperHydrating, keeperName, false)
   }
-  await reconcileKeeperChatReceipts(keeperName)
 }
 
 // Match the visible chat history window. A keeper that calls many tools can
@@ -479,7 +425,7 @@ function toolOutputCoveredSinceMs(entries: readonly { ts: number }[]): number {
  *  chat ToolCallBubble can join results onto transcript rows by tool_use_id.
  *  Failures are swallowed (logged): the transcript must render with or without
  *  tool outputs. */
-async function hydrateKeeperToolOutputs(keeperName: string): Promise<void> {
+export async function hydrateKeeperToolOutputs(keeperName: string): Promise<void> {
   const coveredThroughMs = markToolCallOutputsHydrating(keeperName)
   try {
     const response = await fetchKeeperToolCalls(keeperName, TOOL_OUTPUT_FETCH_LIMIT)
@@ -506,62 +452,36 @@ const QUEUED_KEEPER_REQUEST_LOST_MESSAGE =
   '서버 재시작으로 대기 중이던 요청을 찾을 수 없습니다. 메시지를 다시 보내주세요.'
 const PENDING_KEEPER_CHAT_RESUME_FAILED_MESSAGE =
   '응답을 확인할 수 없어 메시지 복구를 중단했습니다. 다시 보내주세요.'
-const STREAM_FAILURE_HISTORY_SKEW_MS = 30_000
-
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-function entryTimeMs(entry: KeeperConversationEntry): number | null {
-  if (!entry.timestamp) return null
-  const ms = Date.parse(entry.timestamp)
-  return Number.isFinite(ms) ? ms : null
-}
-
-function hasServerAssistantAfterLocalMessage(
+function hasCanonicalOperationTurn(
   entries: readonly KeeperConversationEntry[],
-  message: string,
-  sentAtMs: number | null,
+  operationId: string,
 ): boolean {
-  const expectedText = message.trim()
-  if (!expectedText) return false
-  let matchedUser = false
-
-  for (const entry of entries) {
-    const tsMs = entryTimeMs(entry)
-    if (
-      sentAtMs !== null
-      && tsMs !== null
-      && tsMs < sentAtMs - STREAM_FAILURE_HISTORY_SKEW_MS
-    ) {
-      continue
-    }
-
-    if (entry.role === 'user' && entry.text.trim() === expectedText) {
-      matchedUser = true
-      continue
-    }
-
-    if (matchedUser && entry.role === 'assistant' && entry.text.trim() !== '') {
-      return true
-    }
-  }
-
-  return false
+  const expectedUser = operationDeliveryProvenance(operationId, 'accepted_user')
+  const expectedAssistant = operationDeliveryProvenance(operationId, 'terminal_assistant')
+  const hasUser = entries.some(entry => (
+    entry.deliveryProvenance != null
+    && sameDeliveryProvenance(entry.deliveryProvenance, expectedUser)
+  ))
+  const hasAssistant = entries.some(entry => (
+    entry.deliveryProvenance != null
+    && sameDeliveryProvenance(entry.deliveryProvenance, expectedAssistant)
+  ))
+  return hasUser && hasAssistant
 }
 
 async function reconcileStreamFailureFromServerHistory(
   keeperName: string,
-  message: string,
+  operationId: string,
   localUserId: string,
   localAssistantId: string,
 ): Promise<boolean> {
-  const localUser = (keeperThreads.value[keeperName] ?? [])
-    .find(entry => entry.id === localUserId) ?? null
-  const sentAtMs = localUser ? entryTimeMs(localUser) : null
   const history = await fetchKeeperChatHistory(keeperName)
   const historyEntries = chatHistoryEntriesFromRest(keeperName, history)
-  if (!hasServerAssistantAfterLocalMessage(historyEntries, message, sentAtMs)) {
+  if (!hasCanonicalOperationTurn(historyEntries, operationId)) {
     return false
   }
 
@@ -570,66 +490,28 @@ async function reconcileStreamFailureFromServerHistory(
   return true
 }
 
-function pendingUserEntryId(requestId: string): string {
-  return `pending-user-${requestId}`
+function operationUserEntryId(operationId: string): string {
+  return `pending-user-${operationId}`
 }
 
-function pendingAssistantEntryId(requestId: string): string {
-  return `pending-assistant-${requestId}`
+function operationAssistantEntryId(operationId: string): string {
+  return `pending-assistant-${operationId}`
 }
 
-// The live-send placeholders are appended before the server mints the
-// request id; once KEEPER_QUEUE_REQUEST arrives, stamp it onto both rows so
-// a later history merge can reconcile the turn by requestId even when the
-// stream dies before the reply text lands.
-function stampPlaceholderRequestId(keeperName: string, entryIds: string[], requestId: string): void {
-  for (const entryId of entryIds) {
-    updateThreadEntry(keeperName, entryId, entry => (
-      entry.requestId === requestId ? entry : { ...entry, requestId }
-    ))
-  }
-}
-
-// A busy Keeper can persist history under queue_receipts rather than the
-// request id. Stamp the validated durable receipt onto both optimistic rows
-// so either role can converge with its canonical history row.
-function stampPlaceholderQueueReceiptId(
-  keeperName: string,
-  entryIds: string[],
-  queueReceiptId: string,
-): void {
-  for (const entryId of entryIds) {
-    updateThreadEntry(keeperName, entryId, entry => (
-      entry.details?.queueReceiptId === queueReceiptId
-        ? entry
-        : {
-            ...entry,
-            details: {
-              ...entry.details,
-              queueReceiptId,
-            },
-          }
-    ))
-  }
-}
-
-function isMissingQueuedKeeperRequestError(err: unknown): boolean {
+function isUnknownKeeperChatOperationError(err: unknown): boolean {
   const record = isRecord(err) ? err : null
   const method = asString(record?.method, '').trim().toUpperCase()
   const status = typeof record?.status === 'number' ? record.status : null
   const path = asString(record?.path, '').trim()
   const message = err instanceof Error ? err.message : ''
-  if (method === 'GET' && status === 404 && path.startsWith('/api/v1/gate/message/requests/')) {
-    return message.includes('request_id not found')
-  }
-  return message.includes('/api/v1/gate/message/requests/')
-    && message.includes('request_id not found')
+  if (method === 'GET' && status === 404 && path.includes('/chat/operations/')) return true
+  return message.includes('/chat/operations/') && message.includes('unknown_operation')
 }
 
-function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
+function ensureTrackedOperationThreadEntries(request: TrackedKeeperChatOperation): string {
   const existing = keeperThreads.value[request.keeperName] ?? []
-  const userId = pendingUserEntryId(request.requestId)
-  const assistantId = pendingAssistantEntryId(request.requestId)
+  const userId = operationUserEntryId(request.operationId)
+  const assistantId = operationAssistantEntryId(request.operationId)
   const assistantDraft = request.assistantDraft
   if (!existing.some(entry => entry.id === userId)) {
     appendThreadEntry(request.keeperName, {
@@ -641,11 +523,10 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
       timestamp: new Date(request.submittedAt).toISOString(),
       delivery: 'delivered',
       streamState: null,
-      requestId: request.requestId,
-      streamContract: keeperStreamContract('pending_request_store', 'client_placeholder', {
-        requestId: request.requestId,
-        deliveryReceipt: 'no_delivery_receipt',
-        reason: 'restored pending queued request from browser storage',
+      deliveryProvenance: operationDeliveryProvenance(request.operationId, 'accepted_user'),
+      streamContract: keeperStreamContract('client_operation_store', 'client_placeholder', {
+        requestId: request.operationId,
+        reason: 'restored accepted operation from browser storage',
       }),
       attachments: request.attachments,
       details: null,
@@ -662,11 +543,10 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
       timestamp: assistantDraft?.timestamp ?? null,
       delivery: assistantDraft?.delivery ?? 'queued',
       streamState: assistantDraft ? assistantDraft.streamState : 'opening',
-      requestId: request.requestId,
-      streamContract: keeperStreamContract('pending_request_store', 'client_placeholder', {
-        requestId: request.requestId,
-        deliveryReceipt: 'no_delivery_receipt',
-        reason: 'awaiting queued request poll result',
+      deliveryProvenance: operationDeliveryProvenance(request.operationId, 'terminal_assistant'),
+      streamContract: keeperStreamContract('client_operation_store', 'client_placeholder', {
+        requestId: request.operationId,
+        reason: 'awaiting durable operation terminal state',
       }),
       traceSteps: assistantDraft?.traceSteps,
       error: assistantDraft?.error ?? null,
@@ -676,7 +556,7 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
   return assistantId
 }
 
-function persistPendingAssistantDraft(
+function persistTrackedOperationAssistantDraft(
   keeperName: string,
   requestId: string | null,
   assistantEntryId: string,
@@ -685,23 +565,23 @@ function persistPendingAssistantDraft(
   const entry = (keeperThreads.value[keeperName] ?? [])
     .find(candidate => candidate.id === assistantEntryId) ?? null
   if (!entry) return
-  updatePendingKeeperChatAssistantDraft(requestId, entry)
+  updateTrackedKeeperChatAssistantDraft(requestId, entry)
 }
 
-function withCurrentPendingAssistantDraft(
-  request: PendingKeeperChatRequest,
+function withCurrentTrackedOperationAssistantDraft(
+  request: TrackedKeeperChatOperation,
   assistantEntryId: string,
-): PendingKeeperChatRequest {
+): TrackedKeeperChatOperation {
   const entry = (keeperThreads.value[request.keeperName] ?? [])
     .find(candidate => candidate.id === assistantEntryId) ?? null
   if (!entry) return request
-  const assistantDraft = pendingKeeperChatAssistantDraftFromEntry(entry)
+  const assistantDraft = trackedKeeperChatAssistantDraftFromEntry(entry)
   return assistantDraft ? { ...request, assistantDraft } : request
 }
 
 let localIdCounter = 0
 
-const resumingKeeperChatRequests = new Set<string>()
+const hydratingKeeperChatOperations = new Set<string>()
 const sendingKeeperThreadMessages = new Set<string>()
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 
@@ -737,99 +617,83 @@ export function isKeeperThreadMessageSendInFlight(
   return sendKey ? sendingKeeperThreadMessages.has(sendKey) : false
 }
 
-async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest): Promise<void> {
+async function hydrateTrackedKeeperChatOperation(request: TrackedKeeperChatOperation): Promise<void> {
   // A live in-session send stream still owns this request (e.g. the panel
   // remounted on an SPA route change while the reply was pending). Defer to
   // it rather than minting a duplicate pending entry + a second poll loop.
   // After a full page reload this map is empty, so cold-start resume runs.
-  if (liveSendOwnsRequest(request.requestId)) return
-  const key = `${request.keeperName}:${request.requestId}`
-  if (resumingKeeperChatRequests.has(key)) return
-  resumingKeeperChatRequests.add(key)
-  const assistantId = ensurePendingThreadEntries(request)
+  if (liveSendOwnsRequest(request.operationId)) return
+  const key = `${request.keeperName}:${request.operationId}`
+  if (hydratingKeeperChatOperations.has(key)) return
+  hydratingKeeperChatOperations.add(key)
+  const assistantId = ensureTrackedOperationThreadEntries(request)
   setRecordValue(keeperSending, request.keeperName, true)
   setRecordValue(keeperActionErrors, request.keeperName, null)
   setRecordValue(keeperStreamStartedAt, request.keeperName, request.submittedAt)
   markKeeperStreamSignal(request.keeperName, { force: true })
   try {
     for (;;) {
-      const result = await fetchQueuedKeeperMessageResult(request.requestId)
+      const operation = await fetchKeeperChatOperation(
+        request.keeperName,
+        request.operationId,
+      )
       markKeeperStreamSignal(request.keeperName)
-      if (!isTerminalQueuedKeeperMessage(result)) {
+      if (operation.state.kind === 'queued' || operation.state.kind === 'running') {
         await sleep(PENDING_KEEPER_CHAT_POLL_MS)
         continue
       }
-
-      const reply = queuedKeeperMessageToReply(result)
-      const isNoVisibleReply = reply.details?.turnOutcome === 'no_visible_reply'
-      const suppressReply = keeperTurnOutcomeSuppressesReply(reply.details?.turnOutcome)
-      const isCancelled = result.status === 'cancelled'
-      const isError = !isCancelled && (isNoVisibleReply || result.status !== 'done' || result.ok === false)
+      await hydrateKeeperChatHistory(request.keeperName, { force: true })
+      const isCancelled = operation.state.kind === 'cancelled'
+      const failure = operation.state.kind === 'failed' ? operation.state : null
+      const interrupted =
+        failure?.failureKind === 'Interrupted_by_restart'
       let errorMessage: string | null = null
-      if (isNoVisibleReply) {
-        errorMessage = EMPTY_VISIBLE_REPLY_TEXT
-      } else if (isError) {
-        errorMessage = queuedKeeperMessageError(result)
+      if (failure) {
+        errorMessage = interrupted
+          ? 'Interrupted'
+          : `${failure.failureKind}: ${failure.detail}`
       }
       let userDelivery: KeeperConversationDelivery = 'delivered'
-      if (isCancelled) {
-        userDelivery = 'cancelled'
-      } else if (isError) {
-        userDelivery = 'error'
-      }
-      let assistantDelivery: KeeperConversationDelivery = 'delivered'
-      if (isCancelled) {
-        assistantDelivery = 'cancelled'
-      } else if (isNoVisibleReply) {
-        assistantDelivery = 'error'
-      } else if (isError) {
-        assistantDelivery = 'error'
-      }
-      finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
+      if (isCancelled) userDelivery = 'cancelled'
+      else if (failure) userDelivery = 'error'
+      const assistantDelivery: KeeperConversationDelivery = userDelivery
+      finalizeAssistantEntry(request.keeperName, operationUserEntryId(request.operationId), {
         delivery: userDelivery,
         error: errorMessage,
-        streamContract: keeperStreamContract('queue_poll', 'queue_poll_result', {
-          requestId: request.requestId,
-          deliveryReceipt: 'no_delivery_receipt',
+        streamContract: keeperStreamContract('client_operation_lookup', 'client_operation_terminal', {
+          requestId: request.operationId,
           reason: errorMessage,
         }),
       })
-      let assistantText = reply.text
-      let assistantRawText = reply.details?.replyText ?? reply.text
-      if (isNoVisibleReply) {
-        assistantText = EMPTY_VISIBLE_REPLY_TEXT
-        assistantRawText = EMPTY_VISIBLE_REPLY_TEXT
-      } else if (suppressReply) {
-        assistantText = ''
+      const assistantStillLocal = (keeperThreads.value[request.keeperName] ?? [])
+        .some(entry => entry.id === assistantId)
+      if (assistantStillLocal) {
+        const terminalText = isCancelled ? 'Cancelled' : errorMessage ?? ''
+        finalizeAssistantEntry(request.keeperName, assistantId, {
+          text: terminalText,
+          rawText: terminalText,
+          delivery: assistantDelivery,
+          streamState: null,
+          timestamp: new Date().toISOString(),
+          error: errorMessage,
+          streamContract: keeperStreamContract('client_operation_lookup', 'client_operation_terminal', {
+            requestId: request.operationId,
+            reason: errorMessage,
+          }),
+        })
       }
-      finalizeAssistantEntry(request.keeperName, assistantId, {
-        text: assistantText,
-        rawText: assistantRawText,
-        delivery: assistantDelivery,
-        streamState: null,
-        timestamp: new Date().toISOString(),
-        details: reply.details,
-        error: errorMessage,
-        streamContract: keeperStreamContract('queue_poll', 'queue_poll_result', {
-          requestId: request.requestId,
-          deliveryReceipt: 'no_delivery_receipt',
-          reason: errorMessage,
-        }),
-      })
       if (errorMessage) setRecordValue(keeperActionErrors, request.keeperName, errorMessage)
-      removePendingKeeperChatRequest(request.requestId)
-      await hydrateKeeperChatHistory(request.keeperName, { force: true })
+      removeTrackedKeeperChatOperation(request.operationId)
       return
     }
   } catch (err) {
-    if (isMissingQueuedKeeperRequestError(err)) {
-      removePendingKeeperChatRequest(request.requestId)
-      finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
+    if (isUnknownKeeperChatOperationError(err)) {
+      removeTrackedKeeperChatOperation(request.operationId)
+      finalizeAssistantEntry(request.keeperName, operationUserEntryId(request.operationId), {
         delivery: 'error',
         error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
-        streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
-          requestId: request.requestId,
-          deliveryReceipt: 'no_delivery_receipt',
+        streamContract: keeperStreamContract('client_operation_lookup', 'contract_gap', {
+          requestId: request.operationId,
           reason: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
         }),
       })
@@ -840,9 +704,8 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
         streamState: null,
         timestamp: new Date().toISOString(),
         error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
-        streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
-          requestId: request.requestId,
-          deliveryReceipt: 'no_delivery_receipt',
+        streamContract: keeperStreamContract('client_operation_lookup', 'contract_gap', {
+          requestId: request.operationId,
           reason: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
         }),
       })
@@ -852,13 +715,12 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
     }
     const detail = err instanceof Error ? err.message : `Failed to resume ${request.keeperName} chat request`
     const message = `${PENDING_KEEPER_CHAT_RESUME_FAILED_MESSAGE} (${detail})`
-    removePendingKeeperChatRequest(request.requestId)
-    finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
+    removeTrackedKeeperChatOperation(request.operationId)
+    finalizeAssistantEntry(request.keeperName, operationUserEntryId(request.operationId), {
       delivery: 'error',
       error: message,
-      streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
-        requestId: request.requestId,
-        deliveryReceipt: 'no_delivery_receipt',
+      streamContract: keeperStreamContract('client_operation_lookup', 'contract_gap', {
+        requestId: request.operationId,
         reason: message,
       }),
     })
@@ -869,17 +731,16 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       streamState: null,
       timestamp: new Date().toISOString(),
       error: message,
-      streamContract: keeperStreamContract('queue_poll', 'contract_gap', {
-        requestId: request.requestId,
-        deliveryReceipt: 'no_delivery_receipt',
+      streamContract: keeperStreamContract('client_operation_lookup', 'contract_gap', {
+        requestId: request.operationId,
         reason: message,
       }),
     })
     setRecordValue(keeperActionErrors, request.keeperName, message)
     await hydrateKeeperChatHistory(request.keeperName, { force: true })
   } finally {
-    resumingKeeperChatRequests.delete(key)
-    if (!hasPendingKeeperChatRequest(request.keeperName)) {
+    hydratingKeeperChatOperations.delete(key)
+    if (!hasTrackedKeeperChatOperation(request.keeperName)) {
       setRecordValue(keeperSending, request.keeperName, false)
       setRecordValue(keeperStreamStartedAt, request.keeperName, null)
       clearKeeperStreamSignal(request.keeperName)
@@ -887,525 +748,19 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
   }
 }
 
-export async function resumePendingKeeperChatRequests(name: string): Promise<void> {
+export async function hydrateTrackedKeeperChatOperations(name: string): Promise<void> {
   const keeperName = name.trim()
   if (!keeperName) return
-  await Promise.all(pendingKeeperChatRequestsForKeeper(keeperName).map(resumePendingKeeperChatRequest))
+  await Promise.all(trackedKeeperChatOperationsForKeeper(keeperName).map(hydrateTrackedKeeperChatOperation))
 }
 
-async function handoffCancelledStreamToRequestPoll(
-  request: PendingKeeperChatRequest,
+async function handoffCancelledStreamToOperationHydration(
+  request: TrackedKeeperChatOperation,
   localEntryIds: readonly string[],
 ): Promise<void> {
   removeThreadEntries(request.keeperName, localEntryIds)
-  releaseLiveSendRequest(request.requestId)
-  releaseActiveStreamRequestId(request.requestId)
-  await resumePendingKeeperChatRequest(request)
-}
-
-/** Reconcile locally visible busy-ACK rows against the server's durable queue
- * receipt ledger. Queue-change SSE is only an invalidation signal; this GET is
- * the lifecycle truth for the exact receipt. */
-export async function reconcileKeeperChatReceipts(name: string): Promise<void> {
-  const keeperName = name.trim()
-  if (!keeperName) return
-  if (!dashboardAuthAccess(shellAuthSummary.value, 'admin').allowed) return
-  const generation = (keeperReceiptReconciliationGeneration.get(keeperName) ?? 0) + 1
-  keeperReceiptReconciliationGeneration.set(keeperName, generation)
-  const failures: string[] = []
-  try {
-    const pendingSnapshot = await fetchKeeperChatPending(keeperName)
-    if (keeperReceiptReconciliationGeneration.get(keeperName) !== generation) return
-    for (const pending of pendingSnapshot.pending) {
-      const receiptId = pending.receipt.receiptId
-      const timestamp = new Date(pending.submittedAt * 1000).toISOString()
-      const currentWork = pendingSnapshot.currentWork
-      const thread = keeperThreads.value[keeperName] ?? []
-      const existingReceiptEntry = thread.find(entry => (
-        entry.details?.queueReceiptId === receiptId
-      ))
-      const existingRevision = existingReceiptEntry?.details?.queueRevision
-      if (
-        typeof existingRevision === 'string'
-        && compareKeeperQueueRevisions(pending.receipt.revision, existingRevision) < 0
-      ) {
-        continue
-      }
-      const userEntry = thread.find(entry => (
-        entry.role === 'user' && entry.details?.queueReceiptId === receiptId
-      ))
-      const attachments = pending.attachments.map((attachment: KeeperChatPendingAttachment) => {
-        const local = userEntry?.attachments?.find(candidate => candidate.id === attachment.id)
-        return local ?? { ...attachment, data: '' }
-      })
-      if (userEntry) {
-        updateThreadEntry(keeperName, userEntry.id, entry => ({
-          ...entry,
-          text: pending.content,
-          timestamp,
-          attachments: attachments.length > 0 ? attachments : undefined,
-          userBlocks: pending.userBlocks.length > 0 ? pending.userBlocks : undefined,
-          details: {
-            ...(entry.details ?? {}),
-            queueReceiptId: receiptId,
-            queueRevision: pending.receipt.revision,
-          },
-        }))
-      } else {
-        appendThreadEntry(keeperName, {
-          id: `pending-receipt-user-${receiptId}`,
-          role: 'user',
-          source: 'direct_user',
-          label: 'You',
-          text: pending.content,
-          timestamp,
-          delivery: 'delivered',
-          streamState: null,
-          streamContract: keeperStreamContract('queue_poll', 'queue_poll_result', {
-            deliveryReceipt: 'server_durable_receipt',
-            reason: `pending receipt ${receiptId}`,
-          }),
-          attachments: attachments.length > 0 ? attachments : undefined,
-          userBlocks: pending.userBlocks.length > 0 ? pending.userBlocks : undefined,
-          details: {
-            queueReceiptId: receiptId,
-            queueRevision: pending.receipt.revision,
-          },
-        })
-      }
-      const currentThread = keeperThreads.value[keeperName] ?? []
-      const assistantEntry = currentThread.find(entry => (
-        entry.role === 'assistant' && entry.details?.queueReceiptId === receiptId
-      ))
-      const queueDetails = {
-        ...(assistantEntry?.details ?? {}),
-        queueReceiptId: receiptId,
-        queueRevision: pending.receipt.revision,
-        queueState: 'pending' as const,
-        queueFailureKind: null,
-        queueInFlightLane: currentWork?.lane ?? null,
-        queueInFlightStartedAt: currentWork?.startedAt ?? null,
-      }
-      if (assistantEntry) {
-        updateThreadEntry(keeperName, assistantEntry.id, entry => ({
-          ...entry,
-          delivery: 'queued',
-          streamState: null,
-          details: queueDetails,
-        }))
-      } else {
-        appendThreadEntry(keeperName, {
-          id: `pending-receipt-assistant-${receiptId}`,
-          role: 'assistant',
-          source: 'direct_assistant',
-          label: keeperName,
-          text: `${keeperName}가 다른 작업을 처리 중이에요. 메시지는 대기열에 추가했습니다.`,
-          timestamp,
-          delivery: 'queued',
-          streamState: null,
-          streamContract: keeperStreamContract('queue_poll', 'queue_poll_result', {
-            deliveryReceipt: 'server_durable_receipt',
-            reason: `pending receipt ${receiptId}`,
-          }),
-          details: queueDetails,
-        })
-      }
-    }
-    for (const entry of keeperThreads.value[keeperName] ?? []) {
-      const queueState = entry.details?.queueState
-      if (
-        entry.role !== 'assistant'
-        || !entry.details?.queueReceiptId
-        || (queueState !== 'pending' && queueState !== 'inflight')
-      ) {
-        continue
-      }
-      updateThreadEntry(keeperName, entry.id, current => ({
-        ...current,
-        details: {
-          ...(current.details ?? {}),
-          queueInFlightLane: pendingSnapshot.currentWork?.lane ?? null,
-          queueInFlightStartedAt: pendingSnapshot.currentWork?.startedAt ?? null,
-        },
-      }))
-    }
-  } catch (err) {
-    failures.push(
-      `pending inventory: ${err instanceof Error ? err.message : 'pending lookup failed'}`,
-    )
-  }
-  const queuedEntries = (keeperThreads.value[keeperName] ?? []).filter(entry => (
-    entry.role === 'assistant'
-    && entry.delivery === 'queued'
-    && Boolean(entry.details?.queueReceiptId)
-  ))
-  const pendingConvergence = pendingTerminalTranscriptConvergence.get(keeperName)
-  if (queuedEntries.length === 0 && (!pendingConvergence || pendingConvergence.size === 0)) {
-    if (failures.length > 0) {
-      const message = `큐 receipt 조회 실패: ${failures.join('; ')}`
-      setRecordValue(keeperActionErrors, keeperName, message)
-      console.warn(`[keeper] ${message}`)
-      return
-    }
-    if (keeperActionErrors.value[keeperName]?.startsWith('큐 receipt 조회 실패:')) {
-      setRecordValue(keeperActionErrors, keeperName, null)
-    }
-    return
-  }
-  await Promise.all(queuedEntries.map(async (entry) => {
-    const receiptId = entry.details?.queueReceiptId?.trim() ?? ''
-    if (!receiptId) return
-    try {
-      const receipt = await fetchKeeperChatReceipt(keeperName, receiptId)
-      if (receipt.keeperName !== keeperName || receipt.receiptId !== receiptId) {
-        throw new Error('receipt identity mismatch')
-      }
-      const currentEntry = (keeperThreads.value[keeperName] ?? [])
-        .find(candidate => candidate.id === entry.id)
-      if (!currentEntry || currentEntry.details?.queueReceiptId !== receiptId) return
-      const currentRevision = currentEntry.details.queueRevision
-      const currentState = currentEntry.details.queueState
-      if (
-        typeof currentRevision === 'string'
-        && compareKeeperQueueRevisions(receipt.revision, currentRevision) < 0
-      ) {
-        return
-      }
-      if (
-        typeof currentRevision === 'string'
-        && compareKeeperQueueRevisions(receipt.revision, currentRevision) === 0
-        && currentState
-        && currentState !== receipt.state.kind
-      ) {
-        throw new Error(
-          `receipt lifecycle conflict at revision ${receipt.revision}: ${currentState} -> ${receipt.state.kind}`,
-        )
-      }
-      if (
-        (currentState === 'delivered' || currentState === 'failed')
-        && currentState !== receipt.state.kind
-      ) {
-        throw new Error(
-          `terminal receipt lifecycle regressed at revision ${receipt.revision}: ${currentState} -> ${receipt.state.kind}`,
-        )
-      }
-      const details = {
-        ...(entry.details ?? {}),
-        queueRevision: receipt.revision,
-        queueState: receipt.state.kind,
-        queueFailureKind:
-          receipt.state.kind === 'failed' ? receipt.state.failureKind : null,
-        queueInFlightLane:
-          receipt.state.kind === 'pending' || receipt.state.kind === 'inflight'
-            ? entry.details?.queueInFlightLane ?? null
-            : null,
-        queueInFlightStartedAt:
-          receipt.state.kind === 'pending' || receipt.state.kind === 'inflight'
-            ? entry.details?.queueInFlightStartedAt ?? null
-            : null,
-      }
-      const streamContract = keeperStreamContract('queue_poll', 'queue_poll_result', {
-        deliveryReceipt: 'server_durable_receipt',
-        reason: `receipt ${receiptId} is ${receipt.state.kind}`,
-      })
-      switch (receipt.state.kind) {
-        case 'pending':
-        case 'inflight':
-        case 'recovery_required':
-          finalizeAssistantEntry(keeperName, entry.id, {
-            delivery: 'queued',
-            streamState: null,
-            details,
-            streamContract,
-          })
-          break
-        case 'delivered':
-          {
-            const outcomeRef = receipt.state.outcomeRef?.trim() ?? ''
-            if (!outcomeRef) {
-              const correlationError =
-                '큐 처리 결과 무결성 오류: Delivered receipt에 outcome_ref가 없습니다.'
-              const receiptTargets = pendingTerminalTranscriptConvergence.get(keeperName)
-              receiptTargets?.delete(receiptId)
-              if (receiptTargets?.size === 0) {
-                pendingTerminalTranscriptConvergence.delete(keeperName)
-              }
-              setRecordValue(keeperActionErrors, keeperName, correlationError)
-              finalizeAssistantEntry(keeperName, entry.id, {
-                delivery: 'error',
-                streamState: null,
-                details: {
-                  ...details,
-                  queueCorrelationError: 'missing_outcome_ref',
-                },
-                error: correlationError,
-                streamContract,
-              })
-              break
-            }
-            if (currentState !== 'delivered' && currentState !== 'failed') {
-              const receiptTargets = pendingTerminalTranscriptConvergence.get(keeperName)
-                ?? new Map<string, string | null>()
-              receiptTargets.set(receiptId, outcomeRef)
-              pendingTerminalTranscriptConvergence.set(keeperName, receiptTargets)
-            }
-          }
-          finalizeAssistantEntry(keeperName, entry.id, {
-            delivery: 'delivered',
-            streamState: null,
-            details,
-            error: null,
-            streamContract,
-          })
-          break
-        case 'failed':
-          if (
-            receipt.state.outcomeRef
-            && currentState !== 'delivered'
-            && currentState !== 'failed'
-          ) {
-            const receiptTargets = pendingTerminalTranscriptConvergence.get(keeperName)
-              ?? new Map<string, string | null>()
-            receiptTargets.set(receiptId, receipt.state.outcomeRef)
-            pendingTerminalTranscriptConvergence.set(keeperName, receiptTargets)
-          }
-          finalizeAssistantEntry(keeperName, entry.id, {
-            delivery: 'error',
-            streamState: null,
-            details,
-            error: `큐 처리 실패 (${receipt.state.failureKind}): ${receipt.state.detail}`,
-            streamContract,
-          })
-          break
-      }
-    } catch (err) {
-      failures.push(
-        `${receiptId}: ${err instanceof Error ? err.message : 'receipt lookup failed'}`,
-      )
-    }
-  }))
-  const receiptsAwaitingTranscript = pendingTerminalTranscriptConvergence.get(keeperName)
-  if (
-    receiptsAwaitingTranscript
-    && receiptsAwaitingTranscript.size > 0
-    && keeperReceiptReconciliationGeneration.get(keeperName) === generation
-  ) {
-    // Receipt settlement and transcript persistence are separate projections.
-    // The receipt outcome_ref is the exact turn_ref persisted on the assistant
-    // row. Keep retrying until that identity appears; old non-empty history can
-    // never satisfy a newer receipt. One in-flight fetch per Keeper prevents a
-    // stalled response body from multiplying on each visible poll.
-    failures.push(...await convergeTerminalTranscript(keeperName))
-  }
-  const stillQueued = (keeperThreads.value[keeperName] ?? []).some(entry => (
-    entry.role === 'assistant'
-    && entry.delivery === 'queued'
-    && Boolean(entry.details?.queueReceiptId)
-  ))
-  const stillAwaitingTranscript = (
-    pendingTerminalTranscriptConvergence.get(keeperName)?.size ?? 0
-  ) > 0
-  if (!stillQueued && !stillAwaitingTranscript) {
-    if (keeperActionErrors.value[keeperName]?.startsWith('큐 receipt 조회 실패:')) {
-      setRecordValue(keeperActionErrors, keeperName, null)
-    }
-    return
-  }
-  if (keeperReceiptReconciliationGeneration.get(keeperName) !== generation) return
-  if (failures.length > 0) {
-    const message = `큐 receipt 조회 실패: ${failures.join('; ')}`
-    setRecordValue(keeperActionErrors, keeperName, message)
-    console.warn(`[keeper] ${message}`)
-  } else if (keeperActionErrors.value[keeperName]?.startsWith('큐 receipt 조회 실패:')) {
-    setRecordValue(keeperActionErrors, keeperName, null)
-  }
-}
-
-async function resolveKeeperChatRecoveryEntry(
-  keeperName: string,
-  entry: KeeperConversationEntry,
-  decision:
-    | { kind: 'requeue_unconfirmed' }
-    | { kind: 'cancel_unconfirmed'; detail: string; outcomeRef: string | null },
-): Promise<void> {
-  const receiptId = entry.details?.queueReceiptId?.trim() ?? ''
-  if (!receiptId) {
-    throw new Error('복구할 durable queue receipt가 없습니다.')
-  }
-  setRecordValue(keeperActionErrors, keeperName, null)
-  try {
-    const observed = await fetchKeeperChatReceipt(keeperName, receiptId)
-    if (observed.state.kind !== 'recovery_required') {
-      throw new Error(`receipt ${receiptId} is ${observed.state.kind}, not recovery_required`)
-    }
-    const result = await resolveKeeperChatRecovery(
-      keeperName,
-      receiptId,
-      observed.revision,
-      observed.state.leaseId,
-      decision,
-    )
-    const state = result.receipt.state
-    const details = {
-      ...(entry.details ?? {}),
-      queueRevision: result.receipt.revision,
-      queueState: state.kind,
-      queueFailureKind: state.kind === 'failed' ? state.failureKind : null,
-    }
-    let delivery: KeeperConversationDelivery = 'queued'
-    if (state.kind === 'failed') delivery = 'error'
-    if (state.kind === 'delivered') delivery = 'delivered'
-    finalizeAssistantEntry(keeperName, entry.id, {
-      delivery,
-      streamState: null,
-      details,
-      error: state.kind === 'failed' ? state.detail : undefined,
-    })
-    if (!result.audit.recorded) {
-      setRecordValue(
-        keeperActionErrors,
-        keeperName,
-        `복구 결정은 반영됐지만 audit 기록에 실패했습니다: ${result.audit.error}`,
-      )
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    setRecordValue(keeperActionErrors, keeperName, `큐 복구 결정 실패: ${message}`)
-    throw error
-  }
-}
-
-export async function requeueKeeperChatRecoveryEntry(
-  keeperName: string,
-  entry: KeeperConversationEntry,
-): Promise<void> {
-  await resolveKeeperChatRecoveryEntry(keeperName, entry, {
-    kind: 'requeue_unconfirmed',
-  })
-}
-
-export async function cancelKeeperChatRecoveryEntry(
-  keeperName: string,
-  entry: KeeperConversationEntry,
-  detail: string,
-): Promise<void> {
-  await resolveKeeperChatRecoveryEntry(keeperName, entry, {
-    kind: 'cancel_unconfirmed',
-    detail,
-    outcomeRef: null,
-  })
-}
-
-export async function cancelKeeperChatPendingEntry(
-  keeperName: string,
-  entry: KeeperConversationEntry,
-  options: { requireUserInput?: boolean } = {},
-): Promise<KeeperConversationEntry | null> {
-  const receiptId = entry.details?.queueReceiptId?.trim() ?? ''
-  if (!receiptId || entry.details?.queueState !== 'pending') {
-    throw new Error('취소할 대기 메시지의 최신 상태가 없습니다.')
-  }
-  setRecordValue(keeperActionErrors, keeperName, null)
-  try {
-    const thread = keeperThreads.value[keeperName] ?? []
-    const userEntry = thread.find(candidate => (
-      candidate.role === 'user'
-      && candidate.details?.queueReceiptId === receiptId
-    )) ?? null
-    if (options.requireUserInput && !userEntry) {
-      throw new Error('수정할 원문을 찾지 못해 서버 대기를 취소하지 않았습니다.')
-    }
-    const result = await cancelKeeperChatPendingReceipt(
-      keeperName,
-      receiptId,
-    )
-    const matchingEntryIds = thread
-      .filter(candidate => candidate.details?.queueReceiptId === receiptId)
-      .map(candidate => candidate.id)
-    removeThreadEntries(keeperName, matchingEntryIds)
-    if (!result.audit.recorded) {
-      setRecordValue(
-        keeperActionErrors,
-        keeperName,
-        `메시지는 취소됐지만 audit 기록에 실패했습니다: ${result.audit.error}`,
-      )
-    }
-    return userEntry
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    setRecordValue(keeperActionErrors, keeperName, `대기 메시지 취소 실패: ${message}`)
-    void reconcileKeeperChatReceipts(keeperName)
-    throw error
-  }
-}
-
-export async function editKeeperChatPendingEntry(
-  keeperName: string,
-  entry: KeeperConversationEntry,
-  content: string,
-): Promise<void> {
-  const receiptId = entry.details?.queueReceiptId?.trim() ?? ''
-  const expectedRevision = entry.details?.queueRevision?.trim() ?? ''
-  if (!receiptId || !expectedRevision || entry.details?.queueState !== 'pending') {
-    throw new Error('수정할 대기 메시지의 최신 receipt/revision이 없습니다.')
-  }
-  if (!content.trim()) {
-    throw new Error('대기 메시지 본문은 비워둘 수 없습니다.')
-  }
-  setRecordValue(keeperActionErrors, keeperName, null)
-  try {
-    const result = await editKeeperChatPendingReceipt(
-      keeperName,
-      receiptId,
-      expectedRevision,
-      content,
-    )
-    if (!result.audit.recorded) {
-      setRecordValue(
-        keeperActionErrors,
-        keeperName,
-        `메시지는 수정됐지만 audit 기록에 실패했습니다: ${result.audit.error}`,
-      )
-    }
-    await reconcileKeeperChatReceipts(keeperName)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    setRecordValue(keeperActionErrors, keeperName, `대기 메시지 수정 실패: ${message}`)
-    void reconcileKeeperChatReceipts(keeperName)
-    throw error
-  }
-}
-
-export async function moveKeeperChatPendingEntryToEnd(
-  keeperName: string,
-  entry: KeeperConversationEntry,
-): Promise<void> {
-  const receiptId = entry.details?.queueReceiptId?.trim() ?? ''
-  const expectedRevision = entry.details?.queueRevision?.trim() ?? ''
-  if (!receiptId || !expectedRevision || entry.details?.queueState !== 'pending') {
-    throw new Error('순서를 바꿀 대기 메시지의 최신 receipt/revision이 없습니다.')
-  }
-  setRecordValue(keeperActionErrors, keeperName, null)
-  try {
-    const result = await moveKeeperChatPendingReceiptToEnd(
-      keeperName,
-      receiptId,
-      expectedRevision,
-    )
-    if (!result.audit.recorded) {
-      setRecordValue(
-        keeperActionErrors,
-        keeperName,
-        `순서는 변경됐지만 audit 기록에 실패했습니다: ${result.audit.error}`,
-      )
-    }
-    await reconcileKeeperChatReceipts(keeperName)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    setRecordValue(keeperActionErrors, keeperName, `대기 메시지 순서 변경 실패: ${message}`)
-    void reconcileKeeperChatReceipts(keeperName)
-    throw error
-  }
+  releaseLiveSendRequest(request.operationId)
+  await hydrateTrackedKeeperChatOperation(request)
 }
 
 /** React to a server `keeper_chat_appended` push: re-merge the
@@ -1510,6 +865,10 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
       )
       parsed = null
     }
+    const { normalizeKeeperStatusPayloadDeliveryProvenance } = await import(
+      './api/schemas/keeper-chat-delivery-provenance'
+    )
+    parsed = normalizeKeeperStatusPayloadDeliveryProvenance(parsed)
     const detail = normalizeStatusDetail(keeperName, text, parsed)
     setStatusDetail(keeperName, detail)
   } catch (err) {
@@ -1577,6 +936,7 @@ export async function sendKeeperThreadMessage(
     clientActionIds?: readonly string[]
     blocks?: ChatBlock[]
     userBlocks?: KeeperUserInputBlock[]
+    surfaceContext?: KeeperStreamSurfaceContext
   } = {},
 ): Promise<void> {
   const keeperName = name.trim()
@@ -1595,24 +955,13 @@ export async function sendKeeperThreadMessage(
   ])
   if (sendKeys.some(key => sendingKeeperThreadMessages.has(key))) return
   sendKeys.forEach(key => sendingKeeperThreadMessages.add(key))
-  const hadActiveStream =
-    activeStreamEntryId(keeperName) !== null || activeStreamRequestId(keeperName) !== null
-  let previousCancelled = false
-  try {
-    previousCancelled = await cancelActiveKeeperThreadMessage(keeperName)
-  } catch (err) {
-    sendKeys.forEach(key => sendingKeeperThreadMessages.delete(key))
-    throw err
-  }
-  if (hadActiveStream && !previousCancelled) {
-    sendKeys.forEach(key => sendingKeeperThreadMessages.delete(key))
-    return
-  }
   const localId = `local-${++localIdCounter}-${Date.now()}`
   const assistantId = `reply-${++localIdCounter}-${Date.now()}`
+  const operationId = newKeeperChatOperationId()
   appendThreadEntry(keeperName, {
     id: localId,
     role: 'user',
+    deliveryProvenance: operationDeliveryProvenance(operationId, 'accepted_user'),
     source: 'direct_user',
     label: 'You',
     text: message,
@@ -1630,6 +979,7 @@ export async function sendKeeperThreadMessage(
   appendThreadEntry(keeperName, {
     id: assistantId,
     role: 'assistant',
+    deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_assistant'),
     source: 'direct_assistant',
     label: keeperName,
     text: '',
@@ -1646,89 +996,56 @@ export async function sendKeeperThreadMessage(
   setRecordValue(keeperActionErrors, keeperName, null)
   setRecordValue(keeperStreamStartedAt, keeperName, Date.now())
   const controller = new AbortController()
-  setActiveStream(keeperName, assistantId, controller)
-  let requestId: string | null = null
-  let requestTerminalSeen = false
+  setActiveStream(keeperName, operationId, assistantId, controller)
+  let operationAccepted = false
   let toolCallEnded = false
   try {
     finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered' })
 
     const outcome = await streamKeeperMessage(keeperName, message, {
+      operationId,
       signal: controller.signal,
       attachments,
       userBlocks,
+      surfaceContext: options.surfaceContext,
       onEvent: event => {
         markKeeperStreamSignal(keeperName)
-        if (event.type === 'CUSTOM' && event.name === 'KEEPER_QUEUE_REQUEST') {
-          const nextRequestId = isRecord(event.value)
-            ? asString(event.value.request_id, '').trim()
-            : ''
-          if (!nextRequestId) {
-            const message = 'Keeper queue request event missing request_id; server cancel unavailable.'
-            console.warn(`[keeper] ${message}`)
-            setRecordValue(keeperActionErrors, keeperName, message)
-          } else if (controller.signal.aborted) {
-            requestId = nextRequestId
-            stampPlaceholderRequestId(keeperName, [localId, assistantId], nextRequestId)
-            const pendingRequest = withCurrentPendingAssistantDraft({
-              requestId: nextRequestId,
-              keeperName,
-              message,
-              submittedAt: Date.now(),
-              ...(attachments ? { attachments } : {}),
-            }, assistantId)
-            upsertPendingKeeperChatRequest(pendingRequest)
-            void cancelKeeperThreadRequest(keeperName, nextRequestId).then(outcome => {
-              if (outcome === 'cancelling') {
-                return handoffCancelledStreamToRequestPoll(
-                  pendingRequest,
-                  [localId, assistantId],
-                )
-              }
-              return undefined
-            })
-          } else {
-            requestId = nextRequestId
-            stampPlaceholderRequestId(keeperName, [localId, assistantId], nextRequestId)
-            // This live send now owns the request; resume must defer to it
-            // (and not mint a duplicate pending entry) until handoff/finally.
-            setActiveStreamRequestId(keeperName, requestId)
-            upsertPendingKeeperChatRequest({
-              requestId,
-              keeperName,
-              message,
-              submittedAt: Date.now(),
-              ...(attachments ? { attachments } : {}),
-            })
+        if (
+          event.type === 'CUSTOM'
+          && event.name === 'KEEPER_CHAT_OPERATION_ACCEPTED'
+        ) {
+          const acceptedOperationId = event.value.operation_id.trim()
+          if (!acceptedOperationId || acceptedOperationId !== operationId) {
+            throw new Error('Keeper operation acceptance identity mismatch')
           }
+          operationAccepted = true
+          markLiveSendRequestAccepted(acceptedOperationId)
+          upsertTrackedKeeperChatOperation({
+            operationId: acceptedOperationId,
+            keeperName,
+            message,
+            submittedAt: Date.now(),
+            ...(attachments ? { attachments } : {}),
+          })
         }
-        if (event.type === 'CUSTOM' && event.name === 'KEEPER_REQUEST_TERMINAL' && isRecord(event.value)) {
-          const terminalRequestId = asString(event.value.request_id, '').trim()
-          const status = asString(event.value.status, '').trim()
-          const matchesActiveRequest =
-            Boolean(terminalRequestId) && requestId !== null && terminalRequestId === requestId
-          if (matchesActiveRequest && TERMINAL_REQUEST_STATUSES.has(status)) {
-            requestTerminalSeen = true
-            removePendingKeeperChatRequest(terminalRequestId)
-          }
-        }
-        const error = applyKeeperStreamEvent(keeperName, assistantId, event)
+        const error = applyKeeperStreamEvent(
+          keeperName,
+          assistantId,
+          event,
+          { kind: 'operation', operationId },
+        )
         if (error) {
           throw new Error(error)
         }
-        if (event.type === 'CUSTOM' && event.name === 'KEEPER_CHAT_QUEUED' && isRecord(event.value)) {
-          const queueReceiptId = asString(event.value.receipt_id, '').trim()
-          if (queueReceiptId) {
-            stampPlaceholderQueueReceiptId(
-              keeperName,
-              [localId, assistantId],
-              queueReceiptId,
-            )
-          }
-        }
-        persistPendingAssistantDraft(keeperName, requestId, assistantId)
+        persistTrackedOperationAssistantDraft(
+          keeperName,
+          operationAccepted ? operationId : null,
+          assistantId,
+        )
         if (event.type === 'TOOL_CALL_END') {
           toolCallEnded = true
+        }
+        if (event.type === 'CUSTOM' && event.name === 'KEEPER_TOOL_RESULT_READY') {
           void hydrateKeeperToolOutputs(keeperName)
         }
       },
@@ -1740,14 +1057,13 @@ export async function sendKeeperThreadMessage(
     const finalText = finalEntry?.text.trim() ?? ''
 
     if (!outcome.terminal) {
-      if (requestId) {
+      if (operationAccepted) {
         removeThreadEntries(keeperName, [localId, assistantId])
         // Hand off to resume: release ownership FIRST so our own resume
         // call below is not blocked by the guard we just set.
-        releaseLiveSendRequest(requestId)
-        releaseActiveStreamRequestId(requestId)
-        await resumePendingKeeperChatRequest({
-          requestId,
+        releaseLiveSendRequest(operationId)
+        await hydrateTrackedKeeperChatOperation({
+          operationId,
           keeperName,
           message,
           submittedAt: Date.now(),
@@ -1765,21 +1081,16 @@ export async function sendKeeperThreadMessage(
         streamState: null,
         timestamp: new Date().toISOString(),
         error: cutMessage,
-        streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
-          deliveryReceipt: 'no_delivery_receipt',
+        streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
           reason: cutMessage,
         }),
       })
       setRecordValue(keeperActionErrors, keeperName, cutMessage)
       if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
-      clearActiveStreamRequestId(keeperName)
       return
     }
 
-    const finalDelivery =
-      finalEntry?.delivery === 'queued'
-        ? 'queued' as KeeperConversationDelivery
-        : 'delivered' as KeeperConversationDelivery
+    const finalDelivery = 'delivered' as KeeperConversationDelivery
     const hasContinuationStatus = (
       finalEntry?.details?.turnOutcome === 'continuation_checkpoint'
       && finalEntry.blocks?.some(block => (
@@ -1788,7 +1099,6 @@ export async function sendKeeperThreadMessage(
     )
     if (
       !finalText
-      && finalDelivery !== 'queued'
       && !toolCallEnded
       && !hasContinuationStatus
     ) {
@@ -1799,15 +1109,13 @@ export async function sendKeeperThreadMessage(
         streamState: null,
         timestamp: new Date().toISOString(),
         error: EMPTY_VISIBLE_REPLY_TEXT,
-        streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
-          deliveryReceipt: 'no_delivery_receipt',
+        streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
           reason: EMPTY_VISIBLE_REPLY_TEXT,
         }),
       })
       setRecordValue(keeperActionErrors, keeperName, EMPTY_VISIBLE_REPLY_TEXT)
-      if (requestId) {
-        removePendingKeeperChatRequest(requestId)
-        releaseActiveStreamRequestId(requestId)
+      if (operationAccepted) {
+        removeTrackedKeeperChatOperation(operationId)
       }
       return
     }
@@ -1822,46 +1130,42 @@ export async function sendKeeperThreadMessage(
       streamState: null,
       timestamp: new Date().toISOString(),
       error: null,
-      streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_terminal_event', {
+      streamContract: keeperStreamContract('sse_event', 'backend_terminal_event', {
         eventName: 'RUN_FINISHED',
       }),
     })
     if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
-    if (requestId) {
-      removePendingKeeperChatRequest(requestId)
-      releaseActiveStreamRequestId(requestId)
-    }
-    if (finalDelivery === 'queued') {
-      void reconcileKeeperChatReceipts(keeperName)
+    if (operationAccepted) {
+      removeTrackedKeeperChatOperation(operationId)
     }
   } catch (err) {
     flushPendingKeeperStreamDeltas(keeperName, assistantId)
     if (isAbortError(err)) {
-      const durablePendingRequest = requestId
-        ? pendingKeeperChatRequestsForKeeper(keeperName)
-          .find(candidate => candidate.requestId === requestId) ?? null
+      const durablePendingRequest = operationAccepted
+        ? trackedKeeperChatOperationsForKeeper(keeperName)
+          .find(candidate => candidate.operationId === operationId) ?? null
         : null
       const hasDurablePendingRequest = durablePendingRequest !== null
       const shouldAttemptServerCancel = Boolean(
-        requestId && (liveSendOwnsRequest(requestId) || hasDurablePendingRequest),
+        operationAccepted && (liveSendOwnsRequest(operationId) || hasDurablePendingRequest),
       )
       const serverCancelAlreadyFinalized = Boolean(
-        requestId
-        && !liveSendOwnsRequest(requestId)
+        operationAccepted
+        && !liveSendOwnsRequest(operationId)
         && !hasDurablePendingRequest,
       )
-      if (shouldAttemptServerCancel && requestId) {
-        const pendingRequest = withCurrentPendingAssistantDraft(durablePendingRequest ?? {
-          requestId,
+      if (shouldAttemptServerCancel) {
+        const pendingRequest = withCurrentTrackedOperationAssistantDraft(durablePendingRequest ?? {
+          operationId,
           keeperName,
           message,
           submittedAt: Date.now(),
           ...(attachments ? { attachments } : {}),
         }, assistantId)
-        upsertPendingKeeperChatRequest(pendingRequest)
-        void cancelKeeperThreadRequest(keeperName, requestId).then(outcome => {
+        upsertTrackedKeeperChatOperation(pendingRequest)
+        void cancelKeeperThreadRequest(keeperName, operationId).then(outcome => {
           if (outcome === 'cancelling') {
-            return handoffCancelledStreamToRequestPoll(
+            return handoffCancelledStreamToOperationHydration(
               pendingRequest,
               [localId, assistantId],
             )
@@ -1872,9 +1176,8 @@ export async function sendKeeperThreadMessage(
       finalizeAssistantEntry(keeperName, localId, {
         delivery: 'cancelled',
         error: null,
-        streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
-          deliveryReceipt: 'no_delivery_receipt',
-          requestId: requestId ?? undefined,
+        streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
+          requestId: operationAccepted ? operationId : undefined,
           reason: KEEPER_MESSAGE_CANCELLED_TEXT,
         }),
       })
@@ -1885,9 +1188,8 @@ export async function sendKeeperThreadMessage(
         streamState: null,
         error: null,
         timestamp: new Date().toISOString(),
-        streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
-          deliveryReceipt: 'no_delivery_receipt',
-          requestId: requestId ?? undefined,
+        streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
+          requestId: operationAccepted ? operationId : undefined,
           reason: KEEPER_MESSAGE_CANCELLED_TEXT,
         }),
       })
@@ -1902,29 +1204,27 @@ export async function sendKeeperThreadMessage(
       streamState: null,
       error: errorMessage,
       timestamp: new Date().toISOString(),
-      streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
-        deliveryReceipt: 'no_delivery_receipt',
-        requestId: requestId ?? undefined,
+      streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
+        requestId: operationAccepted ? operationId : undefined,
         reason: errorMessage,
       }),
     })
+    // The assistant placeholder is the single transcript owner of a stream
+    // failure. Keep the optimistic user message as a delivered input row;
+    // marking both rows as errors produced two identical red error cards for
+    // one failed HTTP request.
     finalizeAssistantEntry(keeperName, localId, {
-      delivery: 'error' as KeeperConversationDelivery,
-      error: errorMessage,
-      streamContract: keeperStreamContract('client_reconciliation', 'contract_gap', {
-        deliveryReceipt: 'no_delivery_receipt',
-        requestId: requestId ?? undefined,
+      delivery: 'delivered',
+      error: null,
+      streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
+        requestId: operationAccepted ? operationId : undefined,
         reason: errorMessage,
       }),
     })
-    if (requestTerminalSeen && requestId) {
-      removePendingKeeperChatRequest(requestId)
-      releaseActiveStreamRequestId(requestId)
-    }
     try {
       const reconciled = await reconcileStreamFailureFromServerHistory(
         keeperName,
-        message,
+        operationId,
         localId,
         assistantId,
       )
@@ -1941,16 +1241,15 @@ export async function sendKeeperThreadMessage(
     setRecordValue(keeperActionErrors, keeperName, errorMessage)
     throw err
   } finally {
-    // Release ownership on every exit (success/abort/error). Idempotent:
-    // the non-terminal handoff above already released, so this is a no-op
-    // there; Map.delete of an absent key is harmless.
-    if (requestId) {
-      releaseLiveSendRequest(requestId)
-      releaseKeeperThreadCancelTracking(requestId)
+    // Release cancellation bookkeeping on every accepted exit. The exact
+    // operation ownership is released once by clearActiveStream below; the
+    // non-terminal handoff released it early so its own resume was not blocked.
+    if (operationAccepted) {
+      releaseKeeperThreadCancelTracking(operationId)
     }
     sendKeys.forEach(key => sendingKeeperThreadMessages.delete(key))
-    if (activeStreamEntryId(keeperName) === assistantId) {
-      clearActiveStream(keeperName)
+    clearActiveStream(keeperName, operationId)
+    if (activeStreamEntryId(keeperName) === null) {
       setRecordValue(keeperSending, keeperName, false)
       setRecordValue(keeperStreamStartedAt, keeperName, null)
       clearKeeperStreamSignal(keeperName)

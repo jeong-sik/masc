@@ -14,6 +14,7 @@ type board_stimulus_kind =
   | Post_created
   | Comment_added
   | Reaction_changed of board_reaction_change
+  | Vote_cast of board_vote_change
 
 and board_reaction_target_type =
   | Reaction_post
@@ -25,6 +26,21 @@ and board_reaction_change = {
   user_id : string;
   emoji : string;
   reacted : bool;
+}
+
+and board_vote_target =
+  | Vote_on_post of string
+  | Vote_on_comment of string
+
+and board_vote_direction =
+  | Vote_up
+  | Vote_down
+
+and board_vote_change = {
+  target : board_vote_target;
+  target_author : string;
+  voter : string;
+  direction : board_vote_direction;
 }
 
 type board_stimulus = {
@@ -63,20 +79,21 @@ type stimulus_payload =
          [Fusion_completed]: a HITL decision is an async completion the
          waiting keeper must be notified of. *)
   | Manual_compaction_requested
-  | Goal_assigned of goal_assignment
-      (* RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids]
-         (keeper_up tool args or TOML reconcile). Wakes the keeper ONCE at
-         the assignment edge so the new standing objective arrives as
-         actionable turn input — before this, an assigned goal was
-         discovered only if some unrelated stimulus happened to fire.
-         Uses the same no-dedicated-reason pattern as async completions:
-         turn_reason; the injected pending observation drives the turn. *)
-  | Goal_reconciliation_ready of goal_reconciliation_ready
   | Completion_authority_rejected of completion_authority_rejection
-  (* Cancellation is the one terminal outcome with no Board projection, and
-     Goal_reconciliation_ready targets the Goal owner — a Task with no Goal
-     link reaches no one. This carries the cancellation to the Task's author. *)
+  (* Cancellation is the one terminal outcome with no Board projection. This
+     carries the cancellation to the Task's author. *)
   | Task_cancelled of task_cancellation
+  (* A committed workspace message named this Keeper. The transcript row is the
+     content SSOT; this payload carries the workspace request identity so the
+     message is an entry in the linear drain rather than only a row a scan may
+     or may not reach. *)
+  | Workspace_message of workspace_message
+  (* One Keeper asked another to run a turn and did not wait. This carries the
+     answer back to the asker. Without it the answer is written down where
+     only a screen reads it, and the asking Keeper has to remember to go
+     looking — measured over 2026-08-17..24, nobody did: 4 delegations
+     started, 0 status reads, 10 cancels. *)
+  | Delegate_completed of delegate_completion
 
 and board_attention = {
   candidate_id : string;
@@ -100,11 +117,28 @@ and fusion_terminal =
   | Fusion_failed of string
   | Fusion_cancelled
 
+and delegate_completion = {
+  dc_operation_id : string;
+  (* The id [masc_keeper_delegate] handed back, so the asker matches the
+     answer to its own request without a second lookup. *)
+  dc_keeper : string;
+  (* Which Keeper ran the turn. *)
+  dc_terminal : delegate_terminal;
+}
+
+and delegate_terminal =
+  | Delegate_replied of string
+  | Delegate_no_reply
+  (* The turn ended without text to hand back — it either finished its work
+     through a tool that posted elsewhere, or said nothing. Which of the two
+     is not carried: neither gives the asker something to read, and one
+     variant that says "no text" is the whole fact it acts on. *)
+  | Delegate_failed of string
+
 
 and hitl_resolution_decision =
   | Hitl_approved
   | Hitl_rejected of string
-  | Hitl_edited of Yojson.Safe.t
 
 and hitl_resolution = {
   approval_id : string;
@@ -128,27 +162,14 @@ and connector_attention = {
 }
 
 and scheduled_wake = {
+  occurrence_id : string;
   schedule_instance_id : string;
   schedule_id : string;
   due_at : float;
   payload_digest : string;
   title : string option;
   message : string;
-}
-
-and goal_assignment = {
-  ga_goal_id : string;
-  ga_goal_title : string;
-  (* display-only title resolved from Goal_store at enqueue time. *)
-  ga_assigned_by : string;
-  (* actor label for the prompt line: tool caller name or
-     "toml_reconcile". Display-only; stripped from queue identity so
-     repeat assignments of the same goal dedup regardless of actor. *)
-}
-
-and goal_reconciliation_ready = {
-  gr_goal_id : string;
-  gr_triggering_task_id : string;
+  result_delivery : Keeper_continuation_channel.t option;
 }
 
 and completion_authority_rejection = {
@@ -164,19 +185,22 @@ and task_cancellation = {
   tc_reason : string option;
 }
 
+and workspace_message = {
+  wmsg_request_id : string;
+  wmsg_from : string;
+}
+
+let workspace_message_post_id (message : workspace_message) =
+  "workspace-message:" ^ message.wmsg_request_id
+
 let fusion_completion_post_id (fc : fusion_completion) = "fusion-run:" ^ fc.run_id
+
+let delegate_completion_post_id (dc : delegate_completion) =
+  "keeper-delegate:" ^ dc.dc_operation_id
 
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
 
 let manual_compaction_post_id = "manual-compaction-request"
-
-let goal_assignment_post_id (ga : goal_assignment) =
-  (* Stable per goal: re-assigning the same goal before the keeper consumes
-     the first wake collapses under queue identity dedup. *)
-  "goal-assigned:" ^ ga.ga_goal_id
-
-let goal_reconciliation_ready_post_id (ready : goal_reconciliation_ready) =
-  "goal-reconciliation-ready:" ^ ready.gr_goal_id
 
 let completion_authority_rejection_post_id
       (rejection : completion_authority_rejection)
@@ -192,7 +216,6 @@ let task_cancellation_post_id (cancellation : task_cancellation) =
 let hitl_resolution_decision_to_string = function
   | Hitl_approved -> "approve"
   | Hitl_rejected _ -> "reject"
-  | Hitl_edited _ -> "edit"
 
 type stimulus = {
   post_id : post_id;
@@ -219,12 +242,10 @@ let enqueue (queue : t) (s : stimulus) : t =
 (* Identity projection: durable-event identity must ignore display-only
    payload fields, or repeats of the same event with volatile text (token
    counts, addresses, timestamps inside provider error strings) defeat
-   [enqueue_if_missing]/[dedup_by_identity] and the queue grows unbounded
-   (RFC-0313 W2 loop-safety requirement). Exhaustive on purpose: a new
+   [enqueue_if_missing]/[dedup_by_identity] and the queue grows unbounded.
+   Exhaustive on purpose: a new
    payload kind must decide its identity fields here at compile time. *)
 let identity_payload = function
-  | Goal_assigned ga ->
-    Goal_assigned { ga with ga_goal_title = ""; ga_assigned_by = "" }
   | Task_cancelled cancellation ->
     (* The reason is operator-facing prose whose wording can vary between
        retries of the same cancellation; identity is the task and who ended
@@ -232,8 +253,9 @@ let identity_payload = function
     Task_cancelled { cancellation with tc_reason = None }
   | ( Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
     | Schedule_due _ | Connector_attention _ | Hitl_resolved _
-    | Manual_compaction_requested | Goal_reconciliation_ready _
-    | Completion_authority_rejected _
+    | Manual_compaction_requested
+    | Completion_authority_rejected _ | Workspace_message _
+    | Delegate_completed _
     ) as payload ->
     payload
 
@@ -267,6 +289,13 @@ let stimulus_identity_equal a b =
   match a.payload, b.payload with
   | Fusion_completed left, Fusion_completed right ->
     fusion_completion_identity_equal left right
+  | Schedule_due _, Schedule_due _ ->
+    (* [post_id] is the scheduler occurrence identity.  Pre-occurrence-id
+       durable rows decode with an empty payload [occurrence_id], while a
+       replay after upgrade carries the same occurrence in both places.  The
+       first committed row owns the payload, so comparing the payload again
+       would turn that representation upgrade into a second execution. *)
+    true
   | _ -> identity_payload a.payload = identity_payload b.payload
 
 let to_list (queue : t) : stimulus list =
@@ -284,15 +313,6 @@ let dequeue (queue : t) : (stimulus * t) option =
     (match List.rev queue.back_rev with
      | [] -> None
      | s :: rest -> Some (s, { front = rest; back_rev = []; length = queue.length - 1 }))
-
-let prepend_list stimuli queue =
-  match stimuli with
-  | [] -> queue
-  | _ ->
-    { front = stimuli @ to_list queue
-    ; back_rev = []
-    ; length = queue.length + List.length stimuli
-    }
 
 let remove_by_post_id post_id queue =
   let removed, kept =
@@ -318,13 +338,6 @@ let uniq_stimuli stimuli =
     stimuli
   |> List.rev
 
-let dedup_by_identity queue = queue |> to_list |> uniq_stimuli |> of_list
-
-let remove_by_post_id_pair post_id left right =
-  let left_removed, left' = remove_by_post_id post_id left in
-  let right_removed, right' = remove_by_post_id post_id right in
-  uniq_stimuli (left_removed @ right_removed), left', right'
-
 let sort_by_urgency (queue : t) : t =
   queue
   |> to_list
@@ -341,19 +354,31 @@ let payload_kind_label = function
   | Connector_attention _ -> "connector_attention"
   | Hitl_resolved _ -> "hitl_resolved"
   | Manual_compaction_requested -> "manual_compaction_requested"
-  | Goal_assigned _ -> "goal_assigned"
-  | Goal_reconciliation_ready _ -> "goal_reconciliation_ready"
   | Completion_authority_rejected _ -> "completion_authority_rejected"
   | Task_cancelled _ -> "task_cancelled"
+  | Workspace_message _ -> "workspace_message"
+  | Delegate_completed _ -> "keeper_delegate_completed"
 
 let is_board_signal = function
   | Board_signal _ | Board_attention _ -> true
   | Bootstrap | Fusion_completed _
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
-  | Manual_compaction_requested | Goal_assigned _
-  | Goal_reconciliation_ready _ | Completion_authority_rejected _
-  | Task_cancelled _ ->
+  | Manual_compaction_requested
+  | Completion_authority_rejected _
+  | Task_cancelled _ | Workspace_message _ | Delegate_completed _ ->
     false
+
+(* RFC-0377: the batch-intake predicate needs the routed channel without
+   repeating the payload match at every call site. Exhaustive on purpose,
+   like [is_board_signal] above: a new payload kind must decide here at
+   compile time whether it carries a conversation channel. *)
+let connector_attention_channel = function
+  | Connector_attention { channel; _ } -> Some channel
+  | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+  | Schedule_due _ | Hitl_resolved _ | Manual_compaction_requested
+  | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
+  | Delegate_completed _ ->
+    None
 
 let drain_board_all (queue : t) : stimulus list * t =
   let board, rest =
@@ -381,12 +406,14 @@ let board_stimulus_kind_to_string = function
   | Post_created -> "post_created"
   | Comment_added -> "comment_added"
   | Reaction_changed _ -> "reaction_changed"
+  | Vote_cast _ -> "vote_cast"
 
 let board_stimulus_kind_of_string = function
   | "post_created" -> Ok Post_created
   | "comment_added" -> Ok Comment_added
   | "reaction_changed" ->
     Error "reaction_changed board stimulus requires reaction payload fields"
+  | "vote_cast" -> Error "vote_cast board stimulus requires vote payload fields"
   | value -> Error (Printf.sprintf "unknown board stimulus kind: %s" value)
 
 let board_reaction_target_type_to_string = function
@@ -397,6 +424,27 @@ let board_reaction_target_type_of_string = function
   | "post" -> Ok Reaction_post
   | "comment" -> Ok Reaction_comment
   | value -> Error (Printf.sprintf "unknown board reaction target type: %s" value)
+
+let board_vote_target_fields = function
+  | Vote_on_post post_id ->
+    [ "vote_target_kind", `String "post"; "vote_target_id", `String post_id ]
+  | Vote_on_comment comment_id ->
+    [ "vote_target_kind", `String "comment"; "vote_target_id", `String comment_id ]
+
+let board_vote_target_of_strings ~kind ~target_id =
+  match kind with
+  | "post" -> Ok (Vote_on_post target_id)
+  | "comment" -> Ok (Vote_on_comment target_id)
+  | value -> Error (Printf.sprintf "unknown board vote target kind: %s" value)
+
+let board_vote_direction_to_string = function
+  | Vote_up -> "up"
+  | Vote_down -> "down"
+
+let board_vote_direction_of_string = function
+  | "up" -> Ok Vote_up
+  | "down" -> Ok Vote_down
+  | value -> Error (Printf.sprintf "unknown board vote direction: %s" value)
 
 let option_json f = function
   | Some value -> f value
@@ -412,6 +460,13 @@ let board_reaction_change_fields (reaction : board_reaction_change) =
   ; "reaction_active", `Bool reaction.reacted
   ]
 
+let board_vote_change_fields (vote : board_vote_change) =
+  board_vote_target_fields vote.target
+  @ [ "vote_target_author", `String vote.target_author
+    ; "vote_voter", `String vote.voter
+    ; "vote_direction", `String (board_vote_direction_to_string vote.direction)
+    ]
+
 let board_stimulus_fields board =
   [ "board_kind", `String (board_stimulus_kind_to_string board.kind)
   ; "author", `String board.author
@@ -424,6 +479,7 @@ let board_stimulus_fields board =
   match board.kind with
   | Post_created | Comment_added -> []
   | Reaction_changed reaction -> board_reaction_change_fields reaction
+  | Vote_cast vote -> board_vote_change_fields vote
 
 let assoc_fields ~context = function
   | `Assoc fields -> Ok fields
@@ -483,19 +539,6 @@ let string_field ~context name fields =
   let* json = required_field ~context name fields in
   string_of_json ~context:(context ^ "." ^ name) json
 
-let string_list_field ~context name fields =
-  let* json = required_field ~context name fields in
-  match json with
-  | `List items ->
-    let rec loop acc = function
-      | [] -> Ok (List.rev acc)
-      | item :: rest ->
-        let* value = string_of_json ~context:(context ^ "." ^ name) item in
-        loop (value :: acc) rest
-    in
-    loop [] items
-  | _ -> Error (Printf.sprintf "%s.%s must be a JSON list" context name)
-
 let bool_field ~context name fields =
   let* json = required_field ~context name fields in
   bool_of_json ~context:(context ^ "." ^ name) json
@@ -534,12 +577,17 @@ let payload_to_yojson = function
   | Schedule_due sw ->
     `Assoc
       [ "kind", `String "schedule_due"
+      ; "occurrence_id", `String sw.occurrence_id
       ; "schedule_instance_id", `String sw.schedule_instance_id
       ; "schedule_id", `String sw.schedule_id
       ; "due_at_unix", `Float sw.due_at
       ; "payload_digest", `String sw.payload_digest
       ; "title", option_json (fun value -> `String value) sw.title
       ; "message", `String sw.message
+      ; ( "result_delivery"
+        , match sw.result_delivery with
+          | None -> `Null
+          | Some channel -> Keeper_continuation_channel.to_yojson channel )
       ]
   | Connector_attention ca ->
     `Assoc
@@ -557,23 +605,9 @@ let payload_to_yojson = function
        @
        match r.decision with
        | Hitl_approved -> []
-       | Hitl_rejected rationale -> [ "rationale", `String rationale ]
-       | Hitl_edited input -> [ "edited_input", input ])
+       | Hitl_rejected rationale -> [ "rationale", `String rationale ])
   | Manual_compaction_requested ->
     `Assoc [ "kind", `String "manual_compaction_requested" ]
-  | Goal_assigned ga ->
-    `Assoc
-      [ "kind", `String "goal_assigned"
-      ; "goal_id", `String ga.ga_goal_id
-      ; "goal_title", `String ga.ga_goal_title
-      ; "assigned_by", `String ga.ga_assigned_by
-      ]
-  | Goal_reconciliation_ready ready ->
-    `Assoc
-      [ "kind", `String "goal_reconciliation_ready"
-      ; "goal_id", `String ready.gr_goal_id
-      ; "triggering_task_id", `String ready.gr_triggering_task_id
-      ]
   | Completion_authority_rejected rejection ->
     `Assoc
       [ "kind", `String "completion_authority_rejected"
@@ -596,6 +630,27 @@ let payload_to_yojson = function
         , match cancellation.tc_reason with
           | None -> `Null
           | Some reason -> `String reason )
+      ]
+  | Workspace_message message ->
+    `Assoc
+      [ "kind", `String "workspace_message"
+      ; "request_id", `String message.wmsg_request_id
+      ; "from", `String message.wmsg_from
+      ]
+  | Delegate_completed dc ->
+    let terminal =
+      match dc.dc_terminal with
+      | Delegate_replied reply ->
+        `Assoc [ "kind", `String "replied"; "message", `String reply ]
+      | Delegate_no_reply -> `Assoc [ "kind", `String "no_reply" ]
+      | Delegate_failed detail ->
+        `Assoc [ "kind", `String "failed"; "message", `String detail ]
+    in
+    `Assoc
+      [ "kind", `String "keeper_delegate_completed"
+      ; "operation_id", `String dc.dc_operation_id
+      ; "keeper", `String dc.dc_keeper
+      ; "terminal", terminal
       ]
 
 let continuation_channel_field fields =
@@ -629,6 +684,15 @@ let payload_of_yojson json =
         let* emoji = string_field ~context "reaction_emoji" fields in
         let* reacted = bool_field ~context "reaction_active" fields in
         Ok (Reaction_changed { target_type; target_id; user_id; emoji; reacted })
+      | "vote_cast" ->
+        let* kind = string_field ~context "vote_target_kind" fields in
+        let* target_id = string_field ~context "vote_target_id" fields in
+        let* target = board_vote_target_of_strings ~kind ~target_id in
+        let* target_author = string_field ~context "vote_target_author" fields in
+        let* voter = string_field ~context "vote_voter" fields in
+        let* direction_raw = string_field ~context "vote_direction" fields in
+        let* direction = board_vote_direction_of_string direction_raw in
+        Ok (Vote_cast { target; target_author; voter; direction })
       | _ -> board_stimulus_kind_of_string board_kind
     in
     let* author = string_field ~context "author" fields in
@@ -703,15 +767,74 @@ let payload_of_yojson json =
     let* channel = continuation_channel_field fields in
     Ok (Fusion_completed { run_id; terminal; board_post_id; channel })
   | "schedule_due" ->
+    let allowed_fields =
+      [ "kind"
+      ; "occurrence_id"
+      ; "schedule_instance_id"
+      ; "schedule_id"
+      ; "due_at_unix"
+      ; "payload_digest"
+      ; "title"
+      ; "message"
+      ; "result_delivery"
+      ]
+    in
+    let field_names = List.map fst fields in
+    let* () =
+      if
+        List.length field_names
+        = List.length (List.sort_uniq String.compare field_names)
+      then Ok ()
+      else Error "stimulus.payload.schedule_due has duplicate fields"
+    in
+    let* () =
+      match
+        List.find_opt
+          (fun name -> not (List.mem name allowed_fields))
+          field_names
+      with
+      | None -> Ok ()
+      | Some name ->
+        Error ("stimulus.payload.schedule_due has unknown field: " ^ name)
+    in
+    let* occurrence_id =
+      match List.assoc_opt "occurrence_id" fields with
+      | None -> Ok ""
+      | Some _ -> string_field ~context "occurrence_id" fields
+    in
     let* schedule_instance_id = string_field ~context "schedule_instance_id" fields in
     let* schedule_id = string_field ~context "schedule_id" fields in
     let* due_at = float_field ~context "due_at_unix" fields in
     let* payload_digest = string_field ~context "payload_digest" fields in
     let* title = optional_string_field ~context "title" fields in
     let* message = string_field ~context "message" fields in
+    let* result_delivery =
+      match List.assoc_opt "result_delivery" fields with
+      | None | Some `Null -> Ok None
+      | Some channel_json ->
+        Keeper_continuation_channel.of_yojson channel_json
+        |> Result.map Option.some
+    in
+    let* () =
+      match result_delivery with
+      | None -> Ok ()
+      | Some _ when String.trim occurrence_id = "" ->
+        Error "stimulus.payload.schedule_due delivery requires occurrence_id"
+      | Some channel when not (Keeper_continuation_channel.is_routable channel) ->
+        Error "stimulus.payload.schedule_due result_delivery must be routable"
+      | Some _ -> Ok ()
+    in
     Ok
       (Schedule_due
-         { schedule_instance_id; schedule_id; due_at; payload_digest; title; message })
+         { occurrence_id
+         ; schedule_instance_id
+         ; schedule_id
+         ; due_at
+         ; payload_digest
+         ; title
+         ; message
+         ; result_delivery
+         })
   | "connector_attention" ->
     let* event_id = string_field ~context "event_id" fields in
     let* channel = continuation_channel_field fields in
@@ -725,32 +848,11 @@ let payload_of_yojson json =
       | "reject" ->
         let* rationale = string_field ~context "rationale" fields in
         Ok (Hitl_rejected rationale)
-      | "edit" ->
-        let* input = required_field ~context "edited_input" fields in
-        Ok (Hitl_edited input)
       | other -> Error (Printf.sprintf "unknown hitl_resolution decision: %s" other)
     in
     let* channel = continuation_channel_field fields in
     Ok (Hitl_resolved { approval_id; decision; channel })
   | "manual_compaction_requested" -> Ok Manual_compaction_requested
-  | "goal_assigned" ->
-    let* goal_id = string_field ~context "goal_id" fields in
-    let* goal_title = string_field ~context "goal_title" fields in
-    let* assigned_by = string_field ~context "assigned_by" fields in
-    Ok
-      (Goal_assigned
-         { ga_goal_id = goal_id
-         ; ga_goal_title = goal_title
-         ; ga_assigned_by = assigned_by
-         })
-  | "goal_reconciliation_ready" ->
-    let* goal_id = string_field ~context "goal_id" fields in
-    let* triggering_task_id =
-      string_field ~context "triggering_task_id" fields
-    in
-    Ok
-      (Goal_reconciliation_ready
-         { gr_goal_id = goal_id; gr_triggering_task_id = triggering_task_id })
   | "completion_authority_rejected" ->
     let* () =
       exact_fields
@@ -816,6 +918,59 @@ let payload_of_yojson json =
     Ok
       (Task_cancelled
          { tc_task_id = task_id; tc_cancelled_by = cancelled_by; tc_reason = reason })
+  | "workspace_message" ->
+    let* () =
+      exact_fields ~context ~expected:[ "kind"; "request_id"; "from" ] fields
+    in
+    let* request_id = string_field ~context "request_id" fields in
+    let* from = string_field ~context "from" fields in
+    Ok (Workspace_message { wmsg_request_id = request_id; wmsg_from = from })
+  | "keeper_delegate_completed" ->
+    let* () =
+      exact_fields
+        ~context
+        ~expected:[ "kind"; "operation_id"; "keeper"; "terminal" ]
+        fields
+    in
+    let* operation_id = string_field ~context "operation_id" fields in
+    let* keeper = string_field ~context "keeper" fields in
+    let* terminal_json = required_field ~context "terminal" fields in
+    let* terminal_fields =
+      assoc_fields ~context:"stimulus.payload.terminal" terminal_json
+    in
+    let* terminal_kind =
+      string_field ~context:"stimulus.payload.terminal" "kind" terminal_fields
+    in
+    let* terminal =
+      match terminal_kind with
+      | "replied" | "failed" ->
+        let* () =
+          exact_fields
+            ~context:"stimulus.payload.terminal"
+            ~expected:[ "kind"; "message" ]
+            terminal_fields
+        in
+        let* message =
+          string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
+        in
+        Ok
+          (if String.equal terminal_kind "replied"
+           then Delegate_replied message
+           else Delegate_failed message)
+      | "no_reply" ->
+        let* () =
+          exact_fields
+            ~context:"stimulus.payload.terminal"
+            ~expected:[ "kind" ]
+            terminal_fields
+        in
+        Ok Delegate_no_reply
+      | value ->
+        Error (Printf.sprintf "unknown keeper delegate terminal kind: %s" value)
+    in
+    Ok
+      (Delegate_completed
+         { dc_operation_id = operation_id; dc_keeper = keeper; dc_terminal = terminal })
   | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
 
 let stimulus_to_yojson (stimulus : stimulus) =
@@ -873,3 +1028,20 @@ let queue_of_yojson json =
     let* items_json = required_field ~context "items" fields in
     let* items = list_of_json ~context:"keeper event queue snapshot.items" stimulus_of_yojson items_json in
     Ok (of_list items))
+
+let continuation_channel_of_payload = function
+  | Fusion_completed completion -> Some completion.channel
+  | Hitl_resolved resolution -> Some resolution.channel
+  | Connector_attention attention -> Some attention.channel
+  | Schedule_due wake -> wake.result_delivery
+  | Board_signal _
+  | Board_attention _
+  | Bootstrap
+  | Manual_compaction_requested
+  | Completion_authority_rejected _
+  | Task_cancelled _
+  | Workspace_message _
+  (* The answer arriving is itself the reply; there is nowhere further to
+     route it. *)
+  | Delegate_completed _ -> None
+;;

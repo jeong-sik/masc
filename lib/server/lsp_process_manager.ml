@@ -12,7 +12,6 @@ type lsp_process =
   ; stdin_w : [ Eio.Flow.sink_ty | Eio.Resource.close_ty ] Eio.Std.r
   ; stdout_r : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r
   ; stderr_r : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r
-  ; mutable next_id : int
   }
 
 type spawn_error =
@@ -38,17 +37,11 @@ let command_for_lang lang_id =
   | _ -> None
 ;;
 
-(** Detect language from file extension. *)
+(** Detect language from file extension. [Filename.extension] and
+    [String.lowercase_ascii] are total (no extension yields [""]), so no
+    guard is needed around them. *)
 let lang_of_path file_path =
-  let ext =
-    try Filename.extension file_path |> String.lowercase_ascii with
-    | exn ->
-      Log.Server.warn
-        "lsp_process_manager: Filename.extension failed for %s: %s"
-        file_path
-        (Printexc.to_string exn);
-      ""
-  in
+  let ext = Filename.extension file_path |> String.lowercase_ascii in
   match ext with
   | ".ml" | ".mli" -> "ocaml"
   | ".ts" | ".tsx" -> "typescript"
@@ -65,12 +58,6 @@ let command_exists cmd =
 ;;
 
 (** Allocate a fresh JSON-RPC request ID for this process. *)
-let alloc_id (proc : lsp_process) : int =
-  let id = proc.next_id in
-  proc.next_id <- id + 1;
-  id
-;;
-
 (** Write a JSON-RPC message to the process stdin with Content-Length framing.
 
     LSP spec: messages are framed as
@@ -205,7 +192,7 @@ let spawn ~sw ~lang_id ~workspace_root (proc_mgr : Eio_unix.Process.mgr_ty Eio.R
               "LSP %s stderr reader ended: %s"
               lang_id
               (Printexc.to_string exn));
-        Ok { lang_id; proc; stdin_w; stdout_r; stderr_r; next_id = 1 }
+        Ok { lang_id; proc; stdin_w; stdout_r; stderr_r }
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> Error (Process_error (Printexc.to_string exn)))

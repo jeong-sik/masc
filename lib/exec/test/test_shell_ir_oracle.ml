@@ -11,19 +11,6 @@ let load name =
   | Error message -> Alcotest.failf "%s: %s" name message
 ;;
 
-let contains_substring haystack needle =
-  let hay_len = String.length haystack in
-  let needle_len = String.length needle in
-  let rec loop index =
-    if index + needle_len > hay_len
-    then false
-    else if String.sub haystack index needle_len = needle
-    then true
-    else loop (index + 1)
-  in
-  needle_len = 0 || loop 0
-;;
-
 let test_simple_fixture () =
   let facts = load "simple" in
   Alcotest.(check int) "schema" 1 facts.Oracle.schema_version;
@@ -55,7 +42,7 @@ let assert_incompatible name feature =
   | Ok () -> Alcotest.failf "%s must be structurally incompatible" name
   | Error message ->
     Alcotest.(check bool) ("mentions " ^ feature) true
-      (contains_substring message feature)
+      (String_util.contains_substring message feature)
 ;;
 
 let test_redirect_fixture () =

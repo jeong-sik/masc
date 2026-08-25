@@ -1,414 +1,306 @@
 # MASC
 
-[![OCaml](https://img.shields.io/badge/OCaml-%3E%3D%205.4-orange.svg)](https://ocaml.org/)
-[![agent_sdk](https://img.shields.io/badge/agent__sdk-%3E%3D%200.231.13-blue.svg)](https://github.com/jeong-sik/oas)
+[![OCaml](https://img.shields.io/badge/OCaml-5.5-orange.svg)](https://ocaml.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-[한국어 버전](README.ko.md)
+[한국어](README.ko.md)
 
-**MASC is a local coordination and observability layer for agent work.** It runs
-next to a repository as an MCP server, so coding agents and resident Keepers can
-share goals, tasks, board posts, repository ownership, and approval state. The
-dashboard and per-turn receipts make agent decisions and failures inspectable.
+MASC (Multi-Agent Shared Context) is a repo-local MCP server for agents that
+work in the same project. It keeps goals, tasks, ownership, board messages, and
+execution evidence in one workspace and exposes that state through MCP and a
+web dashboard.
 
-It is not meant to be the fastest way to get work done. MASC trades speed for
-coordination, observability, and experiments with long-running persona-based
-agents. Some design choices are practical; some are playful.
-Accidental jokes, odd names, and small bits of fiction are part of the project
-taste; they are there because they make the experiment more fun, not because
-they are architecture requirements.
+A **Keeper** is an optional long-running agent managed by MASC. Keepers add
+autonomous and event-driven work to the shared workspace. They are an advanced
+path, not a requirement for using MASC as an MCP collaboration server.
 
-> **Development status:** MASC is still a pre-1.0 experiment. It is not a
-> productivity tool, production service, or security boundary. Use it for local
-> experiments and observation only. CODE/IDE workflows are not usable yet, and
-> HITL/Sandbox features can reduce some accidents but cannot be relied on to
-> protect code, secrets, infrastructure, or unattended agents. The current goal
-> is to make agent failures visible enough to discover which workflows may
-> become useful.
+> **Status:** MASC is a pre-1.0 project for local, trusted environments. It is
+> not a production service or a security boundary. Gate, HITL, and Docker
+> execution can constrain specific operations, but they do not protect an
+> unattended agent from every unsafe action. The IDE and TUI are experimental.
+> `main` can be ahead of the latest published binary release.
 
-A **Keeper** is an optional resident agent managed by MASC. It stays alive while
-the server is running, wakes on heartbeat intervals, and reacts to mentions or
-messages.
+![MASC dashboard overview](docs/screenshots/dashboard/2026-08-21/01-overview.png)
 
-### Why "Keeper"
+This image was captured from a live local runtime with operational identifiers
+redacted. The [dashboard inventory](docs/screenshots/dashboard/2026-08-21/README.md)
+contains 24 screens and the exact capture metadata.
 
-Agents in this environment are called **Keepers**, a nickname borrowed from Bullfrog's *Dungeon Keeper* by Peter Molyneux. This is project vocabulary and a playful naming choice, not a deeper architecture claim. The project intentionally leaves room for incidental jokes and character-like naming.
+## Start here
 
----
+### Local source checkout
 
-## What you can do with MASC
-
-- **Run shared Goals and Tasks through MCP tools.** Keep task ownership, status transitions, and verification evidence in one local workspace.
-- **Run and observe resident Keepers.** Give a Keeper its own persona, goal, and instructions, and let it communicate over shared topics or repositories.
-- **Experiment with different agent styles.** Keepers can carry different concerns and instructions, so you can watch what they decide and where they clash.
-- **Attach existing coding agents.** Because MASC is an MCP server, MCP clients such as Claude Code or Codex can connect to `/mcp` and join the same workspace — sharing task claim/transition, board, and goals, and waking Keepers via `masc_broadcast` or @mention. (There is no synchronous external tool for directly invoking a Keeper turn; interaction is through the workspace and mentions.)
-- **Reduce obvious collisions when multiple agents touch the same code.** Turns, locks, and worker ownership can coordinate multiple Keepers working on one repository, but this is not a concurrency-safety guarantee.
-- **Inspect decisions and failures.** The web dashboard shows Keeper / Goal / Task / Board state in real time, and every turn leaves a receipt.
-- **Route external effects through one Gate.** Always Allow, LLM Auto Judge, and HITL are explicit non-hierarchical modes. HITL persists the exact request without blocking the Keeper; its lane is woken when the decision arrives.
-- **Run each Keeper on a different model.** A single line in `runtime.toml` routes a Keeper to a provider × model from the runtime catalog.
-
----
-
-## Features
-
-Legend — ✅ working now · 🟡 partially working · ❌ not working. Status is about implemented local paths, not production readiness or security assurance. Broader plans (cluster mode, external IDE extensions, additional platform binaries, etc.) are in [`ROADMAP.md`](ROADMAP.md).
-
-| Feature | Status | One-line description | Entry point |
-|------|:----:|-----------|--------------|
-| **Keepers** | ✅ | Resident agents with persona, goal, and instructions. Auto-boot when the server starts; state persists to disk | `.masc/config/keepers/*.toml` |
-| **Gate: Always Allow / Auto Judge / HITL** | 🟡 | Product-neutral external-effect boundary with exact one-use grants and per-Keeper wake-up | Dashboard approvals queue |
-| **Board** | ✅ | Keepers collaborate asynchronously via posts, comments, and votes; publishing wakes related Keepers | `masc_board_*` tools / dashboard |
-| **Sandbox (Docker)** | 🟡 | Docker-profile shell execution uses containers, but local profiles and fallback paths mean this is not a security boundary | keeper toml `sandbox_profile` |
-| **Dashboard** | ✅ | Web SPA for observing and commanding Keeper/Goal/Task/Board in real time | `dashboard/` (vite) |
-| **TUI** | ❌ | Not working — `masc-tui` binary exists, but major gaps (CJK/emoji layout, streaming progress, rich-block rendering) make it unusable in practice | `masc-tui` |
-| **CODE / IDE (observational)** | ❌ | Not working — LSP proxy, annotation overlay, and dashboard CODE shell are implemented, but the observational command-only flow is not validated, so it is unusable in practice | Dashboard Code |
-| **OpenTelemetry** | 🟡 | OTLP HTTP exporter + GenAI semconv spans/metrics work, but many signals and instrumentation gaps are not yet collected | `OTEL_EXPORTER_OTLP_ENDPOINT` |
-| **Goal + Task** | 🟡 | Goal/Task CRUD, transitions, verification, and prompt injection work. Automatic scheduling is not implemented | `masc_goal_*` / `masc_*task*` tools |
-| **Multi-Runtime** | 🟡 | Keeper-specific provider × model routing | `runtime.toml` |
-| **Provider Failover** | ❌ | No automatic failover on provider failure; requires manual config change + server restart | `runtime.toml` |
-| **Fusion (+ JoJ)** | 🟡 | Ask several models the same question and let a judge synthesize consensus/contradictions/blind spots. Simple/Refine/Conditional work; JoJ is not wired | `masc_fusion` tool |
-| **Multi-Channel** | 🟡 | External channel messages start/respond to turns. Only Discord is live today; Slack/Telegram need sidecars | `POST /api/v1/gate/message` |
-
-### Current behavior and limits
-
-- **Keepers** — Each Keeper is a long-running agent that stays resident while the server is alive. It wakes on heartbeat, runs turns, and its memory and decision logs persist across restarts. **A Keeper runs only one turn at a time** — parallelism comes from multiple Keepers running together. `[autonomous] concurrency` is a dead legacy key; MASC does not impose a global active-Keeper cap.
-- **Gate / HITL** — The dispatch boundary sends the opaque operation identity and complete typed input to one Gate. Workspace or Keeper Always Allow proceeds directly; Auto Judge runs asynchronously; Manual persists a HITL request. Deferred requests return to the Keeper instead of awaiting a promise, and an exact approved request is consumed once when that Keeper lane wakes. Gate decisions are authorization workflow, not a sandbox or credential boundary.
-- **Sandbox** — Actually invokes `docker run --rm` with cap-drop / no-new-privileges / read-only rootfs. MASC observes active Docker operations but does not pre-admit them through a global spawn slot. Network is controlled by the keeper's `network_mode` (default `inherit`, can be `none`). *Limit*: not every Keeper runs Docker (some use `local`=host execution). If the image is missing and the path is inside the playground, execution falls back to host (telemetry is recorded). Do not treat this as a security boundary.
-- **Multi-Runtime** — A single line in `runtime.toml` under `runtime.assignments`, `keeper = provider.model`, sends every turn for that Keeper to the chosen provider.
-- **Provider Failover** — Ordered automatic failover on provider failure is not implemented. When a provider fails, you must manually edit default/assignment and restart the server.
-- **Fusion + JoJ** — When a Keeper calls `masc_fusion`, panel models answer the same question independently and a judge synthesizes consensus, contradictions, and blind spots. *Limit*: The Judge-of-Judges (JoJ) phase has code and call paths, but the live config lacks a first-order `judges` panel, so JoJ calls **fail-closed with an error**. The result registry is in-memory and is lost on restart.
-- **Goal + Task** — Goals and tasks are created via MCP tools, transitioned through states, and active goals are injected into the Keeper system prompt. Turns are driven by channels/events. (The goal-loop OODA machinery was fully retired on 2026-07-21 — RFC-0352 Path B: the Goal entity, MCP tools, and task linkage stay; the scheduler scripts, server broadcast, and dashboard panel are gone.)
-- **OpenTelemetry** — The OTLP HTTP exporter and GenAI semconv spans/metrics work. *Limit*: many signals and instrumentation gaps are not yet collected. For example, low-level Keeper turn events, internal fusion metrics, and per-provider latency breakdowns are only partially covered.
-- **CODE / IDE (observational, not working)** — The aim is an observational IDE where humans issue commands rather than editing code directly. The LSP proxy, annotation overlay, and dashboard CODE shell are implemented, but **the observational command-only flow is not validated, so CODE is not usable in practice.**
-
----
-
-## Quick Start (5 minutes)
-
-### One-touch (recommended)
-
-From a clone, one command builds/starts the server, seeds a four-keeper team
-(tech lead, backend, frontend, QA) on `ollama_cloud.deepseek-v4-flash`, and opens
-the dashboard. Works on macOS and Linux.
-
-```bash
-export OLLAMA_CLOUD_API_KEY=...      # from https://ollama.com/settings/keys
-./quickstart.sh                      # native build+run, then opens the dashboard
-#   or fully containerized (self-contained image, builds from source):
-./quickstart.sh --docker
-```
-
-Then open `http://127.0.0.1:8935/dashboard`. Options: `--team <preset>` (see
-`presets/`), `--port N`, `--base-path DIR`, `--no-open`, `--no-start`,
-`./quickstart.sh --help`.
-
-- **Native** binds loopback, so the dashboard is served with data and needs no
-  login — this is the path to actually see the dashboard.
-- **`--docker`** builds a self-contained image and reproducibly boots the server
-  + the team; the container binds a network address, so the dashboard shell
-  serves but its live data needs an explicit bearer token (the loopback
-  dev-token is intentionally not exposed on a non-loopback bind). Use it to verify the
-  install/boot; use native to browse the dashboard.
-
-For the `curl | bash` installer, add `--team classic` to seed the same team:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh \
-  | bash -s -- --team classic
-```
-
-### Manual (step by step)
-
-```bash
-# 1. Install the binary (macOS arm64 / Linux x86_64)
-brew install jeong-sik/masc/masc            # Homebrew (Formula/masc.rb in this repo)
-#   or:  curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
-#   from source: git clone https://github.com/jeong-sik/masc.git && cd masc &&
-#     scripts/opam-pin-external-deps.sh --install && opam install . --deps-only &&
-#     scripts/dune-local.sh build @default
-
-# 2. Seed config, then set your provider key
-masc init
-#   edit .masc/config/.env.local:
-#     export OLLAMA_CLOUD_API_KEY=...     # one provider, see table below
-
-# 3. Load your key + start
-source .masc/config/.env.local && masc start
-curl http://127.0.0.1:8935/health        # → 200 OK
-
-# 4. (optional) Dashboard
-cd dashboard && pnpm install && pnpm dev
-```
-
-Provider keys (put the one you use in `.masc/config/.env.local`):
-
-| Provider in `runtime.toml` | Environment variable |
-|---|---|
-| `ollama_cloud` | `OLLAMA_CLOUD_API_KEY` |
-| `deepseek` | `DEEPSEEK_API_KEY` |
-| `glm-coding` | `ZAI_API_KEY_SB` |
-| `ollama` (local) | — (no key) |
-
-> `masc init` seeds `.masc/config/runtime.toml`, which already sets `[runtime].default`. If the server logs `refusing to boot`, run `masc init` in your workspace first. `masc start` is the same as running `masc` with no subcommand (kept as an explicit name for tutorials).
-
----
-
-## Install
-
-### Prebuilt binary
-
-Prefer inspecting the install script and pinning a release:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh -o /tmp/masc-install.sh
-less /tmp/masc-install.sh
-bash /tmp/masc-install.sh --version <release-tag>
-```
-
-For disposable local installs, the convenience path is:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
-```
-
-This installs the binary to `$HOME/.local/bin/masc` and seeds `runtime.toml` into `<base-path>/.masc/config/`. Binaries are provided for **macOS arm64** and **Linux x86_64**. Other platforms build from source.
-
-Installer requirements: `curl` and standard Unix tools (`uname`, `chmod`, `mkdir`, `mktemp`). `jq` is required only when `--version` / `MASC_VERSION` is omitted and the script queries GitHub for the latest release. Use `--version <release-tag>` when you need a reproducible install.
-
-Release assets are downloaded from GitHub releases. When the selected release publishes `SHA256SUMS`, the installer verifies the downloaded binary plus seeded `runtime.toml`; every expected entry must exist and match. Some existing releases do not publish `SHA256SUMS`; for those releases, the verified binary install path is unavailable. If the checksum file cannot be fetched, the installer fails closed by default. Use the source build path below, or bypass verification only for a disposable or air-gapped install by passing `--allow-unverified` or setting `MASC_ALLOW_UNVERIFIED=1`; the script prints a warning before continuing.
-
-> If `runtime.toml` is missing (or its `[runtime].default` is absent), the server logs `refusing to boot` and exits with status 1 — there is no environment-default fallback. Because the file is required to start, the install script seeds [`config/runtime.toml`](config/runtime.toml). To write it manually, define `[runtime].default = "<provider>.<model>"` and a matching `[provider.model]` runtime binding table; `[runtime.assignments]` is optional and only overrides individual Keepers.
-
-### From source
+Install the OCaml dependencies once, then run the workspace server. The default
+quickstart does not start Keepers and does not require a model-provider key.
 
 ```bash
 git clone https://github.com/jeong-sik/masc.git
 cd masc
-scripts/opam-pin-external-deps.sh --install   # pin and install external OCaml dependencies
+
+scripts/opam-pin-external-deps.sh --install
 opam install . --deps-only
-scripts/dune-local.sh build @default
+./quickstart.sh
+
+BASE_PATH="${MASC_QUICKSTART_HOME:-$HOME/masc-quickstart}"
+source "$BASE_PATH/.masc/config/mcp-client.env"
+curl http://127.0.0.1:8935/health
 ```
 
-Requirements: OCaml >= 5.4, opam >= 2.0, dune >= 3.22. Build/test/CI details are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Defaults:
 
-`scripts/dune-local.sh` uses a global lock file (`/tmp/me-dune-local.lock`) to avoid concurrent build collisions across worktrees, and disables the Dune shared cache by default for local builds. This avoids stale native artifacts after shared opam pins move; set `MASC_DUNE_CACHE=enabled` explicitly if you need to re-enable it.
+- runtime state: `~/masc-quickstart/.masc`
+- HTTP port: `8935`
+- dashboard: `http://127.0.0.1:8935/dashboard/`
+- MCP endpoint: `http://127.0.0.1:8935/mcp`
+- Keeper preset: none
+- runtime: the current `[runtime].default` in `config/runtime.toml`
+- MCP bearer exports: `~/masc-quickstart/.masc/config/mcp-client.env`
 
-### Run modes
+Use `./quickstart.sh --help` for `--base-path`, `--team`, `--port`,
+`--no-open`, and `--no-start`.
 
-- **`scripts/start-loopback.sh`**: starts on fixed port `8935` with the Keeper scheduler off for local mock debugging. Pass `--with-keeper-bootstrap` when Keeper autoboot is required.
-- **`scripts/run-local.sh --target-dir /path`**: starts an isolated runtime for the target directory. The port is auto-allocated in the `9100-9999` range from the directory path hash.
-- **`./start-masc.sh --http --port <port>`**: starts the full runtime including the Keeper scheduler.
-
----
-
-## Run
-
-MASC is an MCP server. Start it, then attach agents or MCP clients.
+To start the `classic` Keeper preset, provide its model key on the first run:
 
 ```bash
-# 1. Start the server (loopback)
-PORT=8935   # use another local port if 8935 is already busy
-masc --base-path "$PWD" --port "$PORT"     # if installed from binary
-# or from source:
-./start-masc.sh --http --port "$PORT"
-
-# 2. Health check
-curl "http://127.0.0.1:${PORT}/health"
-
-# 3. Connect an MCP client to http://127.0.0.1:${PORT}/mcp
+export OLLAMA_CLOUD_API_KEY=...
+./quickstart.sh --team classic
 ```
 
-| Mode | Command | Purpose |
-|----------|------|------|
-| Full runtime | `./start-masc.sh --http --port <port>` | Official start including Keeper scheduler |
-| Isolated | `scripts/run-local.sh --target-dir /path` | Per-directory isolation, auto-allocated local port |
-| Loopback | `scripts/start-loopback.sh` | Fixed loopback port, scheduler off (local debugging) |
+The exact compiler and Dune versions are defined in `dune-project`. The first
+source run builds the OCaml server and dashboard and can take several minutes.
 
-Start the dashboard separately:
+### Published binaries
+
+Published releases can lag behind `main`. Choose a tag from
+[GitHub Releases](https://github.com/jeong-sik/masc/releases), then use the
+installer from that same tag. Keeping the script and assets on one tag avoids
+mixing a newer installer contract with older release files.
 
 ```bash
-cd dashboard && pnpm install && pnpm dev   # vite proxies to the local server
-# production build: pnpm build
+TAG=vX.Y.Z
+curl -fsSL "https://raw.githubusercontent.com/jeong-sik/masc/${TAG}/scripts/install.sh" \
+  -o /tmp/masc-install.sh
+less /tmp/masc-install.sh
+bash /tmp/masc-install.sh --version "$TAG"
 ```
 
-The prebuilt binary installer does not clone dashboard source. The dashboard commands above are for a repository checkout. For local dashboard auth and admin-token setup, see [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md).
+Installation behavior is versioned with the selected tag. Recent release
+scripts verify `SHA256SUMS` when it is present and stop when required files are
+absent. Supported platforms are the assets attached to that release. Follow
+the login and start commands printed by the installer. The login command mints
+a worker bearer for the MCP client; the endpoint does not accept an
+unauthenticated client by default.
 
----
+## MCP client setup
+
+HTTP is the public MCP path. First load the worker bearer created by
+`quickstart.sh`:
+
+```bash
+BASE_PATH="${MASC_QUICKSTART_HOME:-$HOME/masc-quickstart}"
+source "$BASE_PATH/.masc/config/mcp-client.env"
+```
+
+For clients that support a bearer-token environment variable, use this shape:
+
+```toml
+[mcp_servers.masc]
+url = "http://127.0.0.1:8935/mcp"
+bearer_token_env_var = "MASC_TOKEN"
+http_headers = { "Accept" = "application/json, text/event-stream" }
+```
+
+After the client connects, the shortest workspace flow is:
+
+```text
+masc_start(path="/path/to/project", task_title="Describe the first task")
+masc_status()
+```
+
+`masc_start` selects the project, joins the workspace, and optionally creates
+and claims a task. Goals, tasks, board posts, and status changes are then shared
+through the MASC tool set.
+
+URL-only configuration fails with `401 Unauthorized` under the default local
+auth policy. For other client formats, a direct initialize probe, and manual
+bearer creation, see [`docs/MCP-TEMPLATE.md`](docs/MCP-TEMPLATE.md). Admin-only
+dashboard operations are covered by
+[`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md).
+
+## Current scope
+
+| Area | Current use | Important limit |
+|---|---|---|
+| Workspace collaboration | Share Goals, Tasks, claims, transitions, board posts, and verification evidence through MCP | Coordination data does not provide transactional protection for concurrent source edits |
+| Keepers | Run configured agents that react to workspace events and write execution records | Advanced path; behavior depends on the selected runtime and Keeper configuration |
+| Dashboard | Read workspace and runtime state and perform operator actions | Availability and write access depend on the built SPA and auth mode |
+| Gate and HITL | Apply Always Allow, model judgment, or human approval to supported external effects | Authorization workflow, not a sandbox or credential boundary |
+| Runtime routing | Assign a provider/model runtime to each Keeper and define ordered runtime lanes | A valid catalog and provider credentials are still required |
+| Fusion | Run panel and judge workflows through `masc_fusion` | Presets and judge runtimes must be configured before use |
+| Connectors | Connect workspace activity to supported external channels, including Discord and Slack | Tokens and channel-to-Keeper bindings are explicit operator configuration |
+| Local or Docker execution | Select `local` or `docker` for Keeper shell work | `local` runs on the host; Docker profiles are not a complete security boundary |
+| IDE and TUI | Inspect experimental interfaces | Not the supported front door for normal work |
+
+The product front door is repo workspace collaboration. Keeper supervision and
+operator controls are secondary. Remote-safe operation, cluster deployment,
+and production service guarantees are outside the current promise. See
+[`docs/PRODUCT-OPERATING-PLAN.md`](docs/PRODUCT-OPERATING-PLAN.md).
 
 ## Configuration
 
-Runtime settings and state live under `.masc/` below `--base-path`. Config files are in `.masc/config/`.
+MASC resolves runtime data below `<base-path>/.masc`. Authored configuration is
+under `<base-path>/.masc/config` unless `MASC_CONFIG_DIR` explicitly selects a
+different config root.
 
-**Required to start**
+| Path | Purpose |
+|---|---|
+| `runtime.toml` | Provider/model catalog, required `[runtime].default`, runtime lanes, and Keeper assignments |
+| `agent-core-models-overlay.toml` | Optional deployment-specific model capability rows; the embedded Agent Core catalog is used when the file is absent |
+| `keepers/<name>.toml` | Operational Keeper settings |
+| `keepers/<name>/AGENT.md` | Complete Keeper prompt; required for every TOML-backed Keeper |
+| `repositories.toml` | Registered repository identity and checkout metadata for repository workflows |
+| `keeper_repo_mappings.toml` | Keeper-to-repository preferences; these are defaults, not an authorization boundary |
+| `.env.local` | Provider environment variables written by current installer and quickstart flows |
 
-| File | Role |
-|------|------|
-| `runtime.toml` | Provider/model catalog + `[runtime].default`. Required to start: if it (or `[runtime].default`) is missing, the server logs `refusing to boot` and exits 1 — no environment-default fallback |
-| `oas-models-overlay.toml` | Deployment-local capability rows merged onto OAS's embedded catalog. Do not copy upstream catalog rows here |
-⚠️ **Legacy / unused keys**: If your `runtime.toml` contains `[autonomous] concurrency` or `[bootstrap] max_active_keepers`, remove it; neither key controls execution.
+A Keeper uses two authored files:
 
-**When creating agents**
-
-| File | Role |
-|------|------|
-| `prompts/keeper.world.md` | The shared **World prompt** injected into every Keeper (common stage and rules, `<world>` block). Editing it changes the whole stage |
-| `keepers/<name>.toml` | Keeper (character) definition — goal, instructions, `persona_name`, `sandbox_profile`. Stacked on top of the World |
-| `personas/<name>/profile.json` | (Optional) Hand-written persona JSON. Referenced by `persona_name` and can be shared by multiple Keepers |
-
-**Only when asking agents to work on repositories**
-
-| File | Role |
-|------|------|
-| `repositories.toml` | Register repositories for Keeper clone/work. Not needed if there is no repo work |
-| `keeper_repo_mappings.toml` | Keeper → credential + accessible repository mapping |
-| `credentials.toml` | GitHub credentials for PR work |
-
-> The remaining files under `prompts/` are behavior, analysis, deliberation, verification, and memory system templates. They are loaded by name where needed and work with defaults, so you usually do not edit them. The file to edit when you want to change the "stage" is `keeper.world.md`.
->
-> The files you hand-author are `keepers/<name>.toml` (Keeper definitions) and `personas/<name>/profile.json` (personas). Runtime state (`.masc/keepers/*.json` + `*.jsonl` logs) is created by the server and should not be edited.
->
-> The active runtime `.masc/` is wherever `--base-path` points. The `masc/.masc/` inside a repository is for locks and scratch only.
-
-Example Keeper definition (`keepers/<name>.toml`):
-
-```toml
-[keeper]
-name = "albini"
-persona_name = "albini"
-goal = "Call out and chase owners of stalled tasks. Does not write code."
-active_goal_ids = ["goal-pm-flow"]
-sandbox_profile = "docker"     # or "local"
-
-instructions = """
-... Keeper behavior instructions ...
-"""
+```text
+<base-path>/.masc/config/keepers/reviewer.toml
+<base-path>/.masc/config/keepers/reviewer/AGENT.md
 ```
 
-Keeper → runtime assignment is done in `runtime.toml` (the keeper toml does not hold model/runtime directly):
+```toml
+# keepers/reviewer.toml
+[keeper]
+autoboot_enabled = true
+proactive_enabled = true
+sandbox_profile = "local"
+mention_targets = ["operator"]
+allowed_paths = ["workspace/yousleepwhen/masc"]
+```
+
+```markdown
+<!-- keepers/reviewer/AGENT.md -->
+You are the review Keeper. Inspect the current change and report concrete
+evidence with file paths and commands.
+```
+
+Keeper TOML contains operational settings only. Prompt text belongs in
+`AGENT.md`. Unknown Keeper TOML keys are rejected.
+
+Runtime assignment belongs in `runtime.toml`:
 
 ```toml
 [runtime.assignments]
-albini = "<provider>.<model>"   # replace with an id from config/runtime.toml
+reviewer = "<provider>.<model>"
 ```
 
-If the selected runtime uses a cloud provider, export the provider credentials before starting the server. Treat [`config/runtime.toml`](config/runtime.toml) and [`docs/runtime-tunables.md`](docs/runtime-tunables.md) as the source of truth for runtime IDs and environment knobs instead of copying provider key names into docs.
+Use [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md) for the complete
+file contract. Use the `masc_config` tool or `/api/v1/dashboard/config` to
+inspect the resolved configuration.
 
----
+## Run modes
 
-## Directory layout
+| Command | Use |
+|---|---|
+| `masc start --base-path <path>` | Start an installed binary; `masc` with no subcommand is equivalent |
+| `./start-masc.sh --http --base-path <path>` | Start the full source-checkout runtime |
+| `scripts/start-loopback.sh` | Start on `127.0.0.1:8935` with Keeper bootstrap disabled unless explicitly enabled |
+| `scripts/run-local.sh --target-dir <path>` | Start an isolated development runtime with a path-derived port |
 
-```
-masc/
-├── bin/            Server and CLI entry points (main_eio = HTTP server, masc_tui = TUI, fusion_run …)
-├── lib/            Core logic (keeper/, board/, fusion/, gate/, ide/, server/, runtime/ …)
-├── dashboard/      TypeScript + Preact dashboard SPA
-├── docs/           Specs, runbooks, RFCs, boundary docs
-├── scripts/        Install, build, CI, and ops scripts
-├── config/         Checked-in defaults used as seeds by the runtime
-├── test/           Alcotest suite
-└── start-masc.sh   Full-runtime launch script
+Always inspect the effective runtime root before editing state:
 
-<base-path>/.masc/ (runtime state, under --base-path)
-├── config/         runtime.toml, keepers/, repositories.toml, credentials.toml …
-├── keepers/        Per-Keeper runtime state and memory (*.json + *.jsonl logs, created by server)
-├── goals.json      Goal state
-├── tasks/          Task backlog and goal↔task links
-├── board_*.jsonl   Board posts, comments, votes (append-only)
-└── audit-approvals/  HITL approval history
+```bash
+curl -fsS 'http://127.0.0.1:8935/health?full=1' \
+  | jq '.paths | {effective_base_path, effective_masc_root, roots_diverge}'
 ```
 
----
-
-## Related Projects
-
-Older versions of this README carried a detailed comparison against other agent
-runtimes. That comparison was useful as a snapshot, but it is not maintained as
-a live upstream inventory. Treat MASC's current local contract as the material
-above: repo-local MCP workspace, Keeper turns, dashboard/receipt visibility,
-filesystem state under `<base-path>/.masc/`, and runtime assignment through
-`runtime.toml`.
-
----
+Runtime-owned files outside `.masc/config/` are not configuration inputs. Do
+not edit Keeper snapshots, task stores, board logs, receipts, or approval
+history by hand.
 
 ## Dashboard
 
-The dashboard is a web panel that exposes surfaces through a hash-based router (`dashboard#<tab>?section=<section>`). The canonical definitions of surfaces and sections are in `dashboard/src/config/navigation.ts` (`DASHBOARD_SURFACES` and `DASHBOARD_SECTION_ITEMS`); items marked `hidden: true` (e.g., cockpit) are not exposed in the UI.
+The server exposes the dashboard at `/dashboard/`. Navigation is defined in
+`dashboard/src/config/navigation.ts`.
 
-Surfaces pinned to the main navigation rail (`V2_PRIMARY_SURFACE_IDS`):
+Primary sidebar screens:
 
-| Surface | Description |
+| Screen | Purpose |
 |---|---|
-| Overview | Quick signals and briefing summary |
-| Workspace | Work goals, plans, repositories, verification |
-| Keepers | Keeper roster, conversations, context workspace |
-| Board | Human / agent / automation / system posts |
-| Schedule | Scheduled Keeper automations and wake signals |
-| Approvals | Keeper HITL approval queue (tool-call gate) |
-| Fusion | masc_fusion panel and judge deliberation |
-| Code | Experimental CODE/IDE shell; not usable for real coding workflows yet |
-| Connectors | Channel sidecars and Keeper bindings |
-| Settings | Keeper settings operations console |
-| Logs | System execution logs |
+| Overview | Workspace and runtime summary |
+| Keepers | Keeper roster, conversation, and context |
+| Registry | Keeper declarations and runtime bindings |
+| Monitor | Fleet, tool, runtime, and observation views |
+| Work | Goals, plans, repositories, and verification |
+| Gate | Human approval queue and Always rules |
+| Schedule | Scheduled work and wake signals |
+| Board | Human, agent, automation, and system posts |
+| Fusion | Panel and judge runs |
+| Logs | Runtime event log |
+| IDE | Experimental collaboration shell |
+| Connectors | External channel status and bindings |
+| Settings | Operator configuration views |
 
-Additional surfaces reachable outside the rail: Monitor (keeper fleet, tool monitor, runtime, observatory), Command (intervention / Gate / approvals), Lab (tool diagnostics, safety harness, performance, Memory OS, keeper memory state).
+Visible second-level sections:
 
-Route examples: `dashboard#monitoring?section=agents`, `dashboard#monitoring?section=journey`, `dashboard#command?section=operations`, `dashboard#connectors?section=connector-status`, `dashboard#lab?section=memory-subsystems`, `dashboard#workspace?section=verification`.
+| Screen | Sections |
+|---|---|
+| Monitor | `agents`, `internal-agents`, `fleet-health`, `runtime`, `observatory` |
+| Work | `work`, `planning`, `repositories`, `verification` |
+| Connectors | `connector-status` |
+| IDE | `ide-shell` |
+| Lab | `tools`, `harness`, `performance`, `keeper-memory-health` |
 
-(Some diagnostic views such as `monitoring?section=journey` are provided by a route-only mapping in `dashboard/src/components/status.ts` rather than a rail surface — reachable by route but not by rail label.)
+`Lab` and `Command` are addressable but are not pinned to the primary sidebar.
+Hidden diagnostics are not part of the visible navigation contract.
 
-### Design preview
+Route examples required by the current dashboard contract:
+`dashboard#monitoring?section=journey`,
+`dashboard#command?section=operations`,
+`dashboard#connectors?section=connector-status`, and
+`dashboard#workspace?section=verification`. `journey` is a hidden diagnostic.
 
-A v2 Keeper Agent surface mockup (roster rail, per-turn detail, runtime panel). This is a design mockup, not a snapshot of the current build.
+See the [24-screen inventory](docs/screenshots/dashboard/2026-08-21/README.md)
+for the captured primary, Monitor, Work, and Lab views.
 
-[![MASC v2 Keeper Agent 대시보드 시안](docs/design/assets/2026-07-04-masc-v2-keeper-agent.png)](docs/design/2026-07-04-masc-v2-keeper-agent-design.md)
+## Repository layout
 
-See [docs/design/2026-07-04-masc-v2-keeper-agent-design.md](docs/design/2026-07-04-masc-v2-keeper-agent-design.md) for the layout breakdown.
-
----
+```text
+masc/
+├── bin/          server and CLI entry points
+├── lib/          workspace, Keeper, runtime, Gate, and server code
+├── packages/     embedded Agent Core package
+├── dashboard/    TypeScript and Preact dashboard source
+├── assets/       built web assets
+├── config/       default configuration seeds
+├── docs/         runbooks, contracts, specs, and historical RFCs
+├── scripts/      build, install, validation, and local operations
+└── test/         OCaml tests and fixtures
+```
 
 ## Documentation
 
-Docs in this repo are not all equally current. Prefer files that name their
-status and `last_verified` date, and treat older design/RFC files as historical
-unless they are linked from a current runbook.
+| Document | Use |
+|---|---|
+| [`docs/MCP-TEMPLATE.md`](docs/MCP-TEMPLATE.md) | MCP client configuration |
+| [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md) | Current Keeper file and runtime assignment contract |
+| [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | Local bearer and dashboard write access |
+| [`docs/AGENT-CORE-BOUNDARY.md`](docs/AGENT-CORE-BOUNDARY.md) | Responsibility split between MASC and embedded Agent Core |
+| [`docs/spec/SPEC-INDEX.md`](docs/spec/SPEC-INDEX.md) | Specification index; inventory counts inside it are historical unless marked current |
+| [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md) | Release evidence format; verify its version header before reuse |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Build, test, and pull-request workflow |
+| [`ROADMAP.md`](ROADMAP.md) | Current planning view, not a release promise |
 
-| Document | Use it for | Currentness note |
-|---|---|---|
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Build/test/PR expectations | Contributor workflow, not product marketing |
-| [`ROADMAP.md`](ROADMAP.md) | 6-8 week operating view | Check its version header against `dune-project` and `CHANGELOG.md` |
-| [`docs/OAS-MASC-BOUNDARY.md`](docs/OAS-MASC-BOUNDARY.md) | MASC ↔ OAS boundary | Reference doc; prefer its `last_verified` and generated pin block over old prose elsewhere |
-| [`docs/spec/SPEC-INDEX.md`](docs/spec/SPEC-INDEX.md) | Spec suite entry point | Living draft; individual spec files may still carry migration context |
-| [`docs/KEEPER-USER-MANUAL.md`](docs/KEEPER-USER-MANUAL.md) | Keeper concepts and operator notes | Older manual; for config truth prefer [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md), [`config/runtime.toml`](config/runtime.toml), and live code |
-| [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md) | Release evidence bundle | Evidence format; version lines must match current release metadata before use |
+## Development and release status
 
-See the [Dashboard](#dashboard) section above for dashboard route formats and surface list.
-
----
-
-## Roadmap / Remaining work
-
-The table below lists concrete remaining tasks derived from the current limits described above. Broader operating plans are in [`ROADMAP.md`](ROADMAP.md).
-
-| # | Area | Remaining work | Expected status change |
-|---|------|---------------|------------------------|
-| 1 | **Keepers / Fleet** | Remove the dead `[autonomous] concurrency` key from deployed `runtime.toml` files and keep fleet documentation aligned with the no-global-cap runtime contract. | 🟡→✅ |
-| 2 | **Provider Failover** | Implement provider-health based **ordered automatic failover**. When a provider fails, automatically route a Keeper's turn to the next candidate provider and log/metric recovery. | ❌→✅ |
-| 3 | **Fusion + JoJ** | Add a first-order judge panel config for the Judge-of-Judges (JoJ) phase in `runtime.toml`, and persist the fusion result registry to disk. | 🟡→✅ |
-| 4 | **Goal + Task** | (superseded) The goal-loop OODA machinery is fully retired (2026-07-21, RFC-0352 Path B). Goal-driven wake, if ever wanted, must be a new typed-Scheduler design — not a revival of this row. | RFC-0352 |
-| 5 | **TUI** | Make `masc-tui` usable in practice. The binary exists but is currently unusable due to CJK/emoji layout, streaming progress, and rich-block rendering gaps. | ❌→🟡/✅ |
-| 6 | **IDE** | Make the observational IDE usable in practice. The LSP proxy, annotation overlay, and dashboard IDE shell exist, but the command-only flow is not validated and the IDE is currently unusable. | ❌→🟡/✅ |
-| 7 | **Multi-Channel** | Add **sidecars** for Slack, Telegram, and other channels outside Discord, and extend the gate message schema per channel. | 🟡→✅ |
-| 8 | **Sandbox** | Reduce host-execution fallback cases when Docker image is missing or the path is inside the playground, and document `sandbox_profile=local` usage explicitly. | ✅ stabilization |
-| 9 | **HITL** | Keep human decisions nonblocking: persist the exact request, let the Keeper continue other work, and wake only that Keeper lane when a decision arrives. | ✅ stabilization |
-| 10 | **Gate** | Keep Always Allow, LLM Auto Judge, and HITL as non-hierarchical choices; audit exact one-use grants without classifying products, commands, or risk levels. | ✅ stabilization |
-| 11 | **OpenTelemetry** | Add missing signals and instrumentation such as low-level Keeper turn events, internal fusion metrics, and per-provider latency breakdowns. | 🟡→✅ |
-
----
-
-## Status
-
-pre-1.0 (`0.y.z`). APIs and configuration formats may change. `1.0.0` will not be declared until repository collaboration, release, and operator paths are trustworthy without caveats.
+- The package version is defined in `dune-project` and generated into
+  `masc.opam`.
+- `CHANGELOG.md` records the source release line.
+- [GitHub Releases](https://github.com/jeong-sik/masc/releases) is the source of
+  truth for published binaries and their assets.
+- APIs and configuration may change before 1.0.
 
 ## License
 
-MIT. Provided "as is" without warranty. See [`LICENSE`](LICENSE) for details.
+MIT. See [`LICENSE`](LICENSE).

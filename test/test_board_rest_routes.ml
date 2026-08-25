@@ -51,13 +51,16 @@ let reaction_raw_auth_request header value =
     `GET
     "/api/v1/board/reactions"
 
-(* /api/v1/tools/* endpoints called by dashboard/src/api/board.ts.
-   Kept in sync with that file — see module doc. *)
+(* /api/v1/tools/* endpoints called by dashboard/src/api/board.ts, plus the
+   goal lifecycle and schedule cancel routes the TUI consumes (#29684). Kept
+   in sync with those consumers — see module doc. *)
 let dashboard_board_tool_routes =
   [ "/api/v1/tools/masc_board_vote"
   ; "/api/v1/tools/masc_board_post"
   ; "/api/v1/tools/masc_board_comment"
   ; "/api/v1/tools/masc_board_comment_vote"
+  ; "/api/v1/tools/masc_goal_transition"
+  ; "/api/v1/tools/masc_schedule_cancel"
   ]
 
 let dashboard_board_reaction_routes =
@@ -146,6 +149,100 @@ let test_board_reaction_catalog_uses_board_ssot () =
     in
     check (list string) "catalog" Masc.Board.board_reaction_emojis actual
   | _ -> fail "reaction catalog must be a JSON object"
+
+(* A board page asks about its rows together. What the answer has to hold is
+   one entry per id the caller named, in the order it named them, so a caller
+   can line the answer up against its rows without matching on anything. *)
+let batch_target_ids json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "targets" fields with
+     | Some (`List rows) ->
+       List.map
+         (function
+           | `Assoc row ->
+             (match List.assoc_opt "target_id" row with
+              | Some (`String id) -> id
+              | Some _ | None -> fail "each target must carry a string target_id")
+           | _ -> fail "each target must be a JSON object")
+         rows
+     | Some _ | None -> fail "batch answer must carry a targets array")
+  | _ -> fail "batch answer must be a JSON object"
+
+let parsed_targets ids =
+  match
+    Server_board_reaction_http.targets_of_strings
+      ~target_type:(Some "post")
+      ~target_ids:(Some ids)
+  with
+  | Ok targets -> targets
+  | Error _ -> fail (Printf.sprintf "targets_of_strings rejected %S" ids)
+
+(* The projection reads the board store, which the parsing above does not: it
+   wants an Eio context and a base path of its own. An empty store is enough
+   here -- what is under test is that every id asked about comes back, in the
+   order asked, whether or not the store had anything for it. *)
+let test_board_reaction_batch_answers_every_id_asked_about () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Unix.putenv
+    "MASC_BASE_PATH"
+    (Filename.concat
+       (Filename.get_temp_dir_name ())
+       (Printf.sprintf "masc-test-reaction-batch-%06x" (Random.bits ())));
+  Masc.Board_dispatch.reset_for_test ();
+  Masc.Board_dispatch.init_jsonl ();
+  let json =
+    Server_board_reaction_http.list_batch_json
+      ~actor:"tester"
+      (parsed_targets "p-one,p-two,p-three")
+  in
+  check
+    (list string)
+    "one entry per id, in the order asked"
+    [ "p-one"; "p-two"; "p-three" ]
+    (batch_target_ids json);
+  match json with
+  | `Assoc fields ->
+    check
+      bool
+      "the emoji catalog rides along so a caller needs no second request"
+      true
+      (List.mem_assoc "supported_reaction_emojis" fields)
+  | _ -> fail "batch answer must be a JSON object"
+
+let test_board_reaction_batch_rejects_an_empty_or_oversized_list () =
+  let rejected ids =
+    match
+      Server_board_reaction_http.targets_of_strings
+        ~target_type:(Some "post")
+        ~target_ids:ids
+    with
+    | Ok _ -> false
+    | Error _ -> true
+  in
+  check bool "no ids at all" true (rejected (Some ""));
+  check bool "only separators" true (rejected (Some " , , "));
+  check bool "missing entirely" true (rejected None);
+  check
+    bool
+    "more ids than a page can hold"
+    true
+    (rejected (Some (String.concat "," (List.init 501 (fun i -> Printf.sprintf "p-%d" i)))));
+  check
+    bool
+    "a full page is answered"
+    false
+    (rejected (Some (String.concat "," (List.init 500 (fun i -> Printf.sprintf "p-%d" i)))))
+
+let test_board_reaction_batch_rejects_an_unknown_target_type () =
+  match
+    Server_board_reaction_http.targets_of_strings
+      ~target_type:(Some "planet")
+      ~target_ids:(Some "p-one")
+  with
+  | Ok _ -> fail "an unknown target_type must not parse"
+  | Error _ -> ()
 
 let test_board_reaction_optional_auth_is_anonymous_only_without_header () =
   with_reaction_auth_base (fun base_path ->
@@ -273,5 +370,17 @@ let () =
             "dashboard dev-token can vote as credential owner"
             `Quick
             test_dashboard_dev_token_can_vote_as_credential_owner
+        ; test_case
+            "reaction batch answers every id asked about"
+            `Quick
+            test_board_reaction_batch_answers_every_id_asked_about
+        ; test_case
+            "reaction batch rejects an empty or oversized list"
+            `Quick
+            test_board_reaction_batch_rejects_an_empty_or_oversized_list
+        ; test_case
+            "reaction batch rejects an unknown target type"
+            `Quick
+            test_board_reaction_batch_rejects_an_unknown_target_type
         ] )
     ]

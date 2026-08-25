@@ -29,26 +29,26 @@
    them per density, then top up the spots that still carry literals.
    ══════════════════════════════════════════════════════════════ */
 .v2-app[data-density="spacious"] {
-  --pad-surface: 32px 42px 60px;
+  --pad-surface: 32px 30px 60px;
   --pad-card:    16px 18px;
   --gap-card:    18px;
   --gap-row:     11px;
 }
 .v2-app[data-density="regular"] {
-  --pad-surface: 22px 26px 40px;
+  --pad-surface: 22px 18px 40px;
   --pad-card:    12px 14px;
   --gap-card:    14px;
   --gap-row:     8px;
 }
 .v2-app[data-density="compact"] {
-  --pad-surface: 15px 18px 30px;
+  --pad-surface: 15px 14px 30px;
   --pad-card:    9px 11px;
   --gap-card:    10px;
   --gap-row:     6px;
 }
 
 /* Mobile (single-column shell, ≤900px — same breakpoint the bottom tab bar
-   uses): the desktop surface padding (up to 42px each side on spacious)
+   uses): the desktop surface padding (up to 30px each side on spacious)
    eats ~27% of a 406px viewport once the 12px shell pad is added. Compress
    the horizontal pad per density tier; keep the vertical rhythm. Only
    `--pad-surface` is touched, so every surface on `.ov-scroll`/`.surf-scroll`/
@@ -160,7 +160,7 @@
    ══════════════════════════════════════════════════════════════ */
 
 /* Consistent transitions on every interactive control. */
-.v2-app .act, .v2-app .send, .v2-app .rfilter, .v2-app .bd-filter,
+.v2-app .act, .v2-app .send, .v2-app .rfilter,
 .v2-app .bd-sub, .v2-app .log-f, .v2-app .set-verify, .v2-app .set-seg-b,
 .v2-app .cp-mode, .v2-app .fbk-btn, .v2-app .chip, .v2-app .tps-range,
 .v2-app .set-add, .v2-app .ctool, .v2-app .nav-item, .v2-app .turn-tab,
@@ -181,7 +181,6 @@
 .v2-app[data-motion]:not([data-motion="off"]) .act:active,
 .v2-app[data-motion]:not([data-motion="off"]) .send:not(:disabled):active,
 .v2-app[data-motion]:not([data-motion="off"]) .rfilter:active,
-.v2-app[data-motion]:not([data-motion="off"]) .bd-filter:active,
 .v2-app[data-motion]:not([data-motion="off"]) .bd-sub:active,
 .v2-app[data-motion]:not([data-motion="off"]) .log-f:active,
 .v2-app[data-motion]:not([data-motion="off"]) .set-verify:active,
@@ -370,7 +369,7 @@
 /* Disabled send reads clearly inert. */
 .v2-app .send:disabled { transform: none; }
 
-/* Compaction-snapshot trigger: let the "before/after 보기" sub-label drop to
-   its own right-aligned line instead of crushing the label into a wrap. */
+/* Context-rail overlay trigger: let the sub-label drop to its own
+   right-aligned line instead of crushing the label into a wrap. */
 .v2-app .cmp-open { flex-wrap: wrap; align-items: baseline; row-gap: 3px; }
 .v2-app .cmp-open-sub { margin-left: auto; }

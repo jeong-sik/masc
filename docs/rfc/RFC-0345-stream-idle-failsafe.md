@@ -1,3 +1,8 @@
+---
+rfc: "0345"
+status: Draft
+---
+
 # RFC-0345 — Streaming idle-timeout fail-safe floor (#25128)
 
 - Status: Draft
@@ -6,23 +11,23 @@
 
 ## 0. Summary
 
-A hung provider stream (bytes stop arriving mid-response, connection never closes) freezes a keeper's chat lane indefinitely. masc already threads an inter-line idle timeout (`stream_idle_timeout_s`) to OAS, but it defaults to `None` by explicit design ("neither MASC nor OAS may infer a provider/model default"), so an operator who does not set `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` gets no bound at all. Measured freeze: 30+ minutes (#25128).
+A hung provider stream (bytes stop arriving mid-response, connection never closes) freezes a keeper's chat lane indefinitely. masc already threads an inter-line idle timeout (`stream_idle_timeout_s`) to agent_core, but it defaults to `None` by explicit design ("neither MASC nor agent_core may infer a provider/model default"), so an operator who does not set `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` gets no bound at all. Measured freeze: 30+ minutes (#25128).
 
 This RFC separates two conflated concepts — a **tuned per-provider timeout** (which the current principle rightly forbids inferring) versus a **liveness fail-safe floor** (a single generous absolute ceiling that only fires on genuine hangs). It proposes adding the latter without violating the former.
 
 ## 1. Problem (evidence)
 
-- `keeper_agent_run.ml:498-509`: comment states OAS `stream_idle_timeout_s` "bounds inter-line idle on HTTP streams", and "`[None]` is carried unchanged: neither MASC nor OAS may infer a provider/model default." The value is `Keeper_runtime_resolved.stream_idle_timeout_sec () : float option` (`:503-504`), passed at `:597` as `?stream_idle_timeout_s`.
+- `keeper_agent_run.ml:498-509`: comment states agent_core `stream_idle_timeout_s` "bounds inter-line idle on HTTP streams", and "`[None]` is carried unchanged: neither MASC nor agent_core may infer a provider/model default." The value is `Keeper_runtime_resolved.stream_idle_timeout_sec () : float option` (`:503-504`), passed at `:597` as `?stream_idle_timeout_s`.
 - `env_config_keeper.ml:559-570`: `stream_idle_timeout_sec ()` reads `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC`; absent → `None`.
 - Consequence: with the env var unset (the default deployment posture), a provider stream that stalls after emitting partial output is never cancelled. The keeper's turn fiber blocks on the stream read; the chat lane makes no further progress until an external restart. `body_timeout_s` (`body_timeout_override_sec`) is likewise opt-in and does not bound *inter-chunk* idle.
-- #25128 (created 2026-07-18, label `triage-required`) records the 30+ minute freeze. The team treats it as a bug, not intended behavior.
+- #25128 (created 2026-07-18) records the 30+ minute freeze. The team treats it as a bug, not intended behavior.
 
-The tension: the "no inferred default" rule exists so masc/OAS never silently truncate a **slow-but-alive** stream (a provider legitimately pausing between tokens) by guessing a provider-tuned value. That rationale is sound. But it currently also permits the **degenerate** case (never-progressing stream) to hang forever.
+The tension: the "no inferred default" rule exists so masc/agent_core never silently truncate a **slow-but-alive** stream (a provider legitimately pausing between tokens) by guessing a provider-tuned value. That rationale is sound. But it currently also permits the **degenerate** case (never-progressing stream) to hang forever.
 
 ## 2. Non-goals
 
 - Per-provider or per-model tuned idle values (that is the thing the "no inferred default" rule forbids, and this RFC preserves that).
-- Changing OAS enforcement semantics. OAS already enforces whatever `stream_idle_timeout_s` it receives; this RFC only changes what masc *resolves* when the operator supplies nothing.
+- Changing agent_core enforcement semantics. agent_core already enforces whatever `stream_idle_timeout_s` it receives; this RFC only changes what masc *resolves* when the operator supplies nothing.
 - Bounding total response latency (that is `body_timeout_s`, a separate knob).
 - Retry/failover policy after a timeout fires (existing keeper error handling owns that).
 
@@ -36,7 +41,7 @@ The tension: the "no inferred default" rule exists so masc/OAS never silently tr
 ### 3.2 Options
 
 **Option A — fail-safe floor (recommended).**
-`Keeper_runtime_resolved.stream_idle_timeout_sec ()` resolves `None → Some FLOOR` where `FLOOR` is a named constant (proposed `600.0` s = 10 min, justified below). An explicit `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` still overrides. The resolved value flows through the existing `?stream_idle_timeout_s` wiring unchanged — OAS enforcement is untouched.
+`Keeper_runtime_resolved.stream_idle_timeout_sec ()` resolves `None → Some FLOOR` where `FLOOR` is a named constant (proposed `600.0` s = 10 min, justified below). An explicit `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` still overrides. The resolved value flows through the existing `?stream_idle_timeout_s` wiring unchanged — agent_core enforcement is untouched.
 - Pro: closes the indefinite-freeze hole for the default deployment posture; the value is a liveness floor, not a tuned default, so the principle holds; bounded code change at one resolution site + a constant.
 - Con: a provider that legitimately idles >10 min mid-stream would be cut. This is judged non-existent in practice (no known provider pauses 10 min between bytes of a single response); if one exists, the operator sets the env var higher (explicit override path already exists).
 
@@ -67,7 +72,7 @@ Leave the default `None`; emit a loud WARN when unset and document the knob.
 
 ## 5. Blast radius
 
-- Single resolution site (`Keeper_runtime_resolved.stream_idle_timeout_sec`) changes `None → Some FLOOR`; every consumer already handles `Some`. OAS enforcement path unchanged (it already received `float option` and acted on `Some`).
+- Single resolution site (`Keeper_runtime_resolved.stream_idle_timeout_sec`) changes `None → Some FLOOR`; every consumer already handles `Some`. agent_core enforcement path unchanged (it already received `float option` and acted on `Some`).
 - Behavioral change: deployments that previously ran with no idle bound now get a 10-min ceiling. This is the intended fix; call it out in CHANGELOG.
 - No schema change, no wire-format change, no cross-repo coordination (masc-local resolution).
 
@@ -80,4 +85,4 @@ Leave the default `None`; emit a loud WARN when unset and document the knob.
 
 ## 7. Implementation note (post-approval)
 
-Bounded: (a) name the floor constant + resolve `None → Some floor` in `Keeper_runtime_resolved`; (b) add the boot log line with source attribution; (c) test the hang-cancels / slow-survives / env-overrides matrix with a fake clock. No OAS change. Sequenced after this RFC is accepted.
+Bounded: (a) name the floor constant + resolve `None → Some floor` in `Keeper_runtime_resolved`; (b) add the boot log line with source attribution; (c) test the hang-cancels / slow-survives / env-overrides matrix with a fake clock. No agent_core change. Sequenced after this RFC is accepted.

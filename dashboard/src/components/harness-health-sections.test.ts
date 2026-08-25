@@ -170,7 +170,7 @@ describe('heroTitle', () => {
       evaluator_status: 'idle',
       last_signal_at: null,
     })
-    expect(heroTitle(data)).toBe('아직 감시 기록이 없습니다.')
+    expect(heroTitle(data)).toBe('아직 감시 기록 없음')
   })
 
   it('returns healthy title when all are healthy/idle', () => {
@@ -300,27 +300,27 @@ describe('statusCardClass', () => {
 
 describe('emptyReasonText', () => {
   it('returns window_empty message', () => {
-    expect(emptyReasonText('window_empty')).toBe('선택된 범위에는 신호가 없습니다.')
+    expect(emptyReasonText('window_empty')).toBe('선택된 범위에는 신호 없음')
   })
 
   it('returns no_recent_events message', () => {
-    expect(emptyReasonText('no_recent_events')).toBe('기록은 있지만 최근 신호가 없습니다.')
+    expect(emptyReasonText('no_recent_events')).toBe('기록은 있지만 최근 신호 없음')
   })
 
   it('returns default message for no_runtime_activity', () => {
-    expect(emptyReasonText('no_runtime_activity')).toBe('아직 이 감시 채널을 통과한 실행이 없습니다.')
+    expect(emptyReasonText('no_runtime_activity')).toBe('아직 이 감시 채널을 통과한 실행 없음')
   })
 
   it('returns default message for null', () => {
-    expect(emptyReasonText(null)).toBe('아직 이 감시 채널을 통과한 실행이 없습니다.')
+    expect(emptyReasonText(null)).toBe('아직 이 감시 채널을 통과한 실행 없음')
   })
 
   it('returns default message for undefined', () => {
-    expect(emptyReasonText(undefined)).toBe('아직 이 감시 채널을 통과한 실행이 없습니다.')
+    expect(emptyReasonText(undefined)).toBe('아직 이 감시 채널을 통과한 실행 없음')
   })
 
   it('returns default message for unknown reason', () => {
-    expect(emptyReasonText('something_else')).toBe('아직 이 감시 채널을 통과한 실행이 없습니다.')
+    expect(emptyReasonText('something_else')).toBe('아직 이 감시 채널을 통과한 실행 없음')
   })
 })
 
@@ -329,8 +329,12 @@ describe('verdictTone', () => {
     expect(verdictTone('approve')).toBe('bg-[var(--color-status-ok)]')
   })
 
-  it('returns ok for approve:conditional', () => {
-    expect(verdictTone('approve:conditional')).toBe('bg-[var(--color-status-ok)]')
+  // 생산자는 승인을 `approve` 한 마디로만 내보내고(eval_calibration.ml:42),
+  // OCaml 쪽 역변환도 `["approve"]` 한 조각일 때만 승인으로 읽는다. 콜론이
+  // 붙은 승인은 어느 쪽도 만들지 못하고 어느 쪽도 이해하지 못하는 값이라,
+  // 접두사만 보고 승인 색을 칠하던 예전 동작을 따라가지 않는다.
+  it('콜론 붙은 approve 는 승인으로 읽지 않는다', () => {
+    expect(verdictTone('approve:conditional')).toBe('bg-[var(--color-status-err)]')
   })
 
   it('returns bad for reject', () => {

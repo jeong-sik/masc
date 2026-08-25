@@ -352,7 +352,7 @@
         <div class="goal-rail"><span class="goal-id">G2</span><span class="goal-phase">Phase 1 · 지금</span></div>
         <div class="goal-body">
           <h3>HTTP projection 배선 + 대시보드 타입</h3>
-          <p>pull 기반 <span class="fl">/api/v1/dashboard/tools</span> 응답에 형제 필드로 노출(SSE 불필요 — scheduled_automation과 동일 경로).</p>
+          <p>pull 기반 <span class="fl">/api/v1/dashboard/tools</span> 응답에 형제 필드로 노출(SSE 불필요).</p>
           <dl class="kv">
             <dt>산출물</dt><dd><code>attach_live_tools_projections</code>에 한 줄 · <code>DashboardKeeperBackground</code> 타입 + <span class="mono">DashboardToolsResponse.keeper_background?</span></dd>
             <dt>연결점</dt><dd>server_dashboard_http_runtime_info.ml:3423 · dashboard-tools-prompts.ts:332</dd>
@@ -384,7 +384,7 @@
           <p>dormant한 <code>tool_orchestration</code> 상태머신을 keeper 런타임에 배선해 <b>진짜</b> (issued · tool_name · ETA · in_flight/awaiting)를 관측. <span class="mono">keeper_tool_call</span> SSE(이미 emit됨)로 라이브 레지스트리를 채우는 경로 검토.</p>
           <dl class="kv">
             <dt>산출물</dt><dd>RFC + <span class="mono">Tool_call_inflight</span> waiting_source 신설 · 라이브 레지스트리</dd>
-            <dt>연결점</dt><dd>tool_event.mli:29 (dormant) · keeper_tools_oas_handler_telemetry.ml:65 (SSE) · waiting_inventory enum</dd>
+            <dt>연결점</dt><dd>tool_event.mli:29 (dormant) · keeper_tools_agent_core_handler_telemetry.ml:65 (SSE) · waiting_inventory enum</dd>
             <dt>이유</dt><dd>Phase 1의 bg/fusion/hitl은 근사치 — 도구별 in-flight의 정답 집은 여기</dd>
             <dt>의존</dt><dd>G1–G3 (표시 계층 선행)</dd>
           </dl>
@@ -443,7 +443,7 @@
       </div>
       <div class="node dormant">
         <h4>keeper_tool_call SSE <span class="chip info">stream</span></h4>
-        <span class="path">keeper_tools_oas_handler_telemetry.ml:65</span>
+        <span class="path">keeper_tools_agent_core_handler_telemetry.ml:65</span>
         <p>도구 호출이 이미 SSE로 흐름. Phase 2 라이브 레지스트리의 급전.</p>
       </div>
       <div class="node absent">

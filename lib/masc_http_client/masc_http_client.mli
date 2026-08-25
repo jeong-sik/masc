@@ -56,6 +56,18 @@ val post_sync :
     Connection-level errors (DNS, TLS, I/O) are caught and surfaced
     as [Error _] rather than propagating as exceptions. *)
 
+val post_response_sync :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  url:string ->
+  headers:(string * string) list ->
+  body:string ->
+  unit ->
+  (response, string) result
+(** [post_response_sync] is {!post_sync} with the response headers kept,
+    for a caller that needs one of them -- the MCP transport returns a new
+    session's id in [Mcp-Session-Id], not in the body. *)
+
 val patch_sync :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->
@@ -90,6 +102,44 @@ val get_sync :
     discarded — returns [Ok (status_code, body_string)] for callers
     that only care about status + body. *)
 
+val post_stream :
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  idle_timeout_sec:float ->
+  url:string ->
+  headers:(string * string) list ->
+  body:string ->
+  on_chunk:(string -> unit) ->
+  unit ->
+  (Pool.stream_outcome, string) result
+(** [post_stream ~clock ~idle_timeout_sec ~url ~headers ~body ~on_chunk ()]
+    POSTs and calls [on_chunk] with each response body chunk as it arrives,
+    for callers rendering a live view of a server-sent event stream.
+
+    On the [Streamed] branch the complete body is returned as well, so a
+    caller can render from the chunks and still run an authoritative
+    whole-body decode at the end. On a non-success status the body comes back
+    as [Buffered] and [on_chunk] is never called — see {!Pool.stream_outcome}.
+
+    There is no wall-clock cap: one would cancel a stream that is still
+    delivering bytes. [idle_timeout_sec] bounds silence instead, and is
+    required because a tolerable silence depends on the protocol — a keeper
+    turn goes quiet for as long as the tool it is running takes. *)
+
+val get_stream :
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  idle_timeout_sec:float ->
+  url:string ->
+  headers:(string * string) list ->
+  on_chunk:(string -> unit) ->
+  unit ->
+  (Pool.stream_outcome, string) result
+(** [get_stream ~clock ~idle_timeout_sec ~url ~headers ~on_chunk ()] is
+    {!post_stream} for a GET: one request whose body is a server-sent event
+    stream the caller reads chunk by chunk for as long as it delivers. The
+    observer feed at [GET /mcp?sse_kind=observer] is the case. The same
+    rules apply: no total cap, silence bounded by [idle_timeout_sec], a
+    non-success status comes back [Buffered] with [on_chunk] never called. *)
+
 (** {1 Typed pool surface}
 
     Re-exports [Pool] (lib/masc_http_client/pool.mli) so callers and
@@ -100,13 +150,6 @@ val get_sync :
     [Pool.request] is reserved for code that needs typed responses
     with header maps or non-default config. *)
 module Pool : module type of Pool
-
-val pool_singleton_opt : unit -> Pool.t option
-(** [pool_singleton_opt ()] returns some domain's [Pool.t] if any
-    has been lazy-initialized by a prior HTTP call, [None] otherwise.
-    Backward-compatible read-only accessor for telemetry consumers.
-    For comprehensive metrics across all domains, use
-    {!all_domain_pools} instead. *)
 
 val all_domain_pools : unit -> (int * Pool.t) list
 (** [all_domain_pools ()] returns all domain-local pools as

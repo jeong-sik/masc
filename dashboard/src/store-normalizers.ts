@@ -9,12 +9,9 @@ import { normalizeKeeperTrust } from './keeper-store-normalize'
 import { normalizeStopCause } from './lib/stop-cause'
 import { parseAgentStatus } from './lib/agent-status'
 import {
-  DASHBOARD_BLOCKED_KEEPER_REASONS,
-  DASHBOARD_KEEPER_EXECUTION_TRUTHS,
-  DASHBOARD_KEEPER_FLEET_OPERATOR_ACTIONS,
   DASHBOARD_KEEPER_FLEET_OPERATOR_SCHEMA,
-  DASHBOARD_KEEPER_NON_EXECUTABLE_CAUSES,
 } from './types/dashboard-execution'
+import { MENTION_DELIVERY_STATUSES } from './types/core'
 import type {
   Agent, Task, Message, ServerStatus,
   DashboardExecutionSummary, DashboardExecutionHandoff,
@@ -23,11 +20,6 @@ import type {
   DashboardExecutionContinuityBrief,
   DashboardConfigResolution,
   DashboardConfigResolutionItem,
-  DashboardBlockedKeeperFact,
-  DashboardBlockedKeeperReason,
-  DashboardKeeperExecutionTruth,
-  DashboardKeeperFleetOperatorAction,
-  DashboardKeeperNonExecutableCause,
   DashboardFleetPressureHealth,
   DashboardFleetSafetyHealth,
   DashboardBlockerClassObject,
@@ -51,7 +43,7 @@ export function normalizeAgentStatus(value: unknown): Agent['status'] {
   const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
   // Backend aliases that normalize to canonical AgentStatus tokens.
   if (raw === 'in_progress' || raw === 'claimed') return 'busy'
-  if (raw === 'dead' || raw === 'left') return 'offline'
+  if (raw === 'left') return 'offline'
   // Canonical tokens — validated by parseAgentStatus SSOT.
   return parseAgentStatus(raw) ?? undefined
 }
@@ -71,16 +63,12 @@ export function normalizeAgent(raw: unknown): Agent | null {
     keeper_id: asString(raw.keeper_id) ?? null,
     status: normalizeAgentStatus(raw.status),
     current_task: asString(raw.current_task) ?? null,
-    joined_at: asString(raw.joined_at),
+    session_bound_at: asString(raw.session_bound_at),
     last_seen: asString(raw.last_seen),
     capabilities: asStringArray(raw.capabilities),
     emoji: asString(raw.emoji),
     koreanName: asString(raw.koreanName) ?? asString(raw.korean_name),
     model: asString(raw.model),
-    traits: asStringArray(raw.traits),
-    interests: asStringArray(raw.interests),
-    activityLevel: asNumber(raw.activityLevel) ?? asNumber(raw.activity_level),
-    primaryValue: asString(raw.primaryValue) ?? asString(raw.primary_value),
   }
 }
 
@@ -96,12 +84,6 @@ export function normalizeTask(raw: unknown): Task | null {
         required_evidence: asStringArray(raw.contract.required_evidence),
         inspect_gate_evidence: asStringArray(raw.contract.inspect_gate_evidence),
         verify_gate_evidence: asStringArray(raw.contract.verify_gate_evidence),
-        links: isRecord(raw.contract.links)
-          ? {
-              operation_id: asString(raw.contract.links.operation_id) ?? null,
-              session_id: asString(raw.contract.links.session_id) ?? null,
-            }
-          : null,
       }
     : null
   const handoffContext = isRecord(raw.handoff_context)
@@ -129,7 +111,6 @@ export function normalizeTask(raw: unknown): Task | null {
     status_raw: asString(raw.status_raw) ?? null,
     priority: asNumber(raw.priority),
     assignee: asString(raw.assignee),
-    assignee_kind: asString(raw.assignee_kind) ?? null,
     description: asString(raw.description),
     created_at: asString(raw.created_at),
     updated_at: asString(raw.updated_at),
@@ -151,15 +132,24 @@ export function normalizeMessage(raw: unknown): Message | null {
   const from = asString(raw.from) ?? asString(raw.from_agent)
   const content = asString(raw.content) ?? ''
   const timestamp = asString(raw.timestamp)
-  const workspace = asString(raw.workspace) ?? asString(raw.workspace_id) ?? asString(raw.channel) ?? asString(raw.channel_name)
+  const workspace = asString(raw.workspace) ?? asString(raw.workspace_id) ?? asString(raw.channel)
+  const rawMentionDelivery = asString(raw.mention_delivery)
+  const mentionDelivery =
+    rawMentionDelivery != null
+    && (MENTION_DELIVERY_STATUSES as readonly string[]).includes(rawMentionDelivery)
+      ? (rawMentionDelivery as Message['mentionDelivery'])
+      : undefined
   return {
     id: asString(raw.id),
+    requestId: asString(raw.request_id),
     seq: asNumber(raw.seq),
     from,
     content,
     timestamp,
     type: asString(raw.type),
     workspace,
+    mentionDelivery,
+    mentions: Array.isArray(raw.mentions) ? asStringArray(raw.mentions) : undefined,
   }
 }
 
@@ -172,15 +162,10 @@ export function normalizeExecutionSummary(raw: unknown): DashboardExecutionSumma
   return {
     active_operations: asNumber(raw.active_operations),
     blocked_operations: asNumber(raw.blocked_operations),
-    runtime_pressure: asNumber(raw.runtime_pressure),
     worker_alerts: asNumber(raw.worker_alerts),
     continuity_alerts: asNumber(raw.continuity_alerts),
     priority_items: asNumber(raw.priority_items),
-    todo_tasks: asNumber(raw.todo_tasks),
-    claimed_tasks: asNumber(raw.claimed_tasks),
-    running_tasks: asNumber(raw.running_tasks),
     done_tasks: asNumber(raw.done_tasks),
-    cancelled_tasks: asNumber(raw.cancelled_tasks),
     keepers: asNumber(raw.keepers),
   }
 }
@@ -232,7 +217,6 @@ export function normalizeExecutionQueueItem(raw: unknown): DashboardExecutionQue
     next_human_action: asString(raw.next_human_action) ?? null,
     terminal_reason_code: terminalReasonCode,
     stop_cause: normalizeStopCause({
-      stop_cause: raw.stop_cause,
       runtime_blocker_class: asString(raw.runtime_blocker_class) ?? asString(raw.runtime_blocker) ?? null,
       runtime_blocker_summary: asString(raw.runtime_blocker_summary) ?? null,
       terminal_reason_code: terminalReasonCode,
@@ -302,7 +286,6 @@ export function normalizeExecutionContinuityBrief(raw: unknown): DashboardExecut
     note,
     focus,
     last_signal_at: asString(raw.last_signal_at) ?? null,
-    last_autonomous_action_at: asString(raw.last_autonomous_action_at) ?? null,
     generation: asNumber(raw.generation),
     turn_count: asNumber(raw.turn_count),
     context_ratio: asNumber(raw.context_ratio) ?? null,
@@ -339,21 +322,15 @@ export function normalizeDashboardConfigResolution(
   if (!isRecord(raw)) return null
   const status = asString(raw.status)
   const configRoot = normalizeDashboardConfigResolutionItem(raw.config_root)
-  const runtimeAuthoring = normalizeDashboardConfigResolutionItem(raw.runtime_authoring)
-  const runtime = normalizeDashboardConfigResolutionItem(raw.runtime)
   const prompts = normalizeDashboardConfigResolutionItem(raw.prompts)
   const keepers = normalizeDashboardConfigResolutionItem(raw.keepers)
-  const personas = normalizeDashboardConfigResolutionItem(raw.personas)
-  if (!status || !configRoot || !runtimeAuthoring || !runtime || !prompts || !keepers || !personas) return null
+  if (!status || !configRoot || !prompts || !keepers) return null
   return {
     status: status as DashboardConfigResolution['status'],
     warnings: asStringArray(raw.warnings),
     config_root: configRoot,
-    runtime_authoring: runtimeAuthoring,
-    runtime,
     prompts,
     keepers,
-    personas,
   }
 }
 
@@ -604,86 +581,6 @@ function normalizeDashboardPausedKeepersHealth(raw: unknown): DashboardPausedKee
   }
 }
 
-const dashboardBlockedKeeperReasonSet: ReadonlySet<string> =
-  new Set(DASHBOARD_BLOCKED_KEEPER_REASONS)
-const dashboardKeeperFleetOperatorActionSet: ReadonlySet<string> =
-  new Set(DASHBOARD_KEEPER_FLEET_OPERATOR_ACTIONS)
-const dashboardKeeperExecutionTruthSet: ReadonlySet<string> =
-  new Set(DASHBOARD_KEEPER_EXECUTION_TRUTHS)
-const dashboardKeeperNonExecutableCauseSet: ReadonlySet<string> =
-  new Set(DASHBOARD_KEEPER_NON_EXECUTABLE_CAUSES)
-
-function currentKeeperFleetFactInvalid(): DashboardBlockedKeeperFact {
-  return {
-    keeper_name: null,
-    agent_name: null,
-    task_id: null,
-    task_status: null,
-    reason: 'current_fact_invalid',
-    action: 'inspect_current_keeper_fact',
-    execution_truth: 'unknown',
-    non_executable_cause: 'current_fact_invalid',
-    operator_action_type: null,
-    operator_tool_name: null,
-    operator_action_confirm_required: null,
-  }
-}
-
-function nonEmptyString(value: unknown): string | null {
-  const parsed = asString(value)?.trim()
-  return parsed ? parsed : null
-}
-
-function normalizeDashboardBlockedKeeperFact(raw: unknown): DashboardBlockedKeeperFact | null {
-  if (!isRecord(raw)) return null
-  const keeperName = raw.keeper_name === null ? null : nonEmptyString(raw.keeper_name)
-  const agentName = raw.agent_name == null ? null : nonEmptyString(raw.agent_name)
-  const taskId = raw.task_id == null ? null : nonEmptyString(raw.task_id)
-  const taskStatus = raw.task_status == null ? null : nonEmptyString(raw.task_status)
-  const rawReason = nonEmptyString(raw.reason)
-  const rawAction = nonEmptyString(raw.action)
-  const rawExecutionTruth = nonEmptyString(raw.execution_truth)
-  const rawNonExecutableCause = nonEmptyString(raw.non_executable_cause)
-  if (
-    rawReason == null
-    || !dashboardBlockedKeeperReasonSet.has(rawReason)
-    || rawAction == null
-    || !dashboardKeeperFleetOperatorActionSet.has(rawAction)
-    || rawExecutionTruth == null
-    || !dashboardKeeperExecutionTruthSet.has(rawExecutionTruth)
-    || rawNonExecutableCause == null
-    || !dashboardKeeperNonExecutableCauseSet.has(rawNonExecutableCause)
-  ) {
-    return null
-  }
-  const reason = rawReason as DashboardBlockedKeeperReason
-  const action = rawAction as DashboardKeeperFleetOperatorAction
-  const executionTruth = rawExecutionTruth as DashboardKeeperExecutionTruth
-  const nonExecutableCause =
-    rawNonExecutableCause as DashboardKeeperNonExecutableCause
-  if (keeperName == null && !(reason === 'no_keeper_binding' && agentName != null)) {
-    return null
-  }
-  return {
-    keeper_name: keeperName,
-    agent_name: agentName,
-    task_id: taskId,
-    task_status: taskStatus,
-    reason,
-    action,
-    execution_truth: executionTruth,
-    non_executable_cause: nonExecutableCause,
-    operator_action_type:
-      raw.operator_action_type == null ? null : nonEmptyString(raw.operator_action_type),
-    operator_tool_name:
-      raw.operator_tool_name == null ? null : nonEmptyString(raw.operator_tool_name),
-    operator_action_confirm_required:
-      raw.operator_action_confirm_required == null
-        ? null
-        : asBoolean(raw.operator_action_confirm_required) ?? null,
-  }
-}
-
 function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPressureHealth | null {
   if (!isRecord(raw)) return null
   const schema = asString(raw.schema)
@@ -694,11 +591,9 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
       : null
   const reason = asString(raw.reason) ?? null
   const blocker = raw.blocker === null ? null : asString(raw.blocker) ?? null
-  const blockedKeeperCount = asNumber(raw.blocked_keeper_count)
-  const blockedKeepers = Array.isArray(raw.blocked_keepers)
-    ? raw.blocked_keepers.map(normalizeDashboardBlockedKeeperFact)
-    : null
   const bootableKeeperCount = asNumber(raw.bootable_keeper_count)
+  const autobootKeeperNames = asStringArray(raw.autoboot_enabled_keeper_names)
+  const executableKeeperNames = asStringArray(raw.executable_keeper_names)
   const runningKeeperFiberCount = asNumber(raw.running_keeper_fiber_count)
   const failingKeeperFiberCount = asNumber(raw.failing_keeper_fiber_count)
   const recoveringKeeperFiberCount = asNumber(raw.recovering_keeper_fiber_count)
@@ -711,34 +606,21 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
   const pausedAutobootEnabledKeeperCount = asNumber(raw.paused_autoboot_enabled_keeper_count)
   const targetReactionCapacityCount = asNumber(raw.target_reaction_capacity_count)
   const operatorActionRequired = asBoolean(raw.operator_action_required)
-  const canonicalBlockedKeepers =
-    blockedKeepers?.every((fact): fact is DashboardBlockedKeeperFact => fact != null)
-      ? blockedKeepers
-      : null
-  const blockedCountIsCurrent =
-    blockedKeeperCount != null
-    && Number.isInteger(blockedKeeperCount)
-    && blockedKeeperCount >= 0
   const currentShape =
     schema === DASHBOARD_KEEPER_FLEET_OPERATOR_SCHEMA
     && status != null
     && Object.prototype.hasOwnProperty.call(raw, 'blocker')
-    && blockedCountIsCurrent
-    && canonicalBlockedKeepers != null
-    && blockedKeeperCount === canonicalBlockedKeepers.length
     && operatorActionRequired != null
     && operatorActionRequired === (status !== 'ok')
-    && ((status === 'ok' && canonicalBlockedKeepers.length === 0)
-      || (status !== 'ok' && canonicalBlockedKeepers.length > 0))
   if (!currentShape) {
     return {
       schema: DASHBOARD_KEEPER_FLEET_OPERATOR_SCHEMA,
       status: 'blocked',
       reason: 'current_fact_invalid',
       blocker: 'current_fact_invalid',
-      blocked_keeper_count: 1,
-      blocked_keepers: [currentKeeperFleetFactInvalid()],
       bootable_keeper_count: bootableKeeperCount ?? null,
+      autoboot_enabled_keeper_names: autobootKeeperNames,
+      executable_keeper_names: executableKeeperNames,
       running_keeper_fiber_count: runningKeeperFiberCount ?? null,
       failing_keeper_fiber_count: failingKeeperFiberCount ?? null,
       recovering_keeper_fiber_count: recoveringKeeperFiberCount ?? null,
@@ -758,9 +640,9 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
     status,
     reason,
     blocker,
-    blocked_keeper_count: blockedKeeperCount,
-    blocked_keepers: canonicalBlockedKeepers,
     bootable_keeper_count: bootableKeeperCount ?? null,
+    autoboot_enabled_keeper_names: autobootKeeperNames,
+    executable_keeper_names: executableKeeperNames,
     running_keeper_fiber_count: runningKeeperFiberCount ?? null,
     failing_keeper_fiber_count: failingKeeperFiberCount ?? null,
     recovering_keeper_fiber_count: recoveringKeeperFiberCount ?? null,
@@ -906,6 +788,7 @@ export function messageSortKey(message: Message): number {
 }
 
 function messageIdentityKey(message: Message): string {
+  if (message.requestId) return JSON.stringify(['request_id', message.requestId])
   if (typeof message.seq === 'number' && Number.isFinite(message.seq)) {
     return JSON.stringify(['seq', message.seq])
   }
@@ -971,6 +854,11 @@ export function normalizeBuildIdentity(raw: unknown): ServerStatus['build'] | un
   return {
     release_version: releaseVersion,
     commit: asString(raw.commit) ?? null,
+    commit_source: asString(raw.commit_source) ?? null,
+    binary_commit: asString(raw.binary_commit) ?? null,
+    binary_commit_source: asString(raw.binary_commit_source) ?? null,
+    repo_head_commit: asString(raw.repo_head_commit) ?? null,
+    repo_head_commit_source: asString(raw.repo_head_commit_source) ?? null,
     started_at: startedAt,
     uptime_seconds: uptimeSeconds,
   }

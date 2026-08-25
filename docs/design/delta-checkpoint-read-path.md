@@ -1,10 +1,5 @@
 ---
 status: reference
-last_verified: 2026-04-17
-code_refs:
-  - lib/keeper/keeper_checkpoint_store.ml
-  - lib/keeper/keeper_fs.ml
-  - lib/keeper/
 ---
 
 # Delta Checkpoint Read Path (Stage 3)
@@ -41,8 +36,8 @@ load_oas(session_dir, session_id)
 
 ## Constraints
 
-- Delta sidecar is only written when `OAS_DELTA_CHECKPOINT=shadow_write`.
-- Stage 3 read path will be gated behind `OAS_DELTA_CHECKPOINT=restore`.
+- Delta sidecar is only written when `AGENT_CORE_DELTA_CHECKPOINT=shadow_write`.
+- Stage 3 read path will be gated behind `AGENT_CORE_DELTA_CHECKPOINT=restore`.
 - Full checkpoint is always written alongside any delta sidecar, so
   fallback to full restore is always available.
 - The 10-delta chain depth limit is enforced by the caller: after 10

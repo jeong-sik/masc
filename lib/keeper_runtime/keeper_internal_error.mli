@@ -1,12 +1,29 @@
 (** Structured keeper-internal error envelopes carried through
-    [Agent_sdk.Error.Internal]. *)
+    [Agent_core.Error.Internal]. *)
 
 (** Canonical wire kind emitted for {!Capacity_backpressure}.  Receipt
     terminal projection and decoding consume this same value. *)
 val capacity_backpressure_kind : string
-val incomplete_tool_transcript_kind : string
 (** Canonical wire kind for structural transcript corruption rejected before
     provider dispatch. *)
+val incomplete_tool_transcript_kind : string
+
+(** Canonical wire kind for a provider-attempt failure whose effect disposition
+    forbids same-turn replay. *)
+val provider_attempt_effect_fenced_kind : string
+
+(** Canonical wire kind for a fenced provider-attempt failure whose turn also
+    carried typed pre_tool_use rejections: the model's correction round-trip
+    was the visible casualty (masc#28885). Fence semantics are identical to
+    {!provider_attempt_effect_fenced_kind}; only the label differs. *)
+val tool_correction_lost_kind : string
+
+(** Canonical wire kind for a response MASC's own accept contract refused. *)
+val accept_rejected_kind : string
+
+(** Canonical wire kind for a failed turn-closing tool effect, or one that
+    returned no typed receipt for what it did. *)
+val terminal_effect_failed_kind : string
 
 type provider_rejection = {
   provider_label : string;
@@ -18,29 +35,9 @@ type capacity_backpressure_source =
   | Client_capacity
   | Runtime_slot
 
-val capacity_backpressure_source_to_string :
-  capacity_backpressure_source -> string
-
-val capacity_backpressure_source_of_string :
-  string -> capacity_backpressure_source option
-
 type capacity_retry_after =
   | Explicit of float
   | No_retry_hint
-
-(** Legacy diagnostic carried by persisted [Capacity_backpressure] envelopes.
-    It has no retry, admission, or lifecycle authority. *)
-type provider_cooldown_cause =
-  | Cooldown_provider_capacity
-  | Cooldown_soft_rate_limited
-  | Cooldown_server_error
-  | Cooldown_hard_quota
-  | Cooldown_terminal_failure
-  | Cooldown_provider_error
-  | Cooldown_rejected
-
-val provider_cooldown_cause_to_string : provider_cooldown_cause -> string
-val provider_cooldown_cause_of_string : string -> provider_cooldown_cause option
 
 type runtime_exhaustion_reason =
   | Connection_refused
@@ -66,9 +63,14 @@ type accept_rejection_kind =
   | Accept_no_usable_progress
   | Accept_predicate_rejected
 
-val accept_rejection_kind_to_string : accept_rejection_kind -> string
-val accept_rejection_kind_of_string : string -> accept_rejection_kind option
+(** The wire label for a {!Llm_provider.Http_client.network_error_kind}.
+    Exported because [Keeper_agent_error] renders the same seven kinds for
+    its own [network_kind] field and kept a byte-identical copy; two
+    mappings for one type can be renamed apart. *)
+val network_error_kind_to_string :
+  Llm_provider.Http_client.network_error_kind -> string
 
+val accept_rejection_kind_to_string : accept_rejection_kind -> string
 type accept_response_shape =
   | Accept_response_empty
   | Accept_response_thinking_only
@@ -78,10 +80,8 @@ type accept_response_shape =
   | Accept_response_mixed_without_deliverable_content
   | Accept_response_has_deliverable_content
 
-val accept_response_shape_to_string : accept_response_shape -> string
-val accept_response_shape_of_string : string -> accept_response_shape option
-val accept_response_shape_of_agent_sdk :
-  Agent_sdk.Response_shape.content_shape -> accept_response_shape
+val accept_response_shape_of_agent_core :
+  Agent_core.Response_shape.content_shape -> accept_response_shape
 
 type transcript_quarantine_reason =
   | Structurally_invalid
@@ -106,9 +106,6 @@ type masc_internal_error =
       source : capacity_backpressure_source;
       detail : string;
       retry_after : capacity_retry_after;
-      cooldown_cause : provider_cooldown_cause option;
-      (** Legacy diagnostic only. Current producers use [None]; decoded values
-          never grant retry, admission, or lifecycle authority. *)
     }
   | Resumable_cli_session of {
       runtime_id : string;
@@ -124,7 +121,7 @@ type masc_internal_error =
          [MaxTokens] on an empty/thinking_only shape marks a truncation, distinct
          from a clean [EndTurn] no-progress terminal. Groundwork slice: threaded
          and serialized, not yet consumed by classification. *)
-      stop_reason : Agent_sdk.Types.stop_reason option;
+      stop_reason : Agent_core.Types.stop_reason option;
       reason : string;
     }
   | Internal_unhandled_exception of {
@@ -147,6 +144,26 @@ type masc_internal_error =
       effect_disposition : Tool_result.failure_effect_disposition;
       diagnostic : string;
     }
+  | Provider_attempt_effect_fenced of {
+      runtime_id : string;
+      effect_disposition : Keeper_provider_attempt_effect_core.t;
+      diagnostic : string;
+    }
+      (** A provider attempt failed after an effect was attempted or after the
+          runtime lost complete effect observation. The exact source must be
+          terminalized as failed, never replayed automatically. *)
+  | Tool_correction_lost of {
+      runtime_id : string;
+      effect_disposition : Keeper_provider_attempt_effect_core.t;
+      reject_count : int;
+      diagnostic : string;
+    }
+      (** The same fence, on a turn that also recorded typed pre_tool_use
+          rejections: the runtime escalated a corrective tool error into the
+          turn's death (masc#28885). Disposition is identical to
+          {!Provider_attempt_effect_fenced} — never replayed in-turn — the
+          label exists so operators can tell a lost correction from an
+          ordinary fenced provider failure. *)
   | Receipt_persistence_failed of { detail : string }
   | Gate_replay_repair_required of {
       approval_id : string;
@@ -155,12 +172,10 @@ type masc_internal_error =
       detail : string;
     }
 
-val masc_internal_error_prefix : string
-
 val runtime_runner_execute_site : string
 
 val blocker_detail_structured_max_chars : int
-(** Upper bound (~2000) preserved for a [masc_oas_error] structured payload
+(** Upper bound (~2000) preserved for a [masc_agent_core_error] structured payload
     by {!cap_blocker_detail}. *)
 
 val cap_blocker_detail : string -> string
@@ -173,6 +188,37 @@ val masc_internal_error_to_json : masc_internal_error -> Yojson.Safe.t
 
 val summary_of_masc_internal_error : masc_internal_error -> string option
 
+(** The closed set of wire kinds {!kind_of_masc_internal_error} can emit — one
+    per {!masc_internal_error} constructor.
+
+    It exists because the wire is a string and the receipt classifier
+    ([Keeper_terminal_reason.of_wire]) had to guess the string back. It knew
+    five of the thirteen and read the rest as an unrecognised state, so a
+    keeper's own named failures reached the operator as "unmapped runtime
+    state" (#29929). Matching this type instead makes a new constructor a
+    compile obligation at every consumer, which is what
+    [Keeper_turn_terminal_code] already promises for the layer above. *)
+type wire_kind =
+  | Wire_runtime_exhausted
+  | Wire_capacity_backpressure
+  | Wire_resumable_cli_session
+  | Wire_accept_rejected
+  | Wire_internal_unhandled_exception
+  | Wire_internal_bridge_exception
+  | Wire_internal_contract_rejected
+  | Wire_incomplete_tool_transcript
+  | Wire_terminal_effect_failed
+  | Wire_provider_attempt_effect_fenced
+  | Wire_tool_correction_lost
+  | Wire_receipt_persistence_failed
+  | Wire_gate_replay_repair_required
+
+val wire_kind_to_string : wire_kind -> string
+
+(** [None] for any string this module does not emit, including the agent-core
+    and provider wire families that travel the same receipt field. *)
+val wire_kind_of_string : string -> wire_kind option
+
 val kind_of_masc_internal_error : masc_internal_error -> string
 
 val runtime_id_of_masc_internal_error : masc_internal_error -> string
@@ -183,8 +229,8 @@ val accept_no_progress_retry_kind :
 
 val accept_rejection_has_no_progress_retry_hint : masc_internal_error -> bool
 
-val sdk_error_of_masc_internal_error :
-  masc_internal_error -> Agent_sdk.Error.sdk_error
+val core_error_of_masc_internal_error :
+  masc_internal_error -> Agent_core.Error.t
 
 val parse_masc_internal_error_json :
   Yojson.Safe.t -> masc_internal_error option
@@ -193,4 +239,4 @@ val classify_masc_internal_error_of_string :
   string -> masc_internal_error option
 
 val classify_masc_internal_error :
-  Agent_sdk.Error.sdk_error -> masc_internal_error option
+  Agent_core.Error.t -> masc_internal_error option

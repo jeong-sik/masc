@@ -1,48 +1,58 @@
 open Alcotest
 open Masc
 module Trace = Server_dashboard_http_keeper_api_trace
-module Types = Server_dashboard_http_keeper_api_types
 module Checkpoints = Server_dashboard_http_keeper_api_checkpoints
-module Keeper_api = Server_dashboard_http_keeper_api
 module Runtime_lens_scan = Server_dashboard_http_keeper_runtime_manifest_scan
 module Runtime_lens_swimlane = Server_dashboard_http_keeper_runtime_lens_swimlane
 module T = Trajectory
 
-let mk_thinking_with_turn ~turn ~ts ~redacted ~content =
-  T.Thinking
-    { ts
+let mk_thinking_with_turn ~turn ~block_index ~reasoning_kind =
+  T.Withheld_thinking
+    { ts = Float.of_int turn
     ; ts_iso = "2026-06-29T00:00:00Z"
     ; turn
-    ; content
-    ; content_length = String.length content
-    ; redacted
+    ; block_index
+    ; reasoning_kind
+    ; char_count = 10
     }
 ;;
 
-let mk_thinking ~ts ~redacted ~content =
-  mk_thinking_with_turn ~turn:1 ~ts ~redacted ~content
+let mk_thinking ~block_index =
+  mk_thinking_with_turn
+    ~turn:1
+    ~block_index
+    ~reasoning_kind:T.Thinking_block
 ;;
 
 let test_dedupe_preserves_first_order () =
-  let t1 = mk_thinking ~ts:1.0 ~redacted:false ~content:"A" in
-  let t2 = mk_thinking ~ts:2.0 ~redacted:false ~content:"B" in
-  let t1_dup = mk_thinking ~ts:1.0 ~redacted:false ~content:"A" in
+  let t1 = mk_thinking ~block_index:1 in
+  let t2 = mk_thinking ~block_index:2 in
+  let t1_dup = mk_thinking ~block_index:1 in
   let input = [ t1; t2; t1_dup ] in
   let result = Trace.dedupe_thinking_lines input in
   check int "length" 2 (List.length result);
   match result with
-  | [ T.Thinking a; T.Thinking b ] ->
-    check string "first" "A" a.content;
-    check string "second" "B" b.content
+  | [ T.Withheld_thinking a; T.Withheld_thinking b ] ->
+    check int "first" 1 a.block_index;
+    check int "second" 2 b.block_index
   | _ -> fail "expected two thinking lines"
 ;;
 
-let test_dedupe_precision () =
-  let t1 = mk_thinking ~ts:1.1234561 ~redacted:false ~content:"A" in
-  let t2 = mk_thinking ~ts:1.1234562 ~redacted:false ~content:"A" in
+let test_dedupe_distinguishes_turn_identity () =
+  let t1 =
+    mk_thinking_with_turn
+      ~turn:1
+      ~block_index:1
+      ~reasoning_kind:T.Thinking_block
+  in
+  let t2 =
+    mk_thinking_with_turn
+      ~turn:2
+      ~block_index:1
+      ~reasoning_kind:T.Thinking_block
+  in
   let input = [ t1; t2 ] in
   let result = Trace.dedupe_thinking_lines input in
-  (* Without the fix, Printf.sprintf "%.6f" would truncate both to 1.123456 and drop t2 *)
   check int "length" 2 (List.length result)
 ;;
 
@@ -63,135 +73,36 @@ let with_temp_dir f =
   Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
 ;;
 
-let test_read_invalid_json_skips () =
-  with_temp_dir (fun dir ->
-    let config = Workspace.default_config dir in
-    let trace_file = Keeper_types_support.keeper_internal_history_path config "test_trace" in
-    let trace_dir = Filename.dirname trace_file in
-    Unix.system (Printf.sprintf "mkdir -p '%s'" trace_dir) |> ignore;
-    let oc = open_out trace_file in
-    (* Rows persist message text as typed [content_blocks] (the only supported
-       message-content shape), not a flat [content] string. 1 valid line, 1
-       invalid line (missing ts/timestamp), 1 valid line. *)
-    Printf.fprintf
-      oc
-      "{\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"A\"}],\"ts_unix\":1.0}\n\
-       {\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"B\"}]}\n\
-       {\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"C\"}],\"ts_unix\":3.0}\n";
-    close_out oc;
-    let result = Trace.read_internal_history_lines ~config ~trace_id:"test_trace" in
-    (* Should skip the invalid line ("B") without failing *)
-    check int "length" 2 (List.length result);
-    match result with
-    | [ T.Thinking a; T.Thinking c ] ->
-      check string "first" "A" a.content;
-      check (float 0.0) "first_ts" 1.0 a.ts;
-      check string "second" "C" c.content;
-      check (float 0.0) "second_ts" 3.0 c.ts
-    | _ -> fail "expected two valid thinking lines")
-;;
-
-let test_converter_decodes_content_blocks () =
-  (* Regression: persisted internal_assistant rows store text under typed
-     [content_blocks]. Before the fix, the converter read a flat [content]
-     field, decoded "" for every row, and returned None — the whole keeper
-     reasoning history was skipped (3339+ "Skipped invalid internal history
-     trace row" WARNs/day) and invisible in the dashboard trace. *)
-  let json =
-    Yojson.Safe.from_string
-      "{\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"hello world\"}],\"ts_unix\":2.0}"
-  in
-  match Types.internal_history_json_to_trajectory_line json with
-  | Some (T.Thinking entry) ->
-    check string "content" "hello world" entry.content;
-    check int "content_length" (String.length "hello world") entry.content_length;
-    check (float 0.0) "ts" 2.0 entry.ts
-  | Some (T.Tool_call _) -> fail "expected Thinking, got Tool_call"
-  | None -> fail "content_blocks row must decode to a Thinking line"
-;;
-
-let test_converter_rejects_flat_content () =
-  (* Contract: [content_blocks] is the only supported message-content shape
-     (Keeper_context_core_message_json). A legacy flat [content] string is not
-     the supported shape and must not silently masquerade as message text. *)
-  let json =
-    Yojson.Safe.from_string
-      "{\"source\":\"internal_assistant\",\"content\":\"legacy flat\",\"ts_unix\":2.0}"
-  in
-  check
-    bool
-    "flat content (no content_blocks) does not decode"
-    true
-    (Option.is_none (Types.internal_history_json_to_trajectory_line json))
-;;
-
-let test_skip_warns_once_per_file () =
-  (* Per-file summary: a trace file whose rows do not decode to thinking lines
-     must emit ONE summary WARN, not one per row. The dashboard re-reads each
-     trace on every poll, so the previous per-row WARN flooded the log (~16k/day
-     from a single busy trace, 84% of all warnings in one observed day). *)
-  with_temp_dir (fun dir ->
-    let config = Workspace.default_config dir in
-    let trace_file =
-      Keeper_types_support.keeper_internal_history_path config "summary_trace"
-    in
-    let trace_dir = Filename.dirname trace_file in
-    Unix.system (Printf.sprintf "mkdir -p '%s'" trace_dir) |> ignore;
-    let oc = open_out trace_file in
-    (* Four rows that do not decode to a thinking line (no ts field -> ts<=0). *)
-    Printf.fprintf
-      oc
-      "{\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"A\"}]}\n\
-       {\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"B\"}]}\n\
-       {\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"C\"}]}\n\
-       {\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"D\"}]}\n";
-    close_out oc;
-    let warnings = ref [] in
-    Console_sink.For_testing.reset ();
-    Console_sink.For_testing.set_writer (Some (fun l -> warnings := l :: !warnings));
-    Fun.protect ~finally:Console_sink.For_testing.reset (fun () ->
-      let result = Trace.read_internal_history_lines ~config ~trace_id:"summary_trace" in
-      check int "all four undecodable rows skipped" 0 (List.length result));
-    let trace_warns =
-      List.filter
-        (fun l -> Astring.String.is_infix ~affix:"internal history trace" l)
-        !warnings
-    in
-    check int "one summary warn for the file, not one per skipped row" 1
-      (List.length trace_warns))
-;;
-
 let test_chat_trace_block_by_turn_ref_reads_allowed_trace_history () =
   with_temp_dir (fun dir ->
     let config = Workspace.default_config dir in
     let masc_root = Workspace.masc_root_dir config in
     let keeper_name = "keeper-chat-trace" in
-    T.append_thinking
+    T.append_withheld_thinking
       ~masc_root
       ~keeper_name
       ~trace_id:"trace-current"
       { ts = 1.0
       ; ts_iso = "2026-07-01T00:00:01Z"
       ; turn = 1
-      ; content = "current turn"
-      ; content_length = String.length "current turn"
-      ; redacted = false
+      ; block_index = 0
+      ; reasoning_kind = T.Thinking_block
+      ; char_count = 12
       };
-    T.append_thinking
+    T.append_withheld_thinking
       ~masc_root
       ~keeper_name
       ~trace_id:"trace-old"
       { ts = 2.0
       ; ts_iso = "2026-07-01T00:00:02Z"
       ; turn = 42
-      ; content = "old turn"
-      ; content_length = String.length "old turn"
-      ; redacted = false
+      ; block_index = 0
+      ; reasoning_kind = T.Thinking_block
+      ; char_count = 8
       };
     let trace_block_by_turn_ref =
       Trace.chat_trace_block_by_turn_ref
         ~max_lines:10
-        ~max_internal_lines:10
         ~config
         ~keeper_name
         ~allowed_trace_ids:[ "trace-current"; "trace-old" ]
@@ -200,7 +111,7 @@ let test_chat_trace_block_by_turn_ref_reads_allowed_trace_history () =
     (match trace_block_by_turn_ref old_ref with
      | Some
          (Keeper_chat_blocks.Trace
-           { trace = [ Keeper_chat_blocks.Trace_think { text = "old turn"; _ } ] })
+           { trace = [ Keeper_chat_blocks.Trace_think { text = ""; content_withheld = true; _ } ] })
        -> ()
      | Some _ -> fail "old trace_id returned unexpected trace block"
      | None -> fail "old trace_id from trace_history should enrich");
@@ -242,6 +153,45 @@ let runtime_manifest_json_without_field row_json field =
   match row_json with
   | `Assoc fields -> `Assoc (List.remove_assoc field fields)
   | _ -> fail "runtime manifest row must encode as an object"
+;;
+
+(* The scan record carries no mutable field, so folding a row must leave the
+   argument at its previous value and report the advance through the return.
+   This pins the property the fold buys: a caller can hold on to an earlier
+   scan without it drifting under them. It does not compile against the
+   in-place shape, where [update_runtime_manifest_scan] returned [unit]. *)
+let test_runtime_manifest_scan_fold_leaves_input_untouched () =
+  let scan =
+    Runtime_lens_scan.make_runtime_manifest_scan
+      ~path:"/tmp/immutable-runtime-manifest.jsonl"
+      ~limit:4
+      ~scan_line_limit:16
+      ~scan_scope:"test"
+  in
+  let row =
+    Keeper_runtime_manifest.make
+      ~keeper_name:"immutable-scan-keeper"
+      ~trace_id:"trace-immutable-scan"
+      ~keeper_turn_id:7
+      ~event:Keeper_runtime_manifest.Turn_finished
+      ~status:"finished"
+      ()
+  in
+  let advanced = Runtime_lens_scan.update_runtime_manifest_scan scan row in
+  check int "argument keeps its row count" 0 scan.total_rows;
+  check bool "argument keeps its terminal flag" false scan.has_terminal;
+  check
+    (list int)
+    "argument keeps its terminal turn ids"
+    []
+    scan.terminal_keeper_turn_ids;
+  check int "result counts the row" 1 advanced.total_rows;
+  check bool "result observes the terminal event" true advanced.has_terminal;
+  check
+    (list int)
+    "result records the terminal turn id"
+    [ 7 ]
+    advanced.terminal_keeper_turn_ids
 ;;
 
 let test_runtime_manifest_scan_surfaces_diagnostics_without_repeat_warnings () =
@@ -375,14 +325,14 @@ let make_checkpoint_inventory_meta ~name ~trace_id =
 ;;
 
 let make_inventory_checkpoint ~session_id ~turn_count ~created_at =
-  Agent_sdk.Checkpoint.
+  Agent_core.Checkpoint.
     { version = checkpoint_version
     ; session_id
     ; agent_name = "checkpoint-inventory-test"
     ; model = "opaque-runtime"
     ; system_prompt = None
     ; messages = []
-    ; usage = Agent_sdk.Types.empty_usage
+    ; usage = Agent_core.Types.empty_usage
     ; turn_count
     ; created_at
     ; tools = []
@@ -395,10 +345,10 @@ let make_inventory_checkpoint ~session_id ~turn_count ~created_at =
     ; reasoning_effort = None
     ; enable_thinking = None
     ; preserve_thinking = None
-    ; response_format = Agent_sdk.Types.Off
+    ; response_format = Agent_core.Types.Off
     ; thinking_budget = None
     ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create_sync ()
+    ; context = Agent_core.Context.create_sync ()
     ; mcp_sessions = []
     ; working_context = None
     }
@@ -438,10 +388,10 @@ let test_checkpoint_load_error_projection_is_total () =
     ~kind:"io_error"
     ~detail:(Some "permission denied");
   check_checkpoint_error_projection
-    (Store.Sdk_other_error "sdk failure")
+    (Store.Agent_core_error "agent core failure")
     ~status:"unavailable"
-    ~kind:"sdk_other_error"
-    ~detail:(Some "sdk failure")
+    ~kind:"agent_core_error"
+    ~detail:(Some "agent core failure")
 ;;
 
 (* The caller that splices this projection into a larger row used to take the
@@ -463,7 +413,7 @@ let test_checkpoint_load_error_projection_is_always_an_object () =
       Store.Store_error "store unavailable";
       Store.Parse_error "invalid checkpoint";
       Store.Io_error "permission denied";
-      Store.Sdk_other_error "sdk failure";
+      Store.Agent_core_error "agent core failure";
     ]
 ;;
 
@@ -472,24 +422,24 @@ let test_checkpoint_inventory_preserves_partial_load_failures () =
   let config = Workspace.default_config dir in
   let keeper_name = "checkpoint-inventory" in
   let trace_id = "trace-checkpoint-inventory" in
-  Keeper_meta_store.write_meta
+  Keeper_meta_store.replace_snapshot
     config
     (make_checkpoint_inventory_meta ~name:keeper_name ~trace_id)
   |> Result.map_error (fun detail -> fail ("checkpoint inventory meta write failed: " ^ detail))
   |> Result.get_ok;
   let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
   let current = make_inventory_checkpoint ~session_id:trace_id ~turn_count:2 ~created_at:2.0 in
-  (match Keeper_checkpoint_store.save_oas_classified ~session_dir current with
+  (match Keeper_checkpoint_store.save_agent_core_classified ~session_dir current with
    | Ok _ -> ()
    | Error detail -> fail ("checkpoint inventory current save failed: " ^ detail));
   let corrupt_history =
     make_inventory_checkpoint ~session_id:trace_id ~turn_count:1 ~created_at:1.0
   in
   let corrupt_snapshot_id =
-    Keeper_checkpoint_store.oas_history_snapshot_id_of_checkpoint corrupt_history
+    Keeper_checkpoint_store.agent_core_history_snapshot_id_of_checkpoint corrupt_history
   in
   let corrupt_path =
-    Keeper_checkpoint_store.oas_history_path
+    Keeper_checkpoint_store.agent_core_history_path
       ~session_dir
       ~snapshot_id:corrupt_snapshot_id
   in
@@ -528,7 +478,7 @@ let test_checkpoint_inventory_projects_missing_current () =
   let config = Workspace.default_config dir in
   let keeper_name = "checkpoint-missing" in
   let trace_id = "trace-checkpoint-missing" in
-  Keeper_meta_store.write_meta
+  Keeper_meta_store.replace_snapshot
     config
     (make_checkpoint_inventory_meta ~name:keeper_name ~trace_id)
   |> Result.map_error (fun detail -> fail ("checkpoint inventory meta write failed: " ^ detail))
@@ -545,116 +495,69 @@ let test_checkpoint_inventory_projects_missing_current () =
     (json |> member "current_error" = `Null)
 ;;
 
-let test_compaction_snapshots_read_rotated_manifest_beyond_old_tail () =
+(* Clock groups fold the edge stream into a table of per-group accumulators.
+   The records are immutable, so each edge rebinds its entry; two edges in the
+   same turn must still land in one group with the count advanced and the
+   observed-at window spanning both. *)
+let test_clock_groups_accumulate_edges_per_turn () =
   with_temp_dir @@ fun dir ->
   let config = Workspace.default_config dir in
-  let keeper_name = "compaction-rotated" in
-  let trace_id = "trace-compaction-rotated" in
-  let active_path =
-    Keeper_runtime_manifest.path_for_trace config ~keeper_name ~trace_id
-  in
-  let rotated_path = active_path ^ ".1" in
-  Fs_compat.mkdir_p (Filename.dirname active_path);
-  let context_compacted =
-    let exact_evidence =
-      `Assoc
-        [ "slot_id", `String "slot-7"
-        ; "call_id", `String "call-7"
-        ; "target_identity_fingerprint", `String "target-7"
-        ; "catalog_generation_fingerprint", `String "catalog-7"
-        ; "catalog_evidence_sha256", `String "catalog-sha-7"
-        ; "plan_fingerprint", `String "plan-7"
-        ; "receipt_request_body_sha256", `String "request-sha-7"
-        ; "before_checkpoint_bytes", `Int 4096
-        ; "after_checkpoint_bytes", `Int 1024
-        ; "before_message_count", `Int 12
-        ; "after_message_count", `Int 4
-        ; "summarized_message_count", `Int 4
-        ; "dropped_message_count", `Int 8
-        ; "before_tool_use_count", `Int 3
-        ; "after_tool_use_count", `Int 3
-        ; "before_tool_result_count", `Int 3
-        ; "after_tool_result_count", `Int 3
-        ]
-    in
+  let keeper_name = "clock-group-keeper" in
+  let trace_id = "trace-clock-groups" in
+  let row event =
     Keeper_runtime_manifest.make
-      ~ts:"2026-08-05T00:00:00Z"
       ~keeper_name
       ~trace_id
       ~keeper_turn_id:7
-      ~event:Keeper_runtime_manifest.Context_compacted
-      ~decision:
-        (Keeper_runtime_manifest.with_compaction_outcome
-           ~compaction_outcome:Keeper_runtime_manifest.Checkpoint_committed
-           (`Assoc
-             [ "before_tokens", `Int 1200
-             ; "after_tokens", `Int 400
-             ; "exact_evidence", exact_evidence
-             ]))
+      ~event
+      ~status:"observed"
       ()
+    |> Keeper_runtime_manifest.to_json
   in
-  let unrelated index =
-    Keeper_runtime_manifest.make
-      ~ts:(Printf.sprintf "2026-08-05T00:%02d:%02dZ" (index / 60) (index mod 60))
+  let path = Keeper_runtime_manifest.path_for_trace config ~keeper_name ~trace_id in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let channel = open_out path in
+  List.iter
+    (fun json -> Printf.fprintf channel "%s\n" (Yojson.Safe.to_string json))
+    [ row Keeper_runtime_manifest.Turn_started
+    ; row Keeper_runtime_manifest.Turn_finished
+    ];
+  close_out channel;
+  let scan =
+    Runtime_lens_scan.read_runtime_manifest_scan
+      ~config
       ~keeper_name
       ~trace_id
-      ~keeper_turn_id:7
-      ~event:Keeper_runtime_manifest.Turn_started
+      ~limit:8
       ()
   in
-  let rotated_rows =
-    context_compacted :: List.init 250 (fun index -> unrelated (index + 1))
-  in
-  let render rows =
-    rows
-    |> List.map (fun row ->
-      Keeper_runtime_manifest.to_json row |> Yojson.Safe.to_string)
-    |> String.concat "\n"
-    |> fun content -> content ^ "\n"
-  in
-  Fs_compat.save_file rotated_path (render rotated_rows);
-  Fs_compat.save_file active_path (render [ unrelated 251 ]);
-  Unix.utimes rotated_path 1.0 1.0;
-  Unix.utimes active_path 2.0 2.0;
-  let json =
-    Keeper_api.compaction_snapshots_json ~config ~keeper_id:keeper_name ~limit:25
-  in
+  check int "both rows decoded" 2 scan.total_rows;
   let open Yojson.Safe.Util in
-  check int "rotated compaction is visible" 1 (json |> member "count" |> to_int);
-  check bool "complete segment scan is not truncated" false
-    (json |> member "scan_truncated" |> to_bool);
-  let item = json |> member "items" |> to_list |> List.hd in
-  check int "before token count" 1200 (item |> member "before_tokens" |> to_int);
-  check int "after token count" 400 (item |> member "after_tokens" |> to_int)
-;;
-
-let test_compaction_snapshots_cache_returns_warming_then_ready () =
-  with_temp_dir (fun dir ->
-    let config = Workspace.default_config dir in
-    let keeper_id = "cache-hydration-keeper" in
-    let hydration_status json =
-      Yojson.Safe.Util.(json |> member "hydration_status" |> to_string)
-    in
-    let cold =
-      Keeper_api.cached_compaction_snapshots_json ~config ~keeper_id ~limit:25
-        ~force_refresh:true
-    in
-    check string "cold miss is explicit" "warming" (hydration_status cold);
-    let rec await_ready remaining =
-      let current =
-        Keeper_api.cached_compaction_snapshots_json ~config ~keeper_id ~limit:25
-          ~force_refresh:false
-      in
-      match hydration_status current with
-      | "ready" -> current
-      | "warming" when remaining > 0 ->
-        Time_compat.sleep 0.005;
-        await_ready (remaining - 1)
-      | status -> failf "unexpected hydration status: %s" status
-    in
-    let ready = await_ready 200 in
-    check int "ready empty inventory" 0
-      Yojson.Safe.Util.(ready |> member "count" |> to_int))
+  let groups =
+    match
+      Server_dashboard_http_keeper_runtime_lens_clock_groups
+      .runtime_lens_clock_groups_json
+        scan
+    with
+    | `List groups -> groups
+    | _ -> fail "clock groups projection must be a list"
+  in
+  let turn_groups =
+    List.filter (fun g -> g |> member "group_type" |> to_string = "turn") groups
+  in
+  check int "one turn group" 1 (List.length turn_groups);
+  match turn_groups with
+  | [ group ] ->
+    check int "both edges folded into it" 2 (group |> member "edge_count" |> to_int);
+    check bool
+      "the terminal event closes the group"
+      true
+      (group |> member "closed" |> to_bool);
+    check bool
+      "distinct events are kept"
+      true
+      (List.length (group |> member "events" |> to_list) >= 2)
+  | _ -> fail "expected exactly one turn group"
 ;;
 
 let () =
@@ -666,23 +569,12 @@ let () =
     "Server_dashboard_http_keeper_api_trace"
     [ ( "dedupe_thinking_lines"
       , [ test_case "preserves first order" `Quick test_dedupe_preserves_first_order
-        ; test_case "preserves sub-microsecond precision" `Quick test_dedupe_precision
+        ; test_case
+            "distinguishes turn identity"
+            `Quick
+            test_dedupe_distinguishes_turn_identity
         ] )
-    ; ( "read_internal_history_lines"
-      , [ test_case "skips invalid jsonl rows" `Quick test_read_invalid_json_skips
-        ; test_case "summarises skips once per file" `Quick test_skip_warns_once_per_file
-        ] )
-     ; ( "internal_history_json_to_trajectory_line"
-       , [ test_case
-             "decodes content_blocks rows"
-             `Quick
-             test_converter_decodes_content_blocks
-         ; test_case
-             "rejects flat content rows"
-             `Quick
-             test_converter_rejects_flat_content
-         ] )
-     ; ( "chat_trace_block_by_turn_ref"
+    ; ( "chat_trace_block_by_turn_ref"
        , [ test_case
              "reads allowed trace_history trace ids"
              `Quick
@@ -699,6 +591,14 @@ let () =
             "surfaces unsupported rows without repeated warnings"
             `Quick
             test_runtime_manifest_scan_surfaces_diagnostics_without_repeat_warnings
+        ; test_case
+            "folding a row leaves the argument scan untouched"
+            `Quick
+            test_runtime_manifest_scan_fold_leaves_input_untouched
+        ; test_case
+            "clock groups accumulate edges per turn"
+            `Quick
+            test_clock_groups_accumulate_edges_per_turn
         ] )
     ; ( "checkpoint_inventory"
       , [ test_case
@@ -717,16 +617,6 @@ let () =
             "projects missing current without failing inventory"
             `Quick
             test_checkpoint_inventory_projects_missing_current
-        ] )
-    ; ( "compaction_snapshots"
-      , [ test_case
-            "reads rotated compaction beyond the old tail window"
-            `Quick
-            test_compaction_snapshots_read_rotated_manifest_beyond_old_tail
-        ; test_case
-            "returns warming before background hydration completes"
-            `Quick
-            test_compaction_snapshots_cache_returns_warming_then_ready
         ] )
     ]
 ;;

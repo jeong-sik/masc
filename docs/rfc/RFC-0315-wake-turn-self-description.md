@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0294", "0303", "0310", "0313"]
-implementation_prs: []
 ---
 
 # RFC-0315: Typed wake-turn context and self-directed work lane
@@ -22,7 +21,7 @@ stimuli arrived without inventing a second state protocol.
 - Goal and Task APIs own objectives, assignment, priority, and status.
 - Board, connector, and reaction ledgers own incoming stimuli and delivery
   evidence.
-- OAS checkpoints own replayable typed message/tool/reasoning blocks.
+- agent_core checkpoints own replayable typed message/tool/reasoning blocks.
 - Memory APIs own durable notes. Transcript prose is context only.
 
 The complete boundary is
@@ -44,7 +43,7 @@ long-running job wakes that Keeper without blocking unrelated lanes.
 When no immediate stimulus is actionable, a Keeper with an active Goal may
 decompose it into typed Tasks, claim eligible work, publish observable progress,
 or state a typed blocker through the owning API. A Keeper with no active Goal
-may choose work consistent with its persona and tools, but must create or claim
+may choose work consistent with its keeper and tools, but must create or claim
 typed work before treating it as an operational objective.
 
 The runtime must not pause solely because a prose summary is absent. Pause/stop
@@ -57,4 +56,4 @@ remain explicit lifecycle outcomes for genuine failure or operator action.
 - `test_keeper_event_queue.ml` and reaction-ledger tests pin assignment edges.
 - Keeper state-machine tests pin lane lifecycle transitions independently of
   transcript content.
-- Replay-checkpoint tests pin typed OAS message/tool/reasoning preservation.
+- Replay-checkpoint tests pin typed agent_core message/tool/reasoning preservation.

@@ -33,12 +33,23 @@ let test_resolve_mention_targets_normalizes_explicit_values () =
 
 let override_json value = `Assoc [ "max_context_override", value ]
 
+let rec rm_rf path =
+  if Sys.is_directory path
+  then (
+    Array.iter (fun entry -> rm_rf (Filename.concat path entry)) (Sys.readdir path);
+    Unix.rmdir path)
+  else Sys.remove path
+
+(* Recursive, not [Unix.rmdir]: once any test in this binary has installed the
+   process-global Eio fs (the persist round-trip below), later contexts can
+   materialize files under their base, and an empty-dir-only cleanup fails the
+   wrong test. *)
 let with_test_context f =
   let base = Filename.temp_file "keeper-turn-up-args-" "" in
   Sys.remove base;
   Unix.mkdir base 0o755;
   Fun.protect
-    ~finally:(fun () -> Unix.rmdir base)
+    ~finally:(fun () -> rm_rf base)
     (fun () ->
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->
@@ -71,11 +82,11 @@ let test_parse_rejects_runtime_agent_identity_as_keeper_name () =
           (String.starts_with body ~prefix:"invalid keeper name:");
         check bool "names the canonical keeper" true
           (String.ends_with body
-             ~suffix:"use the canonical keeper name \"executor\""))
-    [ "keeper-executor-agent"
-    ; "keeper_executor_agent"
-    ; "keeper-executor_agent"
-    ; "keeper_executor-agent"
+             ~suffix:"use the canonical keeper name \"omega\""))
+    [ "keeper-omega-agent"
+    ; "keeper_omega_agent"
+    ; "keeper-omega_agent"
+    ; "keeper_omega-agent"
     ]
 
 let test_parse_max_context_override () =
@@ -113,6 +124,131 @@ let test_runtime_json_rejects_toml_owned_max_context_override () =
     ; `Float 3.9
     ; `Intlit "999999999999999999999999"
     ]
+
+let wake_prompt_json value = `Assoc [ "autonomous_wake_prompt", value ]
+
+(* Shares Env_config_keeper.KeeperAutonomous.validate_wake_prompt with the
+   fleet env reader and the keeper TOML parser, so the cases below pin the
+   whole contract once: blank rejected (never folded into "unset"), byte
+   bound enforced at the boundary, null as the only explicit clear. *)
+let test_parse_autonomous_wake_prompt () =
+  let parse value =
+    Keeper_turn_up_args.parse_autonomous_wake_prompt (wake_prompt_json value)
+  in
+  let check_ok label expected value =
+    match parse value with
+    | Ok actual -> check (pair bool (option string)) label expected actual
+    | Error error -> failf "%s: %s" label error
+  in
+  let check_error label value =
+    match parse value with
+    | Error _ -> ()
+    | Ok _ -> failf "%s unexpectedly accepted" label
+  in
+  (match Keeper_turn_up_args.parse_autonomous_wake_prompt (`Assoc []) with
+   | Ok actual ->
+     check (pair bool (option string)) "absent field" (false, None) actual
+   | Error error -> failf "absent field: %s" error);
+  check_ok "null clears" (true, None) `Null;
+  check_ok
+    "value is trimmed and preserved"
+    (true, Some "백로그를 확인하고 하나 진행해.")
+    (`String "  백로그를 확인하고 하나 진행해. \n");
+  check_error "blank is rejected, not folded into unset" (`String "   ");
+  check_error "empty is rejected" (`String "");
+  check_error "non-string" (`Int 3);
+  let bound = Env_config_keeper.KeeperAutonomous.max_wake_prompt_bytes in
+  check_ok
+    "exactly at the byte bound"
+    (true, Some (String.make bound 'a'))
+    (`String (String.make bound 'a'));
+  check_error "one byte over the bound" (`String (String.make (bound + 1) 'a'))
+
+(* Unlike [with_test_context], persist writes the keeper TOML under the
+   base, so cleanup must be recursive. *)
+let with_persisting_context f =
+  let base = Filename.temp_file "keeper-turn-up-persist-" "" in
+  Sys.remove base;
+  Unix.mkdir base 0o755;
+  Fun.protect
+    ~finally:(fun () -> rm_rf base)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+      Eio.Switch.run @@ fun sw ->
+      let ctx : _ Keeper_types_profile.context =
+        { config = Workspace.default_config base
+        ; agent_name = "test-agent"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = None
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider
+        }
+      in
+      f ctx)
+
+(* End-to-end for the settable surface behind the dashboard PATCH and
+   masc_keeper_up: parse -> TOML persist -> profile-defaults read-back, then
+   an explicit null clears the key instead of writing an empty one. *)
+let test_persist_round_trips_wake_prompt () =
+  with_persisting_context @@ fun ctx ->
+  let name = "wake-persist-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (* persist reads instructions off the meta, not off the parsed args,
+           and refuses a keeper that has none. *)
+        (`Assoc
+           [ "name", `String name
+           ; "instructions", `String "fixture instructions"
+           ])
+    with
+    | Ok meta -> meta
+    | Error error -> failf "meta fixture: %s" error
+  in
+  let parse_or_fail json =
+    match Keeper_turn_up_args.parse ctx json with
+    | Ok parsed -> parsed
+    | Error result -> failf "parse: %s" (Keeper_types_profile.tool_result_body result)
+  in
+  let persist_or_fail parsed =
+    match
+      Keeper_turn_up_config_persistence.persist ~config:ctx.config ~parsed ~meta
+    with
+    | Ok (_ : Keeper_turn_up_config_persistence.outcome) -> ()
+    | Error error -> failf "persist: %s" error
+  in
+  let read_back () =
+    match
+      Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+        ~base_path:ctx.config.base_path
+        name
+    with
+    | Ok defaults -> defaults.Keeper_types_profile.autonomous_wake_prompt
+    | Error error ->
+      failf "read back: %s" (Keeper_types_profile.keeper_toml_load_error_to_string error)
+  in
+  persist_or_fail
+    (parse_or_fail
+       (`Assoc
+          [ "name", `String name
+          ; "instructions", `String "fixture instructions"
+          ; "autonomous_wake_prompt", `String "백로그를 확인하고 하나 진행해."
+          ]));
+  check
+    (option string)
+    "persisted keeper TOML round-trips through the profile parser"
+    (Some "백로그를 확인하고 하나 진행해.")
+    (read_back ());
+  persist_or_fail
+    (parse_or_fail (`Assoc [ "name", `String name; "autonomous_wake_prompt", `Null ]));
+  check
+    (option string)
+    "an explicit null removes the key instead of writing an empty value"
+    None
+    (read_back ())
 
 (* masc#25767: masc_keeper_up described itself as "Create or update a durable keeper"
    while creation required a sandbox_profile readable only from a keeper TOML the tool
@@ -192,6 +328,16 @@ let () =
       , [ test_case "request values are exact or rejected" `Quick test_parse_max_context_override
         ; test_case "runtime JSON rejects TOML-owned field" `Quick
             test_runtime_json_rejects_toml_owned_max_context_override
+        ] )
+    ; ( "autonomous_wake_prompt"
+      , [ test_case
+            "shared wake-prompt contract: trim, blank reject, byte bound, null clear"
+            `Quick
+            test_parse_autonomous_wake_prompt
+        ; test_case
+            "persist round-trips the keeper TOML and null removes the key"
+            `Quick
+            test_persist_round_trips_wake_prompt
         ] )
     ; ( "keeper_name"
       , [ test_case

@@ -1,35 +1,32 @@
 (** Board — top-level public facade for the board store.
 
-    The .ml is a single line: [include Board_votes].  This
-    .mli mirrors the runtime with [include module type of
-    struct include Board_votes end] so type identity is
-    preserved end-to-end across the four-hop chain
-    {!Board_types} → {!Board_core_classify} →
-    {!Board_core_payload} (runtimed inside {!Board_core}) →
-    {!Board_core} → {!Board_votes} → {!Board}.
+    The runtime is two [include]s, and this .mli mirrors both
+    with [include module type of] so type identity is
+    preserved end to end.
 
-    Callers reach the entire board surface — store /
-    persistence / classification / payload normalisation /
-    voting / karma / flair — through {!Board.X} unqualified
-    after [open Masc].  478 dotted [Board.X] call sites
-    in lib + bin + test all resolve through this runtime.
+    - {!Board_votes} carries the store / persistence /
+      classification / payload / voting / karma / flair
+      surface, itself layered as
+      {!Board_types} → {!Board_core_classify} →
+      {!Board_core_payload} (runtimed inside {!Board_core}) →
+      {!Board_core} → {!Board_votes}.
+    - {!Board_audience} carries the audience and mention
+      resolution surface.  Both reach {!Board_types}; OCaml
+      resolves the repeated definitions to the same types, so
+      including both is not a conflict.
 
-    No locally-defined surface; this facade has no
-    behavioural code of its own.  Every entry visible from
-    {!Board} traces back to one of the four upstream
-    modules. *)
+    Callers reach the whole surface through {!Board.X}
+    unqualified after [open Masc].
+
+    No behavioural code of its own: every entry visible from
+    {!Board} is defined in {!Board_votes} or
+    {!Board_audience}, and both are re-exported whole rather
+    than by a hand-listed subset that could fall behind. *)
 
 include module type of struct
   include Board_votes
 end
 
-val audience_for_post
-  :  visibility:visibility
-  -> title:string
-  -> content:string
-  -> (audience, board_error) result
-
-val audience_for_comment : content:string -> (audience, board_error) result
-val audience_for_reaction : audience
-val audience_label : audience -> string
-val direct_targets_of_text : string -> Agent_id.t list
+include module type of struct
+  include Board_audience
+end

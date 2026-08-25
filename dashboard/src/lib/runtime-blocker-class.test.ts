@@ -13,14 +13,14 @@ describe('asKeeperRuntimeBlockerClass', () => {
   })
 
   it('rejects unknown strings — the over-permissive `as` cast trap is closed', () => {
-    expect(asKeeperRuntimeBlockerClass('sdk_future_unmapped_variant')).toBeNull()
+    expect(asKeeperRuntimeBlockerClass('agent_core_future_unmapped_variant')).toBeNull()
     expect(asKeeperRuntimeBlockerClass('typoed_blocker')).toBeNull()
     expect(asKeeperRuntimeBlockerClass('')).toBeNull()
   })
 
   it('trims surrounding whitespace before membership check — parity with asString/asNullableString', () => {
     expect(asKeeperRuntimeBlockerClass('runtime_exhausted ')).toBe('runtime_exhausted')
-    expect(asKeeperRuntimeBlockerClass('  sdk_context_window_exceeded\t')).toBe('sdk_context_window_exceeded')
+    expect(asKeeperRuntimeBlockerClass('  agent_core_context_window_exceeded\t')).toBe('agent_core_context_window_exceeded')
     expect(asKeeperRuntimeBlockerClass('   ')).toBeNull()
   })
 

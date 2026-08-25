@@ -1,10 +1,11 @@
 ---
+rfc: "0365"
 title: handoff_context must survive the ownership boundary
 status: Draft
-authors: Claude Opus 5 (1M context)
+author: Claude Opus 5 (1M context)
 created: 2026-08-06
 supersedes: []
-relates_to:
+related:
   - RFC-0315 (current-task rendering in the world state)
   - RFC-0351 (memory-first context management) — §2 principle 2 constrains the fix
 ---
@@ -191,7 +192,6 @@ B 를 고르면 노트의 수명이 문제가 된다. 태스크가 A → B → C
 | `workspace_task_transitions.ml:53` (broadcast) | `persisted_handoff_context` 가 entry-class 에서 `None` — claim 이 물려받은 노트를 자기가 쓴 것처럼 방송하지 않는다 | 의도대로 |
 | `keeper_task_cancellation_wake.ml:106` | Cancel 은 exit-class 라 필드가 인자로 대체된다. 사유 없이 취소하면 필드도 비므로 `stated_reason` 은 `None` | 변화 없음 |
 | `dashboard_goals_types_timeline.ml:69` | B 가 든 태스크의 timeline 에 A 의 summary 가 표시될 수 있다 | 대시보드 표시. 운영자는 전체 기록을 보므로 허용 |
-| `keeper_catchup_digest.ml:212` | 이전 소유자의 노트가 digest 에 나타난다 | 의도에 부합 |
 
 ## 7. 검증
 

@@ -8,8 +8,6 @@ include Dashboard_http_keeper_metrics
 type metrics_acc =
   { ma_sample_points : int
   ; ma_handoff_count : int
-  ; ma_fallback_count : int
-  ; ma_fallback_observed_points : int
   ; ma_tool_call_count : int
   ; ma_turn_points : int
   ; ma_heartbeat_points : int
@@ -20,8 +18,6 @@ type metrics_acc =
 let init_acc =
   { ma_sample_points = 0
   ; ma_handoff_count = 0
-  ; ma_fallback_count = 0
-  ; ma_fallback_observed_points = 0
   ; ma_tool_call_count = 0
   ; ma_turn_points = 0
   ; ma_heartbeat_points = 0
@@ -138,12 +134,6 @@ let compute_metrics_window
                    | _ -> None
                  in
                  let runtime_obj = member "runtime" json in
-                 let fallback_applied =
-                   match runtime_obj with
-                   | `Assoc _ ->
-                       Safe_ops.json_bool_opt "fallback_applied" runtime_obj
-                   | _ -> None
-                 in
                  let acc =
                    { acc with
                      ma_sample_points = acc.ma_sample_points + 1
@@ -155,15 +145,6 @@ let compute_metrics_window
                    ; ma_handoff_count =
                        acc.ma_handoff_count
                        + if handoff_performed then 1 else 0
-                   ; ma_fallback_count =
-                       acc.ma_fallback_count
-                       +
-                       (match fallback_applied with
-                        | Some true -> 1
-                        | Some false | None -> 0)
-                   ; ma_fallback_observed_points =
-                       acc.ma_fallback_observed_points
-                       + if Option.is_some fallback_applied then 1 else 0
                    ; ma_tool_call_count =
                        acc.ma_tool_call_count + tool_call_count
                    ; ma_last_handoff =
@@ -192,34 +173,48 @@ let compute_metrics_window
                  let generation_stats_row =
                    match Hashtbl.find_opt generation_stats generation with
                    | Some stats -> stats
-                   | None ->
-                       let stats = create_keeper_gen_window_stats () in
-                       Hashtbl.add generation_stats generation stats;
-                       stats
+                   | None -> create_keeper_gen_window_stats ()
                  in
-                 generation_stats_row.turns <-
-                   generation_stats_row.turns + 1;
-                 (match usage with
-                  | Some (input, output, total) ->
-                      generation_stats_row.usage_points <-
-                        generation_stats_row.usage_points + 1;
-                      generation_stats_row.input_tokens <-
-                        generation_stats_row.input_tokens + input;
-                      generation_stats_row.output_tokens <-
-                        generation_stats_row.output_tokens + output;
-                      generation_stats_row.total_tokens <-
-                        generation_stats_row.total_tokens + total
-                  | None -> ());
-                 if handoff_performed
-                 then
-                   generation_stats_row.handoffs <-
-                     generation_stats_row.handoffs + 1;
-                 if
-                   generation_stats_row.first_ts <= 0.0
-                   || ts_unix < generation_stats_row.first_ts
-                 then generation_stats_row.first_ts <- ts_unix;
-                 if ts_unix > generation_stats_row.last_ts
-                 then generation_stats_row.last_ts <- ts_unix;
+                 let usage_points, input_tokens, output_tokens, total_tokens =
+                   match usage with
+                   | Some (input, output, total) ->
+                       ( generation_stats_row.usage_points + 1,
+                         generation_stats_row.input_tokens + input,
+                         generation_stats_row.output_tokens + output,
+                         generation_stats_row.total_tokens + total )
+                   | None ->
+                       ( generation_stats_row.usage_points,
+                         generation_stats_row.input_tokens,
+                         generation_stats_row.output_tokens,
+                         generation_stats_row.total_tokens )
+                 in
+                 (* [Hashtbl.replace] inserts when the generation is new, so
+                    the row no longer has to be added before it is filled in.
+                    [tools] is the same table either way — the record update
+                    copies the handle, not the contents. *)
+                 Hashtbl.replace generation_stats generation
+                   {
+                     generation_stats_row with
+                     turns = generation_stats_row.turns + 1;
+                     usage_points;
+                     input_tokens;
+                     output_tokens;
+                     total_tokens;
+                     handoffs =
+                       (if handoff_performed
+                        then generation_stats_row.handoffs + 1
+                        else generation_stats_row.handoffs);
+                     first_ts =
+                       (if
+                          generation_stats_row.first_ts <= 0.0
+                          || ts_unix < generation_stats_row.first_ts
+                        then ts_unix
+                        else generation_stats_row.first_ts);
+                     last_ts =
+                       (if ts_unix > generation_stats_row.last_ts
+                        then ts_unix
+                        else generation_stats_row.last_ts);
+                   };
                  List.iter
                    (count_table_incr generation_stats_row.tools)
                    tools_used;
@@ -275,7 +270,7 @@ let compute_metrics_window
                          ; ( "inference_telemetry"
                            , json
                              |> member "inference_telemetry"
-                             |> Keeper_hooks_oas
+                             |> Keeper_hooks_agent_core
                                   .redact_inference_telemetry_json )
                          ])
                  in
@@ -336,12 +331,6 @@ let compute_metrics_window
       ; "window_turns", `Int acc.ma_turn_points
       ; "window_series_max_lines", `Int series_points
       ; "handoff_count", `Int acc.ma_handoff_count
-      ; "fallback_count", `Int acc.ma_fallback_count
-      ; ( "fallback_rate"
-        , Json_util.int_ratio_json
-            acc.ma_fallback_count
-            acc.ma_fallback_observed_points )
-      ; "fallback_observed_points", `Int acc.ma_fallback_observed_points
       ; ( "intervention_share"
         , Json_util.int_ratio_json acc.ma_proactive_points interaction_points )
       ; ( "intervention_per_turn"

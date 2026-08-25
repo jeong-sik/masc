@@ -55,7 +55,7 @@ export function boardMetricNow(): number {
 // Pass-through nullable error formatter: returns null when no error is
 // provided (the metric field stays null), uses message||name for Error,
 // keeps raw strings, falls through to String() for anything else. The
-// nullable return is the distinguishing trait vs the string-only
+// nullable return distinguishes this from the string-only
 // errorToString / errorMessageOr variants in other modules.
 function errorMessageOrNull(error: unknown): string | null {
   if (error instanceof Error) return error.message || error.name

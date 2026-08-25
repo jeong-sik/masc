@@ -32,11 +32,14 @@ export interface JourneyWaterfallEntry {
   thinkingContent: string | null
   thinkingRedacted: boolean
   durationMs: number | null
-  costUsd: number | null
   gateReason: string | null
   error: string | null
   sessionId: string | null
   traceId: string | null
+  plannedIndex: number | null
+  batchIndex: number | null
+  batchSize: number | null
+  executionMode: 'serial' | 'concurrent' | null
 }
 
 export interface JourneyWaterfallRuntimeEvidence {
@@ -44,7 +47,7 @@ export interface JourneyWaterfallRuntimeEvidence {
   staleReason: string | null
   traceId: string
   keeperTurnId: number | null
-  maxOasTurnCount: number | null
+  maxAgentCoreTurnCount: number | null
   providerTerminalStatus: string | null
   providerTerminalExceptionKind: string | null
   providerAttemptStartedCount: number
@@ -68,7 +71,6 @@ export interface JourneyWaterfallTurn {
   failureCount: number
   gateRejectedCount: number
   totalDurationMs: number
-  totalCostUsd: number
   runtimeEvidence: JourneyWaterfallRuntimeEvidence | null
 }
 
@@ -80,7 +82,6 @@ export interface JourneyWaterfallSummary {
   failureCount: number
   gateRejectedCount: number
   totalDurationMs: number
-  totalCostUsd: number
   timelineStartTs: number | null
   timelineEndTs: number | null
   runtimeEvidence: JourneyWaterfallRuntimeEvidence | null
@@ -139,6 +140,13 @@ function traceEventStatus(event: UnifiedTraceEvent): WaterfallEntryStatus {
   return 'unknown'
 }
 
+function traceEventExecutionMode(
+  event: UnifiedTraceEvent,
+): JourneyWaterfallEntry['executionMode'] {
+  const value = event.detail.execution_mode
+  return value === 'serial' || value === 'concurrent' ? value : null
+}
+
 function entryFromTraceEvent(event: UnifiedTraceEvent): JourneyWaterfallEntry | null {
   if (event.kind !== 'tool_call' && event.kind !== 'thinking') return null
   const status = traceEventStatus(event)
@@ -158,11 +166,14 @@ function entryFromTraceEvent(event: UnifiedTraceEvent): JourneyWaterfallEntry | 
     thinkingContent: event.thinkingContent ?? null,
     thinkingRedacted: event.thinkingRedacted === true,
     durationMs: event.duration_ms ?? null,
-    costUsd: event.cost_usd ?? null,
     gateReason: event.gate?.reason ?? null,
     error: event.error ?? null,
     sessionId: event.sessionId ?? null,
     traceId: traceEventTraceId(event),
+    plannedIndex: numberValue(event.detail.planned_index),
+    batchIndex: numberValue(event.detail.batch_index),
+    batchSize: numberValue(event.detail.batch_size),
+    executionMode: traceEventExecutionMode(event),
   }
 }
 
@@ -185,7 +196,7 @@ export function summarizeRuntimeTrace(
     staleReason: trace.stale_reason,
     traceId: trace.trace_id,
     keeperTurnId: runtimeKeeperTurnId(trace),
-    maxOasTurnCount: clock.max_oas_turn_count ?? trace.turn_identity.max_oas_turn_count,
+    maxAgentCoreTurnCount: clock.max_agent_core_turn_count ?? trace.turn_identity.max_agent_core_turn_count,
     providerTerminalStatus: trace.provider_attempts.terminal_status,
     providerTerminalExceptionKind: trace.provider_attempts.terminal_exception_kind,
     providerAttemptStartedCount: trace.provider_attempts.started_count,
@@ -228,7 +239,6 @@ function buildTurn(
     failureCount: sortedEntries.filter(entry => entry.status === 'failure').length,
     gateRejectedCount: sortedEntries.filter(entry => entry.status === 'gate_rejected').length,
     totalDurationMs: toolEntries.reduce((sum, entry) => sum + (entry.durationMs ?? 0), 0),
-    totalCostUsd: toolEntries.reduce((sum, entry) => sum + (entry.costUsd ?? 0), 0),
     runtimeEvidence,
   }
 }
@@ -286,7 +296,6 @@ export function buildJourneyWaterfall(input: JourneyWaterfallInput): JourneyWate
       failureCount: allTurnEntries.filter(entry => entry.status === 'failure').length,
       gateRejectedCount: allTurnEntries.filter(entry => entry.status === 'gate_rejected').length,
       totalDurationMs: turns.reduce((sum, turn) => sum + turn.totalDurationMs, 0),
-      totalCostUsd: turns.reduce((sum, turn) => sum + turn.totalCostUsd, 0),
       timelineStartTs: allTurnEntries[0]?.ts ?? null,
       timelineEndTs: allTurnEntries.at(-1)?.ts ?? null,
       runtimeEvidence,
@@ -297,7 +306,6 @@ export function buildJourneyWaterfall(input: JourneyWaterfallInput): JourneyWate
 function keeperActivityAge(keeper: Keeper): number {
   return numberValue(keeper.last_turn_ago_s)
     ?? numberValue(keeper.last_activity_ago_s)
-    ?? numberValue(keeper.agent?.last_seen_ago_s)
     ?? Number.POSITIVE_INFINITY
 }
 

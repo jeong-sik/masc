@@ -3,6 +3,7 @@
 module KCB = Keeper_turn_runtime_budget
 module KEC = Keeper_context_runtime
 module KUM = Keeper_unified_metrics
+module KTP = Keeper_terminal_effect_policy
 open Keeper_meta_contract
 
 (* RFC-0132 PR-2: success-path keeper-facing metric label = external boundary; redact via SSOT. *)
@@ -18,19 +19,22 @@ let apply_lifecycle
       ~meta
       (result : Keeper_agent_run.run_result)
   =
-  let resilience_handles = KCB.post_turn_resilience_handles ~config ~meta in
   let lifecycle : KEC.post_turn_lifecycle =
-    KEC.apply_post_turn_lifecycle_with_resilience_handles
-      ~resilience_audit_store:resilience_handles.resilience_audit_store
-      ~resilience_strategy_executor:resilience_handles.resilience_strategy_executor
-      ~meta
-      ~checkpoint:result.checkpoint
-    |> resilience_handles.sync_lifecycle_meta
+    KEC.apply_post_turn_lifecycle ~meta ~checkpoint:result.checkpoint
   in
-  KEC.dispatch_post_turn_lifecycle_events
-    ~config
-    ~keeper_name:meta.name
-    lifecycle;
+  KTP.run_best_effort
+    ~terminal_effect:KTP.Lifecycle_projection
+    ~on_error:(fun exn ->
+      Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
+        ~config
+        ~keeper_name:meta.name
+        ~side_effect:(KTP.effect_label KTP.Lifecycle_projection)
+        (Printexc.to_string exn))
+    (fun () ->
+       KEC.dispatch_post_turn_lifecycle_events
+         ~config
+         ~keeper_name:meta.name
+         lifecycle);
   lifecycle
 ;;
 
@@ -68,10 +72,11 @@ let terminal_outcome_of_result result =
   match result.Keeper_agent_run.stop_reason with
   | Runtime_agent.Completed -> Terminal_done
   | Runtime_agent.InputRequired _ -> Terminal_input_required
-  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Awaiting_external_effect _
-  | Runtime_agent.Yielded_after_repeated_tool_call _ ->
+  | Runtime_agent.Yielded_after_repeated_tool_call _
+  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
     Terminal_checkpoint
 ;;
 
@@ -100,51 +105,54 @@ let append_metrics_snapshot
       ~turn_cost
       ~(lifecycle : KEC.post_turn_lifecycle)
       ~terminal_outcome
+      ~execution_outcome
   =
   (* Single typed channel for the whole cycle: post helpers + the metrics
      snapshot + the failure-path label all derive from one value, so the
      reactive/autonomous decision can no longer drift between sites. *)
   let channel_tag = Keeper_world_observation.channel_to_string channel in
-  try
-    (match post_action_of_channel channel with
-     | Assign_task ->
-       Keeper_turn_helpers.post_assign_task ~channel:channel_tag
-     | Empty_queue_sleep ->
-       Keeper_turn_helpers.post_empty_queue_sleep ~channel:channel_tag);
-    KUM.append_metrics_snapshot
-      ~config
-      ~meta:updated_meta
-      ~observation
-      ~result
-      ~latency_ms
-      ~turn_cost
-      ~turn_generation:lifecycle.KEC.turn_generation
-      ~channel
-      ~checkpoint_bytes:lifecycle.checkpoint_bytes
-      ~message_count:lifecycle.message_count
-      ~handoff_json:lifecycle.handoff_json
-      ()
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string MetricEmitDropped)
-      ~labels:
-        [ "keeper", updated_meta.name
-        ; "channel", channel_tag
-        ; "site", Keeper_metric_emit_dropped_site.(to_label Keeper_unified_turn)
-        ]
-      ();
-    Log.Keeper.error
-      "write metrics snapshot failed after keeper cycle: %s"
-      (Printexc.to_string exn);
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string TurnMetricsSnapshotFailures)
-      ~labels:
-        [ "keeper", meta.Keeper_meta_contract.name
-        ; "site", Keeper_turn_metrics_snapshot_failure_site.(to_label Post_cycle)
-        ]
-      ()
+  KTP.run_best_effort
+    ~terminal_effect:KTP.Metrics_snapshot
+    ~on_error:(fun exn ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string MetricEmitDropped)
+        ~labels:
+          [ "keeper", updated_meta.name
+          ; "channel", channel_tag
+          ; "site", Keeper_metric_emit_dropped_site.(to_label Keeper_unified_turn)
+          ]
+        ();
+      Log.Keeper.error
+        "write metrics snapshot failed after keeper cycle: %s"
+        (Printexc.to_string exn);
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string TurnMetricsSnapshotFailures)
+        ~labels:
+          [ "keeper", meta.Keeper_meta_contract.name
+          ; "site", Keeper_turn_metrics_snapshot_failure_site.(to_label Post_cycle)
+          ]
+        ())
+    (fun () ->
+       (match Keeper_execution_outcome.lane execution_outcome with
+        | Keeper_execution_outcome.Direct -> ()
+        | Keeper_execution_outcome.Autonomous _ ->
+          (match post_action_of_channel channel with
+           | Assign_task ->
+             Keeper_turn_helpers.post_assign_task ~channel:channel_tag
+           | Empty_queue_sleep ->
+             Keeper_turn_helpers.post_empty_queue_sleep ~channel:channel_tag));
+       KUM.append_metrics_snapshot
+         ~config
+         ~meta:updated_meta
+         ~observation
+         ~result
+         ~latency_ms
+         ~turn_cost
+         ~channel
+         ~checkpoint_bytes:lifecycle.checkpoint_bytes
+         ~message_count:lifecycle.message_count
+         ~handoff_json:lifecycle.handoff_json
+         ())
 ;;
 
 let emit_activity_graph
@@ -159,16 +167,24 @@ let emit_activity_graph
       ~wall_tokens_per_second
       ~terminal_outcome
   =
-  try
-    let activity_kind = terminal_outcome_to_activity_kind terminal_outcome in
-    let cache_miss_input_tokens =
-      Keeper_hooks_oas.cache_miss_input_tokens
-        ~input_tokens:result.Keeper_agent_run.usage.input_tokens
-        ~cache_creation_input_tokens:result.usage.cache_creation_input_tokens
-        ~cache_read_input_tokens:result.usage.cache_read_input_tokens
-    in
-    let event =
-      Activity_graph.emit
+  KTP.run_best_effort
+    ~terminal_effect:KTP.Activity_graph
+    ~on_error:(fun exn ->
+      Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
+        ~config
+        ~keeper_name:updated_meta.name
+        ~side_effect:(KTP.effect_label KTP.Activity_graph)
+        (Printexc.to_string exn))
+    (fun () ->
+       let activity_kind = terminal_outcome_to_activity_kind terminal_outcome in
+       let cache_miss_input_tokens =
+         Keeper_hooks_agent_core.cache_miss_input_tokens
+           ~input_tokens:result.Keeper_agent_run.usage.input_tokens
+           ~cache_creation_input_tokens:result.usage.cache_creation_input_tokens
+           ~cache_read_input_tokens:result.usage.cache_read_input_tokens
+       in
+       let event =
+         Activity_graph.emit
         config
         ~actor:{ kind = "agent"; id = updated_meta.Keeper_meta_contract.agent_name }
         ~kind:activity_kind
@@ -224,20 +240,12 @@ let emit_activity_graph
                | None -> []))
         ~tags:[ "keeper"; "turn"; "metrics" ]
         ()
-    in
-    Log.Keeper.debug
-      "%s: activity graph %s emitted seq=%d"
-      updated_meta.name
-      activity_kind
-      event.seq
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
-      ~config
-      ~keeper_name:updated_meta.name
-      ~side_effect:"activity graph turn terminal emit"
-      (Printexc.to_string exn)
+       in
+       Log.Keeper.debug
+         "%s: activity graph %s emitted seq=%d"
+         updated_meta.name
+         activity_kind
+         event.seq)
 ;;
 
 let emit_usage_metrics_and_log
@@ -252,8 +260,8 @@ let emit_usage_metrics_and_log
   let outcome_str =
     match result.Keeper_agent_run.stop_reason with
     | Runtime_agent.Completed -> "completed"
-    | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
-      Printf.sprintf "yielded_to_chat_waiting(%d)" turns_used
+    | Runtime_agent.Yielded_to_operation_queued { turns_used } ->
+      Printf.sprintf "yielded_to_operation_queued(%d)" turns_used
     | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
       Printf.sprintf "yielded_to_durable_stimulus(%d)" turns_used
     | Runtime_agent.Awaiting_external_effect { turns_used } ->
@@ -265,6 +273,12 @@ let emit_usage_metrics_and_log
         turns_used
         tool_name
         repeated_count
+    | Runtime_agent.Yielded_after_repeated_assistant_text
+        { turns_used; repeated_count } ->
+      Printf.sprintf
+        "yielded_after_repeated_assistant_text(%d,%d)"
+        turns_used
+        repeated_count
     | Runtime_agent.InputRequired { turns_used; _ } ->
       Printf.sprintf "input_required(%d)" turns_used
   in
@@ -274,12 +288,14 @@ let emit_usage_metrics_and_log
     | Terminal_input_required -> "input_required"
      | Terminal_checkpoint ->
       (match result.stop_reason with
-       | Runtime_agent.Yielded_to_chat_waiting _ -> "yielded_to_chat_waiting"
+       | Runtime_agent.Yielded_to_operation_queued _ -> "yielded_to_operation_queued"
        | Runtime_agent.Yielded_to_durable_stimulus _ ->
          "yielded_to_durable_stimulus"
        | Runtime_agent.Awaiting_external_effect _ -> "awaiting_external_effect"
        | Runtime_agent.Yielded_after_repeated_tool_call _ ->
          "yielded_after_repeated_tool_call"
+       | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
+         "yielded_after_repeated_assistant_text"
        | Runtime_agent.InputRequired _ -> "input_required"
        | Runtime_agent.Completed -> "success")
   in
@@ -360,6 +376,7 @@ let emit_usage_metrics_and_log
     else 0
   in
   Log.Keeper.info
+    ~category:Log.Turn
     "%s: keeper cycle %s runtime_lane=%s tokens=%d latency=%dms mode=%s stop=%s"
     updated_meta.name
     (terminal_outcome_to_log_label terminal_outcome)
@@ -393,56 +410,46 @@ let terminal_reason_of_outcome result = function
       Keeper_turn_disposition.Input_required
   | Terminal_checkpoint ->
     (match result.Keeper_agent_run.stop_reason with
-     | Runtime_agent.Yielded_to_chat_waiting _
+     | Runtime_agent.Yielded_to_operation_queued _
      | Runtime_agent.Yielded_to_durable_stimulus _
      | Runtime_agent.Awaiting_external_effect _
      | Runtime_agent.Yielded_after_repeated_tool_call _
+     | Runtime_agent.Yielded_after_repeated_assistant_text _
      | Runtime_agent.InputRequired _ ->
        Keeper_turn_terminal.of_disposition
          ~source:"runtime_stop_reason"
          Keeper_turn_disposition.Input_required
      | Runtime_agent.Completed -> Keeper_turn_terminal.success ())
 
-let persist_terminal_turn_meta
-      ~config
-      ~original_meta
-      ~updated_meta
-  =
-  (match
-     Keeper_meta_store.write_meta_with_merge
-       ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-       config
-       updated_meta
-   with
-   | Ok () -> ()
-   | Error msg ->
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string WriteMetaFailures)
-       ~labels:
-         [ "keeper", updated_meta.name
-         ; ( "phase"
-           , if Keeper_meta_store.is_version_conflict_error msg
-             then "keeper_cycle_cas_race"
-             else "keeper_cycle" )
-         ]
-       ();
-     (* #22043: emit inside the [Error] arm so
-        [write_meta_cycle_failures_total] stays a failure counter. It is
-        summed into the dashboard failure panel (Dashboard.ml), and the
-        sibling emit site (Keeper_unified_turn.ml, site=Turn_failure) only
-        fires on the failure path. Previously this inc sat after the match
-        and fired on every successful persist cycle, inflating the series. *)
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string WriteMetaCycleFailures)
-       ~labels:
-         [ "keeper", original_meta.name
-         ; "site", Keeper_write_meta_cycle_failure_site.(to_label Keeper_cycle)
-         ]
-       ();
-     if Keeper_meta_store.is_version_conflict_error msg
-     then Log.Keeper.warn "write_meta lost CAS race after retries (keeper cycle): %s" msg
-     else Log.Keeper.error "write_meta failed after keeper cycle: %s" msg);
-  updated_meta
+exception Owner_meta_commit_failed of string
+
+let persist_terminal_turn_meta ~config ~original_meta ~updated_meta =
+  match
+    Keeper_owner_registry.commit_turn_runtime
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:original_meta.name
+      ~before:original_meta
+      ~after:updated_meta
+  with
+  | Ok (Some committed) -> committed
+  | Ok None ->
+    raise
+      (Owner_meta_commit_failed
+         "Keeper Owner removed metadata during terminal turn commit")
+  | Error error ->
+    let detail = Keeper_owner_registry.command_error_to_string error in
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string WriteMetaFailures)
+      ~labels:[ "keeper", original_meta.name; "phase", "keeper_cycle" ]
+      ();
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string WriteMetaCycleFailures)
+      ~labels:
+        [ "keeper", original_meta.name
+        ; "site", Keeper_write_meta_cycle_failure_site.(to_label Keeper_cycle)
+        ]
+      ();
+    raise (Owner_meta_commit_failed detail)
 ;;
 
 let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
@@ -460,12 +467,12 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
     Health.record_success ~agent_name:updated_meta.name
   in
   match result.Keeper_agent_run.stop_reason with
-  | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
-    (* A clean, intentional yield to a parked chat, not a degraded outcome:
+  | Runtime_agent.Yielded_to_operation_queued { turns_used } ->
+    (* A clean, intentional yield to a queued operation, not a degraded outcome:
        clear turn-failure state and record health success, like a completed
        turn. The keeper resumes its own work on the next cycle. *)
     Log.Keeper.info ~keeper_name:updated_meta.name
-      "yielded turn slot to a waiting chat request after %d turn(s), checkpoint \
+      "yielded autonomous Owner child to a queued operation after %d turn(s), checkpoint \
        saved — will resume next cycle"
       turns_used;
     reset_failure_state ()
@@ -489,11 +496,19 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
       tool_name
       repeated_count;
     reset_failure_state ()
+  | Runtime_agent.Yielded_after_repeated_assistant_text
+      { turns_used; repeated_count } ->
+    Log.Keeper.warn ~keeper_name:updated_meta.name
+      "yielded repeated assistant text after %d turn(s): count=%d; \
+       checkpoint saved — will resume next cycle"
+      turns_used
+      repeated_count;
+    reset_failure_state ()
   | Runtime_agent.InputRequired { turns_used; request } ->
     Log.Keeper.info ~keeper_name:updated_meta.name
       "typed input required after %d turn(s), checkpoint saved request_id=%s"
       turns_used
-      request.Agent_sdk.Error.request_id;
+      request.Agent_core.Error.request_id;
     reset_failure_state ()
   | Runtime_agent.Completed -> reset_failure_state ()
 ;;
@@ -503,8 +518,6 @@ module For_testing = struct
     | Terminal_done
     | Terminal_checkpoint
     | Terminal_input_required
-
-  let terminal_outcome_of_result = terminal_outcome_of_result
 
   let persist_terminal_turn_meta_for_outcome
         ~config
@@ -518,8 +531,6 @@ module For_testing = struct
       ~updated_meta
 
   let reset_turn_failures_for_stop_reason = reset_turn_failures_for_stop_reason
-  let acknowledge_pending_messages = acknowledge_pending_messages
-
   type nonrec cycle_post_action = cycle_post_action =
     | Assign_task
     | Empty_queue_sleep
@@ -527,25 +538,17 @@ module For_testing = struct
   let post_action_of_channel = post_action_of_channel
 end
 
-let emit_terminal_fsm
-      ~config
-      ~meta
-      ~keeper_turn_id
-      ~updated_meta
-      result
-  =
+let emit_terminal_fsm ~meta ~keeper_turn_id =
   Keeper_turn_fsm.emit_transition
     ~keeper_name:meta.Keeper_meta_contract.name
     ~turn_id:keeper_turn_id
     ~prev:Keeper_turn_fsm.Streaming
     Keeper_turn_fsm.Completing;
-  reset_turn_failures_for_stop_reason ~config ~updated_meta result;
   Keeper_turn_fsm.emit_transition
     ~keeper_name:meta.name
     ~turn_id:keeper_turn_id
     ~prev:Keeper_turn_fsm.Completing
-    Keeper_turn_fsm.Done;
-  Completed updated_meta
+    Keeper_turn_fsm.Done
 ;;
 
 let handle
@@ -553,14 +556,26 @@ let handle
       ~meta
       ~turn_ctx_cell
       ~observation
-      ~channel
       ~latency_ms
       ~degraded_retry_applied
       ~degraded_retry_runtime
       ~fallback_reason
       ~keeper_turn_id
-      result
+      execution_outcome
   =
+  let result = Keeper_execution_outcome.result execution_outcome in
+  let channel = Keeper_execution_outcome.metrics_channel execution_outcome in
+  let run_projection terminal_effect f =
+    KTP.run_best_effort
+      ~terminal_effect
+      ~on_error:(fun exn ->
+        Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
+          ~config
+          ~keeper_name:meta.name
+          ~side_effect:(KTP.effect_label terminal_effect)
+          (Printexc.to_string exn))
+      f
+  in
   let turn_cost = turn_cost result in
   let lifecycle =
     apply_lifecycle
@@ -573,10 +588,14 @@ let handle
       lifecycle.KEC.updated_meta
       ~latency_ms
       ~observation
-      ~update_proactive_rt:true
+      ~is_autonomous_turn:(Keeper_execution_outcome.is_autonomous execution_outcome)
       result
   in
-  let updated_meta = acknowledge_pending_messages updated_meta observation in
+  let updated_meta =
+    if Keeper_execution_outcome.is_autonomous execution_outcome
+    then acknowledge_pending_messages updated_meta observation
+    else updated_meta
+  in
   (* RFC-0303 Phase 3: the no-progress loop detector is retired, so the
      metrics-updated meta flows through unchanged (no loop-detection rebind). *)
   let terminal_outcome = terminal_outcome_of_result result in
@@ -590,7 +609,8 @@ let handle
     ~latency_ms
     ~turn_cost
     ~lifecycle
-    ~terminal_outcome;
+    ~terminal_outcome
+    ~execution_outcome;
   let turn_mode = KUM.turn_mode_of_result result in
   let turn_mode_label = KUM.turn_mode_to_string turn_mode in
   let usage_trust =
@@ -614,34 +634,38 @@ let handle
     ~lifecycle
     ~wall_tokens_per_second
     ~terminal_outcome;
-  KUM.broadcast_lifecycle_events
-    ~name:updated_meta.name
-    ~turn_generation:lifecycle.turn_generation
-    ~handoff_json:lifecycle.handoff_json;
-  KUM.append_decision_record
-    ~config
-    ~meta:updated_meta
-    ~turn_ctx_cell
-    ~observation
-    ~latency_ms
-    ~outcome:
-      (decision_outcome_to_label
-         (decision_outcome_of_terminal_outcome terminal_outcome))
-    ~degraded_retry_applied
-    ?degraded_retry_runtime
-    ?fallback_reason:(Option.map Keeper_error_classify.degraded_retry_reason_to_string fallback_reason)
-    ~turn_mode
-    ~terminal_reason:(terminal_reason_of_outcome result terminal_outcome)
-    ~result:(Some result)
-    ();
-  emit_usage_metrics_and_log
-    ~updated_meta
-    ~result
-    ~latency_ms
-    ~usage_trust
-    ~turn_mode_label
-    ~lifecycle
-    ~terminal_outcome;
+  run_projection KTP.Lifecycle_broadcast (fun () ->
+    KUM.broadcast_lifecycle_events
+      ~name:updated_meta.name
+      ~handoff_json:lifecycle.handoff_json);
+  run_projection KTP.Decision_record (fun () ->
+    KUM.append_decision_record
+      ~config
+      ~meta:updated_meta
+      ~turn_ctx_cell
+      ~observation
+      ~latency_ms
+      ~outcome:
+        (decision_outcome_to_label
+           (decision_outcome_of_terminal_outcome terminal_outcome))
+      ~channel
+      ~degraded_retry_applied
+      ?degraded_retry_runtime
+      ?fallback_reason:
+        (Option.map Keeper_error_classify.degraded_retry_reason_to_string fallback_reason)
+      ~turn_mode
+      ~terminal_reason:(terminal_reason_of_outcome result terminal_outcome)
+      ~result:(Some result)
+      ());
+  run_projection KTP.Usage_metrics (fun () ->
+    emit_usage_metrics_and_log
+      ~updated_meta
+      ~result
+      ~latency_ms
+      ~usage_trust
+      ~turn_mode_label
+      ~lifecycle
+      ~terminal_outcome);
   (* Every terminal outcome has consumed a keeper turn id. *)
   let updated_meta =
     persist_terminal_turn_meta
@@ -652,10 +676,12 @@ let handle
   (* Single source of truth for success-path terminal FSM transitions.
      Completion-contract observations never rewrite a successful runtime turn
      into a failed Keeper lifecycle transition. *)
-  emit_terminal_fsm
-    ~config
-    ~meta
-    ~keeper_turn_id
-    ~updated_meta
-    result
+  run_projection KTP.Terminal_fsm_projection (fun () ->
+    emit_terminal_fsm ~meta ~keeper_turn_id);
+  (* Turn success is product state, not a best-effort FSM projection. Keep the
+     failure counter and health reset outside [run_projection] so an exception
+     from either transition emitter cannot leave a completed turn marked as
+     failed on the next heartbeat. *)
+  reset_turn_failures_for_stop_reason ~config ~updated_meta result;
+  Completed updated_meta
 ;;

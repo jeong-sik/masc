@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Tool_name — Compile-time verified tool identifiers.
 
     Replaces stringly-typed tool dispatch with exhaustive variant matching.
@@ -148,20 +131,17 @@ module Goal_name = struct
     | Goal_list
     | Goal_transition
     | Goal_upsert
-    | Goal_assign
 
   let to_string = function
     | Goal_list -> "masc_goal_list"
     | Goal_transition -> "masc_goal_transition"
     | Goal_upsert -> "masc_goal_upsert"
-    | Goal_assign -> "masc_goal_assign"
   ;;
 
   let of_string = function
     | "masc_goal_list" -> Some Goal_list
     | "masc_goal_transition" -> Some Goal_transition
     | "masc_goal_upsert" -> Some Goal_upsert
-    | "masc_goal_assign" -> Some Goal_assign
     | _ -> None
   ;;
 
@@ -172,7 +152,6 @@ module Operator_name = struct
   type t =
     | Operator_action
     | Operator_board_attention_quarantine_requeue
-    | Operator_chat_recovery_resolve
     | Operator_confirm
     | Operator_digest
     | Operator_snapshot
@@ -182,7 +161,6 @@ module Operator_name = struct
     | Operator_action -> "masc_operator_action"
     | Operator_board_attention_quarantine_requeue ->
       "masc_operator_board_attention_quarantine_requeue"
-    | Operator_chat_recovery_resolve -> "masc_operator_chat_recovery_resolve"
     | Operator_confirm -> "masc_operator_confirm"
     | Operator_digest -> "masc_operator_digest"
     | Operator_snapshot -> "masc_operator_snapshot"
@@ -193,7 +171,6 @@ module Operator_name = struct
     | "masc_operator_action" -> Some Operator_action
     | "masc_operator_board_attention_quarantine_requeue" ->
       Some Operator_board_attention_quarantine_requeue
-    | "masc_operator_chat_recovery_resolve" -> Some Operator_chat_recovery_resolve
     | "masc_operator_confirm" -> Some Operator_confirm
     | "masc_operator_digest" -> Some Operator_digest
     | "masc_operator_snapshot" -> Some Operator_snapshot
@@ -222,7 +199,6 @@ module Operator_remote_name = struct
     ; Operator_tool Operator_name.Operator_digest
     ; Operator_tool Operator_name.Operator_action
     ; Operator_tool Operator_name.Operator_board_attention_quarantine_requeue
-    ; Operator_tool Operator_name.Operator_chat_recovery_resolve
     ; Operator_tool Operator_name.Operator_task_recovery_resolve
     ; Operator_tool Operator_name.Operator_confirm
     ]
@@ -323,6 +299,3 @@ let is_masc = function
   | Masc _ -> true
 ;;
 
-let is_board = function
-  | Masc m -> Masc.is_board m
-;;

@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0084", "0056"]
-implementation_prs: [15458, 15460, 15461, 15462, 15465, 15466, 15468, 15470, 15471, 15475, 15477, 15480, 15481, 15482, 15483, 15484, 15485, 15486]
 ---
 
 # RFC-0087 — Tool Dispatch Path Unification + Legacy Purge
@@ -30,8 +29,8 @@ RFC-0084 sprint (24 PR) 완료 직후 정밀 audit이 3개 root gap을 식별:
 ## §2 의도된 결과
 
 - 모든 5 observer가 keeper-turn / 외부 MCP / inline 3개 dispatch path에서 동일 발화
-- `Host_config` 가 cred/coreutils/shell/runtime/disclosure + log/run/policy + env-derived 4 (base_path/config_dir/data_dir/personas_dir) + home/assets_dir/base_path_raw = **15 도메인** 통합
-- `Env_config_core` 의 path-related public surface (`base_path_opt`, `base_path_raw_opt`, `config_dir_opt`, `personas_dir_opt`, `home_dir_opt`, `assets_dir_opt`) 폭발
+- `Host_config` 가 cred/coreutils/shell/runtime/disclosure + log/run/policy + env-derived paths + home/assets_dir/base_path_raw를 통합
+- `Env_config_core` 의 path-related public surface가 여러 경계로 분산
 - Env-var deprecation 메커니즘 폭발 (7 entries)
 - `Host_config.t` + `Dispatch_outcome.t` `@@deriving show, eq` 적용
 - AST 기반 regression helper (`test_lib/ast_grep.ml`) 도입
@@ -39,7 +38,7 @@ RFC-0084 sprint (24 PR) 완료 직후 정밀 audit이 3개 root gap을 식별:
 
 ## §3 비결정 영역 / Out of Scope
 
-- OAS `Agent_sdk.Tool.descriptor` audit — masc 외부 repo
+- agent_core `Agent_sdk.Tool.descriptor` audit — masc 외부 repo
 - `cdal_runtime` sub-library의 `Env_config_core` path caller migration — RFC-OAS-011 격리 보존
 - `auth_diagnostic` / `auth_login` / `config_diagnostic` `normalize_masc_base_path_input` — generic string utility, path SSOT 아님
 - `worker_runtime_docker` `Env_config_core.*_env_key` — string identifier (값 아님)
@@ -65,7 +64,6 @@ RFC-0084 sprint (24 PR) 완료 직후 정밀 audit이 3개 root gap을 식별:
 | #15480 PR-12 | _tool_spec_* misleading prefix rename (51 occurrence) | OPEN |
 | #15481 PR-13 | underscore audit (1 dead + 8 rename) | OPEN |
 | #15482 PR-14 | dispatch chain inline (dispatch + dispatch_structured 폭발) | OPEN |
-| #15483 PR-15 | tool_schemas_inline 4 binding rename | OPEN |
 | #15484 PR-16 | server_dashboard_http_core 9 binding rename | OPEN |
 | #15485 PR-17 | 4 dead function 폭발 (~250 LOC) + 2 rename | OPEN |
 | #15486 PR-18 | execution_surfaces + namespace_truth 8 rename | OPEN |
@@ -74,7 +72,6 @@ RFC-0084 sprint (24 PR) 완료 직후 정밀 audit이 3개 root gap을 식별:
 
 - `dune build --root . @lib/check` green at every PR commit
 - 각 PR에 source-AST regression test (RFC-0085 PR-1 도입 `test_lib/ast_grep.ml`)
-- `ci/lint-no-direct-dispatch.sh` green at every PR
 
 ## §6 학습 (memory에 저장)
 

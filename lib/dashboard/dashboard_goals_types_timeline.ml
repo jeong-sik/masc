@@ -14,12 +14,11 @@
 open Dashboard_goals_types_accessor
 
 let json_to_string_opt = function | `String s -> Some s | _ -> None
-let json_to_int_opt = function | `Int n -> Some n | `Intlit s -> (try Some (int_of_string s) with _ -> None) | _ -> None
-
 let goal_phase_color = function
   | Goal_phase.Executing -> "#4ade80"
-  | Goal_phase.Blocked -> "#ef4444"
-  | Goal_phase.Paused -> "#94a3b8"
+  (* RFC-0387 stage 2: the proof-pending hue matches the Task domain's
+     [AwaitingVerification] so the gate reads as the same shape of wait. *)
+  | Goal_phase.Verifying -> "#a78bfa"
   | Goal_phase.Completed -> "#60a5fa"
   | Goal_phase.Dropped -> "#6b7280"
 
@@ -188,8 +187,6 @@ let goal_detail_keeper_json (detail : goal_detail_keeper) =
         match meta.current_task_id with
         | Some task_id -> `String (Keeper_id.Task_id.to_string task_id)
         | None -> `Null );
-      ( "active_goal_ids",
-        `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids) );
       ( "sandbox_profile",
         `String (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile) );
       ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode));
@@ -249,17 +246,40 @@ let goal_event_timeline_json event =
           payload_field "phase" |> json_to_string_opt
           |> Option.value ~default:"<missing payload.phase>"
         in
+        (* [payload.actor] is the agent name, a bare string: every producer
+           builds it that way ([gate_event_payload] and the two inline
+           payloads in workspace_goals.ml). Reading it as [actor.id] made
+           [json_member_or_null] return [`Null] for every event ever written,
+           so the summary silently lost the actor — the one field that says
+           who moved the goal. Marked like [phase] when absent, so a producer
+           that stops writing it shows up instead of disappearing.
+
+           The alternative — dropping the "by %s" clause when the field is
+           absent — is what this change is fixing. The summary read
+           "phase=blocked" for months and read correctly, which is exactly
+           why nobody looked. *)
         let actor =
-          payload_field "actor" |> json_member_or_null "id" |> json_to_string_opt
+          payload_field "actor" |> json_to_string_opt
+          (* NDT-OK: bracketed marker, not a permissive default. *)
+          |> Option.value ~default:"<missing payload.actor>"
         in
-        ( "Goal Phase",
-          (match actor with
-          | Some actor_id -> Printf.sprintf "phase=%s by %s" phase actor_id
-          | None -> Printf.sprintf "phase=%s" phase),
-          (match phase with
-          | "blocked" -> "bad"
-          | "paused" -> "warn"
-          | _ -> "ok") )
+        (* Enumerated over [Goal_phase.t] rather than matched on the string, so
+           adding a phase to the variant fails this match instead of landing in
+           a healthy-looking bucket by default.
+
+           A phase this build cannot parse — including the [<missing ...>]
+           marker above — is `warn`, not `ok`. The marker is loud in the summary
+           text but the old `_ -> "ok"` made the row render neutral, the same as
+           a healthy event, so a corrupted producer event was invisible to an
+           operator scanning by colour. Live ledger check before the change: all
+           78 goal_phase rows carry one of the six known tokens, so nothing
+           in the store moves to `warn` because of this. *)
+        let severity =
+          match Goal_phase.of_string phase with
+          | Some (Executing | Verifying | Completed | Dropped) -> "ok"
+          | None -> "warn"
+        in
+        ("Goal Phase", Printf.sprintf "phase=%s by %s" phase actor, severity)
     | _ ->
         ("Goal Event", event_type, "ok")
   in

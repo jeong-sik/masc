@@ -7,12 +7,9 @@ updated: 2026-06-01
 author: jeong-sik
 supersedes: []
 superseded_by: null
-superseded_sections:
-  - section: "§2"
     by: "0211"
-    note: "Surface choice (persona model field as the single surface) is superseded by RFC-0211 (runtime.toml keeper-assignment SSOT). Part A routing mechanism stands."
+    note: "Surface choice (keeper model field as the single surface) is superseded by runtime assignment contract (runtime.toml keeper-assignment SSOT). Part A routing mechanism stands."
 related: ["0001", "0206", "0211"]
-implementation_prs: []
 ---
 
 # RFC-0207 — Per-keeper LLM runtime routing
@@ -23,12 +20,12 @@ implementation_prs: []
 
 ## 0. Summary
 
-A keeper can already declare which provider-model it runs on, via its persona
+A keeper can already declare which provider-model it runs on, via its keeper
 TOML `model = "provider.model"` field (e.g. `keepers/echo.toml` →
 `model = "ollama_cloud.deepseek-v4-pro"`). That declaration reached the
 reconcile/status layer but **never reached the wire**: the turn dispatcher
 returned the global `[runtime].default` for every keeper. This RFC fixes the
-dispatcher to honour the existing persona selection. No new configuration
+dispatcher to honour the existing keeper selection. No new configuration
 surface is introduced.
 
 ## 1. Problem
@@ -48,9 +45,9 @@ The per-keeper intent died at two points:
 
 Fixing only ① still dispatches the default at ②; both are fixed.
 
-## 2. There is only one surface: the persona `model` field
+## 2. There is only one surface: the keeper `model` field
 
-The keeper persona TOML already carries the per-keeper runtime selection:
+The Keeper TOML already carries the per-Keeper runtime selection:
 
 - `keepers/<name>.toml` `[keeper] model = "provider.model"` (the key is parsed
   as `runtime_id`/`model`, both populating `keeper_profile_defaults.model`).
@@ -61,12 +58,12 @@ The keeper persona TOML already carries the per-keeper runtime selection:
 
 An earlier draft of this RFC added a *second* surface (`[llm_runtime.<keeper>]`
 in the shared `runtime.toml`). That was rejected: it duplicated the
-existing persona field, split per-keeper data across two files, and — because
+existing keeper field, split per-keeper data across two files, and — because
 the dispatcher read one surface while the reconcile/status layer read the other
 with the opposite precedence — created a split-brain that would flag `runtime`
 drift on every ~30 s reconcile sweep (a re-sync write storm, cf. #10061).
 
-The dispatcher is allowed to read the persona field directly: the dependency
+The dispatcher is allowed to read the keeper field directly: the dependency
 direction is `keeper_types_profile` (low) ← `keeper_meta_contract` (mid)
 ← `keeper_runtime` (high), and `keeper_meta_contract` already depends on
 `Keeper_types_profile`. There was never a dependency wall forcing a new surface.
@@ -76,22 +73,22 @@ direction is `keeper_types_profile` (low) ← `keeper_meta_contract` (mid)
 `runtime_id_of_meta` resolves a keeper's runtime from the SAME `defaults.model`
 source as `effective_declarative_runtime_id`:
 
-- persona `model = Some "provider.model"` → that id (after `String.trim`);
+- keeper `model = Some "provider.model"` → that id (after `String.trim`);
 - otherwise → the documented `[runtime].default`
   (`Runtime.get_default_runtime_id ()`), NOT a silent substitution.
 
 Because both the dispatcher and the declare/status layer read `defaults.model`,
 they cannot disagree — one surface, no storm. The reconcile change-detector
 (`runtime_changed = runtime_id_of_meta meta <> effective_declarative_runtime_id
-defaults meta`) is now always false unless the persona file actually changed.
+defaults meta`) is now always false unless the keeper file actually changed.
 
 ### Validation (fail-fast at dispatch, RFC-0206 §2.1)
 
-The persona `model` is a raw string. It is validated at *dispatch*: the driver
+The keeper `model` is a raw string. It is validated at *dispatch*: the driver
 calls `Runtime.get_runtime_by_id id`, and an id that does not resolve to a
 materialized runtime returns `None`, so the driver returns an
 `Agent_sdk.Error.Internal` instead of silently substituting the default. There
-is no startup-time validation pass (the persona selection is per-keeper and
+is no startup-time validation pass (the keeper selection is per-keeper and
 config-static; a typo surfaces as a loud dispatch error on that keeper's first
 turn).
 
@@ -124,7 +121,7 @@ The `ollama_cloud.deepseek-v4-pro` binding already materializes in
 ## 6. Part B — ordered failover (deferred)
 
 Static per-keeper selection is Part A ("1번"). Ordered failover ("3") is Part B:
-extend the persona with an optional ordered list (e.g.
+extend the keeper with an optional ordered list (e.g.
 `runtime_failover = ["..."]`) consumed by the reactive failover lane in
 `keeper_error_classify.ml`. That file is a contended, broken-main-history shared
 surface (#19679 landed a `degraded_rotation_*` lane there), so Part B ships as a
@@ -135,14 +132,14 @@ recoverable failure the existing `degraded_rotation` fallback still applies.
 
 `test/test_runtime_per_keeper_routing.ml` (5 cases, self-initialising):
 
-1. persona `model` drives `runtime_id_of_meta` (declared keeper → its selection,
+1. keeper `model` drives `runtime_id_of_meta` (declared keeper → its selection,
    not the default);
 2. undeclared keeper falls to `[runtime].default`;
 3. `get_runtime_by_id` resolves a known id and returns `None` for an unknown id
    (driver fail-fast);
 4. direct budget resolution uses the selected runtime's `max-context`;
 5. the production `resolve_max_context_resolution_of_meta` path budgets against
-   the persona runtime rather than the global default.
+   the keeper runtime rather than the global default.
 
 Whole-program `dune build @check` and `dune build .` are green; the existing
 `runtime_id_of_meta` consumers (`test_keeper_identity_parse`,

@@ -8,9 +8,7 @@ type memory_search_source =
   | History
   | All
 
-val memory_search_source_to_string : memory_search_source -> string
 val memory_search_source_of_string_opt : string -> memory_search_source option
-val all_memory_search_sources : memory_search_source list
 val valid_memory_search_source_strings : string list
 
 val keeper_memory_search_json
@@ -33,7 +31,7 @@ val keeper_context_status_json
   -> ctx_work:Keeper_types.working_context
   -> string
 
-(** RFC-0035 P4 surface: explicit memory write.
+(** Explicit memory write surface.
 
     Atomically adds a durable claim to the current Memory OS snapshot, the only
     store an explicit write reaches.
@@ -51,15 +49,25 @@ val keeper_context_status_json
 val keeper_memory_write_with_outcome
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> authorize_external_effect:
+       (operation:string ->
+        input:Yojson.Safe.t ->
+        (unit -> Keeper_tool_execution.t) ->
+        Keeper_tool_execution.t)
   -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
 
+val memory_write_gate_operation : string
+
+val replay_memory_write_args_of_gate_input
+  :  Yojson.Safe.t
+  -> (Yojson.Safe.t, string) result
+(** Validate and retain the exact producer-owned Gate input for host replay.
+    Replay rejects duplicate, unknown, missing, and invalid fields rather than
+    reconstructing or defaulting an approved request. *)
+
 (** Title length cap exposed for sync regression tests. *)
-val keeper_memory_write_max_title_chars : int
-
 (** Upper bound on the composed [**title** content] body. *)
-val keeper_memory_write_max_body_chars : int
-
 (** Result of validating a [keeper_memory_write] call's args. Exposed
     so tests can pin the error_kind taxonomy without constructing a
     [Workspace.config]. *)

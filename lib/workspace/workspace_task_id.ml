@@ -12,21 +12,17 @@ let task_id_to_int id =
   else if String.sub id 0 prefix_len <> prefix then None
   else int_of_string_opt (String.sub id prefix_len (String.length id - prefix_len))
 
-(** Extract the raw task-entry JSON list from a parsed archive document,
-    tolerating both the bare-[`List] legacy shape and the current
-    [{"tasks": [...]}] envelope.  Single source for the archive
+(** Extract the raw task-entry JSON list from a parsed archive document.
+    The archive is the [{"tasks": [...]}] envelope; the bare-[`List] shape
+    that predated it is no longer read.  Single source for the archive
     readers/writers so the shape cannot drift between them. *)
-let archive_entries_of_json = function
-  | `List tasks -> tasks
-  | `Assoc _ as json -> begin
-      match Json_util.assoc_member_opt "tasks" json with
-      | Some (`List tasks) -> tasks
-      | _ -> []
-    end
+let archive_entries_of_json json =
+  match Json_util.assoc_member_opt "tasks" json with
+  | Some (`List tasks) -> tasks
   | _ -> []
 
 let read_archive_entries config =
-  if not (Sys.file_exists (archive_path config)) then []
+  if not (path_exists config (archive_path config)) then []
   else archive_entries_of_json (read_json config (archive_path config))
 
 let read_archive_task_ids config =

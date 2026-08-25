@@ -14,9 +14,6 @@ type board_context_inference_target_source =
   | Explicit_target
   | Post_author
 
-val board_context_inference_target_source_to_string :
-  board_context_inference_target_source -> string
-
 type board_context_inference_request = {
   post_id : string;
   target_keeper : string option;
@@ -30,3 +27,23 @@ val resolve_board_context_inference_target :
   Board.post ->
   string option ->
   (string * board_context_inference_target_source, [ `Bad_request of string | `Internal_server_error of string ]) result
+
+val wake_keepers_after_runtime_param_change :
+  base_path:string ->
+  param_key:string ->
+  previous_interval_s:int ->
+  new_interval_s:int ->
+  Yojson.Safe.t option
+(** For the Keeper cadence parameter, signals exact admitted [Running] or
+    [Failing] sleepers only when the effective interval decreases. Lengthened,
+    unchanged, in-flight, and inactive lanes remain explicit in the returned
+    operator-visible summary. Other runtime parameters return [None]. *)
+
+val mutate_runtime_param_with_effects :
+  base_path:string ->
+  param_key:string ->
+  (unit -> (Runtime_params.json_change, string) result) ->
+  (Runtime_params.json_change * (string * Yojson.Safe.t) list, string) result
+(** Run a string-keyed parameter mutation and derive its wake effects as one
+    serialized operation for the Keeper cadence key. Other keys remain
+    independent and do not contend on the cadence side-effect lock. *)

@@ -20,24 +20,24 @@ let checkpoint_write_error_to_string ~persistence_error_to_string = function
   | Persistence_error error -> persistence_error_to_string error
 ;;
 
-let resume_checkpoint_of_context (ctx : working_context) : Agent_sdk.Checkpoint.t =
-  let checkpoint_context = Agent_sdk.Context.copy ~eio:true (oas_context_of_context ctx) in
+let resume_checkpoint_of_context (ctx : working_context) : Agent_core.Checkpoint.t =
+  let checkpoint_context = Agent_core.Context.copy ~eio:true (agent_core_context_of_context ctx) in
   {
     ctx.checkpoint with
-    version = Agent_sdk.Checkpoint.checkpoint_version;
+    version = Agent_core.Checkpoint.checkpoint_version;
     system_prompt = Some (system_prompt_of_context ctx);
     messages = messages_of_context ctx;
     context = checkpoint_context;
   }
 
-let context_of_oas_checkpoint (cp : Agent_sdk.Checkpoint.t) : working_context =
+let context_of_agent_core_checkpoint (cp : Agent_core.Checkpoint.t) : working_context =
   let system_prompt = Option.value ~default:"" cp.system_prompt in
   let messages = cp.messages in
-  let context = Agent_sdk.Context.copy ~eio:true cp.context in
+  let context = Agent_core.Context.copy ~eio:true cp.context in
   let checkpoint =
     { cp with system_prompt = Some system_prompt; messages; context }
   in
-  sync_oas_context { checkpoint }
+  sync_agent_core_context { checkpoint }
 
 let checkpoint_for_persistence
     ~(multimodal_policy : Keeper_types_profile.multimodal_policy)
@@ -45,11 +45,8 @@ let checkpoint_for_persistence
     ~(session : session_context)
     ~(agent_name : string)
     ~(ctx : working_context)
-    ~(generation : int)
-  : (Agent_sdk.Checkpoint.t, Keeper_compaction_unit.structural_error) result =
-  let checkpoint_context = Agent_sdk.Context.copy ~eio:true (oas_context_of_context ctx) in
-  Agent_sdk.Context.set_scoped checkpoint_context Agent_sdk.Context.Session
-    Keeper_checkpoint_store.keeper_generation_context_key (`Int generation);
+  : (Agent_core.Checkpoint.t, Keeper_compaction_unit.structural_error) result =
+  let checkpoint_context = Agent_core.Context.copy ~eio:true (agent_core_context_of_context ctx) in
   let checkpoint_messages = messages_of_context ctx in
   (* RFC vision-delegation §2.3 site 2 (checkpoint write boundary). For a
      Delegate keeper, evict any inline image to a handle-only placeholder BEFORE
@@ -74,7 +71,7 @@ let checkpoint_for_persistence
     Ok
       {
         ctx.checkpoint with
-        version = Agent_sdk.Checkpoint.checkpoint_version;
+        version = Agent_core.Checkpoint.checkpoint_version;
         session_id = session.session_id;
         agent_name;
         model = Boundary_redaction.to_string Boundary_redaction.runtime_model_label;
@@ -84,13 +81,12 @@ let checkpoint_for_persistence
         context = checkpoint_context;
       }
 
-let save_oas_checkpoint_classified
+let save_agent_core_checkpoint_classified
     ~multimodal_policy
     ~keeper_name
     ~session
     ~agent_name
     ~ctx
-    ~generation
   =
   match
     checkpoint_for_persistence
@@ -99,26 +95,24 @@ let save_oas_checkpoint_classified
       ~session
       ~agent_name
       ~ctx
-      ~generation
   with
   | Error error -> Error (Tool_history_invalid error)
   | Ok checkpoint ->
     (match
-       Keeper_checkpoint_store.save_oas_classified
+       Keeper_checkpoint_store.save_agent_core_classified
          ~session_dir:session.session_dir
          checkpoint
      with
      | Ok outcome -> Ok (checkpoint, outcome)
      | Error error -> Error (Persistence_error error))
 
-let save_oas_checkpoint_if_source_with
-    ~save_oas_history
+let save_agent_core_checkpoint_if_source_with
+    ~save_agent_core_history
     ~multimodal_policy
     ~keeper_name
     ~session
     ~agent_name
     ~ctx
-    ~generation
     ~expected_source_ref
   =
   match
@@ -128,12 +122,11 @@ let save_oas_checkpoint_if_source_with
       ~session
       ~agent_name
       ~ctx
-      ~generation
   with
   | Error error -> Error (Tool_history_invalid error)
   | Ok checkpoint ->
     (match
-       Keeper_checkpoint_store.save_oas_if_source
+       Keeper_checkpoint_store.save_agent_core_if_source
          ~session_dir:session.session_dir
          ~expected_source_ref
          checkpoint
@@ -143,7 +136,7 @@ let save_oas_checkpoint_if_source_with
      | Keeper_checkpoint_store.Installed installed ->
        let installation =
          match
-           save_oas_history
+           save_agent_core_history
              ~session_dir:session.session_dir
              checkpoint
          with
@@ -159,46 +152,35 @@ let save_oas_checkpoint_if_source_with
        in
        Ok (checkpoint, installation))
 
-let save_oas_checkpoint_if_source =
-  save_oas_checkpoint_if_source_with
-    ~save_oas_history:Keeper_checkpoint_store.save_oas_history
+let save_agent_core_checkpoint_if_source =
+  save_agent_core_checkpoint_if_source_with
+    ~save_agent_core_history:Keeper_checkpoint_store.save_agent_core_history
 ;;
 
 module For_testing = struct
-  let save_oas_checkpoint_if_source_with_history ~save_oas_history =
-    save_oas_checkpoint_if_source_with ~save_oas_history
+  let save_agent_core_checkpoint_if_source_with_history ~save_agent_core_history =
+    save_agent_core_checkpoint_if_source_with ~save_agent_core_history
   ;;
 end
 
-let save_oas_checkpoint
+let save_agent_core_checkpoint
     ~multimodal_policy
     ~keeper_name
     ~session
     ~agent_name
     ~ctx
-    ~generation
   =
   match
-    save_oas_checkpoint_classified
+    save_agent_core_checkpoint_classified
       ~multimodal_policy
       ~keeper_name
       ~session
       ~agent_name
       ~ctx
-      ~generation
   with
   | Ok (checkpoint, Keeper_checkpoint_store.Saved _)
   | Ok (checkpoint, Keeper_checkpoint_store.Stale_noop _) -> Ok checkpoint
   | Error e -> Error e
-
-let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
-  match
-    Agent_sdk.Context.get_scoped cp.context Agent_sdk.Context.Session
-      Keeper_checkpoint_store.keeper_generation_context_key
-  with
-  | Some (`Int value) -> value
-  | Some (`Intlit raw) -> Option.value ~default:fallback (int_of_string_opt raw)
-  | _ -> fallback
 
 (* ================================================================ *)
 (* Checkpoint Loading                                                *)
@@ -206,93 +188,115 @@ let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int 
 
 let load_context_from_checkpoint ~trace_id ~base_dir =
   let session = create_session ~session_id:trace_id ~base_dir in
-  let oas_result =
-    Keeper_checkpoint_store.load_oas ~session_dir:session.session_dir
+  let agent_core_result =
+    Keeper_checkpoint_store.load_agent_core ~session_dir:session.session_dir
       ~session_id:trace_id
   in
-  (match oas_result with
+  (match agent_core_result with
    | Error (Parse_error detail) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CheckpointFailures)
-         ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_parse))]
+         ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Agent_core_parse))]
          ();
-       Log.Keeper.error "keeper:%s OAS checkpoint parse error: %s" trace_id detail
+       Log.Keeper.error "keeper:%s AGENT_CORE checkpoint parse error: %s" trace_id detail
    | Error (Store_error detail) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CheckpointFailures)
-         ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_store))]
+         ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Agent_core_store))]
          ();
-       Log.Keeper.error "keeper:%s OAS checkpoint store error: %s" trace_id detail
+       Log.Keeper.error "keeper:%s AGENT_CORE checkpoint store error: %s" trace_id detail
    | Error (Io_error detail) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CheckpointFailures)
-         ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_io))]
+         ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Agent_core_io))]
          ();
-       Log.Keeper.error "keeper:%s OAS checkpoint I/O error: %s" trace_id detail
-   | Error (Sdk_other_error detail) ->
+       Log.Keeper.error "keeper:%s AGENT_CORE checkpoint I/O error: %s" trace_id detail
+   | Error (Agent_core_error detail) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CheckpointFailures)
-         ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_sdk))]
+         ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Agent_core_failure))]
          ();
-       Log.Keeper.error "keeper:%s OAS checkpoint SDK error: %s" trace_id detail
+       Log.Keeper.error "keeper:%s AGENT_CORE checkpoint agent-core error: %s" trace_id detail
    | Error Not_found ->
-       Log.Keeper.debug "keeper:%s OAS checkpoint not found" trace_id
+       Log.Keeper.debug "keeper:%s AGENT_CORE checkpoint not found" trace_id
    | Ok _ -> ());
-  let oas_checkpoint =
-    (match oas_result with
+  let agent_core_checkpoint =
+    (match agent_core_result with
      | Ok v -> Some v
      | Error Not_found -> None
      | Error _ ->
        Log.Keeper.warn
-         "keeper:%s OAS checkpoint unavailable after explicit load diagnostics"
+         "keeper:%s AGENT_CORE checkpoint unavailable after explicit load diagnostics"
          trace_id;
        None)
   in
-  match oas_checkpoint with
+  match agent_core_checkpoint with
   | Some checkpoint ->
-      let ctx = context_of_oas_checkpoint checkpoint in
+      let ctx = context_of_agent_core_checkpoint checkpoint in
       (session, Some ctx)
   | None ->
-      (* No canonical OAS checkpoint is available. Non-trivial OAS errors
+      (* No canonical AGENT_CORE checkpoint is available. Non-trivial AGENT_CORE errors
          were already logged above at error level. *)
       (session, None)
 
-(** Patch an OAS checkpoint: unify session_id and normalize the last assistant
-    message's visible text. OAS-owned internal replay blocks (reasoning/tool blocks) stay
+(** Patch an AGENT_CORE checkpoint: unify session_id and normalize the last assistant
+    message's visible text. AGENT_CORE-owned internal replay blocks (reasoning/tool blocks) stay
     typed content blocks; MASC only edits the visible text projection. New
     writes keep the checkpoint [working_context] empty. *)
 let patch_checkpoint_last_assistant
-    (cp : Agent_sdk.Checkpoint.t) ~session_id ~response_text
-  : Agent_sdk.Checkpoint.t =
+    (cp : Agent_core.Checkpoint.t) ~session_id ~response_text
+  : Agent_core.Checkpoint.t =
   let visible_response_text = response_text in
-  let patch_assistant_message (msg : Agent_sdk.Types.message) =
+  let patch_assistant_message (msg : Agent_core.Types.message) =
     let visible_is_blank = String.trim visible_response_text = "" in
     let rec patch_content replaced acc = function
       | [] ->
           if replaced || visible_is_blank then List.rev acc
-          else List.rev (Agent_sdk.Types.Text visible_response_text :: acc)
-      | Agent_sdk.Types.Text _ :: rest when not replaced ->
+          else List.rev (Agent_core.Types.Text visible_response_text :: acc)
+      | Agent_core.Types.Text _ :: rest when not replaced ->
           let acc =
             if visible_is_blank then acc
-            else Agent_sdk.Types.Text visible_response_text :: acc
+            else Agent_core.Types.Text visible_response_text :: acc
           in
           patch_content true acc rest
-      | Agent_sdk.Types.Text _ :: rest -> patch_content replaced acc rest
+      | Agent_core.Types.Text _ :: rest -> patch_content replaced acc rest
       | block :: rest -> patch_content replaced (block :: acc) rest
     in
-    Agent_sdk.Types.make_message
-      ~role:Agent_sdk.Types.Assistant
-      (patch_content false [] msg.Agent_sdk.Types.content)
+    let content = patch_content false [] msg.Agent_core.Types.content in
+    let rec content_unchanged left right =
+      match left, right with
+      | [], [] -> true
+      | Agent_core.Types.Text left :: left_rest,
+        Agent_core.Types.Text right :: right_rest
+        when String.equal left right ->
+        content_unchanged left_rest right_rest
+      | left_block :: left_rest, right_block :: right_rest
+        when left_block == right_block ->
+        content_unchanged left_rest right_rest
+      | _ -> false
+    in
+    if content_unchanged content msg.Agent_core.Types.content
+       && Option.is_none msg.name
+       && Option.is_none msg.tool_call_id
+       && msg.metadata = []
+    then msg
+    else
+      Agent_core.Types.make_message
+        ~role:Agent_core.Types.Assistant
+        content
   in
   let rec patch_last_assistant suffix_rev = function
     | [] -> cp.messages
-    | msg :: older_rev when msg.Agent_sdk.Types.role = Agent_sdk.Types.Assistant ->
-        List.rev_append older_rev (patch_assistant_message msg :: suffix_rev)
+    | msg :: older_rev when msg.Agent_core.Types.role = Agent_core.Types.Assistant ->
+        let patched = patch_assistant_message msg in
+        if patched == msg
+        then cp.messages
+        else List.rev_append older_rev (patched :: suffix_rev)
     | msg :: older_rev -> patch_last_assistant (msg :: suffix_rev) older_rev
   in
   let messages =
     patch_last_assistant [] (List.rev cp.messages)
   in
-  { cp with Agent_sdk.Checkpoint.session_id;
+  { cp with Agent_core.Checkpoint.session_id;
             messages;
             working_context = None }

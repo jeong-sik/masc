@@ -10,9 +10,7 @@ include module type of Voice_bridge_core
 
 (** {1 Types} *)
 
-(** How a Voice MCP call failed. Exposed so the retry policy is testable —
-    it used to be decided by matching prefixes of the rendered message, and
-    the timeout case never matched its own rendering. *)
+(** How one Voice MCP call failed. *)
 type mcp_call_error =
   | Timed_out of float
   | Connection_failed of string
@@ -22,12 +20,13 @@ type mcp_call_error =
       }
   | Malformed_body of string
 
+type effect_disposition =
+  | Proven_pre_effect
+  | Remote_effect_unresolved
+
 val mcp_call_error_to_string : mcp_call_error -> string
-
-val is_retryable_error : mcp_call_error -> bool
-(** Transient failures only: a timeout, a connection failure, or a 5xx.
-    A malformed response body and a 4xx are not retried. *)
-
+val mcp_call_effect_disposition : mcp_call_error -> effect_disposition
+(** Voice MCP failures do not prove that remote playback did not happen. *)
 
 type agent_speak_completion =
   | Spoken

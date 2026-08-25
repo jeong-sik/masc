@@ -1,7 +1,7 @@
 (** Keeper lifecycle phase variant + bijection helpers.
 
     SSOT for the lifecycle phase enum referenced by the
-    [Keeper_state_machine] FSM, dashboard UI, persona audits, and
+    [Keeper_state_machine] FSM, dashboard UI, Keeper audits, and
     operator-facing keeper status surfaces. Verbatim extract from the
     head of [Keeper_state_machine]; the parent retains a transparent
     variant alias so existing exhaustive matches at ~109 call sites
@@ -16,9 +16,6 @@ type phase =
   | Offline
   | Running
   | Failing
-  | Overflowed
-    (* Retired (#26546): never derived anymore; kept so historical durable
-       lifecycle records ("overflowed") still decode via [phase_of_string]. *)
   | Compacting
   | HandingOff
   | Draining
@@ -26,13 +23,11 @@ type phase =
   | Stopped
   | Crashed
   | Restarting
-  | Dead
 
 let phase_to_string = function
   | Offline -> "offline"
   | Running -> "running"
   | Failing -> "failing"
-  | Overflowed -> "overflowed"
   | Compacting -> "compacting"
   | HandingOff -> "handing_off"
   | Draining -> "draining"
@@ -40,14 +35,12 @@ let phase_to_string = function
   | Stopped -> "stopped"
   | Crashed -> "crashed"
   | Restarting -> "restarting"
-  | Dead -> "dead"
 ;;
 
 let phase_of_string = function
   | "offline" -> Some Offline
   | "running" -> Some Running
   | "failing" -> Some Failing
-  | "overflowed" -> Some Overflowed
   | "compacting" -> Some Compacting
   | "handing_off" -> Some HandingOff
   | "draining" -> Some Draining
@@ -55,7 +48,6 @@ let phase_of_string = function
   | "stopped" -> Some Stopped
   | "crashed" -> Some Crashed
   | "restarting" -> Some Restarting
-  | "dead" -> Some Dead
   | _ -> None
 ;;
 
@@ -63,7 +55,6 @@ let all_phases =
   [ Offline
   ; Running
   ; Failing
-  ; Overflowed
   ; Compacting
   ; HandingOff
   ; Draining
@@ -71,6 +62,5 @@ let all_phases =
   ; Stopped
   ; Crashed
   ; Restarting
-  ; Dead
   ]
 ;;

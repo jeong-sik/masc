@@ -23,11 +23,6 @@ export MCP_AGENT_NAME="${MCP_AGENT_NAME:-$HARNESS_ADMIN_AGENT}"
 export CURL_RETRY_COUNT="${CURL_RETRY_COUNT:-12}"
 export CURL_RETRY_DELAY_SEC="${CURL_RETRY_DELAY_SEC:-1}"
 export CURL_TIMEOUT_SEC="${CURL_TIMEOUT_SEC:-80}"
-if (( CURL_TIMEOUT_SEC > 5 )); then
-  export MASC_TOOL_TIMEOUT_DEFAULT_SEC="${MASC_TOOL_TIMEOUT_DEFAULT_SEC:-$((CURL_TIMEOUT_SEC - 5))}"
-else
-  export MASC_TOOL_TIMEOUT_DEFAULT_SEC="${MASC_TOOL_TIMEOUT_DEFAULT_SEC:-$CURL_TIMEOUT_SEC}"
-fi
 export HARNESS_LOG_FILE="${HARNESS_LOG_FILE:-$LOG_FILE}"
 # shellcheck source=scripts/harness/lib/mcp_jsonrpc.sh
 source "${ROOT_DIR}/scripts/harness/lib/mcp_jsonrpc.sh"
@@ -179,9 +174,10 @@ if ! wait_for_mcp_initialize_ready "$MCP_URL" 25; then
   exit 1
 fi
 
-run_contract 1 4 "streamable_http_contract.sh"
-run_contract 2 4 "golden_path_1_contract.sh"
-run_contract 3 4 "public_tool_live_sweep.sh"
-run_contract 4 4 "scheduler_live_supported_contract.sh"
+run_contract 1 5 "streamable_http_contract.sh"
+run_contract 2 5 "golden_path_1_contract.sh"
+run_contract 3 5 "public_tool_live_sweep.sh"
+run_contract 4 5 "scheduler_live_supported_contract.sh"
+run_contract 5 5 "graphql_transport_auth_parity_contract.sh"
 
 echo "PASS: contract harness suite"

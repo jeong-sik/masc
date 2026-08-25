@@ -1,21 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-module Random = Stdlib.Random
-
 (** Agent Identity - Unified Agent Identification across MCP sessions
 
     OpenClaw-inspired session tracking for multi-agent environments.
@@ -27,8 +9,6 @@ module Random = Stdlib.Random
 
     @since 0.5.0
 *)
-
-module StringMap = Set_util.StringMap
 
 (** Typed classification of a session_key's display prefix.
 
@@ -155,7 +135,7 @@ type t = {
   user_id : string option;        (** User ID from channel (e.g., telegram user id) *)
   capabilities : string list;     (** Declared agent capabilities *)
   registered_at : float;          (** Unix timestamp *)
-  mutable last_seen : float;      (** Last activity timestamp *)
+  last_seen : float;              (** Last activity timestamp *)
   metadata : (string * string) list;  (** Additional metadata *)
 }
 [@@deriving to_yojson]
@@ -234,97 +214,6 @@ let anonymous () =
     last_seen = now;
     metadata = [];
   }
-
-(** {1 Identity Registry} *)
-
-module Registry = struct
-  type registry = {
-    identities : t StringMap.t ref;  (** session_key -> identity *)
-    by_agent_name : string StringMap.t ref;  (** agent_name -> session_key *)
-    lock : Eio.Mutex.t;
-  }
-
-  let create () = {
-    identities = ref StringMap.empty;
-    by_agent_name = ref StringMap.empty;
-    lock = Eio.Mutex.create ();
-  }
-
-  let with_lock reg f =
-    Eio_guard.with_mutex reg.lock f
-
-  (** Register or update identity *)
-  let register reg identity =
-    with_lock reg (fun () ->
-      reg.identities := StringMap.add identity.session_key identity !(reg.identities);
-      reg.by_agent_name := StringMap.add identity.agent_name identity.session_key !(reg.by_agent_name);
-      identity
-    )
-
-  (** Find by session key *)
-  let find_by_session reg session_key =
-    with_lock reg (fun () ->
-      StringMap.find_opt session_key !(reg.identities)
-    )
-
-  (** Find by agent name *)
-  let find_by_name reg agent_name =
-    with_lock reg (fun () ->
-      match StringMap.find_opt agent_name !(reg.by_agent_name) with
-      | Some session_key -> StringMap.find_opt session_key !(reg.identities)
-      | None -> None
-    )
-
-  (** Update last_seen *)
-  let touch reg session_key () =
-    with_lock reg (fun () ->
-      match StringMap.find_opt session_key !(reg.identities) with
-      | Some identity ->
-          identity.last_seen <- Time_compat.now ()
-      | None -> ()
-    )
-
-  (** Remove identity *)
-  let unregister reg session_key =
-    with_lock reg (fun () ->
-      match StringMap.find_opt session_key !(reg.identities) with
-      | Some identity ->
-          reg.identities := StringMap.remove session_key !(reg.identities);
-          let by_agent_name = StringMap.remove identity.agent_name !(reg.by_agent_name) in
-          let replacement =
-            StringMap.fold
-              (fun replacement_session candidate found ->
-                 match found with
-                 | Some _ -> found
-                 | None when String.equal candidate.agent_name identity.agent_name ->
-                   Some replacement_session
-                 | None -> None)
-              !(reg.identities)
-              None
-          in
-          reg.by_agent_name :=
-            (match replacement with
-             | None -> by_agent_name
-             | Some replacement_session ->
-               StringMap.add identity.agent_name replacement_session by_agent_name)
-      | None -> ()
-    )
-
-  (** List all registered identities. Lifecycle authority belongs to explicit
-      registration/unregistration, not an elapsed-time cutoff. *)
-  let list_all reg =
-    with_lock reg (fun () ->
-      !(reg.identities)
-      |> StringMap.bindings
-      |> List.map snd
-    )
-
-  (** Get identity count *)
-  let count reg =
-    with_lock reg (fun () ->
-      StringMap.cardinal !(reg.identities)
-    )
-end
 
 (** {1 Utilities} *)
 

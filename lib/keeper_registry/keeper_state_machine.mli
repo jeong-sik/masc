@@ -3,35 +3,28 @@
     This module defines the keeper lifecycle as a pure state machine.
     All functions are deterministic: no I/O, no clock reads, no mutable state.
 
-    Phase count history:
-      - 11 phases at RFC-0002 Phase 1 introduction (#5229, 2026-04-05)
-      - +1 → 12 when [Overflowed] was added (MASC-1, 2026-04)
     Single Source of Truth (SSOT) is the [type phase] declaration below;
     spec doc counts are
     cross-checked by [scripts/audit-tla-phase-count.sh] (R-H-1.c #14874).
 
     Architecture:
-    - Layer 3 (NonDet Shell): measurements captured via [Keeper_measurement]
+    - Layer 3 (NonDet Shell): the caller supplies wall-clock and event inputs
     - Layer 2 (Det Core): THIS MODULE — events x conditions -> phase transitions
     - Layer 1 (Storage): [Keeper_registry] applies transitions atomically
 
     Key invariant: given the same [conditions] and [event], [apply_event]
     always produces the same [transition_result]. *)
 
-(** {1 Phase (13-State Enum)} *)
+(** {1 Phase (11-State Enum)} *)
 
 (** Fine-grained keeper lifecycle phase.
-    Buffer states ([Failing], [Overflowed], [Compacting], [HandingOff],
+    Buffer states ([Failing], [Compacting], [HandingOff],
     [Draining], [Restarting]) are observable intermediaries between
     stable states. *)
 type phase =
   | Offline       (** Registered but no heartbeat fiber started *)
   | Running       (** Healthy heartbeat loop executing *)
   | Failing       (** Consecutive failures detected, probing recovery *)
-  | Overflowed    (** Retired (#26546): no condition derives this phase since
-                      the automatic overflow-compaction trigger was removed.
-                      The variant survives so historical durable lifecycle
-                      records ("overflowed") still decode. *)
   | Compacting    (** Context compaction in progress *)
   | HandingOff    (** Generation rollover in progress *)
   | Draining      (** Graceful shutdown: completing current turn *)
@@ -39,13 +32,12 @@ type phase =
   | Stopped       (** Clean exit, terminal *)
   | Crashed       (** Unrecoverable error, restart candidate *)
   | Restarting    (** Supervisor backoff wait before re-launch *)
-  | Dead          (** Explicit durable tombstone, terminal *)
 
 val phase_to_string : phase -> string
 val phase_of_string : string -> phase option
 val all_phases : phase list
 
-(** [is_terminal phase] is true for Stopped/Dead — phases with no
+(** [is_terminal phase] is true for Stopped — a phase with no
     outgoing transition (see {!can_transition}). Shared by health surfaces
     and the mermaid renderer so the terminal triple is defined once in the
     FSM instead of re-matched at each consumer. *)
@@ -74,8 +66,6 @@ type conditions = {
   (** [meta.paused = true] *)
   stop_requested : bool;
   (** [Atomic.get fiber_stop = true] *)
-  dead_tombstone_latched : bool;
-  (** Explicit durable Dead tombstone observed by lifecycle admission. *)
   restart_requested : bool;
   (** Supervisor has requested immediate restart of a stopped fiber. *)
   drain_complete : bool;
@@ -146,7 +136,7 @@ type event =
   | Handoff_started
     (** Emit only through the registry lifecycle origin guard. See the
         paired lifecycle contract above. *)
-  | Handoff_completed of { new_trace_id : string; generation : int }
+  | Handoff_completed of { new_trace_id : string }
     (** Must fire in the same turn as the matching [Handoff_started]. *)
   | Handoff_failed of { reason : string }
     (** Must fire in the same turn as the matching [Handoff_started]. *)
@@ -187,10 +177,9 @@ type entry_action =
   | Start_drain
   | Schedule_restart of { delay_sec : float }
   | Publish_lifecycle of { event_name : string; detail : string }
-  | Mark_dead_tombstone
   | Cleanup_and_unregister
   | Trigger_immediate_cleanup
-  | Cancel_pending_oas
+  | Cancel_pending_agent_core
 
 (** Result of applying an event. *)
 type transition_result = {
@@ -222,7 +211,6 @@ val transition_error_to_string : transition_error -> string
 
     Priority (first match wins) — mirrors the [DerivePhase] action in
     [specs/keeper-state-machine/KeeperStateMachine.tla]:
-    1.  Dead (explicit durable [dead_tombstone_latched])
     2.  Stopped (stop_requested + drain_complete + ~compaction_active +
                  ~handoff_active)
         -- Checked first because a clean drain wins even if the fiber
@@ -236,15 +224,12 @@ val transition_error_to_string : transition_error -> string
     7.  Paused (operator_paused)
     8.  HandingOff (handoff_active)
     9.  Compacting (compaction_active)
-    10. (retired #26546 — Overflowed is no longer derived)
-    11. Failing (latest health failure or structural failure observation)
-    12. Running (fiber_alive)
-    13. Offline (default fallback for inconsistent zero-state)
+    10. Failing (latest health failure or structural failure observation)
+    11. Running (fiber_alive)
+    12. Offline (default fallback for inconsistent zero-state)
 
-    Drift note: prior to this revision the docstring listed Dead as
-    priority 1; the actual implementation has always checked Stopped
-    first (the TLA+ spec agrees).  The order above is the ground truth
-    enforced by [keeper_state_machine.ml] and TLC. *)
+    The order above is the ground truth enforced by
+    [keeper_state_machine.ml] and TLC. *)
 val derive_phase : conditions -> phase
 
 (** Pure condition updater: given current conditions and an event,
@@ -253,7 +238,7 @@ val derive_phase : conditions -> phase
 val update_conditions : conditions -> event -> conditions
 
 (** Apply an event to the current state: update conditions, derive new phase.
-    Returns [Error] for events on terminal states (Stopped, Dead).
+    Returns [Error] for events on the terminal state (Stopped).
     Pure function — no I/O, no clock. [now] is passed as argument. *)
 val apply_event :
   current_phase:phase ->
@@ -268,7 +253,7 @@ val can_transition : from_phase:phase -> to_phase:phase -> bool
 (** [true] when a keeper phase is allowed to execute a unified turn.
     Runtime contract:
     - [Running] and [Failing] may execute turns.
-    - All other phases must skip OAS turn execution until the keeper
+    - All other phases must skip AGENT_CORE turn execution until the keeper
       re-enters an executable phase. *)
 val can_execute_turn : phase -> bool
 

@@ -1,7 +1,4 @@
-(* Keeper_workspace_ops — structured shell op dispatch for Grep.
-
-   Private sub-module included by [Keeper_tool_command_runtime]. Only exposes what the
-   facade needs. *)
+(** Keeper_workspace_ops — owner of structured workspace dispatch for Grep. *)
 
 val handle_tool_search_files :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->

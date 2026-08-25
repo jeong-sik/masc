@@ -58,24 +58,24 @@ let find_run runs id =
 (* a registry carrying one of each terminal/active status *)
 let seeded () =
   let t = R.create () in
-  R.register_running t ~run_id:"r-run" ~keeper:"k1" ~preset:"balanced" ~started_at:300.0;
-  R.register_running t ~run_id:"r-done" ~keeper:"k1" ~preset:"deep" ~started_at:100.0;
-  R.mark_completed t ~run_id:"r-done" ~ok:true ();
-  R.register_running t ~run_id:"r-fail" ~keeper:"k1" ~preset:"deep" ~started_at:200.0;
+  R.register_running t ~run_id:"r-run" ~keeper:"k1" ~preset:"balanced" ~topology:Fusion_types.Simple ~started_at:300.0;
+  R.register_running t ~run_id:"r-done" ~keeper:"k1" ~preset:"deep" ~topology:Fusion_types.Simple ~started_at:100.0;
+  R.mark_completed t ~run_id:"r-done" ~outcome:R.Succeeded;
+  R.register_running t ~run_id:"r-fail" ~keeper:"k1" ~preset:"deep" ~topology:Fusion_types.Simple ~started_at:200.0;
   R.mark_completed t ~run_id:"r-fail"
-    ~failure:"judge failed: timeout" ~failure_code:"timeout" ~ok:false ();
+    ~outcome:(R.Failed { reason = "judge failed: timeout"; code = "timeout" });
   R.register_running
     t
     ~run_id:"r-foreign"
     ~keeper:"k2"
-    ~preset:"balanced"
+    ~preset:"balanced" ~topology:Fusion_types.Simple
     ~started_at:400.0;
   t
 ;;
 
 (* (1a) list mode: only the calling keeper's tracked runs, newest-first, with
    the right status label. The label mapping is the mutation-sensitive core —
-   ok=false must read "failed", not "completed". *)
+   a typed failure must read "failed", not "completed". *)
 let test_list_scoped_to_keeper () =
   let json = H.fusion_status_json ~registry:(seeded ()) ~keeper:"k1" ~run_id:"" |> parse in
   check bool "ok" true (bool_ json "ok");
@@ -85,7 +85,7 @@ let test_list_scoped_to_keeper () =
   check string "newest started_at first" "r-run" (str (List.hd runs) "run_id");
   check string "running label" "running" (str (find_run runs "r-run") "status");
   check string "completed label" "completed" (str (find_run runs "r-done") "status");
-  check string "failed label (ok=false)" "failed" (str (find_run runs "r-fail") "status");
+  check string "typed failure label" "failed" (str (find_run runs "r-fail") "status");
   (* run carries its identifying metadata for the operator/keeper *)
   let r = find_run runs "r-run" in
   check string "keeper field" "k1" (str r "keeper");

@@ -255,16 +255,28 @@
   overflow: hidden;
 }
 
+/* Collapsed by default: this block explains what backs the section and edits
+   nothing, so it sat above the real controls looking like one that refused to
+   work. The marker and pointer say it opens; the caption says it only reads. */
 .set-control-ledger-h {
   align-items: center;
-  border-bottom: 1px solid var(--border-soft);
   color: var(--text-mid);
+  cursor: pointer;
   display: flex;
   font-family: var(--font-ui);
-  font-size: var(--fs-10);
-  justify-content: space-between;
+  font-size: var(--fs-11);
+  gap: 6px;
+  justify-content: flex-start;
   padding: 8px 10px;
-  text-transform: uppercase;
+  user-select: none;
+}
+
+.set-control-ledger[open] .set-control-ledger-h {
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.set-control-ledger-h:hover {
+  color: var(--text-bright);
 }
 
 .set-control-ledger-grid {
@@ -311,8 +323,8 @@
 }
 
 .set-control-ledger-row.unsupported .set-control-kind {
-  border-color: color-mix(in oklab, var(--status-fail) 45%, transparent);
-  color: var(--status-fail);
+  border-color: color-mix(in oklab, var(--status-bad) 45%, transparent);
+  color: var(--status-bad);
 }
 
 .set-control-label {
@@ -575,8 +587,8 @@
 }
 
 .set-route-icon.danger:hover {
-  border-color: color-mix(in oklab, var(--status-fail) 55%, transparent);
-  color: var(--status-fail);
+  border-color: color-mix(in oklab, var(--status-bad) 55%, transparent);
+  color: var(--status-bad);
 }
 
 .set-route-icon:disabled,
@@ -748,8 +760,8 @@
 }
 
 .set-path-truth-state.missing {
-  border-color: color-mix(in oklab, var(--status-fail) 45%, transparent);
-  color: var(--status-fail);
+  border-color: color-mix(in oklab, var(--status-bad) 45%, transparent);
+  color: var(--status-bad);
 }
 
 .set-mcp-check-result {
@@ -765,7 +777,7 @@
 }
 
 .set-mcp-check-result.error {
-  color: var(--status-fail);
+  color: var(--status-bad);
 }
 
 .set-rt {
@@ -1533,7 +1545,7 @@
 }
 
 .set-fusion-runtime-chip button:hover {
-  color: var(--status-fail);
+  color: var(--status-bad);
 }
 
 .set-fusion-runtime-add {

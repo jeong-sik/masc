@@ -61,11 +61,6 @@ let agent_current_task_matches_assignments active_task_assignees ~agent_name tas
   | None -> false
 ;;
 
-let agent_current_task_matches_backlog backlog ~agent_name task_id =
-  let active_task_assignees = active_task_assignees_by_task_id backlog in
-  agent_current_task_matches_assignments active_task_assignees ~agent_name task_id
-;;
-
 let reconcile_agent_current_task_record
       config
       ?(touch_last_seen = true)
@@ -116,7 +111,7 @@ let reconcile_agent_current_task_with_assignments
   if path_exists config agent_file
   then
     with_file_lock config agent_file (fun () ->
-      match read_agent_with_repair config agent_file with
+      match read_agent config agent_file with
       | Ok agent ->
         reconcile_agent_current_task_record
           config
@@ -139,36 +134,6 @@ let reconcile_agent_current_task_with_backlog
     ~touch_last_seen
     ~agent_name
     active_task_assignees
-;;
-
-let reconcile_all_agent_current_tasks_with_backlog
-      config
-      ?(touch_last_seen = true)
-      backlog
-  =
-  let agents_path = agents_dir config in
-  try
-    if Sys.file_exists agents_path
-    then (
-      let active_task_assignees = active_task_assignees_by_task_id backlog in
-      Sys.readdir agents_path
-      |> Array.to_list
-      |> List.filter (fun name -> Filename.check_suffix name ".json")
-      |> List.iter (fun name ->
-        Workspace_query.safe_yield ();
-        let path = Filename.concat agents_path name in
-        with_file_lock config path (fun () ->
-          match read_agent_with_repair config path with
-          | Ok (agent : Masc_domain.agent) ->
-            reconcile_agent_current_task_record
-              config
-              ~touch_last_seen
-              ~agent_file:path
-              ~agent
-              active_task_assignees
-          | Error msg -> Log.Misc.error "agent state reconcile failed for %s: %s" name msg)))
-  with
-  | Sys_error msg -> Log.Misc.error "agent state reconcile scan failed: %s" msg
 ;;
 
 (** Claim next highest priority unclaimed task.
@@ -238,12 +203,9 @@ let claim_next_r
            Workspace_task.update_local_agent_state config ~agent_name (fun agent ->
              { agent with status = Busy; current_task = Some prev.id });
            let message =
-             Printf.sprintf
-               "%s already holds [P%d] %s: %s."
-               agent_name
-               prev.priority
-               prev.id
-               prev.title
+             (* Shared with the claim-by-task_id refusal, which used to say only
+                that a task was held. One constraint, one sentence. *)
+             Workspace_task.held_tasks_refusal_message ~agent_name [ prev ]
            in
            raise
              (Existing_claim
@@ -374,6 +336,7 @@ let claim_next_r
            write_backlog
              ~after_commit:(fun () ->
                Task_cache_invariant.clear_stale_agent_task config
+                 ~cause:Task_cache_invariant.After_commit
                  ~agent_name ~task_id:task.id ~status:claimed_status
                  ~module_name:"claim_next_r.claim")
              config new_backlog;

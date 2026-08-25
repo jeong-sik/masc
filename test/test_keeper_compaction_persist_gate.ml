@@ -22,7 +22,7 @@
     [requested_messages] must be revisited. *)
 
 module U = Masc.Keeper_compaction_unit
-module T = Agent_sdk.Types
+module T = Agent_core.Types
 
 let message ?tool_call_id role content : T.message =
   { role; content; name = None; tool_call_id; metadata = [] }
@@ -46,7 +46,7 @@ let result id =
 
 (* One complete tool cycle, then an assistant turn that opens a cycle and a
    second assistant turn that opens another before the first is answered. That
-   overlap is the shape observed live on analyst and idealist:
+   overlap is the shape observed live on two Keepers:
 
      compaction_rejected reason=invalid_structure:
        Keeper_compaction_unit.Overlapping_tool_cycle

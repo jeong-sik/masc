@@ -52,7 +52,7 @@ let context name =
     ]
 ;;
 
-let candidate ?(keeper_name = "sangsu") ?(context = context "primary") ~id ~recorded_at () :
+let candidate ?(keeper_name = "alpha") ?(context = context "primary") ~id ~recorded_at () :
   A.candidate
   =
   { candidate_id = id
@@ -106,13 +106,13 @@ let judgment ?(judged_at = 101.0) (proof : P.exact_provenance) : A.judgment =
 
 let roots ~base_path candidates =
   ignore
-    (ok "ensure roots" (P.ensure_roots ~base_path ~keeper_name:"sangsu" candidates) : int);
-  ok "load roots" (P.load ~base_path ~keeper_name:"sangsu")
+    (ok "ensure roots" (P.ensure_roots ~base_path ~keeper_name:"alpha" candidates) : int);
+  ok "load roots" (P.load ~base_path ~keeper_name:"alpha")
 ;;
 
 let claim ~base_path ~worker_epoch ~now =
   let target =
-    ok "load claim target" (P.load ~base_path ~keeper_name:"sangsu")
+    ok "load claim target" (P.load ~base_path ~keeper_name:"alpha")
     |> List.find_opt (fun (partition : P.t) ->
       match partition.state with
       | P.Ready -> true
@@ -130,7 +130,7 @@ let claim ~base_path ~worker_epoch ~now =
          ~now
          ~worker_epoch
          ~base_path
-         ~keeper_name:"sangsu"
+         ~keeper_name:"alpha"
          ~partition_id:target.partition_id
          ~generation:target.generation)
   with
@@ -175,15 +175,15 @@ let test_roots_are_singleton_deterministic_and_context_exact () =
        "repeat ensure"
        (P.ensure_roots
           ~base_path
-          ~keeper_name:"sangsu"
+          ~keeper_name:"alpha"
           [ first; second; isolated ]));
-  let repeated = ok "load repeated roots" (P.load ~base_path ~keeper_name:"sangsu") in
+  let repeated = ok "load repeated roots" (P.load ~base_path ~keeper_name:"alpha") in
   Alcotest.(check bool) "root creation is idempotent" true (created = repeated);
   expect_error
     "same candidate identity with changed context"
     (P.ensure_roots
        ~base_path
-       ~keeper_name:"sangsu"
+       ~keeper_name:"alpha"
        [ { first with judgment_request = `Assoc [ "keeper_context", context "changed" ] } ]);
   let primary_key = (List.hd created).P.context_key in
   let isolated_key = (List.hd (List.rev created)).P.context_key in
@@ -218,7 +218,7 @@ let test_exact_claim_never_claims_a_ready_sibling () =
           ~now:10.0
           ~worker_epoch:competitor
           ~base_path
-          ~keeper_name:"sangsu"
+          ~keeper_name:"alpha"
           ~partition_id:first_partition.partition_id
           ~generation:first_partition.generation)
      : P.t option);
@@ -233,11 +233,11 @@ let test_exact_claim_never_claims_a_ready_sibling () =
              ~now:11.0
              ~worker_epoch:stale_worker
              ~base_path
-             ~keeper_name:"sangsu"
+             ~keeper_name:"alpha"
              ~partition_id:first_partition.partition_id
              ~generation:first_partition.generation)));
   (match
-     ok "load after stale target conflict" (P.load ~base_path ~keeper_name:"sangsu")
+     ok "load after stale target conflict" (P.load ~base_path ~keeper_name:"alpha")
      |> List.find_opt (fun (partition : P.t) ->
        String.equal partition.partition_id second_partition.partition_id)
    with
@@ -250,7 +250,7 @@ let test_exact_claim_never_claims_a_ready_sibling () =
          ~now:12.0
          ~worker_epoch:stale_worker
          ~base_path
-         ~keeper_name:"sangsu"
+         ~keeper_name:"alpha"
          ~partition_id:second_partition.partition_id
          ~generation:second_partition.generation)
   with
@@ -279,7 +279,7 @@ let test_generation_advances_only_for_state_transition () =
            ~now:2.0
            ~worker_epoch:owner
            ~base_path
-           ~keeper_name:"sangsu"
+           ~keeper_name:"alpha"
            ~partition_id:ready.partition_id
            ~generation:ready.generation)
     with
@@ -516,16 +516,16 @@ let test_existing_judgment_completion_is_atomic_and_restart_safe () =
   in
   require_projected
     "durable roundtrip"
-    (ok "load projected judgment" (P.load ~base_path ~keeper_name:"sangsu"));
+    (ok "load projected judgment" (P.load ~base_path ~keeper_name:"alpha"));
   Alcotest.(check int)
     "restart does not recover completed existing judgment"
     0
     (ok
        "restart after existing judgment completion"
-       (P.recover_for_process_start ~now:12.0 ~base_path ~keeper_name:"sangsu"));
+       (P.recover_for_process_start ~now:12.0 ~base_path ~keeper_name:"alpha"));
   require_projected
     "restart"
-    (ok "load after restart" (P.load ~base_path ~keeper_name:"sangsu"));
+    (ok "load after restart" (P.load ~base_path ~keeper_name:"alpha"));
   let bound_claim = claim ~base_path ~worker_epoch:owner ~now:13.0 in
   let bound_proof =
     provenance ~slot_id:"bound-existing-slot" ~call_id:"bound-existing-call" ()
@@ -575,7 +575,7 @@ let test_existing_judgment_completion_is_atomic_and_restart_safe () =
     |> fsynced "record existing-judgment advancement fixture"
   in
   expect_error
-    "existing judgment cannot bypass OAS-selected advancement"
+    "existing judgment cannot bypass AGENT_CORE-selected advancement"
     (P.complete_existing_judgment
        ~now:16.0
        ~worker_epoch:owner
@@ -645,8 +645,8 @@ let test_before_advance_record_is_atomic_and_exact () =
       ~base_path
       ~partition:advancing
       ~provenance:next
-    |> ok "bind OAS-selected successor"
-    |> fsynced "bind OAS-selected successor"
+    |> ok "bind AGENT_CORE-selected successor"
+    |> fsynced "bind AGENT_CORE-selected successor"
   in
   expect_error
     "completion cannot use prior attempt provenance"
@@ -672,7 +672,7 @@ let test_runtime_transitions_append_then_startup_compacts () =
   with_temp_base "board-attention-partition-append-index" @@ fun base_path ->
   let pending = candidate ~id:"candidate-append" ~recorded_at:1.0 () in
   ignore (roots ~base_path [ pending ] : P.t list);
-  let ledger_path = P.For_testing.path ~base_path ~keeper_name:"sangsu" in
+  let ledger_path = P.For_testing.path ~base_path ~keeper_name:"alpha" in
   let owner = P.Worker_epoch.generate () in
   let claimed = claim ~base_path ~worker_epoch:owner ~now:10.0 in
   let proof = provenance () in
@@ -711,12 +711,12 @@ let test_runtime_transitions_append_then_startup_compacts () =
     0
     (ok
        "startup compaction"
-       (P.recover_for_process_start ~now:20.0 ~base_path ~keeper_name:"sangsu"));
+       (P.recover_for_process_start ~now:20.0 ~base_path ~keeper_name:"alpha"));
   Alcotest.(check int)
     "startup compacts to one latest row"
     1
     (List.length (ledger_lines ledger_path));
-  match ok "load compacted ledger" (P.load ~base_path ~keeper_name:"sangsu") with
+  match ok "load compacted ledger" (P.load ~base_path ~keeper_name:"alpha") with
   | [ { P.state = P.Settled _; _ } ] -> ()
   | _ -> Alcotest.fail "startup ledger rewrite lost the Settled receipt"
 ;;
@@ -745,8 +745,8 @@ let test_restart_releases_only_unbound_and_quarantines_dispatchable () =
     2
     (ok
        "process-start recovery"
-       (P.recover_for_process_start ~now:20.0 ~base_path ~keeper_name:"sangsu"));
-  let recovered = ok "load recovered partitions" (P.load ~base_path ~keeper_name:"sangsu") in
+       (P.recover_for_process_start ~now:20.0 ~base_path ~keeper_name:"alpha"));
+  let recovered = ok "load recovered partitions" (P.load ~base_path ~keeper_name:"alpha") in
   (match recovered with
    | [ first; second ] ->
      (match first.state with
@@ -776,7 +776,7 @@ let test_restart_releases_only_unbound_and_quarantines_dispatchable () =
   Alcotest.(check (list string))
     "quarantined executions are never redispatched"
     []
-    (ok "load terminalized roots" (P.load ~base_path ~keeper_name:"sangsu")
+    (ok "load terminalized roots" (P.load ~base_path ~keeper_name:"alpha")
      |> List.filter_map (fun (partition : P.t) ->
        match partition.state with
        | P.Ready -> Some partition.candidate_id
@@ -833,7 +833,7 @@ let test_provider_neutral_blocked_reason_codec () =
        ~base_path
        ~partition:claimed
        (P.Exact_setup_unavailable ""));
-  match ok "load after rejected reason" (P.load ~base_path ~keeper_name:"sangsu") with
+  match ok "load after rejected reason" (P.load ~base_path ~keeper_name:"alpha") with
   | [ { P.state = P.Running { progress = P.Unbound; _ }; _ } ] -> ()
   | _ -> Alcotest.fail "invalid blocked reason mutated the partition"
 ;;
@@ -887,11 +887,11 @@ let test_strict_current_schema_rejects_old_json () =
     "retired judgment failure JSON is rejected"
     (P.of_yojson (replace_field "state" retired_blocked encoded));
   let malformed = replace_field "partition_id" (`String "forged-root") encoded in
-  let ledger_path = P.For_testing.path ~base_path ~keeper_name:"sangsu" in
+  let ledger_path = P.For_testing.path ~base_path ~keeper_name:"alpha" in
   ok
     "inject malformed durable row"
     (Fs_compat.save_file_atomic ledger_path (Yojson.Safe.to_string malformed ^ "\n"));
-  expect_error "forged deterministic root identity" (P.load ~base_path ~keeper_name:"sangsu")
+  expect_error "forged deterministic root identity" (P.load ~base_path ~keeper_name:"alpha")
 ;;
 
 let inject_torn_tail ledger_path =
@@ -904,18 +904,18 @@ let test_torn_tail_recovery_preserves_current_hard_cut () =
   with_temp_base "board-attention-partition-torn-tail" @@ fun base_path ->
   let pending = candidate ~id:"candidate-torn" ~recorded_at:1.0 () in
   ignore (roots ~base_path [ pending ] : P.t list);
-  let ledger_path = P.For_testing.path ~base_path ~keeper_name:"sangsu" in
+  let ledger_path = P.For_testing.path ~base_path ~keeper_name:"alpha" in
   let durable = Fs_compat.load_file ledger_path in
   inject_torn_tail ledger_path;
   expect_error
     "torn tail still hard-fails general reads"
-    (P.load ~base_path ~keeper_name:"sangsu");
+    (P.load ~base_path ~keeper_name:"alpha");
   Alcotest.(check int)
     "torn tail without Running recovers nothing"
     0
     (ok
        "torn-tail process-start recovery"
-       (P.recover_for_process_start ~now:10.0 ~base_path ~keeper_name:"sangsu"));
+       (P.recover_for_process_start ~now:10.0 ~base_path ~keeper_name:"alpha"));
   Alcotest.(check string)
     "torn tail truncated to last complete row"
     durable
@@ -928,8 +928,8 @@ let test_torn_tail_recovery_preserves_current_hard_cut () =
     1
     (ok
        "torn Unbound recovery"
-       (P.recover_for_process_start ~now:12.0 ~base_path ~keeper_name:"sangsu"));
-  match ok "load after torn recovery" (P.load ~base_path ~keeper_name:"sangsu") with
+       (P.recover_for_process_start ~now:12.0 ~base_path ~keeper_name:"alpha"));
+  match ok "load after torn recovery" (P.load ~base_path ~keeper_name:"alpha") with
   | [ { P.state = P.Ready; candidate_id; _ } ] ->
     Alcotest.(check string) "candidate remains recoverable" pending.candidate_id candidate_id
   | _ -> Alcotest.fail "torn-tail recovery lost the current partition"
@@ -941,7 +941,7 @@ let test_invalid_or_mismatched_provenance_never_rewrites () =
     "non-finite candidate time"
     (P.ensure_roots
        ~base_path
-       ~keeper_name:"sangsu"
+       ~keeper_name:"alpha"
        [ candidate ~id:"candidate-invalid" ~recorded_at:Float.nan () ]);
   let valid = candidate ~id:"candidate-valid" ~recorded_at:1.0 () in
   ignore (roots ~base_path [ valid ] : P.t list);
@@ -983,13 +983,13 @@ let test_invalid_or_mismatched_provenance_never_rewrites () =
          { candidate_id = valid.candidate_id
          ; judgment = judgment (provenance ~request_body_sha256:"other-body" ())
          });
-  match ok "load Bound after rejected completion" (P.load ~base_path ~keeper_name:"sangsu") with
+  match ok "load Bound after rejected completion" (P.load ~base_path ~keeper_name:"alpha") with
   | [ { P.state = P.Running { progress = P.Bound durable; _ }; _ } ] ->
     Alcotest.(check bool) "durable binding remains intact" true (durable = proof)
   | _ -> Alcotest.fail "rejected completion mutated the durable binding"
 ;;
 
-let test_predispatch_rejection_chain_binds_oas_selected_third_slot () =
+let test_predispatch_rejection_chain_binds_agent_core_selected_third_slot () =
   with_temp_base "board-attention-partition-predispatch-chain" @@ fun base_path ->
   let pending = candidate ~id:"candidate-predispatch-chain" ~recorded_at:1.0 () in
   ignore (roots ~base_path [ pending ] : P.t list);
@@ -1033,7 +1033,7 @@ let test_predispatch_rejection_chain_binds_oas_selected_third_slot () =
        ; _
        } ->
      Alcotest.(check bool)
-       "latest rejected visit and OAS successor are durable"
+       "latest rejected visit and AGENT_CORE successor are durable"
        true
        (durable = second && durable_next = third)
    | _ -> Alcotest.fail "predispatch chain did not retain latest advancement");
@@ -1044,8 +1044,8 @@ let test_predispatch_rejection_chain_binds_oas_selected_third_slot () =
       ~base_path
       ~partition:after_second
       ~provenance:third_provenance
-    |> ok "bind OAS-selected third slot"
-    |> fsynced "bind OAS-selected third slot"
+    |> ok "bind AGENT_CORE-selected third slot"
+    |> fsynced "bind AGENT_CORE-selected third slot"
   in
   match rebound.state with
   | P.Running { progress = P.Bound durable; _ } ->
@@ -1053,7 +1053,7 @@ let test_predispatch_rejection_chain_binds_oas_selected_third_slot () =
       "third slot exact provenance is bound"
       true
       (durable = third_provenance)
-  | _ -> Alcotest.fail "third OAS-selected slot was not bindable"
+  | _ -> Alcotest.fail "third AGENT_CORE-selected slot was not bindable"
 ;;
 
 let () =
@@ -1085,9 +1085,9 @@ let () =
             `Quick
             test_before_advance_record_is_atomic_and_exact
         ; Alcotest.test_case
-            "predispatch rejection chain binds OAS-selected third slot"
+            "predispatch rejection chain binds AGENT_CORE-selected third slot"
             `Quick
-            test_predispatch_rejection_chain_binds_oas_selected_third_slot
+            test_predispatch_rejection_chain_binds_agent_core_selected_third_slot
         ; Alcotest.test_case
             "runtime transitions append then startup compacts"
             `Quick

@@ -22,7 +22,7 @@ let string_list_of_json json =
   | `List items ->
       items
       |> List.filter_map (function
-             | `String value -> String_util.trim_to_option value
+             | `String value -> String_util.trim_nonempty value
              | _ -> None)
   | _ -> []
 
@@ -41,18 +41,15 @@ let list_field key json =
   | `List items -> items
   | _ -> []
 
-let severity_rank s =
-  match String.lowercase_ascii s with
-  | "bad" | "risk" | "critical" -> 2
-  | "warn" | "watch" | "interrupted" | "degraded" -> 1
-  | _ -> 0
-
-let status_rank = function
-  | "busy" -> 4
-  | "active" -> 3
-  | "listening" -> 2
-  | "idle" -> 1
-  | _ -> 0
+(* The wire carries [agent_status_to_string]'s output, so ranking a serialized
+   status means decoding it first. Ranking the raw string instead left an arm
+   for "idle" — a spelling this producer never emits — while the real fourth
+   constructor, [Inactive], fell through to the catch-all and ranked the same
+   as garbage. *)
+let status_rank raw =
+  match Masc_domain.agent_status_of_string_opt (String.lowercase_ascii (String.trim raw)) with
+  | Some status -> Masc_domain.agent_status_rank status
+  | None -> 0
 
 let rec take n items =
   if n <= 0 then [] else match items with [] -> [] | x :: xs -> x :: take (n - 1) xs
@@ -76,9 +73,16 @@ let severity_rank_of_health_level = Health_status.rank
 (** Status/health classification predicates — single source of truth.
     Used across dashboard, briefing, and operator modules. *)
 
-let is_keeper_offline status =
-  List.mem status [ "offline"; "inactive"; "error" ]
-
+(* [status] arrives from the operator snapshot, where it is
+   [Keeper_status_runtime.control_plane_status_to_string]'s output:
+   paused / active / busy / listening / inactive / offline / idle. That
+   producer emits no "error", so the arm that used to be here could not
+   match. Compared as strings rather than decoded because this library
+   holds only masc_types and masc_core — reaching the keeper module
+   would invert the dependency. *)
+(* The typed form lives in Keeper_status_runtime, which this library
+   cannot reach without inverting the dependency. *)
+(* STR-OK: JSON boundary comparison. *)
 let is_health_critical = Health_status.requires_operator_action
 
 let is_health_warning health =

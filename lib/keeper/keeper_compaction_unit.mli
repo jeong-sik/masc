@@ -6,8 +6,8 @@
     by itself authorize a unit for LLM summarization. *)
 
 type closed_unit =
-  | Ordinary_message of Agent_sdk.Types.message
-  | Closed_tool_cycle of Agent_sdk.Types.message list
+  | Ordinary_message of Agent_core.Types.message
+  | Closed_tool_cycle of Agent_core.Types.message list
 
 type structural_error =
   | Empty_tool_use_id of
@@ -61,7 +61,7 @@ type structural_error =
 
 type partition =
   { closed_prefix : closed_unit list
-  ; protected_suffix : Agent_sdk.Types.message list
+  ; protected_suffix : Agent_core.Types.message list
   }
 
 type provider_transcript_error =
@@ -69,14 +69,14 @@ type provider_transcript_error =
   | Unresolved_tool_results of { tool_use_ids : string list }
 [@@deriving show]
 
-val messages_of_closed_unit : closed_unit -> Agent_sdk.Types.message list
+val messages_of_closed_unit : closed_unit -> Agent_core.Types.message list
 (** Flatten a unit back to the messages it holds: the single message of
     [Ordinary_message], or the message list of [Closed_tool_cycle] in its
     original order. *)
 
 val partition
   :  ?quarantine:bool
-  -> Agent_sdk.Types.message list
+  -> Agent_core.Types.message list
   -> (partition, structural_error) result
 (** With [~quarantine:true] the first structural break freezes the valid
     [closed_prefix] and moves the open cycle plus the offending message and its
@@ -88,14 +88,14 @@ val partition
 (** Validate the same structural contract as {!partition} without exposing a
     partition to persistence callers that must preserve every message exactly. *)
 val validate
-  :  Agent_sdk.Types.message list
+  :  Agent_core.Types.message list
   -> (unit, structural_error) result
 
 (** Provider dispatch requires a fully closed tool protocol. Unlike
     {!validate}, this rejects the open ToolUse suffix that checkpoint
     persistence deliberately preserves for crash recovery. *)
 val validate_provider_transcript
-  :  Agent_sdk.Types.message list
+  :  Agent_core.Types.message list
   -> (unit, provider_transcript_error) result
 
 val interrupted_tool_result_content : string
@@ -104,13 +104,13 @@ val interrupted_tool_result_content : string
     masc has no durable per-tool-call effect receipt to consult. *)
 
 type tail_closure =
-  { messages : Agent_sdk.Types.message list
+  { messages : Agent_core.Types.message list
   ; closed_tool_use_ids : string list
         (** Empty when the history was already dispatchable. *)
   }
 
 val close_open_tail
-  :  Agent_sdk.Types.message list
+  :  Agent_core.Types.message list
   -> (tail_closure, structural_error) result
 (** Close the in-flight tool cycle that checkpoint persistence deliberately
     preserves, so a history interrupted by process death becomes dispatchable

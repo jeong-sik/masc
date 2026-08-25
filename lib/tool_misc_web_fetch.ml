@@ -1,19 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 open Tool_args
 
 let default_timeout_sec = 15
@@ -101,6 +85,53 @@ let valid_url url =
     match Uri.scheme uri |> Option.map String.lowercase_ascii with
     | Some "http" | Some "https" -> true
     | _ -> false
+
+(* Boundary: web content decides what gets fetched next, so a request
+   must not reach the loopback surface (MASC's own API included), the
+   private network, or link-local metadata addresses. The check is
+   literal — IP ranges via Ipaddr plus the RFC 6761 localhost names.
+   It does not resolve DNS, so a public hostname that resolves to a
+   private address is outside this boundary; that limitation is part
+   of the contract, not hidden. Applied to the initial URL and to
+   every redirect hop. *)
+let rec blocked_ip_reason : Ipaddr.t -> string option = function
+  | Ipaddr.V4 v4 ->
+      if Ipaddr.V4.Prefix.(mem v4 loopback) then Some "loopback address"
+      else if Ipaddr.V4.Prefix.(mem v4 link) then Some "link-local address"
+      else if
+        List.exists
+          (fun block -> Ipaddr.V4.Prefix.mem v4 block)
+          Ipaddr.V4.Prefix.private_blocks
+      then Some "private-network address"
+      else if Ipaddr.V4.compare v4 Ipaddr.V4.any = 0 then
+        Some "unspecified address"
+      else None
+  | Ipaddr.V6 v6 -> (
+      match Ipaddr.v4_of_v6 v6 with
+      | Some v4 -> blocked_ip_reason (Ipaddr.V4 v4)
+      | None ->
+          if Ipaddr.V6.compare v6 Ipaddr.V6.localhost = 0 then
+            Some "loopback address"
+          else if Ipaddr.V6.Prefix.(mem v6 link) then Some "link-local address"
+          else if Ipaddr.V6.Prefix.(mem v6 unique_local) then
+            Some "private-network address"
+          else if Ipaddr.V6.compare v6 Ipaddr.V6.unspecified = 0 then
+            Some "unspecified address"
+          else None)
+
+let blocked_destination_reason url =
+  match Uri.host (Uri.of_string (String.trim url)) with
+  | None -> Some "URL has no host"
+  | Some host ->
+      let lowered = String.lowercase_ascii host in
+      if
+        String.equal lowered "localhost"
+        || String.ends_with ~suffix:".localhost" lowered
+      then Some "localhost is not fetchable"
+      else (
+        match Ipaddr.of_string lowered with
+        | Error _ -> None (* hostname; resolution is out of scope here *)
+        | Ok ip -> blocked_ip_reason ip)
 
 let ends_with ~suffix value =
   let value_length = String.length value in
@@ -256,9 +287,225 @@ let render_payload ~extract_mode ~content_kind payload =
   | Plain_text -> (normalize_raw_text payload, Raw_text)
   | Json_text | Xml_text -> (String.trim payload, Raw_text)
 
-let truncate_text ~max_chars text =
-  if String.length text <= max_chars then text, false
-  else String.sub text 0 max_chars ^ "\n[TRUNCATED]", true
+(* Deterministic truncation, following the head/tail window Hermes uses
+   for web extracts: keep the opening three quarters and the closing
+   quarter of the budget, cut on line boundaries, and point at the
+   offloaded full text instead of shipping it. Same input, same output. *)
+let truncation_head_share_num = 3
+let truncation_share_den = 4
+
+(* [Env_config_core.base_path] is the guarded public accessor
+   (RFC-0085 PR-9 hides the raw option form): unset becomes the
+   canonical remedy message in the marker, and a #9903 test-isolation
+   breach surfaces loudly as the offload reason instead of writing
+   under the operator's HOME. *)
+let web_artifact_index_schema = "masc.web_artifact.v1"
+
+(* RFC-0383: one append-only fact line per offload. The index is a
+   projection — the content-addressed file stays the truth, so an
+   append failure must not turn a successful offload into a failure.
+   The same sha256 offloaded again writes another row: an independent
+   observation that the URL still had that content, with dedup already
+   solved by content addressing at the file layer. *)
+let web_artifact_index_append ~dir ~sha256 ~source_url ~title ~bytes
+    ~fetched_at_unix =
+  let row =
+    `Assoc
+      (List.concat
+         [ [ ("schema", `String web_artifact_index_schema)
+           ; ("sha256", `String sha256)
+           ; ("source_url", `String source_url)
+           ]
+         ; (match title with
+            | Some title -> [ ("title", `String title) ]
+            | None -> [])
+         ; [ ("bytes", `Int bytes)
+           ; ( "fetched_at"
+             , `String (Masc_domain.iso8601_of_unix_seconds fetched_at_unix) )
+           ]
+         ])
+  in
+  try Ok (Fs_compat.append_jsonl (Filename.concat dir "index.jsonl") row) with
+  | Unix.Unix_error (err, _, _) -> Error (Unix.error_message err)
+  | Sys_error message -> Error message
+
+let offload_full_text ~source_url ~title ~fetched_at_unix text =
+  match Env_config_core.base_path () with
+  | exception Env_config_core.Config_error message -> Error message
+  | base ->
+      let dir =
+        List.fold_left
+          Filename.concat
+          base
+          [ Common.masc_dirname; "artifacts"; "web-fetch" ]
+      in
+      (* #28820: the full text lives in the content-addressed
+         [Tool_blob_store], so the sha carried by the marker and the index
+         is directly the input of [keeper_artifact_read] — a keeper-lane
+         reader exists for it. This directory keeps only the discovery
+         projection ([index.jsonl]). Filesystem failures become typed
+         reasons in the marker; anything else propagates to the tool
+         dispatch boundary rather than being flattened into a string
+         here. *)
+      (try
+         let store = Tool_blob_store.create ~base_path:base in
+         let artifact =
+           Tool_blob_store.put_durable store ~bytes:text ~mime:"text/markdown"
+         in
+         (* The blob is durable at this point, so an index-side directory or
+            append failure must surface as [index_unavailable], never as
+            [full_text_unavailable] — the marker would otherwise deny a blob
+            that exists. *)
+         let index =
+           try
+             Fs_compat.mkdir_p dir;
+             web_artifact_index_append ~dir
+               ~sha256:artifact.Tool_output.sha256 ~source_url ~title
+               ~bytes:(String.length text) ~fetched_at_unix
+           with
+           | Unix.Unix_error (err, _, _) -> Error (Unix.error_message err)
+           | Sys_error message -> Error message
+         in
+         Ok (artifact.Tool_output.sha256, index)
+       with
+       | Unix.Unix_error (err, _, _) -> Error (Unix.error_message err)
+       | Sys_error message -> Error message)
+
+let is_utf8_continuation_byte byte = Char.code byte land 0xC0 = 0x80
+
+(* When no newline is near the budget, the raw byte offset can land
+   inside a multi-byte codepoint and ship silent mojibake. Snap the cut
+   to a codepoint start: left for the head (excluded byte must start a
+   codepoint), right for the tail (included byte must start one). Both
+   walks are bounded and deterministic; invalid input degrades to an
+   empty window, never a loop. *)
+let snap_codepoint_left text index =
+  let rec loop i =
+    if i > 0 && is_utf8_continuation_byte text.[i] then loop (i - 1) else i
+  in
+  loop index
+
+let snap_codepoint_right text index =
+  let total = String.length text in
+  let rec loop i =
+    if i < total && is_utf8_continuation_byte text.[i] then loop (i + 1) else i
+  in
+  loop index
+
+let outline_max_entries = 32
+
+(* Byte-offset map of the extraction's markdown ATX headings, in order.
+   Offsets index the offloaded artifact, so every entry doubles as a
+   read address for keeper_artifact_read(sha256, offset, max_bytes) —
+   the keeper picks a section instead of paging blindly. A one-bit
+   fence toggle keeps `#` lines inside ``` blocks out of the map;
+   imperfect fencing costs map precision, never correctness. Collection
+   stops at [outline_max_entries] while the total keeps counting, so
+   the marker can say how much of the document the map covers. *)
+let document_outline text =
+  let total = String.length text in
+  let line_end offset =
+    match String.index_from_opt text offset '\n' with
+    | Some idx -> idx
+    | None -> total
+  in
+  let rec walk offset in_fence collected collected_count heading_total =
+    if offset >= total then List.rev collected, heading_total
+    else
+      let stop = line_end offset in
+      let line = String.sub text offset (stop - offset) in
+      let line_len = String.length line in
+      let fence_line = line_len >= 3 && String.equal (String.sub line 0 3) "```" in
+      let heading =
+        (not in_fence) && (not fence_line)
+        &&
+        let rec hashes i =
+          if i < line_len && Char.equal line.[i] '#' then hashes (i + 1) else i
+        in
+        let count = hashes 0 in
+        count >= 1 && count <= 6 && count < line_len && Char.equal line.[count] ' '
+      in
+      let collected, collected_count =
+        if heading && collected_count < outline_max_entries then
+          (offset, line) :: collected, collected_count + 1
+        else collected, collected_count
+      in
+      let heading_total = if heading then heading_total + 1 else heading_total in
+      let in_fence = if fence_line then not in_fence else in_fence in
+      walk (stop + 1) in_fence collected collected_count heading_total
+  in
+  walk 0 false [] 0 0
+
+let outline_block text =
+  match document_outline text with
+  | [], _ -> None
+  | entries, heading_total ->
+      let header =
+        Printf.sprintf
+          "[OUTLINE headings=%d shown=%d — byte offsets into full_text for \
+           keeper_artifact_read]"
+          heading_total (Stdlib.List.length entries)
+      in
+      let rows =
+        List.map (fun (offset, line) -> Printf.sprintf "%d %s" offset line) entries
+      in
+      Some (String.concat "\n" (header :: rows))
+
+let truncate_text ~max_chars ~source_url ~title ~fetched_at_unix text =
+  let total = String.length text in
+  if total <= max_chars then text, false, None
+  else
+    let head_budget = max_chars * truncation_head_share_num / truncation_share_den in
+    let tail_budget = max_chars - head_budget in
+    let head_cut =
+      if head_budget = 0 then 0
+      else
+        match String.rindex_from_opt text (head_budget - 1) '\n' with
+        | Some idx when idx > 0 -> idx
+        | Some _ | None -> snap_codepoint_left text head_budget
+    in
+    let tail_start =
+      let minimum = total - tail_budget in
+      match String.index_from_opt text minimum '\n' with
+      | Some idx when idx + 1 < total -> idx + 1
+      | Some _ | None -> snap_codepoint_right text minimum
+    in
+    let head = String.sub text 0 head_cut in
+    let tail = String.sub text tail_start (total - tail_start) in
+    let offloaded = offload_full_text ~source_url ~title ~fetched_at_unix text in
+    let marker =
+      match offloaded with
+      | Ok (sha256, index) -> (
+          let base =
+            Printf.sprintf
+              "[TRUNCATED total_chars=%d kept_head=%d kept_tail=%d full_text_sha256=%s]"
+              total (String.length head) (String.length tail) sha256
+          in
+          (* RFC-0383: a failed index append never demotes a successful
+             offload — the artifact is the truth and the index only a
+             projection — but it does not pass silently either. The
+             marker carries the reason, mirroring full_text_unavailable. *)
+          let base =
+            match index with
+            | Ok () -> base
+            | Error reason ->
+                String.concat "\n"
+                  [ base; Printf.sprintf "[index_unavailable=%s]" reason ]
+          in
+          (* The outline only ships when the offload succeeded: its
+             offsets address the artifact file, and a map without an
+             address surface would send the keeper nowhere. *)
+          match outline_block text with
+          | None -> base
+          | Some outline -> String.concat "\n" [ base; outline ])
+      | Error reason ->
+          Printf.sprintf
+            "[TRUNCATED total_chars=%d kept_head=%d kept_tail=%d full_text_unavailable=%s]"
+            total (String.length head) (String.length tail) reason
+    in
+    ( String.concat "\n\n" [ head; marker; tail ]
+    , true
+    , match offloaded with Ok (sha256, _) -> Some sha256 | Error _ -> None )
 
 (** Response cache. Authorization and admission belong to the Keeper Gate; this
     leaf does not maintain a second, process-local request limiter. *)
@@ -326,7 +573,7 @@ let fetch_failure_to_string = function
 
 let fetch_failure_class : fetch_failure -> Tool_result.tool_failure_class =
   function
-  | Transport_error _ -> Tool_result.Transient_error
+  | Transport_error _ -> Tool_result.Dependency_unavailable
   | Http_status _ -> Tool_result.Runtime_failure
   | No_http_status -> Tool_result.Runtime_failure
   | Invalid_redirect _ -> Tool_result.Workflow_rejection
@@ -341,13 +588,6 @@ type fetch_response =
   ; downloaded_bytes : int option
   ; body : string
   }
-
-type http_fetch =
-  timeout_sec:int ->
-  headers:(string * string) list ->
-  max_response_bytes:int ->
-  string ->
-  (fetch_response, fetch_failure) Result.t
 
 let resolve_redirect_url ~base_url target =
   Uri.resolve "" (Uri.of_string base_url) (Uri.of_string target) |> Uri.to_string
@@ -371,7 +611,10 @@ let fetch_response_of_http_response ~request_url ~redirect_count
 let validate_redirect_target target =
   if not (valid_url target) then
     Error "redirect target must be a valid http or https URL"
-  else Ok ()
+  else (
+    match blocked_destination_reason target with
+    | Some reason -> Error ("redirect target rejected: " ^ reason)
+    | None -> Ok ())
 
 let default_http_fetch ~timeout_sec ~headers ~max_response_bytes url =
   let rec loop ~redirect_count request_url =
@@ -440,7 +683,7 @@ let with_http_get_for_test http_get f =
     f
 
 (** Main fetch implementation *)
-let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars =
+let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars ~fetched_at_unix =
   let headers =
     [
       ( "User-Agent",
@@ -471,7 +714,10 @@ let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars =
               let rendered, extraction_source =
                 render_payload ~extract_mode ~content_kind response.body
               in
-              let text, truncated = truncate_text ~max_chars rendered in
+              let text, truncated, full_text_sha256 =
+                truncate_text ~max_chars ~source_url:response.final_url ~title
+                  ~fetched_at_unix rendered
+              in
               Ok
                 ( response
                 , status
@@ -480,14 +726,15 @@ let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars =
                 , title
                 , description
                 , text
-                , truncated ))
+                , truncated
+                , full_text_sha256 ))
       | Some status -> Error (Http_status status)
       | None -> Error No_http_status)
 
 (* RFC-0189 PR-1b.8 — typed result.
    Failure-class assignments live with construction:
    - [Workflow_rejection]: caller-input violation (invalid URL).
-   - [Transient_error]:    rate-limit hit + transport-level failure
+   - [Dependency_unavailable]:    rate-limit hit + transport-level failure
                            ([fetch_failure_class] for transport).
                            Both retry-friendly by nature; clients can
                            now back off automatically based on the
@@ -519,6 +766,9 @@ let handle ~tool_name ~start_time args : Tool_result.result =
   if not (valid_url url) then
     make_workflow_err "url must be a valid http or https URL"
   else
+    match blocked_destination_reason url with
+    | Some reason -> make_workflow_err ("url rejected: " ^ reason)
+    | None ->
     match extract_mode_of_string extract_mode_raw with
     | None -> make_workflow_err "extractMode must be one of: markdown, text"
     | Some extract_mode ->
@@ -535,7 +785,8 @@ let handle ~tool_name ~start_time args : Tool_result.result =
       match cache_lookup key now with
       | Some cached -> ok_from_data cached
       | None ->
-        (match fetch_impl ~url ~timeout_sec:timeout ~extract_mode ~max_chars with
+        (match fetch_impl ~url ~timeout_sec:timeout ~extract_mode ~max_chars
+                 ~fetched_at_unix:start_time with
                     | Ok
                         ( response
                         , http_status
@@ -544,7 +795,8 @@ let handle ~tool_name ~start_time args : Tool_result.result =
                         , title
                         , description
                         , text
-                        , truncated ) ->
+                        , truncated
+                        , full_text_sha256 ) ->
                         let fields =
                           [
                             ("url", `String url);
@@ -559,6 +811,10 @@ let handle ~tool_name ~start_time args : Tool_result.result =
                             ("content_chars", `Int (String.length text));
                             ("truncated", `Bool truncated);
                           ]
+                          @
+                          (match full_text_sha256 with
+                          | Some sha256 -> [ ("full_text_sha256", `String sha256) ]
+                          | None -> [])
                           @
                           (match response.content_type with
                           | Some value -> [ ("content_type", `String value) ]

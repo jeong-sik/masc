@@ -1,5 +1,5 @@
 (** Test suite for Phase 1: Work-as-heartbeat config defaults,
-    freshness decision logic, and Phase 0 percentile function.
+    keepalive cycle actions, and Phase 0 percentile function.
 
     Note: env_config values are top-level let bindings, evaluated once at
     program start. Runtime putenv does NOT affect them. Tests verify defaults
@@ -18,27 +18,88 @@ let test_wah_enabled_default () =
   check bool "work-as-heartbeat enabled by default"
     true Cfg.WorkAsHeartbeat.enabled
 
-let test_wah_max_silence_default () =
-  (* MASC_KEEPER_MAX_SILENCE_SEC not set in test env → default 120.0 *)
-  let v = Cfg.WorkAsHeartbeat.max_silence_sec in
-  check (float 0.1) "default max silence 120s" 120.0 v
+let keeper_setting env_name =
+  match
+    List.find_opt
+      (fun (setting : Keeper_runtime_setting_registry.setting) ->
+        String.equal setting.env_name env_name)
+      Keeper_runtime_setting_registry.active
+  with
+  | Some setting -> setting
+  | None -> failf "missing Keeper runtime registry row for %s" env_name
+;;
 
-let test_wah_max_silence_floor_logic () =
-  (* The floor clamp uses keepalive interval dynamically.
-     We verify: max_silence_sec >= keepalive_interval_sec always. *)
-  let v = Cfg.WorkAsHeartbeat.max_silence_sec in
-  let interval = Float.of_int Cfg.KeeperKeepalive.interval_sec in
-  check bool "max_silence >= keepalive interval"
-    true (v >= interval)
+let test_keepalive_registry_defaults_match_runtime () =
+  let interval = keeper_setting "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" in
+  check string "interval registry default matches runtime"
+    (string_of_int Cfg.KeeperKeepalive.interval_sec)
+    interval.default_display
+;;
 
 (* ── KeeperKeepalive config defaults ───────────────────── *)
 
 let test_keepalive_interval_default () =
-  check int "default interval 30s" 30 Cfg.KeeperKeepalive.interval_sec
+  check int "default interval 300s" 300 Cfg.KeeperKeepalive.interval_sec
 
 let test_keepalive_interval_positive () =
   let v = Cfg.KeeperKeepalive.interval_sec in
   check bool "interval is positive" true (v > 0)
+
+let test_keeper_heartbeat_stale_window_tracks_cadence () =
+  check (float 0.1) "30s cycle respects the 300s snapshot producer" 360.0
+    (Masc.Keeper_status_runtime.keeper_heartbeat_stale_after_s
+       ~keepalive_interval_s:30.0
+       ~snapshot_interval_s:300.0);
+  check (float 0.1) "300s cadence receives 60s slack" 360.0
+    (Masc.Keeper_status_runtime.keeper_heartbeat_stale_after_s
+       ~keepalive_interval_s:300.0
+       ~snapshot_interval_s:30.0)
+;;
+
+let test_keeper_turn_record_freshness_tracks_cadence () =
+  check (float 0.1) "short cadence preserves the historical 300s floor" 300.0
+    (Masc.Keeper_status_runtime.keeper_turn_record_freshness_slo_s
+       ~keepalive_interval_s:30.0);
+  check (float 0.1) "300s cadence receives full-cycle slack" 420.0
+    (Masc.Keeper_status_runtime.keeper_turn_record_freshness_slo_s
+       ~keepalive_interval_s:300.0)
+;;
+
+let test_keeper_metric_freshness_tracks_runtime_cadence () =
+  check (float 0.1) "short cadence preserves telemetry floor" 300.0
+    (Telemetry_unified.source_freshness_slo_s
+       ~keeper_keepalive_interval_s:30.0
+       Telemetry_unified.Keeper_metric);
+  check (float 0.1) "keeper metric receives full-cycle slack" 420.0
+    (Telemetry_unified.source_freshness_slo_s
+       ~keeper_keepalive_interval_s:300.0
+       Telemetry_unified.Keeper_metric)
+;;
+
+let test_live_turn_keeps_turn_record_source_healthy () =
+  let health, stale_reason =
+    Masc.Keeper_status_runtime.keeper_turn_record_source_health
+      ~skipped_rows:0
+      ~live_turn_in_progress:true
+      ~latest_age_s:(Some 900.0)
+      ~freshness_slo_s:420.0
+  in
+  (* Not "ok": that additionally claims the newest finished record is inside
+     the SLO, and here it is 900s against 420s. The running turn has not
+     written its record yet, so there is nothing to judge (#28720). *)
+  check string "a running turn reports live, not ok" "live" health;
+  check string "live producer has no stale reason" "" stale_reason;
+  let health, stale_reason =
+    Masc.Keeper_status_runtime.keeper_turn_record_source_health
+      ~skipped_rows:0
+      ~live_turn_in_progress:false
+      ~latest_age_s:(Some 900.0)
+      ~freshness_slo_s:420.0
+  in
+  check string "idle old producer is stale" "stale" health;
+  check string "idle old producer explains staleness"
+    "freshness_slo_exceeded" stale_reason
+;;
 
 let test_keepalive_interval_has_one_resolved_ssot () =
   Runtime_settings.ensure_init ();
@@ -50,7 +111,7 @@ let test_keepalive_interval_has_one_resolved_ssot () =
 ;;
 
 let test_keepalive_sleep_chunk_default () =
-  check (float 0.01) "default sleep chunk 2.0s" 2.0
+  check (float 0.01) "default sleep chunk 0.5s" 0.5
     Cfg.KeeperKeepalive.sleep_chunk_sec
 
 (* ── KeeperGrpc config defaults ────────────────────────── *)
@@ -78,71 +139,38 @@ let test_timing_ring_size_range () =
 
 (* ── Config invariant properties ───────────────────────── *)
 
-let test_config_invariant_silence_ge_interval () =
-  let silence = Cfg.WorkAsHeartbeat.max_silence_sec in
-  let interval = Float.of_int Cfg.KeeperKeepalive.interval_sec in
-  check bool "max_silence >= interval (invariant)" true (silence >= interval)
-
 let test_config_invariant_sweep_independent () =
   let sweep = Cfg.KeeperSupervisor.sweep_interval_sec in
   check bool "sweep > 0" true (sweep > 0.0)
 
 
-(* ── Freshness decision pure logic ──────────────────────── *)
+let test_completed_cycle_records_and_refreshes () =
+  match
+    Masc.Keeper_heartbeat_loop.decide_keepalive_cycle_action
+      Masc.Keeper_heartbeat_loop.Turn_cycle_completed
+  with
+  | Masc.Keeper_heartbeat_loop.Record_turn_status Refresh_work_heartbeat -> ()
+  | _ -> fail "completed cycle must record and refresh work-heartbeat"
+;;
 
-let test_freshness_fresh () =
-  let now = 100.0 in
-  let last_hb = 50.0 in
-  let max_silence = 120.0 in
-  let fresh = now -. last_hb < max_silence in
-  check bool "50s ago < 120s window → fresh" true fresh
+let test_crashed_cycle_records_and_preserves_work_heartbeat () =
+  match
+    Masc.Keeper_heartbeat_loop.decide_keepalive_cycle_action
+      Masc.Keeper_heartbeat_loop.Turn_cycle_crashed
+  with
+  | Masc.Keeper_heartbeat_loop.Record_turn_status Preserve_work_heartbeat -> ()
+  | _ -> fail "crashed cycle must record without refreshing work-heartbeat"
+;;
 
-let test_freshness_stale () =
-  let now = 200.0 in
-  let last_hb = 50.0 in
-  let max_silence = 120.0 in
-  let fresh = now -. last_hb < max_silence in
-  check bool "150s ago >= 120s window → stale" false fresh
-
-let test_freshness_exact_boundary () =
-  let now = 170.0 in
-  let last_hb = 50.0 in
-  let max_silence = 120.0 in
-  let fresh = now -. last_hb < max_silence in
-  check bool "exactly 120s → NOT fresh (< is strict)" false fresh
-
-let test_freshness_never_heartbeated () =
-  (* Initial last_hb = 0.0. At unix epoch + 200s:
-     200.0 - 0.0 = 200.0 >= 120.0 → stale.
-     This correctly forces initial presence sync. *)
-  let now = 200.0 in
-  let last_hb = 0.0 in
-  let max_silence = 120.0 in
-  let fresh = now -. last_hb < max_silence in
-  check bool "never heartbeated (0.0) → stale → forces presence sync"
-    false fresh
-
-let test_freshness_disabled_flag () =
-  (* When work_as_hb = false, presence_fresh is always false regardless of timestamp *)
-  let work_as_hb = false in
-  let now = 100.0 in
-  let last_hb = 99.0 in
-  let max_silence = 120.0 in
-  let fresh = work_as_hb && (now -. last_hb < max_silence) in
-  check bool "feature disabled → always stale" false fresh
-
-let test_busy_cycle_records_no_turn_status_or_work_heartbeat () =
-  let accounting =
-    Masc.Keeper_heartbeat_loop.keepalive_cycle_accounting
+let test_busy_cycle_defers_typed_block () =
+  match
+    Masc.Keeper_heartbeat_loop.decide_keepalive_cycle_action
       (Masc.Keeper_heartbeat_loop.Turn_cycle_busy
-         (Masc.Keeper_turn_admission.Turn_busy None))
-  in
-  check bool "busy cycle records no turn status" false accounting.record_turn_status;
-  check
-    bool
-    "busy cycle refreshes no work-heartbeat success"
-    false
-    accounting.refresh_work_heartbeat
+         (Masc.Keeper_owner.Turn_busy None))
+  with
+  | Masc.Keeper_heartbeat_loop.Defer_autonomous_work
+      (Masc.Keeper_owner.Turn_busy None) -> ()
+  | _ -> fail "busy cycle must preserve its typed admission block"
 ;;
 
 (* ── Percentile function (Phase 0 profiling) ────────────── *)
@@ -189,12 +217,20 @@ let () =
   run "work_as_heartbeat" [
     "config", [
       test_case "enabled default" `Quick test_wah_enabled_default;
-      test_case "max_silence default" `Quick test_wah_max_silence_default;
-      test_case "max_silence floor invariant" `Quick test_wah_max_silence_floor_logic;
+      test_case "registry defaults match runtime" `Quick
+        test_keepalive_registry_defaults_match_runtime;
     ];
     "keepalive_config", [
       test_case "interval default" `Quick test_keepalive_interval_default;
       test_case "interval positive" `Quick test_keepalive_interval_positive;
+      test_case "stale window tracks cadence" `Quick
+        test_keeper_heartbeat_stale_window_tracks_cadence;
+      test_case "turn-record freshness tracks cadence" `Quick
+        test_keeper_turn_record_freshness_tracks_cadence;
+      test_case "keeper metric freshness tracks runtime cadence" `Quick
+        test_keeper_metric_freshness_tracks_runtime_cadence;
+      test_case "live turn keeps record source healthy" `Quick
+        test_live_turn_keeps_turn_record_source_healthy;
       test_case "interval has one resolved SSOT" `Quick
         test_keepalive_interval_has_one_resolved_ssot;
       test_case "sleep_chunk default" `Quick test_keepalive_sleep_chunk_default;
@@ -207,21 +243,21 @@ let () =
       test_case "timing_ring default" `Quick test_timing_ring_size_default;
       test_case "timing_ring range" `Quick test_timing_ring_size_range;
     ];
-    "freshness_logic", [
-      test_case "within window → fresh" `Quick test_freshness_fresh;
-      test_case "beyond window → stale" `Quick test_freshness_stale;
-      test_case "exact boundary → stale (strict <)" `Quick test_freshness_exact_boundary;
-      test_case "never heartbeated → stale" `Quick test_freshness_never_heartbeated;
-      test_case "feature disabled → always stale" `Quick test_freshness_disabled_flag;
-    ];
-    "cycle_accounting", [
+    "cycle_action", [
       test_case
-        "busy records no completion or work-heartbeat success"
+        "completed records and refreshes work-heartbeat"
         `Quick
-        test_busy_cycle_records_no_turn_status_or_work_heartbeat;
+        test_completed_cycle_records_and_refreshes;
+      test_case
+        "crashed records and preserves work-heartbeat"
+        `Quick
+        test_crashed_cycle_records_and_preserves_work_heartbeat;
+      test_case
+        "busy defers with its typed admission block"
+        `Quick
+        test_busy_cycle_defers_typed_block;
     ];
     "config_invariants", [
-      test_case "max_silence >= interval" `Quick test_config_invariant_silence_ge_interval;
       test_case "sweep interval positive" `Quick test_config_invariant_sweep_independent;
     ];
     "percentile", [

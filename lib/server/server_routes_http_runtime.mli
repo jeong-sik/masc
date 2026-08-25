@@ -145,7 +145,8 @@ val make_health_json :
     [operator_action_reasons] /
     [keeper_fibers] / [fd_observation] / [fd_accountant] / [disk_observation] /
     [keeper_fleet_safety] / [publication_recovery_activation] /
-    [keeper_reaction_ledger] / [paused_keepers] /
+    [keeper_reaction_ledger] / [keeper_terminal_effect_policy] /
+    [keeper_observability_artifacts] / [paused_keepers] /
     [keeper_config_error_count] / [keeper_config_errors] /
     [keeper_config_unknown_key_count] / [keeper_config_unknown_keys] /
     [keeper_config_schema_status] / [keeper_config_schema_blocking] /
@@ -241,7 +242,7 @@ val make_health_response_json :
 val start_full_health_snapshot_refresh_loop :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  request_authority:Server_request_authority.request_context ->
+  request_authority:Server_request_authority.authority ->
   unit
 (** Starts the Eio background refresh loop for cached [/health?full=1]
     diagnostics.  The loop keeps heavy durable scans out of the HTTP request
@@ -260,7 +261,7 @@ module For_testing : sig
     unit
   (** Synchronously recomputes and stores the cached full-health snapshot. *)
 
-  val mark_full_health_snapshot_error : exn -> unit
+  val mark_full_health_snapshot_failure : Proactive_refresh.failure -> unit
   (** Records a failed background refresh without recomputing the snapshot. *)
 
   val full_health_refresh_timing : unit -> float * float * float
@@ -275,9 +276,8 @@ val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) li
     [/health] keeps the richer paused keeper object.  The
     [keeper_reaction_ledger] field keeps the same summary object as
     [/health] so the dashboard can render pending durable stimuli without a
-    second endpoint.  [keeper_turn_admission] mirrors the [/health] admission
-    pressure component so the shell can show in-flight lane, chat waiting
-    count/cap/full state, and rejected-chat counters without polling a second
+    second endpoint.  [keeper_owner] mirrors the [/health] single-owner
+    scheduling and durable operation component without polling a second
     endpoint.  [keeper_board_event_collection] mirrors the [/health] board
     scanner failure component so the shell can show a reactive-board ingestion
     fault without scraping logs or metrics.  [fd_accountant] is also projected here so the dashboard shell
@@ -288,8 +288,8 @@ val keeper_fleet_runtime_resolution_light_fields :
   unit -> (string * Yojson.Safe.t) list
 (** Like {!keeper_fleet_runtime_resolution_fields}, but omits the
     reaction-ledger JSONL scan for the [/api/v1/dashboard/shell?light=true]
-    header hot path.  It keeps [keeper_turn_admission] because admission
-    pressure is in-memory and cheap to read, and keeps
+    header hot path.  It keeps [keeper_owner] because the projection is
+    in-memory and cheap to read, and keeps
     [keeper_board_event_collection] because the failure snapshot is in-memory
     and cheap to read. *)
 
@@ -319,8 +319,6 @@ val readiness_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** {1 Board} *)
 
 val board_post_detail_json :
-  include_moderation:bool ->
-  blind_votes:bool ->
   config:Workspace.config option ->
   voter:string option ->
   reaction_actor:string option ->
@@ -332,11 +330,8 @@ val board_post_detail_json :
     When [voter] is supplied, post/comment rows include vote state for
     that voter. [reaction_actor] independently selects the actor-aware
     reaction state and must come from authenticated credential identity,
-    never a query parameter. When [include_moderation] is [true], rows also
-    include operator-only moderation projection fields. When [config] is
-    supplied, post rows include contributor-quality projection fields.
-    When [blind_votes] is [true], rows hide score fields until that
-    voter has voted.
+    never a query parameter. When [config] is supplied, post rows include
+    contributor-quality projection fields.
 
     [response_format] is decoded once at the HTTP boundary by
     {!Server_board_post_response_format.of_query}; unsupported wire values are

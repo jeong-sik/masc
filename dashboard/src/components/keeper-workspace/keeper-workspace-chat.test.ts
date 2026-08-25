@@ -35,8 +35,22 @@ function gateResponse(queue: KeeperApprovalQueueItem[]): DashboardGateResponse {
     approval_queue: queue,
     approval_queue_state: { state: 'ready' },
     recent_resolved: [],
+    recent_resolved_page: {
+      returned: 0,
+      matched: 0,
+      limit: 20,
+      window_minutes: 1440,
+      truncated: false,
+      scan_exhausted: false,
+    },
+    recent_resolved_state: { state: 'ready' },
     approval_rules: [],
-  } as DashboardGateResponse
+    approval_rules_state: { state: 'ready' },
+    hitl: {
+      gate_mode: { mode: 'manual', configured: true, state: 'ready' },
+      judge_lane: { status: 'available', lane_id: 'keeper_gate_judge', slots: ['keeper_gate_judge'] },
+    },
+  }
 }
 
 async function loadChat() {
@@ -171,9 +185,34 @@ describe('KeeperWorkspaceChat', () => {
     expect(queueLink).not.toBeNull()
     expect(queueLink.textContent).toContain('1')
     expect(queueLink.getAttribute('aria-label')).toContain('결재 대기 1건')
-    expect(container.querySelector('[data-testid="keeper-pending-approval-cue"]')).toBeNull()
+    // The in-thread design cue (keepers.jsx chat-pendcue) rides the same queue.
+    const pendcue = container.querySelector('[data-testid="keeper-chat-pendcue"]') as HTMLButtonElement
+    expect(pendcue).not.toBeNull()
+    expect(pendcue.textContent).toContain('승인 대기')
+    expect(pendcue.textContent).toContain('fs_write')
     await act(async () => {
       queueLink.click()
+    })
+    expect(navigate).toHaveBeenCalledWith('approvals')
+  })
+
+  it('links the in-thread pending-approval cue to the approvals queue', async () => {
+    const { KeeperWorkspaceChat } = await loadChat()
+    const { navigate } = await import('../../router')
+    mockGateData.value = gateResponse([approvalItem('appr-1', 'sangsu', 'fs_write')])
+
+    await act(async () => {
+      render(html`<${KeeperWorkspaceChat} keeper=${mockKeeper} />`, container)
+    })
+
+    const pendcue = container.querySelector('[data-testid="keeper-chat-pendcue"]') as HTMLButtonElement
+    expect(pendcue).not.toBeNull()
+    expect(pendcue.classList.contains('chat-pendcue')).toBe(true)
+    expect(pendcue.querySelector('.chat-pendcue-dot')).not.toBeNull()
+    expect(pendcue.querySelector('.chat-pendcue-tx .mono')?.textContent).toBe('fs_write')
+    expect(pendcue.querySelector('.chat-pendcue-arr')).not.toBeNull()
+    await act(async () => {
+      pendcue.click()
     })
     expect(navigate).toHaveBeenCalledWith('approvals')
   })
@@ -186,6 +225,7 @@ describe('KeeperWorkspaceChat', () => {
     })
 
     expect(container.querySelector('[data-testid="keeper-pending-approval-link"]')).toBeNull()
+    expect(container.querySelector('[data-testid="keeper-chat-pendcue"]')).toBeNull()
   })
 
   it('renders the backend queue-unavailable state instead of a zero approval cue', async () => {
@@ -217,6 +257,7 @@ describe('KeeperWorkspaceChat', () => {
     )
     expect(unavailable.getAttribute('title')).toBe('pending store requires reset')
     expect(container.querySelector('[data-testid="keeper-pending-approval-link"]')).toBeNull()
+    expect(container.querySelector('[data-testid="keeper-chat-pendcue"]')).toBeNull()
     expect(container.textContent).not.toContain('결재 대기 0건')
   })
 

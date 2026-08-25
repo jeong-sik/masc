@@ -2,8 +2,8 @@ module Types = Masc_domain
 
 module Generic = Test_mcp_tool_matrix_cases
 module KET = Masc.Keeper_tool_dispatch_runtime
-module KTO = Masc.Keeper_tools_oas_bundle
-module Tool = Agent_sdk.Tool
+module KTO = Masc.Keeper_tools_agent_core_bundle
+module Tool = Agent_core.Tool
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
@@ -29,7 +29,7 @@ and fixture = {
   config : Masc.Workspace.config;
   meta : Masc.Keeper_meta_contract.keeper_meta;
   ctx_snapshot : Keeper_types.working_context;
-  tools : Agent_sdk.Tool.t list;
+  tools : Agent_core.Tool.t list;
 }
 
 let string_starts_with = Generic.string_starts_with
@@ -175,7 +175,7 @@ let make_fixture
       ~system_prompt:"keeper tool matrix"
     |> fun ctx ->
     Masc.Keeper_context_runtime.append ctx
-      (Agent_sdk.Types.user_msg "tool matrix memory needle")
+      (Agent_core.Types.user_msg "tool matrix memory needle")
   in
   let ctx_snapshot = ctx in
   Masc.Keeper_registry.For_testing.clear ();
@@ -207,13 +207,13 @@ let make_fixture
 let find_tool fixture name =
   let by_name tool_name =
     List.find_opt
-      (fun (tool : Agent_sdk.Tool.t) -> String.equal tool.schema.name tool_name)
+      (fun (tool : Agent_core.Tool.t) -> String.equal tool.schema.name tool_name)
       fixture.tools
   in
   match by_name name with
   | Some _ as found -> found
   | None ->
-    (match Masc.Keeper_tool_alias.public_name_for_internal name with
+    (match Masc.Keeper_tool_descriptor_resolution.public_name_for_internal name with
      | Some public -> by_name public
      | None -> None)
 
@@ -304,7 +304,6 @@ let prepare_keeper_name fixture name =
   then
     ensure_keeper_claim fixture;
   if name = "keeper_voice_session_end" then ensure_voice_session fixture;
-  if name = "keeper_ide_annotate" then ignore (ensure_sample_file fixture);
   (* keeper_memory_search: needle "tool matrix memory needle" is already
      in ctx_snapshot from fixture creation (line ~128). No mutation needed. *)
   ignore (name = "keeper_memory_search")
@@ -328,9 +327,12 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   | "analyze_image" ->
       `Assoc [ ("artifact", `String "tool-matrix-missing-query") ]
   | "keeper_ide_annotate" ->
+      (* RFC-0378 §5.3: the anchor is the co-view vocabulary — a codebase
+         slug plus a repo-root-relative path, handed back verbatim. *)
       `Assoc
         [
-          ("file_path", `String (ensure_sample_file fixture));
+          ("codebase", `String "github.com_owner_repo");
+          ("file_path", `String "lib/sample.ml");
           ("line_start", `Int 1);
           ("content", `String "tool matrix ide annotation");
         ]
@@ -433,11 +435,11 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("note", `String "tool matrix person note") ]
   | "keeper_tasks_list" -> `Assoc [ ("include_done", `Bool true) ]
   | "keeper_broadcast" ->
-      `Assoc [ ("message", `String "tool matrix broadcast") ]
+      `Assoc [ ("content", `String "tool matrix broadcast") ]
   | "keeper_task_done" ->
       (* The completion text intentionally contains the "follow-up"
          excuse pattern so the anti-rationalization gate fast-rejects
-         on Gate 2 (excuse pattern) without invoking the cross_verifier
+         on Gate 2 (excuse pattern) without invoking the completion-authority
          LLM runtime. The matrix runs in environments where the
          evaluator runtime is unreachable, and the LLM path's 180s
          timeout would always exceed the 25s per-case budget. The
@@ -599,7 +601,7 @@ let evaluate_expectation ~name expectation = function
            Error
              (Printf.sprintf "%s expected guard %s but succeeded" name
                 (String.concat ", " fragments)))
-  | Error { Agent_sdk.Types.message; _ } ->
+  | Error { Agent_core.Types.message; _ } ->
       if contains_any message fatal_fragments then
         Error
           (Printf.sprintf "%s hit fatal keeper-tool failure: %s" name message)

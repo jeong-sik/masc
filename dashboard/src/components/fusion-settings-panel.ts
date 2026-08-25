@@ -22,6 +22,9 @@ import {
   type FusionSettingsParseIssue,
 } from '../lib/fusion-settings'
 import { readFusionPresetView } from '../lib/fusion-preset-view'
+import { fetchFusionConfig } from '../api/dashboard'
+import type { FusionConfigView } from '../api/dashboard'
+import { FusionPresetCard } from './fusion/fusion-preset-card'
 import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
 import { parseRuntimeTomlEnvironment } from '../lib/runtime-toml-config'
 
@@ -177,6 +180,11 @@ function RuntimePanelEditor({
 
 export function FusionSettingsPanel() {
   const [source, setSource] = useState<string | null>(null)
+  // Typed projection of the *parsed* policy — the value the tool executes
+  // against. Fetched alongside the raw text because the two answer different
+  // questions: the text is what the editor writes into, this is what the
+  // backend made of it (deadlines, budgets, first-pass judges, groups).
+  const [config, setConfig] = useState<FusionConfigView | null>(null)
   const [draft, setDraft] = useState<FusionSettingsDraft | null>(null)
   const [state, setState] = useState<EditorState>('loading')
   const [error, setError] = useState('')
@@ -190,6 +198,15 @@ export function FusionSettingsPanel() {
       try {
         const cfg = await fetchRuntimeTomlConfig()
         if (!active) return
+        // A failed projection must not blank the editor: the raw text still
+        // loads and stays writable, the composition card just does not render.
+        void fetchFusionConfig()
+          .then(loaded => {
+            if (active) setConfig(loaded)
+          })
+          .catch(() => {
+            if (active) setConfig(null)
+          })
         const parsed = readFusionSettingsResult(cfg.source_text)
         if (!parsed.ok) {
           setSource(cfg.source_text)
@@ -301,7 +318,11 @@ export function FusionSettingsPanel() {
       setDraft(draftFromSettings(cfg.source_text, parsed.settings))
       try {
         await refreshRuntimeConfigConsumers()
-        setSavedMessage(cfg.reloaded ? '저장됨 (reload 완료)' : '저장됨')
+        setSavedMessage(
+          cfg.application?.keeper_overlay.requires_restart
+            ? '저장됨 (Keeper 설정은 재시작 대기)'
+            : '저장됨',
+        )
       } catch (err) {
         setError(`저장됨, 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
         setState('error')
@@ -328,8 +349,11 @@ export function FusionSettingsPanel() {
   // Flat preset with panel models → full read-only card. Grouped preset
   // ([[...panels]] array-of-tables) → fail-visible note (a single flat card
   // cannot represent N groups without silently dropping some).
+  // Grouped presets render fine here (the card walks every group), so the
+  // typed card is not gated on the flat-shape check the editor needs.
+  const typedPreset =
+    config?.presets.find(entry => entry.name === draft.defaultPreset) ?? null
   const showPresetEditor = presetView !== null && !presetView.grouped
-  const showPresetView = showPresetEditor && presetView.panel.length > 0
   const showGroupedNote = presetView !== null && presetView.grouped
   const runtimeOptions = runtimeOptionsFromSource(source, draft)
   const judgeLabel = presetView?.judgeGroupCount ? 'Judge-of-judges runtime' : 'Judge runtime'
@@ -391,21 +415,13 @@ export function FusionSettingsPanel() {
             </div>
           `
         : null}
-      ${showPresetView && presetView
+      ${typedPreset
         ? html`
-            <div class="set-sub-h">${presetView.preset} 프리셋</div>
-            <div class="set-fus-preset" data-testid="fusion-preset-view">
-              <div class="set-fus-lane">
-                <div class="set-fus-lane-h">panel · ${presetView.panel.length}</div>
-                ${presetView.panel.map(id => html`<div key=${id} class="set-fus-model mono" data-testid="fusion-preset-panel-model">${id}</div>`)}
-              </div>
-              <div class="set-fus-lane">
-                <div class="set-fus-lane-h" data-testid="fusion-preset-judge-lane-h">judge${presetView.judgeGroupCount > 0 ? ` · 메타 (1차 심판 ${presetView.judgeGroupCount} · judge-of-judges)` : ''}</div>
-                ${presetView.judge
-                  ? html`<div class="set-fus-model judge mono" data-testid="fusion-preset-judge">${presetView.judge}</div>`
-                  : html`<div class="set-fus-model judge mono" data-testid="fusion-preset-judge">미지정</div>`}
-              </div>
-            </div>
+            <div class="set-sub-h">${typedPreset.name} 프리셋</div>
+            <${FusionPresetCard}
+              preset=${typedPreset}
+              stagedGroupSize=${config?.stagedJudgeGroupSize ?? 3}
+            />
           `
         : null}
     </div>

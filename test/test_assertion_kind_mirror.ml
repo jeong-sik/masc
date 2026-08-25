@@ -80,6 +80,83 @@ let test_every_advertised_kind_parses () =
     owner
 ;;
 
+
+(* ── masc_check argument parsing ──────────────────────────────────────
+
+   [handle_check] reads an optional [assertions: [<string>...]] array. The
+   parse used [List.filter_map] over the items, so an element that was not a
+   JSON string was discarded before it reached [check_assertion] and never
+   appeared in the response. [all_passed] was then computed over the
+   survivors, which is the answer to a narrower question than the caller
+   asked.
+
+   [check_assertion] already has the right shape for input it does not
+   understand: an unrecognised *name* comes back with [passed = false] plus
+   [expected_assertions]. These pin the same treatment for an element of the
+   wrong *type*. *)
+
+let temp_dir_seq = ref 0
+
+let temp_dir () =
+  incr temp_dir_seq;
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-assert-%d-%d" (Unix.getpid ()) !temp_dir_seq)
+  in
+  Unix.mkdir dir 0o700;
+  dir
+
+let with_ctx f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> try Unix.rmdir dir with Unix.Unix_error _ -> ())
+    (fun () ->
+      let config = Masc.Workspace.default_config dir in
+      f { Masc.Workspace_types.config; agent_name = "test-agent" })
+
+let state_all_true : Masc.Workspace_assertions.agent_state =
+  { task_claimed = true; current_task_set = true }
+
+let check_with args =
+  with_ctx (fun ctx ->
+    let result =
+      Masc.Workspace_assertions.handle_check
+        ~inspect_state:(fun _ -> state_all_true)
+        ~tool_name:"masc_check" ~start_time:0.0 ctx args
+    in
+    Yojson.Safe.from_string (Tool_result.message result))
+
+let reported_assertions json =
+  match Yojson.Safe.Util.member "assertions" json with
+  | `List items ->
+    List.map
+      (fun item -> Yojson.Safe.Util.(member "assertion" item |> to_string))
+      items
+  | _ -> []
+
+let all_passed json =
+  match Yojson.Safe.Util.member "all_passed" json with
+  | `Bool b -> b
+  | _ -> failwith "all_passed missing"
+
+let test_non_string_element_is_reported () =
+  let json =
+    check_with
+      (`Assoc [ "assertions", `List [ `String "task_claimed"; `Int 42 ] ])
+  in
+  check int "both elements are accounted for" 2
+    (List.length (reported_assertions json));
+  check bool "an element it could not read cannot pass" false (all_passed json)
+
+let test_only_non_string_elements_do_not_become_defaults () =
+  let json = check_with (`Assoc [ "assertions", `List [ `Int 42 ] ]) in
+  check int "the one element the caller sent is the one reported" 1
+    (List.length (reported_assertions json));
+  check bool "not silently answered with the defaults" false (all_passed json)
+
 let () =
   Alcotest.run
     "Assertion kind mirror"
@@ -89,6 +166,12 @@ let () =
             test_published_enum_matches_the_owner
         ; test_case "every advertised kind parses" `Quick
             test_every_advertised_kind_parses
+        ] )
+    ; ( "argument parsing"
+      , [ test_case "a non-string element is reported, not dropped" `Quick
+            test_non_string_element_is_reported
+        ; test_case "unreadable elements do not become the defaults" `Quick
+            test_only_non_string_elements_do_not_become_defaults
         ] )
     ]
 ;;

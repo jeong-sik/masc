@@ -26,21 +26,13 @@ import { isAbortError } from '../lib/async-state'
 const POLL_INTERVAL_MS = 5_000
 const RECENT_LIMIT = 50
 
-// Gates rendered as cards even before they emit, so the operator sees the full
-// known set with zero counts. Backend-emitted gates outside this list are
-// appended from the live attribution data (see gatesToRender) so none is
-// silently dropped. Backend currently emits accountability, exec_policy,
-// keeper_fsm and verification (lib `Attribution.* ~gate:"..."`); the rest are
-// forward-declared and show zero until their source is wired.
-const KNOWN_GATES = [
-  'verification',
-  'exec_policy',
-  'keeper_fsm',
-  'worker_dev_tools',
-  'accountability',
-  'oas_completion',
-  'agent_lifecycle',
-] as const
+// The gates the backend emits. Every Attribution constructor call in masc
+// passes gate:"keeper_fsm" (keeper_state_machine.ml:544/547 and the
+// policy_failed sites), so this is the whole set. A gate outside this list
+// still gets a card from the live data (see gatesToRender), which is what
+// makes listing a gate ahead of its first emission unnecessary: the six
+// entries that used to sit here rendered a zero card forever.
+const KNOWN_GATES = ['keeper_fsm'] as const
 
 // Render order: the known set first (stable, including empty placeholders), then
 // any other gate present in live data, sorted. A backend gate missing from

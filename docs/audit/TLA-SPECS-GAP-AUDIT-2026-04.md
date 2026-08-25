@@ -4,7 +4,6 @@
 > Author: Vincent (jeong-sik) with Agent-LLM-A
 > Created: 2026-04-30
 > Tracks: Q-P0-2 (TLA+ specs gap audit)
-> Companion: `docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04*.md` (Q-P0-3, MERGED)
 
 ---
 
@@ -149,7 +148,7 @@ This mirrors the OAS audit chain's discipline: Phase 2 refined Phase 1's verdict
 
 ## 6. Recommended ratchet (descriptive, not enforced)
 
-Following the pattern from `scripts/oas-boundary-ratchet.sh` (PR #12117 MERGED), a TLA+ Bug Model coverage ratchet would track:
+A TLA+ Bug Model coverage ratchet tracks:
 
 ```bash
 # Strict (descriptive only — would be enforced after baseline review)
@@ -178,7 +177,6 @@ The ratchet wouldn't gate CI immediately — both metrics need a sweep PR (or se
 - `specs/Makefile` — `check-clean`, `check-buggy`, KNOWN_FAILURES list
 - `scripts/cleanup-tlc-artifacts.sh` — artifact sweeper
 - `specs/keeper-state-machine/KeeperOASAdvanced.tla` — canonical unified Bug Model example
-- `docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04*.md` — sister audit chain (Q-P0-3, MERGED 4/4)
 - AGENT-LLM-A.md `TLA+ Bug Model 패턴 (Mutation Testing for Specs)` section
 - Memory: `feedback_self_confession_comments_must_be_measured` (don't trust self-confessing comments — same idea applied to specs: don't trust a buggy.cfg you didn't read)
 

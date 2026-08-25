@@ -204,6 +204,36 @@ let absent_primary_message path =
   Printf.sprintf "primary ledger file does not exist: %s" path
 ;;
 
+(* Probe result for the primary ledger. [Primary_absent] used to be an [if]
+   above the recovery match rather than a constructor, which split one decision
+   over two axes into two separate nested matches. The halves then drifted:
+   recovering from the mirror logged a warning when the primary was absent and
+   said nothing when the primary was corrupt — the more alarming of the two. *)
+type primary_failure =
+  | Primary_absent
+  | Primary_unparseable of string
+
+(* [read_json_result] folds file-read failure and JSON failure into one
+   [Error message], so an existing-but-broken primary surfaces as
+   [Primary_unparseable] rather than being silently swallowed. *)
+let load_primary config : (state, primary_failure) Result.t =
+  let path = schedules_path config in
+  if not (Workspace_utils.path_exists config path)
+  then Error Primary_absent
+  else (
+    match Workspace_utils.read_json_result config path with
+    | Ok json ->
+      (match state_of_yojson json with
+       | Ok state -> Ok state
+       | Error parse_err -> Error (Primary_unparseable parse_err))
+    | Error read_err -> Error (Primary_unparseable read_err))
+;;
+
+let primary_failure_message ~path = function
+  | Primary_absent -> absent_primary_message path
+  | Primary_unparseable detail -> detail
+;;
+
 (* Total load that distinguishes an uninitialised store from a corrupt one and
    from a primary removed out-of-band. [read_json_result] folds file-read failure
    and parse failure into a single [Error message], so an existing-but-broken
@@ -217,40 +247,39 @@ let absent_primary_message path =
 let load config : load_outcome =
   ensure_dirs config;
   let path = schedules_path config in
-  if not (Workspace_utils.path_exists config path) then (
-    match load_recovery config with
-    | Recovery_loaded state ->
-      (* The next [write_state] rewrites the primary from this state. The warning
-         records that the state came from the mirror, so the repair is visible
-         rather than silent. *)
-      Log.Misc.warn
-        "schedule_store: primary ledger %s does not exist; loaded %d schedules \
-         and %d wakes from recovery mirror %s"
-        path
-        (List.length state.schedules)
-        (List.length state.wakes)
-        (recovery_path config);
-      Loaded state
-    | Recovery_absent -> Fresh
-    | Recovery_unparseable recovery_err ->
-      Corrupt
-        { primary_err = absent_primary_message path
-        ; recovery_err = Some recovery_err
-        })
-  else (
-    let primary =
-      match Workspace_utils.read_json_result config path with
-      | Ok json -> state_of_yojson json
-      | Error read_err -> Error read_err
-    in
-    match primary with
-    | Ok state -> Loaded state
-    | Error primary_err ->
-      (match load_recovery config with
-       | Recovery_loaded state -> Loaded state
-       | Recovery_absent -> Corrupt { primary_err; recovery_err = None }
-       | Recovery_unparseable recovery_err ->
-         Corrupt { primary_err; recovery_err = Some recovery_err }))
+  (* The next [write_state] rewrites the primary from this state. The warning
+     records that the state came from the mirror, so the repair is visible
+     rather than silent — for either reason the primary was unusable. *)
+  let recovered_from_mirror ~primary_err state =
+    Log.Misc.warn
+      "schedule_store: %s; loaded %d schedules and %d wakes from recovery \
+       mirror %s"
+      primary_err
+      (List.length state.schedules)
+      (List.length state.wakes)
+      (recovery_path config);
+    Loaded state
+  in
+  match load_primary config with
+  | Ok state -> Loaded state
+  | Error primary ->
+    let primary_err = primary_failure_message ~path primary in
+    (* The outcome depends on both probes, so both are matched together. The
+       recovery axis is enumerated in full; the primary axis is collapsed only
+       where the answer provably does not depend on it, because [primary_err]
+       already carries the difference.
+
+       The one cell where the primary axis does decide is [Recovery_absent]:
+       no primary and no mirror is an uninitialised store ([Fresh]), while a
+       broken primary and no mirror is corruption the operator must see. *)
+    (match primary, load_recovery config with
+     | (Primary_absent | Primary_unparseable _), Recovery_loaded state ->
+       recovered_from_mirror ~primary_err state
+     | Primary_absent, Recovery_absent -> Fresh
+     | Primary_unparseable _, Recovery_absent ->
+       Corrupt { primary_err; recovery_err = None }
+     | (Primary_absent | Primary_unparseable _), Recovery_unparseable recovery_err
+       -> Corrupt { primary_err; recovery_err = Some recovery_err })
 ;;
 
 (* Read-only accessor used by [get_schedule]. [Fresh] yields the empty default,
@@ -394,7 +423,7 @@ let validate_initial_request (request : Schedule_domain.schedule_request) =
   else
     match request.status with
     | Scheduled -> Ok ()
-    | _ ->
+    | Due | Running | Succeeded | Failed | Cancelled | Expired ->
       Error
         (Invalid_initial_status
            "new requests must start scheduled")
@@ -566,7 +595,9 @@ let cancel_matching config ~should_cancel =
              (Printf.sprintf
                 "cannot cancel running schedule %s while retiring its consumer"
                 request.schedule_id))
-      | request :: rest -> cancel (request :: schedules) changed rest
+      (* Already terminal: nothing to cancel, and no error to raise. *)
+      | ({ status = Succeeded | Failed | Cancelled | Expired; _ } as request) :: rest ->
+        cancel (request :: schedules) changed rest
     in
     let* schedules, changed = cancel [] false state.schedules in
     if changed

@@ -9,6 +9,7 @@ type error =
   | Finalization_blocked of Keeper_shutdown_types.t
   | Finalization_draining of Keeper_shutdown_types.t * string
   | Completion_failed of Keeper_shutdown_types.t * string
+  | Admission_release_failed of Keeper_shutdown_types.t * string
 
 val error_to_string : error -> string
 
@@ -35,14 +36,26 @@ val register_completion_handler :
 val run :
   config:Workspace.config ->
   entry:Keeper_registry.registry_entry option ->
+  ?successor_operation_id:Keeper_shutdown_types.Operation_id.t ->
   Keeper_shutdown_types.t ->
   (Keeper_shutdown_types.t, error) result
 
+(** [admission_already_released_by_removal ~config operation error] holds only
+    for a [Remove_meta] operation when [error] says the Keeper owner is absent
+    from the registry and the keeper's metadata is gone from the store. In
+    that state the owner-local fence disappeared with the removed Keeper. The
+    caller remains responsible for releasing the exact process-local intake
+    fence after any pending completion receipt is durably settled. Logs one
+    info line when true. Retain-meta intents and leftover metadata keep the
+    error. *)
+val admission_already_released_by_removal :
+     config:Workspace.config
+  -> Keeper_shutdown_types.t
+  -> Keeper_owner_registry.command_error
+  -> bool
+
 module For_testing : sig
   val paused_meta :
-    Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta
-
-  val dead_tombstone_meta :
     Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta
 
   val remove_pending_confirms_by_target :
@@ -54,13 +67,4 @@ module For_testing : sig
   val reset_remove_pending_confirms_by_target : unit -> unit
   val reset_completion_handler : unit -> unit
 
-  val update_registry_meta_exact :
-    Keeper_shutdown_types.t ->
-    Keeper_registry.registry_entry option ->
-    Keeper_meta_contract.keeper_meta ->
-    (unit, string) result
-  (** The registry projection step of cleanup preparation. Exposed so the
-      lane-disappeared verdict can be pinned: a lane that vanished mid-operation
-      and a lane that was already absent are the same end state, and both must
-      succeed. A lane that was *replaced* must still fail. *)
 end

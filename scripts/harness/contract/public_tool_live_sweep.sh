@@ -84,7 +84,7 @@ CLEANUP_TASK_FINALIZED=0
 cleanup_contract_task() {
   local exit_status=$?
   if [ "$CLEANUP_TASK_FINALIZED" -ne 1 ] && [ -n "${task_id:-}" ]; then
-    call_tool 5999 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"cancel",notes:"public tool sweep cleanup after unsuccessful run"}')" >/dev/null 2>&1 || true
+    call_tool 5999 "masc_transition" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id,action:"cancel",notes:"public tool sweep cleanup after unsuccessful run"}')" >/dev/null 2>&1 || true
   fi
   exit "$exit_status"
 }
@@ -159,7 +159,7 @@ r_goal_list="$(call_tool 5008 "masc_goal_list" '{}')"
 expect_ok "masc_goal_list" "$r_goal_list"
 
 next_step "masc_goal_upsert"
-GOAL_SEED_PAYLOAD="$(call_tool 5009 "masc_goal_upsert" '{"title":"Public Tool Sweep Goal","priority":1}')"
+GOAL_SEED_PAYLOAD="$(call_tool 5009 "masc_goal_upsert" '{"title":"Public Tool Sweep Goal","metric":"sweep steps pass","target_value":"all steps","priority":1}')"
 GOAL_ID="$(printf '%s' "$GOAL_SEED_PAYLOAD" | extract_result | jq -r '.goal_id // empty')"
 if [ -z "$GOAL_ID" ]; then
   mcp_fail_with_context "could not create goal for public tool live sweep" "$GOAL_SEED_PAYLOAD"
@@ -183,7 +183,7 @@ r_goal_transition="$(
   call_tool 5011 "masc_goal_transition" "$(
     jq -cn \
       --arg goal_id "$GOAL_ID" \
-      '{goal_id:$goal_id,action:"pause",note:"public tool sweep pause"}'
+      '{goal_id:$goal_id,action:"drop",note:"public tool sweep drop"}'
   )"
 )"
 expect_ok "masc_goal_transition" "$r_goal_transition"
@@ -197,7 +197,7 @@ r_tasks="$(call_tool 5014 "masc_tasks" '{}')"
 expect_ok "masc_tasks" "$r_tasks"
 
 next_step "masc_transition claim"
-r_claim="$(call_tool 5015 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"claim",notes:"public tool sweep claim"}')")"
+r_claim="$(call_tool 5015 "masc_transition" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id,action:"claim",notes:"public tool sweep claim"}')")"
 expect_ok_or_guard "masc_transition claim" "$r_claim" 'already claimed'
 
 next_step "masc_plan_init"
@@ -221,7 +221,7 @@ r_plan_get="$(call_tool 5020 "masc_plan_get" "$(jq -cn --arg task_id "$task_id" 
 expect_ok "masc_plan_get" "$r_plan_get"
 
 next_step "masc_transition start"
-r_transition="$(call_tool 5021 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"start",notes:"public tool sweep start"}')")"
+r_transition="$(call_tool 5021 "masc_transition" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id,action:"start",notes:"public tool sweep start"}')")"
 expect_ok "masc_transition start" "$r_transition"
 
 next_step "masc_heartbeat"
@@ -229,7 +229,7 @@ r_heartbeat="$(call_tool 5022 "masc_heartbeat" '{}')"
 expect_ok "masc_heartbeat" "$r_heartbeat"
 
 next_step "masc_broadcast"
-r_broadcast="$(call_tool 5023 "masc_broadcast" "$(jq -cn --arg agent_name "$AGENT_NAME" --arg message "public tool sweep broadcast" '{agent_name:$agent_name,message:$message}')")"
+r_broadcast="$(call_tool 5023 "masc_broadcast" "$(jq -cn --arg agent_name "$AGENT_NAME" --arg content "public tool sweep broadcast" '{agent_name:$agent_name,content:$content}')")"
 expect_ok "masc_broadcast" "$r_broadcast"
 
 next_step "masc_messages"
@@ -269,7 +269,7 @@ if [[ -z "$comment_id" ]]; then
 fi
 
 next_step "masc_board_vote"
-r_board_vote="$(call_tool 5029 "masc_board_vote" "$(jq -cn --arg post_id "$post_id" --arg voter "$AGENT_NAME" '{post_id:$post_id,voter:$voter}')")"
+r_board_vote="$(call_tool 5029 "masc_board_vote" "$(jq -cn --arg post_id "$post_id" --arg voter "$AGENT_NAME" '{post_id:$post_id,voter:$voter,direction:"up"}')")"
 expect_ok "masc_board_vote" "$r_board_vote"
 
 next_step "masc_board_comment_vote"
@@ -311,9 +311,6 @@ next_step "masc_board_curation_read after submit"
 r_curation_read_after="$(call_tool 5034 "masc_board_curation_read" '{}')"
 expect_ok "masc_board_curation_read after submit" "$r_curation_read_after"
 
-next_step "masc_persona_list"
-r_persona_list="$(call_tool 5035 "masc_persona_list" '{}')"
-expect_ok "masc_persona_list" "$r_persona_list"
 
 next_step "masc_agent_timeline"
 r_agent_timeline="$(call_tool 5036 "masc_agent_timeline" "$(jq -cn --arg agent_name "$AGENT_NAME" '{agent_name:$agent_name,limit:5}')")"
@@ -324,21 +321,23 @@ done_notes="Public MCP tool live sweep completed all requested tool calls and ve
 done_summary="public tool live sweep verified across the public MCP surface"
 
 next_step "masc_transition submit for verification"
-r_submitted="$(call_tool 5037 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,agent_name:$agent_name,action:"submit_for_verification",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
+r_submitted="$(call_tool 5037 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,action:"submit_for_verification",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
 expect_ok "masc_transition submit for verification" "$r_submitted"
 
-next_step "masc_tasks awaiting-verification producer credit"
-r_awaiting="$(call_tool 5038 "masc_tasks" '{"status":"awaiting_verification"}')"
+next_step "masc_tasks post-submission producer credit"
+r_awaiting="$(call_tool 5038 "masc_tasks" '{}')"
 if response_tool_ok "$r_awaiting" \
   && [[ "$r_awaiting" == *"$task_id"* ]] \
-  && [[ "$r_awaiting" == *"awaiting_verification"* ]] \
+  && { [[ "$r_awaiting" == *"awaiting_verification"* ]] \
+    || [[ "$r_awaiting" == *"in_progress"* ]]; } \
   && [[ "$r_awaiting" == *"$AGENT_NAME"* ]]; then
-  echo "  PASS: masc_tasks awaiting-verification producer credit"
+  echo "  PASS: masc_tasks post-submission producer credit"
 else
   mcp_fail_with_context \
-    "masc_tasks: AwaitingVerification projection did not retain producer credit" \
+    "masc_tasks: post-submission projection did not retain producer credit" \
     "$r_awaiting"
 fi
-CLEANUP_TASK_FINALIZED=1
+# Awaiting verification is nonterminal. EXIT cleanup must release this task even
+# after a successful sweep so later harnesses do not inherit producer ownership.
 
 echo "PASS: public MCP tool live sweep"

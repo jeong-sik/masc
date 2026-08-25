@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0079", "0088"]
-implementation_prs: [15906, 15922, 15926, 15928, 15936, 15949]
 ---
 
 # RFC-0108: Atomic JSONL Append (in-process)
@@ -29,7 +28,7 @@ implementation_prs: [15906, 15922, 15926, 15928, 15936, 15949]
 | 카테고리 | malformed 라인 | 손상 패턴 |
 |---|---|---|
 | `logs/system_log_YYYY-MM-DD.jsonl` | 2 | `}{` concat (두 JSON 이 newline 없이 한 라인에) |
-| `oas-events/YYYY-MM/DD.jsonl` | 38 | `}{` concat + 라인 중간에 다른 record 헤더 삽입 |
+| `agent_core-events/YYYY-MM/DD.jsonl` | 38 | `}{` concat + 라인 중간에 다른 record 헤더 삽입 |
 | `trajectories/<keeper>/trace-*.jsonl` | 89 | utf-8 multibyte 절단 — record 끝의 한글 byte가 다음 라인으로 흘러감 |
 | `keepers/<keeper>/reaction-ledger/YYYY-MM/DD.jsonl` | 114 | utf-8 multibyte 절단 — 같은 패턴, 2026-05-17 하루에 집중 |
 | (총) | **243** (live) + 136 (legacy _backups) | |
@@ -48,7 +47,7 @@ implementation_prs: [15906, 15922, 15926, 15928, 15936, 15949]
 |---|---|---|---|
 | 0 (없음) | `Ring.write_to_sink` (`lib/masc_log/log.ml:286-294`) | `output_string + output_char + flush` 3 syscall, mutex 0 | `}{` concat 직발 |
 | 1 (Stdlib) | `Fs_compat.append_file_unix` (`lib/fs_compat/fs_compat.ml:152-214`) → `trajectories` | `Stdlib.Mutex` + `Append_fd_cache` LRU | utf-8 절단 발생 |
-| 2 (Eio) | `Dated_jsonl.append` (`lib/dated_jsonl/dated_jsonl.ml:256-272`) → `oas-events` / `reaction-ledger` | `Eio.Mutex.use_ro` per base_dir + 내부 `Fs_compat.append_jsonl` | utf-8 절단 발생 |
+| 2 (Eio) | `Dated_jsonl.append` (`lib/dated_jsonl/dated_jsonl.ml:256-272`) → `agent_core-events` / `reaction-ledger` | `Eio.Mutex.use_ro` per base_dir + 내부 `Fs_compat.append_jsonl` | utf-8 절단 발생 |
 
 핵심 인사이트: **Tier-1 도 Tier-2 도 손상이 발생했다**. 이는 다음을 의미한다:
 
@@ -194,7 +193,7 @@ val close : t -> unit
 
 - PR-3 머지 후: `<base-path>/.masc/logs/system_log_*.jsonl`
 - PR-4 머지 후: `<base-path>/.masc/trajectories/`
-- PR-5 머지 후: `<base-path>/.masc/oas-events/` + `<base-path>/.masc/keepers/*/reaction-ledger/`
+- PR-5 머지 후: `<base-path>/.masc/agent_core-events/` + `<base-path>/.masc/keepers/*/reaction-ledger/`
 
 한 번이라도 malformed ≥ 1 재발견 시 즉시 §3.2 보장 모델 회귀.
 

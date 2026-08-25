@@ -26,36 +26,3 @@ let operator_generated_at_iso json =
      | Some value -> value
      | None -> Masc_domain.now_iso ())
 ;;
-
-let dashboard_request_timeout_s = Server_dashboard_http_core_cache.dashboard_request_timeout_s
-let operator_refresh_interval_s = Server_dashboard_http_core_operator.operator_refresh_interval_s
-let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
-
-let operator_cache_json ?cache_key ~scope json =
-  let diagnostic_field key =
-    match projection_diagnostics_field json key with
-    | Some value -> value
-    | None -> `Null
-  in
-  let cache_state =
-    match projection_diagnostics_field json "cache_state" with
-    | Some (`String value) -> value
-    | _ -> "request_swr_or_inline_compute"
-  in
-  `Assoc
-    [ "scope", `String scope
-    ; "cache_state", `String cache_state
-    ; "projection_surface", diagnostic_field "surface"
-    ; "last_success_at", diagnostic_field "last_success_at"
-    ; "last_attempt_at", diagnostic_field "last_attempt_at"
-    ; "last_error_at", diagnostic_field "last_error_at"
-    ; "stale_reason", diagnostic_field "stale_reason"
-    ; "stale_age_ms", diagnostic_field "stale_age_ms"
-    ; "request_cache_key", Json_util.string_opt_to_json cache_key
-    ; "request_cache_ttl_s", `Float standard_cache_ttl_s
-    ; "request_timeout_s", `Float Server_dashboard_http_core_cache.dashboard_request_timeout_s
-    ; ( "background_refresh_interval_s"
-      , `Float Server_dashboard_http_core_operator.operator_refresh_interval_s )
-    ; "policy", `String "cached_surface plus HTTP stale-while-revalidate"
-    ]
-;;

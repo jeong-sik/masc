@@ -18,6 +18,7 @@ let route_candidate_has_fields json =
            ; "sandbox_profile"
            ; "network_mode"
            ; "status"
+           ; "tool_kind"
            ])
       fields
 ;;
@@ -42,7 +43,7 @@ let redacted_command = "[REDACTED]"
 let route_safe_path_string _path = "[REDACTED]"
 
 let route_text_for_evidence output_text =
-  match Tool_output.decode_from_oas output_text with
+  match Tool_output.decode_from_agent_core output_text with
   | Tool_output.Decoded { preview; _ } -> preview
   | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> output_text
 ;;
@@ -127,6 +128,7 @@ let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_tex
               (Json_util.assoc_member_opt "status" output_json))
       |> add_string "network_mode" (Json_util.assoc_string_opt "network_mode" output_json)
       |> add_string "sandbox_profile" (Json_util.assoc_string_opt "sandbox_profile" output_json)
+      |> add_string "tool_kind" (Json_util.assoc_string_opt "tool_kind" output_json)
       |> add_string "via" (Json_util.assoc_string_opt "via" output_json)
       |> add_string "path" (Option.map route_safe_path_string (Json_util.assoc_string_opt "path" input))
       |> add_string "cwd" (Option.map route_safe_path_string (Json_util.assoc_string_opt "cwd" input))

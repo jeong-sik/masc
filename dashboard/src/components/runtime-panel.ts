@@ -1,10 +1,10 @@
 // RuntimePanel — Monitor "Runtime" lane.
-// Renders OasHealthChip / RuntimeMonitor / VerificationSpecsPanel inline,
+// Renders AgentCoreHealthChip / RuntimeMonitor / VerificationSpecsPanel inline,
 // and delegates telemetry views to
 // TelemetryPanel (cost / audit).
 //
 // Progressive-disclosure default view (density reduction, 2026-04):
-//   Signal layer     — RuntimeHealthSnapshot first, OasHealthChip below
+//   Signal layer     — RuntimeHealthSnapshot first, AgentCoreHealthChip below
 //   Diagnostic layer — Runtime lanes via CollapsibleSection (closed)
 //   Raw layer        — Formal specs via CollapsibleSection (closed)
 // NN/g progressive disclosure: respect working-memory limits, defer detail.
@@ -17,7 +17,7 @@
 //
 // Per-view dispatch:
 //   default      — Signal strip + collapsed diagnostic/raw accordions
-//   providers    — OAS health chip + runtime monitor only
+//   providers    — Agent Core health chip + runtime monitor only
 //   config       — raw runtime.toml editor
 //   cost / audit — TelemetryPanel → CostDashboard
 //   verification — formal specs only
@@ -28,10 +28,11 @@ import { computed } from '@preact/signals'
 import { replaceRoute, route } from '../router'
 import { FilterChips } from './common/filter-chips'
 import { CollapsibleSection } from './common/collapsible'
-import { OasHealthChip } from './oas-health-chip'
+import { AgentCoreHealthChip } from './agent-core-health-chip'
 import { RuntimeHealthSnapshot } from './runtime-health-snapshot'
 import { RuntimeMonitor } from './runtime-monitor'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
+import { RuntimeObservablesPanel } from './runtime-observables-panel'
 import { VerificationSpecsPanel } from './verification-specs-panel'
 import { TelemetryPanel, isTelemetryView, TELEMETRY_VIEW_CHIPS } from './telemetry-panel'
 import { RouteLink } from './common/route-link'
@@ -94,7 +95,7 @@ function HiddenDiagnosticsLinks() {
   const links = [
     {
       label: 'Transport diagnostics',
-      detail: 'SSE/gRPC/WebSocket/WebRTC connection freshness.',
+      detail: 'SSE/gRPC/WebSocket connection freshness.',
       section: 'transport-health',
     },
     {
@@ -160,7 +161,7 @@ export function RuntimePanel() {
         ${view === 'providers'
           ? html`
             <${RuntimeHealthSnapshot} />
-            <${OasHealthChip} />
+            <${AgentCoreHealthChip} />
             <${RuntimeMonitor} />
           `
         : view === 'config'
@@ -171,9 +172,12 @@ export function RuntimePanel() {
           ? html`<${VerificationSpecsPanel} />`
         : html`
             <${RuntimeHealthSnapshot} />
-            <${OasHealthChip} />
+            <${AgentCoreHealthChip} />
             <${RuntimeMonitor} />
             <${HiddenDiagnosticsLinks} />
+            <${CollapsibleSection} id="runtime-details-observables" title="프로세스 관측">
+              <${RuntimeObservablesPanel} />
+            <//>
             <${CollapsibleSection} id="runtime-details-verification" title="형식검증">
               <${VerificationSpecsPanel} />
             <//>

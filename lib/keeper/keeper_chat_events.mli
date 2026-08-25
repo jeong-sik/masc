@@ -38,52 +38,85 @@ type stream_protocol_error = {
   raw_bytes : int option;
 }
 
+type reply_details =
+  { reply : string
+  ; turn_outcome : Keeper_turn_outcome.t
+  ; turn_ref : Ids.Turn_ref.t
+  }
+
+type continuation_checkpoint =
+  { message : string
+  ; request_id : string option
+  }
+
 type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }
   | Text_message_start of { message_id : string; role : role }
   | Text_delta of string
   | Text_message_end
-  | External_effect_completed
+  | External_effect_completed of
+      { target : Keeper_surface_post.delivery_target }
       (** A terminal tool already delivered the reply outside this adapter.
           Connector adapters settle the receipt without emitting another
-          text message. *)
+          text message. [target] names where the post actually landed. *)
   | Run_finished of { run_id : string }
   | Event_error of { message : string }
-  | Custom of { name : string; value : Yojson.Safe.t }
-  | Oas_stream_connected
-  | Oas_stream_message_start of
+  | Reply_details of reply_details
+  | Continuation_checkpoint of continuation_checkpoint
+  | Agent_core_stream_connected
+  | Agent_core_stream_message_start of
       { provider_message_id : string
       ; model : string
-      ; usage : Agent_sdk.Types.api_usage option
+      ; usage : Agent_core.Types.api_usage option
       }
-  | Oas_stream_message_delta of
-      { stop_reason : Agent_sdk.Types.stop_reason option
-      ; usage : Agent_sdk.Types.api_usage option
+  | Agent_core_stream_message_delta of
+      { stop_reason : Agent_core.Types.stop_reason option
+      ; usage : Agent_core.Types.delta_usage option
       }
-  | Oas_stream_message_stop
-  | Oas_stream_ping
-  | Oas_content_block_start of
+  | Agent_core_stream_message_stop
+  | Agent_core_stream_ping
+  | Agent_core_content_block_start of
       { index : int
       ; content_type : string
       ; tool_call_id : string option
       ; tool_call_name : string option
       }
-  | Oas_content_block_stop of { index : int }
-  | Oas_thinking_delta of { index : int; delta : string }
-  | Oas_thinking_signature_delta of { index : int; signature_bytes : int }
-  | Oas_media_delta of
+  | Agent_core_content_block_stop of { index : int }
+  | Agent_core_thinking_delta of { index : int; delta : string }
+  | Agent_core_thinking_signature_delta of { index : int; signature_bytes : int }
+  | Agent_core_media_delta of
       { index : int
       ; media_type : string
-      ; source_type : Agent_sdk.Types.media_source_kind
+      ; source_type : Agent_core.Types.media_source_kind
       ; media_ref : string
           (** RFC-0301: reader-facing URL of the persisted media
               ([/api/v1/media/<token>]), replacing the pre-RFC byte count. *)
       }
-  | Oas_stream_protocol_error of stream_protocol_error
+  | Agent_core_stream_protocol_error of stream_protocol_error
   | Tool_call_start of { tool_call_id : string; tool_call_name : string }
   | Tool_call_args of { tool_call_id : string; delta : string }
   | Tool_call_args_snapshot of { tool_call_id : string; snapshot : string }
   | Tool_call_end of { tool_call_id : string }
+      (** Provider argument streaming ended. This is not execution completion. *)
+  | Tool_approval_requested of
+      { tool_call_id : string
+      ; tool_call_name : string
+      ; args : string
+      ; question : string
+      }
+      (** The turn is held at this call until an operator answers or the wait
+          runs out. Carries the call's arguments as sent, because a reader
+          deciding whether to allow it needs to see what it would do -- the
+          name alone does not distinguish reading a file from rewriting it. *)
+  | Tool_approval_settled of
+      { tool_call_id : string
+      ; outcome : string
+      }
+      (** How the wait ended: the operator's answer, or that nobody gave one.
+          Sent so a pane showing the prompt stops showing it, including on the
+          paths where no answer arrived. *)
+  | Tool_result_ready of { tool_call_id : string }
+      (** The exact tool result is durably readable from the tool-call store. *)
   | Link_block of
       { url : string
       ; title : string
@@ -120,7 +153,11 @@ val publish : keeper_chat_event Eio.Stream.t -> keeper_chat_event -> unit
 (** [subscribe stream] blocks until an event is available, then returns it. *)
 val subscribe : keeper_chat_event Eio.Stream.t -> keeper_chat_event
 
-val api_usage_to_json : Agent_sdk.Types.api_usage -> Yojson.Safe.t
+val api_usage_to_json : Agent_core.Types.api_usage -> Yojson.Safe.t
+
+(** JSON for cumulative mid-stream counters: only reported fields appear,
+    so "not reported" stays distinguishable from 0. *)
+val delta_usage_to_json : Agent_core.Types.delta_usage -> Yojson.Safe.t
 val stream_protocol_error_kind_to_string : stream_protocol_error_kind -> string
 val stream_protocol_error_summary : stream_protocol_error -> string
 val stream_protocol_error_to_json : stream_protocol_error -> Yojson.Safe.t

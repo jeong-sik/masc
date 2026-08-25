@@ -1,9 +1,12 @@
-open Keeper_types
 open Keeper_meta_contract
-open Keeper_keepalive
 
 let grpc_client_ref : Masc_grpc_client.t option Atomic.t = Atomic.make None
 let grpc_env_ref : Eio_unix.Stdenv.base option Atomic.t = Atomic.make None
+
+(* Transport control remains responsive even when autonomous turns use a
+   slower cadence. Control directives received on this stream must not wait
+   for the five-minute Keeper work interval. *)
+let grpc_control_heartbeat_interval_sec = 30.0
 
 let set_grpc_client ?(env : Eio_unix.Stdenv.base option) c =
   Atomic.set grpc_client_ref (Some c);
@@ -67,7 +70,11 @@ let run_grpc_heartbeat_stream
       then (
         let no_wakeup = Atomic.make false in
         ignore
-          (Keeper_keepalive_signal.interruptible_sleep ~clock ~stop ~wakeup:no_wakeup interval_sec
+          (Keeper_keepalive_signal.interruptible_sleep
+             ~clock
+             ~stop
+             ~wakeup:no_wakeup
+             (fun () -> interval_sec)
            : Keeper_keepalive_signal.sleep_outcome);
         tick ()))
   in
@@ -202,7 +209,6 @@ let start_keeper_grpc_heartbeat
   match Masc_grpc_transport.from_env (), Atomic.get grpc_client_ref with
   | Masc_grpc_transport.Grpc, Some client ->
     Log.Keeper.info "keeper %s: starting gRPC heartbeat fiber" m.name;
-    let interval = float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ()) in
     let session_id =
       Printf.sprintf
         "keeper-%s-%Ld"
@@ -216,7 +222,7 @@ let start_keeper_grpc_heartbeat
       ~config:ctx.config
       ~agent_name:m.agent_name
       ~session_id
-      ~interval_sec:interval
+      ~interval_sec:grpc_control_heartbeat_interval_sec
       ~clock:ctx.clock
   | Masc_grpc_transport.Grpc, None ->
     Otel_metric_store.inc_counter

@@ -17,14 +17,13 @@ type phase_gate_outcome =
   | Phase_gate_skipped of Keeper_meta_contract.keeper_meta
     (** Cooperative early-exit in a non-executable registry phase. The caller
         must retain this skip as a typed outcome; it is not completed work. *)
-  | Phase_gate_terminal_error of Agent_sdk.Error.sdk_error
+  | Phase_gate_terminal_error of Agent_core.Error.t
     (** Hard early-exit: registry phase missing. [run_keeper_cycle]
         returns [Error err]. *)
 
 val decide_and_record
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
-  -> generation:int
   -> keeper_turn_id:int
   -> append_phase_gate_decision:
        (Keeper_unified_turn_phase_plan.turn_plan

@@ -8,42 +8,40 @@
 type accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
 (** Exact operator authority for terminally cancelling one accepted event.
-    [source_incarnation] and [owner_nonce] fence the observed paused owner;
+    [source_incarnation] fences the observed paused owner;
     [operator_operation_id] makes replay/conflict explicit. *)
 
 type accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
-  ; target_generation : int
   ; target_trace_id : Keeper_id.Trace_id.t
   }
 (** Exact causal authority for terminally transferring one accepted event.
-    [target_generation] and [target_trace_id] prevent delayed outbox replay
+    [target_trace_id] prevents delayed outbox replay
     from projecting into a purged or same-name replacement Keeper. *)
 
 type source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
+  | Turn_completed
   | Turn_attempt_terminal of { detail : string }
-(** Closed terminal source evidence. The first three families are intrinsically
-    represented by their durable event payload. [Turn_attempt_terminal] records
-    that one admitted turn ended without durable compaction progress; the exact
+(** Closed terminal source evidence. Fusion and HITL completion are intrinsically
+    represented by their durable event payload. [Turn_completed] records a
+    successful admitted turn; [Turn_attempt_terminal] records that one admitted
+    turn ended without durable compaction progress. In both cases the exact
     source remains in the transition receipt instead of being discarded by a
     raw ACK. [detail] is diagnostic only and carries no transition authority. *)
 
 type accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -131,6 +129,17 @@ val peek_when :
 val select_when :
   ready:(Keeper_event_queue.stimulus -> bool) -> t -> pending_selection option
 
+val connector_attention_conversation_batch :
+  primary:pending_selection -> t -> pending_selection list
+(** [connector_attention_conversation_batch ~primary state] returns every
+    OTHER pending entry in [state] whose payload is [Connector_attention]
+    and whose channel is the same conversation
+    ({!Keeper_continuation_channel.same_conversation}) as [primary]'s
+    channel, in their existing FIFO order (RFC-0377). [[]] when [primary]
+    is not itself a [Connector_attention] selection, or no other pending
+    entry shares its conversation. A pure read like {!select_when}: it does
+    not remove anything from [state]. *)
+
 val validate_pending_selection :
   selection:pending_selection ->
   t ->
@@ -154,8 +163,16 @@ val reprioritize_pending :
 (** Change only the exact selected source priority. A real change receives the
     next source incarnation; unrelated pending entries retain theirs. *)
 
+val defer_pending :
+  selection:pending_selection ->
+  t ->
+  (t * int64, string) result
+(** Move one exact selected source to the back of its current urgency lane and
+    assign a new source incarnation. This is the durable fairness primitive for
+    transient failures: no source is lost, but it cannot monopolize the head of
+    the active queue while independent work is waiting. *)
+
 val cancel_pending_accepted :
-  current_owner_nonce:int ->
   applied_at:float ->
   cancellation:accepted_cancellation ->
   t ->
@@ -165,7 +182,6 @@ val cancel_pending_accepted :
     through a source-bearing WAL outbox entry by persistence. *)
 
 val transfer_pending_accepted :
-  current_owner_nonce:int ->
   applied_at:float ->
   transfer:accepted_transfer ->
   t ->
@@ -175,7 +191,6 @@ val transfer_pending_accepted :
     the replay authority until the target projection completes. *)
 
 val ack_pending_source_terminal :
-  current_owner_nonce:int ->
   applied_at:float ->
   source_terminal:accepted_source_terminal ->
   t ->
@@ -186,7 +201,6 @@ val ack_pending_source_terminal :
     authority. *)
 
 val terminalize_pending_turn_attempt :
-  current_owner_nonce:int ->
   applied_at:float ->
   selection:pending_selection ->
   detail:string ->
@@ -197,6 +211,16 @@ val terminalize_pending_turn_attempt :
     Repeating the same request after WAL projection returns its original
     receipt, while a later selection of the same source is a new attempt;
     diagnostic [detail] never participates in admission or idempotency. *)
+
+val terminalize_pending_turn_completed :
+  applied_at:float ->
+  selection:pending_selection ->
+  t ->
+  (t * transition_result, string) result
+(** Commit typed completion evidence for one admitted turn. Completion and
+    failure share one deterministic per-attempt operation identity, so a stale
+    contradictory settlement fails closed instead of replacing the first
+    durable outcome. *)
 
 val accepted_pending_cancellation_replay :
   accepted_cancellation ->
@@ -250,4 +274,4 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v15"] is the only accepted schema. *)
+(** ["keeper.event_queue.state.v16"] is the only accepted schema. *)

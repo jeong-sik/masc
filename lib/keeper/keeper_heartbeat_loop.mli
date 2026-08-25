@@ -8,12 +8,6 @@ val effective_keepalive_meta :
   disk_meta_opt:keeper_meta option ->
   keeper_meta
 
-val repair_identity_drift_for_keepalive :
-  ?lifecycle_token:Keeper_lifecycle_reservation.token ->
-  ctx:'a context ->
-  keeper_meta ->
-  keeper_meta option
-
 val keeper_agent_status : keeper_meta -> Masc_domain.agent_status
 
 val repair_identity_drift_for_keepalive :
@@ -26,7 +20,6 @@ val sync_keeper_presence :
   ctx:'a context ->
   meta_current:keeper_meta ->
   consecutive_failures:int ref ->
-  last_successful_heartbeat_ts:float ref ->
   keeper_meta
 
 val collect_keepalive_board_events :
@@ -36,14 +29,6 @@ val collect_keepalive_board_events :
   Keeper_world_observation.pending_board_event list * keeper_meta
 
 val in_turn_liveness_pulse_interval_sec : unit -> float
-
-val with_in_turn_liveness_pulse_for_test :
-  sw:Eio.Switch.t ->
-  clock:'a Eio.Time.clock ->
-  interval_sec:float ->
-  tick:(unit -> unit) ->
-  (unit -> 'b) ->
-  'b
 
 val emit_in_turn_liveness_pulse :
   ctx:'a context -> meta:keeper_meta -> unit
@@ -59,6 +44,7 @@ type heartbeat_event_intake = {
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
   pending_selection : Keeper_event_queue_state.pending_selection option;
+  consumed_selections : Keeper_event_queue_state.pending_selection list;
   event_queue_intake_error :
     Keeper_heartbeat_stimulus_intake.event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
@@ -111,17 +97,22 @@ val record_provider_timeout_observation :
 type keepalive_cycle_status =
   | Turn_cycle_completed
   | Turn_cycle_crashed
-  | Turn_cycle_busy of Keeper_turn_admission.autonomous_block
+  | Turn_cycle_busy of Keeper_owner.autonomous_block
 
-type keepalive_cycle_accounting =
-  { record_turn_status : bool
-  ; refresh_work_heartbeat : bool
-  }
+type work_heartbeat_action =
+  | Refresh_work_heartbeat
+  | Preserve_work_heartbeat
 
-val keepalive_cycle_accounting :
-  keepalive_cycle_status -> keepalive_cycle_accounting
-(** Closed accounting policy used by the heartbeat loop. Busy cycles record
-    neither turn completion nor work-heartbeat success. *)
+type keepalive_cycle_action =
+  | Defer_autonomous_work of Keeper_owner.autonomous_block
+  | Record_turn_status of work_heartbeat_action
+
+val decide_keepalive_cycle_action :
+  keepalive_cycle_status -> keepalive_cycle_action
+(** Total accounting decision used by the heartbeat effect shell. Completed
+    cycles record and refresh, crashed cycles record while preserving the
+    existing work-health lease, and busy cycles retain their typed admission
+    block without recording a turn. *)
 
 (** Outcome of one keepalive cycle evaluation.
 
@@ -135,6 +126,10 @@ val keepalive_cycle_accounting :
 type keepalive_turn_outcome = {
   meta : keeper_meta;
   cycle_status : keepalive_cycle_status;
+  stimuli_acked : bool;
+      (** The cycle admitted at least one event-queue stimulus and acked
+          every entry of that batch on completion. The loop reads it to
+          skip the cadence sleep while more entries are pending. *)
 }
 
 (** Record a swallowed keepalive-cycle exception as a turn failure:
@@ -144,25 +139,64 @@ type keepalive_turn_outcome = {
 val record_crashed_cycle_failure :
   base_path:string -> keeper_name:string -> exn -> unit
 
-val compaction_outcomes_of_cycle_outcome :
-  Keeper_heartbeat_loop_cycle.cycle_outcome ->
-  [ `Manual_committed of int | `Failed ] list
 (** Pure mapping from one possibly nested cycle to every compaction
     commit/failure observation it contains. Only committed outcomes mutate
     durable compaction state. *)
 
-val failed_selection_terminal_detail :
-  Keeper_unified_turn.turn_failure -> string option
-(** Pure source-disposal decision for a failed turn that consumed a pending
-    Event Queue selection. [Some detail] only for a typed context-overflow
-    terminal route with no pending [deferred_runtime_lane]: with automatic
-    overflow-compaction recovery removed (#26546), retry has no evidence of a
-    smaller request, so the loop terminalizes the selection. [None]
-    preserves the selection — a deferred lane freezes a successor runtime for
-    this exact selection, other terminal classes may resolve without
-    compaction, retryable routes stay pending, and transcript corruption is
-    consumed by its own pause path. *)
+type failed_source_disposition =
+  | Preserve_for_deferred_runtime
+  | Defer_to_queue_tail
+  | Quarantine_source of { detail : string }
 
+val failed_source_disposition :
+  Keeper_unified_turn.turn_failure -> failed_source_disposition
+(** Pure liveness policy for one failed source turn. Only transcript integrity
+    corruption pauses the Keeper. A frozen successor runtime retains the exact
+    source, transient failures move it behind independent work, and deterministic
+    failures quarantine that source with its durable receipt. *)
+
+type connector_attention_outcome =
+  | Attention_resolved
+  | Attention_ignored
+
+type batch_disposition =
+  | Batch_ack_completed of
+      { connector_attention_outcome : connector_attention_outcome }
+  | Batch_quarantine of { detail : string }
+  | Batch_defer of { reason : string }
+  | Batch_no_action
+
+val batch_disposition_of_cycle_outcome :
+  Keeper_heartbeat_loop_cycle.cycle_outcome option -> batch_disposition
+(** RFC-0377: the single queue action ([Batch_ack_completed] /
+    [Batch_quarantine] / [Batch_defer] / [Batch_no_action]) a turn's
+    [cycle_outcome] implies for every stimulus admitted into that turn — the
+    primary selection plus any Connector_attention batch companions. The
+    caller applies the returned action uniformly to every admitted
+    selection ([List.for_all]/[List.iter] over
+    [heartbeat_event_intake.consumed_selections]); this function decides
+    only *what* to do, never *to which* selection, so a batch of any size
+    shares one disposition by construction. Pure: composes the route ->
+    [connector_attention_outcome] mapping with {!failed_source_disposition},
+    both already pure. *)
+
+type connector_attention_settlement =
+  | Settle_resolved
+  | Settle_ignored
+  | Settle_quarantined of { detail : string }
+  | Settle_pending_in_queue
+
+val connector_attention_settlement_of_disposition :
+  batch_disposition -> connector_attention_settlement
+(** The terminal external-attention event a disposition owes the rows behind its
+    Connector_attention stimuli. The queue entry and the attention row are two
+    separate writes, and the wake is edge-triggered
+    (RFC-connector-ambient-attention-wake): once a disposition terminalizes the
+    entry, only a *new* ambient message in that conversation ever arms another
+    stimulus. So every disposition that terminalizes must name a terminal event
+    here — [Settle_pending_in_queue] is correct only while the entry stays
+    queued for a later turn to settle. Pure, and split from the append so the
+    mapping is checkable without running a turn. *)
 
 (** Pure: post-turn status event derived from the registry
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];
@@ -182,7 +216,7 @@ val run_keepalive_unified_turn :
   stop:bool Atomic.t ->
   proactive_warmup_elapsed:bool ->
   reactive_wake:bool ->
-  shared_context:Agent_sdk.Context.t ->
+  shared_context:Agent_core.Context.t ->
   deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
   on_deferred_runtime_consumed:(unit -> unit) ->
   record_deferred_runtime_lane:
@@ -194,7 +228,6 @@ val refresh_work_as_heartbeat :
   meta_after_proactive:keeper_meta ->
   proactive_warmup_elapsed:bool ->
   work_as_hb:(unit -> bool) ->
-  last_successful_heartbeat_ts:float ref ->
   consecutive_failures:int ref ->
   unit
 
@@ -227,11 +260,15 @@ val record_keepalive_stage_timing :
     Runs synchronously in the calling fiber until [stop] becomes true. *)
 val run_heartbeat_loop :
   proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool Atomic.t ->
-  wakeup:bool Atomic.t -> unit
+  wakeup:bool Atomic.t -> cadence_sleeping:bool Atomic.t -> unit
 
 module For_testing : sig
+  (** Deferred runtime lane hints have nothing to do with continuation
+      delivery; they only shared this module with it. The implementation and
+      its live caller both remain, so the export stays too. *)
   val consume_deferred_runtime_lane_hint :
     Keeper_turn_driver.deferred_runtime_lane option ref ->
     Keeper_turn_driver.deferred_runtime_lane ->
     bool
 end
+

@@ -1,4 +1,4 @@
-(** Tests for RFC-0233 PR-2: the in-flight [tool_use_id ↔ execution_id]
+(** Tests for RFC-0233 PR-2: the in-flight [invocation ↔ execution_id]
     join table ([Keeper_execution_join]) and the event bridge stamping
     that consumes it ([Keeper_event_bridge.native_event_to_json]). *)
 
@@ -23,67 +23,106 @@ let int_of_field = function
   | Some (`Int value) -> Some value
   | _ -> None
 
+let invocation
+      ?(turn = 0)
+      ?(planned_index = 0)
+      ?(batch_index = 0)
+      ?(batch_size = 1)
+      ?(execution_mode = Agent_core.Tool_contract.Serial)
+      tool_use_id
+  =
+  Agent_core.Tool_contract.Invocation.create
+    ~tool_use_id
+    ~turn
+    ~completion:Agent_core.Tool_contract.Continue_after_success
+    ~schedule:
+      { planned_index
+      ; batch_index
+      ; batch_size
+      ; execution_mode
+      }
+
 (* ── Join table semantics ─────────────────────────────── *)
 
 let test_record_take_roundtrip () =
   Join.For_testing.clear ();
-  Join.record ~tool_use_id:"tu-1" ~execution_id:"exec-1-0001";
+  let invocation = invocation "tu-1" in
+  Join.record ~invocation ~execution_id:"exec-1-0001";
   check (option string) "take returns the pair" (Some "exec-1-0001")
-    (Join.take ~tool_use_id:"tu-1");
+    (Join.take ~invocation);
   check (option string) "take removes the entry" None
-    (Join.take ~tool_use_id:"tu-1");
+    (Join.take ~invocation);
   check int "table empty after take" 0 (Join.For_testing.size ())
 
-let test_empty_tool_use_id_ignored () =
+let test_blank_tool_use_id_joins_by_invocation () =
   Join.For_testing.clear ();
-  Join.record ~tool_use_id:"" ~execution_id:"exec-1-0002";
-  check int "empty id records nothing" 0 (Join.For_testing.size ());
-  check (option string) "empty id lookup is None" None (Join.take ~tool_use_id:"")
+  let invocation = invocation "" in
+  Join.record ~invocation ~execution_id:"exec-1-0002";
+  check (option string)
+    "blank provider id still joins"
+    (Some "exec-1-0002")
+    (Join.take ~invocation)
 
 let test_missing_entry_is_none () =
   Join.For_testing.clear ();
+  let invocation = invocation "tu-unknown" in
   check (option string) "unknown id is None" None
-    (Join.take ~tool_use_id:"tu-unknown")
+    (Join.take ~invocation)
 
-let test_rerecord_overwrites () =
+let test_distinct_occurrences_with_repeated_id_do_not_overwrite () =
   Join.For_testing.clear ();
-  Join.record ~tool_use_id:"tu-2" ~execution_id:"exec-1-000a";
-  Join.record ~tool_use_id:"tu-2" ~execution_id:"exec-1-000b";
-  check (option string) "last record wins" (Some "exec-1-000b")
-    (Join.take ~tool_use_id:"tu-2")
+  let first = invocation ~turn:1 ~planned_index:0 "tu-2" in
+  let second = invocation ~turn:1 ~planned_index:1 "tu-2" in
+  Join.record ~invocation:first ~execution_id:"exec-1-000a";
+  Join.record ~invocation:second ~execution_id:"exec-1-000b";
+  check (option string)
+    "second occurrence"
+    (Some "exec-1-000b")
+    (Join.take ~invocation:second);
+  check (option string)
+    "first occurrence remains"
+    (Some "exec-1-000a")
+    (Join.take ~invocation:first)
+
+let test_abandoned_join_is_released_with_invocation () =
+  Join.For_testing.clear ();
+  let record_abandoned () =
+    let abandoned = invocation ~turn:4 ~planned_index:2 "cancelled" in
+    Join.record ~invocation:abandoned ~execution_id:"exec-abandoned"
+  in
+  record_abandoned ();
+  Gc.full_major ();
+  Gc.full_major ();
+  check int "cancelled publication leaves no join entry" 0 (Join.For_testing.size ())
 
 (* ── Bridge stamping ──────────────────────────────────── *)
 
-let mk_event ?caused_by payload : Agent_sdk.Event_bus.event =
-  { meta =
-      { correlation_id = "corr-1"
-      ; run_id = "run-1"
-      ; ts = 1781200000.0
-      ; caused_by
-      }
+let mk_event ?(event_id = "event-1") ?caused_by payload : Agent_core.Event_bus.event =
+  let meta =
+    Agent_core.Event_bus.mk_envelope
+      ~event_id
+      ~correlation_id:"corr-1"
+      ~run_id:"run-1"
+      ?caused_by
+      ()
+  in
+  { meta = { meta with event_time = 1781200000.0; observed_at = 1781200000.5 }
   ; payload
   }
-
-let invocation ?(turn = 0) ?(planned_index = 0) tool_use_id =
-  Agent_sdk.Tool_contract.Invocation.create
-    ~tool_use_id
-    ~turn
-    ~completion:Agent_sdk.Tool_contract.Continue_after_success
-    ~schedule:
-      { planned_index
-      ; batch_index = 0
-      ; batch_size = 1
-      ; execution_mode = Agent_sdk.Tool_contract.Serial
-      }
 
 let test_tool_called_carries_tool_use_id () =
   Join.For_testing.clear ();
   let json =
     Bridge.native_event_to_json
       (mk_event
-         (Agent_sdk.Event_bus.ToolCalled
-            { invocation = invocation "tu-3"
-            ; agent_name = "oas-r1"
+         (Agent_core.Event_bus.ToolCalled
+            { invocation =
+                invocation
+                  ~batch_index:2
+                  ~batch_size:3
+                  ~execution_mode:Agent_core.Tool_contract.Concurrent
+                  "tu-3"
+            ; agent_name = "agent_core-r1"
             ; tool_name = "Read"
             ; input = `Null
             }))
@@ -95,19 +134,26 @@ let test_tool_called_carries_tool_use_id () =
     (int_of_field (payload_member "turn" json));
   check (option int) "payload planned_index" (Some 0)
     (int_of_field (payload_member "planned_index" json));
+  check (option int) "payload batch_index" (Some 2)
+    (int_of_field (payload_member "batch_index" json));
+  check (option int) "payload batch_size" (Some 3)
+    (int_of_field (payload_member "batch_size" json));
+  check (option string) "payload execution_mode" (Some "concurrent")
+    (string_of_field (payload_member "execution_mode" json));
   check bool "tool_called has no execution_id (mint happens after publish)"
     true
     (payload_member "execution_id" json = None)
 
 let test_tool_completed_stamps_execution_id () =
   Join.For_testing.clear ();
-  (* The hook records the pair before OAS publishes ToolCompleted. *)
-  Join.record ~tool_use_id:"tu-4" ~execution_id:"exec-2-0001";
+  (* The hook records the pair before AGENT_CORE publishes ToolCompleted. *)
+  let invocation = invocation ~turn:1 ~planned_index:3 "tu-4" in
+  Join.record ~invocation ~execution_id:"exec-2-0001";
   let json =
     Bridge.native_event_to_json
       (mk_event ~caused_by:"run-called-1"
-         (Agent_sdk.Event_bus.ToolCompleted
-            { invocation = invocation ~turn:1 ~planned_index:3 "tu-4"
+         (Agent_core.Event_bus.ToolCompleted
+            { invocation
             ; agent_name = "keeper-x-agent"
             ; tool_name = "Read"
             ; output = Ok { content = "ok"; _meta = None }
@@ -133,9 +179,9 @@ let test_tool_completed_without_entry_omits_execution_id () =
   let json =
     Bridge.native_event_to_json
       (mk_event
-         (Agent_sdk.Event_bus.ToolCompleted
+         (Agent_core.Event_bus.ToolCompleted
             { invocation = invocation ~turn:2 "tu-5"
-            ; agent_name = "oas-worker"
+            ; agent_name = "agent_core-worker"
             ; tool_name = "Execute"
             ; output = Ok { content = "ok"; _meta = None }
             }))
@@ -150,11 +196,11 @@ let test_tool_approval_completed_preserves_exact_occurrence () =
   let json =
     Bridge.native_event_to_json
       (mk_event
-         (Agent_sdk.Event_bus.ToolApprovalCompleted
+         (Agent_core.Event_bus.ToolApprovalCompleted
             { invocation = invocation ~turn:4 ~planned_index:2 "tu-approved"
             ; agent_name = "keeper-approval"
             ; tool_name = "Execute"
-            ; approval = Agent_sdk.Hooks.Approved
+            ; approval = Agent_core.Hooks.Approved
             }))
     |> Option.get
   in
@@ -188,9 +234,9 @@ let test_empty_tool_use_id_omitted_from_payload () =
   let json =
     Bridge.native_event_to_json
       (mk_event
-         (Agent_sdk.Event_bus.ToolCalled
+         (Agent_core.Event_bus.ToolCalled
             { invocation = invocation ""
-            ; agent_name = "oas-r1"
+            ; agent_name = "agent_core-r1"
             ; tool_name = "Read"
             ; input = `Null
             }))
@@ -198,6 +244,76 @@ let test_empty_tool_use_id_omitted_from_payload () =
   in
   check bool "empty provider id is omitted" true
     (payload_member "tool_use_id" json = None)
+
+let test_non_terminal_agent_outcomes_keep_distinct_wire_types () =
+  let yielded =
+    Bridge.native_event_to_json
+      (mk_event
+         (Agent_core.Event_bus.AgentYielded
+            { agent_name = "keeper-yield"
+            ; task_id = "run-yield"
+            ; turn = 4
+            ; elapsed = 2.5
+            }))
+    |> Option.get
+  in
+  check
+    (option string)
+    "yield wire kind"
+    (Some "agent_yielded")
+    (string_of_field (member "event_type" yielded));
+  check (option int) "yield turn" (Some 4) (int_of_field (payload_member "turn" yielded));
+  let request : Agent_core.Error.input_required =
+    { request_id = "request-1"
+    ; participant_name = Some "operator"
+    ; question = "Continue?"
+    ; schema = Some (`Assoc [ "type", `String "boolean" ])
+    ; timeout_s = Some 30.0
+    ; created_at = 1781200000.0
+    }
+  in
+  let input_required =
+    Bridge.native_event_to_json
+      (mk_event
+         (Agent_core.Event_bus.AgentInputRequired
+            { agent_name = "keeper-input"
+            ; task_id = "run-input"
+            ; request
+            ; elapsed = 3.5
+            }))
+    |> Option.get
+  in
+  check
+    (option string)
+    "input-required wire kind"
+    (Some "agent_input_required")
+    (string_of_field (member "event_type" input_required));
+  check
+    (option string)
+    "input request id"
+    (Some "request-1")
+    (string_of_field (payload_member "request_id" input_required));
+  check
+    (option string)
+    "input question"
+    (Some "Continue?")
+    (string_of_field (payload_member "question" input_required));
+  check
+    (option string)
+    "input participant"
+    (Some "operator")
+    (string_of_field (payload_member "participant_name" input_required));
+  check
+    bool
+    "input schema"
+    true
+    (payload_member "schema" input_required
+     = Some (`Assoc [ "type", `String "boolean" ]));
+  check
+    bool
+    "input timeout"
+    true
+    (payload_member "timeout_s" input_required = Some (`Float 30.0))
 
 let terminal_projection_string_field ~label key = function
   | `Assoc fields ->
@@ -266,10 +382,10 @@ let test_terminal_agent_failure_projection_redacts_detail () =
     ~secret:effect_secret
     ~expected_variant:"terminal_tool_effect_failed"
     ~expected_tool_use_id:"tool-terminal-safe"
-    (Agent_sdk.Error.Agent
-       (Agent_sdk.Error.TerminalToolEffectFailed
+    (Agent_core.Error.Agent
+       (Agent_core.Error.TerminalToolEffectFailed
           { tool_use_id = "tool-terminal-safe"
-          ; effect_disposition = Agent_sdk.Error.proven_post_terminal_effect
+          ; effect_disposition = Agent_core.Error.proven_post_terminal_effect
           ; detail = effect_secret
           }));
   let durability_secret = "terminal-durability-secret-2cc19a31" in
@@ -278,23 +394,23 @@ let test_terminal_agent_failure_projection_redacts_detail () =
     ~secret:durability_secret
     ~expected_variant:"terminal_tool_durability_failed"
     ~expected_tool_use_id:"tool-durable-safe"
-    (Agent_sdk.Error.Agent
-       (Agent_sdk.Error.TerminalToolDurabilityFailed
+    (Agent_core.Error.Agent
+       (Agent_core.Error.TerminalToolDurabilityFailed
           { invocation =
               invocation ~turn:9 ~planned_index:4 "tool-durable-safe"
-          ; effect_disposition = Agent_sdk.Error.unknown_terminal_effect
+          ; effect_disposition = Agent_core.Error.unknown_terminal_effect
           ; detail = durability_secret
           }))
 ;;
 
-let test_agent_failed_matches_typed_sse_event () =
-  let agent_name = "oas-r1" in
+let test_agent_failed_keeps_canonical_envelope_and_typed_error () =
+  let agent_name = "agent_core-r1" in
   let task_id = "task-failed-1" in
   let elapsed_s = 4.25 in
   let caused_by = "run-agent-started-1" in
   let error =
-    Agent_sdk.Error.Agent
-      (Agent_sdk.Error.HookExecutionFailed
+    Agent_core.Error.Agent
+      (Agent_core.Error.HookExecutionFailed
          { hook_name = "post_tool_use"
          ; stage = "execute"
          ; tool_name = Some "Execute"
@@ -310,30 +426,52 @@ let test_agent_failed_matches_typed_sse_event () =
   let actual =
     Bridge.native_event_to_json
       (mk_event
+         ~event_id:"event-agent-failed-1"
          ~caused_by
-         (Agent_sdk.Event_bus.AgentFailed
+         (Agent_core.Event_bus.AgentFailed
             { agent_name; task_id; error; elapsed = elapsed_s }))
     |> Option.get
-    |> Yojson.Safe.to_string
   in
-  let expected =
-    Sse_event.agent_failed
-      ~caused_by
-      ~ts_unix:1781200000.0
-      ~correlation_id:"corr-1"
-      ~run_id:"run-1"
-      ~agent_name
-      ~task_id
-      ~elapsed_s
-      ~error:projection.error
-      ~error_domain:projection.error_domain
-      ~error_code:projection.error_code
-      ~error_retryable:projection.error_retryable
-      ~error_detail:projection.error_detail
-      ()
-    |> Yojson.Safe.to_string
+  check (option string) "producer event identity" (Some "event-agent-failed-1")
+    (string_of_field (member "event_id" actual));
+  check (option string) "causation survives" (Some caused_by)
+    (string_of_field (member "caused_by" actual));
+  check (option string) "serialized error domain" (Some projection.error_domain)
+    (string_of_field (payload_member "error_domain" actual));
+  check bool "serialized typed detail" true
+    (payload_member "error_detail" actual = Some projection.error_detail)
+
+let test_publish_to_bridge_preserves_one_producer_identity () =
+  Eio_main.run @@ fun _env ->
+  let bus = Agent_core.Event_bus.create () in
+  let config =
+    Agent_core.Event_bus.subscription_config
+      ~capacity:2
+      ~overflow:Agent_core.Event_bus.Drop_oldest
+    |> Result.get_ok
   in
-  check string "agent_failed bridge matches typed constructor" expected actual
+  let subscription = Agent_core.Event_bus.subscribe ~config bus in
+  let event =
+    Agent_core.Event_bus.mk_event
+      ~event_id:"event-publish-bridge-1"
+      ~correlation_id:"corr-publish-bridge"
+      ~run_id:"run-publish-bridge"
+      (Agent_core.Event_bus.TurnStarted { agent_name = "keeper-a"; turn = 3 })
+  in
+  Agent_core.Event_bus.publish bus event;
+  let delivered =
+    match Agent_core.Event_bus.drain subscription with
+    | [ delivered ] -> delivered
+    | events -> failf "expected one delivered event, got %d" (List.length events)
+  in
+  let first = Bridge.native_event_to_json delivered |> Option.get in
+  let retry = Bridge.native_event_to_json delivered |> Option.get in
+  check (option string) "published identity reaches adapter"
+    (Some "event-publish-bridge-1")
+    (string_of_field (member "event_id" first));
+  check string "re-serialization keeps exact occurrence identity"
+    (Yojson.Safe.to_string first)
+    (Yojson.Safe.to_string retry)
 
 let test_authorization_errors_have_typed_projection () =
   let check_projection label expected_domain error =
@@ -348,23 +486,23 @@ let test_authorization_errors_have_typed_projection () =
   check_projection
     "API authorization"
     "api"
-    (Agent_sdk.Error.Api
-       (Agent_sdk.Retry.AuthorizationError { message = "permission refused" }));
+    (Agent_core.Error.Api
+       (Agent_core.Retry.AuthorizationError { message = "permission refused" }));
   check_projection
     "provider authorization"
     "provider"
-    (Agent_sdk.Error.Provider
+    (Agent_core.Error.Provider
        (Llm_provider.Error.AuthorizationError
           { provider = "provider"; detail = "permission refused" }))
 
 let test_request_body_too_large_projection_preserves_bounds () =
   let projection =
     Error_json.agent_failed_error_projection
-      (Agent_sdk.Error.Api
-         (Agent_sdk.Retry.InvalidRequest
+      (Agent_core.Error.Api
+         (Agent_core.Retry.InvalidRequest
             { message = "request body too large"
             ; reason =
-                Agent_sdk.Retry.Request_body_too_large
+                Agent_core.Retry.Request_body_too_large
                   { actual_bytes = 1_671_330; limit_bytes = 1_048_576 }
             }))
   in
@@ -392,11 +530,11 @@ let test_request_body_too_large_projection_preserves_bounds () =
 let test_provider_request_body_refusal_projection_preserves_status () =
   let projection =
     Error_json.agent_failed_error_projection
-      (Agent_sdk.Error.Api
-         (Agent_sdk.Retry.InvalidRequest
+      (Agent_core.Error.Api
+         (Agent_core.Retry.InvalidRequest
             { message = "payload too large"
             ; reason =
-                Agent_sdk.Retry.Request_body_refused_by_provider { status = 413 }
+                Agent_core.Retry.Request_body_refused_by_provider { status = 413 }
             }))
   in
   check
@@ -435,12 +573,12 @@ let test_input_capacity_projection_preserves_evidence () =
   in
   let projection =
     Error_json.agent_failed_error_projection
-      (Agent_sdk.Error.Api
-         (Agent_sdk.Retry.InputCapacity
+      (Agent_core.Error.Api
+         (Agent_core.Retry.InputCapacity
             { message = "typed capacity"
             ; constraint_
             ; reason =
-                Agent_sdk.Retry.Serving_constraint_rejected
+                Agent_core.Retry.Serving_constraint_rejected
                   (Llm_provider.Serving_constraint.Input_rejected
                      { input_tokens = 524299
                      ; accepted_through = 524298
@@ -471,13 +609,63 @@ let test_input_capacity_projection_preserves_evidence () =
     (Some "input_rejected")
     (string_of_field (member "kind" reason_json))
 
+(* [Retry.Timeout] carries a typed phase that separates an admission or queue
+   wait from a streaming stall. The arm bound only [message], so every timeout
+   reached the wire indistinguishable from every other one. *)
+let test_timeout_projection_preserves_phase () =
+  let projection =
+    Error_json.agent_failed_error_projection
+      (Agent_core.Error.Api
+         (Agent_core.Retry.Timeout
+            { message = "per-provider timeout after 90.0s"
+            ; phase = Some Llm_provider.Http_client.Admission
+            }))
+  in
+  check
+    (option string)
+    "typed variant"
+    (Some "timeout")
+    (string_of_field (member "variant" projection.error_detail));
+  check
+    (option string)
+    "typed phase"
+    (Some
+       (Llm_provider.Http_client.timeout_phase_to_label
+          Llm_provider.Http_client.Admission))
+    (string_of_field (member "timeout_phase" projection.error_detail))
+
+(* An absent phase stays absent on the wire. Naming one would report a phase
+   the provider never attributed. *)
+let test_timeout_projection_without_phase_reports_null () =
+  let projection =
+    Error_json.agent_failed_error_projection
+      (Agent_core.Error.Api
+         (Agent_core.Retry.Timeout { message = "unattributed timeout"; phase = None }))
+  in
+  check
+    (option string)
+    "typed variant"
+    (Some "timeout")
+    (string_of_field (member "variant" projection.error_detail));
+  check
+    bool
+    "phase is null, not a guess"
+    true
+    (match member "timeout_phase" projection.error_detail with
+     | Some `Null -> true
+     | Some _ | None -> false)
+
 let () =
   run "keeper_execution_join"
     [ ( "join_table"
       , [ test_case "record/take roundtrip" `Quick test_record_take_roundtrip
-        ; test_case "empty tool_use_id ignored" `Quick test_empty_tool_use_id_ignored
+        ; test_case "blank tool_use_id joins by invocation" `Quick
+            test_blank_tool_use_id_joins_by_invocation
         ; test_case "missing entry is None" `Quick test_missing_entry_is_none
-        ; test_case "re-record overwrites" `Quick test_rerecord_overwrites
+        ; test_case "repeated ids keep distinct occurrences" `Quick
+            test_distinct_occurrences_with_repeated_id_do_not_overwrite
+        ; test_case "cancelled invocation releases abandoned join" `Quick
+            test_abandoned_join_is_released_with_invocation
         ] )
     ; ( "bridge_stamping"
       , [ test_case "tool_called carries tool_use_id" `Quick
@@ -490,8 +678,12 @@ let () =
             test_tool_approval_completed_preserves_exact_occurrence
         ; test_case "empty tool_use_id omitted" `Quick
             test_empty_tool_use_id_omitted_from_payload
-        ; test_case "agent_failed matches typed constructor" `Quick
-            test_agent_failed_matches_typed_sse_event
+        ; test_case "non-terminal outcomes keep distinct wire types" `Quick
+            test_non_terminal_agent_outcomes_keep_distinct_wire_types
+        ; test_case "agent_failed keeps canonical envelope" `Quick
+            test_agent_failed_keeps_canonical_envelope_and_typed_error
+        ; test_case "publish to bridge preserves producer identity" `Quick
+            test_publish_to_bridge_preserves_one_producer_identity
         ; test_case "terminal agent failures redact raw detail" `Quick
             test_terminal_agent_failure_projection_redacts_detail
         ; test_case "authorization errors have typed projection" `Quick
@@ -502,5 +694,9 @@ let () =
             test_provider_request_body_refusal_projection_preserves_status
         ; test_case "input capacity preserves typed evidence" `Quick
             test_input_capacity_projection_preserves_evidence
+        ; test_case "timeout preserves typed phase" `Quick
+            test_timeout_projection_preserves_phase
+        ; test_case "unattributed timeout reports null phase" `Quick
+            test_timeout_projection_without_phase_reports_null
         ] )
     ]

@@ -16,7 +16,7 @@ trace, generation, and turn identity:
 2. the input event is durably queued or delivered to that Keeper lane;
 3. a turn receipt records the terminal outcome;
 4. the runtime manifest records the expected checkpoint load/save boundary;
-5. a restart restores the saved OAS checkpoint and completes a new turn;
+5. a restart restores the saved agent core checkpoint and completes a new turn;
 6. a second Keeper lane continues while the tested lane is busy or fails.
 
 Task, goal, board, HITL, connector, scheduler, and Fusion mutations require

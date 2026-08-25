@@ -8,6 +8,20 @@
 
 module T = Masc_grpc_types
 module Keeper_directive = Masc.Keeper_directive
+module Keeper_registry = Masc.Keeper_registry
+
+let keeper_meta ~name ~agent_name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String name
+        ; "agent_name", `String agent_name
+        ; "trace_id", `String ("trace-" ^ name)
+        ])
+  with
+  | Ok meta -> meta
+  | Error error -> Alcotest.failf "invalid keeper meta fixture: %s" error
+;;
 
 let task_id value =
   match Keeper_id.Task_id.of_string value with
@@ -41,6 +55,18 @@ let with_temp_dir prefix f =
 ;;
 
 (* ====== Type serialization/deserialization round-trip tests ====== *)
+
+(* The wire is a oneof now (#29396 A6), so these assertions read the arm
+   rather than a string the codec used to build. The label is this suite's
+   own: it exists to keep the expectations readable, not to reintroduce a
+   string form the product parses. *)
+let directive_label directive =
+  match T.HeartbeatAck.directive_to_wire directive with
+  | `Pause _ -> "pause"
+  | `Wakeup _ -> "wakeup"
+  | `Claim_task_id id -> "claim:" ^ id
+  | `not_set -> "<not set>"
+;;
 
 let test_subscribe_filter_request_roundtrip () =
   let req =
@@ -118,7 +144,17 @@ let test_broadcast_request_roundtrip () =
 ;;
 
 let test_broadcast_response_roundtrip () =
-  let resp = T.BroadcastResponse.{ success = true; seq = 42L } in
+  let resp =
+    T.BroadcastResponse.
+      { success = true
+      ; seq = 42L
+      ; request_id = Some "wmsg-0123456789abcdef0123456789abcdef"
+      ; delivery_status = Delivery_accepted
+      ; delivery_reason = None
+      ; workspace_persistence_status = Workspace_persisted
+      ; retry_disposition = Retry_do_not_resend
+      }
+  in
   let bytes = T.BroadcastResponse.to_bytes resp in
   let decoded = T.BroadcastResponse.of_bytes bytes in
   Alcotest.(check bool) "success" true decoded.success;
@@ -162,7 +198,7 @@ let test_heartbeat_ack_roundtrip () =
   Alcotest.(check (list string))
     "directives"
     [ "wakeup"; "claim:task-42" ]
-    (List.map T.HeartbeatAck.directive_to_wire decoded.directives)
+    (List.map directive_label decoded.directives)
 ;;
 
 let test_subscribe_request_roundtrip () =
@@ -319,13 +355,15 @@ let test_grpc_stream_max_buffer_env_override () =
 ;;
 
 let test_grpc_default_on_enablement () =
-  (* With no MASC_GRPC_ENABLED env var, gRPC stays enabled. *)
+  (* With no MASC_GRPC_ENABLED env var, gRPC stays off: nothing has ever
+     subscribed to it, so it does not open a port to prove that again. Both
+     explicit settings still decide. *)
   let was_set = Sys.getenv_opt "MASC_GRPC_ENABLED" in
   (match was_set with
    | Some _ -> Unix.putenv "MASC_GRPC_ENABLED" ""
    | None -> ());
   let result = Masc_grpc_server.is_enabled () in
-  Alcotest.(check bool) "enabled by default" true result;
+  Alcotest.(check bool) "off by default" false result;
   (* Verify explicit enable still works. *)
   Unix.putenv "MASC_GRPC_ENABLED" "1";
   let enabled = Masc_grpc_server.is_enabled () in
@@ -351,8 +389,6 @@ let test_grpc_server_registers_health_service () =
              ~port:Masc_grpc_server.default_port
              ~workspace_config
              ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
-             ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-               Error "test stub")
          in
          let services = Grpc_eio.Server.list_services server in
          Alcotest.(check bool)
@@ -373,31 +409,6 @@ let test_grpc_server_registers_health_service () =
          (List.mem "grpc.health.v1.Health" services))
 ;;
 
-let test_lsp_jsonrpc_request_parse_missing_method () =
-  match
-    Masc_grpc_server.For_testing.parse_lsp_jsonrpc_request
-      {|{"jsonrpc":"2.0","params":null}|}
-  with
-  | Ok _ -> Alcotest.fail "missing method should be rejected"
-  | Error msg ->
-    Alcotest.(check string)
-      "explicit missing method error"
-      "JSON-RPC request missing method field"
-      msg
-;;
-
-let test_lsp_jsonrpc_request_parse_method_not_string () =
-  match
-    Masc_grpc_server.For_testing.parse_lsp_jsonrpc_request
-      {|{"jsonrpc":"2.0","method":17,"params":null}|}
-  with
-  | Ok _ -> Alcotest.fail "non-string method should be rejected"
-  | Error msg ->
-    Alcotest.(check string)
-      "explicit method type error"
-      "JSON-RPC request method field must be a string"
-      msg
-;;
 
 let test_get_status_projects_backlog_tasks () =
   Eio_main.run
@@ -406,29 +417,47 @@ let test_get_status_projects_backlog_tasks () =
   with_temp_dir "masc-grpc-status" (fun dir ->
     let workspace_config = Workspace_utils.default_config dir in
     ignore (Masc.Workspace.init workspace_config ~agent_name:(Some "alpha"));
+    (* Registration turns the requested "alpha" into a generated nickname
+       ("alpha-witty-gecko"), and claiming a task moves the agent off "active".
+       Re-stating either literal here would pin the naming scheme and the
+       status vocabulary instead of the projection, so both come from the
+       workspace itself. *)
+    let sole_agent () =
+      match Masc.Workspace.get_agents_raw workspace_config with
+      | [ (agent : Masc_domain.agent) ] -> agent
+      | agents ->
+        Alcotest.failf "expected exactly 1 registered agent, got %d" (List.length agents)
+    in
+    let agent_name = (sole_agent ()).name in
     ignore
       (Masc.Workspace.add_task
          workspace_config
          ~title:"Fix stale projection"
          ~priority:1
          ~description:"Use backlog SSOT for gRPC status");
-    ignore (Masc.Workspace.claim_next_r workspace_config ~agent_name:"alpha" ());
+    ignore (Masc.Workspace.claim_next_r workspace_config ~agent_name ());
     let service =
       Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
-        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "GetStatus" with
     | Some { handler = `Unary handler; _ } ->
       let resp = T.StatusResponse.of_bytes (handler "") in
+      Alcotest.(check int) "agents count" 1 (List.length resp.agents);
+      let agent = List.hd resp.agents in
+      let stored = sole_agent () in
+      Alcotest.(check string) "agent name" stored.name agent.T.name;
+      Alcotest.(check string)
+        "agent status"
+        (Masc_domain.agent_status_to_string stored.status)
+        agent.T.status;
       Alcotest.(check int) "tasks count" 1 (List.length resp.tasks);
       let task = List.hd resp.tasks in
       Alcotest.(check string) "task id" "task-001" task.T.id;
       Alcotest.(check string) "task title" "Fix stale projection" task.T.title;
       Alcotest.(check string) "task status" "claimed" task.T.status;
-      Alcotest.(check string) "task assignee" "alpha" task.T.assigned_to;
+      Alcotest.(check string) "task assignee" stored.name task.T.assigned_to;
       Alcotest.(check int) "task priority" 1 task.T.priority
     | _ -> Alcotest.fail "GetStatus unary handler missing")
 ;;
@@ -494,34 +523,6 @@ let test_tool_call_request_invalid_bytes_result () =
       (String_util.contains_substring msg"ToolCallRequest")
 ;;
 
-let test_lsp_request_invalid_bytes_result () =
-  match T.LspRequest.of_bytes_result malformed_protobuf with
-  | Ok _ -> Alcotest.fail "expected decode failure"
-  | Error msg ->
-    Alcotest.(check bool)
-      "error keeps 'protobuf decode error:' prefix"
-      true
-      (String.starts_with ~prefix:"protobuf decode error:" msg);
-    Alcotest.(check bool)
-      "error names the failing protobuf type (LspRequest)"
-      true
-      (String_util.contains_substring msg"LspRequest")
-;;
-
-let test_lsp_response_invalid_bytes_result () =
-  match T.LspResponse.of_bytes_result malformed_protobuf with
-  | Ok _ -> Alcotest.fail "expected decode failure"
-  | Error msg ->
-    Alcotest.(check bool)
-      "error keeps 'protobuf decode error:' prefix"
-      true
-      (String.starts_with ~prefix:"protobuf decode error:" msg);
-    Alcotest.(check bool)
-      "error names the failing protobuf type (LspResponse)"
-      true
-      (String_util.contains_substring msg"LspResponse")
-;;
-
 let test_tool_call_handler_invalid_bytes_raise_grpc_status () =
   Eio_main.run
   @@ fun env ->
@@ -532,8 +533,6 @@ let test_tool_call_handler_invalid_bytes_raise_grpc_status () =
       Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
-        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "ToolCall" with
     | Some { handler = `Unary handler; _ } ->
@@ -556,8 +555,6 @@ let test_subscribe_handler_invalid_bytes_raise_grpc_status () =
       Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
-        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "Subscribe" with
     | Some { handler = `ServerStreaming handler; _ } ->
@@ -573,6 +570,48 @@ let test_subscribe_handler_invalid_bytes_raise_grpc_status () =
     | _ -> Alcotest.fail "Subscribe server-streaming handler missing")
 ;;
 
+(* #30399. [since_seq] says "resume from this sequence number" and this
+   endpoint serves no backlog, so a resume it cannot honour is refused rather
+   than answered with live events numbered as if the gap were not there. *)
+let subscribe_bytes ~since_seq =
+  Masc_grpc_types.SubscribeRequest_serde.to_bytes
+    T.SubscribeRequest.
+      { agent_name = "resume-probe"; session_id = "s1"; event_types = []; since_seq }
+;;
+
+let test_subscribe_refuses_a_resume_it_cannot_serve () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_temp_dir "masc-grpc-subscribe-resume" (fun dir ->
+    let workspace_config = Workspace_utils.default_config dir in
+    let service =
+      Masc_grpc_service.create_service
+        ~workspace_config
+        ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+    in
+    match Grpc_eio.Service.get_method service "Subscribe" with
+    | Some { handler = `ServerStreaming handler; _ } ->
+      (match handler (subscribe_bytes ~since_seq:100L) with
+       | _ -> Alcotest.fail "a non-zero since_seq must not open a stream"
+       | exception exn ->
+         let text = Printexc.to_string exn in
+         Alcotest.(check bool)
+           "refused as UNIMPLEMENTED rather than served silently"
+           true
+           (String.starts_with ~prefix:"Grpc_error(UNIMPLEMENTED:" text);
+         Alcotest.(check bool)
+           "the refusal names the value it could not honour"
+           true
+           (String_util.contains_substring text "100"));
+      (* Zero is "from now", which this endpoint does serve. *)
+      (match handler (subscribe_bytes ~since_seq:0L) with
+       | _stream -> ()
+       | exception exn ->
+         Alcotest.failf "since_seq=0 must still stream: %s" (Printexc.to_string exn))
+    | _ -> Alcotest.fail "Subscribe server-streaming handler missing")
+;;
+
 let test_heartbeat_handler_invalid_bytes_warns_and_continues () =
   Eio_main.run
   @@ fun env ->
@@ -583,8 +622,6 @@ let test_heartbeat_handler_invalid_bytes_warns_and_continues () =
       Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
-        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "Heartbeat" with
     | Some { handler = `Bidi handler; _ } ->
@@ -630,6 +667,166 @@ let test_heartbeat_handler_invalid_bytes_warns_and_continues () =
     | _ -> Alcotest.fail "Heartbeat bidi handler missing")
 ;;
 
+let test_heartbeat_projects_workspace_view () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_temp_dir "masc-grpc-heartbeat-workspace-view" (fun dir ->
+    let workspace_config = Workspace_utils.default_config dir in
+    ignore (Masc.Workspace.init workspace_config ~agent_name:(Some "alpha"));
+    ignore
+      (Masc.Workspace.add_task
+         workspace_config
+         ~title:"Keep claimed work pending"
+         ~priority:1
+         ~description:"Project the Workspace task snapshot");
+    ignore (Masc.Workspace.claim_next_r workspace_config ~agent_name:"alpha" ());
+    let service =
+      Masc_grpc_service.create_service
+        ~workspace_config
+        ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+    in
+    match Grpc_eio.Service.get_method service "Heartbeat" with
+    | Some { handler = `Bidi handler; _ } ->
+      Eio.Switch.run
+      @@ fun sw ->
+      let request_stream = Grpc_eio.Stream.create 16 in
+      let response_stream = handler ~sw request_stream in
+      Grpc_eio.Stream.add
+        request_stream
+        (T.HeartbeatPing.to_bytes
+           { agent_name = "alpha"
+           ; session_id = "sess-workspace-view"
+           ; timestamp_ms = 1700000000000L
+           ; current_task_id = ""
+           });
+      let ack =
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 1.0 (fun () ->
+          Grpc_eio.Stream.take response_stream)
+        |> T.HeartbeatAck.of_bytes
+      in
+      Alcotest.(check (list string))
+        "claimed task emits no assignment directive"
+        []
+        (List.map directive_label ack.directives);
+      Alcotest.(check int) "active agents" 1 ack.active_agent_count;
+      Alcotest.(check int) "pending tasks" 1 ack.pending_task_count;
+      Grpc_eio.Stream.close request_stream
+    | _ -> Alcotest.fail "Heartbeat bidi handler missing")
+;;
+
+let test_heartbeat_projects_keeper_pause_not_workspace_pause () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Keeper_registry.For_testing.clear ();
+  with_temp_dir "masc-grpc-heartbeat-keeper-pause" (fun dir ->
+    Fun.protect
+      ~finally:Keeper_registry.For_testing.clear
+      (fun () ->
+    let workspace_config = Workspace_utils.default_config dir in
+    let agent_name = "keeper-alpha-agent" in
+    let keeper_name = "alpha" in
+    ignore (Masc.Workspace.init workspace_config ~agent_name:(Some agent_name));
+    let meta = keeper_meta ~name:keeper_name ~agent_name in
+    ignore
+      (Keeper_registry.For_testing.register
+         ~base_path:workspace_config.base_path
+         keeper_name
+         meta);
+    Masc.Workspace.pause workspace_config ~by:"operator" ~reason:"maintenance";
+    let service =
+      Masc_grpc_service.create_service
+        ~workspace_config
+        ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+    in
+    match Grpc_eio.Service.get_method service "Heartbeat" with
+    | Some { handler = `Bidi handler; _ } ->
+      Eio.Switch.run
+      @@ fun sw ->
+      let request_stream = Grpc_eio.Stream.create 16 in
+      let response_stream = handler ~sw request_stream in
+      let send_heartbeat session_id =
+        Grpc_eio.Stream.add
+          request_stream
+          (T.HeartbeatPing.to_bytes
+             { agent_name
+             ; session_id
+             ; timestamp_ms = 1700000000000L
+             ; current_task_id = ""
+             });
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 1.0 (fun () ->
+          Grpc_eio.Stream.take response_stream)
+        |> T.HeartbeatAck.of_bytes
+      in
+      let workspace_paused_ack = send_heartbeat "sess-workspace-pause" in
+      Alcotest.(check (list string))
+        "workspace pause does not become a durable keeper pause"
+        []
+        (List.map directive_label workspace_paused_ack.directives);
+      ignore (Masc.Workspace.resume workspace_config ~by:"operator");
+      ignore
+        (Keeper_registry.For_testing.register
+           ~base_path:workspace_config.base_path
+           keeper_name
+           { meta with paused = true });
+      let keeper_paused_ack = send_heartbeat "sess-keeper-pause" in
+      Alcotest.(check (list string))
+        "durable keeper pause reaches its control stream"
+        [ "pause" ]
+        (List.map directive_label keeper_paused_ack.directives);
+      Grpc_eio.Stream.close request_stream
+    | _ -> Alcotest.fail "Heartbeat bidi handler missing"))
+;;
+
+let test_heartbeat_does_not_materialize_uninitialized_workspace () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Keeper_registry.For_testing.clear ();
+  with_temp_dir "masc-grpc-heartbeat-uninitialized" (fun dir ->
+    Fun.protect
+      ~finally:Keeper_registry.For_testing.clear
+      (fun () ->
+    let workspace_config = Workspace_utils.default_config dir in
+    let state_path = Workspace_utils.state_path workspace_config in
+    Alcotest.(check bool) "state absent before heartbeat" false (Sys.file_exists state_path);
+    let service =
+      Masc_grpc_service.create_service
+        ~workspace_config
+        ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+    in
+    match Grpc_eio.Service.get_method service "Heartbeat" with
+    | Some { handler = `Bidi handler; _ } ->
+      Eio.Switch.run
+      @@ fun sw ->
+      let request_stream = Grpc_eio.Stream.create 16 in
+      let response_stream = handler ~sw request_stream in
+      Grpc_eio.Stream.add
+        request_stream
+        (T.HeartbeatPing.to_bytes
+           { agent_name = "uninitialized-grpc-agent"
+           ; session_id = "sess-uninitialized"
+           ; timestamp_ms = 1700000000000L
+           ; current_task_id = ""
+           });
+      let ack =
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 1.0 (fun () ->
+          Grpc_eio.Stream.take response_stream)
+        |> T.HeartbeatAck.of_bytes
+      in
+      Alcotest.(check (list string))
+        "uninitialized heartbeat has no directives"
+        []
+        (List.map directive_label ack.directives);
+      Alcotest.(check bool)
+        "heartbeat leaves state absent"
+        false
+        (Sys.file_exists state_path);
+      Grpc_eio.Stream.close request_stream
+    | _ -> Alcotest.fail "Heartbeat bidi handler missing"))
+;;
+
 (* ====== Test suite ====== *)
 
 let () =
@@ -667,14 +864,6 @@ let () =
             "ToolCallRequest invalid bytes result"
             `Quick
             test_tool_call_request_invalid_bytes_result
-        ; Alcotest.test_case
-            "LspRequest invalid bytes result"
-            `Quick
-            test_lsp_request_invalid_bytes_result
-        ; Alcotest.test_case
-            "LspResponse invalid bytes result"
-            `Quick
-            test_lsp_response_invalid_bytes_result
         ] )
     ; ( "service"
       , [ Alcotest.test_case "service_name" `Quick test_service_name
@@ -691,9 +880,25 @@ let () =
             `Quick
             test_subscribe_handler_invalid_bytes_raise_grpc_status
         ; Alcotest.test_case
+            "subscribe refuses a resume it cannot serve"
+            `Quick
+            test_subscribe_refuses_a_resume_it_cannot_serve
+        ; Alcotest.test_case
             "heartbeat invalid bytes warn and continue"
             `Quick
             test_heartbeat_handler_invalid_bytes_warns_and_continues
+        ; Alcotest.test_case
+            "heartbeat projects workspace view"
+            `Quick
+            test_heartbeat_projects_workspace_view
+        ; Alcotest.test_case
+            "heartbeat projects keeper pause only"
+            `Quick
+            test_heartbeat_projects_keeper_pause_not_workspace_pause
+        ; Alcotest.test_case
+            "heartbeat leaves uninitialized workspace absent"
+            `Quick
+            test_heartbeat_does_not_materialize_uninitialized_workspace
         ] )
     ; ( "server_config"
       , [ Alcotest.test_case "default_port" `Quick test_grpc_default_port
@@ -713,14 +918,6 @@ let () =
             "registers_health_service"
             `Quick
             test_grpc_server_registers_health_service
-        ; Alcotest.test_case
-            "lsp_jsonrpc_missing_method"
-            `Quick
-            test_lsp_jsonrpc_request_parse_missing_method
-        ; Alcotest.test_case
-            "lsp_jsonrpc_method_not_string"
-            `Quick
-            test_lsp_jsonrpc_request_parse_method_not_string
         ] )
     ]
 ;;

@@ -1,0 +1,4 @@
+(test
+ (name test_keeper_chat_operation_store)
+ (modules test_keeper_chat_operation_store)
+ (libraries alcotest masc.keeper_chat_operations sqlite3 yojson))

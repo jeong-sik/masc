@@ -4,4 +4,6 @@
  (name pool_metrics)
  (public_name masc.pool_metrics)
  (wrapped false)
+ (flags
+  (:standard -w +4 -w +33))
  (libraries masc.http_client))

@@ -63,7 +63,7 @@ val total_pids : unit -> int
     [grace_ms] is bounded internally to a sane range (10ms..60s). *)
 val drain : keeper_id:string -> grace_ms:int -> drain_result
 
-(** Register the default Tombstone_reaped subscriber against
+(** Register the default Supervisor_cleaned subscriber against
     [Keeper_lifecycle_hooks]. Idempotent — calling more than once
     only registers one cleanup hook. Called once during supervisor
     bootstrap. *)

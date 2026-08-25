@@ -52,15 +52,7 @@ let mtime_of path =
   try Some (Unix.stat path).Unix.st_mtime with
   | Unix.Unix_error _ -> None
 
-(* Same "%04d-%02d-%02dT%02d:%02d:%02dZ" idiom as
-   Types_core.iso8601_of_unix_seconds / Log.timestamp_iso — duplicated here
-   rather than depended on to keep this module's dependency footprint
-   unchanged. *)
-let iso8601_of_unix_seconds ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+let iso8601_of_unix_seconds = Time_codec.rfc3339_of_unix
 
 type bundle_freshness =
   | Fresh
@@ -107,6 +99,48 @@ let log_bundle_freshness_warning () =
        && pnpm run build"
       (iso8601_of_unix_seconds stamp_mtime)
       (iso8601_of_unix_seconds binary_mtime)
+
+let rebuild_next_action = "cd dashboard && pnpm run build"
+
+(** Health projection of the dashboard surface. The boot-time WARN from
+    {!log_bundle_freshness_warning} scrolls away with the log ring; this JSON
+    keeps the same verdict visible on every [/health] probe, so an operator
+    (or an audit) can see a dark dashboard surface without replaying startup
+    logs. [status] is ["ok"], ["stale"], or ["missing"]; a present build-stamp
+    with no [index.html] still reports ["missing"] because the index is what
+    actually serves. *)
+let surface_status_json () =
+  let index = index_path () in
+  let index_present = Sys.file_exists index in
+  let freshness_status, freshness_fields =
+    match bundle_freshness () with
+    | Missing_stamp -> ("missing", [])
+    | Stale { stamp_mtime; binary_mtime } ->
+      ( "stale"
+      , [ ("build_stamp_at", `String (iso8601_of_unix_seconds stamp_mtime))
+        ; ("binary_built_at", `String (iso8601_of_unix_seconds binary_mtime))
+        ] )
+    | Fresh ->
+      let stamp_field =
+        match mtime_of (build_stamp_path ()) with
+        | Some stamp_mtime ->
+          [ ("build_stamp_at", `String (iso8601_of_unix_seconds stamp_mtime)) ]
+        | None -> []
+      in
+      ("ok", stamp_field)
+  in
+  (* A missing index.html trumps freshness: the index is what actually
+     serves, so a stale-or-fresh stamp without it is still a dark surface. *)
+  let status = if index_present then freshness_status else "missing" in
+  let next_action = if status = "ok" then "none" else rebuild_next_action in
+  `Assoc
+    ([ ("schema", `String "masc.dashboard_surface.v1")
+     ; ("status", `String status)
+     ; ("index_present", `Bool index_present)
+     ; ("assets_root", `String (assets_root ()))
+     ; ("next_action", `String next_action)
+     ]
+     @ freshness_fields)
 
 let html () =
   try

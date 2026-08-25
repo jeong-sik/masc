@@ -27,7 +27,7 @@ let blocker_reason_of_turn_driver_reason
   | Keeper_turn_driver.Other_detail detail -> Other_detail detail
 ;;
 
-let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class option =
+let blocker_class_of_core_error (err : Agent_core.Error.t) : blocker_class option =
   match Keeper_error_classify.recoverable_runtime_failure_reason err with
   | Some Keeper_error_classify.Capacity_backpressure -> Some Capacity_backpressure
   | _ ->
@@ -37,39 +37,54 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
     Some (Runtime_exhausted (blocker_reason_of_turn_driver_reason reason))
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> None
   | Some (Keeper_turn_driver.Accept_rejected _) -> None
-  (* RFC-0159 Phase A: typed [Internal_*] variants carry an opaque exception
-     repr.  They are not yet mapped to a dedicated [blocker_class]; returning
-     [None] keeps Phase A scope to typed substrate only.  A follow-up RFC may
-  introduce a typed blocker_class for unhandled internal failures. *)
-  | Some (Keeper_turn_driver.Internal_unhandled_exception _) -> None
-  | Some (Keeper_turn_driver.Internal_bridge_exception _) -> None
-  | Some (Keeper_turn_driver.Internal_contract_rejected _) -> None
-  | Some (Keeper_turn_driver.Incomplete_tool_transcript _) -> None
-  | Some (Keeper_turn_driver.Terminal_effect_failed _) -> None
-  | Some (Keeper_turn_driver.Receipt_persistence_failed _) -> None
-  | Some (Keeper_turn_driver.Gate_replay_repair_required _) -> None
+  (* RFC-0159 follow-up (task-194): typed [Internal_*] variants now map to
+     dedicated [blocker_class] values so dashboards/operators can distinguish
+     unhandled internal failures instead of collapsing them to [None]. *)
+  | Some (Keeper_turn_driver.Internal_unhandled_exception _) ->
+    Some Internal_unhandled_exception
+  | Some (Keeper_turn_driver.Internal_bridge_exception _) ->
+    Some Internal_bridge_exception
+  | Some (Keeper_turn_driver.Internal_contract_rejected _) ->
+    Some Internal_contract_rejected
+  | Some (Keeper_turn_driver.Incomplete_tool_transcript _) ->
+    Some Incomplete_tool_transcript
+  | Some (Keeper_turn_driver.Terminal_effect_failed _) ->
+    Some Terminal_effect_failed
+  | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _) ->
+    Some Provider_attempt_effect_fenced
+  | Some (Keeper_turn_driver.Tool_correction_lost _) ->
+    Some Tool_correction_lost
+  | Some (Keeper_turn_driver.Receipt_persistence_failed _) ->
+    Some Receipt_persistence_failed
+  | Some (Keeper_turn_driver.Gate_replay_repair_required _) ->
+    Some Gate_replay_repair_required
   | None ->
     (match err with
-     | Agent_sdk.Error.Internal _ -> None
-     | Agent_sdk.Error.Agent
+     | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } -> None
+     | Agent_core.Error.Agent
          ( HookExecutionFailed _
          | TerminalToolEffectFailed _
-         | TerminalToolDurabilityFailed _ ) ->
+         | TerminalToolDurabilityFailed _
+         (* Hitting the declared round ceiling is not a blocked keeper: the
+            next turn starts normally against the same history. The turn's
+            terminal reason code carries it, which is the visibility this
+            needs. *)
+         | ToolRoundLimitExceeded _ ) ->
        None
-     | Agent_sdk.Error.Agent (UnrecognizedStopReason _) ->
-       Some Sdk_unrecognized_stop_reason
-     | Agent_sdk.Error.Agent (GuardrailViolation _) -> Some Sdk_guardrail_violation
-     | Agent_sdk.Error.Agent (TripwireViolation _) -> Some Sdk_tripwire_violation
-     | Agent_sdk.Error.Agent (InputRequired _) -> Some Sdk_input_required
-     (* Provider-level [Api] errors are surfaced via OAS retry / runtime
+     | Agent_core.Error.Agent (UnrecognizedStopReason _) ->
+       Some Agent_core_unrecognized_stop_reason
+     | Agent_core.Error.Agent (GuardrailViolation _) -> Some Agent_core_guardrail_violation
+     | Agent_core.Error.Agent (TripwireViolation _) -> Some Agent_core_tripwire_violation
+     | Agent_core.Error.Agent (InputRequired _) -> Some Agent_core_input_required
+     (* Provider-level [Api] errors are surfaced via AGENT_CORE retry / runtime
          layers and do not map to a typed blocker_class by themselves. *)
-     | Agent_sdk.Error.Api _
-     | Agent_sdk.Error.Provider _
-     | Agent_sdk.Error.Mcp _
-     | Agent_sdk.Error.Config _
-     | Agent_sdk.Error.Serialization _
-     | Agent_sdk.Error.Io _
-     | Agent_sdk.Error.Orchestration _ -> None)
+     | Agent_core.Error.Api _
+     | Agent_core.Error.Provider _
+     | Agent_core.Error.Mcp _
+     | Agent_core.Error.Config _
+     | Agent_core.Error.Serialization _
+     | Agent_core.Error.Io _
+     | Agent_core.Error.Orchestration _ -> None)
 ;;
 
 (* ── Runtime blocker surface ───────────────────────────────── *)
@@ -94,27 +109,9 @@ let is_provider_runtime_blocker_class blocker_class =
   String.equal blocker_class "provider_runtime_error"
 ;;
 
-let is_stale_turn_timeout_blocker_class blocker_class =
-  String.equal blocker_class (blocker_class_to_string Stale_turn_timeout)
-;;
-
 let is_fiber_unresolved_blocker_class blocker_class =
   String.equal blocker_class (blocker_class_to_string Fiber_unresolved)
 ;;
-
-let runtime_blocker_surface_of_masc_internal_error = function
-  | Keeper_turn_driver.Accept_rejected _
-  | Keeper_turn_driver.Runtime_exhausted _
-  | Keeper_turn_driver.Capacity_backpressure _
-  | Keeper_turn_driver.Resumable_cli_session _
-  | Keeper_turn_driver.Internal_unhandled_exception _
-  | Keeper_turn_driver.Internal_bridge_exception _
-  | Keeper_turn_driver.Internal_contract_rejected _
-  | Keeper_turn_driver.Incomplete_tool_transcript _
-  | Keeper_turn_driver.Terminal_effect_failed _
-  | Keeper_turn_driver.Receipt_persistence_failed _
-  | Keeper_turn_driver.Gate_replay_repair_required _ ->
-    None
 
 let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   : runtime_blocker_surface
@@ -140,11 +137,20 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       else summary
     (* All remaining blocker_class variants carry no class-specific summary
        transformation — fall back to the live summary or the typed name. *)
-    | Sdk_context_window_exceeded
-    | Sdk_unrecognized_stop_reason
-    | Sdk_guardrail_violation
-    | Sdk_tripwire_violation
-    | Sdk_input_required -> if summary = "" then str else summary
+    | Agent_core_context_window_exceeded
+    | Agent_core_unrecognized_stop_reason
+    | Agent_core_guardrail_violation
+    | Agent_core_tripwire_violation
+    | Agent_core_input_required
+    | Internal_unhandled_exception
+    | Internal_bridge_exception
+    | Internal_contract_rejected
+    | Incomplete_tool_transcript
+    | Terminal_effect_failed
+    | Provider_attempt_effect_fenced
+    | Tool_correction_lost
+    | Receipt_persistence_failed
+    | Gate_replay_repair_required -> if summary = "" then str else summary
   in
   { blocker_class = str; summary }
 ;;
@@ -177,11 +183,28 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
              investigation is required before restart."
             count
       }
-  | Keeper_registry.Provider_runtime_error { code; detail; _ } ->
+  (* The registry wraps runtime exhaustion in [Provider_runtime_error] with the
+     typed reason alongside it ([keeper_unified_turn_types.ml:100-112]). Reading
+     the code and dropping the reason is what made the status bridge's
+     [runtime_exhausted] arm unreachable: every exhaustion arrived labelled
+     "provider_runtime_error" (#30447). *)
+  | Keeper_registry.Provider_runtime_error { reason = Some reason; code; detail; _ } ->
+    Some
+      (runtime_blocker_surface_of_typed_class
+         ~summary:
+           (Printf.sprintf
+              "Runtime attempts exhausted (%s): %s; inspect the attempt chain before \
+               retry."
+              code
+              detail)
+         (Runtime_exhausted reason))
+  | Keeper_registry.Provider_runtime_error { code; detail; agent_core_timeout; _ } ->
     (match
        Keeper_provider_runtime_boundary.classify_provider_runtime_error_record
+         ?agent_core_timeout
          ~code
          ~detail
+         ()
      with
      | Keeper_provider_runtime_boundary.Provider_timeout _ ->
        Some

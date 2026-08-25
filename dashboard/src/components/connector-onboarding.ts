@@ -79,7 +79,7 @@ export function ConnectorOnboardingGrid() {
   return html`
     <div class="v2-connector-onboarding">
       <div class="mb-3">
-        <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">아직 연결된 사이드카가 없습니다</h3>
+        <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">아직 연결된 사이드카 없음</h3>
         <div class="mt-1 text-2xs text-[var(--color-fg-disabled)]">
           4개의 채널 사이드카를 켤 수 있습니다. 카드의 시작 명령을 복사해 새 터미널에서 실행하거나, 아래
           <strong>Start All</strong>로 한 번에 실행하세요. 실행 후 이 화면이 라이브 상태로 갱신됩니다.

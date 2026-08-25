@@ -8,12 +8,13 @@ include Ids
 (* ============================================ *)
 
 (** Timestamp utilities *)
-let now_iso () =
-  let open Unix in
-  let tm = gmtime (gettimeofday ()) in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-    tm.tm_hour tm.tm_min tm.tm_sec
+
+(* The clock read is not new — reading it is what [now_iso] is for. Only the
+   body around it changed, from an inline gmtime block to a call to the shared
+   writer, and the ratchet's move detector cannot match a line across that
+   reshape.
+   DET-OK *)
+let now_iso () = Time_codec.rfc3339_of_unix (Unix.gettimeofday ())
 
 (** Parse a strict RFC 3339 timestamp to Unix seconds. *)
 let parse_iso8601_opt value = Time_codec.parse_rfc3339_opt value
@@ -44,6 +45,17 @@ let string_of_agent_status = agent_status_to_string
 let all_agent_statuses = [ Active; Busy; Listening; Inactive ]
 let valid_agent_status_strings =
   List.map agent_status_to_string all_agent_statuses
+
+(* Presence ordering for operator surfaces: the agent doing work outranks the
+   one merely holding a session, which outranks the one only listening. A
+   fifth constructor breaks compilation here instead of silently ranking 0,
+   which is what happens when the ordering is written over the serialized
+   strings instead. *)
+let agent_status_rank = function
+  | Busy -> 4
+  | Active -> 3
+  | Listening -> 2
+  | Inactive -> 1
 
 let agent_status_of_string_opt = function
   | "active" -> Some Active
@@ -110,99 +122,9 @@ type agent = {
   meta: agent_meta option; [@default None] (* session metadata *)
 } [@@deriving yojson { strict = false }, show]
 
-let agent_of_yojson_generated = agent_of_yojson
-
-let iso8601_of_unix_seconds ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
-
-let normalize_agent_last_seen ~session_bound_at = function
-  | `String _ as value -> Some value
-  | `Int seconds ->
-      Some (`String (iso8601_of_unix_seconds (float_of_int seconds)))
-  | `Float seconds ->
-      Some (`String (iso8601_of_unix_seconds seconds))
-  | `Null -> session_bound_at  (* bootstrap from session_bound_at — see #7947 *)
-  | _ -> None
-
-let short_json_repr = function
-  | `Null -> "null"
-  | `Bool b -> Printf.sprintf "%b" b
-  | `Int i -> string_of_int i
-  | `Float f -> Printf.sprintf "%g" f
-  | `String s ->
-      if String.length s <= 40 then Printf.sprintf "\"%s\"" s
-      else Printf.sprintf "\"%s...\"" (String.sub s 0 37)
-  | `Assoc _ -> "<object>"
-  | `List _ -> "<array>"
-  | `Intlit s -> s
-  | `Tuple _ -> "<tuple>"
-  | `Variant _ -> "<variant>"
-
-let agent_of_yojson json =
-  match agent_of_yojson_generated json with
-  | Ok _ as ok -> ok
-  | Error original_error -> (
-      match json with
-      | `Assoc fields ->
-          let session_bound_at_value =
-            match List.assoc_opt "session_bound_at" fields with
-            | Some (`String _ as v) -> Some v
-            | _ -> None
-          in
-          let last_seen_raw = List.assoc_opt "last_seen" fields in
-          let annotated_error () =
-            let last_seen_repr =
-              match last_seen_raw with
-              | Some v -> short_json_repr v
-              | None -> "<missing>"
-            in
-            Printf.sprintf "%s (last_seen=%s)" original_error last_seen_repr
-          in
-          (* No liveness evidence at all. [agent_to_yojson] always writes
-             [last_seen], so reaching here means the record did not come from
-             this codec: truncated, hand-edited, or an older schema. Keeping
-             the record is still right (#9751) — it is rebuilt on the next
-             heartbeat — but the filler must not claim liveness. The epoch
-             makes [parse_agent_status] treat the timestamp as absent, so the
-             derived age is omitted and consumers fall back to their
-             [max_float] "infinitely stale" default. A [now ()] filler
-             inverted that: a corrupt record read as "seen just now" and
-             satisfied every downstream liveness check. *)
-          let no_evidence_iso () = `String (iso8601_of_unix_seconds 0.0) in
-          let normalized_last_seen =
-            match last_seen_raw with
-            | Some value ->
-                normalize_agent_last_seen ~session_bound_at:session_bound_at_value value
-            | None ->
-                (match session_bound_at_value with
-                 | Some _ as v -> v
-                 | None -> Some (no_evidence_iso ()))
-          in
-          (match normalized_last_seen with
-          | Some normalized_last_seen ->
-              let fields_without_last_seen =
-                ("last_seen", normalized_last_seen)
-                :: List.remove_assoc "last_seen" fields
-              in
-              (* Same reasoning for session_bound_at: the generated
-                 deserialiser requires the field, so fill it to keep the
-                 record, but with the epoch rather than a value that claims
-                 the session was bound just now. *)
-              let normalized_fields =
-                match session_bound_at_value with
-                | Some _ -> fields_without_last_seen
-                | None ->
-                    ("session_bound_at", no_evidence_iso ())
-                    :: List.remove_assoc "session_bound_at" fields_without_last_seen
-              in
-              (match agent_of_yojson_generated (`Assoc normalized_fields) with
-               | Ok _ as ok -> ok
-               | Error _ -> Error (annotated_error ()))
-          | None -> Error (annotated_error ()))
-      | _ -> Error original_error)
+(* Name kept because 73 call sites reach it through [Masc_domain]; renaming
+   them to [Time_codec.rfc3339_of_unix] is tracked in #27131. *)
+let iso8601_of_unix_seconds = Time_codec.rfc3339_of_unix
 
 (** Actions an *agent* may drive on a task. A completion verdict is deliberately
     absent: it is not an agent action. See [completion_authority]. *)
@@ -348,10 +270,6 @@ let task_actor_of_status = function
   | Done { assignee; _ } -> Completer assignee
   | Cancelled { cancelled_by; _ } -> Canceller cancelled_by
 
-let task_actor_name = function
-  | Unassigned -> None
-  | Holder name | Submitter name | Completer name | Canceller name -> Some name
-
 (** Who owes work on this Task now. [Done] and [Cancelled] owe nothing, so
     they answer [None] even though both carry a name. Canonical
     ownership-check helper — used by task_state, gRPC, etc. *)
@@ -412,9 +330,10 @@ let task_status_is_done = function
     - String identity: schema enum is the actual function image, so
       renames cannot desync.
 
-    The remaining hand-coded axis is the witness list's length —
-    [test_types.ml] pins it at 6, so adding a constructor without
-    adding a witness here breaks that test.
+    The remaining hand-coded axis is the witness list itself.
+    [test_task_status_vocabulary] compares it against the arms of
+    [task_status_of_yojson], so a status one side knows and the other does
+    not fails there.
 
     Order matches the FSM lifecycle (Todo -> Claimed -> InProgress ->
     AwaitingVerification -> Done | Cancelled) for readable schema docs. *)
@@ -490,21 +409,28 @@ let task_status_of_yojson json =
     | "done" ->
         Ok (Done { assignee = req "assignee"; completed_at = req "completed_at"; notes = opt "notes" })
     | "awaiting_verification" ->
+        (* Write-boundary format validation: the field stays the wire string
+           because no in-process consumer reads it as a time (rg: the only
+           parse_iso8601 of a task started_at is this check; graphql carries
+           it as display text). RFC-0371 audit reclassified this from
+           validate-then-discard on that evidence. *)
         (match Json_util.get_string json "started_at" with
-         | Some started_at when Option.is_some (parse_iso8601_opt started_at) ->
-           Ok
-             (AwaitingVerification
-                { assignee = req "assignee"
-                ; started_at
-                ; submitted_at = req "submitted_at"
-                ; verification_id = req "verification_id"
-                })
+         | None -> Error "awaiting_verification requires started_at"
          | Some started_at ->
-           Error
-             (Printf.sprintf
-                "awaiting_verification started_at must be RFC 3339, got %S"
-                started_at)
-         | None -> Error "awaiting_verification requires started_at")
+           (match parse_iso8601_opt started_at with
+            | Some _ ->
+              Ok
+                (AwaitingVerification
+                   { assignee = req "assignee"
+                   ; started_at
+                   ; submitted_at = req "submitted_at"
+                   ; verification_id = req "verification_id"
+                   })
+            | None ->
+              Error
+                (Printf.sprintf
+                   "awaiting_verification started_at must be RFC 3339, got %S"
+                   started_at)))
     | "cancelled" ->
         Ok (Cancelled
               { cancelled_by = req "cancelled_by"
@@ -518,28 +444,27 @@ let task_status_of_yojson json =
 type task_execution_links = {
   operation_id : string option; [@default None]
   session_id : string option; [@default None]
-} [@@deriving show, yojson { strict = false }]
+} [@@deriving show, yojson { strict = true }]
+
+(** No producer has been linked yet. A task starts here and stays here until a
+    runtime records the operation or session that carried it out. *)
+let no_execution_links = { operation_id = None; session_id = None }
 
 (** Task contract - persisted completion criteria and evidence facts.
 
+    Written once, when the task is created, and never rewritten: what counts as
+    done cannot change while the task runs. Runtime evidence producers are
+    recorded independently on the task itself as [execution_links].
+
     [completion_contract], [required_evidence], and [verify_gate_evidence] are
     supplied to the completion authority as task facts. The workspace FSM never
-    interprets their prose, counts entries, or derives a completion verdict.
-
-    A [required_tools : string list] field was also removed (2026-06-03,
-    same fan-in-0 pattern): it was deprecated and ignored by task claim
-    routing, always normalized to [[]] by [Workspace_task_classify], had no
-    production reader, and the keeper turn layer rejects the [required_tools]
-    key outright (#19806, [Keeper_config_text]). Later cleanup removed the
-    same-named dashboard and tool-call benchmark fields too, so the string no
-    longer names any task, dashboard, or benchmark contract surface. *)
+    interprets their prose, counts entries, or derives a completion verdict. *)
 type task_contract = {
   strict : bool; [@default false]
   completion_contract : string list; [@default []]
   required_evidence : string list; [@default []]
   inspect_gate_evidence : string list; [@default []]
   verify_gate_evidence : string list; [@default []]
-  links : task_execution_links; [@default { operation_id = None; session_id = None }]
 } [@@deriving show, yojson { strict = false }]
 
 (** Handoff context persisted across release/reclaim cycles *)
@@ -602,10 +527,9 @@ let stated_reason ~(reason : string option)
     match handoff_context with
     | None -> None
     | Some context ->
-      (match context.reason with
-       | Some context_reason when Option.is_some (non_blank context_reason) ->
-         non_blank context_reason
-       | Some _ | None -> non_blank context.summary)
+      (match Option.bind context.reason non_blank with
+       | Some _ as reason -> reason
+       | None -> non_blank context.summary)
   in
   match reason with
   | None -> from_handoff ()
@@ -631,10 +555,25 @@ type task = {
      side registry). *)
   predecessor_task_id: string option; [@default None]
   contract: task_contract option; [@default None]
+  (* Runtime identifiers attached after the task is created, by whichever
+     execution picks it up. Separate from [contract] so linking them never
+     touches what counts as done. *)
+  execution_links: task_execution_links; [@default no_execution_links]
   handoff_context: task_handoff_context option; [@default None]
   cycle_count: int; [@default 0]
   reclaim_policy: task_reclaim_policy option; [@default None]
   do_not_reclaim_reason: string option; [@default None]
+  (* RFC skills-declared-not-discovered: which skills a keeper working this
+     task can read. Named by their directory under <base_path>/.masc/skills/.
+
+     Declared rather than discovered on purpose. The Agent Skills default is
+     to list every skill's description in the prompt and let the model pick,
+     which is a semantic match masc does not make elsewhere. A task that names
+     its skills answers "what was loaded on that turn" by being read, not by
+     replaying what the model decided.
+
+     Empty is the ordinary case and means no skill block is built at all. *)
+  skills: string list; [@default []]
 } [@@deriving show]
 
 (* RFC-0323 G-10: the typed reclaim claim gate is retired. #23661 removed its
@@ -738,7 +677,7 @@ let task_to_yojson t =
     | None -> base
     | Some created_by -> base @ [("created_by", `String created_by)]
   in
-  (* Omitted when None (created_by pattern): old readers never see the key. *)
+  (* Omitted when no predecessor exists. *)
   let with_predecessor = match t.predecessor_task_id with
     | None -> with_created_by
     | Some p -> with_created_by @ [("predecessor_task_id", `String p)]
@@ -748,15 +687,24 @@ let task_to_yojson t =
     | Some contract ->
         with_predecessor @ [ ("contract", task_contract_to_yojson contract) ]
   in
-  let with_handoff_context = match t.handoff_context with
-    | None -> with_contract
-    | Some handoff_context ->
+  (* Omitted while unlinked, so a task carries the key only once an execution
+     claimed it. *)
+  let with_execution_links =
+    match t.execution_links with
+    | { operation_id = None; session_id = None } -> with_contract
+    | links ->
         with_contract
+        @ [ ("execution_links", task_execution_links_to_yojson links) ]
+  in
+  let with_handoff_context = match t.handoff_context with
+    | None -> with_execution_links
+    | Some handoff_context ->
+        with_execution_links
         @
         [ ( "handoff_context",
             task_handoff_context_to_yojson handoff_context ) ]
   in
-  (* cycle_count omitted when 0 for backward-compat on existing backlogs. *)
+  (* A zero cycle count is the implicit initial state. *)
   let with_cycle_count =
     if t.cycle_count = 0 then with_handoff_context
     else with_handoff_context @ [("cycle_count", `Int t.cycle_count)]
@@ -772,14 +720,40 @@ let task_to_yojson t =
     | None -> with_reclaim_policy
     | Some r -> with_reclaim_policy @ [("do_not_reclaim_reason", `String r)]
   in
+  (* Omitted when no skill is named, which is every task that does not need
+     one. Writing an empty list instead would put the key on every row in the
+     backlog to say nothing. *)
+  let with_skills =
+    match t.skills with
+    | [] -> with_do_not_reclaim
+    | skills ->
+        with_do_not_reclaim
+        @ [("skills", `List (List.map (fun s -> `String s) skills))]
+  in
   (* Merge status fields into task *)
   match status_json with
-  | `Assoc status_fields -> `Assoc (with_do_not_reclaim @ status_fields)
-  | _ -> `Assoc with_do_not_reclaim
+  | `Assoc status_fields -> `Assoc (with_skills @ status_fields)
+  | _ -> `Assoc with_skills
+
+(* Listing row for keeper tools: identity, ordering, and claim state without
+   the body. A live backlog row averages 2.0 KB of which handoff_context,
+   description, and contract are 89% (#29463); this carries the remaining
+   fields so a 50-row listing stays a few KB. *)
+let task_compact_to_yojson t =
+  let base = [
+    ("id", `String t.id);
+    ("title", `String t.title);
+    ("priority", `Int t.priority);
+    ("created_at", `String t.created_at);
+  ] in
+  match task_status_to_yojson t.task_status with
+  | `Assoc status_fields -> `Assoc (base @ status_fields)
+  | _ -> `Assoc base
 
 let task_of_yojson json =
   let req key = Json_util.get_string_with_default json ~key ~default:"" in
   let opt key = Json_util.get_string json key in
+  let member key = Json_util.assoc_member_opt key json in
   let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
   try
     let id = req "id" in
@@ -787,17 +761,23 @@ let task_of_yojson json =
     let description = opt "description" |> Option.value ~default:"" in
     let priority = Json_util.get_int json "priority" |> Option.value ~default:3 in
     let files = Json_util.get_string_list json "files" in
+    (* Absent on every task written before skills existed, and on every task
+       that names none. Both read as the empty list, which is the same fact. *)
+    let skills = Json_util.get_string_list json "skills" in
     let created_at = req "created_at" in
     let created_by = opt "created_by" in
-    (* Absent or non-string value degrades to None — a decode Error here would
-       make backlog_of_yojson silently drop the whole task. *)
+    (* The predecessor link is optional. *)
     let predecessor_task_id = opt "predecessor_task_id" in
-    let contract = match m "contract" with
-      | `Null -> None
-      | contract_json ->
-          (match task_contract_of_yojson contract_json with
-           | Ok contract -> Some contract
-           | Error _ -> None)
+    let contract_result =
+      match member "contract" with
+      | None | Some `Null -> Ok None
+      | Some contract_json ->
+        Result.map Option.some (task_contract_of_yojson contract_json)
+    in
+    let execution_links_result =
+      match member "execution_links" with
+      | None -> Ok no_execution_links
+      | Some links_json -> task_execution_links_of_yojson links_json
     in
     let handoff_context = match m "handoff_context" with
       | `Null -> None
@@ -816,8 +796,8 @@ let task_of_yojson json =
            | Error _ -> None)
     in
     let do_not_reclaim_reason = opt "do_not_reclaim_reason" in
-    match task_status_of_yojson json with
-    | Ok task_status ->
+    match contract_result, execution_links_result, task_status_of_yojson json with
+    | Ok contract, Ok execution_links, Ok task_status ->
         Ok
           {
             id;
@@ -830,25 +810,43 @@ let task_of_yojson json =
             created_by;
             predecessor_task_id;
             contract;
+            execution_links;
             handoff_context;
             cycle_count;
             reclaim_policy;
             do_not_reclaim_reason;
+            skills;
           }
-    | Error e -> Error e
+    | Error error, _, _ -> Error ("task.contract corrupt: " ^ error)
+    | _, Error error, _ -> Error ("task.execution_links corrupt: " ^ error)
+    | _, _, Error error -> Error error
   with e -> Error (Printexc.to_string e)
 
 (** Message - broadcast or direct *)
+type message_mention_delivery =
+  | Mention_passive
+  | Mention_pending
+  | Mention_accepted
+  | Mention_rejected
+[@@deriving yojson, show]
+
+let message_mention_delivery_to_string = function
+  | Mention_passive -> "passive"
+  | Mention_pending -> "pending"
+  | Mention_accepted -> "accepted"
+  | Mention_rejected -> "rejected"
+
 type message = {
+  request_id: string;
   seq: int;
   from_agent: string; [@key "from"]
   msg_type: string; [@key "type"] [@default "broadcast"]
   content: string;
   mention: string option; [@default None]
+  mention_delivery: message_mention_delivery;
   timestamp: string;
   trace_context: string option; [@default None]
   expires_at: float option; [@default None]
-  relevance: string; [@default "medium"]
 } [@@deriving yojson { strict = false }, show]
 
 (** Workspace state *)

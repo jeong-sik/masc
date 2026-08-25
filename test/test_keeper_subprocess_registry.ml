@@ -84,7 +84,7 @@ let test_default_hook_drains_on_tombstone () =
   setup ();
   R.register ~keeper_id:"k" ~pid:0x7FFFFFF2;
   R.register_default_cleanup_hook ();
-  H.run ~keeper_id:"k" H.Tombstone_reaped;
+  H.run ~keeper_id:"k" H.Supervisor_cleaned;
   check (list int) "registry drained by hook" [] (R.pids_for ~keeper_id:"k")
 
 let test_default_hook_ignores_phase_transition () =
@@ -112,7 +112,7 @@ let () =
     ];
     "default_hook", [
       test_case "registration is idempotent"        `Quick test_default_hook_idempotent_registration;
-      test_case "drains on Tombstone_reaped"        `Quick test_default_hook_drains_on_tombstone;
+      test_case "drains on Supervisor_cleaned"        `Quick test_default_hook_drains_on_tombstone;
       test_case "ignores Phase_transition"          `Quick test_default_hook_ignores_phase_transition;
     ];
   ]

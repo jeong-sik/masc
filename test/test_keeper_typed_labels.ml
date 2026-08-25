@@ -96,6 +96,31 @@ let test_pp_failure_reason_includes_payload () =
        true
      with Not_found -> false)
 
+let test_pp_failure_reason_preserves_exact_text () =
+  let cases : (Keeper_turn_fsm.failure_reason * string) list =
+    [ ( Failure_runtime_unavailable
+          { base = "claude_api"; resolved = Some "claude_code" }
+      , "runtime_unavailable(base=claude_api,resolved=claude_code)" )
+    ; ( Failure_no_capable_provider { runtime_id = "runtime-1"; detail = "none" }
+      , "no_capable_provider(runtime=runtime-1,detail=none)" )
+    ; ( Failure_provider_error { kind = "quota"; detail = "blocked" }
+      , "provider_error(kind=quota,detail=blocked)" )
+    ; ( Failure_receipt_lost
+          { primary_error = "write failed"; fallback_path = Some "/tmp/fallback" }
+      , "receipt_lost(err=write failed,fallback=/tmp/fallback)" )
+    ; Failure_runtime_error "bad frame", "runtime_error(bad frame)"
+    ; ( Failure_unexpected_exception { exn = "Failure(boom)"; backtrace = None }
+      , "unexpected_exception(Failure(boom))" )
+    ]
+  in
+  List.iter
+    (fun (reason, expected) ->
+      Alcotest.(check string)
+        expected
+        expected
+        (format_to_string Keeper_turn_fsm.pp_failure_reason reason))
+    cases
+
 (* ── Keeper_turn_fsm.turn_state ──────────────────────────────── *)
 
 let all_turn_states : Keeper_turn_fsm.any_state list =
@@ -203,30 +228,12 @@ let test_classify_no_signal_returns_no_actionable () =
         "expected No_actionable_signal, got %s"
         (Keeper_contract_classifier.actionable_signal_label other)
 
-let test_is_actionable_matches_variants () =
-  Alcotest.(check bool) "Has_unclaimed_tasks is actionable" true
-    (Keeper_contract_classifier.is_actionable Has_unclaimed_tasks);
-  Alcotest.(check bool) "Has_board_activity is actionable" true
-    (Keeper_contract_classifier.is_actionable Has_board_activity);
-  Alcotest.(check bool)
-    "Has_completion_authority_rejection is actionable"
-    true
-    (Keeper_contract_classifier.is_actionable
-       Has_completion_authority_rejection);
-  Alcotest.(check bool) "No_actionable_signal is not actionable" false
-    (Keeper_contract_classifier.is_actionable No_actionable_signal)
-
 (* ── Keeper_profile_load_failure_site.t ──────────────────────── *)
 
 let all_profile_load_failure_sites : Keeper_profile_load_failure_site.t list =
   [
-    Personas_root;
-    Personas_dirs_resolve;
     Toml_discovery_error;
     Materializable_check;
-    Load_persona_extended;
-    Agent_md_read;
-    List_persona_summaries;
   ]
 
 let test_profile_load_failure_site_labels_unique () =
@@ -261,6 +268,8 @@ let () =
             test_failure_reason_labels_unique;
           Alcotest.test_case "pp surfaces payload" `Quick
             test_pp_failure_reason_includes_payload;
+          Alcotest.test_case "pp preserves exact text" `Quick
+            test_pp_failure_reason_preserves_exact_text;
         ] );
       ( "turn_state",
         [
@@ -281,8 +290,6 @@ let () =
             test_classify_board_signal;
           Alcotest.test_case "empty observation → No_actionable_signal" `Quick
             test_classify_no_signal_returns_no_actionable;
-          Alcotest.test_case "is_actionable matches all variants" `Quick
-            test_is_actionable_matches_variants;
         ] );
       ( "profile_load_failure_site",
         [

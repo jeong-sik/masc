@@ -16,12 +16,8 @@ type trust_class =
   | Explicit_trusted_host
 
 type authority
-(** Backward-compatible name for the admitted host/port projection. *)
-
-type request_context = authority
-(** The live request context: typed scheme + admitted authority + trust class.
-    The alias keeps existing projection APIs source-compatible while making
-    the security boundary explicit at classifiers and fiber binding sites. *)
+(** The admitted request context: typed scheme + admitted host/port + trust
+    class, bound at classifiers and fiber binding sites. *)
 
 type trust_policy
 
@@ -41,7 +37,7 @@ val make_trust_policy :
 
 val trust_policy_error_to_string : trust_policy_error -> string
 
-val projection_context : trust_policy -> request_context
+val projection_context : trust_policy -> authority
 (** Return the policy-owned context for background projections that have no
     wire request to classify.  The explicit public identity wins when present;
     otherwise the effective listener identity is used.  Consumers must not
@@ -49,7 +45,7 @@ val projection_context : trust_policy -> request_context
 
 type classification =
   | Missing
-  | Single of request_context
+  | Single of authority
   | Multiple
   | Malformed
   | Untrusted
@@ -91,8 +87,6 @@ val scheme_to_string : scheme -> string
 val trust_class : authority -> trust_class
 val rendered : authority -> string
 
-val equivalent_for_scheme :
-  scheme:scheme -> authority -> authority -> bool
 (** Compare normalized host and effective port.  [http] and [https] apply
     their standard default ports; IPv4/IPv6 textual aliases are canonicalized
     during parsing. *)
@@ -106,8 +100,6 @@ val parse_serialized_origin :
     trailing bytes, and non-HTTP(S) schemes. *)
 
 val serialized_origin_host : serialized_origin -> string
-val serialized_origin_scheme : serialized_origin -> scheme
-
 val serialized_origin_equal :
   serialized_origin -> serialized_origin -> bool
 (** Exact scheme/normalized-host/effective-port equality. *)
@@ -117,11 +109,11 @@ val serialized_origin_matches_authority :
 (** Exact scheme/normalized-host/effective-port equality against the admitted
     request context.  Loopback aliases are deliberately not collapsed. *)
 
-val with_current : request_context -> (unit -> 'a) -> 'a
+val with_current : authority -> (unit -> 'a) -> 'a
 (** Bind an admitted authority to the current Eio request fiber. *)
 
-val current : unit -> request_context option
-val current_exn : unit -> request_context
+val current : unit -> authority option
+val current_exn : unit -> authority
 (** Return the request-fiber authority or raise
     {!Unbound_request_authority}.  There is intentionally no raw-header or
     configured-host fallback. *)

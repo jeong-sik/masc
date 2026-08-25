@@ -55,7 +55,6 @@ describe('keeperDisplayStatus', () => {
     it('classifies offline keeper with no activity as unbooted', () => {
       const keeper = makeKeeper({
         status: 'offline',
-        generation: 0,
         turn_count: 0,
       })
       expect(keeperDisplayStatus(keeper)).toBe('unbooted')
@@ -64,25 +63,14 @@ describe('keeperDisplayStatus', () => {
     it('classifies inactive keeper with no activity as unbooted', () => {
       const keeper = makeKeeper({
         status: 'inactive',
-        generation: 0,
         turn_count: 0,
       })
       expect(keeperDisplayStatus(keeper)).toBe('unbooted')
     })
 
-    it('classifies offline keeper with generation > 0 as stopped', () => {
-      const keeper = makeKeeper({
-        status: 'offline',
-        generation: 3,
-        turn_count: 0,
-      })
-      expect(keeperDisplayStatus(keeper)).toBe('stopped')
-    })
-
     it('classifies offline keeper with turn_count > 0 as stopped', () => {
       const keeper = makeKeeper({
         status: 'offline',
-        generation: 0,
         turn_count: 5,
       })
       expect(keeperDisplayStatus(keeper)).toBe('stopped')
@@ -91,9 +79,7 @@ describe('keeperDisplayStatus', () => {
     it('classifies offline keeper with all activity signals as stopped', () => {
       const keeper = makeKeeper({
         status: 'offline',
-        generation: 2,
         turn_count: 10,
-        agent: { exists: true },
       })
       expect(keeperDisplayStatus(keeper)).toBe('stopped')
     })
@@ -121,9 +107,9 @@ describe('keeperDisplayStatus', () => {
       const keeper = makeKeeper({
         status: 'active',
         phase: 'Running',
-        lifecycle_phase: 'Dead',
+        lifecycle_phase: 'Stopped',
       })
-      expect(keeperDisplayStatus(keeper)).toBe('dead')
+      expect(keeperDisplayStatus(keeper)).toBe('stopped')
     })
   })
 })
@@ -132,33 +118,23 @@ describe('keeperDisplayRuntime', () => {
   it('prefers runtime_canonical then selected_runtime_canonical', () => {
     expect(
       keeperDisplayRuntime({
-        runtime_canonical: 'oas.primary',
-        selected_runtime_canonical: 'oas.secondary',
+        runtime_canonical: 'agentCore.primary',
+        selected_runtime_canonical: 'agentCore.secondary',
         runtime_id: 'legacy.runtime',
       }),
-    ).toEqual({ label: 'Runtime', value: 'oas.primary' })
+    ).toEqual({ label: 'Runtime', value: 'agentCore.primary' })
     expect(
       keeperDisplayRuntime({
-        selected_runtime_canonical: 'oas.secondary',
+        selected_runtime_canonical: 'agentCore.secondary',
         runtime_id: 'legacy.runtime',
       }),
-    ).toEqual({ label: 'Runtime', value: 'oas.secondary' })
+    ).toEqual({ label: 'Runtime', value: 'agentCore.secondary' })
   })
 
   it('falls back to runtime_id', () => {
     expect(keeperDisplayRuntime({ runtime_id: 'keeper_unified' })).toEqual({
       label: 'Runtime',
       value: 'keeper_unified',
-    })
-  })
-
-  it('falls back to runtime_ref group and item', () => {
-    expect(
-      keeperDisplayRuntime({ runtime_ref: { group: 'tier', item: 'resilient_breaker' } }),
-    ).toEqual({ label: 'Runtime', value: 'tier.resilient_breaker' })
-    expect(keeperDisplayRuntime({ runtime_ref: { group: 'tier', item: null } })).toEqual({
-      label: 'Runtime',
-      value: 'tier',
     })
   })
 
@@ -169,7 +145,6 @@ describe('keeperDisplayRuntime', () => {
         runtime_canonical: ' ',
         selected_runtime_canonical: '',
         runtime_id: ' ',
-        runtime_ref: { group: ' ', item: 'ignored' },
       }),
     ).toBeNull()
   })
@@ -218,18 +193,19 @@ describe('keeperRuntimeBlockerLabel', () => {
     expect(keeperRuntimeBlockerLabel('runtime_exhausted')).toBe('런타임 후보 소진')
   })
 
-  it('labels the active SDK blocker variants', () => {
-    expect(keeperRuntimeBlockerLabel('sdk_context_window_exceeded')).toBe('SDK 컨텍스트 윈도 초과')
-    expect(keeperRuntimeBlockerLabel('sdk_unrecognized_stop_reason')).toBe('SDK 미식별 정지 사유')
-    expect(keeperRuntimeBlockerLabel('sdk_idle_detected')).toBe('SDK Idle 감지')
-    expect(keeperRuntimeBlockerLabel('sdk_guardrail_violation')).toBe('SDK 가드레일 위반')
-    expect(keeperRuntimeBlockerLabel('sdk_tripwire_violation')).toBe('SDK Tripwire 위반')
-    expect(keeperRuntimeBlockerLabel('sdk_exit_condition_met')).toBe('SDK 종료 조건 충족')
+  it('labels the active agent-core blocker variants', () => {
+    expect(keeperRuntimeBlockerLabel('agent_core_context_window_exceeded')).toBe('Agent Core 컨텍스트 윈도 초과')
+    expect(keeperRuntimeBlockerLabel('agent_core_unrecognized_stop_reason')).toBe('Agent Core 미식별 정지 사유')
+    expect(keeperRuntimeBlockerLabel('agent_core_guardrail_violation')).toBe('Agent Core 가드레일 위반')
+    expect(keeperRuntimeBlockerLabel('agent_core_tripwire_violation')).toBe('Agent Core Tripwire 위반')
   })
 
   it('SSOT regression guard — every literal in KEEPER_RUNTIME_BLOCKER_CLASSES has a non-null label', () => {
     for (const cls of KEEPER_RUNTIME_BLOCKER_CLASSES) {
       expect(keeperRuntimeBlockerLabel(cls), `missing label for ${cls}`).not.toBeNull()
+      // A label that repeats the wire string satisfies the check above while
+      // telling the operator nothing they did not already see.
+      expect(keeperRuntimeBlockerLabel(cls), `${cls} is labelled with its own wire string`).not.toBe(cls)
     }
   })
 })
@@ -270,26 +246,6 @@ describe('keeperRuntimeBlockerHint', () => {
       'exception',
       'Keeper 런타임 예외가 기록되어 로그와 최근 turn 상태 확인이 필요합니다.',
     ],
-    [
-      'awaiting_operator',
-      '진행을 위해 운영자의 승인, 결정, 또는 게이트 해제가 필요합니다.',
-    ],
-    [
-      'awaiting_sandbox_egress',
-      '샌드박스 네트워크 또는 push egress 정책 때문에 keeper가 진행하지 못하고 있습니다.',
-    ],
-    [
-      'supervisor_paused',
-      'Supervisor가 keeper를 일시정지한 상태라 재개 조건을 확인해야 합니다.',
-    ],
-    [
-      'synthetic_stall',
-      '실제 STATE 없이 합성된 진행 기록만 남아 최근 턴 산출물을 재확인해야 합니다.',
-    ],
-    [
-      'self_imposed_idle',
-      'Keeper가 관찰 또는 대기만 계획하고 있어 다음 실행 지시가 필요할 수 있습니다.',
-    ],
   ]
 
   it.each(registryBlockerHintCases)(
@@ -318,7 +274,7 @@ describe('keeperActivityDisplay', () => {
   it('uses heartbeat as the latest live signal when autonomous action is older', () => {
     expect(
       keeperActivityDisplay({
-        last_autonomous_action_at: '2026-04-24T12:00:00Z',
+        tool_audit_at: '2026-04-24T12:00:00Z',
         last_heartbeat: '2026-04-24T17:54:00Z',
       }),
     ).toEqual({
@@ -408,7 +364,7 @@ describe('keeperActivityDisplay', () => {
   it('uses autonomous action when it is newer than heartbeat', () => {
     expect(
       keeperActivityDisplay({
-        last_autonomous_action_at: '2026-04-24T17:59:00Z',
+        tool_audit_at: '2026-04-24T17:59:00Z',
         last_heartbeat: '2026-04-24T17:54:00Z',
       }).source,
     ).toBe('autonomous_action')
@@ -493,10 +449,6 @@ describe('keeperWorkPreview', () => {
         }),
       ),
     ).toBe('Continuation checkpoint saved.')
-  })
-
-  it('falls through to current_task', () => {
-    expect(keeperWorkPreview(makeKeeper({ agent: { current_task: 'task-7' } }))).toBe('task-7')
   })
 
   it('returns null when no signal exists', () => {

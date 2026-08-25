@@ -64,8 +64,13 @@ val recover_at_boot :
     lets bootstrap isolate every Keeper in its own process-lifetime fiber. *)
 val recover_operation :
   config:Workspace.config ->
+  ?successor_operation_id:Keeper_shutdown_types.Operation_id.t ->
   Keeper_shutdown_types.t ->
   (Keeper_shutdown_types.t, string) result
+(** [successor_operation_id] hands the admission fence to that operation in the
+    same transition instead of releasing it: a keeper whose shutdown is
+    immediately superseded never has an unfenced moment between the two. Absent,
+    the fence is released as before. *)
 
 (** Recover one current operation. If recovery releases admission and the
     owner also has corrupt durable state, restore that deterministic fail-closed

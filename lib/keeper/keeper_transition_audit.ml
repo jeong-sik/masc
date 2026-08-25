@@ -67,21 +67,26 @@ let sink_path () =
   | _ -> None
 ;;
 
-let default_store_ref : Dated_jsonl.t option ref = ref None
+(* The directory this store occupies under [.masc]. Exposed so readers of the
+   same store name it from here instead of spelling the literal. *)
+let store_dirname = "transition-audit"
+
+let default_store = Atomic.make None
 
 let get_default_store () =
-  match !default_store_ref with
+  match Atomic.get default_store with
   | Some store -> Some store
   | None ->
     (try
        let dir =
          Filename.concat
            (Common.masc_dir_from_base_path ~base_path:(Env_config_core.base_path ()))
-           "transition-audit"
+           store_dirname
        in
        let store = Dated_jsonl.create ~base_dir:dir () in
-       default_store_ref := Some store;
-       Some store
+       if Atomic.compare_and_set default_store None (Some store)
+       then Some store
+       else Atomic.get default_store
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
@@ -331,8 +336,11 @@ let recent_transitions_json ~keeper_name ~limit : Yojson.Safe.t =
          consistent with just-recorded transitions. *)
       let (_ : int) = flush_pending () in
       let items =
-        Dated_jsonl.read_recent store (max limit 1 * 8)
-        |> List.filter_map (function
+        (* Project during the read: the scan window is [8 * limit] rows and only
+           the matching keeper's [record] sub-tree survives, so materialising
+           every row's parsed tree first is wasted. The selector is pure, so the
+           reader's newest-first call order is not observable. *)
+        Dated_jsonl.filter_map_recent store (max limit 1 * 8) ~f:(function
           | `Assoc fields ->
             (match List.assoc_opt "keeper" fields, List.assoc_opt "record" fields with
              | Some (`String name), Some record when String.equal name keeper_name ->
@@ -397,8 +405,9 @@ let recent_completed_turns_from_store ~keeper_name ~limit =
   | Some _, _ | _, None -> []
   | None, Some store ->
     let (_ : int) = flush_pending () in
-    Dated_jsonl.read_recent store (max limit 1 * 8)
-    |> List.filter_map (function
+    (* Same shape as above, and here the projection also decodes to a typed
+       record, so the parsed tree is garbage as soon as the row is read. *)
+    Dated_jsonl.filter_map_recent store (max limit 1 * 8) ~f:(function
       | `Assoc fields ->
         (match List.assoc_opt "keeper" fields, List.assoc_opt "completed_turn" fields with
          | Some (`String name), Some record when String.equal name keeper_name ->
@@ -433,16 +442,12 @@ module For_testing = struct
     with_append_queue_lock (fun () -> Stdlib.Queue.clear append_queue);
     Atomic.set async_append_active false;
     Atomic.set append_queue_dropped 0;
-    default_store_ref := None
+    Atomic.set default_store None
   ;;
 
   let queued_count = queued_count_for_testing
   let dropped_count = dropped_count_for_testing
   let set_async_append_active v = Atomic.set async_append_active v
-
-  let clear_completed_turn_ring ~keeper_name =
-    Hashtbl.remove completed_turn_rings keeper_name
-  ;;
 
   let observe_append_failure = observe_append_failure
 end

@@ -23,7 +23,7 @@
       Prompt_registry.set_markdown_dir "prompts";
       Prompt_registry.load_prompts_from_directory "prompts";
 
-      (* Effective text for a key, override > file > default *)
+      (* Effective text for a key, override > file *)
       let prompt = Prompt_registry.get_prompt "code-review-v2" in
 
       (* Every source's contribution, side by side *)
@@ -37,34 +37,12 @@
 
 module Types = Prompt_registry_types
 
-type prompt_metrics = Types.prompt_metrics = {
-  usage_count: int;      (** Number of times this prompt has been used *)
-  avg_score: float;      (** Average quality score (0.0 - 1.0) *)
-  last_used: float;      (** Unix timestamp of last usage *)
-}
-
-let prompt_metrics_to_yojson = Types.prompt_metrics_to_yojson
-let prompt_metrics_of_yojson = Types.prompt_metrics_of_yojson
-
 type prompt_entry = Types.prompt_entry = {
   id: string;                     (** Unique identifier *)
   template: string;               (** Prompt template with {{var}} placeholders *)
   version: string;                (** Semantic version string *)
   variables: string list;         (** Extracted variable names from template *)
-  metrics: prompt_metrics option; (** Optional usage metrics *)
   created_at: float;              (** Unix timestamp of creation *)
-  deprecated: bool;               (** Whether this prompt is deprecated *)
-}
-
-let prompt_entry_to_yojson = Types.prompt_entry_to_yojson
-let prompt_entry_of_yojson = Types.prompt_entry_of_yojson
-
-type registry_stats = Types.registry_stats = {
-  total_prompts: int;
-  active_prompts: int;
-  deprecated_prompts: int;
-  most_used: string option;
-  avg_usage: float;
 }
 
 type prompt_meta = Types.prompt_meta = {
@@ -79,7 +57,6 @@ type prompt_resolution = Types.prompt_resolution = {
   source: string;
   file_value: string option;
   override_value: string option;
-  default_value: string option;
   file_path: string option;
   file_exists: bool;
   has_override: bool;
@@ -96,40 +73,20 @@ type persisted_mutation_error =
     Returns (assoc list of key-value pairs, body after frontmatter).
     If no frontmatter found, returns ([], full content). *)
 let parse_frontmatter content =
-  let lines = String.split_on_char '\n' content in
-  match lines with
-  | first :: rest when String.trim first = "---" ->
-      let rec collect_meta acc = function
-        | [] -> (List.rev acc, "")
-        | line :: remaining when String.trim line = "---" ->
-            (List.rev acc, String.concat "\n" remaining)
-        | line :: remaining ->
-            let pair =
-              match String.index_opt line ':' with
-              | Some i ->
-                  let key = String.trim (String.sub line 0 i) in
-                  let value = String.trim (String.sub line (i + 1) (String.length line - i - 1)) in
-                  Some (key, value)
-              | None -> None
-            in
-            collect_meta (match pair with Some p -> p :: acc | None -> acc) remaining
-      in
-      collect_meta [] rest
-  | _ -> ([], content)
+  let parsed = Frontmatter.parse content in
+  parsed.Frontmatter.fields, parsed.Frontmatter.body
+;;
 
 let markdown_body content =
   let _metadata, body = parse_frontmatter content in
   body
 
-(** Parse a bracketed list value like [a, b, c] into string list. *)
+(** Parse a list value like [a, b, c] into string list. Reads through
+    {!Frontmatter.list_field}, which also accepts the unbracketed [a, b, c]
+    the other frontmatter readers used to allow; every asset in the tree
+    writes the bracketed form, so nothing already on disk changes meaning. *)
 let parse_list_value s =
-  let s = String.trim s in
-  if String.length s >= 2 && s.[0] = '[' && s.[String.length s - 1] = ']' then
-    let inner = String.sub s 1 (String.length s - 2) in
-    String.split_on_char ',' inner
-    |> List.map String.trim
-    |> List.filter (fun s -> s <> "")
-  else []
+  Frontmatter.list_field { Frontmatter.fields = [ ("v", s) ]; body = "" } "v"
 
 (** {1 Variable Extraction} *)
 
@@ -165,9 +122,6 @@ let prompts_dir = store.prompts_dir
 
 (** Markdown prompt source directory for operator-managed prompt text. *)
 let markdown_dir = store.markdown_dir
-
-(** Make a storage key from id and version *)
-let make_key ~id ~version = Printf.sprintf "%s@%s" id version
 
 let set_markdown_dir dir =
   with_override_mutation_lock (fun () ->
@@ -228,36 +182,37 @@ let read_file_if_exists path =
     Automatically extracts variables if not provided. *)
 (** {1 Template Rendering} *)
 
+(* Total by construction: [template_variable_regex] wraps group 1 in every
+   match, so [Re.Group.get] cannot raise here, and the list operations are
+   pure. The previous blanket [try] could only fold asynchronous exceptions
+   into a stringly error. *)
 let render_template ?template_variables ~template ~vars () : (string, string) result =
-  try
-    let vars = List.map (fun (name, value) -> (String.trim name, value)) vars in
-    let missing =
-      let effective_variables = extract_variables template in
-      let declared_variables =
-        match template_variables with
-        | Some variables ->
-            variables
-            |> List.map String.trim
-            |> List.filter (fun name -> name <> "")
-        | None -> []
-      in
-      List.sort_uniq String.compare
-        (effective_variables @ declared_variables)
-      |> List.filter (fun name -> not (List.mem_assoc name vars))
+  let vars = List.map (fun (name, value) -> (String.trim name, value)) vars in
+  let missing =
+    let effective_variables = extract_variables template in
+    let declared_variables =
+      match template_variables with
+      | Some variables ->
+          variables
+          |> List.map String.trim
+          |> List.filter (fun name -> name <> "")
+      | None -> []
     in
-    if missing <> [] then
-      Error
-        (Printf.sprintf "Unresolved variables in template: %s"
-           (String.concat ", " missing))
-    else
-      Ok
-        (Re.replace template_variable_regex template ~f:(fun group ->
-             let name = Re.Group.get group 1 |> String.trim in
-             match List.assoc_opt name vars with
-             | Some value -> value
-             | None -> Re.Group.get group 0))
-  with e ->
-    Error (Printf.sprintf "Render error: %s" (Printexc.to_string e))
+    List.sort_uniq String.compare
+      (effective_variables @ declared_variables)
+    |> List.filter (fun name -> not (List.mem_assoc name vars))
+  in
+  if missing <> [] then
+    Error
+      (Printf.sprintf "Unresolved variables in template: %s"
+         (String.concat ", " missing))
+  else
+    Ok
+      (Re.replace template_variable_regex template ~f:(fun group ->
+           let name = Re.Group.get group 1 |> String.trim in
+           match List.assoc_opt name vars with
+           | Some value -> value
+           | None -> Re.Group.get group 0))
 
 (** {1 Utility Functions} *)
 
@@ -284,20 +239,13 @@ let clear () : unit =
 
 (** {1 Simple Override API for Hardcoded Prompts} *)
 
-let default_prompt_value_unlocked key =
-  let storage_key = make_key ~id:key ~version:"default" in
-  match Hashtbl.find_opt registry storage_key with
-  | Some entry -> Some entry.template
-  | None -> None
-
 (* Pure assembly of a [resolved] record from pre-captured values.
    Invariant: [file_value] must already be read by the caller — this
    function never touches the filesystem, so it is safe to call from
    inside a [with_mutex] block without the contention cost of disk
    I/O under the lock (the original sin that [resolve_prompt] at the
    bottom of this file was explicitly refactored to avoid, see #3335). *)
-let build_resolved_from_snapshot
-    ~key ~override_value ~default_value ~file_value =
+let build_resolved_from_snapshot ~key ~override_value ~file_value =
   let file_path = prompt_markdown_path key in
   let source, effective =
     match override_value with
@@ -305,17 +253,13 @@ let build_resolved_from_snapshot
     | None -> (
         match file_value with
         | Some value -> ("file", value)
-        | None -> (
-            match default_value with
-            | Some value -> ("default", value)
-            | None -> ("missing", "")))
+        | None -> ("missing", ""))
   in
   {
     effective;
     source;
     file_value;
     override_value;
-    default_value;
     file_path;
     file_exists = Option.is_some file_value;
     has_override = Option.is_some override_value;
@@ -328,7 +272,6 @@ type prompt_snapshot = {
   snap_key : string;
   snap_meta : prompt_meta;
   snap_override_value : string option;
-  snap_default_value : string option;
 }
 
 (* Resolve a single prompt by doing the filesystem read OUTSIDE the
@@ -340,7 +283,6 @@ let resolved_of_snapshot (s : prompt_snapshot) =
   build_resolved_from_snapshot
     ~key:s.snap_key
     ~override_value:s.snap_override_value
-    ~default_value:s.snap_default_value
     ~file_value
 
 (* [expected = []] means the prompt is never rendered through
@@ -369,9 +311,6 @@ let prompt_item_json_of_resolved key (meta : prompt_meta) resolved =
       ("category", `String meta.category);
       ("description", `String meta.description);
       ("current", `String resolved.effective);
-      ( "default",
-        ((match resolved.file_value with Some _ as v -> v | None -> resolved.default_value)
-         |> fun v -> match v with Some s -> `String s | None -> `Null) );
       ("effective", `String resolved.effective);
       ( "file_value", Json_util.string_opt_to_json resolved.file_value );
       ( "override_value", Json_util.string_opt_to_json resolved.override_value );
@@ -445,8 +384,7 @@ let load_prompts_from_directory dir =
         ) files
       end)
 
-(** Register a hardcoded prompt with its default value.
-    This also registers it in the versioned template system as a fallback. *)
+(** Resolve a prompt. Resolution: override > file > missing. *)
 let resolve_prompt key =
   let file_path = prompt_markdown_path key in
   let file_value = Option.bind file_path read_file_if_exists in
@@ -456,25 +394,21 @@ let resolve_prompt key =
       |> Option.map (fun (entry : Prompt_override_persistence.entry) ->
              entry.value)
     in
-    let default_value = default_prompt_value_unlocked key in
     let source, effective =
       match override_value with
       | Some value -> ("override", value)
       | None -> (
           match file_value with
           | Some value -> ("file", value)
-          | None -> (
-              match default_value with
-              | Some value -> ("default", value)
-              | None -> ("missing", "")))
+          | None -> ("missing", ""))
     in
     {
-      effective; source; file_value; override_value; default_value;
+      effective; source; file_value; override_value;
       file_path; file_exists = Option.is_some file_value;
       has_override = Option.is_some override_value;
     })
 
-(** Get a prompt value. Resolution: override > file > registered default *)
+(** Get a prompt value. Resolution: override > file > missing *)
 let get_prompt key = (resolve_prompt key).effective
 
 let render_prompt_template key vars =
@@ -536,11 +470,7 @@ let validated_override ?expected_contract_revision key value =
         match Hashtbl.find_opt meta_tbl key with
         | None -> Error "Unknown prompt key"
         | Some meta -> (
-            let contract_body =
-              match file_value with
-              | Some body -> Some body
-              | None -> default_prompt_value_unlocked key
-            in
+            let contract_body = file_value in
             match contract_body with
             | None -> Error "Prompt contract body is missing"
             | Some body ->
@@ -583,25 +513,13 @@ let set_override key value =
           with_mutex (fun () -> Hashtbl.replace override_tbl key entry);
           Ok ())
 
-(** Clear override, reverting to file or default *)
+(** Clear override, reverting to file *)
 let clear_prompt_override key =
   with_override_mutation_lock (fun () ->
       with_mutex (fun () -> Hashtbl.remove override_tbl key))
 
 (** Get source of current value *)
 let prompt_source key = (resolve_prompt key).source
-
-let validate_required_prompt_files () =
-  with_mutex (fun () ->
-      Hashtbl.fold
-        (fun key meta acc ->
-          if not meta.required_file then acc
-          else
-            match prompt_markdown_path key with
-            | Some path when Sys.file_exists path && not (Sys.is_directory path) -> acc
-            | Some path -> (key, path) :: acc
-            | None -> (key, "<invalid-key>") :: acc)
-        meta_tbl [] |> List.sort compare)
 
 (* [validate_prompt_templates] was doing [read_file_if_exists] inside
    the [with_mutex] fold via [resolve_prompt_unlocked], holding the
@@ -620,7 +538,6 @@ let validate_prompt_templates () =
               |> Option.map
                    (fun (entry : Prompt_override_persistence.entry) ->
                      entry.value);
-            snap_default_value = default_prompt_value_unlocked key;
           } :: acc)
         meta_tbl [])
   in
@@ -644,7 +561,7 @@ let validate_prompt_templates () =
     call (once per registered prompt), blocking all other prompt
     registry operations for the full disk scan.  Now:
 
-    1. Snapshot (key, meta, override, default) under [with_mutex].
+    1. Snapshot (key, meta, override) under [with_mutex].
     2. Release the lock.
     3. For each snapshot, read the markdown file and build the
        [resolved] record outside the lock.
@@ -664,7 +581,6 @@ let list_prompts () =
               |> Option.map
                    (fun (entry : Prompt_override_persistence.entry) ->
                      entry.value);
-            snap_default_value = default_prompt_value_unlocked key;
           } :: acc)
         meta_tbl [])
   in
@@ -748,13 +664,13 @@ let clear_prompt_override_persisted ~base_path key =
 
 (** Restore overrides from JSON file, applying the same validation as
     [set_override] so that stale or manually-edited entries are rejected. *)
-let restore_failure_observer : (unit -> unit) ref = ref (fun () -> ())
+let restore_failure_observer = Atomic.make (fun () -> ())
 
 let set_restore_failure_observer observer =
-  restore_failure_observer := observer
+  Atomic.set restore_failure_observer observer
 
 let record_override_restore_failure () =
-  !restore_failure_observer ()
+  (Atomic.get restore_failure_observer) ()
 
 let restore_overrides base_path =
   let path =
@@ -796,10 +712,10 @@ let restore_overrides base_path =
           match key with
           | None ->
               Log.Misc.error
-                "prompt override restore: rejected persistence file, falling back to file/default values: %s"
+                "prompt override restore: rejected persistence file, falling back to file values: %s"
                 reason
           | Some key ->
               Log.Misc.error
-                "prompt override restore: rejected %s, falling back to file/default value: %s"
+                "prompt override restore: rejected %s, falling back to file value: %s"
                 key reason)
         failures)

@@ -8,27 +8,22 @@
     - masc_grpc_* for gRPC transport
     - masc_agent_heartbeat_* for agent liveness *)
 
-let webrtc_is_enabled_ref = Atomic.make (fun () -> false)
-let webrtc_pending_count_ref = Atomic.make (fun () -> 0)
-let webrtc_peers_count_ref = Atomic.make (fun () -> 0)
-let webrtc_live_count_ref = Atomic.make (fun () -> 0)
-let webrtc_channels_count_ref = Atomic.make (fun () -> 0)
-let webrtc_ice_servers_urls_ref = Atomic.make (fun () -> [])
-
-let register_webrtc_metrics ~is_enabled ~pending_count ~peers_count ~live_count ~channels_count ~ice_servers_urls =
-  Atomic.set webrtc_is_enabled_ref is_enabled;
-  Atomic.set webrtc_pending_count_ref pending_count;
-  Atomic.set webrtc_peers_count_ref peers_count;
-  Atomic.set webrtc_live_count_ref live_count;
-  Atomic.set webrtc_channels_count_ref channels_count;
-  Atomic.set webrtc_ice_servers_urls_ref ice_servers_urls
-;;
-
 (** {1 SSE Metrics} *)
+
+type sse_session_kind =
+  | Observer
+  | Agent_stream
+  | Presence
+
+let sse_session_kind_to_string = function
+  | Observer -> "observer"
+  | Agent_stream -> "agent_stream"
+  | Presence -> "presence"
+;;
 
 type hot_queue_session =
   { session_id : string
-  ; kind : string
+  ; kind : sse_session_kind
   ; queue_depth : int
   ; last_event_id : int
   ; idle_seconds : float
@@ -36,7 +31,40 @@ type hot_queue_session =
 
 let sse_hot_sessions : hot_queue_session list Atomic.t = Atomic.make []
 
+let sse_session_kinds = [ Observer; Agent_stream; Presence ]
+let relay_retry_stages = [ "append"; "broadcast" ]
+let relay_drop_stages = [ "queue"; "append"; "broadcast" ]
+
+let () =
+  List.iter
+    (fun kind ->
+      let kind = sse_session_kind_to_string kind in
+      Otel_metric_store.register_gauge
+        ~name:Otel_metric_store.metric_sse_sessions
+        ~help:Otel_metric_store.metric_sse_sessions
+        ~labels:[ "kind", kind ]
+        ())
+    sse_session_kinds;
+  List.iter
+    (fun stage ->
+      Otel_metric_store.register_counter
+        ~name:Otel_metric_store.metric_agent_core_sse_relay_retries
+        ~help:Otel_metric_store.metric_agent_core_sse_relay_retries
+        ~labels:[ "stage", stage ]
+        ())
+    relay_retry_stages;
+  List.iter
+    (fun stage ->
+      Otel_metric_store.register_counter
+        ~name:Otel_metric_store.metric_agent_core_sse_relay_drops
+        ~help:Otel_metric_store.metric_agent_core_sse_relay_drops
+        ~labels:[ "stage", stage ]
+        ())
+    relay_drop_stages
+;;
+
 let set_sse_sessions ~kind count =
+  let kind = sse_session_kind_to_string kind in
   Otel_metric_store.set_gauge
     Otel_metric_store.metric_sse_sessions
     ~labels:[ "kind", kind ]
@@ -74,6 +102,11 @@ let inc_broadcast_failure ?target () =
    flapping invisible to dashboards.  Counter is unlabelled because
    the subscriber identity is high-cardinality (sub_id is gRPC stream
    id); operators can correlate via the warn log line if needed. *)
+let inc_sse_broadcast_skipped_no_observer () =
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_sse_broadcast_skipped_no_observer ()
+;;
+
 let inc_external_subscriber_callback_failure () =
   Otel_metric_store.inc_counter Otel_metric_store.metric_sse_external_subscriber_callback_failures ()
 ;;
@@ -85,21 +118,14 @@ let observe_external_subscriber_fanout_duration seconds =
 ;;
 
 (* P2 silent-failure fix (transport scan):
-   The OAS relay drop-marker is the operator-visible signal that an
-   OAS event was dropped after exhausting retries.  If the drop marker
-   broadcast itself fails (oas_event_bridge.ml:430), operators get no
+   The AGENT_CORE relay drop-marker is the operator-visible signal that an
+   AGENT_CORE event was dropped after exhausting retries.  If the drop marker
+   broadcast itself fails, operators get no
    indication a drop happened.  Distinct from inc_broadcast_failure
    so the recovery-path failure rate is isolated from normal broadcast
    failures. *)
 let inc_relay_drop_marker_failure () =
-  Otel_metric_store.inc_counter Otel_metric_store.metric_oas_sse_relay_drop_marker_failures ()
-;;
-
-let set_sse_queue_depth ~session_id depth =
-  Otel_metric_store.set_gauge
-    Otel_metric_store.metric_sse_stream_queue_depth
-    ~labels:[ "session_id", session_id ]
-    (float_of_int depth)
+  Otel_metric_store.inc_counter Otel_metric_store.metric_agent_core_sse_relay_drop_marker_failures ()
 ;;
 
 let set_sse_queue_snapshot ~avg_depth ~max_depth ~hot_sessions =
@@ -122,6 +148,20 @@ let inc_sse_idle_evicted () =
 
 let inc_sse_reject ~reason =
   Otel_metric_store.inc_counter Otel_metric_store.metric_sse_rejects ~labels:[ "reason", reason ] ()
+;;
+
+(* Silent-failure fix (2026-08-18 live finding): every external MCP
+   credential had gone stale after a token rotation and every client
+   request died at the auth boundary with a client-only 401 — zero
+   server-side trace, so mcp_transport_sessions.json staying empty was
+   indistinguishable from "no client ever tried".  [reason] carries the
+   typed [auth_error_code] ("invalid_token", "missing_token", ...), not
+   free-form message text, so the label set stays bounded. *)
+let inc_mcp_auth_reject ~endpoint ~reason =
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_mcp_auth_rejects
+    ~labels:[ "endpoint", endpoint; "reason", reason ]
+    ()
 ;;
 
 let inc_sse_reconnect () = Otel_metric_store.inc_counter Otel_metric_store.metric_sse_reconnects ()
@@ -155,33 +195,6 @@ let inc_grpc_events_dropped () =
 
 let set_ws_sessions count =
   Otel_metric_store.set_gauge Otel_metric_store.metric_ws_sessions (float_of_int count)
-;;
-
-let inc_ws_parse_cache_hit () =
-  Otel_metric_store.inc_counter Otel_metric_store.metric_ws_parse_cache_hits ()
-;;
-
-let inc_ws_parse_cache_miss () =
-  Otel_metric_store.inc_counter Otel_metric_store.metric_ws_parse_cache_misses ()
-;;
-
-(** Iter 28 visibility fix — counter for previously-silent JSON parse
-    drops in parse_sse_dashboard_event. Closed 2-value error_kind
-    vocab keeps Otel_metric_store label cardinality bounded. *)
-type ws_frame_json_parse_error_kind =
-  | Yojson_parse_error
-  | Other_ws_frame_json_parse_error
-
-let ws_frame_json_parse_error_kind_to_string = function
-  | Yojson_parse_error -> "yojson_parse_error"
-  | Other_ws_frame_json_parse_error -> "other"
-;;
-
-let inc_ws_frame_json_parse_failure ~error_kind =
-  Otel_metric_store.inc_counter
-    Otel_metric_store.metric_server_mcp_ws_frame_json_parse_failures
-    ~labels:[ "error_kind", ws_frame_json_parse_error_kind_to_string error_kind ]
-    ()
 ;;
 
 let inc_ws_bytes_cache_hit () =
@@ -228,14 +241,6 @@ let observe_ws_message_bytes_sent n =
     bytes
 ;;
 
-let observe_ws_message_bytes_recv n =
-  let bytes = float_of_int (max 0 n) in
-  Otel_metric_store.observe_histogram
-    Otel_metric_store.metric_ws_message_bytes
-    ~labels:[ "direction", "recv" ]
-    bytes
-;;
-
 let inc_grpc_bytes_sent ~bytes =
   if bytes > 0
   then
@@ -249,24 +254,6 @@ let inc_ws_delta_built () = Otel_metric_store.inc_counter Otel_metric_store.metr
 
 let inc_ws_delta_payload_serialization () =
   Otel_metric_store.inc_counter Otel_metric_store.metric_ws_delta_payload_serializations ()
-;;
-
-let inc_grpc_backlog_replay_lines_scanned ?(delta = 1) () =
-  if delta > 0
-  then
-    Otel_metric_store.inc_counter
-      Otel_metric_store.metric_grpc_backlog_replay_lines_scanned
-      ~delta:(float_of_int delta)
-      ()
-;;
-
-let inc_grpc_backlog_replay_events_replayed ?(delta = 1) () =
-  if delta > 0
-  then
-    Otel_metric_store.inc_counter
-      Otel_metric_store.metric_grpc_backlog_replay_events_replayed
-      ~delta:(float_of_int delta)
-      ()
 ;;
 
 (** {1 Primary HTTP listener state} *)
@@ -382,7 +369,6 @@ let http_listener_json ?now () =
 (** {1 Environment-derived Transport Config} *)
 
 let grpc_runtime_listening : bool Atomic.t = Atomic.make false
-let ws_runtime_listening : bool Atomic.t = Atomic.make false
 let ws_same_origin_runtime_ready : bool Atomic.t = Atomic.make false
 
 (** Explanatory status for why a transport is or is not listening.
@@ -390,14 +376,11 @@ let ws_same_origin_runtime_ready : bool Atomic.t = Atomic.make false
     ["bind_failed"], ["stopped"]. *)
 let grpc_listen_status : string Atomic.t = Atomic.make "not_started"
 
-let ws_listen_status : string Atomic.t = Atomic.make "not_started"
 let set_grpc_runtime_listening listening = Atomic.set grpc_runtime_listening listening
-let set_ws_runtime_listening listening = Atomic.set ws_runtime_listening listening
 let set_ws_same_origin_runtime_ready ready =
   Atomic.set ws_same_origin_runtime_ready ready
 
 let set_grpc_listen_status status = Atomic.set grpc_listen_status status
-let set_ws_listen_status status = Atomic.set ws_listen_status status
 let grpc_enabled () = Env_config.Transport.grpc_enabled ()
 let grpc_port () = Env_config.Transport.grpc_port
 let grpc_listening () = grpc_enabled () && Atomic.get grpc_runtime_listening
@@ -415,110 +398,106 @@ let inc_agent_stale () = Otel_metric_store.inc_counter Otel_metric_store.metric_
 
 (** {1 Transport Health JSON Snapshot} *)
 
-let int_field key json =
-  match Json_util.assoc_member_opt key json with
-  | Some (`Int value) -> value
-  | Some (`Intlit raw) -> Safe_ops.int_of_string_with_default ~default:0 raw
-  | _ -> 0
-;;
-
-let workspace_id_from_config (_config : Workspace.config) = "default"
-
-let cluster_summary_json (_config : Workspace.config) =
-  (* Transport health should stay metrics-only and avoid Workspace I/O. *)
-  None
-;;
-
-let int_field_opt key = function
-  | Some json -> Some (int_field key json)
-  | None -> None
-;;
-
 
 let http_listener_mode () =
-  Env_config.Transport.use_h2 () |> Env_config.Transport.h2_mode_to_string
+  Env_config.Transport.effective_h2_mode ()
 ;;
 
-let primary_path ~webrtc_channels ~grpc_subscribers ~ws_sessions ~sse_sessions =
-  if webrtc_channels > 0
-  then "webrtc_datachannel"
-  else if grpc_subscribers > 0
-  then "grpc_subscribe"
+(* Closed so the reader lands on the same four values the writer can produce.
+   Spelled as free strings, the TUI carried whatever arrived and rendered it,
+   so a producer typo or a retired spelling reached the operator as a path
+   name rather than as a decode failure (#27652). *)
+type primary_path_kind =
+  | Grpc_subscribe
+  | Websocket
+  | Sse
+  | Streamable_http
+
+let primary_path_kind_to_string = function
+  | Grpc_subscribe -> "grpc_subscribe"
+  | Websocket -> "websocket"
+  | Sse -> "sse"
+  | Streamable_http -> "streamable_http"
+
+let primary_path_kind_of_string = function
+  | "grpc_subscribe" -> Some Grpc_subscribe
+  | "websocket" -> Some Websocket
+  | "sse" -> Some Sse
+  | "streamable_http" -> Some Streamable_http
+  | _ -> None
+
+let primary_path ~grpc_subscribers ~ws_sessions ~sse_sessions =
+  if grpc_subscribers > 0
+  then Grpc_subscribe
   else if ws_sessions > 0
-  then "websocket"
+  then Websocket
   else if sse_sessions > 0
-  then "sse"
-  else "streamable_http"
+  then Sse
+  else Streamable_http
 ;;
 
-let queue_pressure ~sse_queue_max ~relay_queue_depth ~relay_retry_total ~relay_drop_total =
+(* [relay_retry_total] and [relay_drop_total] used to feed this. They are
+   process-lifetime counters with no decrement anywhere, so one relay drop
+   pinned the reading to "high" until the next restart and the queue depths
+   below could no longer move it. The totals travel beside this field in the
+   same payload, where a number that only grows belongs (#27652). *)
+let queue_pressure_high_depth = 32
+let queue_pressure_watch_depth = 8
+
+type queue_pressure_kind =
+  | Steady
+  | Watch
+  | High
+
+let queue_pressure_kind_to_string = function
+  | Steady -> "steady"
+  | Watch -> "watch"
+  | High -> "high"
+
+let queue_pressure_kind_of_string = function
+  | "steady" -> Some Steady
+  | "watch" -> Some Watch
+  | "high" -> Some High
+  | _ -> None
+
+let queue_pressure ~sse_queue_max ~relay_queue_depth =
   let max_queue_depth = max sse_queue_max relay_queue_depth in
-  if max_queue_depth >= 32 || relay_drop_total > 0
-  then "high"
-  else if max_queue_depth >= 8 || relay_queue_depth > 0 || relay_retry_total > 0
-  then "watch"
-  else "steady"
+  if max_queue_depth >= queue_pressure_high_depth
+  then High
+  else if max_queue_depth >= queue_pressure_watch_depth
+  then Watch
+  else Steady
 ;;
 
 let ws_enabled () = Env_config.Transport.ws_enabled ()
-let ws_port () = Env_config.Transport.ws_port
-let ws_listening () = ws_enabled () && Atomic.get ws_runtime_listening
 let ws_same_origin_ready () =
   ws_enabled () && Atomic.get ws_same_origin_runtime_ready
-
-(* [tcp_port_reachable] is intentionally [false], matching the canonical
-   decision in [Transport_read_model.tcp_port_reachable]. A stdlib
-   [Unix.connect] probe here would (a) block the Eio domain on a syscall
-   inside the transport-health refresh path and (b) only ever flip to
-   [true] by racing a foreign listener on the same port, which is not a
-   useful health signal. With this, [grpc_reachable]/[ws_reachable]
-   collapse to their [*_live] (listener-bound) state, the single source
-   of truth shared with the read model. Argument kept for call-site
-   stability. *)
-let tcp_port_reachable (_port : int) : bool = false
-;;
 
 let hot_session_json (session : hot_queue_session) =
   `Assoc
     [ "session_id", `String session.session_id
-    ; "kind", `String session.kind
+    ; "kind", `String (sse_session_kind_to_string session.kind)
     ; "queue_depth", `Int session.queue_depth
     ; "last_event_id", `Int session.last_event_id
     ; "idle_seconds", `Float session.idle_seconds
     ]
 ;;
 
-type ws_delivery_metric_names =
-  { parse_cache_hits : string
-  ; parse_cache_misses : string
-  ; bytes_cache_hits : string
-  ; bytes_cache_misses : string
-  ; client_acks : string
-  ; throttled_deliveries : string
-  ; delta_payload_serializations : string
-  ; client_buffered_bytes : string
-  ; client_buffered_bytes_count : string
-  ; hello_latency : string
-  ; hello_latency_count : string
-  }
-
-let ws_delivery_metric_names =
-  { parse_cache_hits = "masc_ws_parse_cache_hits_total"
-  ; parse_cache_misses = "masc_ws_parse_cache_misses_total"
-  ; bytes_cache_hits = "masc_ws_bytes_cache_hits_total"
-  ; bytes_cache_misses = "masc_ws_bytes_cache_misses_total"
-  ; client_acks = "masc_ws_client_acks_total"
-  ; throttled_deliveries = "masc_ws_throttled_deliveries_total"
-  ; delta_payload_serializations = "masc_ws_delta_payload_serializations_total"
-  ; client_buffered_bytes = "masc_ws_client_buffered_bytes"
-  ; client_buffered_bytes_count = "masc_ws_client_buffered_bytes_count"
-  ; hello_latency = Otel_metric_store.metric_ws_dashboard_hello_latency_seconds
-  ; hello_latency_count = Otel_metric_store.metric_ws_dashboard_hello_latency_seconds ^ "_count"
-  }
+let required_metric_value name ?(labels = []) () =
+  match Otel_metric_store.get_metric_value name ~labels () with
+  | Some value -> value
+  | None ->
+    invalid_arg
+      (Printf.sprintf
+         "transport health metric cell is not registered: %s labels=%s"
+         name
+         (labels
+          |> List.map (fun (key, value) -> key ^ "=" ^ value)
+          |> String.concat ","))
 ;;
 
-let transport_health_json ~config =
-  let v name ?(labels = []) () = Otel_metric_store.metric_value_or_zero name ~labels () in
+let transport_health_json () =
+  let v = required_metric_value in
   let sse_observer = v Otel_metric_store.metric_sse_sessions ~labels:[ "kind", "observer" ] () in
   let sse_agent_stream =
     v Otel_metric_store.metric_sse_sessions ~labels:[ "kind", "agent_stream" ] ()
@@ -531,53 +510,42 @@ let transport_health_json ~config =
   let sse_queue_avg = v Otel_metric_store.metric_sse_queue_depth_avg () in
   let sse_queue_max = int_of_float (v Otel_metric_store.metric_sse_queue_depth_max ()) in
   let relay_queue_depth =
-    int_of_float (v Otel_metric_store.metric_oas_sse_relay_queue_depth ())
+    int_of_float (v Otel_metric_store.metric_agent_core_sse_relay_queue_depth ())
   in
   let relay_retry_append =
     int_of_float
-      (v Otel_metric_store.metric_oas_sse_relay_retries ~labels:[ "stage", "append" ] ())
+      (v Otel_metric_store.metric_agent_core_sse_relay_retries ~labels:[ "stage", "append" ] ())
   in
   let relay_retry_broadcast =
     int_of_float
-      (v Otel_metric_store.metric_oas_sse_relay_retries ~labels:[ "stage", "broadcast" ] ())
+      (v Otel_metric_store.metric_agent_core_sse_relay_retries ~labels:[ "stage", "broadcast" ] ())
   in
   let relay_retry_total =
-    int_of_float (Otel_metric_store.metric_total Otel_metric_store.metric_oas_sse_relay_retries)
+    int_of_float (Otel_metric_store.metric_total Otel_metric_store.metric_agent_core_sse_relay_retries)
   in
   let relay_drop_queue =
-    int_of_float (v Otel_metric_store.metric_oas_sse_relay_drops ~labels:[ "stage", "queue" ] ())
+    int_of_float (v Otel_metric_store.metric_agent_core_sse_relay_drops ~labels:[ "stage", "queue" ] ())
   in
   let relay_drop_append =
     int_of_float
-      (v Otel_metric_store.metric_oas_sse_relay_drops ~labels:[ "stage", "append" ] ())
+      (v Otel_metric_store.metric_agent_core_sse_relay_drops ~labels:[ "stage", "append" ] ())
   in
   let relay_drop_broadcast =
     int_of_float
-      (v Otel_metric_store.metric_oas_sse_relay_drops ~labels:[ "stage", "broadcast" ] ())
+      (v Otel_metric_store.metric_agent_core_sse_relay_drops ~labels:[ "stage", "broadcast" ] ())
   in
   let relay_drop_total =
-    int_of_float (Otel_metric_store.metric_total Otel_metric_store.metric_oas_sse_relay_drops)
+    int_of_float (Otel_metric_store.metric_total Otel_metric_store.metric_agent_core_sse_relay_drops)
   in
   let broadcast_sum = v Otel_metric_store.metric_sse_broadcast_duration () in
-  let broadcast_count = v "masc_sse_broadcast_duration_seconds_count" () in
+  let broadcast_count = v Otel_metric_store.metric_sse_broadcast_duration_count () in
   let broadcast_avg =
     if broadcast_count > 0.0 then broadcast_sum /. broadcast_count else 0.0
-  in
-  let external_fanout_sum =
-    v Otel_metric_store.metric_sse_external_fanout_duration_seconds ()
-  in
-  let external_fanout_count =
-    v (Otel_metric_store.metric_sse_external_fanout_duration_seconds ^ "_count") ()
-  in
-  let external_fanout_avg =
-    if external_fanout_count > 0.0
-    then external_fanout_sum /. external_fanout_count
-    else 0.0
   in
   let grpc_streams = v Otel_metric_store.metric_grpc_active_streams () in
   let grpc_subscribers = v Otel_metric_store.metric_grpc_subscribers () in
   let grpc_heartbeat_sum = v Otel_metric_store.metric_grpc_heartbeat_latency () in
-  let grpc_heartbeat_count = v "masc_grpc_heartbeat_latency_seconds_count" () in
+  let grpc_heartbeat_count = v Otel_metric_store.metric_grpc_heartbeat_latency_count () in
   let grpc_heartbeat_avg =
     if grpc_heartbeat_count > 0.0 then grpc_heartbeat_sum /. grpc_heartbeat_count else 0.0
   in
@@ -588,54 +556,35 @@ let transport_health_json ~config =
     int_of_float
       (Otel_metric_store.metric_total Keeper_metrics.(to_string LifecycleDispatchRejections))
   in
-  let ws_delivery_metrics = ws_delivery_metric_names in
   let ws_sessions = int_of_float (v Otel_metric_store.metric_ws_sessions ()) in
   let grpc_configured = grpc_enabled () in
   let grpc_live = grpc_listening () in
-  let grpc_reachable = grpc_live || tcp_port_reachable (grpc_port ()) in
   let ws_configured = ws_enabled () in
-  let ws_live = ws_listening () in
-  let ws_reachable = ws_live || tcp_port_reachable (ws_port ()) in
-  let streamable_auth_policy_present =
-    Env_config.Transport.http_auth_strict_env_enabled ()
-  in
-  let webrtc_configured = (Atomic.get webrtc_is_enabled_ref) () in
-  let webrtc_pending = (Atomic.get webrtc_pending_count_ref) () in
-  let webrtc_peers = (Atomic.get webrtc_peers_count_ref) () in
-  let webrtc_live = (Atomic.get webrtc_live_count_ref) () in
-  let webrtc_channels = (Atomic.get webrtc_channels_count_ref) () in
+  let ws_live = ws_same_origin_ready () in
   let listener_mode = http_listener_mode () in
-  let topology_summary = cluster_summary_json config in
-  let workspace_id = workspace_id_from_config config in
-  let cluster_name = Env_config_core.cluster_name () in
-  (* Keep transport-health free of Workspace/PG reads so proactive refresh does not
-     contend with dashboard and MCP writes on the shared backend. *)
-  let recent_messages = None in
-  let recent_messages_available = Option.is_some recent_messages in
+  let listener_mode_label =
+    Env_config.Transport.h2_mode_to_string listener_mode
+  in
+  let multiplex_ready =
+    match listener_mode with
+    | Env_config.Transport.H1_only -> false
+    | Env_config.Transport.Auto | Env_config.Transport.H2_only -> true
+  in
   let grpc_subscribers_i = int_of_float grpc_subscribers in
   let primary_path =
     primary_path
-      ~webrtc_channels
       ~grpc_subscribers:grpc_subscribers_i
       ~ws_sessions
       ~sse_sessions:sse_total
   in
-  let topology_available = Option.is_some topology_summary in
-  let degraded_source = "metrics_only" in
   `Assoc
     [ ( "summary"
       , `Assoc
-          [ "primary_path", `String primary_path
+          [ "primary_path", `String (primary_path_kind_to_string primary_path)
           ; ( "queue_pressure"
             , `String
-                (queue_pressure
-                   ~sse_queue_max
-                   ~relay_queue_depth
-                   ~relay_retry_total
-                   ~relay_drop_total) )
-          ; "recent_messages", Json_util.int_opt_to_json recent_messages
-          ; "recent_messages_available", `Bool recent_messages_available
-          ; "recent_messages_source", `String degraded_source
+                (queue_pressure_kind_to_string
+                   (queue_pressure ~sse_queue_max ~relay_queue_depth)) )
           ; "external_fanout_targets", `Int sse_external_subscribers
           ] )
     ; ( "sse"
@@ -647,9 +596,6 @@ let transport_health_json ~config =
           ; "external_subscribers", `Int sse_external_subscribers
           ; "broadcast_avg_seconds", `Float broadcast_avg
           ; "broadcast_count", `Int (int_of_float broadcast_count)
-          ; "external_fanout_avg_seconds", `Float external_fanout_avg
-          ; "external_fanout_count", `Int (int_of_float external_fanout_count)
-          ; "external_fanout_sum_seconds", `Float external_fanout_sum
           ; "queue_avg_depth", `Float sse_queue_avg
           ; "queue_max_depth", `Int sse_queue_max
           ; "relay_queue_depth", `Int relay_queue_depth
@@ -665,11 +611,8 @@ let transport_health_json ~config =
           ] )
     ; ( "grpc"
       , `Assoc
-          [ "enabled", `Bool grpc_configured
-          ; "configured", `Bool grpc_configured
+          [ "configured", `Bool grpc_configured
           ; "listening", `Bool grpc_live
-          ; "reachable", `Bool grpc_reachable
-          ; "listen_status", `String (Atomic.get grpc_listen_status)
           ; "port", `Int (grpc_port ())
           ; "active_streams", `Int (int_of_float grpc_streams)
           ; "subscribers", `Int grpc_subscribers_i
@@ -679,106 +622,53 @@ let transport_health_json ~config =
           ] )
     ; ( "websocket"
       , `Assoc
-          [ "enabled", `Bool ws_configured
-          ; "configured", `Bool ws_configured
+          [ "configured", `Bool ws_configured
           ; "listening", `Bool ws_live
-          ; "reachable", `Bool ws_reachable
-          ; "listen_status", `String (Atomic.get ws_listen_status)
-          ; "mode", `String "standalone"
-          ; "port", `Int (ws_port ())
+          ; (* Sessions ride the HTTP listener's same-origin /ws upgrade,
+               so there is no WebSocket-specific port to report. *)
+            "mode", `String "same_origin"
           ; "sessions", `Int ws_sessions
           ; "relay_source", `String "sse_external_subscriber"
-          ; (* Diagnostic counters for the WS delivery path.  The metric names
-         are catalogued here so this surface does not take a compile-time
-         dependency on any particular WS perf/observability PR.  If a
-         producing PR has not registered a metric yet, [metric_value_or_zero]
-         returns 0.0, which reads naturally as "nothing has happened". *)
-            ( "delivery"
+          ; ( "delivery"
             , `Assoc
-                [ ( "parse_cache_hits"
-                  , `Int (int_of_float (v ws_delivery_metrics.parse_cache_hits ())) )
-                ; ( "parse_cache_misses"
-                  , `Int (int_of_float (v ws_delivery_metrics.parse_cache_misses ())) )
-                ; ( "bytes_cache_hits"
-                  , `Int (int_of_float (v ws_delivery_metrics.bytes_cache_hits ())) )
-                ; ( "bytes_cache_misses"
-                  , `Int (int_of_float (v ws_delivery_metrics.bytes_cache_misses ())) )
-                ; ( "client_acks"
-                  , `Int (int_of_float (v ws_delivery_metrics.client_acks ())) )
-                ; ( "throttled_deliveries"
-                  , `Int (int_of_float (v ws_delivery_metrics.throttled_deliveries ())) )
-                ; ( "delta_payload_serializations"
+                [ ( "bytes_cache_hits"
                   , `Int
                       (int_of_float
-                         (v ws_delivery_metrics.delta_payload_serializations ())) )
-                ; (* Histogram sum + auto _count give operators enough to compute
-           average buffered bytes per ack without external telemetry queries. *)
-                  ( "client_buffered_bytes_sum"
-                  , `Float (v ws_delivery_metrics.client_buffered_bytes ()) )
+                         (v Otel_metric_store.metric_ws_bytes_cache_hits ())) )
+                ; ( "bytes_cache_misses"
+                  , `Int
+                      (int_of_float
+                         (v Otel_metric_store.metric_ws_bytes_cache_misses ())) )
+                ; ( "client_acks"
+                  , `Int (int_of_float (v Otel_metric_store.metric_ws_client_acks ())) )
+                ; ( "throttled_deliveries"
+                  , `Int
+                      (int_of_float
+                         (v Otel_metric_store.metric_ws_throttled_deliveries ())) )
+                ; ( "client_buffered_bytes_sum"
+                  , `Float (v Otel_metric_store.metric_ws_client_buffered_bytes ()) )
                 ; ( "client_buffered_bytes_count"
                   , `Int
                       (int_of_float
-                         (v ws_delivery_metrics.client_buffered_bytes_count ())) )
-                ; ( "hello_latency_sum_seconds"
-                  , `Float (Otel_metric_store.metric_total ws_delivery_metrics.hello_latency) )
-                ; ( "hello_latency_count"
-                  , `Int
-                      (int_of_float
-                         (Otel_metric_store.metric_total ws_delivery_metrics.hello_latency_count))
-                  )
+                         (v Otel_metric_store.metric_ws_client_buffered_bytes_count ())) )
                 ] )
-          ] )
-    ; ( "webrtc"
-      , `Assoc
-          [ "enabled", `Bool webrtc_configured
-          ; "configured", `Bool webrtc_configured
-          ; "signaling_available", `Bool webrtc_configured
-          ; "signaling_mode", `String "shared_http"
-          ; "pending_offers", `Int webrtc_pending
-          ; "active_peers", `Int webrtc_peers
-          ; "live_connections", `Int webrtc_live
-          ; "connected_channels", `Int webrtc_channels
-          ; ( "ice_server_count"
-            , `Int (List.length ((Atomic.get webrtc_ice_servers_urls_ref) ())) )
           ] )
     ; ( "streamable_http"
       , `Assoc
           [ "endpoint", `String "/mcp"
           ; "observer_stream", `String "/mcp?sse_kind=observer"
           ; "presence_stream", `String "/events/presence"
-          ; "managed_endpoint", `String "/mcp/managed"
-          ; "operator_endpoint", `String "/mcp/operator"
-          ; "delete_endpoint", `String "/mcp"
-          ; "default_transport", `String "streamable_http"
-          ; "configured", `Bool true
-          ; "protocol_capable", `Bool true
-          ; "auth_policy_present", `Bool streamable_auth_policy_present
           ; "supports_post", `Bool true
           ; "supports_sse_upgrade", `Bool true
-          ; "supports_delete", `Bool true
-          ; "listener", http_listener_json ()
+          ; ( "auth_rejects_total"
+            , `Int
+                (int_of_float
+                   (Otel_metric_store.metric_total Otel_metric_store.metric_mcp_auth_rejects)) )
           ] )
     ; ( "http2"
       , `Assoc
-          [ "listener_mode", `String listener_mode
-          ; "multiplex_ready", `Bool (not (String.equal listener_mode "h1_only"))
-          ; "prior_knowledge_path", `String "/mcp"
-          ] )
-    ; ( "cluster"
-      , `Assoc
-          [ "cluster", `String cluster_name
-          ; "workspace_id", `String workspace_id
-          ; "topology_available", `Bool topology_available
-          ; "topology_source", `String degraded_source
-          ; "total_units", Json_util.int_opt_to_json (int_field_opt "total_units" topology_summary)
-          ; ( "managed_units"
-            , Json_util.int_opt_to_json (int_field_opt "managed_unit_count" topology_summary) )
-          ; ( "live_agents"
-            , Json_util.int_opt_to_json (int_field_opt "live_agent_count" topology_summary) )
-          ; ( "active_operations"
-            , Json_util.int_opt_to_json (int_field_opt "active_operation_count" topology_summary) )
-          ; ( "stale_units"
-            , Json_util.int_opt_to_json (int_field_opt "stale_unit_count" topology_summary) )
+          [ "listener_mode", `String listener_mode_label
+          ; "multiplex_ready", `Bool multiplex_ready
           ] )
     ; ( "agent_health"
       , `Assoc

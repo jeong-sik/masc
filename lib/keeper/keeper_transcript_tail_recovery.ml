@@ -28,15 +28,6 @@ let empty_report =
   }
 ;;
 
-let outcome_to_wire = function
-  | Already_dispatchable -> "already_dispatchable"
-  | Closed _ -> "closed"
-  | Unparseable _ -> "unparseable"
-  | Meta_unavailable _ -> "meta_unavailable"
-  | Checkpoint_unavailable _ -> "checkpoint_unavailable"
-  | Commit_rejected _ -> "commit_rejected"
-;;
-
 (* A keeper with no durable metadata, or whose canonical checkpoint has not been
    written yet, has no in-flight tool cycle to recover. Those are ordinary
    startup states, not failures, so they do not inflate the failure count that
@@ -50,15 +41,15 @@ let recover_keeper config name =
     let session_dir =
       Filename.concat (Keeper_types_support.session_base_dir_ config) session_id
     in
-    (match Store.load_oas_with_ref ~session_dir ~session_id with
+    (match Store.load_agent_core_with_ref ~session_dir ~session_id with
      | Error error -> Checkpoint_unavailable error
      | Ok (checkpoint, expected_source_ref) ->
-       (match Unit_.close_open_tail checkpoint.Agent_sdk.Checkpoint.messages with
+       (match Unit_.close_open_tail checkpoint.Agent_core.Checkpoint.messages with
         | Error structural -> Unparseable structural
         | Ok { Unit_.closed_tool_use_ids = []; _ } -> Already_dispatchable
         | Ok { Unit_.messages; closed_tool_use_ids } ->
-          let candidate = { checkpoint with Agent_sdk.Checkpoint.messages } in
-          (match Store.save_oas_if_source ~session_dir ~expected_source_ref candidate with
+          let candidate = { checkpoint with Agent_core.Checkpoint.messages } in
+          (match Store.save_agent_core_if_source ~session_dir ~expected_source_ref candidate with
            | Store.Installed _ -> Closed { tool_use_ids = closed_tool_use_ids }
            | Store.Not_installed { cause; _ } -> Commit_rejected cause)))
 ;;

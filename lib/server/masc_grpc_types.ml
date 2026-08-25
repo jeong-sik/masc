@@ -149,36 +149,40 @@ module HeartbeatAck = struct
     ; directives : Keeper_directive.t list
     }
 
-  let directive_of_wire raw =
-    match raw with
-    | "pause" -> Ok Keeper_directive.Pause
-    | "wakeup" -> Ok Keeper_directive.Wakeup
-    | _ ->
-      (match String.index_opt raw ':' with
-       | Some separator ->
-         let tag = String.sub raw 0 separator in
-         let payload =
-           String.sub raw (separator + 1) (String.length raw - separator - 1)
-         in
-         if String.equal tag "claim"
-         then (
-           match Keeper_id.Task_id.of_string payload with
-           | Ok task_id -> Ok (Keeper_directive.Assign_task task_id)
-           | Error error ->
-             Error
-               (Printf.sprintf
-                  "invalid HeartbeatAck task assignment %S: %s"
-                  raw
-                  error))
-         else Error (Printf.sprintf "unknown HeartbeatAck directive tag %S" tag)
-       | None -> Error (Printf.sprintf "unknown HeartbeatAck directive %S" raw))
+  type directive_wire =
+    [ `Pause of bool
+    | `Wakeup of bool
+    | `Claim_task_id of string
+    | `not_set
+    ]
+
+  (* The wire carries one oneof arm per directive, so a value that names no
+     arm cannot be built. This used to be "pause" | "wakeup" |
+     "claim:<task_id>": a prefix split on ':' and matched by name, which is
+     how "resume" sat in the proto comment for months while every client that
+     sent it got a decode failure instead of the documented behaviour
+     (#29396 A6). [`not_set] is the one shape protobuf still admits — a
+     Directive message with no field set — and it is a decode error. *)
+  let directive_of_wire : directive_wire -> _ = function
+    | `Pause _ -> Ok Keeper_directive.Pause
+    | `Wakeup _ -> Ok Keeper_directive.Wakeup
+    | `Claim_task_id payload ->
+      (match Keeper_id.Task_id.of_string payload with
+       | Ok task_id -> Ok (Keeper_directive.Assign_task task_id)
+       | Error error ->
+         Error
+           (Printf.sprintf
+              "invalid HeartbeatAck task assignment %S: %s"
+              payload
+              error))
+    | `not_set -> Error "HeartbeatAck directive has no kind set"
   ;;
 
-  let directive_to_wire = function
-    | Keeper_directive.Pause -> "pause"
-    | Keeper_directive.Wakeup -> "wakeup"
+  let directive_to_wire : _ -> directive_wire = function
+    | Keeper_directive.Pause -> `Pause true
+    | Keeper_directive.Wakeup -> `Wakeup true
     | Keeper_directive.Assign_task task_id ->
-      "claim:" ^ Keeper_id.Task_id.to_string task_id
+      `Claim_task_id (Keeper_id.Task_id.to_string task_id)
   ;;
 
   let decode_directives directives =
@@ -383,18 +387,115 @@ module BroadcastRequest = struct
 end
 
 module BroadcastResponse = struct
+  type delivery_status =
+    | Delivery_passive
+    | Delivery_accepted
+    | Delivery_already_accepted
+    | Delivery_pending
+    | Delivery_deferred
+    | Delivery_rejected
+    | Delivery_not_persisted
+    | Delivery_outcome_unknown
+
+  type retry_disposition =
+    | Retry_do_not_resend
+    | Retry_allowed
+    | Retry_outcome_unknown
+
+  type workspace_persistence_status =
+    | Workspace_persisted
+    | Workspace_not_persisted
+    | Workspace_persistence_unknown
+
   type t =
     { success : bool
     ; seq : int64
+    ; request_id : string option
+    ; delivery_status : delivery_status
+    ; delivery_reason : string option
+    ; workspace_persistence_status : workspace_persistence_status
+    ; retry_disposition : retry_disposition
     }
+
+  let delivery_status_to_wire = function
+    | Delivery_passive -> "passive"
+    | Delivery_accepted -> "accepted"
+    | Delivery_already_accepted -> "already_accepted"
+    | Delivery_pending -> "pending"
+    | Delivery_deferred -> "deferred"
+    | Delivery_rejected -> "rejected"
+    | Delivery_not_persisted -> "not_persisted"
+    | Delivery_outcome_unknown -> "outcome_unknown"
+  ;;
+
+  let delivery_status_of_wire = function
+    | "passive" -> Delivery_passive
+    | "accepted" -> Delivery_accepted
+    | "already_accepted" -> Delivery_already_accepted
+    | "pending" -> Delivery_pending
+    | "deferred" -> Delivery_deferred
+    | "rejected" -> Delivery_rejected
+    | "not_persisted" -> Delivery_not_persisted
+    | "outcome_unknown" -> Delivery_outcome_unknown
+    | value -> invalid_arg (Printf.sprintf "unknown BroadcastResponse.delivery_status: %S" value)
+  ;;
+
+  let retry_disposition_to_wire = function
+    | Retry_do_not_resend -> "do_not_resend"
+    | Retry_allowed -> "retry_allowed"
+    | Retry_outcome_unknown -> "outcome_unknown"
+  ;;
+
+  let retry_disposition_of_wire = function
+    | "do_not_resend" -> Retry_do_not_resend
+    | "retry_allowed" -> Retry_allowed
+    | "outcome_unknown" -> Retry_outcome_unknown
+    | value -> invalid_arg (Printf.sprintf "unknown BroadcastResponse.retry_disposition: %S" value)
+  ;;
+
+  let workspace_persistence_status_to_wire = function
+    | Workspace_persisted -> "persisted"
+    | Workspace_not_persisted -> "not_persisted"
+    | Workspace_persistence_unknown -> "outcome_unknown"
+  ;;
+
+  let workspace_persistence_status_of_wire = function
+    | "persisted" -> Workspace_persisted
+    | "not_persisted" -> Workspace_not_persisted
+    | "outcome_unknown" -> Workspace_persistence_unknown
+    | value ->
+      invalid_arg
+        (Printf.sprintf
+           "unknown BroadcastResponse.workspace_persistence_status: %S"
+           value)
+  ;;
+
 
   let of_bytes bytes =
     let p = decode ~type_name:"BroadcastResponse" P.BroadcastResponse.from_proto bytes in
-    { success = p.success; seq = p.seq }
+    { success = p.success
+    ; seq = p.seq
+    ; request_id = p.request_id
+    ; delivery_status = delivery_status_of_wire p.delivery_status
+    ; delivery_reason = p.delivery_reason
+    ; workspace_persistence_status =
+        workspace_persistence_status_of_wire p.workspace_persistence_status
+    ; retry_disposition = retry_disposition_of_wire p.retry_disposition
+    }
   ;;
 
   let to_bytes (t : t) =
-    encode P.BroadcastResponse.to_proto { success = t.success; seq = t.seq }
+    encode
+      P.BroadcastResponse.to_proto
+      { success = t.success
+      ; seq = t.seq
+      ; request_id = t.request_id
+      ; delivery_status = delivery_status_to_wire t.delivery_status
+      ; delivery_reason = t.delivery_reason
+      ; workspace_persistence_status =
+          workspace_persistence_status_to_wire t.workspace_persistence_status
+      ; retry_disposition = retry_disposition_to_wire t.retry_disposition
+      }
   ;;
 end
 
@@ -428,72 +529,3 @@ module StatusResponse = struct
   ;;
 end
 
-(** {1 LSP Proxy} *)
-
-module LspRequest = struct
-  type t =
-    { language_id : string
-    ; jsonrpc_request_json : string
-    ; workspace_root : string option
-    }
-
-  let of_bytes_result bytes =
-    match decode_result ~type_name:"LspRequest" P.LspRequest.from_proto bytes with
-    | Ok p ->
-      Ok
-        ({ language_id = p.language_id
-         ; jsonrpc_request_json = p.jsonrpc_request_json
-         ; workspace_root =
-             (match p.workspace_root with
-              | "" -> None
-              | s -> Some s)
-         }
-         : t)
-    | Error _ as err -> err
-  ;;
-
-  let of_bytes bytes =
-    match of_bytes_result bytes with
-    | Ok req -> req
-    | Error msg -> invalid_arg msg
-  ;;
-
-  let to_bytes (t : t) =
-    encode
-      P.LspRequest.to_proto
-      { language_id = t.language_id
-      ; jsonrpc_request_json = t.jsonrpc_request_json
-      ; workspace_root = Option.value ~default:"" t.workspace_root
-      }
-  ;;
-end
-
-module LspResponse = struct
-  type t =
-    { jsonrpc_response_json : string
-    ; error_message : string
-    }
-
-  let of_bytes_result bytes =
-    match decode_result ~type_name:"LspResponse" P.LspResponse.from_proto bytes with
-    | Ok p ->
-      Ok
-        ({ jsonrpc_response_json = p.jsonrpc_response_json
-         ; error_message = p.error_message
-         }
-         : t)
-    | Error _ as err -> err
-  ;;
-
-  let of_bytes bytes =
-    match of_bytes_result bytes with
-    | Ok resp -> resp
-    | Error msg -> invalid_arg msg
-  ;;
-
-  let to_bytes (t : t) =
-    encode
-      P.LspResponse.to_proto
-      { jsonrpc_response_json = t.jsonrpc_response_json; error_message = t.error_message }
-  ;;
-end

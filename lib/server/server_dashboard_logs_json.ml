@@ -28,6 +28,7 @@ let build
       ~before_seq
       ~category_filter
       ~exclude_category
+      ~(ring_bounds : Log.Ring.bounds)
       (entries : Log.Ring.entry list)
   : Yojson.Safe.t
   =
@@ -79,6 +80,16 @@ let build
        ; "latest_seq", Json_util.int_option_to_yojson (entry_seq_json newest)
        ; "oldest_seq", Json_util.int_option_to_yojson (entry_seq_json oldest)
        ; "latest_ts_iso", Json_util.string_option_to_yojson (entry_ts_json newest)
+         (* Live-window truth: with [dropped_before] true, an empty or
+            thin result below [start_seq] means "outside the ring
+            window" (consult [retention.durable_store]), not "did not
+            happen". *)
+       ; ( "ring"
+         , `Assoc
+             [ "start_seq", `Int ring_bounds.Log.Ring.start_seq
+             ; "total", `Int ring_bounds.Log.Ring.total
+             ; "dropped_before", `Bool ring_bounds.Log.Ring.dropped_before
+             ] )
        ]
        @ fields)
   | json -> json

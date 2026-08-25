@@ -18,8 +18,6 @@ type t =
   ; host_root_abs : string
   ; container_root : string option
   ; root_arg : string
-  ; repos_arg : string
-  ; task_overlay_pattern : string
   }
 
 let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
@@ -91,13 +89,18 @@ let backend_of_config_agent ~(config : Workspace.config) ~(agent_name : string) 
 let sandbox_id_of_name name =
   "keeper:" ^ Playground_paths.sanitize_keeper_name name
 
+(* The Local/Docker split of the playground root is spelled once, in
+   [Keeper_sandbox_config]. It used to be written here as well, so the two
+   roots a keeper can own ([.masc/playground/<k>/] and
+   [.masc/playground/docker/<k>/]) were constructed in two places (#21837).
+   The match stays exhaustive, so a new backend still has to declare its
+   root. *)
 let host_root_rel_of_backend ~(backend : backend) name =
-  match backend with
-  | Local -> Playground_paths.bundle_root name
-  | Docker ->
-      Printf.sprintf "%s/docker/%s/"
-        Playground_paths.all_playgrounds_prefix
-        (Playground_paths.sanitize_keeper_name name)
+  Keeper_sandbox_config.host_root_rel_of_profile
+    (match backend with
+     | Local -> Keeper_sandbox_config.Local
+     | Docker -> Keeper_sandbox_config.Docker)
+    name
 
 let host_root_rel_of_profile sandbox_profile name =
   host_root_rel_of_backend
@@ -168,8 +171,6 @@ let of_meta ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_me
        | Local -> None
        | Docker -> Some (container_root meta.name))
   ; root_arg = "."
-  ; repos_arg = "repos"
-  ; task_overlay_pattern = "repos/<repo>"
   }
 
 let allowed_root_rel_of_meta ~(meta : Keeper_meta_contract.keeper_meta) : string =
@@ -267,11 +268,5 @@ let context_status_fields (t : t) : (string * Yojson.Safe.t) list =
   ; "sandbox_network_mode", `String t.network_mode
   ; "sandbox_lifetime", `String storage_lifetime
   ; "sandbox_root", `String t.root_arg
-  ; "sandbox_repos", `String t.repos_arg
-  ; "sandbox_task_overlay_pattern", `String t.task_overlay_pattern
-  ; ( "sandbox_paths"
-    , `Assoc
-        [ "root", `String t.root_arg
-        ; "repos", `String t.repos_arg
-        ] )
+  ; "sandbox_paths", `Assoc [ "root", `String t.root_arg ]
   ]

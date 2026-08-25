@@ -2,7 +2,6 @@ import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback, useMemo, useState } from 'preact/hooks'
 import { AtSign, Mic, Paperclip, Sparkles, Square, Trophy, X } from 'lucide-preact'
 import { ActionButton } from '../common/button'
-import { SectionCard } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
 import { showToast } from '../common/toast'
 import { requestConfirm } from '../common/confirm-dialog'
@@ -14,8 +13,9 @@ import { RichContent } from '../common/rich-content'
 import { CursorPagination } from '../common/pagination'
 import { route } from '../../router'
 import { keepers as dashboardKeepers, messages, refreshExecution } from '../../store'
-import { votePost } from '../../api/board'
-import { createPost, currentDashboardActor, sendBroadcast } from '../../api'
+import { fetchBoardReactionsBatch, votePost } from '../../api/board'
+import type { BoardReactionSummary } from '../../types'
+import { broadcastReceiptMessage, createPost, currentDashboardActor, sendBroadcast } from '../../api'
 import { deleteBoardPost, setBoardPostPinned } from '../../api/actions'
 import { dispatchOperatorAction, operatorActionBusy } from '../../operator-store'
 import { registerBoardHearthsRefresh } from '../../sse-store'
@@ -66,12 +66,14 @@ import {
   boardLoading,
   boardLoadingMore,
   boardHasMore,
+  boardTotal,
+  boardHiddenCategories,
   lastBoardRefreshAt,
   refreshBoard,
   loadMoreBoardPosts,
   PAGE_SIZE,
+  feedVisibleLimit,
   CONTENT_CATEGORIES,
-  categoryVisibleLimits,
   detailPost,
   detailLoading,
   detailPostId,
@@ -81,16 +83,16 @@ import {
   loadPostDetail,
   togglePostSelection,
   splitVisiblePosts,
+  contentCategory,
   categoryLabel,
   refreshBoardHearths,
   refreshBoardFlairs,
   selectedBoardPostId,
-  boardFilterMode,
   boardSortMode,
   boardComposerMode,
   SORT_MODES,
 } from './board-state'
-import type { BoardPost, BoardSortMode, ContentCategory } from './board-state'
+import type { BoardPost, BoardSortMode } from './board-state'
 
 export const BOARD_DETAIL_WIDTH_STORAGE_KEY = 'dashboard:board-detail-width'
 export const BOARD_DETAIL_WIDTH_DEFAULT = 360
@@ -176,108 +178,6 @@ function ScrollMarker({ onVisible }: { onVisible: () => void }) {
   return html`<div ref=${ref} class="h-1" />`
 }
 
-// ── Render section (paginated group by category) ──────────────────
-/** Expand the visible slice for this category by PAGE_SIZE.
- *  If the category has run out of locally-loaded posts AND the server
- *  still has more, also trigger a server-side page fetch. */
-function expandCategory(
-  category: ContentCategory,
-  limits: Record<string, number>,
-  currentLimit: number,
-  localPostCount: number,
-) {
-  const nextLimit = currentLimit + PAGE_SIZE
-  categoryVisibleLimits.value = { ...limits, [category]: nextLimit }
-  // Exhausted the locally-loaded slice for this category — ask the server
-  // for more. loadMoreBoardPosts is a noop if already loading or has_more=false.
-  if (nextLimit >= localPostCount && boardHasMore.value) {
-    void loadMoreBoardPosts()
-  }
-}
-
-function collapseCategory(
-  category: ContentCategory,
-  limits: Record<string, number>,
-  currentLimit: number,
-) {
-  const nextLimit = Math.max(PAGE_SIZE, currentLimit - PAGE_SIZE)
-  categoryVisibleLimits.value = { ...limits, [category]: nextLimit }
-}
-
-function renderCategorySection(
-  category: ContentCategory,
-  posts: BoardPost[],
-  total: number,
-  hidden: number,
-) {
-  const meta = CONTENT_CATEGORIES.find(c => c.id === category)
-  const label = meta ? `${meta.icon} ${meta.label}` : category
-  const limits = categoryVisibleLimits.value
-  const limit = limits[category] ?? PAGE_SIZE
-  // "has more" considers both the locally-loaded posts and the server's
-  // signal. Without boardHasMore, once the category's slice catches up to
-  // the loaded window the button disappears and the next server page is
-  // never requested — that was the #7118 regression.
-  const hasMoreLocal = posts.length > limit
-  const hasMoreRemote = boardHasMore.value
-  const hasMore = hasMoreLocal || hasMoreRemote
-  const loadingMore = boardLoadingMore.value
-  const remainingLabel = hasMoreLocal
-    ? `${posts.length - limit}개 남음`
-    : '다음 페이지 불러오기'
-  const visibleCount = Math.min(limit, posts.length)
-  const cursorLabel = hasMoreRemote && !hasMoreLocal
-    ? `${visibleCount} / ${total}+`
-    : `${visibleCount} / ${total}`
-
-  if (posts.length === 0 && hidden === 0) return null
-  if (posts.length === 0 && hidden > 0) {
-    return html`
-      <div class="v2-workspace-panel mb-3 px-3 py-2 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] text-xs text-[var(--color-fg-muted)]">
-        ${label} — ${hidden}건 숨김
-      </div>
-    `
-  }
-
-  return html`
-    <${SectionCard} label=${`${label} (${total})`} class="mb-4 v2-workspace-panel ss-card" variant="standard">
-      <div class="flex flex-col gap-2">
-        ${posts.slice(0, limit).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
-      </div>
-      ${hasMore ? html`
-        <${ScrollMarker} onVisible=${() => {
-          if (loadingMore) return
-          expandCategory(category, limits, limit, posts.length)
-        }} />
-        <div class="flex justify-center py-3">
-          <${CursorPagination}
-            class="bd-category-pagination"
-            cursor=${cursorLabel}
-            cursorLabel="표시"
-            hasPrevious=${limit > PAGE_SIZE}
-            hasNext=${hasMore}
-            previousLabel="줄이기"
-            nextLabel=${loadingMore ? '불러오는 중...' : `더 보기 (${remainingLabel})`}
-            ariaLabel=${`${categoryLabel(category)} 게시글 페이지`}
-            disabled=${loadingMore}
-            testId=${`board-category-pagination-${category}`}
-            onPrevious=${() => {
-              collapseCategory(category, limits, limit)
-            }}
-            onNext=${() => {
-              expandCategory(category, limits, limit, posts.length)
-            }}
-          />
-        </div>
-      ` : null}
-    <//>
-  `
-}
-
-function CategorySection({ group }: { group: { category: ContentCategory; posts: BoardPost[]; total: number; hidden: number } }) {
-  return renderCategorySection(group.category, group.posts, group.total, group.hidden)
-}
-
 // ── Board summary stats (compact inline) ─────────────────────────
 function renderLatencyChip(label: string, metric: BoardLatencyMetric) {
   if (metric.last_latency_ms === null) return null
@@ -356,7 +256,12 @@ function BdAuthor({ label, size = 24 }: { label: string; size?: number }) {
 }
 
 // ── Post card (v2 list item) ───────────────────────────────────────
-function PostCard({ post }: { post: BoardPost }) {
+function PostCard({ post, reactions, supportedEmojis, reactionsArriving = false }: {
+  post: BoardPost
+  reactions?: BoardReactionSummary[]
+  supportedEmojis?: readonly string[]
+  reactionsArriving?: boolean
+}) {
   const isDeleting = deletingPostId.value === post.id
   const previewBody = dedupeLeadingHeading(post.title, post.body)
   const authorLabel = boardActorDisplayName(post.author, post.author_identity)
@@ -364,10 +269,11 @@ function PostCard({ post }: { post: BoardPost }) {
   const authorTitle = boardActorTitle(post.author, post.author_identity)
   const upvoteActive = post.current_vote === 'up'
   const downvoteActive = post.current_vote === 'down'
-  const voteScoreLabel = post.vote_blind ? '투표 후 공개' : String(post.votes ?? 0)
-  const voteScoreAria = post.vote_blind ? '점수 투표 후 공개' : `점수 ${post.votes ?? 0}`
-  const isMod = post.moderation_status && post.moderation_status !== 'none' && post.moderation_status !== 'approved'
+  const voteScoreLabel = String(post.votes)
+  const voteScoreAria = `점수 ${post.votes}`
   const selected = selectedBoardPostId.value === post.id
+  const category = contentCategory(post)
+  const categoryMeta = CONTENT_CATEGORIES.find(item => item.id === category)
 
   const handleVote = async (dir: 'up' | 'down', event: Event) => {
     event.stopPropagation()
@@ -446,7 +352,7 @@ function PostCard({ post }: { post: BoardPost }) {
           }}
         >${authorLabel}</a>
         ${post.pinned ? html`<span class="bd-badge pin" title="고정된 게시글">고정</span>` : null}
-        ${isMod ? html`<span class="bd-badge mod">모더레이션 대기</span>` : null}
+        <span class="bd-badge" title="게시글 분류">${categoryMeta?.icon ?? ''} ${categoryLabel(category)}</span>
         ${post.flair ? html`<span class="bd-badge">flair:${post.flair}</span>` : null}
         ${boardHearthFilter.value === '' && post.hearth ? html`<span class="bd-badge">${post.hearth}</span>` : null}
         <span class="ts"><${TimeAgo} timestamp=${post.created_at} /></span>
@@ -474,8 +380,9 @@ function PostCard({ post }: { post: BoardPost }) {
             targetType="post"
             targetId=${post.id}
             compact
-            initialSummaries=${post.reactions ?? []}
-            supportedEmojis=${post.supported_reaction_emojis}
+            initialSummaries=${reactions ?? post.reactions ?? []}
+            supportedEmojis=${supportedEmojis ?? post.supported_reaction_emojis}
+            summariesArriving=${reactionsArriving}
           />
         </div>
         <span class="karma" aria-label=${voteScoreAria} title=${voteScoreLabel}>karma <b>${voteScoreLabel}</b></span>
@@ -541,8 +448,8 @@ function BdRail({ activeSub, onSub, onMentions }: {
   onMentions: () => void
 }) {
   const hearths = boardHearths.value
-  const allCount = boardPosts.value.length
-  const modCount = useMemo(() => boardPosts.value.filter(p => p.moderation_status && p.moderation_status !== 'none' && p.moderation_status !== 'approved').length, [boardPosts.value])
+  const allCount = boardTotal.value ?? boardPosts.value.length
+  const allCountLabel = boardTotal.value === null && boardHasMore.value ? `${allCount}+` : String(allCount)
   const mentionCount = useMemo(() => countMentionMessages(), [messages.value])
 
   return html`
@@ -557,7 +464,10 @@ function BdRail({ activeSub, onSub, onMentions }: {
         >
           <span class="glyph">${SUB_BOARD_GLYPHS.all}</span>
           <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>전체</span>
-          <span class="n">${allCount}</span>
+          <span
+            class="n"
+            title=${boardTotal.value === null && boardHasMore.value ? `${allCount}개 이상 · 현재 불러온 게시글 기준` : `전체 ${allCount}개`}
+          >${allCountLabel}</span>
         </button>
         ${hearths.map(hearth => html`
           <button
@@ -576,11 +486,6 @@ function BdRail({ activeSub, onSub, onMentions }: {
       <div class="bd-queue-section">
         <div class="div"></div>
         <h4>큐</h4>
-        <button type="button" class="bd-sub" onClick=${() => { boardFilterMode.value = 'mod'; onMentions() }} data-testid="bd-queue-mod">
-          <span class="glyph">⚑</span>
-          모더레이션
-          <span class="n">${modCount}</span>
-        </button>
         <button type="button" class="bd-sub" onClick=${onMentions} data-testid="bd-queue-mentions">
           <span class="glyph">＠</span>
           멘션 인박스
@@ -591,10 +496,8 @@ function BdRail({ activeSub, onSub, onMentions }: {
   `
 }
 
-function BdFeedHead({ activeFilter, onFilter, count, contentQuery, onContentQuery, sortMode, onSort }: {
-  activeFilter: 'all' | 'mod'
-  onFilter: (filter: 'all' | 'mod') => void
-  count: number
+function BdFeedHead({ countLabel, contentQuery, onContentQuery, sortMode, onSort }: {
+  countLabel: string
   contentQuery: string
   onContentQuery: (value: string) => void
   sortMode: BoardSortMode
@@ -604,15 +507,11 @@ function BdFeedHead({ activeFilter, onFilter, count, contentQuery, onContentQuer
   // Prototype board.jsx:158 renders the bare hearth label (e.g. "core/scheduler")
   // with no "#" prefix; the hearth name already carries its namespace path.
   const title = activeHearth === '' ? '전체 피드' : activeHearth
-  const filters: Array<{ key: 'all' | 'mod'; label: string }> = [
-    { key: 'all', label: '전체' },
-    { key: 'mod', label: '모더레이션' },
-  ]
 
   return html`
     <div class="bd-feed-head">
       <h2>${title}</h2>
-      <span class="ns">${count}개 포스트</span>
+      <span class="ns">${countLabel}</span>
       <${TextInput}
         type="search"
         value=${contentQuery}
@@ -629,16 +528,6 @@ function BdFeedHead({ activeFilter, onFilter, count, contentQuery, onContentQuer
         class="!w-auto min-w-32 !px-2 !py-1 !text-xs"
         onInput=${(value: string) => onSort(value as BoardSortMode)}
       />
-      <span class="spacer"></span>
-      ${filters.map(f => html`
-        <button
-          key=${f.key}
-          type="button"
-          class=${`bd-filter ${activeFilter === f.key ? 'on' : ''}`}
-          onClick=${() => onFilter(f.key)}
-          data-testid=${`bd-filter-${f.key}`}
-        >${f.label}</button>
-      `)}
     </div>
   `
 }
@@ -737,7 +626,17 @@ function BdThreadDetail({
             <div class="bd-th-hd"><span class="who">${authorLabel}</span><span class="ts mono"><${TimeAgo} timestamp=${post.created_at} /></span></div>
             <div class="bd-th-body">
               <div class="text-sm font-semibold mb-1">${stripInlineMarkdown(post.title)}</div>
-              <div class="mb-2"><${PostShareActions} post=${post} /></div>
+              <div class="mb-2 flex flex-wrap items-center gap-2">
+                <${ActionButton}
+                  variant="ghost"
+                  size="sm"
+                  class="v2-workspace-action"
+                  onClick=${() => navigateBoard({ post: post.id })}
+                  ariaLabel=${`전체 상세 보기: ${post.id}`}
+                  testId=${`bd-open-full-detail-${post.id}`}
+                >전체 상세 보기<//>
+                <${PostShareActions} post=${post} />
+              </div>
               <${RichContent} text=${post.body} previewLimit=${4} />
               <${FusionBoardEvidence} post=${evidencePost} class="mt-3" />
             </div>
@@ -987,7 +886,14 @@ function BdComposer() {
           payload: { message },
         })
       } else {
-        await sendBroadcast(currentDashboardActor(), message)
+        const receipt = await sendBroadcast(currentDashboardActor(), message)
+        if (!receipt.ok) {
+          setLocalBody('')
+          resetMobileMentionDrafts()
+          setMobileOpen(false)
+          showToast(broadcastReceiptMessage(receipt), 'warning')
+          return
+        }
       }
       setLocalBody('')
       resetMobileMentionDrafts()
@@ -1279,30 +1185,14 @@ function BdComposer() {
 }
 
 function BdMobileQueues({
-  activeFilter,
   mentionCount,
-  modCount,
-  onFilter,
   onMentions,
 }: {
-  activeFilter: 'all' | 'mod'
   mentionCount: number
-  modCount: number
-  onFilter: (filter: 'all' | 'mod') => void
   onMentions: () => void
 }) {
   return html`
     <div class="bd-mobile-queues" aria-label="Board mobile queues" data-testid="bd-mobile-queues">
-      <button
-        type="button"
-        class=${`bd-mobile-queue ${activeFilter === 'mod' ? 'on' : ''}`}
-        onClick=${() => onFilter('mod')}
-        data-testid="bd-mobile-queue-mod"
-      >
-        <span class="glyph">⚑</span>
-        모더레이션
-        <span class="n">${modCount}</span>
-      </button>
       <button
         type="button"
         class="bd-mobile-queue"
@@ -1317,70 +1207,149 @@ function BdMobileQueues({
   `
 }
 
+function UnifiedBoardFeed({
+  posts,
+  visibleLimit,
+  onVisibleLimitChange,
+}: {
+  posts: BoardPost[]
+  visibleLimit: number
+  onVisibleLimitChange: (limit: number) => void
+}) {
+  // One request answers every row this feed draws. The board list is a public,
+  // cached projection and reaction state is per viewer, so it cannot ride in
+  // that response -- and asking per row made twenty of the twenty-three
+  // requests that opening the board sent.
+  const drawnIds = posts.slice(0, visibleLimit).map(post => post.id).join(',')
+  const [batchedReactions, setBatchedReactions] = useState<{
+    byTargetId: Map<string, BoardReactionSummary[]>
+    supportedEmojis: readonly string[]
+  } | null>(null)
+  useEffect(() => {
+    const ids = drawnIds === '' ? [] : drawnIds.split(',')
+    if (ids.length === 0) {
+      setBatchedReactions({ byTargetId: new Map(), supportedEmojis: [] })
+      return
+    }
+    let cancelled = false
+    setBatchedReactions(null)
+    void fetchBoardReactionsBatch('post', ids)
+      .then(next => { if (!cancelled) setBatchedReactions(next) })
+      .catch(err => {
+        // Each bar falls back to fetching its own, which is what it did before.
+        console.warn('[board] reaction batch failed', err instanceof Error ? err.message : err)
+        if (!cancelled) setBatchedReactions({ byTargetId: new Map(), supportedEmojis: [] })
+      })
+    return () => { cancelled = true }
+  }, [drawnIds])
+
+  const hasMoreLocal = posts.length > visibleLimit
+  const hasMoreRemote = boardHasMore.value
+  const hasMore = hasMoreLocal || hasMoreRemote
+  const loadingMore = boardLoadingMore.value
+  const visibleCount = Math.min(visibleLimit, posts.length)
+  const remainingLabel = hasMoreLocal
+    ? `${posts.length - visibleLimit}개 남음`
+    : '다음 페이지 불러오기'
+  const cursorLabel = hasMoreRemote && !hasMoreLocal
+    ? `${visibleCount} / ${posts.length}+`
+    : `${visibleCount} / ${posts.length}`
+
+  const expand = () => {
+    if (loadingMore) return
+    const nextLimit = visibleLimit + PAGE_SIZE
+    onVisibleLimitChange(nextLimit)
+    if (nextLimit >= posts.length && boardHasMore.value) void loadMoreBoardPosts()
+  }
+
+  return html`
+    <div class="flex flex-col gap-2" data-testid="bd-unified-feed">
+      ${posts.slice(0, visibleLimit).map(post => html`<${PostCard}
+        key=${post.id}
+        post=${post}
+        reactions=${batchedReactions?.byTargetId.get(post.id)}
+        supportedEmojis=${batchedReactions && batchedReactions.supportedEmojis.length > 0
+          ? batchedReactions.supportedEmojis
+          : undefined}
+        reactionsArriving=${batchedReactions === null} />`)}
+    </div>
+    ${hasMore ? html`
+      <${ScrollMarker} onVisible=${expand} />
+      <div class="flex justify-center py-3">
+        <${CursorPagination}
+          class="bd-feed-pagination"
+          cursor=${cursorLabel}
+          cursorLabel="표시"
+          hasPrevious=${visibleLimit > PAGE_SIZE}
+          hasNext=${hasMore}
+          previousLabel="줄이기"
+          nextLabel=${loadingMore ? '불러오는 중...' : `더 보기 (${remainingLabel})`}
+          ariaLabel="전체 게시글 페이지"
+          disabled=${loadingMore}
+          testId="board-feed-pagination"
+          onPrevious=${() => onVisibleLimitChange(Math.max(PAGE_SIZE, visibleLimit - PAGE_SIZE))}
+          onNext=${expand}
+        />
+      </div>
+    ` : null}
+  `
+}
+
 function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => void }) {
   const [contentQuery, setContentQuery] = useState('')
+  const visibleLimit = feedVisibleLimit.value
   const filteredPosts = useMemo(
     () => filterBoardPosts(posts, contentQuery),
     [posts, contentQuery],
   )
   const isFiltering = contentQuery.trim() !== ''
-  const visibleGroups = useMemo(() => splitVisiblePosts(filteredPosts), [filteredPosts])
-  const mentionCount = useMemo(() => countMentionMessages(), [messages.value])
-  const modCount = useMemo(
-    () => posts.filter(post => post.moderation_status && post.moderation_status !== 'none' && post.moderation_status !== 'approved').length,
-    [posts],
+  const visiblePosts = useMemo(
+    () => filteredPosts.filter(post => !boardHiddenCategories.value.has(contentCategory(post))),
+    [filteredPosts, boardHiddenCategories.value],
   )
-
-  const modeFilteredGroups = useMemo(() => visibleGroups.groups.map(g => ({
-    ...g,
-    posts: g.posts.filter(post => {
-      if (boardFilterMode.value === 'mod') return post.moderation_status && post.moderation_status !== 'none' && post.moderation_status !== 'approved'
-      return true
-    }),
-  })), [visibleGroups, boardFilterMode.value])
-  const filteredByMode = useMemo(() => modeFilteredGroups.flatMap(g => g.posts), [modeFilteredGroups])
+  const mentionCount = useMemo(() => countMentionMessages(), [messages.value])
+  const countLabel = isFiltering
+    ? `${visiblePosts.length}개 표시`
+    : boardTotal.value !== null
+      ? `전체 ${boardTotal.value}개`
+      : boardHasMore.value
+        ? `현재 ${visiblePosts.length}개 불러옴 · 더 있음`
+        : `전체 ${visiblePosts.length}개`
 
   return html`
     <section class="bd-feed">
       <${BdFeedHead}
-        activeFilter=${boardFilterMode.value}
-        onFilter=${(filter: 'all' | 'mod') => { boardFilterMode.value = filter }}
-        count=${filteredByMode.length}
+        countLabel=${countLabel}
         contentQuery=${contentQuery}
-        onContentQuery=${setContentQuery}
+        onContentQuery=${(query: string) => {
+          setContentQuery(query)
+          feedVisibleLimit.value = PAGE_SIZE
+        }}
         sortMode=${boardSortMode.value}
         onSort=${(sortMode: BoardSortMode) => {
           if (boardSortMode.value === sortMode) return
           boardSortMode.value = sortMode
-          categoryVisibleLimits.value = {
-            article: PAGE_SIZE,
-            review: PAGE_SIZE,
-            notice: PAGE_SIZE,
-            system: PAGE_SIZE,
-          }
+          feedVisibleLimit.value = PAGE_SIZE
           selectedBoardPostId.value = null
           refreshBoard()
         }}
       />
       <${BdMobileQueues}
-        activeFilter=${boardFilterMode.value}
         mentionCount=${mentionCount}
-        modCount=${modCount}
-        onFilter=${(filter: 'all' | 'mod') => { boardFilterMode.value = filter }}
         onMentions=${onMentions}
       />
       <div class="bd-list">
-        ${isFiltering && filteredByMode.length === 0 && posts.length > 0
+        ${isFiltering && visiblePosts.length === 0 && posts.length > 0
           ? html`<div class="ov-empty">필터 결과 없음 (${posts.length} items)</div>`
-          : filteredByMode.length === 0 && boardLoading.value
+          : visiblePosts.length === 0 && boardLoading.value
             ? html`<${LoadingState} title="게시판 불러오는 중…" />`
-            : filteredByMode.length === 0
+            : visiblePosts.length === 0
               ? html`<${EmptyState} title="아직 게시글이 없습니다" hint="에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
-              : modeFilteredGroups.map(g =>
-                  g.posts.length > 0
-                    ? html`<${CategorySection} key=${g.category} group=${{ category: g.category, posts: g.posts, total: g.total, hidden: g.hidden }} />`
-                    : null,
-                )}
+              : html`<${UnifiedBoardFeed}
+                  posts=${visiblePosts}
+                  visibleLimit=${visibleLimit}
+                  onVisibleLimitChange=${(limit: number) => { feedVisibleLimit.value = limit }}
+                />`}
       </div>
       <${BdComposer} />
     </section>

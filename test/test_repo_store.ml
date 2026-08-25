@@ -2,16 +2,6 @@
 
 open Repo_manager_types
 
-let contains_substring s needle =
-  let s_len = String.length s in
-  let n_len = String.length needle in
-  let rec loop i =
-    if i + n_len > s_len then false
-    else if String.sub s i n_len = needle then true
-    else loop (i + 1)
-  in
-  if n_len = 0 then true else loop 0
-
 let is_symlink path =
   try (Unix.lstat path).st_kind = Unix.S_LNK
   with Unix.Unix_error _ | Sys_error _ -> false
@@ -140,7 +130,7 @@ let test_add_duplicate_fails () =
           | Ok _ -> Alcotest.fail "expected error for duplicate"
           | Error msg ->
               Alcotest.(check bool) "mentions already exists" true
-              (contains_substring msg "already exists")))
+              (String_util.contains_substring msg "already exists")))
 
 let test_add_rejects_blank_local_path () =
   with_temp_base_path (fun base_path ->
@@ -149,7 +139,7 @@ let test_add_rejects_blank_local_path () =
       | Ok _ -> Alcotest.fail "blank local_path must be rejected"
       | Error error ->
         Alcotest.(check bool) "names local_path" true
-          (contains_substring error "local_path"))
+          (String_util.contains_substring error "local_path"))
 
 let test_find_existing () =
   with_temp_base_path (fun base_path ->
@@ -166,7 +156,7 @@ let test_find_missing () =
       match Repo_store.find ~base_path "missing" with
       | Ok _ -> Alcotest.fail "expected error for missing repo"
       | Error msg ->
-          Alcotest.(check bool) "mentions not found" true (contains_substring msg "not found"))
+          Alcotest.(check bool) "mentions not found" true (String_util.contains_substring msg "not found"))
 
 let test_remove_existing () =
   with_temp_base_path (fun base_path ->
@@ -187,7 +177,7 @@ let test_remove_missing () =
       match Repo_store.remove ~base_path "missing" with
       | Ok _ -> Alcotest.fail "expected error for missing repo"
       | Error msg ->
-          Alcotest.(check bool) "mentions not found" true (contains_substring msg "not found"))
+          Alcotest.(check bool) "mentions not found" true (String_util.contains_substring msg "not found"))
 
 let test_update_status_existing () =
   with_temp_base_path (fun base_path ->
@@ -210,7 +200,7 @@ let test_update_status_missing () =
       match Repo_store.update_status ~base_path "missing" Paused with
       | Ok _ -> Alcotest.fail "expected error for missing repo"
       | Error msg ->
-          Alcotest.(check bool) "mentions not found" true (contains_substring msg "not found"))
+          Alcotest.(check bool) "mentions not found" true (String_util.contains_substring msg "not found"))
 
 let test_update_existing () =
   with_temp_base_path (fun base_path ->
@@ -231,7 +221,7 @@ let test_update_missing () =
       match Repo_store.update ~base_path "missing" (sample_repo "missing") with
       | Ok _ -> Alcotest.fail "expected error for missing repo"
       | Error msg ->
-          Alcotest.(check bool) "mentions not found" true (contains_substring msg "not found"))
+          Alcotest.(check bool) "mentions not found" true (String_util.contains_substring msg "not found"))
 
 let test_update_rejects_blank_local_path () =
   with_temp_base_path (fun base_path ->
@@ -244,7 +234,7 @@ let test_update_rejects_blank_local_path () =
         | Ok _ -> Alcotest.fail "blank local_path must be rejected"
         | Error error ->
           Alcotest.(check bool) "names local_path" true
-            (contains_substring error "local_path"))
+            (String_util.contains_substring error "local_path"))
 
 let test_local_path_absolute_preserved () =
   let repo = { (sample_repo "abs") with local_path = "/absolute/path" } in
@@ -286,7 +276,7 @@ let test_load_rejects_incomplete_repository () =
       | Ok _ -> Alcotest.fail "incomplete repository row must be rejected"
       | Error error ->
           Alcotest.(check bool) "names first missing field" true
-            (contains_substring error "repository.demo.local_path"))
+            (String_util.contains_substring error "repository.demo.local_path"))
 
 let test_load_rejects_missing_repository_table () =
   with_temp_base_path (fun base_path ->
@@ -296,7 +286,7 @@ let test_load_rejects_missing_repository_table () =
       | Ok _ -> Alcotest.fail "catalog without repository table must be rejected"
       | Error error ->
           Alcotest.(check bool) "names required table" true
-            (contains_substring error "required repository table"))
+            (String_util.contains_substring error "required repository table"))
 
 let test_load_rejects_unknown_top_level_field () =
   with_temp_base_path (fun base_path ->
@@ -306,7 +296,7 @@ let test_load_rejects_unknown_top_level_field () =
       | Ok _ -> Alcotest.fail "unknown top-level field must be rejected"
       | Error error ->
         Alcotest.(check bool) "names unknown top-level field" true
-          (contains_substring error "unknown top-level field answer"))
+          (String_util.contains_substring error "unknown top-level field answer"))
 
 let test_load_rejects_noncanonical_status () =
   with_temp_base_path (fun base_path ->
@@ -328,7 +318,7 @@ let test_load_rejects_noncanonical_status () =
       | Ok _ -> Alcotest.fail "noncanonical status must be rejected"
       | Error error ->
           Alcotest.(check bool) "names rejected status" true
-            (contains_substring error "Unknown repository status: active"))
+            (String_util.contains_substring error "Unknown repository status: active"))
 
 let test_load_rejects_unknown_field () =
   with_temp_base_path (fun base_path ->
@@ -351,7 +341,7 @@ let test_load_rejects_unknown_field () =
       | Ok _ -> Alcotest.fail "unknown repository field must be rejected"
       | Error error ->
           Alcotest.(check bool) "names unknown field" true
-            (contains_substring error "repository.demo.retired_path"))
+            (String_util.contains_substring error "repository.demo.retired_path"))
 
 let test_load_rejects_wrong_field_type () =
   with_temp_base_path (fun base_path ->
@@ -361,7 +351,7 @@ let test_load_rejects_wrong_field_type () =
       | Ok _ -> Alcotest.fail "wrong field type must be rejected"
       | Error error ->
         Alcotest.(check bool) "names wrong field" true
-          (contains_substring error "repository.demo.aliases"))
+          (String_util.contains_substring error "repository.demo.aliases"))
 
 let test_error_status_requires_message () =
   with_temp_base_path (fun base_path ->
@@ -371,7 +361,7 @@ let test_error_status_requires_message () =
       | Ok _ -> Alcotest.fail "Error status without status_error must be rejected"
       | Error error ->
         Alcotest.(check bool) "names required status_error" true
-          (contains_substring error "repository.demo.status_error"))
+          (String_util.contains_substring error "repository.demo.status_error"))
 
 let run_git_quiet args =
   let devnull = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
@@ -432,18 +422,18 @@ let test_discover_finds_grouped_workspace_repos () =
     with_temp_base_path (fun base_path ->
         let workspace = Filename.concat base_path "workspace" in
         let group = Filename.concat workspace "yousleepwhen" in
-        let repo_dir = Filename.concat group "oas" in
+        let repo_dir = Filename.concat group "agent_core" in
         Unix.mkdir workspace 0o755;
         Unix.mkdir group 0o755;
         Unix.mkdir repo_dir 0o755;
-        init_git_repo repo_dir "https://github.com/test/oas";
+        init_git_repo repo_dir "https://example.com/agent-core";
         match Repo_store.discover_repositories ~base_path with
         | Error e -> Alcotest.fail ("discover failed: " ^ e)
         | Ok repos ->
             Alcotest.(check int) "finds grouped workspace repo" 1
               (List.length repos);
             let repo = List.hd repos in
-            Alcotest.(check string) "id" "oas" repo.id;
+            Alcotest.(check string) "id" "agent_core" repo.id;
             Alcotest.(check string) "local_path" (canonical_path repo_dir) repo.local_path)
 
 let test_discover_keeps_depth_cap () =
@@ -539,6 +529,122 @@ let test_discover_skips_registered () =
                 Alcotest.(check int) "skips already registered" 0
                   (List.length repos)))
 
+let test_discover_origin_budget_is_cumulative () =
+  with_temp_base_path (fun base_path ->
+    let fake_bin = Filename.concat base_path "fake-bin" in
+    Unix.mkdir fake_bin 0o755;
+    let fake_git = Filename.concat fake_bin "git" in
+    write_file fake_git "#!/bin/sh\nexec sleep 30\n";
+    Unix.chmod fake_git 0o755;
+    List.iter
+      (fun name ->
+         let repo = Filename.concat base_path name in
+         Unix.mkdir repo 0o755;
+         Unix.mkdir (Filename.concat repo ".git") 0o755)
+      [ "stalled-a"; "stalled-b" ];
+    let old_path = Sys.getenv "PATH" in
+    Fun.protect
+      ~finally:(fun () -> Unix.putenv "PATH" old_path)
+      (fun () ->
+         Unix.putenv "PATH" (fake_bin ^ ":" ^ old_path);
+         let started_at = Unix.gettimeofday () in
+         let result =
+           Repo_store.For_testing.discover_repositories_with_budget
+             ~origin_budget_sec:0.2
+             ~base_path
+         in
+         let elapsed = Unix.gettimeofday () -. started_at in
+         (match result with
+          | Error _ -> ()
+          | Ok _ -> Alcotest.fail "exhausted discovery budget returned a partial success");
+         Alcotest.(check bool)
+           "two stalled repositories share one request budget"
+           true
+           (elapsed < 1.0)))
+;;
+
+let test_discover_timeout_on_last_candidate_is_typed_failure () =
+  with_temp_base_path (fun base_path ->
+    let fake_bin = Filename.concat base_path "fake-bin" in
+    Unix.mkdir fake_bin 0o755;
+    let fake_git = Filename.concat fake_bin "git" in
+    write_file fake_git "#!/bin/sh\nexec sleep 30\n";
+    Unix.chmod fake_git 0o755;
+    let repo = Filename.concat base_path "stalled-only" in
+    Unix.mkdir repo 0o755;
+    Unix.mkdir (Filename.concat repo ".git") 0o755;
+    let old_path = Sys.getenv "PATH" in
+    Fun.protect
+      ~finally:(fun () -> Unix.putenv "PATH" old_path)
+      (fun () ->
+         Unix.putenv "PATH" (fake_bin ^ ":" ^ old_path);
+         let started_at = Unix.gettimeofday () in
+         let result =
+           Repo_store.For_testing.discover_repositories_with_budget
+             ~origin_budget_sec:0.2
+             ~base_path
+         in
+         let elapsed = Unix.gettimeofday () -. started_at in
+         (match result with
+          | Error _ -> ()
+          | Ok _ -> Alcotest.fail "timed-out final origin was silently skipped");
+         Alcotest.(check bool) "still bounded by the budget" true (elapsed < 1.0)))
+;;
+
+let test_discover_skips_missing_origin_without_failing_request () =
+  if not (git_available ()) then Alcotest.skip ()
+  else
+    with_temp_base_path (fun base_path ->
+      let without_origin = Filename.concat base_path "without-origin" in
+      Unix.mkdir without_origin 0o755;
+      init_git_repo without_origin "https://github.com/test/temporary";
+      (match Repo_git.run_git ~cwd:without_origin [ "remote"; "remove"; "origin" ] with
+       | Ok _ -> ()
+       | Error detail -> Alcotest.fail detail);
+      let with_origin = Filename.concat base_path "with-origin" in
+      Unix.mkdir with_origin 0o755;
+      init_git_repo with_origin "https://github.com/test/with-origin";
+      match Repo_store.discover_repositories ~base_path with
+      | Error detail ->
+        Alcotest.fail ("missing origin failed repository discovery: " ^ detail)
+      | Ok repos ->
+        Alcotest.(check (list string))
+          "missing-origin repository is skipped while valid candidates survive"
+          [ "with-origin" ]
+          (List.map (fun (repo : repository) -> repo.id) repos))
+;;
+
+let test_discover_origin_budget_starts_after_filesystem_scan () =
+  if not (git_available ()) then Alcotest.skip ()
+  else
+    with_temp_base_path (fun base_path ->
+      let repo = Filename.concat base_path "fast-origin" in
+      Unix.mkdir repo 0o755;
+      init_git_repo repo "https://github.com/test/fast-origin";
+      match
+        Repo_store.For_testing.discover_repositories_with_budget_after_scan
+          ~before_origin_inspection:(fun () -> Unix.sleepf 0.25)
+          ~origin_budget_sec:0.2
+          ~base_path
+      with
+      | Error detail ->
+        Alcotest.fail ("filesystem discovery consumed origin budget: " ^ detail)
+      | Ok repos ->
+        Alcotest.(check int) "fast origin remains inspectable" 1 (List.length repos))
+;;
+
+let test_discovery_warning_escapes_untrusted_fields () =
+  let line =
+    Repo_store.For_testing.discovery_skip_log_line
+      ~abs_repo_dir:"/tmp/repo\nforged"
+      ~detail:"fatal:\027[31mred"
+  in
+  Alcotest.(check string)
+    "newline and terminal escape are rendered as quoted escapes"
+    "repo discovery skipped \"/tmp/repo\\nforged\": origin unavailable (\"fatal:\\027[31mred\")"
+    line
+;;
+
 let test_register_discovered_auto_adds () =
   if not (git_available ()) then Alcotest.skip ()
   else
@@ -619,10 +725,10 @@ let with_two_absolute_repos f =
   with_temp_base_path (fun base_path ->
     init_empty_store base_path;
     let masc_path = Filename.concat base_path "workspace/masc" in
-    let oas_path = Filename.concat base_path "workspace/oas" in
+    let agent_core_path = Filename.concat base_path "workspace/agent_core" in
     Unix.mkdir (Filename.concat base_path "workspace") 0o755;
     Unix.mkdir masc_path 0o755;
-    Unix.mkdir oas_path 0o755;
+    Unix.mkdir agent_core_path 0o755;
     let masc =
       { (sample_repo "masc") with
         url = "https://github.com/jeong-sik/masc"
@@ -630,19 +736,19 @@ let with_two_absolute_repos f =
       ; aliases = [ "masc-mcp" ]
       }
     in
-    let oas =
-      { (sample_repo "oas") with
-        url = "https://github.com/jeong-sik/oas"
-      ; local_path = oas_path
+    let agent_core =
+      { (sample_repo "agent_core") with
+        url = "https://example.com/agent-core"
+      ; local_path = agent_core_path
       }
     in
-    (match Repo_store.save_all ~base_path [ masc; oas ] with
+    (match Repo_store.save_all ~base_path [ masc; agent_core ] with
      | Ok () -> ()
      | Error e -> Alcotest.fail ("save_all: " ^ e));
-    f ~base_path ~masc_path ~oas_path)
+    f ~base_path ~masc_path ~agent_core_path)
 
 let test_find_url_by_id_known () =
-  with_two_absolute_repos (fun ~base_path ~masc_path:_ ~oas_path:_ ->
+  with_two_absolute_repos (fun ~base_path ~masc_path:_ ~agent_core_path:_ ->
     match Repo_store.find_url_by_id ~base_path "masc" with
     | Ok (Some url) ->
       Alcotest.(check string)
@@ -653,14 +759,14 @@ let test_find_url_by_id_known () =
     | Error error -> Alcotest.fail ("lookup failed: " ^ error))
 
 let test_find_url_by_id_unknown () =
-  with_two_absolute_repos (fun ~base_path ~masc_path:_ ~oas_path:_ ->
+  with_two_absolute_repos (fun ~base_path ~masc_path:_ ~agent_core_path:_ ->
     match Repo_store.find_url_by_id ~base_path "nonexistent" with
     | Ok None -> ()
     | Ok (Some s) -> Alcotest.fail ("expected None for unknown, got: " ^ s)
     | Error error -> Alcotest.fail ("lookup failed: " ^ error))
 
 let test_find_repo_by_path_prefix_match () =
-  with_two_absolute_repos (fun ~base_path ~masc_path ~oas_path:_ ->
+  with_two_absolute_repos (fun ~base_path ~masc_path ~agent_core_path:_ ->
     let abs = Filename.concat masc_path "lib/foo.ml" in
     match Repo_store.find_repo_by_path_prefix ~base_path abs with
     | Ok (Some (repo, rel)) ->
@@ -670,7 +776,7 @@ let test_find_repo_by_path_prefix_match () =
     | Error error -> Alcotest.fail ("lookup failed: " ^ error))
 
 let test_find_repo_by_path_prefix_outside () =
-  with_two_absolute_repos (fun ~base_path ~masc_path:_ ~oas_path:_ ->
+  with_two_absolute_repos (fun ~base_path ~masc_path:_ ~agent_core_path:_ ->
     match Repo_store.find_repo_by_path_prefix ~base_path "/tmp/elsewhere.ml" with
     | Ok None -> ()
     | Ok (Some (repo, _)) -> Alcotest.fail ("unexpected match: " ^ repo.id)
@@ -712,7 +818,7 @@ let test_find_repo_by_path_prefix_sibling_not_matched () =
 
 let test_find_repo_by_path_prefix_root () =
   (* abs_path equals the repo's local_path itself → empty rel. *)
-  with_two_absolute_repos (fun ~base_path ~masc_path ~oas_path:_ ->
+  with_two_absolute_repos (fun ~base_path ~masc_path ~agent_core_path:_ ->
     match Repo_store.find_repo_by_path_prefix ~base_path masc_path with
     | Ok (Some (repo, rel)) ->
       Alcotest.(check string) "matched repo id" "masc" repo.id;
@@ -727,7 +833,7 @@ let test_lookup_preserves_catalog_error () =
       match Repo_store.find_url_by_id ~base_path "masc" with
       | Error error ->
         Alcotest.(check bool) "catalog error preserved" true
-          (contains_substring error "repository must be a table")
+          (String_util.contains_substring error "repository must be a table")
       | Ok _ -> Alcotest.fail "catalog error must not become a missing lookup")
 
 let () =
@@ -811,6 +917,16 @@ let () =
           Alcotest.test_case "relative base path keeps visible repos" `Quick
             test_discover_relative_base_path_keeps_visible_repos;
           Alcotest.test_case "skips registered repos" `Quick test_discover_skips_registered;
+          Alcotest.test_case "skips missing origin without failing discovery" `Quick
+            test_discover_skips_missing_origin_without_failing_request;
+          Alcotest.test_case "shares one origin inspection budget" `Quick
+            test_discover_origin_budget_is_cumulative;
+          Alcotest.test_case "starts origin budget after filesystem scan" `Quick
+            test_discover_origin_budget_starts_after_filesystem_scan;
+          Alcotest.test_case "timeout on the last candidate is a typed failure" `Quick
+            test_discover_timeout_on_last_candidate_is_typed_failure;
+          Alcotest.test_case "escapes discovery warning fields" `Quick
+            test_discovery_warning_escapes_untrusted_fields;
         ] );
       ( "registration",
         [

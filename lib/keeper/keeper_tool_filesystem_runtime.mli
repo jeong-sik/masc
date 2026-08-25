@@ -1,35 +1,32 @@
 (** Filesystem runtime handlers for descriptor-backed Read/Edit/Write tools. *)
 
-val resolve_partition_for_write
+val valid_fs_write_mode_strings : string list
+(** The canonical enum [Tool_shard_types_enum_mirrors.fs_write_mode_enum_strings]
+    hand-copies. Exported so test_enum_mirror_sync can compare the copy against
+    it; the mirror module names this value as the owner. *)
+val resolve_write_attribution
   :  base_dir:string
-  -> kind:string
   -> file_path:string
-  -> Agent_observation.codebase_partition * string
-(** RFC-0128 §4.5. Reverse-lookup helper used by [track_write_region]
-    to decide which neutral observation partition a keeper write
-    belongs to and what its repo-relative file path is. Exposed for
-    testing so the sandbox/working-tree join invariant can be
-    verified directly.
+  -> Agent_observation.file_attribution
+(** RFC-0378 §5.1. The system's only [Code_address] mint, used by
+    [track_write_region] and the tool-event hook to decide where a
+    keeper write belongs. Exposed for testing so the
+    sandbox/working-tree join invariant can be verified directly.
 
-    Returns:
-    - [(By_url slug, rel_path)] when the file lives under a registered
-      repository whose [url] normalises via
-      {!Agent_observation.canonical_url_of_remote}. [rel_path] is the path
-      relative to that repository's [local_path].
-    - [(No_canonical_url, original_path)] when a matched repository has a blank
-      or malformed [url].
-    - [(Base_unresolved, original_path)] when no registered repository contains
-      the path.
-    - [(Unmatched, original_path)] when a sandbox playground [repo_id] cannot
-      be found in the repository store.
-
-      The three non-[By_url] variants all write under the shared
-      [.masc-ide/_orphan/] directory, but keep the typed reason in memory and
-      in emitted observation records. Increments [masc_ide_orphan_writes_total]
-      with the concrete failure reason label ([unregistered_repo] /
-      [blank_url] / [url_unparseable] / sandbox variants).
-
-    [kind] selects the metric label ([annotation] or [region]). *)
+    [Addressed] carries the parsed address when the file lives under a
+    registered repository (sandbox playground parse or [local_path]
+    prefix) whose [url] normalises via
+    {!Agent_observation.canonical_url_of_remote}; the repo-relative
+    path is lexically dot-collapsed before minting. A path inside a
+    linked git worktree of the matched repository folds to the {e same}
+    address as the main-tree path — decided by git itself
+    ({!Repo_git.checkout_identity}: the file's [--git-common-dir]
+    equals the matched root's [.git]), never by a path convention —
+    with the measured checkout root carried as the [checkout]
+    projection metadata (#28968, RFC-0378 §5.1/§9,
+    RFC-keeper-workspace-root-only §3.2).
+    [Unaddressed] carries the typed reason and the path exactly as the
+    resolver saw it. Total — never raises. *)
 
 val handle_read_file_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
@@ -37,6 +34,14 @@ val handle_read_file_with_outcome :
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   Keeper_tool_execution.t
+
+val handle_owned_read_file_with_outcome :
+  ownership_root:string ->
+  args:Yojson.Safe.t ->
+  Keeper_tool_execution.t
+(** Read-only boundary for a Workspace producer that has no Keeper runtime
+    metadata. Relative paths are rooted at [ownership_root], and the opened
+    regular file plus every parent component is verified by [Fs_compat]. *)
 
 (** Rebuild the write arguments from a recorded Gate input, including the
     mode the approval carried. [Error] when the recorded effect is one this

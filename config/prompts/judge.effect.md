@@ -29,4 +29,15 @@ input, and the messages you were given, and say in the rationale that older
 turn history was outside the window. A non-zero count is not by itself a
 reason to return `require_human`.
 
+`request_context.completed_tool_calls` lists the calls that already ran and
+settled inside this same turn, each carrying its operation, its complete input,
+and the disposition it settled on. It does not carry what those tools returned:
+judge this request on its own operation identity and input, and read the list
+as the record of what the keeper has already done this turn leading up to it.
+`request_context.completed_tool_calls_omitted` counts calls left out when the
+list exceeded the evidence budget. When that count is above zero, more calls
+ran than you can see, so do not treat the list as the complete record of the
+turn and say so in the rationale. A non-zero count is not by itself a reason to
+return `require_human`.
+
 Respond only through the requested structured JSON contract.

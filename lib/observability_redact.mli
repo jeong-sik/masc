@@ -46,16 +46,3 @@ val redacted_tool_output_json : tool_name:string -> string -> Yojson.Safe.t opti
 (** Produce a redacted structured copy of tool output when it is JSON,
     otherwise a redacted string. *)
 
-val build_tool_call_trace_json :
-  ?tool_use_id:string ->
-  tool_name:string ->
-  input:Yojson.Safe.t ->
-  output:string option ->
-  is_error:bool option ->
-  unit ->
-  Yojson.Safe.t
-(** Build a redacted observability-safe tool trace row. *)
-
-val summarize_tool_call_traces :
-  Yojson.Safe.t list -> string option * string option * string option
-(** Returns [(tool_input_preview, tool_args_preview, tool_output_preview)]. *)

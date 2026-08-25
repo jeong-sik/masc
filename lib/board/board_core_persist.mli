@@ -27,6 +27,12 @@ val flusher_schedule_dropped_count : unit -> int
 val persist_error_count : unit -> int
 val record_persist_error : where:string -> string -> unit
 
+(** [persist_io_error ~where msg] records the failure via
+    {!record_persist_error} and returns the typed
+    [Error (Io_error "<where>: <msg>")] the append paths surface to
+    their callers. *)
+val persist_io_error : where:string -> string -> ('a, board_error) result
+
 val create_store : unit -> store
 
 val invalidate_post_caches : store -> unit
@@ -54,9 +60,6 @@ val ensure_masc_dir : unit -> unit
 val max_jsonl_bytes : int
 val rotate_if_needed : string -> unit
 
-val posts_jsonl_unlocked : store -> string
-val save_posts_jsonl_result : string -> (unit, board_error) result
-val save_posts_jsonl : string -> unit
 val rewrite_posts : store -> unit
 val rewrite_comments : store -> unit
 val reactions_jsonl_unlocked : store -> string
@@ -67,10 +70,16 @@ val append_comment : comment -> (unit, board_error) result
 val sub_board_access_to_string : sub_board_access -> string
 val sub_board_access_of_string_opt : string -> sub_board_access option
 val sub_board_post_counts_unlocked : store -> (string, int) Hashtbl.t
-val sub_board_post_count_from_counts : (string, int) Hashtbl.t -> string -> int
+(* [sub_board_post_count_from_counts] is the lookup both
+   [sub_board_with_post_count] and its _unlocked twin perform on the table
+   [sub_board_post_counts_unlocked] returns; callers take the sub_board, not
+   the count. *)
 val sub_board_with_post_count_unlocked : store -> sub_board -> sub_board
 val sub_board_with_post_count : (string, int) Hashtbl.t -> sub_board -> sub_board
-val sub_board_author_allowed : sub_board -> author_id:Agent_id.t -> bool
+(* [sub_board_author_allowed] is the predicate
+   [validate_sub_board_post_policy_unlocked] applies. A caller outside asks the
+   validator, which answers with the typed board_error, rather than reading the
+   bool and inventing its own refusal. *)
 val validate_sub_board_post_policy_unlocked :
   store -> author_id:Agent_id.t -> hearth:string option -> (unit, board_error) result
 

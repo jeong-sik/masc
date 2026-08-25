@@ -70,7 +70,6 @@ const staleTokenSummary = (): DashboardShellAuthSummary => ({
   requested_agent: 'dashboard',
   effective_agent: null,
   effective_role: null,
-  default_role: 'reader',
   auth_error_code: 'invalid_token',
   auth_error_detail: 'Invalid token: Token mismatch',
   can_keeper_msg: false,

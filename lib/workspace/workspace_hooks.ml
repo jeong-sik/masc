@@ -1,7 +1,7 @@
 (** Workspace Hooks — Callback refs for upper-layer dependencies.
 
     Workspace modules must not depend on Activity_graph, Board,
-    Relation_materializer or Oas_worker directly.
+    Relation_materializer or the runtime execution boundary directly.
     Instead, they call these callback refs which are wired at startup
     by workspace.ml (the hub module that already depends on everything).
 
@@ -18,7 +18,7 @@ open Masc_domain
 type activity_entity = { kind: string; id: string }
 
 type operator_pending_confirm_request =
-  { token : string
+  { confirm_token : string
   ; trace_id : string
   ; actor : string
   ; action_type : string
@@ -130,12 +130,20 @@ let observe_task_transition_fn
       (fun _config ~agent_name:_ ~task_id:_ ~transition:_
            ~details:_ -> ())
 
-(** Invalidate dashboard execution cache on task mutation (add, transition).
-    Wired by server bootstrap to avoid circular dependency between
-    Workspace sub-modules and server dashboard surfaces. *)
+(** Invalidate dashboard execution cache after an authoritative task backlog or
+    goal-link commit. Wired by server bootstrap to avoid a dependency from
+    Workspace sub-modules back to server dashboard surfaces. *)
 let on_task_mutation_fn
   : (unit -> unit) Atomic.t
   = Atomic.make (fun () -> ())
+
+let on_workspace_message_mutation_fn
+  : (Workspace_utils_backend_setup.config ->
+     request_id:string ->
+     mention_delivery:Masc_domain.message_mention_delivery ->
+     unit)
+      Atomic.t
+  = Atomic.make (fun _config ~request_id:_ ~mention_delivery:_ -> ())
 
 let operator_pending_confirm_trace_id_fn
   : (string -> string) Atomic.t
@@ -204,13 +212,15 @@ let tool_assigned_fn
      string) Atomic.t
   = Atomic.make (fun ~agent_id:_ ~profile:_ ~tool_list:_ ?config_hash:_ ?reason:_ () -> "")
 
-(** Wall-clock latency of [Workspace_broadcast.broadcast] including
+(** Wall-clock latency of a successfully committed
+    [Workspace_broadcast.broadcast], including
     [next_seq] (state.json file lock + read + write), agent.json read
     for the cache-invariant check, msg.json write, [backend_publish],
     [emit_message_activity], and the [on_broadcast_mention] callback.
     Labelled by [msg_type] so [cache_invalidated] follow-ups (which
     skip the agent.json read + use the rewritten content) are
-    distinguishable from regular broadcasts.  Default no-op; emit
+    distinguishable from regular broadcasts. Authoritative write failures do
+    not emit this success observation. Default no-op; emit
     lives in [lib/workspace.ml] to avoid a [masc_workspace → Otel_metric_store] dep
     cycle. *)
 let workspace_broadcast_observed_fn
@@ -243,12 +253,15 @@ let get_default_runtime_id_fn
   : (unit -> string) Atomic.t
   = Atomic.make (fun () -> failwith "Workspace_hooks: get_default_runtime_id_fn not connected")
 
-(* Optional: [None] means "use the global default runtime". Defaults to a
-   None-returning thunk (not a failwith) so unconnected test contexts fall back
-   to the default instead of crashing. *)
-let get_cross_verifier_runtime_id_fn
-  : (unit -> string option) Atomic.t
-  = Atomic.make (fun () -> None)
+(* The completion-authority evaluator's runtime comes only from the published
+   [verifier_exact] exact-output lane (RFC-0361 D7(a)): admitted slot ids in
+   frozen declaration order. The unconnected default is an explicit [Error] so
+   an unwired process leaves the review visibly deferred instead of silently
+   picking a runtime. *)
+let get_verifier_exact_lane_slot_ids_fn
+  : (unit -> (string list, string) result) Atomic.t
+  = Atomic.make (fun () ->
+      Error "Workspace_hooks: get_verifier_exact_lane_slot_ids_fn not connected")
 
 let record_task_metric_fn
   : (Workspace_utils_backend_setup.config ->
@@ -335,6 +348,18 @@ let verification_submitted_fn
            task.id
            verification_id
            assignee)
+
+(* RFC-0387 stage 2: the goal-side analogue of [verification_submitted_fn].
+   The uninstalled default is loud for the same reason — a durable pending
+   request with no lane draining it is exactly the gate-without-caller wedge
+   the stage was split to avoid. *)
+let goal_verification_pending_fn
+  : (Workspace_utils_backend_setup.config -> goal_id:string -> unit) Atomic.t
+  = Atomic.make
+      (fun _config ~goal_id ->
+         Log.Misc.warn
+           "goal verification request committed without an installed goal verifier lane goal_id=%s"
+           goal_id)
 
 let verification_notify_verdict_fn
   : (task_id:string ->

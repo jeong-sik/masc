@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0058"]
-implementation_prs: [14952]
 ---
 
 # RFC-0010 — ocamlformat config reconciliation
@@ -60,9 +59,7 @@ dance:
    now a needle in a reformat haystack.
 4. A `style:` follow-up PR or commit to carry the reformat separately.
 
-Observed instances (2026-05-12): PR #14931 (`style(runtime_model_resolve):
-align to janestreet`), and the `style(test_oas_worker_named_liveness_integration)`
-commit on PR #14905. With ~85% of the tree non-compliant, this recurs on
+With ~85% of the tree non-compliant, this recurs on
 every PR that edits an old file — a self-perpetuating whack-a-mole.
 
 ## 2. Options
@@ -113,15 +110,6 @@ RFC covering:
 - Whether to do it tree-wide in one commit or directory-by-directory.
 
 This RFC explicitly does *not* decide any of that.
-
-### 3.2 The two `style:` PRs already in flight
-
-PR #14931 and the `style(test_oas_worker_named_liveness_integration)`
-commit on #14905 reformatted a handful of files toward `janestreet`
-before this RFC. After Option B merges they are harmless no-ops (those
-files happen to be janestreet-clean now, which `disable = true` makes
-irrelelvant). They can be merged as-is or closed; either is fine. Don't
-block them on this RFC.
 
 ## 4. Non-goals
 

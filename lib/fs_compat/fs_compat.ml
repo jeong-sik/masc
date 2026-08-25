@@ -140,8 +140,18 @@ let load_file_unix (path : string) : string =
        Stdlib.really_input_string ic len)
 ;;
 
+(* The Eio path below creates with 0o644. [Stdlib.open_out] creates with
+   0o666 masked by the process umask, so the same [save_file] call produced a
+   different mode depending on which branch ran — and which branch runs is
+   whether an Eio fs happens to be installed, not anything about the file
+   (#29358). The mode is named here so both branches agree. *)
+let save_file_mode = 0o644
+
 let save_file_unix (path : string) (content : string) : unit =
-  let oc = Stdlib.open_out path in
+  let fd =
+    Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ] save_file_mode
+  in
+  let oc = Unix.out_channel_of_descr fd in
   Stdlib.Fun.protect
     ~finally:(fun () -> Stdlib.close_out_noerr oc)
     (fun () -> Stdlib.output_string oc content)
@@ -156,7 +166,7 @@ let save_file_unix (path : string) (content : string) : unit =
    not domain-safe — two domains writing through the same cached
    channel corrupted records mid-line (observed 2026-05-17:
    utf-8 multibyte tears across trajectories/, keepers/*/reaction-
-   ledger/, plus "}{"-concat in oas-events/ — total 243 live
+   ledger/, plus "}{"-concat in agent-core-events/ — total 243 live
    malformed lines).
 
    PR #15936 (RFC-0108 root-fix scope #1) addressed [append_jsonl]
@@ -198,19 +208,10 @@ let get_append_path_mutex path =
 
 let append_file_unix (path : string) (content : string) : unit =
   let mu = get_append_path_mutex path in
-  Stdlib.Mutex.lock mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock mu)
-    (fun () ->
-      let oc =
-        Stdlib.open_out_gen
-          [ Stdlib.Open_append; Stdlib.Open_creat; Stdlib.Open_wronly ]
-          0o644
-          path
-      in
-      Fun.protect
-        ~finally:(fun () -> Stdlib.close_out_noerr oc)
-        (fun () -> Stdlib.output_string oc content))
+  Stdlib.Mutex.protect mu (fun () ->
+    Fd_cache.with_writer path (fun oc ->
+      Stdlib.output_string oc content;
+      Stdlib.flush oc))
 ;;
 
 let mkdir_p_unix (path : string) : unit =
@@ -249,7 +250,7 @@ let save_file (path : string) (content : string) : unit =
     ~fallback:(fun () -> save_file_unix path content)
     (fun fs ->
        let eio_path = Eio.Path.(fs / path) in
-       Eio.Path.save ~create:(`Or_truncate 0o644) eio_path content)
+       Eio.Path.save ~create:(`Or_truncate save_file_mode) eio_path content)
 ;;
 
 let save_file_atomic path content =
@@ -615,7 +616,8 @@ let exact_path_kind ?(follow = true) (path : string) : exact_path_kind =
         let stats = if follow then Unix.stat path else Unix.lstat path in
         Exact_kind stats.Unix.st_kind
       with
-      | Unix.Unix_error (Unix.ENOENT, _, _) -> Exact_missing)
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> Exact_missing
+      | Unix.Unix_error (Unix.ENOTDIR, _, _) -> Exact_unknown)
     (fun fs ->
        match Eio.Path.kind ~follow Eio.Path.(fs / path) with
        | `Not_found -> Exact_missing
@@ -747,6 +749,8 @@ let same_file_snapshot (left : Unix.stats) (right : Unix.stats) =
 type owned_regular_file_snapshot =
   { device : int
   ; inode : int
+  ; owner_uid : int
+  ; permissions : int
   ; file_size : int
   ; modified_at : float
   ; changed_at : float
@@ -755,6 +759,8 @@ type owned_regular_file_snapshot =
 let owned_regular_file_snapshot_of_stats (stats : Unix.stats) =
   { device = stats.st_dev
   ; inode = stats.st_ino
+  ; owner_uid = stats.st_uid
+  ; permissions = stats.st_perm land 0o7777
   ; file_size = stats.st_size
   ; modified_at = stats.st_mtime
   ; changed_at = stats.st_ctime
@@ -764,6 +770,8 @@ let owned_regular_file_snapshot_of_stats (stats : Unix.stats) =
 let equal_owned_regular_file_snapshot left right =
   Int.equal left.device right.device
   && Int.equal left.inode right.inode
+  && Int.equal left.owner_uid right.owner_uid
+  && Int.equal left.permissions right.permissions
   && Int.equal left.file_size right.file_size
   && Float.equal left.modified_at right.modified_at
   && Float.equal left.changed_at right.changed_at
@@ -948,6 +956,7 @@ let load_owned_regular_file ~ownership_root path =
 type owned_regular_file_prefix =
   { content : string
   ; file_size : int
+  ; modified_at : float
   ; truncated : bool
   }
 
@@ -970,6 +979,7 @@ let load_owned_regular_file_prefix_blocking
           Ok
             { content
             ; file_size = descriptor.Unix.st_size
+            ; modified_at = descriptor.Unix.st_mtime
             ; truncated = descriptor.Unix.st_size > length
             })
       path
@@ -2203,14 +2213,7 @@ let rec private_jsonl_transaction_error_to_string = function
   | Unexpected_transaction_file_kind kind ->
     Printf.sprintf
       "private JSONL transaction target has unexpected file kind: %s"
-      (match kind with
-       | Unix.S_REG -> "regular"
-       | Unix.S_DIR -> "directory"
-       | Unix.S_CHR -> "character-device"
-       | Unix.S_BLK -> "block-device"
-       | Unix.S_LNK -> "symbolic-link"
-       | Unix.S_FIFO -> "fifo"
-       | Unix.S_SOCK -> "socket")
+      (file_kind_to_string kind)
   | Ambiguous_transaction_file_identity { path; link_count } ->
     Printf.sprintf
       "private JSONL transaction path has ambiguous hard-link identity: %s (links=%d)"

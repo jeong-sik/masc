@@ -12,7 +12,7 @@
 
     Internal helpers ([preview], [outcome_to_json]
     decoders, the [audit_store_cache] and its mutex,
-    [get_audit_store], [parse_entries], [max_logged_errors],
+    [get_audit_store], [collect_entries], [max_logged_errors],
     [remove_assoc_keys]) are hidden — callers use the typed log
     helpers and the read / prune / stats accessors only.
 
@@ -75,6 +75,10 @@ type audit_entry = {
 
 (** {1 Wire-format} *)
 
+(** The directory this store occupies under [.masc]. Readers of the same
+    store name it from here instead of spelling the literal. *)
+val store_dirname : string
+
 val action_to_string : action -> string
 (** Stable serialisation; round-tripped by {!string_to_action}. The
     parametric variants ([ToolCall] / [GateDecision] /
@@ -86,20 +90,34 @@ val string_to_action : string -> action
     [Unknown] so callers can distinguish future action variants from
     explicit [Custom] events. *)
 
-val gate_audit_decision_to_string : gate_audit_decision -> string
-
-val gate_audit_decision_of_string : string -> gate_audit_decision
-
 val entry_to_json : audit_entry -> Yojson.Safe.t
 
-val entry_of_json_r : Yojson.Safe.t -> (audit_entry, string) result
-(** Strict decoder. *)
-
-val entry_of_json : Yojson.Safe.t -> audit_entry option
-(** Lenient wrapper around {!entry_of_json_r} that logs and drops
-    bad entries. *)
-
 (** {1 Storage} *)
+
+val audit_entry_matches :
+  ?actor:string ->
+  ?kind:string ->
+  ?severity:string ->
+  ?since:float ->
+  ?until:float ->
+  audit_entry ->
+  bool
+(** The audit query filters as one predicate, so a reader and a
+    projection cannot disagree about what was asked for. *)
+
+val read_entries_matching :
+  ?n:int ->
+  ?since:float ->
+  ?until:float ->
+  keep:(audit_entry -> bool) ->
+  config ->
+  audit_entry list
+(** Most-recent [n] entries satisfying [keep]. [n] counts matches,
+    where {!read_entries} counts rows read: the store holds every
+    agent's actions, so a caller that filters afterwards has no
+    window size that means "the newest [n] of mine". Corrupt rows are
+    reported but do not consume the budget. [since]/[until] additionally bound
+    the day files opened; [keep] still decides exact timestamps on edge days. *)
 
 val read_entries : ?n:int -> config -> audit_entry list
 (** Most-recent [n] (default 10000) parsed entries from the
@@ -110,7 +128,6 @@ val append_entry : config -> audit_entry -> unit
 (** Atomic append to today's day-file; creates the directory and
     file on first call. *)
 
-val audit_event_severity : audit_entry -> string
 (** Dashboard severity for an audit entry: ["info"], ["warn"], or ["error"]. *)
 
 val audit_event_json : audit_entry -> Yojson.Safe.t
@@ -226,5 +243,3 @@ type stats = {
 
 val get_stats : config -> stats
 (** [file_size_bytes] is always [0] under the date-split layout. *)
-
-val stats_to_json : stats -> Yojson.Safe.t

@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Tool_catalog_surfaces — Canonical per-surface tool name lists.
 
     SSOT for tool surface membership. All other modules should derive their
@@ -62,7 +45,6 @@ let public_mcp_surface_tools =
   ; (* Planning *)
     "masc_goal_list"
   ; "masc_goal_upsert"
-  ; "masc_goal_assign"
   ; "masc_goal_transition"
   ; "masc_plan_init"
   ; "masc_plan_get"
@@ -83,21 +65,44 @@ let public_mcp_surface_tools =
        purpose: it wipes transcript messages, which is a different decision
        from asking a keeper to compact. *)
     "masc_keeper_compact"
-  ; (* Persona authoring is operator-visible. *)
-    "masc_persona_list"
-  ; "masc_persona_create"
-  ; "masc_persona_update"
-  ; "masc_persona_delete"
+  ; (* [masc_keeper_msg] is the operator's front door for sending a keeper a
+       direct message: submit -> operation_id, then poll
+       [masc_keeper_delegate_status]. It already had a real handler
+       (Keeper_tool_surface.handle_keeper_msg) reachable only from the HTTP
+       copilot chat route and the board-context-inference caller; this adds
+       the MCP tools/call path so an operator can reach the same handler
+       without going through either adapter. *)
+    "masc_keeper_msg"
+  ; (* [masc_keeper_delegate_status] is the read-side counterpart operators
+       need to poll the operation_id that masc_keeper_msg / masc_keeper_delegate
+       return; it was already catalog-owned as a read_state_tool but missing
+       from this surface, so an operator could submit a turn but never observe
+       it settle. *)
+    "masc_keeper_delegate_status"
   ; (* Board. [masc_board_reaction] is intentionally public: it is the
-       operator/client counterpart to existing board comment/vote actions. *)
+       operator/client counterpart to existing board comment/vote actions.
+       [masc_board_search] is the read counterpart operators need to locate a
+       post before calling masc_board_post_get/comment/vote on it. *)
     "masc_board_post"
   ; "masc_board_list"
   ; "masc_board_post_get"
+  ; "masc_board_search"
   ; "masc_board_comment"
   ; "masc_board_vote"
   ; "masc_board_curation_read"
   ; "masc_board_curation_submit"
   ; "masc_board_reaction"
+  ; (* Task workspace read-side: operators need the history of a task they
+       did not submit themselves (e.g. one another Keeper claimed). *)
+    "masc_task_history"
+  (* [masc_fusion_status] deliberately stays off this surface: RFC-0266 §7
+     Phase 3 scopes it to the calling keeper's own fusion runs ("a run owned
+     by a different keeper is reported as not found" -- see
+     Keeper_tool_in_process_runtime.mli), and it has no external Tool_dispatch
+     tag registration, so an operator caller could only ever see an empty
+     result. Making it operator-visible would require a real scoping redesign
+     (target-keeper field + contract change), not a whitelist entry. See
+     masc#28963 / masc#28960. *)
   ]
   @ public_schedule_surface_tools
   @
@@ -124,7 +129,6 @@ let spawned_agent_surface_tools =
   ; "masc_messages"
   ; "masc_goal_list"
   ; "masc_goal_upsert"
-  ; "masc_goal_assign"
   ; "masc_goal_transition"
   ; "masc_board_list"
   ; "masc_board_post"
@@ -152,40 +156,6 @@ let spawned_agent_surface_tools =
   ]
 ;;
 
-let local_worker_surface_tools =
-  [ "masc_status"
-  ; "masc_tasks"
-  ; "masc_transition"
-  ; "masc_add_task"
-  ; "masc_heartbeat"
-  ; "masc_agent_card"
-  ; "masc_goal_list"
-  ; "masc_goal_upsert"
-  ; "masc_goal_assign"
-  ; "masc_goal_transition"
-  ; "masc_board_post"
-  ; "masc_board_list"
-  ; "masc_board_post_get"
-  ; "masc_board_comment"
-  ; "masc_board_vote"
-  ; "masc_board_search"
-  ; "masc_board_stats"
-  ; "masc_board_profile"
-  ; "masc_board_hearths"
-  ; "masc_board_curation_read"
-  ; "masc_board_sub_board_create"
-  ; "masc_board_sub_board_list"
-  ; "masc_board_sub_board_get"
-  ; "masc_board_sub_board_update"
-  ; "masc_board_sub_board_delete"
-  ; "masc_board_curation_submit"
-  ; "masc_run_init"
-  ; "masc_run_plan"
-  ; "masc_run_get"
-  ; "masc_run_list"
-  ]
-;;
-
 let session_min_surface_tools =
   [ "masc_status"
   ; "masc_tasks"
@@ -194,7 +164,6 @@ let session_min_surface_tools =
   ; "masc_add_task"
   ; "masc_goal_list"
   ; "masc_goal_upsert"
-  ; "masc_goal_assign"
   ; "masc_goal_transition"
   ; "masc_broadcast"
   ; "masc_heartbeat"

@@ -97,29 +97,29 @@ type calibration_example = {
 (* Store                                                             *)
 (* ================================================================ *)
 
-let store_ref : Dated_jsonl.t option ref = ref None
+let store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
 
 let base_path () =
   Filename.concat (Env_config_core.base_path ()) "data/verdicts"
 
-let get_store () =
-  match !store_ref with
+let rec get_store () =
+  match Atomic.get store_ref with
   | Some s -> s
   | None ->
     let s = Dated_jsonl.create ~base_dir:(base_path ()) () in
-    store_ref := Some s;
-    s
+    if Atomic.compare_and_set store_ref None (Some s)
+    then s
+    else
+      (* Another domain published the process-wide store while this domain
+         created its candidate.  All writers must use that single instance so
+         Dated_jsonl's per-store serialization remains authoritative. *)
+      get_store ()
 
-(** Reset the store reference.  For testing only. *)
-let reset_store_for_testing () = store_ref := None
-
-(** Set the process-local verdict store to an explicit isolated directory.
-    Offline eval tooling uses this after verdict-store isolation checks; tests
-    use [set_store_for_testing] as a compatibility alias. *)
-let set_store ~base_dir =
-  store_ref := Some (Dated_jsonl.create ~base_dir ())
-
-let set_store_for_testing = set_store
+module For_testing = struct
+  let reset_store () = Atomic.set store_ref None
+  let set_store ~base_dir =
+    Atomic.set store_ref (Some (Dated_jsonl.create ~base_dir ()))
+end
 
 (** Resolve where an offline eval tool's [--record-verdicts] verdicts are
     written. Such a tool drives a real judge and persists verdicts; if those
@@ -224,39 +224,6 @@ let resolve_record_verdicts_store ?cwd ~record_verdicts ~verdict_store_dir
     | Some d -> Ok (Some d)
 ;;
 
-let missing_cross_verifier_error =
-  "--record-verdicts without --evaluator-runtime requires [runtime].cross_verifier \
-   (routes.cross_verifier); configure it in runtime.toml or pass \
-   --evaluator-runtime ID"
-;;
-
-let resolve_record_verdicts_evaluator ~record_verdicts ~generator_runtime
-    ~evaluator_runtime ~cross_verifier_runtime : (string option, string) result =
-  if not record_verdicts then Ok evaluator_runtime
-  else
-    match evaluator_runtime with
-    | Some id ->
-      let id = String.trim id in
-      if id = "" then Error "--evaluator-runtime must not be empty"
-      else Ok (Some id)
-    | None -> (
-      let generator_runtime = String.trim generator_runtime in
-      match cross_verifier_runtime with
-      | Some id ->
-        let id = String.trim id in
-        if id = "" then Error missing_cross_verifier_error
-        else if String.equal id generator_runtime then
-          Error
-            (Printf.sprintf
-               "--record-verdicts without --evaluator-runtime requires \
-                [runtime].cross_verifier to be distinct from --runtime (%s); \
-                pass --evaluator-runtime ID to make same-model evaluation \
-                explicit."
-               generator_runtime)
-        else Ok None
-      | None -> Error missing_cross_verifier_error)
-;;
-
 (* ================================================================ *)
 (* Hashing                                                           *)
 (* ================================================================ *)
@@ -299,13 +266,13 @@ let label_record_to_json (r : label_record) : Yojson.Safe.t =
   ]
 
 (* ================================================================ *)
-(* OAS Harness.verdict conversion (#3165)                            *)
+(* AGENT_CORE Harness.verdict conversion (#3165)                            *)
 (* ================================================================ *)
 
-(** Convert a MASC [verdict_record] to an OAS [Harness.verdict].
+(** Convert a MASC [verdict_record] to an AGENT_CORE [Harness.verdict].
     Maps "approve" → passed=true, "reject:*" → passed=false.
     The gate name is recorded as evidence for traceability. *)
-let to_harness_verdict (r : verdict_record) : Agent_sdk.Harness.verdict =
+let to_harness_verdict (r : verdict_record) : Agent_core.Harness.verdict =
   let passed =
     match r.verdict with
     | Task.Anti_rationalization.Approve -> true
@@ -326,7 +293,7 @@ let to_harness_verdict (r : verdict_record) : Agent_sdk.Harness.verdict =
            (Task.Anti_rationalization.gate_to_string r.gate)
            (verdict_to_string r.verdict))
   in
-  { Agent_sdk.Harness.passed; score; evidence; detail }
+  { Agent_core.Harness.passed; score; evidence; detail }
 
 (* ================================================================ *)
 (* Record writing                                                    *)
@@ -336,7 +303,7 @@ let record_verdict
     ~(task_id : string)
     ~(req : Task.Anti_rationalization.review_request)
     ~(result : Task.Anti_rationalization.review_result)
-    ?(on_harness_verdict : (Agent_sdk.Harness.verdict -> unit) option)
+    ?(on_harness_verdict : (Agent_core.Harness.verdict -> unit) option)
     () : unit =
   match result.verdict with
   | None -> ()
@@ -393,15 +360,24 @@ let string_field json key =
 (* Divergence analysis                                               *)
 (* ================================================================ *)
 
+(* Row bounds for the two windowed calibration readers. Both branches of each
+   reader use its bound: the filtered branch previously had none. *)
+let divergence_scan_rows = 1000
+let calibration_scan_rows = 5000
+
 let find_divergences ?(since = "") ?(until = "") () : divergence list =
   let store = get_store () in
   let records =
     if since = "" && until = "" then
-      Dated_jsonl.read_recent store 1000
+      Dated_jsonl.read_recent store divergence_scan_rows
     else
+      (* Same bound as the unfiltered branch above. [read_range] carries no
+         row bound, so supplying a date -- which narrows the request -- used to
+         remove the cap, and a one-sided date widens it further because the
+         missing side is filled with 2020-01-01 / 2099-12-31 below. *)
       let s = if since = "" then "2020-01-01" else since in
       let u = if until = "" then "2099-12-31" else until in
-      Dated_jsonl.read_range store ~since:s ~until:u
+      Dated_jsonl.read_range_recent store ~since:s ~until:u divergence_scan_rows
   in
   (* Separate verdicts and labels *)
   let (verdicts, labels) : Yojson.Safe.t StringMap.t * Yojson.Safe.t StringMap.t =
@@ -487,11 +463,12 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
   let store = get_store () in
   let records =
     if since = "" && until = "" then
-      Dated_jsonl.read_recent store 5000
+      Dated_jsonl.read_recent store calibration_scan_rows
     else
+      (* Same bound as the unfiltered branch; see [find_divergences]. *)
       let s = if since = "" then "2020-01-01" else since in
       let u = if until = "" then "2099-12-31" else until in
-      Dated_jsonl.read_range store ~since:s ~until:u
+      Dated_jsonl.read_range_recent store ~since:s ~until:u calibration_scan_rows
   in
   let max_failure_reasons = 5 in
   let evaluator_failure_tags =
@@ -563,10 +540,20 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
       | Some hv ->
           if label_verdict_of_verdict ev = hv then
             (fp, fn, ag + 1)
-          else
+          else (
+            (* Every disagreement pair is written out. The wildcard this
+               replaces asserted "false negative" for anything that was not
+               (Approve, Reject_label); a third label_verdict would have been
+               counted as a false negative and quietly lowered
+               agreement_rate. Listing the pairs makes the compiler ask
+               instead. *)
             match ev, hv with
             | Task.Anti_rationalization.Approve, Reject_label -> (fp + 1, fn, ag)
-            | _ -> (fp, fn + 1, ag)
+            | Task.Anti_rationalization.Reject _, Approve_label -> (fp, fn + 1, ag)
+            | Task.Anti_rationalization.Approve, Approve_label
+            | Task.Anti_rationalization.Reject _, Reject_label ->
+                (* [label_verdict_of_verdict ev = hv] already returned above. *)
+                (fp, fn, ag + 1))
     ) verdict_hashes (0, 0, 0)
   in
   let labeled_total = false_pos + false_neg + agree in

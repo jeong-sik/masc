@@ -34,12 +34,19 @@ type endpoint = {
   api_key_env : string option;
   enabled : bool;
   timeout_seconds : float option;
-  max_retries : int option;
+  default_voice : string option;
 }
 (** Per-endpoint configuration.  [api_key_env] names the
     environment variable holding the credential (not the
     credential itself).  [base_url] / [mcp_url] / [health_url]
-    are populated based on [kind]. *)
+    are populated based on [kind].
+
+    [default_voice] is the voice name this endpoint answers to. A voice id is
+    provider-specific vocabulary -- an ElevenLabs [voice_id] is 20-64
+    alphanumerics, an OpenAI voice is a name like ["alloy"] -- so the fallback
+    chain handing one endpoint's id to the next endpoint asks for a voice that
+    does not exist there (#24068). [None] means the endpoint has none declared
+    and falls back to [tts.default_voice]. *)
 
 (** {1 Voice tuning} *)
 
@@ -175,7 +182,14 @@ val select_endpoint :
 val voice_for_agent : t -> string -> string
 (** [voice_for_agent config agent_id] returns the agent-specific
     voice id when present in [config.tts.agent_voices], else
-    [config.tts.default_voice]. *)
+    [config.tts.default_voice]. This is the workspace-wide answer; a caller
+    speaking through a specific endpoint wants {!voice_for_agent_at_endpoint}. *)
+
+val voice_for_agent_at_endpoint : t -> endpoint -> string -> string
+(** The voice to ask [endpoint] for on [agent_id]'s behalf: the endpoint's own
+    [default_voice] when it declares one, otherwise {!voice_for_agent}. The
+    fallback chain resolves this per endpoint rather than once, so switching
+    endpoints does not carry the previous provider's voice vocabulary along. *)
 
 val tuning_for_agent : t -> string -> voice_tuning
 (** [tuning_for_agent config agent_id] returns the

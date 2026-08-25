@@ -227,6 +227,8 @@ val load_owned_regular_file
 type owned_regular_file_snapshot =
   { device : int
   ; inode : int
+  ; owner_uid : int
+  ; permissions : int
   ; file_size : int
   ; modified_at : float
   ; changed_at : float
@@ -253,6 +255,10 @@ val load_owned_regular_file_with_snapshot
 type owned_regular_file_prefix =
   { content : string
   ; file_size : int
+  ; modified_at : float
+        (** From the same validated descriptor as [file_size], so a caller
+            listing a directory can order by modification time without a
+            second stat and without reading past [max_bytes]. *)
   ; truncated : bool
   }
 
@@ -1214,8 +1220,6 @@ val rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing :
   expected:Private_jsonl_cursor.t ->
   string ->
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
-
-val durable_append_failure_to_string : durable_append_failure -> string
 
 (** Render a structured durable-append failure without discarding the original
     [Unix.error] or rollback failures. *)

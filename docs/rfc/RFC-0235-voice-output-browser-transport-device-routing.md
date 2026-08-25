@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0223"]
-implementation_prs: []
 ---
 
 # RFC-0235: Voice output transport — browser-addressed audio delivery, device-routed playback
@@ -128,7 +127,7 @@ broadcast.
    The only `Sys.remove` sites (`:384` dedup, `:451` synthesis failure)
    produce unservable files and stay as-is. (Correction of an earlier
    draft that claimed immediate deletion on every exit path.)
-5. **OAS boundary respected.** Voice output is a MASC concept. OAS continues
+5. **agent_core boundary respected.** Voice output is a MASC concept. agent_core continues
    to receive a host-assembled message list and is unaware of audio delivery
    (mirrors RFC-0223 §2.5). All transport code lives under MASC
    (`lib/voice*`, `lib/keeper*`, `lib/server*`, `dashboard/`).

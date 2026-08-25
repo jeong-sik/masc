@@ -5,12 +5,10 @@
     summary helpers used by the eval CLI and dashboard. METR Task
     Standard / OpenAI Harness inspired.
 
-    Internal helpers (the [match_mode_to_string] /
-    [grader_result_to_json] / [eval_run_to_json] /
-    [eval_result_to_json] / [suite_result_to_json] /
-    [scenario_to_json] write-side encoders that callers consume only
-    via {!report_to_string} / {!write_results_jsonl}, and the
-    [score_std_dev] / [weighted_score] internal aggregators) are
+    Internal helpers (the [grader_result_to_json] / [eval_run_to_json] /
+    [eval_result_to_json] / [suite_result_to_json] write-side encoders
+    that callers consume only via {!report_to_string} /
+    {!write_results_jsonl}, and the [score_std_dev] aggregator) are
     hidden — callers consume the typed records, the deterministic
     grader / tool-expectation runners, the pass@k / summary
     builders, and the IO entry points only.
@@ -47,7 +45,6 @@ type grader =
 (** {1 Scenario types} *)
 
 type tool_expectation = {
-  tool_name : string;
   selector : Eval_tool_selector.t;
   required : bool;
   max_calls : int option;
@@ -60,8 +57,6 @@ type tool_expectation = {
 type ownership =
   | Self_owned
   | Foreign
-
-val ownership_to_string : ownership -> string
 
 type scenario = {
   id : string;
@@ -149,9 +144,13 @@ val check_tool_expectations_with_evidence :
 (** {1 Pass@k + summary} *)
 
 val compute_pass_at_k : k:int -> n:int -> c:int -> float
-(** Probability of at least one pass in [k] independent runs given
-    [c] successes out of [n] total. The unbiased estimator from the
-    agent-eval / METR literature. *)
+(** The chance that a [k]-run sample drawn from the [n] recorded runs, [c] of
+    which passed, contains at least one pass: [1 - C(n-c, k) / C(n, k)].
+
+    The draw is without replacement, so a single failing run cannot fill more
+    than one slot of the sample. That is what separates this from
+    [1 - (1 - c/n)^k], which reads the same counts with replacement and
+    therefore never reports more than this one does. *)
 
 val summarize_runs :
   scenario:scenario -> k:int -> eval_run list -> eval_result
@@ -168,6 +167,11 @@ val load_scenarios_from_file :
     Yojson / Sys errors as [Error msg]. *)
 
 (** {1 Reporting} *)
+
+(** Threshold the human-facing report uses for a scenario's PASS/FAIL badge:
+    a scenario reads PASS when [pass_at_k] reaches this value. Display only —
+    nothing branches on the badge. *)
+val scenario_pass_at_k_threshold : float
 
 val report_to_string : eval_suite_result -> string
 (** Pretty-print a suite result as a human-readable report

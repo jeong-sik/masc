@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Workspace_assertions - State inspection and assertion-based verification *)
 
 open Masc_domain
@@ -37,6 +20,12 @@ let assertion_kind_to_string = function
 let all_assertion_kinds = [ Task_claimed; Current_task_set ]
 
 let valid_assertion_strings = List.map assertion_kind_to_string all_assertion_kinds
+
+(* Stands in for an [assertions] element that was not a JSON string. It is
+   deliberately not a valid assertion name, so [check_assertion] reports it
+   with [passed = false] and [expected_assertions] instead of the caller
+   losing the element silently. *)
+let unreadable_assertion = "<non-string assertion>"
 
 let assertion_kind_of_string_lenient = function
   | "task_claimed" -> Some Task_claimed
@@ -66,14 +55,6 @@ let check_assertion st assertion =
       ]
 ;;
 
-let state_to_json st =
-  `Assoc
-    [ "task_claimed", `Bool st.task_claimed
-    ; "current_task_set", `Bool st.current_task_set
-    ; "session_active", `Bool false
-    ]
-;;
-
 let handle_check ~(inspect_state : context -> agent_state) ~tool_name ~start_time ctx args
   =
   let st = inspect_state ctx in
@@ -81,11 +62,19 @@ let handle_check ~(inspect_state : context -> agent_state) ~tool_name ~start_tim
   let assertions =
     match Json_util.assoc_member_opt "assertions" args with
     | Some (`List items) ->
+      (* Total, so the list the caller sent and the list that gets checked
+         have the same length. [List.filter_map] dropped anything that was
+         not a JSON string before it reached [check_assertion], so the
+         element never appeared in the response and [all_passed] answered a
+         narrower question than the caller asked. [check_assertion] already
+         handles input it cannot read -- an unrecognised name comes back
+         [passed = false] with [expected_assertions] -- and a wrong-typed
+         element now takes that same path. *)
       let parsed =
-        List.filter_map
+        List.map
           (function
-            | `String s -> Some s
-            | _ -> None)
+            | `String s -> s
+            | _ -> unreadable_assertion)
           items
       in
       (match parsed with

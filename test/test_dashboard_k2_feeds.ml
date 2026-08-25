@@ -88,18 +88,6 @@ let append_jsonl path json =
 
 let strings json = json |> Json.to_list |> List.map Json.to_string
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  let rec loop idx =
-    if idx + needle_len > haystack_len
-    then false
-    else if String.equal (String.sub haystack idx needle_len) needle
-    then true
-    else loop (idx + 1)
-  in
-  String.equal needle "" || loop 0
-;;
 
 (* --- Decision log tests --- *)
 
@@ -197,7 +185,7 @@ let test_decisions_log_json_shape () =
     "summary contains blocker"
     true
     (let s = Json.(event |> member "summary" |> to_string) in
-     contains_substring ~needle:"blocked" s)
+     String_util.string_contains_substring ~needle:"blocked" s)
 ;;
 
 let test_decisions_json_terminal_reason_duration_fallback () =
@@ -276,7 +264,7 @@ let test_decisions_json_terminal_reason_duration_fallback () =
     Json.(log_event |> member "duration_ms" |> to_float);
   check bool "log summary includes reason" true
     (let s = Json.(log_event |> member "summary" |> to_string) in
-     contains_substring ~needle:"reason: provider_error" s)
+     String_util.string_contains_substring ~needle:"reason: provider_error" s)
 ;;
 
 let () =

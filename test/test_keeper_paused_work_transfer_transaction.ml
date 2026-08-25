@@ -6,6 +6,14 @@ module Persistence = Keeper_event_queue_persistence
 module Receipt = Keeper_paused_work_disposition_receipt
 module Transaction = Keeper_paused_work_transfer_transaction
 
+let test_switch : Eio.Switch.t option ref = ref None
+
+let current_test_context () =
+  match Eio_context.get_env_opt (), !test_switch with
+  | Some env, Some sw -> env, sw
+  | _ -> Alcotest.fail "transfer test Eio context is not installed"
+;;
+
 let require_ok label = function
   | Ok value -> value
   | Error detail -> Alcotest.failf "%s: %s" label detail
@@ -17,10 +25,7 @@ let require_some label = function
 ;;
 
 let with_strict_executor f =
-  Eio_main.run
-  @@ fun env ->
-  Eio.Switch.run
-  @@ fun sw ->
+  let env, sw = current_test_context () in
   let pool =
     Domain_pool.create
       ~sw
@@ -64,12 +69,13 @@ let receipt_path config ~keeper_name ~operator_operation_id =
     (Filename.concat
        (Filename.concat
           (Workspace.masc_root_dir config)
-          "paused-work-dispositions-v6")
+          ("paused-work-dispositions-"
+           ^ Masc.Keeper_paused_work_disposition_receipt.store_version))
        ("keeper-" ^ sha256 keeper_name))
     ("operation-" ^ sha256 operator_operation_id ^ ".json")
 ;;
 
-let write_meta config ~keeper_name ~trace_id ~generation ~paused =
+let write_meta config ~keeper_name ~trace_id ~paused =
   let meta =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -80,18 +86,9 @@ let write_meta config ~keeper_name ~trace_id ~generation ~paused =
          ])
     |> require_ok "parse Keeper metadata fixture"
   in
-  (* write_meta is a CAS: an existing row must be rewritten at its on-disk
-     version, or the store rejects the write as a version conflict. *)
-  let meta_version =
-    match Keeper_meta_store.read_meta config keeper_name with
-    | Ok (Some existing) -> existing.meta_version
-    | Ok None -> 0
-    | Error detail -> Alcotest.fail detail
-  in
   let meta =
     { meta with
       paused
-    ; meta_version
     ; latched_reason =
         (if paused
          then
@@ -101,10 +98,9 @@ let write_meta config ~keeper_name ~trace_id ~generation ~paused =
                     Keeper_latched_reason.operator_actor_grpc_directive
                 })
          else None)
-    ; runtime = { meta.runtime with nonce = generation }
     }
   in
-  Keeper_meta_store.write_meta config meta |> require_ok "persist Keeper metadata";
+  Keeper_meta_store.replace_snapshot config meta |> require_ok "persist Keeper metadata";
   meta
 ;;
 
@@ -124,7 +120,6 @@ let with_transfer_lane f =
            config
            ~keeper_name:from_keeper
            ~trace_id:"trace-paused-transfer-source"
-           ~generation:31
            ~paused:true
        in
        let target_meta =
@@ -132,9 +127,13 @@ let with_transfer_lane f =
            config
            ~keeper_name:to_keeper
            ~trace_id:"trace-active-transfer-target"
-           ~generation:41
            ~paused:false
        in
+       let _, sw = current_test_context () in
+       (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+        | Ok count -> Alcotest.(check int) "installed owner count" 2 count
+        | Error error ->
+          Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
        let channel =
          Keeper_continuation_channel.slack
            ~team_id:(Some "team-1")
@@ -170,8 +169,6 @@ let with_transfer_lane f =
        let request : Transaction.request =
          { source
          ; source_incarnation
-         ; owner_nonce = source_meta.runtime.nonce
-         ; target_generation = target_meta.runtime.nonce
          ; continuation_binding = Receipt.Routed channel
          ; operator_operation_id = "operator-transfer-1"
          }
@@ -256,7 +253,6 @@ let test_retired_v2_receipt_file_is_rejected () =
     { from_keeper
     ; to_keeper
     ; target_trace_id = target_meta.runtime.trace_id
-    ; target_generation = request.target_generation
     ; source = request.source
     ; source_incarnation = request.source_incarnation
     ; continuation_binding = request.continuation_binding
@@ -265,7 +261,6 @@ let test_retired_v2_receipt_file_is_rejected () =
   let current : Receipt.t =
     { keeper_name = from_keeper
     ; expected_trace_id = source_meta.runtime.trace_id
-    ; expected_generation = request.owner_nonce
     ; operator_operation_id = request.operator_operation_id
     ; requested_at = 2.0
     ; operation = Receipt.Transfer_owner transfer
@@ -358,16 +353,18 @@ let test_transfer_busy_has_zero_mutation () =
   with_transfer_lane (fun config from_keeper to_keeper _source_meta _target_meta request ->
     let base_path = config.Workspace.base_path in
     (match
-       Keeper_turn_admission.run_if_free
+       Keeper_owner_registry.run_maintenance_if_idle
          ~base_path
          ~keeper_name:from_keeper
          (fun () ->
             Transaction.transfer_pending config ~from_keeper ~to_keeper request)
      with
-     | `Ran (Error { cause = Transaction.Admission_busy _; _ }) -> ()
-     | `Ran (Error error) -> Alcotest.fail (Transaction.error_to_string error)
-     | `Ran (Ok _) | `Busy _ ->
-       Alcotest.fail "transfer was not deferred by turn admission");
+     | Ok (`Ran (Error { cause = Transaction.Admission_busy _; _ })) -> ()
+     | Ok (`Ran (Error error)) -> Alcotest.fail (Transaction.error_to_string error)
+     | Error error ->
+       Alcotest.fail (Keeper_owner_registry.command_error_to_string error)
+     | Ok (`Ran (Ok _) | `Busy _) ->
+       Alcotest.fail "transfer was not deferred by Keeper Owner");
     let source =
       Persistence.load_state_result ~base_path ~keeper_name:from_keeper
       |> require_ok "load admission-busy source"
@@ -520,7 +517,6 @@ let test_replay_after_source_ack_projects_target () =
       { from_keeper
       ; to_keeper
       ; target_trace_id = target_meta.runtime.trace_id
-      ; target_generation = request.target_generation
       ; source = request.source
       ; source_incarnation = request.source_incarnation
       ; continuation_binding = request.continuation_binding
@@ -529,7 +525,6 @@ let test_replay_after_source_ack_projects_target () =
     let receipt : Receipt.t =
       { keeper_name = from_keeper
       ; expected_trace_id = source_meta.runtime.trace_id
-      ; expected_generation = request.owner_nonce
       ; operator_operation_id = request.operator_operation_id
       ; requested_at = 2.0
       ; operation = Receipt.Transfer_owner transfer
@@ -545,11 +540,9 @@ let test_replay_after_source_ack_projects_target () =
     let causal : Keeper_registry_event_queue.accepted_transfer =
       { source = request.source
       ; source_incarnation = request.source_incarnation
-      ; owner_nonce = request.owner_nonce
       ; operator_operation_id = request.operator_operation_id
       ; from_keeper
       ; to_keeper
-      ; target_generation = request.target_generation
       ; target_trace_id = target_meta.runtime.trace_id
       }
     in
@@ -558,7 +551,6 @@ let test_replay_after_source_ack_projects_target () =
       (Keeper_registry_event_queue.transfer_pending_accepted_result
          ~base_path:config.Workspace.base_path
          from_keeper
-         ~current_owner_nonce:request.owner_nonce
          ~applied_at:receipt.requested_at
          ~transfer:causal
        |> Result.map_error Keeper_registry_event_queue.transfer_pending_error_to_string
@@ -573,133 +565,6 @@ let test_replay_after_source_ack_projects_target () =
      | Transaction.Committed -> Alcotest.fail "prepared receipt was replaced");
     check_applied ~expected_target:Transaction.Enqueued replay.projection;
     assert_converged config ~from_keeper ~to_keeper request.source)
-;;
-
-let test_generic_recovery_preserves_receipted_target_identity () =
-  with_transfer_lane
-  @@ fun config from_keeper to_keeper source_meta target_meta request ->
-  let transfer : Receipt.transfer_owner =
-    { from_keeper
-    ; to_keeper
-    ; target_trace_id = target_meta.runtime.trace_id
-    ; target_generation = request.target_generation
-    ; source = request.source
-    ; source_incarnation = request.source_incarnation
-    ; continuation_binding = request.continuation_binding
-    }
-  in
-  let receipt : Receipt.t =
-    { keeper_name = from_keeper
-    ; expected_trace_id = source_meta.runtime.trace_id
-    ; expected_generation = request.owner_nonce
-    ; operator_operation_id = request.operator_operation_id
-    ; requested_at = 2.0
-    ; operation = Receipt.Transfer_owner transfer
-    }
-  in
-  (match
-     Receipt.with_keeper_lock config ~keeper_name:from_keeper (fun lock ->
-       Receipt.save_if_absent lock config receipt)
-   with
-   | Ok (Ok Receipt.Created) -> ()
-   | Ok (Ok (Receipt.Existing _)) -> Alcotest.fail "prepared receipt already existed"
-   | Ok (Error detail) | Error detail -> Alcotest.fail detail);
-  let causal : Keeper_registry_event_queue.accepted_transfer =
-    { source = request.source
-    ; source_incarnation = request.source_incarnation
-    ; owner_nonce = request.owner_nonce
-    ; operator_operation_id = request.operator_operation_id
-    ; from_keeper
-    ; to_keeper
-    ; target_generation = request.target_generation
-    ; target_trace_id = target_meta.runtime.trace_id
-    }
-  in
-  ignore
-    (Keeper_registry_event_queue.transfer_pending_accepted_result
-       ~base_path:config.Workspace.base_path
-       from_keeper
-       ~current_owner_nonce:request.owner_nonce
-       ~applied_at:receipt.requested_at
-       ~transfer:causal
-     |> Result.map_error Keeper_registry_event_queue.transfer_pending_error_to_string
-     |> require_ok "simulate committed source ACK");
-  ignore
-    (write_meta
-       config
-       ~keeper_name:to_keeper
-       ~trace_id:"trace-restarted-target"
-       ~generation:request.target_generation
-       ~paused:false :
-      Keeper_meta_contract.keeper_meta);
-  (match
-     with_strict_executor
-     @@ fun () ->
-     Keeper_event_queue_recovery.project_owner_result
-       ~base_path:config.Workspace.base_path
-       ~keeper_name:from_keeper
-   with
-   | Error
-       (Keeper_event_queue_recovery.Paused_transfer_target_projection_failed
-          { target_keeper
-          ; cause = Transaction.Target_owner_identity_changed
-          }) ->
-     Alcotest.(check string) "trace failure target" to_keeper target_keeper
-   | Error error ->
-     Alcotest.fail (Keeper_event_queue_recovery.projection_error_to_string error)
-   | Ok _ -> Alcotest.fail "generic recovery ignored the target trace identity");
-  ignore
-    (write_meta
-       config
-       ~keeper_name:to_keeper
-       ~trace_id:(Keeper_id.Trace_id.to_string target_meta.runtime.trace_id)
-       ~generation:(request.target_generation + 1)
-       ~paused:false :
-      Keeper_meta_contract.keeper_meta);
-  (match
-     with_strict_executor
-     @@ fun () ->
-     Keeper_event_queue_recovery.project_owner_result
-       ~base_path:config.Workspace.base_path
-       ~keeper_name:from_keeper
-   with
-   | Error
-       (Keeper_event_queue_recovery.Paused_transfer_target_projection_failed
-          { target_keeper
-          ; cause = Transaction.Target_owner_nonce_changed { expected; actual }
-          }) ->
-     Alcotest.(check string) "generation failure target" to_keeper target_keeper;
-     Alcotest.(check int)
-       "expected target generation"
-       request.target_generation
-       expected;
-     Alcotest.(check int)
-       "current target generation"
-       (request.target_generation + 1)
-       actual
-   | Error error ->
-     Alcotest.fail (Keeper_event_queue_recovery.projection_error_to_string error)
-   | Ok _ -> Alcotest.fail "generic recovery ignored the target generation");
-  let source =
-    Persistence.load_state_result
-      ~base_path:config.Workspace.base_path
-      ~keeper_name:from_keeper
-    |> require_ok "load retained source transition"
-  in
-  let target =
-    Persistence.load_state_result
-      ~base_path:config.Workspace.base_path
-      ~keeper_name:to_keeper
-    |> require_ok "load unchanged target queue"
-  in
-  Alcotest.(check int)
-    "identity failure retains the source outbox"
-    1
-    (List.length (State.transition_outbox source));
-  Alcotest.(check int)
-    "identity failure has no target effect"
-    0
-    (Queue.length (State.pending target))
 ;;
 
 let test_unrelated_enqueue_preserves_source_incarnation () =
@@ -746,11 +611,9 @@ let test_exact_projected_replay_survives_target_identity_rotation () =
   let transfer : Keeper_registry_event_queue.accepted_transfer =
     { source = request.source
     ; source_incarnation = request.source_incarnation
-    ; owner_nonce = request.owner_nonce
     ; operator_operation_id = request.operator_operation_id
     ; from_keeper
     ; to_keeper
-    ; target_generation = target_meta.runtime.nonce
     ; target_trace_id = target_meta.runtime.trace_id
     }
   in
@@ -776,7 +639,6 @@ let test_exact_projected_replay_survives_target_identity_rotation () =
        config
        ~keeper_name:to_keeper
        ~trace_id:"rotated-target-trace"
-       ~generation:(target_meta.runtime.nonce + 1)
        ~paused:false :
       Keeper_meta_contract.keeper_meta);
   (match project () with
@@ -844,26 +706,30 @@ let test_stale_source_incarnation_has_no_receipt_or_target_effect () =
 let with_shutdown_reservation ~base_path ~keeper_name f =
   let operation_id = Keeper_shutdown_types.Operation_id.generate () in
   (match
-     Keeper_turn_admission.begin_shutdown
+     Keeper_owner_registry.begin_shutdown
        ~base_path
        ~keeper_name
        ~operation_id
    with
-   | Keeper_turn_admission.Shutdown_reserved _ -> ()
-   | Keeper_turn_admission.Shutdown_already_reserved _ ->
-     Alcotest.fail "fresh transfer fixture already had a shutdown reservation");
+   | Ok (Keeper_owner.Shutdown_reserved _) -> ()
+   | Ok (Keeper_owner.Shutdown_already_reserved _) ->
+     Alcotest.fail "fresh transfer fixture already had a shutdown reservation"
+   | Error error ->
+     Alcotest.fail (Keeper_owner_registry.command_error_to_string error));
   Fun.protect
     ~finally:(fun () ->
       match
-        Keeper_turn_admission.rollback_shutdown
+        Keeper_owner_registry.rollback_shutdown
           ~base_path
           ~keeper_name
           ~operation_id
       with
-      | Keeper_turn_admission.Shutdown_rolled_back -> ()
-      | Keeper_turn_admission.Shutdown_not_reserved
-      | Keeper_turn_admission.Shutdown_reserved_by_other _ ->
-        Alcotest.fail "transfer fixture did not own its shutdown reservation")
+      | Ok Keeper_owner.Shutdown_rolled_back -> ()
+      | Ok Keeper_owner.Shutdown_not_reserved
+      | Ok (Keeper_owner.Shutdown_reserved_by_other _) ->
+        Alcotest.fail "transfer fixture did not own its shutdown reservation"
+      | Error error ->
+        Alcotest.fail (Keeper_owner_registry.command_error_to_string error))
     (fun () -> f operation_id)
 ;;
 
@@ -910,7 +776,7 @@ let test_source_shutdown_fences_transfer_before_receipt () =
    | Error
        { cause =
            Transaction.Admission_busy
-             (Keeper_turn_admission.Shutdown_requested actual)
+             (Keeper_owner.Shutdown_requested actual)
        ; reservation_release = None
        }
      when Keeper_shutdown_types.Operation_id.equal actual operation_id -> ()
@@ -938,6 +804,11 @@ let test_target_shutdown_fences_transfer_before_source_ack () =
 ;;
 
 let () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_context.set_env env;
+  Eio.Switch.run @@ fun sw ->
+  test_switch := Some sw;
   Alcotest.run
     "keeper paused-work transfer transaction"
     [ ( "Transfer_owner"
@@ -966,7 +837,7 @@ let () =
             `Quick
             test_stale_source_incarnation_has_no_receipt_or_target_effect
         ; Alcotest.test_case
-            "source shutdown fences transfer before turn admission"
+            "source shutdown fences transfer before Owner mutation"
             `Quick
             test_source_shutdown_fences_transfer_before_receipt
         ; Alcotest.test_case
@@ -985,10 +856,6 @@ let () =
             "replay after source ACK projects target"
             `Quick
             test_replay_after_source_ack_projects_target
-        ; Alcotest.test_case
-            "generic recovery preserves receipted target identity"
-            `Quick
-            test_generic_recovery_preserves_receipted_target_identity
         ; Alcotest.test_case
             "exact projected replay survives target identity rotation"
             `Quick

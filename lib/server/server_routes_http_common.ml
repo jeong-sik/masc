@@ -75,30 +75,7 @@ let get_protocol_version = Server_mcp_transport_http.get_protocol_version
 let get_protocol_version_for_session =
   Server_mcp_transport_http.get_protocol_version_for_session
 
-(** Prefer runtime capabilities captured in [server_state] and only fall back to
-    the legacy global Eio context for compatibility with older test helpers. *)
-let current_server_state_opt () = !server_state
-
-let state_switch_opt = function
-  | Some state -> (
-      match state.Mcp_server.sw with
-      | Some sw -> Some sw
-      | None -> Eio_context.get_switch_opt ())
-  | None -> Eio_context.get_switch_opt ()
-
-let state_clock_opt = function
-  | Some state -> (
-      match state.Mcp_server.clock with
-      | Some clock -> Some clock
-      | None -> Eio_context.get_clock_opt ())
-  | None -> Eio_context.get_clock_opt ()
-
-let state_net_opt = function
-  | Some state -> (
-      match state.Mcp_server.net with
-      | Some net -> Some net
-      | None -> Eio_context.get_net_opt ())
-  | None -> Eio_context.get_net_opt ()
+let current_server_state_opt () = current_server_state ()
 
 
 (** Requests that enter the MCP transport surface.  [/]'s GET representation
@@ -123,10 +100,6 @@ let validate_origin ~request_authority (request : Httpun.Request.t) =
     false
 
 (** Check if client accepts SSE *)
-let accepts_sse (request : Httpun.Request.t) =
-  Http_negotiation.accepts_sse_header
-    (Httpun.Headers.get request.headers "accept")
-
 (** Check if client accepts MCP Streamable HTTP (JSON + SSE) *)
 let accepts_streamable_mcp (request : Httpun.Request.t) =
   Http_negotiation.accepts_streamable_mcp
@@ -152,13 +125,13 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
       (fun () ->
         match current_server_state_opt () with
         | None -> false
-        | Some _ -> Server_startup_state.(!state).state_ready);
+        | Some _ -> (Server_startup_state.snapshot ()).state_ready);
     get_runtime_result =
       (fun () ->
         match current_server_state_opt () with
         | None -> Error "Server state not initialized"
         | Some state -> (
-            match (state_switch_opt (Some state), state_clock_opt (Some state)) with
+            match (state.Mcp_server.sw, state.Mcp_server.clock) with
             | Some sw, Some clock ->
                 Ok
                   {

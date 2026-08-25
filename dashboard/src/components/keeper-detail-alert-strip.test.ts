@@ -68,6 +68,7 @@ describe('KeeperRuntimeAlertStrip', () => {
     ['runtime_exhausted', '런타임 후보 소진'],
     ['unmapped_runtime_state', '매핑되지 않은 runtime 상태'],
     ['transient_runtime_retry', '일시적 런타임 재시도'],
+    ['provider_attempt_effect_fenced', 'Provider 효과 결과 확인 필요'],
   ])('labels receipt-derived attention reason %s distinctly', (reason, label) => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({
@@ -79,6 +80,22 @@ describe('KeeperRuntimeAlertStrip', () => {
     const text = container.textContent ?? ''
     expect(text).toContain(label)
     expect(text).not.toContain(reason)
+  })
+
+  it('humanizes the fenced provider effect in the operator disposition line', () => {
+    const { container } = render(h(KeeperRuntimeAlertStrip, {
+      keeper: keeper({
+        needs_attention: true,
+        trust: {
+          operator_disposition_reason: 'provider_attempt_effect_fenced',
+        },
+      }),
+    }))
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('운영자 판단')
+    expect(text).toContain('Provider 효과 결과 확인 필요')
+    expect(text).not.toContain('provider_attempt_effect_fenced')
   })
 
   // First-class status_bridge reasons keep their OWN labels — they are no
@@ -168,7 +185,7 @@ describe('KeeperRuntimeAlertStrip', () => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({
         stop_cause: {
-          code: 'turn_timeout',
+          code: 'stale_turn_timeout',
           source: 'runtime_blocker_class',
           label: 'Turn timeout',
           summary: 'turn wall clock exceeded before completion',
@@ -185,10 +202,10 @@ describe('KeeperRuntimeAlertStrip', () => {
     const text = container.textContent ?? ''
     // Per-turn stop cause is rendered through the canonical terminal code.
     expect(text).toContain('정지 원인')
-    expect(text).toContain('turn_timeout')
-    expect(text).toContain('turn_timeout')
+    expect(text).toContain('stale_turn_timeout')
+    expect(text).toContain('stale_turn_timeout')
     // Per-attempt success is gated out so the strip no longer shows
-    // "런타임 레인 · completed" next to "정지 원인 · turn_timeout".
+    // "런타임 레인 · completed" next to "정지 원인 · stale_turn_timeout".
     expect(text).not.toContain('런타임 레인')
     expect(text).not.toContain('마지막 시도')
   })
@@ -226,16 +243,16 @@ describe('KeeperRuntimeAlertStrip', () => {
         needs_attention: true,
         attention_reason: 'paused',
         next_human_action: 'inspect_blocker_before_resume',
-        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_class: 'stale_turn_timeout',
         runtime_blocker_summary: 'Turn timeout fired before resume.',
       }),
     }))
 
     expect(container.textContent).toContain('일시정지')
     expect(container.textContent).toContain('일시정지 원인')
-    expect(container.textContent).toContain('턴 응답 만료')
+    expect(container.textContent).toContain('오래된 턴 만료')
     expect(container.textContent).toContain('Turn timeout fired before resume.')
-    expect(container.textContent).not.toContain('OAS budget timeout fired before the keeper hard timeout.')
+    expect(container.textContent).not.toContain('Agent Core budget timeout fired before the keeper hard timeout.')
     expect(container.textContent).toContain('원인 확인 후 재개')
     expect(container.textContent).not.toContain('런타임 차단')
     expect(container.textContent).not.toContain('주의 사유 · paused')
@@ -247,7 +264,7 @@ describe('KeeperRuntimeAlertStrip', () => {
         phase: 'Paused',
         paused: false,
         needs_attention: true,
-        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_class: 'stale_turn_timeout',
       }),
     }))
 
@@ -263,7 +280,7 @@ describe('KeeperRuntimeAlertStrip', () => {
         phase: 'Running',
         paused: false,
         needs_attention: true,
-        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_class: 'stale_turn_timeout',
       }),
     }))
 

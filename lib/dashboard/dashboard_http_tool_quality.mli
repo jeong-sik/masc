@@ -33,4 +33,7 @@ val aggregate :
     the last [window_hours] hours. The payload includes per-tool /
     per-keeper / per-thinking-mode / per-hour rate tables plus the
     source-metadata envelope and the canonical
-    [dashboard_surface] tag. *)
+    [dashboard_surface] tag. Typed deferred records are reported in
+    [deferred] and excluded from settled success/failure rates.
+    Records without an integer [result_bytes] are malformed: they are
+    counted in [malformed] and excluded from every other figure. *)

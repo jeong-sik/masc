@@ -73,6 +73,23 @@ let test_board_worker_has_one_fork_site () =
        ~callee:"Keeper_keepalive.fork_board_attention_worker")
 ;;
 
+let test_launch_restores_tool_usage_with_lifecycle_authority () =
+  check int
+    "start_keepalive uses the token-qualified restore"
+    1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"lib/keeper/keeper_keepalive.ml"
+       ~binding_name:"start_keepalive"
+       ~callee:"Keeper_registry_tool_usage_persistence.restore_for_lifecycle");
+  check int
+    "start_keepalive does not use the name-only restore"
+    0
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"lib/keeper/keeper_keepalive.ml"
+       ~binding_name:"start_keepalive"
+       ~callee:"Keeper_registry_tool_usage_persistence.restore")
+;;
+
 let cleanup_protect_count ~module_path ~binding_name =
   Ast_grep.count_applications_with_label_containing_call_in_value_binding
     ~module_path
@@ -136,6 +153,10 @@ let () =
             "board attention worker has one fork site"
             `Quick
             test_board_worker_has_one_fork_site
+        ; test_case
+            "launch restores tool usage with lifecycle authority"
+            `Quick
+            test_launch_restores_tool_usage_with_lifecycle_authority
         ] )
     ]
 ;;

@@ -58,10 +58,7 @@ type current_binding =
 (** Planning-context anomaly snapshot.
 
     - [planning_missing_task]: task id referenced by the planning
-      slot but not present in the backlog.
-    - [deliverable_conflict_task]: task id whose deliverable
-      claims completion in conflict with the recorded status. *)
+      slot but not present in the backlog. *)
 type planning_context_state =
   { planning_missing_task : string option
-  ; deliverable_conflict_task : string option
   }

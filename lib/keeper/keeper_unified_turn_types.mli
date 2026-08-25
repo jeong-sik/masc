@@ -23,7 +23,36 @@ type turn_state =
 val require_last_execution_for_finalize :
   keeper_name:string ->
   turn_state ->
-  (Keeper_turn_runtime_budget.runtime_execution, Agent_sdk.Error.sdk_error) result
+  (Keeper_turn_runtime_budget.runtime_execution, Agent_core.Error.t) result
+
+(** Which runtime a "keeper cycle FAILED" report should name, and what the
+    (possibly different) next-attempt hint is. See
+    [keeper_cycle_failed_runtime_attribution] (masc#28762). *)
+type keeper_cycle_failed_runtime_attribution =
+  { reported_runtime_id : string
+    (** The runtime that actually dispatched and failed this cycle. *)
+  ; deferred_next_runtime_id : string
+    (** The runtime a same-turn deferral queued for the *next* cycle, or
+        ["none"] when no deferral occurred. Distinct fact from
+        [reported_runtime_id]; never conflate the two into one field. *)
+  }
+
+(** [keeper_cycle_failed_runtime_attribution ~deferred_runtime_lane
+    ~execution_runtime_id] resolves the runtime a failure report should
+    name. [execution_runtime_id] (typically [execution.runtime_id]) names
+    the deferred-lane assignment this cycle was budgeted under, not
+    necessarily the concrete candidate [attempt_runtime_candidates] actually
+    dispatched: [Runtime_lane_preference] sticky ordering can route a lane
+    keyed by one runtime id to a different candidate first. When
+    [deferred_runtime_lane] is [Some hint] (a same-turn deferral was
+    recorded), [hint.failed_runtime_id] is the dispatched candidate's own id
+    and is reported as [reported_runtime_id]; otherwise
+    [execution_runtime_id] is used as-is (no rotation occurred, so it is
+    already the dispatched candidate). *)
+val keeper_cycle_failed_runtime_attribution :
+  deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
+  execution_runtime_id:string ->
+  keeper_cycle_failed_runtime_attribution
 
 val turn_event_bus_manifest_decision :
   Keeper_turn_runtime_budget.turn_event_bus_summary -> Yojson.Safe.t
@@ -45,37 +74,16 @@ type turn_tool_event_tracker
 
 val create_turn_tool_event_tracker : unit -> turn_tool_event_tracker
 val turn_tool_event_integrity_error :
-  turn_tool_event_tracker -> Agent_sdk.Error.sdk_error option
+  turn_tool_event_tracker -> Agent_core.Error.t option
 val turn_tool_completed_count : turn_tool_event_tracker -> int
 
-(** Append [input] to the pending FIFO queue for [tool_name]. Returns the
-    updated tracker. *)
-val push_turn_tool_input :
-  turn_tool_event_tracker -> string -> Yojson.Safe.t -> turn_tool_event_tracker
-
-(** Remove and return the oldest pending input for [tool_name], or [None]
-    if the queue is empty. Returns the updated tracker as the second
-    component. *)
-val pop_turn_tool_input :
-  turn_tool_event_tracker -> string -> Yojson.Safe.t option * turn_tool_event_tracker
-
-(** Record an unmatched [ToolCompleted] (no prior [ToolCalled]) into the
-    tracker. Logs the violation and stores the first observed integrity error.
-    Returns the updated tracker. *)
-val record_unmatched_tool_completed :
-  turn_tool_event_tracker ->
-  keeper_name:string ->
-  tool_name:string ->
-  outcome:string ->
-  turn_tool_event_tracker
-
-(** Drive the tracker over a batch of [Agent_sdk.Event_bus.event]s,
+(** Drive the tracker over a batch of [Agent_core.Event_bus.event]s,
     matching [ToolCalled] <-> [ToolCompleted] pairs and recording integrity
     violations. Returns the updated tracker. *)
 val record_turn_tool_events :
   keeper_name:string ->
   turn_tool_event_tracker ->
-  Agent_sdk.Event_bus.event list ->
+  Agent_core.Event_bus.event list ->
   turn_tool_event_tracker
 
 (** Record the observation for a streaming turn cancelled externally.
@@ -86,7 +94,6 @@ val record_turn_tool_events :
 val record_streaming_cancelled_observation :
   config:Workspace.config ->
   run_meta:Keeper_meta_contract.keeper_meta ->
-  run_generation:int ->
   runtime_id:string ->
   keeper_turn_id:int ->
   unit ->

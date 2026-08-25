@@ -29,6 +29,24 @@ let test_block_id_unknown_rejected () =
     check bool "unknown block id is explicit" true
       (Astring.String.is_infix ~affix:"unknown prompt block id" message)
 
+(* Recurring world-state blocks stay on the first provider round of a turn;
+   only a genuine mid-turn message (the operator note) rides a post-tool
+   round. Pinned per constructor so a new block declares its class rather
+   than inheriting one (task-514). *)
+let test_block_id_post_tool_round_classes () =
+  List.iter
+    (fun (block, expected) ->
+      check bool
+        (Printf.sprintf "post-tool class of %s" (Prompt_block_id.to_string block))
+        expected
+        (Prompt_block_id.injected_on_post_tool_round block))
+    [ (Prompt_block_id.Keeper_instructions, true)
+    ; (Prompt_block_id.Dynamic_context, false)
+    ; (Prompt_block_id.Temporal_summary, false)
+    ; (Prompt_block_id.Memory_os_recall, false)
+    ; (Prompt_block_id.Operator_note, true)
+    ]
+
 (* ── TurnRecord codec ─────────────────────────────────── *)
 
 let digest_of_label label =
@@ -49,29 +67,28 @@ let sample_record () : Turn_record.t =
       [ Ids.Execution_id.of_string "exec-1781200000000-0001"
       ; Ids.Execution_id.of_string "exec-1781200000001-0002"
       ]
-  ; keeper = "sangsu"
-  ; agent_name = "sangsu-agent"
-  ; generation = 12
+  ; keeper = "alpha"
+  ; agent_name = "alpha-agent"
   ; turn_kind = Turn_record.Direct
   ; trace_id = "trace-1780648779957-00000"
   ; absolute_turn = 4071
   ; turn_ref =
       Ids.Turn_ref.make ~trace_id:"trace-1780648779957-00000" ~absolute_turn:4071
   ; blocks =
-      [ sample_block Prompt_block_id.Persona "aaaa"
+      [ sample_block Prompt_block_id.Keeper_instructions "aaaa"
       ; sample_block Prompt_block_id.Dynamic_context "bbbb"
       ; sample_block Prompt_block_id.Memory_os_recall "cccc"
       ]
   ; input_components =
       Some
-        [ { component = Turn_record.Prompt_block Prompt_block_id.Persona
+        [ { component = Turn_record.Prompt_block Prompt_block_id.Keeper_instructions
           ; bytes = 4
           }
         ; { component = Turn_record.Tool_schemas; bytes = 8192 }
         ; { component = Turn_record.Message_user; bytes = 256 }
         ]
   ; runtime_profile = "ollama_cloud.deepseek-v4-flash"
-  ; model = Some "deepseek-v4-flash"
+  ; selected_model = Some "deepseek-v4-flash"
   ; finish_reason = Some "completed"
   ; context_window = Some 131072
   ; price_input_per_million = Some 0.15
@@ -83,13 +100,14 @@ let sample_record () : Turn_record.t =
         { runtime_profile = "ollama_cloud.deepseek-v4-flash"
         ; body_bytes = 560_513
         }
+  ; model_input_window = Some { transmitted_atoms = 15; total_atoms = 7_706; measurement = Wire_shape }
   ; raw_trace_run_ref =
       Some
         { worker_run_id = "worker-run-41"
         ; path = "/tmp/turn-record-test.jsonl"
         ; start_seq = 8
         ; end_seq = 15
-        ; agent_name = "oas-test-runtime"
+        ; agent_name = "agent_core-test-runtime"
         ; session_id = "trace-1780648779957-00000"
         }
   ; sampling =
@@ -152,7 +170,6 @@ let test_codec_roundtrip () =
          decoded.execution_ids);
     check string "keeper" record.keeper decoded.keeper;
     check string "agent_name" record.agent_name decoded.agent_name;
-    check int "generation" record.generation decoded.generation;
     check string "turn_kind" (Turn_record.turn_kind_to_string record.turn_kind)
       (Turn_record.turn_kind_to_string decoded.turn_kind);
     check string "trace_id" record.trace_id decoded.trace_id;
@@ -183,7 +200,7 @@ let test_codec_roundtrip () =
          (fun (component : Turn_record.input_component) -> component.bytes)
          (input_components_or_fail decoded.input_components));
     check string "runtime_profile" record.runtime_profile decoded.runtime_profile;
-    check (option string) "model" record.model decoded.model;
+    check (option string) "selected_model" record.selected_model decoded.selected_model;
     check (option string) "finish_reason" record.finish_reason decoded.finish_reason;
     check (option int) "context_window" record.context_window decoded.context_window;
     check (option (float 0.0001)) "price_input_per_million"
@@ -238,7 +255,7 @@ let test_codec_roundtrip () =
 let test_codec_optional_fields_absent () =
   let record =
     { (sample_record ()) with
-      model = None
+      selected_model = None
     ; finish_reason = None
     ; context_window = None
     ; price_input_per_million = None
@@ -246,6 +263,7 @@ let test_codec_optional_fields_absent () =
     ; request_latency_ms = None
     ; ttfrc_ms = None
     ; request_wire_observation = None
+    ; model_input_window = None
     ; sampling =
         { temperature = None
         ; top_p = None
@@ -263,14 +281,14 @@ let test_codec_optional_fields_absent () =
   in
   let json = Turn_record.to_json record in
   (* RFC-0233 §2.3/§8: absent meta fields are omitted from the wire, never
-     emitted as a fabricated value (no "stop", no placeholder model, no
+     emitted as a fabricated value (no "stop", no placeholder selected model, no
      fabricated 200K window or Claude $3/$15 price). *)
   (match json with
    | `Assoc fields ->
      check bool "finish_reason key omitted when None" false
        (List.mem_assoc "finish_reason" fields);
-     check bool "model key omitted when None" false
-       (List.mem_assoc "model" fields);
+     check bool "selected_model key omitted when None" false
+       (List.mem_assoc "selected_model" fields);
      check bool "top_p key omitted when None" false
        (List.mem_assoc "top_p" fields);
      check bool "max_tokens key omitted when None" false
@@ -295,7 +313,8 @@ let test_codec_optional_fields_absent () =
   match Turn_record.of_json json with
   | Error e -> failf "decode failed: %s" e
   | Ok decoded ->
-    check (option string) "model absent stays None" None decoded.model;
+    check (option string) "selected_model absent stays None" None
+      decoded.selected_model;
     check (option string) "finish_reason absent stays None (not \"stop\")" None
       decoded.finish_reason;
     check (option int) "context_window absent stays None" None decoded.context_window;
@@ -329,6 +348,19 @@ let test_codec_rejects_malformed () =
   (match Turn_record.of_json (`String "not a record") with
    | Ok _ -> fail "decoded a non-object"
    | Error _ -> ());
+  (match Turn_record.to_json (sample_record ()) with
+   | `Assoc fields ->
+     let blank_selected_model =
+       `Assoc
+         (("selected_model", `String " ")
+          :: List.remove_assoc "selected_model" fields)
+     in
+     (match Turn_record.of_json blank_selected_model with
+      | Ok _ -> fail "decoded a blank selected_model"
+      | Error message ->
+        check bool "blank selected_model is explicit" true
+          (Astring.String.is_infix ~affix:"selected_model" message))
+   | _ -> fail "sample turn record is not an object");
   match Turn_record.of_json (`Assoc [ ("keeper", `String "x") ]) with
   | Ok _ -> fail "decoded a row with missing fields"
   | Error msg ->
@@ -350,13 +382,75 @@ let test_codec_requires_current_observation_fields () =
           (Astring.String.is_infix ~affix:field message))
     [ "turn_ref"
     ; "agent_name"
-    ; "generation"
     ; "turn_kind"
     ; "raw_trace_run_ref"
     ; "input_components"
     ; "request_runtime_profile"
     ; "request_body_bytes"
+    ; "transmitted_atoms"
+    ; "total_atoms"
     ]
+
+(* The record has to carry how much of its own history the turn transmitted,
+   because nothing downstream can recover it: the request itself keeps no trace
+   of what was cut. *)
+let test_record_carries_transmitted_history_share () =
+  let record =
+    { (sample_record ()) with
+      Turn_record.model_input_window =
+        Some
+          { Turn_record.transmitted_atoms = 7
+          ; total_atoms = 7_700
+          ; measurement = Wire_shape
+          }
+    }
+  in
+  match Turn_record.of_json (Turn_record.to_json record) with
+  | Error message -> failf "roundtrip rejected the share: %s" message
+  | Ok decoded ->
+    (match decoded.Turn_record.model_input_window with
+     | None -> failf "roundtrip dropped the share"
+     | Some window ->
+       check int "transmitted survives" 7 window.Turn_record.transmitted_atoms;
+       check int "total survives" 7_700 window.Turn_record.total_atoms)
+
+(* A share above 1 is not a large number, it is a contradiction: the reader
+   would render a keeper transmitting more history than it holds. *)
+let test_codec_rejects_transmitting_more_than_held () =
+  let json =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (("transmitted_atoms", `Int 9)
+         :: ("total_atoms", `Int 8)
+         :: List.remove_assoc "transmitted_atoms"
+              (List.remove_assoc "total_atoms" fields))
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> failf "decoded a row transmitting more atoms than it held"
+  | Error message ->
+    check bool "error names the contradiction" true
+      (Astring.String.is_infix ~affix:"transmitted_atoms" message)
+
+(* Half an observation is not an observation. Accepting one side would let the
+   reader compute a share against a fabricated denominator. *)
+let test_codec_rejects_half_an_observation () =
+  let json =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (("transmitted_atoms", `Int 7)
+         :: ("total_atoms", `Null)
+         :: List.remove_assoc "transmitted_atoms"
+              (List.remove_assoc "total_atoms" fields))
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> failf "decoded a row with only one of the two counts"
+  | Error message ->
+    check bool "error says both or neither" true
+      (Astring.String.is_infix ~affix:"total_atoms" message)
 
 let test_codec_rejects_mismatched_turn_ref () =
   let json =
@@ -493,13 +587,13 @@ let valid_block_json ?(bytes = 4) ?(digest = digest_of_label "block") block =
 let test_codec_rejects_malformed_blocks () =
   let cases =
     [ ( "negative bytes"
-      , valid_block_json ~bytes:(-1) Prompt_block_id.Persona )
+      , valid_block_json ~bytes:(-1) Prompt_block_id.Keeper_instructions )
     ; ( "non-sha256 digest"
-      , valid_block_json ~digest:"abcd" Prompt_block_id.Persona )
+      , valid_block_json ~digest:"abcd" Prompt_block_id.Keeper_instructions )
     ; ( "uppercase digest"
       , valid_block_json
           ~digest:(String.make 64 'A')
-          Prompt_block_id.Persona )
+          Prompt_block_id.Keeper_instructions )
     ]
   in
   List.iter
@@ -510,8 +604,8 @@ let test_codec_rejects_malformed_blocks () =
     cases
 
 let test_codec_rejects_duplicate_blocks_and_components () =
-  let persona = valid_block_json Prompt_block_id.Persona in
-  (match Turn_record.of_json (replace_blocks [ persona; persona ]) with
+  let keeper_instructions = valid_block_json Prompt_block_id.Keeper_instructions in
+  (match Turn_record.of_json (replace_blocks [ keeper_instructions; keeper_instructions ]) with
    | Ok _ -> fail "decoded duplicate prompt blocks"
    | Error message ->
      check bool "duplicate block is explicit" true
@@ -563,7 +657,7 @@ let test_codec_rejects_unknown_fields () =
   let record_json = Turn_record.to_json (sample_record ()) in
   let with_unknown_record_field =
     match record_json with
-    | `Assoc fields -> `Assoc (("retired_cursor", `String "old") :: fields)
+    | `Assoc fields -> `Assoc (("model", `String "runtime") :: fields)
     | other -> other
   in
   (match Turn_record.of_json with_unknown_record_field with
@@ -597,14 +691,14 @@ let record_with_blocks blocks = { (sample_record ()) with blocks }
 let test_diff_added_removed_changed () =
   let prev =
     record_with_blocks
-      [ sample_block Prompt_block_id.Persona "aaaa"
+      [ sample_block Prompt_block_id.Keeper_instructions "aaaa"
       ; sample_block Prompt_block_id.Dynamic_context "bbbb"
       ; sample_block Prompt_block_id.Temporal_summary "rrrr"
       ]
   in
   let next =
     record_with_blocks
-      [ sample_block Prompt_block_id.Persona "aaaa" (* unchanged *)
+      [ sample_block Prompt_block_id.Keeper_instructions "aaaa" (* unchanged *)
       ; sample_block Prompt_block_id.Dynamic_context "BBBB" (* changed *)
       ; sample_block Prompt_block_id.Memory_os_recall "mmmm" (* added *)
       ]
@@ -631,7 +725,7 @@ let test_diff_identical_records_is_empty () =
 
 let test_entries_with_diffs_same_trace_only () =
   let r1 =
-    { (record_with_blocks [ sample_block Prompt_block_id.Persona "aaaa" ]) with
+    { (record_with_blocks [ sample_block Prompt_block_id.Keeper_instructions "aaaa" ]) with
       trace_id = "trace-A"
     ; absolute_turn = 1
     ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-A" ~absolute_turn:1
@@ -639,7 +733,7 @@ let test_entries_with_diffs_same_trace_only () =
   in
   let r2 =
     { (record_with_blocks
-         [ sample_block Prompt_block_id.Persona "aaaa"
+         [ sample_block Prompt_block_id.Keeper_instructions "aaaa"
          ; sample_block Prompt_block_id.Temporal_summary "rrrr"
          ])
       with
@@ -649,7 +743,7 @@ let test_entries_with_diffs_same_trace_only () =
     }
   in
   let r3 =
-    { (record_with_blocks [ sample_block Prompt_block_id.Persona "zzzz" ]) with
+    { (record_with_blocks [ sample_block Prompt_block_id.Keeper_instructions "zzzz" ]) with
       trace_id = "trace-B" (* new generation: diff must be None *)
     ; absolute_turn = 3
     ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-B" ~absolute_turn:3
@@ -695,11 +789,35 @@ let test_turn_ref_rejects_malformed () =
   check bool "non-int suffix -> None" true (Ids.Turn_ref.of_string "trace#abc" = None);
   check bool "empty trace -> None" true (Ids.Turn_ref.of_string "#4" = None)
 
+(* The 61 rows in #30190 that named a deepseek profile next to GLM's 200,000
+   were all error-path rows, and the number they carried was the turn budget,
+   not that profile's window. Both halves of the contract are pinned here: the
+   number recorded is the budget the prompt was shaped to, and the error path
+   records no number at all. *)
+let test_context_window_records_the_turn_budget () =
+  Alcotest.(check (option int))
+    "a completed turn records the budget it was shaped to"
+    (Some 200_000)
+    (Masc.Keeper_turn_record_writer.context_window_of_turn
+       ~turn_budget:200_000
+       `Produced_result)
+
+let test_context_window_absent_on_the_error_path () =
+  Alcotest.(check (option int))
+    "an errored turn records no ceiling"
+    None
+    (Masc.Keeper_turn_record_writer.context_window_of_turn
+       ~turn_budget:200_000
+       `Errored)
+
+
 let () =
   run "turn_record"
     [ ( "prompt_block_id"
       , [ test_case "all known constructors roundtrip" `Quick test_block_id_roundtrip
         ; test_case "unknown block rejected" `Quick test_block_id_unknown_rejected
+        ; test_case "post-tool round classes" `Quick
+            test_block_id_post_tool_round_classes
         ] )
     ; ( "codec"
       , [ test_case "roundtrip" `Quick test_codec_roundtrip
@@ -709,6 +827,12 @@ let () =
         ; test_case "rejects malformed rows" `Quick test_codec_rejects_malformed
         ; test_case "current observation fields required" `Quick
             test_codec_requires_current_observation_fields
+        ; test_case "record carries transmitted history share" `Quick
+            test_record_carries_transmitted_history_share
+        ; test_case "transmitting more than held rejected" `Quick
+            test_codec_rejects_transmitting_more_than_held
+        ; test_case "half an observation rejected" `Quick
+            test_codec_rejects_half_an_observation
         ; test_case "mismatched turn_ref rejected" `Quick
             test_codec_rejects_mismatched_turn_ref
         ; test_case "mismatched raw trace session rejected" `Quick
@@ -738,6 +862,12 @@ let () =
             test_diff_identical_records_is_empty
         ; test_case "entries_with_diffs pairs same-trace only" `Quick
             test_entries_with_diffs_same_trace_only
+        ] )
+    ; ( "context_window"
+      , [ test_case "records the turn budget" `Quick
+            test_context_window_records_the_turn_budget
+        ; test_case "absent on the error path" `Quick
+            test_context_window_absent_on_the_error_path
         ] )
     ; ( "turn_ref"
       , [ test_case "make/to_string/of_string roundtrip" `Quick

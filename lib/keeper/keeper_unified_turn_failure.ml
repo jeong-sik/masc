@@ -10,7 +10,16 @@ module EC = Keeper_error_classify
    the 2026-07-21 provider-parse-rejection incident. The counter is
    process-local, which is where the unbounded loop lives; once the bound is
    exceeded the observation degrades to ordinary (durable) crash accounting,
-   so restarts cannot reset the bound either. *)
+   so restarts cannot reset the bound either.
+
+   Constitution exception (named bound + rationale): this number gates only
+   crash ACCOUNTING, never the keeper lifecycle — the keeper stays active
+   either way (see the "Keeper lifecycle remains active" log in
+   [record_failure_observation]). The failure class is deterministic
+   (identical request, identical 400), so the bound is not there to absorb
+   flakiness; 3 gives a poisoned checkpoint a few cycles in which an
+   intervening compaction or operator context clear can change the request
+   before durable accounting resumes. *)
 let max_consecutive_invalid_request_failures = 3
 
 let invalid_request_consecutive : (string, int) Hashtbl.t = Hashtbl.create 8
@@ -39,7 +48,15 @@ let reset_invalid_request_failures ~keeper_name =
     [empty_completion_exemption_budget] consecutive exempted empty-completion
     failures; the next one counts toward the crash threshold again.  A
     successful turn (or an operator context clear) resets the budget via
-    {!note_turn_success}. *)
+    {!note_turn_success}.
+
+    Constitution exception (named bound + rationale): like the
+    [InvalidRequest] bound above, this gates crash ACCOUNTING only, not the
+    keeper lifecycle.  Unlike [InvalidRequest], an empty completion can be
+    transient provider flakiness (a degraded backend answering empty turns
+    while it recovers), so the budget deliberately leaves room — 5
+    consecutive exempted failures — for the provider to recover across
+    cycles before the failure class degrades to durable crash accounting. *)
 let empty_completion_exemption_budget = 5
 
 let empty_completion_exemptions : (string, int) Hashtbl.t = Hashtbl.create 8
@@ -78,7 +95,7 @@ let invalid_request_budget_exhausted ~keeper_name err =
          attempts; degrading to ordinary crash accounting: %s"
         keeper_name
         max_consecutive_invalid_request_failures
-        (Keeper_types_profile.short_preview (Agent_sdk.Error.to_string err));
+        (Keeper_types_profile.short_preview (Agent_core.Error.to_string err));
     exhausted)
 ;;
 

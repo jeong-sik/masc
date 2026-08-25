@@ -32,7 +32,7 @@ export interface CodeDocumentStore {
   readonly subscribeRegions: (listener: () => void) => () => void
   readonly loadRegions: (
     filePath: string,
-    opts?: { keeper?: string; repoId?: string | null; signal?: AbortSignal },
+    opts?: { keeper?: string; codebase?: string | null; signal?: AbortSignal },
   ) => Promise<void>
   readonly subscribe: (listener: () => void) => () => void
 }
@@ -76,7 +76,7 @@ export function createCodeDocumentStore(
 
   const loadRegions = async (
     filePath: string,
-    opts?: { keeper?: string; repoId?: string | null; signal?: AbortSignal },
+    opts?: { keeper?: string; codebase?: string | null; signal?: AbortSignal },
   ): Promise<void> => {
     const requestId = regionRequestId + 1
     regionRequestId = requestId

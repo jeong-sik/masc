@@ -175,7 +175,7 @@ let blueprint_of_route : Route.t -> blueprint = function
       title = "tools";
       tail = "· capability";
       signal = "public · keeper · privileged";
-      source = "capability registry · OAS catalog";
+      source = "capability registry · Agent Core catalog";
       cadence = "on schema drift";
       vow =
         "Every callable surface should reveal its audience, risk class, and \

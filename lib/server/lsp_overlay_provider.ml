@@ -7,50 +7,79 @@
 open Ide_annotation_types
 
 module Cache = struct
-  let tbl : (string, annotation list) Hashtbl.t = Hashtbl.create 32
+  (* The cached rows are only valid for the store revision they were read
+     from. [store_bytes] is that revision token: every mutation of an
+     annotation store is an append (create, tombstone, and compaction
+     marker alike — see [Ide_annotations]), so the file's byte length is a
+     total order on its contents. A cache hit therefore has to agree with
+     the store's current length, otherwise a keeper annotation written
+     after the reader first touched the file would stay invisible for the
+     whole connection: the client that reads this overlay is read-only, so
+     the [didSave] invalidation below never fires for it. *)
+  type entry =
+    { annotations : annotation list
+    ; store_bytes : int
+    }
+
+  let tbl : (string, entry) Hashtbl.t = Hashtbl.create 32
   let mutex = Eio.Mutex.create ()
 
-  let key ~base_dir ~file_path =
+  (* Keyed by the store directory, not by [base_dir] alone: the same
+     repo-relative [file_path] names a different document in every
+     codebase, so a codebase-blind key would serve one codebase's rows
+     for another's request. *)
+  let key ~base_dir ~codebase ~file_path =
+    let store_dir = Ide_paths.code_store_dir ~base_dir ~codebase in
     let p =
       if String.equal file_path ""
-      then Fpath.v base_dir
-      else Fpath.append (Fpath.v base_dir) (Fpath.v file_path)
+      then Fpath.v store_dir
+      else Fpath.append (Fpath.v store_dir) (Fpath.v file_path)
     in
     Fpath.to_string (Fpath.rem_empty_seg (Fpath.normalize p))
+  ;;
 
-  let get ~base_dir ~file_path =
-    Eio.Mutex.use_rw ~protect:true mutex (fun () ->
-      let k = key ~base_dir ~file_path in
-      match Hashtbl.find_opt tbl k with
-      | Some annotations -> annotations
-      | None ->
-        let filter : annotation_filter =
-          { file_path = Some file_path; keeper_id = None; goal_id = None; task_id = None }
-        in
-        let annotations = Ide_annotations.list ~base_dir ~filter () in
-        Hashtbl.replace tbl k annotations;
-        annotations)
+  (* A store file that does not exist yet reads as length 0, which is the
+     same revision an empty store has. Both hold no annotations, so the
+     cached empty list stays valid until the first append. *)
+  let store_bytes ~base_dir ~codebase =
+    match Fs_compat.file_size (Ide_annotations.store_file ~base_dir ~codebase ()) with
+    | Some bytes -> bytes
+    | None -> 0
+  ;;
 
-  let invalidate ~base_dir ~file_path =
-    Eio.Mutex.use_rw ~protect:true mutex (fun () ->
-      Hashtbl.remove tbl (key ~base_dir ~file_path))
+  (* [codebase = None] is a reader that has not named a store — an LSP
+     connection opened without an IDE scope, for instance. It reads as no
+     annotations, never as a default codebase: picking one would serve
+     another repo's rows to a reader that never asked for a repo. *)
+  let get ~base_dir ~codebase ~file_path =
+    match codebase with
+    | None -> []
+    | Some codebase ->
+      Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+        let k = key ~base_dir ~codebase ~file_path in
+        let store_bytes = store_bytes ~base_dir ~codebase in
+        match Hashtbl.find_opt tbl k with
+        | Some entry when entry.store_bytes = store_bytes -> entry.annotations
+        | Some _ | None ->
+          let filter : annotation_filter =
+            { file_path = Some file_path; keeper_id = None; goal_id = None; task_id = None }
+          in
+          let annotations = Ide_annotations.list ~base_dir ~codebase ~filter () in
+          Hashtbl.replace tbl k { annotations; store_bytes };
+          annotations)
+  ;;
 
-  let clear () =
-    Eio.Mutex.use_rw ~protect:true mutex (fun () ->
-      Hashtbl.clear tbl)
+  let invalidate ~base_dir ~codebase ~file_path =
+    match codebase with
+    | None -> ()
+    | Some codebase ->
+      Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+        Hashtbl.remove tbl (key ~base_dir ~codebase ~file_path))
+  ;;
+
+  let clear () = Eio.Mutex.use_rw ~protect:true mutex (fun () -> Hashtbl.clear tbl)
 end
 
-(** Centralized [file://] URI helper using Fpath normalization. *)
-let file_uri_of_relative ~base_dir ~file_path =
-  let p =
-    if String.equal file_path ""
-    then Fpath.v base_dir
-    else Fpath.append (Fpath.v base_dir) (Fpath.v file_path)
-  in
-  "file://" ^ Fpath.to_string (Fpath.rem_empty_seg (Fpath.normalize p))
-;;
-
-(** LSP CodeLens entry as JSON. *)
 let tag_opt label value =
   match value with
   | Some raw when String.trim raw <> "" -> [ Printf.sprintf "%s:%s" label raw ]
@@ -100,23 +129,8 @@ let codelens_to_json (a : annotation) : Yojson.Safe.t =
     ]);
   ]
 
-(** LSP InlayHint entry — shows route-context binding inline. *)
-let inlay_hint_to_json (a : annotation) : Yojson.Safe.t =
-  let label =
-    match annotation_context_label a with
-    | "" -> Printf.sprintf "[%s]" (annotation_kind_to_string a.kind)
-    | label -> label
-  in
-  `Assoc [
-    ("position", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
-    ("label", `String label);
-    ("tooltip", `String (annotation_message_with_context a));
-    ("kind", `Int 2);  (* TypeParameter kind for inline annotations *)
-  ]
-
-(** Generate LSP CodeLens entries for a file. *)
-let codelenses ~base_dir ~file_path : Yojson.Safe.t list =
-  let annotations = Cache.get ~base_dir ~file_path in
+let codelenses ~base_dir ~codebase ~file_path : Yojson.Safe.t list =
+  let annotations = Cache.get ~base_dir ~codebase ~file_path in
   List.filter_map (fun (a : annotation) ->
     match a.kind with
     | Decision -> Some (codelens_to_json a)
@@ -125,23 +139,9 @@ let codelenses ~base_dir ~file_path : Yojson.Safe.t list =
     | Comment -> None
   ) annotations
 
-(** Generate LSP InlayHint entries for a file.
-    Only annotations with route-context bindings produce hints. *)
-let inlay_hints ~base_dir ~file_path : Yojson.Safe.t list =
-  let annotations = Cache.get ~base_dir ~file_path in
-  List.filter_map (fun (a : annotation) ->
-    if annotation_route_tags a <> [] then
-      Some (inlay_hint_to_json a)
-    else
-      None
-  ) annotations
-
-(** Merge MASC warnings with LSP diagnostics.
-    Annotations of kind [Question] are elevated to [Information] severity
-    diagnostics to surface unresolved questions in the editor. *)
-let diagnostics ~base_dir ~file_path ~(lsp_diagnostics : Yojson.Safe.t list) :
+let diagnostics ~base_dir ~codebase ~file_path ~(lsp_diagnostics : Yojson.Safe.t list) :
   Yojson.Safe.t list =
-  let annotations = Cache.get ~base_dir ~file_path in
+  let annotations = Cache.get ~base_dir ~codebase ~file_path in
   let masc_diags = List.filter_map (fun (a : annotation) ->
     match a.kind with
     | Question ->
@@ -161,21 +161,21 @@ let diagnostics ~base_dir ~file_path ~(lsp_diagnostics : Yojson.Safe.t list) :
   ) annotations in
   lsp_diagnostics @ masc_diags
 
-let invalidate_cache ~base_dir ~file_path = Cache.invalidate ~base_dir ~file_path
+let invalidate_cache ~base_dir ~codebase ~file_path = Cache.invalidate ~base_dir ~codebase ~file_path
 
 let clear_cache () = Cache.clear ()
 
 (** Find annotations overlapping a given LSP position (0-based line).
     An annotation covers lines [line_start, line_end] (1-based internally),
     so it overlaps LSP line [l] when [line_start - 1 <= l <= line_end - 1]. *)
-let annotations_at_line ~base_dir ~file_path ~line =
-  let annotations = Cache.get ~base_dir ~file_path in
+let annotations_at_line ~base_dir ~codebase ~file_path ~line =
+  let annotations = Cache.get ~base_dir ~codebase ~file_path in
   List.filter (fun (a : annotation) ->
     a.line_start - 1 <= line && line <= a.line_end - 1
   ) annotations
 
-let has_annotations_at_line ~base_dir ~file_path ~line =
-  annotations_at_line ~base_dir ~file_path ~line <> []
+let has_annotations_at_line ~base_dir ~codebase ~file_path ~line =
+  annotations_at_line ~base_dir ~codebase ~file_path ~line <> []
 
 (** Normalize Hover.contents to MarkupContent (kind, value).
     Handles MarkupContent, MarkedString, and MarkedString[]. *)
@@ -206,8 +206,8 @@ let contents_to_markup = function
 (** Append MASC annotation context to an LSP Hover response.
     Handles all LSP Hover.contents forms: MarkupContent, MarkedString, MarkedString[].
     Returns the enriched response unchanged if no annotations overlap. *)
-let enrich_hover ~base_dir ~file_path ~line (result : Yojson.Safe.t) =
-  let matching = annotations_at_line ~base_dir ~file_path ~line in
+let enrich_hover ~base_dir ~codebase ~file_path ~line (result : Yojson.Safe.t) =
+  let matching = annotations_at_line ~base_dir ~codebase ~file_path ~line in
   if matching = [] then result
   else
     let masc_section =
@@ -235,53 +235,9 @@ let enrich_hover ~base_dir ~file_path ~line (result : Yojson.Safe.t) =
        | None -> result)
     | _ -> result
 
-(** Generate LSP Location links for annotations overlapping [line].
-    Used by textDocument/definition to jump to annotation targets. *)
-let definition_links ~base_dir ~file_path ~line : Yojson.Safe.t list =
-  let matching = annotations_at_line ~base_dir ~file_path ~line in
-  List.map (fun (a : annotation) ->
-    `Assoc [
-      ("uri", `String (file_uri_of_relative ~base_dir ~file_path:a.file_path));
-      ("range", `Assoc [
-        ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
-        ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
-      ]);
-    ]
-  ) matching
 
-(** Generate LSP Location[] for annotations related to those at [line].
-    Finds annotations sharing the same goal_id or task_id across the file.
-    Used by textDocument/references. *)
-let reference_locations ~base_dir ~file_path ~line ~include_declaration:_ :
-    Yojson.Safe.t list =
-  let matching = annotations_at_line ~base_dir ~file_path ~line in
-  let goal_ids = List.filter_map (fun (a : annotation) -> a.goal_id) matching in
-  let task_ids = List.filter_map (fun (a : annotation) -> a.task_id) matching in
-  let all = Cache.get ~base_dir ~file_path in
-  let related = List.filter (fun (a : annotation) ->
-    (match a.goal_id with Some g -> List.mem g goal_ids | None -> false)
-    || (match a.task_id with Some t -> List.mem t task_ids | None -> false)
-  ) all in
-  let seen = Hashtbl.create 16 in
-  let deduped = List.filter (fun (a : annotation) ->
-    let key = (a.file_path, a.line_start) in
-    if Hashtbl.mem seen key then false
-    else (Hashtbl.add seen key (); true)
-  ) (matching @ related) in
-  List.map (fun (a : annotation) ->
-    `Assoc [
-      ("uri", `String (file_uri_of_relative ~base_dir ~file_path:a.file_path));
-      ("range", `Assoc [
-        ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
-        ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
-      ]);
-    ]
-  ) deduped
-
-(** Generate CompletionItem[] for MASC annotation snippets.
-    Used by textDocument/completion. *)
-let completion_items ~base_dir ~file_path ~line:_ : Yojson.Safe.t list =
-  let annotations = Cache.get ~base_dir ~file_path in
+let completion_items ~base_dir ~codebase ~file_path ~line:_ : Yojson.Safe.t list =
+  let (_ : annotation list) = Cache.get ~base_dir ~codebase ~file_path in
   let kinds = [ "Comment"; "Decision"; "Question"; "Bookmark" ] in
   List.mapi (fun i kind ->
     let label = Printf.sprintf "masc:%s" (String.lowercase_ascii kind) in
@@ -294,15 +250,14 @@ let completion_items ~base_dir ~file_path ~line:_ : Yojson.Safe.t list =
       ("sortText", `String (Printf.sprintf "zzz_masc_%02d" i));
       ("data", `Assoc [
         ("file_path", `String file_path);
-        ("annotations_count", `Int (List.length annotations));
       ]);
     ]
   ) kinds
 
 (** Generate CodeAction[] for annotation operations.
     Used by textDocument/codeAction. *)
-let code_actions ~base_dir ~file_path ~line ~diagnostics:_ : Yojson.Safe.t list =
-  let matching = annotations_at_line ~base_dir ~file_path ~line in
+let code_actions ~base_dir ~codebase ~file_path ~line ~diagnostics:_ : Yojson.Safe.t list =
+  let matching = annotations_at_line ~base_dir ~codebase ~file_path ~line in
   (* task-1692: the observation plane is read-only, so "Create MASC
      Annotation" must not return a WorkspaceEdit that inserts text into the
      source file (the old [edit]/[newText]). Annotations live in the MASC
@@ -338,36 +293,8 @@ let code_actions ~base_dir ~file_path ~line ~diagnostics:_ : Yojson.Safe.t list 
     ]
   else [ create_action ]
 
-(** Generate SymbolInformation[] for MASC annotations.
-    Used by textDocument/documentSymbol. *)
-let document_symbols ~base_dir ~file_path : Yojson.Safe.t list =
-  let annotations = Cache.get ~base_dir ~file_path in
-  List.map (fun (a : annotation) ->
-    let kind_label = annotation_kind_to_string a.kind in
-    let truncated =
-      if String.length a.content > 40 then
-        String.sub a.content 0 40 ^ "..."
-      else a.content
-    in
-    let name = Printf.sprintf "[%s] %s" kind_label truncated in
-    `Assoc [
-      ("name", `String name);
-      ("kind", `Int 17);
-      ("range", `Assoc [
-        ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
-        ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
-      ]);
-      ("selectionRange", `Assoc [
-        ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
-        ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
-      ]);
-    ]
-  ) annotations
-
-(** Generate FoldingRange[] for consecutive annotation blocks.
-    Used by textDocument/foldingRange. *)
-let folding_ranges ~base_dir ~file_path : Yojson.Safe.t list =
-  let annotations = Cache.get ~base_dir ~file_path in
+let folding_ranges ~base_dir ~codebase ~file_path : Yojson.Safe.t list =
+  let annotations = Cache.get ~base_dir ~codebase ~file_path in
   let sorted_anns = List.sort (fun (a : annotation) (b : annotation) ->
     compare a.line_start b.line_start
   ) annotations in
@@ -399,26 +326,3 @@ let folding_ranges ~base_dir ~file_path : Yojson.Safe.t list =
         ])
       else None
   ) groups
-
-(** Generate DocumentHighlight[] for annotations sharing goal/task context.
-    Used by textDocument/documentHighlight. *)
-let document_highlights ~base_dir ~file_path ~line : Yojson.Safe.t list =
-  let matching = annotations_at_line ~base_dir ~file_path ~line in
-  if matching = [] then []
-  else
-    let goal_ids = List.filter_map (fun (a : annotation) -> a.goal_id) matching in
-    let task_ids = List.filter_map (fun (a : annotation) -> a.task_id) matching in
-    let all = Cache.get ~base_dir ~file_path in
-    let related = List.filter (fun (a : annotation) ->
-      (match a.goal_id with Some g -> List.mem g goal_ids | None -> false)
-      || (match a.task_id with Some t -> List.mem t task_ids | None -> false)
-    ) all in
-    List.map (fun (a : annotation) ->
-      `Assoc [
-        ("range", `Assoc [
-          ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
-          ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
-        ]);
-        ("kind", `Int 2);
-      ]
-    ) related

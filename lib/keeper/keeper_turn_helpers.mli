@@ -8,10 +8,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 
-(** Interval (seconds) for the per-turn background fiber that drains the
-    [keeper_turn] subscription on the OAS event bus. *)
-val default_turn_event_bus_drain_interval_sec : float
-
 val turn_event_bus_drain_interval_sec : unit -> float
 
 val string_contains_substring : needle:string -> string -> bool
@@ -28,13 +24,6 @@ val report_keeper_cycle_side_effect_issue :
   string -> unit
 (** Log and record a side-effect failure for a keeper cycle. *)
 
-val dispatch_keeper_phase_event_checked :
-  config:Workspace.config ->
-  keeper_name:string ->
-  side_effect:string ->
-  Keeper_state_machine.event -> unit
-(** Dispatch a phase event and log on error instead of raising. *)
-
 val finalize_trajectory_acc :
   config:Workspace.config ->
   keeper_name:string ->
@@ -42,14 +31,6 @@ val finalize_trajectory_acc :
   Trajectory.trajectory_outcome -> unit
 (** Finalize a trajectory accumulator with the given outcome. Logs errors
     rather than raising (except cancellation). *)
-
-val record_execution_receipt_gap :
-  config:Workspace.config ->
-  meta:keeper_meta ->
-  stale_reason:string ->
-  error:string ->
-  unit -> unit
-(** Record a coverage gap when an execution receipt could not be appended. *)
 
 val post_assign_task : channel:string -> unit
 (** FSM guard post-action for [AssignTask]. *)
@@ -66,7 +47,6 @@ val pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface
 val record_pre_dispatch_terminal_observation :
   config:Workspace.config ->
   meta:keeper_meta ->
-  generation:int ->
   runtime_id:string ->
   outcome:Keeper_execution_receipt.outcome_kind ->
   terminal_reason_code:string ->

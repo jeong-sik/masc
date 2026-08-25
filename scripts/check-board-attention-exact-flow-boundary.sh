@@ -388,7 +388,7 @@ check_boundary() {
     "Board attention execution must not regain local retry or defer authority"
   forbid_pattern \
     'Exact_output\.(receipt_phase|receipt_dispatch_count|candidate_rejection_(disposition|phase|dispatch_count))|receipt_(phase|dispatch_count)|candidate_rejection_(disposition|phase|dispatch_count)|dispatch_count|exact_execution_failed_before_dispatch' \
-    "Board attention execution must not inspect OAS receipt or candidate-rejection phase, disposition, or dispatch count"
+    "Board attention execution must not inspect AGENT_CORE receipt or candidate-rejection phase, disposition, or dispatch count"
   forbid_pattern \
     'Judgment_blocked|Claim_released|Claim_already_transitioned|Legacy_|legacy_failure' \
     "retired Board attention failure or claim-recovery surface returned"

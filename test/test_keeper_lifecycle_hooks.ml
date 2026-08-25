@@ -39,13 +39,10 @@ let cleanup_dir dir =
 
 let make_keeper_meta ~name ~trace_id =
   match
+    (* agent_name is omitted: the fixture derives the canonical
+       keeper-<name>-agent form, which the parser requires. *)
     Masc_test_deps.meta_of_json_fixture
-      (`Assoc
-         [
-           ("name", `String name);
-           ("agent_name", `String name);
-           ("trace_id", `String trace_id);
-         ])
+      (`Assoc [ ("name", `String name); ("trace_id", `String trace_id) ])
   with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_keeper_meta failed: %s" e)
@@ -74,7 +71,7 @@ let test_run_dispatches_in_order () =
   H.register (fun ~keeper_id:_ _ -> order := "a" :: !order);
   H.register (fun ~keeper_id:_ _ -> order := "b" :: !order);
   H.register (fun ~keeper_id:_ _ -> order := "c" :: !order);
-  H.run ~keeper_id:"k1" H.Tombstone_reaped;
+  H.run ~keeper_id:"k1" H.Supervisor_cleaned;
   (* List was prepended, so reverse to get registration order *)
   check (list string) "registration order" [ "a"; "b"; "c" ]
     (List.rev !order)
@@ -84,20 +81,16 @@ let test_run_passes_keeper_id_and_event () =
   let captured = ref [] in
   H.register (fun ~keeper_id ev ->
     let tag = match ev with
-      | H.Tombstone_reaped -> "tombstone"
+      | H.Supervisor_cleaned -> "supervisor_cleaned"
       | H.Phase_transition { from_phase; to_phase } ->
         Printf.sprintf "%s->%s"
           (SM.phase_to_string from_phase)
           (SM.phase_to_string to_phase)
     in
     captured := (keeper_id, tag) :: !captured);
-  H.run ~keeper_id:"alpha" H.Tombstone_reaped;
-  H.run ~keeper_id:"beta"
-    (H.Phase_transition
-       { from_phase = SM.Running; to_phase = SM.Dead });
+  H.run ~keeper_id:"alpha" H.Supervisor_cleaned;
   let want = [
-    ("alpha", "tombstone");
-    ("beta",  "running->dead");
+    ("alpha", "supervisor_cleaned");
   ] in
   check (list (pair string string)) "captured events" want
     (List.rev !captured)
@@ -110,7 +103,7 @@ let test_exception_in_hook_is_swallowed () =
   H.register (fun ~keeper_id:_ _ -> incr after_count);
   let before = lifecycle_hook_failure_count ~keeper in
   (* Should not raise. *)
-  H.run ~keeper_id:keeper H.Tombstone_reaped;
+  H.run ~keeper_id:keeper H.Supervisor_cleaned;
   let after = lifecycle_hook_failure_count ~keeper in
   check int "subsequent hook still ran" 1 !after_count;
   check (float 0.001) "hook failure metric increments" 1.0
@@ -128,7 +121,7 @@ let test_exception_in_hook_records_coverage_gap_with_context () =
       let keeper = meta.name in
       H.register (fun ~keeper_id:_ _ ->
         failwith "synthetic lifecycle hook failure");
-      H.run ~base_dir ~meta ~keeper_id:keeper H.Tombstone_reaped;
+      H.run ~base_dir ~meta ~keeper_id:keeper H.Supervisor_cleaned;
       match TCG.read_recent ~masc_root:base_dir ~n:1 with
       | [ row ] ->
         let open Yojson.Safe.Util in
@@ -155,7 +148,7 @@ let test_cancelled_in_hook_is_reraised () =
     raise (Eio.Cancel.Cancelled (Failure "synthetic cancel")));
   let raised =
     try
-      H.run ~keeper_id:"cancel-keeper" H.Tombstone_reaped;
+      H.run ~keeper_id:"cancel-keeper" H.Supervisor_cleaned;
       false
     with
     | Eio.Cancel.Cancelled _ -> true

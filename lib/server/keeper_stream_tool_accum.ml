@@ -1,7 +1,7 @@
 (* See keeper_stream_tool_accum.mli. Kept as a parallel turn-local collector to
    [Keeper_stream_media_accum] rather than a shared abstraction, for the same
    reason that one gives: the SSE bridge owns live translation and this owns
-   durable persistence, so they stay on their own side of the OAS-stream /
+   durable persistence, so they stay on their own side of the AGENT_CORE-stream /
    chat-store boundary. *)
 
 type open_block = {
@@ -77,22 +77,22 @@ let replace_fragments t index snapshot =
   | Some block -> replace_block t index { block with args_fragments = [ snapshot ] }
 
 (* [sse_event_is_deliverable_progress_signal] answers a [content_type = "tool_use"]
-   check alone (agent_sdk's [Streaming.sse_event_is_deliverable_progress_signal]),
+   check alone (agent_core's [Streaming.sse_event_is_deliverable_progress_signal]),
    independent of whether identity fields are populated. Keeping that check
    separate from the identity check below lets the malformed-but-tool-typed
    case (deliverable, no id/name) be told apart from a genuinely non-tool
-   start (not deliverable): the bridge tombstones the former
-   (Tool_start_missing_identity, keeper_chat_oas_stream_bridge.ml's
+   start (not deliverable): the bridge voids the former
+   (Tool_start_missing_identity, keeper_chat_agent_core_stream_bridge.ml's
    ContentBlockStart handler) and leaves the latter's index untouched. *)
-let stream_start_is_tool_progress (evt : Agent_sdk.Types.sse_event) =
+let stream_start_is_tool_progress (evt : Agent_core.Types.sse_event) =
   match evt with
-  | Agent_sdk.Types.ContentBlockStart _ ->
-    Agent_sdk.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal evt
+  | Agent_core.Types.ContentBlockStart _ ->
+    Agent_core.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal evt
   | _ -> false
 
-let stream_start_has_tool_identity (evt : Agent_sdk.Types.sse_event) =
+let stream_start_has_tool_identity (evt : Agent_core.Types.sse_event) =
   match evt with
-  | Agent_sdk.Types.ContentBlockStart { tool_id; tool_name; _ } -> (
+  | Agent_core.Types.ContentBlockStart { tool_id; tool_name; _ } -> (
     match tool_id, tool_name with
     | Some tid, Some tname
       when String.trim tid <> "" && String.trim tname <> "" -> true
@@ -102,9 +102,9 @@ let stream_start_has_tool_identity (evt : Agent_sdk.Types.sse_event) =
 let stream_start_is_tool evt =
   stream_start_is_tool_progress evt && stream_start_has_tool_identity evt
 
-let on_event t (evt : Agent_sdk.Types.sse_event) =
+let on_event t (evt : Agent_core.Types.sse_event) =
   match evt with
-  | Agent_sdk.Types.ContentBlockStart { index; tool_id; tool_name; _ } ->
+  | Agent_core.Types.ContentBlockStart { index; tool_id; tool_name; _ } ->
     if List.mem index t.invalid_indices
     then ()
     else if stream_start_is_tool evt then (
@@ -150,7 +150,7 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
     else if stream_start_is_tool_progress evt
     then
       (* Deliverable tool-use content type but missing/blank identity: the
-         live bridge tombstones this index (Tool_start_missing_identity)
+         live bridge voids this index (Tool_start_missing_identity)
          until its terminator, so a later valid start at the same index must
          not resurrect it as a fresh block. *)
       invalidate_index t index
@@ -160,20 +160,20 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
          (* An identity-free non-tool block leaves occupancy untouched. *)
          ()
        | Some _, _ | _, Some _ ->
-         (* The live bridge tombstones a non-tool block carrying tool identity
+         (* The live bridge voids a non-tool block carrying tool identity
             until its stop, so it cannot be reopened as a valid tool block. *)
          invalidate_index t index)
-  | Agent_sdk.Types.ContentBlockDelta
-      { index; delta = Agent_sdk.Types.InputJsonDelta fragment } ->
+  | Agent_core.Types.ContentBlockDelta
+      { index; delta = Agent_core.Types.InputJsonDelta fragment } ->
     append_fragment t index fragment
-  | Agent_sdk.Types.ContentBlockDelta
-      { index; delta = Agent_sdk.Types.InputJsonSnapshot snapshot } ->
+  | Agent_core.Types.ContentBlockDelta
+      { index; delta = Agent_core.Types.InputJsonSnapshot snapshot } ->
     replace_fragments t index snapshot
-  | Agent_sdk.Types.ContentBlockDelta { index; delta = Agent_sdk.Types.MediaDelta _ } ->
+  | Agent_core.Types.ContentBlockDelta { index; delta = Agent_core.Types.MediaDelta _ } ->
     (* The SSE bridge opens an [Active_media] block straight from a bare
        [MediaDelta] — no [ContentBlockStart] announces it — and then rejects a
        tool start at that index as a protocol error without emitting
-       [Tool_call_start] (keeper_chat_oas_stream_bridge.ml, [Some (Active_media _)]
+       [Tool_call_start] (keeper_chat_agent_core_stream_bridge.ml, [Some (Active_media _)]
        arm). Mirror that occupancy: the index stays closed to tool starts until
        its terminator, so a reload cannot gain a tool row the live stream never
        showed. A delta landing on an already-open tool block leaves the block
@@ -182,11 +182,11 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
     (match block_for_index t index with
      | Some _ -> ()
      | None -> invalidate_index t index)
-  | Agent_sdk.Types.ContentBlockStop { index } ->
+  | Agent_core.Types.ContentBlockStop { index } ->
     if List.mem index t.invalid_indices
     then clear_invalid_index t index
     else finalize_block t index
-  | Agent_sdk.Types.MessageStop ->
+  | Agent_core.Types.MessageStop ->
     List.iter (fun (index, _) -> finalize_block t index) t.blocks;
     t.invalid_indices <- []
   | _ -> ()

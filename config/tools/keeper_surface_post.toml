@@ -1,0 +1,69 @@
+name = "keeper_surface_post"
+description = """
+Post a message to one conversation endpoint: 'dashboard' (appears in the \
+operator's chat transcript), 'discord', or 'slack'. Standard Markdown is \
+rendered natively by Discord and by Slack's Block Kit markdown block. To \
+create a real highlighted user mention, pass stable participant-roster ids \
+in mention_user_ids; never guess ids from display names. A Slack post may \
+reply inside an existing thread (thread_ts) or carry Block Kit blocks; see \
+those parameters. Posting to an unbound surface is an error. These endpoints \
+are read by a person, so an unchanged status reposted every cycle crowds \
+their view and says nothing the previous one did not; when there is nothing \
+new, the turn ends without a post."""
+
+[[params]]
+name = "surface"
+type = "string"
+required = true
+description = """
+Lane to post to: 'dashboard', 'discord', or 'slack'. Posting to a surface \
+this keeper is not bound to is an error, not a no-op."""
+
+[[params]]
+name = "content"
+type = "string"
+required = true
+description = """
+Standard Markdown message to deliver. Discord renders it natively; Slack \
+renders it through the official Block Kit markdown block. When blocks is \
+provided, content is only the Slack notification fallback text."""
+
+[[params]]
+name = "channel_id"
+type = "string"
+description = """
+Bound Discord or Slack channel id. Required only when more than one channel \
+is bound for the selected surface; must be one of those bindings."""
+
+[[params]]
+name = "mention_user_ids"
+type = "array"
+items = { type = "string" }
+max_items = 100
+description = """
+Stable ids from keeper_surface_read participants to visibly mention. Slack \
+requires U.../W... ids; Discord requires decimal user snowflakes. Never \
+guess an id from a display name; plain @name text is not an API mention."""
+
+[[params]]
+name = "thread_ts"
+type = "string"
+description = """
+Slack timestamp of an existing thread's root message (from \
+keeper_surface_read). Posts this message as a reply inside that thread. \
+Slack surface only; when both this and a continuation thread exist, this \
+value wins."""
+
+[[params]]
+name = "blocks"
+type = "array"
+max_items = 50
+description = """
+Slack Block Kit blocks for chat.postMessage (at most 50, each a block object \
+with a \"type\" member). Slack surface only. content stays the notification \
+fallback text; when omitted, content renders as one markdown block. \
+Rendering mentions inside custom blocks is the author's responsibility; \
+mention_user_ids are still roster-validated."""
+
+[params.items]
+type = "object"

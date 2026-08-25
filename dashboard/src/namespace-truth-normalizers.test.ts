@@ -43,10 +43,7 @@ describe('normalizeNamespaceTruth', () => {
     const result = normalizeNamespaceTruth({
       generated_at_iso: '2026-04-17T10:00:00Z',
       dashboard_surface: '/api/v1/dashboard/namespace-truth',
-      dashboard_aliases: [
-        '/api/v1/dashboard/project-snapshot',
-        '/api/v1/dashboard/workspace-truth',
-      ],
+      dashboard_aliases: ['/api/v1/dashboard/project-snapshot'],
       source: 'namespace_truth_read_model',
       retention: {
         scope: 'dashboard_namespace_truth',
@@ -60,7 +57,7 @@ describe('normalizeNamespaceTruth', () => {
 
     expect(result.generated_at_iso).toBe('2026-04-17T10:00:00Z')
     expect(result.dashboard_surface).toBe('/api/v1/dashboard/namespace-truth')
-    expect(result.dashboard_aliases).toContain('/api/v1/dashboard/workspace-truth')
+    expect(result.dashboard_aliases).toEqual(['/api/v1/dashboard/project-snapshot'])
     expect(result.source).toBe('namespace_truth_read_model')
     expect(result.retention?.scope).toBe('dashboard_namespace_truth')
     expect(result.retention?.execution_input).toBe('/api/v1/dashboard/execution')
@@ -272,7 +269,13 @@ describe('normalizeNamespaceTruth', () => {
           hidden_count: 7,
           hidden_actors: ['agent-2', 'agent-3'],
           confirm_required_actions: [
-            { action_type: 'shutdown', target_type: 'keeper', description: 'Shutdown keeper', confirm_required: true },
+            {
+              action_type: 'keeper_recover',
+              tool_name: 'masc_keeper_recover',
+              target_type: 'keeper',
+              description: 'Safe down/up recovery for stale/degraded keeper.',
+              confirm_required: true,
+            },
           ],
         },
       },
@@ -284,46 +287,41 @@ describe('normalizeNamespaceTruth', () => {
     expect(pcs!.visible_count).toBe(3)
     expect(pcs!.hidden_actors).toEqual(['agent-2', 'agent-3'])
     expect(pcs!.confirm_required_actions).toHaveLength(1)
-    expect(pcs!.confirm_required_actions[0]!.action_type).toBe('shutdown')
+    expect(pcs!.confirm_required_actions[0]!.action_type).toBe('keeper_recover')
   })
 
-  it('filters out confirm_required_actions with missing required fields', () => {
+  it('rejects a summary with an invalid action', () => {
     const result = normalizeNamespaceTruth({
       operator: {
         pending_confirm_summary: {
+          actor_filter: null,
+          filter_active: false,
+          visible_count: 0,
+          total_count: 0,
+          hidden_count: 0,
+          hidden_actors: [],
           confirm_required_actions: [
-            { action_type: 'shutdown' }, // missing target_type
-            { target_type: 'keeper' }, // missing action_type
-            { action_type: 'restart', target_type: 'agent' }, // valid
+            { action_type: 'shutdown' },
           ],
         },
       },
     })
-    const pcs = result.operator?.pending_confirm_summary
-    expect(pcs!.confirm_required_actions).toHaveLength(1)
-    expect(pcs!.confirm_required_actions[0]!.action_type).toBe('restart')
+    expect(result.operator?.pending_confirm_summary).toBeNull()
   })
 
-  it('defaults pending_confirm_summary numeric fields', () => {
+  it('rejects an incomplete pending-confirm summary', () => {
     const result = normalizeNamespaceTruth({
       operator: {
         pending_confirm_summary: {},
       },
     })
-    const pcs = result.operator?.pending_confirm_summary
-    expect(pcs!.visible_count).toBe(0)
-    expect(pcs!.total_count).toBe(0)
-    expect(pcs!.hidden_count).toBe(0)
-    expect(pcs!.filter_active).toBe(false)
-    expect(pcs!.actor_filter).toBeNull()
-    expect(pcs!.hidden_actors).toEqual([])
+    expect(result.operator?.pending_confirm_summary).toBeNull()
   })
 
   it('extracts readiness summary and attention events', () => {
     const result = normalizeNamespaceTruth({
       readiness: {
         status: 'warn',
-        score: 0.61,
         decision_required_count: 2,
         blocking_count: 3,
         pillars: [
@@ -331,7 +329,6 @@ describe('normalizeNamespaceTruth', () => {
             key: 'execution_safety',
             label: 'Execution Safety',
             status: 'ok',
-            score: 1,
             summary: 'Sandbox posture is visible.',
             blocking_reasons: [],
             metrics: { keeper_count: 4 },
@@ -340,7 +337,6 @@ describe('normalizeNamespaceTruth', () => {
             key: 'goal_coherence',
             label: 'Goal Coherence',
             status: 'warn',
-            score: 0.25,
             summary: 'One keeper is unscoped.',
             blocking_reasons: ['1 keeper has no active goal link.'],
             metrics: { unscoped_keepers: 1 },
@@ -362,7 +358,6 @@ describe('normalizeNamespaceTruth', () => {
 
     expect(result.readiness).not.toBeNull()
     expect(result.readiness!.status).toBe('warn')
-    expect(result.readiness!.score).toBe(0.61)
     expect(result.readiness!.decision_required_count).toBe(2)
     expect(result.readiness!.pillars).toHaveLength(2)
     expect(result.readiness!.pillars[1]!.blocking_reasons).toEqual(['1 keeper has no active goal link.'])

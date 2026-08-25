@@ -198,7 +198,6 @@ const BACKEND_PHASE_LOWERCASE_MAP = {
   offline: 'Offline',
   running: 'Running',
   failing: 'Failing',
-  overflowed: 'Overflowed',
   compacting: 'Compacting',
   handing_off: 'HandingOff',
   draining: 'Draining',
@@ -206,7 +205,6 @@ const BACKEND_PHASE_LOWERCASE_MAP = {
   stopped: 'Stopped',
   crashed: 'Crashed',
   restarting: 'Restarting',
-  dead: 'Dead',
 } as const satisfies Record<string, KeeperPhase>
 
 /** Forward-compat PascalCase passthrough — accepts already-typed values from
@@ -216,7 +214,6 @@ const BACKEND_PHASE_PASCAL_PASSTHROUGH = {
   Offline: 'Offline',
   Running: 'Running',
   Failing: 'Failing',
-  Overflowed: 'Overflowed',
   Compacting: 'Compacting',
   HandingOff: 'HandingOff',
   Draining: 'Draining',
@@ -224,7 +221,6 @@ const BACKEND_PHASE_PASCAL_PASSTHROUGH = {
   Stopped: 'Stopped',
   Crashed: 'Crashed',
   Restarting: 'Restarting',
-  Dead: 'Dead',
 } as const satisfies Record<KeeperPhase, KeeperPhase>
 
 // Compile-time coverage check: every KeeperPhase variant must appear as a
@@ -263,7 +259,7 @@ export function toKeeperPhase(raw: string | null | undefined): KeeperPhase | nul
 // `toKeeperLifecycleState` (iter65, sibling cleanup PR).
 const PIPELINE_STAGES: ReadonlySet<PipelineStage> = new Set<PipelineStage>([
   'idle', 'compacting', 'handoff', 'offline',
-  'failing', 'overflowed', 'draining', 'paused',
+  'failing', 'draining', 'paused',
   'crashed', 'restarting', 'unknown',
 ])
 
@@ -292,7 +288,7 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
     return raw
   }
   if (raw === 'in_progress' || raw === 'claimed') return 'busy'
-  if (raw === 'dead' || raw === 'left') return 'offline'
+  if (raw === 'left') return 'offline'
   return 'offline'
 }
 
@@ -303,7 +299,7 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
 const KEEPER_LIFECYCLE_STATES: ReadonlySet<KeeperLifecycleState> = new Set<KeeperLifecycleState>([
   'active', 'compacting', 'preparing', 'handoff-imminent',
   'idle', 'offline', 'unbooted', 'stopped',
-  'paused', 'crashed', 'dead', 'unknown',
+  'paused', 'crashed', 'unknown',
 ])
 
 // Typed parse: replaces the `as KeeperLifecycleState` cast that
@@ -322,7 +318,7 @@ export function toKeeperLifecycleState(raw: string | null | undefined): KeeperLi
 export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
   // RFC-0139 PR-2: strict-superset migration off `isOfflineStatus`
   // (status-only). `isKeeperOffline` adds the terminal-FSM-phase axis
-  // (Offline/Stopped/Dead/Crashed) so a keeper crashed mid-tick
+  // (Offline/Stopped/Crashed) so a keeper crashed mid-tick
   // is caught even when its wire-format status hasn't transitioned yet.
   if (isKeeperOffline(keeper)) {
     // Keep offline-detail labels on a typed display axis. Unknown future
@@ -532,8 +528,6 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         prefill_ms: asNumber(rawTel.prefill_ms) ?? null,
       } : null
       const runtimeObj = isRecord(item.runtime) ? item.runtime : null
-      const fallbackEvents = runtimeObj && Array.isArray(runtimeObj.fallback_events) ? runtimeObj.fallback_events : []
-      const firstFallback = fallbackEvents.length > 0 && isRecord(fallbackEvents[0]) ? fallbackEvents[0] : null
       return {
         ts,
         context_ratio: null,
@@ -556,10 +550,6 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         runtime_id: runtimeObj ? (asString(runtimeObj.runtime_id) ?? asString(runtimeObj.name) ?? null) : null,
         runtime_outcome: runtimeObj ? (asString(runtimeObj.outcome) ?? null) : null,
         runtime_attempt_count: runtimeObj ? (asNumber(runtimeObj.attempt_count) ?? null) : null,
-        runtime_strategy: runtimeObj && typeof runtimeObj.strategy === 'string' ? runtimeObj.strategy : null,
-        fallback_applied: runtimeObj ? runtimeObj.fallback_applied === true : false,
-        fallback_hops: runtimeObj ? (asNumber(runtimeObj.fallback_hops) ?? 0) : 0,
-        fallback_reason: firstFallback && typeof firstFallback.reason === 'string' ? firstFallback.reason : null,
       }
     })
     .filter((item): item is KeeperMetricPoint => item !== null)
@@ -621,7 +611,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
   return rows
     .map((row): Keeper | null => {
       if (!isRecord(row)) return null
-      const agentRaw = isRecord(row.agent) ? row.agent : null
       const contextRaw = isRecord(row.context) ? row.context : null
       const metricsWindow = normalizeMetricsWindow(row.metrics_window)
 
@@ -637,7 +626,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
       const topContextSource = asString(row.context_source) ?? null
       const topContextMeasured = topContextSource === 'turn_record'
       const contextRatio = topContextMeasured ? asNumber(row.context_ratio) ?? null : null
-      const statusRaw = asString(row.status) ?? asString(agentRaw?.status) ?? 'offline'
+      const statusRaw = asString(row.status) ?? 'offline'
       const model = undefined
       const metricsSeries = normalizeMetricsSeries(row.metrics_series)
 
@@ -659,21 +648,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
             }
           : undefined
 
-      const normalizedAgent =
-        agentRaw
-          ? {
-              name: asString(agentRaw.name),
-              error: asString(agentRaw.error),
-              agent_type: asString(agentRaw.agent_type),
-              status: asString(agentRaw.status),
-              current_task: asString(agentRaw.current_task) ?? null,
-              joined_at: asString(agentRaw.joined_at),
-              last_seen: asString(agentRaw.last_seen),
-              last_seen_ago_s: asNumber(agentRaw.last_seen_ago_s),
-              capabilities: asStringArray(agentRaw.capabilities),
-            }
-          : undefined
-
       const providerHealth: ProviderHealth | null = null
       const runtimeBlockerClass = asKeeperRuntimeBlockerClass(row.runtime_blocker_class)
       const runtimeBlockerSummary = asString(row.runtime_blocker_summary) ?? null
@@ -681,7 +655,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
       const terminalReason = trust?.latest_terminal_reason ?? null
       const nextHumanAction = asString(row.next_human_action) ?? null
       const stopCause = normalizeStopCause({
-        stop_cause: row.stop_cause,
         runtime_blocker_class: runtimeBlockerClass,
         runtime_blocker_summary: runtimeBlockerSummary,
         terminal_reason_code: terminalReason?.code ?? null,
@@ -710,7 +683,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         paused: asBoolean(row.paused),
         registered:
           typeof row.registered === 'boolean' ? row.registered : undefined,
-        reconcile_status: asString(row.reconcile_status) ?? null,
         emoji: asString(row.emoji),
         koreanName: asString(row.koreanName) ?? asString(row.korean_name),
         keeper_id: asString(row.keeper_id) ?? null,
@@ -730,6 +702,10 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         status: normalizeKeeperAgentStatus(statusRaw),
         keepalive_running:
           typeof row.keepalive_running === 'boolean' ? row.keepalive_running : undefined,
+        keeper_keepalive_interval_s:
+          asNumber(row.keeper_keepalive_interval_s) ?? null,
+        heartbeat_stale_after_s:
+          asNumber(row.heartbeat_stale_after_s) ?? null,
         proactive_enabled:
           typeof row.proactive_enabled === 'boolean' ? row.proactive_enabled : undefined,
         pause_state: asKeeperPauseState(row.pause_state),
@@ -743,14 +719,12 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         next_human_action: nextHumanAction,
         config_error: normalizeKeeperProfileConfigError(row.config_error),
         trust,
-        active_goal_ids: asStringArray(row.active_goal_ids) ?? [],
         sandbox_profile: normalizeKeeperSandboxProfile(row.sandbox_profile),
         sandbox_target: asString(row.sandbox_target) ?? null,
         sandbox_last_error: asString(row.sandbox_last_error) ?? null,
         blocked_task_count: asNumber(row.blocked_task_count) ?? null,
         goal_progress: isRecord(row.goal_progress)
           ? {
-              active_goal_count: asNumber(row.goal_progress.active_goal_count) ?? undefined,
               linked_task_count: asNumber(row.goal_progress.linked_task_count) ?? undefined,
               done_task_count: asNumber(row.goal_progress.done_task_count) ?? undefined,
               open_task_count: asNumber(row.goal_progress.open_task_count) ?? undefined,
@@ -760,20 +734,14 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           : null,
         created_at: toIsoTimestamp(row.created_at) ?? asString(row.created_at),
         updated_at: toIsoTimestamp(row.updated_at) ?? asString(row.updated_at),
-        last_heartbeat: asString(row.last_heartbeat) ?? asString(agentRaw?.last_seen),
-        last_autonomous_action_at: toIsoTimestamp(row.last_autonomous_action_at) ?? asString(row.last_autonomous_action_at) ?? null,
-        generation: asNumber(row.generation),
+        last_heartbeat: asString(row.heartbeat_observation_error)
+          ? undefined
+          : asString(row.last_heartbeat),
+        heartbeat_observation_error: asString(row.heartbeat_observation_error) ?? null,
         turn_count: asNumber(row.turn_count) ?? asNumber(row.total_turns),
         total_turns: asNumber(row.total_turns) ?? asNumber(row.turn_count),
         total_tokens: asNumber(row.total_tokens),
         last_latency_ms: asNumber(row.last_latency_ms),
-        autonomous_action_count: asNumber(row.autonomous_action_count),
-        autonomous_turn_count: asNumber(row.autonomous_turn_count),
-        autonomous_text_turn_count: asNumber(row.autonomous_text_turn_count),
-        autonomous_tool_turn_count: asNumber(row.autonomous_tool_turn_count),
-        board_reactive_turn_count: asNumber(row.board_reactive_turn_count),
-        mention_reactive_turn_count: asNumber(row.mention_reactive_turn_count),
-        noop_turn_count: asNumber(row.noop_turn_count),
         keeper_age_s: asNumber(row.keeper_age_s),
         last_turn_ago_s: asNumber(row.last_turn_ago_s),
         last_handoff_ago_s: asNumber(row.last_handoff_ago_s),
@@ -794,10 +762,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         context_metrics_unavailable: normalizeKeeperContextMetricsUnavailable(row.context_metrics_unavailable),
         last_turn_usage: normalizeKeeperLastTurnUsage(row.last_turn_usage),
         context: normalizedContext,
-        traits: asStringArray(row.traits),
-        interests: asStringArray(row.interests),
-        primaryValue: asString(row.primaryValue) ?? asString(row.primary_value),
-        activityLevel: asNumber(row.activityLevel) ?? asNumber(row.activity_level),
         recent_input_preview: asString(row.recent_input_preview) ?? null,
         recent_output_preview: asString(row.recent_output_preview) ?? null,
         recent_tool_names: asStringArray(row.recent_tool_names) ?? [],
@@ -814,7 +778,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_compaction_decision: asString(row.last_compaction_decision) ?? null,
         metrics_series: metricsSeries.length > 0 ? metricsSeries : undefined,
         metrics_window: metricsWindow,
-        agent: normalizedAgent,
         provider_health: providerHealth,
       }
     })

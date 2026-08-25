@@ -20,9 +20,7 @@
     ([lane_pressure_ctx_ratio] tuning constant,
     [keeper_tool_audit_json_fields],
     [is_internal_action] / [is_internal_incident],
-    [incident_action_types],
-    [identity_digest], [action_identity],
-    [matched_internal_action_keys], [severity_rank],
+    [identity_digest], [action_identity], [severity_rank],
     [option_to_json] / [Json_util.string_opt_to_json] /
     [string_list_json] envelope helpers,
     [parse_iso_opt] / [trim_to_option],
@@ -47,20 +45,8 @@ val build_internal_signals :
   Yojson.Safe.t list ->
   Yojson.Safe.t list ->
   Yojson.Safe.t list
-(** [build_internal_signals incidents actions] fuses the
-    operator's incident + recommended-action streams into
-    one internal-signal list, sorted by descending
-    pressure rank. *)
-
-(** {1 Incident / action pairing} *)
-
-val action_matches_incident : Yojson.Safe.t -> Yojson.Safe.t -> bool
-(** [action_matches_incident incident action] returns [true]
-    when [action] targets the same [target_type] /
-    [target_id] pair as [incident] and either its
-    normalized [reason] equals the incident's normalized
-    [summary] (both non-empty), or its [action_type] is one
-    of the types listed for the incident's [kind].  Returns
-    [false] on a target mismatch.  Shared with
-    {!Dashboard_briefing}, which pairs the same operator
-    digest streams. *)
+(** [build_internal_signals incidents actions] emits the operator's incident
+    and recommended-action streams as one internal-signal list, sorted by
+    descending pressure rank. Each row carries the stream it came from and
+    leaves the other field [null]: the digest records no link between an
+    attention item and a recommended action, so none is asserted. *)

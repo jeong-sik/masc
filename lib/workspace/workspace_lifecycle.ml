@@ -6,7 +6,6 @@
 open Masc_domain
 open Workspace_utils
 open Workspace_state
-open Workspace_identity
 open Workspace_broadcast
 open Workspace_identity
 
@@ -29,6 +28,16 @@ let agent_parse_error_snapshot ~agent_name ~agent_file =
     ("raw_head",
       if raw_head = "" then `Null else `String raw_head);
   ]
+
+let log_lifecycle_broadcast_result ~operation ~agent_name = function
+  | Ok _ -> ()
+  | Error error ->
+    Log.Workspace.error
+      "agent lifecycle committed but broadcast was not persisted operation=%s agent=%s detail=%s"
+      operation
+      agent_name
+      (broadcast_error_to_string error)
+;;
 
 (** Bind agent session - with auto-generated nickname and metadata *)
 let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
@@ -56,15 +65,17 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
     else begin
       let dir = agents_dir config in
       let prefix = safe_filename agent_type ^ "-" in
+      (* Backend-aware: the bare [Sys.readdir] scan saw only the local
+         mirror, so a Memory-backend workspace never found the existing
+         record and minted a fresh nickname per session (RFC-0371 B9).
+         [list_dir] is total — missing dir reads as []. *)
       let existing =
-        if Sys.file_exists dir && Sys.is_directory dir then
-          Array.to_list (Sys.readdir dir)
-          |> List.find_opt (fun f ->
-               Filename.check_suffix f ".json"
-               && String.length f > String.length prefix
-               && String.starts_with f ~prefix)
-          |> Option.map (fun f -> Filename.chop_suffix f ".json")
-        else None
+        list_dir config dir
+        |> List.find_opt (fun f ->
+             Filename.check_suffix f ".json"
+             && String.length f > String.length prefix
+             && String.starts_with f ~prefix)
+        |> Option.map (fun f -> Filename.chop_suffix f ".json")
       in
       match existing with
       | Some nick -> nick  (* Reuse existing nickname for this agent_type *)
@@ -76,7 +87,7 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
   let agent_file_dedup = Filename.concat (agents_dir config) (safe_filename nickname ^ ".json") in
   let already_bound = Sys.file_exists agent_file_dedup in
   if already_bound then begin
-    (match read_agent_with_repair config agent_file_dedup with
+    (match read_agent config agent_file_dedup with
      | Ok existing_agent ->
        let is_inactive = existing_agent.status = Inactive in
        let new_session_id = if is_inactive then generate_session_id () else
@@ -105,11 +116,12 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
            let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
            { s with active_agents = agents }
          ) in
-         let _ =
-           broadcast config ~from_agent:nickname
-             ~msg_type:"session_rebound"
-             ~content:(Printf.sprintf "%s rebound the namespace session" nickname)
-         in
+         broadcast ~audience:System_record config ~from_agent:nickname
+           ~msg_type:"session_rebound"
+           ~content:(Printf.sprintf "%s rebound the namespace session" nickname)
+         |> log_lifecycle_broadcast_result
+              ~operation:"session_rebound"
+              ~agent_name:nickname;
          log_event config (`Assoc [
            ("type", `String "agent_session_bound");
            ("agent", `String nickname);
@@ -174,11 +186,12 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
   ) in
 
   (* Broadcast session binding *)
-  let _ =
-    broadcast config ~from_agent:nickname
-      ~msg_type:"session_bound"
-      ~content:(Printf.sprintf "%s bound the namespace session" nickname)
-  in
+  broadcast ~audience:System_record config ~from_agent:nickname
+    ~msg_type:"session_bound"
+    ~content:(Printf.sprintf "%s bound the namespace session" nickname)
+  |> log_lifecycle_broadcast_result
+       ~operation:"session_bound"
+       ~agent_name:nickname;
 
   (* Log event with metadata *)
   log_event config (`Assoc [
@@ -205,7 +218,7 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
   end
 
 (** End agent session *)
-let end_session ?(stop_heartbeats = true) config ~agent_name =
+let end_session config ~agent_name =
   ensure_initialized config;
 
   (* Support both exact nickname match and agent_type prefix match *)
@@ -213,7 +226,7 @@ let end_session ?(stop_heartbeats = true) config ~agent_name =
 
   (* Stop any heartbeats owned by this agent *)
   let _stopped =
-    if stop_heartbeats then Heartbeat.stop_by_agent ~agent_name:actual_name else 0
+    Heartbeat.stop_by_agent ~agent_name:actual_name
   in
 
   let agent_file = Filename.concat (agents_dir config) (safe_filename actual_name ^ ".json") in
@@ -221,7 +234,7 @@ let end_session ?(stop_heartbeats = true) config ~agent_name =
   if in_fs then begin
     (* Mark agent as Inactive instead of deleting, so a future session can restore
        identity without orphan state. *)
-    (match read_agent_with_repair config agent_file with
+    (match read_agent config agent_file with
      | Ok existing_agent ->
        let updated = { existing_agent with status = Inactive; last_seen = now_iso () } in
        write_json config agent_file (agent_to_yojson updated)
@@ -240,11 +253,12 @@ let end_session ?(stop_heartbeats = true) config ~agent_name =
       { s with active_agents = List.filter ((<>) actual_name) s.active_agents }
     ) in
 
-    let _ =
-      broadcast config ~from_agent:"system"
-        ~msg_type:"session_ended"
-        ~content:(Printf.sprintf "%s ended the namespace session" actual_name)
-    in
+    broadcast ~audience:System_record config ~from_agent:"system"
+      ~msg_type:"session_ended"
+      ~content:(Printf.sprintf "%s ended the namespace session" actual_name)
+    |> log_lifecycle_broadcast_result
+         ~operation:"session_ended"
+         ~agent_name:actual_name;
 
     (* Log event *)
     log_event config (`Assoc [

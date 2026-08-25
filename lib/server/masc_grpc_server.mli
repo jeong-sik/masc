@@ -15,11 +15,6 @@ val configured_port : unit -> int
 (** Whether gRPC transport is enabled (default-on, opt-out via env). *)
 val is_enabled : unit -> bool
 
-module For_testing : sig
-  val parse_lsp_jsonrpc_request :
-    string -> ((string * Yojson.Safe.t), string) result
-end
-
 (** Build a gRPC server preloaded with reflection, health, and workspace
     services. Exposed for tests and local transport wiring checks. *)
 val create_server :
@@ -29,10 +24,6 @@ val create_server :
     (string ->
      string ->
      (string, Server_grpc_tool_dispatch.error) result) ->
-  lsp_dispatcher:(language_id:string ->
-                   jsonrpc_request_json:string ->
-                   workspace_root:string option ->
-                   (string, string) result) ->
   Grpc_eio.Server.t
 
 (** Start the gRPC workspace server in a forked fiber.

@@ -117,7 +117,7 @@ function canonicalRoute(tab: TabId, params: Record<string, string>): RouteState 
 
 function normalizeSegments(pathPart: string): string[] {
   const normalized = pathPart.replace(/^\/+/, '')
-  const segments = normalized.split('/').filter(Boolean)
+  const segments = normalized.split('/').filter(Boolean).map(decodeSafe)
   if (segments[0] === 'dashboard') return segments.slice(1)
   return segments
 }
@@ -133,7 +133,7 @@ function parseSegments(
 
   if (segments[0] === 'command' && segments[1]) {
     const nextParams = { ...params }
-    const second = decodeSafe(segments[1])
+    const second = segments[1]
     if (
       `command:${second}` in CROSS_SURFACE_SECTION_REDIRECTS
       || `command:${second}` in SECTION_REDIRECTS
@@ -153,7 +153,7 @@ function parseSegments(
     && segments[1]
   ) {
     const tab = segments[0] as 'monitoring' | 'workspace' | 'lab' | 'code'
-    const nextParams = { ...params, section: decodeSafe(segments[1]) }
+    const nextParams = { ...params, section: segments[1] }
     return canonicalRoute(tab, nextParams)
   }
 
@@ -171,18 +171,17 @@ function parseHash(hash: string): RouteState {
   const raw = (hash || '').replace(/^#/, '').trim()
   if (!raw) return DEFAULT_ROUTE
 
-  const decoded = decodeSafe(raw)
-  let pathPart = decoded
+  let pathPart = raw
   let queryPart: string | undefined
 
-  if (decoded.startsWith('?')) {
+  if (raw.startsWith('?')) {
     pathPart = ''
-    queryPart = decoded.slice(1)
+    queryPart = raw.slice(1)
   } else {
-    const qIndex = decoded.indexOf('?')
+    const qIndex = raw.indexOf('?')
     if (qIndex >= 0) {
-      pathPart = decoded.slice(0, qIndex)
-      queryPart = decoded.slice(qIndex + 1)
+      pathPart = raw.slice(0, qIndex)
+      queryPart = raw.slice(qIndex + 1)
     }
   }
 
@@ -204,12 +203,28 @@ function hashLooksLikeQuery(rawHashBody: string): boolean {
 }
 
 function parsePathname(pathname: string, search: string): RouteState | null {
-  const segments = pathname.replace(/^\/+/, '').split('/').filter(Boolean)
+  const segments = pathname
+    .replace(/^\/+/, '')
+    .split('/')
+    .filter(Boolean)
+    .map(decodeSafe)
+  // The server serves the dashboard at both / and /dashboard, so a link
+  // written as /?tab=monitoring is the same request as /dashboard?tab=…. It
+  // used to fall through to the default route, which is a silent answer to a
+  // URL that named a destination.
+  if (segments.length === 0) {
+    return parseSegments([], parseParams(search.replace(/^\?/, '')))
+  }
   if (segments[0] !== 'dashboard') return null
 
   const sub = segments.slice(1)
-  if (sub.length === 0) return { ...DEFAULT_ROUTE, params: parseParams(search.replace(/^\?/, '')) }
   if (sub[0] === 'assets' || sub[0] === 'credits') return null
+  // /dashboard?tab=monitoring&section=… is the shape a person writes by hand,
+  // and it used to land on overview: this returned DEFAULT_ROUTE with the
+  // params attached, so `tab` rode along as a parameter of the wrong tab.
+  // parseSegments already resolves a tab from the query when the path carries
+  // none, so hand it the empty segment list rather than answering first.
+  if (sub.length === 0) return parseSegments([], parseParams(search.replace(/^\?/, '')))
 
   const params = parseParams(search.replace(/^\?/, ''))
   return parseSegments(sub, params)

@@ -5,7 +5,6 @@ status: Implemented
 created: 2026-05-17
 updated: 2026-07-13
 author: vincent
-implementation_prs: [15711]
 ---
 
 # RFC-0093 — Board persistence identity and atomic snapshot

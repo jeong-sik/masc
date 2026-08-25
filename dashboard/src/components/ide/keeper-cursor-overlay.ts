@@ -3,7 +3,6 @@
  * Enhanced with precise cursor positions from keeper activity
  */
 
-import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { fetchIdeCursors, type IdeScope } from '../../api/ide'
 import { registerIdeCursorRefresh } from '../../sse-store'
@@ -45,8 +44,8 @@ export interface KeeperCursorStreamState {
 
 export interface KeeperCursorStreamOptions {
   readonly scope?: IdeScope | null
-  readonly repoId?: string | null
-  readonly canonicalUrl?: string | null
+  /** RFC-0378 §5.3b: the canonical codebase slug — the one wire key. */
+  readonly codebase?: string | null
   readonly onStatus?: (state: KeeperCursorStreamState) => void
 }
 
@@ -157,154 +156,6 @@ export function calculateHeatmap(cursors: Iterable<KeeperCursor>, windowMs = 600
   }
   
   return heatmap
-}
-
-// ── Components ───────────────────────────────────────────────────
-
-interface KeeperCursorWidgetProps {
-  cursor: KeeperCursor
-  color: KeeperCursorColor
-  onJump?: (keeperId: string, line: number) => void
-}
-
-export function KeeperCursorWidget({ cursor, color, onJump }: KeeperCursorWidgetProps) {
-  const label = cursor.tool_name 
-    ? `${cursor.keeper_id} (${cursor.tool_name})`
-    : cursor.keeper_id
-  
-  return html`
-    <div
-      class="keeper-cursor-widget v2-ide-detail"
-      style=${{
-        position: 'absolute',
-        left: 0,
-        top: `${cursor.line * 24}px`,
-        zIndex: 10,
-        pointerEvents: 'none',
-      }}
-    >
-      ${cursor.selection_end && html`
-        <div
-          class="keeper-selection"
-          style=${{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: `${(cursor.selection_end.line - cursor.line) * 24}px`,
-            background: color.selection,
-            pointerEvents: 'auto',
-            cursor: 'pointer',
-          }}
-          onClick=${() => onJump?.(cursor.keeper_id, cursor.line)}
-        />
-      `}
-      <div
-        class="keeper-cursor-label"
-        style=${{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '4px',
-          padding: '2px 6px',
-          background: color.cursor,
-          color: color.text,
-          fontSize: '10px',
-          fontWeight: '600',
-          borderRadius: '3px',
-          boxShadow: color.shadow,
-        }}
-      >
-        <span>${label}</span>
-        <span style=${{ opacity: 0.8 }}>{cursor.focus_mode}</span>
-      </div>
-    </div>
-  `
-}
-
-interface CollisionWarningProps {
-  collisions: Array<{ line: number; keeper_ids: string[] }>
-}
-
-export function CollisionWarning({ collisions }: CollisionWarningProps) {
-  if (collisions.length === 0) return null
-  
-  return html`
-    <div class="collision-warnings v2-ide-panel" style=${{
-      padding: '8px 12px',
-      background: 'var(--color-bg-warning)',
-      borderBottom: '1px solid var(--color-border-warning)',
-    }}>
-      <div style=${{ fontWeight: '600', marginBottom: '4px' }}>
-        Multi-Keeper cursor overlap
-      </div>
-      <div style=${{ color: 'var(--color-fg-warning)', fontSize: '12px' }}>
-        ${collisions.map(c => `L${c.line}: ${c.keeper_ids.length} keepers`).join(' · ')}
-      </div>
-    </div>
-  `
-}
-
-interface HeatmapRulerProps {
-  heatmap: Map<number, number>
-  totalLines: number
-}
-
-export function HeatmapRuler({ heatmap, totalLines }: HeatmapRulerProps) {
-  const maxActivity = Math.max(1, ...heatmap.values())
-  
-  return html`
-    <div class="heatmap-ruler v2-ide-panel" style=${{
-      width: '4px',
-      background: 'var(--color-bg-surface)',
-      borderLeft: '1px solid var(--color-border-default)',
-    }}>
-      ${Array.from({ length: Math.min(totalLines, 100) }, (_, i) => {
-        const line = Math.floor(i * totalLines / 100)
-        const activity = heatmap.get(line) || 0
-        const intensity = activity / maxActivity
-        const opacity = 0.1 + (intensity * 0.9)
-        
-        return html`
-          <div
-            key=${line}
-            style=${{
-              height: '2px',
-              background: `rgb(var(--color-accent-glow) / ${opacity})`,
-              marginBottom: '4px',
-            }}
-            title=${`Line ${line}: ${activity} active keepers`}
-          />
-        `
-      })}
-    </div>
-  `
-}
-
-interface ActiveFileIndicatorProps {
-  activeFile: string | null
-  keeperCount: number
-}
-
-export function ActiveFileIndicator({ activeFile, keeperCount }: ActiveFileIndicatorProps) {
-  if (!activeFile) return null
-  
-  return html`
-    <div class="active-file-indicator v2-ide-panel" style=${{
-      padding: '6px 12px',
-      background: 'var(--color-bg-muted)',
-      borderBottom: '1px solid var(--color-border-default)',
-      fontSize: '12px',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px',
-    }}>
-      <span style=${{ fontWeight: '600' }}>📄</span>
-      <span style=${{ fontFamily: 'var(--font-mono)' }}>{activeFile}</span>
-      <span style=${{ marginLeft: 'auto', color: 'var(--color-fg-muted)' }}>
-        ${keeperCount} keeper${keeperCount !== 1 ? 's' : ''} active
-      </span>
-    </div>
-  `
 }
 
 // ── WebSocket Push Integration ──────────────────────────────────
@@ -424,8 +275,7 @@ export function connectKeeperCursorPush(
     try {
       const snapshot = await fetchIdeCursors({
         scope: options.scope,
-        repoId: options.repoId,
-        canonicalUrl: options.canonicalUrl,
+        codebase: options.codebase,
       })
       if (closed) return
       onUpdate(normalizeKeeperCursorSnapshot(snapshot))
@@ -458,42 +308,5 @@ export function connectKeeperCursorPush(
     closed = true
     unregister()
     options.onStatus?.({ status: 'closed', failedCount })
-  }
-}
-
-// ── Helper to update cursor from tool call ───────────────────────
-
-export function updateCursorFromToolCall(
-  overlay: KeeperCursorOverlay,
-  keeperId: string,
-  filePath: string,
-  lineStart: number,
-  lineEnd: number,
-  toolName: string,
-  turn: number,
-): KeeperCursorOverlay {
-  const now = Date.now()
-  
-  const updated: KeeperCursor = {
-    keeper_id: keeperId,
-    file_path: filePath,
-    line: lineStart,
-    column: 0,
-    selection_end: lineEnd !== lineStart ? { line: lineEnd, column: 0 } : undefined,
-    focus_mode: 'editing',
-    last_update: now,
-    tool_name: toolName,
-    turn,
-  }
-  
-  const newCursors = new Map(overlay.cursors)
-  newCursors.set(keeperId, updated)
-  
-  return {
-    ...overlay,
-    cursors: newCursors,
-    heatmap: calculateHeatmap(newCursors.values()),
-    collisions: detectCollisions(newCursors.values()),
-    active_file: filePath,
   }
 }

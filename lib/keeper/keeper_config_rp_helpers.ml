@@ -6,20 +6,12 @@
 
     @since God file decomposition *)
 
-let clamp_int v ~min_v ~max_v =
-  max min_v (min max_v v)
-
+(* Delegations to the canonical clamped readers (RFC-0371 B7). *)
 let int_of_env_default name ~default ~min_v ~max_v =
-  Env_config_core.get_int ~default name |> clamp_int ~min_v ~max_v
+  Env_config_core.get_int_clamped ~default ~min_v ~max_v name
 
 let float_of_env_default name ~default ~min_v ~max_v =
-  match Env_config_core.raw_value_opt name with
-  | None -> default
-  | Some raw ->
-    let v =
-      Option.value ~default (float_of_string_opt (String.trim raw))
-    in
-    max min_v (min max_v v)
+  Env_config_core.get_float_clamped ~default ~min_v ~max_v name
 
 let _rp_validate_int ~min ~max key v =
   if v >= min && v <= max then Ok ()

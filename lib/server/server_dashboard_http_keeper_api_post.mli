@@ -5,16 +5,6 @@ module Http = Http_server_eio
 include module type of Server_dashboard_http_keeper_api_types
 
 val json_list_length : Yojson.Safe.t -> int
-val trajectory_line_ts : Trajectory.trajectory_line -> float
-val dedupe_thinking_lines :
-  Trajectory.trajectory_line list -> Trajectory.trajectory_line list
-val read_internal_history_lines :
-  config:Workspace.config -> trace_id:string -> Trajectory.trajectory_line list
-val merge_keeper_trace_lines :
-  config:Workspace.config ->
-  trace_id:string ->
-  Trajectory.trajectory_line list ->
-  Trajectory.trajectory_line list
 
 val respond_error :
   ?status:Httpun.Status.t ->
@@ -24,16 +14,20 @@ val respond_error :
   string ->
   unit
 
-val handle_keeper_catchup_judge_post :
+(** Operator-initiated deliberation on behalf of [keeper]. The run is owned by
+    the keeper named in the route, so its wake, board post and chat delivery
+    are indistinguishable from a self-initiated run; the prompt, preset and
+    topology come from the request body. Omitted preset/topology fall back to
+    the tool's own defaults; validation stays in the tool so this endpoint
+    cannot drift from what a keeper-side call would accept. *)
+val handle_keeper_fusion_post :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 
-val handle_keeper_chat_recovery_post :
+val handle_keeper_operator_note_post :
   Mcp_server.server_state ->
   string ->
   Httpun.Request.t ->
   Httpun.Reqd.t ->
-  keeper_name:string ->
-  raw_receipt_id:string ->
   string ->
   unit
 
@@ -48,13 +42,12 @@ val handle_keeper_board_attention_quarantine_recovery_post :
   unit
 
 val stat_json_of_path : string -> Yojson.Safe.t
-val oas_checkpoint_summary_json :
+val agent_core_checkpoint_summary_json :
   source_kind:string ->
   snapshot_id:string ->
   path:string ->
   is_current:bool ->
-  fallback_generation:int ->
-  Agent_sdk.Checkpoint.t ->
+  Agent_core.Checkpoint.t ->
   Yojson.Safe.t
 val keeper_checkpoint_inventory_json :
   Workspace.config -> string -> [ `Not_found | `OK ] * Yojson.Safe.t
@@ -91,6 +84,15 @@ val context_shrink_of_patch :
   (string * Yojson.Safe.t) list ->
   (string * int) option
 
+(** Pure validation of a dashboard config patch body: duplicate keys, the
+    allowed-field list, and per-field types/contracts (including the shared
+    autonomous wake-prompt contract). [Ok ()] means {!handle_keeper_config_post}
+    would proceed to apply it. *)
+val validate_dashboard_config_patch :
+  meta:Keeper_meta_contract.keeper_meta ->
+  (string * Yojson.Safe.t) list ->
+  (unit, string) result
+
 val handle_keeper_config_post :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
@@ -103,6 +105,9 @@ val handle_keeper_config_post :
 
 val handle_keeper_secrets_post :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+
+val handle_keeper_github_login_post :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 
 val handle_keeper_lifecycle_post :
   ?body_str:string ->
@@ -125,8 +130,8 @@ val handle_keeper_directive_post :
   Httpun.Reqd.t ->
   string ->
   unit
-(** A resume body requires [owner_nonce] and a stable
-    [operator_operation_id]; raw action-only resume is rejected. *)
+(** A resume body requires a stable [operator_operation_id]; raw
+    action-only resume is rejected. *)
 
 val handle_keeper_bulk_directive_post :
   sw:Eio.Switch.t ->
@@ -138,12 +143,20 @@ val handle_keeper_bulk_directive_post :
   string ->
   unit
 (** Pause/wakeup accept a [names] list. Resume accepts a [targets] list whose
-    entries carry [name], [owner_nonce], and [operator_operation_id]. *)
+    entries carry [name] and [operator_operation_id]. *)
 
 module For_testing : sig
+  val github_login_stream_headers : string -> Httpun.Headers.t
+  val github_login_stream_send_with :
+    write:(string -> unit) ->
+    flush:(unit -> unit) ->
+    string ->
+    Yojson.Safe.t ->
+    unit
+
   val parse_resume_request :
-    Yojson.Safe.t -> (int * string, string) result
+    Yojson.Safe.t -> (string, string) result
 
   val parse_bulk_resume_requests :
-    Yojson.Safe.t -> ((string * int * string) list, string) result
+    Yojson.Safe.t -> ((string * string) list, string) result
 end

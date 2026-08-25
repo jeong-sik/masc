@@ -1,5 +1,3 @@
-module StringSet = Set_util.StringSet
-
 (** SSOT for config filenames documented in [docs/TOML-RELOAD-MATRIX.md].
     Consumed by the resolver here and by config loaders elsewhere in the
     codebase. Issue #8414. *)
@@ -29,7 +27,6 @@ type resolution = {
   config_root : path_item;
   prompts : path_item;
   keepers : path_item;
-  personas : path_item;
 }
 
 type inputs = {
@@ -37,7 +34,6 @@ type inputs = {
   executable_name : string;
   env_base_path : string option;
   env_config_dir : string option;
-  env_personas_dir : string option;
 }
 
 let trim_opt = Env_config_core.trim_opt
@@ -70,7 +66,6 @@ let allow_inherited_test_base_path () =
    so the SSOT lives in lib/host_config/ instead of Env_config_core. *)
 let initial_env_base_path = (Host_config.from_env ()).base_path
 let initial_env_config_dir = (Host_config.from_env ()).config_dir
-let initial_env_personas_dir = (Host_config.from_env ()).personas_dir
 let initial_env_home = Sys.getenv_opt "HOME" |> trim_opt
 
 let sanitize_inherited_test_env_opt ~running_under_test_executable ~allow_inherited
@@ -122,14 +117,6 @@ let current_env_base_path_opt () =
     ~initial:initial_env_base_path
     ~current:((Host_config.from_env ()).base_path)
     ~home:initial_env_home
-
-let current_env_personas_dir_opt () =
-  sanitize_inherited_test_env_opt
-    ~running_under_test_executable:
-      (running_under_test_executable ())
-    ~allow_inherited:(allow_inherited_test_config_paths ())
-    ~initial:initial_env_personas_dir
-    ~current:((Host_config.from_env ()).personas_dir)
 
 let fallback_cwd_from_env () =
   let host = Host_config.from_env () in
@@ -213,36 +200,15 @@ let to_json (resolution : resolution) =
       ("config_root", item_to_json resolution.config_root);
       ("prompts", item_to_json resolution.prompts);
       ("keepers", item_to_json resolution.keepers);
-      ("personas", item_to_json resolution.personas);
     ]
 
 let config_signature_exists config_dir =
   let runtime_toml = Filename.concat config_dir runtime_toml_filename in
   let prompts = Filename.concat config_dir "prompts" in
-  let keepers = Filename.concat config_dir "keepers" in
-  let personas = Filename.concat config_dir "personas" in
+  let keepers = Filename.concat config_dir Common.keepers_runtime_dirname in
   existing_dir config_dir
   && (existing_file runtime_toml
-     || existing_dir prompts || existing_dir keepers
-     || existing_dir personas)
-
-let rec ancestor_dirs path =
-  let dir = absolute_path path in
-  let parent = Filename.dirname dir in
-  if parent = dir then [ dir ] else dir :: ancestor_dirs parent
-
-let path_from_executable ~cwd executable_name =
-  let exe = absolute_path_from ~cwd executable_name in
-  if not (Sys.file_exists exe) then None
-  else
-    ancestor_dirs (Filename.dirname exe)
-    |> List.find_map (fun dir ->
-           let candidate = Filename.concat dir "config" in
-           if config_signature_exists candidate then Some candidate else None)
-
-let path_from_cwd cwd =
-  let candidate = Filename.concat cwd "config" |> absolute_path_from ~cwd in
-  if config_signature_exists candidate then Some candidate else None
+     || existing_dir prompts || existing_dir keepers)
 
 let base_path_config_root ~cwd base_path =
   let base_path =
@@ -298,42 +264,21 @@ let child_item (root : path_item) name =
   let exists = root.exists && existing_dir path in
   { path; exists; source = root.source }
 
-let file_item (root : path_item) name =
-  let path = Filename.concat root.path name in
-  let exists = root.exists && existing_file path in
-  { path; exists; source = root.source }
-
-let personas_item (inputs : inputs) root =
-  match trim_opt inputs.env_personas_dir with
-  | Some raw ->
-      let path = absolute_path_from ~cwd:inputs.cwd raw in
-      if existing_dir path then
-        ({ path; exists = true; source = Env }, [])
-      else
-        ( { path; exists = false; source = Invalid_env },
-          [ Printf.sprintf
-              "MASC_PERSONAS_DIR is set but does not point to a directory: %s"
-              path ] )
-  | None -> (child_item root "personas", [])
-
 let inputs_from_env () =
   {
     cwd = current_working_dir ();
     executable_name = Sys.executable_name;
     env_base_path = current_env_base_path_opt ();
     env_config_dir = current_env_config_dir_opt ();
-    env_personas_dir = current_env_personas_dir_opt ();
   }
 
 let resolve_with inputs =
   let config_root, root_warnings = config_root_resolution inputs in
   let prompts = child_item config_root "prompts" in
   let keepers = child_item config_root "keepers" in
-  let personas, persona_warnings = personas_item inputs config_root in
   let missing_child_warnings =
     [ ("prompts", prompts.exists)
     ; ("keepers", keepers.exists)
-    ; ("personas", personas.exists)
     ]
     |> List.filter_map (fun (label, exists) ->
            if exists then None
@@ -342,7 +287,7 @@ let resolve_with inputs =
                (Printf.sprintf "Resolved config child is missing: %s" label))
   in
   let warnings =
-    root_warnings @ persona_warnings @ missing_child_warnings
+    root_warnings @ missing_child_warnings
   in
   let status =
     match config_root.source with
@@ -357,21 +302,21 @@ let resolve_with inputs =
     config_root;
     prompts;
     keepers;
-    personas;
   }
 
-let cached_resolution : resolution option ref = ref None
+let cached_resolution : resolution option Atomic.t = Atomic.make None
 
-let resolve () =
-  match !cached_resolution with
+let rec resolve () =
+  match Atomic.get cached_resolution with
   | Some r -> r
   | None ->
       let r = resolve_with (inputs_from_env ()) in
-      cached_resolution := Some r;
-      r
+      if Atomic.compare_and_set cached_resolution None (Some r)
+      then r
+      else resolve ()
 
 let reset () =
-  cached_resolution := None
+  Atomic.set cached_resolution None
 
 let prompts_dir () =
   (resolve ()).prompts.path
@@ -379,13 +324,18 @@ let prompts_dir () =
 let keepers_dir () =
   (resolve ()).keepers.path
 
+(* Not part of [resolution]: the diagnostics record (and its JSON
+   projection) reports the children whose absence warns on boot, and the
+   tools directory is created on demand by the asset sync instead. *)
+let tools_dir () =
+  Filename.concat (resolve ()).config_root.path "tools"
+
 let inputs_for_base_path ~base_path =
   {
     cwd = base_path;
     executable_name = Sys.executable_name;
     env_base_path = Some base_path;
     env_config_dir = current_env_config_dir_opt ();
-    env_personas_dir = current_env_personas_dir_opt ();
   }
 
 let resolve_for_base_path ~base_path =
@@ -396,66 +346,6 @@ let keepers_dir_for_base_path ~base_path =
 
 let keeper_runtime_store_of_dirname =
   Common.keeper_runtime_store_of_dirname
-
-let personas_dir_opt () =
-  let resolution = resolve () in
-  match resolution.config_root.source with
-  | Env | Local_masc when resolution.personas.exists ->
-      Some resolution.personas.path
-  | Env | Local_masc | Invalid_env | Missing ->
-      None
-
-let dedupe_paths paths =
-  let rec go seen acc = function
-    | [] -> List.rev acc
-    | p :: rest ->
-      if StringSet.mem p seen then go seen acc rest
-      else go (StringSet.add p seen) (p :: acc) rest
-  in
-  go StringSet.empty [] paths
-
-let personas_dirs_with inputs resolution =
-  (* Mirror [personas_dir_opt]'s invariant: when the resolver is Missing or
-     Invalid_env, never expose a personas path even if [resolution.personas.exists]
-     happens to be true (e.g. [default_missing_root] pointing at a repo-local
-     config/ tree). Without this gate, callers can silently load personas from
-     a fallback root the resolver explicitly disowned. *)
-  let explicit_personas_dir_override = trim_opt inputs.env_personas_dir in
-  (* Persona resolution is intentionally single-source:
-     - MASC_PERSONAS_DIR when explicitly set (bypasses config-root gating;
-       operator-declared persona roots stand on their own — a user may
-       legitimately want personas without a full MASC config directory)
-     - otherwise the resolved config root's personas/
-     Hidden secondary searches (secondary personas roots, base-path-root personas)
-     make the dashboard/config panel lie about the actual source of truth. *)
-  match explicit_personas_dir_override with
-  | Some _ ->
-    (* The env override path is captured in [resolution.personas] by
-       [personas_item] when MASC_PERSONAS_DIR is set; honor its exists
-       flag regardless of [config_root.source].  If the env path is
-       invalid the source comes back as [Invalid_env] and we still
-       suppress to keep the no-silent-fallback contract. *)
-    (match resolution.personas.source with
-     | Env when resolution.personas.exists -> [ resolution.personas.path ]
-     | _ -> [])
-  | None ->
-    let primary =
-      match resolution.config_root.source with
-      | Invalid_env | Missing -> []
-      | Env | Local_masc ->
-        if resolution.personas.exists then [ resolution.personas.path ] else []
-    in
-    dedupe_paths primary
-
-let personas_dirs_for_base_path ~base_path =
-  let inputs = inputs_for_base_path ~base_path in
-  let resolution = resolve_with inputs in
-  personas_dirs_with inputs resolution
-
-let personas_dirs () =
-  let resolution = resolve () in
-  let inputs = inputs_from_env () in
-  personas_dirs_with inputs resolution
 
 let keeper_toml_path_opt name =
   let path = Filename.concat (keepers_dir ()) (name ^ ".toml") in
@@ -470,7 +360,15 @@ let keeper_toml_path_opt_for_base_path ~base_path name =
 let warnings () =
   (resolve ()).warnings
 
-let last_logged_signature : string option ref = ref None
+let last_logged_signature : string option Atomic.t = Atomic.make None
+
+let rec claim_new_signature cell signature =
+  let previous = Atomic.get cell in
+  if previous = Some signature
+  then false
+  else if Atomic.compare_and_set cell previous (Some signature)
+  then true
+  else claim_new_signature cell signature
 
 let log_warnings ?(context = "ConfigDir") () =
   let resolution = resolve () in
@@ -478,16 +376,17 @@ let log_warnings ?(context = "ConfigDir") () =
     String.concat "\n"
       ((status_to_string resolution.status) :: resolution.warnings)
   in
-  if resolution.warnings <> [] && !last_logged_signature <> Some signature then begin
+  if resolution.warnings <> []
+     && claim_new_signature last_logged_signature signature
+  then begin
     List.iter (fun warning ->
         Log.warn ~ctx:context "%s" warning)
-      resolution.warnings;
-    last_logged_signature := Some signature
+      resolution.warnings
   end
 
 (* Track the last resolution signature we info-logged so startup banner is
    idempotent across repeated [log_resolution] calls (bootstrap + per-query). *)
-let last_logged_resolution_signature : string option ref = ref None
+let last_logged_resolution_signature : string option Atomic.t = Atomic.make None
 
 (** Emit a single info-level line stating the resolved config root source and
     path. When [MASC_CONFIG_DIR] is set, also note whether a [<base_path>/.masc/config]
@@ -517,10 +416,8 @@ let log_resolution ?(context = "ConfigDir") () =
   let signature =
     Printf.sprintf "source=%s path=%s%s" source item.path shadow_note
   in
-  if !last_logged_resolution_signature <> Some signature then begin
-    Log.info ~ctx:context "resolved: %s" signature;
-    last_logged_resolution_signature := Some signature
-  end
+  if claim_new_signature last_logged_resolution_signature signature
+  then Log.info ~ctx:context "resolved: %s" signature
 
 (* RFC-0121 — .masc/<sub> sub-directory accessors.
 
@@ -541,8 +438,15 @@ let credentials_dir ~base_path =
 let agent_runtime_dir ~base_path =
   Filename.concat (masc_root ~base_path) "runtime/agent"
 
-let repos_dir ~base_path =
-  Filename.concat (masc_root ~base_path) "repos"
+let repos_dirname = "repos"
+
+let repos_dir ~base_path = Filename.concat (masc_root ~base_path) repos_dirname
+
+(* Base-path-relative, because Repo_manager stores repository.local_path
+   relative and resolves it later: Repo_store.local_path does
+   [Filename.concat base_path repo.local_path]. An absolute [repos_dir] would
+   be resolved a second time. *)
+let repos_relative_path ~id = Filename.concat (Filename.concat Common.masc_dirname repos_dirname) id
 
 let tmp_dir ~base_path =
   Filename.concat (masc_root ~base_path) "tmp"

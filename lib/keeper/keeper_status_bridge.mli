@@ -20,19 +20,14 @@ type runtime_blocker_surface = {
   summary : string;
 }
 
-val blocker_class_of_sdk_error :
-  Agent_sdk.Error.sdk_error -> blocker_class option
+val blocker_class_of_core_error :
+  Agent_core.Error.t -> blocker_class option
 
 val runtime_blocker_surface_of_typed_class :
   ?summary:string -> blocker_class -> runtime_blocker_surface
 
 val runtime_blocker_surface_of_failure_reason :
   Keeper_registry.failure_reason -> runtime_blocker_surface option
-
-val runtime_blocker_surface_opt :
-  Workspace_utils.config -> keeper_meta -> runtime_blocker_surface option
-
-val drift_surface_json : unknown_toml_keys:string list -> Yojson.Safe.t
 
 val auto_execution_session_surface_json : unit -> Yojson.Safe.t
 

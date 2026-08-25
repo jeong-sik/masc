@@ -1,8 +1,8 @@
 (** Fusion — 패널 fan-out. 같은 프롬프트를 N개 모델에 병렬로 던져 답을 수집한다.
 
-    OAS의 범용 [Async_agent.all]을 소비하며, "패널/fusion" 개념은 OAS에 노출하지
-    않는다 — OAS 입장에선 독립 에이전트 N개일 뿐이다. 각 모델은 MASC의 기존
-    runtime→agent 빌더([Runtime_oas_runner] → [Runtime_agent])로 만든다.
+    AGENT_CORE의 범용 [Async_agent.all]을 소비하며, "패널/fusion" 개념은 AGENT_CORE에 노출하지
+    않는다 — AGENT_CORE 입장에선 독립 에이전트 N개일 뿐이다. 각 모델은 MASC의 기존
+    runtime→agent 빌더([Runtime_agent_core_runner] → [Runtime_agent])로 만든다.
 
     [web_tools=true]면 [masc_web_search] / [masc_web_fetch]를 패널 에이전트에
     주입해 OpenRouter Fusion의 패널 web tool semantics를 따른다. 재귀 가드는
@@ -26,7 +26,8 @@
     - 빌드 실패·실행 실패·빈 응답은 [Failed]로 격리되어 다른 패널을 죽이지 않는다.
     - 반환 순서: 빌드 실패분 먼저, 그 다음 실행 결과(그룹순 × 그룹내 모델순). *)
 val run
-  :  sw:Eio.Switch.t
+  :  base_dir:string
+  -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> groups:Fusion_policy.panel_group list
   -> prompt:string
@@ -37,6 +38,6 @@ module For_testing : sig
   val outcome_of_result
     :  panelist:string
     -> model:string
-    -> (Agent_sdk.Types.api_response, Agent_sdk.Error.sdk_error) result
+    -> (Agent_core.Types.api_response, Agent_core.Error.t) result
     -> Fusion_types.panel_outcome
 end

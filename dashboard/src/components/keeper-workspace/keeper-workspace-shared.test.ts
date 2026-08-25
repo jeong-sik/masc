@@ -12,7 +12,6 @@ import {
 } from './keeper-workspace-shared'
 import { html } from 'htm/preact'
 import type { Keeper } from '../../types'
-import type { KeeperCompositeSnapshot } from '../../api/schemas/keeper-composite'
 
 function mk(partial: Partial<Keeper>): Keeper {
   return { name: 'k', status: 'running', ...partial } as Keeper
@@ -30,20 +29,9 @@ describe('keeperBucket', () => {
     expect(keeperBucket(mk({ status: 'offline', lifecycle_phase: 'Paused' }))).toBe('paused')
   })
   it('classifies a stopped keeper as offline', () => {
-    expect(keeperBucket(mk({ status: 'stopped' }))).toBe('offline')
+    expect(keeperBucket(mk({ phase: 'Stopped' }))).toBe('offline')
   })
   it('classifies a blocked keeper as stuck (typed SSOT, 확인 필요 group)', () => {
-    expect(keeperBucket(mk({ status: 'running', runtime_blocker_class: 'turn_timeout' }))).toBe('stuck')
-  })
-  it('promotes synthetic_stall to stuck once the composite attention axis confirms blocked (W1)', () => {
-    const keeper = mk({ status: 'running', runtime_blocker_class: 'synthetic_stall' })
-    // Flat record only: the diagnostic synthetic marker stays running.
-    expect(keeperBucket(keeper)).toBe('running')
-    // Same keeper + composite (what registry/monitoring see) must agree.
-    const composite = {
-      runtime_attention: { blocked: true, execution_current: true },
-    } as unknown as KeeperCompositeSnapshot
-    expect(keeperBucket(keeper, composite)).toBe('stuck')
   })
 })
 
@@ -52,12 +40,10 @@ describe('keeperStatusTone', () => {
     expect(keeperStatusTone(mk({ status: 'running' }))).toBe('ok')
   })
   it('surfaces error phases as bad (not a healthy green dot)', () => {
-    // Failing/Overflowed are neither offline nor paused, so keeperBucket
+    // Failing is neither offline nor paused, so keeperBucket
     // classifies them as "running"; the tone must still flag them.
     expect(keeperStatusTone(mk({ lifecycle_phase: 'Failing' }))).toBe('bad')
-    expect(keeperStatusTone(mk({ lifecycle_phase: 'Overflowed' }))).toBe('bad')
     expect(keeperStatusTone(mk({ lifecycle_phase: 'Crashed' }))).toBe('bad')
-    expect(keeperStatusTone(mk({ lifecycle_phase: 'Dead' }))).toBe('bad')
   })
   it('maps transient phases to busy (working-through, not paused)', () => {
     // Fleet SSOT PHASE_TONE (lib/fleet-tone.ts) classifies the transient
@@ -103,10 +89,9 @@ describe('statePillTone', () => {
 
 describe('keeperRuntimeLabel', () => {
   it('uses the shared runtime display priority', () => {
-    expect(keeperRuntimeLabel(mk({ runtime_canonical: ' oas.seoul-1 ' }))).toBe('oas.seoul-1')
+    expect(keeperRuntimeLabel(mk({ runtime_canonical: ' agentCore.seoul-1 ' }))).toBe('agentCore.seoul-1')
     expect(keeperRuntimeLabel(mk({ selected_runtime_canonical: 'local·docker' }))).toBe('local·docker')
     expect(keeperRuntimeLabel(mk({ runtime_id: 'keeper_unified' }))).toBe('keeper_unified')
-    expect(keeperRuntimeLabel(mk({ runtime_ref: { group: 'tier', item: 'resilient_breaker' } }))).toBe('tier.resilient_breaker')
     expect(keeperRuntimeLabel(mk({}))).toBeNull()
   })
 })

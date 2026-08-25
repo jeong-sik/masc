@@ -1,299 +1,190 @@
-// Transport health schema — schema-at-boundary for
-// `GET /api/v1/dashboard/transport-health`.
-//
-// The largest endpoint on the dashboard: 10 nested transport surfaces
-// (summary, sse, grpc, websocket, webrtc, streamable_http, http2,
-// cluster, agent_health, plus optional projection_diagnostics). The
-// prior hand-rolled decoder returned `null` if ANY of the 9 required
-// subsections or `generated_at` was missing — this PR preserves that
-// contract via the thin null-returning wrapper in `api/transport-health.ts`.
-//
-// Uses the shared `SchemaDriftError` base landed in #7732.
+import { Data, Effect, ParseResult, Schema } from 'effect'
 
-import {
-  boolean,
-  check,
-  fallback,
-  nullable,
-  number,
-  object,
-  optional,
-  pipe,
-  safeParse,
-  string,
-  unknown,
-  type BaseIssue,
-  type InferOutput,
-} from 'valibot'
+const NonNegativeNumberSchema = Schema.JsonNumber.pipe(Schema.nonNegative())
+const NonNegativeIntegerSchema = Schema.NonNegativeInt
+const PortSchema = Schema.Int.pipe(Schema.between(1, 65_535))
 
-import { SchemaDriftError, parseOrThrow } from './drift-error'
-
-// --- Hot session (per-entry lenient in sse.hot_sessions) ---
-
-const HotSessionSchema = object({
-  session_id: string(),
-  kind: fallback(string(), 'unknown'),
-  queue_depth: fallback(number(), 0),
-  last_event_id: fallback(number(), 0),
-  idle_seconds: fallback(number(), 0),
+const HotSessionSchema = Schema.Struct({
+  session_id: Schema.NonEmptyString,
+  kind: Schema.Literal('observer', 'agent_stream', 'presence'),
+  queue_depth: NonNegativeIntegerSchema,
+  last_event_id: NonNegativeIntegerSchema,
+  idle_seconds: NonNegativeNumberSchema,
 })
 
-export type HotSession = InferOutput<typeof HotSessionSchema>
+export type HotSession = Schema.Schema.Type<typeof HotSessionSchema>
 
-// --- Subsection schemas (each field uses fallback matching the prior
-//     `asString(raw.X, DEFAULT)` / `asNumber(raw.X, 0)` decoder) ---
-
-const SummarySchema = object({
-  primary_path: fallback(string(), 'unknown'),
-  queue_pressure: fallback(string(), 'unknown'),
-  // `asNumber(x) ?? null` — absent/non-number → null, not undefined.
-  recent_messages: fallback(nullable(number()), null),
-  recent_messages_available: fallback(boolean(), false),
-  recent_messages_source: fallback(string(), 'unknown'),
-  external_fanout_targets: fallback(number(), 0),
+const SummarySchema = Schema.Struct({
+  primary_path: Schema.Literal(
+    'grpc_subscribe',
+    'websocket',
+    'sse',
+    'streamable_http',
+  ),
+  queue_pressure: Schema.Literal('steady', 'watch', 'high'),
+  external_fanout_targets: NonNegativeIntegerSchema,
 })
 
-const SseOuterSchema = object({
-  sessions_observer: fallback(number(), 0),
-  sessions_agent_stream: fallback(number(), 0),
-  sessions_presence: fallback(number(), 0),
-  sessions_total: fallback(number(), 0),
-  external_subscribers: fallback(number(), 0),
-  broadcast_avg_seconds: fallback(number(), 0),
-  broadcast_count: fallback(number(), 0),
-  queue_avg_depth: fallback(number(), 0),
-  queue_max_depth: fallback(number(), 0),
-  relay_queue_depth: fallback(number(), 0),
-  relay_retry_total: fallback(number(), 0),
-  relay_retry_append: fallback(number(), 0),
-  relay_retry_broadcast: fallback(number(), 0),
-  relay_drop_total: fallback(number(), 0),
-  relay_drop_queue: fallback(number(), 0),
-  relay_drop_append: fallback(number(), 0),
-  relay_drop_broadcast: fallback(number(), 0),
-  // Lenient per-entry on hot_sessions handled in parseSse below.
-  hot_sessions: optional(unknown()),
+const SseOuterSchema = Schema.Struct({
+  sessions_observer: NonNegativeIntegerSchema,
+  sessions_agent_stream: NonNegativeIntegerSchema,
+  sessions_presence: NonNegativeIntegerSchema,
+  sessions_total: NonNegativeIntegerSchema,
+  external_subscribers: NonNegativeIntegerSchema,
+  broadcast_avg_seconds: NonNegativeNumberSchema,
+  broadcast_count: NonNegativeIntegerSchema,
+  queue_avg_depth: NonNegativeNumberSchema,
+  queue_max_depth: NonNegativeIntegerSchema,
+  relay_queue_depth: NonNegativeIntegerSchema,
+  relay_retry_total: NonNegativeIntegerSchema,
+  relay_retry_append: NonNegativeIntegerSchema,
+  relay_retry_broadcast: NonNegativeIntegerSchema,
+  relay_drop_total: NonNegativeIntegerSchema,
+  relay_drop_queue: NonNegativeIntegerSchema,
+  relay_drop_append: NonNegativeIntegerSchema,
+  relay_drop_broadcast: NonNegativeIntegerSchema,
+  hot_sessions: Schema.Array(HotSessionSchema),
 })
 
-interface SseSection {
-  sessions_observer: number
-  sessions_agent_stream: number
-  sessions_presence: number
-  sessions_total: number
-  external_subscribers: number
-  broadcast_avg_seconds: number
-  broadcast_count: number
-  queue_avg_depth: number
-  queue_max_depth: number
-  relay_queue_depth: number
-  relay_retry_total: number
-  relay_retry_append: number
-  relay_retry_broadcast: number
-  relay_drop_total: number
-  relay_drop_queue: number
-  relay_drop_append: number
-  relay_drop_broadcast: number
-  hot_sessions: HotSession[]
-}
-
-const GrpcSchema = object({
-  enabled: fallback(boolean(), false),
-  configured: fallback(boolean(), false),
-  listening: fallback(boolean(), false),
-  port: fallback(number(), 0),
-  active_streams: fallback(number(), 0),
-  subscribers: fallback(number(), 0),
-  heartbeat_avg_seconds: fallback(number(), 0),
-  events_delivered: fallback(number(), 0),
-  events_dropped: fallback(number(), 0),
+const GrpcSchema = Schema.Struct({
+  configured: Schema.Boolean,
+  listening: Schema.Boolean,
+  port: PortSchema,
+  active_streams: NonNegativeIntegerSchema,
+  subscribers: NonNegativeIntegerSchema,
+  heartbeat_avg_seconds: NonNegativeNumberSchema,
+  events_delivered: NonNegativeIntegerSchema,
+  events_dropped: NonNegativeIntegerSchema,
 })
 
-// Diagnostic counters for the WS delivery path.  Each field falls back
-// to 0 so this remains forward-compatible with servers that have not
-// yet landed the corresponding OTel metric (e.g. a dashboard
-// pointed at an older build should not surface schema errors, it
-// should show zeroes and let the operator know the metric is absent).
-const WebsocketDeliverySchema = object({
-  parse_cache_hits: fallback(number(), 0),
-  parse_cache_misses: fallback(number(), 0),
-  bytes_cache_hits: fallback(number(), 0),
-  bytes_cache_misses: fallback(number(), 0),
-  client_acks: fallback(number(), 0),
-  throttled_deliveries: fallback(number(), 0),
-  client_buffered_bytes_sum: fallback(number(), 0),
-  client_buffered_bytes_count: fallback(number(), 0),
+const WebsocketDeliverySchema = Schema.Struct({
+  bytes_cache_hits: NonNegativeIntegerSchema,
+  bytes_cache_misses: NonNegativeIntegerSchema,
+  client_acks: NonNegativeIntegerSchema,
+  throttled_deliveries: NonNegativeIntegerSchema,
+  client_buffered_bytes_sum: NonNegativeNumberSchema,
+  client_buffered_bytes_count: NonNegativeIntegerSchema,
 })
 
-const WebsocketSchema = object({
-  enabled: fallback(boolean(), false),
-  configured: fallback(boolean(), false),
-  listening: fallback(boolean(), false),
-  mode: fallback(string(), 'unknown'),
-  port: fallback(number(), 0),
-  sessions: fallback(number(), 0),
-  relay_source: fallback(string(), 'unknown'),
-  delivery: fallback(WebsocketDeliverySchema, {
-    parse_cache_hits: 0,
-    parse_cache_misses: 0,
-    bytes_cache_hits: 0,
-    bytes_cache_misses: 0,
-    client_acks: 0,
-    throttled_deliveries: 0,
-    client_buffered_bytes_sum: 0,
-    client_buffered_bytes_count: 0,
+const WebsocketSchema = Schema.Struct({
+  configured: Schema.Boolean,
+  listening: Schema.Boolean,
+  mode: Schema.Literal('same_origin'),
+  sessions: NonNegativeIntegerSchema,
+  relay_source: Schema.Literal('sse_external_subscriber'),
+  delivery: WebsocketDeliverySchema,
+})
+
+const StreamableHttpSchema = Schema.Struct({
+  endpoint: Schema.Literal('/mcp'),
+  observer_stream: Schema.Literal('/mcp?sse_kind=observer'),
+  presence_stream: Schema.Literal('/events/presence'),
+  supports_post: Schema.Literal(true),
+  supports_sse_upgrade: Schema.Literal(true),
+})
+
+const Http2Schema = Schema.Union(
+  Schema.Struct({
+    listener_mode: Schema.Literal('auto'),
+    multiplex_ready: Schema.Literal(true),
   }),
+  Schema.Struct({
+    listener_mode: Schema.Literal('h1_only'),
+    multiplex_ready: Schema.Literal(false),
+  }),
+  Schema.Struct({
+    listener_mode: Schema.Literal('h2_only'),
+    multiplex_ready: Schema.Literal(true),
+  }),
+)
+
+const AgentHealthSchema = Schema.Struct({
+  stale_total: NonNegativeIntegerSchema,
+  lifecycle_dispatch_rejections_total: NonNegativeIntegerSchema,
 })
 
-const WebrtcSchema = object({
-  enabled: fallback(boolean(), false),
-  configured: fallback(boolean(), false),
-  signaling_available: fallback(boolean(), false),
-  signaling_mode: fallback(string(), 'unknown'),
-  pending_offers: fallback(number(), 0),
-  active_peers: fallback(number(), 0),
-  live_connections: fallback(number(), 0),
-  connected_channels: fallback(number(), 0),
-  ice_server_count: fallback(number(), 0),
+const ProjectionDiagnosticsSchema = Schema.Struct({
+  source: Schema.Literal('cached_surface'),
+  cache_state: Schema.Literal('initializing', 'fresh', 'stale'),
+  last_success_at: Schema.OptionFromNullOr(Schema.String),
+  last_attempt_at: Schema.OptionFromNullOr(Schema.String),
+  last_error_at: Schema.OptionFromNullOr(Schema.String),
+  stale_reason: Schema.OptionFromNullOr(Schema.String),
+  stale_age_ms: Schema.OptionFromNullOr(NonNegativeIntegerSchema),
 })
 
-const StreamableHttpSchema = object({
-  endpoint: fallback(string(), '/mcp'),
-  observer_stream: fallback(string(), '/mcp?sse_kind=observer'),
-  presence_stream: fallback(string(), '/events/presence'),
-  managed_endpoint: fallback(string(), '/mcp/managed'),
-  operator_endpoint: fallback(string(), '/mcp/operator'),
-  delete_endpoint: fallback(string(), '/mcp'),
-  default_transport: fallback(string(), 'unknown'),
-  supports_post: fallback(boolean(), false),
-  supports_sse_upgrade: fallback(boolean(), false),
-  supports_delete: fallback(boolean(), false),
-})
-
-const Http2Schema = object({
-  listener_mode: fallback(string(), 'unknown'),
-  multiplex_ready: fallback(boolean(), false),
-  prior_knowledge_path: fallback(string(), '/mcp'),
-})
-
-const ClusterSchema = object({
-  cluster: fallback(string(), 'default'),
-  workspace_id: fallback(string(), 'default'),
-  topology_available: fallback(boolean(), false),
-  topology_source: fallback(string(), 'unknown'),
-  // These five use `asNumber(x) ?? null` — absent → null, not undefined.
-  total_units: fallback(nullable(number()), null),
-  managed_units: fallback(nullable(number()), null),
-  live_agents: fallback(nullable(number()), null),
-  active_operations: fallback(nullable(number()), null),
-  stale_units: fallback(nullable(number()), null),
-})
-
-const AgentHealthSchema = object({
-  stale_total: fallback(number(), 0),
-  lifecycle_dispatch_rejections_total: fallback(number(), 0),
-})
-
-// `projection_diagnostics` is only present when the backend explicitly
-// includes it. When omitted, downstream sees `undefined` (matches prior
-// `projectionDiagnostics ? {...} : undefined`).
-const ProjectionDiagnosticsSchema = object({
-  source: fallback(string(), 'unknown'),
-  cache_state: fallback(string(), 'unknown'),
-  // Prior decoder: `asString(x) ?? null` — absent/non-string → null.
-  last_success_at: fallback(nullable(string()), null),
-  last_attempt_at: fallback(nullable(string()), null),
-  last_error_at: fallback(nullable(string()), null),
-  stale_reason: fallback(nullable(string()), null),
-  stale_age_ms: fallback(nullable(number()), null),
-})
-
-// --- Outer schema: all 9 subsections required + generated_at non-empty ---
-
-const TransportHealthOuterSchema = object({
+const TransportHealthReadySchema = Schema.Struct({
   summary: SummarySchema,
   sse: SseOuterSchema,
   grpc: GrpcSchema,
   websocket: WebsocketSchema,
-  webrtc: WebrtcSchema,
   streamable_http: StreamableHttpSchema,
   http2: Http2Schema,
-  cluster: ClusterSchema,
   agent_health: AgentHealthSchema,
-  // Prior decoder: `if (!generatedAt) return null` — empty string must
-  // also cause rejection, matching that guard exactly.
-  generated_at: pipe(
-    string(),
-    check(s => s.length > 0, 'generated_at must be non-empty'),
-  ),
-  projection_diagnostics: optional(ProjectionDiagnosticsSchema),
+  generated_at: Schema.NonEmptyString,
+  projection_diagnostics: ProjectionDiagnosticsSchema,
 })
 
-export interface TransportHealthData {
-  summary: InferOutput<typeof SummarySchema>
-  sse: SseSection
-  grpc: InferOutput<typeof GrpcSchema>
-  websocket: InferOutput<typeof WebsocketSchema>
-  webrtc: InferOutput<typeof WebrtcSchema>
-  streamable_http: InferOutput<typeof StreamableHttpSchema>
-  http2: InferOutput<typeof Http2Schema>
-  cluster: InferOutput<typeof ClusterSchema>
-  agent_health: InferOutput<typeof AgentHealthSchema>
-  generated_at: string
-  projection_diagnostics?: InferOutput<typeof ProjectionDiagnosticsSchema>
+const TransportHealthInitializingSchema = Schema.Struct({
+  status: Schema.Literal('initializing'),
+  generated_at: Schema.NonEmptyString,
+  message: Schema.NonEmptyString,
+  projection_diagnostics: ProjectionDiagnosticsSchema,
+})
+
+export const TransportHealthSnapshotSchema = Schema.Union(
+  TransportHealthReadySchema,
+  TransportHealthInitializingSchema,
+)
+
+export type TransportHealthData = Schema.Schema.Type<
+  typeof TransportHealthReadySchema
+>
+export type TransportHealthSnapshot = Schema.Schema.Type<
+  typeof TransportHealthSnapshotSchema
+>
+
+export function isTransportHealthReady(
+  snapshot: TransportHealthSnapshot,
+): snapshot is TransportHealthData {
+  return !('status' in snapshot)
 }
 
-export class TransportHealthSchemaDriftError extends SchemaDriftError {
-  constructor(issues: readonly BaseIssue<unknown>[]) {
-    super('transport-health', issues)
-  }
+export class TransportHealthSchemaDriftError extends Data.TaggedError(
+  'TransportHealthSchemaDriftError',
+)<{
+  readonly domain: 'transport-health'
+  readonly issues: ReadonlyArray<ParseResult.ArrayFormatterIssue>
+  readonly message: string
+}> {}
+
+function schemaDriftError(
+  error: ParseResult.ParseError,
+): TransportHealthSchemaDriftError {
+  const issues = ParseResult.ArrayFormatter.formatErrorSync(error)
+  const details = issues
+    .map(issue => {
+      const path = issue.path.length > 0 ? issue.path.join('.') : '<root>'
+      return `${path}: ${issue.message}`
+    })
+    .join('; ')
+  return new TransportHealthSchemaDriftError({
+    domain: 'transport-health',
+    issues,
+    message: `transport-health schema drift: ${details}`,
+  })
 }
 
-function parseSseHotSessions(raw: unknown): HotSession[] {
-  if (!Array.isArray(raw)) return []
-  const out: HotSession[] = []
-  for (const item of raw) {
-    const parsed = safeParse(HotSessionSchema, item, { abortEarly: true })
-    if (parsed.success) out.push(parsed.output)
-  }
-  return out
-}
+const STRICT_PARSE_OPTIONS = {
+  errors: 'all',
+  onExcessProperty: 'error',
+} as const
 
-export function parseTransportHealthData(data: unknown): TransportHealthData {
-  const outer = parseOrThrow(
-    TransportHealthSchemaDriftError,
-    TransportHealthOuterSchema,
-    data,
-  )
-  return {
-    summary: outer.summary,
-    sse: {
-      sessions_observer: outer.sse.sessions_observer,
-      sessions_agent_stream: outer.sse.sessions_agent_stream,
-      sessions_presence: outer.sse.sessions_presence,
-      sessions_total: outer.sse.sessions_total,
-      external_subscribers: outer.sse.external_subscribers,
-      broadcast_avg_seconds: outer.sse.broadcast_avg_seconds,
-      broadcast_count: outer.sse.broadcast_count,
-      queue_avg_depth: outer.sse.queue_avg_depth,
-      queue_max_depth: outer.sse.queue_max_depth,
-      relay_queue_depth: outer.sse.relay_queue_depth,
-      relay_retry_total: outer.sse.relay_retry_total,
-      relay_retry_append: outer.sse.relay_retry_append,
-      relay_retry_broadcast: outer.sse.relay_retry_broadcast,
-      relay_drop_total: outer.sse.relay_drop_total,
-      relay_drop_queue: outer.sse.relay_drop_queue,
-      relay_drop_append: outer.sse.relay_drop_append,
-      relay_drop_broadcast: outer.sse.relay_drop_broadcast,
-      hot_sessions: parseSseHotSessions(outer.sse.hot_sessions),
-    },
-    grpc: outer.grpc,
-    websocket: outer.websocket,
-    webrtc: outer.webrtc,
-    streamable_http: outer.streamable_http,
-    http2: outer.http2,
-    cluster: outer.cluster,
-    agent_health: outer.agent_health,
-    generated_at: outer.generated_at,
-    projection_diagnostics: outer.projection_diagnostics,
-  }
+export function decodeTransportHealthData(
+  data: unknown,
+): Effect.Effect<TransportHealthSnapshot, TransportHealthSchemaDriftError> {
+  return Schema.decodeUnknown(
+    TransportHealthSnapshotSchema,
+    STRICT_PARSE_OPTIONS,
+  )(data).pipe(Effect.mapError(schemaDriftError))
 }

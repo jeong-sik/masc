@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 import type {
   KeeperApprovalQueueItem,
   KeeperApprovalRule,
+  KeeperApprovalRulesState,
   KeeperResolvedApprovalItem,
   KeeperResolvedApprovalPage,
   GateDecisionSource,
@@ -29,6 +30,7 @@ import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import { formatDateTimeKo, formatDurationCompound } from '../../lib/format-time'
 import {
   keeperResolvedApprovalDecisionClass,
+  keeperResolvedApprovalDecisionTone,
   keeperResolvedApprovalDecisionLabel,
   type KeeperResolvedApprovalDecision,
 } from '../../lib/keeper-approval-decision'
@@ -40,15 +42,54 @@ import {
   gateError,
   gateLoading,
   gateApprovalActing,
+  gateAuditWriteFailures,
+  clearGateAuditWriteFailures,
+  deleteKeeperApprovalRule,
   refreshGate,
   respondToKeeperApproval,
   retryKeeperAutoJudge,
   setKeeperGateMode,
 } from '../gate-store'
 
-type ApprovalsView = 'queue' | 'history'
-type ApprovalHistoryFilter = 'all' | KeeperResolvedApprovalDecision | 'rule'
+function ApprovalAuditWriteFailureAlert() {
+  const notices = gateAuditWriteFailures.value
+  if (notices.length === 0) return null
+  return html`
+    <section
+      class="ap-error ap-audit-write-alert sev-bad"
+      role="alert"
+      data-testid="approval-audit-write-unavailable"
+    >
+      <strong><span aria-hidden="true">!</span> 권한 변경은 커밋됐지만 감사 기록은 저장되지 않았습니다</strong>
+      <span>재실행하지 마세요. 아래 receipt는 실제 변경 성공과 감사 저장 실패를 함께 증명합니다.</span>
+      ${notices.map(notice => html`
+        <div class="ap-audit-failure" key=${`${notice.id ?? '-'}:${notice.receipt.event}:${notice.observed_at}`}>
+          <span class="mono">
+            ${notice.receipt.event} · ${notice.receipt.stage} ·
+            ${notice.id ?? 'id 없음'} · ${notice.transport.toUpperCase()} ·
+            관측 ${formatDateTimeKo(notice.observed_at)}
+          </span>
+          <span>${notice.receipt.detail}</span>
+          <details>
+            <summary>RAW receipt</summary>
+            <pre data-testid="approval-audit-write-raw">${JSON.stringify(notice.receipt, null, 2)}</pre>
+          </details>
+        </div>
+      `)}
+      <button type="button" class="ap-viewbtn" onClick=${clearGateAuditWriteFailures}>
+        확인 후 숨기기
+      </button>
+    </section>
+  `
+}
 
+type ApprovalsView = 'queue' | 'history'
+type ApprovalHistoryFilter = 'all' | KeeperResolvedApprovalDecision | GateDecisionSource
+
+// Design pill order (keeper-v2 approvals.jsx AP_HIST_FILTERS): decision pills
+// first, then decider pills. The design's 보류 pill is omitted — the live
+// decision model is the closed {approve, reject} set (see file header); the
+// decider pills are backed by the live decision_source field.
 const APPROVAL_HISTORY_FILTERS: ReadonlyArray<{
   id: ApprovalHistoryFilter
   label: string
@@ -57,9 +98,9 @@ const APPROVAL_HISTORY_FILTERS: ReadonlyArray<{
   { id: 'all', label: '전체', predicate: () => true },
   { id: 'approve', label: '승인', predicate: item => item.decision === 'approve' },
   { id: 'reject', label: '거부', predicate: item => item.decision === 'reject' },
-  { id: 'edit', label: '수정됨', predicate: item => item.decision === 'edit' },
-  { id: 'unknown', label: '처리됨', predicate: item => item.decision === 'unknown' },
-  { id: 'rule', label: 'Always 규칙', predicate: item => item.rule_match != null },
+  { id: 'human_operator', label: 'HITL 수동', predicate: item => item.decision_source === 'human_operator' },
+  { id: 'auto_judge', label: 'Auto Judge', predicate: item => item.decision_source === 'auto_judge' },
+  { id: 'always_allowed', label: 'Always', predicate: item => item.decision_source === 'always_allowed' },
 ]
 const DEFAULT_APPROVAL_HISTORY_FILTER = APPROVAL_HISTORY_FILTERS[0]!
 
@@ -118,49 +159,61 @@ function decisionSourceLabel(source: GateDecisionSource | null | undefined): str
 
 function ResolvedApprovalItem({ item }: { item: KeeperResolvedApprovalItem }) {
   const decision = keeperResolvedApprovalDecisionLabel(item.decision)
-  // Judge evidence recorded at resolution time (#26126). Older audit events
-  // carry none, so the row renders without the fold rather than implying a
-  // judgment that was never recorded.
+  const tone = keeperResolvedApprovalDecisionTone(item.decision)
   const judgeSummary =
     item.summary_status?.status === 'available' ? item.summary_status.summary : null
   const judgeSlot =
     item.exact_attempt?.state === 'bound' ? item.exact_attempt.slot_id : null
+  const automated = item.decision_source !== 'human_operator'
   return html`
     <li
-      class="ap-history-item"
+      class=${`ap-hist-row dec-${tone}`}
       data-testid="approval-history-item"
       data-approval-id=${item.id}
     >
-      <span class=${`ap-history-decision ${keeperResolvedApprovalDecisionClass(item.decision)}`}>${decision}</span>
-      <span class="ap-history-tool mono">${item.tool_name}</span>
-      <span class="ap-history-keeper">${item.keeper_name}</span>
-      <span class="ap-history-source">${decisionSourceLabel(item.decision_source)}</span>
-      <span class="ap-history-id mono">${item.id}</span>
-      ${judgeSlot
-        ? html`<span class="ap-history-slot mono" data-testid="approval-history-slot">${judgeSlot}</span>`
-        : null}
-      ${item.rule_match?.rule_id
-        ? html`<span class="ap-history-rule mono">rule ${item.rule_match.rule_id}</span>`
-        : null}
-      ${item.resolved_at
-        ? html`<span class="ap-history-at">${formatDateTimeKo(item.resolved_at)}</span>`
-        : null}
-      ${judgeSummary
-        ? html`
-            <details class="ap-history-judge" data-testid="approval-history-judge">
-              <summary>판정 근거</summary>
-              <p class="ap-summary-text">${judgeSummary.context_summary}</p>
-              ${judgeSummary.key_questions.length
-                ? html`<ul class="ap-summary-questions">
-                    ${judgeSummary.key_questions.map(q => html`<li>${q}</li>`)}
-                  </ul>`
-                : null}
-              ${judgeSummary.rationale.trim()
-                ? html`<p class="ap-summary-rationale">${judgeSummary.rationale.trim()}</p>`
-                : null}
-            </details>
-          `
-        : null}
+      <span class="ap-hist-at mono">
+        ${item.resolved_at ? formatDateTimeKo(item.resolved_at) : '해결 시각 없음'}
+      </span>
+      <span class=${`ap-hist-dec ${tone}`}>${decision}</span>
+      <div class="ap-hist-body">
+        <div class="ap-hist-top">
+          <span class="ap-hist-id mono">${item.id}</span>
+          <span class="ap-hist-keeper mono">${item.keeper_name}</span>
+          <span class="ap-hist-tool mono">${item.tool_name}</span>
+          ${judgeSlot
+            ? html`<span class="ap-hist-slot mono" data-testid="approval-history-slot">${judgeSlot}</span>`
+            : null}
+        </div>
+        ${/* The design's .ap-hist-reason slot, fed by the audit record's own
+             decision_reason — rendered only when the server recorded one
+             (mark, don't fake). */''}
+        ${item.decision_reason
+          ? html`<div class="ap-hist-reason" data-testid="approval-history-reason">${item.decision_reason}</div>`
+          : null}
+        ${judgeSummary
+          ? html`
+              <details class="ap-hist-judge" data-testid="approval-history-judge">
+                <summary>판정 근거</summary>
+                <p class="ap-summary-text">${judgeSummary.context_summary}</p>
+                ${judgeSummary.key_questions.length
+                  ? html`<ul class="ap-summary-questions">
+                      ${judgeSummary.key_questions.map(q => html`<li>${q}</li>`)}
+                    </ul>`
+                  : null}
+                ${judgeSummary.rationale.trim()
+                  ? html`<p class="ap-summary-rationale">${judgeSummary.rationale.trim()}</p>`
+                  : null}
+              </details>
+            `
+          : null}
+      </div>
+      <span
+        class=${`ap-hist-by ${automated ? 'auto' : ''}`}
+        title=${decisionSourceLabel(item.decision_source)}
+      >
+        ${item.actor ?? 'unattributed'}
+        <span class="ap-hist-src">${decisionSourceLabel(item.decision_source)}</span>
+      </span>
     </li>
   `
 }
@@ -232,7 +285,7 @@ function ApHistory({
   const counts = useMemo(() => ({
     approve: sorted.filter(item => item.decision === 'approve').length,
     reject: sorted.filter(item => item.decision === 'reject').length,
-    rule: sorted.filter(item => item.rule_match != null).length,
+    autoJudge: sorted.filter(item => item.decision_source === 'auto_judge').length,
     keepers: new Set(sorted.map(item => item.keeper_name)).size,
   }), [sorted])
 
@@ -242,7 +295,10 @@ function ApHistory({
       <div class="ap-hist-summary" aria-label="승인 이력 요약">
         <div class="ap-hist-stat"><b class="mono ok">${counts.approve}</b> 승인</div>
         <div class="ap-hist-stat"><b class="mono bad">${counts.reject}</b> 거부</div>
-        <div class="ap-hist-stat"><b class="mono">${counts.rule}</b> Rule</div>
+        <div class="ap-hist-stat"><b class="mono">${counts.autoJudge}</b> Auto Judge</div>
+        ${/* Design's 4th stat is median decision latency; the audit record has
+             no latency field, so the slot carries the live-only keeper count
+             instead of a fabricated number. */''}
         <div class="ap-hist-stat"><b class="mono">${counts.keepers}</b> 관련 키퍼</div>
       </div>
       <div class="ap-hist-filters" role="tablist" aria-label="승인 이력 필터">
@@ -258,15 +314,15 @@ function ApHistory({
       </div>
       ${shown.length > 0
         ? html`
-            <ul class="ap-history-list ap-hist-list">
+            <ul class="ap-hist-list">
               ${shown.map(item => html`<${ResolvedApprovalItem} key=${item.id} item=${item} />`)}
             </ul>
           `
         : html`
             <div class="ap-clear compact" data-testid="approvals-history-empty">
               <div class="ico">${'✓'}</div>
-              <h3>해당 필터의 처리 이력이 없습니다</h3>
-              <div class="ap-clear-sub">최근 처리 projection에 일치하는 항목이 없습니다.</div>
+              <h3>해당 필터의 처리 이력 없음</h3>
+              <div class="ap-clear-sub">최근 처리 projection에 일치하는 항목 없음</div>
             </div>
           `}
     </section>
@@ -281,10 +337,10 @@ function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: strin
       : item.exact_attempt.state
   return [
     { label: '키퍼', value: item.keeper_name },
-    { label: '작업', value: item.tool_name },
+    { label: '도구', value: item.tool_name },
     { label: '상태', value: 'Human 판단 대기 · Keeper lane nonblocking' },
     { label: '대기', value: apAge(item.waiting_s) },
-    { label: '작업', value: approvalWorkSummary(item) },
+    { label: '연결 작업', value: approvalWorkSummary(item) },
     { label: '턴', value: typeof item.turn_id === 'number' ? `turn ${item.turn_id}` : null },
     { label: '요청시각', value: compactText(item.requested_at) },
     { label: '입력', value: compactText(item.input_preview) || '입력 미리보기 없음' },
@@ -589,12 +645,26 @@ function ApprovalDetailPanel({
 }
 
 function ApprovalRuleRow({ rule }: { rule: KeeperApprovalRule }) {
-  const fingerprintPreview = rule.request_fingerprint?.slice(0, 12)
+  const fingerprintPreview = rule.request_fingerprint.slice(0, 12)
+  const expired = rule.expires_at !== null && rule.expires_at <= Date.now() / 1000
+  const expiryLabel = rule.expires_at === null
+    ? '만료 없음'
+    : `${expired ? '만료됨' : '만료'} ${formatDateTimeKo(rule.expires_at * 1000)}`
+  const deleting = gateApprovalActing.value === `rule:${rule.id}`
   return html`
     <li class="ap-rule-row" data-testid="approval-rule-row">
       <span class="ap-rule-keeper mono">${rule.keeper_name}</span>
       <span class="ap-rule-tool mono">${rule.tool_name}</span>
-      ${fingerprintPreview ? html`<span class="ap-rule-fingerprint mono">${fingerprintPreview}</span>` : null}
+      <span class="ap-rule-fingerprint mono">${fingerprintPreview}</span>
+      <span class="ap-rule-provenance mono">${rule.created_by} · ${rule.source_approval_id}</span>
+      <span class=${`ap-rule-expiry ${expired ? 'sev-bad' : ''}`} data-testid="approval-rule-expiry">${expiryLabel}</span>
+      <button
+        type="button"
+        class="ap-rule-delete"
+        disabled=${deleting}
+        onClick=${() => void deleteKeeperApprovalRule(rule.id)}
+        aria-label=${rule.tool_name + ' Always 규칙 삭제'}
+      >${deleting ? '삭제 중' : '삭제'}</button>
     </li>
   `
 }
@@ -609,10 +679,12 @@ function ApAside({
   openCount,
   resolvedItems,
   rules,
+  rulesState,
 }: {
   openCount: number
   resolvedItems: KeeperResolvedApprovalItem[]
   rules: KeeperApprovalRule[]
+  rulesState: KeeperApprovalRulesState
 }) {
   const hitl = gateData.value?.hitl
   const recent = [...resolvedItems]
@@ -635,21 +707,21 @@ function ApAside({
               Gate 모드
               <b>${GATE_MODES.find(option => option.mode === gateMode?.mode)?.label ?? '확인 필요'}</b>
             </span>
-            <div class="ap-viewseg" role="radiogroup" aria-label="Gate 모드" data-testid="gate-mode-selector">
+            <div class="wka-mode wka-mode-3" role="radiogroup" aria-label="Gate 모드" data-testid="gate-mode-selector">
               ${GATE_MODES.map(option => html`
                 <button
                   key=${option.mode}
                   type="button"
-                  class=${`ap-viewbtn ${gateMode?.mode === option.mode ? 'on' : ''}`}
+                  class=${`wka-mode-b ${gateMode?.mode === option.mode ? 'on' : ''}`}
                   role="radio"
                   aria-checked=${gateMode?.mode === option.mode}
                   onClick=${() => void setKeeperGateMode(option.mode)}
                   disabled=${modeDisabled}
-                >${option.label}</button>
+                ><b>${option.label}</b></button>
               `)}
             </div>
           </div>
-          <div class="wka-auto-stat">${rules.length.toLocaleString()}개 Always 규칙 · 열린 승인 ${openCount.toLocaleString()}건</div>
+          <div class="wka-auto-stat">${rulesState.state === 'ready' ? `${rules.length.toLocaleString()}개 Always 규칙` : 'Always 규칙 확인 불가'} · 열린 승인 ${openCount.toLocaleString()}건</div>
           <div class="wka-auto-note">
             Human은 사람이 판단하고, Auto Judge는 LLM이 판단하며, Always Allow는 workspace의 명시적 선택입니다.
           </div>
@@ -668,8 +740,8 @@ function ApAside({
                   </div>
                 `
             : null}
-          ${gateMode?.state === 'invalid' || gateMode?.state === 'unavailable' || gateMode?.read_error
-            ? html`<div class="ap-env-warn mono">Gate mode ${gateMode.state ?? 'invalid'}: ${gateMode.read_error ?? '상태 확인 실패'}</div>`
+          ${gateMode?.state === 'invalid' || gateMode?.state === 'unavailable'
+            ? html`<div class="ap-env-warn mono">Gate mode ${gateMode.state}: ${gateMode.read_error}</div>`
             : null}
         </div>
       </section>
@@ -679,7 +751,12 @@ function ApAside({
           <h3>Always Rules</h3>
           <span class="mono">${rules.length}</span>
         </div>
-        ${rules.length > 0
+        ${rulesState.state === 'ready'
+          ? html`<div class="wka-hint mono">정확일치 규칙 — keeper · tool · request fingerprint</div>`
+          : null}
+        ${rulesState.state === 'unavailable'
+          ? html`<div class="ap-env-warn" role="alert" data-testid="approval-rules-unavailable">${rulesState.error}</div>`
+          : rules.length > 0
           ? html`
               <ul class="ap-rule-list">${rules.slice(0, ASIDE_RULES_LIMIT).map(rule => html`<${ApprovalRuleRow} key=${rule.id} rule=${rule} />`)}</ul>
               ${hiddenRules > 0
@@ -699,7 +776,7 @@ function ApAside({
               <ul class="ap-recent-list">
                 ${recent.map(item => html`
                   <li class="ap-recent-row" key=${item.id}>
-                    <span class=${`ap-history-decision ${keeperResolvedApprovalDecisionClass(item.decision)}`}>
+                    <span class=${`ap-recent-dec ${keeperResolvedApprovalDecisionClass(item.decision)}`}>
                       ${keeperResolvedApprovalDecisionLabel(item.decision)}
                     </span>
                     <span class="ap-recent-body">
@@ -734,9 +811,13 @@ export function ApprovalsSurface() {
     approvalQueueState && approvalQueueState.state !== 'ready'
       ? approvalQueueState
       : null
+  const resolvedState = gateData.value?.recent_resolved_state ?? null
   const resolvedItems = gateData.value?.recent_resolved ?? []
   const resolvedPage = gateData.value?.recent_resolved_page ?? null
+  const resolvedUnavailable =
+    resolvedState?.state === 'unavailable' ? resolvedState : null
   const rules = gateData.value?.approval_rules ?? []
+  const rulesState = gateData.value?.approval_rules_state ?? null
   const queueViolations = gateData.value?.approval_queue_violations ?? []
   const error = gateError.value
   // First load only: gateResource is stale-while-revalidate, so a refetch
@@ -756,7 +837,7 @@ export function ApprovalsSurface() {
   }, [items])
 
   return html`
-    <main class="ov ov-2col ss-surface ap-surface bg-surface-page text-text-primary" data-screen-label="Gate HITL 큐" data-testid="approvals-surface">
+    <main class="ov ov-flush ov-2col ss-surface ap-surface bg-surface-page text-text-primary" data-screen-label="Gate HITL 큐" data-testid="approvals-surface">
       <div class="ov-scroll">
         <header class="ov-head">
           <div>
@@ -795,6 +876,15 @@ export function ApprovalsSurface() {
         </header>
 
         ${error ? html`<div class="ap-error" role="alert" data-testid="approvals-error">${error}</div>` : null}
+        <${ApprovalAuditWriteFailureAlert} />
+        ${resolvedUnavailable
+          ? html`
+              <div class="ap-error sev-bad" role="alert" data-testid="approvals-history-unavailable">
+                <strong><span aria-hidden="true">!</span> 승인 처리 이력을 읽을 수 없습니다</strong>
+                <span>${resolvedUnavailable.error}</span>
+              </div>
+            `
+          : null}
         ${queueViolations.length > 0
           ? html`
               <div class="ap-error sev-warn" role="alert" data-testid="approvals-queue-violations">
@@ -829,7 +919,9 @@ export function ApprovalsSurface() {
         ${firstLoad
           ? html`<${LoadingState}>Gate 큐 불러오는 중...<//>`
           : view === 'history'
-            ? html`<${ApHistory} items=${resolvedItems} page=${resolvedPage} />`
+            ? resolvedUnavailable
+              ? null
+              : html`<${ApHistory} items=${resolvedItems} page=${resolvedPage} />`
           : queueUnavailable || items === null
             ? null
           : html`
@@ -848,7 +940,7 @@ export function ApprovalsSurface() {
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">처리 완료</div>
-            <div class="ov-kpi-v volt">${resolvedItems.length}</div>
+            <div class="ov-kpi-v volt">${resolvedUnavailable ? '—' : resolvedItems.length}</div>
           </div>
         </section>
 
@@ -877,18 +969,19 @@ export function ApprovalsSurface() {
           ? html`
               <div class="ap-clear" data-testid="approvals-empty">
                 <div class="ico">${'✓'}</div>
-                <h3>열린 Human 판단이 없습니다</h3>
-                <div class="ap-clear-sub">HITL 큐가 비어 있습니다 — keeper들은 계속 진행 중입니다.</div>
+                <h3>열린 Human 판단 없음</h3>
+                <div class="ap-clear-sub">HITL 큐 비어 있음</div>
               </div>
             `
           : null}
       `}
       </div>
-      ${!firstLoad && !queueUnavailable && items !== null ? html`
+      ${!firstLoad && !queueUnavailable && !resolvedUnavailable && items !== null && rulesState !== null ? html`
         <${ApAside}
           openCount=${items.length}
           resolvedItems=${resolvedItems}
           rules=${rules}
+          rulesState=${rulesState}
         />
       ` : null}
     </main>

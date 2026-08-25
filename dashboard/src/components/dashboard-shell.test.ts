@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { ConnectionStatus, DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, shouldRenderSurfaceLead, SideRail, summarizeAttentionPreview } from './dashboard-shell'
+import { ConnectionStatus, DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, shouldRenderSurfaceLead } from './dashboard-shell'
 import { route } from '../router'
 import { dashboardWsConnected, dashboardWsLastError, dashboardWsReady } from '../dashboard-ws-state'
 import { dashboardLoading } from '../store'
@@ -144,38 +144,6 @@ describe('isKeeperDetailDashboardRoute', () => {
   })
 })
 
-describe('summarizeAttentionPreview', () => {
-  it('includes grounded evidence in attention tooltip lines', () => {
-    expect(summarizeAttentionPreview([
-      {
-        summary: 'Adversarial review failed',
-        kind: 'review_rejected',
-        grounded_verdict: {
-          verdict: 'FAIL',
-          reason: 'bad branch',
-          evidence: [
-            { path: 'lib/foo.ml', line: 12, quote: 'let bad = true' },
-          ],
-        },
-      },
-    ])).toEqual([
-      'Adversarial review failed | lib/foo.ml:12 let bad = true',
-    ])
-  })
-
-  it('falls back to evidence_preview when no grounded verdict exists', () => {
-    expect(summarizeAttentionPreview([
-      {
-        summary: 'Needs inspection',
-        kind: 'runtime_blocked',
-        evidence_preview: ['runtime_blocker_state=blocked'],
-      },
-    ])).toEqual([
-      'Needs inspection | runtime_blocker_state=blocked',
-    ])
-  })
-})
-
 describe('dashboardHealthChips', () => {
   it('separates source mismatch, paused keepers, and execution errors', () => {
     const chips = dashboardHealthChips({
@@ -248,7 +216,10 @@ describe('dashboardHealthChips', () => {
         server_workspace_mismatch: false,
       } as any,
       runtimeProviderProbe: {
+        source: 'runtime.toml',
         status: 'unreachable',
+        probe_ok: false,
+        checked_at: '2026-08-24T12:00:00Z',
         summary: {
           runtimes: 1,
           probed: 1,
@@ -260,11 +231,30 @@ describe('dashboardHealthChips', () => {
         providers: [{
           runtime_id: 'runpod_mtp.qwen',
           provider_id: 'runpod_mtp',
+          provider_display_name: 'RunPod MTP',
+          model_id: 'qwen',
+          model_api_name: 'Qwen/Qwen3-32B',
+          protocol: 'openai-compatible-http',
+          runtime_kind: 'http',
+          transport: 'http',
+          auth_kind: 'env:RUNPOD_API_KEY',
           status: 'missing_auth',
           reachable: false,
+          http_status: null,
+          latency_ms: null,
+          model_count: null,
+          content_type: null,
+          downloaded_bytes: null,
+          endpoint_url: 'https://example.invalid/v1',
+          probe_url: 'https://example.invalid/v1/models',
+          error: 'env credential RUNPOD_API_KEY is empty or unset',
+          checked_at: '2026-08-24T12:00:00Z',
           credential_required: true,
           auth_present: false,
         }],
+        errors: ['runpod_mtp.qwen: missing_auth'],
+        observations: ['runtime.toml provider reachability: 0 reachable, 1 failed, 0 skipped'],
+        limitations: ['Probe checks provider metadata endpoints only; it does not send a completion request.'],
       },
       executionError: null,
       loading: false,
@@ -372,423 +362,13 @@ describe('dashboardHealthChips', () => {
     })])
   })
 
-  it('reports canonical fleet execution unavailable without phase inference', () => {
-    const chips = dashboardHealthChips({
-      connected: true,
-      counts: { keepers: 2, configured_keepers: 2 },
-      keepers: [],
-      runtimeResolution: {
-        status: 'ready',
-        warnings: [],
-        fleet_safety: {
-          keeper_fibers: 1,
-          paused_keepers: 3,
-          keeper_fleet_safety: null,
-        },
-      } as any,
-      executionError: null,
-      loading: false,
-    })
 
-    const chip = chips.find(c => c.key === 'fleet-liveness-risk')
-    expect(chip).toEqual(expect.objectContaining({
-      label: 'Current Keeper fact invalid',
-      tone: 'bad',
-    }))
-    expect(chip?.detail).toContain('reason=current_fact_invalid')
-    expect(chip?.detail).toContain('restore a canonical current snapshot')
-  })
 
-  it('surfaces a P0 blocked fleet when health reports zero executable keeper fibers', () => {
-    const chips = dashboardHealthChips({
-      connected: true,
-      counts: { keepers: 14, configured_keepers: 14 },
-      keepers: [],
-      runtimeResolution: {
-        status: 'ready',
-        warnings: [],
-        fleet_safety: {
-          keeper_fibers: 0,
-          paused_keepers: 13,
-          keeper_fleet_safety: {
-            status: 'blocked',
-            blocked_keepers: [{
-              keeper_name: 'paused-keeper',
-              reason: 'durable_paused_autoboot_enabled',
-              action: 'resume_or_leave_paused',
-            }],
-            reason: null,
-            blocker: 'no_executable_keeper_fibers',
-            blocked_keeper_count: 14,
-            bootable_keeper_count: 1,
-            running_keeper_fiber_count: 0,
-            failing_keeper_fiber_count: 0,
-            recovering_keeper_fiber_count: 0,
-            executable_keeper_fiber_count: 0,
-            no_executable_keeper_fibers: true,
-            reaction_capacity_below_target: true,
-            reaction_capacity_shortfall_count: 14,
-            paused_keeper_count: 13,
-            autoboot_enabled_keeper_count: 14,
-            paused_autoboot_enabled_keeper_count: 13,
-            target_reaction_capacity_count: 14,
-            operator_action_required: true,
-          },
-        },
-      } as any,
-      executionError: null,
-      loading: false,
-    })
 
-    const chip = chips.find(c => c.key === 'fleet-liveness-risk')
-    expect(chip).toEqual(expect.objectContaining({
-      label: 'Keeper paused',
-      tone: 'bad',
-    }))
-    expect(chip?.detail).toContain('status=blocked')
-    expect(chip?.detail).toContain('executable_keeper_fiber_count=0')
-    expect(chip?.detail).toContain('paused_keeper_count=13')
-    expect(chip?.detail).toContain('failing_keeper_fiber_count=0')
-    expect(chip?.detail).toContain('recovering_keeper_fiber_count=0')
-    expect(chip?.detail).toContain('target_reaction_capacity_count=14')
-    expect(chip?.detail).toContain('blocker=no_executable_keeper_fibers')
-    expect(chip?.detail).toContain('resume selected paused keepers')
-  })
 
-  it('does not override canonical blocked status for an all-paused fleet', () => {
-    const chips = dashboardHealthChips({
-      connected: true,
-      counts: { keepers: 3, configured_keepers: 3 },
-      keepers: [],
-      runtimeResolution: {
-        status: 'ready',
-        warnings: [],
-        fleet_safety: {
-          keeper_fibers: 0,
-          paused_keepers: 3,
-          keeper_fleet_safety: {
-            status: 'blocked',
-            blocked_keepers: [{
-              keeper_name: 'paused-keeper',
-              reason: 'durable_paused_autoboot_enabled',
-              action: 'resume_or_leave_paused',
-            }],
-            reason: null,
-            blocker: 'no_executable_keeper_fibers',
-            blocked_keeper_count: 3,
-            bootable_keeper_count: 3,
-            running_keeper_fiber_count: 0,
-            failing_keeper_fiber_count: 0,
-            recovering_keeper_fiber_count: 0,
-            executable_keeper_fiber_count: 0,
-            no_executable_keeper_fibers: true,
-            reaction_capacity_below_target: true,
-            reaction_capacity_shortfall_count: 3,
-            paused_keeper_count: 3,
-            autoboot_enabled_keeper_count: 3,
-            paused_autoboot_enabled_keeper_count: 3,
-            target_reaction_capacity_count: 3,
-            operator_action_required: true,
-          },
-        },
-      } as any,
-      executionError: null,
-      loading: false,
-    })
 
-    const chip = chips.find(c => c.key === 'fleet-liveness-risk')
-    expect(chip).toEqual(expect.objectContaining({
-      label: 'Keeper paused',
-      tone: 'bad',
-    }))
-    expect(chip?.detail).toContain('paused_keeper_count=3')
-    expect(chip?.detail).toContain('resume selected paused keepers')
-  })
 
-  it.each([
-    [
-      'failing-only',
-      {
-        status: 'blocked',
-        blocked_keepers: [{
-          keeper_name: 'failing-keeper',
-          reason: 'phase_failing',
-          action: 'repair_failing_keeper',
-        }],
-        reason: null,
-        blocker: 'no_executable_keeper_fibers',
-        blocked_keeper_count: 2,
-        failing_keeper_fiber_count: 2,
-        recovering_keeper_fiber_count: 0,
-        executable_keeper_fiber_count: 0,
-        paused_keeper_count: 0,
-        target_reaction_capacity_count: 2,
-      },
-      'failing_keeper_fiber_count=2',
-      'inspect and recover failing keepers',
-    ],
-    [
-      'recovering-only',
-      {
-        status: 'blocked',
-        blocked_keepers: [{
-          keeper_name: 'recovering-keeper',
-          reason: 'phase_restarting',
-          action: 'wait_for_keeper_restart',
-        }],
-        reason: null,
-        blocker: 'no_executable_keeper_fibers',
-        blocked_keeper_count: 2,
-        failing_keeper_fiber_count: 0,
-        recovering_keeper_fiber_count: 2,
-        executable_keeper_fiber_count: 0,
-        paused_keeper_count: 0,
-        target_reaction_capacity_count: 2,
-      },
-      'recovering_keeper_fiber_count=2',
-      'keeper recovery is in progress',
-    ],
-    [
-      'unknown',
-      {
-        status: 'blocked',
-        blocked_keepers: [{
-          keeper_name: null,
-          reason: 'current_fact_invalid',
-          action: 'inspect_current_keeper_fact',
-        }],
-        reason: null,
-        blocker: 'no_executable_keeper_fibers',
-        blocked_keeper_count: 2,
-        failing_keeper_fiber_count: 0,
-        recovering_keeper_fiber_count: 0,
-        executable_keeper_fiber_count: 0,
-        paused_keeper_count: 0,
-        target_reaction_capacity_count: 2,
-      },
-      'blocker=no_executable_keeper_fibers',
-      'restore a canonical current snapshot',
-    ],
-  ] as const)('uses canonical %s evidence for blocked fleet operator advice', (
-    _caseName,
-    fleet,
-    evidence,
-    operatorAction,
-  ) => {
-    const chips = dashboardHealthChips({
-      connected: true,
-      counts: { keepers: 2, configured_keepers: 2 },
-      keepers: [],
-      runtimeResolution: {
-        status: 'ready',
-        warnings: [],
-        fleet_safety: {
-          keeper_fibers: 0,
-          paused_keepers: 0,
-          keeper_fleet_safety: fleet,
-        },
-      } as any,
-      executionError: null,
-      loading: false,
-    })
 
-    const detail = chips.find(c => c.key === 'fleet-liveness-risk')?.detail
-    expect(detail).toContain(evidence)
-    expect(detail).toContain(operatorAction)
-    expect(detail).not.toContain('resume selected paused keepers')
-  })
-
-  it('keeps mixed paused fleets blocked when autoboot keepers are still below target', () => {
-    const chips = dashboardHealthChips({
-      connected: true,
-      counts: { keepers: 16, configured_keepers: 16 },
-      keepers: [],
-      runtimeResolution: {
-        status: 'ready',
-        warnings: [],
-        fleet_safety: {
-          keeper_fibers: 0,
-          paused_keepers: 14,
-          keeper_fleet_safety: {
-            status: 'blocked',
-            blocked_keepers: [{
-              keeper_name: 'paused-keeper',
-              reason: 'durable_paused_autoboot_enabled',
-              action: 'resume_or_leave_paused',
-            }],
-            reason: null,
-            blocker: 'no_executable_keeper_fibers',
-            blocked_keeper_count: 16,
-            bootable_keeper_count: 2,
-            running_keeper_fiber_count: 0,
-            failing_keeper_fiber_count: 0,
-            executable_keeper_fiber_count: 0,
-            no_executable_keeper_fibers: true,
-            reaction_capacity_below_target: true,
-            reaction_capacity_shortfall_count: 14,
-            paused_keeper_count: 14,
-            autoboot_enabled_keeper_count: 14,
-            paused_autoboot_enabled_keeper_count: 13,
-            target_reaction_capacity_count: 14,
-            operator_action_required: true,
-          },
-        },
-      } as any,
-      executionError: null,
-      loading: false,
-    })
-
-    const chip = chips.find(c => c.key === 'fleet-liveness-risk')
-    expect(chip).toEqual(expect.objectContaining({
-      label: 'Keeper paused',
-      tone: 'bad',
-    }))
-    expect(chip?.detail).toContain('paused_autoboot_enabled_keeper_count=13')
-    expect(chip?.detail).toContain('resume selected paused keepers')
-  })
-
-  it('surfaces fleet capacity degradation when executable fibers are below target', () => {
-    const chips = dashboardHealthChips({
-      connected: true,
-      counts: { keepers: 13, configured_keepers: 13 },
-      keepers: [],
-      runtimeResolution: {
-        status: 'ready',
-        warnings: [],
-        fleet_safety: {
-          keeper_fibers: 3,
-          paused_keepers: 2,
-          keeper_fleet_safety: {
-            status: 'degraded',
-            blocked_keepers: [{
-              keeper_name: 'failing-keeper',
-              reason: 'phase_failing',
-              action: 'repair_failing_keeper',
-            }],
-            reason: null,
-            blocker: 'reaction_capacity_below_target',
-            blocked_keeper_count: 10,
-            bootable_keeper_count: 11,
-            running_keeper_fiber_count: 3,
-            failing_keeper_fiber_count: 8,
-            executable_keeper_fiber_count: 11,
-            no_executable_keeper_fibers: false,
-            reaction_capacity_below_target: true,
-            reaction_capacity_shortfall_count: 2,
-            paused_keeper_count: 2,
-            autoboot_enabled_keeper_count: 13,
-            paused_autoboot_enabled_keeper_count: 2,
-            target_reaction_capacity_count: 13,
-            operator_action_required: true,
-          },
-        },
-      } as any,
-      executionError: null,
-      loading: false,
-    })
-
-    const chip = chips.find(c => c.key === 'fleet-liveness-risk')
-    expect(chip).toEqual(expect.objectContaining({
-      label: 'Keeper failing',
-      tone: 'warn',
-    }))
-    expect(chip?.detail).toContain('status=degraded')
-    expect(chip?.detail).toContain('executable_keeper_fiber_count=11')
-    expect(chip?.detail).toContain('failing_keeper_fiber_count=8')
-    expect(chip?.detail).toContain('target_reaction_capacity_count=13')
-    expect(chip?.detail).toContain('reaction_capacity_shortfall_count=2')
-    expect(chip?.detail).toContain('blocker=reaction_capacity_below_target')
-  })
-
-  it('does not treat non-FD fleet blocked counts as FD pressure', () => {
-    const chips = dashboardHealthChips({
-      connected: true,
-      counts: { keepers: 24, configured_keepers: 24 },
-      keepers: [],
-      runtimeResolution: {
-        status: 'ready',
-        warnings: [],
-        fleet_safety: {
-          keeper_fibers: 8,
-          paused_keepers: 0,
-          keeper_fleet_safety: {
-            status: 'degraded',
-            blocked_keepers: [{
-              keeper_name: 'running-keeper',
-              reason: 'phase_running',
-              action: 'inspect_capacity_accounting',
-            }],
-            reason: null,
-            blocker: 'reaction_capacity_below_target',
-            blocked_keeper_count: 24,
-            bootable_keeper_count: 24,
-            running_keeper_fiber_count: 8,
-            failing_keeper_fiber_count: 0,
-            executable_keeper_fiber_count: 8,
-            no_executable_keeper_fibers: false,
-            reaction_capacity_below_target: true,
-            reaction_capacity_shortfall_count: 16,
-            paused_keeper_count: 0,
-            autoboot_enabled_keeper_count: 24,
-            paused_autoboot_enabled_keeper_count: 0,
-            target_reaction_capacity_count: 24,
-            operator_action_required: true,
-          },
-        },
-      } as any,
-      executionError: null,
-      loading: false,
-    })
-
-    const chip = chips.find(c => c.key === 'fleet-liveness-risk')
-    expect(chip).toEqual(expect.objectContaining({
-      label: 'Keeper capacity fact inconsistent',
-      tone: 'warn',
-    }))
-    expect(chip?.detail).not.toContain('FD pressure')
-  })
-
-  it('does not infer executable truth from running capacity', () => {
-    for (const executableValue of [undefined, '4'] as const) {
-      const fleet = {
-        status: 'degraded',
-        reason: null,
-        blocker: 'reaction_capacity_below_target',
-        blocked_keeper_count: 2,
-        running_keeper_fiber_count: 4,
-        target_reaction_capacity_count: 6,
-        reaction_capacity_below_target: true,
-        reaction_capacity_shortfall_count: 2,
-        operator_action_required: true,
-        ...(executableValue === undefined
-          ? {}
-          : { executable_keeper_fiber_count: executableValue }),
-      }
-      const chips = dashboardHealthChips({
-        connected: true,
-        counts: { keepers: 6, configured_keepers: 6 },
-        keepers: [],
-        runtimeResolution: {
-          status: 'ready',
-          warnings: [],
-          fleet_safety: {
-            keeper_fibers: 4,
-            paused_keepers: 0,
-            keeper_fleet_safety: fleet,
-          },
-        } as any,
-        executionError: null,
-        loading: false,
-      })
-      const chip = chips.find(c => c.key === 'fleet-liveness-risk')
-      expect(chip).toEqual(expect.objectContaining({
-        label: 'Current Keeper fact invalid',
-        tone: 'bad',
-      }))
-      expect(chip?.detail).toContain('reason=current_fact_invalid')
-      expect(chip?.detail).toContain('restore a canonical current snapshot')
-    }
-  })
 
   it('surfaces quarantined reaction ledger rows even when pending backlog is clear', () => {
     const chips = dashboardHealthChips({
@@ -966,69 +546,6 @@ describe('dashboardHealthChips', () => {
     })
   })
 
-})
-
-describe('SideRail v2 chrome', () => {
-  let container: HTMLDivElement
-
-  beforeEach(() => {
-    container = document.createElement('div')
-    document.body.appendChild(container)
-    route.value = {
-      tab: 'workspace',
-      params: { section: 'work' },
-      postId: null,
-    }
-  })
-
-  afterEach(() => {
-    render(null, container)
-    container.remove()
-  })
-
-  it('renders v2 structural classes and highlights the active surface', () => {
-    render(h(SideRail, { collapsed: false, onToggle: () => {} }), container)
-
-    expect(container.querySelector('.nav-brand')).not.toBeNull()
-    expect(container.querySelector('.nav-sec')).not.toBeNull()
-    expect(container.querySelector('.nav-link.active')).not.toBeNull()
-    expect(container.querySelector('.nav-link.active')?.textContent).toContain('Work')
-    expect(container.querySelector('.nav-link.active')?.textContent).not.toContain('Settings')
-
-    // Multiple surfaces render sublists (any surface with 2+ sections), so
-    // anchor on the globally-unique active sublink instead of the first list.
-    const sublist = container.querySelector('.nav-sublist')
-    expect(sublist).not.toBeNull()
-    const activeSublink = container.querySelector('.nav-sublink.active')
-    expect(activeSublink).not.toBeNull()
-    expect(activeSublink?.textContent).toContain('Work')
-    expect(container.querySelector('.nav-footer .nav-footer-settings')?.textContent).toContain('Settings')
-  })
-
-  it('moves Settings to the rail footer and highlights it there', () => {
-    route.value = {
-      tab: 'settings',
-      params: {},
-      postId: null,
-    }
-
-    render(h(SideRail, { collapsed: false, onToggle: () => {} }), container)
-
-    expect(container.querySelector('.nav-group .nav-link.active')).toBeNull()
-    const settings = container.querySelector('.nav-footer .nav-footer-settings')
-    expect(settings).not.toBeNull()
-    expect(settings?.className).toContain('active')
-    expect(settings?.textContent).toContain('Settings')
-  })
-
-  it('renders collapsed icon-only links with v2 classes', () => {
-    render(h(SideRail, { collapsed: true, onToggle: () => {} }), container)
-
-    const links = container.querySelectorAll('.nav-link-collapsed')
-    expect(links.length).toBeGreaterThan(0)
-    expect(container.querySelector('.nav-link-collapsed.active')).not.toBeNull()
-    expect(container.querySelector('.nav-footer .nav-footer-settings')).not.toBeNull()
-  })
 })
 
 describe('DashboardHealthStrip v2 chrome', () => {

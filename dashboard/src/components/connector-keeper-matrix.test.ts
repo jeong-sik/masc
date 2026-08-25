@@ -11,7 +11,7 @@ import {
   type MatrixRow,
 } from './connector-keeper-matrix'
 import type { GateConnectorInfo } from '../api/gate'
-import type { GateKeeperInfo } from '../api/schemas/gate-keepers'
+import type { GateKeeper, KeeperListing } from '../api/gate-keepers'
 
 const mkConnector = (id: string, overrides: Partial<GateConnectorInfo> = {}): GateConnectorInfo => ({
   connector_id: id,
@@ -24,19 +24,30 @@ const mkConnector = (id: string, overrides: Partial<GateConnectorInfo> = {}): Ga
   ...(overrides as object),
 }) as GateConnectorInfo
 
-const mkKeeper = (name: string): GateKeeperInfo =>
-  ({ name }) as GateKeeperInfo
+const mkKeeper = (name: string): GateKeeper => ({
+  name,
+  runtimeLabel: '',
+  status: 'idle',
+})
+
+// The server answered with everything it knows. Tests that care about
+// truncation pass their own listing.
+const whole = (keepers: readonly GateKeeper[]): KeeperListing => ({
+  total: keepers.length,
+  limit: 200,
+  truncated: false,
+})
 
 describe('deriveMatrix', () => {
   it('returns 4 columns in known order', () => {
-    const m = deriveMatrix([], [])
+    const m = deriveMatrix([], [], whole([]))
     expect(m.columns).toEqual(['discord', 'imessage', 'slack', 'telegram'])
   })
 
   it('cell is na when keeper exists but connector is offline', () => {
     const connectors = [mkConnector('discord', { available: false })]
     const keepers = [mkKeeper('alpha')]
-    const m = deriveMatrix(connectors, keepers)
+    const m = deriveMatrix(connectors, keepers, whole(keepers))
     const alphaRow = m.rows.find(r => r.keeperName === 'alpha')!
     const discordCell = alphaRow.cells.find(c => c.connectorId === 'discord')!
     expect(discordCell.state).toBe('na')
@@ -45,7 +56,7 @@ describe('deriveMatrix', () => {
   it('cell is unbound when connector is up but no binding exists', () => {
     const connectors = [mkConnector('discord', { available: true })]
     const keepers = [mkKeeper('alpha')]
-    const m = deriveMatrix(connectors, keepers)
+    const m = deriveMatrix(connectors, keepers, whole(keepers))
     const alphaRow = m.rows.find(r => r.keeperName === 'alpha')!
     const discordCell = alphaRow.cells.find(c => c.connectorId === 'discord')!
     expect(discordCell.state).toBe('unbound')
@@ -59,7 +70,7 @@ describe('deriveMatrix', () => {
         { channel_id: 'c2', keeper_name: 'alpha' },
       ] as never,
     })]
-    const m = deriveMatrix(connectors, [mkKeeper('alpha')])
+    const m = deriveMatrix(connectors, [mkKeeper('alpha')], whole([mkKeeper('alpha')]))
     const firstRow = m.rows[0]!
     const cell = firstRow.cells.find(c => c.connectorId === 'discord')!
     expect(cell.state).toBe('bound')
@@ -71,7 +82,7 @@ describe('deriveMatrix', () => {
       available: true,
       configured_bindings: [{ channel_id: 'c1', keeper_name: 'ghost' }] as never,
     })]
-    const m = deriveMatrix(connectors, [mkKeeper('alpha')])
+    const m = deriveMatrix(connectors, [mkKeeper('alpha')], whole([mkKeeper('alpha')]))
     expect(m.rows.some(r => r.keeperName === 'ghost' && !r.known)).toBe(true)
     const ghostRow = m.rows.find(r => r.keeperName === 'ghost')!
     const slackCell = ghostRow.cells.find(c => c.connectorId === 'slack')!
@@ -86,7 +97,7 @@ describe('deriveMatrix', () => {
       }),
       mkConnector('slack', { available: false }),
     ]
-    const m = deriveMatrix(connectors, [mkKeeper('alpha'), mkKeeper('beta')])
+    const m = deriveMatrix(connectors, [mkKeeper('alpha'), mkKeeper('beta')], whole([mkKeeper('alpha'), mkKeeper('beta')]))
     expect(m.totals.knownKeepers).toBe(2)
     expect(m.totals.liveConnectors).toBe(1)
     expect(m.totals.totalBindings).toBe(1)
@@ -105,7 +116,7 @@ describe('ConnectorKeeperMatrix', () => {
   })
 
   it('renders empty-state copy when no keepers exist', () => {
-    const matrix: MatrixData = deriveMatrix([], [])
+    const matrix: MatrixData = deriveMatrix([], [], whole([]))
     render(html`<${ConnectorKeeperMatrix} matrix=${matrix} />`, container)
     expect(container.textContent).toContain('No keepers yet')
   })
@@ -115,7 +126,7 @@ describe('ConnectorKeeperMatrix', () => {
       mkConnector('discord', { available: true, configured_bindings: [{ channel_id: 'c1', keeper_name: 'alpha' }] as never }),
     ]
     const keepers = [mkKeeper('alpha'), mkKeeper('beta')]
-    const matrix = deriveMatrix(connectors, keepers)
+    const matrix = deriveMatrix(connectors, keepers, whole(keepers))
     render(html`<${ConnectorKeeperMatrix} matrix=${matrix} />`, container)
     expect(container.querySelector('.v2-connector-keeper-matrix')).not.toBeNull()
     const cells = container.querySelectorAll('[data-matrix-cell]')
@@ -127,7 +138,7 @@ describe('ConnectorKeeperMatrix', () => {
   })
 
   it('renders a Coverage header in the trailing column', () => {
-    const matrix = deriveMatrix([mkConnector('discord', { available: true })], [mkKeeper('alpha')])
+    const matrix = deriveMatrix([mkConnector('discord', { available: true })], [mkKeeper('alpha')], whole([mkKeeper('alpha')]))
     render(html`<${ConnectorKeeperMatrix} matrix=${matrix} />`, container)
     expect(container.querySelector('[data-matrix-coverage-header]')).toBeTruthy()
   })
@@ -138,7 +149,7 @@ describe('ConnectorKeeperMatrix', () => {
       mkConnector('slack', { available: true }),
     ]
     const keepers = [mkKeeper('alpha'), mkKeeper('beta')]
-    const matrix = deriveMatrix(connectors, keepers)
+    const matrix = deriveMatrix(connectors, keepers, whole(keepers))
     render(html`<${ConnectorKeeperMatrix} matrix=${matrix} />`, container)
     const chips = container.querySelectorAll('[data-matrix-row-coverage]')
     // One chip per keeper row.
@@ -165,7 +176,7 @@ describe('ConnectorKeeperMatrix', () => {
       ] as never }),
     ]
     const keepers = [mkKeeper('alpha'), mkKeeper('beta')]
-    const matrix = deriveMatrix(connectors, keepers)
+    const matrix = deriveMatrix(connectors, keepers, whole(keepers))
     render(html`<${ConnectorKeeperMatrix} matrix=${matrix} />`, container)
     // Footer label ("Totals →") is visible.
     expect(container.querySelector('[data-matrix-column-totals-label]')).toBeTruthy()
@@ -192,7 +203,7 @@ describe('ConnectorKeeperMatrix', () => {
       ] as never }),
     ]
     const keepers = [mkKeeper('alpha')]
-    const matrix = deriveMatrix(connectors, keepers)
+    const matrix = deriveMatrix(connectors, keepers, whole(keepers))
     render(html`<${ConnectorKeeperMatrix} matrix=${matrix} />`, container)
     const cells = container.querySelectorAll('[data-matrix-column-total-bound]')
     const discordCell = cells[0] as HTMLElement
@@ -203,7 +214,7 @@ describe('ConnectorKeeperMatrix', () => {
   it('column totals footer dashes empty columns (no bound, no unbound, no unknown)', () => {
     // imessage + telegram have 0 bindings and are offline → na cells only.
     // The totals cell for those columns shows "—" not "0".
-    const matrix = deriveMatrix([mkConnector('discord', { available: true })], [mkKeeper('alpha')])
+    const matrix = deriveMatrix([mkConnector('discord', { available: true })], [mkKeeper('alpha')], whole([mkKeeper('alpha')]))
     render(html`<${ConnectorKeeperMatrix} matrix=${matrix} />`, container)
     const cells = container.querySelectorAll('[data-matrix-column-total-bound]')
     // imessage is col 1 — offline, no bindings → all na → dashed.
@@ -253,7 +264,7 @@ describe('summarizeMatrixColumn (pure)', () => {
       mkConnector('slack', { available: true }),
     ]
     const keepers = [mkKeeper('alpha'), mkKeeper('beta')]
-    const matrix = deriveMatrix(connectors, keepers)
+    const matrix = deriveMatrix(connectors, keepers, whole(keepers))
     // Discord column (idx 0): alpha=bound, beta=unbound, gamma=unknown
     const discordCounts = summarizeMatrixColumn(matrix, 0)
     expect(discordCounts.bound).toBe(1)
@@ -263,8 +274,51 @@ describe('summarizeMatrixColumn (pure)', () => {
   })
 
   it('handles an out-of-range column index (returns all-zero, no crash)', () => {
-    const matrix = deriveMatrix([mkConnector('discord', { available: true })], [mkKeeper('alpha')])
+    const matrix = deriveMatrix([mkConnector('discord', { available: true })], [mkKeeper('alpha')], whole([mkKeeper('alpha')]))
     // columnIdx 99 → no cell at that index in any row
     expect(summarizeMatrixColumn(matrix, 99)).toEqual({ bound: 0, unbound: 0, na: 0, unknown: 0 })
+  })
+})
+
+describe('ConnectorKeeperMatrix — truncated directory', () => {
+  let host: HTMLDivElement
+
+  beforeEach(() => {
+    host = document.createElement('div')
+    document.body.appendChild(host)
+  })
+
+  afterEach(() => {
+    render(null, host)
+    host.remove()
+  })
+
+  it('says so when the grid is drawn from a partial keeper list', () => {
+    // masc#29077: the grid used to render 50 of 129 keepers with no sign that
+    // 79 were missing, and the bindings pointing at those 79 showed up as
+    // "unknown" keepers instead.
+    const matrix = deriveMatrix(
+      [mkConnector('discord', { available: true })],
+      [mkKeeper('alpha')],
+      { total: 129, limit: 50, truncated: true },
+    )
+    render(html`<${ConnectorKeeperMatrix} matrix=${matrix} />`, host)
+
+    const notice = host.querySelector('[data-testid="keeper-matrix-truncated"]')
+    expect(notice).not.toBeNull()
+    expect(notice?.textContent).toContain('129')
+    expect(notice?.textContent).toContain('50')
+  })
+
+  it('stays quiet when the list is complete', () => {
+    const keepers = [mkKeeper('alpha')]
+    const matrix = deriveMatrix(
+      [mkConnector('discord', { available: true })],
+      keepers,
+      whole(keepers),
+    )
+    render(html`<${ConnectorKeeperMatrix} matrix=${matrix} />`, host)
+
+    expect(host.querySelector('[data-testid="keeper-matrix-truncated"]')).toBeNull()
   })
 })

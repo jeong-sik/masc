@@ -2,10 +2,10 @@ module StringMap = Set_util.StringMap
 
 type purpose = Keeper_registry_types.lifecycle_transaction_purpose =
   | Paused_work_disposition
+  | Keepalive_launch
 
 type snapshot = Keeper_registry_types.lifecycle_reservation_snapshot =
   { owner_id : string
-  ; expected_generation : int
   ; purpose : purpose
   }
 
@@ -47,13 +47,13 @@ let key_locks_mutex = Mutex.create ()
 
 let purpose_to_string = function
   | Paused_work_disposition -> "paused_work_disposition"
+  | Keepalive_launch -> "keepalive_launch"
 ;;
 
 let snapshot_to_string snapshot =
   Printf.sprintf
-    "owner=%s expected_generation=%d purpose=%s"
+    "owner=%s purpose=%s"
     snapshot.owner_id
-    snapshot.expected_generation
     (purpose_to_string snapshot.purpose)
 ;;
 
@@ -86,13 +86,12 @@ let with_key_lock ~base_path ~keeper_name f =
     f ())
 ;;
 
-let acquire ~base_path ~keeper_name ~expected_generation ~purpose =
+let acquire ~base_path ~keeper_name ~purpose =
   let base_path = Keeper_registry_types.canonical_base_path_exn base_path in
   let keeper_name = String.trim keeper_name in
   let key = canonical_key ~base_path ~keeper_name in
   let snapshot =
     { owner_id = Keeper_id.Uid.(generate () |> to_string)
-    ; expected_generation
     ; purpose
     }
   in
@@ -107,7 +106,6 @@ let acquire ~base_path ~keeper_name ~expected_generation ~purpose =
 
 let token_owns_current (token : token) current =
   String.equal token.snapshot.owner_id current.owner_id
-  && Int.equal token.snapshot.expected_generation current.expected_generation
   && token.snapshot.purpose = current.purpose
 ;;
 
@@ -124,7 +122,6 @@ let authorize ?token ~base_path ~keeper_name () =
 ;;
 
 let owner_id token = token.snapshot.owner_id
-let expected_generation token = token.snapshot.expected_generation
 
 let release token =
   with_key_lock ~base_path:token.base_path ~keeper_name:token.keeper_name (fun () ->

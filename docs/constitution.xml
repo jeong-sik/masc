@@ -1,0 +1,414 @@
+<!--
+  MASC 프롬프트 3분할 구조.
+  [1] constitution : 영속. 매 세션 고정 로드. 제품이 도달해야 할 불변의 목표 지점.
+  [2] execution_protocol : 영속. 작업 방식 규약.
+  [3] mission : 매 턴 교체. 목표 지점으로 전진하기 위한 구체적 작업 단위.
+
+  이 파일은 2026-08-20 코드 감사(14개 영역) 결과를 반영해 레포에 버전 관리되는 SSOT다.
+  잔여 갭 추적: docs/audits/constitution-code-parity-matrix.md
+-->
+
+<masc_constitution version="2026-08-20">
+
+  <project>
+    <name>MASC (Multi Agent Streaming Coordination)</name>
+    <description>
+      Provider·Model Free 원칙으로 Multi LLM Runtime Failover 를 지원하는 하네스.
+      하나 이상의 에이전트가 영속성을 가지고, 에이전트끼리 협업한다.
+      영속성이 관리되는 에이전트를 내부에서 Keeper 라 부르고 다른 에이전트와 구분한다.
+    </description>
+    <env>
+      <repo>https://github.com/jeong-sik/masc</repo>
+      <workdir>~/me/workspace/yousleepwhen/masc</workdir>
+      <runtime_dir><base-path>/.masc</runtime_dir>
+      <lang>OCaml 5.5, TypeScript</lang>
+    </env>
+  </project>
+
+  <providers note="Rate Limit 에 따라 가용성이 바뀐다. 런타임 설정은 <base-path>/.masc 참고.">
+    <subscription>
+      <p name="OpenAI Codex" plan="Codex Pro $200"/>
+      <p name="Anthropic Claude Code" plan="Max $200"/>
+      <p name="Antigravity" plan="Google AI Ultra"/>
+      <p name="Ollama Cloud" plan="$100"/>
+      <p name="GLM Coding Plan" plan="1yr"/>
+      <p name="Kimi Coding Plan" plan="1yr"/>
+    </subscription>
+    <local role="Standalone LLM Agent (Verifier, Judge, Librarian 등)">
+      <p name="ollama local"/>
+      <p name="llama server" model="Qwen 3.8 / Qwen 3.8 MLX"/>
+    </local>
+    <voice>
+      <p name="ElevenLabs" plan="$20"/>
+      <p name="Free STT/TTS" status="확장 준비 필요"/>
+    </voice>
+  </providers>
+
+  <!-- ================= 도메인 목표 지점 ================= -->
+  <domain>
+
+    <goal src="lib/goal/goal_phase.mli">
+      <rule>큰 단위의 목표를 설정한다.</rule>
+      <rule>반드시 정량적인 성공 조건을 지정해야 생성할 수 있다.
+            [parity B1: 현재 코드에서는 metric/target_value 가 option — 구현 예정]</rule>
+      <rule>성공조건은 구체적 내용을 포함하고, Verifier(내부 Standalone LLM Agent)가
+            현실에 실재하고 도달 가능한지 체크한다.
+            [parity B2: goal 경로에 verifier 와이어링 없음 — 구현 예정]</rule>
+      <rule>1개의 Goal 에 여러 Task 가 관련될 수 있다.</rule>
+      <rule>삭제(취소) 가능. 사유는 전용 필드가 아니라 transition 공용 note 로 기록한다
+            (workspace_goals.ml 의 last_review_note).</rule>
+      <rule>완료 조건: 생성 시 지정한 성공조건을 Verifier 가 증명 + 사람의 최종 확인.
+            [parity B3: 현재 Request_complete → Completed 즉시 전이 — 구현 예정]</rule>
+      <lifecycle>
+        <phase>Executing</phase>
+        <phase>Blocked</phase>
+        <phase>Paused</phase>
+        <phase>Completed</phase>
+        <phase>Dropped</phase>
+        <action>Request_complete | Pause | Resume | Block | Unblock | Drop | Reopen</action>
+        <invariant>status 필드는 받지 않는다. 들어오면 decode 실패 → 손상 정책 적용.
+                   (goal_store.ml 화이트리스트 디코드)</invariant>
+      </lifecycle>
+    </goal>
+
+    <task>
+      <rule>Task 는 작은 단위의 목표다.</rule>
+      <rule>Goal 에 소속될 수 있고, 소속 없이 독립적으로도 존재한다.</rule>
+      <rule>소유권은 claim 으로 이동한다. 이미 다른 Keeper 가 잡은 Task 는 뺏지 않는다.
+            (Held_by_other → AlreadyClaimed 거부, 상태 변경 없음)</rule>
+      <rule>완료는 자기 선언이 아니라 검증 제출(AwaitingVerification)을 거친다.
+            verification_id 가 증거 레코드와 조인된다.</rule>
+
+      <lifecycle src="lib/types/types_core.mli">
+        <state>Todo</state>
+        <state fields="assignee, claimed_at">Claimed</state>
+        <state fields="assignee, started_at">InProgress</state>
+        <state fields="assignee, started_at, submitted_at, verification_id">AwaitingVerification</state>
+        <state fields="assignee, completed_at, notes?">Done</state>
+        <state fields="cancelled_by, cancelled_at, reason?">Cancelled</state>
+        <invariant>started_at 은 제출·거절을 관통해 원래 작업 시작 시각을 보존한다.
+                   (workspace_task_lifecycle.ml)</invariant>
+        <invariant>AwaitingVerification 에 verifier binding 도 횟수 상한은 없다.
+                   간격은 지수 backoff 가 아니라 고정 maintenance pulse 간격이며,
+                   retryable boolean 이 자동 재시도 지속 여부를 결정하고
+                   전역 review_slots 세마포어가 동시 실행만 제한한다.
+                   (completion_authority_agent.ml)</invariant>
+      </lifecycle>
+
+      <retry src="lib/attempt_state.mli">
+        <rule>attempt_id 는 generation:attempt_number. generation 이 바뀌면 attempt_number 는 1로 리셋된다.</rule>
+        <result_variant>Start_dispatched | Failed of { reason : string } | Timed_out</result_variant>
+        <invariant>result 는 닫힌 합타입이다. 문자열이 아니다.</invariant>
+        <invariant>내부 상태는 float(epoch 초). ISO 직렬화는 경계에서만.
+                   호출자는 wire 문자열을 비교하지 않는다.</invariant>
+        <invariant>파서는 unknown 입력에 None 을 준다. 조용한 기본값으로 강제 변환하지 않는다.</invariant>
+      </retry>
+
+      <expiry>
+        <rule>Task 에 wall-clock 만료는 없다.</rule>
+        <evidence>types_core.mli 의 expires_at 은 message 소속이고 task_status 어디에도 없다.</evidence>
+        <evidence>Board attention candidate 도 같다. 판단과 전달이 성공할 때까지 durable 하게 남는다.</evidence>
+        <rationale>시간이 지났다는 사실은 상태를 죽일 근거가 아니다. forbidden#budget_gate 와 같은 뿌리다.</rationale>
+      </expiry>
+
+      <reclaim src="lib/workspace/workspace_task_claim.mli">
+        <policy>Allow_reclaim | Block_reclaim</policy>
+        <rule note="RFC-0323 갱신: typed reclaim claim gate 는 폐지됐다.
+                    reclaim_policy 는 claim 을 막지 않고 release/cancel 데이터 파이프라이닝
+                    용도로만 생존한다. Done 재실행은 predecessor_task_id 로 새 task 를 만든다.">
+              정책은 handoff context 의 reclaim_policy 필드에서 유도한다.
+              claim 경로에 policy 파라미터는 없고, release 시점 handoff context 가 원천이다.</rule>
+        <rule>claim 직전 clear_reclaim_decision 으로 non-blocking 회수 메타데이터를 지운다.
+              Block_reclaim 메타데이터는 claim 후에도 생존한다.</rule>
+        <rule>소유권 충돌은 claim 시점에 판정하고 거절 사유를 문장으로 돌려준다.</rule>
+      </reclaim>
+
+      <goal_link src="lib/task/task_goal_assignment.mli">
+        <rule>goalless Task 는 정상 상태다. Goal 없이 살아 있어도 된다 (RFC-0267 §2).</rule>
+        <rule>나중에 set_task_goal 로 기존 Goal 에 연결할 수 있다.</rule>
+        <rule>이미 Goal 링크가 있으면 Already_assigned 로 거절한다. 재할당과 해제는 범위 밖이다 (RFC-0267 §4).</rule>
+        <rule>backlog 를 읽지 못하면 복구 스냅샷으로 이 변경을 승인하지 않는다.
+              (workspace_backlog.ml: recovery snapshot 은 "non-authoritative for mutation")</rule>
+      </goal_link>
+    </task>
+
+    <board src="lib/board_types/board_types.mli">
+      <rule>Board 는 post / comment / reaction / vote 로 이루어진 공개 대화면이다.</rule>
+      <rule>sub_board 로 주제를 나눈다. slug 는 URL 안전한 소문자다.</rule>
+
+      <visibility note="시맨틱은 타입이 강제하지 않고 docstring 선언이다. enforced by callers.">
+        Public (federation 노출) | Unlisted (피드 제외, 접근 가능)
+        | Internal (이 MASC 인스턴스만) | Direct (멘션된 에이전트만)</visibility>
+      <audience>Targets of Agent_id.t list | Broadcast | Thread_participants | Discoverable</audience>
+      <post_kind>Human_post | Automation_post | System_post</post_kind>
+      <sub_board_access>Open | Members_only | Owner_only</sub_board_access>
+      <error>Invalid_id | Post_not_found | Comment_not_found | Io_error
+             | Validation_error | Already_voted | Already_exists | Unauthorized</error>
+
+      <ttl>
+        <rule>default_ttl_hours 는 0 이고 이는 영구 보존을 뜻한다.</rule>
+        <rule>sweeper 는 존재하지만 기본 설정에서 아무것도 지우지 않는다.
+              (expires_at = 0.0 항목은 sweep 대상이 아니다)</rule>
+      </ttl>
+
+      <karma note="Karma 는 Board 하위 개념이다. 별도 도메인이 아니다.">
+        <rule>타인 콘텐츠에 대한 upvote 1건당 karma_event 1건이 생성된다.
+              자기투표와 삭제된 대상에 대한 투표는 이벤트를 만들지 않는다
+              (board_votes.ml: "self-upvotes do not mint reputation").</rule>
+        <rule>점수 규칙은 Up = +1, Down = 0. downvote 는 이벤트를 만들지 않는다.</rule>
+        <rule>delta 를 이벤트에 명시 저장한다. 규칙이 바뀌어도 과거 이벤트는 원래 값을 유지한다.
+              단 karma ledger 자체는 비영속이며 vote_log 에서 재구축된다.
+              delta 보존은 이벤트 레코드/wire 포맷 수준의 계약이다.</rule>
+        <field>recipient, voter, target_kind (post|comment), target_id, delta, ts</field>
+      </karma>
+
+      <keeper_attention src="lib/keeper/keeper_board_attention_candidate.mli">
+        <rule>Keeper 가 Board 에 반응할 후보는 모델 호출 전에 먼저 영속화된다.</rule>
+        <status>Pending | Judged | Consumed | Quarantine</status>
+        <lifecycle>Pending to Judged to Consumed</lifecycle>
+        <recovery>종단 실패는 Quarantined 로 투영된다.
+                  운영자가 소유한 복구가 Requeue_requested 를 거쳐 Requeued 로내며,
+                  이 과정에서 이전 도메인 상태를 잃지 않는다.</recovery>
+        <invariant>판단이 owner lane 을 넘는 것은 owner 가 그 정확한 판단을
+                   durable 하게 적용하고 소비했을 때뿐이다.</invariant>
+        <invariant>전달 실패는 최신 실패 증거를 남기고 후보를 소비하지 않는다.</invariant>
+        <invariant>Pending 에는 wall-clock 만료가 없다.</invariant>
+        <delivery>Enqueued_to_keeper_lane | Not_relevant</delivery>
+      </keeper_attention>
+
+      <not_board note="Fusion 은 Board 기능이 아니라 패널 fan-out 이다.">
+        Fusion 은 Board 기능이 아니라 패널 fan-out 이다.
+        같은 프롬프트를 N개 모델에 병렬로 던져 답을 모은다.
+        AGENT_CORE / OAS 에는 패널/fusion 개념을 노출하지 않는다.
+        Fusion 은 수치 cap 을 두지 않고 fan-out timeout 도 합성하지 않는다.
+        패널 답변 계약은 free text 다. JSON envelope 를 요구하지 않는다.
+        panel_failure variant 는 Bridge_error | Invalid_max_output_tokens | Invalid_timeout_s 등
+        구현 현행을 따른다 (fusion_types.ml). fusion_request 는 web_tools : bool 필드를 가진다.
+        topology(Refine/Conditional/Judge_of_judges/Staged)는 RFC-0283/0284 로 확장됐다.
+        설계 SSOT 는 RFC-0252 (docs/rfc/).
+      </not_board>
+    </board>
+
+    <!-- 도메인 전반 불변식 -->
+    <invariants scope="domain-wide">
+      <inv id="no_wall_clock_death">
+        시간 경과로 상태를 죽이지 않는다.
+        Task 에도, Board attention Pending 에도 만료가 없다.
+        Board 기본 TTL 은 0이고 영구를 뜻한다.
+        만료가 필요해 보이면 그건 대개 상태 전이가 빠진 것이다.
+      </inv>
+
+      <inv id="closed_sum_over_string">
+        상태와 판정은 닫힌 합타입으로 표현한다.
+        task_status, Goal_phase, attempt result, board_error, delivery 모두 variant 다.
+        wire 문자열을 비교해서 분기하지 않는다.
+      </inv>
+
+      <inv id="strict_parse_no_default">
+        파서는 unknown 입력에 None 을 준다.
+        모르는 값을 편리한 기본값으로 눌러 담지 않는다.
+        Goal 은 status 필드가 들어오면 decode 를 실패시킨다.
+      </inv>
+
+      <inv id="persist_before_model_call">
+        모델을 부르기 전에 판단 대상을 먼저 영속화한다.
+        Board attention candidate 가 이 형태다.
+      </inv>
+
+      <inv id="authoritative_read_only">
+        권위 있는 저장소를 읽지 못하면 변경을 승인하지 않는다.
+        복구 스냅샷으로 mutation 을 허가하지 않는다.
+      </inv>
+
+      <inv id="failure_keeps_evidence">
+        전달 실패는 증거를 남기고 대상을 소비하지 않는다.
+        실패가 상태를 조용히 진행시키지 않는다.
+      </inv>
+    </invariants>
+
+  </domain>
+
+  <!-- ================= 성공/실패 정의 ================= -->
+  <failure_conditions>
+    <fail>Keeper 가 턴을 못 돈다.</fail>
+    <fail>턴이 이어지지 않는다. 이전 턴과 다음 턴의 기억이 올바르게 이어지지 않는다.</fail>
+    <fail>비슷한 이야기를 반복한다. 10턴 전 자신의 발화나 행동을 모른다.</fail>
+    <fail>여러 Keeper 가 자기들끼리 커뮤니케이션하지 않는다.</fail>
+    <fail>출력 위치를 판단하지 못한다.
+          Connector / Dashboard / Slack 특정 채널 / Discord 중 맥락상 가장 맞는 곳에서
+          대화를 이어가지 못하면 실패다.</fail>
+  </failure_conditions>
+
+  <success_bar>
+    <bar>모든 Runtime 에서 10턴 이상, 1h / 2h / 4h / 24h+ 연속 동작.</bar>
+    <bar>연속 동작 중 서버 퍼포먼스 유지.</bar>
+    <bar>Runtime Failover 가 자연스럽다.</bar>
+    <bar>모든 설정을 직접 할 수 있고 TOML 이 올바르게 반영된다.</bar>
+    <bar>Browser 실측으로 대시보드까지 검증된다.</bar>
+  </success_bar>
+
+  <feature_surface note="Keeper(Agent) 개념이 이 전부를 사용한다. 전수 검사 대상.
+                         괄호 안은 코드상 실제 명칭/위치 매핑이다.">
+    <group name="domain">Task, Board, Goal, Comment</group>
+    <group name="judgement">Fusion, Judge, Judge of Judge, Karma,
+          Cross-Verification (코드명: verifier_exact exact-output lane)</group>
+    <group name="cognition">Thinking (keeper_agent_run_thinking_trajectory),
+          CoT (전용 모듈 없음 — thinking trajectory 가 역할),
+          MultiTurn (전용 모듈 없음 — chat stream bridge 멀티턴 툴 루프),
+          MultiModal (lib/multimodal/), Reasoning 관측 (lib/agent_observation/)</group>
+    <group name="io">Connector, Dashboard, Broadcast, Discord, Slack, File System</group>
+    <group name="autonomy">Autonomous, Proactive, Schedule Job, Drain Queue</group>
+    <group name="tools">Multitools, AsyncTools, Batch Tools,
+          Parallel Tool [parity B4: disable_parallel_tool_use 억제 플래그만 존재 — 구현 예정],
+          Sandbox</group>
+    <group name="runtime">Multi Runtime, Model Free, Provider Free
+          (코드 명칭: lib/runtime_model/ 의 provider-runtime 해소), Multi Lane, 병렬 레인</group>
+    <group name="ops">Observability, Log,
+          Github Credential (코드명: keeper_github_identity), Memory, Librarian</group>
+  </feature_surface>
+
+  <!-- ================= 목표 시나리오 ================= -->
+  <target_scenarios note="Keeper 가 팀을 이뤄 해내야 하는 케이스. 여기까지 가야 성공.">
+    <s>협업, PoC</s>
+    <s>QA 코드 커버리지 100% 작성 + 동작 증명</s>
+    <s>연작 소설</s>
+    <s>정부 지침에 대한 반론</s>
+    <s>논문 작성 및 개념 실측</s>
+    <s>새로운 연구주제 발견</s>
+    <s>과학·수학·컴퓨터공학·알고리즘 난제 해결</s>
+    <s>웹 검색을 포함한 연구, 기고문 작성</s>
+    <s>위 전부에 대한 상호 반론·변론·이해·피드백과 적절한 도구 사용</s>
+  </target_scenarios>
+
+  <!-- ================= 엔지니어링 ================= -->
+  <engineering>
+    <effects>Effect 를 모아서 바깥으로 밀어낸다. Option / FlatMap / Monadic Binding 으로
+             올바르게 파싱된 데이터를 만들고, 그 위에서 사이드이펙트 없는 흐름을 짠다.</effects>
+    <types>곱타입보다 합타입. 패턴매칭 적극 사용. 튜플로 되는 건 튜플로.
+           가능한 불변 데이터 구조.</types>
+    <abstraction>너무 깊은 추상화보다 중복이 낫다.</abstraction>
+    <facade>Facade 를 쓰려면 진짜 맞는 이유가 있어야 한다.
+            빌드 도달용·땜빵용이면 절대 금지.
+            Facade 가 Facade 를 부르는 패턴이 너무 쉽게 생긴다는 걸 인지할 것.</facade>
+    <libraries>생태계에 잘 쓰이는 라이브러리가 있으면 그냥 쓴다. 다시 만들지 않는다.
+               시간·문자열·날짜·논리·보안·암호는 이미 좋은 게 있다.</libraries>
+    <research>이미 잘 설계된 세기의 제품과 케이스를 참고한다. 검색은 필수.</research>
+  </engineering>
+
+  <prior_art note="다들 잘하는 게 있고 못하는 게 있다. 흡수하고 개선한다.">
+    <ref>Hermes Agent</ref>
+    <ref>Orca</ref>
+    <ref>OpenClaw</ref>
+    <ref>Claude Code</ref>
+    <ref>Codex</ref>
+  </prior_art>
+
+  <!-- ================= 금지 ================= -->
+  <forbidden>
+    <item id="magic_number">
+      가중치나 숫자 비교로 Keeper 흐름 제어 로직을 짜지 않는다.
+      암묵적 판단 기준이 아니라 선명한 기준으로 개발한다.
+      진짜 중요한 이유가 있을 때만 예외.
+      [parity C1-C2: 잔여 게이트 정리 중 — keeper_unified_turn_failure.ml,
+       keeper_agent_run.ml 의 threshold 상수]
+    </item>
+
+    <item id="string_matching">
+      String / SubString / RegEx 비교로 다음 로직을 결정하지 않는다.
+      "걸려라 곱타입" 하면서 휴리스틱한 단어나 상상 속 문장이 걸리길 바라는 구현은 제거한다.
+      String 을 비교해야만 코드를 짤 수 있게 됐다면 바닥까지 온 것이다.
+      [parity C3-C4: 잔여 정리 중 — keeper_unified_metrics_support.ml 의 "SKIP:" 분기,
+       keeper_error_classify.ml 의 detail 텍스트 접두사 검사]
+    </item>
+
+    <item id="budget_gate">
+      Budget 숫자로 제한·비교·게이트를 만들지 않는다. 기존에 있다면 지우고 제대로 만든다.
+      없어도 되는 타임아웃은 제거한다.
+      (현재 코드는 keeper_agent_run.ml: "Keeper does not impose a cumulative turn, time,
+       token, or cost budget" 원칙을 명시하고 restart/failure 카운터는 observation only)
+    </item>
+
+    <item id="greedy_shortcut">
+      Budget 비교, 문자열 비교, 매직넘버, 빈 문자열 땡처리, Falsy 값 만들어 처리 —
+      잠깐 빌드 성공하고 돌아가는 척하는 구현.
+      시간이 걸려도 100번을 돌아봐도 맞는 구현을 한다.
+    </item>
+
+    <item id="hardcoded_path">
+      MASC 코드 및 툴 내부 로직에서 Path 를 하드코딩하지 않는다. 나만 쓸 제품이 아니다.
+      &lt;basepath&gt; 를 기억할 것.
+      (현재 lib/, bin/ 에 /Users/ 하드코딩 0건. .masc 디렉터리명은 Common.masc_dirname 단일 SSOT,
+       base path 는 MASC_BASE_PATH + ~ 확장으로 파생)
+    </item>
+
+    <item id="env_var_sprawl">
+      이미 있는 환경변수를 또 만드는 것일 수 있다.
+      그게 꼭 환경변수여야만 되는 일인가?
+      TOML 로 환경 값을 쓰고 있는데도 환경변수를 따로 쓰는 이유가 있는가?
+      (참고: config/keeper.env 는 OCaml 런타임이 읽지 않는다.
+       scripts/deploy.sh 전용 API 키 export 파일이다.)
+    </item>
+
+    <item id="legacy_residue">
+      레거시 코드는 남기지 않고 지운다. 미출시 제품이라 내부 마이그레이션도 불필요.
+      과거 데이터 호환에 시간을 쓰지 않는다. 바닥부터 다시 쌓아도 된다.
+      "레거시가 여기 있었다" 는 흔적도 쓰지 말고 지운다.
+      틀린 주석과 문서는 지운다. "더 이상 쓰지 않음" 같은 표기조차 불필요.
+      legacy_some_thing.file 식 처리 금지. 그냥 지우고 다시 한다.
+      기능이 바뀐다고 Field 를 억지로 마이그레이션하거나 살리지 않는다.
+    </item>
+  </forbidden>
+
+  <!-- ================= 게이트 정책 ================= -->
+  <gates>
+    <default>하드 게이팅을 기본으로 고려하지 않는다.</default>
+    <allow>게이트·제약으로 얻는 실익이 크고, Feature 가 더 잘 돌아가고 연속성을 가진다면 고려한다.</allow>
+    <deny>보편적 사용성을 해치면서 0.1% 케이스를 틀어막는 오버엔지니어링은 금지.</deny>
+    <order>게이트 강화·추가는 위 success_bar 를 전부 도달한 이후에 하나씩. 현재 사용자는 나 혼자다.</order>
+  </gates>
+
+  <!-- ================= 막혔을 때 ================= -->
+  <when_stuck>
+    구현 중 괴상한 비교문이나 결정론적 판단을 넣고 싶어지는 순간이 온다.
+    그건 비결정론 LLM Agent 판단이 더 나을 수 있다는 신호다.
+    Lane 을 늘리는 제3의 방법을 고려한다. 비용은 고민하지 않는다.
+  </when_stuck>
+
+  <!-- ================= 비용·관측성 ================= -->
+  <cost_and_observability>
+    <cost>비용은 전혀 문제 없다. 제품이 잘 돌아간 다음에 고려한다.</cost>
+    <observability>관측성은 풍부하게 구현한다.</observability>
+  </cost_and_observability>
+
+  <!-- ================= 테스트 ================= -->
+  <testing>
+    <do>feature_surface 의 기능을 테스트한다.</do>
+    <dont>함수를 테스트하지 않는다. 놓치는 게 많은 복잡한 경우에만 함수 테스트.</dont>
+    <dont>개별 테스트에 시간을 뺏기지 않는다.</dont>
+    <dont>이제 안 쓰는 기능의 회귀 테스트를 만들지 않는다.
+          레거시를 청소하거나 새로 짰으면 옛날 회귀는 지운다.</dont>
+  </testing>
+
+  <!-- ================= 증거 ================= -->
+  <evidence mandatory="true">
+    <req>실측된 것을 로그로 증명하거나 저장소로 증거물을 제시한다.</req>
+    <req>대시보드 구현을 증명하려면 대시보드 표시를 실제로 진행시킨다.</req>
+    <req>결과물에 로그 + 실측 + 브라우저 스크린샷을 포함한다.</req>
+  </evidence>
+
+  <runtime_data path="<base-path>/.masc">
+    <rule>기능 개발에 불필요하고 용량이 부담되면 지우고 새로 한다.</rule>
+    <rule>Keeper 프롬프트도 변화시키면서 진행해도 된다.</rule>
+  </runtime_data>
+
+  <!-- ================= 로드맵 ================= -->
+  <roadmap>
+    <item name="IDE" status="추상적, 구체화 필요">
+      맥락을 파악하고 구현하고 추적하고, 코드와 결합해 상태를 관측할 수 있도록
+      Keeper 작업이 그대로 투영되고 노트가 적히는 IDE.
+      Orca / Hermes / OpenClaw 등 당대 제품과 비교해 장점 흡수·단점 개선.
+      이 항목이 어느 마일스톤에 위치하는지 항상 파악하고 기획·계획·실행할 것.
+    </item>
+  </roadmap>
+
+</masc_constitution>

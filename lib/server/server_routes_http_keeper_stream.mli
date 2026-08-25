@@ -67,9 +67,10 @@ type user_input_block = Keeper_multimodal_input.user_input_block =
   | User_audio of user_media_block
 (** Semantic user-input blocks accepted from the dashboard.  This is a
     MASC request-boundary type, intentionally distinct from dashboard
-    rich-render [ChatBlock] values and from OAS provider blocks. *)
+    rich-render [ChatBlock] values and from AGENT_CORE provider blocks. *)
 
 type keeper_chat_stream_request = {
+  request_id : Keeper_owner.Chat_operation.Operation_id.t;
   name : string;
   message : string;
   user_blocks : user_input_block list;
@@ -111,30 +112,58 @@ val keeper_chat_stream_error_json : string -> Yojson.Safe.t
 (** [{ "error": { "message": "…" } }] envelope for
     parse / handler errors. *)
 
-(** {1 Queue request handlers} *)
-
-val handle_keeper_chat_request_result :
-  caller:string ->
+val handle_keeper_tool_approval :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Drives [GET /api/v1/keepers/chat/requests/<request_id>].
-    Reads the async keeper message request state directly from
-    {!Keeper_msg_async} without requiring an MCP session. *)
+(** Drives [POST /api/v1/keepers/tool-approval].
 
-val handle_keeper_chat_request_cancel :
-  caller:string ->
+    Reads [{"name", "tool_call_id", "decision"}] where decision is
+    ["approve"] or ["deny"], and releases the matching held tool call.
+
+    Returns [{settled: true}] when a wait was actually released, and
+    [{settled: false}] when none was: the call had already timed out, was
+    answered, or was never held. That is reported rather than treated as
+    success, so an operator is not told a call was approved when nothing was
+    listening for it. *)
+
+val handle_keeper_tool_approvals_list :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Drives [POST /api/v1/keepers/chat/requests/<request_id>/cancel].
-    Cancels a live async keeper message request when it is still
-    cancellable. *)
+(** Drives [GET /api/v1/keepers/tool-approvals].
+
+    Projects every held tool call from the shared approval registry:
+    [{pending: [{keeper, tool_call_id, tool, args, question, asked_at,
+    timeout_sec}]}], oldest first. Live registry state only — a wait exists
+    exactly while its turn is parked on it. This is what lets an operator
+    answer a call whose owning stream watcher is gone; without it such a
+    call can only time out (masc#30034). *)
+
+val handle_keeper_tool_approval_mode_get :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [GET /api/v1/keepers/tool-approval-mode]: the keepers moved off
+    the default stance, as [{overrides: [{keeper, mode}], default:"auto"}].
+    A keeper absent from the list is [auto]. *)
+
+val handle_keeper_tool_approval_mode_set :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [POST /api/v1/keepers/tool-approval-mode]. Reads
+    [{"name", "mode"}] where mode is ["auto"] or ["yolo"], validates the
+    keeper is registered, and sets the in-memory stance the approval gate
+    consults per call. The stance does not survive a restart — deliberately:
+    [yolo] runs every tool call unasked. *)
 
 val handle_keeper_turn_interrupt :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [POST /api/v1/keepers/turn/interrupt].
     Reads [{"name": "<keeper>"}], validates the keeper is registered, and
-    asks {!Keeper_registry.interrupt_current_turn} to cancel the in-flight
-    turn's switch. Returns [{cancelled, turn_id}] on success or
-    [{cancelled:false, reason:"no_in_flight_turn"}] when there is nothing
-    to interrupt. *)
+    asks {!Keeper_registry.interrupt_current_turn} to fail the in-flight
+    turn's switch. Returns [{signalled:true, turn_id}] when the switch was
+    failed, [{signalled:false, reason:"no_in_flight_turn"}] when there was
+    no turn, and [{signalled:false, reason:"cancel_failed", detail}] when
+    the attempt itself failed.
+
+    [signalled] is not a completed cancellation: the signal still has to
+    reach the running fiber, and a fiber parked in an uncancellable section
+    keeps running. The turn state, not this response, says whether the turn
+    ended. *)
 
 (** {1 SSE handler} *)
 
@@ -156,7 +185,7 @@ val handle_keeper_chat_stream :
     through the SSE stream rather than the HTTP envelope
     once the headers have flushed. *)
 
-(** {1 Turn execution (shared between HTTP handler and queue consumer)} *)
+(** {1 Owner operation turn execution} *)
 
 type queued_turn_failure_kind =
   | Turn_failed
@@ -172,17 +201,19 @@ type queued_turn_outcome =
       { kind : queued_turn_failure_kind
       ; detail : string
       }
-  | Deferred of { rejection : Keeper_turn_admission.rejection }
 
 type turn_submission =
-  | Direct_request
-  | Queued_receipt of
-      { receipt_ids : Keeper_chat_delivery_identity.Receipt_ids.t
-      ; claim : unit -> (unit, string) result
+  | Owner_operation of
+      { operation_id : Keeper_owner.Chat_operation.Operation_id.t
+      ; admission_token : Keeper_turn_dispatch_authority.token
       ; execution_sw : Eio.Switch.t
+      ; surface : Surface_ref.t
+      ; speaker : Keeper_chat_store.speaker
+      ; conversation_id : string option
+      ; external_message_id : string option
+      ; workspace_id : string option
+      ; extra_mentions : Keeper_identity.Keeper_id.t list
       }
-
-val queued_turn_failure_kind_to_string : queued_turn_failure_kind -> string
 
 val process_single_turn :
   user_row_origin:Keeper_chat_store.user_row_origin ->
@@ -198,50 +229,26 @@ val process_single_turn :
   run_id:string ->
   message_id:string ->
   agent_name:string ->
-  submitted_by:string ->
   events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
   queued_turn_outcome option
-(** Execute a single keeper turn, publishing events to the provided
-    event stream. Direct HTTP requests enter the durable {!Keeper_msg_async}
-    boundary and run under its server-owned request switch. Queue-consumer
-    turns are already durably owned by {!Keeper_chat_queue}: [Queued_receipt]
-    runs inline under its [execution_sw], parks on the Keeper turn slot, and
-    invokes [claim] for its exact [receipt_ids] only after admission. It does
-    not create a second durable async request. The typed [submission] prevents
-    direct requests from carrying queue claim authority and prevents queued
-    receipts from omitting it. [closed] is a mutable flag that suppresses
-    worker event pushes when set to [true] (used by the SSE adapter when the
-    HTTP stream is closed). [client_disconnects] carries the HTTP stream switch
-    and disconnect signal; it stops only the stream projection and does not
-    cancel an accepted direct request. [auth_token] is [None] for
-    queue-consumer turns where no HTTP request is available.
+(** Execute one already-claimed Owner operation and publish its live turn
+    events. The operation owns transcript provenance, admission, cancellation,
+    and terminal settlement; this function never creates another durable
+    request identity. [closed] and [client_disconnects] affect only a live SSE
+    projection, never the accepted operation. [user_row_origin] decides whether
+    the operation appends the user row or observes an upstream append.
 
-    [user_row_origin] is the durable provenance selected by the accepting
-    boundary. [Needs_append] makes this turn own the user row;
-    [Already_persisted] and [Already_persisted_upstream] prohibit a duplicate
-    append. Queue-consumer turns pass the exact provenance stored with their
-    receipt instead of deriving ownership from a connector label.
+    With no visible blocks, the operation records a typed terminal failure
+    rather than inventing assistant prose. *)
 
-    [Queued_receipt] (constructed only by [Server_bootstrap_loops]'s
-    queue-consumer [handle_turn] wiring) changes terminal handling for
-    [No_visible_reply], an empty [Visible_reply], and
-    [Continuation_checkpoint]. A media-only ordinary reply is delivered even
-    when its text is empty. A continuation persists a typed status block and
-    is delivered to the originating connector without inventing assistant
-    prose. A continuation always commits a delivered assistant row
-    ([content = ""] plus the typed status block) — including direct turns,
-    which previously could commit [No_assistant_reply] or [Tool_calls_only]
-    instead. The [claim]
-    callback atomically claims the exact observed queue receipt after turn
-    admission and before transcript or provider effects.
-
-    With no visible blocks, the interactive HTTP stream keeps recording the user line
-    only ([persist_user_message_only]), matching its existing "the keeper will
-    answer on the next turn" semantics; a queued turn instead persists a typed
-    failure row via [persist_failure_reply]. A queued message is claimed from
-    [Keeper_chat_queue] at [claim] — there is no later turn for it
-    to ride along with, so true silence after that claim is terminal, not
-    merely deferred. *)
+val operation_runner :
+  state:Mcp_server.server_state ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  Keeper_owner.operation_runner
+(** Production runner installed into every Keeper Owner. It leaves the FIFO
+    head Queued until the Keeper registry entry exists and is healthy, then
+    claims exactly once, streams events by operation id, and joins terminal
+    connector delivery before returning. *)
 
 (** {1 Testing helpers} *)
 
@@ -253,11 +260,16 @@ type canonical_reply_payload_error =
   | Invalid_payload_field_type of string
   | Unknown_turn_outcome
   | Invalid_turn_ref
+  | Invalid_external_effect_target of string
 
 type canonical_reply_payload =
   { payload_json : Yojson.Safe.t
   ; turn_outcome : Keeper_turn_outcome.t
   ; turn_ref : Ids.Turn_ref.t
+  ; external_effect_target : Keeper_surface_post.delivery_target option
+      (** [Some] iff [turn_outcome] is [External_effect_completed]: the
+          decoder rejects the outcome without a target and a target on any
+          other outcome. *)
   ; visible_reply : string
   ; poll_body : string
   }
@@ -265,16 +277,25 @@ type canonical_reply_payload =
 val canonical_reply_payload_error_to_string :
   canonical_reply_payload_error -> string
 
-type keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.state
-(** Per-stream OAS event bridge state. Abstract outside tests so callers cannot
+type keeper_stream_bridge_state = Keeper_chat_agent_core_stream_bridge.state
+(** Per-stream AGENT_CORE event bridge state. Abstract outside tests so callers cannot
     construct synthetic stream correlation state. *)
 
 type translated_keeper_stream_event =
-  Keeper_chat_oas_stream_bridge.translated_event = {
+  Keeper_chat_agent_core_stream_bridge.translated_event = {
   bridge_state : keeper_stream_bridge_state;
   chat_events : Keeper_chat_events.keeper_chat_event list;
 }
-(** Result of translating one typed OAS stream event into keeper chat events. *)
+(** Result of translating one typed AGENT_CORE stream event into keeper chat events. *)
+
+type operation_wire_stream = Wire_started | Wire_terminal_sent
+(** Wire-terminal accounting for one keeper chat operation: whether a live
+    AG-UI audience exists and whether a terminal event (RUN_FINISHED/
+    RUN_ERROR) made it out. The stream counts as open from sink registration
+    — not from the first projected event — so a turn that fails after claim
+    but before the projection runs still gets its synthesized terminal; the
+    record is dropped when the last sink unregisters. Consumed by the Owner
+    settle hook after the child switch unwinds (#28811). *)
 
 module For_testing : sig
   val parse_request : string -> (keeper_chat_stream_request, string) result
@@ -287,21 +308,6 @@ module For_testing : sig
   val direct_message_of_request :
     keeper_chat_stream_request -> Keeper_invocation_contract.direct_message
   val keeper_chat_stream_headers : string -> Httpun.Headers.t
-  val defer_dashboard_payload_if_busy :
-    base_path:string ->
-    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-    thread_id:string ->
-    keeper_chat_stream_request ->
-    [ `Not_busy | `Queued of int | `Queue_error of string ]
-  val defer_dashboard_payload_if_busy_evidence :
-    base_path:string ->
-    clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-    thread_id:string ->
-    keeper_chat_stream_request ->
-    [ `Not_busy
-    | `Queued of Yojson.Safe.t * string
-    | `Queue_error of string
-    ]
   val canonical_reply_payload_of_body :
     redact_text:(string -> string) ->
     string ->
@@ -315,16 +321,14 @@ module For_testing : sig
   val queued_delivery_outcome_of_turn_ref :
     Ids.Turn_ref.t option -> queued_turn_outcome
   val committed_delivery_outcome :
-    queued_turn:bool ->
     turn_ref:Ids.Turn_ref.t option ->
     (unit, string) result ->
-    (queued_turn_outcome option, string) result
+    (queued_turn_outcome, string) result
   val empty_reply_delivery_plan :
-    queued_turn:bool ->
     has_visible_blocks:bool ->
     has_tool_calls:bool ->
-    [ `Visible_blocks | `Tool_calls_only | `Failure | `User_only ]
-  val format_surface_context : Yojson.Safe.t -> string
+    [ `Visible_blocks | `Tool_calls_only | `Failure ]
+
   val surface_context_to_instructions : Yojson.Safe.t -> string option
   val keeper_tool_failure_log_details :
     tool_name:string ->
@@ -334,8 +338,20 @@ module For_testing : sig
     error_body:string ->
     failure_class:Tool_result.tool_failure_class ->
     Yojson.Safe.t
-  val worker_settlement_terminal_body :
-    staged_body:string option ->
-    Keeper_msg_async.worker_settlement ->
-    string option
+
+  val note_operation_wire_event : operation_id:string -> Ag_ui.event -> unit
+  val take_operation_wire_stream :
+    operation_id:string -> operation_wire_stream option
+  val synthesize_wire_terminal_on_settle :
+    keeper_name:string ->
+    operation_id:string ->
+    execution:Keeper_owner.operation_execution ->
+    unit
+  val on_operation_execution_settled :
+    keeper_name:string ->
+    claimed_operation_id:Keeper_owner.Chat_operation.Operation_id.t option ->
+    execution:Keeper_owner.operation_execution ->
+    unit
+  val register_operation_live_sink :
+    operation_id:string -> (Ag_ui.event -> unit) -> unit -> unit
 end

@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Board_dispatch - Runtime backend selection for MASC Board
 
     Board now runs on the JSONL store only. Backend is selected once at
@@ -76,6 +59,7 @@ type board_signal_kind =
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed of board_reaction_change
+  | Board_vote_cast of board_vote_change
 
 and board_reaction_change = {
   target_type : Board.reaction_target_type;
@@ -83,6 +67,17 @@ and board_reaction_change = {
   user_id : string;
   emoji : string;
   reacted : bool;
+}
+
+and board_vote_target =
+  | Vote_on_post of string
+  | Vote_on_comment of string
+
+and board_vote_change = {
+  target : board_vote_target;
+  target_author : string;
+  voter : string;
+  direction : Board.vote_direction;
 }
 
 type board_signal = {
@@ -216,7 +211,7 @@ let ensure_flusher_actor store =
             in
             if cas_won then
               try start_flusher_actor ~sw store
-              with exn ->
+              with exn ->  (* cancel-guard-ok: re-raises after rolling the flag back *)
                 (* Roll the flag back so a future caller can retry.  Only
                    roll back if the state hasn't been swapped out from
                    under us. *)
@@ -272,11 +267,6 @@ let emit_board_sse_event event =
   match Atomic.get board_sse_hook with
   | Some hook -> Safe_ops.protect ~default:() (fun () -> hook event)
   | None -> ()
-
-let is_initialized () =
-  match Atomic.get backend_state with
-  | Active _ -> true
-  | Uninitialized -> false
 
 let init_jsonl () =
   if match Atomic.get backend_state with Active _ -> true | Uninitialized -> false then
@@ -439,6 +429,10 @@ let get_post ~post_id =
   match backend () with
   | Jsonl store -> Board.get_post store ~post_id
 
+let find_post_by_run_id ~run_id =
+  match backend () with
+  | Jsonl store -> Board.find_post_by_run_id store ~run_id
+
 let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_author_filter
     ?post_kind_filter
     ?(sort_by = Hot) ?(exclude_system = false) ?(exclude_automation = false)
@@ -580,10 +574,43 @@ let current_vote_for_post ~voter ~post_id =
   match backend () with
   | Jsonl store -> Board.current_vote_for_post store ~voter ~post_id
 
+(* A vote is thread activity the voted-on author can act on, so it travels
+   the same hook as comments and reactions. The signal's [author] is the
+   voter, the actor; [target_author] names whose writing was voted on, so the
+   keeper router can wake exactly that lane without a second store read. *)
+let emit_vote_board_signal ~target ~target_author ~voter ~direction
+    (post : Board.post) =
+  emit_board_signal
+    { signal =
+        { kind = Board_vote_cast { target; target_author; voter; direction }
+        ; post_id = Board.Post_id.to_string post.id
+        ; author = voter
+        ; title = post.title
+        ; content = post.content
+        ; hearth = post.hearth
+        ; updated_at = Some post.updated_at
+        }
+    ; audience = Board.audience_for_vote
+    }
+
 let vote ~voter ~post_id ~direction =
   let result =
     match backend () with
-    | Jsonl store -> Board.vote store ~voter ~post_id ~direction
+    | Jsonl store ->
+        (match Board.vote store ~voter ~post_id ~direction with
+         | Ok _score as ok ->
+             (match Board.get_post store ~post_id with
+              | Ok post ->
+                  emit_vote_board_signal
+                    ~target:(Vote_on_post (Board.Post_id.to_string post.id))
+                    ~target_author:(Board.Agent_id.to_string post.author)
+                    ~voter ~direction post
+              | Error e ->
+                  Log.BoardLog.warn
+                    "board vote signal skipped: get_post failed for %s: %s"
+                    post_id (Board_types.show_board_error e));
+             ok
+         | Error _ as err -> err)
   in
   (match result with
    | Ok _score ->
@@ -607,7 +634,29 @@ let current_vote_for_comment ~voter ~comment_id =
 let vote_comment ~voter ~comment_id ~direction =
   let result =
     match backend () with
-    | Jsonl store -> Board.vote_comment store ~voter ~comment_id ~direction
+    | Jsonl store ->
+        (match Board.vote_comment store ~voter ~comment_id ~direction with
+         | Ok _score as ok ->
+             (match Board.get_comment store ~comment_id with
+              | Error e ->
+                  Log.BoardLog.warn
+                    "board comment vote signal skipped: get_comment failed for %s: %s"
+                    comment_id (Board_types.show_board_error e)
+              | Ok comment ->
+                  let post_id = Board.Post_id.to_string comment.post_id in
+                  (match Board.get_post store ~post_id with
+                   | Ok post ->
+                       emit_vote_board_signal
+                         ~target:
+                           (Vote_on_comment (Board.Comment_id.to_string comment.id))
+                         ~target_author:(Board.Agent_id.to_string comment.author)
+                         ~voter ~direction post
+                   | Error e ->
+                       Log.BoardLog.warn
+                         "board comment vote signal skipped: get_post failed for %s: %s"
+                         post_id (Board_types.show_board_error e)));
+             ok
+         | Error _ as err -> err)
   in
   (match result with
    | Ok _score ->
@@ -713,9 +762,9 @@ let list_comments ?(limit = 1000) () =
   match backend () with
   | Jsonl store -> Board.list_comments store ~limit ()
 
-let list_hearths () =
+let list_hearths ?(exclude_system = false) ?(exclude_automation = false) () =
   match backend () with
-  | Jsonl store -> Board.list_hearths store
+  | Jsonl store -> Board.list_hearths store ~exclude_system ~exclude_automation ()
 
 let set_thread_id ~post_id ~thread_id =
   match backend () with

@@ -1,10 +1,10 @@
 (* RFC-0351 S1: deterministic offline checkpoint purge. The rules were
-   measured live on the analyst checkpoint (1,315 -> 579 messages, -28.0%
+   measured live on one Keeper's checkpoint (1,315 -> 579 messages, -28.0%
    bytes); these tests pin the rule contract so the checked-in tool cannot
    drift from what was validated. *)
 
 module Purge = Masc.Keeper_checkpoint_purge
-module Types = Agent_sdk.Types
+module Types = Agent_core.Types
 
 let text_message role text : Types.message =
   { role; content = [ Types.Text text ]; name = None; tool_call_id = None; metadata = [] }
@@ -27,6 +27,22 @@ let tool_result ?(content = "raw tool output") id : Types.content_block =
 let cycle id =
   [ block_message Types.Assistant [ tool_use id ]
   ; { (block_message Types.Tool [ tool_result id ]) with tool_call_id = Some id }
+  ]
+
+let tool_error_result ?(content = "raw tool error") id : Types.content_block =
+  Types.ToolResult
+    { tool_use_id = id
+    ; content
+    ; outcome =
+        Types.Tool_failed
+          { failure_kind = Types.Recoverable_tool_error; error_class = None }
+    ; json = Some (`Assoc [ "error", `String "boom" ])
+    ; content_blocks = None
+    }
+
+let error_cycle id =
+  [ block_message Types.Assistant [ tool_use id ]
+  ; { (block_message Types.Tool [ tool_error_result id ]) with tool_call_id = Some id }
   ]
 
 let unsigned_thinking text : Types.content_block =
@@ -111,17 +127,73 @@ let test_reasoning_strip_scope () =
     [ "answer"; "<thinking>|signed" ]
     (message_texts purged)
 
-let test_reasoning_inside_tool_cycle_is_kept () =
+(* Contract change: R2 used to skip any message carrying a ToolUse, so the
+   assistant message that opens a tool cycle kept its unsigned reasoning. On an
+   agentic keeper that is almost every assistant message — measured on the
+   that checkpoint, 418 of 422 surviving unsigned Thinking blocks (490,370 B,
+   41.0% of the file) were held by this rule. Unsigned reasoning carries no
+   signature to replay, so the exemption bought nothing. *)
+let test_unsigned_reasoning_inside_tool_cycle_is_stripped () =
   let messages =
     [ block_message Types.Assistant [ unsigned_thinking "pre-tool"; tool_use "a" ]
     ; { (block_message Types.Tool [ tool_result "a" ]) with tool_call_id = Some "a" }
     ]
   in
-  let _purged, report = run messages in
+  let purged, report = run messages in
   Alcotest.(check int)
-    "a tool-use message keeps its reasoning"
+    "unsigned reasoning is stripped even beside a tool_use"
+    1
+    report.reasoning_blocks_stripped;
+  Alcotest.(check int) "no cycle message dropped" 2 (List.length purged);
+  (match List.hd purged with
+   | { Types.content = [ Types.ToolUse { id; _ } ]; _ } ->
+     Alcotest.(check string) "the tool_use itself survives" "a" id
+   | other ->
+     Alcotest.failf
+       "expected a lone surviving ToolUse, got %s"
+       (Types.show_message other))
+
+(* The safety line the old guard was reaching for, pinned where it belongs:
+   per block, by signature — not per message, by "has a tool_use". *)
+let test_signed_reasoning_inside_tool_cycle_is_kept () =
+  let messages =
+    [ block_message Types.Assistant [ signed_thinking "pre-tool"; tool_use "a" ]
+    ; { (block_message Types.Tool [ tool_result "a" ]) with tool_call_id = Some "a" }
+    ]
+  in
+  let purged, report = run messages in
+  Alcotest.(check int)
+    "signed reasoning beside a tool_use is untouched"
     0
-    report.reasoning_blocks_stripped
+    report.reasoning_blocks_stripped;
+  Alcotest.(check int) "no cycle message dropped" 2 (List.length purged);
+  match List.hd purged with
+  | { Types.content = [ Types.Thinking { signature = Some _; _ }; Types.ToolUse _ ]; _ } ->
+    ()
+  | other ->
+    Alcotest.failf
+      "signed thinking must replay byte-exact, got %s"
+      (Types.show_message other)
+
+(* An assistant progress frame can sit inside an already-open tool cycle
+   without carrying either anchor. Once its unsigned reasoning is stripped,
+   dropping that empty interstitial frame leaves the ToolUse/ToolResult pair
+   intact. *)
+let test_thinking_only_interstitial_cycle_message_is_dropped () =
+  let messages =
+    [ block_message Types.Assistant [ tool_use "a" ]
+    ; block_message Types.Assistant [ unsigned_thinking "only-thinking" ]
+    ; { (block_message Types.Tool [ tool_result "a" ]) with tool_call_id = Some "a" }
+    ; text_message Types.User "after"
+    ]
+  in
+  let purged, report = run messages in
+  Alcotest.(check int) "unsigned reasoning stripped" 1 report.reasoning_blocks_stripped;
+  Alcotest.(check int) "empty interstitial dropped" 1 report.reasoning_messages_dropped;
+  Alcotest.(check int) "pairing intact" 3 (List.length purged);
+  match Masc.Keeper_compaction_unit.validate purged with
+  | Ok () -> ()
+  | Error _ -> Alcotest.fail "dropping the interstitial broke tool pairing"
 
 let test_tool_result_clear_preserves_pairing () =
   let messages = cycle "a" @ [ text_message Types.User "after" ] in
@@ -143,6 +215,29 @@ let test_tool_result_clear_preserves_pairing () =
   match Masc.Keeper_compaction_unit.validate purged with
   | Ok () -> ()
   | Error _ -> Alcotest.fail "cleared cycle no longer validates"
+
+let test_error_tool_result_is_never_cleared () =
+  (* R3 clears successful payloads only: an error result is feedback and
+     lesson evidence, so its payload, json, and outcome all survive. *)
+  let messages = error_cycle "a" @ cycle "b" in
+  let purged, report = run messages in
+  Alcotest.(check int)
+    "only the successful result is cleared"
+    1
+    report.tool_results_cleared;
+  (match List.nth purged 1 with
+   | { Types.content = [ Types.ToolResult { content; json; outcome; _ } ]; _ } ->
+     Alcotest.(check string) "error payload survives" "raw tool error" content;
+     Alcotest.(check bool) "error json untouched" true (Option.is_some json);
+     (match outcome with
+      | Types.Tool_failed _ -> ()
+      | _ -> Alcotest.fail "error outcome must survive the purge")
+   | _ -> Alcotest.fail "error cycle lost its ToolResult block");
+  let twice, _ = run purged in
+  Alcotest.(check (list string))
+    "preserved errors make the second purge the identity too"
+    (message_texts purged)
+    (message_texts twice)
 
 let test_protected_tail_is_byte_exact () =
   let wake = text_message Types.User "(autonomous wake)" in
@@ -171,7 +266,7 @@ let test_cycle_overlapping_protected_tail_is_untouched () =
 let test_strip_revealed_duplicates_collapse_in_one_pass () =
   (* Three assistant replies that differ only in their reasoning become
      byte-identical once R2 strips them; R1 must see the stripped form in the
-     same pass (measured on the sangsu checkpoint: the reverse ordering left
+     same pass (measured on that checkpoint: the reverse ordering left
      229 duplicates for a second run to find). *)
   let reply thinking =
     block_message Types.Assistant [ unsigned_thinking thinking; Types.Text "same answer" ]
@@ -245,7 +340,7 @@ let test_config_bounds_are_enforced () =
 
 let test_checkpoint_fields_pass_through () =
   let checkpoint =
-    Agent_sdk.Checkpoint.
+    Agent_core.Checkpoint.
       { version = checkpoint_version
       ; session_id = "trace-purge-fixture"
       ; agent_name = "purge-fixture"
@@ -272,7 +367,7 @@ let test_checkpoint_fields_pass_through () =
       ; thinking_budget = None
       ; reasoning_effort = None
       ; cache_system_prompt = false
-      ; context = Agent_sdk.Context.create_sync ()
+      ; context = Agent_core.Context.create_sync ()
       ; mcp_sessions = []
       ; working_context = None
       }
@@ -284,11 +379,11 @@ let test_checkpoint_fields_pass_through () =
     Alcotest.(check string)
       "session identity unchanged"
       checkpoint.session_id
-      purged.Agent_sdk.Checkpoint.session_id;
+      purged.Agent_core.Checkpoint.session_id;
     Alcotest.(check int)
       "turn watermark unchanged"
       checkpoint.turn_count
-      purged.Agent_sdk.Checkpoint.turn_count
+      purged.Agent_core.Checkpoint.turn_count
 
 let () =
   Alcotest.run
@@ -308,13 +403,25 @@ let () =
             test_duplicate_tool_cycles_are_never_collapsed
         ; Alcotest.test_case "reasoning strip scope" `Quick test_reasoning_strip_scope
         ; Alcotest.test_case
-            "reasoning inside a tool cycle is kept"
+            "unsigned reasoning inside a tool cycle is stripped"
             `Quick
-            test_reasoning_inside_tool_cycle_is_kept
+            test_unsigned_reasoning_inside_tool_cycle_is_stripped
+        ; Alcotest.test_case
+            "signed reasoning inside a tool cycle is kept"
+            `Quick
+            test_signed_reasoning_inside_tool_cycle_is_kept
+        ; Alcotest.test_case
+            "a thinking-only interstitial cycle message is dropped"
+            `Quick
+            test_thinking_only_interstitial_cycle_message_is_dropped
         ; Alcotest.test_case
             "tool result clear preserves pairing"
             `Quick
             test_tool_result_clear_preserves_pairing
+        ; Alcotest.test_case
+            "error tool result is never cleared"
+            `Quick
+            test_error_tool_result_is_never_cleared
         ; Alcotest.test_case
             "strip-revealed duplicates collapse in one pass"
             `Quick

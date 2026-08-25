@@ -41,7 +41,7 @@ type t =
           from the [State.OOMKilled = true] probe field; the dispatch
           error string is not load-bearing here. *)
   | Exec_timeout of { container_id : string; budget_sec : float }
-      (** [docker exec] (or per-OAS-call ceiling) exceeded its budget.
+      (** [docker exec] (or per-AGENT_CORE-call ceiling) exceeded its budget.
           Distinct from [Daemon_unreachable] — the daemon answered
           promptly, the workload itself ran past the budget. *)
   | Probe_format_drift of { command : string; raw : string }

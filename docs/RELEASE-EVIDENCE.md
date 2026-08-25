@@ -1,10 +1,5 @@
 ---
 status: runbook
-last_verified: 2026-06-29
-code_refs:
-  - lib/mcp_server.ml
-  - lib/keeper/
-  - lib/keeper/keeper_runtime.ml
 ---
 
 # Release Evidence
@@ -21,8 +16,8 @@ code_refs:
 - local boot + `/health`: isolated base path에서 서버 부팅 후 health payload 저장
 - MCP handshake: `initialize` + `tools/list` raw capture 저장
 - repo workspace collaboration read path: `masc_status` raw capture 저장
-- dashboard read paths: `/api/v1/dashboard/briefing`, `/api/v1/dashboard/namespace-truth` raw capture 저장
-- quantitative readiness: `docs/PRODUCTION-READINESS-GATES.md`의 release artifact, keeper turn evidence, performance SLO, OAS pin/boundary gate 결과를 함께 첨부
+- dashboard read paths: `/api/v1/dashboard/briefing`, `/api/v1/dashboard/project-snapshot` raw capture 저장
+- quantitative readiness: `docs/PRODUCTION-READINESS-GATES.md`의 release artifact, keeper turn evidence, performance SLO, agent core pin/boundary gate 결과를 함께 첨부
 - raw evidence: headers/body/json 정규화본 + `server.log`
 
 이 bundle이 없으면 최신 release/main에 대해 release-ready 또는 production-ready claim을 하지 않는다.
@@ -59,7 +54,7 @@ make release-evidence
 - 실제 binary가 부팅되고 `/health`를 제공하는지
 - MCP public surface가 최소 handshake를 만족하는지
 - dashboard read model이 최소 조회 경로에서 깨지지 않는지
-- `docs/PRODUCTION-READINESS-GATES.md` 결과가 첨부된 경우, keeper turn evidence chain과 OAS pin/boundary가 정량 기준을 만족하는지
+- `docs/PRODUCTION-READINESS-GATES.md` 결과가 첨부된 경우, keeper turn evidence chain과 agent core pin/boundary가 정량 기준을 만족하는지
 
 ## What This Does Not Prove
 

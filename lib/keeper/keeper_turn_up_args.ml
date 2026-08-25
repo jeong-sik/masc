@@ -15,25 +15,19 @@ type parsed_args = {
   allowed_paths_opt : string list option;
   autoboot_enabled_opt : bool option;
   mention_targets_opt : string list option;
-  active_goal_ids_opt : string list option;
   max_context_override_opt : int option;
   max_context_override_present : bool;
+  autonomous_wake_prompt_opt : string option;
+  autonomous_wake_prompt_present : bool;
   proactive_enabled_opt : bool option;
   sandbox_profile_opt : string option;
   network_mode_opt : string option;
-  persona_name_opt : string option;
   instructions_arg : string option;
   profile_defaults : keeper_profile_defaults;
   instructions_opt : string option;
+  autonomous_instructions_arg : string option;
+  autonomous_instructions_opt : string option;
 }
-
-let json_non_null_member_present key (json : Yojson.Safe.t) =
-  match json with
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some `Null | None -> false
-      | Some _ -> true)
-  | _ -> false
 
 let parse_present_string_list_opt args key =
   match Json_util.assoc_member_opt key args with
@@ -95,7 +89,27 @@ let parse_max_context_override args =
            "max_context_override must be an integer or null (received %s)"
            (Json_util.kind_name other))
 
-let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.t) :
+(* Same shared contract as the fleet env var and the keeper TOML parser
+   (Env_config_keeper.KeeperAutonomous.validate_wake_prompt), so no value can
+   pass one authoring surface and be rejected by another. Null is the only
+   explicit clear: strings have no zero sentinel, and folding "" into a clear
+   would make a typo read as "the setting did not take". *)
+let parse_autonomous_wake_prompt args =
+  match Json_util.assoc_member_opt "autonomous_wake_prompt" args with
+  | None -> Ok (false, None)
+  | Some `Null -> Ok (true, None)
+  | Some (`String raw) ->
+      (match Env_config_keeper.KeeperAutonomous.validate_wake_prompt raw with
+       | Ok value -> Ok (true, Some value)
+       | Error reason ->
+           Error (Printf.sprintf "autonomous_wake_prompt: %s" reason))
+  | Some other ->
+      Error
+        (Printf.sprintf
+           "autonomous_wake_prompt must be a string or null (received %s)"
+           (Json_util.kind_name other))
+
+let parse (ctx : _ context) (args : Yojson.Safe.t) :
     (parsed_args, tool_result) result =
   let name = get_string args "name" "" in
   if not (validate_name name) then
@@ -112,51 +126,27 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
                 "invalid keeper name: %S is a runtime agent identity; use the canonical keeper name %S"
                 name canonical_name))
     | None ->
-    match Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_up" args with
-    | Error e -> Error (tool_result_error e)
-    | Ok () ->
-    match
-      reject_removed_keeper_input_keys ~allow_sandbox_fields:true
-        ~tool_name:"masc_keeper_up" args
-    with
-    | Error e -> Error (tool_result_error e)
-    | Ok () ->
-    if
-      (not allow_sandbox_fields)
-      && Option.is_some (Json_util.assoc_member_opt "network_mode" args)
-    then
-      Error
-        (tool_result_error
-           "removed keeper sandbox args for masc_keeper_up: network_mode. Configure \
-            network posture in keeper TOML/profile defaults; the public keeper-up \
-            contract accepts only the optional sandbox_profile isolation boundary.")
-    else
     let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
-    let active_goal_ids_opt_res = parse_present_string_list_opt args "active_goal_ids" in
     let mention_targets_opt_res = parse_present_string_list_opt args "mention_targets" in
     let runtime_id_opt_res = parse_runtime_id_opt args in
     match
-      allowed_paths_opt_res, active_goal_ids_opt_res, mention_targets_opt_res,
+      allowed_paths_opt_res, mention_targets_opt_res,
       runtime_id_opt_res
     with
-    | Error e, _, _, _
-    | _, Error e, _, _
-    | _, _, Error e, _
-    | _, _, _, Error e -> Error (tool_result_error e)
-    | Ok allowed_paths_opt, Ok active_goal_ids_opt, Ok mention_targets_opt,
+    | Error e, _, _
+    | _, Error e, _
+    | _, _, Error e -> Error (tool_result_error e)
+    | Ok allowed_paths_opt, Ok mention_targets_opt,
       Ok runtime_id_opt ->
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
     let max_context_override_res = parse_max_context_override args in
+    let autonomous_wake_prompt_res = parse_autonomous_wake_prompt args in
     let proactive_enabled_opt = get_bool_opt args "proactive_enabled" in
     let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
     let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
-    let persona_name_opt = Safe_ops.json_string_opt "persona_name" args in
     let instructions_arg = get_string_opt args "instructions" in
-    let persona_name_error =
-      match persona_name_opt with
-      | Some persona_name when not (validate_name persona_name) ->
-        Some (Printf.sprintf "invalid persona_name: %S" persona_name)
-      | Some _ | None -> None
+    let autonomous_instructions_arg =
+      get_string_opt args "autonomous_instructions"
     in
     match
       load_keeper_profile_defaults_result_for_base_path
@@ -186,40 +176,42 @@ let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.
              ~keeper_name:name
              profile_defaults)
     in
-    (* The previous implementation read [<base>/memory/souls/<name>/SOUL.md]
-       on every keeper turn-up and wrapped the resulting (or "not found")
-       text into a "[SYSTEM: SOUL INFUSION]" block prepended to the
-       keeper's instructions.  No production keeper ships a SOUL.md
-       and no spec defines one — the directory does not exist on any
-       host — so the path emitted an INFO log every cycle and silently
-       polluted every keeper's instructions with a fallback string.
-       Removed; instructions now reflect only the operator-supplied
-       argument or the keeper profile default. *)
     let instructions_opt =
       match instructions_arg with
       | Some _ -> instructions_arg
       | None -> profile_defaults.instructions
     in
-    match persona_name_error, sandbox_profile_error, max_context_override_res with
-    | Some msg, _, _ | None, Some msg, _ -> Error (tool_result_error msg)
-    | None, None, Error msg -> Error (tool_result_error msg)
-    | None, None, Ok (max_context_override_present, max_context_override_opt) ->
+    let autonomous_instructions_opt =
+      match autonomous_instructions_arg with
+      | Some _ -> autonomous_instructions_arg
+      | None -> profile_defaults.autonomous_instructions
+    in
+    match
+      sandbox_profile_error, max_context_override_res, autonomous_wake_prompt_res
+    with
+    | Some msg, _, _ -> Error (tool_result_error msg)
+    | None, Error msg, _ -> Error (tool_result_error msg)
+    | None, _, Error msg -> Error (tool_result_error msg)
+    | None, Ok (max_context_override_present, max_context_override_opt),
+      Ok (autonomous_wake_prompt_present, autonomous_wake_prompt_opt) ->
     Ok {
       name;
       runtime_id_opt;
       allowed_paths_opt;
-      active_goal_ids_opt;
       autoboot_enabled_opt;
       mention_targets_opt;
       max_context_override_opt;
       max_context_override_present;
+      autonomous_wake_prompt_opt;
+      autonomous_wake_prompt_present;
       proactive_enabled_opt;
       sandbox_profile_opt;
       network_mode_opt;
-      persona_name_opt;
       instructions_arg;
       profile_defaults;
       instructions_opt;
+      autonomous_instructions_arg;
+      autonomous_instructions_opt;
     }
 
 (** Resolve mention targets with dedup and filtering. *)
@@ -245,17 +237,6 @@ let resolve_network_mode ~sandbox_profile ~fallback =
   fallback
   |> Option.value ~default:(default_network_mode_for_profile sandbox_profile)
 
-
-let private_workspace_root_rel ~sandbox_profile keeper_name =
-  Keeper_sandbox.host_root_rel_of_profile sandbox_profile keeper_name
-  |> Keeper_alerting_path.strip_trailing_slashes
-
-let private_workspace_root_abs ~(config : Workspace.config) ~sandbox_profile keeper_name =
-  Filename.concat
-    (Keeper_alerting_path.project_root_of_config config)
-    (private_workspace_root_rel ~sandbox_profile keeper_name)
-  |> Keeper_alerting_path.normalize_path_for_check
-  |> Keeper_alerting_path.strip_trailing_slashes
 
 let sandbox_allowed_path_has_forbidden_segments path =
   let has_glob =

@@ -1,0 +1,66 @@
+(include_subdirs unqualified)
+
+(library
+ (name agent_core)
+ (public_name masc.agent_core)
+ (modules_without_implementation agent_execution_projection_intf)
+ (private_modules
+  execution_id
+  execution_cause
+  execution_json
+  execution_provider_response_snapshot
+  execution_tool_schedule
+  execution_event
+  execution_runtime
+  execution_codec_executor
+  execution_event_store
+  execution_journal
+  execution_lane_writer
+  execution_agent_scope
+  execution_tool_settlement
+  execution_context
+  agent_input
+  agent_run_loop_support
+  agent_tool_batch_plan
+  agent_tool_pre_execution_gate
+  agent_tool_terminal_boundary
+  agent_tool_execution_types
+  agent_execution_projection
+  agent_execution_runner
+  pipeline_checkpoint
+  pipeline_execution_scope
+  pipeline_execution_resume
+  pipeline_terminal_tool
+  pipeline_terminal_resume
+  agent_execution_event_writer)
+ (libraries
+  llm_provider
+  (re_export agent_core_base)
+  (re_export agent_core_protocol)
+  eio
+  eio.unix
+  eio_main
+  cohttp
+  cohttp-eio
+  tls
+  tls-eio
+  ca-certs
+  mtime.clock.os
+  digestif
+  dune-build-info
+  cstruct
+  optint
+  yojson
+  ppx_deriving_yojson.runtime
+  uri
+  unix
+  re
+  str
+  mcp_protocol_bundle)
+ (flags
+  (:standard -open Agent_core_base -open Agent_core_protocol))
+ (inline_tests)
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_inline_test ppx_let))
+ (instrumentation
+  (backend bisect_ppx)))

@@ -108,6 +108,96 @@ let normalized_artifact_ref_of_json = function
   | _ -> Not_normalized_artifact_ref
 ;;
 
+let collect_normalized_artifact_refs ~reject_invalid json =
+  let add_reference references reference =
+    if
+      List.exists
+        (fun existing ->
+           String.equal existing.sha256 reference.sha256
+           && String.equal existing.mime reference.mime)
+        references
+    then references
+    else reference :: references
+  in
+  let rec collect references = function
+    | (`Assoc fields as json) ->
+      (match normalized_artifact_ref_of_json json with
+       | Decoded_normalized_artifact_ref reference ->
+         Ok (add_reference references reference)
+       | Invalid_normalized_artifact_ref { detail } when reject_invalid ->
+         Error detail
+       | Invalid_normalized_artifact_ref _ | Not_normalized_artifact_ref ->
+         List.fold_left
+           (fun result (_, value) ->
+              Result.bind result (fun references -> collect references value))
+           (Ok references)
+           fields)
+    | `List values ->
+      List.fold_left
+        (fun result value ->
+           Result.bind result (fun references -> collect references value))
+        (Ok references)
+        values
+    | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ ->
+      Ok references
+  in
+  Result.map List.rev (collect [] json)
+;;
+
+let normalized_artifact_refs_in_json json =
+  match collect_normalized_artifact_refs ~reject_invalid:false json with
+  | Ok references -> references
+  | Error _ -> []
+;;
+
+let normalized_artifact_refs_in_json_strict json =
+  collect_normalized_artifact_refs ~reject_invalid:true json
+;;
+
+let artifact_manifest_mime = "application/vnd.masc.tool-result-manifest+json"
+let artifact_manifest_schema = "masc.tool-result-artifact-manifest.v1"
+
+let artifact_manifest_to_json ~content ~structured_content =
+  `Assoc
+    [ "schema", `String artifact_manifest_schema
+    ; "content", `String content
+    ; "structured_content", structured_content
+    ]
+;;
+
+type artifact_manifest_decode =
+  | Not_artifact_manifest
+  | Invalid_artifact_manifest of { detail : string }
+  | Decoded_artifact_manifest of
+      { content : string
+      ; structured_content : Yojson.Safe.t
+      ; artifact_refs : artifact_ref list
+      }
+
+let artifact_manifest_of_json = function
+  | `Assoc
+      [ "schema", `String schema
+      ; "content", `String content
+      ; "structured_content", structured_content
+      ]
+    when String.equal schema artifact_manifest_schema ->
+    (match normalized_artifact_refs_in_json_strict structured_content with
+     | Ok artifact_refs ->
+       Decoded_artifact_manifest
+         { content; structured_content; artifact_refs }
+     | Error detail -> Invalid_artifact_manifest { detail })
+  | `Assoc fields when List.mem_assoc "schema" fields ->
+    (match List.assoc_opt "schema" fields with
+     | Some (`String schema) when not (String.equal schema artifact_manifest_schema) ->
+       Not_artifact_manifest
+     | _ ->
+       Invalid_artifact_manifest
+         { detail =
+             "expected exact fields schema, content, and structured_content"
+         })
+  | _ -> Not_artifact_manifest
+;;
+
 type t =
   | Inline of string
   | Stored of artifact_ref
@@ -122,11 +212,11 @@ let default_model_projection =
 let bounded_inline_model_projection =
   Inline_up_to { maximum_bytes = Common.max_tool_output_bytes }
 
-let marker_prefix = "[masc:blob "
+let marker_prefix = "[masc:blob sha256="
 
 let is_marker s = String.starts_with ~prefix:marker_prefix s
 
-let encode_for_oas = function
+let encode_for_agent_core = function
   | Inline s -> s
   | Stored { sha256; bytes; preview; mime } ->
     Printf.sprintf "[masc:blob sha256=%s bytes=%d mime=%s preview=%S]"
@@ -137,7 +227,7 @@ type decode_result =
   | Invalid_marker of { detail : string }
   | Decoded of artifact_ref
 
-let decode_from_oas s =
+let decode_from_agent_core s =
   if not (is_marker s) then Not_marker
   else
     match
@@ -146,6 +236,7 @@ let decode_from_oas s =
            (fun sha256 bytes mime preview -> Ok (sha256, bytes, mime, preview))
        with
        | Scanf.Scan_failure msg -> Error msg
+       | End_of_file -> Error "unexpected end of artifact marker"
        | Failure msg -> Error msg
        | Invalid_argument msg -> Error msg)
     with
@@ -154,57 +245,3 @@ let decode_from_oas s =
       match make_artifact_ref ~sha256 ~bytes ~preview ~mime with
       | Ok artifact_ref -> Decoded artifact_ref
       | Error err -> Invalid_marker { detail = make_error_to_string err })
-
-type embedded_reference_error =
-  { offset : int
-  ; detail : string
-  }
-
-let artifact_refs_in_text text =
-  let text_length = String.length text in
-  let prefix_length = String.length marker_prefix in
-  let rec find_prefix offset =
-    if offset + prefix_length > text_length
-    then None
-    else if String.sub text offset prefix_length = marker_prefix
-    then Some offset
-    else find_prefix (offset + 1)
-  in
-  let rec marker_end index in_quotes escaped =
-    if index >= text_length
-    then None
-    else
-      let character = String.unsafe_get text index in
-      if escaped
-      then marker_end (index + 1) in_quotes false
-      else if in_quotes && character = '\\'
-      then marker_end (index + 1) in_quotes true
-      else if character = '"'
-      then marker_end (index + 1) (not in_quotes) false
-      else if character = ']' && not in_quotes
-      then Some index
-      else marker_end (index + 1) in_quotes false
-  in
-  let rec collect offset references =
-    match find_prefix offset with
-    | None -> Ok (List.rev references)
-    | Some start ->
-      (match marker_end (start + prefix_length) false false with
-       | None ->
-         Error
-           { offset = start
-           ; detail = "artifact marker has no closing bracket"
-           }
-       | Some stop ->
-         let marker = String.sub text start (stop - start + 1) in
-         (match decode_from_oas marker with
-          | Decoded reference ->
-            collect (stop + 1) (reference :: references)
-          | Invalid_marker { detail } -> Error { offset = start; detail }
-          | Not_marker ->
-            Error
-              { offset = start
-              ; detail = "artifact marker prefix was not recognized"
-              }))
-  in
-  collect 0 []

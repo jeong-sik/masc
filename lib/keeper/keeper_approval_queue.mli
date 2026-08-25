@@ -4,7 +4,7 @@
     tool/product name. It records an exact request, accepts an explicit
     resolution, and wakes only the originating Keeper lane. *)
 
-include module type of Keeper_approval_queue_rules_types
+open Keeper_approval_queue_rules_types
 
 type storage_error =
   { path : string
@@ -59,7 +59,7 @@ type exact_attempt_transition =
   ; write_outcome : exact_write_outcome
   }
 (** Exact writes share the Keeper runtime durability outcome SSOT.
-    [Fsync_completed] is the only outcome that permits an OAS POST, slot
+    [Fsync_completed] is the only outcome that permits an AGENT_CORE POST, slot
     failover, or automatic Gate finalization. [Visible_sync_unconfirmed _]
     means the rename is visible and the process projection has converged, but
     parent-directory fsync was not confirmed; callers must not cross those
@@ -113,9 +113,24 @@ type approved_resolution_delivery =
   }
 
 type grant_consumption =
-  | Consumption_committed
+  | Consumption_committed of Keeper_approval.Audit.receipt
   | Consumption_already_committed
   | Consumption_not_matching
+
+type pending_submission_disposition =
+  | Pending_created of Keeper_approval.Audit.receipt
+  | Pending_deduplicated
+  | Folded_onto_unconsumed_grant
+      (** The same effect request is already approved and its one-shot grant
+          has not been consumed: the host owes the Keeper a replay of exactly
+          this call, so no second approval is opened. Rejected and
+          grant-consumed deliveries never fold — those retries are a new
+          approval cycle and a new effect respectively. *)
+
+type pending_submission =
+  { approval_id : string
+  ; disposition : pending_submission_disposition
+  }
 
 type replay_recording =
   | Replay_recorded
@@ -138,7 +153,6 @@ type install_error = Install_storage_failed of storage_error
 val storage_error_to_string : storage_error -> string
 val approval_queue_unavailable_title : string
 val approval_queue_unavailable_severity : string
-val approval_queue_unavailable_icon : string
 val approval_queue_ready_state_json : Yojson.Safe.t
 val approval_queue_unavailable_state_json : storage_error -> Yojson.Safe.t
 val summary_transition_error_to_string : summary_transition_error -> string
@@ -207,134 +221,12 @@ val record_consumed_resolution_replay :
   outcome:resolution_replay_outcome ->
   (replay_recording, grant_error) result
 
-(** {1 Exact Always Allowed rules} *)
-
-val list_rules :
-  base_path:string -> unit -> (approval_rule list, rule_store_error) result
-
-val list_rules_dashboard_json :
-  base_path:string -> unit -> (Yojson.Safe.t, rule_store_error) result
-
-(** Insert or fetch the rule for the exact
-    [(keeper_name, tool_name, canonical complete input)] identity.
-    [expires_at] is an optional absolute Unix expiry; the identity match
-    ignores it, so an existing rule is returned unchanged. *)
-val upsert_rule :
-  base_path:string ->
-  keeper_name:string ->
-  tool_name:string ->
-  input:Yojson.Safe.t ->
-  ?created_by:string ->
-  ?source_approval_id:string ->
-  ?expires_at:float ->
-  unit ->
-  (approval_rule * bool, rule_store_error) result
-
-val delete_rule :
-  base_path:string -> id:string -> unit -> (approval_rule, rule_store_error) result
-
-(** Find the exact remembered request and report whether it authorizes at
-    [now] (defaults to the wall clock; inject for deterministic evaluation).
-    An expired rule is reported as [Rule_match_expired], never applied, and
-    never deleted. *)
-val find_matching_rule :
-  base_path:string ->
-  keeper_name:string ->
-  tool_name:string ->
-  input:Yojson.Safe.t ->
-  ?now:float ->
-  unit ->
-  (rule_lookup, rule_store_error) result
-
-(** {1 Audit log} *)
-
-val audit_approval_event :
-  base_path:string ->
-  event_type:string ->
-  id:string ->
-  keeper_name:string ->
-  tool_name:string ->
-  ?turn_id:int ->
-  ?task_id:string ->
-  ?goal_id:string ->
-  ?goal_ids:string list ->
-  ?rule_match:rule_match ->
-  ?source_approval_id:string ->
-  ?actor:string ->
-  ?decision_source:decision_source ->
-  ?decision:decision ->
-  ?summary_status:summary_status ->
-  ?exact_attempt:exact_attempt_state ->
-  unit ->
-  unit
-
-val audit_rule_event :
-  base_path:string -> event_type:string -> approval_rule -> unit
-
 val generate_id : unit -> string
-val recent_resolved_history_limit : int
-val recent_resolved_max_limit : int
-val recent_resolved_default_window_minutes : int
-val recent_resolved_min_window_minutes : int
-val recent_resolved_max_window_minutes : int
-
-val read_recent_audit :
-  base_path:string -> ?keeper_name:string -> ?n:int -> unit -> Yojson.Safe.t list
-
-val audit_day_string_of_ts : float -> string
-(** Day key ["YYYY-MM-DD"] for the [YYYY-MM/DD.jsonl] audit layout. Exposed as
-    a pure function so the UTC invariant is testable: the write path
-    ([Jsonl_writer.dated_path]) picks the day file with [Unix.gmtime], so a
-    local-time key would read the wrong file for the hours where the two
-    calendars disagree. *)
-
-type resolved_history =
-  { resolved_rows : Yojson.Safe.t list
-  ; resolved_matched : int
-  ; resolved_limit : int
-  ; resolved_window_minutes : int
-  ; resolved_scan_exhausted : bool
-  }
-(** A page of resolved Gate decisions together with the bounds that produced
-    it. [resolved_rows] is newest first and holds at most [resolved_limit]
-    entries; [resolved_matched] counts every resolved decision the scan saw
-    inside the window, so [resolved_matched > resolved_limit] means the page is
-    a slice rather than the whole window. [resolved_scan_exhausted] reports the
-    second bound: the physical row cap stopped the scan before it reached the
-    window start, so even [resolved_matched] undercounts. Rendering only
-    [resolved_rows] reintroduces the silent truncation this type removes. *)
-
-val list_recent_resolved :
-  base_path:string ->
-  now_ts:float ->
-  ?limit:int ->
-  ?window_minutes:int ->
-  unit ->
-  resolved_history
-(** [list_recent_resolved ~base_path ~now_ts ()] returns resolved Gate decisions
-    from the last [window_minutes] (default
-    {!recent_resolved_default_window_minutes}, clamped to
-    [[recent_resolved_min_window_minutes, recent_resolved_max_window_minutes]]),
-    newest first, capped at [limit] (default
-    {!recent_resolved_history_limit}, clamped to
-    [[0, recent_resolved_max_limit]]).
-
-    [now_ts] is supplied by the caller rather than read here, matching
-    {!Dashboard_gate_metrics.tool_rejection_counts}: the observation boundary
-    captures the clock once for the whole projection, and this function stays
-    deterministic so a test can pin an exact window.
-
-    Rows without a [ts] are excluded: a wall-clock window cannot place an
-    undated decision, and dating it by guesswork would misreport history.
-
-    Storage failures are reported through the approval-queue failure metric and
-    yield an empty page rather than raising. *)
 
 module For_testing : sig
   type strict_snapshot_writer =
     string -> string -> (unit, Fs_compat.atomic_replace_failure) result
 
-  val reset_audit_store : unit -> unit
   val reset_runtime_state : unit -> unit
   val with_pending_store_lock : (unit -> 'a) -> 'a
   val get_pending_entry_unchecked : id:string -> pending_approval option
@@ -396,9 +288,14 @@ end
 (** {1 Nonblocking submission and explicit resolution} *)
 
 (** Durably enqueue an exact request without suspending the caller. Returns an
-    existing id only when the same Keeper, operation identity, canonical input,
-    turn/task/goal identity, and continuation channel are already pending. A
-    deduplicated request does not consume a durable queue sequence. *)
+    existing id when the same Keeper, operation identity, canonical input,
+    task/goal identity, and continuation channel are already pending, or are
+    already approved with their one-shot grant unconsumed
+    ({!Folded_onto_unconsumed_grant}). The turn that asked is recorded on the
+    entry but is not part of the request's identity: a next-turn retry of the
+    same call folds onto the approval already in flight instead of opening a
+    second one (#28866). A deduplicated or folded request does not consume a
+    durable queue sequence or emit a new pending audit event. *)
 val submit_pending :
   keeper_name:string ->
   tool_name:string ->
@@ -408,10 +305,9 @@ val submit_pending :
   ?request_context:Yojson.Safe.t ->
   ?task_id:string ->
   ?goal_id:string ->
-  ?goal_ids:string list ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   unit ->
-  (string, storage_error) result
+  (pending_submission, storage_error) result
 
 type resolve_error =
   | Not_found of string
@@ -426,6 +322,11 @@ type resolve_error =
       }
 
 val resolve_error_to_string : resolve_error -> string
+
+type resolution_result =
+  { remembered_rule : approval_rule option
+  ; audit_receipts : Keeper_approval.Audit.receipt list
+  }
 
 (** Commit a resolution, optionally persist an exact Always Allowed rule for
     [Decision.Approve], then wake only the Keeper captured by the pending entry.
@@ -483,8 +384,8 @@ val bind_summary_exact_attempt :
   request_body_sha256:string ->
   (exact_attempt_transition, exact_attempt_error) result
 
-(** Bind one exact OAS attempt before provider dispatch. Only
-    [Fsync_completed] permits the OAS POST. A visible unconfirmed bind retains
+(** Bind one exact AGENT_CORE attempt before provider dispatch. Only
+    [Fsync_completed] permits the AGENT_CORE POST. A visible unconfirmed bind retains
     the identity but forbids POST and failover. Repeating the active identity
     strictly rewrites it, allowing durability to be confirmed without changing
     identity. A released attempt may be replaced only by a new identity; every
@@ -500,7 +401,7 @@ val release_summary_exact_attempt_before_dispatch :
   request_body_sha256:string ->
   (exact_attempt_transition, exact_attempt_error) result
 
-(** Mark the matching binding released only after OAS proves the attempt stayed
+(** Mark the matching binding released only after AGENT_CORE proves the attempt stayed
     before dispatch. Only [Fsync_completed] permits failover. A visible
     unconfirmed release retains the original identity, forbids a successor, and
     may be terminalized only with [Exact_terminal_persistence_failure],

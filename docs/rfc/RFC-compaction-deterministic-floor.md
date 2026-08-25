@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: []
 related: ["0042", "0257", "worldstate-observation-channel-split"]
-implementation_prs: [25270, 25281]
 ---
 
 # RFC-compaction-deterministic-floor
@@ -115,7 +114,7 @@ but the reactive path — the one that matters for the spiral — does not persi
 
 PR #25232 tried to reduce *how much* accumulates by stamping/superseding
 world-state user messages; it was a no-op because masc metadata cannot cross the
-OAS conversation boundary (see the world-state-channel-split RFC). That work is
+agent_core conversation boundary (see the world-state-channel-split RFC). That work is
 upstream (reduce accumulation); **this** RFC is downstream (guarantee reduction
 when the window is already exceeded). They are complementary, not alternatives.
 
@@ -177,7 +176,7 @@ floor would therefore drop the foundational setup. Two protections cover this:
 - a positional **head window** (`floor_protected_head_units`) for the leading
   setup, and
 - **explicit protection of the first User unit** (`first_user_goal_index`) — the
-  OAS goal. A fixed head window alone does not suffice: if System/setup units
+  agent_core goal. A fixed head window alone does not suffice: if System/setup units
   precede the goal, it can sit just past the window and be dropped (review
   #25281 P1.2). Protecting its exact index guarantees the goal survives wherever
   it is.
@@ -207,7 +206,7 @@ one. Be precise about the two residuals:
   1. a **byte-heuristic** token estimate — which the codebase explicitly rejects
      as a capacity guess (#25092: "not a tokenizer estimate, byte heuristic";
      #25130: "does not infer capacity from bytes"; CLAUDE.md workaround bar), or
-  2. the **actual-wire typed fit authority** — OAS #2667, which is unresolved and
+  2. the **actual-wire typed fit authority** — agent_core #2667, which is unresolved and
      is the same dependency the attention-worker capacity split waits on.
 
   So the adaptive tail is **not merely a follow-up: it is blocked on #2667.**

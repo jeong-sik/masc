@@ -16,15 +16,6 @@ let build_dashboard_if_needed_script_path () =
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    idx + nlen <= hlen
-    && (String.sub haystack idx nlen = needle || loop (idx + 1))
-  in
-  nlen = 0 || loop 0
-
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
@@ -112,14 +103,14 @@ let make_config_root root =
   let config = Filename.concat root "config" in
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
-  mkdir_p (Filename.concat config "personas");
   write_file (Filename.concat config "runtime.toml") "# repo seed\n";
   config
 
 let write_keeper_seed repo_root =
+  mkdir_p (Filename.concat repo_root "config/keepers/alpha");
   write_file
-    (Filename.concat repo_root "config/keepers/sangsu.toml")
-    "[keeper]\npersona_name = \"sangsu\"\n"
+    (Filename.concat repo_root "config/keepers/alpha.toml")
+    "[keeper]\nautoboot_enabled = true\ninstructions = \"Keep working autonomously.\"\n"
 
 let write_fake_eio_exe exe_path =
   mkdir_p (Filename.dirname exe_path);
@@ -131,10 +122,8 @@ capture="${FAKE_CAPTURE_FILE:?}"
 {
   printf 'MASC_BASE_PATH=%s\n' "${MASC_BASE_PATH:-}"
   printf 'MASC_CONFIG_DIR=%s\n' "${MASC_CONFIG_DIR:-}"
-  printf 'MASC_PERSONAS_DIR=%s\n' "${MASC_PERSONAS_DIR:-}"
   printf 'MASC_GRPC_ENABLED=%s\n' "${MASC_GRPC_ENABLED:-}"
   printf 'MASC_WS_ENABLED=%s\n' "${MASC_WS_ENABLED:-}"
-  printf 'MASC_WEBRTC_ENABLED=%s\n' "${MASC_WEBRTC_ENABLED:-}"
   printf 'ARGS=%s\n' "$*"
 } >"$capture"
 exit 0
@@ -164,7 +153,7 @@ let test_bootstraps_local_config_and_sets_http_only_env () =
         run_process ~cwd:repo_root script
           ~env:[ ("FAKE_CAPTURE_FILE", capture) ]
           ~unset_env:
-            [ "MASC_BASE_PATH"; "MASC_CONFIG_DIR"; "MASC_PERSONAS_DIR" ]
+            [ "MASC_BASE_PATH"; "MASC_CONFIG_DIR" ]
           [| script; "--target-dir"; target; "--port"; "9955" |]
       in
       if code <> 0 then
@@ -177,21 +166,17 @@ let test_bootstraps_local_config_and_sets_http_only_env () =
         (Sys.file_exists (Filename.concat target_abs ".masc/config/runtime.json"));
       check bool "bootstrapped keepers excluded by default" false
         (Sys.file_exists
-           (Filename.concat target_abs ".masc/config/keepers/sangsu.toml"));
+           (Filename.concat target_abs ".masc/config/keepers/alpha.toml"));
       check bool "base path set" true
-        (contains_substring captured ("MASC_BASE_PATH=" ^ target_abs));
+        (String_util.contains_substring captured ("MASC_BASE_PATH=" ^ target_abs));
       check bool "config dir set" true
-        (contains_substring captured ("MASC_CONFIG_DIR=" ^ Filename.concat target_abs ".masc/config"));
-      check bool "personas dir set" true
-        (contains_substring captured ("MASC_PERSONAS_DIR=" ^ Filename.concat target_abs ".masc/config/personas"));
+        (String_util.contains_substring captured ("MASC_CONFIG_DIR=" ^ Filename.concat target_abs ".masc/config"));
       check bool "grpc disabled by default" true
-        (contains_substring captured "MASC_GRPC_ENABLED=0");
+        (String_util.contains_substring captured "MASC_GRPC_ENABLED=0");
       check bool "ws disabled by default" true
-        (contains_substring captured "MASC_WS_ENABLED=0");
-      check bool "webrtc disabled by default" true
-        (contains_substring captured "MASC_WEBRTC_ENABLED=0");
+        (String_util.contains_substring captured "MASC_WS_ENABLED=0");
       check bool "port passed through" true
-        (contains_substring captured "ARGS=--host=127.0.0.1 --port=9955"))
+        (String_util.contains_substring captured "ARGS=--host=127.0.0.1 --port=9955"))
 
 let test_bootstrap_keepers_flag_is_opt_in () =
   with_temp_dir "run-local-script" (fun dir ->
@@ -203,7 +188,7 @@ let test_bootstrap_keepers_flag_is_opt_in () =
       let code, stdout, stderr =
         run_process ~cwd:repo_root script
           ~unset_env:
-            [ "MASC_BASE_PATH"; "MASC_CONFIG_DIR"; "MASC_PERSONAS_DIR" ]
+            [ "MASC_BASE_PATH"; "MASC_CONFIG_DIR" ]
           [|
             script;
             "--target-dir";
@@ -218,9 +203,9 @@ let test_bootstrap_keepers_flag_is_opt_in () =
         failf "run-local bootstrap-keepers failed (%d)\nstdout:\n%s\nstderr:\n%s"
           code stdout stderr;
       check bool "bootstrapped keeper copied with flag" true
-        (Sys.file_exists (Filename.concat target ".masc/config/keepers/sangsu.toml"));
+        (Sys.file_exists (Filename.concat target ".masc/config/keepers/alpha.toml"));
       check bool "keepers included message" true
-        (contains_substring stderr "keepers included"))
+        (String_util.contains_substring stderr "keepers included"))
 
 let test_print_port_is_stable_for_target_dir () =
   with_temp_dir "run-local-script" (fun dir ->
@@ -325,9 +310,9 @@ esac
         failf "dashboard build helper failed (%d)\nstdout:\n%s\nstderr:\n%s"
           code stdout stderr;
       check bool "stale generated index forced rebuild" true
-        (contains_substring (read_file pnpm_capture) "run build");
+        (String_util.contains_substring (read_file pnpm_capture) "run build");
       check bool "stale reason was explicit" true
-        (contains_substring stderr "remote startup resources"))
+        (String_util.contains_substring stderr "remote startup resources"))
 
 let test_existing_target_config_is_not_overwritten () =
   with_temp_dir "run-local-script" (fun dir ->
@@ -354,9 +339,8 @@ let test_explicit_config_env_is_preserved_without_bootstrap () =
       let repo_root = setup_fake_repo dir in
       let target = Filename.concat dir "target" in
       let override_root = Filename.concat dir "override-config" in
-      let override_personas = Filename.concat override_root "personas" in
       mkdir_p target;
-      mkdir_p override_personas;
+      mkdir_p override_root;
       let capture = Filename.concat dir "captured-env.txt" in
       let script = Filename.concat repo_root "scripts/run-local.sh" in
       let code, stdout, stderr =
@@ -365,7 +349,6 @@ let test_explicit_config_env_is_preserved_without_bootstrap () =
             [
               ("FAKE_CAPTURE_FILE", capture);
               ("MASC_CONFIG_DIR", override_root);
-              ("MASC_PERSONAS_DIR", override_personas);
             ]
           [| script; "--target-dir"; target; "--port"; "9959" |]
       in
@@ -374,40 +357,9 @@ let test_explicit_config_env_is_preserved_without_bootstrap () =
           code stdout stderr;
       let captured = read_file capture in
       check bool "explicit config dir preserved" true
-        (contains_substring captured ("MASC_CONFIG_DIR=" ^ override_root));
-      check bool "explicit personas dir preserved" true
-        (contains_substring captured ("MASC_PERSONAS_DIR=" ^ override_personas));
+        (String_util.contains_substring captured ("MASC_CONFIG_DIR=" ^ override_root));
       check bool "target config not bootstrapped" false
         (Sys.file_exists (Filename.concat target ".masc/config/runtime.toml")))
-
-let test_config_dir_set_personas_dir_unset_defaults_to_config_personas () =
-  with_temp_dir "run-local-script" (fun dir ->
-      let repo_root = setup_fake_repo dir in
-      let target = Filename.concat dir "target" in
-      let override_config = Filename.concat dir "my-config" in
-      mkdir_p target;
-      mkdir_p override_config;
-      let capture = Filename.concat dir "captured-env.txt" in
-      let script = Filename.concat repo_root "scripts/run-local.sh" in
-      let code, stdout, stderr =
-        run_process ~cwd:repo_root script
-          ~env:
-            [
-              ("FAKE_CAPTURE_FILE", capture);
-              ("MASC_CONFIG_DIR", override_config);
-            ]
-          ~unset_env:[ "MASC_PERSONAS_DIR" ]
-          [| script; "--target-dir"; target; "--port"; "9960" |]
-      in
-      if code <> 0 then
-        failf "run-local with MASC_CONFIG_DIR only failed (%d)\nstdout:\n%s\nstderr:\n%s"
-          code stdout stderr;
-      let captured = read_file capture in
-      check bool "config dir uses explicit value" true
-        (contains_substring captured ("MASC_CONFIG_DIR=" ^ override_config));
-      check bool "personas dir defaults to config/personas" true
-        (contains_substring captured
-           ("MASC_PERSONAS_DIR=" ^ Filename.concat override_config "personas")))
 
 let test_bootstrap_only_materializes_state_without_exec () =
   with_temp_dir "run-local-script" (fun dir ->
@@ -420,7 +372,7 @@ let test_bootstrap_only_materializes_state_without_exec () =
         run_process ~cwd:repo_root script
           ~env:[ ("FAKE_CAPTURE_FILE", capture) ]
           ~unset_env:
-            [ "MASC_BASE_PATH"; "MASC_CONFIG_DIR"; "MASC_PERSONAS_DIR" ]
+            [ "MASC_BASE_PATH"; "MASC_CONFIG_DIR" ]
           [|
             script;
             "--target-dir";
@@ -439,7 +391,7 @@ let test_bootstrap_only_materializes_state_without_exec () =
         (Sys.file_exists (Filename.concat target ".masc/config/runtime.json"));
       check bool "fake exe not invoked" false (Sys.file_exists capture);
       check bool "bootstrap ready message" true
-        (contains_substring stderr "[local-run] Bootstrap ready"))
+        (String_util.contains_substring stderr "[local-run] Bootstrap ready"))
 
 let () =
   run "run_local_script"
@@ -461,8 +413,6 @@ let () =
             test_existing_target_config_is_not_overwritten;
           test_case "explicit config env is preserved without bootstrap" `Quick
             test_explicit_config_env_is_preserved_without_bootstrap;
-          test_case "config_dir set personas_dir unset defaults to config/personas" `Quick
-            test_config_dir_set_personas_dir_unset_defaults_to_config_personas;
           test_case "bootstrap-only materializes state without exec" `Quick
             test_bootstrap_only_materializes_state_without_exec;
         ] );

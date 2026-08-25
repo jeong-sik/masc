@@ -23,7 +23,7 @@ let schema = "masc.dashboard_surface.v1"
 
 let string_field key json =
   match Json_util.assoc_member_opt key json with
-  | Some (`String value) -> String_util.trim_to_option value
+  | Some (`String value) -> String_util.trim_nonempty value
   | _ -> None
 ;;
 
@@ -113,14 +113,6 @@ let to_json envelope =
           ; "stale_reason", Json_util.string_opt_to_json envelope.cache.stale_reason
           ; "latest_age_s", Json_util.float_opt_to_json envelope.cache.latest_age_s
           ; "health", Json_util.string_opt_to_json envelope.cache.health
-          ] )
-    ; ( "migration"
-      , `Assoc
-          [ "body_shape", `String "root_fields_preserved"
-          ; ( "rule"
-            , `String
-                "New dashboard read models add this envelope before versioning or removing existing root fields."
-            )
           ] )
     ]
 ;;

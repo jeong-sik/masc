@@ -1,11 +1,5 @@
 ---
 status: reference
-last_verified: 2026-08-01
-code_refs:
-  - lib/types/types_core.mli
-  - lib/goal/goal_phase.mli
-  - lib/tool_schemas/tool_schemas_schedule.ml
-  - lib/keeper/keeper_sandbox_control.mli
 ---
 
 # MASC Glossary
@@ -25,7 +19,7 @@ code_refs:
 : Workspace에 참여해 typed capability를 호출하는 실행 주체.
 
 **Keeper**
-: 독립된 OAS checkpoint와 MASC lifecycle을 가진 장기 실행 Agent. 현재 typed
+: 독립된 agent core checkpoint와 MASC lifecycle을 가진 장기 실행 Agent. 현재 typed
   event와 tool schema를 관찰하고 자율 turn을 실행한다.
 
 **Keeper Cycle**
@@ -33,10 +27,10 @@ code_refs:
   한 회차. 모든 cycle이 모델 호출을 실행하지는 않는다.
 
 **Keeper Turn**
-: 하나의 Keeper 작업 시도를 위해 MASC가 OAS Agent run을 실행하는 단위.
+: 하나의 Keeper 작업 시도를 위해 MASC가 agent core Agent run을 실행하는 단위.
 
-**OAS Turn**
-: 하나의 OAS Agent run 내부에서 provider response와 tool 실행이 진행되는 한
+**agent core Turn**
+: 하나의 agent core Agent run 내부에서 provider response와 tool 실행이 진행되는 한
   단계. Keeper turn과 동일한 단위가 아니다.
 
 **Runtime Attempt**
@@ -89,7 +83,7 @@ code_refs:
 ## Continuity
 
 **Checkpoint**
-: OAS conversation과 Keeper working context의 durable 저장점.
+: agent core conversation과 Keeper working context의 durable 저장점.
 
 **Generation**
 : 같은 Keeper가 새 trace로 이어진 횟수. 초기값은 0이다.

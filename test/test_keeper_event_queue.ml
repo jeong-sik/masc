@@ -29,7 +29,7 @@ let rec rm_rf path =
 let snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-    "event-queue-v15.json"
+    "event-queue-v17.json"
 
 let json_field name = function
   | `Assoc fields -> List.assoc_opt name fields
@@ -109,15 +109,6 @@ let remove_payload_field ~kind ~field =
     (fun fields ->
        if List.mem_assoc field fields then List.remove_assoc field fields else fields)
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  let rec scan offset =
-    offset + needle_len <= haystack_len
-    && (String.equal (String.sub haystack offset needle_len) needle || scan (offset + 1))
-  in
-  String.equal needle "" || scan 0
-
 let event_queue_test_meta keeper_name trace_id =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -132,7 +123,7 @@ let event_queue_test_meta keeper_name trace_id =
 let persist_event_queue_test_meta ~base_path keeper_name =
   let meta = event_queue_test_meta keeper_name ("trace-" ^ keeper_name) in
   (match
-     Masc.Keeper_meta_store.write_meta (Masc.Workspace.default_config base_path) meta
+     Masc.Keeper_meta_store.replace_snapshot (Masc.Workspace.default_config base_path) meta
    with
    | Ok () -> ()
    | Error detail -> Alcotest.fail detail);
@@ -172,7 +163,7 @@ let load_queue_state ~base_path ~keeper_name =
   | Ok state -> state
   | Error detail -> Alcotest.fail detail
 
-let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~owner_nonce ~operation_id =
+let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~operation_id =
   let target_meta = persist_event_queue_test_meta ~base_path to_keeper in
   (match
      Masc.Keeper_registry_event_queue.enqueue_stimulus_durable_result
@@ -193,11 +184,9 @@ let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~owner_nonce ~oper
   let transfer : Keeper_event_queue_persistence.accepted_transfer =
     { source = selection.source
     ; source_incarnation = selection.admitted_revision
-    ; owner_nonce
     ; operator_operation_id = operation_id
     ; from_keeper
     ; to_keeper
-    ; target_generation = target_meta.runtime.nonce
     ; target_trace_id = target_meta.runtime.trace_id
     }
   in
@@ -205,7 +194,6 @@ let stage_transfer ~base_path ~from_keeper ~to_keeper ~source ~owner_nonce ~oper
      Masc.Keeper_registry_event_queue.transfer_pending_accepted_result
        ~base_path
        from_keeper
-       ~current_owner_nonce:owner_nonce
        ~applied_at:101.0
        ~transfer
    with
@@ -330,6 +318,68 @@ let () =
       | _ -> Alcotest.fail "reaction board stimulus round-trip changed payload shape")
    | Error msg -> Alcotest.fail ("reaction board stimulus round-trip failed: " ^ msg));
 
+  (* #29457: a vote is a board stimulus whose payload names the target, the
+     voted-on author, the voter, and the direction; all four must survive the
+     durable round-trip, and the post id stays the enclosing stimulus id. *)
+  let vote_payload () =
+    Board_signal
+      { kind =
+          Vote_cast
+            { target = Vote_on_comment "c1"
+            ; target_author = "poster"
+            ; voter = "peer"
+            ; direction = Vote_down
+            }
+      ; author = "peer"
+      ; title = "parent"
+      ; content = "body"
+      ; hearth = None
+      ; updated_at = Some 6.0
+      }
+  in
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = "p-vote"; urgency = Normal; arrived_at = 6.0; payload = vote_payload () })
+   with
+   | Ok s ->
+     (match s.payload with
+      | Board_signal
+          { kind =
+              Vote_cast
+                { target = Vote_on_comment target_id; target_author; voter; direction = Vote_down }
+          ; author
+          ; hearth = None
+          ; _
+          } ->
+        assert (String.equal s.post_id "p-vote");
+        assert (String.equal target_id "c1");
+        assert (String.equal target_author "poster");
+        assert (String.equal voter "peer");
+        assert (String.equal author "peer")
+      | _ -> Alcotest.fail "vote board stimulus round-trip changed payload shape")
+   | Error msg -> Alcotest.fail ("vote board stimulus round-trip failed: " ^ msg));
+  (match
+     stimulus_of_yojson
+       (`Assoc
+          [ "post_id", `String "p-vote"
+          ; "urgency", `String "normal"
+          ; "arrived_at_unix", `Float 6.0
+          ; ( "payload"
+            , `Assoc
+                [ "kind", `String "board_signal"
+                ; "board_kind", `String "vote_cast"
+                ; "author", `String "peer"
+                ; "title", `String "parent"
+                ; "content", `String "body"
+                ; "hearth", `Null
+                ; "updated_at_unix", `Null
+                ] )
+          ])
+   with
+   | Ok _ -> Alcotest.fail "vote_cast without vote payload fields must not decode"
+   | Error _ -> ());
+
   (* RFC-0266: Fusion_completed is a non-board stimulus with its own label. *)
   let fusion_payload () =
     Fusion_completed
@@ -364,6 +414,7 @@ let () =
             ~parent_channel_id:None
             ~thread_id:(Some "th-1")
             ~user_id:"u-7"
+            ()
           |> Result.get_ok)
      }
    in
@@ -441,12 +492,14 @@ let () =
   (* Scheduled wake is a non-board stimulus whose enclosing occurrence id and
      payload both survive restart replay. *)
   let scheduled_wake =
-    { schedule_instance_id = "instance-sched-1"
+    { occurrence_id = "schedule-occurrence:test"
+    ; schedule_instance_id = "instance-sched-1"
     ; schedule_id = "sched-1"
     ; due_at = 200.0
     ; payload_digest = "digest-1"
     ; title = Some "Scheduled lane wake"
     ; message = "Run the scheduled maintenance lane now."
+    ; result_delivery = None
     }
   in
   let schedule_payload () = Schedule_due scheduled_wake in
@@ -465,13 +518,71 @@ let () =
      assert (String.equal s.post_id "schedule-occurrence:codec");
      (match s.payload with
       | Schedule_due wake ->
+        assert (String.equal wake.occurrence_id "schedule-occurrence:test");
         assert (String.equal wake.schedule_id "sched-1");
         assert (Float.equal wake.due_at 200.0);
         assert (String.equal wake.payload_digest "digest-1");
         assert (wake.title = Some "Scheduled lane wake");
-        assert (String.equal wake.message "Run the scheduled maintenance lane now.")
+        assert (String.equal wake.message "Run the scheduled maintenance lane now.");
+        assert (Option.is_none wake.result_delivery)
       | _ -> Alcotest.fail "Schedule_due codec round-trip changed payload shape")
    | Error msg -> Alcotest.fail ("Schedule_due stimulus round-trip failed: " ^ msg));
+
+  (* A pre-upgrade row has no payload occurrence_id, but its enclosing
+     post_id is already the exact scheduler occurrence identity.  A replay
+     after upgrade must deduplicate against that durable row instead of
+     executing the same occurrence twice. *)
+  let legacy_schedule =
+    { post_id = "schedule-occurrence:legacy-replay"
+    ; urgency = Immediate
+    ; arrived_at = 5.0
+    ; payload = Schedule_due { scheduled_wake with occurrence_id = "" }
+    }
+  in
+  let upgraded_schedule =
+    { legacy_schedule with
+      arrived_at = 6.0
+    ; payload =
+        Schedule_due
+          { scheduled_wake with
+            occurrence_id = "schedule-occurrence:legacy-replay"
+          }
+    }
+  in
+  assert (stimulus_identity_equal legacy_schedule upgraded_schedule);
+  assert
+    (not
+       (stimulus_identity_equal
+          legacy_schedule
+          { upgraded_schedule with post_id = "schedule-occurrence:next" }));
+
+  let schedule_result_channel =
+    match Keeper_continuation_channel.dashboard ~thread_id:"schedule-result-thread" with
+    | Ok channel -> channel
+    | Error detail -> Alcotest.fail detail
+  in
+  let routed_scheduled_wake =
+    { scheduled_wake with result_delivery = Some schedule_result_channel }
+  in
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = "schedule-occurrence:routed-codec"
+          ; urgency = Immediate
+          ; arrived_at = 6.0
+          ; payload = Schedule_due routed_scheduled_wake
+          })
+   with
+   | Ok { payload = Schedule_due wake; _ } ->
+     (match wake.result_delivery with
+      | Some restored ->
+        assert
+          (Keeper_continuation_channel.same_route
+             schedule_result_channel
+             restored)
+      | None -> Alcotest.fail "Schedule_due codec dropped result delivery route")
+   | Ok _ -> Alcotest.fail "routed Schedule_due decoded as another payload"
+   | Error msg -> Alcotest.fail ("routed Schedule_due round-trip failed: " ^ msg));
 
   (* Hitl_resolved survives the codec round-trip: the wake is persisted for
      replay when the target keeper is not registered yet, so approval_id and
@@ -521,115 +632,6 @@ let () =
       (stimulus_identity_equal
       (hitl_stimulus Hitl_approved)
       (hitl_stimulus (Hitl_rejected "operator declined"))));
-
-  (* --- RFC-0315 P3 W0: Goal_assigned --- *)
-  let assignment =
-    { ga_goal_id = "goal-9"
-    ; ga_goal_title = "Harden wake continuity"
-    ; ga_assigned_by = "keeper_up"
-    }
-  in
-  assert (
-    String.equal (goal_assignment_post_id assignment) "goal-assigned:goal-9");
-  assert (
-    String.equal (payload_kind_label (Goal_assigned assignment)) "goal_assigned");
-  (match
-     stimulus_of_yojson
-       (stimulus_to_yojson
-          { post_id = goal_assignment_post_id assignment
-          ; urgency = Normal
-          ; arrived_at = 7.0
-          ; payload = Goal_assigned assignment
-          })
-   with
-   | Ok s ->
-     (match s.payload with
-      | Goal_assigned ga ->
-        assert (String.equal ga.ga_goal_id "goal-9");
-        assert (String.equal ga.ga_goal_title "Harden wake continuity");
-        assert (String.equal ga.ga_assigned_by "keeper_up")
-      | _ -> Alcotest.fail "Goal_assigned codec round-trip changed payload shape")
-   | Error msg ->
-     Alcotest.fail ("Goal_assigned stimulus round-trip failed: " ^ msg));
-  (* Identity strips display-only fields: re-assigning the same goal via a
-     different actor or after a title edit still dedups. *)
-  let assignment_stim =
-    { post_id = goal_assignment_post_id assignment
-    ; urgency = Normal
-    ; arrived_at = 7.0
-    ; payload = Goal_assigned assignment
-    }
-  in
-  let assignment_retitled =
-    { assignment_stim with
-      arrived_at = 8.0
-    ; payload =
-        Goal_assigned
-          { assignment with
-            ga_goal_title = "Harden wake continuity (v2)"
-          ; ga_assigned_by = "toml_reconcile"
-          }
-    }
-  in
-  assert (stimulus_identity_equal assignment_stim assignment_retitled);
-  let reconciliation =
-    { gr_goal_id = "goal-9"; gr_triggering_task_id = "task-4" }
-  in
-  let reconciliation_stim =
-    { post_id = goal_reconciliation_ready_post_id reconciliation
-    ; urgency = Immediate
-    ; arrived_at = 9.0
-    ; payload = Goal_reconciliation_ready reconciliation
-    }
-  in
-  assert (
-    String.equal
-      reconciliation_stim.post_id
-      "goal-reconciliation-ready:goal-9");
-  assert (
-    String.equal
-      (payload_kind_label reconciliation_stim.payload)
-      "goal_reconciliation_ready");
-  (match stimulus_of_yojson (stimulus_to_yojson reconciliation_stim) with
-   | Ok { payload = Goal_reconciliation_ready decoded; _ } ->
-     assert (String.equal decoded.gr_goal_id "goal-9");
-     assert (String.equal decoded.gr_triggering_task_id "task-4")
-   | Ok _ -> Alcotest.fail "Goal_reconciliation_ready codec changed payload"
-   | Error msg ->
-     Alcotest.fail
-       ("Goal_reconciliation_ready stimulus round-trip failed: " ^ msg));
-  let prompt_event =
-    match
-      Masc.Keeper_world_observation.pending_board_event_of_stimulus
-        ~meta:(event_queue_test_meta "goal-reconciler" "trace-goal-reconciler")
-        reconciliation_stim
-    with
-    | Ok (Some event) -> event
-    | Ok None -> Alcotest.fail "goal reconciliation wake produced no prompt event"
-    | Error _ -> Alcotest.fail "goal reconciliation wake prompt projection failed"
-  in
-  assert (
-    match prompt_event.event_kind with
-    | Masc.Keeper_world_observation.Goal_reconciliation_ready -> true
-    | _ -> false);
-  assert (
-    contains_substring
-      ~needle:"Re-read Goal and Task SSOT"
-      prompt_event.preview);
-  (* The Board-activity partition decides which prompt section renders this
-     event and whether it reaches [Keeper_contract_classifier]'s
-     [board_activity_count]. Classifying a reconciliation wake as scheduled
-     work compiles cleanly but drops it from the Board Activity prompt section
-     and from [board_activity_count]; when the event is isolated, it also
-     removes [Board_event_pending] and suppresses the intended reactive turn,
-     so pin both sides here. *)
-  assert (Masc.Keeper_world_observation.is_board_activity_event prompt_event);
-  assert (
-    not
-      (Masc.Keeper_world_observation.is_board_activity_event
-         { prompt_event with
-           event_kind = Masc.Keeper_world_observation.Schedule_due scheduled_wake
-         }));
 
   (* A completion-authority rejection is a system LLM result delivered to the
      producer Keeper. It is neither a Keeper identity nor a generic Board
@@ -708,7 +710,7 @@ let () =
       decoded = rejection
     | _ -> false);
   assert (String.equal rejection_event.post_id rejection_stimulus.post_id);
-  assert (contains_substring ~needle:rejection.car_reason rejection_event.preview);
+  assert (String_util.string_contains_substring ~needle:rejection.car_reason rejection_event.preview);
   assert (
     not (Masc.Keeper_world_observation.is_board_activity_event rejection_event));
   assert (
@@ -739,19 +741,6 @@ let () =
              Completion_authority_rejected
                { rejection with car_reason = "different reason" }
          }));
-
-  (* Producer diff is edge-only: additions wake, removals and unchanged ids
-     never do. *)
-  assert (
-    Masc.Keeper_goal_assignment_wake.added_goal_ids
-      ~old_ids:[ "goal-1"; "goal-2" ]
-      ~new_ids:[ "goal-2"; "goal-9" ]
-    = [ "goal-9" ]);
-  assert (
-    Masc.Keeper_goal_assignment_wake.added_goal_ids
-      ~old_ids:[ "goal-1" ]
-      ~new_ids:[]
-    = []);
 
   (* --- queue operations preserved --- *)
   let board_stim =
@@ -958,7 +947,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:23
         ~operation_id:"recover-transfer-target";
       Alcotest.(check int)
         "source outbox awaits target projection"
@@ -1008,7 +996,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:27
         ~operation_id:"transfer-during-target-shutdown";
       let transfer =
         match
@@ -1023,22 +1010,22 @@ let () =
         Masc.Keeper_shutdown_types.Operation_id.generate ()
       in
       (match
-         Masc.Keeper_turn_admission.begin_shutdown
+         Masc.Keeper_shutdown_intake_fence.begin_shutdown
            ~base_path
            ~keeper_name:to_keeper
            ~operation_id:shutdown_operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+       | Masc.Keeper_shutdown_intake_fence.Reserved _ -> ()
+       | Masc.Keeper_shutdown_intake_fence.Already_reserved _ ->
          Alcotest.fail "fresh target shutdown was already reserved");
       Fun.protect
         ~finally:(fun () ->
           ignore
-            (Masc.Keeper_turn_admission.rollback_shutdown
+            (Masc.Keeper_shutdown_intake_fence.rollback_shutdown
                ~base_path
                ~keeper_name:to_keeper
                ~operation_id:shutdown_operation_id
-              : Masc.Keeper_turn_admission.rollback_shutdown_result))
+              : Masc.Keeper_shutdown_intake_fence.rollback_result))
         (fun () ->
            (match
               Masc.Keeper_registry_event_queue
@@ -1082,47 +1069,34 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:29
         ~operation_id:"post-purge-transfer-recovery";
       let config = Masc.Workspace.default_config base_path in
-      let target_meta =
-        match Masc.Keeper_meta_store.read_meta config to_keeper with
-        | Ok (Some meta) -> meta
-        | Ok None -> Alcotest.fail "target metadata fixture disappeared"
-        | Error detail -> Alcotest.fail detail
-      in
       let shutdown_operation_id =
         Masc.Keeper_shutdown_types.Operation_id.generate ()
       in
       (match
-         Masc.Keeper_turn_admission.begin_shutdown
+         Masc.Keeper_shutdown_intake_fence.begin_shutdown
            ~base_path
            ~keeper_name:to_keeper
            ~operation_id:shutdown_operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+       | Masc.Keeper_shutdown_intake_fence.Reserved _ -> ()
+       | Masc.Keeper_shutdown_intake_fence.Already_reserved _ ->
          Alcotest.fail "fresh post-purge target was already reserved");
       (match
-         Masc.Keeper_meta_store.remove_meta_if_identity
-           config
-           ~name:to_keeper
-           ~trace_id:target_meta.runtime.trace_id
-           ~generation:target_meta.runtime.nonce
+         Masc.Keeper_meta_store.remove_snapshot config ~name:to_keeper
        with
        | Ok () -> ()
-       | Error error ->
-         Alcotest.fail
-           (Masc.Keeper_meta_store.identity_remove_error_to_string error));
+       | Error error -> Alcotest.fail error);
       (match
-         Masc.Keeper_turn_admission.rollback_shutdown
+         Masc.Keeper_shutdown_intake_fence.rollback_shutdown
            ~base_path
            ~keeper_name:to_keeper
            ~operation_id:shutdown_operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_rolled_back -> ()
-       | Masc.Keeper_turn_admission.Shutdown_not_reserved
-       | Masc.Keeper_turn_admission.Shutdown_reserved_by_other _ ->
+       | Masc.Keeper_shutdown_intake_fence.Rolled_back -> ()
+       | Masc.Keeper_shutdown_intake_fence.Not_reserved
+       | Masc.Keeper_shutdown_intake_fence.Reserved_by_other _ ->
          Alcotest.fail "post-purge target fence was not released");
       (match
          with_strict_executor
@@ -1178,11 +1152,9 @@ let () =
         let target_meta = event_queue_test_meta to_keeper ("trace-" ^ to_keeper) in
         { source = selection.source
         ; source_incarnation = selection.admitted_revision
-        ; owner_nonce = 31
         ; operator_operation_id = "source-transfer-during-shutdown"
         ; from_keeper
         ; to_keeper
-        ; target_generation = target_meta.runtime.nonce
         ; target_trace_id = target_meta.runtime.trace_id
         }
       in
@@ -1190,28 +1162,27 @@ let () =
         Masc.Keeper_shutdown_types.Operation_id.generate ()
       in
       (match
-         Masc.Keeper_turn_admission.begin_shutdown
+         Masc.Keeper_shutdown_intake_fence.begin_shutdown
            ~base_path
            ~keeper_name:from_keeper
            ~operation_id:shutdown_operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+       | Masc.Keeper_shutdown_intake_fence.Reserved _ -> ()
+       | Masc.Keeper_shutdown_intake_fence.Already_reserved _ ->
          Alcotest.fail "fresh source shutdown was already reserved");
       Fun.protect
         ~finally:(fun () ->
           ignore
-            (Masc.Keeper_turn_admission.rollback_shutdown
+            (Masc.Keeper_shutdown_intake_fence.rollback_shutdown
                ~base_path
                ~keeper_name:from_keeper
                ~operation_id:shutdown_operation_id
-              : Masc.Keeper_turn_admission.rollback_shutdown_result))
+              : Masc.Keeper_shutdown_intake_fence.rollback_result))
         (fun () ->
            (match
               Masc.Keeper_registry_event_queue.transfer_pending_accepted_result
                 ~base_path
                 from_keeper
-                ~current_owner_nonce:31
                 ~applied_at:31.0
                 ~transfer
             with
@@ -1247,7 +1218,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:28
         ~operation_id:"recovery-during-source-shutdown";
       let target_dir =
         Filename.concat
@@ -1262,22 +1232,22 @@ let () =
         Masc.Keeper_shutdown_types.Operation_id.generate ()
       in
       (match
-         Masc.Keeper_turn_admission.begin_shutdown
+         Masc.Keeper_shutdown_intake_fence.begin_shutdown
            ~base_path
            ~keeper_name:from_keeper
            ~operation_id:shutdown_operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+       | Masc.Keeper_shutdown_intake_fence.Reserved _ -> ()
+       | Masc.Keeper_shutdown_intake_fence.Already_reserved _ ->
          Alcotest.fail "fresh source shutdown was already reserved");
       Fun.protect
         ~finally:(fun () ->
           ignore
-            (Masc.Keeper_turn_admission.rollback_shutdown
+            (Masc.Keeper_shutdown_intake_fence.rollback_shutdown
                ~base_path
                ~keeper_name:from_keeper
                ~operation_id:shutdown_operation_id
-              : Masc.Keeper_turn_admission.rollback_shutdown_result))
+              : Masc.Keeper_shutdown_intake_fence.rollback_result))
         (fun () ->
            (match
               with_strict_executor
@@ -1324,28 +1294,27 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:28
         ~operation_id:"recovery-during-target-shutdown";
       let shutdown_operation_id =
         Masc.Keeper_shutdown_types.Operation_id.generate ()
       in
       (match
-         Masc.Keeper_turn_admission.begin_shutdown
+         Masc.Keeper_shutdown_intake_fence.begin_shutdown
            ~base_path
            ~keeper_name:to_keeper
            ~operation_id:shutdown_operation_id
        with
-       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+       | Masc.Keeper_shutdown_intake_fence.Reserved _ -> ()
+       | Masc.Keeper_shutdown_intake_fence.Already_reserved _ ->
          Alcotest.fail "fresh recovery target shutdown was already reserved");
       Fun.protect
         ~finally:(fun () ->
           ignore
-            (Masc.Keeper_turn_admission.rollback_shutdown
+            (Masc.Keeper_shutdown_intake_fence.rollback_shutdown
                ~base_path
                ~keeper_name:to_keeper
                ~operation_id:shutdown_operation_id
-              : Masc.Keeper_turn_admission.rollback_shutdown_result))
+              : Masc.Keeper_shutdown_intake_fence.rollback_result))
         (fun () ->
            (match
               with_strict_executor
@@ -1393,7 +1362,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:29
         ~operation_id:"recover-transfer-target-failure";
       let target_path =
         Filename.concat
@@ -1443,7 +1411,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:board_stim
-        ~owner_nonce:31
         ~operation_id:"recover-transfer-first";
       let first_transition_id =
         match
@@ -1466,7 +1433,6 @@ let () =
         ~from_keeper
         ~to_keeper
         ~source:bootstrap_stim
-        ~owner_nonce:31
         ~operation_id:"recover-transfer-second";
       let second_transition_id =
         match
@@ -1567,25 +1533,27 @@ let () =
           |> Yojson.Safe.to_string
         in
         write_file path malformed;
+        (* The reader fails open: a snapshot this binary cannot decode starts
+           an empty queue instead of stopping the keeper. What it must never do
+           is present the malformed rows as state, and it must leave the file
+           alone so the evidence survives for the operator. *)
+        ignore expected_detail;
         (match
            Keeper_event_queue_persistence.load_state_result
              ~base_path
              ~keeper_name
          with
-         | Ok _ ->
-           Alcotest.failf "persisted malformed payload loaded: %s" label
          | Error detail ->
-           Alcotest.(check bool)
-             (label ^ " error requires reset")
-             true
-             (contains_substring ~needle:"reset required" detail);
-           (match expected_detail with
-            | None -> ()
-            | Some expected ->
-              Alcotest.(check bool)
-                (label ^ " error preserves decoder detail")
-                true
-                (contains_substring ~needle:expected detail)));
+           Alcotest.failf
+             "malformed payload must fail open, got an error: %s (%s)"
+             label
+             detail
+         | Ok state ->
+           Alcotest.(check int)
+             (label ^ " starts from an empty queue")
+             0
+             (Keeper_event_queue.length
+                (Keeper_event_queue_state.pending state)));
         Alcotest.(check string)
           (label ^ " evidence is not rewritten")
           malformed
@@ -1659,7 +1627,7 @@ let () =
 
   (* --- A-fix (RFC: keeper-orphan-stimulus-persistence): a consumed stimulus
          is drained from the current queue state on the genuine-ack path. Here
-         the stimulus lives in event-queue-v15.json, mirroring a bootstrap enqueued
+         the stimulus lives in event-queue-v17.json, mirroring a bootstrap enqueued
          by supervisor launch; after ack, [load] must be empty. Without the
          A-fix this returns length 1 and accumulates across restarts. --- *)
   let base_path = temp_dir "keeper-event-queue-ack-drains-pending" in
@@ -2140,3 +2108,28 @@ let () =
       with
       | Error msg -> assert (String.length msg > 0)
       | Ok () -> Alcotest.fail "durable enqueue overwrote a corrupt snapshot");
+
+  (* --- version contract: a snapshot written under the previous envelope is
+     rejected, never decoded. Dropping a durable stimulus variant changes the
+     persisted shape, so the cut rides on the schema version; a reader that
+     still accepted the older string would meet payload kinds the current sum
+     no longer carries. #29490 removed Goal_reconciliation_ready without
+     turning this crank and four keepers could not boot. --- *)
+  (match
+     Keeper_event_queue_state.of_yojson
+       (`Assoc
+           [ "schema", `String "keeper.event_queue.state.v15"
+           ; "revision", `Int 1
+           ; "pending", `List []
+           ; "last_transition", `Null
+           ; "projected_dispositions", `List []
+           ; "transition_outbox", `List []
+           ; "accepted_transfer_projections", `List []
+           ])
+   with
+   | Ok _ -> Alcotest.fail "prior-schema event queue snapshot was accepted"
+   | Error message ->
+     assert (
+       String.equal
+         message
+         "unsupported keeper event queue state schema: keeper.event_queue.state.v15"))

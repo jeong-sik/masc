@@ -11,6 +11,7 @@ type compaction_rejection =
   | Invalid_compaction_plan
   | Invalid_structure of Keeper_compaction_unit.structural_error
   | No_eligible_history
+  | No_reducible_boundary
   | Invalid_structural_evidence of
       Keeper_compaction_evidence.decode_error
       * Keeper_compaction_outcome.exact_execution_terminal
@@ -30,6 +31,7 @@ let compaction_rejection_to_tag = function
   | Invalid_structure error ->
     "invalid_structure:" ^ Keeper_compaction_unit.show_structural_error error
   | No_eligible_history -> "no_eligible_history"
+  | No_reducible_boundary -> "no_reducible_boundary"
   | Invalid_structural_evidence _ -> "invalid_structural_evidence"
 ;;
 
@@ -62,5 +64,7 @@ let summarization_rejection = function
     Exact_flow_already_started
   | Keeper_compaction_llm_summarizer.Exact_execution_terminal terminal ->
     Exact_execution_terminal terminal
+  | Keeper_compaction_llm_summarizer.No_reducible_boundary ->
+    No_reducible_boundary
   | Keeper_compaction_llm_summarizer.Invalid_plan -> Invalid_compaction_plan
 ;;

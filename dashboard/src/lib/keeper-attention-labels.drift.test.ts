@@ -1,7 +1,8 @@
 // Build-time drift guard for the keeper attention vocabulary.
 //
 // The backend is the single source of truth for `attention_reason` /
-// `next_human_action` wire codes — they are string literals emitted from OCaml.
+// `next_human_action` wire codes — they are literals or canonical shared
+// constants emitted from OCaml.
 // keeper-attention-labels.ts hand-mirrors that vocabulary, and that mirror
 // silently drifted before: the backend emitted `stale_turn_timeout` for a
 // release while the frontend union had no arm for it, so the dashboard showed
@@ -84,20 +85,47 @@ function executionReceiptAttentionReasons(): string[] {
     'operator_disposition_reason_to_string present in keeper_execution_receipt.ml',
   ).toBeGreaterThan(-1)
   const body = src.slice(start, src.indexOf(';;', start))
-  return [...body.matchAll(/-> "([a-z_]+)"/g)]
+  const literalReasons = [...body.matchAll(/-> "([a-z_]+)"/g)]
     .map((m) => m[1])
     .filter((token): token is string => token !== undefined)
+  const internalErrorSrc = read('lib/keeper_runtime/keeper_internal_error.ml')
+  const internalErrorConstants = new Map<string, string>()
+  for (const match of internalErrorSrc.matchAll(/^let ([a-z_]+) = "([a-z_]+)"$/gm)) {
+    const name = match[1]
+    const value = match[2]
+    if (name !== undefined && value !== undefined) internalErrorConstants.set(name, value)
+  }
+  const sharedConstantReasons = [
+    ...body.matchAll(/->\s*Keeper_internal_error\.([a-z_]+)/g),
+  ].map((m) => {
+    const name = m[1]
+    const value = name === undefined ? undefined : internalErrorConstants.get(name)
+    expect(
+      value,
+      `Keeper_internal_error.${name ?? '<missing>'} resolves to a canonical string`,
+    ).toBeDefined()
+    return value as string
+  })
+  return [...literalReasons, ...sharedConstantReasons]
 }
 
 // keeper_runtime_trust_snapshot.ml only promotes receipt disposition reasons to
 // `attention_reason` when the derived display disposition needs attention.
-// These receipt reasons are tied to pass/skipped dispositions and should stay
-// out of the attention label union unless the backend changes that contract.
-const EXECUTION_RECEIPT_PASS_ONLY_REASONS: ReadonlySet<string> = new Set([
+// These receipt reasons currently map to display dispositions that do not
+// require attention. They should stay out of the attention label union unless
+// the backend changes that contract.
+const EXECUTION_RECEIPT_NON_ATTENTION_REASONS: ReadonlySet<string> = new Set([
   'healthy',
   'runtime_fallback',
   'phase_skipped',
   'input_required',
+  'capacity_backpressure',
+  // Same pairing as capacity_backpressure: Disp_fail_open_next_runtime, which
+  // Keeper_operator_disposition_display renders as "Pass", so
+  // display_disposition_requires_attention never promotes it. The provider was
+  // healthy and the keeper carries on; the Korean label lives in
+  // fsm-hub-types' operator-disposition-reason table instead.
+  'accept_rejected',
 ])
 
 describe('keeper attention vocabulary drift guard', () => {
@@ -108,6 +136,9 @@ describe('keeper attention vocabulary drift guard', () => {
     expect(statusBridgeStandaloneActions().length).toBeGreaterThan(0)
     expect(dispositionActions().length).toBeGreaterThan(2)
     expect(executionReceiptAttentionReasons().length).toBeGreaterThan(4)
+    expect(executionReceiptAttentionReasons()).toContain(
+      'provider_attempt_effect_fenced',
+    )
   })
 
   it('every keeper_status_bridge attention_reason has a frontend label', () => {
@@ -143,7 +174,7 @@ describe('keeper attention vocabulary drift guard', () => {
 
   it('every dashboard attention-worthy execution receipt reason has a frontend label', () => {
     const attentionWorthy = executionReceiptAttentionReasons().filter(
-      (reason) => !EXECUTION_RECEIPT_PASS_ONLY_REASONS.has(reason),
+      (reason) => !EXECUTION_RECEIPT_NON_ATTENTION_REASONS.has(reason),
     )
     const missing = [...new Set(attentionWorthy)].filter((reason) => !isAttentionReason(reason))
     expect(

@@ -96,17 +96,28 @@ val agent_credential_of_yojson :
 type auth_config = {
   enabled : bool;
   workspace_secret_hash : string option;  [@default None]
-  require_token : bool;  [@default false]
+  require_token : bool;  [@default true]
   token_expiry_hours : int;  [@default 24]
 }
 [@@deriving show]
 
+val min_token_expiry_hours : int
+val max_token_expiry_hours : int
+(** The window a bearer credential may be issued for, in hours: an hour at the
+    shortest, a year at the longest. Shared by the config decoder and by callers
+    that name their own window instead of taking the config's, so the two cannot
+    disagree about what the credential store will accept. *)
+
 val default_auth_config : auth_config
 (** [enabled = true; workspace_secret_hash = None; require_token = true;
-       token_expiry_hours = 24]. *)
+       token_expiry_hours = 24]. Decoding accepts a workspace hash only as 64
+    lowercase hexadecimal characters and an expiry only in [1..8760]. *)
 
 val auth_config_to_yojson : auth_config -> Yojson.Safe.t
 val auth_config_of_yojson : Yojson.Safe.t -> (auth_config, string) result
+(** Decodes the exact auth configuration object. Missing optional fields use
+    {!default_auth_config}; present invalid, unknown, or duplicate fields are
+    rejected. *)
 
 (** {1 Permission matrix} *)
 

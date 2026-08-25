@@ -29,14 +29,11 @@ let keeper_diagnostic_for_name (ctx : 'a context) ~(name : string) =
       let keepalive_running =
         Keeper_status_bridge.runtime_keepalive_running ctx.config meta
       in
-      let agent_status =
-        Keeper_status_runtime.parse_agent_status ctx.config ~agent_name:meta.agent_name
-      in
       let now_ts = Time_compat.now () in
       Ok
         (Keeper_status_runtime.keeper_diagnostic_json
+           ~config:ctx.config
            ~meta
-           ~agent_status
            ~keepalive_running
            ~history_items:[]
            ~now_ts
@@ -66,23 +63,39 @@ let keeper_recovery_outcome after_diagnostic =
 
 (** {1 Domain-specific action handlers} *)
 
-let workspace_action_result request result =
-  Ok (`Assoc [
-    ("tool_name", `String (delegated_tool_for request.action_type));
-    ("result", result);
-  ])
+let workspace_action_result ?(result_status = ActionOk) request result =
+  let* tool_name = delegated_tool_for request.action_type in
+  Ok (`Assoc [ ("tool_name", `String tool_name); ("result", result) ], result_status)
 
 let execute_workspace_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
   | "broadcast" ->
       let* () = validate_target_type Operator_action_constants.Workspace request in
       let* message =
-        match get_string_opt request.payload "message" with
-        | Some value -> Ok value
-        | None -> Error "payload.message is required"
+        require_payload_field request.payload "message"
+          "payload.message is required"
       in
-      let result = Workspace.broadcast ctx.config ~from_agent:request.actor ~content:message in
-      workspace_action_result request (`String result.rendered)
+      let* result =
+        match
+          (* The operator addressing the workspace is speech. *)
+          Workspace.broadcast
+            ~audience:Workspace_broadcast.Fleet_conversation
+            ctx.config ~from_agent:request.actor ~content:message
+        with
+        | Ok result -> Ok result
+        | Error error -> Error (Workspace.broadcast_error_to_string error)
+      in
+      let result_status =
+        match result.mention_delivery with
+        | Workspace_broadcast.Passive
+        | Workspace_broadcast.Accepted
+        | Workspace_broadcast.Already_accepted -> ActionOk
+        | Workspace_broadcast.Pending
+        | Workspace_broadcast.Deferred _ -> ActionDeferred
+        | Workspace_broadcast.Rejected _ -> ActionError
+      in
+      workspace_action_result ~result_status request
+        (Workspace_broadcast.broadcast_delivery_to_yojson result)
   | "namespace_pause" ->
       let* () = validate_target_type Operator_action_constants.Workspace request in
       let reason =
@@ -102,9 +115,8 @@ let execute_workspace_action (ctx : 'a context) (request : action_request) =
   | "task_inject" ->
       let* () = validate_target_type Operator_action_constants.Workspace request in
       let* title =
-        match get_string_opt request.payload "title" with
-        | Some value -> Ok value
-        | None -> Error "payload.title is required"
+        require_payload_field request.payload "title"
+          "payload.title is required"
       in
       let priority = get_int request.payload "priority" 2 in
       let description =
@@ -202,13 +214,8 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
       let* () = validate_target_type Operator_action_constants.Keeper request in
       let* name = require_target_id request in
       let* message =
-        match get_string_opt request.payload "message" with
-        | Some value -> Ok value
-        | None -> Error "payload.message is required"
-      in
-      let* () =
-        Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_delegate"
-          request.payload
+        require_payload_field request.payload "message"
+          "payload.message is required"
       in
       let args =
         `Assoc
@@ -230,35 +237,32 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
   | _ -> Error (Printf.sprintf "not a keeper action: %s" request.action_type)
 
 let execute_action (ctx : 'a context) (request : action_request) :
-    (Yojson.Safe.t, string) result =
+    (Yojson.Safe.t * action_result_status, string) result =
   match request.action_type with
   | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" ->
       execute_workspace_action ctx request
   | "keeper_probe" | "keeper_recover" | "keeper_message" ->
-      execute_keeper_action ctx request
+      execute_keeper_action ctx request |> Result.map (fun result -> result, ActionOk)
   | "" -> Error "action_type is required"
   | other -> Error (Printf.sprintf "unsupported action_type: %s" other)
 
-(** All known action_types: available_actions plus hidden canonical actions. *)
-let known_action_types =
-  let from_registry =
-    List.map
-      (fun (a : Operator_pending_confirm.available_action) -> a.action_type)
-      Operator_pending_confirm.available_actions
-  in
-  from_registry
-
 let validate_request request =
   if request.action_type = "" then Error "action_type is required"
-  else if List.mem request.action_type known_action_types then Ok ()
-  else Error (Printf.sprintf "unsupported action_type: %s" request.action_type)
+  else
+    match Operator_action_catalog.of_string request.action_type with
+    | Some _ -> Ok ()
+    | None -> Error (Printf.sprintf "unsupported action_type: %s" request.action_type)
+
+let invalidate_operator_snapshot_views config =
+  invalidate_snapshot_cache ();
+  Dashboard_projection_cache.invalidate_snapshot_json ~config
 
 let action_json ?actor_hint (ctx : _ context) args :
     (Yojson.Safe.t, string) result =
   let* request = action_request_of_args ?actor_hint ctx args in
   let* () = validate_request request in
   let* request = normalize_request_target_type request in
-  let delegated_tool = delegated_tool_for request.action_type in
+  let* delegated_tool = delegated_tool_for request.action_type in
   let trace_id = trace_id "ops" in
   let started_at = Unix.gettimeofday () in
   if confirm_required request.action_type then (
@@ -267,7 +271,7 @@ let action_json ?actor_hint (ctx : _ context) args :
     let preview = preview_of_action request in
     let entry =
       {
-        token;
+        confirm_token = token;
         trace_id;
         actor = request.actor;
         action_type = request.action_type;
@@ -280,6 +284,7 @@ let action_json ?actor_hint (ctx : _ context) args :
       }
     in
     let* () = upsert_pending_confirm ctx.config entry in
+    let () = invalidate_operator_snapshot_views ctx.config in
     append_action_log ctx.config
       {
         trace_id;
@@ -300,13 +305,13 @@ let action_json ?actor_hint (ctx : _ context) args :
          [
            ("trace_id", `String trace_id);
            ("confirm_required", `Bool true);
-           ("confirm_token", `String entry.token);
+           ("confirm_token", `String entry.confirm_token);
            ("preview", preview);
            ("tool_name", `String delegated_tool);
            ("expires_at", `String expires_at);
          ]))
   else
-    let* executed = execute_action ctx request in
+    let* executed, result_status = execute_action ctx request in
     let latency_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
     append_action_log ctx.config
       {
@@ -319,18 +324,22 @@ let action_json ?actor_hint (ctx : _ context) args :
         target_id = request.target_id;
         delegated_tool;
         confirmation_state = Immediate;
-        result_status = ActionOk;
+        result_status;
         latency_ms;
         created_at = Masc_domain.now_iso ();
       };
+    let fields =
+      [ ("trace_id", `String trace_id)
+      ; ("confirm_required", `Bool false)
+      ; ("tool_name", `String delegated_tool)
+      ; ("result", executed)
+      ]
+    in
     Ok
-      (Tool_args.ok_assoc
-         [
-           ("trace_id", `String trace_id);
-           ("confirm_required", `Bool false);
-           ("tool_name", `String delegated_tool);
-           ("result", executed);
-         ])
+      (match result_status with
+       | ActionOk -> Tool_args.ok_assoc fields
+       | ActionDeferred -> `Assoc (("status", `String "deferred") :: fields)
+       | ActionError -> Tool_args.error_assoc fields)
 
 let confirm_json ?actor_hint (ctx : _ context) args :
     (Yojson.Safe.t, string) result =
@@ -347,11 +356,13 @@ let confirm_json ?actor_hint (ctx : _ context) args :
   | Some confirm_token -> (
       match
         raw_pending_confirms ctx.config
-        |> List.find_opt (fun entry -> String.equal entry.token confirm_token)
+        |> List.find_opt (fun entry ->
+               String.equal entry.confirm_token confirm_token)
       with
       | None -> Error "pending confirmation not found"
       | Some entry when pending_confirm_expired entry ->
           let* () = remove_pending_confirm ctx.config confirm_token in
+          let () = invalidate_operator_snapshot_views ctx.config in
           append_action_log ctx.config
             {
               trace_id = entry.trace_id;
@@ -396,6 +407,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
       | Some entry ->
           if String.equal decision "deny" then (
             let* () = remove_pending_confirm ctx.config confirm_token in
+            let () = invalidate_operator_snapshot_views ctx.config in
             append_action_log ctx.config
               {
                 trace_id = entry.trace_id;
@@ -435,7 +447,9 @@ let confirm_json ?actor_hint (ctx : _ context) args :
               }
             in
             let* () = remove_pending_confirm ctx.config confirm_token in
-            let* executed = execute_action ctx request in
+            let () = invalidate_operator_snapshot_views ctx.config in
+            let* executed, result_status = execute_action ctx request in
+            let () = invalidate_operator_snapshot_views ctx.config in
             let latency_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
             append_action_log ctx.config
               {
@@ -448,7 +462,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
                 target_id = entry.target_id;
                 delegated_tool = entry.delegated_tool;
                 confirmation_state = Confirmed;
-                result_status = ActionOk;
+                result_status;
                 latency_ms;
                 created_at = Masc_domain.now_iso ();
               };
@@ -456,12 +470,16 @@ let confirm_json ?actor_hint (ctx : _ context) args :
               ~agent_id:entry.actor ~trace_id:entry.trace_id
               ~decision:Audit_log.Gate_confirm ~action_type:entry.action_type
               ~confirmation_state:(confirmation_state_to_string Confirmed) ();
+            let fields =
+              [ ("trace_id", `String entry.trace_id)
+              ; ("decision", `String "confirm")
+              ; ("tool_name", `String entry.delegated_tool)
+              ; ("result", executed)
+              ; ("executed_action", pending_confirm_to_yojson entry)
+              ]
+            in
             Ok
-              (Tool_args.ok_assoc
-                 [
-                   ("trace_id", `String entry.trace_id);
-                   ("decision", `String "confirm");
-                   ("tool_name", `String entry.delegated_tool);
-                   ("result", executed);
-                   ("executed_action", pending_confirm_to_yojson entry);
-                 ]))
+              (match result_status with
+               | ActionOk -> Tool_args.ok_assoc fields
+               | ActionDeferred -> `Assoc (("status", `String "deferred") :: fields)
+               | ActionError -> Tool_args.error_assoc fields))

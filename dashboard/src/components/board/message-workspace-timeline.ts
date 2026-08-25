@@ -1,16 +1,24 @@
 import { html } from 'htm/preact'
-import { useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import { ArrowLeft, AtSign } from 'lucide-preact'
 import { ActionButton } from '../common/button'
-import { EmptyState } from '../common/feedback-state'
+import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { RichContent } from '../common/rich-content'
 import { TimeAgo } from '../common/time-ago'
 import { SYSTEM_MESSAGE_FROM, boardMessageRowKey, previewBoardMessage } from '../../lib/board-utils'
-import { messages } from '../../store'
+import {
+  cancelDashboardWorkspaceMessagesRefresh,
+  messages,
+  refreshDashboardWorkspaceMessages,
+  serverStatus,
+  workspaceMessagesError,
+  workspaceMessagesLoading,
+} from '../../store'
 import type { Message } from '../../types'
 import { ComposerV2 } from './composer-v2'
 import { extractMentionTargets } from './mention-inbox'
 import { navigateBoard } from './board-route'
+import { registerWorkspaceMessagesRefresh } from '../../sse-store'
 
 interface TimelineRow {
   message: Message
@@ -56,7 +64,7 @@ export function buildMessageWorkspaceModel(messageList: readonly Message[]): Mes
   let totalMentions = 0
 
   messageList.forEach((message, index) => {
-    const mentionTargets = extractMentionTargets(message.content)
+    const mentionTargets = message.mentions ?? extractMentionTargets(message.content)
     totalMentions += mentionTargets.length
     const workspace = normalizeWorkspace(message.workspace)
     const rows = byWorkspace.get(workspace) ?? []
@@ -100,6 +108,12 @@ function TimelineMessage({ row }: { row: TimelineRow }) {
           ${row.message.type
             ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5 text-2xs font-medium uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">${row.message.type}</span>`
             : null}
+          ${row.message.mentionDelivery
+            ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5 text-2xs font-medium uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">${row.message.mentionDelivery === 'passive' ? 'Passive fanout' : `Keeper intake ${row.message.mentionDelivery}`}</span>`
+            : null}
+          ${row.message.requestId
+            ? html`<span class="max-w-48 truncate font-mono text-2xs text-[var(--color-fg-muted)]" title=${row.message.requestId} translate="no">${row.message.requestId}</span>`
+            : null}
         </div>
         <div class="mt-2 text-sm leading-paragraph text-[var(--color-fg-primary)]">
           <${RichContent} text=${preview} previewLimit=${2} />
@@ -123,6 +137,7 @@ function TimelineMessage({ row }: { row: TimelineRow }) {
 
 export function MessageWorkspaceTimeline() {
   const model = useMemo(() => buildMessageWorkspaceModel(messages.value), [messages.value])
+  const project = serverStatus.value?.project ?? null
   const [selectedWorkspace, setSelectedWorkspace] = useState<string | null>(null)
   const activeWorkspace = model.workspaces.some(workspace => workspace.workspace === selectedWorkspace)
     ? selectedWorkspace
@@ -130,8 +145,24 @@ export function MessageWorkspaceTimeline() {
   const active = activeWorkspace ? model.workspaces.find(workspace => workspace.workspace === activeWorkspace) ?? null : null
   const composerWorkspace = activeWorkspace ?? 'default'
 
+  useEffect(() => {
+    const refresh = () => {
+      void refreshDashboardWorkspaceMessages(project)
+    }
+    const unregister = registerWorkspaceMessagesRefresh(refresh)
+    refresh()
+    return () => {
+      unregister()
+      cancelDashboardWorkspaceMessagesRefresh()
+    }
+  }, [project])
+
   return html`
-    <section class="grid gap-4" aria-labelledby="message-workspace-timeline-heading">
+    <section
+      class="grid gap-4"
+      aria-labelledby="message-workspace-timeline-heading"
+      aria-busy=${workspaceMessagesLoading.value}
+    >
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">Messages</div>
@@ -164,10 +195,18 @@ export function MessageWorkspaceTimeline() {
         </div>
       </div>
 
+      ${workspaceMessagesError.value
+        ? html`<${ErrorState} message=${workspaceMessagesError.value} />`
+        : null}
+
       ${model.workspaces.length === 0
         ? html`
             <${ComposerV2} workspaceId=${composerWorkspace} />
-            <${EmptyState} message="메시지 타임라인이 없습니다" compact />
+            ${workspaceMessagesError.value
+              ? null
+              : workspaceMessagesLoading.value
+              ? html`<${LoadingState}>메시지 타임라인 불러오는 중…<//>`
+              : html`<${EmptyState} message="메시지 타임라인 없음" compact />`}
           `
         : html`
             <div class="flex flex-wrap gap-2" role="tablist" aria-label="Message workspaces">

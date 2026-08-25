@@ -13,7 +13,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(result : Keeper_agent_run.run_result) ~(latency_ms : int)
     ~(turn_cost : float)
-    ~(turn_generation : int)
     ~(channel : Keeper_world_observation.keeper_cycle_channel)
     ~(checkpoint_bytes : int)
     ~(message_count : int)
@@ -44,7 +43,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
           ("cache_creation_tokens", `Int result.usage.cache_creation_input_tokens);
           ("cache_read_tokens", `Int result.usage.cache_read_input_tokens);
           ("total_tokens",
-           `Int (Keeper_context_runtime.total_tokens result.usage));
+           `Int (Inference_utils.total_tokens result.usage));
         ]
         @ usage_trust_json_fields usage_trust)
     else
@@ -94,7 +93,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         ("name", `String meta.name);
         ("agent_name", `String meta.agent_name);
         ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-        ("generation", `Int turn_generation);
         ("prompt_fingerprint", `String result.prompt_metrics.fingerprint);
         ("prompt", Keeper_agent_run.prompt_metrics_to_json result.prompt_metrics);
         ("ctx_composition", Keeper_agent_run.ctx_composition_to_json result.ctx_composition);
@@ -121,7 +119,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
          match result.runtime_observation with
          | Some observation -> redacted_runtime_observation_to_json observation
          | None -> `Null);
-        ("memory_check", memory_check_default_json ());
         ("handoff_performed",
          `Bool
            (match handoff_json with
@@ -135,17 +132,17 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
         ( "trace_ref",
           match result.trace_ref with
           | Some trace_ref ->
-              Agent_sdk.Raw_trace.run_ref_to_yojson trace_ref
+              Agent_core.Raw_trace.run_ref_to_yojson trace_ref
           | None -> `Null );
         ( "run_validation",
           match result.run_validation with
           | Some validation ->
-              Agent_sdk.Raw_trace.run_validation_to_yojson validation
+              Agent_core.Raw_trace.run_validation_to_yojson validation
           | None -> `Null );
         ("inference_telemetry",
          match result.inference_telemetry with
          | Some t ->
-           Keeper_hooks_oas.inference_telemetry_to_runtime_json t
+           Keeper_hooks_agent_core.inference_telemetry_to_runtime_json t
          | None -> `Null);
       ])
   in

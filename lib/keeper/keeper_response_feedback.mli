@@ -1,5 +1,5 @@
 (** keeper-v2 #9: response-feedback typed model + deterministic aggregation
-    (MASC-side only; OAS is unaware of this module by construction).
+    (MASC-side only; AGENT_CORE is unaware of this module by construction).
 
     Phase 1a — the PURE, deterministic core: the vote vocabulary, a strict
     JSON codec, and a pure tally fold. No I/O, no Eio. The durable sink

@@ -10,10 +10,9 @@
 type turn_prompt_context =
   { turn_system_prompt : string
   ; dynamic_context : string
-  ; memory_context : string
   ; temporal_context : string
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
-  ; history_messages : Agent_sdk.Types.message list
+  ; history_messages : Agent_core.Types.message list
   ; ctx_work : Keeper_context_runtime.working_context
   }
 
@@ -34,12 +33,7 @@ type extra_system_context_assembly =
 
 val sanitize_user_message : string -> string
 (** Normalize malformed UTF-8 before appending the complete user message to
-    the OAS context. This boundary does not classify or rewrite its meaning. *)
-
-val normalize_memory_fragment : string -> string
-(** Normalize malformed UTF-8 while preserving the complete recalled memory.
-    Trust and relevance are interpreted by the configured model, not by a
-    local string deny-list. *)
+    the AGENT_CORE context. This boundary does not classify or rewrite its meaning. *)
 
 val assemble_extra_system_context :
   existing_extra_system_context:string option ->
@@ -49,9 +43,23 @@ val assemble_extra_system_context :
     estimate has authority over assembly or dispatch; typed provider overflow
     is handled at the MASC lane boundary. *)
 
+val ends_with_tool_results : Agent_core.Types.message list -> bool
+(** Whether the conversation's last message is a Tool-role message — i.e. the
+    next provider round immediately continues a tool loop.
+
+    This is a position question, not a containment question:
+    [Hooks.last_tool_results] reports the results of the last Tool message
+    anywhere in history, so it is non-empty for almost every turn of a keeper
+    that has ever used a tool. Gating the recurring context blocks on that
+    predicate suppressed the world state on the first round of ordinary turns
+    (live: one keeper's turn 15, 2026-08-24 08:08Z — ctx absent on round one).
+    The
+    first round of a turn ends with the user's message; only rounds that
+    follow tool execution end with the Tool message. *)
+
 val build_turn_context
   :  ctx:Keeper_run_context.run_context
-  -> build_turn_prompt:(base_system_prompt:string -> messages:Agent_sdk.Types.message list -> Keeper_agent_prompt_metrics.turn_prompt)
+  -> build_turn_prompt:(base_system_prompt:string -> messages:Agent_core.Types.message list -> Keeper_agent_prompt_metrics.turn_prompt)
   -> user_message:string
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta

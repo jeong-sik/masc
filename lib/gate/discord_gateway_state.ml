@@ -10,8 +10,6 @@
    incomplete transition surfaces as an explicit, named failure
    rather than a silent no-op or catch-all swallow. *)
 
-let protocol_version = 10
-
 (* ── Opcodes ────────────────────────────────────────────────────── *)
 
 type opcode =
@@ -256,7 +254,12 @@ let trigger_policy_to_string = function
 
 (* ── Opaque state ──────────────────────────────────────────────── *)
 
-let gateway_url = "wss://gateway.discord.gg/?v=10&encoding=json"
+(* [v] is the API version, per the gateway docs' query-parameter table, so
+   it comes from the one place that number is defined. *)
+let gateway_url =
+  Printf.sprintf
+    "wss://gateway.discord.gg/?v=%d&encoding=json"
+    Discord_api_version.current
 
 module StringMap = Map.Make (String)
 
@@ -265,7 +268,6 @@ type t =
   ; config : config
   ; reconnect_attempts : int        (* Exponential backoff exponent. *)
   ; last_seq : int option           (* Latest dispatch sequence number. *)
-  ; heartbeat_interval_ms : int option  (* From Op_hello, used by Heartbeat_tick. *)
   ; resume_gateway_url : string option  (* From READY, used by Resuming. *)
   ; resume_context : (string * int option) option
     (* (session_id, last_seq_at_disconnect). Set when leaving Connected
@@ -286,7 +288,6 @@ let create ~config =
   ; config
   ; reconnect_attempts = 0
   ; last_seq = None
-  ; heartbeat_interval_ms = None
   ; resume_gateway_url = None
   ; resume_context = None
   ; awaiting_hello_since_mono = None
@@ -317,24 +318,11 @@ let field_bool_opt name json =
   | Some (`Bool b) -> Some b
   | _ -> None
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  if needle_len = 0 then true
-  else if needle_len > haystack_len then false
-  else
-    let rec loop i =
-      if i + needle_len > haystack_len then false
-      else if String.sub haystack i needle_len = needle then true
-      else loop (i + 1)
-    in
-    loop 0
-
 let content_mentions_user ~user_id content =
   let user_id = String.trim user_id in
   user_id <> ""
-  && (contains_substring ~needle:("<@" ^ user_id ^ ">") content
-      || contains_substring ~needle:("<@!" ^ user_id ^ ">") content)
+  && (String_util.contains_substring content ("<@" ^ user_id ^ ">")
+      || String_util.contains_substring content ("<@!" ^ user_id ^ ">"))
 
 (* Discord sends user mentions as [<@snowflake>] (or [<@!snowflake>] for
    nickname-ping).  The structured [mentions] array carries the matching
@@ -788,7 +776,6 @@ let handle_hello t (frame : frame) =
            in
            ( { t with
                state = next_state
-             ; heartbeat_interval_ms = Some interval_ms
              ; awaiting_hello_since_mono = None
              }
            , [ Schedule_heartbeat { interval_ms }

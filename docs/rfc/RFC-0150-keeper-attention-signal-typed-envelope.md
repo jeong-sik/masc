@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0068", "0135"]
-implementation_prs: []
 ---
 
 # RFC-0150: Keeper Attention Signal — backend 단일 typed wire envelope

@@ -10,15 +10,17 @@
 (** {1 Failure classification} *)
 
 (** Closed sum type for tool failure classification.  Each constructor
-    maps to a distinct retry/log/telemetry policy; the compiler enforces
+    maps to distinct diagnostic/log/telemetry evidence; the compiler enforces
     exhaustive handling at every match site.
 
     @since 2.96.0 *)
 type tool_failure_class =
-  | Transient_error (** Network/timeout/rate-limit — retryable *)
+  | Dependency_unavailable (** A required external dependency was unavailable. *)
   | Policy_rejection (** Auth/permission/boundary — permanent *)
-  | Runtime_failure (** Internal error/bug — non-retryable *)
-  | Workflow_rejection (** Business rule violation — non-retryable *)
+  | Runtime_failure (** Internal error/bug. *)
+  | Workflow_rejection (** Business rule violation. *)
+  | Operator_cancelled
+      (** An operator interrupted the work (#28810). *)
 
 type failure_effect_disposition =
   | Proven_pre_effect
@@ -31,25 +33,24 @@ type failure_effect_disposition =
 val failure_effect_disposition_to_string : failure_effect_disposition -> string
 val failure_effect_disposition_of_string : string -> failure_effect_disposition option
 
+(** The encoder emits only current constructor names.  The decoder also accepts
+    the historical derived-json constructor [["Transient_error"]] as
+    {!Dependency_unavailable}, so persisted telemetry remains readable after
+    the constructor rename. *)
 val tool_failure_class_to_yojson : tool_failure_class -> Yojson.Safe.t
 val tool_failure_class_of_yojson :
   Yojson.Safe.t -> (tool_failure_class, string) result
 
 val pp_tool_failure_class : Format.formatter -> tool_failure_class -> unit
-val show_tool_failure_class : tool_failure_class -> string
-
 val tool_failure_class_to_string : tool_failure_class -> string
 val tool_failure_class_of_string : string -> tool_failure_class option
-
-(** [Transient_error] is the only retryable class. *)
-val is_retryable : tool_failure_class -> bool
 
 (** [Runtime_failure] maps to [Error]; all others to [Warn]. *)
 val log_level_of_failure_class : tool_failure_class -> Log.level
 
 (** {1 Tool call outcome (wire-level)} *)
 
-(** Lightweight observation of an MCP/OAS wire response.  This external
+(** Lightweight observation of an MCP/AGENT_CORE wire response.  This external
     projection cannot represent {!Deferred}; it is not an internal execution
     outcome authority. *)
 type tool_call_outcome = Ok | Error | Unknown
@@ -58,8 +59,10 @@ val string_of_tool_call_outcome : tool_call_outcome -> string
 val log_level_of_tool_call_outcome : tool_call_outcome -> Log.level
 
 (** Classify a tool failure from an exception raised during execution.
-    Constructor-only fallback.  Semantic classes from exception messages must
-    be passed explicitly at the catch boundary. *)
+    Constructor-only fallback.  A bare [Eio.Time.Timeout] or the timeout reason
+    wrapped by [Eio.Cancel.Cancelled] is {!Dependency_unavailable}; other Eio
+    cancellation reasons are {!Operator_cancelled}.  Semantic classes from
+    exception messages must be passed explicitly at the catch boundary. *)
 val classify_from_exception : exn -> tool_failure_class
 
 (** {1 Structured result (SSOT)} *)
@@ -95,6 +98,7 @@ type failure_payload =
   { class_ : tool_failure_class
   ; message : string
   ; data : Yojson.Safe.t
+  ; metadata : Yojson.Safe.t option
   ; tool_name : string
   ; duration_ms : float
   }
@@ -121,6 +125,10 @@ val data : result -> Yojson.Safe.t
 
 val metadata : result -> Yojson.Safe.t option
 
+(** Attach an opaque one-way projection without changing the authoritative
+    disposition or payload. *)
+val with_metadata : Yojson.Safe.t -> result -> result
+
 (** Explicit predicates.  Use all three when recording or serializing an
     outcome; do not collapse {!Deferred} into a success boolean inside MASC. *)
 (** [true] only for [Completed].  This is a derived query, not an outcome value;
@@ -139,10 +147,10 @@ val is_failed : result -> bool
     must use {!make_ok} and pass [~data] directly. *)
 val ok : tool_name:string -> start_time:float -> string -> result
 
-(** Failure result with an opaque string body.  An absent explicit class
-    defaults to [Runtime_failure]; message contents never affect the class. *)
+(** Failure result with an opaque string body.  The producer must supply the
+    failure class explicitly; message contents never affect the class. *)
 val error
-  :  ?failure_class:tool_failure_class option
+  :  failure_class:tool_failure_class
   -> tool_name:string
   -> start_time:float
   -> string
@@ -170,7 +178,7 @@ val make_ok
   -> unit
   -> result
 
-(** Typed deferred constructor.  [metadata] is forwarded opaquely at the OAS
+(** Typed deferred constructor.  [metadata] is forwarded opaquely at the AGENT_CORE
     boundary; the constructor itself is the only semantic authority. *)
 val make_deferred
   :  tool_name:string
@@ -186,6 +194,7 @@ val make_err
   -> class_:tool_failure_class
   -> start_time:float
   -> ?data:Yojson.Safe.t
+  -> ?metadata:Yojson.Safe.t
   -> string
   -> result
 

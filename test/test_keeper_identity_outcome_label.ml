@@ -14,12 +14,12 @@ let test_empty_input () =
 
 let dummy_input = "kpper"
 
-let test_persona_not_found () =
+let test_keeper_not_found () =
   let err =
-    Keeper_identity.Persona_not_found
+    Keeper_identity.Keeper_not_found
       { input = dummy_input; resolved = "kpper"; searched = "/x" }
   in
-  check string "Persona_not_found" "persona_not_found" (label_of err)
+  check string "Keeper_not_found" "keeper_not_found" (label_of err)
 
 let test_name_ambiguous () =
   let err =
@@ -41,7 +41,7 @@ let () =
       ( "P3-a outcome labels",
         [
           test_case "Empty_input" `Quick test_empty_input;
-          test_case "Persona_not_found" `Quick test_persona_not_found;
+          test_case "Keeper_not_found" `Quick test_keeper_not_found;
           test_case "Name_ambiguous" `Quick test_name_ambiguous;
           test_case "Ephemeral_suffix_rejected" `Quick
             test_ephemeral_suffix_rejected;

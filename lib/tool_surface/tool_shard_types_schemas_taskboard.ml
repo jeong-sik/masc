@@ -3,11 +3,11 @@
 let taskboard_tools : Masc_domain.tool_schema list =
   [ { name = "keeper_tasks_list"
     ; description =
-        "List tasks on the MASC backlog. Returns task_id, title, status, assignee, and \
-         priority for each task. For awaiting_verification, report that the task \
-         is pending a verdict from the system LLM agent at the \
-         completion-authority boundary and is not claimable by any Keeper; never \
-         Read producer sandbox paths directly."
+        "List backlog tasks. Rows carry id, title, priority, created_at, status, \
+         assignee; projection=full adds description, files, contract, \
+         handoff_context, execution_links. awaiting_verification means the task \
+         awaits the completion-authority verdict and no Keeper can claim it; \
+         never Read producer sandbox paths."
     ; input_schema =
         `Assoc
                   [ "type", `String "object"
@@ -32,7 +32,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
                 ; ( "limit"
                   , `Assoc
                       [ (* #18472 widening removed: a multi-type schema trips
-                           OAS #2343 fail-closed and crashes the keeper cycle.
+                           agent-core boundary fail-closed and crashes the keeper cycle.
                            Runtime coerces string->int, so strict integer is safe. *)
                         ( "type", `String "integer" )
                       ; "description", `String "Max tasks to return (default: 50)"
@@ -47,216 +47,19 @@ let taskboard_tools : Masc_domain.tool_schema list =
                                   , `String
                                       "Optional producer revision from the previous keeper_tasks_list snapshot; matching revisions return unchanged." )
                                 ] )
+                          ; ( "projection"
+                            , `Assoc
+                                [ "type", `String "string"
+                                ; "enum", `List [ `String "compact"; `String "full" ]
+                                ; "default", `String "compact"
+                                ] )
                           ] )
           ]
     }
-  ; { name = "keeper_tasks_audit"
-    ; description =
-        "Find tasks whose exact assignee identity is absent from explicit active \
-         workspace/session membership. Returns the task status and assignee. This \
-         audit is read-only: it never releases or reassigns tasks."
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ ( "limit"
-                  , `Assoc
-                      [ (* #18472 widening removed: a multi-type schema trips
-                           OAS #2343 fail-closed and crashes the keeper cycle.
-                           Runtime coerces string->int, so strict integer is safe. *)
-                        ( "type", `String "integer" )
-                      ; "description", `String "Max orphans to return (default: 20)"
-                      ; "minimum", `Int 1
-                      ; "maximum", `Int 50
-                      ; "default", `Int 20
-                      ] )
-                ] )
-          ]
-    }
-  ; { name = "keeper_broadcast"
-    ; description =
-        "Send a message visible to all agents in the MASC workspace. Use for status updates, \
-         announcements, warnings, or workspace."
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ ( "message"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; "description", `String "Message content to broadcast"
-                      ; "minLength", `Int 1
-                      ] )
-                ] )
-          ; "required", `List [ `String "message" ]
-          ]
-    }
-  ; { name = "keeper_task_claim"
-    ; description =
-        "Claim MASC backlog work. With no task_id, claims the next eligible \
-         unclaimed todo task that matches your capabilities. \
-         awaiting_verification tasks are pending a verdict from the system LLM agent \
-         at the completion-authority boundary and are not claimable Keeper work. \
-         Never Read producer sandbox paths directly. \
-         With task_id, claims that exact task when a user, mention, board item, or \
-         keeper_tasks_list row identifies it; an awaiting_verification task returns \
-         the typed pending-verdict refusal. If you already own another \
-         Claimed/InProgress task, finish it with keeper_task_done or explicitly \
-         release it first; keeper_task_claim does not auto-release active work. If \
-         active_goal_ids are configured, the no-arg claim prefers goal-linked work \
-         and only widens when the scoped pool has no eligible task."
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ ( "task_id"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String
-                            "Optional exact task id from keeper_tasks_list, board, mention, or user request" )
-                      ; "minLength", `Int 1
-                      ] )
-                ] )
-          ]
-    }
-  ; { name = "keeper_task_done"
-    ; description =
-        "Mark your claimed task as complete with a result summary and trusted \
-         evidence_refs. The task must be claimed by you. The completion gate \
-         accepts task completion only when evidence_refs contains a \
-         reviewer-inspectable PR, commit, trace, receipt, or URL reference; \
-         pure-placeholder results ('done', 'ok', etc.) are rejected."
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ ( "task_id"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; "description", `String "Task ID returned by keeper_task_claim"
-                      ; "minLength", `Int 1
-                      ] )
-                ; ( "result"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String
-                            "What was done: files changed, tests run, outcome observed" )
-                      ; "minLength", `Int 1
-                      ] )
-                ; ( "evidence_refs"
-                  , `Assoc
-                      [ "type", `String "array"
-                      ; "items", `Assoc [ "type", `String "string" ]
-                      ; "minItems", `Int 1
-                      ; ( "description"
-                        , `String
-                            "Trusted references substantiating completion. At least \
-                             one reference must validate against local state: an \
-                             existing base-path file/file:// URI, local git commit \
-                             hash, or .masc trace/turn/receipt ref that resolves on \
-                             disk. Result text, URLs, PR numbers, and trace-shaped \
-                             labels alone do not satisfy the task-completion gate." )
-                      ] )
-                ; ( "notes"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String
-                            "Verification handoff notes (>= 20 chars). For \
-                             contracted tasks: summarise what changed AND \
-                             mention each contract.required_evidence entry \
-                             verbatim. Ignored when the task has no contract."
-                        )
-                      ] )
-                ] )
-          ; "required", `List [ `String "task_id"; `String "result"; `String "evidence_refs" ]
-          ]
-    }
-  ; { name = "keeper_task_create"
-    ; description =
-        "Create a new task on the MASC backlog. The task appears for any keeper to \
-         claim."
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ ( "title"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String
-                            "Task title: verb + object + scope (e.g. 'Fix CI timeout in \
-                             keeper_agent_run.ml')" )
-                      ; "minLength", `Int 5
-                      ; "maxLength", `Int 200
-                      ] )
-                ; ( "description"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String
-                            "What to do, why, and acceptance criteria. Another keeper \
-                             reads this to start working." )
-                      ; "minLength", `Int 10
-                      ] )
-                ; ( "priority"
-                  , `Assoc
-                      [ "type", `String "integer"
-                      ; ( "description"
-                        , `String "1=critical 2=high 3=medium 4=low 5=backlog" )
-                      ; "minimum", `Int 1
-                      ; "maximum", `Int 5
-                      ; "default", `Int 3
-                      ] )
-                ; ( "goal_id"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String
-                            "Optional structured goal linkage." )
-                      ] )
-                ; ( "contract"
-                  , `Assoc
-                      [ "type", `String "object"
-                      ; ( "description"
-                        , `String
-                            "Optional persisted task contract for deterministic \
-                             completion and verification evidence." )
-                      ; ( "properties"
-                        , `Assoc
-                            [ "strict", `Assoc [ "type", `String "boolean" ]
-                            ; ( "completion_contract"
-                              , `Assoc
-                                  [ "type", `String "array"
-                                  ; "items", `Assoc [ "type", `String "string" ]
-                                  ] )
-                            ; ( "required_evidence"
-                              , `Assoc
-                                  [ "type", `String "array"
-                                  ; "items", `Assoc [ "type", `String "string" ]
-                                  ] )
-                            ; ( "inspect_gate_evidence"
-                              , `Assoc
-                                  [ "type", `String "array"
-                                  ; "items", `Assoc [ "type", `String "string" ]
-                                  ] )
-                            ; ( "verify_gate_evidence"
-                              , `Assoc
-                                  [ "type", `String "array"
-                                  ; "items", `Assoc [ "type", `String "string" ]
-                                  ] )
-                            ] )
-                      ] )
-                ] )
-          ; "required", `List [ `String "title"; `String "description" ]
-          ]
-    }
+  ; Tool_shard_types_schemas_taskboard_toml.tasks_audit
+  ; Tool_shard_types_schemas_taskboard_toml.broadcast
+  ; Tool_shard_types_schemas_taskboard_toml.task_claim
+  ; Tool_shard_types_schemas_taskboard_toml.task_done
+  ; Tool_shard_types_schemas_taskboard_toml.task_create
   ]
 ;;

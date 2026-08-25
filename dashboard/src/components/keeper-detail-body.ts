@@ -14,7 +14,6 @@ import { KpiGrid } from './keeper-detail-kpi'
 import {
   EquipmentList,
   RelationshipList,
-  TraitsList,
 } from './keeper-detail-lists'
 import {
   InferenceTelemetryPanel,
@@ -31,10 +30,7 @@ import {
   KeeperDetailSectionRail,
   KeeperDetailSection,
 } from './keeper-detail-shell'
-import {
-  GenerationLineagePanel,
-  KeeperCheckpointPanel,
-} from './keeper-detail-history'
+import { KeeperCheckpointPanel } from './keeper-detail-history'
 import {
   KeeperDiagnosticSummary,
   KeeperRuntimeActions,
@@ -43,12 +39,12 @@ import { KeeperStateDiagramPanel } from './keeper-state-diagram'
 import { KeeperCompactionPanel } from './keeper-compaction-panel'
 import { AgentJournalStream } from './agent-detail-journal'
 import { SessionTraceView } from './session-trace/session-trace-view'
+import { isKeeperOffline } from '../lib/keeper-predicates'
 import { KeeperToolTelemetry } from './keeper-tool-telemetry'
 import { KeeperEvalQualityPanel } from './keeper-eval-quality'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import { KeeperMemoryOsRecallPanel, KeeperTurnInspector } from './keeper-turn-inspector'
 import { SupervisorDiagnosticsPanel } from './keeper-supervisor-diagnostics'
-import { KeeperPromptAssemblyPanel } from './keeper-prompt-assembly-panel'
 import { KeeperRuntimeModelEditor } from './keeper-runtime-model-editor'
 import { KeeperConditionsDivergent } from './keeper-conditions-divergent'
 import { KeeperActivitySummary } from './keeper-detail-activity-summary'
@@ -116,7 +112,7 @@ export function KeeperDetailBody({
         >
           <${KeeperCommsPanel} keeper=${keeper} />
           <${CollapsibleSection} title="세션 활동 로그" open=${false} mountWhenOpen=${true}>
-            <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
+            <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperOffline=${isKeeperOffline(keeper)} />
           <//>
         <//>
 
@@ -175,9 +171,6 @@ export function KeeperDetailBody({
       ${'' /* ── CTX composition by category ── */}
       <${CtxCompositionPanel} keeper=${keeper} />
 
-      ${'' /* ── Keeper prompt assembly provenance and stale guidance audit ── */}
-      <${KeeperPromptAssemblyPanel} compact=${true} />
-
       ${'' /* ── Prompt fingerprint / segment telemetry ── */}
       <${PromptTelemetryPanel} keeper=${keeper} />
 
@@ -191,7 +184,7 @@ export function KeeperDetailBody({
           title="진단 / 운영"
           defaultCollapsed=${true}
         >
-          ${'' /* ── 런타임 model (RFC-0207 persona runtime_id) — read-only card surfaced here one expand away; edits deep-link to the 설정(.kcf) 런타임 tab, the single write path ── */}
+          ${'' /* Runtime assignment is read-only here; edits deep-link to the config runtime tab, the single write path. */}
           <${KeeperRuntimeModelEditor} keeperName=${keeper.name} onOpenRuntimeConfig=${onOpenRuntimeConfig} />
           <${KeeperToolTelemetry} keeperName=${keeper.name} />
           <${KeeperSecretProjectionPanel} keeperName=${keeper.name} projection=${compositeSnapshot?.secret_projection} />
@@ -243,14 +236,7 @@ export function KeeperDetailBody({
         >
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <${PanelCard} title="프로필">
-          <${TraitsList} traits=${keeper.traits ?? []} label="특성" />
-          <${TraitsList} traits=${keeper.interests ?? []} label="관심사" />
-          ${keeper.primaryValue
-            ? html`<div class="flex items-center gap-2 mt-3 text-xs text-[var(--color-fg-muted)]">
-                <span class="text-[var(--color-fg-muted)]">핵심 가치:</span>
-                <span class="font-medium text-[var(--color-status-ok)]">${keeper.primaryValue}</span>
-              </div>`
-            : null}
+              <div class="text-xs text-[var(--color-fg-muted)]">Keeper ${keeper.name}</div>
             <//>
 
           ${keeper.inventory && keeper.inventory.length > 0
@@ -269,7 +255,6 @@ export function KeeperDetailBody({
             `
             : null}
 
-          <${GenerationLineagePanel} keeperName=${keeper.name} />
             </div>
 
           <${CollapsibleSection} title="Checkpoint & Snapshots">

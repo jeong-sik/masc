@@ -1,10 +1,11 @@
 ---
+rfc: "0363"
 title: Historical tool-result demotion in the bounded transmission view
 status: Draft
-authors: Claude Opus 5 (1M context)
+author: Claude Opus 5 (1M context)
 created: 2026-08-05
 supersedes: []
-relates_to:
+related:
   - RFC-0351 (memory-first context management, compaction sunset) — this implements the L5 tool_result line
   - RFC-memory-os-bounded-context-and-librarian-curator (#26534)
   - "#26545 / #26551 / #26800 (Runtime_model_input_tail_window)"
@@ -75,7 +76,7 @@ RFC-0351 §4 타입 수명이 이미 이 줄을 적어놓았다:
 
 ```
 raw = project_with_drop ~measure_message_bytes ~capacity_bytes ~reserved_bytes messages
-demote ~demote_before:raw.dropped_atoms messages
+demote ~demote_before:(* §3.4.1: 현재 턴의 첫 원자 *) messages
   |> project_with_drop ~measure_message_bytes ~capacity_bytes ~reserved_bytes
 ```
 
@@ -87,7 +88,7 @@ demote ~demote_before:raw.dropped_atoms messages
    `api_common.ml:304-321` — `content_blocks = Some blocks` 이면 `content` 는 **직렬화되지 않는다**. 그런 메시지의 `content` 를 마커로 바꾸면 크기가 전혀 줄지 않는데 추정기는 감소를 계상한다. 즉 추정이 **하한**이 되어, window 가 과소평가로 cut 하고 물질화된 요청이 예산을 넘는다. `Some` 은 이미지·문서를 담으며 마커로 표현할 수도 없다.
 2. `Tool_output.decode_from_oas content = Not_marker`
    `Decoded` 는 이미 강등된 것이고, **`Invalid_marker` 는 강등하지 않는다** — 마커 모양인데 파싱에 실패한 payload 를 blob 으로 다시 저장하면 손상을 고착시킨다. 세 경우를 exhaustive match 로 다룬다.
-3. 원자 인덱스 < 원문 projection 의 `dropped_atoms`
+3. 원자 인덱스 < `demote_before` 경계 (§3.4.1: 현재 턴의 첫 원자. 최후예외 시에는 최신 원자 너머)
 4. `upper_bound_demoted_bytes msg < measure_message_bytes msg`
 
 판단은 (a) 타입, (b) 정수 비교, (c) 바이트 비교뿐이다. 중요도 점수·문자열 분류·휴리스틱 임계값 없음 (RFC-0351 §2 원칙 2).
@@ -136,6 +137,12 @@ where saturating_ref = make_artifact_ref
 3. 줄어든 메시지로 최종 cut을 다시 계산한다.
 
 따라서 demotion 경계는 원문 cut이 움직일 때만 움직인다. 양자화 cut이 60으로 유지되는 동안 새 turn을 붙여도 같은 60개만 마커이고, 60 → 120으로 뛰는 순간 새 60개가 바뀌지만 그 원자들은 원문 요청에서도 바로 그 jump에 탈락한다. demotion이 prompt-cache 변경 빈도를 늘리지 않는다. exact cut fallback에서도 동일하다. raw cut이 매 turn 움직이는 상황에서는 demotion도 움직이지만, 원문 prefix가 이미 같은 빈도로 움직인다.
+
+### 3.4.1 개정 — 경계는 현재 턴이다 (#28739), 최후예외 하나 (#28845)
+
+구현은 위 원문-cut 고정에서 **현재 턴의 첫 원자** 경계(RFC-0351 §4 사이클 스코프)로 옮겨졌다 (#28739). 이전 턴의 결과는 이미 receipt/보드 포스트로 보고됐으므로, 원문 cut 이 유지한 이전-턴 원자도 강등 대상이다 — 이것이 §1.1 "예산당 원자 수" 이득의 실제 원천이다. 경계는 턴당 한 번만 움직이므로 위 prompt-cache 논증은 그대로 성립한다.
+
+**최후예외 (#28845)**: 원문 cut 이 `Newest_atom_exceeds_available` 로 거부되는 경우 — 최신 원자가 분할 불가능한 채 히스토리 예산 전체보다 큰 경우 — 에는 고정할 원문 cut 이 존재하지 않는다. 이때 조립은 경계를 최신 원자 너머(`demote_before = atom_count`)로 옮겨 **딱 한 번** 재시도한다. 현재 턴 제외는 이 시도에서만 해제되고, 현재 턴의 tool 결과도 마커로 강등되어 나간다. 강등할 것이 없거나 강등 후에도 초과면 typed 거부가 그대로다 — 재시도 루프가 아니다.
 
 ### 3.5 물질화와 실패
 

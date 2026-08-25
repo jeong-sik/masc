@@ -1,28 +1,11 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
+(** Tool_input_validation — Pre-dispatch validation via AGENT_CORE Tool_middleware.
 
-(** Tool_input_validation — Pre-dispatch validation via OAS Tool_middleware.
-
-    Delegates to [Agent_sdk.Tool_middleware.make_validation_hook] for strict
-    schema checking and structured error feedback. OAS 0.212 removed implicit
+    Delegates to [Agent_core.Tool_middleware.make_validation_hook] for strict
+    schema checking and structured error feedback. AGENT_CORE 0.212 removed implicit
     type coercion: a mistyped scalar (e.g. string for integer) is a
     deterministic Reject carrying the field name, not a silent repair.
 
-    @since 2.220.0 — OAS delegation
+    @since 2.220.0 — AGENT_CORE delegation
     @since 2.221.0 — use Tool_middleware.make_validation_hook *)
 
 (** Register input validation as a Tool_dispatch pre-hook.
@@ -182,8 +165,6 @@ let schema_shape_json schema =
   `Assoc fields
 ;;
 
-let schema_has_property_name schema name = List.mem name (schema_property_names schema)
-
 let prepare_args ?schema:_ ~name:_ args = strip_internal_marker_args args
 
 let schema_has_properties = function
@@ -215,23 +196,6 @@ let unsupported_arg_names schema = function
       if List.mem name properties then None else Some name)
     |> List.sort_uniq String.compare
   | _ -> []
-;;
-
-let schema_has_property schema name = schema_has_property_name schema name
-
-let typed_shell_unsupported_field_hint schema names =
-  let has_shell_fields =
-    schema_has_property schema "argv" && schema_has_property schema "pipeline"
-  in
-  let has_legacy_shell_string =
-    List.exists (fun name -> String.equal name "cmd" || String.equal name "command") names
-  in
-  if has_shell_fields && has_legacy_shell_string
-  then
-    Some
-      "typed shell execution has no cmd/command field; use one non-empty argv \
-       process vector, e.g. argv=[\"git\",\"status\",\"--short\"]"
-  else None
 ;;
 
 type one_of_branch = {
@@ -334,18 +298,478 @@ let one_of_required_shape_error schema = function
   | _ -> None
 ;;
 
+(* The rejection names the fields the schema does accept, so the model can
+   correct the call from the message alone instead of guessing a new name
+   (analyst, 2026-08-22: agent → agent_name → author before it found the
+   declared shape). *)
 let schema_shape_error schema args =
   match unsupported_arg_names schema args with
   | name :: names ->
-    let names = name :: names in
-    let names_text = String.concat ", " names in
-    let hint =
-      match typed_shell_unsupported_field_hint schema names with
-      | None -> ""
-      | Some hint -> "; " ^ hint
+    let names_text = String.concat ", " (name :: names) in
+    let accepted =
+      match property_names schema with
+      | [] -> "(none)"
+      | accepted -> String.concat ", " accepted
     in
-    Some (Printf.sprintf "received unsupported field(s): %s%s" names_text hint)
+    Some
+      (Printf.sprintf
+         "received unsupported field(s): %s; accepted: %s"
+         names_text
+         accepted)
   | [] -> one_of_required_shape_error schema args
+;;
+
+(* ---------------------------------------------------------------- *)
+(* Declared range/length constraints                                  *)
+(*                                                                    *)
+(* [Tool_bridge.params_of_json_schema] projects a JSON Schema onto the *)
+(* AGENT_CORE [tool_param] record, which carries name/type/required only.     *)
+(* Every minimum/maximum/minLength/maxLength/minItems/maxItems is      *)
+(* dropped there, so agent core validation hook cannot see it. These      *)
+(* checks therefore read the raw JSON Schema masc already holds.       *)
+(* ---------------------------------------------------------------- *)
+
+type numeric_keyword =
+  | Minimum
+  | Maximum
+  | Exclusive_minimum
+  | Exclusive_maximum
+
+type count_keyword =
+  | Min_length
+  | Max_length
+  | Min_items
+  | Max_items
+
+let numeric_keyword_json_name = function
+  | Minimum -> "minimum"
+  | Maximum -> "maximum"
+  | Exclusive_minimum -> "exclusiveMinimum"
+  | Exclusive_maximum -> "exclusiveMaximum"
+;;
+
+let count_keyword_json_name = function
+  | Min_length -> "minLength"
+  | Max_length -> "maxLength"
+  | Min_items -> "minItems"
+  | Max_items -> "maxItems"
+;;
+
+let numeric_keywords = [ Minimum; Maximum; Exclusive_minimum; Exclusive_maximum ]
+let count_keywords = [ Min_length; Max_length; Min_items; Max_items ]
+
+let constraint_keyword_json_names =
+  List.map numeric_keyword_json_name numeric_keywords
+  @ List.map count_keyword_json_name count_keywords
+;;
+
+(** A rejection caused by declared constraints. [Argument_out_of_range] is
+    the caller's fault; [Schema_bound_malformed] is masc's — a declared
+    bound that cannot be read. Both fail closed, and both keep the field
+    path so the message names what to change. *)
+type constraint_failure =
+  | Argument_out_of_range of string
+  | Schema_bound_malformed of string
+
+type numeric_value =
+  | Numeric_int of int
+  | Numeric_float of float
+
+let numeric_of_json : Yojson.Safe.t -> numeric_value option = function
+  | `Int value -> Some (Numeric_int value)
+  | `Float value when Float.is_finite value -> Some (Numeric_float value)
+  | `Intlit literal ->
+    (match int_of_string_opt literal with
+     | Some value -> Some (Numeric_int value)
+     | None -> None)
+  | `Float _ | `Null | `Bool _ | `String _ | `Assoc _ | `List _ -> None
+;;
+
+(* Compare one native integer with one finite float without first rounding
+   the integer to IEEE-754. [float_of_int] loses units above 2^53, which can
+   otherwise make [maximum=9007199254740992.0] accept the integer one above
+   it. OCaml ints occupy [Sys.int_size - 1] value bits; the positive limit is
+   not itself representable as an int, while the negative limit is [min_int]. *)
+let compare_int_float integer floating =
+  let integer_magnitude_limit = Float.ldexp 1.0 (Sys.int_size - 1) in
+  if floating >= integer_magnitude_limit
+  then -1
+  else if floating < -.integer_magnitude_limit
+  then 1
+  else
+    let integral_part = int_of_float floating in
+    let comparison = Int.compare integer integral_part in
+    if comparison <> 0
+    then comparison
+    else Float.compare (Float.of_int integer) floating
+;;
+
+let numeric_compare left right =
+  match left, right with
+  | Numeric_int left, Numeric_int right -> Int.compare left right
+  | Numeric_int left, Numeric_float right -> compare_int_float left right
+  | Numeric_float left, Numeric_int right -> -(compare_int_float right left)
+  | Numeric_float left, Numeric_float right -> Float.compare left right
+;;
+
+let numeric_to_string = function
+  | Numeric_int value -> string_of_int value
+  | Numeric_float value -> Printf.sprintf "%g" value
+;;
+
+(* JSON Schema counts string length in characters, not bytes. Counting
+   bytes would reject a Korean title well under a declared maxLength. *)
+let utf8_character_count source =
+  let source_length = String.length source in
+  let rec loop index count =
+    if index >= source_length
+    then count
+    else (
+      let decoded = String.get_utf_8_uchar source index in
+      (* [utf_decode_length] is at least 1 even for an invalid byte, so the
+         walk always terminates. *)
+      loop (index + Uchar.utf_decode_length decoded) (count + 1))
+  in
+  loop 0 0
+;;
+
+let count_bound_of_json : Yojson.Safe.t -> int option = function
+  | `Int value when value >= 0 -> Some value
+  | `Float value
+    when Float.is_integer value
+         && value >= 0.0
+         && value <= Float.of_int Int.max_int -> Some (int_of_float value)
+  | `Intlit literal ->
+    (match int_of_string_opt literal with
+     | Some value when value >= 0 -> Some value
+     | Some _ | None -> None)
+  | `Int _
+  | `Float _
+  | `Null
+  | `Bool _
+  | `String _
+  | `Assoc _
+  | `List _
+  -> None
+;;
+
+let schema_value_to_diagnostic_string = function
+  | `Float value when not (Float.is_finite value) ->
+    (match classify_float value with
+     | FP_nan -> "NaN"
+     | FP_infinite when value > 0.0 -> "Infinity"
+     | FP_infinite -> "-Infinity"
+     | FP_normal | FP_subnormal | FP_zero -> Printf.sprintf "%g" value)
+  | value -> Yojson.Safe.to_string value
+;;
+
+let malformed_bound ~path ~keyword ~declared =
+  Schema_bound_malformed
+    (Printf.sprintf
+       "schema declares an unreadable %s for %s: %s"
+       keyword
+       path
+       (schema_value_to_diagnostic_string declared))
+;;
+
+(* A value whose JSON kind the keyword does not apply to is left alone:
+   the declared [type] is enforced by the AGENT_CORE hook that already ran, so a
+   surviving mismatch means the schema itself pairs a keyword with an
+   incompatible type. [test_tool_input_validation] pins that no masc
+   schema does. *)
+let numeric_constraint_failure ~path ~keyword ~declared value =
+  match numeric_of_json declared with
+  | None ->
+    Some
+      (malformed_bound
+         ~path
+         ~keyword:(numeric_keyword_json_name keyword)
+         ~declared)
+  | Some bound ->
+    (match numeric_of_json value with
+     | None ->
+       (match value with
+        | `Float value when not (Float.is_finite value) ->
+          Some
+            (Argument_out_of_range
+               (Printf.sprintf "%s must be a finite number" path))
+        | `Intlit literal ->
+          Some
+            (Argument_out_of_range
+               (Printf.sprintf
+                  "%s integer literal %s is outside the native exact-comparison range"
+                  path
+                  literal))
+        | `Int _ | `Float _ | `Null | `Bool _ | `String _ | `Assoc _ | `List _ ->
+          None)
+     | Some actual ->
+       let comparison = numeric_compare actual bound in
+       let violated =
+         match keyword with
+         | Minimum -> comparison < 0
+         | Exclusive_minimum -> comparison <= 0
+         | Maximum -> comparison > 0
+         | Exclusive_maximum -> comparison >= 0
+       in
+       if not violated
+       then None
+       else (
+         let actual_text = numeric_to_string actual in
+         let bound_text = numeric_to_string bound in
+         Some
+           (Argument_out_of_range
+              (match keyword with
+               | Minimum ->
+                 Printf.sprintf
+                   "%s %s is below minimum %s"
+                   path
+                   actual_text
+                   bound_text
+               | Exclusive_minimum ->
+                 Printf.sprintf
+                   "%s %s is not greater than exclusiveMinimum %s"
+                   path
+                   actual_text
+                   bound_text
+               | Maximum ->
+                 Printf.sprintf
+                   "%s %s exceeds maximum %s"
+                   path
+                   actual_text
+                   bound_text
+               | Exclusive_maximum ->
+                 Printf.sprintf
+                   "%s %s is not less than exclusiveMaximum %s"
+                   path
+                   actual_text
+                   bound_text))))
+;;
+
+let count_constraint_failure ~path ~keyword ~declared value =
+  let measured =
+    match keyword, value with
+    | (Min_length | Max_length), `String text -> Some (utf8_character_count text)
+    | (Min_items | Max_items), `List items -> Some (List.length items)
+    | (Min_length | Max_length | Min_items | Max_items), _ -> None
+  in
+  match measured with
+  | None -> None
+  | Some actual ->
+    (match count_bound_of_json declared with
+     | None ->
+       Some
+         (malformed_bound ~path ~keyword:(count_keyword_json_name keyword) ~declared)
+     | Some bound ->
+       let violated =
+         match keyword with
+         | Min_length | Min_items -> actual < bound
+         | Max_length | Max_items -> actual > bound
+       in
+       if not violated
+       then None
+       else
+         Some
+           (Argument_out_of_range
+              (match keyword with
+               | Min_length ->
+                 Printf.sprintf
+                   "%s has %d character(s), below minLength %d"
+                   path
+                   actual
+                   bound
+               | Max_length ->
+                 Printf.sprintf
+                   "%s has %d character(s), above maxLength %d"
+                   path
+                   actual
+                   bound
+               | Min_items ->
+                 Printf.sprintf
+                   "%s has %d item(s), below minItems %d"
+                   path
+                   actual
+                   bound
+               | Max_items ->
+                 Printf.sprintf
+                   "%s has %d item(s), above maxItems %d"
+                   path
+                   actual
+                   bound)))
+;;
+
+let child_property_path parent name =
+  if String.equal parent "" then name else parent ^ "." ^ name
+;;
+
+let rec constraint_failures ~path schema value =
+  match schema with
+  | `Assoc schema_fields ->
+    let declared_here =
+      List.filter_map
+        (fun keyword ->
+           match
+             List.assoc_opt (numeric_keyword_json_name keyword) schema_fields
+           with
+           | None -> None
+           | Some declared -> numeric_constraint_failure ~path ~keyword ~declared value)
+        numeric_keywords
+      @ List.filter_map
+          (fun keyword ->
+             match
+               List.assoc_opt (count_keyword_json_name keyword) schema_fields
+             with
+             | None -> None
+             | Some declared -> count_constraint_failure ~path ~keyword ~declared value)
+          count_keywords
+    in
+    let nested =
+      match value with
+      | `Assoc value_fields ->
+        (match List.assoc_opt "properties" schema_fields with
+         | Some (`Assoc property_schemas) ->
+           List.concat_map
+             (fun (property_name, property_schema) ->
+                match List.assoc_opt property_name value_fields with
+                | None -> []
+                | Some property_value ->
+                  constraint_failures
+                    ~path:(child_property_path path property_name)
+                    property_schema
+                    property_value)
+             property_schemas
+         | _ -> [])
+      | `List items ->
+        (match List.assoc_opt "items" schema_fields with
+         | Some (`Assoc _ as item_schema) ->
+           List.concat
+             (List.mapi
+                (fun index item ->
+                   constraint_failures
+                     ~path:(Printf.sprintf "%s[%d]" path index)
+                     item_schema
+                     item)
+                items)
+         | _ -> [])
+      | _ -> []
+    in
+    declared_here @ nested
+  | _ -> []
+;;
+
+(** Malformed declarations are schema defects independently of whether the
+    corresponding optional argument was supplied. Checking them in a separate
+    schema-only walk keeps an omitted field from turning fail-closed validation
+    into a silent pass. *)
+let rec malformed_schema_bound_failures ~path schema =
+  match schema with
+  | `Assoc schema_fields ->
+    let declared_here =
+      List.filter_map
+        (fun keyword ->
+           match
+             List.assoc_opt (numeric_keyword_json_name keyword) schema_fields
+           with
+           | None -> None
+           | Some declared ->
+             (match numeric_of_json declared with
+              | Some _ -> None
+              | None ->
+                Some
+                  (malformed_bound
+                     ~path
+                     ~keyword:(numeric_keyword_json_name keyword)
+                     ~declared)))
+        numeric_keywords
+      @ List.filter_map
+          (fun keyword ->
+             match
+               List.assoc_opt (count_keyword_json_name keyword) schema_fields
+             with
+             | None -> None
+             | Some declared ->
+               (match count_bound_of_json declared with
+                | Some _ -> None
+                | None ->
+                  Some
+                    (malformed_bound
+                       ~path
+                       ~keyword:(count_keyword_json_name keyword)
+                       ~declared)))
+          count_keywords
+    in
+    let nested_properties =
+      match List.assoc_opt "properties" schema_fields with
+      | Some (`Assoc property_schemas) ->
+        List.concat_map
+          (fun (property_name, property_schema) ->
+             malformed_schema_bound_failures
+               ~path:(child_property_path path property_name)
+               property_schema)
+          property_schemas
+      | _ -> []
+    in
+    let nested_items =
+      match List.assoc_opt "items" schema_fields with
+      | Some (`Assoc _ as item_schema) ->
+        malformed_schema_bound_failures ~path:(path ^ "[]") item_schema
+      | _ -> []
+    in
+    declared_here @ nested_properties @ nested_items
+  | _ -> []
+;;
+
+(** First declared-constraint failure for [args], or [None]. A malformed
+    bound is reported ahead of an out-of-range argument: masc's own schema
+    defect must not be blamed on the caller. *)
+let schema_constraint_failure schema args =
+  match malformed_schema_bound_failures ~path:"" schema with
+  | malformed :: _ -> Some malformed
+  | [] ->
+    let failures = constraint_failures ~path:"" schema args in
+    (match failures with
+     | [] -> None
+     | first :: _ -> Some first)
+;;
+
+(** Every constraint declaration {!constraint_failures} can reach, as
+    ["<field path>:<keyword>"]. Compared in tests against a raw scan of the
+    whole schema so a declaration placed where the walker does not descend
+    (a [oneOf] branch, a tuple-form [items]) is caught instead of silently
+    unenforced. *)
+let rec constraint_declaration_paths_at ~path schema =
+  match schema with
+  | `Assoc schema_fields ->
+    let declared_here =
+      List.filter_map
+        (fun keyword_name ->
+           if List.mem_assoc keyword_name schema_fields
+           then Some (Printf.sprintf "%s:%s" path keyword_name)
+           else None)
+        constraint_keyword_json_names
+    in
+    let nested_properties =
+      match List.assoc_opt "properties" schema_fields with
+      | Some (`Assoc property_schemas) ->
+        List.concat_map
+          (fun (property_name, property_schema) ->
+             constraint_declaration_paths_at
+               ~path:(child_property_path path property_name)
+               property_schema)
+          property_schemas
+      | _ -> []
+    in
+    let nested_items =
+      match List.assoc_opt "items" schema_fields with
+      | Some (`Assoc _ as item_schema) ->
+        constraint_declaration_paths_at ~path:(path ^ "[]") item_schema
+      | _ -> []
+    in
+    declared_here @ nested_properties @ nested_items
+  | _ -> []
+;;
+
+let constraint_declaration_paths schema =
+  constraint_declaration_paths_at ~path:"" schema
 ;;
 
 let retired_transition_alias_names ~name = function
@@ -385,12 +809,14 @@ let pass_reason ~schema ~args ~prepared_args =
   | None -> "missing_schema"
 ;;
 
-let validation_schema_of_json ~name json_schema : Agent_sdk.Types.tool_schema =
-  { name
-  ; description = ""
-  ; parameters = Tool_bridge.params_of_json_schema json_schema
-  ; strict = None
-  }
+(* Typed end to end: the params this hook already holds go straight into the
+   authoritative constructor. The previous version rendered them to JSON and
+   reparsed via [tool_schema_of_json], with a [failwith] on the reparse — a
+   round-trip through a wire format that never left the process
+   (RFC-0371 §3.1). *)
+let validation_schema_of_json ~name json_schema : Agent_core.Types.tool_schema =
+  let parameters = Tool_bridge.params_of_json_schema json_schema in
+  Agent_core.Types.tool_schema_of_params ~name ~description:"" ~parameters ()
 ;;
 
 let reject_validation ~name ~reason ~message =
@@ -403,13 +829,14 @@ let reject_validation ~name ~reason ~message =
        ; data =
            `Assoc
              [ "error", `String message
-             ; "validation", `String "oas_tool_middleware"
+             ; "validation", `String "agent_core_tool_middleware"
              ; "reason", `String reason
              ; ( "failure_class"
                , `String
                    (Tool_result.tool_failure_class_to_string
                       Tool_result.Policy_rejection) )
              ]
+       ; metadata = None
        ; tool_name = name
        ; duration_ms = 0.0
        })
@@ -432,9 +859,10 @@ let validation_exception_action ~name exn : Tool_dispatch.pre_hook_action =
        ; data =
            `Assoc
              [ "error", `String message
-             ; "validation", `String "oas_tool_middleware"
+             ; "validation", `String "agent_core_tool_middleware"
              ; "exception", `String error_text
              ]
+       ; metadata = None
        ; tool_name = name
        ; duration_ms = 0.0
        })
@@ -511,18 +939,34 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
            in
            Option.map (validation_schema_of_json ~name:lookup_name) schema_opt
          in
-         let hook = Agent_sdk.Tool_middleware.make_validation_hook ~lookup in
+         let hook = Agent_core.Tool_middleware.make_validation_hook ~lookup in
+         (* Declared ranges are checked only once agent core has accepted the
+            declared types, so a mistyped value reports its type error
+            rather than a confusing range error. *)
          (match hook ~name ~args:prepared_args with
-    | Agent_sdk.Tool_middleware.Pass when not (Yojson.Safe.equal prepared_args args) ->
-      let reason = pass_reason ~schema:(Some schema) ~args ~prepared_args in
-      emit_validation_telemetry ~tool:name ~result:"pass" ~reason;
-      Log.Tool_validation.debug "tool_input_validation normalized args for %s" name;
-      Tool_dispatch.Proceed prepared_args
-    | Agent_sdk.Tool_middleware.Pass ->
-      let reason = pass_reason ~schema:(Some schema) ~args ~prepared_args in
-      emit_validation_telemetry ~tool:name ~result:"pass" ~reason;
-      Tool_dispatch.Pass
-    | Agent_sdk.Tool_middleware.Reject { message; _ } ->
+    | Agent_core.Tool_middleware.Pass ->
+      (match schema_constraint_failure schema prepared_args with
+       | Some (Argument_out_of_range message) ->
+         reject_validation
+           ~name
+           ~reason:"invalid_args"
+           ~message:(Printf.sprintf "Tool '%s' %s" name message)
+       | Some (Schema_bound_malformed message) ->
+         reject_validation
+           ~name
+           ~reason:"malformed_schema"
+           ~message:(Printf.sprintf "Tool '%s' %s" name message)
+       | None ->
+         let reason = pass_reason ~schema:(Some schema) ~args ~prepared_args in
+         emit_validation_telemetry ~tool:name ~result:"pass" ~reason;
+         if Yojson.Safe.equal prepared_args args
+         then Tool_dispatch.Pass
+         else (
+           Log.Tool_validation.debug
+             "tool_input_validation normalized args for %s"
+             name;
+           Tool_dispatch.Proceed prepared_args))
+    | Agent_core.Tool_middleware.Reject { message; _ } ->
       emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"invalid_args";
       Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;
       (* Input-schema / policy rejection — classify so the
@@ -535,13 +979,14 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
            ; data =
                `Assoc
                  [ "error", `String message
-                 ; "validation", `String "oas_tool_middleware"
+                 ; "validation", `String "agent_core_tool_middleware"
                  ; "reason", `String "invalid_args"
                  ; ( "failure_class"
                    , `String
                        (Tool_result.tool_failure_class_to_string
                           Tool_result.Policy_rejection) )
                  ]
+           ; metadata = None
            ; tool_name = name
            ; duration_ms = 0.0
            })

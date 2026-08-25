@@ -14,7 +14,7 @@ let in_turn_liveness_pulse_interval_sec () =
   max 5.0 (min 30.0 (float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())))
 ;;
 
-let with_in_turn_liveness_pulse_for_test ~sw:_sw ~clock ~interval_sec ~tick f =
+let with_pulse_fiber ~sw:_sw ~clock ~interval_sec ~tick f =
   let interval_sec = max 0.001 interval_sec in
   Eio.Switch.run (fun pulse_sw ->
     let pulse_stop = Atomic.make false in
@@ -64,9 +64,59 @@ let with_in_turn_liveness_pulse_for_test ~sw:_sw ~clock ~interval_sec ~tick f =
       Printexc.raise_with_backtrace exn backtrace)
 ;;
 
+(* #27349: raw elapsed-time facts about the current turn, carried without any
+   threshold or judgment -- the SSE payload and the two gauges below expose
+   [in_flight_elapsed_ms]/[since_last_progress_ms] verbatim on every pulse
+   tick (5-30s) while a turn is executing. Nothing here decides "stuck";
+   consumers do (the operator dashboard live, and eventually #27323's
+   supervision seat reading the gauge series). [started_at]/[last_progress_at]
+   already exist on every [turn_observation] (stamped by
+   [Keeper_registry.stamp_turn_progress] on every progress event) but were
+   previously read only for dashboard JSON display -- nothing computed or
+   surfaced the elapsed deltas that would have shown "4 keepers in-flight
+   25min, progress 0" instead of a heartbeat pulse that just says "alive". *)
+let elapsed_ms ~now_ts ~since = Float.max 0.0 ((now_ts -. since) *. 1000.0)
+
+let in_flight_elapsed_ms ~now_ts ~started_at = elapsed_ms ~now_ts ~since:started_at
+
+let since_last_progress_ms ~now_ts ~last_progress_at =
+  elapsed_ms ~now_ts ~since:last_progress_at
+;;
+
+let record_in_flight_elapsed_gauges
+      ~(meta : keeper_meta)
+      ~now_ts
+      ~(obs : Keeper_registry_types.turn_observation)
+  =
+  let labels = [ "keeper", meta.name ] in
+  Otel_metric_store.register_gauge
+    ~name:Keeper_metrics.(to_string InFlightElapsedSeconds)
+    ~help:"Wall-clock seconds since the current turn started. No threshold: \
+           a supervising consumer judges staleness against progress, not \
+           against this value alone."
+    ~labels
+    ();
+  Otel_metric_store.set_gauge
+    Keeper_metrics.(to_string InFlightElapsedSeconds)
+    ~labels
+    (in_flight_elapsed_ms ~now_ts ~started_at:obs.started_at /. 1000.0);
+  Otel_metric_store.register_gauge
+    ~name:Keeper_metrics.(to_string SinceLastProgressSeconds)
+    ~help:"Wall-clock seconds since the current turn's last recorded \
+           progress event. No threshold: a long-running turn that keeps \
+           progressing stays near zero; a stalled provider call grows \
+           unbounded."
+    ~labels
+    ();
+  Otel_metric_store.set_gauge
+    Keeper_metrics.(to_string SinceLastProgressSeconds)
+    ~labels
+    (since_last_progress_ms ~now_ts ~last_progress_at:obs.last_progress_at /. 1000.0)
+;;
+
 let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
   match Keeper_registry.get ~base_path:ctx.config.base_path meta.name with
-  | Some entry when Option.is_some entry.current_turn_observation ->
+  | Some { current_turn_observation = Some obs; _ } ->
     (try
        let _heartbeat = Workspace.heartbeat ctx.config ~agent_name:meta.agent_name in
        ()
@@ -82,15 +132,25 @@ let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
          ~labels:[ "keeper", meta.name; "phase", "in_turn_heartbeat" ]
          ());
     let now_ts = Time_compat.now () in
+    (try record_in_flight_elapsed_gauges ~meta ~now_ts ~obs with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Log.Keeper.warn
+         "in-turn elapsed gauges failed for %s: %s"
+         meta.name
+         (Printexc.to_string exn));
     (try
        let json =
          `Assoc
            [ "type", `String "keeper_heartbeat"
            ; "name", `String meta.name
-           ; "generation", `Int meta.runtime.nonce
            ; "ts_unix", `Float now_ts
            ; "phase", `String "turn_running"
            ; "in_turn", `Bool true
+           ; "in_flight_elapsed_ms",
+             `Float (in_flight_elapsed_ms ~now_ts ~started_at:obs.started_at)
+           ; "since_last_progress_ms",
+             `Float (since_last_progress_ms ~now_ts ~last_progress_at:obs.last_progress_at)
            ]
        in
        Sse.broadcast json;
@@ -114,7 +174,7 @@ let with_in_turn_liveness_pulse
       ~(stop : bool Atomic.t)
       f
   =
-  with_in_turn_liveness_pulse_for_test
+  with_pulse_fiber
     ~sw:ctx.sw
     ~clock:ctx.clock
     ~interval_sec:(in_turn_liveness_pulse_interval_sec ())

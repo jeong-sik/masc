@@ -18,13 +18,11 @@ include Keeper_supervisor_launch
 type sweep_acc =
   { to_restart : (Keeper_registry.registry_entry * string) list
   ; to_unregister : Keeper_registry.registry_entry list
-  ; to_cleanup_dead : Keeper_registry.registry_entry list
   }
 
 let empty_sweep_acc =
   { to_restart = []
   ; to_unregister = []
-  ; to_cleanup_dead = []
   }
 ;;
 
@@ -36,7 +34,7 @@ let pending_hitl_approval_counts config =
     |> List.filter_map (fun name ->
          let pending_count =
            List.fold_left
-             (fun count (entry : Keeper_approval_queue.pending_approval) ->
+             (fun count (entry : Keeper_approval_queue_rules_types.pending_approval) ->
                 if String.equal entry.keeper_name name
                 then count + 1
                 else count)
@@ -52,7 +50,6 @@ let pending_hitl_approval_keeper_names config =
 let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
   =
   let now = Time_compat.now () in
-  let dead_ttl_sec = Runtime_params.get Runtime_settings.keeper_dead_ttl_sec in
   let base_path = ctx.config.base_path in
   (* HITL requests are observable inputs, not Keeper-lane ownership. *)
   (match pending_hitl_approval_counts ctx.config with
@@ -118,11 +115,6 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
      yield meter still protects unusually large cohorts or non-default sizes. *)
   let process_entry (acc : sweep_acc) (entry : Keeper_registry.registry_entry) =
     match entry.phase with
-    | Keeper_state_machine.Dead ->
-      (match entry.dead_since_ts with
-       | Some dead_since when now -. dead_since >= dead_ttl_sec ->
-         { acc with to_cleanup_dead = entry :: acc.to_cleanup_dead }
-       | _ -> acc)
     | Keeper_state_machine.Stopped ->
       if Keeper_registry.lane_has_exited entry
       then { acc with to_unregister = entry :: acc.to_unregister }
@@ -131,7 +123,6 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
     | Keeper_state_machine.Paused
     | Keeper_state_machine.Crashed
     | Keeper_state_machine.Failing
-    | Keeper_state_machine.Overflowed
     | Keeper_state_machine.Compacting
     | Keeper_state_machine.HandingOff
     | Keeper_state_machine.Draining
@@ -190,12 +181,6 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
           sweep must not drop the accumulator of a newer same-name lane. *)
        unregister_exact_and_drop entry)
     final_acc.to_unregister;
-  (* Submit exact-lane durable finalization. [Dead_cleaned] and
-     [Tombstone_reaped] are emitted only by the completion receipt handler. *)
-  List.iter
-    (fun (entry : Keeper_registry.registry_entry) ->
-       cleanup_dead_tombstone ctx entry)
-    final_acc.to_cleanup_dead;
   let restart_list = final_acc.to_restart in
   (* Restart crashed keepers *)
   List.iter
@@ -213,20 +198,6 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
             let reason =
               Keeper_lifecycle_admission.autonomous_denial_to_wire denial
             in
-            (* The persisted meta won the admission decision, so make the
-               registry observe that same authoritative snapshot before
-               publishing the denial.  In particular, a stale [Running]
-               registry entry paired with a persisted dead tombstone must
-               become [Dead], not remain an apparently live lane that can be
-               selected by phase-only consumers. *)
-            Keeper_registry.update_meta
-              ~base_path
-              old_entry.name
-              meta;
-            (match denial with
-             | Keeper_lifecycle_admission.Autonomous_dead_tombstone ->
-               Keeper_registry.mark_dead ~base_path old_entry.name ~at:now
-             | Keeper_lifecycle_admission.Autonomous_paused _ -> ());
             let denial_phase =
               match Keeper_registry.get ~base_path old_entry.name with
               | Some entry -> Some entry.phase
@@ -262,15 +233,68 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
               Keeper_metrics.(to_string RestartAttempts)
               ~labels:[ "keeper", old_entry.name ]
               ();
-            (* Dispatch restart intent only after lifecycle admission. A
-               paused or tombstoned lane never enters the restarting FSM. *)
-            Keeper_registry.dispatch_event_unit
-              ~base_path
-              old_entry.name
-              (Keeper_state_machine.Supervisor_restart_attempt { attempt });
             let old_crash_log = old_entry.crash_log in
-         (match Keeper_registry.register_restarting ~base_path old_entry.name meta with
-          | Error (Keeper_registry.Restart_shutdown_reserved operation_id) ->
+         (match
+            Keeper_keepalive_launch_transaction.run
+              ~base_path
+              ~keeper_name:old_entry.name
+              ~register:(fun token intake_token ->
+                match Keeper_registry.get ~base_path old_entry.name with
+                | Some current
+                  when Keeper_lane.Id.equal
+                         (Keeper_lane.id current.lane)
+                         (Keeper_lane.id old_entry.lane) ->
+                  (match
+                     Keeper_registry.dispatch_event_exact_for_lifecycle
+                       token
+                       old_entry
+                       (Keeper_state_machine.Supervisor_restart_attempt { attempt })
+                   with
+                   | Error error -> Error (`Transition error)
+                   | Ok _ ->
+                     (match
+                        Keeper_registry.register_restarting_for_lifecycle
+                          ~intake_token
+                          token
+                          ~base_path
+                          old_entry.name
+                          meta
+                      with
+                      | Ok registered -> Ok registered
+                      | Error error ->
+                        ignore
+                          (Keeper_registry.update_entry_exact_for_lifecycle
+                             token
+                             old_entry
+                             (fun _current -> old_entry)
+                            : Keeper_registry.exact_update_result);
+                        Error (`Restart error)))
+                | Some current -> Error (`Replaced current)
+                | None -> Error `Missing)
+              ~rollback:
+                (Keeper_keepalive_launch_transaction.Restore_previous old_entry)
+              (fun intake_token token reg ->
+                ignore
+                  (Keeper_registry.update_entry_exact_for_lifecycle
+                     token
+                     reg
+                     (fun current ->
+                        { current with
+                          restart_count = attempt
+                        ; last_restart_ts = now
+                        ; crash_log = keep_last_n 5 (now, crash_msg) old_crash_log
+                        ; last_failure_reason = None
+                        })
+                    : Keeper_registry.exact_update_result);
+                launch_supervised_fiber
+                  ~intake_token
+                  ~lifecycle_token:token
+                  ~proactive_warmup_sec:0
+                  ctx
+                  meta
+                  reg)
+          with
+          | Error (Keeper_keepalive_launch_transaction.Shutdown_reserved operation_id) ->
             Log.Keeper.warn
               "%s: restart skipped because shutdown operation %s owns admission"
               old_entry.name
@@ -279,12 +303,63 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
               Keeper_metrics.(to_string RestartOutcomes)
               ~labels:[ "keeper", old_entry.name; "outcome", "shutdown_reserved" ]
               ()
-          | Error (Keeper_registry.Restart_lifecycle_reserved owner) ->
+          | Error Keeper_keepalive_launch_transaction.Intake_token_not_live ->
+            Log.Keeper.error
+              "%s: restart transaction rejected an inactive durable-intake token"
+              old_entry.name;
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartOutcomes)
+              ~labels:[ "keeper", old_entry.name; "outcome", "intake_token_not_live" ]
+              ()
+          | Error (Keeper_keepalive_launch_transaction.Reservation_unavailable owner) ->
             Log.Keeper.info
               "%s: supervisor restart deferred to lifecycle transaction owner: %s"
               old_entry.name
               (Keeper_lifecycle_reservation.snapshot_to_string owner)
-          | Error (Keeper_registry.Restart_event_queue_unavailable { keeper_name; detail }) ->
+          | Error
+              (Keeper_keepalive_launch_transaction.Registration_failed
+                 (`Restart (Keeper_registry.Restart_shutdown_reserved operation_id))) ->
+            Log.Keeper.warn
+              "%s: restart skipped because shutdown operation %s owns admission"
+              old_entry.name
+              (Keeper_shutdown_types.Operation_id.to_string operation_id);
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartOutcomes)
+              ~labels:[ "keeper", old_entry.name; "outcome", "shutdown_reserved" ]
+              ()
+          | Error
+              (Keeper_keepalive_launch_transaction.Registration_failed
+                 (`Restart Keeper_registry.Restart_intake_token_not_live)) ->
+            Log.Keeper.error
+              "%s: restart registry rejected an inactive durable-intake token"
+              old_entry.name;
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartOutcomes)
+              ~labels:[ "keeper", old_entry.name; "outcome", "intake_token_not_live" ]
+              ()
+          | Error
+              (Keeper_keepalive_launch_transaction.Registration_failed
+                 (`Transition error)) ->
+            Log.Keeper.warn
+              "%s: supervisor restart intent was rejected: %s"
+              old_entry.name
+              (Keeper_state_machine.transition_error_to_string error);
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartOutcomes)
+              ~labels:[ "keeper", old_entry.name; "outcome", "transition_rejected" ]
+              ()
+          | Error
+              (Keeper_keepalive_launch_transaction.Registration_failed
+                 (`Restart (Keeper_registry.Restart_lifecycle_reserved owner))) ->
+            Log.Keeper.info
+              "%s: supervisor restart deferred to lifecycle transaction owner: %s"
+              old_entry.name
+              (Keeper_lifecycle_reservation.snapshot_to_string owner)
+          | Error
+              (Keeper_keepalive_launch_transaction.Registration_failed
+                 (`Restart
+                    (Keeper_registry.Restart_event_queue_unavailable
+                       { keeper_name; detail }))) ->
             Log.Keeper.error
               "%s: restart refused because durable event queue is unavailable: %s"
               keeper_name
@@ -293,14 +368,58 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
               Keeper_metrics.(to_string RestartOutcomes)
               ~labels:[ "keeper", keeper_name; "outcome", "event_queue_unavailable" ]
               ()
-          | Ok reg ->
-            Keeper_registry.restore_supervisor_state
-              ~base_path
+          | Error
+              (Keeper_keepalive_launch_transaction.Registration_failed
+                 (`Replaced current)) ->
+            Log.Keeper.info
+              "%s: supervisor restart retained newer lane phase=%s"
               old_entry.name
-              ~restart_count:attempt
-              ~last_restart_ts:now
-              ~crash_log:(keep_last_n 5 (now, crash_msg) old_crash_log);
-            (match launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta reg with
+              (Keeper_state_machine.phase_to_string current.Keeper_registry.phase)
+          | Error
+              (Keeper_keepalive_launch_transaction.Registration_failed `Missing) ->
+            Log.Keeper.info
+              "%s: supervisor restart deferred because crashed lane disappeared"
+              old_entry.name
+          | Error
+              (Keeper_keepalive_launch_transaction.Lifecycle_open_failed
+                 { error; rollback_error }) ->
+            Log.Keeper.warn
+              "%s: supervisor restart deferred until Librarian owner exits: %s%s"
+              old_entry.name
+              (Keeper_memory_lane.lifecycle_open_error_to_string error)
+              (match rollback_error with
+               | None -> ""
+               | Some detail -> "; rollback failed: " ^ detail);
+            ignore
+              (Keeper_memory_lane.abort_librarian
+                 ~base_path
+                 ~keeper_name:old_entry.name
+                : (Keeper_memory_lane.librarian_abort_outcome,
+                   Keeper_memory_lane.librarian_abort_error)
+                    result);
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartOutcomes)
+              ~labels:[ "keeper", old_entry.name; "outcome", "librarian_deferred" ]
+              ()
+          | Error
+              (Keeper_keepalive_launch_transaction.Launch_failed
+                 { exception_detail; librarian_abort_error; rollback_error }) ->
+            let cleanup_detail label = function
+              | None -> ""
+              | Some detail -> "; " ^ label ^ " failed: " ^ detail
+            in
+            Log.Keeper.error
+              "%s: supervisor restart launch callback failed: %s%s%s"
+              old_entry.name
+              exception_detail
+              (cleanup_detail "Librarian abort" librarian_abort_error)
+              (cleanup_detail "registry rollback" rollback_error);
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartOutcomes)
+              ~labels:[ "keeper", old_entry.name; "outcome", "launch_callback_failed" ]
+              ()
+          | Ok launch_result ->
+            (match launch_result with
              | Error _ ->
                (* Launch gate aborted fail-closed (no fiber; done resolved and
                   Crashed published by the gate). Announcing Restarted/Running

@@ -11,6 +11,10 @@ const toastMocks = vi.hoisted(() => ({
   showToast: vi.fn(),
 }))
 
+const devTokenMocks = vi.hoisted(() => ({
+  refreshDevTokenAfterAuthError: vi.fn(async () => true),
+}))
+
 vi.mock('./api', () => apiMocks)
 vi.mock('./api/dashboard-hot', () => ({
   fetchDashboardShell: apiMocks.fetchDashboardShell,
@@ -22,6 +26,10 @@ vi.mock('./sse', () => ({
 }))
 vi.mock('./components/common/toast', () => ({
   showToast: toastMocks.showToast,
+}))
+vi.mock('./api/dev-token', async importOriginal => ({
+  ...(await importOriginal<typeof import('./api/dev-token')>()),
+  refreshDevTokenAfterAuthError: devTokenMocks.refreshDevTokenAfterAuthError,
 }))
 
 afterEach(async () => {
@@ -77,7 +85,6 @@ describe('refreshShell auth failure handling', () => {
       requested_agent: 'dashboard',
       effective_agent: 'codex',
       effective_role: 'worker',
-      default_role: 'worker',
       token_valid: true,
       token_agent: 'codex',
       auth_error_code: null,
@@ -109,7 +116,6 @@ describe('refreshShell auth failure handling', () => {
       requested_agent: 'dashboard',
       effective_agent: 'dashboard',
       effective_role: 'admin',
-      default_role: 'worker',
       token_valid: true,
       token_agent: 'dashboard',
       auth_error_code: null,
@@ -144,5 +150,81 @@ describe('refreshShell auth failure handling', () => {
 
     expect(store.shellAuthSummary.value).toBe(verifiedAuth)
     expect(sessionActor.currentCanonicalDashboardActor()).toBe('dashboard')
+  })
+})
+
+/* The server keeps the loopback read contract available to an unauthenticated
+   caller, so a rejected credential comes back as HTTP 200 with
+   `token_valid: false` and a typed `auth_error_code` in the body. The MCP
+   client only recovers from the auth envelope of a *failed* call, so before
+   this wiring a tab whose traffic was the shell poll re-sent the same
+   rejected token indefinitely — measured every 6 minutes across two server
+   restarts on 2026-08-12. */
+describe('rejected shell credential recovery', () => {
+  const rejected = {
+    enabled: true,
+    require_token: true,
+    token_present: true,
+    token_valid: false,
+    token_agent: null,
+    requested_agent: null,
+    effective_agent: null,
+    effective_role: null,
+    auth_error_code: 'invalid_token',
+    auth_error_detail: '[AuthError] Invalid token: Token mismatch',
+    can_keeper_msg: false,
+    keeper_msg_error: '[AuthError] Invalid token: Token mismatch',
+  } as const
+
+  function shellBody(auth: Record<string, unknown>) {
+    return {
+      generated_at: '2026-08-12T14:02:00Z',
+      status: { project: 'me' },
+      counts: { agents: 0, tasks: 0, keepers: 0, total_runtimes: 0 },
+      auth,
+    } as never
+  }
+
+  it('asks for a fresh dev token and forwards the typed rejection code', async () => {
+    const store = await import('./store')
+    store.hydrateShellSnapshot(shellBody(rejected), { light: true })
+    expect(devTokenMocks.refreshDevTokenAfterAuthError).toHaveBeenCalledWith('invalid_token')
+  })
+
+  it('reaches the same recovery through a shell refresh response', async () => {
+    apiMocks.fetchDashboardShell.mockResolvedValueOnce(shellBody(rejected))
+    const store = await import('./store')
+    await store.refreshShell({ force: true })
+    expect(devTokenMocks.refreshDevTokenAfterAuthError).toHaveBeenCalledWith('invalid_token')
+  })
+
+  it('leaves an accepted credential alone', async () => {
+    const store = await import('./store')
+    store.hydrateShellSnapshot(
+      shellBody({ ...rejected, token_valid: true, auth_error_code: null, auth_error_detail: null }),
+      { light: true },
+    )
+    expect(devTokenMocks.refreshDevTokenAfterAuthError).not.toHaveBeenCalled()
+  })
+
+  /* No stored credential is the pre-bootstrap state, not a rejection —
+     `ensureDevToken` mints the first token there. Refreshing on it would
+     race the bootstrap that is already in flight. */
+  it('does not treat a missing credential as a rejection', async () => {
+    const store = await import('./store')
+    store.hydrateShellSnapshot(
+      shellBody({ ...rejected, token_present: false, auth_error_code: 'missing_token' }),
+      { light: true },
+    )
+    expect(devTokenMocks.refreshDevTokenAfterAuthError).not.toHaveBeenCalled()
+  })
+
+  /* `preserveAuth` callers are explicitly not reporting on the credential —
+     they carry a stale auth slice forward, so acting on it would refresh from
+     data the caller already disclaimed. */
+  it('stays out of preserveAuth hydration', async () => {
+    const store = await import('./store')
+    store.hydrateShellSnapshot(shellBody(rejected), { light: true, preserveAuth: true })
+    expect(devTokenMocks.refreshDevTokenAfterAuthError).not.toHaveBeenCalled()
   })
 })

@@ -1,0 +1,134 @@
+{
+  "captured_at": "2026-08-19T11:40:51Z",
+  "purpose": "Judge of Judge · Connector routing 두 행의 browser 축 — 대시보드 렌더 실측",
+  "runtime": {
+    "dashboard_version": "v0.23.0",
+    "build": "e4ecfb942d",
+    "note": "라이브는 #29106 시점 바이너리다. main HEAD(49f2852ec2, #29107)는 아직 배포 전."
+  },
+  "judge_of_judge": {
+    "screen": "#fusion",
+    "runs_listed": 12,
+    "selected_run": "KMSG-2433848DEA7AB9BFDBDCB3DEBE2606AD",
+    "labels": [
+      "preset · council",
+      "topology · staged judge of judges",
+      "COMPLETE"
+    ],
+    "pipeline_rendered": "keeper turn → gate → panel ×4 → 1차 심판 ×6 → meta → board evidence",
+    "panel": [
+      {
+        "model": "ollama_cloud.kimi-k2-7-code",
+        "tokens": 255
+      },
+      {
+        "model": "ollama_cloud.minimax-m3",
+        "tokens": 303
+      },
+      {
+        "model": "ollama_cloud.deepseek-v4-pro",
+        "tokens": 163
+      },
+      {
+        "model": "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731",
+        "tokens": 234
+      }
+    ],
+    "judge_phase": {
+      "header": "심판 위상 · 심판의 심판 · 관측된 심판 노드 9개 · RFC-0284",
+      "first_round": [
+        {
+          "axis": "evidence",
+          "model": "ollama_cloud.deepseek-v4-pro",
+          "tokens": "2.4k",
+          "ok": true
+        },
+        {
+          "axis": "coverage",
+          "model": "ollama_cloud.minimax-m3",
+          "tokens": "2.4k",
+          "ok": true
+        },
+        {
+          "axis": "risk",
+          "model": "ollama_cloud.kimi-k2-7-code",
+          "tokens": "4.0k",
+          "ok": true
+        }
+      ],
+      "staged": [
+        {
+          "stage": "stage-1",
+          "axis": "feasibility",
+          "model": "ollama_cloud.deepseek-v4-pro"
+        }
+      ]
+    },
+    "banner": "보드 sink + registry 관측 · live JoJ judges 미구성 시 fail-closed",
+    "reading": "JoJ 실행이 화면에 완결된 형태로 렌더된다 — 위상 라벨, 패널 응답 4개, 1차 심판 축 3종과 단계 심판까지."
+  },
+  "connector_routing": {
+    "screen": "#connectors?section=connector-status",
+    "header": "외부 게이트 4개 · 2 active · GET /api/v1/gate/connectors",
+    "gate": {
+      "health": "healthy",
+      "base": "http://localhost:8935",
+      "last_health_check": "48m ago",
+      "binding_source": "persisted"
+    },
+    "connectors": [
+      {
+        "name": "Discord",
+        "state": "CONNECTED",
+        "bot": "1489858300729172039",
+        "pid": 3390,
+        "last_ready": "8m ago",
+        "bindings": 5,
+        "targets": [
+          "sangsu"
+        ]
+      },
+      {
+        "name": "Slack",
+        "state": "CONNECTED",
+        "bot": "U060QL65V1V",
+        "last_ready": "59m ago",
+        "bindings": 1,
+        "channel": "C09TK9L4DV4",
+        "targets": [
+          "kidsnote"
+        ]
+      },
+      {
+        "name": "iMessage",
+        "state": "DOWN",
+        "bindings": 0,
+        "note": "connector status file not found"
+      },
+      {
+        "name": "Telegram",
+        "state": "DOWN",
+        "bindings": 0,
+        "note": "connector status file not found"
+      }
+    ],
+    "recent_audit": [
+      {
+        "at": "2026-08-09 04:28:12",
+        "action": "bind",
+        "target": "1467140571524108300",
+        "keeper": "sangsu",
+        "actor": "dashboard-admin"
+      },
+      {
+        "at": "2026-06-26 15:49:20",
+        "action": "bind",
+        "target": "1356818756755525815",
+        "keeper": "sangsu",
+        "actor": "dashboard"
+      }
+    ],
+    "reading": "채널→keeper 라우팅 6건이 화면에 그대로 나온다(Discord 5·Slack 1, keeper 2명). 라이브 축이 기록한 cross-routing 양방향 2 keeper와 일치한다. 미구성 커넥터 2종은 DOWN과 바인딩 0으로 구분되어 보인다."
+  },
+  "method_note": "대시보드는 해시 라우팅(#fusion, #connectors)이다. 커넥터 화면은 첫 스크린샷에서 스켈레톤만 잡혀 3초 뒤 다시 찍었다 — 로딩 중 화면을 근거로 쓰면 '비어 있다'는 반대 결론이 나온다."
+}

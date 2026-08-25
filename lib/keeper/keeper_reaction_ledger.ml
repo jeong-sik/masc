@@ -7,11 +7,10 @@ type stimulus_kind =
       (* RFC-connector-ambient-attention-wake: ambient connector message wake *)
   | Hitl_resolved  (* HITL resolution delivered as an ordinary Keeper wake *)
   | Manual_compaction
-  | Goal_assigned
-      (* RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
-  | Goal_reconciliation_ready
   | Completion_authority_rejected
   | Task_cancelled
+  | Workspace_message
+  | Delegate_completed  (* One Keeper's answer to a turn another asked it to run *)
 
 type reaction_kind =
   | Turn_started
@@ -24,7 +23,7 @@ module Event_id_set = Set.Make (String)
 
 (* The storage namespace and row schema advance together. Readers inspect
    exactly this namespace, keeping exact evidence under one authority. *)
-let storage_generation = "v5"
+let storage_generation = "v7"
 let schema = "keeper.reaction_ledger." ^ storage_generation
 
 let stimulus_kind_to_string = function
@@ -35,10 +34,10 @@ let stimulus_kind_to_string = function
   | Connector_attention -> "connector_attention"
   | Hitl_resolved -> "hitl_resolved"
   | Manual_compaction -> "manual_compaction"
-  | Goal_assigned -> "goal_assigned"
-  | Goal_reconciliation_ready -> "goal_reconciliation_ready"
   | Completion_authority_rejected -> "completion_authority_rejected"
   | Task_cancelled -> "task_cancelled"
+  | Workspace_message -> "workspace_message"
+  | Delegate_completed -> "keeper_delegate_completed"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -53,10 +52,10 @@ let stimulus_kind_of_string = function
   | "connector_attention" -> Some Connector_attention
   | "hitl_resolved" -> Some Hitl_resolved
   | "manual_compaction" -> Some Manual_compaction
-  | "goal_assigned" -> Some Goal_assigned
-  | "goal_reconciliation_ready" -> Some Goal_reconciliation_ready
   | "completion_authority_rejected" -> Some Completion_authority_rejected
   | "task_cancelled" -> Some Task_cancelled
+  | "workspace_message" -> Some Workspace_message
+  | "keeper_delegate_completed" -> Some Delegate_completed
   | _ -> None
 ;;
 
@@ -75,7 +74,15 @@ let reaction_kind_of_string = function
   | other -> Error (Unknown_reaction_kind other)
 ;;
 
-let digest_id prefix payload = prefix ^ ":" ^ Digest.to_hex (Digest.string payload)
+(* The event id is recomputed on read and compared, so a collision is a replay
+   decision, not a display artefact -- two stimuli landing on one id make the
+   second read as the first. Stdlib.Digest is MD5; the schedule, auth and
+   cache identities in this repository already use Digestif.SHA256 (#26720).
+   The digest feeds the id readers compare, so the storage generation advances
+   with it: rows written under v6 stay in the v6 namespace and are not read. *)
+let digest_id prefix payload =
+  prefix ^ ":" ^ Digestif.SHA256.(digest_string payload |> to_hex)
+;;
 let board_stimulus_id ~post_id = "board:" ^ post_id
 
 let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -88,12 +95,11 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Connector_attention _ -> Connector_attention
   | Keeper_event_queue.Hitl_resolved _ -> Hitl_resolved
   | Keeper_event_queue.Manual_compaction_requested -> Manual_compaction
-  | Keeper_event_queue.Goal_assigned _ -> Goal_assigned
-  | Keeper_event_queue.Goal_reconciliation_ready _ ->
-    Goal_reconciliation_ready
   | Keeper_event_queue.Completion_authority_rejected _ ->
     Completion_authority_rejected
   | Keeper_event_queue.Task_cancelled _ -> Task_cancelled
+  | Keeper_event_queue.Workspace_message _ -> Workspace_message
+  | Keeper_event_queue.Delegate_completed _ -> Delegate_completed
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -116,16 +122,10 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
          ])
 ;;
 
-let urgency_to_string = function
-  | Keeper_event_queue.Immediate -> "immediate"
-  | Normal -> "normal"
-  | Low -> "low"
-;;
-
 let store_dir ~masc_root ~keeper_name =
   Filename.concat
     (Filename.concat
-       (Filename.concat (Filename.concat masc_root "keepers") keeper_name)
+       (Filename.concat (Filename.concat masc_root Common.keepers_runtime_dirname) keeper_name)
        "reaction-ledger")
     storage_generation
 ;;
@@ -169,7 +169,18 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
            reaction.target_id
            reaction.user_id
            reaction.emoji
-           reaction.reacted)
+           reaction.reacted
+       | Keeper_event_queue.Vote_cast vote ->
+         Printf.sprintf
+           "vote_cast target=%s target_author=%s voter=%s direction=%s"
+           (match vote.target with
+            | Keeper_event_queue.Vote_on_post post_id -> "post:" ^ post_id
+            | Keeper_event_queue.Vote_on_comment comment_id -> "comment:" ^ comment_id)
+           vote.target_author
+           vote.voter
+           (match vote.direction with
+            | Keeper_event_queue.Vote_up -> "up"
+            | Keeper_event_queue.Vote_down -> "down"))
       bs.author
       title
   | Keeper_event_queue.Bootstrap -> "bootstrap"
@@ -191,16 +202,6 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       r.approval_id
       (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
   | Keeper_event_queue.Manual_compaction_requested -> "manual_compaction_requested"
-  | Keeper_event_queue.Goal_assigned ga ->
-    Printf.sprintf
-      "goal_assigned goal_id=%s assigned_by=%s"
-      ga.ga_goal_id
-      ga.ga_assigned_by
-  | Keeper_event_queue.Goal_reconciliation_ready ready ->
-    Printf.sprintf
-      "goal_reconciliation_ready goal_id=%s triggering_task_id=%s"
-      ready.gr_goal_id
-      ready.gr_triggering_task_id
   | Keeper_event_queue.Completion_authority_rejected rejection ->
     Printf.sprintf
       "completion_authority_rejected task_id=%s verification_id=%s"
@@ -211,6 +212,20 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "task_cancelled task_id=%s cancelled_by=%s"
       cancellation.tc_task_id
       cancellation.tc_cancelled_by
+  | Keeper_event_queue.Workspace_message message ->
+    Printf.sprintf
+      "workspace_message request_id=%s from=%s"
+      message.wmsg_request_id
+      message.wmsg_from
+  | Keeper_event_queue.Delegate_completed dc ->
+    Printf.sprintf
+      "keeper_delegate_completed operation_id=%s keeper=%s outcome=%s"
+      dc.dc_operation_id
+      dc.dc_keeper
+      (match dc.dc_terminal with
+       | Keeper_event_queue.Delegate_replied _ -> "replied"
+       | Keeper_event_queue.Delegate_no_reply -> "no_reply"
+       | Keeper_event_queue.Delegate_failed _ -> "failed")
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -227,10 +242,10 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Connector_attention _
     | Keeper_event_queue.Hitl_resolved _
     | Keeper_event_queue.Manual_compaction_requested
-    | Keeper_event_queue.Goal_assigned _
-    | Keeper_event_queue.Goal_reconciliation_ready _ -> None
     | Keeper_event_queue.Completion_authority_rejected _ -> None
     | Keeper_event_queue.Task_cancelled _ -> None
+    | Keeper_event_queue.Workspace_message _ -> None
+    | Keeper_event_queue.Delegate_completed _ -> None
   in
   `Assoc
     (base_fields
@@ -244,7 +259,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
              [ "kind", `String (stimulus_kind_to_string kind)
              ; "source", `String "keeper_event_queue"
              ; "post_id", `String stimulus.post_id
-             ; "urgency", `String (urgency_to_string stimulus.urgency)
+             ; "urgency", `String (Keeper_event_queue.urgency_to_string stimulus.urgency)
              ; "arrived_at_unix", `Float stimulus.arrived_at
              ; "board_updated_at_unix", Json_util.option_to_yojson (fun value -> `Float value) board_updated_at
              ; "payload_preview", `String (stimulus_payload_preview stimulus.payload)
@@ -840,10 +855,10 @@ let decode_current_row ~keeper_name row =
       | ( Bootstrap | Fusion_completed | Schedule_due
         | Connector_attention | Hitl_resolved
         | Manual_compaction
-        | Goal_assigned
-        | Goal_reconciliation_ready
         | Completion_authority_rejected
-        | Task_cancelled ),
+        | Task_cancelled
+        | Workspace_message
+        | Delegate_completed ),
         _ -> Ok ()
     in
     let expected_event_id = digest_id "krl" (stimulus_id ^ "|stimulus") in
@@ -900,108 +915,196 @@ let max_recorded_at current candidate =
   | Some left, Some right -> Some (Float.max left right)
 ;;
 
-let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
-  if String.equal stimulus_id ""
+type event_queue_reaction_evidence_accumulator =
+  { mutable stimulus_seen : bool
+  ; mutable turn_started_seen : bool
+  ; mutable event_queue_ack_seen : bool
+  ; mutable event_queue_cancelled_seen : bool
+  ; mutable stimulus_recorded_at : float option
+  ; mutable turn_started_recorded_at : float option
+  ; mutable event_queue_ack_recorded_at : float option
+  ; mutable event_queue_cancelled_recorded_at : float option
+  ; mutable latest_recorded_at : float option
+  ; mutable matched_record_count : int
+  ; mutable quarantined_record_count : int
+  ; mutable first_matching_quarantine_reason : row_quarantine_reason option
+  ; mutable seen_event_ids : Event_id_set.t
+  }
+
+let empty_event_queue_reaction_evidence_accumulator () =
+  { stimulus_seen = false
+  ; turn_started_seen = false
+  ; event_queue_ack_seen = false
+  ; event_queue_cancelled_seen = false
+  ; stimulus_recorded_at = None
+  ; turn_started_recorded_at = None
+  ; event_queue_ack_recorded_at = None
+  ; event_queue_cancelled_recorded_at = None
+  ; latest_recorded_at = None
+  ; matched_record_count = 0
+  ; quarantined_record_count = 0
+  ; first_matching_quarantine_reason = None
+  ; seen_event_ids = Event_id_set.empty
+  }
+;;
+
+let note_event_queue_reaction_evidence_row ~keeper_name accumulator row =
+  let is_replay =
+    match string_field "event_id" row with
+    | Some event_id
+      when not (String.equal event_id "")
+           && Event_id_set.mem event_id accumulator.seen_event_ids -> true
+    | Some event_id when not (String.equal event_id "") ->
+      accumulator.seen_event_ids
+        <- Event_id_set.add event_id accumulator.seen_event_ids;
+      false
+    | Some _ | None -> false
+  in
+  if not is_replay
+  then
+    match decode_current_row ~keeper_name row with
+    | Error reason ->
+      accumulator.quarantined_record_count
+        <- accumulator.quarantined_record_count + 1;
+      (match accumulator.first_matching_quarantine_reason with
+       | Some _ -> ()
+       | None -> accumulator.first_matching_quarantine_reason <- Some reason)
+    | Ok current_row ->
+      accumulator.matched_record_count <- accumulator.matched_record_count + 1;
+      let metadata =
+        match current_row with
+        | Current_stimulus { metadata; _ }
+        | Current_reaction { metadata; _ } -> metadata
+      in
+      let recorded_at = Some metadata.recorded_at in
+      accumulator.latest_recorded_at
+        <- max_recorded_at accumulator.latest_recorded_at recorded_at;
+      (match current_row with
+       | Current_stimulus _ ->
+         accumulator.stimulus_seen <- true;
+         accumulator.stimulus_recorded_at
+           <- max_recorded_at accumulator.stimulus_recorded_at recorded_at
+       | Current_reaction { reaction_kind = Turn_started; _ } ->
+         accumulator.turn_started_seen <- true;
+         accumulator.turn_started_recorded_at
+           <- max_recorded_at accumulator.turn_started_recorded_at recorded_at
+       | Current_reaction { reaction_kind = Event_queue_ack; _ } ->
+         accumulator.event_queue_ack_seen <- true;
+         accumulator.event_queue_ack_recorded_at
+           <- max_recorded_at accumulator.event_queue_ack_recorded_at recorded_at
+       | Current_reaction { reaction_kind = Event_queue_cancelled; _ } ->
+         accumulator.event_queue_cancelled_seen <- true;
+         accumulator.event_queue_cancelled_recorded_at
+           <- max_recorded_at
+                accumulator.event_queue_cancelled_recorded_at
+                recorded_at)
+;;
+
+let event_queue_reaction_evidence_of_accumulator
+      ~keeper_name
+      ~stimulus_id
+      accumulator
+  =
+  let evidence =
+    { keeper_name
+    ; stimulus_id
+    ; stimulus_seen = accumulator.stimulus_seen
+    ; turn_started_seen = accumulator.turn_started_seen
+    ; event_queue_ack_seen = accumulator.event_queue_ack_seen
+    ; event_queue_cancelled_seen = accumulator.event_queue_cancelled_seen
+    ; stimulus_recorded_at = accumulator.stimulus_recorded_at
+    ; turn_started_recorded_at = accumulator.turn_started_recorded_at
+    ; event_queue_ack_recorded_at = accumulator.event_queue_ack_recorded_at
+    ; event_queue_cancelled_recorded_at =
+        accumulator.event_queue_cancelled_recorded_at
+    ; latest_recorded_at = accumulator.latest_recorded_at
+    ; matched_record_count = accumulator.matched_record_count
+    ; quarantined_record_count = accumulator.quarantined_record_count
+    }
+  in
+  match accumulator.first_matching_quarantine_reason with
+  | Some first_reason -> Evidence_quarantined { evidence; first_reason }
+  | None -> Evidence_complete evidence
+;;
+
+let unique_stimulus_ids stimulus_ids =
+  let seen = Hashtbl.create (List.length stimulus_ids) in
+  List.fold_left
+    (fun unique stimulus_id ->
+       if Hashtbl.mem seen stimulus_id
+       then unique
+       else (
+         Hashtbl.add seen stimulus_id ();
+         stimulus_id :: unique))
+    []
+    stimulus_ids
+  |> List.rev
+;;
+
+let event_queue_reaction_evidence_batch_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_ids
+  =
+  if List.exists (String.equal "") stimulus_ids
   then Error Evidence_invalid_stimulus_id
-  else begin
-  let stimulus_seen = ref false in
-  let turn_started_seen = ref false in
-  let event_queue_ack_seen = ref false in
-  let event_queue_cancelled_seen = ref false in
-  let stimulus_recorded_at = ref None in
-  let turn_started_recorded_at = ref None in
-  let event_queue_ack_recorded_at = ref None in
-  let event_queue_cancelled_recorded_at = ref None in
-  let latest_recorded_at = ref None in
-  let matched_record_count = ref 0 in
-  let quarantined_record_count = ref 0 in
-  let first_matching_quarantine_reason = ref None in
-  let seen_event_ids = ref Event_id_set.empty in
-  let remember_first slot value =
-    match !slot with
-    | Some _ -> ()
-    | None -> slot := Some value
-  in
-  let note_matching_row row =
-    let is_replay =
-      match string_field "event_id" row with
-      | Some event_id
-        when not (String.equal event_id "")
-             && Event_id_set.mem event_id !seen_event_ids -> true
-      | Some event_id when not (String.equal event_id "") ->
-        seen_event_ids := Event_id_set.add event_id !seen_event_ids;
-        false
-      | Some _ | None -> false
-    in
-    if not is_replay
-    then
-      match decode_current_row ~keeper_name row with
-      | Error reason ->
-        incr quarantined_record_count;
-        remember_first first_matching_quarantine_reason reason
-      | Ok current_row ->
-        incr matched_record_count;
-        let metadata =
-          match current_row with
-          | Current_stimulus { metadata; _ }
-          | Current_reaction { metadata; _ } -> metadata
-        in
-        let recorded_at = Some metadata.recorded_at in
-        latest_recorded_at := max_recorded_at !latest_recorded_at recorded_at;
-        (match current_row with
-         | Current_stimulus _ ->
-           stimulus_seen := true;
-           stimulus_recorded_at
-             := max_recorded_at !stimulus_recorded_at recorded_at
-         | Current_reaction { reaction_kind = Turn_started; _ } ->
-           turn_started_seen := true;
-           turn_started_recorded_at
-             := max_recorded_at !turn_started_recorded_at recorded_at
-         | Current_reaction { reaction_kind = Event_queue_ack; _ } ->
-           event_queue_ack_seen := true;
-           event_queue_ack_recorded_at
-             := max_recorded_at !event_queue_ack_recorded_at recorded_at
-         | Current_reaction { reaction_kind = Event_queue_cancelled; _ } ->
-           event_queue_cancelled_seen := true;
-           event_queue_cancelled_recorded_at
-             := max_recorded_at !event_queue_cancelled_recorded_at recorded_at)
-  in
-  let note_parsed_row row =
-    match string_field "stimulus_id" row with
-    | Some row_stimulus_id when String.equal row_stimulus_id stimulus_id ->
-      note_matching_row row
-    | Some _ | None -> ()
-  in
-  let store = store_for_base_path ~base_path ~keeper_name in
-  let iteration =
-    Dated_jsonl.iter_all_entries_result store (function
-      | Dated_jsonl.Parsed row -> note_parsed_row row
-      | Dated_jsonl.Malformed_json _ -> ())
-  in
-  match iteration with
-  | Error error -> Error (Evidence_read_error error)
-  | Ok () ->
-    let evidence =
-      { keeper_name
-      ; stimulus_id
-      ; stimulus_seen = !stimulus_seen
-      ; turn_started_seen = !turn_started_seen
-      ; event_queue_ack_seen = !event_queue_ack_seen
-      ; event_queue_cancelled_seen = !event_queue_cancelled_seen
-      ; stimulus_recorded_at = !stimulus_recorded_at
-      ; turn_started_recorded_at = !turn_started_recorded_at
-      ; event_queue_ack_recorded_at = !event_queue_ack_recorded_at
-      ; event_queue_cancelled_recorded_at = !event_queue_cancelled_recorded_at
-      ; latest_recorded_at = !latest_recorded_at
-      ; matched_record_count = !matched_record_count
-      ; quarantined_record_count = !quarantined_record_count
-      }
-    in
-    (match !first_matching_quarantine_reason with
-     | Some first_reason ->
-       Ok (Evidence_quarantined { evidence; first_reason })
-     | None -> Ok (Evidence_complete evidence))
-  end
+  else
+    let stimulus_ids = unique_stimulus_ids stimulus_ids in
+    match stimulus_ids with
+    | [] -> Ok []
+    | _ ->
+      let accumulators = Hashtbl.create (List.length stimulus_ids) in
+      let requested =
+        List.map
+          (fun stimulus_id ->
+             stimulus_id, empty_event_queue_reaction_evidence_accumulator ())
+          stimulus_ids
+      in
+      List.iter
+        (fun (stimulus_id, accumulator) ->
+           Hashtbl.add accumulators stimulus_id accumulator)
+        requested;
+      let note_parsed_row row =
+        match string_field "stimulus_id" row with
+        | Some stimulus_id ->
+          (match Hashtbl.find_opt accumulators stimulus_id with
+           | Some accumulator ->
+             note_event_queue_reaction_evidence_row
+               ~keeper_name
+               accumulator
+               row
+           | None -> ())
+        | None -> ()
+      in
+      let store = store_for_base_path ~base_path ~keeper_name in
+      (match
+         Dated_jsonl.iter_all_entries_result store (function
+           | Dated_jsonl.Parsed row -> note_parsed_row row
+           | Dated_jsonl.Malformed_json _ -> ())
+       with
+       | Error error -> Error (Evidence_read_error error)
+       | Ok () ->
+         Ok
+           (List.map
+              (fun (stimulus_id, accumulator) ->
+                 ( stimulus_id
+                 , event_queue_reaction_evidence_of_accumulator
+                     ~keeper_name
+                     ~stimulus_id
+                     accumulator ))
+              requested))
+;;
+
+let event_queue_reaction_evidence_result ~base_path ~keeper_name ~stimulus_id =
+  match
+    event_queue_reaction_evidence_batch_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_ids:[ stimulus_id ]
+  with
+  | Error _ as error -> error
+  | Ok [ (_, evidence) ] -> Ok evidence
+  | Ok _ -> Error Evidence_invalid_stimulus_id
 ;;
 
 let event_queue_turn_started_seen_for_source_result
@@ -1222,10 +1325,35 @@ let board_stimulus_token metadata stimulus_kind =
   | Bootstrap | Fusion_completed | Schedule_due
   | Connector_attention | Hitl_resolved
   | Manual_compaction
-  | Goal_assigned
-  | Goal_reconciliation_ready
   | Completion_authority_rejected
-  | Task_cancelled -> None
+  | Task_cancelled
+  | Workspace_message
+  | Delegate_completed -> None
+;;
+
+(* The per-keeper status this module publishes. The fleet roll-up used to
+   recover it by reading back the JSON it had just written and comparing the
+   string, so a renamed value or a missing field read as "not degraded" with
+   nothing to fail the build (#27560). The value travels beside the JSON now
+   and the string exists only at the boundary. *)
+type keeper_summary_status =
+  | Summary_empty
+  | Summary_ok
+  | Summary_degraded
+  | Summary_unknown
+  | Summary_unavailable
+      (** The store could not be reached at all, which is not the same as
+          reaching it and finding nothing ([Summary_empty]) or reading it and
+          finding trouble ([Summary_degraded]). It was emitted as a bare
+          string beside a four-case type, so the vocabulary a reader had to
+          handle was one wider than anything in the code said (#27560). *)
+
+let keeper_summary_status_to_string = function
+  | Summary_empty -> "empty"
+  | Summary_ok -> "ok"
+  | Summary_degraded -> "degraded"
+  | Summary_unknown -> "unknown"
+  | Summary_unavailable -> "unavailable"
 ;;
 
 let summarize_rows ~keeper_name ~limit rows =
@@ -1330,16 +1458,16 @@ let summarize_rows ~keeper_name ~limit rows =
   let pending_stimulus_count = List.length pending_stimulus_ids in
   let degraded_signal_count = pending_stimulus_count + !quarantined_row_count in
   let status =
-    if !row_count = 0 && !quarantined_row_count = 0 then "empty"
-    else if degraded_signal_count = 0 then "ok"
-    else "degraded"
+    if !row_count = 0 && !quarantined_row_count = 0 then Summary_empty
+    else if degraded_signal_count = 0 then Summary_ok
+    else Summary_degraded
   in
-  `Assoc
+  ( status
+  , `Assoc
     [ "schema", `String summary_schema
     ; "keeper_name", `String keeper_name
-    ; "status", `String status
+    ; "status", `String (keeper_summary_status_to_string status)
     ; "operator_action_required", `Bool (degraded_signal_count > 0)
-    ; "scanned_row_limit", `Int limit
     ; "scanned_row_count", `Int scanned_row_count
     ; "row_count", `Int !row_count
     ; "stimulus_count", `Int !stimulus_count
@@ -1360,16 +1488,16 @@ let summarize_rows ~keeper_name ~limit rows =
     ; "latest_recorded_at_unix", Json_util.float_opt_to_json !latest_recorded_at
     ; "latest_stimulus_id", Json_util.string_opt_to_json !latest_stimulus_id
     ; "read_error", `Null
-    ]
+    ] )
 ;;
 
 let error_summary ~keeper_name ~limit error =
-  `Assoc
+  ( Summary_unknown
+  , `Assoc
     [ "schema", `String summary_schema
     ; "keeper_name", `String keeper_name
-    ; "status", `String "unknown"
+    ; "status", `String (keeper_summary_status_to_string Summary_unknown)
     ; "operator_action_required", `Bool true
-    ; "scanned_row_limit", `Int limit
     ; "scanned_row_count", `Int 0
     ; "row_count", `Int 0
     ; "stimulus_count", `Int 0
@@ -1385,10 +1513,12 @@ let error_summary ~keeper_name ~limit error =
     ; "latest_recorded_at_unix", `Null
     ; "latest_stimulus_id", `Null
     ; "read_error", `String error
-    ]
+    ] )
 ;;
 
-let summary_for_keeper ~base_path ~keeper_name ~limit =
+(* The status travels with the JSON so the fleet roll-up can read it without
+   parsing what this module just wrote. *)
+let summary_with_status ~base_path ~keeper_name ~limit =
   try
     match
       Dated_jsonl.read_recent_result
@@ -1406,10 +1536,8 @@ let summary_for_keeper ~base_path ~keeper_name ~limit =
   | exn -> error_summary ~keeper_name ~limit (Printexc.to_string exn)
 ;;
 
-let summary_status json =
-  match string_field "status" json with
-  | Some value -> value
-  | None -> "unknown"
+let summary_for_keeper ~base_path ~keeper_name ~limit =
+  snd (summary_with_status ~base_path ~keeper_name ~limit)
 ;;
 
 let summary_read_error_count json =
@@ -1418,15 +1546,22 @@ let summary_read_error_count json =
   | _ -> 0
 ;;
 
+(* Written out so the exhaustive match is what fails when a case is added,
+   rather than a caller quietly missing the new string. *)
+let fleet_summary_status_strings =
+  List.map
+    keeper_summary_status_to_string
+    [ Summary_empty; Summary_ok; Summary_degraded; Summary_unknown; Summary_unavailable ]
+;;
+
 let unavailable_fleet_summary_json () =
   `Assoc
     [ "schema", `String fleet_summary_schema
-    ; "status", `String "unavailable"
+    ; "status", `String (keeper_summary_status_to_string Summary_unavailable)
     ; "status_reasons", `List []
     ; "operator_action_required", `Bool false
     ; "keeper_count", `Int 0
     ; "keeper_names", `List []
-    ; "scanned_row_limit_per_keeper", `Int 0
     ; "scanned_row_count", `Int 0
     ; "row_count", `Int 0
     ; "stimulus_count", `Int 0
@@ -1473,11 +1608,13 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
   (* NDT-OK: fleet summary health renders stale-age telemetry at the read
      boundary; keeper control flow never branches on this timestamp. *)
   let now = Unix.gettimeofday () in
-  let summaries =
+  let summaries_with_status =
     List.map
-      (fun keeper_name -> summary_for_keeper ~base_path ~keeper_name ~limit:limit_per_keeper)
+      (fun keeper_name ->
+        summary_with_status ~base_path ~keeper_name ~limit:limit_per_keeper)
       keeper_names
   in
+  let summaries = List.map snd summaries_with_status in
   let durable_event_queue_summaries =
     List.map (fun keeper_name -> durable_event_queue_health ~base_path ~keeper_name) keeper_names
   in
@@ -1659,27 +1796,25 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
       read_error_count > 0
       || durable_event_queue_discovery_error_count > 0
       || durable_event_queue_read_error_count > 0
-    then "unknown"
+    then Summary_unknown
     else if
-      pending_count > 0
-      || quarantined_row_count > 0
+      List.exists
+        (fun (status, _) -> status = Summary_degraded)
+        summaries_with_status
       || durable_event_queue_stale_count > 0
-    then "degraded"
-    else if row_count = 0 && durable_event_queue_count = 0 then "empty"
-    else if List.exists (fun summary -> summary_status summary = "degraded") summaries
-    then "degraded"
-    else "ok"
+    then Summary_degraded
+    else if row_count = 0 && durable_event_queue_count = 0 then Summary_empty
+    else Summary_ok
   in
   `Assoc
     [ "schema", `String fleet_summary_schema
-    ; "status", `String status
+    ; "status", `String (keeper_summary_status_to_string status)
     ; "status_reasons", `List (List.map (fun value -> `String value) status_reasons)
     ; ( "operator_action_required"
       , `Bool
           (status_reasons <> []) )
     ; "keeper_count", `Int (List.length keeper_names)
     ; "keeper_names", `List (List.map (fun value -> `String value) keeper_names)
-    ; "scanned_row_limit_per_keeper", `Int limit_per_keeper
     ; "scanned_row_count", `Int (total_int "scanned_row_count")
     ; "row_count", `Int row_count
     ; "stimulus_count", `Int (total_int "stimulus_count")

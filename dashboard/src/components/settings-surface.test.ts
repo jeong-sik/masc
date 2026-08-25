@@ -3,24 +3,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
+import { Effect } from 'effect'
 import {
   SettingsSurface,
   mcpExposedToolNames,
+  mcpExposedToolGroups,
   logEntryToSysRow,
   logRowStatus,
   normalizeSettingsSection,
   settingsControlInventory,
 } from './settings-surface'
 import type {
-  ConfigEntry,
-  DashboardConfigResponse,
   DashboardRuntimeProviderSnapshot,
   DashboardRuntimeProvidersResponse,
   DashboardToolInventoryItem,
-  LogEntry,
   RuntimeDefaultsResponse,
   RuntimeResolvedResponse,
 } from '../api/dashboard'
+import type { ConfigEntry, DashboardConfig } from '../api/dashboard-config'
+import type { LogEntry, LogsData } from '../api/dashboard-logs'
 import { DashboardMain } from './dashboard-shell'
 import { SETTINGS_ROUTE_SECTION_IDS } from '../config/navigation'
 import { route } from '../router'
@@ -29,6 +30,15 @@ import { tweaksDensity } from './tweaks-panel'
 import { notificationDeliveryError, notifyRules } from '../notifications'
 
 const MOCK_RUNTIME_PATH = 'fixture/config/runtime.toml'
+const runtimeProviderProtocols = [
+  {
+    protocol: 'openai-compatible-http',
+    transport: 'endpoint',
+    semantics: 'http_provider',
+    credential_policy: 'optional',
+    requires_non_interactive: false,
+  },
+] as const
 import { dashboardLoading, shellAuthSummary, shellConfigResolution, shellRuntimeResolution } from '../store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { resetDevTokenBootstrap } from '../api/dev-token'
@@ -85,8 +95,6 @@ vi.mock('../api/dashboard.js', async () => {
   const actual = await vi.importActual<typeof import('../api/dashboard')>('../api/dashboard')
   return {
     ...actual,
-    fetchDashboardConfig: apiMock.fetchDashboardConfig,
-    fetchLogs: apiMock.fetchLogs,
     fetchDashboardTools: apiMock.fetchDashboardTools,
     fetchRuntimeDefaults: apiMock.fetchRuntimeDefaults,
     fetchRuntimeResolved: apiMock.fetchRuntimeResolved,
@@ -97,6 +105,14 @@ vi.mock('../api/dashboard.js', async () => {
     saveRuntimeTomlConfig: apiMock.saveRuntimeTomlConfig,
   }
 })
+
+vi.mock('../api/dashboard-config', () => ({
+  fetchDashboardConfig: apiMock.fetchDashboardConfig,
+}))
+
+vi.mock('../api/dashboard-logs', () => ({
+  fetchLogs: apiMock.fetchLogs,
+}))
 
 vi.mock('../lib/runtime-config-refresh', () => ({
   refreshRuntimeConfigConsumers: runtimeRefreshMock.refreshRuntimeConfigConsumers,
@@ -119,16 +135,30 @@ vi.mock('../api', async () => {
 function makeLogEntry(overrides: Partial<LogEntry> = {}): LogEntry {
   return {
     seq: 1,
-    ts: '2026-06-21T16:24:51Z',
+    timestamp: '2026-06-21T16:24:51Z',
     level: 'INFO',
     source: 'structured',
     module: 'Keeper',
     message: 'booted',
-    keeper_name: null,
-    turn_id: null,
+    keeperName: 'system',
+    hasTurn: false,
     category: null,
-    details: null,
+    details: {},
     ...overrides,
+  }
+}
+
+function makeLogsData(entries: readonly LogEntry[]): LogsData {
+  return {
+    generatedAt: '2026-06-21T16:24:51Z',
+    source: 'masc_log_ring',
+    retention: {
+      scope: 'dashboard_logs',
+      durableStore: '/workspace/.masc/logs/system_log_2026-06-21.jsonl',
+    },
+    ring: { startSeq: 0, total: entries.length, droppedBefore: false },
+    total: entries.length,
+    entries,
   }
 }
 
@@ -137,7 +167,6 @@ function makeToolItem(overrides: Partial<DashboardToolInventoryItem> = {}): Dash
     name: 'tool',
     description: '',
     category: 'uncategorized',
-    enabled_in_current_mode: false,
     direct_call_allowed: false,
     doc_refs: [],
     prompt_hints: [],
@@ -152,12 +181,10 @@ function makeToolItem(overrides: Partial<DashboardToolInventoryItem> = {}): Dash
 
 function makeModelRouting(
   overrides: {
-    cross_verifier_runtime_id?: string | null
     media_failover?: string[]
   } = {},
 ): RuntimeDefaultsResponse['model_routing'] {
   return {
-    cross_verifier_runtime_id: null,
     media_failover: [],
     ...overrides,
   }
@@ -195,22 +222,26 @@ function makeRuntimeResolved(
       id: 'rt-a', provider: 'P', model: 'm1',
       effective_max_context: 128000, max_context_source: 'override',
       max_output_tokens: null, is_local: false, is_default: true,
+      keeper_dispatchable: true, keeper_dispatch_blocked_reason: null,
     },
     runtimes: [
       {
         id: 'rt-a', provider: 'P', model: 'm1',
         effective_max_context: 128000, max_context_source: 'override',
         max_output_tokens: null, is_local: false, is_default: true,
+        keeper_dispatchable: true, keeper_dispatch_blocked_reason: null,
       },
       {
         id: 'rt-b', provider: 'P', model: 'm2',
         effective_max_context: 128000, max_context_source: 'override',
         max_output_tokens: null, is_local: false, is_default: false,
+        keeper_dispatchable: true, keeper_dispatch_blocked_reason: null,
       },
       {
         id: 'rt-c', provider: 'P', model: 'm3',
         effective_max_context: 128000, max_context_source: 'override',
         max_output_tokens: null, is_local: false, is_default: false,
+        keeper_dispatchable: true, keeper_dispatch_blocked_reason: null,
       },
     ],
     lanes: [],
@@ -248,7 +279,6 @@ function makeRuntimeProvider(
     source: 'runtime.toml',
     endpoint_url: 'https://runtime.example/v1',
     note: null,
-    discovery: null,
     ...overrides,
   }
 }
@@ -288,44 +318,38 @@ function makeConfigEntry(overrides: Partial<ConfigEntry> = {}): ConfigEntry {
   return {
     env: 'MASC_BASE_PATH',
     description: 'Base storage directory',
-    value: null,
-    default: '(cwd)',
+    displayValue: '(cwd)',
+    defaultValue: '(cwd)',
     source: 'runtime',
-    source_detail: 'resolved from runtime',
-    provenance: {
-      kind: 'runtime',
-      detail: 'resolved from runtime',
-    },
+    sourceDetail: 'resolved from runtime',
     sensitive: false,
     ...overrides,
   }
 }
 
-function makeDashboardConfig(overrides: Partial<DashboardConfigResponse> = {}): DashboardConfigResponse {
+function makeDashboardConfig(overrides: Partial<DashboardConfig> = {}): DashboardConfig {
   return {
-    generated_at: '2026-06-21T00:00:00Z',
     server: {
       version: 'test',
-      git_commit: null,
-      ocaml_version: '5.4.0',
-      uptime_seconds: 12,
+      ocamlVersion: '5.4.0',
+      uptimeSeconds: 12,
       pid: 123,
     },
     categories: {
       server: [
-        makeConfigEntry({ env: 'MASC_URL', description: 'MCP URL', value: 'http://127.0.0.1:8935/mcp', default: '(derived)', source: 'env', source_detail: 'environment variable MASC_URL' }),
-        makeConfigEntry({ env: 'MASC_HTTP_BASE_URL', description: 'HTTP base URL', value: 'http://127.0.0.1:8935', default: '(derived)', source: 'env', source_detail: 'environment variable MASC_HTTP_BASE_URL' }),
-        makeConfigEntry({ env: 'MASC_BASE_PATH', description: 'Base storage directory', value: '/workspace', default: '(cwd)', source: 'env', source_detail: 'environment variable MASC_BASE_PATH' }),
+        makeConfigEntry({ env: 'MASC_URL', description: 'MCP URL', displayValue: 'http://127.0.0.1:8935/mcp', defaultValue: '(derived)', source: 'env', sourceDetail: 'environment variable MASC_URL' }),
+        makeConfigEntry({ env: 'MASC_HTTP_BASE_URL', description: 'HTTP base URL', displayValue: 'http://127.0.0.1:8935', defaultValue: '(derived)', source: 'env', sourceDetail: 'environment variable MASC_HTTP_BASE_URL' }),
+        makeConfigEntry({ env: 'MASC_BASE_PATH', description: 'Base storage directory', displayValue: '/workspace', defaultValue: '(cwd)', source: 'env', sourceDetail: 'environment variable MASC_BASE_PATH' }),
       ],
       path: [
-        makeConfigEntry({ env: 'MASC_CONFIG_DIR', description: 'Config directory override', value: null, default: '(none)', source: 'default', source_detail: 'compiled default value' }),
-        makeConfigEntry({ env: 'MASC_DATA_DIR', description: 'Data directory override', value: null, default: '(none)', source: 'default', source_detail: 'compiled default value' }),
+        makeConfigEntry({ env: 'MASC_CONFIG_DIR', description: 'Config directory override', displayValue: '(none)', defaultValue: '(none)', source: 'default', sourceDetail: 'compiled default value' }),
+        makeConfigEntry({ env: 'MASC_DATA_DIR', description: 'Data directory override', displayValue: '(none)', defaultValue: '(none)', source: 'default', sourceDetail: 'compiled default value' }),
       ],
       dashboard: [
-        makeConfigEntry({ env: 'MASC_DASHBOARD_CTX_PREPARING', description: 'Context preparing', value: '0.70', default: '0.70', source: 'default', source_detail: 'compiled default value' }),
-        makeConfigEntry({ env: 'MASC_DASHBOARD_CTX_HANDOFF_IMMINENT', description: 'Context imminent', value: '0.85', default: '0.85', source: 'default', source_detail: 'compiled default value' }),
-        makeConfigEntry({ env: 'MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO', description: 'Runtime warning', value: '0.95', default: '0.95', source: 'default', source_detail: 'compiled default value' }),
-        makeConfigEntry({ env: 'MASC_DASHBOARD_SIGNAL_STALE_SEC', description: 'Signal stale', value: '1200.0', default: '1200.0', source: 'default', source_detail: 'compiled default value' }),
+        makeConfigEntry({ env: 'MASC_DASHBOARD_CTX_PREPARING', description: 'Context preparing', displayValue: '0.70', defaultValue: '0.70', source: 'default', sourceDetail: 'compiled default value' }),
+        makeConfigEntry({ env: 'MASC_DASHBOARD_CTX_HANDOFF_IMMINENT', description: 'Context imminent', displayValue: '0.85', defaultValue: '0.85', source: 'default', sourceDetail: 'compiled default value' }),
+        makeConfigEntry({ env: 'MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO', description: 'Runtime warning', displayValue: '0.95', defaultValue: '0.95', source: 'default', sourceDetail: 'compiled default value' }),
+        makeConfigEntry({ env: 'MASC_DASHBOARD_SIGNAL_STALE_SEC', description: 'Signal stale', displayValue: '1200.0', defaultValue: '1200.0', source: 'default', sourceDetail: 'compiled default value' }),
       ],
     },
     ...overrides,
@@ -341,8 +365,8 @@ function stubRuntimeResolved(value: RuntimeResolvedResponse = makeRuntimeResolve
 }
 
 function stubEmptyApi() {
-  apiMock.fetchDashboardConfig.mockResolvedValue(makeDashboardConfig())
-  apiMock.fetchLogs.mockResolvedValue({ total: 0, entries: [] })
+  apiMock.fetchDashboardConfig.mockReturnValue(Effect.succeed(makeDashboardConfig()))
+  apiMock.fetchLogs.mockReturnValue(Effect.succeed(makeLogsData([])))
   apiMock.fetchDashboardTools.mockResolvedValue({ tool_inventory: { count: 0, tools: [] } })
   stubRuntimeDefaults()
   stubRuntimeResolved()
@@ -353,6 +377,7 @@ function stubEmptyApi() {
     file_name: 'runtime.toml',
     source_text: '[runtime]\ndefault = "rt-a"\n',
     reloaded: false,
+    provider_protocols: runtimeProviderProtocols,
   })
   apiMock.patchRuntimeMediaFailover.mockImplementation(async () => ({
     ok: true,
@@ -360,6 +385,7 @@ function stubEmptyApi() {
     file_name: 'runtime.toml',
     source_text: '[runtime]\ndefault = "rt-a"\n',
     reloaded: true,
+    provider_protocols: runtimeProviderProtocols,
   }))
   apiMock.patchRuntimeRouting.mockImplementation(async () => ({
     ok: true,
@@ -367,6 +393,7 @@ function stubEmptyApi() {
     file_name: 'runtime.toml',
     source_text: '[runtime]\ndefault = "rt-a"\n',
     reloaded: true,
+    provider_protocols: runtimeProviderProtocols,
   }))
   apiMock.saveRuntimeTomlConfig.mockImplementation(async (sourceText: string) => ({
     ok: true,
@@ -374,6 +401,7 @@ function stubEmptyApi() {
     file_name: 'runtime.toml',
     source_text: sourceText,
     reloaded: true,
+    provider_protocols: runtimeProviderProtocols,
   }))
 }
 
@@ -442,20 +470,16 @@ describe('SettingsSurface', () => {
       status: 'ready',
       warnings: [],
       config_root: { path: '/workspace/.masc/config', exists: true, source: 'derived' },
-      runtime_authoring: { path: '/workspace/.masc/config/runtime.toml', exists: true, source: 'derived' },
-      runtime: { path: MOCK_RUNTIME_PATH, exists: true, source: 'runtime.toml' },
       prompts: { path: '/workspace/.masc/config/prompts', exists: true, source: 'derived' },
       keepers: { path: '/workspace/.masc/keepers', exists: true, source: 'derived' },
-      personas: { path: '/workspace/.masc/personas', exists: true, source: 'derived' },
     }
     shellAuthSummary.value = null
     localStorage.clear()
     tweaksDensity.value = 'spacious'
     notifyRules.value = {
-      keeper_guardrail: true,
       keeper_handoff: true,
       'approval:pending': true,
-      'oas:agent_failed': true,
+      'agent_core:agent_failed': true,
     }
     notificationDeliveryError.value = null
     window.location.hash = '#settings'
@@ -558,6 +582,12 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('local')
     expect(container.querySelector('[data-testid="settings-control-ledger"]')?.textContent)
       .toContain('browser shell only')
+    // The ledger reads and never writes, so it ships collapsed: open above the
+    // real controls it looked like one of them that refused to work.
+    const ledger = container.querySelector('[data-testid="settings-control-ledger"]')
+    expect(ledger?.tagName.toLowerCase()).toBe('details')
+    expect((ledger as HTMLDetailsElement | null)?.open).toBe(false)
+    expect(ledger?.querySelector('summary')?.textContent).toContain('읽기 전용')
     expect(container.querySelector('[data-control-id="settings-theme-density"]')?.getAttribute('data-control-kind'))
       .toBe('browser-local')
     expect(container.querySelector('[data-control-id="settings-display-locale"]')?.getAttribute('data-control-kind'))
@@ -758,6 +788,57 @@ describe('SettingsSurface', () => {
     })
   })
 
+  it('MCP server page groups exposed tools by the live registry category (set-tg rows)', async () => {
+    apiMock.fetchDashboardTools.mockResolvedValue({
+      tool_inventory: {
+        count: 3,
+        tools: [
+          makeToolItem({ name: 'masc_start', category: 'lifecycle', surfaces: ['public_mcp'] }),
+          makeToolItem({ name: 'masc_handoff', category: 'lifecycle', surfaces: ['public_mcp'] }),
+          makeToolItem({ name: 'masc_trace_window', category: 'observe', surfaces: ['public_mcp'] }),
+          makeToolItem({ name: 'internal_only', category: 'ops', surfaces: ['internal'] }),
+        ],
+      },
+    })
+
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="mcp-tools-list"]')).not.toBeNull()
+    })
+    // groups sorted by category; tools sorted inside each group
+    const groups = [...container.querySelectorAll('[data-testid="mcp-tools-list"] .set-tg-row')]
+    expect(groups.map(g => g.querySelector('.set-tg-id')?.textContent)).toEqual(['lifecycle', 'observe'])
+    expect(groups.every(g => g.querySelector('.set-tg-kind.masc')?.textContent === 'masc')).toBe(true)
+    expect([...groups[0]!.querySelectorAll('.set-tg-chip')].map(c => c.textContent))
+      .toEqual(['masc_handoff', 'masc_start'])
+    expect([...groups[1]!.querySelectorAll('.set-tg-chip')].map(c => c.textContent))
+      .toEqual(['masc_trace_window'])
+    expect(container.querySelector('[data-testid="mcp-tools-list"]')?.textContent).not.toContain('internal_only')
+    expect(container.textContent).toContain('Exposed public MCP tools (3)')
+    // transport detail mirrors the live endpoint with the bearer token masked
+    expect(container.querySelector('[data-testid="settings-mcp-transport-detail"]')?.textContent)
+      .toBe('POST http://127.0.0.1:8935/mcp · Content-Type: application/json · Authorization: Bearer ••••')
+  })
+
+  it('mcpExposedToolGroups keeps only public_mcp tools, grouped by category', () => {
+    const groups = mcpExposedToolGroups([
+      makeToolItem({ name: 'masc_start', category: 'lifecycle', surfaces: ['public_mcp'] }),
+      makeToolItem({ name: 'masc_handoff', category: 'lifecycle', surfaces: ['public_mcp'] }),
+      makeToolItem({ name: 'masc_status', category: ' observe ', surfaces: ['public_mcp', 'keeper'] }),
+      makeToolItem({ name: 'internal_only', category: 'ops', surfaces: ['internal'] }),
+      makeToolItem({ name: 'no_category', category: '  ', surfaces: ['public_mcp'] }),
+    ])
+    expect(groups).toEqual([
+      { category: 'general', names: ['no_category'] },
+      { category: 'lifecycle', names: ['masc_handoff', 'masc_start'] },
+      { category: 'observe', names: ['masc_status'] },
+    ])
+    expect(mcpExposedToolGroups([])).toEqual([])
+  })
+
   it('paths page shows resolved server paths instead of editable local previews', async () => {
     render(html`<${SettingsSurface} />`, container)
 
@@ -765,7 +846,10 @@ describe('SettingsSurface', () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain('/workspace/.masc')
-      expect(container.textContent).toContain(MOCK_RUNTIME_PATH)
+      // The Runtime TOML row has no item in config_resolution — the server's
+      // resolution record has no such field — so it renders the resolved
+      // runtime config_path, which is what production shows.
+      expect(container.textContent).toContain('/cfg/runtime.toml')
       expect(container.textContent).toContain('MASC_BASE_PATH')
     })
     expect(container.textContent).not.toContain('format-checked only')
@@ -776,7 +860,9 @@ describe('SettingsSurface', () => {
   it('paths page does not fabricate unknown rows when path resolution is unavailable', async () => {
     shellRuntimeResolution.value = null
     shellConfigResolution.value = null
-    apiMock.fetchDashboardConfig.mockRejectedValueOnce(new Error('config unavailable'))
+    apiMock.fetchDashboardConfig.mockReturnValueOnce(
+      Effect.fail(new Error('config unavailable')),
+    )
     stubRuntimeDefaults(makeRuntimeDefaults({ config_path: null }))
     stubRuntimeResolved(makeRuntimeResolved({ config_path: null }))
     apiMock.fetchRuntimeProviders.mockResolvedValueOnce(makeRuntimeProviders({ config_path: null }))
@@ -797,7 +883,9 @@ describe('SettingsSurface', () => {
   it('paths page labels provider-only path data as partial resolution', async () => {
     shellRuntimeResolution.value = null
     shellConfigResolution.value = null
-    apiMock.fetchDashboardConfig.mockRejectedValueOnce(new Error('config unavailable'))
+    apiMock.fetchDashboardConfig.mockReturnValueOnce(
+      Effect.fail(new Error('config unavailable')),
+    )
 
     render(html`<${SettingsSurface} />`, container)
 
@@ -834,7 +922,7 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="notify-permission-value"]')?.textContent).toBe('unsupported')
     expect(container.querySelector('[data-testid="notify-permission-request"]')).toBeNull()
 
-    for (const kind of ['keeper_guardrail', 'keeper_handoff', 'approval:pending', 'oas:agent_failed']) {
+    for (const kind of ['keeper_handoff', 'approval:pending', 'agent_core:agent_failed']) {
       const toggle = container.querySelector(`[data-testid="notify-rule-toggle-${kind}"]`)
       expect(toggle).not.toBeNull()
       expect(toggle?.closest('label')?.classList.contains('v2-mobile-operator-target')).toBe(true)
@@ -847,7 +935,7 @@ describe('SettingsSurface', () => {
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
 
     const toggle = await waitFor(() => {
-      const el = container.querySelector('[data-testid="notify-rule-toggle-keeper_guardrail"]') as HTMLInputElement
+      const el = container.querySelector('[data-testid="notify-rule-toggle-keeper_handoff"]') as HTMLInputElement
       expect(el).not.toBeNull()
       return el
     })
@@ -857,7 +945,7 @@ describe('SettingsSurface', () => {
 
     await waitFor(() => {
       const stored = JSON.parse(localStorage.getItem('dashboard:notify:rules-v1') ?? '{}')
-      expect(stored.keeper_guardrail).toBe(false)
+      expect(stored.keeper_handoff).toBe(false)
     })
   })
 
@@ -874,7 +962,9 @@ describe('SettingsSurface', () => {
   })
 
   it('notify page surfaces config projection failures instead of rendering missing thresholds', async () => {
-    apiMock.fetchDashboardConfig.mockRejectedValueOnce(new Error('config projection offline'))
+    apiMock.fetchDashboardConfig.mockReturnValueOnce(
+      Effect.fail(new Error('config projection offline')),
+    )
 
     render(html`<${SettingsSurface} />`, container)
 
@@ -938,6 +1028,7 @@ describe('SettingsSurface', () => {
           file_name: 'runtime.toml',
           source_text: '[runtime]\ndefault = "rt-a"\n',
           reloaded: false,
+          provider_protocols: runtimeProviderProtocols,
         }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -1014,7 +1105,7 @@ describe('SettingsSurface', () => {
             always_ignored_sampling_params: ['top_p'],
           },
           request_config: {
-            source: 'oas-provider-config',
+            source: 'agent-core-provider-config',
             provider_kind: 'openai_compat',
             request_path: '/chat/completions',
             request_path_targets_responses_api: false,
@@ -1049,7 +1140,7 @@ describe('SettingsSurface', () => {
             connect_timeout_s: 120,
           },
           effective_capabilities: {
-            source: 'oas-provider-config-model',
+            source: 'agent-core-provider-config-model',
             max_context_tokens: 131072,
             max_output_tokens: 4096,
             supports_tools: true,
@@ -1151,7 +1242,6 @@ describe('SettingsSurface', () => {
                 supports_computer_use: false,
                 supports_code_execution: true,
               },
-              match_prefixes: ['m1'],
             },
             binding: {
               provider_id: 'provider-a',
@@ -1218,12 +1308,12 @@ describe('SettingsSurface', () => {
         'controls:tool-choice,required,named,parallel,extended-thinking,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
       )
       expect(cards[0]?.textContent).toContain('note:verified by runtime discovery')
-      expect(cards[0]?.textContent).toContain('source:oas-provider-config')
+      expect(cards[0]?.textContent).toContain('source:agent-core-provider-config')
       expect(cards[0]?.textContent).toContain('path:/chat/completions')
       expect(cards[0]?.textContent).toContain('system-prompt')
       expect(cards[0]?.textContent).toContain('sampling:top_k:40,min_p:0.05')
       expect(cards[0]?.textContent).toContain('tool:required')
-      expect(cards[0]?.textContent).toContain('source:oas-provider-config-model · ctx:131072 · out:4096 · tools · tool-choice+required+named+parallel')
+      expect(cards[0]?.textContent).toContain('source:agent-core-provider-config-model · ctx:131072 · out:4096 · tools · tool-choice+required+named+parallel')
       expect(cards[0]?.textContent).toContain('ignored:temperature,top_p,presence_penalty,frequency_penalty')
       expect(cards[0]?.textContent).toContain('input:multimodal,image,audio')
       expect(cards[0]?.textContent).toContain('modality:visual-first')
@@ -1251,13 +1341,13 @@ describe('SettingsSurface', () => {
         // routing/assignments 서브섹션은 전용 Routing 섹션으로 이동했다.
       ).toEqual(['catalog'])
     })
-    expect(container.textContent).not.toContain('oas·seoul-1')
+    expect(container.textContent).not.toContain('agentCore·seoul-1')
   })
 
   it('runtime overview shows its own error state when the provider catalog is unavailable, without fabricating catalog cards', async () => {
     // PR-6 (bug #14/#15/#36): the settings surface no longer re-projects
     // /api/v1/dashboard/runtime-defaults into a fake runtime-provider-catalog
-    // shape when /api/v1/dashboard/runtime-providers fails — it shows the
+    // shape when /api/v1/providers fails — it shows the
     // catalog's own error state instead.
     apiMock.fetchRuntimeProviders.mockRejectedValueOnce(new Error('provider catalog unavailable'))
 
@@ -1288,7 +1378,6 @@ describe('SettingsSurface', () => {
     stubRuntimeDefaults(
       makeRuntimeDefaults({
         model_routing: makeModelRouting({
-          cross_verifier_runtime_id: 'rt-a',
           media_failover: [],
         }),
       }),
@@ -1307,41 +1396,51 @@ describe('SettingsSurface', () => {
         .toContain('수동 reroute')
       expect(container.querySelector('[data-testid="runtime-media-failover-reality"]')?.textContent)
         .toContain('provider 실패 자동 전환이 아니라')
-      expect(container.querySelector('[data-testid="runtime-routing-cross-verifier"]')).not.toBeNull()
       expect(container.querySelector('[data-testid="runtime-media-failover-editor"]')).not.toBeNull()
     })
   })
 
-  it('patches scalar model routing lanes from settings and refreshes the projection', async () => {
-    apiMock.fetchRuntimeDefaults.mockReset()
-    apiMock.fetchRuntimeDefaults
-      .mockResolvedValueOnce(makeRuntimeDefaults())
-      .mockResolvedValueOnce(makeRuntimeDefaults({
-        model_routing: makeModelRouting({
-          cross_verifier_runtime_id: 'rt-b',
-          media_failover: [],
-        }),
-      }))
+  it('routing section renders resolved runtime lanes as read-only candidate chains', async () => {
+    stubRuntimeResolved(makeRuntimeResolved({
+      lanes: [
+        {
+          id: 'default',
+          runtime_ids: ['rt-a', 'rt-b'],
+          preferred_candidate: 'rt-b',
+          preferred_at_ts: 1750000000,
+        },
+        {
+          id: 'vision',
+          runtime_ids: ['rt-c'],
+          preferred_candidate: null,
+          preferred_at_ts: null,
+        },
+      ],
+    }))
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
-    await waitFor(() => {
-      const select = container.querySelector('[data-testid="runtime-routing-cross-verifier"]') as HTMLSelectElement | null
-      expect(select).not.toBeNull()
-      expect(select?.disabled).toBe(false)
-      expect(select?.options.length).toBeGreaterThan(1)
-    })
-
-    const crossVerifier = container.querySelector('[data-testid="runtime-routing-cross-verifier"]') as HTMLSelectElement
-    await fireEvent.input(crossVerifier, { target: { value: 'rt-b' } })
 
     await waitFor(() => {
-      expect(apiMock.patchRuntimeRouting).toHaveBeenCalledWith('cross_verifier', 'rt-b')
-      expect(runtimeRefreshMock.refreshRuntimeConfigConsumers).toHaveBeenCalledTimes(1)
-      expect((container.querySelector('[data-testid="runtime-routing-cross-verifier"]') as HTMLSelectElement).value)
-        .toBe('rt-b')
+      expect(container.querySelector('[data-testid="runtime-lanes-section"]')).not.toBeNull()
     })
-    expect(container.querySelector('[data-testid="runtime-routing-message"]')?.textContent).toContain('저장됨')
+    const laneDefault = container.querySelector('[data-testid="runtime-lane-default"]') as HTMLElement
+    expect(laneDefault.classList.contains('rt-fo')).toBe(true)
+    expect(laneDefault.querySelector('.rt-fo-lane')?.textContent).toBe('default')
+    expect(laneDefault.querySelector('.rt-fo-lane-id')?.textContent).toBe('[runtime].default')
+    const cands = [...laneDefault.querySelectorAll('.rt-fo-chain .rt-fo-cand')]
+    expect(cands.map(c => c.querySelector('.rt-fo-id')?.textContent)).toEqual(['rt-a', 'rt-b'])
+    expect(cands.map(c => c.classList.contains('head'))).toEqual([true, false])
+    expect(cands[0]!.querySelector('.rt-fo-rank')?.textContent).toBe('1차')
+    expect(laneDefault.querySelector('[data-testid="runtime-lane-default-sticky"]')?.textContent)
+      .toContain('sticky → rt-b')
+
+    const laneVision = container.querySelector('[data-testid="runtime-lane-vision"]') as HTMLElement
+    expect(laneVision.querySelector('[data-testid="runtime-lane-vision-sticky"]')).toBeNull()
+    // read-only: no candidate edit controls (the routing PATCH writer covers
+    // default + media_failover only)
+    expect(container.querySelector('[data-testid="runtime-lanes-section"]')?.querySelector('button, select, input'))
+      .toBeNull()
   })
 
   it('routing section exposes a required default lane without an empty option and patches it', async () => {
@@ -1404,13 +1503,11 @@ describe('SettingsSurface', () => {
     apiMock.fetchRuntimeDefaults
       .mockResolvedValueOnce(makeRuntimeDefaults({
         model_routing: makeModelRouting({
-          cross_verifier_runtime_id: null,
           media_failover: ['rt-b'],
         }),
       }))
       .mockResolvedValueOnce(makeRuntimeDefaults({
         model_routing: makeModelRouting({
-          cross_verifier_runtime_id: null,
           media_failover: ['rt-b', 'rt-c'],
         }),
       }))
@@ -1471,9 +1568,7 @@ describe('SettingsSurface', () => {
   it('log filter chips filter live rows from the ring', async () => {
     // 7 ring entries mapped to rows: tool(category/details or /masc_/)=4,
     // success(ok)=4, failure(fail)=2.
-    apiMock.fetchLogs.mockResolvedValue({
-      total: 7,
-      entries: [
+    apiMock.fetchLogs.mockReturnValue(Effect.succeed(makeLogsData([
         makeLogEntry({
           seq: 7,
           level: 'INFO',
@@ -1487,8 +1582,7 @@ describe('SettingsSurface', () => {
         makeLogEntry({ seq: 3, level: 'ERROR', message: 'masc_trace_window 실패' }),
         makeLogEntry({ seq: 2, level: 'ERROR', message: 'restart failed (3/3)' }),
         makeLogEntry({ seq: 1, level: 'INFO', message: 'handoff 시작' }),
-      ],
-    })
+      ])))
 
     render(html`<${SettingsSurface} />`, container)
 
@@ -1523,6 +1617,7 @@ describe('SettingsSurface', () => {
       file_name: 'runtime.toml',
       source_text: '[fusion]\nenabled = true\ndefault_preset = "trio"\n\n[fusion.presets.trio]\nmin_answered = 2\n',
       reloaded: false,
+      provider_protocols: runtimeProviderProtocols,
     })
     render(html`<${SettingsSurface} />`, container)
 
@@ -1545,6 +1640,7 @@ describe('SettingsSurface', () => {
       file_name: 'runtime.toml',
       source_text: '[runtime]\ndefault = "runpod_mtp.qwen"\n',
       reloaded: false,
+      provider_protocols: runtimeProviderProtocols,
     }
     apiMock.fetchRuntimeTomlConfig.mockResolvedValueOnce(runtimeConfig)
 
@@ -1659,14 +1755,28 @@ describe('settings read-surface helpers', () => {
   it('logEntryToSysRow maps a ring entry to [time, level, identity, message, status]', () => {
     const row = logEntryToSysRow(
       makeLogEntry({
-        ts: '2026-06-21T16:24:51Z',
+        timestamp: '2026-06-21T16:24:51Z',
         level: 'ERROR',
-        keeper_name: 'drifter',
+        keeperName: 'drifter',
         module: 'Keeper',
         message: 'masc_trace_window 실패',
       }),
     )
-    expect(row).toEqual(['16:24:51', 'error', 'drifter', 'masc_trace_window 실패', 'fail', true])
+    // The last field is the tool chip. This entry carries no category, so it is
+    // not a tool row — it used to be one because the message contains "masc_".
+    expect(row).toEqual(['16:24:51', 'error', 'drifter', 'masc_trace_window 실패', 'fail', false])
+  })
+
+  it('logEntryToSysRow does not read the message body to find tool rows', () => {
+    // Each of these contains "masc_" and none is a tool: the logging module's
+    // own warnings, the agent-core error prefix, and a staging path (#24036).
+    for (const message of [
+      '[masc_log] WARN: unrecognised log level, defaulting to Info',
+      '[masc_agent_core_error] provider returned no content',
+      'renamed .masc_atomic_stage_9f2 into place',
+    ]) {
+      expect(logEntryToSysRow(makeLogEntry({ message }))[5]).toBe(false)
+    }
   })
 
   it('logEntryToSysRow preserves structured tool classification for filters', () => {
@@ -1680,8 +1790,8 @@ describe('settings read-surface helpers', () => {
     expect(row[5]).toBe(true)
   })
 
-  it('logEntryToSysRow falls back to module then (root) for identity', () => {
-    expect(logEntryToSysRow(makeLogEntry({ keeper_name: null, module: 'Server' }))[2]).toBe('Server')
-    expect(logEntryToSysRow(makeLogEntry({ keeper_name: null, module: '' }))[2]).toBe('(root)')
+  it('logEntryToSysRow uses the normalized keeper identity', () => {
+    expect(logEntryToSysRow(makeLogEntry({ keeperName: 'system', module: 'Server' }))[2]).toBe('system')
+    expect(logEntryToSysRow(makeLogEntry({ keeperName: 'drifter', module: '' }))[2]).toBe('drifter')
   })
 })

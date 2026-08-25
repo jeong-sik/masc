@@ -38,16 +38,16 @@ val validate_media_type : string -> (string, string) result
 val validate_image_size : string -> (unit, string) result
 (** Validate raw image bytes against {!max_image_bytes}. *)
 
-val truncated_of_stop_reason : Agent_sdk.Types.stop_reason -> bool
+val truncated_of_stop_reason : Agent_core.Types.stop_reason -> bool
 (** Collapse the provider's typed terminal reason to the single [truncated] bit
     {!Multimodal.Vision_analyze.classify} consumes: [MaxTokens -> true], every
-    other variant -> [false]. Exhaustive so a new SDK variant forces a decision. *)
+    other variant -> [false]. Exhaustive so a new agent-core variant forces a decision. *)
 
 val message_of_request
   :  Multimodal.Vision_analyze.request
-  -> Agent_sdk.Types.message
+  -> Agent_core.Types.message
 (** One-shot user message [text query; image], with bytes base64-encoded and
-    [~source_type:Agent_sdk.Types.Base64] (the OpenAI/ollama serializer emits
+    [~source_type:Agent_core.Types.Base64] (the OpenAI/ollama serializer emits
     [data:<media_type>;base64,<data>]). *)
 
 val provider_for_vision
@@ -79,13 +79,6 @@ val store_artifact
   -> string
   -> (Multimodal.Vision_artifact_store.handle, string) result
 (** Store image bytes in the content-addressed artifact store. Blocking
-    filesystem work is offloaded when the Eio runtime is active. *)
-
-val load_artifact
-  :  dir:string
-  -> Multimodal.Vision_artifact_store.handle
-  -> (string, string) result
-(** Load image bytes from the content-addressed artifact store. Blocking
     filesystem work is offloaded when the Eio runtime is active. *)
 
 (** Typed outcome of {!run_vision}. SSOT shared by the tool handler (renders to

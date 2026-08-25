@@ -37,6 +37,9 @@ Relationship to existing tooling (complementary, not duplicate)
 Usage
 -----
   audit-sublib-cycle.py [--root DIR] [--describe-file FILE] [--leaf LIB]...
+  audit-sublib-cycle.py --describe-file FILE \
+    --closed-source-root packages/agent_core \
+    --required-local-library masc.agent_core
   audit-sublib-cycle.py --self-test     # clean + buggy fixture dual-check
 
 Exit codes: 0 = all leaves clean, 1 = boundary violation, 2 = usage/parse error.
@@ -49,6 +52,7 @@ import subprocess
 import sys
 from collections import deque
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import Union
 
 MEGA_LIB = "masc"
@@ -90,8 +94,6 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.voice_bridge_core",
     "masc.discovery_cache",
     "masc.local_runtime_pool",
-    "masc.worker_execution_backend",
-    "masc.worker_execution_spec",
     # Keeper-owned pure/type leaves extracted from lib/keeper/.
     "masc.keeper_accountability_claim_types",
     "masc.keeper_runtime_manifest_types",
@@ -99,7 +101,7 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_registry_types_turn_phase",
     "masc.keeper_registry_types_decision",
     "masc.keeper_registry_types_compaction",
-    "masc.keeper_hooks_oas_types",
+    "masc.keeper_hooks_agent_core_types",
     "masc.keeper_binding_health_config",
     "masc.keeper_transition_audit_types",
     "masc.keeper_path_rejection",
@@ -132,7 +134,7 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     # no-op for that leaf family without any signal.
     "masc.event_bus_slots",
     "masc.keeper_synthetic_marker",
-    "masc.keeper_oas_timeout_message",
+    "masc.keeper_agent_core_timeout_message",
     "masc.keeper_tool_response",
     "masc.keeper_discovered_tools",
     "masc.keeper_tool_execute_timeout",
@@ -158,13 +160,21 @@ class Library:
 
     name: str
     uid: str
+    local: bool
     requires: tuple[str, ...]
+    source_dir: str
 
 
 @dataclass(frozen=True)
 class Violation:
     leaf: str
     path: tuple[str, ...]  # human-readable lib names: leaf -> ... -> mega
+
+
+@dataclass(frozen=True)
+class SourceRootViolation:
+    library: str
+    source_dir: str
 
 
 # --- minimal s-expression parser (atoms + lists; no external deps) -----------
@@ -221,49 +231,87 @@ def parse(tokens: list[str]) -> list[Sexp]:
     return items
 
 
-def _child(node: "list[Sexp]", key: str) -> "list[Sexp] | None":
-    """Return the first child sublist whose head atom equals ``key``."""
-    for ch in node:
-        if isinstance(ch, list) and ch and ch[0] == key:
-            return ch
-    return None
+def _required_field(record: "list[Sexp]", key: str) -> Sexp:
+    matches = [
+        child
+        for child in record
+        if isinstance(child, list) and child and child[0] == key
+    ]
+    if len(matches) != 1 or len(matches[0]) != 2:
+        raise ValueError(
+            f"library record requires exactly one single-valued {key!r} field"
+        )
+    return matches[0][1]
 
 
 def find_libraries(sexp: Sexp) -> list[Library]:
-    """Walk the describe tree and collect every node with both name and uid.
-
-    Library nodes carry ``(name ...)`` and ``(uid ...)``; module nodes carry
-    ``(name ...)`` only, so requiring uid cleanly selects libraries.
-    """
+    """Walk the Dune 0.1 describe tree and decode library variants strictly."""
     libs: list[Library] = []
 
     def visit(node: Sexp) -> None:
         if not isinstance(node, list):
             return
-        name_node = _child(node, "name")
-        uid_node = _child(node, "uid")
-        if (
-            name_node is not None
-            and uid_node is not None
-            and len(name_node) >= 2
-            and len(uid_node) >= 2
-            and isinstance(name_node[1], str)
-            and isinstance(uid_node[1], str)
-        ):
-            req_node = _child(node, "requires")
-            requires: tuple[str, ...] = ()
-            if (
-                req_node is not None
-                and len(req_node) >= 2
-                and isinstance(req_node[1], list)
+        if node and node[0] == "library":
+            if len(node) != 2 or not isinstance(node[1], list):
+                raise ValueError("malformed library variant in describe output")
+            record = node[1]
+            name = _required_field(record, "name")
+            uid = _required_field(record, "uid")
+            local = _required_field(record, "local")
+            requires = _required_field(record, "requires")
+            source_dir = _required_field(record, "source_dir")
+            if not isinstance(name, str) or not isinstance(uid, str):
+                raise ValueError("library name and uid must be atoms")
+            if not isinstance(local, str) or local not in ("true", "false"):
+                raise ValueError(f"library {name!r} has malformed local field")
+            if not isinstance(requires, list) or not all(
+                isinstance(dependency_uid, str) for dependency_uid in requires
             ):
-                requires = tuple(u for u in req_node[1] if isinstance(u, str))
-            libs.append(Library(name=name_node[1], uid=uid_node[1], requires=requires))
+                raise ValueError(f"library {name!r} has malformed requires field")
+            if not isinstance(source_dir, str):
+                raise ValueError(f"library {name!r} has malformed source_dir field")
+            libs.append(
+                Library(
+                    name=name,
+                    uid=uid,
+                    local=local == "true",
+                    requires=tuple(requires),
+                    source_dir=source_dir,
+                )
+            )
         for ch in node:
             visit(ch)
 
     visit(sexp)
+    seen_uids: dict[str, Library] = {}
+    for lib in libs:
+        previous = seen_uids.get(lib.uid)
+        if previous is not None:
+            raise ValueError(
+                f"duplicate library uid {lib.uid!r}: {previous.name!r} and {lib.name!r}"
+            )
+        seen_uids[lib.uid] = lib
     return libs
+
+
+def find_build_context(sexp: Sexp) -> str:
+    contexts: list[str] = []
+
+    def visit(node: Sexp) -> None:
+        if not isinstance(node, list):
+            return
+        if len(node) == 2 and node[0] == "build_context" and isinstance(node[1], str):
+            contexts.append(node[1])
+        for child in node:
+            visit(child)
+
+    visit(sexp)
+    unique = sorted(set(contexts))
+    if len(unique) != 1:
+        raise ValueError(
+            f"expected exactly one build_context, found {len(unique)}: {unique}"
+        )
+    return unique[0]
 
 
 # --- core boundary check (pure; operates on a list of Library) ---------------
@@ -325,15 +373,122 @@ def _path_to(start: str, target: str, by_uid: dict[str, Library]) -> "list[str] 
     return None
 
 
+def validate_graph(libs: list[Library]) -> None:
+    """Fail closed when describe output is not a complete UID graph."""
+    by_uid = {lib.uid: lib for lib in libs}
+    dangling = sorted(
+        (lib.name, uid) for lib in libs for uid in lib.requires if uid not in by_uid
+    )
+    if dangling:
+        rendered = ", ".join(f"{name} -> {uid}" for name, uid in dangling[:8])
+        suffix = " ..." if len(dangling) > 8 else ""
+        raise ValueError(
+            f"describe graph has dangling requires UIDs: {rendered}{suffix}"
+        )
+
+
+def _source_root_path(value: str) -> PurePosixPath:
+    path = PurePosixPath(value)
+    if path.is_absolute() or not path.parts or ".." in path.parts:
+        raise ValueError(
+            f"closed source root must be a normalized relative path: {value!r}"
+        )
+    return path
+
+
+def _local_source_relative(lib: Library, build_context: str) -> PurePosixPath:
+    if not lib.local:
+        raise ValueError(f"cannot classify external library {lib.name!r} as local")
+    source = PurePosixPath(lib.source_dir)
+    context = PurePosixPath(build_context)
+    try:
+        relative = source.relative_to(context)
+    except ValueError as exc:
+        raise ValueError(
+            f"local library {lib.name!r} source_dir {lib.source_dir!r} "
+            f"is outside build_context {build_context!r}"
+        ) from exc
+    if ".." in relative.parts:
+        raise ValueError(
+            f"local library {lib.name!r} has non-normal source_dir {lib.source_dir!r}"
+        )
+    return relative
+
+
+def check_closed_source_root(
+    libs: list[Library],
+    *,
+    build_context: str,
+    source_root: str,
+    required_local_library: "str | None" = None,
+) -> list[SourceRootViolation]:
+    """Reject local libraries outside a directory-restricted describe graph.
+
+    The caller must capture ``dune describe workspace SOURCE_ROOT``. Dune then
+    emits the libraries declared below SOURCE_ROOT plus their resolved
+    dependency closure. External libraries are represented explicitly as
+    ``local false`` and remain allowed; any ``local true`` node owned elsewhere
+    in the workspace is a reverse dependency across the package boundary.
+    """
+    root = _source_root_path(source_root)
+    local_libs = [lib for lib in libs if lib.local]
+    if not local_libs:
+        raise ValueError("closed source-root graph contains no local libraries")
+
+    relative_by_uid = {
+        lib.uid: _local_source_relative(lib, build_context) for lib in local_libs
+    }
+
+    if required_local_library is not None:
+        anchors = [lib for lib in local_libs if lib.name == required_local_library]
+        if len(anchors) != 1:
+            raise ValueError(
+                f"required local library {required_local_library!r} must appear "
+                f"exactly once, found {len(anchors)}"
+            )
+        anchor_path = relative_by_uid[anchors[0].uid]
+        if anchor_path != root and root not in anchor_path.parents:
+            raise ValueError(
+                f"required local library {required_local_library!r} is owned by "
+                f"{anchors[0].source_dir!r}, not {source_root!r}"
+            )
+
+    violations: list[SourceRootViolation] = []
+    for lib in local_libs:
+        relative = relative_by_uid[lib.uid]
+        if relative != root and root not in relative.parents:
+            violations.append(
+                SourceRootViolation(library=lib.name, source_dir=lib.source_dir)
+            )
+    return sorted(violations, key=lambda item: (item.library, item.source_dir))
+
+
 # --- describe acquisition ----------------------------------------------------
 
 
-def load_describe(root: str, describe_file: "str | None") -> Sexp:
+def load_describe(
+    root: str,
+    describe_file: "str | None",
+    closed_source_root: "str | None" = None,
+) -> Sexp:
     if describe_file is not None:
         text = open(describe_file, encoding="utf-8").read()
     else:
+        command = [
+            "dune",
+            "describe",
+            "workspace",
+            "--root",
+            root,
+            "--format",
+            "sexp",
+            "--lang",
+            "0.1",
+        ]
+        if closed_source_root is not None:
+            command.extend(["--with-pps", closed_source_root])
         proc = subprocess.run(
-            ["dune", "describe", "--root", root],
+            command,
             capture_output=True,
             text=True,
             check=False,
@@ -354,21 +509,91 @@ def load_describe(root: str, describe_file: "str | None") -> Sexp:
 def self_test() -> int:
     """RFC-0001 / TLA bug-model homolog: a gate is only valid if it PASSES on a
     clean graph AND FAILS on a graph with the bug injected. Both must hold."""
-    mega = Library(name="masc", uid="MEGA", requires=("LEAF", "OTHER"))
-    neutral = Library(name="masc_core", uid="CORE", requires=())
+
+    described = parse(
+        tokenize(
+            """(
+              (root /WORKSPACE_ROOT)
+              (build_context _build/default)
+              (executables
+                ((names (probe))
+                 (requires (AGENT_CORE))
+                 (modules ())
+                 (include_dirs ())))
+              (library
+                ((name masc.agent_core)
+                 (uid AGENT_CORE)
+                 (local true)
+                 (requires (YOJSON))
+                 (source_dir _build/default/packages/agent_core/lib)
+                 (modules ())
+                 (include_dirs ())))
+              (library
+                ((name yojson)
+                 (uid YOJSON)
+                 (local false)
+                 (requires ())
+                 (source_dir /FINDLIB/yojson)
+                 (modules ())
+                 (include_dirs ()))))
+            """
+        )
+    )
+    described = described[0] if len(described) == 1 else described
+    decoded = find_libraries(described)
+    if [lib.name for lib in decoded] != ["masc.agent_core", "yojson"]:
+        print(
+            f"SELF-TEST FAIL: describe schema decoded unexpected libraries: {decoded}"
+        )
+        return 1
+    if find_build_context(described) != "_build/default":
+        print("SELF-TEST FAIL: describe schema decoded unexpected build context")
+        return 1
+    validate_graph(decoded)
+    print("self-test: Dune 0.1 describe schema decodes strictly (PASS)")
+
+    def local(
+        name: str, uid: str, requires: tuple[str, ...], source_dir: str
+    ) -> Library:
+        return Library(
+            name=name,
+            uid=uid,
+            local=True,
+            requires=requires,
+            source_dir=source_dir,
+        )
+
+    def external(name: str, uid: str, requires: tuple[str, ...] = ()) -> Library:
+        return Library(
+            name=name,
+            uid=uid,
+            local=False,
+            requires=requires,
+            source_dir=f"/FINDLIB/{name}",
+        )
+
+    mega = local("masc", "MEGA", ("LEAF", "OTHER"), "_build/default/lib")
+    neutral = local("masc_core", "CORE", (), "_build/default/lib/core")
+    other = external("other", "OTHER")
     # clean: leaf depends only on neutral; mega depends on leaf (allowed direction)
-    clean_leaf = Library(name="masc.masc_goal", uid="LEAF", requires=("CORE",))
-    clean = [mega, neutral, clean_leaf]
+    clean_leaf = local("masc.masc_goal", "LEAF", ("CORE",), "_build/default/lib/goal")
+    clean = [mega, neutral, clean_leaf, other]
     # buggy: leaf re-couples to the mega-lib (direct)
-    buggy_leaf = Library(name="masc.masc_goal", uid="LEAF", requires=("CORE", "MEGA"))
-    buggy = [mega, neutral, buggy_leaf]
+    buggy_leaf = local(
+        "masc.masc_goal", "LEAF", ("CORE", "MEGA"), "_build/default/lib/goal"
+    )
+    buggy = [mega, neutral, buggy_leaf, other]
     # buggy-transitive: leaf -> mid -> mega
-    mid = Library(name="masc.mid", uid="MID", requires=("MEGA",))
-    trans_leaf = Library(name="masc.masc_goal", uid="LEAF", requires=("MID",))
-    buggy_trans = [mega, neutral, mid, trans_leaf]
+    mid = local("masc.mid", "MID", ("MEGA",), "_build/default/lib/mid")
+    trans_leaf = local("masc.masc_goal", "LEAF", ("MID",), "_build/default/lib/goal")
+    buggy_trans = [mega, neutral, mid, trans_leaf, other]
 
     leaves = ("masc.masc_goal",)
     ok = True
+
+    validate_graph(clean)
+    validate_graph(buggy)
+    validate_graph(buggy_trans)
 
     v_clean = check(clean, leaves)
     if v_clean:
@@ -392,6 +617,101 @@ def self_test() -> int:
         print(
             f"self-test: buggy graph (transitive) -> violation {v_trans[0].path} (PASS)"
         )
+
+    build_context = "_build/default"
+    source_root = "packages/agent_core"
+    agent_core = local(
+        "masc.agent_core",
+        "AGENT_CORE",
+        ("AGENT_STRINGS", "YOJSON"),
+        "_build/default/packages/agent_core/lib",
+    )
+    agent_strings = local(
+        "masc.agent_core.strings",
+        "AGENT_STRINGS",
+        (),
+        "_build/default/packages/agent_core/lib/strings",
+    )
+    yojson = external("yojson", "YOJSON")
+    closed_clean = [agent_core, agent_strings, yojson]
+    validate_graph(closed_clean)
+    v_closed_clean = check_closed_source_root(
+        closed_clean,
+        build_context=build_context,
+        source_root=source_root,
+        required_local_library="masc.agent_core",
+    )
+    if v_closed_clean:
+        ok = False
+        print(
+            f"SELF-TEST FAIL: clean closed source-root graph reported {v_closed_clean}"
+        )
+    else:
+        print("self-test: closed source root with external deps -> clean (PASS)")
+
+    coordinator = local(
+        "masc.keeper_runtime",
+        "KEEPER",
+        (),
+        "_build/default/lib/keeper_runtime",
+    )
+    closed_buggy = [
+        Library(
+            name=agent_core.name,
+            uid=agent_core.uid,
+            local=agent_core.local,
+            requires=("AGENT_STRINGS", "KEEPER"),
+            source_dir=agent_core.source_dir,
+        ),
+        agent_strings,
+        coordinator,
+    ]
+    validate_graph(closed_buggy)
+    v_closed_buggy = check_closed_source_root(
+        closed_buggy,
+        build_context=build_context,
+        source_root=source_root,
+        required_local_library="masc.agent_core",
+    )
+    if len(v_closed_buggy) != 1 or v_closed_buggy[0].library != coordinator.name:
+        ok = False
+        print(
+            "SELF-TEST FAIL: closed source-root graph did not reject local "
+            f"coordinator dependency: {v_closed_buggy}"
+        )
+    else:
+        print("self-test: closed source root rejects local coordinator dep (PASS)")
+
+    try:
+        check_closed_source_root(
+            [agent_strings, yojson],
+            build_context=build_context,
+            source_root=source_root,
+            required_local_library="masc.agent_core",
+        )
+    except ValueError:
+        print("self-test: missing required local library fails closed (PASS)")
+    else:
+        ok = False
+        print("SELF-TEST FAIL: missing required local library was accepted")
+
+    try:
+        validate_graph(
+            [
+                Library(
+                    name=agent_core.name,
+                    uid=agent_core.uid,
+                    local=agent_core.local,
+                    requires=("MISSING",),
+                    source_dir=agent_core.source_dir,
+                )
+            ]
+        )
+    except ValueError:
+        print("self-test: dangling UID fails closed (PASS)")
+    else:
+        ok = False
+        print("SELF-TEST FAIL: dangling UID was accepted")
 
     print("SELF-TEST: ALL PASS" if ok else "SELF-TEST: FAILED")
     return 0 if ok else 1
@@ -418,6 +738,24 @@ def main(argv: list[str]) -> int:
         help="leaf library that must not depend on the mega-lib (repeatable; adds to defaults)",
     )
     ap.add_argument(
+        "--closed-source-root",
+        default=None,
+        metavar="DIR",
+        help=(
+            "require every local library in this directory-restricted describe "
+            "graph to be owned below DIR"
+        ),
+    )
+    ap.add_argument(
+        "--required-local-library",
+        default=None,
+        metavar="LIB",
+        help=(
+            "with --closed-source-root, require exactly one local anchor library "
+            "named LIB below that source root"
+        ),
+    )
+    ap.add_argument(
         "--self-test",
         action="store_true",
         help="run the clean+buggy fixture dual-check and exit",
@@ -427,18 +765,27 @@ def main(argv: list[str]) -> int:
     if args.self_test:
         return self_test()
 
+    if args.required_local_library is not None and args.closed_source_root is None:
+        ap.error("--required-local-library requires --closed-source-root")
+
     leaves = DEFAULT_LEAVES + tuple(args.leaf)
     try:
-        sexp = load_describe(args.root, args.describe_file)
+        sexp = load_describe(args.root, args.describe_file, args.closed_source_root)
+        libs = find_libraries(sexp)
     except (RuntimeError, ValueError, OSError) as exc:
         print(f"audit-sublib-cycle: {exc}", file=sys.stderr)
         return 2
 
-    libs = find_libraries(sexp)
     if not libs:
         print(
             "audit-sublib-cycle: no libraries found in describe output", file=sys.stderr
         )
+        return 2
+
+    try:
+        validate_graph(libs)
+    except ValueError as exc:
+        print(f"audit-sublib-cycle: {exc}", file=sys.stderr)
         return 2
 
     violations = check(libs, leaves)
@@ -456,11 +803,45 @@ def main(argv: list[str]) -> int:
         )
         return 1
 
+    if args.closed_source_root is not None:
+        try:
+            build_context = find_build_context(sexp)
+            source_root_violations = check_closed_source_root(
+                libs,
+                build_context=build_context,
+                source_root=args.closed_source_root,
+                required_local_library=args.required_local_library,
+            )
+        except ValueError as exc:
+            print(f"audit-sublib-cycle: {exc}", file=sys.stderr)
+            return 2
+        if source_root_violations:
+            print(
+                "BOUNDARY VIOLATION: directory-restricted graph contains "
+                "workspace-local libraries owned outside the package",
+                file=sys.stderr,
+            )
+            for violation in source_root_violations:
+                print(f"  {violation.library}: {violation.source_dir}", file=sys.stderr)
+            print(
+                f"\nLibraries described from `{args.closed_source_root}` may depend only "
+                "on libraries owned below that source root or on external installed "
+                "libraries.",
+                file=sys.stderr,
+            )
+            return 1
+
     checked = [name for name in leaves if any(lib.name == name for lib in libs)]
     noun = "library" if len(checked) == 1 else "libraries"
     print(
         f"audit-sublib-cycle: OK - {len(checked)} leaf {noun} clean: {', '.join(checked) or '(none present)'}"
     )
+    if args.closed_source_root is not None:
+        local_count = sum(1 for lib in libs if lib.local)
+        print(
+            "audit-sublib-cycle: OK - "
+            f"{local_count} local libraries remain below {args.closed_source_root}"
+        )
     return 0
 
 

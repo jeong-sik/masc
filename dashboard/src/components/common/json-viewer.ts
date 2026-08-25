@@ -12,7 +12,7 @@ export function parseJsonLikeData(data: unknown): unknown {
   }
 }
 
-export function JsonViewer({ data, label, initialCollapsed = false, level = 0, ancestors = [] }: { data: unknown; label?: string; initialCollapsed?: boolean; level?: number; ancestors?: object[] }) {
+export function JsonViewer({ data, label, initialCollapsed = false, collapseNested = true, level = 0, ancestors = [] }: { data: unknown; label?: string; initialCollapsed?: boolean; collapseNested?: boolean; level?: number; ancestors?: object[] }) {
   const [collapsed, setCollapsed] = useState(initialCollapsed)
 
   const isObject = data !== null && typeof data === 'object'
@@ -82,8 +82,8 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
       ${!collapsed && html`
         <div class="pl-4 ml-1.5 border-l border-[var(--color-border-divider)] mt-1 flex flex-col gap-0.5 w-full min-w-0">
           ${isArray
-            ? (data as unknown[]).map((val, idx) => html`<${JsonViewer} key=${idx} data=${val} label=${String(idx)} level=${level + 1} initialCollapsed=${level >= 2} ancestors=${nextAncestors} />`)
-            : (entries as [string, unknown][]).map(([k, v]) => html`<${JsonViewer} key=${k} data=${v} label=${k} level=${level + 1} initialCollapsed=${level >= 2} ancestors=${nextAncestors} />`)
+            ? (data as unknown[]).map((val, idx) => html`<${JsonViewer} key=${idx} data=${val} label=${String(idx)} level=${level + 1} initialCollapsed=${collapseNested && level >= 2} collapseNested=${collapseNested} ancestors=${nextAncestors} />`)
+            : (entries as [string, unknown][]).map(([k, v]) => html`<${JsonViewer} key=${k} data=${v} label=${k} level=${level + 1} initialCollapsed=${collapseNested && level >= 2} collapseNested=${collapseNested} ancestors=${nextAncestors} />`)
           }
         </div>
       `}
@@ -91,12 +91,12 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
   `
 }
 
-export function JsonViewerCard({ data, title }: { data: unknown; title?: string }) {
+export function JsonViewerCard({ data, title, expandAll = false }: { data: unknown; title?: string; expandAll?: boolean }) {
   return html`
     <div class="bg-[var(--color-bg-page)] border border-[var(--color-border-default)] rounded-[var(--r-1)] overflow-hidden flex flex-col max-h-100" data-testid="json-viewer-card" data-title=${title ?? ''}>
       ${title ? html`<div class="px-3 py-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-2xs uppercase tracking-wider font-semibold text-[var(--color-fg-muted)]">${title}</div>` : null}
       <div class="p-3 overflow-y-auto min-h-0 w-full">
-        <${JsonViewer} data=${data} />
+        <${JsonViewer} data=${data} collapseNested=${!expandAll} />
       </div>
     </div>
   `

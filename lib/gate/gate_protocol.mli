@@ -70,8 +70,6 @@ val message_request_status_to_string : message_request_status -> string
     Unknown labels return [None] so callers fail closed instead of silently
     treating protocol drift as acceptance. *)
 val message_request_status_of_string : string -> message_request_status option
-val message_request_to_json : message_request -> Yojson.Safe.t
-
 (** Successful response to send back to the consumer. *)
 type outbound_message = {
   keeper_name : string;
@@ -95,19 +93,15 @@ type validation_error =
   | Empty_keeper_name
   | Empty_channel_user_id
   | Empty_idempotency_key
-  | Duplicate_message of string
 
 val validation_error_to_string : validation_error -> string
 
 val validate :
   max_content_length:int ->
-  dedup_check:(string -> bool) ->
   inbound_message ->
   (unit, validation_error) result
-(** Pure validation with injected dedup check.
-    Returns [Ok ()] when the message can proceed.
-    The [dedup_check] function is provided by the caller
-    so this module stays free of mutable state. *)
+(** Pure structural validation. Durable idempotency belongs to the selected
+    Keeper Owner operation store, after dispatch. *)
 
 (** {1 Errors} *)
 

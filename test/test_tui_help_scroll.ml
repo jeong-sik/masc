@@ -1,0 +1,81 @@
+(** The help overlay scrolls against the sheet it draws.
+
+    The overlay writes its lines one per row and then, on a terminal wide
+    enough, folds them into two columns -- so the rows it draws are half the
+    lines it holds. The key handler used to bound [j] with the line count and
+    no height at all, which let the stored scroll run to twice what the frame
+    could ever show. The reader saw the sheet stop, kept pressing, and then
+    had to press [k] dozens of times before anything moved.
+
+    These tests pin the two numbers both sides now read. *)
+
+let check_int = Alcotest.(check int)
+let check_bool = Alcotest.(check bool)
+
+(* Stand-ins for the real sections: the fold cares about how many lines there
+   are, not what they say. *)
+let lines n = List.init n (fun i -> Printf.sprintf "line %d" i)
+
+let test_wide_terminal_halves_the_sheet () =
+  let sheet = Masc_tui_help.sheet ~cols:120 (lines 76) in
+  check_int "76 lines fold into 38 rows" 38 (List.length sheet)
+
+let test_odd_line_count_keeps_the_tail () =
+  let sheet = Masc_tui_help.sheet ~cols:120 (lines 75) in
+  check_int "an odd sheet still holds every line" 38 (List.length sheet);
+  check_bool "the last row exists" true (List.length sheet > 0)
+
+let test_narrow_terminal_draws_one_line_per_row () =
+  let sheet = Masc_tui_help.sheet ~cols:80 (lines 76) in
+  check_int "an 80-column terminal draws every line on its own row" 76
+    (List.length sheet)
+
+let test_content_height_leaves_room_for_the_frame () =
+  check_int "a 43-row viewport draws 38 rows of sheet" 38
+    (Masc_tui_help.content_height ~rows:43);
+  check_int "a viewport smaller than the frame still draws one row" 1
+    (Masc_tui_help.content_height ~rows:2)
+
+(* What the key handler and the drawing both do now. *)
+let viewport ~cols ~rows lines =
+  ( List.length (Masc_tui_help.sheet ~cols lines)
+  , Masc_tui_help.content_height ~rows )
+
+let test_holding_j_does_not_bank_presses () =
+  let count, height = viewport ~cols:120 ~rows:30 (lines 76) in
+  let ceiling = Masc_tui_scroll.maximum ~count ~height in
+  let rec press_down n scroll =
+    if n = 0 then scroll
+    else press_down (n - 1) (Masc_tui_scroll.down ~count ~height scroll)
+  in
+  let bottom = press_down 200 0 in
+  check_int "j stops at the last row the frame can show" ceiling bottom;
+  check_bool "one k moves the frame straight away" true
+    (Masc_tui_scroll.up ~count ~height bottom < ceiling)
+
+let test_the_line_count_is_not_the_bound () =
+  (* The number the old ceiling used, against the one the frame can spend. *)
+  let sheet_lines = lines 76 in
+  let count, height = viewport ~cols:120 ~rows:30 sheet_lines in
+  check_bool "a bound taken from the lines overshoots the sheet" true
+    (List.length sheet_lines - 1 > Masc_tui_scroll.maximum ~count ~height)
+
+let () =
+  Alcotest.run "tui_help_scroll"
+    [ ( "sheet"
+      , [ Alcotest.test_case "wide terminal halves the sheet" `Quick
+            test_wide_terminal_halves_the_sheet
+        ; Alcotest.test_case "odd line count keeps the tail" `Quick
+            test_odd_line_count_keeps_the_tail
+        ; Alcotest.test_case "narrow terminal draws one line per row" `Quick
+            test_narrow_terminal_draws_one_line_per_row
+        ; Alcotest.test_case "content height leaves room for the frame" `Quick
+            test_content_height_leaves_room_for_the_frame
+        ] )
+    ; ( "bound"
+      , [ Alcotest.test_case "holding j does not bank presses" `Quick
+            test_holding_j_does_not_bank_presses
+        ; Alcotest.test_case "the line count is not the bound" `Quick
+            test_the_line_count_is_not_the_bound
+        ] )
+    ]

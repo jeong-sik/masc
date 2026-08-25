@@ -37,6 +37,19 @@ exception Compute_timeout of string * bool
     Callers of [get_or_compute_with_timeout] do not need to handle this —
     it is caught and converted to a timeout-error JSON response. *)
 
+val timeout_error_code : string
+(** The [error] value carried by every timeout envelope this module emits. *)
+
+val is_timeout_envelope : Yojson.Safe.t -> bool
+(** [is_timeout_envelope json] is [true] when [json] is a timeout envelope
+    produced by this module rather than a computed payload.
+
+    Readers must call this instead of matching the [error] string themselves:
+    the recognizer shares {!timeout_error_code} with the producer, so the wire
+    value cannot change under a reader. The envelope still travels in-band as
+    data, which is why every reader needs this check at all; #28400 tracks
+    moving it out of band and giving it its own HTTP status. *)
+
 val get_or_compute_with_timeout :
   string -> ttl:float -> clock:_ Eio.Time.clock -> timeout_sec:float ->
   (unit -> Yojson.Safe.t) -> Yojson.Safe.t
@@ -46,6 +59,13 @@ val get_or_compute_with_timeout :
     data, returns a timeout-error JSON without caching it.  Repeated no-stale
     timeouts for the same key open a short fail-fast circuit; fresh or stale
     cache entries are still served normally. *)
+
+val set_default_clock : _ Eio.Time.clock -> unit
+(** Register the process clock so every {!get_or_compute} runs under the
+    default backstop timeout. Called once at boot. Until it is called,
+    [get_or_compute] keeps its original unbounded behaviour, which is what unit
+    tests and non-Eio contexts rely on. A surface needing a tighter bound
+    calls {!get_or_compute_with_timeout} with its own value. *)
 
 val seed_stale_if_missing :
   string -> stale_for:float -> Yojson.Safe.t -> unit

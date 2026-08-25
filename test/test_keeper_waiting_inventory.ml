@@ -1,12 +1,11 @@
 open Alcotest
 module U = Yojson.Safe.Util
-module Keeper_chat_queue = Masc.Keeper_chat_queue
 module Keeper_chat_store = Masc.Keeper_chat_store
 module Keeper_external_attention = Masc.Keeper_external_attention
 module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_owner_registry = Masc.Keeper_owner_registry
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_shutdown_types = Masc.Keeper_shutdown_types
-module Keeper_turn_admission = Masc.Keeper_turn_admission
 module Keeper_types_profile = Masc.Keeper_types_profile
 module Otel_metric_store = Masc.Otel_metric_store
 module Server_keeper_waiting_inventory = Masc.Server_keeper_waiting_inventory
@@ -49,15 +48,16 @@ let with_workspace f =
   let dir = temp_dir () in
   Eio.Switch.run
   @@ fun sw ->
-  Eio.Switch.on_release sw (fun () ->
-    Keeper_chat_queue.For_testing.reset ();
-    rm_rf dir);
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
   let config = Workspace_core.default_config dir in
   ignore (Workspace_core.init config ~agent_name:(Some "test"));
-  Keeper_chat_queue.For_testing.reset ();
-  let queue_report = Keeper_chat_queue.configure_persistence ~base_path:dir in
-  check int "chat queue persistence starts clean" 0
-    (List.length queue_report.load_errors);
+  (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+   | Ok 0 -> ()
+   | Ok count -> failf "expected empty owner inventory, got %d owners" count
+   | Error error ->
+     fail
+       ("owner inventory install failed: "
+        ^ Keeper_owner_registry.install_error_to_string error));
   f config
 ;;
 
@@ -74,26 +74,21 @@ let keeper_meta_fixture keeper_name =
 ;;
 
 let ensure_keeper config keeper_name =
-  match Result.bind (keeper_meta_fixture keeper_name) (Keeper_meta_store.write_meta config) with
-  | Ok _ -> ()
-  | Error err -> fail ("write keeper meta failed: " ^ err)
-;;
-
-let claim_pending_head keeper_name =
-  match Keeper_chat_queue.observe_pending ~keeper_name with
-  | Ok (Some observation) ->
-    (match Keeper_chat_queue.lease_observed observation with
-     | `Leased lease -> lease
-     | `Stale _ -> fail "pending chat receipt observation became stale"
-     | `Error error ->
-       fail
-         ("pending chat receipt claim failed: "
-          ^ Keeper_chat_queue.mutation_error_to_string error))
-  | Ok None -> fail "pending chat receipt is not observable"
-  | Error error ->
+  let meta =
+    match keeper_meta_fixture keeper_name with
+    | Ok meta -> meta
+    | Error detail -> fail ("keeper meta fixture failed: " ^ detail)
+  in
+  match
+    Keeper_owner_registry.create_meta
+      ~base_path:config.Workspace_utils_backend_setup.base_path
+      meta
+  with
+  | Ok (Some _) -> ()
+  | Ok None -> fail "owner create did not persist keeper meta"
+  | Error err ->
     fail
-      ("pending chat receipt observation failed: "
-       ^ Keeper_chat_queue.mutation_error_to_string error)
+      ("owner create failed: " ^ Keeper_owner_registry.command_error_to_string err)
 ;;
 
 let keeper_meta_exn config keeper_name =
@@ -241,12 +236,150 @@ let test_event_queue_pending_is_visible () =
      | pending_row :: _ ->
        check string "pending wake producer" "keeper_supervisor"
          (json_string_member "wake_producer" pending_row);
+       check string "operator sentence names the bootstrap wake" "기동 직후 첫 턴"
+         (json_string_member "what" pending_row);
        let detail = U.member "detail" pending_row in
        check string "public row retains typed payload label" "bootstrap"
          (json_string_member "payload_kind" detail);
        check bool "public row does not enumerate the exact event payload" true
-         (U.member "payload" detail = `Null)
+         (U.member "payload" detail = `Null);
+       (* The row carries the exact-entry address the operator boundary
+          resolves, so the inventory is the only queue projection a control
+          surface needs. *)
+       let source_ref = json_string_member "source_ref" detail in
+       let source_incarnation = json_string_member "source_incarnation" detail in
+       check string "source_ref is the typed source snapshot digest"
+         (Keeper_event_queue_state.source_snapshot_ref pending)
+         source_ref;
+       let state =
+         match
+           Keeper_event_queue_persistence.load_state_result
+             ~base_path:config.Workspace_utils_backend_setup.base_path
+             ~keeper_name
+         with
+         | Ok state -> state
+         | Error detail -> fail ("durable queue state read failed: " ^ detail)
+       in
+       (match Keeper_event_queue_state.pending_selections state with
+        | [ selection ] ->
+          check string "source_incarnation is the entry's admitted revision"
+            (Int64.to_string selection.admitted_revision)
+            source_incarnation
+        | selections ->
+          failf "expected one pending selection, got %d" (List.length selections));
+       (match
+          Keeper_event_queue_state.resolve_pending_selection
+            ~source_ref
+            ~source_incarnation:(Int64.of_string source_incarnation)
+            state
+        with
+        | Ok selection ->
+          check string "resolved selection is the queued stimulus"
+            pending.Keeper_event_queue.post_id
+            selection.Keeper_event_queue_state.source.Keeper_event_queue.post_id
+        | Error detail -> fail ("row address did not resolve: " ^ detail))
      | rows -> failf "expected one queue row, got %d" (List.length rows))
+;;
+
+let test_event_queue_pending_rows_carry_operator_visible_fields () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "waiting-inventory-kinds" in
+  ensure_keeper config keeper_name;
+  let message =
+    { (stimulus ~post_id:"workspace-message:wmsg-1" ~arrived_at:100.0
+         (Keeper_event_queue.Workspace_message
+            ({ wmsg_request_id = "wmsg-1"; wmsg_from = "alpha" }
+             : Keeper_event_queue.workspace_message)))
+      with urgency = Keeper_event_queue.Immediate
+    }
+  in
+  let cancelled =
+    stimulus ~post_id:"task-cancelled:T-1" ~arrived_at:101.0
+      (Keeper_event_queue.Task_cancelled
+         ({ tc_task_id = "T-1"; tc_cancelled_by = "alpha"; tc_reason = None }
+          : Keeper_event_queue.task_cancellation))
+  in
+  let rejected =
+    stimulus ~post_id:"completion-authority-rejected:T-2" ~arrived_at:102.0
+      (Keeper_event_queue.Completion_authority_rejected
+         ({ car_task_id = "T-2"
+          ; car_verification_id = "verification-2"
+          ; car_reason = "evidence lacks a test run"
+          ; car_authority = Masc_domain.System_llm_agent { agent_run_id = "run-2" }
+          }
+          : Keeper_event_queue.completion_authority_rejection))
+  in
+  let sensitive_content = "private-board-content-must-not-cross-inventory" in
+  let board =
+    stimulus ~post_id:"board-post-sensitive" ~arrived_at:103.0
+      (Keeper_event_queue.Board_signal
+         ({ kind = Keeper_event_queue.Post_created
+          ; author = "operator"
+          ; title = "private title"
+          ; content = sensitive_content
+          ; hearth = None
+          ; updated_at = None
+          }
+          : Keeper_event_queue.board_stimulus))
+  in
+  Keeper_event_queue_persistence.persist
+    ~base_path:config.Workspace_utils_backend_setup.base_path
+    ~keeper_name
+    (queue_of_list [ message; cancelled; rejected; board ]);
+  let json =
+    Server_keeper_waiting_inventory.dashboard_json_for_keeper config ~keeper_name
+  in
+  let keeper =
+    match find_keeper json keeper_name with
+    | Some keeper -> keeper
+    | None -> fail "keeper row missing"
+  in
+  let row_of post_id =
+    U.(keeper |> member "waiting_on" |> to_list)
+    |> List.find_opt (fun row ->
+      String.equal post_id U.(row |> member "detail" |> member "post_id" |> to_string))
+    |> function
+    | Some row -> row
+    | None -> failf "queue row missing for %s" post_id
+  in
+  let detail_of post_id = U.member "detail" (row_of post_id) in
+  let what_of post_id = json_string_member "what" (row_of post_id) in
+  check string "workspace message sentence names the sender and urgency"
+    "alpha가 보낸 메시지 (즉시)"
+    (what_of message.Keeper_event_queue.post_id);
+  check string "cancellation sentence names the canceller and task"
+    "alpha가 작업 T-1 취소"
+    (what_of cancelled.Keeper_event_queue.post_id);
+  check string "rejection sentence names the task"
+    "작업 T-2 완료 증거 거절됨"
+    (what_of rejected.Keeper_event_queue.post_id);
+  check string "board sentence names the author, not the content"
+    "operator의 새 글"
+    (what_of board.Keeper_event_queue.post_id);
+  let message_detail = detail_of message.Keeper_event_queue.post_id in
+  check string "workspace message sender" "alpha"
+    (json_string_member "message_from" message_detail);
+  check string "workspace message request id" "wmsg-1"
+    (json_string_member "message_request_id" message_detail);
+  let cancelled_detail = detail_of cancelled.Keeper_event_queue.post_id in
+  check string "cancelled task id" "T-1"
+    (json_string_member "cancelled_task_id" cancelled_detail);
+  check string "cancelled by" "alpha" (json_string_member "cancelled_by" cancelled_detail);
+  check bool "absent cancellation reason stays absent" true
+    (U.member "cancelled_reason" cancelled_detail = `Null);
+  let rejected_detail = detail_of rejected.Keeper_event_queue.post_id in
+  check string "rejection reason" "evidence lacks a test run"
+    (json_string_member "rejection_reason" rejected_detail);
+  check string "rejection task id" "T-2"
+    (json_string_member "rejection_task_id" rejected_detail);
+  check bool "rejection row does not serialize the authority payload" true
+    (U.member "car_authority" rejected_detail = `Null);
+  let board_detail = detail_of board.Keeper_event_queue.post_id in
+  check string "board row keeps only the typed payload label" "board_signal"
+    (json_string_member "payload_kind" board_detail);
+  check bool "board post content does not cross the inventory" false
+    (String_util.contains_substring (Yojson.Safe.to_string json) sensitive_content)
 ;;
 
 let test_keeper_scoped_projection_excludes_other_keepers () =
@@ -314,270 +447,33 @@ let test_manual_compaction_waiting_row_has_typed_producer () =
        failf "expected one manual compaction waiting row, got %d" (List.length rows))
 ;;
 
-let test_chat_queue_pending_rows_are_visible () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "queued-chat-keeper" in
-  ensure_keeper config keeper_name;
-  let message : Keeper_chat_queue.queued_message =
-    { content = "queued while busy"
-    ; user_blocks = []
-    ; attachments = []
-    ; timestamp = 150.0
-    ; source = Keeper_chat_queue.Discord { channel_id = "chan-42"; user_id = "user-7" }
-    ; user_row_origin = Masc.Keeper_chat_store.Already_persisted_upstream
-    }
-  in
-  let receipt =
-    match Keeper_chat_queue.enqueue ~keeper_name message with
-    | Ok receipt -> receipt
-    | Error error ->
-      fail
-        ("chat queue enqueue failed: "
-         ^ Keeper_chat_queue.mutation_error_to_string error)
-  in
-  let json = Server_keeper_waiting_inventory.dashboard_json config in
-  check_metric_float "chat queue metric"
-    Otel_metric_store.metric_keeper_waiting_count
-    ~labels:[ "scope", "keeper"; "source", "chat_queue_pending" ]
-    1.0;
-  check int "one keeper row" 1 (json_int_member "row_count" json);
-  (match find_keeper json keeper_name with
-   | None -> fail "keeper row missing"
-   | Some keeper ->
-     check string "keeper state" "waiting" (json_string_member "state" keeper);
-     check int "keeper waiting count" 1 (json_int_member "waiting_count" keeper);
-     check int "chat queue source" 1
-       U.(keeper |> member "sources" |> member "chat_queue_pending" |> to_int);
-     (match U.(keeper |> member "waiting_on" |> to_list) with
-      | [ row ] ->
-        check string "chat queue source row" "chat_queue_pending"
-          (json_string_member "source" row);
-        check string "chat queue wake producer" "keeper_chat_queue_store"
-          (json_string_member "wake_producer" row);
-        check string "chat queue next action" "keeper_chat_consumer_drain"
-          (json_string_member "next_action" row);
-        check string "chat queue waiting_on" "discord"
-          (json_string_member "waiting_on" row);
-        check string "chat queue source kind" "discord"
-          U.(row |> member "detail" |> member "message_source" |> member "kind" |> to_string);
-        check string "chat queue channel" "chan-42"
-          U.(
-            row |> member "detail" |> member "message_source" |> member "channel_id"
-            |> to_string);
-        check int "chat queue content length" (String.length message.content)
-          U.(row |> member "detail" |> member "content_length" |> to_int);
-        check string "pending receipt is correlated"
-          (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id)
-          U.(row |> member "detail" |> member "receipt_id" |> to_string);
-        check string "pending lifecycle is explicit" "pending"
-          U.(row |> member "detail" |> member "lifecycle" |> member "state"
-             |> to_string)
-      | rows -> failf "expected one chat queue row, got %d" (List.length rows)))
-  ;
-  let lease = claim_pending_head keeper_name in
-  let inflight_json = Server_keeper_waiting_inventory.dashboard_json config in
-  match find_keeper inflight_json keeper_name with
-  | None -> fail "inflight keeper row missing"
-  | Some keeper ->
-    check int "pending source clears after lease" 0
-      U.(keeper |> member "sources" |> member "chat_queue_pending" |> to_int_option
-         |> Option.value ~default:0);
-    check int "inflight source is visible" 1
-      U.(keeper |> member "sources" |> member "chat_queue_inflight" |> to_int);
-    (match U.(keeper |> member "waiting_on" |> to_list) with
-     | [ row ] ->
-       check string "inflight row source" "chat_queue_inflight"
-         (json_string_member "source" row);
-       check string "inflight lifecycle is explicit" "inflight"
-         U.(row |> member "detail" |> member "lifecycle" |> member "state"
-            |> to_string);
-       check string "inflight lease is correlated" lease.lease_id
-         U.(row |> member "detail" |> member "lifecycle" |> member "lease_id"
-            |> to_string)
-     | rows -> failf "expected one inflight chat row, got %d" (List.length rows))
-;;
-
-let test_chat_queue_recovery_required_row_is_visible () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "queued-chat-recovery-keeper" in
-  ensure_keeper config keeper_name;
-  let receipt =
-    match
-      Keeper_chat_queue.enqueue ~keeper_name
-        { content = "delivery outcome is unproven"
-        ; user_blocks = []
-        ; attachments = []
-        ; timestamp = 160.0
-        ; source =
-            Keeper_chat_queue.Dashboard
-              { thread_id = "keeper:queued-chat-recovery-keeper" }
-        ; user_row_origin = Keeper_chat_store.Needs_append
-        }
-    with
-    | Ok receipt -> receipt
-    | Error error ->
-      fail
-        ("chat queue recovery enqueue failed: "
-         ^ Keeper_chat_queue.mutation_error_to_string error)
-  in
-  let lease = claim_pending_head keeper_name in
-  Keeper_chat_queue.For_testing.reset ();
-  let report =
-    Keeper_chat_queue.configure_persistence
-      ~base_path:config.Workspace_utils_backend_setup.base_path
-  in
-  check int "one receipt requires explicit recovery" 1
-    report.recovery_required_receipt_count;
-  let json = Server_keeper_waiting_inventory.dashboard_json config in
-  check_metric_float "chat queue recovery metric"
-    Otel_metric_store.metric_keeper_waiting_count
-    ~labels:[ "scope", "keeper"; "source", "chat_queue_recovery_required" ]
-    1.0;
-  match find_keeper json keeper_name with
-  | None -> fail "recovery-required keeper row missing"
-  | Some keeper ->
-    check int "recovery-required waiting count" 1
-      (json_int_member "waiting_count" keeper);
-    check int "recovery-required source count" 1
-      U.(
-        keeper
-        |> member "sources"
-        |> member "chat_queue_recovery_required"
-        |> to_int);
-    (match U.(keeper |> member "waiting_on" |> to_list) with
-     | [ row ] ->
-       check string "recovery-required source row"
-         "chat_queue_recovery_required"
-         (json_string_member "source" row);
-       check string "recovery requires explicit operator action"
-         "resolve_keeper_chat_queue_recovery"
-         (json_string_member "next_action" row);
-       check string "recovery receipt is correlated"
-         (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id)
-         U.(row |> member "detail" |> member "receipt_id" |> to_string);
-       check string "recovery lifecycle is explicit" "recovery_required"
-         U.(
-           row
-           |> member "detail"
-           |> member "lifecycle"
-           |> member "state"
-           |> to_string);
-       check string "recovery lease is correlated" lease.lease_id
-         U.(
-           row
-           |> member "detail"
-           |> member "lifecycle"
-           |> member "lease_id"
-           |> to_string);
-       check bool "recovery row is non-dispatchable" false
-         U.(
-           row
-           |> member "detail"
-           |> member "lifecycle"
-           |> member "dispatchable"
-           |> to_bool)
-     | rows ->
-       failf "expected one recovery-required chat row, got %d" (List.length rows))
-;;
-
-let test_turn_admission_waiting_row_is_visible () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "admission-waiting-keeper" in
-  ensure_keeper config keeper_name;
-  Keeper_turn_admission.For_testing.reset ();
-  Fun.protect
-    ~finally:(fun () -> Keeper_turn_admission.For_testing.reset ())
-    (fun () ->
-      Eio.Switch.run
-      @@ fun sw ->
-      let autonomous_started, set_autonomous_started = Eio.Promise.create () in
-      let release_autonomous, set_release_autonomous = Eio.Promise.create () in
-      Eio.Fiber.fork ~sw (fun () ->
-        match
-          Keeper_turn_admission.run_if_free
-            ~base_path:config.Workspace_utils_backend_setup.base_path
-            ~keeper_name
-            (fun () ->
-               Eio.Promise.resolve set_autonomous_started ();
-               Eio.Promise.await release_autonomous)
-        with
-        | `Ran () -> ()
-        | `Busy _ -> fail "autonomous holder must admit on a free slot");
-      Eio.Promise.await autonomous_started;
-      Eio.Fiber.fork ~sw (fun () ->
-        match
-          Keeper_turn_admission.run_serialized
-            ~base_path:config.Workspace_utils_backend_setup.base_path
-            ~keeper_name
-            (fun () -> ())
-        with
-        | `Ran () -> ()
-        | `Rejected _ -> fail "parked chat must not reject below the cap");
-      Eio.Fiber.yield ();
-      let json = Server_keeper_waiting_inventory.dashboard_json config in
-      check_metric_float "turn admission waiting metric"
-        Otel_metric_store.metric_keeper_waiting_count
-        ~labels:[ "scope", "keeper"; "source", "turn_admission_waiting" ]
-        1.0;
-      check int "one keeper row" 1 (json_int_member "row_count" json);
-      (match find_keeper json keeper_name with
-       | None -> fail "keeper row missing"
-       | Some keeper ->
-         check string "keeper state" "waiting" (json_string_member "state" keeper);
-         check int "keeper waiting count" 1 (json_int_member "waiting_count" keeper);
-         check int "turn admission source" 1
-           U.(keeper |> member "sources" |> member "turn_admission_waiting" |> to_int);
-         (match U.(keeper |> member "waiting_on" |> to_list) with
-          | [ row ] ->
-            check string "turn admission row source" "turn_admission_waiting"
-              (json_string_member "source" row);
-            check string "turn admission wake producer" "keeper_turn_admission"
-              (json_string_member "wake_producer" row);
-            check string "turn admission next action" "turn_slot_release"
-              (json_string_member "next_action" row);
-            check string "turn admission waiting_on" "chat"
-              (json_string_member "waiting_on" row);
-            check bool "turn admission since is recorded" true
-              (U.(row |> member "since" |> to_float) > 0.0);
-            check string "waiting lane" "chat"
-              U.(row |> member "detail" |> member "waiting_lane" |> to_string);
-            check bool "detail waiting_since is recorded" true
-              (U.(row |> member "detail" |> member "waiting_since" |> to_float) > 0.0);
-            check string "in-flight lane" "autonomous"
-              U.(row |> member "detail" |> member "in_flight" |> member "lane" |> to_string)
-          | rows -> failf "expected one turn admission row, got %d" (List.length rows)));
-      Eio.Promise.resolve set_release_autonomous ())
-;;
-
-let test_turn_admission_shutdown_row_is_deferred () =
+let test_owner_shutdown_row_is_deferred () =
   with_workspace
   @@ fun config ->
   let keeper_name = "admission-shutdown-keeper" in
   ensure_keeper config keeper_name;
-  Keeper_turn_admission.For_testing.reset ();
   Fun.protect
-    ~finally:(fun () -> Keeper_turn_admission.For_testing.reset ())
+    ~finally:(fun () -> ())
     (fun () ->
       let base_path = config.Workspace_utils_backend_setup.base_path in
       let operation_id = Keeper_shutdown_types.Operation_id.generate () in
       (match
-         Keeper_turn_admission.begin_shutdown
+         Keeper_owner_registry.begin_shutdown
            ~base_path
            ~keeper_name
            ~operation_id
        with
-       | Keeper_turn_admission.Shutdown_reserved reservation ->
+       | Ok (Masc.Keeper_owner.Shutdown_reserved reservation) ->
          check bool "shutdown reservation is idle" true
            (Option.is_none reservation.in_flight)
-       | Keeper_turn_admission.Shutdown_already_reserved _ ->
-         fail "fresh keeper unexpectedly had a shutdown reservation");
+       | Ok (Masc.Keeper_owner.Shutdown_already_reserved _) ->
+         fail "fresh keeper unexpectedly had a shutdown reservation"
+       | Error error ->
+         fail (Keeper_owner_registry.command_error_to_string error));
       let json = Server_keeper_waiting_inventory.dashboard_json config in
-      check_metric_float "turn admission shutdown metric"
+      check_metric_float "Owner shutdown metric"
         Otel_metric_store.metric_keeper_waiting_count
-        ~labels:[ "scope", "keeper"; "source", "turn_admission_shutdown" ]
+        ~labels:[ "scope", "keeper"; "source", "owner_shutdown" ]
         1.0;
       check_metric_float "deferred keeper metric"
         Otel_metric_store.metric_keeper_waiting_keeper_count
@@ -592,14 +488,14 @@ let test_turn_admission_shutdown_row_is_deferred () =
          check string "shutdown keeper is deferred" "deferred"
            (json_string_member "state" keeper);
          check int "shutdown source count" 1
-           U.(keeper |> member "sources" |> member "turn_admission_shutdown" |> to_int);
+           U.(keeper |> member "sources" |> member "owner_shutdown" |> to_int);
          (match U.(keeper |> member "waiting_on" |> to_list) with
           | [ row ] ->
-            check string "shutdown row source" "turn_admission_shutdown"
+            check string "shutdown row source" "owner_shutdown"
               (json_string_member "source" row);
             check string "shutdown row waiting_on" "shutdown"
               (json_string_member "waiting_on" row);
-            check string "shutdown row wake producer" "keeper_turn_admission"
+            check string "shutdown row wake producer" "keeper_owner_actor"
               (json_string_member "wake_producer" row);
             check string "shutdown row next action" "keeper_shutdown_finalize"
               (json_string_member "next_action" row);
@@ -610,21 +506,21 @@ let test_turn_admission_shutdown_row_is_deferred () =
                 |> to_string);
             check bool "admission fence is explicit" true
               U.(row |> member "detail" |> member "admission_fenced" |> to_bool);
-            check int "shutdown has no waiting chat" 0
-              U.(row |> member "detail" |> member "chat_waiting_count" |> to_int);
             check bool "shutdown has no in-flight turn" true
               U.(row |> member "detail" |> member "in_flight" = `Null)
           | rows -> failf "expected one shutdown row, got %d" (List.length rows)));
       (match
-         Keeper_turn_admission.rollback_shutdown
+         Keeper_owner_registry.rollback_shutdown
            ~base_path
            ~keeper_name
            ~operation_id
        with
-       | Keeper_turn_admission.Shutdown_rolled_back -> ()
-       | Keeper_turn_admission.Shutdown_not_reserved
-       | Keeper_turn_admission.Shutdown_reserved_by_other _ ->
-         fail "owned shutdown reservation did not roll back");
+       | Ok Masc.Keeper_owner.Shutdown_rolled_back -> ()
+       | Ok Masc.Keeper_owner.Shutdown_not_reserved
+       | Ok (Masc.Keeper_owner.Shutdown_reserved_by_other _) ->
+         fail "owned shutdown reservation did not roll back"
+       | Error error ->
+         fail (Keeper_owner_registry.command_error_to_string error));
       let reopened = Server_keeper_waiting_inventory.dashboard_json config in
       match find_keeper reopened keeper_name with
       | None -> fail "reopened keeper row missing"
@@ -679,7 +575,9 @@ let test_keeper_owned_schedule_waiting_rows_are_lane_scoped () =
         check string "keeper next action" "wait_until_due"
           (json_string_member "next_action" row);
         check string "keeper schedule id" "sched-owned"
-          U.(row |> member "detail" |> member "schedule_id" |> to_string)
+          U.(row |> member "detail" |> member "schedule_id" |> to_string);
+        check string "schedule sentence names the schedule" "예약 실행 · sched-owned"
+          (json_string_member "what" row)
       | rows -> failf "expected one keeper schedule row, got %d" (List.length rows)));
   match U.(json |> member "global_waiting_on" |> to_list) with
   | [ row ] ->
@@ -734,51 +632,17 @@ let save_text path text =
   | Error err -> fail ("save_file_atomic failed: " ^ err)
 ;;
 
-let test_corrupt_chat_queue_snapshot_is_read_error () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "corrupt-chat-queue-keeper" in
-  ensure_keeper config keeper_name;
-  let base_path = config.Workspace_utils_backend_setup.base_path in
-  let path =
-    Filename.concat
-      (Filename.concat
-         (Common.keepers_runtime_dir_of_base ~base_path)
-         keeper_name)
-      "chat-queue.sqlite3"
-  in
-  save_text path "{not-json";
-  Keeper_chat_queue.For_testing.reset ();
-  let report = Keeper_chat_queue.configure_persistence ~base_path in
-  check int "corrupt chat queue is reported at configure" 1
-    (List.length report.load_errors);
-  let json = Server_keeper_waiting_inventory.dashboard_json config in
-  match find_keeper json keeper_name with
-  | None -> fail "corrupt chat queue keeper row missing"
-  | Some keeper ->
-    check int "corrupt queue projects one read error" 1
-      U.(keeper |> member "sources" |> member "read_error" |> to_int);
-    (match U.(keeper |> member "waiting_on" |> to_list) with
-     | [ row ] ->
-       check string "corrupt queue waiting_on" "chat_queue_snapshot"
-         (json_string_member "waiting_on" row);
-       check string "corrupt queue repair action"
-         "repair_keeper_chat_queue_snapshot"
-         (json_string_member "next_action" row)
-     | rows -> failf "expected one corrupt chat queue row, got %d" (List.length rows))
-;;
-
-let pending_confirm_fixture ?(target_type = "goal") ?target_id ()
+let pending_confirm_fixture ()
       : Operator_pending_confirm.pending_confirm
   =
-  { token = "confirm-goal-1"
-  ; trace_id = "trace-goal-1"
+  { confirm_token = "confirm-broadcast-1"
+  ; trace_id = "trace-broadcast-1"
   ; actor = "operator"
-  ; action_type = "approve_goal"
-  ; target_type
-  ; target_id
-  ; payload = `Assoc [ "goal_id", `String "goal-123" ]
-  ; delegated_tool = "masc_goal_approve"
+  ; action_type = "broadcast"
+  ; target_type = "workspace"
+  ; target_id = None
+  ; payload = `Assoc [ "message", `String "maintenance notice" ]
+  ; delegated_tool = "masc_broadcast"
   ; created_at = "2026-07-07T00:00:00Z"
   ; expires_at = None
   }
@@ -806,6 +670,8 @@ let test_corrupt_schedule_ledger_is_read_error () =
   | [ row ] ->
     check string "source" "read_error" (json_string_member "source" row);
     check string "waiting_on" "schedule_store" (json_string_member "waiting_on" row);
+    check string "read error sentence names the store" "대기 기록 읽기 실패 · schedule_store"
+      (json_string_member "what" row);
     check string "wake producer" "read_model_reader"
       (json_string_member "wake_producer" row);
     check string "next action" "repair_schedule_ledger"
@@ -920,7 +786,7 @@ let test_global_pending_confirm_is_actionable_row () =
   ensure_keeper config "known-keeper";
   write_pending_confirms_exn
     config
-    [ pending_confirm_fixture ~target_id:"goal-123" () ];
+    [ pending_confirm_fixture () ];
   let json = Server_keeper_waiting_inventory.dashboard_json config in
   check_metric_float "global pending-confirm metric"
     Otel_metric_store.metric_keeper_waiting_count
@@ -935,45 +801,20 @@ let test_global_pending_confirm_is_actionable_row () =
   | [ row ] ->
     let detail = U.(row |> member "detail") in
     check string "source" "operator_pending_confirm" (json_string_member "source" row);
-    check string "waiting_on" "approve_goal" (json_string_member "waiting_on" row);
+    check string "waiting_on" "broadcast" (json_string_member "waiting_on" row);
     check string "wake producer" "operator_pending_confirm_store"
       (json_string_member "wake_producer" row);
     check string "next action" "operator_confirm_action"
       (json_string_member "next_action" row);
-    check string "token" "confirm-goal-1" U.(detail |> member "token" |> to_string);
-    check string "trace_id" "trace-goal-1" U.(detail |> member "trace_id" |> to_string);
-    check string "target_type" "goal" U.(detail |> member "target_type" |> to_string);
-    check string "target_id" "goal-123" U.(detail |> member "target_id" |> to_string);
-    check string "delegated_tool" "masc_goal_approve"
+    check string "confirm token" "confirm-broadcast-1"
+      U.(detail |> member "confirm_token" |> to_string);
+    check string "trace_id" "trace-broadcast-1"
+      U.(detail |> member "trace_id" |> to_string);
+    check string "target_type" "workspace"
+      U.(detail |> member "target_type" |> to_string);
+    check bool "target_id is absent" true U.(detail |> member "target_id" = `Null);
+    check string "delegated_tool" "masc_broadcast"
       U.(detail |> member "delegated_tool" |> to_string)
-  | rows -> failf "expected one global pending-confirm row, got %d" (List.length rows)
-;;
-
-let test_goal_pending_confirm_id_collision_stays_global () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "colliding-keeper" in
-  ensure_keeper config keeper_name;
-  write_pending_confirms_exn
-    config
-    [ pending_confirm_fixture ~target_type:"goal" ~target_id:keeper_name () ];
-  let json = Server_keeper_waiting_inventory.dashboard_json config in
-  check_metric_float "global collision pending-confirm metric"
-    Otel_metric_store.metric_keeper_waiting_count
-    ~labels:[ "scope", "global"; "source", "operator_pending_confirm" ]
-    1.0;
-  check int "global collision pending-confirm row" 1
-    (json_int_member "global_row_count" json);
-  (match find_keeper json keeper_name with
-   | None -> fail "keeper row missing"
-   | Some keeper ->
-     check int "keeper lane remains empty" 0 (json_int_member "waiting_count" keeper));
-  match U.(json |> member "global_waiting_on" |> to_list) with
-  | [ row ] ->
-    let detail = U.(row |> member "detail") in
-    check string "source" "operator_pending_confirm" (json_string_member "source" row);
-    check string "target_type" "goal" U.(detail |> member "target_type" |> to_string);
-    check string "target_id" keeper_name U.(detail |> member "target_id" |> to_string)
   | rows -> failf "expected one global pending-confirm row, got %d" (List.length rows)
 ;;
 
@@ -1045,26 +886,20 @@ let () =
     [ ( "dashboard_json"
       , [ test_case "event queue pending is visible" `Quick
             test_event_queue_pending_is_visible
+        ; test_case "event queue rows carry operator-visible payload fields" `Quick
+            test_event_queue_pending_rows_carry_operator_visible_fields
         ; test_case "manual compaction producer is typed" `Quick
             test_manual_compaction_waiting_row_has_typed_producer
         ; test_case "keeper-scoped projection excludes other keepers" `Quick
             test_keeper_scoped_projection_excludes_other_keepers
-        ; test_case "chat queue pending rows are visible" `Quick
-            test_chat_queue_pending_rows_are_visible
-        ; test_case "chat queue recovery-required row is visible" `Quick
-            test_chat_queue_recovery_required_row_is_visible
-        ; test_case "turn admission waiting row is visible" `Quick
-            test_turn_admission_waiting_row_is_visible
-        ; test_case "turn admission shutdown row is deferred" `Quick
-            test_turn_admission_shutdown_row_is_deferred
+        ; test_case "Owner shutdown row is deferred" `Quick
+            test_owner_shutdown_row_is_deferred
         ; test_case "keeper-owned schedule rows are lane scoped" `Quick
             test_keeper_owned_schedule_waiting_rows_are_lane_scoped
         ; test_case "live turn keeper is busy without waiting rows" `Quick
             test_live_turn_keeper_is_busy_without_waiting_rows
         ; test_case "corrupt schedule ledger is read_error" `Quick
             test_corrupt_schedule_ledger_is_read_error
-        ; test_case "corrupt chat queue is read_error" `Quick
-            test_corrupt_chat_queue_snapshot_is_read_error
         ; test_case "keeper name discovery failure is read_error" `Quick
             test_keeper_name_discovery_failure_is_read_error
         ; test_case "corrupt external attention is read_error" `Quick
@@ -1073,8 +908,6 @@ let () =
             test_external_attention_projection_is_bounded
         ; test_case "global pending confirm is actionable row" `Quick
             test_global_pending_confirm_is_actionable_row
-        ; test_case "goal pending confirm id collision stays global" `Quick
-            test_goal_pending_confirm_id_collision_stays_global
         ; test_case "corrupt pending confirms is read_error" `Quick
             test_corrupt_pending_confirms_is_read_error
         ; test_case "unavailable pending approval store is read_error" `Quick

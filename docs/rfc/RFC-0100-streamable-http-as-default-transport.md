@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0098", "0099"]
-implementation_prs: ["15798", "15865"]
 ---
 
 # RFC-0100 — Streamable HTTP as default transport (MCP 2025-03-26)
@@ -17,8 +16,8 @@ Status: Active (PR-3 merge promotes to Active; PR-5 removal flips to Implemented
 Author: jeong-sik (vincent)
 Date: 2026-05-17
 Scope: HTTP transport surface (`POST /mcp`) — chunked-first default, auto-upgrade to SSE on demand, `Mcp-Session-Id` header, legacy `GET /sse` deprecation window
-Out of scope: provider-side streaming wire-up ([[RFC-0095]], merged), error envelope shape ([[RFC-0098]]), session lifecycle events ([[RFC-0099]] — *consumed* by this RFC for resume/eviction), FD accounting (IMPROVE-03), TTFT measurement ([[RFC-OAS-020]] in oas)
-Series: **IMPROVE-02** of the masc + oas improvement series.
+Out of scope: provider-side streaming wire-up ([[RFC-0095]], merged), error envelope shape ([[RFC-0098]]), session lifecycle events ([[RFC-0099]] — *consumed* by this RFC for resume/eviction), FD accounting (IMPROVE-03), TTFT measurement ([[RFC-OAS-020]] in agent_core)
+Series: **IMPROVE-02** of the masc + agent_core improvement series.
 
 ## 1. Problem
 
@@ -149,7 +148,7 @@ PR-2 is **wire-shape-changing** (chunked framing replaces full-body); but the *b
 ## 7. Open questions
 
 - **Q1**: Should the 50 ms first-byte budget be configurable via env knob? **Decision (default)**: no — it's a spec/middlebox requirement, not a tunable. If a use case appears, revisit.
-- **Q2**: What's the exact upgrade dispatch signal? Tool catalog metadata (`streaming: true`)? Or runtime-decided (first chunk-emit from the OAS path)? **Decision (PR-3)**: tool catalog metadata, surfaced through `Server_mcp_streaming_tools.is_streaming_capable`. The registry is a hand-curated SSOT inside `lib/server/`; adding or removing a tool name flips its POST response between SSE framing and chunked JSON. The runtime-decided alternative was rejected because the first-chunk-emit signal arrives after the response shape is already framed, so it would require speculative framing or a second connection.
+- **Q2**: What's the exact upgrade dispatch signal? Tool catalog metadata (`streaming: true`)? Or runtime-decided (first chunk-emit from the agent_core path)? **Decision (PR-3)**: tool catalog metadata, surfaced through `Server_mcp_streaming_tools.is_streaming_capable`. The registry is a hand-curated SSOT inside `lib/server/`; adding or removing a tool name flips its POST response between SSE framing and chunked JSON. The runtime-decided alternative was rejected because the first-chunk-emit signal arrives after the response shape is already framed, so it would require speculative framing or a second connection.
 - **Q3**: Should server reject `POST /mcp` with `Mcp-Session-Id: <unknown>` (force re-open) or silently mint a new session? **Decision (PR-3)**: reject with `404 Not Found` + new `Mcp-Session-Id` header. Implemented as `validate_session_known` in `Server_mcp_transport_http_protocol`; the handshake set (`initialize` / `ping` / `notifications/initialized`) is exempt because those are the methods that legitimately establish a known session.
 
 ## 8. Acceptance
@@ -169,4 +168,4 @@ PR-2 is **wire-shape-changing** (chunked framing replaces full-body); but the *b
 - [[RFC-0098]] — Typed JSON-RPC error envelope (response edge, IMPROVE-01)
 - [[RFC-0099]] — Session lifecycle typed events (transport edge, IMPROVE-05)
 - [[RFC-0095]] — Provider-D-compat provider streaming wire-up (provider edge, in main)
-- [[RFC-OAS-020]] — TTFT instrumentation in oas (IMPROVE-04)
+- [[RFC-OAS-020]] — TTFT instrumentation in agent_core (IMPROVE-04)

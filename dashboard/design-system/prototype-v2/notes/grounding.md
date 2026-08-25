@@ -22,7 +22,7 @@
 
 ## Board (components/board/*)
 Comms board, NOT task kanban: board-surface (feed), sub-board-surface, post-detail (threads),
-reaction-bar, board-karma-panel, board-curation-panel, board-moderation-surface (+moderation-badge),
+reaction-bar, board-karma-panel, board-curation-panel,
 mention-inbox, composer-v2, message-workspace-timeline.
 
 ## IDE (components/ide/*, api/ide.ts)
@@ -36,8 +36,8 @@ mention-inbox, composer-v2, message-workspace-timeline.
 ## Connectors (api/schemas/gate-connectors.ts)
 - GET /api/v1/gate/connectors → { connectors[], total, active_count, generated_at }
 - Connector: connector_id, display_name, channel, capabilities[], status, available, connected, stale, stale_after_sec, error, updated_at, reply_mode, self_chat_guid (iMessage), last_ready_at, bot_user_name/id, guild_count, gate_base_url, gate_healthy, pid.
-- configured_bindings: [{channel_id, keeper_name}]; recent_audit: [{timestamp, action, guild_id, channel_id, keeper_name, actor_id, actor_name, previous_keeper}]
-- binding_summary {binding_source, runtime_bindings_count, configured_bindings_count}; names {guild_names, channel_names}.
+- configured_bindings: [{channel_id, keeper_name}]; recent_audit: [{timestamp, action, guild_id?, channel_id, keeper_name, actor_id, actor_name, previous_keeper}]
+- Discord names: {guild_names, channel_names, channel_to_guild, channel_to_parent}.
 
 ## Repo stack
 dashboard = Preact + htm + lucide-preact + Tailwind tokens (--color-bg-page/surface/elevated, --color-border-default/strong, --color-fg-*, text-ok). Tests everywhere (vitest).

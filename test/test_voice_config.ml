@@ -56,17 +56,6 @@ let parse json_str =
   let json = Yojson.Safe.from_string json_str in
   Vc.parse_json json
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  if needle_len = 0 then true
-  else
-    let rec loop idx =
-      idx + needle_len <= haystack_len
-      && (String.sub haystack idx needle_len = needle || loop (idx + 1))
-    in
-    loop 0
-
 let rec mkdir_p path =
   if path <> "" && not (Sys.file_exists path) then begin
     mkdir_p (Filename.dirname path);
@@ -108,7 +97,7 @@ let test_load_detailed_invalid_json () =
     match Vc.load_detailed () with
     | Error (Vc.Invalid msg) ->
       check bool "json syntax error surfaced" true
-        (contains_substring ~needle:"invalid voice config json" msg)
+        (String_util.string_contains_substring ~needle:"invalid voice config json" msg)
     | Error Vc.Not_configured ->
       fail "expected Invalid, got Not_configured"
     | Ok _ -> fail "expected Invalid, got Ok")
@@ -118,7 +107,7 @@ let test_load_detailed_schema_error_is_invalid () =
     match Vc.load_detailed () with
     | Error (Vc.Invalid msg) ->
       check bool "schema error surfaced" true
-        (contains_substring ~needle:"required" msg)
+        (String_util.string_contains_substring ~needle:"required" msg)
     | Error Vc.Not_configured ->
       fail "expected Invalid, got Not_configured"
     | Ok _ -> fail "expected Invalid, got Ok")
@@ -143,13 +132,13 @@ let test_load_legacy_strings_preserved () =
     match Vc.load () with
     | Error msg ->
       check bool "missing reported" true
-        (contains_substring ~needle:"voice config missing at" msg)
+        (String_util.string_contains_substring ~needle:"voice config missing at" msg)
     | Ok _ -> fail "expected missing-config Error, got Ok");
   with_explicit_voice_config "{ this is not json" (fun () ->
     match Vc.load () with
     | Error msg ->
       check bool "json error surfaced" true
-        (contains_substring ~needle:"invalid voice config json" msg)
+        (String_util.string_contains_substring ~needle:"invalid voice config json" msg)
     | Ok _ -> fail "expected invalid-config Error, got Ok")
 
 let test_session_empty_endpoints_ok () =
@@ -159,6 +148,15 @@ let test_session_empty_endpoints_ok () =
     check int "session endpoints empty" 0 (List.length config.session.endpoints)
   | Error err ->
     fail (Printf.sprintf "expected Ok, got Error: %s" err)
+
+let test_removed_max_retries_is_ignored_on_read () =
+  let endpoints =
+    {|[{"id":"session","kind":"voice_mcp","mcp_url":"http://localhost/mcp","max_retries":2}]|}
+  in
+  match parse (minimal_config_json ~session_endpoints:endpoints) with
+  | Ok config ->
+    check int "legacy endpoint remains available" 1 (List.length config.session.endpoints)
+  | Error message -> fail ("legacy max_retries field broke config loading: " ^ message)
 
 let test_session_with_endpoint_ok () =
   let session_ep =
@@ -226,6 +224,88 @@ let test_config_path_survives_deleted_cwd_without_base () =
          true
          (Filename.basename path = "voice_config.json"))
 
+(* A voice id is provider vocabulary: an ElevenLabs voice_id is 20-64
+   alphanumerics, an OpenAI voice is a name like "alloy". The fallback chain
+   used to resolve the voice once and hand it to whichever endpoint it landed
+   on, so the second endpoint was asked for a voice that does not exist there
+   (#24068). Each endpoint now answers for its own. *)
+let two_provider_config =
+  {|{
+  "tts": {
+    "default_model": "eleven_multilingual_v2",
+    "default_voice": "aEO01A4wXwd1O8GPgGlF",
+    "default_voice_settings": {},
+    "endpoints": [
+      { "id": "eleven", "kind": "elevenlabs_direct",
+        "api_key_env": "ELEVENLABS_API_KEY", "enabled": true },
+      { "id": "openai", "kind": "openai_compat",
+        "base_url": "https://api.openai.com/v1",
+        "api_key_env": "OPENAI_API_KEY", "enabled": true,
+        "default_voice": "alloy" }
+    ]
+  },
+  "stt": {
+    "default_model": "scribe_v1",
+    "endpoints": [
+      { "id": "eleven-stt", "kind": "elevenlabs_direct",
+        "api_key_env": "ELEVENLABS_API_KEY", "enabled": true }
+    ]
+  },
+  "session": { "endpoints": [] }
+}|}
+;;
+
+let endpoint_named config id =
+  match List.find_opt (fun (e : Vc.endpoint) -> String.equal e.id id) config.Vc.tts.endpoints with
+  | Some endpoint -> endpoint
+  | None -> failf "tts endpoint %S is missing from the parsed config" id
+;;
+
+let test_endpoint_voice_overrides_the_workspace_default () =
+  match parse two_provider_config with
+  | Error _ -> fail "the two-provider config must parse"
+  | Ok config ->
+    let eleven = endpoint_named config "eleven" in
+    let openai = endpoint_named config "openai" in
+    check (option string) "the eleven endpoint declares none" None eleven.Vc.default_voice;
+    check (option string) "the openai endpoint declares its own" (Some "alloy")
+      openai.Vc.default_voice;
+    check string
+      "an endpoint without one falls back to the workspace default"
+      "aEO01A4wXwd1O8GPgGlF"
+      (Vc.voice_for_agent_at_endpoint config eleven "some-agent");
+    check string
+      "an endpoint with one answers for itself"
+      "alloy"
+      (Vc.voice_for_agent_at_endpoint config openai "some-agent");
+    (* The point of the fix: switching endpoints changes the voice asked for. *)
+    check bool
+      "the two endpoints do not share a voice"
+      false
+      (String.equal
+         (Vc.voice_for_agent_at_endpoint config eleven "some-agent")
+         (Vc.voice_for_agent_at_endpoint config openai "some-agent"))
+;;
+
+let test_endpoint_voice_is_absent_when_not_declared () =
+  (* The shared fixture declares no per-endpoint voice, so every endpoint has
+     to keep resolving to the workspace default -- the field is additive. *)
+  match parse (minimal_config_json ~session_endpoints:"[]") with
+  | Error _ -> fail "the base config must parse"
+  | Ok config ->
+    List.iter
+      (fun (endpoint : Vc.endpoint) ->
+        check (option string)
+          (Printf.sprintf "%s declares no voice" endpoint.Vc.id)
+          None
+          endpoint.Vc.default_voice;
+        check string
+          (Printf.sprintf "%s resolves to the workspace default" endpoint.Vc.id)
+          (Vc.voice_for_agent config "some-agent")
+          (Vc.voice_for_agent_at_endpoint config endpoint "some-agent"))
+      config.Vc.tts.endpoints
+;;
+
 let () =
   Alcotest.run "voice_config"
     [
@@ -246,6 +326,8 @@ let () =
         [
           test_case "empty session endpoints parses ok"
             `Quick test_session_empty_endpoints_ok;
+          test_case "removed max_retries is ignored on read"
+            `Quick test_removed_max_retries_is_ignored_on_read;
           test_case "session with endpoint parses ok"
             `Quick test_session_with_endpoint_ok;
           test_case "tts reachable when session empty"
@@ -262,4 +344,14 @@ let () =
             `Quick
             test_config_path_survives_deleted_cwd_without_base;
         ] );
+      ( "per_endpoint_voice"
+      , [ test_case
+            "endpoint voice overrides the workspace default"
+            `Quick
+            test_endpoint_voice_overrides_the_workspace_default
+        ; test_case
+            "absent endpoint voice keeps the workspace default"
+            `Quick
+            test_endpoint_voice_is_absent_when_not_declared
+        ] )
     ]

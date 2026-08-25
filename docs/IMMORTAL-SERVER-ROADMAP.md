@@ -1,9 +1,5 @@
 ---
 status: runbook
-last_verified: 2026-07-16
-code_refs:
-  - lib/keeper/keeper_keepalive.ml
-  - lib/keeper/keeper_supervisor.ml
 ---
 
 # MASC 고가용성 서버 로드맵
@@ -12,21 +8,20 @@ code_refs:
 
 ## 현재 상태
 
-### ✅ 있는 것
-- `workspace_resilience.ml` - 시간 파싱과 관찰 헬퍼
-- `rate_limit.ml` - 요청 제한
-- `cancellation.ml` - 취소 처리
+### 있는 것
+- `workspace_resilience.ml` — 시간 파싱과 관찰 헬퍼
+- `rate_limit.ml` — 요청 제한
+- `cancellation.ml` — 취소 처리
+- `lib/keeper/keeper_supervisor.ml` — keeper 단위 감독. `.mli`가 스스로 AGENT_CORE `Agent.run` 생명주기는 감독하지 않는다고 한정한다
+- `lib/dashboard/dashboard_feature_health.ml` — `Feature_flag_registry.all_flags` 의 플래그별 health
+- `lib/dashboard/dashboard_harness_health.ml` — harness health 판정을 기록하는 원장 (판정은 다른 곳에서 온다)
+- `lib/fs_compat/capability_recovery_*.ml`, `publication_recovery_*.ml` — 기동 시 파일 표면 정합 복구. `mcp_server.ml` 까지 배선됨
+- `lib/shutdown.ml`, `lib/shutdown_hooks.ml` — 단계가 정의된 graceful shutdown. `bin/main_eio.ml:664` 가 SIGINT/SIGTERM 에 물려 있다
+- `lib/server/proactive_refresh.ml` — circuit breaker 를 가진 refresh 루프. `lib/dashboard/dashboard_cache.ml:109,664` 에 timeout circuit
+- `lib/session.ml` `restore_from_disk` — 재시작 시 세션 복구. `lib/server/server_runtime_bootstrap.ml:570` 에서 호출
 
-### 제거된 레거시
-- `ZeroZombie` - 경과 시간 기반 Agent/Task 생명주기 mutation 프로토콜
-
-### ❌ 없거나 부족한 것
-- Supervision Tree
-- Health Check 시스템
-- Graceful Shutdown
-- Auto Recovery
-- Circuit Breaker
-- State Persistence (재시작 복구)
+### 없는 것
+- 프로세스 전체를 덮는 Supervision Tree. `lib/subsystem_health.ml` 이 전역 alive/dead 레지스트리를 갖지만 `server_bootstrap_loops.ml:963` 은 죽음을 표시할 뿐 재시작하지 않는다
 
 ---
 
@@ -48,7 +43,7 @@ code_refs:
      [workers]          [workers]         [workers]
 ```
 
-**구현 파일**: `lib/supervisor.ml` — 구현됐으나 production 배선 없이 fan-in zero로 남아 #20798에서 삭제됨. 아래 스케치는 재구현 시 설계 참고용.
+아래는 설계 스케치다. 배선되는 감독자만 만든다 — 소비자 없는 감독 트리는 이전에 한 번 만들었다가 아무도 부르지 않아 사라졌다.
 ```ocaml
 type restart_strategy = 
   | OneForOne      (* 하나 죽으면 그것만 재시작 *)

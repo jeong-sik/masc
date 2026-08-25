@@ -164,11 +164,6 @@ let tail_order_of_fields fields =
   | Some _ ->
       Error "keeper_status argument \"tail_order\" must be a string"
 
-let tail_order_of_args args =
-  match status_argument_fields args with
-  | Error _ as error -> error
-  | Ok fields -> tail_order_of_fields fields
-
 let tail_order_to_string = Keeper_status_options_defaults.tail_order_to_string
 let all_tail_orders = Keeper_status_options_defaults.all_tail_orders
 let valid_tail_order_strings = Keeper_status_options_defaults.valid_tail_order_strings
@@ -241,6 +236,24 @@ let apply_tail_order order items =
   | Newest_first -> List.rev items
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+(* Existence, answered by the same candidate spellings and the same
+   effective-meta read the status resolver uses — but as a typed bool, so
+   callers stop deriving it by substring-matching "keeper not found" in a
+   rendered status error (RFC-0371 B4). *)
+let keeper_exists_config ~(config : Workspace.config) raw_name =
+  let candidates =
+    status_name_lookup_candidates raw_name |> List.filter validate_name
+  in
+  let rec loop = function
+    | [] -> Ok false
+    | candidate :: rest ->
+        (match read_effective_meta_resolved config candidate with
+         | Error e -> Error e
+         | Ok (Some _) -> Ok true
+         | Ok None -> loop rest)
+  in
+  loop candidates
+
 let resolve_status_target_config ~(config : Workspace.config) ~(agent_name : string) fields =
   let ( let* ) = Result.bind in
   let* requested_name = effective_status_name_config ~agent_name fields in
@@ -260,53 +273,29 @@ let resolve_status_target_config ~(config : Workspace.config) ~(agent_name : str
     in
     loop candidates
 
-type chat_queue_status_observation =
-  | Chat_queue_snapshot of Keeper_chat_queue.diagnostic_snapshot
-  | Chat_queue_unavailable of string
-
-let observe_chat_queue ~keeper_name =
-  if Eio_guard.is_ready ()
-  then Chat_queue_snapshot (Keeper_chat_queue.snapshot ~keeper_name)
-  else Chat_queue_unavailable "eio_guard_not_ready"
-
-let chat_queue_load_error_to_json
-    (error : Keeper_chat_queue.snapshot_load_error) =
-  `Assoc
-    [ ( "kind"
-      , `String
-          (Keeper_chat_queue.snapshot_load_error_kind_to_string error.kind) )
-    ; "path", Json_util.string_opt_to_json error.path
-    ; "message", `String error.message
-    ]
-
-let chat_queue_status_to_json observation =
-  let durable_replay_enabled =
-    Keeper_chat_queue.persistence_configured ()
-  in
-  match observation with
-  | Chat_queue_unavailable reason ->
+let chat_operation_status_to_json ~base_path ~keeper_name =
+  match Keeper_owner_registry.operation_projection ~base_path ~keeper_name with
+  | Error error ->
     `Assoc
-      [ "pending_messages", `Null
-      ; "inflight_messages", `Null
-      ; "revision", `Null
-      ; "load_errors", `Null
-      ; "snapshot_available", `Bool false
-      ; "read_error", `String reason
-      ; "durable_replay_enabled", `Bool durable_replay_enabled
+      [ "snapshot_available", `Bool false
+      ; "read_error",
+        `String (Keeper_owner_registry.lookup_error_to_string error)
       ]
-  | Chat_queue_snapshot snapshot ->
+  | Ok projection ->
     `Assoc
-      [ "pending_messages", `Int (List.length snapshot.pending)
-      ; "inflight_messages", `Int (List.length snapshot.inflight)
-      ; "revision", `String (Int64.to_string snapshot.revision)
-      ; ( "load_errors"
-        , `List (List.map chat_queue_load_error_to_json snapshot.load_errors) )
+      [ "queued_count", `Int projection.queued_count
+      ; ( "running_operation_id"
+        , match projection.running_operation_id with
+          | None -> `Null
+          | Some operation_id ->
+            `String
+              (Keeper_chat_operation.Operation_id.to_string operation_id) )
+      ; "terminal_count", `Int projection.terminal_count
       ; "snapshot_available", `Bool true
       ; "read_error", `Null
-      ; "durable_replay_enabled", `Bool durable_replay_enabled
       ]
+;;
 
-let nonempty_trimmed = Keeper_status_detail_observability.nonempty_trimmed
 let json_string_opt_member = Json_util.get_string_nonempty
 let latest_metrics_json = Keeper_status_detail_observability.latest_metrics_json
 let model_observability_json = Keeper_status_detail_observability.model_observability_json
@@ -323,8 +312,11 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
       (match resolve_status_target_config ~config ~agent_name fields with
        | Error err -> tool_result_error err
        | Ok (name, m) ->
-      let chat_queue_observation = observe_chat_queue ~keeper_name:m.name in
-      let chat_queue_status = chat_queue_status_to_json chat_queue_observation in
+      let chat_operation_status =
+        chat_operation_status_to_json
+          ~base_path:config.base_path
+          ~keeper_name:m.name
+      in
       let
         { tail_turns
         ; tail_messages
@@ -337,13 +329,25 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
         }
         = options
       in
-      let max_context_resolution =
-        Keeper_context_runtime.resolve_max_context_resolution_of_meta m
-      in
       let context_budget =
-        Keeper_context_runtime.context_budget_json_of_resolution
-          ~runtime_id:(runtime_id_of_meta m)
-          max_context_resolution
+        let runtime_id = runtime_id_of_meta m in
+        match
+          Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+            ~requested_override:m.max_context_override
+            ~runtime_id
+        with
+        | Ok max_context_resolution ->
+            Keeper_context_runtime.context_budget_json_of_resolution
+              ~runtime_id
+              max_context_resolution
+        | Error error ->
+            `Assoc
+              [ ( "runtime_id", `String runtime_id )
+              ; ( "capacity_error"
+                , `String
+                    (Keeper_context_runtime.max_context_resolution_error_to_string
+                       error) )
+              ]
       in
       let base_dir = session_base_dir config in
          let ctx_opt =
@@ -376,7 +380,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                ]
          in
          let keepalive_running = runtime_keepalive_running config m in
-         let agent_status = parse_agent_status config ~agent_name:m.agent_name in
          let now_ts = Time_compat.now () in
          let created_ts =
            Workspace_resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
@@ -401,16 +404,9 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
          in
 
          let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
-         let generation_index_path =
-           Keeper_types_support.keeper_generation_index_path config m.name
-         in
          let session_dir =
            Keeper_types_support.keeper_session_dir
              config
-             (Keeper_id.Trace_id.to_string m.runtime.trace_id)
-         in
-         let generation_manifest_path =
-           Keeper_types_support.keeper_generation_manifest_path config
              (Keeper_id.Trace_id.to_string m.runtime.trace_id)
          in
          let history_path =
@@ -422,10 +418,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            Keeper_types_support.keeper_internal_history_path config
              (Keeper_id.Trace_id.to_string m.runtime.trace_id)
          in
-         let generation_lineage =
-           Keeper_generation_lineage.surface_json config m ~recent_limit:6
-         in
-
          let metrics_tail =
            let lines =
              Dated_jsonl.read_recent_lines metrics_store tail_turns
@@ -481,11 +473,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                         SSOT extractor. *)
                      let content = Keeper_context_core.text_of_history_jsonl_json j in
                      let source = Safe_ops.json_string ~default:"unknown" "source" j in
-                     let ts_unix =
-                       let ts0 = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-                       if ts0 > 0.0 then ts0
-                       else Safe_ops.json_float ~default:0.0 "timestamp" j
-                     in
+                     let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
                      let age_s =
                        if ts_unix > 0.0 then Some (max 0.0 (now_ts -. ts_unix))
                        else None
@@ -547,8 +535,11 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
               fragment_count,
               filtered_count )
          in
-         let allowed_tools = keeper_model_tool_names () in
-        let last_autonomous = String.trim m.runtime.last_autonomous_action_at in
+        (* No tool call log for this keeper means no reading, not a reading of
+           zero. The branch removed here answered "0 calls" whenever lifetime
+           meta counters were non-zero, so a keeper that used a tool once and
+           then had its log rotate away read as "0 calls" rather than as
+           unmeasured. *)
         let tool_audit_snapshot =
           match latest_tool_audit_snapshot_from_files config ~keeper_name:m.name with
           | Some snapshot ->
@@ -556,28 +547,10 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                 snapshot with
                 tool_audit_at =
                   (match snapshot.tool_audit_source, snapshot.tool_audit_at with
-                   | Some _, None when last_autonomous <> "" -> Some last_autonomous
                    | Some _, None -> Some m.updated_at
-                   | _ -> snapshot.tool_audit_at);
+                   | (Some _ | None), Some _ | None, None -> snapshot.tool_audit_at);
               }
-          | None ->
-              let has_runtime_activity =
-                last_autonomous <> ""
-                || m.runtime.autonomous_turn_count > 0
-                || m.runtime.autonomous_action_count > 0
-              in
-              {
-                empty_tool_audit_snapshot with
-                latest_tool_call_count =
-                  (if has_runtime_activity then Some 0 else None);
-                latest_action_source = None;
-                tool_audit_source =
-                  (if has_runtime_activity then Some "keeper_runtime_meta" else None);
-                tool_audit_at =
-                  (if last_autonomous <> "" then Some last_autonomous
-                   else if has_runtime_activity then Some m.updated_at
-                   else None);
-              }
+          | None -> empty_tool_audit_snapshot
         in
          let sandbox_last_error =
            match Keeper_registry.get ~base_path:config.base_path m.name with
@@ -633,22 +606,13 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                    ])
            | other -> other
          in
-         let chat_queue =
-           chat_queue_status
-         in
-
          let json = `Assoc ([
            ("name", `String name);
            ("meta", Keeper_meta_json.meta_to_json m);
-           ( "persona",
-             match m.persona with
-             | Some persona when String.trim persona <> "" -> `String persona
-             | _ -> `Null );
            ("instructions",
             if String.trim m.instructions = "" then `Null else `String m.instructions);
            ("paused", `Bool m.paused);
            ("keepalive_running", `Bool keepalive_running);
-           ("agent", agent_status);
            ("keeper_age_s", Json_util.float_opt_to_json keeper_age_s);
            ("last_turn_ago_s", Json_util.float_opt_to_json last_turn_ago_s);
            ("last_handoff_ago_s", Json_util.float_opt_to_json last_handoff_ago_s);
@@ -710,17 +674,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                then `Null
                else `String m.runtime.proactive_rt.last_preview);
            ]);
-           ("drift",
-             let toml_defaults =
-               (Keeper_types_profile.keeper_default_source_snapshot
-                  ~base_path:config.Workspace.base_path
-                  name)
-                 .defaults
-             in
-             drift_surface_json
-               ~unknown_toml_keys:toml_defaults.unknown_toml_keys);
            ("policy", `Assoc [
-             ("voice_tools_available", `Bool (List.mem "keeper_voice_speak" allowed_tools));
              ("sandbox_profile",
                `String (sandbox_profile_to_string m.sandbox_profile));
              ("network_mode",
@@ -728,16 +682,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("allowed_paths", Json_util.json_string_list m.allowed_paths);
            ]);
            ("auto_execution_session", auto_execution_session_surface_json ());
-           ("auto_execution_session_enabled", `Bool false);
-           ("autonomy", `Assoc [
-             ("turn_count", `Int m.runtime.autonomous_turn_count);
-             ("tool_turn_count", `Int m.runtime.autonomous_tool_turn_count);
-             ("text_turn_count", `Int m.runtime.autonomous_text_turn_count);
-             ("board_reactive_turn_count", `Int m.runtime.board_reactive_turn_count);
-             ("mention_reactive_turn_count", `Int m.runtime.mention_reactive_turn_count);
-             ("noop_turn_count", `Int m.runtime.noop_turn_count);
-             ("tool_action_count", `Int m.runtime.autonomous_action_count);
-           ]);
         ] @ runtime_blocker_fields @ attention_fields @ [
            ("status_options", `Assoc [
              ("tail_turns", `Int tail_turns);
@@ -752,13 +696,12 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("context_budget", context_budget);
            ("model_observability", model_observability);
            ("runtime_trust", runtime_trust);
-           ("chat_queue", chat_queue);
+           ("chat_operations", chat_operation_status);
            ("runtime", runtime_surface_json config m);
            ("workspace", workspace_surface_json m);
            ("sources", source_provenance_json config m);
            ("context", ctx_stats);
            ("metrics_overview", metrics_summary_to_json metrics_overview);
-           ("generation_lineage", generation_lineage);
            ("metrics_tail", metrics_tail);
            ("history_tail", history_tail);
            ("history_tail_count",
@@ -772,13 +715,11 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("storage_paths", `Assoc [
              ("meta", `String (keeper_meta_path config m.name));
              ("metrics", `String (Dated_jsonl.base_dir metrics_store));
-           ("generation_index", `String generation_index_path);
            ( "decisions"
            , `String (Keeper_types_support.keeper_decision_log_path config m.name) );
              ( "feedback"
              , `String (Keeper_types_support.keeper_feedback_log_path config m.name) );
            ("session_dir", `String session_dir);
-             ("generation_manifest", `String generation_manifest_path);
              ("history", `String history_path);
              ("history_internal", `String internal_history_path);
              ("evidence_dir", `String
@@ -805,7 +746,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("sandbox_id", `String sandbox.sandbox_id);
              ("sandbox_backend", `String (Keeper_sandbox.backend_to_string sandbox.backend));
              ("sandbox_root", `String sandbox.root_arg);
-             ("sandbox_repos", `String sandbox.repos_arg);
              ("sandbox_container_root", Json_util.string_opt_to_json sandbox.container_root);
              ("default_cwd", `String keeper_visible_abs);
              ("sandbox_profile", `String (sandbox_profile_to_string m.sandbox_profile));

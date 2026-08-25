@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Tool Registry - In-memory call counters and usage statistics
 
     Provides fast O(1) in-memory tracking of tool call frequency.
@@ -69,7 +52,7 @@ let with_registry_ro f = Eio_guard.with_mutex_ro registry_mu f
 
 module StringSet = Set_util.StringSet
 
-(** Tool_registry sits below keeper/OAS dispatch; depending on Config or tool
+(** Tool_registry sits below keeper/AGENT_CORE dispatch; depending on Config or tool
     schemas creates cycles. Explicit metadata is its local catalog truth. *)
 let stats_catalog_tool_names : StringSet.t Eio.Lazy.t =
   Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
@@ -82,12 +65,8 @@ let stats_catalog_tool_names : StringSet.t Eio.Lazy.t =
       explicit_metadata_names)
 ;;
 
-let is_keeper_internal_tool_name tool_name =
-  String.starts_with ~prefix:"keeper_" tool_name
-
 let is_stats_known_tool tool_name =
   StringSet.mem tool_name (Eio.Lazy.force stats_catalog_tool_names)
-  || is_keeper_internal_tool_name tool_name
 
 let is_known_tool = is_stats_known_tool
 

@@ -146,7 +146,6 @@ struct RoundStallSummary {
     schema_failures: u64,
     rule_validation_failures: u64,
     reprompts: u64,
-    dm_persona: Option<String>,
     progress_reason: Option<String>,
     progress_detail: Option<String>,
     recovery_applied: bool,
@@ -899,7 +898,6 @@ fn extract_stalled_round_summary(json: &Value) -> RoundStallSummary {
             .and_then(|s| s.get("reprompts"))
             .and_then(Value::as_u64)
             .unwrap_or(0),
-        dm_persona: summary_nonempty_string(summary, "dm_persona"),
         progress_reason: summary_nonempty_string(summary, "progress_reason"),
         progress_detail: progress_detail.clone(),
         recovery_applied: summary
@@ -962,9 +960,6 @@ fn build_stalled_round_guide(
             "검증 지표: schema {} / rule {} / reprompt {}",
             schema_failures, rule_validation_failures, reprompts
         ));
-    }
-    if let Some(dm_persona) = summary.dm_persona.as_deref() {
-        lines.push(format!("DM persona: {}", dm_persona));
     }
     if let Some(reason) = summary.progress_reason.as_deref() {
         lines.push(format!("진행 판정: {}", reason));

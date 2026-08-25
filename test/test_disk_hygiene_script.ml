@@ -36,15 +36,6 @@ let with_temp_dir prefix f =
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    idx + nlen <= hlen
-    && (String.sub haystack idx nlen = needle || loop (idx + 1))
-  in
-  nlen = 0 || loop 0
-
 let env_array overrides =
   let table = Hashtbl.create 64 in
   Unix.environment ()
@@ -192,11 +183,11 @@ let test_disk_hygiene_fix_path () =
       in
       check bool "warn-only run returns nonzero" true (code1 <> 0);
       check bool "reports dune cache warning" true
-        (contains_substring stdout1 "dune_cache");
+        (String_util.contains_substring stdout1 "dune_cache");
       check bool "reports tlc artefacts warning" true
-        (contains_substring stdout1 "tlc_artifacts");
+        (String_util.contains_substring stdout1 "tlc_artifacts");
       check bool "reports build dirs warning" true
-        (contains_substring stdout1 "build_dirs");
+        (String_util.contains_substring stdout1 "build_dirs");
       check bool "stderr empty on report run" true (String.trim stderr1 = "");
 
       let code2, stdout2, stderr2 =
@@ -224,11 +215,11 @@ let test_disk_hygiene_fix_path () =
         (Sys.file_exists (Filename.concat home_dir ".cache/dune"));
       let dune_log_contents = read_file dune_log in
       check bool "trim invoked with default size" true
-        (contains_substring dune_log_contents "cache trim --size=20GB");
+        (String_util.contains_substring dune_log_contents "cache trim --size=20GB");
       check bool "post-fix summary printed" true
-        (contains_substring stdout2 "Post-fix:");
+        (String_util.contains_substring stdout2 "Post-fix:");
       check bool "post-fix summary is clean" true
-        (contains_substring stdout2 "summary ok=4 warn=0"))
+        (String_util.contains_substring stdout2 "summary ok=4 warn=0"))
 
 let test_tla_check_cleans_generated_artifacts_by_default () =
   with_temp_dir "tla-check-cleanup" (fun dir ->
@@ -263,7 +254,7 @@ let test_tla_check_cleans_generated_artifacts_by_default () =
         failf "tla-check failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
           stderr;
       check bool "cleanup message emitted" true
-        (contains_substring stdout "cleanup-tlc-artifacts:");
+        (String_util.contains_substring stdout "cleanup-tlc-artifacts:");
       check bool "states dir removed" false
         (Sys.file_exists (Filename.concat repo_dir "specs/states"));
       check bool "trace data removed" false
@@ -302,7 +293,7 @@ let test_tla_check_respects_keep_tlc_artifacts () =
         failf "tla-check failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
           stderr;
       check bool "preserve message emitted" true
-        (contains_substring stdout "KEEP_TLC_ARTIFACTS=1");
+        (String_util.contains_substring stdout "KEEP_TLC_ARTIFACTS=1");
       check bool "states dir preserved" true
         (Sys.file_exists (Filename.concat repo_dir "specs/states"));
       check bool "trace data preserved" true
@@ -331,13 +322,13 @@ let read_makefile_surface () =
 let test_makefile_exposes_disk_hygiene_targets () =
   let makefile = read_makefile_surface () in
   check bool "diagnostics target exists" true
-    (contains_substring makefile "diagnostics-disk-hygiene:");
+    (String_util.contains_substring makefile "diagnostics-disk-hygiene:");
   check bool "safe fix target exists" true
-    (contains_substring makefile "fix-disk-hygiene:");
+    (String_util.contains_substring makefile "fix-disk-hygiene:");
   check bool "hard fix target exists" true
-    (contains_substring makefile "fix-disk-hygiene-hard:");
+    (String_util.contains_substring makefile "fix-disk-hygiene-hard:");
   check bool "clean target runs tlc cleanup" true
-    (contains_substring makefile "bash scripts/cleanup-tlc-artifacts.sh")
+    (String_util.contains_substring makefile "bash scripts/cleanup-tlc-artifacts.sh")
 
 let () =
   run "disk_hygiene_script"

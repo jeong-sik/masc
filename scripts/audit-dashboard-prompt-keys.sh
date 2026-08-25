@@ -1,13 +1,8 @@
 #!/usr/bin/env bash
 # Fail when dashboard production code names a prompt key the server cannot emit.
 #
-# The dashboard decodes and labels prompt blocks by key string. Deleting a
-# prompt asset is a server-side change that leaves those strings syntactically
-# valid, so a panel keeps rendering a block that resolves to empty instead of
-# failing. That happened after #26823 folded keeper.world / keeper.capabilities
-# / keeper.constitution into keeper: the config panel decoded three
-# blocks the server no longer sends and rendered nothing, and the assembly
-# panel described six stages whose keys were gone.
+# The dashboard decodes and labels prompt blocks by key string. Every referenced
+# key must resolve to a current prompt asset or registry constant.
 #
 # Scope is position-based, not prefix-based. "keeper." also prefixes schedule
 # payload kinds (keeper.cron, keeper.smoke) and workspace source tags, which
@@ -49,9 +44,8 @@ SINKS='normalizePromptBlock|promptKeys?|system_prompt_blocks'
 ns="$(sed 's/\..*//' "$existing" | sort -u | paste -sd'|' -)"
 
 # -A5 so a key inside a multi-line promptKeys array is seen. Without it the
-# sink line holds only "promptKeys: [" and every key on a following line goes
-# unchecked, which is how a removed dotted prompt key survived its own
-# asset being deleted.
+# sink line holds only "promptKeys: [" and every key on a following line would
+# otherwise go unchecked.
 grep -rn -A5 --include='*.ts' --exclude='*.test.ts' -E "$SINKS" dashboard/src 2>/dev/null \
   | grep -oE "'(${ns})(\.[a-z_.]+)?'" \
   | tr -d "'" \

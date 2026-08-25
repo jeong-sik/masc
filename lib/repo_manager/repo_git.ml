@@ -31,11 +31,68 @@ let non_interactive_git_env =
 
 let read_only_git_env = ("GIT_OPTIONAL_LOCKS", "0") :: non_interactive_git_env
 
-let status_summary_timeout_sec = 5.0
+let inspection_timeout_sec = 5.0
+
+type origin_lookup_error =
+  | Origin_missing
+  | Origin_lookup_timed_out of string
+  | Origin_lookup_failed of string
+
+let origin_lookup_error_to_string = function
+  | Origin_missing -> "origin remote is not configured"
+  | Origin_lookup_timed_out detail -> detail
+  | Origin_lookup_failed detail -> detail
+;;
+
+module Inspection_budget = struct
+  type t =
+    { started_at : Mtime.t
+    ; timeout_sec : float
+    }
+
+  let create ?(timeout_sec = inspection_timeout_sec) () =
+    if not (Float.is_finite timeout_sec && Float.compare timeout_sec 0.0 > 0)
+    then invalid_arg "Repo_git.Inspection_budget.create: timeout_sec must be finite and positive";
+    { started_at = Mtime_clock.now (); timeout_sec }
+  ;;
+
+  let elapsed_sec budget =
+    Mtime.Span.to_float_ns (Mtime.span budget.started_at (Mtime_clock.now ())) /. 1e9
+  ;;
+
+  (* [open Repo_manager_types] above brings [repository_status]'s [Error of
+     string] into scope, shadowing the result constructor. This budget answers
+     with a result, so name the type and qualify the constructors. *)
+  let remaining_timeout budget : (float, string) Stdlib.result =
+    let remaining = budget.timeout_sec -. elapsed_sec budget in
+    if Float.compare remaining 0.0 <= 0
+    then Stdlib.Error "git inspection request budget exhausted"
+    else Stdlib.Ok (min inspection_timeout_sec remaining)
+  ;;
+
+  let is_exhausted budget = Result.is_error (remaining_timeout budget)
+end
 
 let split_lines text =
   if text = "" then []
   else String.split_on_char '\n' text |> List.filter (fun line -> line <> "")
+
+let git_failure_detail args status stdout stderr =
+  let status_text =
+    match status with
+    | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+    | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
+    | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
+  in
+  let detail =
+    let stderr = String.trim stderr in
+    let stdout = String.trim stdout in
+    if stderr <> "" then status_text ^ ": " ^ stderr
+    else if stdout <> "" then status_text ^ ": " ^ stdout
+    else status_text
+  in
+  Printf.sprintf "git %s failed: %s" (String.concat " " args) detail
+;;
 
 type status_summary = {
   changed_files : int;
@@ -129,20 +186,7 @@ let run_git ~cwd ?(env = []) ?timeout_sec args : (string list, string) result =
   match status with
   | Unix.WEXITED 0 -> Ok (split_lines stdout)
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-      let status_text =
-        match status with
-        | Unix.WEXITED code -> Printf.sprintf "exit %d" code
-        | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
-        | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
-      in
-      let detail =
-        let stderr = String.trim stderr in
-        let stdout = String.trim stdout in
-        if stderr <> "" then status_text ^ ": " ^ stderr
-        else if stdout <> "" then status_text ^ ": " ^ stdout
-        else status_text
-      in
-      Error (Printf.sprintf "git %s failed: %s" (String.concat " " args) detail)
+    Error (git_failure_detail args status stdout stderr)
 
 let clone ~repository =
   let env = non_interactive_git_env in
@@ -190,18 +234,44 @@ let get_branches ~repository =
   | Ok lines -> Ok lines
   | Error msg -> Error msg
 
-let get_origin_url ~local_path =
-  match run_git ~cwd:local_path [ "remote"; "get-url"; "origin" ] with
-  | Ok (url :: _) -> Ok url
-  | Ok [] -> Error "git remote get-url origin returned no output"
-  | Error msg -> Error msg
+(* Bounded and read-only, matching [worktree_root] below. Reading a remote URL
+   is a config lookup, but [run_git] defaults to no timeout, so a git index
+   lock held by another process — or a stalled filesystem — would block the
+   caller indefinitely. Both callers sit on request paths: repository checkout
+   inspection renders a dashboard response, and write attribution is about to
+   move onto the tool post-hook (RFC-keeper-workspace-root-only §5.1).
+
+   [read_only_git_env] adds GIT_OPTIONAL_LOCKS=0 so an inspection never takes
+   a lock that a keeper's own git command then waits on. *)
+let get_origin_url ?(timeout_sec = inspection_timeout_sec) ~local_path () =
+  let args = [ "remote"; "get-url"; "origin" ] in
+  let argv = "git" :: "-C" :: local_path :: args in
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_status_split
+      ~env:(merge_env read_only_git_env)
+      ~timeout_sec
+      argv
+  in
+  match status, split_lines stdout with
+  | Unix.WEXITED 0, url :: _ -> Ok url
+  | Unix.WEXITED 0, [] ->
+    Error (Origin_lookup_failed "git remote get-url origin returned no output")
+  (* Git gives a missing remote a distinct exit status, so absence stays typed
+     without inspecting mutable stderr text. *)
+  | Unix.WEXITED 2, _ -> Error Origin_missing
+  (* Process_eio owns what a timeout looks like; reading its number here made
+     the two modules agree by coincidence (#28651). *)
+  | status', _ when Process_eio.exit_reason_of_status status' = Process_eio.Timed_out ->
+    Error (Origin_lookup_timed_out (git_failure_detail args status stdout stderr))
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ ->
+    Error (Origin_lookup_failed (git_failure_detail args status stdout stderr))
 
 let worktree_root ~local_path =
   match
     run_git
       ~cwd:local_path
       ~env:read_only_git_env
-      ~timeout_sec:status_summary_timeout_sec
+      ~timeout_sec:inspection_timeout_sec
       [ "rev-parse"; "--show-toplevel" ]
   with
   | Ok (root :: _) ->
@@ -210,6 +280,36 @@ let worktree_root ~local_path =
     then Stdlib.Error "git rev-parse --show-toplevel returned blank"
     else Stdlib.Ok root
   | Ok [] -> Stdlib.Error "git rev-parse --show-toplevel returned no output"
+  | Error msg -> Stdlib.Error msg
+
+type checkout_identity = {
+  toplevel : string;
+  git_common_dir : string;
+}
+
+let checkout_identity ~local_path =
+  (* Outputs arrive in argument order; [--path-format=absolute] pins
+     both lines to absolute paths regardless of the cwd (git >= 2.31,
+     far below any environment this runs in). *)
+  match
+    run_git
+      ~cwd:local_path
+      ~env:read_only_git_env
+      ~timeout_sec:inspection_timeout_sec
+      [ "rev-parse"
+      ; "--path-format=absolute"
+      ; "--show-toplevel"
+      ; "--git-common-dir"
+      ]
+  with
+  | Ok (toplevel :: git_common_dir :: _) ->
+    let toplevel = String.trim toplevel in
+    let git_common_dir = String.trim git_common_dir in
+    if String.equal toplevel "" || String.equal git_common_dir ""
+    then Stdlib.Error "git rev-parse checkout identity returned blank output"
+    else Stdlib.Ok { toplevel; git_common_dir }
+  | Ok _ ->
+    Stdlib.Error "git rev-parse checkout identity returned too few lines"
   | Error msg -> Stdlib.Error msg
 
 let branch_of_origin_head_ref refname =
@@ -240,29 +340,33 @@ let origin_head_branch ~local_path =
     run_git
       ~cwd:local_path
       ~env:read_only_git_env
-      ~timeout_sec:status_summary_timeout_sec
+      ~timeout_sec:inspection_timeout_sec
       [ "symbolic-ref"; "-q"; "refs/remotes/origin/HEAD" ]
   with
   | Ok (refname :: _) -> branch_of_origin_head_ref refname
   | Ok [] -> Stdlib.Error "git symbolic-ref refs/remotes/origin/HEAD returned no output"
   | Error msg -> Stdlib.Error msg
 
-let inspect_timeout_sec = status_summary_timeout_sec
-
-let current_branch ~repository =
+let current_branch ?(timeout_sec = inspection_timeout_sec) ~repository () =
   match
     run_git ~cwd:repository.local_path ~env:read_only_git_env
-      ~timeout_sec:inspect_timeout_sec
+      ~timeout_sec
       [ "rev-parse"; "--abbrev-ref"; "HEAD" ]
   with
   | Ok (name :: _) -> Ok name
   | Ok [] -> Error "git rev-parse --abbrev-ref HEAD returned no output"
   | Error msg -> Error msg
 
-let ahead_behind ~repository ~target_ref : (int * int, string) result =
+let ahead_behind
+    ?(timeout_sec = inspection_timeout_sec)
+    ~repository
+    ~target_ref
+    ()
+    : (int * int, string) result
+  =
   match
     run_git ~cwd:repository.local_path ~env:read_only_git_env
-      ~timeout_sec:inspect_timeout_sec
+      ~timeout_sec
       [ "rev-list"; "--left-right"; "--count"; target_ref ^ "...HEAD" ]
   with
   | Stdlib.Error msg -> Stdlib.Error msg
@@ -294,10 +398,10 @@ let get_recent_commits ~repository ~branch ~limit =
   | Ok lines -> Ok lines
   | Error msg -> Error msg
 
-let status_summary ~repository =
+let status_summary ?(timeout_sec = inspection_timeout_sec) ~repository () =
   match
     run_git ~cwd:repository.local_path ~env:read_only_git_env
-      ~timeout_sec:status_summary_timeout_sec
+      ~timeout_sec
       ["--no-optional-locks"; "status"; "--porcelain=v1"; "--untracked-files=normal"]
   with
   | Stdlib.Error msg -> Stdlib.Error msg

@@ -2,12 +2,21 @@
   "managed_by": "MASC",
   "schema": "masc.prompt-managed-assets.v1",
   "paths": [
+    "goal_verification.lookup.md",
+    "goal_verification.proof.md",
     "judge.board.md",
-    "judge.catchup.md",
     "judge.effect.md",
     "keeper.md",
+    "keeper.current_task.skills.md",
+    "keeper.observation.current_task_absent.md",
+    "keeper.observation.current_task_absent_in_recovery.md",
+    "keeper.observation.current_task_unobservable.md",
+    "keeper.observation.recovered_current_task.md",
     "librarian.md",
     "verification.md",
-    "worker.md"
+    "verification.contract.md",
+    "verification.lookup.none.md",
+    "verification.lookup.producer_tree.md",
+    "verification.required_evidence.md"
   ]
 }

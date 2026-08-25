@@ -18,7 +18,6 @@
       {!selected_keeper_turn_id}, {!terminal_event_present_for_turn})
       — used to pick the active keeper turn for runtime-lens. *)
 
-open Server_dashboard_http_keeper_api_types
 
 let receipt_row_matches ?turn_id keeper_name trace_id json =
   let keeper_matches = Json_util.get_string json "keeper_name" = Some keeper_name in

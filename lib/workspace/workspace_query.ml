@@ -58,8 +58,7 @@ let update_priority config ~task_id ~priority =
                     ; ("old", `Int old_priority)
                     ; ("new", `Int priority)
                     ; ("ts", `String (now_iso ()))
-                    ]);
-                (Atomic.get Workspace_hooks.on_task_mutation_fn) ()
+                    ])
               with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn ->
@@ -102,15 +101,31 @@ let list_leaf_json_names config dir =
          && not (String.contains name '/')
          && Filename.check_suffix name ".json")
 
+let agents_persistence_surface = "workspace_agents"
+
+(* A file under [agents/] that does not decode is dropped from the listing
+   and counted on [masc_persistence_read_drops_total]; nothing rewrites it.
+   An open() that failed under fd pressure is not a loss (RFC-0134) and is
+   logged without the data-integrity counter. *)
 let load_agents_from_dir config dir ~include_inactive =
   list_leaf_json_names config dir
   |> List.filter_map (fun name ->
          safe_yield ();
          let path = Filename.concat dir name in
-         match read_agent_with_repair config path with
+         match read_agent_result config path with
          | Ok agent when include_inactive || agent.status <> Masc_domain.Inactive ->
              Some agent
-         | Ok _ | Error _ -> None)
+         | Ok _ -> None
+         | Error (Agent_fd_pressure exn) ->
+             Log.Workspace.warn "agent listing skipped %s under fd pressure: %s"
+               path (Printexc.to_string exn);
+             None
+         | Error (Agent_read_error detail) ->
+             Safe_ops.report_persistence_read_drop_counted
+               ~surface:agents_persistence_surface
+               ~reason:Read_drop_reason.Entry_load_error
+               ~path ~detail;
+             None)
 
 let state_backed_agent_type = "workspace-state"
 
@@ -202,7 +217,7 @@ let get_all_agents config =
     exact assignee identity is absent from explicit active workspace/session
     membership. [last_seen] is retained as observation and never changes task
     ownership. *)
-let audit_orphan_tasks config : (Masc_domain.task * string) list =
+let audit_orphan_tasks_in_tasks config tasks : (Masc_domain.task * string) list =
   if not (is_initialized config) then []
   else
     let active_names =
@@ -210,7 +225,6 @@ let audit_orphan_tasks config : (Masc_domain.task * string) list =
       |> List.map (fun (agent : Masc_domain.agent) -> agent.name)
     in
     let is_active_agent assignee = List.mem assignee active_names in
-    let backlog = read_backlog config in
     List.filter_map (fun (task : Masc_domain.task) ->
       match task.task_status with
       | Masc_domain.Claimed { assignee; _ }
@@ -219,7 +233,11 @@ let audit_orphan_tasks config : (Masc_domain.task * string) list =
           if is_active_agent assignee then None
           else Some (task, assignee)
       | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
-    ) backlog.tasks
+    ) tasks
+
+let audit_orphan_tasks config : (Masc_domain.task * string) list =
+  if not (is_initialized config) then []
+  else audit_orphan_tasks_in_tasks config (read_backlog config).tasks
 
 (* RFC-0294 PR-4: the single typed source of truth for "is this status
    orphan-eligible, and under which gauge class". EXHAUSTIVE over [task_status]
@@ -332,15 +350,48 @@ let select_all_message_names ~since_seq names =
        if cmp <> 0 then cmp else String.compare name_a name_b)
   |> List.map snd
 
-(** Read most-recent messages without parsing the entire history directory. *)
-let collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label =
+let select_all_message_names_newest_first ~since_seq names =
+  select_all_message_names ~since_seq names |> List.rev
+
+(** Read most-recent messages without parsing the entire history directory.
+
+    [keep] decides which messages COUNT toward [limit]. Without it a caller that
+    filters afterwards cannot express "the newest [limit] messages of MINE": the
+    store returns [limit] messages from every agent and the caller's filter thins
+    them to an unpredictable number, which is zero once other agents fill the
+    window. Callers used to compensate by requesting a multiple of what they
+    wanted — 200, 2000, [limit * 5], [limit * 10] capped at 1000, a different
+    guess at each call site — and each guess is wrong at some fleet size.
+
+    Filtering here costs a wider directory walk, bounded by the messages that
+    exist rather than by a guess, and stops as soon as [limit] matches are
+    found. *)
+(* The two reads walk different amounts of the directory, so which one is
+   wanted is a caller's decision rather than a default. [Newest_window] can stop
+   at [limit] names because every name it reads is an answer; [Matching] cannot
+   know how far back the [limit]-th match sits. Collapsing them into an optional
+   predicate would make the cheap walk the silent default for a caller that
+   needed the other one — the exact shape that put a filter after the read in
+   the first place. *)
+type message_scan =
+  | Newest_window
+  | Matching of (Masc_domain.message -> bool)
+
+let collect_recent_messages config ~msgs_path ~since_seq ~limit ~scan ~warn_label =
   if not (Sys.file_exists msgs_path) then []
   else
     let names =
       Sys.readdir msgs_path
       |> Array.to_list
       |> List.filter is_valid_filename
-      |> select_recent_message_names ~since_seq ~limit
+      |> (match scan with
+          | Newest_window -> select_recent_message_names ~since_seq ~limit
+          | Matching _ -> select_all_message_names_newest_first ~since_seq)
+    in
+    let keep (msg : Masc_domain.message) =
+      match scan with
+      | Newest_window -> true
+      | Matching predicate -> predicate msg
     in
     let rec loop remaining acc = function
       | _ when remaining <= 0 -> List.rev acc
@@ -353,7 +404,8 @@ let collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label =
             match read_json config path with
             | json ->
                 (match message_of_yojson json with
-                 | Ok msg when msg.seq > since_seq -> loop (remaining - 1) (msg :: acc) rest
+                 | Ok msg when msg.seq > since_seq && keep msg ->
+                     loop (remaining - 1) (msg :: acc) rest
                  | Ok _ | Error _ -> loop remaining acc rest)
             | exception (Eio.Cancel.Cancelled _ as e) -> raise e
             | exception e ->
@@ -370,7 +422,25 @@ let get_messages_raw config ~since_seq ~limit =
   if not (root_is_initialized config) then []
   else
     let msgs_path = messages_dir config in
-    collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label:"message"
+    collect_recent_messages
+      config
+      ~msgs_path
+      ~since_seq
+      ~limit
+      ~scan:Newest_window
+      ~warn_label:"message"
+
+let get_messages_matching config ~since_seq ~limit ~keep =
+  if not (root_is_initialized config) then []
+  else
+    let msgs_path = messages_dir config in
+    collect_recent_messages
+      config
+      ~msgs_path
+      ~since_seq
+      ~limit
+      ~scan:(Matching keep)
+      ~warn_label:"message"
 
 let get_all_messages_raw config ~since_seq =
   if not (root_is_initialized config) then []

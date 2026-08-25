@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Plan Tool Handlers
 
     Extracted from mcp_server_eio.ml for testability.
@@ -117,7 +100,6 @@ let handle_note_add ~tool_name ~start_time ctx args : Tool_result.result =
       let response = `Assoc [
         Plan_action_outcome.(status_field Added);
         ("task_id", `String task_id);
-        ("note_count", `Int (List.length plan_ctx.Planning_eio.notes));
       ] in
       Tool_result.make_ok ~tool_name ~start_time ~data:response ()
   | Error e ->
@@ -246,7 +228,7 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | _ -> None
 
 (* RFC-0057 PR-2: schemas binding removed; plan tools now emitted via
-   Tool_descriptors_gen (Tool_schemas_misc.schemas chain). *)
+   config/tools/masc_plan_*.toml (Tool_schemas_misc.schemas chain). *)
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

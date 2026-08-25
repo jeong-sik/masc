@@ -26,18 +26,6 @@ val invalid_name_error : string -> string
 val default_proactive_enabled : bool
 val prompt_render_max_bytes : int
 
-(* ── Removed / rejected keeper input keys ───────────────────── *)
-
-val removed_keeper_input_key_names : string list
-
-val present_json_keys : string list -> Yojson.Safe.t -> string list
-
-val reject_removed_keeper_input_keys :
-  ?allow_sandbox_fields:bool ->
-  tool_name:string ->
-  Yojson.Safe.t ->
-  (unit, string) result
-
 (* ── UTF-8 string processing ────────────────────────────────── *)
 
 val utf8_repair_string : string -> string

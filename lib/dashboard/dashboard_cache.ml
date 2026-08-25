@@ -179,14 +179,61 @@ let should_restore_stale_after_failure exn =
   | Eio.Cancel.Cancelled _ -> true
   | _ -> false
 
-let timeout_json ~key ~timeout_sec ~timeout_kind =
+(* The one shape a timed-out compute takes on the wire.
+
+   Every timeout path in this module goes through [timeout_error_json], and the
+   only sanctioned reader is [is_timeout_envelope] beside it. Both read
+   [timeout_error_code], so changing the wire value cannot leave a reader
+   behind — a recognizer that lives in another module and matches the string
+   itself drifts silently the moment a producer changes.
+
+   The envelope still travels in-band, as a value indistinguishable from a
+   computed payload until a reader checks; #28400 tracks moving it out of band
+   and giving it its own HTTP status. *)
+let timeout_error_code = "computation_timeout"
+
+type timeout_envelope = {
+  key : string;
+  timeout_sec : float;
+  timeout_kind : string;
+  waiting : bool;
+}
+
+let timeout_envelope_message { key; timeout_sec; timeout_kind; waiting } =
+  match timeout_kind with
+  | "circuit_open" ->
+    Printf.sprintf "Dashboard %s is failing fast after repeated cache timeouts" key
+  | _ when waiting ->
+    Printf.sprintf
+      "Dashboard %s timed out after %.0fs waiting for an in-flight computation"
+      key timeout_sec
+  | _ -> Printf.sprintf "Dashboard %s timed out after %.0fs" key timeout_sec
+
+let timeout_envelope_json envelope =
   `Assoc
     [
-      ("error", `String "computation_timeout");
-      ("timeout_sec", `Float timeout_sec);
-      ("key", `String key);
-      ("timeout_kind", `String timeout_kind);
+      ("error", `String timeout_error_code);
+      ("message", `String (timeout_envelope_message envelope));
+      ("generated_at", `String (Masc_domain.now_iso ()));
+      ("timeout_kind", `String envelope.timeout_kind);
+      ("timeout_sec", `Float envelope.timeout_sec);
+      ("key", `String envelope.key);
     ]
+
+let is_timeout_envelope = function
+  | `Assoc fields ->
+    (match List.assoc_opt "error" fields with
+     | Some (`String code) -> String.equal code timeout_error_code
+     | _ -> false)
+  | _ -> false
+
+let timeout_error_json ?timeout_kind ?(waiting = false) key timeout_sec =
+  let timeout_kind =
+    match timeout_kind with
+    | Some timeout_kind -> timeout_kind
+    | None -> if waiting then "waiter" else "owner"
+  in
+  timeout_envelope_json { key; timeout_sec; timeout_kind; waiting }
 
 (** Maximum seconds a waiter will poll for a [Computing] slot before evicting
     it and recomputing.
@@ -498,8 +545,8 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
                       ((), SMap.add key (Ready cooldown) map)
                   | None ->
                       let err_json =
-                        timeout_json ~key ~timeout_sec:(max_wait_sec ())
-                          ~timeout_kind:"compute"
+                        timeout_error_json ~timeout_kind:"compute" key
+                          (max_wait_sec ())
                       in
                       fallback_val := Some err_json;
                       let cooldown = { value = err_json; expires_at = ts +. 5.0; stale_until = ts +. 5.0 } in
@@ -508,7 +555,8 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            );
            (match !fallback_val with
             | Some v -> v
-            | None -> `Assoc [("error", `String "Compute timeout")]))
+            | None ->
+                timeout_error_json ~timeout_kind:"compute" key (max_wait_sec ())))
     | `Retry_stuck (elapsed, _ceiling) ->
       (* Pair the watchdog with an SLO-actionable signal: if this counter
          climbs sustainedly, [release_on_cancel] is not firing and the
@@ -575,38 +623,48 @@ let peek key =
   | Some (Computing { stale = Some stale_value; _ }) -> Some stale_value
   | _ -> None
 
-let timeout_error_json ?timeout_kind ?(waiting = false) key timeout_sec =
-  let timeout_kind =
-    match timeout_kind with
-    | Some timeout_kind -> timeout_kind
-    | None -> if waiting then "waiter" else "owner"
-  in
-  let message =
-    match timeout_kind with
-    | "circuit_open" ->
-      Printf.sprintf
-        "Dashboard %s is failing fast after repeated cache timeouts" key
-    | _ when waiting ->
-      Printf.sprintf
-        "Dashboard %s timed out after %.0fs waiting for an in-flight computation"
-        key timeout_sec
-    | _ ->
-      Printf.sprintf "Dashboard %s timed out after %.0fs" key timeout_sec
-  in
-  `Assoc
-    [
-      ("error", `String "computation_timeout");
-      ("message", `String message);
-      ("generated_at", `String (Masc_domain.now_iso ()));
-      ("timeout_kind", `String timeout_kind);
-      ("timeout_sec", `Float timeout_sec);
-      ("key", `String key);
-    ]
+(* RFC-0372 Phase 5 — a bounded compute is still not a yielding compute.
+
+   Phases 1-4 bounded what one dashboard read returns, how many stores it
+   merges, and how long it may run. None of that changes *where* it runs.
+   Every HTTP connection is a fiber forked onto one domain
+   ([server_bootstrap_http.ml]), and Eio fibers switch only at await points.
+   [List.sort] and Yojson decoding contain none, so the domain stops for the
+   whole pure-compute stretch between two file reads: sibling fibers, including
+   [/health], do not run.
+
+   Measured against the live server on 2026-08-12, one telemetry read on an
+   otherwise idle process: [/health] median 10-12ms -> 458ms, peak 5137ms,
+   back to 14ms the instant the read returned. The control pushed 700x more
+   bytes through the same client from a different server and left [/health] at
+   17ms median / 48ms peak, so the stall is the server's, not the harness's.
+   The per-probe timeline degrades across the entire window rather than in
+   periodic spikes, which is the signature of non-yielding compute rather than
+   GC pauses.
+
+   [submit_or_inline] moves the work to a worker domain and turns the caller's
+   wait into an await point, so sibling fibers run. It is also the only
+   sanctioned offload here: [Eio_guard.run_in_systhread] leaves the work with
+   no Eio effect handler, which poisons the shared [dir_mu] and takes keeper
+   persistence down process-wide (see the note in
+   [server_routes_http_routes_provider_runs.ml], which already offloads its own
+   dashboard compute this way). Pool workers run inside [Eio.Switch.run], so
+   [Eio.Mutex.use_rw ~protect] resolves normally.
+
+   Safe to offload here because [compute] runs without holding the cache lock
+   (see the header note); the pool is the only thing the caller waits on.
+
+   Weight stays at the default 1.0. This compute is CPU-bound and occupying a
+   whole worker is the intent; RFC-0204 rejects *reclassifying* existing I/O
+   submissions to 1.0, which is a different change. Pool size then bounds how
+   many computes run at once, so no separate concurrency gate is added. *)
+let offloaded compute () = Executor_pool_ref.submit_or_inline compute
 
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
   if Option.is_none (peek key) && timeout_circuit_is_open key then
     timeout_error_json ~timeout_kind:"circuit_open" key timeout_sec
   else
+    let compute = offloaded compute in
     try
       let value =
         if Eio_guard.is_ready () then
@@ -636,6 +694,47 @@ let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
     | Compute_timeout (key, waiting) ->
         record_timeout_circuit key;
         timeout_error_json ~waiting key timeout_sec
+
+(* RFC-0372 Phase 3 — make the timeout the default rather than the opt-in.
+
+   [get_or_compute_with_timeout] has existed for a while, but it requires an
+   Eio clock at the call site, so most callers reach for the plain
+   [get_or_compute]: at the time of writing 9 call sites take the timeout and
+   37 do not. Those 37 compute without any ceiling, which is how one dashboard
+   read can hold a domain indefinitely. Converting them one by one is the
+   N-of-M patch CLAUDE.md rejects; the ceiling belongs in the default.
+
+   The clock is registered once at boot ([set_default_clock] from main_eio),
+   after which every [get_or_compute] runs under a timeout without changing a
+   single call site. Before registration — unit tests, non-Eio contexts — the
+   original unbounded path still runs, so nothing that never had a clock
+   suddenly needs one.
+
+   Individual call sites that need a tighter ceiling keep calling
+   [get_or_compute_with_timeout] explicitly; this only removes "no ceiling at
+   all" as a reachable state in production. *)
+let default_clock : float Eio.Time.clock_ty Eio.Resource.t option Atomic.t =
+  Atomic.make None
+
+let set_default_clock clock =
+  Atomic.set default_clock
+    (Some (clock :> float Eio.Time.clock_ty Eio.Resource.t))
+
+(* Deliberately generous: this is a backstop against unbounded compute, not a
+   latency target. The measured worst case for the widest dashboard read was
+   ~12s before RFC-0372 Phase 1/2; surfaces that want a tighter bound pass
+   their own [timeout_sec]. *)
+let default_compute_timeout_sec = 30.0
+
+let get_or_compute_unbounded = get_or_compute
+
+let get_or_compute key ~ttl compute =
+  match Atomic.get default_clock with
+  | Some clock ->
+    get_or_compute_with_timeout key ~ttl ~clock
+      ~timeout_sec:default_compute_timeout_sec compute
+  | None -> get_or_compute_unbounded key ~ttl compute
+;;
 
 let seed_stale_if_missing key ~stale_for value =
   let ts = now () in

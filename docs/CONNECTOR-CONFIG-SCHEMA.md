@@ -17,15 +17,15 @@ env  >  runtime TOML  >  field defaults
 - Dashboard should **write the TOML**, not the `.env` — TOML is the persistent
   surface, `.env` is developer scratch.
 
-Discord is no longer a sidecar. Its in-process OCaml gateway resolves the
-trigger-policy env override and the `[discord]` table in MASC `runtime.toml` as
-documented in the Discord section below.
+Discord and Slack are not sidecars. Their in-process OCaml gateways read
+credentials and the trigger-policy override from the server environment as
+documented in their sections below.
 
 ## Common fields (all sidecars)
 
 | Field | Env alias | Default | Notes |
 |---|---|---|---|
-| `gate_base_url` | `GATE_BASE_URL` (Discord/Slack/Telegram), `MASC_GATE_URL` (iMessage) | `http://localhost:8935` | MASC server. Loopback host relaxes auth. |
+| `gate_base_url` | `GATE_BASE_URL` (Telegram), `MASC_GATE_URL` (iMessage) | `http://localhost:8935` | MASC server. Loopback host relaxes auth. |
 | `gate_api_token` | `GATE_API_TOKEN`, `MASC_GATE_API_TOKEN` (iMessage) | `""` | Required unless `gate_base_url` is loopback. |
 | `gate_timeout_sec` | `GATE_TIMEOUT_SEC` | 120 (30 for iMessage) | int/float seconds, must be positive. |
 | `status_cache_ttl_sec` | `STATUS_CACHE_TTL_SEC` | 15 (10 for iMessage) | gate status cache. |
@@ -90,15 +90,24 @@ iMessage-specific setup (dashboard can guide, not automate):
 - Messages.app must be signed in and open for chat.db to contain recent rows.
 - For `reply_mode=self-chat`, create a self-chat in Messages first and paste its GUID.
 
-### Slack (`sidecars/slack-bot/src/config.py`)
+### Slack (in-process gateway — RFC-0317)
 
-Uses **Socket Mode** — no public endpoint, no OAuth callback.
+The Slack connector runs **inside the server process** over **Socket Mode** —
+no public endpoint, no OAuth callback, no sidecar. Modules:
+`lib/server/server_slack_in_process_gateway.{ml,mli}` plus the gate-state
+module `lib/gate/channel_gate_slack_state.{ml,mli}`; env reads live in
+`lib/config/env_config_slack.{ml,mli}`.
 
-| Field | Env alias | Type | Required | Notes |
-|---|---|---|---|---|
-| `slack_bot_token` | `SLACK_BOT_TOKEN` | str | **yes** | `xoxb-…`. |
-| `slack_app_token` | `SLACK_APP_TOKEN` | str | **yes** | `xapp-…` for Socket Mode. |
-| `default_keeper` | `SLACK_DEFAULT_KEEPER` | str | no (`sangsu`) | fallback when no binding matches. |
+| Env var | Required | Notes |
+|---|---|---|
+| `SLACK_APP_TOKEN` | **yes** | `xapp-…` app-level token for `apps.connections.open`. If unset the gateway does not start; the rest of the server boots normally. |
+| `SLACK_BOT_TOKEN` | **yes** | `xoxb-…` bot token for outbound `chat.postMessage`. Read at call time, so rotation does not require a restart. If unset the gateway connects but every reply fails, and the connector reports `available:false`. |
+| `MASC_SLACK_TRIGGER_POLICY` | no | Closed sum: `mention_only`, `mention_or_thread`, `user_only:<slack_user_id>`, or `all`. |
+
+Channel→keeper bindings: `Channel_gate_slack_state.bind` / `unbind` write to
+`.gate/runtime/slack/bindings.json` (overridable via
+`MASC_SLACK_BINDING_STORE_PATH`), mutated through
+`/api/v1/gate/connector/bind?name=slack` and `/unbind?name=slack`.
 
 Slack-specific setup:
 
@@ -146,13 +155,12 @@ For each connector the dashboard should render:
 
 ## Known gaps and progress
 
-- ~~`sidecars/{imessage,slack,telegram}-bot/src/config.py` reference `Path` and
+- ~~`sidecars/{imessage,telegram}-bot/src/config.py` reference `Path` and
   `os` inside `_runtime_toml_path()` without importing them — `BotConfig()`
   hits `NameError` the moment `TomlConfigSettingsSource` is wired.~~ **Fixed**
   in `fix/sidecar-config-imports` (regression test per sidecar).
-- ~~Only discord-bot ships a `run.sh` wrapper — imessage/slack/telegram have
-  no first-class start/tail/status entry point.~~ **Fixed** in
-  `feature/sidecar-run-sh`: all 4 bots now expose
+- ~~imessage/telegram have no first-class start/tail/status entry point.~~
+  **Fixed** in `feature/sidecar-run-sh`: both sidecars expose
   `./run.sh [start|stop|tail|status]` with a `.env.example` and
   per-bridge token guidance.
 - ~~Dashboard's lifecycle hint forks discord-only `./run.sh` from

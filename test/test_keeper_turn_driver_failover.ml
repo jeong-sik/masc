@@ -18,7 +18,7 @@ let write_file path content =
 
 let with_model_catalog_content content f =
   let original = Llm_provider.Model_catalog.global () in
-  let path = Filename.temp_file "runtime-failover-oas-models" ".toml" in
+  let path = Filename.temp_file "runtime-failover-agent_core-models" ".toml" in
   Fun.protect
     ~finally:(fun () ->
       (match original with
@@ -29,19 +29,19 @@ let with_model_catalog_content content f =
     (fun () ->
       write_file path content;
       match Llm_provider.Model_catalog.load_file path with
-      | Error msg -> Alcotest.failf "test OAS model catalog should load: %s" msg
+      | Error msg -> Alcotest.failf "test AGENT_CORE model catalog should load: %s" msg
       | Ok catalog ->
         Llm_provider.Model_catalog.set_global catalog;
         f ())
 
-let checkpoint_with_session_id session_id : Agent_sdk.Checkpoint.t =
-  { version = Agent_sdk.Checkpoint.checkpoint_version
+let checkpoint_with_session_id session_id : Agent_core.Checkpoint.t =
+  { version = Agent_core.Checkpoint.checkpoint_version
   ; session_id
   ; agent_name = "agent-test"
   ; model = "model-test"
   ; system_prompt = None
   ; messages = []
-  ; usage = Agent_sdk.Types.empty_usage
+  ; usage = Agent_core.Types.empty_usage
   ; turn_count = 1
   ; created_at = 0.0
   ; tools = []
@@ -54,24 +54,46 @@ let checkpoint_with_session_id session_id : Agent_sdk.Checkpoint.t =
   ; reasoning_effort = None
   ; enable_thinking = None
   ; preserve_thinking = None
-  ; response_format = Agent_sdk.Types.Off
+  ; response_format = Agent_core.Types.Off
   ; thinking_budget = None
   ; cache_system_prompt = false
-  ; context = Agent_sdk.Context.create_sync ()
+  ; context = Agent_core.Context.create_sync ()
   ; mcp_sessions = []
   ; working_context = None
   }
 
-let message ?(role = Agent_sdk.Types.Assistant) content : Agent_sdk.Types.message =
+let completed_run_result () : Runtime_agent.run_result =
+  { response =
+      { Agent_core.Types.id = "response-test"
+      ; model = "model-test"
+      ; stop_reason = Agent_core.Types.EndTurn
+      ; content = []
+      ; usage = None
+      ; telemetry = None
+      }
+  ; checkpoint = Some (checkpoint_with_session_id "selected-runtime")
+  ; session_id = "selected-runtime"
+  ; turns = 1
+  ; trace_ref = None
+  ; run_validation = None
+  ; runtime_observation = None
+  ; stop_reason = Runtime_agent.Completed
+  }
+
+let message ?(role = Agent_core.Types.Assistant) content : Agent_core.Types.message =
   { role; content; name = None; tool_call_id = None; metadata = [] }
 
 let retryable_network_error message =
-  Agent_sdk.Error.Api
-    (Agent_sdk.Retry.NetworkError
+  Agent_core.Error.Api
+    (Agent_core.Retry.NetworkError
        { message; kind = Llm_provider.Http_client.Unknown })
 
+let attempt_without_effect result checkpoint =
+  result, checkpoint, Masc.Keeper_provider_attempt_effect.No_effect_observed
+;;
+
 let accept_empty_no_progress_error scope =
-  Driver.sdk_error_of_masc_internal_error
+  Driver.core_error_of_masc_internal_error
     (Driver.Accept_rejected
        { scope
        ; model = Some "runtime"
@@ -87,7 +109,6 @@ let runtime_toml_with_lane =
 default = "primary.test_model"
 
 [runtime.lanes.resilient]
-strategy = "ordered"
 candidates = [ "primary.test_model", "fallback.test_model" ]
 
 [providers.primary]
@@ -116,13 +137,125 @@ max-concurrent = 1
 max-request-body-bytes = 65536
 |}
 
+let runtime_toml_quota_lane_with_shared_credential shared_credential =
+  Printf.sprintf
+    {|
+[runtime]
+default = "shared_a.test_model"
+
+[runtime.lanes.quota_lane]
+candidates = [ "shared_a.test_model", "shared_b.test_model", "other.test_model" ]
+
+[providers.shared_a]
+display-name = "Shared account A"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.shared_a.credentials]
+type = "env"
+key = %S
+
+[providers.shared_b]
+display-name = "Shared account B"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+
+[providers.shared_b.credentials]
+type = "env"
+key = %S
+
+[providers.other]
+display-name = "Other account"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:3"
+
+[providers.other.credentials]
+type = "env"
+key = "OTHER_QUOTA_TEST_KEY"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[shared_a.test_model]
+is-default = true
+max-request-body-bytes = 65536
+
+[shared_b.test_model]
+max-request-body-bytes = 65536
+
+[other.test_model]
+max-request-body-bytes = 65536
+|}
+    shared_credential
+    shared_credential
+;;
+
+let runtime_toml_quota_lane =
+  runtime_toml_quota_lane_with_shared_credential "SHARED_QUOTA_TEST_KEY"
+;;
+
+let runtime_toml_official_provider_named_like_registry =
+  {|
+[runtime]
+default = "openai.official_model"
+
+[providers.openai]
+protocol = "codex-app-server"
+command = "/definitely/missing/masc-codex-app-server"
+is-non-interactive = true
+
+[models.official_model]
+api-name = "gpt-fixture"
+max-context = 400000
+
+[openai.official_model]
+|}
+
+let runtime_toml_checkpoint_lane =
+  {|
+[runtime]
+default = "codex.codex"
+
+[runtime.lanes.checkpoint_lane]
+candidates = [ "codex.codex", "primary.test_model" ]
+
+[providers.codex]
+protocol = "codex-app-server"
+command = "/definitely/missing/masc-codex-app-server"
+is-non-interactive = true
+
+[models.codex]
+api-name = "gpt-fixture"
+max-context = 400000
+
+[codex.codex]
+
+[providers.primary]
+display-name = "Primary Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[primary.test_model]
+is-default = true
+max-concurrent = 1
+max-request-body-bytes = 65536
+|}
+
 let runtime_toml_thinking_lane =
   {|
 [runtime]
 default = "thinking.reasoning_big"
 
 [runtime.lanes.mixed]
-strategy = "ordered"
 candidates = [ "thinking.reasoning_big", "plain.non_reasoning" ]
 
 [providers.thinking]
@@ -181,7 +314,6 @@ default = "primary.text_model"
 media_failover = [ "outsidevision.vision_model" ]
 
 [runtime.lanes.resilient]
-strategy = "ordered"
 candidates = [ "primary.text_model", "lanevision.vision_model" ]
 
 [providers.primary]
@@ -234,7 +366,6 @@ let runtime_toml_unknown_lane_candidate =
 default = "primary.test_model"
 
 [runtime.lanes.resilient]
-strategy = "ordered"
 candidates = [ "primary.test_model", "missing.test_model" ]
 
 [providers.primary]
@@ -259,7 +390,6 @@ let runtime_toml_lane_shadows_runtime =
 default = "primary.test_model"
 
 [runtime.lanes."primary.test_model"]
-strategy = "ordered"
 candidates = [ "fallback.test_model" ]
 
 [providers.primary]
@@ -301,6 +431,18 @@ let with_runtime_config toml f =
        | Ok () -> f ()
        | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e)
 
+let reload_runtime_config toml =
+  let path = Filename.temp_file "runtime_failover_reload_" ".toml" in
+  Fun.protect
+    ~finally:(fun () ->
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+       write_file path toml;
+       match Runtime.init_default ~config_path:path with
+       | Ok () -> ()
+       | Error e -> Alcotest.failf "Runtime.init_default reload failed: %s" e)
+
 let test_lane_loads_ordered_candidates () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     match Runtime.get_lane_by_id "resilient" with
@@ -328,24 +470,43 @@ let test_resolve_assignment_prefers_lane_over_runtime () =
   with_runtime_config runtime_toml_lane_shadows_runtime (fun () ->
     match Runtime.resolve_assignment "primary.test_model" with
     | `Missing -> Alcotest.fail "expected assignment to resolve"
-    | `Single_runtime _ -> Alcotest.fail "expected lane to shadow runtime"
     | `Lane lane ->
       Alcotest.(check string)
         "lane id shadows runtime id"
         "primary.test_model"
         (Runtime_lane.id lane);
       Alcotest.(check (list string))
-        "lane candidates"
-        [ "fallback.test_model" ]
+        "declared candidates keep their order, then the default terminates"
+        [ "fallback.test_model"; "primary.test_model" ]
         (Runtime_lane.ordered_candidates lane))
 
-let test_resolve_assignment_to_single_runtime () =
+(* A keeper assigned to a bare runtime id used to dispatch without a lane, which
+   turned off failover, sticky candidate preference and quota demotion at once.
+   It now gets a lane of its own that ends at [runtime].default. *)
+let test_bare_runtime_assignment_gets_a_lane_with_somewhere_to_go () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     match Runtime.resolve_assignment "fallback.test_model" with
     | `Missing -> Alcotest.fail "expected runtime to resolve"
-    | `Lane _ -> Alcotest.fail "expected single runtime, not lane"
-    | `Single_runtime rt ->
-      Alcotest.(check string) "runtime id" "fallback.test_model" rt.Runtime.id)
+    | `Lane lane ->
+      Alcotest.(check string)
+        "lane is named after the runtime it was assigned"
+        "fallback.test_model"
+        (Runtime_lane.id lane);
+      Alcotest.(check (list string))
+        "the assigned runtime is head, the default terminates the walk"
+        [ "fallback.test_model"; "primary.test_model" ]
+        (Runtime_lane.ordered_candidates lane))
+
+(* The default must not be appended twice when a lane already names it. *)
+let test_lane_already_naming_the_default_is_unchanged () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    match Runtime.resolve_assignment "resilient" with
+    | `Missing -> Alcotest.fail "expected lane to resolve"
+    | `Lane lane ->
+      Alcotest.(check (list string))
+        "declared candidates already terminate at the default"
+        [ "primary.test_model"; "fallback.test_model" ]
+        (Runtime_lane.ordered_candidates lane))
 
 let test_attempt_inference_policy_uses_attempt_runtime () =
   with_model_catalog_content runtime_thinking_lane_model_catalog @@ fun () ->
@@ -398,8 +559,7 @@ let test_resolve_assignment_missing () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     match Runtime.resolve_assignment "not.configured" with
     | `Missing -> ()
-    | `Single_runtime _ | `Lane _ ->
-      Alcotest.fail "expected missing assignment")
+    | `Lane _ -> Alcotest.fail "expected missing assignment")
 
 let runtime_toml_assignment_to_lane =
   {|
@@ -407,7 +567,6 @@ let runtime_toml_assignment_to_lane =
 default = "primary.test_model"
 
 [runtime.lanes.resilient]
-strategy = "ordered"
 candidates = [ "primary.test_model", "fallback.test_model" ]
 
 [runtime.assignments]
@@ -502,7 +661,7 @@ let test_prior_checkpoint_appends_current_goal_once () =
     let prior_checkpoint =
       { (checkpoint_with_session_id "prior-session") with
         messages =
-          [ message ~role:Agent_sdk.Types.User [ Agent_sdk.Types.Text "prior goal" ] ]
+          [ message ~role:Agent_core.Types.User [ Agent_core.Types.Text "prior goal" ] ]
       }
     in
     let agent_ref = ref None in
@@ -514,7 +673,7 @@ let test_prior_checkpoint_appends_current_goal_once () =
          ~base_path:(Filename.get_temp_dir_name ())
          ~goal:current_goal
          ~session_id:prior_checkpoint.session_id
-         ~oas_checkpoint:prior_checkpoint
+         ~agent_core_checkpoint:prior_checkpoint
          ~agent_ref
          ~sw
          ~net:env#net
@@ -526,20 +685,20 @@ let test_prior_checkpoint_appends_current_goal_once () =
          "invalid provider endpoints unexpectedly completed the resumed run");
     let messages =
       match !agent_ref with
-      | Some agent -> (Agent_sdk.Agent.state agent).messages
-      | None -> Alcotest.fail "expected resumed OAS agent"
+      | Some agent -> (Agent_core.Agent.state agent).messages
+      | None -> Alcotest.fail "expected resumed AGENT_CORE agent"
     in
     let user_messages =
       List.filter
-        (fun (entry : Agent_sdk.Types.message) ->
-           entry.role = Agent_sdk.Types.User)
+        (fun (entry : Agent_core.Types.message) ->
+           entry.role = Agent_core.Types.User)
         messages
     in
     let current_goal_count =
       List.fold_left
-        (fun count (entry : Agent_sdk.Types.message) ->
+        (fun count (entry : Agent_core.Types.message) ->
            match entry.role, entry.content with
-           | Agent_sdk.Types.User, [ Agent_sdk.Types.Text text ]
+           | Agent_core.Types.User, [ Agent_core.Types.Text text ]
              when String.equal text current_goal ->
              count + 1
            | _ -> count)
@@ -590,8 +749,8 @@ let test_deferred_tail_rejects_transformed_uncapped_runtime () =
     in
     (match result with
      | Error
-         (Agent_sdk.Error.Config
-           (Agent_sdk.Error.InvalidConfig
+         (Agent_core.Error.Config
+           (Agent_core.Error.InvalidConfig
              { field = "max-request-body-bytes"; detail })) ->
        Alcotest.(check bool)
          "typed rejection names the deferred tail runtime"
@@ -600,7 +759,7 @@ let test_deferred_tail_rejects_transformed_uncapped_runtime () =
      | Error error ->
        Alcotest.failf
          "expected final request-cap rejection, got %s"
-         (Agent_sdk.Error.to_string error)
+         (Agent_core.Error.to_string error)
      | Ok _ ->
        Alcotest.fail
          "transformed uncapped deferred runtime reached provider execution");
@@ -612,7 +771,7 @@ let test_deferred_tail_rejects_transformed_uncapped_runtime () =
 let test_lane_media_degrade_uses_first_candidate_runtime_id () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     match Runtime.resolve_assignment "resilient" with
-    | `Missing | `Single_runtime _ ->
+    | `Missing ->
       Alcotest.fail "expected resilient assignment to resolve to a lane"
     | `Lane lane ->
       let first_candidate_id =
@@ -664,12 +823,11 @@ let test_run_named_media_degrade_emits_typed_manifest () =
       { manifest_keeper_name = "media-degrade-keeper"
       ; manifest_agent_name = Some "media-degrade-agent"
       ; manifest_trace_id = "media-degrade-trace"
-      ; manifest_generation = Some 1
       ; manifest_keeper_turn_id = Some 1
       }
     in
     let image =
-      Agent_sdk.Types.image_block
+      Agent_core.Types.image_block
         ~media_type:"image/png"
         ~data:(Base64.encode_string "synthetic-image")
         ()
@@ -687,7 +845,7 @@ let test_run_named_media_degrade_emits_typed_manifest () =
          ~sw
          ~net:env#net
          ()
-       : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result);
+       : (Driver.named_run_result, Agent_core.Error.t) result);
     let degraded =
       List.find_opt
         (fun (manifest : Runtime_manifest.t) ->
@@ -712,10 +870,129 @@ let test_run_named_media_degrade_emits_typed_manifest () =
         "primary.test_model"
         (string_member "degraded_runtime_id" decision))
 
+let routed_rows_with_status status manifests =
+  List.filter
+    (fun (manifest : Runtime_manifest.t) ->
+       manifest.event = Runtime_manifest.Runtime_routed
+       && String.equal manifest.status status)
+    manifests
+
+let run_checkpoint_lane_turn ~history_messages ~on_manifests =
+  with_runtime_config runtime_toml_checkpoint_lane (fun () ->
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    Masc_test_deps.init_eio_clock ~sw env;
+    let manifests = ref [] in
+    let context : Runtime_manifest.turn_context =
+      { manifest_keeper_name = "checkpoint-runtime-compat-keeper"
+      ; manifest_agent_name = Some "checkpoint-runtime-compat-agent"
+      ; manifest_trace_id = "checkpoint-runtime-compat-trace"
+      ; manifest_keeper_turn_id = Some 1
+      }
+    in
+    let checkpoint =
+      { (checkpoint_with_session_id "agent_core-session") with
+        messages = history_messages
+      }
+    in
+    match
+      Driver.run_named
+        ~runtime_id:"checkpoint_lane"
+        ~keeper_name:"checkpoint-runtime-compat-keeper"
+        ~base_path:(Filename.get_temp_dir_name ())
+        ~goal:"continue the AGENT_CORE turn"
+        ~initial_messages:history_messages
+        ~agent_core_checkpoint:checkpoint
+        ~runtime_manifest_context:context
+        ~runtime_manifest_append:(fun manifest -> manifests := manifest :: !manifests)
+        ~body_timeout_s:0.5
+        ~sw
+        ~net:env#net
+        ()
+    with
+    | Ok _ -> Alcotest.fail "the AGENT_CORE fixture endpoint unexpectedly completed"
+    | Error
+        (Agent_core.Error.Config
+           (Agent_core.Error.InvalidConfig { field = "agent_core_checkpoint"; _ })) ->
+      Alcotest.fail "the official-client runtime must start without AGENT_CORE resume"
+    | Error
+        (Agent_core.Error.Config
+           (Agent_core.Error.InvalidConfig { field = "initial_messages"; _ })) ->
+      Alcotest.fail
+        "canonical official-client history must stay representable"
+    | Error _ -> on_manifests !manifests)
+
+let test_agent_core_checkpoint_preserves_official_client_history () =
+  let history_messages =
+    [ message
+        ~role:Agent_core.Types.User
+        [ Agent_core.Types.Text "prior user turn" ]
+    ; message
+        [ Agent_core.Types.Thinking
+            { content = "prior provider reasoning"; signature = None }
+        ; Agent_core.Types.ToolUse
+            { id = "prior-tool-call"
+            ; name = "prior_tool"
+            ; input = `Assoc []
+            }
+        ]
+    ; Agent_core.Types.tool_result_msg
+        ~tool_use_id:"prior-tool-call"
+        ~content:"prior tool result"
+        ()
+    ]
+  in
+  run_checkpoint_lane_turn ~history_messages ~on_manifests:(fun manifests ->
+    (match routed_rows_with_status "fresh_session" manifests with
+     | [] -> ()
+     | _ :: _ ->
+       Alcotest.fail "the retired fresh_session manifest row must not reappear");
+    (match routed_rows_with_status "checkpoint_not_replayed" manifests with
+     | [ manifest ] ->
+       let decision =
+         Runtime_manifest.public_projection_of_decision manifest.decision
+       in
+       Alcotest.(check string)
+         "checkpoint routing action"
+         "official_client_checkpoint_not_replayed"
+         (string_member "routing_action" decision);
+       Alcotest.(check string)
+         "checkpoint routing reason"
+         "official_client_session_store_owns_resume"
+         (string_member "routing_reason" decision)
+     | [] ->
+       Alcotest.fail "checkpoint_not_replayed manifest row was not observable"
+     | _ :: _ :: _ ->
+       Alcotest.fail "expected exactly one checkpoint_not_replayed row");
+    ())
+
+let test_text_official_client_history_stays_admissible () =
+  let history_messages =
+    [ message
+        ~role:Agent_core.Types.User
+        [ Agent_core.Types.Text "prior user turn" ]
+    ; message [ Agent_core.Types.Text "prior assistant reply" ]
+    ]
+  in
+  run_checkpoint_lane_turn ~history_messages ~on_manifests:(fun manifests ->
+    (match routed_rows_with_status "fresh_session" manifests with
+     | [] -> ()
+     | _ :: _ ->
+       Alcotest.fail "the retired fresh_session manifest row must not reappear");
+    (match routed_rows_with_status "checkpoint_not_replayed" manifests with
+     | [ _ ] -> ()
+     | [] ->
+       Alcotest.fail "checkpoint_not_replayed manifest row was not observable"
+     | _ :: _ :: _ ->
+       Alcotest.fail "expected exactly one checkpoint_not_replayed row");
+    ())
+
 let test_lane_media_reroute_stays_within_lane () =
   with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
     match Runtime.resolve_assignment "resilient" with
-    | `Missing | `Single_runtime _ ->
+    | `Missing ->
       Alcotest.fail "expected resilient assignment to resolve to a lane"
     | `Lane lane ->
       let first_candidate_id, remaining_candidate_ids =
@@ -737,10 +1014,10 @@ let test_lane_media_reroute_stays_within_lane () =
           remaining_candidate_ids
       in
       let image_block =
-        Agent_sdk.Types.Image
+        Agent_core.Types.Image
           { media_type = "image/png"
           ; data = Base64.encode_string "image"
-          ; source_type = Agent_sdk.Types.Base64
+          ; source_type = Agent_core.Types.Base64
           }
       in
       match
@@ -799,17 +1076,19 @@ let test_attempt_loop_stops_on_nonretryable_failure () =
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "primary.test_model" ->
-          Error (Agent_sdk.Error.Internal "primary terminal failure"), None
-        | "fallback.test_model" -> Ok runtime_id, None
+          attempt_without_effect
+            (Error (Agent_core.Error.Internal "primary terminal failure"))
+            None
+        | "fallback.test_model" -> attempt_without_effect (Ok runtime_id) None
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "primary.test_model"; "fallback.test_model" ]
   in
   (match result with
    | Ok runtime_id -> Alcotest.failf "unexpected fallback success: %s" runtime_id
-   | Error (Agent_sdk.Error.Internal msg) ->
+   | Error (Agent_core.Error.Internal msg) ->
      Alcotest.(check string) "primary error preserved" "primary terminal failure" msg
    | Error e ->
-     Alcotest.failf "expected primary Internal error, got %s" (Agent_sdk.Error.to_string e));
+     Alcotest.failf "expected primary Internal error, got %s" (Agent_core.Error.to_string e));
   Alcotest.(check (list string))
     "attempted candidates"
     [ "primary.test_model" ]
@@ -843,8 +1122,10 @@ let test_attempt_loop_retries_transport_failure_before_checkpoint () =
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "primary.test_model" ->
-          Error (retryable_network_error "primary network failed"), None
-        | "fallback.test_model" -> Ok runtime_id, None
+          attempt_without_effect
+            (Error (retryable_network_error "primary network failed"))
+            None
+        | "fallback.test_model" -> attempt_without_effect (Ok runtime_id) None
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "primary.test_model"; "fallback.test_model" ]
   in
@@ -854,7 +1135,7 @@ let test_attempt_loop_retries_transport_failure_before_checkpoint () =
    | Error e ->
      Alcotest.failf
        "expected fallback success, got %s"
-       (Agent_sdk.Error.to_string e));
+       (Agent_core.Error.to_string e));
   Alcotest.(check (list string))
     "attempted candidates"
     [ "primary.test_model"; "fallback.test_model" ]
@@ -875,12 +1156,97 @@ let test_attempt_loop_retries_transport_failure_before_checkpoint () =
        ])
     (List.map (fun (event, _, _) -> event_name event) events)
 
+let test_cross_owner_fallback_returns_winning_runtime_authority () =
+  with_runtime_config runtime_toml_checkpoint_lane (fun () ->
+    let runtime runtime_id =
+      match Runtime.get_runtime_by_id runtime_id with
+      | Some runtime -> runtime
+      | None -> Alcotest.failf "missing runtime %s" runtime_id
+    in
+    let primary = runtime "codex.codex" in
+    let fallback = runtime "primary.test_model" in
+    let result =
+      Driver.For_testing.attempt_runtime_candidates
+        ~runtime_id:"checkpoint_lane"
+        ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.id)
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~run_attempt:(fun ~idx ~runtime_id runtime ->
+          if String.equal runtime_id primary.id
+          then
+            attempt_without_effect
+              (Error (retryable_network_error "primary failed"))
+              None
+          else
+            attempt_without_effect
+              (Driver.For_testing.selected_runtime_result
+                 runtime
+                 ~lane_attempt_index:idx
+                 (Ok (completed_run_result ())))
+              None)
+        [ primary; fallback ]
+    in
+    match result with
+    | Error error ->
+      Alcotest.failf
+        "expected fallback success, got %s"
+        (Agent_core.Error.to_string error)
+    | Ok selected ->
+      Alcotest.(check string)
+        "selected runtime id"
+        "primary.test_model"
+        selected.Driver.selected_runtime_id;
+      Alcotest.(check int)
+        "selected context window"
+        (Runtime.max_context_of_runtime fallback)
+        selected.selected_max_context;
+      Alcotest.(check int)
+        "fallback candidate wins at lane index 1 (primary at 0 failed first)"
+        1
+        selected.lane_attempt_index;
+      (match selected.checkpoint_owner with
+       | Runtime_execution.Masc_agent_core -> ()
+       | Runtime_execution.Official_client ->
+         Alcotest.fail "fallback checkpoint owner must be AGENT_CORE"))
+
+let test_first_candidate_success_keeps_lane_attempt_index_zero () =
+  with_runtime_config runtime_toml_checkpoint_lane (fun () ->
+    let primary = Runtime.get_runtime_by_id "codex.codex" in
+    let primary =
+      match primary with
+      | Some runtime -> runtime
+      | None -> Alcotest.fail "missing runtime codex.codex"
+    in
+    let result =
+      Driver.For_testing.attempt_runtime_candidates
+        ~runtime_id:"checkpoint_lane"
+        ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.id)
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~run_attempt:(fun ~idx ~runtime_id:_ runtime ->
+          attempt_without_effect
+            (Driver.For_testing.selected_runtime_result
+               runtime
+               ~lane_attempt_index:idx
+               (Ok (completed_run_result ())))
+            None)
+        [ primary ]
+    in
+    match result with
+    | Error error ->
+      Alcotest.failf
+        "expected first-candidate success, got %s"
+        (Agent_core.Error.to_string error)
+    | Ok selected ->
+      Alcotest.(check int)
+        "no rotation: lane_attempt_index stays 0"
+        0
+        selected.Driver.lane_attempt_index)
+
 let test_attempt_loop_retries_provider_wire_failure_same_turn () =
   let attempts = ref [] in
   let deferred = ref 0 in
   let events = ref [] in
   let provider_wire_error =
-    Agent_sdk.Error.Provider
+    Agent_core.Error.Provider
       (Llm_provider.Error.ProviderWireError
          { provider = "test-provider"
          ; format = Llm_provider.Http_client.Sse
@@ -897,8 +1263,9 @@ let test_attempt_loop_retries_provider_wire_failure_same_turn () =
       ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
         attempts := !attempts @ [ runtime_id ];
         match candidate with
-        | "primary.test_model" -> Error provider_wire_error, None
-        | "fallback.test_model" -> Ok runtime_id, None
+        | "primary.test_model" ->
+          attempt_without_effect (Error provider_wire_error) None
+        | "fallback.test_model" -> attempt_without_effect (Ok runtime_id) None
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "primary.test_model"; "fallback.test_model" ]
   in
@@ -911,7 +1278,7 @@ let test_attempt_loop_retries_provider_wire_failure_same_turn () =
    | Error error ->
      Alcotest.failf
        "expected same-turn provider-wire fallback, got %s"
-       (Agent_sdk.Error.to_string error));
+       (Agent_core.Error.to_string error));
   Alcotest.(check (list string))
     "provider-wire failure advances to the next lane candidate"
     [ "primary.test_model"; "fallback.test_model" ]
@@ -922,6 +1289,111 @@ let test_attempt_loop_retries_provider_wire_failure_same_turn () =
     !deferred;
   let events = List.rev !events in
   Alcotest.(check int) "both candidate attempts remain observable" 4 (List.length events)
+
+let check_effect_disposition_blocks_same_turn_retry label effect_disposition =
+  let attempts = ref [] in
+  let deferred = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> true)
+      ~on_retry_deferred:(fun hint -> deferred := hint :: !deferred)
+      ~runtime_id:"primary.test_model"
+      ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        match candidate with
+        | "primary.test_model" ->
+          ( Error (retryable_network_error "primary failed after possible effect")
+          , None
+          , effect_disposition )
+        | "fallback.test_model" ->
+          Alcotest.failf "%s allowed duplicate-capable fallback" label
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "primary.test_model"; "fallback.test_model" ]
+  in
+  (match result with
+   | Error error ->
+     (match Driver.classify_masc_internal_error error with
+      | Some
+          (Driver.Provider_attempt_effect_fenced
+             { runtime_id = "primary.test_model"
+             ; effect_disposition = observed
+             ; diagnostic
+             }) ->
+        Alcotest.(check bool)
+          (label ^ " keeps the exact effect disposition")
+          true
+          (observed = effect_disposition);
+        Alcotest.(check bool)
+          (label ^ " keeps a diagnostic")
+          true
+          (String.length diagnostic > 0)
+      | Some other ->
+        Alcotest.failf
+          "%s returned wrong typed failure %s"
+          label
+          (Driver.kind_of_masc_internal_error other)
+      | None -> Alcotest.failf "%s dropped the typed effect fence" label)
+   | Ok _ -> Alcotest.failf "%s unexpectedly succeeded" label);
+  Alcotest.(check (list string))
+    (label ^ " attempts only the effect owner")
+    [ "primary.test_model" ]
+    !attempts;
+  Alcotest.(check int)
+    (label ^ " does not defer the same unsafe suffix")
+    0
+    (List.length !deferred)
+
+let test_attempt_loop_stops_after_effect_attempt () =
+  check_effect_disposition_blocks_same_turn_retry
+    "effect attempted"
+    Masc.Keeper_provider_attempt_effect.Effect_attempted
+
+let test_attempt_loop_fails_closed_without_effect_observation () =
+  check_effect_disposition_blocks_same_turn_retry
+    "effect observation unavailable"
+    Masc.Keeper_provider_attempt_effect.Observation_unavailable
+
+let test_effect_fence_outranks_an_earlier_overflow () =
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id:_ candidate ->
+        match candidate with
+        | "small.test_model" ->
+          attempt_without_effect
+            (Error
+               (Agent_core.Error.Api
+                  (Agent_core.Retry.ContextOverflow
+                     { message = "small context"; limit = Some 1024 })))
+            None
+        | "effect-owner.test_model" ->
+          ( Error (retryable_network_error "failed after an effect")
+          , None
+          , Masc.Keeper_provider_attempt_effect.Effect_attempted )
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "small.test_model"; "effect-owner.test_model" ]
+  in
+  match result with
+  | Error error ->
+    (match Driver.classify_masc_internal_error error with
+     | Some
+         (Driver.Provider_attempt_effect_fenced
+            { runtime_id = "effect-owner.test_model"
+            ; effect_disposition =
+                Masc.Keeper_provider_attempt_effect.Effect_attempted
+            ; _
+            }) ->
+       ()
+     | Some other ->
+       Alcotest.failf
+         "later effect fence was replaced by %s"
+         (Driver.kind_of_masc_internal_error other)
+     | None -> Alcotest.fail "later effect fence was replaced by the first overflow")
+  | Ok _ -> Alcotest.fail "effect-fenced lane unexpectedly succeeded"
 
 let test_attempt_loop_blocks_no_progress_when_gate_denies () =
   let attempts = ref [] in
@@ -945,7 +1417,9 @@ let test_attempt_loop_blocks_no_progress_when_gate_denies () =
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "primary.test_model" ->
-          Error primary_error, Some checkpoint_after_primary
+          attempt_without_effect
+            (Error primary_error)
+            (Some checkpoint_after_primary)
         | "fallback.test_model" ->
           Alcotest.fail "no-progress retry gate should block fallback candidate"
         | other -> Alcotest.failf "unexpected candidate %s" other)
@@ -955,8 +1429,8 @@ let test_attempt_loop_blocks_no_progress_when_gate_denies () =
    | Error err ->
      Alcotest.(check string)
        "primary no-progress error preserved"
-       (Agent_sdk.Error.to_string primary_error)
-       (Agent_sdk.Error.to_string err)
+       (Agent_core.Error.to_string primary_error)
+       (Agent_core.Error.to_string err)
    | Ok runtime_id ->
      Alcotest.failf "unexpected fallback success: %s" runtime_id);
   Alcotest.(check (list string))
@@ -1000,8 +1474,10 @@ let test_attempt_loop_does_not_gate_network_retry () =
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "primary.test_model" ->
-          Error (retryable_network_error "primary network failed"), None
-        | "fallback.test_model" -> Ok runtime_id, None
+          attempt_without_effect
+            (Error (retryable_network_error "primary network failed"))
+            None
+        | "fallback.test_model" -> attempt_without_effect (Ok runtime_id) None
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "primary.test_model"; "fallback.test_model" ]
   in
@@ -1011,7 +1487,7 @@ let test_attempt_loop_does_not_gate_network_retry () =
    | Error e ->
      Alcotest.failf
        "expected fallback success, got %s"
-       (Agent_sdk.Error.to_string e));
+       (Agent_core.Error.to_string e));
   Alcotest.(check bool)
     "network retry does not call no-progress gate"
     false
@@ -1025,11 +1501,230 @@ let test_attempt_loop_does_not_gate_network_retry () =
     4
     (List.length !events)
 
+let test_attempt_loop_reorders_shared_quota_sibling_same_turn () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect
+      ~finally:Runtime_quota_window.reset_for_testing
+      (fun () ->
+         let attempts = ref [] in
+         let result =
+           Driver.For_testing.attempt_runtime_candidates
+             ~runtime_id:"quota_lane"
+             ~runtime_id_of:Fun.id
+             ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+             ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
+               attempts := !attempts @ [ runtime_id ];
+               match runtime_id with
+               | "shared_a.test_model" ->
+                 attempt_without_effect
+                   (Error
+                      (Agent_core.Error.Provider
+                         (Llm_provider.Error.HardQuota
+                            { provider = "shared_a"
+                            ; retry_after = Some 300.0
+                            ; detail = "account quota exhausted"
+                            })))
+                   None
+               | "other.test_model" -> attempt_without_effect (Ok runtime_id) None
+               | "shared_b.test_model" ->
+                 Alcotest.fail
+                   "same-credential sibling must move behind the unrelated account"
+               | other -> Alcotest.failf "unexpected candidate %s" other)
+             [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ]
+         in
+         (match result with
+          | Ok runtime_id ->
+            Alcotest.(check string)
+              "unrelated account serves the turn"
+              "other.test_model"
+              runtime_id
+          | Error error ->
+            Alcotest.failf
+              "expected unrelated fallback success: %s"
+              (Agent_core.Error.to_string error));
+         Alcotest.(check (list string))
+           "new quota window reorders the remaining walk immediately"
+           [ "shared_a.test_model"; "other.test_model" ]
+           !attempts))
+
+let test_attempt_quota_scope_survives_runtime_reload () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect
+      ~finally:Runtime_quota_window.reset_for_testing
+      (fun () ->
+         let attempted_runtime =
+           Option.get (Runtime.get_runtime_by_id "shared_a.test_model")
+         in
+         let attempted_scope = Runtime.quota_scope_of_runtime attempted_runtime in
+         let result =
+           Driver.For_testing.attempt_runtime_candidates
+             ~runtime_id:"quota_lane"
+             ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.id)
+             ~quota_scope_of:(fun runtime ->
+               Some (Runtime.quota_scope_of_runtime runtime))
+             ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+             ~run_attempt:(fun ~idx:_ ~runtime_id:_ _candidate ->
+               reload_runtime_config
+                 (runtime_toml_quota_lane_with_shared_credential
+                    "REBOUND_QUOTA_TEST_KEY");
+               attempt_without_effect
+                 (Error
+                    (Agent_core.Error.Provider
+                       (Llm_provider.Error.HardQuota
+                          { provider = "shared_a"
+                          ; retry_after = Some 300.0
+                          ; detail = "old account quota exhausted"
+                          })))
+                 None)
+             [ attempted_runtime ]
+         in
+         (match result with
+          | Error (Agent_core.Error.Provider (Llm_provider.Error.HardQuota _)) -> ()
+          | Error error ->
+            Alcotest.failf
+              "expected hard-quota result, got %s"
+              (Agent_core.Error.to_string error)
+          | Ok _ -> Alcotest.fail "hard-quota attempt unexpectedly succeeded");
+         let rebound_scope =
+           Option.get (Runtime.quota_scope_of_runtime_id "shared_a.test_model")
+         in
+         let now = Unix.gettimeofday () in
+         Alcotest.(check bool)
+           "response remains attributed to attempted credential"
+           true
+           (Option.is_some
+              (Runtime_quota_window.active_until ~scope:attempted_scope ~now));
+         Alcotest.(check (option (float 0.0)))
+           "replacement credential is not charged for old response"
+           None
+           (Runtime_quota_window.active_until ~scope:rebound_scope ~now)))
+
+let test_deferred_quota_order_is_frozen_before_predispatch () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect
+      ~finally:Runtime_quota_window.reset_for_testing
+      (fun () ->
+         let shared_scope =
+           Option.get (Runtime.quota_scope_of_runtime_id "shared_a.test_model")
+         in
+         Runtime_quota_window.note_exhausted
+           ~scope:shared_scope
+           ~resets_at:500.0;
+         let hint =
+           Driver.For_testing.make_deferred_runtime_lane
+             ~assignment_id:"quota_lane"
+             ~failed_runtime_id:"previous.test_model"
+             ~next_runtime_id:"shared_a.test_model"
+             ~later_runtime_ids:
+               [ "shared_b.test_model"; "other.test_model" ]
+             ~failure:(retryable_network_error "previous cycle failed")
+         in
+         let ordered =
+           Driver.quota_ordered_deferred_runtime_lane ~now:100.0 hint
+         in
+         Alcotest.(check (list string))
+           "pre-dispatch and driver share the same reordered suffix"
+           [ "other.test_model"
+           ; "shared_a.test_model"
+           ; "shared_b.test_model"
+           ]
+           (Driver.deferred_runtime_ids ordered)))
+
+let test_deferred_dispatch_preserves_predispatch_quota_order () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect
+      ~finally:Runtime_quota_window.reset_for_testing
+      (fun () ->
+         let hint =
+           Driver.For_testing.make_deferred_runtime_lane
+             ~assignment_id:"quota_lane"
+             ~failed_runtime_id:"previous.test_model"
+             ~next_runtime_id:"shared_a.test_model"
+             ~later_runtime_ids:
+               [ "shared_b.test_model"; "other.test_model" ]
+             ~failure:(retryable_network_error "previous cycle failed")
+         in
+         let frozen =
+           Driver.quota_ordered_deferred_runtime_lane
+             ~now:(Unix.gettimeofday ())
+             hint
+         in
+         let shared_scope =
+           Option.get (Runtime.quota_scope_of_runtime_id "shared_a.test_model")
+         in
+         Runtime_quota_window.note_exhausted
+           ~scope:shared_scope
+           ~resets_at:(Unix.gettimeofday () +. 300.0);
+         Eio_main.run
+         @@ fun env ->
+         Eio.Switch.run
+         @@ fun sw ->
+         Masc_test_deps.init_eio_clock ~sw env;
+         let transformed_urls = ref [] in
+         let result =
+           Driver.run_named
+             ~runtime_id:"quota_lane"
+             ~keeper_name:"deferred-frozen-quota-order"
+             ~base_path:(Filename.get_temp_dir_name ())
+             ~goal:"preserve the pre-dispatch runtime binding"
+             ~deferred_runtime_lane:frozen
+             ~provider_config_transform:(fun provider_config ->
+               transformed_urls := provider_config.base_url :: !transformed_urls;
+               Error
+                 (Agent_core.Error.Config
+                    (Agent_core.Error.InvalidConfig
+                       { field = "provider-config-transform"
+                       ; detail = "stop after observing the selected runtime"
+                       })))
+             ~sw
+             ~net:env#net
+             ()
+         in
+         (match result with
+          | Error error when !transformed_urls = [] ->
+            Alcotest.failf
+              "dispatch did not reach the selected runtime: %s"
+              (Agent_core.Error.to_string error)
+          | Error _ -> ()
+          | Ok _ -> Alcotest.fail "test provider transform unexpectedly succeeded");
+         Alcotest.(check (list string))
+           "dispatch keeps the runtime frozen before pre-dispatch"
+           [ "http://127.0.0.1:1" ]
+           (List.rev !transformed_urls)))
+
+let test_official_client_does_not_inherit_registry_api_key_scope () =
+  with_runtime_config runtime_toml_official_provider_named_like_registry (fun () ->
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect
+      ~finally:Runtime_quota_window.reset_for_testing
+      (fun () ->
+         let official_scope =
+           Option.get (Runtime.quota_scope_of_runtime_id "openai.official_model")
+         in
+         let registry_api_key_scope =
+           Runtime_quota_window.scope_of_credential
+             ~provider_id:"openai"
+             (Some (Runtime_schema.Env "OPENAI_API_KEY"))
+         in
+         Runtime_quota_window.note_exhausted
+           ~scope:official_scope
+           ~resets_at:500.0;
+         Alcotest.(check (option (float 0.0)))
+           "subscription quota does not demote an API-key account"
+           None
+           (Runtime_quota_window.active_until
+              ~scope:registry_api_key_scope
+              ~now:100.0)))
+
 let test_typed_checkpoint_is_the_same_run_retry_authority () =
   let stages =
-    [ Agent_sdk.Agent.After_assistant_collected
-    ; Agent_sdk.Agent.After_tool_results_appended
-    ; Agent_sdk.Agent.After_context_injection
+    [ Agent_core.Agent.After_assistant_collected
+    ; Agent_core.Agent.After_tool_results_appended
+    ; Agent_core.Agent.After_context_injection
     ]
   in
   List.iter
@@ -1049,7 +1744,8 @@ let test_typed_checkpoint_is_the_same_run_retry_authority () =
            ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
              attempts := !attempts @ [ runtime_id ];
              match candidate with
-             | "primary.test_model" -> Error primary_error, None
+             | "primary.test_model" ->
+               attempt_without_effect (Error primary_error) None
              | "fallback.test_model" ->
                Alcotest.fail "checkpoint stage must block same-run fallback"
              | other -> Alcotest.failf "unexpected candidate %s" other)
@@ -1059,8 +1755,8 @@ let test_typed_checkpoint_is_the_same_run_retry_authority () =
         | Error err ->
           Alcotest.(check string)
             "primary error preserved"
-            (Agent_sdk.Error.to_string primary_error)
-            (Agent_sdk.Error.to_string err)
+            (Agent_core.Error.to_string primary_error)
+            (Agent_core.Error.to_string err)
         | Ok runtime_id ->
           Alcotest.failf "unexpected fallback success: %s" runtime_id);
        Alcotest.(check (list string))
@@ -1073,20 +1769,25 @@ let test_typed_checkpoint_is_the_same_run_retry_authority () =
          (List.length !events))
     stages
 
-let test_attempt_loop_preserves_last_sdk_error () =
+let test_attempt_loop_preserves_last_core_error () =
   let events = ref [] in
+  let observed_errors = ref [] in
   let result =
     Driver.For_testing.attempt_runtime_candidates
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
+      ~on_attempt_error:(fun ~runtime_id ~attempt error ->
+        observed_errors := (runtime_id, attempt, error) :: !observed_errors)
       ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
-        Error (retryable_network_error (runtime_id ^ " failed")), None)
+        attempt_without_effect
+          (Error (retryable_network_error (runtime_id ^ " failed")))
+          None)
       [ "primary.test_model"; "fallback.test_model" ]
   in
   (match result with
    | Ok _ -> Alcotest.fail "expected final candidate error"
-   | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.NetworkError { message; _ })) ->
+   | Error (Agent_core.Error.Api (Agent_core.Retry.NetworkError { message; _ })) ->
      Alcotest.(check string)
        "last candidate error preserved"
        "fallback.test_model failed"
@@ -1094,7 +1795,7 @@ let test_attempt_loop_preserves_last_sdk_error () =
    | Error e ->
      Alcotest.failf
        "expected final network error, got %s"
-       (Agent_sdk.Error.to_string e));
+       (Agent_core.Error.to_string e));
   let events = List.rev !events in
   Alcotest.(check (list string))
     "failed runtime ids"
@@ -1105,10 +1806,22 @@ let test_attempt_loop_preserves_last_sdk_error () =
        | Runtime_manifest.Runtime_failed -> true
        | _ -> false)
      |> List.map decision_runtime_id)
+  ;
+  let observed_errors = List.rev !observed_errors in
+  Alcotest.(check (list (pair string int)))
+    "typed attempt observer sees every candidate without changing the terminal error"
+    [ "primary.test_model", 0; "fallback.test_model", 1 ]
+    (List.map (fun (runtime_id, attempt, _) -> runtime_id, attempt) observed_errors);
+  Alcotest.(check bool)
+    "attempt observer preserves typed retryability"
+    true
+    (List.exists
+       (fun (_, _, error) -> Agent_core.Error.is_retryable error)
+       observed_errors)
 
 let context_overflow_error message =
-  Agent_sdk.Error.Api
-    (Agent_sdk.Retry.ContextOverflow { message; limit = Some 32768 })
+  Agent_core.Error.Api
+    (Agent_core.Retry.ContextOverflow { message; limit = Some 32768 })
 
 let serving_constraint () =
   Llm_provider.Serving_constraint.make
@@ -1123,8 +1836,8 @@ let serving_constraint () =
   |> Result.get_ok
 
 let input_capacity_error reason =
-  Agent_sdk.Error.Api
-    (Agent_sdk.Retry.InputCapacity
+  Agent_core.Error.Api
+    (Agent_core.Retry.InputCapacity
        { message = "typed input-capacity admission"
        ; constraint_ = serving_constraint ()
        ; reason
@@ -1141,26 +1854,27 @@ let test_attempt_loop_input_capacity_does_not_advance_masc_lane () =
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "unmeasurable.test_model" ->
-          Error
-            (input_capacity_error
-               (Agent_sdk.Retry.Token_measurement_unavailable
-                  Llm_provider.Input_token_count.Anthropic_messages_count_tokens)),
-          None
+          attempt_without_effect
+            (Error
+               (input_capacity_error
+                  (Agent_core.Retry.Token_measurement_unavailable
+                     Llm_provider.Input_token_count.Anthropic_messages_count_tokens)))
+            None
         | other ->
           Alcotest.failf
-            "MASC advanced to candidate %s without an OAS flow receipt"
+            "MASC advanced to candidate %s without an AGENT_CORE flow receipt"
             other)
       [ "unmeasurable.test_model"; "measurable.test_model" ]
   in
   (match result with
-   | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.InputCapacity _)) -> ()
+   | Error (Agent_core.Error.Api (Agent_core.Retry.InputCapacity _)) -> ()
    | Error error ->
      Alcotest.failf
        "typed input capacity was not preserved: %s"
-       (Agent_sdk.Error.to_string error)
+       (Agent_core.Error.to_string error)
    | Ok _ -> Alcotest.fail "MASC must not advance an InputCapacity failure");
   Alcotest.(check (list string))
-    "only OAS may advance the candidate flow"
+    "only AGENT_CORE may advance the candidate flow"
     [ "unmeasurable.test_model" ]
     !attempts
 
@@ -1179,8 +1893,10 @@ let test_attempt_loop_overflow_tries_next_candidate () =
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "small.test_model" ->
-          Error (context_overflow_error "prompt exceeds context window"), None
-        | "large.test_model" -> Ok runtime_id, None
+          attempt_without_effect
+            (Error (context_overflow_error "prompt exceeds context window"))
+            None
+        | "large.test_model" -> attempt_without_effect (Ok runtime_id) None
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "small.test_model"; "large.test_model" ]
   in
@@ -1193,7 +1909,7 @@ let test_attempt_loop_overflow_tries_next_candidate () =
    | Error e ->
      Alcotest.failf
        "expected larger-context fallback success, got %s"
-       (Agent_sdk.Error.to_string e));
+       (Agent_core.Error.to_string e));
   Alcotest.(check (list string))
     "overflow continues the lane walk"
     [ "small.test_model"; "large.test_model" ]
@@ -1213,7 +1929,9 @@ let test_attempt_loop_overflow_on_last_candidate_is_terminal () =
       ~emit_runtime_manifest:(emit_manifest_collector events)
       ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
         attempts := !attempts @ [ runtime_id ];
-        Error (context_overflow_error (runtime_id ^ " overflow")), None)
+        attempt_without_effect
+          (Error (context_overflow_error (runtime_id ^ " overflow")))
+          None)
       [ "small.test_model"; "smaller.test_model" ]
   in
   (match result with
@@ -1244,13 +1962,16 @@ let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "small.test_model" ->
-          Error (context_overflow_error "prompt exceeds context window"), None
+          attempt_without_effect
+            (Error (context_overflow_error "prompt exceeds context window"))
+            None
         | "fallback.test_model" ->
-          ( Error
-              (Agent_sdk.Error.Api
-                 (Agent_sdk.Retry.RateLimited
-                    { retry_after = None; message = "weekly usage limit" }))
-          , None )
+          attempt_without_effect
+            (Error
+               (Agent_core.Error.Api
+                  (Agent_core.Retry.RateLimited
+                     { retry_after = None; message = "weekly usage limit" })))
+            None
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "small.test_model"; "fallback.test_model" ]
   in
@@ -1280,16 +2001,20 @@ let test_attempt_loop_midwalk_terminal_outranks_observed_overflow () =
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "small.test_model" ->
-          Error (context_overflow_error "prompt exceeds context window"), None
+          attempt_without_effect
+            (Error (context_overflow_error "prompt exceeds context window"))
+            None
         | "broken.test_model" ->
-          Error (Agent_sdk.Error.Internal "hard mid-lane failure"), None
+          attempt_without_effect
+            (Error (Agent_core.Error.Internal "hard mid-lane failure"))
+            None
         | other ->
           Alcotest.failf "walk must stop before candidate %s" other)
       [ "small.test_model"; "broken.test_model"; "fallback.test_model" ]
   in
   (match result with
    | Ok _ -> Alcotest.fail "expected mid-lane stop"
-   | Error (Agent_sdk.Error.Internal msg) ->
+   | Error (Agent_core.Error.Internal msg) ->
      Alcotest.(check string)
        "stopping error preserved"
        "hard mid-lane failure"
@@ -1297,7 +2022,7 @@ let test_attempt_loop_midwalk_terminal_outranks_observed_overflow () =
    | Error e ->
      Alcotest.failf
        "expected stopping Internal error, got %s"
-       (Agent_sdk.Error.to_string e));
+       (Agent_core.Error.to_string e));
   Alcotest.(check (list string))
     "walk stopped at the terminal candidate"
     [ "small.test_model"; "broken.test_model" ]
@@ -1307,8 +2032,8 @@ let test_checkpoint_denial_defers_exact_frozen_suffix_once () =
   let attempts = ref [] in
   let deferred = ref [] in
   let err =
-    Agent_sdk.Error.Api
-      (Agent_sdk.Retry.ServerError
+    Agent_core.Error.Api
+      (Agent_core.Retry.ServerError
          { status = 500; message = "checkpoint-observed failure" })
   in
   let result =
@@ -1320,7 +2045,7 @@ let test_checkpoint_denial_defers_exact_frozen_suffix_once () =
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
       ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
         attempts := runtime_id :: !attempts;
-        Error err, None)
+        attempt_without_effect (Error err) None)
       [ "runtime.a"; "runtime.b"; "runtime.c"; "runtime.d" ]
   in
   (match result with
@@ -1353,8 +2078,9 @@ let test_deferred_cycle_starts_at_supplied_successor_and_keeps_tail () =
       ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
         attempts := runtime_id :: !attempts;
         match runtime_id with
-        | "runtime.b" -> Error (retryable_network_error "b failed"), None
-        | "runtime.c" -> Ok runtime_id, None
+        | "runtime.b" ->
+          attempt_without_effect (Error (retryable_network_error "b failed")) None
+        | "runtime.c" -> attempt_without_effect (Ok runtime_id) None
         | "runtime.a" ->
           Alcotest.fail "failed lane prefix must not replay on the next cycle"
         | other -> Alcotest.failf "unexpected runtime %s" other)
@@ -1364,7 +2090,7 @@ let test_deferred_cycle_starts_at_supplied_successor_and_keeps_tail () =
    | Ok runtime_id ->
      Alcotest.(check string) "same-run tail succeeds" "runtime.c" runtime_id
    | Error error ->
-     Alcotest.failf "expected suffix success: %s" (Agent_sdk.Error.to_string error));
+     Alcotest.failf "expected suffix success: %s" (Agent_core.Error.to_string error));
   Alcotest.(check (list string))
     "next cycle starts at B then advances to C"
     [ "runtime.b"; "runtime.c" ]
@@ -1381,7 +2107,9 @@ let test_deferred_cycle_post_checkpoint_replaces_hint_with_tail () =
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
       ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
         Alcotest.(check string) "only B attempted" "runtime.b" runtime_id;
-        Error (retryable_network_error "b checkpoint failure"), None)
+        attempt_without_effect
+          (Error (retryable_network_error "b checkpoint failure"))
+          None)
       [ "runtime.b"; "runtime.c"; "runtime.d" ]
   in
   (match result with Error _ -> () | Ok _ -> Alcotest.fail "expected B failure");
@@ -1404,7 +2132,9 @@ let test_single_candidate_checkpoint_failure_has_no_hint () =
       ~runtime_id_of:Fun.id
       ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
       ~run_attempt:(fun ~idx:_ ~runtime_id:_ _candidate ->
-        Error (retryable_network_error "only failed"), None)
+        attempt_without_effect
+          (Error (retryable_network_error "only failed"))
+          None)
       [ "runtime.only" ]
   in
   (match result with Error _ -> () | Ok _ -> Alcotest.fail "expected failure");
@@ -1439,7 +2169,7 @@ let test_missing_deferred_successor_is_typed_error () =
     Driver.For_testing.resolve_runtime_candidates
       [ "runtime.definitely-missing-deferred-successor" ]
   with
-  | Error (Agent_sdk.Error.Internal detail) ->
+  | Error (Agent_core.Error.Internal detail) ->
     Alcotest.(check bool)
       "missing successor is loud"
       true
@@ -1447,7 +2177,7 @@ let test_missing_deferred_successor_is_typed_error () =
   | Error error ->
     Alcotest.failf
       "expected typed internal missing-successor error, got %s"
-      (Agent_sdk.Error.to_string error)
+      (Agent_core.Error.to_string error)
   | Ok _ -> Alcotest.fail "missing successor unexpectedly resolved"
 
 let test_missing_deferred_head_is_consumed_once () =
@@ -1458,11 +2188,11 @@ let test_missing_deferred_head_is_consumed_once () =
       "runtime.definitely-missing-deferred-head"
   in
   (match result with
-   | Error (Agent_sdk.Error.Internal _) -> ()
+   | Error (Agent_core.Error.Internal _) -> ()
    | Error error ->
      Alcotest.failf
        "expected typed missing-head error, got %s"
-       (Agent_sdk.Error.to_string error)
+       (Agent_core.Error.to_string error)
    | Ok _ -> Alcotest.fail "missing deferred head unexpectedly resolved");
   Alcotest.(check int) "missing head consumed once" 1 !consumed
 
@@ -1498,9 +2228,13 @@ let () =
             `Quick
             test_resolve_assignment_prefers_lane_over_runtime;
           Alcotest.test_case
-            "resolve_assignment returns single runtime"
+            "a bare runtime assignment gets a lane with somewhere to go"
             `Quick
-            test_resolve_assignment_to_single_runtime;
+            test_bare_runtime_assignment_gets_a_lane_with_somewhere_to_go;
+          Alcotest.test_case
+            "a lane already naming the default is unchanged"
+            `Quick
+            test_lane_already_naming_the_default_is_unchanged;
           Alcotest.test_case
             "resolve_assignment reports missing id"
             `Quick
@@ -1521,6 +2255,14 @@ let () =
             "run_named media degrade emits typed manifest"
             `Quick
             test_run_named_media_degrade_emits_typed_manifest;
+          Alcotest.test_case
+            "AGENT_CORE checkpoint preserves official-client history"
+            `Quick
+            test_agent_core_checkpoint_preserves_official_client_history;
+          Alcotest.test_case
+            "text official-client history stays admissible"
+            `Quick
+            test_text_official_client_history_stays_admissible;
           Alcotest.test_case
             "lane media reroute stays within lane"
             `Quick
@@ -1550,9 +2292,29 @@ let () =
             `Quick
             test_attempt_loop_retries_transport_failure_before_checkpoint;
           Alcotest.test_case
+            "cross-owner fallback returns winning runtime authority"
+            `Quick
+            test_cross_owner_fallback_returns_winning_runtime_authority;
+          Alcotest.test_case
+            "first-candidate success keeps lane_attempt_index at 0"
+            `Quick
+            test_first_candidate_success_keeps_lane_attempt_index_zero;
+          Alcotest.test_case
             "provider-wire failure rotates in the same turn"
             `Quick
             test_attempt_loop_retries_provider_wire_failure_same_turn;
+          Alcotest.test_case
+            "effect attempt blocks same-turn fallback"
+            `Quick
+            test_attempt_loop_stops_after_effect_attempt;
+          Alcotest.test_case
+            "missing effect observation fails closed"
+            `Quick
+            test_attempt_loop_fails_closed_without_effect_observation;
+          Alcotest.test_case
+            "effect fence outranks an earlier overflow"
+            `Quick
+            test_effect_fence_outranks_an_earlier_overflow;
           Alcotest.test_case
             "attempt loop blocks no-progress when gate denies"
             `Quick
@@ -1562,13 +2324,33 @@ let () =
             `Quick
             test_attempt_loop_does_not_gate_network_retry;
           Alcotest.test_case
+            "hard quota reorders shared sibling in same turn"
+            `Quick
+            test_attempt_loop_reorders_shared_quota_sibling_same_turn;
+          Alcotest.test_case
+            "hard quota keeps attempted scope across runtime reload"
+            `Quick
+            test_attempt_quota_scope_survives_runtime_reload;
+          Alcotest.test_case
+            "deferred quota order is frozen before pre-dispatch"
+            `Quick
+            test_deferred_quota_order_is_frozen_before_predispatch;
+          Alcotest.test_case
+            "deferred dispatch preserves pre-dispatch quota order"
+            `Quick
+            test_deferred_dispatch_preserves_predispatch_quota_order;
+          Alcotest.test_case
+            "official client quota excludes registry API-key scope"
+            `Quick
+            test_official_client_does_not_inherit_registry_api_key_scope;
+          Alcotest.test_case
             "typed checkpoint is same-run retry authority"
             `Quick
             test_typed_checkpoint_is_the_same_run_retry_authority;
           Alcotest.test_case
-            "attempt loop preserves last SDK error"
+            "attempt loop preserves last Agent Core error"
             `Quick
-            test_attempt_loop_preserves_last_sdk_error;
+            test_attempt_loop_preserves_last_core_error;
           Alcotest.test_case
             "context overflow tries next lane candidate"
             `Quick

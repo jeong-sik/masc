@@ -65,14 +65,12 @@ val dispatch :
   agent_name:string ->
   arguments:Yojson.Safe.t ->
   state:Mcp_server.server_state ->
-  sw:Eio.Switch.t ->
-  clock:_ ->
   name:string ->
   start_time:float ->
   Tool_result.result option
-(** [dispatch ~config ~agent_name ~arguments ~state ~sw ~clock
-      ~name ~start_time] handles MCP server-local routing for tool [name]
-    when the main runtime router has no match.  Currently routes:
+(** [dispatch ~config ~agent_name ~arguments ~state ~name ~start_time] handles
+    MCP server-local routing for tool [name] when the main runtime router has no
+    match.  Currently routes:
 
     - [masc_board_post] -> identity enforcement +
       {!Board_dispatch.create_post} +
@@ -80,7 +78,9 @@ val dispatch :
     - everything else -> [None] (caller falls through to remaining
       dispatchers).
 
-    [config] / [state] / [sw] / [clock] are ignored at the entry
-    today (board path doesn't need them) but kept in the
-    signature for forward compat — adding new tool routes that
-    require runtime resources will not break callers. *)
+    This doc used to say [config] / [state] / [sw] / [clock] "are ignored at the
+    entry today … but kept in the signature for forward compat". [config],
+    [state] and [start_time] are used by the routes below; [sw] and [clock] were
+    the only unused ones and are gone. The one caller is a direct call, so a
+    later route needing a switch or a clock adds the parameter back and the
+    compiler names that caller. *)

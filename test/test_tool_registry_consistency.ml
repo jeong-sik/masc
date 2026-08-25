@@ -5,12 +5,10 @@ open Masc
     Asserts that:
     1. The runtime schema-registry key set equals the tag-registry key set.
     2. Mandatory (core-always) tools are present in the tag/schema registries.
-    3. Retired tool names are absent from the tag/schema/handler registries.
 
-    These invariants are foundational for the MASC/Keeper/OAS overhaul:
+    These invariants are foundational for the MASC/Keeper/AGENT_CORE overhaul:
     every tool that can be dispatched must have both a tag (for token
-    validation) and a schema (for input validation), and retired surfaces
-    must not leak back into the runtime registry. *)
+    validation) and a schema (for input validation). *)
 
 let init () = Masc_test_deps.init_unified_tool_registry ()
 
@@ -70,6 +68,88 @@ let test_schema_set_equals_tag_registry_set () =
     ~actual:schemas
 ;;
 
+let rec canonical_json = function
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       |> List.map (fun (name, value) -> name, canonical_json value)
+       |> List.sort (fun (left, _) (right, _) -> String.compare left right))
+  | `List values -> `List (List.map canonical_json values)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
+    value
+;;
+
+let canonical_json_string value =
+  value |> canonical_json |> Yojson.Safe.to_string
+;;
+
+let test_schema_inventory_matches_dispatch_validation_registry () =
+  init ();
+  List.iter
+    (fun (schema : Masc_domain.tool_schema) ->
+      match Tool_dispatch.lookup_schema schema.name with
+      | None -> Alcotest.failf "%s missing from dispatch schema registry" schema.name
+      | Some registered_schema ->
+        Alcotest.(check string)
+          (schema.name ^ " advertised and validation schemas match")
+          (canonical_json_string schema.input_schema)
+          (canonical_json_string registered_schema))
+    Config.raw_all_tool_schemas
+;;
+
+let test_every_descriptor_has_exact_runtime_schema () =
+  let missing =
+    Keeper_tool_descriptor.all_descriptors ()
+    |> List.filter_map (fun (descriptor : Keeper_tool_descriptor.t) ->
+      match Unified_tool_registry.runtime_schema_for_descriptor descriptor with
+      | Some _ -> None
+      | None -> Some descriptor.internal_name)
+    |> sorted_set
+  in
+  Alcotest.(check (list string))
+    "every descriptor internal handler has an exact runtime schema"
+    []
+    missing
+;;
+
+let schema_property_names schema =
+  match Json_util.assoc_member_opt "properties" schema with
+  | Some (`Assoc properties) -> List.map fst properties
+  | _ -> []
+;;
+
+let test_translated_descriptor_keeps_distinct_runtime_schema () =
+  init ();
+  let edit_descriptor =
+    match Keeper_tool_descriptor.find_public "Edit" with
+    | Some descriptor -> descriptor
+    | None -> Alcotest.fail "Edit descriptor missing"
+  in
+  let runtime_schema =
+    match Tool_dispatch.lookup_schema "tool_edit_file" with
+    | Some schema -> schema
+    | None -> Alcotest.fail "tool_edit_file runtime schema missing"
+  in
+  let public_properties = schema_property_names edit_descriptor.input_schema in
+  let runtime_properties = schema_property_names runtime_schema in
+  Alcotest.(check bool)
+    "Edit public schema owns file_path"
+    true
+    (List.mem "file_path" public_properties);
+  Alcotest.(check bool)
+    "Edit public schema does not expose runtime path"
+    false
+    (List.mem "path" public_properties);
+  Alcotest.(check bool)
+    "tool_edit_file runtime schema owns translated path"
+    true
+    (List.mem "path" runtime_properties);
+  Alcotest.(check bool)
+    "tool_edit_file runtime schema does not reuse public file_path"
+    false
+    (List.mem "file_path" runtime_properties)
+;;
+
 let test_workspace_schemas_route_to_state () =
   init ();
   Tool_schemas_workspace.schemas
@@ -120,7 +200,7 @@ let test_workspace_schemas_have_tool_spec_metadata () =
   let workspace_names = workspace_schema_names () in
   let missing_tool_specs =
     List.filter
-      (fun name -> not (List.mem name (Tool_spec.all_registered_names ())))
+      (fun name -> not (List.mem name (Tool_dispatch.all_registered_names ())))
       workspace_names
   in
   Alcotest.(check (list string))
@@ -227,6 +307,18 @@ let () =
     [ ( "registry_sets"
       , [ test_case "schema set equals tag_registry set" `Quick
             test_schema_set_equals_tag_registry_set
+        ; test_case
+            "schema inventory matches dispatch validation registry"
+            `Quick
+            test_schema_inventory_matches_dispatch_validation_registry
+        ; test_case
+            "every descriptor has an exact runtime schema"
+            `Quick
+            test_every_descriptor_has_exact_runtime_schema
+        ; test_case
+            "translated descriptors keep distinct runtime schemas"
+            `Quick
+            test_translated_descriptor_keeps_distinct_runtime_schema
         ] )
     ; ( "workspace_tools"
       , [ test_case "workspace schemas route to Mod_state" `Quick

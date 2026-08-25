@@ -7,11 +7,10 @@
 
     - a {!Goal_phase.t} (canonical lifecycle: [Executing] / [Blocked] /
       [Completed] / [Paused] / [Dropped]) — the only persisted
-      lifecycle representation.  ["status"] is not an accepted field:
-      a row carrying it fails to decode, and {!read_state} then applies
-      the corrupt-store policy (recovery mirror if usable, otherwise an
-      empty state plus a warning).  A store written before the field was
-      dropped must be reset rather than loaded.
+      lifecycle representation.  The goal schema is closed: a row
+      carrying any other field fails to decode, and {!read_state} then
+      applies the corrupt-store policy (recovery mirror if usable,
+      otherwise an empty state plus a warning).
 
     Every type is exposed concretely because external
     callers ([test/test_dashboard_goals],
@@ -22,9 +21,9 @@
     and access record fields ([.id], [.phase],
     [.updated_at], [.title], …) directly.
 
-    Internal helpers that stay private: [normalize_lower], [now_ms],
+    Internal helpers that stay private: [now_ms],
     [gen_goal_id], [find_goal], [replace_goal], [update_state],
-    [sort_goals], [active_goals], [ensure_dirs],
+    [sort_goals], [ensure_dirs],
     [default_state], [clamp_priority]. *)
 
 (** {1 Parsers (string → variant option)} *)
@@ -43,12 +42,8 @@ type goal = {
   due_date : string option;
   priority : int;
   phase : Goal_phase.t;
-  parent_goal_id : string option;
   last_review_note : string option;
   last_review_at : string option;
-  (** RFC-0362: the keeper responsible for turning this Goal into Tasks.
-      [None] is the default and is legitimate. *)
-  owner : string option;
   created_at : string;
   updated_at : string;
 }
@@ -72,7 +67,7 @@ type state = {
 
 type rollup = {
   active_count : int;
-  paused_count : int;
+  verifying_count : int;
   done_count : int;
   dropped_count : int;
 }
@@ -85,7 +80,8 @@ val rollup_to_yojson : rollup -> Yojson.Safe.t
 val compute_rollup : goal list -> rollup
 (** Field-wise count of goals per lifecycle bucket
     ([Executing] → active, [Paused]/[Blocked] → paused,
-    [Completed] → done, [Dropped] → dropped).  Single
+    [Verifying] → verifying, [Completed] → done,
+    [Dropped] → dropped).  Single
     pass; no allocation beyond the result record. *)
 
 (** {1 Persistence paths} *)
@@ -133,6 +129,20 @@ val update_goal :
     (with [updated_at] pre-stamped), normalises the result,
     and writes back.  Errors when the [goal_id] is unknown. *)
 
+type conditional_update =
+  | Goal_updated of goal
+  | Goal_phase_mismatch of Goal_phase.t
+
+val update_goal_if_phase :
+  Workspace_utils.config ->
+  goal_id:string ->
+  expected_phase:Goal_phase.t ->
+  (goal -> goal) ->
+  (conditional_update, string) result
+(** Atomic compare-and-update under the goals file lock. A phase mismatch is
+    returned without writing, so recovery cannot overwrite a concurrent
+    lifecycle transition. *)
+
 type delete_goal_outcome =
   | Deleted
   | Deleted_with_orphaned_links of string
@@ -173,7 +183,6 @@ val upsert_goal :
   ?due_date:string ->
   ?priority:int ->
   ?phase:Goal_phase.t ->
-  ?parent_goal_id:string ->
   unit ->
   (goal * [ `created | `updated ], string) result
 (** Creates a new goal when [id] is omitted (mints
@@ -184,4 +193,11 @@ val upsert_goal :
 
     Errors:
     - [title] required for new goals (omit / empty string
-      on a new goal id). *)
+      on a new goal id).
+    - RFC-0387 B1: [metric] and [target_value] are both required
+      (non-blank) whenever the upsert creates a new row —
+      including an explicit previously-unknown [id].  The
+      create/update split is decided inside the write lock on
+      the freshly decoded state, so an undecodable store hits
+      the fail-closed persistence error, never this one.
+      Updating an existing row is not gated. *)

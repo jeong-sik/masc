@@ -128,7 +128,7 @@ describe('ReactionBar', () => {
 
     await waitFor(() => {
       expect(fetchBoardReactionState).toHaveBeenCalledTimes(2)
-      expect(screen.getByRole('status')).toHaveTextContent('리액션 종류를 불러오는 중입니다')
+      expect(screen.getByRole('status')).toHaveTextContent('불러오는 중…')
     })
     resolveRefresh({ summaries: [], supportedEmojis: ['🔥'] })
     await waitFor(() => {

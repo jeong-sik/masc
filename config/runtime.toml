@@ -6,18 +6,23 @@
 #
 # Local Gemma 4 QAT is a canary runtime, not the fleet default. Keep the
 # default on the cloud runtime and pin only one keeper to local Ollama until
-# sustained turns prove the local box can absorb more load. OAS handles Gemma 4
+# sustained turns prove the local box can absorb more load. AGENT_CORE handles Gemma 4
 # thinking through the chat-template control token path, not Ollama think:true.
 
 [runtime]
 default = "ollama_cloud.deepseek-v4-flash"
-# Anti-rationalization/cross-verifier work uses a typed verdict tool call.
+# Anti-rationalization/completion-authority work uses a typed verdict tool call.
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
-# this explicit smart lane.
-cross_verifier = "deepseek.deepseek-v4-pro"
+# this explicit smart lane. The judgement call resolves the verifier_exact
+# exact-output lane below (RFC-0361 D7(a)) — [runtime] carries no scalar
+# binding for it.
 
 # Existing workspaces are not overwritten by this seed. Copy the required lane
 # declarations into the live runtime.toml before enabling their consumers.
+# Providers and individual provider.model bindings default to `enabled = true`.
+# Set `enabled = false` in either table to keep the catalog example while
+# excluding it from the executable runtime inventory. A disabled runtime cannot
+# remain referenced by [runtime].default, lanes, assignments, or failover lists.
 [runtime.exact_output_lanes.librarian_exact]
 slots = ["glm-coding.glm-5-turbo", "deepseek.deepseek-v4-pro"]
 
@@ -30,18 +35,24 @@ slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
 [runtime.exact_output_lanes.board_attention_exact]
 slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
 
+# Verifier/completion-authority judgement lane (RFC-0361 D7(a)). Judgement
+# calls resolve only this lane and fail over in declared slot order, the same
+# frozen-order contract as the librarian/compaction lanes.
+[runtime.exact_output_lanes.verifier_exact]
+slots = ["deepseek.deepseek-v4-pro", "glm-coding.glm-5-turbo"]
+
 [providers.ollama_cloud]
 display-name = "Ollama Cloud"
 protocol = "openai-compatible-http"
 endpoint = "https://ollama.com/v1"
-# OAS connect + initial-response-headers wall-clock budget (oas#2163).
+# AGENT_CORE connect + initial-response-headers wall-clock budget (agent-core boundary).
 # Ollama Cloud serving reasoning models (kimi-k2.7-code, minimax-m3) can hold the
 # first response header past the 60s OpenAI_compat default (cold-start /
 # admission queueing / long reasoning prefill), surfacing in the Fusion panel
 # as `phase=http_operation: HTTP operation exceeded wall-clock timeout` — which
 # degraded a panel to 1/3 models (only deepseek-v4-pro cleared 60s). 600s
-# intentionally mirrors OAS `Provider_config.default_connect_timeout_s Ollama`;
-# omit to keep the OAS OpenAI-compatible default. Key spelling is mirrored by
+# intentionally mirrors AGENT_CORE `Provider_config.default_connect_timeout_s Ollama`;
+# omit to keep the AGENT_CORE OpenAI-compatible default. Key spelling is mirrored by
 # `Runtime_schema.connect_timeout_s_key`.
 connect-timeout-s = 600.0
 
@@ -99,6 +110,22 @@ endpoint = "http://localhost:11434"
 [providers.ollama.healthcheck]
 path = "/api/tags"
 
+# Official Claude Code subscription runtime example. This stays commented so
+# a fresh install does not claim the local CLI is installed or logged in.
+# There is deliberately no credentials table: Claude Code owns its stored
+# claude.ai login, and MASC removes API/token environment fallbacks.
+# [providers.claude_code]
+# display-name = "Claude Code Subscription"
+# protocol = "claude-code"
+# command = "claude"
+# is-non-interactive = true
+#
+# [models.claude-code-sonnet]
+# api-name = "claude-sonnet-4-5"
+# max-context = 200000
+#
+# [claude_code.claude-code-sonnet]
+
 [models.deepseek-v4-pro]
 api-name = "deepseek-v4-pro"
 max-context = 1000000
@@ -116,8 +143,11 @@ supports-response-format-json = true
 supports-structured-output = false
 
 [models.deepseek-v4-flash]
+# Mirrors the AGENT_CORE catalog window. Kept in step by the
+# repo-runtime-toml-declares-no-clamped-max-context gate: a value above the
+# catalog's is clamped away and only reads as authoritative (#28738).
+max-context = 1000000
 api-name = "deepseek-v4-flash"
-max-context = 1048576
 tools-support = true
 thinking-support = true
 streaming = true
@@ -126,8 +156,30 @@ streaming = true
 max-output-tokens = 384000
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+# "none" here does not mean "no reasoning". With supports-reasoning it declares
+# an inherent-thinking contract: the model reasons on its own and the wire has
+# no toggle, which is what lets a keeper turn carrying enable_thinking=true
+# through admission at all.
+#
+# 2026-08-25: changing it to "reasoning-effort" rejected every turn on this
+# lane. thinking-support = true makes the runtime seed request
+# enable_thinking=true (runtime_inference.ml), and under that dialect an
+# explicit enable is only encodable when a concrete effort accompanies it, so
+# each request died as AcceptRejected(Enable_not_encodable) before dispatch.
+# Measured live: 10 api_error_invalid_request and 0 successes on
+# ollama_cloud.ollama-cloud-deepseek-v4-flash-0731 within one keeper cycle.
+#
+# The endpoint does honour reasoning_effort -- it names its own ladder when it
+# rejects an unknown value ("high", "medium", "low", "max", or "none") -- so
+# the dialect can move here, but only together with a declared effort. "none"
+# additionally needs thinking-support = false, or the enable and the effort
+# contradict each other.
+thinking-control-format = "none"
+# ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
+# thinking-control-format above is the request axis only; without this line the
+# response axis resolves to reading no field and the reasoning is discarded.
+reasoning-streaming-format = "delta:reasoning"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -136,7 +188,7 @@ api-name = "glm-4.7"
 max-context = 200000
 tools-support = true
 thinking-support = true
-# Keep long-running keeper turns on non-preserved reasoning by default. OAS owns
+# Keep long-running keeper turns on non-preserved reasoning by default. AGENT_CORE owns
 # GLM's clear_thinking wire contract; enabling preserved thinking here replays
 # historical reasoning into every subsequent keeper turn.
 preserve-thinking = false
@@ -153,16 +205,16 @@ supports-structured-output = false
 api-name = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
 max-context = 262144
 tools-support = true
-# OAS maps this to Gemma 4's <|think|> chat-template token and omits the
+# AGENT_CORE maps this to Gemma 4's <|think|> chat-template token and omits the
 # generic Ollama top-level think field for this model family.
 thinking-support = true
 preserve-thinking = false
 streaming = true
 
 [models.gemma4-26b-a4b-qat.capabilities]
-# This runtime rides OAS native Ollama /api/chat, which does not serialize
-# tool_choice (oas backend_ollama.ml:24). Declaring true here would override
-# oas models.toml's supports_tool_choice=false (provider_runtime_binding.ml
+# This runtime rides AGENT_CORE native Ollama /api/chat, which does not serialize
+# tool_choice (agent_core backend_ollama.ml:24). Declaring true here would override
+# agent_core models.toml's supports_tool_choice=false (provider_runtime_binding.ml
 # applies this override last) while the transport silently drops forced tool
 # choice. Do not re-enable without a serializer path + model-side proof.
 supports-tool-choice = false
@@ -177,7 +229,7 @@ supports-multimodal-inputs = true
 api-name = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
 max-context = 131072
 tools-support = true
-# OAS maps this to Gemma 4's <|think|> chat-template token and omits the
+# AGENT_CORE maps this to Gemma 4's <|think|> chat-template token and omits the
 # generic Ollama top-level think field for this model family.
 thinking-support = true
 preserve-thinking = false
@@ -200,7 +252,7 @@ wizard-default = true
 # Keeper application working set, not the provider's 1M-token capability.
 # The exact final JSON body (system/tail + tools + lossless transcript) must
 # remain bounded so durable canonical history cannot become an n,n+1,... wire
-# replay. OAS rejects an oversized serialized body locally before POST; the
+# replay. AGENT_CORE rejects an oversized serialized body locally before POST; the
 # Keeper turn policy owns any subsequent recovery decision.
 max-request-body-bytes = 524288
 
@@ -217,29 +269,58 @@ wizard-default = true
 max-request-body-bytes = 262144
 
 [models.glm-5-turbo]
+# Mirrors the AGENT_CORE catalog window. Was 203000, above the catalog's
+# 200000, so the resolver clamped it away and the declaration only read as
+# authoritative — #28737 cited it as this model's window while the number in
+# effect was the catalog's (#28738). Kept in step by the
+# repo-runtime-toml-declares-no-clamped-max-context gate.
+max-context = 200000
 api-name = "GLM-5-Turbo"
-max-context = 203000
 tools-support = true
 thinking-support = true
-# Keep long-running keeper turns on non-preserved reasoning by default. OAS owns
+# Keep long-running keeper turns on non-preserved reasoning by default. AGENT_CORE owns
 # GLM's clear_thinking wire contract; enabling preserved thinking here replays
 # historical reasoning into every subsequent keeper turn.
 preserve-thinking = false
 streaming = true
 
 [models.glm-5-turbo.capabilities]
-max-output-tokens = 131072
+# Catalog says 128000. 131072 is 128 * 1024, which is how the two came to
+# disagree; the catalog wins because it is what the adapter reads whenever the
+# model is in it (#28738).
+max-output-tokens = 128000
 supports-tool-choice = false
 supports-extended-thinking = true
 supports-response-format-json = true
 supports-structured-output = false
 
 [glm-coding.glm-5-turbo]
-max-request-body-bytes = 262144
+# 262144 was inherited from [glm-coding.glm-4-7-coding], where it is justified
+# by that model's smaller serving window. This model's window is 200000 tokens
+# and the ceiling has to be read against that: measured on a live
+# 2026-08-14 request, 195,485 B carried 54,615 tokens, so 262144 B is about
+# 73,000 tokens — a third of what the model accepts.
+#
+# The keeper pays for the difference in memory. The window sizes history
+# against this ceiling, so on that same trace the keeper transmitted 14 of
+# 15,413 messages, roughly 7 turns of 7,650.
+#
+# Both candidate values have a recorded failure, and neither is safe by
+# arithmetic. 262144 latched analyst on 2026-07-29: its history serialized to
+# 355,286 B, every request was refused, and the turn could not compact its way
+# out. 524288 failed the next day when five keepers landed at 524,335 B — 47
+# bytes over — because the window fills toward whatever ceiling it is given and
+# the envelope is not part of what it measures. What made that catastrophic
+# rather than a retry was the recovery chain, fixed since in #27813.
+#
+# So this is not "524288 is the right size". It is: one value fails on
+# ordinary history, the other fails only on an envelope overshoot the retry
+# path now absorbs.
+max-request-body-bytes = 524288
 
 # MiniMax M3 (Ollama Cloud) — chat/runtime binding retained for explicit
 # operator use. Do not route provider-native structured-output lanes here unless
-# the OAS catalog proves a native schema guarantee for this runtime.
+# the AGENT_CORE catalog proves a native schema guarantee for this runtime.
 # api-name originally verified 2026-06-18 against
 # https://ollama.com/v1/chat/completions.
 [models.minimax-m3]
@@ -253,10 +334,10 @@ streaming = true
 max-output-tokens = 131072
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-# SSOT = OAS models.toml per official MiniMax Chat docs: Chat tool_choice /
-# response_format / structured output are not documented (jeong-sik/oas#2339).
+supports-reasoning-budget = false
+thinking-control-format = "none"
+# SSOT = agent-core models.toml per official MiniMax Chat documentation; Chat
+# tool_choice, response_format, and structured output are not documented.
 supports-response-format-json = false
 supports-structured-output = false
 supports-image-input = true
@@ -291,7 +372,7 @@ wizard-default = true
 max-request-body-bytes = 524288
 
 # Kimi K2.7 Code (Ollama Cloud) — vision-capable Cloud runtime. The model name
-# is kept separate from Kimi's direct API route; OAS owns provider/model wire
+# is kept separate from Kimi's direct API route; AGENT_CORE owns provider/model wire
 # details and MASC declares only runtime-local concrete model capabilities.
 # Official Kimi docs checked 2026-07-04: kimi-k2.7-code is the latest
 # code-focused thinking model; keep the short Kimi seed on the current model.
@@ -306,9 +387,9 @@ streaming = true
 max-output-tokens = 32768
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-# SSOT = OAS models.toml; Ollama Cloud Kimi rows do not currently advertise a
+supports-reasoning-budget = false
+thinking-control-format = "none"
+# SSOT = AGENT_CORE models.toml; Ollama Cloud Kimi rows do not currently advertise a
 # native schema/response_format guarantee.
 supports-response-format-json = false
 supports-structured-output = false
@@ -331,8 +412,8 @@ streaming = true
 [models.ollama-cloud-deepseek-v3-1-671b.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -348,8 +429,8 @@ streaming = true
 [models.ollama-cloud-deepseek-v3-2.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -365,8 +446,8 @@ streaming = true
 [models.ollama-cloud-deepseek-v4-flash.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -395,8 +476,12 @@ streaming = true
 [models.ollama-cloud-deepseek-v4-flash-0731.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
+# ollama.com /v1 streams the reasoning delta under "reasoning" (probe, #26788).
+# thinking-control-format above is the request axis only; without this line the
+# response axis resolves to reading no field and the reasoning is discarded.
+reasoning-streaming-format = "delta:reasoning"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -415,8 +500,8 @@ streaming = true
 [models.ollama-cloud-deepseek-v4-pro.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -470,8 +555,8 @@ streaming = true
 [models.ollama-cloud-gemini-3-flash-preview.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -538,8 +623,8 @@ streaming = true
 [models.ollama-cloud-gemma4-31b.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -555,8 +640,8 @@ streaming = true
 [models.ollama-cloud-glm-4-7.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -572,8 +657,8 @@ streaming = true
 [models.ollama-cloud-glm-5.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -589,8 +674,8 @@ streaming = true
 [models.ollama-cloud-glm-5-1.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -606,8 +691,8 @@ streaming = true
 [models.ollama-cloud-glm-5-2.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -623,8 +708,8 @@ streaming = true
 [models.ollama-cloud-gpt-oss-20b.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -640,8 +725,8 @@ streaming = true
 [models.ollama-cloud-gpt-oss-120b.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -657,8 +742,8 @@ streaming = true
 [models.ollama-cloud-kimi-k2-5.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -674,8 +759,8 @@ streaming = true
 [models.ollama-cloud-kimi-k2-6.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -691,8 +776,8 @@ streaming = true
 [models.ollama-cloud-kimi-k2-7-code.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -708,8 +793,8 @@ streaming = true
 [models.ollama-cloud-minimax-m2-1.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -725,8 +810,8 @@ streaming = true
 [models.ollama-cloud-minimax-m2-5.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -742,8 +827,8 @@ streaming = true
 [models.ollama-cloud-minimax-m2-7.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -759,9 +844,9 @@ streaming = true
 [models.ollama-cloud-minimax-m3.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
-# SSOT = OAS models.toml per official MiniMax Chat docs (jeong-sik/oas#2339).
+supports-reasoning-budget = false
+thinking-control-format = "none"
+# SSOT = agent-core models.toml per official MiniMax Chat documentation.
 supports-response-format-json = false
 supports-structured-output = false
 supports-image-input = true
@@ -849,8 +934,8 @@ streaming = true
 [models.ollama-cloud-nemotron-3-nano-30b.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -866,8 +951,8 @@ streaming = true
 [models.ollama-cloud-nemotron-3-super.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -883,8 +968,8 @@ streaming = true
 [models.ollama-cloud-nemotron-3-ultra.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -934,8 +1019,12 @@ streaming = true
 [models.ollama-cloud-qwen3-5-397b.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+# ollama.com exposes this binding through its OpenAI-compatible /v1 endpoint.
+# Reasoning is inherent/default-on and no explicit thinking-control field is
+# accepted on this wire. The native provider keeps the catalog's Ollama control.
+thinking-control-format = "none"
+reasoning-streaming-format = "delta:reasoning_content"
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -987,7 +1076,8 @@ candidates = [
 # config, not here (enforced by test_runtime_config_validity "public seed
 # has no keeper assignments").
 # Do not assign general keeper lanes to Pro here. Pro is reserved for explicit
-# judge/evaluator lanes ([runtime].cross_verifier and [fusion].judge).
+# judge/evaluator lanes ([runtime.exact_output_lanes.verifier_exact] and
+# [fusion].judge).
 #
 # Assignment targets must be runtime ids (<provider>.<model>); a lane id here
 # is rejected at load. A keeper reaches a [runtime.lanes] failover group only
@@ -1034,7 +1124,7 @@ panel = [
   "ollama_cloud.ollama-cloud-ministral-3-14b",
 ]
 # Fusion judges request provider-native structured output. Keep this on a
-# runtime whose model resolves through the OAS catalog with native schema support.
+# runtime whose model resolves through the AGENT_CORE catalog with native schema support.
 judge = "ollama_cloud.ollama-cloud-devstral-2-123b"
 panel_system_prompt = """
 You are an expert panelist. Answer the user's question directly and concisely \

@@ -1,26 +1,8 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-module Random = Stdlib.Random
-
 (** Agent Registry Eio - Global agent identity tracking
 
-    Actor model: all mutable state (identity registry, session→key map,
-    resolved-name cache) is held in a single Mutex-protected record, removing
-    the TOCTOU race in the previous three-Atomic-store design.
+    Actor model: one immutable identity/session/cache snapshot is swapped
+    behind a single mutex. Identity materialization and logging stay outside
+    the critical section; pure transitions close creation races.
 
     @since 0.5.0
 *)

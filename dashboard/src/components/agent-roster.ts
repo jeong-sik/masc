@@ -22,7 +22,6 @@ import { ringFocusClasses } from './common/ring'
 import { TimeAgo } from './common/time-ago'
 import { AgentAvatar } from './overview/agent-avatar'
 import { AgentPresence } from './common/agent-presence'
-import { AgentCapability } from './common/agent-capability'
 import { openAgentProfile } from './agent-detail-state'
 import { openKeeperDetail } from './keeper-detail'
 import { formatDuration } from '../lib/format-time'
@@ -75,8 +74,25 @@ import { FL_TONE_LABEL, PHASE_LABEL_KO, type FleetTone } from '../lib/fleet-tone
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { compositeSnapshotForKeeper } from '../lib/keeper-composite-lookup'
 import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../composite-signals'
-import { navigate } from '../router'
+import { hashForRoute, navigate } from '../router'
 import { operatorSnapshot } from '../operator-store'
+import { FleetAsideActions, FleetQueueSection, FleetRotationSection } from './fleet-aside-extras'
+
+// keeper-v2 fleet.jsx ChatGlyph — deep link glyph into the keeper conversation
+// console (here: the keepers surface scoped to this keeper).
+function FleetChatGlyph({ size = 14 }: { size?: number }) {
+  return html`<svg
+    viewBox="0 0 24 24"
+    width=${size}
+    height=${size}
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.7"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  ><path d="M4 5.5h16v10H9.5L5 19v-3.5H4z" /><path d="M8.5 10.2h7M8.5 13h4.5" /></svg>`
+}
 
 type RosterStateNote = { label: string; text: string; kind?: string }
 type RosterPresenceDisplay = { status: string | null; detail: string | null }
@@ -126,7 +142,7 @@ function rosterContextMeta(
     context_tokens?: number | null
     context_max?: number | null
   } | null | undefined,
-): { pct: number; detail: string | null } | null {
+): { pct: number; detail: string | null; win: string | null } | null {
   const ratio = source?.context_ratio
   if (ratio == null || !Number.isFinite(ratio)) return null
 
@@ -140,7 +156,10 @@ function rosterContextMeta(
         ? formatTokens(tokens)
         : null
 
-  return { pct, detail }
+  // win = the observed context window size, rendered as the .fl-ctx-win
+  // annotation next to the percentage. Only present when context_max was
+  // actually received — never derived (mark, don't fake).
+  return { pct, detail, win: max != null ? formatTokens(max) : null }
 }
 
 /**
@@ -218,19 +237,6 @@ export function rosterStateNote(
       text: `이전 턴 차단 (${state.staleBlocker}) — 현재는 실행 중`,
       kind: state.staleBlocker,
     }
-  }
-
-  if (state.kind === 'running' && keeper.runtime_blocker_class === 'synthetic_stall') {
-    const summary = keeper.runtime_blocker_summary?.trim()
-    return {
-      label: '상태 추정',
-      text: summary || '실제 STATE 없이 합성된 진행 기록만 남아 최근 턴 산출물 재확인이 필요합니다.',
-      kind: 'synthetic_stall',
-    }
-  }
-
-  if (state.kind === 'offline' && keeper.agent?.current_task) {
-    return { label: '작업 중단', text: `할당된 작업이 있으나 keeper가 ${state.cause} 상태입니다` }
   }
 
   const diagnosticError = keeper.diagnostic?.last_error?.trim()
@@ -478,7 +484,6 @@ function keeperRelationKeys(source: Keeper): string[] {
     relationKey('keeper-id', source.keeper_id),
     relationKey('keeper-name', source.name),
     relationKey('agent-name', source.agent_name),
-    relationKey('agent-name', source.agent?.name),
   ]
   return Array.from(new Set(keys.filter((key): key is string => key != null)))
 }
@@ -630,7 +635,6 @@ function keeperRuntimeAgentProjection(source: Keeper): RosterAgent | null {
   const displayName = relationValue(source.name)
   if (!displayName) return null
 
-  const linkedAgent = source.agent
   const liveCurrentTask =
     source.recent_output_preview
     ?? source.recent_input_preview
@@ -640,18 +644,11 @@ function keeperRuntimeAgentProjection(source: Keeper): RosterAgent | null {
     name: displayName,
     keeper_name: source.name,
     keeper_id: source.keeper_id ?? null,
-    agent_type: linkedAgent?.agent_type,
-    status: (linkedAgent?.status as Agent['status'] | undefined) ?? (source.status as Agent['status'] | undefined),
-    current_task: linkedAgent?.current_task ?? liveCurrentTask,
+    status: source.status as Agent['status'] | undefined,
+    current_task: liveCurrentTask,
     context_ratio: source.context_ratio ?? undefined,
-    joined_at: linkedAgent?.joined_at,
-    last_seen: linkedAgent?.last_seen,
-    capabilities: linkedAgent?.capabilities,
     emoji: source.emoji,
     koreanName: source.koreanName,
-    traits: source.traits,
-    activityLevel: source.activityLevel,
-    primaryValue: source.primaryValue,
     rosterSource: 'keeper_runtime',
   }
 }
@@ -669,15 +666,12 @@ function mergeRosterAgent(existing: RosterAgent | undefined, next: RosterAgent):
     status: existing.status ?? next.status,
     current_task: existing.current_task ?? next.current_task,
     context_ratio: existing.context_ratio ?? next.context_ratio,
-    joined_at: existing.joined_at ?? next.joined_at,
+    session_bound_at: existing.session_bound_at ?? next.session_bound_at,
     last_seen: existing.last_seen ?? next.last_seen,
     capabilities: existing.capabilities?.length ? existing.capabilities : next.capabilities,
     emoji: existing.emoji ?? next.emoji,
     koreanName: existing.koreanName ?? next.koreanName,
     model: existing.model ?? next.model,
-    traits: existing.traits?.length ? existing.traits : next.traits,
-    activityLevel: existing.activityLevel ?? next.activityLevel,
-    primaryValue: existing.primaryValue ?? next.primaryValue,
   }
 }
 
@@ -993,18 +987,14 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     keeperFilter === 'agent-only' || keeperStateHints.length === 0
       ? null
       : `키퍼 ${keeperStateHints.join(' · ')}`
-  const fallbackStateTitle =
-    executionError.value
-      ? '상태 불러오기 실패'
-      : executionLoaded.value
-        ? '일부만 불러옴'
-        : '불러오는 중'
+  // The banner renders only for error / not-yet-loaded states
+  // (shouldShowExecutionFallbackState): a loaded-but-partial roster speaks
+  // through its own rows and health counts.
+  const fallbackStateTitle = executionError.value ? '상태 불러오기 실패' : '불러오는 중'
   const fallbackStateMessage =
     executionError.value
       ? `${scopeLabel}. 상태 정보를 아직 불러오지 못했습니다.`
-      : executionLoaded.value
-        ? `${scopeLabel}. 일부만 불러왔습니다.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''}`
-        : `${scopeLabel}.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''} 상태 정보가 올라오면 목록이 채워집니다.`
+      : `${scopeLabel}.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''} 상태 정보가 올라오면 목록이 채워집니다.`
 
   const rosterRows = useMemo(() => filtered.map((agent: Agent) => {
     const keeperRuntime = findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)
@@ -1110,7 +1100,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   // Health pills (fl-hpill) read from the same band counts as the rows. No title
   // here — the shell's SurfaceLead owns the "Keeper Fleet" header for this
   // surface (dashboard-shell SURFACE_OWN_LEAD).
-  const healthRun = counts.active
+  const healthNormal = counts.active
   const healthTransient = counts.transient
   const healthPaused = counts.paused
   const healthOffline = counts.offline
@@ -1128,6 +1118,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     || selectedRow?.agent.koreanName?.trim()
     || null
   const selectedKeeperId = fleetKeeperIdEvidence(selectedRow?.keeperRuntime ?? null)
+  const selectedRuntime = fleetRuntimeEvidence(selectedRow?.keeperRuntime ?? null)
 
   // Render one fleet roster row (.fl-row), layered with the live classes /
   // test-ids the tests + CSS rely on (v2-monitoring-roster-row, data-tone,
@@ -1202,10 +1193,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <${AgentAvatar}
               name=${row.agent.name}
               status=${row.presenceDisplay.status}
-              traits=${row.agent.traits}
               size="md"
-              currentWork=${row.currentWork}
-              activityAge=${row.lastActivityAge}
             />
           </span>
           <div class="fl-id-txt">
@@ -1233,17 +1221,23 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           <span class="fl-gloss" title=${glossTitle}>${glossText}</span>
           ${row.bandActionHint ? html`<span class="fl-gloss">${row.bandActionHint}</span>` : null}
           ${exclusionLabel
-            ? html`<span class="fl-gloss" data-exclusion title="자동 부팅에서 제외됨 — 서버 시작 시 기동하지 않습니다. 기동 버튼으로 직접 켜세요.">${exclusionLabel}</span>`
+            ? html`<span class="fl-gloss" data-exclusion title="자동 부팅 제외 — 기동 버튼으로 켭니다">${exclusionLabel}</span>`
             : null}
         </div>
 
-        <div class="fl-ctx" aria-label=${`컨텍스트 ${ctxPct != null ? `${ctxPct}%` : '없음'}`}>
+        <div class="fl-ctx" aria-label=${`컨텍스트 ${ctxPct != null ? `${ctxPct}%` : '미관측'}`}>
           ${ctxPct != null
             ? html`
                 <div class="fl-ctx-bar"><span class=${ctxHot ? 'hot' : ''} style="width:${ctxPct}%"></span></div>
-                <span class="fl-ctx-val ${ctxHot ? 'hot' : ctxPct === 0 ? 'zero' : ''}">${ctxPct}%</span>
+                <span class="fl-ctx-val ${ctxHot ? 'hot' : ctxPct === 0 ? 'zero' : ''}">${ctxPct}%${row.contextMeta?.win
+                  ? html` <i class="fl-ctx-win">/ ${row.contextMeta.win}</i>`
+                  : null}</span>
               `
-            : html`<span class="fl-ctx-val zero" data-stub="no context_ratio">—</span>`}
+            : html`<span
+                class="fl-ctx-val zero"
+                data-stub="no context_ratio"
+                title="현재 점유율 미관측 · 마지막 턴 usage와 분리"
+              >—</span>`}
         </div>
 
         <div
@@ -1268,13 +1262,26 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
         <div class="fl-actcell" aria-label="액션" onClick=${(e: Event) => e.stopPropagation()}>
           ${row.keeperRuntime
-            ? html`<${KeeperActionButtons}
+            // keeper-v2 fleet.jsx: hover-revealed .fl-actions group + fl-chat
+            // deep link into the keepers conversation surface. The design's
+            // per-button .fl-act glyph buttons stay unbuilt — the live row
+            // deliberately renders text action buttons (DESIGN-PARITY.md
+            // monitor ledger: six-track grid with a 160px action cell).
+            ? html`<div class="fl-actions"><${KeeperActionButtons}
                 keeper=${row.keeperRuntime}
                 size="sm"
                 compact
                 stopPropagation
-              />`
+              /></div>`
             : html`<span class="text-2xs text-[var(--color-fg-muted)]">—</span>`}
+          ${row.keeperRuntime
+            ? html`<a
+                class="fl-chat"
+                href=${hashForRoute('keepers', { keeper: row.keeperRuntime.name.trim() })}
+                title=${`${row.displayName} 대화 콘솔 열기`}
+                aria-label=${`${row.displayName} 대화 콘솔 열기`}
+              ><${FleetChatGlyph} size=${13} /></a>`
+            : null}
         </div>
       </div>
     `
@@ -1288,22 +1295,27 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           <h1 class="fl-title">Keeper Fleet</h1>
         </div>
         <div class="fl-health">
-          <span class="fl-hpill ok">런타임 가능 <b>${healthRun}</b></span>
+          <span class="fl-hpill ok">정상 <b>${healthNormal}</b></span>
           ${healthTransient > 0 ? html`<span class="fl-hpill busy">${KEEPER_TRANSIENT_LABEL_KO} <b>${healthTransient}</b></span>` : null}
           <span class="fl-hpill warn">일시정지 <b>${healthPaused}</b></span>
           <span class="fl-hpill">${KEEPER_STATUS_LABEL_KO.offline} <b>${healthOffline}</b></span>
           ${healthAttention > 0 ? html`<span class="fl-hpill bad">주의 <b>${healthAttention}</b></span>` : null}
         </div>
         <span class="fl-spacer"></span>
-        <button
-          type="button"
-          class="fl-create"
-          data-testid="keeper-create-entry"
-          title="Registry에서 페르소나를 골라 키퍼를 생성합니다"
-          onClick=${() => navigate('registry', {})}
-        >＋ 새 Keeper</button>
+        <!-- keeper-v2 fleet.jsx fl-top-actions: the design's second slot is the
+             프롬프트 (AGENT.md persona library) button — no live persona store
+             exists in the dashboard, so only the create action renders. -->
+        <div class="fl-top-actions">
+          <button
+            type="button"
+            class="fl-create fl-top-btn primary"
+            data-testid="keeper-create-entry"
+            title="Registry에서 페르소나를 골라 키퍼를 생성합니다"
+            onClick=${() => navigate('registry', {})}
+          >＋ 새 Keeper</button>
+        </div>
         <div class="fl-meta"><span class="live">● live</span><span>${namespaceName}</span></div>
-        <span class="sr-only">실행 rows ${healthRun} · 전이 rows ${healthTransient} · 일시정지 rows ${healthPaused} · 중지 rows ${healthOffline}</span>
+        <span class="sr-only">정상 rows ${healthNormal} · 전이 rows ${healthTransient} · 일시정지 rows ${healthPaused} · 중지 rows ${healthOffline}</span>
       </header>
 
       ${showExecutionFallbackState
@@ -1368,8 +1380,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               <div class="px-6 py-10">
                 <${EmptyState}
                   message=${showExecutionFallbackState && expectedScopedCount > 0
-                      ? `${fallbackStateTitle}: ${scopeLabel}가 있지만, 현재 조건에 맞는 항목은 아직 없습니다.`
-                      : '조건에 맞는 runtime row가 없습니다.'}
+                      ? `${fallbackStateTitle}: ${scopeLabel}가 있지만, 현재 조건에 맞는 항목은 아직 없음`
+                      : '조건에 맞는 runtime row 없음'}
                   compact
                 />
               </div>
@@ -1394,10 +1406,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 <${AgentAvatar}
                   name=${selectedRow.agent.name}
                   status=${selectedRow.presenceDisplay.status}
-                  traits=${selectedRow.agent.traits}
                   size="lg"
-                  currentWork=${selectedRow.currentWork}
-                  activityAge=${selectedRow.lastActivityAge}
                 />
               </span>
               <div class="min-w-0">
@@ -1408,6 +1417,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     ${selectedKoreanName && selectedKeeperId ? ' · ' : ''}
                     ${selectedKeeperId ? html`<span class="font-mono">keeper-id · ${selectedKeeperId}</span>` : null}
                   </div>
+                ` : null}
+                ${selectedRuntime.source === 'assigned' ? html`
+                  <!-- keeper-v2 fleet.jsx fl-as-runtime: bound runtime under the
+                       aside identity block. Rendered only when a runtime is
+                       actually assigned (mark, don't fake — the 런타임 vitals
+                       grid below carries the 미확인 case). -->
+                  <div class="fl-as-runtime mono" title="바인딩된 런타임">${selectedRuntime.value}</div>
                 ` : null}
                 <div class="mt-1.5 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-secondary)]">
                   <!-- KeeperPhaseBadge below is the aside's single status
@@ -1448,7 +1464,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   ? html`<${KeeperPhaseBadge} phase=${selectedRow.fsmPhaseKey} compact />`
                   : html`<span class="fl-chip" data-tone=${selectedTone}>${selectedRow.band.label}</span>`}
                 ${selectedRow.fsmStageKey && selectedRow.fsmStageText ? html`
-                  <span class="inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-2xs font-medium ${stageBadgeClass(selectedRow.fsmStageKey)}" title=${selectedRow.monitoringEvidence?.stage?.description ?? '활동 단계 정보가 없습니다.'}>
+                  <span class="inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-2xs font-medium ${stageBadgeClass(selectedRow.fsmStageKey)}" title=${selectedRow.monitoringEvidence?.stage?.description ?? '활동 단계 정보 없음'}>
                     ${selectedRow.fsmStageText}
                   </span>
                 ` : null}
@@ -1501,9 +1517,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             ${selectedCtxPct == null && selectedContextUnavailable?.kind === 'not_observed' ? html`
               <div class="fl-as-sec" data-testid="fleet-context-not-observed">
                 <h4>컨텍스트</h4>
-                <div class="text-xs text-[var(--color-fg-muted)]">
-                  현재 점유율 미관측 · usage와 분리
-                </div>
+                <div class="fl-notobs">현재 점유율 <b>미관측</b> · usage와 분리</div>
               </div>
             ` : null}
 
@@ -1550,27 +1564,42 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             ${(selectedRow.recentTools.length > 0 || selectedRow.toolCallCount != null || selectedRow.toolAuditAt) ? html`
               <div class="fl-as-sec">
                 <h4>최근 도구</h4>
-                <div class="flex flex-wrap items-center gap-1.5 text-2xs text-[var(--color-fg-muted)]">
-                  <${AgentCapability} tools=${selectedRow.recentTools} maxVisible=${5} />
-                  ${selectedRow.toolCallCount != null && selectedRow.toolCallCount > 0 ? html`
-                    <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs">${selectedRow.toolCallCount}회 관찰됨</span>
-                  ` : null}
-                  ${selectedRow.toolAuditAt ? html`
-                    <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs">감사 <${TimeAgo} timestamp=${selectedRow.toolAuditAt} /></span>
-                  ` : null}
-                </div>
+                ${selectedRow.recentTools.length > 0 ? html`
+                  <!-- keeper-v2 fleet.jsx fl-tools/fl-toolrow: mono rows, one
+                       per observed tool name (recent_tool_names ∪
+                       latest_tool_names). -->
+                  <div class="fl-tools">
+                    ${selectedRow.recentTools.map(tool => html`<div class="fl-toolrow">${tool}</div>`)}
+                  </div>
+                ` : null}
+                ${(selectedRow.toolCallCount != null && selectedRow.toolCallCount > 0) || selectedRow.toolAuditAt ? html`
+                  <div class="mt-1.5 flex flex-wrap items-center gap-1.5 text-2xs text-[var(--color-fg-muted)]">
+                    ${selectedRow.toolCallCount != null && selectedRow.toolCallCount > 0 ? html`
+                      <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs">${selectedRow.toolCallCount}회 관찰됨</span>
+                    ` : null}
+                    ${selectedRow.toolAuditAt ? html`
+                      <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs">감사 <${TimeAgo} timestamp=${selectedRow.toolAuditAt} /></span>
+                    ` : null}
+                  </div>
+                ` : null}
               </div>
+            ` : null}
+
+            ${selectedRow.keeperRuntime ? html`
+              <${FleetQueueSection} keeper=${selectedRow.keeperRuntime} />
+              <${FleetRotationSection} keeper=${selectedRow.keeperRuntime} />
+              <${FleetAsideActions} keeper=${selectedRow.keeperRuntime} />
             ` : null}
           ` : html`
             <div class="fl-as-sec">
-              <${EmptyState} message="선택할 keeper 또는 agent가 없습니다." compact />
+              <${EmptyState} message="선택할 keeper 또는 agent 없음" compact />
             </div>
           `}
         </aside>
       </div>
 
       <div class="fl-foot">
-        <span class="fl-tick"><span class="k">runtime rows</span><span class="v">active ${healthRun}/${rosterRows.length}</span></span>
+        <span class="fl-tick"><span class="k">normal rows</span><span class="v">${healthNormal}/${rosterRows.length}</span></span>
         <span class="fl-tick"><span class="k">transient rows</span><span class="v">${healthTransient}</span></span>
         <span class="fl-tick"><span class="k">paused rows</span><span class="v">${healthPaused}</span></span>
         <span class="fl-tick"><span class="k">offline rows</span><span class="v">${healthOffline}</span></span>

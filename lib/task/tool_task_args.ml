@@ -6,20 +6,35 @@
 
     @since God file decomposition — extracted from tool_task.ml *)
 
+let task_contract_keys =
+  [ "strict"
+  ; "completion_contract"
+  ; "required_evidence"
+  ; "inspect_gate_evidence"
+  ; "verify_gate_evidence"
+  ]
+
+let parse_task_contract_object = function
+  | `Assoc fields as json ->
+    Result.bind
+      (Json_util.reject_unknown_fields
+         ~surface:"contract"
+         ~allowed:task_contract_keys
+         fields)
+      (fun () -> Masc_domain.task_contract_of_yojson json)
+  | other ->
+    Error
+      (Printf.sprintf
+         "contract must be an object when provided (received %s)"
+         (Json_util.kind_name other))
+
 let parse_task_contract args =
   match Json_util.assoc_member_opt "contract" args with
   | None | Some `Null -> Ok None
-  | Some (`Assoc _ as json) -> (
-      match Masc_domain.task_contract_of_yojson json with
-      | Ok contract -> Ok (Some contract)
-      | Error error ->
-          Error
-            (Printf.sprintf "Invalid contract payload: %s" error))
-  | Some other ->
-      Error
-        (Printf.sprintf
-           "contract must be an object when provided (received %s)"
-           (Json_util.kind_name other))
+  | Some json ->
+    parse_task_contract_object json
+    |> Result.map Option.some
+    |> Result.map_error (Printf.sprintf "Invalid contract payload: %s")
 
 let handoff_example_evidence_ref =
   Filename.concat Common.masc_dirname "harness-evidence/proof.json"
@@ -73,7 +88,7 @@ let synthesize_summary_from_siblings args =
    outcome of work it did. Pure ownership transitions (Claim, Start)
    have no outcome to summarize yet, so requiring a summary just makes
    the LLM either invent one (degrading audit signal) or fail the call
-   entirely (the 2026-05-17 nick0cave production case).
+   entirely (the 2026-05-17 production case).
 
    Exit-class actions:
      Cancel / Release / Submit_for_verification
@@ -129,6 +144,28 @@ let parse_handoff_context ~(agent_name : string)
                   \"evidence_refs\": [\"%s\"]}."
                  (Masc_domain.task_action_to_string action)
                  handoff_example_evidence_ref)
+          else if
+            (* The verification store would snapshot these as payload-free
+               invalid references, and the reviewer reads an invalid reference
+               as unavailable evidence. Refusing here names the accepted forms
+               while the caller can still act; accepting turns one malformed
+               reference into a resubmit loop that no rejection reason
+               explains. *)
+            List.exists Tool_task_completion_review.unresolvable_evidence_ref
+              handoff_context.evidence_refs
+          then
+            Error
+              (Printf.sprintf
+                 "handoff_context.evidence_refs entries must be %s for \
+                  action=%s. The verification store cannot read any other \
+                  form, and the reviewer sees it as missing evidence. Wrap \
+                  narrative, a Board post id, a commit, or a URL as %s. \
+                  Example: {\"summary\": \"tests green\", \"evidence_refs\": \
+                  [\"%s\"]}."
+                 Tool_task_completion_review.resolvable_evidence_ref_forms
+                 (Masc_domain.task_action_to_string action)
+                 Tool_task_completion_review.note_evidence_ref_form
+                 handoff_example_evidence_ref)
           else if String.equal summary "" then
             if summary_required then
               Error
@@ -173,6 +210,5 @@ let transition_known_args =
     "notes";
     "reason";
     "expected_version";
-    "agent_name";
     "handoff_context";
   ]

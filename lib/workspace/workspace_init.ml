@@ -6,7 +6,6 @@
 open Masc_domain
 open Workspace_utils
 open Workspace_state
-open Workspace_backlog
 open Workspace_broadcast
 
 (** Initialize MASC workspace state *)
@@ -15,7 +14,7 @@ let init config ~agent_name =
   (* Ensure root .masc structure exists even when initializing a non-default workspace. *)
   let root_dir = masc_root_dir config in
   let root_agents_dir = Filename.concat root_dir "agents" in
-  let root_keepers_dir = Filename.concat root_dir "keepers" in
+  let root_keepers_dir = Filename.concat root_dir Common.keepers_runtime_dirname in
   let root_traces_dir = Filename.concat root_dir "traces" in
   let root_tasks_dir = Filename.concat root_dir "tasks" in
   let root_messages_dir = Filename.concat root_dir "messages" in
@@ -30,21 +29,7 @@ let init config ~agent_name =
     ];
   if not (path_exists_root config (root_state_path config))
   then (
-    let root_state =
-      { protocol_version = "0.1.0"
-      ; project = Filename.basename config.base_path
-      ; started_at = now_iso ()
-      ; message_seq = 0
-      ; active_agents = []
-      ; paused = false
-      ; pause_reason = None
-      ; paused_by = None
-      ; paused_at = None
-      ; search_strategy_default = Some "best_first_v1"
-      ; speculation_enabled = false
-      ; speculation_budget = None
-      }
-    in
+    let root_state = Workspace_bootstrap.default_workspace_state config in
     write_json_root config (root_state_path config) (workspace_state_to_yojson root_state))
   else (
     (* Sync PG state to local file on startup so filesystem fallback has fresh data *)
@@ -110,7 +95,7 @@ let pause config ~by ~reason =
   in
   (* Broadcast pause notification *)
   let _ =
-    broadcast
+    broadcast ~audience:System_record
       config
       ~from_agent:"system"
       ~content:(Printf.sprintf "⏸️ Workspace PAUSED by %s: %s" by reason)
@@ -130,7 +115,7 @@ let resume config ~by =
     in
     (* Broadcast resume notification *)
     let _ =
-      broadcast
+      broadcast ~audience:System_record
         config
         ~from_agent:"system"
         ~content:(Printf.sprintf "▶️ Workspace RESUMED by %s" by)

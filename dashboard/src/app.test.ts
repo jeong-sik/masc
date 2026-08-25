@@ -11,7 +11,7 @@ import {
   shouldUseCompactDashboardChrome,
 } from './app'
 import { route } from './router'
-import { executionLoaded, keepers, shellCounts, shellRuntimeResolution } from './store'
+import { executionLoaded, keepers, serverStatus, shellCounts, shellRuntimeResolution } from './store'
 import { activeKeeperName } from './keeper-state'
 import type { Keeper } from './types'
 
@@ -26,6 +26,7 @@ describe('App v2 header chrome', () => {
     route.value = { tab: 'overview', params: {}, postId: null }
     keepers.value = []
     executionLoaded.value = false
+    serverStatus.value = null
     shellCounts.value = null
     shellRuntimeResolution.value = null
     activeKeeperName.value = ''
@@ -38,6 +39,7 @@ describe('App v2 header chrome', () => {
     route.value = { tab: 'overview', params: {}, postId: null }
     keepers.value = []
     executionLoaded.value = false
+    serverStatus.value = null
     shellCounts.value = null
     shellRuntimeResolution.value = null
     activeKeeperName.value = ''
@@ -117,12 +119,11 @@ describe('App v2 header chrome', () => {
     expect(container.querySelector('.v2-statchip.live')).not.toBeNull()
   })
 
-  it('renders keeper breadcrumb tail and the live running-count chip', () => {
+  it('renders keeper breadcrumb tail without presenting partial rows as a running count', () => {
     window.innerWidth = 1280
     route.value = { tab: 'keepers', params: { keeper: 'albini' }, postId: null }
-    // Before runtime health hydrates, the shared runtime-count resolver falls
-    // back to the execution rows. Seed 7 running keepers so the chip reads
-    // "7 실행 중".
+    // Rows can hydrate before the execution projection is complete. Seed seven
+    // partial rows and keep executionLoaded=false: the chip must stay unknown.
     keepers.value = Array.from({ length: 7 }, (_, i): Keeper => ({
       name: `k${i}`,
       status: 'running',
@@ -135,20 +136,42 @@ describe('App v2 header chrome', () => {
     expect(crumb?.textContent).toContain('Keepers')
     expect(crumb?.textContent).toContain('albini')
 
-    // The live running-count chip is `.v2-statchip.live` in the top bar. The old
+    // The live count chip is `.v2-statchip.live` in the top bar. The old
     // `.v2-app-header-status` container, the separate server-status "scheduler"
     // chip ("서버"/"응답" text + its title), and the chip-title attributes were
     // removed by the v2 reskin — TopBarV2 emits an attention indicator + 예약
-    // button instead. The live-count + pulse coverage is preserved here.
+    // button instead. Partial rows carry neither an asserted zero nor a pulse.
     const liveChip = container.querySelector('.v2-statchip.live') as HTMLElement | null
     expect(liveChip).not.toBeNull()
-    expect(liveChip?.textContent).toContain('7 실행 중')
-    // Pulse is now carried by the StatusDot pip (`.dot2.pulse`), replacing the old
-    // `motion-safe:animate-pulse` utility class on an inner span.
-    expect(liveChip?.querySelector('.dot2.pulse')).not.toBeNull()
+    expect(liveChip?.textContent).toContain('— 미수집')
+    expect(liveChip?.textContent).not.toContain('0 실행 중')
+    expect(liveChip?.querySelector('.dot2.pulse')).toBeNull()
   })
 
-  it('uses runtime health for the live running-count chip when rows are stale', () => {
+  it('keeps a missing shell Keeper count unavailable instead of inventing zero fibers', () => {
+    shellCounts.value = { agents: 2, tasks: 7 }
+
+    renderApp()
+
+    const liveChip = container.querySelector('.v2-statchip.live') as HTMLElement | null
+    expect(liveChip?.textContent).toContain('— 미수집')
+    expect(liveChip?.textContent).not.toContain('0 Keeper Fiber')
+    expect(liveChip?.querySelector('.dot2.pulse')).toBeNull()
+  })
+
+  it('keeps bootstrap fallback zero unavailable while the shell is initializing', () => {
+    serverStatus.value = { project: 'initializing' }
+    shellCounts.value = { agents: 0, tasks: 0, keepers: 0 }
+
+    renderApp()
+
+    const liveChip = container.querySelector('.v2-statchip.live') as HTMLElement | null
+    expect(liveChip?.textContent).toContain('— 미수집')
+    expect(liveChip?.textContent).not.toContain('0 Keeper Fiber')
+    expect(liveChip?.querySelector('.dot2.pulse')).toBeNull()
+  })
+
+  it('labels fresh runtime health as executable capacity when rows are stale', () => {
     window.innerWidth = 1280
     route.value = { tab: 'keepers', params: { keeper: 'albini' }, postId: null }
     keepers.value = Array.from({ length: 7 }, (_, i): Keeper => ({
@@ -174,7 +197,7 @@ describe('App v2 header chrome', () => {
 
     const liveChip = container.querySelector('.v2-statchip.live') as HTMLElement | null
     expect(liveChip).not.toBeNull()
-    expect(liveChip?.textContent).toContain('1 실행 중')
+    expect(liveChip?.textContent).toContain('1 실행 가능')
     expect(liveChip?.title).toContain('runtime health')
     expect(liveChip?.title).toContain('paused=3')
     expect(liveChip?.title).toContain('offline=0 (not derived from execution rows)')
@@ -252,19 +275,9 @@ describe('App v2 header chrome', () => {
     window.innerWidth = 900
     renderApp()
 
-    // Mobile nav is now NavRailV2's always-present bottom tab bar
-    // (`nav.v2-nav.is-mnav`). The old drawer model (a 44x44 hamburger
-    // `button[aria-controls="dashboard-side-rail"]` toggling a side-rail
-    // drawer + `nav[aria-label="Primary mobile navigation"]`) was removed by
-    // the reskin; the prototype keeps a persistent bottom tab bar instead.
+    // Mobile navigation is NavRailV2's always-present bottom tab bar.
     expect(container.querySelector('nav.v2-nav.is-mnav')).not.toBeNull()
   })
-
-  // REMOVED: "hides mobile nav tabs when the mobile side-rail drawer is open" —
-  // the mobile side-rail drawer + hamburger toggle were removed by the v2 reskin.
-  // The bottom tab bar (`nav.v2-nav.is-mnav`) is always present on mobile, so
-  // there is no drawer-open state that hides it. Positive coverage that the
-  // bottom bar renders is kept in the test above.
 
   it('uses the header Copilot control instead of a floating FAB on mobile', () => {
     window.innerWidth = 900
@@ -286,9 +299,7 @@ describe('App v2 header chrome', () => {
     window.innerWidth = 1280
     renderApp()
 
-    // The desktop rail is now NavRailV2's `nav.v2-nav` (no `#dashboard-side-rail`
-    // id, no `.v2-shell-rail`). The mobile-hidden behaviour is no longer a class
-    // on the rail: on desktop the rail variant has no `.is-mnav`.
+    // The desktop rail is NavRailV2; its desktop variant has no `.is-mnav`.
     const rail = container.querySelector('nav.v2-nav')
     expect(rail).not.toBeNull()
     expect(rail?.classList.contains('is-mnav')).toBe(false)
@@ -327,12 +338,6 @@ describe('App v2 header chrome', () => {
     expect(scroll?.classList.contains('h-full')).toBe(true)
   })
 
-  // REMOVED: "toggles the mobile side-rail drawer" — the v2 reskin removed the
-  // mobile side-rail drawer (`#dashboard-side-rail` block/hidden toggling) and its
-  // hamburger control (`button[aria-controls="dashboard-side-rail"]`). The mobile
-  // bottom tab bar (`nav.v2-nav.is-mnav`) is always present; there is no
-  // drawer-open/closed state to toggle. Positive bottom-bar coverage is kept above.
-
   it('hides floating status and focus chrome on prototype primary surfaces', () => {
     window.innerWidth = 1280
     window.location.hash = '#overview'
@@ -343,22 +348,33 @@ describe('App v2 header chrome', () => {
     expect(container.querySelector('[data-testid="dashboard-focus-mode-toggle"]')).toBeNull()
   })
 
-  it('keeps floating status and focus chrome on operational surfaces', () => {
+  it('keeps floating status and focus chrome on non-rail surfaces', () => {
     window.innerWidth = 1280
-    // `command` is a non-primary operational surface; `monitoring` moved into
-    // V2_PRIMARY_SURFACE_IDS (#23578) so it now suppresses floating chrome.
-    window.location.hash = '#command/operations'
-    route.value = { tab: 'command', params: { section: 'operations' }, postId: null }
+    // `command` and `lab` joined V2_PRIMARY_SURFACE_IDS in #29798 (the
+    // prototype rail carries the 명령·Lab group), so they render the v2 shell
+    // and suppress floating chrome. `cockpit` stays off the rail.
+    window.location.hash = '#cockpit'
+    route.value = { tab: 'cockpit', params: {}, postId: null }
     renderApp()
 
     expect(container.querySelector('[data-testid="dashboard-status-tray"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="dashboard-focus-mode-toggle"]')).not.toBeNull()
+
+    // On the now-primary 명령 surface the v2 rail renders and the floating
+    // chrome is gone (the top bar carries the operational facts there).
+    window.location.hash = '#command/operations'
+    route.value = { tab: 'command', params: { section: 'operations' }, postId: null }
+    renderApp()
+    expect(container.querySelector('nav.v2-nav')).not.toBeNull()
+    expect(container.querySelector('[data-testid="dashboard-status-tray"]')).toBeNull()
   })
 
   it('focus mode does not permanently hide the rail', async () => {
     window.innerWidth = 1280
-    window.location.hash = '#command/operations'
-    route.value = { tab: 'command', params: { section: 'operations' }, postId: null }
+    // The focus toggle rides the floating chrome, so exercise it on `cockpit`;
+    // `command` became a rail surface in #29798 and no longer carries the toggle.
+    window.location.hash = '#cockpit'
+    route.value = { tab: 'cockpit', params: {}, postId: null }
     renderApp()
 
     // Rail (now `nav.v2-nav`) should be visible initially.
@@ -385,7 +401,7 @@ describe('App v2 header chrome', () => {
   it('keeps the command palette chunk out of the initial dashboard render', () => {
     renderApp()
 
-    expect(container.querySelector('ninja-keys')).toBeNull()
+    expect(container.querySelector('.cmdk-backdrop')).toBeNull()
   })
 })
 
@@ -443,14 +459,26 @@ describe('shouldSuppressFloatingChrome', () => {
     })).toBe(true)
   })
 
-  it('keeps floating chrome for operational surfaces unless a shell overlay is active', () => {
+  it('keeps floating chrome only for surfaces outside the prototype rail', () => {
+    // `command` and `lab` joined V2_PRIMARY_SURFACE_IDS in #29798 — the
+    // prototype rail (shell.jsx) carries the 명령·Lab group.
     expect(shouldSuppressFloatingChrome({
       currentTab: 'command',
       keeperDetailMode: false,
       mobileDrawerOpen: false,
+    })).toBe(true)
+    expect(shouldSuppressFloatingChrome({
+      currentTab: 'lab',
+      keeperDetailMode: false,
+      mobileDrawerOpen: false,
+    })).toBe(true)
+    expect(shouldSuppressFloatingChrome({
+      currentTab: 'cockpit',
+      keeperDetailMode: false,
+      mobileDrawerOpen: false,
     })).toBe(false)
     expect(shouldSuppressFloatingChrome({
-      currentTab: 'command',
+      currentTab: 'cockpit',
       keeperDetailMode: false,
       mobileDrawerOpen: true,
     })).toBe(true)

@@ -9,7 +9,7 @@ export interface KeeperRuntimeTraceTurnIdentity {
   requested_keeper_turn_id: number | null
   manifest_keeper_turn_ids: number[]
   receipt_turn_counts: number[]
-  max_oas_turn_count: number | null
+  max_agent_core_turn_count: number | null
   provider_lane_resolved_count: number
   provider_attempt_started_count: number
   provider_attempt_finished_count: number
@@ -67,7 +67,6 @@ export const KEEPER_RUNTIME_MANIFEST_SCAN_DIAGNOSTICS_SCHEMA =
   'keeper.runtime_manifest_scan_diagnostics.v1' as const
 
 const KEEPER_RUNTIME_MANIFEST_SCAN_DIAGNOSTIC_KINDS = [
-  'retired_event',
   'unsupported_event',
   'invalid_manifest_row',
   'invalid_json_row',
@@ -86,8 +85,6 @@ export type KeeperRuntimeManifestScanDiagnostics =
   | {
       state: 'available'
       schema: typeof KEEPER_RUNTIME_MANIFEST_SCAN_DIAGNOSTICS_SCHEMA
-      retired_event_count: number
-      retired_event_counts: KeeperRuntimeManifestEventCount[]
       unsupported_event_count: number
       unsupported_event_counts: KeeperRuntimeManifestEventCount[]
       unsupported_event_unattributed_count: number
@@ -104,7 +101,7 @@ export type KeeperRuntimeManifestScanDiagnostics =
 export interface KeeperRuntimeLensTurnClock {
   trace_id: string
   keeper_turn_id: number | null
-  max_oas_turn_count: number | null
+  max_agent_core_turn_count: number | null
   terminal_event_present: boolean
   terminal_event: string | null
   manifest_total_rows: number
@@ -137,22 +134,6 @@ export interface KeeperRuntimeLensPayloadRoleAxis {
 
 export interface KeeperRuntimeLensSourceClockAxis {
   counts: Record<string, number>
-}
-
-export interface KeeperRuntimeLensClaimScopeAxis {
-  present: boolean
-  source: string
-  status: string
-  result: string | null
-  mode: string | null
-  scoped: boolean | null
-  active_goal_ids: string[]
-  effective_goal_ids: string[]
-  fallback_reason: string | null
-  matched_goal_id: string | null
-  excluded_count: number | null
-  claimed_task_id: string | null
-  claimed_goal_id: string | null
 }
 
 export interface KeeperRuntimeLensConfigDriftAxis {
@@ -188,7 +169,6 @@ export interface KeeperRuntimeLensAxes {
   provider_attempt: KeeperRuntimeLensProviderAttemptAxis
   payload_role: KeeperRuntimeLensPayloadRoleAxis
   source_clock: KeeperRuntimeLensSourceClockAxis
-  claim_scope: KeeperRuntimeLensClaimScopeAxis
   config_drift: KeeperRuntimeLensConfigDriftAxis
   context: KeeperRuntimeLensContextAxis
   memory: KeeperRuntimeLensMemoryAxis
@@ -213,7 +193,7 @@ export interface KeeperRuntimeLensLane {
 export interface KeeperRuntimeLensSwimlanes {
   keeper: KeeperRuntimeLensLane
   masc_policy_runtime: KeeperRuntimeLensLane
-  oas_agent: KeeperRuntimeLensLane
+  agent_core_agent: KeeperRuntimeLensLane
   provider: KeeperRuntimeLensLane
   tool_runtime: KeeperRuntimeLensLane
   memory_context: KeeperRuntimeLensLane
@@ -243,7 +223,7 @@ export interface KeeperRuntimeLensClockEdge {
   finished_at: string | null
   trace_id: string
   keeper_turn_id: number | null
-  oas_turn_count: number | null
+  agent_core_turn_count: number | null
   provider_attempt_id: string | null
   tool_batch_id: string | null
   checkpoint_id: string | null
@@ -411,16 +391,13 @@ function parseManifestScanDiagnostics(raw: unknown): KeeperRuntimeManifestScanDi
     }
   }
   if (
-    !Array.isArray(raw.retired_event_counts)
-    || !Array.isArray(raw.unsupported_event_counts)
+    !Array.isArray(raw.unsupported_event_counts)
     || !Array.isArray(raw.samples)
   ) {
     return { state: 'unavailable', schema, error: 'malformed manifest scan diagnostics payload' }
   }
-  const retiredEventCounts = raw.retired_event_counts.map(parseManifestEventCount)
   const unsupportedEventCounts = raw.unsupported_event_counts.map(parseManifestEventCount)
   const samples = raw.samples.map(parseManifestScanDiagnostic)
-  const retiredEventCount = nonNegativeInteger(raw.retired_event_count)
   const unsupportedEventCount = nonNegativeInteger(raw.unsupported_event_count)
   const unsupportedEventUnattributedCount = nonNegativeInteger(
     raw.unsupported_event_unattributed_count,
@@ -428,12 +405,10 @@ function parseManifestScanDiagnostics(raw: unknown): KeeperRuntimeManifestScanDi
   const invalidManifestRowCount = nonNegativeInteger(raw.invalid_manifest_row_count)
   const invalidJsonRowCount = nonNegativeInteger(raw.invalid_json_row_count)
   if (
-    retiredEventCount === null
-    || unsupportedEventCount === null
+    unsupportedEventCount === null
     || unsupportedEventUnattributedCount === null
     || invalidManifestRowCount === null
     || invalidJsonRowCount === null
-    || !allParsed(retiredEventCounts)
     || !allParsed(unsupportedEventCounts)
     || !allParsed(samples)
   ) {
@@ -442,8 +417,6 @@ function parseManifestScanDiagnostics(raw: unknown): KeeperRuntimeManifestScanDi
   return {
     state: 'available',
     schema,
-    retired_event_count: retiredEventCount,
-    retired_event_counts: retiredEventCounts,
     unsupported_event_count: unsupportedEventCount,
     unsupported_event_counts: unsupportedEventCounts,
     unsupported_event_unattributed_count: unsupportedEventUnattributedCount,
@@ -488,7 +461,7 @@ function parseRuntimeTraceTurnIdentity(raw: unknown): KeeperRuntimeTraceTurnIden
     requested_keeper_turn_id: nullableNumberField(obj, 'requested_keeper_turn_id'),
     manifest_keeper_turn_ids: numberListField(obj, 'manifest_keeper_turn_ids'),
     receipt_turn_counts: numberListField(obj, 'receipt_turn_counts'),
-    max_oas_turn_count: nullableNumberField(obj, 'max_oas_turn_count'),
+    max_agent_core_turn_count: nullableNumberField(obj, 'max_agent_core_turn_count'),
     provider_lane_resolved_count: numberField(obj, 'provider_lane_resolved_count'),
     provider_attempt_started_count: numberField(obj, 'provider_attempt_started_count'),
     provider_attempt_finished_count: numberField(obj, 'provider_attempt_finished_count'),
@@ -558,7 +531,7 @@ function parseRuntimeLensTurnClock(raw: unknown, fallbackTraceId: string): Keepe
   return {
     trace_id: stringField(obj, 'trace_id') || fallbackTraceId,
     keeper_turn_id: nullableNumberField(obj, 'keeper_turn_id'),
-    max_oas_turn_count: nullableNumberField(obj, 'max_oas_turn_count'),
+    max_agent_core_turn_count: nullableNumberField(obj, 'max_agent_core_turn_count'),
     terminal_event_present: obj.terminal_event_present === true,
     terminal_event: nullableStringField(obj, 'terminal_event'),
     manifest_total_rows: numberField(obj, 'manifest_total_rows'),
@@ -623,25 +596,6 @@ function parseRuntimeLensSourceClockAxis(raw: unknown): KeeperRuntimeLensSourceC
   return { counts }
 }
 
-function parseRuntimeLensClaimScopeAxis(raw: unknown): KeeperRuntimeLensClaimScopeAxis {
-  const obj = isRecord(raw) ? raw : {}
-  return {
-    present: obj.present === true,
-    source: stringField(obj, 'source') || '(unknown source)',
-    status: stringField(obj, 'status') || 'not_observed',
-    result: nullableStringField(obj, 'result'),
-    mode: nullableStringField(obj, 'mode'),
-    scoped: nullableBooleanField(obj, 'scoped'),
-    active_goal_ids: stringListField(obj, 'active_goal_ids'),
-    effective_goal_ids: stringListField(obj, 'effective_goal_ids'),
-    fallback_reason: nullableStringField(obj, 'fallback_reason'),
-    matched_goal_id: nullableStringField(obj, 'matched_goal_id'),
-    excluded_count: nullableNumberField(obj, 'excluded_count'),
-    claimed_task_id: nullableStringField(obj, 'claimed_task_id'),
-    claimed_goal_id: nullableStringField(obj, 'claimed_goal_id'),
-  }
-}
-
 function parseRuntimeLensConfigDriftAxis(raw: unknown): KeeperRuntimeLensConfigDriftAxis {
   const obj = isRecord(raw) ? raw : {}
   return {
@@ -681,7 +635,6 @@ function parseRuntimeLensAxes(raw: unknown): KeeperRuntimeLensAxes {
     provider_attempt: parseRuntimeLensProviderAttemptAxis(obj.provider_attempt),
     payload_role: parseRuntimeLensPayloadRoleAxis(obj.payload_role),
     source_clock: parseRuntimeLensSourceClockAxis(obj.source_clock),
-    claim_scope: parseRuntimeLensClaimScopeAxis(obj.claim_scope),
     config_drift: parseRuntimeLensConfigDriftAxis(obj.config_drift),
     context: parseRuntimeLensContextAxis(obj.context),
     memory: parseRuntimeTraceMemory(obj.memory),
@@ -718,7 +671,7 @@ function parseRuntimeLensSwimlanes(raw: unknown): KeeperRuntimeLensSwimlanes {
   return {
     keeper: parseRuntimeLensLane(obj.keeper, 'keeper', 'Keeper'),
     masc_policy_runtime: parseRuntimeLensLane(obj.masc_policy_runtime, 'masc_policy_runtime', 'MASC Runtime'),
-    oas_agent: parseRuntimeLensLane(obj.oas_agent, 'oas_agent', 'OAS'),
+    agent_core_agent: parseRuntimeLensLane(obj.agent_core_agent, 'agent_core_agent', 'Agent Core'),
     provider: parseRuntimeLensLane(obj.provider, 'provider', 'Provider'),
     tool_runtime: parseRuntimeLensLane(obj.tool_runtime, 'tool_runtime', 'Tool Runtime'),
     memory_context: parseRuntimeLensLane(obj.memory_context, 'memory_context', 'Memory/Context'),
@@ -757,7 +710,7 @@ function parseRuntimeLensClockEdge(raw: unknown): KeeperRuntimeLensClockEdge {
     finished_at: nullableStringField(obj, 'finished_at'),
     trace_id: stringField(obj, 'trace_id'),
     keeper_turn_id: nullableNumberField(obj, 'keeper_turn_id'),
-    oas_turn_count: nullableNumberField(obj, 'oas_turn_count'),
+    agent_core_turn_count: nullableNumberField(obj, 'agent_core_turn_count'),
     provider_attempt_id: nullableStringField(obj, 'provider_attempt_id'),
     tool_batch_id: nullableStringField(obj, 'tool_batch_id'),
     checkpoint_id: nullableStringField(obj, 'checkpoint_id'),

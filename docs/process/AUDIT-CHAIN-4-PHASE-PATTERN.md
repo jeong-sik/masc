@@ -4,13 +4,14 @@
 > across multiple survey-style audit chains in this repo.
 > Author: Vincent (jeong-sik) with Agent-LLM-A
 > Created: 2026-04-30
-> Source: Q-P0-3 (OAS↔MASC boundary) + Q-P0-2 (TLA+ specs gap)
+> Source: Q-P0-3 (agent core↔MASC boundary) + Q-P0-2 (TLA+ specs gap)
 
 ---
 
 ## 1. Purpose
 
-Two completed audit chains (`docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04*.md` and `docs/audit/TLA-SPECS-GAP-AUDIT-2026-04*.md`) both followed the same 4-phase shape. This doc records the pattern so future surveys can reuse it without re-deriving the structure.
+The TLA specs audit used a four-phase survey and closure shape. This document
+records that current workflow pattern.
 
 This is a **process doc**, not enforced. Survey work doesn't always fit this shape — the pattern is a starting point, not a constraint.
 
@@ -25,7 +26,7 @@ This is a **process doc**, not enforced. Survey work doesn't always fit this sha
 
 ## 3. Worked examples
 
-### 3.1 Q-P0-3: OAS↔MASC boundary
+### 3.1 Q-P0-3: agent core↔MASC boundary
 
 | Phase | PR | Result |
 |---|---|---|
@@ -108,7 +109,7 @@ Aim for 1 Phase 3 PR per cycle when running parallel cron-driven fanout.
 ## 8. Phase 4 deferral discipline
 
 Don't wire ratchets into CI immediately after Phase 3 closes. From observation:
-- OAS chain wired the ratchet at the same time as Phase 3 (#12117 + #12119) because the metric (C4 direct calls) was already at 0.
+- agent core chain wired the ratchet at the same time as Phase 3 (#12117 + #12119) because the metric (C4 direct calls) was already at 0.
 - TLA gap chain defers Phase 4 wire-up because two ratchet metrics need ≥2 Phase 3 implementations to cross the meaningful floor (otherwise the gate trivially passes at first enforcement).
 
 Rule of thumb: **defer hard-gating until at least 2 Phase 3 PRs have moved the floor.** Otherwise the ratchet's first CI run carries no signal.
@@ -122,13 +123,11 @@ Rule of thumb: **defer hard-gating until at least 2 Phase 3 PRs have moved the f
 
 ## 10. References
 
-- `docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04*.md` — Q-P0-3 chain (4/4 MERGED)
 - `docs/audit/TLA-SPECS-GAP-AUDIT-2026-04*.md` — Q-P0-2 chain (Phase 3 closure in #12188)
 - `docs/audit/TLA-PPX-ADOPTION-AUDIT-2026-04.md` — runtime-side PPX adoption (PR #12143 MERGED)
 - `docs/audit/DASHBOARD-OBSERVABILITY-AUDIT-2026-04*.md` — first new-domain application of codified pattern (PR #12202 Phase 1, PR #12208 Phase 2)
 - `docs/audit/AUTH-CREDENTIAL-AUDIT-2026-04*.md` — second new-domain application; surfaced anchor-falsification outcome (PR #12209 Phase 1, PR #12217 Phase 2)
 - `docs/audit/SERVER-HTTP-ROUTES-AUDIT-2026-04*.md` — third new-domain application; surfaced narrow-confirm + narrow-collapse + narrow-discover in a single chain (PR #12213 Phase 1, PR #12218 Phase 2)
-- `scripts/oas-boundary-ratchet.sh` — ratchet template (decreasing-monotonic)
 - `scripts/tla-ppx-ratchet.sh` — ratchet template (increasing-monotonic, PR #12151)
 - `scripts/tla-bug-model-ratchet.sh` — first mixed-direction ratchet (PR #12192)
 - Memory: `feedback_diagnostic_with_measurement_strongly_triggers_root_fix` — measurement matters

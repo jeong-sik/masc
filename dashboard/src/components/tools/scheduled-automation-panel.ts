@@ -18,8 +18,10 @@ import { kSigil, kSlot } from '../keeper-badge'
 import {
   schedPayloadSpec,
   SCHED_TERMINAL,
-  SCHED_TERMINAL_NORMALIZED,
+  SCHED_TERMINAL_SET,
+  parseRecurrenceKind,
   schedStatusSpec,
+  type RecurrenceKind,
   type SchedStatusSpec,
 } from '../v2/schedule-constants'
 
@@ -48,16 +50,16 @@ function actorLabel(actor: DashboardScheduledAutomationActor | null | undefined)
   return kind ? `${actor.id} (${kind})` : actor.id
 }
 
-export function normalizedScheduleStatus(value: string | null | undefined): string {
-  return value?.trim().toLowerCase() ?? ''
+export function scheduleWireValue(value: string | null | undefined): string {
+  return value ?? ''
 }
 
-function normalized(value: string | null | undefined): string {
-  return normalizedScheduleStatus(value)
+function wireValue(value: string | null | undefined): string {
+  return scheduleWireValue(value)
 }
 
 export function automationTone(status: string | null | undefined): StatusChipTone {
-  switch (normalized(status)) {
+  switch (wireValue(status)) {
     case 'running':
     case 'scheduled':
       return 'ok'
@@ -106,7 +108,7 @@ function assertNever(value: never): never {
 
 export function filterMatches(filter: ScheduleFilterKey, request: DashboardScheduledAutomationRequest): boolean {
   if (filter === 'all') return true
-  const status = normalized(effectiveStatus(request))
+  const status = wireValue(effectiveStatus(request))
   switch (filter) {
     case 'scheduled':
       return status === 'scheduled'
@@ -115,7 +117,7 @@ export function filterMatches(filter: ScheduleFilterKey, request: DashboardSched
     case 'running':
       return status === 'running'
     case 'terminal':
-      return SCHED_TERMINAL_NORMALIZED.has(status)
+      return SCHED_TERMINAL_SET.has(status)
     default:
       // Exhaustiveness: a new ScheduleFilterKey must fail to compile here rather
       // than silently fall through to "show all" (Unknown->Permissive-Default).
@@ -135,7 +137,8 @@ function CountChip({ name, count }: { name: string; count: number }) {
 export function recurrenceLabel(request: DashboardScheduledAutomationRequest): string {
   if (request.recurrence_summary?.trim()) return request.recurrence_summary
   const recurrence = request.recurrence
-  const kind = recurrence?.kind ?? request.recurrence_kind ?? 'one_shot'
+  const rawKind = recurrence?.kind ?? request.recurrence_kind
+  const kind = parseRecurrenceKind(rawKind)
   if (kind === 'interval' && typeof recurrence?.interval_sec === 'number') {
     return `every ${recurrence.interval_sec}s`
   }
@@ -155,7 +158,7 @@ export function recurrenceLabel(request: DashboardScheduledAutomationRequest): s
     const timezone = recurrence.timezone
     return `cron ${recurrence.expression}${timezone ? ` ${timezone}` : ''}`
   }
-  return enumLabel(kind)
+  return enumLabel(rawKind)
 }
 
 /**
@@ -197,7 +200,7 @@ function payloadSupportBlocksWake(request: DashboardScheduledAutomationRequest):
 
 function canProjectUpcomingWake(request: DashboardScheduledAutomationRequest): boolean {
   if (payloadSupportBlocksWake(request)) return false
-  const status = normalized(effectiveStatus(request))
+  const status = wireValue(effectiveStatus(request))
   if (NON_UPCOMING_WAKE_STATUS.has(status)) return false
   return true
 }
@@ -386,6 +389,7 @@ function dispatchReceiptRows(
     { label: 'activation_reason', value: receipt.activation_reason },
     { label: 'activation_detail', value: receipt.activation_detail },
     { label: 'post_id', value: receipt.post_id },
+    { label: 'result_delivery_policy', value: receipt.result_delivery_policy },
   ]
   return rows.filter((row): row is { label: string; value: string } => {
     return typeof row.value === 'string' && row.value.trim() !== ''
@@ -1029,7 +1033,7 @@ function DurableSignalItem({
 // collapsed live Korean labels to English fallbacks). Unknown statuses fall
 // back to schedStatusSpec's dim spec.
 function statusSpecForLive(status: string | null | undefined): SchedStatusSpec {
-  return schedStatusSpec(normalized(status))
+  return schedStatusSpec(wireValue(status))
 }
 
 type PayloadSupportState = NonNullable<DashboardScheduledAutomationRequest['payload_support']>
@@ -1453,19 +1457,16 @@ const SCH_CADENCES: readonly SchCadenceDef[] = [
 
 function schTabMatches(tab: SchTabDef, request: DashboardScheduledAutomationRequest): boolean {
   if (tab.statuses === null) return true
-  return tab.statuses.includes(normalized(effectiveStatus(request)))
+  return tab.statuses.includes(wireValue(effectiveStatus(request)))
 }
 
-function recurrenceKind(request: DashboardScheduledAutomationRequest): string | null {
-  const kind = request.recurrence?.kind ?? request.recurrence_kind ?? null
-  const value = normalized(kind)
-  return value === '' ? null : value
+function recurrenceKind(request: DashboardScheduledAutomationRequest): RecurrenceKind | null {
+  return parseRecurrenceKind(request.recurrence?.kind ?? request.recurrence_kind)
 }
 
 function scheduleCadence(request: DashboardScheduledAutomationRequest): SchCadenceKey {
   switch (recurrenceKind(request)) {
     case 'one_shot':
-    case 'oneshot':
       return 'oneshot'
     case 'interval':
       return 'interval'
@@ -1539,7 +1540,7 @@ function SchCadenceSummary({
 }
 
 function isTerminalSchedule(request: DashboardScheduledAutomationRequest): boolean {
-  return SCHED_TERMINAL_NORMALIZED.has(normalized(effectiveStatus(request)))
+  return SCHED_TERMINAL_SET.has(wireValue(effectiveStatus(request)))
 }
 
 function SchPollingStrip({
@@ -1819,12 +1820,14 @@ function SchWakeReceipt({
 function SchedulePrototypeSurface({
   automation,
   selectedScheduleId: controlledSelectedId,
+  selectedRequest: controlledSelectedRequest,
   onSelectSchedule,
 }: {
   automation: DashboardScheduledAutomation
   // Optional controlled selection so a sibling (the operations aside) can drive
   // the same detail overlay. Uncontrolled (internal state) when omitted.
   selectedScheduleId?: string | null
+  selectedRequest?: DashboardScheduledAutomationRequest | null
   onSelectSchedule?: (scheduleId: string | null) => void
 }) {
   const [tab, setTab] = useState<SchTabKey>('scheduled')
@@ -1843,7 +1846,9 @@ function SchedulePrototypeSurface({
   const durableSignalContract = durableWakeSignalContract(automation)
   const durableSignals = durableSignalContract.visibleSignals
   const selected = selectedScheduleId
-    ? rows.find(request => request.schedule_id === selectedScheduleId) ?? null
+    ? controlledSelectedRequest?.schedule_id === selectedScheduleId
+      ? controlledSelectedRequest
+      : rows.find(request => request.schedule_id === selectedScheduleId) ?? null
     : null
   const payloadSummary = payloadSupportSummary(automation)
 
@@ -1975,12 +1980,12 @@ export function ScheduleAside({
   onOpen: (scheduleId: string) => void
 }) {
   const asideStatus = (request: DashboardScheduledAutomationRequest): string =>
-    normalized(effectiveStatus(request))
+    wireValue(effectiveStatus(request))
   const payloadBlocked = requests.filter(payloadSupportBlocksWake)
   const failed = requests.filter(request => asideStatus(request) === 'failed' && !payloadSupportBlocksWake(request))
   const due = requests.filter(request => SCHEDULE_ASIDE_DUE.has(asideStatus(request)) && !payloadSupportBlocksWake(request))
   const recent = requests
-    .filter(request => SCHED_TERMINAL_NORMALIZED.has(asideStatus(request)))
+    .filter(request => SCHED_TERMINAL_SET.has(asideStatus(request)))
     .slice(0, SCHEDULE_ASIDE_RECENT_MAX)
   const needTotal = due.length
 
@@ -2079,12 +2084,14 @@ export function ScheduledAutomationPanel({
   automation,
   variant = 'diagnostics',
   selectedScheduleId: controlledSelectedId,
+  selectedRequest: controlledSelectedRequest,
   onSelectSchedule,
 }: {
   automation?: DashboardScheduledAutomation | null
   variant?: 'diagnostics' | 'v2'
   // Forwarded to the v2 surface so the schedule aside can control the overlay.
   selectedScheduleId?: string | null
+  selectedRequest?: DashboardScheduledAutomationRequest | null
   onSelectSchedule?: (scheduleId: string | null) => void
 }) {
   const [activeFilter, setActiveFilter] = useState<ScheduleFilterKey>('all')
@@ -2102,6 +2109,7 @@ export function ScheduledAutomationPanel({
     return html`<${SchedulePrototypeSurface}
       automation=${automation}
       selectedScheduleId=${controlledSelectedId}
+      selectedRequest=${controlledSelectedRequest}
       onSelectSchedule=${onSelectSchedule}
     />`
   }
@@ -2129,6 +2137,10 @@ export function ScheduledAutomationPanel({
     ]),
   )
   const unsupportedPayloads = automation.payload_support?.unsupported_request_count ?? 0
+  // The server reports null counts when the schedule ledger could not be read.
+  // Rendering those as 0 would claim "no schedules" on a read failure.
+  const countText = (value: number | null | undefined): string =>
+    typeof value === 'number' ? value.toLocaleString() : '—'
   const unknownPayloads = automation.payload_support?.unknown_request_count ?? 0
   const unsupportedKinds = automation.payload_support?.unsupported_kinds ?? []
 
@@ -2142,10 +2154,10 @@ export function ScheduledAutomationPanel({
           <//>
         </div>
         <span class="text-[var(--color-fg-muted)]">
-          활성 <span class="font-mono text-[var(--color-fg-secondary)]">${automation.fsm.active_count.toLocaleString()}</span>
+          활성 <span class="font-mono text-[var(--color-fg-secondary)]">${countText(automation.fsm.active_count)}</span>
         </span>
         <span class="text-[var(--color-fg-muted)]">
-          종료 <span class="font-mono text-[var(--color-fg-secondary)]">${automation.fsm.terminal_count.toLocaleString()}</span>
+          종료 <span class="font-mono text-[var(--color-fg-secondary)]">${countText(automation.fsm.terminal_count)}</span>
         </span>
         <span class=${unsupportedPayloads > 0 ? 'text-[var(--color-danger-fg)]' : 'text-[var(--color-fg-muted)]'}>
           unsupported payload <span class="font-mono">${unsupportedPayloads.toLocaleString()}</span>
@@ -2278,7 +2290,7 @@ export function ScheduledAutomationPanel({
               </aside>
             </div>
             ${automation.truncated
-              ? html`<div class="text-3xs text-[var(--color-fg-muted)]">표시 ${rows.length.toLocaleString()} / 전체 ${automation.request_count.toLocaleString()}건</div>`
+              ? html`<div class="text-3xs text-[var(--color-fg-muted)]">표시 ${rows.length.toLocaleString()} / 전체 ${countText(automation.request_count)}건</div>`
               : null}
           `
         : html`<div class="text-xs text-[var(--color-fg-muted)]">예약 요청 없음</div>`}

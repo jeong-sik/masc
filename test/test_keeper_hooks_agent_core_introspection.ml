@@ -1,0 +1,128 @@
+(** Contract lock for {!Keeper_hooks_agent_core_introspection.hook_introspection_json}.
+
+    The introspection is a hand-maintained static description of the keeper
+    hook slots. This test pins the semantic contract and cross-checks the slots
+    owned by [Keeper_hooks_agent_core.make_hooks] against the actual final hook record,
+    so a runtime slot cannot be removed while the dashboard still reports it as
+    active:
+
+    - lib/keeper/keeper_hooks_agent_core.ml ([make_hooks]) — the keeper_hooks_agent_core slots
+    - lib/keeper/keeper_run_tools.ml — before_turn_params
+
+    [before_turn_params] is assembled by [Keeper_run_tools_hooks], not
+    [make_hooks], so its source/active claim remains a sibling-module contract
+    lock here. *)
+
+open Alcotest
+
+let json = Masc.Keeper_hooks_agent_core_introspection.hook_introspection_json ()
+
+let slots_of (j : Yojson.Safe.t) =
+  match j with
+  | `Assoc fields -> (
+    match List.assoc_opt "slots" fields with
+    | Some (`Assoc slots) -> slots
+    | _ -> failwith "introspection JSON missing `slots` assoc")
+  | _ -> failwith "introspection JSON is not an object"
+
+let slot_field slot_name field =
+  match List.assoc_opt slot_name (slots_of json) with
+  | Some (`Assoc sf) -> List.assoc_opt field sf
+  | _ -> None
+
+let slot_bool slot_name field =
+  match slot_field slot_name field with Some (`Bool b) -> Some b | _ -> None
+
+let slot_string slot_name field =
+  match slot_field slot_name field with Some (`String s) -> Some s | _ -> None
+
+let slot_active slot_name =
+  match slot_bool slot_name "active" with
+  | Some active -> active
+  | None -> failwith ("introspection slot missing active bool: " ^ slot_name)
+
+(* The 8 slots the introspection claims are wired. Retired AGENT_CORE hook slots are
+   absent rather than retained as inactive compatibility surface. *)
+let expected_active =
+  [ "before_turn"
+  ; "before_turn_params"
+  ; "after_turn"
+  ; "post_tool_use"
+  ; "post_tool_use_failure"
+  ; "on_stop"
+  ; "on_error"
+  ; "on_tool_error"
+  ]
+
+let test_slot_set () =
+  let names = List.map fst (slots_of json) |> List.sort compare in
+  let expected = List.sort compare expected_active in
+  check (list string) "introspection exposes exactly the 8 current hook slots" expected names
+
+let test_active_split () =
+  List.iter
+    (fun n -> check (option bool) (n ^ " is active") (Some true) (slot_bool n "active"))
+    expected_active
+
+let test_sources () =
+  (* before_turn_params comes from a sibling module; the remaining active
+     slots are keeper_hooks_agent_core. *)
+  check (option string) "before_turn_params source" (Some "keeper_run_tools")
+    (slot_string "before_turn_params" "source");
+  check (option string) "after_turn source" (Some "keeper_hooks_agent_core")
+    (slot_string "after_turn" "source")
+
+let make_meta_ref (name : string) : Masc.Keeper_meta_contract.keeper_meta ref =
+  let json : Yojson.Safe.t = `Assoc [ "name", `String name ] in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Ok meta -> ref meta
+  | Error e -> failwith ("make_meta_ref: " ^ e)
+
+let make_runtime_hooks () : Agent_core.Hooks.hooks =
+  let base_path =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      ("masc-hook-introspection-" ^ string_of_int (Unix.getpid ()))
+  in
+  let config = Masc.Workspace.default_config base_path in
+  let meta_ref = make_meta_ref "hook-introspection-keeper" in
+  let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
+  Masc.Keeper_hooks_agent_core.make_hooks
+    ~config
+    ~meta_ref
+    ~turn_ctx_cell
+    ~trace_id:"introspection-trace"
+    ~keeper_turn_id:1
+    ~on_after_turn_ordinal:ignore
+    ()
+
+let runtime_slots_of (hooks : Agent_core.Hooks.hooks) =
+  [
+    "before_turn", Option.is_some hooks.before_turn;
+    "after_turn", Option.is_some hooks.after_turn;
+    "post_tool_use", Option.is_some hooks.post_tool_use;
+    "post_tool_use_failure", Option.is_some hooks.post_tool_use_failure;
+    "on_stop", Option.is_some hooks.on_stop;
+    "on_error", Option.is_some hooks.on_error;
+    "on_tool_error", Option.is_some hooks.on_tool_error;
+  ]
+
+let test_runtime_active_claims_match_make_hooks () =
+  make_runtime_hooks ()
+  |> runtime_slots_of
+  |> List.iter (fun (slot_name, active) ->
+    check bool
+      (slot_name ^ " active claim matches make_hooks")
+      active
+      (slot_active slot_name))
+
+let () =
+  Alcotest.run "Keeper_hooks_agent_core_introspection"
+    [ ( "slot contract"
+      , [ test_case "exactly the 8 current slots" `Quick test_slot_set
+        ; test_case "all current slots active" `Quick test_active_split
+        ; test_case "slot sources" `Quick test_sources
+        ; test_case "make_hooks active claims match runtime record" `Quick
+            test_runtime_active_claims_match_make_hooks
+        ] )
+    ]

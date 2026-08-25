@@ -3,7 +3,19 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.21.2)
+(version 0.24.0)
+
+; Format OCaml, and only OCaml. CI's formatting check runs ocamlformat over
+; **/*.ml and **/*.mli (.github/workflows/ocamlformat.yml) and says nothing
+; about dune files, but `dune fmt` formats every language it knows — so it
+; rewrote 18 dune files nobody checks, and the one blank line it added to
+; lib/dune pushed the structure ratchet's then line-count metric past its
+; baseline. The repo's own formatter broke the repo's own gate (#29253).
+; That metric now counts library modules rather than file lines, but scoping
+; formatting to the language CI enforces is still what makes `dune fmt`
+; agree with it.
+(formatting
+ (enabled_for ocaml))
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
@@ -31,16 +43,25 @@
   ; [{>= "3.22" & >= "3.22"}] (audited continuous-loop iter #10).
   ; External dependencies (opam pin)
   (mcp_protocol (>= 1.3.0))
-  (ocaml-webrtc (>= 0.2.3))
   (grpc-direct-core (>= 0.1.0))
   (grpc-direct (>= 0.1.0))
   (ws-direct-core (>= 0.1.0))
   (ws-direct-gluten (>= 0.1.0))
   (ws-direct-eio (>= 0.1.0))
+  ; Native stdout colour capability detection links the system terminfo API.
+  (conf-ncurses :build)
   ; Standard dependencies
   (re (>= 1.10))
   (ptime (>= 1.2))
-  (yojson (>= 2.0))
+  ; Upper bound, not just a floor. yojson 3.0 landed through a floor-only
+  ; constraint on a cache miss and broke every build on main (#28327); the
+  ; repair raised the floor and left 3 -> 4 open (#28543). --locked pins the
+  ; exact version now, so this is the answer for anything that resolves
+  ; without the lock.
+  (yojson
+   (and
+    (>= 3.0)
+    (< 4.0)))
   (otoml (>= 1.0))
   (graphql (>= 0.14.0))
   (graphql_parser (>= 0.14.0))
@@ -56,11 +77,8 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; The exact OAS release pin carries typed recovery, response-shape, and
-  ;; ordered multimodal delivery contracts;
-  ;; its SHA and rationale live in scripts/oas-agent-sdk-pin.sh (SSOT).
-  ;; See check-oas-pin.sh.
-  (agent_sdk (>= 0.231.13))
+  ;; Agent execution is built from packages/agent_core in this repository.
+  ;; It is a private MASC library, not an independently versioned package.
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))
@@ -91,14 +109,6 @@
   optint
   (ocaml-protoc-plugin (>= 4.0))
   (pbrt (and (>= 3.0) (< 4.0)))
-  ; [ctypes] + [ctypes-foreign] removed: zero callers in lib/ bin/ test/
-  ; since webrtc_bindings.ml was removed (per lib/dune:252 comment).
-  ; Confirmed by `rg '\bctypes\b' lib/ bin/ test/` = empty.  Audited
-  ; continuous-loop iter #17 (2026-05-15).  Re-add if native FFI work
-  ; resumes.
-  ; [pbrt_services] removed: no caller in lib/ bin/ test/ since
-  ; continuous-loop iter #11 audit (2026-05-15).  Re-add if gRPC
-  ; service support resumes.
   (h2 (>= 0.13))
   (h2-eio (>= 0.13))
   (alcotest (and :with-test (>= 1.6)))
@@ -107,6 +117,8 @@
   (bisect_ppx (and :with-test (>= 2.8)))
   (mtime (>= 2.0))
   (markup (>= 1.0.3))
+  (uucp (>= 17.0.0))
+  (uuseg (>= 17.0.0))
   (uuidm (>= 0.9.10))
   ; RFC-0004 Phase A0.1 typed SSE event library (lib/sse_event/).
   ; atdgen runs at build-time (codegen for sse_event.atd →
@@ -119,10 +131,6 @@
   ; dashboard/src/schemas/sse_event_generated.ts).  Build-time only;
   ; no runtime linkage.  CI invokes it via dashboard/scripts/gen-sse-types.sh.
   (atdts (and :build (>= 4.2.0)))
-  ; [neo4j_bolt_eio] removed: no caller in lib/ bin/ test/ since
-  ; continuous-loop iter #12 audit (2026-05-15).  Same shape as
-  ; pbrt_services (iter #11): declared but never imported.  Re-add
-  ; when Neo4j Bolt support resumes.
   ; OpenTelemetry observability + OTLP exporter.  MASC consumes the
   ; [opentelemetry.client] findlib library exposed by 0.13; newer package
   ; families use a different public library layout.

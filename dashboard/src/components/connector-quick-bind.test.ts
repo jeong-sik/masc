@@ -7,9 +7,16 @@ import {
   resetQuickBindState,
   channelIdPlaceholder,
 } from './connector-quick-bind'
-import type { GateKeeperInfo } from '../api/gate'
+import type { GateKeeper, KeeperListing } from '../api/gate-keepers'
 
-const mkKeeper = (name: string): GateKeeperInfo => ({ name } as GateKeeperInfo)
+const mkKeeper = (name: string): GateKeeper => ({
+  name,
+  runtimeLabel: '',
+  status: 'idle',
+})
+
+// Default: the server served the whole directory.
+const WHOLE: KeeperListing = { total: 2, limit: 200, truncated: false }
 
 const flushUi = async () => {
   for (let i = 0; i < 4; i++) await Promise.resolve()
@@ -28,12 +35,12 @@ describe('QuickBindForm', () => {
   })
 
   it('renders nothing when there are no keepers', () => {
-    render(html`<${QuickBindForm} connectorId="discord" keepers=${[]} />`, container)
+    render(html`<${QuickBindForm} connectorId="discord" keepers=${[]} listing=${WHOLE} />`, container)
     expect(container.querySelector('[data-quick-bind]')).toBeNull()
   })
 
   it('renders a channel input + keeper select + Bind button', () => {
-    render(html`<${QuickBindForm} connectorId="discord" keepers=${[mkKeeper('kpr-a'), mkKeeper('kpr-b')]} />`, container)
+    render(html`<${QuickBindForm} connectorId="discord" keepers=${[mkKeeper('kpr-a'), mkKeeper('kpr-b')]} listing=${WHOLE} />`, container)
     expect(container.querySelector('.v2-connector-quick-bind')).not.toBeNull()
     const form = container.querySelector('[data-quick-bind="discord"]')!
     expect(form.querySelector('input[placeholder*="1234567890"]')).toBeTruthy()
@@ -46,7 +53,7 @@ describe('QuickBindForm', () => {
   })
 
   it('Bind button disabled while channel ID is empty', () => {
-    render(html`<${QuickBindForm} connectorId="discord" keepers=${[mkKeeper('kpr-a')]} />`, container)
+    render(html`<${QuickBindForm} connectorId="discord" keepers=${[mkKeeper('kpr-a')]} listing=${WHOLE} />`, container)
     const form = container.querySelector('[data-quick-bind="discord"]')!
     const submit = Array.from(form.querySelectorAll('button')).find(b => b.textContent?.includes('Bind')) as HTMLButtonElement
     expect(submit.disabled).toBe(true)
@@ -56,7 +63,7 @@ describe('QuickBindForm', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), { status: 200 }),
     )
-    render(html`<${QuickBindForm} connectorId="discord" keepers=${[mkKeeper('kpr-a')]} />`, container)
+    render(html`<${QuickBindForm} connectorId="discord" keepers=${[mkKeeper('kpr-a')]} listing=${WHOLE} />`, container)
     const form = container.querySelector('[data-quick-bind="discord"]')!
     const input = form.querySelector('input') as HTMLInputElement
     input.value = '1234567890'
@@ -81,7 +88,7 @@ describe('QuickBindForm', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), { status: 200 }),
     )
-    render(html`<${QuickBindForm} connectorId="slack" keepers=${[mkKeeper('kpr-a')]} />`, container)
+    render(html`<${QuickBindForm} connectorId="slack" keepers=${[mkKeeper('kpr-a')]} listing=${WHOLE} />`, container)
     const form = container.querySelector('[data-quick-bind="slack"]')!
     const input = form.querySelector('input') as HTMLInputElement
     input.value = 'C09TK9L4DV4'
@@ -109,7 +116,7 @@ describe('QuickBindForm', () => {
       if (String(url).includes('/api/v1/gate/connector/bind')) bindRequested = true
       return Promise.resolve(new Response(JSON.stringify({ error: 'unknown keeper' }), { status: 404 }))
     })
-    render(html`<${QuickBindForm} connectorId="discord" keepers=${[mkKeeper('kpr-a')]} />`, container)
+    render(html`<${QuickBindForm} connectorId="discord" keepers=${[mkKeeper('kpr-a')]} listing=${WHOLE} />`, container)
     const form = container.querySelector('[data-quick-bind="discord"]')!
     const input = form.querySelector('input') as HTMLInputElement
     input.value = '1234567890123456789'
@@ -137,7 +144,7 @@ describe('QuickBindForm', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), { status: 200 }),
     )
-    render(html`<${QuickBindForm} connectorId="discord" keepers=${[mkKeeper('kpr-a')]} />`, container)
+    render(html`<${QuickBindForm} connectorId="discord" keepers=${[mkKeeper('kpr-a')]} listing=${WHOLE} />`, container)
     const form = container.querySelector('[data-quick-bind="discord"]')!
     const input = form.querySelector('input') as HTMLInputElement
     input.value = '1234567890123456789'
@@ -158,7 +165,7 @@ describe('QuickBindForm', () => {
       if (String(url).includes('/api/v1/gate/connector/bind')) bindPosts += 1
       return new Promise<Response>(resolve => { deferred.push(resolve) })
     })
-    render(html`<${QuickBindForm} connectorId="discord" keepers=${[mkKeeper('kpr-a')]} />`, container)
+    render(html`<${QuickBindForm} connectorId="discord" keepers=${[mkKeeper('kpr-a')]} listing=${WHOLE} />`, container)
     const form = container.querySelector('[data-quick-bind="discord"]')!
     const input = form.querySelector('input') as HTMLInputElement
     input.value = '1234567890123456789'
@@ -178,7 +185,7 @@ describe('QuickBindForm', () => {
   })
 
   it('renders the connector-specific placeholder (Slack shows C-prefix example, not Discord snowflake)', () => {
-    render(html`<${QuickBindForm} connectorId="slack" keepers=${[mkKeeper('kpr-a')]} />`, container)
+    render(html`<${QuickBindForm} connectorId="slack" keepers=${[mkKeeper('kpr-a')]} listing=${WHOLE} />`, container)
     const input = container.querySelector('[data-quick-bind="slack"] input') as HTMLInputElement
     const placeholder = input.getAttribute('placeholder') ?? ''
     expect(placeholder).toContain('C0123ABCD')
@@ -213,5 +220,50 @@ describe('channelIdPlaceholder', () => {
 
   it('unknown connector falls through to a neutral example', () => {
     expect(channelIdPlaceholder('xyz-unknown')).toContain('1234567890')
+  })
+})
+
+describe('QuickBindForm — truncated keeper directory', () => {
+  let container: HTMLElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    resetQuickBindState()
+  })
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('warns that the dropdown is not the whole directory', () => {
+    // masc#29077: with 129 keepers the dropdown listed the alphabetically
+    // first 50 — almost all throwaway benchmark keepers — so the operational
+    // ones could not be selected at all, and nothing on screen said why.
+    render(
+      html`<${QuickBindForm}
+        connectorId="discord"
+        keepers=${[mkKeeper('kpr-a')]}
+        listing=${{ total: 129, limit: 50, truncated: true }}
+      />`,
+      container,
+    )
+
+    const notice = container.querySelector('[data-testid="quick-bind-truncated"]')
+    expect(notice).not.toBeNull()
+    expect(notice?.textContent).toContain('129')
+    expect(notice?.textContent).toContain('50')
+  })
+
+  it('stays quiet when every keeper is selectable', () => {
+    render(
+      html`<${QuickBindForm}
+        connectorId="discord"
+        keepers=${[mkKeeper('kpr-a')]}
+        listing=${WHOLE}
+      />`,
+      container,
+    )
+
+    expect(container.querySelector('[data-testid="quick-bind-truncated"]')).toBeNull()
   })
 })

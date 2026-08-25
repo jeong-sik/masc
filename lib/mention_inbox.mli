@@ -1,6 +1,6 @@
 (** Mention_inbox — JSONL-based persistent mention inbox
 
-    Stores @mention events in `.masc/mention_inbox.jsonl`.
+    Stores [@mention] events in `.masc/mention_inbox.jsonl`.
     Each mention is an append-only record with read/unread tracking.
 
     @since Phase 3A — Keeper Deliberation Engine
@@ -18,19 +18,15 @@ type mention_record = {
   read_at: float;          (** 0.0 = unread, otherwise Unix timestamp when read *)
 }
 
-val generate_mention_id : unit -> string
 (** Generate a unique mention ID with "m-" prefix. *)
 
 val mention_record_to_json : mention_record -> Yojson.Safe.t
 (** Serialize a mention record to JSON. *)
 
-val mention_record_of_json : Yojson.Safe.t -> mention_record option
 (** Deserialize a mention record from JSON. Returns None on parse failure. *)
 
-val inbox_path : Workspace.config -> string
 (** Returns the path to `.masc/mention_inbox.jsonl`. *)
 
-val append_mention : ?task_id:string -> Workspace.config -> mention_record -> unit
 (** Append a mention record to the JSONL file.
 
     If [~task_id] is provided and the backlog reports the task as terminal
@@ -43,5 +39,4 @@ val read_mentions : Workspace.config -> target_agent:string -> limit:int -> ment
 val unread_count : Workspace.config -> target_agent:string -> int
 (** Count unread mentions (where read_at = 0.0) for a target agent. *)
 
-val mark_read : Workspace.config -> mention_id:string -> unit
 (** Set read_at to current time for the given mention ID. *)

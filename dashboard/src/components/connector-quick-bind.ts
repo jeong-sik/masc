@@ -11,7 +11,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import type { GateKeeperInfo } from '../api/gate'
+import type { GateKeeper, KeeperListing } from '../api/gate-keepers'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { Select } from './common/select'
@@ -26,7 +26,7 @@ interface FormEntry {
 
 const formState = signal<Record<string, FormEntry>>({})
 
-function getEntry(connectorId: string, keepers: GateKeeperInfo[]): FormEntry {
+function getEntry(connectorId: string, keepers: readonly GateKeeper[]): FormEntry {
   const existing = formState.value[connectorId]
   if (existing) return existing
   const firstKeeper = keepers[0]?.name ?? ''
@@ -85,9 +85,10 @@ async function submit(connectorId: string, entry: FormEntry) {
   setEntry(connectorId, ok ? { channelId: '', submitting: false } : { submitting: false })
 }
 
-export function QuickBindForm({ connectorId, keepers }: {
+export function QuickBindForm({ connectorId, keepers, listing }: {
   connectorId: string
-  keepers: GateKeeperInfo[]
+  keepers: readonly GateKeeper[]
+  listing: KeeperListing
 }) {
   if (keepers.length === 0) return null
   const entry = getEntry(connectorId, keepers)
@@ -148,6 +149,18 @@ export function QuickBindForm({ connectorId, keepers }: {
       >
         ${entry.submitting ? '연결 중...' : '🔗 Bind'}
       <//>
+      ${listing.truncated
+        ? html`
+            <p
+              class="w-full text-3xs text-[var(--color-status-warn)]"
+              data-testid="quick-bind-truncated"
+            >
+              키퍼 ${listing.total}개 중 ${listing.limit}개만 목록에 있어요 —
+              이름순으로 뒤쪽 ${listing.total - listing.limit}개는 여기서 고를
+              수 없어요.
+            </p>
+          `
+        : null}
     </div>
   `
 }

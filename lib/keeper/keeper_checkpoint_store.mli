@@ -1,69 +1,60 @@
-(** Keeper checkpoint store — OAS checkpoint persistence, OAS
-    history archive, and SDK error classification. *)
+(** Keeper checkpoint store — AGENT_CORE checkpoint persistence, AGENT_CORE
+    history archive, and agent-core error classification. *)
 
-(** Path of the canonical OAS checkpoint file
+(** Path of the canonical AGENT_CORE checkpoint file
     [session_dir/<session_id>.json]. *)
-val oas_checkpoint_path :
+val agent_core_checkpoint_path :
   session_dir:string -> session_id:string -> string
 
-(** [oas-snapshot-] prefix on OAS history archive entries. *)
-val oas_history_prefix : string
-
-(** [.json] suffix on OAS history archive entries. *)
-val oas_history_suffix : string
-
-(** [true] iff [filename] is an OAS history archive file. *)
-val is_oas_history_file : string -> bool
-
-(** Sorted-descending list of OAS history archive filenames in
+(** [agent-core-snapshot-] prefix on AGENT_CORE history archive entries. *)
+(** [.json] suffix on AGENT_CORE history archive entries. *)
+(** [true] iff [filename] is an AGENT_CORE history archive file. *)
+(** Sorted-descending list of AGENT_CORE history archive filenames in
     [session_dir]. *)
-val list_oas_history_files : session_dir:string -> string list
+val list_agent_core_history_files : session_dir:string -> string list
 
-(** Number of OAS history archive entries retained after a save. *)
-val max_oas_history_retained : int
-
-(** Path of an OAS history archive entry within [session_dir]. *)
-val oas_history_path :
+(** Number of AGENT_CORE history archive entries retained after a save. *)
+(** Path of an AGENT_CORE history archive entry within [session_dir]. *)
+val agent_core_history_path :
   session_dir:string -> snapshot_id:string -> string
 
 (** Session-scoped context key carrying the keeper generation on a
     checkpoint. Single definition of the wire literal; every writer and
     reader (context core, tests) must reference this value so the key
     cannot drift between sites. *)
-val keeper_generation_context_key : string
 val compaction_commit_count_context_key : string
 
 val compaction_commit_count_of_context :
-  Agent_sdk.Context.t -> (int, string) result
+  Agent_core.Context.t -> (int, string) result
 (** Read the checkpoint-authoritative compaction commit count. Absence means
     zero for a checkpoint that has not yet been compacted; malformed or
     negative values fail closed. *)
 
-(** Compose an OAS history archive snapshot id from a checkpoint
+(** Compose an AGENT_CORE history archive snapshot id from a checkpoint
     (created_at_ms + keeper_generation suffix). *)
-val oas_history_snapshot_id_of_checkpoint :
-  Agent_sdk.Checkpoint.t -> string
+val agent_core_history_snapshot_id_of_checkpoint :
+  Agent_core.Checkpoint.t -> string
 
-(** Save [ckpt] to the OAS history archive in [session_dir],
-    pruning to [max_oas_history_retained] entries. Logs and
+(** Save [ckpt] to the AGENT_CORE history archive in [session_dir],
+    pruning to [max_agent_core_history_retained] entries. Logs and
     swallows write failures. *)
-val save_oas_history :
-  session_dir:string -> Agent_sdk.Checkpoint.t -> unit
+val save_agent_core_history :
+  session_dir:string -> Agent_core.Checkpoint.t -> unit
 
-(** Delete OAS history archive entries by [snapshot_ids]. Returns
+(** Delete AGENT_CORE history archive entries by [snapshot_ids]. Returns
     [(deleted, missing)] in input-order, with [missing] containing
     every snapshot id whose file was absent OR removal failed. An id
     that is not one real path segment (empty / "." / ".." / separator /
     NUL) can never name a history entry and is reported [missing]
     without touching the filesystem. *)
-val delete_oas_history_files :
+val delete_agent_core_history_files :
   session_dir:string ->
   snapshot_ids:string list ->
   string list * string list
 
 (** Relation between an incoming checkpoint and the current known high
-    watermark for the same canonical OAS checkpoint path. *)
-type save_oas_relation = [ `Cold | `Forward | `Equal ]
+    watermark for the same canonical AGENT_CORE checkpoint path. *)
+type save_agent_core_relation = [ `Cold | `Forward | `Equal ]
 
 (** Classified checkpoint save result.
 
@@ -71,8 +62,8 @@ type save_oas_relation = [ `Cold | `Forward | `Equal ]
     untouched because accepting [incoming_turn_count] would move memory
     behind the known high watermark. It must not be treated as keeper
     turn failure, pause, or stop. *)
-type save_oas_outcome =
-  | Saved of { relation : save_oas_relation; turn_count : int }
+type save_agent_core_outcome =
+  | Saved of { relation : save_agent_core_relation; turn_count : int }
   | Stale_noop of { incoming_turn_count : int; known_turn_count : int }
 
 (** Save [ckpt] in one locked disk-SSOT transaction. A missing [session_dir]
@@ -86,10 +77,10 @@ type save_oas_outcome =
     persisted, but this is not a keeper lifecycle failure. Equal turn_count
     re-saves pass. A corrupt or unreadable existing checkpoint fails closed and
     is never treated as a cold store. *)
-val save_oas_classified :
+val save_agent_core_classified :
   session_dir:string ->
-  Agent_sdk.Checkpoint.t ->
-  (save_oas_outcome, string) result
+  Agent_core.Checkpoint.t ->
+  (save_agent_core_outcome, string) result
 
 (** Run [f] under the stable checkpoint lock for [session_dir]. The lock inode
     is a sibling of the session subtree, so deleting/recreating that subtree
@@ -99,48 +90,46 @@ val with_session_lock :
   session_dir:string -> (string -> 'a) -> ('a, string) result
 
 (** Load failure classification used by callers to distinguish
-    cold-start absence from real I/O / parse / SDK errors. *)
+    cold-start absence from real I/O / parse / agent-core errors. *)
 type checkpoint_load_error =
   | Not_found
   | Store_error of string
   | Parse_error of string
   | Io_error of string
-  | Sdk_other_error of string
+  | Agent_core_error of string
 
-(** Project an [Agent_sdk.Error.sdk_error] to [checkpoint_load_error].
+(** Project an [Agent_core.Error.t] to [checkpoint_load_error].
 
     RFC-0089 G4: this no longer classifies [Not_found] from string-matched
     [FileOpFailed.detail]. Cold-start "checkpoint absent" is detected at
     the OS boundary via a typed [Fs_compat.file_exists] check *before* any
-    load, so any [sdk_error] reaching this function is a real
-    I/O / parse / SDK fault and routes accordingly. *)
-val classify_sdk_error :
-  Agent_sdk.Error.sdk_error -> checkpoint_load_error
+    load, so any [core_error] reaching this function is a real
+    I/O / parse / agent-core fault and routes accordingly. *)
+val classify_core_error :
+  Agent_core.Error.t -> checkpoint_load_error
 
-(** Load a single OAS history archive entry. Returns [Not_found]
+(** Load a single AGENT_CORE history archive entry. Returns [Not_found]
     when the file does not exist or [snapshot_id] is not one real path
-    segment (such an id can never name a history entry); classifies SDK
-    errors via [classify_sdk_error]. *)
-val load_oas_history_file :
+    segment (such an id can never name a history entry); classifies Agent Core
+    errors via [classify_core_error]. *)
+val load_agent_core_history_file :
   session_dir:string ->
   snapshot_id:string ->
-  (Agent_sdk.Checkpoint.t, checkpoint_load_error) result
+  (Agent_core.Checkpoint.t, checkpoint_load_error) result
 
-(** Load the canonical OAS checkpoint for [session_id]. One read path
+(** Load the canonical AGENT_CORE checkpoint for [session_id]. One read path
     for Eio and non-Eio contexts: presence is a typed
     [Fs_compat.file_exists] check, the read is Eio-native when the fs
     capability is installed, and the JSON decode runs off the calling
     fiber. A [session_id] that is not one real path segment is refused
-    as [Store_error] (the same rejection the SDK store applied). *)
-val load_oas :
+    as [Store_error] (the same rejection agent core store applied). *)
+val load_agent_core :
   session_dir:string ->
   session_id:string ->
-  (Agent_sdk.Checkpoint.t, checkpoint_load_error) result
+  (Agent_core.Checkpoint.t, checkpoint_load_error) result
 
 type checkpoint_identity_error =
   | Session_id_invalid of string
-  | Generation_missing
-  | Generation_not_integer
   | Ref_create_failed of Keeper_checkpoint_ref.create_error
 
 type checkpoint_ref_load_error =
@@ -157,9 +146,6 @@ type checkpoint_ref_load_error =
     derived from one immutable byte snapshot. *)
 type exact_checkpoint_snapshot
 
-val exact_snapshot_checkpoint :
-  exact_checkpoint_snapshot -> Agent_sdk.Checkpoint.t
-
 val exact_snapshot_reference :
   exact_checkpoint_snapshot -> Keeper_checkpoint_ref.t
 
@@ -173,7 +159,7 @@ val exact_snapshot_of_canonical_bytes :
   (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
 
 (** Load an exact canonical checkpoint snapshot under the session lock. *)
-val load_oas_exact_snapshot :
+val load_agent_core_exact_snapshot :
   session_dir:string ->
   session_id:string ->
   (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
@@ -181,10 +167,10 @@ val load_oas_exact_snapshot :
 (** Load one canonical checkpoint and its exact source identity from the same
     locked byte snapshot. No size, mtime, timestamp, or process cache
     participates in the identity. *)
-val load_oas_with_ref :
+val load_agent_core_with_ref :
   session_dir:string ->
   session_id:string ->
-  ( Agent_sdk.Checkpoint.t * Keeper_checkpoint_ref.t
+  ( Agent_core.Checkpoint.t * Keeper_checkpoint_ref.t
   , checkpoint_ref_load_error )
   result
 
@@ -246,37 +232,37 @@ type checkpoint_installation =
     remain typed [auxiliary] facts beside the exact installed reference; they
     never become install failures or retry signals. An exception before commit
     is re-raised with its original raw backtrace. *)
-val save_oas_if_source :
+val save_agent_core_if_source :
   session_dir:string ->
   expected_source_ref:Keeper_checkpoint_ref.t ->
-  Agent_sdk.Checkpoint.t ->
+  Agent_core.Checkpoint.t ->
   checkpoint_installation
 
 module For_testing : sig
-  val save_oas_if_source_with_observer :
+  val save_agent_core_if_source_with_observer :
     on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
     session_dir:string ->
     expected_source_ref:Keeper_checkpoint_ref.t ->
-    Agent_sdk.Checkpoint.t ->
+    Agent_core.Checkpoint.t ->
     checkpoint_installation
 
-  val save_oas_if_source_with_release_failure :
+  val save_agent_core_if_source_with_release_failure :
     release_failure:File_lock_eio.durable_lock_error ->
     on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
     session_dir:string ->
     expected_source_ref:Keeper_checkpoint_ref.t ->
-    Agent_sdk.Checkpoint.t ->
+    Agent_core.Checkpoint.t ->
     checkpoint_installation
 
-  val save_oas_if_source_with_acquire_failure :
+  val save_agent_core_if_source_with_acquire_failure :
     acquire_failure:File_lock_eio.durable_lock_error ->
     on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
     session_dir:string ->
     expected_source_ref:Keeper_checkpoint_ref.t ->
-    Agent_sdk.Checkpoint.t ->
+    Agent_core.Checkpoint.t ->
     checkpoint_installation
 
-  val save_oas_if_source_with_writer :
+  val save_agent_core_if_source_with_writer :
     write_checkpoint_bytes:
       (on_durable_commit:(unit -> unit) ->
        ownership_root:string ->
@@ -286,14 +272,14 @@ module For_testing : sig
     on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
     session_dir:string ->
     expected_source_ref:Keeper_checkpoint_ref.t ->
-    Agent_sdk.Checkpoint.t ->
+    Agent_core.Checkpoint.t ->
     checkpoint_installation
 
-  val save_oas_if_source_with_post_commit_unwind :
+  val save_agent_core_if_source_with_post_commit_unwind :
     post_commit_unwind:(unit -> unit) ->
     on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
     session_dir:string ->
     expected_source_ref:Keeper_checkpoint_ref.t ->
-    Agent_sdk.Checkpoint.t ->
+    Agent_core.Checkpoint.t ->
     checkpoint_installation
 end

@@ -23,7 +23,7 @@ import { isCalendarVisible, queueDrainStatusOf } from './queue-drain-status'
 import {
   SCHED_CADENCE,
   SCHED_CADENCE_ORDER,
-  SCHED_TERMINAL_NORMALIZED,
+  SCHED_TERMINAL_SET,
   cadenceOfRecurrenceKind,
   parseRecurrenceKind,
   schedPayloadSpec,
@@ -36,12 +36,8 @@ const WEEKDAY_KO: readonly string[] = ['일', '월', '화', '수', '목', '금',
 
 // ── derivations ────────────────────────────────────────────────────
 
-function normalizedStatus(request: DashboardScheduledAutomationRequest): string {
-  return request.status.trim().toLowerCase()
-}
-
 export function isTerminalRequest(request: DashboardScheduledAutomationRequest): boolean {
-  return SCHED_TERMINAL_NORMALIZED.has(normalizedStatus(request))
+  return SCHED_TERMINAL_SET.has(request.status)
 }
 
 /** Operator cadence for a request, or `null` when the recurrence kind is not one

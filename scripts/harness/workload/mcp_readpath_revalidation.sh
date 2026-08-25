@@ -119,11 +119,9 @@ start_mode_server() {
 
   local grpc_enabled="0"
   local ws_enabled="1"
-  local webrtc_enabled="1"
   case "$mode" in
     http_only)
       ws_enabled="0"
-      webrtc_enabled="0"
       ;;
     default)
       ;;
@@ -134,12 +132,9 @@ start_mode_server() {
   esac
 
   (
-    export MASC_DASHBOARD_BRIEFING_MODELS="disabled"
     export MASC_GRPC_ENABLED="$grpc_enabled"
     export MASC_GRPC_PORT="$grpc_port"
     export MASC_WS_ENABLED="$ws_enabled"
-    export MASC_WS_PORT="$ws_port"
-    export MASC_WEBRTC_ENABLED="$webrtc_enabled"
     exec "$SERVER_EXE" --host=127.0.0.1 --port "$port" --base-path "$BASE_PATH"
   ) >"$log_file" 2>&1 &
   printf '%s\n' "$!"
@@ -461,13 +456,11 @@ run_mode() {
     health_mode_ok="$(printf '%s' "$health_json" | jq -r --arg mode "$mode" '
       if $mode == "http_only" then
         ((.transport.grpc.enabled == false)
-          and (.transport.websocket.enabled == false)
-          and (.transport.webrtc.enabled == false)) | tostring
+          and (.transport.websocket.enabled == false)) | tostring
       else
         ((.transport.grpc.enabled == false)
           and (.transport.websocket.enabled == true)
-          and (.transport.websocket.listening == true)
-          and (.transport.webrtc.enabled == true)) | tostring
+          and (.transport.websocket.listening == true)) | tostring
       end
     ')"
   else

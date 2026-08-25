@@ -2,7 +2,7 @@
 
     Orchestrates keeper turns by building domain-specific system prompt
     configuration and delegating to {!Keeper_agent_run.run_turn} which
-    owns the full OAS-backed context lifecycle (checkpoint, prompt state,
+    owns the full AGENT_CORE-backed context lifecycle (checkpoint, prompt state,
     Agent.run).
 
     Sub-modules:
@@ -36,52 +36,6 @@ let restart_keepalive_after_message_turn ctx meta =
       meta.name
       (start_keepalive_outcome_to_string outcome)
 ;;
-
-let turn_cost_for_result (result : Keeper_agent_run.run_result) : float =
-  (* cost_usd is accounted independently of token-count trust (token⊥cost). The
-     provider's authoritative cost field is used verbatim; only missing cost
-     uses the aggregate identity 0.0. *)
-  Keeper_unified_metrics.estimate_usage_cost_usd result.usage
-
-let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
-    (result : Keeper_agent_run.run_result) : keeper_meta =
-  let now_ts = Time_compat.now () in
-  let turn_cost = turn_cost_for_result result in
-  let observed_input_tokens = result.usage.input_tokens in
-  let observed_output_tokens = result.usage.output_tokens in
-  let observed_total_tokens = Keeper_context_runtime.total_tokens result.usage in
-  let updated_meta = {
-    meta with
-    updated_at = now_iso ();
-    runtime =
-      {
-        meta.runtime with
-        usage =
-          with_last_reported_usage
-            {
-              meta.runtime.usage with
-              total_turns = meta.runtime.usage.total_turns + 1;
-              total_input_tokens =
-                meta.runtime.usage.total_input_tokens + observed_input_tokens;
-              total_output_tokens =
-                meta.runtime.usage.total_output_tokens + observed_output_tokens;
-              total_tokens =
-                meta.runtime.usage.total_tokens + observed_total_tokens;
-              total_cost_usd = meta.runtime.usage.total_cost_usd +. turn_cost;
-              last_turn_ts = now_ts;
-              last_latency_ms = latency_ms;
-            }
-            ~usage_reported:result.usage_reported
-            ~input_tokens:observed_input_tokens
-            ~output_tokens:observed_output_tokens
-            ~total_tokens:observed_total_tokens
-            ~observed_at:now_ts;
-      };
-  } in
-  Keeper_unified_metrics.record_keeper_total_cost_usd
-    ~keeper_name:updated_meta.name
-    ~total_cost_usd:updated_meta.runtime.usage.total_cost_usd;
-  updated_meta
 
 let direct_turn_observation ~(config : Workspace.config) (meta : keeper_meta) :
     Keeper_world_observation.world_observation =
@@ -265,19 +219,43 @@ let turn_resources_error ~surface failure =
        ])
 ;;
 
+let require_registered_keeper ~base_path ~name ~action =
+  if Keeper_registry.is_registered ~base_path name
+  then Ok ()
+  else
+    Error
+      (Printf.sprintf
+         "keeper %s is not registered in this server process; retry shortly or start it before %s"
+         name
+         action)
+;;
+
 let preflight_keeper_invocation ctx request =
   let name = Keeper_invocation_contract.target_name request in
   match ensure_keeper_exists ~ctx ~name with
   | Error e -> Error e
   | Ok meta ->
-    resolve_turn_runtime_id meta
-    |> Result.map (fun _ -> request)
+    Result.bind
+      (require_registered_keeper
+         ~base_path:ctx.config.base_path
+         ~name
+         ~action:"delegating work")
+      (fun () ->
+         resolve_turn_runtime_id meta
+         |> Result.map (fun _ -> request))
 ;;
 
-let preflight_keeper_msg ctx message =
-  let request = Keeper_invocation_contract.direct_message_request message in
-  preflight_keeper_invocation ctx request
-  |> Result.map (fun _ -> message)
+(* The message path resolves the keeper one call earlier and carries the
+   effective meta here, so this preflight validates without a second disk
+   read (RFC-0371 B6). The delegate path below still reads: it has no
+   resolution step of its own. *)
+let preflight_keeper_msg_resolved ~base_path ~(meta : keeper_meta) message =
+  Result.bind
+    (require_registered_keeper
+       ~base_path
+       ~name:meta.name
+       ~action:"sending a message")
+    (fun () -> resolve_turn_runtime_id meta |> Result.map (fun _ -> message))
 ;;
 
 let preflight_keeper_delegate ctx request =
@@ -295,8 +273,9 @@ let preflight_keeper_delegate ctx request =
     [docs/audit/2026-06-13-masc-fsm-drift-audit.md] (finding #3).  This
     wrapper emits the canonical start sequence
     [Idle -> Phase_gating -> Runtime_routing -> Awaiting_provider -> Streaming]
-    before invoking [f], then records the matching terminal state
-    ([Done], [Failed], or [Cancelled]) from the result or exception.
+    before invoking [f], then records [Failed] or [Cancelled] from the error
+    boundary. Successful terminal transitions are owned by the shared
+    [Keeper_unified_turn_success] pipeline.
 
     The wrapper is intentionally thin: it does not duplicate metrics,
     receipt, or meta writes — those remain in
@@ -326,22 +305,12 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
   try
     let result = f () in
     (match result with
-     | Ok _ ->
-       Keeper_turn_fsm.emit_transition
-         ~keeper_name
-         ~turn_id
-         ~prev:Keeper_turn_fsm.Streaming
-         Keeper_turn_fsm.Completing;
-       Keeper_turn_fsm.emit_transition
-         ~keeper_name
-         ~turn_id
-         ~prev:Keeper_turn_fsm.Completing
-         Keeper_turn_fsm.Done
+     | Ok _ -> ()
      | Error err ->
        let reason =
          Keeper_turn_fsm.Failure_provider_error
-           { kind = Keeper_agent_error.sdk_error_kind err
-           ; detail = Agent_sdk.Error.to_string err
+           { kind = Agent_core.Error.(category err |> category_label)
+           ; detail = Agent_core.Error.to_string err
            }
        in
        Keeper_turn_fsm.emit_transition
@@ -374,17 +343,19 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
 (* -- handle_keeper_msg: orchestrator ---------------------------------------- *)
 
 (* Body of [handle_keeper_msg], runnable only while holding the keeper's
-   turn slot ([Keeper_turn_admission]). Covers [Keeper_agent_run.run_turn]
-   AND the post-turn meta/lifecycle writes — both must stay inside the slot
+   Keeper Owner child. Covers [Keeper_agent_run.run_turn]
+   AND the post-turn meta/lifecycle writes — both must stay inside the child
    or a concurrent turn can clobber the checkpoint and regress
    [total_turns] (2026-06-10 RCA, RFC-0225 §1).
 
-   Precondition: the caller holds the keeper's turn slot. Public direct-message
+   Precondition: the caller runs in the Keeper Owner child. Public direct-message
    and typed-delegate entrypoints construct a valid invocation request before
    reaching this function. *)
 let run_keeper_invocation_turn_admitted_inner
       ?on_text_delta
       ?on_event
+      ?on_tool_result_ready
+      ?approval_gate
       ?event_bus
       ?continuation_channel
       ~surface
@@ -406,9 +377,9 @@ let run_keeper_invocation_turn_admitted_inner
     | None ->
         (match on_text_delta with
          | None -> None
-         | Some cb -> Some (fun (evt : Agent_sdk.Types.sse_event) ->
+         | Some cb -> Some (fun (evt : Agent_core.Types.sse_event) ->
              match evt with
-             | Agent_sdk.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
+             | Agent_core.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
              | _ -> ()))
   in
   let name = Keeper_invocation_contract.target_name request in
@@ -431,7 +402,7 @@ let run_keeper_invocation_turn_admitted_inner
       , Keeper_invocation_contract.direct_message_direct_reply direct_message
       , Keeper_invocation_contract.direct_message_channel_session_key direct_message
       , Keeper_invocation_contract.direct_message_channel direct_message
-      , Keeper_invocation_contract.direct_message_user_oas_blocks direct_message )
+      , Keeper_invocation_contract.direct_message_user_agent_core_blocks direct_message )
   in
     match ensure_keeper_exists
       ~ctx ~name
@@ -446,14 +417,20 @@ let run_keeper_invocation_turn_admitted_inner
        with
        | Error failure -> turn_resources_error ~surface failure
        | Ok { entry; publication_recovery } ->
-      let meta = entry.meta in
       (match
          Keeper_unified_turn_pre_dispatch.load_profile_defaults
            ~base_path:ctx.config.base_path
-           ~keeper_name:meta.name
+           ~keeper_name:entry.meta.name
        with
-       | Error err -> tool_result_error (Agent_sdk.Error.to_string err)
+       | Error err -> tool_result_error (Agent_core.Error.to_string err)
        | Ok profile_defaults ->
+      (match
+         Keeper_meta_contract.effective_meta_of_profile_defaults
+           profile_defaults
+           entry.meta
+       with
+       | Error error -> tool_result_error error
+       | Ok meta ->
       (* RFC vision-delegation §2.3 site 1 (fresh input). For a Delegate keeper,
          evict each image to the artifact store + an eager analyze_image reading
          BEFORE it enters the turn, so the main history stays text-only and
@@ -501,7 +478,7 @@ let run_keeper_invocation_turn_admitted_inner
           ~masc_root
           ~keeper_name:meta.name
           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-          ~generation:meta.runtime.nonce ()
+          ()
       in
       Progress.Tracker.step turn_tracker ~message:"Building turn prompt" ();
       (match
@@ -511,7 +488,7 @@ let run_keeper_invocation_turn_admitted_inner
        with
 	         | Error error ->
 	           Progress.stop_tracking turn_task_id;
-	           tool_result_error (Agent_sdk.Error.to_string error)
+	           tool_result_error (Agent_core.Error.to_string error)
 	         | Ok initial_execution ->
             let base_dir =
               let root = session_base_dir ctx.config in
@@ -610,9 +587,9 @@ let run_keeper_invocation_turn_admitted_inner
             (* RFC-0225 §3.3: per-run carrier for the chat lane. *)
 	            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
 	            let run_result, latency_ms =
-	              Keeper_context_runtime.timed (fun () ->
+	              Inference_utils.timed (fun () ->
 	                  match Eio_context.get_clock () with
-	                  | Error msg -> Error (Agent_sdk.Error.Internal msg)
+	                  | Error msg -> Error (Agent_core.Error.Internal msg)
 	                  | Ok clock ->
 	                  let { Keeper_unified_turn_retry_setup.current_turn_phase_elapsed_ms
 	                      ; _
@@ -635,8 +612,9 @@ let run_keeper_invocation_turn_admitted_inner
 	                      ~reason
 	                      ~next_runtime
 	                      ~attempt
-	                      ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
-	                      ~error_message:(Some (Agent_sdk.Error.to_string err))
+	                      ~error_kind:
+	                        (Some Agent_core.Error.(category err |> category_label))
+	                      ~error_message:(Some (Agent_core.Error.to_string err))
 	                  in
 	                  let setup_direct_retry_runtime runtime_id =
 	                    Keeper_unified_turn_pre_dispatch.build_runtime_execution
@@ -687,32 +665,31 @@ let run_keeper_invocation_turn_admitted_inner
 		                                retry.next_runtime
 		                                reason
 		                                (short_preview
-		                                   (Agent_sdk.Error.to_string
+		                                   (Agent_core.Error.to_string
 		                                      fail_open_err));
 		                              Keeper_turn_helpers.record_pre_dispatch_terminal_observation
 		                                ~config:ctx.config
 		                                ~meta
-		                                ~generation:meta.runtime.nonce
 		                                ~runtime_id:retry.next_runtime
 		                                ~outcome:`Error
 		                                ~terminal_reason_code:
 		                                  (Printf.sprintf
 		                                     "direct_retry_setup_%s"
 		                                     (Keeper_agent_error
-		                                      .terminal_reason_code_of_sdk_error
+		                                      .terminal_reason_code_of_core_error
 		                                        fail_open_err))
 		                                ~activity_kind:
 		                                  "direct_no_progress_retry_setup"
 		                                ~trajectory_outcome:
 		                                  (Trajectory.Failed
-		                                     (Agent_sdk.Error.to_string
+		                                     (Agent_core.Error.to_string
 		                                        fail_open_err))
 		                                ~error_kind:
-		                                  (Keeper_agent_error
-		                                   .sdk_error_kind_for_receipt
-		                                     fail_open_err)
+		                                  (Agent_core.Error.(
+		                                     category fail_open_err |> category_label)
+		                                   |> Keeper_execution_receipt.error_kind_of_string)
 		                                ~error_message:
-		                                  (Agent_sdk.Error.to_string fail_open_err)
+		                                  (Agent_core.Error.to_string fail_open_err)
 		                                ~degraded_retry_applied:true
 		                                ~degraded_retry_runtime:retry.next_runtime
 		                                ~fallback_reason:retry.fallback_reason
@@ -741,8 +718,9 @@ let run_keeper_invocation_turn_admitted_inner
 			                                ?user_blocks
 			                                ~runtime_id
 			                                ~world_observation
-		                                ~generation:meta.runtime.nonce
 		                                ?on_event
+		                                ?on_tool_result_ready
+		                                ?approval_gate
 		                                ~trajectory_acc
 		                                ?degraded_retry_runtime
 		                                ?fallback_reason
@@ -755,8 +733,8 @@ let run_keeper_invocation_turn_admitted_inner
 		            in
 		            match run_result with
             | Error err ->
-              let e_str = Agent_sdk.Error.to_string err in
-              let user_message = Keeper_agent_error.user_message_of_sdk_error err in
+              let e_str = Agent_core.Error.to_string err in
+              let user_message = Keeper_agent_error.user_message_of_core_error err in
               (try
                  let _ = Trajectory.finalize trajectory_acc
                    (Trajectory.Failed e_str) in
@@ -773,100 +751,33 @@ let run_keeper_invocation_turn_admitted_inner
                  ()
                with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_keeper_exn
                  ~label:"trajectory finalize (agent_run ok)" exn);
-              let resilience_handles =
-                Keeper_turn_runtime_budget.post_turn_resilience_handles
-                  ~config:ctx.config ~meta
+              let degraded_retry_applied =
+                not (String.equal result.runtime_id initial_execution.runtime_id)
               in
-              let lifecycle =
-                Keeper_context_runtime.apply_post_turn_lifecycle_with_resilience_handles
-                  ~resilience_audit_store:
-                    resilience_handles.resilience_audit_store
-                  ~resilience_strategy_executor:
-                    resilience_handles.resilience_strategy_executor
-	                  ~meta
-                  ~checkpoint:result.checkpoint
-                |> resilience_handles.sync_lifecycle_meta
+              let degraded_retry_runtime =
+                if degraded_retry_applied then Some result.runtime_id else None
               in
-              Keeper_context_runtime.dispatch_post_turn_lifecycle_events
-                ~config:ctx.config
-                ~keeper_name:meta.name
-                lifecycle;
+              let execution_outcome =
+                Keeper_execution_outcome.create
+                  ~lane:Keeper_execution_outcome.Direct
+                  result
+              in
               let updated_meta =
-                update_direct_turn_meta lifecycle.updated_meta ~latency_ms result
+                match
+                  Keeper_unified_turn_success.handle
+                    ~config:ctx.config
+                    ~meta
+                    ~turn_ctx_cell
+                    ~observation:world_observation
+                    ~latency_ms
+                    ~degraded_retry_applied
+                    ~degraded_retry_runtime
+                    ~fallback_reason:None
+                    ~keeper_turn_id
+                    execution_outcome
+                with
+                | Keeper_unified_turn_success.Completed updated_meta -> updated_meta
               in
-              (* #9733: keeper_msg turn-completion is the same race shape
-                 as the unified-turn failure path — heartbeat updates
-                 [last_seen] in parallel and bumps
-                 [meta_version], so a bare [write_meta] loses the CAS
-                 race and silently drops the turn payload (usage tokens,
-                 trace_history, generation).  Use the same merged-CAS
-                 retry as [keeper_unified_turn.ml:1683] so the cycle
-                 payload wins at the cycle-owned fields and heartbeat-
-                 owned fields are taken from disk. *)
-              (match
-                 write_meta_with_merge
-                   ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-                   ctx.config updated_meta
-               with
-               | Ok () -> ()
-               | Error msg ->
-                   Otel_metric_store.inc_counter
-                     Keeper_metrics.(to_string WriteMetaFailures)
-                     ~labels:
-                       [ ("keeper", updated_meta.name);
-                         ("phase",
-                          if is_version_conflict_error msg
-                          then "keeper_msg_turn_cas_race"
-                          else "keeper_msg_turn")
-                       ]
-                     ();
-                   if is_version_conflict_error msg then
-                     Log.Keeper.warn
-                       "write_meta lost CAS race after retries (keeper_msg turn): %s"
-                       msg
-                   else
-                     Log.Keeper.error
-                       "write_meta failed after keeper_msg turn: %s" msg);
-              (try
-                 Keeper_unified_metrics.append_metrics_snapshot
-                   ~config:ctx.config
-                   ~meta:updated_meta
-                   ~observation:(direct_turn_observation ~config:ctx.config updated_meta)
-                   ~result
-                   ~latency_ms
-                   ~turn_cost:(turn_cost_for_result result)
-                   ~turn_generation:lifecycle.turn_generation
-                   ~channel:Keeper_world_observation.Reactive
-                   ~checkpoint_bytes:lifecycle.checkpoint_bytes
-                   ~message_count:lifecycle.message_count
-                   ~handoff_json:lifecycle.handoff_json
-                   ()
-               with
-               | Eio.Cancel.Cancelled _ as e -> raise e
-               | exn ->
-                   (* #10047: surface the drop as a Otel_metric_store counter so
-                      dashboards can alert when state advances without a
-                      matching metric record. The log alone was too easy
-                      to miss and operators trusted metric jsonl as
-                      ground truth. *)
-                   Otel_metric_store.inc_counter
-                     Keeper_metrics.(to_string MetricEmitDropped)
-                     ~labels:[
-                       ("keeper", updated_meta.name);
-                       ("channel", "turn");
-                       ("site", "keeper_turn_msg");
-                     ] ();
-                   Otel_metric_store.inc_counter
-                     Keeper_metrics.(to_string TurnMetricsSnapshotFailures)
-                     ~labels:[("keeper", updated_meta.name); ("site", "turn")]
-                     ();
-                   Log.Keeper.error
-                     "write metrics snapshot failed after keeper_msg turn: %s"
-                     (Printexc.to_string exn));
-              Keeper_unified_metrics.broadcast_lifecycle_events
-                ~name:updated_meta.name
-                ~turn_generation:lifecycle.turn_generation
-                ~handoff_json:lifecycle.handoff_json;
               restart_keepalive_after_message_turn ctx updated_meta;
               Progress.Tracker.complete turn_tracker
                 ~message:(Printf.sprintf "Turn completed: %d tool calls" (Keeper_agent_result.tool_call_count result)) ();
@@ -878,7 +789,7 @@ let run_keeper_invocation_turn_admitted_inner
                   | None -> `Null
                 in
                 let cache_miss_input_tokens =
-                  Keeper_hooks_oas.cache_miss_input_tokens
+                  Keeper_hooks_agent_core.cache_miss_input_tokens
                     ~input_tokens:u.input_tokens
                     ~cache_creation_input_tokens:u.cache_creation_input_tokens
                     ~cache_read_input_tokens:u.cache_read_input_tokens
@@ -893,14 +804,23 @@ let run_keeper_invocation_turn_admitted_inner
                                   detail)
                          | None -> None)
                 in
-                `Assoc [
+                let external_effect_target_field =
+                  match result.terminal_effect_receipt with
+                  | Some (Keeper_tool_execution.Surface_post_completed target) ->
+                    [ ( Keeper_surface_post.delivery_target_wire_key
+                      , Keeper_surface_post.delivery_target_to_yojson
+                          (Keeper_surface_post.delivery_target_of_post_target
+                             target) )
+                    ]
+                  | None -> []
+                in
+                `Assoc ([
                   ("reply", `String result.response_text);
                   ( Keeper_turn_outcome.wire_key,
                     `String
                       (Keeper_turn_outcome.to_label
                          result.turn_outcome) );
                   ("model", `String surface_model_used);
-                  ("model_used_raw", `String surface_model_used);
                   ("turns", `Int result.turn_count);
                   ( "tool_call_evidence",
                     `List tool_call_evidence );
@@ -917,11 +837,11 @@ let run_keeper_invocation_turn_admitted_inner
                      chat row via append_turn ?turn_ref. *)
                   ( Keeper_turn_outcome.turn_ref_wire_key,
                     Ids.Turn_ref.to_yojson turn_ref );
-                ]
+                ] @ external_effect_target_field)
               in
               tool_result_ok_data reply_json
 
-))))
+)))))
 
 (* Turn-observation boundary for the chat lane.
 
@@ -934,10 +854,8 @@ let run_keeper_invocation_turn_admitted_inner
    ([Keeper_unified_turn.run_keeper_cycle]); this gives the chat lane that
    lifecycle instead of adding a second projection beside it.
 
-   Placed on the admitted body, which is the single point all three chat entry
-   paths ([handle_keeper_invocation], [handle_keeper_msg_if_free], and the
-   [on_admitted] arm) funnel through, and which by construction runs while the
-   turn slot is held.
+   Placed on the admitted body, which is reached only by the Owner operation
+   child after its durable Queued-to-Running claim.
 
    [mark_turn_finished] is idempotent and runs on both the normal and the
    exceptional exit. Its own failure must not replace the turn's result or
@@ -946,6 +864,8 @@ let run_keeper_invocation_turn_admitted_inner
 let run_keeper_invocation_turn_admitted
       ?on_text_delta
       ?on_event
+      ?on_tool_result_ready
+      ?approval_gate
       ?event_bus
       ?continuation_channel
       ~surface
@@ -970,6 +890,8 @@ let run_keeper_invocation_turn_admitted
     run_keeper_invocation_turn_admitted_inner
       ?on_text_delta
       ?on_event
+      ?on_tool_result_ready
+      ?approval_gate
       ?event_bus
       ?continuation_channel
       ~surface
@@ -985,153 +907,29 @@ let run_keeper_invocation_turn_admitted
     raise exn
 ;;
 
-let handle_keeper_invocation
+let handle_keeper_msg_admitted
+      ~admission_token:_
       ?on_text_delta
       ?on_event
+      ?on_tool_result_ready
+      ?approval_gate
       ?event_bus
       ?continuation_channel
-      ?on_admission_rejected
-      ?on_admitted
-      ~surface
-      ~request
-      ?direct_message
-      ctx
-  : tool_result
-  =
-  let event_bus =
-    match event_bus with
-    | Some _ -> event_bus
-    | None -> Event_bus_slots.get_keeper ()
-  in
-  let name = Keeper_invocation_contract.target_name request in
-  match
-    Keeper_turn_admission.run_serialized
-      ~base_path:ctx.config.base_path
-      ~keeper_name:name
-      (fun () ->
-        match on_admitted with
-        | Some notify ->
-          (match notify () with
-           | Ok () ->
-             run_keeper_invocation_turn_admitted
-               ?on_text_delta
-               ?on_event
-               ?event_bus
-               ?continuation_channel
-               ~surface
-               ~request
-               ?direct_message
-               ctx
-           | Error detail ->
-             tool_result_error
-               ("keeper turn admission persistence failed: " ^ detail))
-        | None ->
-          run_keeper_invocation_turn_admitted
-            ?on_text_delta
-            ?on_event
-            ?event_bus
-            ?continuation_channel
-            ~surface
-            ~request
-            ?direct_message
-            ctx
-            )
-    with
-    | `Ran result -> result
-    | `Rejected
-        ({ Keeper_turn_admission.shutdown_operation_id = Some operation_id
-         ; _
-         } as rejection) ->
-        Option.iter (fun notify -> notify rejection) on_admission_rejected;
-        tool_result_error
-          (Printf.sprintf
-             "keeper %s is stopping under operation %s"
-             name
-             (Keeper_shutdown_types.Operation_id.to_string operation_id))
-    | `Rejected
-        ({ Keeper_turn_admission.waiting
-         ; in_flight
-         ; shutdown_operation_id = None
-         } as rejection) ->
-        Option.iter (fun notify -> notify rejection) on_admission_rejected;
-        let in_flight_text =
-          match in_flight with
-          | None -> ""
-          | Some { Keeper_turn_admission.lane; started_at } ->
-              (* NDT-OK: gettimeofday renders the in-flight turn age for the error text only *)
-              Printf.sprintf
-                "; in-flight %s turn running for %.0fs"
-                (Keeper_turn_admission.lane_to_string lane)
-                (Unix.gettimeofday () -. started_at)
-        in
-        tool_result_error
-          (Printf.sprintf
-             "keeper %s turn queue is full (%d chat requests waiting%s); retry later"
-             name
-             waiting
-             in_flight_text)
-
-let handle_keeper_msg
-      ?on_text_delta
-      ?on_event
-      ?event_bus
-      ?continuation_channel
-      ?on_admission_rejected
-      ?on_admitted
       ctx
       direct_message
   =
   let request =
     Keeper_invocation_contract.direct_message_request direct_message
   in
-  handle_keeper_invocation
+  run_keeper_invocation_turn_admitted
     ?on_text_delta
     ?on_event
+    ?on_tool_result_ready
+    ?approval_gate
     ?event_bus
     ?continuation_channel
-    ?on_admission_rejected
-    ?on_admitted
     ~surface:Direct_message
     ~request
     ~direct_message
     ctx
 ;;
-
-let handle_keeper_delegate ?event_bus ctx request =
-  handle_keeper_invocation
-    ?event_bus
-    ~surface:Keeper_delegate
-    ~request
-    ctx
-;;
-
-let handle_keeper_msg_if_free
-      ?on_text_delta
-      ?on_event
-      ?event_bus
-      ?continuation_channel
-      ctx
-      direct_message
-  =
-  let event_bus =
-    match event_bus with
-    | Some _ -> event_bus
-    | None -> Event_bus_slots.get_keeper ()
-  in
-  let request =
-    Keeper_invocation_contract.direct_message_request direct_message
-  in
-  let name = Keeper_invocation_contract.target_name request in
-  Keeper_turn_admission.run_chat_if_free
-    ~base_path:ctx.config.base_path
-    ~keeper_name:name
-    (fun () ->
-      run_keeper_invocation_turn_admitted
-        ?on_text_delta
-        ?on_event
-        ?event_bus
-        ?continuation_channel
-        ~surface:Direct_message
-        ~request
-        ~direct_message
-        ctx)

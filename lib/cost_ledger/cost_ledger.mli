@@ -4,13 +4,13 @@
     and inference metrics. It does not read or translate alternate stores or
     field names. *)
 
-(** Runtime-owned identity for one inference. [oas_turn_ordinal] is the exact
-    zero-based ordinal carried by OAS [AfterTurn], not a value reconstructed
+(** Runtime-owned identity for one inference. [agent_core_turn_ordinal] is the exact
+    zero-based ordinal carried by AGENT_CORE [AfterTurn], not a value reconstructed
     from a completed-turn count. *)
 type inference_identity =
   { trace_id : string
   ; keeper_turn_id : int
-  ; oas_turn_ordinal : int
+  ; agent_core_turn_ordinal : int
   }
 
 type source =
@@ -50,8 +50,5 @@ val to_json :
 val of_json : Yojson.Safe.t -> (t, decode_error) result
 (** Decode only the current row contract. *)
 
-val directory_name : string
-val dir_of_masc_root : string -> string
-val dir_of_base_path : base_path:string -> string
 val store_of_masc_root : string -> Dated_jsonl.t
 val store_of_base_path : base_path:string -> Dated_jsonl.t

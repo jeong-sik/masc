@@ -7,66 +7,34 @@ let expect_ok = function
   | Error error -> fail error
 ;;
 
-let test_direct_roundtrip () =
+let test_operation_roundtrip () =
   let request_id =
     Identity.Request_id.of_string "kmsg-direct-test" |> expect_ok
   in
-  let key = Identity.Direct_request request_id in
+  let key = Identity.Operation request_id in
   let decoded =
     Identity.delivery_key_to_yojson key
     |> Identity.delivery_key_of_yojson
     |> expect_ok
   in
-  check bool "direct identity roundtrips" true
-    (Identity.delivery_key_equal key decoded);
-  check bool "filename is stable" true
-    (String.equal
-       (Identity.delivery_key_file_stem key)
-       (Identity.delivery_key_file_stem decoded))
-;;
-
-let test_queue_requires_nonempty_receipts () =
-  (match Identity.Receipt_ids.of_list [] with
-   | Error Identity.Receipt_ids.Empty -> ()
-   | Ok _ -> fail "empty receipt list was accepted");
-  let receipt_id =
-    Identity.Receipt_id.of_string
-      "chatq_123e4567-e89b-12d3-a456-426614174000"
-    |> expect_ok
-  in
-  let receipt_ids =
-    Identity.Receipt_ids.of_list [ receipt_id ]
-    |> Result.map_error Identity.Receipt_ids.error_to_string
-    |> expect_ok
-  in
-  let key = Identity.Queue_receipts receipt_ids in
-  let decoded =
-    Identity.delivery_key_to_yojson key
-    |> Identity.delivery_key_of_yojson
-    |> expect_ok
-  in
-  check bool "queue identity roundtrips" true
+  check bool "operation identity roundtrips" true
     (Identity.delivery_key_equal key decoded)
 ;;
 
-let test_async_roundtrip () =
+let test_fusion_roundtrip () =
   let request_id =
     Identity.Request_id.of_string "fus-async-test" |> expect_ok
   in
-  let key = Identity.Async_request request_id in
+  let key = Identity.Fusion_run request_id in
   let decoded =
     Identity.delivery_key_to_yojson key
     |> Identity.delivery_key_of_yojson
     |> expect_ok
   in
-  check bool "async identity roundtrips" true
+  check bool "Fusion identity roundtrips" true
     (Identity.delivery_key_equal key decoded);
-  check bool "async namespace differs from direct" false
-    (Identity.delivery_key_equal key (Identity.Direct_request request_id));
-  check bool "async filename namespace is stable" true
-    (String.equal
-       (Identity.delivery_key_file_stem key)
-       (Identity.delivery_key_file_stem decoded))
+  check bool "Fusion namespace differs from operation" false
+    (Identity.delivery_key_equal key (Identity.Operation request_id))
 ;;
 
 let test_transcript_slot_roundtrip () =
@@ -108,11 +76,10 @@ let test_identity_rejects_schema_drift () =
     | Ok _ -> failf "%s was accepted" label
   in
   reject
-    "unknown direct identity field"
+    "unknown delivery identity"
     (`Assoc
-        [ "kind", `String "direct_request"
-        ; "request_id", `String "kmsg-direct-test"
-        ; "legacy_id", `String "legacy"
+        [ "kind", `String "unknown"
+        ; "operation_id", `String "kmsg-unknown-test"
         ])
     Identity.delivery_key_of_yojson;
   reject
@@ -124,19 +91,56 @@ let test_identity_rejects_schema_drift () =
     Identity.transcript_slot_of_yojson
 ;;
 
+(* The pair invariant lives in the decoder, so both durable readers inherit
+   it. Half a pair answers no question: a key without a slot cannot say
+   which row of the delivery it is, a slot without a key belongs to no
+   delivery. *)
+let test_provenance_pair_is_all_or_nothing () =
+  let request_id = Identity.Request_id.of_string "kmsg-pair-test" |> expect_ok in
+  let provenance =
+    { Identity.delivery_key = Identity.Operation request_id
+    ; transcript_slot = Identity.Accepted_user
+    }
+  in
+  let fields = Identity.delivery_provenance_fields provenance in
+  check int "the pair writes exactly two fields" 2 (List.length fields);
+  (match Identity.delivery_provenance_of_fields fields with
+   | Ok (Some decoded) ->
+     check bool "the pair roundtrips" true
+       (Identity.delivery_provenance_equal provenance decoded)
+   | Ok None -> fail "a written pair decoded as absent"
+   | Error error -> fail error);
+  (match Identity.delivery_provenance_of_fields [ "id", `String "msg-1" ] with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "a row with neither field decoded as present"
+   | Error error -> failf "a row with neither field was rejected: %s" error);
+  let reject label fields =
+    match Identity.delivery_provenance_of_fields fields with
+    | Error _ -> ()
+    | Ok _ -> failf "%s was accepted" label
+  in
+  reject
+    "delivery_key without transcript_slot"
+    (List.filter (fun (name, _) -> name = "delivery_key") fields);
+  reject
+    "transcript_slot without delivery_key"
+    (List.filter (fun (name, _) -> name = "transcript_slot") fields);
+  reject
+    "pair carrying an undecodable delivery_key"
+    [ "delivery_key", `Assoc [ "kind", `String "direct_request" ]
+    ; "transcript_slot", Identity.transcript_slot_to_yojson Identity.Accepted_user
+    ]
+;;
+
 let () =
   run
     "keeper chat delivery identity"
     [ ( "identity"
-      , [ test_case "direct roundtrip" `Quick test_direct_roundtrip
+      , [ test_case "operation roundtrip" `Quick test_operation_roundtrip
         ; test_case
-            "async request roundtrip"
+            "Fusion run roundtrip"
             `Quick
-            test_async_roundtrip
-        ; test_case
-            "queue identity is nonempty"
-            `Quick
-            test_queue_requires_nonempty_receipts
+            test_fusion_roundtrip
         ; test_case
             "transcript slots roundtrip"
             `Quick
@@ -145,6 +149,10 @@ let () =
             "schema drift fails closed"
             `Quick
             test_identity_rejects_schema_drift
+        ; test_case
+            "provenance pair is all or nothing"
+            `Quick
+            test_provenance_pair_is_all_or_nothing
         ] )
     ]
 ;;

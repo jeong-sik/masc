@@ -2,7 +2,7 @@
 # Guard against reintroducing keeper-side synthetic tool-call fabrication and
 # the deleted failed-tool-only completion gate residue from PR #20168.
 #
-# Real tool evidence must come from OAS/tool execution surfaces. Keeper result
+# Real tool evidence must come from AGENT_CORE/tool execution surfaces. Keeper result
 # helpers must not fabricate tool_calls to satisfy progress or visibility gates.
 # Historical docs and negative tests are intentionally out of scope; this guard
 # protects active executable, prompt-facing, and workflow surfaces.
@@ -49,7 +49,8 @@ trap 'rm -f "$current_tmp"' EXIT
       -o -type f -print
   done
 } | sort -u \
-  | xargs rg --with-filename --no-heading --line-number --color=never \
+  | tr '\n' '\0' \
+  | xargs -0 rg --with-filename --no-heading --line-number --color=never \
       "$RESIDUE_PATTERN" \
   | while IFS=: read -r path line content; do
       [[ -n "${path:-}" && -n "${line:-}" ]] || continue

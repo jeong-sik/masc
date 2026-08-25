@@ -18,13 +18,6 @@ val owned_active_tasks_for_meta :
   meta:Keeper_meta_contract.keeper_meta ->
   (owned_active_task list, string) result
 
-(** Shutdown transaction variant. Ownership is the exact persisted
-    [meta.agent_name]; backlog read failures are returned. *)
-val owned_active_tasks_for_meta_strict :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  (owned_active_task list, string) result
-
 (** Strict ownership, task records, and the backlog CAS version captured by the
     same read. The complete task snapshot lets lifecycle transactions reconcile
     their own durable receipts without racing a second backlog read. *)
@@ -44,12 +37,6 @@ val owned_active_task_id_for_meta :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_id.Task_id.t option
-
-(** Field-level merge for [Keeper_meta_store.write_meta_with_merge]. *)
-val merge_current_task_id :
-  latest:Keeper_meta_contract.keeper_meta ->
-  caller:Keeper_meta_contract.keeper_meta ->
-  Keeper_meta_contract.keeper_meta
 
 (** Persist [meta.current_task_id] after comparing it with backlog ownership. *)
 val sync_current_task_id_from_backlog :

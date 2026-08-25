@@ -138,6 +138,7 @@ let test_event_tool_called () =
     session_id = Some "mcp-session-1";
     operation_id = Some "op-1";
     worker_run_id = Some "run-1";
+    execution_id = None;
     error_kind = Some (error_kind "timeout");
     error_message = Some "timed out after 30s";
     exit_code = None;
@@ -180,7 +181,7 @@ let check_one_tool_called_record label json ~operation_id ~worker_run_id =
           check bool (label ^ " success") false r.success;
           check int (label ^ " duration_ms") 658 r.duration_ms;
           check (option string) (label ^ " agent_id")
-            (Some "keeper-masc-improver-agent") r.agent_id;
+            (Some "keeper-omicron-improver-agent") r.agent_id;
           check (option string) (label ^ " operation_id") operation_id
             r.operation_id;
           check (option string) (label ^ " worker_run_id") worker_run_id
@@ -205,7 +206,7 @@ let test_parse_event_records_tool_called_null_options () =
                   ("tool_name", `String "tool_execute");
                   ("success", `Bool false);
                   ("duration_ms", `Int 658);
-                  ("agent_id", `String "keeper-masc-improver-agent");
+                  ("agent_id", `String "keeper-omicron-improver-agent");
                   ("source", `String "keeper_internal");
                   ("session_id", `String "mcp-session");
                   ("operation_id", `Null);
@@ -231,7 +232,7 @@ let test_parse_event_records_tool_called_missing_options () =
                   ("tool_name", `String "tool_execute");
                   ("success", `Bool false);
                   ("duration_ms", `Int 658);
-                  ("agent_id", `String "keeper-masc-improver-agent");
+                  ("agent_id", `String "keeper-omicron-improver-agent");
                   ("source", `String "keeper_internal");
                   ("session_id", `String "mcp-session");
                 ];
@@ -241,13 +242,56 @@ let test_parse_event_records_tool_called_missing_options () =
   check_one_tool_called_record "missing options" json ~operation_id:None
     ~worker_run_id:None
 
+let test_parse_event_records_legacy_transient_failure_class () =
+  let json =
+    `Assoc
+      [ "timestamp", `Float 1777120367.858374
+      ; ( "event"
+        , `List
+            [ `String "Tool_called"
+            ; `Assoc
+                [ "tool_name", `String "tool_execute"
+                ; "success", `Bool false
+                ; "duration_ms", `Int 658
+                ; "failure_class", `List [ `String "Transient_error" ]
+                ]
+            ] )
+      ]
+  in
+  match Telemetry_eio.parse_event_records [ json ] with
+  | [ { event = Telemetry_eio.Tool_called event; _ } ] ->
+    Alcotest.(check (option string))
+      "legacy constructor is preserved as dependency_unavailable"
+      (Some "dependency_unavailable")
+      (Option.map Tool_result.tool_failure_class_to_string event.failure_class);
+    let canonical = Telemetry_eio.event_to_json (Telemetry_eio.Tool_called event) in
+    let failure_class =
+      let open Yojson.Safe.Util in
+      canonical |> member "event" |> index 1 |> member "failure_class"
+    in
+    Alcotest.(check string)
+      "rewritten row uses the canonical derived constructor"
+      {|["Dependency_unavailable"]|}
+      (Yojson.Safe.to_string failure_class);
+    (match Telemetry_eio.parse_event_records [ canonical ] with
+     | [ { event = Telemetry_eio.Tool_called _; _ } ] -> ()
+     | records ->
+       Alcotest.failf
+         "expected canonical round-trip row, got %d"
+         (List.length records))
+  | records ->
+    Alcotest.failf
+      "expected one legacy Tool_called record, got %d"
+      (List.length records)
+;;
+
 let check_one_tool_assigned_record label json =
   match Telemetry_eio.parse_event_records [json] with
   | [ record ] -> (
       match record.event with
       | Telemetry_eio.Tool_assigned r ->
           check string (label ^ " agent_id")
-            "keeper-masc-improver-agent" r.agent_id;
+            "keeper-omicron-improver-agent" r.agent_id;
           check string (label ^ " profile") "default" r.profile;
           check int (label ^ " tool_count") 32 r.tool_count;
           check string (label ^ " assignment_id") "asg-001" r.assignment_id
@@ -268,7 +312,7 @@ let test_parse_event_records_tool_assigned_minimal_payload () =
               `String "Tool_assigned";
               `Assoc
                 [
-                  ("agent_id", `String "keeper-masc-improver-agent");
+                  ("agent_id", `String "keeper-omicron-improver-agent");
                   ("profile", `String "default");
                   ("tool_count", `Int 32);
                   ("assignment_id", `String "asg-001");
@@ -289,7 +333,7 @@ let test_parse_event_records_tool_assigned_missing_optional_fields () =
               `String "Tool_assigned";
               `Assoc
                 [
-                  ("agent_id", `String "keeper-masc-improver-agent");
+                  ("agent_id", `String "keeper-omicron-improver-agent");
                   ("profile", `String "default");
                   ("tool_count", `Int 32);
                   ("assignment_id", `String "asg-001");
@@ -368,7 +412,7 @@ let test_parse_event_records_drop_increments_counter () =
   let labels =
     [
       ("surface", "telemetry_eio");
-      ("reason", Safe_ops.persistence_read_drop_reason_invalid_payload);
+      ("reason", Read_drop_reason.to_wire Read_drop_reason.Invalid_payload);
     ]
   in
   let before = Otel_metric_store.metric_value_or_zero metric ~labels () in
@@ -591,6 +635,30 @@ let test_legacy_single_file_is_ignored () =
     0
     (List.length (Telemetry_eio.read_all_events config))
 
+(* [read_all_events] decodes rows during the read now instead of materialising
+   the window first. The decoder runs under a newest-first scan while the
+   result stays chronological, so order is the thing worth pinning. *)
+let test_read_all_events_is_chronological_across_day_files () =
+  with_temp_dir (fun base_dir ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let config = Workspace.default_config base_dir in
+    let dir = telemetry_dir base_dir in
+    let row ts agent_id =
+      Printf.sprintf
+        {|{"timestamp":%.1f,"event":["Agent_session_bound",{"agent_id":"%s","capabilities":[]}]}|}
+        ts agent_id
+    in
+    write_dated_file dir "2026-01" "31" [ row 100.0 "a"; row 200.0 "b" ];
+    write_dated_file dir "2026-02" "01" [ "not-json"; row 300.0 "c" ];
+    let timestamps =
+      Telemetry_eio.read_all_events config
+      |> List.map (fun (record : Telemetry_eio.event_record) -> record.timestamp)
+    in
+    check (list (float 0.001))
+      "oldest first across months, malformed row dropped"
+      [ 100.0; 200.0; 300.0 ] timestamps)
+
 let test_track_applies_default_retention_days () =
   with_env "MASC_TELEMETRY_RETENTION_DAYS" "" (fun () ->
     with_env "MASC_TELEMETRY_MAX_BYTES" "0" (fun () ->
@@ -653,6 +721,8 @@ let () =
         test_parse_event_records_tool_called_null_options;
       test_case "tool_called missing option fields" `Quick
         test_parse_event_records_tool_called_missing_options;
+      test_case "legacy transient failure class" `Quick
+        test_parse_event_records_legacy_transient_failure_class;
       test_case "tool_assigned minimal payload" `Quick
         test_parse_event_records_tool_assigned_minimal_payload;
       test_case "tool_assigned missing optional fields" `Quick
@@ -704,6 +774,8 @@ let () =
         test_summarize_tool_usage_reads_date_split_store_without_fs;
       test_case "legacy single telemetry file is ignored" `Quick
         test_legacy_single_file_is_ignored;
+      test_case "read_all_events is chronological across day files" `Quick
+        test_read_all_events_is_chronological_across_day_files;
       test_case "track applies default retention days" `Quick
         test_track_applies_default_retention_days;
       test_case "track applies telemetry max bytes" `Quick

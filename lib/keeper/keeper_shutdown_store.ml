@@ -35,6 +35,7 @@ type supersede_blocked_result =
    recovered from the record afterwards. *)
 type superseded_admission =
   | Blocked_operator_stop
+  | Blocked_dashboard_purge
   | Unreconciled_turn of Keeper_shutdown_types.active_turn
 
 type operator_metadata_supersession_token =
@@ -205,10 +206,6 @@ let int_option_to_json = function
   | Some value -> `Int value
 ;;
 
-let float_option_to_json = function
-  | None -> `Null
-  | Some value -> `Float value
-;;
 
 let active_turn_to_json turn =
   `Assoc
@@ -216,9 +213,9 @@ let active_turn_to_json turn =
       , match turn.lane with
         | None -> `Null
         | Some lane -> `String (admission_lane_to_string lane) )
-    ; "admitted_at", float_option_to_json turn.admitted_at
+    ; "admitted_at", Json_util.float_opt_to_json turn.admitted_at
     ; "observed_turn_id", int_option_to_json turn.observed_turn_id
-    ; "observation_started_at", float_option_to_json turn.observation_started_at
+    ; "observation_started_at", Json_util.float_opt_to_json turn.observation_started_at
     ]
 ;;
 
@@ -249,6 +246,10 @@ let cleanup_evidence_to_json evidence =
   `Assoc
     [ "settled_task_ids", task_ids_to_json evidence.settled_task_ids
     ; "pending_confirms_removed", `Int evidence.pending_confirms_removed
+    ; ( "meta_snapshot_digest"
+      , `String
+          (Keeper_meta_json.Snapshot_digest.to_string
+             evidence.meta_snapshot_digest) )
     ]
 ;;
 
@@ -278,6 +279,11 @@ let finalization_evidence_to_json evidence =
 ;;
 
 let supersession_to_json = function
+  | Operator_blocked_purge_released { actor } ->
+    `Assoc
+      [ "kind", `String "operator_blocked_purge_released"
+      ; "actor", `String actor
+      ]
   | Operator_metadata_update { actor } ->
     `Assoc
       [ "kind", `String "operator_metadata_update"
@@ -305,19 +311,19 @@ let cleanup_reason_to_json = function
     `Assoc [ "kind", `String "operator_stop_retain_meta" ]
   | Operator_stop_remove_meta ->
     `Assoc [ "kind", `String "operator_stop_remove_meta" ]
-  | Dead_tombstone_cleanup ->
-    `Assoc [ "kind", `String "dead_tombstone_cleanup" ]
+  | Supervisor_cleanup ->
+    `Assoc [ "kind", `String "supervisor_cleanup" ]
   | Dashboard_keeper_purge context ->
     `Assoc
       [ "kind", `String "dashboard_keeper_purge"
       ; "requested_name", `String context.requested_name
       ; "agent_name", `String context.agent_name
-      ; "meta_version", `Int context.meta_version
       ]
 ;;
 
 let phase_to_json = function
   | Prepared -> `Assoc [ "kind", `String "prepared" ]
+  | Joining_lanes -> `Assoc [ "kind", `String "joining_lanes" ]
   | Joined_idle -> `Assoc [ "kind", `String "joined_idle" ]
   | Finalizing_tasks settled_task_ids ->
     `Assoc
@@ -394,7 +400,6 @@ let to_json operation =
     ; "keeper_name", `String operation.keeper_name
     ; "lane_ownership", lane_ownership_to_json operation.lane_ownership
     ; "trace_id", `String (Keeper_id.Trace_id.to_string operation.trace_id)
-    ; "generation", `Int operation.generation
     ; "actor", `String operation.actor
     ; ( "cleanup_intent"
       , `Assoc
@@ -538,7 +543,12 @@ let task_ids_field_of_json field json =
 let cleanup_evidence_of_json json =
   let* settled_task_ids = task_ids_field_of_json "settled_task_ids" json in
   let* pending_confirms_removed = int "pending_confirms_removed" json in
-  Ok { settled_task_ids; pending_confirms_removed }
+  let* meta_snapshot_digest_wire = string "meta_snapshot_digest" json in
+  let* meta_snapshot_digest =
+    Keeper_meta_json.Snapshot_digest.of_string meta_snapshot_digest_wire
+    |> Result.map_error (fun detail -> Decode_error detail)
+  in
+  Ok { settled_task_ids; pending_confirms_removed; meta_snapshot_digest }
 ;;
 
 let completion_receipt_of_json json =
@@ -587,6 +597,9 @@ let finalization_evidence_of_json json =
 let supersession_of_json json =
   let* kind = string "kind" json in
   match kind with
+  | "operator_blocked_purge_released" ->
+    let* actor = string "actor" json in
+    Ok (Operator_blocked_purge_released { actor })
   | "operator_metadata_update" ->
     let* actor = string "actor" json in
     Ok (Operator_metadata_update { actor })
@@ -605,6 +618,7 @@ let phase_of_json json =
   let* kind = string "kind" json in
   match kind with
   | "prepared" -> Ok Prepared
+  | "joining_lanes" -> Ok Joining_lanes
   | "joined_idle" -> Ok Joined_idle
   | "finalizing_tasks" ->
     let* settled_task_ids = task_ids_field_of_json "settled_task_ids" json in
@@ -692,12 +706,11 @@ let cleanup_reason_of_json json =
   match kind with
   | "operator_stop_retain_meta" -> Ok Operator_stop_retain_meta
   | "operator_stop_remove_meta" -> Ok Operator_stop_remove_meta
-  | "dead_tombstone_cleanup" -> Ok Dead_tombstone_cleanup
+  | "supervisor_cleanup" -> Ok Supervisor_cleanup
   | "dashboard_keeper_purge" ->
     let* requested_name = string "requested_name" json in
     let* agent_name = string "agent_name" json in
-    let* meta_version = int "meta_version" json in
-    Ok (Dashboard_keeper_purge { requested_name; agent_name; meta_version })
+    Ok (Dashboard_keeper_purge { requested_name; agent_name })
   | value ->
     Error
       (Decode_error (Printf.sprintf "unknown shutdown cleanup reason: %S" value))
@@ -729,7 +742,6 @@ let of_json json =
       Keeper_id.Trace_id.of_string trace_id_wire
       |> Result.map_error (fun e -> Decode_error e)
     in
-    let* generation = int "generation" json in
     let* actor = string "actor" json in
     let* cleanup_json = assoc "cleanup_intent" json in
     let* reason_json = assoc "reason" cleanup_json in
@@ -751,7 +763,6 @@ let of_json json =
       ; keeper_name
       ; lane_ownership
       ; trace_id
-      ; generation
       ; actor
       ; cleanup_intent = { reason; remove_session }
       ; turn_disposition
@@ -922,6 +933,20 @@ let prepare_operator_metadata_supersession
       ; superseded_admission = Unreconciled_turn turn
       }
   | Ok
+      ({ phase = Superseded (Operator_blocked_purge_released _)
+       ; revision
+       ; _ } as _operation) ->
+    (* Idempotent: a second release of the same purge re-mints the same token
+       rather than reporting a phase mismatch. *)
+    Ok
+      { base_path
+      ; keeper_name
+      ; operation_id
+      ; expected_revision = revision
+      ; actor
+      ; superseded_admission = Blocked_dashboard_purge
+      }
+  | Ok
       ({ phase = Superseded (Operator_metadata_update _ | Operator_reconciliation_accepted _)
        ; revision
        ; _ } as _operation) ->
@@ -932,6 +957,25 @@ let prepare_operator_metadata_supersession
       ; expected_revision = revision
       ; actor
       ; superseded_admission = Blocked_operator_stop
+      }
+  (* A purge whose worker died in [Joining_lanes] holds the admission fence,
+     and that fence is what stops its own reissue: meta cannot be materialized
+     while it is held, and [Keeper_dashboard_purge.resolve] needs that meta to
+     build a target. Releasing it is the only exit, and it is as safe here as
+     for an operator stop -- the phase, not the intent, is what says the work
+     failed. *)
+  | Ok
+      ({ phase = Blocked _
+       ; cleanup_intent = { reason = Dashboard_keeper_purge _; _ }
+       ; revision
+       ; _ } as _operation) ->
+    Ok
+      { base_path
+      ; keeper_name
+      ; operation_id
+      ; expected_revision = revision
+      ; actor
+      ; superseded_admission = Blocked_dashboard_purge
       }
   | Ok ({ phase = Blocked _; _ } as operation) ->
     Error (Supersession_intent_mismatch operation)
@@ -977,12 +1021,18 @@ let supersede_blocked_operator_stop ~config ~token ~now =
          | Ok
              ({ phase =
                   Superseded
-                    (Operator_metadata_update _ | Operator_reconciliation_accepted _)
+                    ( Operator_metadata_update _
+                    | Operator_reconciliation_accepted _
+                    | Operator_blocked_purge_released _ )
               ; _ } as existing) ->
            Ok (Superseded_already_persisted existing)
          | Ok
              ({ phase = Blocked _ | Reconciliation_required _
               ; cleanup_intent = { reason = Operator_stop_retain_meta; _ }
+              ; _ } as existing)
+         | Ok
+             ({ phase = Blocked _
+              ; cleanup_intent = { reason = Dashboard_keeper_purge _; _ }
               ; _ } as existing) ->
            if not (Int.equal existing.revision token.expected_revision)
            then
@@ -997,6 +1047,8 @@ let supersede_blocked_operator_stop ~config ~token ~now =
                match token.superseded_admission with
                | Blocked_operator_stop ->
                  Operator_metadata_update { actor = token.actor }
+               | Blocked_dashboard_purge ->
+                 Operator_blocked_purge_released { actor = token.actor }
                | Unreconciled_turn unreconciled_turn ->
                  Operator_reconciliation_accepted
                    { actor = token.actor; unreconciled_turn }
@@ -1040,7 +1092,8 @@ let persist_blocked_latest ~config ~identity ~failure ~now =
            (match existing.phase with
             | Finalized _ | Blocked _ | Reconciliation_required _ | Superseded _ ->
               Ok (State_preserved existing)
-            | Prepared | Joined_idle | Finalizing_tasks _ | Cleanup_ready _ ->
+            | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _
+            | Cleanup_ready _ ->
               let blocked =
                 { existing with
                   revision = existing.revision + 1

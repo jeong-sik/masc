@@ -38,7 +38,7 @@ interface MemoryResponse {
 interface IdeMemoryPanelProps {
   readonly keeperName?: string | null
   readonly scope?: IdeScope | null
-  readonly repoId?: string | null
+  readonly codebase?: string | null
   readonly canonicalUrl?: string | null
 }
 
@@ -133,18 +133,17 @@ function buildLensGraph(entries: ReadonlyArray<MemoryEntry>): {
   return { nodes, edges, start: entries[0]!.id }
 }
 
-export function IdeMemoryPanel({ keeperName, scope, repoId, canonicalUrl }: IdeMemoryPanelProps) {
+export function IdeMemoryPanel({ keeperName, scope, codebase }: IdeMemoryPanelProps) {
   const [entries, setEntries] = useState<ReadonlyArray<MemoryEntry>>([])
   const [total, setTotal] = useState(0)
   const [contract, setContract] = useState<MemoryContract | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Mirrors api/ide.ts's resolveIdeScope: the server requires exactly one
-  // of repo_id / canonical_url / keeper_lane. Without one it fails closed
+  // The server requires one canonical codebase slug. Without one it fails closed
   // with 400 missing_ide_scope — checking here first means the panel never
   // makes that doomed request and never surfaces its bare status code.
-  const hasScope = Boolean(scope) || Boolean(repoId?.trim()) || Boolean(canonicalUrl?.trim())
+  const hasScope = Boolean(scope) || Boolean(codebase?.trim())
 
   const fetchMemory = useCallback(async () => {
     if (!hasScope) {
@@ -160,7 +159,7 @@ export function IdeMemoryPanel({ keeperName, scope, repoId, canonicalUrl }: IdeM
     try {
       const params = new URLSearchParams()
       if (keeperName) params.set('keeper_id', keeperName)
-      appendIdeScopeParams(params, { scope, repoId, canonicalUrl })
+      appendIdeScopeParams(params, { scope, codebase })
       params.set('limit', '50')
       const data = await get<MemoryResponse>(`/api/v1/ide/memory?${params}`)
       setEntries(data.entries)
@@ -171,7 +170,7 @@ export function IdeMemoryPanel({ keeperName, scope, repoId, canonicalUrl }: IdeM
     } finally {
       setLoading(false)
     }
-  }, [hasScope, keeperName, scope, repoId, canonicalUrl])
+  }, [hasScope, keeperName, scope, codebase])
 
   useEffect(() => {
     fetchMemory()

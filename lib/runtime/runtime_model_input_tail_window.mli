@@ -2,11 +2,11 @@
     provider-bound conversation history (RFC-0351 §3 L5, #26534 PR-C, #26544,
     #26551).
 
-    [project] keeps only the most recent atoms of the message list that OAS
+    [project] keeps only the most recent atoms of the message list that AGENT_CORE
     is about to send to a provider. One atom is either an organic [User]
     message or an [Assistant] message together with the [Tool] messages that
     answer it, so a cut can never separate a tool result from the tool call
-    that produced it. Durable agent state and checkpoints are untouched: OAS
+    that produced it. Durable agent state and checkpoints are untouched: AGENT_CORE
     applies a [model_input_projection] to the provider-bound copy only
     ({!Runtime_agent_context.config.model_input_projection}).
 
@@ -36,7 +36,7 @@
     refills toward it, the same sawtooth an atom-count window had, now
     bounded in the unit the target actually refuses on.
 
-    Messages carrying OAS extra-system-context provenance are never counted
+    Messages carrying AGENT_CORE extra-system-context provenance are never counted
     as atoms and never dropped; that block is re-assembled fresh each turn by
     the keeper hooks and must survive the cut. When the cut leaves a
     non-[User] message at the head of the transmitted history, a constant
@@ -63,8 +63,8 @@ type label =
   | Atom of int  (** Zero-based index of the atom this message belongs to. *)
 
 val annotate
-  :  Agent_sdk.Types.message list
-  -> (Agent_sdk.Types.message * label) list * int
+  :  Agent_core.Types.message list
+  -> (Agent_core.Types.message * label) list * int
 (** Label every message with its atom index, in order, and return the atom
     count. [User] and [Assistant] open a new atom; [Tool] joins the atom of the
     assistant that issued the call, so both sides of a tool exchange always
@@ -75,6 +75,52 @@ val annotate
     {!project} and needs to reason about age must use the same labelling, and
     a second implementation of it would let the two stages disagree about
     where an atom begins. *)
+
+val first_atom_at_or_after
+  :  Agent_core.Types.message list
+  -> message_index:int
+  -> int
+(** Atom index of the first atom whose message sits at or after
+    [message_index]; the atom count when none does.
+
+    Converts a position in the message list into the atom vocabulary the cut
+    and the demotion boundary both speak. A caller that knows a boundary as a
+    message count — how many messages a turn was seeded with, say — cannot use
+    that number directly: pinned messages are not atoms, and a [Tool] message
+    belongs to the atom its [Assistant] opened, so the two indices drift apart.
+    Kept here so the conversion uses the same labelling as the cut rather than
+    a second reading of where an atom begins. *)
+
+val next_shrink_capacity_bytes
+  :  ?allow_empty_history:bool
+  -> measure_message_bytes:(Agent_core.Types.message -> int)
+  -> target_capacity_bytes:int
+  -> Agent_core.Types.message list
+  -> int option
+(** Choose a smaller projection capacity at an atom boundary after a provider
+    has rejected [messages]. [None] means there is no smaller structural view.
+
+    [allow_empty_history=false] preserves the newest atom. When explicitly
+    [true], a caller that carries the current goal outside [messages] may use a
+    zero-prior-history floor after every atom boundary has been exhausted.
+
+    The returned capacity is never below the bytes required by pinned
+    messages, the synthetic preamble, and the newest atom. It is also strictly
+    smaller than the exact rejected window after synthetic framing is charged;
+    otherwise this function returns [None]. Thus applying {!project} cannot
+    replace a size-driven refusal with an equal or larger request.
+    [target_capacity_bytes] is used when it lies inside those structural
+    bounds (for example, the ordinary halving policy). *)
+
+val minimum_capacity_bytes
+  :  measure_message_bytes:(Agent_core.Types.message -> int)
+  -> Agent_core.Types.message list
+  -> int option
+(** Return the exact measured capacity of the zero-prior-history view: pinned
+    messages plus the omission preamble. [None] means [messages] has no
+    shrinkable atom or the framed floor is not strictly smaller than the
+    rejected view. Callers must pass [allow_empty_history=true] to {!project}
+    when applying this capacity. *)
 
 type budget_error =
   | Reservation_exceeds_capacity of
@@ -95,34 +141,76 @@ type budget_error =
           refused instead. *)
 
 type projection =
-  { messages : Agent_sdk.Types.message list
+  { messages : Agent_core.Types.message list
   ; dropped_atoms : int
-        (** Exact raw-history cut chosen for [messages]. Projection stages that
-            rewrite historical bytes use this as their cache-stable anchor: the
-            rewrite boundary moves only when the authoritative cut moves. *)
+        (** Exact raw-history cut chosen for [messages]. Describes this cut and
+            nothing else: the stage that rewrites historical bytes used to
+            anchor its own boundary here, and now chooses one from the
+            conversation's structure instead, so a reader must not take this as
+            a boundary anyone else is required to share. *)
+  ; atom_count : int
+        (** Atoms the input history contained, before the cut. [atom_count -
+            dropped_atoms] is what the provider receives. Both are reported
+            because a share is not recoverable from the transmitted list alone:
+            the dropped atoms leave no trace in [messages], so an observer
+            given only the result cannot tell a keeper that transmitted all of
+            a short history from one that transmitted the tail of a long one.
+            Pinned messages are not atoms and are counted in neither. *)
   }
 
+type window_observation =
+  { transmitted_atoms : int
+  ; total_atoms : int
+  }
+(** How much of a history one projection carried, kept without the messages so
+    an observer can hold it for the length of a turn. *)
+
+val observe : history_atom_count:int -> projection -> window_observation
+(** [observe ~history_atom_count projection] pairs what [projection]
+    transmitted with the history it was measured against.
+
+    [history_atom_count] is passed in rather than read off [projection]
+    because a projection only knows the list it was handed. The demotion
+    pipeline cuts, materializes, and on a storage failure re-cuts the
+    surviving sublist — and that last projection's own [atom_count] is the
+    size of the sublist, not of the turn's history. Reading the denominator
+    from it inflates the share by whatever the earlier cuts already removed:
+    a keeper that reached over 800 of 5,000 atoms would report 800 of 1,000
+    (illustrative shape, not a measured trace). Supply the [atom_count] of the
+    first cut, which is the only one taken against the full history. *)
+
 val budget_error_to_string : budget_error -> string
-(** Diagnostic rendering carrying the measured values. Suitable as the
-    [Error] payload of an [Agent_sdk.Agent.model_input_projection], which
-    aborts the turn before request measurement or dispatch. *)
+(** Diagnostic rendering carrying the measured values. *)
+
+val budget_error_to_core_error : budget_error -> Agent_core.Error.t
+(** The [Error] payload of an [Agent_core.Agent.model_input_projection], which
+    aborts the turn before request measurement or dispatch.
+
+    Both constructors are named [Api (ContextOverflow _)]: each says this
+    candidate's declared ceiling cannot carry the turn, which is a
+    per-candidate capacity bound rather than a defect in the request, and the
+    lane loop already treats that constructor as grounds to try the next
+    candidate. [limit] is [None] — it is a token count and this window
+    measures bytes. *)
 
 val project_with_drop
-  :  measure_message_bytes:(Agent_sdk.Types.message -> int)
+  :  ?allow_empty_history:bool
+  -> measure_message_bytes:(Agent_core.Types.message -> int)
   -> capacity_bytes:int
   -> reserved_bytes:int
-  -> Agent_sdk.Types.message list
+  -> Agent_core.Types.message list
   -> (projection, budget_error) result
 (** The canonical projection result, including the exact atom cut selected
     from the unmodified input. [messages] is physically the input list when
     [dropped_atoms = 0]. *)
 
 val project
-  :  measure_message_bytes:(Agent_sdk.Types.message -> int)
+  :  ?allow_empty_history:bool
+  -> measure_message_bytes:(Agent_core.Types.message -> int)
   -> capacity_bytes:int
   -> reserved_bytes:int
-  -> Agent_sdk.Types.message list
-  -> (Agent_sdk.Types.message list, budget_error) result
+  -> Agent_core.Types.message list
+  -> (Agent_core.Types.message list, budget_error) result
 (** [project ~measure_message_bytes ~capacity_bytes ~reserved_bytes messages]
     returns the most recent suffix of [messages] whose measured size fits
     [capacity_bytes - reserved_bytes], with pinned messages preserved in
@@ -140,6 +228,11 @@ val project
     encoder for every message of one call; exact agreement with the
     provider's own serializer is not required, since [reserved_bytes] carries
     that allowance.
+
+    By default the newest atom is mandatory. [allow_empty_history=true] is for
+    bootstrap callers whose current goal is carried outside [messages]; when
+    no prior atom fits, the projection may retain only pinned messages and the
+    omission preamble.
 
     Never raises. Returns the input list physically unchanged when the whole
     history fits (including the empty list), so a request that needs no cut

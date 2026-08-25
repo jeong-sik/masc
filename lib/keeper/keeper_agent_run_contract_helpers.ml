@@ -6,7 +6,7 @@ let keeper_tool_names_for_outcome ~(tool_calls : Keeper_agent_result.tool_call_d
   |> List.rev
   |> List.filter_map (fun (detail : Keeper_agent_result.tool_call_detail) ->
     if detail.execution_outcome = outcome
-    then Some (Keeper_tool_resolution.canonical_tool_name detail.tool_name)
+    then Some (Keeper_tool_descriptor_resolution.canonical_tool_name detail.tool_name)
     else None)
 ;;
 
@@ -27,10 +27,11 @@ let observed_completion_evidence
   =
   match stop_reason with
   | Runtime_agent.InputRequired _
-  | Runtime_agent.Yielded_to_chat_waiting _
+  | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Awaiting_external_effect _
-  | Runtime_agent.Yielded_after_repeated_tool_call _ ->
+  | Runtime_agent.Yielded_after_repeated_tool_call _
+  | Runtime_agent.Yielded_after_repeated_assistant_text _ ->
     Keeper_execution_receipt.Completion_observation_unknown
   | Runtime_agent.Completed ->
     if actual_keeper_tool_names <> []

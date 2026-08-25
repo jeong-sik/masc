@@ -39,18 +39,24 @@ let fixed_store_dir ~masc_root ~base_path = function
   | Agent_event  -> Some (Filename.concat masc_root "telemetry")
   | Tool_call_io -> Some (Filename.concat masc_root "tool_calls")
   | Tool_usage   -> Some (Filename.concat masc_root "tool_usage")
-  | Oas_event    -> Some (Filename.concat masc_root "oas-events")
+  | Agent_core_event    -> Some (Filename.concat masc_root "agent-core-events")
   | Tool_metric  -> Some (Filename.concat base_path "data/tool-metrics")
   | Keeper_metric | Trajectory_tool_call | Execution_receipt | Goal_event ->
       None
     (* handled separately *)
 
-let source_freshness_slo_s = function
-  | Keeper_metric -> 300.0
+let source_freshness_slo_s ?keeper_keepalive_interval_s = function
+  | Keeper_metric ->
+    let keepalive_interval_s =
+      Option.value
+        keeper_keepalive_interval_s
+        ~default:(float_of_int Env_config.KeeperKeepalive.interval_sec)
+    in
+    Float.max 300.0 (keepalive_interval_s +. 120.0)
   | Tool_call_io -> 300.0
   | Trajectory_tool_call -> 300.0
   | Execution_receipt -> 300.0
-  | Oas_event -> 300.0
+  | Agent_core_event -> 300.0
   | Agent_event -> 900.0
   (* Tool_usage covers non-public registered calls, which are sparse by
      design. Match the SSOT in tool_usage_log.ml. *)
@@ -61,10 +67,10 @@ let source_freshness_slo_s = function
 let source_producer = function
   | Keeper_metric -> "keeper_unified_metrics"
   | Agent_event -> "telemetry_eio"
-  | Tool_call_io -> "keeper_hooks_oas|mcp_server_eio_call_tool"
-  | Trajectory_tool_call -> "keeper_hooks_oas|mcp_server_eio_call_tool"
+  | Tool_call_io -> "keeper_hooks_agent_core|mcp_server_eio_call_tool"
+  | Trajectory_tool_call -> "keeper_hooks_agent_core|mcp_server_eio_call_tool"
   | Tool_usage -> "tool_usage_log"
-  | Oas_event -> "oas_event_bus"
+  | Agent_core_event -> "agent_core_event_bus"
   | Execution_receipt -> "keeper_agent_run.execution_receipt"
   | Goal_event -> "goal_fsm"
   | Tool_metric -> "tool_metrics_persist"
@@ -75,7 +81,7 @@ let source_dashboard_surface = function
   | Tool_call_io -> "/api/v1/keepers/:name/tool-calls"
   | Trajectory_tool_call -> "/api/v1/keepers/:name/tool-stats"
   | Tool_usage -> "/api/v1/dashboard/tools"
-  | Oas_event -> "/api/v1/dashboard/telemetry"
+  | Agent_core_event -> "/api/v1/dashboard/telemetry"
   | Execution_receipt -> "/api/v1/dashboard/execution-trust"
   | Goal_event -> "/api/v1/dashboard/goals"
   | Tool_metric -> "/api/v1/tool-metrics"
@@ -90,16 +96,30 @@ let source_durable_store ~masc_root ~base_path = function
       | Some dir -> dir
       | None -> "")
 
-let source_metadata_fields ~base_path ~masc_root source =
+let source_metadata_fields
+      ?keeper_keepalive_interval_s
+      ~base_path
+      ~masc_root
+      source
+  =
   [
-    ("freshness_slo_s", `Float (source_freshness_slo_s source));
+    ( "freshness_slo_s"
+    , `Float
+        (source_freshness_slo_s ?keeper_keepalive_interval_s source) );
     ("producer", `String (source_producer source));
     ( "durable_store",
       `String (source_durable_store ~masc_root ~base_path source) );
     ("dashboard_surface", `String (source_dashboard_surface source));
   ]
 
-let replay_retention_json ~base_path ~masc_root ~sources : Yojson.Safe.t =
+let replay_retention_json
+      ?keeper_keepalive_interval_s
+      ~base_path
+      ~masc_root
+      ~sources
+      ()
+  : Yojson.Safe.t
+  =
   `Assoc
     [
       ("scope", `String "dashboard_telemetry_replay");
@@ -116,7 +136,11 @@ let replay_retention_json ~base_path ~masc_root ~sources : Yojson.Safe.t =
              (fun source ->
                `Assoc
                  (("source", `String (source_to_string source))
-                 :: source_metadata_fields ~base_path ~masc_root source))
+                 :: source_metadata_fields
+                      ?keeper_keepalive_interval_s
+                      ~base_path
+                      ~masc_root
+                      source))
              sources) );
       ( "cache_policy",
         `String
@@ -146,7 +170,7 @@ let classify_store_dir source ~site dir =
 
 (** Discover all keeper metric directories under [masc_root/keepers/]. *)
 let discover_keeper_metric_dirs masc_root : (string * string) list =
-  let keepers_dir = Filename.concat masc_root "keepers" in
+  let keepers_dir = Filename.concat masc_root Common.keepers_runtime_dirname in
   match classify_store_dir Keeper_metric ~site:"discover_keeper_metric_root"
           keepers_dir with
   | Store_missing | Store_invalid -> []
@@ -191,7 +215,7 @@ let discover_trajectory_keeper_dirs masc_root : (string * string) list =
   | Store_directory -> discover_trajectory_keeper_dirs_in_root trajectories_root
 
 let discover_execution_receipt_dirs masc_root : (string * string) list =
-  let keepers_dir = Filename.concat masc_root "keepers" in
+  let keepers_dir = Filename.concat masc_root Common.keepers_runtime_dirname in
   match classify_store_dir Execution_receipt
           ~site:"discover_execution_receipt_root" keepers_dir with
   | Store_missing | Store_invalid -> []

@@ -3,6 +3,7 @@ open Test_operator_control_support
 
 let test_confirm_rejects_expired_token () =
   Eio_main.run @@ fun env ->
+  Eio_guard.enable ();
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
@@ -24,7 +25,7 @@ let test_confirm_rejects_expired_token () =
                  [
                    `Assoc
                      [
-                       ("token", `String "expired-token");
+                       ("confirm_token", `String "expired-token");
                        ("trace_id", `String "ops_expired");
                        ("actor", `String "operator");
                        ("action_type", `String "namespace_pause");
@@ -38,10 +39,29 @@ let test_confirm_rejects_expired_token () =
                      ];
                  ])));
       let ctx = operator_ctx env sw config "operator" in
+      Operator_control.invalidate_snapshot_cache ();
+      ignore
+        (Operator_control_snapshot_cache.get_or_compute "expired-sentinel"
+           ~ttl:60.0 (fun () -> `String "stale"));
+      let projection_computes = ref 0 in
+      let projection () =
+        Dashboard_projection_cache.get_or_compute_snapshot_json ~config
+          ~actor:(Some "operator") (fun _ ->
+            incr projection_computes;
+            `Int !projection_computes)
+      in
+      ignore (projection ());
       match
         Operator_control.confirm_json ctx
           (`Assoc [ ("actor", `String "operator"); ("confirm_token", `String "expired-token") ])
       with
       | Ok _ -> Alcotest.fail "expected expired confirmation error"
       | Error err ->
-          Alcotest.(check string) "expired error" "pending confirmation expired" err)
+          Alcotest.(check string) "expired error" "pending confirmation expired" err;
+          Alcotest.(check bool) "expired removal clears operator snapshot cache"
+            false
+            (Option.is_some
+               (Operator_control_snapshot_cache.peek "expired-sentinel"));
+          ignore (projection ());
+          Alcotest.(check int) "expired removal clears dashboard projection" 2
+            !projection_computes)

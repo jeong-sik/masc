@@ -27,7 +27,7 @@ module Http = Http_server_eio
         "channel_user_id": "123456789",
         "channel_user_name": "user#1234",
         "channel_workspace_id": "987654321",
-        "keeper_name": "luna",
+        "destination_id": "luna",
         "content": "What is the project status?",
         "idempotency_key": "discord-msg-abc123",
         "metadata": {}
@@ -66,11 +66,10 @@ module Http = Http_server_eio
     ]}
 
     Response (error):
-    {[ { "ok": false, "error": "keeper_name is required" } ]}
+    {[ { "ok": false, "error": "destination_id is required" } ]}
 *)
 (** Map typed gate_error to HTTP status code. *)
 let http_status_of_gate_error : Channel_gate.gate_error -> Httpun.Status.t = function
-  | Validation (Duplicate_message _) -> `Conflict
   | Validation _ -> `Bad_request
   | Keeper_error _ -> `Bad_gateway
   | Dispatch_unavailable -> `Service_unavailable
@@ -135,20 +134,13 @@ let request_elapsed_ms request_started =
   Keeper_timing.elapsed_duration_ms ~start_time:request_started
     ~end_time:(Unix.gettimeofday ())
 
-let handle_gate_message ~sw ~clock ~submitted_by state request reqd =
+let handle_gate_message ~clock state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let request_started = Unix.gettimeofday () in
     let workspace_scope = Mcp_server.workspace_scope state in
     let dispatch =
-      (* The HTTP gate route posts and awaits synchronously. A busy Keeper keeps
-         the async [masc_keeper_msg] poll contract; durable connector leaves use
-         [accept_connector] before entering their Keeper lane. *)
       Gate_keeper_backend.dispatch
-        ~submitted_by ~sw ~clock
-        ~proc_mgr:state.Mcp_server.proc_mgr
-        ~net:state.Mcp_server.net
-        ~publication_recovery_provider:
-          (Mcp_server.publication_recovery_availability_provider state)
+        ~clock
         ~config:workspace_scope.config
     in
     let result =
@@ -237,32 +229,21 @@ let handle_gate_connectors _state request reqd =
     int_query_param request "audit_limit" ~default:10
     |> fun value -> max 1 (min 50 value)
   in
-  let gate_status = Channel_gate_metrics.snapshot_json () in
-  let json =
-    Channel_gate_connector.connectors_json ~gate_status_json:gate_status
-      ~audit_limit ()
-  in
+  let json = Channel_gate_connector.connectors_json ~audit_limit () in
   respond_public_read_json_value ~status:`OK request reqd json
 
 (** GET /api/v1/gate/connector/status?name=<connector>&audit_limit=<n>
 
-    Generic connector status. Accepts the current [name=<connector>] form and
-    also tolerates legacy [channel=<connector>] callers. *)
-let resolve_connector_status_name ?name ?channel () =
+    Generic connector status. [name=<connector>] is the only accepted form;
+    the [channel=<connector>] spelling it replaced is not read. *)
+let resolve_connector_status_name ?name () =
   match Option.map String.trim name with
   | Some name when name <> "" -> Some (String.lowercase_ascii name)
-  | _ -> (
-      match Option.map String.trim channel with
-      | Some legacy when legacy <> "" ->
-          Some (String.lowercase_ascii legacy)
-      | _ -> None)
+  | _ -> None
 
 let handle_gate_connector_status _state request reqd =
   let connector_name =
-    resolve_connector_status_name
-      ?name:(query_param request "name")
-      ?channel:(query_param request "channel")
-      ()
+    resolve_connector_status_name ?name:(query_param request "name") ()
   in
   match connector_name with
   | None | Some "" ->
@@ -294,20 +275,16 @@ let gate_keeper_ctx ~sw ~clock state =
       Mcp_server.publication_recovery_availability_provider state;
   }
 
-let keeper_exists ~sw ~clock state keeper_name =
-  let args = `Assoc [ ("name", `String keeper_name) ] in
-  match
-    Keeper_tool_surface.dispatch (gate_keeper_ctx ~sw ~clock state)
-      ~name:"masc_keeper_status" ~args
-  with
-  | Some result when Tool_result.is_success result -> Ok true
-  | Some result ->
-      let err = Tool_result.message result in
-      if String_util.contains_substring
-           (String.lowercase_ascii err) "keeper not found"
-      then Ok false
-      else Error err
-  | None -> Error "keeper dispatch unavailable"
+(* Typed existence from the meta layer. The previous version ran the whole
+   masc_keeper_status dispatch and re-derived the store's [Ok None] by
+   substring-matching "keeper not found" in the rendered error — a phrase
+   its producers spell two ways, so a wording change silently turned 404
+   into 502 (RFC-0371 B4). Invalid names now read as [Ok false] (404)
+   instead of surfacing a resolver error. *)
+let keeper_exists state keeper_name =
+  Keeper_status_detail.keeper_exists_config
+    ~config:(Mcp_server.workspace_config state)
+    keeper_name
 
 let respond_keeper_tool_json ~sw ~clock state request reqd ~tool_name ~args =
   match
@@ -325,25 +302,36 @@ let respond_keeper_tool_json ~sw ~clock state request reqd ~tool_name ~args =
           respond_json_value_with_cors ~status:`Internal_server_error request reqd
             (Channel_gate.error_json "internal error") )
   | Some result ->
+      (* Not-found is decided by the typed existence precheck at the route
+         (see [handle_gate_keeper_status_by_name]); an error out of the tool
+         dispatch itself is a backend failure, not a 404. The substring
+         classifier that used to pick the status here matched one of the two
+         producer spellings of "keeper not found" by accident
+         (RFC-0371 B4). *)
       let err = Tool_result.message result in
-      let lower = String.lowercase_ascii err in
-      let status =
-        if String_util.contains_substring lower "keeper not found" then `Not_found
-        else `Bad_gateway
-      in
-      respond_json_value_with_cors ~status request reqd
+      respond_json_value_with_cors ~status:`Bad_gateway request reqd
         (Channel_gate.error_json err)
   | None ->
       respond_json_value_with_cors ~status:`Service_unavailable request reqd
         (Channel_gate.error_json "keeper dispatch unavailable")
 
-(** GET /api/v1/gate/keepers?limit=100&detailed=true
+(* Upper bound on rows in one keeper-list response, and the default. One
+   constant so the two cannot drift: before masc#29077 the default was 100
+   while the clamp was 200, so an unparameterised caller was capped below what
+   the route was willing to serve, and neither number appeared in the answer.
+   The response carries [total] and [truncated], so a workspace that outgrows
+   this bound says so instead of returning a short list that looks complete. *)
+let keeper_list_max_limit = 200
 
-    Authenticated keeper discovery for channel-side connectors. *)
+(** GET /api/v1/gate/keepers?limit=200&detailed=true
+
+    Authenticated keeper discovery for channel-side connectors. [limit] only
+    narrows: it is clamped to [1, keeper_list_max_limit] and defaults to the
+    bound. *)
 let handle_gate_keepers ~sw ~clock state request reqd =
   let limit =
-    int_query_param request "limit" ~default:100
-    |> fun value -> max 1 (min 200 value)
+    int_query_param request "limit" ~default:keeper_list_max_limit
+    |> fun value -> max 1 (min keeper_list_max_limit value)
   in
   let detailed = bool_query_param request "detailed" ~default:true in
   let args =
@@ -362,10 +350,22 @@ let handle_gate_keeper_status_by_name ~sw ~clock state request reqd =
       if name = "" then
         respond_json_value_with_cors ~status:`Bad_request request reqd
           (Channel_gate.error_json "name is required")
-      else
-        let args = `Assoc [ ("name", `String name) ] in
-        respond_keeper_tool_json ~sw ~clock state request reqd
-          ~tool_name:"masc_keeper_status" ~args
+      else (
+        (* Typed 404: existence is answered by the meta layer before the
+           status dispatch runs, so the proxy below never has to guess
+           not-found back out of a rendered error. *)
+        match keeper_exists state name with
+        | Error err ->
+            respond_json_value_with_cors ~status:`Service_unavailable request
+              reqd
+              (Channel_gate.error_json err)
+        | Ok false ->
+            respond_json_value_with_cors ~status:`Not_found request reqd
+              (Channel_gate.error_json ("unknown keeper: " ^ name))
+        | Ok true ->
+            let args = `Assoc [ ("name", `String name) ] in
+            respond_keeper_tool_json ~sw ~clock state request reqd
+              ~tool_name:"masc_keeper_status" ~args)
   | None ->
       respond_json_value_with_cors ~status:`Bad_request request reqd
         (Channel_gate.error_json "name is required")
@@ -397,7 +397,7 @@ let handle_bind_for_connector ~sw ~clock state request reqd
         respond_json_value_with_cors ~status:`Bad_request request reqd
           (Channel_gate.error_json "keeper_name is required")
       else
-        match keeper_exists ~sw ~clock state keeper_name with
+        match keeper_exists state keeper_name with
         | Error err ->
             respond_json_value_with_cors ~status:`Service_unavailable request reqd
               (Channel_gate.error_json err)
@@ -505,23 +505,9 @@ let handle_gate_connector_unbind _state request reqd =
 let add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/gate/message" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"channel_gate" (fun state submitted_by _req reqd ->
-         handle_gate_message ~sw ~clock ~submitted_by state request reqd
+       with_tool_actor_auth ~tool_name:"channel_gate" (fun state _submitted_by _req reqd ->
+         handle_gate_message ~clock state request reqd
        ) request reqd)
-
-  |> Http.Router.prefix_get "/api/v1/gate/message/requests/" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_keeper_delegate_status"
-         (fun state caller _req reqd ->
-           Server_routes_http_keeper_stream.handle_keeper_chat_request_result
-             ~caller state request reqd)
-         request reqd)
-
-  |> Http.Router.prefix_post "/api/v1/gate/message/requests/" (fun request reqd ->
-       with_tool_actor_auth ~tool_name:"masc_keeper_delegate_cancel"
-         (fun state caller _req reqd ->
-           Server_routes_http_keeper_stream.handle_keeper_chat_request_cancel
-             ~caller state request reqd)
-         request reqd)
 
   |> Http.Router.get "/api/v1/gate/health" (fun request reqd ->
        with_public_read (fun state _req reqd ->

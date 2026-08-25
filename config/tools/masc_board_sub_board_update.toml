@@ -1,0 +1,39 @@
+name = "masc_board_sub_board_update"
+description = """
+Update an existing SubBoard by slug or ID. Only provided fields are changed; \
+slug and owner remain immutable."""
+
+[[params]]
+name = "sub_board_id"
+type = "string"
+required = true
+description = "SubBoard slug or ID to update"
+
+[[params]]
+name = "name"
+type = "string"
+description = "New display name"
+
+[[params]]
+name = "description"
+type = "string"
+description = "New description"
+
+[[params]]
+name = "access"
+type = "string"
+enum = ["open", "members_only", "owner_only"]
+description = "New access policy"
+
+[[params]]
+name = "members"
+type = "array"
+items = { type = "string" }
+description = "New member list (owner always included)"
+
+[[params]]
+name = "owner"
+type = "string"
+description = """
+Owner identity. Auto-filled from the caller's agent identity \
+when omitted by MCP runtime clients."""

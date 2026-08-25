@@ -15,21 +15,16 @@
     aggregation over those same JSONL reads rather than SQL —
     RFC-0029 candidate, tracked in #10710.  *)
 
-open Dashboard_http_helpers
-
-let normalize_model_name s =
-  let s = String.trim s in
-  Runtime_provider_binding.normalize_runtime_name_for_bucket s
 
 type keeper_gen_window_stats = {
-  mutable turns: int;
-  mutable usage_points: int;
-  mutable input_tokens: int;
-  mutable output_tokens: int;
-  mutable total_tokens: int;
-  mutable handoffs: int;
-  mutable first_ts: float;
-  mutable last_ts: float;
+  turns: int;
+  usage_points: int;
+  input_tokens: int;
+  output_tokens: int;
+  total_tokens: int;
+  handoffs: int;
+  first_ts: float;
+  last_ts: float;
   tools: (string, int) Hashtbl.t;
 }
 
@@ -85,13 +80,9 @@ let keeper_history_summary_json
           Keeper_context_core.text_of_history_jsonl_json j |> String.trim
         in
         let source = Safe_ops.json_string ~default:"" "source" j |> String.trim in
-        let ts_unix =
-          let ts0 = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-          if ts0 > 0.0 then ts0 else Safe_ops.json_float ~default:0.0 "timestamp" j
-        in
+        let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
         if role = "" || content = ""
            || Keeper_types_support.is_internal_history_source source
-           || Keeper_context_core.has_world_state_signature content
         then
           (conv_acc, k2k_acc, raw_count, fragment_count, filtered_count)
         else

@@ -3,6 +3,7 @@ export type RuntimeTomlCredentialType = 'env' | 'file' | 'inline' | 'none'
 
 export interface RuntimeTomlProvider {
   id: string
+  enabled: boolean
   displayName: string
   protocol: string
   transportKind: RuntimeTomlTransportKind
@@ -12,6 +13,7 @@ export interface RuntimeTomlProvider {
   credentialKey: string
   credentialPath: string
   credentialValue: string
+  isNonInteractive: boolean
 }
 
 export interface RuntimeTomlModel {
@@ -35,6 +37,7 @@ export interface RuntimeTomlBinding {
   id: string
   providerId: string
   modelId: string
+  enabled: boolean
   isDefault: boolean
   maxConcurrent: number | null
   keepAlive: string
@@ -43,11 +46,13 @@ export interface RuntimeTomlBinding {
   // when the binding omits them (most bindings do).
   priceInput: number | null
   priceOutput: number | null
+  // llama-server prefill-liveness opt-in (runtime.toml `return-progress`,
+  // RFC-0382 §7); null when the binding omits it.
+  returnProgress: boolean | null
 }
 
 export interface RuntimeTomlEnvironment {
   defaultRuntimeId: string
-  crossVerifierRuntimeId: string
   assignments: Record<string, string>
   providers: RuntimeTomlProvider[]
   models: RuntimeTomlModel[]
@@ -278,6 +283,7 @@ function providerFromDocument(document: TomlDocument, id: string): RuntimeTomlPr
   const credentialType = asString(credentials.type) as RuntimeTomlCredentialType
   return {
     id,
+    enabled: asBoolean(values.enabled, true),
     displayName: asString(values['display-name'], asString(values['provider-name'], id)),
     protocol: asString(values.protocol),
     transportKind: endpoint ? 'endpoint' : command ? 'command' : 'missing',
@@ -289,6 +295,7 @@ function providerFromDocument(document: TomlDocument, id: string): RuntimeTomlPr
     credentialKey: asString(credentials.key),
     credentialPath: asString(credentials.path),
     credentialValue: asString(credentials.value),
+    isNonInteractive: asBoolean(values['is-non-interactive']),
   }
 }
 
@@ -303,10 +310,10 @@ function modelFromDocument(document: TomlDocument, id: string): RuntimeTomlModel
   // reader looked for a `json-support` key on the top-level model table, which
   // never exists in the SSOT config, so JSON-lane validation never fired.
   const caps = sectionValues(document, `models.${id}.capabilities`)
-  // thinking-control-format is intentionally NOT read here: OAS
+  // thinking-control-format is intentionally NOT read here: Agent Core
   // request-building never consumes runtime.toml's [models.<id>.capabilities]
-  // thinking-control-format key (masc #21521 / oas models.toml) — it is the
-  // OAS catalog's effective_capabilities.thinking_control_format that governs
+  // thinking-control-format key (masc #21521 / agentCore models.toml) — it is the
+  // Agent Core catalog's effective_capabilities.thinking_control_format that governs
   // the actual request wire. Re-adding a client-side reader for this key
   // would resurrect the inert-config-editing UX this removal fixed.
   const multimodalCap = caps['supports-multimodal-inputs']
@@ -338,12 +345,17 @@ function bindingFromDocument(
     id: `${entry.providerId}.${entry.modelId}`,
     providerId: entry.providerId,
     modelId: entry.modelId,
+    enabled: asBoolean(values.enabled, true),
     isDefault: asBoolean(values['is-default']),
     maxConcurrent: asNumber(values['max-concurrent']),
     keepAlive: asString(values['keep-alive']),
     numCtx: asNumber(values['num-ctx']),
     priceInput: asNumber(values['price-input']),
     priceOutput: asNumber(values['price-output']),
+    returnProgress:
+      values['return-progress'] === undefined
+        ? null
+        : asBoolean(values['return-progress']),
   }
 }
 
@@ -371,13 +383,21 @@ export function parseRuntimeTomlEnvironment(sourceText: string): RuntimeTomlEnvi
   }
   return {
     defaultRuntimeId: asString(runtimeValues.default),
-    crossVerifierRuntimeId: asString(runtimeValues.cross_verifier),
     assignments,
     providers,
     models,
     bindings,
     warnings,
   }
+}
+
+export function enabledRuntimeIds(environment: RuntimeTomlEnvironment): string[] {
+  const enabledProviderIds = new Set(
+    environment.providers.filter(provider => provider.enabled).map(provider => provider.id),
+  )
+  return environment.bindings
+    .filter(binding => binding.enabled && enabledProviderIds.has(binding.providerId))
+    .map(binding => binding.id)
 }
 
 function sourceLineCount(sourceText: string): number {
@@ -617,9 +637,6 @@ export function cascadeDeleteProvider(sourceText: string, providerId: string): s
       ? setRuntimeTomlKey(next, 'runtime', 'default', fallback)
       : deleteRuntimeTomlKey(next, 'runtime', 'default')
   }
-  if (typeof runtimeValues.cross_verifier === 'string' && toDeleteBindings.has(runtimeValues.cross_verifier)) {
-    next = deleteRuntimeTomlKey(next, 'runtime', 'cross_verifier')
-  }
   
   // Clean up assignments
   const assignments = sectionValues(nextDocument, 'runtime.assignments')
@@ -639,8 +656,8 @@ export function setRuntimeTomlDefault(sourceText: string, runtimeId: string): st
 export function setRuntimeTomlProviderField(
   sourceText: string,
   providerId: string,
-  field: 'display-name' | 'protocol' | 'endpoint' | 'command',
-  value: string,
+  field: 'enabled' | 'display-name' | 'protocol' | 'endpoint' | 'command' | 'is-non-interactive',
+  value: string | boolean,
 ): string {
   const section = `providers.${providerId}`
   if (field === 'endpoint') {
@@ -704,57 +721,11 @@ export function setRuntimeTomlModelField(
 export function setRuntimeTomlBindingField(
   sourceText: string,
   runtimeId: string,
-  field: 'is-default' | 'max-concurrent' | 'keep-alive' | 'num-ctx',
+  field: 'enabled' | 'is-default' | 'max-concurrent' | 'keep-alive' | 'num-ctx',
   value: string | number | boolean | null,
 ): string {
   if (value === null) return deleteRuntimeTomlKey(sourceText, runtimeId, field)
   return setRuntimeTomlKey(sourceText, runtimeId, field, value)
-}
-
-// Closed set mirroring lib/runtime/runtime_toml.ml's api_format_of_protocol —
-// any other string fails runtime.toml *parse* validation on save
-// (Runtime.save_config_text re-parses via materialize_config). This does not
-// mean every member here can be safely offered by the add-provider form: see
-// RUNTIME_TOML_CREATABLE_PROTOCOLS below for the materialization gate.
-export const RUNTIME_TOML_PROTOCOLS = [
-  'openai-compatible-http',
-  'ollama-http',
-  'openai-compatible-cli',
-  'messages-http',
-  'messages-cli',
-] as const
-
-export type RuntimeTomlProtocol = (typeof RUNTIME_TOML_PROTOCOLS)[number]
-
-// Subset of RUNTIME_TOML_PROTOCOLS the add-provider form is allowed to offer.
-// The add-provider form only creates endpoint-backed providers. Command
-// transport is blocked at the binding form via transportKind, while
-// `provider_kind_for_http_provider` still returns `None` for `Messages_api`.
-// Messages providers parse and save, but resolve to no provider_kind and
-// `Runtime.materialize_config`'s `List.filter_map` silently drops their bindings
-// from the live runtime list instead of failing the save
-// (lib/runtime/runtime_adapter.ml:183-203, lib/runtime/runtime.ml:239).
-// This is an allow-list of materializable endpoint protocols, so a future 6th
-// protocol defaults to non-creatable until reviewed.
-export const RUNTIME_TOML_CREATABLE_PROTOCOLS = [
-  'openai-compatible-http',
-  'ollama-http',
-  'openai-compatible-cli',
-] as const
-
-export type RuntimeTomlCreatableProtocol = (typeof RUNTIME_TOML_CREATABLE_PROTOCOLS)[number]
-
-export function isRuntimeTomlCreatableProtocol(protocol: string): protocol is RuntimeTomlCreatableProtocol {
-  return (RUNTIME_TOML_CREATABLE_PROTOCOLS as readonly string[]).includes(protocol)
-}
-
-const RUNTIME_TOML_NON_MATERIALIZABLE_PROTOCOLS = new Set([
-  'messages-http',
-  'messages-cli',
-])
-
-export function isRuntimeTomlNonMaterializableProtocol(protocol: string): boolean {
-  return RUNTIME_TOML_NON_MATERIALIZABLE_PROTOCOLS.has(protocol)
 }
 
 // runtime.toml ids become TOML table headers ([providers.<id>], [models.<id>],

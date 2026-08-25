@@ -86,36 +86,6 @@ describe('deriveKeeperOperationalState — paused branch', () => {
     })
   })
 
-  it('paused supervisor cause when blocker is supervisor_paused', () => {
-    const state = deriveKeeperOperationalState({
-      keeper: makeKeeper({
-        paused: true,
-        runtime_blocker_class: 'supervisor_paused',
-      }),
-      composite: null,
-    })
-    expect(state).toMatchObject({
-      kind: 'paused',
-      attention: 'clean',
-      cause: 'supervisor',
-    })
-  })
-
-  it('paused auto_recover cause when blocker is retryable timeout', () => {
-    const state = deriveKeeperOperationalState({
-      keeper: makeKeeper({
-        paused: true,
-        runtime_blocker_class: 'turn_timeout',
-      }),
-      composite: null,
-    })
-    expect(state).toMatchObject({
-      kind: 'paused',
-      attention: 'clean',
-      cause: 'auto_recover',
-    })
-  })
-
   it('paused operator cause when pause_state === paused', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({ pause_state: 'paused' }),
@@ -128,9 +98,12 @@ describe('deriveKeeperOperationalState — paused branch', () => {
     })
   })
 
-  it('paused operator cause when only status === paused', () => {
+  // 예전에는 phase 가 없고 `status === 'paused'` 이기만 하면 flag 가 false 여도
+  // 일시정지로 봤다. 서버는 그 단어를 flag 와 같은 `ld_paused` 로 만들지만
+  // `Stopped` 이벤트에서 단어만 남겨두므로, 이미 멈춘 키퍼가 재개 가능으로 보였다.
+  it('phase 가 없으면 flag 가 판정한다', () => {
     const state = deriveKeeperOperationalState({
-      keeper: makeKeeper({ status: 'paused', phase: null, paused: false }),
+      keeper: makeKeeper({ status: 'active', phase: null, paused: true }),
       composite: null,
     })
     expect(state).toMatchObject({
@@ -171,9 +144,8 @@ describe('deriveKeeperOperationalState — paused branch', () => {
 })
 
 describe('deriveKeeperOperationalState — offline branch', () => {
-  it.each<[Keeper['phase'], 'crashed' | 'dead' | 'shutdown' | 'unbooted']>([
+  it.each<[Keeper['phase'], 'crashed' | 'shutdown' | 'unbooted']>([
     ['Crashed', 'crashed'],
-    ['Dead', 'dead'],
     ['Stopped', 'shutdown'],
     ['Offline', 'unbooted'],
   ])('phase=%s → cause=%s', (phase, cause) => {
@@ -184,16 +156,23 @@ describe('deriveKeeperOperationalState — offline branch', () => {
     expect(state).toMatchObject({ kind: 'offline', attention: 'clean', cause })
   })
 
-  it.each<['offline' | 'inactive' | 'unbooted']>([
-    ['offline'],
-    ['inactive'],
-    ['unbooted'],
-  ])('status=%s without phase → offline', (status) => {
+  // 예전에는 status 가 'offline' | 'inactive' | 'unbooted' 중 하나이기만 하면
+  // phase 없이도 offline 으로 접혔다. 'inactive' 한 단어가 stale·degraded·zombie
+  // 셋을 함께 가리켰으므로, 늦은 하트비트 하나가 멈춘 키퍼와 같은 판정을 받았다.
+  it('phase 가 없어도 health=offline 이면 offline', () => {
     const state = deriveKeeperOperationalState({
-      keeper: makeKeeper({ status }),
+      keeper: makeKeeper({ diagnostic: { health_state: 'offline' } } as Partial<Keeper>),
       composite: null,
     })
     expect(state.kind).toBe('offline')
+  })
+
+  it.each(['stale', 'degraded', 'zombie'])('health=%s 는 offline 이 아니다', (health_state) => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper({ diagnostic: { health_state } } as Partial<Keeper>),
+      composite: null,
+    })
+    expect(state.kind).not.toBe('offline')
   })
 
   it('composite phase Stopped overrides keeper.phase', () => {
@@ -206,36 +185,6 @@ describe('deriveKeeperOperationalState — offline branch', () => {
 })
 
 describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', () => {
-  it('synthetic_stall without composite ⇒ running because it is diagnostic-only', () => {
-    const state = deriveKeeperOperationalState({
-      keeper: makeKeeper({
-        runtime_blocker_class: 'synthetic_stall',
-      }),
-      composite: null,
-    })
-    expect(state).toMatchObject({
-      kind: 'running',
-      attention: 'clean',
-      staleBlocker: null,
-    })
-  })
-
-  it('synthetic_stall with blocked runtime_attention ⇒ stuck', () => {
-    const state = deriveKeeperOperationalState({
-      keeper: makeKeeper({
-        runtime_blocker_class: 'synthetic_stall',
-      }),
-      composite: makeComposite({
-        runtime_attention: attention({ execution_current: true, blocked: true }),
-      }),
-    })
-    expect(state).toMatchObject({
-      kind: 'stuck',
-      attention: 'blocked',
-      reason: 'synthetic_stall',
-    })
-  })
-
   it('blocker AND execution_current=true ⇒ stuck (receipt is current)', () => {
     // execution_current=true means the receipt matches the *current* live
     // turn (server_dashboard_http.ml:1061-1074) — the blocker is meaningful.
@@ -259,7 +208,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     // stale marker → blocker stays meaningful (fail-closed). Mirrors the
     // older-backend case where runtime_attention may omit the field.
     const state = deriveKeeperOperationalState({
-      keeper: makeKeeper({ runtime_blocker_class: 'turn_timeout' }),
+      keeper: makeKeeper({ runtime_blocker_class: 'stale_turn_timeout' }),
       composite: makeComposite({
         runtime_attention: attention({ execution_current: undefined }),
       }),
@@ -267,7 +216,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     expect(state).toMatchObject({
       kind: 'stuck',
       attention: 'clean',
-      reason: 'turn_timeout',
+      reason: 'stale_turn_timeout',
     })
   })
 
@@ -291,7 +240,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     for (const cls of KEEPER_RUNTIME_BLOCKER_CLASSES) {
       const state = deriveKeeperOperationalState({
         keeper: makeKeeper({ runtime_blocker_class: cls as KeeperRuntimeBlockerClass }),
-        composite: cls === 'synthetic_stall'
+        composite: cls === 'exception'
           ? makeComposite({ runtime_attention: attention({ execution_current: true, blocked: true }) })
           : null,
       })
@@ -325,7 +274,7 @@ describe('deriveKeeperOperationalState — running branch with conditioning', ()
       keeper: makeKeeper({
         phase: 'Running',
         status: 'active',
-        runtime_blocker_class: 'synthetic_stall',
+        runtime_blocker_class: 'exception',
       }),
       composite: makeComposite({
         phase: 'Stable',
@@ -343,7 +292,7 @@ describe('deriveKeeperOperationalState — running branch with conditioning', ()
       kind: 'running',
       attention: 'clean',
       turnPhase: 'executing',
-      staleBlocker: 'synthetic_stall',
+      staleBlocker: 'exception',
     })
   })
 
@@ -393,7 +342,7 @@ describe('deriveKeeperOperationalState — priority invariants', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({
         paused: true,
-        runtime_blocker_class: 'synthetic_stall',
+        runtime_blocker_class: 'exception',
       }),
       composite: null,
     })
@@ -417,7 +366,7 @@ describe('deriveKeeperOperationalState — priority invariants', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({
         phase: 'Running',
-        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_class: 'stale_turn_timeout',
       }),
       composite: makeComposite({
         runtime_attention: attention({ execution_current: true }),
@@ -430,7 +379,7 @@ describe('deriveKeeperOperationalState — priority invariants', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({
         phase: 'Running',
-        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_class: 'stale_turn_timeout',
       }),
       composite: makeComposite({
         runtime_attention: attention({
@@ -443,7 +392,7 @@ describe('deriveKeeperOperationalState — priority invariants', () => {
       kind: 'running',
       attention: 'clean',
       turnPhase: 'idle',
-      staleBlocker: 'turn_timeout',
+      staleBlocker: 'stale_turn_timeout',
     })
   })
 })
@@ -480,9 +429,9 @@ interface DeriveInputsLite {
 
 describe('toKeeperPhase — wire-boundary narrow (lowercase + PascalCase)', () => {
   it.each<KeeperPhase>([
-    'Offline', 'Running', 'Failing', 'Overflowed', 'Compacting',
+    'Offline', 'Running', 'Failing', 'Compacting',
     'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed',
-    'Restarting', 'Dead',
+    'Restarting',
   ])('accepts PascalCase KeeperPhase %s', (phase) => {
     expect(toKeeperPhase(phase)).toBe(phase)
   })
@@ -491,7 +440,6 @@ describe('toKeeperPhase — wire-boundary narrow (lowercase + PascalCase)', () =
     ['running', 'Running'],
     ['failing', 'Failing'],
     ['handing_off', 'HandingOff'],
-    ['dead', 'Dead'],
   ])('accepts lowercase wire format %s → %s', (input, expected) => {
     expect(toKeeperPhase(input)).toBe(expected)
   })
@@ -512,12 +460,12 @@ describe('compositePhaseTone — exhaustive switch over KeeperPhase', () => {
     expect(compositePhaseTone(phase)).toBe('active')
   })
   it.each<KeeperPhase>([
-    'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Paused', 'Restarting',
+    'Compacting', 'HandingOff', 'Draining', 'Paused', 'Restarting',
   ])('phase %s ⇒ warn', (phase) => {
     expect(compositePhaseTone(phase)).toBe('warn')
   })
   it.each<KeeperPhase>([
-    'Failing', 'Stopped', 'Crashed', 'Dead',
+    'Failing', 'Stopped', 'Crashed',
   ])('phase %s ⇒ err', (phase) => {
     expect(compositePhaseTone(phase)).toBe('err')
   })
@@ -601,7 +549,7 @@ describe('KeeperOperationalState.attention axis — RFC-0135 §13 Goal-2 (2026-0
     // kind=offline × attention=needs_attention
     ['offline', { phase: 'Offline' }, { runtime_attention: attention({ needs_attention: true }) }, 'needs_attention'],
     // kind=stuck × attention=blocked
-    ['stuck', { runtime_blocker_class: 'turn_timeout' as KeeperRuntimeBlockerClass }, { runtime_attention: attention({ blocked: true }) }, 'blocked'],
+    ['stuck', { runtime_blocker_class: 'stale_turn_timeout' as KeeperRuntimeBlockerClass }, { runtime_attention: attention({ blocked: true }) }, 'blocked'],
     // kind=running × attention=clean
     ['running', {}, { runtime_attention: attention({}) }, 'clean'],
   ])('kind=%s × attention=%s — axes orthogonal', (kind, keeperOverrides, compositeOverrides, expectedAttention) => {
@@ -644,7 +592,7 @@ describe('KeeperOperationalState remaining Goal-2 axes — RFC-0135 strict close
   it('displaySummary is present on the state and keeps composite-preferred precedence', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({
-        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_class: 'stale_turn_timeout',
         runtime_blocker_summary: 'flat summary',
         attention_reason: 'attention memo',
       }),

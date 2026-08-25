@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0084", "0089"]
-implementation_prs: [15720, 16235, 16238, 16296]
 ---
 
 # RFC-0091 — Execute tool: cmd string → typed Argv schema
@@ -98,7 +97,7 @@ typed boundary* — 를 닫는다. RFC-0089(`string classifier → typed variant
 - **외부 MCP 서버에 노출된 Execute tool schema**. RFC-0084에서 외부 노출이 이미
   `guarded_dispatch` 단일 경로로 통합됐으므로, 본 RFC는 *내부 tool descriptor*
   변경만 수반한다. MCP wire schema는 PR-4 에서 함께 갱신.
-- **keeper persona prompt 변경**. RFC 본문에서 prompt를 수정하지 않는다.
+- **Keeper prompt 변경**. RFC 본문에서 prompt를 수정하지 않는다.
   PR-3 에서 tool descriptor JSON schema가 변경되면 LLM이 그 schema에 맞춰
   argv list를 생성하므로 prompt 직접 변경 없이 동작한다. 단 *기존 keeper TOML
   fixture* 의 example Execute call은 PR-3 머지에서 동시 갱신한다.
@@ -199,7 +198,7 @@ acceptance: 단일 파일 LOC > 500 인 신규 파일 없음. `software-developm
 
 ## §7 위험 / Open questions
 
-1. **keeper LLM 적응 transition**. PR-3 머지 직후 keeper persona LLM 이 새
+1. **keeper LLM 적응 transition**. PR-3 머지 직후 Keeper LLM 이 새
    schema 에 적응하기까지 turn 단위로 시간이 걸린다. 이 transition 동안 *모든*
    Execute call 이 boundary parse fail 하면 keeper 가 정지한다. mitigation: typed
    descriptor 전환 후 24h log re-audit 를 진행한다.

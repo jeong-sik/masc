@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0203", "0218"]
-implementation_prs: []
 ---
 
 # RFC-0223: Typed connector surfaces — presence, pull-based lane context, speaker identity
@@ -109,7 +108,7 @@ old push-scoped message feed.
    classifier branches (CLAUDE.md workaround signature #2).
 4. **read/act split.** The read tool is side-effect-free and always allowed;
    the post tool is an action and goes through tool policy.
-5. **OAS untouched.** Surfaces are a MASC concept. OAS continues to receive a
+5. **agent_core untouched.** Surfaces are a MASC concept. agent_core continues to receive a
    host-assembled message list; nothing here crosses the boundary.
 6. **No standing machinery (owner constraint).** Presence is recomputed from
    bindings + registry on every observation — no cached presence state. The

@@ -12,31 +12,11 @@ let metadata_gap_json ~kind ~summary ~scope_type ~scope_id ~severity =
       ("severity", `String severity);
     ]
 
-let collect_metadata_gaps ~sessions ~keepers ~agents =
+let collect_metadata_gaps ~keepers ~agents =
   let agent_needs_focus json =
     List.mem
       (String.lowercase_ascii (String.trim (string_field "status" json)))
       [ "active"; "busy" ]
-  in
-  let session_gaps =
-    sessions
-    |> List.concat_map (fun json ->
-           let session_id = string_field "session_id" json |> fun value -> if value = "" then None else Some value in
-           let items = ref [] in
-           if String_util.trim_to_option (string_field "goal" json) = None then
-             items :=
-               metadata_gap_json ~kind:"session_goal_missing"
-                 ~summary:"Session goal is missing in briefing facts."
-                 ~scope_type:"session" ~scope_id:session_id ~severity:"watch"
-               :: !items;
-           if is_missing_or_unknown (string_field "communication_mode" json)
-           then
-             items :=
-               metadata_gap_json ~kind:"session_communication_mode_missing"
-                 ~summary:"Session communication mode is not recorded."
-                 ~scope_type:"session" ~scope_id:session_id ~severity:"watch"
-               :: !items;
-           List.rev !items)
   in
   let keeper_gaps =
     keepers
@@ -65,7 +45,7 @@ let collect_metadata_gaps ~sessions ~keepers ~agents =
                   ~severity:"watch")
            else None)
   in
-  take 8 (session_gaps @ keeper_gaps @ agent_gaps)
+  take 8 (keeper_gaps @ agent_gaps)
 
 type section =
   | Communication
@@ -73,10 +53,8 @@ type section =
   | Watch
 
 let gap_kinds_for_section = function
-  | Communication ->
-      [ "session_communication_mode_missing"; "keeper_last_reply_missing" ]
-  | Alignment ->
-      [ "session_goal_missing"; "agent_focus_missing" ]
+  | Communication -> [ "keeper_last_reply_missing" ]
+  | Alignment -> [ "agent_focus_missing" ]
   | Watch -> []
 
 let count_metadata_gaps_for_section ~section gaps =

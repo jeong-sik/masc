@@ -1,12 +1,12 @@
 type t =
-  | Oas_cleanup
-  | Oas_save
-  | Oas_delete
-  | Oas_archive
+  | Agent_core_cleanup
+  | Agent_core_save
+  | Agent_core_delete
+  | Agent_core_archive
 
 let to_label = function
-  | Oas_cleanup -> "oas_cleanup"
-  | Oas_save -> "oas_save"
-  | Oas_delete -> "oas_delete"
-  | Oas_archive -> "oas_archive"
+  | Agent_core_cleanup -> "agent_core_cleanup"
+  | Agent_core_save -> "agent_core_save"
+  | Agent_core_delete -> "agent_core_delete"
+  | Agent_core_archive -> "agent_core_archive"
 ;;

@@ -203,11 +203,15 @@ fi
 # ── Check 2: turn_phase (OCaml) vs TurnPhaseSet in TLA+ ─────────────────────
 
 echo ""
-echo "=== Check 2: turn_phase (OCaml) vs KeeperRuntimeLifecycle.tla domain ==="
+echo "=== Check 2: turn_phase (OCaml) vs KeeperTurnCycle.tla domain ==="
 
-KR_TYPES_ML="lib/keeper/keeper_registry_types.ml"
 KR_TURN_PHASE_ML="lib/keeper_registry/keeper_registry_types_turn_phase.ml"
-KCL_TLA="specs/keeper-state-machine/KeeperRuntimeLifecycle.tla"
+# Was specs/keeper-state-machine/KeeperRuntimeLifecycle.tla, a path with no file
+# behind it. Both branches below skipped on the missing file and the script
+# still exited 0, so this check reported nothing for as long as the name was
+# wrong. TurnPhaseSet lives here and in KeeperDecisionPipeline.tla with the
+# same seven members.
+KCL_TLA="specs/keeper-state-machine/KeeperTurnCycle.tla"
 
 if [ -f "$KR_TURN_PHASE_ML" ]; then
   # turn_phase constructors (strip "Turn_" prefix, lowercase for TLA+ comparison)
@@ -229,7 +233,8 @@ if [ -f "$KR_TURN_PHASE_ML" ]; then
         echo "      (Add 'TurnPhaseSet == {\"idle\", ...}' to the spec for automated sync)"
       fi
     else
-      echo "INFO: ${KCL_TLA} not found — TLA+ turn_phase check skipped"
+      echo "FAIL: ${KCL_TLA} not found — turn_phase cannot be cross-checked"
+      exit_code=1
     fi
   else
     echo "WARN: could not extract OCaml turn_phase from ${KR_TURN_PHASE_ML}"
@@ -238,33 +243,12 @@ else
   echo "WARN: ${KR_TURN_PHASE_ML} not found — turn_phase check skipped"
 fi
 
-# ── Check 3: runtime_state (OCaml) vs RuntimeSet in TLA+ ────────────────────
-
-echo ""
-echo "=== Check 3: runtime_state (OCaml) vs KeeperRuntimeLifecycle.tla domain ==="
-
-if [ -f "$KR_TYPES_ML" ]; then
-  ocaml_runtime=$(extract_ocaml_type "$KR_TYPES_ML" "runtime_state" \
-    | sed 's/Runtime_//' | tr '[:upper:]' '[:lower:]' | sort -u)
-
-  if [ -n "$ocaml_runtime" ]; then
-    if [ -f "$KCL_TLA" ]; then
-      # Extract from the RuntimeSet == {"..."} definition in the TLA+ spec.
-      # Reads the canonical set literal — no hardcoded values needed here.
-      tla_runtime=$(extract_tla_set_literals "$KCL_TLA" "RuntimeSet")
-      if [ -n "$tla_runtime" ]; then
-        check_pair "OCaml(runtime_state)" "$ocaml_runtime" "TLA+(RuntimeSet)" "$tla_runtime"
-      else
-        echo "INFO: RuntimeSet definition not found in ${KCL_TLA} — runtime_state check skipped"
-        echo "      (Add 'RuntimeSet == {\"idle\", ...}' to the spec for automated sync)"
-      fi
-    else
-      echo "INFO: ${KCL_TLA} not found — TLA+ runtime_state check skipped"
-    fi
-  fi
-else
-  echo "WARN: ${KR_TYPES_ML} not found — runtime_state check skipped"
-fi
+# Check 3 compared an OCaml [runtime_state] variant in
+# lib/keeper/keeper_registry_types.ml against RuntimeSet in the TLA+ spec.
+# No such variant exists: the only runtime_state in the tree is
+# [type runtime_state = string] in keeper_composite_observer, and no OCaml type
+# carries the spec's selecting/trying states. The check named a spec file that
+# does not exist and an OCaml type that does not exist, and printed nothing.
 
 # ── Check 4: PHASE_STYLES coverage (TypeScript) vs KeeperPhase ───────────────
 

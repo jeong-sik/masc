@@ -99,8 +99,8 @@ val fetch_range :
 
 val list_all : t -> string list
 (** List all sha256 hashes currently in the store. O(n) in store size.
-    Mainly used by tests. Production retention is owned exclusively by
-    {!Tool_blob_maintenance}. *)
+    Mainly used by tests. Offline retention is owned exclusively by
+    {!Tool_blob_maintenance} under the BasePath process lease. *)
 
 type list_error =
   { path : string
@@ -117,9 +117,8 @@ type delete_error =
   ; reason : string
   }
 
-val delete_error_to_string : delete_error -> string
 val delete : t -> sha256:string -> (bool, delete_error) result
 (** Delete one exact blob. [Ok false] means it is already absent; filesystem
     failures remain typed and visible. Bulk retention/deletion is owned
-    exclusively by {!Tool_blob_maintenance}; callers must not synthesize a
-    partial consumer keep-set. *)
+    exclusively by offline {!Tool_blob_maintenance} under the BasePath process
+    lease; callers must not synthesize a partial consumer keep-set. *)

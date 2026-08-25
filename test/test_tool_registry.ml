@@ -80,6 +80,14 @@ let () =
               ~duration_ms:1
               ();
             check int "total" 0 (Tool_registry.total_calls ()))
+        ; test_case "keeper prefix does not invent tool identity" `Quick (fun () ->
+            Tool_registry.reset ();
+            Tool_registry.record_call_if_known
+              ~tool_name:"keeper_totally_unknown"
+              ~disposition:(Tool_result.Failed ())
+              ~duration_ms:1
+              ();
+            check int "total" 0 (Tool_registry.total_calls ()))
         ; test_case "gated recording includes keeper-internal tools" `Quick (fun () ->
             Tool_registry.reset ();
             Tool_registry.record_call_if_known

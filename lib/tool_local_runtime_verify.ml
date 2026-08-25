@@ -1,23 +1,6 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Tool_local_runtime_verify -- runtime contract verification. *)
 
-module Oas_types = Agent_sdk.Types
+module Agent_core_types = Agent_core.Types
 
 
 (* http_error_message moved to Provider_http_error.to_message (SSOT,
@@ -28,32 +11,49 @@ let safe_discovery_endpoints () =
   | Stdlib.Effect.Unhandled _ -> None
   | _ -> None
 
+let select_endpoint_urls_for_pool ?runtime_pool endpoint_urls =
+  match Option.bind runtime_pool String_util.trim_nonempty with
+  | None -> if endpoint_urls = [] then None else Some endpoint_urls
+  | Some pool
+    when String.equal pool Local_runtime_pool.default_pool_label
+         || String.equal pool "default" ->
+      if endpoint_urls = [] then None else Some endpoint_urls
+  | Some pool ->
+      let matches url =
+        String.equal pool url
+        || String.equal pool (Local_runtime_pool.runtime_id_of_base_url url)
+      in
+      (match List.filter matches endpoint_urls with
+       | [] -> None
+      | selected -> Some selected)
+;;
+
+module For_testing = struct
+  let select_endpoint_urls_for_pool = select_endpoint_urls_for_pool
+end
+
 let discovery_endpoints_for_pool runtime_pool =
   match safe_discovery_endpoints () with
   | None -> None
   | Some [] -> None
   | Some endpoints ->
-      let matches_pool (endpoint : Discovery_cache.endpoint_info) =
-        match Option.bind runtime_pool String_util.trim_to_option with
-        | None -> true
-        | Some pool
-          when String.equal pool Local_runtime_pool.default_pool_label
-               || String.equal pool "default" ->
-            true
-        | Some pool ->
-            String.equal pool endpoint.url
-            || String.equal pool
-                 (Local_runtime_pool.runtime_id_of_base_url endpoint.url)
+      let endpoint_urls =
+        List.map (fun (endpoint : Discovery_cache.endpoint_info) -> endpoint.url) endpoints
       in
-      let filtered = List.filter matches_pool endpoints in
-      Some (if Stdlib.List.length filtered = 0 then endpoints else filtered)
+      Option.map
+        (fun selected_urls ->
+          List.filter
+            (fun (endpoint : Discovery_cache.endpoint_info) ->
+              List.mem endpoint.url selected_urls)
+            endpoints)
+        (select_endpoint_urls_for_pool ?runtime_pool endpoint_urls)
 
 let endpoint_model_id (endpoint : Discovery_cache.endpoint_info) =
   match endpoint.models with
-  | model :: _ -> String_util.trim_to_option model.id
+  | model :: _ -> String_util.trim_nonempty model.id
   | [] -> (
       match endpoint.props with
-      | Some props -> String_util.trim_to_option props.model
+      | Some props -> String_util.trim_nonempty props.model
       | None -> None)
 
 let endpoint_total_slots (endpoint : Discovery_cache.endpoint_info) =
@@ -72,15 +72,10 @@ let endpoint_ctx_size (endpoint : Discovery_cache.endpoint_info) =
 let endpoint_busy_slots (endpoint : Discovery_cache.endpoint_info) =
   match endpoint.slots with Some slots -> slots.busy | None -> 0
 
-let first_endpoint_url endpoints =
-  match endpoints with
-  | (endpoint : Discovery_cache.endpoint_info) :: _ -> Some endpoint.url
-  | [] -> None
-
 let error_message_of_http_error = Provider_http_error.to_message
 
 (** Probe whether an endpoint supports the OpenAI chat-completions protocol.
-    This is a protocol-level probe; it explicitly depends on OAS
+    This is a protocol-level probe; it explicitly depends on AGENT_CORE
     [Llm_provider.Complete.complete] because the goal is to verify the
     endpoint's wire protocol, not to run a full agent turn. *)
 let probe_chat_completion_compatible
@@ -110,7 +105,7 @@ let probe_chat_completion_compatible
           ~request_path:Masc_network_defaults.openai_chat_completions_path
           ~max_tokens:1 ()
       in
-      let messages : Oas_types.message list = [ Oas_types.user_msg "hi" ] in
+      let messages : Agent_core_types.message list = [ Agent_core_types.user_msg "hi" ] in
       let run_completion () =
         Llm_provider.Complete.complete ~sw:env.sw ~net:env.net
           ~config:provider_config ~messages ()
@@ -136,7 +131,7 @@ let classify_runtime_blocker ~provider_reachable ~slot_reachable
     (Some "provider_unreachable", Some "llama runtime health or slots endpoint failed")
   else if not chat_completion_compatible then
     ( Some "provider_protocol_incompatible",
-      Some "one or more endpoints failed the OAS chat-completions probe" )
+      Some "one or more endpoints failed the AGENT_CORE chat-completions probe" )
   else if
     match expected_model, actual_model_id with
     | Some expected, Some actual -> not (String.equal expected actual)
@@ -214,8 +209,6 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
                 `String
                   (Local_runtime_pool.runtime_id_of_base_url endpoint.url) );
               ("base_url", `String endpoint.url);
-              ("provider_base_url", `String endpoint.url);
-              ("slot_url", `String endpoint.url);
               ("provider_reachable", `Bool provider_ok_row);
               ( "provider_status_code",
                 Json_util.int_opt_to_json
@@ -223,7 +216,7 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
               ( "provider_error",
                 Json_util.string_opt_to_json
                   (if provider_ok_row then None
-                   else Some "oas discovery marked endpoint unhealthy") );
+                   else Some "agent_core discovery marked endpoint unhealthy") );
               ("slot_reachable", `Bool slot_ok_row);
               ("slot_status_code", Json_util.int_opt_to_json (if slot_ok_row then Some 200 else None));
               ("slot_error", `Null);
@@ -278,10 +271,11 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
     [
       ("checked_at", `String (Masc_domain.now_iso ()));
       ("runtime_pool", Json_util.string_opt_to_json runtime_pool);
-      ("source", `String "oas_discovery");
+      ("source", `String "agent_core_discovery");
+      ("verification_scope", `String "local_openai_compatible_runtime_pool");
+      ("blocks_keeper_turns", `Bool false);
+      ("fleet_provider_health", `String "not_assessed");
       ("cache_age_seconds", `Float (Discovery_cache.cache_age_seconds ()));
-      ("provider_base_url", Json_util.string_opt_to_json (first_endpoint_url endpoints));
-      ("slot_url", Json_util.string_opt_to_json (first_endpoint_url endpoints));
       ("provider_reachable", `Bool provider_reachable);
       ("slot_reachable", `Bool slot_reachable);
       ("chat_completion_compatible", `Bool chat_completion_compatible);
@@ -292,7 +286,6 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
       ("expected_ctx", Json_util.int_opt_to_json expected_ctx);
       ("actual_ctx", Json_util.int_opt_to_json actual_ctx);
       ("active_slots_now", `Int active_slots_now);
-      ("peak_hot_slots", `Int active_slots_now);
       ("configured_capacity", `Int configured_capacity);
       ("configured_max_concurrent_models", `Int configured_max_concurrent_models);
       ("runtime_blocker", Json_util.string_opt_to_json runtime_blocker);
@@ -307,10 +300,11 @@ let runtime_verify_json_missing_discovery ?runtime_pool ?expected_slots
     [
       ("checked_at", `String (Masc_domain.now_iso ()));
       ("runtime_pool", Json_util.string_opt_to_json runtime_pool);
-      ("source", `String "oas_discovery");
+      ("source", `String "agent_core_discovery");
+      ("verification_scope", `String "local_openai_compatible_runtime_pool");
+      ("blocks_keeper_turns", `Bool false);
+      ("fleet_provider_health", `String "not_assessed");
       ("cache_age_seconds", `Float (Discovery_cache.cache_age_seconds ()));
-      ("provider_base_url", `Null);
-      ("slot_url", `Null);
       ("provider_reachable", `Bool false);
       ("slot_reachable", `Bool false);
       ("chat_completion_compatible", `Null);
@@ -321,11 +315,12 @@ let runtime_verify_json_missing_discovery ?runtime_pool ?expected_slots
       ("expected_ctx", Json_util.int_opt_to_json expected_ctx);
       ("actual_ctx", `Null);
       ("active_slots_now", `Int 0);
-      ("peak_hot_slots", `Int 0);
       ("configured_capacity", `Int 0);
       ("configured_max_concurrent_models", `Int Inference_utils.max_concurrent_models);
-      ("runtime_blocker", `String "oas_discovery_unavailable");
-      ("detail", `String "runtime verification requires OAS discovery endpoints");
+      ("runtime_blocker", `String "agent_core_discovery_unavailable");
+      ( "detail",
+        `String
+          "No typed local OpenAI-compatible discovery endpoint is registered. This diagnostic does not assess or block official-client, CLI, or remote Keeper provider lanes." );
       ("pass", `Bool false);
       ("runtimes", `List []);
     ]

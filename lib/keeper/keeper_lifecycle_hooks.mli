@@ -7,8 +7,8 @@
     - [Keeper_registry.dispatch_event_with_audit] fires [Phase_transition]
       after the state machine accepts a phase change and the registry write
       commits.
-    - [Keeper_supervisor_cleanup_tombstone.handle_completion] fires
-      [Tombstone_reaped] after the durable shutdown finalization receipt
+    - [Keeper_supervisor_cleanup.handle_completion] fires
+      [Supervisor_cleaned] after the durable shutdown finalization receipt
       records exact-lane unregister.
 
     Phase B/C uses the same registration API to attach the
@@ -36,8 +36,8 @@ type event =
       (** Fired from [Keeper_registry.dispatch_event_with_audit] for real
           phase changes after the registry write commits. Hooks observe an
           applied transition; they cannot veto. *)
-  | Tombstone_reaped
-      (** Fired by the durable dead-tombstone completion handler after exact
+  | Supervisor_cleaned
+      (** Fired by the durable supervisor cleanup completion handler after exact
           registry unregister and finalization persistence. The keeper is
           fully gone from in-process state at this point. *)
 

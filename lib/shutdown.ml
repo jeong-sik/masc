@@ -151,11 +151,11 @@ let start_process_deadline_watchdog ~timeout_s =
                   Thread.delay timeout_s;
                   if Atomic.compare_and_set state Armed Fired then
                     Unix._exit process_deadline_exit_code
-                with _ ->
+                with _ ->  (* cancel-guard-ok: raw Thread.create body: Cancelled cannot arrive *)
                   if Atomic.compare_and_set state Armed Fired then
                     Unix._exit process_deadline_start_failure_exit_code)
               ())
-       with exn -> Error (Watchdog_thread_start_failed (Printexc.to_string exn))
+       with exn -> Error (Watchdog_thread_start_failed (Printexc.to_string exn))  (* cancel-guard-ok: Thread.create failure, not an Eio context *)
      with
      | Ok thread -> Ok { state; thread }
      | Error _ as error -> error)

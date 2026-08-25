@@ -1,15 +1,20 @@
 (** Goal_phase — state machine SSOT for goal lifecycle.
 
-    Encodes the five phases a goal can be in, the operator/system
+    Encodes the six phases a goal can be in, the operator/system
     actions that drive transitions, and the deterministic decision
     function {!decide_transition}. Used by the goal subsystem to keep
-    transition logic out of caller code. *)
+    transition logic out of caller code.
+
+    RFC-0387 stage 2: [Verifying] sits between [Executing] and
+    [Completed] — [Request_complete] enters it, and only the verifier's
+    [Record_proof_proven] leaves it for [Completed]. *)
 
 (** Goal lifecycle phases. *)
 type t =
   | Executing
-  | Blocked
-  | Paused
+  | Verifying
+      (** Completion requested; the proof verdict is pending out-of-band
+          (RFC-0387 B3). *)
   | Completed
   | Dropped
 
@@ -31,40 +36,68 @@ val all : t list
     string set (MCP schema enum, validator) via [List.map to_string all]. *)
 
 val admits_self_directed_progress : t -> bool
-(** Whether a keeper waking on this goal can make progress on it. *)
+(** Whether a keeper waking on this goal can make progress on it. [Verifying]
+    admits continued progress on the linked tasks while the completion proof
+    is judged out-of-band: the gate holds the phase, not the work. *)
 
 (** Operator / system actions that may drive a transition. *)
 type action =
   | Request_complete
-  | Pause
-  | Resume
-  | Block
-  | Unblock
   | Drop
   | Reopen
+  | Record_proof_proven
+      (** Verifier commit: the completion proof held. [Verifying ->
+          Completed]. Requires non-blank evidence at the tool boundary. *)
+  | Record_proof_refuted
+      (** Verifier commit: the completion proof failed. [Verifying ->
+          Executing]; the refutation reason stays in the ledger and
+          goal_events. *)
+      (** Phase-neutral creation-time criterion verdicts (RFC-0387 B2): legal
+          in every non-terminal phase as [Already <same phase>] — the handler
+          commits the ledger and never writes the phase. *)
 
 val action_to_string : action -> string
 val action_of_string : string -> action option
-val parse_action : string -> action option
-
 val all_actions : action list
-(** Every action in declaration order. SSOT for the schema/validator action
-    enum via [List.map action_to_string all_actions]. *)
+(** Every internal action in declaration order. Includes verifier-only ledger
+    commits and is the SSOT for the exhaustive transition matrix. *)
 
-(** Outcome of {!decide_transition}. [Move_to] is a direct phase change and
-    [Complete] is the terminal success transition. *)
+module Public_action : sig
+  (** Lifecycle requests exposed by [masc_goal_transition]. Verifier verdicts
+      are deliberately absent: they enter through the application-owned typed
+      authority boundary, never through an MCP caller. *)
+  type t =
+    | Request_complete
+    | Drop
+    | Reopen
+
+  val to_action : t -> action
+  val to_string : t -> string
+  val of_string : string -> t option
+  val parse : string -> t option
+  val all : t list
+end
+
+(** What a transition request resolves to.
+
+    [Move_to] is a phase change: the caller writes the new phase and records
+    the event. [Already] is the same request made against a goal that is
+    already in the phase the action targets — satisfied, with nothing to write.
+    A caller that treats the two alike turns a repeated report into repeated
+    history. *)
+type outcome =
+  | Move_to of t
+  | Already of t
 
 val decide_transition :
   phase:t ->
   action:action ->
-  (t, string) result
-(** Pure transition decider: the phase the goal moves to, or [Error msg] for
-    an invalid pair.
+  (outcome, string) result
+(** Pure transition decider: what the request resolves to, or [Error msg] for a
+    pair that names no reachable phase.
 
-    This returned a [transition_outcome] whose [Complete] arm was the
-    else-branch of a verifier-policy check — one of four outcomes alongside
-    [Open_verification] and [Open_approval], removed with the goal quorum
-    engine in #24332. With those gone [Complete] and [Move_to Completed] named
-    the same thing, and both consumers immediately collapsed one into the
-    other while the doc still called [Complete] a distinct terminal
-    transition. A phase is now just a phase. *)
+    The diagonal — an action whose target phase the goal already occupies —
+    answers [Already] rather than an error, which is what the Task FSM already
+    says for the same shape (Cancel on Cancelled, Done_action on Done). Not
+    every terminal pair is on it: [Dropped, Request_complete] is still an
+    error, because completion is not the phase a dropped goal is in. *)

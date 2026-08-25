@@ -1,27 +1,15 @@
-(** Tool_local_runtime -- local model runtime management and benchmarking tools.
+(** Tool_local_runtime -- local model runtime MCP dispatch and schemas.
 
-    Facade module that re-exports sub-modules and provides MCP dispatch/schemas.
+    Handler implementations are split across:
     Implementation is split across:
     - Tool_local_runtime_core   : types, helpers, process discovery, model fetching
     - Tool_local_runtime_http   : HTTP helpers (curl wrappers, JSON member access)
     - Tool_local_runtime_verify : runtime contract verification
-    - Tool_local_runtime_bench  : concurrency benchmark
-    - Tool_local_runtime_status : runtime pool status reporting
     - Tool_local_runtime_probe  : native Ollama timing/KV inference probe *)
 
 open Masc_domain
 
 module Core = Tool_local_runtime_core
-
-(* Re-export sub-module public values used by external callers *)
-let runtime_status_json = Tool_local_runtime_status.runtime_status_json
-let runtime_verify_json = Tool_local_runtime_verify.runtime_verify_json
-let runtime_ollama_probe_json = Tool_local_runtime_probe.runtime_ollama_probe_json
-let run_bench = Tool_local_runtime_bench.run_bench
-let provider_health_reachable = Tool_local_runtime_verify.provider_health_reachable
-let ollama_loaded_models_of_ps_json = Tool_local_runtime_probe.ollama_loaded_models_of_ps_json
-let ollama_probe_run_of_generate_json = Tool_local_runtime_probe.ollama_probe_run_of_generate_json
-let kv_cache_assessment_json = Tool_local_runtime_probe.kv_cache_assessment_json
 
 let ok_response ~tool_name ~start_time fields : Core.tool_result =
   Tool_result.make_ok
@@ -41,46 +29,7 @@ let err_response ~tool_name ~start_time ~class_ msg : Core.tool_result =
     (Yojson.Safe.to_string data)
 ;;
 
-let handle_models _ctx : Core.tool_result =
-  let tool_name = "masc_runtime_models" in
-  let start_time = Time_compat.now () in
-  match Core.fetch_models () with
-  | Error msg ->
-      err_response
-        ~tool_name
-        ~start_time
-        ~class_:Tool_result.Transient_error
-        msg
-  | Ok (url, models) ->
-      ok_response
-        ~tool_name
-        ~start_time
-        [
-          ( "result",
-            `Assoc
-              [
-                ("server_url", `String Env_config.Local_runtime.server_url);
-                ("endpoint", `String url);
-                ("source", `String "llama.cpp /v1/models");
-                ("models", `List (List.map (fun m -> `String m) models));
-                ("model_count", `Int (List.length models));
-              ] );
-        ]
-
-let handle_runtime_status _ctx args : Core.tool_result =
-  let tool_name = "masc_runtime_status" in
-  let start_time = Time_compat.now () in
-  let include_models =
-    match Json_util.assoc_member_opt "include_models" args with
-    | Some (`Bool flag) -> flag
-    | _ -> true
-  in
-  ok_response
-    ~tool_name
-    ~start_time
-    [ ("result", runtime_status_json ~include_models ()) ]
-
-let handle_runtime_verify _ctx args : Core.tool_result =
+let run_runtime_verify args : Core.tool_result =
   let tool_name = "masc_runtime_verify" in
   let start_time = Time_compat.now () in
   let runtime_pool = Json_util.get_string args "runtime_pool" in
@@ -102,92 +51,32 @@ let handle_runtime_verify _ctx args : Core.tool_result =
     ~start_time
     [
       ( "result",
-        runtime_verify_json ?runtime_pool ?expected_slots ?expected_ctx ?expected_model () );
+        Tool_local_runtime_verify.runtime_verify_json
+          ?runtime_pool ?expected_slots ?expected_ctx ?expected_model () );
     ]
 
-let handle_runtime_bench _ctx args : Core.tool_result =
-  let tool_name = "masc_runtime_bench" in
-  let start_time = Time_compat.now () in
-  let model_id = Json_util.get_string args "model" in
-  let runtime_pool = Json_util.get_string args "runtime_pool" in
-  let parallelism =
-    match Json_util.assoc_member_opt "parallelism" args with
-    | Some (`Int value) -> max 1 (min 128 value)
-    | Some (`Intlit value) -> (
-        match Core.parse_int_opt value with
-        | Some parsed -> max 1 (min 128 parsed)
-        | None -> 8)
-    | _ -> 8
-  in
-  let rounds =
-    match Json_util.assoc_member_opt "rounds" args with
-    | Some (`Int value) -> max 1 (min 8 value)
-    | Some (`Intlit value) -> (
-        match Core.parse_int_opt value with
-        | Some parsed -> max 1 (min 8 parsed)
-        | None -> 1)
-    | _ -> 1
-  in
-  let max_tokens =
-    match Json_util.assoc_member_opt "max_tokens" args with
-    | Some (`Int value) -> max 1 (min 128 value)
-    | Some (`Intlit value) -> (
-        match Core.parse_int_opt value with
-        | Some parsed -> max 1 (min 128 parsed)
-        | None -> 16)
-    | _ -> 16
-  in
-  let timeout_sec =
-    match Json_util.assoc_member_opt "timeout_sec" args with
-    | Some (`Int value) -> max 3 (min 120 value)
-    | Some (`Intlit value) -> (
-        match Core.parse_int_opt value with
-        | Some parsed -> max 3 (min 120 parsed)
-        | None -> 8)
-    | _ -> 8
-  in
-  let prompt =
-    match Json_util.assoc_member_opt "prompt" args with
-    | Some (`String value) when not (String.equal (String.trim value) "") -> String.trim value
-    | _ -> "Reply with exactly one short word: ready"
-  in
-  match
-    run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt
-      ~max_tokens ~timeout_sec ()
-  with
-  | Ok json -> ok_response ~tool_name ~start_time [ ("result", json) ]
-  | Error err ->
-      err_response
-        ~tool_name
-        ~start_time
-        ~class_:Tool_result.Runtime_failure
-        err
+(* TEL-OK: this adapter only requests the shared external-effect authorization
+   and delegates the completion. The authorizer owns the Gate decision receipt;
+   the outer MCP tool-call boundary owns duration and result telemetry. *)
+let handle_runtime_verify (ctx : Core.context) args : Core.tool_result =
+  let continue () = run_runtime_verify args in
+  match ctx.authorize_external_effect with
+  | None -> continue ()
+  | Some authorize ->
+    authorize
+      ~operation:"masc_runtime_verify"
+      ~input:args
+      ~continue
+;;
 
-let run_runtime_ollama_probe ?timeout_sec args : Core.tool_result =
+let run_runtime_ollama_probe ~probe_runs ~max_tokens ~ps_timeout_sec ?timeout_sec
+    args : Core.tool_result =
   let tool_name = "masc_runtime_ollama_probe" in
   let start_time = Time_compat.now () in
   let server_url = Json_util.get_string args "server_url" in
   let model = Json_util.get_string args "model" in
   let prompt = Json_util.get_string args "prompt" in
   let keep_alive = Json_util.get_string args "keep_alive" in
-  let probe_runs =
-    match Json_util.assoc_member_opt "probe_runs" args with
-    | Some (`Int value) -> value
-    | Some (`Intlit value) -> (
-        match Core.parse_int_opt value with
-        | Some parsed -> parsed
-        | None -> 2)
-    | _ -> 2
-  in
-  let max_tokens =
-    match Json_util.assoc_member_opt "max_tokens" args with
-    | Some (`Int value) -> value
-    | Some (`Intlit value) -> (
-        match Core.parse_int_opt value with
-        | Some parsed -> parsed
-        | None -> 16)
-    | _ -> 16
-  in
   let think_mode =
     match Json_util.assoc_member_opt "think_mode" args with
     | Some (`String value) -> (
@@ -225,8 +114,9 @@ let run_runtime_ollama_probe ?timeout_sec args : Core.tool_result =
         ~start_time
         [
           ( "result",
-            runtime_ollama_probe_json ?server_url ?model ?prompt ?keep_alive
-              ~probe_runs ~max_tokens ~think_mode ?timeout_sec
+            Tool_local_runtime_probe.runtime_ollama_probe_json
+              ?server_url ?model ?prompt ?keep_alive
+              ~probe_runs ~max_tokens ~think_mode ?timeout_sec ~ps_timeout_sec
               ~generate_when_unloaded ~run_generate () );
         ]
 
@@ -244,16 +134,56 @@ let runtime_ollama_probe_timeout_sec args =
            expected
            got)
 
+(* Absent means "use the default"; present-but-unusable does not. Reading a
+   string or a float back as the default answers with an ok response for a
+   probe the caller did not ask for. Out-of-range is the same story with a
+   different cause -- #24851 removed that rewrite for timeout_sec, and these
+   knobs are refused in the same place, before the Gate sees the call, so a
+   rejected probe never authorizes an external effect (#25006). *)
+let runtime_ollama_probe_bounded_field args ~name ~default ~validate =
+  match Json_field.int args name with
+  | Json_field.Field_absent -> Ok default
+  | Json_field.Found value -> validate value
+  | Json_field.Wrong_shape { expected; got } ->
+      Error (Printf.sprintf "%s must be an %s, got %s" name expected got)
+
+type ollama_probe_bounds =
+  { probe_runs : int
+  ; max_tokens : int
+  ; ps_timeout_sec : int
+  ; timeout_sec : int option
+  }
+
+let runtime_ollama_probe_bounds args : (ollama_probe_bounds, string) result =
+  let ( let* ) = Result.bind in
+  let* timeout_sec = runtime_ollama_probe_timeout_sec args in
+  let* probe_runs =
+    runtime_ollama_probe_bounded_field args ~name:"probe_runs" ~default:2
+      ~validate:Tool_local_runtime_probe.validate_probe_runs
+  in
+  let* max_tokens =
+    runtime_ollama_probe_bounded_field args ~name:"max_tokens" ~default:16
+      ~validate:Tool_local_runtime_probe.validate_max_tokens
+  in
+  let* ps_timeout_sec =
+    runtime_ollama_probe_bounded_field args ~name:"ps_timeout_sec" ~default:2
+      ~validate:Tool_local_runtime_probe.validate_ps_timeout_sec
+  in
+  Ok { probe_runs; max_tokens; ps_timeout_sec; timeout_sec }
+
 let handle_runtime_ollama_probe (ctx : Core.context) args : Core.tool_result =
-  match runtime_ollama_probe_timeout_sec args with
+  match runtime_ollama_probe_bounds args with
   | Error message ->
       err_response
         ~tool_name:"masc_runtime_ollama_probe"
         ~start_time:(Time_compat.now ())
         ~class_:Tool_result.Workflow_rejection
         message
-  | Ok timeout_sec ->
-      let continue () = run_runtime_ollama_probe ?timeout_sec args in
+  | Ok { probe_runs; max_tokens; ps_timeout_sec; timeout_sec } ->
+      let continue () =
+        run_runtime_ollama_probe ~probe_runs ~max_tokens ~ps_timeout_sec
+          ?timeout_sec args
+      in
       (match ctx.authorize_external_effect with
        | None -> continue ()
        | Some authorize ->
@@ -280,6 +210,9 @@ let () =
   List.iter
     (fun (definition : Tool_schemas_local_runtime.definition) ->
       let s = definition.schema in
+      let policy =
+        Tool_schemas_local_runtime.execution_policy definition.operation
+      in
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name
@@ -287,8 +220,8 @@ let () =
            ~module_tag:Tool_dispatch.Mod_local_runtime
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
-           ~is_read_only:true
-           ~is_idempotent:true
+           ~is_read_only:policy.read_only
+           ~is_idempotent:policy.idempotent
            ()))
     Tool_schemas_local_runtime.definitions
 

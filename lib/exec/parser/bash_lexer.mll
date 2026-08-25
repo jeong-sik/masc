@@ -78,6 +78,12 @@ let dq_body = dq_char*
 rule token = parse
   | [' ' '\t']+    { token lexbuf }
   | '\n'           { incr_tokens (); Lexing.new_line lexbuf; token lexbuf }
+  (* Before [PIPE] and the fd-redirect rules so the two-character
+     operators win their own lexemes. A lone [&] stays out of the subset
+     and still reaches [classify_too_complex] as `Background. *)
+  | "&&"           { incr_tokens (); AND_IF }
+  | "||"           { incr_tokens (); OR_IF }
+  | ';'            { incr_tokens (); SEMICOLON }
   | '|'            { incr_tokens (); PIPE }
   | (fd as src) ">&" (fd as dst)
                     { incr_tokens (); FD_REDIRECT (int_of_string src, int_of_string dst) }

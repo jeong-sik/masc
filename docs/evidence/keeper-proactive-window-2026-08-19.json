@@ -1,0 +1,38 @@
+{
+  "captured_at": "2026-08-19T02:30:00Z",
+  "purpose": "Proactive 행 duration 축: 신호 기반 자율 케이던스의 창 단위 판정 (진척·실패율·연속성)",
+  "window": {
+    "from": "2026-08-18T17:01:41Z",
+    "to": "2026-08-19T01:54:28Z",
+    "hours": 8.9,
+    "source": "<base-path>/.masc/keepers/*/execution-receipts/2026-08/19.jsonl (UTC day file)"
+  },
+  "aggregates": {
+    "receipts": 226,
+    "keepers_active": 13,
+    "outcomes": { "receipt_done": 180, "receipt_failed": 44, "receipt_cancelled": 2 },
+    "success_rate": 0.796,
+    "failure_breakdown": {
+      "api_error_network": 38,
+      "provider_error_parse": 4,
+      "provider_attempt_effect_fenced": 1,
+      "accept_rejected": 1,
+      "api_error_timeout": 1,
+      "provider_error_timeout:stream_idle:streaming_thinking": 1,
+      "yielded_to_durable_stimulus": 1
+    },
+    "actionable_signal": { "has_unclaimed_tasks": 180, "none": 46 }
+  },
+  "continuity": {
+    "intra_day_gaps_ge_2h": 0,
+    "midnight_boundary_gaps_ge_1h": 0,
+    "restart_crossing": "09:21 KST 재배포(3bd64d95)를 케이던스 단절 없이 관통",
+    "verdict_on_sleep_resume": "수면→재개 이벤트는 관측 불가 — fleet이 잠들지 않음. 부재가 아니라 이 fleet 상태에서 그 이벤트가 발생하지 않는 것"
+  },
+  "known_defect_status": {
+    "matrix_claim": "리더는 channel=scheduled_autonomous만 세는데 스케줄러 깨움 턴은 reactive로 떨어져 집계 밖 (08-17 감사)",
+    "verification": "현재 main에서 확정 — keeper_world_observation.ml:1348 큐 자극 전부가 reactive 트리거로 합류",
+    "fix": "PR #29050 (Scheduled_automation_due를 scheduled 결정으로 분리, feature 테스트 3케이스)"
+  },
+  "limits": "\"새 진척·비반복\" 판정은 receipt 필드(current_task_id 대부분 null)만으로 불충분 — 후속 판정 필요. 24h 창은 t0+24h 도달 시"
+}

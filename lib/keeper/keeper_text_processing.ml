@@ -37,10 +37,6 @@ let normalize_proactive_text (raw : string) : string =
   |> Re.replace_string re_whitespace ~by:" "
   |> String.trim
 
-let extract_checkin_text (raw : string) : string option =
-  let cleaned = normalize_proactive_text raw in
-  if cleaned = "" then None else Some cleaned
-
 let proactive_has_terminal_punct (s : string) : bool =
   let t = String.trim s in
   t <> "" && Re.execp re_terminal_punct t
@@ -64,10 +60,13 @@ let looks_fragmentary_history_text (raw : string) : bool =
   else
     let hard_fragment = proactive_looks_fragmentary t in
     let has_terminal = proactive_has_terminal_ending t in
-    let ends_korean_sentence = Re.execp re_korean_ending t in
-    let short_unterminated =
-      (not has_terminal) && (not ends_korean_sentence) && String.length t <= 24
-    in
+    (* [t] is normalized (whitespace-collapsed, trimmed) and the [t = ""] case
+       returned above, so [proactive_has_terminal_korean_ending t] reduces to
+       [Re.execp re_korean_ending t]. [has_terminal] is that disjoined with the
+       punctuation check, so [not has_terminal] already implies the Korean
+       ending is absent. The separate conjunct that used to sit here rejected
+       nothing. *)
+    let short_unterminated = (not has_terminal) && String.length t <= 24 in
     let trailing_connector =
       (not has_terminal)
       && Re.execp re_trailing_connector (String.lowercase_ascii t)

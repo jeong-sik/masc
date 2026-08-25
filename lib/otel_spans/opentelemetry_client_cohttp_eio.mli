@@ -12,12 +12,10 @@
 
     Internal helpers stay private at this boundary
     (the [OT] / [Signal] / [Batch] aliases, the
-    [( let@ )] / [spf] helpers, [set_headers] /
-    [get_headers], the [error] type, the
+    [( let@ )] / [spf] helpers, the [error] type, the
     [n_errors] / [n_dropped] counters, [report_err_],
     the {!Httpc} module, the {!EMITTER} module type,
-    [mk_emitter], the {!Backend} functor, [create_backend], [setup_],
-    [with_setup]).
+    [mk_emitter], the {!Backend} functor, [create_backend], [setup_]).
 
     Library [Opentelemetry.GC_metrics] sampling is intentionally absent:
     process.runtime.ocaml.gc.* duplicated the masc_gc_* gauges exported
@@ -57,7 +55,6 @@ end
 val setup :
   ?stop:bool Atomic.t ->
   ?config:Config.t ->
-  ?enable:bool ->
   sw:Eio.Switch.t ->
   Eio_unix.Stdenv.base ->
   unit

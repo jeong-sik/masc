@@ -1,11 +1,12 @@
+import { keeperStreamContract } from '../keeper-stream-contract'
 import { html } from 'htm/preact'
 import { AgentFailure, failureTypeFromDiagnostic } from './common/agent-failure'
 import { Markdown } from "./common/markdown"
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 import { dashboardAuthAccess } from '../lib/dashboard-auth-access'
 import { isInFlightDelivery } from '../lib/keeper-delivery'
-import { formatTimeAgo, relativeTime, NO_TIME_INFO } from '../lib/format-time'
+import { relativeTime, NO_TIME_INFO } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
 import type {
   ChatBlock,
@@ -23,14 +24,8 @@ import {
   interruptKeeperTurn,
   isKeeperThreadMessageSendInFlight,
   probeKeeperRuntime,
-  reconcileKeeperChatReceipts,
-  cancelKeeperChatPendingEntry,
-  editKeeperChatPendingEntry,
-  moveKeeperChatPendingEntryToEnd,
-  requeueKeeperChatRecoveryEntry,
-  cancelKeeperChatRecoveryEntry,
   recoverKeeperRuntime,
-  resumePendingKeeperChatRequests,
+  hydrateTrackedKeeperChatOperations,
   sendKeeperThreadMessage,
 } from '../keeper-actions'
 import {
@@ -43,35 +38,16 @@ import {
   keeperStreamStartedAt,
   keeperStreamLastEventAt,
   keeperThreads,
-  keeperStreamContract,
   setRecordValue,
 } from '../keeper-state'
-import { isDefaultVisibleConversationEntry } from '../keeper-state'
+import { isAutonomousTurnEntry, isDefaultVisibleConversationEntry } from '../keeper-state'
 import {
   getKeeperLastSeen,
   advanceKeeperLastSeen,
   newestConversationEntryUnix,
 } from '../keeper-last-seen'
-import { refreshKeeperCatchupDigest } from '../keeper-digest-actions'
-import { keeperCatchupDigests } from '../keeper-digest-signals'
-import {
-  KeeperCatchupDigestCard,
-  shouldShowKeeperCatchupDigest,
-} from './keeper-catchup-digest-card'
-import {
-  enqueueInput,
-  clearInputQueue,
-  getQueuedMessages,
-  dequeueInput,
-  markInputSent,
-  requeueInputFront,
-  hasQueuedInputClientAction,
-  updateQueuedMessage,
-  removeQueuedMessage,
-  type QueuedMessage,
-} from '../keeper-chat-store'
 import { stableAttachmentId } from './chat/attachments'
-import { AttachDraftChip, ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S, formatAttachmentSize, type ChatComposerCommand, type ChatComposerSendPayload } from './chat/primitives'
+import { ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S, type ChatComposerCommand, type ChatComposerSendPayload } from './chat/primitives'
 import { showToast } from './common/toast'
 import { TextInput } from './common/input'
 import { shellAuthSummary } from '../store'
@@ -86,24 +62,19 @@ import {
   subscribeKeeperWaitingInventory,
 } from '../keeper-waiting-inventory-store'
 import { registerKeeperWaitingInventoryRefresh } from '../sse-store'
-import { chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
 import {
-  cancelKeeperChatPendingReceipt,
-  editKeeperChatPendingReceipt,
-  fetchKeeperChatReceipt,
-  fetchKeeperEventQueuePending,
-  fetchKeeperChatPending,
-  KeeperEventQueueOperationError,
-  moveKeeperChatPendingReceiptToEnd,
-  operateKeeperEventQueue,
-  resolveKeeperChatRecovery,
+  chatExpandAutonomousRuns,
+  chatShowAutonomous,
+  chatShowInternal,
+  chatShowMetadata,
+} from '../lib/chat-view-prefs'
+import {
+  cancelKeeperChatOperation,
+  editQueuedKeeperChatOperation,
+  listQueuedKeeperChatOperations,
+  moveQueuedKeeperChatOperationToEnd,
   type DashboardKeeperWaitingKeeper,
-  type DashboardKeeperWaitingRow,
-  type KeeperChatPendingSource,
-  type KeeperChatPendingSnapshot,
-  type KeeperEventQueueOperatorAction,
-  type KeeperEventQueuePendingSnapshot,
-  type KeeperEventQueueReplayableAction,
+  type KeeperChatOperation,
 } from '../api'
 
 
@@ -133,36 +104,30 @@ function GhostButton({
   `
 }
 
-function quietReasonLabel(reason?: string | null): string {
+function quietReasonLabel(
+  reason: NonNullable<KeeperDiagnostic['quiet_reason']>,
+): string {
   switch (reason) {
-    case 'quiet_hours':
-      return 'quiet hours'
-    case 'min_gap':
-      return 'cooldown gate'
-    case 'no_recent_activity':
-      return 'waiting for activity'
     case 'disabled':
       return 'runtime disabled'
+    case 'not_running':
+      return 'keepalive not running'
     case 'startup':
       return 'warming up'
-    case 'model_error':
-      return 'model error'
-    case 'graphql_error':
-      return 'graphql error'
     case 'never_started':
       return 'never started'
-    default:
-      return 'unknown'
   }
 }
 
-function nextActionLabel(path: string): string {
+function nextActionLabel(path: KeeperDiagnostic['next_action_path']): string {
   switch (path) {
-    case 'probe':
-      return 'probe'
+    case 'auto_restart':
+      return 'auto restart'
     case 'recover':
       return 'recover'
-    default:
+    case 'probe':
+      return 'probe'
+    case 'direct_message':
       return 'message'
   }
 }
@@ -248,42 +213,6 @@ function liveAssistantPlaceholder(keeperName: string): KeeperConversationEntry {
     }),
     details: null,
     error: null,
-  }
-}
-
-function queuedInputToConversationEntry(msg: QueuedMessage): KeeperConversationEntry {
-  const hasText = msg.content.trim().length > 0
-  const attachmentCount = msg.attachments?.length ?? 0
-  const attachmentText = attachmentCount > 0 ? `첨부 ${attachmentCount}개 대기 중` : ''
-  return {
-    id: `queued-user-${msg.id}`,
-    role: 'user',
-    source: 'direct_user',
-    label: 'You',
-    text: hasText ? msg.content : attachmentText,
-    rawText: msg.content,
-    timestamp: queuedTimestampIso(msg.timestamp),
-    delivery: 'queued',
-    streamState: undefined,
-    streamContract: keeperStreamContract('client_local_send', 'client_placeholder', {
-      deliveryReceipt: 'no_delivery_receipt',
-      reason: 'client-side composer queue item; not yet submitted to keeper runtime',
-    }),
-    queueSeq: msg.sequence,
-    queueClientActionId: msg.clientActionId ?? null,
-    attachments: msg.attachments,
-    blocks: msg.blocks,
-    details: null,
-    error: null,
-  }
-}
-
-function queuedTimestampIso(timestampMs: number): string | null {
-  if (!Number.isFinite(timestampMs)) return null
-  try {
-    return new Date(timestampMs).toISOString()
-  } catch {
-    return null
   }
 }
 
@@ -412,118 +341,13 @@ export function KeeperDiagnosticSummary({
       </div>
       ${diagnostic?.last_error
         ? html`<${AgentFailure}
-            type=${failureTypeFromDiagnostic(diagnostic.last_error, diagnostic.recoverable)}
+            type=${failureTypeFromDiagnostic(diagnostic.last_error)}
             message=${diagnostic.last_error}
           />`
         : null}
       ${showRawStatus
         ? html`<div class="mt-3 max-h-60 overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] custom-scrollbar v2-monitoring-panel"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
         : null}
-    </div>
-  `
-}
-
-// ── Queued message editor (rendered inside the conversation panel) ──
-
-interface QueueItemCardProps {
-  keeperName: string
-  msg: QueuedMessage
-  onMutate: () => void
-  onSave: () => void
-}
-
-function QueueItemCard({ keeperName, msg, onMutate, onSave }: QueueItemCardProps) {
-  const [editing, setEditing] = useState(msg.editOnOpen === true)
-  const [text, setText] = useState(msg.content)
-  const [attachments, setAttachments] = useState(msg.attachments ?? [])
-  const [editError, setEditError] = useState<string | null>(null)
-
-  const save = () => {
-    try {
-      const updated = updateQueuedMessage(keeperName, msg.id, {
-        content: text.trim(),
-        attachments: attachments.length > 0 ? attachments : undefined,
-        editOnOpen: false,
-      })
-      if (!updated) throw new Error('수정할 대기 메시지를 찾지 못했습니다.')
-      setEditError(null)
-      setEditing(false)
-      onMutate()
-      onSave()
-    } catch (error) {
-      setEditError(error instanceof Error ? error.message : String(error))
-    }
-  }
-
-  const cancel = () => {
-    setText(msg.content)
-    setAttachments(msg.attachments ?? [])
-    setEditError(null)
-    updateQueuedMessage(keeperName, msg.id, { editOnOpen: false })
-    setEditing(false)
-  }
-
-  const removeAttachment = (id: string) => {
-    setAttachments(prev => prev.filter(a => a.id !== id))
-  }
-
-  return html`
-    <div
-      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2.5"
-      data-chat-queue-item=${msg.id}
-      data-chat-queue-seq=${msg.sequence}
-      data-chat-queue-client-action-id=${msg.clientActionId ?? undefined}
-    >
-      ${editing
-        ? html`
-            <textarea
-              class="w-full min-h-[3.5rem] rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2.5 py-2 text-sm leading-relaxed text-[var(--color-fg-primary)] outline-none focus:border-[var(--color-accent-fg-dim)]"
-              value=${text}
-              onInput=${(e: Event) => { setText((e.target as HTMLTextAreaElement).value) }}
-            />
-            ${attachments.length > 0
-              ? html`
-                  <div class="mt-2 flex flex-wrap gap-2">
-                    ${attachments.map(att => html`
-                      <${AttachDraftChip}
-                        key=${att.id}
-                        attachment=${att}
-                        onRemove=${() => { removeAttachment(att.id) }}
-                      />
-                    `)}
-                  </div>
-                `
-              : null}
-            ${editError
-              ? html`<div class="mt-2 text-2xs text-[var(--color-status-err)]">${editError}</div>`
-              : null}
-            <div class="mt-2 flex items-center justify-end gap-2">
-              <button type="button" class="text-2xs text-[var(--color-fg-secondary)] hover:text-[var(--color-fg-primary)]" onClick=${cancel}>취소</button>
-              <button type="button" class="rounded-[var(--r-0)] bg-[var(--color-accent-fg)] px-2.5 py-1 text-2xs font-semibold text-[var(--color-bg-page)]" onClick=${save}>저장</button>
-            </div>
-          `
-        : html`
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0 flex-1">
-                <div class="text-sm text-[var(--color-fg-primary)] whitespace-pre-wrap break-words">${msg.content}</div>
-                ${attachments.length > 0
-                  ? html`<div class="mt-1.5 flex flex-wrap gap-1.5">
-                      ${attachments.map(att => html`
-                        <span class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-1.5 py-0.5 text-2xs text-[var(--color-fg-secondary)]">
-                          <span>${att.type === 'image' ? '▣' : '◫'}</span>
-                          <span class="truncate max-w-[12rem]">${att.name}</span>
-                          <span class="tabular-nums">${formatAttachmentSize(att.size)}</span>
-                        </span>
-                      `)}
-                    </div>`
-                  : null}
-              </div>
-              <div class="flex items-center gap-1.5 flex-none">
-                <button type="button" class="text-2xs text-[var(--color-fg-secondary)] hover:text-[var(--color-fg-primary)]" onClick=${() => { setEditing(true) }}>수정</button>
-                <button type="button" class="text-2xs text-[var(--color-status-err)] hover:text-[var(--color-status-err)]" onClick=${() => { removeQueuedMessage(keeperName, msg.id); onMutate() }}>삭제</button>
-              </div>
-            </div>
-          `}
     </div>
   `
 }
@@ -550,194 +374,33 @@ function BusyToolbar({
   `
 }
 
-function pendingSourceLabel(source: KeeperChatPendingSource): string {
-  switch (source.kind) {
-    case 'dashboard':
-      return `dashboard · thread ${source.threadId}`
-    case 'discord':
-      return `discord · user ${source.userId} · channel ${source.channelId}`
-    case 'slack':
-      return `slack · user ${source.userId} · channel ${source.channelId}`
-  }
-}
-
-type OperatorChatReceiptEvidence = {
-  receiptId: string
-  queueIndex: number | null
-  source: 'chat_queue_inflight' | 'chat_queue_recovery_required'
-  messageSource: string | null
-  contentLength: number | null
-  startedAt: number | null
-}
-
-function detailRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
-}
-
-function operatorChatReceiptEvidence(
-  row: DashboardKeeperWaitingRow,
-): OperatorChatReceiptEvidence | null {
-  if (
-    row.source !== 'chat_queue_inflight'
-    && row.source !== 'chat_queue_recovery_required'
-  ) return null
-  const detail = detailRecord(row.detail)
-  const lifecycle = detailRecord(detail?.lifecycle)
-  const receiptId = typeof detail?.receipt_id === 'string'
-    ? detail.receipt_id.trim()
-    : ''
-  if (!receiptId) return null
-  const queueIndex = typeof detail?.queue_index === 'number'
-    && Number.isSafeInteger(detail.queue_index)
-    && detail.queue_index >= 0
-    ? detail.queue_index
-    : null
-  const messageSourceRecord = detailRecord(detail?.message_source)
-  const messageSource = typeof messageSourceRecord?.kind === 'string'
-    ? messageSourceRecord.kind.trim() || null
-    : null
-  const contentLength = typeof detail?.content_length === 'number'
-    && Number.isSafeInteger(detail.content_length)
-    && detail.content_length >= 0
-    ? detail.content_length
-    : null
-  const startedAt = typeof lifecycle?.started_at === 'number'
-    && Number.isFinite(lifecycle.started_at)
-    && lifecycle.started_at >= 0
-    ? lifecycle.started_at
-    : null
-  return {
-    receiptId,
-    queueIndex,
-    source: row.source,
-    messageSource,
-    contentLength,
-    startedAt,
-  }
-}
-
-function ServerQueueStatus({
+function ServerOperationStatus({
   busy,
-  pendingCount,
-  inflightCount,
-  recoveryRequiredCount,
-  persistenceBlockedCount,
-  readErrorCount,
-  projectionError,
-  projectionReady,
-  projectionPresent,
-  currentExecution,
-  readErrorAction,
   onInspect,
   inspectAllowed,
   inspectReason,
 }: {
   busy: boolean
-  pendingCount: number
-  inflightCount: number
-  recoveryRequiredCount: number
-  persistenceBlockedCount: number
-  readErrorCount: number
-  projectionError?: string | null
-  projectionReady: boolean
-  projectionPresent: boolean
-  currentExecution?: DashboardKeeperWaitingKeeper['current_execution']
-  readErrorAction?: string | null
   onInspect: () => void
   inspectAllowed: boolean
   inspectReason: string | null
 }) {
-  const projectionUnavailable = Boolean(projectionError) || !projectionReady || !projectionPresent
-  if (
-    !projectionUnavailable
-    && !busy
-    && pendingCount === 0
-    && inflightCount === 0
-    && recoveryRequiredCount === 0
-    && persistenceBlockedCount === 0
-    && readErrorCount === 0
-  ) return null
   return html`
     <div
-      class="mb-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2.5 text-xs text-[var(--color-fg-secondary)] v2-monitoring-panel"
-      data-server-chat-queue
-      data-server-chat-queue-pending=${pendingCount}
-      data-server-chat-queue-inflight=${inflightCount}
-      data-server-chat-queue-recovery-required=${recoveryRequiredCount}
-      data-server-chat-queue-persistence-blocked=${persistenceBlockedCount}
-      data-server-chat-queue-read-errors=${readErrorCount}
-      data-server-chat-queue-projection=${projectionError
-        ? 'read-failed'
-        : !projectionReady
-          ? 'loading'
-          : !projectionPresent
-            ? 'missing'
-            : 'ready'}
+      class="mb-3 flex flex-wrap items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2.5 text-xs text-[var(--color-fg-secondary)] v2-monitoring-panel"
+      data-keeper-operation-status
     >
-      <div class="flex flex-wrap items-center gap-2 v2-monitoring-row">
-        <button
-          type="button"
-          class="font-semibold text-[var(--color-accent-fg)] underline decoration-dotted underline-offset-2"
-          disabled=${!inspectAllowed}
-          title=${inspectAllowed ? '서버 대기열 상세 및 제어' : inspectReason ?? 'Admin 권한이 필요합니다.'}
-          onClick=${onInspect}
-          data-open-keeper-queue-control
-        >${inspectAllowed ? 'Keeper 서버 대기열 상세/제어' : '대기열 상세/제어 · Admin 권한 필요'}</button>
-        ${inflightCount > 0
-          ? html`<span class="rounded-[var(--r-0)] border border-[var(--info-20)] bg-[var(--info-10)] px-2 py-0.5" data-server-chat-queue-state="inflight">처리 중 ${inflightCount}</span>`
-          : null}
-        ${pendingCount > 0
-          ? html`<span class="rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5" data-server-chat-queue-state="pending">서버 대기 ${pendingCount}</span>`
-          : null}
-        ${recoveryRequiredCount > 0
-          ? html`<span class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-[var(--color-status-err)]" data-server-chat-queue-state="recovery-required">배송 복구 확인 필요 ${recoveryRequiredCount}</span>`
-          : null}
-        ${persistenceBlockedCount > 0
-          ? html`<span class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-[var(--color-status-err)]" data-server-chat-queue-state="persistence-blocked">영속화 조정 필요 ${persistenceBlockedCount}</span>`
-          : null}
-        ${readErrorCount > 0
-          ? html`<span class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-[var(--color-status-err)]" data-server-chat-queue-state="read-error">대기열 조회 실패 ${readErrorCount}</span>`
-          : null}
-        ${projectionError
-          ? html`<span class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-[var(--color-status-err)]">서버 대기열 갱신 실패</span>`
-          : !projectionReady
-            ? html`<span class="rounded-[var(--r-0)] border border-[var(--info-20)] bg-[var(--info-10)] px-2 py-0.5">서버 대기열 불러오는 중</span>`
-            : !projectionPresent
-              ? html`<span class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-[var(--color-status-err)]">Keeper 대기열 투영 없음</span>`
-              : null}
-        ${busy && inflightCount === 0
-          ? html`<span class="rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5">다른 턴 실행 중</span>`
-          : null}
-      </div>
-      <div class="mt-1.5 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
-        이 값은 브라우저 초안이 아니라 서버의 durable receipt 투영입니다.
-        ${projectionError ? html` 최근 갱신 오류: <code>${projectionError}</code>. 표시 수치는 이전 snapshot일 수 있습니다.` : null}
-        ${readErrorAction ? html` 복구 조치: <code>${readErrorAction}</code>.` : null}
-        ${currentExecution?.live_turn
-          ? html`
-              현재 실행: turn <code>${currentExecution.live_turn.turn_id ?? '-'}</code>
-              · phase <code>${currentExecution.turn_phase ?? '-'}</code>
-              ${currentExecution.decision?.stage
-                ? html` · decision <code>${currentExecution.decision.stage}</code>`
-                : null}
-              ${currentExecution.runtime?.state
-                ? html` · runtime <code>${currentExecution.runtime.state}</code>`
-                : null}
-              · model <code>${currentExecution.live_turn.selected_model ?? '선택 전'}</code>
-              · wake <code>${currentExecution.run_state?.wake_kind ?? 'unknown'}${currentExecution.run_state?.stimulus_kinds?.length ? `:${currentExecution.run_state.stimulus_kinds.join(',')}` : ''}</code>
-              · active tools <code>${currentExecution.live_turn.active_tool_count ?? 0}</code>
-              · latest tool <code>${currentExecution.latest_tool?.name ?? 'none'}</code>
-              · 시작 <code>${currentExecution.live_turn.started_at === undefined
-                ? 'unknown'
-                : formatTimeAgo(currentExecution.live_turn.started_at)}</code>
-              · 최근 진행 <code>${currentExecution.live_turn.last_progress_kind ?? 'unknown'} / ${currentExecution.live_turn.last_progress_at === undefined
-                ? 'unknown'
-                : formatTimeAgo(currentExecution.live_turn.last_progress_at)}</code>
-            `
-          : null}
-      </div>
+      <button
+        type="button"
+        class="font-semibold text-[var(--color-accent-fg)] underline decoration-dotted underline-offset-2"
+        disabled=${!inspectAllowed}
+        title=${inspectAllowed ? '채팅 작업 상세 및 제어' : inspectReason ?? 'Admin 권한이 필요합니다.'}
+        onClick=${onInspect}
+        data-open-keeper-operation-control
+      >${inspectAllowed ? '채팅 작업 상세/제어' : '채팅 작업 상세/제어 · Admin 권한 필요'}</button>
+      ${busy
+        ? html`<span class="rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5">Running</span>`
+        : null}
     </div>
   `
 }
@@ -751,96 +414,37 @@ function KeeperQueueControlPanel({
   keeper: DashboardKeeperWaitingKeeper | null
   onClose: () => void
 }) {
-  const [snapshot, setSnapshot] = useState<KeeperChatPendingSnapshot | null>(null)
-  const [eventSnapshot, setEventSnapshot] = useState<KeeperEventQueuePendingSnapshot | null>(null)
+  const [operations, setOperations] = useState<readonly KeeperChatOperation[]>([])
   const [error, setError] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<string | null>(null)
-  const [eventRecoveries, setEventRecoveries] = useState<readonly {
-    operation: KeeperEventQueueReplayableAction
-    commitState: 'committed' | 'unknown'
-    message: string
-  }[]>([])
+
   const load = async (clearError = true) => {
     try {
       if (clearError) setError(null)
-      const [chat, events] = await Promise.all([
-        fetchKeeperChatPending(keeperName),
-        fetchKeeperEventQueuePending(keeperName),
-      ])
-      setSnapshot(chat)
-      setEventSnapshot(events)
+      setOperations(await listQueuedKeeperChatOperations(keeperName))
     } catch (cause) {
-      setSnapshot(null)
-      setEventSnapshot(null)
+      setOperations([])
       if (clearError) setError(cause instanceof Error ? cause.message : String(cause))
     }
   }
+
   useEffect(() => {
     void load()
     return registerKeeperWaitingInventoryRefresh(changedKeeper => {
       if (changedKeeper === keeperName) void load(false)
     })
   }, [keeperName])
-  const eventRows = eventSnapshot?.pending ?? []
-  const activeChatRows = (keeper?.waiting_on ?? [])
-    .map(operatorChatReceiptEvidence)
-    .filter((row): row is OperatorChatReceiptEvidence => row !== null)
-  const inflightRows = activeChatRows.filter(row => row.source === 'chat_queue_inflight')
-  const recoveryRows = activeChatRows.filter(
-    row => row.source === 'chat_queue_recovery_required',
-  )
-  const currentExecution = keeper?.current_execution ?? null
-  const currentWork = snapshot?.currentWork ?? null
-  const mutate = async (key: string, operation: () => Promise<unknown>) => {
-    setPendingAction(key)
-    try {
-      await operation()
-      await Promise.all([
-        reconcileKeeperChatReceipts(keeperName),
-        load(),
-        refreshKeeperWaitingInventory(keeperName),
-      ])
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause)
-      await Promise.allSettled([
-        reconcileKeeperChatReceipts(keeperName),
-        load(false),
-        refreshKeeperWaitingInventory(keeperName),
-      ])
-      setError(message)
-      showToast(message, 'error')
-    } finally {
-      setPendingAction(null)
-    }
-  }
-  const mutateEvent = async (
-    key: string,
-    operation: KeeperEventQueueOperatorAction,
+
+  const mutateChat = async (
+    operationId: string,
+    action: () => Promise<unknown>,
   ) => {
-    setPendingAction(key)
+    setPendingAction(operationId)
     try {
-      await operateKeeperEventQueue(keeperName, operation)
-      if (operation.action !== 'reprioritize' && operation.operationId) {
-        setEventRecoveries(recoveries => recoveries.filter(
-          recovery => recovery.operation.operationId !== operation.operationId,
-        ))
-      }
+      await action()
       await Promise.all([load(), refreshKeeperWaitingInventory(keeperName)])
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause)
-      if (cause instanceof KeeperEventQueueOperationError) {
-        const recovery = {
-          operation: cause.operation,
-          commitState: cause.commitState,
-          message,
-        }
-        setEventRecoveries(recoveries => [
-          ...recoveries.filter(
-            item => item.operation.operationId !== cause.operation.operationId,
-          ),
-          recovery,
-        ])
-      }
       await Promise.allSettled([load(false), refreshKeeperWaitingInventory(keeperName)])
       setError(message)
       showToast(message, 'error')
@@ -848,71 +452,40 @@ function KeeperQueueControlPanel({
       setPendingAction(null)
     }
   }
-  const resolveRecovery = async (
-    row: OperatorChatReceiptEvidence,
-    decision:
-      | { kind: 'requeue_unconfirmed' }
-      | {
-          kind: 'cancel_unconfirmed'
-          detail: string
-          outcomeRef: null
-        },
-  ) => {
-    await mutate(`recovery:${row.receiptId}`, async () => {
-      const observed = await fetchKeeperChatReceipt(keeperName, row.receiptId)
-      if (observed.state.kind !== 'recovery_required') {
-        throw new Error(
-          `receipt ${row.receiptId} is ${observed.state.kind}, not recovery_required`,
-        )
-      }
-      const result = await resolveKeeperChatRecovery(
-        keeperName,
-        row.receiptId,
-        observed.revision,
-        observed.state.leaseId,
-        decision,
-      )
-      if (!result.audit.recorded) {
-        showToast(
-          `복구 결정은 반영됐지만 audit 기록에 실패했습니다: ${result.audit.error}`,
-          'warning',
-        )
-      }
-    })
-  }
+
+  const currentExecution = keeper?.current_execution ?? null
+
   return html`
     <section
       class="fixed inset-y-0 right-0 z-[120] grid h-dvh w-[min(48rem,100vw)] content-start gap-3 overflow-y-auto border-l border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-2xl"
-      data-keeper-queue-control-panel
+      data-keeper-operation-control-panel
       role="dialog"
-      aria-label="${keeperName} 운영자 대기열 제어"
+      aria-label="${keeperName} 작업 제어"
     >
       <div class="flex items-center justify-between gap-2">
         <div>
-          <div class="text-sm font-semibold text-[var(--color-fg-primary)]">운영자 대기열 제어</div>
-          <div class="text-2xs text-[var(--color-fg-muted)]">서버에 저장된 대기 항목만 안전하게 변경합니다.</div>
+          <div class="text-sm font-semibold text-[var(--color-fg-primary)]">Keeper 작업 제어</div>
         </div>
         <${GhostButton} onClick=${onClose}>닫기<//>
       </div>
+
       ${error
         ? html`<div class="rounded-[var(--r-0)] bg-[var(--danger-10)] p-2 text-2xs text-[var(--color-status-err)]">${error}</div>`
         : null}
-      <div
-        class="grid gap-2 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] p-2"
-        data-operator-current-execution
-      >
+
+      <div class="grid gap-2 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] p-2">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">현재 실행</div>
-          ${(currentExecution?.live_turn || currentWork)
+          ${currentExecution?.live_turn
             ? html`
                 <button
                   type="button"
                   disabled=${pendingAction === 'interrupt-current-turn'}
                   class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-1 text-2xs text-[var(--color-status-err)] disabled:opacity-50"
-                  onClick=${() => void mutate('interrupt-current-turn', async () => {
+                  onClick=${() => void mutateChat('interrupt-current-turn', async () => {
                     const cancelled = await interruptKeeperTurn(keeperName)
                     showToast(
-                      cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴이 없습니다',
+                      cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴 없음',
                       cancelled ? 'success' : 'warning',
                     )
                   })}
@@ -922,302 +495,80 @@ function KeeperQueueControlPanel({
         </div>
         ${currentExecution?.live_turn
           ? html`
-              <div class="grid gap-1 text-2xs text-[var(--color-fg-secondary)]">
-                <div>
-                  turn <code>${currentExecution.live_turn.turn_id ?? '-'}</code>
-                  · phase <code>${currentExecution.turn_phase ?? '-'}</code>
-                  · decision <code>${currentExecution.decision?.stage ?? '-'}</code>
-                  · runtime <code>${currentExecution.runtime?.state ?? '-'}</code>
-                </div>
-                <div>
-                  model <code>${currentExecution.live_turn.selected_model ?? '선택 전'}</code>
-                  · wake <code>${currentExecution.run_state?.wake_kind ?? 'unknown'}${currentExecution.run_state?.stimulus_kinds?.length
-                    ? `:${currentExecution.run_state.stimulus_kinds.join(',')}`
-                    : ''}</code>
-                  · active tools <code>${currentExecution.live_turn.active_tool_count ?? 0}</code>
-                </div>
-                <div>
-                  시작 <code>${currentExecution.live_turn.started_at === undefined
-                    ? 'unknown'
-                    : formatTimeAgo(currentExecution.live_turn.started_at)}</code>
-                  · 최근 진행 <code>${currentExecution.live_turn.last_progress_kind ?? 'unknown'} / ${currentExecution.live_turn.last_progress_at === undefined
-                    ? 'unknown'
-                    : formatTimeAgo(currentExecution.live_turn.last_progress_at)}</code>
-                  · latest tool <code>${currentExecution.latest_tool?.name ?? 'none'}</code>
-                </div>
+              <div class="text-2xs text-[var(--color-fg-secondary)]">
+                turn <code>${currentExecution.live_turn.turn_id ?? '-'}</code>
+                · phase <code>${currentExecution.turn_phase ?? '-'}</code>
+                · model <code>${currentExecution.live_turn.selected_model ?? '선택 전'}</code>
+                · active tools <code>${currentExecution.live_turn.active_tool_count ?? 0}</code>
+                · latest tool <code>${currentExecution.latest_tool?.name ?? 'none'}</code>
               </div>
             `
-          : currentWork
-            ? html`
-                <div class="text-2xs text-[var(--color-fg-secondary)]">
-                  lane <code>${currentWork.lane}</code>
-                  · 시작 <code>${formatTimeAgo(currentWork.startedAt)}</code>
-                  · live turn 상세 투영은 아직 없습니다.
-                </div>
-              `
-            : html`<div class="text-2xs text-[var(--color-fg-muted)]">현재 실행 중인 턴이 없습니다.</div>`}
-        ${inflightRows.map(row => html`
-          <div
-            class="grid gap-1 border-t border-[var(--color-border-subtle)] pt-2 text-2xs text-[var(--color-fg-muted)]"
-            data-operator-chat-inflight=${row.receiptId}
-          >
-            <div class="break-all font-mono text-[var(--color-fg-secondary)]">
-              ${row.receiptId}
-            </div>
-            <div>
-              ${row.queueIndex === null ? '순서 unknown' : `처리 슬롯 #${row.queueIndex + 1}`}
-              · source ${row.messageSource ?? 'unknown'}
-              · content ${row.contentLength ?? 'unknown'} chars
-              · 시작 ${row.startedAt === null ? 'unknown' : formatTimeAgo(row.startedAt)}
-            </div>
-          </div>
-        `)}
-        ${(keeper?.sources?.chat_queue_inflight ?? 0) > inflightRows.length
-          ? html`
-              <div class="text-2xs text-[var(--color-status-warn)]">
-                inflight ${(keeper?.sources?.chat_queue_inflight ?? 0) - inflightRows.length}건의 행 상세가 서버 projection에서 생략됐습니다.
-              </div>
-            `
-          : null}
+          : html`<div class="text-2xs text-[var(--color-fg-muted)]">현재 실행 중인 턴이 없습니다.</div>`}
       </div>
+
       <div class="grid gap-2">
         <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">
-          채팅 대기 ${snapshot?.pending.length ?? keeper?.sources?.chat_queue_pending ?? 0}
+          채팅 대기열 ${operations.length}
         </div>
-        ${(snapshot?.pending ?? []).map((item, index) => {
-          const key = item.receipt.receiptId
-          const busy = pendingAction === key
+        ${operations.map((operation, index) => {
+          const busy = pendingAction === operation.operationId
           return html`
-            <div class="grid gap-1 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] p-2" data-operator-chat-receipt=${key}>
+            <div
+              class="grid gap-1 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] p-2"
+              data-operator-chat-operation=${operation.operationId}
+            >
               <div class="flex flex-wrap items-center justify-between gap-2">
-                <span class="font-mono text-2xs text-[var(--color-fg-muted)]">#${index + 1} · ${key}</span>
-                <span class="text-2xs text-[var(--color-fg-muted)]">${new Date(item.submittedAt * 1000).toLocaleString()}</span>
+                <span class="break-all font-mono text-2xs text-[var(--color-fg-muted)]">
+                  #${index + 1} · seq ${operation.sequence} · ${operation.operationId}
+                </span>
+                <span class="text-2xs text-[var(--color-fg-muted)]">
+                  ${new Date(operation.createdAt * 1000).toLocaleString()}
+                </span>
               </div>
-              <div class="break-all text-2xs text-[var(--color-fg-muted)]" data-operator-chat-source>
-                ${pendingSourceLabel(item.source)}
+              <div class="whitespace-pre-wrap break-words text-xs text-[var(--color-fg-primary)]">
+                ${operation.input?.message ?? ''}
               </div>
-              <div class="whitespace-pre-wrap break-words text-xs text-[var(--color-fg-primary)]">${item.content}</div>
               <div class="flex flex-wrap gap-1.5">
                 <button
                   type="button"
                   disabled=${busy}
                   class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1 text-2xs disabled:opacity-50"
                   onClick=${() => {
-                    const content = window.prompt('서버 대기 메시지를 수정합니다.', item.content)
+                    const content = window.prompt('Queued operation을 수정합니다.', operation.input?.message ?? '')
                     if (content === null) return
-                    void mutate(key, () => editKeeperChatPendingReceipt(
-                      keeperName,
-                      key,
-                      snapshot!.revision,
-                      content,
-                    ))
+                    void mutateChat(
+                      operation.operationId,
+                      () => editQueuedKeeperChatOperation(keeperName, operation, content),
+                    )
                   }}
                 >수정</button>
                 <button
                   type="button"
-                  disabled=${busy || index === (snapshot?.pending.length ?? 0) - 1}
+                  disabled=${busy || index === operations.length - 1}
                   class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1 text-2xs disabled:opacity-50"
-                  onClick=${() => void mutate(key, () => moveKeeperChatPendingReceiptToEnd(
-                    keeperName,
-                    key,
-                    snapshot!.revision,
-                  ))}
+                  onClick=${() => void mutateChat(
+                    operation.operationId,
+                    () => moveQueuedKeeperChatOperationToEnd(keeperName, operation.operationId),
+                  )}
                 >맨 뒤로</button>
                 <button
                   type="button"
                   disabled=${busy}
                   class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-1 text-2xs text-[var(--color-status-err)] disabled:opacity-50"
-                  onClick=${() => void mutate(key, () => cancelKeeperChatPendingReceipt(keeperName, key))}
+                  onClick=${() => void mutateChat(
+                    operation.operationId,
+                    () => cancelKeeperChatOperation(keeperName, operation.operationId),
+                  )}
                 >취소</button>
               </div>
             </div>
           `
         })}
-      </div>
-      <div class="grid gap-2 border-t border-[var(--color-border-subtle)] pt-3">
-        <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">
-          배송 복구 확인 필요 ${keeper?.sources?.chat_queue_recovery_required ?? recoveryRows.length}
-        </div>
-        ${recoveryRows.map(row => {
-          const key = `recovery:${row.receiptId}`
-          const busy = pendingAction === key
-          return html`
-            <div
-              class="grid gap-1 rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] p-2"
-              data-operator-chat-recovery=${row.receiptId}
-            >
-              <div class="break-all font-mono text-2xs text-[var(--color-status-err)]">
-                ${row.receiptId}
-              </div>
-              <div class="text-2xs text-[var(--color-fg-secondary)]">
-                이전 배송 결과가 확인되지 않아 자동 재실행이 차단됐습니다.
-                ${row.startedAt === null ? '' : ` · 원래 실행 시작 ${formatTimeAgo(row.startedAt)}`}
-              </div>
-              <div class="text-3xs text-[var(--color-fg-muted)]">
-                ${row.queueIndex === null ? 'queue index unknown' : `queue index ${row.queueIndex}`}
-                · source ${row.messageSource ?? 'unknown'}
-                · content ${row.contentLength ?? 'unknown'} chars
-              </div>
-              <div class="flex flex-wrap gap-1.5">
-                <button
-                  type="button"
-                  disabled=${busy}
-                  class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1 text-2xs disabled:opacity-50"
-                  onClick=${() => void resolveRecovery(row, {
-                    kind: 'requeue_unconfirmed',
-                  })}
-                >재대기</button>
-                <button
-                  type="button"
-                  disabled=${busy}
-                  class="rounded-[var(--r-0)] border border-[var(--danger-20)] px-2 py-1 text-2xs text-[var(--color-status-err)] disabled:opacity-50"
-                  onClick=${() => {
-                    const detail = window.prompt('미확인 배송을 취소하는 이유를 입력하세요.')
-                    if (detail === null) return
-                    const trimmed = detail.trim()
-                    if (!trimmed) {
-                      showToast('취소 이유를 입력해야 합니다.', 'warning')
-                      return
-                    }
-                    void resolveRecovery(row, {
-                      kind: 'cancel_unconfirmed',
-                      detail: trimmed,
-                      outcomeRef: null,
-                    })
-                  }}
-                >미확인 배송 취소</button>
-              </div>
-            </div>
-          `
-        })}
-        ${(keeper?.sources?.chat_queue_recovery_required ?? 0) > recoveryRows.length
-          ? html`
-              <div class="text-2xs text-[var(--color-status-warn)]">
-                복구 필요 ${(keeper?.sources?.chat_queue_recovery_required ?? 0) - recoveryRows.length}건의 행 상세가 서버 projection에서 생략됐습니다.
-              </div>
-            `
-          : null}
-        ${recoveryRows.length === 0
-          ? html`<div class="text-2xs text-[var(--color-fg-muted)]">복구 결정을 기다리는 receipt가 없습니다.</div>`
+        ${operations.length === 0
+          ? html`<div class="text-2xs text-[var(--color-fg-muted)]">—</div>`
           : null}
       </div>
-      <div class="grid gap-2 border-t border-[var(--color-border-subtle)] pt-3">
-        <!-- eventSnapshot is fetched on mount, typed queue invalidation, and operator
-             actions. The shared keeper-scoped inventory keeps the count from reading 0
-             before that read resolves or after it throws. -->
-        <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">자율 이벤트 대기 ${eventSnapshot?.totalPending ?? keeper?.sources?.event_queue_pending ?? 0}</div>
-        ${eventRecoveries.map(recovery => {
-          const operationId = recovery.operation.operationId
-          const key = `event-recovery:${operationId}`
-          return html`
-            <div
-              class="grid gap-1 rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] p-2"
-              data-event-operation-recovery=${operationId}
-            >
-              <div class="text-2xs text-[var(--color-status-err)]">
-                ${recovery.commitState === 'committed' ? 'source commit 완료 · 후속 복구 필요' : 'commit 결과 확인 필요'}
-                · ${recovery.operation.action}
-              </div>
-              <div class="break-words text-3xs text-[var(--color-fg-secondary)]">${recovery.message}</div>
-              <div class="break-all font-mono text-3xs text-[var(--color-fg-muted)]">${operationId}</div>
-              <button
-                type="button"
-                disabled=${pendingAction === key}
-                class="w-fit rounded-[var(--r-0)] border border-[var(--danger-20)] px-2 py-1 text-2xs text-[var(--color-status-err)] disabled:opacity-50"
-                onClick=${() => void mutateEvent(key, recovery.operation)}
-              >동일 작업 결과 확인·복구</button>
-            </div>
-          `
-        })}
-        ${eventRows.map(item => {
-          const key = `event:${item.sourceRef}`
-          const busy = pendingAction === key
-          return html`
-            <div class="grid gap-1 rounded-[var(--r-0)] border border-[var(--color-border-subtle)] p-2" data-operator-event-row>
-              <div class="font-mono text-2xs text-[var(--color-fg-muted)]">#${item.queueIndex + 1} · ${item.postId}</div>
-              <div class="text-2xs text-[var(--color-fg-secondary)]">
-                wake reason ${item.payloadKind} · urgency ${item.urgency}
-                · 도착 ${formatTimeAgo(item.arrivedAt)} (${new Date(item.arrivedAt * 1000).toLocaleString()})
-              </div>
-              ${item.rejectionReason
-                ? html`
-                    <div
-                      class="whitespace-pre-wrap text-2xs text-[var(--color-fg-secondary)]"
-                      data-operator-event-reason
-                    >${item.rejectionTaskId ? `${item.rejectionTaskId}: ` : ''}${item.rejectionReason}</div>
-                  `
-                : null}
-              <!-- A cancellation row names the task and the canceller even when
-                   no reason was given: "task_cancelled" alone tells an operator
-                   nothing they can triage. -->
-              ${item.cancelledTaskId
-                ? html`
-                    <div
-                      class="whitespace-pre-wrap text-2xs text-[var(--color-fg-secondary)]"
-                      data-operator-event-cancellation
-                    >${item.cancelledTaskId} 취소${item.cancelledBy ? ` · ${item.cancelledBy}` : ''}${item.cancelledReason ? ` · ${item.cancelledReason}` : ''}</div>
-                  `
-                : null}
-              <div class="break-all font-mono text-3xs text-[var(--color-fg-muted)]">
-                source ref ${item.sourceRef}
-              </div>
-              <div class="text-3xs text-[var(--color-fg-muted)]">
-                urgency 변경은 이 항목만이 아니라 대기열 전체를 urgency 순으로 다시 정렬합니다.
-              </div>
-              <div class="flex flex-wrap gap-1.5">
-                ${(['immediate', 'normal', 'low'] as const).map(urgency => html`
-                  <button
-                    type="button"
-                    disabled=${busy}
-                    class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1 text-2xs disabled:opacity-50"
-                    onClick=${() => {
-                      void mutateEvent(key, {
-                        action: 'reprioritize',
-                        sourceIncarnation: item.sourceIncarnation,
-                        sourceRef: item.sourceRef,
-                        urgency,
-                      })
-                    }}
-                  >${urgency}</button>
-                `)}
-                <button
-                  type="button"
-                  disabled=${busy}
-                  class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-1 text-2xs disabled:opacity-50"
-                  onClick=${() => {
-                    const targetKeeper = window.prompt('이 이벤트를 넘길 Keeper 이름을 입력하세요.')
-                    if (targetKeeper === null) return
-                    void mutateEvent(key, {
-                      action: 'transfer',
-                      sourceIncarnation: item.sourceIncarnation,
-                      sourceRef: item.sourceRef,
-                      targetKeeper,
-                    })
-                  }}
-                >이관</button>
-                <button
-                  type="button"
-                  disabled=${busy}
-                  class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-1 text-2xs text-[var(--color-status-err)] disabled:opacity-50"
-                  onClick=${() => {
-                    const reason = window.prompt('이벤트 취소 이유를 입력하세요.')
-                    if (reason === null) return
-                    void mutateEvent(key, {
-                      action: 'cancel',
-                      sourceIncarnation: item.sourceIncarnation,
-                      sourceRef: item.sourceRef,
-                      reason,
-                    })
-                  }}
-                >취소</button>
-              </div>
-            </div>
-          `
-        })}
-        ${eventRows.length === 0
-          ? html`<div class="text-2xs text-[var(--color-fg-muted)]">대기 중인 자율 이벤트가 없습니다.</div>`
-          : null}
-      </div>
+
     </section>
   `
 }
@@ -1243,21 +594,15 @@ export function KeeperConversationPanel({
   // subscribes this component, so a Tweaks flip re-renders every mounted panel.
   const showMetadata = chatShowMetadata.value
   const showInternal = chatShowInternal.value
+  const showAutonomous = chatShowAutonomous.value
 
   const [historyExpanded, setHistoryExpanded] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [queueControlOpen, setQueueControlOpen] = useState(false)
-  // Bumped whenever the input queue mutates — the queue lives outside
-  // the signal graph (keeper-chat-store), so re-renders must be forced.
-  const [queueVersion, setQueueVersion] = useState(0)
-  const bumpQueue = () => setQueueVersion(v => v + 1)
-  const isDrainingRef = useRef(false)
-
   // The conversation and Lane share one keeper-scoped projection. Typed queue
   // invalidations, focus recovery, and WS reconnects refresh it without a timer.
   useEffect(() => {
     const unsubscribeInventory = subscribeKeeperWaitingInventory(keeperName)
-    void reconcileKeeperChatReceipts(keeperName)
     return () => {
       unsubscribeInventory()
     }
@@ -1270,55 +615,50 @@ export function KeeperConversationPanel({
     return inv.keepers.find(k => k.keeper_name === keeperName) ?? null
   }, [keeperName, inventoryState.inventory])
 
+  // The unread divider anchors on the last-seen cursor as it stood when this
+  // keeper's panel was entered. Captured during the first render for the
+  // keeper — before ChatTranscript's layout effect or the hydration below can
+  // advance the cursor — and held for the whole visit, so advances while the
+  // operator reads do not move the "여기까지 읽음" line. A keeper switch on
+  // the same panel instance is a new visit and re-captures.
+  const unreadAfterTs = useMemo(() => getKeeperLastSeen(keeperName), [keeperName])
   // External-system sync: merge the server-persisted transcript
   // (.masc/keeper_chat/<name>.jsonl) on mount so the conversation
   // survives full page reloads. Once-per-keeper inside the action.
   useEffect(() => {
-    // Capture the last-seen cursor BEFORE anything advances it, and fetch the
-    // since-last-seen digest against that frozen baseline. The card and the
-    // unread divider anchor on the server's echoed since_unix, not the live
-    // cursor, so the advance below does not move them mid-visit.
-    const baseline = getKeeperLastSeen(keeperName)
-    if (baseline !== null) void refreshKeeperCatchupDigest(keeperName, baseline)
     void (async () => {
       await hydrateKeeperChatHistory(keeperName)
       // The server transcript is now merged: mark the newest merged entry as
-      // seen so the NEXT visit's baseline is current. First-ever visits (no
-      // prior cursor) also land here, seeding the cursor without a card.
+      // seen so the NEXT visit's anchor is current. First-ever visits (no
+      // prior cursor) also land here, seeding the cursor without a divider.
       const newest = newestConversationEntryUnix(keeperThreads.value[keeperName] ?? [])
       if (newest !== null) advanceKeeperLastSeen(keeperName, newest)
     })()
-    void resumePendingKeeperChatRequests(keeperName)
+    void hydrateTrackedKeeperChatOperations(keeperName)
   }, [keeperName])
 
   const rawThread = keeperThreads.value[keeperName] ?? []
   // thread / visibleThread / transcriptEntries form a derivation chain over
-  // rawThread + UI state (showInternal toggle, sending flag, searchQuery
-  // keystrokes). The parent re-renders on every search keystroke and other
-  // unrelated signals; memoizing each stage on its stable upstream skips the
-  // refilter when rawThread and the relevant UI flag are unchanged.
-  const thread = useMemo(
+  // rawThread + UI state (showInternal/showAutonomous toggles, sending flag,
+  // searchQuery keystrokes). The parent re-renders on every search keystroke
+  // and other unrelated signals; memoizing each stage on its stable upstream
+  // skips the refilter when rawThread and the relevant UI flag are unchanged.
+  // hiddenCount stays internal-only: the "숨겨진 내부 메시지" banner must not
+  // count autonomous entries the operator chose to hide with their own toggle.
+  const internalFilteredThread = useMemo(
     () => showInternal ? rawThread : rawThread.filter(isDefaultVisibleConversationEntry),
     [rawThread, showInternal],
   )
-  const hiddenCount = rawThread.length - thread.length
+  const hiddenCount = rawThread.length - internalFilteredThread.length
+  const thread = useMemo(
+    () => showAutonomous
+      ? internalFilteredThread
+      : internalFilteredThread.filter(entry => !isAutonomousTurnEntry(entry)),
+    [internalFilteredThread, showAutonomous],
+  )
   const sending = keeperSending.value[keeperName] ?? false
   const serverBusy = inventoryEntry?.state === 'busy'
   const isKeeperBusy = Boolean(serverBusy && !sending)
-  const serverPendingCount = Math.max(0, inventoryEntry?.sources?.chat_queue_pending ?? 0)
-  const serverInflightCount = Math.max(0, inventoryEntry?.sources?.chat_queue_inflight ?? 0)
-  const serverRecoveryRequiredCount = Math.max(
-    0,
-    inventoryEntry?.sources?.chat_queue_recovery_required ?? 0,
-  )
-  const serverPersistenceBlockedCount = Math.max(
-    0,
-    inventoryEntry?.sources?.chat_queue_persistence_blocked ?? 0,
-  )
-  const serverQueueReadErrorCount = Math.max(0, inventoryEntry?.sources?.read_error ?? 0)
-  const inventoryProjectionError = inventoryState.error
-  const inventoryProjectionReady = inventoryState.ready
-  const inventoryProjectionPresent = Boolean(inventoryState.inventory && inventoryEntry)
   const visibleThread = useMemo(
     () =>
       sending && !thread.some(isActiveAssistantEntry)
@@ -1326,31 +666,11 @@ export function KeeperConversationPanel({
         : thread,
     [thread, sending, keeperName],
   )
-  const queuedMessages = useMemo(
-    () => getQueuedMessages(keeperName),
-    [keeperName, queueVersion],
-  )
-  const queueCount = queuedMessages.length
-  const visibleThreadWithQueue = useMemo(
-    () =>
-      queuedMessages.length > 0
-        ? [...visibleThread, ...queuedMessages.map(queuedInputToConversationEntry)]
-        : visibleThread,
-    [visibleThread, queuedMessages],
-  )
   const hasQuery = searchQuery.trim().length > 0
   const transcriptEntries = useMemo(
-    () => filterConversationEntries(visibleThreadWithQueue, searchQuery),
-    [visibleThreadWithQueue, searchQuery],
+    () => filterConversationEntries(visibleThread, searchQuery),
+    [visibleThread, searchQuery],
   )
-  // Since-last-seen digest (fetched once on mount against the frozen baseline).
-  // Reading the signal here subscribes the panel so the card appears when the
-  // fetch resolves. Card + divider anchor on digest.since_unix, not the cursor.
-  const catchupDigest = keeperCatchupDigests.value[keeperName] ?? null
-  const digestCard = shouldShowKeeperCatchupDigest(catchupDigest)
-    ? html`<${KeeperCatchupDigestCard} digest=${catchupDigest} />`
-    : null
-  const unreadAfterTs = catchupDigest?.since_unix ?? null
   const newestEntryTsUnix = useMemo(
     () => newestConversationEntryUnix(transcriptEntries),
     [transcriptEntries],
@@ -1371,43 +691,13 @@ export function KeeperConversationPanel({
       ...(onInspectTurn
         ? { label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick: onInspectTurn }
         : {}),
-      ...(!chatAccess.blocked
-        ? {
-            onPendingCancel: async (entry: KeeperConversationEntry) => {
-              await cancelKeeperChatPendingEntry(keeperName, entry)
-              showToast('대기 메시지를 취소했습니다.', 'success')
-            },
-            onPendingEdit: async (entry: KeeperConversationEntry) => {
-              const receiptId = entry.details?.queueReceiptId
-              const original = (keeperThreads.value[keeperName] ?? []).find(candidate => (
-                candidate.role === 'user'
-                && candidate.details?.queueReceiptId === receiptId
-              ))
-              if (!original) {
-                throw new Error('수정할 원문을 찾지 못했습니다.')
-              }
-              const content = window.prompt('서버 대기 메시지를 수정합니다.', original.text)
-              if (content === null) return
-              await editKeeperChatPendingEntry(keeperName, entry, content)
-              showToast('서버 대기 메시지를 원자적으로 수정했습니다.', 'success')
-            },
-            onPendingMoveToEnd: async (entry: KeeperConversationEntry) => {
-              await moveKeeperChatPendingEntryToEnd(keeperName, entry)
-              showToast('대기 메시지를 맨 뒤로 옮겼습니다.', 'success')
-            },
-          }
-        : {}),
-      onRecoveryRequeue: (entry: KeeperConversationEntry) =>
-        requeueKeeperChatRecoveryEntry(keeperName, entry),
-      onRecoveryCancel: (entry: KeeperConversationEntry, detail: string) =>
-        cancelKeeperChatRecoveryEntry(keeperName, entry, detail),
     }),
-    [chatAccess.blocked, keeperName, onInspectTurn],
+    [onInspectTurn],
   )
   const transcriptEmptyText =
-    hasQuery && visibleThreadWithQueue.length > 0
-      ? '검색어와 일치하는 메시지가 없습니다.'
-      : '아직 표시할 대화가 없습니다. 내부 메시지는 Tweaks의 "내부 메시지"로 볼 수 있습니다.'
+    hasQuery && visibleThread.length > 0
+      ? '검색어와 일치하는 메시지 없음'
+      : '표시할 대화 없음'
   const hydrating = keeperHydrating.value[keeperName] ?? false
   const error = keeperActionErrors.value[keeperName]
   const renderError = (extraClass = 'mt-2') => {
@@ -1429,11 +719,11 @@ export function KeeperConversationPanel({
   }
   const composerDisabled = !keeperName || chatAccess.blocked
   const composerPlaceholder = chatAccess.blocked
-    ? '현재 actor는 direct keeper chat 권한이 없습니다'
+    ? '현재 actor는 direct keeper chat 권한 없음'
     : isKeeperBusy
-      ? '현재 턴 실행 중 — 지금 보낸 메시지는 현재 턴 종료 후 대기열에서 처리됩니다'
+      ? '현재 턴 실행 중 — 지금 보내면 새 durable operation으로 접수됩니다'
       : sending
-        ? '응답 중 — 지금 보낸 메시지는 대기열에 추가됩니다'
+        ? '응답 중 — 새 durable operation을 바로 접수할 수 있습니다'
         : placeholder
 
   // 1 s ticker while a stream is active so the stall badge can compare
@@ -1443,13 +733,6 @@ export function KeeperConversationPanel({
     if (!sending) return
     const id = setInterval(() => setStallTick(t => t + 1), 1000)
     return () => clearInterval(id)
-  }, [sending, keeperName])
-
-  // Reactively drain the queued inputs when the keeper finishes sending
-  useEffect(() => {
-    if (!sending && keeperName) {
-      void drainQueue()
-    }
   }, [sending, keeperName])
 
   const streamStartedAt = keeperStreamStartedAt.value[keeperName] ?? null
@@ -1464,50 +747,6 @@ export function KeeperConversationPanel({
     await loadFullKeeperHistory(keeperName)
   }
 
-  const drainQueue = async () => {
-    if (isDrainingRef.current) return
-    isDrainingRef.current = true
-    try {
-      for (;;) {
-        const queued = dequeueInput(keeperName)
-        if (!queued) return
-        bumpQueue()
-
-        const content = queued.content.trim()
-        const attachments = queued.attachments && queued.attachments.length > 0 ? queued.attachments : undefined
-        if (!content && !attachments) {
-          markInputSent(keeperName)
-          bumpQueue()
-          continue
-        }
-
-        try {
-          await sendKeeperThreadMessage(keeperName, content, {
-            attachments,
-            blocks: queued.blocks,
-            clientActionId: queued.clientActionId,
-            userBlocks: queued.userBlocks,
-          })
-          markInputSent(keeperName)
-          bumpQueue()
-        } catch (err) {
-          if (isAbortError(err)) {
-            markInputSent(keeperName)
-            bumpQueue()
-            return
-          }
-          requeueInputFront(keeperName, queued)
-          bumpQueue()
-          const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
-          showToast(message, 'error')
-          return
-        }
-      }
-    } finally {
-      isDrainingRef.current = false
-    }
-  }
-
   const submit = async ({ blocks, userBlocks, clientActionId, text }: ChatComposerSendPayload) => {
     const prompt = text
     if (chatAccess.blocked) {
@@ -1517,24 +756,7 @@ export function KeeperConversationPanel({
     if (!keeperName || (!prompt && blocks.length === 0)) return
     const attachments = blocksToAttachments(blocks)
     const displayBlocks = blocksToDisplayBlocks(blocks)
-    if (keeperSending.value[keeperName]) {
-      if (
-        isKeeperThreadMessageSendInFlight(keeperName, clientActionId)
-        || hasQueuedInputClientAction(keeperName, clientActionId)
-      ) {
-        return
-      }
-      enqueueInput(
-        keeperName,
-        prompt,
-        attachments.length > 0 ? attachments : undefined,
-        clientActionId,
-        displayBlocks,
-        userBlocks,
-      )
-      bumpQueue()
-      return
-    }
+    if (isKeeperThreadMessageSendInFlight(keeperName, clientActionId)) return
     try {
       await sendKeeperThreadMessage(keeperName, prompt, {
         attachments,
@@ -1548,12 +770,6 @@ export function KeeperConversationPanel({
       showToast(message, 'error')
       return
     }
-    await drainQueue()
-  }
-
-  const cancelQueue = () => {
-    clearInputQueue(keeperName)
-    bumpQueue()
   }
 
   // Busy/interrupt affordance shared by all three composer layouts. Defined
@@ -1567,7 +783,7 @@ export function KeeperConversationPanel({
         void interruptKeeperTurn(keeperName)
           .then(cancelled => {
             showToast(
-              cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴이 없습니다',
+              cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴 없음',
               cancelled ? 'success' : 'warning',
             )
           })
@@ -1578,21 +794,9 @@ export function KeeperConversationPanel({
     />
   `
 
-  const serverQueueStatus = html`
-    <${ServerQueueStatus}
+  const serverOperationStatus = html`
+    <${ServerOperationStatus}
       busy=${serverBusy}
-      pendingCount=${serverPendingCount}
-      inflightCount=${serverInflightCount}
-      recoveryRequiredCount=${serverRecoveryRequiredCount}
-      persistenceBlockedCount=${serverPersistenceBlockedCount}
-      readErrorCount=${serverQueueReadErrorCount}
-      projectionError=${inventoryProjectionError}
-      projectionReady=${inventoryProjectionReady}
-      projectionPresent=${inventoryProjectionPresent}
-      currentExecution=${inventoryEntry?.current_execution}
-      readErrorAction=${serverQueueReadErrorCount > 0
-        ? inventoryEntry?.source_next_actions?.read_error?.[0] ?? inventoryEntry?.next_action
-        : null}
       onInspect=${() => setQueueControlOpen(true)}
       inspectAllowed=${queueControlAccess.allowed}
       inspectReason=${queueControlAccess.reason}
@@ -1605,28 +809,6 @@ export function KeeperConversationPanel({
           keeper=${inventoryEntry}
           onClose=${() => setQueueControlOpen(false)}
         />
-      `
-    : null
-
-  const browserDraftQueue = queueCount > 0
-    ? html`
-        <div class="mb-3 flex flex-col gap-2" data-chat-queue-list>
-          <div class="flex items-center justify-between gap-2 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row" data-chat-queue-row>
-            <span>${queueCount}개 브라우저 초안 · 서버 미접수</span>
-            <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
-          </div>
-          ${queuedMessages.map(msg => html`
-            <${QueueItemCard}
-              key=${msg.id}
-              keeperName=${keeperName}
-              msg=${msg}
-              onMutate=${bumpQueue}
-              onSave=${() => {
-                if (!sending) void drainQueue()
-              }}
-            />
-          `)}
-        </div>
       `
     : null
 
@@ -1655,7 +837,7 @@ export function KeeperConversationPanel({
                 />
                 ${hasQuery
                   ? html`<span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs font-medium text-[var(--color-fg-secondary)] v2-monitoring-row" data-chat-search-count>
-                      ${transcriptEntries.length} / ${visibleThreadWithQueue.length}
+                      ${transcriptEntries.length} / ${visibleThread.length}
                     </span>`
                   : null}
                 <span class="spacer"></span>
@@ -1682,8 +864,6 @@ export function KeeperConversationPanel({
             `
           : null}
 
-        ${digestCard ? html`<div class="mx-10 mt-3">${digestCard}</div>` : null}
-
         <div class="kw-thread v2-monitoring-panel">
           <div class="kw-thread-inner v2-monitoring-panel">
             <${ChatTranscript}
@@ -1699,6 +879,7 @@ export function KeeperConversationPanel({
               toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
               toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
               unreadAfterTs=${unreadAfterTs}
+              expandAutonomousRuns=${chatExpandAutonomousRuns.value}
               onSeenBottom=${markTranscriptSeen}
               action=${inspectAction}
             />
@@ -1720,9 +901,8 @@ export function KeeperConversationPanel({
 
         <div class="kw-composer-wrap v2-monitoring-panel">
           <div class="kw-composer-inner v2-monitoring-panel">
-            ${serverQueueStatus}
+            ${serverOperationStatus}
             ${queueControlPanel}
-            ${browserDraftQueue}
             ${isKeeperBusy ? renderBusyToolbar() : null}
             <${ChatComposer}
               key=${keeperName}
@@ -1733,8 +913,7 @@ export function KeeperConversationPanel({
               streaming=${sending}
               streamStartedAt=${streamStartedAt}
               lastEventAt=${lastSignalAt}
-              queueEnabled=${true}
-              queueCount=${queueCount}
+              allowSendWhileStreaming=${true}
               commands=${composerCommands}
               onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
               onAbort=${() => { cancelKeeperThreadFromUi(keeperName) }}
@@ -1776,7 +955,7 @@ export function KeeperConversationPanel({
             />
             ${hasQuery
               ? html`<span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]" data-chat-search-count>
-                  ${transcriptEntries.length} / ${visibleThreadWithQueue.length}
+                  ${transcriptEntries.length} / ${visibleThread.length}
                 </span>`
               : null}
             ${!historyExpanded
@@ -1801,8 +980,6 @@ export function KeeperConversationPanel({
             `
           : null}
 
-        ${digestCard ? html`<div class="shrink-0">${digestCard}</div>` : null}
-
         <${ChatTranscript}
           entries=${transcriptEntries}
           emptyText=${transcriptEmptyText}
@@ -1810,10 +987,12 @@ export function KeeperConversationPanel({
           variant="messenger"
           size="primary"
           groupToolCalls=${true}
+          showSourceBadge=${true}
           toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
           toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
           toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
           unreadAfterTs=${unreadAfterTs}
+          expandAutonomousRuns=${chatExpandAutonomousRuns.value}
           onSeenBottom=${markTranscriptSeen}
           action=${inspectAction}
         />
@@ -1832,9 +1011,8 @@ export function KeeperConversationPanel({
           : null}
 
         <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4 shadow-none v2-monitoring-panel">
-        ${serverQueueStatus}
+        ${serverOperationStatus}
         ${queueControlPanel}
-        ${browserDraftQueue}
           ${isKeeperBusy ? renderBusyToolbar() : null}
           <${ChatComposer}
             key=${keeperName}
@@ -1845,8 +1023,7 @@ export function KeeperConversationPanel({
             streaming=${sending}
             streamStartedAt=${streamStartedAt}
             lastEventAt=${lastSignalAt}
-            queueEnabled=${true}
-            queueCount=${queueCount}
+            allowSendWhileStreaming=${true}
             commands=${composerCommands}
             onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
             onAbort=${() => { cancelKeeperThreadFromUi(keeperName) }}
@@ -1884,7 +1061,7 @@ export function KeeperConversationPanel({
             />
             ${hasQuery
               ? html`<span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]" data-chat-search-count>
-                  ${transcriptEntries.length} / ${visibleThreadWithQueue.length}
+                  ${transcriptEntries.length} / ${visibleThread.length}
                 </span>`
               : null}
             ${!historyExpanded
@@ -1909,7 +1086,6 @@ export function KeeperConversationPanel({
                 </div>
               `
             : null}
-          ${digestCard ? html`<div class="mb-4">${digestCard}</div>` : null}
           <${ChatTranscript}
             entries=${transcriptEntries}
             emptyText=${transcriptEmptyText}
@@ -1917,10 +1093,12 @@ export function KeeperConversationPanel({
             variant="messenger"
             size="default"
             groupToolCalls=${true}
+            showSourceBadge=${true}
             toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
             toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
             toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
             unreadAfterTs=${unreadAfterTs}
+            expandAutonomousRuns=${chatExpandAutonomousRuns.value}
             onSeenBottom=${markTranscriptSeen}
             action=${inspectAction}
           />
@@ -1940,9 +1118,8 @@ export function KeeperConversationPanel({
           : null}
 
         <div class="border-t border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4 v2-monitoring-panel">
-        ${serverQueueStatus}
+        ${serverOperationStatus}
         ${queueControlPanel}
-        ${browserDraftQueue}
           ${isKeeperBusy ? renderBusyToolbar() : null}
           <${ChatComposer}
             key=${keeperName}
@@ -1953,8 +1130,7 @@ export function KeeperConversationPanel({
             streaming=${sending}
             streamStartedAt=${streamStartedAt}
             lastEventAt=${lastSignalAt}
-            queueEnabled=${true}
-            queueCount=${queueCount}
+            allowSendWhileStreaming=${true}
             commands=${composerCommands}
             onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
             onAbort=${() => { cancelKeeperThreadFromUi(keeperName) }}

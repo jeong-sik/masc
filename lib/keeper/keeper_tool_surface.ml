@@ -26,32 +26,53 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
           Keeper_registry.all ~base_path:config.base_path ()
           |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
         in
-        let names =
+        let all_names =
           registry_names @ keeper_names config
           |> List.map String.trim
           |> List.filter (fun name -> not (String.equal name ""))
           |> List.sort_uniq String.compare
-          |> take limit
         in
+        (* [total] is measured before [limit] is applied, so a caller can tell
+           a short answer from a complete one. Without it [count] reports the
+           post-truncation size and reads as "that is all of them" — the shape
+           behind masc#29077, where a 129-keeper workspace answered 50 and the
+           operational keepers, sorting after ~90 benchmark ones, all fell off
+           the end. *)
+        let total = List.length all_names in
+        let names = take limit all_names in
+        let truncated = List.length names < total in
         let rows =
           names
           |> List.filter_map (fun name ->
                keeper_list_row_json ~runtime_class:"keeper" config name)
         in
+        (* [truncated] answers "did [limit] drop names", nothing else. [count]
+           can still be below [min total limit] in the detailed shape when a
+           listed name has no readable metadata and [keeper_list_row_json]
+           yields no row. *)
+        let listing =
+          [
+            ("total", `Int total);
+            ("limit", `Int limit);
+            ("truncated", `Bool truncated);
+          ]
+        in
         let json =
           if not detailed then
             `Assoc
-              [
-                ("count", `Int (List.length names));
-                ("keepers", `List (List.map (fun name -> `String name) names));
-                ("items", `List rows);
-              ]
+              ([
+                 ("count", `Int (List.length names));
+                 ("keepers", `List (List.map (fun name -> `String name) names));
+                 ("items", `List rows);
+               ]
+              @ listing)
           else
             `Assoc
-              [
-                ("count", `Int (List.length rows));
-                ("keepers", `List rows);
-              ]
+              ([
+                 ("count", `Int (List.length rows));
+                 ("keepers", `List rows);
+               ]
+              @ listing)
         in
         json)
   in
@@ -60,8 +81,8 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_list ctx args : tool_result =
   keeper_list_body ~config:ctx.config args
 
-let handle_keeper_persona_audit ctx args =
-  Persona_audit.handle ~config:ctx.config args
+let handle_keeper_audit ctx args =
+  Keeper_tool_keeper_audit.handle ~config:ctx.config args
 
 let parse_network_mode_or_error raw =
   match network_mode_of_string raw with
@@ -192,16 +213,27 @@ let keeper_reset_body ~(config : Workspace.config) args : tool_result =
   match resolve_keeper_meta_config ~config args with
   | Error err -> tool_result_error err
   | Ok meta ->
-    let reset_meta = Keeper_meta_contract.reset_runtime_state meta in
-    (match Keeper_meta_store.write_meta config reset_meta with
-     | Ok () ->
+    (match
+       Keeper_owner_registry.apply_meta
+         ~base_path:config.base_path
+         ~keeper_name:meta.name
+         (Keeper_owner_reducer.Reset_latch
+            { updated_at = Keeper_meta_contract.now_iso () })
+     with
+     | Ok (Some _) ->
        tool_result_ok
          (Printf.sprintf
-            "Reset runtime state for %s: usage counters zeroed, last_model_used cleared."
+            "Reset lifecycle latch for %s: pause and blocker state cleared."
             meta.name)
-     | Error err ->
+     | Ok None ->
        tool_result_error
-         (Printf.sprintf "Failed to write reset meta for %s: %s" meta.name err))
+         (Printf.sprintf "Failed to reset %s: owner metadata missing" meta.name)
+     | Error error ->
+       tool_result_error
+         (Printf.sprintf
+            "Failed to reset %s: %s"
+            meta.name
+            (Keeper_owner_registry.command_error_to_string error)))
 
 let handle_keeper_reset ctx args : tool_result =
   keeper_reset_body ~config:ctx.config args
@@ -366,7 +398,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             if preserve_system then
               (* Keep only system-role messages *)
               List.filter
-                (fun (m : Agent_sdk.Types.message) ->
+                (fun (m : Agent_core.Types.message) ->
                    (=) m.role Llm_provider.Types.System)
                 existing_messages
             else
@@ -378,25 +410,15 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             }
           in
           let cleared_ctx = { checkpoint } in
-          (* Increment generation from meta to signal a new context epoch.
-             Using a hardcoded value would violate generation monotonicity
-             — the keeper_unified_turn retry loop uses meta.runtime.nonce
-             to detect stale contexts. *)
-          let current_gen =
-            match meta_for_trace with
-            | Some meta -> meta.runtime.nonce
-            | None -> 0
-          in
           (match meta_for_trace with
            | Some meta ->
                (match
-                  Keeper_context_runtime.save_oas_checkpoint
+                  Keeper_context_runtime.save_agent_core_checkpoint
                     ~multimodal_policy:meta.multimodal_policy
                     ~keeper_name:meta.name
                     ~session
                     ~agent_name:meta.agent_name
                     ~ctx:cleared_ctx
-                    ~generation:(current_gen + 1)
                 with
                 | Ok _ -> ()
                 | Error err ->
@@ -406,7 +428,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                         err
                     in
                     Log.Keeper.warn
-                      "%s: failed to save cleared OAS checkpoint: %s"
+                      "%s: failed to save cleared AGENT_CORE checkpoint: %s"
                       name detail)
            | None -> ());
           msg_count - List.length cleared_messages
@@ -448,11 +470,6 @@ let handle_keeper_clear ctx args : tool_result =
 let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
   let ctx = resolve_ctx ctx ~name in
   match name with
-  | "masc_persona_list" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_list ctx args))
-  | "masc_persona_create" -> Some (tool_result_with_tool_name ~tool_name:name (Keeper_tool_persona_crud.handle_persona_create ctx args))
-  | "masc_persona_update" -> Some (tool_result_with_tool_name ~tool_name:name (Keeper_tool_persona_crud.handle_persona_update ctx args))
-  | "masc_persona_delete" -> Some (tool_result_with_tool_name ~tool_name:name (Keeper_tool_persona_crud.handle_persona_delete ctx args))
-  | "masc_keeper_create_from_persona" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_create_from_persona ctx args))
   | "masc_keeper_up" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_up ctx args))
   | "masc_keeper_status" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_status ctx args))
   | "masc_keeper_delegate" ->
@@ -460,6 +477,15 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
         (tool_result_with_tool_name
            ~tool_name:name
            (Keeper_tool_surface_ops.handle_keeper_delegate
+              ?invocation_ref
+              ~submitted_by:ctx.agent_name
+              ctx
+              args))
+  | "masc_keeper_msg" ->
+      Some
+        (tool_result_with_tool_name
+           ~tool_name:name
+           (Keeper_tool_surface_ops.handle_keeper_msg_from_args
               ~submitted_by:ctx.agent_name
               ctx
               args))
@@ -480,7 +506,11 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
               ~config:ctx.config ~caller:ctx.agent_name args))
   | "masc_keeper_down" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_down ctx args))
   | "masc_keeper_list" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_list ctx args))
-  | "masc_keeper_persona_audit" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_persona_audit ctx args))
+  | "masc_keeper_audit" ->
+    Some
+      (tool_result_with_tool_name
+         ~tool_name:name
+         (handle_keeper_audit ctx args))
   | "masc_keeper_reset" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_reset ctx args))
   | "masc_keeper_compact" ->
     Some
@@ -508,51 +538,30 @@ let dispatch_keeper_msg ~submitted_by ?continuation_channel ctx ~message : tool_
     (handle_keeper_msg ?continuation_channel ~submitted_by ctx message)
 ;;
 
-(** Private direct-delivery stream used by connector and dashboard adapters. *)
-let dispatch_keeper_msg_stream
+let dispatch_keeper_msg_stream_admitted
+      ~admission_token
       ?on_text_delta
       ?on_event
+      ?on_tool_result_ready
+      ?approval_gate
       ?continuation_channel
-      ?on_admission_rejected
-      ?on_admitted
       ctx
       ~message
-  : tool_result option
   =
   let name = "masc_keeper_msg" in
   let ctx = resolve_ctx ctx ~name in
   Some
     (tool_result_with_tool_name
        ~tool_name:name
-       (handle_keeper_msg_stream
+       (handle_keeper_msg_stream_admitted
+          ~admission_token
           ?on_text_delta
           ?on_event
+          ?on_tool_result_ready
+      ?approval_gate
           ?continuation_channel
-          ?on_admission_rejected
-          ?on_admitted
           ctx
           message))
-
-let dispatch_keeper_msg_stream_if_free
-      ?on_text_delta
-      ?on_event
-      ?continuation_channel
-      ctx
-      ~message
-  =
-  let name = "masc_keeper_msg" in
-  let ctx = resolve_ctx ctx ~name in
-  match
-    handle_keeper_msg_stream_if_free
-      ?on_text_delta
-      ?on_event
-      ?continuation_channel
-      ctx
-      message
-  with
-  | `Busy rejection -> `Busy rejection
-  | `Ran result ->
-    `Ran (Some (tool_result_with_tool_name ~tool_name:name result))
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
@@ -586,8 +595,6 @@ let register_keeper_surface_schema (s : Masc_domain.tool_schema) =
        ~is_idempotent:policy.is_idempotent
        ~visibility:metadata.visibility
        ~implementation_status:metadata.implementation_status
-       ?canonical_name:metadata.canonical_name
-       ?replacement:metadata.replacement
        ?reason:metadata.reason
        ~allow_direct_call_when_hidden:metadata.allow_direct_call_when_hidden
        ())
@@ -601,7 +608,7 @@ let () =
    Phase 5 Eio plumbing scope. *)
 (* RFC-0182 Phase 5 PR-B: [eio_context_missing] returns a typed "Eio context
    required" failure when masc_keeper_msg / masc_keeper_up etc. are
-   invoked from a path that lacks ?sw / ?clock (e.g. OAS handler).
+   invoked from a path that lacks ?sw / ?clock (e.g. AGENT_CORE handler).
    Production keeper dispatch from [Mcp_server_eio_execute] always
    provides them via PR-A.2 plumbing. *)
 let eio_context_missing tool_name =
@@ -641,40 +648,6 @@ let () =
       | _ -> eio_context_missing name
     in
     match name with
-    | "masc_persona_list" ->
-      with_eio_context (fun ctx ->
-        Some
-          (tool_result_with_tool_name
-             ~tool_name:name
-             (Persona.handle_persona_list ctx args)))
-    | "masc_persona_create" ->
-      with_eio_context (fun ctx ->
-        run_external_effect (fun () ->
-          Some
-            (tool_result_with_tool_name
-               ~tool_name:name
-               (Keeper_tool_persona_crud.handle_persona_create ctx args))))
-    | "masc_persona_update" ->
-      with_eio_context (fun ctx ->
-        run_external_effect (fun () ->
-          Some
-            (tool_result_with_tool_name
-               ~tool_name:name
-               (Keeper_tool_persona_crud.handle_persona_update ctx args))))
-    | "masc_persona_delete" ->
-      with_eio_context (fun ctx ->
-        run_external_effect (fun () ->
-          Some
-            (tool_result_with_tool_name
-               ~tool_name:name
-               (Keeper_tool_persona_crud.handle_persona_delete ctx args))))
-    | "masc_keeper_create_from_persona" ->
-      with_eio_context (fun ctx ->
-        run_external_effect (fun () ->
-          Some
-            (tool_result_with_tool_name
-               ~tool_name:name
-               (handle_keeper_create_from_persona ctx args))))
     | "masc_keeper_list" ->
       Some (tool_result_with_tool_name ~tool_name:name (keeper_list_body ~config args))
     | "masc_keeper_delegate_status" ->
@@ -708,11 +681,11 @@ let () =
         Some (tool_result_with_tool_name ~tool_name:name (keeper_clear_body ~config args)))
     | "masc_keeper_reset" ->
       Some (tool_result_with_tool_name ~tool_name:name (keeper_reset_body ~config args))
-    | "masc_keeper_persona_audit" ->
+    | "masc_keeper_audit" ->
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (Keeper_tool_persona_audit.handle ~config args))
+           (Keeper_tool_keeper_audit.handle ~config args))
     | "masc_keeper_status" ->
       Some
         (tool_result_with_tool_name
@@ -745,6 +718,15 @@ let () =
              ~submitted_by:agent_name
              ctx
              args))
+    | "masc_keeper_msg" ->
+      with_eio_context (fun ctx ->
+        Some
+          (tool_result_with_tool_name
+             ~tool_name:name
+             (Keeper_tool_surface_ops.handle_keeper_msg_from_args
+                ~submitted_by:agent_name
+                ctx
+                args)))
     | "masc_keeper_up" ->
       (match sw, clock with
        | Some sw, Some clock ->

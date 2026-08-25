@@ -46,12 +46,6 @@ let () =
     let assets = Filename.concat (project_root ()) "assets" in
     if Sys.file_exists assets then Unix.putenv "MASC_ASSETS_DIR" assets
 
-let contains_substr sub s =
-  try
-    let _ = Str.search_forward (Str.regexp_string sub) s 0 in
-    true
-  with Not_found -> false
-
 let contains_re re s =
   try
     let _ = Str.search_forward (Str.regexp re) s 0 in
@@ -122,37 +116,37 @@ let test_html_starts_with_doctype () =
       (String.length html >= 15 && String.sub html 0 15 = "<!DOCTYPE html>")
   else
     check bool "fallback contains error" true
-      (contains_substr "Dashboard build not found" html)
+      (String_util.contains_substring html "Dashboard build not found")
 
 let test_html_contains_head () =
   let html = Web_dashboard.html () in
   if dashboard_built () then
-    check bool "has head" true (contains_substr "<head>" html)
+    check bool "has head" true (String_util.contains_substring html "<head>")
   else
     check bool "fallback is non-empty" true (String.length html > 0)
 
 let test_html_contains_body () =
   let html = Web_dashboard.html () in
-  check bool "has body" true (contains_substr "<body>" html)
+  check bool "has body" true (String_util.contains_substring html "<body>")
 
 let test_html_contains_title () =
   let html = Web_dashboard.html () in
   if dashboard_built () then
-    check bool "has MASC title" true (contains_substr "MASC Dashboard" html)
+    check bool "has MASC title" true (String_util.contains_substring html "MASC Dashboard")
   else
     check bool "fallback mentions dashboard" true
-      (contains_substr "Dashboard" html)
+      (String_util.contains_substring html "Dashboard")
 
 let test_html_contains_stylesheet () =
   let html = Web_dashboard.html () in
   if dashboard_built () then
     check bool "has stylesheet link" true
       (contains_re "rel=\"stylesheet\"" html
-       || contains_substr "<style>" html)
+       || String_util.contains_substring html "<style>")
   else
     check bool "fallback has no stylesheet" true
       (not (contains_re "rel=\"stylesheet\"" html)
-       && not (contains_substr "<style>" html))
+       && not (String_util.contains_substring html "<style>"))
 
 let test_html_contains_script () =
   let html = Web_dashboard.html () in
@@ -165,10 +159,10 @@ let test_html_contains_script () =
 let test_html_contains_app_mount () =
   let html = Web_dashboard.html () in
   if dashboard_built () then
-    check bool "has app mount div" true (contains_substr "id=\"app\"" html)
+    check bool "has app mount div" true (String_util.contains_substring html "id=\"app\"")
   else
     check bool "fallback has no app mount" true
-      (not (contains_substr "id=\"app\"" html))
+      (not (String_util.contains_substring html "id=\"app\""))
 
 let test_html_ends_with_html_tag () =
   let html = Web_dashboard.html () in
@@ -181,10 +175,10 @@ let test_html_references_dashboard_assets () =
   let html = Web_dashboard.html () in
   if dashboard_built () then
     check bool "references dashboard assets" true
-      (contains_substr "/dashboard/assets/" html)
+      (String_util.contains_substring html "/dashboard/assets/")
   else
     check bool "fallback does not reference assets" false
-      (contains_substr "/dashboard/assets/" html)
+      (String_util.contains_substring html "/dashboard/assets/")
 
 
 (* ============================================================
@@ -223,7 +217,7 @@ let test_fallback_on_missing_asset () =
           let html = Web_dashboard.html () in
           let etag = Web_dashboard.etag () in
           check bool "fallback html contains error message" true
-            (contains_substr "Dashboard build not found" html);
+            (String_util.contains_substring html "Dashboard build not found");
           check string "fallback etag is none" "none" etag))
     ~finally:(fun () -> Unix.rmdir missing_assets_root)
 
@@ -239,7 +233,7 @@ let test_html_ignores_invalid_explicit_assets_dir () =
         (fun () ->
           let html = Web_dashboard.html () in
           check bool "does not fall back to base_path assets" false
-            (contains_substr "dashboard-from-base-path" html)))
+            (String_util.contains_substring html "dashboard-from-base-path")))
     ~finally:(fun () -> cleanup_temp_dashboard_root base_root)
 
 let test_html_ignores_base_path_assets () =
@@ -254,7 +248,7 @@ let test_html_ignores_base_path_assets () =
         (fun () ->
           let html = Web_dashboard.html () in
           check bool "ignores base_path assets" false
-            (contains_substr "dashboard-from-base-path" html)))
+            (String_util.contains_substring html "dashboard-from-base-path")))
     ~finally:(fun () ->
       cleanup_temp_dashboard_root base_root)
 
@@ -342,7 +336,9 @@ let test_bundle_freshness_fresh_when_stamp_after_binary () =
 let test_bundle_freshness_build_stamp_path_under_dashboard_assets () =
   with_temp_dashboard_root (fun () ->
     check bool "build_stamp_path lives under assets/dashboard/" true
-      (contains_substr "/dashboard/.build-stamp" (Web_dashboard.build_stamp_path ())))
+      (String_util.contains_substring
+         (Web_dashboard.build_stamp_path ())
+         "/dashboard/.build-stamp"))
 
 (* log_bundle_freshness_warning has no return value to assert on (there is no
    existing Log capture harness in this suite) — these are smoke tests
@@ -359,6 +355,70 @@ let test_log_bundle_freshness_warning_does_not_raise_on_fresh () =
   let far_future = Unix.gettimeofday () +. (365.0 *. 24.0 *. 3600.0) in
   with_temp_dashboard_root ~stamp_mtime:far_future (fun () ->
     Web_dashboard.log_bundle_freshness_warning ())
+
+(* ============================================================
+   surface_status_json: /health projection of the dashboard surface
+   ============================================================ *)
+
+let assoc_field name = function
+  | `Assoc kvs -> List.assoc_opt name kvs
+  | _ -> None
+
+let status_of json =
+  match assoc_field "status" json with
+  | Some (`String s) -> s
+  | _ -> "<no-status>"
+
+let index_present_of json =
+  match assoc_field "index_present" json with
+  | Some (`Bool b) -> b
+  | _ -> fail "index_present field missing"
+
+let next_action_of json =
+  match assoc_field "next_action" json with
+  | Some (`String s) -> s
+  | _ -> "<no-next-action>"
+
+let test_surface_status_ok_when_fresh_and_index_present () =
+  let far_future = Unix.gettimeofday () +. (365.0 *. 24.0 *. 3600.0) in
+  with_temp_dashboard_root ~stamp_mtime:far_future (fun () ->
+    let json = Web_dashboard.surface_status_json () in
+    check string "status" "ok" (status_of json);
+    check bool "index_present" true (index_present_of json);
+    check string "next_action" "none" (next_action_of json);
+    check bool "build_stamp_at present" true
+      (assoc_field "build_stamp_at" json <> None))
+
+let test_surface_status_stale_when_stamp_predates_binary () =
+  with_temp_dashboard_root ~stamp_mtime:long_ago (fun () ->
+    let json = Web_dashboard.surface_status_json () in
+    check string "status" "stale" (status_of json);
+    check bool "binary_built_at present" true
+      (assoc_field "binary_built_at" json <> None);
+    check string "next_action names the rebuild" "cd dashboard && pnpm run build"
+      (next_action_of json))
+
+let test_surface_status_missing_without_stamp () =
+  with_temp_dashboard_root (fun () ->
+    let json = Web_dashboard.surface_status_json () in
+    check string "status" "missing" (status_of json);
+    check bool "index_present stays true" true (index_present_of json);
+    check string "next_action names the rebuild" "cd dashboard && pnpm run build"
+      (next_action_of json))
+
+let test_surface_status_missing_when_index_absent_despite_fresh_stamp () =
+  let far_future = Unix.gettimeofday () +. (365.0 *. 24.0 *. 3600.0) in
+  with_temp_dashboard_root ~stamp_mtime:far_future (fun () ->
+    (* Partially-deployed tree: the stamp survived, index.html did not. *)
+    let index =
+      Filename.concat
+        (Filename.concat (Web_dashboard.assets_root ()) "dashboard")
+        "index.html"
+    in
+    if Sys.file_exists index then Sys.remove index;
+    let json = Web_dashboard.surface_status_json () in
+    check string "status" "missing" (status_of json);
+    check bool "index_present" false (index_present_of json))
 
 (* ============================================================
    Test Runners
@@ -403,5 +463,11 @@ let () =
       test_case "warn does not raise on missing stamp" `Quick test_log_bundle_freshness_warning_does_not_raise_on_missing_stamp;
       test_case "warn does not raise on stale" `Quick test_log_bundle_freshness_warning_does_not_raise_on_stale;
       test_case "warn does not raise on fresh" `Quick test_log_bundle_freshness_warning_does_not_raise_on_fresh;
+    ];
+    "surface_status", [
+      test_case "ok when fresh and index present" `Quick test_surface_status_ok_when_fresh_and_index_present;
+      test_case "stale when stamp predates binary" `Quick test_surface_status_stale_when_stamp_predates_binary;
+      test_case "missing without stamp" `Quick test_surface_status_missing_without_stamp;
+      test_case "missing when index absent despite fresh stamp" `Quick test_surface_status_missing_when_index_absent_despite_fresh_stamp;
     ];
   ]

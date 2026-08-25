@@ -5,10 +5,12 @@
     every turn before the lane fails over.  This module remembers the last
     successful candidate per lane so later turns start from it instead.
 
-    The table is keyed by lane id and shared across keepers on purpose:
+    The immutable registry is keyed by lane id and shared across keepers on purpose:
     provider rate limits are account-scoped, so one keeper's failover
     discovery benefits every keeper routed through the same lane.  Entries
-    expire lazily on read against {!ttl_s}; there is no background sweeper. *)
+    expire lazily on read against {!ttl_s}; there is no background sweeper.
+    Clock and TTL are observed once outside the registry mutex, then supplied
+    to a pure transition. *)
 
 val prefer_order : lane_id:string -> string list -> string list
 (** Reorder [candidates] so the remembered last-good candidate for [lane_id]

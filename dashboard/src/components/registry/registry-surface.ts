@@ -1,8 +1,27 @@
+// MASC v2 — Registry surface (design: registry.jsx RegistrySurface).
+// Rebuilt onto the design's `.reg-*`/`.rk-*`/`.rp-*` vocabulary so the vendored
+// keeper-v2/registry.css skin has markup to land on.
+//
+// What is intentionally NOT built here (mark-don't-fake — no live signal):
+// - Persona (AGENT.md) library panel + editor (`reg-persona`, `rp-desc`,
+//   `rp-traits`, `reg-input`, ...): the backend exposes no prompt-file roster —
+//   `/api/v1/prompts` lists system prompt keys, not keeper AGENT.md files.
+// - Keeper create wizard (`reg-wizard`, `rw-*`): no keeper-create API exists in
+//   api/keeper-lifecycle.ts (boot/shutdown/reset/clear/pause/resume/wake/purge).
+// - `rk-tps` tok/s badge: tok/s only exists as per-keeper detail telemetry
+//   (KeeperMetricPoint.wall_tokens_per_second), not as a roster-level signal.
+// - `reg-cols`: the design's two-column grid exists to lay the persona panel
+//   next to the keeper panel; with one panel it would leave an empty track.
+//
+// Update/delete are not reimplemented: the menu's "keeper 설정" opens the
+// existing keeper detail route (config panel write path), and "등록 해제"
+// opens RegistryDeregister (drain + purge against the real control plane).
+
 import { html } from 'htm/preact'
-import { useMemo } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 
 import type { Keeper } from '../../types'
-import { route } from '../../router'
+import { navigate, route } from '../../router'
 import {
   buildCompositeByKeeperKey,
   fleetCompositeSnapshot,
@@ -17,9 +36,9 @@ import { keeperDisplayRuntime } from '../../lib/keeper-runtime-display'
 import { keepers } from '../../store'
 import { KeeperDetailPage } from '../keeper-detail-page'
 import { openKeeperDetail } from '../keeper-detail-state'
-import { PersonaBrowser } from '../keeper-spawn/persona-browser'
 import { KeeperBadge } from '../keeper-badge'
 import { Dot, Pill, type DotState, type PillTone } from '../v2/primitives-v2'
+import { RegistryDeregister } from './registry-deregister'
 
 export type RegistryKeeperGroupId = KeeperOperationalState['kind']
 
@@ -31,18 +50,22 @@ interface RegistryKeeperRow {
 interface RegistryKeeperGroup {
   readonly id: RegistryKeeperGroupId
   readonly label: string
+  /** `.reg-kgroup` modifier for the group header dot (keeper-v2/registry.css). */
+  readonly cls: string
   readonly dot: DotState
   readonly tone: PillTone
 }
 
 // Group labels come from the canonical KEEPER_STATUS_LABEL_KO SSOT so the
 // registry groups read identically to the monitoring band chip and the
-// keeper-workspace roster groups.
+// keeper-workspace roster groups. The design has three groups (run/pause/off);
+// the dashboard's canonical model adds `stuck`, whose dot rule is a recorded
+// live-only addition in keeper-v2/registry.css.
 const KEEPER_GROUPS: Readonly<Record<RegistryKeeperGroupId, RegistryKeeperGroup>> = {
-  running: { id: 'running', label: KEEPER_STATUS_LABEL_KO.running, dot: 'ok', tone: 'ok' },
-  stuck: { id: 'stuck', label: KEEPER_STATUS_LABEL_KO.stuck, dot: 'bad', tone: 'bad' },
-  paused: { id: 'paused', label: KEEPER_STATUS_LABEL_KO.paused, dot: 'warn', tone: 'warn' },
-  offline: { id: 'offline', label: KEEPER_STATUS_LABEL_KO.offline, dot: 'idle', tone: 'neutral' },
+  running: { id: 'running', label: KEEPER_STATUS_LABEL_KO.running, cls: 'run', dot: 'ok', tone: 'ok' },
+  stuck: { id: 'stuck', label: KEEPER_STATUS_LABEL_KO.stuck, cls: 'stuck', dot: 'bad', tone: 'bad' },
+  paused: { id: 'paused', label: KEEPER_STATUS_LABEL_KO.paused, cls: 'pause', dot: 'warn', tone: 'warn' },
+  offline: { id: 'offline', label: KEEPER_STATUS_LABEL_KO.offline, cls: 'off', dot: 'idle', tone: 'neutral' },
 }
 
 export function keeperGroup(
@@ -80,32 +103,7 @@ function configuredOnly(state: KeeperOperationalState): boolean {
   return state.kind === 'offline' && state.cause === 'unbooted'
 }
 
-/**
- * Persona layer. Create/edit/delete and keeper spawn all live in
- * [PersonaBrowser], which owns its own load, permission gating, and confirm
- * dialogs. Registry mounts it rather than re-listing personas read-only: two
- * surfaces for the same records is what split persona writes away from this
- * route in the first place.
- */
-function PersonaLayer() {
-  return html`
-    <div class="reg-layer reg-personas">
-      <h2 style="margin:0 0 8px;">Persona</h2>
-      <p style="margin:0 0 12px;opacity:.7;font-size:12px;">
-        페르소나를 만들고 편집합니다. <strong>키퍼 시작</strong>은 그 페르소나의 기본 지시사항으로
-        키퍼를 생성하고 곧바로 부팅합니다 — 설정만 해두는 경로는 아직 없습니다.
-        목표는 생성 후 키퍼 상세에서 연결합니다.
-      </p>
-      <${PersonaBrowser} />
-    </div>
-  `
-}
-
 export function RegistrySurface() {
-  // Keeper update/delete are not reimplemented here. The row opens the existing
-  // keeper detail route, which already hosts the config panel (write) and the
-  // purge flow (delete). `baseAgentDirectoryRoute` keeps 'registry' as the
-  // return tab, so the drill-down does not bounce the operator to Monitoring.
   const keeperParam = route.value.params.keeper as string | undefined
 
   const roster = keepers.value
@@ -119,63 +117,165 @@ export function RegistrySurface() {
     [roster, compositeByKeeperKey],
   )
 
+  const [menu, setMenu] = useState<string | null>(null)
+  const [deregister, setDeregister] = useState<RegistryKeeperRow | null>(null)
+
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenu(null)
+    }
+    window.addEventListener('click', close)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [menu])
+
   if (keeperParam) {
     return html`<${KeeperDetailPage} />`
   }
 
   return html`
-    <section class="reg-surface" style="padding:16px;display:flex;flex-direction:column;gap:20px;">
-      <${PersonaLayer} />
+    <main class="reg">
+      <div class="reg-scroll">
+        <header class="reg-head">
+          <div>
+            <span class="reg-eyebrow">레지스트리</span>
+            <h1>프롬프트 · Keeper · 런타임</h1>
+            <p class="reg-sub">AGENT.md 를 골라 keeper 를 만들고, 런타임에 바인딩합니다.</p>
+          </div>
+        </header>
 
-      <!-- Persona-centric registry: persona CRUD is the primary surface;
-           keeper instances are a collapsed, de-emphasized listing below.
-           The <details> toggle keeps groupRegistryKeepers + the
-           #registry?keeper=<name> deep link behavior intact. -->
-      <details class="reg-layer reg-keepers">
-        <summary style="cursor:pointer;list-style:none;">
-          <h3 style="margin:0;display:inline-flex;align-items:center;gap:6px;">
-            Keeper 인스턴스 <${Pill} tone="info">${roster.length}<//>
-          </h3>
-        </summary>
-        <div style="margin-top:12px;">
-        ${Object.values(KEEPER_GROUPS).map(group => html`
-          <div key=${group.id} class="reg-kgroup" style="margin-bottom:12px;">
-            <h4 style="margin:0 0 6px;display:flex;align-items:center;gap:6px;">
-              <${Dot} state=${group.dot} /> ${group.label}
-              <${Pill} tone=${group.tone} count>${grouped[group.id].length}<//>
-            </h4>
-            ${grouped[group.id].length === 0
-              ? html`<p style="margin:0;opacity:.5;">없음</p>`
-              : html`
-                  <ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;">
-                    ${grouped[group.id].map(row => {
-                      const runtime = runtimeLabel(row.keeper)
+        <div class="reg-spine">
+          <div class="reg-station idea">
+            <div class="rs-tag"><span class="rs-node"></span>AGENT.md</div>
+            <div class="rs-name">프롬프트 파일</div>
+            <div class="rs-gloss">keeper 프롬프트 전체가 담긴 한 장. 여러 keeper 가 공유할 수 있다.</div>
+          </div>
+          <div class="reg-arrow">→</div>
+          <div class="reg-station actual">
+            <div class="rs-tag"><span class="rs-node"></span>KEEPER</div>
+            <div class="rs-name">Keeper</div>
+            <div class="rs-gloss">파일을 참조하는 실제 에이전트. TOML 은 운영 설정만.</div>
+          </div>
+          <div class="reg-arrow">→</div>
+          <div class="reg-station runtime">
+            <div class="rs-tag"><span class="rs-node"></span>RUNTIME</div>
+            <div class="rs-name">런타임</div>
+            <div class="rs-gloss">keeper가 도는 모델·파이버. 언제든 교체.</div>
+          </div>
+        </div>
+
+        <section class="reg-panel actual">
+          <div class="reg-panel-h">
+            <span class="rp-layer"></span>
+            <h2>Keeper</h2>
+            <span class="rp-kr">에이전트</span>
+            <span class="rp-count">${roster.length}</span>
+            <span class="rp-spacer"></span>
+          </div>
+          <div class="reg-keepers">
+            ${Object.values(KEEPER_GROUPS).map(group => {
+              const rows = grouped[group.id]
+              if (!rows.length) return null
+              return html`
+                <div key=${group.id}>
+                  <div class=${`reg-kgroup ${group.cls}`}>
+                    <span class="rg-dot"></span>${group.label}<span class="rg-n">${rows.length}</span>
+                  </div>
+                  <div class="reg-kgrid">
+                    ${rows.map(row => {
+                      const { keeper, state } = row
+                      const runtime = runtimeLabel(keeper)
                       return html`
-                        <li key=${row.keeper.name} class="reg-keeper-row">
-                          <button
-                            type="button"
-                            class="reg-keeper-open"
-                            data-testid="registry-keeper-open"
-                            title="${row.keeper.name} 상세 · 설정 편집 · 삭제"
-                            onClick=${() => openKeeperDetail(row.keeper)}
-                            style="display:flex;align-items:center;gap:8px;width:100%;padding:4px;
-                                   background:none;border:0;cursor:pointer;text-align:left;color:inherit;"
-                          >
-                            <${KeeperBadge} id=${row.keeper.name} variant="full" size="sm" />
-                            <span style="opacity:.7;font-size:12px;">
-                              ${runtime ?? '런타임 없음'}
-                            </span>
-                            ${configuredOnly(row.state) ? html`<${Pill} tone="neutral">configured<//>` : null}
-                          </button>
-                        </li>
+                        <div
+                          key=${keeper.name}
+                          class=${`reg-keeper ${state.kind === 'offline' ? 'is-off' : ''}`}
+                        >
+                          <div class="rk-top">
+                            <${KeeperBadge} id=${keeper.name} size="lg" />
+                            <div class="rk-id">
+                              <div class="rk-name">${keeper.name}</div>
+                              <div class="rk-phase">
+                                <${Dot} state=${group.dot} />${group.label}
+                                ${configuredOnly(state) ? html`<${Pill} tone="neutral">configured<//>` : null}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              class="rk-menu-btn"
+                              data-testid="registry-keeper-menu"
+                              title="명령"
+                              onClick=${(e: Event) => {
+                                e.stopPropagation()
+                                setMenu(menu === keeper.name ? null : keeper.name)
+                              }}
+                            >⋯</button>
+                            ${menu === keeper.name
+                              ? html`
+                                  <div class="rk-menu" onClick=${(e: Event) => e.stopPropagation()}>
+                                    <button
+                                      class="rk-menu-i"
+                                      data-testid="registry-keeper-open"
+                                      onClick=${() => {
+                                        openKeeperDetail(keeper)
+                                        setMenu(null)
+                                      }}
+                                    ><span class="g">⚙</span> keeper 설정</button>
+                                    <button
+                                      class="rk-menu-i"
+                                      data-testid="registry-keeper-chat"
+                                      onClick=${() => {
+                                        navigate('keepers', { keeper: keeper.name })
+                                        setMenu(null)
+                                      }}
+                                    ><span class="g">◈</span> 대화 열기</button>
+                                    <div class="rk-menu-sep"></div>
+                                    <button
+                                      class="rk-menu-i danger"
+                                      data-testid="registry-keeper-deregister"
+                                      onClick=${() => {
+                                        setDeregister(row)
+                                        setMenu(null)
+                                      }}
+                                    ><span class="g">⊘</span> 등록 해제</button>
+                                  </div>
+                                `
+                              : null}
+                          </div>
+                          <div class="rk-facet prov" title="참조하는 프롬프트 파일">
+                            <span class="rk-f-lyr"></span>
+                            <span class="rk-f-arrow">←</span>
+                            <span class="rk-f-val">${keeper.agent_name ?? '직접 정의'}</span>
+                          </div>
+                          <div class="rk-facet rt" title="바인딩된 런타임">
+                            <span class="rk-f-lyr"></span>
+                            <span class="rk-f-val">${runtime ?? '런타임 없음'}</span>
+                          </div>
+                        </div>
                       `
                     })}
-                  </ul>
-                `}
+                  </div>
+                </div>
+              `
+            })}
+            ${roster.length === 0
+              ? html`<div class="reg-empty">등록된 keeper가 없습니다.</div>`
+              : null}
           </div>
-        `)}
-        </div>
-      </details>
-    </section>
+        </section>
+      </div>
+
+      ${deregister
+        ? html`<${RegistryDeregister}
+            keeper=${deregister.keeper}
+            state=${deregister.state}
+            onClose=${() => setDeregister(null)}
+          />`
+        : null}
+    </main>
   `
 }

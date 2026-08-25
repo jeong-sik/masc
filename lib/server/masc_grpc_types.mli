@@ -49,10 +49,19 @@ module HeartbeatAck : sig
     ; directives : Keeper_directive.t list
     }
 
-  (** Exact codec for the legacy protobuf [string] field.  This is the only
-      boundary where Keeper directives are represented as strings. *)
-  val directive_of_wire : string -> (Keeper_directive.t, string) result
-  val directive_to_wire : Keeper_directive.t -> string
+  (** Exact codec for the protobuf [Directive] oneof. Each arm is one
+      constructor of {!Keeper_directive}, so the wire cannot name a directive
+      this type does not have. [`not_set] — a Directive message with no field
+      set — is the one shape protobuf still admits and is an error here. *)
+  type directive_wire =
+    [ `Pause of bool
+    | `Wakeup of bool
+    | `Claim_task_id of string
+    | `not_set
+    ]
+
+  val directive_of_wire : directive_wire -> (Keeper_directive.t, string) result
+  val directive_to_wire : Keeper_directive.t -> directive_wire
 
   val of_bytes : string -> t
   val to_bytes : t -> string
@@ -132,9 +141,34 @@ module BroadcastRequest : sig
 end
 
 module BroadcastResponse : sig
+  type delivery_status =
+    | Delivery_passive
+    | Delivery_accepted
+    | Delivery_already_accepted
+    | Delivery_pending
+    | Delivery_deferred
+    | Delivery_rejected
+    | Delivery_not_persisted
+    | Delivery_outcome_unknown
+
+  type retry_disposition =
+    | Retry_do_not_resend
+    | Retry_allowed
+    | Retry_outcome_unknown
+
+  type workspace_persistence_status =
+    | Workspace_persisted
+    | Workspace_not_persisted
+    | Workspace_persistence_unknown
+
   type t =
     { success : bool
     ; seq : int64
+    ; request_id : string option
+    ; delivery_status : delivery_status
+    ; delivery_reason : string option
+    ; workspace_persistence_status : workspace_persistence_status
+    ; retry_disposition : retry_disposition
     }
 
   val of_bytes : string -> t
@@ -155,27 +189,3 @@ module StatusResponse : sig
   val to_bytes : t -> string
 end
 
-(** {1 LSP Proxy} *)
-
-module LspRequest : sig
-  type t =
-    { language_id : string
-    ; jsonrpc_request_json : string
-    ; workspace_root : string option
-    }
-
-  val of_bytes_result : string -> (t, string) result
-  val of_bytes : string -> t
-  val to_bytes : t -> string
-end
-
-module LspResponse : sig
-  type t =
-    { jsonrpc_response_json : string
-    ; error_message : string
-    }
-
-  val of_bytes_result : string -> (t, string) result
-  val of_bytes : string -> t
-  val to_bytes : t -> string
-end

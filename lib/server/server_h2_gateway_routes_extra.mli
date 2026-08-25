@@ -12,6 +12,7 @@ val dispatch :
   cors:(string * string) list ->
   path:string ->
   config:Workspace.config option ->
+  with_public_read:((unit -> unit) -> unit) ->
   [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
   | `CONNECT | `TRACE | `Other of string ] ->
   bool
@@ -30,7 +31,9 @@ val dispatch :
       (clamped to [0..5000]).  Author filter routes through
       {!Server_utils.board_actor_author_for_write} so keeper
       aliases resolve to canonical names.
-    - [GET /api/v1/board/hearths] — hearth name+count list.
+    - [GET /api/v1/board/hearths] — hearth name+count list. Optional
+      [exclude_system] / [exclude_automation] booleans use the same post-kind
+      filter axis as the Board listing.
     - [GET /api/v1/board/flairs] — available flair list.
     - [GET /api/v1/board/curation] — latest AI curation snapshot
       ([{snapshot: null}] when no snapshot has been submitted yet).

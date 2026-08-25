@@ -18,23 +18,15 @@ export type {
 export interface IdeApiOptions extends GetOptions {
   readonly keeper?: string
   readonly scope?: IdeScope | null
-  readonly repoId?: string | null
-  readonly canonicalUrl?: string | null
+  /** RFC-0378 §5.3b: the one wire key — the canonical codebase slug the
+   *  server minted (repositories API `codebase` field). Display names and
+   *  catalog ids are projection labels, not addresses. */
+  readonly codebase?: string | null
 }
 
-export type IdeScope =
-  | { readonly kind: 'repo_id'; readonly repoId: string }
-  | { readonly kind: 'canonical_url'; readonly canonicalUrl: string }
-  /**
-   * Read-only scope over the repo-unattributed observation lane. Keeper
-   * turn/coordination events carry no file, so the server stores them
-   * outside any repo partition; this scope is the only address for that
-   * data. Mutations sent with it are refused server-side
-   * (keeper_lane_read_only).
-   */
-  | { readonly kind: 'keeper_lane'; readonly keeperId: string }
+export type IdeScope = { readonly kind: 'codebase'; readonly codebase: string }
 
-export type IdeScopeOptions = Pick<IdeApiOptions, 'scope' | 'repoId' | 'canonicalUrl'>
+export type IdeScopeOptions = Pick<IdeApiOptions, 'scope' | 'codebase'>
 
 export type IdeEventKind = 'tool' | 'turn'
 
@@ -135,32 +127,18 @@ function trimmedNonEmpty(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null
 }
 
-export function ideScopeFromRepoId(repoId: string | null | undefined): IdeScope | null {
-  const trimmed = trimmedNonEmpty(repoId)
-  return trimmed ? { kind: 'repo_id', repoId: trimmed } : null
-}
-
-export function ideScopeFromCanonicalUrl(canonicalUrl: string | null | undefined): IdeScope | null {
-  const trimmed = trimmedNonEmpty(canonicalUrl)
-  return trimmed ? { kind: 'canonical_url', canonicalUrl: trimmed } : null
-}
-
-export function ideScopeFromKeeperLane(keeperId: string | null | undefined): IdeScope | null {
-  const trimmed = trimmedNonEmpty(keeperId)
-  return trimmed ? { kind: 'keeper_lane', keeperId: trimmed } : null
+export function ideScopeFromCodebase(codebase: string | null | undefined): IdeScope | null {
+  const trimmed = trimmedNonEmpty(codebase)
+  return trimmed ? { kind: 'codebase', codebase: trimmed } : null
 }
 
 function resolveIdeScope(opts: IdeScopeOptions): IdeScope | null {
   const candidates: IdeScope[] = []
   if (opts.scope) candidates.push(opts.scope)
-  const repoScope = ideScopeFromRepoId(opts.repoId)
-  if (repoScope) candidates.push(repoScope)
-  const canonicalScope = ideScopeFromCanonicalUrl(opts.canonicalUrl)
-  if (canonicalScope) candidates.push(canonicalScope)
+  const codebaseScope = ideScopeFromCodebase(opts.codebase)
+  if (codebaseScope) candidates.push(codebaseScope)
   if (candidates.length > 1) {
-    throw new Error(
-      'IDE scope must resolve to exactly one of repo_id, canonical_url, or keeper_lane',
-    )
+    throw new Error('IDE scope must resolve to exactly one codebase')
   }
   return candidates[0] ?? null
 }
@@ -168,17 +146,7 @@ function resolveIdeScope(opts: IdeScopeOptions): IdeScope | null {
 export function appendIdeScopeParams(params: URLSearchParams, opts: IdeScopeOptions): void {
   const scope = resolveIdeScope(opts)
   if (!scope) return
-  switch (scope.kind) {
-    case 'repo_id':
-      params.set('repo_id', scope.repoId)
-      break
-    case 'canonical_url':
-      params.set('canonical_url', scope.canonicalUrl)
-      break
-    case 'keeper_lane':
-      params.set('keeper_lane', scope.keeperId)
-      break
-  }
+  params.set('codebase', scope.codebase)
 }
 
 function appendWorkspaceParams(

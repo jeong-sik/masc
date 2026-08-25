@@ -37,7 +37,6 @@ let cleanup () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Board_curation.reset_for_test ();
-  Board_moderation.reset_for_test ();
   Fs_compat.reset_fd_cache_for_testing ();
   Fs_compat.reset_mkdir_memo_for_testing ();
   remove_path (Filename.concat _test_base_path Common.masc_dirname);
@@ -92,56 +91,16 @@ let make_keeper_meta ?(name = "judge-keeper") () : Keeper_meta_contract.keeper_m
       (`Assoc
          [
            ("name", `String name);
-           ("agent_name", `String name);
+           (* The decoder requires the derived form, not the raw name
+              (keeper_meta_json_parse.ml:367). Passing [name] here made every
+              fixture in this file fail construction, which is why five of its
+              assertions have never run. *)
+           ("agent_name", `String (Masc.Keeper_identity.keeper_agent_name name));
            ("trace_id", `String "test-trace-board");
          ])
   with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_keeper_meta failed: %s" e)
-
-let contains_substring haystack needle =
-  try
-    ignore (Str.search_forward (Str.regexp_string needle) haystack 0);
-    true
-  with Not_found -> false
-
-let source_text rel = Masc_test_deps.read_file (Masc_test_deps.source_path rel)
-
-let slice_between text ~start_marker ~end_marker =
-  try
-    let start = Str.search_forward (Str.regexp_string start_marker) text 0 in
-    let stop = Str.search_forward (Str.regexp_string end_marker) text start in
-    String.sub text start (stop - start)
-  with Not_found ->
-    Alcotest.failf "missing source marker between %S and %S" start_marker end_marker
-
-let slice_from text ~start_marker =
-  try
-    let start = Str.search_forward (Str.regexp_string start_marker) text 0 in
-    String.sub text start (String.length text - start)
-  with Not_found -> Alcotest.failf "missing source marker %S" start_marker
-
-let test_moderation_http_identity_bound_to_auth_source () =
-  let src = source_text "lib/server/server_dashboard_http_delete_actions.ml" in
-  let flag_route =
-    slice_between src
-      ~start_marker:{|Http.Router.post "/api/v1/dashboard/board/moderation/flag"|}
-      ~end_marker:{|Http.Router.get "/api/v1/dashboard/board/moderation/queue"|}
-  in
-  let action_route =
-    slice_from src
-      ~start_marker:{|Http.Router.post "/api/v1/dashboard/board/moderation/action"|}
-  in
-  Alcotest.(check bool) "flag route binds authenticated agent" true
-    (contains_substring flag_route "(fun _state agent_name req reqd ->");
-  Alcotest.(check bool) "flag reporter uses authenticated agent" true
-    (contains_substring flag_route "let reporter = agent_name");
-  Alcotest.(check bool) "flag route ignores body reporter" false
-    (contains_substring flag_route {|json_string_opt "reporter"|});
-  Alcotest.(check bool) "action actor uses authenticated agent" true
-    (contains_substring action_route "let actor = agent_name");
-  Alcotest.(check bool) "action route ignores body actor" false
-    (contains_substring action_route {|json_string_opt "actor"|})
 
 (** {2 Group 1: Helper / Formatting Functions} *)
 
@@ -196,7 +155,21 @@ let test_board_error_to_string () =
   let s = Board_tool.board_error_to_string (Board.Post_not_found "test-id") in
   Alcotest.(check bool) "post_not_found has text" true (String.length s > 0);
   let s2 = Board_tool.board_error_to_string (Board.Validation_error "bad") in
-  Alcotest.(check bool) "validation_error" true (String.contains s2 'b')
+  Alcotest.(check bool) "validation_error" true (String.contains s2 'b');
+  (* A guessed id can carry the accepted c-hex shape (keeper:polisher voted
+     c-000…0 on 2026-08-24), so the shape check lets it through and the
+     lookup miss is the only reply the caller gets. It must name the two
+     producers of real ids instead of only repeating the dead one. *)
+  let s3 =
+    Board_tool.board_error_to_string
+      (Board.Comment_not_found "c-00000000000000000000000000000000")
+  in
+  Alcotest.(check bool)
+    "comment_not_found names the post_get producer" true
+    (String_util.contains_substring s3 "masc_board_post_get");
+  Alcotest.(check bool)
+    "comment_not_found names the comment producer" true
+    (String_util.contains_substring s3 "masc_board_comment")
 
 let test_is_agent () =
   with_eio @@ fun env ->
@@ -258,34 +231,24 @@ let json_member_bool json key =
   | `Bool value -> value
   | _ -> Alcotest.failf "expected bool field %s" key
 
-let json_member_null json key =
-  match Yojson.Safe.Util.member key json with
-  | `Null -> ()
-  | _ -> Alcotest.failf "expected null field %s" key
-
 let json_member_list json key =
   match Yojson.Safe.Util.member key json with
   | `List values -> values
   | _ -> Alcotest.failf "expected list field %s" key
 
-let json_has_member json key =
-  match Yojson.Safe.Util.member key json with
-  | `Null -> false
-  | _ -> true
-
 let test_board_actor_identity_canonicalizes_keeper_alias () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let json = Server_utils.board_actor_identity_json "keeper-analyst-agent" in
+  let json = Server_utils.board_actor_identity_json "keeper-delta-agent" in
   Alcotest.(check string) "kind" "keeper" (json_member_string json "kind");
-  Alcotest.(check string) "id" "analyst" (json_member_string json "id");
-  Alcotest.(check string) "key" "keeper:analyst" (json_member_string json "key");
-  Alcotest.(check string) "raw" "keeper-analyst-agent"
+  Alcotest.(check string) "id" "delta" (json_member_string json "id");
+  Alcotest.(check string) "key" "keeper:delta" (json_member_string json "key");
+  Alcotest.(check string) "raw" "keeper-delta-agent"
     (json_member_string json "raw");
   Alcotest.(check string) "source" "keeper_alias_contract"
     (json_member_string json "source");
-  Alcotest.(check string) "runtime agent" "keeper-analyst-agent"
+  Alcotest.(check string) "runtime agent" "keeper-delta-agent"
     (json_member_string json "runtime_agent_name")
 
 let test_board_actor_identity_keeps_non_keeper_agent () =
@@ -367,206 +330,25 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
   Alcotest.(check bool) "comment reaction selected" true
     (json_member_bool comment_summary "has_reacted")
 
-let test_board_dashboard_json_embeds_moderation_projection () =
-  with_eio @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  cleanup ();
-  let post =
-    match
-      Board_dispatch.create_post ~author:"moderated-author"
-        ~content:"moderation projection post" ~post_kind:Board.Human_post ()
-    with
-    | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  let post_id = Board.Post_id.to_string post.id in
-  let comment =
-    match
-      Board_dispatch.add_comment ~post_id ~author:"moderated-commenter"
-        ~content:"moderation projection comment" ()
-    with
-    | Ok comment -> comment
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  let comment_id = Board.Comment_id.to_string comment.id in
-  (match
-     Board_moderation.flag ~target_kind:Board_moderation.Target_post
-       ~target_id:post_id ~reporter:"reporter-a" ~reason:Board_moderation.Spam
-   with
-   | Ok _ -> ()
-   | Error e -> Alcotest.fail e);
-  (match
-     Board_moderation.flag ~target_kind:Board_moderation.Target_comment
-       ~target_id:comment_id ~reporter:"reporter-b"
-       ~reason:Board_moderation.Harassment
-   with
-   | Ok _ -> ()
-   | Error e -> Alcotest.fail e);
-  let public_post_json =
-    Server_utils.board_post_dashboard_json ~author_karma:0 post
-  in
-  let public_comment_json = Server_utils.board_comment_dashboard_json comment in
-  Alcotest.(check bool) "public post omits report count" false
-    (json_has_member public_post_json "report_count");
-  Alcotest.(check bool) "public post omits moderation status" false
-    (json_has_member public_post_json "moderation_status");
-  Alcotest.(check bool) "public comment omits report count" false
-    (json_has_member public_comment_json "report_count");
-  Alcotest.(check bool) "public comment omits moderation status" false
-    (json_has_member public_comment_json "moderation_status");
-  let post_json =
-    Server_utils.board_post_dashboard_json ~include_moderation:true ~author_karma:0 post
-  in
-  let comment_json =
-    Server_utils.board_comment_dashboard_json ~include_moderation:true comment
-  in
-  Alcotest.(check int) "post report count" 1
-    (json_member_int post_json "report_count");
-  Alcotest.(check string) "post moderation status" "flagged"
-    (json_member_string post_json "moderation_status");
-  Alcotest.(check int) "comment report count" 1
-    (json_member_int comment_json "report_count");
-  Alcotest.(check string) "comment moderation status" "flagged"
-    (json_member_string comment_json "moderation_status")
-
-let test_board_dashboard_json_hides_unvoted_scores_when_blind () =
-  with_eio @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  cleanup ();
-  let post =
-    match
-      Board_dispatch.create_post ~author:"blind-author"
-        ~content:"vote blind post" ~post_kind:Board.Human_post ()
-    with
-    | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  let post_id = Board.Post_id.to_string post.id in
-  (match Board_dispatch.vote ~voter:"peer" ~post_id ~direction:Board.Up with
-  | Ok _ -> ()
-  | Error e -> Alcotest.fail (Board.show_board_error e));
-  let post =
-    match Board_dispatch.get_post ~post_id with
-    | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  let comment =
-    match
-      Board_dispatch.add_comment ~post_id ~author:"blind-commenter"
-        ~content:"vote blind comment" ()
-    with
-    | Ok comment -> comment
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  let comment_id = Board.Comment_id.to_string comment.id in
-  (match
-     Board_dispatch.vote_comment ~voter:"peer" ~comment_id
-       ~direction:Board.Up
-   with
-   | Ok _ -> ()
-   | Error e -> Alcotest.fail (Board.show_board_error e));
-  let comment =
-    match Board_dispatch.get_comments ~post_id with
-    | Ok (comment :: _) -> comment
-    | Ok [] -> Alcotest.fail "expected comment"
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  let hidden_post_json =
-    Server_utils.board_post_dashboard_json ~blind_votes:true
-      ~current_vote:None ~author_karma:0 post
-  in
-  Alcotest.(check bool) "post vote blind" true
-    (json_member_bool hidden_post_json "vote_blind");
-  json_member_null hidden_post_json "votes";
-  json_member_null hidden_post_json "score";
-  json_member_null hidden_post_json "votes_up";
-  json_member_null hidden_post_json "votes_down";
-  Alcotest.(check string) "post blind reason" "vote_before_score"
-    (json_member_string hidden_post_json "vote_blind_reason");
-  let revealed_post_json =
-    Server_utils.board_post_dashboard_json ~blind_votes:true
-      ~current_vote:(Some Board.Up) ~author_karma:0 post
-  in
-  Alcotest.(check bool) "post vote revealed" false
-    (json_member_bool revealed_post_json "vote_blind");
-  Alcotest.(check int) "post revealed votes" 1
-    (json_member_int revealed_post_json "votes");
-  let hidden_comment_json =
-    Server_utils.board_comment_dashboard_json ~blind_votes:true
-      ~current_vote:None comment
-  in
-  Alcotest.(check bool) "comment vote blind" true
-    (json_member_bool hidden_comment_json "vote_blind");
-  json_member_null hidden_comment_json "votes";
-  json_member_null hidden_comment_json "score";
-  json_member_null hidden_comment_json "votes_up";
-  json_member_null hidden_comment_json "votes_down";
-  let revealed_comment_json =
-    Server_utils.board_comment_dashboard_json ~blind_votes:true
-      ~current_vote:(Some Board.Up) comment
-  in
-  Alcotest.(check bool) "comment vote revealed" false
-    (json_member_bool revealed_comment_json "vote_blind");
-  Alcotest.(check int) "comment revealed score" 1
-    (json_member_int revealed_comment_json "score")
-
-let test_board_dashboard_json_embeds_contributor_quality () =
-  with_eio @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  cleanup ();
-  let post =
-    match
-      Board_dispatch.create_post ~author:"quality-author"
-        ~content:"quality projection post" ~post_kind:Board.Human_post ()
-    with
-    | Ok post -> post
-    | Error e -> Alcotest.fail (Board.show_board_error e)
-  in
-  let rep =
-    {
-      (Reputation.default_reputation ~agent_name:"quality-author") with
-      completion_rate = 0.8;
-      response_rate = 0.6;
-      board_posts = 3;
-      board_comments = 5;
-    }
-  in
-  let contributor_quality =
-    Server_utils.board_contributor_quality_json rep
-  in
-  let post_json =
-    Server_utils.board_post_dashboard_json ~contributor_quality
-      ~author_karma:0 post
-  in
-  let quality =
-    match Yojson.Safe.Util.member "contributor_quality" post_json with
-    | `Assoc _ as quality -> quality
-    | _ -> Alcotest.fail "expected contributor_quality object"
-  in
-  Alcotest.(check string) "quality source" "agent_reputation"
-    (json_member_string quality "source");
-  Alcotest.(check int) "quality board posts" 3
-    (json_member_int quality "board_posts")
-
 let test_inline_board_post_author_rewrites_caller_claim () =
   let args =
     make_args
       [
         ("content", `String "ctx-owned post");
-        ("author", `String "analyst");
+        ("author", `String "delta");
         ("meta", `Assoc [ ("trace", `String "probe-10297") ]);
       ]
   in
   let normalized =
     Mcp_tool_runtime_board.ensure_board_post_author
-      ~agent_name:"keeper-velvet-hammer-agent" args
+      ~agent_name:"keeper-xi-hammer-agent" args
   in
-  Alcotest.(check string) "author from ctx" "velvet-hammer"
+  Alcotest.(check string) "author from ctx" "xi-hammer"
     Yojson.Safe.Util.(normalized |> member "author" |> to_string);
-  Alcotest.(check string) "caller claim preserved" "analyst"
+  Alcotest.(check string) "caller claim preserved" "delta"
     Yojson.Safe.Util.(
       normalized |> member "meta" |> member "author_caller_claim" |> to_string);
-  Alcotest.(check string) "raw ctx agent preserved" "keeper-velvet-hammer-agent"
+  Alcotest.(check string) "raw ctx agent preserved" "keeper-xi-hammer-agent"
     Yojson.Safe.Util.(
       normalized
       |> member "meta"
@@ -580,14 +362,14 @@ let test_inline_board_post_author_accepts_matching_alias () =
     make_args
       [
         ("content", `String "ctx-owned post");
-        ("author", `String "keeper-analyst-agent");
+        ("author", `String "keeper-delta-agent");
       ]
   in
   let normalized =
     Mcp_tool_runtime_board.ensure_board_post_author
-      ~agent_name:"keeper-analyst-agent" args
+      ~agent_name:"keeper-delta-agent" args
   in
-  Alcotest.(check string) "author canonical" "analyst"
+  Alcotest.(check string) "author canonical" "delta"
     Yojson.Safe.Util.(normalized |> member "author" |> to_string);
   Alcotest.(check bool) "no mismatch claim" true
     Yojson.Safe.Util.(
@@ -655,7 +437,7 @@ let test_post_create_metadata_payload () =
        [
          ("title", `String "Why");
          ("content", `String "Visible answer\n\nSupporting detail");
-         ("author", `String "sangsu");
+         ("author", `String "alpha");
          ("meta", `Assoc [ ("source", `String "keeper_autonomy") ]);
        ])
   in
@@ -846,9 +628,9 @@ let test_post_create_sources_footer_and_meta () =
   let json = parse_create_response_json body in
   let content = Yojson.Safe.Util.(json |> member "content" |> to_string) in
   Alcotest.(check bool) "sources footer appended" true
-    (contains_substring content "## Sources");
+    (String_util.contains_substring content "## Sources");
   Alcotest.(check bool) "source url rendered" true
-    (contains_substring content "<https://example.com/docs>");
+    (String_util.contains_substring content "<https://example.com/docs>");
   Alcotest.(check string) "source url persisted" "https://example.com/docs"
     Yojson.Safe.Util.(
       json |> member "meta" |> member "sources" |> index 0 |> member "url"
@@ -911,7 +693,7 @@ let test_keeper_board_sub_board_owner_is_runtime_bound () =
            ])
   in
   Alcotest.(check bool) "sub-board create succeeds" false
-    (contains_substring created "error");
+    (String_util.contains_substring created "error");
   let fetched =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
@@ -919,9 +701,9 @@ let test_keeper_board_sub_board_owner_is_runtime_bound () =
       ~args:(make_args [ "sub_board_id", `String slug ])
   in
   Alcotest.(check bool) "owner is keeper identity" true
-    (contains_substring fetched "Owner: sub-board-keeper");
+    (String_util.contains_substring fetched "Owner: sub-board-keeper");
   Alcotest.(check bool) "spoofed owner is absent" false
-    (contains_substring fetched "spoofed-owner")
+    (String_util.contains_substring fetched "spoofed-owner")
 
 let test_direct_board_reaction_binds_keeper_identity () =
   with_eio @@ fun env ->
@@ -996,7 +778,7 @@ let test_model_visible_board_maintenance_dispatches_in_process () =
            [ "post_id", `String post_id; "author", `String "spoofed-author" ])
   in
   Alcotest.(check bool) "delete reaches its Board handler" true
-    (contains_substring delete_result post_id);
+    (String_util.contains_substring delete_result post_id);
   match Board_dispatch.get_post ~post_id with
   | Ok _ -> Alcotest.fail "model-visible in-process delete left the post behind"
   | Error _ -> ()
@@ -1013,17 +795,17 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
       ~args:(make_args [])
   in
   Alcotest.(check bool) "fake board name rejected" true
-    (contains_substring fake "unknown_board_tool");
+    (String_util.contains_substring fake "unknown_board_tool");
   let comment_vote =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
       ~name:"masc_board_comment_vote"
-      ~args:(make_args [ ("comment_id", `String "") ])
+      ~args:(make_args [ ("comment_id", `String ""); ("direction", `String "up") ])
   in
   Alcotest.(check bool) "typed comment vote reaches board handler" true
-    (contains_substring comment_vote "comment_id required");
+    (String_util.contains_substring comment_vote "comment_id required");
   Alcotest.(check bool) "typed comment vote is not unknown" false
-    (contains_substring comment_vote "unknown_board_tool");
+    (String_util.contains_substring comment_vote "unknown_board_tool");
   let curation =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
@@ -1032,7 +814,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   in
   Alcotest.(check string) "typed curation read reaches board handler" "null" curation;
   Alcotest.(check bool) "typed curation read is not unknown" false
-    (contains_substring curation "unknown_board_tool");
+    (String_util.contains_substring curation "unknown_board_tool");
   let curation_submit =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
@@ -1069,7 +851,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
            ])
   in
   Alcotest.(check bool) "typed curation submit is not unknown" false
-    (contains_substring curation_submit "unknown_board_tool");
+    (String_util.contains_substring curation_submit "unknown_board_tool");
   let submit_json = Yojson.Safe.from_string curation_submit in
   Alcotest.(check string) "keeper source injected for curation" "typed-keeper"
     Yojson.Safe.Util.(submit_json |> member "submitted_by" |> to_string);
@@ -1108,7 +890,7 @@ let test_board_curation_submit_roundtrips_to_read () =
   Alcotest.(check bool) "raw submit rejects non-object provenance" false
     invalid_provenance_ok;
   Alcotest.(check bool) "invalid provenance error mentions object" true
-    (contains_substring invalid_provenance_body "object");
+    (String_util.contains_substring invalid_provenance_body "object");
   let ok, body =
     dispatch "masc_board_curation_submit"
       (make_args
@@ -1175,14 +957,14 @@ let test_board_curation_submit_roundtrips_to_read () =
     "Board has one high-priority routing item."
     Yojson.Safe.Util.(read_json |> member "summary" |> to_string)
 
-let mcp_runtime_board_dispatch ~sw ~clock name args =
+let mcp_runtime_board_dispatch name args =
   let state = Mcp_server.For_testing.create_state ~base_path:_test_base_path in
   Mcp_tool_runtime_board.dispatch ~config:(Mcp_server.workspace_config state)
-    ~agent_name:"mcp-runtime-curator" ~arguments:args ~state ~sw ~clock ~name
+    ~agent_name:"mcp-runtime-curator" ~arguments:args ~state ~name
     ~start_time:(Unix.gettimeofday ())
 
-let require_mcp_runtime_result ~sw ~clock name args =
-  match mcp_runtime_board_dispatch ~sw ~clock name args with
+let require_mcp_runtime_result name args =
+  match mcp_runtime_board_dispatch name args with
   | Some result -> ((Tool_result.is_success result), (Tool_result.message result))
   | None -> Alcotest.failf "%s not routed by MCP runtime board dispatch" name
 
@@ -1190,15 +972,16 @@ let test_board_curation_mcp_runtime_routes_read_and_submit () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  Eio.Switch.run @@ fun sw ->
-  let clock = Eio.Stdenv.clock env in
+  (* The switch stays: [with_eio] scopes the fibers this test runs under. The
+     clock binding existed only to reach [dispatch], which never read it. *)
+  Eio.Switch.run @@ fun _sw ->
   let read_ok, read_body =
-    require_mcp_runtime_result ~sw ~clock "masc_board_curation_read" (make_args [])
+    require_mcp_runtime_result "masc_board_curation_read" (make_args [])
   in
   Alcotest.(check bool) "MCP runtime curation read ok" true read_ok;
   Alcotest.(check string) "MCP runtime curation read empty" "null" read_body;
   let submit_ok, submit_body =
-    require_mcp_runtime_result ~sw ~clock "masc_board_curation_submit"
+    require_mcp_runtime_result "masc_board_curation_submit"
       (make_args
          [
            ("submitted_by", `String "mcp-runtime-curator");
@@ -1215,7 +998,7 @@ let test_board_curation_mcp_runtime_routes_read_and_submit () =
   Alcotest.(check string) "MCP runtime submitted_by persisted" "curator"
     Yojson.Safe.Util.(submitted |> member "submitted_by" |> to_string);
   let read2_ok, read2_body =
-    require_mcp_runtime_result ~sw ~clock "masc_board_curation_read" (make_args [])
+    require_mcp_runtime_result "masc_board_curation_read" (make_args [])
   in
   Alcotest.(check bool) "MCP runtime curation read after submit ok" true read2_ok;
   Alcotest.(check string) "MCP runtime curation read after submit summary"
@@ -1246,7 +1029,7 @@ let test_post_create_accepts_automation_rejects_system () =
   in
   Alcotest.(check bool) "system rejected" false ok_sys;
   Alcotest.(check bool) "error mentions reserved" true
-    (contains_substring body_sys "reserved")
+    (String_util.contains_substring body_sys "reserved")
 
 let test_post_create_empty_content () =
   with_eio @@ fun env ->
@@ -1270,7 +1053,7 @@ let test_post_create_empty_title_rejected () =
          ("author", `String "tester") ]) in
   Alcotest.(check bool) "empty title rejected" false ok;
   Alcotest.(check bool) "error mentions title" true
-    (contains_substring body "title" || contains_substring body "Title")
+    (String_util.contains_substring body "title" || String_util.contains_substring body "Title")
 
 let test_post_create_missing_author_rejected () =
   with_eio @@ fun env ->
@@ -1280,7 +1063,7 @@ let test_post_create_missing_author_rejected () =
     (make_args [("content", `String "Hello board")]) in
   Alcotest.(check bool) "missing author rejected" false ok;
   Alcotest.(check bool) "error mentions author" true
-    (contains_substring body "author")
+    (String_util.contains_substring body "author")
 
 let test_post_create_anonymous_author_rejected () =
   with_eio @@ fun env ->
@@ -1290,7 +1073,7 @@ let test_post_create_anonymous_author_rejected () =
     (make_args [("content", `String "Hello board"); ("author", `String "anonymous")]) in
   Alcotest.(check bool) "anonymous author rejected" false ok;
   Alcotest.(check bool) "error mentions author" true
-    (contains_substring body "author")
+    (String_util.contains_substring body "author")
 
 let test_post_list_empty () =
   with_eio @@ fun env ->
@@ -1314,7 +1097,7 @@ let test_cleanup_clears_persisted_jsonl () =
   let ok2, body = dispatch "masc_board_list" (make_args []) in
   Alcotest.(check bool) "list ok after cleanup" true ok2;
   Alcotest.(check bool) "persisted content removed" false
-    (contains_substring body "persist me")
+    (String_util.contains_substring body "persist me")
 
 let test_post_list_with_posts () =
   with_eio @@ fun env ->
@@ -1371,7 +1154,7 @@ let test_post_list_invalid_sort_rejected () =
     (make_args [("sort", `String "invalid_xyz")]) in
   Alcotest.(check bool) "invalid sort rejected" false ok;
   Alcotest.(check bool) "error mentions valid sorts" true
-    (contains_substring body "invalid sort. Valid: hot, trending, recent, updated, discussed")
+    (String_util.contains_substring body "invalid sort. Valid: hot, trending, recent, updated, discussed")
 
 let test_post_list_filter_combinations () =
   with_eio @@ fun env ->
@@ -1397,21 +1180,21 @@ let test_post_list_filter_combinations () =
   Alcotest.(check bool) "exclude_automation ok" true ok2;
   Alcotest.(check bool) "exclude both ok" true ok3;
   Alcotest.(check bool) "exclude_system hides system" false
-    (contains_substring body1 "keeper-alert-bot");
+    (String_util.contains_substring body1 "keeper-alert-bot");
   Alcotest.(check bool) "exclude_system keeps keeper" true
-    (contains_substring body1 "dm-keeper");
+    (String_util.contains_substring body1 "dm-keeper");
   Alcotest.(check bool) "exclude_automation keeps system" true
-    (contains_substring body2 "keeper-alert-bot");
+    (String_util.contains_substring body2 "keeper-alert-bot");
   Alcotest.(check bool) "exclude_automation hides keeper" false
-    (contains_substring body2 "dm-keeper");
+    (String_util.contains_substring body2 "dm-keeper");
   Alcotest.(check bool) "exclude_automation hides harness" false
-    (contains_substring body2 "dashboard-harness-bot");
+    (String_util.contains_substring body2 "dashboard-harness-bot");
   Alcotest.(check bool) "exclude both keeps human" true
-    (contains_substring body3 "human-author");
+    (String_util.contains_substring body3 "human-author");
   Alcotest.(check bool) "exclude both hides keeper" false
-    (contains_substring body3 "dm-keeper");
+    (String_util.contains_substring body3 "dm-keeper");
   Alcotest.(check bool) "exclude both hides harness" false
-    (contains_substring body3 "dashboard-harness-bot")
+    (String_util.contains_substring body3 "dashboard-harness-bot")
 
 let test_dispatch_delete_success () =
   with_eio @@ fun env ->
@@ -1431,7 +1214,7 @@ let test_dispatch_delete_success () =
   in
   Alcotest.(check bool) "delete ok" true ok_del;
   Alcotest.(check bool) "delete msg contains id" true
-    (contains_substring msg_del post_id)
+    (String_util.contains_substring msg_del post_id)
 
 let test_dispatch_delete_not_found () =
   with_eio @@ fun env ->
@@ -1444,7 +1227,7 @@ let test_dispatch_delete_not_found () =
   in
   Alcotest.(check bool) "delete not found" false ok;
   Alcotest.(check bool) "error message present" true
-    (contains_substring body "Post not found" || contains_substring body "nonexistent-id")
+    (String_util.contains_substring body "Post not found" || String_util.contains_substring body "nonexistent-id")
 
 let test_dispatch_delete_empty_id () =
   with_eio @@ fun env ->
@@ -1454,7 +1237,7 @@ let test_dispatch_delete_empty_id () =
     (make_args [("post_id", `String "")]) in
   Alcotest.(check bool) "empty id rejected" false ok;
   Alcotest.(check bool) "error mentions required" true
-    (contains_substring body "required")
+    (String_util.contains_substring body "required")
 
 let test_dispatch_post_update_success () =
   with_eio @@ fun env ->
@@ -1482,7 +1265,7 @@ let test_dispatch_post_update_success () =
   in
   Alcotest.(check bool) "edit ok" true ok_edit;
   Alcotest.(check bool) "edit msg contains new body" true
-    (contains_substring msg_edit "edited tool body");
+    (String_util.contains_substring msg_edit "edited tool body");
   (match Board_dispatch.get_post ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok post -> Alcotest.(check string) "edit persisted" "edited tool body" post.content)
@@ -1544,7 +1327,7 @@ let test_dispatch_post_update_transfers_author () =
   in
   Alcotest.(check bool) "transfer edit ok" true ok_edit;
   Alcotest.(check bool) "edit msg contains new author" true
-    (contains_substring msg_edit "tool-transfer-next");
+    (String_util.contains_substring msg_edit "tool-transfer-next");
   match Board_dispatch.get_post ~post_id with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post ->
@@ -1563,7 +1346,7 @@ let test_dispatch_post_update_missing_id () =
       (make_args [ ("author", `String "x"); ("content", `String "y") ])
   in
   Alcotest.(check bool) "missing post_id rejected" false ok;
-  Alcotest.(check bool) "error mentions required" true (contains_substring body "required")
+  Alcotest.(check bool) "error mentions required" true (String_util.contains_substring body "required")
 
 let test_post_get_success () =
   with_eio @@ fun env ->
@@ -1617,7 +1400,7 @@ let check_get_footer ~label post_id args expected =
     dispatch "masc_board_post_get" (make_args (("post_id", `String post_id) :: args))
   in
   Alcotest.(check bool) (label ^ " get ok") true ok;
-  Alcotest.(check bool) label true (contains_substring body expected)
+  Alcotest.(check bool) label true (String_util.contains_substring body expected)
 
 let test_post_get_comment_pagination_clamps_and_advances () =
   with_eio @@ fun env ->
@@ -1699,7 +1482,7 @@ let test_vote_not_found () =
     result;
   Alcotest.(check bool) "has error" true (String.length body > 0)
 
-let test_vote_rejects_legacy_direction_fallbacks () =
+let test_vote_requires_explicit_direction () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
@@ -1720,23 +1503,37 @@ let test_vote_rejects_legacy_direction_fallbacks () =
     (String_util.contains_substring
        ((Tool_result.message empty_direction))
        "invalid vote direction");
-  let legacy_vote_alias =
+  let missing_direction =
     dispatch_result
       "masc_board_vote"
-      (make_args
-         [
-           ("post_id", `String "missing");
-           ("voter", `String "v");
-           ("vote", `String "down");
-         ])
+      (make_args [ ("post_id", `String "missing"); ("voter", `String "v") ])
   in
-  Alcotest.(check bool) "legacy vote alias rejected" false (Tool_result.is_success legacy_vote_alias);
+  Alcotest.(check bool) "missing direction rejected" false (Tool_result.is_success missing_direction);
+  check_failure_class
+    "missing direction is workflow rejection"
+    (Some "workflow_rejection")
+    missing_direction;
   Alcotest.(check bool)
-    "legacy vote alias error"
+    "missing direction error"
     true
     (String_util.contains_substring
-       ((Tool_result.message legacy_vote_alias))
-       "legacy vote parameter")
+       ((Tool_result.message missing_direction))
+       "vote direction required");
+  let comment_missing_direction =
+    dispatch_result
+      "masc_board_comment_vote"
+      (make_args [ ("comment_id", `String "c-missing"); ("voter", `String "v") ])
+  in
+  Alcotest.(check bool)
+    "comment vote missing direction rejected"
+    false
+    (Tool_result.is_success comment_missing_direction);
+  Alcotest.(check bool)
+    "comment vote missing direction error"
+    true
+    (String_util.contains_substring
+       ((Tool_result.message comment_missing_direction))
+       "vote direction required")
 
 (** {2 Group 5: Comment} *)
 
@@ -1769,7 +1566,7 @@ let test_comment_add_missing_author_rejected () =
     (make_args [("post_id", `String "missing"); ("content", `String "hi")]) in
   Alcotest.(check bool) "missing author rejected" false ok;
   Alcotest.(check bool) "error mentions author" true
-    (contains_substring body "author")
+    (String_util.contains_substring body "author")
 
 let test_comment_add_anonymous_author_rejected () =
   with_eio @@ fun env ->
@@ -1780,7 +1577,7 @@ let test_comment_add_anonymous_author_rejected () =
        [("post_id", `String "missing"); ("content", `String "hi"); ("author", `String "anonymous")]) in
   Alcotest.(check bool) "anonymous author rejected" false ok;
   Alcotest.(check bool) "error mentions author" true
-    (contains_substring body "author")
+    (String_util.contains_substring body "author")
 
 let test_comment_vote_missing () =
   with_eio @@ fun env ->
@@ -1795,11 +1592,13 @@ let test_comment_vote_not_found () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
+  (* Well-formed id that no comment carries: the store lookup misses. *)
+  let missing_comment_id = "c-" ^ String.make 32 '0' in
   let result =
     dispatch_result "masc_board_comment_vote"
       (make_args
          [
-           ("comment_id", `String "missing-comment");
+           ("comment_id", `String missing_comment_id);
            ("voter", `String "v");
            ("direction", `String "up");
          ])
@@ -1810,7 +1609,38 @@ let test_comment_vote_not_found () =
     "missing comment vote is workflow rejection"
     (Some "workflow_rejection")
     result;
-  Alcotest.(check bool) "error msg" true (String.length body > 0)
+  Alcotest.(check bool) "error names the miss" true
+    (String_util.contains_substring body "Comment not found")
+
+(* #29457: 109 of 134 masc_board_comment_vote calls in August 2026 carried an
+   invented id ("c-placeholder", "c-b1", "BUILDER_A_DONE"). The typed id parser
+   refuses them before any store lookup, and the message names the accepted
+   shape so the caller can correct itself. *)
+let test_comment_vote_rejects_invented_id () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  List.iter
+    (fun invented ->
+      let result =
+        dispatch_result "masc_board_comment_vote"
+          (make_args
+             [
+               ("comment_id", `String invented);
+               ("voter", `String "v");
+               ("direction", `String "up");
+             ])
+      in
+      let body = Tool_result.message result in
+      Alcotest.(check bool) (invented ^ " is refused") false
+        (Tool_result.is_success result);
+      check_failure_class
+        (invented ^ " is a workflow rejection")
+        (Some "workflow_rejection")
+        result;
+      Alcotest.(check bool) (invented ^ " error names the accepted shape") true
+        (String_util.contains_substring body Board.Comment_id.accepted_format))
+    [ "c-placeholder"; "c-b1"; "BUILDER_A_DONE"; "C-" ^ String.make 32 '0' ]
 
 (** {2 Group 6: Search / Stats / Profile / Hearths} *)
 
@@ -1960,6 +1790,41 @@ let test_post_update_schema_exposes_new_author () =
 
 (** {1 Test Runner} *)
 
+(* An [@] a keeper name could never be is prose. [Agent_id] accepts 1..64 of
+   [a-zA-Z0-9._-] with one optional colon, so a bare "@", an npm scope and a
+   path all fail that shape -- and used to take the whole post down with them.
+   Each case below is a shape the live board log carried while the post was
+   refused. *)
+let comment_audience content =
+  Masc.Board.audience_for_comment ~content
+
+let post_audience content =
+  Masc.Board.audience_for_post ~visibility:Masc.Board.Public ~title:"t" ~content
+
+let label_of = function
+  | Ok audience -> Masc.Board.audience_label audience
+  | Error _ -> "error"
+
+let test_prose_at_is_not_an_address () =
+  Alcotest.(check string) "bare @ in a comment" "thread_participants"
+    (label_of (comment_audience "ping @ me later"));
+  Alcotest.(check string) "npm scope" "discoverable"
+    (label_of (post_audience "see @internals/libs/errors/asyncErrorHandler."));
+  Alcotest.(check string) "bare @@" "thread_participants"
+    (label_of (comment_audience "the @@ operator"))
+
+let test_a_named_broadcast_selector_is_still_refused () =
+  (* An author who wrote @@something meant to broadcast and named a selector
+     that does not exist. That is worth refusing; the empty one is not. *)
+  Alcotest.(check string) "unknown selector" "error"
+    (label_of (comment_audience "heads up @@everyone"))
+
+let test_a_well_shaped_name_is_still_a_target () =
+  Alcotest.(check string) "plain name" "targets"
+    (label_of (comment_audience "@delta please look"));
+  Alcotest.(check string) "namespaced name" "targets"
+    (label_of (comment_audience "@keeper:delta please look"))
+
 let () =
   Eio_main.run @@ fun env ->
   current_eio_env := Some env;
@@ -1981,18 +1846,10 @@ let () =
             `Quick test_board_actor_identity_keeps_non_keeper_agent;
           Alcotest.test_case "board dashboard json embeds reaction summaries"
             `Quick test_board_dashboard_json_embeds_reaction_summaries;
-          Alcotest.test_case "board dashboard json embeds moderation projection"
-            `Quick test_board_dashboard_json_embeds_moderation_projection;
-          Alcotest.test_case "board dashboard json hides blind vote scores"
-            `Quick test_board_dashboard_json_hides_unvoted_scores_when_blind;
-          Alcotest.test_case "board dashboard json embeds contributor quality"
-            `Quick test_board_dashboard_json_embeds_contributor_quality;
           Alcotest.test_case "MCP runtime board post author rewrites caller claim"
             `Quick test_inline_board_post_author_rewrites_caller_claim;
           Alcotest.test_case "MCP runtime board post author accepts matching alias"
             `Quick test_inline_board_post_author_accepts_matching_alias;
-          Alcotest.test_case "moderation http identity binds to auth source"
-            `Quick test_moderation_http_identity_bound_to_auth_source;
         ] );
       ( "json_helpers",
         [
@@ -2066,9 +1923,9 @@ let () =
         [
           Alcotest.test_case "vote not found" `Quick test_vote_not_found;
           Alcotest.test_case
-            "legacy direction fallbacks rejected"
+            "explicit direction required"
             `Quick
-            test_vote_rejects_legacy_direction_fallbacks;
+            test_vote_requires_explicit_direction;
         ] );
       ( "comments",
         [
@@ -2080,6 +1937,8 @@ let () =
           Alcotest.test_case "comment vote missing" `Quick test_comment_vote_missing;
           Alcotest.test_case "comment vote not found" `Quick
             test_comment_vote_not_found;
+          Alcotest.test_case "comment vote rejects invented id" `Quick
+            test_comment_vote_rejects_invented_id;
         ] );
       ( "search_stats",
         [
@@ -2104,6 +1963,15 @@ let () =
             test_dispatch_post_update_transfers_author;
           Alcotest.test_case "post update missing id" `Quick
             test_dispatch_post_update_missing_id;
+        ] );
+      ( "board addressing",
+        [
+          Alcotest.test_case "an @ in prose is not an address" `Quick
+            test_prose_at_is_not_an_address;
+          Alcotest.test_case "a named broadcast selector is still refused" `Quick
+            test_a_named_broadcast_selector_is_still_refused;
+          Alcotest.test_case "a well-shaped name is still a target" `Quick
+            test_a_well_shaped_name_is_still_a_target;
         ] );
       ( "schemas",
         [

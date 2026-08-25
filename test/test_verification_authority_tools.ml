@@ -1,14 +1,14 @@
-(* RFC-0361 D1: the completion authority's read-only lookup surface.
+(* Completion-authority descriptor, validation, dispatch, and containment
+   contracts. *)
 
-   The properties under test are the ones that decide whether a judge can be
-   trusted with the surface at all: it cannot read outside the producer's root,
-   it cannot be handed a name it silently ignores, and it reports failure
-   instead of a clean-looking empty answer. *)
-
+module Keeper_meta_store = Masc.Keeper_meta_store
+module Descriptor = Masc.Keeper_tool_descriptor
 module VAT = Masc.Verification_authority_tools
 module AR = Masc.Task.Anti_rationalization
 
-let temp_base_path () =
+let producer = "test-producer"
+
+let temp_dir () =
   let path =
     Filename.concat
       (Filename.get_temp_dir_name ())
@@ -18,115 +18,388 @@ let temp_base_path () =
   path
 ;;
 
-let rec mkdir_p path =
-  if not (Sys.file_exists path)
-  then (
-    mkdir_p (Filename.dirname path);
-    Unix.mkdir path 0o700)
+let rec rm_rf path =
+  match Unix.lstat path with
+  | { st_kind = Unix.S_DIR; _ } ->
+    Sys.readdir path
+    |> Array.iter (fun entry -> rm_rf (Filename.concat path entry));
+    (try Unix.rmdir path with Unix.Unix_error _ -> ())
+  | _ -> (try Unix.unlink path with Unix.Unix_error _ -> ())
+  | exception Unix.Unix_error _ -> ()
 ;;
 
-let write_file path contents =
-  mkdir_p (Filename.dirname path);
-  let channel = open_out_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_out channel)
-    (fun () -> output_string channel contents)
+(* [agent_name] is deliberately omitted: [meta_of_json_fixture] fills in the
+   canonical [Keeper_identity.keeper_agent_name], so this fixture cannot drift
+   from the identity rule the meta parser enforces. *)
+let ensure_producer config name =
+  match
+    Result.bind
+      (Masc_test_deps.meta_of_json_fixture
+         (`Assoc [ "name", `String name; "always_allow", `Bool true ]))
+      (Keeper_meta_store.replace_snapshot config)
+  with
+  | Ok _ -> ()
+  | Error err -> Alcotest.failf "write keeper meta failed: %s" err
 ;;
 
-(* A surface bound to a producer whose root exists and holds [files]. *)
-let with_surface files f =
-  let base_path = temp_base_path () in
-  let surface = VAT.create ~base_path ~producer:"test-producer" in
-  let root = VAT.ownership_root surface in
-  mkdir_p root;
-  List.iter
-    (fun (relative, contents) -> write_file (Filename.concat root relative) contents)
-    files;
-  f surface root
+(* A workspace holding one producer keeper, and the surface bound to it. *)
+let with_surface f =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = temp_dir () in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  ensure_producer config producer;
+  match VAT.create ~config ~producer with
+  | Error reason -> Alcotest.failf "surface creation failed: %s" reason
+  | Ok surface -> f config surface
 ;;
 
-let dispatch_result surface ~name ~args = VAT.dispatch surface ~name ~args
+let require_layout = function
+  | Ok layout -> layout
+  | Error detail -> Alcotest.failf "root layout unavailable: %s" detail
+;;
 
-let test_read_file_returns_content () =
-  with_surface [ "lib/answer.ml", "let answer = 42\n" ] (fun surface _root ->
-    match
-      dispatch_result surface ~name:"verification_read_file"
-        ~args:(`Assoc [ "path", `String "lib/answer.ml" ])
-    with
-    | Error detail -> Alcotest.failf "expected a read, got error: %s" detail
+(* Create the producer playground used to resolve relative tool paths. *)
+let producer_playground (config : Workspace_core.config) producer_name =
+  let path =
+    Keeper_sandbox_config.host_root_abs_of_agent
+      ~base_path:
+        (Workspace_verification_store.project_root_of_base_path config.base_path)
+      ~agent_name:producer_name
+  in
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir)
+    then (
+      mkdir_p (Filename.dirname dir);
+      try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  in
+  mkdir_p path;
+  path
+;;
+
+(* The judge and producer share the descriptor-owned model surface. *)
+let test_schemas_are_the_descriptor_schemas () =
+  with_surface (fun _config surface ->
+    let offered = VAT.schemas surface in
+    let names =
+      List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) offered
+    in
+    Alcotest.(check (list string))
+      "the surface is read-only"
+      [ "tool_read_file"; "tool_search_files"; "masc_web_fetch" ]
+      names;
+    List.iter
+      (fun (schema : Masc_domain.tool_schema) ->
+         match Descriptor.descriptors_for_internal schema.name with
+         | [ descriptor ] ->
+           Alcotest.(check string)
+             (schema.name ^ " description is the descriptor's")
+             descriptor.Descriptor.description
+             schema.description;
+           Alcotest.(check bool)
+             (schema.name ^ " input schema is the descriptor's")
+             true
+             (Yojson.Safe.equal descriptor.Descriptor.input_schema schema.input_schema)
+         | found ->
+           Alcotest.failf
+             "%s resolves to %d descriptors; the surface needs exactly one"
+             schema.name
+             (List.length found))
+      offered)
+;;
+
+(* A successful read proves descriptor translation reaches the runtime handler;
+   a missing required argument must be rejected at the same boundary. *)
+let test_read_translates_the_advertised_argument_and_refuses_a_malformed_one () =
+  with_surface (fun config surface ->
+    let playground = producer_playground config producer in
+    let name = "advertised-argument-probe.txt" in
+    let contents = "written by the probe" in
+    (try
+       Out_channel.with_open_text (Filename.concat playground name) (fun oc ->
+         output_string oc contents)
+     with
+     | Sys_error err -> Alcotest.failf "probe file could not be written: %s" err);
+    let read key =
+      VAT.dispatch surface ~name:"tool_read_file" ~args:(`Assoc [ key, `String name ])
+    in
+    let required =
+      match
+        List.find_opt
+          (fun (schema : Masc_domain.tool_schema) ->
+             String.equal schema.name "tool_read_file")
+          (VAT.schemas surface)
+      with
+      | Some { input_schema = `Assoc fields; _ } ->
+        (match List.assoc_opt "required" fields with
+         | Some (`List (`String field :: _)) -> field
+         | _ -> Alcotest.fail "tool_read_file advertises no required argument")
+      | _ -> Alcotest.fail "tool_read_file is not offered"
+    in
+    (match read required with
+     | Error detail ->
+       Alcotest.failf
+         "the advertised required argument %S did not reach the handler: %s"
+         required
+         detail
+     | Ok output ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%S returns the file's contents" required)
+         true
+         (Astring.String.is_infix ~affix:contents output));
+    match VAT.dispatch surface ~name:"tool_read_file" ~args:(`Assoc []) with
     | Ok output ->
+      Alcotest.failf
+        "a read with no %S resolved instead of being refused, so an unopened \
+         file reads as an answer: %s"
+        required
+        output
+    | Error detail ->
       Alcotest.(check bool)
-        "content is present"
+        "the refusal names the missing argument"
         true
-        (Astring.String.is_infix ~affix:"let answer = 42" output))
+        (Astring.String.is_infix ~affix:required detail))
 ;;
 
-let test_read_file_outside_root_is_rejected () =
-  with_surface [ "inside.txt", "in\n" ] (fun surface root ->
-    (* A sibling of the producer root, reachable only by escaping it. *)
-    write_file (Filename.concat (Filename.dirname root) "outside.txt") "out\n";
+(* A search requires an explicit non-empty pattern. *)
+let test_search_refuses_a_call_without_its_required_pattern () =
+  with_surface (fun config surface ->
+    ignore (producer_playground config producer);
+    (match
+       VAT.dispatch surface ~name:"tool_search_files" ~args:(`Assoc [])
+     with
+     | Ok output ->
+       Alcotest.failf
+         "a search with no pattern resolved instead of being refused: %s"
+         output
+     | Error detail ->
+       Alcotest.(check bool)
+         "the refusal names the missing argument"
+         true
+         (Astring.String.is_infix ~affix:"pattern" detail));
     match
-      dispatch_result surface ~name:"verification_read_file"
-        ~args:(`Assoc [ "path", `String "../outside.txt" ])
+      VAT.dispatch
+        surface
+        ~name:"tool_search_files"
+        ~args:(`Assoc [ "pattern", `String "advertised" ])
     with
-    | Ok output -> Alcotest.failf "escape should not read; got %s" output
-    | Error _ -> ())
+    | Ok _ -> ()
+    | Error detail ->
+      Alcotest.failf "a search carrying its pattern was refused: %s" detail)
 ;;
 
 (* A judge that calls a name this surface does not offer must be told so. A
    dropped call would read to the model as a tool that returned nothing. *)
 let test_unknown_tool_name_is_an_error () =
-  with_surface [] (fun surface _root ->
-    match dispatch_result surface ~name:"verification_write_file" ~args:(`Assoc []) with
+  with_surface (fun _config surface ->
+    match VAT.dispatch surface ~name:"tool_write_file" ~args:(`Assoc []) with
     | Ok output -> Alcotest.failf "unknown tool should not succeed; got %s" output
     | Error detail ->
       Alcotest.(check bool)
         "names the offered tools"
         true
-        (Astring.String.is_infix ~affix:"verification_read_file" detail))
+        (Astring.String.is_infix ~affix:"tool_search_files" detail))
 ;;
 
-(* Every advertised schema must reach an implementation. Advertising a name
-   dispatch does not know would put a tool in the model's list that always
-   fails. *)
-let test_every_schema_name_dispatches () =
-  with_surface [] (fun surface _root ->
-    List.iter
-      (fun (schema : Masc_domain.tool_schema) ->
-         match dispatch_result surface ~name:schema.name ~args:(`Assoc []) with
-         | Ok _ -> ()
-         | Error detail ->
-           Alcotest.(check bool)
-             (Printf.sprintf "%s is not reported as unknown" schema.name)
-             false
-             (Astring.String.is_infix ~affix:"unknown tool" detail))
-      (VAT.schemas surface))
+(* Workspace agents are valid verification producers even though they have no
+   Keeper runtime metadata. Their surface is rooted directly at the producer
+   playground and exposes only the owned regular-file reader. *)
+let test_workspace_producer_gets_owned_read_surface () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = temp_dir () in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  let producer_name = "workspace-producer" in
+  let playground = producer_playground config producer_name in
+  let path = Filename.concat playground "evidence.txt" in
+  Out_channel.with_open_text path (fun channel ->
+    output_string channel "first line\nsecond line\n");
+  match VAT.create ~config ~producer:producer_name with
+  | Error reason -> Alcotest.failf "workspace surface creation failed: %s" reason
+  | Ok surface ->
+    Alcotest.(check (list string))
+      "workspace producer surface"
+      [ "tool_read_file"; "masc_web_fetch" ]
+      (VAT.schemas surface
+       |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name));
+    (match
+       VAT.dispatch
+         surface
+         ~name:"tool_read_file"
+         ~args:
+           (`Assoc
+               [ "file_path", `String "evidence.txt"
+               ; "offset", `Int 2
+               ; "limit", `Int 1
+               ])
+     with
+     | Error detail -> Alcotest.failf "owned read failed: %s" detail
+     | Ok payload ->
+       let json = Yojson.Safe.from_string payload in
+       Alcotest.(check string)
+         "reads the requested line"
+         "second line\n"
+         Yojson.Safe.Util.(json |> member "content" |> to_string));
+    (match VAT.dispatch surface ~name:"tool_search_files" ~args:(`Assoc []) with
+     | Ok output -> Alcotest.failf "workspace search unexpectedly ran: %s" output
+     | Error detail ->
+       Alcotest.(check bool)
+         "error lists only the exact offered surface"
+         false
+         (Astring.String.is_infix ~affix:"this review offers tool_search_files" detail))
 ;;
 
-(* RFC-0361 D2. The prompt states what the evaluator can see, and the two
-   surfaces are different claims. Rendering the toolless text for a
-   tool-carrying review is the exact gap D1 exists to close. *)
-let test_prompt_states_the_available_surface () =
-  with_surface [] (fun surface _root ->
+let make_checkout root relative =
+  let mkdir path = try Unix.mkdir path 0o755 with Unix.Unix_error _ -> () in
+  let rec mkdir_p path =
+    let parent = Filename.dirname path in
+    if parent <> path && not (Sys.file_exists parent) then mkdir_p parent;
+    mkdir path
+  in
+  let checkout = Filename.concat root relative in
+  mkdir_p checkout;
+  mkdir (Filename.concat checkout ".git")
+;;
+
+let test_root_layout_fails_closed_when_discovery_is_unavailable () =
+  with_surface (fun _config surface ->
+    match VAT.root_layout surface with
+    | Ok layout ->
+      Alcotest.failf
+        "missing producer root was presented as a usable layout: %s"
+        (String.concat ", " layout)
+    | Error detail ->
+      Alcotest.(check bool)
+        "unavailable discovery remains an error"
+        true
+        (Astring.String.is_infix ~affix:"workspace root" detail
+         || Astring.String.is_infix ~affix:"verification root" detail))
+;;
+
+let test_root_layout_fails_closed_when_checkout_discovery_is_partial () =
+  with_surface (fun config surface ->
+    let root = producer_playground config producer in
+    for index = 0 to Masc.Keeper_playground_checkouts.max_reported_checkouts do
+      make_checkout root (Printf.sprintf "checkout-%02d" index)
+    done;
+    match VAT.root_layout surface with
+    | Ok layout ->
+      Alcotest.failf
+        "partial checkout discovery was presented as complete: %s"
+        (String.concat ", " layout)
+    | Error detail ->
+      Alcotest.(check bool)
+        "partial discovery names its limit"
+        true
+        (Astring.String.is_infix ~affix:"checkout discovery is partial" detail))
+;;
+
+let test_root_layout_reports_entries_and_discovered_checkouts () =
+  with_surface (fun config surface ->
+    let root = producer_playground config producer in
+    let mkdir path = try Unix.mkdir path 0o755 with Unix.Unix_error _ -> () in
+    make_checkout root "repos/masc";
+    (* A checkout the conventional prefix would miss entirely. *)
+    make_checkout root "scratch-tree";
+    mkdir (Filename.concat root "artifacts");
+    let layout = VAT.root_layout surface |> require_layout in
+    let holds affix =
+      List.exists (fun entry -> Astring.String.is_infix ~affix entry) layout
+    in
+    Alcotest.(check bool)
+      "reports a checkout under the keeper's own repos/ convention"
+      true
+      (holds "repos/masc");
+    Alcotest.(check bool)
+      "reports a checkout that convention would have missed"
+      true
+      (holds "scratch-tree");
+    Alcotest.(check bool)
+      "a checkout is marked as one, so a path prefix is identifiable"
+      true
+      (holds "git checkout");
+    Alcotest.(check bool)
+      "still names the root's own entries, which need no prefix"
+      true
+      (holds "artifacts"))
+;;
+
+let test_prompt_states_the_root_and_not_a_repository () =
+  with_surface (fun config surface ->
+    let root = producer_playground config producer in
+    make_checkout root "repos/masc";
     let request : AR.review_request =
-      { agent_name = "test-producer"
+      { agent_name = producer
       ; task_title = "t"
       ; task_description = "d"
       ; completion_notes = "n"
-      ; task_id = "task-1"
+      ; task_id = "task-403"
+      ; evidence_refs = []
+      }
+    in
+    let text =
+      match
+        AR.build_prompt
+          ~lookup:
+            (AR.Lookup_tools
+               { schemas = VAT.schemas surface
+               ; dispatch = VAT.dispatch surface
+               ; root_layout = VAT.root_layout surface |> require_layout
+               })
+          request
+      with
+      | Ok text -> text
+      | Error detail -> Alcotest.failf "prompt render failed: %s" detail
+    in
+    Alcotest.(check bool)
+      "the prompt shows the checkout prefix the evaluator would otherwise guess"
+      true
+      (Astring.String.is_infix ~affix:"repos/masc" text);
+    Alcotest.(check bool)
+      "the prompt no longer calls the root the producer's tree"
+      false
+      (Astring.String.is_infix ~affix:"pointed at the producer's tree" text);
+    Alcotest.(check bool)
+      "a missing path is framed as an answer about the path, not about the work"
+      true
+      (Astring.String.is_infix ~affix:"not the question of whether the work exists" text))
+;;
+
+let test_prompt_states_the_available_surface () =
+  with_surface (fun config surface ->
+    ignore (producer_playground config producer);
+    let request : AR.review_request =
+      { agent_name = producer
+      ; task_title = "t"
+      ; task_description = "d"
+      ; completion_notes = "n"
+      ; task_id = "task-001"
       ; evidence_refs = []
       }
     in
     let render lookup =
       match AR.build_prompt ~lookup request with
-      | Ok prompt -> prompt
+      | Ok text -> text
       | Error detail -> Alcotest.failf "prompt render failed: %s" detail
     in
     let without = render AR.No_lookup_surface in
     let with_tools =
       render
         (AR.Lookup_tools
-           { schemas = VAT.schemas surface; dispatch = VAT.dispatch surface })
+           { schemas = VAT.schemas surface
+           ; dispatch = VAT.dispatch surface
+           ; root_layout = VAT.root_layout surface |> require_layout
+           })
     in
     Alcotest.(check bool)
       "toolless prompt says the snapshot is the only proof"
@@ -135,38 +408,121 @@ let test_prompt_states_the_available_surface () =
     Alcotest.(check bool)
       "toolless prompt does not advertise a tool"
       false
-      (Astring.String.is_infix ~affix:"verification_read_file" without);
+      (Astring.String.is_infix ~affix:"tool_search_files" without);
     Alcotest.(check bool)
       "tool prompt names the tools"
       true
-      (Astring.String.is_infix ~affix:"verification_read_file" with_tools);
+      (Astring.String.is_infix ~affix:"tool_search_files" with_tools);
     Alcotest.(check bool)
       "tool prompt does not deny having tools"
       false
       (Astring.String.is_infix
          ~affix:"You have no tool that opens anything else"
-         with_tools))
+         with_tools);
+    Alcotest.(check bool)
+      "tool prompt states the read-only boundary"
+      true
+      (Astring.String.is_infix ~affix:"verifier surface is read-only" with_tools))
+;;
+
+
+(* masc#28989: a URL left in note evidence must be inspectable by the judge
+   itself. The fetch boundary is stubbed; what is pinned here is the surface —
+   the tool is offered on both producer scopes, a valid call dispatches through
+   the shared guards, and the typed envelope reaches the judge. *)
+let test_web_fetch_is_offered_and_dispatches () =
+  with_surface (fun _config surface ->
+    Alcotest.(check bool)
+      "keeper producer offers tool_web_fetch"
+      true
+      (List.exists
+         (fun (schema : Masc_domain.tool_schema) ->
+           String.equal schema.name "masc_web_fetch")
+         (VAT.schemas surface));
+    Masc.Tool_misc_web_fetch.with_http_fetch_for_test
+      (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ url ->
+        Ok
+          { Masc.Tool_misc_web_fetch.http_status = Some 200
+          ; final_url = url
+          ; redirect_count = 0
+          ; content_type = Some "text/plain"
+          ; downloaded_bytes = Some 20
+          ; body = "diff --git a/x b/x\n"
+          })
+      (fun () ->
+        match
+          VAT.dispatch
+            surface
+            ~name:"masc_web_fetch"
+            ~args:
+              (`Assoc
+                [ "url", `String "https://github.com/jeong-sik/masc/pull/28988"
+                ])
+        with
+        | Error reason -> Alcotest.failf "web fetch dispatch failed: %s" reason
+        | Ok output ->
+          Alcotest.(check bool)
+            "envelope carries the fetched text"
+            true
+            (Astring.String.is_infix ~affix:"diff --git" output)))
+;;
+
+let test_web_fetch_refuses_a_private_target () =
+  with_surface (fun _config surface ->
+    match
+      VAT.dispatch
+        surface
+        ~name:"masc_web_fetch"
+        ~args:(`Assoc [ "url", `String "http://127.0.0.1:8935/health" ])
+    with
+    | Ok output ->
+      Alcotest.failf "private-network fetch must be refused, got: %s" output
+    | Error _ -> ())
 ;;
 
 let () =
   Random.self_init ();
   Alcotest.run
     "verification authority tools"
-    [ ( "containment"
-      , [ Alcotest.test_case "read file returns content" `Quick
-            test_read_file_returns_content
-        ; Alcotest.test_case "read outside root is rejected" `Quick
-            test_read_file_outside_root_is_rejected
+    [ ( "surface"
+      , [ Alcotest.test_case "schemas are the descriptor schemas" `Quick
+            test_schemas_are_the_descriptor_schemas
+        ; Alcotest.test_case
+            "read translates the advertised argument and refuses a malformed one"
+            `Quick
+            test_read_translates_the_advertised_argument_and_refuses_a_malformed_one
+        ; Alcotest.test_case "search refuses a call without its required pattern"
+            `Quick test_search_refuses_a_call_without_its_required_pattern
+        ; Alcotest.test_case "workspace producer gets owned read surface" `Quick
+            test_workspace_producer_gets_owned_read_surface
         ] )
     ; ( "dispatch"
       , [ Alcotest.test_case "unknown tool name is an error" `Quick
             test_unknown_tool_name_is_an_error
-        ; Alcotest.test_case "every schema name dispatches" `Quick
-            test_every_schema_name_dispatches
+        ; Alcotest.test_case "web fetch is offered and dispatches" `Quick
+            test_web_fetch_is_offered_and_dispatches
+        ; Alcotest.test_case "web fetch refuses a private target" `Quick
+            test_web_fetch_refuses_a_private_target
         ] )
     ; ( "prompt"
       , [ Alcotest.test_case "prompt states the available surface" `Quick
             test_prompt_states_the_available_surface
+        ; Alcotest.test_case
+            "root_layout reports entries and discovered checkouts"
+            `Quick
+            test_root_layout_reports_entries_and_discovered_checkouts
+        ; Alcotest.test_case
+            "root_layout fails closed when discovery is unavailable"
+            `Quick
+            test_root_layout_fails_closed_when_discovery_is_unavailable
+        ; Alcotest.test_case
+            "root_layout fails closed when checkout discovery is partial"
+            `Quick
+            test_root_layout_fails_closed_when_checkout_discovery_is_partial
+        ; Alcotest.test_case
+            "prompt states the root instead of implying a repository"
+            `Quick
+            test_prompt_states_the_root_and_not_a_repository
         ] )
     ]
 ;;

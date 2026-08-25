@@ -115,7 +115,7 @@ let output_lines_for_chunk ~ts_ms ~stream chunk =
   |> List.map (fun text ->
     { ts_ms
     ; stream
-    ; text = Masc_exec.Exec_buffer.utf8_truncate text max_line_bytes
+    ; text = Exec_buffer.utf8_truncate text max_line_bytes
     ; ansi = false
     })
 
@@ -300,14 +300,14 @@ let snapshot_state keeper_name =
 
 let add_stream_chunks entries select =
   let buffer =
-    Masc_exec.Exec_buffer.create ~head_cap:0 ~tail_cap:retained_stream_bytes
+    Exec_buffer.create ~head_cap:0 ~tail_cap:retained_stream_bytes
   in
   List.iter
-    (fun entry -> Masc_exec.Exec_buffer.add_string buffer (select entry))
+    (fun entry -> Exec_buffer.add_string buffer (select entry))
     entries;
-  ( Masc_exec.Exec_buffer.tail buffer
-  , Masc_exec.Exec_buffer.total_bytes buffer
-  , Masc_exec.Exec_buffer.bytes_dropped buffer )
+  ( Exec_buffer.tail buffer
+  , Exec_buffer.total_bytes buffer
+  , Exec_buffer.bytes_dropped buffer )
 
 let snapshot ~keeper_name =
   let keeper, entries, lines = snapshot_state keeper_name in

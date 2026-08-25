@@ -6,12 +6,11 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import {
-  fetchDashboardGoalsTree,
   patchKeeperConfig,
 } from '../api/dashboard'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import type { DashboardRuntimeProviderSnapshot, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
-import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
+import type { KeeperConfig, KeeperHookSlot } from '../types'
 import { formatTokens } from '../lib/format-number'
 import {
   PHASE_LABEL_KO,
@@ -61,7 +60,7 @@ import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { BTN_FILLED_BASE } from './common/button-filled-base'
 import { ExpandableTextarea } from './common/expandable-textarea'
-import { createAsyncResource } from '../lib/async-state'
+import { KeeperGithubIdentityPanel } from './keeper-github-identity-panel'
 import {
   findRuntimeCatalogEntry,
   loadRuntimeCatalog,
@@ -74,8 +73,9 @@ import {
   runtimeCatalogRequestConfig,
   runtimeCatalogSnapshotFacts,
 } from '../lib/runtime-provider-summary'
-import { refreshKeeperRuntimeStatus } from '../store'
+import { keepers, refreshKeeperRuntimeStatus } from '../store'
 import { bumpKeeperRuntimeTraceRefresh } from './keeper-runtime-trace-refresh'
+import { KcfAvatarBlock, KcfPlan } from './keeper-config-v2-blocks'
 import { navigate } from '../router'
 import { SetupGuideCard } from './setup-guide-card'
 import { SectionHeader } from './common/section-header'
@@ -125,7 +125,6 @@ export type KcfTabId =
   | 'runtime'
   | 'policy'
   | 'access'
-  | 'goals'
   | 'hooks'
   | 'health'
 
@@ -135,7 +134,6 @@ const KCF_TABS: readonly (readonly [KcfTabId, string, string])[] = [
   ['runtime', '런타임', '◷'],
   ['policy', '실행 정책', '⚖'],
   ['access', '권한·샌드박스', '⚿'],
-  ['goals', '목표', '◎'],
   ['hooks', '훅', '⬡'],
   ['health', '상태·진단', '◉'],
 ]
@@ -164,10 +162,11 @@ export type KeeperConfigControlEndpoint =
   | '/api/v1/keepers/:name/directive'
   | '/api/v1/dashboard/goals'
   | '/api/v1/providers'
+  | '/api/v1/keepers/:name/github-identity'
+  | '/api/v1/keepers/:name/github-login'
 
 export type KeeperConfigBrowserStateKey =
   | 'promptPreviewTab'
-  | 'goalSearchQuery'
   | 'hookFilterQuery'
 
 export type KeeperConfigControlEvidence =
@@ -203,11 +202,8 @@ export function focusKeeperConfigTab(tab: KcfTabId): void {
 
 // ── State ────────────────────────────────────────────────
 
-const goalOptionsResource = createAsyncResource<GoalTreeNode[]>()
-const goalOptionsState = goalOptionsResource.state
 // Client-only search over the goal catalogue (title/id substring). The catalogue
 // can be large, so the goals tab filters the rendered list without a fetch.
-const goalSearchQuery = signal('')
 const editMode = signal(false)
 const saving = signal(false)
 const saveError = signal<string | null>(null)
@@ -305,7 +301,7 @@ export type MaxContextOverrideDraftResult =
 export function parseMaxContextOverrideDraft(raw: string): MaxContextOverrideDraftResult {
   if (raw === '0') return { ok: true, value: null }
   if (!/^[1-9]\d*$/.test(raw)) {
-    return { ok: false, error: '컨텍스트 오버라이드는 양의 정수여야 합니다. 0은 설정을 지웁니다.' }
+    return { ok: false, error: '양의 정수만 허용 (0 = 해제)' }
   }
   const value = Number(raw)
   if (!Number.isSafeInteger(value)) {
@@ -319,19 +315,111 @@ export type RuntimeDraft = {
   autoboot_enabled: boolean
   max_context_override: string
   sandbox_profile: SandboxProfile
-  active_goal_ids: string[]
   mention_targets_text: string
   network_mode: SandboxNetworkMode
   allowed_paths_text: string
   proactive_enabled: boolean
+  // Keeper-level autonomous wake prompt; '' = inherit fleet (sent as null)
+  autonomous_wake_prompt: string
+}
+
+export type KeeperConfigBooleanProjection =
+  | { kind: 'configured'; configured: boolean; live: boolean }
+  | {
+      kind: 'drift'
+      configured: boolean
+      live: boolean
+      defaultSource: 'toml'
+      defaultManifestPath: string | null
+    }
+  | { kind: 'live-only'; live: boolean }
+  | { kind: 'invalid-evidence'; live: boolean }
+
+type KeeperConfigBooleanField = 'autoboot_enabled' | 'proactive.enabled'
+
+/** Resolve an editable boolean against the same declarative config evidence
+ * the PATCH endpoint writes. The top-level value is live-meta state; when a
+ * typed source row proves that TOML differs, the editor must start from TOML
+ * rather than presenting the stale runtime overlay as the persisted policy. */
+export function keeperConfigBooleanProjection(
+  c: KeeperConfig,
+  field: KeeperConfigBooleanField,
+  live: boolean,
+): KeeperConfigBooleanProjection {
+  const evidence = c.sources.override_field_sources?.find(row => row.field === field)
+  if (!evidence || evidence.default_missing === true) return { kind: 'live-only', live }
+  if (
+    evidence.default_source_kind !== 'toml'
+    || typeof evidence.default_value !== 'boolean'
+    || typeof evidence.live_value !== 'boolean'
+  ) {
+    return { kind: 'invalid-evidence', live }
+  }
+  if (evidence.default_value === evidence.live_value) {
+    return { kind: 'configured', configured: evidence.default_value, live: evidence.live_value }
+  }
+  return {
+    kind: 'drift',
+    configured: evidence.default_value,
+    live: evidence.live_value,
+    defaultSource: 'toml',
+    defaultManifestPath: evidence.default_manifest_path,
+  }
+}
+
+function configuredBooleanValue(projection: KeeperConfigBooleanProjection): boolean {
+  return projection.kind === 'configured' || projection.kind === 'drift'
+    ? projection.configured
+    : projection.live
+}
+
+function proactiveConfigProjection(c: KeeperConfig): KeeperConfigBooleanProjection {
+  return keeperConfigBooleanProjection(c, 'proactive.enabled', c.proactive.enabled)
+}
+
+function proactiveConfigValue(c: KeeperConfig): boolean {
+  return configuredBooleanValue(proactiveConfigProjection(c))
+}
+
+function proactiveConfigHint(c: KeeperConfig): string {
+  const projection = proactiveConfigProjection(c)
+  if (projection.kind === 'drift') {
+    const configured = projection.configured ? 'ON' : 'OFF'
+    const live = projection.live ? 'ON' : 'OFF'
+    return `유휴 시 keeper 자가 기동 · TOML ${configured} / live meta ${live}`
+  }
+  if (projection.kind === 'invalid-evidence') {
+    return '유휴 시 keeper 자가 기동 · config source evidence invalid'
+  }
+  return '유휴 시 keeper 자가 기동'
+}
+
+// Mirror of the server contract
+// (Env_config_keeper.KeeperAutonomous.max_wake_prompt_bytes): the value is
+// appended to the durable checkpoint on every autonomous turn.
+export const AUTONOMOUS_WAKE_PROMPT_MAX_BYTES = 2048
+
+export type AutonomousWakePromptDraftResult =
+  | { ok: true; value: string | null }
+  | { ok: false; error: string }
+
+export function parseAutonomousWakePromptDraft(raw: string): AutonomousWakePromptDraftResult {
+  const trimmed = raw.trim()
+  if (trimmed === '') return { ok: true, value: null }
+  const bytes = new TextEncoder().encode(trimmed).length
+  if (bytes > AUTONOMOUS_WAKE_PROMPT_MAX_BYTES) {
+    return {
+      ok: false,
+      error: `깨우기 프롬프트 ${bytes}B — 상한 ${AUTONOMOUS_WAKE_PROMPT_MAX_BYTES}B (매 자율 턴 히스토리에 누적)`,
+    }
+  }
+  return { ok: true, value: trimmed }
 }
 
 const runtimeDraft = signal<RuntimeDraft | null>(null)
 const runtimeSaving = signal(false)
 const runtimeDirectiveSaving = signal<'pause' | 'resume' | 'wakeup' | null>(null)
 function resetKeeperConfigPanelDrafts(): void {
-  goalOptionsResource.reset()
-  goalSearchQuery.value = ''
   editMode.value = false
   editDraft.value = null
   saveError.value = null
@@ -385,13 +473,11 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     autoboot_enabled: c.autoboot_enabled,
     max_context_override: String(c.max_context_override ?? 0),
     sandbox_profile: coerceSandboxProfile(c.sandbox_profile),
-    active_goal_ids: c.workspace.active_goal_ids.length > 0
-      ? c.workspace.active_goal_ids
-      : c.active_goal_ids,
     mention_targets_text: c.workspace.mention_targets.join('\n'),
     network_mode: coerceNetworkMode(c.network_mode),
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
-    proactive_enabled: c.proactive.enabled,
+    proactive_enabled: proactiveConfigValue(c),
+    autonomous_wake_prompt: c.autonomous_wake_prompt ?? '',
   }
 }
 
@@ -545,6 +631,7 @@ export function keeperConfigControlInventory(
             'sources.precedence',
             'sources.has_live_override',
             'sources.override_fields',
+            'sources.override_field_sources',
           ]),
         },
       ]
@@ -561,15 +648,6 @@ export function keeperConfigControlInventory(
             ...configReadContracts(['prompt.instructions', 'sources.override_fields']),
             apiContract('PATCH', KEEPER_CONFIG_API, 'instructions'),
           ],
-        },
-        {
-          id: 'kcf-prompt-assembly',
-          tab,
-          label: 'Prompt assembly trace',
-          kind: 'live-read',
-          source: `${configApiSource} prompt.system_prompt_blocks + workspace.active_goals`,
-          action: 'read-only assembled layer trace',
-          contracts: configReadContracts(['prompt.system_prompt_blocks', 'workspace.active_goals']),
         },
         {
           id: 'kcf-prompt-preview-tabs',
@@ -639,6 +717,20 @@ export function keeperConfigControlInventory(
           [
             'autoboot_enabled',
             'proactive.enabled',
+            'sources.override_field_sources',
+          ],
+        ),
+        keeperRuntimeControlItem(
+          c,
+          tab,
+          'kcf-policy-wake-prompt',
+          'Autonomous wake prompt',
+          `${configApiSource} autonomous_wake_prompt`,
+          'PATCH /api/v1/keepers/:name/config autonomous_wake_prompt',
+          'autonomous_wake_prompt',
+          [
+            'autonomous_wake_prompt',
+            'prompt.unified_user_message_preview',
           ],
         ),
       ]
@@ -683,35 +775,17 @@ export function keeperConfigControlInventory(
           action: 'read-only computed access projection',
           contracts: configReadContracts(['effective_allowed_paths', 'workspace.bound_workspace_ids']),
         },
-      ]
-    case 'goals':
-      return [
-        keeperRuntimeControlItem(
-          c,
-          tab,
-          'kcf-goals-active-bindings',
-          'Active goal bindings',
-          `${configApiSource} workspace.active_goal_ids + GET /api/v1/dashboard/goals`,
-          'PATCH /api/v1/keepers/:name/config active_goal_ids',
-          'active_goal_ids',
-          [
-            'active_goal_ids',
-            'workspace.active_goal_ids',
-            'workspace.active_goals',
-            'workspace.active_goal_count',
-            'workspace.missing_active_goal_ids',
-            'sources.default_manifest_path',
-            'sources.default_source_kind',
-          ],
-        ),
         {
-          id: 'kcf-goals-catalog-filter',
+          id: 'kcf-access-github-identity',
           tab,
-          label: 'Goal catalog filter',
-          kind: 'browser-local',
-          source: 'loaded goal tree + goalSearchQuery signal',
-          action: 'client-side title/id filter only',
-          contracts: [apiContract('GET', DASHBOARD_GOALS_API), browserState('goalSearchQuery')],
+          label: 'GitHub CLI identity',
+          kind: 'live-write',
+          source: 'GET /api/v1/keepers/:name/github-identity stored/effective probes',
+          action: 'POST /api/v1/keepers/:name/github-login operator web login stream',
+          contracts: [
+            apiContract('GET', '/api/v1/keepers/:name/github-identity'),
+            apiContract('POST', '/api/v1/keepers/:name/github-login'),
+          ],
         },
       ]
     case 'hooks':
@@ -814,24 +888,25 @@ export function buildRuntimePayloadResult(
 ): RuntimePayloadBuildResult {
   const maxContextOverride = parseMaxContextOverrideDraft(draft.max_context_override)
   if (!maxContextOverride.ok) return maxContextOverride
+  const wakePrompt = parseAutonomousWakePromptDraft(draft.autonomous_wake_prompt)
+  if (!wakePrompt.ok) return wakePrompt
   const payload: KeeperConfigUpdatePayload = {}
   const newPaths = listTextToStrings(draft.allowed_paths_text)
   const newMentionTargets = listTextToStrings(draft.mention_targets_text)
   const origPaths = orig.allowed_paths ?? []
-  const origActiveGoalIds = orig.workspace.active_goal_ids.length > 0
-    ? orig.workspace.active_goal_ids
-    : orig.active_goal_ids
   if (draft.runtime_id.trim() !== (orig.execution.selected_runtime_id ?? '').trim()) payload.runtime_id = draft.runtime_id.trim()
   if (draft.autoboot_enabled !== orig.autoboot_enabled) payload.autoboot_enabled = draft.autoboot_enabled
   if (maxContextOverride.value !== orig.max_context_override) {
     payload.max_context_override = maxContextOverride.value
   }
-  if (!sameStringArray(draft.active_goal_ids, origActiveGoalIds)) payload.active_goal_ids = draft.active_goal_ids
+  if (wakePrompt.value !== (orig.autonomous_wake_prompt ?? null)) {
+    payload.autonomous_wake_prompt = wakePrompt.value
+  }
   if (!sameStringArray(newMentionTargets, orig.workspace.mention_targets)) payload.mention_targets = newMentionTargets
   if (!sameStringArray(newPaths, origPaths)) payload.allowed_paths = newPaths
   if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
   if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
-  if (draft.proactive_enabled !== orig.proactive.enabled) payload.proactive_enabled = draft.proactive_enabled
+  if (draft.proactive_enabled !== proactiveConfigValue(orig)) payload.proactive_enabled = draft.proactive_enabled
   return { ok: true, payload }
 }
 
@@ -872,7 +947,9 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     max_context_override: result.ok
       ? 'max_context_override' in payload
       : rd.max_context_override !== String(c.max_context_override ?? 0),
-    active_goal_ids: 'active_goal_ids' in payload,
+    autonomous_wake_prompt: result.ok
+      ? 'autonomous_wake_prompt' in payload
+      : rd.autonomous_wake_prompt.trim() !== (c.autonomous_wake_prompt ?? ''),
     mention_targets: 'mention_targets' in payload,
     allowed_paths: 'allowed_paths' in payload,
     sandbox_profile: 'sandbox_profile' in payload,
@@ -949,60 +1026,6 @@ function runtimeCatalogSpecRows(entry: DashboardRuntimeProviderSnapshot): readon
     ['policy', runtimeCatalogParameterPolicy(entry), true],
   ]
 }
-
-function updateRuntimeActiveGoalIds(values: readonly string[]) {
-  const d = runtimeDraft.value
-  if (!d) return
-  runtimeDraft.value = { ...d, active_goal_ids: dedupeStrings(values) }
-}
-
-function toggleRuntimeActiveGoal(goalId: string, checked: boolean) {
-  const d = runtimeDraft.value
-  if (!d) return
-  const next = checked
-    ? [...d.active_goal_ids, goalId]
-    : d.active_goal_ids.filter((id) => id !== goalId)
-  updateRuntimeActiveGoalIds(next)
-}
-
-function flattenGoalTree(nodes: readonly GoalTreeNode[]): GoalTreeNode[] {
-  const out: GoalTreeNode[] = []
-  for (const node of nodes) {
-    out.push(node)
-    out.push(...flattenGoalTree(node.children ?? []))
-  }
-  return out
-}
-
-async function loadGoalOptions(options?: { force?: boolean }): Promise<void> {
-  const force = options?.force === true
-  if (!force && goalOptionsState.value.status === 'loaded') return
-  if (force) goalOptionsResource.reset()
-  await goalOptionsResource.load(async () => {
-    const response = await fetchDashboardGoalsTree()
-    return flattenGoalTree(response.tree)
-  })
-}
-
-// Case-insensitive title/id substring filter for the goals catalogue.
-export function filterGoalOptions(
-  goals: readonly GoalTreeNode[],
-  query: string,
-): readonly GoalTreeNode[] {
-  const needle = query.trim().toLowerCase()
-  if (needle === '') return goals
-  return goals.filter(
-    (goal) =>
-      goal.title.toLowerCase().includes(needle) || goal.id.toLowerCase().includes(needle),
-  )
-}
-
-// ── Helpers ──────────────────────────────────────────────
-
-// .kcf-* widgets — keeper-v2/keeper-config.jsx contract, styled by the vendored
-// keeper-config.css. Used inside the 8-tab modal so the field set matches the
-// prototype's section/fact/text-field anatomy. The editable widgets keep the
-// live input model + aria-labels; only the read-only display adopts .kcf-facts.
 
 type KcfFactRow = readonly [key: string, value: string | number | null | undefined, mono?: boolean]
 
@@ -1155,112 +1178,7 @@ function KcfReadonlyText({ label, hint, text }: { label: string; hint?: string; 
   `
 }
 
-// ── prompt assembly trace (조립 추적) ──
-// Keeper-scoped layered lineage built from the keeper's OWN config provenance:
-// system_prompt_blocks (shared base), prompt.instructions (manifest, or a live
-// override when sources.override_fields lists the field), and active_goals.
-// This is deliberately NOT the workspace-global KeeperPromptAssemblyPanel — that
-// component fetches dashboard-wide prompt-registry overrides (fetchDashboardPrompts)
-// and cannot render one keeper's assembled layers. Read-only; every segment is
-// real config text with real provenance, no fabricated base prose.
-type KcfAssemblySource = 'base' | 'manifest' | 'override' | 'goals'
 
-interface KcfAssemblySegment {
-  readonly src: KcfAssemblySource
-  readonly field: string
-  readonly path: string
-  readonly text: string
-  readonly win: boolean
-}
-
-const KCF_ASSEMBLY_SRC_META: Readonly<Record<KcfAssemblySource, { lbl: string; cls: string }>> = {
-  base: { lbl: '공유 베이스', cls: 'src-base' },
-  manifest: { lbl: '매니페스트', cls: 'src-manifest' },
-  override: { lbl: 'live override', cls: 'src-override' },
-  goals: { lbl: '배정 목표', cls: 'src-goals' },
-}
-
-// Server override_fields are dot-namespaced (keeper_status_bridge.ml
-// live_override_details): 'prompt.instructions', etc. A field is
-// marked as winning over the manifest only when its exact key is present.
-export function buildKcfAssemblySegments(c: KeeperConfig): KcfAssemblySegment[] {
-  const overrideFields = new Set(c.sources.override_fields)
-  const manifestPath =
-    c.sources.default_manifest_path && c.sources.default_manifest_path.trim() !== ''
-      ? c.sources.default_manifest_path
-      : '매니페스트'
-  const livePath =
-    c.sources.live_meta_path && c.sources.live_meta_path.trim() !== ''
-      ? c.sources.live_meta_path
-      : 'live override'
-  const segments: KcfAssemblySegment[] = []
-  const blocks = c.prompt.system_prompt_blocks
-  const baseBlocks: readonly (readonly [string, { key: string; source: string; text: string }])[] = [
-    ['공유 시스템', blocks.system],
-  ]
-  for (const [label, block] of baseBlocks) {
-    if (block.text.trim() !== '') {
-      segments.push({ src: 'base', field: label, path: block.source, text: block.text, win: false })
-    }
-  }
-  const pushPromptField = (overrideKey: string, label: string, text: string) => {
-    if (text.trim() === '') return
-    const overridden = overrideFields.has(overrideKey)
-    segments.push({
-      src: overridden ? 'override' : 'manifest',
-      field: label,
-      path: overridden ? livePath : manifestPath,
-      text,
-      win: overridden,
-    })
-  }
-  pushPromptField('prompt.instructions', '지시사항 (instructions)', c.prompt.instructions)
-  const goals = c.workspace.active_goals
-  if (goals.length > 0) {
-    segments.push({
-      src: 'goals',
-      field: `배정 goal ${goals.length}개`,
-      path: 'goal store',
-      text: goals.map((g) => `· ${g.title}`).join('\n'),
-      win: false,
-    })
-  }
-  return segments
-}
-
-function KcfAssemblyTrace({ config }: { config: KeeperConfig }) {
-  const segments = buildKcfAssemblySegments(config)
-  if (segments.length === 0) {
-    return html`<div class="kcf-goals-empty">조립할 프롬프트 레이어가 없습니다.</div>`
-  }
-  const presentSources = [...new Set(segments.map((s) => s.src))]
-  return html`
-    <div class="kasm">
-      <div class="kasm-legend">
-        ${presentSources.map((src) => {
-          const meta = KCF_ASSEMBLY_SRC_META[src]
-          return html`<span key=${src} class=${`kasm-leg ${meta.cls}`}><i></i>${meta.lbl}</span>`
-        })}
-      </div>
-      <div class="kasm-stack">
-        ${segments.map((seg, i) => {
-          const meta = KCF_ASSEMBLY_SRC_META[seg.src]
-          return html`
-            <div key=${i} class=${`kasm-seg ${meta.cls} ${seg.win ? 'win' : ''}`}>
-              <div class="kasm-seg-h">
-                <span class="kasm-seg-src">${meta.lbl}</span>
-                <span class="kasm-seg-field mono">${seg.field}</span>
-                ${seg.win ? html`<span class="kasm-seg-win">매니페스트 덮어씀</span>` : null}
-                <span class="kasm-seg-path mono">${seg.path}</span>
-              </div>
-              <div class="kasm-seg-text">${seg.text}</div>
-            </div>
-          `
-        })}
-      </div>
-    </div>
-  `
-}
 
 // .set-* inline controls — keeper-v2 primitives (SetRow / Toggle / Segmented),
 // styled by the vendored surfaces.css. Used for the editable boolean toggles and
@@ -1440,7 +1358,7 @@ function InlineContextOverrideRow({ value, onChange, error, dirty = false }: {
           <span class="text-xs text-text-dim w-5">tok</span>
         </div>
       </div>
-      ${error ? html`<div class="mt-1 text-2xs text-[var(--color-status-err)]" role="alert">${error}</div>` : html`<div class="mt-1 text-2xs text-text-dim">양의 정수만 허용됩니다. 0은 오버라이드를 지웁니다.</div>`}
+      ${error ? html`<div class="mt-1 text-2xs text-[var(--color-status-err)]" role="alert">${error}</div>` : html`<div class="mt-1 text-2xs text-text-dim">양의 정수만 허용 (0 = 해제)</div>`}
     </div>
   `
 }
@@ -1576,9 +1494,6 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   if (configKeeperName.value !== keeperName || state.status === 'idle') {
     void loadKeeperConfig(keeperName)
   }
-  if (goalOptionsState.value.status === 'idle') {
-    void loadGoalOptions()
-  }
   if (runtimeCatalogState.value.status === 'idle') {
     loadRuntimeCatalog()
   }
@@ -1620,6 +1535,13 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   const c = state.data
   const isEditing = editMode.value
   const isSaving = saving.value
+  // Fleet-roster row for this keeper: carries the live fields the config API
+  // does not project (koreanName, sandbox_target, created_at) — the top bar
+  // and the identity tab's 파생 사실 section read from it.
+  const keeperRow = keepers.value.find(k => k.name === keeperName) ?? null
+  const keeperKoreanName = keeperRow?.koreanName?.trim() || null
+  const keeperSandboxTarget = keeperRow?.sandbox_target?.trim() || null
+  const keeperCreatedAt = keeperRow?.created_at?.trim() || null
   const runtimeWriteUnsupportedReason = keeperRuntimeConfigWriteUnsupportedReason(c)
   const runtimeCanEdit = runtimeWriteUnsupportedReason === null
 
@@ -1691,7 +1613,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         action === 'pause'
           ? await pauseKeeper(keeperName)
           : action === 'resume'
-            ? await resumeKeeper(keeperName, c.metrics.generation)
+            ? await resumeKeeper(keeperName)
             : await wakeKeeper(keeperName)
       if (!result.ok) {
         throw new Error(result.error || `${action} directive failed`)
@@ -1794,7 +1716,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     <${SectionHeader} size="xs" class="mt-3 mb-0.5" right=${html`
       <button
         type="button"
-        class="text-2xs text-accent-fg hover:underline v2-monitoring-action"
+        class="set-link text-2xs v2-monitoring-action"
         data-testid="kcf-prompt-global-edit-link"
         title="세계관·능력 등 전역 프롬프트 블록은 설정 › 프롬프트에서 관리합니다"
         onClick=${() => { navigate('settings', { section: 'prompts' }) }}
@@ -1829,31 +1751,57 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         : html`<${LongText} text=${c.prompt.unified_user_message_preview} truncateAt=${null} />`}
   `
 
-  const goalState = goalOptionsState.value
-  const goalOptionsLoaded = goalState.status === 'loaded'
-  const goalOptions: GoalTreeNode[] = goalOptionsLoaded ? goalState.data : []
-  const selectedActiveGoalIds = rd
-    ? rd.active_goal_ids
-    : (c.workspace.active_goal_ids.length > 0 ? c.workspace.active_goal_ids : c.active_goal_ids)
   const currentMentionTargets = rd
     ? listTextToStrings(rd.mention_targets_text)
     : c.workspace.mention_targets
-  const knownGoalIds = new Set(goalOptions.map((goal) => goal.id))
-  const unknownSelectedGoalIds = goalOptionsLoaded
-    ? selectedActiveGoalIds.filter((goalId) => !knownGoalIds.has(goalId))
-    : []
 
   // ── Tab content (the live fields, regrouped under the 8 prototype tabs) ──
-  // identity ◈ — source provenance
+  // identity ◈ — avatar + owned attrs + derived facts + source provenance
   const identityTab = html`
-    <${KcfSec} title="편집 가능 범위" desc="여기서 저장되는 값은 keeper 프롬프트, live override 계층, runtime.toml의 [runtime.assignments]입니다.">
+    <${KcfSec} title="아바타" desc="이 keeper 의 얼굴 — 시길(슬롯 색 + 2글자 모노그램)은 keeper id 에서 결정론적으로 파생되어 목록·채팅·보드와 항상 일치합니다. 초상화·슬롯 색·시길 편집은 keeper avatar API 가 없어 기획 단계입니다.">
+      <${KcfAvatarBlock} keeperName=${keeperName} displayName=${keeperKoreanName ?? keeperName} />
+    </${KcfSec}>
+
+    <${KcfSec} title="정체성" desc="이 keeper가 소유한 속성. 아래 파생 사실은 배정·파생된 값이라 여기서 바꾸지 않습니다.">
+      <div class="kcf-idrow">
+        <div class="kcf-field">
+          <div class="kcf-tf-h">
+            <label>표시 이름</label>
+            <span class="kcf-tf-hint">목록·채팅·보드에 표시 · <${KcfPlan}>이름 변경</KcfPlan></span>
+          </div>
+          <input
+            class="kcf-input"
+            value=${keeperKoreanName ?? keeperName}
+            readOnly
+            aria-label="표시 이름"
+            title="표시 이름 변경 API 미노출 — 기획 단계"
+          />
+        </div>
+      </div>
+    </${KcfSec}>
+
+    <${KcfSec} title="파생 사실" desc="배정·파생된 사실 — 읽기 전용. 격리는 sandbox_profile 기준입니다.">
       <${KcfFacts} rows=${[
-        ['기본 소스', c.sources.default_source_kind],
-        ['라이브 오버라이드', c.sources.has_live_override ? 'ON' : 'OFF'],
+        ['sandbox', keeperSandboxTarget ? keeperSandboxTarget : '— 비활성', true],
+        ['생성', keeperCreatedAt],
+        ['runtime profile', c.execution.selected_runtime_id, true],
       ]} />
     </${KcfSec}>
 
-    <${KcfSec} title="소스 · 경로" desc="등록 상태와 매니페스트 경로는 읽기 전용입니다.">
+    <${KcfSec} title="편집 가능 범위" desc="keeper 프롬프트 · live override · [runtime.assignments]">
+      <${KcfFacts} rows=${[
+        ['기본 소스', c.sources.default_source_kind],
+        ['라이브 오버라이드', c.sources.has_live_override ? 'ON' : 'OFF'],
+        ...(proactiveConfigProjection(c).kind === 'drift'
+          ? [[
+              '프로액티브 설정 드리프트',
+              `TOML ${proactiveConfigValue(c) ? 'ON' : 'OFF'} / live meta ${c.proactive.enabled ? 'ON' : 'OFF'}`,
+            ] as const]
+          : []),
+      ]} />
+    </${KcfSec}>
+
+    <${KcfSec} title="소스 · 경로" desc="읽기 전용">
       <${KcfReadonlyText} label="라이브 메타 경로" text=${c.sources.live_meta_path} />
       ${c.sources.default_manifest_path ? html`<${KcfReadonlyText} label="기본 매니페스트 경로" text=${c.sources.default_manifest_path} />` : null}
       <div style="margin-top:14px;">
@@ -1872,11 +1820,6 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   const promptTab = html`
     ${toolbar}
     ${promptSection}
-    <${KcfSec}
-      title="조립 추적"
-      desc="이 keeper의 시스템 프롬프트가 어느 레이어에서 조립됐는지 — 공유 베이스 위에 매니페스트/live override가 쌓이고, override_fields에 오른 필드가 매니페스트를 덮어씁니다.">
-      <${KcfAssemblyTrace} config=${c} />
-    </${KcfSec}>
   `
 
   // runtime ◷ — runtime selection + execution profile (read-only introspection + runtime_id picker)
@@ -1902,13 +1845,13 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
     ${selectedRuntimeCatalogRows.length > 0
       ? html`
-        <${KcfSec} title="Runtime catalog spec" desc="선택 runtime 의 /api/v1/providers Provider × Model projection입니다. 요청 파라미터와 effective capability는 여기서 읽기 전용으로 확인합니다.">
+        <${KcfSec} title="Runtime catalog spec" desc="Provider × Model 스펙 (읽기 전용)">
           <${KcfFacts} rows=${selectedRuntimeCatalogRows} />
         </${KcfSec}>
       `
       : null}
 
-    <${KcfSec} title="실행" desc="런타임 후보는 읽기 전용입니다. fallback 은 마지막 runtime 을 제외한 항목에 순서대로 적용됩니다.">
+    <${KcfSec} title="실행" desc="읽기 전용 · fallback은 위에서부터 순서대로">
       <${KcfFacts} rows=${[
         ['활성 런타임', c.execution.active_model ? 'runtime' : null],
       ]} />
@@ -1926,6 +1869,14 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         <${RuntimeList} runtimes=${c.execution.models} />
       </div>
     </${KcfSec}>
+
+    ${c.execution.runtime_options.length > 1 ? html`
+      <${KcfSec} title="fallback 후보" desc="runtime.toml [runtime.assignments] 에 등록된 이 keeper 의 런타임 후보 — 등록 순서대로 표시됩니다.">
+        <div class="kcf-chain">
+          ${c.execution.runtime_options.map(r => html`<span key=${r} class="kcf-chain-item mono">${r}</span>`)}
+        </div>
+      </${KcfSec}>
+    ` : null}
   `
 
   // policy ⚖ — verify gate + proactive + tool policy
@@ -1933,6 +1884,8 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     ${runtimeWriteUnsupportedNotice}
     <${MajorSectionHeader} title="검증" />
     <${BoolRow} label="검증" value=${c.execution.verify} />
+    <div class="kcf-dead">☠ 제거됨 · <span class="mono">ratio / message / token 게이트</span>와 <span class="mono">context_within_budget</span> FSM 조건은 zero-consumer 로 소스에서 삭제됐습니다. 컴팩션 임계치를 설정하는 곳은 없습니다 (컴팩션은 owner-lane 런타임이 provider overflow 시 실행 · metrics.compaction_count 로 관측).</div>
+    <div class="kcf-dead">☠ 제거됨 · <span class="mono">Handoff_triggered</span> 이벤트와 자동 핸드오프 임계치는 소스에서 삭제됐습니다 — config 스키마에 handoff 설정 필드가 없습니다.</div>
 
     <${SectionHeader} title="프로액티브" />
     ${rd && runtimeCanEdit ? html`
@@ -1940,13 +1893,27 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         <${SetToggle} ariaLabel="자동 부팅" on=${rd.autoboot_enabled}
           onChange=${(v: boolean) => updateRuntimeDraft('autoboot_enabled', v)} />
       </${SetRow}>
-      <${SetRow} label="활성" hint="유휴 시 keeper 자가 기동" dirty=${dirtyFlags.proactive_enabled}>
+      <${SetRow} label="활성" hint=${proactiveConfigHint(c)} dirty=${dirtyFlags.proactive_enabled}>
         <${SetToggle} ariaLabel="프로액티브 활성" on=${rd.proactive_enabled}
           onChange=${(v: boolean) => updateRuntimeDraft('proactive_enabled', v)} />
       </${SetRow}>
+      <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${dirtyFlags.autonomous_wake_prompt ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-sm text-[var(--color-fg-secondary)]">자율 턴 깨우기 프롬프트</span>
+          <span class="text-xs text-[var(--color-fg-muted)]">비우면 함대 기본값 상속 · 매 자율 턴 히스토리에 기록</span>
+        </div>
+        <textarea aria-label="autonomous_wake_prompt" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
+          rows=${3}
+          value=${rd.autonomous_wake_prompt}
+          placeholder=${c.prompt.unified_user_message_preview || 'Continue.'}
+          onInput=${(e: Event) => updateRuntimeDraft('autonomous_wake_prompt', (e.target as HTMLTextAreaElement).value)}
+        ></textarea>
+      </div>
     ` : html`
       <${BoolRow} label="자동 부팅" value=${c.autoboot_enabled} />
-      <${BoolRow} label="활성" value=${c.proactive.enabled} />
+      <${BoolRow} label="활성" value=${proactiveConfigValue(c)} />
+      <${ConfigRow} label="자율 턴 깨우기 프롬프트"
+        value=${c.autonomous_wake_prompt ?? `(상속) ${c.prompt.unified_user_message_preview || 'Continue.'}`} />
     `}
 
   `
@@ -1977,23 +1944,19 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
         dirty=${dirtyFlags.network_mode}
       />
-      <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${dirtyFlags.allowed_paths ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-sm text-[var(--color-fg-secondary)]">allowed_paths</span>
-          <span class="text-xs text-[var(--color-fg-muted)]">한 줄에 하나씩. 명시 경로만 허용됩니다.</span>
+      <div class="kcf-paths">
+        <div class="kcf-tf-h">
+          <label>allowed_paths${dirtyFlags.allowed_paths ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</label>
+          <span class="kcf-tf-hint">한 줄에 하나 · 명시 경로만 허용</span>
         </div>
-        <textarea aria-label="allowed_paths" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
+        <textarea aria-label="allowed_paths" class="kcf-text mono"
           rows=${4}
           value=${rd.allowed_paths_text}
           placeholder=".masc/keepers/<name>/"
           onInput=${(e: Event) => updateRuntimeDraft('allowed_paths_text', (e.target as HTMLTextAreaElement).value)}
         ></textarea>
+        <span class="kcf-path-eff mono">effective: ${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'}</span>
       </div>
-      ${(c.effective_allowed_paths ?? []).length > 0 ? html`
-        <div class="py-1.5 px-3 text-3xs text-[var(--color-fg-muted)]">
-          effective: ${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'}
-        </div>
-      ` : null}
       ${rd.sandbox_profile === 'docker' ? html`
         <${SetupGuideCard} connectorId="sandbox_hardened" />
       ` : null}
@@ -2042,77 +2005,10 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${ModelList} models=${c.workspace.bound_workspace_ids} />
     </div>
 
+    <${KeeperGithubIdentityPanel} keeperName=${keeperName} />
+
   `
 
-  // goals ◎ — assigned goal-store bindings (active_goal_ids picker)
-  const filteredGoalOptions = filterGoalOptions(goalOptions, goalSearchQuery.value)
-  const goalsTab = html`
-    ${runtimeWriteUnsupportedNotice}
-    <${KcfSec}
-      title="배정 목표"
-      desc=${runtimeCanEdit ? 'goal store 카탈로그에서 이 keeper가 소유할 goal을 고릅니다.' : '현재 배정된 goal-store 연결을 읽기 전용으로 표시합니다.'}
-      right=${html`<span class="kcf-goals-count mono">active_goal_ids · ${selectedActiveGoalIds.length} 배정</span>`}
-    >
-      <div class="kcf-goals">
-        ${goalOptions.length > 0 && rd && runtimeCanEdit ? html`
-          <div class="kcf-goals-bar">
-            <div class="kcf-search">
-              <span class="kcf-search-ic" aria-hidden="true">◌</span>
-              <input
-                type="search"
-                aria-label="goal 검색"
-                value=${goalSearchQuery.value}
-                placeholder="goal 제목·id 검색…"
-                onInput=${(e: Event) => { goalSearchQuery.value = (e.target as HTMLInputElement).value }}
-              />
-            </div>
-            <span class="kcf-goals-count mono">${selectedActiveGoalIds.length} 배정 · ${filteredGoalOptions.length} 표시</span>
-          </div>
-        ` : null}
-        ${goalState.status === 'loading' ? html`
-          <div class="text-2xs text-[var(--color-fg-muted)]" role="status">목표 목록 로딩 중...</div>
-        ` : goalState.status === 'error' ? html`
-          <div class="text-2xs text-[var(--color-status-err)]">${goalState.message}</div>
-        ` : goalOptions.length > 0 && rd && runtimeCanEdit ? (
-          filteredGoalOptions.length > 0 ? html`
-          <div class="kcf-goals-list">
-            ${filteredGoalOptions.map((goal) => {
-              const checked = rd.active_goal_ids.includes(goal.id)
-              return html`
-                <button
-                  type="button"
-                  key=${goal.id}
-                  class=${`kcf-goal ${checked ? 'on' : ''}`}
-                  aria-pressed=${checked ? 'true' : 'false'}
-                  onClick=${() => { toggleRuntimeActiveGoal(goal.id, !checked) }}
-                >
-                  <span class="kcf-goal-check">${checked ? '✓' : ''}</span>
-                  <span class="kcf-goal-body">
-                    <span class="kcf-goal-title">${goal.title}</span>
-                    <span class="kcf-goal-id mono">${goal.id}</span>
-                  </span>
-                </button>
-              `
-            })}
-          </div>
-          ` : html`
-          <div class="kcf-goals-empty">검색 결과 없음</div>
-          `
-        ) : selectedActiveGoalIds.length > 0 ? html`
-          <${ModelList} models=${selectedActiveGoalIds} />
-        ` : html`
-          <div class="kcf-goals-empty">활성 목표가 연결되어 있지 않습니다.</div>
-        `}
-        ${unknownSelectedGoalIds.length > 0 ? html`
-          <div class="mt-2 text-2xs text-[var(--color-status-warn)]">
-            Goal Store에서 찾을 수 없는 연결: ${unknownSelectedGoalIds.join(', ')}
-          </div>
-        ` : null}
-      </div>
-    </${KcfSec}>
-  `
-
-  // hooks ⬡ — global runtime hook architecture (keeper-agnostic, read-only)
   const hooksTab = c.hooks ? (() => {
     const allEntries: readonly HookSlotEntry[] = Object.entries(c.hooks.slots) as HookSlotEntry[]
     const activeCount = allEntries.filter(([, slot]) => slot.active).length
@@ -2172,6 +2068,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
           ]} />
         </div>
       ` : null}
+      <div class="kc-inh-note">외부 효과 호출은 <button type="button" class="set-link" onClick=${() => navigate('approvals')}>Gate 큐</button>로 갑니다.</div>
     `
   })() : html`<div class="text-2xs text-[var(--color-fg-muted)] py-4">hook 정보가 없습니다.</div>`
 
@@ -2225,7 +2122,6 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     runtime: runtimeTab,
     policy: policyTab,
     access: accessTab,
-    goals: goalsTab,
     hooks: hooksTab,
     health: healthTab,
   }
@@ -2262,13 +2158,16 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         <div class="kcf-top">
           <${KeeperBadge} id=${keeperName} name=${keeperName} variant="sigil" size="lg" />
           <div class="kcf-top-id">
-            <div class="kcf-top-name">${keeperName}</div>
+            <div class="kcf-top-name">${keeperName}${keeperKoreanName ? html`<span class="kcf-top-kr">${keeperKoreanName}</span>` : null}</div>
             <div class="kcf-top-sub mono">${c.execution.selected_runtime_id || c.sources.default_source_kind || MISSING_DATA_DASH}</div>
           </div>
           <span class="kcf-top-phase">
             <span style=${`width:7px;height:7px;border-radius:50%;background:${phaseDotColor};display:inline-block;${phaseToken === 'running' ? 'box-shadow:0 0 6px ' + phaseDotColor + ';' : ''}`} aria-hidden="true"></span>
             ${phaseLabel}
           </span>
+          ${keeperSandboxTarget ? html`
+            <span class="kcf-top-sandbox" title="이 keeper 전용 작업 경로 (live field: sandbox_target) — local 은 worktree root, docker 는 container target 입니다">⬡ ${keeperSandboxTarget}</span>
+          ` : null}
           <div class="kcf-top-spacer"></div>
           ${onClose ? html`
             <button type="button" class="kcf-top-x" onClick=${onClose} data-testid="kw-config-close" title="닫기 (Esc)">✕</button>

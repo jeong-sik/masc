@@ -1107,56 +1107,6 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "description": "Persona drift detection: missing persona references by keeper.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "fixedColor": "orange",
-            "mode": "fixed"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineInterpolation": "smooth",
-            "pointSize": 0,
-            "showPoints": "never"
-          },
-          "unit": "cpm"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 52
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (keeper) (rate(masc_keeper_persona_drift_missing_total{keeper=~\"$keeper\"}[$__rate_interval])) * 60",
-          "legendFormat": "{{keeper}}",
-          "refId": "A"
-        }
-      ],
-      "title": "Persona Drift Missing",
-      "transparent": true,
-      "type": "timeseries"
-    },
-    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -1350,7 +1300,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "OAS worker execution errors by keeper.",
+      "description": "AGENT_CORE worker execution errors by keeper.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1386,12 +1336,12 @@
       },
       "targets": [
         {
-          "expr": "sum by (keeper) (rate(masc_keeper_oas_execution_errors_total{keeper=~\"$keeper\"}[$__rate_interval])) * 60",
+          "expr": "sum by (keeper) (rate(masc_keeper_agent_core_execution_errors_total{keeper=~\"$keeper\"}[$__rate_interval])) * 60",
           "legendFormat": "{{keeper}}",
           "refId": "A"
         }
       ],
-      "title": "OAS Execution Errors",
+      "title": "AGENT_CORE Execution Errors",
       "transparent": true,
       "type": "timeseries"
     },
@@ -1400,7 +1350,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "OAS deterministic tool failures by keeper.",
+      "description": "AGENT_CORE deterministic tool failures by keeper.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1436,12 +1386,12 @@
       },
       "targets": [
         {
-          "expr": "sum by (keeper) (rate(masc_keeper_tools_oas_deterministic_failures_total{keeper=~\"$keeper\"}[$__rate_interval])) * 60",
+          "expr": "sum by (keeper) (rate(masc_keeper_tools_agent_core_deterministic_failures_total{keeper=~\"$keeper\"}[$__rate_interval])) * 60",
           "legendFormat": "{{keeper}}",
           "refId": "A"
         }
       ],
-      "title": "OAS Deterministic Failures",
+      "title": "AGENT_CORE Deterministic Failures",
       "transparent": true,
       "type": "timeseries"
     },

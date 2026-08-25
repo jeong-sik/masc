@@ -17,9 +17,14 @@ type t =
   ; provider : provider
   ; model : model_spec
   ; binding : binding
-  ; provider_config : Llm_provider.Provider_config.t
-    (** load 시점에 materialize 된 hot-path provider config. 소비자는
-        routing 없이 이걸 곧장 LLM dispatch 로 넘긴다. *)
+  ; execution : Runtime_execution.t
+    (** Turn owner materialized at load time. HTTP bindings become
+        [Agent_core]; official client runtimes remain distinct and can never
+        be dispatched as a fake LLM provider config. *)
+  ; quota_scope : Runtime_quota_window.scope
+    (** Quota ownership key frozen at materialization, from the same
+        credential-alias selection that resolved the dispatched API key
+        (PR #28219 review). *)
   }
 
 (* id 파생의 단일 출처는 {!Runtime_schema.binding_key} — runtime 을 id 로
@@ -32,21 +37,78 @@ let id_of_binding (b : binding) : string = binding_key b
     제외)이되 왜 제외되는지 이유를 잃지 않는다. 이 이유는 assignment / default /
     task-route / lane 검증이 "not found" 대신 근본 원인을 표면화하는 데 쓰인다
     (Unknown→silent-drop 안티패턴 차단). *)
-let of_binding_result (cfg : config) (b : binding) : (t, string) result =
-  match provider_of_id cfg b.provider_id, model_of_id cfg b.model_id with
-  | Some provider, Some model ->
-    (match Runtime_adapter.binding_to_provider_config cfg b with
-     | Ok provider_config ->
-       Ok { id = id_of_binding b; provider; model; binding = b; provider_config }
-     | Error reason -> Error reason)
-  | None, _ -> Error (Printf.sprintf "provider not found: %s" b.provider_id)
-  | Some _, None -> Error (Printf.sprintf "model not found: %s" b.model_id)
+(* Quota scope is frozen here, at materialization, from the same
+   credential-alias selection that resolves the dispatched API key. Deriving
+   it later would re-run alias selection against a possibly changed process
+   environment and charge the window to an account the dispatch never used
+   (PR #28219 review). *)
+let quota_scope_of_materialized
+    ~(provider : provider)
+    ~(execution : Runtime_execution.t) =
+  let credential =
+    match execution with
+    | Runtime_execution.Agent_core _ ->
+      Runtime_adapter.effective_credential_reference
+        ~provider_id:provider.id
+        provider.credentials
+    | Runtime_execution.Antigravity_cli _ -> provider.credentials
+    | Runtime_execution.Codex_app_server _
+    | Runtime_execution.Claude_code _ ->
+      (* Official clients own subscription login. A registry API-key default
+         with the same provider label is a different account authority. *)
+      None
+  in
+  Runtime_quota_window.scope_of_credential ~provider_id:provider.id credential
 ;;
 
-(** {!of_binding_result} 의 option 투영. materialize 실패 이유가 필요 없는
-    호출자(단일 binding 성공 여부만 확인)를 위한 유지 API. *)
-let of_binding (cfg : config) (b : binding) : t option =
-  Result.to_option (of_binding_result cfg b)
+(* Why a binding did not become a runtime, as a closed vocabulary rather than a
+   string. The distinction the variant makes is the one the config loader has to
+   act on: [Binding_disabled] and [Provider_disabled] are choices the operator
+   wrote down, [Execution_unbuildable] is a capability limit of the adapter, and
+   the two [*_not_declared] cases are dangling references — the binding names a
+   [\[providers.x\]] or [\[models.y\]] row that does not exist. Collapsing all
+   five into one string is what let a dangling reference be dropped as quietly as
+   a deliberate disable (masc#28403): a [local_llama_server.qwen3-6-35b-uncensored]
+   binding pointed at a model row an unquoted dot had split into
+   [models.qwen3."6-35b-uncensored"], and nothing reported the runtime's absence.
+   Deciding fatality by matching the reason string would be the same defect one
+   layer up, so the vocabulary is closed and {!load_list} matches it. *)
+type drop_reason =
+  | Binding_disabled
+  | Provider_disabled of string (* provider id *)
+  | Provider_not_declared of string (* provider id the binding names *)
+  | Model_not_declared of string (* model id the binding names *)
+  | Execution_unbuildable of string (* adapter's own reason *)
+
+let string_of_drop_reason = function
+  | Binding_disabled -> "binding is disabled by runtime.toml"
+  | Provider_disabled id -> Printf.sprintf "provider %S is disabled by runtime.toml" id
+  | Provider_not_declared id -> Printf.sprintf "provider not found: %s" id
+  | Model_not_declared id -> Printf.sprintf "model not found: %s" id
+  | Execution_unbuildable reason -> reason
+;;
+
+let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
+  if not b.enabled
+  then Error Binding_disabled
+  else match provider_of_id cfg b.provider_id, model_of_id cfg b.model_id with
+  | Some provider, Some model ->
+    if not provider.enabled
+    then Error (Provider_disabled provider.id)
+    else
+      (match Runtime_adapter.binding_to_execution cfg b with
+       | Ok execution ->
+         Ok
+           { id = id_of_binding b
+           ; provider
+           ; model
+           ; binding = b
+           ; execution
+           ; quota_scope = quota_scope_of_materialized ~provider ~execution
+           }
+       | Error reason -> Error (Execution_unbuildable reason))
+  | None, _ -> Error (Provider_not_declared b.provider_id)
+  | Some _, None -> Error (Model_not_declared b.model_id)
 ;;
 
 let is_local_provider (provider : provider) =
@@ -69,12 +131,12 @@ let is_local_runtime (runtime : t) = is_local_provider runtime.provider
    typo that does not exist. Materialize failure stays fail-closed: the binding
    is still excluded from [runtimes] (RFC-0206 §2.1). *)
 let partition_bindings (cfg : config) (bindings : binding list)
-  : t list * (string * string) list
+  : t list * (string * drop_reason) list
   =
   let runtimes, dropped =
     List.fold_left
       (fun (runtimes, dropped) (b : binding) ->
-         match of_binding_result cfg b with
+         match of_binding cfg b with
          | Ok rt -> rt :: runtimes, dropped
          | Error reason -> runtimes, (id_of_binding b, reason) :: dropped)
       ([], [])
@@ -90,14 +152,51 @@ let partition_bindings (cfg : config) (bindings : binding list)
    runtimes" wording. The result is the suffix that follows the quoted id in
    each caller's message, so the existing prefix ("[runtime.assignments].<k> =
    <id>") is preserved and the typo case stays byte-for-byte unchanged. *)
-let unresolved_runtime_suffix ~(dropped_bindings : (string * string) list)
+let unresolved_runtime_suffix ~(dropped_bindings : (string * drop_reason) list)
     ~(runtime_count : int) (id : string) : string =
   match List.assoc_opt id dropped_bindings with
   | Some reason ->
     Printf.sprintf
       ": binding is defined but could not be materialized as a runtime — %s"
-      reason
+      (string_of_drop_reason reason)
   | None -> Printf.sprintf " not found among %d runtimes" runtime_count
+;;
+
+(* A dangling reference is an operator typo, and unlike every other drop reason
+   it is not survivable by ignoring the binding: the runtime the operator
+   declared simply does not exist, and nothing downstream will say so unless the
+   id happens to be referenced by an assignment, route, or lane. Reporting it
+   here — at load, over the whole binding list — is what makes the absence
+   visible without a reference to hang the message on (masc#28403). The other
+   three reasons stay non-fatal: they keep the RFC-0206 §2.1 contract that a
+   binding MASC cannot run is excluded rather than fatal. *)
+let dangling_reference_reason = function
+  | Provider_not_declared id ->
+    Some (Printf.sprintf "names provider %S, which has no [providers.%s] row" id id)
+  | Model_not_declared id ->
+    Some (Printf.sprintf "names model %S, which has no [models.%s] row" id id)
+  | Binding_disabled | Provider_disabled _ | Execution_unbuildable _ -> None
+;;
+
+let validate_no_dangling_bindings ~(config_path : string)
+    ~(dropped_bindings : (string * drop_reason) list) : (unit, string) result =
+  match
+    List.filter_map
+      (fun (id, reason) ->
+        Option.map
+          (fun why -> Printf.sprintf "  %s %s" id why)
+          (dangling_reference_reason reason))
+      dropped_bindings
+  with
+  | [] -> Ok ()
+  | dangling ->
+    Error
+      (Printf.sprintf
+         "%s: %d binding(s) reference a provider or model that is not declared, \
+          so the runtime they define does not exist:\n%s"
+         config_path
+         (List.length dangling)
+         (String.concat "\n" dangling))
 ;;
 
 (** TOML 에서 Runtime 목록과 default Runtime 을 로드한다.
@@ -112,40 +211,12 @@ let find_declared_lane (lanes : Runtime_lane.t list) (id : string) =
   List.find_opt (fun lane -> String.equal (Runtime_lane.id lane) id) lanes
 ;;
 
-(* One admission path for every [runtime] field that names a routing target.
-   Three validators — keeper assignments, the per-route ids, and the
-   media_failover list — answered one question, "does this id resolve to
-   something a consumer can route to", and had drifted into three resolution
-   domains and three error shapes for it. The turn driver reaches all three
-   through the same lane-aware dispatch, so a single parse is what the
-   runtime-indifference spec asks for; three parses is how they diverge.
-
-   The domain travels with the reference rather than with the call, because it is
-   a property of the field's consumer, not of the validation phase:
-
-   - [Runtime_only] for keeper assignments and media_failover entries.
-     runtime.mli documents the assignment snapshot as ids that resolve to a
-     configured runtime, and Keeper_vision_tool looks media_failover entries up
-     among runtimes (keeper_vision_tool.ml:82-89). Admitting a lane id at either
-     site would load a config its consumer cannot route.
-   - [Lane_then_runtime] for the route ids, mirroring [resolve_assignment]
-     (:1341-1348): a lane shadows a same-named runtime, so validation must judge
-     the target the consumer will actually get.
-
-   [None] stays the designed "inherit [runtime].default" case for a route, [[]]
-   the designed "derive capable runtimes from declared capabilities" case for
-   media_failover, and a keeper absent from the assignment table still falls back
-   at lookup time. An unknown id remains an operator typo rejected at load rather
-   than a silent fallback (Unknown -> Permissive anti-pattern).
-
-   Removed with the merge: [Declares_capability] and its lane-candidate helper.
-   #25719 dropped the last capability requirement after finding neither consumer
-   requests a wire response format, leaving a variant with match arms and no
-   construction site — dead weight that reads as an available option. The tool
-   channel it could not express is refused by OAS at dispatch through
-   candidate_rejection_disposition (oas/lib/llm_provider/exact_output.mli:126-132),
-   which is pre-dispatch and therefore failover-eligible: ordering rather than
-   exclusion, which is what the spec asks for. *)
+(* Each [runtime] reference is validated under its field's admission contract:
+   - [Runtime_only] requires a declared runtime id for keeper assignments and
+     media_failover entries. Assignment execution may still resolve a
+     same-named lane first.
+   - [Lane_then_runtime] admits a declared lane or runtime id for route ids.
+   Unknown ids are rejected while loading the configuration. *)
 type reference_domain =
   | Runtime_only
   | Lane_then_runtime
@@ -166,7 +237,7 @@ type runtime_reference =
   }
 
 let validate_runtime_references ~(config_path : string)
-    ~(dropped_bindings : (string * string) list) (runtimes : t list)
+    ~(dropped_bindings : (string * drop_reason) list) (runtimes : t list)
     (lanes : Runtime_lane.t list) (references : runtime_reference list)
   : (unit, string) result
   =
@@ -212,20 +283,6 @@ let assignment_references (assignments : (string * string) list) =
     assignments
 ;;
 
-let route_references (routes : (string * string option) list) =
-  List.filter_map
-    (fun (route_name, route_id) ->
-      Option.map
-        (fun id ->
-          { site = Printf.sprintf "[runtime].%s" route_name
-          ; shape = Scalar
-          ; id
-          ; domain = Lane_then_runtime
-          })
-        route_id)
-    routes
-;;
-
 let media_failover_references (media_failover : string list) =
   List.map
     (fun id ->
@@ -241,7 +298,7 @@ let media_failover_references (media_failover : string list) =
    Empty candidate lists are rejected at parse time; here we reject unknown ids
    as operator typos (mirrors [runtime].default validation). *)
 let validate_lanes ~(config_path : string)
-    ~(dropped_bindings : (string * string) list) (runtimes : t list)
+    ~(dropped_bindings : (string * drop_reason) list) (runtimes : t list)
     (lane_decls : Runtime_schema.lane_decl list)
   : (unit, string) result
   =
@@ -268,25 +325,35 @@ let validate_lanes ~(config_path : string)
             ~runtime_count:(List.length runtimes) id))
 ;;
 
+(* [runtime].default is required, so every lane can end somewhere. Without this
+   a lane walk stops at its last declared candidate and the turn dies there —
+   failover would exist only where an operator remembered to type a second
+   candidate. Appended rather than substituted: declared order is the
+   operator's, this only says where the walk terminates. *)
+let with_terminal_default ~default_runtime_id candidates =
+  if List.exists (String.equal default_runtime_id) candidates
+  then candidates
+  else candidates @ [ default_runtime_id ]
+;;
+
 let lanes_of_decls ~(config_path : string)
-    ~(dropped_bindings : (string * string) list) (runtimes : t list)
+    ~(dropped_bindings : (string * drop_reason) list) ~(default_runtime_id : string)
+    (runtimes : t list)
     (lane_decls : Runtime_schema.lane_decl list)
   : (Runtime_lane.t list, string) result
   =
   let* () = validate_lanes ~config_path ~dropped_bindings runtimes lane_decls in
   Ok
     (List.map
-       (fun ({ Runtime_schema.id; strategy; candidate_ids } : Runtime_schema.lane_decl) ->
-          match strategy with
-          | Runtime_schema.Ordered ->
-            Runtime_lane.make ~id ~strategy:Runtime_lane.Ordered candidate_ids)
+       (fun ({ Runtime_schema.id; candidate_ids } : Runtime_schema.lane_decl) ->
+          Runtime_lane.make ~id (with_terminal_default ~default_runtime_id candidate_ids))
        lane_decls)
 ;;
 
-(* Pure decision for the capability gate, separated from the global OAS catalog
-   lookup so it is unit-testable. [entries] is [(label, known_to_oas)] per runtime.
+(* Pure decision for the capability gate, separated from the global AGENT_CORE catalog
+   lookup so it is unit-testable. [entries] is [(label, known_to_agent_core)] per runtime.
 
-   An unknown model resolves to OAS [provider_default], whose guessed capabilities
+   An unknown model resolves to AGENT_CORE [provider_default], whose guessed capabilities
    (notably [thinking_control_format = No_thinking_control]) silently drop
    thinking/sampling control a binding may require. Reject such a binding at
    load instead of discovering corruption at runtime
@@ -305,9 +372,9 @@ let decide_capability_gate ~(config_path : string) (entries : (string * bool) li
   | _ ->
     Error
       (Printf.sprintf
-         "%s: %d runtime model(s) absent from the OAS capability catalog; they \
+         "%s: %d runtime model(s) absent from the AGENT_CORE capability catalog; they \
           would use provider_default and silently drop thinking/sampling control. \
-          Add deployment rows to oas-models-overlay.toml or update the OAS embedded catalog: %s"
+          Add deployment rows to agent-core-models-overlay.toml or update the AGENT_CORE embedded catalog: %s"
          config_path
          (List.length unknown)
          (String.concat ", " (List.map fst unknown)))
@@ -370,9 +437,9 @@ let missing_catalog_model_label (missing : missing_catalog_model) =
 
 let missing_catalog_report_to_string (report : missing_catalog_report) =
   Printf.sprintf
-    "%s: %d runtime model(s) absent from the OAS capability catalog; they \
+    "%s: %d runtime model(s) absent from the AGENT_CORE capability catalog; they \
      would use provider_default and silently drop thinking/sampling control. \
-     Add deployment rows to oas-models-overlay.toml or update the OAS embedded catalog: %s"
+     Add deployment rows to agent-core-models-overlay.toml or update the AGENT_CORE embedded catalog: %s"
     report.config_path
     (List.length report.missing_models)
     (String.concat ", " (List.map missing_catalog_model_label report.missing_models))
@@ -439,7 +506,7 @@ let startup_degradation_to_yojson = function
       ; "status", `String "degraded"
       ; "degraded", `Bool true
       ; "operator_action_required", `Bool true
-      ; "terminal_reason", `String "missing_oas_catalog_models"
+      ; "terminal_reason", `String "missing_agent_core_catalog_models"
       ; "message", `String (startup_degradation_to_string degradation)
       ; "config_path", `String degradation.report.config_path
       ; "configured_default_runtime_id"
@@ -465,14 +532,19 @@ let startup_degradation_to_yojson = function
       ; "dropped_lanes", `List (List.map dropped_lane_to_yojson degradation.dropped_lanes)
       ; ( "next_action"
         , `String
-            "Add deployment rows to oas-models-overlay.toml (or upstream OAS) or remove \
+            "Add deployment rows to agent-core-models-overlay.toml (or upstream AGENT_CORE) or remove \
              those runtime.toml bindings; uncatalogued runtimes are disabled \
              for this process." )
       ]
 ;;
 
 let capabilities_for_runtime (rt : t) =
-  Llm_provider.Provider_config.capabilities_for_config_model rt.provider_config
+  match rt.execution with
+  | Runtime_execution.Agent_core provider_config ->
+    Llm_provider.Provider_config.capabilities_for_config_model provider_config
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Claude_code _
+  | Runtime_execution.Antigravity_cli _ -> None
 ;;
 
 type max_context_source =
@@ -488,7 +560,7 @@ let max_context_source_to_string = function
 
 (* Effective input context window and the source that produced it.
    [None] means neither the runtime.toml [model.max-context] override nor the
-   OAS capability catalog declares a positive context window for this
+   AGENT_CORE capability catalog declares a positive context window for this
    binding — [validate_runtime_max_context] rejects such a runtime at load
    (fail-closed; Unknown->Permissive anti-pattern, not a silent default). *)
 let resolve_max_context_of_runtime (rt : t) : (int * max_context_source) option =
@@ -508,7 +580,7 @@ let resolve_max_context_of_runtime (rt : t) : (int * max_context_source) option 
 ;;
 
 (* Every materialized runtime must resolve a positive context window from the
-   runtime.toml override or the OAS capability catalog. A binding that leaves
+   runtime.toml override or the AGENT_CORE capability catalog. A binding that leaves
    both unset is a config error rejected here, not a runtime defaulted to a
    fallback window (RFC-0206 §2.1 no silent fallback). *)
 let validate_runtime_max_context ~(config_path : string) (runtimes : t list)
@@ -524,12 +596,14 @@ let validate_runtime_max_context ~(config_path : string) (runtimes : t list)
     Error
       (Printf.sprintf
          "%s: runtime %S (model=%s) has no [models.%s].max-context override \
-          and no OAS capability catalog max-context; set the override or add \
+          and no AGENT_CORE capability catalog max-context; set the override or add \
           the model to the capability catalog (no silent default — \
           RFC-0206 §2.1)"
          config_path
          r.id
-         r.provider_config.model_id
+         (match Runtime_execution.model_id r.execution with
+          | Some model_id -> model_id
+          | None -> "<official-client-selected>")
          r.model.id)
 ;;
 
@@ -556,8 +630,87 @@ let validate_request_body_cap ~runtime_id
     Error (Missing_or_non_positive_request_body_cap { runtime_id })
 ;;
 
+(* Whether a materialized runtime could carry a keeper turn if one were routed
+   to it, independent of whether anything routes to it today.
+
+   Boot validation deliberately checks only reachable ids — refusing to start
+   over a runtime nobody is assigned to would be wrong — but that left the
+   blocked state with no observer at all: a runtime declared in runtime.toml,
+   materialized, listed by /api/v1/runtime/resolved, and impossible to assign,
+   with nothing anywhere saying why. Seven live runtimes were in that state on
+   2026-08-12 and finding them required a separate script that re-parsed the
+   TOML (masc#28404). The readiness is the same predicate boot validation uses,
+   named once so the operator-facing projection and the fail-closed gate cannot
+   disagree. *)
+type keeper_dispatch_readiness =
+  | Dispatchable
+  | Missing_request_body_cap of { table_path : string }
+
+(* TEL-OK: pure predicate over an already-materialized runtime; the boot logger
+   and the resolved projection own its observability. *)
+let keeper_dispatch_readiness (runtime : t) : keeper_dispatch_readiness =
+  (* Only Agent_core is judged, because only Agent_core builds the request whose
+     size this bounds. An official-client turn hands its conversation to a
+     spawned vendor client that owns its own context window and refuses an
+     oversized one in a typed terminal. *)
+  match runtime.execution with
+  | Runtime_execution.Agent_core provider_config ->
+    (match validate_request_body_cap ~runtime_id:runtime.id provider_config with
+     | Ok _ -> Dispatchable
+     | Error _ ->
+       Missing_request_body_cap
+         { table_path =
+             Otoml.string_of_path
+               [ runtime.binding.provider_id; runtime.binding.model_id ]
+         })
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Claude_code _
+  | Runtime_execution.Antigravity_cli _ -> Dispatchable
+;;
+
+(* TEL-OK: pure rendering of the variant above; callers decide where it lands. *)
+let keeper_dispatch_blocker = function
+  | Dispatchable -> None
+  | Missing_request_body_cap { table_path } ->
+    Some
+      (Printf.sprintf
+         "no positive max-request-body-bytes; declare [%s].max-request-body-bytes"
+         table_path)
+;;
+
+(* Every materialized runtime a keeper could not be assigned to, in declaration
+   order, paired with the reason. Empty is the healthy state.
+   TEL-OK: pure filter; the boot path logs one line per entry it returns. *)
+let keeper_dispatch_blocked (runtimes : t list) : (t * string) list =
+  List.filter_map
+    (fun runtime ->
+      Option.map
+        (fun reason -> runtime, reason)
+        (keeper_dispatch_blocker (keeper_dispatch_readiness runtime)))
+    runtimes
+;;
+
+(* [runtime.exact_output_lanes.verifier_exact] (RFC-0361 D7(a)) is the single
+   selector for completion-authority judgement calls: admitted slots in frozen
+   declaration order, fail over in that order. *)
+let verifier_exact_lane_id = "verifier_exact"
+
+let verifier_exact_slot_ids_of_lane_decls
+      (decls : Runtime_schema.exact_output_lane_decl list)
+  =
+  match
+    List.find_opt
+      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         String.equal lane.id verifier_exact_lane_id)
+      decls
+  with
+  | None -> []
+  | Some lane -> lane.slot_ids
+;;
+
 (* Keeper provider attempts originate at the configured default, an explicit
-   keeper assignment, an explicit media-failover runtime, or cross verifier. A lane is
+   keeper assignment, an explicit media-failover runtime, the verifier_exact
+   exact-output lane's slots, or cross verifier. A lane is
    reachable only when its id shadows one of the configured routes; a merely
    declared lane is dormant until a routed root names it.
    Expand each lane-capable route with the same lane-over-runtime precedence as
@@ -569,7 +722,7 @@ let validate_request_body_cap ~runtime_id
 let keeper_dispatch_runtime_ids
     ~(default_runtime_id : string)
     ~(assignments : (string * string) list)
-    ~(cross_verifier_runtime_id : string option)
+    ~(verifier_exact_slot_ids : string list)
     ~(media_failover : string list)
     ~(lanes : Runtime_lane.t list)
   =
@@ -595,16 +748,16 @@ let keeper_dispatch_runtime_ids
     []
     ( routed_roots
       @ media_failover
-      @ (cross_verifier_runtime_id |> Option.to_list |> List.concat_map expand) )
+      @ List.concat_map expand verifier_exact_slot_ids )
 ;;
 
 (* TEL-OK: pure fail-closed validation; the load boundary surfaces its error. *)
 let validate_keeper_dispatch_request_caps
     ~(config_path : string)
+    ~(verifier_exact_slot_ids : string list)
     ( runtimes
     , (default_runtime : t)
     , assignments
-    , cross_verifier_runtime_id
     , media_failover
     , lanes )
   =
@@ -612,72 +765,61 @@ let validate_keeper_dispatch_request_caps
     keeper_dispatch_runtime_ids
       ~default_runtime_id:default_runtime.id
       ~assignments
-      ~cross_verifier_runtime_id
+      ~verifier_exact_slot_ids
       ~media_failover
       ~lanes
   in
   let runtime_by_id id =
     List.find_opt (fun (runtime : t) -> String.equal runtime.id id) runtimes
   in
-  match
-    List.find_map
-      (fun id ->
-         match runtime_by_id id with
-         | None -> None
-         | Some runtime ->
-           (match
-              validate_request_body_cap
-                ~runtime_id:runtime.id
-                runtime.provider_config
-            with
-            | Ok _ -> None
-            | Error _ -> Some runtime))
-      ids
-  with
+  (* Same predicate {!keeper_dispatch_readiness} reports to operators. Only
+     reachable ids are judged here — a declared-but-unassigned runtime must not
+     refuse boot — but the two must never disagree about what "blocked" means,
+     which is why the decision has one definition and this is a projection of
+     it. The official-client arms are Dispatchable there: requiring a declared
+     max-prompt-bytes for them added a second authority over the same window,
+     measured in wire bytes rather than tokens, and made its absence a boot
+     refusal, so a deployment could not choose to let the provider decide. *)
+  let missing_ceiling runtime =
+    match keeper_dispatch_readiness runtime with
+    | Dispatchable -> None
+    | Missing_request_body_cap { table_path } -> Some (runtime, table_path)
+  in
+  match List.find_map (fun id -> Option.bind (runtime_by_id id) missing_ceiling) ids with
   | None -> Ok ()
-  | Some runtime ->
+  | Some (runtime, table_path) ->
     Error
       (Printf.sprintf
          "%s: Keeper-dispatch runtime %S has no positive \
-          max-request-body-bytes; declare [%s.%s].max-request-body-bytes before \
+          max-request-body-bytes; declare [%s].max-request-body-bytes before \
           dispatch so the exact serialized request has an explicit admission \
           ceiling"
          config_path
          runtime.id
-         runtime.binding.provider_id
-         runtime.binding.model_id)
+         table_path)
 ;;
 
-(* Every runtime binding's provider/model pair must be known to the OAS
+(* Every runtime binding's provider/model pair must be known to the AGENT_CORE
    capability catalog. Use the materialized [Provider_config.t] so
    provider-qualified catalog rows are considered before bare model rows; this
    keeps overlapping ids such as native Kimi vs Ollama Cloud Kimi from requiring
    bare-id manifest workarounds. *)
-let validate_runtime_model_capabilities ~(config_path : string) (runtimes : t list)
-  : (unit, string) result
-  =
-  decide_capability_gate
-    ~config_path
-    (List.map
-       (fun (r : t) ->
-          ( Printf.sprintf "%s (model=%s)" r.id r.provider_config.model_id
-          , Option.is_some (capabilities_for_runtime r) ))
-       runtimes)
-;;
-
 let missing_runtime_model_capabilities ~(config_path : string) (runtimes : t list)
   : missing_catalog_report option
   =
   let missing_models =
     List.filter_map
       (fun (r : t) ->
-         match capabilities_for_runtime r with
-         | Some _ -> None
-         | None ->
+         match r.execution, capabilities_for_runtime r with
+         | ( Runtime_execution.Codex_app_server _
+           | Runtime_execution.Claude_code _
+           | Runtime_execution.Antigravity_cli _ ), _ -> None
+         | Runtime_execution.Agent_core _, Some _ -> None
+         | Runtime_execution.Agent_core provider_config, None ->
            let provider_label =
-             Llm_provider.Provider_config.capability_provider_label r.provider_config
+             Llm_provider.Provider_config.capability_provider_label provider_config
            in
-           let model_id = r.provider_config.model_id in
+           let model_id = provider_config.model_id in
            Some
              { runtime_id = r.id
              ; provider_id = r.provider.id
@@ -746,7 +888,7 @@ let missing_reference_error
     match default_drop with
     | Some _ ->
       Printf.sprintf
-        "Configured %s=%S is absent from the OAS capability catalog; degraded \
+        "Configured %s=%S is absent from the AGENT_CORE capability catalog; degraded \
          boot will not select a different default runtime."
         runtime_default_route_name
         configured_default_runtime_id
@@ -760,7 +902,7 @@ let missing_reference_error
   Printf.sprintf
     "%s: cannot use degraded runtime boot because catalog-missing runtime ids \
      are referenced by routing config: %s. %s Add catalog rows to \
-     oas-models-overlay.toml (or upstream OAS) or remove those routing references; MASC will not erase \
+     agent-core-models-overlay.toml (or upstream AGENT_CORE) or remove those routing references; MASC will not erase \
      explicit runtime intent into [runtime].default fallback."
     config_path
     (String.concat "; " references)
@@ -769,18 +911,16 @@ let missing_reference_error
 
 let degrade_loaded_for_missing_catalog
     ( (runtimes, configured_default, assignments,
-       cross_verifier_id, media_failover, lanes) :
+       media_failover, lanes) :
       t list
       * t
       * (string * string) list
-      * string option
       * string list
       * Runtime_lane.t list )
     (report : missing_catalog_report)
   : ( ( t list
         * t
         * (string * string) list
-        * string option
         * string list
         * Runtime_lane.t list )
       * startup_degradation
@@ -837,7 +977,6 @@ let degrade_loaded_for_missing_catalog
          | _ ->
            ( Runtime_lane.make
                ~id:(Runtime_lane.id lane)
-               ~strategy:(Runtime_lane.strategy lane)
                kept_candidates
              :: kept
            , dropped_candidates
@@ -845,34 +984,8 @@ let degrade_loaded_for_missing_catalog
       lanes
       ([], [], [])
   in
-  (* A route id may name a lane (#25394). A lane-targeted route stays live
-     while any candidate survives (the lane itself degrades), and drops only
-     when the whole lane dropped; a runtime-targeted route drops when that
-     runtime is missing. Mirrors [resolve_assignment]'s lane precedence. *)
-  let is_declared_lane id =
-    List.exists (fun lane -> String.equal (Runtime_lane.id lane) id) lanes
-  in
-  let lane_fully_dropped id =
-    List.exists
-      (fun (entry : dropped_runtime_lane) -> String.equal entry.lane_id id)
-      dropped_lanes
-  in
-  let route_unavailable id =
-    if is_declared_lane id then lane_fully_dropped id else is_missing id
-  in
-  let drop_route route_name = function
-    | None -> None, None
-    | Some runtime_id when route_unavailable runtime_id ->
-      None, Some { route_name; runtime_id }
-    | Some _ as value -> value, None
-  in
-  let cross_verifier_id, cross_verifier_drop =
-    drop_route "[runtime].cross_verifier" cross_verifier_id
-  in
   let dropped_routes =
-    [ default_drop
-    ; cross_verifier_drop
-    ]
+    [ default_drop ]
     |> List.filter_map Fun.id
   in
   let kept_media_failover, dropped_media_failover =
@@ -895,7 +1008,7 @@ let degrade_loaded_for_missing_catalog
   | [] ->
     Error
       (Printf.sprintf
-         "%s: all configured runtime models are absent from the OAS capability \
+         "%s: all configured runtime models are absent from the AGENT_CORE capability \
           catalog; cannot degrade without dispatching through provider_default"
          report.config_path)
   | _ when has_routing_references ->
@@ -926,7 +1039,6 @@ let degrade_loaded_for_missing_catalog
       ( ( active_runtimes
         , configured_default
         , kept_assignments
-        , cross_verifier_id
         , kept_media_failover
         , kept_lanes )
       , degradation )
@@ -939,7 +1051,6 @@ let materialize_config
   : ( (t list
        * t
        * (string * string) list
-       * string option
        * string list
        * Runtime_lane.t list)
       * Runtime_schema.exact_output_lane_decl list
@@ -947,6 +1058,10 @@ let materialize_config
     result
   =
   let runtimes, dropped_bindings = partition_bindings cfg cfg.bindings in
+  (* Ahead of default / assignment / route validation on purpose: a dangling
+     binding makes a runtime the operator declared not exist, and the messages
+     below can only describe an id something else referenced. *)
+  let* () = validate_no_dangling_bindings ~config_path ~dropped_bindings in
   let assignments = cfg.keeper_assignments in
   let* rt =
     match cfg.default_runtime_id with
@@ -982,21 +1097,19 @@ let materialize_config
      name a lane (#25394); candidate resolution is enforced by [validate_lanes]
      inside [lanes_of_decls]. *)
   let* lanes =
-    lanes_of_decls ~config_path ~dropped_bindings runtimes cfg.lane_decls
+    lanes_of_decls ~config_path ~dropped_bindings ~default_runtime_id:rt.id runtimes
+      cfg.lane_decls
   in
-  (* One list in the order the errors surface: the route, then media_failover. *)
   let* () =
     validate_runtime_references ~config_path ~dropped_bindings runtimes lanes
-      (route_references
-         [ "cross_verifier", cfg.cross_verifier_runtime_id ]
-      @ media_failover_references cfg.media_failover)
+      (media_failover_references cfg.media_failover)
   in
   let* () =
     if validate_max_context
     then validate_runtime_max_context ~config_path runtimes
     else Ok ()
   in
-  (* The OAS catalog membership gate is intentionally not called here:
+  (* The AGENT_CORE catalog membership gate is intentionally not called here:
      [load_list] stays a routing-validity parser for tests and config probes.
      Startup callers choose fail-closed [init_default_strict] or server-visible
      degraded boot [init_default_degraded_report]. *)
@@ -1004,7 +1117,6 @@ let materialize_config
     ( runtimes
     , rt
     , assignments
-    , cfg.cross_verifier_runtime_id
     , cfg.media_failover
     , lanes )
   in
@@ -1015,7 +1127,6 @@ let load_list_internal ~(config_path : string) ~validate_max_context
   : ( (t list
        * t
        * (string * string) list
-       * string option
        * string list
        * Runtime_lane.t list)
       * Runtime_schema.exact_output_lane_decl list
@@ -1055,7 +1166,6 @@ type loaded_state =
   { default_runtime : t option
   ; runtimes : t list
   ; keeper_assignments : (string * string) list
-  ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; lanes : Runtime_lane.t list
   ; config_path : string option
@@ -1066,7 +1176,6 @@ let empty_loaded_state =
   { default_runtime = None
   ; runtimes = []
   ; keeper_assignments = []
-  ; cross_verifier_runtime_id = None
   ; media_failover = []
   ; lanes = []
   ; config_path = None
@@ -1083,14 +1192,12 @@ let set_loaded
     ( runtimes
     , rt
     , assignments
-    , cross_verifier_id
     , media_failover
     , lanes ) =
   Atomic.set loaded_state_ref
     { default_runtime = Some rt
     ; runtimes
     ; keeper_assignments = assignments
-    ; cross_verifier_runtime_id = cross_verifier_id
     ; media_failover
     ; lanes
     ; config_path = Some config_path
@@ -1104,26 +1211,37 @@ let init_default ~config_path =
   set_loaded ~config_path loaded;
   Ok ()
 
-let publish_exact_output_registry ~lanes resolver_snapshot =
-  match Runtime_exact_output_registry.publish ~lanes resolver_snapshot with
+let publish_exact_output_registry ?required_lane_ids ~lanes resolver_snapshot =
+  match
+    Runtime_exact_output_registry.publish
+      ?required_lane_ids
+      ~lanes
+      resolver_snapshot
+  with
   | Ok registry -> Ok registry
   | Error error ->
     Error (Runtime_exact_output_registry.publication_error_to_string error)
 ;;
 
 (* Fail-closed startup entry point: [load_list] (RFC-0206 routing validation)
-   PLUS the OAS capability-catalog gate. Strict callers use this so an operator
+   PLUS the AGENT_CORE capability-catalog gate. Strict callers use this so an operator
    runtime.toml whose model is absent from the catalog is rejected before boot —
    the gate that load_list intentionally no longer applies, kept out of load_list
    so unit tests stay catalog-independent. *)
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _) as loaded), exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
-       (match validate_keeper_dispatch_request_caps ~config_path loaded with
+       (match
+          validate_keeper_dispatch_request_caps
+            ~config_path
+            ~verifier_exact_slot_ids:
+              (verifier_exact_slot_ids_of_lane_decls exact_output_lane_decls)
+            loaded
+        with
         | Error msg -> Error (Runtime_config_error msg)
         | Ok () ->
           set_loaded ~config_path loaded;
@@ -1136,13 +1254,21 @@ let init_default_strict ~config_path =
 let init_default_degraded_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:false with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _) as loaded), exact_output_lane_decls) ->
+    let verifier_exact_slot_ids =
+      verifier_exact_slot_ids_of_lane_decls exact_output_lane_decls
+    in
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | None ->
        (match validate_runtime_max_context ~config_path runtimes with
         | Error msg -> Error (Runtime_config_error msg)
         | Ok () ->
-          (match validate_keeper_dispatch_request_caps ~config_path loaded with
+          (match
+             validate_keeper_dispatch_request_caps
+               ~config_path
+               ~verifier_exact_slot_ids
+               loaded
+           with
            | Error msg -> Error (Runtime_config_error msg)
            | Ok () ->
              set_loaded ~config_path loaded;
@@ -1151,7 +1277,7 @@ let init_default_degraded_report ~config_path =
        (match degrade_loaded_for_missing_catalog loaded report with
         | Error msg -> Error (Runtime_config_error msg)
         | Ok
-            (((active_runtimes, _, _, _, _, _) as degraded_loaded), degradation)
+            (((active_runtimes, _, _, _, _) as degraded_loaded), degradation)
           ->
           (match validate_runtime_max_context ~config_path active_runtimes with
            | Error msg -> Error (Runtime_config_error msg)
@@ -1159,6 +1285,7 @@ let init_default_degraded_report ~config_path =
              (match
                 validate_keeper_dispatch_request_caps
                   ~config_path
+                  ~verifier_exact_slot_ids
                   degraded_loaded
               with
               | Error msg -> Error (Runtime_config_error msg)
@@ -1191,11 +1318,10 @@ let runtimes_and_media_failover () =
   state.runtimes, state.media_failover
 ;;
 
-(* RFC persona⊥{model,runtime}: keeper→runtime assignment is sourced from
-   [[runtime.assignments]] (runtime.toml SSOT), NOT from persona JSON or keeper
-   TOML. [None] = no explicit assignment; the caller falls back to
+(* Keeper-to-runtime assignment is sourced from [[runtime.assignments]] in
+   runtime.toml, not from keeper TOML. [None] = no explicit assignment; the caller falls back to
    {!get_default_runtime_id}. The returned id is opaque (masc never parses it;
-   only the OAS adapter resolves it to provider/model/spec). Reads
+   only the AGENT_CORE adapter resolves it to provider/model/spec). Reads
    [keeper_assignments_ref], never a module-level eager binding. *)
 let runtime_id_for_keeper (keeper_name : string) : string option =
   List.assoc_opt keeper_name (runtime_state ()).keeper_assignments
@@ -1206,7 +1332,6 @@ let keeper_assignments () = (runtime_state ()).keeper_assignments
 type dashboard_runtime_defaults_snapshot =
   { default_runtime : t option
   ; runtimes : t list
-  ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option
   }
@@ -1215,16 +1340,35 @@ let dashboard_runtime_defaults_snapshot () =
   let state = runtime_state () in
   { default_runtime = state.default_runtime
   ; runtimes = state.runtimes
-  ; cross_verifier_runtime_id = state.cross_verifier_runtime_id
   ; media_failover = state.media_failover
   ; config_path = state.config_path
   }
 ;;
 
-(* [runtime].cross_verifier routing for the anti-rationalization evaluator.
-   [None] = the evaluator inherits [runtime].default. Reads the Atomic ref set by
-   [init_default]. *)
-let cross_verifier_runtime_id () = (runtime_state ()).cross_verifier_runtime_id
+(* Admitted [verifier_exact] slot ids in frozen declaration order from the
+   published exact-output registry — the single provider-selection SSOT for
+   completion-authority judgement calls (RFC-0361 D7(a)). [Error] names why the
+   lane cannot judge (registry not published, lane unconfigured, or no admitted
+   slots); there is no fallback to another route. *)
+let verifier_exact_lane_slot_ids () =
+  match Runtime_exact_output_registry.current () with
+  | Error error ->
+    Error (Runtime_exact_output_registry.publication_error_to_string error)
+  | Ok registry ->
+    (match
+       Runtime_exact_output_registry.resolve_lane
+         registry
+         ~lane_id:verifier_exact_lane_id
+     with
+     | Ok { selected_slots } ->
+       Ok
+         (List.map
+            (fun (slot : Runtime_exact_output_registry.selected_slot) ->
+               slot.slot_id)
+            selected_slots)
+     | Error error ->
+       Error (Runtime_exact_output_registry.lane_resolution_error_to_string error))
+;;
 
 (* [runtime].media_failover ordered runtime ids for RFC-0265 modality-gated
    reroute. [[]] = derive capable runtimes from declared capabilities. Reads the
@@ -1241,8 +1385,8 @@ let get_lane_by_id (id : string) : Runtime_lane.t option =
 ;;
 
 (* RFC-0207: resolve a runtime by its binding-key id ["provider.model"].  The
-   keeper turn driver dispatches to the *requested* runtime (a keeper's persona
-   [model] selection or the default) instead of unconditionally the default; an
+   keeper turn driver dispatches to the requested runtime assignment (or the
+   default) instead of unconditionally the default; an
    unknown id returns [None] so the driver fails fast (no silent substitution —
    RFC-0206 §2.1).  Reads [runtimes_ref], never a module-level eager binding. *)
 let get_runtime_by_id (id : string) : t option =
@@ -1265,16 +1409,25 @@ let max_context_of_runtime (rt : t) : int =
          rt.id)
 ;;
 
-(* Resolve a keeper assignment to either a lane or a single runtime. Lanes are
-   preferred so a lane id can shadow a runtime id (lanes are explicit operator
-   routing constructs). [Missing] means the assignment does not name a known
-   lane or runtime. *)
+(* Resolve a keeper assignment to a lane. Declared lanes are preferred so a lane
+   id can shadow a runtime id (lanes are explicit operator routing constructs).
+   An assignment naming a bare runtime gets a lane of its own rather than a
+   bare dispatch target: the lane id is what keys sticky preference and quota
+   demotion, so without one those mechanisms are simply off for that keeper.
+   [Missing] means the assignment does not name a known lane or runtime. *)
 let resolve_assignment (assigned_id : string) =
   match get_lane_by_id assigned_id with
   | Some lane -> `Lane lane
   | None ->
     (match get_runtime_by_id assigned_id with
-     | Some runtime -> `Single_runtime runtime
+     | Some runtime ->
+       let candidates =
+         match get_default_runtime () with
+         | Some default ->
+           with_terminal_default ~default_runtime_id:default.id [ runtime.id ]
+         | None -> [ runtime.id ]
+       in
+       `Lane (Runtime_lane.make ~id:runtime.id candidates)
      | None -> `Missing)
 ;;
 
@@ -1292,12 +1445,12 @@ let max_context_of_runtime_id (id : string) : int option =
   | None -> None
 ;;
 
-(* The model's declared max output tokens (OAS capability catalog SSOT), or
+(* The model's declared max output tokens (AGENT_CORE capability catalog SSOT), or
    [None] when the runtime is unknown or the catalog row leaves it unset.
-   Mirrors [max_context_of_runtime_id] but projects the OAS-typed capability
+   Mirrors [max_context_of_runtime_id] but projects the AGENT_CORE-typed capability
    rather than the runtime.toml [model] record, because max output is owned by
    the provider/model catalog, not the per-binding runtime config. This is an
-   observable capability ceiling only. OAS owns request validation and clamp
+   observable capability ceiling only. AGENT_CORE owns request validation and clamp
    policy; MASC never turns this value into a request default. *)
 let max_output_tokens_of_runtime_id (id : string) : int option =
   match get_runtime_by_id id with
@@ -1328,24 +1481,67 @@ let temperature_of_runtime_id (id : string) : float option =
 
 let top_p_of_runtime_id (id : string) : float option =
   match get_runtime_by_id id with
-  | Some rt -> rt.provider_config.top_p
+  | Some rt -> rt.model.top_p
   | None -> None
 ;;
 
-let top_k_of_runtime_id (id : string) : int option =
+(* The per-model [reasoning-effort] declared in runtime.toml
+   ([models.<id>.reasoning-effort]), or [None] when the runtime is unknown
+   or the model leaves it unset. Mirrors [temperature_of_runtime_id]. *)
+let reasoning_effort_of_runtime_id (id : string)
+  : Llm_provider.Reasoning_effort.t option
+  =
   match get_runtime_by_id id with
-  | Some rt -> rt.provider_config.top_k
+  | Some rt -> rt.model.reasoning_effort
   | None -> None
 ;;
 
-let min_p_of_runtime_id (id : string) : float option =
+let turn_timeout_s_of_runtime_id (id : string) : float option =
   match get_runtime_by_id id with
-  | Some rt -> rt.provider_config.min_p
+  | Some rt -> rt.model.turn_timeout_s
   | None -> None
+;;
+
+(* Reads the scope frozen at materialization ({!of_binding}); no
+   environment access here, so a post-load env change cannot re-select the
+   credential alias out from under the recorded window. *)
+let quota_scope_of_runtime (rt : t) : Runtime_quota_window.scope =
+  rt.quota_scope
+;;
+
+let quota_scope_of_runtime_id (id : string) : Runtime_quota_window.scope option =
+  match get_runtime_by_id id with
+  | Some rt -> Some (quota_scope_of_runtime rt)
+  | None -> None
+;;
+
+let max_prompt_bytes_of_runtime_id (id : string) : int option =
+  match get_runtime_by_id id with
+  | Some rt -> rt.model.max_prompt_bytes
+  | None -> None
+;;
+
+(* Two declarations bound a model input, and which one applies depends on the
+   path: [Keeper_antigravity_runtime] projects against the model's
+   [max-prompt-bytes], while the generic driver takes the binding's
+   [max-request-body-bytes] through [validate_request_body_cap]. A caller that
+   has to fit inside whatever this runtime will enforce has to satisfy both,
+   so the smaller declared value is the answer. They count different things —
+   prompt bytes against whole-request bytes — which is why this is the ceiling
+   for something known to be a part of the input, not a budget for the input
+   itself. *)
+let declared_input_byte_ceiling_of_runtime_id (id : string) : int option =
+  match get_runtime_by_id id with
+  | None -> None
+  | Some rt ->
+    (match rt.model.max_prompt_bytes, rt.binding.max_request_body_bytes with
+     | None, None -> None
+     | Some only, None | None, Some only -> Some only
+     | Some prompt_bytes, Some body_bytes -> Some (min prompt_bytes body_bytes))
 ;;
 
 let default_preserve_thinking_for_model (_rt : t) : bool option =
-  (* OAS owns provider/model capability truth and can preserve reasoning when
+  (* AGENT_CORE owns provider/model capability truth and can preserve reasoning when
      the provider contract requires it. MASC must not turn "request-side
      preserve is supported" into a fleet-wide replay policy; long-running
      keepers otherwise accumulate hidden reasoning across unrelated turns. *)
@@ -1663,13 +1859,6 @@ let materialize_runtime_config_text ~config_path content =
   materialize_config ~config_path cfg
 ;;
 
-let validate_runtime_config_text ~config_path content =
-  let* loaded, _exact_output_lanes =
-    materialize_runtime_config_text ~config_path content
-  in
-  validate_keeper_dispatch_request_caps ~config_path loaded
-;;
-
 let runtime_config_write_mutex = Mutex.create ()
 
 let with_runtime_config_write_lock f =
@@ -1715,16 +1904,34 @@ let runtime_config_write_outcome
        Runtime_exact_output_registry.Committed (`Durability_unconfirmed failure))
 ;;
 
+(* Pure save precondition shared by the writer and the preview endpoint: TOML
+   parse, config materialization, and dispatch-cap validation, with no write and
+   no [set_loaded]. Keeping this as the single source of the precondition means
+   [can_save] previews cannot diverge from what [commit_runtime_config_text]
+   actually enforces. *)
+let parse_and_validate_config_text ~config_path content =
+  let* loaded, exact_output_lanes =
+    materialize_runtime_config_text ~config_path content
+  in
+  (* TEL-OK: validation is pure; config commit owns visible failure reporting. *)
+  let* () =
+    validate_keeper_dispatch_request_caps
+      ~config_path
+      ~verifier_exact_slot_ids:
+        (verifier_exact_slot_ids_of_lane_decls exact_output_lanes)
+      loaded
+  in
+  Ok (loaded, exact_output_lanes)
+;;
+
 let commit_runtime_config_text
     ?(replace_file = Fs_compat.save_file_atomic_strict_staged)
     ~path
     content
   =
   let* loaded, exact_output_lanes =
-    materialize_runtime_config_text ~config_path:path content
+    parse_and_validate_config_text ~config_path:path content
   in
-  (* TEL-OK: validation is pure; config commit owns visible failure reporting. *)
-  let* () = validate_keeper_dispatch_request_caps ~config_path:path loaded in
   match
     Runtime_exact_output_registry.prepare_replacement ~lanes:exact_output_lanes
   with
@@ -1787,6 +1994,14 @@ let save_config_text ?runtime_config_path content =
     content
 ;;
 
+let validate_config_text ?runtime_config_path content =
+  let* path = runtime_config_path_result ?runtime_config_path () in
+  let* _loaded, _exact_output_lanes =
+    parse_and_validate_config_text ~config_path:path content
+  in
+  Ok ()
+;;
+
 module For_testing = struct
   type snapshot = loaded_state
   (* TEL-OK: this module only exposes pure state and validation test helpers. *)
@@ -1795,7 +2010,6 @@ module For_testing = struct
   let restore snapshot = Atomic.set loaded_state_ref snapshot
   (* TEL-OK: test-only alias of the pure reachability projection above. *)
   let keeper_dispatch_runtime_ids = keeper_dispatch_runtime_ids
-
   let save_config_text_with_sync_parent
       ?runtime_config_path
       ~sync_parent
@@ -1892,10 +2106,6 @@ let set_runtime_default ?runtime_config_path ~runtime_id () =
   set_runtime_scalar ?runtime_config_path ~key:"default" ~runtime_id:(Some runtime_id) ()
 ;;
 
-let set_runtime_cross_verifier ?runtime_config_path ~runtime_id () =
-  set_runtime_scalar ?runtime_config_path ~key:"cross_verifier" ~runtime_id ()
-;;
-
 let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =
   set_runtime_string_array ?runtime_config_path ~key:"media_failover" ~runtime_ids ()
 ;;
@@ -1917,8 +2127,3 @@ let default_max_context () : int =
    labels and returned the model-id substring. Under single-binding the model
    name sent to the runtime endpoint is the default runtime's [model.api_name].
    Falls back to ["auto"] before {!init_default} runs. *)
-let default_model_api_name () : string =
-  match get_default_runtime () with
-  | Some rt -> rt.model.api_name
-  | None -> "auto"
-;;

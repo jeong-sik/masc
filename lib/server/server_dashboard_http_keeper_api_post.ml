@@ -11,25 +11,79 @@ let json_list_length = function
   | _ -> 0
 ;;
 
-let trajectory_line_ts = Trace.line_ts
-let dedupe_thinking_lines = Trace.dedupe_thinking_lines
-
-let read_internal_history_lines = Trace.read_internal_history_lines
-let merge_keeper_trace_lines = Trace.merge_keeper_trace_lines
-
 let respond_error ?(status = `Bad_request) ?request ?ok reqd message =
   Http.Response.json_value ?request ~status (error_json ?ok message) reqd
 
-(* The rubric and the output sections are the operator's, not this handler's:
-   they live in config/prompts/judge.catchup.md next to the two other judge
-   prompts, so all three are read and overridden in one place. *)
-let keeper_catchup_judge_prompt ~keeper_name ~(digest : Keeper_catchup_digest.t) =
-  let digest_json = Keeper_catchup_digest.to_json digest in
-  Prompt_registry.render_prompt_template
-    Prompt_names.judge_catchup
-    [ "keeper_name", keeper_name
-    ; "digest_json", Yojson.Safe.pretty_to_string digest_json
-    ]
+let github_login_stream_headers origin =
+  Httpun.Headers.of_list
+    ([ "content-type", "text/event-stream"
+     ; "cache-control", "no-cache"
+     ; "connection", "close"
+     ; "x-accel-buffering", "no"
+     ]
+     @ Server_auth.cors_headers origin)
+;;
+
+let github_login_stream_send_with ~write ~flush event json =
+  write (Printf.sprintf "event: %s\ndata: %s\n\n" event (Yojson.Safe.to_string json));
+  flush ()
+;;
+
+let github_login_stream_send writer =
+  github_login_stream_send_with
+    ~write:(Httpun.Body.Writer.write_string writer)
+    ~flush:(fun () -> Httpun.Body.Writer.flush writer (fun _ -> ()))
+;;
+
+let handle_keeper_github_login_post state req reqd =
+  let req_path = Http.Request.path req in
+  let name = extract_keeper_name_for_suffix req_path keeper_suffix_github_login in
+  let config = Mcp_server.workspace_config state in
+  if name = "" then respond_error reqd "keeper name is required"
+  else if not (Keeper_config.validate_name name) then
+    respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
+  else
+    match Keeper_meta_store.read_meta config name with
+    | Error message -> respond_error ~status:`Internal_server_error reqd message
+    | Ok None ->
+      respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
+    | Ok (Some _) ->
+      let hostname =
+        match Server_utils.query_param req "hostname" with
+        | Some hostname -> hostname
+        | None -> "github.com"
+      in
+      (match
+         Keeper_github_identity.login_env
+           ~config
+           ~keeper_name:name
+       with
+       | Error message -> respond_error reqd message
+       | Ok env ->
+         let headers =
+           github_login_stream_headers (Server_auth.get_origin req)
+         in
+         let response = Httpun.Response.create ~headers `OK in
+         let writer = Httpun.Reqd.respond_with_streaming reqd response in
+         Fun.protect
+           ~finally:(fun () -> Httpun.Body.Writer.close writer)
+           (fun () ->
+              match
+                Keeper_github_identity.stream_login
+                  ~config
+                  ~keeper_name:name
+                  ~hostname
+                  ~env
+                  ~is_closed:(fun () -> Httpun.Body.Writer.is_closed writer)
+                  ~send_event:(github_login_stream_send writer)
+              with
+              | Ok () -> ()
+              | Error message when not (Httpun.Body.Writer.is_closed writer) ->
+                github_login_stream_send
+                  writer
+                  "error"
+                  (`Assoc [ "message", `String message ])
+              | Error _ -> ()))
 ;;
 
 let parse_fusion_result text =
@@ -37,98 +91,97 @@ let parse_fusion_result text =
   | Yojson.Json_error _ -> `Assoc [ "ok", `Bool false; "error", `String text ]
 ;;
 
-let is_finite_float value =
-  match classify_float value with
-  | FP_normal | FP_subnormal | FP_zero -> true
-  | FP_infinite | FP_nan -> false
-;;
+(* Operator-initiated deliberation: runs [Fusion_tool.handle] from an HTTP
+   request with the prompt, preset and topology the operator supplied. The
+   judge-of-judges and staged topologies the tool advertises had no reachable
+   HTTP surface before this: only a keeper deciding on its own to call the tool
+   could exercise them. The run is owned by [name], so its wake, board post and
+   chat delivery land on that keeper exactly as a self-initiated run would.
 
-let handle_keeper_catchup_judge_post state req reqd body_str =
+   Validation stays in the tool. Preset/topology/prompt rejections come back as
+   the tool's own typed refusals rather than a second copy of those rules here,
+   which is what keeps this endpoint from drifting away from what a keeper-side
+   call would do. *)
+let handle_keeper_fusion_post state req reqd body_str =
   let req_path = Http.Request.path req in
-  let name = extract_keeper_name_for_suffix req_path keeper_suffix_catchup_judge in
+  let name = extract_keeper_name_for_suffix req_path keeper_suffix_fusion in
   if name = "" then respond_error reqd "keeper name required"
   else if not (Keeper_config.validate_name name) then
     respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
   else
     try
       let args = Yojson.Safe.from_string body_str in
-      let since_unix = Safe_ops.json_float_opt "since_unix" args in
-      match since_unix with
-      | None -> respond_error reqd "since_unix is required"
-      | Some since_unix when not (is_finite_float since_unix) ->
-        respond_error reqd "since_unix must be a finite unix-seconds float"
-      | Some since_unix when since_unix < 0.0 ->
-        respond_error reqd "since_unix must be non-negative"
-      | Some since_unix ->
+      let prompt =
+        match Json_util.assoc_member_opt "prompt" args with
+        | Some (`String value) -> String.trim value
+        | _ -> ""
+      in
+      if prompt = "" then respond_error reqd "prompt is required"
+      else
         let config = Mcp_server.workspace_config state in
         let now_unix = Time_compat.now () in
-        let digest =
-          Keeper_catchup_digest.build ~base_path:config.base_path
-            ~keeper_name:name ~since_unix ~now_unix
-        in
-        (match keeper_catchup_judge_prompt ~keeper_name:name ~digest with
-         | Error detail ->
-           respond_error ~status:`Internal_server_error reqd
-             ("judge.catchup prompt unavailable: " ^ detail)
-         | Ok prompt ->
         match Eio_context.get_root_switch_opt (), Eio_context.get_net_opt () with
-         | None, _ | _, None ->
-           respond_error reqd "fusion requires the server root switch + net (unavailable)"
-         | Some sw, Some net ->
-           (match Fusion_config_loader.load ~base_path:config.base_path with
-            | Error msg -> respond_error reqd msg
-            | Ok policy ->
-              let fusion_args =
-                `Assoc
-                  [ "prompt", `String prompt
-                  ; "web_tools", `Bool false
-                  ; "topology", `String "simple"
-                  ]
-              in
-              let raw =
-                Fusion_tool.handle
-                  ~sw
-                  ~net
-                  ~base_dir:config.base_path
-                  ~keeper:name
-                  ~now_unix
-                  ~policy
-                  ~args:fusion_args
-                  ()
-              in
-              let fusion_json = parse_fusion_result raw in
-              (match Json_util.assoc_member_opt "ok" fusion_json with
-               | Some (`Bool true) ->
-                 (match Json_util.assoc_member_opt "run_id" fusion_json with
-                  | Some (`String run_id) ->
-                    Http.Response.json_value ~compress:true ~request:req
-                      (`Assoc
-                         [ "ok", `Bool true
-                         ; "status", `String "fusion_started"
-                         ; "run_id", `String run_id
-                         ; "owner_keeper", `String name
-                         ; "fusion_route", `String ("/#fusion?run_id=" ^ run_id)
-                         ; "digest", Keeper_catchup_digest.to_json digest
-                         ])
-                      reqd
-                  | _ -> respond_error reqd "fusion accepted without canonical run_id")
-               | _ ->
-                 let message =
-                   match Json_util.assoc_member_opt "error" fusion_json with
-                   | Some (`String msg) -> msg
-                   | _ -> Yojson.Safe.to_string fusion_json
-                 in
-                 respond_error reqd message)))
+        | None, _ | _, None ->
+          respond_error reqd "fusion requires the server root switch + net (unavailable)"
+        | Some sw, Some net ->
+          (match Fusion_config_loader.load ~base_path:config.base_path with
+           | Error msg -> respond_error reqd msg
+           | Ok policy ->
+             let string_arg key =
+               match Json_util.assoc_member_opt key args with
+               | Some (`String value) when String.trim value <> "" ->
+                 [ key, `String (String.trim value) ]
+               | _ -> []
+             in
+             let web_tools =
+               match Json_util.assoc_member_opt "web_tools" args with
+               | Some (`Bool value) -> [ "web_tools", `Bool value ]
+               | _ -> []
+             in
+             (* preset/topology 를 생략하면 도구의 기본값(default_preset / simple)이
+                그대로 적용된다 — 여기서 기본값을 새로 정하지 않는다. *)
+             let fusion_args =
+               `Assoc
+                 (("prompt", `String prompt)
+                  :: (string_arg "preset" @ string_arg "topology" @ web_tools))
+             in
+             let raw =
+               Fusion_tool.handle ~sw ~net ~base_dir:config.base_path ~keeper:name
+                 ~now_unix ~policy ~args:fusion_args ()
+             in
+             let fusion_json = parse_fusion_result raw in
+             (match Json_util.assoc_member_opt "ok" fusion_json with
+              | Some (`Bool true) ->
+                (match Json_util.assoc_member_opt "run_id" fusion_json with
+                 | Some (`String run_id) ->
+                   Http.Response.json_value ~compress:true ~request:req
+                     (`Assoc
+                        [ "ok", `Bool true
+                        ; "status", `String "fusion_started"
+                        ; "run_id", `String run_id
+                        ; "owner_keeper", `String name
+                        ; "fusion_route", `String ("/#fusion?run_id=" ^ run_id)
+                        ])
+                     reqd
+                 | _ -> respond_error reqd "fusion accepted without canonical run_id")
+              | _ ->
+                let message =
+                  match Json_util.assoc_member_opt "error" fusion_json with
+                  | Some (`String msg) -> msg
+                  | _ ->
+                    (match Json_util.assoc_member_opt "reason" fusion_json with
+                     | Some (`String msg) -> msg
+                     | _ -> "fusion refused the request")
+                in
+                respond_error reqd message))
     with
-    | Yojson.Json_error msg -> respond_error reqd ("invalid json: " ^ msg)
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> respond_error reqd (Printexc.to_string exn)
+    | Yojson.Json_error msg -> respond_error reqd ("invalid JSON body: " ^ msg)
 ;;
 
 (* Trajectory preview helpers moved to Server_dashboard_http_keeper_api_types. *)
 
 let stat_json_of_path = Checkpoints.stat_json_of_path
-let oas_checkpoint_summary_json = Checkpoints.oas_checkpoint_summary_json
+let agent_core_checkpoint_summary_json = Checkpoints.agent_core_checkpoint_summary_json
 let keeper_checkpoint_inventory_json = Checkpoints.inventory_json
 
 let linked_artifact_json = Checkpoints.linked_artifact_json
@@ -138,13 +191,9 @@ include Server_dashboard_http_keeper_runtime_manifest_scan
 (* Runtime-manifest receipt + scan-summary helpers in Server_dashboard_http_keeper_api_scan_summary. *)
 module Scan_summary = Server_dashboard_http_keeper_api_scan_summary
 
-let receipt_row_matches = Scan_summary.receipt_row_matches
 let read_receipt_rows = Scan_summary.read_receipt_rows
-let unique_ints = Scan_summary.unique_ints
-let json_int_list = Scan_summary.json_int_list
 let event_bus_summary_json = Scan_summary.event_bus_summary_json
 
-let max_int_list_opt = Scan_summary.max_int_list_opt
 let selected_keeper_turn_id = Scan_summary.selected_keeper_turn_id
 let terminal_event_present_for_turn = Scan_summary.terminal_event_present_for_turn
 
@@ -169,7 +218,7 @@ let keeper_runtime_trace_json (config : Workspace.config) (name : string)
   else
     let trace_id_query =
       match trace_id with
-      | Some value -> String_util.trim_to_option value
+      | Some value -> String_util.trim_nonempty value
       | _ -> None
     in
     let missing_trace_id_json =
@@ -258,8 +307,6 @@ let keeper_runtime_trace_json (config : Workspace.config) (name : string)
               ("manifest_total_rows_scope", `String manifest_scan.scan_scope);
               ( "manifest_total_rows_exact",
                 `Bool (manifest_scan.scanned_lines < manifest_scan.scan_line_limit) );
-              ("manifest_scan_line_limit", `Int manifest_scan.scan_line_limit);
-              ("manifest_scanned_lines", `Int manifest_scan.scanned_lines);
               ( "manifest_scan_diagnostics"
               , runtime_manifest_scan_diagnostics_json manifest_scan );
               ("manifest_returned_rows", `Int (List.length manifest_rows));
@@ -284,7 +331,7 @@ let keeper_runtime_trace_json (config : Workspace.config) (name : string)
                     ( "checkpoints",
                       `List
                         (List.map
-                           (linked_artifact_json ~kind:"oas_checkpoint")
+                           (linked_artifact_json ~kind:"agent_core_checkpoint")
                            checkpoint_paths) );
                     ( "tool_call_logs",
                       `List
@@ -308,6 +355,37 @@ let handle_keeper_checkpoints_post state req reqd body_str =
       let args = Yojson.Safe.from_string body_str in
       let action = Safe_ops.json_string ~default:"" "action" args in
       match action with
+      | ("preview_purge" | "apply_purge") as purge_action ->
+          let apply = String.equal purge_action "apply_purge" in
+          (match Checkpoints.purge_current config ~keeper_name:name ~apply with
+           | Error error ->
+             let status =
+               match error with
+               | Checkpoints.Purge_invalid_keeper_name _ -> `Bad_request
+               | Checkpoints.Purge_keeper_not_found _ -> `Not_found
+               | Purge_keeper_active _
+               | Purge_checkpoint_invalid _
+               | Purge_source_changed -> `Conflict
+               | Purge_checkpoint_unavailable _
+               | Purge_backup_failed _
+               | Purge_install_failed _ -> `Internal_server_error
+             in
+             respond_error
+               ~status
+               ~request:req
+               ~ok:false
+               reqd
+               (Checkpoints.purge_error_to_string error)
+           | Ok result ->
+             let (_status, inventory) =
+               keeper_checkpoint_inventory_json config name
+             in
+             let response =
+               match Checkpoints.purge_result_json ~action:purge_action result with
+               | `Assoc fields -> `Assoc (("inventory", inventory) :: fields)
+               | other -> other
+             in
+             Http.Response.json_value ~compress:true ~request:req response reqd)
       | "delete_history" ->
           let snapshot_ids =
             Safe_ops.json_string_list "snapshot_ids" args
@@ -332,7 +410,7 @@ let handle_keeper_checkpoints_post state req reqd body_str =
              | Ok trace_id ->
                  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
                  let (deleted, missing) =
-                   Keeper_checkpoint_store.delete_oas_history_files
+                   Keeper_checkpoint_store.delete_agent_core_history_files
                      ~session_dir ~snapshot_ids
                  in
                  let (_status, inventory) =
@@ -379,7 +457,6 @@ let dashboard_config_bool_fields =
 
 let dashboard_config_string_list_fields =
   [
-    "active_goal_ids";
     "mention_targets";
     "allowed_paths";
   ]
@@ -392,7 +469,11 @@ let dashboard_config_string_list_fields =
 let confirm_context_shrink_field = "confirm_context_shrink"
 
 let dashboard_config_patch_allowed_fields =
-  [ "name"; "max_context_override"; confirm_context_shrink_field ]
+  [ "name"
+  ; "max_context_override"
+  ; "autonomous_wake_prompt"
+  ; confirm_context_shrink_field
+  ]
   @
   dashboard_config_string_fields
   @ dashboard_config_bool_fields
@@ -415,85 +496,6 @@ let duplicate_assoc_keys fields =
         else loop (key :: seen) dup rest
   in
   loop [] [] fields
-
-let keeper_chat_recovery_error_status = function
-  | Keeper_chat_queue.Invalid_input _ -> `Bad_request
-  | Keeper_chat_queue.Receipt_already_terminal _
-  | Keeper_chat_queue.Receipt_not_recovery_required _
-  | Keeper_chat_queue.Receipt_not_pending _
-  | Keeper_chat_queue.Pending_revision_mismatch _
-  | Keeper_chat_queue.Recovery_revision_mismatch _
-  | Keeper_chat_queue.Recovery_lease_mismatch _ ->
-      `Conflict
-  | Keeper_chat_queue.Persistence_not_configured
-  | Keeper_chat_queue.Snapshot_unavailable _
-  | Keeper_chat_queue.Revision_exhausted
-  | Keeper_chat_queue.Persist_failed _ ->
-      `Service_unavailable
-
-let handle_keeper_chat_recovery_post state agent_name req reqd ~keeper_name
-    ~raw_receipt_id body_str =
-  let respond ?(status = `OK) json =
-    Http.Response.json_value ~status ~request:req json reqd
-  in
-  let parsed =
-    try
-      Yojson.Safe.from_string body_str
-      |> Keeper_chat_recovery_command.parse_request
-    with
-    | Yojson.Json_error detail ->
-      Error
-        (Keeper_chat_recovery_command.Invalid_field
-           { field = "request body"; expectation = "is invalid JSON: " ^ detail })
-  in
-  match parsed with
-  | Error error ->
-    respond
-      ~status:`Bad_request
-      (`Assoc
-        [ "schema", `String Keeper_chat_recovery_command.result_schema
-        ; "ok", `Bool false
-        ; "error", Keeper_chat_recovery_command.input_error_to_json error
-        ])
-  | Ok recovery_request ->
-    (match
-       Keeper_chat_recovery_command.make
-         ~keeper_name
-         ~raw_receipt_id
-         recovery_request
-     with
-     | Error error ->
-       respond
-         ~status:`Bad_request
-         (`Assoc
-           [ "schema", `String Keeper_chat_recovery_command.result_schema
-           ; "ok", `Bool false
-           ; "error", Keeper_chat_recovery_command.input_error_to_json error
-           ])
-     | Ok command ->
-       let result =
-         Keeper_chat_recovery_command.execute ~now:(Time_compat.now ()) command
-       in
-       let audit =
-         Keeper_chat_recovery_command.audit
-           (Mcp_server.workspace_config state)
-           ~actor:agent_name
-           command
-           ~outcome:
-             (match result with
-              | Ok _ -> Audit_log.Success
-              | Error error ->
-                Audit_log.Failure
-                  (Keeper_chat_queue.mutation_error_to_string error))
-         |> Keeper_chat_recovery_command.audit_json
-       in
-       (match result with
-        | Ok report ->
-          respond (Keeper_chat_recovery_command.success_json ~audit command report)
-        | Error error ->
-          respond
-            ~status:(keeper_chat_recovery_error_status error)
-            (Keeper_chat_recovery_command.mutation_error_json ~audit error)))
 
 let keeper_board_attention_quarantine_error_status = function
   | Keeper_board_attention_quarantine_command.Candidate_state_conflict _
@@ -600,6 +602,20 @@ let validate_dashboard_max_context_override = function
       Keeper_config.validate_max_context_override_value value |> Result.map ignore
   | other -> dashboard_field_type_error "max_context_override" "an integer or null" other
 
+(* Same shared contract as every other authoring surface for this value
+   (fleet env, keeper TOML, keeper_up args): blank rejected, 2048-byte
+   bound. Null clears the keeper override and falls back to the fleet
+   setting. *)
+let validate_dashboard_autonomous_wake_prompt = function
+  | `Null -> Ok ()
+  | `String raw ->
+      (match Env_config_keeper.KeeperAutonomous.validate_wake_prompt raw with
+       | Ok (_ : string) -> Ok ()
+       | Error reason ->
+           Error (Printf.sprintf "autonomous_wake_prompt: %s" reason))
+  | other ->
+      dashboard_field_type_error "autonomous_wake_prompt" "a string or null" other
+
 let validate_dashboard_config_field key value =
   if key = "name" then
     match value with
@@ -607,6 +623,8 @@ let validate_dashboard_config_field key value =
     | other -> dashboard_field_type_error key "a string" other
   else if key = "max_context_override" then
     validate_dashboard_max_context_override value
+  else if key = "autonomous_wake_prompt" then
+    validate_dashboard_autonomous_wake_prompt value
   else if key = confirm_context_shrink_field then
     (match value with
      | `Bool _ -> Ok ()
@@ -705,20 +723,9 @@ let prevalidate_config_update
       (parsed : Keeper_turn_up_args.parsed_args)
   =
   match old.latched_reason with
-  | Some Keeper_latched_reason.Dead_tombstone ->
-    Error "keeper identity is terminal; create a fresh Keeper"
-  | Some
-      ( Keeper_latched_reason.Operator_paused _
-      | Keeper_latched_reason.Transcript_corruption_reset_required )
+  | Some (Keeper_latched_reason.Operator_paused _)
   | None ->
-    (match
-       Keeper_turn_up_update.resolve_active_goal_ids
-         config
-         parsed
-         old.active_goal_ids
-     with
-     | Error _ as error -> error
-     | Ok _ ->
+    (
        let allowed_paths =
          match parsed.allowed_paths_opt with
          | Some allowed_paths -> allowed_paths
@@ -835,8 +842,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                         }
                       in
                       (match
-                         Keeper_turn_up_args.parse
-                           ~allow_sandbox_fields:true keeper_ctx args_with_name
+                         Keeper_turn_up_args.parse keeper_ctx args_with_name
                        with
                        | Error result ->
                            respond_error reqd
@@ -861,11 +867,8 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                                 ~detail
                                 ()
                             | Ok () ->
-                           (* Dashboard edits are user-initiated and win for the
-                              fields they touch; update_keeper now persists via
-                              a CAS merge ([heartbeat_fields_from_disk]) so a
-                              concurrent keeper turn's cumulative usage counters
-                              are not rewound by this snapshot-derived write.
+                           (* Dashboard edits commit a closed Owner profile
+                              command, so they cannot overwrite runtime counters.
                               [preserve_prompt_defaults] keeps existing prompt
                               fields when the request omits them. *)
                            let result =
@@ -1074,16 +1077,10 @@ type parsed_bulk_directive =
   | Bulk_resume_owner of bulk_resume_target list
 
 let required_resume_owner_request json =
-  match
-    Safe_ops.json_int_opt "owner_nonce" json,
-    Safe_ops.json_string_opt "operator_operation_id" json
-  with
-  | Some owner_nonce, Some operator_operation_id ->
-    Ok
-      Keeper_paused_work_resume_transaction.
-        { owner_nonce; operator_operation_id }
-  | None, _ -> Error "resume requires integer \"owner_nonce\""
-  | _, None -> Error "resume requires string \"operator_operation_id\""
+  match Safe_ops.json_string_opt "operator_operation_id" json with
+  | Some operator_operation_id ->
+    Ok Keeper_paused_work_resume_transaction.{ operator_operation_id }
+  | None -> Error "resume requires string \"operator_operation_id\""
 
 let parse_keeper_directive_json json =
   (* STR-OK: HTTP boundary parse of the untrusted wire "action" field into a
@@ -1172,10 +1169,13 @@ let parse_bulk_directive_json json =
   | None -> Error "missing \"action\" field"
 
 module For_testing = struct
+  let github_login_stream_headers = github_login_stream_headers
+  let github_login_stream_send_with = github_login_stream_send_with
+
   let parse_resume_request json =
     match parse_keeper_directive_json json with
     | Ok (Resume_owner request) ->
-      Ok (request.owner_nonce, request.operator_operation_id)
+      Ok request.operator_operation_id
     | Ok (Plain_directive _) -> Error "request is not Resume_owner"
     | Error _ as error -> error
   ;;
@@ -1186,9 +1186,7 @@ module For_testing = struct
       Ok
         (List.map
            (fun target ->
-              ( target.name
-              , target.request.owner_nonce
-              , target.request.operator_operation_id ))
+              (target.name, target.request.operator_operation_id))
            targets)
     | Ok (Bulk_plain _) -> Error "request is not bulk Resume_owner"
     | Error _ as error -> error
@@ -1206,12 +1204,8 @@ let resume_error_status (error : Keeper_paused_work_resume_transaction.error) =
   | Durable_meta_missing -> `Not_found
   | Reservation_conflict _
   | Receipt_conflict _
-  | Durable_owner_nonce_changed _
   | Durable_owner_identity_changed
   | Durable_owner_not_paused
-  | Durable_owner_dead_tombstone
-  | Durable_owner_transcript_reset_required
-  | Registry_owner_nonce_changed _
   | Registry_owner_identity_changed
   | Registry_owner_not_paused _ -> `Conflict
   | Receipt_lock_failed _
@@ -1226,7 +1220,6 @@ let resume_receipt_json
   `Assoc
     [ "keeper_name", `String receipt.keeper_name
     ; "expected_trace_id", `String (Keeper_id.Trace_id.to_string receipt.expected_trace_id)
-    ; "expected_generation", `Int receipt.expected_generation
     ; "operator_operation_id", `String receipt.operator_operation_id
     ; "requested_at", `Float receipt.requested_at
     ; "operation", `String "resume_owner"
@@ -1263,38 +1256,35 @@ let resume_result_json ~name
 let run_resume_owner config ~name request =
   Keeper_paused_work_resume_transaction.resume config ~keeper_name:name request
 
-let persist_directive_pause ~config ~name
-    (meta : Keeper_meta_contract.keeper_meta) =
-  let updated_meta =
-    { meta with
-      paused = true
-    ; runtime = { meta.runtime with last_blocker = None }
-    ; updated_at = Keeper_meta_contract.now_iso ()
-    }
-  in
-  (* Pause toggle via CAS merge: do not rewind a concurrent turn's cumulative
-     usage counters. Resume is owned exclusively by the receipt transaction. *)
+let persist_directive_pause ~config ~name =
   match
-       Keeper_meta_store.write_meta_with_merge
-         ~merge:Keeper_meta_merge.monotonic_usage_counters
-         config
-         updated_meta
+    Keeper_owner_registry.apply_meta
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:name
+      (Keeper_owner_reducer.Pause
+         { reason =
+             Keeper_latched_reason.Operator_paused
+               { operator_actor = Keeper_latched_reason.Grpc_directive }
+         ; updated_at = Keeper_meta_contract.now_iso ()
+         })
   with
-  | Ok () -> Ok ()
-  | Error err ->
+  | Ok (Some _) -> Ok ()
+  | Ok None -> Error "owner removed Keeper metadata during pause"
+  | Error error ->
+    let detail = Keeper_owner_registry.command_error_to_string error in
     Log.Keeper.warn
-      "directive pause: write_meta failed for %s: %s"
+      "directive pause: owner command failed for %s: %s"
       name
-      err;
+      detail;
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string PausedStatePersistErrors)
       ~labels:
         [ ( "phase"
           , Keeper_paused_state_persist_phase.(to_label Directive) )
-        ; "reason", "write_meta_error"
+        ; "reason", "owner_command_error"
         ]
       ();
-    Error err
+    Error detail
 
 let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_str =
   let req_path = Http.Request.path req in
@@ -1316,9 +1306,8 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
       (match run_resume_owner config ~name request with
        | Error error ->
          Log.Keeper.warn
-           "directive resume_owner rejected for %s generation=%d operation_id=%s: %s"
+           "directive resume_owner rejected for %s operation_id=%s: %s"
            name
-           request.owner_nonce
            request.operator_operation_id
            (Keeper_paused_work_resume_transaction.error_to_string error);
          Http.Response.json_value
@@ -1339,16 +1328,14 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
          (match success.projection with
           | Applied _ ->
             Log.Keeper.info
-              "directive resume_owner applied for %s generation=%d operation_id=%s"
+              "directive resume_owner applied for %s operation_id=%s"
               name
-              request.owner_nonce
               request.operator_operation_id;
             Http.Response.json_value ~compress:true ~request:req response reqd
           | Committed_followup_failed failure ->
             Log.Keeper.warn
-              "directive resume_owner committed with pending projection for %s generation=%d operation_id=%s: %s"
+              "directive resume_owner committed with pending projection for %s operation_id=%s: %s"
               name
-              request.owner_nonce
               request.operator_operation_id
               (resume_failure_message failure);
             Http.Response.json_value
@@ -1370,8 +1357,7 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
       let proceed meta_opt =
         let persist_result =
           match plain_directive, meta_opt with
-          | Plain_pause, Some meta ->
-            persist_directive_pause ~config ~name meta
+          | Plain_pause, Some _ -> persist_directive_pause ~config ~name
           | Plain_pause, None | Plain_wakeup, _ -> Ok ()
         in
         match persist_result with
@@ -1383,14 +1369,16 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
                [ "ok", `Bool false
                ; "action", `String action_str
                ; "name", `String name
-               ; "error", `String error
+               ; ( "error"
+                 , `String error )
                ])
             reqd
         | Ok () ->
           let resolved_agent_name =
             match Keeper_registry_lookup.find_by_name name, meta_opt with
             | Some entry, _ -> entry.meta.agent_name
-            | None, Some meta -> meta.agent_name
+            | None, Some (meta : Keeper_meta_contract.keeper_meta) ->
+              meta.agent_name
             | None, None -> Keeper_identity.keeper_agent_name name
           in
           Keeper_keepalive.process_directive
@@ -1467,7 +1455,7 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
 
 (** Bulk variant of [handle_keeper_directive_post]. Pause and wakeup accept
     [{names: [name, ...]}]. Resume accepts exact per-owner
-    [{targets: [{name, owner_nonce, operator_operation_id}, ...]}] fences.
+    [{targets: [{name, operator_operation_id}, ...]}] fences.
     Cache invalidation still runs once for the whole batch. *)
 let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_str =
   let parsed =
@@ -1530,8 +1518,7 @@ let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd 
               in
               let persist_result =
                 match plain_directive, meta_opt with
-                | Plain_pause, Some meta ->
-                  persist_directive_pause ~config ~name meta
+                | Plain_pause, Some _ -> persist_directive_pause ~config ~name
                 | Plain_pause, None | Plain_wakeup, _ -> Ok ()
               in
               (match persist_result with
@@ -1539,13 +1526,15 @@ let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd 
                  `Assoc
                    [ "name", `String name
                    ; "ok", `Bool false
-                   ; "error", `String error
+                   ; ( "error"
+                     , `String error )
                    ]
                | Ok () ->
                  let resolved_agent_name =
                    match Keeper_registry_lookup.find_by_name name, meta_opt with
                    | Some entry, _ -> entry.meta.agent_name
-                   | None, Some meta -> meta.agent_name
+                   | None, Some (meta : Keeper_meta_contract.keeper_meta) ->
+                     meta.agent_name
                    | None, None -> Keeper_identity.keeper_agent_name name
                  in
                  Keeper_keepalive.process_directive
@@ -1594,5 +1583,63 @@ let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd 
       else
         Http.Response.json_value ~status:`Internal_server_error ~compress:true
           ~request:req response reqd
+
+(* RFC-0366. One sentence for one turn. The store rejects an oversized note
+   rather than truncating it, and this boundary passes that refusal through
+   with the caller's own byte count so an operator can see what was rejected
+   instead of guessing which half arrived. *)
+let handle_keeper_operator_note_post state agent_name req reqd body_str =
+  let req_path = Http.Request.path req in
+  let name = extract_keeper_name_for_post req_path keeper_suffix_operator_note in
+  if String.length name = 0 then respond_error reqd "keeper name is required"
+  else
+    let parsed =
+      match Yojson.Safe.from_string body_str with
+      | `Assoc fields ->
+        (match List.assoc_opt "text" fields with
+         | Some (`String text) -> Ok text
+         | Some _ -> Error "text must be a string"
+         | None -> Error "text is required")
+      | _ -> Error "body must be a JSON object"
+      | exception Yojson.Json_error message ->
+        Error (Printf.sprintf "invalid json: %s" message)
+    in
+    match parsed with
+    | Error message -> respond_error ~ok:false reqd message
+    | Ok text ->
+      let config = Mcp_server.workspace_config state in
+      (match
+         Keeper_operator_note.write ~config ~keeper:name ~text ~created_by:agent_name
+       with
+       | Ok note ->
+         Log.Keeper.info
+           "operator note stored for %s by %s bytes=%d"
+           name
+           agent_name
+           (String.length text);
+         Http.Response.json_value ~compress:true ~request:req
+           (`Assoc
+              [ "ok", `Bool true
+              ; "keeper", `String name
+              ; "pending", `Bool true
+              ; "note", Keeper_operator_note.to_json note
+              ])
+           reqd
+       | Error error ->
+         let status =
+           match error with
+           | Keeper_operator_note.Write_failed _ -> `Internal_server_error
+           | Keeper_operator_note.Unknown_keeper _
+           | Keeper_operator_note.Empty_text
+           | Keeper_operator_note.Too_large _ -> `Bad_request
+         in
+         Http.Response.json_value ~status ~request:req
+           (`Assoc
+              [ "ok", `Bool false
+              ; "keeper", `String name
+              ; ( "error"
+                , `String (Keeper_operator_note.write_error_to_string error) )
+              ])
+           reqd)
 
 (** Keeper GET sub-routes handler: /config, /chat/history, /trajectory. *)

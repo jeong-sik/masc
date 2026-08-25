@@ -79,18 +79,6 @@ let init_local_repo path =
   in
   ()
 
-let contains_substring s sub =
-  let sub_len = String.length sub in
-  sub_len = 0
-  ||
-  let s_len = String.length s in
-  let rec aux i =
-    if i + sub_len > s_len then false
-    else if String.sub s i sub_len = sub then true
-    else aux (i + 1)
-  in
-  aux 0
-
 let sample_repo ~url local_path =
   {
     id = "test-repo";
@@ -142,6 +130,96 @@ let test_get_branches () =
           | Ok branches ->
               Alcotest.(check bool) "has main" true (List.mem "main" branches)))
 
+let test_get_origin_url () =
+  with_temp_dir (fun tmp ->
+      let source = Filename.concat tmp "source" in
+      init_local_repo source;
+      (match
+         run_cmd
+           ~cwd:source
+           [ "git"; "remote"; "add"; "origin"; "https://example.test/owner/repo.git" ]
+       with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail ("git remote add failed: " ^ e));
+      match Repo_git.get_origin_url ~local_path:source () with
+      | Ok url ->
+          Alcotest.(check string)
+            "origin URL"
+            "https://example.test/owner/repo.git"
+            url
+      | Error e ->
+        Alcotest.fail
+          ("get_origin_url failed: " ^ Repo_git.origin_lookup_error_to_string e))
+
+let test_get_origin_url_reports_missing_without_text_matching () =
+  with_temp_dir (fun tmp ->
+    let source = Filename.concat tmp "source" in
+    init_local_repo source;
+    match Repo_git.get_origin_url ~local_path:source () with
+    | Error Repo_git.Origin_missing -> ()
+    | Error error ->
+      Alcotest.failf
+        "unexpected missing-origin outcome: %s"
+        (Repo_git.origin_lookup_error_to_string error)
+    | Ok url -> Alcotest.failf "missing origin returned URL %s" url)
+
+let test_get_origin_url_times_out_on_stalled_config () =
+  with_temp_dir (fun tmp ->
+      let fake_bin = Filename.concat tmp "bin" in
+      Unix.mkdir fake_bin 0o755;
+      let fake_git = Filename.concat fake_bin "git" in
+      write_file fake_git "#!/bin/sh\nsleep 30\n";
+      Unix.chmod fake_git 0o755;
+      let old_path = Sys.getenv "PATH" in
+      Fun.protect
+        ~finally:(fun () -> Unix.putenv "PATH" old_path)
+        (fun () ->
+          Unix.putenv "PATH" (fake_bin ^ ":" ^ old_path);
+          let started_at = Unix.gettimeofday () in
+          match Repo_git.get_origin_url ~local_path:tmp () with
+          | Ok url -> Alcotest.failf "expected timeout, got origin %s" url
+          | Error (Repo_git.Origin_lookup_timed_out error) ->
+              let elapsed = Unix.gettimeofday () -. started_at in
+              Alcotest.(check bool)
+                "reports timeout"
+                true
+                (String_util.contains_substring error "timeout after 5s");
+              Alcotest.(check bool)
+                "returns within a bounded interval"
+                true
+                (elapsed >= 4.0 && elapsed < 10.0)
+          | Error error ->
+            Alcotest.failf
+              "expected typed timeout, got %s"
+              (Repo_git.origin_lookup_error_to_string error)))
+
+let test_get_origin_url_uses_read_only_git_env () =
+  with_temp_dir (fun tmp ->
+    let source = Filename.concat tmp "source" in
+    init_local_repo source;
+    (match
+       run_cmd
+         ~cwd:source
+         [ "git"; "remote"; "add"; "origin"; "https://example.test/owner/repo.git" ]
+     with
+     | Ok () -> ()
+     | Error e -> Alcotest.fail ("git remote add failed: " ^ e));
+    let captured = ref [] in
+    Fun.protect
+      ~finally:(fun () -> Exec_tap.disable ())
+      (fun () ->
+         Exec_tap.enable ~writer:(fun line -> captured := line :: !captured);
+         match Repo_git.get_origin_url ~local_path:source () with
+         | Error e ->
+           Alcotest.fail
+             ("origin failed: " ^ Repo_git.origin_lookup_error_to_string e)
+         | Ok _ ->
+           let joined = String.concat "\n" (List.rev !captured) in
+           Alcotest.(check bool)
+             "sets GIT_OPTIONAL_LOCKS env key"
+             true
+             (String_util.contains_substring joined "\"GIT_OPTIONAL_LOCKS\"")))
+
 let test_fetch () =
   with_temp_dir (fun tmp ->
       let source = Filename.concat tmp "source" in
@@ -172,7 +250,7 @@ let test_get_recent_commits () =
               Alcotest.(check bool) "at least 1 commit" true
                 (List.length commits >= 1);
               Alcotest.(check bool) "contains initial" true
-                (List.exists (fun s -> contains_substring s "initial") commits)))
+                (List.exists (fun s -> String_util.contains_substring s "initial") commits)))
 
 let test_status_summary_counts_porcelain_rows () =
   with_temp_dir (fun tmp ->
@@ -190,13 +268,13 @@ let test_status_summary_counts_porcelain_rows () =
       | Ok () -> ()
       | Error e -> Alcotest.fail ("git commit tracked failed: " ^ e));
       let repo = sample_repo ~url:source source in
-      (match Repo_git.status_summary ~repository:repo with
+      (match Repo_git.status_summary ~repository:repo () with
       | Error e -> Alcotest.fail ("clean status failed: " ^ e)
       | Ok summary ->
           Alcotest.(check int) "clean changed" 0 summary.changed_files);
       write_file tracked "modified\n";
       write_file (Filename.concat source "untracked.txt") "new\n";
-      (match Repo_git.status_summary ~repository:repo with
+      (match Repo_git.status_summary ~repository:repo () with
       | Error e -> Alcotest.fail ("dirty status failed: " ^ e)
       | Ok summary ->
           Alcotest.(check int) "dirty changed" 2 summary.changed_files;
@@ -206,7 +284,7 @@ let test_status_summary_counts_porcelain_rows () =
       (match run_cmd ~cwd:source ["git"; "add"; "tracked.txt"] with
       | Ok () -> ()
       | Error e -> Alcotest.fail ("git add modified failed: " ^ e));
-      match Repo_git.status_summary ~repository:repo with
+      match Repo_git.status_summary ~repository:repo () with
       | Error e -> Alcotest.fail ("staged status failed: " ^ e)
       | Ok summary ->
           Alcotest.(check int) "staged changed" 2 summary.changed_files;
@@ -224,16 +302,16 @@ let test_status_summary_uses_read_only_git_conventions () =
         ~finally:(fun () -> Exec_tap.disable ())
         (fun () ->
           Exec_tap.enable ~writer:(fun line -> captured := line :: !captured);
-          match Repo_git.status_summary ~repository:repo with
+          match Repo_git.status_summary ~repository:repo () with
           | Error e -> Alcotest.fail ("status failed: " ^ e)
           | Ok _ ->
               let joined = String.concat "\n" (List.rev !captured) in
               Alcotest.(check bool)
                 "uses --no-optional-locks" true
-                (contains_substring joined "--no-optional-locks");
+                (String_util.contains_substring joined "--no-optional-locks");
 	              Alcotest.(check bool)
 	                "sets GIT_OPTIONAL_LOCKS env key" true
-	                (contains_substring joined "\"GIT_OPTIONAL_LOCKS\"")))
+	                (String_util.contains_substring joined "\"GIT_OPTIONAL_LOCKS\"")))
 
 let test_origin_head_branch_preserves_slash_branch () =
   with_temp_dir (fun tmp ->
@@ -274,6 +352,21 @@ let () =
         ] );
       ( "get_branches",
         [ Alcotest.test_case "returns branches" `Quick test_get_branches ] );
+      ( "get_origin_url",
+        [ Alcotest.test_case "returns configured origin" `Quick test_get_origin_url
+        ; Alcotest.test_case
+            "reports missing origin as typed absence"
+            `Quick
+            test_get_origin_url_reports_missing_without_text_matching
+        ; Alcotest.test_case
+            "times out on stalled config"
+            `Slow
+            test_get_origin_url_times_out_on_stalled_config
+        ; Alcotest.test_case
+            "uses read-only git environment"
+            `Quick
+            test_get_origin_url_uses_read_only_git_env
+        ] );
       ( "fetch", [ Alcotest.test_case "returns remotes" `Quick test_fetch ] );
       ( "get_recent_commits",
         [ Alcotest.test_case "returns commits" `Quick test_get_recent_commits ] );

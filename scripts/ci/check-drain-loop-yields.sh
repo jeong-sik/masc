@@ -5,7 +5,7 @@
 # Background
 #   PR #14491 introduced Keeper_telemetry_consumer.spawn_subscriber
 #   with a drain loop that called the non-blocking
-#   [Agent_sdk_metrics_bridge.drain] and recursed without
+#   [Runtime_event_bus.drain] and recursed without
 #   [Eio.Time.sleep] / [Eio.Fiber.yield]. On a quiet bus the fiber
 #   pinned its Eio domain at ~100% CPU, starving every co-located
 #   fiber on the same domain — including HTTP handlers and lazy
@@ -53,7 +53,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 # Patterns that indicate a non-blocking drain. Recurses immediately on
 # empty queue, so the loop body must yield before the next iteration.
-DRAIN_RE='Agent_sdk_metrics_bridge\.drain|Agent_sdk\.Event_bus\.drain|Eio\.Stream\.take_nonblocking'
+DRAIN_RE='Runtime_event_bus\.drain|Agent_core\.Event_bus\.drain|Eio\.Stream\.take_nonblocking'
 
 # Patterns that count as a cooperative yield. Narrow on purpose:
 #   - Eio.Time.sleep        explicit timed wait

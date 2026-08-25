@@ -22,7 +22,7 @@ interface ConnectorSetupGuide {
 export const CONNECTOR_SETUP_GUIDES: Record<string, ConnectorSetupGuide> = {
   discord: {
     title: 'Discord 봇 등록 (서버 내장 게이트웨이)',
-    intro: 'Bot Token + Message Content Intent + OAuth bot scope가 필요합니다. RFC-0203 §Phase 3 이후 별도 사이드카 프로세스 없이 서버 프로세스 내부에서 Discord Gateway 에 직접 연결합니다.',
+    intro: 'Bot Token + Message Content Intent + OAuth bot scope 필요. 서버가 Discord Gateway에 직접 연결합니다.',
     steps: [
       {
         text: 'Discord Developer Portal에서 새 Application 생성.',

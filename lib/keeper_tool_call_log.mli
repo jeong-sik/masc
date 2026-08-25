@@ -6,25 +6,45 @@
     @since 2.249.0 *)
 
 val set_truncation_info :
-  keeper_name:string ->
+  invocation:Agent_core.Tool_contract.Invocation.t ->
   original_bytes:int ->
   ?truncated_to:int ->
   unit ->
   unit
-(** [set_truncation_info ~keeper_name ~original_bytes ?truncated_to ()]
-    records pre-truncation output size for the given keeper. Called by
+(** [set_truncation_info ~invocation ~original_bytes ?truncated_to ()]
+    records pre-truncation output size for the exact invocation. Called by
     the tool handler wrapper before returning the (possibly truncated)
-    result to OAS. Per-keeper isolation prevents cross-keeper corruption
-    under concurrent tool execution. *)
+    result to AGENT_CORE. Physical invocation identity preserves isolation even
+    when a provider emits blank or repeated tool-use ids. Weak ownership lets a
+    cancelled invocation release its pending observation. *)
 
 val consume_truncation_info :
-  keeper_name:string ->
+  invocation:Agent_core.Tool_contract.Invocation.t ->
   unit ->
   int * int option
-(** [consume_truncation_info ~keeper_name ()] returns
-    [(original_bytes, truncated_to)] for the given keeper and clears
+(** [consume_truncation_info ~invocation ()] returns
+    [(original_bytes, truncated_to)] for the exact invocation and clears
     the pending state. Returns [(0, None)] when no truncation info
-    was set (e.g. OAS-internal tool call that bypassed the wrapper). *)
+    was set (e.g. AGENT_CORE-internal tool call that bypassed the wrapper). *)
+
+val set_disposition :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  disposition:(unit, unit, Tool_result.tool_failure_class) Tool_result.disposition ->
+  unit
+(** [set_disposition ~invocation ~disposition] records the typed outcome for
+    the exact invocation, alongside {!set_truncation_info} and for the same
+    reason: the boundary between the masc dispatch and the hook that writes
+    the row narrows the value, and the hook cannot get it back. AGENT_CORE
+    hands the hook a [tool_result] that cannot represent [Deferred] and whose
+    error class is a different taxonomy from [tool_failure_class]. *)
+
+val consume_disposition :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  unit ->
+  (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition option
+(** [consume_disposition ~invocation ()] returns the typed outcome for the
+    exact invocation and clears it. [None] for a call that did not come
+    through the masc dispatch boundary. *)
 
 type turn_ctx_cell = Keeper_tool_call_log_context.cell
 (** Per-run turn-context carrier (RFC-0225 §3.3). Created once per
@@ -37,6 +57,7 @@ val create_turn_ctx_cell : unit -> turn_ctx_cell
 val set_turn_context :
   cell:turn_ctx_cell ->
   ?agent_name:string ->
+  ?turn_kind:Turn_record.turn_kind ->
   ?lane:string ->
   ?tool_choice:string ->
   ?thinking_enabled:bool ->
@@ -44,11 +65,9 @@ val set_turn_context :
   ?prompt_fingerprint:string ->
   ?trace_id:string ->
   ?session_id:string ->
-  ?generation:int ->
   ?turn:int ->
   ?keeper_turn_id:int ->
   ?task_id:string ->
-  ?goal_ids:string list ->
   ?sandbox_profile:string ->
   ?sandbox_root:string ->
   ?allowed_paths:string list ->
@@ -61,9 +80,9 @@ val set_turn_context :
 
 val get_turn_context :
   cell:turn_ctx_cell ->
-  unit ->string option * string option * bool option * int option * string option * string option * string option * int option * int option * string option * string list option * string option * string option
+  unit ->string option * string option * bool option * int option * string option * string option * string option * int option * int option * string option * string option * string option
 (** Returns [(lane, tool_choice, thinking_enabled, thinking_budget, trace_id,
-    prompt_fingerprint, session_id, turn, keeper_turn_id, task_id, goal_ids,
+    prompt_fingerprint, session_id, turn, keeper_turn_id, task_id,
     sandbox_profile, network_mode)] for
     the run, or [None] values when no turn context has
     been recorded. *)
@@ -99,6 +118,8 @@ val route_evidence_json_of_tool_io :
     [backend], [sandbox], evaluation-only [eval_tags], and policy labels.
     Runtime route/status fields such as [via], [sandbox_profile],
     [network_mode], [status], and redacted command/cwd/path are added when
+    present. Composition surface tools are not descriptor-backed; their
+    RFC-0386 [tool_kind] is picked up from the tool's own result payload when
     present. *)
 
 val init : ?cluster_name:string -> base_path:string -> unit -> unit
@@ -129,6 +150,11 @@ val configured_masc_root : unit -> string option
     [init], even if the store failed to open. Runtime sidecars use this to
     keep their durable projections in the same cluster namespace. *)
 
+val committed_revision : unit -> int
+(** Monotonic in-process revision advanced exactly after each successful
+    durable tool-call append. Readers use it to invalidate derived caches
+    without making the persistence owner depend on a dashboard module. *)
+
 val log_call :
   keeper_name:string ->
   tool_name:string ->
@@ -138,6 +164,7 @@ val log_call :
   duration_ms:float ->
   ?model:string ->
   ?agent_name:string ->
+  ?turn_kind:Turn_record.turn_kind ->
   ?lane:string ->
   ?tool_choice:string ->
   ?thinking_enabled:bool ->
@@ -146,13 +173,23 @@ val log_call :
   ?execution_id:Ids.Execution_id.t ->
   ?tool_use_id:string ->
   ?planned_index:int ->
+  ?batch_index:int ->
+  ?batch_size:int ->
+  ?execution_mode:Agent_core.Tool_contract.execution_mode ->
+  ?typed_result:Tool_result.result ->
+  ?disposition:
+    (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition ->
+  ?composition_tool:string ->
+  ?composition_run_id:string ->
+  ?composition_node_id:string ->
+  ?composition_execution:Keeper_tool_composition_catalog.execution_mode ->
+  ?composition_tool_kind:Keeper_tool_descriptor.tool_kind ->
+  ?parent_tool_use_id:string ->
   ?trace_id:string ->
   ?session_id:string ->
-  ?generation:int ->
   ?turn:int ->
   ?keeper_turn_id:int ->
   ?task_id:string ->
-  ?goal_ids:string list ->
   ?sandbox_profile:string ->
   ?sandbox_root:string ->
   ?allowed_paths:string list ->
@@ -160,6 +197,7 @@ val log_call :
   ?runtime_profile:string ->
   ?result_bytes:int ->
   ?truncated_to:int ->
+  ?on_committed:(unit -> unit) ->
   unit ->
   unit
 (** [log_call ...] persists a single tool call record with full I/O.
@@ -167,9 +205,27 @@ val log_call :
     dispatch boundary; the trajectory row for the same execution carries
     the identical value. [tool_use_id] is the provider call id for the
     same execution (when the dispatch lane has one) — the key that the
-    oas:tool_called/oas:tool_completed event rows also carry. Blank and
+    agent_core:tool_called/agent_core:tool_completed event rows also carry. Blank and
     repeated provider ids remain meaningful when scoped by [turn] and
-    [planned_index], so they are persisted unchanged.
+    [planned_index], so they are persisted unchanged. [batch_index],
+    [batch_size], and [execution_mode] preserve Agent Core's actual schedule
+    rather than inferring concurrency from timing.
+    [typed_result] serializes the producer-owned disposition when it is
+    available. Any canonical normalized artifact references in its typed data
+    are also persisted as actual JSON under [artifact_refs], keeping the
+    content-addressed blobs visible to offline maintenance without parsing a
+    JSON-bearing model-output string. Those GC roots deliberately carry an
+    empty preview; model/UI preview projection remains owned by [output]. The
+    composition fields are an explicit observation envelope supplied by the
+    typed plan executor; readers must not reconstruct them from [tool_use_id]
+    or tool-name strings.
+    [on_committed], when supplied, forces this row through the synchronous
+    append boundary and runs only after that append succeeds. It is intended
+    for exact completion notifications whose readers must not race the
+    asynchronous log queue. [turn_kind] names which turn made the call —
+    a submitted operation's turn or the keeper's own autonomous cycle —
+    so a reader can join calls to a submission instead of inferring the
+    boundary from timestamps that a concurrent autonomous turn overlaps.
     Output is truncated to 4000 bytes. [model] is a compatibility input only;
     non-empty values are redacted to the neutral runtime lane. [runtime_profile]
     is persisted separately as the operator-facing runtime selector. Turn-policy fields ([lane], [tool_choice],
@@ -185,13 +241,20 @@ val read_recent :
   unit ->
   Yojson.Safe.t list
 (** [read_recent ?keeper_name ?n ()] returns the [n] most recent entries,
-    optionally filtered by keeper name. Default [n=100]. *)
+    optionally filtered by keeper name. Default [n=100]. Reads the store tail
+    only far enough to answer: [n] rows unfiltered, [n *
+    {!read_over_scan_factor}] when filtering by keeper. *)
 
 val read_over_scan_factor : int
-(** Scan multiplier [read_recent] applies before its keeper filter: it
-    reads [n * read_over_scan_factor] fleet rows to find [n] matching
-    entries. Callers sharing one fleet read ({!read_recent_rows}) size
-    their window with this to reproduce [read_recent]'s coverage. *)
+(** Scan multiplier [read_recent] applies before its keeper filter: to end up
+    with [n] rows from one keeper it reads [n * read_over_scan_factor] fleet
+    rows. Callers sharing one fleet read ({!read_recent_rows}) size their
+    window with this to reproduce a per-keeper [read_recent]'s coverage.
+
+    It applies only when [keeper_name] is given. Without one the filter keeps
+    every row, so reading past [n] would parse rows that {!read_recent} then
+    discards — on a store averaging 6.8 KB per row that was 165 MB read for an
+    answer 33 MB contains. *)
 
 val read_recent_rows : n:int -> unit -> Yojson.Safe.t list
 (** [read_recent_rows ~n ()] returns the [n] most recent fleet-wide rows
@@ -225,6 +288,8 @@ val read_latest :
 val reset_for_testing : unit -> unit
 (** Resets the in-memory store reference. For unit tests only. *)
 
+val pending_truncation_count_for_testing : unit -> int
+(** Number of live invocation-scoped truncation observations. Test only. *)
+
 val queued_count_for_testing : unit -> int
 (** Number of queued asynchronous append records. For unit tests only. *)
-

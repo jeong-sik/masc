@@ -16,13 +16,6 @@ let payload_role_to_string = function
   | Checkpoint -> "checkpoint"
   | Memory_store -> "memory_store"
 
-let payload_role_of_string = function
-  | "model_input" -> Some Model_input
-  | "operator_evidence" -> Some Operator_evidence
-  | "checkpoint" -> Some Checkpoint
-  | "memory_store" -> Some Memory_store
-  | _ -> None
-
 type source_clock =
   | Wall
   | Monotonic
@@ -35,14 +28,14 @@ let source_clock_to_string = function
   | Monotonic -> "monotonic"
   | Logical -> "logical"
   | Provider -> "provider"
-  | Event_bus -> "oas_event_bus"
+  | Event_bus -> "agent_core_event_bus"
 
 let source_clock_of_string = function
   | "wall" -> Some Wall
   | "monotonic" -> Some Monotonic
   | "logical" -> Some Logical
   | "provider" -> Some Provider
-  | "oas_event_bus" -> Some Event_bus
+  | "agent_core_event_bus" -> Some Event_bus
   | _ -> None
 
 let source_clock_of_event = function
@@ -66,10 +59,6 @@ module StringSet = Set_util.StringSet
 let schema_version = 1
 let manifest_file_suffix = ".jsonl"
 
-type status =
-  | Skipped
-  | Other of string
-
 type compaction_outcome =
   | Checkpoint_committed
   | Lifecycle_cleanup_failed_without_checkpoint
@@ -87,23 +76,6 @@ let compaction_outcome_of_string = function
   | "lifecycle_cleanup_failed_without_checkpoint" ->
     Some Lifecycle_cleanup_failed_without_checkpoint
   | _ -> None
-;;
-
-let skipped_status = "skipped"
-
-let status_of_string value =
-  if String.equal value skipped_status then Skipped else Other value
-;;
-
-let status_to_string = function
-  | Skipped -> skipped_status
-  | Other value -> value
-;;
-
-let status_is_skipped manifest =
-  match status_of_string manifest.status with
-  | Skipped -> true
-  | Other _ -> false
 ;;
 
 let safe_segment value =
@@ -156,22 +128,6 @@ let clock_refs ?edge_id ?lane ?source_clock ?observed_at ?started_at
          string_field_opt "caused_by" caused_by;
          int_field_opt "logical_seq" logical_seq;
        ])
-
-let extract_string_field key json =
-  match json with
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-    | Some (`String value) -> Some value
-    | _ -> None)
-  | _ -> None
-
-let extract_int_field key json =
-  match json with
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-    | Some (`Int value) -> Some value
-    | _ -> None)
-  | _ -> None
 
 let extract_clock_refs decision =
   match decision with
@@ -240,7 +196,7 @@ let clock_lane_of_event = function
     "provider"
   | Checkpoint_loaded
   | Checkpoint_saved ->
-    "oas_agent"
+    "agent_core_agent"
   | Context_injected
   | Context_compacted
   | Event_bus_correlated ->
@@ -251,7 +207,7 @@ let turn_label ctx =
   | Some value -> string_of_int value
   | None -> "unknown"
 
-let oas_turn_label = function
+let agent_core_turn_label = function
   | Some value -> string_of_int value
   | None -> "0"
 
@@ -259,32 +215,32 @@ let context_edge_id ctx event =
   Printf.sprintf "%s:keeper-%s:%s" ctx.manifest_trace_id (turn_label ctx)
     (event_kind_to_string event)
 
-let context_tool_batch_id ctx ?oas_turn_count () =
-  Printf.sprintf "%s:keeper-%s:tool-batch-oas-%s"
-    ctx.manifest_trace_id (turn_label ctx) (oas_turn_label oas_turn_count)
+let context_tool_batch_id ctx ?agent_core_turn_count () =
+  Printf.sprintf "%s:keeper-%s:tool-batch-agent_core-%s"
+    ctx.manifest_trace_id (turn_label ctx) (agent_core_turn_label agent_core_turn_count)
 
-let context_checkpoint_id ctx ?oas_turn_count () =
-  Printf.sprintf "checkpoint:%s:oas-%s" ctx.manifest_trace_id
-    (oas_turn_label oas_turn_count)
+let context_checkpoint_id ctx ?agent_core_turn_count () =
+  Printf.sprintf "checkpoint:%s:agent_core-%s" ctx.manifest_trace_id
+    (agent_core_turn_label agent_core_turn_count)
 
 let context_compaction_id ctx ~source =
   Printf.sprintf "%s:keeper-%s:compaction-%s"
     ctx.manifest_trace_id (turn_label ctx) source
 
-let clock_refs_for_context ctx ~event ?oas_turn_count ?elapsed_ms
+let clock_refs_for_context ctx ~event ?agent_core_turn_count ?elapsed_ms
     ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by
     ?logical_seq ?compaction_source () =
   let tool_batch_id =
     match event with
     | Provider_lane_resolved ->
-      Some (context_tool_batch_id ctx ?oas_turn_count ())
+      Some (context_tool_batch_id ctx ?agent_core_turn_count ())
     | _ -> None
   in
   let checkpoint_id =
     match event with
     | Checkpoint_loaded
     | Checkpoint_saved ->
-      Some (context_checkpoint_id ctx ?oas_turn_count ())
+      Some (context_checkpoint_id ctx ?agent_core_turn_count ())
     | _ -> None
   in
   let compaction_id =
@@ -336,7 +292,7 @@ let with_compaction_outcome ~compaction_outcome decision =
 ;;
 
 let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
-    ?generation ?keeper_turn_id ?oas_turn_count ?logical_seq ~event ?runtime_id
+    ?keeper_turn_id ?agent_core_turn_count ?logical_seq ~event ?runtime_id
     ?(status = "ok") ?(decision = `Assoc []) ?receipt_path ?checkpoint_path
     ?tool_call_log_path () =
   {
@@ -345,9 +301,8 @@ let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
     keeper_name;
     agent_name;
     trace_id;
-    generation;
     keeper_turn_id;
-    oas_turn_count;
+    agent_core_turn_count;
     logical_seq;
     event;
     runtime_id;
@@ -356,12 +311,11 @@ let make ?(ts = Masc_domain.now_iso ()) ~keeper_name ?agent_name ~trace_id
     links = { receipt_path; checkpoint_path; tool_call_log_path };
   }
 
-let make_for_context ctx ~event ?oas_turn_count ?logical_seq ?runtime_id
+let make_for_context ctx ~event ?agent_core_turn_count ?logical_seq ?runtime_id
     ?status ?decision ?receipt_path ?checkpoint_path ?tool_call_log_path () =
   make ~keeper_name:ctx.manifest_keeper_name
     ?agent_name:ctx.manifest_agent_name ~trace_id:ctx.manifest_trace_id
-    ?generation:ctx.manifest_generation
-    ?keeper_turn_id:ctx.manifest_keeper_turn_id ?oas_turn_count ?logical_seq
+    ?keeper_turn_id:ctx.manifest_keeper_turn_id ?agent_core_turn_count ?logical_seq
     ~event ?runtime_id ?status ?decision ?receipt_path ?checkpoint_path
     ?tool_call_log_path ()
 
@@ -416,9 +370,15 @@ let decision_public_allowlist =
     ; "checkpoint_installation_schema"; "checkpoint_installation_state"
     ; "checkpoint_installed_ref"; "checkpoint_installation_auxiliary"
     ; "compaction_post_install_schema"; "compaction_lifecycle"
-    ; "operator_action_required"; "trace_id"; "generation"; "turn_count"
+    ; "operator_action_required"; "trace_id"; "turn_count"
     ; "sha256"; "kind"; "detail"; "backtrace_present"; "completion_error"
     ; "failure_dispatch"; "failure_dispatch_error"
+    (* Runtime attempt attribution (#28871): the lane walk stores the
+       attempted candidate in decision.runtime_id/idx (error_kind on
+       failures) while the row's top-level runtime_id is the lane id.
+       Dropping these here made intra-lane failover unreadable on every
+       API consumer. *)
+    ; "idx"; "runtime_id"; "error_kind"
     ])
 
 let compaction_evidence_public_allowlist =
@@ -448,7 +408,7 @@ let decision_child_scope scope key =
   then Compaction_evidence
   else scope
 
-let rec public_projection_of_decision decision =
+let public_projection_of_decision decision =
   let rec project scope path = function
     | `Assoc fields ->
         let allowlist = decision_allowlist scope in
@@ -477,9 +437,8 @@ let to_json manifest =
       ("keeper_name", `String manifest.keeper_name);
       ("agent_name", json_of_string_opt manifest.agent_name);
       ("trace_id", `String manifest.trace_id);
-      ("generation", json_of_int_opt manifest.generation);
-      ("keeper_turn_id", json_of_int_opt manifest.keeper_turn_id);
-      ("oas_turn_count", json_of_int_opt manifest.oas_turn_count);
+        ("keeper_turn_id", json_of_int_opt manifest.keeper_turn_id);
+      ("agent_core_turn_count", json_of_int_opt manifest.agent_core_turn_count);
       ("logical_seq", json_of_int_opt manifest.logical_seq);
       ("event", `String (event_kind_to_string manifest.event));
       ("runtime_id", json_of_string_opt manifest.runtime_id);
@@ -496,9 +455,8 @@ let public_to_json manifest =
       ("keeper_name", `String manifest.keeper_name);
       ("agent_name", json_of_string_opt manifest.agent_name);
       ("trace_id", `String manifest.trace_id);
-      ("generation", json_of_int_opt manifest.generation);
       ("keeper_turn_id", json_of_int_opt manifest.keeper_turn_id);
-      ("oas_turn_count", json_of_int_opt manifest.oas_turn_count);
+      ("agent_core_turn_count", json_of_int_opt manifest.agent_core_turn_count);
       ("logical_seq", json_of_int_opt manifest.logical_seq);
       ("event", `String (event_kind_to_string manifest.event));
       ("runtime_id", json_of_string_opt manifest.runtime_id);
@@ -570,9 +528,8 @@ type parsed_row = {
   keeper_name : string;
   agent_name : string option;
   trace_id : string;
-  generation : int option;
   keeper_turn_id : int option;
-  oas_turn_count : int option;
+  agent_core_turn_count : int option;
   logical_seq : int option;
   event_wire : string;
   runtime_id : string option;
@@ -707,9 +664,8 @@ let parse_row = function
             required_string "keeper_name" fields >>= fun keeper_name ->
             optional_string "agent_name" fields >>= fun agent_name ->
             required_string "trace_id" fields >>= fun trace_id ->
-            optional_int "generation" fields >>= fun generation ->
             optional_int "keeper_turn_id" fields >>= fun keeper_turn_id ->
-            optional_int "oas_turn_count" fields >>= fun oas_turn_count ->
+            optional_int "agent_core_turn_count" fields >>= fun agent_core_turn_count ->
             optional_int "logical_seq" fields >>= fun logical_seq ->
             required_string "event" fields >>= fun event_wire ->
             optional_string "runtime_id" fields >>= fun runtime_id ->
@@ -725,9 +681,8 @@ let parse_row = function
                 keeper_name;
                 agent_name;
                 trace_id;
-                generation;
                 keeper_turn_id;
-                oas_turn_count;
+                agent_core_turn_count;
                 logical_seq;
                 event_wire;
                 runtime_id;
@@ -754,9 +709,8 @@ let active_row (row : parsed_row) event : t =
     keeper_name = row.keeper_name;
     agent_name = row.agent_name;
     trace_id = row.trace_id;
-    generation = row.generation;
     keeper_turn_id = row.keeper_turn_id;
-    oas_turn_count = row.oas_turn_count;
+    agent_core_turn_count = row.agent_core_turn_count;
     logical_seq = row.logical_seq;
     event;
     runtime_id = row.runtime_id;
@@ -780,17 +734,14 @@ let of_json json =
       Error (Printf.sprintf "unknown event: %S" event)
   | Error _ as error -> error
 
-let dated_jsonl_today_path base_dir =
-  let open Unix in
-  let tm = gmtime (gettimeofday ()) in
-  let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
-  let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
-  Filename.concat (Filename.concat base_dir month) day
-
 let execution_receipt_path_for_today config ~keeper_name =
-  Keeper_types_support.keeper_execution_receipt_store config keeper_name
-  |> Dated_jsonl.base_dir
-  |> dated_jsonl_today_path
+  (* [Jsonl_writer.dated_path_now] is the same calculation the writer runs;
+     a second copy here is free to drift to a different calendar (#27143). *)
+  let base_dir =
+    Keeper_types_support.keeper_execution_receipt_store config keeper_name
+    |> Dated_jsonl.base_dir
+  in
+  (Jsonl_writer.dated_path_now ~base_dir).Jsonl_writer.path
 
 let base_dir config ~keeper_name =
   Filename.concat

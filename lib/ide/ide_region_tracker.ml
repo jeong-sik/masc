@@ -105,8 +105,8 @@ let extract_region_from_full_file ~keeper_id ~file_path ~turn ~tool_name ~conten
 let is_file_write_tool name =
   name = "write_file" || name = "edit_file" || name = "apply_patch"
 
-let regions_file ~base_dir ?(partition = Ide_paths.Legacy_default) () =
-  Filename.concat (Ide_paths.partition_store_dir ~base_dir partition) "regions.jsonl"
+let regions_file ~base_dir ~codebase () =
+  Filename.concat (Ide_paths.code_store_dir ~base_dir ~codebase) "regions.jsonl"
 
 let rec ensure_dir path =
   if path = "" || path = "/" || (Sys.file_exists path && Sys.is_directory path)
@@ -116,8 +116,8 @@ let rec ensure_dir path =
     try Unix.mkdir path 0o755 with
     | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
 
-let append_region ~base_dir ?(partition = Ide_paths.Legacy_default) region =
-  let path = regions_file ~base_dir ~partition () in
+let append_region ~base_dir ~codebase region =
+  let path = regions_file ~base_dir ~codebase () in
   ensure_dir (Filename.dirname path);
   Fs_compat.append_jsonl path (region_to_json region)
 
@@ -140,10 +140,10 @@ let load_regions_from_path ?file_path path =
     |> List.rev
 
 
-let read_regions ~base_dir ?(partition = Ide_paths.Legacy_default) ?file_path () =
-  load_regions_from_path ?file_path (regions_file ~base_dir ~partition ())
+let read_regions ~base_dir ~codebase ?file_path () =
+  load_regions_from_path ?file_path (regions_file ~base_dir ~codebase ())
 
-let ingest_tool_call ~base_dir ?(partition = Ide_paths.Legacy_default) ~keeper_id ~turn json =
+let ingest_tool_call ~base_dir ~codebase ~keeper_id ~turn json =
   let tool_name =
     match json with
     | `Assoc fields -> (
@@ -182,10 +182,10 @@ let ingest_tool_call ~base_dir ?(partition = Ide_paths.Legacy_default) ~keeper_i
            RFC-0128 PR-1e: the content fallback for edit_file/apply_patch
            used to be served by Ide_meta_sync.flush_regions, which wrote
            to the flat store and produced a double-write against the
-           by-url partition once PR-1c routed ingest_tool_call. Moving the
+           by-url codebase once PR-1c routed ingest_tool_call. Moving the
            fallback into ingest_tool_call lets us drop the meta_sync call
            site so all keeper write records land in a single, consistent
-           partition bucket. *)
+           codebase bucket. *)
         let extract_full_file () =
           match List.assoc_opt "content" arguments with
           | Some (`String content) ->
@@ -209,4 +209,4 @@ let ingest_tool_call ~base_dir ?(partition = Ide_paths.Legacy_default) ~keeper_i
                    ~diff_text:patch_text
                | _ -> extract_full_file ())
         in
-        List.iter (append_region ~base_dir ~partition) regions
+        List.iter (append_region ~base_dir ~codebase) regions

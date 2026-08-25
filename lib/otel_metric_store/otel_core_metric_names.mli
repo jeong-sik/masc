@@ -10,7 +10,7 @@ val metric_mcp_requests : string
 val metric_llm_inference_duration : string
 
 (** [masc_llm_prompt_tok_per_sec] - prefill throughput histogram.
-    Observed in [Keeper_hooks_oas] after_turn when [response.telemetry.timings]
+    Observed in [Keeper_hooks_agent_core] after_turn when [response.telemetry.timings]
     is [Some] and [prompt_per_second] is positive. Labels: [model], [provider_kind]. *)
 val metric_llm_prompt_tok_per_sec : string
 
@@ -30,23 +30,20 @@ val metric_errors : string
 val metric_error_events : string
 val metric_workspace_route_failures : string
 val metric_active_agents : string
-val metric_pending_tasks : string
-
 (** RFC-0294 PR-4: gauge of orphaned tasks, labeled by status_class. *)
 val metric_orphan_tasks : string
-
-(** Goal attainment percentage by [goal_id]. Companion
-    {!metric_goal_attainment_measured} distinguishes real 0% from
-    unmeasured goals. *)
-val metric_goal_attainment_pct : string
-
-(** Gauge by [goal_id]: [1] when goal attainment percentage is measured,
-    [0] when the dashboard projection is currently unmeasured. *)
-val metric_goal_attainment_measured : string
 
 val metric_sse_reconnects : string
 val metric_sse_idle_evictions : string
 val metric_sse_rejects : string
+
+(** Counter [masc_mcp_auth_rejects_total{endpoint,reason}] — MCP transport
+    requests rejected at the auth boundary. Before this counter every
+    rejected bearer produced only a client-visible 401 with no
+    server-side trace (2026-08-18 finding: every external MCP credential
+    was stale and the operator surface showed nothing). *)
+val metric_mcp_auth_rejects : string
+
 val metric_provider_prefix_cache_creation_tokens : string
 val metric_tool_input_validation : string
 val metric_llm_provider_http_status : string
@@ -70,11 +67,3 @@ val metric_llm_provider_reasoning_tokens : string
 val metric_llm_provider_tool_calls : string
 val metric_llm_provider_circuit_state : string
 
-(** Section 7.3.2 Zero Silent Failure measurement: aggregate counter for
-    every fallback event across the runtime pipeline. Labels: [kind]
-    enumerates the fallback class (runtime_empty, capability_drop,
-    cli_unsupported, ...); [detail] carries the specific reason within the
-    kind (e.g. for runtime_empty: rejection_reason_label). This counter exists
-    so the "Zero Silent Failure" dashboard panel has a single numerator across
-    all fallback classes. *)
-val metric_fallback_triggered : string

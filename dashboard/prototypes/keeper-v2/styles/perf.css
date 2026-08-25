@@ -1,0 +1,8 @@
+/* MASC v2 — performance layer styles (perf.jsx).
+   Windowing scrollers for VirtualList. Tokens from colors_and_type.css + v2.css. */
+
+/* ── VirtualList scrollers ── */
+.vl-scroller { scrollbar-width: thin; }
+.vl-scroller::-webkit-scrollbar { width: 10px; }
+.vl-scroller::-webkit-scrollbar-thumb { background: var(--border-main); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+.vl-row { box-sizing: border-box; }

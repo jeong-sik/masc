@@ -1,11 +1,9 @@
 ---
 rfc: "0107"
-phase: D
 status: Active
 created: 2026-05-17
 updated: 2026-05-18
 supplement_of: RFC-0107
-implementation_prs: [15950, 15965, 15985, 15990, 16017, 15993]
 # Excluded (design-spec doc merge): #15941 Phase D.1
 ---
 
@@ -42,7 +40,7 @@ callsite 변경이 없도록 한다.
 | `lib/graphql_client.ml:181` | `post_sync` |
 | `lib/opentelemetry_client_cohttp_eio.ml:147` | `make_closing_client` |
 
-**합계: 13 callsites** in masc. (OAS 별도 repo 는 본 Phase 범위 외.)
+**합계: 13 callsites** in masc. (agent_core 는 본 Phase 범위 외.)
 
 ## 2. Current anti-pattern (per call, 모든 sync 호출자 동일)
 
@@ -239,7 +237,7 @@ Phase D step 2 가 그 결정 위에 구현.
 | per-host TLS context cache | piaf 가 이미 함 (Phase B 확인) — cohttp 직접 구현 시 우리가 더해야 함 |
 | HTTP/2 지원 | **out-of-scope** (RFC §2 non-goal). piaf 는 무료로 받지만 callsite 가 h1 가정 |
 | max_idle_per_host = 8 정당화 | RFC-0101 §2 nofile=10240 cap, 256 server slots × 8 idle = 2048, safe |
-| OAS repo 마이그레이션 | **out-of-scope of Phase D**. masc 13 callsites 만. OAS 는 동등 interface 후속 PR |
+| agent_core 마이그레이션 | **out-of-scope of Phase D**. masc 13 callsites 만. agent_core 는 동등 interface 후속 PR |
 
 ## 6. 검증
 

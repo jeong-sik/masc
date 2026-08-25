@@ -1,13 +1,13 @@
 (* test/test_cap_blocker_structured_error.ml
 
-   #9933: a blocker_info detail must preserve structured masc_oas_error
+   #9933: a blocker_info detail must preserve structured masc_agent_core_error
    JSON payloads. The pre-fix behaviour truncated at the narrative cap,
    slicing payloads like
-   "Internal error: [masc_oas_error] {\"kind\":\"provider_timeout\",\
+   "Internal error: [masc_agent_core_error] {\"kind\":\"provider_timeout\",\
    \"budget_sec\":30.0,...}" mid-key and leaving operators with
    "budget_" as the trailing evidence.
 
-   The cap is applied where the runtime builds [last_blocker.detail]
+   The cap is applied where the runtime builds a blocker detail string
    (keeper_unified_metrics_failure).
 
    Pinned invariants:
@@ -20,16 +20,16 @@
 
 module T = Keeper_internal_error
 
-let oas_error_payload_small =
-  "[masc_oas_error] {\"kind\":\"provider_timeout\",\
+let agent_core_error_payload_small =
+  "[masc_agent_core_error] {\"kind\":\"provider_timeout\",\
    \"budget_sec\":30.0,\"keeper_turn_timeout_sec\":120.0,\
    \"estimated_input_tokens\":45000,\"source\":\"tool_list_build\"}"
 
-let wrapped_oas_error_payload_small = "Internal error: " ^ oas_error_payload_small
+let wrapped_agent_core_error_payload_small = "Internal error: " ^ agent_core_error_payload_small
 
-let oas_error_payload_huge =
+let agent_core_error_payload_huge =
   let buf = Buffer.create 2500 in
-  Buffer.add_string buf "[masc_oas_error] {\"kind\":\"provider_timeout\",\"extra\":\"";
+  Buffer.add_string buf "[masc_agent_core_error] {\"kind\":\"provider_timeout\",\"extra\":\"";
   for _ = 1 to 2500 do Buffer.add_char buf 'x' done;
   Buffer.add_string buf "\"}";
   Buffer.contents buf
@@ -49,23 +49,23 @@ let ends_with_ellipsis s =
   sl >= nl && String.sub s (sl - nl) nl = needle
 
 let test_small_structured_payload_preserved () =
-  let result = T.cap_blocker_detail oas_error_payload_small in
+  let result = T.cap_blocker_detail agent_core_error_payload_small in
   Alcotest.(check string)
     "small structured payload unchanged"
-    oas_error_payload_small result;
+    agent_core_error_payload_small result;
   Alcotest.(check bool)
     "no ellipsis added to structured payload"
     false (ends_with_ellipsis result)
 
 let test_huge_structured_payload_safety_capped () =
-  let result = T.cap_blocker_detail oas_error_payload_huge in
+  let result = T.cap_blocker_detail agent_core_error_payload_huge in
   (* The payload is > structured cap, so it must be shorter than the
      input but still kept near the structured cap (otherwise we'd be
      applying the narrative budget). *)
   Alcotest.(check bool)
     "pathological payload truncated"
     true
-    (String.length result < String.length oas_error_payload_huge);
+    (String.length result < String.length agent_core_error_payload_huge);
   Alcotest.(check bool)
     "but kept at the structured cap, not the narrative cap"
     true
@@ -79,10 +79,10 @@ let test_plain_narrative_short_preserved () =
     narrative_short (T.cap_blocker_detail narrative_short)
 
 let test_wrapped_internal_error_preserved () =
-  let result = T.cap_blocker_detail wrapped_oas_error_payload_small in
+  let result = T.cap_blocker_detail wrapped_agent_core_error_payload_small in
   Alcotest.(check string)
     "wrapped structured payload unchanged"
-    wrapped_oas_error_payload_small result;
+    wrapped_agent_core_error_payload_small result;
   Alcotest.(check bool)
     "no ellipsis added to wrapped structured payload"
     false (ends_with_ellipsis result)
@@ -106,9 +106,9 @@ let test_idempotence () =
     Alcotest.(check string)
       (Printf.sprintf "idempotent: %s" label) once twice
   in
-  check "small structured" oas_error_payload_small;
-  check "wrapped structured" wrapped_oas_error_payload_small;
-  check "huge structured" oas_error_payload_huge;
+  check "small structured" agent_core_error_payload_small;
+  check "wrapped structured" wrapped_agent_core_error_payload_small;
+  check "huge structured" agent_core_error_payload_huge;
   check "short narrative" narrative_short;
   check "long narrative" narrative_long
 

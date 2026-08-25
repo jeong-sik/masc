@@ -75,7 +75,7 @@ The roadmap proposes new architecture without acknowledging RFCs already drafted
 
 | RFC | Topic | Roadmap section it shadows |
 |---|---|---|
-| `RFC-0008` | CredentialProvider trait | Phase 2-2 (Provider backend separation) |
+| `RFC-0008` | CredentialProvider property | Phase 2-2 (Provider backend separation) |
 | `RFC-0019` | Keeper credential unification | Phase 2-2 |
 | `RFC-0020` | Keeper event queue layer separation | Phase 3-2 (Event-driven Queue) |
 | `RFC-0022` | Runtime attempt liveness contract | Phase 1-1 (Livelock FSM) |
@@ -99,7 +99,6 @@ specs/boundary/ToolCallContract_TTrace_1776849071.tla
 specs/checkpoint-trim/CheckpointTrim.tla
 specs/closure/ContractClosure.tla
 specs/task-lifecycle/TaskLifecycle.tla
-docs/MASC_A2A.tla
 ```
 
 `KeeperCompositeLifecycle.tla` (mentioned in `~/.../memory/MEMORY.md`, 449 LOC) acts as observer over 5 sub-FSMs; this means the roadmap's "GatePipeline" / "LivelockFSM" / "Recovery" should likely *extend* `KeeperCompositeLifecycle.tla` and `RuntimeKeeperRecovery.tla` rather than create from scratch.

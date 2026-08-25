@@ -133,6 +133,60 @@ let test_stats_zero_state_shape () =
   Alcotest.(check (list (pair string int))) "empty idle_per_host"
     [] zero.idle_per_host
 
+(* ── Host-header port fix (masc, 2026-08-16, task-11) ───────────
+   Piaf 0.2.0's own default HTTP/1.1 Host header carries the bare
+   hostname only, dropping any explicit non-default port — confirmed
+   live against server_request_authority.ml's admit_http1_authority,
+   which then rejects the request as Untrusted. See
+   ensure_host_header's doc comment in pool.ml for the full trace. *)
+
+let ensure_host_header = Masc_http_client.Pool.For_testing.ensure_host_header
+
+let test_ensure_host_header_adds_port_when_missing () =
+  let uri = Uri.of_string "http://127.0.0.1:18935/api/v1/keepers/chat/stream" in
+  match ensure_host_header ~uri (Some [ ("content-type", "application/json") ]) with
+  | Some headers ->
+    Alcotest.(check (option string)) "host header carries the port"
+      (Some "127.0.0.1:18935") (List.assoc_opt "host" headers);
+    Alcotest.(check int) "existing headers preserved" 2 (List.length headers)
+  | None -> Alcotest.fail "expected Some headers"
+
+let test_ensure_host_header_omits_port_when_uri_has_none () =
+  let uri = Uri.of_string "http://example.com/path" in
+  match ensure_host_header ~uri (Some []) with
+  | Some headers ->
+    Alcotest.(check (option string)) "host header has no port"
+      (Some "example.com") (List.assoc_opt "host" headers)
+  | None -> Alcotest.fail "expected Some headers"
+
+let test_ensure_host_header_leaves_caller_override_alone () =
+  let uri = Uri.of_string "http://127.0.0.1:18935/x" in
+  let caller_headers = [ ("Host", "override.example:9999") ] in
+  match ensure_host_header ~uri (Some caller_headers) with
+  | Some headers ->
+    Alcotest.(check (list (pair string string)))
+      "caller's Host header is untouched (case-insensitive match, no duplicate added)"
+      caller_headers headers
+  | None -> Alcotest.fail "expected Some headers"
+
+let test_ensure_host_header_on_none_headers_with_host () =
+  let uri = Uri.of_string "https://api.example.com:8443/v1" in
+  match ensure_host_header ~uri None with
+  | Some headers ->
+    Alcotest.(check (option string)) "host header added to an empty list"
+      (Some "api.example.com:8443") (List.assoc_opt "host" headers)
+  | None -> Alcotest.fail "expected Some headers"
+
+let test_ensure_host_header_on_none_headers_without_uri_host_stays_none () =
+  (* A URI with no host at all (malformed target) has nothing to add;
+     returning None here preserves ?headers's original "caller passed
+     nothing" shape instead of manufacturing a headers list from thin air. *)
+  let uri = Uri.of_string "not-a-uri" in
+  Alcotest.(check (option (list (pair string string))))
+    "no host to add, no headers supplied -> None"
+    None
+    (ensure_host_header ~uri None)
+
 (* ── RFC-0129 — read_body_with_idle ─────────────────────────── *)
 
 (* Build a mock [Piaf.Body.t] that the test fiber can feed chunks into
@@ -364,6 +418,19 @@ let () =
       ( "stats type shape",
         [
           Alcotest.test_case "zero state" `Quick test_stats_zero_state_shape;
+        ] );
+      ( "ensure_host_header (Host-header port fix, task-11)",
+        [
+          Alcotest.test_case "adds port when missing" `Quick
+            test_ensure_host_header_adds_port_when_missing;
+          Alcotest.test_case "omits port when uri has none" `Quick
+            test_ensure_host_header_omits_port_when_uri_has_none;
+          Alcotest.test_case "leaves caller override alone" `Quick
+            test_ensure_host_header_leaves_caller_override_alone;
+          Alcotest.test_case "adds header to None headers when uri has a host" `Quick
+            test_ensure_host_header_on_none_headers_with_host;
+          Alcotest.test_case "None headers stays None when uri has no host" `Quick
+            test_ensure_host_header_on_none_headers_without_uri_host_stays_none;
         ] );
       ( "RFC-0129 read_body_with_idle",
         [

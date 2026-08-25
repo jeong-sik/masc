@@ -76,6 +76,7 @@ let protected_references ~config ~keeper_name ~dir =
            then collect (String_set.add run_ref.path protected) rest
            else Error (Invalid_raw_trace_reference run_ref.path))
     in
+    let open Result.Syntax in
     collect String_set.empty entries
 ;;
 

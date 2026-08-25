@@ -21,6 +21,87 @@ let artifact_ref_exn ~sha256 ~bytes ~preview ~mime =
 
 let counter = ref 0
 
+let invocation ~tool_use_id ~turn ~planned_index =
+  Agent_core.Tool_contract.Invocation.create
+    ~tool_use_id
+    ~turn
+    ~completion:Agent_core.Tool_contract.Continue_after_success
+    ~schedule:
+      { planned_index
+      ; batch_index = 0
+      ; batch_size = 2
+      ; execution_mode = Agent_core.Tool_contract.Concurrent
+      }
+;;
+
+let test_pending_observations_are_occurrence_scoped () =
+  Keeper_tool_call_log.reset_for_testing ();
+  let first = invocation ~tool_use_id:"" ~turn:7 ~planned_index:0 in
+  let sibling_with_same_blank_id =
+    invocation ~tool_use_id:"" ~turn:7 ~planned_index:1
+  in
+  let later_with_repeated_id =
+    invocation ~tool_use_id:"repeated" ~turn:8 ~planned_index:0
+  in
+  let earlier_with_repeated_id =
+    invocation ~tool_use_id:"repeated" ~turn:7 ~planned_index:2
+  in
+  List.iter
+    (fun (invocation, original_bytes) ->
+       Keeper_tool_call_log.set_truncation_info
+         ~invocation
+         ~original_bytes
+         ())
+    [ first, 11
+    ; sibling_with_same_blank_id, 22
+    ; earlier_with_repeated_id, 33
+    ; later_with_repeated_id, 44
+    ];
+  let consume invocation =
+    Keeper_tool_call_log.consume_truncation_info
+      ~invocation
+      ()
+  in
+  Alcotest.(check (pair int (option int)))
+    "blank-id sibling keeps its own observation"
+    (22, None)
+    (consume sibling_with_same_blank_id);
+  Alcotest.(check (pair int (option int)))
+    "first blank-id occurrence remains available"
+    (11, None)
+    (consume first);
+  Alcotest.(check (pair int (option int)))
+    "later repeated-id occurrence keeps its own observation"
+    (44, None)
+    (consume later_with_repeated_id);
+  Alcotest.(check (pair int (option int)))
+    "earlier repeated-id occurrence remains available"
+    (33, None)
+    (consume earlier_with_repeated_id);
+  Alcotest.(check (pair int (option int)))
+    "consumed occurrence is absent"
+    (0, None)
+    (consume first)
+;;
+
+let test_abandoned_observation_is_released_with_invocation () =
+  Keeper_tool_call_log.reset_for_testing ();
+  let record_abandoned () =
+    let abandoned = invocation ~tool_use_id:"cancelled" ~turn:9 ~planned_index:0 in
+    Keeper_tool_call_log.set_truncation_info
+      ~invocation:abandoned
+      ~original_bytes:99
+      ()
+  in
+  record_abandoned ();
+  Gc.full_major ();
+  Gc.full_major ();
+  Alcotest.(check int)
+    "settlement-skip observation is weakly released"
+    0
+    (Keeper_tool_call_log.pending_truncation_count_for_testing ())
+;;
+
 let with_tmp_log f =
   incr counter;
   let dir = Filename.concat (Filename.get_temp_dir_name ())
@@ -108,6 +189,43 @@ let test_read_recent_keeper_filter () =
 (* The dashboard /tool-calls handler derives each keeper's slice from one
    shared fleet read instead of per-keeper [read_recent] calls. The
    derivation must be observationally equal to [read_recent]. *)
+(* The unfiltered read stops at [n]; the keeper-filtered one still scans past
+   it to find [n] matches. Both have to hold at once — dropping the over-scan
+   everywhere would silently shorten per-keeper answers, and keeping it
+   everywhere reads five times the store for a fleet answer that cannot
+   change. *)
+let test_unfiltered_read_is_exactly_n_and_filtered_still_finds_n () =
+  with_tmp_log (fun () ->
+    List.iter
+      (fun (keeper, tool) ->
+        Keeper_tool_call_log.log_call
+          ~keeper_name:keeper ~tool_name:tool
+          ~input:(`Assoc []) ~output_text:"out"
+          ~success:true ~duration_ms:1.0 ())
+      [ ("alice", "t1"); ("bob", "t2"); ("bob", "t3"); ("bob", "t4")
+      ; ("bob", "t5"); ("bob", "t6"); ("bob", "t7"); ("bob", "t8")
+      ; ("bob", "t9"); ("alice", "t10")
+      ];
+    let tools rows =
+      List.map
+        (fun json ->
+          match Safe_ops.json_string_opt "tool" json with
+          | Some tool -> tool
+          | None -> "?")
+        rows
+    in
+    Alcotest.(check (list string))
+      "unfiltered read returns exactly the newest n"
+      [ "t9"; "t10" ]
+      (tools (Keeper_tool_call_log.read_recent ~n:2 ()));
+    (* alice's two rows sit at opposite ends of the store, so finding both
+       requires reading well past n — this is what the over-scan buys. *)
+    Alcotest.(check (list string))
+      "keeper-filtered read still scans past n to find n matches"
+      [ "t1"; "t10" ]
+      (tools (Keeper_tool_call_log.read_recent ~keeper_name:"alice" ~n:2 ())))
+;;
+
 let test_fleet_rows_derivation_matches_read_recent () =
   with_tmp_log (fun () ->
     List.iter
@@ -138,7 +256,7 @@ let test_fleet_rows_derivation_matches_read_recent () =
           (List.map Yojson.Safe.to_string derived))
       [ "alice"; "bob"; "carol"; "absent-keeper" ])
 
-let test_exact_oas_occurrence_persisted () =
+let test_exact_agent_core_occurrence_persisted () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
       ~keeper_name:"k"
@@ -150,6 +268,9 @@ let test_exact_oas_occurrence_persisted () =
       ~tool_use_id:""
       ~turn:9
       ~planned_index:4
+      ~batch_index:2
+      ~batch_size:3
+      ~execution_mode:Agent_core.Tool_contract.Concurrent
       ();
     match Keeper_tool_call_log.read_recent ~n:1 () with
     | [ entry ] ->
@@ -164,8 +285,197 @@ let test_exact_oas_occurrence_persisted () =
       Alcotest.(check int)
         "planned index persisted"
         4
-        (Safe_ops.json_int ~default:(-1) "planned_index" entry)
+        (Safe_ops.json_int ~default:(-1) "planned_index" entry);
+      Alcotest.(check int)
+        "batch index persisted"
+        2
+        (Safe_ops.json_int ~default:(-1) "batch_index" entry);
+      Alcotest.(check int)
+        "batch size persisted"
+        3
+        (Safe_ops.json_int ~default:(-1) "batch_size" entry);
+      Alcotest.(check (option string))
+        "execution mode persisted"
+        (Some "concurrent")
+        (Safe_ops.json_string_opt "execution_mode" entry)
     | _ -> Alcotest.fail "expected exactly one entry")
+
+(* The ordinary path knows the disposition but not the payload, so it cannot
+   supply [typed_result]. Before this it supplied nothing and the row carried
+   only [success], which cannot tell a policy rejection from a runtime failure
+   and cannot represent [Deferred] at all. *)
+let test_ordinary_path_disposition_persisted () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"epsilon"
+      ~tool_name:"keeper_fs_read"
+      ~input:(`Assoc [ "path", `String "lib/runtime.ml" ])
+      ~output_text:"refused"
+      ~success:false
+      ~duration_ms:3.0
+      ~disposition:(Tool_result.Failed Tool_result.Policy_rejection)
+      ();
+    match Keeper_tool_call_log.read_recent ~n:1 () with
+    | [ entry ] ->
+      Alcotest.(check (option string))
+        "the row says which kind of failure"
+        (Some "failed")
+        (Safe_ops.json_string_opt "disposition" entry)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+(* A row with neither says so by omission rather than by guessing. *)
+let test_row_without_a_typed_outcome_omits_the_field () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"epsilon"
+      ~tool_name:"keeper_fs_read"
+      ~input:(`Assoc [])
+      ~output_text:"ok"
+      ~success:true
+      ~duration_ms:1.0
+      ();
+    match Keeper_tool_call_log.read_recent ~n:1 () with
+    | [ entry ] ->
+      Alcotest.(check (option string))
+        "no disposition is written when none was known"
+        None
+        (Safe_ops.json_string_opt "disposition" entry)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+let test_composition_action_context_persisted () =
+  with_tmp_log (fun () ->
+    let typed_result =
+      Tool_result.Completed
+        { Tool_result.tool_name = "keeper_fs_read"
+        ; data = `Assoc [ "content", `String "typed output" ]
+        ; metadata = None
+        ; duration_ms = 12.5
+        }
+    in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"delta"
+      ~tool_name:"keeper_fs_read"
+      ~input:(`Assoc [ "path", `String "lib/runtime.ml" ])
+      ~output_text:"typed output"
+      ~success:true
+      ~duration_ms:12.5
+      ~typed_result
+      ~composition_tool:"keeper_research_pipeline"
+      ~composition_run_id:"run-42"
+      ~composition_node_id:"fetch_sources"
+      ~composition_execution:Keeper_tool_composition_catalog.Async
+      ~parent_tool_use_id:"outer-7"
+      ();
+    match Keeper_tool_call_log.read_recent ~n:1 () with
+    | [ entry ] ->
+      List.iter
+        (fun (label, key, expected) ->
+           Alcotest.(check (option string))
+             label
+             (Some expected)
+             (Safe_ops.json_string_opt key entry))
+        [ "typed disposition", "disposition", "completed"
+        ; "composition tool", "composition_tool", "keeper_research_pipeline"
+        ; "composition run", "composition_run_id", "run-42"
+        ; "composition node", "composition_node_id", "fetch_sources"
+        ; "composition execution", "composition_execution", "async"
+        ; "outer provider call", "parent_tool_use_id", "outer-7"
+        ]
+    | _ -> Alcotest.fail "expected exactly one composition action entry")
+
+(* One keeper, one trace: a submitted turn and the keeper's own autonomous
+   cycle each run the same composition tool. Rows of both carry the same
+   keeper, trace_id and composition tool, so a reader asking which run
+   belongs to the submission had nothing to separate them and fell back to
+   the submission's wall clock — which the autonomous run overlaps
+   (masc#28977 RW17: builder-b's autonomous compose runs were read as
+   exactly-once violations of the submitted mission).
+
+   The rows are written the way both production writers do it: context into
+   a per-run cell, read back as a record, passed explicitly to log_call. *)
+let test_composition_rows_separate_submitted_from_autonomous_turn () =
+  with_tmp_log (fun () ->
+    let node_ids = [ "clock"; "board"; "board-peer"; "memory" ] in
+    let log_composition_run ~turn_kind ~keeper_turn_id ~run_id =
+      let cell = Keeper_tool_call_log.create_turn_ctx_cell () in
+      Keeper_tool_call_log.set_turn_context
+        ~cell
+        ~agent_name:"keeper-build-b-agent"
+        ~turn_kind
+        ~lane:"tool_optional"
+        ~trace_id:"trace-shared"
+        ~session_id:"trace-shared"
+        ~keeper_turn_id
+        ();
+      let context : Keeper_tool_call_log_context.turn_context =
+        Keeper_tool_call_log_context.get_turn_context_record ~cell ()
+      in
+      List.iter
+        (fun node_id ->
+           Keeper_tool_call_log.log_call
+             ~keeper_name:"build-b"
+             ~tool_name:"masc_board_stats"
+             ~input:(`Assoc [])
+             ~output_text:"ok"
+             ~success:true
+             ~duration_ms:1.0
+             ?agent_name:context.agent_name
+             ?turn_kind:context.turn_kind
+             ?lane:context.lane
+             ?trace_id:context.trace_id
+             ?session_id:context.session_id
+             ?keeper_turn_id:context.keeper_turn_id
+             ~composition_tool:"keeper_compose_mission-snapshot"
+             ~composition_run_id:run_id
+             ~composition_node_id:node_id
+             ~composition_execution:Keeper_tool_composition_catalog.Inline
+             ~parent_tool_use_id:("call-" ^ run_id)
+             ())
+        node_ids
+    in
+    log_composition_run
+      ~turn_kind:Turn_record.Direct
+      ~keeper_turn_id:2
+      ~run_id:"run-submitted";
+    log_composition_run
+      ~turn_kind:Turn_record.Autonomous
+      ~keeper_turn_id:3
+      ~run_id:"run-autonomous";
+    let entries = Keeper_tool_call_log.read_recent ~n:16 () in
+    Alcotest.(check int) "every node row of both runs persisted" 8
+      (List.length entries);
+    let run_ids_for kind =
+      List.filter_map
+        (fun entry ->
+           match Safe_ops.json_string_opt "turn_kind" entry with
+           | Some value when String.equal value kind ->
+             Safe_ops.json_string_opt "composition_run_id" entry
+           | Some _ | None -> None)
+        entries
+      |> List.sort_uniq String.compare
+    in
+    Alcotest.(check (list string)) "submitted turn owns exactly its run"
+      [ "run-submitted" ]
+      (run_ids_for "direct");
+    Alcotest.(check (list string)) "autonomous cycle owns exactly its run"
+      [ "run-autonomous" ]
+      (run_ids_for "autonomous");
+    let submitted_node_rows =
+      List.filter
+        (fun entry ->
+           match Safe_ops.json_string_opt "turn_kind" entry with
+           | Some value -> String.equal value "direct"
+           | None -> false)
+        entries
+    in
+    Alcotest.(check int) "submitted run keeps all four node rows" 4
+      (List.length submitted_node_rows);
+    Alcotest.(check (list string)) "every node of the submitted run is named"
+      (List.sort String.compare node_ids)
+      (List.filter_map
+         (Safe_ops.json_string_opt "composition_node_id")
+         submitted_node_rows
+       |> List.sort String.compare))
 
 (* ── Redaction: tool names do not suppress evidence ────────────── *)
 
@@ -226,7 +536,7 @@ let test_model_field_stored () =
 
 let test_turn_context_fields_stored () =
   with_tmp_log (fun () ->
-    (* Mirrors the production reader (keeper_hooks_oas): context is
+    (* Mirrors the production reader (keeper_hooks_agent_core): context is
        written to a per-run cell, read back as a record, and passed
        explicitly to log_call — there is no ambient fallback. *)
     let cell = Keeper_tool_call_log.create_turn_ctx_cell () in
@@ -240,11 +550,9 @@ let test_turn_context_fields_stored () =
       ~prompt_fingerprint:"prompt-fp-k"
       ~trace_id:"trace-k"
       ~session_id:"trace-k"
-      ~generation:3
       ~turn:7
       ~keeper_turn_id:7
       ~task_id:"task-runtime-trust"
-      ~goal_ids:["goal-short"; "goal-long"]
       ~sandbox_profile:"docker"
       ~sandbox_root:"/tmp/k-sandbox"
       ~allowed_paths:["/tmp/k-sandbox"; "/tmp/shared"]
@@ -265,9 +573,8 @@ let test_turn_context_fields_stored () =
       ?thinking_budget:tctx.thinking_budget
       ?prompt_fingerprint:tctx.prompt_fingerprint
       ?trace_id:tctx.trace_id ?session_id:tctx.session_id
-      ?generation:tctx.generation
       ?turn:tctx.turn ?keeper_turn_id:tctx.keeper_turn_id
-      ?task_id:tctx.task_id ?goal_ids:tctx.goal_ids
+      ?task_id:tctx.task_id
       ?sandbox_profile:tctx.sandbox_profile
       ?sandbox_root:tctx.sandbox_root
       ?allowed_paths:tctx.allowed_paths
@@ -298,8 +605,6 @@ let test_turn_context_fields_stored () =
     Alcotest.(check (option string)) "session_id field"
       (Some "trace-k")
       (Safe_ops.json_string_opt "session_id" entry);
-    Alcotest.(check int) "generation field" 3
-      (Safe_ops.json_int ~default:0 "generation" entry);
     Alcotest.(check int) "turn field" 7
       (Safe_ops.json_int ~default:0 "turn" entry);
     Alcotest.(check int) "keeper_turn_id field" 7
@@ -310,9 +615,6 @@ let test_turn_context_fields_stored () =
     Alcotest.(check (option string)) "task_id field"
       (Some "task-runtime-trust")
       (Safe_ops.json_string_opt "task_id" entry);
-    Alcotest.(check (list string)) "goal_ids field"
-      ["goal-short"; "goal-long"]
-      Yojson.Safe.Util.(entry |> member "goal_ids" |> to_list |> List.map to_string);
     Alcotest.(check (option string)) "sandbox_profile field"
       (Some "docker")
       (Safe_ops.json_string_opt "sandbox_profile" entry);
@@ -328,8 +630,6 @@ let test_turn_context_fields_stored () =
     Alcotest.(check (option string)) "runtime_contract agent"
       (Some "keeper-k-agent")
       (Safe_ops.json_string_opt "agent_name" runtime_contract);
-    Alcotest.(check int) "runtime_contract generation" 3
-      (Safe_ops.json_int ~default:0 "generation" runtime_contract);
     Alcotest.(check (list string)) "runtime_contract allowed_paths"
       ["/tmp/k-sandbox"; "/tmp/shared"]
       Yojson.Safe.Util.(
@@ -342,7 +642,7 @@ let test_turn_context_fields_stored () =
       true
       (String_util.contains_substring
          Yojson.Safe.Util.(member "execute_path_basis" path_resolution |> to_string)
-         "do not repeat the repo prefix");
+         "do not repeat the cwd prefix");
     Alcotest.(check bool)
       "runtime contract points .masc state at task/context tools"
       true
@@ -448,7 +748,7 @@ let test_turn_context_fields_absent_without_context () =
 let test_route_evidence_stored_for_git_push () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"tool_execute"
       ~input:
         (`Assoc
@@ -511,7 +811,7 @@ let test_route_evidence_stored_for_git_push () =
 let test_route_evidence_stored_for_blob_backed_git_push () =
   with_tmp_log (fun () ->
     let marker =
-      Tool_output.encode_for_oas
+      Tool_output.encode_for_agent_core
         (Tool_output.Stored
            (artifact_ref_exn
               ~sha256:(String.make 64 'b')
@@ -520,7 +820,7 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
               ~preview:{|{"ok":true,"via":"docker","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}))
     in
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"tool_execute"
       ~input:
         (`Assoc
@@ -563,7 +863,7 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
 let test_route_evidence_redacts_wrapped_git_push () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"tool_execute"
       ~input:
         (`Assoc
@@ -600,7 +900,7 @@ let test_route_evidence_command_redaction_fails_closed () =
     (fun command ->
        with_tmp_log (fun () ->
          Keeper_tool_call_log.log_call
-           ~keeper_name:"executor"
+           ~keeper_name:"omega"
            ~tool_name:"tool_execute"
            ~input:(`Assoc [ ("cmd", `String command) ])
            ~output_text:
@@ -636,7 +936,7 @@ let test_route_evidence_command_redaction_fails_closed () =
 let test_route_evidence_records_descriptor_for_filesystem_calls () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"Read"
       ~input:(`Assoc [ ("file_path", `String "README.md") ])
       ~output_text:"file contents"
@@ -674,7 +974,7 @@ let test_route_evidence_records_descriptor_for_filesystem_calls () =
 let test_route_evidence_records_internal_descriptor () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"keeper_time_now"
       ~input:(`Assoc [])
       ~output_text:
@@ -716,7 +1016,7 @@ let test_route_evidence_records_internal_descriptor () =
 let test_route_evidence_records_masc_board_descriptor () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"mcp__masc__masc_board_post"
       ~input:(`Assoc [ "body", `String "descriptor evidence test" ])
       ~output_text:{|{"ok":true,"post_id":"post-1"}|}
@@ -777,7 +1077,7 @@ let test_route_evidence_records_descriptor_eval_tags () =
 let test_non_object_input_still_logs_action_radius () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"tool_write_file"
       ~input:(`String "raw pre-tool gate payload")
       ~output_text:"gate_waiting_for_operator"
@@ -811,15 +1111,17 @@ let test_dashboard_aggregate_groups_runtime_fields () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
       ~keeper_name:"k1" ~tool_name:"masc_status"
-      ~input:(`Assoc []) ~output_text:"ok"
+      ~input:(`Assoc []) ~output_text:"ok" ~result_bytes:2
       ~success:true ~duration_ms:2.0
       ~model:"glm-5.1" ~lane:"tool_optional"
       ~tool_choice:"auto"
       ~thinking_enabled:false ~thinking_budget:1024
       ~runtime_profile:"primary" ();
+    let failure_output = "error: {\"ok\":false,\"error\":\"boom\"}" in
     Keeper_tool_call_log.log_call
       ~keeper_name:"k2" ~tool_name:"masc_status"
-      ~input:(`Assoc []) ~output_text:"error: {\"ok\":false,\"error\":\"boom\"}"
+      ~input:(`Assoc []) ~output_text:failure_output
+      ~result_bytes:(String.length failure_output)
       ~success:false ~duration_ms:3.0
       ~model:"qwen3.5-27b-unified" ~lane:"retry"
       ~tool_choice:"auto"
@@ -835,7 +1137,7 @@ let test_dashboard_aggregate_groups_runtime_fields () =
       (Some "tool_call_io")
       (Safe_ops.json_string_opt "source" summary);
     Alcotest.(check (option string)) "dashboard producer"
-      (Some "keeper_hooks_oas|mcp_server_eio_call_tool")
+      (Some "keeper_hooks_agent_core|mcp_server_eio_call_tool")
       (Safe_ops.json_string_opt "producer" summary);
     Alcotest.(check (option string)) "dashboard surface"
       (Some "/api/v1/dashboard/tool-quality")
@@ -882,6 +1184,7 @@ let test_dashboard_aggregate_missing_runtime_profile_is_unknown () =
       ~tool_name:"masc_status"
       ~input:(`Assoc [])
       ~output_text:"ok"
+      ~result_bytes:2
       ~success:true
       ~duration_ms:1.0
       ();
@@ -894,6 +1197,42 @@ let test_dashboard_aggregate_missing_runtime_profile_is_unknown () =
       "missing runtime profile goes to unknown bucket"
       1
       (Safe_ops.json_int ~default:0 "calls" unknown_bucket))
+
+let test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate () =
+  with_tmp_log (fun () ->
+    let result =
+      Tool_result.make_deferred
+        ~tool_name:"keeper_wait"
+        ~start_time:(Time_compat.now ())
+        ~data:(`Assoc [ "reason", `String "external_effect_pending" ])
+        ()
+    in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k-deferred"
+      ~tool_name:"keeper_wait"
+      ~input:(`Assoc [])
+      ~output_text:(Tool_result.message result)
+      ~success:(Tool_result.is_success result)
+      ~duration_ms:(Tool_result.duration_ms result)
+      ~typed_result:result
+      ();
+    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    Alcotest.(check int)
+      "deferred remains visible as typed neutral outcome"
+      1
+      (Safe_ops.json_int ~default:0 "deferred" summary);
+    Alcotest.(check int)
+      "deferred excluded from settled quality total"
+      0
+      (Safe_ops.json_int ~default:(-1) "total" summary);
+    Alcotest.(check int)
+      "deferred is not a failure"
+      0
+      (Safe_ops.json_int ~default:(-1) "failure" summary);
+    Alcotest.(check bool)
+      "deferred is absent from settled per-tool rates"
+      true
+      Yojson.Safe.Util.(member "by_tool" summary |> to_list |> List.is_empty))
 
 let test_dashboard_hourly_trend_numeric_ts () =
   with_tmp_log_dir (fun dir ->
@@ -910,6 +1249,7 @@ let test_dashboard_hourly_trend_numeric_ts () =
          ; ("tool", `String "masc_status")
          ; ("input", `Assoc [])
          ; ("output", `String "ok")
+         ; ("result_bytes", `Int 2)
          ; ("success", `Bool true)
          ; ("duration_ms", `Float 2.0)
          ]);
@@ -953,6 +1293,7 @@ let test_dashboard_aggregate_window_hours () =
          ; ("tool", `String "masc_status")
          ; ("input", `Assoc [])
          ; ("output", `String "ok")
+         ; ("result_bytes", `Int 2)
          ; ("success", `Bool true)
          ; ("duration_ms", `Float 2.0)
          ]);
@@ -963,6 +1304,7 @@ let test_dashboard_aggregate_window_hours () =
          ; ("tool", `String "masc_status")
          ; ("input", `Assoc [])
          ; ("output", `String "error: {\"ok\":false,\"error\":\"stale\"}")
+         ; ("result_bytes", `Int 35)
          ; ("success", `Bool false)
          ; ("duration_ms", `Float 5.0)
          ]);
@@ -978,6 +1320,74 @@ let test_dashboard_aggregate_window_hours () =
     Alcotest.(check (option (float 0.0001))) "window echoed"
       (Some 24.0)
       (Safe_ops.json_float_opt "window_hours" summary))
+
+let test_dashboard_aggregate_drops_rows_without_result_bytes () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.create
+        ~base_dir:(Filename.concat dir ".masc/tool_calls")
+        ()
+    in
+    let now = Unix.gettimeofday () in
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Float now)
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "ok")
+         ; ("result_bytes", `Int 2)
+         ; ("success", `Bool true)
+         ; ("duration_ms", `Float 2.0)
+         ]);
+    (* No [result_bytes]: an inline output string must not stand in for it. *)
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Float now)
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "error: {\"ok\":false,\"error\":\"boom\"}")
+         ; ("success", `Bool false)
+         ; ("duration_ms", `Float 5.0)
+         ]);
+    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    Alcotest.(check int) "malformed row counted" 1
+      (Safe_ops.json_int ~default:(-1) "malformed" summary);
+    Alcotest.(check int) "malformed row excluded from total" 1
+      (Safe_ops.json_int ~default:(-1) "total" summary);
+    Alcotest.(check int) "malformed row excluded from failures" 0
+      (Safe_ops.json_int ~default:(-1) "failure" summary);
+    let masc_status =
+      find_bucket "masc_status" (Yojson.Safe.Util.member "by_tool" summary)
+    in
+    Alcotest.(check int) "malformed row excluded from per-tool calls" 1
+      (Safe_ops.json_int ~default:(-1) "calls" masc_status);
+    Alcotest.(check bool) "malformed row excluded from failure categories" true
+      Yojson.Safe.Util.(member "failure_categories" summary |> to_list |> List.is_empty))
+
+let test_dashboard_aggregate_only_malformed_rows_is_empty_summary () =
+  with_tmp_log_dir (fun dir ->
+    let store =
+      Dated_jsonl.create
+        ~base_dir:(Filename.concat dir ".masc/tool_calls")
+        ()
+    in
+    Dated_jsonl.append store
+      (`Assoc
+         [ ("ts", `Float (Unix.gettimeofday ()))
+         ; ("keeper", `String "k")
+         ; ("tool", `String "masc_status")
+         ; ("input", `Assoc [])
+         ; ("output", `String "ok")
+         ; ("success", `Bool true)
+         ; ("duration_ms", `Float 2.0)
+         ]);
+    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    Alcotest.(check int) "malformed row counted" 1
+      (Safe_ops.json_int ~default:(-1) "malformed" summary);
+    Alcotest.(check int) "nothing aggregated" 0
+      (Safe_ops.json_int ~default:(-1) "total" summary))
 
 let test_append_failure_records_coverage_gap () =
   with_tmp_corrupt_tool_call_store (fun ~dir:_ ~masc_root ->
@@ -1010,7 +1420,7 @@ let test_dashboard_aggregate_surfaces_coverage_gap () =
     Telemetry_coverage_gap.record
       ~masc_root
       ~source:"tool_call_io"
-      ~producer:"keeper_hooks_oas"
+      ~producer:"keeper_hooks_agent_core"
       ~durable_store:(Filename.concat masc_root "tool_calls")
       ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
       ~stale_reason:"tool_call_io_append_failed"
@@ -1033,7 +1443,7 @@ let test_dashboard_aggregate_ignores_recovered_coverage_gap () =
     Telemetry_coverage_gap.record
       ~masc_root
       ~source:"tool_call_io"
-      ~producer:"keeper_hooks_oas"
+      ~producer:"keeper_hooks_agent_core"
       ~durable_store:(Filename.concat masc_root "tool_calls")
       ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
       ~stale_reason:"tool_call_io_append_failed"
@@ -1042,7 +1452,7 @@ let test_dashboard_aggregate_ignores_recovered_coverage_gap () =
       ();
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"masc_status"
-      ~input:(`Assoc []) ~output_text:"ok"
+      ~input:(`Assoc []) ~output_text:"ok" ~result_bytes:2
       ~success:true ~duration_ms:2.0
       ~trace_id:"trace-recovered" ();
     let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
@@ -1120,14 +1530,14 @@ let test_output_valid_utf8_untouched () =
     | _ -> Alcotest.fail "expected exactly one entry")
 
 (* When the tool output is the OCaml [%S]-quoted [masc:blob ...] marker
-   produced by Tool_output.encode_for_oas, the persisted record must
+   produced by Tool_output.encode_for_agent_core, the persisted record must
    normalize it into a structured _blob object so that telemetry readers
    (UI, jq scripts) see a clean JSON shape instead of doubly-escaped
    string fields. *)
 let test_output_blob_marker_normalized () =
   with_tmp_log (fun () ->
     let marker =
-      Tool_output.encode_for_oas
+      Tool_output.encode_for_agent_core
         (Tool_output.Stored
            (artifact_ref_exn
               ~sha256:(String.make 64 'a')
@@ -1180,6 +1590,73 @@ let test_output_inline_string_preserved () =
       Alcotest.(check string) "inline output stays a string"
         "small inline result" s
     | _ -> Alcotest.fail "expected exactly one entry")
+
+let test_output_preview_derives_truncation_metadata () =
+  with_tmp_log (fun () ->
+    let output_text = String.make 5000 'x' in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k"
+      ~tool_name:"tool_large"
+      ~input:(`Assoc [])
+      ~output_text
+      ~result_bytes:(String.length output_text)
+      ~success:true
+      ~duration_ms:1.0
+      ();
+    match Keeper_tool_call_log.read_recent ~n:1 () with
+    | [ `Assoc fields ] ->
+      Alcotest.(check (option int))
+        "producer bytes retained"
+        (Some 5000)
+        (List.assoc_opt "result_bytes" fields |> Option.map Yojson.Safe.Util.to_int);
+      Alcotest.(check (option int))
+        "log preview clamp is explicit"
+        (Some 4000)
+        (List.assoc_opt "truncated_to" fields |> Option.map Yojson.Safe.Util.to_int)
+    | _ -> Alcotest.fail "expected exactly one object entry")
+
+(* A file target and a working directory are both strings. Reported as the
+   same target_kind, a consumer reading "path" as "a file" opened a directory:
+   1,094 of 2026-08-18's 1,323 Execute rows carried a cwd that way (#29013). *)
+let test_action_radius_tells_a_file_from_a_directory () =
+  with_tmp_log (fun () ->
+    let radius_of_input input =
+      Keeper_tool_call_log.log_call
+        ~keeper_name:"k" ~tool_name:"probe" ~input ~output_text:"ok"
+        ~success:true ~duration_ms:1.0 ();
+      match Keeper_tool_call_log.read_recent ~n:1 () with
+      | [ json ] ->
+        let radius =
+          match json with
+          | `Assoc fields ->
+            Option.value (List.assoc_opt "action_radius" fields) ~default:`Null
+          | _ -> `Null
+        in
+        ( Safe_ops.json_string ~default:"" "target_kind" radius
+        , Safe_ops.json_string ~default:"" "target_path" radius )
+      | _ -> Alcotest.fail "expected exactly one entry"
+    in
+    Alcotest.(check (pair string string))
+      "file_path is a file target"
+      ("path", "lib/keeper/keeper_tool_call_log.ml")
+      (radius_of_input
+         (`Assoc [ "file_path", `String "lib/keeper/keeper_tool_call_log.ml" ]));
+    Alcotest.(check (pair string string))
+      "cwd is a directory target"
+      ("directory", "repos/masc")
+      (radius_of_input (`Assoc [ "cwd", `String "repos/masc" ]));
+    Alcotest.(check (pair string string))
+      "repo_path is a directory target"
+      ("directory", "repos/masc")
+      (radius_of_input (`Assoc [ "repo_path", `String "repos/masc" ]));
+    (* An explicit declaration still wins over the key it was found under. *)
+    Alcotest.(check (pair string string))
+      "declared target_kind is not overridden"
+      ("workspace", "repos/masc")
+      (radius_of_input
+         (`Assoc
+            [ "cwd", `String "repos/masc"; "target_kind", `String "workspace" ])))
+;;
 
 let test_string_input_keeps_action_radius () =
   with_tmp_log (fun () ->
@@ -1247,15 +1724,79 @@ let test_async_append_defers_until_flush env =
           (Safe_ops.json_string_opt "keeper" entry)
       | _ -> Alcotest.fail "expected exactly one entry"))
 
+let test_commit_callback_bypasses_async_queue env =
+  with_tmp_log_dir (fun _dir ->
+    Eio.Switch.run (fun sw ->
+      Keeper_tool_call_log.start_flush_fiber
+        ~sw
+        ~clock:(Eio.Stdenv.clock env);
+      let committed = ref false in
+      Keeper_tool_call_log.log_call
+        ~keeper_name:"chat-k"
+        ~tool_name:"masc_status"
+        ~input:(`Assoc [])
+        ~output_text:"ready"
+        ~success:true
+        ~duration_ms:1.0
+        ~on_committed:(fun () -> committed := true)
+        ();
+      Alcotest.(check bool) "callback observed committed row" true !committed;
+      Alcotest.(check int)
+        "committed row did not enter async queue"
+        0
+        (Keeper_tool_call_log.queued_count_for_testing ());
+      Alcotest.(check int)
+        "committed row is immediately readable"
+        1
+        (List.length (Keeper_tool_call_log.read_recent ~n:1 ()))))
+
+let test_commit_callback_fails_closed_without_store () =
+  Keeper_tool_call_log.reset_for_testing ();
+  let raised =
+    try
+      Keeper_tool_call_log.log_call
+        ~keeper_name:"chat-k"
+        ~tool_name:"masc_status"
+        ~input:(`Assoc [])
+        ~output_text:"unavailable"
+        ~success:true
+        ~duration_ms:1.0
+        ~on_committed:(fun () -> Alcotest.fail "callback must not run")
+        ();
+      false
+    with _ -> true
+  in
+  Alcotest.(check bool) "required commit fails closed" true raised
+
 let () =
   Alcotest.run "keeper_tool_call_log"
-    [ ( "read_recent",
+    [ ( "invocation observation",
+        [ Alcotest.test_case
+            "blank and repeated ids remain occurrence-scoped"
+            `Quick
+            test_pending_observations_are_occurrence_scoped
+        ; Alcotest.test_case
+            "cancelled invocation releases abandoned observation"
+            `Quick
+            test_abandoned_observation_is_released_with_invocation
+        ] )
+    ; ( "read_recent",
         [ eio_test "n=0 returns []" test_read_recent_n_zero
         ; eio_test "n<0 returns []" test_read_recent_n_negative
         ; eio_test "keeper filter" test_read_recent_keeper_filter
         ; eio_test "fleet-row derivation equals read_recent"
             test_fleet_rows_derivation_matches_read_recent
-        ; eio_test "exact OAS occurrence" test_exact_oas_occurrence_persisted
+        ; eio_test "unfiltered read is exactly n; filtered still finds n"
+            test_unfiltered_read_is_exactly_n_and_filtered_still_finds_n
+        ; eio_test "exact AGENT_CORE occurrence" test_exact_agent_core_occurrence_persisted
+        ; eio_test "ordinary path disposition"
+            test_ordinary_path_disposition_persisted
+        ; eio_test "no typed outcome omits the field"
+            test_row_without_a_typed_outcome_omits_the_field
+        ; eio_test "composition action context"
+            test_composition_action_context_persisted
+        ; eio_test "composition rows separate submitted from autonomous turn"
+            test_composition_rows_separate_submitted_from_autonomous_turn
         ] )
     ; ( "redaction",
         [ eio_test "sensitive-named tool logged with redaction"
@@ -1291,10 +1832,16 @@ let () =
             test_dashboard_aggregate_groups_runtime_fields
         ; eio_test "dashboard aggregate marks missing runtime profile unknown"
             test_dashboard_aggregate_missing_runtime_profile_is_unknown
+        ; eio_test "dashboard aggregate keeps deferred neutral"
+            test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate
         ; eio_test "dashboard hourly trend buckets numeric ts"
             test_dashboard_hourly_trend_numeric_ts
         ; eio_test "dashboard aggregate window hours"
             test_dashboard_aggregate_window_hours
+        ; eio_test "dashboard aggregate drops rows without result_bytes"
+            test_dashboard_aggregate_drops_rows_without_result_bytes
+        ; eio_test "dashboard aggregate with only malformed rows is empty"
+            test_dashboard_aggregate_only_malformed_rows_is_empty_summary
         ; eio_test "append failure records coverage gap"
             test_append_failure_records_coverage_gap
         ; eio_test "dashboard aggregate surfaces coverage gap"
@@ -1313,13 +1860,21 @@ let () =
             test_output_blob_marker_normalized
         ; eio_test "inline string output stays a JSON string"
             test_output_inline_string_preserved
+        ; eio_test "large output records preview truncation"
+            test_output_preview_derives_truncation_metadata
         ] )
     ; ( "action_radius",
         [ eio_test "string input does not break action radius"
             test_string_input_keeps_action_radius
+        ; Alcotest.test_case "action radius tells a file from a directory" `Quick
+            test_action_radius_tells_a_file_from_a_directory
         ] )
     ; ( "async_append",
         [ eio_env_test "append queues until flush when async fiber is active"
             test_async_append_defers_until_flush
+        ; eio_env_test "commit callback runs after synchronous readable append"
+            test_commit_callback_bypasses_async_queue
+        ; eio_test "commit callback fails closed without store"
+            test_commit_callback_fails_closed_without_store
         ] )
     ]

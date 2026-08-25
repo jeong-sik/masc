@@ -15,7 +15,6 @@ include Keeper_unified_metrics_json_support
 let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
     ?(is_autonomous_turn = true)
-    ?(update_proactive_rt = true)
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
   let tool_names = Keeper_agent_result.tool_names result in
@@ -36,9 +35,8 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
      must never rewrite an observation to zero. *)
   let observed_input_tokens = result.usage.input_tokens in
   let observed_output_tokens = result.usage.output_tokens in
-  let observed_total_tokens = Keeper_context_runtime.total_tokens result.usage in
+  let observed_total_tokens = Inference_utils.total_tokens result.usage in
   let turn_cost = estimate_usage_cost_usd result.usage in
-  let substantive_tool_call_count = List.length tool_names in
   let has_substantive_tools = has_substantive_tool_calls tool_names in
   let has_text = String.trim result.response_text <> "" in
   (* Visible-output preview follows the typed result surface. *)
@@ -53,7 +51,8 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     has_substantive_tools || has_validated_evidence
   in
   let is_scheduled_autonomous_cycle =
-    is_scheduled_autonomous_cycle_of_observation observation
+    is_autonomous_turn
+    && is_scheduled_autonomous_cycle_of_observation observation
   in
   let is_board_reactive =
     Keeper_world_observation.has_pending_board_activity observation
@@ -67,7 +66,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   in
   let rt = meta.runtime in
   (* #10474: proactive outcome counter for successful cycles. *)
-  if update_proactive_rt && is_scheduled_autonomous_cycle then begin
+  if is_scheduled_autonomous_cycle then begin
     let outcome =
       if has_substantive_tools then "tool_called"
       else if is_noop_cycle ~has_text ~tools_used:tool_names
@@ -106,35 +105,31 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       proactive_rt = {
         count_total =
           rt.proactive_rt.count_total
-          + (if update_proactive_rt && is_scheduled_autonomous_cycle then 1 else 0);
+          + (if is_scheduled_autonomous_cycle then 1 else 0);
         last_ts =
-          (if update_proactive_rt
-              && (is_scheduled_autonomous_cycle
-                  || ((is_board_reactive || is_mention_reactive)
-                      && has_meaningful_work))
+          (if is_scheduled_autonomous_cycle
+              || ((is_board_reactive || is_mention_reactive)
+                  && has_meaningful_work)
            then now_ts
            else rt.proactive_rt.last_ts);
         visible_count_total =
           rt.proactive_rt.visible_count_total
-          + (if update_proactive_rt
-               && is_scheduled_autonomous_cycle
+          + (if is_scheduled_autonomous_cycle
                && (has_text || visible_tool_signal_present)
              then 1
              else 0);
         last_visible_ts =
-          (if update_proactive_rt
-              && is_scheduled_autonomous_cycle
+          (if is_scheduled_autonomous_cycle
               && (has_text || visible_tool_signal_present)
            then now_ts
            else rt.proactive_rt.last_visible_ts);
         last_outcome =
-          (if update_proactive_rt && is_scheduled_autonomous_cycle then
+          (if is_scheduled_autonomous_cycle then
              scheduled_autonomous_outcome_of_result ~has_text
                ~has_tool_calls:visible_tool_signal_present
            else rt.proactive_rt.last_outcome);
         last_reason =
-          (if not update_proactive_rt then rt.proactive_rt.last_reason
-           else if is_scheduled_autonomous_cycle then
+          (if is_scheduled_autonomous_cycle then
              (if has_substantive_tools then
                 Printf.sprintf "unified:tools=[%s]"
                   (String.concat "," tool_names)
@@ -160,7 +155,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
              | Proactive_tool_use
              | Proactive_mixed_response -> rt.proactive_rt.last_reason);
         last_preview =
-          (if not update_proactive_rt || not is_scheduled_autonomous_cycle
+          (if not is_scheduled_autonomous_cycle
            then rt.proactive_rt.last_preview
            else
              select_proactive_preview
@@ -173,44 +168,16 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
                ~validated_evidence_preview:
                  (Option.map validated_evidence_preview validated_evidence));
         consecutive_noop_count =
-          (if update_proactive_rt && is_scheduled_autonomous_cycle then
+          (if is_scheduled_autonomous_cycle then
              if is_noop_cycle ~has_text ~tools_used:tool_names
              then rt.proactive_rt.consecutive_noop_count + 1
              else 0
            else rt.proactive_rt.consecutive_noop_count);
       };
-      (* Autonomous action tracking from tool calls *)
-      autonomous_action_count =
-        rt.autonomous_action_count
-        + (if is_autonomous_turn then substantive_tool_call_count else 0);
-      autonomous_turn_count =
-        rt.autonomous_turn_count + (if is_autonomous_turn then 1 else 0);
-      autonomous_text_turn_count =
-        rt.autonomous_text_turn_count
-        + (if is_autonomous_turn && has_text && not has_substantive_tools then 1 else 0);
-      autonomous_tool_turn_count =
-        rt.autonomous_tool_turn_count
-        + (if is_autonomous_turn && has_substantive_tools then 1 else 0);
-      board_reactive_turn_count =
-        rt.board_reactive_turn_count + (if is_board_reactive then 1 else 0);
-      mention_reactive_turn_count =
-        rt.mention_reactive_turn_count + (if is_mention_reactive then 1 else 0);
-      noop_turn_count =
-        rt.noop_turn_count
-        + (if is_autonomous_turn && not has_text && not has_substantive_tools
-              && not has_validated_evidence then 1 else 0);
-      (* This timestamp stays scoped to substantive tool actions.
-         Validated evidence affects proactive visibility, but it does not
-         redefine the autonomous action counter semantics. *)
-      last_autonomous_action_at =
-        (if is_autonomous_turn && has_substantive_tools
-         then now_iso ()
-         else rt.last_autonomous_action_at);
       (* A successful turn means the keeper is not blocked.
          Clear unconditionally so stale error strings from previous
          failures do not persist in the runtime JSON and mislead the
          dashboard into showing BLOCKED status. *)
-      last_blocker = None;
     };
   } in
   record_keeper_total_cost_usd

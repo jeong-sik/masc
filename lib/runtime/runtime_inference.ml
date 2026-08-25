@@ -14,10 +14,23 @@ let resolve_temperature ~runtime_id ~fallback =
   | Some temperature -> temperature
   | None -> fallback ()
 
-(* masc#24067 / oas#2517: MASC must not synthesize a request [max_tokens]
+(* Per-runtime reasoning effort. Official-client runtimes reject
+   [enable_thinking] and take effort instead, so without this the effort a
+   Claude Code / Codex / Antigravity turn runs at is whatever the CLI
+   defaults to and no operator declaration reaches it. [None] leaves the
+   caller's own value in place. *)
+let resolve_reasoning_effort ~runtime_id =
+  Runtime.reasoning_effort_of_runtime_id runtime_id
+
+let resolve_turn_timeout_s ~runtime_id = Runtime.turn_timeout_s_of_runtime_id runtime_id
+
+let resolve_max_prompt_bytes ~runtime_id =
+  Runtime.max_prompt_bytes_of_runtime_id runtime_id
+
+(* masc#24067 / agent-core boundary: MASC must not synthesize a request [max_tokens]
    value. The former resolver invented one from either a model capability
    ceiling or a flat fallback. Callers now carry explicit intent as [int
-   option], and OAS alone owns model-capability validation plus
+   option], and AGENT_CORE alone owns model-capability validation plus
    envelope-specific clamp/fallback policy. *)
 
 type seed = {
@@ -49,7 +62,17 @@ let seed_of_thinking_support ?(preserve_thinking = None) (thinking_support : boo
 ;;
 
 let for_runtime ~name =
-  seed_of_thinking_support
-    ~preserve_thinking:(Runtime.preserve_thinking_of_runtime_id name)
-    (Runtime.thinking_support_of_runtime_id name)
+  match Runtime.get_runtime_by_id name with
+  | Some runtime ->
+    (match Runtime_execution.checkpoint_owner runtime.Runtime.execution with
+     | Runtime_execution.Official_client ->
+       seed_of_thinking_support None
+     | Runtime_execution.Masc_agent_core ->
+       seed_of_thinking_support
+         ~preserve_thinking:(Runtime.preserve_thinking_of_runtime_id name)
+         (Runtime.thinking_support_of_runtime_id name))
+  | None ->
+    seed_of_thinking_support
+      ~preserve_thinking:(Runtime.preserve_thinking_of_runtime_id name)
+      (Runtime.thinking_support_of_runtime_id name)
 ;;

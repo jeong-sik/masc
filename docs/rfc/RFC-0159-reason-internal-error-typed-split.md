@@ -8,7 +8,6 @@ author: agent-llm-a-opus
 supersedes: []
 superseded_by: null
 related: ["0148", "0157", "0158"]
-implementation_prs: []
 ---
 
 # RFC-0159 — Reason_internal_error typed split
@@ -238,7 +237,7 @@ truth for the catch-all removal).
   boundary unit test must include an FFI-raised case.
 - **Phase 3 breaking change**: removing `Reason_internal_error` is a
   closed-sum API break. Mitigation: phase 1 keeps both; downstream JSON
-  consumers (dashboard, OAS exporters) must ship readers for the four
+  consumers (dashboard, agent_core exporters) must ship readers for the four
   new forms in phase 1 PR (not deferred).
 - **Producer-side typo**: a site that previously wrote
   `terminal_reason := "internal_error"` and now must pick a sub-variant

@@ -42,6 +42,13 @@ type entry =
   ; completed_at : float option
   }
 
+(** [same_entry_record a b] is whole-record equality, used by the terminal
+    partition check to tell a duplicate publish from an integrity conflict.
+    Distinct from identity: two records can share a [request_id] and still
+    differ. Deliberately not defined as equality of [entry_record_to_json]'s
+    output — the conflict predicate belongs to the record, not its rendering. *)
+val same_entry_record : entry -> entry -> bool
+
 (** A request exists, but the supplied access identity does not own it (or
     cannot be constructed). [Caller_mismatch] intentionally does not expose
     the persisted owner value. A different base path is a different store and
@@ -214,9 +221,6 @@ type cancel_result =
 type worker_cancel_source =
   | Operator_request
   | Runtime_cancellation
-
-val worker_cancel_source_to_string : worker_cancel_source -> string
-(** Stable wire label for cancellation provenance. *)
 
 type worker_abort_reason =
   | Worker_cancelled of

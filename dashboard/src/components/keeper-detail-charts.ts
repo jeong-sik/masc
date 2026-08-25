@@ -3,7 +3,6 @@ import { formatTokens, isFiniteMetricValue } from '../lib/format-number'
 import { SPARKLINE_W, SPARKLINE_H, SPARKLINE_PAD } from '../lib/sparkline-config'
 import { ProgressBar } from './common/progress-bar'
 import { Eyebrow } from './common/eyebrow'
-import { StatusChip } from './common/status-chip'
 import type { Keeper, KeeperMetricPoint } from '../types'
 import { ctxColor } from './keeper-detail-ctx-utils'
 import { MutedSpan, DetailCard, DetailRow } from './keeper-detail-kpi'
@@ -142,29 +141,15 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
   const latencyLine = miniSparkline(latencySeries)
   const costLine = miniSparkline(costs)
 
-  // Fallback markers on latency chart
-  const n = series.length
-  const fallbackIndices = series
-    .map((p: KeeperMetricPoint, i: number) => p.fallback_applied ? i : -1)
-    .filter((i: number) => i >= 0)
-  const fallbackCount = fallbackIndices.length
-
   return html`
     <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5 v2-monitoring-row">
-      ${'' /* Latency + fallback markers */}
+      ${'' /* Latency */}
       <${DetailCard}>
         <${DetailRow}>
           <${Eyebrow}>지연 시간</${Eyebrow}>
-          <span class="flex items-center gap-2">
-            ${fallbackCount > 0 ? html`<span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--bad-soft)] text-[var(--color-status-err)] font-mono">FB ${fallbackCount}</span>` : null}
-            <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${isFiniteMetricValue(lastLatency) && lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
-          </span>
+          <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${isFiniteMetricValue(lastLatency) && lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
         </${DetailRow}>
         <svg aria-hidden="true" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded-[var(--r-1)] w-full" style="background:var(--bg-deepest);">
-          ${fallbackIndices.map((idx: number) => {
-            const x = SPARKLINE_PAD + (idx / Math.max(n - 1, 1)) * (W - 2 * SPARKLINE_PAD)
-            return html`<line x1="${x.toFixed(1)}" y1="${SPARKLINE_PAD}" x2="${x.toFixed(1)}" y2="${H - SPARKLINE_PAD}" stroke="var(--color-status-err)" stroke-width="1.5" opacity="0.6"/>`
-          })}
           ${latencyLine ? html`<polyline points="${latencyLine}" fill="none" stroke="var(--sky-400)" stroke-width="1.5"/>` : null}
         </svg>
       <//>
@@ -179,23 +164,6 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
           ${costLine ? html`<polyline points="${costLine}" fill="none" stroke="var(--purple)" stroke-width="1.5"/>` : null}
         </svg>
       <//>
-
-      ${'' /* Runtime fallback events */}
-      ${fallbackCount > 0 ? html`
-        <div class="md:col-span-2 p-3 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-6)]">
-          <${DetailRow}>
-            <>런타임 폴백</>
-            <span class="text-3xs text-[var(--color-status-err)]">${fallbackCount}회</span>
-          </${DetailRow}>
-          <div class="flex flex-wrap gap-1.5">
-            ${series.filter((p: KeeperMetricPoint) => p.fallback_applied).slice(-10).map((p: KeeperMetricPoint) => html`
-              <${StatusChip} tone="bad" uppercase=${false} class="font-mono">
-                fallback${p.fallback_reason ? ` (${p.fallback_reason.length > 20 ? p.fallback_reason.slice(0, 20) + '...' : p.fallback_reason})` : ''}
-              <//>
-            `)}
-          </div>
-        </div>
-      ` : null}
     </div>
   `
 }

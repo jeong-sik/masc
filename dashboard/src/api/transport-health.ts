@@ -1,31 +1,38 @@
-import { get, type AbortableRequestOptions } from './core'
+import { Effect } from 'effect'
+
 import {
-  parseTransportHealthData,
+  DashboardHttp,
+  type DashboardTransportError,
+} from './effect-http'
+import {
+  decodeTransportHealthData,
   type HotSession,
   type TransportHealthData,
+  type TransportHealthSnapshot,
+  type TransportHealthSchemaDriftError,
 } from './schemas/transport-health'
 
-export type { HotSession, TransportHealthData }
-export { TransportHealthSchemaDriftError } from './schemas/transport-health'
+export type { HotSession, TransportHealthData, TransportHealthSnapshot }
+export {
+  decodeTransportHealthData,
+  isTransportHealthReady,
+  TransportHealthSchemaDriftError,
+} from './schemas/transport-health'
 
-// Thin null-returning wrapper preserving the pre-migration contract —
-// `src/api/transport-health.test.ts` has many assertions on
-// `decodeTransportHealthData(x) === null` for missing subsections.
-// New call sites should use `parseTransportHealthData` directly for
-// throw-on-drift semantics.
-export function decodeTransportHealthData(raw: unknown): TransportHealthData | null {
-  try {
-    return parseTransportHealthData(raw)
-  } catch {
-    return null
-  }
-}
+export type TransportHealthError =
+  | DashboardTransportError
+  | TransportHealthSchemaDriftError
 
-export async function fetchTransportHealth(
-  opts?: AbortableRequestOptions,
-): Promise<TransportHealthData> {
-  const raw = await get<unknown>('/api/v1/dashboard/transport-health', {
-    signal: opts?.signal,
+const TRANSPORT_HEALTH_PATH = '/api/v1/dashboard/transport-health'
+
+export function fetchTransportHealth(): Effect.Effect<
+  TransportHealthSnapshot,
+  TransportHealthError,
+  DashboardHttp
+> {
+  return Effect.gen(function*() {
+    const http = yield* DashboardHttp
+    const raw = yield* http.getUnknown(TRANSPORT_HEALTH_PATH)
+    return yield* decodeTransportHealthData(raw)
   })
-  return parseTransportHealthData(raw)
 }

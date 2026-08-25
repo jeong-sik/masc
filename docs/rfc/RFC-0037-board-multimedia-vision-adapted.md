@@ -1,3 +1,8 @@
+---
+rfc: "0037"
+status: Draft
+---
+
 # RFC-0037: Board Multimedia & Vision — Eio/File-Based Adaptation
 
 - **Status**: Draft
@@ -5,7 +10,6 @@
 - **Created**: 2026-05-07
 - **Drives**: adaptation of an externally authored 2025-05 plan document for board multimedia + AI vision integration. The external plan as written is not implementable on masc main; this RFC documents the verified gap and proposes a stack-aligned path.
 - **Related**:
-  - `docs/rfc/RFC-0008-credential-provider.md` — credential surface that any external API integration (Provider-A / Provider-D) must respect.
   - `lib/board_types/board_types.mli` — current post type SSOT (line 76 onward).
   - `lib/provider_adapter.ml` — existing AI provider abstraction (1626 LOC + 397 mli) that this RFC builds on rather than replacing.
   - `~/me/common/evidence-record.md` — currency policy that any model-id / pricing claim must satisfy at PR time.

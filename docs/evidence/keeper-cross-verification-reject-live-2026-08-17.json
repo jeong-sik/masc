@@ -1,0 +1,34 @@
+{
+ "schema": "masc.keeper.cross_verification_reject.live.v2",
+ "measured_at": "2026-08-17T11:55:00Z",
+ "live_endpoint": "http://127.0.0.1:8935",
+ "provenance": "Reject-path lines discovered by the masc-08 session; adversarial review then split the two cases — one genuine rejection, one false rejection that exposed a verifier tool defect (#28950).",
+ "genuine_rejection": {
+  "task_id": "task-341",
+  "verification_id": "vrf-d13ecaaa4a4a09074a14a8fc56dded4e",
+  "rejected_at": "2026-08-17T06:24:13+09:00",
+  "elapsed_s": 6.0,
+  "verifier_self_check": "all four files the submitter claimed to have modified were checked with tool_read_file and none existed at submission time",
+  "timing_proof": "the real work (branch task-341-sse-ssot, 4-file commit) was created 06:42-06:43 — 18+ minutes AFTER the rejection; at submission time the claimed work genuinely did not exist",
+  "log_line": "start-masc-nohup-20260817b.log:21935",
+  "note": "task created_by=lane-smith while the verification producer is keeper-taskmaster-agent — author and submitter differ"
+ },
+ "false_rejection_discovered": {
+  "task_id": "task-319",
+  "verification_id": "vrf-0c4da4fe1a5c8b741c6bcb276cd42c83",
+  "rejected_at": "2026-08-17T03:20:41+09:00",
+  "what_actually_happened": "the submitter's cited files, including an evidence artifact created 45 seconds before the rejection (mtime 03:19:56), all existed under the playground's nested checkout repos/masc/ — the verifier's tool_read_file resolves relative paths against ownership_root and never looked one level down, so the honest submission was rejected as missing",
+  "defect_issue": "#28950",
+  "log_line": "start-masc-nohup-20260817b.log:10422",
+  "why_kept_here": "a receipt that silently dropped this case would overstate the verifier; the false rejection is itself a live measurement of the verification tool's path-resolution boundary"
+ },
+ "durable_store": {
+  "file": "<base-path>/.masc/verification-runs.jsonl",
+  "shape": "register event (task_id, producer, authority_kind=system_llm_agent, authority_actor) + complete event (outcome=rejected, elapsed_s, tools[] with the verifier's own tool invocations, dispositions and output excerpts)"
+ },
+ "post_state": "both tasks returned to status=todo — a rejection reworks rather than terminalizes",
+ "remaining": [
+  "strict (criteria_count>0) rejection path is still unmeasured — both cases were non-strict",
+  "verifier path resolution fix (#28950) and a re-verification of the task-319 shape after it"
+ ]
+}

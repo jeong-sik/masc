@@ -295,21 +295,12 @@ let meta_has_source (meta : Yojson.Safe.t option) : bool =
   | _ -> false
 
 (* stdlib-only substring containment; avoids a [re] dep for this test exe. *)
-let contains_substring ~(needle : string) (haystack : string) : bool =
-  let nlen = String.length needle and hlen = String.length haystack in
-  let rec scan i =
-    if i + nlen > hlen then false
-    else if String.equal (String.sub haystack i nlen) needle then true
-    else scan (i + 1)
-  in
-  nlen = 0 || scan 0
-
 let check_io_error ~where = function
   | Error (Board.Io_error msg) ->
       Alcotest.(check bool)
         ("error includes " ^ where)
         true
-        (contains_substring ~needle:where msg)
+        (String_util.string_contains_substring ~needle:where msg)
   | Error e -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e)
   | Ok _ -> Alcotest.fail "expected Io_error"
 
@@ -361,7 +352,15 @@ let test_keeper_signal_hook_cancellation_propagates () =
    with Eio.Cancel.Cancelled _ -> raised := true);
   Alcotest.(check bool) "cancellation propagated" true !raised
 
-let test_dedup_hit_does_not_emit_post_created_fanout () =
+(* [create_post] has no content dedup: identical bodies from one keeper turn
+   become two posts and fan out twice. The idempotent entry point is
+   [create_post_once_by_fusion_run_id], which keys on a run id rather than on
+   content.
+
+   Pinned rather than left unasserted because the read side has no defence: a
+   keeper that posts the same body twice reaches every subscriber twice. If
+   dedup returns, this fails and the author has to say so. *)
+let test_identical_content_creates_two_posts () =
   let keeper_signals = ref 0 in
   let sse_post_created = ref 0 in
   Board_dispatch.set_board_signal_hook (fun _ -> incr keeper_signals);
@@ -383,12 +382,14 @@ let test_dedup_hit_does_not_emit_post_created_fanout () =
     | Ok post -> post
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
-  Alcotest.(check string)
-    "dedup returns existing post"
-    (Board.Post_id.to_string first.id)
-    (Board.Post_id.to_string second.id);
-  Alcotest.(check int) "keeper signal emitted once" 1 !keeper_signals;
-  Alcotest.(check int) "SSE post_created emitted once" 1 !sse_post_created
+  Alcotest.(check bool)
+    "identical content yields a distinct post"
+    false
+    (String.equal
+       (Board.Post_id.to_string first.id)
+       (Board.Post_id.to_string second.id));
+  Alcotest.(check int) "keeper signal emitted per post" 2 !keeper_signals;
+  Alcotest.(check int) "SSE post_created emitted per post" 2 !sse_post_created
 
 let test_create_post_persistence_failure_returns_error_without_fanout () =
   let keeper_signals = ref 0 in
@@ -419,7 +420,7 @@ let test_create_post_persistence_failure_returns_error_without_fanout () =
 
 let test_structured_post_roundtrip () =
   let meta = `Assoc [("source", `String "keeper_autonomy")] in
-  match Board_dispatch.create_post ~author:"sangsu"
+  match Board_dispatch.create_post ~author:"alpha"
           ~title:"Explicit title"
           ~content:"Visible line\n\nSupporting detail"
           ~post_kind:Board.Automation_post
@@ -486,17 +487,15 @@ let test_list_posts_with_sort () =
   let all_same = List.for_all (fun c -> c = List.hd counts) counts in
   Alcotest.(check bool) "all sort orders return same count" true all_same
 
+(* A hand-written meta object cannot stay valid: the current schema requires
+   some fifty fields and rejects anything outside itself, so every field the
+   schema gains or moves breaks this fixture. [meta_of_json_fixture] fills the
+   rest from the canonical defaults, which is also how
+   [test_keeper_waiting_inventory] recovered from the same two drifts —
+   [agent_name] spelled by hand, and [sandbox_profile] / [network_mode], which
+   are keeper TOML fields rather than meta JSON fields. *)
 let board_observation_meta name =
-  match
-    Keeper_meta_json_parse.meta_of_json
-      (`Assoc
-        [ "name", `String name
-        ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
-        ; "trace_id", `String ("trace-" ^ name)
-        ; "sandbox_profile", `String "local"
-        ; "network_mode", `String "inherit"
-        ])
-  with
+  match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String name ]) with
   | Ok meta -> meta
   | Error message -> Alcotest.failf "board observation meta failed: %s" message
 
@@ -622,10 +621,41 @@ let test_dashboard_projection_does_not_produce_attention_candidate () =
             (List.length candidates)
         | Error detail ->
           Alcotest.failf "owner candidate read failed: %s" detail);
+       (* The live collector records the candidate and asks
+          [Keeper_board_attention_worker_wake] for a judgment. Neither it nor
+          [Wake.request] touches [fiber_wakeup]: the keeper wakes once the
+          worker has judged, which [test_keeper_board_attention_worker] covers.
+          Pinned as [false] so a synchronous wake here — which would put the
+          keeper on a candidate the judge has not seen — fails. *)
        Alcotest.(check bool)
-         "live owner collection woke the Keeper"
-         true
+         "live owner collection defers the wake to the judgment worker"
+         false
          (Atomic.get entry.fiber_wakeup))
+;;
+
+(* [vote] returns the post's score after the vote, not the amount this vote
+   changed it. The two are equal for the first voter, which is why the field
+   could sit under the name [delta] and read correctly everywhere it was tried
+   (#27675). A second voter separates them: the total is 2, a change is 1. *)
+let test_vote_returns_total_score_not_change () =
+  let post =
+    match
+      Board_dispatch.create_post ~author:"score-author"
+        ~content:"two voters separate a total from a change" ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let vote_exn ~voter =
+    match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
+    | Ok score -> score
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+  in
+  let first = vote_exn ~voter:"score-voter-a" in
+  let second = vote_exn ~voter:"score-voter-b" in
+  Alcotest.(check int) "first vote: total and change agree" 1 first;
+  Alcotest.(check int) "second vote returns the total, not the change" 2 second
 ;;
 
 let test_recent_sort_bypasses_hot_cutoff () =
@@ -846,6 +876,11 @@ let test_comment_persists_post_reply_count () =
    with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok _ -> ());
+  (* Write-ahead (#28952): the comment append is the durable WAL row;
+     the posts snapshot picks up the bumped reply_count on the next
+     flush, exactly like vote counts — not inline with the comment. *)
+  (match Board_dispatch.backend () with
+   | Board_dispatch.Jsonl store -> Board.flush_dirty store);
   let persisted_reply_count =
     Board.persist_path ()
     |> Fs_compat.load_jsonl
@@ -856,7 +891,7 @@ let test_comment_persists_post_reply_count () =
       | _ -> None)
   in
   Alcotest.(check (option int))
-    "post snapshot reply_count updated with comment append"
+    "post snapshot reply_count updated by the flush after a comment"
     (Some 1)
     persisted_reply_count;
   Board.reset_global_for_test ();
@@ -1417,8 +1452,6 @@ let test_dashboard_detail_uses_authenticated_reaction_actor () =
    | Error error -> Alcotest.fail (Board.show_board_error error));
   let status, body =
     Server_routes_http_runtime.board_post_detail_json
-      ~include_moderation:false
-      ~blind_votes:false
       ~config:None
       ~voter:(Some "forgeable-query-voter")
       ~reaction_actor:(Some "credential-owner")
@@ -1550,6 +1583,102 @@ let test_board_signal_reaction_changed_resolves_comment_parent () =
      | _ -> Alcotest.fail "expected reaction_changed board signal")
   | None -> Alcotest.fail "expected reaction_changed board signal"
 
+(* #29457: a vote is a board signal addressed at the voted-on author. The
+   signal's [author] is the voter (the actor) and the payload carries whose
+   writing was voted on, so the keeper router can wake that lane directly. *)
+let vote_signals_seen () =
+  let seen = ref [] in
+  Board_dispatch.set_board_signal_hook (fun signal -> seen := signal :: !seen);
+  fun () -> List.rev !seen
+
+let test_board_signal_vote_cast_on_post () =
+  let post =
+    match
+      Board_dispatch.create_post ~author:"vote-author" ~title:"Vote parent"
+        ~content:"vote parent content" ~post_kind:Board.Human_post ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> post
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let signals = vote_signals_seen () in
+  (match Board_dispatch.vote ~voter:"voter-one" ~post_id ~direction:Board.Up with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ());
+  (match signals () with
+   | [ addressed ] ->
+     let signal = addressed.Board_dispatch.signal in
+     (match signal.Board_dispatch.kind with
+      | Board_dispatch.Board_vote_cast { target; target_author; voter; direction } ->
+        (match target with
+         | Board_dispatch.Vote_on_post id ->
+           Alcotest.(check string) "target is the post" post_id id
+         | Board_dispatch.Vote_on_comment _ -> Alcotest.fail "expected a post target");
+        Alcotest.(check string) "target author" "vote-author" target_author;
+        Alcotest.(check string) "voter" "voter-one" voter;
+        Alcotest.(check string) "direction" "up"
+          (Board.vote_direction_to_string direction);
+        Alcotest.(check string) "signal author is the voter" "voter-one" signal.author;
+        Alcotest.(check string) "signal post" post_id signal.Board_dispatch.post_id;
+        Alcotest.(check string) "signal title" "Vote parent" signal.title;
+        (match addressed.audience with
+         | Board.Thread_participants -> ()
+         | _ -> Alcotest.fail "vote audience must be thread participants")
+      | _ -> Alcotest.fail "expected vote_cast board signal")
+   | signals ->
+     Alcotest.failf "expected exactly one board signal, got %d" (List.length signals));
+  (* A same-direction duplicate is Already_voted: no store change, no signal. *)
+  (match Board_dispatch.vote ~voter:"voter-one" ~post_id ~direction:Board.Up with
+   | Error (Board.Already_voted _) -> ()
+   | Ok _ -> Alcotest.fail "expected Already_voted"
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  Alcotest.(check int) "duplicate vote emits no signal" 1 (List.length (signals ()))
+
+let test_board_signal_vote_cast_on_comment_names_comment_author () =
+  let post =
+    match
+      Board_dispatch.create_post ~author:"vote-post-author" ~title:"Comment vote parent"
+        ~content:"comment vote parent content" ~post_kind:Board.Human_post ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> post
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let comment =
+    match
+      Board_dispatch.add_comment ~post_id ~author:"vote-comment-author"
+        ~content:"comment vote target" ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok comment -> comment
+  in
+  let comment_id = Board.Comment_id.to_string comment.id in
+  let signals = vote_signals_seen () in
+  (match
+     Board_dispatch.vote_comment ~voter:"voter-two" ~comment_id ~direction:Board.Down
+   with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok _ -> ());
+  match signals () with
+  | [ addressed ] ->
+    let signal = addressed.Board_dispatch.signal in
+    (match signal.Board_dispatch.kind with
+     | Board_dispatch.Board_vote_cast { target; target_author; voter; direction } ->
+       (match target with
+        | Board_dispatch.Vote_on_comment id ->
+          Alcotest.(check string) "target is the comment" comment_id id
+        | Board_dispatch.Vote_on_post _ -> Alcotest.fail "expected a comment target");
+       Alcotest.(check string) "target author is the commenter" "vote-comment-author"
+         target_author;
+       Alcotest.(check string) "voter" "voter-two" voter;
+       Alcotest.(check string) "direction" "down"
+         (Board.vote_direction_to_string direction);
+       Alcotest.(check string) "signal post is the parent" post_id
+         signal.Board_dispatch.post_id
+     | _ -> Alcotest.fail "expected vote_cast board signal")
+  | signals ->
+    Alcotest.failf "expected exactly one board signal, got %d" (List.length signals)
+
 let test_reaction_rejects_unsupported_emoji () =
   match
     Board_dispatch.create_post ~author:"reaction-author"
@@ -1585,8 +1714,23 @@ let test_search () =
 let test_hearths () =
   ignore (Board_dispatch.create_post ~author:"hearth-test" ~content:"fire topic"
     ~hearth:"test-hearth" ~post_kind:Board.Human_post ());
+  ignore (Board_dispatch.create_post ~author:"hearth-system" ~content:"system topic"
+    ~hearth:"system-hearth" ~post_kind:Board.System_post ());
+  ignore (Board_dispatch.create_post ~author:"hearth-automation" ~content:"automation topic"
+    ~hearth:"automation-hearth" ~post_kind:Board.Automation_post ());
   let hearths = Board_dispatch.list_hearths () in
-  Alcotest.(check bool) "has hearths" true (List.length hearths >= 1)
+  let count name rows = List.assoc_opt name rows |> Option.value ~default:0 in
+  Alcotest.(check bool) "has hearths" true (List.length hearths >= 3);
+  Alcotest.(check int) "unfiltered system count" 1 (count "system-hearth" hearths);
+  Alcotest.(check int) "unfiltered automation count" 1 (count "automation-hearth" hearths);
+  let without_system = Board_dispatch.list_hearths ~exclude_system:true () in
+  Alcotest.(check int) "system excluded" 0 (count "system-hearth" without_system);
+  Alcotest.(check int) "automation retained" 1 (count "automation-hearth" without_system);
+  let direct_only =
+    Board_dispatch.list_hearths ~exclude_system:true ~exclude_automation:true ()
+  in
+  Alcotest.(check int) "automation excluded" 0 (count "automation-hearth" direct_only);
+  Alcotest.(check int) "human retained" 1 (count "test-hearth" direct_only)
 
 let test_set_thread_id () =
   match
@@ -1712,14 +1856,35 @@ let test_direct_post_requires_exact_targets () =
        ())
 ;;
 
-let test_malformed_target_fails_closed () =
-  expect_validation_error
-    "malformed target"
-    (Board_dispatch.create_post
-       ~author:"validator"
-       ~content:"please inspect @!"
-       ~post_kind:Board.Human_post
-       ())
+let audience_label = function
+  | Board.Targets _ -> "targets"
+  | Board.Broadcast -> "broadcast"
+  | Board.Thread_participants -> "thread_participants"
+  | Board.Discoverable -> "discoverable"
+;;
+
+(* [Agent_id.of_string] checks shape only — 1..64 of [a-zA-Z0-9._-] with one
+   optional colon — so a candidate it rejects fails on a character or a length
+   no keeper name can have. [board_audience.ml] reads those as prose rather
+   than as an address that went wrong, and records what the rejection was
+   actually catching in the live log: a bare "@" five times, "@@" three times,
+   and "@internals/libs/errors/asyncErrorHandler." once.
+
+   A plausible misspelling ("@alcie" for "@alice") passes the shape check and
+   is still lost on the read side; that gap needs the keeper registry at the
+   write boundary and is not what this pins. *)
+let test_malformed_target_is_read_as_prose () =
+  Alcotest.(check string)
+    "a token no Agent_id can be is prose, not a failed address"
+    "discoverable"
+    (match
+       Board.audience_for_post
+         ~visibility:Board.Public
+         ~title:""
+         ~content:"please inspect @!"
+     with
+     | Ok audience -> audience_label audience
+     | Error error -> Board.show_board_error error)
 ;;
 
 let test_write_boundary_emits_typed_audience () =
@@ -2115,8 +2280,8 @@ let () =
         (with_eio test_keeper_signal_hook_failure_does_not_abort_create_post);
       Alcotest.test_case "keeper hook cancellation propagates" `Quick
         (with_eio test_keeper_signal_hook_cancellation_propagates);
-      Alcotest.test_case "dedup hit does not fan out post_created" `Quick
-        (with_eio test_dedup_hit_does_not_emit_post_created_fanout);
+      Alcotest.test_case "identical content creates two posts" `Quick
+        (with_eio test_identical_content_creates_two_posts);
       Alcotest.test_case "create append failure returns error without fanout" `Quick
         (with_eio test_create_post_persistence_failure_returns_error_without_fanout);
       Alcotest.test_case "structured roundtrip" `Quick (with_eio test_structured_post_roundtrip);
@@ -2191,10 +2356,16 @@ let () =
         (with_eio test_board_sse_reaction_changed);
       Alcotest.test_case "board signal reaction_changed resolves comment parent" `Quick
         (with_eio test_board_signal_reaction_changed_resolves_comment_parent);
+      Alcotest.test_case "board signal vote_cast on post" `Quick
+        (with_eio test_board_signal_vote_cast_on_post);
+      Alcotest.test_case "board signal vote_cast on comment names comment author" `Quick
+        (with_eio test_board_signal_vote_cast_on_comment_names_comment_author);
       Alcotest.test_case "unsupported emoji rejected" `Quick
         (with_eio test_reaction_rejects_unsupported_emoji);
     ];
     "misc", [
+      Alcotest.test_case "vote returns total score, not change" `Quick
+        (with_eio test_vote_returns_total_score_not_change);
       Alcotest.test_case "stats" `Quick (with_eio test_stats);
       Alcotest.test_case "search" `Quick (with_eio test_search);
       Alcotest.test_case "hearths" `Quick (with_eio test_hearths);
@@ -2209,8 +2380,8 @@ let () =
       Alcotest.test_case "invalid author" `Quick (with_eio test_invalid_author);
       Alcotest.test_case "Direct requires exact targets" `Quick
         (with_eio test_direct_post_requires_exact_targets);
-      Alcotest.test_case "malformed target fails closed" `Quick
-        (with_eio test_malformed_target_fails_closed);
+      Alcotest.test_case "malformed target is read as prose" `Quick
+        (with_eio test_malformed_target_is_read_as_prose);
       Alcotest.test_case "write emits typed audience" `Quick
         (with_eio test_write_boundary_emits_typed_audience);
       Alcotest.test_case "target case is identity-level" `Quick

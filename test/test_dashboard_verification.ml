@@ -11,16 +11,9 @@ let () = Mirage_crypto_rng_unix.use_default ()
 
 module V = Masc.Verification
 module D = Dashboard_verification
-module CU = Workspace_utils
 module FD = Keeper_fd_pressure
 
 (* ── Fixture helpers ────────────────────────────────── *)
-
-let active_verifications_dir base_path =
-  Filename.concat (CU.masc_dir_from_base_path ~base_path) "verifications"
-
-let legacy_verifications_dir base_path =
-  Filename.concat base_path "verifications"
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -150,7 +143,7 @@ let test_temp_base_path_overrides_and_restores_env_inputs () =
           (Some base_path) (Sys.getenv_opt "MASC_BASE_PATH_INPUT");
         let _ =
           create_pending_request ~base_path ~task_id:"task-env-override"
-            ~worker:"keeper-alpha" ~criteria:[V.Custom "env isolated"]
+            ~worker:"keeper-alpha" ~criteria:[ "env isolated" ]
             ~evidence:["ref-env"]
         in
         let j = D.requests_json ~base_path () in
@@ -173,8 +166,8 @@ let test_requests_json_shape () =
         ~task_id:"task-shape"
         ~worker:"keeper-alpha"
         ~criteria:[
-          V.Custom "Must reduce FD leak";
-          V.Custom "Must pass integration tests";
+          "Must reduce FD leak";
+          "Must pass integration tests";
         ]
         ~required_artifacts:[
           "artifact://required-report";
@@ -236,8 +229,6 @@ let test_requests_json_shape () =
            ["trace://submitted-runtime-proof"]
            (List.map Yojson.Safe.Util.to_string items)
      | _ -> Alcotest.fail "submitted_evidence should be list");
-    Alcotest.(check bool) "legacy required_evidence alias removed"
-      true (member "required_evidence" r = `Null);
     Alcotest.(check bool) "valid empty/non-empty evidence has no projection error"
       true (member "evidence_projection_error" r = `Null);
     (match member "submitted_by" r with
@@ -269,14 +260,14 @@ let test_requests_json_uses_explicit_base_path_not_env () =
         create_pending_request ~base_path:workspace_base
           ~task_id:"task-workspace"
           ~worker:"keeper-workspace"
-          ~criteria:[V.Custom "workspace criterion"]
+          ~criteria:[ "workspace criterion" ]
           ~evidence:["ref-workspace"]
       in
       let _ =
         create_pending_request ~base_path:env_base
           ~task_id:"task-env"
           ~worker:"keeper-env"
-          ~criteria:[V.Custom "env criterion"]
+          ~criteria:[ "env criterion" ]
           ~evidence:["ref-env"]
       in
       let j = D.requests_json ~base_path:workspace_base () in
@@ -298,13 +289,13 @@ let test_task_id_filter () =
   with_temp_base_path (fun base_path ->
     let _ = create_pending_request ~base_path
         ~task_id:"task-A" ~worker:"alpha"
-        ~criteria:[V.Custom "A criterion"] ~evidence:["ref-A"] in
+        ~criteria:[ "A criterion" ] ~evidence:["ref-A"] in
     let _ = create_pending_request ~base_path
         ~task_id:"task-A" ~worker:"alpha"
-        ~criteria:[V.Custom "A criterion 2"] ~evidence:["ref-A2"] in
+        ~criteria:[ "A criterion 2" ] ~evidence:["ref-A2"] in
     let _ = create_pending_request ~base_path
         ~task_id:"task-B" ~worker:"beta"
-        ~criteria:[V.Custom "B criterion"] ~evidence:["ref-B"] in
+        ~criteria:[ "B criterion" ] ~evidence:["ref-B"] in
 
     (* Unfiltered: all 3 requests *)
     let j_all = D.requests_json ~base_path () in
@@ -345,30 +336,6 @@ let test_task_id_filter () =
      | `List _ -> Alcotest.fail "expected empty list"
      | _ -> Alcotest.fail "requests not list"))
 
-let test_requests_json_ignores_legacy_root_entries () =
-  with_temp_base_path (fun base_path ->
-    let _ =
-      create_pending_request ~base_path ~task_id:"task-live" ~worker:"alpha"
-        ~criteria:[V.Custom "live criterion"] ~evidence:["ref-live"]
-    in
-    let legacy_dir = legacy_verifications_dir base_path in
-    Fs_compat.mkdir_p legacy_dir;
-    Fs_compat.save_file (Filename.concat legacy_dir "vrf-foreign.json")
-      {|{"id":"vrf-foreign","task_id":"task-legacy","evaluator":"oracle","overall_verdict":"approve"}|};
-    Alcotest.(check bool) "active store exists" true
-      (Sys.file_exists (active_verifications_dir base_path));
-    let j = D.requests_json ~base_path () in
-    (match member "total" j with
-     | `Int 1 -> ()
-     | `Int n -> Alcotest.fail (Printf.sprintf "expected 1 live row, got %d" n)
-     | _ -> Alcotest.fail "total not int");
-    match member "requests" j with
-    | `List [row] -> (
-        match member "task_id" row with
-        | `String "task-live" -> ()
-        | _ -> Alcotest.fail "legacy root row leaked into dashboard")
-    | _ -> Alcotest.fail "expected one dashboard row")
-
 let test_requests_json_surfaces_conflict_triage_fields () =
   with_temp_base_path (fun base_path ->
     let output =
@@ -385,7 +352,7 @@ let test_requests_json_surfaces_conflict_triage_fields () =
     in
     let req =
       match V.create_request ~base_path ~task_id:"task-conflict" ~output
-              ~criteria:[V.Custom "tests pass"] ~worker:"keeper-alpha" () with
+              ~criteria:[ "tests pass" ] ~worker:"keeper-alpha" () with
       | Ok req -> req
       | Error e -> Alcotest.fail (Printf.sprintf "create_request failed: %s" e)
     in
@@ -585,6 +552,60 @@ let string_field name j =
   | `String value -> value
   | _ -> Alcotest.fail (Printf.sprintf "%s not string" name)
 
+(* A stored file the schema cannot read must not take the projection with it.
+
+   This is the shape that reached production: a producer removed on 2026-08-07
+   left 171 records whose [criteria] entries are objects rather than strings,
+   and the projection raised on the first of them, so /api/v1/dashboard/proof
+   answered 500 for five days while 122 readable records sat beside them. The
+   fixture writes that exact shape rather than truncated JSON, so the case
+   fails if the projection ever goes back to reading the store all-or-nothing. *)
+let superseded_criteria_record =
+  {|{"id":"vrf-superseded","task_id":"t-superseded","output":null,|}
+  ^ {|"criteria":[{"type":"custom","description":"Task scope satisfied"}],|}
+  ^ {|"worker":"w","created_at":1.0}|}
+
+let test_projection_survives_an_unreadable_record () =
+  with_temp_base_path (fun base_path ->
+    let readable =
+      create_pending_request ~base_path ~task_id:"t-readable" ~worker:"w"
+        ~criteria:[ "criterion" ] ~evidence:[]
+    in
+    let dir = Filename.concat base_path ".masc/verifications" in
+    Fs_compat.save_file
+      (Filename.concat dir "vrf-superseded.json")
+      superseded_criteria_record;
+
+    let requests = D.requests_json ~base_path () in
+    Alcotest.(check int)
+      "the readable request is still projected"
+      1
+      (int_field "total" requests);
+    Alcotest.(check int)
+      "the unreadable record is counted, not swallowed"
+      1
+      (int_field "unreadable_total" requests);
+    (match member "unreadable" requests with
+     | `List [ entry ] ->
+       Alcotest.(check bool)
+         "the unreadable entry names its file"
+         true
+         (Astring.String.is_infix ~affix:"vrf-superseded.json"
+            (string_field "path" entry));
+       Alcotest.(check bool)
+         "the unreadable entry carries why it could not be read"
+         false
+         (String.equal (String.trim (string_field "detail" entry)) "")
+     | _ -> Alcotest.fail "unreadable is not a one-element list");
+
+    (* The summary projection reads the same store and must agree. *)
+    let summary = D.summary_json ~base_path () in
+    Alcotest.(check int) "summary counts the readable request"
+      1 (int_field "total" summary);
+    Alcotest.(check int) "summary counts the unreadable record"
+      1 (int_field "unreadable_total" summary);
+    ignore readable)
+
 let test_requests_and_summary_remain_available_after_fd_observation () =
   with_temp_base_path (fun base_path ->
     let _ =
@@ -592,7 +613,7 @@ let test_requests_and_summary_remain_available_after_fd_observation () =
         ~base_path
         ~task_id:"task-fd-pressure"
         ~worker:"keeper-alpha"
-        ~criteria:[ V.Custom "verification remains visible under FD pressure" ]
+        ~criteria:[ "verification remains visible under FD pressure" ]
         ~evidence:[ "ref-fd" ]
     in
     FD.reset_for_tests ();
@@ -643,8 +664,6 @@ let () =
       Alcotest.test_case "uses explicit base_path, not env" `Quick
         test_requests_json_uses_explicit_base_path_not_env;
       Alcotest.test_case "task_id filter" `Quick test_task_id_filter;
-      Alcotest.test_case "ignores legacy root entries" `Quick
-        test_requests_json_ignores_legacy_root_entries;
       Alcotest.test_case "conflict triage fields" `Quick
         test_requests_json_surfaces_conflict_triage_fields;
       Alcotest.test_case "evidence projection errors" `Quick
@@ -655,6 +674,8 @@ let () =
         test_requests_json_snapshot_projection_edges;
       Alcotest.test_case "fd pressure remains observation-only" `Quick
         test_requests_and_summary_remain_available_after_fd_observation;
+      Alcotest.test_case "survives an unreadable record" `Quick
+        test_projection_survives_an_unreadable_record;
     ];
     "summary_json", [
       Alcotest.test_case "immutable submission count" `Quick

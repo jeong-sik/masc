@@ -25,7 +25,7 @@ let trimmed_env name =
     let t = String.trim raw in
     if String.equal t "" then None else Some t
 
-let bot_token_opt () = trimmed_env "DISCORD_BOT_TOKEN"
+let bot_token_opt () = Env_config_discord.bot_token_opt ()
 
 (* Default trigger policy when none is configured (empty/unset). The
    "quiet, mention-triggered bot" baseline per RFC-0203. *)
@@ -147,19 +147,27 @@ let discord_chat_metadata ~guild_id ~channel_id ~message_id =
   ]
 
 let discord_delivery ~guild_id ~channel_id ~message_id ~author_id :
-    Gate_keeper_backend.connector_delivery =
+    (Gate_keeper_backend.connector_delivery, string) result =
   let parent_channel_id = State.parent_channel_of_thread ~channel_id in
   let thread_id = Option.map (fun _ -> channel_id) parent_channel_id in
-  { source = Keeper_chat_queue.Discord { channel_id; user_id = author_id }
-  ; surface =
-      Surface_ref.Discord
-        { guild_id; channel_id; parent_channel_id; thread_id }
-  ; conversation_id = Some (discord_conversation_id ~guild_id ~channel_id)
-  ; external_message_id = Some message_id
-    (* The guild IS the workspace identity; a DM has none, which rides the
-       typed delivery as explicit absence ([None]), never an empty string. *)
-  ; workspace_id = guild_id
-  }
+  Result.map
+    (fun continuation_channel ->
+       { Gate_keeper_backend.continuation_channel
+       ; surface =
+           Surface_ref.Discord
+             { guild_id; channel_id; parent_channel_id; thread_id }
+       ; conversation_id = Some (discord_conversation_id ~guild_id ~channel_id)
+       ; external_message_id = Some message_id
+       ; workspace_id = guild_id
+       })
+    (Keeper_continuation_channel.discord
+       ~guild_id
+       ~channel_id
+       ~parent_channel_id
+       ~thread_id
+       ~reply_to_message_id:message_id
+       ~user_id:author_id
+       ())
 
 let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
       ~message_id ~author_id ~author_name ~content ~mentions_bot ~route ~urgency
@@ -322,11 +330,11 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
       ; metadata
       }
     in
-    let delivery =
-      discord_delivery ~guild_id ~channel_id ~message_id ~author_id
-    in
     let outcome =
-      Channel_gate.handle_inbound ~dispatch:(dispatch_for_delivery delivery) msg
+      match discord_delivery ~guild_id ~channel_id ~message_id ~author_id with
+      | Error detail -> Error (Channel_gate.Internal detail)
+      | Ok delivery ->
+        Channel_gate.handle_inbound ~dispatch:(dispatch_for_delivery delivery) msg
     in
     Some (fun () ->
      match outcome with
@@ -541,7 +549,9 @@ let handle_ambient ?resolved_keeper_name ~base_dir
                           ~channel_id
                           ~parent_channel_id
                           ~thread_id
+                          ~reply_to_message_id:message_id
                           ~user_id:author_id
+                          ()
                       with
                       | Ok channel -> channel
                       | Error message -> invalid_arg message)

@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0051", "0056", "0085"]
-implementation_prs: [16604, 16624, 16643]
 ---
 
 # RFC-0136 — Keeper Unified Turn Decomposition
@@ -21,7 +20,7 @@ implementation_prs: [16604, 16624, 16643]
 
 ### 1.1 현재 상태
 
-`lib/keeper/keeper_unified_turn.ml` 은 `OAS Agent.run()` 경유 keeper turn 의 *단일 진입점* (3-path dispatcher 통합 후 RFC-? 산물). Public entrypoint 는 `run_keeper_cycle` 이다.
+`lib/keeper/keeper_unified_turn.ml` 은 `agent_core Agent.run()` 경유 keeper turn 의 *단일 진입점* (3-path dispatcher 통합 후 RFC-? 산물). Public entrypoint 는 `run_keeper_cycle` 이다.
 
 interface (`.mli`, 319 LOC) 의 30+ surface 는 모두 *5 sub-module 가 정의* 하고 `keeper_unified_turn.ml` 이 `include` 로 re-export:
 
@@ -63,7 +62,7 @@ include Keeper_unified_turn_phase_plan   (*  84 LOC *)
 | Setup | L77-129 | 53 | nested let bindings |
 | **Phase Gate** | L130-242 | 113 | 3 typed outcomes (supervisor_stop / non_executable_phase / registry_missing → Ok meta or Error) |
 | Runtime resolution | L243-? | TBD | sets effective_runtime and timeout_budget |
-| Retry loop | ?-1900 | TBD | OAS Agent.run + runtime rotation + error classify |
+| Retry loop | ?-1900 | TBD | agent_core Agent.run + runtime rotation + error classify |
 | Success/Failure dispatch | L1904-1940 | 37 | already extracted to `Keeper_unified_turn_(success|failure)` |
 
 Phase Gate 의 3 outcome 은 *implicit early-exit* — caller (외부 모듈) 가 *outcome 별 처리* 를 *볼 수 없다*. *Alexis King — Parse, don't validate* 의 정확한 위반: validation 결과가 *타입에 표현되지 않음*.

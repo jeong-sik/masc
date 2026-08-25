@@ -20,8 +20,6 @@ type metadata = {
   visibility : visibility;
   lifecycle : lifecycle;
   implementation_status : implementation_status;
-  canonical_name : string option;
-  replacement : string option;
   reason : string option;
   allow_direct_call_when_hidden : bool;
   readonly : bool option;
@@ -52,18 +50,11 @@ type execution_policy_error =
 val default_metadata : required_permission:Masc_domain.permission -> metadata
 
 val hidden_active :
-  ?canonical_name:string -> ?replacement:string ->
   ?allow_direct_call_when_hidden:bool ->
   ?implementation_status:implementation_status ->
   required_permission:Masc_domain.permission -> string -> metadata
 
-val placeholder_tools_enabled : unit -> bool
-
 (** {1 Public tool surface} *)
-
-val public_mcp_tools : string list
-(** Alias for [Tool_catalog_surfaces.public_mcp_surface_tools].
-    Prefer the surfaces module directly for new code. *)
 
 val is_public_mcp : string -> bool
 (** O(1) membership check against the public surface. *)
@@ -75,8 +66,6 @@ val execution_policy_of_metadata :
   tool_name:string -> metadata -> (execution_policy, execution_policy_error) result
 val execution_policy_error_to_string : execution_policy_error -> string
 val implementation_status : string -> implementation_status
-val canonical_tool_name : string -> string
-val is_placeholder : string -> bool
 val is_visible : ?include_hidden:bool -> string -> bool
 val allow_direct_call : string -> bool
 
@@ -84,14 +73,11 @@ val allow_direct_call : string -> bool
 
 val visibility_to_string : visibility -> string
 val lifecycle_to_string : lifecycle -> string
-val implementation_status_to_string : implementation_status -> string
-
 (** {1 JSON metadata} *)
 
 val metadata_to_fields : string -> (string * Yojson.Safe.t) list
 (** Full metadata as JSON key-value pairs. *)
 
-val public_contract_fields : string -> (string * Yojson.Safe.t) list
 (** Minimal metadata for public contract responses. *)
 
 val register_runtime_metadata : string -> metadata -> (unit, string) result
@@ -99,6 +85,14 @@ val register_runtime_metadata : string -> metadata -> (unit, string) result
     catalog-owned required permission. Unclassified tool names fail closed. *)
 
 val registered_metadata : string -> metadata option
+
+val known_names : unit -> string list
+(** Every tool name this catalog carries metadata for, sorted and deduplicated.
+
+    The schema lists elsewhere are not this set. A tool can have a catalog
+    policy and keep its schema outside [Config]'s front door, and a contract
+    test that walks the schema lists never reaches it — which is how the
+    Hidden-with-direct-calls-denied branch went unexercised. *)
 (** Explicit or [Tool_spec]-registered metadata, without surface-derived
     fallback metadata. *)
 

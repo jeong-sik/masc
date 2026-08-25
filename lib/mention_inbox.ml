@@ -17,22 +17,6 @@ type mention_record = {
   read_at: float;
 }
 
-(** {1 ID Generation} *)
-
-(* RNG for mention-id generation.  [Random.State.t] is NOT fiber-safe —
-   the previous doc comment claiming otherwise was incorrect.  Guard
-   the shared state with an [Eio.Mutex] and route every RNG access
-   through [with_mention_rng]. *)
-let mention_rng = Random.State.make_self_init ()
-let mention_rng_mutex = Eio.Mutex.create ()
-let with_mention_rng f =
-  Eio.Mutex.use_ro mention_rng_mutex (fun () -> f mention_rng)
-
-let generate_mention_id () =
-  let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  let rand = with_mention_rng (fun rng -> Random.State.int rng 10000) in
-  Printf.sprintf "m-%d-%04d" ts rand
-
 (** {1 JSON Serialization} *)
 
 let mention_record_to_json (r : mention_record) : Yojson.Safe.t =
@@ -74,26 +58,6 @@ let inbox_path (config : Workspace.config) : string =
 
 (** {1 JSONL I/O} *)
 
-let append_mention ?task_id (config : Workspace.config) (record : mention_record) : unit =
-  (* Fleet-wide invariant (PR-C): if the mention is associated with a terminal
-     task, skip the append and log the desync (issue #13397). *)
-  let skip =
-    match task_id with
-    | None -> false
-    | Some tid ->
-        (match Task_cache_invariant.fresh_task_status config ~task_id:tid with
-         | Some status when Task_cache_invariant.is_terminal status ->
-             Task_cache_invariant.clear_stale_agent_task config
-               ~agent_name:record.source_agent ~task_id:tid ~status
-               ~module_name:"mention_inbox.append_mention";
-             true
-         | _ -> false)
-  in
-  if not skip then (
-    let path = inbox_path config in
-    let json = mention_record_to_json record in
-    Fs_compat.append_jsonl path json)
-
 let load_all_mentions (config : Workspace.config) : mention_record list =
   let path = inbox_path config in
   if not (Sys.file_exists path) then []
@@ -128,23 +92,3 @@ let unread_count (config : Workspace.config) ~(target_agent : string) : int =
   load_all_mentions config
   |> List.filter (fun r -> r.target_agent = target_agent && r.read_at = 0.0)
   |> List.length
-
-let mark_read (config : Workspace.config) ~(mention_id : string) : unit =
-  let path = inbox_path config in
-  let all = load_all_mentions config in
-  let now = Time_compat.now () in
-  let updated =
-    List.map (fun r ->
-        if r.id = mention_id && r.read_at = 0.0 then
-          { r with read_at = now }
-        else r)
-      all
-  in
-  (* Rewrite entire file with updated records *)
-  let content =
-    updated
-    |> List.map (fun r -> Yojson.Safe.to_string (mention_record_to_json r))
-    |> String.concat "\n"
-  in
-  let content = if content = "" then "" else content ^ "\n" in
-  Fs_compat.save_file path content

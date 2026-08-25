@@ -5,11 +5,11 @@ module MCI = Masc.Masc_context_injector
 
 (* ── Helpers ──────────────────────────────────────────── *)
 
-let ok_output content : Agent_sdk.Types.tool_result =
-  Ok { Agent_sdk.Types.content; _meta = None }
+let ok_output content : Agent_core.Types.tool_result =
+  Ok { Agent_core.Types.content; _meta = None }
 
-let err_output message : Agent_sdk.Types.tool_result =
-  Error { Agent_sdk.Types.message; recoverable = true; error_class = None }
+let err_output message : Agent_core.Types.tool_result =
+  Error { Agent_core.Types.message; recoverable = true; error_class = None }
 
 (* ── Unit tests: injector function ──────────────────── *)
 
@@ -19,7 +19,7 @@ let test_injector_returns_some_on_success () =
   match injector ~tool_name:"read_file" ~input:`Null ~output:(ok_output "data") with
   | Some inj ->
     check bool "has context_updates" true
-      (List.length inj.Agent_sdk.Hooks.context_updates > 0);
+      (List.length inj.Agent_core.Hooks.context_updates > 0);
     check bool "no extra_messages" true
       (inj.extra_messages = [])
   | None -> fail "expected Some injection"
@@ -31,7 +31,7 @@ let test_injector_returns_some_on_error () =
   | Some inj ->
     let last_outcome =
       List.assoc MCI.key_last_tool_outcome
-        inj.Agent_sdk.Hooks.context_updates
+        inj.Agent_core.Hooks.context_updates
     in
     check (of_pp Yojson.Safe.pp) "outcome is error"
       (`String "error") last_outcome
@@ -44,7 +44,7 @@ let test_injector_increments_counts () =
   ignore (injector ~tool_name:"t2" ~input:`Null ~output:(ok_output "ok"));
   match injector ~tool_name:"t3" ~input:`Null ~output:(err_output "err") with
   | Some inj ->
-    let updates = inj.Agent_sdk.Hooks.context_updates in
+    let updates = inj.Agent_core.Hooks.context_updates in
     let count = List.assoc MCI.key_tool_call_count updates in
     check (of_pp Yojson.Safe.pp) "3 total calls" (`Int 3) count;
     let success = List.assoc MCI.key_tool_success_count updates in
@@ -58,15 +58,15 @@ let test_injector_increments_counts () =
 let test_context_populated_after_injection () =
   let config = MCI.default_config () in
   let injector = MCI.make ~config () in
-  let ctx = Agent_sdk.Context.create_sync () in
+  let ctx = Agent_core.Context.create_sync () in
   match injector ~tool_name:"bash" ~input:`Null ~output:(ok_output "done") with
   | Some inj ->
-    List.iter (fun (k, v) -> Agent_sdk.Context.set ctx k v)
-      inj.Agent_sdk.Hooks.context_updates;
-    (match Agent_sdk.Context.get ctx MCI.key_last_tool_name with
+    List.iter (fun (k, v) -> Agent_core.Context.set ctx k v)
+      inj.Agent_core.Hooks.context_updates;
+    (match Agent_core.Context.get ctx MCI.key_last_tool_name with
      | Some (`String "bash") -> ()
      | _ -> fail "last_tool_name not set");
-    (match Agent_sdk.Context.get ctx MCI.key_wall_time with
+    (match Agent_core.Context.get ctx MCI.key_wall_time with
      | Some (`String s) ->
        check bool "ends with Z" true (String.length s > 0 && s.[String.length s - 1] = 'Z')
      | _ -> fail "wall_time not set")
@@ -75,7 +75,7 @@ let test_context_populated_after_injection () =
 let test_context_updates_overwrite_bounded_keys () =
   let config = MCI.default_config () in
   let injector = MCI.make ~config () in
-  let ctx = Agent_sdk.Context.create_sync () in
+  let ctx = Agent_core.Context.create_sync () in
   let expected_keys =
     [
       MCI.key_wall_time;
@@ -93,16 +93,16 @@ let test_context_updates_overwrite_bounded_keys () =
     match injector ~tool_name ~input:`Null ~output:(ok_output "done") with
     | Some inj ->
       List.iter
-        (fun (key, value) -> Agent_sdk.Context.set ctx key value)
-        inj.Agent_sdk.Hooks.context_updates
+        (fun (key, value) -> Agent_core.Context.set ctx key value)
+        inj.Agent_core.Hooks.context_updates
     | None -> fail "expected Some injection"
   done;
   check
     (list string)
     "context keys stay bounded"
     expected_keys
-    (Agent_sdk.Context.keys ctx |> List.sort String.compare);
-  (match Agent_sdk.Context.get ctx MCI.key_tool_call_count with
+    (Agent_core.Context.keys ctx |> List.sort String.compare);
+  (match Agent_core.Context.get ctx MCI.key_tool_call_count with
    | Some (`Int 200) -> ()
    | other ->
      fail
@@ -110,7 +110,7 @@ let test_context_updates_overwrite_bounded_keys () =
           "expected 200 tool calls, got %s"
           (Yojson.Safe.to_string
              (Option.value ~default:`Null other))));
-  match Agent_sdk.Context.get ctx MCI.key_last_tool_name with
+  match Agent_core.Context.get ctx MCI.key_last_tool_name with
   | Some (`String "tool_200") -> ()
   | other ->
     fail
@@ -121,22 +121,22 @@ let test_context_updates_overwrite_bounded_keys () =
 (* ── Temporal summary rendering ─────────────────────── *)
 
 let test_render_temporal_summary_empty () =
-  let ctx = Agent_sdk.Context.create_sync () in
+  let ctx = Agent_core.Context.create_sync () in
   check (option string) "no summary before any tool"
     None (MCI.render_temporal_summary ctx)
 
 let test_render_temporal_summary_populated () =
-  let ctx = Agent_sdk.Context.create_sync () in
+  let ctx = Agent_core.Context.create_sync () in
   let now = 1_800_000_000.0 in
-  Agent_sdk.Context.set ctx
+  Agent_core.Context.set ctx
     MCI.key_wall_time (`String "2026-04-06T12:00:00Z");
-  Agent_sdk.Context.set ctx
+  Agent_core.Context.set ctx
     MCI.key_session_start (`Float (now -. 42.5));
-  Agent_sdk.Context.set ctx
+  Agent_core.Context.set ctx
     MCI.key_tool_call_count (`Int 3);
-  Agent_sdk.Context.set ctx
+  Agent_core.Context.set ctx
     MCI.key_last_tool_name (`String "tool_execute");
-  Agent_sdk.Context.set ctx
+  Agent_core.Context.set ctx
     MCI.key_last_tool_outcome (`String "ok");
   match MCI.render_temporal_summary ~now ctx with
   | Some summary ->
@@ -153,19 +153,19 @@ let test_render_temporal_summary_populated () =
    (the idle-wake bug). Uses a fixed [~now] far in the future
    relative to the stored (stale) values. *)
 let test_render_uses_fresh_now_not_stale () =
-  let ctx = Agent_sdk.Context.create_sync () in
+  let ctx = Agent_core.Context.create_sync () in
   let stale_now = 1_700_000_000.0 in
   (* 2023-11-14T22:13:20Z *)
   let session_start = stale_now -. 100.0 in
-  Agent_sdk.Context.set ctx
+  Agent_core.Context.set ctx
     MCI.key_wall_time (`String (MCI.iso8601_of_float stale_now));
-  Agent_sdk.Context.set ctx
+  Agent_core.Context.set ctx
     MCI.key_session_start (`Float session_start);
-  Agent_sdk.Context.set ctx
+  Agent_core.Context.set ctx
     MCI.key_tool_call_count (`Int 2);
-  Agent_sdk.Context.set ctx
+  Agent_core.Context.set ctx
     MCI.key_last_tool_name (`String "bash");
-  Agent_sdk.Context.set ctx
+  Agent_core.Context.set ctx
     MCI.key_last_tool_outcome (`String "ok");
   let fresh_now = 1_800_000_000.0 in
   (* 2027-01-15T08:00:00Z — 100_000_000s after the stale snapshot *)
@@ -183,16 +183,16 @@ let test_render_uses_fresh_now_not_stale () =
   | None -> fail "expected Some summary"
 
 let test_render_rejects_retired_elapsed_without_session_start () =
-  let ctx = Agent_sdk.Context.create_sync () in
-  Agent_sdk.Context.set ctx
+  let ctx = Agent_core.Context.create_sync () in
+  Agent_core.Context.set ctx
     MCI.key_wall_time (`String "2023-11-14T22:13:20Z");
-  Agent_sdk.Context.set ctx
+  Agent_core.Context.set ctx
     "session:elapsed_seconds" (`Float 55.0);
-  Agent_sdk.Context.set ctx
+  Agent_core.Context.set ctx
     MCI.key_tool_call_count (`Int 1);
-  Agent_sdk.Context.set ctx
+  Agent_core.Context.set ctx
     MCI.key_last_tool_name (`String "legacy_tool");
-  Agent_sdk.Context.set ctx
+  Agent_core.Context.set ctx
     MCI.key_last_tool_outcome (`String "ok");
   check
     (option string)
@@ -201,8 +201,8 @@ let test_render_rejects_retired_elapsed_without_session_start () =
     (MCI.render_temporal_summary ~now:1_800_000_000.0 ctx)
 
 let test_render_omits_malformed_elapsed_context () =
-  let ctx = Agent_sdk.Context.create_sync () in
-  Agent_sdk.Context.set ctx
+  let ctx = Agent_core.Context.create_sync () in
+  Agent_core.Context.set ctx
     MCI.key_wall_time (`String "2023-11-14T22:13:20Z");
   check (option string) "missing elapsed anchor omits summary"
     None (MCI.render_temporal_summary ~now:1_800_000_000.0 ctx)

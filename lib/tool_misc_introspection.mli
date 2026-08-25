@@ -26,11 +26,7 @@ val tool_inventory_json :
   Yojson.Safe.t
 (** [tool_inventory_json _ctx ~include_hidden]
     returns the tool catalog snapshot.
-
-    [enabled_in_current_mode] is reported as [false] because this
-    is the dashboard context (no keeper) — pinned at the contract
-    seam to prevent operator dashboards from incorrectly showing
-    keeper-only tools as active. *)
+ *)
 
 (** {1 Tool handlers}
 

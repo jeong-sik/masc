@@ -1,42 +1,7 @@
 (** MCP Protocol Server Core (Eio-only)
 
     This module provides shared types/config/resources for the Eio server.
-    Legacy handlers have been removed.
 *)
-
-(* JSON-RPC core — canonical definitions live in Mcp_transport_protocol.
-   Aliases here preserve backward compatibility for callers using Mcp_server.*.
-   These are zero-cost: OCaml native compilation inlines module aliases. *)
-
-type jsonrpc_request = Mcp_transport_protocol.jsonrpc_request = {
-  jsonrpc : string;
-  id : Yojson.Safe.t option;
-  method_ : string;
-  params : Yojson.Safe.t option;
-}
-
-let jsonrpc_request_of_yojson = Mcp_transport_protocol.jsonrpc_request_of_yojson
-let jsonrpc_request_to_yojson = Mcp_transport_protocol.jsonrpc_request_to_yojson
-let has_field = Mcp_transport_protocol.has_field
-let get_field = Mcp_transport_protocol.get_field
-let is_jsonrpc_v2 = Mcp_transport_protocol.is_jsonrpc_v2
-let is_jsonrpc_response = Mcp_transport_protocol.is_jsonrpc_response
-let is_notification = Mcp_transport_protocol.is_notification
-let get_id = Mcp_transport_protocol.get_id
-let is_valid_request_id = Mcp_transport_protocol.is_valid_request_id
-let validate_initialize_params = Mcp_transport_protocol.validate_initialize_params
-let make_response = Mcp_transport_protocol.make_response
-let make_error = Mcp_transport_protocol.make_error
-let jsonrpc_notification = Mcp_transport_protocol.jsonrpc_notification
-
-(* Protocol version — canonical in Mcp_transport_protocol *)
-let supported_protocol_versions = Mcp_transport_protocol.supported_protocol_versions
-let default_protocol_version = Mcp_transport_protocol.default_protocol_version
-let is_supported_protocol_version = Mcp_transport_protocol.is_supported_protocol_version
-let normalize_protocol_version = Mcp_transport_protocol.normalize_protocol_version
-let protocol_version_from_params = Mcp_transport_protocol.protocol_version_from_params
-
-let validate_protocol_version = Mcp_transport_protocol.validate_protocol_version
 
 (** Server info *)
 type mcp_icon = {
@@ -96,7 +61,7 @@ let server_info =
     [
       ("name", `String "masc");
       ("title", `String "MASC MCP Server");
-      ("version", `String Version.version);
+      ("version", `String Runtime_build_version.current);
       ( "description",
         `String
           "Multi-agent MCP server exposing MASC workspace state, tools, prompts, and resources." );
@@ -663,8 +628,6 @@ let publication_recovery_available_snapshot_to_health_yojson
           [ "discovered_owner", `Int discovered_owner_count
           ; "invalid_owner_name", `Int invalid_owner_name_count
           ; "owner_identity_rejected", `Int owner_identity_rejected_count
-          ; "owner_inspection_pending", `Int owners.inspection_pending
-          ; "owner_inspection_running", `Int owners.inspection_running
           ; ( "owner_reconciliation_pending"
             , `Int owners.reconciliation_pending )
           ; ( "owner_reconciliation_running"
@@ -1096,8 +1059,8 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
         Workspace_metric_hooks.install ();
         Atomic.set Workspace_hooks.get_default_runtime_id_fn Runtime.get_default_runtime_id;
         Atomic.set
-          Workspace_hooks.get_cross_verifier_runtime_id_fn
-          Runtime.cross_verifier_runtime_id;
+          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+          Runtime.verifier_exact_lane_slot_ids;
         Atomic.set Task.Handlers.push_event_to_sessions_fn Subscriptions.push_event_to_sessions;
         Board_dispatch.init_jsonl ())
       base_path

@@ -1,7 +1,7 @@
 open Alcotest
 open Masc
 
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 
 let empty_env _name = None
 
@@ -9,6 +9,15 @@ let parse_or_fail content =
   match Keeper_toml_loader.parse_toml content with
   | Ok doc -> doc
   | Error msg -> failf "TOML parse failed: %s" msg
+
+let agent_core_provider_config (runtime : Runtime.t) =
+  match runtime.execution with
+  | Runtime_execution.Agent_core provider_config -> provider_config
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Claude_code _
+  | Runtime_execution.Antigravity_cli _ ->
+    failf "runtime %s is not an agent_core provider" runtime.id
+;;
 
 let rec repo_root_from dir =
   let dune_project = Filename.concat dir "dune-project" in
@@ -300,24 +309,42 @@ let assert_ollama_cloud_seed_runtime runtimes case =
   | Some runtime ->
     check string (case.runtime_id ^ " api name") case.api_name
       runtime.model.api_name;
+    (* The effective window, not the declaration. These cases pinned
+       runtime.model.max_context, the runtime.toml override, which holds only
+       while it stays under the model's catalog window; above it the resolver
+       clamps and the pinned number never reaches anything (#28738). What the
+       seed must keep stable is the window the runtime resolves. *)
     check (option int) (case.runtime_id ^ " context") (Some case.context)
-      runtime.model.max_context;
+      (Runtime.resolve_max_context_of_runtime runtime |> Option.map fst);
     check bool (case.runtime_id ^ " tools") case.tools
       runtime.model.tools_support;
     check bool (case.runtime_id ^ " thinking") case.thinking
       runtime.model.thinking_support;
-    check bool (case.runtime_id ^ " known to provider-qualified OAS catalog") true
+    check bool (case.runtime_id ^ " known to provider-qualified AGENT_CORE catalog") true
       (Option.is_some
          (Llm_provider.Provider_config.capabilities_for_config_model
-            runtime.provider_config));
+            (agent_core_provider_config runtime)));
     (match runtime.model.capabilities with
      | None -> failf "expected capabilities for %s" case.runtime_id
      | Some caps ->
-       let expected_thinking_format =
-         if case.thinking
-         then Runtime_schema.Reasoning_effort
-         else Runtime_schema.No_thinking_control
-       in
+       (* [thinking] says the model reasons; it does not say the endpoint takes a
+          control on the wire. ollama.com /v1 serves reasoning inherently and
+          accepts no control field, so [reasoning-effort] there declares a
+          dialect that can never be encoded: the format carries no effort value,
+          runtime.toml has no key that supplies one, and runtime_adapter never
+          sets reasoning_effort. Every enable_thinking=true turn is then rejected
+          as Enable_not_encodable — measured 25/25 on the acceptance harness,
+          0/25 after the first five models dropped the declaration. Deployed
+          config has carried none since 2026-08-04; the audit is oas#2716
+          (2026-07-20).
+
+          This is a property of the endpoint, not of individual models, and
+          every case in this list is an ollama.com /v1 model. Asserting it for
+          the whole list keeps a new model from declaring a dialect the
+          endpoint cannot read; a per-model exception set would admit one on
+          the next addition. *)
+       let expected_reasoning_budget = false
+       and expected_thinking_format = Runtime_schema.No_thinking_control in
        check bool (case.runtime_id ^ " forced tool_choice disabled") false
          caps.supports_tool_choice;
        check bool (case.runtime_id ^ " image input") case.vision
@@ -326,7 +353,7 @@ let assert_ollama_cloud_seed_runtime runtimes case =
          caps.supports_multimodal_inputs;
        check bool (case.runtime_id ^ " extended thinking") case.thinking
          caps.supports_extended_thinking;
-       check bool (case.runtime_id ^ " reasoning budget") case.thinking
+       check bool (case.runtime_id ^ " reasoning budget") expected_reasoning_budget
          caps.supports_reasoning_budget;
        check bool (case.runtime_id ^ " thinking control") true
          (Runtime_schema.equal_thinking_control_format
@@ -337,8 +364,8 @@ let test_runtime_json_not_in_repo_config () =
   let path = Filename.concat (repo_root ()) "config/runtime.json" in
   check bool "retired runtime.json absent" false (Sys.file_exists path)
 
-let with_deployment_oas_model_catalog f =
-  let overlay_path = Filename.concat (repo_root ()) "config/oas-models-overlay.toml" in
+let with_deployment_agent_core_model_catalog f =
+  let overlay_path = Filename.concat (repo_root ()) "config/agent-core-models-overlay.toml" in
   check bool "deployment catalog overlay present" true (Sys.file_exists overlay_path);
   match Llm_provider.Model_catalog.load_file overlay_path with
   | Error msg -> failf "deployment catalog overlay should load: %s" msg
@@ -352,8 +379,8 @@ let with_deployment_oas_model_catalog f =
          | None -> fail "embedded plus deployment overlay catalog should load"
          | Some catalog -> f catalog)
 
-let test_deployment_oas_model_catalog_covers_live_runpod_mtp () =
-  with_deployment_oas_model_catalog @@ fun catalog ->
+let test_deployment_agent_core_model_catalog_covers_live_runpod_mtp () =
+  with_deployment_agent_core_model_catalog @@ fun catalog ->
   let runpod_model_id = "qwen36-35b-a3b-mtp" in
   let provider_labels = [ "runpod_mtp"; "vllm-qwen3-mtp" ] in
   let expect_provider_lookup provider_name =
@@ -365,7 +392,7 @@ let test_deployment_oas_model_catalog_covers_live_runpod_mtp () =
     with
     | None ->
       failf
-        "expected deployment OAS catalog row for provider=%s model=%s"
+        "expected deployment AGENT_CORE catalog row for provider=%s model=%s"
         provider_name
         runpod_model_id
     | Some entry ->
@@ -416,33 +443,60 @@ let test_deployment_oas_model_catalog_covers_live_runpod_mtp () =
        | Some gate_caps -> expect_runpod_caps name gate_caps)
     provider_labels
 
-let test_deployment_oas_model_catalog_covers_glm_streaming_reasoning () =
-  with_deployment_oas_model_catalog @@ fun _catalog ->
-  let model_id = "GLM-5-Turbo" in
+(* Every GLM row that claims reasoning and native streaming must also name the
+   delta field, because a row that leaves [reasoning_streaming_format] out
+   resolves to [Default_reasoning_streaming], and for this family the derived
+   dialect is [No_streaming_reasoning] -- which makes [Streaming] discard the
+   provider's reasoning_content deltas instead of forwarding them. Enumerating
+   the catalog rather than naming one model keeps a newly added GLM row from
+   re-opening that hole: #26329 declared the field on GLM-5-Turbo only, and the
+   sibling glm-4.7 rows sat undeclared behind an assertion that could not see
+   them. *)
+let test_deployment_agent_core_model_catalog_covers_glm_streaming_reasoning () =
+  with_deployment_agent_core_model_catalog @@ fun catalog ->
+  let glm_rows =
+    List.filter
+      (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+         match entry.provider_name with
+         | Some provider_label ->
+           String.starts_with ~prefix:"glm-coding" provider_label
+         | None -> false)
+      (Llm_provider.Model_catalog.model_entries catalog)
+  in
+  check bool "deployment catalog carries GLM rows" true (glm_rows <> []);
   List.iter
-    (fun provider_label ->
+    (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+       let provider_label = Option.value entry.provider_name ~default:"" in
+       let model_id = entry.id_prefix in
+       let label = provider_label ^ "/" ^ model_id in
        match
          Llm_provider.Capabilities.for_provider_model_id
            ~allow_bare_fallback:false
            ~provider_label
            ~model_id
        with
-       | None ->
-         failf
-           "expected deployment GLM streaming capability for provider=%s model=%s"
-           provider_label
-           model_id
+       | None -> failf "expected deployment GLM capability for %s" label
        | Some caps ->
-         check bool (provider_label ^ " native streaming") true
-           caps.supports_native_streaming;
-         check bool (provider_label ^ " typed reasoning delta") true
-           (Llm_provider.Capabilities.(
-              caps.reasoning_streaming_format
-              = Delta_reasoning_field "reasoning_content")))
-    [ "glm-coding"; "glm-coding-sb-exact" ]
+         if caps.supports_reasoning && caps.supports_native_streaming
+         then (
+           check bool (label ^ " typed reasoning delta") true
+             (Llm_provider.Capabilities.(
+                caps.reasoning_streaming_format
+                = Delta_reasoning_field "reasoning_content"));
+           match
+             (Llm_provider.Reasoning_dialect.of_capabilities caps)
+               .Llm_provider.Reasoning_dialect.streaming
+           with
+           | Delta_field "reasoning_content" -> ()
+           | No_streaming_reasoning
+           | Delta_field _
+           | Delta_reasoning_details
+           | Template_parser ->
+             failf "%s resolves to a dialect that drops reasoning deltas" label))
+    glm_rows
 
-let test_deployment_oas_model_catalog_covers_live_runpod_rtxa6000_gemma () =
-  with_deployment_oas_model_catalog @@ fun catalog ->
+let test_deployment_agent_core_model_catalog_covers_live_runpod_rtxa6000_gemma () =
+  with_deployment_agent_core_model_catalog @@ fun catalog ->
   let model_id = "gemma4-coder-fable5-q4km" in
   let provider_name = "runpod_rtxa6000" in
   (match
@@ -450,7 +504,7 @@ let test_deployment_oas_model_catalog_covers_live_runpod_rtxa6000_gemma () =
    with
    | None ->
      failf
-       "expected deployment OAS catalog row for provider=%s model=%s"
+       "expected deployment AGENT_CORE catalog row for provider=%s model=%s"
        provider_name
        model_id
    | Some entry ->
@@ -480,8 +534,8 @@ let test_deployment_oas_model_catalog_covers_live_runpod_rtxa6000_gemma () =
       (Llm_provider.Capabilities.(
          caps.thinking_control_format = Chat_template_token "<|think|>"))
 
-let test_deployment_oas_model_catalog_covers_local_gemma4_e2b_qat () =
-  with_deployment_oas_model_catalog @@ fun catalog ->
+let test_deployment_agent_core_model_catalog_covers_local_gemma4_e2b_qat () =
+  with_deployment_agent_core_model_catalog @@ fun catalog ->
   let model_id = "hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL" in
   let provider_name = "ollama" in
   (match
@@ -489,7 +543,7 @@ let test_deployment_oas_model_catalog_covers_local_gemma4_e2b_qat () =
    with
    | None ->
      failf
-       "expected deployment OAS catalog row for provider=%s model=%s"
+       "expected deployment AGENT_CORE catalog row for provider=%s model=%s"
        provider_name
        model_id
    | Some entry ->
@@ -533,8 +587,8 @@ let test_deployment_oas_model_catalog_covers_local_gemma4_e2b_qat () =
          ~provider_label:"ollama"
          ~model_id)
 
-let test_deployment_oas_model_catalog_preserve_axes_resolve () =
-  with_deployment_oas_model_catalog @@ fun catalog ->
+let test_deployment_agent_core_model_catalog_preserve_axes_resolve () =
+  with_deployment_agent_core_model_catalog @@ fun catalog ->
   let expect_provider_catalog_field
         ~field_name
         ~get
@@ -547,7 +601,7 @@ let test_deployment_oas_model_catalog_preserve_axes_resolve () =
     with
     | None ->
       failf
-        "expected deployment OAS catalog row for provider=%s model=%s"
+        "expected deployment AGENT_CORE catalog row for provider=%s model=%s"
         provider_name
         model_id
     | Some entry ->
@@ -568,7 +622,7 @@ let test_deployment_oas_model_catalog_preserve_axes_resolve () =
         ~model_id
     with
     | None ->
-      failf "expected OAS capabilities for provider=%s model=%s" provider_name model_id
+      failf "expected AGENT_CORE capabilities for provider=%s model=%s" provider_name model_id
     | Some caps ->
       check bool (provider_name ^ " request-side preserve capability") true
         (Llm_provider.Capabilities.(
@@ -589,7 +643,7 @@ let test_deployment_oas_model_catalog_preserve_axes_resolve () =
         ~model_id
     with
     | None ->
-      failf "expected OAS capabilities for provider=%s model=%s" provider_name model_id
+      failf "expected AGENT_CORE capabilities for provider=%s model=%s" provider_name model_id
     | Some caps ->
       check bool (provider_name ^ " reasoning replay override") true
         (Llm_provider.Capabilities.(
@@ -597,7 +651,7 @@ let test_deployment_oas_model_catalog_preserve_axes_resolve () =
   in
   let expect_bare_kimi_k27_wire_semantics model_id =
     (match Llm_provider.Model_catalog.lookup catalog model_id with
-     | None -> failf "expected deployment OAS catalog row for %s" model_id
+     | None -> failf "expected deployment AGENT_CORE catalog row for %s" model_id
      | Some entry ->
        check (option string) (model_id ^ " native base") (Some "kimi")
          entry.base_label;
@@ -611,7 +665,7 @@ let test_deployment_oas_model_catalog_preserve_axes_resolve () =
        check (option string) (model_id ^ " no catalog replay override") None
          entry.reasoning_replay);
     match Llm_provider.Capabilities.for_model_id model_id with
-    | None -> failf "expected OAS capabilities for %s" model_id
+    | None -> failf "expected AGENT_CORE capabilities for %s" model_id
     | Some caps ->
       check bool (model_id ^ " native no request thinking knob") true
         (Llm_provider.Capabilities.(
@@ -631,11 +685,11 @@ let test_deployment_oas_model_catalog_preserve_axes_resolve () =
     ~model_id:"kimi-k2.7-code";
   expect_bare_kimi_k27_wire_semantics "kimi-k2.7-code"
 
-let test_repo_runtime_bindings_resolve_through_oas_provider_config () =
-  with_deployment_oas_model_catalog @@ fun catalog ->
+let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
+  with_deployment_agent_core_model_catalog @@ fun catalog ->
   check
     (option string)
-    "runtime-local alias is not promoted to the OAS catalog"
+    "runtime-local alias is not promoted to the AGENT_CORE catalog"
     None
     (Option.map
        (fun (entry : Llm_provider.Model_catalog.model_entry) -> entry.id_prefix)
@@ -650,23 +704,22 @@ let test_repo_runtime_bindings_resolve_through_oas_provider_config () =
       ( runtimes
       , _default
       , _assignments
-      , _cross_verifier
       , _media_failover , _lanes ) ->
     check bool "at least one runtime binding" true (List.length runtimes > 0);
     List.iter
       (fun (runtime : Runtime.t) ->
          match
            Llm_provider.Provider_config.capabilities_for_config_model
-             runtime.provider_config
+             (agent_core_provider_config runtime)
          with
          | None ->
            failf
              "runtime binding %s provider/model %s/%s must resolve through its \
-              OAS Provider_config"
+              AGENT_CORE Provider_config"
              runtime.id
              (Llm_provider.Provider_config.capability_provider_label
-                runtime.provider_config)
-             runtime.provider_config.model_id
+                (agent_core_provider_config runtime))
+             (agent_core_provider_config runtime).model_id
          | Some _ ->
            if String.equal runtime.id "ollama_cloud.ollama-cloud-rnj-1-8b"
            then
@@ -674,18 +727,19 @@ let test_repo_runtime_bindings_resolve_through_oas_provider_config () =
                bool
                "runtime-local alias uses the typed Provider_config override"
                true
-               (Option.is_some runtime.provider_config.model_capabilities_override))
+               (Option.is_some
+                  (agent_core_provider_config runtime).model_capabilities_override))
       runtimes
 
-let test_deployment_oas_model_catalog_modality_priorities_resolve () =
-  with_deployment_oas_model_catalog @@ fun catalog ->
+let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
+  with_deployment_agent_core_model_catalog @@ fun catalog ->
   let rows =
     List.filter
       (fun (entry : Llm_provider.Model_catalog.model_entry) ->
          Option.is_some entry.modality_priority)
       (Llm_provider.Model_catalog.model_entries catalog)
   in
-  check bool "deployment OAS catalog has modality priority rows" true (rows <> []);
+  check bool "deployment AGENT_CORE catalog has modality priority rows" true (rows <> []);
   List.iter
     (fun (entry : Llm_provider.Model_catalog.model_entry) ->
        match entry.modality_priority with
@@ -716,7 +770,7 @@ let test_deployment_oas_model_catalog_modality_priorities_resolve () =
          (match capabilities with
           | None ->
             failf
-              "modality_priority row %s must resolve through deployment OAS catalog"
+              "modality_priority row %s must resolve through deployment AGENT_CORE catalog"
               entry.id_prefix
           | Some caps ->
             check
@@ -725,6 +779,149 @@ let test_deployment_oas_model_catalog_modality_priorities_resolve () =
               true
               (caps.modality_priority = expected)))
     rows
+
+(* [reasoning-effort] is the only declared reasoning control official-client
+   runtimes have: Keeper_official_client_host.resolve_reasoning_effort rejects
+   enable_thinking outright. Asserting the parsed variant rather than "parsing
+   succeeded" is what separates a declaration that reached the model spec from
+   one that was accepted and dropped. *)
+let test_model_reasoning_effort_parses_into_the_typed_variant () =
+  let config =
+    "[models.probe]\napi-name = \"probe\"\nreasoning-effort = \"xhigh\"\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Error _ -> fail "a model declaring a known reasoning-effort must parse"
+  | Ok parsed ->
+    (match parsed.Runtime_schema.models with
+     | [ model ] ->
+       check
+         bool
+         "reasoning-effort xhigh reaches the model spec as XHigh"
+         true
+         (model.Runtime_schema.reasoning_effort
+          = Some Llm_provider.Reasoning_effort.XHigh)
+     | _ -> fail "exactly one model must parse")
+
+let test_model_reasoning_effort_rejects_unknown_value_at_load () =
+  let config =
+    "[models.probe]\napi-name = \"probe\"\nreasoning-effort = \"turbo\"\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Ok _ -> fail "an unknown reasoning-effort must be rejected at load"
+  | Error errors ->
+    check
+      bool
+      "the rejection names the offending value"
+      true
+      (List.exists
+         (fun (e : Runtime_toml.parse_error) ->
+            let contains needle =
+              let n = String.length needle in
+              let rec scan i =
+                i + n <= String.length e.message
+                && (String.sub e.message i n = needle || scan (i + 1))
+              in
+              scan 0
+            in
+            contains "turbo")
+         errors)
+
+let test_model_without_reasoning_effort_leaves_it_unset () =
+  let config = "[models.probe]\napi-name = \"probe\"\n" in
+  match Runtime_toml.parse_string config with
+  | Error _ -> fail "a model without reasoning-effort must still parse"
+  | Ok parsed ->
+    (match parsed.Runtime_schema.models with
+     | [ model ] ->
+       check
+         bool
+         "an undeclared reasoning-effort stays None rather than defaulting"
+         true
+         (model.Runtime_schema.reasoning_effort = None)
+     | _ -> fail "exactly one model must parse")
+
+(* [turn-timeout-s] exists because reasoning effort is per model while the only
+   pre-existing bound was per provider (antigravity [timeout-s]) or absent
+   entirely (claude-code, codex-app-server, both fixed at 300s in the adapter).
+   A max-effort binding could therefore not be given more wall clock than a
+   low-effort one sharing its provider. Live evidence, 2026-08-10: keeper
+   delta on claude_code.claude-opus-5-max failed every turn with "timed out
+   after 300.000s" at 5,884 bytes of system+user input.
+
+   The rejection case is the load-bearing one, but only for values that state
+   no intent: a negative or non-finite bound would read as a provider fault
+   rather than a config typo. [0] is not in that set — it declares that no
+   deadline is installed, which is a posture an operator may want and which
+   the sibling case below pins. *)
+let test_model_turn_timeout_parses_as_a_positive_float () =
+  let config = "[models.probe]\napi-name = \"probe\"\nturn-timeout-s = 900.0\n" in
+  match Runtime_toml.parse_string config with
+  | Error _ -> fail "a model declaring a positive turn-timeout-s must parse"
+  | Ok parsed ->
+    (match parsed.Runtime_schema.models with
+     | [ model ] ->
+       check
+         bool
+         "turn-timeout-s reaches the model spec"
+         true
+         (model.Runtime_schema.turn_timeout_s = Some 900.0)
+     | _ -> fail "exactly one model must parse")
+
+(* [0] is a declaration, not a typo: it says no deadline is installed, so the
+   spawned client decides when its own turn ends. Absent stays distinct from
+   it — absent keeps the adapter default — which is what the sibling case
+   below pins. Negative and non-finite remain rejected, because neither states
+   an intent the adapter can act on. *)
+let test_model_turn_timeout_admits_zero_and_rejects_negative () =
+  let parse value =
+    Runtime_toml.parse_string
+      (Printf.sprintf "[models.probe]\napi-name = \"probe\"\nturn-timeout-s = %s\n" value)
+  in
+  (match parse "0" with
+   | Error _ -> fail "turn-timeout-s = 0 must parse: it declares no deadline"
+   | Ok parsed ->
+     (match parsed.Runtime_schema.models with
+      | [ model ] ->
+        check
+          bool
+          "zero reaches the model spec as a declared value"
+          true
+          (model.Runtime_schema.turn_timeout_s = Some 0.0)
+      | _ -> fail "exactly one model must parse"));
+  (* Control. Without this, removing the validator entirely would also pass. *)
+  match parse "-1.0" with
+  | Ok _ -> fail "a negative turn-timeout-s must be rejected at load"
+  | Error errors ->
+    check
+      bool
+      "the rejection names the offending key"
+      true
+      (List.exists
+         (fun (e : Runtime_toml.parse_error) ->
+            let contains needle =
+              let n = String.length needle in
+              let rec scan i =
+                i + n <= String.length e.path
+                && (String.sub e.path i n = needle || scan (i + 1))
+              in
+              scan 0
+            in
+            contains "turn-timeout-s")
+         errors)
+
+let test_model_without_turn_timeout_leaves_it_unset () =
+  let config = "[models.probe]\napi-name = \"probe\"\n" in
+  match Runtime_toml.parse_string config with
+  | Error _ -> fail "a model without turn-timeout-s must still parse"
+  | Ok parsed ->
+    (match parsed.Runtime_schema.models with
+     | [ model ] ->
+       check
+         bool
+         "an undeclared turn-timeout-s stays None so the caller keeps its bound"
+         true
+         (model.Runtime_schema.turn_timeout_s = None)
+     | _ -> fail "exactly one model must parse")
 
 let test_exact_output_lane_config_is_ordered_and_rejects_duplicates () =
   let valid =
@@ -783,8 +980,67 @@ let test_retired_native_streaming_capability_is_rejected () =
             && String_util.contains_substring error.message "was removed")
          errors)
 
+(* A [models.X].max-context above the model's catalog window resolves to the
+   catalog number with source Override_clamped_by_capability: the declaration
+   is clamped away and reaches nothing. Two shipped runtimes carried one, and
+   one of them — glm-coding.glm-5-turbo, declaring 203000 against a catalog
+   window of 200000 — was cited in #28737 as this model's context window while
+   the number in effect was the catalog's (#28738).
+
+   The clamp itself stays — it is the safe direction if the catalog ever
+   shrinks under a deployment's override. What must not ship is a declaration
+   that reads as authoritative and is not. This drives the real resolver over
+   the real config rather than reading the file as text. *)
+let test_repo_runtime_toml_declares_no_clamped_max_context () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  match Runtime.load_list ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
+    let clamped =
+      List.filter_map
+        (fun (rt : Runtime.t) ->
+           match Runtime.resolve_max_context_of_runtime rt with
+           | Some (effective, Runtime.Override_clamped_by_capability) ->
+             Some
+               (Printf.sprintf
+                  "%s declares %s and the catalog gives %d"
+                  rt.Runtime.id
+                  (match rt.Runtime.model.Runtime_schema.max_context with
+                   | Some declared -> string_of_int declared
+                   | None -> "<none>")
+                  effective)
+           | Some (_, (Runtime.Override | Runtime.Capability)) | None -> None)
+        runtimes
+    in
+    check (list string)
+      "no shipped runtime declares a max-context its model cannot take"
+      []
+      (List.sort String.compare clamped)
+
+(* The capability probe on 2026-08-13 sent 36 requests to the kimi_coding
+   models and all 36 came back carrying thinking while nothing declared it, so
+   every one logged Thinking_returned_but_declared_unsupported (#28457). Two of
+   those three models have since left the catalog entirely; this is the one
+   that remains, and the declaration is what stops the drift from returning
+   the moment a runtime binds it again. *)
+let test_kimi_for_coding_declares_the_reasoning_it_returns () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  match
+    Llm_provider.Capabilities.for_provider_model_id
+      ~allow_bare_fallback:false
+      ~provider_label:"kimi_code"
+      ~model_id:"kimi-for-coding"
+  with
+  | None -> fail "kimi-for-coding missing from the deployment catalog"
+  | Some caps ->
+    check bool "declares reasoning" true
+      caps.Llm_provider.Capabilities.supports_reasoning;
+    check bool "declares extended thinking" true
+      caps.Llm_provider.Capabilities.supports_extended_thinking
+
 let test_repo_runtime_toml_loads () =
-  with_deployment_oas_model_catalog @@ fun _catalog ->
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   check bool "repo runtime.toml present" true (Sys.file_exists path);
   match Runtime.load_list ~config_path:path with
@@ -793,7 +1049,6 @@ let test_repo_runtime_toml_loads () =
       ( runtimes
       , default
       , assignments
-      , cross_verifier
       , media_failover
       , lanes ) ->
     check bool "at least one runtime" true (List.length runtimes > 0);
@@ -815,6 +1070,7 @@ check
   ; "compaction_exact"
   ; "hitl_auto_judge"
   ; "librarian_exact"
+  ; "verifier_exact"
   ]
   (List.map fst lane_signatures);
 check
@@ -830,6 +1086,19 @@ check
        String.equal lane_id "board_attention_exact"
        || String.equal lane_id "hitl_auto_judge")
      lane_signatures);
+(* RFC-0361 D7(a): the completion-authority judgement lane is the single
+   provider-selection SSOT and failover follows declaration order. *)
+check
+  (option (list string))
+  "verifier_exact slot order is frozen"
+  (Some [ "deepseek.deepseek-v4-pro"; "glm-coding.glm-5-turbo" ])
+  (match
+     List.find_opt
+       (fun (lane_id, _) -> String.equal lane_id "verifier_exact")
+       lane_signatures
+   with
+   | Some (_, slot_ids) -> Some slot_ids
+   | None -> None);
 List.iter
   (fun (lane : Runtime_schema.exact_output_lane_decl) ->
      check bool
@@ -839,14 +1108,16 @@ List.iter
   config.exact_output_lane_decls);
     check (option (float 0.0)) "Ollama Cloud connect timeout override"
       (Some 600.0)
-      default.provider_config.connect_timeout_s;
+      (agent_core_provider_config default).connect_timeout_s;
     check int "public seed has no keeper assignments" 0
       (List.length assignments);
     let keeper_dispatch_ids =
       Runtime.For_testing.keeper_dispatch_runtime_ids
         ~default_runtime_id:default.id
         ~assignments
-        ~cross_verifier_runtime_id:cross_verifier
+        ~verifier_exact_slot_ids:
+          (* pinned to the seed by the verifier_exact lane check above *)
+          [ "deepseek.deepseek-v4-pro"; "glm-coding.glm-5-turbo" ]
         ~media_failover
         ~lanes
     in
@@ -859,7 +1130,7 @@ List.iter
          with
          | None -> failf "expected bounded Keeper runtime in seed: %s" runtime_id
          | Some runtime ->
-           (match runtime.provider_config.max_request_body_bytes with
+           (match (agent_core_provider_config runtime).max_request_body_bytes with
             | Some cap when cap > 0 -> ()
             | None | Some _ ->
               failf
@@ -908,9 +1179,9 @@ List.iter
      with
      | None -> fail "expected DeepSeek Pro runtime in seed"
      | Some runtime ->
-       check (option (float 0.0)) "DeepSeek keeps OAS connect timeout default"
+       check (option (float 0.0)) "DeepSeek keeps AGENT_CORE connect timeout default"
          None
-         runtime.provider_config.connect_timeout_s;
+         (agent_core_provider_config runtime).connect_timeout_s;
        (match runtime.model.capabilities with
         | Some caps ->
           check bool "DeepSeek Pro structured output disabled" false
@@ -964,7 +1235,7 @@ List.iter
          runtime.model.api_name;
        check (option (float 0.0)) "native MiniMax M3 connect timeout"
          (Some 600.0)
-         runtime.provider_config.connect_timeout_s;
+         (agent_core_provider_config runtime).connect_timeout_s;
        (match runtime.model.capabilities with
        | Some caps ->
          check bool "native MiniMax M3 response_format json" true
@@ -985,16 +1256,23 @@ List.iter
      | None -> fail "expected Kimi K2.7 Code Ollama Cloud runtime in seed"
      | Some runtime ->
        check string "Kimi K2.7 Code api name" "kimi-k2.7-code" runtime.model.api_name;
-       check (option int) "Kimi K2.7 Code context" (Some 262144) runtime.model.max_context;
+       (* Effective window, not the declaration: what matters is what the
+          runtime resolves, and an override only holds while it stays under
+          the model's catalog window (#28738). *)
+       check (option int) "Kimi K2.7 Code context" (Some 262144)
+         (Runtime.resolve_max_context_of_runtime runtime |> Option.map fst);
        (match runtime.model.capabilities with
         | Some caps ->
           check bool "Kimi K2.7 Code image input" true caps.supports_image_input;
           check bool "Kimi K2.7 Code multimodal input" true
             caps.supports_multimodal_inputs;
-          check bool "Kimi K2.7 Code reasoning effort" true
+          (* ollama.com /v1 reasons inherently and takes no control field, so
+             this model declares no thinking control. See the comment on
+             [expected_thinking_format] above for the measurement. *)
+          check bool "Kimi K2.7 Code thinking control" true
             (Runtime_schema.equal_thinking_control_format
                caps.thinking_control_format
-               Runtime_schema.Reasoning_effort)
+               Runtime_schema.No_thinking_control)
         | None -> fail "expected Kimi K2.7 Code capabilities"))
 
 (* The lane-resolution test below iterates the lanes a config declares, so it
@@ -1035,7 +1313,7 @@ let assert_mandatory_exact_output_lanes_declared ~label path =
          | Some { slot_ids = []; _ } ->
            failf
              "%s declares mandatory exact-output lane %s with no slots; startup \
-              requires at least one OAS target ref"
+              requires at least one AGENT_CORE target ref"
              label
              lane_id
          | Some { slot_ids = _ :: _; _ } -> ())
@@ -1091,7 +1369,7 @@ let test_boot_path_fixtures_declare_mandatory_exact_output_lanes () =
    grows an api_key_env fails this test instead of failing a push to main. *)
 let test_release_evidence_fixture_lanes_resolve_without_credentials () =
   let fixture_dir = release_evidence_fixture_dir () in
-  let overlay_path = Filename.concat fixture_dir "oas-models-overlay.toml" in
+  let overlay_path = Filename.concat fixture_dir "agent-core-models-overlay.toml" in
   let overlay_contents =
     try In_channel.with_open_bin overlay_path In_channel.input_all with
     | Sys_error detail ->
@@ -1187,7 +1465,7 @@ let test_release_evidence_fixture_lanes_resolve_without_credentials () =
 let test_deployment_exact_output_catalog_admits_seed_lanes () =
   let root = repo_root () in
   let runtime_path = Filename.concat root "config/runtime.toml" in
-  let overlay_path = Filename.concat root "config/oas-models-overlay.toml" in
+  let overlay_path = Filename.concat root "config/agent-core-models-overlay.toml" in
   let overlay_contents =
     try In_channel.with_open_bin overlay_path In_channel.input_all with
     | Sys_error detail ->
@@ -1224,8 +1502,8 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
       ~minimum_guarantee:Exact_output.Json_syntax
   in
   let messages =
-    [ Agent_sdk.Types.text_message
-        Agent_sdk.Types.User
+    [ Agent_core.Types.text_message
+        Agent_core.Types.User
         "Return one JSON object."
     ]
   in
@@ -1265,27 +1543,14 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
            lane.slot_ids)
       config.exact_output_lane_decls
 
-let test_toml_catalog_resolves_lifecycle_keys () =
-  let doc =
-    parse_or_fail
-      "[lifecycle]\n\
-       dead_ttl_sec = 86400\n"
-  in
-  let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
-  in
-  check int "applied lifecycle overrides" 1 count;
-  check (option string) "dead ttl" (Some "86400")
-    (List.assoc_opt "MASC_KEEPER_DEAD_TTL_SEC" overrides)
-
 let test_toml_catalog_resolves_web_search_keys () =
   let doc =
     parse_or_fail
       "[web_search]\n\
        searxng_url = \"http://localhost:8888\"\n\
        provider = \"auto\"\n\
-       provider_order = \"searxng,brave,duckduckgo\"\n\
-       fallbacks = \"duckduckgo,bing_rss\"\n\
+       provider_order = \"searxng,brave,tavily\"\n\
+       fallbacks = \"tavily,exa\"\n\
        timeout_sec = 12\n\
        cache_ttl_sec = 45.5\n"
   in
@@ -1297,9 +1562,9 @@ let test_toml_catalog_resolves_web_search_keys () =
     (List.assoc_opt "MASC_SEARXNG_URL" overrides);
   check (option string) "provider" (Some "auto")
     (List.assoc_opt "MASC_WEB_SEARCH_PROVIDER" overrides);
-  check (option string) "provider order" (Some "searxng,brave,duckduckgo")
+  check (option string) "provider order" (Some "searxng,brave,tavily")
     (List.assoc_opt "MASC_WEB_SEARCH_PROVIDER_ORDER" overrides);
-  check (option string) "fallbacks" (Some "duckduckgo,bing_rss")
+  check (option string) "fallbacks" (Some "tavily,exa")
     (List.assoc_opt "MASC_WEB_SEARCH_FALLBACKS" overrides);
   check (option string) "timeout" (Some "12")
     (List.assoc_opt "MASC_WEB_SEARCH_TIMEOUT_SEC" overrides);
@@ -1570,8 +1835,158 @@ let test_runtime_toml_parses_optional_max_request_body_bytes () =
          binding.Runtime_schema.max_request_body_bytes
      | bindings -> failf "expected one binding, got %d" (List.length bindings))
 
+(* RFC-0382 §7: return-progress is a binding-level opt-in (like keep-alive /
+   num-ctx) that asks an OpenAI-compat server to stream prompt_progress chunks
+   during prefill. Omitted must stay None — only an explicit declaration may
+   put the field on the wire. *)
+let test_runtime_toml_parses_optional_return_progress () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     return-progress = true\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error errs ->
+    let rendered =
+      errs
+      |> List.map (fun (err : Runtime_toml.parse_error) ->
+        Printf.sprintf "%s: %s" err.path err.message)
+      |> String.concat "\n"
+    in
+    failf "runtime TOML should parse optional return-progress:\n%s" rendered
+  | Ok cfg ->
+    (match cfg.Runtime_schema.bindings with
+     | [ binding ] ->
+       check (option bool) "explicit return-progress opt-in" (Some true)
+         binding.Runtime_schema.return_progress
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+(* An R1-style reasoning model can restate the same thought until the turn
+   dies, and Ollama's own control for that is repeat_penalty over
+   repeat_last_n tokens. Neither could be declared at all, so the remedy was
+   unreachable from configuration. Binding-level like keep-alive / num-ctx,
+   because both are Ollama options rather than a portable sampling knob. *)
+let test_runtime_toml_parses_repetition_samplers () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     repeat-penalty = 1.15\n\
+     repeat-last-n = 1024\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error errs ->
+    let rendered =
+      errs
+      |> List.map (fun (err : Runtime_toml.parse_error) ->
+        Printf.sprintf "%s: %s" err.path err.message)
+      |> String.concat "\n"
+    in
+    failf "runtime TOML should parse the repetition samplers:\n%s" rendered
+  | Ok cfg ->
+    (match cfg.Runtime_schema.bindings with
+     | [ binding ] ->
+       check (option int) "explicit repeat-last-n" (Some 1024)
+         binding.Runtime_schema.repeat_last_n;
+       (match binding.Runtime_schema.repeat_penalty with
+        | Some value -> check bool "explicit repeat-penalty" true (Float.equal value 1.15)
+        | None -> failf "repeat-penalty should be declared")
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+let test_runtime_toml_omitted_repetition_samplers_stay_none () =
+  let content = "[providers.local]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n" in
+  match Runtime_toml.parse_string content with
+  | Error _ -> failf "runtime TOML without the samplers should still parse"
+  | Ok cfg ->
+    (match cfg.Runtime_schema.bindings with
+     | [ binding ] ->
+       check (option int) "omitted repeat-last-n stays None" None
+         binding.Runtime_schema.repeat_last_n;
+       check bool "omitted repeat-penalty stays None" true
+         (Option.is_none binding.Runtime_schema.repeat_penalty)
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+(* 0 and below would silence the sampler while reading as "configured", so the
+   declaration is rejected instead of being carried onto the wire. *)
+let test_runtime_toml_rejects_non_positive_repeat_penalty () =
+  let content = "[providers.local]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     repeat-penalty = 0.0\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n" in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> failf "repeat-penalty = 0.0 should be rejected"
+  | Error errs ->
+    check bool "names the offending key" true
+      (List.exists
+         (fun (err : Runtime_toml.parse_error) ->
+           String.equal err.path "local.sample.repeat-penalty")
+         errs)
+
+(* -1 is Ollama's "the whole context"; anything below it has no meaning. *)
+let test_runtime_toml_rejects_repeat_last_n_below_minus_one () =
+  let content = "[providers.local]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     repeat-last-n = -2\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n" in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> failf "repeat-last-n = -2 should be rejected"
+  | Error errs ->
+    check bool "names the offending key" true
+      (List.exists
+         (fun (err : Runtime_toml.parse_error) ->
+           String.equal err.path "local.sample.repeat-last-n")
+         errs)
+
 let test_runtime_toml_omitted_max_request_body_bytes_is_none () =
-  (* Undeclared must stay None rather than acquiring a default. OAS reads None as
+  (* Undeclared must stay None rather than acquiring a default. AGENT_CORE reads None as
      "no ceiling declared" and passes every size; a default here would silently
      become a product-wide cap nobody chose. *)
   let content =
@@ -1599,38 +2014,29 @@ let test_runtime_toml_omitted_max_request_body_bytes_is_none () =
 
 let test_keeper_dispatch_runtime_graph_enumeration () =
   let lanes =
-    [ Runtime_lane.make
-        ~id:"default-a"
-        ~strategy:Runtime_lane.Ordered
-        [ "lane-a"; "lane-b" ]
-    ; Runtime_lane.make
-        ~id:"dormant-lane"
-        ~strategy:Runtime_lane.Ordered
-        [ "lane-c"; "lane-b" ]
-    ; Runtime_lane.make
-        ~id:"cross-e"
-        ~strategy:Runtime_lane.Ordered
-        [ "cross-a"; "lane-b" ]
+    [ Runtime_lane.make ~id:"default-a" [ "lane-a"; "lane-b" ]
+    ; Runtime_lane.make ~id:"dormant-lane" [ "lane-c"; "lane-b" ]
+    ; Runtime_lane.make ~id:"cross-e" [ "cross-a"; "lane-b" ]
     ]
   in
   let actual =
     Runtime.For_testing.keeper_dispatch_runtime_ids
       ~default_runtime_id:"default-a"
       ~assignments:[ "keeper-a", "assigned-b" ]
-      ~cross_verifier_runtime_id:(Some "cross-e")
+      ~verifier_exact_slot_ids:[ "verifier-a"; "lane-b" ]
       ~media_failover:[ "media-c"; "lane-a" ]
       ~lanes
   in
   check
     (list string)
-    "routed lane candidates, special routes, and media failover are deduplicated \
-     without admitting a dormant lane"
-    [ "lane-a"
-    ; "lane-b"
-    ; "assigned-b"
-    ; "media-c"
-    ; "cross-a"
-    ]
+    "routed lane candidates, special routes, verifier_exact slots, and media \
+     failover are deduplicated without admitting a dormant lane"
+    (* [cross-e] is declared but nothing routes to it: no assignment, no
+       verifier_exact slot, no media failover entry names it. #29197 removed
+       the cross_verifier route that used to pull it in, so its member
+       [cross-a] is no longer enumerated — same reason [dormant-lane] never
+       was. *)
+    [ "lane-a"; "lane-b"; "assigned-b"; "media-c"; "verifier-a" ]
     actual
 ;;
 
@@ -1681,54 +2087,101 @@ let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
            (String_util.contains_substring detail "local.lane"))
 ;;
 
-let test_runtime_config_validation_rejects_uncapped_special_runtime () =
-  let content route =
+(* The Agent_core rule above bounds the serialized request body, and stops
+   there. An official-client turn never builds that body: it hands its
+   conversation to a spawned vendor client that owns its own context window and
+   refuses an oversized one in a typed terminal, which the shrink sequence
+   retries with less. Requiring a declared max-prompt-bytes there made the
+   provider's own window a boot-time obligation on the operator, so a
+   deployment could not choose to let the provider decide — and the ceiling it
+   demanded was in wire bytes, which is not the unit the window is in.
+
+   This pins the removal in both directions: the official-client side must
+   load undeclared, and the Agent_core side must still reject. Without the
+   second half, deleting the whole check would also pass. *)
+let test_runtime_config_validation_admits_undeclared_official_client_seed () =
+  let content ~bound ~agent_core_cap =
     Printf.sprintf
       "[providers.local]\n\
        protocol = \"openai-compatible-http\"\n\
        endpoint = \"http://127.0.0.1:1/v1\"\n\
        \n\
-       [models.default]\n\
-       api-name = \"default\"\n\
+       [providers.subscription]\n\
+       protocol = \"claude-code\"\n\
+       command = \"/usr/bin/true\"\n\
+       is-non-interactive = true\n\
+       \n\
+       [models.sample]\n\
+       api-name = \"sample\"\n\
        max-context = 1024\n\
        \n\
-       [models.special]\n\
-       api-name = \"special\"\n\
-       max-context = 1024\n\
+       [models.seeded]\n\
+       api-name = \"seeded\"\n\
+       max-context = 1024\n%s\
        \n\
-       [local.default]\n\
-       max-request-body-bytes = 65536\n\
+       [local.sample]\n%s\
        \n\
-       [local.special]\n\
+       [subscription.seeded]\n\
        \n\
        [runtime]\n\
-       default = \"local.default\"\n\
-       %s = \"local.special\"\n"
-      route
+       default = \"local.sample\"\n\
+       \n\
+       [runtime.assignments]\n\
+       \"probe\" = \"subscription.seeded\"\n"
+      bound
+      agent_core_cap
   in
-  List.iter
-    (fun route ->
-       let snapshot = Runtime.For_testing.snapshot () in
-       let path = Filename.temp_file "uncapped_special_runtime_" ".toml" in
-       let config = content route in
-       let oc = open_out path in
-       output_string oc config;
-       close_out oc;
-       Fun.protect
-         ~finally:(fun () ->
-           Runtime.For_testing.restore snapshot;
-           try Sys.remove path with
-           | Sys_error _ -> ())
-         (fun () ->
-            match Runtime.save_config_text ~runtime_config_path:path config with
-            | Ok () ->
-              failf "uncapped %s runtime must fail runtime config validation" route
-            | Error detail ->
-              check bool "typed config diagnostic names the cap" true
-                (String_util.contains_substring detail "max-request-body-bytes");
-              check bool "typed config diagnostic names the special runtime" true
-                (String_util.contains_substring detail "local.special")))
-    [ "cross_verifier" ]
+  let declared_agent_core_cap = "max-request-body-bytes = 65536\n" in
+  let attempt text =
+    let snapshot = Runtime.For_testing.snapshot () in
+    let path = Filename.temp_file "official_seed_" ".toml" in
+    let oc = open_out path in
+    output_string oc text;
+    close_out oc;
+    Fun.protect
+      ~finally:(fun () ->
+        Runtime.For_testing.restore snapshot;
+        try Sys.remove path with
+        | Sys_error _ -> ())
+      (fun () -> Runtime.save_config_text ~runtime_config_path:path text)
+  in
+  (match
+     attempt (content ~bound:"" ~agent_core_cap:declared_agent_core_cap)
+   with
+   | Ok () -> ()
+   | Error detail ->
+     failf
+       "an official-client Keeper runtime with no max-prompt-bytes must load: %s"
+       detail);
+  (* Declaring it stays legal — the key still exists for operators who want the
+     seed bounded; it is simply no longer an admission condition. *)
+  (match
+     attempt
+       (content
+          ~bound:"max-prompt-bytes = 131072\n"
+          ~agent_core_cap:declared_agent_core_cap)
+   with
+   | Ok () -> ()
+   | Error detail -> failf "a declared seed bound must still load: %s" detail);
+  (* Control. The Agent_core half of this validator must still reject, or the
+     two assertions above would also pass with the whole check deleted. The
+     remediation assertion is kept from #28175: a diagnostic naming a
+     syntactically plausible but unconsumed table would satisfy a bare key
+     substring while startup stayed stuck. *)
+  match attempt (content ~bound:"" ~agent_core_cap:"") with
+  | Ok () ->
+    fail "an Agent_core Keeper runtime with no max-request-body-bytes must be rejected"
+  | Error detail ->
+    check bool "the diagnostic names the Agent_core key" true
+      (String_util.contains_substring detail "max-request-body-bytes");
+    check bool
+      "the remediation points at the binding table that owns the key"
+      true
+      (String_util.contains_substring
+         detail
+         "[local.sample].max-request-body-bytes");
+    check bool "the diagnostic does not demand the seed key" false
+      (String_util.contains_substring detail "max-prompt-bytes")
 ;;
 
 let test_runtime_config_validation_allows_uncapped_dormant_lane_candidate () =
@@ -1928,7 +2381,7 @@ let with_fake_runtime_model_catalog f =
      base = \"openai_chat\"\n\
      max_context_tokens = 1024\n"
   in
-  let path = Filename.temp_file "oas-models" ".toml" in
+  let path = Filename.temp_file "agent_core-models" ".toml" in
   let oc = open_out path in
   output_string oc content;
   close_out oc;
@@ -1940,13 +2393,13 @@ let with_fake_runtime_model_catalog f =
        )
     (fun () ->
        match Llm_provider.Model_catalog.load_file path with
-       | Error msg -> failf "fake OAS model catalog should load: %s" msg
+       | Error msg -> failf "fake AGENT_CORE model catalog should load: %s" msg
        | Ok catalog ->
          Llm_provider.Model_catalog.set_global catalog;
          f ())
 
 let with_model_catalog_content content f =
-  let path = Filename.temp_file "oas-provider-qualified-models" ".toml" in
+  let path = Filename.temp_file "agent_core-provider-qualified-models" ".toml" in
   let oc = open_out path in
   output_string oc content;
   close_out oc;
@@ -1958,7 +2411,7 @@ let with_model_catalog_content content f =
        )
     (fun () ->
        match Llm_provider.Model_catalog.load_file path with
-       | Error msg -> failf "provider-qualified OAS model catalog should load: %s" msg
+       | Error msg -> failf "provider-qualified AGENT_CORE model catalog should load: %s" msg
        | Ok catalog ->
          Llm_provider.Model_catalog.set_global catalog;
          f ())
@@ -2056,39 +2509,403 @@ let test_runtime_capability_gate_uses_provider_qualified_catalog () =
          check (option bool) "provider-qualified preserve policy" None
            (Runtime.preserve_thinking_of_runtime_id "ollama_cloud.shared")))
 
-let test_runtime_assignment_rejects_commented_disabled_binding () =
+let test_runtime_toml_enabled_defaults_true () =
+  let runtime_toml =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string runtime_toml with
+  | Error errors ->
+    failf "enabled defaults should parse: %s"
+      (errors
+       |> List.map (fun (error : Runtime_toml.parse_error) -> error.message)
+       |> String.concat "; ")
+  | Ok cfg ->
+    (match cfg.Runtime_schema.providers, cfg.Runtime_schema.bindings with
+     | [ provider ], [ binding ] ->
+       check bool "provider enabled by default" true provider.enabled;
+       check bool "binding enabled by default" true binding.enabled
+     | providers, bindings ->
+       failf
+         "expected one provider and one binding, got %d and %d"
+         (List.length providers)
+         (List.length bindings))
+;;
+
+let test_runtime_provider_disable_excludes_its_bindings () =
+  let runtime_toml =
+    "[providers.active]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [providers.dormant]\n\
+     enabled = false\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:2/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [active.sample]\n\
+     [dormant.sample]\n\
+     \n\
+     [runtime]\n\
+     default = \"active.sample\"\n"
+  in
+  with_temp_runtime_toml runtime_toml (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "disabled provider should not block active runtime: %s" msg
+    | Ok (runtimes, _, _, _, _) ->
+      check (list string) "materialized runtime ids" [ "active.sample" ]
+        (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes))
+;;
+
+let test_runtime_binding_disable_excludes_only_that_binding () =
   let runtime_toml =
     "[providers.local]\n\
      protocol = \"openai-compatible-http\"\n\
      endpoint = \"http://127.0.0.1:1/v1\"\n\
      \n\
      [models.good]\n\
-     api-name = \"chat\"\n\
+     api-name = \"good\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.disabled]\n\
+     api-name = \"disabled\"\n\
      max-context = 1024\n\
      \n\
      [local.good]\n\
-     \n\
-     # Disabled runtime binding. An assignment to it must fail closed rather\n\
-     # than inheriting [runtime].default.\n\
-     # [models.disabled]\n\
-     # api-name = \"disabled\"\n\
-     # max-context = 1024\n\
-     # [local.disabled]\n\
+     [local.disabled]\n\
+     enabled = false\n\
      \n\
      [runtime]\n\
-     default = \"local.good\"\n\
-     \n\
-     [runtime.assignments]\n\
-     keeper_a = \"local.disabled\"\n"
+     default = \"local.good\"\n"
   in
   with_temp_runtime_toml runtime_toml (fun path ->
     match Runtime.load_list ~config_path:path with
-    | Ok _ -> failf "assignment to commented/disabled runtime should be rejected"
+    | Error msg -> failf "disabled binding should not block active runtime: %s" msg
+    | Ok (runtimes, _, _, _, _) ->
+      check (list string) "materialized runtime ids" [ "local.good" ]
+        (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes));
+  let referenced_runtime_toml =
+    runtime_toml
+    ^ "\n[runtime.assignments]\nkeeper_a = \"local.disabled\"\n"
+  in
+  with_temp_runtime_toml referenced_runtime_toml (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Ok _ -> failf "assignment to explicitly disabled runtime should be rejected"
     | Error msg ->
       check bool "error mentions assignment table" true
         (String_util.contains_substring msg "[runtime.assignments].keeper_a");
       check bool "error mentions disabled runtime id" true
-        (String_util.contains_substring msg "local.disabled"))
+        (String_util.contains_substring msg "local.disabled");
+      check bool "error identifies configured disable" true
+        (String_util.contains_substring msg "disabled by runtime.toml"))
+;;
+
+(* masc#28404. Same config the test above proves must still boot: [local.sample]
+   is routed and capped, [local.dormant] is declared, materialized, and cannot
+   carry a keeper turn. Boot staying up is correct; the runtime being blocked
+   with nothing anywhere saying so is the defect. Seven live runtimes were in
+   this state on 2026-08-12 and finding them took a script that re-parsed the
+   TOML, because the runtime list reported them exactly like the assignable
+   ones. *)
+let test_declared_uncapped_runtime_reports_its_dispatch_blocker () =
+  let runtime_toml =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.dormant]\n\
+     api-name = \"dormant\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     max-request-body-bytes = 65536\n\
+     \n\
+     [local.dormant]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  with_temp_runtime_toml runtime_toml (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg ->
+      failf "an unassigned uncapped runtime must not fail the load: %s" msg
+    | Ok (runtimes, _, _, _, _) ->
+      check (list string) "both runtimes materialize"
+        [ "local.sample"; "local.dormant" ]
+        (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes);
+      (match Runtime.keeper_dispatch_blocked runtimes with
+       | [ (blocked, reason) ] ->
+         check string "the uncapped runtime is the blocked one" "local.dormant"
+           blocked.id;
+         check bool "reason names the table to edit" true
+           (String_util.contains_substring reason "[local.dormant]");
+         check bool "reason names the missing field" true
+           (String_util.contains_substring reason "max-request-body-bytes")
+       | blocked ->
+         failf
+           "expected exactly the uncapped runtime to be blocked; got [%s]"
+           (String.concat "; "
+              (List.map (fun ((r : Runtime.t), _) -> r.id) blocked)));
+      (* The routed runtime is judged by the same predicate, so a projection
+         that reported everything blocked would fail here rather than read as a
+         fleet-wide outage. *)
+      check bool "the routed runtime is dispatchable" true
+        (match
+           List.find_opt
+             (fun (runtime : Runtime.t) -> String.equal runtime.id "local.sample")
+             runtimes
+         with
+         | Some runtime ->
+           Runtime.keeper_dispatch_readiness runtime = Runtime.Dispatchable
+         | None -> false))
+;;
+
+(* An official-client runtime declares no body cap by design — the spawned
+   vendor client owns its own context window — so it must not be reported as
+   blocked. Without this, the projection would tell operators to add a field
+   that boot validation deliberately does not require of it. *)
+let test_official_client_runtime_is_dispatchable_without_a_body_cap () =
+  let runtime_toml =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [providers.claude_code]\n\
+     protocol = \"claude-code\"\n\
+     command = \"claude\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.official]\n\
+     api-name = \"claude-sonnet-5\"\n\
+     max-context = 200000\n\
+     \n\
+     [local.sample]\n\
+     max-request-body-bytes = 65536\n\
+     \n\
+     [claude_code.official]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  with_temp_runtime_toml runtime_toml (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "official-client runtime should load: %s" msg
+    | Ok (runtimes, _, _, _, _) ->
+      check (list string) "no runtime is reported blocked" []
+        (List.map
+           (fun ((runtime : Runtime.t), _) -> runtime.id)
+           (Runtime.keeper_dispatch_blocked runtimes)))
+;;
+
+(* masc#28403. The runtime this declares — [local.typo] — cannot exist, because
+   no [models.typo] row does. Nothing references it, which is the whole point:
+   before this was a load error the only way a dangling binding surfaced was an
+   assignment / route / lane naming it, so an unreferenced one vanished in
+   silence. A live [local_llama_server.qwen3-6-35b-uncensored] binding did
+   exactly that for an unknown length of time, and was found only by parsing the
+   TOML with a separate script. *)
+let test_binding_naming_an_undeclared_model_fails_the_load () =
+  let runtime_toml =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.good]\n\
+     api-name = \"good\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.good]\n\
+     [local.typo]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.good\"\n"
+  in
+  with_temp_runtime_toml runtime_toml (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Ok (runtimes, _, _, _, _) ->
+      failf
+        "binding naming an undeclared model must fail the load; got runtimes [%s]"
+        (String.concat "; " (List.map (fun (r : Runtime.t) -> r.id) runtimes))
+    | Error msg ->
+      check bool "error names the dangling binding" true
+        (String_util.contains_substring msg "local.typo");
+      check bool "error names the missing model row" true
+        (String_util.contains_substring msg "[models.typo]"))
+;;
+
+(* The other half of masc#28403: the binding namespace is now the set of
+   declared providers, not "every top-level table that is not reserved". Both
+   tables below exist in the live runtime.toml and are read by other parsers;
+   under the old exclusion rule each parsed as a binding whose provider did not
+   exist, which is why an unresolved binding had to be dropped quietly for boot
+   to survive at all. If this test fails with a dangling-binding error, the
+   namespace has been re-opened and the check above is load-bearing for config
+   sections it was never meant to judge. *)
+let test_non_provider_namespaces_are_not_bindings () =
+  let runtime_toml =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.good]\n\
+     api-name = \"good\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.good]\n\
+     \n\
+     [voice.local_playback]\n\
+     enabled = true\n\
+     \n\
+     [fusion.presets]\n\
+     quorum = \"three\"\n\
+     \n\
+     [runtime]\n\
+     default = \"local.good\"\n"
+  in
+  with_temp_runtime_toml runtime_toml (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "non-provider namespaces must not be bindings: %s" msg
+    | Ok (runtimes, _, _, _, _) ->
+      check (list string) "only the declared provider binds a runtime"
+        [ "local.good" ]
+        (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes))
+;;
+
+(* RFC-0206 §2.1 is unchanged by the above: a binding MASC is told not to run is
+   still excluded rather than fatal. Only a dangling reference — a runtime that
+   cannot exist — is fatal, so this asserts the two classes stayed apart rather
+   than the load simply becoming stricter. *)
+let test_deliberate_disable_is_still_a_tolerated_drop () =
+  let runtime_toml =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [providers.dormant]\n\
+     enabled = false\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:2/v1\"\n\
+     \n\
+     [models.good]\n\
+     api-name = \"good\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.good]\n\
+     [local.off]\n\
+     enabled = false\n\
+     [dormant.good]\n\
+     \n\
+     [models.off]\n\
+     api-name = \"off\"\n\
+     max-context = 1024\n\
+     \n\
+     [runtime]\n\
+     default = \"local.good\"\n"
+  in
+  with_temp_runtime_toml runtime_toml (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "deliberate disables must not fail the load: %s" msg
+    | Ok (runtimes, _, _, _, _) ->
+      check (list string) "disabled binding and disabled provider are excluded"
+        [ "local.good" ]
+        (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes))
+;;
+
+(* [Provider_not_declared] is unreachable from TOML once the namespace is closed
+   — a table under an undeclared provider is no longer read as a binding at all
+   — so it is exercised at its own boundary rather than left as a variant no
+   test constructs. *)
+let test_of_binding_reports_an_undeclared_provider () =
+  let cfg =
+    { Runtime_schema.providers = []
+    ; models = []
+    ; bindings = []
+    ; default_runtime_id = None
+    ; keeper_assignments = []
+    ; media_failover = []
+    ; lane_decls = []
+    ; exact_output_lane_decls = []
+    }
+  in
+  let binding =
+    { Runtime_schema.provider_id = "absent"
+    ; model_id = "whatever"
+    ; enabled = true
+    ; is_default = false
+    ; wizard_default = false
+    ; max_concurrent = None
+    ; max_request_body_bytes = None
+    ; price_input = None
+    ; price_output = None
+    ; keep_alive = None
+    ; num_ctx = None
+  ; repeat_penalty = None
+  ; repeat_last_n = None
+    ; return_progress = None
+    }
+  in
+  match Runtime.of_binding cfg binding with
+  | Ok _ -> fail "binding with an undeclared provider must not materialize"
+  | Error (Runtime.Provider_not_declared id) ->
+    check string "reports the provider it could not find" "absent" id
+  | Error other ->
+    failf
+      "expected Provider_not_declared, got %s"
+      (Runtime.string_of_drop_reason other)
+;;
+
+let test_runtime_toml_rejects_non_boolean_enabled () =
+  let runtime_toml =
+    "[providers.local]\n\
+     enabled = \"no\"\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     enabled = 0\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string runtime_toml with
+  | Ok _ -> failf "non-boolean enabled fields should be rejected"
+  | Error errors ->
+    let rendered =
+      errors
+      |> List.map (fun (error : Runtime_toml.parse_error) ->
+        Printf.sprintf "%s: %s" error.path error.message)
+      |> String.concat "\n"
+    in
+    check bool "provider enabled path" true
+      (String_util.contains_substring rendered "providers.local.enabled");
+    check bool "binding enabled path" true
+      (String_util.contains_substring rendered "local.sample.enabled")
+;;
 
 (* One validator now decides every [runtime] field that names a routing target
    (keeper assignments, the route ids, media_failover entries), so the properties
@@ -2128,13 +2945,6 @@ let test_every_routing_field_names_itself_in_its_diagnostic () =
   in
   check bool "assignment diagnostic names the keeper's table entry" true
     (String_util.contains_substring assignment "[runtime.assignments].keeper_a = \"local.typo\"");
-  let route =
-    load_error_of_runtime_toml
-      ~what:"a route naming an unknown runtime"
-      (routing_reference_base ^ "cross_verifier = \"local.typo\"\n")
-  in
-  check bool "route diagnostic names the route field" true
-    (String_util.contains_substring route "[runtime].cross_verifier = \"local.typo\"");
   let media =
     load_error_of_runtime_toml
       ~what:"a media_failover entry naming an unknown runtime"
@@ -2147,15 +2957,6 @@ let test_every_routing_field_names_itself_in_its_diagnostic () =
 
 let test_routing_reference_domains_stay_distinct () =
   let lane = "\n[runtime.lanes.safe]\nstrategy = \"ordered\"\ncandidates = [\"local.good\"]\n" in
-  (* A route resolves lane-first, mirroring [resolve_assignment], so naming a lane
-     is valid config. *)
-  with_temp_runtime_toml
-    (routing_reference_base ^ "cross_verifier = \"safe\"\n" ^ lane)
-    (fun path ->
-      match Runtime.load_list ~config_path:path with
-      | Error msg -> failf "a route may name a lane: %s" msg
-      | Ok (_, _, _, cross_verifier, _, _) ->
-        check (option string) "route keeps the lane id" (Some "safe") cross_verifier);
   (* An assignment resolves among runtimes only. runtime.mli documents the
      assignment snapshot as ids that resolve to a configured runtime, so admitting
      a lane here would load a config the assignment consumer cannot look up. *)
@@ -2176,7 +2977,7 @@ let test_routing_reference_domains_stay_distinct () =
   check bool "media_failover refuses a lane id" true
     (String_util.contains_substring media "[runtime].media_failover entry \"safe\"")
 
-let test_strict_init_rejects_assigned_runtime_absent_from_oas_catalog () =
+let test_strict_init_rejects_assigned_runtime_absent_from_agent_core_catalog () =
   let catalog =
     "[[models]]\n\
      id_prefix = \"chat\"\n\
@@ -2193,7 +2994,7 @@ let test_strict_init_rejects_assigned_runtime_absent_from_oas_catalog () =
      max-context = 1024\n\
      \n\
      [models.missing]\n\
-     api-name = \"missing-from-oas-catalog\"\n\
+     api-name = \"missing-from-agent_core-catalog\"\n\
      max-context = 1024\n\
      \n\
      [ollama.good]\n\
@@ -2217,8 +3018,8 @@ let test_strict_init_rejects_assigned_runtime_absent_from_oas_catalog () =
          | Ok () ->
            failf "strict runtime init should reject assigned uncatalogued runtime"
          | Error msg ->
-           check bool "error mentions OAS catalog gate" true
-             (String_util.contains_substring msg "absent from the OAS capability catalog");
+           check bool "error mentions AGENT_CORE catalog gate" true
+             (String_util.contains_substring msg "absent from the AGENT_CORE capability catalog");
            check bool "error mentions assigned runtime id" true
              (String_util.contains_substring msg "ollama.missing")))
 
@@ -2264,11 +3065,11 @@ let test_runtime_capability_gate_reports_missing_catalog_models () =
             [provider_name] to add instead of the generic "openai_compat". *)
          check string "provider label" "custom" missing.provider_label;
          check string "model id" "missing-family-123" missing.model_id;
-         check bool "diagnostic names OAS catalog file" true
+         check bool "diagnostic names AGENT_CORE catalog file" true
            (String_util.contains_substring
               (Runtime.strict_init_error_to_string
                  (Runtime.Missing_catalog_models report))
-              "oas-models-overlay.toml");
+              "agent-core-models-overlay.toml");
          check bool "diagnostic reports provider label" true
            (String_util.contains_substring
               (Runtime.strict_init_error_to_string
@@ -2293,7 +3094,7 @@ let test_server_degraded_init_rejects_referenced_uncatalogued_runtimes () =
      max-context = 1024\n\
      \n\
      [models.missing]\n\
-     api-name = \"missing-from-oas-catalog\"\n\
+     api-name = \"missing-from-agent_core-catalog\"\n\
      max-context = 1024\n\
      \n\
      [ollama.good]\n\
@@ -2356,7 +3157,7 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
      max-context = 1024\n\
      \n\
      [models.missing]\n\
-     api-name = \"missing-from-oas-catalog\"\n\
+     api-name = \"missing-from-agent_core-catalog\"\n\
      \n\
      [ollama.good]\n\
      max-request-body-bytes = 65536\n\
@@ -2441,7 +3242,7 @@ let test_server_degraded_init_rejects_uncatalogued_default () =
      max-context = 1024\n\
      \n\
      [models.missing]\n\
-     api-name = \"missing-from-oas-catalog\"\n\
+     api-name = \"missing-from-agent_core-catalog\"\n\
      max-context = 1024\n\
      \n\
      [ollama.good]\n\
@@ -2504,7 +3305,6 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
         ( runtimes
         , _default
         , _assignments
-        , _cross_verifier
         , _media_failover
         , _lanes ) ->
       let expect id expected =
@@ -2522,9 +3322,9 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
             (option int)
             (Printf.sprintf "%s provider_config max_concurrent_requests" id)
             expected
-            rt.Runtime.provider_config.max_concurrent_requests;
+            (agent_core_provider_config rt).max_concurrent_requests;
           let selected_provider_config =
-            Runtime_candidate.of_provider_config rt.Runtime.provider_config
+            Runtime_candidate.of_provider_config (agent_core_provider_config rt)
             |> Runtime_candidate.provider_cfg
           in
           check
@@ -2536,9 +3336,55 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
       expect "local.no-cap" None;
       expect "local.capped" (Some 5))
 
-(* [runtime].cross_verifier resolves to a configured JSON-capable runtime,
-   defaults to None, and rejects unknown or incapable targets. *)
-let test_cross_verifier_runtime_routing () =
+(* Under the Reasoning_effort dialect the wire field comes from the declared
+   effort, not from enable_thinking, so a model row that names an effort has
+   to reach the materialized provider config. It did not: only the
+   official-client path read spec.reasoning_effort, which left an HTTP model
+   whose endpoint honours the control reasoning on every turn with no way to
+   say otherwise. *)
+let test_runtime_toml_reasoning_effort_flows_to_provider_config () =
+  with_fake_runtime_model_catalog @@ fun () ->
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.undeclared]\n\
+     api-name = \"undeclared\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.quiet]\n\
+     api-name = \"quiet\"\n\
+     max-context = 1024\n\
+     reasoning-effort = \"none\"\n\
+     \n\
+     [local.undeclared]\n\
+     \n\
+     [local.quiet]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.undeclared\"\n"
+  in
+  with_temp_runtime_toml content (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "runtime TOML should materialize: %s" msg
+    | Ok (runtimes, _default, _assignments, _media_failover, _lanes) ->
+      let effort id =
+        match
+          List.find_opt (fun (rt : Runtime.t) -> String.equal rt.id id) runtimes
+        with
+        | None -> failf "expected runtime %s" id
+        | Some rt ->
+          Option.map
+            Llm_provider.Reasoning_effort.to_string
+            (agent_core_provider_config rt).reasoning_effort
+      in
+      check (option string) "declared effort reaches the provider config"
+        (Some "none") (effort "local.quiet");
+      check (option string) "omitted effort stays absent" None
+        (effort "local.undeclared"))
+
+let test_load_allows_a_lane_that_mixes_checkpoint_owners () =
   with_fake_runtime_model_catalog @@ fun () ->
   let base =
     "[providers.local]\n\
@@ -2546,62 +3392,43 @@ let test_cross_verifier_runtime_routing () =
      protocol = \"ollama-http\"\n\
      endpoint = \"http://localhost:11434\"\n\
      \n\
+     [providers.subscription]\n\
+     display-name = \"Claude Code Subscription\"\n\
+     protocol = \"claude-code\"\n\
+     command = \"/usr/bin/true\"\n\
+     is-non-interactive = true\n\
+     \n\
      [models.chat]\n\
      api-name = \"chat\"\n\
      max-context = 1024\n\
      \n\
-     [models.libr]\n\
-     api-name = \"libr\"\n\
+     [models.other]\n\
+     api-name = \"other\"\n\
      max-context = 1024\n\
      \n\
-     [models.libr.capabilities]\n\
-     supports-response-format-json = true\n\
+     [models.sonnet]\n\
+     api-name = \"sonnet\"\n\
+     max-context = 1024\n\
      \n\
      [local.chat]\n\
      \n\
-     [local.libr]\n\
+     [local.other]\n\
+     \n\
+     [subscription.sonnet]\n\
      \n\
      [runtime]\n\
      default = \"local.chat\"\n"
   in
-  with_temp_runtime_toml (base ^ "cross_verifier = \"local.libr\"\n") (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg -> failf "cross_verifier routing should load: %s" msg
-    | Ok
-        ( _runtimes
-        , _default
-        , _assignments
-        , cross_verifier
-        , _media_failover , _lanes ) ->
-      check (option string) "cross_verifier runtime id" (Some "local.libr")
-        cross_verifier);
-  with_temp_runtime_toml base (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg -> failf "absent cross_verifier should load: %s" msg
-    | Ok
-        ( _
-        , _
-        , _
-        , cross_verifier
-        , _media_failover
-        , _lanes ) ->
-      check (option string) "cross_verifier unset is None" None cross_verifier);
-  with_temp_runtime_toml (base ^ "cross_verifier = \"local.nope\"\n") (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Ok _ -> failf "unknown [runtime].cross_verifier id must be rejected at load"
-    | Error _ -> ());
-  (* The verdict travels as a report_review_verdict tool call and no wire response
-     format is requested (anti_rationalization.ml:243-248), so the JSON-mode
-     requirement was on the wrong axis. The right one — can this model call a tool
-     — is not declarable: Runtime_schema.model_capabilities carries the shapes of
-     tool CHOICE, not tool support. A candidate that cannot serve the tool channel
-     is refused by OAS at dispatch instead, which is failover-eligible. So a model
-     declaring nothing now resolves for this route. *)
-  with_temp_runtime_toml (base ^ "cross_verifier = \"local.chat\"\n") (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg ->
-      failf "[runtime].cross_verifier must accept a capability-free model: %s" msg
-    | Ok _ -> ())
+  with_temp_runtime_toml
+    (base
+     ^ "\n\
+        [runtime.lanes.\"subscription.sonnet\"]\n\
+        strategy = \"ordered\"\n\
+        candidates = [\"subscription.sonnet\", \"local.chat\"]\n")
+    (fun path ->
+      match Runtime.load_list ~config_path:path with
+      | Ok _ -> ()
+      | Error msg -> failf "a mixed-owner failover lane must load: %s" msg)
 
 let test_structured_judge_runtime_key_is_rejected () =
   match
@@ -2616,131 +3443,6 @@ let test_structured_judge_runtime_key_is_rejected () =
             String.equal error.path "runtime.structured_judge"
             && String_util.contains_substring error.message "unknown [runtime] key")
          errors)
-
-(* The live cross_verifier route accepts a [runtime.lanes] id, following
-   [resolve_assignment]'s lane-over-runtime precedence. *)
-let judge_lane_base =
-  "[providers.local]\n\
-   display-name = \"Local\"\n\
-   protocol = \"ollama-http\"\n\
-   endpoint = \"http://localhost:11434\"\n\
-   \n\
-   [models.chat]\n\
-   api-name = \"chat\"\n\
-   max-context = 1024\n\
-   \n\
-   [models.judge]\n\
-   api-name = \"judge\"\n\
-   max-context = 1024\n\
-   \n\
-   [models.judge.capabilities]\n\
-   supports-response-format-json = true\n\
-   supports-structured-output = true\n\
-   \n\
-   [models.judge2]\n\
-   api-name = \"judge2\"\n\
-   max-context = 1024\n\
-   \n\
-   [models.judge2.capabilities]\n\
-   supports-response-format-json = true\n\
-   supports-structured-output = true\n\
-   \n\
-   [models.jsononly]\n\
-   api-name = \"jsononly\"\n\
-   max-context = 1024\n\
-   \n\
-   [models.jsononly.capabilities]\n\
-   supports-response-format-json = true\n\
-   supports-structured-output = false\n\
-   \n\
-   [local.chat]\n\
-   \n\
-   [local.judge]\n\
-   \n\
-   [local.judge2]\n\
-   \n\
-   [local.jsononly]\n\
-   \n\
-   [runtime]\n\
-   default = \"local.chat\"\n"
-
-let test_cross_verifier_lane_target () =
-  with_fake_runtime_model_catalog @@ fun () ->
-  let json_capable_lane =
-    judge_lane_base
-    ^ "cross_verifier = \"verifiers\"\n\
-       \n\
-       [runtime.lanes.verifiers]\n\
-       strategy = \"ordered\"\n\
-       candidates = [\"local.judge\", \"local.jsononly\"]\n"
-  in
-  with_temp_runtime_toml json_capable_lane (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg -> failf "lane-targeted cross_verifier should load: %s" msg
-    | Ok (_, _, _, cross_verifier, _, _) ->
-      check
-        (option string)
-        "cross_verifier keeps the lane id"
-        (Some "verifiers")
-        cross_verifier);
-  let json_incapable_lane =
-    judge_lane_base
-    ^ "cross_verifier = \"verifiers\"\n\
-       \n\
-       [runtime.lanes.verifiers]\n\
-       strategy = \"ordered\"\n\
-       candidates = [\"local.judge\", \"local.chat\"]\n"
-  in
-  (* Formerly rejected because local.chat declares no JSON mode. The route requests
-     no wire format, so the lane resolves and OAS refuses an unusable candidate at
-     dispatch instead — pre-dispatch and failover-eligible. *)
-  with_temp_runtime_toml json_incapable_lane (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg -> failf "cross_verifier lane should resolve: %s" msg
-    | Ok (_, _, _, cross_verifier, _, lanes) ->
-      check (option string) "cross_verifier keeps the lane id" (Some "verifiers")
-        cross_verifier;
-      check bool "verifiers lane is materialized" true
-        (List.exists
-           (fun lane -> String.equal (Runtime_lane.id lane) "verifiers")
-           lanes))
-
-let test_save_config_text_refreshes_cross_verifier_runtime () =
-  with_fake_runtime_model_catalog @@ fun () ->
-  let content =
-    "[providers.local]\n\
-     display-name = \"Local\"\n\
-     protocol = \"ollama-http\"\n\
-     endpoint = \"http://localhost:11434\"\n\
-     \n\
-     [models.chat]\n\
-     api-name = \"chat\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.libr]\n\
-     api-name = \"libr\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.libr.capabilities]\n\
-     supports-response-format-json = true\n\
-     \n\
-     [local.chat]\n\
-     max-request-body-bytes = 65536\n\
-     \n\
-     [local.libr]\n\
-     max-request-body-bytes = 65536\n\
-     \n\
-     [runtime]\n\
-     default = \"local.chat\"\n\
-     cross_verifier = \"local.libr\"\n"
-  in
-  with_temp_runtime_toml content (fun path ->
-    match Runtime.save_config_text ~runtime_config_path:path content with
-    | Error msg -> failf "save_config_text should validate and reload: %s" msg
-    | Ok () ->
-      check (option string) "saved cross_verifier runtime id"
-        (Some "local.libr")
-        (Runtime.cross_verifier_runtime_id ()))
 
 let test_save_config_text_commits_exact_registry_with_runtime_state () =
   with_fake_runtime_model_catalog @@ fun () ->
@@ -2820,33 +3522,38 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
       String.equal lane_id actual_lane_id
     | Error _ | Ok _ -> false
   in
+  let lane_has_no_admitted_slots ~lane_id registry =
+    match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+    | Error
+        (Runtime_exact_output_registry.No_admitted_lane_slots
+           { lane_id = actual_lane_id }) ->
+      String.equal lane_id actual_lane_id
+    | Error _ | Ok _ -> false
+  in
   let baseline = content ~default:"local.chat" "slot-a" in
   with_temp_runtime_toml baseline (fun path ->
     (match Runtime.save_config_text ~runtime_config_path:path baseline with
      | Error detail -> failf "baseline exact save failed: %s" detail
      | Ok () -> ());
     let stable_registry = registry_exn () in
-    let stable_generation =
-      Runtime_exact_output_registry.generation stable_registry
-    in
-    let stable_file = Fs_compat.load_file path in
-    let invalid = content ~default:"local.libr" "missing-slot" in
-    (match Runtime.save_config_text ~runtime_config_path:path invalid with
-     | Ok () -> fail "unknown exact target must reject raw save"
+    let degraded = content ~default:"local.libr" "missing-slot" in
+    (match Runtime.save_config_text ~runtime_config_path:path degraded with
      | Error detail ->
-       check bool "error identifies frozen catalog rejection" true
-         (String_util.contains_substring detail "frozen catalog"));
-    check string "invalid save preserves file" stable_file (Fs_compat.load_file path);
-    check string "invalid save preserves runtime cache" "local.chat"
+       failf "optional unbound exact target must not reject raw save: %s" detail
+     | Ok () -> ());
+    check string "degraded save commits file" degraded (Fs_compat.load_file path);
+    check string "degraded save commits runtime cache" "local.libr"
       (Runtime.get_default_runtime_id ());
-    let after_invalid = registry_exn () in
-    check int64 "invalid save preserves registry generation" stable_generation
-      (Runtime_exact_output_registry.generation after_invalid);
-    check (list string) "invalid save preserves registry slots" [ "slot-a" ]
-      (slots_exn ~lane_id:"compaction_exact" after_invalid);
-check bool "invalid save does not synthesize HITL lane" true
-  (lane_is_unconfigured ~lane_id:"hitl_auto_judge" after_invalid);
-    let replacement = content ~default:"local.libr" "slot-b" in
+    let after_degraded = registry_exn () in
+    check bool "degraded save republishes the registry" true
+      (not (after_degraded == stable_registry));
+    check bool "degraded save leaves optional lane without admitted slots" true
+      (lane_has_no_admitted_slots
+         ~lane_id:"compaction_exact"
+         after_degraded);
+    check bool "degraded save does not synthesize HITL lane" true
+      (lane_is_unconfigured ~lane_id:"hitl_auto_judge" after_degraded);
+    let replacement = content ~default:"local.chat" "slot-b" in
     let failed_path = path ^ ".directory" in
     Unix.mkdir failed_path 0o755;
     Fun.protect
@@ -2857,77 +3564,68 @@ check bool "invalid save does not synthesize HITL lane" true
           | Error detail ->
             check bool "write failure is surfaced" true
               (String_util.contains_substring detail "save_file_atomic"));
-         check string "write failure preserves runtime cache" "local.chat"
+         check string "write failure preserves runtime cache" "local.libr"
            (Runtime.get_default_runtime_id ());
          let after_write_failure = registry_exn () in
-         check int64 "write failure preserves registry generation" stable_generation
-           (Runtime_exact_output_registry.generation after_write_failure);
-         check (list string) "write failure preserves registry slots" [ "slot-a" ]
-           (slots_exn ~lane_id:"compaction_exact" after_write_failure);
-check bool "write failure does not synthesize HITL lane" true
-  (lane_is_unconfigured ~lane_id:"hitl_auto_judge" after_write_failure));
+         check bool "write failure preserves the published registry" true
+           (after_write_failure == after_degraded);
+         check bool "write failure preserves no-admitted lane" true
+           (lane_has_no_admitted_slots
+              ~lane_id:"compaction_exact"
+              after_write_failure);
+         check bool "write failure does not synthesize HITL lane" true
+           (lane_is_unconfigured
+              ~lane_id:"hitl_auto_judge"
+              after_write_failure));
     (match Runtime.save_config_text ~runtime_config_path:path replacement with
      | Error detail -> failf "valid exact replacement failed: %s" detail
      | Ok () -> ());
     check string "valid save commits file" replacement (Fs_compat.load_file path);
-    check string "valid save commits runtime cache" "local.libr"
+    check string "valid save commits runtime cache" "local.chat"
       (Runtime.get_default_runtime_id ());
     let replaced = registry_exn () in
-    check bool "valid save advances registry generation" true
-      (Int64.compare
-         (Runtime_exact_output_registry.generation replaced)
-         stable_generation
-       > 0);
+    check bool "valid save republishes the registry" true
+      (not (replaced == after_degraded));
     check (list string) "valid save commits registry slots" [ "slot-b" ]
       (slots_exn ~lane_id:"compaction_exact" replaced);
-check bool "valid save does not synthesize HITL lane" true
-  (lane_is_unconfigured ~lane_id:"hitl_auto_judge" replaced))
+    check bool "valid save does not synthesize HITL lane" true
+      (lane_is_unconfigured ~lane_id:"hitl_auto_judge" replaced))
 
-let test_deprecated_capability_notice_warns_once_per_process () =
-  (* runtime.toml is re-parsed on every keeper boot; a per-parse deprecation
-     warning flooded the WARN log (~315/day, 25% of live WARN volume). The
-     notice must fire once per process per capability key, not once per parse.
-     [dedupcheck] is a unique provider id so the process-level dedup table is
-     not pre-populated by another test. The deprecated key sits under
-     [providers.<id>.capabilities] because that is where parse_capabilities (the
-     emitter) runs. *)
+let test_unknown_capability_key_rejected_at_load () =
   let content =
-    "[providers.dedupcheck]\n\
+    "[providers.capcheck]\n\
      protocol = \"openai-compatible-http\"\n\
      endpoint = \"http://127.0.0.1:1/v1\"\n\
      \n\
-     [providers.dedupcheck.capabilities]\n\
-     supports-runtime-mcp-tools = true\n\
+     [providers.capcheck.capabilities]\n\
+     supports-teleport = true\n\
      \n\
      [models.sample]\n\
      api-name = \"sample\"\n\
      max-context = 1024\n\
      \n\
-     [dedupcheck.sample]\n\
+     [capcheck.sample]\n\
      \n\
      [runtime]\n\
-     default = \"dedupcheck.sample\"\n"
+     default = \"capcheck.sample\"\n"
   in
-  let warns = ref [] in
-  Console_sink.For_testing.reset ();
-  Console_sink.For_testing.set_writer (Some (fun l -> warns := l :: !warns));
-  Fun.protect ~finally:Console_sink.For_testing.reset (fun () ->
-    (* Parse twice; the deprecated key is present both times. *)
-    ignore (Runtime_toml.parse_string content);
-    ignore (Runtime_toml.parse_string content));
-  let dep_warns =
-    List.filter
-      (fun l ->
-        String_util.contains_substring l "dedupcheck"
-        && String_util.contains_substring l "is deprecated")
-      !warns
-  in
-  check int "deprecation notice fires once per process across two parses" 1
-    (List.length dep_warns)
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "an unknown capabilities key must be rejected at load"
+  | Error errors ->
+    check
+      bool
+      "the rejection names the offending key path"
+      true
+      (List.exists
+         (fun (e : Runtime_toml.parse_error) ->
+            String.equal
+              e.path
+              "providers.capcheck.capabilities.supports-teleport")
+         errors)
 
 (* PR-6 (bugs #14/#15/#36): [model.max-context] is now optional — a runtime
    can resolve its effective context window from the runtime.toml override,
-   the OAS capability catalog, or the override clamped by the catalog cap.
+   the AGENT_CORE capability catalog, or the override clamped by the catalog cap.
    The four cases below cover [Runtime.resolve_max_context_of_runtime]'s
    full match; the fifth covers the assignment-document default-rider join
    (bug #14) that [Server_dashboard_runtime_resolved_json.assignment_json]
@@ -3071,7 +3769,7 @@ let test_runtime_max_context_override_above_cap_is_clamped () =
            | Error error ->
              failf
                "direct runtime execution should resolve: %s"
-               (Agent_sdk.Error.to_string error)
+               (Agent_core.Error.to_string error)
            | Ok execution ->
              check int
                "direct first attempt receives the provider-effective budget"
@@ -3085,6 +3783,90 @@ let test_runtime_max_context_override_above_cap_is_clamped () =
                "direct execution retains the requested override for diagnostics"
                (Some 128000)
                execution.max_context_resolution.requested_override))
+
+(* #28765: the observed incident shape — a 1,048,576-window lane entry
+   point whose sticky-reordered sibling has a 203,000 window. The turn
+   budget must be the smallest candidate window, because the prompt is
+   shaped once and any candidate can serve it. *)
+let test_lane_budget_is_bound_by_smallest_candidate_window () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"lane-big\"\n\
+     provider_name = \"ollama_cloud\"\n\
+     base = \"ollama_cloud\"\n\
+     max_context_tokens = 1048576\n\
+     \n\
+     [[models]]\n\
+     id_prefix = \"lane-small\"\n\
+     provider_name = \"ollama_cloud\"\n\
+     base = \"ollama_cloud\"\n\
+     max_context_tokens = 203000\n"
+  in
+  let runtime_toml =
+    "[providers.ollama_cloud]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"https://ollama.com/v1\"\n\
+     \n\
+     [models.bigwin]\n\
+     api-name = \"lane-big\"\n\
+     max-context = 1048576\n\
+     \n\
+     [models.smallwin]\n\
+     api-name = \"lane-small\"\n\
+     max-context = 203000\n\
+     \n\
+     [ollama_cloud.bigwin]\n\
+     [ollama_cloud.smallwin]\n\
+     \n\
+     [runtime.lanes.\"ollama_cloud.bigwin\"]\n\
+     strategy = \"ordered\"\n\
+     candidates = [\"ollama_cloud.bigwin\", \"ollama_cloud.smallwin\"]\n\
+     \n\
+     [runtime]\n\
+     default = \"ollama_cloud.bigwin\"\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content catalog @@ fun () ->
+       with_temp_runtime_toml runtime_toml (fun path ->
+         match Runtime.init_default ~config_path:path with
+         | Error msg -> failf "lane fixture should load: %s" msg
+         | Ok () ->
+           let meta =
+             match
+               Masc_test_deps.meta_of_json_fixture
+                 (`Assoc
+                    [ "name", `String "lane-min-budget"
+                    ; "trace_id", `String "test-lane-min-budget"
+                    ])
+             with
+             | Ok meta -> meta
+             | Error detail -> failf "lane meta fixture failed: %s" detail
+           in
+           match
+             Keeper_unified_turn_pre_dispatch.build_runtime_execution
+               ~meta
+               ~runtime_id:"ollama_cloud.bigwin"
+           with
+           | Error error ->
+             failf
+               "lane execution should resolve: %s"
+               (Agent_core.Error.to_string error)
+           | Ok execution ->
+             check int
+               "turn budget is the smallest lane candidate window"
+               203000
+               execution.max_context;
+             check int
+               "stored resolution is the binding candidate's"
+               203000
+               execution.max_context_resolution.effective_budget;
+             check string
+               "execution keeps the entry-point runtime id"
+               "ollama_cloud.bigwin"
+               execution.runtime_id))
 
 let test_runtime_max_context_missing_both_sources_rejected_at_load () =
   let runtime_toml =
@@ -3150,32 +3932,240 @@ let test_runtime_assignment_default_rider_resolves_to_default_runtime () =
              "local.good"
              (Runtime.get_default_runtime_id ())))
 
+let codex_app_server_runtime_toml ?credential ?(options = "") () =
+  let credential = Option.value credential ~default:"" in
+  Printf.sprintf
+    "[providers.codex]\n\
+     protocol = \"codex-app-server\"\n\
+     command = \"codex\"\n\
+     is-non-interactive = true\n\
+     %s\n\
+     %s\n\
+     [models.codex]\n\
+     api-name = \"gpt-5.6-sol\"\n\
+     max-context = 400000\n\
+     \n\
+     [codex.codex]\n\
+     \n\
+     [runtime]\n\
+     default = \"codex.codex\"\n"
+    options
+    credential
+;;
+
+let test_codex_app_server_materializes_as_turn_runtime () =
+  with_temp_runtime_toml (codex_app_server_runtime_toml ()) (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error error -> failf "codex-app-server runtime should load: %s" error
+    | Ok (runtimes, default, _, _, _) ->
+      check int "one runtime" 1 (List.length runtimes);
+      check string "default id" "codex.codex" default.id;
+      (match default.execution with
+       | Runtime_execution.Agent_core _
+       | Runtime_execution.Claude_code _ ->
+         fail "codex-app-server was incorrectly materialized as agent_core"
+       | Runtime_execution.Codex_app_server config ->
+         check string "cli path" "codex" config.cli_path;
+         check (option string) "model" (Some "gpt-5.6-sol") config.model
+       | Runtime_execution.Antigravity_cli _ ->
+         fail "codex-app-server was incorrectly materialized as antigravity-cli"))
+;;
+
+let antigravity_cli_runtime_toml ?credential ?(options = "") () =
+  let credential = Option.value credential ~default:"" in
+  Printf.sprintf
+    "[providers.antigravity]\n\
+     protocol = \"antigravity-cli\"\n\
+     command = \"agy\"\n\
+     is-non-interactive = true\n\
+     %s\n\
+     %s\n\
+     [models.gemini]\n\
+     api-name = \"gemini-3.6-flash-high\"\n\
+     max-context = 128000\n\
+     \n\
+     [antigravity.gemini]\n\
+     \n\
+     [runtime]\n\
+     default = \"antigravity.gemini\"\n"
+    options
+    credential
+;;
+
+let antigravity_file_credential =
+  "[providers.antigravity.credentials]\n\
+   type = \"file\"\n\
+   path = \"/tmp/antigravity-oauth-token\""
+;;
+
+let test_antigravity_cli_materializes_typed_process_options () =
+  let options =
+    "agent = \"fixture-agent\"\n\
+     effort = \"high\"\n\
+     timeout-s = 45.0"
+  in
+  with_temp_runtime_toml
+    (antigravity_cli_runtime_toml
+       ~credential:antigravity_file_credential
+       ~options
+       ())
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Error error -> failf "antigravity-cli runtime should load: %s" error
+       | Ok (runtimes, default, _, _, _) ->
+         check int "one runtime" 1 (List.length runtimes);
+         check string "default id" "antigravity.gemini" default.id;
+         (match default.execution with
+          | Runtime_execution.Antigravity_cli config ->
+            check string "cli path" "agy" config.cli_path;
+            check string "model" "gemini-3.6-flash-high" config.model;
+            check (option string) "agent" (Some "fixture-agent") config.agent;
+            check bool
+              "effort"
+              true
+              (config.effort = Some Runtime_antigravity.High);
+            check string
+              "OAuth source"
+              "/tmp/antigravity-oauth-token"
+              config.oauth_source;
+            check (float 0.0) "timeout" 45.0 config.timeout_s
+          | Runtime_execution.Agent_core _
+          | Runtime_execution.Codex_app_server _
+          | Runtime_execution.Claude_code _ ->
+            fail "antigravity-cli was materialized through the wrong execution owner"))
+;;
+
+let test_antigravity_cli_requires_explicit_timeout () =
+  with_temp_runtime_toml
+    (antigravity_cli_runtime_toml
+       ~credential:antigravity_file_credential
+       ())
+    (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Ok _ -> fail "antigravity-cli silently defaulted timeout-s"
+    | Error error ->
+      check bool "diagnostic names required timeout" true
+        (String_util.contains_substring error "timeout-s is required"))
+;;
+
+let test_antigravity_cli_requires_file_credentials () =
+  let expect_rejected name ?credential () =
+    with_temp_runtime_toml
+      (antigravity_cli_runtime_toml
+         ?credential
+         ~options:"timeout-s = 45.0"
+         ())
+      (fun path ->
+         match Runtime.load_list ~config_path:path with
+         | Ok _ -> failf "antigravity-cli admitted %s credentials" name
+         | Error error ->
+           check bool (name ^ " diagnostic") true
+             (String_util.contains_substring error "file credential"))
+  in
+  let env_credential =
+    "[providers.antigravity.credentials]\n\
+     type = \"env\"\n\
+     key = \"GEMINI_API_KEY\""
+  in
+  let inline_credential =
+    "[providers.antigravity.credentials]\n\
+     type = \"inline\"\n\
+     value = \"secret\""
+  in
+  expect_rejected "missing" ();
+  expect_rejected "environment" ~credential:env_credential ();
+  expect_rejected "inline" ~credential:inline_credential ()
+;;
+
+let test_antigravity_options_are_protocol_scoped () =
+  with_temp_runtime_toml
+    (codex_app_server_runtime_toml
+       ~options:"agent = \"fixture-agent\""
+       ())
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Ok _ -> fail "codex-app-server silently admitted an Antigravity option"
+       | Error error ->
+         check bool "diagnostic names scoped option" true
+           (String_util.contains_substring
+              error
+              "agent is valid only for protocol antigravity-cli"))
+;;
+
+let test_antigravity_authority_fields_are_rejected () =
+  with_temp_runtime_toml
+    (antigravity_cli_runtime_toml
+       ~credential:antigravity_file_credential
+       ~options:"sandbox = false\ntimeout-s = 45.0"
+       ())
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Ok _ -> fail "antigravity-cli admitted an operator authority override"
+       | Error error ->
+         check bool "diagnostic names unsupported field" true
+           (String_util.contains_substring
+              error
+              "unsupported antigravity-cli provider field"))
+;;
+
+let test_codex_app_server_rejects_declared_credentials () =
+  let credential =
+    "[providers.codex.credentials]\n\
+     type = \"env\"\n\
+     key = \"OPENAI_API_KEY\""
+  in
+  with_temp_runtime_toml
+    (codex_app_server_runtime_toml ~credential ())
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Ok _ -> fail "codex-app-server incorrectly admitted declared credentials"
+       | Error error ->
+         check bool "diagnostic names official subscription ownership" true
+           (String_util.contains_substring
+              error
+              "official Codex client owns subscription login"))
+;;
+
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
         [ test_case "runtime.json is not a repo config source" `Quick
             test_runtime_json_not_in_repo_config;
-          test_case "deployment OAS catalog covers live RunPod MTP runtime" `Quick
-            test_deployment_oas_model_catalog_covers_live_runpod_mtp;
+          test_case "codex app-server is a distinct turn runtime" `Quick
+            test_codex_app_server_materializes_as_turn_runtime;
+          test_case "codex app-server rejects declared credentials" `Quick
+            test_codex_app_server_rejects_declared_credentials;
+          test_case "antigravity CLI options materialize" `Quick
+            test_antigravity_cli_materializes_typed_process_options;
+          test_case "antigravity CLI requires explicit timeout" `Quick
+            test_antigravity_cli_requires_explicit_timeout;
+          test_case "antigravity CLI requires file credentials" `Quick
+            test_antigravity_cli_requires_file_credentials;
+          test_case "antigravity options are protocol-scoped" `Quick
+            test_antigravity_options_are_protocol_scoped;
+          test_case "antigravity authority fields are rejected" `Quick
+            test_antigravity_authority_fields_are_rejected;
+          test_case "deployment AGENT_CORE catalog covers live RunPod MTP runtime" `Quick
+            test_deployment_agent_core_model_catalog_covers_live_runpod_mtp;
           test_case
-            "deployment OAS catalog covers GLM typed streaming reasoning"
+            "deployment AGENT_CORE catalog covers GLM typed streaming reasoning"
             `Quick
-            test_deployment_oas_model_catalog_covers_glm_streaming_reasoning;
+            test_deployment_agent_core_model_catalog_covers_glm_streaming_reasoning;
           test_case
-            "deployment OAS catalog covers live RunPod RTX A6000 Gemma runtime"
-            `Quick test_deployment_oas_model_catalog_covers_live_runpod_rtxa6000_gemma;
+            "deployment AGENT_CORE catalog covers live RunPod RTX A6000 Gemma runtime"
+            `Quick test_deployment_agent_core_model_catalog_covers_live_runpod_rtxa6000_gemma;
           test_case
-            "deployment OAS catalog covers local Gemma4 E2B QAT runtime"
-            `Quick test_deployment_oas_model_catalog_covers_local_gemma4_e2b_qat;
+            "deployment AGENT_CORE catalog covers local Gemma4 E2B QAT runtime"
+            `Quick test_deployment_agent_core_model_catalog_covers_local_gemma4_e2b_qat;
           test_case
-            "deployment OAS catalog preserves typed thinking/replay axes"
-            `Quick test_deployment_oas_model_catalog_preserve_axes_resolve;
+            "deployment AGENT_CORE catalog preserves typed thinking/replay axes"
+            `Quick test_deployment_agent_core_model_catalog_preserve_axes_resolve;
           test_case
-            "repo runtime bindings resolve through OAS provider configs"
-            `Quick test_repo_runtime_bindings_resolve_through_oas_provider_config;
+            "repo runtime bindings resolve through AGENT_CORE provider configs"
+            `Quick test_repo_runtime_bindings_resolve_through_agent_core_provider_config;
           test_case
-            "deployment OAS catalog modality priority strings resolve"
-            `Quick test_deployment_oas_model_catalog_modality_priorities_resolve;
+            "deployment AGENT_CORE catalog modality priority strings resolve"
+            `Quick test_deployment_agent_core_model_catalog_modality_priorities_resolve;
           test_case "exact-output lane config is ordered and rejects duplicates" `Quick
             test_exact_output_lane_config_is_ordered_and_rejects_duplicates;
           test_case "exact-output lane rejects unknown keys" `Quick
@@ -3184,28 +4174,20 @@ let () =
             test_retired_native_streaming_capability_is_rejected;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
+          test_case "kimi-for-coding declares the reasoning it returns" `Quick
+            test_kimi_for_coding_declares_the_reasoning_it_returns;
+          test_case "repo-runtime-toml-declares-no-clamped-max-context" `Quick
+            test_repo_runtime_toml_declares_no_clamped_max_context;
           test_case
             "deployment exact-output catalog admits repo seed lanes"
             `Quick
             test_deployment_exact_output_catalog_admits_seed_lanes;
           test_case
-            "[runtime].cross_verifier resolves, defaults to None, rejects unknown"
-            `Quick test_cross_verifier_runtime_routing;
-          test_case
             "retired [runtime].structured_judge key is rejected"
             `Quick test_structured_judge_runtime_key_is_rejected;
           test_case
-            "[runtime].cross_verifier accepts JSON-capable lanes"
-            `Quick test_cross_verifier_lane_target;
-          test_case
-            "save_config_text validates and refreshes cross_verifier runtime"
-            `Quick test_save_config_text_refreshes_cross_verifier_runtime;
-          test_case
             "save_config_text commits exact registry with runtime state"
             `Quick test_save_config_text_commits_exact_registry_with_runtime_state;
-          test_case
-            "lifecycle TOML keys resolve through the declarative catalog"
-            `Quick test_toml_catalog_resolves_lifecycle_keys;
           test_case
             "web_search TOML keys resolve through the declarative catalog"
             `Quick test_toml_catalog_resolves_web_search_keys;
@@ -3220,7 +4202,7 @@ let () =
           test_case "runtime table preserves empty media_failover" `Quick
             test_runtime_toml_preserves_explicit_empty_media_failover;
           test_case
-            "runtime capability gate uses provider-qualified OAS catalog rows"
+            "runtime capability gate uses provider-qualified AGENT_CORE catalog rows"
             `Quick test_runtime_capability_gate_uses_provider_qualified_catalog;
           test_case "runtime locality uses provider schema" `Quick
             test_runtime_locality_uses_provider_schema;
@@ -3236,9 +4218,22 @@ let () =
           test_case
             "server degraded init rejects uncatalogued default"
             `Quick test_server_degraded_init_rejects_uncatalogued_default;
-          test_case
-            "runtime assignment rejects commented disabled binding"
-            `Quick test_runtime_assignment_rejects_commented_disabled_binding;
+          test_case "runtime enabled defaults true" `Quick
+            test_runtime_toml_enabled_defaults_true;
+          test_case "disabled provider excludes all of its bindings" `Quick
+            test_runtime_provider_disable_excludes_its_bindings;
+          test_case "disabled binding is excluded and rejected when referenced" `Quick
+            test_runtime_binding_disable_excludes_only_that_binding;
+          test_case "unreferenced binding naming an undeclared model fails the load"
+            `Quick test_binding_naming_an_undeclared_model_fails_the_load;
+          test_case "non-provider top-level namespaces are not bindings" `Quick
+            test_non_provider_namespaces_are_not_bindings;
+          test_case "deliberate disables stay tolerated drops" `Quick
+            test_deliberate_disable_is_still_a_tolerated_drop;
+          test_case "of_binding reports an undeclared provider" `Quick
+            test_of_binding_reports_an_undeclared_provider;
+          test_case "runtime enabled fields require booleans" `Quick
+            test_runtime_toml_rejects_non_boolean_enabled;
           test_case
             "every routing field names itself in its diagnostic"
             `Quick test_every_routing_field_names_itself_in_its_diagnostic;
@@ -3246,8 +4241,8 @@ let () =
             "routing reference domains stay distinct"
             `Quick test_routing_reference_domains_stay_distinct;
           test_case
-            "strict init rejects assigned runtime absent from OAS catalog"
-            `Quick test_strict_init_rejects_assigned_runtime_absent_from_oas_catalog;
+            "strict init rejects assigned runtime absent from AGENT_CORE catalog"
+            `Quick test_strict_init_rejects_assigned_runtime_absent_from_agent_core_catalog;
           test_case "atomic runtime getters are consistent after init" `Quick
             test_runtime_atomic_getters_are_consistent_after_init;
           test_case "max-concurrent is optional opt-in" `Quick
@@ -3258,10 +4253,22 @@ let () =
             test_runtime_toml_rejects_non_positive_max_concurrent;
           test_case "max-concurrent flows from binding to provider config" `Quick
             test_runtime_toml_max_concurrent_flows_to_provider_config;
+          test_case "reasoning-effort flows from model row to provider config" `Quick
+            test_runtime_toml_reasoning_effort_flows_to_provider_config;
           test_case "max-request-body-bytes is optional opt-in" `Quick
             test_runtime_toml_parses_optional_max_request_body_bytes;
+          test_case "return-progress is optional opt-in" `Quick
+            test_runtime_toml_parses_optional_return_progress;
           test_case "omitted max-request-body-bytes stays None" `Quick
             test_runtime_toml_omitted_max_request_body_bytes_is_none;
+          test_case "repetition samplers are optional opt-in" `Quick
+            test_runtime_toml_parses_repetition_samplers;
+          test_case "omitted repetition samplers stay None" `Quick
+            test_runtime_toml_omitted_repetition_samplers_stay_none;
+          test_case "non-positive repeat-penalty is rejected" `Quick
+            test_runtime_toml_rejects_non_positive_repeat_penalty;
+          test_case "repeat-last-n below -1 is rejected" `Quick
+            test_runtime_toml_rejects_repeat_last_n_below_minus_one;
           test_case
             "keeper dispatch graph enumeration"
             `Quick test_keeper_dispatch_runtime_graph_enumeration;
@@ -3269,18 +4276,24 @@ let () =
             "runtime config rejects uncapped keeper candidate"
             `Quick test_runtime_config_validation_rejects_uncapped_keeper_candidate;
           test_case
-            "runtime config rejects an uncapped cross-verifier runtime"
+            "runtime config admits an undeclared official-client seed"
             `Quick
-            test_runtime_config_validation_rejects_uncapped_special_runtime;
+            test_runtime_config_validation_admits_undeclared_official_client_seed;
           test_case
             "runtime config allows uncapped dormant lane candidate"
             `Quick
             test_runtime_config_validation_allows_uncapped_dormant_lane_candidate;
+          test_case
+            "declared uncapped runtime reports its dispatch blocker"
+            `Quick test_declared_uncapped_runtime_reports_its_dispatch_blocker;
+          test_case
+            "official-client runtime is dispatchable without a body cap"
+            `Quick test_official_client_runtime_is_dispatchable_without_a_body_cap;
           test_case "non-positive max-request-body-bytes is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_request_body_bytes;
           test_case
-            "deprecated capability notice warns once per process, not per parse"
-            `Quick test_deprecated_capability_notice_warns_once_per_process;
+            "unknown capabilities key is rejected at load"
+            `Quick test_unknown_capability_key_rejected_at_load;
           test_case
             "max-context: capability-only source uses the catalog cap"
             `Quick test_runtime_max_context_capability_only_uses_catalog_cap;
@@ -3290,6 +4303,9 @@ let () =
           test_case
             "max-context: override above the catalog cap is clamped"
             `Quick test_runtime_max_context_override_above_cap_is_clamped;
+          test_case
+            "max-context: lane budget is bound by the smallest candidate window"
+            `Quick test_lane_budget_is_bound_by_smallest_candidate_window;
           test_case
             "max-context: missing both sources is rejected at load"
             `Quick test_runtime_max_context_missing_both_sources_rejected_at_load;
@@ -3305,5 +4321,26 @@ let () =
           test_case
             "release-evidence smoke lanes resolve with no credential present"
             `Quick test_release_evidence_fixture_lanes_resolve_without_credentials
+        ; test_case
+            "reasoning-effort parses into the typed variant"
+            `Quick test_model_reasoning_effort_parses_into_the_typed_variant
+        ; test_case
+            "reasoning-effort rejects an unknown value at load"
+            `Quick test_model_reasoning_effort_rejects_unknown_value_at_load
+        ; test_case
+            "a model without reasoning-effort leaves it unset"
+            `Quick test_model_without_reasoning_effort_leaves_it_unset
+        ; test_case
+            "turn-timeout-s parses as a positive float"
+            `Quick test_model_turn_timeout_parses_as_a_positive_float
+        ; test_case
+            "turn-timeout-s admits zero and rejects negative"
+            `Quick test_model_turn_timeout_admits_zero_and_rejects_negative
+        ; test_case
+            "a model without turn-timeout-s leaves it unset"
+            `Quick test_model_without_turn_timeout_leaves_it_unset
+        ; test_case
+            "load allows a lane that mixes checkpoint owners"
+            `Quick test_load_allows_a_lane_that_mixes_checkpoint_owners
         ] )
     ]

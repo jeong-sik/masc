@@ -1,0 +1,22 @@
+{
+  "captured_at": "2026-08-19T04:28:00Z",
+  "purpose": "Parallel/Batch Tool 행 live 축 근거",
+  "source": "<base-path>/.masc/tool_calls/2026-08/19.jsonl (라이브 dated store, 271 rows @ 캡처 시점)",
+  "distribution": {
+    "execution_mode": { "serial": 153, "concurrent": 118 },
+    "batch_size": { "1": 219, "2": 38, "3": 6, "4": 8 },
+    "batched_rows_size_gt_1": 52
+  },
+  "latest_batched_sample": {
+    "ts_iso": "2026-08-19T04:10:06Z",
+    "keeper": "rondo",
+    "tool": "masc_goal_list",
+    "execution_mode": "concurrent",
+    "batch_index": 0,
+    "batch_size": 2,
+    "planned_index": 1,
+    "duration_ms": 2.45,
+    "success": true
+  },
+  "verdict": "keeper 런타임이 실제 turn에서 도구를 concurrent 배치(batch_size 2~4)로 실행하고 per-call 배치 좌표(batch_index/planned_index)를 기록 — live 축 충족. scenario 축은 별도(전용 시나리오 정의 필요)."
+}

@@ -27,6 +27,13 @@ val bundle_freshness : unit -> bundle_freshness
     server startup. *)
 val log_bundle_freshness_warning : unit -> unit
 
+(** Health projection of the dashboard surface for [/health]. [status] is
+    ["ok"], ["stale"] (bundle predates the running binary), or ["missing"]
+    (no build-stamp, unreadable stamp, or a stamp without [index.html]).
+    Carries [assets_root], [index_present], [next_action], and RFC3339
+    freshness timestamps when known. *)
+val surface_status_json : unit -> Yojson.Safe.t
+
 (** Generate the dashboard HTML page *)
 val html : unit -> string
 

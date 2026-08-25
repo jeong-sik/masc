@@ -16,6 +16,173 @@ let activity_result_json ~ok ~message =
   `Assoc [ ("ok", `Bool ok); ("message", `String message) ]
 ;;
 
+type keeper_cadence_wakeup_summary =
+  { requested : int
+  ; signaled : int
+  ; deferred_missing : int
+  ; deferred_replaced : int
+  ; deferred_in_flight : int
+  ; deferred_awake : int
+  ; deferred_inactive : int
+  ; deferred_lifecycle : int
+  ; deferred_lifecycle_reserved : int
+  }
+
+let empty_keeper_cadence_wakeup_summary =
+  { requested = 0
+  ; signaled = 0
+  ; deferred_missing = 0
+  ; deferred_replaced = 0
+  ; deferred_in_flight = 0
+  ; deferred_awake = 0
+  ; deferred_inactive = 0
+  ; deferred_lifecycle = 0
+  ; deferred_lifecycle_reserved = 0
+  }
+;;
+
+let keeper_cadence_effect_mu = Eio.Mutex.create ()
+
+let is_keeper_cadence_param param_key =
+  String.equal
+    param_key
+    (Runtime_params.key Runtime_settings.keeper_keepalive_interval_sec)
+;;
+
+let wake_keepers_after_runtime_param_change
+      ~base_path
+      ~param_key
+      ~previous_interval_s
+      ~new_interval_s
+  =
+  if
+    not (is_keeper_cadence_param param_key)
+  then None
+  else
+    let change, wake_required =
+      if new_interval_s < previous_interval_s
+      then "shortened", true
+      else if new_interval_s > previous_interval_s
+      then "lengthened", false
+      else "unchanged", false
+    in
+    let entries =
+      if wake_required then Keeper_registry.all ~base_path () else []
+    in
+    let summary =
+      List.fold_left
+        (fun summary (entry : Keeper_registry.registry_entry) ->
+           let summary = { summary with requested = summary.requested + 1 } in
+           match Keeper_registry.wakeup_cadence_sleeper_exact entry with
+           | Keeper_registry.Cadence_sleeper_signaled ->
+             { summary with signaled = summary.signaled + 1 }
+           | Keeper_registry.Cadence_sleeper_missing ->
+             { summary with deferred_missing = summary.deferred_missing + 1 }
+           | Keeper_registry.Cadence_sleeper_replaced ->
+             { summary with deferred_replaced = summary.deferred_replaced + 1 }
+           | Keeper_registry.Cadence_sleeper_in_flight ->
+             { summary with
+               deferred_in_flight = summary.deferred_in_flight + 1
+             }
+           | Keeper_registry.Cadence_sleeper_awake ->
+             { summary with deferred_awake = summary.deferred_awake + 1 }
+           | Keeper_registry.Cadence_sleeper_inactive _ ->
+             { summary with deferred_inactive = summary.deferred_inactive + 1 }
+           | Keeper_registry.Cadence_sleeper_lifecycle_denied _ ->
+             { summary with
+               deferred_lifecycle = summary.deferred_lifecycle + 1
+             }
+           | Keeper_registry.Cadence_sleeper_lifecycle_reserved _ ->
+             { summary with
+               deferred_lifecycle_reserved =
+                 summary.deferred_lifecycle_reserved + 1
+             })
+        empty_keeper_cadence_wakeup_summary
+        entries
+    in
+    let deferred = summary.requested - summary.signaled in
+    if deferred > 0
+    then
+      Log.Keeper.warn
+        "keeper cadence shortened: signaled=%d requested=%d deferred_missing=%d \
+         deferred_replaced=%d deferred_in_flight=%d deferred_awake=%d \
+         deferred_inactive=%d \
+         deferred_lifecycle=%d deferred_lifecycle_reserved=%d"
+        summary.signaled
+        summary.requested
+        summary.deferred_missing
+        summary.deferred_replaced
+        summary.deferred_in_flight
+        summary.deferred_awake
+        summary.deferred_inactive
+        summary.deferred_lifecycle
+        summary.deferred_lifecycle_reserved;
+    Some
+      (`Assoc
+         [ "change", `String change
+         ; "previous_interval_s", `Int previous_interval_s
+         ; "new_interval_s", `Int new_interval_s
+         ; "wake_required", `Bool wake_required
+         ; "requested", `Int summary.requested
+         ; "signaled", `Int summary.signaled
+         ; "deferred_missing", `Int summary.deferred_missing
+         ; "deferred_replaced", `Int summary.deferred_replaced
+         ; "deferred_in_flight", `Int summary.deferred_in_flight
+         ; "deferred_awake", `Int summary.deferred_awake
+         ; "deferred_inactive", `Int summary.deferred_inactive
+         ; "deferred_lifecycle", `Int summary.deferred_lifecycle
+         ; ( "deferred_lifecycle_reserved"
+           , `Int summary.deferred_lifecycle_reserved )
+         ; "fully_signaled", `Bool (deferred = 0)
+         ])
+;;
+
+let runtime_param_effect_fields
+      ~base_path
+      ~param_key
+      (change : Runtime_params.json_change)
+  =
+  if
+    not (is_keeper_cadence_param param_key)
+  then []
+  else
+    match change.old_value, change.new_value with
+    | `Int previous_interval_s, `Int new_interval_s ->
+      (match
+         wake_keepers_after_runtime_param_change
+           ~base_path
+           ~param_key
+           ~previous_interval_s
+           ~new_interval_s
+       with
+       | None -> []
+       | Some summary -> [ "keeper_cadence_wakeup", summary ])
+    | old_value, new_value ->
+      Log.Keeper.error
+        "keeper cadence mutation returned non-integer snapshots old=%s new=%s"
+        (Yojson.Safe.to_string old_value)
+        (Yojson.Safe.to_string new_value);
+      []
+;;
+
+let mutate_runtime_param_with_effects ~base_path ~param_key mutate =
+  let mutate_and_apply_effects () =
+    match mutate () with
+    | Error _ as error -> error
+    | Ok change ->
+      Ok
+        ( change
+        , runtime_param_effect_fields ~base_path ~param_key change )
+  in
+  if is_keeper_cadence_param param_key
+  then
+    Eio.Mutex.use_rw
+      ~protect:true
+      keeper_cadence_effect_mu
+      mutate_and_apply_effects
+  else mutate_and_apply_effects ()
+;;
+
 let respond_board_reaction_result request reqd = function
   | Ok json -> respond_json_value_with_cors request reqd json
   | Error error ->
@@ -25,19 +192,6 @@ let respond_board_reaction_result request reqd = function
       reqd
       (Server_board_reaction_http.error_json error)
 ;;
-
-let include_moderation_projection ~base_path request =
-  match auth_token_from_request request with
-  | None -> false
-  | Some _ -> (
-      match
-        authorize_token_bound_permission_request
-          ~base_path
-          ~permission:Masc_domain.CanReadState
-          request
-      with
-      | Ok _ -> true
-      | Error _ -> false)
 
 let with_optional_board_reaction_actor ~base_path request reqd f =
   match
@@ -533,15 +687,24 @@ let add_routes ~sw ~clock router =
            query_param req "until"
            |> Fun.flip Option.bind (fun s -> float_of_string_opt (String.trim s))
          in
-         let fetch_limit = match actor_filter, kind_filter, severity_filter with
-           | None, None, None -> limit
-           | _ -> min 5000 (limit * 20)
+         (* The filters decide the read, so [limit] counts entries the
+            caller asked for. Reading a multiple and filtering afterwards
+            only moved the write rate at which the answer came back short:
+            the store holds every agent's actions. *)
+         let matches =
+           Audit_log.audit_entry_matches ?actor:actor_filter ?kind:kind_filter
+             ?severity:severity_filter ?since:since_filter ?until:until_filter
          in
-         let all_entries = Audit_log.read_entries ~n:fetch_limit config in
+         let all_entries =
+           Audit_log.read_entries_matching
+             ~n:limit
+             ?since:since_filter
+             ?until:until_filter
+             ~keep:matches
+             config
+         in
          let json =
-           Audit_log.audit_events_response_json ?actor:actor_filter
-             ?kind:kind_filter ?severity:severity_filter ?since:since_filter
-             ?until:until_filter ~limit all_entries
+           Audit_log.audit_events_response_json ~limit all_entries
          in
          Http.Response.json_value ~compress:true ~request:req
            json reqd
@@ -573,25 +736,18 @@ let add_routes ~sw ~clock router =
          let offset = int_query_param req "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
          let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
          let voter = board_voter_query req in
-         let blind_votes = bool_query_param req "blind_votes" ~default:false in
-         let include_moderation =
-           include_moderation_projection
-             ~base_path:config.base_path
-             req
-         in
          let cache_key =
            let cache_part = function
              | Some value -> value
              | None -> ""
            in
-           Printf.sprintf "board:list:%s:%s:%s:%b:%b:%s:%d:%d:%s:%s:%b:%b"
+           Printf.sprintf "board:list:%s:%s:%s:%b:%b:%s:%d:%d:%s:%s"
              config.base_path
              (cache_part hearth)
              (board_sort_label sort_by)
              exclude_system exclude_automation
              (cache_part author_query)
              limit offset (cache_part voter) (cache_part reaction_actor)
-             blind_votes include_moderation
          in
          let json =
            Dashboard_cache.get_or_compute cache_key
@@ -619,9 +775,6 @@ let add_routes ~sw ~clock router =
                       ~voter:reaction_actor
                   in
                   let reactions_for = board_reactions_lookup reaction_rows in
-                  let contributor_quality_for =
-                    board_contributor_quality_lookup ~config ()
-                  in
                   let posts_json =
                     List.map
                       (fun (p : Board.post) ->
@@ -629,9 +782,8 @@ let add_routes ~sw ~clock router =
                          let post_id = Board.Post_id.to_string p.id in
                          let current_vote = board_current_vote_for_post ~voter ~post_id in
                          let reactions = reactions_for (Board.Reaction_post, post_id) in
-                         let contributor_quality = contributor_quality_for author in
-                         board_post_dashboard_json ~include_moderation ~blind_votes
-                           ?contributor_quality ~reactions
+                         board_post_dashboard_json
+                           ~reactions
                            ?current_vote
                            ~author_karma:(get_karma author) p)
                       paged
@@ -653,6 +805,24 @@ let add_routes ~sw ~clock router =
             Http.Response.json_value
               (Server_board_reaction_http.catalog_json ())
               reqd)
+         request
+         reqd)
+
+  (* Registered before the single-target read so the longer path is matched
+     first. One page of the board asks about its rows here instead of once per
+     row. *)
+  |> Http.Router.get "/api/v1/board/reactions/batch" (fun request reqd ->
+       with_token_permission_auth
+         ~permission:Masc_domain.CanReadState
+         (fun _state actor req reqd ->
+            let actor = board_actor_author_for_write actor in
+            let result =
+              Server_board_reaction_http.targets_of_strings
+                ~target_type:(query_param req "target_type")
+                ~target_ids:(query_param req "target_ids")
+              |> Result.map (Server_board_reaction_http.list_batch_json ~actor)
+            in
+            respond_board_reaction_result request reqd result)
          request
          reqd)
 
@@ -694,11 +864,17 @@ let add_routes ~sw ~clock router =
          reqd)
 
   |> Http.Router.get "/api/v1/board/hearths" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
+       with_public_read (fun state req reqd ->
          let config = Mcp_server.workspace_config state in
+         let exclude_system = bool_query_param req "exclude_system" ~default:false in
+         let exclude_automation =
+           bool_query_param req "exclude_automation" ~default:false
+         in
          let cache_key =
-           Printf.sprintf "board:hearths:%s"
+           Printf.sprintf "board:hearths:%s:exclude-system=%b:exclude-automation=%b"
              (Keeper_api_types.cache_key_string_segment config.base_path)
+             exclude_system
+             exclude_automation
          in
          let json =
            Dashboard_cache.get_or_compute
@@ -706,7 +882,10 @@ let add_routes ~sw ~clock router =
              ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
              (fun () ->
                 Domain_pool_ref.submit_io_or_inline (fun () ->
-                  let hearths = Board_dispatch.list_hearths () in
+                  let hearths =
+                    Board_dispatch.list_hearths
+                      ~exclude_system ~exclude_automation ()
+                  in
                   `Assoc [
                     ("hearths", `List (List.map (fun (name, count) ->
                       `Assoc [("name", `String name); ("count", `Int count)]
@@ -899,16 +1078,8 @@ let add_routes ~sw ~clock router =
                        (Server_board_post_response_format.error_json error)
                    | Ok response_format ->
                      let voter = board_voter_query req in
-                     let blind_votes =
-                       bool_query_param req "blind_votes" ~default:false
-                     in
-                     let include_moderation =
-                       include_moderation_projection ~base_path:config.base_path req
-                     in
                      let status, body =
                        board_post_detail_json
-                         ~include_moderation
-                         ~blind_votes
                          ~voter
                          ~reaction_actor
                          ~config:(Some config)
@@ -1055,6 +1226,87 @@ let add_routes ~sw ~clock router =
                (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
          )
        ) request reqd)
+
+  (* Goal lifecycle from the terminal (#29684). The workspace tool already owns
+     the transition rules ([Goal_phase.decide_transition] inside
+     [handle_goal_transition]); this route only pipes HTTP into it, the same
+     shape the four Board tool routes above take. No identity is injected:
+     the tool records the acting agent from the context, and an invalid
+     phase transition is the tool's rejection to make, not the route's. *)
+  |> Http.Router.post "/api/v1/tools/masc_goal_transition" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_goal_transition"
+         (fun state _req reqd ->
+         let agent_name = board_tool_agent_name_from_request request in
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let ( let* ) r f =
+               match r with
+               | Ok v -> f v
+               | Error msg ->
+                   respond_json_value_with_cors ~status:`Bad_request request reqd
+                     (activity_result_json ~ok:false ~message:msg)
+             in
+             let* args =
+               try Ok (Yojson.Safe.from_string body_str)
+               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
+             in
+             let config = (Mcp_server.workspace_scope state).Mcp_server.config in
+             let ctx = { Workspace_types.config; agent_name } in
+             let start_time = Unix.gettimeofday () in
+             let result =
+               Workspace_goals.handle_goal_transition
+                 ~tool_name:"masc_goal_transition" ~start_time ctx args
+             in
+             let ok = Tool_result.is_success result in
+             let msg = Tool_result.message result in
+             let status = if ok then `OK else `Bad_request in
+             respond_json_value_with_cors ~status request reqd
+               (activity_result_json ~ok ~message:msg)
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
+         )
+       ) request reqd)
+  (* Schedule cancel from the terminal (#29684). The workspace tool owns the
+     argument contract ([Tool_schedule.handle_cancel]: schedule_id,
+     cancelled_by_*, reason) and the store transition; the route pipes HTTP
+     straight into that handler, so validation and error text stay identical
+     to the MCP tool. Cancel takes only the config -- no creation hooks, no
+     agent identity to inject -- because its arguments already carry the
+     canceller. *)
+  |> Http.Router.post "/api/v1/tools/masc_schedule_cancel" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_schedule_cancel"
+         (fun state _req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let ( let* ) r f =
+               match r with
+               | Ok v -> f v
+               | Error msg ->
+                   respond_json_value_with_cors ~status:`Bad_request request reqd
+                     (activity_result_json ~ok:false ~message:msg)
+             in
+             let* args =
+               try Ok (Yojson.Safe.from_string body_str)
+               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
+             in
+             let config = (Mcp_server.workspace_scope state).Mcp_server.config in
+             let start_time = Unix.gettimeofday () in
+             let result =
+               Tool_schedule.handle_cancel
+                 ~tool_name:"masc_schedule_cancel" ~start_time config args
+             in
+             let ok = Tool_result.is_success result in
+             let msg = Tool_result.message result in
+             let status = if ok then `OK else `Bad_request in
+             respond_json_value_with_cors ~status request reqd
+               (activity_result_json ~ok ~message:msg)
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
+         )
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/karma" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
          let karma_list = Board_dispatch.get_all_karma () in
@@ -1099,24 +1351,6 @@ let add_routes ~sw ~clock router =
               Http.Response.json_value json reqd)
        ) request reqd)
 
-  (* Agent Reputation API *)
-  |> Http.Router.prefix_get "/api/v1/reputation/" (fun request reqd ->
-       with_public_read (fun state _req reqd ->
-         let path = Http.Request.path request in
-         (match extract_path_param ~prefix:"/api/v1/reputation/" path with
-          | None ->
-              Http.Response.json_value
-                (`Assoc [("error", `String "agent_name is required")])
-                ~status:`Bad_request reqd
-          | Some agent_name ->
-              let rep =
-                Reputation.compute_reputation
-                  (Mcp_server.workspace_config state) ~agent_name
-              in
-              Http.Response.json_value
-                (Reputation.agent_reputation_to_yojson rep) reqd)
-       ) request reqd)
-
   (* Prompt Registry API *)
   |> Http.Router.get "/api/v1/prompts" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
@@ -1124,88 +1358,140 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value json reqd
        ) request reqd)
 
+  (* Skill catalog API (RFC skills-as-tools §2.6): the same load the tool
+     surface performs at turn start, projected as JSON. A broken skills
+     directory answers ok=false with the exact turn-blocking error instead
+     of an empty list, so the dashboard shows why keepers are refusing
+     turns rather than showing no skills. *)
+  |> Http.Router.get "/api/v1/skills" (fun request reqd ->
+       with_public_read (fun state _req reqd ->
+         let config = Mcp_server.workspace_config state in
+         let json =
+           match
+             Keeper_run_tools_setup.load_skill_catalog
+               ~base_path:config.Workspace.base_path
+           with
+           | Error error ->
+             `Assoc
+               [ ("ok", `Bool false)
+               ; ("error", `String (Agent_core.Error.to_string error))
+               ]
+           | Ok catalog ->
+             let skills =
+               Keeper_skill_catalog.skills catalog
+               |> List.map (fun (skill : Keeper_skill_catalog.skill) ->
+                    let base =
+                      [ ("name", `String skill.name)
+                      ; ("description", `String skill.description)
+                      ; ( "kind"
+                        , `String
+                            (Keeper_skill_catalog.surface_to_string
+                               skill.surface) )
+                      ; ("body_bytes", `Int (String.length skill.body))
+                      ]
+                    in
+                    match skill.surface with
+                    | Keeper_skill_catalog.Instruction -> `Assoc base
+                    | Keeper_skill_catalog.Composition entry ->
+                      `Assoc
+                        (base
+                        @ [ ( "tool_name"
+                            , `String
+                                (Keeper_tool_composition_catalog.tool_name
+                                   entry) )
+                          ; ( "execution"
+                            , `String
+                                (Keeper_tool_composition_catalog
+                                 .execution_mode_to_string entry.execution) )
+                          ; ( "params"
+                            , `List
+                                (List.map
+                                   (fun
+                                     (param :
+                                       Keeper_tool_composition_catalog.param)
+                                   ->
+                                     `Assoc
+                                       [ ("name", `String param.param_name)
+                                       ; ( "type"
+                                         , `String
+                                             (Keeper_tool_composition_catalog
+                                              .param_type_to_string
+                                                param.param_type) )
+                                       ; ( "description"
+                                         , `String param.param_description )
+                                       ])
+                                   entry.params) )
+                          ]))
+             in
+             `Assoc [ ("ok", `Bool true); ("skills", `List skills) ]
+         in
+         Http.Response.json_value json reqd
+       ) request reqd)
+
   |> Http.Router.post "/api/v1/prompts" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_prompt_override"
          (fun state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let args = Yojson.Safe.from_string body_str in
-             let key = Json_util.get_string args "key"
-               |> Option.value ~default:"" in
-             let action = Json_util.get_string args "action" in
-             if key = "" then
-               respond_json_value_with_cors ~status:`Bad_request request reqd
-                 (`Assoc
-                    [ ("ok", `Bool false); ("error", `String "key is required") ])
-             else match action with
-             | None ->
-               respond_json_value_with_cors ~status:`Bad_request request reqd
-                 (`Assoc
-                    [
-                      ("ok", `Bool false);
-                      ("error", `String "action is required");
-                    ])
-             | Some action ->
-               let result = match action with
-                 | "clear" ->
-                   (match
-                      Prompt_registry.clear_prompt_override_persisted
-                        ~base_path:
-                          (Mcp_server.workspace_config state).base_path
-                        key
-                    with
-                    | Ok () -> Ok "override cleared"
-                    | Error message ->
-                        Error (`Persistence message))
-                 | "set" ->
-                   let value = Json_util.get_string args "value"
-                     |> Option.value ~default:"" in
-                   (match
-                      Prompt_registry.set_override_persisted
-                        ~base_path:
-                          (Mcp_server.workspace_config state).base_path
-                        key value
-                    with
-                    | Ok () -> Ok "override set"
-                    | Error (Prompt_registry.Validation_error message) ->
-                        Error (`Validation message)
-                    | Error (Prompt_registry.Persistence_error message) ->
-                        Error (`Persistence message))
-                 | unsupported ->
-                     Error
-                       (`Validation
-                         (Printf.sprintf "unsupported action: %s" unsupported))
-               in
-               match result with
-               | Ok msg ->
-                 respond_json_value_with_cors request reqd
-                   (`Assoc
-                      [
-                        ("ok", `Bool true);
-                        ("message", `String msg);
-                        ("key", `String key);
-                        ("source", `String (Prompt_registry.prompt_source key));
-                        ("effective", `String (Prompt_registry.get_prompt key));
-                      ])
-               | Error (`Validation msg) ->
-                 respond_json_value_with_cors ~status:`Bad_request request reqd
-                   (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
-               | Error (`Persistence msg) ->
-                 Log.Pages.error "prompt override persist failed: %s" msg;
-                 respond_json_value_with_cors ~status:`Internal_server_error
-                   request reqd
-                   (`Assoc
-                      [
-                        ("ok", `Bool false);
-                        ("error", `String "prompt override persistence failed");
-                      ])
-           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+           match Server_prompt_override_request.decode body_str with
+           | Error error ->
              respond_json_value_with_cors ~status:`Bad_request request reqd
                (`Assoc
                   [
                     ("ok", `Bool false);
-                    ("error", `String (Printexc.to_string exn));
+                    ( "error"
+                    , `String (Server_prompt_override_request.error_message error) );
                   ])
+           | Ok override_request ->
+             let key = Server_prompt_override_request.key override_request in
+             let result =
+               match override_request with
+               | Server_prompt_override_request.Clear _ ->
+                 (match
+                    Prompt_registry.clear_prompt_override_persisted
+                      ~base_path:
+                        (Mcp_server.workspace_config state).base_path
+                      key
+                  with
+                  | Ok () -> Ok "override cleared"
+                  | Error message -> Error (`Persistence message))
+               | Server_prompt_override_request.Set { value; _ } ->
+                 (match
+                    Prompt_registry.set_override_persisted
+                      ~base_path:
+                        (Mcp_server.workspace_config state).base_path
+                      key
+                      value
+                  with
+                  | Ok () -> Ok "override set"
+                  | Error (Prompt_registry.Validation_error message) ->
+                    Error (`Validation message)
+                  | Error (Prompt_registry.Persistence_error message) ->
+                    Error (`Persistence message))
+             in
+             (match result with
+              | Ok message ->
+                respond_json_value_with_cors request reqd
+                  (`Assoc
+                     [
+                       ("ok", `Bool true);
+                       ("message", `String message);
+                       ("key", `String key);
+                       ("source", `String (Prompt_registry.prompt_source key));
+                       ("effective", `String (Prompt_registry.get_prompt key));
+                     ])
+              | Error (`Validation message) ->
+                respond_json_value_with_cors ~status:`Bad_request request reqd
+                  (`Assoc [ ("ok", `Bool false); ("error", `String message) ])
+              | Error (`Persistence message) ->
+                Log.Pages.error "prompt override persist failed: %s" message;
+                respond_json_value_with_cors ~status:`Internal_server_error
+                  request
+                  reqd
+                  (`Assoc
+                     [
+                       ("ok", `Bool false);
+                       ("error", `String "prompt override persistence failed");
+                     ]))
          )
        ) request reqd)
 
@@ -1214,62 +1500,61 @@ let add_routes ~sw ~clock router =
        with_tool_auth ~tool_name:"masc_set_param"
          (fun state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let args = Yojson.Safe.from_string body_str in
+           match Server_runtime_param_request.decode_set body_str with
+           | Error error ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (`Assoc
+                  [ ("ok", `Bool false)
+                  ; ( "error"
+                    , `String
+                        (Server_runtime_param_request.error_message error) )
+                  ])
+           | Ok runtime_param_request ->
              let base_path = (Mcp_server.workspace_config state).base_path in
              let actor =
                sanitized_dashboard_actor_for_request ~base_path request
                |> Option.value ~default:"dashboard"
              in
-             let param_key = Json_util.get_string args "param_key"
-               |> Option.value ~default:"" |> String.trim in
-             let value_json = Json_util.assoc_member_opt "value" args in
-            if param_key = "" then
-               respond_json_value_with_cors ~status:`Bad_request request reqd
-                 (`Assoc
-                    [ ("ok", `Bool false); ("error", `String "param_key is required") ])
-             else match value_json with
-             | None ->
-               respond_json_value_with_cors ~status:`Bad_request request reqd
-                 (`Assoc
-                    [ ("ok", `Bool false); ("error", `String "value is required") ])
-             | Some value ->
-               let old_value =
-                 match Runtime_params.registry ()
-                   |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
-                 | Some (_, current, _, _, _) -> current
-                 | None -> `Null
-               in
-               (match Runtime_params.set_by_key param_key value ~actor with
-                | Error msg ->
-                  respond_json_value_with_cors ~status:`Bad_request request reqd
-                    (`Assoc [ "ok", `Bool false; "error", `String msg ])
-                | Ok () ->
-                  Sse.broadcast
-                    (`Assoc
-                       [ "type", `String "runtime_param_changed"
-                       ; "param_key", `String param_key
-                       ; "old_value", old_value
-                       ; "new_value", value
-                       ; "actor", `String actor
-                       ]);
-                  respond_json_value_with_cors request reqd
-                    (`Assoc
-                       [ "ok", `Bool true
-                       ; ( "message"
-                         , `String
-                             (Printf.sprintf
-                                "Set %s = %s"
-                                param_key
-                                (Yojson.Safe.to_string value)) )
-                       ]))
-           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             respond_json_value_with_cors ~status:`Bad_request request reqd
-               (`Assoc
-                  [
-                    ("ok", `Bool false);
-                    ("error", `String (Printexc.to_string exn));
-                  ])
+             let param_key =
+               Server_runtime_param_request.set_param_key runtime_param_request
+             in
+             let value =
+               Server_runtime_param_request.set_value runtime_param_request
+             in
+             (match
+                mutate_runtime_param_with_effects
+                  ~base_path
+                  ~param_key
+                  (fun () ->
+                    Runtime_params.set_by_key_with_change
+                      param_key
+                      value
+                      ~actor)
+              with
+              | Error msg ->
+                respond_json_value_with_cors ~status:`Bad_request request reqd
+                  (`Assoc [ "ok", `Bool false; "error", `String msg ])
+              | Ok (change, effect_fields) ->
+                Sse.broadcast
+                  (`Assoc
+                     ([ "type", `String "runtime_param_changed"
+                      ; "param_key", `String param_key
+                      ; "old_value", change.old_value
+                      ; "new_value", change.new_value
+                      ; "actor", `String actor
+                      ]
+                      @ effect_fields));
+                respond_json_value_with_cors request reqd
+                  (`Assoc
+                     ([ "ok", `Bool true
+                      ; ( "message"
+                        , `String
+                            (Printf.sprintf
+                               "Set %s = %s"
+                               param_key
+                               (Yojson.Safe.to_string change.new_value)) )
+                      ]
+                      @ effect_fields)))
          )
        ) request reqd)
 
@@ -1277,57 +1562,51 @@ let add_routes ~sw ~clock router =
        with_tool_auth ~tool_name:"masc_set_param"
          (fun state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let args = Yojson.Safe.from_string body_str in
-             let param_key = Json_util.get_string args "param_key"
-               |> Option.value ~default:"" in
+           match Server_runtime_param_request.decode_clear body_str with
+           | Error error ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (`Assoc
+                  [ ("ok", `Bool false)
+                  ; ( "error"
+                    , `String
+                        (Server_runtime_param_request.error_message error) )
+                  ])
+           | Ok runtime_param_request ->
+             let param_key =
+               Server_runtime_param_request.clear_param_key runtime_param_request
+             in
              let base_path = (Mcp_server.workspace_config state).base_path in
              let actor =
                sanitized_dashboard_actor_for_request ~base_path request
                |> Option.value ~default:"dashboard"
              in
-            if param_key = "" then
-               respond_json_value_with_cors ~status:`Bad_request request reqd
-                 (`Assoc
-                    [ ("ok", `Bool false); ("error", `String "param_key is required") ])
-             else
-               let old_value =
-                 match Runtime_params.registry ()
-                   |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
-                 | Some (_, current, _, _, _) -> current
-                 | None -> `Null
-               in
-               (match Runtime_params.clear_by_key param_key ~actor with
-                | Error msg ->
-                  respond_json_value_with_cors ~status:`Bad_request request reqd
-                    (`Assoc [ "ok", `Bool false; "error", `String msg ])
-                | Ok () ->
-                  let new_value =
-                    match Runtime_params.registry ()
-                      |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
-                    | Some (_, _, default, _, _) -> default
-                    | None -> `Null
-                  in
-                  Sse.broadcast
-                    (`Assoc
-                       [ "type", `String "runtime_param_changed"
-                       ; "param_key", `String param_key
-                       ; "old_value", old_value
-                       ; "new_value", new_value
-                       ; "actor", `String actor
-                       ]);
-                  respond_json_value_with_cors request reqd
-                    (`Assoc
-                       [ "ok", `Bool true
-                       ; ( "message"
-                         , `String (Printf.sprintf "Cleared %s to default" param_key) )
-                       ]))
-           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             respond_json_value_with_cors ~status:`Bad_request request reqd
-               (`Assoc
-                  [
-                    ("ok", `Bool false);
-                    ("error", `String (Printexc.to_string exn));
-                  ])
+             (match
+                mutate_runtime_param_with_effects
+                  ~base_path
+                  ~param_key
+                  (fun () ->
+                    Runtime_params.clear_by_key_with_change param_key ~actor)
+              with
+              | Error msg ->
+                respond_json_value_with_cors ~status:`Bad_request request reqd
+                  (`Assoc [ "ok", `Bool false; "error", `String msg ])
+              | Ok (change, effect_fields) ->
+                Sse.broadcast
+                  (`Assoc
+                     ([ "type", `String "runtime_param_changed"
+                      ; "param_key", `String param_key
+                      ; "old_value", change.old_value
+                      ; "new_value", change.new_value
+                      ; "actor", `String actor
+                      ]
+                      @ effect_fields));
+                respond_json_value_with_cors request reqd
+                  (`Assoc
+                     ([ "ok", `Bool true
+                      ; ( "message"
+                        , `String
+                            (Printf.sprintf "Cleared %s to default" param_key) )
+                      ]
+                      @ effect_fields)))
          )
        ) request reqd)

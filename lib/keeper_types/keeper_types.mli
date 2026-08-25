@@ -23,7 +23,6 @@ type keeper_health =
   | KH_stale
   | KH_degraded
   | KH_zombie
-  | KH_dead
 
 type keeper_continuity =
   | Continuity_healthy
@@ -43,7 +42,7 @@ type tool_call_entry = {
 (** {1 Working Context Types} *)
 
 type working_context = {
-  checkpoint : Agent_sdk.Checkpoint.t;
+  checkpoint : Agent_core.Checkpoint.t;
 }
 
 type session_context = {

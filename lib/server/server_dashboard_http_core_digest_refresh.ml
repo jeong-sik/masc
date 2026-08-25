@@ -9,7 +9,7 @@
     ~target_type:"workspace"] under a fresh [Operator_control.context],
     decorates the result with [with_projection_diagnostics] /
     [with_operator_digest_metadata], and republishes via
-    [!operator_digest_broadcast_ref].
+    [broadcast_operator_digest].
 
     Pure helper move (no callback injection). All cross-module
     references reach existing siblings or top-level libraries — no
@@ -37,7 +37,7 @@ module Core_cache = Server_dashboard_http_core_cache
 module Core_operator = Server_dashboard_http_core_operator
 module Core_operator_query = Server_dashboard_http_core_operator_query
 
-let start_operator_digest_refresh_loop ~state ~sw ~clock =
+let start_operator_digest_refresh_loop ~state ~sw ~clock ~broadcast_digest =
   let workspace_scope = Mcp_server.workspace_scope state in
   let config = workspace_scope.config in
   let proc_mgr = state.Mcp_server.proc_mgr in
@@ -91,13 +91,18 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
            ~interval_s:Core_operator.operator_refresh_interval_s)
         with
         timeout_s = Core_operator.operator_refresh_interval_s *. 0.8
-      ; on_error = Some (mark_cached_surface_error Core_operator.operator_digest_cache)
+      ; on_failure =
+          Some
+            (fun failure ->
+              mark_cached_surface_error_message
+                Core_operator.operator_digest_cache
+                (Proactive_refresh.failure_message failure))
       ; warm_delay_s = 150.0
       }
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success Core_operator.operator_digest_cache json;
-      !Core_operator.operator_digest_broadcast_ref
+      broadcast_digest
         (cached_surface_json Core_operator.operator_digest_cache
          |> Core_operator_query.with_operator_digest_metadata
               ~config

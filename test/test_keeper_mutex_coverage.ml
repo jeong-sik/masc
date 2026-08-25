@@ -59,62 +59,59 @@ let wait_for_active_switch_count clock expected =
   loop 100
 ;;
 
-let wait_for_running ~base_path request_id =
-  let rec loop remaining =
-    match Keeper_msg_async.poll ~base_path ~caller request_id with
-    | Keeper_msg_async.Found ({ status = Running; _ } as entry) -> entry
-    | _ when remaining <= 0 ->
-      failwith (Printf.sprintf "request %s did not start" request_id)
-    | _ ->
-      Eio.Fiber.yield ();
-      loop (remaining - 1)
-  in
-  loop 200
+(* #29024: these waits used to sample the store in a loop -- originally
+   spinning on [Eio.Fiber.yield], which only reschedules fibers already
+   runnable in this domain and so handed no time at all to the separate OS
+   thread that produces the transition ([Eio_guard.run_in_systhread] in
+   keeper_msg_async.ml). Sampling on a clock instead would only widen the
+   window; the transition still has to be guessed at from outside.
+
+   Both transitions announce themselves, so wait on the announcement:
+
+   - worker start -- [f] is invoked after the Running status is committed and
+     after the request switch is registered, so entering [f] IS the signal.
+   - terminal settlement -- every abort path calls [notify_settled], which is
+     what [~on_worker_settled] receives. The .mli calls it "the single
+     projection boundary for SSE or other live terminal notifications".
+
+   The deadline below is a failure detector, not the wait: without it a signal
+   that never arrives would hang the run instead of failing it. *)
+let signal_deadline_seconds = 10.0
+
+let await_signal clock ~what promise =
+  match
+    Eio.Time.with_timeout clock signal_deadline_seconds (fun () ->
+      Ok (Eio.Promise.await promise))
+  with
+  | Ok value -> value
+  | Error `Timeout ->
+    failwith
+      (Printf.sprintf "%s did not signal within %.0fs" what signal_deadline_seconds)
 ;;
 
-let wait_for_lost ~base_path request_id =
-  let rec loop remaining =
-    match Keeper_msg_async.poll ~base_path ~caller request_id with
-    | Keeper_msg_async.Found ({ status = Lost _; _ } as entry) -> entry
-    | _ when remaining <= 0 ->
-      failwith (Printf.sprintf "request %s did not become lost" request_id)
-    | _ ->
-      Eio.Fiber.yield ();
-      loop (remaining - 1)
-  in
-  loop 200
+(* [notify_settled] can project more than one settlement for a request; only
+   the first Cancelled one resolves the promise. *)
+let resolve_once flag resolver value =
+  if not (Atomic.exchange flag true) then Eio.Promise.resolve resolver value
 ;;
 
-let wait_for_cancelled ~base_path request_id =
-  let rec loop remaining =
-    match Keeper_msg_async.poll ~base_path ~caller request_id with
-    | Keeper_msg_async.Found ({ status = Cancelled _; _ } as entry) -> entry
-    | _ when remaining <= 0 ->
-      failwith (Printf.sprintf "request %s did not become cancelled" request_id)
-    | _ ->
-      Eio.Fiber.yield ();
-      loop (remaining - 1)
+(* Resolves on the first settlement carrying a Cancelled status. Every abort
+   path in keeper_msg_async.ml commits the status and then calls
+   [notify_settled], so this fires after the transition is durable. *)
+let cancelled_signal () =
+  let seen = Atomic.make false in
+  let promise, resolver = Eio.Promise.create () in
+  let observe settlement =
+    match settlement with
+    | Keeper_msg_async.Status_settlement
+        { entry = { Keeper_msg_async.status = Cancelled _; _ } as entry; _ } ->
+      resolve_once seen resolver entry
+    | Keeper_msg_async.Status_settlement _
+    | Keeper_msg_async.Settlement_projection_error _ -> ()
   in
-  loop 200
+  promise, observe
 ;;
 
-let contains_substring ~needle value =
-  let needle_len = String.length needle in
-  let value_len = String.length value in
-  if needle_len = 0
-  then true
-  else if needle_len > value_len
-  then false
-  else (
-    let rec loop i =
-      if i + needle_len > value_len
-      then false
-      else if String.equal (String.sub value i needle_len) needle
-      then true
-      else loop (i + 1)
-    in
-    loop 0)
-;;
 
 let temp_dir prefix =
   let path = Filename.temp_file prefix "" in
@@ -139,6 +136,13 @@ let with_eio_env f =
   Eio_guard.enable ();
   Fun.protect
     ~finally:(fun () ->
+      (* Keeper_msg_async keeps seven process-wide tables (pending,
+         transition_locks, active_switches, store_transition_locks,
+         reserved_request_ids, keeper_submission_locks,
+         keeper_persistence_locks). Only 10 of the 39 msg_async cases used to
+         clear them, so the other 29 handed their leftovers to whatever ran
+         next. Clearing here covers every case, including ones added later. *)
+      Keeper_msg_async.For_testing.clear ();
       Fs_compat.clear_fs ();
       Eio_guard.disable ())
     (fun () -> f env)
@@ -778,9 +782,11 @@ let test_keeper_msg_async_running_write_failure_projects_durable_marker_once () 
 
 let test_keeper_msg_async_marks_recovered_inflight_lost () =
   with_eio_env
-  @@ fun _env ->
+  @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let entered_worker, notify_entered_worker = Eio.Promise.create () in
   let base_path = temp_dir "keeper-msg-async-lost-" in
   let promise, _resolver = Eio.Promise.create () in
   let request_id =
@@ -790,12 +796,13 @@ let test_keeper_msg_async_marks_recovered_inflight_lost () =
       ~caller
       ~keeper_name:"gamma"
       ~f:(fun _request_sw ->
+        Eio.Promise.resolve notify_entered_worker ();
         Eio.Promise.await promise;
         tr_ok "{}")
       ()
     |> accepted_request_id
   in
-  ignore (wait_for_running ~base_path request_id : Keeper_msg_async.entry);
+  await_signal clock ~what:"worker start" entered_worker;
   (match
      Keeper_msg_async.cancel ~base_path ~caller:"different-caller" request_id
    with
@@ -838,9 +845,11 @@ let test_keeper_msg_async_marks_recovered_inflight_lost () =
 
 let test_keeper_msg_async_recovery_sweep_marks_only_disk_only_inflight_lost () =
   with_eio_env
-  @@ fun _env ->
+  @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let entered_worker, notify_entered_worker = Eio.Promise.create () in
   let base_path = temp_dir "keeper-msg-async-recover-sweep-" in
   let promise, _resolver = Eio.Promise.create () in
   let request_id =
@@ -850,12 +859,13 @@ let test_keeper_msg_async_recovery_sweep_marks_only_disk_only_inflight_lost () =
       ~caller
       ~keeper_name:"sweep"
       ~f:(fun _request_sw ->
+        Eio.Promise.resolve notify_entered_worker ();
         Eio.Promise.await promise;
         tr_ok "{}")
       ()
     |> accepted_request_id
   in
-  ignore (wait_for_running ~base_path request_id : Keeper_msg_async.entry);
+  await_signal clock ~what:"worker start" entered_worker;
   Alcotest.(check int)
     "live in-memory worker is not recovered as lost"
     0
@@ -905,32 +915,39 @@ let test_keeper_msg_async_recovery_sweep_marks_only_disk_only_inflight_lost () =
 
 let test_keeper_msg_async_marks_cancelled_worker_cancelled () =
   with_eio_env
-  @@ fun _env ->
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let cancelled_settlement, observe_cancelled = cancelled_signal () in
+  let entered_worker, notify_entered_worker = Eio.Promise.create () in
   let base_path = temp_dir "keeper-msg-async-cancel-" in
-  let request_id =
+  (* The switch teardown at the end of this block is what cancels the worker.
+     [accepted_request_id] still runs: it asserts the submission was durably
+     accepted. Nothing needs the id any more now that both waits are signals. *)
+  let () =
     Eio.Switch.run
     @@ fun sw ->
     let never, _resolver = Eio.Promise.create () in
-    let request_id =
-      Keeper_msg_async.submit
-        ~background_sw:sw
-        ~base_path
-        ~caller
-        ~keeper_name:"cancelled"
-        ~f:(fun _request_sw ->
-          Eio.Promise.await never;
-          tr_ok "{}")
-        ()
-      |> accepted_request_id
-    in
-    ignore (wait_for_running ~base_path request_id : Keeper_msg_async.entry);
-    request_id
+    ignore
+      (Keeper_msg_async.submit
+         ~on_worker_settled:observe_cancelled
+         ~background_sw:sw
+         ~base_path
+         ~caller
+         ~keeper_name:"cancelled"
+         ~f:(fun _request_sw ->
+           Eio.Promise.resolve notify_entered_worker ();
+           Eio.Promise.await never;
+           tr_ok "{}")
+         ()
+       |> accepted_request_id
+        : string);
+    await_signal clock ~what:"worker start" entered_worker
   in
-  match wait_for_cancelled ~base_path request_id with
+  match await_signal clock ~what:"cancellation settlement" cancelled_settlement with
   | { Keeper_msg_async.status = Cancelled { reason; cancelled_by }; completed_at = Some _; _ } ->
     Alcotest.(check string) "cancelled_by runtime" "runtime" cancelled_by;
     Alcotest.(check bool) "cancelled reason mentions cancellation" true
-      (contains_substring ~needle:"cancelled" (String.lowercase_ascii reason))
+      (String_util.string_contains_substring ~needle:"cancelled" (String.lowercase_ascii reason))
   | { Keeper_msg_async.status = Cancelled _; completed_at = None; _ } ->
     Alcotest.fail "expected cancelled request to have completed_at"
   | entry ->
@@ -941,24 +958,29 @@ let test_keeper_msg_async_marks_cancelled_worker_cancelled () =
 
 let test_keeper_msg_async_operator_cancel_is_terminal_cancelled () =
   with_eio_env
-  @@ fun _env ->
+  @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let cancelled_settlement, observe_cancelled = cancelled_signal () in
+  let entered_worker, notify_entered_worker = Eio.Promise.create () in
   let base_path = temp_dir "keeper-msg-async-operator-cancel-" in
   let never, _resolver = Eio.Promise.create () in
   let request_id =
     Keeper_msg_async.submit
+      ~on_worker_settled:observe_cancelled
       ~background_sw:sw
       ~base_path
       ~caller
       ~keeper_name:"operator-cancelled"
       ~f:(fun _request_sw ->
+        Eio.Promise.resolve notify_entered_worker ();
         Eio.Promise.await never;
         tr_ok "{}")
       ()
     |> accepted_request_id
   in
-  ignore (wait_for_running ~base_path request_id : Keeper_msg_async.entry);
+  await_signal clock ~what:"worker start" entered_worker;
   Alcotest.(check bool)
     "cancel returns true"
     true
@@ -966,11 +988,11 @@ let test_keeper_msg_async_operator_cancel_is_terminal_cancelled () =
      | Keeper_msg_async.Cancellation_requested
          Keeper_msg_async.Durably_committed -> true
      | _ -> false);
-  (match wait_for_cancelled ~base_path request_id with
+  (match await_signal clock ~what:"cancellation settlement" cancelled_settlement with
    | { Keeper_msg_async.status = Cancelled { reason; cancelled_by }; completed_at = Some _; _ } ->
      Alcotest.(check string) "cancelled_by operator" "operator" cancelled_by;
      Alcotest.(check bool) "reason mentions operator" true
-       (contains_substring ~needle:"operator" (String.lowercase_ascii reason))
+       (String_util.string_contains_substring ~needle:"operator" (String.lowercase_ascii reason))
    | { Keeper_msg_async.status = Cancelled _; completed_at = None; _ } ->
      Alcotest.fail "expected operator-cancelled request to have completed_at"
    | entry ->
@@ -999,9 +1021,12 @@ let test_keeper_msg_async_operator_cancel_is_terminal_cancelled () =
 
 let test_keeper_msg_async_live_cancel_signals_after_post_publish_failure () =
   with_eio_env
-  @@ fun _env ->
+  @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let cancelled_settlement, observe_cancelled = cancelled_signal () in
+  let entered_worker, notify_entered_worker = Eio.Promise.create () in
   let base_path = temp_dir "keeper-msg-live-cancel-volatile-" in
   let never, _resolver = Eio.Promise.create () in
   Fun.protect
@@ -1024,17 +1049,19 @@ let test_keeper_msg_async_live_cancel_signals_after_post_publish_failure () =
        let request_id =
          Keeper_msg_async.For_testing.submit
            request_ops
+           ~on_worker_settled:observe_cancelled
            ~background_sw:sw
            ~base_path
            ~caller
            ~keeper_name:"live-cancel-volatile"
            ~f:(fun _request_sw ->
+             Eio.Promise.resolve notify_entered_worker ();
              Eio.Promise.await never;
              tr_ok "{}")
            ()
          |> accepted_request_id
        in
-       ignore (wait_for_running ~base_path request_id : Keeper_msg_async.entry);
+       await_signal clock ~what:"worker start" entered_worker;
        Atomic.set fail_cancel_persistence true;
        let result =
          Keeper_msg_async.For_testing.cancel
@@ -1051,7 +1078,7 @@ let test_keeper_msg_async_live_cancel_signals_after_post_publish_failure () =
             "post-publish cancellation did not preserve volatility: %s"
             (Keeper_msg_async.cancel_result_to_json ~request_id other
              |> Yojson.Safe.to_string));
-       ignore (wait_for_cancelled ~base_path request_id : Keeper_msg_async.entry))
+       ignore (await_signal clock ~what:"cancellation settlement" cancelled_settlement : Keeper_msg_async.entry))
 ;;
 
 let test_keeper_msg_async_explicit_cancel_retries_failed_worker_signal () =
@@ -1059,6 +1086,9 @@ let test_keeper_msg_async_explicit_cancel_retries_failed_worker_signal () =
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let cancelled_settlement, observe_cancelled = cancelled_signal () in
+  let entered_worker, notify_entered_worker = Eio.Promise.create () in
   let base_path = temp_dir "keeper-msg-cancel-signal-retry-" in
   let never, _resolver = Eio.Promise.create () in
   Fun.protect
@@ -1085,18 +1115,20 @@ let test_keeper_msg_async_explicit_cancel_retries_failed_worker_signal () =
              aborts := reason :: !aborts;
              Ok ())
            ~on_worker_settled:(fun settlement ->
-             settlements := settlement :: !settlements)
+             settlements := settlement :: !settlements;
+             observe_cancelled settlement)
            ~background_sw:sw
            ~base_path
            ~caller
            ~keeper_name:"cancel-signal-retry"
            ~f:(fun _request_sw ->
+             Eio.Promise.resolve notify_entered_worker ();
              Eio.Promise.await never;
              tr_ok "{}")
            ()
          |> accepted_request_id
        in
-       ignore (wait_for_running ~base_path request_id : Keeper_msg_async.entry);
+       await_signal clock ~what:"worker start" entered_worker;
        wait_for_active_switch_count (Eio.Stdenv.clock env) 1;
        (match
           Keeper_msg_async.For_testing.cancel
@@ -1133,7 +1165,7 @@ let test_keeper_msg_async_explicit_cancel_retries_failed_worker_signal () =
             "explicit retry did not signal the owned worker: %s"
             (Keeper_msg_async.cancel_result_to_json ~request_id other
              |> Yojson.Safe.to_string));
-       ignore (wait_for_cancelled ~base_path request_id : Keeper_msg_async.entry);
+       ignore (await_signal clock ~what:"cancellation settlement" cancelled_settlement : Keeper_msg_async.entry);
        Alcotest.(check int) "worker signal attempted twice" 2
          (Atomic.get signal_attempts);
        Alcotest.(check int) "abort callback projected once" 1
@@ -1498,6 +1530,8 @@ let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let entered_worker, notify_entered_worker = Eio.Promise.create () in
   let base_path = temp_dir "keeper-msg-canonical-integrity-settlement-" in
   let release, resolve_release = Eio.Promise.create () in
   Fun.protect
@@ -1544,13 +1578,19 @@ let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
            ~caller
            ~keeper_name:"canonical-integrity-settlement"
            ~f:(fun _request_sw ->
+             Eio.Promise.resolve notify_entered_worker ();
              Eio.Promise.await release;
              tr_ok {|{"worker":"result"}|})
            ()
          |> accepted_request_id
        in
        let running : Keeper_msg_async.entry =
-         wait_for_running ~base_path request_id
+         (* The signal fires from inside [f], which runs only after the Running
+            status is committed, so this is a single read rather than a retry. *)
+         await_signal clock ~what:"worker start" entered_worker;
+         match Keeper_msg_async.poll ~base_path ~caller request_id with
+         | Keeper_msg_async.Found entry -> entry
+         | _ -> Alcotest.fail "worker signalled start but no record was readable"
        in
        Atomic.set injection (Some (running, request_id));
        Eio.Promise.resolve resolve_release ();
@@ -1597,42 +1637,13 @@ let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
          Alcotest.fail "canonical terminal was not exact polling truth")
 ;;
 
-let test_keeper_stream_canonical_settlement_ignores_staged_worker_result () =
-  let status =
-    Keeper_msg_async.Done
-      { ok = true; body = "canonical-disk"; data = None }
-  in
-  let project origin =
-    let entry : Keeper_msg_async.entry =
-      { request_id = "canonical-settlement"
-      ; keeper_name = "keeper"
-      ; base_path = Filename.concat (Filename.get_temp_dir_name ()) "canonical-settlement"
-      ; submitted_by = "owner"
-      ; status
-      ; submitted_at = 0.
-      ; completed_at = Some 0.
-      }
-    in
-    Server_routes_http_keeper_stream.For_testing.worker_settlement_terminal_body
-      ~staged_body:(Some "staged-worker")
-      (Keeper_msg_async.Status_settlement
-         { entry; durability = Keeper_msg_async.Durable; origin })
-  in
-  Alcotest.(check (option string))
-    "canonical reconciliation uses disk body"
-    (Some "canonical-disk")
-    (project Keeper_msg_async.Canonical_reconciliation);
-  Alcotest.(check (option string))
-    "normal transition retains staged stream body"
-    (Some "staged-worker")
-    (project Keeper_msg_async.Transition_commit)
-;;
-
 let test_keeper_msg_async_integrity_ambiguity_projects_exact_poll_error () =
   with_eio_env
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let entered_worker, notify_entered_worker = Eio.Promise.create () in
   let base_path = temp_dir "keeper-msg-integrity-projection-error-" in
   let release, resolve_release = Eio.Promise.create () in
   Fun.protect
@@ -1650,12 +1661,13 @@ let test_keeper_msg_async_integrity_ambiguity_projects_exact_poll_error () =
            ~caller
            ~keeper_name:"integrity-projection-error"
            ~f:(fun _request_sw ->
+             Eio.Promise.resolve notify_entered_worker ();
              Eio.Promise.await release;
              tr_ok "{}")
            ()
          |> accepted_request_id
        in
-       ignore (wait_for_running ~base_path request_id : Keeper_msg_async.entry);
+       await_signal clock ~what:"worker start" entered_worker;
        write_request_record
          ~location:Terminal_record
          ~keeper_name:"different-terminal-owner"
@@ -1948,145 +1960,6 @@ let test_keeper_msg_async_recovery_rejects_linked_request_root () =
          (Sys.file_exists terminal_path))
 ;;
 
-let test_keeper_persistence_preparation_configures_queue_before_request_recovery () =
-  with_eio_env
-  @@ fun _env ->
-  let base_path = temp_dir "keeper-persistence-prepare-" in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
-      Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
-      rm_rf base_path)
-    (fun () ->
-       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
-       Keeper_chat_queue.For_testing.reset ();
-       let request_id = "kmsg_prepare_running_0_0" in
-       write_request_record
-         ~base_path
-         ~request_id
-         ~status:"running"
-         ~status_fields:[]
-         ();
-       let prepared =
-         match
-           Server_bootstrap_loops.prepare_keeper_persistence
-             ~config:(Workspace.default_config base_path)
-             ()
-         with
-         | Ok prepared -> prepared
-         | Error error ->
-           Alcotest.failf
-             "persistence preparation failed: %s"
-             (Server_bootstrap_loops.keeper_persistence_prepare_error_to_string
-                error)
-       in
-       Alcotest.(check bool) "queue is configured by preparation" true
-         (Keeper_chat_queue.persistence_configured ());
-       let report =
-         Server_bootstrap_loops.keeper_persistence_report prepared
-       in
-       Alcotest.(check int) "request recovery completed inside preparation" 1
-         report.requests.lost;
-       match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
-       | Keeper_msg_async.Found { status = Lost _; _ } -> ()
-       | _ -> Alcotest.fail "prepared request was published before recovery")
-;;
-
-let test_keeper_persistence_preparation_observes_structural_request_store () =
-  with_eio_env
-  @@ fun _env ->
-  let base_path = temp_dir "keeper-persistence-structural-store-" in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
-      Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
-      rm_rf base_path)
-    (fun () ->
-       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
-       let request_id = "kmsg_structural_store_0_0" in
-       let active_path =
-         require_record_path ~location:Active_record ~base_path ~request_id
-       in
-       let active_store = Filename.dirname active_path in
-       mkdir_p (Filename.dirname active_store);
-       Fs_compat.save_file active_store "not-a-directory";
-       let prepared =
-         match
-         Server_bootstrap_loops.prepare_keeper_persistence
-           ~config:(Workspace.default_config base_path)
-           ()
-         with
-         | Ok prepared -> prepared
-         | Error error ->
-           Alcotest.failf
-             "structural request observation blocked preparation: %s"
-             (Server_bootstrap_loops.keeper_persistence_prepare_error_to_string
-                error)
-       in
-       let report = Server_bootstrap_loops.keeper_persistence_report prepared in
-       Alcotest.(check bool)
-         "active store error remains typed"
-         true
-         (List.exists
-            (fun (error : Keeper_msg_async.recovery_store_error) ->
-               error.store = Keeper_msg_async.Active_store
-               && String.equal error.path active_store)
-            report.requests.store_errors);
-       match
-         Server_bootstrap_loops.claim_prepared_keeper_persistence
-           ~config:(Workspace.default_config base_path)
-           prepared
-       with
-       | Ok _ -> ()
-       | Error error ->
-         Alcotest.failf
-           "typed request-store observation poisoned owner claim: %s"
-           (Server_bootstrap_loops.keeper_persistence_claim_error_to_string error))
-;;
-
-let test_keeper_persistence_preparation_preserves_unattributed_request_record () =
-  with_eio_env
-  @@ fun _env ->
-  let base_path = temp_dir "keeper-persistence-unattributed-record-" in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
-      Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
-      rm_rf base_path)
-    (fun () ->
-       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
-       let request_id = "kmsg_unattributed_record_0_0" in
-       write_disk_record
-         ~location:Active_record
-         ~base_path
-         ~request_id
-         "{corrupt";
-       let prepared =
-         match
-           Server_bootstrap_loops.prepare_keeper_persistence
-             ~config:(Workspace.default_config base_path)
-             ()
-         with
-         | Ok prepared -> prepared
-         | Error error ->
-           Alcotest.failf
-             "unattributed record blocked unrelated Keeper lanes: %s"
-             (Server_bootstrap_loops.keeper_persistence_prepare_error_to_string
-                error)
-       in
-       match
-         (Server_bootstrap_loops.keeper_persistence_report prepared).requests
-           .record_errors
-       with
-       | [ error ] ->
-         Alcotest.(check string) "request id remains observable" request_id
-           error.Keeper_msg_async.request_id;
-         Alcotest.(check (option string)) "unattributed lane remains explicit"
-           None error.keeper_name
-       | _ -> Alcotest.fail "unattributed corrupt record evidence was lost")
-;;
-
-
 let test_keeper_persistence_ready_rejects_second_preparation () =
   with_eio_env
   @@ fun _env ->
@@ -2094,7 +1967,6 @@ let test_keeper_persistence_ready_rejects_second_preparation () =
   let base_b = temp_dir "keeper-persistence-ready-b-" in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
       rm_rf base_a;
       rm_rf base_b)
@@ -2145,7 +2017,6 @@ let test_keeper_persistence_canonical_start_token_is_affine () =
   Unix.symlink real_a alias;
   Fun.protect
     ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
       rm_rf parent)
     (fun () ->
@@ -2274,7 +2145,6 @@ let test_keeper_persistence_claim_is_one_shot_for_process () =
   let base_b = temp_dir "keeper-persistence-claim-b-" in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_chat_queue.For_testing.reset ();
       Server_bootstrap_loops.For_testing.reset_keeper_persistence_lifecycle ();
       rm_rf base_a;
       rm_rf base_b)
@@ -2437,7 +2307,7 @@ let test_keeper_msg_async_load_record_missing_status_is_unreadable () =
          Alcotest.(check bool)
            "reason mentions missing fields"
            true
-           (contains_substring ~needle:"missing required string field \"status\"" reason)
+           (String_util.string_contains_substring ~needle:"missing required string field \"status\"" reason)
        | Keeper_msg_async.Found _ -> Alcotest.fail "expected unreadable, got found"
        | Keeper_msg_async.Absent -> Alcotest.fail "expected unreadable, got absent"
        | Keeper_msg_async.Rejected _ -> Alcotest.fail "expected unreadable, got rejected")
@@ -2469,7 +2339,7 @@ let test_keeper_msg_async_load_record_unknown_status_is_unreadable () =
          Alcotest.(check bool)
            "reason mentions unknown status"
            true
-           (contains_substring ~needle:"unknown status" reason)
+           (String_util.string_contains_substring ~needle:"unknown status" reason)
        | Keeper_msg_async.Found _ -> Alcotest.fail "expected unreadable, got found"
        | Keeper_msg_async.Absent -> Alcotest.fail "expected unreadable, got absent"
        | Keeper_msg_async.Rejected _ -> Alcotest.fail "expected unreadable, got rejected")
@@ -2501,7 +2371,7 @@ let test_keeper_msg_async_rejects_filename_request_id_mismatch () =
          Alcotest.(check bool)
            "filename/request id consistency is enforced"
            true
-           (contains_substring ~needle:"does not match filename request_id" reason)
+           (String_util.string_contains_substring ~needle:"does not match filename request_id" reason)
        | Keeper_msg_async.Found _ -> Alcotest.fail "mismatched request id must not load"
        | Keeper_msg_async.Absent -> Alcotest.fail "mismatched record unexpectedly absent"
        | Keeper_msg_async.Rejected _ -> Alcotest.fail "mismatched id is a record error")
@@ -2664,10 +2534,6 @@ let () =
             `Quick
             test_keeper_msg_async_integrity_conflict_projects_canonical_terminal
         ; test_case
-            "canonical settlement ignores staged worker result"
-            `Quick
-            test_keeper_stream_canonical_settlement_ignores_staged_worker_result
-        ; test_case
             "integrity ambiguity projects exact poll error"
             `Quick
             test_keeper_msg_async_integrity_ambiguity_projects_exact_poll_error
@@ -2695,18 +2561,6 @@ let () =
             "exact load rejects active and terminal outside symlinks"
             `Quick
             test_keeper_msg_async_exact_load_rejects_outside_symlink_records
-        ; test_case
-            "persistence preparation configures queue then recovers requests"
-            `Quick
-            test_keeper_persistence_preparation_configures_queue_before_request_recovery
-        ; test_case
-            "persistence preparation observes structural request store"
-            `Quick
-            test_keeper_persistence_preparation_observes_structural_request_store
-        ; test_case
-            "persistence preparation preserves unattributed request record"
-            `Quick
-            test_keeper_persistence_preparation_preserves_unattributed_request_record
         ; test_case
             "ready persistence preparation rejects a second owner"
             `Quick

@@ -51,7 +51,7 @@ let test_model_surface_exposes_delegation_not_keeper_administration () =
     ; "masc_keeper_sandbox_start"
     ; "masc_keeper_sandbox_stop"
     ; "masc_keeper_reset"
-    ; "masc_keeper_persona_audit"
+    ; "masc_keeper_audit"
     ; "masc_keeper_status"
     ; "masc_keeper_down"
     ; "masc_keeper_up"

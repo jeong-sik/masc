@@ -23,7 +23,7 @@
 # matches the #8605 family pattern, CI fails with exit 2 (see script header).
 #
 # Historical record of the drain:
-# - sdk_tool_contract.ml:377 (param_type_of_schema) — #8832 split into
+# - agent_core_tool_contract.ml:377 (param_type_of_schema) — #8832 split into
 #   param_type_of_schema_opt (sound-partial) + warn-and-default wrapper.
 # - activity_graph_types.ml:89 (span_status_of_string) — #8895 sound-partial
 #   template (mirrors #8779 node_status).

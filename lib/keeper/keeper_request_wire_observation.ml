@@ -1,7 +1,7 @@
 let metric = Keeper_metrics.RuntimeRequestWireBytes
 
 (* Powers-of-two byte-scale measurement buckets. These are histogram schema,
-   not admission thresholds: OAS and each runtime's provider configuration
+   not admission thresholds: AGENT_CORE and each runtime's provider configuration
    remain the only request-size authorities. The finite bounds cover the
    current 64 KiB, 256 KiB and 1 MiB declared-cap fixtures exactly and retain
    useful resolution through 8 MiB; the metric store adds +Inf. *)
@@ -35,7 +35,7 @@ let record ~keeper_name ~runtime_id ~max_request_body_bytes ~body_bytes =
 ;;
 
 let observer ?on_observation ~keeper_name ~runtime_id ~max_request_body_bytes
-  : Agent_sdk.Agent.pre_dispatch_serialization_observer
+  : Agent_core.Agent.pre_dispatch_serialization_observer
   =
   fun observation ->
   let body_bytes = observation.Llm_provider.Request_wire_observer.body_bytes in

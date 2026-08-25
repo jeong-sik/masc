@@ -1,7 +1,10 @@
 import { html } from 'htm/preact'
 import { formatContextTokens } from '../lib/format-number'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
+import type {
+  DashboardRuntimeProviderSnapshot,
+  RuntimeTomlEditorProtocol,
+} from '../api/dashboard'
 import {
   findRuntimeCatalogEntry,
   loadRuntimeCatalog,
@@ -15,14 +18,12 @@ import {
   runtimeCatalogSnapshotFacts,
 } from '../lib/runtime-provider-summary'
 import {
-  isRuntimeTomlNonMaterializableProtocol,
   isReservedRuntimeTomlId,
   isValidRuntimeTomlIdFormat,
+  enabledRuntimeIds,
   parseRuntimeTomlEnvironment,
-  RUNTIME_TOML_CREATABLE_PROTOCOLS,
   type RuntimeTomlCredentialType,
   type RuntimeTomlEnvironment,
-  type RuntimeTomlProtocol,
   type RuntimeTomlProvider,
 } from '../lib/runtime-toml-config'
 import { keepers } from '../store'
@@ -38,7 +39,7 @@ export type RuntimeStructuredSection =
   | 'bindings'
   | 'assignments'
 
-export type RuntimeBindingEditableField = 'max-concurrent' | 'keep-alive' | 'num-ctx'
+export type RuntimeBindingEditableField = 'enabled' | 'max-concurrent' | 'keep-alive' | 'num-ctx'
 export type RuntimeProviderTransportEditableField = 'endpoint' | 'command'
 
 // Basic-field-only payloads (RFC-0273 §3.2 reuse boundary). Per-model
@@ -46,19 +47,18 @@ export type RuntimeProviderTransportEditableField = 'endpoint' | 'command'
 // ...) are deliberately excluded — those are semantically coupled to real,
 // per-model verified behavior (see runtime.toml's own inline caveats), not
 // something a generic add form can default safely. They stay raw-TOML-only.
-// transportKind is fixed to 'endpoint': CLI (`command`) transport providers
-// resolve to no provider_kind on the backend today and get silently dropped
-// from the live runtime list rather than failing the save (see
-// RUNTIME_TOML_CREATABLE_PROTOCOLS in lib/runtime-toml-config.ts). Until that
-// backend limitation is lifted, this form cannot offer command transport.
+// Generic providers use endpoint transport. A typed official-client protocol
+// may require command transport; that exception is selected by protocol and
+// never exposed as a free-form transport switch.
 export interface NewRuntimeProviderInput {
   id: string
   displayName: string
-  protocol: RuntimeTomlProtocol
-  transportKind: 'endpoint'
+  protocol: string
+  transportKind: 'endpoint' | 'command'
   transportValue: string
   credentialType: RuntimeTomlCredentialType
   credentialValue: string
+  isNonInteractive: boolean
 }
 
 export interface NewRuntimeModelInput {
@@ -73,19 +73,20 @@ export interface NewRuntimeModelInput {
 
 interface RuntimeEnvironmentEditorProps {
   sourceText: string
+  providerProtocols: RuntimeTomlEditorProtocol[]
   section: RuntimeStructuredSection
   disabled?: boolean
   draftDirty?: boolean
   saving?: boolean
   onRoutingChange: (
-    lane: 'default' | 'cross_verifier',
+    lane: 'default',
     runtimeId: string | null,
   ) => void
   onAssignmentChange: (keeperName: string, runtimeId: string | null) => void
   onBindingFieldChange: (
     runtimeId: string,
     field: RuntimeBindingEditableField,
-    value: string | number | null,
+    value: string | number | boolean | null,
   ) => void
   onAddProvider: (input: NewRuntimeProviderInput) => void
   onAddModel: (input: NewRuntimeModelInput) => void
@@ -96,6 +97,7 @@ interface RuntimeEnvironmentEditorProps {
     field: RuntimeProviderTransportEditableField,
     value: string,
   ) => void
+  onProviderEnabledChange: (providerId: string, enabled: boolean) => void
   onProviderCredentialChange: (
     providerId: string,
     credentialType: RuntimeTomlCredentialType,
@@ -103,12 +105,8 @@ interface RuntimeEnvironmentEditorProps {
   ) => void
 }
 
-function firstId<T extends { id: string }>(items: T[]): string {
-  return items[0]?.id ?? ''
-}
-
 function runtimeOptions(environment: RuntimeTomlEnvironment): string[] {
-  return environment.bindings.map(binding => binding.id)
+  return enabledRuntimeIds(environment)
 }
 
 function credentialValue(provider: RuntimeTomlProvider): string {
@@ -126,21 +124,25 @@ function transportValue(provider: RuntimeTomlProvider): string {
 interface NewProviderDraft {
   id: string
   displayName: string
-  protocol: RuntimeTomlProtocol
-  transportKind: 'endpoint'
+  protocol: string
+  transportKind: 'endpoint' | 'command'
   transportValue: string
   credentialType: RuntimeTomlCredentialType
   credentialValue: string
+  isNonInteractive: boolean
 }
 
-const DEFAULT_NEW_PROVIDER: NewProviderDraft = {
-  id: '',
-  displayName: '',
-  protocol: RUNTIME_TOML_CREATABLE_PROTOCOLS[0],
-  transportKind: 'endpoint',
-  transportValue: '',
-  credentialType: 'env',
-  credentialValue: '',
+function newProviderDraft(protocol: RuntimeTomlEditorProtocol): NewProviderDraft {
+  return {
+    id: '',
+    displayName: '',
+    protocol: protocol.protocol,
+    transportKind: protocol.transport,
+    transportValue: '',
+    credentialType: protocol.credential_policy === 'forbidden' ? 'none' : 'env',
+    credentialValue: '',
+    isNonInteractive: protocol.requires_non_interactive,
+  }
 }
 
 // jsonSupport as a 3-way string enum (not boolean|null) because <select> values
@@ -273,6 +275,7 @@ function keeperDotTone(status: string): string {
 
 export function RuntimeEnvironmentEditor({
   sourceText,
+  providerProtocols,
   section,
   disabled,
   draftDirty,
@@ -285,13 +288,22 @@ export function RuntimeEnvironmentEditor({
   onAddBinding,
   onDeleteProvider,
   onProviderTransportChange,
+  onProviderEnabledChange,
   onProviderCredentialChange,
 }: RuntimeEnvironmentEditorProps) {
+  const defaultProviderProtocol = providerProtocols[0]
+  if (!defaultProviderProtocol) {
+    throw new Error('runtime provider protocol inventory must not be empty')
+  }
+  const defaultProviderDraft = useMemo(
+    () => newProviderDraft(defaultProviderProtocol),
+    [defaultProviderProtocol],
+  )
   const environment = useMemo(() => parseRuntimeTomlEnvironment(sourceText), [sourceText])
   const [modelQuery, setModelQuery] = useState('')
 
   const [providerFormOpen, setProviderFormOpen] = useState(false)
-  const [newProvider, setNewProvider] = useState<NewProviderDraft>(DEFAULT_NEW_PROVIDER)
+  const [newProvider, setNewProvider] = useState<NewProviderDraft>(defaultProviderDraft)
   const [providerFormError, setProviderFormError] = useState<string | null>(null)
   const [providerDeleteError, setProviderDeleteError] = useState<string | null>(null)
 
@@ -306,7 +318,6 @@ export function RuntimeEnvironmentEditor({
   const runtimeIds = runtimeOptions(environment)
   const isDisabled = disabled === true || saving === true
 
-  const crossVerifierLane = environment.crossVerifierRuntimeId
   const assignments = environment.assignments
   const keeperList = keepers.value
   const typedPatchDisabled = isDisabled || draftDirty === true
@@ -325,10 +336,6 @@ export function RuntimeEnvironmentEditor({
 
   function updateDefault(runtimeId: string) {
     if (runtimeId !== '') onRoutingChange('default', runtimeId)
-  }
-
-  function updateRoutingLane(lane: 'cross_verifier', runtimeId: string) {
-    onRoutingChange(lane, runtimeId === '' ? null : runtimeId)
   }
 
   function updateAssignment(keeperName: string, runtimeId: string) {
@@ -376,7 +383,20 @@ export function RuntimeEnvironmentEditor({
     }
     const transportValue = newProvider.transportValue.trim()
     if (transportValue === '') {
-      setProviderFormError('endpoint를 입력하세요')
+      setProviderFormError(`${newProvider.transportKind}를 입력하세요`)
+      return
+    }
+    const protocol = providerProtocols.find(entry => entry.protocol === newProvider.protocol)
+    if (!protocol) {
+      setProviderFormError('백엔드 runtime protocol inventory에 없는 provider입니다')
+      return
+    }
+    if (
+      newProvider.transportKind !== protocol.transport
+      || newProvider.isNonInteractive !== protocol.requires_non_interactive
+      || (protocol.credential_policy === 'forbidden' && newProvider.credentialType !== 'none')
+    ) {
+      setProviderFormError('provider 설정이 백엔드 runtime protocol 계약과 일치하지 않습니다')
       return
     }
     const trimmedCredentialValue = newProvider.credentialValue.trim()
@@ -391,7 +411,7 @@ export function RuntimeEnvironmentEditor({
       transportValue,
       credentialValue: trimmedCredentialValue,
     })
-    setNewProvider(DEFAULT_NEW_PROVIDER)
+    setNewProvider(defaultProviderDraft)
     setProviderFormError(null)
     setProviderDeleteError(null)
     setProviderFormOpen(false)
@@ -441,37 +461,19 @@ export function RuntimeEnvironmentEditor({
       setBindingFormError('provider와 model을 모두 선택하세요')
       return
     }
-    // A binding pin is written as a top-level `[providerId.modelId]` table.
-    // bindingSections() on read already excludes RESERVED_TOP_LEVEL first
-    // segments (providers/models/runtime/...), so a provider id that collides
-    // with one of those is silently unreadable after save -- or worse, if the
-    // model id also matches an existing `[models.<id>]` model definition, the
-    // binding table collides with it outright. New providers can never get a
-    // reserved id (runtimeTomlIdError), but this dropdown lists whatever is
-    // already in environment.providers, which can include a legacy/hand-edited
-    // provider that predates that check -- so guard here too.
+    // Backend validation rejects this source on save. Keep the same reason at
+    // the draft boundary so the operator sees it before attempting the write.
     if (isReservedRuntimeTomlId(bindingProviderId)) {
       setBindingFormError(`"${bindingProviderId}"는 예약된 이름이라 바인딩 provider로 쓸 수 없습니다`)
       return
     }
-    // A `command` transport provider always resolves to no provider_kind on the
-    // backend, so materialize_config's filter_map silently drops any binding
-    // pinned to it from the live runtime list. The add-provider form can no
-    // longer create one, but this dropdown lists every parsed provider,
-    // including a `command` one that already exists via raw TOML / legacy config.
     const selectedProvider = environment.providers.find(p => p.id === bindingProviderId)
-    if (selectedProvider?.transportKind === 'command') {
+    const selectedProtocol = providerProtocols.find(
+      protocol => protocol.protocol === selectedProvider?.protocol,
+    )
+    if (selectedProvider?.transportKind === 'command' && selectedProtocol?.semantics !== 'official_client') {
       setBindingFormError(
         `"${bindingProviderId}"는 command(CLI) transport라 바인딩을 생성할 수 없습니다 (백엔드가 아직 CLI provider를 라우팅하지 못합니다)`,
-      )
-      return
-    }
-    // Protocol-only non-materialization is limited to Messages_api. Other
-    // protocols, including openai-compatible-cli, are valid when the provider
-    // uses endpoint/HTTP transport.
-    if (selectedProvider && isRuntimeTomlNonMaterializableProtocol(selectedProvider.protocol)) {
-      setBindingFormError(
-        `"${bindingProviderId}"는 ${selectedProvider.protocol} protocol이라 바인딩을 생성할 수 없습니다 (백엔드가 아직 이 provider를 라우팅하지 못합니다)`,
       )
       return
     }
@@ -492,7 +494,7 @@ export function RuntimeEnvironmentEditor({
   // so the narrow Settings embed can wrap labels and controls.
 
   function laneRow(
-    lane: 'default' | 'cross_verifier',
+    lane: 'default',
     label: string,
     hint: string,
     value: string,
@@ -604,8 +606,8 @@ export function RuntimeEnvironmentEditor({
         </div>
       ` : null}
 
-      <!-- routing — runtime-editor.jsx:135-141. default and cross_verifier are
-           read from [runtime] and written back. -->
+      <!-- routing — runtime-editor.jsx:135-141. [runtime].default is read and
+           written back. -->
       <div class=${section === 'routing' ? '' : 'hidden'} data-testid="runtime-section-routing">
         <div class="rt-note">
           런타임 id = <span class="mono">provider.model</span> (binding key). 레인은 등록된 바인딩 중에서 고릅니다.
@@ -614,15 +616,8 @@ export function RuntimeEnvironmentEditor({
           'default',
           '기본 런타임',
           '[runtime].default — 배정 없는 keeper가 사용',
-          environment.defaultRuntimeId || firstId(environment.bindings),
+          environment.defaultRuntimeId || runtimeIds[0] || '',
           updateDefault,
-        )}
-        ${laneRow(
-          'cross_verifier',
-          'cross-verifier',
-          '[runtime].cross_verifier — 반-합리화 평가자',
-          crossVerifierLane,
-          runtimeId => updateRoutingLane('cross_verifier', runtimeId),
         )}
       </div>
 
@@ -641,12 +636,32 @@ export function RuntimeEnvironmentEditor({
           ` : null}
           ${environment.providers.map(provider => {
             const providerTransportField = transportField(provider)
+            const officialClient = providerProtocols.find(
+              protocol => protocol.protocol === provider.protocol,
+            )?.semantics === 'official_client'
             return html`
             <div key=${provider.id} class="rt-card" data-testid=${`runtime-provider-${provider.id}`}>
               <div class="rt-card-h">
                 <span class="rt-card-id mono">${provider.id}</span>
                 <span class="rt-card-name">${provider.displayName}</span>
                 <span class="rt-proto mono">${provider.protocol || '—'}</span>
+                <label class="rt-mini v2-mobile-operator-target">
+                  <span>enabled</span>
+                  <input
+                    type="checkbox"
+                    checked=${provider.enabled}
+                    disabled=${isDisabled}
+                    aria-label=${`${provider.id} provider enabled`}
+                    data-testid=${`runtime-provider-${provider.id}-enabled`}
+                    onChange=${(event: Event) => {
+                      onProviderEnabledChange(
+                        provider.id,
+                        (event.currentTarget as HTMLInputElement).checked,
+                      )
+                    }}
+                  />
+                </label>
+                ${officialClient ? html`<span class="rt-assign-tag pin mono">구독 CLI</span>` : null}
                 <button
                   type="button"
                   class="rt-delete-provider"
@@ -699,6 +714,15 @@ export function RuntimeEnvironmentEditor({
                   </span>
                   `}
               </div>
+              ${officialClient ? html`
+                <div class="rt-field" data-testid=${`runtime-provider-${provider.id}-subscription-boundary`}>
+                  <span class="sub-k">execution</span>
+                  <span class="mono">official client · ${provider.isNonInteractive ? 'non-interactive' : '설정 오류: interactive'}</span>
+                </div>
+                ${provider.credentialType !== 'none' ? html`
+                  <div class="rt-warn" role="alert">공식 구독 클라이언트에는 API credential을 선언할 수 없습니다.</div>
+                ` : null}
+              ` : null}
               ${/* Provider capability chips (mcp-tools/tool-events/mcp-http-headers)
                    had no live source and rendered as if confirmed. Removed until a
                    provider-capability source exists, rather than implying support
@@ -747,29 +771,47 @@ export function RuntimeEnvironmentEditor({
                     value=${newProvider.protocol}
                     disabled=${isDisabled}
                     aria-label="새 provider protocol"
-                    onChange=${(event: Event) => setNewProvider({ ...newProvider, protocol: (event.currentTarget as HTMLSelectElement).value as RuntimeTomlProtocol })}
+                    onChange=${(event: Event) => {
+                      const protocolName = (event.currentTarget as HTMLSelectElement).value
+                      const protocol = providerProtocols.find(entry => entry.protocol === protocolName)
+                      if (protocol) {
+                        setNewProvider({
+                          ...newProviderDraft(protocol),
+                          id: newProvider.id,
+                          displayName: newProvider.displayName,
+                        })
+                      }
+                    }}
                   >
-                    ${RUNTIME_TOML_CREATABLE_PROTOCOLS.map(p => html`<option value=${p}>${p}</option>`)}
+                    ${providerProtocols.map(protocol => html`
+                      <option value=${protocol.protocol}>${protocol.protocol}</option>
+                    `)}
                   </select>
                 </div>
                 <div class="rt-field">
-                  <span class="sub-k">endpoint</span>
+                  <span class="sub-k">${newProvider.transportKind}</span>
                   <input
                     class="rt-input mono"
                     value=${newProvider.transportValue}
-                    placeholder="https://..."
+                    placeholder=${newProvider.transportKind === 'command' ? '/absolute/path/to/codex' : 'https://...'}
                     disabled=${isDisabled}
                     aria-label="새 provider transport 값"
                     onInput=${(event: Event) => setNewProvider({ ...newProvider, transportValue: (event.currentTarget as HTMLInputElement).value })}
                   />
                 </div>
-                <div class="rt-note">CLI(command) provider는 현재 백엔드에서 라우팅되지 않아 이 폼에서 생성할 수 없습니다. raw TOML 탭을 이용하세요.</div>
+                <div class="rt-note">
+                  ${providerProtocols.find(protocol => protocol.protocol === newProvider.protocol)?.semantics === 'official_client'
+                    ? '구독 로그인 사용 · API key 미저장 · non-interactive 강제'
+                    : '일반 provider는 endpoint transport를 사용합니다.'}
+                </div>
                 <div class="rt-field">
                   <span class="sub-k">credential</span>
                   <select
                     class="rt-select rt-select-narrow"
                     value=${newProvider.credentialType}
-                    disabled=${isDisabled}
+                    disabled=${isDisabled || providerProtocols.find(
+                      protocol => protocol.protocol === newProvider.protocol,
+                    )?.credential_policy === 'forbidden'}
                     aria-label="새 provider credential 종류"
                     onChange=${(event: Event) => setNewProvider({ ...newProvider, credentialType: (event.currentTarget as HTMLSelectElement).value as RuntimeTomlCredentialType })}
                   >
@@ -803,7 +845,7 @@ export function RuntimeEnvironmentEditor({
                     type="button"
                     class="rt-add-cancel"
                     disabled=${isDisabled}
-                    onClick=${() => { setProviderFormOpen(false); setNewProvider(DEFAULT_NEW_PROVIDER); setProviderFormError(null) }}
+                    onClick=${() => { setProviderFormOpen(false); setNewProvider(defaultProviderDraft); setProviderFormError(null) }}
                   >취소</button>
                 </div>
               </div>
@@ -818,8 +860,8 @@ export function RuntimeEnvironmentEditor({
            when the key is present. There is no effort/thinking-control-format
            chip here: this list has no runtime binding, so there is no catalog
            entry to resolve it against, and the raw thinking-control-format key
-           in runtime.toml is inert (OAS request-building never reads it — see
-           masc #21521 / oas models.toml). Showing it back to the operator here
+           in runtime.toml is inert (Agent Core request-building never reads it — see
+           masc #21521 / agentCore models.toml). Showing it back to the operator here
            invited editing a dead key as if it mattered. -->
       <div class=${section === 'models' ? '' : 'hidden'} data-testid="runtime-section-models">
         <input
@@ -864,7 +906,7 @@ export function RuntimeEnvironmentEditor({
             </div>
           `)}
           ${filteredModels.length === 0 ? html`
-            <div class="rt-note" data-testid="runtime-models-empty">일치하는 모델이 없습니다.</div>
+            <div class="rt-note" data-testid="runtime-models-empty">일치하는 모델 없음</div>
           ` : null}
           <div class="rt-model rt-card-add" data-testid="runtime-add-model-card">
             ${!modelFormOpen ? html`
@@ -985,7 +1027,7 @@ export function RuntimeEnvironmentEditor({
            price-input/price-output (runtime_toml.ml:600-601). The effort mode
            is NOT shown here — it lives in the catalog-derived "effective" row
            rendered by RuntimeBindingCatalogSpec just below, which is the value
-           OAS request-building actually uses (the raw runtime.toml
+           Agent Core request-building actually uses (the raw runtime.toml
            thinking-control-format key is inert; masc #21521). -->
       <div class=${section === 'bindings' ? '' : 'hidden'} data-testid="runtime-section-bindings">
         <div class="rt-binds">
@@ -1031,6 +1073,10 @@ export function RuntimeEnvironmentEditor({
           ${environment.bindings.map(binding => {
             const isDefault = binding.id === environment.defaultRuntimeId || binding.isDefault
             const model = environment.models.find(m => m.id === binding.modelId) ?? null
+            const providerEnabled = environment.providers.find(
+              provider => provider.id === binding.providerId,
+            )?.enabled === true
+            const effectiveEnabled = binding.enabled && providerEnabled
             return html`
               <div key=${binding.id} class="rt-bind ${isDefault ? 'is-default' : ''}">
                 <button
@@ -1045,6 +1091,7 @@ export function RuntimeEnvironmentEditor({
                 <div class="rt-bind-main">
                   <div class="rt-bind-key mono">
                     ${binding.id}${isDefault ? html`<span class="rt-default-tag">default</span>` : null}
+                    ${effectiveEnabled ? null : html`<span class="rt-default-tag">disabled</span>`}
                   </div>
                   <div class="rt-bind-sub mono">
                     ${protoContext(model?.maxContext ?? null)}${binding.priceInput != null
@@ -1054,6 +1101,23 @@ export function RuntimeEnvironmentEditor({
                   <${RuntimeBindingCatalogSpec} runtimeId=${binding.id} />
                 </div>
                 <div class="rt-bind-fields">
+                  <label class="rt-mini v2-mobile-operator-target">
+                    <span>enabled</span>
+                    <input
+                      type="checkbox"
+                      checked=${binding.enabled}
+                      disabled=${isDisabled}
+                      aria-label=${`${binding.id} enabled`}
+                      data-testid=${`runtime-binding-${binding.id}-enabled`}
+                      onChange=${(event: Event) => {
+                        onBindingFieldChange(
+                          binding.id,
+                          'enabled',
+                          (event.currentTarget as HTMLInputElement).checked,
+                        )
+                      }}
+                    />
+                  </label>
                   <label class="rt-mini">
                     <span>max-conc</span>
                     <input
@@ -1113,7 +1177,7 @@ export function RuntimeEnvironmentEditor({
             [runtime.assignments] — keeper → 런타임 id.
           </div>
           ${keeperList.length === 0 ? html`
-            <div class="rt-note" data-testid="runtime-assignments-empty">표시할 keeper가 없습니다.</div>
+            <div class="rt-note" data-testid="runtime-assignments-empty">표시할 keeper 없음</div>
           ` : html`
             <div class="rt-assign-summary mono" data-testid="runtime-assignments-summary">
               고정 ${pinnedAssignments.length}개 · default 폴백 ${fallbackAssignments.length}개

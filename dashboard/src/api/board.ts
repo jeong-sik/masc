@@ -1,11 +1,11 @@
-import { currentDashboardActor, get, post, del, put, withRetries, defaultBoardVoter } from './core'
+import { currentDashboardActor, get, post, del, put, runRequest, defaultBoardVoter } from './core'
 import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
 import { normalizePendingConfirmation } from '../pending-confirm'
 import { timeBoardRequest } from '../board-metrics'
 import type {
   BoardActorIdentity, BoardPost, BoardPostOrigin, BoardComment, BoardReactionSummary,
   BoardReactionState, BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
-  BoardVoteDirection, BoardModerationStatus, BoardContributorQuality,
+  BoardVoteDirection,
     BoardAttachmentDecode, BoardAttachmentKind,
     BoardCurationSnapshot, BoardKarmaLedger, BoardKarmaLedgerEvent, BoardKarmaTotal,
     KeeperApprovalQueueItem, KeeperExactAttemptState,
@@ -553,50 +553,6 @@ function normalizeBoardVoteDirection(raw: unknown): BoardVoteDirection | null {
   return direction === 'up' || direction === 'down' ? direction : null
 }
 
-function normalizeBoardModerationStatus(raw: unknown): BoardModerationStatus {
-  const status = asString(raw, '').trim().toLowerCase()
-  switch (status) {
-    case 'flagged':
-    case 'approved':
-    case 'removed':
-    case 'hidden':
-    case 'warned':
-      return status
-    default:
-      return 'none'
-  }
-}
-
-function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality | null {
-  if (!isRecord(raw)) return null
-  const completionRate = asNumber(raw.completion_rate)
-  const responseRate = asNumber(raw.response_rate)
-  const boardPosts = asNumber(raw.board_posts)
-  const boardComments = asNumber(raw.board_comments)
-  const source = asString(raw.source, '').trim() || undefined
-  const rawEvidenceState = asString(raw.evidence_state, '').trim()
-  const evidenceState = rawEvidenceState === 'measured' || rawEvidenceState === 'default'
-    ? rawEvidenceState
-    : undefined
-
-  if (
-    completionRate === undefined
-    && responseRate === undefined
-    && boardPosts === undefined
-    && boardComments === undefined
-    && source === undefined
-    && evidenceState === undefined
-  ) return null
-  return {
-    source,
-    completion_rate: completionRate,
-    response_rate: responseRate,
-    board_posts: boardPosts,
-    board_comments: boardComments,
-    evidence_state: evidenceState,
-  }
-}
-
 // RFC-0233 §7: parse the typed origin object (post_to_yojson_with_karma emits
 // turn_ref / source / fusion_run_id). Parse, don't repair: a non-object or an
 // all-absent origin -> null (no empty record); each sub-field degrades
@@ -628,8 +584,6 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
   const votes = asNumber(raw.votes, score || (votesUp - votesDown))
   const currentVote = normalizeBoardVoteDirection(raw.current_vote)
   const hasVoted = typeof raw.has_voted === 'boolean' ? raw.has_voted : currentVote !== null
-  const voteBlind = raw.vote_blind === true
-  const voteBlindReason = asString(raw.vote_blind_reason, '').trim() || undefined
   const commentCount = asNumber(raw.comment_count, asNumber(raw.reply_count, 0))
   const flairValue = (() => {
     const flair = raw.flair
@@ -678,8 +632,6 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     tags,
     votes,
     vote_balance: score,
-    vote_blind: voteBlind,
-    ...(voteBlindReason ? { vote_blind_reason: voteBlindReason } : {}),
     current_vote: currentVote,
     has_voted: hasVoted,
     comment_count: commentCount,
@@ -695,9 +647,6 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
         : '')
       || null,
     hearth_count: asNumber(raw.hearth_count, 0),
-    report_count: Math.max(0, Math.trunc(asNumber(raw.report_count, 0))),
-    moderation_status: normalizeBoardModerationStatus(raw.moderation_status),
-    contributor_quality: normalizeBoardContributorQuality(raw.contributor_quality),
     ...(reactions !== undefined ? { reactions } : {}),
     ...(supportedReactionEmojis !== undefined
       ? { supported_reaction_emojis: supportedReactionEmojis }
@@ -719,8 +668,6 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
   const votes = asNumber(raw.votes, score)
   const currentVote = normalizeBoardVoteDirection(raw.current_vote)
   const hasVoted = typeof raw.has_voted === 'boolean' ? raw.has_voted : currentVote !== null
-  const voteBlind = raw.vote_blind === true
-  const voteBlindReason = asString(raw.vote_blind_reason, '').trim() || undefined
   const reactions = Array.isArray(raw.reactions)
     ? raw.reactions
         .map(normalizeBoardReactionSummary)
@@ -739,12 +686,8 @@ function normalizeBoardComment(raw: unknown): BoardComment | null {
     vote_balance: score,
     votes_up: votesUp,
     votes_down: votesDown,
-    vote_blind: voteBlind,
-    ...(voteBlindReason ? { vote_blind_reason: voteBlindReason } : {}),
     current_vote: currentVote,
     has_voted: hasVoted,
-    report_count: Math.max(0, Math.trunc(asNumber(raw.report_count, 0))),
-    moderation_status: normalizeBoardModerationStatus(raw.moderation_status),
     ...(reactions !== undefined ? { reactions } : {}),
     ...(supportedReactionEmojis !== undefined
       ? { supported_reaction_emojis: supportedReactionEmojis }
@@ -989,10 +932,9 @@ export async function fetchBoard(
     excludeAutomation?: boolean
     author?: string
     hearth?: string
-    blindVotes?: boolean
   },
 ): Promise<{ posts: BoardPost[] }> {
-  return timeBoardRequest('list', () => withRetries('fetchBoard', async () => {
+  return timeBoardRequest('list', () => runRequest('fetchBoard', async () => {
     const params = new URLSearchParams()
     if (sortBy) params.set('sort_by', sortBy)
     if (options?.excludeSystem) params.set('exclude_system', 'true')
@@ -1000,7 +942,6 @@ export async function fetchBoard(
     if (options?.author) params.set('author', options.author)
     if (options?.hearth) params.set('hearth', options.hearth)
     params.set('voter', currentDashboardActor())
-    if (options?.blindVotes) params.set('blind_votes', 'true')
     params.set('limit', options?.excludeSystem || options?.excludeAutomation || options?.author || options?.hearth ? '150' : '100')
     const qs = params.toString()
     const raw = await get<{ posts?: unknown[] }>(`/api/v1/board${qs ? `?${qs}` : ''}`)
@@ -1011,9 +952,16 @@ export async function fetchBoard(
   }))
 }
 
-export async function fetchBoardHearths(): Promise<BoardHearth[]> {
-  return withRetries('fetchBoardHearths', async () => {
-    const raw = await get<{ hearths?: unknown[] }>('/api/v1/board/hearths')
+export async function fetchBoardHearths(options: {
+  excludeSystem?: boolean
+  excludeAutomation?: boolean
+} = {}): Promise<BoardHearth[]> {
+  return runRequest('fetchBoardHearths', async () => {
+    const params = new URLSearchParams()
+    if (options.excludeSystem) params.set('exclude_system', 'true')
+    if (options.excludeAutomation) params.set('exclude_automation', 'true')
+    const qs = params.toString()
+    const raw = await get<{ hearths?: unknown[] }>(`/api/v1/board/hearths${qs ? `?${qs}` : ''}`)
     return Array.isArray(raw.hearths)
       ? raw.hearths.map(normalizeBoardHearth).filter((row): row is BoardHearth => row !== null)
       : []
@@ -1021,7 +969,7 @@ export async function fetchBoardHearths(): Promise<BoardHearth[]> {
 }
 
 export async function fetchBoardFlairs(): Promise<BoardFlair[]> {
-  return withRetries('fetchBoardFlairs', async () => {
+  return runRequest('fetchBoardFlairs', async () => {
     const raw = await get<{ flairs?: unknown[] }>('/api/v1/board/flairs')
     return Array.isArray(raw.flairs)
       ? raw.flairs.map(normalizeBoardFlair).filter((row): row is BoardFlair => row !== null)
@@ -1030,14 +978,14 @@ export async function fetchBoardFlairs(): Promise<BoardFlair[]> {
 }
 
 export async function fetchBoardCuration(): Promise<BoardCurationSnapshot | null> {
-  return withRetries('fetchBoardCuration', async () => {
+  return runRequest('fetchBoardCuration', async () => {
     const raw = await get<{ snapshot?: unknown }>('/api/v1/board/curation')
     return raw.snapshot != null ? normalizeBoardCurationSnapshot(raw.snapshot) : null
   })
 }
 
 export async function fetchBoardKarmaLedger(options: { agent?: string; limit?: number } = {}): Promise<BoardKarmaLedger> {
-  return withRetries('fetchBoardKarmaLedger', async () => {
+  return runRequest('fetchBoardKarmaLedger', async () => {
     const params = new URLSearchParams()
     const agent = options.agent?.trim()
     if (agent) params.set('agent', agent)
@@ -1054,7 +1002,7 @@ export async function fetchBoardReactionState(
   targetType: BoardReactionTargetType,
   targetId: string,
 ): Promise<BoardReactionState> {
-  return timeBoardRequest('reaction_summary', () => withRetries('fetchBoardReactionState', async () => {
+  return timeBoardRequest('reaction_summary', () => runRequest('fetchBoardReactionState', async () => {
     const params = new URLSearchParams({
       target_type: targetType,
       target_id: targetId,
@@ -1078,12 +1026,52 @@ export async function fetchBoardReactionState(
   }))
 }
 
+/**
+ * Reaction state for a page of targets in one request.
+ *
+ * The board list is a public, cached projection and reaction state is per
+ * viewer -- whether *you* reacted -- so the two cannot travel together. Asking
+ * per row made twenty of the twenty-three requests that opening the board sent.
+ */
+export async function fetchBoardReactionsBatch(
+  targetType: BoardReactionTargetType,
+  targetIds: readonly string[],
+): Promise<{ byTargetId: Map<string, BoardReactionSummary[]>; supportedEmojis: string[] }> {
+  const wanted = targetIds.filter(id => id !== '')
+  if (wanted.length === 0) return { byTargetId: new Map(), supportedEmojis: [] }
+  return timeBoardRequest('reaction_summary', () => runRequest('fetchBoardReactionsBatch', async () => {
+    const params = new URLSearchParams({
+      target_type: targetType,
+      target_ids: wanted.join(','),
+    })
+    const raw = await get<unknown>(`/api/v1/board/reactions/batch?${params}`)
+    if (!isRecord(raw) || !Array.isArray(raw.targets)) {
+      throw new Error('Malformed board reaction batch: targets must be an array')
+    }
+    const supportedEmojis = normalizeSupportedReactionEmojis(raw.supported_reaction_emojis)
+    if (!supportedEmojis || supportedEmojis.length === 0) {
+      throw new Error('Malformed board reaction batch: supported_reaction_emojis is required')
+    }
+    const byTargetId = new Map<string, BoardReactionSummary[]>()
+    for (const row of raw.targets) {
+      if (!isRecord(row) || typeof row.target_id !== 'string' || !Array.isArray(row.reactions)) {
+        throw new Error('Malformed board reaction batch: each target needs an id and reactions')
+      }
+      const summaries = row.reactions.map(normalizeBoardReactionSummary)
+      if (summaries.some(entry => entry === null)) {
+        throw new Error('Malformed board reaction batch: invalid reaction summary')
+      }
+      byTargetId.set(row.target_id, summaries as BoardReactionSummary[])
+    }
+    return { byTargetId, supportedEmojis }
+  }))
+}
+
 export async function fetchBoardPost(postId: string): Promise<BoardPost & { comments: BoardComment[] }> {
-  return timeBoardRequest('detail', () => withRetries('fetchBoardPost', async () => {
+  return timeBoardRequest('detail', () => runRequest('fetchBoardPost', async () => {
     const params = new URLSearchParams({
       format: 'flat',
       voter: currentDashboardActor(),
-      blind_votes: 'true',
     })
     const raw = await get<Record<string, unknown>>(`/api/v1/board/${postId}?${params}`)
     const postRaw = isRecord(raw.post) ? raw.post : raw
@@ -1117,7 +1105,6 @@ export function votePost(postId: string, direction: 'up' | 'down'): Promise<unkn
   return post('/api/v1/tools/masc_board_vote', {
     post_id: postId,
     direction,
-    vote: direction,
     voter: defaultBoardVoter(),
   })
 }
@@ -1126,7 +1113,6 @@ export function voteComment(commentId: string, direction: 'up' | 'down'): Promis
   return post('/api/v1/tools/masc_board_comment_vote', {
     comment_id: commentId,
     direction,
-    vote: direction,
     voter: defaultBoardVoter(),
   })
 }
@@ -1224,7 +1210,7 @@ export function normalizeSubBoard(raw: unknown): SubBoard | null {
 }
 
 export async function fetchSubBoards(): Promise<SubBoard[]> {
-  const data = await withRetries('fetchSubBoards', () => get('/api/v1/board/sub-boards'))
+  const data = await runRequest('fetchSubBoards', () => get('/api/v1/board/sub-boards'))
   if (!isRecord(data)) return []
   const raw = Array.isArray(data.sub_boards) ? data.sub_boards : []
   return raw.flatMap((r: unknown) => {
@@ -1234,7 +1220,7 @@ export async function fetchSubBoards(): Promise<SubBoard[]> {
 }
 
 export async function fetchSubBoard(subBoardId: string): Promise<SubBoard | null> {
-  const data = await withRetries('fetchSubBoard', () => get(`/api/v1/board/sub-boards/${encodeURIComponent(subBoardId)}`))
+  const data = await runRequest('fetchSubBoard', () => get(`/api/v1/board/sub-boards/${encodeURIComponent(subBoardId)}`))
   return normalizeSubBoard(data)
 }
 

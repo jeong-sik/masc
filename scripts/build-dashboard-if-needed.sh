@@ -119,5 +119,17 @@ if needs_rebuild; then
   touch "$STAMP"
   echo "[dashboard] Build complete." >&2
 else
-  echo "[dashboard] Up to date, skipping." >&2
+  # Binary-only deploys leave the stamp older than the freshly built server
+  # binary, and the server compares stamp mtime against its own executable
+  # (lib/web_dashboard.ml bundle_freshness) — so /health reported the bundle
+  # as stale even though it matches the sources (#28973). The stamp asserts
+  # source-bundle consistency; when that holds (needs_rebuild said no) and
+  # the server binary is newer, refresh the stamp instead of rebuilding.
+  server_bin="$REPO_ROOT/_build/default/bin/main_eio.exe"
+  if [ -f "$server_bin" ] && [ "$server_bin" -nt "$STAMP" ]; then
+    touch "$STAMP"
+    echo "[dashboard] Up to date; stamp refreshed past newer server binary (#28973)." >&2
+  else
+    echo "[dashboard] Up to date, skipping." >&2
+  fi
 fi

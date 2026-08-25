@@ -47,6 +47,7 @@ let model_execute_cwd_resolution_error ~config ~meta ~args ~cwd error =
   in
   Keeper_tool_execution.failure
     ~class_:Tool_result.Policy_rejection
+    ~effect_disposition:Tool_result.Proven_pre_effect
     (error_json ~fields message)
 
 let sandbox_target_label = function
@@ -88,8 +89,15 @@ let replay_args_of_gate_input input =
   | _ -> Error "approved Gate input is not an object"
 ;;
 
-let execute_secret_redaction ~base_path ~keeper_name =
-  Keeper_secret_redaction.snapshot ~base_path ~keeper_name
+let execute_secret_redaction
+      ~additional_secret_files
+      ~base_path
+      ~keeper_name
+  =
+  Keeper_secret_redaction.snapshot_with_additional_secret_files
+    ~additional_secret_files
+    ~base_path
+    ~keeper_name
 
 let redact_execute_text redaction text =
   Keeper_secret_redaction.redact_text redaction text
@@ -102,13 +110,63 @@ let redact_execute_output redaction ~stdout ~stderr =
   in
   stdout, stderr, output
 
+let composable_output_fields ~base_path ~stdout ~stderr ~output =
+  if String.length output <= Tool_bridge.default_externalize_threshold_bytes
+  then Ok [ "output", `String output ]
+  else
+    try
+      let store = Tool_blob_store.create ~base_path in
+      let store_stream bytes =
+        Tool_blob_store.put_durable store ~bytes ~mime:"text/plain"
+        |> Tool_output.normalized_artifact_ref_to_json
+      in
+      Ok
+        [ "output_artifact", store_stream output
+        ; "stdout_artifact", store_stream stdout
+        ; "stderr_artifact", store_stream stderr
+        ]
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+
 module For_testing = struct
+  (* Test seam: when set, [handle_tool_execute_typed] routes its dispatch
+     through this override instead of the real shell dispatch. The override
+     returns a controlled [Execute_shell_ir.dispatch_error] so tests can
+     drive each rejected-dispatch branch through the real production wiring
+     (stream start -> dispatch -> stream end) without spawning a process. *)
+  let dispatch_override
+      : (unit ->
+        ( Masc_exec.Exec_dispatch.dispatch_result
+        , Keeper_tooling.Execute_shell_ir.dispatch_error )
+        result)
+        option ref
+    = ref None
+
   let elapsed_duration_ms = elapsed_duration_ms
   let model_execute_location_fields = model_execute_location_fields
-  let execute_gate_input = execute_gate_input
-  let redact_execute_output ~base_path ~keeper_name ~stdout ~stderr =
-    let redaction = execute_secret_redaction ~base_path ~keeper_name in
+  let redact_execute_output_with_additional_secret_files
+        ~additional_secret_files
+        ~base_path
+        ~keeper_name
+        ~stdout
+        ~stderr
+    =
+    let redaction =
+      execute_secret_redaction
+        ~additional_secret_files
+        ~base_path
+        ~keeper_name
+    in
     redact_execute_output redaction ~stdout ~stderr
+
+  let redact_execute_output ~base_path ~keeper_name ~stdout ~stderr =
+    redact_execute_output_with_additional_secret_files
+      ~additional_secret_files:[]
+      ~base_path
+      ~keeper_name
+      ~stdout
+      ~stderr
 
 end
 
@@ -119,7 +177,14 @@ let assoc_upsert = Keeper_tool_execute_input.assoc_upsert
 let typed_input_command_text = Keeper_tool_execute_input.typed_input_command_text
 let typed_input_has_env = Keeper_tool_execute_input.typed_input_has_env
 let typed_input_timeout_sec = Keeper_tool_execute_input.typed_input_timeout_sec
+let typed_input_timeout_budget = Keeper_tool_execute_input.typed_input_timeout_budget
 let typed_validation_error_text = Keeper_tool_execute_input.typed_validation_error_text
+
+let typed_input_env
+      ({ env; _ } : Keeper_tool_execute_typed_input.execute_input)
+  =
+  env
+;;
 
 let normalize_path_for_keeper_tool_execute_shell_ir_containment path =
   Keeper_alerting_path.normalize_path_for_check path
@@ -127,25 +192,17 @@ let normalize_path_for_keeper_tool_execute_shell_ir_containment path =
 
 (* Backend target helpers for typed Shell IR dispatch. *)
 let docker_sandbox_target = Keeper_sandbox_shell_ir_target.docker_target
-let docker_local_fallback_target =
-  Keeper_sandbox_shell_ir_target.docker_local_fallback_target
 
-let input_with_cwd cwd = function
-  | Keeper_tool_execute_typed_input.Exec
-      { argv; cwd = _; env; timeout_sec; stdin; stdout; stderr } ->
-    Keeper_tool_execute_typed_input.Exec
-      { argv
-      ; cwd = Some cwd
-      ; env
-      ; timeout_sec
-      ; stdin
-      ; stdout
-      ; stderr
-      }
-  | Keeper_tool_execute_typed_input.Pipeline
-      { stages; cwd = _; env; timeout_sec } ->
-    Keeper_tool_execute_typed_input.Pipeline
-      { stages; cwd = Some cwd; env; timeout_sec }
+type dispatch_bundle =
+  { sandbox : Masc_exec.Sandbox_target.t
+  ; fields : (string * Yojson.Safe.t) list
+  ; base_host_env : string array option
+  ; github_secret_files : unit -> (string list, string) result
+  ; cleanup : unit -> unit
+  }
+
+let input_with_cwd cwd (input : Keeper_tool_execute_typed_input.execute_input) =
+  { input with Keeper_tool_execute_typed_input.cwd = Some cwd }
 
 let handle_tool_execute_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
@@ -157,10 +214,6 @@ let handle_tool_execute_typed
       ~(args : Yojson.Safe.t)
       ()
   =
-  let root = Keeper_alerting_path.project_root_of_config config in
-  let output_redaction =
-    execute_secret_redaction ~base_path:config.base_path ~keeper_name:meta.name
-  in
   match
     Keeper_tool_execute_path.resolve_tool_execute_cwd_typed
       ~config
@@ -189,6 +242,7 @@ let handle_tool_execute_typed
       | Error e ->
         Keeper_tool_execution.failure
           ~class_:Tool_result.Policy_rejection
+          ~effect_disposition:Tool_result.Proven_pre_effect
           (error_json
              ~fields:
                ([ "typed", `Bool true ] @ model_location_fields)
@@ -201,32 +255,79 @@ let handle_tool_execute_typed
            in
            Keeper_tool_execution.failure
              ~class_:Tool_result.Policy_rejection
+             ~effect_disposition:Tool_result.Proven_pre_effect
              (error_json ~fields (typed_validation_error_text e))
          | Ok () ->
         let cmd = typed_input_command_text input in
+        let timeout_budget = typed_input_timeout_budget input in
         let timeout_sec = typed_input_timeout_sec input in
         let input = input_with_cwd cwd input in
-        (* This location check only selects the explicit local-fallback route.
-           It is not authorization evidence. The outer Keeper Gate remains the
-           sole authorization boundary for every Execute request. *)
-        let in_playground = Keeper_tool_execute_path.in_playground ~root ~cwd ~meta in
         let sandbox_profile, _ =
           Keeper_sandbox_runner.effective_sandbox_profile ~meta
         in
         let local_dispatch_sandbox ?(extra_fields = []) () =
-          match
-            Keeper_secret_projection.local_env_for_keeper
-              ~base_path:config.base_path
-              ~keeper_name:meta.name
-              ()
-          with
+          match Keeper_github_identity.validate_local_tool_env (typed_input_env input) with
           | Error err ->
             Error
               (Keeper_sandbox_shell_ir_target.target_error
                  ~fields:extra_fields
-                 ("local_secret_projection_failed: " ^ err))
-          | Ok base_host_env ->
-            Ok (Masc_exec.Sandbox_target.host (), extra_fields, base_host_env)
+                 err)
+          | Ok () ->
+            (match
+               Keeper_secret_projection.local_env_for_keeper
+                 ~host_env:(Unix.environment ())
+                 ~base_path:config.base_path
+                 ~keeper_name:meta.name
+                 ()
+             with
+             | Error err ->
+               Error
+                 (Keeper_sandbox_shell_ir_target.target_error
+                    ~fields:extra_fields
+                    ("local_secret_projection_failed: " ^ err))
+             | Ok base_host_env ->
+               (match base_host_env with
+                | None ->
+                  Error
+                    (Keeper_sandbox_shell_ir_target.target_error
+                       ~fields:extra_fields
+                       "local_secret_projection_failed: projection returned no environment")
+                | Some env ->
+                  (match
+                     Keeper_github_identity.runtime_env_for_tool
+                       ~config
+                       ~keeper_name:meta.name
+                       env
+                   with
+                   | Error err ->
+                     Error
+                       (Keeper_sandbox_shell_ir_target.target_error
+                          ~fields:extra_fields
+                          ("local_github_identity_invalid: " ^ err))
+                   | Ok (env, identity_state, cleanup) ->
+                     let identity_field =
+                       match identity_state with
+                       | Keeper_github_identity.Unconfigured -> "unconfigured"
+                       | Configured _ -> "configured"
+                     in
+                     (match Keeper_github_identity.projected_config_dir env with
+                      | None ->
+                        cleanup ();
+                        Error
+                          (Keeper_sandbox_shell_ir_target.target_error
+                             ~fields:extra_fields
+                             "local GitHub identity projection has no GH_CONFIG_DIR")
+                      | Some github_config_dir ->
+                        Ok
+                          { sandbox = Masc_exec.Sandbox_target.host ()
+                          ; fields =
+                              ("github_identity", `String identity_field) :: extra_fields
+                          ; base_host_env = Some env
+                          ; github_secret_files =
+                              (fun () ->
+                                 Ok [ Filename.concat github_config_dir "hosts.yml" ])
+                          ; cleanup
+                          }))))
         in
         let dispatch_sandbox =
           match sandbox_profile with
@@ -237,38 +338,48 @@ let handle_tool_execute_typed
               Error
                 (Keeper_sandbox_shell_ir_target.target_error
                    "typed Shell IR Docker dispatch does not support env yet")
-            else (
-              match docker_local_fallback_target ~meta ?timeout_sec () with
-              | Some (target, fields) when in_playground ->
-                (match target with
-                 | Masc_exec.Sandbox_target.Host ->
-                   local_dispatch_sandbox ~extra_fields:fields ()
-                 | Docker _ -> Ok (target, fields, None))
-              | Some _ | None ->
-                docker_sandbox_target
-                  ~turn_sandbox_factory
-                  ~meta
-                  ~cwd
-                  ?timeout_sec
-                  ()
-                |> Result.map (fun target ->
-                  ( target
-                  , [ "requested_sandbox", `String "docker"
-                    ; "via", `String "docker"
-                    ; "sandbox_profile", `String "docker"
-                    ]
-                  , None )))
+            else
+              docker_sandbox_target
+                ~turn_sandbox_factory
+                ~meta
+                ~cwd
+                ~timeout_sec
+                ()
+              |> Result.map
+                   (fun
+                     (dispatch : Keeper_sandbox_shell_ir_target.docker_dispatch)
+                   ->
+                  { sandbox = dispatch.target
+                  ; fields =
+                      [ "requested_sandbox", `String "docker"
+                      ; "via", `String "docker"
+                      ; "sandbox_profile", `String "docker"
+                      ]
+                  ; base_host_env = None
+                  ; github_secret_files =
+                      (fun () ->
+                         Keeper_turn_sandbox_runtime.prepare_github_identity_secret_files
+                           ~timeout_sec
+                           dispatch.runtime)
+                  ; cleanup = Fun.id
+                  })
         in
         (match dispatch_sandbox with
-         | Error ({ message; fields } : Keeper_sandbox_shell_ir_target.target_error) ->
+         | Error ({ message; fields; class_ } : Keeper_sandbox_shell_ir_target.target_error) ->
            Keeper_tool_execution.failure
+             ~class_
+             ~effect_disposition:Tool_result.Proven_pre_effect
              (error_json
                 ~fields:
                   ([ "typed", `Bool true; "cmd", `String cmd ]
                    @ model_location_fields
                    @ fields)
                 message)
-         | Ok (dispatch_sandbox, sandbox_extra_fields, base_host_env) ->
+         | Ok dispatch_bundle ->
+        Fun.protect ~finally:dispatch_bundle.cleanup (fun () ->
+        let dispatch_sandbox = dispatch_bundle.sandbox in
+        let sandbox_extra_fields = dispatch_bundle.fields in
+        let base_host_env = dispatch_bundle.base_host_env in
         let dispatched_model_location_fields =
           match dispatch_sandbox with
           | Masc_exec.Sandbox_target.Host ->
@@ -284,7 +395,26 @@ let handle_tool_execute_typed
         (* Lower the validated typed input exactly once. The resulting Shell IR
            is the neutral dispatch representation; it carries no product or
            inferred authorization semantics. *)
-        match Keeper_tool_execute_typed_input.to_shell_ir ~sandbox:dispatch_sandbox input with
+        (* A Docker stage writes redirect paths as the container sees them.
+           The two roots below are what turns one of those into a path this
+           process can open, and they hold only inside the shared mount. On
+           the host the command's namespace is already this one. *)
+        let redirect_namespace =
+          match dispatch_sandbox with
+          | Masc_exec.Sandbox_target.Host ->
+            Keeper_tool_execute_typed_input.Command_filesystem
+          | Masc_exec.Sandbox_target.Docker _ ->
+            Keeper_tool_execute_typed_input.Bound_mount
+              { visible_root = Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
+              ; host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta
+              }
+        in
+        match
+          Keeper_tool_execute_typed_input.to_shell_ir
+            ~sandbox:dispatch_sandbox
+            ~namespace:redirect_namespace
+            input
+        with
         | Error e ->
           let fields =
             [ "typed", `Bool true; "cmd", `String cmd ]
@@ -292,6 +422,7 @@ let handle_tool_execute_typed
           in
           Keeper_tool_execution.failure
             ~class_:Tool_result.Policy_rejection
+            ~effect_disposition:Tool_result.Proven_pre_effect
             (error_json ~fields (typed_validation_error_text e))
         | Ok ir ->
         let cmd_for_log =
@@ -317,6 +448,7 @@ let handle_tool_execute_typed
           =
           Keeper_tool_execution.failure
             ~class_
+            ~effect_disposition:Tool_result.Proven_pre_effect
             (error_json
                ~fields:(typed_context_fields @ extra_fields)
                msg)
@@ -339,7 +471,6 @@ let handle_tool_execute_typed
           ; base_path = config.base_path
           ; causal_context = Option.map (fun current -> current ()) gate_context
           ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
-          ; goal_ids = meta.active_goal_ids
           ; continuation_channel
           }
         in
@@ -354,11 +485,12 @@ let handle_tool_execute_typed
         (match
            gate_decision
          with
-         | Keeper_gate.Deferred { approval_id; reason } ->
+         | Keeper_gate.Deferred { approval_id; reason; audit_receipts } ->
            Keeper_gate_deferred_payload.create
              ~operation:gate_operation
              ~approval_id
              ~reason
+             ~audit_receipts
              ~context:(`Assoc typed_context_fields)
              ()
            |> Keeper_gate_deferred_payload.to_execution
@@ -375,51 +507,54 @@ let handle_tool_execute_typed
             ~keeper_name:meta.name
             "external effect authorized operation=tool_execute source=%s"
             (Keeper_gate.authorization_source_to_string authorization.source);
+          let authorized result =
+            Keeper_tool_execution.with_gate_authorization authorization result
+          in
+          (match dispatch_bundle.github_secret_files () with
+           | Error err ->
+             authorized
+               (typed_error_json
+                  ~extra_fields:[ "error", `String "github_identity_snapshot_unavailable" ]
+                  ("GitHub identity snapshot unavailable: " ^ err))
+           | Ok github_secret_files ->
+          let output_redaction =
+            execute_secret_redaction
+              ~additional_secret_files:github_secret_files
+              ~base_path:config.base_path
+              ~keeper_name:meta.name
+          in
           (* NDT-OK: wall clock is used only for elapsed telemetry, never for
              dispatch branching or policy decisions. *)
           let t0 = Unix.gettimeofday () in
           let task_id =
             Option.map Keeper_id.Task_id.to_string meta.current_task_id
           in
-          let stream_dispatch =
-            Sys.getenv_opt "MASC_STREAM_EXECUTE_OUTPUT" <> Some "false"
+          let stdout_stream_redaction =
+            Keeper_secret_redaction.create_stream_state output_redaction
           in
-          if stream_dispatch
-          then (
-            try
-              Keeper_keepalive_signal.record_execute_stream_start
-                ~keeper_name:meta.name
-                ~task_id
-            with
+          let stderr_stream_redaction =
+            Keeper_secret_redaction.create_stream_state output_redaction
+          in
+          (* Execute output always streams. The MASC_STREAM_EXECUTE_OUTPUT
+             kill switch was read here on every tool execution — an env
+             effect inside the dispatch path — while nothing in the
+             repository, shell config, or deployment scripts ever set it,
+             and its parse accepted every value except the exact string
+             "false" (RFC-0371 B7). *)
+          (try
+             Keeper_keepalive_signal.record_execute_stream_start
+               ~keeper_name:meta.name
+               ~task_id
+           with
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
               Log.Dashboard.warn
                 "execute stream start callback failed keeper=%s: %s"
                 meta.name
                 (Printexc.to_string exn));
-          let stdout_redact_state =
-            Keeper_secret_redaction.create_stream_state ()
-          in
-          let stderr_redact_state =
-            Keeper_secret_redaction.create_stream_state ()
-          in
-          let on_output_chunk chunk =
-            if stream_dispatch
+          let record_stream_chunk stream data =
+            if not (String.equal data "")
             then (
-              let stream, data =
-                match chunk with
-                | `Stdout s -> `Stdout, s
-                | `Stderr s -> `Stderr, s
-              in
-              let data =
-                match stream with
-                | `Stdout ->
-                  Keeper_secret_redaction.redact_stream_chunk
-                    output_redaction stdout_redact_state data
-                | `Stderr ->
-                  Keeper_secret_redaction.redact_stream_chunk
-                    output_redaction stderr_redact_state data
-              in
               try
                 Keeper_keepalive_signal.record_execute_stream_chunk
                   ~keeper_name:meta.name
@@ -433,38 +568,219 @@ let handle_tool_execute_typed
                   meta.name
                   (Printexc.to_string exn))
           in
-          let dispatch_result =
-            Keeper_tool_execute_shell_ir.dispatch
-              ~workdir:cwd
+          (* The line-buffered redactor is boundary-safe when a credential is
+             split across process chunks and scans every byte once. *)
+          let on_output_chunk chunk =
+            let stream, state, data =
+              match chunk with
+              | `Stdout s -> `Stdout, stdout_stream_redaction, s
+              | `Stderr s -> `Stderr, stderr_stream_redaction, s
+            in
+            let data = Keeper_secret_redaction.redact_stream_chunk state data in
+            record_stream_chunk stream data
+          in
+          (* RFC execute-subset-dispositions step 1.  A script that arrived
+             inside [argv:["sh";"-c";...]] is invisible to everything else on
+             this path, so it is counted here and nowhere else.  Recognition
+             and classification only -- the dispatch below is unchanged, and
+             what runs is exactly what ran before this line existed. *)
+          (* [lowered] is what the step-1 line was missing. The finding says
+             what was hidden inside the argv; it does not say whether step 4
+             then put the call under the boundary, because the tap reads the
+             input and the lowering happens after it. Measured on 27 live
+             records: 9 [representable], and no way to tell how many of them
+             the gate actually took.
+
+             It is a property of the call rather than of the stage: a lowered
+             call has one stage, and a call that kept its shell has whatever
+             the caller wrote. *)
+          let lowered =
+            match ir with
+            | Masc_exec.Shell_ir.Simple simple ->
+              not
+                (Keeper_tooling.Shell_costume.names_a_shell
+                   (Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin))
+            | Masc_exec.Shell_ir.Pipeline _ | Masc_exec.Shell_ir.Sequence _ -> true
+          in
+          let costume_findings =
+            Keeper_tool_execute_typed_input.hidden_script_findings
               ~sandbox:dispatch_sandbox
-              ?timeout_sec
-              ?base_host_env
-              ~on_output_chunk
-              ir
+              input
+          in
+          List.iter
+            (fun (shell, finding) ->
+               Log.Keeper.info
+                 "shell_costume keeper=%s shell=%s finding=%s lowered=%b cmd=%s"
+                 meta.name
+                 shell
+                 (Keeper_tooling.Shell_costume.finding_tag finding)
+                 lowered
+                 cmd_for_log)
+            costume_findings;
+          (* Tell without refusing.  Two thirds of live escapes are [;], which
+             the IR omits on purpose, and none of them is refused: an
+             argv-shaped costume arrives as one opaque program, so the gate has
+             nothing to object to and the call runs.  Refusing them would break
+             work that runs today; saying nothing gives the writer no reason to
+             stop.  So the answer also says what the call should have been.
+
+             It goes in the payload, not in [metadata].  A completed result's
+             model-visible text is the serialized [data]
+             ([Tool_result.message]); [_meta] is a separate field, and every
+             read of it in agent_core discards it -- [agent_tools.ml] answers
+             [Ok { content; _meta = _ }] at the point a tool result becomes
+             conversation.  Metadata reaches dispatch observers and an MCP wire
+             client; it does not reach the keeper this sentence is written for.
+             A field beside the others leaves [ok], the status and the streams
+             alone, so a call that worked still reads as a call that worked. *)
+          let costume_advice =
+            List.filter_map
+              (fun (shell, finding) ->
+                 match finding with
+                 | Keeper_tooling.Shell_costume.Outside_the_subset reason ->
+                   Some
+                     (`Assoc
+                         [ "shell", `String shell
+                         ; ( "finding"
+                           , `String
+                               (Keeper_tooling.Shell_costume.finding_tag finding) )
+                         ; ( "should_have_been"
+                           , `String
+                               (Keeper_tooling.Subset_rewrite.to_string
+                                  (Keeper_tooling.Subset_rewrite.of_reason reason))
+                           )
+                         ])
+                 | Keeper_tooling.Shell_costume.Representable
+                 | Keeper_tooling.Shell_costume.Refused_by_policy _
+                 | Keeper_tooling.Shell_costume.Unparsable _ -> None)
+              costume_findings
+          in
+          let escaped_shell_fields =
+            match costume_advice with
+            | [] -> []
+            | advice -> [ "escaped_shell", `List advice ]
+          in
+          let dispatch () =
+            match !For_testing.dispatch_override with
+            | Some override -> override ()
+            | None ->
+              Keeper_tooling.Execute_shell_ir.dispatch
+                ~workdir:cwd
+                ~sandbox:dispatch_sandbox
+                ~timeout_sec
+                ?base_host_env
+                ~on_output_chunk
+                ir
+          in
+          let dispatch_result =
+            match dispatch_sandbox with
+            | Masc_exec.Sandbox_target.Host ->
+              Keeper_external_resource_lease.with_lease
+                (Keeper_external_resource_lease.Host_cwd cwd)
+                dispatch
+            | Docker _ -> dispatch ()
           in
           match dispatch_result with
-          | Error (Keeper_tool_execute_shell_ir.Gate_reject diagnostic) ->
+          | Error (Keeper_tooling.Execute_shell_ir.Gate_reject diagnostic) ->
             (* RFC-0208 P1: gate denial audit line. *)
             Log.Keeper.warn
               "shell_ir gate_reject keeper=%s cmd=%s diagnostic=%s"
               meta.name
               cmd_for_log
               (message_for_log diagnostic);
-            typed_error_json diagnostic
-          | Error Keeper_tool_execute_shell_ir.Cannot_parse ->
-            typed_error_json "Cannot parse command"
-          | Error Keeper_tool_execute_shell_ir.Too_complex ->
-            typed_error_json "Command too complex"
-          | Error (Keeper_tool_execute_shell_ir.Path_reject e) ->
+            (try
+               Keeper_keepalive_signal.record_execute_stream_end
+                 ~keeper_name:meta.name
+                 ~task_id
+                 ~status:(`Assoc [ "rejected", `String "gate_reject" ])
+             with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Dashboard.warn
+                  "execute stream end callback failed keeper=%s: %s"
+                  meta.name
+                  (Printexc.to_string exn));
+            authorized (typed_error_json diagnostic)
+          | Error (Keeper_tooling.Execute_shell_ir.Cannot_parse reason) ->
+            let reason_tag = Keeper_tooling.Execute_shell_ir.parse_reason_tag reason in
+            (* Parity with gate_reject/path_reject, which have always carried
+               their diagnostic.  These two could not until the typed gate
+               could produce them. *)
+            Log.Keeper.warn
+              "shell_ir cannot_parse keeper=%s cmd=%s reason=%s"
+              meta.name
+              cmd_for_log
+              reason_tag;
+            (try
+               Keeper_keepalive_signal.record_execute_stream_end
+                 ~keeper_name:meta.name
+                 ~task_id
+                 ~status:
+                   (`Assoc
+                      [ "rejected", `String "cannot_parse"; "reason", `String reason_tag ])
+             with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Dashboard.warn
+                  "execute stream end callback failed keeper=%s: %s"
+                  meta.name
+                  (Printexc.to_string exn));
+            authorized
+              (typed_error_json (Printf.sprintf "Cannot parse command: %s" reason_tag))
+          | Error (Keeper_tooling.Execute_shell_ir.Too_complex reason) ->
+            let reason_tag = Keeper_tooling.Execute_shell_ir.too_complex_reason_tag reason in
+            (* Parity with gate_reject/path_reject, which have always carried
+               their diagnostic.  These two could not until the typed gate
+               could produce them. *)
+            Log.Keeper.warn
+              "shell_ir too_complex keeper=%s cmd=%s reason=%s"
+              meta.name
+              cmd_for_log
+              reason_tag;
+            (try
+               Keeper_keepalive_signal.record_execute_stream_end
+                 ~keeper_name:meta.name
+                 ~task_id
+                 ~status:
+                   (`Assoc
+                      [ "rejected", `String "too_complex"; "reason", `String reason_tag ])
+             with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Dashboard.warn
+                  "execute stream end callback failed keeper=%s: %s"
+                  meta.name
+                  (Printexc.to_string exn));
+            authorized
+              (typed_error_json
+                 (Printf.sprintf
+                    "Command too complex: %s. %s."
+                    reason_tag
+                    (Keeper_tooling.Subset_rewrite.to_string
+                       (Keeper_tooling.Subset_rewrite.of_reason reason))))
+          | Error (Keeper_tooling.Execute_shell_ir.Path_reject e) ->
             (* RFC-0208 P1: path-policy denial audit line. *)
             Log.Keeper.warn
               "shell_ir path_reject keeper=%s cmd=%s reason=%s"
               meta.name
               cmd_for_log
               (message_for_log e);
-            typed_error_json
-              ~extra_fields:[ "blocked_cmd", `String cmd_for_log ]
-              e
+            (try
+               Keeper_keepalive_signal.record_execute_stream_end
+                 ~keeper_name:meta.name
+                 ~task_id
+                 ~status:(`Assoc [ "rejected", `String "path_reject" ])
+             with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Dashboard.warn
+                  "execute stream end callback failed keeper=%s: %s"
+                  meta.name
+                  (Printexc.to_string exn));
+            authorized
+              (typed_error_json
+                 ~extra_fields:[ "blocked_cmd", `String cmd_for_log ]
+                 e)
           | Ok result ->
             let elapsed_ms =
               (* NDT-OK: second wall-clock read closes the elapsed telemetry
@@ -485,42 +801,26 @@ let handle_tool_execute_typed
             let status_json =
               Keeper_alerting_path.process_status_to_json result.status
             in
-            if stream_dispatch
-            then (
-              let flush_remaining stream state =
-                let remaining =
-                  Keeper_secret_redaction.redact_stream_finish
-                    output_redaction state
-                in
-                if not (String.equal remaining "")
-                then (
-                  try
-                    Keeper_keepalive_signal.record_execute_stream_chunk
-                      ~keeper_name:meta.name
-                      ~stream
-                      remaining
-                  with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | exn ->
-                    Log.Dashboard.warn
-                      "execute stream flush callback failed keeper=%s: %s"
-                      meta.name
-                      (Printexc.to_string exn))
-              in
-              flush_remaining `Stdout stdout_redact_state;
-              flush_remaining `Stderr stderr_redact_state;
-              try
-                Keeper_keepalive_signal.record_execute_stream_end
-                  ~keeper_name:meta.name
-                  ~task_id
-                  ~status:status_json
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.Dashboard.warn
-                  "execute stream end callback failed keeper=%s: %s"
-                  meta.name
-                  (Printexc.to_string exn));
+            (* The line-buffered redactor holds a partial trailing line, so the
+               stream is flushed here before the end marker. *)
+            record_stream_chunk
+              `Stdout
+              (Keeper_secret_redaction.redact_stream_finish stdout_stream_redaction);
+            record_stream_chunk
+              `Stderr
+              (Keeper_secret_redaction.redact_stream_finish stderr_stream_redaction);
+            (try
+               Keeper_keepalive_signal.record_execute_stream_end
+                 ~keeper_name:meta.name
+                 ~task_id
+                 ~status:status_json
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Dashboard.warn
+                 "execute stream end callback failed keeper=%s: %s"
+                 meta.name
+                 (Printexc.to_string exn));
             (try
                Keeper_keepalive_signal.record_execute_output
                  ~keeper_name:meta.name
@@ -528,7 +828,7 @@ let handle_tool_execute_typed
                  ~stdout
                  ~stderr
                  ~status:status_json
-                 ~streamed:stream_dispatch
+                 ~streamed:true
              with
              | Eio.Cancel.Cancelled _ as e -> raise e
              | exn ->
@@ -546,23 +846,113 @@ let handle_tool_execute_typed
               | Unix.WEXITED 0, _ | _, "" -> []
               | _, stderr -> [ "error", `String stderr; "stderr", `String stderr ]
             in
-            let payload =
-              Yojson.Safe.to_string
-                (`Assoc
+            let output_fields =
+              if succeeded
+              then
+                composable_output_fields
+                  ~base_path:config.base_path
+                  ~stdout
+                  ~stderr
+                  ~output
+              else Ok [ "output", `String output ]
+            in
+            (match output_fields with
+             | Error detail ->
+               Log.Keeper.warn
+                 ~keeper_name:meta.name
+                 "execute output artifact persistence failed after process completion: %s"
+                 detail;
+               authorized
+                 (Keeper_tool_execution.failure
+                    ~effect_disposition:Tool_result.Proven_post_effect
+                    (error_json
+                       ~fields:
+                         ([ "typed", `Bool true
+                          ; "code", `String "execute_output_externalization_failed"
+                          ; "status", status_json
+                          ; "execution_time_ms", `Int elapsed_ms
+                          ]
+                          @ dispatched_model_location_fields)
+                       "Execute completed, but its oversized output artifact could not be persisted."))
+             | Ok output_fields ->
+               let timeout_fields =
+                 match
+                   Process_eio.exit_reason_of_status result.status, timeout_budget
+                 with
+                 | ( Process_eio.Timed_out
+                   , Keeper_tool_execute_input.Default seconds ) ->
+                   [ ( "timeout"
+                     , `Assoc
+                         [ "limit_sec", `Float seconds
+                         ; "source", `String "default"
+                         ] )
+                   ]
+                 | ( Process_eio.Timed_out
+                   , Keeper_tool_execute_input.Named_by_caller seconds ) ->
+                   [ ( "timeout"
+                     , `Assoc
+                         [ "limit_sec", `Float seconds
+                         ; "source", `String "timeout_sec"
+                         ] )
+                   ]
+                 | ( ( Process_eio.Completed _
+                     | Process_eio.Signaled _
+                     | Process_eio.Stopped _ )
+                   , _ ) -> []
+               in
+               let payload =
+                 `Assoc
                    ([ "ok", `Bool succeeded
                     ; "status", status_json
-                    ; "output", `String output
-                    ; "typed", `Bool true
-                    ; "execution_time_ms", `Int elapsed_ms
                     ]
+                    @ escaped_shell_fields
+                    @ timeout_fields
+                    @ output_fields
+                    @ [ "typed", `Bool true
+                      ; "execution_time_ms", `Int elapsed_ms
+                      ]
                     @ failure_error_fields
                     @ sandbox_extra_fields
-                    @ dispatched_model_location_fields))
-            in
-            if succeeded
-            then Keeper_tool_execution.success payload
-            else Keeper_tool_execution.failure payload
-        )))
+                    @ dispatched_model_location_fields)
+               in
+               (* A process that ran and exited nonzero (or died to a
+                  signal) is an observed tool result the model reads and
+                  reacts to — the payload carries ok:false, the exit
+                  status, and stderr. Routing it through the failure
+                  disposition marked the whole turn
+                  Terminal_effect_failed (sticky), so a keeper probing a
+                  missing path with `ls` died mid-mission — four turn
+                  deaths across the E0 campaign and a pilot Keeper
+                  (masc#28983). Only infra failures — sandbox dispatch,
+                  secret projection, output/manifest persistence — keep
+                  the failure disposition. *)
+               authorized
+                 (match
+                    Tool_bridge.attach_artifact_manifest
+                      ~base_path:config.base_path
+                      (let answered =
+                         Tool_result.make_ok
+                           ~tool_name:"tool_execute"
+                           ~start_time:t0
+                           ~data:payload
+                           ()
+                       in
+                       answered)
+                  with
+                  | Ok result -> Keeper_tool_execution.of_tool_result result
+                  | Error _ ->
+                    Keeper_tool_execution.failure
+                      ~effect_disposition:Tool_result.Proven_post_effect
+                      (error_json
+                         ~fields:
+                           ([ "typed", `Bool true
+                            ; "code", `String "execute_result_manifest_failed"
+                            ; "status", status_json
+                            ; "execution_time_ms", `Int elapsed_ms
+                            ]
+                            @ dispatched_model_location_fields)
+                         "Execute completed, but its result manifest could not be persisted.")))
+        )))))
 
 let handle_tool_execute_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
@@ -588,6 +978,7 @@ let handle_tool_execute_with_outcome
   else
     Keeper_tool_execution.failure
       ~class_:Tool_result.Policy_rejection
+      ~effect_disposition:Tool_result.Proven_pre_effect
       (error_json
          ~fields:[ "typed", `Bool true ]
          "Typed Shell IR input is required. Provide non-empty argv or pipeline.")

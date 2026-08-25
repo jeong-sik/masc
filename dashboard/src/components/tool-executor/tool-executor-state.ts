@@ -95,7 +95,7 @@ export async function executeTool(): Promise<void> {
   if (!tool || executing.value) return
   const access = dashboardAuthAccess(shellAuthSummary.value, selectedToolRequiredRole(tool))
   if (!access.allowed) {
-    showToast(access.reason ?? `${tool.name} 실행 권한이 없습니다.`, 'error', 6000)
+    showToast(access.reason ?? `${tool.name} 실행 권한 없음`, 'error', 6000)
     return
   }
   const missing = validateRequired(formValues.value, tool.inputSchema)

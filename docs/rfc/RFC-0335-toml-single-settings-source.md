@@ -1,3 +1,8 @@
+---
+rfc: "0335"
+status: Draft
+---
+
 # RFC-0335 — TOML as the Single Settings Source
 
 - **Status:** Draft
@@ -58,7 +63,7 @@ green and revertible. The RFC owns the vision and the stage boundaries; each sta
   `lib/keeper/keeper_alerting.ml` (`SLACK_TOKEN`/`SLACK_USER_TOKEN`) by routing through the boundary.
   This stage alone resolves the incident.
 - **W2 — Config boundary → `runtime.toml`.** `env_config_core` config fields and path-family
-  (`MASC_CONFIG_DIR`, `MASC_PERSONAS_DIR`, `MASC_SIDECAR_ROOT`) move to TOML; `MASC_BASE_PATH` stays
+  (`MASC_CONFIG_DIR`, `MASC_SIDECAR_ROOT`) move to TOML; `MASC_BASE_PATH` stays
   CLI-arg per exception §6. RFC-0274's path-safety becomes "TOML is the only writer" — no shell defense
   needed.
 - **W3 — Residual `getenv` sites absorbed.** Every remaining settings `getenv` outside the boundary

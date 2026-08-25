@@ -62,6 +62,14 @@ val get_all_agents : config -> Masc_domain.agent list
     pairs for orphaned tasks. *)
 val audit_orphan_tasks : config -> (Masc_domain.task * string) list
 
+val audit_orphan_tasks_in_tasks
+  :  config
+  -> Masc_domain.task list
+  -> (Masc_domain.task * string) list
+(** Apply the orphan audit to an already-read backlog task snapshot. This keeps
+    callers that project several backlog fields on one authoritative revision
+    from triggering a second backlog read. *)
+
 (** RFC-0294 PR-4: typed source of truth for orphan-status classification.
     [Some label] for an orphan-eligible status (Claimed / InProgress /
     AwaitingVerification), [None] otherwise. Exhaustive over [task_status] so a
@@ -92,6 +100,20 @@ val is_agent_session_bound : config -> agent_name:string -> bool
 val get_messages_raw :
   config -> since_seq:int -> limit:int -> Masc_domain.message list
 
+(** Return the newest [limit] messages for which [keep] holds, newest first.
+
+    [limit] counts MATCHES, not messages read. A caller that filters after
+    calling {!get_messages_raw} cannot say that: the store fills the window with
+    every agent's messages and the caller's filter thins it to whatever is left,
+    reaching zero once other agents are busier. Each such call site compensated
+    with its own multiplier, and every multiplier is wrong at some fleet size. *)
+val get_messages_matching :
+  config ->
+  since_seq:int ->
+  limit:int ->
+  keep:(Masc_domain.message -> bool) ->
+  Masc_domain.message list
+
 (** Return all raw messages after [since_seq], ordered
     from oldest unseen to newest unseen. *)
 val get_all_messages_raw :
@@ -115,10 +137,6 @@ val get_messages : config -> since_seq:int -> limit:int -> string
     (alphanumeric, underscore, hyphen, dot). *)
 val is_valid_filename : string -> bool
 
-(** Extract a sequence number from a message filename like
-    ["000001885_unknown_broadcast.json"]. Returns 0 on parse failure. *)
-val extract_seq_from_filename : string -> int
-
 (** {1 Internal Helpers (used by sibling workspace modules)} *)
 
 (** Yield the Eio fiber if running under Eio; no-op otherwise. *)
@@ -127,8 +145,10 @@ val safe_yield : unit -> unit
 (** [take_first n xs] returns the first [n] elements of [xs]. *)
 val take_first : int -> 'a list -> 'a list
 
-(** Read most-recent messages from filesystem or PG backend without
-    parsing the entire history directory. *)
-val collect_recent_messages :
-  config -> msgs_path:string -> since_seq:int -> limit:int ->
-  warn_label:string -> Masc_domain.message list
+(** How far back a message read walks. [Newest_window] stops at [limit] names
+    because each one is an answer; [Matching] keeps walking until [limit]
+    messages satisfy the predicate. *)
+type message_scan =
+  | Newest_window
+  | Matching of (Masc_domain.message -> bool)
+

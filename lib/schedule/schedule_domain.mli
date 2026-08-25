@@ -4,7 +4,7 @@
     who requested it. Authorization of any external effect belongs to the
     payload consumer's leaf gate, not to the scheduler. *)
 
-type actor_kind =
+type actor_kind = Schedule_contract_values.actor_kind =
   | Human_operator
   | Automated_actor
   | System
@@ -15,7 +15,7 @@ type actor =
   ; display_name : string option
   }
 
-type schedule_status =
+type schedule_status = Schedule_contract_values.schedule_status =
   | Scheduled
   | Due
   | Running
@@ -26,7 +26,7 @@ type schedule_status =
 
 val all_schedule_statuses : schedule_status list
 
-type schedule_source =
+type schedule_source = Schedule_contract_values.schedule_source =
   | Operator_request
   | Automated_request
   | System_request
@@ -80,7 +80,7 @@ type schedule_request =
   ; recurrence : recurrence
   }
 
-type wake_status =
+type wake_status = Schedule_contract_values.wake_status =
   | Wake_running
   | Wake_succeeded
   | Wake_failed
@@ -134,6 +134,7 @@ val schedule_status_to_string : schedule_status -> string
 val schedule_status_of_string : string -> (schedule_status, string) result
 val schedule_source_to_string : schedule_source -> string
 val schedule_source_of_string : string -> (schedule_source, string) result
+val recurrence_kind : recurrence -> Schedule_contract_values.recurrence_kind
 val recurrence_kind_to_string : recurrence -> string
 val recurrence_summary : recurrence -> string
 (** Stable, human-readable recurrence summary for dashboard and keeper tool

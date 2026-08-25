@@ -18,8 +18,6 @@ type authority =
   ; trust_class : trust_class
   }
 
-type request_context = authority
-
 type trusted_identity =
   { authority : host_port
   ; scheme : scheme
@@ -36,7 +34,7 @@ type trust_policy_error =
 
 type classification =
   | Missing
-  | Single of request_context
+  | Single of authority
   | Multiple
   | Malformed
   | Untrusted
@@ -202,13 +200,6 @@ let effective_host_port ~scheme (authority : host_port) =
   effective_port_value ~scheme authority.port
 ;;
 
-let equivalent_for_scheme ~scheme left right =
-  String.equal left.host right.host
-  && Option.equal Int.equal
-       (effective_port ~scheme left)
-       (effective_port ~scheme right)
-;;
-
 let host_port_equivalent_for_scheme ~scheme (left : host_port)
     (right : host_port) =
   String.equal left.host right.host
@@ -291,7 +282,7 @@ let make_trust_policy ~bind_host ~bind_port ~explicit_base_url :
             }))
 ;;
 
-let projection_context (trust_policy : trust_policy) : request_context =
+let projection_context (trust_policy : trust_policy) : authority =
   let identity, trust_class =
     match trust_policy.explicit_trusted_host with
     | Some identity -> identity, Explicit_trusted_host
@@ -498,8 +489,6 @@ let parse_serialized_origin raw =
 ;;
 
 let serialized_origin_host (origin : serialized_origin) = origin.authority.host
-let serialized_origin_scheme (origin : serialized_origin) = origin.scheme
-
 let serialized_origin_equal
     (left : serialized_origin)
     (right : serialized_origin) =

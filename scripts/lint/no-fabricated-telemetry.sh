@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Detect Math.random() inside dashboard React components (.jsx/.tsx).
+# Detect Math.random() inside dashboard component sources.
 #
 # Why this gate exists:
 #   `fundamental_roadmap.md` Phase 4-1 cites Math.random() driving fake
@@ -7,11 +7,11 @@
 #   remove fabricated telemetry placeholders) removed those, but the
 #   pattern is easy to reintroduce when stubbing UI in isolation.
 #
-# Why .jsx/.tsx only:
-#   Plain .ts files legitimately use Math.random() for ephemeral IDs
-#   (e.g. dashboard/src/sse.ts:53 SSE client id,
-#   dashboard/src/components/common/command-bar.ts:61 listId). Restricting
-#   to component files (.jsx/.tsx) keeps the signal precise.
+# Scope:
+#   The dashboard has no .jsx/.tsx files — components are .ts modules
+#   rendering html`` templates — so a .jsx/.tsx-only scan read nothing.
+#   .ts is scanned; the legitimate uses (retry jitter, ephemeral ids) carry
+#   a `real-randomness-needed:` line comment. Tests are excluded.
 #
 # Allowed (never flagged):
 #   - Lines marked `// real-randomness-needed: <reason>`
@@ -27,7 +27,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ALLOWLIST="${ROOT}/scripts/lint/no-fabricated-telemetry.allowlist"
 
-ROOTS=("${ROOT}/dashboard/src" "${ROOT}/oas-public")
+ROOTS=("${ROOT}/dashboard/src" "${ROOT}/agent_core-public")
 
 ALLOW_TMP="$(mktemp -t no-fab-tele.XXXXXX)"
 trap 'rm -f "${ALLOW_TMP}"' EXIT
@@ -57,7 +57,7 @@ for root in "${ROOTS[@]}"; do
 
     report+=("${key}: ${content}")
     violations=$((violations + 1))
-  done < <(rg --no-heading --line-number --color=never -g '*.jsx' -g '*.tsx' 'Math\.random' "${root}" 2>/dev/null || true)
+  done < <(rg --no-heading --line-number --color=never -g '*.ts' -g '*.jsx' -g '*.tsx' -g '!*.test.ts' 'Math\.random' "${root}" 2>/dev/null || true)
 done
 
 if [[ ${violations} -gt 0 ]]; then

@@ -26,11 +26,26 @@ let require_last_execution_for_finalize ~keeper_name turn_state =
   | Some exec -> Ok exec
   | None ->
     let err =
-      Agent_sdk.Error.Internal
+      Agent_core.Error.Internal
         (Printf.sprintf "%s: last_execution missing at turn finalize" keeper_name)
     in
-    Log.Keeper.error "%s" (Agent_sdk.Error.to_string err);
+    Log.Keeper.error "%s" (Agent_core.Error.to_string err);
     Error err
+;;
+
+type keeper_cycle_failed_runtime_attribution =
+  { reported_runtime_id : string
+  ; deferred_next_runtime_id : string
+  }
+
+let keeper_cycle_failed_runtime_attribution ~deferred_runtime_lane ~execution_runtime_id =
+  match deferred_runtime_lane with
+  | Some (hint : Keeper_turn_driver.deferred_runtime_lane) ->
+    { reported_runtime_id = hint.failed_runtime_id
+    ; deferred_next_runtime_id = hint.next_runtime_id
+    }
+  | None ->
+    { reported_runtime_id = execution_runtime_id; deferred_next_runtime_id = "none" }
 ;;
 
 let turn_event_bus_manifest_decision
@@ -92,6 +107,7 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; provider_id = None
          ; http_status = None
          ; runtime_id = Some (runtime_id)
+         ; agent_core_timeout = None
          ; reason = Some (registry_reason_of_internal_reason reason)
          })
   | Some (Keeper_internal_error.Capacity_backpressure { detail = capacity_detail; _ }) ->
@@ -102,6 +118,7 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
          ; provider_id = None
          ; http_status = None
          ; runtime_id = None
+         ; agent_core_timeout = None
          ; reason = None
          })
   | Some
@@ -115,18 +132,20 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
       | Keeper_internal_error.Internal_contract_rejected _
       | Keeper_internal_error.Incomplete_tool_transcript _
       | Keeper_internal_error.Terminal_effect_failed _
+      | Keeper_internal_error.Provider_attempt_effect_fenced _
+      | Keeper_internal_error.Tool_correction_lost _
       | Keeper_internal_error.Receipt_persistence_failed _
       | Keeper_internal_error.Gate_replay_repair_required _ )
   | None -> None
 ;;
 
-(* RFC-0047 follow-up: exhaustive match on [Keeper_turn_disposition.t].
+(* Exhaustive match on [Keeper_turn_disposition.t].
    Pre-fix this used [String.starts_with ~prefix:"api_error_"] on the
    wire form of [terminal_reason.code]; that substring guard depended
-   on SDK-error wires being routed through [Unknown { raw_error = _ }]
+   on agent-core error wires being routed through [Unknown { raw_error = _ }]
    because [normalize_code] no longer collapsed them to "provider_error".
-   With [of_failure] now emitting [Provider_error (Sdk_error _)] typed
-   for the SDK-error fallback, this routing reduces to a clean variant
+   With [of_failure] now emitting [Provider_error (Agent_core_error _)] typed
+   for the agent-core error fallback, this routing reduces to a clean variant
    match — no substring classifier left in this function. *)
 let registry_failure_reason_of_terminal_reason
       (terminal_reason : Keeper_turn_terminal.t)
@@ -146,6 +165,12 @@ let registry_failure_reason_of_terminal_reason
          ; provider_id = None
          ; http_status = None
          ; runtime_id = None
+           (* The typed observation rides along with the verbatim wire
+              (RFC-0371 §6.1(3)); consumers stop re-parsing the code. *)
+         ; agent_core_timeout =
+             (match c with
+              | Keeper_turn_terminal_code.Agent_core_error { timeout; _ } -> timeout
+              | _ -> None)
          ; reason = None
          })
   | Keeper_turn_disposition.Runtime_attempts_exhausted ->
@@ -156,6 +181,7 @@ let registry_failure_reason_of_terminal_reason
          ; provider_id = None
          ; http_status = None
          ; runtime_id = None
+         ; agent_core_timeout = None
          ; reason = None
          })
   | Keeper_turn_disposition.Success
@@ -172,7 +198,7 @@ let registry_failure_reason_of_terminal_reason
 type turn_tool_event_tracker =
   { pending_tool_inputs : Yojson.Safe.t list StringMap.t
   ; tool_completed_count : int
-  ; integrity_error : Agent_sdk.Error.sdk_error option
+  ; integrity_error : Agent_core.Error.t option
   }
 
 let create_turn_tool_event_tracker () =
@@ -226,21 +252,21 @@ let record_unmatched_tool_completed
   match tracker.integrity_error with
   | Some _ -> tracker
   | None ->
-    { tracker with integrity_error = Some (Agent_sdk.Error.Internal message) }
+    { tracker with integrity_error = Some (Agent_core.Error.Internal message) }
 ;;
 
 let record_turn_tool_events
       ~(keeper_name : string)
       (tracker : turn_tool_event_tracker)
-      (events : Agent_sdk.Event_bus.event list)
+      (events : Agent_core.Event_bus.event list)
   : turn_tool_event_tracker
   =
   List.fold_left
-    (fun tracker (evt : Agent_sdk.Event_bus.event) ->
+    (fun tracker (evt : Agent_core.Event_bus.event) ->
        match evt.payload with
-       | Agent_sdk.Event_bus.ToolCalled { tool_name; input; _ } ->
+       | Agent_core.Event_bus.ToolCalled { tool_name; input; _ } ->
          push_turn_tool_input tracker tool_name input
-       | Agent_sdk.Event_bus.ToolCompleted { tool_name; output = Ok _; _ } ->
+       | Agent_core.Event_bus.ToolCompleted { tool_name; output = Ok _; _ } ->
          let tracker =
            { tracker with tool_completed_count = tracker.tool_completed_count + 1 }
          in
@@ -252,7 +278,7 @@ let record_turn_tool_events
               ~keeper_name
               ~tool_name
               ~outcome:"ok")
-       | Agent_sdk.Event_bus.ToolCompleted { tool_name; output = Error _; _ } ->
+       | Agent_core.Event_bus.ToolCompleted { tool_name; output = Error _; _ } ->
          let tracker =
            { tracker with tool_completed_count = tracker.tool_completed_count + 1 }
          in
@@ -285,7 +311,6 @@ let streaming_cancellation_source_to_fsm = function
 let record_streaming_cancelled_observation
       ~(config : Workspace.config)
       ~(run_meta : Keeper_meta_contract.keeper_meta)
-      ~(run_generation : int)
       ~(runtime_id : string)
       ~(keeper_turn_id : int)
       ()
@@ -314,7 +339,6 @@ let record_streaming_cancelled_observation
   Keeper_turn_helpers.record_pre_dispatch_terminal_observation
     ~config
     ~meta:run_meta
-    ~generation:run_generation
     ~runtime_id
     ~outcome:`Cancelled
     ~terminal_reason_code

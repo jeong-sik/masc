@@ -266,7 +266,7 @@ mirror machine-parseable for drift-detection lint.
   (e.g., `// --color-bg-3 (approx, do not auto-fix)`) so a lint can
   skip them without false-fixing.
 
-### Lint plan (RFC-OAS-018 candidate, deferred)
+### Lint plan (RFC-Agent Core-018 candidate, deferred)
 
 A drift-detection lint script would:
 
@@ -282,7 +282,7 @@ RFC-0063 §7-B (`scripts/ci/check-drain-loop-yields.sh`).
 
 A structural alternative — typed mirror codegen (e.g. `mirrorOf('--bg-2')`
 with compile-time token lookup or a codemod that verifies the resolved hex
-against the canonical SSOT) — is noted as a future RFC-OAS-018 direction
+against the canonical SSOT) — is noted as a future RFC-Agent Core-018 direction
 to avoid the string-prefix whitelist accumulation risk of `// approx` labels.
 
 ## Preview gallery — SPA hash routing (2026-04-28)

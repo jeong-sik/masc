@@ -12,6 +12,8 @@ import {
   ChatComposer,
   ChatTranscript,
   THINKING_TRACE_PREVIEW_CHARS,
+  autonomousToolSummary,
+  _resetTraceCardOpenChoicesForTests,
   type ChatComposerSendPayload,
 } from './primitives'
 import { _resetChatStoreForTests, readKeeperDraft } from '../../keeper-chat-store'
@@ -116,6 +118,13 @@ function entry(
   }
 }
 
+// Turn-timeline collapse choices are module state by design: they outlive
+// the transcript unmount that switching keepers causes. Clear them between
+// cases so no test inherits another's toggle.
+beforeEach(() => {
+  _resetTraceCardOpenChoicesForTests()
+})
+
 describe('ChatTranscript', () => {
   let container: HTMLDivElement
 
@@ -215,6 +224,136 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('.chat-bubble')).toBeNull()
   })
 
+  it('renders a connector-delivered outcome as a terminal status, not assistant prose', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'connector-done-live',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            rawText: '',
+            details: { turnOutcome: 'external_effect_completed' },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_completed"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.textContent).toContain('커넥터로 답변 완료')
+    expect(status?.textContent).toContain('해당 채널에서 확인')
+    expect(container.querySelector('.chat-bubble')).toBeNull()
+  })
+
+  it('names the dashboard as the delivery target instead of claiming a connector', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'dashboard-post-done',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'analyst',
+            text: '',
+            rawText: '',
+            details: {
+              turnOutcome: 'external_effect_completed',
+              externalEffectTarget: { kind: 'dashboard' },
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_completed"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.getAttribute('data-chat-effect-target')).toBe('dashboard')
+    expect(status?.textContent).toContain('대시보드에 게시 완료')
+    expect(status?.textContent).not.toContain('Slack/Discord')
+  })
+
+  it('names the Slack thread destination on a threaded delivery target', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'slack-thread-post-done',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'kidsnote',
+            text: '',
+            rawText: '',
+            details: {
+              turnOutcome: 'external_effect_completed',
+              externalEffectTarget: {
+                kind: 'slack',
+                channelId: 'C09TK9L4DV4',
+                threadTs: '1786524720.554309',
+              },
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_completed"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.getAttribute('data-chat-effect-target')).toBe('slack')
+    expect(status?.textContent).toContain('Slack으로 답변 완료')
+    expect(status?.textContent).toContain('C09TK9L4DV4')
+    expect(status?.textContent).toContain('스레드로 전송')
+  })
+
+  it('names the Discord channel destination on a discord delivery target', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'discord-post-done',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            rawText: '',
+            details: {
+              turnOutcome: 'external_effect_completed',
+              externalEffectTarget: { kind: 'discord', channelId: 'D-123' },
+            },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const status = container.querySelector(
+      '[data-chat-control-status="external_effect_completed"]',
+    )
+    expect(status).not.toBeNull()
+    expect(status?.getAttribute('data-chat-effect-target')).toBe('discord')
+    expect(status?.textContent).toContain('Discord로 답변 완료')
+    expect(status?.textContent).toContain('D-123')
+  })
+
   it('renders a typed continuation checkpoint as durable status, not assistant prose', () => {
     render(
       html`<${ChatTranscript}
@@ -245,7 +384,7 @@ describe('ChatTranscript', () => {
   })
 
   it('renders failure rows as a typed card with collapsed diagnostic detail', async () => {
-    const text = 'Keeper request failed: Internal error: [masc_oas_error] {"kind":"accept_rejected","scope":"ollama_cloud.deepseek-v4-flash","reason_kind":"no_usable_progress"}'
+    const text = 'Keeper request failed: Internal error: [masc_agent_core_error] {"kind":"accept_rejected","scope":"ollama_cloud.deepseek-v4-flash","reason_kind":"no_usable_progress"}'
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -337,7 +476,6 @@ describe('ChatTranscript', () => {
                 'TEXT_MESSAGE_END',
                 'RUN_FINISHED',
               ],
-              deliveryReceipt: 'server_lifecycle_replay_only',
               reason: 'history row records durable server stream lifecycle replay',
             },
             surface: {
@@ -368,9 +506,6 @@ describe('ChatTranscript', () => {
     expect(bubble.getAttribute('data-chat-stream-contract-lifecycle-events')).toBe(
       'RUN_STARTED,TEXT_MESSAGE_START,TEXT_MESSAGE_END,RUN_FINISHED',
     )
-    expect(bubble.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe(
-      'server_lifecycle_replay_only',
-    )
     expect(bubble.getAttribute('data-chat-stream-contract-reason')).toBe(
       'history row records durable server stream lifecycle replay',
     )
@@ -378,6 +513,43 @@ describe('ChatTranscript', () => {
     expect(surfaceLink?.textContent).toContain('Discord Thread')
     expect(surfaceLink?.getAttribute('title')).toContain('guild_id=guild-1')
     expect(surfaceLink?.getAttribute('title')).toContain('thread_id=thread-1')
+  })
+
+  it('badges the agent surface with the sender, never the viewer', () => {
+    // A row projected into another keeper's transcript carries the agent
+    // surface. The origin badge must name the keeper that actually spoke
+    // (speaker_name), never assert the row is the viewer's own (#28813).
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'projected-1',
+            role: 'user',
+            source: 'direct_user',
+            speakerName: 'keeper-code-reviewer-agent',
+            speakerAuthority: 'external',
+            text: 'fleet announcement',
+            rawText: 'fleet announcement',
+            surface: { kind: 'agent' },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="projected-1"]') as HTMLElement
+    expect(bubble).not.toBeNull()
+    expect(bubble.getAttribute('data-chat-surface-kind')).toBe('agent')
+
+    // Pin the origin badge by class so the assertion fails when the badge
+    // disappears and cannot be perturbed by message content that happens to
+    // contain the same words.
+    const badge = bubble.querySelector('.kw-src-badge.origin-agent')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toBe('keeper-code-reviewer-agent')
   })
 
   it('renders connector speaker and route context for gate history rows', () => {
@@ -438,9 +610,8 @@ describe('ChatTranscript', () => {
             streamState: null,
             error: '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.',
             streamContract: {
-              source: 'client_reconciliation',
+              source: 'client_stream_failure',
               status: 'contract_gap',
-              deliveryReceipt: 'no_delivery_receipt',
               reason: '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.',
             },
           }),
@@ -455,9 +626,8 @@ describe('ChatTranscript', () => {
     expect(bubble).not.toBeNull()
     expect(bubble.getAttribute('data-chat-delivery-state')).toBe('interrupted')
     expect(bubble.getAttribute('data-chat-stream-state')).toBe('complete')
-    expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('client_reconciliation')
+    expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('client_stream_failure')
     expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('contract_gap')
-    expect(bubble.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
     expect(bubble.getAttribute('data-chat-stream-contract-reason')).toBe(
       '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.',
     )
@@ -480,7 +650,6 @@ describe('ChatTranscript', () => {
         stream_contract: {
           source: 'keeper_chat_store',
           status: 'history_without_turn_ref',
-          delivery_receipt: 'no_delivery_receipt',
           reason: 'history row has no durable turn_ref; cannot join stream events',
         },
       },
@@ -495,7 +664,6 @@ describe('ChatTranscript', () => {
         stream_contract: {
           source: 'keeper_chat_store',
           status: 'history_without_turn_ref',
-          delivery_receipt: 'no_delivery_receipt',
           reason: 'history row has no durable turn_ref; cannot join stream events',
         },
       },
@@ -515,7 +683,6 @@ describe('ChatTranscript', () => {
             'RUN_STARTED',
             'RUN_ERROR',
           ],
-          delivery_receipt: 'server_lifecycle_replay_only',
           reason: 'history row records durable server stream lifecycle replay',
         },
       },
@@ -534,7 +701,6 @@ describe('ChatTranscript', () => {
     expect(legacy).not.toBeNull()
     expect(legacy.getAttribute('data-chat-stream-contract-source')).toBe('keeper_chat_store')
     expect(legacy.getAttribute('data-chat-stream-contract-status')).toBe('history_without_turn_ref')
-    expect(legacy.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
     // A missing turn_ref is the normal state of every user row (persisted at
     // request-accept time, before the turn exists), so the badge is
     // suppressed there — the contract attributes still render for debugging.
@@ -559,7 +725,6 @@ describe('ChatTranscript', () => {
     expect(failure.getAttribute('data-chat-stream-contract-status')).toBe('backend_lifecycle_replay')
     expect(failure.getAttribute('data-chat-stream-contract-event')).toBe('RUN_ERROR')
     expect(failure.getAttribute('data-chat-stream-contract-lifecycle-events')).toBe('RUN_STARTED,RUN_ERROR')
-    expect(failure.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('server_lifecycle_replay_only')
     expect(failure.getAttribute('data-chat-stream-contract-badge-state')).toBe('server-replay')
     expect(failure.querySelector('[data-chat-stream-contract-badge]')?.textContent).toContain('서버 replay')
     // transport_failure renders the typed card, so the raw diagnostic is
@@ -572,10 +737,6 @@ describe('ChatTranscript', () => {
     errToggle.click()
     await flushUi()
     expect(failure.querySelector('[data-chat-failure-detail]')?.textContent).toContain('Timeout after 630.0s')
-    expect(
-      [...container.querySelectorAll('[data-chat-stream-contract-delivery-receipt]')]
-        .map(node => node.getAttribute('data-chat-stream-contract-delivery-receipt')),
-    ).not.toContain('client_observed_sse_event')
   })
 
   it('exposes tool-call transcript provenance as rendered attributes', () => {
@@ -590,7 +751,6 @@ describe('ChatTranscript', () => {
             streamContract: {
               source: 'rest_history',
               status: 'history_without_stream_events',
-              deliveryReceipt: 'no_delivery_receipt',
               reason: 'tool history rows carry arguments, not live stream lifecycle',
             },
           }),
@@ -610,7 +770,6 @@ describe('ChatTranscript', () => {
     expect(bubble.getAttribute('data-chat-stream-state')).toBe('complete')
     expect(bubble.getAttribute('data-chat-stream-contract-source')).toBe('rest_history')
     expect(bubble.getAttribute('data-chat-stream-contract-status')).toBe('history_without_stream_events')
-    expect(bubble.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
     expect(bubble.getAttribute('data-chat-stream-contract-reason')).toBe(
       'tool history rows carry arguments, not live stream lifecycle',
     )
@@ -845,99 +1004,6 @@ describe('ChatTranscript', () => {
     expect(onClick.mock.calls[0]?.[0].id).toBe('a1')
   })
 
-  it('renders only exact single-receipt recovery decisions', async () => {
-    const onRecoveryRequeue = vi.fn().mockResolvedValue(undefined)
-    const onRecoveryCancel = vi.fn().mockResolvedValue(undefined)
-    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('operator verified no delivery')
-    const target = entry({
-      id: 'recovery-receipt',
-      role: 'assistant',
-      source: 'direct_assistant',
-      label: 'sangsu',
-      text: 'queued',
-      delivery: 'queued',
-      details: {
-        queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000001',
-        queueRevision: '8',
-        queueState: 'recovery_required',
-      },
-    })
-
-    render(
-      html`<${ChatTranscript}
-        entries=${[target]}
-        emptyText="empty"
-        variant="messenger"
-        action=${{ onRecoveryRequeue, onRecoveryCancel }}
-      />`,
-      container,
-    )
-
-    const requeue = container.querySelector(
-      '[data-chat-queue-recovery-action="requeue_unconfirmed"]',
-    ) as HTMLButtonElement
-    const cancel = container.querySelector(
-      '[data-chat-queue-recovery-action="cancel_unconfirmed"]',
-    ) as HTMLButtonElement
-    expect(requeue).not.toBeNull()
-    expect(cancel).not.toBeNull()
-
-    fireEvent.click(requeue)
-    await waitFor(() => expect(onRecoveryRequeue).toHaveBeenCalledWith(target))
-    fireEvent.click(cancel)
-    await waitFor(() => {
-      expect(onRecoveryCancel).toHaveBeenCalledWith(
-        target,
-        'operator verified no delivery',
-      )
-    })
-    expect(prompt).toHaveBeenCalledTimes(1)
-  })
-
-  it('offers edit and cancel only while a durable receipt is pending', async () => {
-    const onPendingEdit = vi.fn().mockResolvedValue(undefined)
-    const onPendingCancel = vi.fn().mockResolvedValue(undefined)
-    const target = entry({
-      id: 'pending-receipt',
-      role: 'assistant',
-      source: 'direct_assistant',
-      label: 'sangsu',
-      text: '메시지는 대기 중입니다.',
-      delivery: 'queued',
-      details: {
-        queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000002',
-        queueRevision: '9',
-        queueState: 'pending',
-        queueInFlightLane: 'autonomous',
-        queueInFlightStartedAt: 42,
-      },
-    })
-
-    render(
-      html`<${ChatTranscript}
-        entries=${[target]}
-        emptyText="empty"
-        variant="messenger"
-        action=${{ onPendingEdit, onPendingCancel }}
-      />`,
-      container,
-    )
-
-    expect(container.textContent).toContain('자율 작업 처리 중')
-    const edit = container.querySelector(
-      '[data-chat-queue-pending-action="edit"]',
-    ) as HTMLButtonElement
-    const cancel = container.querySelector(
-      '[data-chat-queue-pending-action="cancel"]',
-    ) as HTMLButtonElement
-    expect(edit).not.toBeNull()
-    expect(cancel).not.toBeNull()
-    fireEvent.click(edit)
-    await waitFor(() => expect(onPendingEdit).toHaveBeenCalledWith(target))
-    fireEvent.click(cancel)
-    await waitFor(() => expect(onPendingCancel).toHaveBeenCalledWith(target))
-  })
-
   it('copies the message text from an assistant message copy button', () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.assign(globalThis.navigator, { clipboard: { writeText } })
@@ -1042,44 +1108,6 @@ describe('ChatTranscript', () => {
 
     const cursor = container.querySelector('.animate-pulse')
     expect(cursor).toBeNull()
-  })
-
-  it('shows the shutdown fence that caused a durable queued receipt', () => {
-    render(
-      html`<${ChatTranscript}
-        entries=${[
-          entry({
-            id: 'queued-after-shutdown',
-            role: 'assistant',
-            source: 'direct_assistant',
-            label: 'sangsu',
-            text: '메시지가 다음 active lane에 접수되었습니다.',
-            delivery: 'queued',
-            details: {
-              queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000007',
-              queueShutdownOperationId: 'shutdown-op-7',
-              queueState: 'pending',
-            },
-          }),
-        ]}
-        emptyText="empty"
-        variant="messenger"
-      />`,
-      container,
-    )
-
-    const bubble = container.querySelector('[data-chat-entry-id="queued-after-shutdown"]')
-    expect(bubble?.getAttribute('data-chat-queue-shutdown-operation-id')).toBe('shutdown-op-7')
-    const badge = container.querySelector('[data-chat-queue-state-badge="pending"]')
-    expect(badge?.textContent).toContain('종료 후 처리')
-    expect(badge?.getAttribute('data-chat-queue-shutdown-operation-id')).toBe('shutdown-op-7')
-
-    const detailButton = [...container.querySelectorAll('button')]
-      .find(button => button.textContent?.trim() === '상세 보기')
-    expect(detailButton).toBeDefined()
-    fireEvent.click(detailButton!)
-    expect(container.textContent).toContain('종료 작업 ID')
-    expect(container.textContent).toContain('shutdown-op-7')
   })
 
   it('uses a parent-bounded flexible transcript in primary mode', () => {
@@ -1302,7 +1330,7 @@ describe('ChatTranscript', () => {
   })
 })
 
-describe('ChatComposer queue & stall', () => {
+describe('ChatComposer concurrent submit & stall', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
@@ -1315,15 +1343,14 @@ describe('ChatComposer queue & stall', () => {
     container.remove()
   })
 
-  it('keeps send enabled during streaming when queueing is on', () => {
+  it('keeps durable operation submit enabled during streaming', () => {
     render(
       html`<${ChatComposer}
         draft="다음 질문"
         placeholder="메시지 입력..."
         disabled=${false}
         streaming=${true}
-        queueEnabled=${true}
-        queueCount=${2}
+        allowSendWhileStreaming=${true}
         onDraftChange=${() => {}}
         onSend=${() => {}}
       />`,
@@ -1331,20 +1358,19 @@ describe('ChatComposer queue & stall', () => {
     )
 
     const buttons = [...container.querySelectorAll('button')]
-    const queueButton = buttons.find(button => button.textContent?.includes('대기열 추가'))
-    expect(queueButton).not.toBeUndefined()
-    expect(queueButton?.hasAttribute('disabled')).toBe(false)
-    expect(container.querySelector('[data-chat-queue-count]')?.textContent).toContain('대기 2')
+    const submitButton = buttons.find(button => button.textContent?.includes('새 작업 접수'))
+    expect(submitButton).not.toBeUndefined()
+    expect(submitButton?.hasAttribute('disabled')).toBe(false)
   })
 
-  it('blocks send during streaming when queueing is off', () => {
+  it('blocks send during streaming when concurrent submit is off', () => {
     render(
       html`<${ChatComposer}
         draft="다음 질문"
         placeholder="메시지 입력..."
         disabled=${false}
         streaming=${true}
-        queueEnabled=${false}
+        allowSendWhileStreaming=${false}
         onDraftChange=${() => {}}
         onSend=${() => {}}
       />`,
@@ -2634,7 +2660,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
               {
                 kind: 'progress',
                 text: 'PR 목록을 확인하고 리뷰 상태를 보겠다.',
-                oasBlockIndex: 2,
+                agentCoreBlockIndex: 2,
               },
               {
                 kind: 'tool',
@@ -2658,7 +2684,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(trace?.querySelector('[data-chat-trace-step="chat"]')).toBeNull()
     const progress = trace?.querySelector('[data-chat-trace-step="progress"]') as HTMLElement
     expect(progress.getAttribute('data-chat-trace-provenance')).toBe('intermediate_text')
-    expect(progress.getAttribute('data-chat-trace-oas-block-index')).toBe('2')
+    expect(progress.getAttribute('data-chat-trace-agent-core-block-index')).toBe('2')
     expect(progress.textContent).toContain('PR 목록을 확인하고 리뷰 상태를 보겠다.')
   })
 
@@ -2673,14 +2699,14 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
             source: 'direct_assistant',
             turnRef: 'trace-prov#7',
             traceSteps: [
-              { kind: 'think', text: 'checking context', oasBlockIndex: 3 },
+              { kind: 'think', text: 'checking context', agentCoreBlockIndex: 3 },
               {
                 kind: 'tool',
                 name: 'masc_board_list',
                 toolCallId: 'tc-prov',
                 status: 'ok',
                 args: '{"limit":1}',
-                oasBlockIndex: 4,
+                agentCoreBlockIndex: 4,
               },
             ],
           }),
@@ -2703,14 +2729,14 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     // the data attribute, never the label.
     const think = container.querySelector('[data-chat-trace-step="think"]') as HTMLElement
     expect(think.getAttribute('data-chat-trace-provenance')).toBe('thinking_delta')
-    expect(think.getAttribute('data-chat-trace-oas-block-index')).toBe('3')
+    expect(think.getAttribute('data-chat-trace-agent-core-block-index')).toBe('3')
     expect(think.querySelector('.chat-block-source-badge')?.getAttribute('title'))
       .toBe('source: KEEPER_THINKING_DELTA, content block 3')
 
     const tool = container.querySelector('[data-chat-trace-step="tool"]') as HTMLElement
     expect(tool.getAttribute('data-chat-trace-provenance')).toBe('tool_call_id')
     expect(tool.getAttribute('data-chat-trace-tool-call-id')).toBe('tc-prov')
-    expect(tool.getAttribute('data-chat-trace-oas-block-index')).toBe('4')
+    expect(tool.getAttribute('data-chat-trace-agent-core-block-index')).toBe('4')
     expect(tool.querySelector('.chat-block-source-badge')?.getAttribute('title'))
       .toBe('source: TOOL_CALL_*, tool_call_id=tc-prov, content block 4')
     expect(tool.getAttribute('data-chat-trace-link-state')).toBe('trace-only')
@@ -2944,6 +2970,89 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(settledTrace?.getAttribute('data-chat-turn-complete')).toBe('true')
     expect(container.querySelector('[data-chat-trace-step="think"]')?.textContent).toContain(thinking)
     expect(container.querySelector('[data-chat-trace-step="chat"]')?.textContent).toContain('완료된 응답')
+  })
+
+  // Switching keepers unmounts the whole transcript. The operator's collapse
+  // choice is addressed by turn id, not by component instance, so it has to
+  // survive that unmount — otherwise every timeline the operator folded away
+  // springs back open on return.
+  it('keeps a collapsed turn timeline collapsed across a transcript remount', async () => {
+    const settled = entry({
+      id: 'turn-collapse',
+      text: '완료된 응답',
+      role: 'assistant',
+      source: 'direct_assistant',
+      streamState: null,
+      delivery: 'history',
+      traceSteps: [{ kind: 'think', text: 'considered the options' }],
+    })
+    const renderTurn = (): void => {
+      render(
+        html`<${ChatTranscript}
+          entries=${[settled]}
+          emptyText="empty"
+          groupToolCalls=${true}
+          variant="messenger"
+        />`,
+        container,
+      )
+    }
+    const toggleEl = (): HTMLButtonElement | null =>
+      container.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
+
+    renderTurn()
+    expect(toggleEl()?.getAttribute('aria-expanded')).toBe('true')
+
+    fireEvent.click(toggleEl() as HTMLButtonElement)
+    await waitFor(() => {
+      expect(toggleEl()?.getAttribute('aria-expanded')).toBe('false')
+    })
+
+    // The keeper switch: transcript unmounted, then mounted again.
+    render(null, container)
+    renderTurn()
+
+    expect(toggleEl()?.getAttribute('aria-expanded')).toBe('false')
+    expect(container.querySelector('[data-chat-trace-step="think"]')).toBeNull()
+  })
+
+  it('re-opens a turn timeline the operator expanded after a remount', async () => {
+    const live = (streaming: boolean): KeeperConversationEntry =>
+      entry({
+        id: 'turn-expand',
+        text: streaming ? '응답 작성 중' : '완료된 응답',
+        role: 'assistant',
+        source: 'direct_assistant',
+        streamState: streaming ? 'streaming' : null,
+        delivery: streaming ? 'streaming' : 'history',
+        traceSteps: [{ kind: 'think', text: 'considered the options' }],
+      })
+    const renderTurn = (streaming: boolean): void => {
+      render(
+        html`<${ChatTranscript}
+          entries=${[live(streaming)]}
+          emptyText="empty"
+          groupToolCalls=${true}
+          variant="messenger"
+        />`,
+        container,
+      )
+    }
+    const toggleEl = (): HTMLButtonElement | null =>
+      container.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
+
+    renderTurn(true)
+    expect(toggleEl()?.getAttribute('aria-expanded')).toBe('false')
+
+    fireEvent.click(toggleEl() as HTMLButtonElement)
+    await waitFor(() => {
+      expect(toggleEl()?.getAttribute('aria-expanded')).toBe('true')
+    })
+
+    render(null, container)
+    renderTurn(true)
+
+    expect(toggleEl()?.getAttribute('aria-expanded')).toBe('true')
   })
 
   it('renders board post ids in assistant prose as board detail links', () => {
@@ -3329,6 +3438,135 @@ describe('ChatMessageBubble — workspace source badge (C2)', () => {
     expect(container.querySelector('.kw-src-badge')).toBeNull()
   })
 
+  it('badges a dashboard-surface row as the operator (사람)', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'd',
+          text: 'from the dashboard',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'dashboard' },
+          speakerAuthority: 'owner',
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.origin-dashboard')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('사람')
+    expect(badge?.getAttribute('title')).toContain('surface=dashboard')
+    expect(badge?.getAttribute('title')).toContain('speaker_authority=owner')
+  })
+
+  it('badges a discord connector row', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'dc',
+          text: 'from discord',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'discord', channel_id: 'c1' },
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.origin-discord')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('Discord')
+  })
+
+  it('badges a slack connector row', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'sl',
+          text: 'from slack',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'slack', channel_id: 'C9' },
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    expect(container.querySelector('.kw-src-badge.origin-slack')?.textContent).toContain('Slack')
+  })
+
+  it('badges a workspace fleet broadcast row', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'b',
+          text: 'fleet announcement',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'broadcast' },
+          speakerName: 'keeper-taskmaster-agent',
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.origin-broadcast')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('브로드캐스트')
+    expect(badge?.getAttribute('title')).toContain('speaker_name=keeper-taskmaster-agent')
+  })
+
+  it('badges an agent-surface row with the sending keeper name', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'a',
+          text: 'direct keeper message',
+          role: 'user',
+          source: 'direct_user',
+          surface: { kind: 'agent' },
+          speakerName: 'keeper-lane-smith-agent',
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.origin-agent')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('keeper-lane-smith-agent')
+  })
+
+  it('keeps the semantic badge when a surface is also present', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'ws',
+          text: 'world snapshot',
+          role: 'system',
+          source: 'world_state_prompt',
+          surface: { kind: 'discord', channel_id: 'c1' },
+        })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    expect(container.querySelector('.kw-src-badge.world')).not.toBeNull()
+    expect(container.querySelector('.kw-src-badge.origin-discord')).toBeNull()
+  })
+
   it('renders no badge when the flag is off', () => {
     render(
       html`<${ChatTranscript}
@@ -3457,12 +3695,12 @@ describe('fusion chat card', () => {
           {
             model: 'ollama_cloud.minimax-m3',
             status: 'failed',
-            reason: "(Fusion_types.Provider_error \"Provider 'unknown' bad gateway\")",
+            reason: "Provider 'unknown' bad gateway",
           },
           {
             model: 'ollama_cloud.deepseek-v4-flash',
             status: 'failed',
-            reason: 'Fusion_types.Timeout',
+            reason: 'timeout',
           },
         ],
         judge: { status: 'failed', decision: 'blocked', error: 'judge failed hard' },
@@ -3478,7 +3716,6 @@ describe('fusion chat card', () => {
     expect(detail?.textContent).toContain("Provider 'ollama_cloud.minimax-m3' bad gateway")
     expect(detail?.textContent).toContain('timeout')
     expect(detail?.textContent).toContain('judge failed hard')
-    expect(detail?.textContent).not.toContain('Fusion_types.Provider_error')
     expect(detail?.textContent).not.toContain("Provider 'unknown'")
   })
 
@@ -3833,24 +4070,6 @@ describe('ChatComposer v2 prototype surface', () => {
     expect(container.querySelector('.composer-foot')).toBeNull()
   })
 
-  it('restores the compact footer when queue evidence exists in activity mode', () => {
-    render(
-      html`<${ChatComposer}
-        draft=""
-        placeholder="메시지 입력..."
-        disabled=${false}
-        streaming=${false}
-        queueCount=${2}
-        layout="primary"
-        footerMode="activity"
-        onDraftChange=${() => {}}
-        onSend=${() => {}}
-      />`,
-      container,
-    )
-    expect(container.querySelector('[data-chat-queue-count]')?.textContent).toContain('대기 2')
-  })
-
   it('keeps send and attach controls operational', () => {
     const onSend = vi.fn()
     render(
@@ -3941,5 +4160,62 @@ describe('ChatComposer v2 prototype surface', () => {
     fireEvent.dragOver(composer)
     const textareaAfterDrag = container.querySelector('.composer-box textarea') as HTMLTextAreaElement
     expect(textareaAfterDrag.placeholder).toBe(CHAT_COMPOSER_DROP_PLACEHOLDER)
+  })
+})
+
+// ================================================================
+// autonomousToolSummary
+// ================================================================
+// A collapsed run's header is the only thing a reader sees without clicking, so
+// it has to say what the run did, not just how many wakes it held.
+
+describe('autonomousToolSummary', () => {
+  const withTools = (id: string, names: string[]): KeeperConversationEntry =>
+    entry({
+      id,
+      text: '',
+      traceSteps: names.map((name) => ({ kind: 'tool' as const, name })),
+    })
+
+  it('returns null when the run called no tools', () => {
+    expect(autonomousToolSummary([entry({ id: 'a', text: 'hi' })])).toBeNull()
+    expect(
+      autonomousToolSummary([
+        entry({ id: 'b', text: '', traceSteps: [{ kind: 'think', text: 'thinking' }] }),
+      ]),
+    ).toBeNull()
+    expect(autonomousToolSummary([])).toBeNull()
+  })
+
+  it('folds consecutive repeats into a count', () => {
+    expect(autonomousToolSummary([withTools('a', ['Execute', 'Execute', 'Execute'])]))
+      .toBe('Execute×3')
+  })
+
+  it('keeps the order the tools ran in', () => {
+    expect(autonomousToolSummary([withTools('a', ['Read', 'Execute', 'Execute', 'Read'])]))
+      .toBe('Read Execute×2 Read')
+  })
+
+  it('spans every turn in the run', () => {
+    expect(autonomousToolSummary([withTools('a', ['Read']), withTools('b', ['Grep'])]))
+      .toBe('Read Grep')
+  })
+
+  it('strips the keeper_ and masc_ prefixes the rows already hide', () => {
+    expect(autonomousToolSummary([withTools('a', ['keeper_tasks_list', 'masc_board_search'])]))
+      .toBe('tasks_list board_search')
+  })
+
+  it('counts the groups it did not show', () => {
+    const out = autonomousToolSummary([withTools('a', ['A', 'B', 'C', 'D', 'E', 'F'])])
+    expect(out).toBe('A B C D +2')
+  })
+
+  it('marks a scan it cut short rather than reporting a short run', () => {
+    const many = Array.from({ length: 2100 }, (_, i) => (i % 2 === 0 ? 'Read' : 'Execute'))
+    const out = autonomousToolSummary([withTools('a', many)])
+    expect(out).not.toBeNull()
+    expect(out!.endsWith('…')).toBe(true)
   })
 })

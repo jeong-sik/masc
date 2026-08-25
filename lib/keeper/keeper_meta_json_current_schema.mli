@@ -5,14 +5,14 @@ type validation_error = Invalid_current of string
 val validation_error_detail : validation_error -> string
 
 type field =
+  | Schema
   | Name
   | Agent_name
-  | Persona
   | Instructions
+  | Autonomous_instructions
   | Trace_id
   | Multimodal_policy
   | Trace_history
-  | Generation
   | Last_handoff_ts
   | Created_at
   | Updated_at
@@ -38,26 +38,13 @@ type field =
   | Last_proactive_reason
   | Last_proactive_preview
   | Consecutive_noop_count
-  | Last_compaction_check_ts
-  | Last_compaction_decision
-  | Active_goal_ids
-  | Last_autonomous_action_at
-  | Autonomous_action_count
-  | Autonomous_turn_count
-  | Autonomous_text_turn_count
-  | Autonomous_tool_turn_count
-  | Board_reactive_turn_count
-  | Mention_reactive_turn_count
-  | Noop_turn_count
   | Message_scope_ack_id
-  | Last_blocker
   | Last_runtime_attempt
   | Paused
   | Latched_reason
   | Current_task_id
   | Keeper_id
-  | Oas_env
-  | Meta_version
+  | Agent_core_env
 
 val all_fields : field list
 val field_name : field -> string

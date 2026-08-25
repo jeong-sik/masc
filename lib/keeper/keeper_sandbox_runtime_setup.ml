@@ -1,8 +1,8 @@
 (** See .mli for contract.
 
-    Extracted from [Keeper_tool_command_runtime] (RFC-0006 Phase B-3b) so both
-    [Keeper_tool_command_runtime] (bash sandbox) and [Keeper_sandbox_read_backend] (read
-    sandbox) can preflight the host docker runtime against the
+    Shared by [Keeper_tool_execute_runtime] and
+    [Keeper_sandbox_read_backend] so both execution and read paths can
+    preflight the host docker runtime against the
     configured hardening requirements without forming a module
     dependency cycle. *)
 
@@ -114,10 +114,6 @@ let docker_info_security_options_optional ?timeout_sec () =
   match docker_info_security_options_with_class_optional ?timeout_sec () with
   | Ok security_options -> Ok security_options
   | Error classified -> Error classified.message
-;;
-
-let docker_info_security_options ~timeout_sec =
-  docker_info_security_options_optional ~timeout_sec ()
 ;;
 
 type docker_preflight =
@@ -342,7 +338,21 @@ let unique_preserving_order values =
 ;;
 
 let docker_workspace_state_mount_specs ~base_path ~container_root =
-  let host_masc_root = Common.masc_dir_from_base_path ~base_path in
+  (* Cluster-qualified on the host, default-cluster inside. The files below are
+     the board, task and goal stores, and Board_paths resolves those through
+     [masc_root_dir_from ~cluster_name] — so under a non-default
+     MASC_CLUSTER_NAME the host copies live in .masc/clusters/<name>/ and a
+     mount rooted at .masc/ carried a different set of files than the workspace
+     was reading (#28953, same class as the vote_log_path repair in #28934).
+
+     The container side stays unqualified on purpose: nothing passes
+     MASC_CLUSTER_NAME into the container, so it resolves the default cluster,
+     and the mount hands it the host's active cluster state at that path. *)
+  let host_masc_root =
+    Workspace_utils.masc_root_dir_from
+      ~base_path
+      ~cluster_name:(Env_config_core.cluster_name ())
+  in
   (* [container_root] is itself a bind-mounted playground. Mounting workspace-state
      files inside it creates nested bind targets that Docker Desktop can resolve
      through /run/host_virtiofs and reject as outside the container rootfs. *)

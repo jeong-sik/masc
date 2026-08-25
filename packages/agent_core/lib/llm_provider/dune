@@ -1,0 +1,76 @@
+(include_subdirs no)
+
+(library
+ (name llm_provider)
+ (public_name masc.agent_core.llm_provider)
+ (private_modules
+  complete_stream_error
+  complete_stream_state
+  model_catalog_embedded
+  provider_http_codec
+  tool_result_projection
+  tool_call_input
+  output_token_wire_internal
+  request_artifact_internal
+  exact_output_count_tokens
+  exact_output_measurement_receipt
+  exact_output_measurement_transport
+  prepared_completion_request
+  http_client_phase_observer
+  provider_admission_state
+  provider_registry_state
+  exact_output_catalog_binding
+  exact_output_resolver
+  exact_output_execution
+  exact_output_gemini_schema
+  exact_output_flow
+  exact_output_flow_admission
+  exact_output_generation_receipt
+  exact_output_provider_trace
+  exact_output_ready_admission
+  exact_output_validated_flow_evidence_types
+  exact_output_validated_flow_evidence_canonical_json
+  exact_output_validated_flow_evidence_validation_primitives
+  exact_output_validated_flow_evidence_validation
+  exact_output_validated_flow_evidence_codec
+  exact_output_validated_flow_evidence
+  exact_output_plan)
+ (libraries
+  agent_core_strings
+  yojson
+  otoml
+  ppx_deriving_yojson.runtime
+  eio
+  eio.unix
+  eio_main
+  threads
+  unix
+  str
+  cohttp-eio
+  cohttp
+  http
+  tls
+  tls-eio
+  ca-certs
+  digestif
+  cstruct
+  mirage-crypto-rng
+  mirage-crypto-rng.unix
+  mtime.clock.os
+  domain-name
+  uri)
+ (inline_tests)
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_inline_test))
+ (instrumentation
+  (backend bisect_ppx)))
+
+(rule
+ (target model_catalog_embedded.ml)
+ (deps ../../models.toml)
+ (action
+  (with-stdout-to
+   %{target}
+   (run
+    model_catalog_embed_gen/model_catalog_embed_gen.exe
+    %{dep:../../models.toml}))))

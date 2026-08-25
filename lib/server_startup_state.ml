@@ -65,8 +65,7 @@ let of_product (product : Server_state_product.product) (started_at : float)
 
 (* ── State reference ────────────────────────────────────── *)
 
-let state =
-  ref
+let initial_state () =
     {
       phase = Blocking;
       state_ready = false;
@@ -77,7 +76,15 @@ let state =
       started_at = Unix.gettimeofday ();
     }
 
-let update f = state := f !state
+let state = Atomic.make (initial_state ())
+
+let snapshot () = Atomic.get state
+
+let update f = Atomic_util.update state f
+
+(* NDT-OK: startup elapsed time is operational telemetry and timeout budgeting;
+   wall-clock sampling is confined to this observation boundary. *)
+let wall_clock_now = Unix.gettimeofday
 
 let phase_to_string = function
   | Blocking -> "blocking"
@@ -90,37 +97,17 @@ let phase_to_string = function
 let is_live () = true
 
 let elapsed_since_start () =
-  Unix.gettimeofday () -. !state.started_at
-
-let default_watchdog_timeout_sec = 240.0
+  wall_clock_now () -. (snapshot ()).started_at
 
 let watchdog_timeout_sec () = Env_config.Transport.startup_watchdog_sec ()
 
-let remaining_watchdog_budget_sec ~reserve_sec =
-  Float.max
-    0.0
-    (watchdog_timeout_sec () -. elapsed_since_start () -. reserve_sec)
-;;
-
 let pending_lazy_tasks () =
-  !state.pending_lazy_tasks
-
-let lazy_tasks_complete () =
-  !state.pending_lazy_tasks = []
+  (snapshot ()).pending_lazy_tasks
 
 (* ── Transitions (with product-state invariant checking) ── *)
 
 let reset () =
-  state :=
-    {
-      phase = Blocking;
-      state_ready = false;
-      pending_lazy_tasks = [];
-      last_error = None;
-      path_diagnostics = None;
-      config_resolution = None;
-      started_at = Unix.gettimeofday ();
-    }
+  Atomic.set state (initial_state ())
 
 let mark_blocking () =
   update (fun current ->
@@ -180,8 +167,8 @@ let state_ready_error_to_string = function
 let transition_error stage reason =
   Error (State_ready_transition_rejected { stage; reason })
 
-let mark_state_ready () =
-  let current = !state in
+let rec mark_state_ready () =
+  let current = snapshot () in
   let open Server_state_product in
   let product = to_product current in
   let after_boot =
@@ -216,13 +203,16 @@ let mark_state_ready () =
   match ready with
   | Error _ as error -> error
   | Ok product ->
-    state :=
+    let next =
       of_product
         product
         current.started_at
         current.path_diagnostics
-        current.config_resolution;
-    Ok ()
+        current.config_resolution
+    in
+    if Atomic.compare_and_set state current next
+    then Ok ()
+    else mark_state_ready ()
 
 type lazy_prepare_error =
   | Lazy_state_transition_rejected of string
@@ -231,8 +221,8 @@ let lazy_prepare_error_to_string = function
   | Lazy_state_transition_rejected reason ->
     "lazy startup barrier transition rejected: " ^ reason
 
-let prepare_lazy_tasks ~tasks =
-  let current = !state in
+let rec prepare_lazy_tasks ~tasks =
+  let current = snapshot () in
   let open Server_state_product in
   let product = to_product current in
   let transition =
@@ -243,13 +233,16 @@ let prepare_lazy_tasks ~tasks =
   match transition with
   | Error reason -> Error (Lazy_state_transition_rejected reason)
   | Ok prepared ->
-    state :=
+    let next =
       of_product
         prepared
         current.started_at
         current.path_diagnostics
-        current.config_resolution;
-    Ok ()
+        current.config_resolution
+    in
+    if Atomic.compare_and_set state current next
+    then Ok ()
+    else prepare_lazy_tasks ~tasks
 
 let finish_lazy_task ~task =
   update (fun current ->
@@ -294,7 +287,7 @@ let note_runtime_resolution ~path_diagnostics ~config_resolution =
 (* ── Serialization ──────────────────────────────────────── *)
 
 let to_yojson () =
-  let current = !state in
+  let current = snapshot () in
   let product = to_product current in
   `Assoc
     [
@@ -312,7 +305,12 @@ let to_yojson () =
         match current.config_resolution with
         | Some value -> value
         | None -> `Null );
-      ("elapsed_sec", `Float (elapsed_since_start ()));
+      ( "elapsed_sec",
+        `Float (wall_clock_now () -. current.started_at) );
       ("watchdog_timeout_sec", `Float (watchdog_timeout_sec ()));
       ("product", Server_state_product.product_to_json product);
     ]
+
+module For_testing = struct
+  let restore snapshot = Atomic.set state snapshot
+end

@@ -18,6 +18,7 @@ function repo(id: string, name = id): Repository {
     id,
     name,
     url: '',
+    codebase: null,
     local_path: `/workspace/${id}`,
     default_branch: 'main',
     status: 'active',

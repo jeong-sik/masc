@@ -3,7 +3,6 @@ title: Distribute legacy metrics backend metric ownership to domain modules
 rfc: 0043
 status: Active
 created: 2026-05-08
-implementation_prs: []
 ---
 
 # RFC-0043: Distribute legacy metrics backend metric ownership to domain modules
@@ -45,7 +44,7 @@ implementation_prs: []
 | #13990 | 2026-05-06 | +43 | 3059 (HEAD) |
 
 각 PR 은 자신의 telemetry 추가가 정당하나, *공통 file 에 누적* 되는 구조 자체가
-ratchet 을 만든다. 도메인 owner (keeper, sse, oas, ...) 가 자기 metric 을 자기
+ratchet 을 만든다. 도메인 owner (keeper, sse, agent_core, ...) 가 자기 metric 을 자기
 파일에 두면 ratchet 자체가 사라진다.
 
 ### 1.2 Why PR #14166 가 closed (user-rejected)
@@ -93,7 +92,7 @@ Owner 분산이 안 되어 있어 다음 두 비용이 영구 발생:
 
 | # | Goal |
 |---|------|
-| G1 | 도메인 모듈 (keeper / sse / oas / ws / runtime / ...) 이 자기 metric 을 자기 파일에 정의 |
+| G1 | 도메인 모듈 (keeper / sse / agent_core / ws / runtime / ...) 이 자기 metric 을 자기 파일에 정의 |
 | G2 | `legacy metrics backend module` 은 *runtime registry* + *wire format* (collect / expose) 만 |
 | G3 | godfile cap 위반 자연 해소 (3059 → 예상 ~600 LOC) |
 | G4 | 신규 telemetry 추가 시 도메인 모듈 single-file 변경으로 완료 |
@@ -117,7 +116,7 @@ Owner 분산이 안 되어 있어 다음 두 비용이 영구 발생:
 ```
 keeper:    187 metrics (50.3%)
 sse:        16
-oas:        15
+agent_core:        15
 llm:        15
 ws:         12
 runtime:     9
@@ -149,7 +148,7 @@ server:     24
 runtime:    16
 llm:        13
 tool:       12
-oas:        11
+agent_core:        11
 ... (lower)
 
 총 use site:  772 references across 140 files
@@ -249,7 +248,7 @@ let register_all_metrics () =
 |----|-------|-------|--------------------------|----------|
 | **PR-1** | introduce empty domain modules + `register_all` no-op | ~10 신규 (.ml/.mli pair × 5 도메인) | +200 (추정, 빈 모듈) | – |
 | **PR-2** | 187 `metric_keeper_*` 상수 → `Keeper_metrics`; `legacy metrics backend` 에 alias 유지 | 1 legacy metrics backend module (-) + 1 신규 (+) | legacy metrics backend module: 187 const × ~3 LOC 평균 = ~-560 *측정 base*; new module: ~600; alias: ~190 → net new module ~+800, legacy metrics backend net ~-560+190(alias)=−370 | ✅ **3059 → ~2700, cap 통과** |
-| **PR-3** | sse/oas/llm/ws/runtime (~70 metrics) → 5 도메인 모듈; alias 유지 | 5 신규 + 1 legacy metrics backend module | legacy metrics backend module: −210; new modules: +210; alias: +70 | – |
+| **PR-3** | sse/agent_core/llm/ws/runtime (~70 metrics) → 5 도메인 모듈; alias 유지 | 5 신규 + 1 legacy metrics backend module | legacy metrics backend module: −210; new modules: +210; alias: +70 | – |
 | **PR-4** | 나머지 (~115 metrics) | 10+ 신규 + 1 legacy metrics backend module | legacy metrics backend module: −345; new modules: +345; alias: +115 | – |
 | **PR-5** | call site 마이그 (`Otel_metric_store.metric_*` → `<Domain>_metrics.metric_*`) + alias 제거 | **140 caller files (use site 측정)** + 1 legacy metrics backend module | use site rename ~772; legacy metrics backend alias drop ~−372 | – |
 

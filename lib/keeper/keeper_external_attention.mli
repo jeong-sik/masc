@@ -27,6 +27,7 @@ type surface_ref = Surface_ref.t =
     }
   | Webhook of { source : string; event_id : string }
   | Agent
+  | Broadcast
   | Gate of { label : string; address : (string * string) list }
 
 type conversation_ref = {
@@ -81,6 +82,18 @@ type event =
       ignored_at : float;
       reason : string;
     }
+  | Quarantined of {
+      event_id : string;
+      quarantined_at : float;
+      reason : string;
+    }
+      (** The turn holding this row's stimulus failed terminally, so the queue
+          entry was quarantined and no Keeper ever judged the row. Distinct from
+          [Ignored], which records a completed turn that chose not to reply: a
+          reader that folds the two together reports a judgement that never
+          happened. Terminal for {!pending_for_keeper} either way — the wake is
+          edge-triggered and only a new ambient message re-arms it, so a row left
+          [Recorded] after its stimulus is gone stays pending forever. *)
 
 val event_id_of_dedupe_key : string -> string
 
@@ -99,9 +112,6 @@ val external_message_ref_to_json : external_message_ref -> Yojson.Safe.t
 
 val external_message_ref_of_json :
   Yojson.Safe.t -> (external_message_ref, string) result
-
-val actor_to_json : actor -> Yojson.Safe.t
-val actor_of_json : Yojson.Safe.t -> (actor, string) result
 
 val item_to_json : item -> Yojson.Safe.t
 val item_of_json : Yojson.Safe.t -> (item, string) result
@@ -150,10 +160,41 @@ val mark_ignored :
   unit ->
   (unit, string) result
 
-val load_events_result :
-  base_path:string -> keeper_name:string -> (event list, string) result
+val mark_quarantined :
+  base_path:string ->
+  keeper_name:string ->
+  event_ids:string list ->
+  reason:string ->
+  ?now:float ->
+  unit ->
+  (unit, string) result
+(** Append [Quarantined] for rows whose stimulus was quarantined out of the
+    event queue by a terminal turn failure. Call this wherever the queue entry
+    is terminalized as failed: the queue side and this log are separate writes,
+    and skipping it leaves the row pending with nothing left to drain it. *)
 
 val load_events : base_path:string -> keeper_name:string -> event list
+
+val recorded_items_by_event_ids :
+  base_path:string -> keeper_name:string -> event_ids:string list ->
+  (string * item) list
+(** One-scan batch counterpart to [load_events] +
+    per-id [Recorded] lookup: loads the event log exactly once, then
+    resolves every id in [event_ids] against that one in-memory load
+    (first [Recorded] match per id, same semantics as looking each id up
+    individually). An id with no [Recorded] entry is simply absent from
+    the result; the returned pairs preserve [event_ids]' order. Calling
+    [load_events] once per id here is the same O(file)-per-call trap the
+    [dedup_window_bytes] comment above documents for [record]'s dedup
+    scan — this is the read-side counterpart, for RFC-0377's turn-batched
+    Connector_attention intake (N companions must not cost N full-file
+    reads). *)
+
+val load_recent_evidence_events :
+  base_path:string -> keeper_name:string -> event list
+(** Read a bounded recent tail sized for prompt evidence rather than connector
+    redelivery. The first and last partial lines are excluded when the file is
+    larger than the internal evidence window. This is not a whole-history API. *)
 
 val pending_for_keeper :
   base_path:string ->

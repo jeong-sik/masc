@@ -24,7 +24,7 @@ import {
   CompositeSchemaDriftError,
   type KeeperCompositeSnapshot,
 } from '../api/schemas/keeper-composite'
-import type { GateKeepersData } from '../api/gate'
+import type { GateKeepersData } from '../api/gate-keepers'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import {
   isCompositeFetchNotFound,
@@ -100,22 +100,22 @@ const REAL_COMPOSITE_PAYLOAD = {
   last_outcome: null,
 }
 
-/** Server-shaped gate keepers response. */
+/** Decoded gate keeper product values consumed by FsmHub. */
 const REAL_GATE_KEEPERS_SHAPE: GateKeepersData = {
-  count: 5,
   keepers: [
-    { name: 'analyst', status: 'busy', last_turn_ago_s: null },
-    { name: 'ani1999', status: 'inactive', last_turn_ago_s: null },
-    { name: 'cheolsu', status: 'active', last_turn_ago_s: null },
-    { name: 'janitor', status: 'active', last_turn_ago_s: null },
-    { name: 'masc-improver', status: 'active', last_turn_ago_s: null },
+    { name: 'analyst', runtimeLabel: 'keeper-analyst-agent', status: 'busy' },
+    { name: 'ani1999', runtimeLabel: 'keeper-ani1999-agent', status: 'inactive' },
+    { name: 'cheolsu', runtimeLabel: 'keeper-cheolsu-agent', status: 'active' },
+    { name: 'janitor', runtimeLabel: 'keeper-janitor-agent', status: 'active' },
+    { name: 'masc-improver', runtimeLabel: 'keeper-masc-improver-agent', status: 'active' },
   ],
+  directoryIssues: [],
+  listing: { total: 5, limit: 200, truncated: false },
 }
 
 describe('FSM Hub integration — API response shape', () => {
   describe('gate keepers response', () => {
-    it('declares a number for count and an array for keepers', () => {
-      expect(typeof REAL_GATE_KEEPERS_SHAPE.count).toBe('number')
+    it('declares a concrete array for keepers', () => {
       expect(Array.isArray(REAL_GATE_KEEPERS_SHAPE.keepers)).toBe(true)
       expect(REAL_GATE_KEEPERS_SHAPE.keepers.length).toBeGreaterThan(0)
     })

@@ -41,9 +41,26 @@ const cfg = (over: { ok?: boolean; source_text?: string; reloaded?: boolean }) =
 const fetchMock = vi.fn()
 const saveMock = vi.fn()
 const runtimeRefreshMock = vi.fn(async () => undefined)
+// The panel now also reads the typed policy projection. Default it to "no
+// config" so the existing cases keep exercising the editor alone; cases that
+// assert on the composition card set it explicitly.
+const fusionConfigMock = vi.fn<() => Promise<unknown>>()
 vi.mock('../api/dashboard', () => ({
   fetchRuntimeTomlConfig: () => fetchMock(),
   saveRuntimeTomlConfig: (text: string) => saveMock(text),
+  fetchFusionConfig: () => fusionConfigMock(),
+  runnableTopologies: (
+    preset: { judges: readonly unknown[] },
+    stagedGroupSize: number,
+  ): readonly string[] => {
+    const base = ['simple', 'refine', 'conditional']
+    const judges = preset.judges.length
+    if (judges >= 2) base.push('judge_of_judges')
+    if (stagedGroupSize >= 2 && judges >= stagedGroupSize * 2 && judges % stagedGroupSize === 0) {
+      base.push('staged_judge_of_judges')
+    }
+    return base
+  },
 }))
 vi.mock('../lib/runtime-config-refresh', () => ({
   refreshRuntimeConfigConsumers: () => runtimeRefreshMock(),
@@ -56,6 +73,10 @@ beforeEach(() => {
   fetchMock.mockReset()
   saveMock.mockReset()
   runtimeRefreshMock.mockClear()
+  // Back to "no projection" between cases: a leaked config from a previous
+  // case would render the composition card in a test that asserts its absence.
+  fusionConfigMock.mockReset()
+  fusionConfigMock.mockRejectedValue(new Error('no fusion config in this test'))
   container = document.createElement('div')
   document.body.appendChild(container)
 })
@@ -68,6 +89,53 @@ async function mount() {
   const { FusionSettingsPanel } = await import('./fusion-settings-panel')
   render(h(FusionSettingsPanel, {}), container)
   await vi.waitFor(() => expect(q('[data-testid="fusion-settings-editor"]')).not.toBeNull())
+}
+
+
+// The composition card now renders the typed policy projection, not a regex
+// pass over the source text, so a card assertion has to supply that projection.
+// Kept as a builder so each case states only the axes it is about.
+function fusionConfig(preset: {
+  name: string
+  panel: readonly string[]
+  judge: string
+  judges?: readonly { model: string; label?: string }[]
+  panelTimeoutS?: number | null
+  judgeTimeoutS?: number | null
+}) {
+  return {
+    enabled: true,
+    defaultPreset: preset.name,
+    stagedJudgeGroupSize: 3,
+    presets: [
+      {
+        name: preset.name,
+        panels: [
+          {
+            models: preset.panel,
+            label: '',
+            systemPrompt: 'panelist',
+            webTools: false,
+            maxOutputTokens: null,
+            timeoutS: preset.panelTimeoutS ?? null,
+          },
+        ],
+        judge: preset.judge,
+        judgeSystemPrompt: 'judge',
+        judgeMaxOutputTokens: null,
+        judgeTimeoutS: preset.judgeTimeoutS ?? null,
+        judges: (preset.judges ?? []).map(judge => ({
+          model: judge.model,
+          label: judge.label ?? '',
+          systemPrompt: 'lens',
+          webTools: false,
+          maxOutputTokens: null,
+          timeoutS: null,
+        })),
+        minAnswered: 1,
+      },
+    ],
+  }
 }
 
 describe('FusionSettingsPanel', () => {
@@ -193,12 +261,18 @@ describe('FusionSettingsPanel', () => {
 
   it('renders the read-only preset composition parsed from the loaded config', async () => {
     fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
+    fusionConfigMock.mockResolvedValue(
+      fusionConfig({ name: 'trio', panel: ['a', 'b', 'c'], judge: 'j', panelTimeoutS: 240 }),
+    )
     await mount()
 
     expect(q('[data-testid="fusion-preset-view"]')).not.toBeNull()
     const models = Array.from(container.querySelectorAll('[data-testid="fusion-preset-panel-model"]')).map(m => m.textContent)
     expect(models).toEqual(['a', 'b', 'c'])
-    expect(q('[data-testid="fusion-preset-judge"]')?.textContent).toBe('j')
+    expect(q('[data-testid="fusion-preset-judge"]')?.textContent?.trim()).toBe('j')
+    // The deadline axis is the reason this card moved off the raw-text reader:
+    // it exists in the parsed policy and was invisible before.
+    expect(q('[data-testid="fusion-preset-panel-group"]')?.textContent).toContain('240s')
   })
 
   it('omits the preset card when the default preset has no backing section', async () => {
@@ -293,13 +367,24 @@ model = "evidence_model"
 model = "coverage_model"
 `
     fetchMock.mockResolvedValue(cfg({ source_text: quorumLike }))
+    fusionConfigMock.mockResolvedValue(
+      fusionConfig({
+        name: 'quorum',
+        panel: ['p1', 'p2'],
+        judge: 'meta_model',
+        judges: [{ model: 'evidence_model' }, { model: 'coverage_model' }],
+      }),
+    )
     await mount()
 
     // Flat panels are shown normally.
     expect(q('[data-testid="fusion-preset-view"]')).not.toBeNull()
     const models = Array.from(container.querySelectorAll('[data-testid="fusion-preset-panel-model"]')).map(m => m.textContent)
     expect(models).toEqual(['p1', 'p2'])
-    expect(q('[data-testid="fusion-preset-judge"]')?.textContent).toBe('meta_model')
+    expect(q('[data-testid="fusion-preset-judge"]')?.textContent?.trim()).toBe('meta_model')
+    // Two first-pass judges make judge-of-judges runnable; the card says so
+    // rather than leaving the operator to discover it via a refusal.
+    expect(q('[data-testid="fusion-preset-topologies"]')?.textContent).toContain('judge of judges')
     // The judge lane honestly notes the first-pass judges rather than implying one.
     expect(q('[data-testid="fusion-preset-judge-lane-h"]')?.textContent).toContain('1차 심판 2')
     expect(q('[data-testid="fusion-preset-composition-editor"]')?.textContent).toContain('Judge-of-judges runtime')

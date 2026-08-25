@@ -436,10 +436,7 @@ let protocol_version_from_body body_str =
   Mcp_transport_protocol.protocol_version_from_body body_str
 
 let get_session_id_query target =
-  let uri = Uri.of_string target in
-  match Uri.get_query_param uri "session_id" with
-  | Some _ as value -> value
-  | None -> Uri.get_query_param uri "sessionId"
+  Uri.get_query_param (Uri.of_string target) "session_id"
 
 let capitalize_ascii (s : string) =
   if s = "" then
@@ -495,12 +492,49 @@ let get_protocol_version (request : Httpun.Request.t) =
 let get_protocol_version_header_opt (request : Httpun.Request.t) =
   get_header_any_case request.headers "mcp-protocol-version"
 
+(* Two rejections that used to share one string. They answer different
+   questions — "this server does not speak that version" versus "this session
+   already settled on another version" — and MCP 2026-07-28 fixes the wire
+   shape of only the first (-32022 with data.supported/data.requested). A
+   caller handed a bare string cannot tell them apart, so the distinction
+   lives in the type. *)
+type protocol_version_rejection =
+  | Unsupported_version of { requested : string }
+  | Session_version_mismatch of
+      { session_id : string
+      ; expected : string
+      ; got : string
+      }
+
+let protocol_version_rejection_message = function
+  | Unsupported_version { requested } ->
+      Printf.sprintf "Unsupported MCP-Protocol-Version: %s" requested
+  | Session_version_mismatch { session_id; expected; got } ->
+      Printf.sprintf
+        "MCP-Protocol-Version mismatch for session %s: expected %s, got %s."
+        session_id expected got
+
+let protocol_version_rejection_code : protocol_version_rejection -> Mcp_error_code.t
+  = function
+  | Unsupported_version _ -> Mcp_error_code.Unsupported_protocol_version
+  | Session_version_mismatch _ -> Mcp_error_code.Invalid_request
+
+let protocol_version_rejection_body rejection =
+  match rejection with
+  | Unsupported_version { requested } ->
+      Mcp_error_code.unsupported_protocol_version_body ~requested
+        ~supported:Mcp_transport_protocol.supported_protocol_versions
+  | Session_version_mismatch _ ->
+      Mcp_error_code.jsonrpc_error_body
+        (protocol_version_rejection_code rejection)
+        ~message:(protocol_version_rejection_message rejection)
+
 let validate_protocol_version_continuity ~session_id request =
   let validate_supported version =
     if is_valid_protocol_version version then
       Ok ()
     else
-      Error (Printf.sprintf "Unsupported MCP-Protocol-Version: %s" version)
+      Error (Unsupported_version { requested = version })
   in
   let provided = get_protocol_version_header_opt request in
   match SMap.find_opt session_id (Atomic.get protocol_version_by_session) with
@@ -513,10 +547,8 @@ let validate_protocol_version_continuity ~session_id request =
             Ok ()
           else
             Error
-              (Printf.sprintf
-                 "MCP-Protocol-Version mismatch for session %s: expected %s, \
-                  got %s."
-                 session_id expected version))
+              (Session_version_mismatch
+                 { session_id; expected; got = version }))
   | None -> (
       match provided with
       | Some version -> validate_supported version

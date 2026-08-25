@@ -22,13 +22,6 @@ val valid_surfaces : string list
     [dashboard/src/config/navigation.ts]. *)
 val valid_sections : (string * string list) list
 
-(** [is_valid_surface s] returns [true] iff [s] is in [valid_surfaces]. *)
-val is_valid_surface : string -> bool
-
-(** [is_valid_section ~surface section] checks the pair against the
-    allowlist. Returns [true] for known visible *and* hidden sections. *)
-val is_valid_section : surface:string -> string -> bool
-
 (** [parse_event_json json] parses the request body. Returns [Error msg]
     for any of: malformed JSON shape, missing [surface], unknown
     [surface], unknown [(surface, section)] pair, malformed

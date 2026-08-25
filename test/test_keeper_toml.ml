@@ -2,7 +2,6 @@ open Alcotest
 
 module TL = Keeper_toml_loader
 module KTP = Masc.Keeper_types_profile
-module KEP = Masc.Keeper_tool_persona_runtime
 module Runtime = Server_routes_http_runtime
 
 let request_trust_policy =
@@ -37,16 +36,6 @@ let request_authority_exn request =
     | Server_request_authority.Untrusted ) ->
     fail "expected valid authority"
 ;;
-
-let contains_substring s needle =
-  let s_len = String.length s in
-  let n_len = String.length needle in
-  let rec loop i =
-    if i + n_len > s_len then false
-    else if String.sub s i n_len = needle then true
-    else loop (i + 1)
-  in
-  if n_len = 0 then true else loop 0
 
 let has_repo_keeper_config root =
   let keepers_dir = Filename.concat root "config/keepers" in
@@ -550,43 +539,169 @@ let test_parse_multiline_array_bracket_in_string () =
 (* Profile defaults conversion tests                                 *)
 (* ================================================================ *)
 
-let test_profile_minimal () =
-  let input = {|
-[keeper]
-instructions = "test instructions"
-|} in
+let test_profile_rejects_unknown_key () =
+  let input = "[keeper]\ntypo_field = true\n" in
   match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    match KTP.profile_defaults_of_toml doc with
-    | Error e -> fail e
-    | Ok defaults ->
-      check (option string) "instructions" (Some "test instructions")
-        defaults.instructions
-
-let test_profile_rejects_legacy_goal () =
-  let input = {|
-[keeper]
-goal = "removed"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
+  | Error error -> fail error
   | Ok doc ->
     (match KTP.profile_defaults_of_toml doc with
-     | Ok _ -> fail "expected keeper.goal removal error"
-     | Error msg ->
-       check bool "names removed keeper.goal" true
-         (contains_substring msg "keeper.goal is removed"))
+     | Ok _ -> fail "unknown Keeper field must fail closed"
+     | Error detail ->
+       check bool "generic unknown-key error" true
+         (String_util.contains_substring detail "unknown keeper TOML keys");
+       check bool "names unknown key" true
+         (String_util.contains_substring detail "keeper.typo_field"))
+
+(* Two RFCs put a key in [keeper.tools] within days of each other, and the
+   second one's loader accepted the whole [keeper.tools.] prefix so its own
+   nested key would pass. That also accepted [tools.nativ], which is the
+   silence RFC-0390 declared its key to prevent: a typo would leave the
+   runtime on its default posture with nothing said. Both keys are declared
+   now, so the table is closed again. *)
+let test_profile_rejects_a_typo_in_the_tools_table () =
+  List.iter
+    (fun (input, typo) ->
+       match TL.parse_toml input with
+       | Error error -> fail error
+       | Ok doc ->
+         (match KTP.profile_defaults_of_toml doc with
+          | Ok _ ->
+            fail (Printf.sprintf "%s must fail closed, not read as a default" typo)
+          | Error detail ->
+            check bool
+              (Printf.sprintf "%s is named as unknown" typo)
+              true
+              (String_util.contains_substring detail typo)))
+    [ "[keeper.tools]\nnativ = \"read\"\n", "keeper.tools.nativ"
+    ; "[keeper.tools]\ngroup = [\"execute\"]\n", "keeper.tools.group"
+    ; "[keeper.tools]\nnative_posture = \"read\"\n", "keeper.tools.native_posture"
+    ]
+
+(* Each declared kind must reject a value of another kind. Paired with
+   [keeper_toml_fields], where a key cannot exist without a kind, this covers a
+   newly added key too: it has to pick one of these four, and each is shown to
+   fail the load rather than fall through to [Keeper_toml_loader], where a
+   wrong-typed value and an absent one produce the same default (#26622). *)
+let test_each_keeper_field_kind_rejects_a_wrong_typed_value () =
+  List.iter
+    (fun (field, wrong, expected_kind) ->
+       let input = Printf.sprintf "[keeper]\n%s = %s\n" field wrong in
+       match TL.parse_toml input with
+       | Error error -> failf "fixture for %s did not parse: %s" field error
+       | Ok doc ->
+         (match KTP.profile_defaults_of_toml doc with
+          | Ok _ -> failf "%s accepted a wrong-typed value" field
+          | Error detail ->
+            check bool
+              (field ^ " names the field")
+              true
+              (String_util.contains_substring detail ("keeper." ^ field));
+            check bool
+              (field ^ " names the expected kind")
+              true
+              (String_util.contains_substring detail expected_kind)))
+    [ "name", "true", "string"
+    ; "autoboot_enabled", "\"yes\"", "boolean"
+    ; "max_context_override", "\"128001\"", "integer"
+    ; "mention_targets", "true", "string array"
+    ]
+
+
+(* RFC-0390: [keeper.tools] carries exactly one key. The declared kind list
+   makes any sibling an unknown key, so a typo cannot silently keep the
+   runtime's default posture. *)
+let test_profile_parses_tools_native () =
+  List.iter
+    (fun (raw, expected) ->
+       let input = Printf.sprintf "[keeper.tools]\nnative = %S\n" raw in
+       match TL.parse_toml input with
+       | Error error -> fail error
+       | Ok doc ->
+         (match KTP.profile_defaults_of_toml doc with
+          | Error e -> fail e
+          | Ok d ->
+            check bool
+              (Printf.sprintf "native %s parses" raw)
+              true
+              (d.native_tool_posture = Some expected)))
+    [ "none", Runtime_native_tools.Native_none
+    ; "read", Runtime_native_tools.Native_read
+    ; "full", Runtime_native_tools.Native_full
+    ]
+
+let test_profile_absent_tools_native_is_none () =
+  let input = "[keeper]\nproactive_enabled = true\n" in
+  match TL.parse_toml input with
+  | Error error -> fail error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Error e -> fail e
+     | Ok d ->
+       check bool "absent native is None" true (d.native_tool_posture = None))
+
+let test_profile_rejects_invalid_tools_native () =
+  let input = "[keeper.tools]\nnative = \"yolo\"\n" in
+  match TL.parse_toml input with
+  | Error error -> fail error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "invalid keeper.tools.native must fail closed"
+     | Error detail ->
+       check bool "names the key" true
+         (String_util.contains_substring detail "keeper.tools.native");
+       check bool "lists allowed values" true
+         (String_util.contains_substring detail "none, read, full"))
+
+let test_profile_rejects_unknown_tools_sibling_key () =
+  let input = "[keeper.tools]\ngroup = [\"board\"]\n" in
+  match TL.parse_toml input with
+  | Error error -> fail error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "unknown [keeper.tools] key must fail closed"
+     | Error detail ->
+       check bool "generic unknown-key error" true
+         (String_util.contains_substring detail "unknown keeper TOML keys");
+       check bool "names unknown key" true
+         (String_util.contains_substring detail "keeper.tools.group"))
+
+
+(* RFC-0389: a typo in [keeper.tools.groups] must fail the load. All-unknown
+   used to fall back to All, which quietly cancelled the narrowing the
+   declaration existed to make. *)
+let test_tool_groups_rejects_unknown_names () =
+  let input = "[keeper.tools]\ngroups = [\"exeucte\", \"borad\"]\n" in
+  match TL.parse_toml input with
+  | Error error -> failf "fixture did not parse: %s" error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ ->
+         fail "all-unknown groups fell back to All: the narrowing was cancelled"
+     | Error detail ->
+         check bool "names the first typo" true
+           (String_util.contains_substring detail "exeucte");
+         check bool "names the second typo" true
+           (String_util.contains_substring detail "borad"))
+;;
+
+let test_tool_groups_accepts_known_names () =
+  let input = "[keeper.tools]\ngroups = [\"execute\", \"meta\"]\n" in
+  match TL.parse_toml input with
+  | Error error -> failf "fixture did not parse: %s" error
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Error detail -> failf "known groups were rejected: %s" detail
+     | Ok defaults ->
+         check (option (list string)) "groups carried through"
+           (Some [ "execute"; "meta" ]) defaults.KTP.tool_groups)
+;;
 
 let test_profile_full () =
   let input = {|
 [keeper]
-persona_name = "analyst"
-instructions = "You are a log analyzer."
 mention_targets = ["sherlock", "log-analyzer"]
 proactive_enabled = true
 autoboot_enabled = false
-active_goal_ids = ["goal-runtime", "goal-masc"]
 max_context_override = 128001
 |} in
   match TL.parse_toml input with
@@ -595,15 +710,9 @@ max_context_override = 128001
     match KTP.profile_defaults_of_toml doc with
     | Error e -> fail e
     | Ok d ->
-      check (option string) "persona_name" (Some "analyst") d.persona_name;
-      check (option string) "instructions" (Some "You are a log analyzer.")
-        d.instructions;
       check int "mention_targets" 2 (List.length d.mention_targets);
       check (option bool) "proactive" (Some true) d.proactive_enabled;
       check (option bool) "autoboot_enabled" (Some false) d.autoboot_enabled;
-      check (option (list string)) "active_goal_ids"
-        (Some [ "goal-runtime"; "goal-masc" ])
-        d.active_goal_ids;
       check (option int) "max_context_override" (Some 128_001)
         d.max_context_override
 
@@ -621,9 +730,9 @@ autoboot_enabled = [true, false]
      | Ok _ -> fail "known scalar field must not silently use its default"
      | Error message ->
        check bool "names field" true
-         (contains_substring message "keeper.autoboot_enabled");
+         (String_util.contains_substring message "keeper.autoboot_enabled");
        check bool "names expected type" true
-         (contains_substring message "boolean"))
+         (String_util.contains_substring message "boolean"))
 
 let test_profile_rejects_invalid_max_context_override () =
   let input =
@@ -639,7 +748,7 @@ max_context_override = 0
      | Ok _ -> fail "expected invalid max_context_override error"
      | Error message ->
        check bool "names max_context_override" true
-         (contains_substring message "max_context_override"))
+         (String_util.contains_substring message "max_context_override"))
 
 let test_profile_parses_multimodal_policy () =
   let input = {|
@@ -667,114 +776,9 @@ multimodal_policy = "silent_default"
      | Ok _ -> fail "expected invalid multimodal_policy error"
      | Error msg ->
        check bool "mentions multimodal_policy" true
-         (contains_substring msg "invalid multimodal_policy");
+         (String_util.contains_substring msg "invalid multimodal_policy");
        check bool "mentions allowed values" true
-         (contains_substring msg "delegate"))
-
-let test_profile_rejects_removed_model_keys () =
-  let input = {|
-[keeper]
-models = ["llama:test"]
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-      (match KTP.profile_defaults_of_toml doc with
-       | Ok _ -> fail "expected removed TOML key error"
-       | Error msg ->
-           check bool "mentions removed models key" true
-             (try
-                ignore
-                  (Str.search_forward
-                     (Str.regexp_string "keeper.models")
-                     msg 0);
-                true
-              with Not_found -> false))
-
-let test_profile_rejects_removed_initiative_keys () =
-  let input = {|
-[keeper]
-initiative_enabled = true
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-      (match KTP.profile_defaults_of_toml doc with
-       | Ok _ -> fail "expected removed TOML key error"
-       | Error msg ->
-           check bool "mentions removed initiative key" true
-             (try
-                ignore
-                  (Str.search_forward
-                     (Str.regexp_string "keeper.initiative_enabled")
-                     msg 0);
-                true
-              with Not_found -> false))
-
-let test_profile_rejects_removed_ref_keys () =
-  let input = {|
-[keeper]
-persona_ref = "base-persona"
-runtime_ref = "tool-runtime"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-      (match KTP.profile_defaults_of_toml doc with
-       | Ok _ -> fail "expected removed TOML ref key error"
-       | Error msg ->
-           check bool "mentions removed persona_ref" true
-             (contains_substring msg "keeper.persona_ref");
-           check bool "mentions removed runtime_ref" true
-             (contains_substring msg "keeper.runtime_ref"))
-
-let test_profile_rejects_removed_shards_key () =
-  let input = {|
-[keeper]
-shards = ["base", "voice"]
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Ok _ -> fail "expected removed keeper.shards error"
-     | Error msg ->
-       check bool
-         "mentions removed shards key"
-         true
-         (contains_substring msg "keeper.shards"))
-
-let test_profile_rejects_removed_voice_policy_key () =
-  let input = {|
-[keeper]
-policy_voice_enabled = true
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Ok _ -> fail "expected removed keeper.policy_voice_enabled error"
-     | Error msg ->
-       check bool
-         "mentions removed voice policy key"
-         true
-         (contains_substring msg "keeper.policy_voice_enabled"))
-
-let test_profile_rejects_removed_compaction_cooldown_key () =
-  let input = {|
-[keeper]
-compaction_cooldown_sec = 15
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Ok _ -> fail "expected removed keeper.compaction_cooldown_sec error"
-     | Error msg ->
-       check bool
-         "mentions removed compaction cooldown key"
-         true
-         (contains_substring msg "keeper.compaction_cooldown_sec"))
+         (String_util.contains_substring msg "delegate"))
 
 (* ================================================================ *)
 (* File loading tests                                                *)
@@ -786,7 +790,6 @@ let test_load_from_file () =
   let content = {|
 [keeper]
 name = "test-keeper"
-instructions = "testing file load"
 |} in
   let oc = open_out tmp in
   output_string oc content;
@@ -795,8 +798,7 @@ instructions = "testing file load"
    | Error e -> fail (KTP.keeper_toml_load_error_to_string e)
    | Ok (name, defaults) ->
      check string "name from toml" "test-keeper" name;
-     check (option string) "instructions" (Some "testing file load")
-       defaults.instructions;
+     check (option string) "instructions" None defaults.instructions;
      check (option string) "manifest" (Some tmp) defaults.manifest_path);
   Sys.remove tmp
 
@@ -805,7 +807,6 @@ let test_load_name_from_filename () =
   let path = Filename.concat tmp_dir "my-analyzer.toml" in
   let content = {|
 [keeper]
-instructions = "analyze stuff"
 |} in
   let oc = open_out path in
   output_string oc content;
@@ -821,7 +822,6 @@ let test_load_invalid_name () =
   let content = {|
 [keeper]
 name = "invalid name with spaces"
-instructions = "test"
 |} in
   let oc = open_out tmp in
   output_string oc content;
@@ -890,7 +890,7 @@ let test_discover_retains_invalid_files () =
   in
   write_file "good.toml" {|
 [keeper]
-instructions = "works"
+autoboot_enabled = false
 |};
   write_file "bad.toml" "[broken";
   let result = KTP.discover_keepers_toml tmp_dir in
@@ -911,7 +911,6 @@ instructions = "works"
 let test_bundled_keeper_profiles_resolve_prompt_defaults () =
   let repo = repo_root () in
   let original_config = Sys.getenv_opt "MASC_CONFIG_DIR" in
-  let original_personas = Sys.getenv_opt "MASC_PERSONAS_DIR" in
   let restore key = function
     | Some value -> Unix.putenv key value
     | None -> Unix.putenv key ""
@@ -919,12 +918,9 @@ let test_bundled_keeper_profiles_resolve_prompt_defaults () =
   Fun.protect
     ~finally:(fun () ->
       restore "MASC_CONFIG_DIR" original_config;
-      restore "MASC_PERSONAS_DIR" original_personas;
       Config_dir_resolver.reset ())
     (fun () ->
       Unix.putenv "MASC_CONFIG_DIR" (Filename.concat repo "config");
-      Unix.putenv "MASC_PERSONAS_DIR"
-        (Filename.concat (Filename.concat repo "config") "personas");
       Config_dir_resolver.reset ();
       let keepers_dir = Filename.concat repo "config/keepers" in
       Sys.readdir keepers_dir
@@ -942,27 +938,99 @@ let test_bundled_keeper_profiles_resolve_prompt_defaults () =
                   (KTP.keeper_toml_load_error_to_string e))
            | Ok _defaults -> ()))
 
-let test_bundled_issue_king_uses_local_sandbox () =
+let read_text_file path =
+  let channel = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr channel)
+    (fun () -> really_input_string channel (in_channel_length channel))
+;;
+
+let neutral_local_inherit_contract = "# test-contract: neutral-local-inherit"
+
+let test_bundled_profiles_include_local_sandbox () =
   let repo = repo_root () in
   Fun.protect
     ~finally:(fun () -> Config_dir_resolver.reset ())
     (fun () ->
-      with_env_restore [ "MASC_CONFIG_DIR"; "MASC_PERSONAS_DIR" ] (fun () ->
+      with_env_restore [ "MASC_CONFIG_DIR" ] (fun () ->
           Unix.putenv "MASC_CONFIG_DIR" (Filename.concat repo "config");
-          Unix.putenv "MASC_PERSONAS_DIR"
-            (Filename.concat (Filename.concat repo "config") "personas");
           Config_dir_resolver.reset ();
-          match KTP.load_keeper_profile_defaults_result "issue_king" with
-          | Error e ->
+          let keepers_dir = Filename.concat repo "config/keepers" in
+          let contract_profiles =
+            Sys.readdir keepers_dir
+            |> Array.to_list
+            |> List.filter (fun file -> Filename.check_suffix file ".toml")
+            |> List.filter (fun file ->
+              String_util.contains_substring
+                (read_text_file (Filename.concat keepers_dir file))
+                neutral_local_inherit_contract)
+          in
+          check int "one profile owns the neutral local/inherit contract" 1
+            (List.length contract_profiles);
+          let profile_name =
+            contract_profiles |> List.hd |> Filename.chop_extension
+          in
+          match KTP.load_keeper_profile_defaults_result profile_name with
+          | Error error ->
             fail
-              (Printf.sprintf
-                 "issue_king failed to resolve: %s"
-                 (KTP.keeper_toml_load_error_to_string e))
+              ("neutral local/inherit contract failed to load: "
+               ^ KTP.keeper_toml_load_error_to_string error)
           | Ok defaults ->
-            check (option string) "issue_king sandbox" (Some "local")
+            check (option string) "contract sandbox profile" (Some "local")
               (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
-            check (option string) "issue_king network" (Some "inherit")
+            check (option string) "contract network mode" (Some "inherit")
               (Option.map KTP.network_mode_to_string defaults.network_mode)))
+
+let concrete_keeper_inventory_path repo =
+  Filename.concat repo "test/fixtures/concrete-keeper-identities.txt"
+;;
+
+let concrete_keeper_inventory repo =
+  read_text_file (concrete_keeper_inventory_path repo)
+  |> String.split_on_char '\n'
+  |> List.map String.trim
+  |> List.filter (fun line -> line <> "" && not (String.starts_with ~prefix:"#" line))
+;;
+
+let rec ocaml_source_files path =
+  if Sys.is_directory path
+  then
+    Sys.readdir path
+    |> Array.to_list
+    |> List.concat_map (fun name -> ocaml_source_files (Filename.concat path name))
+  else if Filename.check_suffix path ".ml" || Filename.check_suffix path ".mli"
+  then [ path ]
+  else []
+;;
+
+let test_ocaml_sources_exclude_declared_concrete_keeper_identities () =
+  let repo = repo_root () in
+  let identities = concrete_keeper_inventory repo in
+  check bool "concrete Keeper inventory is declared" true (identities <> []);
+  let source_files =
+    [ "bin"; "lib"; "packages"; "test" ]
+    |> List.concat_map (fun root -> ocaml_source_files (Filename.concat repo root))
+  in
+  (* Every violation, not the first. [failf] inside the loop stopped at one
+     file, so four of the five that had accumulated by 2026-08-24 stayed
+     invisible until the one ahead of them was cleared -- and each round of
+     that costs a full CI build to learn the next name. *)
+  let violations =
+    source_files
+    |> List.concat_map (fun path ->
+         let source = read_text_file path |> String.lowercase_ascii in
+         identities
+         |> List.filter (fun identity ->
+              String_util.contains_substring source (String.lowercase_ascii identity))
+         |> List.map (fun identity -> Printf.sprintf "%s: %S" path identity))
+  in
+  if violations <> []
+  then
+    failf
+      "concrete Keeper identities remain in OCaml source (%d):\n  %s"
+      (List.length violations)
+      (String.concat "\n  " violations)
+;;
 
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
@@ -998,18 +1066,18 @@ let test_typed_keeper_toml_edits_preserve_unrelated_fields () =
     {|
 # operator comment
 [keeper]
-instructions = "keep me"
+name = "probe"
 "proactive_enabled"	= true
 max_context_override	= 200000
 
-[keeper.oas_env]
-OAS_OPENAI_BASE_URL = "http://127.0.0.1:1"
+[keeper.agent_core_env]
+AGENT_CORE_OPENAI_BASE_URL = "http://127.0.0.1:1"
 |};
   (match
      TL.edit_keeper_toml_fields
        ~path
        [ "proactive_enabled", TL.Set (TL.Toml_bool false)
-       ; "persona_name", TL.Set (TL.Toml_string "researcher")
+       ; "sandbox_image", TL.Set (TL.Toml_string "keeper:test")
        ; "allowed_paths", TL.Set (TL.Toml_string_array [ "/tmp/a"; "/tmp/b" ])
        ; "max_context_override", TL.Remove
        ]
@@ -1022,21 +1090,21 @@ OAS_OPENAI_BASE_URL = "http://127.0.0.1:1"
     | Ok content -> content
   in
   check bool "comment survives" true
-    (contains_substring content "# operator comment");
+    (String_util.contains_substring content "# operator comment");
   match TL.parse_toml content with
   | Error error -> fail error
   | Ok doc ->
     check (option bool) "bool updated" (Some false)
       (TL.toml_bool_opt doc "keeper.proactive_enabled");
-    check (option string) "persona inserted" (Some "researcher")
-      (TL.toml_string_opt doc "keeper.persona_name");
+    check (option string) "sandbox image inserted" (Some "keeper:test")
+      (TL.toml_string_opt doc "keeper.sandbox_image");
     check (list string) "list inserted" [ "/tmp/a"; "/tmp/b" ]
       (TL.toml_string_list doc "keeper.allowed_paths");
     check (option int) "context override removed" None
       (TL.toml_int_opt doc "keeper.max_context_override");
     check (option string) "unrelated table survives"
       (Some "http://127.0.0.1:1")
-      (TL.toml_string_opt doc "keeper.oas_env.OAS_OPENAI_BASE_URL")
+      (TL.toml_string_opt doc "keeper.agent_core_env.AGENT_CORE_OPENAI_BASE_URL")
 
 let test_keeper_toml_writer_rejects_table_assignment_shapes () =
   with_temp_dir "keeper-toml-invalid-writer-shape" @@ fun dir ->
@@ -1052,7 +1120,7 @@ let test_keeper_toml_writer_rejects_table_assignment_shapes () =
       | Ok () -> failf "%s must not be rendered as a key assignment" label
       | Error message ->
         check bool (label ^ " error is explicit") true
-          (contains_substring message "cannot be rendered");
+          (String_util.contains_substring message "cannot be rendered");
         check bool (label ^ " file is not created") false (Sys.file_exists path))
     shapes
 
@@ -1137,9 +1205,8 @@ let test_keeper_toml_writer_edits_multiline_assignments () =
          (TL.toml_string_opt doc "keeper.instructions"))
 
 let with_profile_base f =
-  with_env_restore [ "MASC_CONFIG_DIR"; "MASC_PERSONAS_DIR" ] @@ fun () ->
+  with_env_restore [ "MASC_CONFIG_DIR" ] @@ fun () ->
   Unix.putenv "MASC_CONFIG_DIR" "";
-  Unix.putenv "MASC_PERSONAS_DIR" "";
   Config_dir_resolver.reset ();
   with_temp_dir "keeper-profile-base" @@ fun base_path ->
   let config_dir = Filename.concat (Filename.concat base_path ".masc") "config" in
@@ -1179,13 +1246,13 @@ let test_invalid_child_profile_fails_closed_before_dispatch () =
   with
   | Ok _ -> fail "invalid profile reached runtime execution construction"
   | Error
-      (Agent_sdk.Error.Config
-         (Agent_sdk.Error.InvalidConfig { field; detail })) ->
-    check string "typed SDK config field" "keeper.profile" field;
-    check bool "SDK error retains failing path" true
-      (contains_substring detail keeper_path)
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig { field; detail })) ->
+    check string "typed agent-core config field" "keeper.profile" field;
+    check bool "agent-core error retains failing path" true
+      (String_util.contains_substring detail keeper_path)
   | Error err ->
-    failf "expected typed InvalidConfig, got %s" (Agent_sdk.Error.to_string err)
+    failf "expected typed InvalidConfig, got %s" (Agent_core.Error.to_string err)
 
 let test_default_source_snapshot_uses_explicit_base_path () =
   with_profile_base @@ fun ~base_path ~config_dir:_ ~keepers_dir ->
@@ -1214,66 +1281,6 @@ let test_absent_profile_is_legitimate_empty_defaults () =
     check (option string) "no manifest" None defaults.manifest_path;
     check (option string) "no instructions" None defaults.instructions
 
-let test_persona_without_keeper_toml_remains_valid () =
-  with_profile_base @@ fun ~base_path ~config_dir ~keepers_dir:_ ->
-  let persona_dir = Filename.concat (Filename.concat config_dir "personas") "analyst" in
-  mkdir_p persona_dir;
-  let profile_path = Filename.concat persona_dir "profile.json" in
-  write_file profile_path
-    {|{"keeper":{"instructions":"reason carefully"}}|};
-  match
-    KTP.load_keeper_profile_defaults_result_for_base_path
-      ~base_path
-      "analyst"
-  with
-  | Error error -> fail (KTP.keeper_toml_load_error_to_string error)
-  | Ok defaults ->
-    check (option string) "persona instructions" (Some "reason carefully")
-      defaults.instructions;
-    check (option string) "persona manifest" (Some profile_path)
-      defaults.manifest_path
-
-let test_persona_parse_failure_is_typed_profile_error () =
-  with_profile_base @@ fun ~base_path ~config_dir ~keepers_dir ->
-  let persona_dir = Filename.concat (Filename.concat config_dir "personas") "analyst" in
-  mkdir_p persona_dir;
-  let profile_path = Filename.concat persona_dir "profile.json" in
-  write_file profile_path "{invalid-json";
-  let keeper_path = Filename.concat keepers_dir "reviewer.toml" in
-  write_file keeper_path
-    "[keeper]\npersona_name = \"analyst\"\nautoboot_enabled = true\n";
-  match
-    KTP.load_keeper_profile_defaults_result_for_base_path
-      ~base_path
-      "reviewer"
-  with
-  | Ok _ -> fail "malformed persona profile must fail before defaults projection"
-  | Error error ->
-    check bool "persona parse error kind" true (error.kind = KTP.Parse_error);
-    check string "keeper TOML retains dependency owner" keeper_path error.keeper_path;
-    check string "persona profile is the failing path" profile_path error.failing_path;
-    check bool "error reports profile dependency" true
-      (contains_substring
-         (KTP.keeper_toml_load_error_to_string error)
-         "profile dependency")
-
-let test_persona_read_failure_is_typed_profile_error () =
-  with_profile_base @@ fun ~base_path ~config_dir ~keepers_dir:_ ->
-  let persona_dir = Filename.concat (Filename.concat config_dir "personas") "analyst" in
-  mkdir_p persona_dir;
-  let profile_path = Filename.concat persona_dir "profile.json" in
-  Unix.mkdir profile_path 0o755;
-  match
-    KTP.load_keeper_profile_defaults_result_for_base_path
-      ~base_path
-      "analyst"
-  with
-  | Ok _ -> fail "unreadable persona profile must fail before defaults projection"
-  | Error error ->
-    check bool "persona read error kind" true (error.kind = KTP.Read_error);
-    check string "standalone persona owns load" profile_path error.keeper_path;
-    check string "unreadable persona is the failing path" profile_path error.failing_path
-
 let test_keeper_config_directory_probe_is_typed () =
   let path = Filename.temp_file "keeper-config-not-dir" ".toml" in
   Fun.protect
@@ -1300,18 +1307,6 @@ let restore_env name = function
          [None], so this restores the effective resolver state for these tests. *)
       Unix.putenv name ""
 
-let with_personas_dir f =
-  with_temp_dir "keeper-personas" @@ fun personas_dir ->
-  let original = Sys.getenv_opt "MASC_PERSONAS_DIR" in
-  Fun.protect
-    ~finally:(fun () ->
-      restore_env "MASC_PERSONAS_DIR" original;
-      Config_dir_resolver.reset ())
-    (fun () ->
-      Unix.putenv "MASC_PERSONAS_DIR" personas_dir;
-      Config_dir_resolver.reset ();
-      f personas_dir)
-
 let with_config_dir f =
   with_temp_dir "keeper-config" @@ fun config_dir ->
   mkdir_p (Filename.concat config_dir "prompts");
@@ -1327,17 +1322,14 @@ let with_config_dir f =
 
 let test_profile_defaults_materializable_for_name_uses_base_path () =
   let original_config = Sys.getenv_opt "MASC_CONFIG_DIR" in
-  let original_personas = Sys.getenv_opt "MASC_PERSONAS_DIR" in
   let original_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
   Fun.protect
     ~finally:(fun () ->
       restore_env "MASC_CONFIG_DIR" original_config;
-      restore_env "MASC_PERSONAS_DIR" original_personas;
       restore_env "MASC_BASE_PATH" original_base_path;
       Config_dir_resolver.reset ())
     (fun () ->
       Unix.putenv "MASC_CONFIG_DIR" "";
-      Unix.putenv "MASC_PERSONAS_DIR" "";
       Unix.putenv "MASC_BASE_PATH" "";
       Config_dir_resolver.reset ();
       with_temp_dir "keeper-materializable" @@ fun base_path ->
@@ -1350,362 +1342,11 @@ let test_profile_defaults_materializable_for_name_uses_base_path () =
       write_file
         (Filename.concat keepers_dir "runtime.toml")
         "[keeper]\nautoboot_enabled = true\ninstructions = \"runtime keeper\"\n";
-      write_file
-        (Filename.concat keepers_dir "template.toml")
-        "[keeper]\ninstructions = \"loader-only template\"\n";
       check bool
         "explicit autoboot keeper is materializable"
         true
         (KTP.keeper_profile_defaults_materializable_for_name ~base_path
-           "runtime");
-      check bool
-        "loader-only template is not materializable"
-        false
-        (KTP.keeper_profile_defaults_materializable_for_name ~base_path
-           "template"))
-
-(* persona⊥{model,runtime}: keeper TOML no longer carries a runtime/model
-   selection; a [keeper.runtime_id] (or legacy [keeper.model]) key is rejected
-   at load, pointing the operator at runtime.toml [[runtime.assignments]]. *)
-let test_profile_rejects_runtime_id_key () =
-  let input = {|
-[keeper]
-runtime_id = "oas-coding_first"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Ok _ -> fail "expected error: keeper.runtime_id is removed"
-     | Error _ -> ())
-
-let test_profile_rejects_model_key () =
-  let input = {|
-[keeper]
-model = "oas-coding_first"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Ok _ -> fail "expected error: keeper.model is removed"
-     | Error _ -> ())
-
-let test_persona_defaults_load_prompt_fields () =
-  with_personas_dir @@ fun personas_dir ->
-  let persona_dir = Filename.concat personas_dir "probe" in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|
-{
-  "name": "Probe",
-  "keeper": {
-    "instructions": "legacy instructions"
-  }
-}
-|};
-  let defaults =
-    match KTP.load_keeper_profile_defaults_result "probe" with
-    | Ok defaults -> defaults
-    | Error error -> fail (KTP.keeper_toml_load_error_to_string error)
-  in
-  check (option string) "instructions load" (Some "legacy instructions")
-    defaults.instructions
-
-let test_persona_defaults_reject_unsupported_keeper_fields () =
-  with_personas_dir @@ fun personas_dir ->
-  let persona_dir = Filename.concat personas_dir "probe" in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|{
-  "name": "Probe",
-  "keeper": {
-    "unknown_prompt_field": "not accepted"
-  }
-}|};
-  match KTP.load_keeper_profile_defaults_result "probe" with
-  | Ok _ -> fail "unsupported persona keeper fields must fail loading"
-  | Error error ->
-    let detail = KTP.keeper_toml_load_error_to_string error in
-    check bool "persona error identifies unsupported contract" true
-      (contains_substring detail "unsupported persona keeper fields");
-    check bool "persona error names unknown field" true
-      (contains_substring detail "unknown_prompt_field")
-
-let test_persona_defaults_reject_removed_shards () =
-  with_personas_dir @@ fun personas_dir ->
-  let persona_dir = Filename.concat personas_dir "probe" in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|
-{
-  "name": "Probe",
-  "keeper": {
-    "shards": ["base", "voice"],
-    "policy_voice_enabled": true
-  }
-}
-|};
-  match KTP.load_keeper_profile_defaults_result "probe" with
-  | Ok _ -> fail "removed persona keeper.shards must fail loading"
-  | Error error ->
-    let detail = KTP.keeper_toml_load_error_to_string error in
-    check bool "persona error names shards" true (contains_substring detail "shards");
-    check bool
-      "persona error names voice policy"
-      true
-      (contains_substring detail "policy_voice_enabled")
-
-let test_persona_defaults_reject_non_object_shapes () =
-  with_personas_dir @@ fun personas_dir ->
-  let persona_dir = Filename.concat personas_dir "probe" in
-  mkdir_p persona_dir;
-  let profile_path = Filename.concat persona_dir "profile.json" in
-  write_file profile_path {|{"name":"Probe","keeper":"invalid"}|};
-  (match KTP.load_keeper_profile_defaults_result "probe" with
-   | Ok _ -> fail "non-object persona keeper must fail loading"
-   | Error error ->
-     check bool "nested shape error names keeper" true
-       (contains_substring
-          (KTP.keeper_toml_load_error_to_string error)
-          "keeper"));
-  write_file profile_path {|["invalid root"]|};
-  match KTP.load_keeper_profile_defaults_result "probe" with
-  | Ok _ -> fail "non-object persona root must fail loading"
-  | Error error ->
-    check bool "root shape error names root" true
-      (contains_substring
-         (KTP.keeper_toml_load_error_to_string error)
-         "root")
-
-let test_persona_resolver_rejects_operator_todo_profile () =
-  with_personas_dir @@ fun personas_dir ->
-  let persona_dir = Filename.concat personas_dir "probe" in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|
-{
-  "name": "OPERATOR_TODO: probe display",
-  "role": "draft placeholder",
-  "keeper": {}
-}
-|};
-  (match KTP.load_persona_summary "probe" with
-   | Some _ -> fail "placeholder persona summary should be hidden"
-   | None -> ());
-  let defaults =
-    match KTP.load_keeper_profile_defaults_result "probe" with
-    | Ok defaults -> defaults
-    | Error error -> fail (KTP.keeper_toml_load_error_to_string error)
-  in
-  check (option string) "placeholder manifest rejected" None defaults.manifest_path;
-  match
-    KEP.resolved_keeper_args_from_persona
-      (`Assoc [ ("persona_name", `String "probe") ])
-  with
-  | Ok _ -> fail "placeholder persona should not resolve for keeper spawn"
-  | Error e ->
-      check bool "reports persona unavailable" true
-        (contains_substring e "persona not found")
-
-let test_persona_resolver_rejects_placeholder_in_resolved_payload () =
-  with_personas_dir @@ fun personas_dir ->
-  with_config_dir @@ fun config_dir ->
-  let persona_dir = Filename.concat personas_dir "probe" in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|
-{
-  "name": "Probe",
-  "role": "runtime profile",
-  "keeper": {
-    "instructions": "normal persona instructions"
-  }
-}
-|};
-  let keepers_dir = Filename.concat config_dir "keepers" in
-  mkdir_p keepers_dir;
-  let keeper_path = Filename.concat keepers_dir "probe.toml" in
-  write_file keeper_path
-    {|
-[keeper]
-persona_name = "probe"
-instructions = "OPERATOR_TODO: remove before spawn"
-|};
-  match
-    KEP.resolved_keeper_args_from_persona
-      (`Assoc [ ("persona_name", `String "probe") ])
-  with
-  | Ok _ -> fail "placeholder in resolved keeper args should not resolve"
-  | Error e ->
-      check bool "reports resolved args" true
-        (contains_substring e "resolved keeper args");
-      check bool "reports manifest path" true
-        (contains_substring e keeper_path);
-      check bool "reports resolved payload field" true
-        (contains_substring e "$.instructions")
-
-let test_persona_resolver_preserves_autoboot_enabled_arg () =
-  with_personas_dir @@ fun personas_dir ->
-  let persona_dir = Filename.concat personas_dir "probe" in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|
-{
-  "name": "Probe",
-  "keeper": {
-    "instructions": "test persona keeper"
-  }
-}
-|};
-  match
-    KEP.resolved_keeper_args_from_persona
-      (`Assoc
-        [
-          ("persona_name", `String "probe");
-          ("autoboot_enabled", `Bool false);
-        ])
-  with
-  | Error e -> fail ("resolver failed: " ^ e)
-  | Ok (_, resolved) ->
-      check (option bool) "autoboot_enabled preserved" (Some false)
-        (match Yojson.Safe.Util.member "autoboot_enabled" resolved with
-         | `Bool value -> Some value
-         | _ -> None)
-
-let test_persona_resolver_preserves_allowed_paths () =
-  with_personas_dir @@ fun personas_dir ->
-  let persona_dir = Filename.concat personas_dir "probe" in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|
-{
-  "name": "Probe",
-  "keeper": {
-    "instructions": "test persona keeper"
-  }
-}
-|};
-  match
-    KEP.resolved_keeper_args_from_persona
-      (`Assoc
-        [
-          ("persona_name", `String "probe");
-          ("allowed_paths", `List [ `String "/tmp/demo" ]);
-        ])
-  with
-  | Error e -> fail ("resolver failed: " ^ e)
-  | Ok (_, resolved) ->
-      check (list string) "allowed_paths preserved" [ "/tmp/demo" ]
-        (match Yojson.Safe.Util.member "allowed_paths" resolved with
-         | `List items ->
-             List.filter_map
-               (function `String value -> Some value | _ -> None)
-               items
-         | _ -> [])
-
-let test_persona_resolver_preserves_runtime_owned_overrides () =
-  with_personas_dir @@ fun personas_dir ->
-  let persona_dir = Filename.concat personas_dir "probe" in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|{"name":"Probe","keeper":{"instructions":"test persona keeper"}}|};
-  match
-    KEP.resolved_keeper_args_from_persona
-      (`Assoc
-        [ "persona_name", `String "probe"
-        ; "runtime_id", `String "runtime.opaque"
-        ; "active_goal_ids", `List [ `String "goal-1" ]
-        ])
-  with
-  | Error e -> fail ("resolver failed: " ^ e)
-  | Ok (_, resolved) ->
-      check string "runtime_id preserved" "runtime.opaque"
-        (Yojson.Safe.Util.member "runtime_id" resolved
-         |> Yojson.Safe.Util.to_string);
-      check (list string) "active_goal_ids preserved" [ "goal-1" ]
-        (Yojson.Safe.Util.member "active_goal_ids" resolved
-         |> Yojson.Safe.Util.to_list
-         |> List.map Yojson.Safe.Util.to_string)
-
-let test_persona_resolver_rejects_unsupported_or_ill_typed_args () =
-  with_personas_dir @@ fun personas_dir ->
-  let persona_dir = Filename.concat personas_dir "probe" in
-  mkdir_p persona_dir;
-  write_file
-    (Filename.concat persona_dir "profile.json")
-    {|{"name":"Probe","keeper":{"instructions":"test persona keeper"}}|};
-  (match
-     KEP.resolved_keeper_args_from_persona
-       (`Assoc
-         [ "persona_name", `String "probe"
-         ; "unknown_arg", `String "must fail closed"
-         ])
-   with
-   | Ok _ -> fail "unknown persona creation argument must fail"
-   | Error e ->
-       check bool "unknown argument named" true
-         (contains_substring e "unknown_arg"));
-  match
-    KEP.resolved_keeper_args_from_persona
-      (`Assoc
-        [ "persona_name", `String "probe"
-        ; "proactive_enabled", `String "not-a-boolean"
-        ])
-  with
-  | Ok _ -> fail "ill-typed persona creation argument must fail"
-  | Error e ->
-      check bool "ill-typed argument named" true
-        (contains_substring e "proactive_enabled")
-
-let test_persona_resolver_renders_durable_keeper_toml () =
-  let resolved =
-    `Assoc
-      [
-        ("name", `String "probe-keeper");
-        ("persona_name", `String "probe");
-        ("instructions", `String "quote: \"ok\"");
-        ("autoboot_enabled", `Bool false);
-        ("mention_targets", `List [ `String "probe"; `String "@probe" ]);
-        ("proactive_enabled", `Bool true);
-        ("allowed_paths", `List [ `String "/tmp/probe" ]);
-        ("active_goal_ids", `List [ `String "goal-1" ]);
-        ("runtime_id", `String "runtime.opaque");
-      ]
-  in
-  match KEP.render_keeper_toml_from_resolved_args resolved with
-  | Error e -> fail ("render failed: " ^ e)
-  | Ok toml -> (
-      match TL.parse_toml toml with
-      | Error e -> fail ("rendered TOML did not parse: " ^ e)
-      | Ok doc -> (
-          match KTP.profile_defaults_of_toml doc with
-          | Error e -> fail ("rendered TOML did not load: " ^ e)
-          | Ok defaults ->
-              check (option string) "name" (Some "probe-keeper")
-                (TL.toml_string_opt doc "keeper.name");
-              check (option string) "persona_name" (Some "probe")
-                defaults.persona_name;
-              check (option string) "instructions"
-                (Some "quote: \"ok\"") defaults.instructions;
-              check (option bool) "autoboot" (Some false)
-                defaults.autoboot_enabled;
-              check (list string) "mention targets"
-                [ "probe"; "@probe" ] defaults.mention_targets;
-              check (option (list string)) "allowed_paths"
-                (Some [ "/tmp/probe" ]) defaults.allowed_paths;
-              check (option (list string)) "active_goal_ids"
-                (Some [ "goal-1" ]) defaults.active_goal_ids;
-              check bool "runtime_id excluded from keeper TOML" false
-                (contains_substring toml "runtime_id")))
+           "runtime"))
 
 (* ================================================================ *)
 (* Unknown-key detection                                             *)
@@ -1716,44 +1357,12 @@ let test_detect_unknown_keys_empty_when_all_canonical () =
 [keeper]
 mention_targets = ["a", "b"]
 autoboot_enabled = false
-active_goal_ids = ["goal-runtime"]
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
   | Ok doc ->
     let unknown = KTP.detect_unknown_keeper_toml_keys doc in
     check (list string) "no unknown keys" [] unknown
-
-let test_detect_unknown_keys_flags_legacy_dead_config () =
-  let input = {|
-[keeper]
-legacy_scope = "current"
-scope_kind = "local"
-mention_targets = ["a"]
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    let unknown = KTP.detect_unknown_keeper_toml_keys doc in
-    check (list string) "surfaces dead config"
-      ["keeper.legacy_scope"; "keeper.scope_kind"] unknown
-
-let test_removed_tool_policy_keys_rejected () =
-  let input = {|
-[keeper]
-tool_access = ["masc_status"]
-tool_denylist = ["Execute"]
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Ok _ -> fail "removed tool policy keys must be rejected"
-     | Error detail ->
-       check bool "error names tool_access" true
-         (contains_substring detail "keeper.tool_access");
-       check bool "error names tool_denylist" true
-         (contains_substring detail "keeper.tool_denylist"))
 
 let test_detect_unknown_keys_flags_provider_health_table () =
   let input = {|
@@ -1774,13 +1383,12 @@ timeout_count_5m_unhealthy = 3
       ]
       (List.sort String.compare unknown)
 
-let test_oas_env_parses_allowed_keys () =
+let test_agent_core_env_parses_allowed_keys () =
   let input = {|
 [keeper]
-persona_name = "analyst"
-[keeper.oas_env]
-OAS_DEFAULT_MODEL = "provider-a/fast"
-OAS_MAX_TOKENS_DEFAULT = 16384
+[keeper.agent_core_env]
+AGENT_CORE_DEFAULT_MODEL = "provider-a/fast"
+AGENT_CORE_MAX_TOKENS_DEFAULT = 16384
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1788,22 +1396,21 @@ OAS_MAX_TOKENS_DEFAULT = 16384
     match KTP.profile_defaults_of_toml doc with
     | Error e -> fail e
     | Ok d ->
-      check int "oas_env count" 2 (List.length d.oas_env);
+      check int "agent_core_env count" 2 (List.length d.agent_core_env);
       check string "default model value"
-        "provider-a/fast" (List.assoc "OAS_DEFAULT_MODEL" d.oas_env);
+        "provider-a/fast" (List.assoc "AGENT_CORE_DEFAULT_MODEL" d.agent_core_env);
       check string "max tokens default value"
-        "16384" (List.assoc "OAS_MAX_TOKENS_DEFAULT" d.oas_env)
+        "16384" (List.assoc "AGENT_CORE_MAX_TOKENS_DEFAULT" d.agent_core_env)
 
-let test_oas_env_drops_non_oas_prefix () =
+let test_agent_core_env_drops_non_agent_core_prefix () =
   (* Guards against ambient env injection via keeper TOML: arbitrary keys
      outside the audited allowlist are silently dropped. *)
   let input = {|
 [keeper]
-persona_name = "analyst"
-[keeper.oas_env]
+[keeper.agent_core_env]
 PATH = "/evil/bin:/usr/bin"
 LD_PRELOAD = "/tmp/hack.so"
-OAS_DEFAULT_MODEL = "provider-a/fast"
+AGENT_CORE_DEFAULT_MODEL = "provider-a/fast"
 MASC_KEEPER_AUTONOMOUS_MAX_TOKENS = "9999"
 RANDOM_VAR = "nope"
 |} in
@@ -1813,19 +1420,18 @@ RANDOM_VAR = "nope"
     match KTP.profile_defaults_of_toml doc with
     | Error e -> fail e
     | Ok d ->
-      check int "only allowed OAS_* survives" 1 (List.length d.oas_env);
-      check string "allowed OAS key survives"
-        "provider-a/fast" (List.assoc "OAS_DEFAULT_MODEL" d.oas_env);
-      check bool "PATH dropped" false (List.mem_assoc "PATH" d.oas_env);
-      check bool "LD_PRELOAD dropped" false (List.mem_assoc "LD_PRELOAD" d.oas_env);
+      check int "only allowed AGENT_CORE_* survives" 1 (List.length d.agent_core_env);
+      check string "allowed AGENT_CORE key survives"
+        "provider-a/fast" (List.assoc "AGENT_CORE_DEFAULT_MODEL" d.agent_core_env);
+      check bool "PATH dropped" false (List.mem_assoc "PATH" d.agent_core_env);
+      check bool "LD_PRELOAD dropped" false (List.mem_assoc "LD_PRELOAD" d.agent_core_env);
       check bool "unlisted keeper key dropped" false
-        (List.mem_assoc "MASC_KEEPER_AUTONOMOUS_MAX_TOKENS" d.oas_env);
-      check bool "RANDOM_VAR dropped" false (List.mem_assoc "RANDOM_VAR" d.oas_env)
+        (List.mem_assoc "MASC_KEEPER_AUTONOMOUS_MAX_TOKENS" d.agent_core_env);
+      check bool "RANDOM_VAR dropped" false (List.mem_assoc "RANDOM_VAR" d.agent_core_env)
 
-let test_oas_env_absent_means_empty () =
+let test_agent_core_env_absent_means_empty () =
   let input = {|
 [keeper]
-persona_name = "analyst"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1833,29 +1439,27 @@ persona_name = "analyst"
     match KTP.profile_defaults_of_toml doc with
     | Error e -> fail e
     | Ok d ->
-      check int "no table → empty list" 0 (List.length d.oas_env)
+      check int "no table → empty list" 0 (List.length d.agent_core_env)
 
-let test_oas_env_not_flagged_as_unknown () =
+let test_agent_core_env_not_flagged_as_unknown () =
   let input = {|
 [keeper]
-persona_name = "analyst"
-[keeper.oas_env]
-OAS_DEFAULT_MODEL = "provider-a/fast"
+[keeper.agent_core_env]
+AGENT_CORE_DEFAULT_MODEL = "provider-a/fast"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
   | Ok doc ->
     let unknown = KTP.detect_unknown_keeper_toml_keys doc in
-    check int "oas_env keys whitelisted" 0 (List.length unknown)
+    check int "agent_core_env keys whitelisted" 0 (List.length unknown)
 
-let test_oas_env_coerces_bool_to_string () =
-  (* Bools in TOML become "1"/"0" strings for active OAS boolean env knobs. *)
+let test_agent_core_env_coerces_bool_to_string () =
+  (* Bools in TOML become "1"/"0" strings for active AGENT_CORE boolean env knobs. *)
   let input = {|
 [keeper]
-persona_name = "analyst"
-[keeper.oas_env]
-OAS_ALLOW_TEST_PROVIDERS = true
-OAS_DELTA_CHECKPOINT = false
+[keeper.agent_core_env]
+AGENT_CORE_ALLOW_TEST_PROVIDERS = true
+AGENT_CORE_DELTA_CHECKPOINT = false
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1864,40 +1468,24 @@ OAS_DELTA_CHECKPOINT = false
     | Error e -> fail e
     | Ok d ->
       check string "true → 1" "1"
-        (List.assoc "OAS_ALLOW_TEST_PROVIDERS" d.oas_env);
+        (List.assoc "AGENT_CORE_ALLOW_TEST_PROVIDERS" d.agent_core_env);
       check string "false → 0" "0"
-        (List.assoc "OAS_DELTA_CHECKPOINT" d.oas_env)
+        (List.assoc "AGENT_CORE_DELTA_CHECKPOINT" d.agent_core_env)
 
-let test_load_keeper_toml_captures_unknown_keys_on_profile () =
+let test_load_keeper_toml_rejects_unknown_keys () =
   let tmp = Filename.temp_file "keeper_unknown" ".toml" in
-  let oc = open_out tmp in
-  output_string oc {|[keeper]
-name = "scout"
-legacy_scope = "removed"
-typo_field = 42
-|};
-  close_out oc;
-  let unknown_metric () =
-    Masc.Otel_metric_store.metric_value_or_zero
-      Masc.Otel_metric_store.metric_config_unknown_keys_ignored
-      ~labels:[("file_path", tmp)]
-      ()
-  in
-  let before_unknown_metric = unknown_metric () in
+  write_file tmp "[keeper]\ntypo_field = 42\n";
   match KTP.load_keeper_toml tmp with
-  | Error e ->
+  | Ok _ ->
     Sys.remove tmp;
-    fail (KTP.keeper_toml_load_error_to_string e)
-  | Ok (_, defaults) ->
+    fail "unknown Keeper TOML key must fail closed"
+  | Error error ->
     Sys.remove tmp;
-    check (slist string String.compare)
-      "unknown keys captured on profile defaults"
-      [ "keeper.legacy_scope"; "keeper.typo_field" ]
-      defaults.KTP.unknown_toml_keys;
-    check (float 0.0001)
-      "unknown-key metric increments by key count"
-      2.0
-      (unknown_metric () -. before_unknown_metric)
+    check bool "profile error" true (error.kind = KTP.Profile_error);
+    check bool "generic unknown-key error" true
+      (String_util.contains_substring error.detail "unknown keeper TOML keys");
+    check bool "unknown key retained" true
+      (String_util.contains_substring error.detail "keeper.typo_field")
 
 let test_keeper_toml_unknown_keys_in_dir_reports_files () =
   with_temp_dir "keeper-unknown-dir" @@ fun dir ->
@@ -1905,7 +1493,7 @@ let test_keeper_toml_unknown_keys_in_dir_reports_files () =
     {|
 [keeper]
 name = "alpha"
-legacy_scope = "removed"
+typo_field = "unexpected"
 |};
   write_file (Filename.concat dir "beta.toml")
     {|
@@ -1925,7 +1513,7 @@ name = "bad"
       (Filename.concat dir "alpha.toml")
       row.KTP.path;
     check (list string) "unknown keys"
-      [ "keeper.legacy_scope" ]
+      [ "keeper.typo_field" ]
       row.KTP.unknown_keys
   | _ ->
     fail
@@ -1941,15 +1529,8 @@ let test_health_json_surfaces_keeper_toml_unknown_keys () =
 [keeper]
 name = "alpha"
 sandbox_profile = "local"
-legacy_scope = "removed"
+typo_field = "unexpected"
 |};
-  let unknown_metric () =
-    Masc.Otel_metric_store.metric_value_or_zero
-      Masc.Otel_metric_store.metric_config_unknown_keys_ignored
-      ~labels:[("file_path", Filename.concat keepers_dir "alpha.toml")]
-      ()
-  in
-  let before_unknown_metric = unknown_metric () in
   let request = health_request () in
   let json =
     Runtime.make_health_json
@@ -1972,7 +1553,7 @@ legacy_scope = "removed"
     (json |> member "keeper_config_schema_status" |> to_string);
   check bool "schema blocks" true
     (json |> member "keeper_config_schema_blocking" |> to_bool);
-  check string "schema terminal reason" "config_unknown_keys"
+  check string "schema terminal reason" "config_invalid"
     (json |> member "keeper_config_schema_terminal_reason" |> to_string);
   check bool "operator action required" true
     (json |> member "keeper_config_operator_action_required" |> to_bool);
@@ -1989,14 +1570,13 @@ legacy_scope = "removed"
      check string "row next action" "remove_unknown_keeper_toml_keys"
        (row |> member "next_action" |> to_string);
      check (list string) "unknown keys"
-       [ "keeper.legacy_scope" ]
+       [ "keeper.typo_field" ]
        (row |> member "unknown_keys" |> to_list |> List.map to_string)
    | _ ->
      fail
        (Printf.sprintf "expected one health unknown-key row, got %d"
           (List.length rows)));
-  check (float 0.0001) "health scan does not increment warning metric"
-    before_unknown_metric (unknown_metric ())
+  ()
 
 let test_health_json_surfaces_typed_keeper_config_error () =
   with_config_dir @@ fun config_dir ->
@@ -2058,53 +1638,6 @@ let test_health_json_build_exposes_runtime_binary_identity () =
     (String.length (build |> member "executable_dir" |> to_string) > 0);
   check bool "build repo_root field present" true
     (match build |> member "repo_root" with `Null | `String _ -> true | _ -> false)
-
-let test_unknown_toml_warning_key_normalizes_unknown_order () =
-  let path =
-    Printf.sprintf "/tmp/keeper-warning-order-%06x.toml" (Random.bits ())
-  in
-  check bool "first ordered warning emits" true
-    (KTP.warn_unknown_keeper_toml_keys_once ~path
-       [ "keeper.zeta"; "keeper.alpha" ]);
-  check bool "same set in different order is deduped" false
-    (KTP.warn_unknown_keeper_toml_keys_once ~path
-       [ "keeper.alpha"; "keeper.zeta" ])
-
-let test_unknown_toml_warning_key_full_path_not_basename () =
-  (* Two files that share the same basename but live in different directories
-     must each emit their own warning — using only the basename would incorrectly
-     suppress the second warning as a duplicate. *)
-  let suffix =
-    Printf.sprintf "keeper-warning-path-%06x.toml" (Random.bits ())
-  in
-  let path_a = "/tmp/dir-a/" ^ suffix in
-  let path_b = "/tmp/dir-b/" ^ suffix in
-  check bool "first file (dir-a) emits warning" true
-    (KTP.warn_unknown_keeper_toml_keys_once ~path:path_a [ "keeper.typo_x" ]);
-  check bool "second file (dir-b) also emits warning (different full path)" true
-    (KTP.warn_unknown_keeper_toml_keys_once ~path:path_b [ "keeper.typo_x" ])
-
-let string_starts_with ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len
-  && String.sub value 0 prefix_len = prefix
-
-let test_unknown_toml_warning_key_cache_is_bounded () =
-  let prefix =
-    Printf.sprintf "keeper-warning-bound-%06x-" (Random.bits ())
-  in
-  for idx = 0 to KTP.unknown_keeper_toml_warning_key_limit + 3 do
-    ignore
-      (KTP.warn_unknown_keeper_toml_keys_once
-         ~path:("/tmp/" ^ prefix ^ string_of_int idx ^ ".toml")
-         [ "keeper.typo_field" ])
-  done;
-  let matching =
-    KTP.current_unknown_keeper_toml_warning_keys ()
-    |> List.filter (string_starts_with ~prefix)
-  in
-  check bool "warning cache stays bounded for this prefix" true
-    (List.length matching <= KTP.unknown_keeper_toml_warning_key_limit)
 
 (* ================================================================ *)
 (* Test suite                                                        *)
@@ -2179,9 +1712,18 @@ let () =
         ] );
       ( "profile_defaults",
         [
-          test_case "minimal" `Quick test_profile_minimal;
-          test_case "rejects legacy keeper.goal" `Quick
-            test_profile_rejects_legacy_goal;
+          test_case "rejects unknown key" `Quick
+            test_profile_rejects_unknown_key;
+          test_case "parses tools.native postures" `Quick
+            test_profile_parses_tools_native;
+        Alcotest.test_case "a typo in [keeper.tools] fails the load" `Quick
+            test_profile_rejects_a_typo_in_the_tools_table;
+          test_case "absent tools.native is None" `Quick
+            test_profile_absent_tools_native_is_none;
+          test_case "rejects invalid tools.native" `Quick
+            test_profile_rejects_invalid_tools_native;
+          test_case "rejects unknown [keeper.tools] sibling" `Quick
+            test_profile_rejects_unknown_tools_sibling_key;
           test_case "full" `Quick test_profile_full;
           test_case "rejects wrong known-field shape" `Quick
             test_profile_rejects_wrong_known_field_shape;
@@ -2191,22 +1733,6 @@ let () =
             test_profile_parses_multimodal_policy;
           test_case "rejects invalid multimodal_policy" `Quick
             test_profile_rejects_invalid_multimodal_policy;
-          test_case "rejects removed model keys" `Quick
-            test_profile_rejects_removed_model_keys;
-          test_case "rejects removed initiative keys" `Quick
-            test_profile_rejects_removed_initiative_keys;
-          test_case "rejects removed ref keys" `Quick
-            test_profile_rejects_removed_ref_keys;
-          test_case "rejects removed shards key" `Quick
-            test_profile_rejects_removed_shards_key;
-          test_case "rejects removed voice policy key" `Quick
-            test_profile_rejects_removed_voice_policy_key;
-          test_case "rejects removed compaction cooldown key" `Quick
-            test_profile_rejects_removed_compaction_cooldown_key;
-          test_case "rejects keeper.runtime_id key" `Quick
-            test_profile_rejects_runtime_id_key;
-          test_case "rejects keeper.model key" `Quick
-            test_profile_rejects_model_key;
         ] );
       ( "writer",
         [
@@ -2223,16 +1749,12 @@ let () =
         [
           test_case "empty when all canonical" `Quick
             test_detect_unknown_keys_empty_when_all_canonical;
-          test_case "flags legacy dead config" `Quick
-            test_detect_unknown_keys_flags_legacy_dead_config;
-          test_case "rejects removed tool policy keys" `Quick
-            test_removed_tool_policy_keys_rejected;
           test_case "flags provider_health table as unknown" `Quick
             test_detect_unknown_keys_flags_provider_health_table;
-          test_case "oas_env keys not flagged as unknown" `Quick
-            test_oas_env_not_flagged_as_unknown;
-          test_case "load_keeper_toml captures unknown keys on profile" `Quick
-            test_load_keeper_toml_captures_unknown_keys_on_profile;
+          test_case "agent_core_env keys not flagged as unknown" `Quick
+            test_agent_core_env_not_flagged_as_unknown;
+          test_case "load_keeper_toml rejects unknown keys" `Quick
+            test_load_keeper_toml_rejects_unknown_keys;
           test_case "unknown-key scanner reports files" `Quick
             test_keeper_toml_unknown_keys_in_dir_reports_files;
           test_case "health JSON surfaces unknown keys" `Quick
@@ -2241,23 +1763,17 @@ let () =
             test_health_json_surfaces_typed_keeper_config_error;
           test_case "health JSON build exposes runtime binary identity" `Quick
             test_health_json_build_exposes_runtime_binary_identity;
-          test_case "unknown TOML warning key normalizes order" `Quick
-            test_unknown_toml_warning_key_normalizes_unknown_order;
-          test_case "unknown TOML warning key uses full path not basename" `Quick
-            test_unknown_toml_warning_key_full_path_not_basename;
-          test_case "unknown TOML warning key cache is bounded" `Quick
-            test_unknown_toml_warning_key_cache_is_bounded;
         ] );
-      ( "oas_env",
+      ( "agent_core_env",
         [
-          test_case "parses allowed OAS_* keys" `Quick
-            test_oas_env_parses_allowed_keys;
-          test_case "drops non-OAS_* keys (ambient injection guard)" `Quick
-            test_oas_env_drops_non_oas_prefix;
+          test_case "parses allowed AGENT_CORE_* keys" `Quick
+            test_agent_core_env_parses_allowed_keys;
+          test_case "drops non-AGENT_CORE_* keys (ambient injection guard)" `Quick
+            test_agent_core_env_drops_non_agent_core_prefix;
           test_case "empty when table absent" `Quick
-            test_oas_env_absent_means_empty;
+            test_agent_core_env_absent_means_empty;
           test_case "coerces bool → \"1\"/\"0\" string" `Quick
-            test_oas_env_coerces_bool_to_string;
+            test_agent_core_env_coerces_bool_to_string;
         ] );
       ( "file_loading",
         [
@@ -2270,12 +1786,6 @@ let () =
             test_default_source_snapshot_uses_explicit_base_path;
           test_case "absent profile is valid empty defaults" `Quick
             test_absent_profile_is_legitimate_empty_defaults;
-          test_case "persona without keeper TOML remains valid" `Quick
-            test_persona_without_keeper_toml_remains_valid;
-          test_case "persona parse failure is typed" `Quick
-            test_persona_parse_failure_is_typed_profile_error;
-          test_case "persona read failure is typed" `Quick
-            test_persona_read_failure_is_typed_profile_error;
           test_case "config directory probe is typed" `Quick
             test_keeper_config_directory_probe_is_typed;
         ] );
@@ -2286,33 +1796,19 @@ let () =
           test_case "nonexistent dir" `Quick test_discover_nonexistent_dir;
           test_case "retains invalid files" `Quick
             test_discover_retains_invalid_files;
+          test_case "each field kind rejects a wrong-typed value" `Quick
+            test_each_keeper_field_kind_rejects_a_wrong_typed_value;
+          test_case "tool groups reject unknown names" `Quick
+            test_tool_groups_rejects_unknown_names;
+          test_case "tool groups accept known names" `Quick
+            test_tool_groups_accepts_known_names;
           test_case "materializable helper uses base path" `Quick
             test_profile_defaults_materializable_for_name_uses_base_path;
           test_case "bundled keeper profiles resolve prompt defaults" `Quick
             test_bundled_keeper_profiles_resolve_prompt_defaults;
-          test_case "bundled issue_king uses local sandbox" `Quick
-            test_bundled_issue_king_uses_local_sandbox;
-          test_case "persona defaults load prompt fields" `Quick
-            test_persona_defaults_load_prompt_fields;
-          test_case "persona defaults reject unsupported keeper fields" `Quick
-            test_persona_defaults_reject_unsupported_keeper_fields;
-          test_case "persona defaults reject removed shards" `Quick
-            test_persona_defaults_reject_removed_shards;
-          test_case "persona defaults reject non-object shapes" `Quick
-            test_persona_defaults_reject_non_object_shapes;
-          test_case "persona resolver rejects OPERATOR_TODO profile" `Quick
-            test_persona_resolver_rejects_operator_todo_profile;
-          test_case "persona resolver rejects placeholder in resolved payload" `Quick
-            test_persona_resolver_rejects_placeholder_in_resolved_payload;
-          test_case "persona resolver preserves autoboot_enabled arg" `Quick
-            test_persona_resolver_preserves_autoboot_enabled_arg;
-          test_case "persona resolver preserves allowed_paths" `Quick
-            test_persona_resolver_preserves_allowed_paths;
-          test_case "persona resolver preserves runtime-owned overrides" `Quick
-            test_persona_resolver_preserves_runtime_owned_overrides;
-          test_case "persona resolver rejects unsupported or ill-typed args" `Quick
-            test_persona_resolver_rejects_unsupported_or_ill_typed_args;
-          test_case "persona resolver renders durable keeper TOML" `Quick
-            test_persona_resolver_renders_durable_keeper_toml;
+          test_case "bundled profiles include local sandbox" `Quick
+            test_bundled_profiles_include_local_sandbox;
+          test_case "OCaml sources exclude concrete Keeper identities" `Quick
+            test_ocaml_sources_exclude_declared_concrete_keeper_identities;
         ] );
     ]

@@ -45,7 +45,7 @@ let test_unknown_label_is_none () =
     [ ""; "completed"; "checkpoint"; "Visible_reply"; "VISIBLE_REPLY" ]
 
 let test_of_stop_reason () =
-  let request : Agent_sdk.Error.input_required =
+  let request : Agent_core.Error.input_required =
     { request_id = "outcome-input-1"
     ; participant_name = None
     ; question = "Which repository?"
@@ -58,7 +58,7 @@ let test_of_stop_reason () =
     (TO.of_stop_reason Runtime_agent.Completed);
   check outcome "chat yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
-       (Runtime_agent.Yielded_to_chat_waiting { turns_used = 2 }));
+       (Runtime_agent.Yielded_to_operation_queued { turns_used = 2 }));
   check outcome "durable stimulus yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 }));
@@ -72,6 +72,11 @@ let test_of_stop_reason () =
           ; tool_name = "keeper_tasks_list"
           ; repeated_count = 3
           }));
+  check outcome "repeated assistant text yield -> checkpoint"
+    TO.Continuation_checkpoint
+    (TO.of_stop_reason
+       (Runtime_agent.Yielded_after_repeated_assistant_text
+          { turns_used = 2; repeated_count = 3 }));
   check outcome "typed input required -> visible" TO.Visible_reply
     (TO.of_stop_reason
        (Runtime_agent.InputRequired { turns_used = 2; request }))
@@ -102,6 +107,92 @@ let test_external_effect_completed_has_no_direct_reply_error () =
     (Stream.For_testing.direct_reply_terminal_error
        (Some payload_json)
        "")
+
+let test_canonical_payload_carries_delivery_target () =
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"post-target" ~absolute_turn:3 in
+  let body_for outcome target_json =
+    `Assoc
+      ([ "reply", `String ""
+       ; TO.wire_key, `String (TO.to_label outcome)
+       ; TO.turn_ref_wire_key, Ids.Turn_ref.to_yojson turn_ref
+       ]
+       @ target_json)
+    |> Yojson.Safe.to_string
+  in
+  let body_with = body_for TO.External_effect_completed in
+  (match
+     Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
+       (body_with
+          [ ( Masc.Keeper_surface_post.delivery_target_wire_key
+            , `Assoc [ "kind", `String "dashboard" ] )
+          ])
+   with
+   | Ok canonical ->
+     (match canonical.external_effect_target with
+      | Some Masc.Keeper_surface_post.Delivered_to_dashboard -> ()
+      | Some _ | None ->
+        fail "dashboard delivery target was not decoded from the payload")
+   | Error error ->
+     fail
+       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+          error));
+  (* The outcome and the receipt come from the same terminal_effect_state
+     (keeper_agent_run.ml), so a completed external effect always serializes
+     its target. A payload claiming the outcome without one is rejected rather
+     than projected as a null destination. *)
+  (match
+     Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
+       (body_with [])
+   with
+   | Error (Server_routes_http_keeper_stream.Missing_payload_field field) ->
+     check string "the missing field is named" "external_effect_target" field
+   | Error other ->
+     fail
+       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+          other)
+   | Ok _ ->
+     fail "External_effect_completed without a target must be rejected");
+  (* Absence is the ordinary shape for every other outcome. *)
+  (match
+     Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
+       (body_for TO.Visible_reply [])
+   with
+   | Ok canonical ->
+     (match canonical.external_effect_target with
+      | None -> ()
+      | Some _ -> fail "a visible reply carries no delivery target")
+   | Error error ->
+     fail
+       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+          error));
+  (* The other direction: a target on an outcome that completed no external
+     effect is rejected, so [Some] alone proves the outcome. *)
+  (match
+     Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
+       (body_for TO.Visible_reply
+          [ ( Masc.Keeper_surface_post.delivery_target_wire_key
+            , `Assoc [ "kind", `String "dashboard" ] )
+          ])
+   with
+   | Error (Stream.Invalid_external_effect_target _) -> ()
+   | Error error ->
+     fail
+       (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+          error)
+   | Ok _ -> fail "a delivery target on a visible reply must reject the payload");
+  match
+    Stream.For_testing.canonical_reply_payload_of_body ~redact_text:Fun.id
+      (body_with
+         [ ( Masc.Keeper_surface_post.delivery_target_wire_key
+           , `Assoc [ "kind", `String "telegram" ] )
+         ])
+  with
+  | Error (Stream.Invalid_external_effect_target _) -> ()
+  | Error error ->
+    fail
+      (Server_routes_http_keeper_stream.canonical_reply_payload_error_to_string
+         error)
+  | Ok _ -> fail "unknown delivery target kind must reject the payload"
 
 let test_external_effect_status_survives_server_projection () =
   let turn_outcome =
@@ -142,7 +233,7 @@ let test_external_effect_status_survives_server_projection () =
       check string "typed Gate wait keeps the exact turn ref"
         (Ids.Turn_ref.to_string turn_ref)
         outcome_ref
-    | Stream.Failed _ | Stream.Deferred _ ->
+    | Stream.Failed _ ->
       fail "typed Gate wait did not remain deliverable for a queued turn"
 
 let test_external_effect_status_becomes_persisted_chat_block () =
@@ -181,20 +272,92 @@ let test_terminal_effect_defer_kinds_remain_distinct () =
         (match actual with
          | Runtime_agent.Durable_stimulus_waiting -> "durable_stimulus_waiting"
          | Runtime_agent.External_effect_deferred -> "external_effect_deferred"
-         | Runtime_agent.Chat_waiting -> "chat_waiting"
+         | Runtime_agent.Operation_queued -> "operation_queued"
          | Runtime_agent.Repeated_tool_call _ -> "repeated_tool_call"
+         | Runtime_agent.Repeated_assistant_text _ -> "repeated_assistant_text"
          | Runtime_agent.Terminal_tool_completed -> "terminal_tool_completed")
     | Ok Runtime_agent.Continue -> fail (label ^ " unexpectedly continued")
-    | Error error -> fail (label ^ ": " ^ Agent_sdk.Error.to_string error)
+    | Error error -> fail (label ^ ": " ^ Agent_core.Error.to_string error)
   in
   expect_yield
     "generic deferred tool preserves existing checkpoint"
-    Masc.Keeper_tools_oas.Deferred_tool_result
+    Masc.Keeper_tools_agent_core.Deferred_tool_result
     "durable_stimulus_waiting";
   expect_yield
     "typed external effect uses Gate acknowledgement path"
-    Masc.Keeper_tools_oas.External_effect_deferred
+    Masc.Keeper_tools_agent_core.External_effect_deferred
     "external_effect_deferred"
+
+let test_applied_gate_replay_seeds_terminal_settlement () =
+  let output_ref =
+    match
+      Tool_output.make_artifact_ref
+        ~sha256:(String.make 64 'a')
+        ~bytes:2
+        ~preview:""
+        ~mime:"application/json"
+    with
+    | Ok output_ref -> output_ref
+    | Error error -> fail (Tool_output.make_error_to_string error)
+  in
+  let receipt =
+    Masc.Keeper_tool_execution.Surface_post_completed
+      (Masc.Keeper_surface_post.To_discord { channel_id = "D-approved" })
+  in
+  let replay_delivery : Masc.Keeper_tools_agent_core.gate_replay_delivery =
+    { approval_id = "approval-terminal"
+    ; outcome =
+        Masc.Keeper_gate_replay.Applied
+          { operation = "connector_post"
+          ; output_ref
+          ; journal = Masc.Keeper_gate_replay.Replay_journal_recorded
+          }
+    ; terminal_effect_receipt = Some receipt
+    }
+  in
+  let state =
+    Masc.Keeper_tools_agent_core_bundle.For_testing.initial_terminal_effect_state
+      (Some replay_delivery)
+  in
+  (match state with
+   | Masc.Keeper_tools_agent_core.Terminal_effect_completed
+       (Masc.Keeper_tool_execution.Surface_post_completed
+          (Masc.Keeper_surface_post.To_discord { channel_id })) ->
+     check string "receipt keeps the approved target" "D-approved" channel_id
+   | ( Masc.Keeper_tools_agent_core.Terminal_effect_open
+     | Masc.Keeper_tools_agent_core.Deferred_tool_result
+     | Masc.Keeper_tools_agent_core.External_effect_deferred
+     | Masc.Keeper_tools_agent_core.Terminal_effect_completed _
+     | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ) ->
+     fail "applied connector replay did not seed terminal completion");
+  let non_terminal_replay =
+    { replay_delivery with
+      outcome =
+        Masc.Keeper_gate_replay.Applied
+          { operation = "network_read"
+          ; output_ref
+          ; journal = Masc.Keeper_gate_replay.Replay_journal_recorded
+          }
+    ; terminal_effect_receipt = None
+    }
+  in
+  (match
+     Masc.Keeper_tools_agent_core_bundle.For_testing.initial_terminal_effect_state
+       (Some non_terminal_replay)
+   with
+   | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
+   | ( Masc.Keeper_tools_agent_core.Deferred_tool_result
+     | Masc.Keeper_tools_agent_core.External_effect_deferred
+     | Masc.Keeper_tools_agent_core.Terminal_effect_completed _
+     | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ) ->
+     fail "non-terminal Gate replay acquired a terminal boundary");
+  match Masc.Keeper_agent_run.terminal_effect_boundary_decision state with
+  | Ok (Runtime_agent.Yield Runtime_agent.Terminal_tool_completed) -> ()
+  | Ok Runtime_agent.Continue ->
+    fail "applied connector replay re-entered ordinary visible delivery"
+  | Ok (Runtime_agent.Yield _) ->
+    fail "applied connector replay selected the wrong yield boundary"
+  | Error error -> fail (Agent_core.Error.to_string error)
 
 let tool_call ?(input = Some "input") ?(output = Some "output") tool_name
     : Masc.Keeper_agent_result.tool_call_detail =
@@ -231,12 +394,65 @@ let test_repeated_exact_tool_call_boundary () =
        [ tool_call ~input:None "keeper_tasks_list"
        ; tool_call ~input:None "keeper_tasks_list"
        ; tool_call ~input:None "keeper_tasks_list"
+       ]);
+  (* The shape the old counter missed. A keeper ran the same git status 48 times
+     in one dispatch, always with another call in between, so a counter that
+     stopped at the first different call never left 1 and the dispatch ran 279
+     calls over 31 minutes with no answer. The list is newest-first. *)
+  check (option (pair string int)) "repeats separated by other calls still yield"
+    (Some ("Execute", 3))
+    (detect
+       [ tool_call "Execute"
+       ; tool_call "Read"
+       ; tool_call "Execute"
+       ; tool_call "Grep"
+       ; tool_call "Execute"
+       ]);
+  (* Interleaving does not make a different call look repeated. *)
+  check (option (pair string int)) "a call below threshold stays silent" None
+    (detect
+       [ tool_call "Execute"
+       ; tool_call "Read"
+       ; tool_call "Execute"
+       ; tool_call "Grep"
+       ]);
+  (* Output identity still gates it: an interleaved repeat whose result moved
+     is progress, not a loop. *)
+  check (option (pair string int)) "interleaved repeats with moving output are progress"
+    None
+    (detect
+       [ tool_call ~output:(Some "c") "Execute"
+       ; tool_call "Read"
+       ; tool_call ~output:(Some "b") "Execute"
+       ; tool_call "Grep"
+       ; tool_call ~output:(Some "a") "Execute"
        ])
+
+let test_repeated_assistant_text_boundary () =
+  let detect =
+    Masc.Keeper_agent_run.For_testing.repeated_assistant_text ~threshold:3
+  in
+  (* The shape: one plan sentence, byte-identical on consecutive model
+     turns, while every turn's tool batch kept changing and reporting ok. The
+     list is newest-first, one entry per provider turn. *)
+  let plan = "I will now inspect the queue and then drain the backlog." in
+  check (option int) "three identical texts yield" (Some 3)
+    (detect [ plan; plan; plan ]);
+  check (option int) "a changed latest text is progress" None
+    (detect [ "done: queue drained"; plan; plan ]);
+  check (option int) "two identical repeats stay below the threshold" None
+    (detect [ plan; plan; "an earlier different reply" ]);
+  check (option int) "blank texts never count" None
+    (detect [ " \n"; " \n"; " \n" ]);
+  check (option int) "a textless turn breaks the streak" None
+    (detect [ plan; ""; plan; plan ]);
+  check (option int) "a longer streak reports its full length" (Some 4)
+    (detect [ plan; plan; plan; plan ])
 
 let test_autonomous_yield_boundary_contract () =
   let module F = Masc.Keeper_agent_run.For_testing in
   let chat : Masc.Keeper_agent_run.autonomous_yield_request =
-    { reason = Masc.Keeper_agent_run.Chat_waiting }
+    { reason = Masc.Keeper_agent_run.Operation_queued }
   in
   let durable_stimulus : Masc.Keeper_agent_run.autonomous_yield_request =
     { reason =
@@ -249,17 +465,19 @@ let test_autonomous_yield_boundary_contract () =
     }
   in
   (match F.runtime_yield_reason chat with
-    | Runtime_agent.Chat_waiting -> ()
+    | Runtime_agent.Operation_queued -> ()
     | Runtime_agent.Durable_stimulus_waiting
     | Runtime_agent.External_effect_deferred
     | Runtime_agent.Repeated_tool_call _
+   | Runtime_agent.Repeated_assistant_text _
    | Runtime_agent.Terminal_tool_completed ->
      fail "chat request mapped to the durable reason");
   (match F.runtime_yield_reason durable_stimulus with
     | Runtime_agent.Durable_stimulus_waiting -> ()
-    | Runtime_agent.Chat_waiting
+    | Runtime_agent.Operation_queued
     | Runtime_agent.External_effect_deferred
    | Runtime_agent.Repeated_tool_call _
+   | Runtime_agent.Repeated_assistant_text _
    | Runtime_agent.Terminal_tool_completed ->
      fail "durable request mapped to the chat reason");
   check bool "repeated exact call yield preserves its evidence" true
@@ -276,10 +494,28 @@ let test_autonomous_yield_boundary_contract () =
          } ->
        true
      | Runtime_agent.Completed
-     | Runtime_agent.Yielded_to_chat_waiting _
+     | Runtime_agent.Yielded_to_operation_queued _
      | Runtime_agent.Yielded_to_durable_stimulus _
      | Runtime_agent.Awaiting_external_effect _
      | Runtime_agent.Yielded_after_repeated_tool_call _
+     | Runtime_agent.Yielded_after_repeated_assistant_text _
+     | Runtime_agent.InputRequired _ ->
+       false);
+  check bool "repeated assistant text yield preserves its evidence" true
+    (match
+       Runtime_agent.For_testing.stop_reason_of_cooperative_yield
+         ~turns_used:8
+         (Runtime_agent.Repeated_assistant_text { repeated_count = 3 })
+     with
+     | Runtime_agent.Yielded_after_repeated_assistant_text
+         { turns_used = 8; repeated_count = 3 } ->
+       true
+     | Runtime_agent.Completed
+     | Runtime_agent.Yielded_to_operation_queued _
+     | Runtime_agent.Yielded_to_durable_stimulus _
+     | Runtime_agent.Awaiting_external_effect _
+     | Runtime_agent.Yielded_after_repeated_tool_call _
+     | Runtime_agent.Yielded_after_repeated_assistant_text _
      | Runtime_agent.InputRequired _ ->
        false);
   check bool "terminal tool yield settles as completion" true
@@ -289,26 +525,16 @@ let test_autonomous_yield_boundary_contract () =
          Runtime_agent.Terminal_tool_completed
      with
      | Runtime_agent.Completed -> true
-     | Runtime_agent.Yielded_to_chat_waiting _
+     | Runtime_agent.Yielded_to_operation_queued _
      | Runtime_agent.Yielded_to_durable_stimulus _
      | Runtime_agent.Awaiting_external_effect _
      | Runtime_agent.Yielded_after_repeated_tool_call _
+     | Runtime_agent.Yielded_after_repeated_assistant_text _
      | Runtime_agent.InputRequired _ -> false)
-
-let test_terminal_effect_handler_contract () =
-  let is_terminal =
-    Masc.Keeper_tools_oas_bundle.For_testing.is_terminal_effect_handler
-  in
-  check bool "surface post is a terminal effect" true
-    (is_terminal Masc.Keeper_tool_descriptor.Tool_surface_post);
-  check bool "surface read is not a terminal effect" false
-    (is_terminal Masc.Keeper_tool_descriptor.Tool_surface_read);
-  check bool "filesystem write is not a reply terminal" false
-    (is_terminal Masc.Keeper_tool_descriptor.Tool_write_file)
 
 let test_terminal_externalization_failure_contract () =
   let classify =
-    Masc.Keeper_tools_oas_bundle.For_testing.terminal_externalization_failure
+    Masc.Keeper_tools_agent_core_bundle.For_testing.terminal_externalization_failure
   in
   let error : Masc.Tool_bridge.externalization_error =
     { kind = Masc.Tool_bridge.Artifact_storage_failure
@@ -319,17 +545,21 @@ let test_terminal_externalization_failure_contract () =
     (fun state ->
        check bool "non-completed state remains authoritative" true
          (Option.is_none (classify state error)))
-    [ Masc.Keeper_tools_oas.Terminal_effect_open
-    ; Masc.Keeper_tools_oas.Deferred_tool_result
-    ; Masc.Keeper_tools_oas.External_effect_deferred
-    ; Masc.Keeper_tools_oas.Terminal_effect_failed
+    [ Masc.Keeper_tools_agent_core.Terminal_effect_open
+    ; Masc.Keeper_tools_agent_core.Deferred_tool_result
+    ; Masc.Keeper_tools_agent_core.External_effect_deferred
+    ; Masc.Keeper_tools_agent_core.Terminal_effect_failed
         { failure_class = Tool_result.Workflow_rejection
         ; effect_disposition = Tool_result.Proven_pre_effect
         ; diagnostic = "original failure"
         }
     ];
   match
-    classify Masc.Keeper_tools_oas.Terminal_effect_completed error
+    classify
+      (Masc.Keeper_tools_agent_core.Terminal_effect_completed
+         (Masc.Keeper_tool_execution.Surface_post_completed
+            Masc.Keeper_surface_post.To_dashboard))
+      error
   with
   | Some
       { failure_class = Tool_result.Runtime_failure
@@ -456,7 +686,7 @@ let test_queued_delivery_requires_exact_turn_ref () =
     | Stream.Failed { kind = Stream.Missing_turn_ref; detail } ->
         check bool (label ^ " has diagnostic detail") true
           (String.trim detail <> "")
-    | Stream.Failed _ | Stream.Delivered _ | Stream.Deferred _ ->
+    | Stream.Failed _ | Stream.Delivered _ ->
         fail (label ^ " must fail with Missing_turn_ref")
   in
   check_failed "missing turn_ref"
@@ -480,34 +710,27 @@ let test_queued_delivery_requires_exact_turn_ref () =
   | Stream.Delivered { outcome_ref } ->
       check string "valid turn_ref is preserved exactly"
         "trace-queued#42" outcome_ref
-  | Stream.Failed _ | Stream.Deferred _ ->
+  | Stream.Failed _ ->
     fail "valid turn_ref must produce Delivered"
 
 let test_terminal_commit_error_cannot_become_delivery_success () =
   let persist_error = "terminal transcript fsync failed" in
-  let check_error label queued_turn =
-    match
-      Stream.For_testing.committed_delivery_outcome
-        ~queued_turn
-        ~turn_ref:None
-        (Error persist_error)
-    with
-    | Error observed -> check string label persist_error observed
-    | Ok None -> fail (label ^ " was downgraded to direct delivery success")
-    | Ok (Some _) -> fail (label ^ " was downgraded to queued delivery success")
-  in
-  check_error "direct commit preserves typed Error" false;
-  check_error "queued commit preserves typed Error" true
+  match
+    Stream.For_testing.committed_delivery_outcome
+      ~turn_ref:None
+      (Error persist_error)
+  with
+  | Error observed -> check string "operation commit preserves typed Error" persist_error observed
+  | Ok _ -> fail "operation commit was downgraded to delivery success"
 
 let test_media_only_queued_reply_uses_delivery_path () =
   match
     Stream.For_testing.empty_reply_delivery_plan
-      ~queued_turn:true
       ~has_visible_blocks:true
       ~has_tool_calls:false
   with
   | `Visible_blocks -> ()
-  | `Tool_calls_only | `Failure | `User_only ->
+  | `Tool_calls_only | `Failure ->
     fail "media-only queued reply must use the delivered assistant path"
 
 let test_media_continuation_uses_assistant_delivery_path () =
@@ -564,47 +787,47 @@ let test_continuation_status_uses_assistant_delivery_path () =
 let body fields = `Assoc fields
 
 let test_direct_reply_visible_text () =
-  check (option string) "declared checkpoint -> None" None
-    (Ops.direct_reply_visible_text
-       (body
-          [ ("reply", `String checkpoint_text);
-            ("turn_outcome", `String "continuation_checkpoint")
-          ]));
-  check (option string) "declared no visible reply -> None" None
-    (Ops.direct_reply_visible_text
-       (body
-          [ ("reply", `String "all done");
-            ("turn_outcome", `String "no_visible_reply")
-          ]));
-  check_raises
+  let check_ok label expected json =
+    match Ops.direct_reply_visible_text json with
+    | Ok actual -> check (option string) label expected actual
+    | Error error ->
+      failf "%s: %s" label (Ops.direct_reply_decode_error_to_string error)
+  in
+  let check_error label expected json =
+    match Ops.direct_reply_visible_text json with
+    | Ok _ -> failf "%s: expected decode error" label
+    | Error error ->
+      check string label expected
+        (Ops.direct_reply_decode_error_to_string error)
+  in
+  check_ok "declared checkpoint -> None" None
+    (body
+       [ ("reply", `String checkpoint_text);
+         ("turn_outcome", `String "continuation_checkpoint")
+       ]);
+  check_ok "declared no visible reply -> None" None
+    (body
+       [ ("reply", `String "all done");
+         ("turn_outcome", `String "no_visible_reply")
+       ]);
+  check_error
     "missing outcome is a direct-reply contract error"
-    (Invalid_argument "keeper reply payload is missing turn_outcome")
-    (fun () ->
-       ignore
-         (Ops.direct_reply_visible_text
-            (body [ ("reply", `String checkpoint_text) ])
-          : string option));
-  check (option string) "declared visible -> reply text" (Some "all done")
-    (Ops.direct_reply_visible_text
-       (body
-          [ ("reply", `String "all done");
-            ("turn_outcome", `String "visible_reply")
-          ]));
-  check (option string) "empty reply -> None" None
-    (Ops.direct_reply_visible_text
-       (body
-          [ ("reply", `String "   ");
-            ("turn_outcome", `String "visible_reply")
-          ]));
-  check_raises
+    "keeper reply payload is missing turn_outcome"
+    (body [ ("reply", `String checkpoint_text) ]);
+  check_ok "declared visible -> reply text" (Some "all done")
+    (body
+       [ ("reply", `String "all done");
+         ("turn_outcome", `String "visible_reply")
+       ]);
+  check_ok "empty reply -> None" None
+    (body
+       [ ("reply", `String "   ");
+         ("turn_outcome", `String "visible_reply")
+       ]);
+  check_error
     "visible outcome without reply is a direct-reply contract error"
-    (Invalid_argument
-       "keeper reply payload is missing reply for visible_reply")
-    (fun () ->
-       ignore
-         (Ops.direct_reply_visible_text
-            (body [ ("turn_outcome", `String "visible_reply") ])
-          : string option))
+    "keeper reply payload is missing reply for visible_reply"
+    (body [ ("turn_outcome", `String "visible_reply") ])
 
 let test_connector_projection_keeps_external_wait_typed () =
   match
@@ -646,10 +869,12 @@ let test_direct_reply_projection_keeps_external_wait_typed () =
          ; ("turn_outcome", `String "external_effect_pending")
          ])
   with
-  | Connector_status { kind = External_effect_pending } -> ()
-  | Connector_status { kind = Continuation_checkpoint }
-  | Connector_text _ | Connector_no_visible_reply ->
+  | Ok (Connector_status { kind = External_effect_pending }) -> ()
+  | Ok (Connector_status { kind = Continuation_checkpoint })
+  | Ok (Connector_text _ | Connector_no_visible_reply) ->
     fail "direct reply collapsed external-effect wait into silence"
+  | Error error ->
+    fail (Ops.direct_reply_decode_error_to_string error)
 
 let () =
   run "keeper_turn_outcome"
@@ -669,16 +894,20 @@ let () =
             test_external_effect_completed_has_no_direct_reply_error;
           test_case "external effect status survives server projection" `Quick
             test_external_effect_status_survives_server_projection;
+          test_case "canonical payload carries the delivery target" `Quick
+            test_canonical_payload_carries_delivery_target;
           test_case "external effect status becomes persisted chat block" `Quick
             test_external_effect_status_becomes_persisted_chat_block;
           test_case "terminal effect defer kinds remain distinct" `Quick
             test_terminal_effect_defer_kinds_remain_distinct;
+          test_case "applied Gate replay seeds terminal settlement" `Quick
+            test_applied_gate_replay_seeds_terminal_settlement;
           test_case "repeated exact tool call boundary" `Quick
             test_repeated_exact_tool_call_boundary;
+          test_case "repeated assistant text boundary" `Quick
+            test_repeated_assistant_text_boundary;
           test_case "autonomous yield boundary contract" `Quick
             test_autonomous_yield_boundary_contract;
-          test_case "terminal effect handler contract" `Quick
-            test_terminal_effect_handler_contract;
           test_case "terminal externalization failure contract" `Quick
             test_terminal_externalization_failure_contract;
         ] );

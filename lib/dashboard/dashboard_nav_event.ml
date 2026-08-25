@@ -36,7 +36,9 @@ let valid_sections =
     , [ "observatory"
       ; "agents"
       ; "runtime"
+      ; "internal-agents"
       ; "fleet-health"
+      ; "lanes"
       ; "transport-health"
       ; "feature-health"
       ; "journey"
@@ -44,9 +46,9 @@ let valid_sections =
   ; "command", [ "operations" ]
   ; "connectors", [ "connector-status" ]
   ; ( "workspace"
-    , [ "board"; "sub-boards"; "moderation"; "planning"; "repositories"; "verification"; "work" ] )
+    , [ "board"; "sub-boards"; "planning"; "repositories"; "verification"; "work" ] )
   ; ( "lab"
-    , [ "tools"; "harness"; "performance"; "keeper-memory-health"; "audit-integrity" ]
+    , [ "tools"; "harness"; "performance"; "keeper-memory-health" ]
     )
   ; "code", [ "ide-shell" ]
   ; ( "settings"

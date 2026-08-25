@@ -12,6 +12,119 @@ let keeper_reply_chunk_hard_wrap_chars = 180
    blocks (backpressure) when the consumer lags. *)
 let worker_events_buffer_size = 512
 
+(* Wire-terminal accounting for keeper chat operations (#28811). The Dashboard
+   projection publishes AG-UI events while the turn runs inside the child
+   switch; a cancelled turn kills the projection fiber before it can emit
+   RUN_ERROR, so the stream used to close with no terminal receipt. Track
+   which operations have a live wire audience and whether a terminal made it
+   out; the Owner settle hook synthesizes the missing terminal from the
+   execution verdict after the child switch has unwound.
+
+   The stream counts as OPEN from sink registration, not from the first
+   projected event: a turn that fails after claim but before the projection
+   ever runs (missing input, payload parse failure) projects nothing, yet the
+   attached client is already waiting on a terminal (#28849 review). When the
+   last sink unregisters the record is dropped — with no audience there is
+   nothing to close, and the durable operation state stays the authority. *)
+type operation_wire_stream = Wire_started | Wire_terminal_sent
+
+let operation_wire_streams : (string, operation_wire_stream) Hashtbl.t =
+  Hashtbl.create 32
+
+let operation_wire_streams_mu = Stdlib.Mutex.create ()
+
+let ag_ui_terminal_event (event : Ag_ui.event) =
+  match event.Ag_ui.event_type with
+  | Ag_ui.Run_finished | Ag_ui.Run_error -> true
+  | Run_started | Step_started | Step_finished | Text_message_start
+  | Text_message_content | Text_message_end | Tool_call_start
+  | Tool_call_args | Tool_call_end | State_snapshot | State_delta
+  | Custom -> false
+
+let note_operation_wire_opened ~operation_id =
+  Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
+    if not (Hashtbl.mem operation_wire_streams operation_id)
+    then Hashtbl.replace operation_wire_streams operation_id Wire_started)
+
+let note_operation_wire_event ~operation_id event =
+  let terminal = ag_ui_terminal_event event in
+  Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
+    match Hashtbl.find_opt operation_wire_streams operation_id, terminal with
+    | Some Wire_terminal_sent, _ -> ()
+    | _, true ->
+      Hashtbl.replace operation_wire_streams operation_id Wire_terminal_sent
+    | None, false ->
+      Hashtbl.replace operation_wire_streams operation_id Wire_started
+    | Some Wire_started, false -> ())
+
+let drop_operation_wire_stream ~operation_id =
+  Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
+    Hashtbl.remove operation_wire_streams operation_id)
+
+let take_operation_wire_stream ~operation_id =
+  Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
+    let state = Hashtbl.find_opt operation_wire_streams operation_id in
+    Hashtbl.remove operation_wire_streams operation_id;
+    state)
+
+type operation_live_sink = Ag_ui.event -> unit
+
+let operation_live_sinks :
+  (string, (int * operation_live_sink) list) Hashtbl.t =
+  Hashtbl.create 16
+;;
+
+let operation_live_sinks_mu = Stdlib.Mutex.create ()
+let next_operation_live_sink_id = Atomic.make 0
+
+let register_operation_live_sink ~operation_id sink =
+  let sink_id = Atomic.fetch_and_add next_operation_live_sink_id 1 in
+  Stdlib.Mutex.protect operation_live_sinks_mu (fun () ->
+    let current =
+      match Hashtbl.find_opt operation_live_sinks operation_id with
+      | None -> []
+      | Some sinks -> sinks
+    in
+    Hashtbl.replace operation_live_sinks operation_id ((sink_id, sink) :: current);
+    (* An attached sink IS the open wire stream (#28849 review): mark it under
+       the sinks lock so registration and the last-sink drop below cannot
+       interleave into an attached-client/no-record state. Lock order is
+       always sinks_mu -> streams_mu; the streams lock never takes sinks_mu. *)
+    note_operation_wire_opened ~operation_id);
+  fun () ->
+    Stdlib.Mutex.protect operation_live_sinks_mu (fun () ->
+      match Hashtbl.find_opt operation_live_sinks operation_id with
+      | None -> ()
+      | Some sinks ->
+        let remaining = List.filter (fun (id, _) -> id <> sink_id) sinks in
+        if remaining = []
+        then (
+          Hashtbl.remove operation_live_sinks operation_id;
+          (* Last sink gone -> no audience: drop the wire record so settle
+             stays silent instead of synthesizing into the void. *)
+          drop_operation_wire_stream ~operation_id)
+        else Hashtbl.replace operation_live_sinks operation_id remaining)
+;;
+
+let publish_operation_live_event ~operation_id event =
+  let sinks =
+    Stdlib.Mutex.protect operation_live_sinks_mu (fun () ->
+      match Hashtbl.find_opt operation_live_sinks operation_id with
+      | None -> []
+      | Some sinks -> sinks)
+  in
+  List.iter
+    (fun (_, sink) ->
+       try sink event with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Keeper.warn
+           "keeper_stream: operation live sink failed operation_id=%s error=%s"
+           operation_id
+           (Printexc.to_string exn))
+    sinks
+;;
+
 (* SSE reconnect backoff (ms) primed on the dashboard keeper-chat streams. Shared
    with {!Server_routes_http_routes_dashboard} (via [open]) so the two dashboard
    priming sites cannot silently diverge. Intentionally distinct from
@@ -32,6 +145,7 @@ type user_input_block = Keeper_multimodal_input.user_input_block =
   | User_audio of user_media_block
 
 type keeper_chat_stream_request = {
+  request_id : Keeper_owner.Chat_operation.Operation_id.t;
   name : string;
   message : string;
   user_blocks : user_input_block list;
@@ -129,285 +243,182 @@ let turn_instructions_for_request payload =
 
 let direct_message_of_request payload = payload.direct_message
 
-let modalities_for_request payload =
-  match Keeper_multimodal_input.modalities payload.user_blocks with
-  | [] -> [ "text" ]
-  | labels -> labels
+(* How long a held tool call waits for an operator.
 
-type dashboard_deferred_chat =
-  { in_flight : Keeper_turn_admission.in_flight_info option
-  ; chat_waiting : bool
-  ; pending_count : int
-  ; inflight_count : int
-  ; recovery_required_count : int
-  ; receipt_id : string
-  ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
-  ; queue_revision : int64
-  }
+   Long enough to read the question and decide -- an operator glancing away
+   should not come back to a denied call. Short enough that a turn does not
+   sit on a provider connection all afternoon when the reader has walked
+   away: the chat stream's own silence bound is the same order, and a wait
+   outliving it would hold a turn whose reader is already gone. *)
+let keeper_tool_approval_timeout_sec = 180.0
 
-let dashboard_busy_queue_state ~base_path ~keeper_name =
-  let admission = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name in
-  let in_flight = admission.snapshot_in_flight in
-  let chat_waiting = admission.snapshot_waiting > 0 in
-  let shutdown_operation_id = admission.snapshot_shutdown_operation_id in
-  let queue_waiting =
-    if not (Keeper_chat_queue.persistence_configured ())
-    then true
-    else
-      match Keeper_chat_queue.lane_status ~keeper_name with
-      | Error _ -> true
-      | Ok { has_active; health = Keeper_chat_queue.Ready; _ } -> has_active
-      | Ok
-          { health =
-              ( Keeper_chat_queue.Persistence_reconciliation_required
-              | Keeper_chat_queue.Delivery_recovery_required _
-              | Keeper_chat_queue.Unavailable _ )
-          ; _
-          } ->
-        true
-  in
-  match in_flight, chat_waiting, queue_waiting, shutdown_operation_id with
-  | None, false, false, None -> None
-  | _ -> Some (in_flight, chat_waiting, shutdown_operation_id)
+(* Answer a held tool call.
 
-let dashboard_deferred_ack_text ~keeper_name deferred =
-  if deferred.recovery_required_count < 0
-  then invalid_arg "dashboard deferred recovery count must be non-negative"
-  else if deferred.recovery_required_count > 0
-  then
-    Printf.sprintf
-      "%s의 이전 메시지 상태를 확인해야 해요. 새 메시지는 안전하게 대기 중입니다."
-      keeper_name
-  else
-    match deferred.shutdown_operation_id with
-    | Some _ ->
-      Printf.sprintf
-        "%s가 종료 중이에요. 다시 활동을 시작하면 이 메시지를 처리합니다."
-        keeper_name
-    | None ->
-      Printf.sprintf
-        "%s가 다른 작업을 처리 중이에요. 메시지는 대기열에 추가했습니다."
-        keeper_name
-
-let dashboard_deferred_chat_to_json ~keeper_name
-    ({ in_flight
-     ; chat_waiting
-     ; pending_count
-     ; inflight_count
-     ; recovery_required_count
-     ; receipt_id
-     ; shutdown_operation_id
-     ; queue_revision
-     } : dashboard_deferred_chat) =
-  let in_flight_fields =
-    match in_flight with
-    | None -> []
-    | Some { Keeper_turn_admission.lane; started_at } ->
-        [ ( "in_flight_lane"
-          , `String (Keeper_turn_admission.lane_to_string lane) )
-        ; ( "in_flight_started_at"
-          , `Float started_at )
-        ]
-  in
-  `Assoc
-    ([ ("keeper_name", `String keeper_name)
-     ; ("status", `String "queued")
-     ; ("queue", `String "keeper_chat_queue")
-     ; ("pending_count", `Int pending_count)
-     ; ("inflight_count", `Int inflight_count)
-     ; ("recovery_required_count", `Int recovery_required_count)
-     ; ("chat_waiting", `Bool chat_waiting)
-     ; ("receipt_id", `String receipt_id)
-     ; ("queue_revision", `String (Int64.to_string queue_revision))
-     ; ( "shutdown_operation_id"
-       , match shutdown_operation_id with
-         | None -> `Null
-         | Some operation_id ->
-           `String (Keeper_shutdown_types.Operation_id.to_string operation_id) )
-     ]
-     @ in_flight_fields)
-
-let enqueue_dashboard_payload
-      ~clock
-      ~thread_id
-      ~user_row_origin
-      payload
-      ~in_flight
-      ~chat_waiting
-      ~shutdown_operation_id
-  =
-  match
-    Keeper_chat_queue.enqueue ~keeper_name:payload.name
-      { Keeper_chat_queue.content = payload.message
-      ; user_blocks = payload.user_blocks
-      ; attachments = payload.attachments
-      ; timestamp = Eio.Time.now clock
-      ; source = Keeper_chat_queue.Dashboard { thread_id }
-      ; user_row_origin
-      }
-  with
-  | Error error -> Error (Keeper_chat_queue.mutation_error_to_string error)
-  | Ok receipt ->
-      Ok
-        { in_flight
-        ; chat_waiting
-        ; pending_count = receipt.pending_count
-        ; inflight_count = receipt.inflight_count
-        ; recovery_required_count = receipt.recovery_required_count
-        ; receipt_id = Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id
-        ; queue_revision = receipt.revision
-        ; shutdown_operation_id
-        }
-
-let dashboard_deferred_chat_of_rejection
-      ~clock
-      ~thread_id
-      ~user_row_origin
-      payload
-     ({ Keeper_turn_admission.waiting
-     ; in_flight
-     ; shutdown_operation_id
-     } : Keeper_turn_admission.rejection) =
-  (* Dashboard messages remain durable while a shutdown fence is active;
-     the queue is the continuation boundary for a later resume/replacement
-     lane, rather than starting a turn behind the fence. *)
-  enqueue_dashboard_payload
-    ~clock
-    ~thread_id
-    ~user_row_origin
-    payload
-    ~in_flight
-    ~chat_waiting:(waiting > 0)
-    ~shutdown_operation_id
-
-let defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id payload =
-  match dashboard_busy_queue_state ~base_path ~keeper_name:payload.name with
-  | None -> `Not_busy
-  | Some (in_flight, chat_waiting, shutdown_operation_id) ->
-      (match
-         enqueue_dashboard_payload
-           ~clock
-           ~thread_id
-           ~user_row_origin:Keeper_chat_store.Needs_append
-           payload
-           ~in_flight
-           ~chat_waiting
-           ~shutdown_operation_id
-       with
-       | Ok queued -> `Queued queued
-       | Error message -> `Queue_error message)
-
-let keeper_chat_request_prefixes =
-  [
-    "/api/v1/gate/message/requests/";
-    "/api/v1/keepers/chat/requests/";
-  ]
-
-let has_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len
-  && String.equal (String.sub value 0 prefix_len) prefix
-
-let keeper_chat_request_suffix request =
-  let path = Http.Request.path request in
-  let rec loop = function
-    | [] -> None
-    | prefix :: rest ->
-        if has_prefix ~prefix path then
-          Some
-            (String.sub path (String.length prefix)
-               (String.length path - String.length prefix))
-        else loop rest
-  in
-  loop keeper_chat_request_prefixes
-
-let parse_keeper_chat_request_result_path request =
-  match keeper_chat_request_suffix request with
-  | Some suffix -> (
-      match String.split_on_char '/' suffix with
-      | [ request_id ] when String.trim request_id <> "" -> Ok request_id
-      | _ -> Error "expected /api/v1/gate/message/requests/<request_id>" )
-  | None -> Error "invalid keeper chat request path"
-
-let parse_keeper_chat_request_cancel_path request =
-  match keeper_chat_request_suffix request with
-  | Some suffix -> (
-      match String.split_on_char '/' suffix with
-      | [ request_id; "cancel" ] when String.trim request_id <> "" ->
-          Ok request_id
-      | _ -> Error "expected /api/v1/gate/message/requests/<request_id>/cancel" )
-  | None -> Error "invalid keeper chat request path"
-
-let http_status_of_access_rejection = function
-  | Keeper_msg_async.Invalid_base_path _
-  | Keeper_msg_async.Invalid_caller
-  | Keeper_msg_async.Invalid_request_id -> `Bad_request
-  | Keeper_msg_async.Caller_mismatch -> `Forbidden
+   The reply says whether a wait was actually released. A late answer -- one
+   whose call already timed out, or was never held -- reports [settled: false]
+   rather than reading as success, so an operator is not told a call was
+   approved when nothing was listening for it. *)
+let handle_keeper_tool_approval state request reqd =
+  Http.Request.read_body_async reqd (fun body_str ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    let parsed =
+      try
+        match Yojson.Safe.from_string body_str with
+        | `Assoc fields ->
+          let field name =
+            match List.assoc_opt name fields with
+            | Some (`String value) -> Ok (String.trim value)
+            | Some _ | None ->
+              Error (Printf.sprintf "%s (string) is required" name)
+          in
+          let ( let* ) = Result.bind in
+          let* keeper_name = field "name" in
+          let* tool_call_id = field "tool_call_id" in
+          let* decision_raw = field "decision" in
+          (match Keeper_tool_approval_registry.decision_of_string decision_raw with
+           | Some decision -> Ok (keeper_name, tool_call_id, decision)
+           | None ->
+             Error
+               (Printf.sprintf "decision must be approve or deny, got %S"
+                  decision_raw))
+        | _ -> Error "JSON object body required"
+      with
+      | Yojson.Json_error msg -> Error ("invalid json: " ^ msg)
+    in
+    match parsed with
+    | Error msg ->
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (keeper_chat_stream_error_json msg)
+    | Ok (keeper_name, tool_call_id, decision) ->
+      if not (Keeper_registry.is_registered ~base_path keeper_name)
+      then
+        respond_json_value_with_cors ~status:`Not_found request reqd
+          (keeper_chat_stream_error_json "keeper not registered")
+      else (
+        let settled =
+          Keeper_tool_approval_registry.settle
+            (Keeper_tool_approval_registry.shared ())
+            ~keeper_name ~tool_call_id decision
+        in
+        Log.Keeper.info
+          "keeper_tool_approval: keeper=%s tool_call_id=%s decision=%s settled=%b"
+          keeper_name tool_call_id
+          (Keeper_tool_approval_registry.decision_to_string decision)
+          settled;
+        respond_json_value_with_cors ~status:`OK request reqd
+          (`Assoc
+             [ ("settled", `Bool settled)
+             ; ( "decision"
+               , `String (Keeper_tool_approval_registry.decision_to_string decision) )
+             ])))
 ;;
 
-let handle_keeper_chat_request_result ~caller state request reqd =
-  match parse_keeper_chat_request_result_path request with
-  | Error message ->
-      respond_json_value_with_cors ~status:`Bad_request request reqd
-        (keeper_chat_stream_error_json message)
-  | Ok request_id -> (
-      match
-        Keeper_msg_async.poll
-          ~base_path:(Mcp_server.workspace_config state).base_path
-          ~caller
-          request_id
-      with
-      | Keeper_msg_async.Absent ->
-          respond_json_value_with_cors ~status:`Not_found request reqd
-            (keeper_chat_stream_error_json "request_id not found")
-      | Keeper_msg_async.Unreadable reason ->
-          respond_json_value_with_cors ~status:`Internal_server_error request
-            reqd
-            (keeper_chat_stream_error_json
-               (Printf.sprintf
-                  "request record unreadable: %s — request was accepted but \
-                   its result is lost"
-                  reason))
-      | Keeper_msg_async.Rejected rejection ->
-          respond_json_value_with_cors
-            ~status:(http_status_of_access_rejection rejection)
-            request
-            reqd
-            (Keeper_msg_async.access_rejection_to_json rejection)
-      | Keeper_msg_async.Found entry ->
-          respond_json_value_with_cors ~status:`OK request reqd
-            (Keeper_msg_async.entry_to_json entry) )
+(* The waits live only in the registry while their turns are parked, so this
+   is a projection of live state, not a store read. Listing them is what lets
+   an operator answer a turn whose owning stream watcher is gone — without
+   this, such a call could only time out (masc#30034). [asked_at] is the
+   registry clock's epoch reading; the consumer derives display age against
+   its own clock rather than trusting one computed here. *)
+let handle_keeper_tool_approvals_list _state request reqd =
+  let held =
+    Keeper_tool_approval_registry.pending
+      (Keeper_tool_approval_registry.shared ())
+  in
+  respond_json_value_with_cors ~status:`OK request reqd
+    (`Assoc
+       [ ( "pending"
+         , `List
+             (List.map
+                (fun (p : Keeper_tool_approval_registry.pending) ->
+                  `Assoc
+                    [ ("keeper", `String p.keeper_name)
+                    ; ("tool_call_id", `String p.tool_call_id)
+                    ; ("tool", `String p.tool_name)
+                    ; ("args", `String p.args)
+                    ; ("question", `String p.question)
+                    ; ("asked_at", `Float p.asked_at)
+                    ; ("timeout_sec", `Float p.timeout_sec)
+                    ])
+                held) )
+       ])
+;;
 
-let handle_keeper_chat_request_cancel ~caller state request reqd =
-  match parse_keeper_chat_request_cancel_path request with
-  | Error message ->
+(* The per-keeper approval stance. GET lists the overrides — a keeper absent
+   from the list is [auto] — and POST sets one. Setting is logged at the
+   server, not only echoed to the caller: [yolo] means every tool call runs
+   unasked, and the operator who set it is not always the operator reading
+   the logs later. *)
+let handle_keeper_tool_approval_mode_get _state request reqd =
+  let overrides =
+    Keeper_tool_approval_mode.overrides (Keeper_tool_approval_mode.shared ())
+  in
+  respond_json_value_with_cors ~status:`OK request reqd
+    (`Assoc
+       [ ( "overrides"
+         , `List
+             (List.map
+                (fun (keeper_name, mode) ->
+                  `Assoc
+                    [ ("keeper", `String keeper_name)
+                    ; ( "mode"
+                      , `String (Keeper_tool_approval_mode.mode_to_string mode)
+                      )
+                    ])
+                overrides) )
+       ; ("default", `String "auto")
+       ])
+;;
+
+let handle_keeper_tool_approval_mode_set state request reqd =
+  Http.Request.read_body_async reqd (fun body_str ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    let parsed =
+      try
+        match Yojson.Safe.from_string body_str with
+        | `Assoc fields ->
+          let field name =
+            match List.assoc_opt name fields with
+            | Some (`String value) -> Ok (String.trim value)
+            | Some _ | None ->
+              Error (Printf.sprintf "%s (string) is required" name)
+          in
+          let ( let* ) = Result.bind in
+          let* keeper_name = field "name" in
+          let* mode_raw = field "mode" in
+          (match Keeper_tool_approval_mode.mode_of_string mode_raw with
+           | Some mode -> Ok (keeper_name, mode)
+           | None ->
+             Error
+               (Printf.sprintf "mode must be auto or yolo, got %S" mode_raw))
+        | _ -> Error "JSON object body required"
+      with
+      | Yojson.Json_error msg -> Error ("invalid json: " ^ msg)
+    in
+    match parsed with
+    | Error msg ->
       respond_json_value_with_cors ~status:`Bad_request request reqd
-        (keeper_chat_stream_error_json message)
-  | Ok request_id ->
-      let result =
-        Keeper_msg_async.cancel
-          ~base_path:(Mcp_server.workspace_config state).base_path
-          ~caller
-          request_id
-      in
-      let status =
-        match result with
-        | Keeper_msg_async.Cancellation_requested _ ->
-            `Accepted
-        | Keeper_msg_async.Cancel_not_found -> `Not_found
-        | Keeper_msg_async.Cancel_rejected rejection ->
-            http_status_of_access_rejection rejection
-        | Keeper_msg_async.Cancel_already_terminal _
-        | Keeper_msg_async.Cancel_worker_ownership_unknown _ ->
-            `Conflict
-        | Keeper_msg_async.Cancel_unreadable _
-        | Keeper_msg_async.Cancel_persistence_failed _
-        | Keeper_msg_async.Cancel_worker_signal_failed _
-        | Keeper_msg_async.Cancel_state_invariant_failed _ ->
-            `Internal_server_error
-      in
-      respond_json_value_with_cors ~status request reqd
-        (Keeper_msg_async.cancel_result_to_json ~request_id result)
+        (keeper_chat_stream_error_json msg)
+    | Ok (keeper_name, mode) ->
+      if not (Keeper_registry.is_registered ~base_path keeper_name)
+      then
+        respond_json_value_with_cors ~status:`Not_found request reqd
+          (keeper_chat_stream_error_json "keeper not registered")
+      else (
+        Keeper_tool_approval_mode.set
+          (Keeper_tool_approval_mode.shared ())
+          ~keeper_name
+          mode;
+        Log.Keeper.info
+          "keeper_tool_approval_mode: keeper=%s mode=%s"
+          keeper_name
+          (Keeper_tool_approval_mode.mode_to_string mode);
+        respond_json_value_with_cors ~status:`OK request reqd
+          (`Assoc
+             [ ("keeper", `String keeper_name)
+             ; ( "mode"
+               , `String (Keeper_tool_approval_mode.mode_to_string mode) )
+             ])))
+;;
 
 let handle_keeper_turn_interrupt state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
@@ -433,20 +444,38 @@ let handle_keeper_turn_interrupt state request reqd =
         respond_json_value_with_cors ~status:`Not_found request reqd
           (keeper_chat_stream_error_json "keeper not registered")
       else (
+        (* The server fails the turn switch and learns nothing more within this
+           request: whether the signal reaches the running fiber, and whether
+           that fiber then terminates, are later events. [signalled] reports
+           what happened here. A turn parked in an uncancellable section keeps
+           running after a [signalled: true] response, so an operator has to
+           read the turn state to know the outcome. The former [cancelled:
+           true] read as that outcome and hid a 63-minute hang (#29229). *)
         match Keeper_registry.interrupt_current_turn ~base_path keeper_name with
-        | `Cancelled turn_id ->
+        | Keeper_registry.Exact_turn_cancelled turn_id ->
           Log.Keeper.info "keeper_turn_interrupt: keeper=%s turn_id=%d" keeper_name turn_id;
           respond_json_value_with_cors ~status:`OK request reqd
-            (`Assoc [ ("cancelled", `Bool true); ("turn_id", `Int turn_id) ])
-        | `No_turn_in_flight ->
+            (`Assoc [ ("signalled", `Bool true); ("turn_id", `Int turn_id) ])
+        | Keeper_registry.Exact_no_turn_in_flight ->
           respond_json_value_with_cors ~status:`OK request reqd
             (`Assoc
-               [ ("cancelled", `Bool false)
+               [ ("signalled", `Bool false)
                ; ("reason", `String "no_in_flight_turn")
-               ])))
+               ])
+        | Keeper_registry.Exact_turn_cancel_failed { turn_id; detail } ->
+          respond_json_value_with_cors ~status:`OK request reqd
+            (`Assoc
+               ([ ("signalled", `Bool false)
+                ; ("reason", `String "cancel_failed")
+                ; ("detail", `String detail)
+                ]
+                @
+                match turn_id with
+                | Some turn_id -> [ ("turn_id", `Int turn_id) ]
+                | None -> []))))
 ;;
 
-(* No cumulative timeout or work budget for keeper_msg. Keeper calls OAS with
+(* No cumulative timeout or work budget for keeper_msg. Keeper calls AGENT_CORE with
    unbounded turn/idle sentinels; turn, token, and cost usage are observations,
    not lifecycle authority. Explicit cancellation plus provider/tool progress
    boundaries settle real liveness failures without discarding the request or
@@ -506,7 +535,8 @@ let parse_keeper_chat_stream_request body_str =
       match json with
       | `Assoc fields ->
         let allowed =
-          [ "name"
+          [ "request_id"
+          ; "name"
           ; "message"
           ; "user_blocks"
           ; "turn_instructions"
@@ -544,6 +574,8 @@ let parse_keeper_chat_stream_request body_str =
       | Some (`String value) -> Ok value
       | Some _ -> Error (key ^ " must be a string")
     in
+    let* request_id = required_string "request_id" in
+    let* request_id = Keeper_owner.Chat_operation.Operation_id.of_string request_id in
     let* name = required_string "name" |> Result.map String.trim in
     let* raw_message = optional_string "message" |> Result.map String.trim in
     let* channel = optional_string "channel" |> Result.map String.trim in
@@ -614,7 +646,8 @@ let parse_keeper_chat_stream_request body_str =
         |> Result.map_error Keeper_invocation_contract.request_error_to_string
       in
       Ok
-        { name
+        { request_id
+        ; name
         ; message
         ; user_blocks
         ; turn_instructions
@@ -628,6 +661,108 @@ let parse_keeper_chat_stream_request body_str =
         }
   with Yojson.Json_error e ->
     Error ("invalid json: " ^ e)
+
+type operation_payload =
+  { payload : keeper_chat_stream_request
+  ; source : Keeper_chat_operation_payload.decoded_source
+  }
+
+let operation_input_of_payload payload =
+  Keeper_chat_operation_payload.input_to_json
+    ~message:payload.message
+    ~user_blocks:payload.user_blocks
+    ~turn_instructions:payload.turn_instructions
+    ~surface_context:payload.surface_context
+    ~attachments:payload.attachments
+;;
+
+let operation_source_of_payload
+      ~thread_id
+      ~submitted_by
+      ~user_row_origin
+      payload
+  =
+  let ( let* ) = Result.bind in
+  let* continuation_channel =
+    if has_external_speaker payload
+    then Error "connector operations must enter through the typed connector ingress"
+    else Keeper_continuation_channel.dashboard ~thread_id
+  in
+  Keeper_chat_operation_payload.source_to_json
+    ~submitted_by
+    ~thread_id
+    ~continuation_channel
+    ~surface:(chat_surface_of_request payload)
+    ~channel:payload.channel
+    ~channel_user_id:payload.channel_user_id
+    ~channel_user_name:payload.channel_user_name
+    ~channel_workspace_id:payload.channel_workspace_id
+    ~conversation_id:None
+    ~external_message_id:None
+    ~workspace_id:None
+    ~extra_mentions:[]
+    ~user_row_origin
+;;
+
+let operation_payload_of_json ~keeper_name ~operation_id ~source ~input =
+  let ( let* ) = Result.bind in
+  let* source = Keeper_chat_operation_payload.source_of_json source in
+  let* input = Keeper_chat_operation_payload.input_of_json input in
+  let raw_message = String.trim input.message in
+  let message =
+    if String.equal raw_message ""
+    then
+      Keeper_multimodal_input.fallback_message
+        ~attachments:input.attachments
+        input.user_blocks
+    else raw_message
+  in
+  let invocation_prompt =
+    if String.trim source.channel_user_id = ""
+    then message
+    else
+      Gate_keeper_backend.contextualize_message
+        ~channel:source.channel
+        ~channel_user_id:source.channel_user_id
+        ~channel_user_name:source.channel_user_name
+        ~channel_workspace_id:source.channel_workspace_id
+        ~metadata:[]
+        ~content:message
+  in
+  let turn_instructions =
+    combined_turn_instructions
+      ~turn_instructions:input.turn_instructions
+      ~surface_context:input.surface_context
+  in
+  let* direct_message =
+    Keeper_invocation_contract.direct_message
+      ~keeper_name
+      ~prompt:invocation_prompt
+      ~direct_reply:true
+      ?turn_instructions
+      ~channel:source.channel
+      ~user_blocks:input.user_blocks
+      ~attachments:input.attachments
+      ()
+    |> Result.map_error Keeper_invocation_contract.request_error_to_string
+  in
+  let payload =
+    { request_id = operation_id
+    ; name = keeper_name
+    ; message
+    ; user_blocks = input.user_blocks
+    ; turn_instructions = input.turn_instructions
+    ; surface_context = input.surface_context
+    ; channel = source.channel
+    ; channel_user_id = source.channel_user_id
+    ; channel_user_name = source.channel_user_name
+    ; channel_workspace_id = source.channel_workspace_id
+    ; attachments = input.attachments
+    ; direct_message
+    }
+  in
+  Ok { payload; source }
+;;
 
 let strip_keeper_visible_reply (reply : string) =
   String.trim reply
@@ -720,7 +855,9 @@ let execute_keeper_stream_tool_streaming
       ~clock
       ?auth_token:_
       ?on_event
-      ?on_admitted
+      ?on_tool_result_ready
+      ?approval_gate
+      ~admission_token
       state
       ~agent_name
       ~message
@@ -730,7 +867,6 @@ let execute_keeper_stream_tool_streaming
   let workspace_scope = Mcp_server.workspace_scope state in
   let config = workspace_scope.config in
   let start_time = Eio.Time.now clock in
-  let admission_rejection = ref None in
   let body, disposition =
     try
       let keeper_ctx : _ Keeper_tool_surface.context =
@@ -745,15 +881,18 @@ let execute_keeper_stream_tool_streaming
             Mcp_server.publication_recovery_availability_provider state;
         }
       in
-      match
-        Keeper_tool_surface.dispatch_keeper_msg_stream ~on_text_delta ?on_event
-          ~on_admission_rejected:(fun rejection ->
-            admission_rejection := Some rejection)
-          ?on_admitted
+      let dispatched =
+        Keeper_tool_surface.dispatch_keeper_msg_stream_admitted
+          ~admission_token
+          ~on_text_delta
+          ?on_event
+          ?on_tool_result_ready
+          ?approval_gate
           keeper_ctx
           ~continuation_channel
           ~message
-      with
+      in
+      match dispatched with
       | Some result ->
           let body = Tool_result.message result in
           body, keeper_stream_disposition_of_result result
@@ -766,16 +905,21 @@ let execute_keeper_stream_tool_streaming
         ( Masc_domain.masc_error_to_string
             (Masc_domain.System Masc_domain.System_error.NotInitialized)
         , Tool_result.Failed Tool_result.Runtime_failure )
+    | exn when Keeper_registry_types.is_operator_interrupt exn ->
+        (* #28810: operator-requested turn interrupt is a typed cancellation,
+           not a crash. The guard covers every Eio delivery shape — bare,
+           [Finally_raised], [Multiple] — while genuinely cancelled fibers
+           re-raise above (#28868 review). *)
+        Log.Mcp.info "tools/call interrupted by operator (stream)";
+        ( Keeper_registry_types.operator_interrupt_detail
+        , Tool_result.Failed Tool_result.Operator_cancelled )
     | exn ->
         let err = Printexc.to_string exn in
         Log.Mcp.error "tools/call crashed (stream): %s" err;
         ( Printf.sprintf "Internal error: %s" err
         , Tool_result.Failed Tool_result.Runtime_failure )
   in
-  match !admission_rejection with
-  | Some rejection -> `Deferred rejection
-  | None ->
-      let success = keeper_stream_success disposition in
+  let success = keeper_stream_success disposition in
       let end_time = Eio.Time.now clock in
       let duration_ms = Keeper_timing.elapsed_duration_ms ~start_time ~end_time in
       let error_detail =
@@ -787,7 +931,10 @@ let execute_keeper_stream_tool_streaming
         ~error_msg:error_detail ();
       (match disposition with
        | Tool_result.Failed failure_class ->
-         Log.Keeper.emit Log.Error
+         (* SSOT: the failure class owns its log level (Runtime_failure ->
+            Error, the rest -> Warn). This site was the last Error hardcode;
+            the MCP twin already routes through the helper (#28878 review). *)
+         Log.Keeper.emit (Tool_result.log_level_of_failure_class failure_class)
            ~details:
              (keeper_tool_failure_log_details ~tool_name:"masc_keeper_msg"
                 ~agent_name ~duration_ms ~streaming:true ~error_body:body
@@ -825,122 +972,10 @@ let execute_keeper_stream_tool_streaming
         ~disposition
         ~duration_ms
         ();
-      `Ran (success, body)
-
-let execute_keeper_stream_tool_streaming_if_free
-      ~sw
-      ~clock
-      ?auth_token:_
-      ?on_event
-      state
-      ~agent_name
-      ~message
-      ~continuation_channel
-      ~on_text_delta
-  =
-  let workspace_scope = Mcp_server.workspace_scope state in
-  let config = workspace_scope.config in
-  let start_time = Eio.Time.now clock in
-  let outcome =
-    try
-      let keeper_ctx : _ Keeper_tool_surface.context =
-        {
-          config;
-          agent_name;
-          sw;
-          clock;
-          proc_mgr = state.Mcp_server.proc_mgr;
-          net = state.Mcp_server.net;
-          publication_recovery_provider =
-            Mcp_server.publication_recovery_availability_provider state;
-        }
-      in
-      match
-        Keeper_turn.handle_keeper_msg_if_free
-          ~on_text_delta
-          ?on_event
-          ~continuation_channel
-          keeper_ctx
-          message
-      with
-      | `Busy rejection -> `Busy rejection
-      | `Ran result ->
-          let body = Tool_result.message result in
-          `Ran (body, keeper_stream_disposition_of_result result)
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Workspace.Not_initialized ->
-        `Ran
-          ( Masc_domain.masc_error_to_string
-              (Masc_domain.System Masc_domain.System_error.NotInitialized)
-          , Tool_result.Failed Tool_result.Runtime_failure )
-    | exn ->
-        let err = Printexc.to_string exn in
-        Log.Mcp.error "tools/call crashed (stream if-free): %s" err;
-        `Ran
-          ( Printf.sprintf "Internal error: %s" err
-          , Tool_result.Failed Tool_result.Runtime_failure )
-  in
-  match outcome with
-  | `Busy rejection -> `Busy rejection
-  | `Ran (body, disposition) ->
-      let success = keeper_stream_success disposition in
-      let end_time = Eio.Time.now clock in
-      let duration_ms = Keeper_timing.elapsed_duration_ms ~start_time ~end_time in
-      let error_detail =
-        if success then None
-        else Some (keeper_tool_failure_error_detail ~duration_ms ~error_body:body)
-      in
-      Audit_log.log_tool_call config
-        ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success
-        ~error_msg:error_detail ();
-      (match disposition with
-       | Tool_result.Failed failure_class ->
-         Log.Keeper.emit Log.Error
-           ~details:
-             (keeper_tool_failure_log_details ~tool_name:"masc_keeper_msg"
-                ~agent_name ~duration_ms ~streaming:true ~error_body:body
-                ~failure_class)
-           "keeper tool call failed: masc_keeper_msg"
-       | Tool_result.Completed () | Tool_result.Deferred () -> ());
-      let telemetry_enabled = Env_config_core.telemetry_enabled () in
-      if telemetry_enabled then (
-        match state.Mcp_server.fs with
-        | Some fs ->
-            (try
-               let telemetry_error_kind =
-                 if success then None
-                 else Some (Telemetry_eio.error_kind_of_string "tool_failure")
-               in
-               let telemetry_failure_class =
-                 match disposition with
-                 | Tool_result.Failed failure_class -> Some failure_class
-                 | Tool_result.Completed () | Tool_result.Deferred () -> None
-               in
-               Telemetry_eio.track_tool_called ~fs config
-                 ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
-                 ~duration_ms ~source:(Tool_registry.string_of_source Agent_internal)
-                 ?failure_class:telemetry_failure_class
-                 ?error_kind:telemetry_error_kind ?error_message:error_detail ()
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-               Log.Misc.error "telemetry tracking failed: %s"
-                 (Printexc.to_string exn))
-        | None -> ());
-      Tool_registry.record_call_if_known ~source:Agent_internal
-        ~tool_name:"masc_keeper_msg"
-        ~disposition
-        ~duration_ms
-        ();
-      `Ran (success, body)
-
-(** Send a Run_error AG-UI event with the given message. *)
-let send_keeper_error ?on_closed writer mutex closed ~thread_id ~run_id err =
-  ignore
-    (keeper_stream_send_event ?on_closed writer mutex closed
-       Ag_ui.(
-         run_error ~thread_id ~run_id ~message:err ()))
+      (* Carry the full disposition, not a collapsed bool: the queued-outcome
+         consumer needs the failure class to keep an operator interrupt from
+         being written as a crash (#28868 review P0). *)
+      `Ran (disposition, body)
 
 type canonical_reply_payload_error =
   | Malformed_reply_json of { parser_detail : string }
@@ -950,11 +985,13 @@ type canonical_reply_payload_error =
   | Invalid_payload_field_type of string
   | Unknown_turn_outcome
   | Invalid_turn_ref
+  | Invalid_external_effect_target of string
 
 type canonical_reply_payload =
   { payload_json : Yojson.Safe.t
   ; turn_outcome : Keeper_turn_outcome.t
   ; turn_ref : Ids.Turn_ref.t
+  ; external_effect_target : Keeper_surface_post.delivery_target option
   ; visible_reply : string
   ; poll_body : string
   }
@@ -973,6 +1010,10 @@ let canonical_reply_payload_error_to_string = function
   | Unknown_turn_outcome ->
     "keeper reply payload contains an unknown turn_outcome"
   | Invalid_turn_ref -> "keeper reply payload contains an invalid turn_ref"
+  | Invalid_external_effect_target detail ->
+    Printf.sprintf
+      "keeper reply payload carries an invalid external_effect_target: %s"
+      detail
 ;;
 
 let required_unique_string_field field fields =
@@ -1018,6 +1059,46 @@ let canonical_reply_payload_of_body ~redact_text body =
     | Some turn_ref -> Ok turn_ref
     | None -> Error Invalid_turn_ref
   in
+  let* external_effect_target =
+    (* The outcome and the surface-post receipt are decided from the same
+       [terminal_effect_state] (keeper_agent_run.ml), so the producer writes
+       the target exactly when the outcome is External_effect_completed. The
+       decoder holds both directions: [Some] iff that outcome, so a [Some]
+       here is the proof the External_effect_completed event needs. *)
+    let completed_external_effect =
+      Keeper_turn_outcome.equal turn_outcome
+        Keeper_turn_outcome.External_effect_completed
+    in
+    match
+      List.filter_map
+        (fun (key, value) ->
+           if String.equal key Keeper_surface_post.delivery_target_wire_key
+           then Some value
+           else None)
+        fields
+    with
+    | [] ->
+      if completed_external_effect
+      then
+        Error
+          (Missing_payload_field Keeper_surface_post.delivery_target_wire_key)
+      else Ok None
+    | [ value ] ->
+      if not completed_external_effect
+      then
+        Error
+          (Invalid_external_effect_target
+             (Printf.sprintf
+                "present on turn_outcome %s"
+                (Keeper_turn_outcome.to_label turn_outcome)))
+      else (
+        match Keeper_surface_post.delivery_target_of_yojson value with
+        | Ok target -> Ok (Some target)
+        | Error detail -> Error (Invalid_external_effect_target detail))
+    | _ ->
+      Error
+        (Duplicate_payload_field Keeper_surface_post.delivery_target_wire_key)
+  in
   let visible_reply =
     strip_keeper_visible_reply reply_raw |> redact_text |> String.trim
   in
@@ -1028,6 +1109,7 @@ let canonical_reply_payload_of_body ~redact_text body =
     { payload_json
     ; turn_outcome
     ; turn_ref
+    ; external_effect_target
     ; visible_reply
     ; poll_body = Yojson.Safe.to_string payload_json
     }
@@ -1052,7 +1134,7 @@ let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt v
        ^ Keeper_turn_outcome.decode_error_to_string error)
   | Ok turn_outcome ->
     (match
-       turn_outcome, String_util.trim_to_option visible_reply, has_visible_blocks
+       turn_outcome, String_util.trim_nonempty visible_reply, has_visible_blocks
      with
      | Keeper_turn_outcome.Continuation_checkpoint, _, _ -> None
      | Keeper_turn_outcome.External_effect_completed, _, _ -> None
@@ -1101,8 +1183,6 @@ type keeper_stream_terminal_status =
   | Stream_reconciliation_required
 
 type keeper_request_terminal_status =
-  | Request_deferred
-  | Request_queued
   | Request_stream of keeper_stream_terminal_status
 
 let keeper_stream_terminal_status_to_string = function
@@ -1114,53 +1194,19 @@ let keeper_stream_terminal_status_to_string = function
 ;;
 
 let keeper_request_terminal_status_to_string = function
-  | Request_deferred -> "deferred"
-  | Request_queued -> "queued"
   | Request_stream status -> keeper_stream_terminal_status_to_string status
 ;;
 
-let keeper_request_terminal_status_ok = function
-  | Request_deferred
-  | Request_queued
-  | Request_stream (Stream_done | Stream_reconciliation_required) ->
-    true
-  | Request_stream (Stream_error | Stream_cancelled | Stream_rejected) ->
-    false
-;;
-
 let keeper_request_terminal_status_is_routine = function
-  | Request_deferred
-  | Request_queued
   | Request_stream (Stream_done | Stream_cancelled | Stream_reconciliation_required) ->
     true
   | Request_stream (Stream_error | Stream_rejected) -> false
 ;;
 
-let keeper_request_terminal_payload ?request_id ~keeper_name ~status
-    ?(message = "") () =
-  let status_label = keeper_request_terminal_status_to_string status in
-  let fields =
-    [ ("keeper_name", `String keeper_name)
-    ; ("status", `String status_label)
-    ; ("ok", `Bool (keeper_request_terminal_status_ok status))
-    ]
-  in
-  let fields =
-    match request_id with
-    | Some request_id -> ("request_id", `String request_id) :: fields
-    | None -> fields
-  in
-  let fields =
-    if String.trim message = "" then fields
-    else ("message", `String message) :: fields
-  in
-  `Assoc fields
-
 type keeper_stream_worker_event =
-  | Stream_event of Agent_sdk.Types.sse_event
+  | Stream_event of Agent_core.Types.sse_event
+  | Stream_chat_event of Keeper_chat_events.keeper_chat_event
   | Stream_client_disconnected
-  | Stream_dashboard_queued of dashboard_deferred_chat
-  | Stream_queued_turn_deferred of Keeper_turn_admission.rejection
   | Stream_terminal of
       { status : keeper_stream_terminal_status
       ; body : string
@@ -1168,8 +1214,6 @@ type keeper_stream_worker_event =
       }
 
 and keeper_stream_completion =
-  | Completion_dashboard_queued of dashboard_deferred_chat
-  | Completion_queued_turn_deferred of Keeper_turn_admission.rejection
   | Completion_terminal of
       { status : keeper_stream_terminal_status
       ; body : string
@@ -1190,157 +1234,19 @@ and queued_turn_outcome =
       { kind : queued_turn_failure_kind
       ; detail : string
       }
-  | Deferred of { rejection : Keeper_turn_admission.rejection }
 
 type turn_submission =
-  | Direct_request
-  | Queued_receipt of
-      { receipt_ids : Keeper_chat_delivery_identity.Receipt_ids.t
-      ; claim : unit -> (unit, string) result
+  | Owner_operation of
+      { operation_id : Keeper_owner.Chat_operation.Operation_id.t
+      ; admission_token : Keeper_turn_dispatch_authority.token
       ; execution_sw : Eio.Switch.t
+      ; surface : Surface_ref.t
+      ; speaker : Keeper_chat_store.speaker
+      ; conversation_id : string option
+      ; external_message_id : string option
+      ; workspace_id : string option
+      ; extra_mentions : Keeper_identity.Keeper_id.t list
       }
-
-let completion_of_worker_settlement ~queued_turn ~staged_completion
-    (settlement : Keeper_msg_async.worker_settlement) =
-  let queued_failure kind detail =
-    if queued_turn then Some (Failed { kind; detail }) else None
-  in
-  match settlement with
-  | Keeper_msg_async.Settlement_projection_error { poll_result; _ } ->
-    let body =
-      match poll_result with
-      | Keeper_msg_async.Unreadable reason -> reason
-      | Keeper_msg_async.Absent ->
-        "keeper request terminal projection is absent from canonical storage"
-      | Keeper_msg_async.Rejected rejection ->
-        Keeper_msg_async.access_rejection_to_json rejection
-        |> Yojson.Safe.to_string
-      | Keeper_msg_async.Found entry ->
-        Printf.sprintf
-          "keeper request integrity projection is non-terminal (status=%s)"
-          (Keeper_msg_async.status_to_string entry.status)
-    in
-    Some
-      (Completion_terminal
-         { status = Stream_error
-         ; body
-         ; queued_outcome = queued_failure Transcript_persist_failed body
-         })
-  | Keeper_msg_async.Status_settlement { entry; durability; origin } ->
-    let status = entry.Keeper_msg_async.status in
-    (match durability, origin, status with
-     | Keeper_msg_async.Volatile_persistence_failure, _, _ ->
-       let body =
-         Printf.sprintf
-           "keeper request terminal state is not durable (status=%s)"
-           (Keeper_msg_async.status_to_string status)
-       in
-       Some
-         (Completion_terminal
-            { status = Stream_error
-            ; body
-            ; queued_outcome = queued_failure Transcript_persist_failed body
-            })
-     | ( Keeper_msg_async.Durable
-       , Keeper_msg_async.Transition_commit
-       , Keeper_msg_async.Done { ok; body; _ } ) ->
-       (match staged_completion with
-        | Some completion -> Some completion
-        | None ->
-          let stream_status = if ok then Stream_done else Stream_error in
-          Some
-            (Completion_terminal
-               { status = stream_status
-               ; body
-               ; queued_outcome =
-                   (if ok then None else queued_failure Turn_failed body)
-               }))
-     | ( Keeper_msg_async.Durable
-       , Keeper_msg_async.Canonical_reconciliation
-       , Keeper_msg_async.Done { ok; body; _ } ) ->
-       let stream_status = if ok then Stream_done else Stream_error in
-       Some
-         (Completion_terminal
-            { status = stream_status
-            ; body
-            ; queued_outcome =
-                (if ok then None else queued_failure Turn_failed body)
-            })
-     | ( Keeper_msg_async.Durable
-       , Keeper_msg_async.Transition_commit
-       , Keeper_msg_async.Cancelled { reason; cancelled_by } ) ->
-       (match staged_completion with
-        | Some
-            ((Completion_terminal
-                { status = (Stream_cancelled | Stream_error); _ }) as completion) ->
-          Some completion
-        | Some _ | None ->
-          let body = Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by in
-          Some
-            (Completion_terminal
-               { status = Stream_cancelled
-               ; body
-               ; queued_outcome = queued_failure Turn_cancelled body
-               }))
-     | ( Keeper_msg_async.Durable
-       , Keeper_msg_async.Canonical_reconciliation
-       , Keeper_msg_async.Cancelled { reason; cancelled_by } ) ->
-       let body = Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by in
-       Some
-         (Completion_terminal
-            { status = Stream_cancelled
-            ; body
-            ; queued_outcome = queued_failure Turn_cancelled body
-            })
-     | ( Keeper_msg_async.Durable
-       , _
-       , Keeper_msg_async.Persistence_failed { attempted_status; reason } ) ->
-       let body =
-         Printf.sprintf
-           "keeper request terminal persistence failed (attempted_status=%s): %s"
-           attempted_status
-           reason
-       in
-       Some
-         (Completion_terminal
-            { status = Stream_error
-            ; body
-            ; queued_outcome = queued_failure Transcript_persist_failed body
-            })
-     | Keeper_msg_async.Durable, _, Keeper_msg_async.Lost { reason } ->
-       Some
-         (Completion_terminal
-            { status = Stream_rejected
-            ; body = reason
-            ; queued_outcome = queued_failure Turn_failed reason
-            })
-     | Keeper_msg_async.Durable, _, Keeper_msg_async.Queued
-     | Keeper_msg_async.Durable, _, Keeper_msg_async.Running
-     | Keeper_msg_async.Durable, _, Keeper_msg_async.Cancelling _ ->
-       None)
-
-let admission_rejection_to_json
-    ({ Keeper_turn_admission.waiting
-     ; in_flight
-     ; shutdown_operation_id
-     } : Keeper_turn_admission.rejection) =
-  let in_flight_fields =
-    match in_flight with
-    | None -> []
-    | Some { Keeper_turn_admission.lane; started_at } ->
-        [ ("in_flight_lane", `String (Keeper_turn_admission.lane_to_string lane))
-        ; ("in_flight_started_at", `Float started_at)
-        ]
-  in
-  `Assoc
-    ([ ("waiting", `Int waiting)
-     ; ( "shutdown_operation_id"
-       , match shutdown_operation_id with
-         | None -> `Null
-         | Some operation_id ->
-           `String (Keeper_shutdown_types.Operation_id.to_string operation_id) )
-     ]
-     @ in_flight_fields)
 
 let queued_turn_failure_kind_to_string = function
   | Turn_failed -> "turn_failed"
@@ -1349,6 +1255,15 @@ let queued_turn_failure_kind_to_string = function
   | Missing_turn_ref -> "missing_turn_ref"
   | Transcript_persist_failed -> "transcript_persist_failed"
   | Stream_projection_failed -> "stream_projection_failed"
+
+(* Total mapping into the closed operation-ledger vocabulary; the queued kind's
+   full name still travels in the failure detail. *)
+let chat_operation_failure_kind_of_queued = function
+  | Turn_failed -> Keeper_chat_operation.Turn_exception
+  | Turn_cancelled -> Keeper_chat_operation.Turn_cancelled
+  | No_visible_reply | Missing_turn_ref -> Keeper_chat_operation.Turn_invariant
+  | Transcript_persist_failed | Stream_projection_failed ->
+    Keeper_chat_operation.Delivery_failed
 
 let queued_delivery_outcome_of_turn_ref = function
   | Some turn_ref ->
@@ -1360,33 +1275,27 @@ let queued_delivery_outcome_of_turn_ref = function
             "queued turn persisted a reply but the reply payload had no valid turn_ref"
         }
 
-let committed_delivery_outcome ~queued_turn ~turn_ref = function
+let committed_delivery_outcome ~turn_ref = function
   | Error persist_error -> Error persist_error
-  | Ok () ->
-      Ok
-        (if queued_turn
-         then Some (queued_delivery_outcome_of_turn_ref turn_ref)
-         else None)
+  | Ok () -> Ok (queued_delivery_outcome_of_turn_ref turn_ref)
 
-let empty_reply_delivery_plan ~queued_turn ~has_visible_blocks ~has_tool_calls =
+let empty_reply_delivery_plan ~has_visible_blocks ~has_tool_calls =
   if has_visible_blocks
   then `Visible_blocks
   else if has_tool_calls
   then `Tool_calls_only
-  else if queued_turn
-  then `Failure
-  else `User_only
+  else `Failure
 
-type keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.state
+type keeper_stream_bridge_state = Keeper_chat_agent_core_stream_bridge.state
 
 type translated_keeper_stream_event =
-  Keeper_chat_oas_stream_bridge.translated_event =
+  Keeper_chat_agent_core_stream_bridge.translated_event =
   { bridge_state : keeper_stream_bridge_state
   ; chat_events : Keeper_chat_events.keeper_chat_event list
   }
 
-let empty_keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.empty_state
-let translate_oas_stream_event = Keeper_chat_oas_stream_bridge.translate
+let empty_keeper_stream_bridge_state () = Keeper_chat_agent_core_stream_bridge.empty_state ()
+let translate_agent_core_stream_event = Keeper_chat_agent_core_stream_bridge.translate
 
 (* [user_row_origin] and [submission] are required labelled arguments. Every
    caller presents the typed transcript provenance and execution ownership
@@ -1395,27 +1304,13 @@ let translate_oas_stream_event = Keeper_chat_oas_stream_bridge.translate
 let process_single_turn ~user_row_origin ~submission
     ~state ~clock ~auth_token ~thread_id ~continuation_channel ~closed
     ~client_disconnects
-    ~payload ~run_id ~message_id ~agent_name ~submitted_by
+    ~payload ~run_id ~message_id ~agent_name
     ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t) =
-  let queued_turn =
-    match submission with
-    | Direct_request -> false
-    | Queued_receipt _ -> true
-  in
   let base_path = (Mcp_server.workspace_config state).base_path in
-  let direct_delivery_checkpoint : Keeper_chat_direct_delivery.t option ref =
-    ref None
-  in
-  let queue_claim_failure = ref None in
-  let queue_claim_committed = ref false in
-  let queued_turn_not_started () =
-    queued_turn && not !queue_claim_committed
-  in
   let redaction =
     Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
   in
   let redact_text = Keeper_secret_redaction.redact_text redaction in
-  let redact_json = Keeper_secret_redaction.redact_json redaction in
   Keeper_chat_events.publish events
     (Run_started { run_id; thread_id });
   Keeper_chat_events.publish events
@@ -1435,10 +1330,10 @@ let process_single_turn ~user_row_origin ~submission
     ]
   in
   let direct_message = direct_message_of_request payload in
-  (* Stream model text deltas live with per-delta redaction. The typed OAS
+  (* Stream model text deltas live with per-delta redaction. The typed AGENT_CORE
      bridge owns per-provider-message state so only the final provider
      message controls terminal resend suppression; canonical terminal content
-     always comes from the assembled OAS response carried by [body]. *)
+     always comes from the assembled AGENT_CORE response carried by [body]. *)
   let worker_events = Eio.Stream.create worker_events_buffer_size in
   let worker_completion, worker_completion_resolver = Eio.Promise.create () in
   let client_disconnect, client_disconnect_resolver = Eio.Promise.create () in
@@ -1465,81 +1360,6 @@ let process_single_turn ~user_row_origin ~submission
     Eio.Mutex.use_rw ~protect:true terminal_delivery_mu (fun () ->
       if not (Atomic.get terminal_pushed) then staged_completion := Some completion)
   in
-  let report_direct_checkpoint_error ~operation checkpoint detail =
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string LifecycleCallbackFailures)
-      ~labels:[ "callback", "keeper_chat_direct_delivery"; "operation", operation ]
-      ();
-    Log.Keeper.error
-      "keeper_stream: direct checkpoint %s failed keeper=%s request_id=%s phase=%s error=%s"
-      operation
-      checkpoint.Keeper_chat_direct_delivery.payload.keeper_name
-      (Keeper_chat_direct_delivery.Request_id.to_string checkpoint.request_id)
-      (Keeper_chat_direct_delivery.phase_kind_to_string
-         (Keeper_chat_direct_delivery.phase_kind checkpoint.phase))
-      detail
-  in
-  let cleanup_direct_checkpoint () =
-    match !direct_delivery_checkpoint with
-    | None -> ()
-    | Some checkpoint ->
-      (match checkpoint.Keeper_chat_direct_delivery.phase with
-       | Keeper_chat_direct_delivery.Transcript_committed _ ->
-         (match
-            Keeper_chat_direct_delivery.observe_async_terminal
-              ~base_path
-              ~identity:checkpoint
-          with
-          | Error error ->
-            report_direct_checkpoint_error
-              ~operation:"observe_async_terminal"
-              checkpoint
-              (Keeper_chat_direct_delivery.error_to_string error)
-          | Ok proof ->
-            (match
-               Keeper_chat_direct_delivery.remove_after_async_terminal
-                 ~base_path
-                 ~identity:checkpoint
-                 ~proof
-             with
-             | Ok () -> direct_delivery_checkpoint := None
-             | Error error ->
-               report_direct_checkpoint_error
-                 ~operation:"remove_after_async_terminal"
-                 checkpoint
-                 (Keeper_chat_direct_delivery.error_to_string error)))
-       | ( Keeper_chat_direct_delivery.Prepared
-         | Keeper_chat_direct_delivery.User_row_committed _
-         | Keeper_chat_direct_delivery.Running _
-         | Keeper_chat_direct_delivery.Effect_staged _ ) ->
-         report_direct_checkpoint_error
-           ~operation:"terminal_before_transcript_commit"
-           checkpoint
-           "canonical request terminal committed while its direct transcript checkpoint remains incomplete")
-  in
-  let publish_committed_completion
-      (settlement : Keeper_msg_async.worker_settlement) =
-    cleanup_direct_checkpoint ();
-    let completion =
-      completion_of_worker_settlement
-        ~queued_turn
-        ~staged_completion:!staged_completion
-        settlement
-    in
-    match completion with
-    | Some completion -> publish_completion completion
-    | None ->
-      let status =
-        match settlement with
-        | Keeper_msg_async.Status_settlement { entry; _ } ->
-          Keeper_msg_async.status_to_string entry.status
-        | Keeper_msg_async.Settlement_projection_error _ -> "projection_error"
-      in
-      Log.Keeper.error
-        "keeper_stream: worker settlement callback received non-terminal status keeper=%s status=%s"
-        payload.name
-        status
-  in
   let await_projection_cutoff () =
     let cutoff =
       Eio.Fiber.first
@@ -1564,10 +1384,6 @@ let process_single_turn ~user_row_origin ~submission
   in
   let push_worker_event event =
     match event with
-    | Stream_dashboard_queued queued ->
-        stage_completion (Completion_dashboard_queued queued)
-    | Stream_queued_turn_deferred rejection ->
-        stage_completion (Completion_queued_turn_deferred rejection)
     | Stream_terminal { status; body; queued_outcome } ->
         stage_completion
           (Completion_terminal { status; body; queued_outcome })
@@ -1575,7 +1391,7 @@ let process_single_turn ~user_row_origin ~submission
       Atomic.set client_disconnected true;
       let (_ : bool) = Eio.Promise.try_resolve client_disconnect_resolver () in
       ()
-    | Stream_event stream_event ->
+    | (Stream_event _ | Stream_chat_event _) as event ->
         if !closed
         then observe_stream_event_cutoff "writer_closed"
         else if Atomic.get terminal_pushed
@@ -1591,7 +1407,7 @@ let process_single_turn ~user_row_origin ~submission
                 | `Terminal, _ | _, `Terminal -> `Terminal
                 | `Client_disconnected, `Client_disconnected -> `Client_disconnected)
               (fun () ->
-                 Eio.Stream.add worker_events stream_event;
+                 Eio.Stream.add worker_events event;
                  `Added)
               await_projection_cutoff
           with
@@ -1602,38 +1418,43 @@ let process_single_turn ~user_row_origin ~submission
   in
   (* RFC-0232 P5: the typed surface is the write-side truth; the label
      [chat_source] is its derivation, used for broadcast metadata. *)
-  let chat_surface = chat_surface_of_request payload in
+  let chat_surface =
+    match submission with
+    | Owner_operation { surface; _ } -> surface
+  in
   let chat_source = Surface_ref.lane_label chat_surface in
   (* RFC-0223 P1: authority derives from the arrival route. A non-empty
      [channel_user_id] means an arbitrary external person on that channel;
      a channel label without a user id (e.g. dashboard Copilot Dock) is
      still an authenticated dashboard operator, so it keeps Owner authority
      while recording the Gate surface label. *)
-  let chat_speaker : Keeper_chat_store.speaker = chat_speaker_of_request payload in
-  let dashboard_direct_stream =
-    (not queued_turn)
-    && (match user_row_origin with
-        | Keeper_chat_store.Needs_append -> true
-        | Keeper_chat_store.Already_persisted _
-        | Keeper_chat_store.Already_persisted_upstream -> false)
-    && not (has_external_speaker payload)
+  let chat_speaker : Keeper_chat_store.speaker =
+    match submission with
+    | Owner_operation { speaker; _ } -> speaker
   in
-  let direct_delivery_error error =
-    Keeper_chat_direct_delivery.error_to_string error
+  let operation_delivery_coordinates =
+    match submission with
+    | Owner_operation { conversation_id; external_message_id; workspace_id; _ } ->
+      conversation_id, external_message_id, workspace_id
   in
-  let set_direct_delivery_checkpoint checkpoint =
-    direct_delivery_checkpoint := Some checkpoint
+  let operation_extra_mentions =
+    match submission with
+    | Owner_operation { extra_mentions; _ } -> extra_mentions
   in
   let queue_delivery_key () =
     match submission with
-    | Queued_receipt { receipt_ids; _ } ->
-      Ok (Keeper_chat_delivery_identity.Queue_receipts receipt_ids)
-    | Direct_request ->
-      Error "non-queued Keeper turn requested queue delivery identity"
+    | Owner_operation { operation_id; _ } ->
+      Keeper_chat_delivery_identity.Request_id.of_string
+        (Keeper_owner.Chat_operation.Operation_id.to_string operation_id)
+      |> Result.map (fun operation_id ->
+        Keeper_chat_delivery_identity.Operation operation_id)
   in
   let append_queued_user_row_once () =
     let ( let* ) = Result.bind in
     let* delivery_key = queue_delivery_key () in
+    let conversation_id, external_message_id, workspace_id =
+      operation_delivery_coordinates
+    in
     match user_row_origin with
     | Keeper_chat_store.Needs_append ->
       Keeper_chat_store.append_user_message_once
@@ -1644,6 +1465,10 @@ let process_single_turn ~user_row_origin ~submission
         ~attachments:payload.attachments
         ~surface:chat_surface
         ~speaker:chat_speaker
+        ?conversation_id
+        ?external_message_id
+        ?workspace_id
+        ~extra_mentions:operation_extra_mentions
         ()
       |> Result.map (fun _ -> ())
     | Keeper_chat_store.Already_persisted _
@@ -1653,6 +1478,7 @@ let process_single_turn ~user_row_origin ~submission
   let append_queued_assistant_once ~content ?(tool_calls = []) ?blocks ?turn_ref () =
     let ( let* ) = Result.bind in
     let* delivery_key = queue_delivery_key () in
+    let conversation_id, _, _ = operation_delivery_coordinates in
     Keeper_chat_store.append_assistant_message_once
       ~base_dir:base_path
       ~keeper_name:payload.name
@@ -1660,6 +1486,7 @@ let process_single_turn ~user_row_origin ~submission
       ~content
       ~tool_calls
       ~surface:chat_surface
+      ?conversation_id
       ?blocks
       ?turn_ref
       ~stream_lifecycle:completed_stream_lifecycle
@@ -1669,6 +1496,7 @@ let process_single_turn ~user_row_origin ~submission
   let append_queued_transport_failure_once ?(tool_calls = []) ?blocks ?turn_ref content =
     let ( let* ) = Result.bind in
     let* delivery_key = queue_delivery_key () in
+    let conversation_id, _, _ = operation_delivery_coordinates in
     Keeper_chat_store.append_assistant_message_once
       ~base_dir:base_path
       ~keeper_name:payload.name
@@ -1676,6 +1504,7 @@ let process_single_turn ~user_row_origin ~submission
       ~content
       ~tool_calls
       ~surface:chat_surface
+      ?conversation_id
       ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
       ?blocks
       ?turn_ref
@@ -1686,122 +1515,17 @@ let process_single_turn ~user_row_origin ~submission
   let append_queued_tool_calls_once ?turn_ref tool_calls =
     let ( let* ) = Result.bind in
     let* delivery_key = queue_delivery_key () in
+    let conversation_id, _, _ = operation_delivery_coordinates in
     Keeper_chat_store.append_tool_calls_once
       ~base_dir:base_path
       ~keeper_name:payload.name
       ~delivery_key
       ~tool_calls
       ~surface:chat_surface
+      ?conversation_id
       ?turn_ref
       ()
     |> Result.map (fun _ -> ())
-  in
-  let on_direct_request_accepted request_id =
-    let ( let* ) = Result.bind in
-    let* request_id =
-      Keeper_chat_delivery_identity.Request_id.of_string request_id
-    in
-    let accepted_payload : Keeper_chat_direct_delivery.accepted_payload =
-      { keeper_name = payload.name
-      ; submitted_by
-      ; user_content = payload.message
-      ; user_attachments = payload.attachments
-      ; surface = chat_surface
-      ; conversation_id = None
-      ; external_message_id = None
-      ; speaker = chat_speaker
-      }
-    in
-    let* prepared =
-      Keeper_chat_direct_delivery.prepare
-        ~base_path
-        ~request_id
-        ~payload:accepted_payload
-        ~now:(Time_compat.now ())
-      |> Result.map_error direct_delivery_error
-    in
-    set_direct_delivery_checkpoint prepared;
-    let* user_committed =
-      Keeper_chat_direct_delivery.commit_user_row
-        ~base_path
-        ~identity:prepared
-        ~now:(Time_compat.now ())
-      |> Result.map_error direct_delivery_error
-    in
-    set_direct_delivery_checkpoint user_committed;
-    let* running =
-      Keeper_chat_direct_delivery.mark_running
-        ~base_path
-        ~identity:user_committed
-        ~now:(Time_compat.now ())
-      |> Result.map_error direct_delivery_error
-    in
-    set_direct_delivery_checkpoint running;
-    Ok ()
-  in
-  let direct_user_row_origin () =
-    match !direct_delivery_checkpoint with
-    | Some
-        { Keeper_chat_direct_delivery.phase =
-            Keeper_chat_direct_delivery.Running { user_row_id }
-        ; _
-        } ->
-      Ok (Keeper_chat_store.Already_persisted { row_id = user_row_id })
-    | Some checkpoint ->
-      Error
-        (Printf.sprintf
-           "direct Keeper delivery cannot hand off to the queue from phase=%s"
-           (Keeper_chat_direct_delivery.phase_kind_to_string
-              (Keeper_chat_direct_delivery.phase_kind checkpoint.phase)))
-    | None -> Error "direct Keeper delivery checkpoint is unavailable"
-  in
-  let on_queue_turn_admitted () =
-    let ( let* ) = Result.bind in
-    let* () =
-      match submission with
-      | Queued_receipt { claim; _ } ->
-        (match claim () with
-         | Ok () ->
-           queue_claim_committed := true;
-           Ok ()
-         | Error detail ->
-           queue_claim_failure := Some detail;
-           Error detail)
-      | Direct_request ->
-        let detail =
-          "direct Keeper turn reached the queued receipt claim boundary"
-        in
-        queue_claim_failure := Some detail;
-        Error detail
-    in
-    append_queued_user_row_once ()
-  in
-  let commit_direct_terminal ~ok ~body ~data transcript_effect =
-    let ( let* ) = Result.bind in
-    match !direct_delivery_checkpoint with
-    | None -> Error "direct Keeper delivery checkpoint is unavailable"
-    | Some checkpoint ->
-      let* staged =
-        Keeper_chat_direct_delivery.stage_effect
-          ~base_path
-          ~identity:checkpoint
-          ~staged:
-            { Keeper_chat_direct_delivery.request_result = { ok; body; data }
-            ; transcript_effect
-            }
-          ~now:(Time_compat.now ())
-        |> Result.map_error direct_delivery_error
-      in
-      set_direct_delivery_checkpoint staged;
-      let* committed =
-        Keeper_chat_direct_delivery.commit_transcript
-          ~base_path
-          ~identity:staged
-          ~now:(Time_compat.now ())
-        |> Result.map_error direct_delivery_error
-      in
-      set_direct_delivery_checkpoint committed;
-      Ok ()
   in
   (* RFC-0301 item 6: collect generated media from the same stream so the assistant
      turn can persist it as reload-visible chat blocks. The bridge surfaces this
@@ -1818,6 +1542,22 @@ let process_single_turn ~user_row_origin ~submission
     Keeper_stream_tool_accum.on_event worker_tool_accum evt;
     push_worker_event (Stream_event evt)
   in
+  let on_tool_result_ready ~tool_call_id =
+    push_worker_event
+      (Stream_chat_event (Keeper_chat_events.Tool_result_ready { tool_call_id }))
+  in
+  (* A gate only for turns an operator started here: this request is open,
+     someone is reading it, and the answer has somewhere to come back to. An
+     autonomous cycle gets none -- nobody is watching it, so every call it
+     made would wait out the timeout and then be denied. *)
+  let approval_gate =
+    Keeper_tool_approval_gate.create
+      ~registry:(Keeper_tool_approval_registry.shared ())
+      ~publish:(fun event -> push_worker_event (Stream_chat_event event))
+      ~clock
+      ~keeper_name:payload.name
+      ~timeout_sec:keeper_tool_approval_timeout_sec
+  in
   let accumulated_media_blocks () =
     match
       Keeper_stream_media_accum.to_chat_blocks ~base_dir:base_path
@@ -1825,24 +1565,6 @@ let process_single_turn ~user_row_origin ~submission
     with
     | [] -> None
     | media_blocks -> Some media_blocks
-  in
-  let persist_user_message_only () =
-    if Option.is_some !direct_delivery_checkpoint || queued_turn
-    then ()
-    else
-      match user_row_origin with
-      | Keeper_chat_store.Needs_append ->
-        Keeper_chat_store.append_user_message
-          ~base_dir:base_path
-          ~keeper_name:payload.name
-          ~content:payload.message
-          ~attachments:payload.attachments
-          ~surface:chat_surface
-          ~speaker:chat_speaker
-          ()
-      | Keeper_chat_store.Already_persisted _
-      | Keeper_chat_store.Already_persisted_upstream ->
-        ()
   in
   let persist_failure_reply ?blocks ?turn_ref err =
     (* The failure marker is typed, not an utterance: it renders for the
@@ -1863,46 +1585,7 @@ let process_single_turn ~user_row_origin ~submission
     let content = persisted_error_reply err in
     let tool_calls = Keeper_stream_tool_accum.to_tool_calls worker_tool_accum in
     let persisted =
-      if Option.is_some !direct_delivery_checkpoint
-      then
-        commit_direct_terminal
-          ~ok:false
-          ~body:err
-          ~data:None
-          (Keeper_chat_direct_delivery.Transport_failure
-             { content; blocks; turn_ref; tool_calls })
-      else if queued_turn
-      then append_queued_transport_failure_once ~tool_calls ?blocks ?turn_ref content
-      else
-        match user_row_origin with
-        | Keeper_chat_store.Needs_append ->
-          Keeper_chat_store.append_turn_result
-            ~base_dir:base_path
-            ~keeper_name:payload.name
-            ~user_content:payload.message
-            ~user_attachments:payload.attachments
-            ~surface:chat_surface
-            ~speaker:chat_speaker
-            ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
-            ~tool_calls
-            ~assistant_content:content
-            ?blocks
-            ?turn_ref
-            ~stream_lifecycle:errored_stream_lifecycle
-            ()
-        | Keeper_chat_store.Already_persisted _
-        | Keeper_chat_store.Already_persisted_upstream ->
-          Keeper_chat_store.append_assistant_message_result
-            ~base_dir:base_path
-            ~keeper_name:payload.name
-            ~content
-            ~tool_calls
-            ~surface:chat_surface
-            ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
-            ?blocks
-            ?turn_ref
-            ~stream_lifecycle:errored_stream_lifecycle
-            ()
+      append_queued_transport_failure_once ~tool_calls ?blocks ?turn_ref content
     in
     Result.iter
       (fun () ->
@@ -1913,111 +1596,81 @@ let process_single_turn ~user_row_origin ~submission
       persisted;
     persisted
   in
-  (* masc#23924: [f] below pushes its own [Stream_terminal] once it reaches a
-     completion arm, but cancellation cuts [f] off before any of
-     those arms run — nothing would ever push to [worker_events], and
-     [consume_worker_events]'s [Eio.Stream.take] would block forever.
-     [on_worker_aborted] fires from Keeper_msg_async.submit's own catch
-     sites (never inside the cancelled [f]) so this turn still gets exactly
-     one terminal event via the same serialized [push_worker_event]. *)
-  let on_worker_aborted (reason : Keeper_msg_async.worker_abort_reason) =
-    let cancellation_status, cancellation_body, failure_kind =
-      match reason with
-      | Keeper_msg_async.Worker_cancelled { cancelled_by; reason } ->
-          let cancelled_by =
-            Keeper_msg_async.worker_cancel_source_to_string cancelled_by
-          in
-          ( Stream_cancelled
-          , Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by
-          , Turn_cancelled )
-    in
-    let persisted = persist_failure_reply cancellation_body in
-    let status, body =
-      match persisted with
-      | Ok () -> cancellation_status, cancellation_body
-      | Error persist_error ->
-          ( Stream_error
-          , Printf.sprintf
-              "keeper cancellation transcript persistence failed: %s"
-              persist_error )
-    in
-    let queued_outcome =
-      if not queued_turn then None
-      else
-        match persisted with
-        | Ok () -> Some (Failed { kind = failure_kind; detail = cancellation_body })
-        | Error persist_error ->
-            Some
-              (Failed
-                 { kind = Transcript_persist_failed
-                 ; detail = persist_error
-                 })
-    in
-    push_worker_event (Stream_terminal { status; body; queued_outcome });
-    persisted
-  in
   let run_turn request_sw =
     let start_time = Time_compat.now () in
         let finish_projection_failure kind detail =
           let persisted = persist_failure_reply detail in
           let queued_outcome =
-            if not queued_turn
-            then None
-            else
-              match persisted with
-              | Ok () -> Some (Failed { kind; detail })
-              | Error persist_error ->
-                Some
-                  (Failed
-                     { kind = Transcript_persist_failed
-                     ; detail = persist_error
-                     })
+            match persisted with
+            | Ok () -> Some (Failed { kind; detail })
+            | Error persist_error ->
+              Some
+                (Failed
+                   { kind = Transcript_persist_failed
+                   ; detail = persist_error
+                   })
           in
           push_worker_event
             (Stream_terminal
                { status = Stream_error; body = detail; queued_outcome });
-          Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail
+          Tool_result.error
+            ~failure_class:Tool_result.Runtime_failure
+            ~tool_name:"masc_keeper_msg"
+            ~start_time
+            detail
         in
-        let on_admitted =
-          if queued_turn then Some on_queue_turn_admitted else None
+        let admission_token =
+          match submission with
+          | Owner_operation { admission_token; _ } -> admission_token
+        in
+        let payload_identity =
+          let direct_target =
+            Keeper_invocation_contract.direct_message_target_name direct_message
+          in
+          if String.equal payload.name direct_target && String.trim payload.name <> ""
+          then Ok ()
+          else Error "Keeper chat payload identity does not match its direct message"
+        in
+        (* Whether a keeper can take a turn lives in the registry, not on
+           disk. [ensure_keeper_exists] downstream reads meta, which an
+           unregistered keeper still has, so the user row committed first and
+           the turn then failed on the registry miss — and the raw
+           [keeper_turn_resources_unavailable] payload was what the person saw
+           in their own chat, stored durably beside their message (#25529).
+           A missing process-local entry covers both the brief pre-autoboot
+           window and a stopped keeper, so the response names only that
+           observed fact and offers both retry and start. *)
+        let keeper_is_registered =
+          if Keeper_registry.is_registered ~base_path payload.name
+          then Ok ()
+          else
+            Error
+              (Printf.sprintf
+                 "keeper %s is not registered in this server process; retry shortly or start it before sending a message"
+                 payload.name)
+        in
+        let operation_prepare =
+          Result.bind keeper_is_registered (fun () ->
+            Result.bind payload_identity (fun () ->
+              append_queued_user_row_once ()))
         in
         let dispatch_result =
-          try
-            if dashboard_direct_stream then
-              match
-                execute_keeper_stream_tool_streaming_if_free ~sw:request_sw ~clock
-                  ?auth_token
-                  state ~agent_name ~message:direct_message ~on_event
-                  ~continuation_channel
-                  ~on_text_delta:(fun _ -> ())
-              with
-              | `Ran result -> Ok (`Ran result)
-              | `Busy rejection ->
-                  (match direct_user_row_origin () with
-                   | Error message -> Error message
-                   | Ok user_row_origin ->
-                     (match
-                        dashboard_deferred_chat_of_rejection
-                          ~clock
-                          ~thread_id
-                          ~user_row_origin
-                          payload
-                          rejection
-                      with
-                      | Ok queued -> Ok (`Queued queued)
-                      | Error message -> Error message))
-            else
-              (match
-                 execute_keeper_stream_tool_streaming
-                   ~sw:request_sw
-                   ~clock
-                   ?auth_token
-                   state ~agent_name ~message:direct_message ~on_event
-                   ~continuation_channel ~on_text_delta:(fun _ -> ())
-                   ?on_admitted
-               with
-               | `Ran result -> Ok (`Ran result)
-               | `Deferred rejection -> Ok (`Deferred rejection))
+          match operation_prepare with
+          | Error _ as error -> error
+          | Ok () ->
+           (try
+            let result =
+              execute_keeper_stream_tool_streaming
+                ~sw:request_sw
+                ~clock
+                ?auth_token
+                state ~agent_name ~message:direct_message ~on_event
+                ~on_tool_result_ready
+                ~approval_gate
+                ~continuation_channel ~on_text_delta:(fun _ -> ())
+                ~admission_token
+            in
+            match result with `Ran result -> Ok (`Ran result)
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
@@ -2031,63 +1684,10 @@ let process_single_turn ~user_row_origin ~submission
                  accumulator. Terminalize the original streaming attempt;
                  [persist_failure_reply] retains the calls and media it
                  actually emitted. *)
-              Error (Printexc.to_string exn)
+              Error (Printexc.to_string exn))
         in
-        match !queue_claim_failure, dispatch_result with
-        | Some detail, _ ->
-            (* The exact Pending receipt was not claimed. Close the local event
-               projection without emitting [Event_error]: connector adapters
-               treat an empty [Run_finished] as a failed no-op, so no outbound
-               message or transcript row can escape for a turn that never
-               started. The queue consumer retains the typed claim failure and
-               decides whether to re-observe or require reconciliation. *)
-            push_worker_event
-              (Stream_terminal
-                 { status = Stream_cancelled
-                 ; body = detail
-                 ; queued_outcome = None
-                 });
-            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail
-        | None, Ok (`Deferred rejection) ->
-            push_worker_event (Stream_queued_turn_deferred rejection);
-            Tool_result.make_ok
-              ~tool_name:"masc_keeper_msg"
-              ~start_time
-              ~data:
-                (`Assoc
-                   [ ("status", `String "deferred")
-                   ; ("admission", admission_rejection_to_json rejection)
-                   ])
-              ()
-        | None, Ok (`Queued queued) ->
-            let data =
-              dashboard_deferred_chat_to_json ~keeper_name:payload.name queued
-            in
-            let body = Yojson.Safe.to_string data in
-            let committed =
-              commit_direct_terminal
-                ~ok:true
-                ~body
-                ~data:(Some data)
-                Keeper_chat_direct_delivery.No_assistant_reply
-            in
-            (match committed with
-             | Ok () ->
-               push_worker_event (Stream_dashboard_queued queued);
-               Tool_result.make_ok
-                 ~tool_name:"masc_keeper_msg"
-                 ~start_time
-                 ~data
-                 ()
-             | Error detail ->
-               push_worker_event
-                 (Stream_terminal
-                    { status = Stream_error
-                    ; body = detail
-                    ; queued_outcome = None
-                    });
-               Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail)
-        | None, Ok (`Ran (true, body)) ->
+        match dispatch_result with
+        | Ok (`Ran ((Tool_result.Completed () | Tool_result.Deferred ()), body)) ->
           (match canonical_reply_payload_of_body ~redact_text body with
            | Error error ->
              let detail = canonical_reply_payload_error_to_string error in
@@ -2100,7 +1700,8 @@ let process_single_turn ~user_row_origin ~submission
                | Duplicate_payload_field _
                | Invalid_payload_field_type _
                | Unknown_turn_outcome
-               | Invalid_turn_ref -> detail
+               | Invalid_turn_ref
+               | Invalid_external_effect_target _ -> detail
              in
              Log.Keeper.error
                "keeper_stream: canonical terminal projection rejected keeper=%s error=%s"
@@ -2128,131 +1729,56 @@ let process_single_turn ~user_row_origin ~submission
              with
              | Some err ->
                  let queued_outcome =
-                   if not queued_turn then None
-                   else
-                     match persist_failure_reply ?turn_ref err with
-                     | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
-                     | Error persist_error ->
-                         Some
-                           (Failed
-                              { kind = Transcript_persist_failed
-                              ; detail = persist_error
-                              })
+                   match persist_failure_reply ?turn_ref err with
+                   | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
+                   | Error persist_error ->
+                     Some
+                       (Failed
+                          { kind = Transcript_persist_failed
+                          ; detail = persist_error
+                          })
                  in
-                 if not queued_turn
-                 then
-                   (match persist_failure_reply ?turn_ref err with
-                    | Ok () -> ()
-                    | Error persist_error ->
-                      Log.Keeper.error
-                        "keeper_stream: failed to persist direct-turn failure keeper=%s error=%s"
-                        payload.name
-                        persist_error);
                  push_worker_event
                    (Stream_terminal
                       { status = Stream_error
                       ; body = err
                       ; queued_outcome
                       });
-                 Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
+                 Tool_result.error
+                   ~failure_class:Tool_result.Runtime_failure
+                   ~tool_name:"masc_keeper_msg"
+                   ~start_time
+                   err
              | None ->
                  let tool_calls =
                    Keeper_stream_tool_accum.to_tool_calls worker_tool_accum
                  in
                  let persist_assistant_reply ~assistant_content =
-                   if Option.is_some !direct_delivery_checkpoint
-                   then
-                     commit_direct_terminal
-                       ~ok:true
-                       ~body
-                       ~data:payload_json_opt
-                       (Keeper_chat_direct_delivery.Assistant_reply
-                          { content = assistant_content; blocks; turn_ref; tool_calls })
-                   else if queued_turn
-                   then
-                     append_queued_assistant_once
-                       ~content:assistant_content
-                       ~tool_calls
-                       ?blocks
-                       ?turn_ref
-                       ()
-                   else
-                     match user_row_origin with
-                     | Keeper_chat_store.Needs_append ->
-                       Keeper_chat_store.append_turn_result
-                         ~base_dir:base_path
-                         ~keeper_name:payload.name
-                         ~user_content:payload.message
-                         ~user_attachments:payload.attachments
-                         ~tool_calls
-                         ~surface:chat_surface
-                         ~speaker:chat_speaker
-                         ~assistant_content
-                         ?blocks
-                         ?turn_ref
-                         ~stream_lifecycle:completed_stream_lifecycle
-                         ()
-                     | Keeper_chat_store.Already_persisted _
-                     | Keeper_chat_store.Already_persisted_upstream ->
-                       Keeper_chat_store.append_assistant_message_result
-                         ~base_dir:base_path
-                         ~keeper_name:payload.name
-                         ~content:assistant_content
-                         ~tool_calls
-                         ~surface:chat_surface
-                         ?blocks
-                         ?turn_ref
-                         ~stream_lifecycle:completed_stream_lifecycle
-                         ()
+                   append_queued_assistant_once
+                     ~content:assistant_content
+                     ~tool_calls
+                     ?blocks
+                     ?turn_ref
+                     ()
                  in
                  let persist_tool_calls_only () =
                    if tool_calls = []
                    then Ok ()
-                   else if Option.is_some !direct_delivery_checkpoint
-                   then
-                     commit_direct_terminal
-                       ~ok:true
-                       ~body
-                       ~data:payload_json_opt
-                       (Keeper_chat_direct_delivery.Tool_calls_only { tool_calls; turn_ref })
-                   else if queued_turn
-                   then append_queued_tool_calls_once ?turn_ref tool_calls
-                   else
-                     match user_row_origin with
-                     | Keeper_chat_store.Needs_append ->
-                       Keeper_chat_store.append_user_and_tool_calls_result
-                         ~base_dir:base_path
-                         ~keeper_name:payload.name
-                         ~user_content:payload.message
-                         ~user_attachments:payload.attachments
-                         ~tool_calls
-                         ~surface:chat_surface
-                         ~speaker:chat_speaker
-                         ?turn_ref
-                         ()
-                     | Keeper_chat_store.Already_persisted _
-                     | Keeper_chat_store.Already_persisted_upstream ->
-                       Keeper_chat_store.append_tool_calls_result
-                         ~base_dir:base_path
-                         ~keeper_name:payload.name
-                         ~tool_calls
-                         ~surface:chat_surface
-                         ?turn_ref
-                         ()
+                   else append_queued_tool_calls_once ?turn_ref tool_calls
                  in
                  let delivered_after_persist ?content persisted =
                    match
-                     committed_delivery_outcome ~queued_turn ~turn_ref persisted
+                     committed_delivery_outcome ~turn_ref persisted
                    with
                    | Ok queued_outcome ->
                        Keeper_chat_broadcast.chat_appended
                          ~keeper_name:payload.name ~source:chat_source ?content ();
-                       Ok queued_outcome
+                       Ok (Some queued_outcome)
                    | Error _ as error -> error
                  in
                  let turn_outcome = canonical_reply.turn_outcome in
                  let delivery_result =
-                   match turn_outcome, String_util.trim_to_option visible_reply with
+                   match turn_outcome, String_util.trim_nonempty visible_reply with
                    | Keeper_turn_outcome.Continuation_checkpoint, _ ->
                        (* [persisted_reply_blocks] always returns [Some _] for
                           [Continuation_checkpoint] (a typed status block), so
@@ -2270,8 +1796,7 @@ let process_single_turn ~user_row_origin ~submission
                          "no visible reply was produced for this queued message"
                        in
                        (match
-                          empty_reply_delivery_plan ~queued_turn
-                            ~has_visible_blocks
+                          empty_reply_delivery_plan ~has_visible_blocks
                             ~has_tool_calls:(tool_calls <> [])
                         with
                         | `Visible_blocks ->
@@ -2285,16 +1810,11 @@ let process_single_turn ~user_row_origin ~submission
                                  ~keeper_name:payload.name
                                  ~source:chat_source
                                  ();
-                               if queued_turn
-                               then Ok (Some (queued_delivery_outcome_of_turn_ref turn_ref))
-                               else Ok None)
+                               Ok (Some (queued_delivery_outcome_of_turn_ref turn_ref)))
                         | `Failure ->
                           persist_failure_reply ?turn_ref detail
                           |> Result.map (fun () ->
-                                 Some (Failed { kind = No_visible_reply; detail }))
-                        | `User_only ->
-                          persist_user_message_only ();
-                          Ok None)
+                                 Some (Failed { kind = No_visible_reply; detail })))
                    | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
                        persist_assistant_reply ~assistant_content:visible_reply
                        |> delivered_after_persist ~content:visible_reply
@@ -2306,12 +1826,9 @@ let process_single_turn ~user_row_origin ~submission
                               ~keeper_name:payload.name
                               ~source:chat_source
                               ();
-                            if queued_turn
-                            then
-                              Ok
-                                (Some
-                                   (queued_delivery_outcome_of_turn_ref turn_ref))
-                            else Ok None)
+                            Ok
+                              (Some
+                                 (queued_delivery_outcome_of_turn_ref turn_ref)))
                    | Keeper_turn_outcome.External_effect_pending, _ ->
                        persist_assistant_reply ~assistant_content:""
                        |> delivered_after_persist
@@ -2319,14 +1836,11 @@ let process_single_turn ~user_row_origin ~submission
                  (match delivery_result with
                   | Error persist_error ->
                       let queued_outcome =
-                        if queued_turn
-                        then
-                          Some
-                            (Failed
-                               { kind = Transcript_persist_failed
-                               ; detail = persist_error
-                               })
-                        else None
+                        Some
+                          (Failed
+                             { kind = Transcript_persist_failed
+                             ; detail = persist_error
+                             })
                       in
                       push_worker_event
                         (Stream_terminal
@@ -2335,6 +1849,7 @@ let process_single_turn ~user_row_origin ~submission
                            ; queued_outcome
                            });
                       Tool_result.error
+                        ~failure_class:Tool_result.Runtime_failure
                         ~tool_name:"masc_keeper_msg"
                         ~start_time
                         persist_error
@@ -2347,19 +1862,11 @@ let process_single_turn ~user_row_origin ~submission
                            ; body = detail
                            ; queued_outcome
                       });
-                      Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time detail
-                  | Some (Deferred { rejection }) ->
-                      push_worker_event (Stream_queued_turn_deferred rejection);
-                      Tool_result.make_ok
+                      Tool_result.error
+                        ~failure_class:Tool_result.Runtime_failure
                         ~tool_name:"masc_keeper_msg"
                         ~start_time
-                        ~data:
-                          (`Assoc
-                             [ ("status", `String "deferred")
-                             ; ( "admission"
-                               , admission_rejection_to_json rejection )
-                             ])
-                        ()
+                        detail
                   | Some (Delivered _) | None ->
                       push_worker_event
                         (Stream_terminal
@@ -2379,58 +1886,58 @@ let process_single_turn ~user_row_origin ~submission
                              ~tool_name:"masc_keeper_msg"
                              ~start_time
                              body)))))
-        | None, Ok (`Ran (false, err)) when queued_turn_not_started () ->
-            push_worker_event
-              (Stream_terminal
-                 { status = Stream_cancelled
-                 ; body = err
-                 ; queued_outcome = None
-                 });
-            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
-        | None, Ok (`Ran (false, err)) ->
+        | Ok (`Ran (Tool_result.Failed dispatch_failure_class, err)) ->
             let persisted = persist_failure_reply err in
             let queued_outcome =
-              if not queued_turn then None
-              else
-                match persisted with
-                | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
-                | Error persist_error ->
-                    Some
-                      (Failed
-                         { kind = Transcript_persist_failed
-                         ; detail = persist_error
-                         })
+              match persisted with
+              | Ok () ->
+                (* #28810 / #28868 review P0: the dispatch classifies an
+                   operator interrupt as [Operator_cancelled]; every other
+                   failure class stays a crash-shaped [Turn_failed]. *)
+                let kind =
+                  match dispatch_failure_class with
+                  | Tool_result.Operator_cancelled -> Turn_cancelled
+                  | Tool_result.Dependency_unavailable
+                  | Tool_result.Policy_rejection
+                  | Tool_result.Runtime_failure
+                  | Tool_result.Workflow_rejection -> Turn_failed
+                in
+                Some (Failed { kind; detail = err })
+              | Error persist_error ->
+                Some
+                  (Failed
+                     { kind = Transcript_persist_failed
+                     ; detail = persist_error
+                     })
             in
             push_worker_event
               (Stream_terminal
                  { status = Stream_error; body = err; queued_outcome });
-            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
-        | None, Error err when queued_turn_not_started () ->
-            push_worker_event
-              (Stream_terminal
-                 { status = Stream_cancelled
-                 ; body = err
-                 ; queued_outcome = None
-                 });
-            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
-        | None, Error err ->
+            Tool_result.error
+              ~failure_class:dispatch_failure_class
+              ~tool_name:"masc_keeper_msg"
+              ~start_time
+              err
+        | Error err ->
             let persisted = persist_failure_reply err in
             let queued_outcome =
-              if not queued_turn then None
-              else
-                match persisted with
-                | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
-                | Error persist_error ->
-                    Some
-                      (Failed
-                         { kind = Transcript_persist_failed
-                         ; detail = persist_error
-                         })
+              match persisted with
+              | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
+              | Error persist_error ->
+                Some
+                  (Failed
+                     { kind = Transcript_persist_failed
+                     ; detail = persist_error
+                     })
             in
             push_worker_event
               (Stream_terminal
                  { status = Stream_error; body = err; queued_outcome });
-            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
+            Tool_result.error
+              ~failure_class:Tool_result.Runtime_failure
+              ~tool_name:"masc_keeper_msg"
+              ~start_time
+              err
   in
   let publish_inline_completion () =
     match !staged_completion with
@@ -2441,119 +1948,63 @@ let process_single_turn ~user_row_origin ~submission
       in
       publish_completion
         (Completion_terminal
-           { status =
-               (if queued_turn_not_started ()
-                then Stream_cancelled
-                else Stream_error)
+           { status = Stream_error
            ; body = detail
-           ; queued_outcome =
-               (if queued_turn_not_started ()
-                then None
-                else Some (Failed { kind = Turn_failed; detail }))
+           ; queued_outcome = Some (Failed { kind = Turn_failed; detail })
            })
   in
-  let submit_result =
+  let request_id =
     match submission with
-    | Queued_receipt { execution_sw; _ } ->
+    | Owner_operation { execution_sw; operation_id; _ } ->
       (try
          Eio.Fiber.fork ~sw:execution_sw (fun () ->
            (match Eio.Switch.run (fun request_sw -> run_turn request_sw) with
             | _ -> publish_inline_completion ()
             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+            | exception exn when Keeper_registry_types.is_operator_interrupt exn ->
+              (* Typed operator cancellation (#28810): the interrupt fails
+                 the turn switch and the [Switch.run] boundary re-raises it
+                 here — bare or combined ([Multiple]/[Finally_raised],
+                 #28868 review). A cancelled turn, not a crash. *)
+              let detail = Keeper_registry_types.operator_interrupt_detail in
+              push_worker_event
+                (Stream_terminal
+                   { status = Stream_error
+                   ; body = detail
+                   ; queued_outcome = Some (Failed { kind = Turn_cancelled; detail })
+                   });
+              publish_inline_completion ()
             | exception exn ->
               let detail = Printexc.to_string exn in
               push_worker_event
                 (Stream_terminal
-                   { status =
-                       (if queued_turn_not_started ()
-                        then Stream_cancelled
-                        else Stream_error)
+                   { status = Stream_error
                    ; body = detail
-                   ; queued_outcome =
-                       (if queued_turn_not_started ()
-                        then None
-                        else Some (Failed { kind = Turn_failed; detail }))
+                   ; queued_outcome = Some (Failed { kind = Turn_failed; detail })
                    });
               publish_inline_completion ()));
-         Ok `Inline
+         Some (Keeper_owner.Chat_operation.Operation_id.to_string operation_id)
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn -> Error (Printexc.to_string exn))
-    | Direct_request ->
-      (match Keeper_msg_async.server_background_switch () with
-       | Error error ->
-         Error
-           (Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string)
-       | Ok background_sw ->
-         let on_accepted =
-           if dashboard_direct_stream
-           then Some on_direct_request_accepted
-           else None
+       | exn ->
+         let body = Printexc.to_string exn in
+         let queued_outcome =
+           match persist_failure_reply body with
+           | Ok () -> Some (Failed { kind = Turn_failed; detail = body })
+           | Error persist_error ->
+             Some
+               (Failed
+                  { kind = Transcript_persist_failed
+                  ; detail = persist_error
+                  })
          in
-         Keeper_msg_async.submit
-           ?on_accepted
-           ~background_sw
-           ~on_worker_aborted
-           ~on_worker_settled:publish_committed_completion
-           ~base_path
-           ~caller:submitted_by
-           ~keeper_name:payload.name
-           ~f:run_turn
-           ()
-         |> Result.map (fun outcome -> `Async outcome)
-         |> Result.map_error (fun error ->
-           Keeper_msg_async.submit_error_to_json error |> Yojson.Safe.to_string))
-  in
-  let request_id, durably_accepted =
-    match submit_result with
-    | Ok `Inline -> None, false
-    | Ok
-        (`Async
-        ({ acceptance = Keeper_msg_async.Durably_accepted; request_id }
-          : Keeper_msg_async.submit_outcome)) ->
-        Some request_id, true
-    | Ok
-        (`Async
-          ({ acceptance = Keeper_msg_async.Reconciliation_required _; _ } as
-            outcome)) ->
-        let body =
-          Keeper_msg_async.submit_outcome_to_json outcome |> Yojson.Safe.to_string
-        in
-        publish_completion
-          (Completion_terminal
-             { status = Stream_reconciliation_required
-             ; body
-             ; queued_outcome = None
-             });
-        Some outcome.request_id, false
-    | Error body ->
-        let queued_outcome =
-          if queued_turn_not_started ()
-          then None
-          else
-            let persisted = persist_failure_reply body in
-            if not queued_turn
-            then None
-            else
-              match persisted with
-              | Ok () -> Some (Failed { kind = Turn_failed; detail = body })
-              | Error persist_error ->
-                  Some
-                    (Failed
-                       { kind = Transcript_persist_failed
-                       ; detail = persist_error
-                       })
-        in
-        publish_completion
-          (Completion_terminal
-             { status =
-                 (if queued_turn_not_started ()
-                  then Stream_cancelled
-                  else Stream_rejected)
-             ; body
-             ; queued_outcome
-             });
-        None, false
+         publish_completion
+           (Completion_terminal
+              { status = Stream_rejected
+              ; body
+              ; queued_outcome
+              });
+         None)
   in
   (match client_disconnects, request_id with
    | None, _ | _, None -> ()
@@ -2581,41 +2032,9 @@ let process_single_turn ~user_row_origin ~submission
                  payload.name request_id;
                push_worker_event Stream_client_disconnected
              end));
-  Option.iter
-    (fun request_id ->
-       Log.Keeper.info
-         "keeper_stream: queued request keeper=%s request_id=%s surface=%s"
-         payload.name request_id
-         (if has_connector_context payload then payload.channel else "dashboard");
-       Keeper_chat_events.publish events
-         (Custom
-            { name = "KEEPER_QUEUE_REQUEST"
-            ; value =
-                Gate_protocol.message_request_to_json
-                  { request_id
-                  ; destination_type = "keeper"
-                  ; destination_id = payload.name
-                  ; channel =
-                      (if has_connector_context payload then payload.channel
-                       else "dashboard")
-                  ; actor_id = Some agent_name
-                  ; status = Gate_protocol.Queued
-                  ; modalities = modalities_for_request payload
-                  ; transport = Some "sse"
-                  ; metadata =
-                      [ ("projection", "keeper_chat_stream")
-                      ; ("protocol", "gate_message_request")
-                      ]
-                  }
-            }))
-    (if durably_accepted then request_id else None);
   let publish_terminal ~status ?(message = "") () =
     let message = redact_text message in
     let status_label = keeper_request_terminal_status_to_string status in
-    let payload_json =
-      keeper_request_terminal_payload ?request_id ~keeper_name:payload.name
-        ~status ~message ()
-    in
     if keeper_request_terminal_status_is_routine status
     then
       (match request_id with
@@ -2637,25 +2056,24 @@ let process_single_turn ~user_row_origin ~submission
          Log.Keeper.warn
            "keeper_stream: request rejected before acceptance keeper=%s status=%s message=%s"
            payload.name status_label message);
-      Keeper_chat_events.publish events
-        (Custom { name = "KEEPER_REQUEST_TERMINAL"; value = payload_json })
+      ()
   in
   let next_worker_projection () =
     if Atomic.get client_disconnected
     then `Client_disconnected
     else (
       match Eio.Stream.take_nonblocking worker_events with
-      | Some event -> `Stream_event event
+      | Some event -> `Worker_event event
       | None ->
         Eio.Fiber.first
           ~combine:(fun left right ->
             match left, right with
-            | `Stream_event _, _ -> left
-            | _, `Stream_event _ -> right
+            | `Worker_event _, _ -> left
+            | _, `Worker_event _ -> right
             | `Completion _, _ -> left
             | _, `Completion _ -> right
             | `Client_disconnected, `Client_disconnected -> `Client_disconnected)
-          (fun () -> `Stream_event (Eio.Stream.take worker_events))
+          (fun () -> `Worker_event (Eio.Stream.take worker_events))
           (fun () ->
              let completion_or_disconnect =
                Eio.Fiber.first
@@ -2673,97 +2091,24 @@ let process_single_turn ~user_row_origin ~submission
              (completion_or_disconnect
               :> [ `Client_disconnected
                   | `Completion of keeper_stream_completion
-                  | `Stream_event of Agent_sdk.Types.sse_event
+                  | `Worker_event of keeper_stream_worker_event
                   ])))
-  in
-  (* Queue-lane producer identity shared with the persisted transcript row;
-     lets the dashboard fold a live progress placeholder into the canonical
-     history entry at turn end. *)
-  let progress_receipt_ids =
-    match submission with
-    | Queued_receipt { receipt_ids; _ } ->
-        List.map
-          Keeper_chat_delivery_identity.Receipt_id.to_string
-          (Keeper_chat_delivery_identity.Receipt_ids.to_list receipt_ids)
-    | Direct_request -> []
   in
   let rec consume_worker_events bridge_state =
     match next_worker_projection () with
     | `Client_disconnected -> None
-    | `Stream_event evt ->
+    | `Worker_event (Stream_event evt) ->
         let translated =
-          translate_oas_stream_event ~redact_text
+          translate_agent_core_stream_event ~redact_text
             ~base_dir:base_path bridge_state evt
         in
-        List.iter
-          (fun event ->
-            Keeper_chat_events.publish events event;
-            (* Tap tool-call progress for dashboard clients watching a
-               queued/consumer-side turn: their chat body stays silent until
-               the terminal transcript commit otherwise. Idempotent on the
-               dashboard keyed by [tool_call_id], so direct-stream turns may
-               broadcast as well. *)
-            (match event with
-             | Keeper_chat_events.Tool_call_start
-                 { tool_call_id; tool_call_name } ->
-                 Keeper_chat_broadcast.turn_progress ~keeper_name:agent_name
-                   ~run_id ~kind:Keeper_chat_broadcast.Tool_call_started
-                   ~tool_call_id ~tool_name:tool_call_name
-                   ~receipt_ids:progress_receipt_ids ()
-             | Keeper_chat_events.Tool_call_end { tool_call_id } ->
-                 Keeper_chat_broadcast.turn_progress ~keeper_name:agent_name
-                   ~run_id ~kind:Keeper_chat_broadcast.Tool_call_ended
-                   ~tool_call_id ~receipt_ids:progress_receipt_ids ()
-             | _ -> ()))
-          translated.chat_events;
+        List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
-    | `Completion (Completion_queued_turn_deferred rejection) ->
-        let message =
-          match rejection.Keeper_turn_admission.shutdown_operation_id with
-          | Some operation_id ->
-              Printf.sprintf
-                "queued receipt remains Pending while shutdown operation %s \
-                 fences keeper admission"
-                (Keeper_shutdown_types.Operation_id.to_string operation_id)
-          | None ->
-              Printf.sprintf
-                "queued receipt remains Pending because keeper admission is \
-                 deferred with %d waiting chat requests"
-                rejection.waiting
-        in
-        publish_terminal ~status:Request_deferred ~message ();
-        Keeper_chat_events.publish events
-          (Custom
-             { name = "KEEPER_QUEUED_TURN_DEFERRED"
-             ; value = admission_rejection_to_json rejection
-             });
-        Keeper_chat_events.publish events Text_message_end;
-        Keeper_chat_events.publish events (Run_finished { run_id });
-        Some (Deferred { rejection })
-    | `Completion (Completion_terminal { body; _ })
-      when queued_turn_not_started () ->
-        let message = redact_text body in
-        publish_terminal
-          ~status:(Request_stream Stream_cancelled)
-          ~message
-          ();
-        Keeper_chat_events.publish events Text_message_end;
-        Keeper_chat_events.publish events (Run_finished { run_id });
-        None
-    | `Completion (Completion_dashboard_queued queued) ->
-        let message =
-          dashboard_deferred_ack_text ~keeper_name:payload.name queued
-        in
-        publish_terminal ~status:Request_queued ~message ();
-        Keeper_chat_events.publish events (Text_delta message);
-        Keeper_chat_events.publish events
-          (Custom
-             { name = "KEEPER_CHAT_QUEUED";
-               value = dashboard_deferred_chat_to_json ~keeper_name:payload.name queued
-             });
-        Keeper_chat_events.publish events Text_message_end;
-        Keeper_chat_events.publish events (Run_finished { run_id });
-        None
+    | `Worker_event (Stream_chat_event event) ->
+        Keeper_chat_events.publish events event;
+        consume_worker_events bridge_state
+    | `Worker_event (Stream_terminal _ | Stream_client_disconnected) ->
+        assert false
     | `Completion
         (Completion_terminal
         { status = Stream_cancelled
@@ -2808,7 +2153,6 @@ let process_single_turn ~user_row_origin ~submission
             | Ok canonical_reply -> canonical_reply
             | Error error -> raise (Canonical_reply_payload_rejected error)
           in
-          let payload_json_opt = Some canonical_reply.payload_json in
           let visible_reply = canonical_reply.visible_reply in
           let turn_outcome = canonical_reply.turn_outcome in
           let suppress_terminal_reply =
@@ -2823,24 +2167,23 @@ let process_single_turn ~user_row_origin ~submission
           if
             (not suppress_terminal_reply)
             && not
-                 (Keeper_chat_oas_stream_bridge.terminal_message_had_text
+                 (Keeper_chat_agent_core_stream_bridge.terminal_message_had_text
                     bridge_state)
           then
             split_keeper_reply_chunks visible_reply
             |> List.iter (fun chunk ->
                    Keeper_chat_events.publish events (Text_delta chunk));
-          (match payload_json_opt with
-           | Some payload_json ->
-               Keeper_chat_events.publish events
-                 (Custom
-                    { name = "KEEPER_REPLY_DETAILS";
-                      value = redact_json payload_json })
+          Keeper_chat_events.publish events
+            (Reply_details
+               { reply = visible_reply
+               ; turn_outcome
+               ; turn_ref = canonical_reply.turn_ref
+               });
+          (match canonical_reply.external_effect_target with
+           | Some target ->
+             Keeper_chat_events.publish events
+               (External_effect_completed { target })
            | None -> ());
-          if
-            Keeper_turn_outcome.equal turn_outcome
-              Keeper_turn_outcome.External_effect_completed
-          then
-            Keeper_chat_events.publish events External_effect_completed;
           if
             Keeper_turn_outcome.equal turn_outcome
               Keeper_turn_outcome.External_effect_pending
@@ -2857,16 +2200,8 @@ let process_single_turn ~user_row_origin ~submission
                 (Status_block
                    { kind = Keeper_chat_blocks.Continuation_checkpoint });
               Keeper_chat_events.publish events
-                (Custom
-                   { name = "KEEPER_CONTINUATION_CHECKPOINT";
-                     value =
-                       `Assoc
-                         (("message", `String visible_reply)
-                          :: (match request_id with
-                              | Some request_id ->
-                                  [ ("request_id", `String request_id) ]
-                              | None -> []))
-                   })
+                (Continuation_checkpoint
+                   { message = visible_reply; request_id })
             end;
           publish_terminal ~status:(Request_stream Stream_done) ();
           Keeper_chat_events.publish events Text_message_end;
@@ -2879,26 +2214,309 @@ let process_single_turn ~user_row_origin ~submission
             publish_terminal ~status:(Request_stream Stream_error) ~message ();
             Keeper_chat_events.publish events Text_message_end;
             Keeper_chat_events.publish events (Event_error { message });
-            if queued_turn
-            then Some (Failed { kind = Stream_projection_failed; detail = message })
-            else None
+            Some (Failed { kind = Stream_projection_failed; detail = message })
         | exn ->
             let message = redact_text (Printexc.to_string exn) in
             publish_terminal ~status:(Request_stream Stream_error) ~message ();
             Keeper_chat_events.publish events Text_message_end;
             Keeper_chat_events.publish events
               (Event_error { message });
-            if queued_turn
-            then Some (Failed { kind = Stream_projection_failed; detail = message })
-            else None)
+            Some (Failed { kind = Stream_projection_failed; detail = message }))
   in
-  match consume_worker_events empty_keeper_stream_bridge_state with
+  match consume_worker_events (empty_keeper_stream_bridge_state ()) with
   | outcome ->
       signal_stream_projection_done ();
       outcome
   | exception exn ->
       signal_stream_projection_done ();
       raise exn
+
+let operation_executor ~state ~clock : Keeper_owner.operation_executor =
+  fun ~sw ~keeper_name ~claim ->
+  let failed ?outcome_ref kind detail =
+    Keeper_owner.Operation_failed { kind; detail; outcome_ref }
+  in
+  let execute_admitted admission_token =
+    match claim () with
+    | Error error ->
+      failed Keeper_chat_operation.Store_unavailable (Keeper_owner.error_to_string error)
+    | Ok None ->
+      failed
+        Keeper_chat_operation.No_queued_operation
+        "Owner FIFO head disappeared before claim"
+    | Ok (Some operation) ->
+      (match operation.input with
+       | None ->
+         failed
+           Keeper_chat_operation.Invalid_input
+           "Running Keeper chat operation has no execution input"
+       | Some input ->
+         (match
+            operation_payload_of_json
+              ~keeper_name
+              ~operation_id:operation.operation_id
+              ~source:operation.source
+              ~input
+          with
+          | Error detail -> failed Keeper_chat_operation.Invalid_input detail
+          | Ok operation_payload ->
+            let payload = operation_payload.payload in
+            let operation_id =
+              Keeper_owner.Chat_operation.Operation_id.to_string operation.operation_id
+            in
+            let events = Keeper_chat_events.create () in
+            let closed = ref false in
+            let delivery, resolve_delivery = Eio.Promise.create () in
+            let settle_delivery result =
+              (* See terminal delivery race: the first resolver is authoritative. *)
+              ignore (Eio.Promise.try_resolve resolve_delivery result : bool)
+            in
+            let drain_events () =
+              let rec loop () =
+                match Keeper_chat_events.subscribe events with
+                | Keeper_chat_events.Run_finished _
+                | Keeper_chat_events.Event_error _ -> ()
+                | _ -> loop ()
+              in
+              loop ()
+            in
+            let fork_adapter run =
+              Eio.Fiber.fork ~sw (fun () ->
+                match run () with
+                | () -> ()
+                | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+                | exception exn ->
+                  settle_delivery (Error (Printexc.to_string exn));
+                  drain_events ())
+            in
+            (match operation_payload.source.continuation_channel with
+             | Keeper_continuation_channel.Dashboard _ ->
+               fork_adapter (fun () ->
+                 let redaction =
+                   Keeper_secret_redaction.snapshot
+                     ~base_path:(Mcp_server.workspace_config state).base_path
+                     ~keeper_name
+                 in
+                 let redact_text = Keeper_secret_redaction.redact_text redaction in
+                 let redact_json = Keeper_secret_redaction.redact_json redaction in
+                 let rec loop projection =
+                   let event = Keeper_chat_events.subscribe events in
+                   let projection, projected =
+                     Server_keeper_chat_agui_projection.project
+                       ~timestamp:(Time_compat.now ())
+                       ~redact_text
+                       ~redact_json
+                       projection
+                       event
+                   in
+                   Option.iter
+                     (fun event ->
+                        note_operation_wire_event ~operation_id event;
+                        Keeper_chat_broadcast.operation_event
+                          ~keeper_name
+                          ~operation_id
+                          ~event;
+                        publish_operation_live_event ~operation_id event)
+                     projected;
+                   if Server_keeper_chat_agui_projection.is_terminal event
+                   then settle_delivery (Ok ())
+                   else loop projection
+                 in
+                 loop Server_keeper_chat_agui_projection.initial)
+             | Keeper_continuation_channel.Discord { channel_id; _ } ->
+               (match Env_config_discord.bot_token_opt () with
+                | Some token ->
+                  fork_adapter (fun () ->
+                    Keeper_chat_discord.adapter_loop
+                      ~clock
+                      ~token
+                      ~channel_id
+                      ~events
+                      ~on_send_result:(fun result ->
+                        settle_delivery
+                          (Result.map_error
+                             (fun error ->
+                                Format.asprintf "%a" Keeper_chat_discord.pp_error error)
+                             result))
+                      ())
+                | None ->
+                  settle_delivery (Error "DISCORD_BOT_TOKEN is not configured");
+                  fork_adapter drain_events)
+             | Keeper_continuation_channel.Slack { channel_id; thread_ts; _ } ->
+               (match Env_config_slack.bot_token_opt () with
+                | Some token ->
+                  fork_adapter (fun () ->
+                    Keeper_chat_slack.adapter_loop
+                      ~clock
+                      ~token
+                      ~channel:channel_id
+                      ?thread_ts
+                      ~events
+                      ~on_send_result:(fun result ->
+                        settle_delivery
+                          (Result.map_error
+                             (fun error ->
+                                Format.asprintf "%a" Keeper_chat_slack.pp_error error)
+                             result))
+                      ())
+                | None ->
+                  settle_delivery (Error "SLACK_BOT_TOKEN is not configured");
+                  fork_adapter drain_events)
+             (* The asker is another Keeper, so the answer goes onto its own
+                event queue rather than to a screen. Unlike the connector
+                adapters there is nothing to stream: [Reply_details] carries
+                the finalized visible reply in one event, so this loop only
+                remembers it and commits once the run ends. A failed commit
+                settles as a delivery failure, which is what marks the
+                operation [Delivery_failed] instead of acknowledging an answer
+                the asker never got. *)
+             | Keeper_continuation_channel.Keeper { keeper_name = asked_by } ->
+               fork_adapter (fun () ->
+                 let commit terminal =
+                   settle_delivery
+                     (Keeper_delegate_completion_wake.deliver
+                        ~base_path:(Mcp_server.workspace_config state).base_path
+                        ~asked_by
+                        ~operation_id
+                        ~delegate:keeper_name
+                        ~terminal)
+                 in
+                 let rec loop reply =
+                   match Keeper_chat_events.subscribe events with
+                   | Keeper_chat_events.Reply_details details ->
+                     loop
+                       (match details.turn_outcome with
+                        | Keeper_turn_outcome.Visible_reply
+                          when String.trim details.reply <> "" ->
+                          Some details.reply
+                        (* The turn spoke somewhere else or said nothing;
+                           either way there is no text to hand back. *)
+                        | Keeper_turn_outcome.Visible_reply
+                        | Keeper_turn_outcome.Continuation_checkpoint
+                        | Keeper_turn_outcome.External_effect_completed
+                        | Keeper_turn_outcome.External_effect_pending
+                        | Keeper_turn_outcome.No_visible_reply -> None)
+                   | Keeper_chat_events.Run_finished _ ->
+                     commit
+                       (match reply with
+                        | Some reply -> Keeper_event_queue.Delegate_replied reply
+                        | None -> Keeper_event_queue.Delegate_no_reply)
+                   | Keeper_chat_events.Event_error { message } ->
+                     commit (Keeper_event_queue.Delegate_failed message)
+                   | _ -> loop reply
+                 in
+                 loop None)
+             | Keeper_continuation_channel.Unrouted { reason } ->
+               settle_delivery (Error ("unrouted Keeper chat operation: " ^ reason));
+               fork_adapter drain_events);
+            let agent_name =
+              if has_external_speaker payload
+              then
+                Gate_keeper_backend.agent_name_for_channel_actor
+                  ~channel:payload.channel
+                  ~channel_workspace_id:payload.channel_workspace_id
+                  ~channel_user_id:payload.channel_user_id
+              else operation_payload.source.submitted_by
+            in
+            let outcome =
+              process_single_turn
+                ~user_row_origin:operation_payload.source.user_row_origin
+                ~submission:
+                  (Owner_operation
+                     { operation_id = operation.operation_id
+                     ; admission_token
+                     ; execution_sw = sw
+                     ; surface = operation_payload.source.surface
+                     ; speaker = chat_speaker_of_request payload
+                     ; conversation_id = operation_payload.source.conversation_id
+                     ; external_message_id = operation_payload.source.external_message_id
+                     ; workspace_id = operation_payload.source.workspace_id
+                     ; extra_mentions = operation_payload.source.extra_mentions
+                     })
+                ~state
+                ~clock
+                ~auth_token:None
+                ~thread_id:operation_payload.source.thread_id
+                ~continuation_channel:operation_payload.source.continuation_channel
+                ~closed
+                ~client_disconnects:None
+                ~payload
+                ~run_id:("keeper-operation-run-" ^ operation_id)
+                ~message_id:("keeper-operation-message-" ^ operation_id)
+                ~agent_name
+                ~events
+            in
+            let delivery = Eio.Promise.await delivery in
+            (match outcome, delivery with
+             | Some (Delivered { outcome_ref }), Ok () ->
+               Keeper_owner.Operation_succeeded { outcome_ref }
+             | Some (Delivered { outcome_ref }), Error detail ->
+               failed ~outcome_ref Keeper_chat_operation.Delivery_failed detail
+             | Some (Failed { kind; detail }), _ ->
+               failed
+                 (chat_operation_failure_kind_of_queued kind)
+                 (queued_turn_failure_kind_to_string kind ^ ": " ^ detail)
+             | None, _ ->
+               failed
+                 Keeper_chat_operation.Turn_invariant
+                 "Owner operation returned no terminal turn outcome")))
+  in
+  match
+    Keeper_turn_dispatch_authority.run execute_admitted
+  with
+  | execution -> execution
+;;
+
+let synthesize_wire_terminal_on_settle ~keeper_name ~operation_id ~execution =
+  match take_operation_wire_stream ~operation_id, execution with
+  | None, _ ->
+    (* No live wire stream ever opened for this operation (connector
+       channels, pre-execution failures): nothing to close. *)
+    ()
+  | Some Wire_terminal_sent, _ -> ()
+  | Some Wire_started, Keeper_owner.Operation_failed { kind; detail; _ } ->
+    let event =
+      Ag_ui.run_error
+        ~thread_id:("keeper:" ^ keeper_name)
+        ~run_id:("keeper-operation-run-" ^ operation_id)
+        ~message:detail
+        ~code:(Keeper_chat_operation.failure_kind_to_string kind)
+        ()
+    in
+    note_operation_wire_event ~operation_id event;
+    Keeper_chat_broadcast.operation_event ~keeper_name ~operation_id ~event;
+    publish_operation_live_event ~operation_id event
+  | Some Wire_started, Keeper_owner.Operation_succeeded _ ->
+    Log.Misc.warn
+      "keeper chat operation %s succeeded without a wire terminal event"
+      operation_id
+
+(* The production settle glue between the Owner hook and the wire registry.
+   Named (and exposed via For_testing) so a test executes exactly what the
+   runner wires: both identifiers become plain strings at this boundary, so
+   a swapped argument would typecheck (#28849 review). *)
+let on_operation_execution_settled ~keeper_name ~claimed_operation_id ~execution =
+  match claimed_operation_id with
+  | None -> ()
+  | Some operation_id ->
+    synthesize_wire_terminal_on_settle
+      ~keeper_name
+      ~operation_id:(Keeper_owner.Chat_operation.Operation_id.to_string operation_id)
+      ~execution
+;;
+
+let operation_runner ~state ~clock : Keeper_owner.operation_runner =
+  let base_path = (Mcp_server.workspace_config state).base_path in
+  { ready =
+      (fun ~keeper_name ->
+         match Keeper_registry.get_with_health ~base_path keeper_name with
+         | Some (_, Keeper_registry.Healthy) -> true
+         | Some (_, _)
+         | None -> false)
+  ; execute = operation_executor ~state ~clock
+  ; on_execution_settled = on_operation_execution_settled
+  }
+;;
 
 let keeper_chat_stream_headers origin =
   Httpun.Headers.of_list
@@ -2914,379 +2532,163 @@ let keeper_chat_stream_headers origin =
      ]
     @ cors_headers origin)
 
+let operation_submit_error_code = function
+  | Keeper_owner_registry.Command_lifecycle_reserved _ -> "owner_stopping"
+  | Command_lookup_failed Inventory_stopping -> "owner_stopping"
+  | Command_lookup_failed
+      (Inventory_not_installed _ | Owner_not_found _ | Owner_unavailable _
+      | Owner_initialization_failed _) ->
+    "store_unavailable"
+  | Command_rejected (Keeper_owner.Owner_stopping | Owner_closed) -> "owner_stopping"
+  | Command_rejected (Keeper_owner.Operation_rejected error) ->
+    (match Keeper_owner.operation_error_kind error with
+     | Invalid_operation_input -> "invalid_input"
+     | Unknown_operation -> "unknown_operation"
+     | Operation_not_queued -> "not_queued"
+     | Operation_idempotency_conflict -> "idempotency_conflict"
+     | Operation_store_unavailable -> "store_unavailable")
+  | Command_rejected
+      (Keeper_owner.Store_unavailable _ | Reducer_rejected _) ->
+    "store_unavailable"
+;;
+
 let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payload =
-  let redaction =
-    Keeper_secret_redaction.snapshot
-      ~base_path:(Mcp_server.workspace_config state).base_path
-      ~keeper_name:payload.name
-  in
-  let redact_text = Keeper_secret_redaction.redact_text redaction in
-  let redact_json = Keeper_secret_redaction.redact_json redaction in
   let origin = get_origin request in
   let headers = keeper_chat_stream_headers origin in
   let response = Httpun.Response.create ~headers `OK in
   let writer = Httpun.Reqd.respond_with_streaming reqd response in
   let mutex = Eio.Mutex.create () in
   let closed = ref false in
-  let client_disconnects = Eio.Stream.create 1 in
-  let disconnect_notified = ref false in
-  let notify_disconnect () =
-    if not !disconnect_notified then begin
-      disconnect_notified := true;
-      Eio.Stream.add client_disconnects ()
-    end
-  in
   let close_stream () =
-    if not !closed then begin
+    if not !closed
+    then begin
       closed := true;
-      (* Catch all exceptions including Cancelled — this function is called
-         from Switch.on_release where re-raising would mask the original exn. *)
       (try Httpun.Body.Writer.close writer
-       with exn ->
+       with
+       | Eio.Cancel.Cancelled _ as e ->
+         Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
+       | exn ->
          Log.Misc.warn "keeper_stream writer close: %s"
            (Printexc.to_string exn))
     end
   in
-  let now_id () = int_of_float (Time_compat.now () *. 1000.0) in
   let thread_id = "keeper:" ^ payload.name in
-  let continuation_channel =
-    match Keeper_continuation_channel.dashboard ~thread_id with
-    | Ok channel -> channel
-    | Error message -> invalid_arg message
+  let operation_id =
+    Keeper_owner.Chat_operation.Operation_id.to_string payload.request_id
   in
-
-  let sse_adapter_loop ~events ~writer ~mutex ~closed ~on_closed ~on_finished =
-    let current_thread_id = ref Ag_ui.default_thread_id in
-    let current_run_id = ref None in
-    let current_message_id = ref None in
-    let ag_role (role : Keeper_chat_events.role) =
-      match role with
-      | Keeper_chat_events.User -> Ag_ui.User
-      | Keeper_chat_events.Assistant -> Ag_ui.Assistant
-    in
-    let send_error message =
-      let message = redact_text message in
-      match !current_run_id with
-      | Some run_id ->
-          send_keeper_error ~on_closed writer mutex closed
-            ~thread_id:!current_thread_id ~run_id message
-      | None ->
-          ignore
-            (keeper_stream_send_event ~on_closed writer mutex closed
-               Ag_ui.(
-                 run_error
-                   ~thread_id:!current_thread_id
-                   ?run_id:!current_run_id
-                   ~message
-                   ()))
-    in
-    let json_opt key value =
-      match value with
-      | None -> []
-      | Some value -> [ (key, value) ]
-    in
-    let send_custom name value =
-      keeper_stream_send_event ~on_closed writer mutex closed
-        Ag_ui.(
-          make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-            ~custom_name:(Some name)
-            ~custom_value:(Some (redact_json value))
-            Custom)
-    in
-    let rec loop () =
-      if not !closed then
-        match Keeper_chat_events.subscribe events with
-        | Run_started { run_id; thread_id } ->
-            current_thread_id := thread_id;
-            current_run_id := Some run_id;
-            if
-              keeper_stream_send_event ~on_closed writer mutex closed
-                Ag_ui.(make_event ~thread_id ~run_id:(Some run_id) Run_started)
-            then loop ()
-        | Text_message_start { message_id; role } ->
-            current_message_id := Some message_id;
-            if
-              keeper_stream_send_event ~on_closed writer mutex closed
-                Ag_ui.(
-                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-                    ~message_id:(Some message_id) ~role:(Some (ag_role role))
-                    Text_message_start)
-            then loop ()
-        | Text_delta text ->
-            (* [text] is already redacted by the typed OAS stream bridge, or
-               is a terminal-reply chunk split from a whole-redacted
-               [visible_reply].  Re-redacting here doubled the per-token
-               regex cost with no effect (redact is idempotent on already-
-               redacted text).  Do not re-redact. *)
-            if
-              keeper_stream_send_event ~on_closed writer mutex closed
-                Ag_ui.(
-                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-                    ~message_id:!current_message_id
-                    ~delta:(Some text)
-                    Text_message_content)
-            then loop ()
-        | Text_message_end ->
-            if
-              keeper_stream_send_event ~on_closed writer mutex closed
-                Ag_ui.(
-                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-                    ~message_id:!current_message_id Text_message_end)
-            then loop ()
-        | External_effect_completed ->
-            if send_custom "KEEPER_EXTERNAL_EFFECT_COMPLETED" `Null then loop ()
-        | Oas_stream_connected ->
-            if send_custom "KEEPER_CONNECTED" `Null then loop ()
-        | Oas_stream_message_start { provider_message_id; model; usage } ->
-            let value =
-              `Assoc
-                ([
-                   ("provider_message_id", `String provider_message_id);
-                   ("model", `String model);
-                 ]
-                @ json_opt "usage"
-                    (Option.map Keeper_chat_events.api_usage_to_json usage))
-            in
-            if send_custom "KEEPER_STREAM_MESSAGE_START" value then loop ()
-        | Oas_stream_message_delta { stop_reason; usage } ->
-            let value =
-              `Assoc
-                (json_opt "stop_reason"
-                   (Option.map
-                      (fun reason ->
-                        `String (Agent_sdk.Types.stop_reason_to_string reason))
-                      stop_reason)
-                @ json_opt "usage"
-                    (Option.map Keeper_chat_events.api_usage_to_json usage))
-            in
-            if send_custom "KEEPER_STREAM_MESSAGE_DELTA" value then loop ()
-        | Oas_stream_message_stop ->
-            if send_custom "KEEPER_STREAM_MESSAGE_STOP" `Null then loop ()
-        | Oas_stream_ping ->
-            if send_custom "KEEPER_STREAM_PING" `Null then loop ()
-        | Oas_content_block_start
-            { index; content_type; tool_call_id; tool_call_name } ->
-            if
-              send_custom "KEEPER_CONTENT_BLOCK_START"
-                (`Assoc
-                  ([
-                     ("index", `Int index);
-                     ("content_type", `String content_type);
-                   ]
-                  @ json_opt "tool_call_id"
-                      (Option.map (fun value -> `String value) tool_call_id)
-                  @ json_opt "tool_call_name"
-                      (Option.map (fun value -> `String value) tool_call_name)))
-            then loop ()
-        | Oas_content_block_stop { index } ->
-            if
-              send_custom "KEEPER_CONTENT_BLOCK_STOP"
-                (`Assoc [ ("index", `Int index) ])
-            then loop ()
-        | Oas_thinking_delta { index; delta } ->
-            if
-              send_custom "KEEPER_THINKING_DELTA"
-                (`Assoc [ ("index", `Int index); ("delta", `String delta) ])
-            then loop ()
-        | Oas_thinking_signature_delta { index; signature_bytes } ->
-            if
-              send_custom "KEEPER_THINKING_SIGNATURE_DELTA"
-                (`Assoc
-                  [
-                    ("index", `Int index);
-                    ("signature_bytes", `Int signature_bytes);
-                  ])
-            then loop ()
-        | Oas_media_delta { index; media_type; source_type; media_ref } ->
-            (* RFC-0301: emit the reader-facing media URL so the dashboard can
-               fetch + render the payload (GET /api/v1/media/<token>), replacing
-               the pre-RFC byte count. *)
-            if
-              send_custom "KEEPER_MEDIA_DELTA"
-                (`Assoc
-                  [
-                    ("index", `Int index);
-                    ("media_type", `String media_type);
-                    ( "source_type",
-                      `String
-                        (Agent_sdk.Types.media_source_kind_to_string source_type)
-                    );
-                    ("media_ref", `String media_ref);
-                  ])
-            then loop ()
-        | Oas_stream_protocol_error error ->
-            if
-              send_custom "KEEPER_STREAM_PROTOCOL_ERROR"
-                (Keeper_chat_events.stream_protocol_error_to_json error)
-            then loop ()
-        | Custom { name; value } ->
-            if send_custom name value then loop ()
-        | Tool_call_start { tool_call_id; tool_call_name } ->
-            if
-              keeper_stream_send_event ~on_closed writer mutex closed
-                Ag_ui.(
-                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-                    ~tool_call_id:(Some tool_call_id) ~tool_call_name:(Some tool_call_name)
-                    Tool_call_start)
-            then loop ()
-        | Tool_call_args { tool_call_id; delta } ->
-            (* [delta] is already redacted at publish
-               ([Tool_call_args { delta = redact_text args; _ }]).  *)
-            if
-              keeper_stream_send_event ~on_closed writer mutex closed
-                Ag_ui.(
-                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-                    ~tool_call_id:(Some tool_call_id)
-                    ~delta:(Some delta)
-                    Tool_call_args)
-            then loop ()
-        | Tool_call_args_snapshot { tool_call_id; snapshot } ->
-            (* [snapshot] is already redacted at publish. OAS
-               [InputJsonSnapshot] is a whole replacement value, not an
-               append fragment, so preserve that distinction on the wire. *)
-            if
-              keeper_stream_send_event ~on_closed writer mutex closed
-                Ag_ui.(
-                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-                    ~tool_call_id:(Some tool_call_id)
-                    ~snapshot:(Some (`String snapshot))
-                    Tool_call_args)
-            then loop ()
-        | Tool_call_end { tool_call_id } ->
-            if
-              keeper_stream_send_event ~on_closed writer mutex closed
-                Ag_ui.(
-                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-                    ~tool_call_id:(Some tool_call_id)
-                    Tool_call_end)
-            then loop ()
-        | Link_block _
-        | Image_block _
-        | Status_block _
-        | Audio_block _
-        | Tool_context_block _ ->
-            (* Connector rich blocks are delivered by non-dashboard adapters;
-               the SSE stream already receives the underlying text/audio
-               through other events. *)
-            loop ()
-        | Event_error { message } -> send_error message
-        | Run_finished { run_id } ->
-            current_run_id := Some run_id;
-            ignore
-              (keeper_stream_send_event ~on_closed writer mutex closed
-                 Ag_ui.(
-                   make_event ~thread_id:!current_thread_id ~run_id:(Some run_id)
-                     Run_finished))
-    in
-    match loop () with
-    | () -> on_finished ()
-    | exception exn ->
-        on_finished ();
-        raise exn
+  let finished, resolve_finished = Eio.Promise.create () in
+  let finish () =
+    (* See stream terminal fan-in: the first terminal notification wins. *)
+    ignore (Eio.Promise.try_resolve resolve_finished () : bool)
   in
-
-
   ignore
-    (keeper_stream_send_raw ~on_closed:notify_disconnect writer mutex closed
+    (keeper_stream_send_raw writer mutex closed
        (Printf.sprintf "retry: %d\n\n" sse_dashboard_retry_backoff_ms));
   Eio.Fiber.fork ~sw (fun () ->
-      ignore
-        (Eio.Switch.run @@ fun stream_sw ->
-           Eio.Switch.on_release stream_sw close_stream;
-           let has_external_actor = has_external_speaker payload in
-           let agent_name =
-             if has_external_actor then
-               Gate_keeper_backend.agent_name_for_channel_actor
-                 ~channel:payload.channel
-                 ~channel_workspace_id:payload.channel_workspace_id
-                 ~channel_user_id:payload.channel_user_id
-             else submitted_by
-           in
-           let run_id = Printf.sprintf "keeper-run-%d" (now_id ()) in
-           let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
-           let events = Keeper_chat_events.create () in
-           let adapter_finished, adapter_finished_resolver =
-             Eio.Promise.create ()
-           in
-           let signal_adapter_finished () =
-             (* fire-and-forget: the adapter-finished signal is idempotent. *)
-             ignore (Eio.Promise.try_resolve adapter_finished_resolver () : bool)
-           in
-           Eio.Fiber.fork ~sw:stream_sw (fun () ->
-             sse_adapter_loop ~events ~writer ~mutex ~closed
-               ~on_closed:notify_disconnect ~on_finished:signal_adapter_finished);
-           let base_path = (Mcp_server.workspace_config state).base_path in
-           let wait_for_adapter_finished () =
-             Eio.Promise.await adapter_finished
-           in
-           let run_now () =
-             (* Dashboard stream route: no gate inbound boundary recorded this
-                user line, so the turn owns recording both sides (RFC-connector-deferred-reply-via-chat-queue §3.4). *)
-             ignore
-               (process_single_turn
-                  ~user_row_origin:Keeper_chat_store.Needs_append
-                  ~submission:Direct_request ~state ~clock
-                  ~auth_token:(auth_token_from_request request)
-                  ~thread_id ~continuation_channel ~closed
-                  ~client_disconnects:(Some (stream_sw, client_disconnects))
-                  ~payload ~run_id ~message_id ~agent_name ~submitted_by ~events
-                : queued_turn_outcome option);
-             wait_for_adapter_finished ()
-           in
-           if has_external_speaker payload then run_now ()
-           else
-             match
-               try
-                 defer_dashboard_payload_if_busy
-                   ~base_path
-                   ~clock
-                   ~thread_id
-                   payload
-               with
-               | Eio.Cancel.Cancelled _ as exn -> raise exn
-               | exn -> `Queue_error (Printexc.to_string exn)
-             with
-             | `Not_busy -> run_now ()
-             | `Queued queued ->
-                 Log.Keeper.info
-                   "keeper_stream: deferred busy dashboard message keeper=%s pending_count=%d inflight_count=%d"
-                   payload.name queued.pending_count queued.inflight_count;
-                 Keeper_chat_events.publish events
-                   (Run_started { run_id; thread_id });
-                 Keeper_chat_events.publish events
-                   (Text_message_start
-                      { message_id; role = Keeper_chat_events.Assistant });
-                 Keeper_chat_events.publish events
-                   (Text_delta
-                      (dashboard_deferred_ack_text
-                         ~keeper_name:payload.name
-                         queued));
-                 Keeper_chat_events.publish events
-                   (Custom
-                      { name = "KEEPER_CHAT_QUEUED";
-                        value =
-                          dashboard_deferred_chat_to_json
-                            ~keeper_name:payload.name queued
-                 });
-                 Keeper_chat_events.publish events Text_message_end;
-                 Keeper_chat_events.publish events (Run_finished { run_id });
-                 wait_for_adapter_finished ()
-             | `Queue_error message ->
-                 Log.Keeper.error
-                   "keeper_stream: failed to defer busy dashboard message keeper=%s: %s"
-                   payload.name message;
-                 Keeper_chat_events.publish events
-                   (Run_started { run_id; thread_id });
-                 Keeper_chat_events.publish events
-                   (Event_error
-                      { message =
-                          "keeper chat queue persistence failed: " ^ message
-                      });
-                 Keeper_chat_events.publish events (Run_finished { run_id });
-                 wait_for_adapter_finished ();
-           (* Queue drain is handled by Keeper_chat_consumer
-              (started in server_bootstrap_loops). *)
-           ))
+    Eio.Switch.run (fun stream_sw ->
+      Eio.Switch.on_release stream_sw close_stream;
+      let accepted = ref false in
+      let buffered = ref [] in
+      let buffered_mu = Stdlib.Mutex.create () in
+      let send_event event =
+        let sent = keeper_stream_send_event writer mutex closed event in
+        if
+          (not sent)
+          || match event.Ag_ui.event_type with
+             | Ag_ui.Run_finished | Ag_ui.Run_error -> true
+             | Run_started | Step_started | Step_finished | Text_message_start
+             | Text_message_content | Text_message_end | Tool_call_start
+             | Tool_call_args | Tool_call_end | State_snapshot | State_delta
+             | Custom -> false
+        then finish ()
+      in
+      let sink event =
+        let send_now =
+          Stdlib.Mutex.protect buffered_mu (fun () ->
+            if !accepted
+            then true
+            else (
+              buffered := event :: !buffered;
+              false))
+        in
+        if send_now then send_event event
+      in
+      let unregister = register_operation_live_sink ~operation_id sink in
+      Eio.Switch.on_release stream_sw unregister;
+      let publish_acceptance acceptance =
+        let operation = acceptance.Keeper_owner.operation in
+        let state =
+          match operation.state with
+          | Keeper_owner.Chat_operation.Queued -> "Queued"
+          | Running _ -> "Running"
+          | Succeeded _ -> "Succeeded"
+          | Failed _ -> "Failed"
+          | Cancelled _ -> "Cancelled"
+        in
+        let event =
+          Ag_ui.of_custom
+            ~name:"KEEPER_CHAT_OPERATION_ACCEPTED"
+            (`Assoc
+               [ "operation_id", `String operation_id
+               ; "state", `String state
+               ; "queued_count", `Int acceptance.queued_count
+               ])
+        in
+        (* See durable acceptance: a closed SSE stream cannot roll back the operation. *)
+        ignore (keeper_stream_send_event writer mutex closed event);
+        let pending =
+          Stdlib.Mutex.protect buffered_mu (fun () ->
+            accepted := true;
+            let pending = List.rev !buffered in
+            buffered := [];
+            pending)
+        in
+        List.iter send_event pending;
+        if Keeper_owner.Chat_operation.is_terminal operation.state then finish ()
+      in
+      let submit_result =
+        let ( let* ) = Result.bind in
+        let* source =
+          operation_source_of_payload
+            ~thread_id
+            ~submitted_by
+            ~user_row_origin:Keeper_chat_store.Needs_append
+            payload
+          |> Result.map_error (fun detail -> `Input detail)
+        in
+        Keeper_owner_registry.submit_operation
+          ~base_path:(Mcp_server.workspace_config state).base_path
+          ~keeper_name:payload.name
+          ~operation_id:payload.request_id
+          ~source
+          ~input:(operation_input_of_payload payload)
+        |> Result.map_error (fun error -> `Owner error)
+      in
+      (match submit_result with
+       | Ok acceptance -> publish_acceptance acceptance
+       | Error (`Input detail) ->
+         ignore
+           (keeper_stream_send_event
+              writer
+              mutex
+              closed
+              (Ag_ui.run_error ~thread_id ~message:detail ~code:"invalid_input" ()));
+         finish ()
+       | Error (`Owner error) ->
+         let detail = Keeper_owner_registry.command_error_to_string error in
+         let code = operation_submit_error_code error in
+         ignore
+           (keeper_stream_send_event
+              writer
+              mutex
+              closed
+              (Ag_ui.run_error
+                 ~thread_id
+                 ~message:detail
+                 ~code
+                 ()));
+         finish ());
+      Eio.Promise.await finished))
 
 (** Build routes for MCP server *)
 
@@ -3299,30 +2701,6 @@ module For_testing = struct
   let chat_speaker_of_request = chat_speaker_of_request
   let turn_instructions_for_request = turn_instructions_for_request
   let direct_message_of_request = direct_message_of_request
-  let defer_dashboard_payload_if_busy_evidence
-        ~base_path
-        ~clock
-        ~thread_id
-        payload
-    =
-    match
-      defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id payload
-    with
-    | `Not_busy -> `Not_busy
-    | `Queued queued ->
-        `Queued
-          ( dashboard_deferred_chat_to_json ~keeper_name:payload.name queued
-          , dashboard_deferred_ack_text ~keeper_name:payload.name queued )
-    | `Queue_error message -> `Queue_error message
-
-  let defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id payload =
-    match
-      defer_dashboard_payload_if_busy ~base_path ~clock ~thread_id payload
-    with
-    | `Not_busy -> `Not_busy
-    | `Queued queued -> `Queued queued.pending_count
-    | `Queue_error message -> `Queue_error message
-
   let canonical_reply_payload_of_body = canonical_reply_payload_of_body
   let direct_reply_terminal_error = direct_reply_terminal_error
   let persisted_reply_blocks = persisted_reply_blocks
@@ -3330,27 +2708,12 @@ module For_testing = struct
     queued_delivery_outcome_of_turn_ref
   let committed_delivery_outcome = committed_delivery_outcome
   let empty_reply_delivery_plan = empty_reply_delivery_plan
-  let format_surface_context = format_surface_context
   let surface_context_to_instructions = surface_context_to_instructions
   let keeper_tool_failure_log_details = keeper_tool_failure_log_details
   let keeper_chat_stream_headers = keeper_chat_stream_headers
-  let worker_settlement_terminal_body ~staged_body settlement =
-    let staged_completion =
-      Option.map
-        (fun body ->
-           Completion_terminal
-             { status = Stream_done; body; queued_outcome = None })
-        staged_body
-    in
-    match
-      completion_of_worker_settlement
-        ~queued_turn:false
-        ~staged_completion
-        settlement
-    with
-    | Some (Completion_terminal { body; _ }) -> Some body
-    | Some (Completion_dashboard_queued _ | Completion_queued_turn_deferred _)
-    | None ->
-      None
-  ;;
+  let note_operation_wire_event = note_operation_wire_event
+  let take_operation_wire_stream = take_operation_wire_stream
+  let synthesize_wire_terminal_on_settle = synthesize_wire_terminal_on_settle
+  let on_operation_execution_settled = on_operation_execution_settled
+  let register_operation_live_sink = register_operation_live_sink
 end

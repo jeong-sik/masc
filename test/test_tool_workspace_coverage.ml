@@ -262,14 +262,26 @@ let snapshot_revision result =
   Tool_result.data result |> Yojson.Safe.Util.member "revision" |> Yojson.Safe.Util.to_string
 ;;
 
+(* This asserted that masc_status initializes the workspace, and raised
+   "MASC not initialized" instead. Initializing is masc_start's job: no tool in
+   Tool_workspace calls Workspace.init, and status_summary_string opens with
+   ensure_initialized, which is the contract refusing to invent a workspace as
+   a side effect of a read.
+
+   So the name described a behaviour that never existed. What is worth pinning
+   is the refusal itself, and that the read leaves nothing behind. *)
 let () =
-  test "dispatch_status_initializes_before_revision" (fun () ->
+  test "dispatch_status_refuses an uninitialized workspace" (fun () ->
     let ctx = make_test_ctx () in
-    match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some result ->
-      assert (Tool_result.is_success result);
-      assert (Sys.file_exists (Workspace_utils_paths_backend.state_path ctx.config))
-    | None -> failwith "dispatch returned None")
+    let raised =
+      match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+      | (_ : Tool_result.result option) -> false
+      | exception Workspace.Not_initialized -> true
+    in
+    assert raised;
+    (* A read that refuses must not have created the state it was refusing to
+       read. *)
+    assert (not (Sys.file_exists (Workspace_utils_paths_backend.state_path ctx.config))))
 ;;
 
 let () =
@@ -358,7 +370,12 @@ let () =
     | Some result ->
       assert (Tool_result.is_failed result);
       assert (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
-      assert_contains (Tool_result.message result) "status snapshot unavailable"
+      assert_contains (Tool_result.message result) "status snapshot unavailable";
+      (match Tool_result.data result with
+       | `Assoc fields ->
+         assert (List.mem_assoc "error_code" fields);
+         assert (List.mem_assoc "message" fields)
+       | _ -> failwith "expected assoc data envelope")
     | None -> failwith "dispatch returned None")
 ;;
 
@@ -474,6 +491,52 @@ let () =
       assert (str_contains result "tasks active=0 todo=0 claimed=0 in_progress=0");
       assert (str_contains result "Summary: active=0, done=1, cancelled=0, total=1");
       assert (str_contains result "(no active tasks)")
+    | None -> failwith "dispatch returned None")
+;;
+
+(* The other half of the contract: a task with no side-registry link renders
+   exactly as it did before goal links existed. Without this, a change that
+   suffixed every row — or one that suffixed an empty goal id — would still
+   pass the linked-task test above. *)
+let () =
+  test "dispatch_status_leaves_unlinked_task_unsuffixed" (fun () ->
+    let ctx = make_test_ctx () in
+    let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
+    ignore
+      (Workspace.add_task ctx.config ~title:"Unlinked task" ~priority:2 ~description:"");
+    let args = `Assoc [] in
+    match Tool_workspace.dispatch ctx ~name:"masc_status" ~args with
+    | Some result ->
+      assert (Tool_result.is_success result);
+      let msg = status_message result in
+      assert_contains msg "Unlinked task";
+      assert_not_contains msg "goal:"
+    | None -> failwith "dispatch returned None")
+;;
+
+(* Quest Board rendering surfaces a task's goal link from the RFC-0267
+   goal_task_links side registry (the task record itself carries no goal_id). *)
+let () =
+  test "dispatch_status_surfaces_task_goal_link" (fun () ->
+    let ctx = make_test_ctx () in
+    let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
+    ignore
+      (Workspace.add_task ctx.config ~title:"Goal-linked task" ~priority:2 ~description:"");
+    (match
+       Workspace_goal_index.link_task_to_goal_result
+         ctx.config
+         ~goal_id:"g-1"
+         ~task_id:"task-001"
+     with
+     | Ok () -> ()
+     | Error msg -> failwith ("goal link failed: " ^ msg));
+    let args = `Assoc [] in
+    match Tool_workspace.dispatch ctx ~name:"masc_status" ~args with
+    | Some result ->
+      assert (Tool_result.is_success result);
+      let msg = status_message result in
+      assert_contains msg "Goal-linked task";
+      assert_contains msg "goal:g-1"
     | None -> failwith "dispatch returned None")
 ;;
 
@@ -826,8 +889,8 @@ let () =
     Eio_main.run
     @@ fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
-    let ctx = { (make_test_ctx ()) with agent_name = "keeper-sangsu-agent" } in
-    let _ = Workspace.init ctx.config ~agent_name:(Some "keeper-sangsu-agent") in
+    let ctx = { (make_test_ctx ()) with agent_name = "keeper-alpha-agent" } in
+    let _ = Workspace.init ctx.config ~agent_name:(Some "keeper-alpha-agent") in
     ignore (Auth.enable_auth ctx.config.base_path ~require_token:true ~agent_name:"admin");
     ignore (Auth.ensure_internal_keeper_token ctx.config.base_path);
     ignore (Workspace.add_task ctx.config ~title:"Keeper work" ~priority:3 ~description:"");
@@ -838,12 +901,12 @@ let () =
       assert (
         str_contains
           result
-          "Credential: required=yes | available=yes | candidates=keeper-sangsu-agent");
+          "Credential: required=yes | available=yes | candidates=keeper-alpha-agent");
       assert (
         not
           (str_contains
              result
-             "Lifecycle actions are credential-blocked for keeper-sangsu-agent"));
+             "Lifecycle actions are credential-blocked for keeper-alpha-agent"));
       assert (not (str_contains result "Suggested next:"))
     | None -> failwith "dispatch returned None")
 ;;
@@ -898,44 +961,14 @@ let () =
     | None -> failwith "dispatch returned None")
 ;;
 
+(* Deliverable prose does not change a task's status. The removed classifier
+   read the first line for an English "completed" prefix and, when it matched,
+   re-badged the task [todo_conflict], added a "completed-looking" attention
+   item and a Planning: deliverable_conflict line. It matched 0 of the 199
+   non-empty deliverables in the live planning store, and only ever fired on
+   fixtures written like the one below. *)
 let () =
-  test
-    "dispatch_status_surfaces_completed_deliverable_conflict_for_active_owned_task"
-    (fun () ->
-       Fun.protect ~finally:Fs_compat.clear_fs
-       @@ fun () ->
-       Eio_main.run
-       @@ fun env ->
-       Fs_compat.set_fs (Eio.Stdenv.fs env);
-       let ctx = make_test_ctx () in
-       let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
-       ignore
-         (Workspace.add_task
-            ctx.config
-            ~title:"Claimed with stale deliverable"
-            ~priority:3
-            ~description:"");
-       ignore (Workspace.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
-       set_current_task_ok ctx.config ~task_id:"task-001";
-       ignore
-         (Planning_eio.set_deliverable
-            ctx.config
-            ~task_id:"task-001"
-            ~content:"Task-001 completed. stale operator artifact.");
-       match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-       | Some r -> let result = status_message r in let success = Tool_result.is_success r in
-         assert success;
-         assert (str_contains result "owned=task-001 | current=task-001");
-         assert (str_contains result "Planning: deliverable_conflict=yes | task=task-001");
-         assert_contains
-           result
-           "Owned task task-001 already has a completed-looking deliverable";
-         assert (not (str_contains result "Suggested next:"))
-       | None -> failwith "dispatch returned None")
-;;
-
-let () =
-  test "dispatch_status_flags_todo_with_completed_deliverable_as_conflict" (fun () ->
+  test "dispatch_status_ignores_deliverable_prose_when_badging_tasks" (fun () ->
     Fun.protect ~finally:Fs_compat.clear_fs
     @@ fun () ->
     Eio_main.run
@@ -945,21 +978,22 @@ let () =
     let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
     ignore
       (Workspace.add_task ctx.config ~title:"Conflicted todo" ~priority:2 ~description:"");
-    ignore (Workspace.add_task ctx.config ~title:"Fresh todo" ~priority:2 ~description:"");
+    ignore
+      (Workspace.add_task ctx.config ~title:"Fresh todo" ~priority:2 ~description:"");
     ignore
       (Planning_eio.set_deliverable
          ctx.config
          ~task_id:"task-001"
          ~content:"Task-001 completed. Exercised masc_operator_snapshot.");
     match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some r -> let result = status_message r in let success = Tool_result.is_success r in
-      assert success;
-      assert (
-        str_contains
-          result
-          "warning task-001 P2 [todo_conflict] Conflicted todo (unclaimed)");
+    | Some r ->
+      let result = status_message r in
+      assert (Tool_result.is_success r);
+      assert (str_contains result "📋 task-001 P2 [todo] Conflicted todo (unclaimed)");
       assert (str_contains result "📋 task-002 P2 [todo] Fresh todo (unclaimed)");
-      assert_contains result "1 todo task(s) have completed-looking planning deliverables"
+      assert (not (str_contains result "todo_conflict"));
+      assert (not (str_contains result "deliverable_conflict"));
+      assert (not (str_contains result "completed-looking"))
     | None -> failwith "dispatch returned None")
 ;;
 
@@ -1000,11 +1034,13 @@ let () =
 let next_hint = Workspace_task.next_actions_hint
 
 let () =
-  test "next_hint_todo lists claim, release, and cancel" (fun () ->
+  test "next_hint_todo lists claim and cancel, not release" (fun () ->
     let h = next_hint Masc_domain.Todo in
     assert (str_contains h "claim");
-    assert (str_contains h "release");
     assert (str_contains h "cancel");
+    (* Release on a Todo is admitted and returns it unchanged -- there is
+       nothing held to hand back. The hint lists what moves the Task. *)
+    assert (not (str_contains h "release"));
     assert (str_contains h "valid_next_actions="))
 ;;
 
@@ -1029,7 +1065,7 @@ let () =
 ;;
 
 let () =
-  test "next_hint_awaiting_verification has no agent action" (fun () ->
+  test "next_hint_awaiting_verification offers supersede alongside cancel" (fun () ->
     let h =
       next_hint
         (Masc_domain.AwaitingVerification
@@ -1039,7 +1075,11 @@ let () =
            ; verification_id = "v"
            })
     in
-    assert (String.equal h ""))
+    (* This hint is where an assignee learns the state has an exit other than
+       Cancel: the live log carried 16 refused resubmissions while the hint
+       read "[cancel]". *)
+    assert (str_contains h "submit_for_verification");
+    assert (str_contains h "cancel"))
 ;;
 
 let () =

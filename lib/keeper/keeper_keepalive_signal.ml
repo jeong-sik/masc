@@ -82,12 +82,12 @@ let record_wake_payload
 let register_record_wake_payload f = Atomic.set record_wake_payload_callback f
 
 let record_tool_skipped_callback
-    : (keeper_name:string -> tool_name:string -> reason_code:string -> unit) Atomic.t
+    : (tool_name:string -> reason_code:string -> unit) Atomic.t
   =
-  Atomic.make (fun ~keeper_name:_ ~tool_name:_ ~reason_code:_ -> ())
+  Atomic.make (fun ~tool_name:_ ~reason_code:_ -> ())
 
-let record_tool_skipped ~keeper_name ~tool_name ~reason_code =
-  (Atomic.get record_tool_skipped_callback) ~keeper_name ~tool_name ~reason_code
+let record_tool_skipped ~tool_name ~reason_code =
+  (Atomic.get record_tool_skipped_callback) ~tool_name ~reason_code
 ;;
 
 let register_record_tool_skipped f = Atomic.set record_tool_skipped_callback f
@@ -221,8 +221,18 @@ type sleep_outcome =
 
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~chunk_sec instead of waiting for the full interval. *)
-let interruptible_sleep ~clock ~stop ~wakeup duration : sleep_outcome =
+let interruptible_sleep ?cadence_sleeping ~clock ~stop ~wakeup duration
+  : sleep_outcome
+  =
   let chunk_sec = Env_config.KeeperKeepalive.sleep_chunk_sec in
+  let set_cadence_sleeping value =
+    Option.iter
+      (fun sleeping ->
+         (* tla-lint: allow-mutation: cadence sleep handshake *)
+         Atomic.set sleeping value)
+      cadence_sleeping
+  in
+  set_cadence_sleeping true;
   let rec wait remaining =
     if Atomic.get stop
     then Stopped
@@ -236,14 +246,28 @@ let interruptible_sleep ~clock ~stop ~wakeup duration : sleep_outcome =
          assertion through [wrap_unit ~stage:"guard"] automatically. *)
       post_heartbeat_tick ~wakeup;
       Woken)
+    else if
+      Option.exists (fun sleeping -> not (Atomic.get sleeping)) cadence_sleeping
+    then Woken
     else if remaining <= 0.0
-    then Timeout
+    then (
+      match cadence_sleeping with
+      | Some sleeping ->
+        (* The timeout edge races a cadence update. Only the winner of this
+           CAS may report [Timeout]; a producer that already consumed the
+           sleeper receives [Woken]. *)
+        if Atomic.compare_and_set sleeping true false
+        then Timeout
+        else Woken
+      | None -> Timeout)
     else (
       let chunk = Float.min chunk_sec remaining in
       Eio.Time.sleep clock chunk;
       wait (remaining -. chunk))
   in
-  wait duration
+  Fun.protect
+    ~finally:(fun () -> set_cadence_sleeping false)
+    (fun () -> wait (duration ()))
 ;;
 
 (** Wake up a specific keeper immediately, causing it to skip the rest of
@@ -328,8 +352,14 @@ let board_signal_stimulus
       (match reason with
        | Board_wake.Explicit_mention | Board_wake.Broadcast ->
          Keeper_event_queue.Immediate
+       (* A comment on the keeper's own post is a thread event, so it keeps
+          the thread priority. This change's subject is that it wakes at all;
+          raising it to Immediate would be a separate queue decision. *)
+       | Board_wake.Comment_on_self_post
        | Board_wake.Thread_reply_after_self_comment
-       | Board_wake.Reaction_after_self_activity ->
+       | Board_wake.Reaction_after_self_activity
+       | Board_wake.Vote_on_self_post
+       | Board_wake.Vote_on_self_comment ->
          Keeper_event_queue.Normal)
   ; arrived_at = Time_compat.now ()
   ; payload
@@ -368,13 +398,19 @@ let record_board_attention_candidate
          ~base_path:config.base_path
          candidate
      with
-     | Ok _ ->
+     | Ok acceptance ->
+       let persistence =
+         match acceptance.persistence with
+         | Keeper_board_attention_candidate.Candidate_recorded -> "recorded"
+         | Keeper_board_attention_candidate.Candidate_already_present -> "duplicate"
+       in
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
          ~labels:
            [ ("keeper", meta.name)
            ; ("kind", signal_kind_label)
            ; ("audience", Keeper_board_audience.label Keeper_board_audience.Discoverable)
+           ; ("persistence", persistence)
            ]
          ()
      | Error err ->
@@ -492,15 +528,12 @@ let wakeup_relevant_keeper_for_board_signal
       (addressed : Board_dispatch.addressed_board_signal)
   =
   let signal = addressed.signal in
-  let registry_entries =
-    Keeper_registry.all ~base_path:config.base_path ()
-    |> List.filter board_signal_entry_accepts_delivery
-  in
   let signal_kind_label =
     match signal.kind with
     | Board_dispatch.Board_post_created -> "post_created"
     | Board_dispatch.Board_comment_added -> "comment_added"
     | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
+    | Board_dispatch.Board_vote_cast _ -> "vote_cast"
   in
   match Keeper_board_audience.of_board_audience addressed.audience with
   | Error error ->
@@ -519,17 +552,107 @@ let wakeup_relevant_keeper_for_board_signal
       signal.post_id
       (Keeper_board_audience.classification_error_to_string error)
   | Ok audience ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string BoardSignalRoutedTotal)
-      ~labels:
-        [ ("kind", signal_kind_label)
-        ; ("audience", Keeper_board_audience.label audience)
-        ]
-      ();
-    (* Every lane is independent: persist and signal each addressed Keeper
-       without a fleet-wide cap, ordering dependency, or content debounce. *)
-    let board_ym = Eio_guard.create_yield_meter () in
-    List.iter
+    (match audience with
+     | Keeper_board_audience.Discoverable ->
+       (* An unaddressed post has no immediate wake target. The Keeper owner
+          already scans the durable Board with its per-lane cursor and owns
+          candidate creation. Repeating that fleet-wide scan in the HTTP
+          producer duplicated candidate writes and retained successful Board
+          receipts behind every Keeper metadata/evidence lock. *)
+       let uninitialized_entries =
+         Keeper_registry.all ~base_path:config.base_path ()
+         |> List.filter (fun (entry : Keeper_registry.registry_entry) ->
+           board_signal_entry_accepts_delivery entry
+           && Float.equal entry.board_cursor_ts 0.0)
+       in
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string BoardSignalCursorDeferredTotal)
+         ~labels:
+           [ ("kind", signal_kind_label)
+           ; ("audience", Keeper_board_audience.label audience)
+           ; ( "first_cursor_fallback"
+             , if uninitialized_entries = [] then "none" else "required" )
+           ]
+         ();
+       Log.Keeper.debug
+         "board discoverable signal deferred to owner cursors: post=%s first_cursor_fallback=%b"
+         signal.post_id
+         (uninitialized_entries <> []);
+       (* A first cursor initializes at the current Board head. Preserve posts
+          written during startup/warmup by recording only those exceptional
+          lanes now; established lanes stay on the owner cursor path above. *)
+       let board_ym = Eio_guard.create_yield_meter () in
+       List.iter
+         (fun (entry : Keeper_registry.registry_entry) ->
+            (match read_meta config entry.name with
+             | Error detail ->
+               Otel_metric_store.inc_counter
+                 Keeper_metrics.(to_string KeepaliveSignalFailures)
+                 ~labels:
+                   [ ("keeper", entry.name); ("phase", "board_meta_read") ]
+                 ();
+               Log.Keeper.warn
+                 "board signal Keeper metadata unavailable: keeper=%s error=%s"
+                 entry.name
+                 detail
+             | Ok None ->
+               Otel_metric_store.inc_counter
+                 Keeper_metrics.(to_string KeepaliveSignalFailures)
+                 ~labels:
+                   [ ("keeper", entry.name); ("phase", "board_meta_missing") ]
+                 ();
+               Log.Keeper.warn
+                 "board signal Keeper metadata missing: keeper=%s"
+                 entry.name
+             | Ok (Some meta) ->
+               (match route_for_keeper_with_bounded_retry ~audience ~meta signal with
+                | Keeper_world_observation_board_signal.Available
+                    Keeper_board_audience.Judge_discoverable ->
+                  record_board_attention_candidate
+                    ~config
+                    ~signal_kind_label
+                    ~meta
+                    signal
+                | Keeper_world_observation_board_signal.Available
+                    Keeper_board_audience.Ignore -> ()
+                | Keeper_world_observation_board_signal.Available
+                    (Keeper_board_audience.Deliver _) ->
+                  Log.Keeper.error
+                    "board discoverable fallback returned direct delivery: keeper=%s post=%s"
+                    meta.name
+                    signal.post_id
+                | Keeper_world_observation_board_signal.Unavailable unavailable ->
+                  Otel_metric_store.inc_counter
+                    Keeper_metrics.(to_string KeepaliveSignalFailures)
+                    ~labels:
+                      [ ("keeper", meta.name); ("phase", "board_signal_read") ]
+                    ();
+                  Log.Keeper.warn
+                    "board discoverable fallback unavailable: keeper=%s post=%s error=%s"
+                    meta.name
+                    signal.post_id
+                    (Keeper_world_observation_board_signal.unavailable_to_string
+                       unavailable)));
+            Eio_guard.yield_step board_ym)
+         uninitialized_entries
+     | ( Keeper_board_audience.Targets _
+       | Keeper_board_audience.Broadcast
+       | Keeper_board_audience.Thread_participants ) ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string BoardSignalRoutedTotal)
+         ~labels:
+           [ ("kind", signal_kind_label)
+           ; ("audience", Keeper_board_audience.label audience)
+           ]
+         ();
+       let registry_entries =
+         Keeper_registry.all ~base_path:config.base_path ()
+         |> List.filter board_signal_entry_accepts_delivery
+       in
+       (* Every addressed lane is independent: persist and signal it without
+          a fleet-wide cap, ordering dependency, or content debounce. *)
+       let board_ym = Eio_guard.create_yield_meter () in
+       List.iter
       (fun (entry : Keeper_registry.registry_entry) ->
          (try
             match read_meta config entry.name with
@@ -597,24 +720,19 @@ let wakeup_relevant_keeper_for_board_signal
                ()
            | Keeper_world_observation_board_signal.Available
                Keeper_board_audience.Judge_discoverable ->
-             (* Intentionally counted under [BoardSignalNoWakeTotal]:
-                [Judge_discoverable] issues no wake for this keeper — the
-                signal is recorded as an attention candidate below
-                instead. The [audience] label keeps this distinguishable
-                from the [Ignore] branch, which shares the counter. *)
+             (* The outer audience match excludes [Discoverable]. Keep this
+                fail-visible if a future routing rule violates that boundary. *)
              Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string BoardSignalNoWakeTotal)
+               Keeper_metrics.(to_string KeepaliveSignalFailures)
                ~labels:
                  [ ("keeper", meta.name)
-                 ; ("kind", signal_kind_label)
-                 ; ("audience", Keeper_board_audience.label audience)
+                 ; ("phase", "unexpected_discoverable_immediate_route")
                  ]
                ();
-             record_board_attention_candidate
-               ~config
-               ~signal_kind_label
-               ~meta
-               signal
+             Log.Keeper.error
+               "board immediate route returned discoverable judgment: keeper=%s post=%s"
+               meta.name
+               signal.post_id
            | Keeper_world_observation_board_signal.Available
                (Keeper_board_audience.Deliver reason) ->
              (match deliver_addressed_board_signal ~config ~reason ~signal meta with
@@ -652,8 +770,11 @@ let wakeup_relevant_keeper_for_board_signal
                       match reason with
                       | Board_wake.Broadcast -> Keeper_registry.Broadcast_signal
                       | Board_wake.Explicit_mention
+                      | Board_wake.Comment_on_self_post
                       | Board_wake.Thread_reply_after_self_comment
-                      | Board_wake.Reaction_after_self_activity ->
+                      | Board_wake.Reaction_after_self_activity
+                      | Board_wake.Vote_on_self_post
+                      | Board_wake.Vote_on_self_comment ->
                         Keeper_registry.Reactive_signal
                     in
                     Keeper_registry.wakeup_running
@@ -689,7 +810,7 @@ let wakeup_relevant_keeper_for_board_signal
               signal.post_id
               (Printexc.to_string exn));
          Eio_guard.yield_step board_ym)
-      registry_entries
+      registry_entries)
 ;;
 
 (* Per-stage timing accumulator for Phase 0 profiling.
@@ -742,7 +863,7 @@ let stage_timing_to_json ~ring ~count =
 let keepalive_entry_accepts_late_event ~(ctx : _ context) ~(keeper_name : string) =
   match Keeper_registry.get_phase ~base_path:ctx.config.base_path keeper_name with
   | None -> true
-  | Some (Keeper_state_machine.Stopped | Keeper_state_machine.Dead) -> false
+  | Some Keeper_state_machine.Stopped -> false
   | Some _ -> true
 
 let dispatch_keepalive_event ~(ctx : _ context) ~(keeper_name : string) event =
@@ -750,30 +871,3 @@ let dispatch_keepalive_event ~(ctx : _ context) ~(keeper_name : string) event =
     Keeper_registry.dispatch_event_unit
       ~base_path:ctx.config.base_path keeper_name event
 
-let dispatch_keepalive_event_with_audit
-      ~(ctx : _ context)
-      ~(keeper_name : string)
-      ~snapshot
-      ~events_fired
-      ~selected_event
-      event
-  =
-  if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
-    (match Keeper_registry.dispatch_event_with_audit_and_log
-       ~base_path:ctx.config.base_path
-       ~snapshot
-       ~events_fired
-       ~selected_event
-       keeper_name
-       event
-     with
-     | Ok _ -> ()
-     | Error err ->
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string KeepaliveSignalFailures)
-           ~labels:[("keeper", keeper_name); ("site", "late_event_rejected")]
-           ();
-         Log.Keeper.warn
-           "%s: keepalive late-event dispatch rejected: %s"
-           keeper_name
-           (Keeper_state_machine.transition_error_to_string err))

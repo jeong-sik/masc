@@ -1,6 +1,5 @@
 open Server_auth
 open Server_utils
-open Server_routes_http_pages
 
 module Http = Http_server_eio
 
@@ -324,7 +323,6 @@ type path_resolution =
 
 type workspace_file = {
   lexical_path : string;
-  resolved_base : string;
   resolved_path : string;
 }
 
@@ -375,7 +373,6 @@ let resolve_workspace_file base requested =
             Ok
               {
                 lexical_path = full;
-                resolved_base;
                 resolved_path = resolved_full;
               }
 
@@ -485,78 +482,92 @@ let file_tree_node ~diff_by_path ~path ~label ~depth ~parent ~has_children =
          ; ("hasChildren", `Bool has_children)
          ; ("diff", diff); ("keeperId", `Null); ("hueIndex", `Null) ]
 
-let rec scan_dir_bounded ?diff_by_path ~base ~depth ~max_depth ~remaining acc dir =
-  if depth > max_depth || remaining <= 0 then (acc, remaining)
-  else
-    let raw_entries =
-      workspace_or_default
-        ~site:"tree_readdir"
-        ~path:dir
-        ~default:[]
-        (fun () -> Sys.readdir dir |> Array.to_list)
-    in
-    (* Sort alphabetically, then partition directories-first so that
-       the node limit (default 750) is consumed by directory trees
-       (lib/, src/) before leaf files ( *.py, *.md).  Without this,
-       a flat directory like ~/me with hundreds of root-level files
-       exhausts the limit before important subdirectories appear. *)
-    let entries =
-      let sorted = List.sort String.compare raw_entries in
-      let dirs, files = List.partition (fun name ->
-        let full = Filename.concat dir name in
-        workspace_or_default
-          ~warn_on_failure:false
-          ~site:"tree_is_directory_partition"
-          ~path:full
-          ~default:false
-          (fun () -> Sys.is_directory full)
-      ) sorted in
-      dirs @ files
-    in
-    let rec fold acc remaining = function
-      | [] -> (acc, remaining)
-      | _ when remaining <= 0 -> (acc, 0)
-      | f :: rest ->
-        if f = "." || f = ".." then fold acc remaining rest
-        else if component_is_confidential f || List.mem f tree_noise_dirs then
-          fold acc remaining rest
-        else
-          let full = Filename.concat dir f in
-          let is_dir =
-            workspace_or_default
-              ~warn_on_failure:false
-              ~site:"tree_is_directory"
-              ~path:full
-              ~default:false
-              (fun () ->
-                 match Unix.lstat full with
-                 | { Unix.st_kind = Unix.S_LNK; _ } -> false
-                 | _ -> Sys.is_directory full)
-          in
-          let rel = rel_under base full in
-          (* With /api/v1/workspace/children lazy-loading a directory's entries
-             on first expand, a directory is expandable regardless of the
-             initial scan depth. Decoupling [has_children] from
-             [depth < max_depth] keeps the chevron on boundary directories; the
-             recursion guard below stays depth-bounded, so the initial scan
-             shape is unchanged and only the boundary display flag flips. *)
-          let has_children = is_dir in
-          let parent = if depth = 0 then "" else Filename.dirname rel in
-          let node = file_tree_node ~diff_by_path
-              ~path:rel ~label:f ~depth ~parent ~has_children in
-          let acc' = node :: acc in
-          let remaining' = remaining - 1 in
-          let acc'', remaining'' =
-            if is_dir && depth < max_depth then
-              scan_dir_bounded
-                ?diff_by_path
-                ~base ~depth:(depth + 1) ~max_depth ~remaining:remaining'
-                acc' full
-            else (acc', remaining')
-          in
-          fold acc'' remaining'' rest
-    in
-    fold acc remaining entries
+(* One directory's entries, alphabetical with directories first, minus the
+   components the tree never shows. Directories lead so that a level's budget
+   reaches subdirectories before a wide directory's leaf files consume it. *)
+let tree_entries dir =
+  let raw_entries =
+    workspace_or_default
+      ~site:"tree_readdir"
+      ~path:dir
+      ~default:[]
+      (fun () -> Sys.readdir dir |> Array.to_list)
+  in
+  let keep name =
+    not (name = "." || name = ".." || component_is_confidential name
+         || List.mem name tree_noise_dirs)
+  in
+  let sorted = List.sort String.compare (List.filter keep raw_entries) in
+  let dirs, files =
+    List.partition
+      (fun name ->
+         let full = Filename.concat dir name in
+         workspace_or_default
+           ~warn_on_failure:false
+           ~site:"tree_is_directory_partition"
+           ~path:full
+           ~default:false
+           (fun () -> Sys.is_directory full))
+      sorted
+  in
+  dirs @ files
+;;
+
+(* Breadth-first, deliberately.
+
+   A depth-first walk spends the node budget on whatever sorts first: on a
+   repository with 11k source files the default 750 nodes were exhausted
+   partway through [dashboard/], so [lib/] — where most of the activity is —
+   never appeared in the response at all, and no amount of clicking could
+   reach it. The budget is a response-size bound, not a statement about which
+   directories matter, and a walk order that makes it act like one leaves a
+   large repository unnavigable.
+
+   Breadth-first spends the same budget on the shallowest nodes, so every
+   top-level entry is present before any subtree is expanded. That is what the
+   seed is for: the client fetches a directory's real contents from
+   [/api/v1/workspace/children] when it is expanded, so anything the budget
+   cuts is one click away instead of unreachable. *)
+let scan_dir_bounded ?diff_by_path ~base ~depth ~max_depth ~remaining acc dir =
+  let pending = Queue.create () in
+  if depth <= max_depth then Queue.add (dir, depth) pending;
+  let acc = ref acc in
+  let remaining = ref remaining in
+  while (not (Queue.is_empty pending)) && !remaining > 0 do
+    let dir, depth = Queue.pop pending in
+    List.iter
+      (fun name ->
+         if !remaining > 0
+         then begin
+           let full = Filename.concat dir name in
+           let is_dir =
+             workspace_or_default
+               ~warn_on_failure:false
+               ~site:"tree_is_directory"
+               ~path:full
+               ~default:false
+               (fun () ->
+                  match Unix.lstat full with
+                  | { Unix.st_kind = Unix.S_LNK; _ } -> false
+                  | _ -> Sys.is_directory full)
+           in
+           let rel = rel_under base full in
+           (* A directory is expandable regardless of the scan depth it was
+              reached at: [/api/v1/workspace/children] loads its entries on
+              first expand, so the chevron stays on boundary directories. *)
+           let has_children = is_dir in
+           let parent = if depth = 0 then "" else Filename.dirname rel in
+           acc
+           := file_tree_node ~diff_by_path ~path:rel ~label:name ~depth ~parent
+                ~has_children
+              :: !acc;
+           remaining := !remaining - 1;
+           if is_dir && depth < max_depth then Queue.add (full, depth + 1) pending
+         end)
+      (tree_entries dir)
+  done;
+  (!acc, !remaining)
+;;
 
 let scan_dir ?diff_by_path ~base ~depth ~max_depth ~max_nodes acc dir =
   fst (scan_dir_bounded ?diff_by_path ~base ~depth ~max_depth ~remaining:max_nodes acc dir)
@@ -612,12 +623,43 @@ let git_diff_badges ~base =
 let git_run_lines_or_error ~cwd args =
   Repo_git.run_git ~cwd ("--no-optional-locks" :: args)
 
+(* The repository that owns [path], searched upward from the file and stopped
+   at [base].
+
+   git does not stop. Asked about a file under a playground that holds its
+   clones in [repos/<id>/], git finds no repository at the playground root,
+   walks past it, and answers from whichever repository encloses MASC's own
+   checkout. There the path does not exist, so git prints nothing and the
+   route reports a modified file as unchanged -- a wrong answer with a 200 on
+   it, which is worse than a failure the caller can see (#30322).
+
+   [base] is the far edge because it is where the caller's authority ends: a
+   query names a keeper or a repository, and an answer from outside that is
+   not an answer to the question asked. *)
+let repository_owning ~base ~path =
+  let normalise dir =
+    let n = String.length dir in
+    if n > 1 && dir.[n - 1] = '/' then String.sub dir 0 (n - 1) else dir
+  in
+  let base = normalise base in
+  let rec walk dir =
+    let dir = normalise dir in
+    if not (String.equal dir base || String.starts_with ~prefix:(base ^ "/") dir)
+    then None
+    else if Sys.file_exists (Filename.concat dir ".git") then Some dir
+    else
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None else walk parent
+  in
+  walk (Filename.dirname path)
+
 module For_testing = struct
   let sanitize_log_value = sanitize_log_value
   let observe_workspace_route_failure = observe_workspace_route_failure
   let parse_git_numstat_line = parse_git_numstat_line
   type safe_workspace_file = workspace_file
   let resolve_workspace_file = resolve_workspace_file
+  let repository_owning = repository_owning
   let load_workspace_file_content = load_workspace_file_content
 end
 
@@ -733,6 +775,28 @@ module For_testing_blame = struct
   let parse_blame_header = parse_blame_header
   let parse_blame_porcelain = parse_blame_porcelain
   let group_blame_entries = group_blame_entries
+end
+
+(* --- Log parsing --- *)
+
+(* One [git log --pretty=format:%h%x09%ad%x09%an%x09%s] row. Only the first
+   three tabs split -- a subject may carry tabs of its own. A row that does
+   not hold four fields is dropped rather than filled in. *)
+let git_log_row_of_line line =
+  match String.split_on_char '\t' line with
+  | hash :: date :: author :: subject_first :: subject_rest ->
+      let subject = String.concat "\t" (subject_first :: subject_rest) in
+      Some
+        (`Assoc
+           [ ("hash", `String hash)
+           ; ("date", `String date)
+           ; ("author", `String author)
+           ; ("subject", `String subject)
+           ])
+  | _ -> None
+
+module For_testing_log = struct
+  let git_log_row_of_line = git_log_row_of_line
 end
 
 (* --- Diff parsing --- *)
@@ -983,10 +1047,15 @@ let add_routes router =
                 if not (Sys.file_exists safe.resolved_path) then
                   json_response ~status:`Not_found request reqd (json_error "File not found")
                 else
-                  let rel = rel_under base safe.lexical_path in
+                (match repository_owning ~base ~path:safe.lexical_path with
+                 | None ->
+                   json_response ~status:`Not_found request reqd
+                     (json_error "No git repository under this scope owns that path")
+                 | Some repo_root ->
+                  let rel = rel_under repo_root safe.lexical_path in
                   let cache_key =
                     Printf.sprintf "git:blame:%s:%s:%s"
-                      base
+                      repo_root
                       (source_to_string source)
                       rel
                   in
@@ -995,7 +1064,7 @@ let add_routes router =
                       ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
                       (fun () ->
                          Domain_pool_ref.submit_io_or_inline (fun () ->
-                           match git_run_lines ~cwd:base
+                           match git_run_lines ~cwd:repo_root
                                    ["blame"; "--porcelain"; "--"; rel]
                            with
                            | [] -> `List []
@@ -1004,7 +1073,72 @@ let add_routes router =
                              let grouped = group_blame_entries rel entries in
                              `List grouped))
                   in
-                  json_response_with_source ~status:`OK ~source request reqd json))
+                  json_response_with_source ~status:`OK ~source request reqd json)))
+         request reqd)
+
+  |> Http.Router.get "/api/v1/git/log" (fun request reqd ->
+       with_public_read
+         (fun state _req reqd ->
+           let uri = Uri.of_string request.target in
+           let base, source = resolve_workspace_base ~state ~uri in
+           let limit =
+             match
+               Option.bind (Uri.get_query_param uri "limit") int_of_string_opt
+             with
+             | Some n when n >= 1 -> min n 200
+             | Some _ | None -> 50
+           in
+           match Uri.get_query_param uri "path" with
+           | None | Some "" ->
+             json_response ~status:`Bad_request request reqd
+               (json_error "Missing path parameter")
+           | Some p ->
+             (match resolve_workspace_file base p with
+              | Error _ ->
+                json_response ~status:`Bad_request request reqd
+                  (json_error "Invalid path")
+              | Ok safe ->
+                if not (Sys.file_exists safe.resolved_path) then
+                  json_response ~status:`Not_found request reqd
+                    (json_error "File not found")
+                else
+                  (match repository_owning ~base ~path:safe.lexical_path with
+                   | None ->
+                     json_response ~status:`Not_found request reqd
+                       (json_error
+                          "No git repository under this scope owns that path")
+                   | Some repo_root ->
+                     let rel = rel_under repo_root safe.lexical_path in
+                     let cache_key =
+                       Printf.sprintf "git:log:%s:%s:%s:%d" repo_root
+                         (source_to_string source)
+                         rel limit
+                     in
+                     let json =
+                       Dashboard_cache.get_or_compute cache_key
+                         ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+                         (fun () ->
+                            Domain_pool_ref.submit_io_or_inline (fun () ->
+                              let lines =
+                                git_run_lines ~cwd:repo_root
+                                  [ "log"
+                                  ; Printf.sprintf "-n%d" limit
+                                  ; "--pretty=format:%h%x09%ad%x09%an%x09%s"
+                                  ; "--date=short"
+                                  ; "--"
+                                  ; rel
+                                  ]
+                              in
+                              `Assoc
+                                [ ("ok", `Bool true)
+                                ; ( "commits"
+                                  , `List
+                                      (List.filter_map git_log_row_of_line
+                                         lines) )
+                                ]))
+                     in
+                     json_response_with_source ~status:`OK ~source request
+                       reqd json)))
          request reqd)
 
   |> Http.Router.get "/api/v1/git/diff" (fun request reqd ->
@@ -1033,10 +1167,18 @@ let add_routes router =
               | Error _ ->
                 json_response ~status:`Bad_request request reqd (json_error "Invalid path")
               | Ok safe ->
-                let rel = rel_under base safe.lexical_path in
+                (match repository_owning ~base ~path:safe.lexical_path with
+                 | None ->
+                   (* Saying so beats the empty diff git would print from
+                      whatever repository encloses this one: an answer from
+                      outside the queried scope is not an answer. *)
+                   json_response ~status:`Not_found request reqd
+                     (json_error "No git repository under this scope owns that path")
+                 | Some repo_root ->
+                let rel = rel_under repo_root safe.lexical_path in
                 let cache_key =
                   Printf.sprintf "git:diff:%s:%s:%s:%s"
-                    base
+                    repo_root
                     (source_to_string source)
                     base_ref
                     rel
@@ -1046,7 +1188,7 @@ let add_routes router =
                     ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
                     (fun () ->
                        Domain_pool_ref.submit_io_or_inline (fun () ->
-                         match git_run_lines_or_error ~cwd:base
+                         match git_run_lines_or_error ~cwd:repo_root
                                  ["diff"; base_ref; "--"; rel]
                          with
                          | Error _ ->
@@ -1065,5 +1207,5 @@ let add_routes router =
                    json_response ~status:`Bad_request request reqd
                      (json_error "git diff failed")
                  | data ->
-                   json_response_with_source ~status:`OK ~source request reqd data)))
+                   json_response_with_source ~status:`OK ~source request reqd data))))
          request reqd)

@@ -1,11 +1,16 @@
 (** Server Routes — sidecar HTTP API.
 
-    Implements [/api/sidecar/<id>/...] for the Discord / cron / connector
-    sidecars: status, start/stop, log tail, GET/PUT TOML config, schema
-    introspection, and the desired-state reconciler that drives the
-    sidecar restart loop.  Mostly path-resolution + filesystem helpers
-    plus a small declarative-state pair (desired_record / attempt_record)
-    persisted as JSON under [.masc/sidecars]. *)
+    Implements [/api/sidecar/<id>/...] for the connector sidecars that run
+    as their own process — imessage and telegram; Discord and Slack moved
+    in-process (RFC-0203 Phase 3, RFC-0317) and the dashboard hides these
+    controls for them.  Serves status, start/stop, log tail, GET/PUT TOML
+    config, and schema introspection.
+
+    The desired-state pair (desired_record / attempt_record, persisted as
+    JSON under [.masc/sidecars]) is reconciled once per start request, in
+    [handle_start].  Nothing reconciles on a timer: [add_routes] takes no
+    switch or clock, so a sidecar that dies on its own stays down until an
+    operator asks for it again. *)
 
 module Http = Http_server_eio
 (** Local alias for the Eio HTTP server module. *)
@@ -13,7 +18,7 @@ module Http = Http_server_eio
 (** {1 Sidecar id validation} *)
 
 val known_ids : string list
-(** Hard-coded sidecar id allowlist (e.g. ["discord"], ["cron"]).  Path
+(** Hard-coded sidecar id allowlist (["imessage"], ["telegram"]).  Path
     routing rejects anything not in this list. *)
 
 val validate_name : string option -> (string, string) result
@@ -74,20 +79,25 @@ val missing_sidecar_dir_message :
 val today_yyyymmdd : unit -> string
 (** Local-timezone [yyyymmdd] used in log file names. *)
 
-val legacy_status_rel : string -> string
-(** Legacy relative path of the per-sidecar status JSON. *)
-
 (** {1 Sidecar status config (env / TOML lookup)} *)
 
 type sidecar_status_config = {
   env_names : string list;
   toml_keys : string list;
+  stale_after_env_name : string;
 }
-(** Names to consult when resolving a sidecar's "is enabled" flag. *)
+(** Where a sidecar's status file may be configured, and the variable
+    naming the age at which its heartbeat stops counting as alive. *)
 
 val sidecar_status_config : string -> sidecar_status_config
-(** Per-sidecar [sidecar_status_config] (Discord checks
-    [DISCORD_BOT_TOKEN] etc.). *)
+(** Per-sidecar status config; raises on an id outside {!known_ids}. *)
+
+val default_status_stale_sec : int
+
+val status_stale_sec : string -> int
+(** Heartbeat age limit for this sidecar, from its
+    [MASC_*_STATUS_STALE_SEC] variable — the same window the gate state
+    modules apply when rendering "stale". *)
 
 val read_file : string -> string
 (** Read whole file; returns empty string when the file is missing. *)
@@ -148,8 +158,6 @@ type sidecar_start_plan = {
     [base_path] without shell interpolation. *)
 
 val sidecar_start_plan : base_path:string -> script:string -> sidecar_start_plan
-val start_sidecar_process : base_path:string -> script:string -> (unit, string) result
-
 (** {1 Declarative state machine} *)
 
 type desired_state = Desired_running | Desired_stopped
@@ -180,40 +188,43 @@ type attempt_record = {
     [attempt] is the shared {!Attempt_state.t} SSOT; ISO timestamps and
     string result tokens are only used at the JSON wire boundary. *)
 
-type attempt_record_decode_error =
-  | Attempt_record_not_object of string
-  | Attempt_record_invalid_field of {
+(** Decode failure for a persisted desired or attempt record. *)
+type record_decode_error =
+  | Record_not_object of string
+  | Record_invalid_field of {
       field : string;
       expected : string;
       actual : string;
     }
-  | Attempt_record_unknown_result of string
-  | Attempt_record_invalid_timestamp of {
+  | Record_unknown_value of {
+      field : string;
+      value : string;
+    }
+  | Record_invalid_timestamp of {
       field : string;
       value : string;
     }
 
-val attempt_record_decode_error_to_string : attempt_record_decode_error -> string
+val record_decode_error_to_string : record_decode_error -> string
 
 val desired_state_to_string : desired_state -> string
 val desired_state_of_string : string -> desired_state option
 val observed_state_to_string : observed_state -> string
 val reconcile_result_to_string : reconcile_result -> string
 
-val attempt_record_json : attempt_record -> Yojson.Safe.t
 val attempt_record_of_json_result :
-  Yojson.Safe.t -> (attempt_record, attempt_record_decode_error) result
-val attempt_record_of_json : Yojson.Safe.t -> attempt_record option
-val desired_record_json : desired_record -> Yojson.Safe.t
-val desired_record_of_json : Yojson.Safe.t -> desired_record option
-
+  Yojson.Safe.t -> (attempt_record, record_decode_error) result
+val desired_record_of_json_result :
+  Yojson.Safe.t -> (desired_record, record_decode_error) result
 val sidecar_desired_path : base_path:string -> string -> string
 val sidecar_attempt_path : base_path:string -> string -> string
-val read_desired_record : base_path:string -> string -> desired_record option
+
+(** [Ok None] when the file is absent; [Error] when it exists but cannot be
+    read, is not JSON, or does not decode. *)
+val read_desired_record_result :
+  base_path:string -> string -> (desired_record option, string) result
 val read_attempt_record_result :
   base_path:string -> string -> (attempt_record option, string) result
-val read_attempt_record : base_path:string -> string -> attempt_record option
-
 val ensure_parent_dir : string -> unit
 (** Create the parent directory of [path] if missing. *)
 
@@ -228,10 +239,8 @@ val write_desired_record :
 val write_attempt_record :
   base_path:string -> id:string -> attempt_record -> (unit, string) result
 
-val observed_state_of_status_json : Yojson.Safe.t -> observed_state
 (** Project [status.json] into the reconciler's observed-state. *)
 
-val retry_backoff_seconds : unit -> float
 (** Backoff duration between reconcile attempts. *)
 
 val retry_backoff_active : now:string -> attempt_record -> bool
@@ -239,10 +248,6 @@ val retry_backoff_active : now:string -> attempt_record -> bool
     last attempt. [now] is parsed at the boundary; the deadline comparison
     uses {!Attempt_state.is_backoff_active}. *)
 
-val next_attempt_record :
-  now:string ->
-  next_retry_at:string ->
-  attempt_record option -> desired_record -> attempt_record
 (** Compute the next [attempt_record] given the previous one and the
     reconciler decision context. *)
 
@@ -258,24 +263,12 @@ val reconcile_desired_once :
     [observed_state], honours backoff, and either invokes
     [start_process] or returns a [Reconcile_noop] reason. *)
 
-val reconcile_preview :
-  ?now:string ->
-  ?previous_attempt:attempt_record ->
-  desired_record -> observed_state -> string
-(** Dry-run preview suitable for a dashboard tooltip. *)
-
 val attempt_fields :
   attempt_record option -> (string * Yojson.Safe.t) list
 (** Render attempt fields as JSON-friendly assoc list (possibly empty). *)
 
-val lifecycle_json :
-  base_path:string ->
-  string ->
-  Yojson.Safe.t ->
-  Yojson.Safe.t
 (** Combined lifecycle JSON: status fields + desired/attempt projection. *)
 
-val append_assoc : 'a -> 'b -> ([> `Assoc of ('a * 'b) list ] as 'c) -> 'c
 (** Append a [(key, value)] pair to a JSON assoc. *)
 
 val clamp_lines : int option -> int
@@ -337,15 +330,6 @@ val parse_body_pairs : string -> ((string * string) list, string) result
 
 (** {1 Config / schema / lifecycle handlers} *)
 
-val handle_get_config :
-  Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
-val handle_put_config :
-  Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
-val handle_schema :
-  Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
 val handle_start :
   Mcp_server.server_state ->
   Httpun.Request.t -> Httpun.Reqd.t -> unit

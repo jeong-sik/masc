@@ -27,7 +27,7 @@ import { TaskWall } from './task-wall'
 import { TaskCreateForm } from '../task-manage/task-create-form'
 import { DECK_CHIP, DECK_LABEL, DECK_PANEL } from './deck-classes'
 
-const QUICK_START_DOC_URL = 'https://github.com/jeong-sik/masc/blob/main/docs/QUICK-START.md'
+const QUICK_START_DOC_URL = 'https://github.com/jeong-sik/masc#start-here'
 const DECK_HEAD = 'flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5 shadow-[inset_0_2px_0_var(--color-accent-fg)]'
 const DECK_CARD = 'rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3'
 function PlanningStat({
@@ -129,9 +129,7 @@ function KeeperToolActivity() {
   // Aggregate top tools across all keepers (memoized)
   const { topTools, totalToolTurns } = useMemo(() => {
     const toolCounts = new Map<string, number>()
-    let turns = 0
     for (const k of keeperList) {
-      turns += k.autonomous_tool_turn_count ?? 0
       const items = k.metrics_window?.top_tools
       if (items) {
         for (const t of items) {
@@ -142,7 +140,10 @@ function KeeperToolActivity() {
     }
     return {
       topTools: [...toolCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8),
-      totalToolTurns: turns,
+      // The calls shown are the calls counted here. This used to add a
+      // lifetime keeper-meta counter instead, so the chip and the tool list
+      // below it were reading different periods.
+      totalToolTurns: [...toolCounts.values()].reduce((sum, count) => sum + count, 0),
     }
   }, [keeperList])
 
@@ -192,7 +193,7 @@ function KeeperToolActivity() {
             </div>
           </div>
         ` : html`
-          <${EmptyState} message="도구 호출 데이터가 아직 없습니다" compact />
+          <${EmptyState} message="도구 호출 데이터가 아직 없음" compact />
         `}
       </div>
     </details>
@@ -212,10 +213,10 @@ export function Planning() {
       ? '장기 목표와 backlog 상태를 함께 추적합니다'
       : 'backlog와 장기 목표를 함께 보는 조감도입니다'
   const planStatusBody = onlyBacklogActive
-    ? '태스크가 등록되어 있습니다. 장기 목표를 추가하면 여기에 함께 표시됩니다.'
+    ? '목표 없음 — 태스크만 등록됨'
     : hasGoals
       ? '장기 목표와 태스크를 한눈에 확인합니다.'
-      : '아직 등록된 항목이 없습니다.'
+      : '아직 등록된 항목 없음'
 
   return html`
     <div class="v2-workspace-surface flex flex-col gap-4">
@@ -264,7 +265,7 @@ export function Planning() {
               count=${goals.value.length}
               summary=${hasGoals
                 ? '등록된 목표를 우선순위 순으로 추적합니다.'
-                : '등록된 목표가 없습니다. 목표를 등록하면 여기에 표시됩니다.'}
+                : '등록된 목표 없음'}
               docHref=${QUICK_START_DOC_URL}
               docLabel="빠른 시작"
             />
@@ -323,7 +324,7 @@ export function Planning() {
             }
           </div>
         ` : html`
-          <p class="p-3 text-xs text-[var(--color-fg-muted)]">등록된 목표가 없습니다. 목표 트리에서 추가할 수 있습니다.</p>
+          <p class="p-3 text-xs text-[var(--color-fg-muted)]">등록된 목표 없음</p>
         `}
       </section>
     </div>

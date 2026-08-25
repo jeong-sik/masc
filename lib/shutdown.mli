@@ -28,8 +28,6 @@ type config_field =
   | Cleanup_timeout
   | Force_timeout
 
-val config_field_env_name : config_field -> string
-
 type config_error =
   | Invalid_config_number of { field : config_field; raw_value : string }
   | Non_finite_config_duration of { field : config_field; value : float }
@@ -125,7 +123,6 @@ type hook = {
 }
 
 val register : name:string -> ?priority:int -> (unit -> unit) -> unit
-val sorted_hooks : unit -> hook list
 val run_registered_hooks : unit -> unit
 (** Run every hook registered with {!register}, in priority order.
 

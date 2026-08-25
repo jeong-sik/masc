@@ -46,6 +46,13 @@ type erased = {
 
 type 'a param = 'a param_entry
 
+type json_change =
+  { old_value : Yojson.Safe.t
+  ; new_value : Yojson.Safe.t
+  }
+
+let key (param : _ param) = param.key
+
 (* ── global state ────────────────────────────────────────────── *)
 
 (** Registry keyed by parameter name.
@@ -54,7 +61,7 @@ let registry_tbl : (string, erased) Hashtbl.t = Hashtbl.create 64
 
 (** Workspace base path used for automatic persistence and audit.
     Set via [initialize]; optional [?base_path] overrides it per call. *)
-let global_base_path : string option ref = ref None
+let global_base_path = Atomic.make None
 
 (** Eio.Mutex for all mutable state.
     Falls back to lock-free when Eio scheduler is absent (tests, init). *)
@@ -63,10 +70,10 @@ let mu = Eio.Mutex.create ()
 let with_rw f = Eio_guard.with_mutex mu f
 let with_ro f = Eio_guard.with_mutex_ro mu f
 
-let initialize ~base_path = global_base_path := Some base_path
+let initialize ~base_path = Atomic.set global_base_path (Some base_path)
 
 let effective_base_path ?base_path () =
-  match base_path with Some p -> Some p | None -> !global_base_path
+  match base_path with Some p -> Some p | None -> Atomic.get global_base_path
 
 (* ── registration ────────────────────────────────────────────── *)
 
@@ -221,7 +228,7 @@ let set ?base_path ?(actor = "system") (entry : 'a param) value =
           record_audit ~base_path ~key ~old_value ~new_value ~actor ());
       Ok ()
 
-let set_by_key ?base_path ?(actor = "system") key json =
+let set_by_key_with_change ?base_path ?(actor = "system") key json =
   let result =
     with_rw (fun () ->
       match Hashtbl.find_opt registry_tbl key with
@@ -230,17 +237,23 @@ let set_by_key ?base_path ?(actor = "system") key json =
           let old_value = erased.current_json () in
           match erased.set_from_json json with
           | Error _ as e -> e
-          | Ok () -> Ok (erased.current_json (), old_value))
+          | Ok () ->
+            Ok { old_value; new_value = erased.current_json () })
   in
   match result with
   | Error _ as e -> e
-  | Ok (new_value, old_value) ->
+  | Ok ({ old_value; new_value } as change) ->
       (match effective_base_path ?base_path () with
       | None -> ()
       | Some base_path ->
           persist ~base_path;
           record_audit ~base_path ~key ~old_value ~new_value ~actor ());
-      Ok ()
+      Ok change
+
+let set_by_key ?base_path ?actor key json =
+  set_by_key_with_change ?base_path ?actor key json
+  |> Result.map (fun _ -> ())
+;;
 
 let clear ?base_path ?(actor = "system") (entry : 'a param) =
   let key, old_value, new_value =
@@ -257,7 +270,7 @@ let clear ?base_path ?(actor = "system") (entry : 'a param) =
       persist ~base_path;
       record_audit ~base_path ~key ~old_value ~new_value ~actor ()
 
-let clear_by_key ?base_path ?(actor = "system") key =
+let clear_by_key_with_change ?base_path ?(actor = "system") key =
   let result =
     with_rw (fun () ->
       match Hashtbl.find_opt registry_tbl key with
@@ -265,17 +278,22 @@ let clear_by_key ?base_path ?(actor = "system") key =
       | Some erased ->
           let old_value = erased.current_json () in
           erased.clear_override ();
-          Ok (erased.default_json (), old_value))
+          Ok { old_value; new_value = erased.default_json () })
   in
   match result with
   | Error _ as e -> e
-  | Ok (new_value, old_value) ->
+  | Ok ({ old_value; new_value } as change) ->
       (match effective_base_path ?base_path () with
       | None -> ()
       | Some base_path ->
           persist ~base_path;
           record_audit ~base_path ~key ~old_value ~new_value ~actor ());
-      Ok ()
+      Ok change
+
+let clear_by_key ?base_path ?actor key =
+  clear_by_key_with_change ?base_path ?actor key
+  |> Result.map (fun _ -> ())
+;;
 
 let registry () =
   with_ro (fun () ->

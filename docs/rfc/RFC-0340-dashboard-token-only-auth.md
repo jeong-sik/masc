@@ -1,11 +1,11 @@
 ---
 rfc: "0340"
-title: "Loopback dashboard Worker credential"
+title: "Loopback dashboard token-only auth"
 status: Active
 updated: 2026-08-03
 ---
 
-# RFC-0340: Loopback dashboard Worker credential
+# RFC-0340: Loopback dashboard token-only auth
 
 - Status: Active
 - Date: 2026-07-10
@@ -30,20 +30,21 @@ The admitted request authority must also be an exact loopback host before any
 token or credential I/O occurs. Host suffix and substring matching are not
 part of the contract.
 
-The credential grants `Worker` permissions. It cannot satisfy `CanAdmin`,
-`CanInit`, or `CanReset`. Dashboard operations that require those permissions
-need an explicit operator credential. Known MCP tools continue to use their
-typed tool permission; the dev-token does not create a path-based exception.
+The credential's role is `RFC-dashboard-dev-token-configured-role`'s decision,
+not this RFC's; that RFC issues it as `Admin`. Known MCP tools continue to use
+their typed tool permission, and the dev-token does not create a path-based
+exception — the endpoint's own gate is the exact loopback `Host`, which this
+RFC specifies above.
 
 ## Durable rotation
 
 Only a valid credential whose actor is exactly `dashboard` and whose role is
-exactly `Worker` is reusable. Every other stored candidate enters one serialized
+exactly the configured issuance role is reusable. Every other stored candidate enters one serialized
 rotation:
 
 1. Persist the new raw token at `.masc/auth/dashboard.token.pending`.
 2. Revoke the current `dashboard` credential.
-3. Persist the new `Worker` credential for the journalled raw token.
+3. Persist the new credential for the journalled raw token.
 4. Atomically publish the raw token at `.masc/auth/dashboard.token` with private
    file permissions.
 5. Remove the pending journal.
@@ -85,13 +86,14 @@ MCP calls carrying an explicit actor are never replayed by this recovery path.
 
 - Invalid request authority performs zero dev-token file I/O.
 - The response has the exact actor and role contract.
-- An existing `Admin` dashboard credential is revoked; its bearer becomes
-  invalid and the replacement bearer resolves to `Worker`.
+- A dashboard credential whose role differs from the configured issuance role
+  is revoked, and its bearer becomes invalid.
 - Corrupt journals and injected read/write failures fail closed with stable
   error codes.
-- The Worker bearer receives `403` from
-  `POST /api/v1/dashboard/gate/mode` (`CanAdmin`) and can use an allowed
-  `CanVote` route.
+- `POST /api/v1/dashboard/gate/mode` (`CanAdmin`) answers `403` to a bearer
+  below that permission. `test_sse_storm_e2e` pins this with a minted `Worker`,
+  not with the dashboard bearer, whose role this RFC does not decide.
 - Typed REST and MCP auth failures retry once; prose-only failures do not retry.
-- `rg "~role:Masc_domain.Admin" lib/server/server_routes_http_dashboard_dev_token.ml`
-  returns no matches.
+- The issuance role is read from one constant
+  (`Server_routes_http_dashboard_dev_token.dashboard_dev_role`), never inlined
+  per call site.

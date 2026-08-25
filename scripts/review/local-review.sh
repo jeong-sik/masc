@@ -49,7 +49,7 @@ Options:
 
 Environment:
   MASC_LOCAL_REVIEW_COMMAND   Optional local command override. Receives prompt on stdin.
-  MASC_LOCAL_REVIEW_URL       Optional OAS/OpenAI-compatible review endpoint.
+  MASC_LOCAL_REVIEW_URL       Optional AGENT_CORE/OpenAI-compatible review endpoint.
   MASC_LOCAL_REVIEW_CACHE_DIR Cache root (default: <shared-repo-root>/.masc/review-cache/local-review)
   MASC_LOCAL_REVIEW_CHUNK_BYTES
   MASC_LOCAL_REVIEW_MAX_TOKENS
@@ -179,7 +179,7 @@ fi
 
 # Require a review endpoint only when actually running a review (not --print-cache-key).
 if [ -z "$REVIEW_COMMAND" ] && [ -z "$REVIEW_URL" ]; then
-  echo "set MASC_LOCAL_REVIEW_COMMAND or MASC_LOCAL_REVIEW_URL (OAS/OpenAI-compatible endpoint)" >&2
+  echo "set MASC_LOCAL_REVIEW_COMMAND or MASC_LOCAL_REVIEW_URL (AGENT_CORE/OpenAI-compatible endpoint)" >&2
   exit 1
 fi
 
@@ -436,7 +436,7 @@ fi
 if [ -n "$REVIEW_COMMAND" ]; then
   REVIEW_TARGET_DESC="custom command"
 else
-  REVIEW_TARGET_DESC="OAS/OpenAI-compatible endpoint \`${REVIEW_URL}\`"
+  REVIEW_TARGET_DESC="AGENT_CORE/OpenAI-compatible endpoint \`${REVIEW_URL}\`"
 fi
 
 MARKDOWN_RESULT="$(

@@ -1,9 +1,21 @@
-type t = { patterns : Re.re list }
+type t =
+  { patterns : Re.re list
+  ; exact_values : string list
+  ; max_exact_value_len : int
+  }
 
-let empty = { patterns = [] }
+type stream_state =
+  { redaction : t
+  ; pending_line : Buffer.t
+  ; mutable next_bounded_flush_at : int
+  }
+
+let empty = { patterns = []; exact_values = []; max_exact_value_len = 0 }
 
 let min_secret_len = 8
 let max_secret_file_bytes = 64 * 1024
+let stream_emit_bytes = 4 * 1024
+let structural_pattern_overlap_bytes = 4 * 1024
 
 let path_exists path =
   try Sys.file_exists path with
@@ -52,6 +64,43 @@ let values_from_file path acc =
            |> add_lines value)
   | _ -> acc
 
+let strip_matching_quotes value =
+  let len = String.length value in
+  if len >= 2
+     && ((Char.equal value.[0] '"' && Char.equal value.[len - 1] '"')
+         || (Char.equal value.[0] '\'' && Char.equal value.[len - 1] '\''))
+  then String.sub value 1 (len - 2)
+  else value
+
+let add_mapping_scalar_values value acc =
+  value
+  |> String.split_on_char '\n'
+  |> List.fold_left
+       (fun acc line ->
+          match String.index_opt line ':' with
+          | None -> acc
+          | Some separator ->
+            let value_start = separator + 1 in
+            let scalar =
+              String.sub line value_start (String.length line - value_start)
+              |> String.trim
+              |> strip_matching_quotes
+            in
+            add_value scalar acc)
+       acc
+
+let values_from_structured_secret_file path acc =
+  match lstat_opt path with
+  | Some st when st.Unix.st_kind = Unix.S_REG ->
+      (match read_regular_file path st with
+       | None -> acc
+       | Some value ->
+           acc
+           |> add_value (strip_one_final_newline value)
+           |> add_lines value
+           |> add_mapping_scalar_values value)
+  | _ -> acc
+
 let collect_env_values env_root acc =
   if not (path_exists env_root) then acc
   else
@@ -96,7 +145,11 @@ let dedupe values =
   |> List.sort (fun a b ->
        compare (String.length b, b) (String.length a, a))
 
-let snapshot ~base_path ~keeper_name =
+let snapshot_with_additional_secret_files
+      ~additional_secret_files
+      ~base_path
+      ~keeper_name
+  =
   let values =
     Keeper_secret_projection.secret_roots ~base_path ~keeper_name
     |> List.fold_left
@@ -107,12 +160,27 @@ let snapshot ~base_path ~keeper_name =
             in
             acc |> collect_env_values env_root |> collect_file_values files_root)
          []
+    |> fun values ->
+    List.fold_left
+      (fun acc path -> values_from_structured_secret_file path acc)
+      values
+      additional_secret_files
     |> dedupe
   in
   let patterns =
     List.map (fun value -> Re.compile (Re.str value)) values
   in
-  { patterns }
+  let max_exact_value_len =
+    List.fold_left (fun longest value -> max longest (String.length value)) 0 values
+  in
+  { patterns; exact_values = values; max_exact_value_len }
+
+let snapshot ~base_path ~keeper_name =
+  snapshot_with_additional_secret_files
+    ~additional_secret_files:[]
+    ~base_path
+    ~keeper_name
+;;
 
 let redact_text t text =
   let text =
@@ -123,55 +191,110 @@ let redact_text t text =
   in
   Observability_redact.redact_text text
 
-(* Streaming chunk redaction. [redact_text] is stateless: a single-line
-   secret split across chunk N's tail and chunk N+1's head matches in
-   neither call. [stream_state] buffers raw bytes up to the last ['\n'] so
-   the containing line is reassembled before redaction. Multi-line secrets
-   (a value containing ['\n'], e.g. a PEM block) may still partially
-   surface if the buffer's last ['\n'] falls inside the secret; this is
-   strictly better than the pre-fix behaviour where every cross-chunk split
-   leaked. *)
-type stream_state = { pending : Buffer.t }
+let stream_overlap_bytes redaction =
+  max structural_pattern_overlap_bytes (max 0 (redaction.max_exact_value_len - 1))
+;;
 
-let create_stream_state () = { pending = Buffer.create 256 }
+let stream_flush_threshold redaction =
+  stream_overlap_bytes redaction + stream_emit_bytes
+;;
 
-let redact_stream_chunk t state chunk =
-  Buffer.add_string state.pending chunk;
-  let contents = Buffer.contents state.pending in
-  match String.rindex_opt contents '\n' with
-  | None -> ""
-  | Some nl_pos ->
-    let safe_len = nl_pos + 1 in
-    let safe_raw = String.sub contents 0 safe_len in
-    let held = String.sub contents safe_len (String.length contents - safe_len) in
-    Buffer.clear state.pending;
-    Buffer.add_string state.pending held;
-    redact_text t safe_raw
+let create_stream_state redaction =
+  { redaction
+  ; pending_line = Buffer.create 256
+  ; next_bounded_flush_at = stream_flush_threshold redaction
+  }
+;;
 
-let redact_stream_finish t state =
-  let contents = Buffer.contents state.pending in
-  Buffer.clear state.pending;
-  if String.equal contents "" then "" else redact_text t contents
+let exact_value_starts_at text ~index value =
+  let value_len = String.length value in
+  let rec equal offset =
+    offset = value_len
+    || (Char.equal text.[index + offset] value.[offset] && equal (offset + 1))
+  in
+  index + value_len <= String.length text
+  && Char.equal text.[index] value.[0]
+  && equal 1
+;;
 
+let exact_value_at redaction text index =
+  List.find_opt (exact_value_starts_at text ~index) redaction.exact_values
+;;
+
+let emit_bounded_prefix state emitted stop =
+  let pending = Buffer.contents state.pending_line in
+  let safely_redacted = Buffer.create stop in
+  let cursor = ref 0 in
+  while !cursor < stop do
+    match exact_value_at state.redaction pending !cursor with
+    | Some value ->
+      Buffer.add_string safely_redacted "[REDACTED]";
+      cursor := !cursor + String.length value
+    | None ->
+      Buffer.add_char safely_redacted pending.[!cursor];
+      incr cursor
+  done;
+  Buffer.add_string
+    emitted
+    (Observability_redact.redact_text (Buffer.contents safely_redacted));
+  Buffer.clear state.pending_line;
+  Buffer.add_substring
+    state.pending_line
+    pending
+    !cursor
+    (String.length pending - !cursor)
+;;
+
+let flush_complete_record state emitted =
+  Buffer.add_string emitted (redact_text state.redaction (Buffer.contents state.pending_line));
+  Buffer.clear state.pending_line;
+  state.next_bounded_flush_at <- stream_flush_threshold state.redaction
+;;
+
+let flush_bounded_prefix_if_needed state emitted =
+  let pending_len = Buffer.length state.pending_line in
+  if pending_len >= state.next_bounded_flush_at
+  then (
+    let overlap = stream_overlap_bytes state.redaction in
+    let stop = pending_len - overlap in
+    emit_bounded_prefix state emitted stop;
+    state.next_bounded_flush_at <- stream_flush_threshold state.redaction)
+;;
+
+let redact_stream_chunk state chunk =
+  let emitted = Buffer.create (String.length chunk) in
+  String.iter
+    (fun char ->
+       Buffer.add_char state.pending_line char;
+       if Char.equal char '\n' || Char.equal char '\r'
+       then flush_complete_record state emitted
+       else flush_bounded_prefix_if_needed state emitted)
+    chunk;
+  Buffer.contents emitted
+;;
+
+let redact_stream_finish state =
+  let trailing = redact_text state.redaction (Buffer.contents state.pending_line) in
+  Buffer.clear state.pending_line;
+  state.next_bounded_flush_at <- stream_flush_threshold state.redaction;
+  trailing
+;;
+
+(* Keys as well as values. A secret can be the key -- a header name, a
+   parameter used as a dict key, {"<secret>": "x"} straight from a tool
+   argument -- and a traversal that only rewrites leaves emits it (#22941).
+   Doing both here rather than in one caller means every boundary that reaches
+   for the redactor gets the same policy; the alternative left two of three
+   callers redacting values only, without saying so. *)
 let rec redact_json_exact t = function
   | `String s -> `String (redact_text t s)
   | `Assoc fields ->
       `Assoc
         (List.map
-           (fun (key, value) -> (key, redact_json_exact t value))
+           (fun (key, value) -> (redact_text t key, redact_json_exact t value))
            fields)
   | `List items -> `List (List.map (redact_json_exact t) items)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json
-
-let rec redact_json_keys t = function
-  | `String _ as value -> value
-  | `Assoc fields ->
-      `Assoc
-        (List.map
-           (fun (key, value) -> redact_text t key, redact_json_keys t value)
-           fields)
-  | `List items -> `List (List.map (redact_json_keys t) items)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as value -> value
 
 let redact_json t json =
   json |> redact_json_exact t |> Observability_redact.redact_json_strings

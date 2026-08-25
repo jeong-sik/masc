@@ -63,13 +63,13 @@
     padding-left: 28px;
   }
 
-  /* Keeper persona grid */
-  .persona-grid {
+  /* Keeper grid */
+  .keeper-grid {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
     gap: 12px;
   }
-  .persona {
+  .keeper-card {
     background: var(--color-bg-surface);
     border: 1px solid var(--color-border-default);
     border-radius: var(--r-1);
@@ -77,10 +77,10 @@
     display: flex; flex-direction: column; gap: 10px;
     min-height: 180px;
   }
-  .persona-head {
+  .keeper-head {
     display: flex; align-items: center; gap: 10px;
   }
-  .persona-avatar {
+  .keeper-avatar {
     width: 40px; height: 40px;
     background: var(--color-bg-page);
     border: 1px solid var(--color-border-strong);
@@ -90,27 +90,27 @@
     position: relative;
     border-radius: var(--r-1);
   }
-  .persona-avatar::before {
+  .keeper-avatar::before {
     content: ""; position: absolute; top: -2px; right: -2px;
     width: 8px; height: 8px; border-radius: 50%;
     background: var(--dot);
     box-shadow: 0 0 0 2px var(--color-bg-surface), 0 0 6px var(--dot);
   }
-  .persona-name {
+  .keeper-name {
     font: 600 11px/1.2 var(--font-mono);
     color: var(--color-fg-primary);
   }
-  .persona-role {
+  .keeper-title {
     font: 9px/1.2 var(--font-mono);
     color: var(--color-fg-muted);
     letter-spacing: var(--track-caps);
     text-transform: uppercase;
   }
-  .persona-bio {
+  .keeper-summary {
     font: 10px/1.4 var(--font-sans);
     color: var(--color-fg-secondary);
   }
-  .persona-tag {
+  .keeper-tag {
     font: 9px/1.2 var(--font-mono);
     color: var(--dot);
     letter-spacing: var(--track-wide);
@@ -334,53 +334,53 @@
     </div>
   </section>
 
-  <!-- KEEPER PERSONAS -->
+  <!-- KEEPERS -->
   <section class="pv-sect">
-    <div class="pv-sect-h"><h2>Keeper Personas</h2><span class="sub">The named fleet · each gets a status-color avatar</span></div>
-    <div class="persona-grid">
-      <div class="persona" style="--dot: var(--color-accent-fg)">
-        <div class="persona-head">
-          <div class="persona-avatar">N</div>
-          <div><div class="persona-name">nick0cave</div><div class="persona-role">Captain</div></div>
+    <div class="pv-sect-h"><h2>Keepers</h2><span class="sub">The named fleet · each gets a status-color avatar</span></div>
+    <div class="keeper-grid">
+      <div class="keeper-card" style="--dot: var(--color-accent-fg)">
+        <div class="keeper-head">
+          <div class="keeper-avatar">N</div>
+          <div><div class="keeper-name">nick0cave</div><div class="keeper-title">Captain</div></div>
         </div>
-        <div class="persona-bio">The delivery keeper. Claims, writes, merges. Always running during an active goal. Brass dot = this is who is moving the work.</div>
-        <div class="persona-tag">brass · #d4a14a</div>
+        <div class="keeper-summary">The delivery keeper. Claims, writes, merges. Always running during an active goal. Brass dot = this is who is moving the work.</div>
+        <div class="keeper-tag">brass · #d4a14a</div>
       </div>
 
-      <div class="persona" style="--dot: var(--ok-fg)">
-        <div class="persona-head">
-          <div class="persona-avatar">M</div>
-          <div><div class="persona-name">masc-improver</div><div class="persona-role">Improver</div></div>
+      <div class="keeper-card" style="--dot: var(--ok-fg)">
+        <div class="keeper-head">
+          <div class="keeper-avatar">M</div>
+          <div><div class="keeper-name">masc-improver</div><div class="keeper-title">Improver</div></div>
         </div>
-        <div class="persona-bio">Refactors MASC itself. Runs on the meta-loop — keeper pipeline, dashboard goals, clarity. Green.</div>
-        <div class="persona-tag">ok · #8ebc8e</div>
+        <div class="keeper-summary">Refactors MASC itself. Runs on the meta-loop — keeper pipeline, dashboard goals, clarity. Green.</div>
+        <div class="keeper-tag">ok · #8ebc8e</div>
       </div>
 
-      <div class="persona" style="--dot: var(--info-fg)">
-        <div class="persona-head">
-          <div class="persona-avatar">S</div>
-          <div><div class="persona-name">sangsu</div><div class="persona-role">Analyst</div></div>
+      <div class="keeper-card" style="--dot: var(--info-fg)">
+        <div class="keeper-head">
+          <div class="keeper-avatar">S</div>
+          <div><div class="keeper-name">sangsu</div><div class="keeper-title">Analyst</div></div>
         </div>
-        <div class="persona-bio">Reads, measures, flags drift. Speaks in QUESTION + FLAG. Never writes code. Blue.</div>
-        <div class="persona-tag">info · #8aa6c4</div>
+        <div class="keeper-summary">Reads, measures, flags drift. Speaks in QUESTION + FLAG. Never writes code. Blue.</div>
+        <div class="keeper-tag">info · #8aa6c4</div>
       </div>
 
-      <div class="persona" style="--dot: var(--err-fg)">
-        <div class="persona-head">
-          <div class="persona-avatar">Q</div>
-          <div><div class="persona-name">qa-king</div><div class="persona-role">QA</div></div>
+      <div class="keeper-card" style="--dot: var(--err-fg)">
+        <div class="keeper-head">
+          <div class="keeper-avatar">Q</div>
+          <div><div class="keeper-name">qa-king</div><div class="keeper-title">QA</div></div>
         </div>
-        <div class="persona-bio">Enforces suites. Red in the feed means qa-king found something. Blocks merges hard. Red.</div>
-        <div class="persona-tag">err · #d8806f</div>
+        <div class="keeper-summary">Enforces suites. Red in the feed means qa-king found something. Blocks merges hard. Red.</div>
+        <div class="keeper-tag">err · #d8806f</div>
       </div>
 
-      <div class="persona" style="--dot: var(--stalled-fg)">
-        <div class="persona-head">
-          <div class="persona-avatar">R</div>
-          <div><div class="persona-name">rama</div><div class="persona-role">Researcher</div></div>
+      <div class="keeper-card" style="--dot: var(--stalled-fg)">
+        <div class="keeper-head">
+          <div class="keeper-avatar">R</div>
+          <div><div class="keeper-name">rama</div><div class="keeper-title">Researcher</div></div>
         </div>
-        <div class="persona-bio">Long-running reads + speculation. Often STALLED while awaiting analyst. The patient one. Purple.</div>
-        <div class="persona-tag">stalled · #a88ac0</div>
+        <div class="keeper-summary">Long-running reads + speculation. Often STALLED while awaiting analyst. The patient one. Purple.</div>
+        <div class="keeper-tag">stalled · #a88ac0</div>
       </div>
     </div>
   </section>

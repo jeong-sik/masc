@@ -28,21 +28,19 @@ open Keeper_context_core
 
 type post_turn_lifecycle = {
   updated_meta : keeper_meta;
-  checkpoint : Agent_sdk.Checkpoint.t option;
+  checkpoint : Agent_core.Checkpoint.t option;
   handoff_json : Yojson.Safe.t option;
   handoff_attempted : bool;
   handoff_failure_reason : string option;
-  turn_generation : int;
   checkpoint_bytes : int;
   message_count : int;
 }
 
 type compaction_recovery = {
-  checkpoint : Agent_sdk.Checkpoint.t;
+  checkpoint : Agent_core.Checkpoint.t;
   checkpoint_installation : Keeper_checkpoint_store.installed_checkpoint;
   trigger : Compaction_trigger.t;
   evidence : Keeper_compaction_evidence.t;
-  turn_generation : int;
   commit_count : int;
 }
 
@@ -82,25 +80,20 @@ let checkpoint_load_error_detail = function
   | Store_error detail
   | Parse_error detail
   | Io_error detail
-  | Sdk_other_error detail -> detail
+  | Agent_core_error detail -> detail
 
 let checkpoint_identity_error_detail = function
   | Keeper_checkpoint_store.Session_id_invalid detail ->
     "invalid session id: " ^ detail
-  | Generation_missing -> "checkpoint generation is missing"
-  | Generation_not_integer -> "checkpoint generation is not an integer"
-  | Ref_create_failed (Keeper_checkpoint_ref.Negative_generation generation) ->
-    Printf.sprintf "negative checkpoint generation: %d" generation
-  | Ref_create_failed (Negative_turn_count turn_count) ->
+  | Ref_create_failed (Keeper_checkpoint_ref.Negative_turn_count turn_count) ->
     Printf.sprintf "negative checkpoint turn count: %d" turn_count
   | Ref_create_failed (Invalid_sha256 digest) ->
     Printf.sprintf "invalid checkpoint SHA-256: %s" digest
 
 let checkpoint_ref_detail (reference : Keeper_checkpoint_ref.t) =
   Printf.sprintf
-    "trace_id=%s generation=%d turn_count=%d sha256=%s"
+    "trace_id=%s turn_count=%d sha256=%s"
     (Keeper_id.Trace_id.to_string reference.trace_id)
-    reference.generation
     reference.turn_count
     reference.sha256
 
@@ -150,90 +143,12 @@ let compaction_recovery_error_to_string = function
     ^ Keeper_compact_policy.compaction_rejection_to_string reason
   | No_compaction { source; reason } ->
     Printf.sprintf
-      "no compaction for trace_id=%s generation=%d turn_count=%d sha256=%s: %s"
+      "no compaction for trace_id=%s turn_count=%d sha256=%s: %s"
       (Keeper_id.Trace_id.to_string source.trace_id)
-      source.generation
       source.turn_count
       source.sha256
       (Keeper_compaction_outcome.no_compaction_reason_to_string reason)
 
-(* ── Tier A6: resilience post-turn wire-in (Cycle 23) ──────────────
-   Feature-flag-gated layer that runs before tool emission and
-   multimodal hydration. The strict ordering is explicit at the call
-   site below — do not reorder.
-
-   When [MASC_RESILIENCE] is off (default), this is a pure pass-
-   through. When on, untyped compaction or handoff error text is
-   fail-closed to operator handoff, and a [`Assoc] meta tree is upserted into
-   [working_context["resilience_meta"]].
-
-   Failures inside the wire-in do not propagate — they are logged
-   and the unmodified lifecycle result is returned, preserving the
-   keeper's primary turn outcome. *)
-
-let apply_resilience_wirein
-    ?audit_store
-    ?strategy_executor
-    ~(now : float)
-    (lifecycle : post_turn_lifecycle) : post_turn_lifecycle =
-  if not (Resilience.Keeper_bridge.masc_resilience_enabled ()) then lifecycle
-  else
-    match lifecycle.checkpoint with
-    | None ->
-        (* No checkpoint to enrich; resilience_meta has no host. *)
-        lifecycle
-    | Some cp -> (
-        try
-          let maybe_error = lifecycle.handoff_failure_reason in
-          let witness = Resilience.Keeper_bridge.running_witness in
-          let outcome =
-            Resilience.Keeper_bridge.apply_post_turn_resilience
-              witness ?audit_store ?strategy_executor ~now
-              ~working_context:cp.Agent_sdk.Checkpoint.working_context
-              ~maybe_error ()
-          in
-          let new_cp =
-            { cp with
-              Agent_sdk.Checkpoint.working_context = outcome.working_context
-            }
-          in
-          { lifecycle with checkpoint = Some new_cp }
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Keeper.warn
-            "keeper:%s resilience wire-in failed: %s"
-            lifecycle.updated_meta.name (Printexc.to_string exn);
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string PostTurnWireinFailures)
-            ~labels:[("keeper", lifecycle.updated_meta.name); ("phase", "resilience")]
-            ();
-          lifecycle)
-
-(* ── Tier K1: multimodal post-turn wire-in (Cycle 27) ─────────────
-   Wire-in that runs after the A5/A6 pair. Reads
-   raw multimodal artifacts the keeper agent dropped into
-   [working_context["multimodal_artifacts"]], hydrates them via
-   [Multimodal_keeper_bridge.hydrate_one], and accumulates them into
-   the process-wide [Multimodal.Workspace_holder].
-
-   It consumes the artifact bag and replaces it with a [workspace_meta]
-   summary so the next turn does not re-process the same entries.
-
-   Failures inside the wire-in do not propagate — they are logged
-   and the unmodified lifecycle result is returned, preserving the
-   keeper's primary turn outcome. *)
-
-(* ── Tier K4b: tool-emission drain (Cycle 27) ──────────────────────
-   Drains producer-owned typed JSON captured at the Keeper tool execution
-   boundary into [working_context["multimodal_artifacts"]] so the
-   K1 wirein below picks them up.
-
-   Strict ordering: this MUST run BEFORE [apply_multimodal_wirein].
-   K4b emit + K1 hydrate is a producer/consumer pair on the same
-   working_context bag.
-
-   Typed tool emission is a normal Keeper capability, not a rollout gate. *)
 let apply_tool_emission_wirein
     (lifecycle : post_turn_lifecycle) : post_turn_lifecycle =
   match lifecycle.checkpoint with
@@ -249,10 +164,10 @@ let apply_tool_emission_wirein
           let new_wc =
             Keeper_tool_emission_hook.drain_into_working_context
               acc
-              ~working_context:cp.Agent_sdk.Checkpoint.working_context
+              ~working_context:cp.Agent_core.Checkpoint.working_context
           in
           let new_cp =
-            { cp with Agent_sdk.Checkpoint.working_context = new_wc }
+            { cp with Agent_core.Checkpoint.working_context = new_wc }
           in
           { lifecycle with checkpoint = Some new_cp }
         with
@@ -276,7 +191,7 @@ let apply_multimodal_wirein
   | Some cp ->
     (match
        Multimodal.Wirein_helpers.extract_raw_artifacts
-         cp.Agent_sdk.Checkpoint.working_context
+         cp.Agent_core.Checkpoint.working_context
      with
      | Error detail ->
        Log.Keeper.warn
@@ -316,7 +231,6 @@ let apply_multimodal_wirein
           let meta =
             `Assoc
               [
-                ("added_this_turn", `Int !added_count);
                 ("workspace_size", `Int workspace_size);
                 ( "last_artifact_id", Json_util.string_opt_to_json !last_id );
                 ("at", `Float now);
@@ -327,7 +241,7 @@ let apply_multimodal_wirein
               meta
           in
           let new_cp =
-            { cp with Agent_sdk.Checkpoint.working_context = new_wc }
+            { cp with Agent_core.Checkpoint.working_context = new_wc }
           in
           { lifecycle with checkpoint = Some new_cp }
         with
@@ -342,108 +256,41 @@ let apply_multimodal_wirein
             ();
           lifecycle))
 
-let apply_post_turn_lifecycle_with_resilience_handles
-    ~(resilience_audit_store : Shared_audit.Store.t option)
-    ~(resilience_strategy_executor : Resilience.Recovery.strategy_executor option)
+let apply_post_turn_lifecycle
     ~(meta : keeper_meta)
-    ~(checkpoint : Agent_sdk.Checkpoint.t option) : post_turn_lifecycle =
-  (* Reviewer #13214: an executor without an audit store would let
-     retry/fallback/handoff/abort callbacks mutate live state
-     without the pre-flight RecoveryAttempted envelope that
-     keeper_bridge relies on for durable auditability.  Reject the
-     combination at the seam so the invariant fails fast at the
-     call site, not later when an envelope is missing. *)
-  (match resilience_audit_store, resilience_strategy_executor with
-   | None, Some _ ->
-     invalid_arg
-       "Keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles: \
-        resilience_strategy_executor requires resilience_audit_store; \
-        executor without audit store would skip the RecoveryAttempted \
-        envelope and break durable auditability"
-   | _ -> ());
+    ~(checkpoint : Agent_core.Checkpoint.t option) : post_turn_lifecycle =
   let now_ts = Time_compat.now () in
-  let no_checkpoint_decision = Keeper_compact_policy.Skipped_no_checkpoint in
   let body = match checkpoint with
   | None ->
-      let updated_meta =
-        map_runtime
-          (fun rt ->
-            {
-              rt with
-              compaction_rt =
-                {
-                  rt.compaction_rt with
-                  last_check_ts = now_ts;
-                  last_decision =
-                    Keeper_compact_policy.compaction_decision_to_string
-                      no_checkpoint_decision
-                    |> compaction_runtime_decision_of_string;
-                };
-            })
-          meta
-      in
+      let updated_meta = meta in
       {
         updated_meta;
         checkpoint = None;
         handoff_json = None;
         handoff_attempted = false;
         handoff_failure_reason = None;
-        turn_generation = meta.runtime.nonce;
         checkpoint_bytes = 0;
         message_count = 0;
       }
   | Some cp ->
-      let ctx = context_of_oas_checkpoint cp in
-      let current_generation =
-        checkpoint_generation cp ~fallback:meta.runtime.nonce
-      in
-      let base_meta =
-        if current_generation = meta.runtime.nonce then meta
-        else
-          map_runtime
-            (fun rt -> { rt with nonce = current_generation })
-            meta
-      in
-      let decision = Keeper_compact_policy.Not_requested in
-      let meta_after_context_check =
-        map_runtime
-          (fun rt ->
-            {
-              rt with
-              compaction_rt =
-                {
-                  rt.compaction_rt with
-                  last_check_ts = now_ts;
-                  last_decision =
-                    Keeper_compact_policy.compaction_decision_to_string
-                      decision
-                    |> compaction_runtime_decision_of_string;
-                };
-            })
-          base_meta
-      in
+      let ctx = context_of_agent_core_checkpoint cp in
+      let base_meta = meta in
+      let meta_after_context_check = base_meta in
       {
         updated_meta = meta_after_context_check;
         checkpoint = Some cp;
         handoff_json = None;
         handoff_attempted = false;
         handoff_failure_reason = None;
-        turn_generation = current_generation;
         checkpoint_bytes = serialized_bytes ctx;
         message_count = message_count ctx;
       }
   in
-  (* Strict ordering: resilience classification → tool emission drain (K4b)
-     → multimodal hydration (K1). K4b precedes multimodal because it is the
-     producer that K1 consumes. The multimodal pass runs last because it
-     persists a [workspace_meta] summary that depends on whether prior passes
-     have already mutated [working_context]. *)
-  let body =
-    apply_resilience_wirein
-      ?audit_store:resilience_audit_store
-      ?strategy_executor:resilience_strategy_executor
-      ~now:now_ts body
-  in
+  (* Strict ordering: tool emission drain (K4b) → multimodal hydration (K1).
+     K4b precedes multimodal because it is the producer that K1 consumes. The
+     multimodal pass runs last because it persists a [workspace_meta] summary
+     that depends on whether the prior pass has already mutated
+     [working_context]. *)
   let body = apply_tool_emission_wirein body in
   apply_multimodal_wirein ~now:now_ts body
 
@@ -454,6 +301,8 @@ type rejection_disposition =
 let rejection_disposition = function
   | Keeper_compact_policy.No_eligible_history ->
     Terminal_no_compaction Keeper_compaction_outcome.No_eligible_history
+  | No_reducible_boundary ->
+    Terminal_no_compaction Keeper_compaction_outcome.No_reducible_boundary
   | Invalid_structure _ ->
     Terminal_no_compaction Keeper_compaction_outcome.Invalid_structural_source
   | Exact_execution_terminal terminal ->
@@ -479,7 +328,6 @@ type prepared_compaction =
   { session : Keeper_context_core.session_context
   ; source_ref : Keeper_checkpoint_ref.t
   ; retry_meta : keeper_meta
-  ; turn_generation : int
   ; prepared_trigger : Compaction_trigger.t
   ; context : Keeper_context_core.working_context
   ; evidence : Keeper_compaction_evidence.t
@@ -495,6 +343,7 @@ let exact_execution_terminal_of_evidence
     ; call_id = evidence.call_id
     ; plan_fingerprint = evidence.plan_fingerprint
     ; request_body_sha256 = evidence.receipt_request_body_sha256
+    ; detail = None
     }
 ;;
 
@@ -515,7 +364,7 @@ let prepare_compaction_admitted
       ~(trigger : Compaction_trigger.t)
   : (prepared_compaction, compaction_recovery_error) result =
   (* Load the durable source and run the policy + LLM planner.  This phase
-     is deliberately admission-free: the keeper's turn slot is not held
+     is deliberately outside turn execution: no Keeper Owner child is active
      while the provider call runs.  Correctness after an interleaved state
      change is enforced by the source CAS at commit, not by the slot. *)
   let session =
@@ -524,39 +373,33 @@ let prepare_compaction_admitted
       ~base_dir
   in
   match
-    Keeper_checkpoint_store.load_oas_with_ref
+    Keeper_checkpoint_store.load_agent_core_with_ref
       ~session_dir:session.session_dir
       ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
   with
   | Error Keeper_checkpoint_store.Ref_not_found ->
     Log.Keeper.debug
-      "keeper:%s compaction OAS checkpoint not found"
+      "keeper:%s compaction AGENT_CORE checkpoint not found"
       (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
     Error (Checkpoint_ref_load_failed Keeper_checkpoint_store.Ref_not_found)
   | Error error ->
     let detail = checkpoint_ref_load_error_detail error in
     Log.Keeper.error
-      "keeper:%s compaction OAS load error: %s"
+      "keeper:%s compaction AGENT_CORE load error: %s"
       (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       detail;
     Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string OasExecutionErrors)
+      Keeper_metrics.(to_string Agent_coreExecutionErrors)
       ~labels:
         [ "keeper", meta.name
         ; ( "phase"
-          , Keeper_oas_execution_error_phase.(to_label Compaction_checkpoint_load) )
+          , Keeper_agent_core_execution_error_phase.(to_label Compaction_checkpoint_load) )
         ]
       ();
     Error (Checkpoint_ref_load_failed error)
   | Ok (checkpoint, source_ref) ->
-    let turn_generation =
-      checkpoint_generation checkpoint ~fallback:meta.runtime.nonce
-    in
-    let ctx = context_of_oas_checkpoint checkpoint in
-    let retry_meta =
-      if turn_generation = meta.runtime.nonce then meta
-      else map_runtime (fun rt -> { rt with nonce = turn_generation }) meta
-    in
+    let ctx = context_of_agent_core_checkpoint checkpoint in
+    let retry_meta = meta in
     let preparation : Keeper_compact_policy.compaction_preparation =
       compact_for_request
         ~meta:retry_meta
@@ -577,7 +420,6 @@ let prepare_compaction_admitted
          { session
          ; source_ref
          ; retry_meta
-         ; turn_generation
          ; prepared_trigger
          ; context = preparation.context
          ; evidence
@@ -634,7 +476,7 @@ let prepare_compaction
 
 let commit_prepared_compaction_with
     ?(after_checkpoint_installed = fun () -> ())
-    ~save_oas_checkpoint_if_source
+    ~save_agent_core_checkpoint_if_source
     (prepared : prepared_compaction)
   : prepared_commit_outcome =
   (* Source-CAS commit.  The caller decides which admission (if any) guards
@@ -643,7 +485,6 @@ let commit_prepared_compaction_with
   let { session
       ; source_ref
       ; retry_meta
-      ; turn_generation
       ; prepared_trigger
       ; context
       ; evidence
@@ -657,7 +498,7 @@ let commit_prepared_compaction_with
     Not_committed (no_compaction_of_prepared ~cause prepared)
   in
   try
-    let candidate_context = oas_context_of_context context in
+    let candidate_context = agent_core_context_of_context context in
     match
       Keeper_checkpoint_store.compaction_commit_count_of_context
         candidate_context
@@ -676,11 +517,11 @@ let commit_prepared_compaction_with
     | Ok source_commit_count ->
       let commit_count = source_commit_count + 1 in
       let stamped_context =
-        Agent_sdk.Context.copy ~eio:true candidate_context
+        Agent_core.Context.copy ~eio:true candidate_context
       in
-      Agent_sdk.Context.set_scoped
+      Agent_core.Context.set_scoped
         stamped_context
-        Agent_sdk.Context.Session
+        Agent_core.Context.Session
         Keeper_checkpoint_store.compaction_commit_count_context_key
         (`Int commit_count);
       let commit_context =
@@ -689,13 +530,12 @@ let commit_prepared_compaction_with
         }
       in
       (match
-         save_oas_checkpoint_if_source
+         save_agent_core_checkpoint_if_source
            ~multimodal_policy:retry_meta.multimodal_policy
            ~keeper_name:retry_meta.name
            ~session
            ~agent_name:retry_meta.agent_name
            ~ctx:commit_context
-           ~generation:turn_generation
            ~expected_source_ref:source_ref
        with
        | Ok
@@ -706,7 +546,6 @@ let commit_prepared_compaction_with
            ; checkpoint_installation = installed
            ; trigger = prepared_trigger
            ; evidence
-           ; turn_generation
            ; commit_count
            }
          in
@@ -714,16 +553,13 @@ let commit_prepared_compaction_with
             Eio.Cancel.protect
             @@ fun () ->
             after_checkpoint_installed ();
-            (try
-               Otel_metric_store.inc_counter
-                 Keeper_metrics.(to_string Compactions)
-                 ~labels:[ "keeper", retry_meta.name ]
-                 ()
-             with
-             | exn ->
-               log_keeper_exn
-                 ~label:"compaction committed metric emission"
-                 exn);
+            (* [inc_counter] is best-effort by construction (its wrapper
+               swallows and logs); the catch that sat here was a second
+               swallow around a total call. *)
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string Compactions)
+              ~labels:[ "keeper", retry_meta.name ]
+              ();
             Committed recovery
           with
           | Eio.Cancel.Cancelled _ as exn ->
@@ -785,21 +621,21 @@ let commit_prepared_compaction_with
 
 let commit_prepared_compaction prepared =
   commit_prepared_compaction_with
-    ~save_oas_checkpoint_if_source
+    ~save_agent_core_checkpoint_if_source
     prepared
 ;;
 
 module For_testing = struct
   let commit_prepared_compaction_with_history
         ?after_checkpoint_installed
-        ~save_oas_history
+        ~save_agent_core_history
         prepared
     =
     commit_prepared_compaction_with
       ?after_checkpoint_installed
-      ~save_oas_checkpoint_if_source:
-        (Keeper_context_core.For_testing.save_oas_checkpoint_if_source_with_history
-           ~save_oas_history)
+      ~save_agent_core_checkpoint_if_source:
+        (Keeper_context_core.For_testing.save_agent_core_checkpoint_if_source_with_history
+           ~save_agent_core_history)
       prepared
   ;;
 end

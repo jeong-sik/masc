@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Guard the Keeper tool execution substrate against three regressions:
 #
-#   1. Descriptor executor variants that turn gh/git/OAS bridge adapters into
+#   1. Descriptor executor variants that turn gh/git/AGENT_CORE bridge adapters into
 #      first-class tool concepts. Those belong behind Shell_ir or runtime
 #      plumbing, not in the descriptor executor enum.
 #   2. GitHub/PR micro-tool names returning to active descriptor, prompt,
@@ -49,12 +49,10 @@ EXECUTOR_SCAN_FILES=(
 SURFACE_SCAN_FILES=(
   "lib/keeper/keeper_tool_descriptor.ml"
   "lib/keeper/keeper_tool_descriptor.mli"
-  "lib/keeper/keeper_tool_alias.ml"
-  "lib/keeper/keeper_tool_alias.mli"
-  "lib/tool_catalog.ml"
-  "lib/tool_catalog.mli"
-  "lib/tool_catalog_surfaces.ml"
-  "lib/tool_catalog_surfaces.mli"
+  "lib/tool/tool_catalog.ml"
+  "lib/tool/tool_catalog.mli"
+  "lib/tool_catalog_surfaces/tool_catalog_surfaces.ml"
+  "lib/tool_catalog_surfaces/tool_catalog_surfaces.mli"
   "docs/KEEPER-CAPABILITY-MATRIX.md"
   "docs/KEEPER-FILE-MODEL.md"
   "docs/KEEPER-USER-MANUAL.md"
@@ -69,7 +67,7 @@ while IFS= read -r prompt_file; do
   KEEPER_PROMPT_SCAN_FILES+=("$prompt_file")
 done < <(find config/prompts -type f | sort)
 
-EXECUTOR_PATTERN='\b(Gh_cli|Git_cli|Oas_bridge)\b'
+EXECUTOR_PATTERN='\b(Gh_cli|Git_cli|Agent_core_bridge)\b'
 PR_VERB_PATTERN='pr_(comment|review|close)'
 REPO_PR_PATTERN='(gh|github)_pr'
 LEGACY_REPO_HELPER_PATTERN='(keeper|github)_pr_[A-Za-z0-9_]*'

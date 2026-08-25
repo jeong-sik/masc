@@ -1,9 +1,5 @@
 ---
 status: reference
-last_verified: 2026-04-17
-code_refs:
-  - lib/config/env_config.mli
-  - lib/config/
 ---
 
 # Environment Variable Contract
@@ -57,18 +53,18 @@ should be treated as restart-required.
 
 | Scope | Examples | Why |
 | --- | --- | --- |
-| Runtime root and config roots | `MASC_BASE_PATH`, `MASC_CONFIG_DIR`, `MASC_PERSONAS_DIR`, `HOME` | `Config_dir_resolver` caches the resolved root for the life of the process |
-| Server bind and socket topology | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_GRPC_PORT`, `MASC_WS_PORT`, `MASC_GRPC_ENABLED`, `MASC_WS_ENABLED`, `MASC_WEBRTC_ENABLED` | listeners and advertised base URLs are fixed during server startup |
+| Runtime root and config root | `MASC_BASE_PATH`, `MASC_CONFIG_DIR`, `HOME` | `Config_dir_resolver` caches the resolved root for the life of the process |
+| Server bind and socket topology | `MASC_HOST`, `MASC_HTTP_PORT`, `MASC_GRPC_PORT`, `MASC_GRPC_ENABLED`, `MASC_WS_ENABLED` | listeners and advertised base URLs are fixed during server startup |
 | Backend/bootstrap wiring | `MASC_STARTUP_WATCHDOG_SEC` | boot-time watchdog setup; storage is filesystem-only by construction |
 | Startup-only TOML seeding | every `MASC_KEEPER_*` value sourced from `runtime.toml` | TOML is loaded once and injected into the process env during boot |
 
 Representative code paths:
 
-- [`server_runtime_bootstrap.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/server/server_runtime_bootstrap.ml)
-- [`config_dir_resolver.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config_dir_resolver.ml)
-- [`server_bootstrap_http.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/server/server_bootstrap_http.ml)
-- [`keeper_runtime_config.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/keeper/keeper_runtime_config.ml)
-- [`keeper_tool_policy.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/keeper/keeper_tool_policy.ml)
+- [`server_runtime_bootstrap.ml`](../lib/server/server_runtime_bootstrap.ml)
+- [`config_dir_resolver.ml`](../lib/config_dir_resolver/config_dir_resolver.ml)
+- [`server_bootstrap_http.ml`](../lib/server/server_bootstrap_http.ml)
+- [`keeper_runtime_config.ml`](../lib/keeper_runtime/keeper_runtime_config.ml)
+- [`keeper_tool_policy.ml`](../lib/keeper/keeper_tool_policy.ml)
 
 ### 2. Env-backed defaults that become runtime-dynamic through `Runtime_params`
 
@@ -82,9 +78,9 @@ runtime parameter authority is `Runtime_params`, not the parent shell env.
 
 Representative code paths:
 
-- [`runtime_params.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/runtime_params.ml)
-- [`keeper_config.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/keeper/keeper_config.ml)
-- [`server_routes_http_routes_activity.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/server/server_routes_http_routes_activity.ml)
+- [`runtime_params.ml`](../lib/runtime_params.ml)
+- [`keeper_config.ml`](../lib/keeper/keeper_config.ml)
+- [`server_routes_http_routes_activity.ml`](../lib/server/server_routes_http_routes_activity.ml)
 
 ### 3. Accessor-shaped env readers with limited live effect
 
@@ -101,10 +97,10 @@ consumer is known to act on every request/turn.
 Examples:
 
 - Transport feature flags in
-  [`env_config_runtime.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config/env_config_runtime.ml)
+  [`env_config_runtime.ml`](../lib/config/env_config_runtime.ml)
   are accessor-shaped, but listener lifecycles remain boot-static.
 - `Config_dir_resolver` helpers read env accessors, but
-  [`resolve()`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config_dir_resolver.ml#L321)
+  [`resolve()`](../lib/config_dir_resolver/config_dir_resolver.ml)
   caches the result, so root changes are boot-static.
 
 ### 4. Execute exec gates (`request_dynamic`, additive-only)
@@ -118,16 +114,10 @@ never break by enabling them.
 Operator rollout procedure and observer log interpretation: see
 [`EXECUTE-RUNBOOK.md`](./EXECUTE-RUNBOOK.md).
 
-| Variable | Default | Effect |
-| --- | --- | --- |
-| `MASC_BASH_SEMANTIC_EXIT` | **on** (post flip PR) | Emits a `return_code_interpretation` object (typed `semantic_exit`) alongside the raw `status`. Set to `0` / `false` / `no` / `off` to opt out and restore the pre-P1 byte-identical shape. See `lib/exec/exec_semantic.mli`. |
-| `MASC_BASH_OUTPUT_CAP` | on (500 KB head + 500 KB tail each) | Head+tail truncation via `Exec_buffer`. `MASC_BASH_CAP_HEAD` / `MASC_BASH_CAP_TAIL` override the per-stream caps. See `lib/exec/exec_buffer.mli`. |
-
 Representative code paths:
 
-- [`exec_semantic.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/exec/exec_semantic.ml)
-- [`exec_buffer.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/exec/exec_buffer.ml)
-- [`exec_policy.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/exec_policy/exec_policy.ml) — Shell_command_gate policy integration
+- [`exec_buffer.ml`](../lib/core/exec_buffer.ml)
+- [`exec_policy.ml`](../lib/exec_policy/exec_policy.ml) — Shell_command_gate policy integration
 
 Because every flag here is `request_dynamic` on the Execute path
 (read at tool-invocation time), operators can flip a flag without a
@@ -155,9 +145,27 @@ Precedence:
 | `MASC_WEB_SEARCH_PROVIDER_ORDER` | built-in order | Overrides provider order for auto mode. |
 | `MASC_WEB_SEARCH_FALLBACKS` | built-in fallback order | Overrides fallback providers after the primary provider fails. |
 | `MASC_WEB_SEARCH_TIMEOUT_SEC` | `15` | Per-provider request timeout. |
-| `MASC_WEB_SEARCH_CACHE_TTL_SEC` | `30.0` | In-process WebSearch cache TTL. |
-| `MASC_WEB_SEARCH_RATE_LIMIT_WINDOW_SEC` | `30.0` | In-process WebSearch rate-limit window. |
-| `MASC_WEB_SEARCH_RATE_LIMIT_MAX_CALLS` | `30` | In-process WebSearch rate-limit ceiling per window. |
+| `MASC_WEB_SEARCH_CACHE_TTL_SEC` | `900.0` | In-process WebSearch cache TTL. |
+| `BRAVE_SEARCH_API_KEY` | `(none)` | Env-only credential; presence admits the `brave` and `brave_llm_context` providers. |
+| `TAVILY_API_KEY` | `(none)` | Env-only credential; presence admits the `tavily` provider. |
+| `EXA_API_KEY` | `(none)` | Env-only credential; presence admits the `exa` provider. |
+| `BING_SEARCH_API_KEY` | `(none)` | Env-only credential; presence admits the `bing_api` provider. |
+| `AZURE_BING_SEARCH_API_KEY` | `(none)` | Azure-issued alias with the same admission as `BING_SEARCH_API_KEY`. |
+| `OLLAMA_API_KEY` | `(none)` | Env-only credential; presence admits the `ollama` provider. |
+
+Web artifact corpus (RFC-0383): every truncation offload stores the full
+extraction as a content-addressed blob in the `Tool_blob_store`
+(`<base>/.masc/tool_blobs/<sha[0..1]>/<sha256>`) — the exact store
+`keeper_artifact_read` resolves (#28820) — and appends one
+`masc.web_artifact.v1` fact row (`sha256`, `source_url`, optional `title`,
+`bytes`, `fetched_at`) to `<base>/.masc/artifacts/web-fetch/index.jsonl`.
+The index is a projection — deleting it changes no behavior. Lane note: a
+keeper re-reads a body with the sha carried by its `[TRUNCATED ...
+full_text_sha256=<sha>]` marker; discovering shas by `Grep`-ing the index is
+an agent/operator-lane path (keeper sandboxes do not expose `.masc` as a
+file surface — keeper-lane cross-session discovery is tracked in #28820).
+MASC never deletes blobs or index rows; retention is operator-managed
+(#28759).
 
 Equivalent `runtime.toml` keys:
 
@@ -166,19 +174,17 @@ Equivalent `runtime.toml` keys:
 searxng_url = "http://localhost:8888"
 provider = "auto"
 provider_order = "searxng,brave,tavily,exa,bing_api"
-fallbacks = "duckduckgo,bing_rss"
+fallbacks = "tavily,exa"
 timeout_sec = 15
-cache_ttl_sec = 30.0
-rate_limit_window_sec = 30.0
-rate_limit_max_calls = 30
+cache_ttl_sec = 900.0
 ```
 
 Representative code paths:
 
-- [`tool_misc_web_search.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/tool_misc_web_search.ml)
-- [`env_config_runtime.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config/env_config_runtime.ml)
-- [`keeper_runtime_config.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/keeper_runtime/keeper_runtime_config.ml)
-- [`masc_network_defaults.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config/masc_network_defaults.ml)
+- [`tool_misc_web_search.ml`](../lib/tool_misc_web_search.ml)
+- [`env_config_runtime.ml`](../lib/config/env_config_runtime.ml)
+- [`keeper_runtime_config.ml`](../lib/keeper_runtime/keeper_runtime_config.ml)
+- [`masc_network_defaults.ml`](../lib/config/masc_network_defaults.ml)
 
 ### 6. Test-only boot overrides
 
@@ -187,15 +193,15 @@ The following flags exist only to make OCaml test executables deterministic:
 | Variable | Default test behavior | Opt-in behavior |
 | --- | --- | --- |
 | `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | ignore a shell-provided `MASC_BASE_PATH` override and re-sync to the requested path | preserve an explicit `MASC_BASE_PATH` override for resolver coverage |
-| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | ignore inherited `MASC_CONFIG_DIR` / `MASC_PERSONAS_DIR` values captured from the parent shell | preserve explicit config/personas overrides for config-root coverage |
+| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | ignore inherited `MASC_CONFIG_DIR` captured from the parent shell | preserve an explicit config-root override for resolver coverage |
 
 These are not operator-facing runtime controls and should not be used as
 production launch knobs.
 
 Representative code paths:
 
-- [`workspace_utils_backend_setup.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/workspace/workspace_utils_backend_setup.ml)
-- [`config_dir_resolver.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config_dir_resolver.ml)
+- [`workspace_utils_backend_setup.ml`](../lib/workspace/workspace_utils_backend_setup.ml)
+- [`config_dir_resolver.ml`](../lib/config_dir_resolver/config_dir_resolver.ml)
 
 ## Rules for New Environment Variables
 

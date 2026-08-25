@@ -1,14 +1,14 @@
 (** Keeper error recording (Log + Otel_metric_store dedup + last_error persistence).
 
     Extracted from keeper_registry.ml (lines 456-506) as part of the
-    godfile decomp campaign. The MASC/OAS Error-Warn Reduction Goal §P6
+    godfile decomp campaign. The MASC/AGENT_CORE Error-Warn Reduction Goal §P6
     deduplication logic + first/repeated emit policy lives here; the
     final CAS write to [last_error] goes through
     [Keeper_registry.set_last_error_entry] so this module does not need
     to know about the central Atomic. *)
 
 let record_common ?details name err persist =
-  (* MASC/OAS Error-Warn Reduction Goal §P6: same (keeper, error) was
+  (* MASC/AGENT_CORE Error-Warn Reduction Goal §P6: same (keeper, error) was
      emitting at ERROR up to 96× in 30-min slices on production
      (system_log_2026-05-16 sample, 299 events/day; verifier
      sandbox_docker ~48%). First occurrence keeps ERROR — operators
@@ -51,6 +51,33 @@ let record_exact ?details (entry : Keeper_registry.registry_entry) err =
     | Keeper_registry.Exact_update_invalid validation_error ->
       Log.Keeper.warn
         "registry: exact error record validation failed name=%s error=%s"
+        entry.name
+        (Keeper_registry.registry_entry_validation_error_to_string validation_error))
+;;
+
+let record_exact_for_lifecycle
+      token
+      ?details
+      (entry : Keeper_registry.registry_entry)
+      err
+  =
+  record_common ?details entry.name err (fun () ->
+    match
+      Keeper_registry.update_entry_exact_for_lifecycle token entry (fun current ->
+        { current with last_error = Some err })
+    with
+    | Keeper_registry.Exact_updated -> ()
+    | Keeper_registry.Exact_update_missing ->
+      Log.Keeper.warn
+        "registry: lifecycle exact error record skipped because lane is no longer registered name=%s"
+        entry.name
+    | Keeper_registry.Exact_update_replaced ->
+      Log.Keeper.warn
+        "registry: lifecycle exact error record retained newer same-name lane name=%s"
+        entry.name
+    | Keeper_registry.Exact_update_invalid validation_error ->
+      Log.Keeper.warn
+        "registry: lifecycle exact error record validation failed name=%s error=%s"
         entry.name
         (Keeper_registry.registry_entry_validation_error_to_string validation_error))
 ;;

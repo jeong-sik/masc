@@ -23,7 +23,7 @@ export const STALE_ACTIVITY_SEC = 900
 export const TOOL_SUCCESS_WARN_PCT = 90
 const TELEMETRY_ACTIVITY_FRESH_SEC = 300
 const TELEMETRY_SOURCE_STALE_SEC = 900
-const OAS_EVENT_LAG_WARN_SEC = 600
+const AGENT_CORE_EVENT_LAG_WARN_SEC = 600
 
 export interface FleetRow {
   name: string
@@ -54,9 +54,6 @@ export interface FleetRow {
   terminal_reason_code?: string | null
   terminal_reason_severity?: string | null
   tool_audit_at: string | null
-  goal_label: string | null
-  goal_linked: boolean
-  active_goal_count: number
   sandbox_profile: string | null
   sandbox_last_error: string | null
   provider_health_status: 'healthy' | 'degraded' | 'unhealthy' | null
@@ -165,7 +162,6 @@ function latestRuntimeMetric(keeper: Keeper) {
       normalizeText(point.runtime_id)
       || normalizeText(point.runtime_outcome)
       || typeof point.runtime_attempt_count === 'number'
-      || point.fallback_applied
     ) {
       return point
     }
@@ -185,7 +181,7 @@ function keeperProviderLabel(keeper: Keeper): string | null {
   const latest = latestRuntimeMetric(keeper)
   const outcome = normalizeText(summary?.runtime_outcome) ?? normalizeText(latest?.runtime_outcome)
   const attempts = summary?.provider_attempt_count ?? latest?.runtime_attempt_count ?? null
-  const fallback = summary?.provider_fallback_applied ?? latest?.fallback_applied ?? null
+  const fallback = summary?.provider_fallback_applied ?? null
   const parts = [
     outcome,
     typeof attempts === 'number' ? `${attempts} attempts` : null,
@@ -195,14 +191,8 @@ function keeperProviderLabel(keeper: Keeper): string | null {
 }
 
 function keeperFallbackLabel(keeper: Keeper): string | null {
-  const latest = latestRuntimeMetric(keeper)
-  if (!latest || latest.fallback_applied !== true) return null
-  const reason = normalizeText(latest.fallback_reason)
-  const hops =
-    typeof latest.fallback_hops === 'number' && latest.fallback_hops > 0
-      ? `${latest.fallback_hops} hops`
-      : null
-  return ['fallback', reason, hops].filter((part): part is string => part != null).join(' · ')
+  const summary = keeper.trust?.execution_summary ?? null
+  return summary?.provider_fallback_applied === true ? 'fallback' : null
 }
 
 function keeperLastLatencyMs(keeper: Keeper): number {
@@ -244,10 +234,6 @@ function keeperRecentTools(keeper: Keeper): string[] {
     ...(keeper.latest_tool_names ?? []),
     ...keeperMetricsWindowTools(keeper),
   ]).slice(0, 3)
-}
-
-function keeperGoalLabel(keeper: Keeper): string | null {
-  return keeper.active_goal_ids?.[0] ?? null
 }
 
 function keeperToolCallCount(keeper: Keeper, toolQualityCalls?: number): number {
@@ -294,12 +280,9 @@ export function buildToolQualityMap(toolQuality: ToolQualityResponse): Map<strin
 type FleetBand = 'attention' | 'active' | 'paused' | 'offline'
 
 // Fleet offline status tokens — shared by `fleetBand()` and `statusClass()`.
-// Overlaps with `OFFLINE_DISPLAY_STATUSES` in keeper-classifiers.ts but
-// excludes `'inactive'`: fleet treats inactive as an attention signal
-// (line below), not a hard offline. This is an intentional semantic
-// divergence, not drift.
+// Overlaps with `OFFLINE_DISPLAY_STATUSES` in keeper-classifiers.ts.
 const FLEET_OFFLINE_STATUSES: ReadonlySet<string> = new Set([
-  'offline', 'unbooted', 'stopped', 'dead', 'crashed',
+  'offline', 'unbooted', 'stopped', 'crashed',
 ])
 
 function normalizedDiagnosticHealthState(row: FleetRow): string | null {
@@ -307,9 +290,16 @@ function normalizedDiagnosticHealthState(row: FleetRow): string | null {
 }
 
 export function isOfflineDiagnosticHealthState(state: string | null): boolean {
-  return state === 'offline' || state === 'dead'
+  return state === 'offline'
 }
 
+// The three health readings that need someone to look. `status` folds all
+// three into the single word 'inactive', which is why this list used to be
+// backed up by a `status === 'inactive'` test below: the fold was the only
+// signal if the diagnostic was missing. The diagnostic carries health for
+// every row, so the fold is no longer read — and reading it cost a keeper
+// that was merely resting an attention badge, because 'inactive' does not
+// distinguish resting from stalled.
 function isAttentionDiagnosticHealthState(state: string | null): boolean {
   return state === 'stale' || state === 'degraded' || state === 'zombie'
 }
@@ -327,7 +317,6 @@ export function fleetBand(row: FleetRow): FleetBand {
   if (normalizedStatus === 'paused') return 'paused'
   if (
     isAttentionDiagnosticHealthState(diagnosticHealthState)
-    || normalizedStatus === 'inactive'
     || row.runtime_blocker_class != null
     || row.runtime_trust_attention === true
     || row.terminal_reason_severity === 'bad'
@@ -411,7 +400,7 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
           const toolQualityForKeeper = toolStats.get(keeper.name)
           const recentTools = keeperRecentTools(keeper)
           const toolCalls = keeperToolCallCount(keeper, toolQualityForKeeper?.calls)
-          const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
+          const activity = keeperActivityDisplay(keeper)
           const runtimeBlockerSummary = normalizeKeeperBlockerText(
             firstNonEmptyString(keeper.runtime_blocker_summary, keeper.last_blocker),
           )
@@ -465,9 +454,6 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             terminal_reason_code: keeper.trust?.latest_terminal_reason?.code ?? null,
             terminal_reason_severity: keeper.trust?.latest_terminal_reason?.severity ?? null,
             tool_audit_at: keeper.tool_audit_at ?? null,
-            goal_label: keeperGoalLabel(keeper),
-            goal_linked: (keeper.active_goal_ids?.length ?? 0) > 0,
-            active_goal_count: keeper.active_goal_ids?.length ?? 0,
             sandbox_profile: keeper.sandbox_profile ?? null,
             sandbox_last_error: keeper.sandbox_last_error ?? null,
             provider_health_status: null,
@@ -510,7 +496,6 @@ export function statusClass(row: FleetRow): string {
   }
   if (
     isAttentionDiagnosticHealthState(diagnosticHealthState)
-    || normalizedStatus === 'inactive'
     || row.runtime_blocker_class != null
     || row.runtime_trust_attention === true
     || row.terminal_reason_severity === 'bad'
@@ -608,33 +593,33 @@ export function sourceDetail(source: TelemetrySourceSummary): string {
 export function buildTelemetryWarnings(sources: TelemetrySourceSummary[]): string[] {
   const warnings: string[] = []
   const bySource = new Map(sources.map(source => [source.source, source]))
-  const oasEvent = bySource.get('oas_event')
-  if (!oasEvent) return warnings
+  const agentCoreEvent = bySource.get('agent_core_event')
+  if (!agentCoreEvent) return warnings
 
-  if (oasEvent.exists === false) {
-    warnings.push('OAS event relay store is missing.')
+  if (agentCoreEvent.exists === false) {
+    warnings.push('Agent Core event relay store is missing.')
     return warnings
   }
 
-  if (oasEvent.entry_count <= 0) return warnings
+  if (agentCoreEvent.entry_count <= 0) return warnings
 
-  const oasAge = numericAge(oasEvent.latest_age_s)
+  const agentCoreAge = numericAge(agentCoreEvent.latest_age_s)
   const agentEvent = bySource.get('agent_event')
   const agentAge = numericAge(agentEvent?.latest_age_s)
-  const oasTs = numericAge(oasEvent.latest_ts_unix)
+  const agentCoreTs = numericAge(agentCoreEvent.latest_ts_unix)
   const agentTs = numericAge(agentEvent?.latest_ts_unix)
 
-  if (agentTs != null && oasTs != null) {
-    const lag = agentTs - oasTs
-    if (lag >= OAS_EVENT_LAG_WARN_SEC) {
-      warnings.push(`OAS event relay trails agent events by ${formatElapsedCompact(lag)}.`)
+  if (agentTs != null && agentCoreTs != null) {
+    const lag = agentTs - agentCoreTs
+    if (lag >= AGENT_CORE_EVENT_LAG_WARN_SEC) {
+      warnings.push(`Agent Core event relay trails agent events by ${formatElapsedCompact(lag)}.`)
       return warnings
     }
   }
 
-  if (oasAge != null && oasAge >= TELEMETRY_SOURCE_STALE_SEC) {
+  if (agentCoreAge != null && agentCoreAge >= TELEMETRY_SOURCE_STALE_SEC) {
     if (agentAge == null || agentAge <= TELEMETRY_ACTIVITY_FRESH_SEC) {
-      warnings.push(`OAS event relay stale: last durable event ${formatElapsedCompact(oasAge)} ago.`)
+      warnings.push(`Agent Core event relay stale: last durable event ${formatElapsedCompact(agentCoreAge)} ago.`)
     }
   }
 

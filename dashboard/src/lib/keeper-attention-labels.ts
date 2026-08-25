@@ -57,6 +57,9 @@ export const ATTENTION_REASONS = [
   'internal_error',
   'cancelled',
   'transcript_corruption',
+  'provider_attempt_effect_fenced',
+  'tool_correction_lost',
+  'terminal_effect_failed',
   'unmapped_runtime_state',
 ] as const
 export type AttentionReason = typeof ATTENTION_REASONS[number]
@@ -77,7 +80,10 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
   transient_runtime_retry: '일시적 런타임 재시도',
   internal_error: '내부 오류',
   cancelled: '취소됨',
-  transcript_corruption: '대화 기록 손상 - 초기화 필요',
+  transcript_corruption: '도구 호출 기록이 끊김 - 재기동 때 자동 복구',
+  provider_attempt_effect_fenced: 'Provider 효과 결과 확인 필요',
+  tool_correction_lost: '도구 교정 유실 - 거절 응답이 전달되지 못함',
+  terminal_effect_failed: '턴을 닫는 도구가 실패 - 결과가 나갔는지 불명',
   unmapped_runtime_state: '매핑되지 않은 runtime 상태',
 }
 

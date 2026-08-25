@@ -69,34 +69,19 @@ type logical_ordering = {
   logical_seq : int option;
 }
 
-type status =
-  | Skipped
-  | Other of string
-
 type compaction_outcome =
   | Checkpoint_committed
   | Lifecycle_cleanup_failed_without_checkpoint
 
 (** {1 Own-module vals} *)
 
-val payload_role_to_string : payload_role -> string
-val payload_role_of_string : string -> payload_role option
-
 val source_clock_to_string : source_clock -> string
 val source_clock_of_string : string -> source_clock option
 val source_clock_of_event : event_kind -> source_clock
 
 val schema_version : int
-val manifest_file_suffix : string
-val safe_segment : string -> string
-
-val status_of_string : string -> status
-val status_to_string : status -> string
-val status_is_skipped : t -> bool
 val compaction_outcome_key : string
 val compaction_outcome_to_string : compaction_outcome -> string
-val compaction_outcome_of_string : string -> compaction_outcome option
-
 val clock_refs :
   ?edge_id:string ->
   ?lane:string ->
@@ -121,7 +106,7 @@ val clock_refs :
 val clock_refs_for_context :
   turn_context ->
   event:event_kind ->
-  ?oas_turn_count:int ->
+  ?agent_core_turn_count:int ->
   ?elapsed_ms:int ->
   ?event_bus_correlation_id:string ->
   ?event_bus_run_id:string ->
@@ -144,9 +129,8 @@ val make :
   keeper_name:string ->
   ?agent_name:string ->
   trace_id:string ->
-  ?generation:int ->
   ?keeper_turn_id:int ->
-  ?oas_turn_count:int ->
+  ?agent_core_turn_count:int ->
   ?logical_seq:int ->
   event:event_kind ->
   ?runtime_id:string ->
@@ -161,7 +145,7 @@ val make :
 val make_for_context :
   turn_context ->
   event:event_kind ->
-  ?oas_turn_count:int ->
+  ?agent_core_turn_count:int ->
   ?logical_seq:int ->
   ?runtime_id:string ->
   ?status:string ->
@@ -190,7 +174,6 @@ val base_dir : Workspace.config -> keeper_name:string -> string
     [trace_id] is sanitized as a path segment. *)
 val path_for_trace : Workspace.config -> keeper_name:string -> trace_id:string -> string
 
-val append_to_path : string -> t -> (unit, string) result
 val append : Workspace.config -> t -> (unit, string) result
 val append_best_effort : ?site:string -> Workspace.config -> t -> unit
 

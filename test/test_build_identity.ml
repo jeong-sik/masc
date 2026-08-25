@@ -1,48 +1,46 @@
 open Masc
 
-let test_resolve_commit_prefers_env () =
+let test_resolve_commit_prefers_embedded () =
   let probe_called = ref false in
   let commit =
     Build_identity.resolve_commit
-      ~env_value:(Some " abc12345 ")
+      ~embedded:(Some " feed0123 ")
       ~probe:(fun () ->
         probe_called := true;
         Some "deadbeef")
   in
-  Alcotest.(check (option string)) "env wins" (Some "abc12345") commit;
+  Alcotest.(check (option string)) "embedded wins" (Some "feed0123") commit;
   Alcotest.(check bool) "probe not called" false !probe_called
 
-let test_resolve_commit_uses_probe_when_env_missing () =
+let test_resolve_commit_uses_probe_when_embedded_missing () =
   let commit =
     Build_identity.resolve_commit
-      ~env_value:None
+      ~embedded:None
       ~probe:(fun () -> Some "deadbeef")
   in
   Alcotest.(check (option string)) "probe used" (Some "deadbeef") commit
 
-let test_resolve_commit_details_splits_env_and_repo_head () =
+let test_resolve_commit_details_prefers_embedded_binary () =
   let details =
     Build_identity.resolve_commit_details
-      ~env_value:(Some " abc12345 ")
+      ~embedded:(Some " feed0123 ")
       ~probe:(fun () -> Some "deadbeef")
   in
-  Alcotest.(check (option string)) "compat commit uses env"
-    (Some "abc12345") details.commit;
-  Alcotest.(check (option string)) "commit source is env"
-    (Some "env:MASC_BUILD_GIT_COMMIT") details.commit_source;
-  Alcotest.(check (option string)) "binary commit uses env"
-    (Some "abc12345") details.binary_commit;
-  Alcotest.(check (option string)) "binary source is env"
-    (Some "env:MASC_BUILD_GIT_COMMIT") details.binary_commit_source;
+  Alcotest.(check (option string)) "binary commit is embedded"
+    (Some "feed0123") details.binary_commit;
+  Alcotest.(check (option string)) "binary source is embedded"
+    (Some "embedded") details.binary_commit_source;
+  Alcotest.(check (option string)) "compat commit uses embedded"
+    (Some "feed0123") details.commit;
+  Alcotest.(check (option string)) "commit source is embedded"
+    (Some "embedded") details.commit_source;
   Alcotest.(check (option string)) "repo head still surfaced"
-    (Some "deadbeef") details.repo_head_commit;
-  Alcotest.(check (option string)) "repo head source"
-    (Some "runtime_repo_head") details.repo_head_commit_source
+    (Some "deadbeef") details.repo_head_commit
 
 let test_resolve_commit_details_marks_repo_head_fallback () =
   let details =
     Build_identity.resolve_commit_details
-      ~env_value:None
+      ~embedded:None
       ~probe:(fun () -> Some "deadbeef")
   in
   Alcotest.(check (option string)) "compat commit falls back to repo head"
@@ -52,7 +50,36 @@ let test_resolve_commit_details_marks_repo_head_fallback () =
   Alcotest.(check (option string)) "binary commit absent" None
     details.binary_commit;
   Alcotest.(check (option string)) "repo head commit present"
-    (Some "deadbeef") details.repo_head_commit
+    (Some "deadbeef") details.repo_head_commit;
+  Alcotest.(check (option string)) "repo head source"
+    (Some "runtime_repo_head") details.repo_head_commit_source
+
+let test_binary_identity_ignores_mismatched_ambient_checkout () =
+  let details =
+    Build_identity.resolve_commit_details
+      ~embedded:(Some "canary-build-source")
+      ~probe:(fun () -> Some "ambient-checkout-head")
+  in
+  Alcotest.(check (option string))
+    "canary identity remains its build source"
+    (Some "canary-build-source")
+    details.binary_commit;
+  Alcotest.(check (option string))
+    "ambient checkout remains separately observable"
+    (Some "ambient-checkout-head")
+    details.repo_head_commit
+
+let test_binary_identity_survives_without_checkout () =
+  let details =
+    Build_identity.resolve_commit_details
+      ~embedded:(Some "packaged-canary-source")
+      ~probe:(fun () -> None)
+  in
+  Alcotest.(check (option string))
+    "packaged canary keeps its build source"
+    (Some "packaged-canary-source")
+    details.binary_commit;
+  Alcotest.(check (option string)) "no ambient checkout" None details.repo_head_commit
 
 let test_current_started_at_is_stable () =
   let first = Build_identity.current () in
@@ -201,15 +228,21 @@ let () =
     [
       ( "identity",
         [
-          Alcotest.test_case "resolve commit prefers env" `Quick
-            test_resolve_commit_prefers_env;
+          Alcotest.test_case "resolve commit prefers embedded" `Quick
+            test_resolve_commit_prefers_embedded;
+          Alcotest.test_case "resolve commit details prefers embedded binary"
+            `Quick test_resolve_commit_details_prefers_embedded_binary;
           Alcotest.test_case "resolve commit falls back to probe" `Quick
-            test_resolve_commit_uses_probe_when_env_missing;
-          Alcotest.test_case "resolve commit details splits env and repo head"
-            `Quick test_resolve_commit_details_splits_env_and_repo_head;
+            test_resolve_commit_uses_probe_when_embedded_missing;
           Alcotest.test_case
             "resolve commit details marks repo head fallback" `Quick
             test_resolve_commit_details_marks_repo_head_fallback;
+          Alcotest.test_case
+            "binary identity ignores mismatched ambient checkout" `Quick
+            test_binary_identity_ignores_mismatched_ambient_checkout;
+          Alcotest.test_case
+            "binary identity survives without checkout" `Quick
+            test_binary_identity_survives_without_checkout;
           Alcotest.test_case "current started_at stable" `Quick
             test_current_started_at_is_stable;
           Alcotest.test_case "runtime cwd snapshot is resolver backed" `Quick

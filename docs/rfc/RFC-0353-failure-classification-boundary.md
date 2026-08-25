@@ -1,7 +1,12 @@
+---
+rfc: "0353"
+status: Draft
+---
+
 # RFC-0353 — 실패 분류가 모듈 경계에서 소실되는 결함 (결정 요청)
 
 **Status**: Draft — 결정 요청
-**연관**: #25489 (수집 이슈), #25482, #25488, #25443, #24838, oas#2736, #25052
+**연관**: #25489 (수집 이슈), #25482, #25488, #25443, #24838, agent_core#2736, #25052
 **제약**: RFC-0000 §1.2 LAW 1 (No dead-end) · LAW 2 (연속 횟수는 결정 권한 없음) · §9 Anti-patterns
 
 ---
@@ -28,7 +33,7 @@
 
 | # | 위치 | 소실 방식 | 실측 |
 |---|---|---|---|
-| oas#2736 | `reasoning_history_projection` | 인과가 다른 두 모집단이 단일 집계 | `No_replay` 217k + replay-all 112k/일이 한 필드에 합산. 이후 #2721 로 Warn→Info |
+| agent_core#2736 | `reasoning_history_projection` | 인과가 다른 두 모집단이 단일 집계 | `No_replay` 217k + replay-all 112k/일이 한 필드에 합산. 이후 #2721 로 Warn→Info |
 | #25052 | `keeper_memory_lane:242` | drop 시 unit 미식별 + `let (_ : outcome) =` | 343건/일. analyst 24.2% |
 | #24838 | `http_client_4xx_request_header_profile` | 배제된 가설만 측정 | `max_single_header=81` vs `limit=8192`. body 크기는 ollama 경로에서 미기록(glm 81건 / ollama 0건) |
 
@@ -36,7 +41,7 @@
 
 ### 1.3 이 목록이 어떻게 만들어졌는가
 
-운영 워크스페이스의 `<base-path>/logs/system_log_*.jsonl` ERROR/WARN 을 36회 반복 스윕하며 수집했다. 각 항목은 시간대별 버킷팅으로 라이브 여부를 확인했고, 같은 방식으로 **이미 해소된 2건은 목록에서 제외**했다(oas#2734, #25487 — 각각 03Z·08Z 경계로 소멸, 이슈 종료). 코드 주장은 `.mli`/모듈 doc 대조로 검증했다.
+운영 워크스페이스의 `<base-path>/logs/system_log_*.jsonl` ERROR/WARN 을 36회 반복 스윕하며 수집했다. 각 항목은 시간대별 버킷팅으로 라이브 여부를 확인했고, 같은 방식으로 **이미 해소된 2건은 목록에서 제외**했다(agent_core#2734, #25487 — 각각 03Z·08Z 경계로 소멸, 이슈 종료). 코드 주장은 `.mli`/모듈 doc 대조로 검증했다.
 
 ---
 
@@ -46,7 +51,7 @@
 2. **타입 시스템이 막지 못한다.** 여섯 건 모두 컴파일되는 형태다 — catch-all `| Error _ ->`, nullary variant, match 순서 의존, `let (_ : t) =`. 한 사이트를 고쳐도 다음 사이트가 같은 코드를 다시 쓴다.
 3. **AI 에이전트가 선례로 학습한다.** CLAUDE.md 가 명시한 누적 메커니즘이며, 현재 코드베이스 통계상 "실패를 catch-all 로 requeue" 는 합리적 패턴으로 보인다.
 4. **비용이 직접 발생한다.** 형태 A 는 성공 확률 0 인 provider 호출을 소비한다.
-5. **은폐 수단이 관습화되어 있다.** oas#2721 은 분해 불가능한 신호를 통째로 Info 로 낮췄다. 형태 B 는 고치지 않으면 *보이지 않게* 된다.
+5. **은폐 수단이 관습화되어 있다.** agent_core#2721 은 분해 불가능한 신호를 통째로 Info 로 낮췄다. 형태 B 는 고치지 않으면 *보이지 않게* 된다.
 
 ---
 
@@ -72,7 +77,7 @@
 
 - **작업**: 실패 타입에 두 축을 필수화한다 — (1) 재시도 가능성, (2) 사유 payload. nullary 실패 variant 금지. 경계 통과 시 재시도 가능성을 뒤집는 변환을 타입으로 차단하거나 명시적 근거를 요구. 재시도/회전 자격을 분리(현재 `InvalidRequest` 하나가 둘을 동시에 차단).
 - **장점**: 재발이 구조적으로 막힌다. 새 실패 경로가 컴파일 시점에 결정을 강제받는다.
-- **단점/리스크**: 실패 타입이 공개 경계(oas ↔ masc)에 걸쳐 있어 변경 범위가 크다. oas 는 별도 repo 이므로 pin 조율 필요. RFC-OAS-035 가 "source compatibility 를 위해 `ProviderUnavailable` 로 투영" 을 명시했으므로 그 결정의 재검토가 선행된다.
+- **단점/리스크**: 실패 타입이 공개 경계(agent_core ↔ masc)에 걸쳐 있어 변경 범위가 크다. agent_core 와 masc 는 함께 움직인다. RFC-OAS-035 가 "source compatibility 를 위해 `ProviderUnavailable` 로 투영" 을 명시했으므로 그 결정의 재검토가 선행된다.
 
 ### Path B — 소비 지점 규율 (lint + 명시 match)
 
@@ -91,7 +96,7 @@
 ## 5. 결정 요청
 
 1. **Path A / B / C 중 어느 것인가.** (제안: C → A. 관측을 먼저 세우고 타입 강제로 수렴. B 의 lint 는 A 착지 전 회귀 방지로 병행 가능.)
-2. **oas 경계 처리.** RFC-OAS-035 의 `ProviderUnavailable` 투영 결정을 재검토 대상으로 열 것인가, masc 쪽에서만 흡수할 것인가.
+2. **agent_core 경계 처리.** RFC-OAS-035 의 `ProviderUnavailable` 투영 결정을 재검토 대상으로 열 것인가, masc 쪽에서만 흡수할 것인가.
 3. **재시도 이탈 시의 목적지 상태.** LAW 1 이 허용하는 `Awaiting` / `Recovering` 중 어느 쪽인가, 아니면 새 typed 상태가 필요한가.
 4. **선행 조사 승인.** 현재 코드베이스의 실패 소비 지점 catch-all 규모 전수 조사(§4 Path B 의 미지수). 규모를 모른 채 lint 를 세우면 대량 위반으로 CI 가 막힌다.
 

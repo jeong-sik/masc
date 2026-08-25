@@ -2,7 +2,7 @@
 
     Carries "who/where/what/why" for each pass/fail decision produced
     by the verification gates (verification,
-    accountability, keeper_fsm, oas_completion, agent_lifecycle,
+    keeper_fsm, agent_core_completion, agent_lifecycle,
     task_transition, exec_policy). Producers record the typed envelope in
     {!Dashboard_attribution}; the attribution HTTP route projects it with
     {!to_yojson}.
@@ -52,7 +52,7 @@ type t = {
   origin : origin;
   gate : string;
       (** Gate identifier. One of [verification],
-          [accountability], [keeper_fsm], [oas_completion],
+          [keeper_fsm], [agent_core_completion],
           [agent_lifecycle], [task_transition], [exec_policy].
           Future gates append to this list.
 

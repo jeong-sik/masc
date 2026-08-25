@@ -1,9 +1,5 @@
 ---
 status: reference
-last_verified: 2026-04-17
-code_refs:
-  - lib/
-  - test/
 ---
 
 # Common Pitfalls
@@ -55,7 +51,7 @@ Dashboard is a Preact+HTM SPA compiled with Vite. Common issues:
 
 **Always after dashboard changes:**
 ```bash
-cd dashboard && pnpm run build  # catches TypeScript errors
+cd dashboard && pnpm run typecheck  # catches TypeScript errors (tsc --noEmit)
 ```
 
 ## 4. Test Breakage From Refactoring (6 occurrences)
@@ -153,13 +149,13 @@ let _ = drain_turn_event_bus ~site:"background_poll" () in
 
 ## 6. Version String Drift (2 occurrences)
 
-`dune-project` version and `sdk_version.ml` (or equivalent) must match.
+`dune-project` version and `packages/agent_core/lib/version.ml` must match.
 CI checks this — but fix it before pushing.
 
 ```bash
 # Check
 grep '(version' dune-project | head -1
-grep 'let version' lib/sdk_version.ml
+grep 'let version' packages/agent_core/lib/version.ml
 ```
 
 ## 7. Prompt Changes Need Checkpoint Reset
@@ -306,8 +302,10 @@ dune build --root .  # ✅ OCaml 빌드 성공
 # 1. OCaml 빌드
 dune build --root .
 
-# 2. Dashboard 빌드 (별도)
-cd dashboard && pnpm run build
+# 2. Dashboard 빌드 (별도) — raw `pnpm run build` 금지: vite emptyOutDir가
+#    assets/dashboard/.build-stamp를 지우고 wrapper만 stamp를 다시 쓴다.
+#    stamp가 없으면 /health dashboard_surface가 "missing"으로 고착된다.
+scripts/build-dashboard-if-needed.sh
 
 # 또는 자동 빌드 script 사용
 ./start-masc.sh --http  # pnpm 있으면 자동 빌드
@@ -316,13 +314,13 @@ cd dashboard && pnpm run build
 **CI에서:**
 ```bash
 scripts/build-dashboard-if-needed.sh
-# checks if dashboard/dist/ exists and is up-to-date
+# assets/dashboard/.build-stamp 기준으로 필요할 때만 재빌드하고 stamp를 갱신한다
 ```
 
 **Dashboard 변경 후 반드시:**
 ```bash
-cd dashboard && pnpm run build
-# TypeScript 컴파일 에러, type 불일치 등을 사전에 감지
+cd dashboard && pnpm run typecheck   # 타입 에러 사전 감지 (비파괴)
+../scripts/build-dashboard-if-needed.sh   # 실제 빌드는 wrapper로
 ```
 
 **Dev Server와 Production Build 차이 주의:**
@@ -333,8 +331,8 @@ cd dashboard && MASC_DASHBOARD_PROXY_TARGET="http://127.0.0.1:8935" pnpm run dev
 # Vite port를 5173이 아닌 값으로 바꾸면 서버 쪽 allowlist도 같이 맞춘다.
 MASC_HTTP_DEV_MUTATION_ORIGINS="http://localhost:4173" ./start-masc.sh
 
-# Production build (static assets in dist/)
-cd dashboard && pnpm run build
+# Production build (static assets: assets/dashboard/)
+scripts/build-dashboard-if-needed.sh
 ```
 
 ## 12. Health Snapshot Ratcheting
@@ -403,12 +401,12 @@ scripts/check-feature-flag-consistency.sh
 dune build --root .  # fails on missing modules
 
 # Dashboard routes
-cd dashboard && pnpm run build  # TypeScript type check
+cd dashboard && pnpm run typecheck  # TypeScript type check
 ```
 
 **Files requiring semantic validation:**
 - `lib/config/feature_flag_registry.ml` - env_name uniqueness
-- `lib/tool_catalog.ml` - public tool list
+- `lib/tool/tool_catalog.ml` - public tool list
 - `dune` files - module list completeness
 - Dashboard TypeScript - type consistency
 
@@ -431,11 +429,11 @@ cd dashboard && pnpm run build  # TypeScript type check
 
 **규칙:** counter는 caller site에서만 emit. pure function은 transition/decision 만 반환.
 
-**예외:** observability-only `Log.*` 호출은 mli에 documented exception이면 허용 (예: `keeper_state_machine.ml` no-savings warn). counter는 예외 없음.
+**예외:** observability-only `Log.*` 호출은 mli에 documented exception이면 허용 (예: `lib/keeper_registry/keeper_state_machine.ml` no-savings warn). counter는 예외 없음.
 
 **PR 체크:**
 ```bash
-rg -nP 'inc_counter' lib/keeper_state/keeper_state_machine.ml lib/keeper/keeper_runtime_routing.ml
+rg -nP 'inc_counter' lib/keeper_registry/keeper_state_machine.ml
 # 기대: 0 매치
 ```
 
@@ -493,7 +491,7 @@ bash scripts/validate-keeper-fsm-graph.sh
 | Pitfall Section | Related ADR | Key Takeaway |
 |----------------|-------------|--------------|
 | #8 Feature Flag Registry Duplicates | [ADR-003: Feature Flag Registry Management](ADR-003-FEATURE-FLAG-REGISTRY-MANAGEMENT.md) | Registry는 SSOT, env_name은 전역 고유, concurrent merge는 semantic validation 필요 |
-| Context handoff pattern | Keeper/OAS checkpoint and handoff docs | Historical mitosis runtime and ADR were removed. Context transfer now uses Relay/Handoff plus keeper/OAS checkpoint paths |
+| Context handoff pattern | Keeper/agent core checkpoint and handoff docs | Historical mitosis runtime and ADR were removed. Context transfer now uses Relay/Handoff plus keeper/agent core checkpoint paths |
 | Dashboard Control Surface | [ADR-002: Dashboard Operator Control Surface](ADR-002-DASHBOARD-OPERATOR-CONTROL-SURFACE.md) | `masc_operator_*` quartet가 canonical, generic tool executor는 admin-only |
 
 **Why ADRs?**
@@ -528,7 +526,7 @@ bash scripts/validate-keeper-fsm-graph.sh
 - [ ] Config 추가/변경했는가? → Section #9 체크
 - [ ] Partial function 사용했는가? → Section #12 체크
 - [ ] Registry-like file 수정했는가? → Section #13 체크
-- [ ] `keeper_state_machine` 또는 `keeper_runtime_routing` 수정했는가? → Section #14.1 체크
+- [ ] `keeper_state_machine` 수정했는가? → Section #14.1 체크
 - [ ] ADT variant 추가했는가? → Section #14.2 체크
 - [ ] `*.tla` 추가/수정했는가? → Section #14.3 체크
 - [ ] FSM edge counter 추가/제거했는가? → Section #14.4 체크

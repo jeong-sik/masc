@@ -1,0 +1,43 @@
+{
+  "schema": "masc.keeper_multi_collaboration_preflight_snapshot.v1",
+  "captured_at": "2026-08-13T13:38:13Z",
+  "mutation_performed": false,
+  "catalog_validation": {
+    "status": "passed",
+    "mission_count": 16,
+    "assertion_count": 29,
+    "acceptance_authority": "real_world_product_outcomes"
+  },
+  "exact_source_preflight": {
+    "status": "blocked",
+    "expected_source_sha": "f83f655904",
+    "runtime_binary_commit": null,
+    "reason": "health binary-commit mismatch: expected='f83f655904' actual=''"
+  },
+  "surface_preflight_without_source_pin": {
+    "status": "blocked",
+    "effective_base_path": "/Users/dancer/me",
+    "missing_operator_tools": [
+      "masc_board_search",
+      "masc_fusion_status",
+      "masc_keeper_delegate_status",
+      "masc_keeper_msg",
+      "masc_task_history"
+    ]
+  },
+  "current_source_registry": {
+    "checkout_sha": "f83f655904",
+    "all_missing_live_names_present_in_source": true,
+    "evidence": [
+      "lib/tool/tool_catalog.ml",
+      "lib/keeper/keeper_tool_surface.ml",
+      "lib/task/tool_task.ml",
+      "lib/board_tool_adapter/board_tool_dispatch.ml"
+    ]
+  },
+  "interpretation": {
+    "confirmed": "The deployed surface cannot run the 16-mission campaign and does not expose a trusted binary SHA.",
+    "inference": "The live executable is likely older or built without the current identity stamp; source/live parity is not proven.",
+    "next_action": "Rebuild and restart with MASC_BUILD_GIT_COMMIT set to the exact checkout SHA, then rerun exact-source preflight before allowing mutation."
+  }
+}

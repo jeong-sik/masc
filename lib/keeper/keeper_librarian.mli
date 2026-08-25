@@ -4,25 +4,34 @@
     new conversation. It returns existing fact identities to retain and new
     facts to add. Every existing identity must be retained or explicitly
     dropped. The LLM owns selection within the rendered-fact byte budget; no
-    deterministic ranking, recency rule, or migration path participates. *)
+    deterministic ranking, recency rule, or migration path participates.
+
+    Wire identities are short surrogate tokens ([m1], [m2], ... in
+    current-fact order), not the cryptographic [memory_id]: a 64-hex digest
+    cannot be echoed verbatim reliably, and stale digests linger in
+    conversation-history recall renderings. The parser maps surrogates back to
+    real identities before validation, so [selection] always carries real
+    identities and unknown tokens stay fail-closed. *)
 
 type current_selection =
   { facts : Keeper_memory_os_types.fact list }
 
 type input =
   { turn_ref : Ids.Turn_ref.t
-  ; generation : int
-  ; persona : string
-    (** The same resolved persona text the keeper's own system prompt
-        carries ([Keeper_types_profile.load_resolved_persona_extended]).
+  ; keeper_instructions : string
+    (** The same instructions the keeper's own system prompt carries.
         The librarian curates on the keeper's behalf, so it judges
         importance through this identity; [""] renders as an explicit
-        [no persona] marker. *)
+        [no keeper instructions] marker. *)
   ; current : current_selection option
   ; max_recall_fact_bytes : int
     (** Maximum UTF-8 bytes for the exact rendered fact lines. The prompt states
         this capacity and the parser rejects an oversized selection. *)
-  ; messages : Agent_sdk.Types.message list
+  ; messages : Agent_core.Types.message list
+  ; counterpart_observations : Keeper_counterpart_observation.t list
+    (** Host-authored speaker provenance plus untrusted current-turn content.
+        This covers connector attention outside the AGENT_CORE checkpoint and
+        direct turns on runtimes that return no AGENT_CORE checkpoint. *)
   }
 
 type selection =

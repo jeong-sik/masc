@@ -6,7 +6,7 @@ import { get, post } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
-import type { KeeperConfig, KeeperFeatureStatus, KeeperHookSlot } from '../types'
+import type { KeeperConfig, KeeperConfigOverrideFieldSource, KeeperHookSlot } from '../types'
 
 function asLooseBoolean(value: unknown, fallback = false): boolean {
   const booleanValue = asBoolean(value)
@@ -17,13 +17,6 @@ function asLooseBoolean(value: unknown, fallback = false): boolean {
     if (normalized === 'false') return false
   }
   return fallback
-}
-
-function asLooseNullableBoolean(value: unknown): boolean | null {
-  const booleanValue = asBoolean(value)
-  if (booleanValue !== undefined) return booleanValue
-  if (typeof value !== 'string') return null
-  return asLooseBoolean(value)
 }
 
 function asLooseNumber(value: unknown): number | undefined {
@@ -53,18 +46,6 @@ function normalizeStringList(value: unknown): string[] {
   return single ? [single] : []
 }
 
-function normalizeKeeperFeatureStatus(value: unknown): KeeperFeatureStatus {
-  const status = asNullableString(value)
-  switch (status) {
-    case 'wired':
-    case 'source_only':
-    case 'unwired':
-      return status
-    default:
-      return 'unwired'
-  }
-}
-
 function normalizeKeeperHookSlot(raw: unknown): KeeperHookSlot | null {
   if (!isRecord(raw)) return null
   return {
@@ -84,17 +65,6 @@ function normalizeKeeperHookSlots(raw: unknown): Record<string, KeeperHookSlot> 
     if (slot) slots[name] = slot
   }
   return slots
-}
-
-function normalizeKeeperConfigActiveGoals(raw: unknown): KeeperConfig['workspace']['active_goals'] {
-  return asRecordArray(raw)
-    .map((item) => {
-      const id = asNullableString(item.id)
-      const title = asNullableString(item.title)
-      if (!id || !title) return null
-      return { id, title }
-    })
-    .filter((item): item is KeeperConfig['workspace']['active_goals'][number] => item !== null)
 }
 
 function dedupeStringList(values: readonly string[]): string[] {
@@ -148,20 +118,72 @@ function normalizeDefaultSourceKind(value: unknown): KeeperConfig['sources']['de
   const sourceKind = asNullableString(value)
   switch (sourceKind) {
     case 'toml':
-    case 'persona':
       return sourceKind
     default:
       return null
   }
 }
 
+function normalizeOverrideFieldSources(raw: unknown): KeeperConfigOverrideFieldSource[] {
+  return asRecordArray(raw)
+    .map((row): KeeperConfigOverrideFieldSource | null => {
+      const field = asNullableString(row.field)
+      if (!field) return null
+      return {
+        field,
+        source: asNullableString(row.source),
+        live_source: asNullableString(row.live_source),
+        default_source: asNullableString(row.default_source),
+        default_source_kind: normalizeDefaultSourceKind(row.default_source_kind),
+        default_manifest_path: asNullableString(row.default_manifest_path),
+        default_manifest_exists: asBoolean(row.default_manifest_exists) ?? null,
+        default_missing: asBoolean(row.default_missing) ?? null,
+        default_value: row.default_value,
+        live_value: row.live_value,
+      }
+    })
+    .filter((row): row is KeeperConfigOverrideFieldSource => row !== null)
+}
+
+function keeperConfigUnavailableMessage(raw: unknown): string {
+  if (!isRecord(raw)) {
+    throw new Error('Invalid keeper config response: config_error must be a typed object')
+  }
+  const keeper = asNullableString(raw.keeper)
+  const keeperPath = asNullableString(raw.keeper_path)
+  const kind = asNullableString(raw.kind)
+  const failingPath = asNullableString(raw.failing_path)
+  const detail = asNullableString(raw.detail)
+  const validKind = kind === 'read_error'
+    || kind === 'parse_error'
+    || kind === 'profile_error'
+    || kind === 'invalid_name'
+  if (
+    !keeper
+    || !keeperPath
+    || !validKind
+    || !failingPath
+    || !detail
+    || raw.terminal_reason !== 'config_invalid'
+    || raw.severity !== 'error'
+    || raw.blocking !== true
+    || raw.operator_action_required !== true
+    || raw.next_action !== 'fix_keeper_toml_config'
+  ) {
+    throw new Error('Invalid keeper config response: config_error must be a typed object')
+  }
+  return `Keeper config unavailable for ${keeper}: ${kind} at ${failingPath}: ${detail}`
+}
+
 function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfig {
   const data = isRecord(raw) ? raw : {}
+  if (data.config_error !== undefined && data.config_error !== null) {
+    throw new Error(keeperConfigUnavailableMessage(data.config_error))
+  }
   const prompt = isRecord(data.prompt) ? data.prompt : {}
   const promptBlocks = isRecord(prompt.system_prompt_blocks) ? prompt.system_prompt_blocks : {}
   const execution = isRecord(data.execution) ? data.execution : {}
   const proactive = isRecord(data.proactive) ? data.proactive : {}
-  const drift = isRecord(data.drift) ? data.drift : {}
   const hooks = isRecord(data.hooks) ? data.hooks : null
   const runtime = isRecord(data.runtime) ? data.runtime : {}
   const runtimeTrust = isRecord(data.runtime_trust) ? data.runtime_trust : null
@@ -172,9 +194,9 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
 
   return {
     name: asNullableString(data.name) ?? requestedName,
-    active_goal_ids: normalizeStringList(data.active_goal_ids),
     autoboot_enabled: asLooseBoolean(data.autoboot_enabled, true),
     max_context_override: decodeMaxContextOverride(data.max_context_override),
+    autonomous_wake_prompt: asNullableString(data.autonomous_wake_prompt),
     sandbox_profile: asNullableString(data.sandbox_profile) ?? '(unknown sandbox_profile)',
     network_mode: asNullableString(data.network_mode) ?? '(unknown network_mode)',
     sandbox_last_error: asNullableString(data.sandbox_last_error),
@@ -206,13 +228,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     proactive: {
       enabled: asLooseBoolean(proactive.enabled),
     },
-    drift: {
-      status: normalizeKeeperFeatureStatus(drift.status),
-      enabled: asLooseNullableBoolean(drift.enabled),
-      min_turn_gap: asInt(drift.min_turn_gap) ?? null,
-      count_total: asInt(drift.count_total) ?? null,
-      last_reason: asNullableString(drift.last_reason),
-    },
     hooks: hooks
       ? {
           scope: asNullableString(hooks.scope),
@@ -234,10 +249,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     workspace: {
       mention_targets: normalizeStringList(workspace.mention_targets),
       bound_workspace_ids: normalizeStringList(workspace.bound_workspace_ids),
-      active_goal_ids: normalizeStringList(workspace.active_goal_ids),
-      active_goals: normalizeKeeperConfigActiveGoals(workspace.active_goals),
-      active_goal_count: asInt(workspace.active_goal_count) ?? 0,
-      missing_active_goal_ids: normalizeStringList(workspace.missing_active_goal_ids),
     },
     sources: {
       live_meta_path: asNullableString(sources.live_meta_path) ?? '',
@@ -246,6 +257,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       precedence: normalizeStringList(sources.precedence),
       has_live_override: asLooseBoolean(sources.has_live_override),
       override_fields: normalizeStringList(sources.override_fields),
+      override_field_sources: normalizeOverrideFieldSources(sources.override_field_sources),
     },
     metrics: {
       generation: asInt(metrics.generation) ?? 0,
@@ -279,10 +291,11 @@ export type SandboxNetworkMode = 'none' | 'inherit'
 
 export type KeeperConfigUpdatePayload = {
   runtime_id?: string
-  active_goal_ids?: string[]
   mention_targets?: string[]
   autoboot_enabled?: boolean
   max_context_override?: number | null
+  // null clears the keeper override (falls back to fleet autonomous.wake_prompt)
+  autonomous_wake_prompt?: string | null
   allowed_paths?: string[]
   // Sandbox
   sandbox_profile?: SandboxProfile

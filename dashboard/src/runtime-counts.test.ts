@@ -13,6 +13,7 @@ import {
   keeperDetailRows,
   runtimeHealthIsFresh,
   resolveRuntimeFleetSafetyCounts,
+  resolveKeeperFleetExecutionCounts,
   resolveRuntimeCounts,
   runtimeDetailRows,
   runtimeCountSourceLabel,
@@ -139,7 +140,7 @@ describe('resolveRuntimeCounts', () => {
 
   it('reports both 2 live and 16 configured keepers in the fluctuation scenario without picking a winner', () => {
     // Real-world reproduction: composite API returns 2 running fiber keepers
-    // while .masc/keepers/ holds 16 persona registrations. Both must surface
+    // while .masc/keepers/ holds 16 Keeper registrations. Both must surface
     // simultaneously so the UI can render "keeper 실행 fiber 2 / configured keeper 16" instead of swapping.
     expect(resolveRuntimeCounts({
       executionLoaded: true,
@@ -244,6 +245,51 @@ describe('resolveRuntimeCounts', () => {
       configured: { keepers: 13, totalRuntimes: 13, source: 'shell' },
       source: 'runtime-health',
     })
+  })
+
+  it('reports each keeper execution phase separately', () => {
+    const runtimeFleetSafety = {
+      keeper_fibers: 4,
+      paused_keepers: 9,
+      paused_keepers_health: { count: 1 },
+      keeper_fleet_safety: {
+        running_keeper_fiber_count: 4,
+        recovering_keeper_fiber_count: 3,
+        executable_keeper_fiber_count: 7,
+        paused_keeper_count: 5,
+      },
+    } as any
+
+    expect(resolveKeeperFleetExecutionCounts(runtimeFleetSafety)).toEqual({
+      running: 4,
+      recovering: 3,
+      executable: 7,
+      paused: 1,
+    })
+  })
+
+  it('keeps a reported zero distinct from an unreported count', () => {
+    const runtimeFleetSafety = {
+      keeper_fleet_safety: {
+        running_keeper_fiber_count: 0,
+        executable_keeper_fiber_count: 2,
+      },
+    } as any
+
+    expect(resolveKeeperFleetExecutionCounts(runtimeFleetSafety)).toEqual({
+      running: 0,
+      recovering: null,
+      executable: 2,
+      paused: null,
+    })
+  })
+
+  it('returns null when no fleet projection is available', () => {
+    expect(resolveKeeperFleetExecutionCounts(null)).toBeNull()
+    expect(resolveKeeperFleetExecutionCounts(undefined)).toBeNull()
+    // keeper_fibers alone is a fiber gauge, not a per-phase projection: it must
+    // not be promoted into a running count.
+    expect(resolveKeeperFleetExecutionCounts({ keeper_fibers: 9 } as any)).toBeNull()
   })
 
   it('does not fall back to keeper_fibers when executable capacity is absent', () => {
@@ -544,6 +590,19 @@ describe('shouldShowExecutionFallbackState', () => {
       executionLoading: false,
       executionError: null,
       loadedCount: 5,
+      expectedCount: 5,
+    })).toBe(false)
+  })
+
+  it('hides the fallback state after load even when counts are partial', () => {
+    // A loaded-but-partial roster is described by the roster rows and health
+    // counts themselves; the permanent "일부만 불러왔습니다" diagnostic banner
+    // was removed for layout room.
+    expect(shouldShowExecutionFallbackState({
+      executionLoaded: true,
+      executionLoading: false,
+      executionError: null,
+      loadedCount: 3,
       expectedCount: 5,
     })).toBe(false)
   })

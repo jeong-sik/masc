@@ -8,10 +8,12 @@ import { ringFocusClasses } from '../common/ring'
 import { ATTACHMENT_INPUT_ACCEPT, collectAttachments } from './attachments'
 import { linkifyHtmlReferences } from './chat-linkify'
 import { UNREAD_DIVIDER_LABEL, unreadDividerAnchorKey } from './unread-divider'
+import { buildChatContextScope, ChatContextScopeRow, ChatSpeakerHandle } from './message-context-scope'
+import type { ChatContextScope } from './message-context-scope'
 import { showToast } from '../common/toast'
 import { copyToClipboard } from '../common/copyable-code'
 import { ArrowRight, ExternalLink, Mic, ShieldCheck, Square } from 'lucide-preact'
-import { prettyJson } from '../tool-call-shared'
+import { normalizeToolName, prettyJson, toolSubject } from '../tool-call-shared'
 import { useVoiceInput } from './voice-input'
 
 const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
@@ -35,6 +37,7 @@ import { hasMarkdownRenderCue } from './markdown-cue'
 import type { JSX } from 'preact'
 import { navigate } from '../../router'
 import { normalizeFusionPanelReason } from '../../lib/fusion-meta'
+import { fusionDecisionSpec } from '../v2/fusion-constants'
 import { STREAMING_THINKING_PREVIEW_CHARS } from '../../config/constants'
 
 /** Keeper identity used by SigilBadge. */
@@ -93,17 +96,17 @@ function traceToolStatusUi(status: ChatTraceToolStep['status']): { className: 'o
 }
 
 function traceSourceBadge(step: ChatTraceStep): TraceSourceBadgeInfo {
-  // The stream content-block index (oasBlockIndex) is provenance detail, not
+  // The stream content-block index (agentCoreBlockIndex) is provenance detail, not
   // an identity: it stays in the hover title and in the
-  // data-chat-trace-oas-block-index attribute, while the visible label keeps
-  // the stable channel name. An "OAS #3" badge told the operator nothing
+  // data-chat-trace-agent-core-block-index attribute, while the visible label keeps
+  // the stable channel name. An "Agent Core #3" badge told the operator nothing
   // about where the step came from (bug #11).
   if (step.kind === 'think') {
     return {
       label: 'thinking_delta',
-      title: step.oasBlockIndex === undefined
+      title: step.agentCoreBlockIndex === undefined
         ? 'source: KEEPER_THINKING_DELTA'
-        : `source: KEEPER_THINKING_DELTA, content block ${step.oasBlockIndex}`,
+        : `source: KEEPER_THINKING_DELTA, content block ${step.agentCoreBlockIndex}`,
       tone: 'stream',
     }
   }
@@ -117,9 +120,9 @@ function traceSourceBadge(step: ChatTraceStep): TraceSourceBadgeInfo {
   if (step.kind === 'progress') {
     return {
       label: 'intermediate_text',
-      title: step.oasBlockIndex === undefined
+      title: step.agentCoreBlockIndex === undefined
         ? 'source: TEXT_MESSAGE_CONTENT followed by TOOL_CALL_START'
-        : `source: TEXT_MESSAGE_CONTENT block ${step.oasBlockIndex}, followed by TOOL_CALL_START`,
+        : `source: TEXT_MESSAGE_CONTENT block ${step.agentCoreBlockIndex}, followed by TOOL_CALL_START`,
       tone: 'stream',
     }
   }
@@ -127,9 +130,9 @@ function traceSourceBadge(step: ChatTraceStep): TraceSourceBadgeInfo {
   if (callId) {
     return {
       label: 'tool_call_id',
-      title: step.oasBlockIndex === undefined
+      title: step.agentCoreBlockIndex === undefined
         ? `source: TOOL_CALL_*, tool_call_id=${callId}`
-        : `source: TOOL_CALL_*, tool_call_id=${callId}, content block ${step.oasBlockIndex}`,
+        : `source: TOOL_CALL_*, tool_call_id=${callId}, content block ${step.agentCoreBlockIndex}`,
       tone: 'tool',
     }
   }
@@ -268,23 +271,10 @@ function surfaceLink(surface?: SurfaceRef | null): ChatMetaInfo | null {
         }
       }
       break
-    case 'dashboard':
-      return {
-        url: '#',
-        label: 'Dashboard',
-        icon: '💻',
-        title: compactKeyValues([
-          ['surface', 'dashboard'],
-          ['session_id', surface.session_id],
-        ]),
-      }
-    case 'agent':
-      return {
-        url: '#',
-        label: 'Agent (Self)',
-        icon: '🤖',
-        title: 'surface=agent',
-      }
+    // dashboard / agent / broadcast / webhook rows carry no link or
+    // coordinates beyond what the origin badge (sourceBadgeInfo) already
+    // shows, so they render no meta chip — the chip lane is for surfaces
+    // with a destination (deep link) or an address to inspect.
     case 'gate':
       {
         const label = surface.label || 'connector'
@@ -381,11 +371,6 @@ type ChatTranscriptAction = {
   label?: string
   title?: string
   onClick?: (entry: KeeperConversationEntry) => void
-  onPendingCancel?: (entry: KeeperConversationEntry) => Promise<void>
-  onPendingEdit?: (entry: KeeperConversationEntry) => Promise<void>
-  onPendingMoveToEnd?: (entry: KeeperConversationEntry) => Promise<void>
-  onRecoveryRequeue?: (entry: KeeperConversationEntry) => Promise<void>
-  onRecoveryCancel?: (entry: KeeperConversationEntry, detail: string) => Promise<void>
 }
 
 export const THINKING_TRACE_PREVIEW_CHARS = 2400
@@ -449,162 +434,6 @@ function showDeliveryBadge(entry: KeeperConversationEntry, variant: ChatTranscri
   return entry.delivery !== 'history' && entry.delivery !== 'delivered'
 }
 
-function QueueReceiptBadge({ entry, action }: {
-  entry: KeeperConversationEntry
-  action?: ChatTranscriptAction
-}) {
-  const [recoveryPending, setRecoveryPending] = useState<'requeue' | 'cancel' | null>(null)
-  const [pendingAction, setPendingAction] = useState<'edit' | 'move' | 'cancel' | null>(null)
-  const receiptId = entry.details?.queueReceiptId?.trim()
-  const shutdownOperationId = entry.details?.queueShutdownOperationId?.trim()
-  const queueState = entry.details?.queueState
-  if (!receiptId || !queueState) return null
-  const label = (() => {
-    switch (queueState) {
-      case 'pending': return '대기 중'
-      case 'inflight': return '처리 중'
-      case 'recovery_required': return '복구 확인 필요'
-      case 'delivered': return '처리 완료'
-      case 'failed': return '처리 실패'
-      default: return '상태 확인 필요'
-    }
-  })()
-  const shutdownLabel = shutdownOperationId ? ' · 종료 후 처리' : ''
-  const currentWorkLabel = (() => {
-    const lane = entry.details?.queueInFlightLane?.trim()
-    if (!lane) return null
-    const work = lane === 'autonomous'
-      ? '자율 작업 처리 중'
-      : lane === 'chat'
-        ? '다른 대화 처리 중'
-        : `${lane} 처리 중`
-    const startedAt = entry.details?.queueInFlightStartedAt
-    return typeof startedAt === 'number'
-      ? `${work} · ${formatTimeHms(startedAt)}부터`
-      : work
-  })()
-  const title = [
-    `receipt ${receiptId}`,
-    label,
-    shutdownOperationId ? `shutdown operation ${shutdownOperationId}` : null,
-  ].filter((value): value is string => value !== null).join(' · ')
-  const runRecovery = async (
-    kind: 'requeue' | 'cancel',
-    operation: () => Promise<void>,
-  ) => {
-    setRecoveryPending(kind)
-    try {
-      await operation()
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error')
-    } finally {
-      setRecoveryPending(null)
-    }
-  }
-  const cancelRecovery = () => {
-    if (!action?.onRecoveryCancel) return
-    const detail = window.prompt('미확인 배송을 취소하는 이유를 입력하세요.')
-    if (detail === null) return
-    if (!detail || detail !== detail.trim()) {
-      showToast('취소 이유는 공백 없이 정확히 입력해야 합니다.', 'error')
-      return
-    }
-    void runRecovery('cancel', () => action.onRecoveryCancel!(entry, detail))
-  }
-  const runPendingAction = async (
-    kind: 'edit' | 'move' | 'cancel',
-    operation: () => Promise<void>,
-  ) => {
-    setPendingAction(kind)
-    try {
-      await operation()
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error')
-    } finally {
-      setPendingAction(null)
-    }
-  }
-  return html`
-    <span class="inline-flex flex-wrap items-center gap-1.5">
-      <span
-        class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)]"
-        title=${title}
-        data-chat-queue-state-badge=${queueState}
-        data-chat-queue-receipt=${receiptId}
-        data-chat-queue-shutdown-operation-id=${shutdownOperationId ?? undefined}
-      >
-        ${label}${shutdownLabel}
-      </span>
-      ${currentWorkLabel
-        ? html`<span class="text-2xs text-[var(--color-fg-muted)]">${currentWorkLabel}</span>`
-        : null}
-      ${queueState === 'pending' && action?.onPendingEdit
-        ? html`
-            <button
-              type="button"
-              disabled=${pendingAction !== null}
-              class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)] disabled:opacity-50"
-              data-chat-queue-pending-action="edit"
-              onClick=${() => {
-                void runPendingAction('edit', () => action.onPendingEdit!(entry))
-              }}
-            >${pendingAction === 'edit' ? '불러오는 중...' : '수정'}</button>
-          `
-        : null}
-      ${queueState === 'pending' && action?.onPendingCancel
-        ? html`
-            <button
-              type="button"
-              disabled=${pendingAction !== null}
-              class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-status-err)] disabled:opacity-50"
-              data-chat-queue-pending-action="cancel"
-              onClick=${() => {
-                void runPendingAction('cancel', () => action.onPendingCancel!(entry))
-              }}
-            >${pendingAction === 'cancel' ? '취소 중...' : '취소'}</button>
-          `
-        : null}
-      ${queueState === 'pending' && action?.onPendingMoveToEnd
-        ? html`
-            <button
-              type="button"
-              disabled=${pendingAction !== null}
-              class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)] disabled:opacity-50"
-              data-chat-queue-pending-action="move-to-end"
-              onClick=${() => {
-                void runPendingAction('move', () => action.onPendingMoveToEnd!(entry))
-              }}
-            >${pendingAction === 'move' ? '변경 중...' : '맨 뒤로'}</button>
-          `
-        : null}
-      ${queueState === 'recovery_required' && action?.onRecoveryRequeue
-        ? html`
-            <button
-              type="button"
-              disabled=${recoveryPending !== null}
-              class="rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5 text-2xs font-semibold text-[var(--warn-bright)] disabled:opacity-50"
-              data-chat-queue-recovery-action="requeue_unconfirmed"
-              onClick=${() => {
-                void runRecovery('requeue', () => action.onRecoveryRequeue!(entry))
-              }}
-            >${recoveryPending === 'requeue' ? '반영 중...' : '미확인 배송 재큐잉'}</button>
-          `
-        : null}
-      ${queueState === 'recovery_required' && action?.onRecoveryCancel
-        ? html`
-            <button
-              type="button"
-              disabled=${recoveryPending !== null}
-              class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-status-err)] disabled:opacity-50"
-              data-chat-queue-recovery-action="cancel_unconfirmed"
-              onClick=${cancelRecovery}
-            >${recoveryPending === 'cancel' ? '반영 중...' : '미확인 배송 취소'}</button>
-          `
-        : null}
-    </span>
-  `
-}
-
 function avatarLabel(entry: KeeperConversationEntry): string {
   if (entry.role === 'user') return '사용자'
   if (entry.label.trim()) return entry.label.trim()
@@ -616,20 +445,62 @@ function avatarMonogram(entry: KeeperConversationEntry): string {
   return label.slice(0, 2).toUpperCase()
 }
 
-// C2: badge non-obvious message provenance. The standalone's .src-badge marks
-// external CHANNELS (discord/slack/imessage) which the live keeper transport
-// does not have — its `source` is a *semantic* origin instead. So we badge the
-// origins that are easy to mistake for a plain user/assistant turn
-// (world-state injection, internal prompt, tool result, system) and leave the
-// two ordinary cases (direct_user / direct_assistant) unbadged.
-const SOURCE_BADGE: Partial<Record<KeeperConversationSource, { label: string; cls: string }>> = {
+// C2: badge message provenance (#29461). Two axes feed one badge slot:
+// 1. Semantic origins that are easy to mistake for a plain turn keep
+//    their badge (world-state injection, internal prompt, tool result,
+//    system) — they win because the surface says where a row travelled,
+//    not what it is.
+// 2. Every other row derives its badge from the typed origin the wire
+//    already carries: entry.surface.kind × the row's speaker fields.
+//    Dashboard rows are the operator's own input (live stores carry
+//    owner authority on every dashboard user row), agent rows name the
+//    sending keeper, broadcast rows mark workspace fleet fanout, and
+//    connector rows name the connector. No surface, no badge — origin
+//    is never guessed from content.
+interface SourceBadgeInfo {
+  label: string
+  cls: string
+  title?: string
+}
+const SEMANTIC_SOURCE_BADGE: Partial<Record<KeeperConversationSource, SourceBadgeInfo>> = {
   world_state_prompt: { label: '월드', cls: 'world' },
   internal_assistant: { label: '내부', cls: 'internal' },
   tool_result: { label: '도구', cls: 'tool' },
   system: { label: '시스템', cls: 'system' },
 }
-function sourceBadgeInfo(entry: KeeperConversationEntry): { label: string; cls: string } | null {
-  return SOURCE_BADGE[entry.source] ?? null
+function surfaceBadgeTitle(entry: KeeperConversationEntry): string {
+  return compactKeyValues([
+    ['surface', entry.surface?.kind],
+    ['speaker_name', entry.speakerName],
+    ['speaker_id', entry.speakerId],
+    ['speaker_authority', entry.speakerAuthority],
+    ['external_message_id', entry.externalMessageId],
+  ])
+}
+function sourceBadgeInfo(entry: KeeperConversationEntry): SourceBadgeInfo | null {
+  const semantic = SEMANTIC_SOURCE_BADGE[entry.source]
+  if (semantic) return semantic
+  const surface = entry.surface
+  if (!surface) return null
+  const title = surfaceBadgeTitle(entry)
+  switch (surface.kind) {
+    case 'dashboard':
+      return { label: '사람', cls: 'origin-dashboard', title }
+    case 'broadcast':
+      return { label: '브로드캐스트', cls: 'origin-broadcast', title }
+    case 'discord':
+      return { label: 'Discord', cls: 'origin-discord', title }
+    case 'slack':
+      return { label: 'Slack', cls: 'origin-slack', title }
+    case 'agent': {
+      const speaker = entry.speakerName?.trim() || entry.speakerId?.trim() || ''
+      return { label: speaker || 'keeper', cls: 'origin-agent', title }
+    }
+    case 'webhook':
+      return { label: surface.source?.trim() || 'Webhook', cls: 'origin-webhook', title }
+    case 'gate':
+      return { label: surface.label?.trim() || 'Gate', cls: 'origin-gate', title }
+  }
 }
 
 type StreamContractBadgeInfo = {
@@ -652,28 +523,17 @@ function streamContractBadgeInfo(entry: KeeperConversationEntry): StreamContract
     `source=${contract.source}`,
     `status=${contract.status}`,
     contract.eventName ? `event=${contract.eventName}` : null,
-    contract.deliveryReceipt ? `receipt=${contract.deliveryReceipt}` : null,
     contract.reason ?? null,
     sourceContext || null,
   ].filter((value): value is string => Boolean(value)).join(' · ')
-  switch (contract.deliveryReceipt) {
-    case 'server_lifecycle_replay_only':
+  switch (contract.status) {
+    case 'backend_lifecycle_replay':
       return { label: '서버 replay', title, state: 'server-replay' }
-    case 'no_delivery_receipt':
-      switch (contract.status) {
-        case 'history_without_turn_ref':
-          // User rows are persisted at request-accept time, before the turn
-          // (and its turn_ref) exists, and nothing back-stamps them — a
-          // missing turn_ref is the normal state of every user row, so the
-          // badge would be pure noise there. On assistant rows it still
-          // marks a real turn-join gap worth surfacing.
-          if (entry.role === 'user') return null
-          return { label: '턴 연결 없음', title, state: 'no-turn-ref' }
-        case 'contract_gap':
-          return { label: '수신 gap', title, state: 'contract-gap' }
-        default:
-          return null
-      }
+    case 'history_without_turn_ref':
+      if (entry.role === 'user') return null
+      return { label: '턴 연결 없음', title, state: 'no-turn-ref' }
+    case 'contract_gap':
+      return { label: '수신 gap', title, state: 'contract-gap' }
     default:
       return null
   }
@@ -745,16 +605,6 @@ function overviewRows(details: KeeperConversationDetails): Array<{ label: string
     typeof details.usage?.totalTokens === 'number' ? { label: '토큰', value: `${details.usage.totalTokens}` } : null,
     formatCurrency(details.costUsd) ? { label: '비용', value: formatCurrency(details.costUsd)! } : null,
     details.traceId ? { label: '트레이스', value: details.traceId } : null,
-    details.queueReceiptId ? { label: '큐 receipt', value: details.queueReceiptId } : null,
-    details.queueShutdownOperationId ? { label: '종료 작업 ID', value: details.queueShutdownOperationId } : null,
-    details.queueState ? { label: '큐 상태', value: details.queueState } : null,
-    details.queueFailureKind ? { label: '큐 실패', value: details.queueFailureKind } : null,
-    typeof details.queueRevision === 'string' ? { label: '큐 revision', value: details.queueRevision } : null,
-    typeof details.queuePendingCount === 'number' ? { label: '접수 시 pending', value: `${details.queuePendingCount}` } : null,
-    typeof details.queueInflightCount === 'number' ? { label: '접수 시 inflight', value: `${details.queueInflightCount}` } : null,
-    typeof details.queueRecoveryRequiredCount === 'number'
-      ? { label: '접수 시 recovery required', value: `${details.queueRecoveryRequiredCount}` }
-      : null,
     typeof details.generation === 'number' ? { label: '세대', value: `${details.generation}` } : null,
   ].filter((row): row is { label: string; value: string } => Boolean(row))
 }
@@ -1424,7 +1274,7 @@ function ChatSuggestionsBlock({ items }: ChatSuggestionsBlock) {
   return html`
     <div class="chat-block-suggestions" data-chat-block="suggestions">
       <span class="chat-block-suggestions-label" id=${labelId}>${CHAT_SUGGESTIONS_LABEL}</span>
-      <div class="chat-block-suggestions-row" role="group" aria-labelledby=${labelId}>
+      <div class="chat-block-suggestions-row suggest-row" role="group" aria-labelledby=${labelId}>
         ${items.map((it, i) => html`
           <${ChatSuggestionChip}
             key=${i}
@@ -1599,14 +1449,17 @@ function ChatVoiceBlock(b: ChatVoiceBlock) {
 function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: string }) {
   const [open, setOpen] = useState(false)
   const safeSrc = src && isSafeMediaUrl(src, ['data:image/']) ? src : null
+  // Keeper-v2 messages.jsx image block: figure.img-out > .img-frame > img | .img-ph.
+  // chat-block-media-frame stays alongside img-frame — it owns the dashboard-only
+  // extras the design never had to solve (placeholder min-height, img max-height cap).
   return html`
-    <figure class="chat-block-media" data-chat-block="image">
-      <div class="chat-block-media-frame ${safeSrc ? 'cursor-zoom-in' : ''}" onClick=${() => safeSrc && setOpen(true)}>
+    <figure class="img-out" data-chat-block="image">
+      <div class="chat-block-media-frame img-frame ${safeSrc ? 'cursor-zoom-in' : ''}" onClick=${() => safeSrc && setOpen(true)}>
         ${safeSrc
           ? html`<img src=${safeSrc} alt=${cap || ''} class="max-h-52 w-full rounded-[var(--r-1)] object-contain" />`
-          : html`<div class="chat-block-media-ph">${ph || '실행 화면'}${src ? ' (unsafe URL)' : ''}</div>`}
+          : html`<div class="chat-block-media-ph img-ph">${ph || '실행 화면'}${src ? ' (unsafe URL)' : ''}</div>`}
       </div>
-      ${cap ? html`<figcaption class="chat-block-media-cap">${cap}</figcaption>` : null}
+      ${cap ? html`<figcaption>${cap}</figcaption>` : null}
       ${open && safeSrc
         ? html`
             <${ChatPreviewModal} title=${cap || '이미지'} onClose=${() => setOpen(false)}>
@@ -1625,14 +1478,15 @@ function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: str
 function ChatSvgBlock({ svg, cap }: { svg: string; cap?: string }) {
   const [open, setOpen] = useState(false)
   const clean = useMemo(() => sanitizeHtml(svg), [svg])
+  // Keeper-v2 messages.jsx svg block: figure.svg-out > .svg-frame (sanitized inline svg).
   return html`
-    <figure class="chat-block-media" data-chat-block="svg">
+    <figure class="svg-out" data-chat-block="svg">
       <div
-        class="chat-block-media-frame cursor-zoom-in"
+        class="chat-block-media-frame svg-frame cursor-zoom-in"
         onClick=${() => setOpen(true)}
         dangerouslySetInnerHTML=${{ __html: clean }}
       />
-      ${cap ? html`<figcaption class="chat-block-media-cap">${cap}</figcaption>` : null}
+      ${cap ? html`<figcaption>${cap}</figcaption>` : null}
       ${open
         ? html`
             <${ChatPreviewModal} title=${cap || 'SVG'} onClose=${() => setOpen(false)}>
@@ -1739,7 +1593,7 @@ function ChatTraceStep({
         data-chat-turn-order-index=${orderIndex ?? undefined}
         data-chat-turn-order-kind="trace"
         data-chat-trace-provenance=${sourceBadge.label}
-        data-chat-trace-oas-block-index=${step.oasBlockIndex ?? undefined}
+        data-chat-trace-agent-core-block-index=${step.agentCoreBlockIndex ?? undefined}
         data-chat-trace-ts=${step.ts ?? undefined}
       >
         <span class="chat-block-tnode"></span>
@@ -1815,7 +1669,7 @@ function ChatTraceStep({
         data-chat-turn-order-index=${orderIndex ?? undefined}
         data-chat-turn-order-kind="trace"
         data-chat-trace-provenance=${sourceBadge.label}
-        data-chat-trace-oas-block-index=${step.oasBlockIndex ?? undefined}
+        data-chat-trace-agent-core-block-index=${step.agentCoreBlockIndex ?? undefined}
         data-chat-trace-ts=${step.ts ?? undefined}
       >
         <span class="chat-block-tnode"></span>
@@ -1843,6 +1697,9 @@ function ChatTraceStep({
   }
 
   const statusUi = traceToolStatusUi(step.status)
+  // The name alone repeats: six `Execute` rows read identically. The subject is
+  // the argument that tells them apart, and it is already on the step.
+  const subject = toolSubject(step.args)
 
   return html`
     <div
@@ -1852,7 +1709,7 @@ function ChatTraceStep({
       data-chat-turn-order-kind="tool"
       data-chat-trace-provenance=${sourceBadge.label}
       data-chat-trace-tool-call-id=${step.toolCallId?.trim() || undefined}
-      data-chat-trace-oas-block-index=${step.oasBlockIndex ?? undefined}
+      data-chat-trace-agent-core-block-index=${step.agentCoreBlockIndex ?? undefined}
       data-chat-trace-link-state=${step.toolCallId?.trim() ? 'trace-only' : 'unlinked'}
       data-chat-trace-output-state=${step.status ?? 'pending'}
       data-chat-trace-ts=${step.ts ?? undefined}
@@ -1863,6 +1720,9 @@ function ChatTraceStep({
           <span class="chat-block-tstep-kind">Tool</span>
           <${TraceSourceBadge} info=${sourceBadge} />
           <span class="chat-block-tstep-name">${step.name}</span>
+          ${subject
+            ? html`<span class="chat-block-tstep-subject" title=${subject}>${subject}</span>`
+            : null}
           <span
             class="chat-block-tstep-status ${statusUi.className}"
             title=${statusUi.title}
@@ -1894,7 +1754,7 @@ function ChatTraceStep({
   `
 }
 
-function ChatTraceBlock({ trace }: { trace: ChatTraceStep[] }) {
+function ChatTraceBlock({ trace, omitted = 0 }: { trace: ChatTraceStep[]; omitted?: number }) {
   const [open, setOpen] = useState(true)
   const toolN = trace.filter((s) => s.kind === 'tool').length
   const dur = traceDur(trace)
@@ -1911,6 +1771,13 @@ function ChatTraceBlock({ trace }: { trace: ChatTraceStep[] }) {
         <span>◈</span>
         <span class="chat-block-trace-label">작업 과정</span>
         <span class="chat-block-trace-count">${trace.length}단계</span>
+        <!-- A nested template literal inside an htm template corrupts its
+             parse and breaks unrelated components in the same module, so the
+             two counts are separate spans rather than one interpolated
+             string. -->
+        ${omitted > 0
+          ? html`<span class="chat-block-trace-count" data-chat-trace-omitted=${omitted}>앞 ${omitted}단계 생략</span>`
+          : null}
         <span class="chat-block-trace-meta">
           ${toolN > 0 ? html`<span>도구 ${toolN}</span>` : null}
           ${dur ? html`<span class="tnum">${dur}</span>` : null}
@@ -1920,6 +1787,12 @@ function ChatTraceBlock({ trace }: { trace: ChatTraceStep[] }) {
         ? html`
             <div class="chat-block-trace-steps">
               <span class="chat-block-trace-rail"></span>
+              ${omitted > 0
+                ? html`<div class="chat-block-tstep-text" data-chat-trace-omitted=${omitted}>
+                    이 턴의 앞 ${omitted}단계는 대화 화면에 싣지 않았습니다 — 전체는 Turn
+                    Inspector의 raw trace에서 확인합니다.
+                  </div>`
+                : null}
               ${trace.map((s, i) => html`<${ChatTraceStep} key=${i} step=${s} />`)}
             </div>
           `
@@ -1937,22 +1810,26 @@ function ChatLinkBlock(b: ChatLinkBlock) {
   }
   const safeUrl = isSafeUrl(b.url) ? b.url : '#'
   const unsafe = safeUrl === '#'
+  // Keeper-v2 messages.jsx LinkCard vocabulary (linkcard / -fav / -body / -title /
+  // -desc / -meta mono / -go); skin is vendored in keeper-v2/v2.css. The
+  // chat-block-linkcard-unsafe hook is dashboard-only: the design has no unsafe-URL
+  // state, and the live renderer refuses javascript:/data: hrefs.
   return html`
     <a
-      class="chat-block-linkcard ${b.kind || ''} ${unsafe ? 'chat-block-linkcard-unsafe' : ''}"
+      class="linkcard ${b.kind || ''} ${unsafe ? 'chat-block-linkcard-unsafe' : ''}"
       href=${safeUrl}
       target="_blank"
       rel=${unsafe ? undefined : 'noopener noreferrer'}
       data-chat-block="link"
       onClick=${unsafe ? (e: MouseEvent) => { e.preventDefault() } : undefined}
     >
-      <span class="chat-block-linkcard-fav">${b.fav || (host ? host.slice(0, 1).toUpperCase() : '↗')}</span>
-      <span class="chat-block-linkcard-body">
-        <span class="chat-block-linkcard-title">${b.title}</span>
-        ${b.desc ? html`<span class="chat-block-linkcard-desc">${b.desc}</span>` : null}
-        <span class="chat-block-linkcard-meta">${unsafe ? 'unsafe URL' : (b.meta || host)}</span>
+      <span class="linkcard-fav">${b.fav || (host ? host.slice(0, 1).toUpperCase() : '↗')}</span>
+      <span class="linkcard-body">
+        <span class="linkcard-title">${b.title}</span>
+        ${b.desc ? html`<span class="linkcard-desc">${b.desc}</span>` : null}
+        <span class="linkcard-meta mono">${unsafe ? 'unsafe URL' : (b.meta || host)}</span>
       </span>
-      <span class="chat-block-linkcard-go">↗</span>
+      <span class="linkcard-go">↗</span>
     </a>
   `
 }
@@ -2139,39 +2016,40 @@ function ChatFusionCard({ boardPostId, runId, fallbackText }: { boardPostId: str
     return () => { alive = false }
   }, [expanded, boardPostId])
 
-  const runLabel = runId ? ` · ${runId.slice(0, 12)}` : ''
   const answeredCount = state.panel.filter((p) => p.status === 'answered').length
   const usageLabel =
     state.totalOutputTokens !== undefined ? ` · ${state.totalOutputTokens.toLocaleString()} tok` : ''
+  // Keeper-v2 messages.jsx fusion block: .msg-fusion > .msg-fusion-h (tag · run ·
+  // decision badge) + .msg-fusion-ans + .msg-fusion-foot (panel count · run link).
+  // Skin is vendored in keeper-v2/fusion.css. The decision badge/answer only render
+  // once the board post is lazy-fetched on expand — before that the live signal
+  // does not exist locally and nothing is fabricated for them.
+  const decSpec = state.status === 'loaded' && state.judge?.decision
+    ? fusionDecisionSpec(state.judge.decision)
+    : null
   return html`
-    <div class="rounded-[var(--r-1,8px)] border border-[var(--color-brass-border,#3a3a2a)] bg-[var(--color-brass-soft,rgba(216,166,87,0.06))] overflow-hidden" data-fusion-card>
+    <div class=${`msg-fusion${decSpec?.cls ? ` dec-${decSpec.cls}` : ''}`} data-fusion-card>
       <button
         type="button"
-        class="w-full flex items-center gap-2 px-3 py-2 text-left text-xs ${CHAT_FOCUS_RING}"
+        class="msg-fusion-h w-full text-left ${CHAT_FOCUS_RING}"
         aria-expanded=${expanded}
         onClick=${() => setExpanded((v) => !v)}
       >
         <span aria-hidden="true">${expanded ? '▾' : '▸'}</span>
-        <span class="font-medium">Fusion 심의</span>
+        <span class="msg-fusion-tag">◈ Fusion 심의</span>
         <span class="text-[var(--color-fg-secondary,#9da7b3)]">
           ${state.status === 'loaded'
-            ? `패널 ${answeredCount}/${state.panel.length} 합의${runLabel}${usageLabel}`
-            : `패널 합의 상세${runLabel}`}
+            ? `패널 ${answeredCount}/${state.panel.length} 합의${usageLabel}`
+            : '패널 합의 상세'}
         </span>
+        ${runId ? html`<span class="msg-fusion-run mono">${runId.slice(0, 12)}</span>` : null}
+        ${decSpec
+          ? html`<span class=${`fus-dec-badge ${decSpec.cls}`}>${decSpec.glyph} ${decSpec.lbl}</span>`
+          : null}
       </button>
-      <div class="flex flex-wrap items-center gap-2 px-3 pb-2">
-        ${runId
-          ? html`
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 rounded-[var(--r-0,4px)] border border-[var(--color-brass-border,#3a3a2a)] bg-[var(--color-bg-surface,#111827)] px-2 py-1 text-2xs font-medium text-[var(--color-fg-secondary,#9da7b3)] hover:text-[var(--color-fg-primary,#f3f4f6)] ${CHAT_FOCUS_RING}"
-              onClick=${() => navigate('fusion', { run_id: runId })}
-              data-testid="fusion-chat-open-run"
-            >
-              <${ExternalLink} size=${12} aria-hidden="true" />
-              <span>Fusion</span>
-            </button>
-          `
+      <div class="msg-fusion-foot">
+        ${state.status === 'loaded'
+          ? html`<span>패널 ${state.panel.length}개 · 심판 종합</span>`
           : null}
         <button
           type="button"
@@ -2182,6 +2060,16 @@ function ChatFusionCard({ boardPostId, runId, fallbackText }: { boardPostId: str
           <${ExternalLink} size=${12} aria-hidden="true" />
           <span>Board</span>
         </button>
+        ${runId
+          ? html`
+            <button
+              type="button"
+              class="msg-fusion-link"
+              onClick=${() => navigate('fusion', { run_id: runId })}
+              data-testid="fusion-chat-open-run"
+            >전체 패널·심판 보기 →</button>
+          `
+          : null}
       </div>
       ${expanded
         ? html`
@@ -2206,11 +2094,11 @@ function ChatFusionCard({ boardPostId, runId, fallbackText }: { boardPostId: str
                         judge · ${state.judge.status}${state.judge.decision ? html` · ${state.judge.decision}` : null}
                       </div>
                       ${state.judge.synthesis
-                        ? html`<div class="mt-1"><${FusionMarkdown} text=${state.judge.synthesis} /></div>`
+                        ? html`<div class="msg-fusion-ans"><${FusionMarkdown} text=${state.judge.synthesis} /></div>`
                         : state.judge.resolvedAnswer
-                          ? html`<div class="mt-1"><${FusionMarkdown} text=${state.judge.resolvedAnswer} /></div>`
+                          ? html`<div class="msg-fusion-ans"><${FusionMarkdown} text=${state.judge.resolvedAnswer} /></div>`
                           : state.judge.error
-                            ? html`<div class="mt-1"><${FusionMarkdown} text=${state.judge.error} /></div>`
+                            ? html`<div class="msg-fusion-ans"><${FusionMarkdown} text=${state.judge.error} /></div>`
                             : null}
                     </div>
                   `
@@ -2279,7 +2167,7 @@ function ChatBlock({ block, fallbackText }: { block: ChatBlock; fallbackText?: s
     case 'image': return html`<${ChatImageBlock} src=${block.src} ph=${block.ph} cap=${block.cap} />`
     case 'svg': return html`<${ChatSvgBlock} svg=${block.svg} cap=${block.cap} />`
     case 'mermaid': return html`<${ChatMermaidBlock} source=${block.source} caption=${block.caption} />`
-    case 'trace': return html`<${ChatTraceBlock} trace=${block.trace} />`
+    case 'trace': return html`<${ChatTraceBlock} trace=${block.trace} omitted=${block.omitted} />`
     case 'thinking': return html`<${ChatPersistedThinkingBlock} content=${block.content} redacted=${block.redacted} />`
     case 'link': return html`<${ChatLinkBlock} url=${block.url} title=${block.title} desc=${block.desc} meta=${block.meta} fav=${block.fav} kind=${block.kind} />`
     case 'broadcast': return html`<${ChatBroadcastBlock} scope=${block.scope} via=${block.via} note=${block.note} recipients=${block.recipients} />`
@@ -2572,7 +2460,7 @@ const CARD_BLOCK_TYPES: ReadonlySet<ChatBlock['t']> = new Set([
   'status',
 ])
 
-type ChatControlStatus = 'continuation_checkpoint' | 'external_effect_pending'
+type ChatControlStatus = 'continuation_checkpoint' | 'external_effect_pending' | 'external_effect_completed'
 
 function chatControlStatus(entry: KeeperConversationEntry): ChatControlStatus | null {
   const persistedStatus = (entry.blocks ?? []).find(
@@ -2580,7 +2468,9 @@ function chatControlStatus(entry: KeeperConversationEntry): ChatControlStatus | 
   )
   if (persistedStatus) return persistedStatus.kind
   const turnOutcome = entry.details?.turnOutcome
-  return turnOutcome === 'continuation_checkpoint' || turnOutcome === 'external_effect_pending'
+  return turnOutcome === 'continuation_checkpoint'
+    || turnOutcome === 'external_effect_pending'
+    || turnOutcome === 'external_effect_completed'
     ? turnOutcome
     : null
 }
@@ -2626,6 +2516,79 @@ function ChatControlStatusCard({
             </p>
             <p class="mt-0.5 text-xs leading-paragraph text-[var(--color-fg-muted)]">
               Keeper가 다음 주기에 이어서 처리합니다.
+            </p>
+          </div>
+        </div>
+        ${supportingBlocks.length > 0
+          ? html`<div class="mt-3"><${ChatBlocks} blocks=${supportingBlocks} fallbackText="" /></div>`
+          : null}
+      </article>
+    `
+  }
+
+  if (status === 'external_effect_completed') {
+    // The delivery target names where the terminal surface post actually
+    // landed; legacy events without it keep the generic connector copy.
+    const target = entry.details?.externalEffectTarget ?? null
+    const copy = (() => {
+      if (target?.kind === 'dashboard') {
+        return {
+          title: '대시보드에 게시 완료',
+          body: 'Keeper의 답변이 이 대시보드 채팅에 게시되었습니다.',
+          hint: '위 대화에서 확인할 수 있습니다.',
+        }
+      }
+      if (target?.kind === 'slack') {
+        return {
+          title: 'Slack으로 답변 완료',
+          body: target.threadTs
+            ? `Keeper의 답변이 Slack 채널 ${target.channelId}의 스레드로 전송되었습니다.`
+            : `Keeper의 답변이 Slack 채널 ${target.channelId}로 전송되었습니다.`,
+          hint: '답변 내용은 해당 채널에서 확인할 수 있습니다.',
+        }
+      }
+      if (target?.kind === 'discord') {
+        return {
+          title: 'Discord로 답변 완료',
+          body: `Keeper의 답변이 Discord 채널 ${target.channelId}로 전송되었습니다.`,
+          hint: '답변 내용은 해당 채널에서 확인할 수 있습니다.',
+        }
+      }
+      return {
+        title: '커넥터로 답변 완료',
+        body: 'Keeper의 답변이 외부 커넥터(Slack/Discord)로 전송되었습니다.',
+        hint: '답변 내용은 해당 채널에서 확인할 수 있습니다.',
+      }
+    })()
+    return html`
+      <article
+        class="w-full rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-subtle)] px-4 py-3.5"
+        role="status"
+        aria-live="polite"
+        data-chat-control-status="external_effect_completed"
+        data-chat-effect-target=${target?.kind ?? undefined}
+        data-chat-entry-id=${entry.id}
+        data-chat-turn-ref=${entry.turnRef ?? undefined}
+      >
+        <div class="flex items-start gap-3">
+          <div
+            class="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-secondary)]"
+            aria-hidden="true"
+          >
+            <${ExternalLink} size=${18} />
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <strong class="text-sm font-semibold text-[var(--color-fg-primary)]">${copy.title}</strong>
+              ${timestamp
+                ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]">${timestamp}</span>`
+                : null}
+            </div>
+            <p class="mt-1 text-sm leading-paragraph text-[var(--color-fg-secondary)]">
+              ${copy.body}
+            </p>
+            <p class="mt-0.5 text-xs leading-paragraph text-[var(--color-fg-muted)]">
+              ${copy.hint}
             </p>
           </div>
         </div>
@@ -2714,12 +2677,17 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   showMetadata = true,
   variant = 'default',
   showSourceBadge = false,
+  contextScope = null,
   action,
 }: {
   entry: KeeperConversationEntry
   showMetadata?: boolean
   variant?: ChatTranscriptVariant
   showSourceBadge?: boolean
+  // Keeper-v2 CtxFrom strip, precomputed by ChatTranscript from the transcript's
+  // own channel rows (null for non-connector entries). Precomputed upstream so
+  // this memo's shallow compare sees a stable object across unrelated re-renders.
+  contextScope?: ChatContextScope | null
   action?: ChatTranscriptAction
 }) {
   if (
@@ -2817,6 +2785,11 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const speakerInfo = speakerMeta(entry)
   const routeInfo = routeMeta(entry)
 
+  // Keeper-v2 messages.jsx Message row vocabulary: the operator avatar is
+  // `.msg-av.op` (keeper rows draw the sigil badge in the design, so msg-av
+  // goes on user rows only); msg-col/msg-hd mark the content column and the
+  // header row. The row keeps the dashboard's chat-bubble chrome — delivery,
+  // stream-contract and meta chips are live signals the design has no slot for.
   return html`
     <article
       ref=${bubbleRef}
@@ -2838,11 +2811,8 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-stream-contract-turn-ref=${entry.streamContract?.turnRef ?? undefined}
       data-chat-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
       data-chat-stream-contract-lifecycle-events=${entry.streamContract?.lifecycleEvents?.join(',') ?? undefined}
-      data-chat-stream-contract-delivery-receipt=${entry.streamContract?.deliveryReceipt ?? undefined}
       data-chat-stream-contract-reason=${entry.streamContract?.reason ?? undefined}
       data-chat-stream-contract-badge-state=${streamContractBadge?.state ?? undefined}
-      data-chat-queue-seq=${entry.queueSeq ?? undefined}
-      data-chat-queue-client-action-id=${entry.queueClientActionId ?? undefined}
       data-chat-surface-kind=${entry.surface?.kind ?? undefined}
       data-chat-surface-address=${entry.surface?.address ? JSON.stringify(entry.surface.address) : undefined}
       data-chat-conversation-id=${entry.conversationId ?? undefined}
@@ -2851,13 +2821,6 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-speaker-name=${entry.speakerName ?? undefined}
       data-chat-speaker-authority=${entry.speakerAuthority ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
-      data-chat-queue-receipt-id=${entry.details?.queueReceiptId ?? undefined}
-      data-chat-queue-shutdown-operation-id=${entry.details?.queueShutdownOperationId ?? undefined}
-      data-chat-queue-state=${entry.details?.queueState ?? undefined}
-      data-chat-queue-revision=${entry.details?.queueRevision ?? undefined}
-      data-chat-queue-pending-count=${entry.details?.queuePendingCount ?? undefined}
-      data-chat-queue-inflight-count=${entry.details?.queueInflightCount ?? undefined}
-      data-chat-queue-recovery-required-count=${entry.details?.queueRecoveryRequiredCount ?? undefined}
       data-chat-attachment-count=${attachments.length}
       data-chat-server-attach-block-count=${attachBlocks.length}
       data-chat-multimodal-sources=${multimodalSources.length > 0 ? multimodalSources.join(',') : undefined}
@@ -2866,24 +2829,28 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       <div class=${`flex justify-between gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
         <div class=${`flex min-w-0 flex-1 gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
           <div
-            class=${`chat-avatar ${tone} flex shrink-0 items-center justify-center whitespace-nowrap text-xs font-bold uppercase tracking-[var(--track-caps)] ${
+            class=${`chat-avatar ${tone}${entry.role === 'user' ? ' msg-av op' : ''} flex shrink-0 items-center justify-center whitespace-nowrap text-xs font-bold uppercase tracking-[var(--track-caps)] ${
               isMessenger ? 'size-8 rounded-card' : 'size-10 rounded-[var(--r-1)]'
             }`}
           >
             ${avatarMonogram(entry)}
           </div>
-          <div class="min-w-0 flex-1">
+          <div class="msg-col min-w-0 flex-1">
             ${isMessenger
               ? html`
-                  <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <div class="msg-hd flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span class="truncate text-sm font-semibold text-[var(--color-fg-primary)]">
                       ${avatarLabel(entry)}
                     </span>
+                    <${ChatSpeakerHandle} entry=${entry} />
                     ${timestamp
                       ? html`<span class="text-2xs font-medium tabular-nums text-[var(--color-fg-secondary)]">${timestamp}</span>`
                       : null}
                     ${sourceBadge
-                      ? html`<span class=${`kw-src-badge ${sourceBadge.cls}`}>${sourceBadge.label}</span>`
+                      ? html`<span
+                          class=${`kw-src-badge ${sourceBadge.cls}`}
+                          title=${sourceBadge.title || undefined}
+                        >${sourceBadge.label}</span>`
                       : null}
                     ${showDeliveryBadge(entry, variant)
                       ? html`
@@ -2895,7 +2862,6 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                           </span>
                         `
                       : null}
-                    <${QueueReceiptBadge} entry=${entry} action=${action} />
                     <${StreamContractBadge} badge=${streamContractBadge} compact=${true} />
                     <${ChatMetaChip} info=${surfaceInfo} compact=${true} />
                     <${ChatMetaChip} info=${speakerInfo} compact=${true} />
@@ -2903,12 +2869,13 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                   </div>
                 `
               : html`
-                  <div class="flex flex-wrap items-center gap-1.5">
+                  <div class="msg-hd flex flex-wrap items-center gap-1.5">
                     <span
                       class=${`chat-role-chip ${tone} inline-flex items-center rounded-[var(--r-0)] px-2.5 py-1 text-2xs font-bold uppercase tracking-2`}
                     >
                       ${entry.label}
                     </span>
+                    <${ChatSpeakerHandle} entry=${entry} />
                     ${showDeliveryBadge(entry, variant)
                       ? html`
                           <span
@@ -2919,7 +2886,6 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                           </span>
                         `
                       : null}
-                    <${QueueReceiptBadge} entry=${entry} action=${action} />
                     ${timestamp
                       ? html`
                           <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-2xs font-medium tabular-nums text-[var(--color-fg-secondary)]">
@@ -2984,6 +2950,8 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
             `
           : null}
       </div>
+
+      ${contextScope ? html`<${ChatContextScopeRow} scope=${contextScope} />` : null}
 
       ${showMetadata && detailItems.length > 0
         ? html`<div class=${`flex flex-wrap gap-1.5 ${isMessenger ? 'pt-0.5' : ''}`}>
@@ -3098,12 +3066,14 @@ function ChatMessageSurface({
   showMetadata = true,
   variant = 'default',
   showSourceBadge = false,
+  contextScope = null,
   action,
 }: {
   entry: KeeperConversationEntry
   showMetadata?: boolean
   variant?: ChatTranscriptVariant
   showSourceBadge?: boolean
+  contextScope?: ChatContextScope | null
   action?: ChatTranscriptAction
 }) {
   return chatControlStatus(entry)
@@ -3114,6 +3084,7 @@ function ChatMessageSurface({
           showMetadata=${showMetadata}
           variant=${variant}
           showSourceBadge=${showSourceBadge}
+          contextScope=${contextScope}
           action=${action}
         />
       `
@@ -3165,6 +3136,8 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   const toolCallId = toolCallIdFromToolEntryId(entry.id)
   const displayArgs = prettyJsonish(entry.text || '')
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
+  // Same reason as the trace-step row: the name repeats, the subject does not.
+  const subject = isEmptyArgs ? null : toolSubject(displayArgs)
 
   // Tool results never travel on the chat stream — they are joined here from
   // the tool-call output store by this row's id (`tool-<tool_use_id>`). Null
@@ -3202,7 +3175,6 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       data-chat-stream-contract-turn-ref=${entry.streamContract?.turnRef ?? undefined}
       data-chat-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
       data-chat-stream-contract-lifecycle-events=${entry.streamContract?.lifecycleEvents?.join(',') ?? undefined}
-      data-chat-stream-contract-delivery-receipt=${entry.streamContract?.deliveryReceipt ?? undefined}
       data-chat-stream-contract-reason=${entry.streamContract?.reason ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
       data-chat-tool-call-id=${toolCallId ?? undefined}
@@ -3215,6 +3187,9 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       >
         <span class="inline-flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-2xs font-mono font-bold text-[var(--color-fg-secondary)]">T</span>
         <span class="font-mono text-sm font-semibold text-[var(--color-accent-fg)] truncate">${toolName}</span>
+        ${subject
+          ? html`<span class="chat-block-tstep-subject" title=${subject}>${subject}</span>`
+          : null}
         <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)]">입력</span>
         ${outputEntry
           ? html`<span
@@ -3357,6 +3332,8 @@ function ToolTraceStep({
   const callId = toolTraceCallId(entry, traceStep)
   const displayArgs = prettyJsonish(entry?.text || traceStep?.args || '')
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
+  // Same reason as the trace-step row: the name repeats, the subject does not.
+  const subject = isEmptyArgs ? null : toolSubject(displayArgs)
   const unlinkedTraceTool = !structuralSummary && isUnlinkedTraceTool(entry, traceStep)
   const sourceBadge = structuralSummary
     ? { label: 'activity', title: 'source: autonomous activity summary', tone: 'tool' as const }
@@ -3395,7 +3372,7 @@ function ToolTraceStep({
       data-chat-turn-order-kind=${orderKind}
       data-chat-trace-provenance=${sourceBadge.label}
       data-chat-trace-tool-call-id=${callId ?? undefined}
-      data-chat-trace-oas-block-index=${traceStep?.oasBlockIndex ?? undefined}
+      data-chat-trace-agent-core-block-index=${traceStep?.agentCoreBlockIndex ?? undefined}
       data-chat-trace-entry-id=${entry?.id ?? undefined}
       data-chat-trace-link-state=${structuralSummary ? 'structural' : unlinkedTraceTool ? 'unlinked' : entry ? 'joined' : 'trace-only'}
       data-chat-trace-output-state=${status}
@@ -3410,6 +3387,9 @@ function ToolTraceStep({
           <span class="chat-block-tstep-kind">Tool</span>
           <${TraceSourceBadge} info=${sourceBadge} />
           <span class="chat-block-tstep-name">${name}</span>
+          ${subject
+            ? html`<span class="chat-block-tstep-subject" title=${subject}>${subject}</span>`
+            : null}
           <span
             class="chat-block-tstep-status ${status}"
             title=${TOOL_STATUS_TITLE[status]}
@@ -3556,7 +3536,6 @@ function ChatResponseTraceStep({
       data-chat-trace-stream-contract-turn-ref=${entry.streamContract?.turnRef ?? undefined}
       data-chat-trace-stream-contract-trace-events=${entry.streamContract?.traceEventCount ?? undefined}
       data-chat-trace-stream-contract-lifecycle-events=${entry.streamContract?.lifecycleEvents?.join(',') ?? undefined}
-      data-chat-trace-stream-contract-delivery-receipt=${entry.streamContract?.deliveryReceipt ?? undefined}
     >
       <span class="chat-block-tnode"></span>
       <div class="min-w-0 flex-1">
@@ -3569,6 +3548,37 @@ function ChatResponseTraceStep({
       </div>
     </div>
   `
+}
+
+/** Addressable identity for one turn's timeline block. The assistant row owns
+ *  a turn bundle; a tool-only group is addressed by its first tool row. Both
+ *  ids come from the conversation store, so they survive the transcript
+ *  unmount that a keeper switch causes. */
+function traceCardIdentity(
+  assistant: KeeperConversationEntry | null,
+  tools: readonly KeeperConversationEntry[],
+): string | null {
+  if (assistant) return `turn:${assistant.id}`
+  const first = tools[0]
+  return first ? `tools:${first.id}` : null
+}
+
+/** Turn timelines the operator explicitly opened or collapsed. Only explicit
+ *  toggles are recorded, so the map is bounded by operator actions rather
+ *  than by transcript size. */
+const traceCardOpenChoices = new Map<string, boolean>()
+
+function traceCardOpenOverride(cardKey: string): boolean | undefined {
+  return traceCardOpenChoices.get(cardKey)
+}
+
+function setTraceCardOpenOverride(cardKey: string, open: boolean): void {
+  traceCardOpenChoices.set(cardKey, open)
+}
+
+/** Test-only: drop recorded collapse choices between cases. */
+export function _resetTraceCardOpenChoicesForTests(): void {
+  traceCardOpenChoices.clear()
 }
 
 function ToolTraceCard({
@@ -3590,14 +3600,22 @@ function ToolTraceCard({
 }) {
   const liveTurn = assistant !== null && !turnComplete
   const structuralSummary = assistant?.source === 'autonomous_turn'
-  const userToggledRef = useRef(false)
-  const [open, setOpen] = useState(() => !liveTurn)
-  useEffect(() => {
-    if (!liveTurn && !userToggledRef.current) setOpen(true)
-  }, [liveTurn])
+  // Collapse state is derived, not stored-and-resynced: the operator's
+  // explicit choice for this turn if there is one, otherwise "open once the
+  // turn is no longer live". The choice lives outside the component because
+  // switching keepers unmounts the whole transcript — with the state held in
+  // `useState` + a `useRef` "did the user toggle" flag, both reset on remount
+  // and every collapsed timeline sprang back open.
+  const cardKey = traceCardIdentity(assistant, tools)
+  const [localOpen, setLocalOpen] = useState<boolean | null>(null)
+  const open =
+    (cardKey !== null ? traceCardOpenOverride(cardKey) : localOpen) ?? !liveTurn
   const toggleOpen = () => {
-    userToggledRef.current = true
-    setOpen((o) => !o)
+    const next = !open
+    if (cardKey !== null) setTraceCardOpenOverride(cardKey, next)
+    // Also drives the re-render; carries the state outright for a card with
+    // no addressable turn identity.
+    setLocalOpen(next)
   }
   const steps = tools.map((entry) => ({ entry, output: lookupToolCallOutput(entry.id) }))
   const coverageStateForEntry = (entry: KeeperConversationEntry): ToolOutputCoverageState =>
@@ -3666,7 +3684,6 @@ function ToolTraceCard({
       data-chat-turn-stream-contract-turn-ref=${assistant?.streamContract?.turnRef ?? undefined}
       data-chat-turn-stream-contract-trace-events=${assistant?.streamContract?.traceEventCount ?? undefined}
       data-chat-turn-stream-contract-lifecycle-events=${assistant?.streamContract?.lifecycleEvents?.join(',') ?? undefined}
-      data-chat-turn-stream-contract-delivery-receipt=${assistant?.streamContract?.deliveryReceipt ?? undefined}
       data-chat-tool-output-hydration-source=${toolOutputHydrationContract?.source ?? undefined}
       data-chat-tool-output-hydration-status=${toolOutputHydrationContract?.status ?? 'not-requested'}
       data-chat-tool-output-hydration-failure=${toolOutputHydrationContract?.failureReason ?? undefined}
@@ -3759,6 +3776,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
   toolOutputsCoveredSinceMs,
   toolOutputsCoveredThroughMs,
   toolOutputHydrationContract,
+  contextScope = null,
   action,
 }: {
   tools: KeeperConversationEntry[]
@@ -3769,6 +3787,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
   toolOutputsCoveredSinceMs: number | null
   toolOutputsCoveredThroughMs: number | null
   toolOutputHydrationContract: ToolCallOutputHydrationContract | null
+  contextScope?: ChatContextScope | null
   action?: ChatTranscriptAction
 }) {
   const traceSteps = assistant.traceSteps ?? []
@@ -3791,6 +3810,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
         showMetadata=${showMetadata !== false}
         variant=${variant}
         showSourceBadge=${showSourceBadge}
+        contextScope=${contextScope}
         action=${action}
       />
     </div>
@@ -3804,6 +3824,7 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
   && prev.toolOutputsCoveredSinceMs === next.toolOutputsCoveredSinceMs
   && prev.toolOutputsCoveredThroughMs === next.toolOutputsCoveredThroughMs
   && prev.toolOutputHydrationContract === next.toolOutputHydrationContract
+  && prev.contextScope === next.contextScope
   && prev.action === next.action
 )
 
@@ -3811,6 +3832,44 @@ const TurnWorkBundle = memo(function TurnWorkBundle({
 // new content keeps auto-scrolling. Scrolling further up unpins so the
 // transcript stops yanking the viewport while old messages are read.
 const STICK_TO_BOTTOM_THRESHOLD_PX = 80
+
+const AUTONOMOUS_SUMMARY_MAX_GROUPS = 4
+// A run can hold hundreds of turns; the header is a glance, not an audit. The
+// scan stops here and says so with a trailing ellipsis rather than paying for
+// the whole run on every render.
+const AUTONOMOUS_SUMMARY_SCAN_LIMIT = 2000
+
+/** Which tools a collapsed run of autonomous turns ran, in the order it ran
+ *  them, consecutive repeats folded into a count. A header reading only
+ *  "자율턴 145개" says how many times the keeper woke, not what any wake did,
+ *  so the run stays closed and the reader still cannot tell a fetch from a
+ *  rewrite. Returns null for a run that called no tools. */
+export function autonomousToolSummary(entries: KeeperConversationEntry[]): string | null {
+  const groups: { name: string; count: number }[] = []
+  let scanned = 0
+  let truncated = false
+  for (const entry of entries) {
+    for (const step of entry.traceSteps ?? []) {
+      if (step.kind !== 'tool') continue
+      if (scanned >= AUTONOMOUS_SUMMARY_SCAN_LIMIT) {
+        truncated = true
+        break
+      }
+      scanned++
+      const name = normalizeToolName(step.name)
+      const last = groups[groups.length - 1]
+      if (last && last.name === name) last.count++
+      else groups.push({ name, count: 1 })
+    }
+    if (truncated) break
+  }
+  if (groups.length === 0) return null
+  const shown = groups.slice(0, AUTONOMOUS_SUMMARY_MAX_GROUPS)
+  const text = shown.map((g) => (g.count > 1 ? `${g.name}×${g.count}` : g.name)).join(' ')
+  const rest = groups.length - shown.length
+  const more = rest > 0 ? ` +${rest}` : ''
+  return truncated ? `${text}${more}…` : `${text}${more}`
+}
 
 /** One autonomous turn, collapsed into a single row. Starts closed: the turn is
  *  the keeper working on its own, and the transcript's subject is the
@@ -3837,6 +3896,7 @@ function AutonomousTurnGroup({
 }) {
   const [open, setOpen] = useState(false)
   const timestamp = timeLabel(entry.timestamp)
+  const toolSummary = useMemo(() => autonomousToolSummary([entry]), [entry])
   return html`
     <div class="chat-block-trace ${open ? 'open' : ''}">
       <button
@@ -3848,6 +3908,9 @@ function AutonomousTurnGroup({
         <span class="chat-block-trace-chev">${open ? '▾' : '▸'}</span>
         <span class="chat-block-trace-label">자율턴</span>
         <span class="chat-block-trace-count">1개</span>
+        ${toolSummary
+          ? html`<span class="chat-block-trace-tools" title=${toolSummary}>${toolSummary}</span>`
+          : null}
         ${timestamp ? html`<span class="chat-block-trace-meta">${timestamp}</span>` : null}
       </button>
       ${open
@@ -3877,6 +3940,115 @@ function AutonomousTurnGroup({
   `
 }
 
+// How many turns an opened run draws at each end before the middle becomes a
+// control. A run has no ceiling -- a keeper wakes on the order of once every
+// few minutes, so an unattended weekend is hundreds of turns -- and drawing it
+// whole trades the wall of headers the fold removed for a wall of rows. The
+// two ends are the parts a reader asks for: where the run started and what the
+// keeper just did.
+const AUTONOMOUS_RUN_WINDOW_HEAD = 3
+const AUTONOMOUS_RUN_WINDOW_TAIL = 3
+// Turns revealed per press of the middle control. Small enough that one press
+// cannot restore the wall, large enough that walking a long run is not dozens
+// of presses.
+const AUTONOMOUS_RUN_WINDOW_STEP = 10
+
+/** Which slice of an opened run to draw, given how far the reader has already
+ *  walked the head down. [hidden] is the count the middle control stands for;
+ *  zero means every turn is drawn and no control belongs in the output.
+ *
+ *  A run only short enough to hide one turn is drawn whole: a control that
+ *  costs a press to save a single row is the same trade `foldAutonomousRuns`
+ *  declines at its own threshold. */
+export function autonomousRunWindow(
+  total: number,
+  headCount: number,
+): { head: number; tail: number; hidden: number } {
+  const tail = AUTONOMOUS_RUN_WINDOW_TAIL
+  if (total <= headCount + tail + 1) return { head: total, tail: 0, hidden: 0 }
+  return { head: headCount, tail, hidden: total - headCount - tail }
+}
+
+/** A run of consecutive autonomous turns behind one header. Starts closed for
+ *  the same reason each turn does: the transcript's subject is the conversation
+ *  these wakes sit between. Expanding renders the run's turns as the same rows
+ *  they would be at top level, each still closed and each still its own turn --
+ *  but only the window's worth of them, with the middle behind a control. */
+function AutonomousTurnRun({
+  entries,
+  showMetadata,
+  variant,
+  showSourceBadge,
+  toolOutputsCoveredSinceMs,
+  toolOutputsCoveredThroughMs,
+  toolOutputHydrationContract,
+  action,
+}: {
+  entries: KeeperConversationEntry[]
+  showMetadata?: boolean
+  variant: ChatTranscriptVariant
+  showSourceBadge: boolean
+  toolOutputsCoveredSinceMs: number | null
+  toolOutputsCoveredThroughMs: number | null
+  toolOutputHydrationContract: ToolCallOutputHydrationContract | null
+  action?: ChatTranscriptAction
+}) {
+  const [open, setOpen] = useState(false)
+  // Only ever grows, and only by a press: new turns arriving in an open run
+  // extend the tail, so the reader's walked-down head stays where they left it.
+  const [headCount, setHeadCount] = useState(AUTONOMOUS_RUN_WINDOW_HEAD)
+  const first = timeLabel(entries[0]?.timestamp)
+  const last = timeLabel(entries[entries.length - 1]?.timestamp)
+  // Both ends or neither: a half range would read as a single point in time.
+  const range = first && last ? (first === last ? first : `${first} ~ ${last}`) : null
+  const drawn = autonomousRunWindow(entries.length, headCount)
+  const toolSummary = useMemo(() => autonomousToolSummary(entries), [entries])
+  const turn = (entry: KeeperConversationEntry) => html`<${AutonomousTurnGroup}
+    key=${entry.id}
+    entry=${entry}
+    showMetadata=${showMetadata}
+    variant=${variant}
+    showSourceBadge=${showSourceBadge}
+    toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
+    toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
+    toolOutputHydrationContract=${toolOutputHydrationContract}
+    action=${action}
+  />`
+  return html`
+    <div class="chat-block-trace chat-auto-run ${open ? 'open' : ''}">
+      <button
+        type="button"
+        class="chat-block-trace-hd"
+        onClick=${() => setOpen((o) => !o)}
+        aria-expanded=${open}
+      >
+        <span class="chat-block-trace-chev">${open ? '▾' : '▸'}</span>
+        <span class="chat-block-trace-label">자율턴</span>
+        <span class="chat-block-trace-count">${entries.length}개</span>
+        ${toolSummary
+          ? html`<span class="chat-block-trace-tools" title=${toolSummary}>${toolSummary}</span>`
+          : null}
+        ${range ? html`<span class="chat-block-trace-meta">${range}</span>` : null}
+      </button>
+      ${open
+        ? html`<div class="chat-auto-run-turns">
+            ${entries.slice(0, drawn.head).map(turn)}
+            ${drawn.hidden > 0
+              ? html`<button
+                  type="button"
+                  class="chat-auto-run-more"
+                  onClick=${() => setHeadCount((n) => n + AUTONOMOUS_RUN_WINDOW_STEP)}
+                >
+                  가운데 ${drawn.hidden}개 더 보기
+                </button>`
+              : null}
+            ${drawn.tail > 0 ? entries.slice(entries.length - drawn.tail).map(turn) : null}
+          </div>`
+        : null}
+    </div>
+  `
+}
+
 type ChatRenderUnit =
   | { kind: 'entry'; entry: KeeperConversationEntry }
   | { kind: 'toolGroup'; id: string; entries: KeeperConversationEntry[] }
@@ -3887,6 +4059,15 @@ type ChatRenderUnit =
   // bury the conversation it sits between. The exact turn remains the group
   // boundary; adjacent autonomous turns must never merge into one giant run.
   | { kind: 'autonomousGroup'; id: string; entry: KeeperConversationEntry }
+  // Consecutive autonomous turns behind one header. Collapsing each turn
+  // individually bounds how tall one wake renders but not how many wakes do:
+  // an hour with nobody watching still puts dozens of identical rows between
+  // two human messages, which buries the conversation the same way expanding
+  // them would. This is a container, not a merge — every turn keeps its own
+  // row and its own open/closed state inside, so the exact turn is still the
+  // group boundary. Runs are cut at any boundary the transcript itself has to
+  // draw; see foldAutonomousRuns.
+  | { kind: 'autonomousRun'; id: string; entries: KeeperConversationEntry[] }
 
 function entryTurnRef(entry: KeeperConversationEntry): string | null {
   const value = entry.turnRef?.trim()
@@ -3992,11 +4173,76 @@ export function buildChatRenderUnits(
   return units
 }
 
+// Below this many consecutive autonomous turns, folding costs more than it
+// saves: one or two stray wakes read as part of the surrounding conversation,
+// and hiding them behind a header only adds a click. At or above it the rows
+// stop being incidental and start being the wall this fold exists to remove.
+const AUTONOMOUS_RUN_FOLD_THRESHOLD = 3
+
+/** Fold consecutive `autonomousGroup` units behind one `autonomousRun`.
+ *
+ *  Runs shorter than the threshold are returned untouched, so a transcript with
+ *  the occasional wake renders exactly as before.
+ *
+ *  A folded run is not allowed to swallow a row the transcript still has to
+ *  anchor something on: the caller draws day dividers and the unread line
+ *  against top-level units, and a unit absorbed into a run stops being one.
+ *  `startsNewRun` cuts before such a row, and `runBoundaryKey` cuts whenever the
+ *  key changes inside an open run — both leave the row at top level as the
+ *  start of the next run. */
+export function foldAutonomousRuns(
+  units: ChatRenderUnit[],
+  opts: {
+    startsNewRun: (unit: ChatRenderUnit) => boolean
+    runBoundaryKey: (unit: ChatRenderUnit) => string | null
+  },
+): ChatRenderUnit[] {
+  const out: ChatRenderUnit[] = []
+  let run: Extract<ChatRenderUnit, { kind: 'autonomousGroup' }>[] = []
+  let boundary: string | null = null
+  const flush = () => {
+    const first = run[0]
+    if (first && run.length >= AUTONOMOUS_RUN_FOLD_THRESHOLD) {
+      // The run reuses the first group's id so its key and timestamp are the
+      // ones the caller already computed anchors from: a divider that would
+      // have landed on that group lands on the run instead of vanishing.
+      out.push({ kind: 'autonomousRun', id: first.id, entries: run.map((unit) => unit.entry) })
+    } else {
+      out.push(...run)
+    }
+    run = []
+    boundary = null
+  }
+  for (const unit of units) {
+    if (unit.kind !== 'autonomousGroup') {
+      flush()
+      out.push(unit)
+      continue
+    }
+    const key = opts.runBoundaryKey(unit)
+    // A null key carries no boundary information, so it neither cuts the run
+    // nor overwrites the last key that did.
+    if (opts.startsNewRun(unit) || (key !== null && boundary !== null && key !== boundary)) {
+      flush()
+    }
+    if (key !== null) boundary = key
+    run.push(unit)
+  }
+  flush()
+  return out
+}
+
 function unitTimestamp(unit: ChatRenderUnit): string | null {
-  const ts = unit.kind === 'entry' || unit.kind === 'autonomousGroup'
-    ? unit.entry.timestamp
-    : unit.entries[0]?.timestamp ?? (unit.kind === 'turnBundle' ? unit.entry.timestamp : null)
-  return ts ?? null
+  switch (unit.kind) {
+    case 'entry':
+    case 'autonomousGroup':
+      return unit.entry.timestamp ?? null
+    case 'toolGroup':
+    case 'autonomousRun':
+      return unit.entries[0]?.timestamp ?? null
+    case 'turnBundle':
+      return unit.entries[0]?.timestamp ?? unit.entry.timestamp ?? null
+  }
 }
 
 function unitTimestampMs(unit: ChatRenderUnit): number | null {
@@ -4023,14 +4269,28 @@ function renderChatTranscriptBody(opts: {
   // Since-last-seen cursor (unix seconds) for the unread divider; null on every
   // non-keeper chat surface so those transcripts render unchanged.
   unreadAfterTs: number | null
+  // When true, skip folding autonomous groups into collapsed runs.
+  expandAutonomousRuns?: boolean
   action?: ChatTranscriptAction
 }): VNode[] {
-  const { entries, showDayDividers, groupToolCalls, showMetadata, variant, showSourceBadge, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, toolOutputHydrationContract, unreadAfterTs, action } = opts
-  const units = buildChatRenderUnits(entries, groupToolCalls)
+  const { entries, showDayDividers, groupToolCalls, showMetadata, variant, showSourceBadge, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, toolOutputHydrationContract, unreadAfterTs, expandAutonomousRuns, action } = opts
+  const ungroupedUnits = buildChatRenderUnits(entries, groupToolCalls)
+  // Anchored on the unfolded list: folding must not move the unread line, only
+  // avoid hiding it. foldAutonomousRuns cuts a run open at this key so the unit
+  // it names is still top level below.
   const unreadAnchorKey = unreadDividerAnchorKey(
-    units.map(unit => ({ key: unitKey(unit), tsMs: unitTimestampMs(unit) })),
+    ungroupedUnits.map(unit => ({ key: unitKey(unit), tsMs: unitTimestampMs(unit) })),
     unreadAfterTs,
   )
+  const units = expandAutonomousRuns
+    ? ungroupedUnits
+    : foldAutonomousRuns(ungroupedUnits, {
+    startsNewRun: (unit) => unreadAnchorKey !== null && unitKey(unit) === unreadAnchorKey,
+    // Day dividers are emitted per unit below, so a run that spanned midnight
+    // would show only its first day. Cutting on the day key keeps every day
+    // that has turns in it addressable by a divider.
+    runBoundaryKey: (unit) => (showDayDividers ? dayKey(unitTimestamp(unit)) : null),
+  })
   const out: VNode[] = []
   // Track the last NON-NULL calendar day rather than only the immediately
   // previous entry, so a null-timestamp entry (live placeholder, checkpoint) in
@@ -4051,7 +4311,19 @@ function renderChatTranscriptBody(opts: {
     if (unreadAnchorKey !== null && unitKey(unit) === unreadAnchorKey) {
       out.push(html`<div class="kw-daydiv kw-unreaddiv" key="unread-divider">${UNREAD_DIVIDER_LABEL}</div>`)
     }
-    if (unit.kind === 'autonomousGroup') {
+    if (unit.kind === 'autonomousRun') {
+      out.push(html`<${AutonomousTurnRun}
+        key=${unit.id}
+        entries=${unit.entries}
+        showMetadata=${showMetadata}
+        variant=${variant}
+        showSourceBadge=${showSourceBadge}
+        toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
+        toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
+        toolOutputHydrationContract=${toolOutputHydrationContract}
+        action=${action}
+      />`)
+    } else if (unit.kind === 'autonomousGroup') {
       out.push(html`<${AutonomousTurnGroup}
         key=${unit.id}
         entry=${unit.entry}
@@ -4093,6 +4365,7 @@ function renderChatTranscriptBody(opts: {
         showMetadata=${showMetadata !== false}
         variant=${variant}
         showSourceBadge=${showSourceBadge}
+        contextScope=${unit.entry.surface ? buildChatContextScope(unit.entry, entries) : null}
         action=${action}
       />`)
     }
@@ -4124,6 +4397,7 @@ export function ChatTranscript({
   toolOutputsCoveredThroughMs = null,
   toolOutputHydrationContract = null,
   unreadAfterTs = null,
+  expandAutonomousRuns = false,
   onSeenBottom,
   action,
 }: {
@@ -4145,6 +4419,8 @@ export function ChatTranscript({
   // Since-last-seen cursor (unix seconds) driving the unread divider. Null on
   // non-keeper surfaces -> no divider.
   unreadAfterTs?: number | null
+  // When true, skip folding autonomous groups into collapsed runs.
+  expandAutonomousRuns?: boolean
   // Called when the operator has demonstrably caught up (scrolled/pinned to the
   // bottom, or a new row arrived while pinned, or the tab regained visibility
   // while pinned). The keeper panel uses it to advance the last-seen cursor.
@@ -4207,7 +4483,7 @@ export function ChatTranscript({
       snap()
       requestAnimationFrame(snap)
       // Bottom-pinned with new content arriving means the operator is watching
-      // it live — advance the cursor so the divider/card do not resurrect it.
+      // it live — advance the cursor so the divider does not resurrect it.
       onSeenBottomRef.current?.()
     } else {
       setUnread(true)
@@ -4265,6 +4541,7 @@ export function ChatTranscript({
               toolOutputsCoveredThroughMs,
               toolOutputHydrationContract,
               unreadAfterTs,
+              expandAutonomousRuns,
               action,
             })}
       </div>
@@ -4334,8 +4611,7 @@ export function ChatComposer({
   streaming,
   streamStartedAt,
   lastEventAt,
-  queueEnabled = false,
-  queueCount = 0,
+  allowSendWhileStreaming = false,
   commands = [],
   onDraftChange,
   onSend,
@@ -4352,10 +4628,9 @@ export function ChatComposer({
   streamStartedAt?: number | null
   /** Wall-clock ms of the most recent stream event; drives the stall hint. */
   lastEventAt?: number | null
-  /** When true, sending stays enabled during streaming — the host panel
-   *  enqueues the message instead of dispatching it immediately. */
-  queueEnabled?: boolean
-  queueCount?: number
+  /** When true, a new durable operation may be submitted while another
+   *  operation is streaming. */
+  allowSendWhileStreaming?: boolean
   commands?: ChatComposerCommand[]
   /** Optional controlled draft handler. When omitted the composer keeps its
    *  own draft state, which prevents the host from re-rendering on every
@@ -4486,15 +4761,14 @@ export function ChatComposer({
       : null
   const isStalled = sinceLastEvent !== null && sinceLastEvent >= STREAM_STALL_THRESHOLD_S
 
-  const canQueue = queueEnabled && streaming
   const streamLabel = streaming
-    ? canQueue
-      ? '대기열 추가'
+    ? allowSendWhileStreaming
+      ? '새 작업 접수'
       : `응답 중${elapsed > 0 ? ` ${elapsed}s` : ''}`
     : '전송'
   const isStreamWarning = streaming && elapsed > 60
   const hasContent = draft.trim() !== '' || attachments.length > 0 || voiceDraft !== null
-  const sendDisabled = disabled || !hasContent || (streaming && !queueEnabled)
+  const sendDisabled = disabled || !hasContent || (streaming && !allowSendWhileStreaming)
   const slashMatch = /^\/([^\s]*)$/.exec(draft)
   const slashQuery = slashMatch?.[1]?.toLowerCase() ?? null
   const slashMatches = useMemo(
@@ -4821,7 +5095,7 @@ export function ChatComposer({
                   ` : null}
                   <button
                     type="button"
-                    class="send ${isStreamWarning && !canQueue ? 'warn' : ''}"
+                    class="send ${isStreamWarning && !allowSendWhileStreaming ? 'warn' : ''}"
                     disabled=${sendDisabled}
                     onClick=${handleSend}
                   >
@@ -4843,7 +5117,7 @@ export function ChatComposer({
                 </div>
               `}
         </div>
-        ${footerMode === 'always' || (footerMode === 'activity' && (isStalled || queueCount > 0))
+        ${footerMode === 'always' || (footerMode === 'activity' && isStalled)
           ? html`
               <div class="composer-foot">
                 <span class="hint">
@@ -4852,9 +5126,6 @@ export function ChatComposer({
                     ? html`<span class="ml-2 text-[var(--color-status-warn)]" data-chat-stall-hint>마지막 수신 ${sinceLastEvent}초 전 — 스트림 지연</span>`
                     : null}
                 </span>
-                ${queueCount > 0
-                  ? html`<span class="queue-badge" data-chat-queue-count>대기 ${queueCount}</span>`
-                  : null}
               </div>
             `
           : null}

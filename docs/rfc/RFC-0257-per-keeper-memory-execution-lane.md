@@ -1,8 +1,13 @@
+---
+rfc: "0257"
+status: Draft
+---
+
 # RFC-0257 — Per-Keeper memory execution lane
 
 - Status: Draft
 - Updated: 2026-07-13
-- Boundary: Memory work is lane-local; provider calls are OAS calls.
+- Boundary: Memory work is lane-local; provider calls are agent_core calls.
 
 ## Contract
 
@@ -12,7 +17,7 @@ acquire a fleet-wide permit and never block Keeper B.
 
 Submissions are durable FIFO work, not a bounded best-effort queue. Saturation,
 provider latency, token use, and queue depth are observations only: work is not
-dropped because a fixed count or timeout was reached. An OAS provider result is
+dropped because a fixed count or timeout was reached. An agent_core provider result is
 recorded explicitly. A completed or failed long-running memory job wakes only
 its originating Keeper lane.
 

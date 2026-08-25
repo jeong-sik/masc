@@ -336,13 +336,6 @@ let peek key =
 
 type slot_kind = Fresh | Stale | Expired | Computing_slot
 
-let slot_kind_to_string = function
-  | Fresh -> "fresh"
-  | Stale -> "stale"
-  | Expired -> "expired"
-  | Computing_slot -> "computing"
-;;
-
 let slot_kind ~now_ts = function
   | Ready e ->
     if now_ts <= e.expires_at then Fresh

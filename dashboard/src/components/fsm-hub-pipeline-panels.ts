@@ -159,7 +159,6 @@ export function OperationalMeaningPanel({
 
 const PHASE_BAR_FILL: Record<string, string> = {
   Running: 'var(--emerald)',
-  Overflowed: 'var(--amber-bright)',
   Compacting: 'var(--amber-bright)',
   HandingOff: 'var(--purple)',
   Failing: 'var(--color-status-err)',
@@ -250,14 +249,12 @@ const STATE_DESCRIPTIONS: Record<string, string> = {
   offline: '키퍼가 아직 시작되지 않음',
   running: '키퍼가 활성 상태로 턴 실행 중',
   failing: '에러 발생, 재시도 또는 복구 진행',
-  overflowed: '프롬프트가 provider 컨텍스트 윈도우 초과; 복구 대기',
   handing_off: '다음 generation 으로 상태 이관 중',
   draining: '종료 전 현재 작업 마무리 중',
   paused: '운영자 pause 또는 재시도 한계',
   stopped: 'clean terminal stop',
   crashed: 'crash 후 재시작 또는 조사 필요',
   restarting: 'supervisor 재시작 흐름 활성',
-  dead: '재시작 예산 소진',
 }
 
 export function HeroPhase({

@@ -179,13 +179,7 @@ let env_keys = function
       in
       Some keys
 
-let now_iso8601 () =
-  let t = Unix.gettimeofday () in
-  let tm = Unix.gmtime t in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ"
-    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-    tm.tm_hour tm.tm_min tm.tm_sec
-    (int_of_float ((t -. Float.floor t) *. 1000.0))
+let now_iso8601 () = Time_codec.rfc3339_of_unix_ms (Unix.gettimeofday ())
 
 (* ── record ─────────────────────────────────────────────── *)
 

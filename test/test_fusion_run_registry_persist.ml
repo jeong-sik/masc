@@ -15,19 +15,6 @@ let remove_if_exists path =
   | Sys_error _ -> ()
 ;;
 
-let contains_substring value needle =
-  let value_len = String.length value in
-  let needle_len = String.length needle in
-  let rec loop index =
-    if needle_len = 0
-    then true
-    else if index + needle_len > value_len
-    then false
-    else if String.sub value index needle_len = needle
-    then true
-    else loop (index + 1)
-  in
-  loop 0
 ;;
 
 let fresh_path suffix =
@@ -48,10 +35,10 @@ let str j k =
   | _ -> failwith (Printf.sprintf "missing string field %s" k)
 ;;
 
-let bool_ j k =
+let object_ j k =
   match field j k with
-  | Some (`Bool b) -> b
-  | _ -> failwith (Printf.sprintf "missing bool field %s" k)
+  | Some (`Assoc _ as value) -> value
+  | _ -> failwith (Printf.sprintf "missing object field %s" k)
 ;;
 
 let float_ j k =
@@ -64,41 +51,41 @@ let float_ j k =
 let test_persist_register_complete () =
   let path = fresh_path ".jsonl" in
   let t = R.create ~path () in
-  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"p" ~started_at:1.0;
-  R.mark_completed t ~run_id:"r1" ~ok:true ();
+  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:1.0;
+  R.mark_completed t ~run_id:"r1" ~outcome:R.Succeeded;
   let content = Fs_compat.load_file path in
   let lines = String.split_on_char '\n' content in
   check int "two events + trailing newline" 3 (List.length lines);
   let event1 = parse (List.nth lines 0) in
   check string "event1 kind" "register" (str event1 "event");
-  check string "event1 run_id" "r1" (str event1 "run_id");
-  check string "event1 keeper" "k" (str event1 "keeper");
-  check string "event1 preset" "p" (str event1 "preset");
+  check string "event1 id" "r1" (str event1 "id");
+  let registration = object_ event1 "registration" in
+  check string "event1 keeper" "k" (str registration "keeper");
+  check string "event1 preset" "p" (str registration "preset");
   check (float 0.001) "event1 started_at" 1.0 (float_ event1 "started_at");
   let event2 = parse (List.nth lines 1) in
   check string "event2 kind" "complete" (str event2 "event");
-  check string "event2 run_id" "r1" (str event2 "run_id");
-  check bool "event2 ok" true (bool_ event2 "ok")
+  check string "event2 id" "r1" (str event2 "id");
+  check string "event2 outcome" "succeeded" (str (object_ event2 "completion") "outcome")
 ;;
 
 let test_persist_failure_detail () =
   let path = fresh_path "-failure.jsonl" in
   let t = R.create ~path () in
-  R.register_running t ~run_id:"r-fail" ~keeper:"k" ~preset:"p" ~started_at:1.0;
-  R.mark_completed t ~run_id:"r-fail" ~failure:"judge failed: bad json"
-    ~failure_code:"parse_error" ~ok:false ();
+  R.register_running t ~run_id:"r-fail" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:1.0;
+  R.mark_completed t ~run_id:"r-fail"
+    ~outcome:(R.Failed { reason = "judge failed: bad json"; code = "parse_error" });
   let content = Fs_compat.load_file path in
   let lines = String.split_on_char '\n' content in
   let event2 = parse (List.nth lines 1) in
-  check string "event2 failure" "judge failed: bad json" (str event2 "failure");
-  check string "event2 failure_code" "parse_error" (str event2 "failure_code");
+  let completion = object_ event2 "completion" in
+  check string "event2 failure" "judge failed: bad json" (str completion "reason");
+  check string "event2 failure_code" "parse_error" (str completion "code");
   let replayed = R.replay path in
   match R.get replayed ~run_id:"r-fail" with
-  | Some { R.status = R.Completed { ok = false; failure; failure_code }; _ } ->
-    check (option string) "replayed failure" (Some "judge failed: bad json")
-      failure;
-    check (option string) "replayed failure_code" (Some "parse_error")
-      failure_code
+  | Some { R.status = R.Completed (R.Failed { reason; code }); _ } ->
+    check string "replayed failure" "judge failed: bad json" reason;
+    check string "replayed failure_code" "parse_error" code
   | Some _ -> fail "expected replayed failed completion"
   | None -> fail "expected replayed run"
 ;;
@@ -113,20 +100,20 @@ let test_replay_prunes_completed () =
       t
       ~run_id:("r" ^ string_of_int i)
       ~keeper:"k"
-      ~preset:"p"
+      ~preset:"p" ~topology:Fusion_types.Simple
       ~started_at:(float_of_int i);
-    R.mark_completed t ~run_id:("r" ^ string_of_int i) ~ok:true ()
+    R.mark_completed t ~run_id:("r" ^ string_of_int i) ~outcome:R.Succeeded
   done;
   (* Leave one run in [Running] state; replay must drop it because the worker
      fiber died with the old process. *)
-  R.register_running t ~run_id:"r-running" ~keeper:"k" ~preset:"p" ~started_at:71.0;
+  R.register_running t ~run_id:"r-running" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:71.0;
   let t2 = R.replay path in
   let runs = R.list_runs t2 in
   check int "pruned completed only" R.max_completed_retained (List.length runs);
   check bool "replayed running run dropped" true
     (Option.is_none (R.get t2 ~run_id:"r-running"));
   check bool "compacted log omits stale running run" false
-    (contains_substring (Fs_compat.load_file path) "r-running");
+    (String_util.contains_substring (Fs_compat.load_file path) "r-running");
   (* Newest completed run (r70) must be present; oldest (r1) pruned. *)
   check bool "newest completed kept" true (Option.is_some (R.get t2 ~run_id:"r70"));
   check bool "oldest completed pruned" true (Option.is_none (R.get t2 ~run_id:"r1"))
@@ -136,8 +123,8 @@ let test_replay_prunes_completed () =
 let test_no_path_is_in_memory_only () =
   let path = fresh_path "-no-path.jsonl" in
   let t = R.create () in
-  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"p" ~started_at:1.0;
-  R.mark_completed t ~run_id:"r1" ~ok:true ();
+  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:1.0;
+  R.mark_completed t ~run_id:"r1" ~outcome:R.Succeeded;
   check bool "no file created" false (Sys.file_exists path)
 ;;
 
@@ -148,35 +135,39 @@ let test_replay_skips_malformed_lines () =
     path
     (String.concat
        "\n"
-	       [ {|{"event":"register","run_id":"r1","keeper":"k","preset":"p","started_at":1.0}|}
-	       ; {|not-json|}
-	       ; {|{"event":"register","run_id":42,"keeper":"k","preset":"p","started_at":2.0}|}
-	       ; {|{"event":"complete","run_id":"r1","ok":"false"}|}
-	       ; {|{"event":"complete","run_id":"r1","ok":false}|}
-	       ; ""
-	       ]);
+       [ {|{"event":"register","id":"r1","started_at":1.0,"registration":{"keeper":"k","preset":"p","topology":"simple"}}|}
+       ; {|not-json|}
+       ; {|{"event":"register","id":42,"started_at":2.0,"registration":{"keeper":"k","preset":"p","topology":"simple"}}|}
+       ; {|{"event":"complete","id":"r1","completion":{"outcome":"failed"}}|}
+       ; {|{"event":"complete","id":"r1","completion":{"outcome":"failed","reason":"bad result","code":"bad_result"}}|}
+       ; ""
+       ]);
   let t = R.replay path in
-  match R.get t ~run_id:"r1" with
-  | Some { R.status = R.Completed { ok = false; _ }; _ } -> ()
-  | Some _ -> fail "expected replayed run to be completed as failed"
-  | None -> fail "expected valid replay events around malformed line to load"
+  (match R.get t ~run_id:"r1" with
+   | Some { R.status = R.Completed (R.Failed _); _ } -> ()
+   | Some _ -> fail "expected replayed run to be completed as failed"
+   | None -> fail "expected valid replay events around malformed line to load");
+  check bool "malformed evidence is preserved" true
+    (String_util.contains_substring (Fs_compat.load_file path) "not-json")
 ;;
 
 (* (5) Replay streams raw JSONL lines and compacts the retained state. *)
 let test_replay_streams_and_compacts () =
   let path = fresh_path "-stream.jsonl" in
   let before =
-    {|{"event":"register","run_id":"r-stream","keeper":"k","preset":"p","started_at":1.0}|}
+    {|{"event":"register","id":"r-stream","started_at":1.0,"registration":{"keeper":"k","preset":"p","topology":"simple"}}|}
   in
-  let after = {|{"event":"complete","run_id":"r-stream","ok":true}|} in
-  let malformed_padding = String.make 70000 'x' in
-  let content = String.concat "\n" [ before; malformed_padding; after; "" ] in
+  let after =
+    {|{"event":"complete","id":"r-stream","completion":{"outcome":"succeeded"}}|}
+  in
+  let blank_padding = String.make 70000 '\n' in
+  let content = String.concat "\n" [ before; blank_padding; after; "" ] in
   Fs_compat.save_file
     path
     content;
   let t = R.replay path in
   (match R.get t ~run_id:"r-stream" with
-   | Some { R.status = R.Completed { ok = true }; _ } -> ()
+   | Some { R.status = R.Completed R.Succeeded; _ } -> ()
    | Some _ -> fail "expected streamed run to be completed"
    | None -> fail "expected streamed run to replay");
   match Fs_compat.file_size path with
@@ -184,13 +175,39 @@ let test_replay_streams_and_compacts () =
   | None -> fail "expected compacted replay log to exist"
 ;;
 
-(* (6) Replay does not compact away an unterminated tail line. *)
+(* (6) Atomic replay compaction replaces the path inode. The shared JSONL
+   writer caches descriptors, so replay must invalidate the descriptor opened
+   by the pre-compaction registry before the replayed owner appends again. *)
+let test_append_after_replay_compaction_targets_live_path () =
+  let path = fresh_path "-append-after-replay.jsonl" in
+  let original = R.create ~path () in
+  R.register_running original ~run_id:"before" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:1.0;
+  R.mark_completed original ~run_id:"before" ~outcome:R.Succeeded;
+  let replayed = R.replay path in
+  R.register_running replayed ~run_id:"after" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:2.0;
+  R.mark_completed replayed ~run_id:"after" ~outcome:R.Succeeded;
+  let replayed_again = R.replay path in
+  check
+    bool
+    "pre-compaction run remains"
+    true
+    (Option.is_some (R.get replayed_again ~run_id:"before"));
+  check
+    bool
+    "post-compaction append reaches live path"
+    true
+    (Option.is_some (R.get replayed_again ~run_id:"after"))
+;;
+
+(* (7) Replay does not compact away an unterminated tail line. *)
 let test_replay_preserves_unterminated_tail () =
   let path = fresh_path "-partial-tail.jsonl" in
   let complete =
-    {|{"event":"register","run_id":"r-partial","keeper":"k","preset":"p","started_at":1.0}|}
+    {|{"event":"register","id":"r-partial","started_at":1.0,"registration":{"keeper":"k","preset":"p","topology":"simple"}}|}
   in
-  let partial = {|{"event":"complete","run_id":"r-partial","ok":true}|} in
+  let partial =
+    {|{"event":"complete","id":"r-partial","completion":{"outcome":"succeeded"}}|}
+  in
   let content = String.concat "\n" [ complete; partial ] in
   Fs_compat.save_file
     path
@@ -215,6 +232,10 @@ let () =
         ; test_case "no-path registry is in-memory only" `Quick test_no_path_is_in_memory_only
         ; test_case "replay skips malformed lines" `Quick test_replay_skips_malformed_lines
         ; test_case "replay streams and compacts log" `Quick test_replay_streams_and_compacts
+        ; test_case
+            "append after replay compaction targets the live path"
+            `Quick
+            test_append_after_replay_compaction_targets_live_path
         ; test_case
             "replay preserves unterminated tail"
             `Quick

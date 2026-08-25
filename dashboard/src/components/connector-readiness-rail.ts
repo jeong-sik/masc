@@ -188,6 +188,11 @@ export function ConnectorReadinessRail({ pills }: { pills: RailPill[] }) {
 interface RailInputs {
   /** Sidecar process is up and reachable. */
   sidecarUp: boolean
+  /** This connector runs as a separate sidecar process that can be started
+      and stopped. discord and slack run inside the server process, so there
+      is nothing to send to /api/v1/sidecar/{start,stop} and the Process pill
+      must not offer it. */
+  hasSidecarProcess: boolean
   /** Channel Gate /health responded healthy. null = unknown. */
   gateHealthy: boolean | null
   /** Number of channel↔keeper bindings configured. */
@@ -216,7 +221,12 @@ export function deriveRail(
 
   // Process
   const processState: RailState = input.sidecarUp ? 'ok' : 'bad'
-  const processDetail = input.sidecarUp ? '🟢 실행 중' : '⊘ 정지'
+  const processDetail = input.hasSidecarProcess
+    ? (input.sidecarUp ? '🟢 실행 중' : '⊘ 정지')
+    : (input.sidecarUp ? '🟢 게이트웨이 실행 중 (서버 프로세스 안)' : '⊘ 게이트웨이 미기동 (서버 프로세스 안)')
+  const processHint = input.hasSidecarProcess
+    ? (processState === 'bad' ? '클릭하면 sidecar Start' : '클릭하면 sidecar Stop')
+    : '서버가 직접 띄우는 게이트웨이라 따로 시작·정지하지 않습니다 — 클릭하면 상세 카드'
 
   // Gate
   let gateState: RailState
@@ -261,8 +271,8 @@ export function deriveRail(
       state: processState,
       label: '프로세스',
       detail: processDetail,
-      hint: processState === 'bad' ? '클릭하면 sidecar Start' : '클릭하면 sidecar Stop',
-      onClick: on.toggleProcess,
+      hint: processHint,
+      onClick: input.hasSidecarProcess ? on.toggleProcess : on.expandHeader,
       inflight: inflight.process === true,
     },
     {

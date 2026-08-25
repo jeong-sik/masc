@@ -7,10 +7,9 @@
     [module Execution_surfaces = ...] alias and reaches
     {!execution_cache} +
     {!broadcast_namespace_truth_ref} through it.  Plus
-    direct dotted callers and a
-    [let module S = ...] inline alias in
-    [test/test_types.ml] for the
-    lifecycle-event patcher family.
+    direct dotted callers.  A [let module S = ...] inline alias for
+    the lifecycle-event patcher family was cited in
+    [test/test_types.ml], which does not exist.
 
     External surface (22 entries):
     - {b cache cells} ({!execution_cache},
@@ -30,9 +29,7 @@
       ({!start_execution_refresh_loop},
       {!start_transport_health_refresh_loop},
       {!start_execution_trust_refresh_loop}).
-    - {b snapshot accessors}
-      ({!dashboard_execution_snapshot_json},
-      {!dashboard_transport_health_snapshot_json}).
+    - {b snapshot access} ({!dashboard_execution_snapshot_json}).
     - {b HTTP route entries}
       ({!dashboard_execution_cached_http_body},
       {!dashboard_execution_http_json},
@@ -59,7 +56,7 @@
     [_last_broadcast_hash] /
     [_broadcast_hash_mu] / [broadcast_cached_surface],
     [_transport_health_cache],
-    [keeper_agent_status_opt] / [patched_keeper_status],
+    [keeper_top_level_status_opt] / [patched_keeper_status],
     [patch_keeper_rows] SSE-event row patcher helper,
     [running_keeper_names],
     [patchexecution_cache_for_keeper],
@@ -113,18 +110,21 @@ val execution_actor_for_request :
 
 val invalidate_execution_cache : unit -> unit
 (** Drops the cached execution surface so the next
-    snapshot read recomputes from upstream.  Swallows
-    [Eio.Cancel.Cancelled] re-raise plus logs and counts other
-    exceptions through
+    snapshot read recomputes from upstream. Runs the cache/tombstone
+    settlement cancellation-protected and logs/counts projection failures
+    through
     {!Keeper_metrics.(to_string LifecycleCallbackFailures)}. *)
 
-val invalidate_execution_cache_with_hooks_for_testing :
-  invalidate_execution_surface:(unit -> unit) ->
-  invalidate_light_cache:(unit -> unit) ->
-  unit ->
-  unit
-(** Test seam for the best-effort invalidation failure path. Production
-    callers should use {!invalidate_execution_cache}. *)
+val install_task_mutation_cache_invalidation : unit -> unit
+(** Connects task mutation commits to {!invalidate_execution_cache}. Server
+    bootstrap installs this before Workspace mutation hooks become available. *)
+
+module For_testing : sig
+  val execution_publication_generation : unit -> int
+
+  val publish_execution_success_if_current :
+    generation:int -> Yojson.Safe.t -> bool
+end
 
 val patch_keeper_dependent_caches :
   keeper_name:string ->
@@ -175,10 +175,6 @@ val dashboard_execution_snapshot_json : unit -> Yojson.Safe.t
     snapshot (or the initialization placeholder when no
     refresh has succeeded yet). *)
 
-val dashboard_transport_health_snapshot_json :
-  unit -> Yojson.Safe.t
-(** Returns the most recent transport-health snapshot. *)
-
 (** {1 HTTP route entries} *)
 
 val dashboard_execution_cached_http_body :
@@ -215,7 +211,15 @@ val dashboard_transport_health_http_json :
   state:Mcp_server.server_state -> Yojson.Safe.t
 (** Returns the cached transport-health JSON with the
     cache-source diagnostic block extended.  Does not
-    consume [sw] or [clock] — pure cache read. *)
+    consume [sw] or [clock] — pure cache read.
+
+    Not to be wrapped in a route-level cache. It reads a published cell and
+    derives [cache_state], [stale_reason] and [stale_age_ms] from it against
+    the clock. A cache in front holds the answer to a question about
+    freshness: the route did that for 30s and served the previous "fresh"
+    payload after the surface had gone to an error state, with
+    [stale_age_ms] frozen so the age stood still while the surface aged
+    (#27652). *)
 
 (** {1 Lifecycle-event patchers}
 
@@ -247,3 +251,19 @@ val patch_keeper_row :
   keepalive_running:bool ->
   Yojson.Safe.t ->
   Yojson.Safe.t
+
+val broadcast_operator_snapshot :
+  Server_dashboard_http_core_operator.operator_snapshot_publication -> unit
+(** Publish an operator snapshot on SSE, if the publication still matches the
+    current one. Passed to the snapshot refresh loop at boot. *)
+
+val broadcast_operator_digest : Yojson.Safe.t -> unit
+(** Publish an operator digest on SSE. Passed to the digest refresh loop at
+    boot.
+
+    Both used to reach their loops through process-global [Atomic.t] cells that
+    module initializers here filled, because
+    [Server_dashboard_http_core_operator] is compiled before [Sse] is in scope
+    here and cannot name these bodies. The cells defaulted to functions that
+    did nothing, so a missing registration was a broadcast that silently went
+    nowhere (#25927). *)

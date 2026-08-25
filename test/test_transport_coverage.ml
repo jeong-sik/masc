@@ -14,7 +14,7 @@
 open Alcotest
 
 module Transport = Masc.Transport
-module Sdk_tool_contract = Masc.Sdk_tool_contract
+module Agent_core_tool_contract = Masc.Agent_core_tool_contract
 
 (* ============================================================
    protocol Tests
@@ -76,7 +76,6 @@ let test_protocol_roundtrip () =
       Transport.Grpc;
       Transport.Sse;
       Transport.Ws;
-      Transport.Webrtc;
     ]
   in
   List.iter (fun p ->
@@ -293,36 +292,6 @@ let test_error_with_data () =
   | None -> fail "expected data"
 
 (* ============================================================
-   binding Tests
-   ============================================================ *)
-
-let test_binding_creation () =
-  let b : Transport.binding = {
-    protocol = Transport.JsonRpc;
-    url = "http://localhost:8931";
-    options = [("timeout", "30")];
-  } in
-  check bool "protocol jsonrpc" true (b.protocol = Transport.JsonRpc);
-  check string "url" "http://localhost:8931" b.url;
-  check int "options count" 1 (List.length b.options)
-
-let test_binding_rest () =
-  let b : Transport.binding = {
-    protocol = Transport.Rest;
-    url = "https://api.example.com/v1";
-    options = [];
-  } in
-  check bool "protocol rest" true (b.protocol = Transport.Rest)
-
-let test_binding_grpc () =
-  let b : Transport.binding = {
-    protocol = Transport.Grpc;
-    url = "grpc://localhost:50051";
-    options = [("tls", "true")];
-  } in
-  check bool "protocol grpc" true (b.protocol = Transport.Grpc)
-
-(* ============================================================
    JsonRpc Module Tests
    ============================================================ *)
 
@@ -497,156 +466,10 @@ let test_rest_tool_to_endpoint_websocket_discovery () =
   check string "method" "GET" (Transport.Rest.method_to_string m);
   check string "path" "/ws" path
 
-let test_rest_tool_to_endpoint_webrtc_offer () =
-  let (m, path) = Transport.Rest.tool_to_endpoint "webrtc_offer" in
-  check string "method" "POST" (Transport.Rest.method_to_string m);
-  check string "path" "/webrtc/offer" path
-
-let test_rest_tool_to_endpoint_webrtc_answer () =
-  let (m, path) = Transport.Rest.tool_to_endpoint "webrtc_answer" in
-  check string "method" "POST" (Transport.Rest.method_to_string m);
-  check string "path" "/webrtc/answer" path
-
 let test_rest_tool_to_endpoint_unknown () =
   let (m, path) = Transport.Rest.tool_to_endpoint "unknown_tool" in
   check string "method" "POST" (Transport.Rest.method_to_string m);
   check string "path" "/mcp" path
-
-let test_rest_parse_request_status () =
-  let req = Transport.Rest.parse_request ~http_method:"GET" ~path:"/api/v1/status" ~query_params:[] ~body:"" in
-  check string "method_name" "masc_status" req.method_name
-
-let test_rest_parse_request_tasks () =
-  let req = Transport.Rest.parse_request ~http_method:"GET" ~path:"/api/v1/tasks" ~query_params:[] ~body:"" in
-  check string "method_name" "masc_tasks" req.method_name
-
-let test_rest_parse_request_agents () =
-  let req = Transport.Rest.parse_request ~http_method:"GET" ~path:"/api/v1/agents" ~query_params:[] ~body:"" in
-  check string "method_name" "unknown" req.method_name
-
-let test_rest_parse_request_operator_snapshot () =
-  let req =
-    Transport.Rest.parse_request ~http_method:"GET" ~path:"/api/v1/operator"
-      ~query_params:[] ~body:""
-  in
-  check string "method_name" "masc_operator_snapshot" req.method_name
-
-let test_rest_parse_request_operator_digest () =
-  let req =
-    Transport.Rest.parse_request ~http_method:"GET"
-      ~path:"/api/v1/operator/digest"
-      ~query_params:
-        [ ( "target_type"
-          , `String Masc.Operator_action_constants.workspace_target_type ) ]
-      ~body:""
-  in
-  check string "method_name" "masc_operator_digest" req.method_name
-
-let test_rest_parse_request_operator_action () =
-  let req =
-    Transport.Rest.parse_request ~http_method:"POST"
-      ~path:"/api/v1/operator/action" ~query_params:[]
-      ~body:"{\"action_type\":\"namespace_pause\"}"
-  in
-  check string "method_name" "masc_operator_action" req.method_name
-
-let test_rest_parse_request_operator_confirm () =
-  let req =
-    Transport.Rest.parse_request ~http_method:"POST"
-      ~path:"/api/v1/operator/confirm" ~query_params:[]
-      ~body:"{\"confirm_token\":\"token-1\"}"
-  in
-  check string "method_name" "masc_operator_confirm" req.method_name
-
-let test_rest_parse_request_agent_card () =
-  let req = Transport.Rest.parse_request ~http_method:"GET" ~path:"/.well-known/agent-card.json" ~query_params:[] ~body:"" in
-  check string "method_name" "masc_agent_card" req.method_name
-
-let test_rest_parse_request_agent_card_canonical () =
-  let req =
-    Transport.Rest.parse_request ~http_method:"GET"
-      ~path:"/.well-known/agent.json" ~query_params:[] ~body:""
-  in
-  check string "method_name" "masc_agent_card" req.method_name
-
-let test_rest_parse_request_websocket_discovery () =
-  let req =
-    Transport.Rest.parse_request ~http_method:"GET" ~path:"/ws"
-      ~query_params:[] ~body:""
-  in
-  check string "method_name" "masc_websocket_discovery" req.method_name
-
-let test_rest_parse_request_webrtc_offer () =
-  let req =
-    Transport.Rest.parse_request ~http_method:"POST" ~path:"/webrtc/offer"
-      ~query_params:[] ~body:"{\"agent_name\":\"a\"}"
-  in
-  check string "method_name" "webrtc_offer" req.method_name
-
-let test_rest_parse_request_webrtc_answer () =
-  let req =
-    Transport.Rest.parse_request ~http_method:"POST" ~path:"/webrtc/answer"
-      ~query_params:[] ~body:"{\"offer_id\":\"offer-1\",\"agent_name\":\"b\"}"
-  in
-  check string "method_name" "webrtc_answer" req.method_name
-
-let test_rest_parse_request_tool () =
-  let req = Transport.Rest.parse_request ~http_method:"POST" ~path:"/api/v1/tools/custom_tool" ~query_params:[] ~body:"" in
-  check string "method_name" "custom_tool" req.method_name
-
-let test_rest_parse_request_unknown () =
-  let req = Transport.Rest.parse_request ~http_method:"POST" ~path:"/some/random/path" ~query_params:[] ~body:"" in
-  check string "method_name" "unknown" req.method_name
-
-let test_rest_parse_request_with_body () =
-  let req = Transport.Rest.parse_request ~http_method:"POST" ~path:"/api/v1/status" ~query_params:[] ~body:"{\"key\":\"value\"}" in
-  check bool "has params" true (req.params <> `Null)
-
-let test_rest_parse_request_broadcast () =
-  (* Test /broadcast endpoint for autocov compatibility *)
-  let req = Transport.Rest.parse_request ~http_method:"POST" ~path:"/broadcast" ~query_params:[] ~body:"{\"agent_name\":\"test\",\"message\":\"hello\"}" in
-  check string "method_name" "masc_broadcast" req.method_name;
-  check bool "has params" true (req.params <> `Null)
-
-let test_rest_parse_request_api_broadcast () =
-  (* Test /api/v1/broadcast RESTful endpoint *)
-  let req = Transport.Rest.parse_request ~http_method:"POST" ~path:"/api/v1/broadcast" ~query_params:[] ~body:"{\"agent_name\":\"test\",\"message\":\"hello\"}" in
-  check string "method_name" "masc_broadcast" req.method_name;
-  check bool "has params" true (req.params <> `Null)
-
-let test_rest_parse_request_roundtrips_direct_bindings () =
-  let direct_operations =
-    [
-      "masc_status";
-      "masc_tasks";
-      "masc_messages";
-      "masc_operator_snapshot";
-      "masc_operator_digest";
-      "masc_operator_action";
-      "masc_operator_confirm";
-      "masc_websocket_discovery";
-      "webrtc_offer";
-      "webrtc_answer";
-      "masc_broadcast";
-      "masc_agent_card";
-    ]
-  in
-  List.iter
-    (fun operation ->
-      let method_, path = Transport.Rest.tool_to_endpoint operation in
-      let req =
-        Transport.Rest.parse_request
-          ~http_method:(Transport.Rest.method_to_string method_)
-          ~path ~query_params:[] ~body:""
-      in
-      check string
-        (Printf.sprintf "%s endpoint parses back to operation" operation)
-        operation req.method_name)
-    direct_operations
-
-let test_rest_parse_request_root () =
-  let req = Transport.Rest.parse_request ~http_method:"GET" ~path:"/" ~query_params:[] ~body:"" in
-  check string "method_name" "masc_status" req.method_name
 
 let test_rest_generate_openapi_paths () =
   let paths = Transport.Rest.generate_openapi_paths () in
@@ -662,7 +485,7 @@ let test_rest_generate_openapi_document () =
   let open Yojson.Safe.Util in
   let doc = Transport.Rest.generate_openapi_document () in
   check string "openapi version" "3.1.0" (doc |> member "openapi" |> to_string);
-  check string "info.version matches repo version" Masc.Version.version
+  check string "info.version matches repo version" Runtime_build_version.current
     (doc |> member "info" |> member "version" |> to_string);
   check string "bearer security scheme type" "http"
     (doc |> member "components" |> member "securitySchemes"
@@ -698,7 +521,7 @@ let test_rest_generate_openapi_document () =
         (operation_id ^ " removed from core remote operations")
         false
         (List.exists (String.equal operation_id)
-           Sdk_tool_contract.core_remote_operation_names);
+           Agent_core_tool_contract.core_remote_operation_names);
       check bool
         (operation_id ^ " absent from OpenAPI operation catalog")
         false
@@ -724,13 +547,13 @@ let test_rest_generate_openapi_document () =
   check_operation_tags "masc_status" [ "tasks" ];
   check_operation_tags "masc_plan_init" [ "planning" ];
   check_operation_tags "masc_broadcast" [ "messaging" ];
-  let sdk_aliases =
-    status_entry |> member "x-agent-sdk" |> member "aliases" |> to_list
+  let agent_core_aliases =
+    status_entry |> member "x-agent-core" |> member "aliases" |> to_list
   in
   check bool "status has no sdk alias masc_workspace_status" false
     (List.exists
        (fun row -> row |> member "name" |> to_string = "masc_workspace_status")
-       sdk_aliases);
+       agent_core_aliases);
   let add_task_entry = operation_entry "masc_add_task" in
   check int "add_task has no fake rest binding"
     0
@@ -761,85 +584,7 @@ let test_rest_generate_openapi_document_relative_server_fallback () =
   check string "relative server url when host unknown" "/"
     (doc |> member "servers" |> index 0 |> member "url" |> to_string)
 
-(* ============================================================
-   get_bindings Tests
-   ============================================================ *)
 
-let test_get_bindings_nonempty () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  check bool "nonempty" true (List.length bindings > 0)
-
-let test_get_bindings_has_sse () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  check bool "has sse" true
-    (List.exists (fun b -> b.Transport.protocol = Transport.Sse) bindings)
-
-let test_get_bindings_has_jsonrpc () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  check bool "has jsonrpc" true
-    (List.exists (fun b -> b.Transport.protocol = Transport.JsonRpc) bindings)
-
-let test_get_bindings_has_rest () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  check bool "has rest" true
-    (List.exists (fun b -> b.Transport.protocol = Transport.Rest) bindings)
-
-let test_get_bindings_has_grpc () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  check bool "has grpc" true
-    (List.exists (fun b -> b.Transport.protocol = Transport.Grpc) bindings)
-
-let test_get_bindings_has_ws () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  check bool "has ws" true
-    (List.exists (fun b -> b.Transport.protocol = Transport.Ws) bindings)
-
-let test_get_bindings_has_webrtc () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  check bool "has webrtc" true
-    (List.exists (fun b -> b.Transport.protocol = Transport.Webrtc) bindings)
-
-let test_get_bindings_url_contains_host () =
-  let bindings = Transport.get_bindings ~host:"127.0.0.1" ~port:9000 in
-  check bool "contains host" true
-    (List.exists (fun b ->
-      try let _ = Str.search_forward (Str.regexp "127.0.0.1") b.Transport.url 0 in true
-      with Not_found -> false
-    ) bindings)
-
-let test_get_bindings_url_contains_port () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:9999 in
-  check bool "contains port" true
-    (List.exists (fun b ->
-      try let _ = Str.search_forward (Str.regexp "9999") b.Transport.url 0 in true
-      with Not_found -> false
-    ) bindings)
-
-(* ============================================================
-   bindings_to_json Tests
-   ============================================================ *)
-
-let test_bindings_to_json_nonempty () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  let json = Transport.bindings_to_json bindings in
-  let json_str = Yojson.Safe.to_string json in
-  check bool "nonempty" true (String.length json_str > 2)
-
-let test_bindings_to_json_has_protocol () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  let json = Transport.bindings_to_json bindings in
-  let json_str = Yojson.Safe.to_string json in
-  check bool "has protocol" true
-    (try let _ = Str.search_forward (Str.regexp "protocol") json_str 0 in true
-     with Not_found -> false)
-
-let test_bindings_to_json_has_url () =
-  let bindings = Transport.get_bindings ~host:"localhost" ~port:8931 in
-  let json = Transport.bindings_to_json bindings in
-  let json_str = Yojson.Safe.to_string json in
-  check bool "has url" true
-    (try let _ = Str.search_forward (Str.regexp "url") json_str 0 in true
-     with Not_found -> false)
 
 (* generate_request_id, parallel_requests, batch_requests removed: dead code (#2990) *)
 
@@ -948,11 +693,6 @@ let () =
       test_case "creation" `Quick test_error_creation;
       test_case "with data" `Quick test_error_with_data;
     ];
-    "binding", [
-      test_case "creation" `Quick test_binding_creation;
-      test_case "rest" `Quick test_binding_rest;
-      test_case "grpc" `Quick test_binding_grpc;
-    ];
     "jsonrpc", [
       test_case "version" `Quick test_jsonrpc_version;
       test_case "parse valid" `Quick test_jsonrpc_parse_request_valid;
@@ -989,59 +729,13 @@ let () =
         test_rest_tool_to_endpoint_operator_confirm;
       test_case "agent_card" `Quick test_rest_tool_to_endpoint_agent_card;
       test_case "websocket_discovery" `Quick test_rest_tool_to_endpoint_websocket_discovery;
-      test_case "webrtc_offer" `Quick test_rest_tool_to_endpoint_webrtc_offer;
-      test_case "webrtc_answer" `Quick test_rest_tool_to_endpoint_webrtc_answer;
       test_case "unknown" `Quick test_rest_tool_to_endpoint_unknown;
-    ];
-    "rest.parse_request", [
-      test_case "status" `Quick test_rest_parse_request_status;
-      test_case "tasks" `Quick test_rest_parse_request_tasks;
-      test_case "agents" `Quick test_rest_parse_request_agents;
-      test_case "operator snapshot" `Quick
-        test_rest_parse_request_operator_snapshot;
-      test_case "operator digest" `Quick
-        test_rest_parse_request_operator_digest;
-      test_case "operator action" `Quick
-        test_rest_parse_request_operator_action;
-      test_case "operator confirm" `Quick
-        test_rest_parse_request_operator_confirm;
-      test_case "agent_card" `Quick test_rest_parse_request_agent_card;
-      test_case "agent_card canonical" `Quick
-        test_rest_parse_request_agent_card_canonical;
-      test_case "websocket discovery" `Quick
-        test_rest_parse_request_websocket_discovery;
-      test_case "webrtc offer" `Quick test_rest_parse_request_webrtc_offer;
-      test_case "webrtc answer" `Quick test_rest_parse_request_webrtc_answer;
-      test_case "tool" `Quick test_rest_parse_request_tool;
-      test_case "unknown" `Quick test_rest_parse_request_unknown;
-      test_case "with body" `Quick test_rest_parse_request_with_body;
-      test_case "root" `Quick test_rest_parse_request_root;
-      test_case "broadcast" `Quick test_rest_parse_request_broadcast;
-      test_case "api_broadcast" `Quick test_rest_parse_request_api_broadcast;
-      test_case "direct binding roundtrip" `Quick
-        test_rest_parse_request_roundtrips_direct_bindings;
     ];
     "rest.generate_openapi_paths", [
       test_case "paths" `Quick test_rest_generate_openapi_paths;
       test_case "document" `Quick test_rest_generate_openapi_document;
       test_case "relative server fallback" `Quick
         test_rest_generate_openapi_document_relative_server_fallback;
-    ];
-    "get_bindings", [
-      test_case "nonempty" `Quick test_get_bindings_nonempty;
-      test_case "has sse" `Quick test_get_bindings_has_sse;
-      test_case "has jsonrpc" `Quick test_get_bindings_has_jsonrpc;
-      test_case "has rest" `Quick test_get_bindings_has_rest;
-      test_case "has grpc" `Quick test_get_bindings_has_grpc;
-      test_case "has ws" `Quick test_get_bindings_has_ws;
-      test_case "has webrtc" `Quick test_get_bindings_has_webrtc;
-      test_case "url contains host" `Quick test_get_bindings_url_contains_host;
-      test_case "url contains port" `Quick test_get_bindings_url_contains_port;
-    ];
-    "bindings_to_json", [
-      test_case "nonempty" `Quick test_bindings_to_json_nonempty;
-      test_case "has protocol" `Quick test_bindings_to_json_has_protocol;
-      test_case "has url" `Quick test_bindings_to_json_has_url;
     ];
     "stats", [
       test_case "record success" `Quick test_stats_record_request_success;

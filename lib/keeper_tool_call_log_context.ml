@@ -7,6 +7,7 @@
 
 type turn_context =
   { agent_name : string option
+  ; turn_kind : Turn_record.turn_kind option
   ; lane : string option
   ; tool_choice : string option
   ; thinking_enabled : bool option
@@ -14,11 +15,9 @@ type turn_context =
   ; prompt_fingerprint : string option
   ; trace_id : string option
   ; session_id : string option
-  ; generation : int option
   ; turn : int option
   ; keeper_turn_id : int option
   ; task_id : string option
-  ; goal_ids : string list option
   ; sandbox_profile : string option
   ; sandbox_root : string option
   ; allowed_paths : string list option
@@ -28,6 +27,7 @@ type turn_context =
 
 let empty_turn_context =
   { agent_name = None
+  ; turn_kind = None
   ; lane = None
   ; tool_choice = None
   ; thinking_enabled = None
@@ -35,11 +35,9 @@ let empty_turn_context =
   ; prompt_fingerprint = None
   ; trace_id = None
   ; session_id = None
-  ; generation = None
   ; turn = None
   ; keeper_turn_id = None
   ; task_id = None
-  ; goal_ids = None
   ; sandbox_profile = None
   ; sandbox_root = None
   ; allowed_paths = None
@@ -55,6 +53,7 @@ let create_cell () : cell = ref empty_turn_context
 let set_turn_context
       ~(cell : cell)
       ?agent_name
+      ?turn_kind
       ?lane
       ?tool_choice
       ?thinking_enabled
@@ -62,11 +61,9 @@ let set_turn_context
       ?prompt_fingerprint
       ?trace_id
       ?session_id
-      ?generation
       ?turn
       ?keeper_turn_id
       ?task_id
-      ?goal_ids
       ?sandbox_profile
       ?sandbox_root
       ?allowed_paths
@@ -76,6 +73,7 @@ let set_turn_context
   =
   cell
   := { agent_name
+     ; turn_kind
      ; lane
      ; tool_choice
      ; thinking_enabled
@@ -83,11 +81,9 @@ let set_turn_context
      ; prompt_fingerprint
      ; trace_id
      ; session_id
-     ; generation
      ; turn
      ; keeper_turn_id
      ; task_id
-     ; goal_ids
      ; sandbox_profile
      ; sandbox_root
      ; allowed_paths
@@ -110,7 +106,6 @@ let get_turn_context ~cell () =
   , ctx.turn
   , ctx.keeper_turn_id
   , ctx.task_id
-  , ctx.goal_ids
   , ctx.sandbox_profile
   , ctx.network_mode )
 ;;
@@ -122,10 +117,8 @@ let runtime_observability_contract_json_for_call ~keeper_name ~cell () =
     ?agent_name:ctx.agent_name
     ?trace_id:ctx.trace_id
     ?session_id:ctx.session_id
-    ?generation:ctx.generation
     ?keeper_turn_id:ctx.keeper_turn_id
     ?task_id:ctx.task_id
-    ?goal_ids:ctx.goal_ids
     ?sandbox_profile:ctx.sandbox_profile
     ?sandbox_root:ctx.sandbox_root
     ?allowed_paths:ctx.allowed_paths

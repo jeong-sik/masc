@@ -8,7 +8,6 @@
 
 type t = {
   generated_at : float;
-  generation : int;
   shell : Yojson.Safe.t;
   shell_light : Yojson.Safe.t;
   (* RFC-0204 section 8.3 ("A"): the [~light] projection of the shell,
@@ -31,13 +30,6 @@ type t = {
    readers can distinguish "not yet warmed" from a real empty snapshot
    (the latter never occurs in normal operation). *)
 let slot : t option Atomic.t = Atomic.make None
-
-(* Monotonic publish counter.  Independent atomic so a reader observing
-   a fresh [t] always sees an increasing [generation] without contention
-   on the slot atomic. *)
-let generation_counter = Atomic.make 0
-
-let next_generation () = Atomic.fetch_and_add generation_counter 1 + 1
 
 let current () = Atomic.get slot
 
@@ -109,7 +101,19 @@ let refresh_loop
       safe "telemetry_summary" (fun () ->
         let base_path = config.base_path in
         let masc_root = Workspace.masc_root_dir config in
-        Telemetry_unified.summary_json ~base_path ~masc_root ())
+        let keeper_keepalive_interval_s =
+          Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
+          |> float_of_int
+        in
+        let keeper_metric_producer_active =
+          Keeper_status_runtime.keeper_metric_producer_active ~base_path
+        in
+        Telemetry_unified.summary_json
+          ~keeper_keepalive_interval_s
+          ~keeper_metric_producer_active
+          ~base_path
+          ~masc_root
+          ())
     in
     let namespace_truth =
       match state with
@@ -151,17 +155,8 @@ let refresh_loop
       safe "activity_swimlane_default" (fun () ->
         Activity_graph.agent_spans_json config ~limit:500 ())
     in
-    (* Emit goal attainment metrics on every snapshot refresh so Grafana
-       panels stay current even when no client hits the goals API. *)
-    (try Dashboard_goals.emit_all_goal_attainment_metrics ~config with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Log.Dashboard.warn
-         "dashboard_snapshot refresh: goal attainment metrics failed: %s"
-         (Printexc.to_string exn));
     {
       generated_at = Unix.gettimeofday ();
-      generation = next_generation ();
       shell;
       shell_light;
       tools;
@@ -182,7 +177,7 @@ let refresh_loop
           (weight 1.0, matching the per-surface refresh loops'
           [run_dashboard_compute ~mode:Offloaded_readonly]) and falls back to
           inline before the pool is installed at boot.  Every shared cell
-          [compute] touches is an [Atomic] ([slot], [generation_counter]), so
+          [compute] touches is an [Atomic] ([slot]), so
           it is cross-domain safe; the publish ([Atomic.set slot]) stays on
           this fiber.  If the whole compute path fails (an exception escapes a
           [safe] wrapper), keep the previous snapshot live. *)
@@ -209,7 +204,6 @@ let make_for_test ~shell ?(shell_light = `Null) ~tools ~namespace_truth
       ?(activity_swimlane_default = `Null) () =
   {
     generated_at = Unix.gettimeofday ();
-    generation = next_generation ();
     shell;
     shell_light;
     tools;

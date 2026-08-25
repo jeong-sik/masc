@@ -56,6 +56,7 @@ type event =
       session_id : string option; [@default None]
       operation_id : string option; [@default None]
       worker_run_id : string option; [@default None]
+      execution_id : string option; [@default None]
       error_kind : error_kind option; [@default None]
       error_message : string option; [@default None]
       exit_code : int option; [@default None]
@@ -111,12 +112,6 @@ type agent_activity = {
 (** {1 Read side} *)
 
 val read_all_events : ?fs:'a -> config -> event_record list
-
-val read_recent_events :
-  ?fs:'a -> config -> limit:int -> event_record list
-
-val read_events_since :
-  ?fs:'a -> config -> since:float -> event_record list
 
 val parse_event_records : Yojson.Safe.t list -> event_record list
 
@@ -187,6 +182,7 @@ val track_tool_called :
   ?session_id:string ->
   ?operation_id:string ->
   ?worker_run_id:string ->
+  ?execution_id:string ->
   ?failure_class:Tool_result.tool_failure_class ->
   ?error_kind:error_kind ->
   ?error_message:string ->
@@ -197,16 +193,6 @@ val track_tool_called :
 (** When [success = false] and [error_kind] is provided, additionally
     emits a paired [Error_occurred] row with a context envelope built
     from the non-empty optional fields (#10358). *)
-
-val track_tool_assigned :
-  ?fs:'a ->
-  config ->
-  agent_id:string ->
-  profile:string ->
-  tool_count:int ->
-  assignment_id:string ->
-  unit ->
-  unit
 
 (** {1 Maintenance} *)
 

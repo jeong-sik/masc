@@ -4,18 +4,17 @@
  (name masc_core)
  (public_name masc.masc_core)
  (wrapped false)
- ; RFC-0071 §3.4 Phase 5 bootstrap: warning 4 (fragile pattern match) on. + unused-value ratchet (warning 32)
- ; All 13 catch-all sites in this sublib match Yojson.Safe.t (poly variant),
- ; which warning 4 ignores by design — so flipping +4 here is a no-op for
- ; existing code but locks in the type-level guarantee for any future closed
- ; concrete variant. Smallest justifiable scope to prove Phase 5 end-to-end.
+ ; Closed variants must remain exhaustive; unused declarations are build errors.
  (flags
-  (:standard -w +4 -w +32))
+  (:standard -w +4 -w +33 -w +37))
  (modules
   atomic_util
   json_util
+  keeper_name_codec
   safe_ops
   common
+  frontmatter
+  exec_buffer
   validation
   failure_observation
   cross_context_mutex
@@ -27,12 +26,12 @@
   system_error_class
   executable_path
   safe_identifier
-  string_util
   list_util
   set_util
   read_drop_reason
   eval_tool_selector)
  (libraries
+  (re_export masc_string_util)
   yojson
   unix
   re

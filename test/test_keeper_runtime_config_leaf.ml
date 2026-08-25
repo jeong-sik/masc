@@ -40,6 +40,75 @@ let test_resolve_overrides_keeps_env_precedence () =
     (List.assoc_opt "MASC_KEEPER_UNIFIED_TEMP" overrides)
 ;;
 
+let retired_toml_keys =
+  [ "autonomous.fairness_cooldown_sec"
+  ; "heartbeat.board_wakeup_max"
+  ; "heartbeat.max_silence_sec"
+  ; "turn.cli_subprocess_idle_sec"
+  ; "turn.capacity_limit"
+  ; "turn.max_output_tokens"
+  ]
+;;
+
+let test_registry_is_internally_consistent () =
+  match Keeper_runtime_setting_registry.validate_registry () with
+  | Ok () -> ()
+  | Error errors -> fail (String.concat "; " errors)
+;;
+
+let test_retired_keys_have_no_active_mapping () =
+  List.iter
+    (fun key ->
+       check
+         (option string)
+         (key ^ " has no active mapping")
+         None
+         (List.assoc_opt
+            key
+            Keeper_runtime_setting_registry.active_toml_mappings);
+       match Keeper_runtime_setting_registry.find_by_toml_key key with
+       | Some { lifecycle = Keeper_runtime_setting_registry.Retired _; _ } -> ()
+       | Some _ -> failf "%s is unexpectedly active" key
+       | None -> failf "%s lost its retired-key diagnostic" key)
+    retired_toml_keys
+;;
+
+let test_active_toml_rows_prove_a_consumer () =
+  Keeper_runtime_setting_registry.active_toml
+  |> List.iter (fun (row : Keeper_runtime_setting_registry.setting) ->
+    check bool (row.env_name ^ " has consumer proof") true (row.consumers <> []))
+;;
+
+(* Feature contract: every credential that admits a web-search provider
+   is named by the registry, environment-only (credentials never gain a
+   TOML key in a committed file), and points at its consumer. *)
+let test_web_search_credentials_are_registered_env_only () =
+  [ "BRAVE_SEARCH_API_KEY"
+  ; "TAVILY_API_KEY"
+  ; "EXA_API_KEY"
+  ; "BING_SEARCH_API_KEY"
+  ; "AZURE_BING_SEARCH_API_KEY"
+  ]
+  |> List.iter (fun env_name ->
+    match
+      List.find_opt
+        (fun (row : Keeper_runtime_setting_registry.setting) ->
+          String.equal row.env_name env_name)
+        Keeper_runtime_setting_registry.all
+    with
+    | None -> failf "%s is not registered" env_name
+    | Some row ->
+      (match row.exposure with
+       | Keeper_runtime_setting_registry.Env_only -> ()
+       | Keeper_runtime_setting_registry.Toml_and_env key ->
+         failf "%s leaked a TOML key: %s" env_name key);
+      check string (env_name ^ " category") "web_search" row.category;
+      check bool
+        (env_name ^ " names its consumer")
+        true
+        (List.mem "Tool_misc_web_search" row.consumers))
+;;
+
 let () =
   run
     "Keeper_runtime_config"
@@ -48,6 +117,16 @@ let () =
             test_resolve_overrides_maps_known_keys
         ; test_case "env vars preempt TOML" `Quick
             test_resolve_overrides_keeps_env_precedence
+        ] )
+    ; ( "setting_registry"
+      , [ test_case "registry identities and consumers are valid" `Quick
+            test_registry_is_internally_consistent
+        ; test_case "retired no-op keys are not active mappings" `Quick
+            test_retired_keys_have_no_active_mapping
+        ; test_case "active TOML rows have consumer proof" `Quick
+            test_active_toml_rows_prove_a_consumer
+        ; test_case "web-search credentials are registered env-only" `Quick
+            test_web_search_credentials_are_registered_env_only
         ] )
     ]
 ;;

@@ -1,0 +1,37 @@
+{
+ "schema": "masc.keeper_canary_run.manual_completion.v1",
+ "captured_at": "2026-08-17T14:20:00Z",
+ "run_id": "canary-ladder-24h-20260816-r1",
+ "keeper": {
+  "name": "canary-24h-ollama-b-20260816",
+  "runtime": "ollama.qwen3-8-27b",
+  "base_path": "/Users/dancer/me"
+ },
+ "why_hand_written": "The harness died at turn 10 with HTTP 401 (the 22:38 operator restart rotated the auth token the runner had pinned at launch — #28958), so no harness evidence JSON exists. This receipt reconstructs the run from the harness log, the keeper's durable stores, and a manual completion of the recall turn.",
+ "wall_clock": {
+  "turn_1_sent": "2026-08-16T13:04:07Z",
+  "recall_replied": "2026-08-17T14:13:00Z",
+  "span": "~25h09m"
+ },
+ "turns_1_to_9": "all nine facts planted and echoed per the harness log (~2h40m interval); turn 5 followed by the planned restart injection — 'restart done in 0.1s continuation=true' (same trace, same generation)",
+ "disruptions_crossed": [
+  "unplanned full server restarts crossed: three in the 01:00-02:32 KST window (Shutdown complete + reboot pairs at 01:00, 01:25, 01:58) plus 19:20 KST (masc-08 redeploy) and 22:38 KST (operator) — five in total; the keeper is non-autoboot, so each surviving turn depended on a manual boot (the 02:32 dashboard action is a keeper boot, not a server restart), and turn 9 was delayed ~40m waiting for one",
+  "the 22:38 restart also rotated the auth token, killing the harness at the recall turn (#28958)"
+ ],
+ "recall_completion": {
+  "how": "the identical recall prompt was re-sent manually with the fresh token at 23:13 KST (request_id canary-24h-recall-manual-1) — the keeper transcript was intact throughout, so the measurement proposition (recall across 24h) is unchanged; the delay only made the condition harder (+1h)",
+  "deterministic": "9/9 facts, character-exact, in planted order (operator-verified against the harness log's planted values)",
+  "judge": "cross-family judge (glm-5.2 keeper turn, request_id canary-24h-judge-1): recalled_count 9/9, order_preserved true, no discrepancy"
+ },
+ "artifacts": {
+  "harness_log": "<base-path>/.masc/logs/canary-ladder-24h-20260816-r1.log (plants, echoes, injection, the 401 death)",
+  "keeper_transcript": "GET /api/v1/keepers/canary-24h-ollama-b-20260816/chat/history (plants + manual recall turn)",
+  "judge_transcript": "GET /api/v1/keepers/canary-10t-glmc-52-20260817/chat/history (canary-24h-judge-1)"
+ },
+ "honest_notes": [
+  "The recall turn ran outside the harness (manual chat POST with the same prompt); everything else is harness-driven.",
+  "The judge here is a keeper-turn judgment, not the harness's provider-subcall judge — same cross-family LLM principle, different plumbing.",
+  "No serving-runtime attribution block (#28914 landed mid-run); the ollama routing is visible in the keeper's runtime-manifests store."
+ ],
+ "transcript_purity": "turn_refs run unbroken through one trace (trace-1786885427022-0000a#1..#10). One unrelated external message (a broadcast receipt from the M5 keeper, 17:44 KST, no assistant reply, no fact content) sits between plant turns 8 and 9; the turn9->recall stretch is clean."
+}

@@ -27,7 +27,7 @@ const FOCUS_SURFACES: FocusSurface[] = [
   },
   {
     title: '운영 큐',
-    description: '빠른 개입(QuickIntervene), 흐름 제어, 최근 운영 활동을 한 화면에서 확인합니다. Auto Judge·HITL은 Gate 화면에 있습니다.',
+    description: '빠른 개입 · 흐름 제어 · 최근 운영 활동 (Auto Judge·HITL은 Gate)',
     action: '운영 큐로 이동',
     tab: 'command',
     params: { section: 'operations' },

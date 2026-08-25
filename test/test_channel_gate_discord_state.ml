@@ -1,15 +1,13 @@
 open Alcotest
 
 module Discord_state = Channel_gate_discord_state
-module Discord_names = Channel_gate_discord_names
 module U = Yojson.Safe.Util
 module Registry_test_connector_a = struct
   let connector_id = "registry-test-connector"
   let display_name = "Registry Test A"
   let channel = "registry-test"
   let status_json ?(audit_limit = 10) () = ignore audit_limit; `Assoc []
-  let connector_json ?gate_status_json ?(audit_limit = 10) () =
-    ignore gate_status_json;
+  let connector_json ?(audit_limit = 10) () =
     ignore audit_limit;
     `Assoc
       [ "connector_id", `String connector_id
@@ -26,8 +24,7 @@ module Registry_test_connector_b = struct
   include Registry_test_connector_a
 
   let display_name = "Registry Test B"
-  let connector_json ?gate_status_json ?(audit_limit = 10) () =
-    ignore gate_status_json;
+  let connector_json ?(audit_limit = 10) () =
     ignore audit_limit;
     `Assoc
       [ "connector_id", `String connector_id
@@ -69,14 +66,33 @@ let with_temp_dir f =
     (fun () -> f base)
 
 let with_discord_paths dir f =
-  let status_path = Filename.concat dir "status.json" in
   let binding_path = Filename.concat dir "bindings.json" in
   let audit_path = Filename.concat dir "audit.jsonl" in
-  let names_path = Filename.concat dir "names.json" in
-  with_env "MASC_DISCORD_STATUS_PATH" (Some status_path) (fun () ->
-    with_env "MASC_DISCORD_BINDING_STORE_PATH" (Some binding_path) (fun () ->
-      with_env "MASC_DISCORD_BINDING_AUDIT_PATH" (Some audit_path) (fun () ->
-        with_env "MASC_DISCORD_NAMES_PATH" (Some names_path) f)))
+  with_env "MASC_DISCORD_BINDING_STORE_PATH" (Some binding_path) (fun () ->
+    with_env "MASC_DISCORD_BINDING_AUDIT_PATH" (Some audit_path) f)
+
+let test_bot_token_accessor_unset_and_whitespace () =
+  (* The supported OCaml 5.4 test runtime has no [Unix.unsetenv]; the
+     existing [with_env ... None] helper represents an unset variable with
+     an empty value, which the accessor must treat as absent. *)
+  with_env "DISCORD_BOT_TOKEN" None (fun () ->
+    check (option string) "unset token -> None" None
+      (Env_config_discord.bot_token_opt ()));
+  with_env "DISCORD_BOT_TOKEN" (Some " \t \n ") (fun () ->
+    check (option string) "whitespace-only token -> None" None
+      (Env_config_discord.bot_token_opt ()))
+
+let test_bot_token_accessor_trims_and_feeds_status_consumer () =
+  with_temp_dir @@ fun dir ->
+  with_discord_paths dir (fun () ->
+  with_env "DISCORD_BOT_TOKEN" (Some "  token-42 \t ") (fun () ->
+    check (option string) "surrounding whitespace is trimmed" (Some "token-42")
+      (Env_config_discord.bot_token_opt ());
+    let json = Discord_state.status_json () in
+    check bool "trimmed token enables disconnected transport" true
+      (json |> U.member "available" |> U.to_bool);
+    check string "trimmed token has no missing-token error" ""
+      (json |> U.member "error" |> U.to_string)))
 
 let test_status_json_reports_in_process_gateway_status () =
   with_temp_dir @@ fun dir ->
@@ -89,8 +105,6 @@ let test_status_json_reports_in_process_gateway_status () =
       (json |> U.member "available" |> U.to_bool);
     check bool "connected false" false
       (json |> U.member "connected" |> U.to_bool);
-    check bool "stale false" false
-      (json |> U.member "stale" |> U.to_bool);
     check string "status source" "in_process_gateway"
       (json |> U.member "status_source" |> U.to_string);
     check string "gateway state" "disconnected"
@@ -99,31 +113,6 @@ let test_status_json_reports_in_process_gateway_status () =
       (json |> U.member "error" |> U.to_string);
     check int "no configured bindings" 0
       (json |> U.member "configured_bindings" |> U.to_list |> List.length)))
-
-let test_status_json_ignores_legacy_sidecar_status_file () =
-  with_temp_dir @@ fun dir ->
-  with_discord_paths dir (fun () ->
-  with_env "DISCORD_BOT_TOKEN" None (fun () ->
-    let status_path = Filename.concat dir "status.json" in
-    Yojson.Safe.to_file status_path
-      (`Assoc
-        [
-          ("updated_at", `String "2026-05-10T16:49:47Z");
-          ("connected", `Bool true);
-          ("bot_user_name", `String "legacy-sidecar");
-          ("runtime_bindings_count", `Int 99);
-        ]);
-    let json = Discord_state.status_json () in
-    check string "source" "in_process_gateway"
-      (json |> U.member "status_source" |> U.to_string);
-    check bool "legacy stale file ignored" false
-      (json |> U.member "stale" |> U.to_bool);
-    check bool "legacy connected file ignored" false
-      (json |> U.member "connected" |> U.to_bool);
-    check string "legacy bot name ignored" ""
-      (json |> U.member "bot_user_name" |> U.to_string);
-    check int "runtime bindings from persisted bindings" 0
-      (json |> U.member "runtime_bindings_count" |> U.to_int)))
 
 let test_status_json_surfaces_binding_store_failure () =
   with_temp_dir @@ fun dir ->
@@ -203,40 +192,8 @@ let test_connectors_json_advertises_gate_connector_descriptor () =
     ignore
       (Discord_state.bind ~channel_id:"1234567890" ~keeper_name:"luna"
          ~actor_name:"dashboard");
-    let status_path = Filename.concat dir "status.json" in
-    Yojson.Safe.to_file status_path
-      (`Assoc
-        [
-          ("updated_at", `String "2026-04-09T00:00:00Z");
-          ("connected", `Bool true);
-          ("bot_user_name", `String "keeper-gateway");
-          ("bot_user_id", `String "bot-1");
-          ("guild_count", `Int 2);
-          ("gate_base_url", `String "http://127.0.0.1:8935");
-          ("gate_healthy", `Bool true);
-          ("gate_health_checked_at", `String "2026-04-09T00:00:00Z");
-          ("last_ready_at", `String "2026-04-09T00:00:00Z");
-          ("binding_source", `String "persisted");
-          ("runtime_bindings_count", `Int 1);
-          ("pid", `Int 4242);
-        ]);
-    let gate_status_json =
-      `Assoc
-        [
-          ( "channels",
-            `List
-              [
-                `Assoc
-                  [
-                    ("channel", `String "discord");
-                    ("message_count", `Int 3);
-                    ("success_rate_pct", `Int 100);
-                  ];
-              ] );
-        ]
-    in
     Channel_gate_connector.register (module Discord_state);
-    let json = Channel_gate_connector.connectors_json ~gate_status_json () in
+    let json = Channel_gate_connector.connectors_json () in
     let connectors = json |> U.member "connectors" |> U.to_list in
     check int "one connector" 1 (List.length connectors);
     let connector = List.hd connectors in
@@ -256,9 +213,11 @@ let test_connectors_json_advertises_gate_connector_descriptor () =
        |> List.exists (function
             | `String "bindings" -> true
             | _ -> false));
-    check string "observed channel surfaced" "discord"
-      (connector |> U.member "observed_channel" |> U.member "channel"
-       |> U.to_string))
+    check string "status source surfaced" "in_process_gateway"
+      (connector |> U.member "status_source" |> U.to_string);
+    check bool "gateway state surfaced" true
+      (connector |> U.member "gateway_state" |> U.to_string
+       |> String.trim |> String.length > 0))
 
 let test_registry_register_replaces_and_all_snapshots () =
   Channel_gate_connector.register (module Registry_test_connector_a);
@@ -282,87 +241,10 @@ let test_registry_register_replaces_and_all_snapshots () =
     check string "snapshot sees replacement" "Registry Test B" C.display_name
   | _ -> fail "unexpected registry snapshot"
 
-let test_name_map_round_trip () =
-  with_temp_dir @@ fun dir ->
-  with_discord_paths dir (fun () ->
-    let nm : Discord_names.name_map =
-      {
-        guild_names = [ ("123", "sangsu-lab") ];
-        channel_names = [ ("456", "#general") ];
-        channel_to_guild = [ ("456", "123") ];
-        channel_to_parent = [ ("789", "456") ];
-        updated_at = "2026-04-15T00:00:00Z";
-      }
-    in
-    Discord_names.save nm;
-    let loaded = Discord_names.read () in
-    check string "guild name round-trips" "sangsu-lab"
-      (List.assoc "123" loaded.guild_names);
-    check string "channel name round-trips" "#general"
-      (List.assoc "456" loaded.channel_names);
-    check string "channel_to_guild round-trips" "123"
-      (List.assoc "456" loaded.channel_to_guild);
-    check string "channel_to_parent round-trips" "456"
-      (List.assoc "789" loaded.channel_to_parent);
-    check string "updated_at round-trips" "2026-04-15T00:00:00Z"
-      loaded.updated_at)
-
-let test_read_name_map_missing_returns_empty () =
-  with_temp_dir @@ fun dir ->
-  with_discord_paths dir (fun () ->
-    let loaded = Discord_names.read () in
-    check int "no guild names" 0 (List.length loaded.guild_names);
-    check int "no channel names" 0 (List.length loaded.channel_names);
-    check int "no channel_to_guild entries" 0
-      (List.length loaded.channel_to_guild);
-    check int "no channel_to_parent entries" 0
-      (List.length loaded.channel_to_parent);
-    check string "empty updated_at" "" loaded.updated_at)
-
-let test_resolve_guild_id_hits_and_misses () =
-  with_temp_dir @@ fun dir ->
-  with_discord_paths dir (fun () ->
-    Discord_names.save
-      {
-        guild_names = [ ("123", "sangsu-lab") ];
-        channel_names = [ ("456", "#general") ];
-        channel_to_guild = [ ("456", "123") ];
-        channel_to_parent = [ ("789", "456") ];
-        updated_at = "2026-04-15T00:00:00Z";
-      };
-    check (option string) "hit returns guild id" (Some "123")
-      (Discord_names.resolve_guild_id_for_channel ~channel_id:"456");
-    check (option string) "miss returns None" None
-      (Discord_names.resolve_guild_id_for_channel ~channel_id:"999");
-    check (option string) "parent hit returns parent channel id" (Some "456")
-      (Discord_names.resolve_parent_channel_id_for_channel ~channel_id:"789");
-    check (option string) "parent miss returns None" None
-      (Discord_names.resolve_parent_channel_id_for_channel ~channel_id:"999");
-    check (option string) "empty channel_id returns None" None
-      (Discord_names.resolve_guild_id_for_channel ~channel_id:""))
-
-let test_bind_populates_guild_id_when_names_available () =
-  with_temp_dir @@ fun dir ->
-  with_discord_paths dir (fun () ->
-    Discord_names.save
-      {
-        guild_names = [ ("guild-1", "sangsu-lab") ];
-        channel_names = [ ("chan-1", "#general") ];
-        channel_to_guild = [ ("chan-1", "guild-1") ];
-        channel_to_parent = [];
-        updated_at = "2026-04-15T00:00:00Z";
-      };
-    match
-      Discord_state.bind ~channel_id:"chan-1" ~keeper_name:"luna"
-        ~actor_name:"dashboard"
-    with
-    | Error err -> fail err
-    | Ok json ->
-        let audit = json |> U.member "recent_audit" |> U.to_list in
-        check string "audit guild_id resolved" "guild-1"
-          (List.hd audit |> U.member "guild_id" |> U.to_string))
-
-let test_bind_accepts_missing_names_with_empty_guild_id () =
+(* The audit wire shape keeps a constant-empty [guild_id] key for Discord
+   rows: dashboards read that shape, and the sidecar that once resolved
+   real guild ids is gone. *)
+let test_bind_audit_carries_constant_empty_guild_id () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
     match
@@ -372,20 +254,12 @@ let test_bind_accepts_missing_names_with_empty_guild_id () =
     | Error err -> fail err
     | Ok json ->
         let audit = json |> U.member "recent_audit" |> U.to_list in
-        check string "audit guild_id empty when names absent" ""
+        check string "audit guild_id stays empty" ""
           (List.hd audit |> U.member "guild_id" |> U.to_string))
 
 let test_resolve_keeper_for_thread_parent_binding () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
-    Discord_names.save
-      {
-        guild_names = [ ("guild-1", "sangsu-lab") ];
-        channel_names = [ ("parent-1", "#personal-agents"); ("thread-1", "thread") ];
-        channel_to_guild = [ ("parent-1", "guild-1"); ("thread-1", "guild-1") ];
-        channel_to_parent = [ ("thread-1", "parent-1") ];
-        updated_at = "2026-04-15T00:00:00Z";
-      };
     ignore
       (Discord_state.bind ~channel_id:"parent-1" ~keeper_name:"luna"
          ~actor_name:"dashboard");
@@ -405,26 +279,18 @@ let test_resolve_keeper_for_thread_parent_binding () =
 let test_resolve_keeper_exact_binding_wins_over_parent () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
-    Discord_names.save
-      {
-        guild_names = [ ("guild-1", "sangsu-lab") ];
-        channel_names = [ ("parent-1", "#personal-agents"); ("thread-1", "thread") ];
-        channel_to_guild = [ ("parent-1", "guild-1"); ("thread-1", "guild-1") ];
-        channel_to_parent = [ ("thread-1", "parent-1") ];
-        updated_at = "2026-04-15T00:00:00Z";
-      };
     ignore
       (Discord_state.bind ~channel_id:"parent-1" ~keeper_name:"luna"
          ~actor_name:"dashboard");
     ignore
-      (Discord_state.bind ~channel_id:"thread-1" ~keeper_name:"sangsu"
+      (Discord_state.bind ~channel_id:"thread-1" ~keeper_name:"alpha"
          ~actor_name:"dashboard");
     match
       Discord_state.resolve_keeper_for_channel_result ~channel_id:"thread-1"
     with
     | Error _ | Ok None -> fail "expected exact binding to resolve"
     | Ok (Some resolution) ->
-        check string "keeper" "sangsu" resolution.keeper_name;
+        check string "keeper" "alpha" resolution.keeper_name;
         check string "incoming" "thread-1" resolution.incoming_channel_id;
         check string "bound" "thread-1" resolution.bound_channel_id;
         check bool "not via parent" false resolution.via_parent)
@@ -478,16 +344,54 @@ let test_thread_registry_round_trip () =
     (Discord_state.is_known_thread ~channel_id:thread_id);
   check int "count restored" before (Discord_state.registered_thread_count ())
 
+let test_large_mention_allowlist_keeps_tokens_whole () =
+  let user_ids =
+    List.init 100 (fun index -> Printf.sprintf "12345678901234%04d" index)
+  in
+  let messages =
+    Discord_state.For_testing.message_chunks_with_mentions
+      ~limit:2000
+      ~content:"body"
+      ~mention_user_ids:user_ids
+  in
+  check bool "large allowlist uses multiple messages" true
+    (List.length messages > 1);
+  check (list string) "every allowed id is retained exactly once" user_ids
+    (List.concat_map
+       (fun (message : Discord_state.For_testing.outbound_message) ->
+          message.allowed_user_mentions)
+       messages);
+  List.iter
+    (fun (message : Discord_state.For_testing.outbound_message) ->
+       check bool "message remains within Discord limit" true
+         (String.length message.content <= 2000);
+       List.iter
+         (fun user_id ->
+            check bool "allowed mention has a complete visible token" true
+              (String_util.contains_substring
+                 message.content
+                 (Printf.sprintf "<@%s>" user_id)))
+         message.allowed_user_mentions)
+    messages;
+  match List.rev messages with
+  | last :: _ ->
+    check string "content is delivered after mention groups" "body" last.content;
+    check (list string) "content does not reopen mentions" []
+      last.allowed_user_mentions
+  | [] -> fail "mention chunker produced no messages"
+
 let () =
   Eio_main.run @@ fun _env ->
   run "channel_gate_discord_state"
     [
       ( "status",
         [
+          test_case "bot token accessor handles unset and whitespace" `Quick
+            test_bot_token_accessor_unset_and_whitespace;
+          test_case "bot token accessor trims for status consumer" `Quick
+            test_bot_token_accessor_trims_and_feeds_status_consumer;
           test_case "in-process gateway status" `Quick
             test_status_json_reports_in_process_gateway_status;
-          test_case "ignores legacy sidecar status file" `Quick
-            test_status_json_ignores_legacy_sidecar_status_file;
           test_case "surfaces binding store failure" `Quick
             test_status_json_surfaces_binding_store_failure;
           test_case "record_ready surfaces bot identity" `Quick
@@ -503,17 +407,10 @@ let () =
           test_case "registry register replaces and all snapshots" `Quick
             test_registry_register_replaces_and_all_snapshots;
         ] );
-      ( "name_map",
+      ( "audit_wire",
         [
-          test_case "round trip" `Quick test_name_map_round_trip;
-          test_case "missing file returns empty" `Quick
-            test_read_name_map_missing_returns_empty;
-          test_case "resolve hits and misses" `Quick
-            test_resolve_guild_id_hits_and_misses;
-          test_case "bind populates guild_id when names available" `Quick
-            test_bind_populates_guild_id_when_names_available;
-          test_case "bind accepts missing names with empty guild_id" `Quick
-            test_bind_accepts_missing_names_with_empty_guild_id;
+          test_case "bind audit carries constant-empty guild_id" `Quick
+            test_bind_audit_carries_constant_empty_guild_id;
           test_case "thread resolves through parent binding" `Quick
             test_resolve_keeper_for_thread_parent_binding;
           test_case "exact binding wins over parent" `Quick
@@ -523,5 +420,10 @@ let () =
         [
           test_case "register lookup update unregister" `Quick
             test_thread_registry_round_trip;
+        ] );
+      ( "message_chunks",
+        [
+          test_case "large mention allowlist keeps tokens whole" `Quick
+            test_large_mention_allowlist_keeps_tokens_whole;
         ] );
     ]

@@ -9,6 +9,23 @@
 
     @stability Internal *)
 
+(** Header keys that carry a credential. Stripped from
+    [Provider_config.headers] so a declared auth header is not duplicated
+    next to [api_key], and hidden from the dashboard's provider header list.
+    Matching is case-insensitive on the trimmed key. *)
+val is_auth_header_key : string -> bool
+
+val effective_credential_reference :
+  provider_id:string ->
+  Runtime_schema.credential option ->
+  Runtime_schema.credential option
+(** Return the explicit credential reference, or the provider registry's
+    declared default environment reference when the runtime row omits one.
+    Environment aliases follow the same candidate selection as API-key
+    materialization, so the returned non-secret reference names the credential
+    that was actually selected. File and inline references are preserved.
+    An unregistered provider with no explicit credential remains [None]. *)
+
 val binding_to_provider_config
   :  Runtime_schema.config
   -> Runtime_schema.binding
@@ -23,3 +40,14 @@ val binding_to_provider_config
     Returns [Error reason] (no silent fallback) when the provider or model id
     is unresolved, or when the provider transport/kind cannot be mapped to a
     concrete provider config. *)
+
+val binding_to_execution
+  :  Runtime_schema.config
+  -> Runtime_schema.binding
+  -> (Runtime_execution.t, string) result
+(** Materialize the owner of a complete turn. HTTP model APIs become
+    {!Runtime_execution.Agent_core}. The exact [codex-app-server] protocol over
+    a credential-free CLI transport becomes
+    {!Runtime_execution.Codex_app_server}; [claude-code] becomes
+    {!Runtime_execution.Claude_code}; and [antigravity-cli] becomes
+    {!Runtime_execution.Antigravity_cli}. Other CLI protocols remain rejected. *)

@@ -9,7 +9,7 @@
     3. [temperature = 0.0] (greedy) is a valid value → [Some 0.0]; temperature
        is NOT a positive-only field.
     4. Absent [temperature] → [None]; the caller keeps its fallback
-       ([MASC_KEEPER_UNIFIED_TEMP] / the OAS agent_default profile).
+       ([MASC_KEEPER_UNIFIED_TEMP] / the AGENT_CORE agent_default profile).
     5. An out-of-range value (outside [0.0, 2.0]) fails the parse (fail-closed):
        an invalid temperature is rejected at load rather than sent to the
        provider, which would reject it at request time.
@@ -193,6 +193,36 @@ let test_sampling_fields_conflicting_declared_capabilities_fail_closed () =
     content
 ;;
 
+(* The [models] table keys carry upstream API model names verbatim, and those
+   names contain dots (gpt-5.3-codex-spark, mimo-v2.5). Provider ids stay
+   dot-free so the "<provider>.<model>" Runtime id remains unambiguous. *)
+let test_dotted_model_id_parses () =
+  let cfg =
+    parse_string_or_fail "[models.\"gpt-5.3-codex-spark\"]\nmax-context = 200000\n"
+  in
+  check
+    (option (float 0.0001))
+    "dotted model id parses"
+    None
+    (model_temperature cfg "gpt-5.3-codex-spark")
+;;
+
+let test_dotted_provider_id_fails_closed () =
+  parse_string_expect_error_entry
+    "provider id with a dot is rejected"
+    ~path:"providers.bad.provider"
+    ~message:"provider id must match [A-Za-z0-9_-]+"
+    "[providers.\"bad.provider\"]\nendpoint = \"http://127.0.0.1:1\"\n"
+;;
+
+let test_model_id_rejection_names_dotted_charset () =
+  parse_string_expect_error_entry
+    "model id outside the charset names the dotted accepted set"
+    ~path:"models.bad model"
+    ~message:"model id must match [A-Za-z0-9._-]+"
+    "[models.\"bad model\"]\nmax-context = 200000\n"
+;;
+
 let () =
   run "runtime_model_temperature_toml"
     [ ( "valid values"
@@ -222,6 +252,13 @@ let () =
             test_top_k_invalid_values_fail_closed
         ; test_case "sampling fields conflict with declared capabilities" `Quick
             test_sampling_fields_conflicting_declared_capabilities_fail_closed
+        ] )
+    ; ( "id charset"
+      , [ test_case "dotted model id parses" `Quick test_dotted_model_id_parses
+        ; test_case "dotted provider id fails closed" `Quick
+            test_dotted_provider_id_fails_closed
+        ; test_case "model id rejection names dotted charset" `Quick
+            test_model_id_rejection_names_dotted_charset
         ] )
     ]
 ;;

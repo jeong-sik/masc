@@ -1,46 +1,51 @@
+---
+rfc: "0342"
+status: Draft
+---
+
 # RFC-0342: Capability catalog overlay, deployment capability declarations, and boot posture
 
 - Status: Draft
 - Date: 2026-07-15
-- Related: masc#24528 (provider_id stamping fix, merged), oas RFC-OAS-036 / oas#2604
-  (D1 overlay + alias-canonicalized lookup, implemented), oas RFC-OAS-034
+- Related: masc#24528 (provider_id stamping fix, merged), agent_core RFC-OAS-036 / agent_core#2604
+  (D1 overlay + alias-canonicalized lookup, implemented), agent_core RFC-OAS-034
   (endpoint/capability boundary), masc `codex/catalog-ssot-purge-20260714`
   (`6921f46c98`, vendored-catalog purge, unlanded), RFC-0206 §2.1 (no silent
   fallback)
 
-> 2026-07-15 update: D1 is implemented on the OAS side as RFC-OAS-036
-> (`Model_catalog.merge` / `set_global_overlay`, oas#2604). That PR also
+> 2026-07-15 update: D1 is implemented on the agent_core side as RFC-OAS-036
+> (`Model_catalog.merge` / `set_global_overlay`, agent_core#2604). That PR also
 > canonicalizes `lookup_for_provider` through the catalog's own `[[providers]]`
 > alias data, which makes **D3 optional**: a deployment alias can be declared
 > as pure overlay data (a provider entry `id = "vllm-qwen3-mtp"` with
 > `aliases = ["runpod_mtp"]`) instead of a masc-side `capability-namespace`
 > key. The masc key remains the better ergonomics when the declaration should
 > live next to the endpoint in runtime.toml; decide at D3 implementation time.
-> MASC D1 now resolves and seeds only `oas-models-overlay.toml`; automatic
+> MASC D1 now resolves and seeds only `agent_core-models-overlay.toml`; automatic
 > config-root/parent full-catalog discovery and the repo full fork are retired.
 > Remaining masc-side work: D2 and D4.
 
 ## 1. Problem
 
 2026-07-15, the server refused to boot: every routed runtime was reported
-absent from the OAS capability catalog and startup declined BasePath
+absent from the agent_core capability catalog and startup declined BasePath
 ownership. Two defects compounded:
 
 1. **Integration defect (fixed by masc#24528).** The runtime adapter never
    stamped `Provider_config.provider_id`, so `capability_provider_label`
    collapsed every OpenAI-compatible provider into the wire-kind label
-   `"openai_compat"`, which no catalog row carries. Under the OAS 0.212
+   `"openai_compat"`, which no catalog row carries. Under the agent_core 0.212
    contract (a declared provider only accepts an exact provider-scoped row;
    bare-row fallback is disabled), no catalog content could satisfy the gate.
 
 2. **Structural defect (this RFC).** Capability truth for a deployment has no
    designed home. The observed consequences, all live in this deployment on
    2026-07-15:
-   - Four divergent catalog copies: oas embedded (`models.toml`, build-time),
-     `~/.config/oas/models.toml` (symlink to a checkout), the deployment
-     config-root `oas-models.toml` (hand-forked, 103 rows / 0 providers,
+   - Four divergent catalog copies: agent_core embedded (`models.toml`, build-time),
+     `~/.config/agent_core/models.toml` (symlink to a checkout), the deployment
+     config-root `agent_core-models.toml` (hand-forked, 103 rows / 0 providers,
      three generations of row encodings), and the masc repo-root
-     `oas-models.toml` (stale, read by env-coupled tests).
+     `agent_core-models.toml` (stale, read by env-coupled tests).
    - Override semantics are replace-not-merge (`Model_catalog.set_global`):
      adding one deployment row requires forking the entire catalog, and the
      fork silently masks every subsequent upstream update. Resolution order
@@ -51,7 +56,7 @@ ownership. Two defects compounded:
      leaked upstream (`provider_name = "runpod_rtxa6000"`) — the boundary
      violated in the opposite direction.
    - masc's own `[models.X.capabilities]` blocks are parsed and used by
-     masc-side validators, but never reach the OAS capability lookup: the
+     masc-side validators, but never reach the agent_core capability lookup: the
      carrier was deleted during the 0.212 diet ("v1 drops
      runtime_capabilities_override … never consumed",
      `runtime_adapter.ml`). Only `supports_tool_choice` survives. The
@@ -63,18 +68,18 @@ ownership. Two defects compounded:
      radius is not.
 
 Interim state after the incident: masc#24528 restores boot, with a
-deployment-local full fork (`<base-path>/.masc/config/oas-models.toml` = upstream copy +
+deployment-local full fork (`<base-path>/.masc/config/agent_core-models.toml` = upstream copy +
 five alias rows, labeled `WORKAROUND … removal target: overlay RFC merge`).
 That fork is the debt this RFC removes.
 
 ## 2. Design
 
-### D1. Overlay merge in `Model_catalog` (oas)
+### D1. Overlay merge in `Model_catalog` (agent_core)
 
 `Model_catalog.global ()` becomes `embedded ⊕ overlay`:
 
-- Overlay source: `oas-models-overlay.toml` in the deployment config root
-  (same resolution chain as today, minus the full-file `oas-models.toml`
+- Overlay source: `agent_core-models-overlay.toml` in the deployment config root
+  (same resolution chain as today, minus the full-file `agent_core-models.toml`
   step). It contains only delta rows and, when needed, delta provider
   entries.
 - Merge key: `(provider_name option, id_prefix)` per model row; provider `id`
@@ -89,7 +94,7 @@ That fork is the debt this RFC removes.
 Consequence: upstream updates ride along with the pin bump; deployment files
 shrink from a 173-row fork to a handful of rows; staleness class disappears.
 
-### D2. Wire `[models.X.capabilities]` into the OAS override (masc)
+### D2. Wire `[models.X.capabilities]` into the agent_core override (masc)
 
 `Provider_config.model_capabilities_override` exists and is consulted before
 any catalog lookup. Restore the carrier: materialization converts a declared
@@ -134,11 +139,11 @@ capabilities) is unchanged; only the blast radius shrinks.
 
 1. masc#24528 (landed first) — gate resolves provider-scoped rows.
 2. D3 alias mapping + D2 wiring (masc, independent PRs).
-3. D1 overlay (oas PR + release + masc pin bump).
+3. D1 overlay (agent_core PR + release + masc pin bump).
 4. Convert the deployment fork: five alias rows → either D3 mappings
    (`runpod_mtp`, `kimi_code`) or overlay delta rows (`glm-coding`
    coding-plan row, local ollama hf.co builds); delete
-   `oas-models.toml` fork and the masc repo-root copy; rewrite the eight
+   `agent_core-models.toml` fork and the masc repo-root copy; rewrite the eight
    env-coupled `test_runtime_config_validity` cases that still assert
    pre-0.212 prefix-encoded rows (red on main today).
 5. D4 boot posture last — it changes operator-visible failure semantics and
@@ -150,7 +155,7 @@ capabilities) is unchanged; only the blast radius shrinks.
   upstream change re-rots the fork; three row-encoding generations in the
   previous fork show how this ends.
 - **Add alias rows upstream**: violates RFC-OAS-034 §2 rule 1 and reverts
-  oas#2432; pollutes a shared catalog with per-deployment hosting names
+  agent_core#2432; pollutes a shared catalog with per-deployment hosting names
   (`runpod_rtxa6000` is already there and should migrate out via D1/D3).
 - **Re-enable bare-row fallback for declared providers**: reintroduces the
   exact corruption the gate exists to prevent (native Kimi vs Ollama-Cloud
@@ -163,7 +168,7 @@ capabilities) is unchanged; only the blast radius shrinks.
 - Overlay: unit tests for merge precedence (embedded row vs overlay row,
   provider-scoped vs bare), empty overlay, provider-entry overlay.
 - D2: total-conversion property — every declarable masc capability field maps
-  to the OAS field; a schema field with no OAS counterpart fails load.
+  to the agent_core field; a schema field with no agent_core counterpart fails load.
 - D3: binding with `capability-namespace` resolves upstream serving-contract
   rows; without it, table-name behavior is unchanged (masc#24528 tests).
 - D4: boot with a catalog-missing routed binding → control plane healthy,

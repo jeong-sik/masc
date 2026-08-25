@@ -5,19 +5,22 @@
     {!Server_routes_http_routes_workspace.classify_workspace_query}. *)
 
 open Server_auth
-open Server_utils
 open Masc_domain
 module Http = Http_server_eio
 
 let base_path_of_state state = (Mcp_server.workspace_config state).base_path
 let extract_path_param = Server_utils.extract_path_param
 
-type ide_error =
+(* The scope vocabulary is shared with the LSP proxy; both surfaces resolve
+   through [Server_ide_scope] so a reader cannot address one store here
+   and a different one there. Equality re-declaration keeps this module's
+   existing field access on [ide_error] unchanged. *)
+type ide_error = Server_ide_scope.ide_error =
   { code : string
   ; message : string
   }
 
-let ide_error code message = { code; message }
+let ide_error = Server_ide_scope.ide_error
 
 let json_error ?code message =
   let fields = [ "ok", `Bool false; "error", `String message ] in
@@ -37,223 +40,31 @@ let respond_ide_error ~status ~request err reqd =
     reqd
 ;;
 
-let resolve_workspace_base ~state ~uri =
-  let project_base = base_path_of_state state in
-  let config = (Mcp_server.workspace_config state) in
-  let lookup_repository repo_id =
-    match Repo_store.find ~base_path:project_base repo_id with
-    | Ok repo -> Some (Repo_store.local_path ~base_path:project_base repo)
-    | Error _ -> None
-  in
-  let lookup_playground name =
-    match Keeper_meta_store.read_meta config name with
-    | Ok (Some m) -> Some (Keeper_sandbox.host_root_abs_of_meta ~config m)
-    | _ -> None
-  in
-  let exists_dir p = Sys.file_exists p && Sys.is_directory p in
-  Server_routes_http_routes_workspace.classify_workspace_query
-    ~project_base
-    ~lookup_repository
-    ~lookup_playground
-    ~exists_dir
-    ~repo_param:(Uri.get_query_param uri "repo_id")
-    ~keeper_param:(Uri.get_query_param uri "keeper")
-;;
 
-let nonempty_query_param uri key =
-  match Uri.get_query_param uri key with
-  | Some raw ->
-    let value = String.trim raw in
-    if String.equal value "" then None else Some value
-  | None -> None
-;;
+type ide_scope = Server_ide_scope.ide_scope = Scope_codebase of { slug : string }
 
-type ide_scope =
-  | Scope_canonical_url of
-      { raw : string
-      ; slug : string
-      }
-  | Scope_repo_id of
-      { repo_id : string
-      ; slug : string
-      }
-  | Scope_keeper_lane of { keeper_id : string }
+let codebase_of_ide_scope = Server_ide_scope.codebase_of_ide_scope
+let resolve_ide_scope_for_query = Server_ide_scope.resolve_ide_scope_for_query
 
-(* Keeper-lane reads address the repo-unattributed observation bucket
-   ([_orphan/] on disk). A keeper turn is a keeper-timeline fact, not a
-   repo fact: turn events and coordination tool events carry no file, so
-   they are written without a [By_url] partition. Before this scope
-   existed, read routes could only address [By_url] partitions, which made
-   that data unreachable from any API while it kept accumulating — the
-   read/write split-brain from the 2026-07-07 IDE observation audit. *)
-let partition_of_ide_scope = function
-  | Scope_canonical_url { slug; _ } | Scope_repo_id { slug; _ } ->
-    Ide_paths.By_url slug
-  | Scope_keeper_lane _ -> Ide_paths.Legacy_default
-;;
-
-let resolve_ide_scope_for_query ~state ~uri =
-  let project_base = base_path_of_state state in
-  match
-    ( nonempty_query_param uri "canonical_url"
-    , nonempty_query_param uri "repo_id"
-    , nonempty_query_param uri "keeper_lane" )
-  with
-  | None, None, None ->
-    Error
-      (ide_error
-         "missing_ide_scope"
-         "IDE scope is required; pass repo_id, canonical_url, or keeper_lane")
-  | Some _, Some _, _ | Some _, _, Some _ | _, Some _, Some _ ->
-    Error
-      (ide_error
-         "conflicting_ide_scope"
-         "IDE scope must specify exactly one of repo_id, canonical_url, or keeper_lane")
-  | Some raw, None, None ->
-    (match Ide_paths.canonical_url_of_remote raw with
-     | Some slug -> Ok (Scope_canonical_url { raw; slug })
-     | None -> Error (ide_error "invalid_canonical_url" "canonical_url is invalid"))
-  | None, Some repo_id, None ->
-    (match Repo_store.find_url_by_id ~base_path:project_base repo_id with
-     | Error message ->
-       Error (ide_error "repository_catalog_unavailable" message)
-     | Ok None -> Error (ide_error "unmatched_repo_id" "repo_id does not match a configured repository")
-     | Ok (Some url) ->
-       (match Ide_paths.canonical_url_of_remote url with
-        | Some slug -> Ok (Scope_repo_id { repo_id; slug })
-        | None ->
-          Error
-            (ide_error
-               "no_canonical_url"
-               "repo_id has no valid canonical URL")))
-  | None, None, Some keeper_id ->
-    (* [keeper_id] is a filter value compared against stored event fields,
-       never a filesystem path, so no registry lookup gates it: validating
-       against currently-active keepers would hide the history of any
-       keeper that is offline or renamed. An unknown id returns an
-       explicitly keeper_lane-scoped empty result. *)
-    Ok (Scope_keeper_lane { keeper_id })
-;;
-
-(* Mutations stay repo-scoped: an observation write without repo identity
-   is exactly the orphan-bucket growth the keeper-lane read scope exists
-   to expose, so the API refuses to mint more of it. *)
-let resolve_partition_for_mutation ~state ~uri =
+(* RFC-0378 §5.3 — the human half of the anchor contract goes through
+   the same mint as the keeper half: the mutation scope names the
+   codebase, [file_path] is repo-root-relative, and the pair is minted
+   directly. The catalog re-derivation from the raw path string — the
+   third attribution vocabulary — is gone with its error taxonomy. *)
+let resolve_annotation_post_address ~state ~uri ~file_path =
   match resolve_ide_scope_for_query ~state ~uri with
-  | Ok (Scope_keeper_lane _) ->
-    Error
-      (ide_error
-         "keeper_lane_read_only"
-         "keeper_lane is a read-only scope; mutations require repo_id or canonical_url")
-  | Ok scope -> Ok (partition_of_ide_scope scope)
   | Error _ as err -> err
-;;
-
-(* The lane keeper is the mandatory filter for keeper-lane reads; a
-   contradictory explicit [keeper_id] param is a caller bug surfaced as a
-   typed error instead of silently returning another keeper's data. *)
-let keeper_filter_for_scope ~scope ~requested_keeper_id =
-  match scope with
-  | Scope_keeper_lane { keeper_id = lane } ->
-    (match requested_keeper_id with
-     | Some k when not (String.equal k lane) ->
+  | Ok scope ->
+    let slug = codebase_of_ide_scope scope in
+    (match Agent_observation.Code_address.v ~codebase:slug ~path:file_path with
+     | Ok address -> Ok address
+     | Error invalid ->
        Error
          (ide_error
-            "keeper_lane_filter_conflict"
-            "keeper_id filter must match the keeper_lane scope")
-     | Some _ | None -> Ok (Some lane))
-  | Scope_canonical_url _ | Scope_repo_id _ -> Ok requested_keeper_id
-;;
-
-let with_keeper_lane_read_auth ~state ~request ~reqd ~scope continue =
-  match scope with
-  | Scope_canonical_url _ | Scope_repo_id _ -> continue ()
-  | Scope_keeper_lane { keeper_id = lane } ->
-    let base_path = base_path_of_state state in
-    (match
-       authorize_token_bound_permission_request
-         ~base_path
-         ~permission:Masc_domain.CanReadState
-         request
-     with
-     | Error err -> respond_auth_error request reqd err
-     | Ok agent_name when String.equal agent_name lane -> continue ()
-     | Ok _ ->
-       respond_ide_error
-         ~status:`Forbidden
-         ~request
-         (ide_error
-            "keeper_lane_forbidden"
-            "keeper_lane reads require a bearer token for the requested keeper")
-         reqd)
-;;
-
-type annotation_scope_error =
-  | File_path_repo_id_mismatch
-  | File_path_canonical_url_mismatch
-  | Repository_catalog_unavailable of string
-
-let annotation_scope_error_message = function
-  | File_path_repo_id_mismatch -> "file_path does not belong to requested repo_id"
-  | File_path_canonical_url_mismatch ->
-    "file_path does not belong to requested canonical_url"
-  | Repository_catalog_unavailable message -> message
-;;
-
-let annotation_scope_error_code = function
-  | File_path_repo_id_mismatch -> "repo_mismatch"
-  | File_path_canonical_url_mismatch -> "canonical_url_mismatch"
-  | Repository_catalog_unavailable _ -> "repository_catalog_unavailable"
-;;
-
-let validate_annotation_post_scope ~state ~uri ~file_path =
-  if Filename.is_relative file_path then Ok ()
-  else (
-    let project_base = base_path_of_state state in
-    match nonempty_query_param uri "canonical_url" with
-    | Some canonical_url ->
-      (match Ide_paths.canonical_url_of_remote canonical_url with
-       | None -> Ok ()
-       | Some requested_slug ->
-         (match Repo_store.find_repo_by_path_prefix ~base_path:project_base file_path with
-          | Error message -> Error (Repository_catalog_unavailable message)
-          | Ok (Some (repo, _)) ->
-            (match Ide_paths.canonical_url_of_remote repo.url with
-             | Some actual_slug when String.equal actual_slug requested_slug -> Ok ()
-             | Some _ | None -> Error File_path_canonical_url_mismatch)
-          | Ok None -> Error File_path_canonical_url_mismatch))
-    | None ->
-      (match nonempty_query_param uri "repo_id" with
-       | None -> Ok ()
-       | Some requested_repo_id ->
-         (match Repo_store.load_all ~base_path:project_base with
-          | Error message -> Error (Repository_catalog_unavailable message)
-          | Ok repositories ->
-            if
-              not
-                (List.exists
-                   (fun (repository : Repo_manager_types.repository) ->
-                     String.equal repository.id requested_repo_id)
-                   repositories)
-            then Ok ()
-            else
-            (match Repo_store.find_repo_by_path_prefix ~base_path:project_base file_path with
-             | Error message -> Error (Repository_catalog_unavailable message)
-             | Ok (Some (repo, _)) when String.equal repo.id requested_repo_id -> Ok ()
-             | Ok (Some _) | Ok None -> Error File_path_repo_id_mismatch))))
-;;
-
-let resolve_partition_for_annotation_post ~state ~uri ~file_path =
-  match resolve_partition_for_mutation ~state ~uri with
-  | Error _ as err -> err
-  | Ok partition ->
-    (match validate_annotation_post_scope ~state ~uri ~file_path with
-     | Ok () -> Ok partition
-     | Error err ->
-       Error
-         (ide_error
-            (annotation_scope_error_code err)
-            (annotation_scope_error_message err)))
+            "invalid_file_path"
+            (Printf.sprintf
+               "file_path must be repo-root-relative (%s)"
+               (Agent_observation.Code_address.invalid_to_string invalid))))
 ;;
 
 let ide_memory_source_kind = "ide_annotation"
@@ -272,7 +83,7 @@ let json_ok data = `Assoc [ "ok", `Bool true; "data", data ]
     Usage: ?take=true resets accumulators after read (destructive),
            default is non-destructive peek.
 
-    Callers: IDE Observation Plane frontend for real-time dashboard. *)
+    Callers: the dashboard's IDE panels, for real-time updates. *)
 let observation_snapshot_handler request reqd =
   let uri = Uri.of_string request.Httpun.Request.target in
   let take =
@@ -386,7 +197,7 @@ let log_annotation_delete_rejected ~auth_identity ~id ~reason =
     reason
 ;;
 
-(* task-1736 (IDE Observation Plane v2, axis B3) — bind an annotation
+(* task-1736 — bind an annotation
    mutation's keeper_id to the authenticated identity.
 
    Before B3 the POST/DELETE handlers read keeper_id from a
@@ -568,17 +379,14 @@ let build_presence_snapshot state =
     ]
 ;;
 
-(* [keeper_id] is scope-resolved by the caller ([keeper_filter_for_scope]):
-   a keeper-lane scope forces its lane keeper, repo scopes pass the optional
-   [?keeper_id] query filter through unchanged. *)
-let build_cursor_snapshot state uri ~partition ~keeper_id ~limit ~offset =
+let build_cursor_snapshot state uri ~codebase ~keeper_id ~limit ~offset =
   let base = base_path_of_state state in
   let runtime_id, branch = runtime_id_and_branch state in
   let file_path = file_path_param uri in
   let cursors =
     Ide_bridge.list_cursors
       ~base_path:base
-      ~partition
+      ~codebase
       ?keeper_id
       ?file_path
       ~limit
@@ -652,7 +460,7 @@ let add_routes router =
     with_public_read
       (fun state _req reqd ->
          let uri = Uri.of_string request.target in
-         (* RFC-0128 §4.2 PR-8: partition storage lives under the
+         (* RFC-0378 §5.2: the IDE store lives under the
             *server* base_path (single .masc-ide/ tree), not the
             workspace tree returned by [resolve_workspace_base]. The
             latter exists for /api/v1/workspace/{tree,file} routes
@@ -683,29 +491,15 @@ let add_routes router =
          match resolve_ide_scope_for_query ~state ~uri with
          | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
          | Ok scope ->
-           (match keeper_filter_for_scope ~scope ~requested_keeper_id:keeper_id with
-            | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
-            | Ok keeper_id ->
-              with_keeper_lane_read_auth ~state ~request ~reqd ~scope (fun () ->
-              let partition = partition_of_ide_scope scope in
+           (let codebase = codebase_of_ide_scope scope in
               let filter =
                 { Ide_annotation_types.file_path; keeper_id; goal_id; task_id }
               in
-              let annotations =
-                Ide_annotations.list
-                  ~base_dir:base
-                  ~partition
-                  ~filter
-                  ()
-              in
+              let annotations = Ide_annotations.list ~base_dir:base ~codebase ~filter () in
               let json =
                 `List (List.map Ide_annotation_types.annotation_to_json annotations)
               in
-              Http.Response.json_value
-                ~compress:true
-                ~request
-                (json_ok json)
-                reqd)))
+              Http.Response.json_value ~compress:true ~request (json_ok json) reqd))
       request
       reqd)
   |> Http.Router.post "/api/v1/ide/annotations" (fun request reqd ->
@@ -728,7 +522,7 @@ let add_routes router =
       ~permission:Masc_domain.CanBroadcast
       (fun state auth_identity _req reqd ->
          let uri = Uri.of_string request.target in
-         (* RFC-0128 §4.2 PR-8: partition storage lives under the
+         (* RFC-0378 §5.2: the IDE store lives under the
             *server* base_path (single .masc-ide/ tree), not the
             workspace tree returned by [resolve_workspace_base]. The
             latter exists for /api/v1/workspace/{tree,file} routes
@@ -807,17 +601,17 @@ let add_routes router =
                           reqd
                       | Ok references ->
                         (match
-                           resolve_partition_for_annotation_post ~state ~uri ~file_path
+                           resolve_annotation_post_address ~state ~uri ~file_path
                          with
                          | Error err ->
                            respond_ide_error ~status:`Bad_request ~request err reqd
-                         | Ok partition ->
+                         | Ok address ->
                            (match
                               Ide_annotations.create
                                 ~base_dir:base
-                                ~partition
+                                ~codebase:(Agent_observation.Code_address.codebase address)
                                 ~keeper_id
-                                ~file_path
+                                ~file_path:(Agent_observation.Code_address.path address)
                                 ~line_start
                                 ~line_end
                                 ~kind
@@ -865,7 +659,7 @@ let add_routes router =
       ~permission:Masc_domain.CanBroadcast
       (fun state auth_identity _req reqd ->
          let uri = Uri.of_string request.target in
-         (* RFC-0128 §4.2 PR-8: partition storage lives under the
+         (* RFC-0378 §5.2: the IDE store lives under the
             *server* base_path (single .masc-ide/ tree), not the
             workspace tree returned by [resolve_workspace_base]. The
             latter exists for /api/v1/workspace/{tree,file} routes
@@ -912,11 +706,16 @@ let add_routes router =
                (json_error msg)
                reqd
            | Ok keeper_id ->
-             (match resolve_partition_for_mutation ~state ~uri with
+             (match resolve_ide_scope_for_query ~state ~uri with
               | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
-              | Ok partition ->
+              | Ok scope ->
                 (match
-                   Ide_annotations.delete ~base_dir:base ~partition ~id ~keeper_id ()
+                   Ide_annotations.delete
+                     ~base_dir:base
+                     ~codebase:(codebase_of_ide_scope scope)
+                     ~id
+                     ~keeper_id
+                     ()
                  with
                  | Ok () -> Http.Response.empty ~status:`No_content reqd
                  | Error msg ->
@@ -934,7 +733,7 @@ let add_routes router =
     with_public_read
       (fun state _req reqd ->
          let uri = Uri.of_string request.target in
-         (* RFC-0128 §4.2 PR-8: partition storage lives under the
+         (* RFC-0378 §5.2: the IDE store lives under the
             *server* base_path (single .masc-ide/ tree), not the
             workspace tree returned by [resolve_workspace_base]. The
             latter exists for /api/v1/workspace/{tree,file} routes
@@ -950,34 +749,12 @@ let add_routes router =
          match resolve_ide_scope_for_query ~state ~uri with
          | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
          | Ok scope ->
-           with_keeper_lane_read_auth ~state ~request ~reqd ~scope (fun () ->
-           let partition = partition_of_ide_scope scope in
+           let codebase = codebase_of_ide_scope scope in
            let regions =
-             Ide_region_tracker.read_regions
-               ~base_dir:base
-               ~partition
-               ?file_path
-               ()
-           in
-           (* [read_regions] has no keeper filter; a keeper-lane read
-              narrows to the lane keeper here so it never exposes another
-              keeper's lane data under this scope. *)
-           let regions =
-             match scope with
-             | Scope_keeper_lane { keeper_id } ->
-               List.filter
-                 (fun (r : Ide_annotation_types.code_region) ->
-                   String.equal r.keeper_id keeper_id)
-                 regions
-             | Scope_canonical_url _ | Scope_repo_id _ -> regions
+             Ide_region_tracker.read_regions ~base_dir:base ~codebase ?file_path ()
            in
            let json = `List (List.map Ide_annotation_types.region_to_json regions) in
-           Http.Response.json_value
-             ~compress:true
-             ~request
-             (json_ok json)
-             reqd)
-      )
+           Http.Response.json_value ~compress:true ~request (json_ok json) reqd)
       request
       reqd)
   |> Http.Router.get "/api/v1/ide/events" (fun request reqd ->
@@ -1004,20 +781,12 @@ let add_routes router =
               (match resolve_ide_scope_for_query ~state ~uri with
                | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
                | Ok scope ->
-                 (match
-                    keeper_filter_for_scope
-                      ~scope
-                      ~requested_keeper_id:(keeper_id_param uri)
-                  with
-                  | Error err ->
-                    respond_ide_error ~status:`Bad_request ~request err reqd
-                  | Ok keeper_id ->
-                    with_keeper_lane_read_auth ~state ~request ~reqd ~scope (fun () ->
-                    let partition = partition_of_ide_scope scope in
+                 (let keeper_id = keeper_id_param uri in
+                    let codebase = codebase_of_ide_scope scope in
                     let events =
                       Ide_bridge.list_events
                         ~base_path:base
-                        ~partition
+                        ~codebase
                         ?kind
                         ?keeper_id
                         ~limit
@@ -1042,7 +811,7 @@ let add_routes router =
                       ~compress:true
                       ~request
                       (json_ok result)
-                      reqd)))))
+                      reqd))))
       request
       reqd)
   (* [build_presence_snapshot] extracted in main — conflict resolved by taking
@@ -1073,23 +842,16 @@ let add_routes router =
            (match resolve_ide_scope_for_query ~state ~uri with
             | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
             | Ok scope ->
-              (match
-                 keeper_filter_for_scope
-                   ~scope
-                   ~requested_keeper_id:(keeper_id_param uri)
-               with
-               | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
-               | Ok keeper_id ->
-                 with_keeper_lane_read_auth ~state ~request ~reqd ~scope (fun () ->
-                 let partition = partition_of_ide_scope scope in
+              (let keeper_id = keeper_id_param uri in
+                 let codebase = codebase_of_ide_scope scope in
                  let snapshot =
-                   build_cursor_snapshot state uri ~partition ~keeper_id ~limit ~offset
+                   build_cursor_snapshot state uri ~codebase ~keeper_id ~limit ~offset
                  in
                  Http.Response.json_value
                    ~compress:true
                    ~request
                    (json_ok snapshot)
-                   reqd))))
+                   reqd)))
       request
       reqd)
   |> Http.Router.post "/api/v1/ide/cursors" (fun request reqd ->
@@ -1128,7 +890,7 @@ let add_routes router =
                      match find_string "source" with
                      | Some source -> source
                      | None ->
-                       (* DET-OK: absent source preserves legacy cursor telemetry. *)
+                       (* DET-OK: an absent source names the editor surface. *)
                        "editor"
                    in
                    (match cursor_focus_mode_field json with
@@ -1157,17 +919,20 @@ let add_routes router =
                         (json_error msg)
                         reqd
                     | Ok keeper_id ->
-                      (match resolve_partition_for_mutation ~state ~uri with
+                      (* RFC-0378 §5.3: the cursor write goes through the same
+                         mint as annotations — the scope names the codebase and
+                         the posted path is repo-root-relative. *)
+                      (match resolve_annotation_post_address ~state ~uri ~file_path with
                        | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
-                       | Ok partition ->
+                       | Ok address ->
                          (match
                             Ide_bridge.ingest_cursor_event
                               ~base_path:base
                               ~keeper_id
-                              ~file_path
+                              ~file_path:(Agent_observation.Code_address.path address)
                               ~line
                               ?column
-                              ~partition
+                              ~codebase:(Agent_observation.Code_address.codebase address)
                               ?focus_mode
                               ~source
                               ()
@@ -1216,16 +981,11 @@ let add_routes router =
            (match resolve_ide_scope_for_query ~state ~uri with
             | Error err -> respond_ide_error ~status:`Bad_request ~request err inner_reqd
             | Ok scope ->
-              (match keeper_filter_for_scope ~scope ~requested_keeper_id:keeper_id with
-               | Error err ->
-                 respond_ide_error ~status:`Bad_request ~request err inner_reqd
-               | Ok keeper_id ->
-              with_keeper_lane_read_auth ~state ~request ~reqd:inner_reqd ~scope (fun () ->
-              let partition = partition_of_ide_scope scope in
+              (let codebase = codebase_of_ide_scope scope in
               let filter : Ide_annotation_types.annotation_filter =
                 { file_path = None; keeper_id; goal_id = None; task_id = None }
               in
-              let annotations = Ide_annotations.list ~base_dir:base ~partition ~filter () in
+              let annotations = Ide_annotations.list ~base_dir:base ~codebase ~filter () in
               let entries =
                 List.map (fun (a : Ide_annotation_types.annotation) ->
                   `Assoc [
@@ -1263,7 +1023,7 @@ let add_routes router =
               in
               let body = Yojson.Safe.to_string result in
               let response = Httpun.Response.create ~headers `OK in
-              Httpun.Reqd.respond_with_string inner_reqd response body))))
+              Httpun.Reqd.respond_with_string inner_reqd response body)))
       request
       reqd)
 ;;

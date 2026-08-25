@@ -20,10 +20,7 @@
     - {b Vote-direction normaliser}: [all_vote_directions],
       [vote_direction_of_string_opt].
     - {b Vote log persistence}: [append_vote_log],
-      [rewrite_vote_log].
-    - {b Internal vote outcome}: the [vote_outcome] record
-      carries the score delta and post-lock vote log / feedback
-      side effects.
+      [save_vote_log_jsonl], [record_vote_side_effect].
     - {b Persistence loaders}: [load_persisted_posts],
       [load_persisted_comments], [load_persisted_votes],
       [recalculate_reply_counts].
@@ -54,17 +51,21 @@ val all_vote_directions : vote_direction list
 val vote_direction_of_string_opt : string -> vote_direction option
 (** Sound partial parser: case-insensitive, trims whitespace, and
     accepts only ["up"] / ["down"].  Empty or unknown input returns
-    [None] (no silent permissive fallback).  Pinned for
-    behaviour-tests under {!test/test_types}. *)
+    [None] (no silent permissive fallback).  No suite pins this
+    parser today. *)
 
 (** {1 Vote log path} *)
 
 val vote_log_path : unit -> string
-(** Path to the append-only vote log JSONL under
-    [<base>/.masc/board_votes.jsonl].  Each accepted row has exactly
-    [target], [voter], [direction], and positive finite [ts] fields; [target]
-    carries canonical typed target/voter identities and the derived [voter]
-    field must match it. *)
+(** Path to the append-only vote log JSONL under the cluster-aware board
+    directory resolved by {!Board_paths.board_masc_dir} — the same
+    resolver used by [persist_path] / [comments_path] / [reactions_path] /
+    [sub_boards_path], so on the default cluster this is
+    [<base>/.masc/board_votes.jsonl] and on a named cluster it is
+    [<base>/.masc/clusters/<cluster>/board_votes.jsonl].  Each accepted row
+    has exactly [target], [voter], [direction], and positive finite [ts]
+    fields; [target] carries canonical typed target/voter identities and the
+    derived [voter] field must match it. *)
 
 (** {1 Voting} *)
 
@@ -83,15 +84,26 @@ val vote :
   direction:vote_direction ->
   (int, board_error) Result.t
 (** Casts a vote on the post identified by [post_id].
-    Returns [Ok delta] where [delta] is the new
-    [(votes_up - votes_down)] score.  Validates [voter] +
-    [post_id] before taking the lock; rejects duplicate
-    votes in the same direction with [Already_voted].
+    Returns [Ok total_score] — the post's [(votes_up - votes_down)]
+    score {b after} this vote, not the amount this vote changed it.
+    Validates [voter] + [post_id] before taking the lock; rejects
+    duplicate votes in the same direction with [Already_voted].
 
     Vote flips swap up↔down without re-counting (and
     {b without} earning credits, to prevent down/up
-    alternation abuse).  The vote log is appended outside the
-    state lock. *)
+    alternation abuse).
+
+    Write-ahead: the vote is durably appended to the vote log {b before}
+    [store.posts] / [store.vote_log] are mutated, not after. Mutating first
+    and rolling back a failed append second would leave a window where a
+    racing [flush_dirty] snapshot-writes the not-yet-durable mutation before
+    the append either confirms or fails it, durably resurrecting a vote that
+    should not exist. If the append fails, [Error (Io_error _)] is returned
+    and nothing was ever mutated, so there is nothing to undo. If a second
+    call for the same [(voter, post_id)] commits first while this one's
+    append is in flight, this call's commit re-checks the vote log
+    immediately before mutating and returns [Error (Already_voted _)]
+    instead of clobbering the winner. *)
 
 val current_vote_for_comment :
   store ->
@@ -107,7 +119,7 @@ val vote_comment :
   comment_id:string ->
   direction:vote_direction ->
   (int, board_error) Result.t
-(** Same shape as {!vote} but targets a comment via its
+(** Same write-ahead shape as {!vote} but targets a comment via its
     [comment_id]. *)
 
 (** {1 Stats} *)
@@ -136,9 +148,15 @@ val comment_of_yojson : Yojson.Safe.t -> comment option
 
 (** {1 Hearth aggregation} *)
 
-val list_hearths : store -> (string * int) list
+val list_hearths
+  :  store
+  -> ?exclude_system:bool
+  -> ?exclude_automation:bool
+  -> unit
+  -> (string * int) list
 (** Returns [(hearth, post_count)] pairs sorted by count
-    descending.  Posts with no [hearth] are skipped. *)
+    descending. Posts with no [hearth] are skipped. Optional post-kind filters
+    use the same classification contract as Board post listing. *)
 
 (** {1 Mutation helpers} *)
 

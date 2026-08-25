@@ -5,7 +5,6 @@ type projection_error =
   | Non_durable_settlement
   | Ambiguous_settlement
   | Nonterminal_status of Keeper_msg_async.request_status
-  | Evidence_unavailable
   | Evidence_invalid of string
   | Projection_failed of string
   | Obligation_removal_failed of Fusion_delivery_obligation.error
@@ -22,31 +21,10 @@ let projection_error_to_string = function
     "Fusion settlement disagrees with canonical request truth"
   | Nonterminal_status status ->
     "Fusion request is not terminal: " ^ Keeper_msg_async.status_to_string status
-  | Evidence_unavailable ->
-    "Fusion computation completed successfully without deliberation evidence"
   | Evidence_invalid detail -> "invalid Fusion deliberation evidence: " ^ detail
   | Projection_failed detail -> "Fusion terminal projection failed: " ^ detail
 ;;
 
-(** Sink failure codes are derived from the typed error — never the other way
-    around. Only errors that are actually delivered through
-    [Fusion_sink.emit_failure] have a code; anything else is a programmer
-    error, so it fails fast instead of silently inventing a string. *)
-let projection_error_failure_code = function
-  | Evidence_unavailable -> "evidence_unavailable"
-  | ( Invalid_request_id _
-    | Obligation_unavailable _
-    | Identity_mismatch _
-    | Non_durable_settlement
-    | Ambiguous_settlement
-    | Nonterminal_status _
-    | Evidence_invalid _
-    | Projection_failed _
-    | Obligation_removal_failed _ ) as error ->
-    invalid_arg
-      ("projection error is not delivered as a sink failure: "
-       ^ projection_error_to_string error)
-;;
 
 let ( let* ) = Result.bind
 
@@ -70,43 +48,45 @@ let validate_identity
   else Ok ()
 ;;
 
-let ensure_registry_entry obligation =
+let ensure_registry_entry ~registry obligation =
   let run_id =
     Keeper_chat_delivery_identity.Request_id.to_string obligation.Fusion_delivery_obligation.request_id
   in
-  match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
+  match Fusion_run_registry.get registry ~run_id with
   | Some _ -> ()
   | None ->
-    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id
+    Fusion_run_registry.register_running registry ~run_id
       ~keeper:obligation.payload.keeper_name ~preset:obligation.payload.preset
-      ~started_at:obligation.accepted_at;
-    Fusion_sink.broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id
+      ~topology:obligation.payload.topology ~started_at:obligation.accepted_at;
+    Fusion_sink.broadcast_run_status ~registry ~run_id
 ;;
 
-let failure_of_status = function
+(* lifecycle 상태를 typed 실패로 옮긴다. 문자열 code 로 접지 않는 이유는 wake 가
+   보낼 terminal 이 사유에 달려 있기 때문이다 — 취소는 [Fusion_cancelled] 로 가야
+   키퍼가 "심의가 실패했다" 와 "심의가 중단됐다" 를 구분한다. *)
+let failure_of_status : Keeper_msg_async.request_status -> Fusion_sink.delivery_failure option
+  = function
   | Keeper_msg_async.Done { ok = false; body; _ } ->
-    Some ("computation_failed", body)
-  | Keeper_msg_async.Lost { reason } -> Some ("lost", reason)
+    Some (Fusion_sink.Computation_failed body)
+  | Keeper_msg_async.Lost { reason } -> Some (Fusion_sink.Lost reason)
   | Keeper_msg_async.Cancelled { reason; cancelled_by } ->
-    Some ("cancelled", Printf.sprintf "%s (cancelled_by=%s)" reason cancelled_by)
+    Some (Fusion_sink.Cancelled { reason; cancelled_by })
   | Keeper_msg_async.Persistence_failed { attempted_status; reason } ->
-    Some
-      ( "persistence_failed"
-      , Printf.sprintf "%s (attempted_status=%s)" reason attempted_status )
+    Some (Fusion_sink.Persistence_failed { attempted_status; reason })
   | Keeper_msg_async.Done { ok = true; _ }
   | Keeper_msg_async.Queued
   | Keeper_msg_async.Running
   | Keeper_msg_async.Cancelling _ -> None
 ;;
 
-let project_entry ~base_path (entry : Keeper_msg_async.entry) =
+let project_entry ~registry ~base_path (entry : Keeper_msg_async.entry) =
   let* request_id = request_id_of_entry entry in
   let* obligation =
     Fusion_delivery_obligation.load ~base_path ~request_id
     |> Result.map_error (fun error -> Obligation_unavailable error)
   in
   let* () = validate_identity entry obligation in
-  ensure_registry_entry obligation;
+  ensure_registry_entry ~registry obligation;
   let payload = obligation.payload in
   let request : Fusion_types.fusion_request =
     { run_id = entry.request_id
@@ -128,8 +108,8 @@ let project_entry ~base_path (entry : Keeper_msg_async.entry) =
       if not (String.equal evidence.question payload.prompt)
       then Error (Identity_mismatch "evidence question differs from accepted prompt")
       else
-        Fusion_orchestrator.project ~base_dir:base_path ~topology:payload.topology
-          ~channel:payload.channel ~request evidence
+        Fusion_orchestrator.project ~registry ~base_dir:base_path
+          ~topology:payload.topology ~channel:payload.channel ~request evidence
         |> Result.map_error (fun detail -> Projection_failed detail)
     | Keeper_msg_async.Done { ok = true; data = None; _ } ->
       (* A durably canonical [Done] without deliberation evidence can never
@@ -138,17 +118,16 @@ let project_entry ~base_path (entry : Keeper_msg_async.entry) =
          Remediate by delivering a typed failure through the same fail-closed
          sink and then clearing the obligation (a failed failure-projection
          still retains it). *)
-      let error = Evidence_unavailable in
-      Fusion_sink.emit_failure ~base_dir:base_path ~keeper:payload.keeper_name
-        ~run_id:entry.request_id ~channel:payload.channel
-        ~failure_code:(projection_error_failure_code error)
-        ~detail:(projection_error_to_string error)
+      Fusion_sink.emit_failure ~registry ~base_dir:base_path
+        ~keeper:payload.keeper_name ~run_id:entry.request_id ~channel:payload.channel
+        ~failure:Fusion_sink.Evidence_unavailable
       |> Result.map_error (fun detail -> Projection_failed detail)
     | status ->
       (match failure_of_status status with
-       | Some (failure_code, detail) ->
-         Fusion_sink.emit_failure ~base_dir:base_path ~keeper:payload.keeper_name
-           ~run_id:entry.request_id ~channel:payload.channel ~failure_code ~detail
+       | Some failure ->
+         Fusion_sink.emit_failure ~registry ~base_dir:base_path
+           ~keeper:payload.keeper_name ~run_id:entry.request_id
+           ~channel:payload.channel ~failure
          |> Result.map_error (fun detail -> Projection_failed detail)
        | None -> Error (Nonterminal_status status))
   in
@@ -156,10 +135,10 @@ let project_entry ~base_path (entry : Keeper_msg_async.entry) =
   |> Result.map_error (fun error -> Obligation_removal_failed error)
 ;;
 
-let on_worker_settled ~base_path = function
+let on_worker_settled ?(registry = Fusion_run_registry.global ()) ~base_path = function
   | Keeper_msg_async.Status_settlement
       { entry; durability = Keeper_msg_async.Durable; _ } ->
-    (match project_entry ~base_path entry with
+    (match project_entry ~registry ~base_path entry with
      | Ok () -> ()
      | Error error ->
        Log.Keeper.error ~keeper_name:entry.keeper_name
@@ -189,7 +168,10 @@ type recovery_report =
   ; staging_cleanup : Fs_compat.atomic_orphan_cleanup_report
   }
 
-let recover_startup ~base_path =
+(* [()] closes the argument list so [?registry] can be erased: OCaml only
+   drops an optional when a positional argument follows it, and every other
+   parameter here is labelled. *)
+let recover_startup ?(registry = Fusion_run_registry.global ()) ~base_path () =
   let* staging_cleanup =
     Fusion_delivery_obligation.cleanup_staging_for_startup ~base_path
   in
@@ -218,7 +200,7 @@ let recover_startup ~base_path =
     with
     | Ok proof ->
       let entry = Keeper_msg_async.durable_terminal_entry proof in
-      (match project_entry ~base_path entry with
+      (match project_entry ~registry ~base_path entry with
        | Ok () -> projected + 1, pending, errors
        | Error error ->
          ( projected

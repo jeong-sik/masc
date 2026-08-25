@@ -11,4 +11,9 @@ val is_allowed : string -> bool
 val filter_environment : string array -> string array
 (** Return a copy of the given [Unix.environment]-shaped array with only
     allowed keys retained. Entries that do not contain ['='] are kept iff
-    their key is allowed. *)
+    their key is allowed.
+
+    Entries that stop a command from waiting for a person are appended after
+    them: nothing in a keeper subprocess can answer an editor or a credential
+    prompt, so a command that opens one waits for someone who is never
+    coming. *)

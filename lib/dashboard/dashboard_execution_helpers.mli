@@ -22,14 +22,13 @@
     [populate_neo4j_identity_cache_locked] internal
     cache state and loader, the every-other-let
     accumulator helpers consumed only inside
-    [load_persona_profile] / [extract_persona_name] /
-    [merge_profiles] / [lookup_neo4j_profile] /
-    [is_keeper_offline] / [is_health_at_risk] / [option_or_else] /
+    [extract_keeper_name] / [lookup_neo4j_profile] /
+    [is_health_at_risk] / [option_or_else] /
     [string_list_json] / [latest_iso_timestamp] /
     [cap_string_list] / [execution_tool_preview_limit] /
     [string_list_of_field]). *)
 
-val extract_persona_name : string -> string
+val extract_keeper_name : string -> string
 (** Strip a keeper-agent alias down to the keeper name, or return the input
     unchanged when it is not one. Delegates to
     [Keeper_identity.keeper_name_of_agent_alias], which owns the four accepted
@@ -75,16 +74,10 @@ type continuity_context = {
 type agent_profile = {
   emoji : string;
   korean_name : string;
-  model : string option;
-  traits : string list;
-  interests : string list;
-  activity_level : float option;
-  primary_value : string option;
 }
 
 val get_agent_profile : string -> agent_profile
-(** Resolves the agent's profile through the persona
-    file → Neo4j cache → fallback chain. *)
+(** Resolves the agent's profile through Neo4j and an identity fallback. *)
 
 (** {1 JSON envelope helpers} *)
 
@@ -100,9 +93,7 @@ val take : int -> 'a list -> 'a list
 val latest_iso_timestamp : string option list -> string option
 val compact_text : ?max_len:int -> string -> string
 val dedup_strings : string list -> string list
-val severity_rank : string -> int
 val dashboard_fixture_name : ?fixture:string -> unit -> string option
-val execution_tool_preview_limit : int
 val cap_string_list : ?limit:int -> string list -> string list
 
 (** {1 Health predicates} *)

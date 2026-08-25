@@ -20,7 +20,7 @@ import type {
   PreCompactEvent,
   HandoffEvent,
 } from './harness-health-state'
-import { verdictWithoutRejectPrefix, verdictToneClass, railStatusMessage } from '../lib/keeper-classifiers'
+import { verdictSummaryText, verdictToneClass, railStatusMessage } from '../lib/keeper-classifiers'
 
 function ItemTitle({ children, class: cx }: { children: unknown; class?: string }) {
   return html`<div class=${`text-sm font-medium text-[var(--color-fg-secondary)] ${cx ?? ''}`}>${children}</div>
@@ -162,12 +162,12 @@ export function freshnessLabel(ts: number | null | undefined, fallback = '기록
 export function emptyReasonText(reason?: string | null): string {
   switch (reason) {
     case 'window_empty':
-      return '선택된 범위에는 신호가 없습니다.'
+      return '선택된 범위에는 신호 없음'
     case 'no_recent_events':
-      return '기록은 있지만 최근 신호가 없습니다.'
+      return '기록은 있지만 최근 신호 없음'
     case 'no_runtime_activity':
     default:
-      return '아직 이 감시 채널을 통과한 실행이 없습니다.'
+      return '아직 이 감시 채널을 통과한 실행 없음'
   }
 }
 
@@ -176,7 +176,7 @@ export function verdictTone(verdict: string): string {
 }
 
 export function verdictSummary(verdict: string): string {
-  return verdictWithoutRejectPrefix(verdict)
+  return verdictSummaryText(verdict)
 }
 
 export function heroTitle(data: HarnessHealthData): string {
@@ -187,7 +187,7 @@ export function heroTitle(data: HarnessHealthData): string {
   ]
   const msg = railStatusMessage(statuses)
   if (msg) return msg
-  if (statuses.every(status => status === 'idle')) return '아직 감시 기록이 없습니다.'
+  if (statuses.every(status => status === 'idle')) return '아직 감시 기록 없음'
   return '감시 채널이 정상 작동 중입니다.'
 }
 

@@ -1,7 +1,7 @@
 (** Per-Keeper Board-attention judgment worker.
 
     MASC owns candidate membership, domain judgment state, and durable exact
-    callbacks. OAS owns opaque-runtime flow admission, dispatch, and
+    callbacks. AGENT_CORE owns opaque-runtime flow admission, dispatch, and
     advancement. Process-local wakes only request another durable inspection. *)
 
 type contention =
@@ -28,18 +28,30 @@ type retry_reason =
   | Exact_claim_contended
   | Selected_generation_changed
 
+type drain_progress =
+  { judgments : int
+  ; steps : int
+  }
+(** What one drain did before it stopped: [judgments] counts candidates that
+    produced a judgment, [steps] every loop iteration including visits that
+    found the candidate already consumed or its partition blocked. A wake that
+    finds an empty partition carries zeroes, which is what separates it from a
+    drain that did work — the verdict alone cannot. *)
+
 type drain_outcome =
-  | Drained
+  | Drained of drain_progress
   | Retry_later of
       { contention : contention
       ; reason : retry_reason
+      ; progress : drain_progress
       }
 (** [Drained] clears the contention re-arms; [Retry_later] keeps the durable
     partition undrained and re-arms the contention timer, so the same worker
     re-inspects it (see [apply_drain_rearm]). A generation that moved under the
     worker arrives here as [Retry_later { reason = Selected_generation_changed }]
     and is retried, not abandoned. The ledger stays the work authority in both
-    cases. *)
+    cases. Both carry the progress made before the verdict: contention after
+    ten judgments is not the same event as contention on the first visit. *)
 
 type rearm_schedule =
   | Rearm_scheduled of { delay_s : float }
@@ -65,6 +77,13 @@ type fatal_error =
 
 val fatal_error_to_string : fatal_error -> string
 
+val max_completed_settlements_per_owner_turn : unit -> int
+(** Hard ceiling for filesystem-backed completed partitions settled by one
+    owner turn. Remaining work is preserved behind a continuation wake.
+    Backed by the [keeper.board_attention.settlements_per_turn]
+    runtime_params tunable (see [Keeper_config]); read fresh on each call
+    since an operator override can change it between turns. *)
+
 val run :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
@@ -73,7 +92,7 @@ val run :
   keeper_name:string ->
   (unit, fatal_error) result
 (** Register and run the wake-driven worker until [sw] is cancelled. The clock
-    is forwarded to OAS execution. MASC owns no execution-target policy.
+    is forwarded to AGENT_CORE execution. MASC owns no execution-target policy.
     Setup or durability errors end this lifecycle instead of awaiting another
     wake. Exact claim contention schedules one generation-keyed delayed wake on
     the worker switch; it never recursively claims a sibling in the same turn.
@@ -85,19 +104,29 @@ val settle_one_completed :
   base_path:string ->
   keeper_name:string ->
   (settlement, string) result
-(** Owner-admission boundary. Apply and deliver at most one completed judgment,
-    settle its partition, and request one continuation wake when more completed
-    results remain. A completion that remains sync-unconfirmed after one explicit
-    confirmation returns an error without delivery or wake. This function never
-    invokes OAS. *)
+(** Owner-admission boundary. Settle preceding non-admitting judgments only up
+    to the fixed per-turn durability bound, cooperatively yielding between
+    them; stop after the first admitting judgment and request one continuation
+    wake when more completed results remain. A completion that remains
+    sync-unconfirmed after one explicit confirmation returns an error without
+    delivery or wake. This function never invokes AGENT_CORE. *)
 
 module For_testing : sig
   type rearm_scheduler
+
+  val reconcile_quarantines :
+    now:float -> base_path:string -> keeper_name:string -> (unit, string) result
+  (** The process-start quarantine reconciliation pass [run] performs.
+      Exposed so a test can drive the retired-candidate settlement without
+      standing up the full Eio worker lifecycle. *)
 
   val drain_outcome_label : drain_outcome -> string
   (** The drain verdict as one token, as logged. Retry_later keeps its reason
       so a worker stuck on a moved generation is distinguishable from one
       losing a claim race. *)
+
+  val drain_outcome_progress : drain_outcome -> drain_progress
+  (** The work counts the outcome carries, as logged. *)
 
   val drain_outcome_log_level : drain_outcome -> Log.level
   (** The level the drain line is emitted at, derived from the outcome.
@@ -174,7 +203,7 @@ module For_testing : sig
       next Pending candidate is prepared before it is claimed; setup failure
       returns an error with the candidate still Pending and its partition Ready.
       The execution seam must invoke the supplied callbacks at the same boundaries
-      as OAS. It exposes no target cause, receipt phase, or dispatch count. *)
+      as AGENT_CORE. It exposes no target cause, receipt phase, or dispatch count. *)
 
   val drain_available :
     yield:(unit -> unit) ->
@@ -201,7 +230,7 @@ module For_testing : sig
        result) ->
     (drain_outcome, string) result
   (** Drain every currently claimable root. Terminal failures remain Blocked and
-      completion durability failures return without re-entering OAS. Exact claim
+      completion durability failures return without re-entering AGENT_CORE. Exact claim
       contention returns [Retry_later] without recursive same-turn retry. *)
 
   val drain_available_with_process :

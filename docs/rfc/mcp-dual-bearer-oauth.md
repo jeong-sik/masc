@@ -8,7 +8,6 @@ author: codex
 supersedes: []
 superseded_by: null
 related: ["0292"]
-implementation_prs: []
 ---
 
 # RFC — MCP dual authentication: static bearer and local OAuth 2.1
@@ -241,7 +240,7 @@ redaction.
 - Existing static bearer files and their JSON schema are unchanged.
 - `bearer_token_env_var` remains supported.
 - OAuth is off unless explicitly enabled.
-- No OAS dependency or protocol change is introduced.
+- No agent_core dependency or protocol change is introduced.
 - No dashboard session or cookie becomes an ambient OAuth login authority.
 - MCP authorization changes only token resolution and the 401 challenge header;
   the existing permission matrix remains authoritative.

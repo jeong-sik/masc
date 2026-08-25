@@ -5,8 +5,6 @@
     HTTP/2 multiplexing eliminates browser's 6-connection-per-domain limit.
 *)
 
-[@@@warning "-32-69"]  (* Suppress unused values/fields during migration *)
-
 open Cmdliner
 
 (** Module aliases *)
@@ -16,24 +14,23 @@ module Mcp_eio = Masc.Mcp_server_eio
 module Workspace = Masc.Workspace
 module Workspace_utils = Workspace_utils
 module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_config = Masc.Keeper_config
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_memory = Masc.Keeper_memory
 module Keeper_execution = Masc.Keeper_execution
 module Keeper_runtime = Masc.Keeper_runtime
+module Keeper_github_identity = Masc.Keeper_github_identity
 module Tool_operator = Masc.Tool_operator
 module Operator_control = Operator_control
 module Dashboard_execution = Dashboard_execution
 module Dashboard_briefing = Dashboard_briefing
-(* module Dashboard_proof removed *)
 module Dashboard_briefing_sections = Dashboard_briefing_sections
 module Build_identity = Masc.Build_identity
-module Keeper_msg_async = Masc.Keeper_msg_async
 module Keeper_status_bridge = Masc.Keeper_status_bridge
 module Keeper_tool_call_log = Masc.Keeper_tool_call_log
 module Graphql_api = Masc.Graphql_api
 module Types = Masc_domain
 module Tempo = Masc.Tempo
-module Auth = Masc.Auth
 module Board = Masc.Board
 module Board_curation = Masc.Board_curation
 module Board_dispatch = Masc.Board_dispatch
@@ -111,7 +108,7 @@ let is_rate_limit_exempt path =
     [Httpun.Reqd.respond_with_string] calls in the main request handler
     against the "invalid state, currently handling error" [Failure] that
     httpun raises when the reqd has already entered its error-handling path
-    (e.g. client disconnect during a long OAS turn — 2026-05-05 cycle9
+    (e.g. client disconnect during a long AGENT_CORE turn — 2026-05-05 cycle9
     FATAL race, also see [Http_server_eio.safe_respond_with_string]).
     [Eio.Cancel.Cancelled] is always re-raised. *)
 let safe_reqd_respond reqd response body =
@@ -120,7 +117,7 @@ let safe_reqd_respond reqd response body =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | Failure msg ->
       Log.Server.warn
-        "[http] reqd respond skipped (invalid state; 2026-05-05 OAS cancel race): %s"
+        "[http] reqd respond skipped (invalid state; 2026-05-05 AGENT_CORE cancel race): %s"
         msg
   | exn ->
       Log.Server.warn "[http] reqd respond unexpected exception: %s"
@@ -230,20 +227,6 @@ let try_mcp_validation_block
 let dispatch_route ~router ~request ~path ~upgrade reqd =
   match request.Httpun.Request.meth, path with
   | `OPTIONS, _ -> options_handler request reqd
-  | `POST, "/webrtc/offer" when Server_webrtc_transport.is_enabled () ->
-    Http.Request.read_body_async reqd (fun body ->
-      match Server_webrtc_transport.handle_offer_request body with
-      | Ok json -> Http.Response.json json reqd
-      | Error msg ->
-        Http.Response.json ~status:`Bad_request
-          (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
-  | `POST, "/webrtc/answer" when Server_webrtc_transport.is_enabled () ->
-    Http.Request.read_body_async reqd (fun body ->
-      match Server_webrtc_transport.handle_answer_request body with
-      | Ok json -> Http.Response.json json reqd
-      | Error msg ->
-        Http.Response.json ~status:`Bad_request
-          (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
   | `DELETE, "/mcp" -> handle_delete_mcp request reqd
   | `DELETE, "/mcp/managed" ->
       handle_delete_mcp
@@ -271,6 +254,25 @@ let try_internal_error_response reqd msg =
       | None ->
           Log.Http.warn "main_eio internal_error response failed: %s"
             (Printexc.to_string exn))
+
+let try_auth_config_error_response reqd =
+  try
+    Http.Response.text
+      ~status:`Service_unavailable
+      "Authentication configuration unavailable"
+      reqd
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    (match Http.Late_response.classify_write_failure exn with
+     | Some failure_msg ->
+       log_late_response_failure
+         ~context:"main_eio auth configuration unavailable"
+         failure_msg
+     | None ->
+       Log.Http.warn "main_eio auth configuration response failed: %s"
+         (Printexc.to_string exn))
+;;
 
 let respond_request_authority_bad_request ~error_code ~message reqd =
   Http.Response.json_value
@@ -351,11 +353,10 @@ let make_extended_handler ~trust_policy routes =
             then ()
             else dispatch_route ~router:routes ~request ~path ~upgrade reqd
           with
-          (* Re-raise cancellation so Eio structured concurrency propagates
-             cleanly.  Previously the catch-all swallowed Cancelled and tried
-             to write a 500 response; that masks shutdown signals and
-             interferes with per-connection switch cleanup. *)
+          (* Cancellation propagates through the connection switch without
+             attempting a response from a cancelled handler. *)
           | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | Auth.Auth_config_error _ -> try_auth_config_error_response reqd
           | exn ->
             let msg = Printexc.to_string exn in
             (match Http.Late_response.classify_write_failure exn with
@@ -405,7 +406,18 @@ let base_path =
   let doc =
     "Workspace root for MASC data. Runtime state lives under <base-path>/.masc; do not pass the .masc directory itself."
   in
-  Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
+  (* [Arg.opt] takes a value, not a thunk, so its default is computed while the
+     term is built — before Cmdliner has looked at argv. Calling
+     [default_base_path ()] there ran the environment-backed resolver on every
+     invocation: it logged a base path no command had selected, and it exited 1
+     when MASC_BASE_PATH was unset even though --base-path carried one. Parse
+     the flag as optional and consult the environment only when it is absent,
+     matching [run_base_path]. *)
+  let resolve = function Some raw -> raw | None -> default_base_path () in
+  Term.(
+    const resolve
+    $ Arg.(
+        value & opt (some string) None & info ["base-path"] ~docv:"PATH" ~doc))
 
 let run_base_path =
   let doc =
@@ -461,6 +473,15 @@ let login_no_expiry =
      easily refresh on expiry. Omit for the default expiring policy."
   in
   Arg.(value & flag & info ["no-expiry"] ~doc)
+
+let login_expiry_hours =
+  let doc =
+    "Mint a token that expires this many hours from now, whatever window \
+     the workspace itself uses. For a client that outlives an operator \
+     session but should still lose its bearer eventually. Accepts 1..8760; \
+     cannot be combined with --no-expiry."
+  in
+  Arg.(value & opt (some int) None & info ["expiry-hours"] ~docv:"HOURS" ~doc)
 
 (** Graceful shutdown exception.
 
@@ -594,19 +615,6 @@ let run_cmd host port cli_base_path =
      base_path differed from the repo checkout directory. *)
   let log_dir = Filename.concat masc_dir "logs" in
   Fs_compat.mkdir_p log_dir;
-  (* Migration: move .jsonl files from old base_path/logs/ if they exist *)
-  let old_log_dir = Filename.concat canonical_base_path "logs" in
-  (if Sys.file_exists old_log_dir && Sys.is_directory old_log_dir then
-     let files = try Sys.readdir old_log_dir with Sys_error _ -> [||] in
-     Array.iter (fun fname ->
-       if Filename.check_suffix fname ".jsonl" then begin
-         let src = Filename.concat old_log_dir fname in
-         let dst = Filename.concat log_dir fname in
-         if not (Sys.file_exists dst) then
-           (try Sys.rename src dst;
-                Log.Server.info "log migration: moved %s -> .masc/logs/" fname
-            with Sys_error _ -> ())
-          end) files);
   Log.Ring.init_file_sink log_dir;
   Log.Ring.cleanup_old_files log_dir;
   Eio_main.run @@ fun env ->
@@ -618,6 +626,11 @@ let run_cmd host port cli_base_path =
   (* Set global clock for Time_compat (Eio-native timestamps).
      Dashboard_cache.now() reads from Time_compat directly. *)
   Time_compat.set_clock (Eio.Stdenv.clock env);
+
+  (* RFC-0372 Phase 3: register the clock with Dashboard_cache so every
+     [get_or_compute] runs under a timeout. Without this the 37 call sites that
+     do not pass a clock compute without any ceiling. *)
+  Dashboard_cache.set_default_clock (Eio.Stdenv.clock env);
 
   (* Wire Runtime_events listener. After masc#18567 removed dead
      [Http_server_eio.start] (the only prior production caller), this
@@ -849,10 +862,12 @@ let run_cmd_exit host port base_path =
   Cmd.Exit.ok
 
 let login_cmd_exit base_path host port agent role client_env no_expiry
-    as_json as_shell =
-  let token_lifetime : Auth_login.token_lifetime =
-    if no_expiry then Long_lived else With_expiry
-  in
+    expiry_hours as_json as_shell =
+  match Auth_login.lifetime_of_flags ~no_expiry ~expiry_hours with
+  | Error message ->
+      Printf.eprintf "login failed: %s\n" message;
+      1
+  | Ok token_lifetime -> (
   match
     Auth_login.mint ~base_path ~host ~port ~agent_name:agent ~role
       ~token_env_var:client_env ~token_lifetime ()
@@ -870,7 +885,7 @@ let login_cmd_exit base_path host port agent role client_env no_expiry
           Auth_login.render_text report
       in
       print_endline output;
-      0
+      0)
 
 let login_cmd =
   let doc =
@@ -883,8 +898,8 @@ let login_cmd =
   Cmd.v info
     Term.(
       const login_cmd_exit $ base_path $ host $ port $ login_agent
-      $ login_role $ login_client_env $ login_no_expiry $ login_json
-      $ login_shell)
+      $ login_role $ login_client_env $ login_no_expiry $ login_expiry_hours
+      $ login_json $ login_shell)
 
 let start_cmd =
   let doc =
@@ -1018,7 +1033,7 @@ let runtime_wizard_binding_for_provider (cfg : Runtime_schema.config)
   let bindings =
     List.filter
       (fun (binding : Runtime_schema.binding) ->
-         String.equal binding.provider_id provider.id)
+         binding.enabled && String.equal binding.provider_id provider.id)
       cfg.bindings
   in
   match bindings with
@@ -1026,11 +1041,17 @@ let runtime_wizard_binding_for_provider (cfg : Runtime_schema.config)
   | _ ->
       (match List.filter (fun (binding : Runtime_schema.binding) -> binding.wizard_default) bindings with
        | [ binding ] -> Ok binding
+       (* One enabled binding is the default by arithmetic: there is nothing
+          else the wizard could install, so requiring the operator to say so
+          rejects a config the server boots from (#27991, live glm-coding).
+          Two or more without a flag stays an error -- that one is a real
+          choice and guessing it would install a model nobody picked. *)
+       | [] when List.length bindings = 1 -> Ok (List.hd bindings)
        | [] ->
            Error
              (Printf.sprintf
-                "provider %s has no install wizard default binding; set wizard-default = true on exactly one [%s.<model>] binding"
-                provider.id provider.id)
+                "provider %s has %d enabled bindings and no install wizard default; set wizard-default = true on exactly one [%s.<model>] binding"
+                provider.id (List.length bindings) provider.id)
        | defaults ->
            Error
              (Printf.sprintf
@@ -1091,7 +1112,10 @@ let runtime_wizard_catalog_records (cfg : Runtime_schema.config) =
          | Error _ as err -> err
          | Ok record -> provider_records (record :: acc) rest)
   in
-  match provider_records [] cfg.providers with
+  let enabled_providers =
+    List.filter (fun (provider : Runtime_schema.provider) -> provider.enabled) cfg.providers
+  in
+  match provider_records [] enabled_providers with
   | Error _ as err -> err
   | Ok records ->
       (match runtime_wizard_default_record cfg with
@@ -1152,6 +1176,62 @@ let schedule_prune_cmd =
   let info = Cmd.info "schedule-prune" ~doc in
   Cmd.v info Term.(const schedule_prune_cmd_exit $ base_path)
 
+let keeper_github_keeper_arg =
+  let doc = "Keeper name whose GitHub CLI identity is managed." in
+  Arg.(required & opt (some string) None & info [ "keeper" ] ~docv:"NAME" ~doc)
+
+let keeper_github_hostname_arg =
+  let doc = "GitHub hostname." in
+  Arg.(value & opt string "github.com" & info [ "hostname" ] ~docv:"HOST" ~doc)
+
+let keeper_github_action_cmd name doc run =
+  let invoke base_path keeper_name hostname =
+    let config = Workspace_utils.default_config base_path in
+    if not (Keeper_config.validate_name keeper_name)
+    then (
+      prerr_endline (Printf.sprintf "invalid keeper name: %s" keeper_name);
+      1)
+    else
+      match Keeper_meta_store.read_meta config keeper_name with
+      | Error message ->
+        prerr_endline message;
+        1
+      | Ok None ->
+        prerr_endline (Printf.sprintf "keeper %S not found" keeper_name);
+        1
+      | Ok (Some _) -> run ~config ~keeper_name ~hostname
+  in
+  Cmd.v
+    (Cmd.info name ~doc)
+    Term.(
+      const invoke
+      $ base_path
+      $ keeper_github_keeper_arg
+      $ keeper_github_hostname_arg)
+
+let keeper_github_cmd =
+  let login =
+    keeper_github_action_cmd
+      "login"
+      "Log a Keeper into GitHub CLI."
+      Keeper_github_identity.run_cli_login
+  in
+  let status =
+    keeper_github_action_cmd
+      "status"
+      "Observe stored and effective Keeper GitHub identities."
+      Keeper_github_identity.run_cli_status
+  in
+  let logout =
+    keeper_github_action_cmd
+      "logout"
+      "Remove a Keeper GitHub CLI login."
+      Keeper_github_identity.run_cli_logout
+  in
+  Cmd.group
+    (Cmd.info "keeper-github" ~doc:"Manage Keeper-specific GitHub CLI identity.")
+    [ login; status; logout ]
+
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
      main_eio.exe showed heavy stop-the-world minor-GC pressure from JSON
@@ -1170,7 +1250,7 @@ let setup_gc () =
 
 let cmd =
   let doc = "MASC MCP Server and operator diagnostics" in
-  let info = Cmd.info "masc" ~version:Masc.Version.version ~doc in
+  let info = Cmd.info "masc" ~version:Runtime_build_version.current ~doc in
   Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ run_base_path)
     info
     [ init_cmd
@@ -1179,6 +1259,7 @@ let cmd =
     ; runtime_default_set_cmd
     ; runtime_wizard_catalog_cmd
     ; schedule_prune_cmd
+    ; keeper_github_cmd
     ]
 
 let () =

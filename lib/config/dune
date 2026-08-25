@@ -14,9 +14,12 @@
   env_config_runtime
   env_config_sandbox
   env_config_slack
+  env_config_discord
   env_config_snapshot
+  env_config_snapshot_collector
   env_config_snapshot_core
   feature_flag_registry
+  keeper_runtime_setting_registry
   keeper_sandbox_config
   masc_grpc_transport
   masc_network_defaults
@@ -31,5 +34,5 @@
  ; catch-all (env_config_runtime.ml string scrutinee) is open-type and warning
  ; 4 ignores it.
  (flags
-  (:standard -w +4 -w +32))
+  (:standard -w +4 -w +33 -w +37))
  (libraries masc_core masc_log yojson otoml uri ipaddr unix))

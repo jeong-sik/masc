@@ -6,7 +6,7 @@
 # blocks regression: any *new* inline "runtime" literal in those files
 # must go through the SSOT module.
 #
-# Scope: the 21 OCaml files PR-2 touched. NOT a repo-wide grep — many
+# Scope: the 20 OCaml files PR-2 touched that still exist. NOT a repo-wide grep — many
 # "runtime" strings elsewhere are JSON schema keys, feature-flag category
 # labels, or internal observability and are out of RFC-0132 scope.
 #
@@ -47,20 +47,12 @@ done
 # Files routed through Boundary_redaction SSOT by RFC-0132 PR-2 (#16536).
 SCAN_FILES=(
   "lib/runtime/runtime_attempt_fsm.ml"
-  "lib/runtime/runtime_attempt_liveness_config.ml"
-  "lib/runtime/runtime_attempt_liveness_observer.ml"
-  "lib/runtime/runtime_catalog_runtime_probe.ml"
-  "lib/runtime/runtime_event_bridge.ml"
   "lib/runtime/runtime_observation.ml"
-  "lib/runtime/runtime_runner.ml"
   "lib/keeper/keeper_agent_result.ml"
   "lib/keeper/keeper_agent_run.ml"
   "lib/keeper/keeper_status_runtime.ml"
-  "lib/keeper/keeper_generation_lineage.ml"
-  "lib/keeper/keeper_hooks_oas.ml"
-  "lib/keeper_hooks_oas_types/keeper_hooks_oas_types.ml"
-  "lib/keeper/keeper_oas_checkpoint.ml"
-  "lib/keeper/keeper_rollover.ml"
+  "lib/keeper/keeper_hooks_agent_core.ml"
+  "lib/keeper_hooks_agent_core_types/keeper_hooks_agent_core_types.ml"
   "lib/keeper/keeper_runtime_contract.ml"
   "lib/keeper/keeper_turn_driver.ml"
   "lib/keeper/keeper_turn_driver_wrappers.ml"

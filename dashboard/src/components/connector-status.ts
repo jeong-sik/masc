@@ -10,18 +10,21 @@ import { post } from '../api/core'
 import { DEFAULT_MASC_ORIGIN } from '../config/constants'
 import {
   fetchGateConnectors,
-  fetchGateKeepers,
   fetchGateStatus,
   type BindingInfo,
   type ChannelInfo,
-  type ConnectorNames,
   type DiscordConfiguredBinding,
   type GateConnectorInfo,
   type GateConnectorsData,
   type GateEventInfo,
-  type GateKeeperInfo,
   type GateStatusData,
 } from '../api/gate'
+import {
+  fetchGateKeepers,
+  type GateKeeper,
+  type KeeperListing,
+} from '../api/gate-keepers'
+import { dashboardRuntime } from '../api/effect-http'
 import {
   KNOWN_CONNECTOR_IDS,
   IN_PROCESS_CONNECTOR_ENV,
@@ -104,10 +107,10 @@ function activeConnectorFilter(): string | null {
   return KNOWN_CONNECTOR_IDS.includes(connector as KnownConnectorId) ? connector : null
 }
 
-// Per-connector lifecycle hints. The three remaining external sidecars
-// (imessage/slack/telegram) ship a run.sh wrapper — see
-// sidecars/<id>-bot/run.sh. Discord runs in-process under
-// Server_discord_in_process_gateway (RFC-0203 §Phase 3, PR #19393);
+// Per-connector lifecycle hints. The two external sidecars
+// (imessage/telegram) ship a run.sh wrapper — see
+// sidecars/<id>-bot/run.sh. Discord (RFC-0203 §Phase 3) and Slack
+// (RFC-0317) run in-process under Server_{discord,slack}_in_process_gateway;
 // no sidecar process, no lifecycle command panel — see
 // {@link IN_PROCESS_CONNECTOR_IDS}.
 // Source of truth: docs/CONNECTOR-CONFIG-SCHEMA.md.
@@ -158,7 +161,7 @@ function patchConnectorUiState(connectorId: string, patch: Partial<ConnectorUiSt
  * Pure filter for keeper groups rendered in the "Keeper-first" panel.
  *
  * Case-insensitive substring match on `group.name` and the keeper's
- * resolved runtime label (agent_name when distinct from
+ * resolved runtime label when distinct from
  * name). Operators on a crowded connector can locate a keeper by
  * partial name or by its runtime agent.
  *
@@ -177,7 +180,7 @@ export function filterKeeperGroups(
   if (needle === '') return groups
   return groups.filter(group => {
     if (group.name.toLowerCase().includes(needle)) return true
-    const runtime = runtimeLabelForKeeper(group.keeper).toLowerCase()
+    const runtime = group.keeper?.runtimeLabel.toLowerCase() ?? ''
     if (runtime !== '' && runtime.includes(needle)) return true
     return false
   })
@@ -186,16 +189,25 @@ export function filterKeeperGroups(
 type ConnectorStatusSnapshot = {
   gate: GateStatusData | null
   connectors: GateConnectorsData | null
-  keepers: GateKeeperInfo[]
+  keepers: readonly GateKeeper[]
+  // How much of the directory `keepers` is. Carried next to the rows so the
+  // surfaces that render a keeper count cannot report the page size as the
+  // whole set — masc#29077.
+  keeperListing: KeeperListing
   gateError: string | null
   connectorError: string | null
   keeperError: string | null
 }
 
+// Nothing fetched yet: zero known, zero served, nothing dropped. `truncated`
+// false here is honest — an empty answer is not a cut-off one.
+const EMPTY_KEEPER_LISTING: KeeperListing = { total: 0, limit: 0, truncated: false }
+
 const EMPTY_SNAPSHOT: ConnectorStatusSnapshot = {
   gate: null,
   connectors: null,
   keepers: [],
+  keeperListing: EMPTY_KEEPER_LISTING,
   gateError: null,
   connectorError: null,
   keeperError: null,
@@ -209,6 +221,7 @@ async function refresh() {
       gate: previous?.gate ?? null,
       connectors: previous?.connectors ?? null,
       keepers: previous?.keepers ?? [],
+      keeperListing: previous?.keeperListing ?? EMPTY_KEEPER_LISTING,
       gateError: null,
       connectorError: null,
       keeperError: null,
@@ -217,7 +230,7 @@ async function refresh() {
     const [gateResult, connResult, keeperResult] = await Promise.allSettled([
       fetchGateStatus(signal),
       fetchGateConnectors(signal),
-      fetchGateKeepers(signal),
+      dashboardRuntime.runPromise(fetchGateKeepers(), { signal }),
     ])
 
     if (gateResult.status === 'fulfilled') {
@@ -233,9 +246,16 @@ async function refresh() {
     }
 
     if (keeperResult.status === 'fulfilled') {
-      next.keepers = keeperResult.value.keepers ?? []
+      next.keepers = keeperResult.value.keepers
+      next.keeperListing = keeperResult.value.listing
+      next.keeperError = keeperResult.value.directoryIssues.length === 0
+        ? null
+        : keeperResult.value.directoryIssues
+            .map(issue => `${issue.keeperName}: ${issue.message}`)
+            .join('; ')
     } else {
       next.keepers = []
+      next.keeperListing = EMPTY_KEEPER_LISTING
       next.keeperError = keeperResult.reason instanceof Error ? keeperResult.reason.message : 'fetch failed'
     }
 
@@ -292,16 +312,6 @@ function truncateMiddle(value: string, limit = 18): string {
   return `${trimmed.slice(0, head)}…${trimmed.slice(-tail)}`
 }
 
-function humanizeChannel(names: ConnectorNames | undefined, channelId: string): string {
-  if (!names) return ''
-  const channelName = names.channel_names[channelId]
-  const guildId = names.channel_to_guild[channelId]
-  const guildName = guildId ? names.guild_names[guildId] : undefined
-  if (!channelName && !guildName) return ''
-  if (channelName && guildName) return `${channelName} in "${guildName}"`
-  return channelName || `in "${guildName}"`
-}
-
 type LivenessState = 'ok' | 'warn' | 'down' | 'unknown'
 
 interface LivenessDot {
@@ -334,12 +344,6 @@ function uniqueStrings(values: string[]): string[] {
     ordered.push(trimmed)
   })
   return ordered
-}
-
-function runtimeLabelForKeeper(keeper: GateKeeperInfo | null | undefined): string {
-  const runtime = keeper?.agent_name?.trim()
-  if (!runtime || runtime === keeper?.name) return ''
-  return runtime
 }
 
 function findKnownConnector(connectors: GateConnectorInfo[], connectorId: KnownConnectorId): GateConnectorInfo | null {
@@ -417,7 +421,6 @@ function placeholderConnector(connectorId: KnownConnectorId): GateConnectorInfo 
       status_path: '',
       binding_store_path: '',
       audit_path: '',
-      names_path: '',
     },
     runtime_summary: {
       available: false,
@@ -447,17 +450,9 @@ function placeholderConnector(connectorId: KnownConnectorId): GateConnectorInfo 
       storage_paths: 'fallback',
       runtime_summary: 'fallback',
       binding_summary: 'fallback',
-      names: 'fallback',
       observed_channel: 'missing',
     },
     observed_channel: null,
-    names_path: '',
-    names: {
-      guild_names: {},
-      channel_names: {},
-      channel_to_guild: {},
-      updated_at: '',
-    },
   }
 }
 
@@ -467,7 +462,6 @@ const CONNECTOR_SOURCE_HEALTH_ROWS: Array<{ key: ConnectorSourceHealthKey; label
   { key: 'storage_paths', label: 'storage paths' },
   { key: 'runtime_summary', label: 'runtime summary' },
   { key: 'binding_summary', label: 'binding summary' },
-  { key: 'names', label: 'names' },
   { key: 'observed_channel', label: 'observed channel' },
 ]
 
@@ -516,7 +510,7 @@ export async function startSidecar(connectorId: string) {
   markStartAttempt(connectorId)
   try {
     await post(`/api/v1/sidecar/start?name=${encodeURIComponent(connectorId)}`, {})
-    showToast(`${connectorId} sidecar 시작 요청 — 잠시 후 상태 갱신됩니다.`, 'success')
+    showToast(`${connectorId} sidecar 시작 요청됨`, 'success')
     await refresh()
   } catch (err) {
     showConnectorActionError(`${connectorId} sidecar 시작 실패`, err)
@@ -590,30 +584,50 @@ async function unbindConnector(connectorId: string, channelId: string) {
 
 type KeeperGroup = {
   name: string
-  keeper: GateKeeperInfo | null
+  keeper: GateKeeper | null
   bindings: Array<{ channel_id: string; keeper_name: string }>
   unknown: boolean
 }
 
 const EMPTY_CONFIGURED_BINDINGS: DiscordConfiguredBinding[] = []
 
+/** "Next:" line of the connector warning panel. An API failure points at
+    the dashboard/server pair; an in-process gateway has no status file, so
+    its remediation is the gateway state plus the env var that starts it;
+    an external sidecar is inspected through its status file. */
+function connectorWarningNextHint(
+  connectorError: string | null,
+  connector: GateConnectorInfo | null,
+  connectorId: string,
+  connectorName: string,
+) {
+  if (connectorError) {
+    return html`refresh the dashboard or check <${Tk}>/api/v1/gate/connectors<//> on ${connector?.gate_base_url || 'the Gate server'}.`
+  }
+  if (isInProcessConnector(connectorId)) {
+    return html`check the server log for the ${connectorName} gateway (<${Tk}>gw ${connector?.gateway_state || 'unknown'}<//>) and the <${Tk}>${IN_PROCESS_CONNECTOR_ENV[connectorId as InProcessConnectorId]}<//> env var.`
+  }
+  return html`run the ${connectorName} status command and inspect <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//>.`
+}
+
 function ConnectorLivePanel({
   connector,
   gate,
   keepers,
+  keeperListing,
   connectorError,
   keeperDirectoryError,
   loading,
 }: {
   connector: GateConnectorInfo | null
   gate: GateStatusData | null
-  keepers: GateKeeperInfo[]
+  keepers: readonly GateKeeper[]
+  keeperListing: KeeperListing
   connectorError: string | null
   keeperDirectoryError: string | null
   loading: boolean
 }) {
   const configuredBindings = connector?.configured_bindings ?? EMPTY_CONFIGURED_BINDINGS
-  const names = connector?.names
   const connectorName = connector?.display_name || 'Connector'
   const connectorId = connector?.connector_id ?? ''
   const ui = getConnectorUiState(connectorId)
@@ -633,13 +647,6 @@ function ConnectorLivePanel({
   } else if (connector?.gate_healthy === false) {
     gateHealthLabel = 'unhealthy'
   }
-
-  const sidecarLogPath = connector?.names_path
-    ? connector.names_path.replace(
-        /\/\.masc\/connectors\/[^/]+\/names\.json$/,
-        `/.masc/logs/${connectorId}-sidecar-YYYYMMDD.log`,
-      )
-    : ''
 
   // observedWorkspaces / bindingsByKeeper / knownNames / knownGroups form a
   // derivation chain over stable props (gate, connector, configuredBindings,
@@ -755,7 +762,7 @@ function ConnectorLivePanel({
 
   const showNoKeeperEmpty =
     configuredBindings.length === 0 && !connector?.available && keepers.length === 0 && !keeperDirectoryError
-  // RFC-0203 §Phase 3: in-process connectors (currently just Discord)
+  // RFC-0203 §Phase 3: in-process connectors (Discord, Slack)
   // have no sidecar process and therefore no "사이드카 미시작" Start
   // affordance. Render the in-process info hint instead — see
   // showInProcessUnavailableHint below.
@@ -810,9 +817,6 @@ function ConnectorLivePanel({
             ? html`<${SidecarLogToggle} connectorId=${connectorId} />`
             : null}
           <${ConnectorConfigToggle} connectorId=${connectorId} />
-          ${sidecarLogPath && !isInProcessConnector(connectorId)
-            ? html`<span class="cursor-help text-3xs text-[var(--color-fg-disabled)]" title=${sidecarLogPath} aria-hidden="true">↗</span>`
-            : null}
           <button
             type="button"
             class="cursor-pointer rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 text-2xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
@@ -826,6 +830,7 @@ function ConnectorLivePanel({
         pills=${deriveRail(
           {
             sidecarUp: connector?.available === true,
+            hasSidecarProcess: !isInProcessConnector(connectorId),
             gateHealthy: connector?.gate_healthy ?? null,
             bindingCount: configuredBindings.length,
             keeperCount: keepers.length,
@@ -858,7 +863,7 @@ function ConnectorLivePanel({
       <${StartupCheckBanner} connectorId=${connectorId} sidecarUp=${connector?.available === true} />
 
       ${connector?.available === true && keepers.length > 0
-        ? html`<${QuickBindForm} connectorId=${connectorId} keepers=${keepers} />`
+        ? html`<${QuickBindForm} connectorId=${connectorId} keepers=${keepers} listing=${keeperListing} />`
         : null}
 
       <${ConnectorFlowSection} connector=${connector} gate=${gate} />
@@ -903,9 +908,7 @@ function ConnectorLivePanel({
               </div>
               <div class="mt-1">
                 <${BoldLabel}>Next: </${BoldLabel}>
-                ${connectorError
-                  ? html`refresh the dashboard or check <${Tk}>/api/v1/gate/connectors<//> on ${connector?.gate_base_url || 'the Gate server'}.`
-                  : html`run the ${connectorName} status command and inspect <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//>.`}
+                ${connectorWarningNextHint(connectorError, connector, connectorId, connectorName)}
               </div>
             </${SurfaceCard}>
           `
@@ -916,7 +919,7 @@ function ConnectorLivePanel({
         : null}
       <${ConnectorConfigForm} connectorId=${connectorId} />
 
-      ${keeperDirectoryError && keepers.length === 0
+      ${keeperDirectoryError
         ? html`
             <${SurfaceCard}
               class="mt-3 !border-[var(--warn-20)] !border-l-4 !border-l-[var(--color-warn)] !bg-[var(--warn-10)] !px-3 !py-2 text-2xs text-[var(--color-status-warn)]"
@@ -924,7 +927,7 @@ function ConnectorLivePanel({
             >
               <span
                 class="mr-2 inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-warn)]"
-                aria-label="키퍼 디렉토리 상태: 사용 불가"
+                aria-label="키퍼 디렉토리 상태: 오류 감지"
               >
                 <span aria-hidden="true">⚠</span>
                 <span>디렉토리 오류</span>
@@ -933,10 +936,10 @@ function ConnectorLivePanel({
                 ? html`<span class="text-3xs text-[var(--color-fg-disabled)]">checked ${timeAgo(connector.gate_health_checked_at)}</span>`
                 : null}
               <div class="mt-1">
-                <${BoldLabel}>Cause: </${BoldLabel}> keeper 디렉토리 사용 불가, 수동 입력만 가능.
+                <${BoldLabel}>Cause: </${BoldLabel}> ${keeperDirectoryError}
               </div>
               <div class="mt-1">
-                <${BoldLabel}>Next: </${BoldLabel}> 지금은 수동 입력으로 진행, 이후 <${Tk}>config/keepers/<//> 복원 또는 <${Tk}>/api/v1/gate/keepers<//> 수정 후 디렉토리 추천에 의존하세요.
+                <${BoldLabel}>Next: </${BoldLabel}> 정상 keeper만 사용하고 <${Tk}>config/keepers/<//> 또는 <${Tk}>/api/v1/gate/keepers<//> 계약 오류를 수정하세요.
               </div>
             </${SurfaceCard}>
           `
@@ -1057,7 +1060,7 @@ function ConnectorLivePanel({
 
       ${showInProcessUnavailableHint
         ? (() => {
-            // RFC-0203 §Phase 3: in-process gateways (Discord) have no
+            // RFC-0203 §Phase 3: in-process gateways (Discord, Slack) have no
             // sidecar process to start, so the operator sees this hint
             // instead of the "Start sidecar" panel. Same amber tone as
             // the sidecar panel — "needs action, not broken" — but the
@@ -1083,7 +1086,7 @@ function ConnectorLivePanel({
                     : null}
                 </div>
                 <div class="text-2xs text-[var(--color-status-warn)]/80">
-                  ${connectorName} 게이트웨이가 서버 프로세스 내부에서 동작합니다. 별도 사이드카 프로세스가 없으므로 Start/Stop 버튼이 없습니다. <${Tk}>${envVar}<//> 환경변수를 설정하고 서버를 재기동하면 자동으로 Discord Gateway 에 연결됩니다.
+                  ${connectorName} 게이트웨이가 서버 프로세스 내부에서 동작합니다. 별도 사이드카 프로세스가 없으므로 Start/Stop 버튼이 없습니다. <${Tk}>${envVar}<//> 환경변수를 설정하고 서버를 재기동하면 자동으로 ${connectorName} 게이트웨이에 연결됩니다.
                 </div>
                 <${SetupGuideCard} connectorId=${connectorId} />
               </${SurfaceCard}>
@@ -1129,7 +1132,7 @@ function ConnectorLivePanel({
                         ? html`
                             <div class="text-3xs text-[var(--color-fg-disabled)]">
                               status ${keeper.status || 'unknown'}
-                              ${runtimeLabelForKeeper(keeper) ? ` · runtime ${runtimeLabelForKeeper(keeper)}` : ''}
+                              ${keeper.runtimeLabel === '' ? '' : ` · runtime ${keeper.runtimeLabel}`}
                             </div>
                           `
                         : null}
@@ -1140,15 +1143,11 @@ function ConnectorLivePanel({
                       : html`
                           <div class="mt-2 space-y-1">
                             ${group.bindings.map(binding => {
-                              const humanized = humanizeChannel(names, binding.channel_id)
                               return html`
                                 <div class="flex items-center justify-between gap-3 text-xs" data-channel-id=${binding.channel_id}>
                                   <div class="min-w-0 text-[var(--color-fg-primary)]">
                                     <span class="mr-1 text-[var(--color-fg-disabled)]" aria-hidden="true">·</span>
-                                    ${humanized
-                                      ? html`<span>${humanized}</span>`
-                                      : html`<span class="text-[var(--color-fg-disabled)]" title="sidecar has not sent names yet">names pending</span>`}
-                                    <span class="ml-2 text-3xs text-[var(--color-fg-disabled)]">(${truncateMiddle(binding.channel_id, 14)})</span>
+                                    <span title=${binding.channel_id}>${truncateMiddle(binding.channel_id, 24)}</span>
                                   </div>
                                   ${bindingActionsEnabled
                                     ? html`
@@ -1186,25 +1185,19 @@ function ConnectorLivePanel({
                                     ariaLabel=${`${connectorName} channel id`}
                                     onInput=${(e: Event) => { patchConnectorUiState(connectorId, { channelDraft: (e.target as HTMLInputElement).value }) }}
                                   />
-                                  ${ui.channelDraft.trim() && humanizeChannel(names, ui.channelDraft.trim())
-                                    ? html`<div class="mt-1 text-3xs text-[var(--color-fg-disabled)]">resolves to ${humanizeChannel(names, ui.channelDraft.trim())}</div>`
-                                    : null}
                                   ${observedWorkspaces.length > 0
                                     ? html`
                                         <div class="mt-2 flex flex-wrap gap-1.5">
                                           ${observedWorkspaces.slice(0, 8).map(workspaceId => {
-                                            const humanized = humanizeChannel(names, workspaceId)
                                             return html`
                                               <${ActionButton}
                                                 variant="ghost"
                                                 size="sm"
                                                 class="!rounded-[var(--r-0)] !py-0.5"
                                                 title=${workspaceId}
-                                                ariaLabel=${humanized ? `select ${humanized}` : `select ${truncateMiddle(workspaceId, 22)}`}
+                                                ariaLabel=${`select ${truncateMiddle(workspaceId, 22)}`}
                                                 onClick=${() => { patchConnectorUiState(connectorId, { channelDraft: workspaceId }) }}
-                                              >${humanized
-                                                ? html`<span>${humanized}</span><span class="ml-1 text-[var(--color-fg-disabled)]"><span aria-hidden="true">· </span>${truncateMiddle(workspaceId, 10)}</span>`
-                                                : truncateMiddle(workspaceId, 22)}<//>
+                                              >${truncateMiddle(workspaceId, 22)}<//>
                                             `
                                           })}
                                         </div>
@@ -1244,15 +1237,11 @@ function ConnectorLivePanel({
                   </div>
                   <div class="mt-2 space-y-1">
                     ${group.bindings.map(binding => {
-                      const humanized = humanizeChannel(names, binding.channel_id)
                       return html`
                         <div class="flex items-center justify-between gap-3 text-xs" data-channel-id=${binding.channel_id}>
                           <div class="min-w-0 text-[var(--color-fg-primary)]">
                             <span class="mr-1 text-[var(--color-fg-disabled)]" aria-hidden="true">·</span>
-                            ${humanized
-                              ? html`<span>${humanized}</span>`
-                              : html`<${MutedSpan}>names pending</${MutedSpan}>`}
-                            <span class="ml-2 text-3xs text-[var(--color-fg-disabled)]">(${truncateMiddle(binding.channel_id, 14)})</span>
+                            <span title=${binding.channel_id}>${truncateMiddle(binding.channel_id, 24)}</span>
                           </div>
                           ${bindingActionsEnabled
                             ? html`
@@ -1280,9 +1269,6 @@ function ConnectorLivePanel({
             <div class="cn-runtime-paths mt-4 flex flex-wrap gap-3 text-3xs text-[var(--color-fg-disabled)]">
               ${connector.status_path
                 ? html`<span title=${connector.status_path}>runtime ${truncateMiddle(connector.status_path, 50)}</span>`
-                : null}
-              ${sidecarLogPath
-                ? html`<span title=${sidecarLogPath}>logs ${truncateMiddle(sidecarLogPath, 50)}</span>`
                 : null}
             </div>
           `
@@ -1327,10 +1313,6 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
         <div>
           <div class="text-[var(--color-fg-disabled)]">errors</div>
           <div class="font-mono text-[var(--color-fg-primary)]">${ch.error_count}</div>
-        </div>
-        <div>
-          <div class="text-[var(--color-fg-disabled)]">duplicates</div>
-          <div class="font-mono text-[var(--color-fg-primary)]">${ch.duplicate_count}</div>
         </div>
         <div>
           <div class="text-[var(--color-fg-disabled)]">namespaces</div>
@@ -1516,20 +1498,16 @@ function GateAnalyticsSection({
               <div class="mb-3">
                 <${KpiStripView}
                   ariaLabel="connector gate 통계"
-                  cols=${4}
+                  cols=${3}
                   cells=${[
                     { variant: 'stacked', label: '메시지', value: gate.total_messages },
                     { variant: 'stacked', label: '성공', value: gate.total_success },
                     { variant: 'stacked', label: '오류', value: gate.total_errors },
-                    { variant: 'stacked', label: '중복 제거 키', value: gate.dedup_table_size },
                   ] satisfies KpiStripViewData['cells']}
                 />
               </div>
 
-              <div class="mb-4 grid grid-cols-2 gap-2 text-2xs text-[var(--color-fg-disabled)] max-[720px]:grid-cols-1">
-                <${SurfaceCard} class="!bg-[var(--color-bg-elevated)] !px-3 !py-2">duplicate suppressions
-                  <span class="ml-2 font-mono text-[var(--color-fg-primary)]">${gate.total_duplicates}</span>
-                <//>
+              <div class="mb-4 grid grid-cols-1 gap-2 text-2xs text-[var(--color-fg-disabled)]">
                 <${SurfaceCard} class="!bg-[var(--color-bg-elevated)] !px-3 !py-2">active connectors
                   <span class="ml-2 font-mono text-[var(--color-fg-primary)]">${gate.channels.length}</span>
                 <//>
@@ -2289,6 +2267,7 @@ export function ConnectorStatusPanel() {
                     connector=${focusedConnector}
                     gate=${d}
                     keepers=${snapshot.keepers}
+                    keeperListing=${snapshot.keeperListing}
                     connectorError=${snapshot.connectorError}
                     keeperDirectoryError=${snapshot.keeperError}
                     loading=${loading}
@@ -2296,12 +2275,12 @@ export function ConnectorStatusPanel() {
                 </${SurfaceCard}>
                 <${DisclosurePanel}
                   title="키퍼 매트릭스"
-                  badge=${html`<span>키퍼 ${snapshot.keepers.length}</span>`}
+                  badge=${html`<span>키퍼 ${snapshot.keepers.length}${snapshot.keeperListing.truncated ? ` / ${snapshot.keeperListing.total}` : ''}</span>`}
                   testId="connector-matrix-disclosure"
                 >
-                  <${ConnectorKeeperMatrix} matrix=${deriveMatrix(allConnectors, snapshot.keepers)} />
+                  <${ConnectorKeeperMatrix} matrix=${deriveMatrix(allConnectors, snapshot.keepers, snapshot.keeperListing)} />
                 <//>
-                <${ConnectorPathsStrip} connectors=${allConnectors} />
+                <${ConnectorPathsStrip} />
                 <${GateAnalyticsSection} gate=${d} gateError=${snapshot.gateError} />
               </div>
             </details>
@@ -2314,6 +2293,7 @@ export function ConnectorStatusPanel() {
               connector=${focusedConnector}
               gate=${d}
               keepers=${snapshot.keepers}
+              keeperListing=${snapshot.keeperListing}
               connectorError=${snapshot.connectorError}
               keeperDirectoryError=${snapshot.keeperError}
               loading=${loading}

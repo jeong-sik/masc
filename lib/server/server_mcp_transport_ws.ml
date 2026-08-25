@@ -393,21 +393,22 @@ let rec atomic_bump_max a v =
   let cur = Atomic.get a in
   if v > cur && not (Atomic.compare_and_set a cur v) then atomic_bump_max a v
 
+(* Must stay the exact domain of [dashboard_slice_for_sse_type]: accepting a
+   slice no event can be routed to is a subscription that silently never
+   delivers, and the rejection below is all-or-nothing, so it cannot be
+   discovered by watching one slice go quiet.
+
+   "shell", "board" and "goals" were accepted here until #27027. They were fed
+   by dashboard/subscribe's one-shot snapshot provider rather than by deltas,
+   and that commit deleted the provider without pruning either vocabulary. *)
 let valid_dashboard_slice = function
-  | "shell"
-  | "execution"
-  | "operator"
-  | "transport"
-  | "namespace"
-  | "composite"
-  | "board"
-  | "goals" ->
-      true
+  | "execution" | "operator" | "transport" | "namespace" | "composite" -> true
   | _ -> false
 
 let dashboard_slice_for_sse_type = function
-  | "project_snapshot" | "namespace_truth_snapshot" ->
-      Some "namespace"
+  (* "namespace_truth_snapshot" was accepted here alongside the canonical name
+     while both were broadcast. Only one is now (#27664). *)
+  | "project_snapshot" -> Some "namespace"
   | "execution_snapshot" ->
       Some "execution"
   | "operator_snapshot" | "operator_digest" ->
@@ -604,80 +605,42 @@ type parsed_sse_event = {
   broadcast_ts: float;
 }
 
-(** Per-broadcast parse cache.
+(** Derive the dashboard view of a broadcast straight from the bus payload.
 
-    [Sse.notify_external_subscribers] passes the same [event: string]
-    reference to each subscriber callback in sequence, so consecutive
-    WS sessions all see the identical pointer for one broadcast.  Caching
-    the parse result keyed by physical equality collapses O(sessions)
-    JSON parses per event down to 1.
+    The bus hands over {!Sse.external_event}, whose [ext_payload] is the value
+    [Sse.broadcast] was called with. Reading it here is what removes the
+    serialize -> frame -> parse round trip: this transport used to recover the
+    same value by scanning the SSE frame for its [data:] field and calling
+    [Yojson.Safe.from_string], once per broadcast (measured 2026-08-06 on the
+    live fleet: 9,828 parses against 10,905 fanouts, and an external-fanout
+    average of 713us against a 258us broadcast, for a single subscriber).
 
-    Correctness: on miss we parse and replace; no torn state is possible
-    (Atomic write is atomic).  A concurrent broadcast at worst wastes one
-    parse — it never yields a wrong result for a different [sse_event].
-    Physical equality is safe here because the snapshot loop holds the
-    event string alive for the duration of fanout. *)
-let parse_cache : (string * parsed_sse_event option) Atomic.t =
-  Atomic.make ("", None)
+    No cache: what remains is two [List.assoc_opt] lookups over the top-level
+    fields plus a constant string match, which is cheaper than the [Atomic.get]
+    and two counter increments the old parse cache spent on every lookup.
 
-let parse_sse_dashboard_event sse_event =
-  let cached_str, cached_val = Atomic.get parse_cache in
-  if cached_str == sse_event then begin
-    Transport_metrics.inc_ws_parse_cache_hit ();
-    cached_val
-  end
-  else begin
-    Transport_metrics.inc_ws_parse_cache_miss ();
-    let result =
-      match Sse.data_payload_of_frame sse_event with
-      | Error Sse.Missing_data_payload ->
-          Log.Server.warn "[mcp-ws] dropping frame without an SSE data field";
-          Transport_metrics.inc_ws_frame_json_parse_failure
-            ~error_kind:Transport_metrics.Other_ws_frame_json_parse_error;
-          None
-      | Ok json_body ->
-        match Yojson.Safe.from_string json_body with
-        | exception (Yojson.Json_error msg) ->
-            (* Iter 28: previously silently dropped — now emit a counter
-               and a warn with a size-bounded body preview so operators
-               can detect malformed frames from clients. Behavior is
-               preserved (still returns None). *)
-            let preview_len = min 200 (String.length json_body) in
-            Log.Server.warn
-              "[mcp-ws] dropping incoming frame: malformed JSON (%s); \
-               body_preview=%s"
-              msg
-              (String.sub json_body 0 preview_len);
-            Transport_metrics.inc_ws_frame_json_parse_failure
-              ~error_kind:Transport_metrics.Yojson_parse_error;
-            None
-        | exception Eio.Cancel.Cancelled e -> raise (Eio.Cancel.Cancelled e)
-        | exception exn ->
-            let preview_len = min 200 (String.length json_body) in
-            Log.Server.warn
-              "[mcp-ws] dropping incoming frame: %s; body_preview=%s"
-              (Printexc.to_string exn)
-              (String.sub json_body 0 preview_len);
-            Transport_metrics.inc_ws_frame_json_parse_failure
-              ~error_kind:Transport_metrics.Other_ws_frame_json_parse_error;
-            None
-        | `Assoc fields as event_json -> (
-            match List.assoc_opt "type" fields with
-            | Some (`String event_type) ->
-                let payload =
-                  match List.assoc_opt "payload" fields with
-                  | Some payload -> payload
-                  | None -> event_json
-                in
-                let slice = dashboard_slice_for_sse_type event_type in
-                let broadcast_ts = Time_compat.now () in
-                Some { event_type; slice; payload; broadcast_ts }
-            | _ -> None)
-        | _ -> None
-    in
-    Atomic.set parse_cache (sse_event, result);
-    result
-  end
+    [broadcast_ts] is [ext_emitted_at], the moment the bus emitted, so every
+    delta from one broadcast carries one logical emission time regardless of
+    when a session's callback ran. The old code stamped [Time_compat.now ()]
+    at parse time and relied on the cache to keep sessions consistent. *)
+let dashboard_event_of_external (ev : Sse.external_event) =
+  match ev.Sse.ext_payload with
+  | `Assoc fields as event_json -> (
+      match List.assoc_opt "type" fields with
+      | Some (`String event_type) ->
+          let payload =
+            match List.assoc_opt "payload" fields with
+            | Some payload -> payload
+            | None -> event_json
+          in
+          Some
+            { event_type
+            ; slice = dashboard_slice_for_sse_type event_type
+            ; payload
+            ; broadcast_ts = ev.Sse.ext_emitted_at
+            }
+      | _ -> None)
+  | _ -> None
 
 (** Shared dashboard/delta payload-frame cache.
 
@@ -744,10 +707,6 @@ let send_dashboard_delta_for_parsed session sse_event parsed =
   match dashboard_delta_payload_text_for_parsed sse_event parsed with
   | Some frame -> send_dashboard_delta_frame session frame
   | None -> false
-
-let send_dashboard_delta_for_sse session sse_event =
-  send_dashboard_delta_for_parsed session sse_event
-    (parse_sse_dashboard_event sse_event)
 
 (** TTL cache for env-var reads on the fan-out hot path.
 
@@ -863,7 +822,8 @@ let __test_reset_env_caches () =
     (Float.neg_infinity, 30.0);
   Atomic.set slice_index_enabled_cache (Float.neg_infinity, true)
 
-let send_dashboard_or_raw_sse session sse_event =
+let send_dashboard_or_raw_sse session (ev : Sse.external_event) =
+  let sse_event = ev.Sse.ext_frame in
   if session_is_backpressured session then begin
     (* Drop the delivery rather than queue it.  Next ack after the client
        drains will let traffic resume; in the meantime [masc_ws_throttled_
@@ -875,15 +835,11 @@ let send_dashboard_or_raw_sse session sse_event =
     true
   end
   else if dashboard_auth_is_authenticated (dashboard_auth session) then begin
-    (* Parse once and reuse for both the delta-build branch and the
-       slice-mismatch decision.  parse_sse_dashboard_event hits a
-       single-slot Atomic cache after the broadcast's first call, but
-       even the cache-hit path costs an Atomic.get + physical eq +
-       counter increment per invocation — so calling it twice per
-       session per broadcast doubles those constants for no signal
-       difference.  At fanout fleet scale (100+ authenticated dashboard
-       sessions) the second call is pure overhead. *)
-    let parsed = parse_sse_dashboard_event sse_event in
+    (* Derive once and reuse for both the delta-build branch and the
+       slice-mismatch decision. The derivation is pure and allocation-free
+       apart from the option, but it is still two assoc lookups per call, so
+       the single binding keeps it at one per session per broadcast. *)
+    let parsed = dashboard_event_of_external ev in
     match parsed with
     | Some { slice = Some slice; _ }
       when List.mem slice (Atomic.get session.dashboard_slices) ->
@@ -1036,9 +992,9 @@ let __test_missed_pong_threshold = missed_pong_threshold
 let __test_next_dashboard_seq = next_dashboard_seq
 let __test_dashboard_seq_value session = Atomic.get session.dashboard_seq
 
-let __test_dashboard_delta_payload_text_for_sse sse_event =
-  dashboard_delta_payload_text_for_parsed sse_event
-    (parse_sse_dashboard_event sse_event)
+let __test_dashboard_delta_payload_text_for_event (ev : Sse.external_event) =
+  dashboard_delta_payload_text_for_parsed ev.Sse.ext_frame
+    (dashboard_event_of_external ev)
 
 let start_upgrade_heartbeat ?sw ?clock session_id session =
   match sw, clock with
@@ -1106,18 +1062,14 @@ let start_upgrade_heartbeat ?sw ?clock session_id session =
 (** Build the MCP-over-WebSocket session handler for a freshly upgraded
     [wsd].  Single source of truth for the MCP WebSocket session
     protocol — session registration, SSE broadcast subscription,
-    liveness heartbeat, and frame opcode handling — shared by the
-    same-origin HTTP-upgrade path
-    ([Server_routes_http_routes_frontend]) and the standalone listener
-    ([Server_ws_standalone]).  The two paths differ only in how the
-    socket is attached (Gluten upgrade vs. raw listener), not in the
-    session protocol.  RFC-0281 S3.2.
+    liveness heartbeat, and frame opcode handling.  Reached through the
+    same-origin HTTP upgrade in [Server_routes_http_routes_frontend].
+    RFC-0281 S3.2.
 
     [on_connection_close] and [on_eof] are observability hooks invoked
     before {!cleanup_session}.  The defaults close the close-frame
-    payload and ignore the eof error; the standalone path injects its
-    close-code diagnostic + eof summary.  Cleanup runs regardless of
-    the hook. *)
+    payload and ignore the eof error.  Cleanup runs regardless of the
+    hook. *)
 let mcp_websocket_handler
     ?sw
     ?clock
@@ -1197,7 +1149,7 @@ let ws_upgrade_accept (request : Httpun.Request.t) : (string, string) result =
   | `GET, Some upgrade, Some connection, Some key, Some "13"
     when ci_eq upgrade "websocket"
          && connection_lists_upgrade connection
-         && (try String.length (Base64.decode_exn key) = 16 with _ -> false) ->
+         && (try String.length (Base64.decode_exn key) = 16 with _ -> false) ->  (* cancel-guard-ok: guards a pure decode: no Eio cancellation point *)
     Ok (sec_websocket_accept key)
   | _ -> Error "websocket upgrade request did not pass RFC 6455 §4.2.1 scrutiny"
 
@@ -1278,29 +1230,6 @@ let send_to_session_result session_id text =
         cleanup_session session_id;
         Send_failed
       end
-
-(** Send a text frame to a specific session by ID.
-    Returns [false] if the session is not found or the send fails.
-    Prefer {!send_to_session_result} when the caller needs to
-    distinguish "session gone" (expected) from "send failed" (bug). *)
-let send_to_session session_id text =
-  match send_to_session_result session_id text with
-  | Sent -> true
-  | Session_gone | Send_failed -> false
-
-(** Broadcast a JSON string to all WebSocket sessions.
-    Independent of SSE -- for WS-only messages. *)
-let broadcast_ws json_str =
-  let snapshot =
-    with_sessions_rw (fun () ->
-      Hashtbl.fold (fun _ s acc -> s :: acc) sessions [])
-  in
-  let failed = ref [] in
-  List.iter (fun session ->
-    if not (send_text_checked ~context:"broadcast" session json_str) then
-      failed := session.id :: !failed
-  ) snapshot;
-  List.iter cleanup_session !failed
 
 (** Close all WebSocket sessions (for graceful shutdown). *)
 let close_all () =

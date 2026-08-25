@@ -6,4 +6,4 @@
   masc
   keeper_metrics
   masc.otel_metric_store
-  agent_sdk.llm_provider))
+  masc.agent_core.llm_provider))

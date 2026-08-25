@@ -5,7 +5,7 @@
 // collapsed group, so adjacent wakes remain distinguishable in the transcript.
 import { describe, expect, it } from 'vitest'
 import type { KeeperConversationEntry } from '../../types'
-import { buildChatRenderUnits } from './primitives'
+import { buildChatRenderUnits, foldAutonomousRuns } from './primitives'
 import { chatHistoryEntriesFromRest, isDefaultVisibleConversationEntry } from '../../keeper-state'
 
 const entry = (
@@ -51,6 +51,16 @@ describe('buildChatRenderUnits — autonomous turns', () => {
     ).toEqual(['a1', 'a2', 'a3'])
   })
 
+  it('leaves folding to foldAutonomousRuns', () => {
+    // The two stages are separate because only the caller knows which units it
+    // still has to anchor a divider on.
+    const units = buildChatRenderUnits(
+      [autonomous('a1'), autonomous('a2'), autonomous('a3'), autonomous('a4')],
+      true,
+    )
+    expect(units.every((unit) => unit.kind === 'autonomousGroup')).toBe(true)
+  })
+
   it('keeps separate runs separate so conversation between them stays in place', () => {
     const units = buildChatRenderUnits(
       [autonomous('a1'), user('u1'), autonomous('a2')],
@@ -79,8 +89,122 @@ describe('buildChatRenderUnits — autonomous turns', () => {
   })
 })
 
+describe('foldAutonomousRuns', () => {
+  const fold = (
+    entries: KeeperConversationEntry[],
+    opts: Partial<Parameters<typeof foldAutonomousRuns>[1]> = {},
+  ) =>
+    foldAutonomousRuns(buildChatRenderUnits(entries, true), {
+      startsNewRun: () => false,
+      runBoundaryKey: () => null,
+      ...opts,
+    })
+
+  it('leaves a run shorter than the fold threshold inline', () => {
+    // One or two wakes read as part of the conversation around them; a header
+    // over them would only add a click.
+    const units = fold([user('u1'), autonomous('a1'), autonomous('a2'), user('u2')])
+    expect(units.map((unit) => unit.kind)).toEqual([
+      'entry',
+      'autonomousGroup',
+      'autonomousGroup',
+      'entry',
+    ])
+  })
+
+  it('folds a longer run while keeping every turn its own row', () => {
+    const units = fold([
+      user('u1'),
+      autonomous('a1'),
+      autonomous('a2'),
+      autonomous('a3'),
+      user('u2'),
+    ])
+    expect(units.map((unit) => unit.kind)).toEqual(['entry', 'autonomousRun', 'entry'])
+    const run = units[1]
+    if (run?.kind !== 'autonomousRun') throw new Error('expected an autonomousRun')
+    expect(run.entries.map((entry) => entry.id)).toEqual(['a1', 'a2', 'a3'])
+  })
+
+  it('gives the run the first turn s unit id so anchors computed before folding still resolve', () => {
+    const ungrouped = buildChatRenderUnits([autonomous('a1'), autonomous('a2'), autonomous('a3')], true)
+    const firstId = ungrouped[0]?.kind === 'autonomousGroup' ? ungrouped[0].id : null
+    const folded = foldAutonomousRuns(ungrouped, {
+      startsNewRun: () => false,
+      runBoundaryKey: () => null,
+    })
+    expect(folded[0]?.kind === 'autonomousRun' ? folded[0].id : null).toBe(firstId)
+  })
+
+  it('does not fold across a message that interrupts the run', () => {
+    // Two runs of two, not one run of four: the conversation between them is
+    // what the transcript is about.
+    const units = fold([
+      autonomous('a1'),
+      autonomous('a2'),
+      user('u1'),
+      autonomous('a3'),
+      autonomous('a4'),
+    ])
+    expect(units.map((unit) => unit.kind)).toEqual([
+      'autonomousGroup',
+      'autonomousGroup',
+      'entry',
+      'autonomousGroup',
+      'autonomousGroup',
+    ])
+  })
+
+  it('cuts the run before a unit the caller still needs at top level', () => {
+    const units = fold(
+      [
+        autonomous('a1'),
+        autonomous('a2'),
+        autonomous('a3'),
+        autonomous('a4'),
+        autonomous('a5'),
+        autonomous('a6'),
+      ],
+      { startsNewRun: (unit) => unit.kind === 'autonomousGroup' && unit.entry.id === 'a4' },
+    )
+    expect(units.map((unit) => unit.kind)).toEqual(['autonomousRun', 'autonomousRun'])
+    const second = units[1]
+    if (second?.kind !== 'autonomousRun') throw new Error('expected an autonomousRun')
+    expect(second.entries.map((entry) => entry.id)).toEqual(['a4', 'a5', 'a6'])
+  })
+
+  it('cuts the run when the boundary key changes', () => {
+    const units = fold(
+      [
+        autonomous('a1'),
+        autonomous('a2'),
+        autonomous('a3'),
+        autonomous('b1'),
+        autonomous('b2'),
+        autonomous('b3'),
+      ],
+      { runBoundaryKey: (unit) => (unit.kind === 'autonomousGroup' ? unit.entry.id[0] ?? null : null) },
+    )
+    expect(units.map((unit) => unit.kind)).toEqual(['autonomousRun', 'autonomousRun'])
+  })
+
+  it('treats a null boundary key as carrying no boundary', () => {
+    // A turn with no timestamp must not cut the run, and must not erase the
+    // last key that would have.
+    const units = fold(
+      [autonomous('a1'), autonomous('a2'), autonomous('a3'), autonomous('a4')],
+      {
+        runBoundaryKey: (unit) =>
+          unit.kind === 'autonomousGroup' && unit.entry.id === 'a3' ? null : 'day-1',
+      },
+    )
+    expect(units.map((unit) => unit.kind)).toEqual(['autonomousRun'])
+  })
+})
+
 describe('chatHistoryEntriesFromRest — autonomous turn rows', () => {
   const autonomousRow = {
+    id: 'msg-autonomous-41',
     role: 'assistant',
     content: 'no work this cycle',
     ts: 1785770777,
@@ -140,8 +264,8 @@ describe('chatHistoryEntriesFromRest — autonomous turn rows', () => {
     // autonomous row between them must not consume that pairing.
     const entries = chatHistoryEntriesFromRest('lane-smith', [
       autonomousRow,
-      { role: 'user', content: 'PR 상태 정리해줘', ts: 1785770800 },
-      { role: 'assistant', content: '3건 확인했습니다', ts: 1785770801 },
+      { id: 'msg-direct-user', role: 'user', content: 'PR 상태 정리해줘', ts: 1785770800 },
+      { id: 'msg-direct-assistant', role: 'assistant', content: '3건 확인했습니다', ts: 1785770801 },
     ])
     expect(entries.map((e) => e.source)).toEqual([
       'autonomous_turn',
@@ -153,7 +277,7 @@ describe('chatHistoryEntriesFromRest — autonomous turn rows', () => {
   it('drops a row whose autonomous_turn payload carries no turn id', () => {
     // Unknown shape is not rendered as an empty bubble.
     const entries = chatHistoryEntriesFromRest('lane-smith', [
-      { role: 'assistant', content: 'x', ts: 1785770777, autonomous_turn: {} },
+      { id: 'msg-malformed-autonomous', role: 'assistant', content: 'x', ts: 1785770777, autonomous_turn: {} },
     ])
     expect(entries).toEqual([])
   })

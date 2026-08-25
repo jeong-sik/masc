@@ -44,7 +44,7 @@ let parsed_thinking_control_format raw =
         | None -> failf "expected capabilities for %S" raw)
      | models -> failf "expected one model for %S, got %d" raw (List.length models))
 
-let test_valid_values_load_and_map_to_oas_variants () =
+let test_valid_values_load_and_map_to_agent_core_variants () =
   let cases =
     Runtime_schema.
       [ "none", No_thinking_control
@@ -75,7 +75,7 @@ let test_unknown_value_fails_load () =
   check bool "unknown thinking-control-format fails the load (Error)" true
     (is_error (Runtime_toml.parse_string (toml_with_tcf "bogus-format")))
 
-(* chat-template-token carries its token (mirrors oas#2484): the format
+(* chat-template-token carries its token (mirrors agent-core boundary): the format
    requires a thinking-control-token key, blank/padded tokens fail, and an
    orphan token on another format fails. *)
 let toml_with_tcf_and_token tcf token =
@@ -151,8 +151,8 @@ let () =
     [
       ( "parse_string",
         [
-          test_case "valid values map to OAS variants" `Quick
-            test_valid_values_load_and_map_to_oas_variants;
+          test_case "valid values map to AGENT_CORE variants" `Quick
+            test_valid_values_load_and_map_to_agent_core_variants;
           test_case "unknown value fails load" `Quick test_unknown_value_fails_load;
           test_case "absent capabilities loads" `Quick
             test_absent_capabilities_loads;

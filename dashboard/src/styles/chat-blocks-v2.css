@@ -68,6 +68,39 @@
   border-top-left-radius: var(--r-0);
 }
 
+/* A run of autonomous turns. The nested turns are indented and separated so
+   the run header reads as their parent rather than as a sibling row. */
+.chat-auto-run-turns {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px 8px 20px;
+  border-top: 1px solid var(--color-border-default);
+}
+
+.chat-auto-run-turns .chat-block-trace {
+  background: var(--color-bg-surface);
+}
+
+/* Stands for the turns between the run's two drawn ends. Dashed rather than
+   solid so it reads as a gap in the sequence, not as another turn row. */
+.chat-auto-run-more {
+  width: 100%;
+  padding: 6px 12px;
+  border: 1px dashed var(--color-border-default);
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--color-fg-secondary);
+  font-size: var(--fs-xs);
+  text-align: center;
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+
+.chat-auto-run-more:hover {
+  background: var(--color-bg-hover);
+}
+
 .chat-block-trace-hd {
   display: flex;
   align-items: center;
@@ -104,6 +137,21 @@
   white-space: nowrap;
 }
 
+/* What a collapsed run actually did. Takes the header's spare width so the time
+   range stays pinned right, and truncates rather than wraps: a header that grows
+   to two lines defeats the fold it labels. */
+.chat-block-trace-tools {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--color-fg-muted);
+}
+
 .chat-block-trace-meta {
   display: inline-flex;
   align-items: center;
@@ -136,13 +184,45 @@
   margin-top: 8px;
 }
 
+/* Tools are what a turn did, not steps beside it. Indenting them under one
+   continuous line makes a run of six Execute calls read as one turn's work.
+   Consecutive tools drop the gap so the line does not break between them. */
+.chat-block-tstep.tool {
+  margin-left: 13px;
+  padding-left: 11px;
+  border-left: 1px solid var(--color-border-default);
+}
+
+.chat-block-tstep.tool + .chat-block-tstep.tool {
+  margin-top: 0;
+  padding-top: 8px;
+}
+
+.chat-block-tstep.tool .chat-block-tnode::before {
+  width: 8px;
+}
+
 .chat-block-tnode {
+  position: relative;
   width: 7px;
   height: 7px;
   margin-top: 6px;
   border-radius: 50%;
   background: var(--color-border-strong);
   flex-shrink: 0;
+}
+
+/* The rail sits at 12px and the steps start at 28px, so without this the dots
+   float beside the line instead of hanging off it. The branch closes that gap:
+   16px of padding minus the 3px the dot's own radius already covers. */
+.chat-block-tnode::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  width: 13px;
+  height: 1px;
+  background: var(--color-border-default);
 }
 .chat-block-tstep.think .chat-block-tnode,
 .chat-block-tstep.reason .chat-block-tnode {
@@ -219,6 +299,21 @@
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
   color: var(--chat-tool-fg, var(--color-fg-secondary));
+  flex-shrink: 0;
+}
+
+/* The argument the call acted on. It takes the row's spare width and truncates,
+   because a path or a command is identified by its tail as much as its head and
+   a wrapped row would cost the scan-ability the subject exists to give. */
+.chat-block-tstep-subject {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--color-fg-muted);
 }
 
 .chat-block-tstep-status {
@@ -682,74 +777,12 @@
   border-top: 1px solid var(--color-border-default);
 }
 
-/* ── Link unfurl card ────────────────────────────────────────── */
-.chat-block-linkcard {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--r-1);
-  background: var(--color-bg-surface);
-  padding: 10px 12px;
-  text-decoration: none;
-  transition: background var(--t-fast), border-color var(--t-fast);
-}
-
-.chat-block-linkcard:hover {
-  background: var(--color-bg-hover);
-  border-color: var(--color-border-strong);
-}
-
-.chat-block-linkcard-fav {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--r-1);
-  background: var(--color-bg-panel-alt);
-  color: var(--color-fg-muted);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-semi);
-  flex-shrink: 0;
-}
-
-.chat-block-linkcard-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-}
-
-.chat-block-linkcard-title {
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semi);
-  color: var(--color-fg-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.chat-block-linkcard-desc {
-  font-size: var(--fs-2xs);
-  color: var(--color-fg-muted);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.chat-block-linkcard-meta {
-  font-family: var(--font-mono);
-  font-size: var(--fs-2xs);
-  color: var(--color-fg-muted);
-}
-
-.chat-block-linkcard-go {
-  color: var(--color-fg-muted);
-  font-size: var(--fs-sm);
-}
+/* ── Link unfurl card ──────────────────────────────────────────
+   Keeper-v2 design vocabulary (.linkcard / -fav / -body / -title / -desc /
+   -meta / -go) — skin vendored in keeper-v2/v2.css. The old
+   .chat-block-linkcard* rules were dropped when primitives.ts renamed onto the
+   design's classes (2026-08-23); .chat-block-linkcard-unsafe is a style-less
+   hook marking a refused href. */
 
 /* ── Broadcast card ──────────────────────────────────────────── */
 .chat-block-broadcast {

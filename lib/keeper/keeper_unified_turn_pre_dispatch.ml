@@ -9,8 +9,8 @@ open Keeper_types_profile
 open Keeper_context_runtime
 
 let profile_load_error ~keeper_name error =
-  Agent_sdk.Error.Config
-    (Agent_sdk.Error.InvalidConfig
+  Agent_core.Error.Config
+    (Agent_core.Error.InvalidConfig
        { field = "keeper.profile"
        ; detail =
            Printf.sprintf
@@ -29,12 +29,12 @@ let build_runtime_execution
       ~(meta : keeper_meta)
       ~(runtime_id : string)
   : ( Keeper_turn_runtime_budget.runtime_execution
-    , Agent_sdk.Error.sdk_error )
+    , Agent_core.Error.t )
     result
   =
   let runtime_id = String.trim runtime_id in
   if String.equal runtime_id "" then
-    Error (Agent_sdk.Error.Internal "runtime_id must be non-empty")
+    Error (Agent_core.Error.Internal "runtime_id must be non-empty")
   else
   let log_pre_dispatch_error ~site detail =
     Log.Keeper.error
@@ -55,10 +55,64 @@ let build_runtime_execution
     in
     log_pre_dispatch_error ~site:"resolve_context_window" detail;
     Error
-      (Agent_sdk.Error.Config
-         (Agent_sdk.Error.InvalidConfig
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig
             { field = "runtime.context_window"; detail }))
-  | Ok max_context_resolution ->
+  | Ok entry_resolution ->
+    (* #28765: the prompt is shaped once per turn, but sticky reordering
+       and in-turn failover mean any candidate in the entry point's lane
+       can end up serving that same prompt. The only single budget no
+       serving candidate can overflow is the minimum across the lane's
+       candidates — and a minimum is order-independent, so when the
+       sticky reorder runs stops mattering. A runtime outside any lane
+       keeps its own resolution. The lane is re-resolved here instead of
+       threaded from the driver: both read the same
+       [Runtime.resolve_assignment] SSOT, and a deferred lane hint's
+       entry point maps back to that same lane. A candidate without a
+       resolvable context window is excluded from the minimum with a
+       warning — it would serve a prompt shaped without its window
+       either way, which is exactly the pre-#28765 behavior. *)
+    let max_context_resolution =
+      match Runtime.resolve_assignment runtime_id with
+      | `Missing -> entry_resolution
+      | `Lane lane ->
+        List.fold_left
+          (fun (smallest : Keeper_context_runtime.max_context_resolution)
+            candidate_id ->
+            if String.equal candidate_id runtime_id
+            then smallest
+            else (
+              match
+                Keeper_context_runtime
+                .resolve_max_context_resolution_for_runtime_id
+                  ~requested_override:meta.max_context_override
+                  ~runtime_id:candidate_id
+              with
+              | Error error ->
+                Log.Keeper.warn
+                  "%s: pre_dispatch: lane candidate %s has no resolvable \
+                   context window (%s); it does not bound the turn budget"
+                  meta.name
+                  candidate_id
+                  (Keeper_context_runtime.max_context_resolution_error_to_string
+                     error);
+                smallest
+              | Ok resolution ->
+                if resolution.effective_budget < smallest.effective_budget
+                then resolution
+                else smallest))
+          entry_resolution
+          (Runtime_lane.ordered_candidates lane)
+    in
+    if max_context_resolution.effective_budget < entry_resolution.effective_budget
+    then
+      Log.Keeper.info
+        "%s: pre_dispatch: lane %s turn budget bound by a smaller sibling \
+         window: entry effective=%d lane-min effective=%d"
+        meta.name
+        runtime_id
+        entry_resolution.effective_budget
+        max_context_resolution.effective_budget;
     let max_context =
       Keeper_turn_runtime_budget.resolved_max_context_for_turn
         ~meta

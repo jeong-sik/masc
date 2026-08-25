@@ -25,6 +25,7 @@ let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   | Mod_control -> "control"
   | Mod_agent_timeline -> "agent_timeline"
   | Mod_schedule -> "schedule"
+  | Mod_spawn -> "spawn"
   | Mod_misc -> "misc"
   | Mod_inline -> "inline"
   | Mod_operator -> "operator"
@@ -52,7 +53,13 @@ let dispatch
   : Tool_result.result option
   =
   let start_time = Time_compat.now () in
-  let err msg = Tool_result.error ~tool_name:name ~start_time msg in
+  let err msg =
+    Tool_result.error
+      ~failure_class:Tool_result.Runtime_failure
+      ~tool_name:name
+      ~start_time
+      msg
+  in
   (* RFC-0189: separate *deliberate caller-misuse rejections* (wrong
      client, wrong surface, deprecated tool) from *runtime/dispatch
      errors* (Tool_local_runtime non-zero exit, try-catch fallback).
@@ -62,7 +69,7 @@ let dispatch
      boundary has no typed failure variant; message text remains opaque. *)
   let workflow_err msg =
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name:name ~start_time msg
   in
   (* Wrap dispatch in try-catch to normalize exceptions into error results.
@@ -99,10 +106,19 @@ let dispatch
             ~base_dir:config.base_path ~caller_keeper_name:agent_name
             ~agent_name:requested_agent_name)
         { Tool_agent_timeline.config; agent_name } ~name ~args
+    (* Routed by the descriptor runtime rather than here: a spawn needs the
+       turn's registry and switch together, and those are read where the turn
+       bound them. *)
+    | Mod_spawn -> None
     | Mod_schedule ->
       Tool_schedule.dispatch
         { Tool_schedule.config
         ; agent_name
+        ; stamp_keeper_wake_result_delivery =
+            (fun ~payload ->
+               Schedule_payload_projection.set_keeper_wake_result_delivery
+                 ~payload
+                 ~channel:None)
         ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
         }
         ~name
@@ -111,7 +127,7 @@ let dispatch
       Tool_misc.dispatch
         { Tool_misc.config
         ; agent_name
-        ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ()
+        ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ~surface:All
         }
         ~name
         ~args
@@ -144,7 +160,7 @@ let dispatch
         (workflow_err
            (Printf.sprintf
               "tool '%s' belongs to the removed operator surface; keeper runtime stays \
-               on OAS Agent.run"
+               on Agent_core.Agent.run"
               name))
     (* ── Tier C: MCP-state-dependent ───────────────────────────── *)
     | Mod_inline ->

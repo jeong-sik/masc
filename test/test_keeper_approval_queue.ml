@@ -1,6 +1,8 @@
 module AQ = Masc.Keeper_approval_queue
+module Rules = Masc.Keeper_approval_queue_rules
+module Rule_types = Keeper_approval_queue_rules_types
 
-let reserve_retry_exact ~base_path (entry : AQ.pending_approval) =
+let reserve_retry_exact ~base_path (entry : Rule_types.pending_approval) =
   AQ.reserve_summary_attempt_retry
     ~base_path
     ~id:entry.id
@@ -31,6 +33,11 @@ let aq_resolve ~base_path ~id ~decision =
 ;;
 
 let yojson = Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal
+
+let resolved_history_exn = function
+  | Ok history -> history
+  | Error error -> Alcotest.fail (Keeper_approval.Audit.read_error_to_string error)
+;;
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_approval_queue_" "" in
@@ -104,12 +111,11 @@ let drop_resolution ~base_path ~keeper_name resolution =
 ;;
 
 
-let submit_with_context
+let submit_submission_with_context
       ?turn_id
       ?request_context
       ?task_id
       ?goal_id
-      ?(goal_ids = [])
       ?continuation_channel
       ~base_path
       ~keeper_name
@@ -126,12 +132,35 @@ let submit_with_context
       ?request_context
       ?task_id
       ?goal_id
-      ~goal_ids
       ?continuation_channel
       ()
   with
-  | Ok id -> id
+  | Ok submission -> submission
   | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
+;;
+
+let submit_with_context
+      ?turn_id
+      ?request_context
+      ?task_id
+      ?goal_id
+      ?continuation_channel
+      ~base_path
+      ~keeper_name
+      ~input
+      ()
+  =
+  (submit_submission_with_context
+     ?turn_id
+     ?request_context
+     ?task_id
+     ?goal_id
+     ?continuation_channel
+     ~base_path
+     ~keeper_name
+     ~input
+     ())
+    .approval_id
 ;;
 
 let submit ~base_path ~keeper_name ~input =
@@ -139,7 +168,7 @@ let submit ~base_path ~keeper_name ~input =
 ;;
 
 let reject_and_cleanup ~base_path id =
-  match aq_resolve ~base_path ~id ~decision:(AQ.Decision.Reject "test cleanup") with
+  match aq_resolve ~base_path ~id ~decision:(Rule_types.Decision.Reject "test cleanup") with
   | Ok () -> ()
   | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
 ;;
@@ -148,6 +177,28 @@ let install_exn ~base_path =
   match AQ.install_persistence ~base_path with
   | Ok report -> report
   | Error error -> Alcotest.fail (AQ.install_error_to_string error)
+;;
+
+let check_failed_audit_receipt ~event_type ~stage receipt =
+  Alcotest.(check bool)
+    "audit event is exact"
+    true
+    (receipt.Keeper_approval.Audit.event_type = event_type);
+  match receipt.write_result with
+  | Ok () -> Alcotest.fail "audit failure was reported as recorded"
+  | Error failure ->
+    Alcotest.(check bool) "audit failure stage is exact" true (failure.stage = stage);
+    Alcotest.(check bool)
+      "audit failure detail is visible"
+      true
+      (String.trim failure.detail <> "")
+;;
+
+let check_append_failure event_type receipt =
+  check_failed_audit_receipt
+    ~event_type
+    ~stage:Keeper_approval.Audit.Append
+    receipt
 ;;
 
 let test_pending_store_lock_serializes_eio_fibers () =
@@ -197,7 +248,6 @@ let test_dedup_never_merges_distinct_origins () =
        let first =
          submit_with_context
            ~turn_id:1
-           ~goal_ids:[ "goal-a" ]
            ~continuation_channel:dashboard_a
            ~base_path
            ~keeper_name
@@ -207,7 +257,6 @@ let test_dedup_never_merges_distinct_origins () =
        let same =
          submit_with_context
            ~turn_id:1
-           ~goal_ids:[ "goal-a" ]
            ~continuation_channel:dashboard_a
            ~base_path
            ~keeper_name
@@ -215,43 +264,135 @@ let test_dedup_never_merges_distinct_origins () =
            ()
        in
        Alcotest.(check string) "same origin deduplicates" first same;
-       let another_turn =
+       (* The turn that asked is provenance, not origin: a next-turn retry
+          of the same call folds onto the approval already pending (#28866).
+          Before this change turn 2 here minted a second approval, and on
+          2026-08-16 that shape produced three approvals and three replays
+          of one identical web_search into the same context. *)
+       let retried_next_turn =
          submit_with_context
            ~turn_id:2
-           ~goal_ids:[ "goal-a" ]
            ~continuation_channel:dashboard_a
            ~base_path
            ~keeper_name
            ~input
            ()
        in
+       Alcotest.(check string)
+         "next-turn retry folds onto the pending approval"
+         first
+         retried_next_turn;
        let another_channel =
          submit_with_context
            ~turn_id:1
-           ~goal_ids:[ "goal-a" ]
            ~continuation_channel:dashboard_b
            ~base_path
            ~keeper_name
            ~input
            ()
        in
-       let another_goal_context =
-         submit_with_context
-           ~turn_id:1
-           ~goal_ids:[ "goal-b" ]
-           ~continuation_channel:dashboard_a
+       Alcotest.(check bool) "distinct origin has its own request" true
+         (not (String.equal first another_channel));
+       List.iter (reject_and_cleanup ~base_path) [ first; another_channel ])
+;;
+
+(* The measured 2026-08-16 incident, end to end: the retry lands after the
+   approval resolved but before its grant was consumed. The resubmission must
+   fold onto that unconsumed grant; once the grant is consumed the same call
+   is a new effect and opens a fresh approval; a rejected approval never
+   absorbs a retry. *)
+let test_retry_folds_onto_unconsumed_grant_until_consumed () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-grant-fold" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let input = `Assoc [ "target", `String "same-network-read" ] in
+       let first =
+         submit_submission_with_context
+           ~turn_id:11
            ~base_path
            ~keeper_name
            ~input
            ()
        in
-       List.iter
-         (fun id ->
-            Alcotest.(check bool) "distinct origin has its own request" true
-              (not (String.equal first id)))
-         [ another_turn; another_channel; another_goal_context ];
-       List.iter (reject_and_cleanup ~base_path)
-         [ first; another_turn; another_channel; another_goal_context ])
+       (match
+          AQ.resolve_with_policy
+            ~base_path
+            ~id:first.approval_id
+            ~decision:Rule_types.Decision.Approve
+            ()
+        with
+        | Ok _ -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       let retried =
+         submit_submission_with_context
+           ~turn_id:12
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
+       Alcotest.(check string)
+         "retry after approval reuses the approved id"
+         first.approval_id
+         retried.approval_id;
+       (match retried.disposition with
+        | AQ.Folded_onto_unconsumed_grant -> ()
+        | AQ.Pending_created _ ->
+          Alcotest.fail "retry opened a second approval over an unconsumed grant"
+        | AQ.Pending_deduplicated ->
+          Alcotest.fail "resolved approval was still reported as pending");
+       (match
+          AQ.consume_approved_resolution
+            ~base_path
+            ~id:first.approval_id
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~input
+        with
+        | Ok (AQ.Consumption_committed _) -> ()
+        | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
+          Alcotest.fail "grant consumption did not commit"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       let after_consumption =
+         submit_submission_with_context
+           ~turn_id:13
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
+       Alcotest.(check bool)
+         "the same call after consumption is a new effect"
+         true
+         (not (String.equal first.approval_id after_consumption.approval_id));
+       (match after_consumption.disposition with
+        | AQ.Pending_created _ -> ()
+        | AQ.Pending_deduplicated | AQ.Folded_onto_unconsumed_grant ->
+          Alcotest.fail "consumed grant absorbed a new effect request");
+       reject_and_cleanup ~base_path after_consumption.approval_id;
+       let after_rejection =
+         submit_submission_with_context
+           ~turn_id:14
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
+       Alcotest.(check bool)
+         "a rejected approval never absorbs a retry"
+         true
+         (not
+            (String.equal after_consumption.approval_id after_rejection.approval_id));
+       (match after_rejection.disposition with
+        | AQ.Pending_created _ -> ()
+        | AQ.Pending_deduplicated | AQ.Folded_onto_unconsumed_grant ->
+          Alcotest.fail "rejected delivery absorbed a retry");
+       reject_and_cleanup ~base_path after_rejection.approval_id)
 ;;
 
 let check_update label expected = function
@@ -407,14 +548,14 @@ let expect_summary_rejection label = function
 ;;
 
 let exact_summary ?(context_summary = "Exact attempt summary") model_run_id :
-    AQ.hitl_context_summary
+    Rule_types.hitl_context_summary
   =
   { summary_version = 2
   ; generated_at = Unix.gettimeofday ()
   ; model_run_id
   ; context_summary
   ; key_questions = []
-  ; judgment = AQ.Approve
+  ; judgment = Rule_types.Approve
   ; rationale = "The exact durable attempt supports this judgment."
   }
 ;;
@@ -459,7 +600,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 8
+             [ "version", `Int 9
             ; "next_sequence", `Int 1
             ; "pending", `List []
             ; "deliveries", `List []
@@ -531,9 +672,37 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
 let test_submit_is_nonblocking_and_exactly_deduplicated () =
   let base_path = temp_dir () in
   let keeper_name = "queue-exact-submit" in
+  let audit_appends = ref 0 in
+  let sse_frames = ref [] in
+  let subscriber_id = "approval-submit-exact-dedupe" in
+  let pending_sse_count () =
+    List.fold_left
+      (fun count frame ->
+         match Masc.Sse.data_payload_of_frame frame with
+         | Error Masc.Sse.Missing_data_payload -> count
+         | Ok payload ->
+           let open Yojson.Safe.Util in
+           let event = Yojson.Safe.from_string payload in
+           if event |> member "type" |> to_string_option = Some "approval:pending"
+           then count + 1
+           else count)
+      0
+      !sse_frames
+  in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
+    ~finally:(fun () ->
+      Masc.Sse.unsubscribe_external subscriber_id;
+      Keeper_approval.Audit.For_testing.reset_store ();
+      cleanup_dir base_path)
     (fun () ->
+       Masc.Sse.subscribe_external
+         ~id:subscriber_id
+         ~callback:(fun (event : Masc.Sse.external_event) ->
+           sse_frames := event.Masc.Sse.ext_frame :: !sse_frames)
+         ();
+       Keeper_approval.Audit.For_testing.reset_store ();
+       Keeper_approval.Audit.For_testing.set_append_jsonl
+         (fun _path _json -> incr audit_appends);
        ignore (install_exn ~base_path);
        let input =
          `Assoc
@@ -553,8 +722,8 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
            ; "completed_tool_calls", `List []
            ]
        in
-       let first =
-         submit_with_context
+       let first_submission =
+         submit_submission_with_context
            ~turn_id:12
            ~request_context
            ~base_path
@@ -562,14 +731,21 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
            ~input
            ()
        in
+       let first = first_submission.approval_id in
+       (match first_submission.disposition with
+        | AQ.Pending_created { write_result = Ok (); _ } -> ()
+        | AQ.Pending_created { write_result = Error _; _ } ->
+          Alcotest.fail "new pending request did not persist its audit"
+        | AQ.Pending_deduplicated | AQ.Folded_onto_unconsumed_grant ->
+          Alcotest.fail "new pending request was reported as deduplicated");
        let reordered =
          `Assoc
            [ "payload", `Assoc [ "nonce", `Int 1; "text", `String "hello" ]
            ; "target", `String "document"
            ]
        in
-       let same =
-         submit_with_context
+       let same_submission =
+         submit_submission_with_context
            ~turn_id:12
            ~request_context
            ~base_path
@@ -577,7 +753,22 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
            ~input:reordered
            ()
        in
+       let same = same_submission.approval_id in
        Alcotest.(check string) "same exact request" first same;
+       (match same_submission.disposition with
+        | AQ.Pending_deduplicated -> ()
+        | AQ.Folded_onto_unconsumed_grant ->
+          Alcotest.fail "pending duplicate matched a delivery, not the pending entry"
+        | AQ.Pending_created _ ->
+          Alcotest.fail "exact duplicate reported a second pending commit");
+       Alcotest.(check int)
+         "exact duplicate emits no second pending audit"
+         1
+         !audit_appends;
+       Alcotest.(check int)
+         "exact duplicate emits no second pending SSE"
+         1
+         (pending_sse_count ());
        let open Yojson.Safe.Util in
        let persisted_entry =
          read_pending_snapshot ~base_path
@@ -601,6 +792,11 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
        in
        Alcotest.(check bool) "changed field is a different request" true
          (not (String.equal first changed));
+       Alcotest.(check int) "changed request emits its own pending audit" 2 !audit_appends;
+       Alcotest.(check int)
+         "changed request emits its own pending SSE"
+         2
+         (pending_sse_count ());
        Alcotest.(check int) "first request sequence" 1 (pending_entry_exn first).sequence;
        Alcotest.(check int)
          "dedup does not consume sequence"
@@ -610,7 +806,7 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
         | None -> Alcotest.fail "pending request missing"
         | Some entry ->
           Alcotest.(check bool) "summary is not started by queue" true
-            (entry.summary_status = AQ.Summary_not_requested);
+            (entry.summary_status = Rule_types.Summary_not_requested);
           Alcotest.check (Alcotest.option yojson)
             "exact outer-turn context"
             (Some request_context)
@@ -682,7 +878,7 @@ let test_same_owner_drain_uses_sequence_not_wall_clock () =
          |> List.concat_map (fun base_path ->
               AQ.list_pending_entries_for_workspace ~base_path
               |> require_ok "read workspace-local FIFO")
-         |> List.map (fun (entry : AQ.pending_approval) -> entry.id)
+         |> List.map (fun (entry : Rule_types.pending_approval) -> entry.id)
        in
        Alcotest.(check (list string))
          "workspace projections compose deterministic FIFO"
@@ -709,20 +905,20 @@ let test_same_owner_drain_uses_sequence_not_wall_clock () =
    the oldest for 2416s. *)
 let head_of_line_owner = "head-of-line-owner"
 
-let require_human_summary () : AQ.hitl_context_summary =
-  { summary_version = AQ.current_hitl_context_summary_version
+let require_human_summary () : Rule_types.hitl_context_summary =
+  { summary_version = Rule_types.current_hitl_context_summary_version
   ; generated_at = 1.0
   ; model_run_id = "model-run-head-of-line"
   ; context_summary = "head approval was handed to a human"
   ; key_questions = []
-  ; judgment = AQ.Require_human
+  ; judgment = Rule_types.Require_human
   ; rationale = "operator decision required"
   }
 ;;
 
-let completed_exact_binding (entry : AQ.pending_approval) =
-  AQ.exact_attempt_binding_with_status
-    (AQ.make_exact_attempt_binding
+let completed_exact_binding (entry : Rule_types.pending_approval) =
+  Rule_types.exact_attempt_binding_with_status
+    (Rule_types.make_exact_attempt_binding
        ~approval_id:entry.id
        ~input_hash:entry.input_hash
        ~sequence:entry.sequence
@@ -731,7 +927,7 @@ let completed_exact_binding (entry : AQ.pending_approval) =
        ~plan_fingerprint:"plan-head-of-line"
        ~request_body_sha256:"sha256-head-of-line"
        ())
-    AQ.Exact_completed
+    Rule_types.Exact_completed
 ;;
 
 let check_owner_selection label ~base_path ~expected entries =
@@ -742,7 +938,7 @@ let check_owner_selection label ~base_path ~expected entries =
       entries
   with
   | [ selected ] ->
-    Alcotest.(check string) label expected selected.AQ.id
+    Alcotest.(check string) label expected selected.Rule_types.id
   | [] -> Alcotest.failf "%s: owner selection returned nothing" label
   | selected ->
     Alcotest.failf "%s: expected one entry, got %d" label (List.length selected)
@@ -776,9 +972,9 @@ let test_terminal_head_does_not_stall_owner_queue () =
          [ follower; head ];
        let judged_head =
          { head with
-           AQ.summary_status = AQ.Summary_available (require_human_summary ())
-         ; AQ.summary_attempt_disposition = AQ.Summary_attempt_settled
-         ; AQ.exact_attempt = AQ.Exact_bound (completed_exact_binding head)
+           Rule_types.summary_status = Rule_types.Summary_available (require_human_summary ())
+         ; Rule_types.summary_attempt_disposition = Rule_types.Summary_attempt_settled
+         ; Rule_types.exact_attempt = Rule_types.Exact_bound (completed_exact_binding head)
          }
        in
        check_owner_selection
@@ -788,10 +984,10 @@ let test_terminal_head_does_not_stall_owner_queue () =
          [ judged_head; follower ];
        let blocked_head =
          { head with
-           AQ.summary_status = AQ.Summary_pending
-         ; AQ.summary_attempt_disposition =
-             AQ.Summary_attempt_pre_worker_unavailable
-               { reason_code = AQ.Summary_pre_worker_auto_judge_unavailable
+           Rule_types.summary_status = Rule_types.Summary_pending
+         ; Rule_types.summary_attempt_disposition =
+             Rule_types.Summary_attempt_pre_worker_unavailable
+               { reason_code = Rule_types.Summary_pre_worker_auto_judge_unavailable
                ; operator_detail =
                    "HITL summary: exact outer-turn request context is unavailable"
                }
@@ -944,7 +1140,7 @@ let test_delivery_wire_shape_drops_request_context () =
            ~input:(`Assoc [ "target", `String "document" ])
            ()
        in
-       (match aq_resolve ~base_path ~id ~decision:AQ.Decision.Approve with
+       (match aq_resolve ~base_path ~id ~decision:Rule_types.Decision.Approve with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let open Yojson.Safe.Util in
@@ -997,7 +1193,7 @@ let test_resolution_is_durable_and_origin_scoped () =
          AQ.resolve_with_policy
            ~base_path
            ~id
-           ~decision:AQ.Decision.Approve
+           ~decision:Rule_types.Decision.Approve
            ~remember_rule:true
            ~created_by:"operator"
            ()
@@ -1018,7 +1214,7 @@ let test_resolution_is_durable_and_origin_scoped () =
        in
        (match resolution.decision with
         | Keeper_event_queue.Hitl_approved -> ()
-        | Keeper_event_queue.Hitl_rejected _ | Keeper_event_queue.Hitl_edited _ ->
+        | Keeper_event_queue.Hitl_rejected _ ->
           Alcotest.fail "expected approved resolution");
        (match AQ.approved_resolution_request ~base_path ~id with
         | Ok (Some request) ->
@@ -1036,16 +1232,16 @@ let test_resolution_is_durable_and_origin_scoped () =
                ~approval_id:id));
        Alcotest.(check bool) "exact remembered request matches" true
          (match
-            AQ.find_matching_rule
+            Rules.find_matching_rule
               ~base_path
               ~keeper_name
               ~tool_name:"external-effect"
               ~input
               ()
           with
-          | Ok (AQ.Rule_match_active _) -> true
-          | Ok (AQ.Rule_match_expired _ | AQ.Rule_match_absent) -> false
-          | Error error -> Alcotest.fail (AQ.rule_store_error_to_string error));
+          | Ok (Rule_types.Rule_match_active _) -> true
+          | Ok (Rule_types.Rule_match_expired _ | Rule_types.Rule_match_absent) -> false
+          | Error error -> Alcotest.fail (Rule_types.rule_store_error_to_string error));
        (match
           AQ.consume_approved_resolution
             ~base_path
@@ -1055,7 +1251,7 @@ let test_resolution_is_durable_and_origin_scoped () =
             ~input:(`Assoc [ "target", `String "other" ])
         with
         | Ok AQ.Consumption_not_matching -> ()
-        | Ok (AQ.Consumption_committed | AQ.Consumption_already_committed) ->
+        | Ok (AQ.Consumption_committed _ | AQ.Consumption_already_committed) ->
           Alcotest.fail "changed input consumed the exact grant"
         | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
        (match
@@ -1066,7 +1262,7 @@ let test_resolution_is_durable_and_origin_scoped () =
             ~tool_name:"external-effect"
             ~input
         with
-        | Ok AQ.Consumption_committed -> ()
+        | Ok (AQ.Consumption_committed _) -> ()
         | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
           Alcotest.fail "exact request did not consume its grant"
        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
@@ -1222,13 +1418,13 @@ let test_resolution_is_durable_and_origin_scoped () =
               Masc.Keeper_gate_replay.project_model_input
                 ~base_path
                 evidence
-                [ Agent_sdk.Types.user_msg retry_text ]
+                [ Agent_core.Types.user_msg retry_text ]
             with
             | Ok [ _canonical; projected ] ->
-              Agent_sdk.Types.text_of_content projected.content
+              Agent_core.Types.text_of_content projected.content
             | Ok _ ->
               Alcotest.fail "replay projection did not append exact evidence"
-            | Error detail -> Alcotest.fail detail)
+            | Error detail -> Alcotest.fail (Agent_core.Error.to_string detail))
        in
        let replay_evidence =
          projected_text
@@ -1267,7 +1463,7 @@ let test_remembered_rule_carries_requested_expiry () =
          AQ.resolve_with_policy
            ~base_path
            ~id
-           ~decision:AQ.Decision.Approve
+           ~decision:Rule_types.Decision.Approve
            ~remember_rule:true
            ~rule_expires_at:expires_at
            ~created_by:"operator"
@@ -1287,7 +1483,7 @@ let test_remembered_rule_carries_requested_expiry () =
           AQ.resolve_with_policy
             ~base_path
             ~id
-            ~decision:AQ.Decision.Approve
+            ~decision:Rule_types.Decision.Approve
             ~remember_rule:true
             ~rule_expires_at:expires_at
             ~created_by:"operator"
@@ -1298,8 +1494,8 @@ let test_remembered_rule_carries_requested_expiry () =
           Alcotest.fail
             ("identical expiry re-resolution must be idempotent: "
              ^ AQ.resolve_error_to_string error));
-       match AQ.list_rules ~base_path () with
-       | Error error -> Alcotest.fail (AQ.rule_store_error_to_string error)
+       match Rules.list_rules ~base_path () with
+       | Error error -> Alcotest.fail (Rule_types.rule_store_error_to_string error)
        | Ok [ rule ] ->
          Alcotest.(check (option (float 0.0)))
            "persisted rule carries requested expiry"
@@ -1330,14 +1526,13 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
          submit_with_context
            ~turn_id:17
            ~task_id:"task-origin"
-           ~goal_ids:[ "goal-origin" ]
            ~continuation_channel
            ~base_path
            ~keeper_name
            ~input
            ()
        in
-       (match aq_resolve ~base_path ~id:approval_id ~decision:AQ.Decision.Approve with
+       (match aq_resolve ~base_path ~id:approval_id ~decision:Rule_types.Decision.Approve with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let resolution =
@@ -1376,12 +1571,11 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
          ; causal_context =
              Some { Gate.turn_id = Some 99; snapshot = `Assoc [] }
          ; task_id
-         ; goal_ids
          ; continuation_channel = None
          }
        in
        let source_of = function
-         | Gate.Allow { source } -> source
+         | Gate.Allow { source; _ } -> source
          | Gate.Deferred _ -> Alcotest.fail "keeper Always Allow unexpectedly deferred"
          | Gate.Unavailable reason ->
            Alcotest.fail (Gate.unavailable_reason_to_string reason)
@@ -1484,7 +1678,7 @@ let test_exact_binding_codec_validates_entry_identity () =
          (run_exact_transition AQ.bind_summary_exact_attempt identity);
        let snapshot = read_pending_snapshot ~base_path in
        let open Yojson.Safe.Util in
-       Alcotest.(check int) "v8 snapshot" 8 (snapshot |> member "version" |> to_int);
+       Alcotest.(check int) "v9 snapshot" 9 (snapshot |> member "version" |> to_int);
        let exact_json =
          snapshot
          |> member "pending"
@@ -1492,8 +1686,8 @@ let test_exact_binding_codec_validates_entry_identity () =
          |> List.hd
          |> member "exact_attempt"
        in
-       (match AQ.exact_attempt_state_of_yojson_with_error exact_json with
-        | Ok (AQ.Exact_bound binding) ->
+       (match Rule_types.exact_attempt_state_of_yojson_with_error exact_json with
+        | Ok (Rule_types.Exact_bound binding) ->
           Alcotest.(check string)
             "codec approval identity"
             identity.approval_id_arg
@@ -1516,7 +1710,7 @@ let test_exact_binding_codec_validates_entry_identity () =
        check_exact_update
          "quarantine exact codec fixture"
          true
-         (quarantine_exact identity AQ.Exact_flow_execution_failed);
+         (quarantine_exact identity Rule_types.Exact_flow_execution_failed);
        let quarantined_exact_json =
          read_pending_snapshot ~base_path
          |> member "pending"
@@ -1531,13 +1725,13 @@ let test_exact_binding_codec_validates_entry_identity () =
           |> member "quarantine_cause"
           |> to_string);
        (match
-          AQ.exact_attempt_state_of_yojson_with_error quarantined_exact_json
+          Rule_types.exact_attempt_state_of_yojson_with_error quarantined_exact_json
         with
         | Ok
-            (AQ.Exact_bound
+            (Rule_types.Exact_bound
               { status =
-                  AQ.Exact_quarantined
-                    AQ.Exact_flow_execution_failed
+                  Rule_types.Exact_quarantined
+                    Rule_types.Exact_flow_execution_failed
               ; _
               }) ->
           ()
@@ -1548,7 +1742,7 @@ let test_exact_binding_codec_validates_entry_identity () =
        List.iter
          (fun removed_cause ->
             match
-              AQ.exact_attempt_state_of_yojson_with_error
+              Rule_types.exact_attempt_state_of_yojson_with_error
                 (replace_field
                    "quarantine_cause"
                    (`String removed_cause)
@@ -1564,7 +1758,7 @@ let test_exact_binding_codec_validates_entry_identity () =
          ; "restart_uncertainty"
          ];
        (match
-          AQ.exact_attempt_state_of_yojson_with_error
+          Rule_types.exact_attempt_state_of_yojson_with_error
             (replace_field "call_id" (`String " ") exact_json)
         with
         | Error _ -> ()
@@ -1572,7 +1766,7 @@ let test_exact_binding_codec_validates_entry_identity () =
        List.iter
          (fun (label, hash) ->
             match
-              AQ.exact_attempt_state_of_yojson_with_error
+              Rule_types.exact_attempt_state_of_yojson_with_error
                 (replace_field
                    "request_body_sha256"
                    (`String hash)
@@ -1691,18 +1885,18 @@ let test_exact_attempt_binding_release_and_conflicts () =
          "bound restart is not rearmed"
          false
          (reserve_retry_exact ~base_path (pending_entry_exn id));
-       let quarantine_cause = AQ.Exact_domain_invalid_output in
+       let quarantine_cause = Rule_types.Exact_domain_invalid_output in
        check_exact_update
          "quarantine replacement"
          true
          (quarantine_exact replacement quarantine_cause);
        (match pending_entry_exn id with
-        | { summary_status = AQ.Summary_failed { reason }
+        | { summary_status = Rule_types.Summary_failed { reason }
           ; exact_attempt =
-              AQ.Exact_bound
+              Rule_types.Exact_bound
                 { status =
-                    AQ.Exact_quarantined
-                      AQ.Exact_domain_invalid_output
+                    Rule_types.Exact_quarantined
+                      Rule_types.Exact_domain_invalid_output
                 ; _
                 }
           ; _
@@ -1716,7 +1910,7 @@ let test_exact_attempt_binding_release_and_conflicts () =
          "same quarantine cause is idempotent"
          false
          (quarantine_exact replacement quarantine_cause);
-       (match quarantine_exact replacement AQ.Exact_cancellation with
+       (match quarantine_exact replacement Rule_types.Exact_cancellation with
         | Error
             (AQ.Exact_attempt_rejected
               (AQ.Exact_attempt_status_conflict _)) ->
@@ -1778,9 +1972,9 @@ let test_restart_classifies_uncertain_and_released_recovery () =
          (reserve_retry_exact ~base_path (pending_entry_exn released_id));
        (match pending_entry_exn released_id with
         | { exact_attempt =
-              AQ.Exact_bound
-                { status = AQ.Exact_released_before_dispatch; _ }
-          ; summary_status = AQ.Summary_pending
+              Rule_types.Exact_bound
+                { status = Rule_types.Exact_released_before_dispatch; _ }
+          ; summary_status = Rule_types.Summary_pending
           ; _
           } ->
           ()
@@ -1790,8 +1984,8 @@ let test_restart_classifies_uncertain_and_released_recovery () =
        let assert_restart_states label =
          (match pending_entry_exn uncertain_id with
           | { exact_attempt =
-                AQ.Exact_bound
-                  { status = AQ.Exact_restart_quarantined
+                Rule_types.Exact_bound
+                  { status = Rule_types.Exact_restart_quarantined
                   ; slot_id
                   ; call_id
                   ; _
@@ -1811,8 +2005,8 @@ let test_restart_classifies_uncertain_and_released_recovery () =
               (label ^ " did not quarantine dispatch-uncertain attempt"));
          match pending_entry_exn released_id with
          | { exact_attempt =
-               AQ.Exact_bound
-                 { status = AQ.Exact_released_recovery_required
+               Rule_types.Exact_bound
+                 { status = Rule_types.Exact_released_recovery_required
                  ; slot_id
                  ; call_id
                  ; _
@@ -1848,8 +2042,8 @@ let test_restart_classifies_uncertain_and_released_recovery () =
          true
          (reserve_retry_exact ~base_path (pending_entry_exn released_id));
        (match pending_entry_exn released_id with
-        | { summary_status = AQ.Summary_pending
-          ; exact_attempt = AQ.Exact_unbound
+        | { summary_status = Rule_types.Summary_pending
+          ; exact_attempt = Rule_types.Exact_unbound
           ; _
           } ->
           ()
@@ -1870,8 +2064,8 @@ let test_restart_classifies_uncertain_and_released_recovery () =
          true
          (reserve_retry_exact ~base_path (pending_entry_exn bulk_id));
        match pending_entry_exn bulk_id with
-       | { summary_status = AQ.Summary_pending
-         ; exact_attempt = AQ.Exact_unbound
+       | { summary_status = Rule_types.Summary_pending
+         ; exact_attempt = Rule_types.Exact_unbound
          ; _
          } ->
          ()
@@ -1920,9 +2114,9 @@ let test_exact_attempt_completion_is_atomic () =
         | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
         | Ok _ -> Alcotest.fail "mismatched completion provenance was accepted");
        (match pending_entry_exn id with
-        | { summary_status = AQ.Summary_pending
+        | { summary_status = Rule_types.Summary_pending
           ; exact_attempt =
-              AQ.Exact_bound { status = AQ.Exact_dispatch_uncertain; _ }
+              Rule_types.Exact_bound { status = Rule_types.Exact_dispatch_uncertain; _ }
           ; _
           } ->
           ()
@@ -1933,9 +2127,9 @@ let test_exact_attempt_completion_is_atomic () =
          true
          (complete_exact identity summary);
        (match pending_entry_exn id with
-        | { summary_status = AQ.Summary_available durable_summary
+        | { summary_status = Rule_types.Summary_available durable_summary
           ; exact_attempt =
-              AQ.Exact_bound { status = AQ.Exact_completed; _ }
+              Rule_types.Exact_bound { status = Rule_types.Exact_completed; _ }
           ; _
           } ->
           Alcotest.(check string)
@@ -2006,7 +2200,7 @@ let test_exact_attempt_bind_storage_failure_is_not_success () =
         | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
         | Ok _ -> Alcotest.fail "failed exact binding persistence reported success");
        match pending_entry_exn id with
-       | { exact_attempt = AQ.Exact_unbound; _ } -> ()
+       | { exact_attempt = Rule_types.Exact_unbound; _ } -> ()
        | _ -> Alcotest.fail "failed exact binding persistence mutated memory")
 ;;
 
@@ -2034,11 +2228,11 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
        in
        let assert_status label id expected =
          match pending_entry_exn id with
-         | { exact_attempt = AQ.Exact_bound { status; _ }; _ } ->
+         | { exact_attempt = Rule_types.Exact_bound { status; _ }; _ } ->
            Alcotest.(check string)
              label
              expected
-             (AQ.exact_attempt_status_to_string status)
+             (Rule_types.exact_attempt_status_to_string status)
          | _ -> Alcotest.failf "%s did not retain an exact binding" label
        in
        let resolved_id =
@@ -2051,7 +2245,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
           AQ.resolve_with_policy
             ~base_path
             ~id:resolved_id
-            ~decision:AQ.Decision.Approve
+            ~decision:Rule_types.Decision.Approve
             ()
         with
         | Ok _ -> ()
@@ -2108,7 +2302,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
             AQ.resolve_with_policy
               ~base_path
               ~id:resolved_id
-              ~decision:AQ.Decision.Approve
+              ~decision:Rule_types.Decision.Approve
               ()
           with
           | Error (AQ.Persistence_failed _) -> ()
@@ -2119,7 +2313,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
          AQ.For_testing.reset_runtime_state ();
          ignore (install_exn ~base_path);
          (match pending_entry_exn before_id with
-          | { exact_attempt = AQ.Exact_unbound; _ } -> ()
+          | { exact_attempt = Rule_types.Exact_unbound; _ } -> ()
           | _ -> Alcotest.fail "pre-rename failure mutated exact binding memory");
          let cancel_before_id, cancel_before_identity =
            prepare "cancel-before-rename"
@@ -2162,7 +2356,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
           | Ok _ ->
             Alcotest.fail "pre-rename cancellation reported a write outcome");
          (match pending_entry_exn cancel_before_id with
-          | { exact_attempt = AQ.Exact_unbound; _ } -> ()
+          | { exact_attempt = Rule_types.Exact_unbound; _ } -> ()
           | _ -> Alcotest.fail "pre-rename cancellation mutated exact memory");
          let cancel_after_id, cancel_after_identity =
            prepare "cancel-after-rename"
@@ -2214,8 +2408,8 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
               Alcotest.failf
                 "released binding accepted %s"
                 label)
-         [ "domain-invalid output", AQ.Exact_domain_invalid_output
-         ; "attempt replay", AQ.Exact_attempt_replay
+         [ "domain-invalid output", Rule_types.Exact_domain_invalid_output
+         ; "attempt replay", Rule_types.Exact_attempt_replay
          ];
        assert_status
          "rejected causes preserve release"
@@ -2226,7 +2420,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
          true
          (quarantine_exact
             release_identity
-            AQ.Exact_terminal_persistence_failure);
+            Rule_types.Exact_terminal_persistence_failure);
        assert_status "release terminal memory" release_id "quarantined";
        let terminalize_released label cause =
          let id, identity = prepare label in
@@ -2248,8 +2442,8 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
            (quarantine_exact identity cause);
          match pending_entry_exn id with
          | { exact_attempt =
-               AQ.Exact_bound
-                 { status = AQ.Exact_quarantined actual; _ }
+               Rule_types.Exact_bound
+                 { status = Rule_types.Exact_quarantined actual; _ }
            ; _
            } when actual = cause ->
            ()
@@ -2260,10 +2454,10 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
        in
        terminalize_released
          "release-cancellation"
-         AQ.Exact_cancellation;
+         Rule_types.Exact_cancellation;
        terminalize_released
          "release-flow-execution-failed"
-         AQ.Exact_flow_execution_failed;
+         Rule_types.Exact_flow_execution_failed;
        let quarantine_id, quarantine_identity = prepare "quarantine" in
        check_exact_update
          "bind quarantine fixture"
@@ -2281,7 +2475,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
             ~call_id:quarantine_identity.call_id_arg
             ~plan_fingerprint:quarantine_identity.plan_fingerprint_arg
             ~request_body_sha256:quarantine_identity.request_body_sha256_arg
-            ~cause:AQ.Exact_flow_execution_failed);
+            ~cause:Rule_types.Exact_flow_execution_failed);
        assert_status
          "visible quarantine memory"
          quarantine_id
@@ -2291,7 +2485,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
          false
          (quarantine_exact
             quarantine_identity
-            AQ.Exact_flow_execution_failed);
+            Rule_types.Exact_flow_execution_failed);
        let complete_id, complete_identity = prepare "complete" in
        check_exact_update
          "bind completion fixture"
@@ -2356,7 +2550,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
              ~call_id
              ~plan_fingerprint
              ~request_body_sha256
-             ~summary:(actual_summary : AQ.hitl_context_summary)
+             ~summary:(actual_summary : Rule_types.hitl_context_summary)
          =
          incr observed_calls;
          Alcotest.(check string) "recovery approval identity" id actual_id;
@@ -2418,7 +2612,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
           Alcotest.fail
             "deterministic completion rejection lost its typed recovery code");
        (match AQ.For_testing.get_pending_entry_unchecked ~id with
-        | Some { summary_attempt_disposition = AQ.Summary_attempt_settled; _ } ->
+        | Some { summary_attempt_disposition = Rule_types.Summary_attempt_settled; _ } ->
           ()
         | _ ->
           Alcotest.fail
@@ -2542,8 +2736,8 @@ let test_current_snapshot_rejects_unbound_available_summary () =
                      then
                        `Assoc
                          (("summary_status",
-                            AQ.summary_status_to_yojson
-                              (AQ.Summary_available summary))
+                            Rule_types.summary_status_to_yojson
+                              (Rule_types.Summary_available summary))
                           :: List.remove_assoc "summary_status" entry_fields)
                      else entry_json
                    | entry_json -> entry_json)
@@ -2608,7 +2802,7 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
         | Error
             (AQ.Exact_attempt_rejected
                (AQ.Exact_attempt_disposition_conflict
-                  { disposition = AQ.Summary_attempt_identity_unbound; _ })) ->
+                  { disposition = Rule_types.Summary_attempt_identity_unbound; _ })) ->
           ()
         | Error error ->
           Alcotest.fail
@@ -2656,11 +2850,11 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
          (reserve_retry_exact ~base_path retryable_entry);
        (match AQ.For_testing.get_pending_entry_unchecked ~id with
         | Some
-            { summary_status = AQ.Summary_pending
-            ; exact_attempt = AQ.Exact_unbound
+            { summary_status = Rule_types.Summary_pending
+            ; exact_attempt = Rule_types.Exact_unbound
             ; summary_attempt_disposition =
-                AQ.Summary_attempt_pre_worker_unavailable
-                  { reason_code = AQ.Summary_pre_worker_start_reserved
+                Rule_types.Summary_attempt_pre_worker_unavailable
+                  { reason_code = Rule_types.Summary_pre_worker_start_reserved
                   ; operator_detail
                   }
             ; _
@@ -2714,18 +2908,18 @@ let test_operator_recovery_skips_terminal_exact_failure () =
          true
          (quarantine_exact
             quarantined_identity
-            AQ.Exact_flow_execution_failed);
+            Rule_types.Exact_flow_execution_failed);
        check_rearm
          "explicit operator action cannot reopen exact quarantine"
          false
          (reserve_retry_exact ~base_path (pending_entry_exn quarantined_id));
        (match AQ.For_testing.get_pending_entry_unchecked ~id:quarantined_id with
         | Some
-            { summary_status = AQ.Summary_failed _
+            { summary_status = Rule_types.Summary_failed _
             ; exact_attempt =
-                AQ.Exact_bound
+                Rule_types.Exact_bound
                   { status =
-                      AQ.Exact_quarantined AQ.Exact_flow_execution_failed
+                      Rule_types.Exact_quarantined Rule_types.Exact_flow_execution_failed
                   ; _
                   }
             ; _
@@ -2782,8 +2976,8 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
         | Ok _ -> Alcotest.fail "bound owner retirement succeeded");
        (match AQ.For_testing.get_pending_entry_unchecked ~id:bound with
         | Some
-            { summary_status = AQ.Summary_pending
-            ; exact_attempt = AQ.Exact_bound binding
+            { summary_status = Rule_types.Summary_pending
+            ; exact_attempt = Rule_types.Exact_bound binding
             ; _
             } ->
           Alcotest.(check string)
@@ -2793,7 +2987,7 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
         | Some _ | None ->
           Alcotest.fail "bound entry changed on failed retirement");
        (match AQ.For_testing.get_pending_entry_unchecked ~id:sibling with
-        | Some { summary_status = AQ.Summary_pending; _ } -> ()
+        | Some { summary_status = Rule_types.Summary_pending; _ } -> ()
         | Some _ | None ->
           Alcotest.fail "blocked retirement partially mutated");
        (match
@@ -2812,7 +3006,7 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
             ids);
        match AQ.For_testing.get_pending_entry_unchecked ~id:retirable with
        | Some
-           { summary_status = AQ.Summary_failed { reason = "retired" }
+           { summary_status = Rule_types.Summary_failed { reason = "retired" }
            ; _
            } ->
          ()
@@ -2891,7 +3085,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 8
+            [ "version", `Int 9
             ; "next_sequence", `Int 1
             ; "pending", `List [ `String "malformed-entry" ]
             ; "deliveries", `List []
@@ -2926,7 +3120,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 8
+               [ "version", `Int 9
                ; "next_sequence", `Int 1
                ; "pending", `List [ `String "malformed-entry" ]
                ; "deliveries", `List []
@@ -2951,7 +3145,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 7
+            [ "version", `Int 8
             ; "pending", `List []
             ; "deliveries", `List []
             ]);
@@ -2961,7 +3155,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error
             (AQ.Install_storage_failed
               { reason =
-                  "gate_pending.version 7 is unsupported (current 8); reset \
+                  "gate_pending.version 8 is unsupported (current 9); reset \
                    runtime state before restarting MASC"
               ; _
               }) ->
@@ -3090,7 +3284,7 @@ let test_replay_sidecar_rejects_raw_output_wire () =
           aq_resolve
             ~base_path
             ~id:approval_id
-            ~decision:AQ.Decision.Approve
+            ~decision:Rule_types.Decision.Approve
         with
         | Ok () -> ()
         | Error error ->
@@ -3105,7 +3299,7 @@ let test_replay_sidecar_rejects_raw_output_wire () =
             ~tool_name:"external-effect"
             ~input
         with
-        | Ok AQ.Consumption_committed -> ()
+        | Ok (AQ.Consumption_committed _) -> ()
         | Ok _ ->
           Alcotest.fail "projection error blocked exact grant consumption"
         | Error error ->
@@ -3172,7 +3366,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 8
+             [ "version", `Int 9
             ; "next_sequence", `Int 2
             ; "pending", `List []
             ; ( "deliveries"
@@ -3208,7 +3402,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
             ~tool_name:"external-effect"
             ~input:(`Assoc [ "target", `String "replay" ])
         with
-        | Ok AQ.Consumption_committed -> ()
+        | Ok (AQ.Consumption_committed _) -> ()
         | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
           Alcotest.fail "replayed exact grant was not consumed"
         | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
@@ -3241,7 +3435,7 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
           aq_resolve
             ~base_path
             ~id
-            ~decision:AQ.Decision.Approve
+            ~decision:Rule_types.Decision.Approve
         with
         | Ok () -> ()
        | Error error ->
@@ -3331,7 +3525,7 @@ let test_observed_delivery_preserves_grant_without_replaying_wake () =
             ~tool_name:"external-effect"
             ~input
         with
-        | Ok AQ.Consumption_committed -> ()
+        | Ok (AQ.Consumption_committed _) -> ()
         | Ok
             ( AQ.Consumption_already_committed
             | AQ.Consumption_not_matching ) ->
@@ -3381,7 +3575,7 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 8
+             [ "version", `Int 9
             ; "next_sequence", `Int 4
             ; "pending", `List []
             ; ( "deliveries"
@@ -3469,22 +3663,22 @@ let test_default_auto_judge_defers_without_blocking () =
          ; causal_context =
              Some { Gate.turn_id = Some 9; snapshot = `Assoc [] }
          ; task_id = Some "task-auto-judge"
-         ; goal_ids = [ "goal-auto-judge" ]
          ; continuation_channel = None
          }
        in
        match Gate.decide ~keeper_always_allow:false request with
-       | Gate.Deferred { approval_id; reason = Gate.Auto_judge_unavailable detail } ->
+       | Gate.Deferred
+           { approval_id; reason = Gate.Auto_judge_unavailable detail; _ } ->
          Alcotest.(check bool) "unavailable reason is explicit" true
            (String.length detail > 0);
          (match AQ.For_testing.get_pending_entry_unchecked ~id:approval_id with
           | Some
-              { summary_status = AQ.Summary_pending
-              ; exact_attempt = AQ.Exact_unbound
+              { summary_status = Rule_types.Summary_pending
+              ; exact_attempt = Rule_types.Exact_unbound
               ; summary_attempt_disposition =
-                  AQ.Summary_attempt_pre_worker_unavailable
+                  Rule_types.Summary_attempt_pre_worker_unavailable
                     { reason_code =
-                        AQ.Summary_pre_worker_auto_judge_unavailable
+                        Rule_types.Summary_pre_worker_auto_judge_unavailable
                     ; operator_detail
                     }
               ; _
@@ -3522,7 +3716,7 @@ let test_unavailable_cycle_grant_never_falls_through () =
     (fun () ->
        ignore (install_exn ~base_path);
        let approval_id = submit ~base_path ~keeper_name ~input in
-       (match aq_resolve ~base_path ~id:approval_id ~decision:AQ.Decision.Approve with
+       (match aq_resolve ~base_path ~id:approval_id ~decision:Rule_types.Decision.Approve with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let resolution =
@@ -3540,7 +3734,6 @@ let test_unavailable_cycle_grant_never_falls_through () =
          ; base_path
          ; causal_context = None
          ; task_id = None
-         ; goal_ids = []
          ; continuation_channel = None
          }
        in
@@ -3555,7 +3748,7 @@ let test_unavailable_cycle_grant_never_falls_through () =
           Alcotest.fail "unexpected unavailable reason for unreadable grant");
        ignore (install_exn ~base_path);
        (match Gate.decide ~cycle_grant:grant ~keeper_always_allow:false request with
-        | Gate.Allow { source = Gate.One_shot_resolution actual } ->
+        | Gate.Allow { source = Gate.One_shot_resolution actual; _ } ->
           Alcotest.(check string) "grant remains unconsumed" approval_id actual
         | Gate.Allow _ -> Alcotest.fail "restored exact grant used the wrong source"
         | Gate.Deferred _ -> Alcotest.fail "restored exact grant did not authorize"
@@ -3584,7 +3777,7 @@ let test_nonapproved_resolution_payload_is_delivered () =
           aq_resolve
             ~base_path
             ~id:reject_id
-            ~decision:(AQ.Decision.Reject rationale)
+            ~decision:(Rule_types.Decision.Reject rationale)
         with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
@@ -3603,35 +3796,434 @@ let test_nonapproved_resolution_payload_is_delivered () =
          "rejection is not a grant"
          true
          (Option.is_none (Gate.cycle_grant_of_resolution rejected));
-       let edit_id =
+       drop_resolution ~base_path ~keeper_name rejected)
+;;
+
+let test_audit_store_failure_keeps_defer_committed_and_visible () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-audit-store-failure" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_approval.Audit.For_testing.reset_store ();
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       Keeper_approval.Audit.For_testing.reset_store ();
+       ignore (install_exn ~base_path);
+       Keeper_approval.Audit.For_testing.set_store_create_probe
+         (fun ~base_path:_ ->
+           failwith
+             "deterministic audit store failure /private/operator/.ssh/id_ed25519");
+       let request : Gate.request =
+         { keeper_name
+         ; operation = "external-effect"
+         ; input = `Assoc [ "target", `String "store-create" ]
+         ; base_path
+         ; causal_context = None
+         ; task_id = None
+         ; continuation_channel = None
+         }
+       in
+       match Gate.decide ~keeper_always_allow:false request with
+       | Gate.Deferred { approval_id; audit_receipts = [ receipt ]; _ } ->
+         check_failed_audit_receipt
+           ~event_type:Keeper_approval.Audit.Pending
+           ~stage:Keeper_approval.Audit.Store_create
+           receipt;
+         (match receipt.write_result with
+          | Ok () -> Alcotest.fail "audit failure was reported as recorded"
+          | Error failure ->
+            Alcotest.(check bool)
+              "audit receipt omits exception paths"
+              false
+              (String.contains failure.detail '/'));
+         (match AQ.For_testing.get_pending_entry_unchecked ~id:approval_id with
+          | Some _ -> ()
+          | None ->
+            Alcotest.fail
+              "audit store failure rolled back the durable pending mutation")
+       | Gate.Deferred _ -> Alcotest.fail "defer returned a non-canonical audit receipt set"
+       | Gate.Allow _ -> Alcotest.fail "unapproved request bypassed Gate"
+       | Gate.Unavailable reason ->
+         Alcotest.fail (Gate.unavailable_reason_to_string reason))
+;;
+
+let test_audit_cleanup_failure_preserves_recorded_receipt () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_approval.Audit.For_testing.reset_store ();
+      cleanup_dir base_path)
+    (fun () ->
+       Keeper_approval.Audit.For_testing.reset_store ();
+       Keeper_approval.Audit.For_testing.set_append_jsonl_cleanup_failure
+         "deterministic descriptor close failure";
+       let receipt =
+         Keeper_approval.Audit.record
+           ~base_path
+           ~event_type:Keeper_approval.Audit.Pending
+           ~id:"cleanup-settlement"
+           ~keeper_name:"queue-audit-cleanup-failure"
+           ~tool_name:"external-effect"
+           ()
+       in
+       (match receipt.write_result with
+        | Ok () -> ()
+        | Error _ ->
+          Alcotest.fail
+            "durably recorded append was collapsed into a failed receipt");
+       (match receipt.cleanup_failure with
+        | None -> Alcotest.fail "descriptor cleanup failure was hidden"
+        | Some failure ->
+          Alcotest.(check bool)
+            "cleanup stage is exact"
+            true
+            (failure.stage = Keeper_approval.Audit.Append_cleanup));
+       let open Yojson.Safe.Util in
+       let wire = Keeper_approval.Audit.receipt_to_yojson receipt in
+       Alcotest.(check bool)
+         "wire keeps durable append recorded"
+         true
+         (wire |> member "recorded" |> to_bool);
+       Alcotest.(check string)
+         "cleanup warning stays typed"
+         "append_cleanup"
+         (wire |> member "cleanup_failure" |> member "stage" |> to_string))
+;;
+
+let test_audit_append_failure_keeps_resolution_rule_and_grant_committed () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-audit-append-failure" in
+  let input = `Assoc [ "target", `String "append" ] in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_approval.Audit.For_testing.reset_store ();
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       Keeper_approval.Audit.For_testing.reset_store ();
+       ignore (install_exn ~base_path);
+       let approval_id = submit ~base_path ~keeper_name ~input in
+       Keeper_approval.Audit.For_testing.set_append_jsonl
+         (fun _path _json ->
+            failwith "deterministic approval audit append failure");
+       let resolution =
+         match
+           AQ.resolve_with_policy
+             ~base_path
+             ~id:approval_id
+             ~decision:Rule_types.Decision.Approve
+             ~remember_rule:true
+             ~created_by:"test-operator"
+             ()
+         with
+         | Ok result -> result
+         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
+       in
+       (match resolution.audit_receipts with
+        | [ rule_receipt; resolved_receipt ] ->
+          check_append_failure Keeper_approval.Audit.Rule_created rule_receipt;
+          check_append_failure Keeper_approval.Audit.Resolved resolved_receipt
+        | _ -> Alcotest.fail "resolution did not return both mutation receipts");
+       (match
+          Rules.find_matching_rule
+            ~base_path
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~input
+            ()
+        with
+        | Ok (Rule_types.Rule_match_active _) -> ()
+        | Ok (Rule_types.Rule_match_expired _ | Rule_types.Rule_match_absent) ->
+          Alcotest.fail "audit append failure rolled back the remembered rule"
+        | Error error -> Alcotest.fail (Rule_types.rule_store_error_to_string error));
+       Alcotest.(check int)
+         "resolved request left pending queue"
+         0
+         (match AQ.list_pending_entries_for_workspace ~base_path with
+          | Ok entries -> List.length entries
+          | Error error -> Alcotest.fail (AQ.storage_error_to_string error));
+       let durable_resolution =
+         durable_resolution_opt ~base_path ~keeper_name ~approval_id
+         |> require_some "approved resolution was not delivered"
+       in
+       let cycle_grant =
+         Gate.cycle_grant_of_resolution durable_resolution
+         |> require_some "approved resolution lacked its one-shot grant"
+       in
+       let request : Gate.request =
+         { keeper_name
+         ; operation = "external-effect"
+         ; input
+         ; base_path
+         ; causal_context = None
+         ; task_id = None
+         ; continuation_channel = None
+         }
+       in
+       let audit_frames = ref [] in
+       let subscriber_id = "approval-audit-append-failure" in
+       Masc.Sse.subscribe_external
+         ~id:subscriber_id
+         ~callback:(fun (event : Masc.Sse.external_event) ->
+           audit_frames := event.Masc.Sse.ext_frame :: !audit_frames)
+         ();
+       Fun.protect
+         ~finally:(fun () -> Masc.Sse.unsubscribe_external subscriber_id)
+         (fun () ->
+            (match Gate.decide ~cycle_grant ~keeper_always_allow:false request with
+             | Gate.Allow
+                 { source = Gate.One_shot_resolution actual
+                 ; audit_receipts = [ consumed_receipt; allowed_receipt ]
+                 } ->
+               Alcotest.(check string) "exact grant id" approval_id actual;
+               check_append_failure
+                 Keeper_approval.Audit.Grant_consumed
+                 consumed_receipt;
+               check_append_failure
+                 Keeper_approval.Audit.Gate_allowed
+                 allowed_receipt
+             | Gate.Allow _ ->
+               Alcotest.fail "one-shot authorization receipts were incomplete"
+             | Gate.Deferred _ -> Alcotest.fail "committed grant did not authorize"
+             | Gate.Unavailable reason ->
+               Alcotest.fail (Gate.unavailable_reason_to_string reason));
+            let audit_events =
+              !audit_frames
+              |> List.rev
+              |> List.filter_map (fun frame ->
+                match Masc.Sse.data_payload_of_frame frame with
+                | Error Masc.Sse.Missing_data_payload -> None
+                | Ok payload ->
+                  let json = Yojson.Safe.from_string payload in
+                  let open Yojson.Safe.Util in
+                  if json |> member "type" |> to_string_option = Some "approval:audit"
+                  then Some json
+                  else None)
+            in
+            Alcotest.(check int)
+              "failed authorization audits are projected"
+              2
+              (List.length audit_events);
+            let open Yojson.Safe.Util in
+            Alcotest.(check (list string))
+              "authorization audit event order"
+              [ "grant_consumed"; "gate_allowed" ]
+              (List.map
+                 (fun event -> event |> member "payload" |> member "audit" |> member "event" |> to_string)
+                 audit_events);
+            List.iter
+              (fun event ->
+                 let payload = event |> member "payload" in
+                 Alcotest.(check string)
+                   "authorization audit subject"
+                   approval_id
+                   (payload |> member "id" |> to_string);
+                 Alcotest.(check bool)
+                   "authorization audit reports append failure"
+                   false
+                   (payload |> member "audit" |> member "recorded" |> to_bool))
+              audit_events);
+       (match
+          AQ.consume_approved_resolution
+            ~base_path
+            ~id:approval_id
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~input
+        with
+        | Ok AQ.Consumption_already_committed -> ()
+        | Ok (AQ.Consumption_committed _ | AQ.Consumption_not_matching) ->
+          Alcotest.fail "consumed grant became authorizable again"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       drop_resolution ~base_path ~keeper_name durable_resolution)
+;;
+
+let test_cancelled_audit_observation_preserves_committed_allow () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-audit-cancelled-observer" in
+  let subscriber_id = "approval-audit-cancelled-observer" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Sse.unsubscribe_external subscriber_id;
+      Keeper_approval.Audit.For_testing.reset_store ();
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       Keeper_approval.Audit.For_testing.reset_store ();
+       ignore (install_exn ~base_path);
+       Keeper_approval.Audit.For_testing.set_append_jsonl
+         (fun _path _json -> failwith "deterministic audit append failure");
+       Masc.Sse.subscribe_external
+         ~id:subscriber_id
+         ~callback:(fun _ ->
+           raise
+             (Eio.Cancel.Cancelled
+                (Failure "cancelled approval audit observation")))
+         ();
+       let request : Gate.request =
+         { keeper_name
+         ; operation = "external-effect"
+         ; input = `Assoc [ "target", `String "cancelled-observer" ]
+         ; base_path
+         ; causal_context = None
+         ; task_id = None
+         ; continuation_channel = None
+         }
+       in
+       let authorization =
+         match Gate.decide ~keeper_always_allow:true request with
+         | Gate.Allow authorization -> authorization
+         | Gate.Deferred _ -> Alcotest.fail "Always Allow unexpectedly deferred"
+         | Gate.Unavailable reason ->
+           Alcotest.fail (Gate.unavailable_reason_to_string reason)
+       in
+       (match authorization.audit_receipts with
+        | [ receipt ] -> check_append_failure Keeper_approval.Audit.Gate_allowed receipt
+        | _ -> Alcotest.fail "Always Allow did not retain its exact audit receipt");
+       let execution =
+         Masc.Keeper_tool_execution.failure "effect failed after authorization"
+         |> Masc.Keeper_tool_execution.with_gate_authorization authorization
+       in
+       let metadata =
+         execution.metadata
+         |> require_some "failed tool execution discarded Gate authorization metadata"
+       in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "failed tool result keeps the committed Gate decision"
+         "allow"
+         (metadata |> member "gate" |> member "decision" |> to_string);
+       Alcotest.(check int)
+         "failed tool result keeps the audit receipt"
+         1
+         (metadata |> member "gate" |> member "audit_receipts" |> to_list |> List.length))
+;;
+
+let test_audit_lock_wait_cancellation_remains_cancellation () =
+  let base_path = temp_dir () in
+  let owner_entered = Atomic.make false in
+  let release_owner = Atomic.make false in
+  let holder =
+    Domain.spawn (fun () ->
+      Keeper_approval.Audit.For_testing.with_audit_io_lock (fun () ->
+        Atomic.set owner_entered true;
+        while not (Atomic.get release_owner) do
+          Domain.cpu_relax ()
+        done))
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set release_owner true;
+      Domain.join holder;
+      Keeper_approval.Audit.For_testing.reset_store ();
+      cleanup_dir base_path)
+    (fun () ->
+       while not (Atomic.get owner_entered) do
+         Domain.cpu_relax ()
+       done;
+       Eio_main.run @@ fun _environment ->
+       Eio.Switch.run @@ fun sw ->
+       let cancel_context, resolve_cancel_context = Eio.Promise.create () in
+       let result, resolve_result = Eio.Promise.create () in
+       Eio.Fiber.fork ~sw (fun () ->
+         let outcome =
+           try
+             Eio.Cancel.sub (fun cancellation ->
+               Eio.Promise.resolve resolve_cancel_context cancellation;
+               `Receipt
+                 (Keeper_approval.Audit.record
+                    ~base_path
+                    ~event_type:Keeper_approval.Audit.Gate_allowed
+                    ~id:"audit-lock-cancellation"
+                    ~keeper_name:"queue-audit-lock-cancellation"
+                    ~tool_name:"external-effect"
+                    ()))
+           with
+           | Eio.Cancel.Cancelled _ -> `Cancellation_escaped
+         in
+         Eio.Promise.resolve resolve_result outcome);
+       let cancellation = Eio.Promise.await cancel_context in
+       Eio.Cancel.cancel cancellation (Failure "cancel audit lock waiter");
+       match Eio.Promise.await result with
+       | `Receipt _ ->
+         Alcotest.fail "audit lock cancellation was relabelled as a write failure"
+       | `Cancellation_escaped -> ())
+;;
+
+let test_http_success_exposes_failed_resolution_and_rule_delete_audit () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-audit-http-failure" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_approval.Audit.For_testing.reset_store ();
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       Keeper_approval.Audit.For_testing.reset_store ();
+       ignore (install_exn ~base_path);
+       let approval_id =
          submit
            ~base_path
            ~keeper_name
-           ~input:(`Assoc [ "target", `String "before" ])
+           ~input:(`Assoc [ "target", `String "http" ])
        in
-       let edited_input =
-         `Assoc [ "target", `String "after"; "confirmed", `Bool true ]
+       Keeper_approval.Audit.For_testing.set_append_jsonl
+         (fun _path _json -> failwith "deterministic HTTP audit append failure");
+       let response =
+         match
+           Server_dashboard_http.dashboard_gate_resolve_http_json
+             ~base_path
+             ~created_by:"http-test-operator"
+             ~args:
+               (`Assoc
+                  [ "id", `String approval_id
+                  ; "decision", `String "approve"
+                  ; "remember_rule", `Bool true
+                  ])
+         with
+         | Ok json -> json
+         | Error error ->
+           Alcotest.fail
+             (Server_dashboard_http.approval_resolve_http_error_to_string error)
        in
-       (match aq_resolve ~base_path ~id:edit_id ~decision:(AQ.Decision.Edit edited_input) with
-        | Ok () -> ()
-        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
-       let edited =
-         durable_resolution_opt ~base_path ~keeper_name ~approval_id:edit_id
-         |> require_some "edited resolution was not delivered"
+       let open Yojson.Safe.Util in
+       Alcotest.(check bool) "HTTP mutation stayed successful" true
+         (response |> member "ok" |> to_bool);
+       let rule_id = response |> member "rule_id" |> to_string in
+       let receipts = response |> member "audit_receipts" |> to_list in
+       Alcotest.(check int) "HTTP exposes rule and resolution receipts" 2
+         (List.length receipts);
+       List.iter
+         (fun receipt ->
+            Alcotest.(check bool) "HTTP receipt reports missing audit" false
+              (receipt |> member "recorded" |> to_bool);
+            Alcotest.(check string) "HTTP receipt carries exact append stage" "append"
+              (receipt |> member "stage" |> to_string))
+         receipts;
+       let delete_response =
+         match
+           Server_dashboard_http.dashboard_gate_rule_delete_http_json
+             ~base_path
+             ~args:(`Assoc [ "id", `String rule_id ])
+         with
+         | Ok json -> json
+         | Error error -> Alcotest.fail error
        in
-       (match edited.decision with
-        | Keeper_event_queue.Hitl_edited actual ->
-          Alcotest.(check bool)
-            "edited input"
-            true
-            (Yojson.Safe.equal edited_input actual)
-        | _ -> Alcotest.fail "edited resolution lost its typed input");
-       Alcotest.(check bool)
-         "edit is not a grant"
-         true
-         (Option.is_none (Gate.cycle_grant_of_resolution edited));
-       drop_resolution ~base_path ~keeper_name rejected;
-       drop_resolution ~base_path ~keeper_name edited)
+       Alcotest.(check bool) "HTTP rule delete stayed successful" true
+         (delete_response |> member "ok" |> to_bool);
+       let delete_receipt = delete_response |> member "audit" in
+       Alcotest.(check yojson) "delete receipt event"
+         (`String "rule_deleted")
+         (delete_receipt |> member "event");
+       Alcotest.(check bool) "delete receipt reports missing audit" false
+         (delete_receipt |> member "recorded" |> to_bool);
+       Alcotest.(check string) "delete receipt carries exact append stage" "append"
+         (delete_receipt |> member "stage" |> to_string))
 ;;
 
 (* #26126: resolution writes the judge evidence the entry carried onto the
@@ -3642,22 +4234,23 @@ let test_resolved_audit_event_carries_judge_evidence () =
   let keeper_name = "queue-judge-evidence" in
   Fun.protect
     ~finally:(fun () ->
-      AQ.For_testing.reset_audit_store ();
+      Keeper_approval.Audit.For_testing.reset_store ();
       cleanup_dir base_path)
     (fun () ->
        ignore (install_exn ~base_path);
        let id =
          submit ~base_path ~keeper_name ~input:(`Assoc [ "target", `String "doc" ])
        in
-       (match aq_resolve ~base_path ~id ~decision:AQ.Decision.Approve with
+       (match aq_resolve ~base_path ~id ~decision:Rule_types.Decision.Approve with
         | Ok () -> ()
         | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
        let history =
-         AQ.list_recent_resolved
+         Keeper_approval.Audit.list_recent_resolved
            ~base_path
            ~now_ts:(Unix.gettimeofday ())
            ~window_minutes:60
            ()
+         |> resolved_history_exn
        in
        let open Yojson.Safe.Util in
        let row =
@@ -3674,7 +4267,7 @@ let test_resolved_audit_event_carries_judge_evidence () =
            (row |> member "summary_status");
          Alcotest.check yojson
            "exact_attempt recorded at resolution"
-           (AQ.exact_attempt_state_to_yojson AQ.Exact_unbound)
+           (Rule_types.exact_attempt_state_to_yojson Rule_types.Exact_unbound)
            (row |> member "exact_attempt"))
 ;;
 
@@ -3718,6 +4311,10 @@ let () =
             "dedup keeps distinct origins"
             `Quick
             test_dedup_never_merges_distinct_origins
+        ; Alcotest.test_case
+            "retry folds onto unconsumed grant until consumed"
+            `Quick
+            test_retry_folds_onto_unconsumed_grant_until_consumed
         ; Alcotest.test_case
             "resolution wakes only origin"
             `Quick
@@ -3830,6 +4427,30 @@ let () =
             "non-approved resolution payload is delivered"
             `Quick
             test_nonapproved_resolution_payload_is_delivered
+        ; Alcotest.test_case
+            "audit store failure keeps defer committed and visible"
+            `Quick
+            test_audit_store_failure_keeps_defer_committed_and_visible
+        ; Alcotest.test_case
+            "audit cleanup failure preserves recorded receipt"
+            `Quick
+            test_audit_cleanup_failure_preserves_recorded_receipt
+        ; Alcotest.test_case
+            "audit append failure keeps authority mutations committed"
+            `Quick
+            test_audit_append_failure_keeps_resolution_rule_and_grant_committed
+        ; Alcotest.test_case
+            "cancelled audit observation preserves committed Allow"
+            `Quick
+            test_cancelled_audit_observation_preserves_committed_allow
+        ; Alcotest.test_case
+            "audit lock wait cancellation remains cancellation"
+            `Quick
+            test_audit_lock_wait_cancellation_remains_cancellation
+        ; Alcotest.test_case
+            "HTTP success exposes failed resolution and rule audit"
+            `Quick
+            test_http_success_exposes_failed_resolution_and_rule_delete_audit
         ; Alcotest.test_case
             "delivery wire shape drops the request context"
             `Quick

@@ -7,8 +7,7 @@ updated: 2026-07-28
 author: vincent (drafted by Claude Opus 4.8)
 supersedes: []
 superseded_by: null
-related: ["0239", "0257", "0243", "0259", "0285"]
-implementation_prs: []
+related: ["0239", "0257", "0259", "0285"]
 ---
 
 # RFC: Keeper durable memory consolidation — deprecate memory_bank into Memory OS
@@ -44,7 +43,7 @@ durable 기억이 **두 개의 독립 시스템**으로 공존하며 **둘 다 b
    facts=명제형 claim)다. bank LT top-3 내용은 idle-echo("Acknowledged loop", "idle state confirmed")
    ·잡담이라 제거가 정당하나, "facts가 같은 정보를 커버하니 안전"이라는 단순 논리는 성립하지 않는다.
    bank LT는 *대체*가 아니라 *low-value 서사 제거*로 정당화된다.
-4. **continuity는 bank 비의존**: keeper runtime 복구는 `.memory.jsonl`이 아니라 OAS
+4. **continuity는 bank 비의존**: keeper runtime 복구는 `.memory.jsonl`이 아니라 agent_core
    checkpoint/context와 typed MASC metadata에서
    온다. → **bank를 꺼도 keeper continuity는 안 깨진다** (통합 리스크를 크게 낮추는 핵심 사실).
 
@@ -64,7 +63,7 @@ keeper durable 기억을 **Memory OS 단일 경로로 통합**하고 memory_bank
 타겟인 Memory OS retention(`cap_facts`)이 실제로 작동해야 의미가 있으므로, retention 실작동 보장을
 본 에픽 범위에 포함한다 (§3 Stage 3).
 
-비목표: Memory OS 스코어 모델 재설계(RFC-0243/0259/0285 소관)는 본 RFC 범위 밖. 본 RFC는 *두 시스템
+비목표: Memory OS 스코어 모델 재설계(RFC-0259/0285 소관)는 본 RFC 범위 밖. 본 RFC는 *두 시스템
 공존 제거*와 *retention 실작동*에 한정한다.
 
 > **2026-07-28 집행**: Stage 2~4를 단일 PR로 집행 완료 (branch

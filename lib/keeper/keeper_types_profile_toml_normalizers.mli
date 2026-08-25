@@ -9,15 +9,7 @@ val int_of_env_default :
   string -> default:int -> min_v:int -> max_v:int -> int
 val float_of_env_default :
   string -> default:float -> min_v:float -> max_v:float -> float
-val clamp_int : int -> min_v:int -> max_v:int -> int
 val validate_name : string -> bool
-val removed_keeper_input_key_names : string list
-val present_json_keys : string list -> Yojson.Safe.t -> string list
-val reject_removed_keeper_input_keys :
-  ?allow_sandbox_fields:bool ->
-  tool_name:string ->
-  Yojson.Safe.t ->
-  (unit, string) result
 val utf8_repair_string : string -> string
 val normalize_prompt_text : max_bytes:int -> string -> string
 val keeper_bootstrap_proactive_warmup_sec : unit -> int
@@ -25,7 +17,6 @@ val keeper_bootstrap_stagger_step_sec : unit -> int
 val keeper_bootstrap_retry_interval_sec : unit -> int
 val keeper_batch_limit : unit -> int
 val keeper_unified_temperature : unit -> float
-val keeper_unified_max_tokens : unit -> int
 val keeper_status_fast_default : unit -> bool
 val keeper_enable_thinking : unit -> bool
 val ensure_runtime_params_init : unit -> unit
@@ -62,8 +53,8 @@ type keeper_profile_defaults =
   Keeper_types_profile_defaults.keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
-  persona_name : string option;
   instructions : string option;
+  autonomous_instructions : string option;
   autoboot_enabled : bool option;
   mention_targets : string list;
   proactive_enabled : bool option;
@@ -73,13 +64,14 @@ type keeper_profile_defaults =
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
   multimodal_policy : Keeper_types_profile_sandbox.multimodal_policy option;
-  active_goal_ids : string list option;
+  autonomous_wake_prompt : string option;
   max_context_override : int option;
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;
-  oas_env : (string * string) list;
-  unknown_toml_keys : string list;
+  native_tool_posture : Runtime_native_tools.posture option;
+  tool_groups : string list option;
+  agent_core_env : (string * string) list;
 }
 val empty_keeper_profile_defaults : keeper_profile_defaults
 val dedupe_keep_order : 'a list -> 'a list
@@ -87,5 +79,3 @@ val normalize_name_list : string list -> string list
 val normalize_name_list_opt : string list -> string list option
 val lower_string_list_opt : string list -> string list option
 val first_some : 'a option -> 'a option -> 'a option
-val personas_root_opt : unit -> string option
-val persona_profile_path_opt : string -> string option

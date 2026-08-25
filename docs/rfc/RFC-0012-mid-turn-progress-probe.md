@@ -1,3 +1,8 @@
+---
+rfc: "0012"
+status: Draft
+---
+
 # RFC 0012 — Mid-Turn Progress Probe
 
 - Status: Draft
@@ -32,14 +37,14 @@ env-driven value to `[60, 600]`.
 `consecutive_noop_count` is updated only at turn end.
 
 Consequence: a turn that hangs in the middle — for example, an
-OAS HTTP single-bulk-read on a slow local LLM that never yields
+agent_core HTTP single-bulk-read on a slow local LLM that never yields
 intermediate progress — is invisible to the watchdog for up to one
 hour. The Apr 23 shutdown log confirms this is not theoretical:
 
 ```
-[Keeper] keeper_llm_bridge: OAS execution cancelled after 91.5s
-[Keeper] keeper_llm_bridge: OAS execution cancelled after 496.8s
-[Keeper] keeper_llm_bridge: OAS execution cancelled after 504.3s
+[Keeper] keeper_llm_bridge: agent_core execution cancelled after 91.5s
+[Keeper] keeper_llm_bridge: agent_core execution cancelled after 496.8s
+[Keeper] keeper_llm_bridge: agent_core execution cancelled after 504.3s
 ```
 
 These were 14 fibers all stuck mid-turn, only released by SIGTERM.
@@ -59,7 +64,7 @@ progress" from "hung turn that will never complete".
   but `lib/keeper/keeper_runtime_resolved.ml:73-79` currently
   clamps the env-driven value to `[60, 600]`. The desync is a code
   regression resolved separately by per-runtime override (Step 2 of
-  goal `oas-bridge-stabilization`). What remains rejected is
+  goal `agent_core-bridge-stabilization`). What remains rejected is
   **flat global reduction** that ignores the legitimate 27 B
   `900 s+` floor (`lib/keeper/keeper_stale_watchdog.ml:405-418`).
 - **Permitted (per-runtime override, added 2026-05-06)**: a runtime
@@ -73,7 +78,7 @@ progress" from "hung turn that will never complete".
   is gated behind a follow-up RFC after one week of legacy metrics backend data
   demonstrates a 900 s ceiling hit. Implementation: see
   `feature/runtime-tiered-turn-timeout`.
-- Changing OAS execution to use chunked reads. That is an OAS-level
+- Changing agent_core execution to use chunked reads. That is an agent_core-level
   change; the user explicitly noted in
   `feedback_oas_execution_uncancellable_mid_turn` that
   "masc 단독 fix 영역 zero".
@@ -83,7 +88,7 @@ progress" from "hung turn that will never complete".
 ## Proposal
 
 Add a `last_progress_at : float` field to `turn_observation` in
-`keeper_registry.ml`. Update it from every `oas:event` that proves
+`keeper_registry.ml`. Update it from every `agent_core:event` that proves
 forward motion (tool call started, tool call completed, agent text
 delta, substrate event). Use it as a third
 in-turn-stale criterion in `keeper_stale_watchdog.ml`:
@@ -113,7 +118,7 @@ Rationale:
 |---|---|
 | `lib/keeper/keeper_registry.ml` | Add `last_progress_at : float` to `turn_observation`; initialise in `start_turn`; expose `record_progress` |
 | `lib/keeper/keeper_registry.mli` | Surface `record_progress` |
-| `lib/keeper/keeper_hooks_oas.ml` | Call `Keeper_registry.record_progress` from each OAS event hook (`turn_ready`, `tool_started`, `tool_completed`, `agent_message_delta`) |
+| `lib/keeper/keeper_hooks_oas.ml` | Call `Keeper_registry.record_progress` from each agent_core event hook (`turn_ready`, `tool_started`, `tool_completed`, `agent_message_delta`) |
 | `lib/keeper/keeper_stale_watchdog.ml` | Use `last_progress_at` in `in_turn_stale` |
 | `lib/config/env_config_keeper.ml` | Add `progress_timeout_sec` (default 300, range \[60, 3600\]) |
 | `test/test_keeper_stale_watchdog.ml` (new or extended) | Cover three cases: progressing slow turn (no kill), hung mid-turn (kill after 300 s), legitimately long single-shot turn that never emits events (kill — desired behaviour) |
@@ -139,7 +144,7 @@ LOC estimate: 80–150 net additions.
 1. Stale watchdog terminates a fiber whose turn has been in
    progress for ≥ `progress_timeout_sec` with zero recorded events,
    even when total turn elapsed < `active_turn_timeout_sec`.
-2. A turn emitting at least one OAS event every 4 minutes is
+2. A turn emitting at least one agent_core event every 4 minutes is
    never killed by the new path, regardless of total duration.
 3. Test fixture verifies both, including the boundary at exactly
    `progress_timeout_sec`.
@@ -155,7 +160,7 @@ LOC estimate: 80–150 net additions.
   `progress_timeout_sec_override`.
 - Substrate events that are not progress (heartbeats, surface
   re-emissions) must be filtered out. The list of "real progress"
-  events is enumerable but needs review against `oas:event` taxonomy.
+  events is enumerable but needs review against `agent_core:event` taxonomy.
 - Should the watchdog distinguish "no event yet" (turn just
   started) from "no event for 5 min" (hang)? Yes — initialise
   `last_progress_at = obs.started_at`, then progress timeout has

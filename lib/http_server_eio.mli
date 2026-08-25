@@ -12,7 +12,7 @@
     point (with signal handlers) lives in the executable
     [bin/main_eio.ml] (and sibling [bin/*_eio.ml] binaries).
 
-    Internal: \[safe_respond_with_string] stays private.
+    Internal: [safe_respond_with_string] stays private.
 
     @see <https://github.com/anmonteiro/httpun> httpun
     documentation *)
@@ -93,12 +93,54 @@ module Response : sig
       keep-alive clients and proxies see an explicit end-of-body. *)
   val empty : ?status:Httpun.Status.t -> Httpun.Reqd.t -> unit
 
+  val etag_hex_chars : int
+  (** Hex digest characters kept in an entity tag. A tag only has to
+      distinguish this body from the previous body of the same resource, so it
+      is truncated rather than carrying a full digest. *)
+
+  val etag_of_body : string -> string
+  (** Entity tag for a response body: a hex digest truncated to
+      {!etag_hex_chars}. One policy for every response that carries a tag,
+      {!json} and {!html_cached} alike. *)
+
+  type json_conditional =
+    | Untagged
+    | Tagged of string
+    | Not_modified of string
+
+  val json_conditional
+    :  status:Httpun.Status.t
+    -> meth:Httpun.Method.t
+    -> if_none_match:string option
+    -> body:string
+    -> json_conditional
+  (** What {!json} will send, decided before any socket work.
+
+      [Untagged] when the response is not a [`OK] answer to [`GET]/[`HEAD]: a
+      validator there would invite revalidation of something that should not be
+      reused. Otherwise [Not_modified] when [if_none_match] equals the body's
+      weak tag, and [Tagged] with that tag when it does not — including when the
+      client sent nothing, since it has not claimed to hold a copy.
+
+      Exposed so the rule is testable in full without constructing a
+      [Httpun.Reqd.t]. *)
+
   (** JSON response with optional zstd compression.  Default
       status [`OK].  When [compress = true] (default) AND
       [?request] or the request attached to [reqd] supplies an
       [Accept-Encoding: zstd] match,
       uses dictionary-based compression for small messages
-      (~70% reduction vs ~6% with standard zstd). *)
+      (~70% reduction vs ~6% with standard zstd).
+
+      A [`OK] response to a GET or HEAD also carries a weak [ETag] over the
+      uncompressed body and [Cache-Control: no-cache], and answers
+      [`Not_modified] when the request's [If-None-Match] matches. The tag is
+      weak because the same JSON is served under several content encodings,
+      which are encodings of one payload rather than several payloads.
+
+      A client that sends no [If-None-Match] is unaffected — it has not
+      claimed to hold a copy, so it always receives the body. Responses that
+      are not [`OK], and responses to unsafe methods, carry no tag. *)
   val json
     :  ?status:Httpun.Status.t
     -> ?compress:bool
@@ -116,17 +158,6 @@ module Response : sig
     -> Yojson.Safe.t
     -> Httpun.Reqd.t
     -> unit
-
-  (** RFC 8594 deprecation headers ([Sunset], [Deprecation],
-      optional [Link] with [rel="successor-version"]).  [date]
-      MUST be HTTP-date format (RFC 7231 S7.1.1.1).  Pass via
-      [Response.json ~extra_headers:(sunset_headers ...) ...]. *)
-  val sunset_headers : date:string -> ?successor:string -> unit -> (string * string) list
-
-  (** Legacy JSON response without compression check (backwards
-      compatible — kept for callers that pre-date the
-      compression-aware {!json}). *)
-  val json_raw : ?status:Httpun.Status.t -> string -> Httpun.Reqd.t -> unit
 
   (** HTML response with ETag + conditional 304 support.  When
       the request If-None-Match header matches the quoted etag
@@ -196,8 +227,7 @@ module Request : sig
   val default_max_body_bytes : int
 
   (** Effective max body size, resolved at module-load time
-      from [MASC_MAX_BODY_BYTES] (preferred) or
-      [MCP_MAX_BODY_BYTES] (legacy), falling back to
+      from [MASC_MAX_BODY_BYTES], falling back to
       {!default_max_body_bytes}.  Restart required for env
       changes. *)
   val max_body_bytes : int

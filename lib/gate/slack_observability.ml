@@ -6,10 +6,7 @@
     Connection-level counters (reconnect/close) live in the I/O layer and are
     added when {!Slack_socket_client} grows observability. *)
 
-type gateway_route =
-  | Control
-  | Triggered
-  | Ambient
+include Gate_connector_observability
 
 type gateway_event =
   | Hello
@@ -18,57 +15,12 @@ type gateway_event =
   | Reaction_added
   | Ignored
 
-type inbound_outcome =
-  | Dropped_unbound
-  | Dispatch_unavailable
-  | Gate_error
-  | Empty_reply
-  | Reply_sent
-  | Reply_send_error
-
-type ambient_outcome =
-  | Ambient_recorded
-  | Ambient_binding_store_error
-  | Ambient_dropped_unbound
-  | Ambient_dropped_empty
-  | Ambient_dropped_too_long
-
-type reply_outcome =
-  | Reply_empty
-  | Reply_send_ok
-  | Reply_send_failed
-
-let gateway_route_label = function
-  | Control -> "control"
-  | Triggered -> "triggered"
-  | Ambient -> "ambient"
-
 let gateway_event_label = function
   | Hello -> "hello"
   | Message_create -> "message_create"
   | App_mention -> "app_mention"
   | Reaction_added -> "reaction_added"
   | Ignored -> "ignored"
-
-let inbound_outcome_label = function
-  | Dropped_unbound -> "dropped_unbound"
-  | Dispatch_unavailable -> "dispatch_unavailable"
-  | Gate_error -> "gate_error"
-  | Empty_reply -> "empty_reply"
-  | Reply_sent -> "reply_sent"
-  | Reply_send_error -> "reply_send_error"
-
-let ambient_outcome_label = function
-  | Ambient_recorded -> "recorded"
-  | Ambient_binding_store_error -> "binding_store_error"
-  | Ambient_dropped_unbound -> "dropped_unbound"
-  | Ambient_dropped_empty -> "dropped_empty"
-  | Ambient_dropped_too_long -> "dropped_too_long"
-
-let reply_outcome_label = function
-  | Reply_empty -> "empty"
-  | Reply_send_ok -> "sent"
-  | Reply_send_failed -> "send_error"
 
 let inc name ~labels =
   Otel_metric_store_core.inc_counter name ~labels ()

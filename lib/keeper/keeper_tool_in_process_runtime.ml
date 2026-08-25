@@ -7,11 +7,12 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+module String_set = Set.Make (String)
+
 let handle_time_now ~args:_ =
   let now_unix = Time_compat.now () in
   let now_iso = Masc_domain.now_iso () in
-  Yojson.Safe.to_string
-    (`Assoc [ "now_iso", `String now_iso; "now_unix", `Float now_unix ])
+  `Assoc [ "now_iso", `String now_iso; "now_unix", `Float now_unix ]
 ;;
 
 let handle_tools_list ~(meta : keeper_meta) ~args:_ =
@@ -47,17 +48,17 @@ let external_gate_decision
       ; base_path = config.Workspace.base_path
       ; causal_context = Option.map (fun current -> current ()) gate_context
       ; task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
-      ; goal_ids = meta.active_goal_ids
       ; continuation_channel
       }
   with
-  | Keeper_gate.Deferred { approval_id; reason } ->
+  | Keeper_gate.Deferred { approval_id; reason; audit_receipts } ->
     Error
       (Gate_deferred
          (Keeper_gate_deferred_payload.create
             ~operation
             ~approval_id
             ~reason
+            ~audit_receipts
             ()))
   | Keeper_gate.Unavailable reason ->
     Error
@@ -80,7 +81,15 @@ let external_gate_decision
       "external effect authorized operation=%s source=%s"
       operation
       (Keeper_gate.authorization_source_to_string authorization.source);
-    Ok ()
+    Ok authorization
+;;
+
+let attach_gate_authorization_to_tool_result authorization result =
+  Tool_result.with_metadata
+    (Keeper_gate.authorization_metadata
+       ?producer_metadata:(Tool_result.metadata result)
+       authorization)
+    result
 ;;
 
 let with_external_gate_tool_result
@@ -104,7 +113,8 @@ let with_external_gate_tool_result
       ~input
       ()
   with
-  | Ok () -> continue ()
+  | Ok authorization ->
+    continue () |> attach_gate_authorization_to_tool_result authorization
   | Error (Gate_deferred deferred) ->
     Keeper_gate_deferred_payload.to_tool_result
       ~tool_name:operation
@@ -138,7 +148,10 @@ let with_external_gate_tool_result_option
       ~input
       ()
   with
-  | Ok () -> continue ()
+  | Ok authorization ->
+    Option.map
+      (attach_gate_authorization_to_tool_result authorization)
+      (continue ())
   | Error (Gate_deferred deferred) ->
     Some
       (Keeper_gate_deferred_payload.to_tool_result
@@ -174,7 +187,8 @@ let with_external_gate_execution
       ~input
       ()
   with
-  | Ok () -> continue ()
+  | Ok authorization ->
+    continue () |> Keeper_tool_execution.with_gate_authorization authorization
   | Error (Gate_deferred deferred) ->
     Keeper_gate_deferred_payload.to_execution deferred
   | Error (Gate_unavailable blocked) ->
@@ -292,8 +306,31 @@ let handle_context_status ~config ~(meta : keeper_meta) ~ctx_work ~args:_ =
   Keeper_tool_memory_runtime.keeper_context_status_json ~config ~meta ~ctx_work
 ;;
 
-let handle_memory_search ~config ~(meta : keeper_meta) ~ctx_work ~args =
-  Keeper_tool_memory_runtime.keeper_memory_search_json ~config ~meta ~ctx_work ~args
+let handle_memory_write_with_outcome
+      ~config
+      ~(meta : keeper_meta)
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~args
+      ()
+  =
+  let authorize_external_effect ~operation ~input continue =
+    with_external_gate_execution
+      ~config
+      ~meta
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~operation
+      ~input
+      continue
+  in
+  Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
+    ~config
+    ~meta
+    ~authorize_external_effect
+    ~args
 ;;
 
 let handle_library_search_with_outcome ~(meta : keeper_meta) ~args =
@@ -314,28 +351,502 @@ let handle_library_read_with_outcome ~(meta : keeper_meta) ~args =
        args)
 ;;
 
+type surface_read_mode =
+  | Local_lane
+  | Discord_channel
+  | Discord_messages
+  | Discord_members
+  | Discord_member
+
+let surface_read_mode_of_args args =
+  let raw_mode =
+    match args with
+    | `Assoc fields ->
+      (match List.assoc_opt "mode" fields with
+       | None -> Ok None
+       | Some (`String value) -> Ok (Some value)
+       | Some _ -> Error "mode must be a string")
+    | _ -> Error "tool arguments must be a JSON object"
+  in
+  match raw_mode with
+  | Error message -> Error message
+  | Ok None -> Ok Local_lane
+  | Ok (Some raw) ->
+    (match raw with
+     | "local" -> Ok Local_lane
+     | "channel" -> Ok Discord_channel
+     | "messages" -> Ok Discord_messages
+     | "members" -> Ok Discord_members
+     | "member" -> Ok Discord_member
+     | other ->
+       Error
+         (Printf.sprintf
+            "mode %S is invalid; expected local, channel, messages, members, or member"
+            other))
+;;
+
+let strict_string_opt key args =
+  match args with
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | None -> Ok None
+     | Some (`String value) -> Ok (Some value)
+     | Some _ -> Error (Printf.sprintf "%s must be a string" key))
+  | _ -> Error "tool arguments must be a JSON object"
+;;
+
+let strict_int_opt key args =
+  match args with
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | None -> Ok None
+     | Some (`Int value) -> Ok (Some value)
+     | Some _ -> Error (Printf.sprintf "%s must be an integer" key))
+  | _ -> Error "tool arguments must be a JSON object"
+;;
+
+let discord_tool_error ~code message =
+  Tool_args.error_response_typed ~code message
+;;
+
+let discord_rest_error error =
+  discord_tool_error
+    ~code:Tool_args.Internal_error
+    (Format.asprintf "Discord read failed: %a" Discord_rest_client.pp_error error)
+;;
+
+let discord_bound_channel ~meta ~args =
+  let requested = strict_string_opt "channel_id" args in
+  match requested with
+  | Error message -> Error message
+  | Ok requested ->
+    (match
+       Channel_gate_discord_state.bound_channels_result ~keeper_name:meta.name
+     with
+     | Error detail ->
+       Error (Channel_gate_discord_state.binding_lookup_error_to_string detail)
+     | Ok bound_channels ->
+       let allowed channel_id =
+         List.mem channel_id bound_channels
+         ||
+         match Channel_gate_discord_state.parent_channel_of_thread ~channel_id with
+         | Some parent -> List.mem parent bound_channels
+         | None -> false
+       in
+       match requested with
+       | Some channel_id when channel_id <> "" ->
+         if allowed channel_id then Ok channel_id
+         else
+           Error
+             (Printf.sprintf
+                "channel_id %S is not bound to keeper %s"
+                channel_id meta.name)
+       | Some _ -> Error "channel_id must not be empty"
+       | None ->
+         (match bound_channels with
+          | [ channel_id ] -> Ok channel_id
+          | [] -> Error "this keeper has no bound Discord channel"
+          | channels ->
+            Error
+              (Printf.sprintf
+                 "channel_id is required; this keeper has %d bound Discord channels: %s"
+                 (List.length channels)
+                 (String.concat ", " channels))))
+;;
+
+let discord_token () =
+  match Env_config_discord.bot_token_opt () with
+  | Some token -> Ok token
+  | None -> Error "DISCORD_BOT_TOKEN is unset or empty"
+;;
+
+let discord_snowflake ~field value =
+  match Discord_rest_client.snowflake_of_string value with
+  | Ok value -> Ok value
+  | Error message -> Error (Printf.sprintf "%s: %s" field message)
+
+let discord_optional_snowflake ~field = function
+  | None -> Ok None
+  | Some value ->
+    (match discord_snowflake ~field value with
+     | Ok value -> Ok (Some value)
+     | Error message -> Error message)
+
+let discord_validate_unique_fields ~context fields =
+  let rec loop seen = function
+    | [] -> Ok ()
+    | (key, _) :: rest ->
+      if String_set.mem key seen then
+        Error (Printf.sprintf "%s contains duplicate field %S" context key)
+      else loop (String_set.add key seen) rest
+  in
+  loop String_set.empty fields
+
+let discord_validate_unique_object ~context = function
+  | `Assoc fields -> discord_validate_unique_fields ~context fields
+  | _ -> Error (Printf.sprintf "%s is not an object" context)
+;;
+
+let discord_object_field_string key = function
+  | `Assoc fields ->
+    (match
+       discord_validate_unique_fields ~context:"Discord response object" fields
+     with
+     | Error message -> Error message
+     | Ok () ->
+       (match List.assoc_opt key fields with
+        | Some (`String value) when value <> "" -> Ok value
+        | Some `Null | None ->
+          Error (Printf.sprintf "Discord response has no %s" key)
+        | Some _ ->
+          Error (Printf.sprintf "Discord response field %s is not a string" key)))
+  | _ -> Error "Discord channel response is not an object"
+;;
+
+let discord_required_snowflake_field ~field key = function
+  | `Assoc fields ->
+    (match
+       discord_validate_unique_fields ~context:"Discord response object" fields
+     with
+     | Error message -> Error message
+     | Ok () ->
+       (match List.assoc_opt key fields with
+        | Some (`String value) -> discord_snowflake ~field value
+        | Some _ ->
+          Error (Printf.sprintf "Discord response field %s is not a string" key)
+        | None -> Error (Printf.sprintf "Discord response has no %s" key)))
+  | _ -> Error "Discord response item is not an object"
+
+let discord_channel_guild_id json =
+  match discord_required_snowflake_field ~field:"id" "id" json with
+  | Error message -> Error ("Discord channel response: " ^ message)
+  | Ok _ -> discord_object_field_string "guild_id" json
+
+let discord_member_user_id json =
+  match json with
+  | `Assoc fields ->
+    (match
+       discord_validate_unique_fields ~context:"Discord member object" fields
+     with
+     | Error message -> Error message
+     | Ok () ->
+       (match List.assoc_opt "user" fields with
+        | Some (`Assoc user_fields) ->
+          (match
+             discord_validate_unique_fields
+               ~context:"Discord member user object" user_fields
+           with
+           | Error message -> Error message
+           | Ok () ->
+             (match List.assoc_opt "id" user_fields with
+              | Some (`String value) -> discord_snowflake ~field:"user.id" value
+              | Some _ -> Error "Discord member user.id is not a string"
+              | None -> Error "Discord member user has no id"))
+        | Some _ -> Error "Discord member user is not an object"
+        | None -> Error "Discord member has no user"))
+  | _ -> Error "Discord member response item is not an object"
+
+let discord_require_items ~kind validate = function
+  | `List items ->
+    let rec loop index = function
+      | [] -> Ok ()
+      | item :: rest ->
+        (match validate item with
+         | Ok _ -> loop (index + 1) rest
+         | Error message ->
+           Error (Printf.sprintf "Discord %s item %d: %s" kind index message))
+    in
+    loop 0 items
+  | _ -> Error (Printf.sprintf "Discord %s response is not an array" kind)
+
+let discord_require_shape mode json =
+  match mode with
+  | Discord_channel ->
+    (match json with
+     | `Assoc _ ->
+       (match discord_required_snowflake_field ~field:"id" "id" json with
+        | Ok _ -> Ok ()
+        | Error message -> Error ("Discord channel response: " ^ message))
+     | _ -> Error "Discord channel response is not an object")
+  | Discord_member ->
+    (match json with
+     | `Assoc _ ->
+       (match discord_member_user_id json with
+        | Ok _ -> Ok ()
+        | Error message -> Error ("Discord member response: " ^ message))
+     | _ -> Error "Discord member response is not an object")
+  | Discord_messages ->
+    discord_require_items ~kind:"message"
+      (fun item -> discord_required_snowflake_field ~field:"id" "id" item)
+      json
+  | Discord_members ->
+    discord_require_items ~kind:"member" discord_member_user_id json
+  | Local_lane -> Ok ()
+;;
+
+let surface_read_mode_label = function
+  | Local_lane -> "local"
+  | Discord_channel -> "channel"
+  | Discord_messages -> "messages"
+  | Discord_members -> "members"
+  | Discord_member -> "member"
+;;
+
+let discord_result_count (data : Yojson.Safe.t) =
+  match data with
+  | `List values -> Some (List.length values)
+  | `Assoc _ | `Null | `Bool _ | `Float _ | `Int _ | `Intlit _ | `String _ -> None
+;;
+
+let discord_success ~mode ~resource ~(channel_id : Discord_rest_client.snowflake)
+    ?guild_id
+    (data : Yojson.Safe.t) =
+  let fields : (string * Yojson.Safe.t) list =
+    [ "mode", `String (surface_read_mode_label mode)
+    ; "resource", `String resource
+    ; "scope", `String "bound_channel"
+    ; "channel_id", `String (Discord_rest_client.snowflake_to_string channel_id)
+    ; "data", data
+    ]
+    @ match guild_id with
+      | Some id ->
+        [ "guild_id", `String (Discord_rest_client.snowflake_to_string id) ]
+      | None -> []
+    @ match discord_result_count data with
+      | Some count -> [ "data_count", `Int count ]
+      | None -> []
+  in
+  Yojson.Safe.to_string (Tool_args.ok_assoc fields)
+;;
+
+let handle_discord_surface_read ~meta ~args ~mode =
+  match strict_string_opt "surface" args with
+  | Error message -> discord_tool_error ~code:Tool_args.Validation_error message
+  | Ok (Some "discord") ->
+    (match discord_bound_channel ~meta ~args, discord_token () with
+     | Error message, _ ->
+       discord_tool_error ~code:Tool_args.Precondition_failed message
+     | _, Error message -> discord_tool_error ~code:Tool_args.Auth_required message
+     | Ok raw_channel_id, Ok token ->
+       (match discord_snowflake ~field:"channel_id" raw_channel_id with
+        | Error message ->
+          discord_tool_error ~code:Tool_args.Precondition_failed message
+        | Ok channel_id ->
+          let clock = Eio_context.get_clock_opt () in
+          let rest ?guild_id call resource =
+            match call () with
+            | Error error ->
+              Log.Keeper.warn
+                ~keeper_name:meta.name
+                "discord_surface_read failed mode=%s resource=%s channel=%s: %s"
+                (surface_read_mode_label mode)
+                resource
+                (Discord_rest_client.snowflake_to_string channel_id)
+                (Format.asprintf "%a" Discord_rest_client.pp_error error);
+              discord_rest_error error
+            | Ok data ->
+              (match discord_require_shape mode data with
+               | Error message ->
+                 Log.Keeper.warn
+                   ~keeper_name:meta.name
+                   "discord_surface_read invalid response mode=%s resource=%s channel=%s: %s"
+                   (surface_read_mode_label mode)
+                   resource
+                   (Discord_rest_client.snowflake_to_string channel_id)
+                   message;
+                 discord_tool_error ~code:Tool_args.Internal_error message
+               | Ok () ->
+                 Log.Keeper.info
+                   ~keeper_name:meta.name
+                   "discord_surface_read mode=%s resource=%s channel=%s guild=%s count=%s"
+                   (surface_read_mode_label mode)
+                   resource
+                   (Discord_rest_client.snowflake_to_string channel_id)
+                   (match guild_id with
+                    | Some value -> Discord_rest_client.snowflake_to_string value
+                    | None -> "-")
+                   (match discord_result_count data with
+                    | Some count -> string_of_int count
+                    | None -> "-");
+                 discord_success ~mode ~resource ~channel_id ?guild_id data)
+          in
+          match mode with
+          | Local_lane ->
+            discord_tool_error ~code:Tool_args.Internal_error
+              "invalid Discord read mode"
+          | Discord_channel ->
+            rest
+              (fun () ->
+                 Discord_rest_client.get_channel ?clock ~token ~channel_id ())
+              "channel"
+          | Discord_messages ->
+            (match
+               strict_int_opt "limit" args,
+               strict_string_opt "discord_before" args,
+               strict_string_opt "discord_after" args
+             with
+             | Error message, _, _
+             | _, Error message, _
+             | _, _, Error message ->
+               discord_tool_error ~code:Tool_args.Validation_error message
+             | Ok limit, Ok before_raw, Ok after_raw ->
+               if Option.is_some before_raw && Option.is_some after_raw then
+                 discord_tool_error
+                   ~code:Tool_args.Validation_error
+                   "discord_before and discord_after are mutually exclusive"
+               else
+                 (match
+                    discord_optional_snowflake ~field:"discord_before" before_raw,
+                    discord_optional_snowflake ~field:"discord_after" after_raw
+                  with
+                  | Error message, _ | _, Error message ->
+                    discord_tool_error ~code:Tool_args.Validation_error message
+                  | Ok before, Ok after ->
+                    let limit =
+                      match limit with
+                      | Some value -> value
+                      | None -> Keeper_surface_read.default_limit
+                    in
+                    if limit < 1 || limit > 100 then
+                      discord_tool_error
+                        ~code:Tool_args.Validation_error
+                        "limit for Discord messages must be between 1 and 100"
+                    else
+                      rest
+                        (fun () ->
+                           Discord_rest_client.get_channel_messages
+                             ?clock ~token ~channel_id ~limit ?before ?after ())
+                        "messages"))
+          | Discord_members | Discord_member ->
+            (match
+               Discord_rest_client.get_channel ?clock ~token ~channel_id ()
+             with
+             | Error error ->
+               Log.Keeper.warn
+                 ~keeper_name:meta.name
+                 "discord_surface_read failed mode=%s resource=channel channel=%s: %s"
+                 (surface_read_mode_label mode)
+                 (Discord_rest_client.snowflake_to_string channel_id)
+                 (Format.asprintf "%a" Discord_rest_client.pp_error error);
+               discord_rest_error error
+             | Ok channel ->
+               (match discord_channel_guild_id channel with
+                | Error message ->
+                  discord_tool_error ~code:Tool_args.Not_found message
+                | Ok raw_guild_id ->
+                  (match discord_snowflake ~field:"guild_id" raw_guild_id with
+                   | Error message ->
+                     discord_tool_error ~code:Tool_args.Internal_error message
+                   | Ok guild_id ->
+                     match mode with
+                     | Discord_members ->
+                       (match
+                          strict_string_opt "query" args,
+                          strict_int_opt "limit" args,
+                          strict_string_opt "discord_after" args
+                        with
+                        | Error message, _, _
+                        | _, Error message, _
+                        | _, _, Error message ->
+                          discord_tool_error ~code:Tool_args.Validation_error message
+                        | Ok query, Ok limit, Ok after_raw ->
+                          let searching =
+                            match query with
+                            | Some value -> value <> ""
+                            | None -> false
+                          in
+                          if searching && Option.is_some after_raw then
+                            discord_tool_error
+                              ~code:Tool_args.Validation_error
+                              "discord_after cannot be combined with a member search query"
+                          else
+                            (match
+                               discord_optional_snowflake
+                                 ~field:"discord_after" after_raw
+                             with
+                             | Error message ->
+                               discord_tool_error
+                                 ~code:Tool_args.Validation_error message
+                             | Ok after ->
+                               let limit =
+                                 match limit with
+                                 | Some value -> value
+                                 | None -> Keeper_surface_read.default_limit
+                               in
+                               if limit < 1 || limit > 1000 then
+                                 discord_tool_error
+                                   ~code:Tool_args.Validation_error
+                                   "limit for Discord members must be between 1 and 1000"
+                               else
+                                 rest
+                                   (fun () ->
+                                      Discord_rest_client.get_guild_members
+                                        ?clock ~token ~guild_id ?query ~limit
+                                        ?after ())
+                                   ~guild_id
+                                   "members"))
+                     | Discord_member ->
+                       (match strict_string_opt "user_id" args with
+                        | Error message ->
+                          discord_tool_error
+                            ~code:Tool_args.Validation_error message
+                        | Ok None | Ok (Some "") ->
+                          discord_tool_error
+                            ~code:Tool_args.Validation_error
+                            "user_id is required for mode='member'"
+                        | Ok (Some user_id) ->
+                          (match discord_snowflake ~field:"user_id" user_id with
+                           | Error message ->
+                             discord_tool_error
+                               ~code:Tool_args.Validation_error message
+                           | Ok user_id ->
+                             rest
+                               (fun () ->
+                                  Discord_rest_client.get_guild_member
+                                    ?clock ~token ~guild_id ~user_id ())
+                               ~guild_id
+                               "member"))
+                     | Local_lane | Discord_channel | Discord_messages ->
+                       discord_tool_error ~code:Tool_args.Internal_error
+                         "invalid Discord read mode")))))
+  | Ok _ ->
+    discord_tool_error
+      ~code:Tool_args.Validation_error
+      "Discord live read modes require surface='discord'"
+;;
+
 let handle_surface_read ~config ~(meta : keeper_meta) ~args =
-  let surface = Safe_ops.json_string ~default:"" "surface" args in
-  let limit =
-    Safe_ops.json_int ~default:Keeper_surface_read.default_limit "limit" args
-  in
-  let before = Safe_ops.json_float_opt "before" args in
-  let page =
-    Keeper_chat_store.load_page
-      ~base_dir:config.Workspace.base_path
-      ~keeper_name:meta.name
-      ?before
-      ()
-  in
-  let notes =
-    Keeper_person_notes.notes
-      ~base_dir:config.Workspace.base_path
-      ~keeper_name:meta.name
-  in
-  Keeper_surface_read.respond ~surface ~limit
-    ~has_more:page.Keeper_chat_store.has_more
-    ~notes
-    page.Keeper_chat_store.messages
+  match
+    discord_validate_unique_object ~context:"keeper_surface_read arguments" args
+  with
+  | Error message -> discord_tool_error ~code:Tool_args.Validation_error message
+  | Ok () ->
+    (match surface_read_mode_of_args args with
+     | Error message -> discord_tool_error ~code:Tool_args.Validation_error message
+     | Ok (Discord_channel | Discord_messages | Discord_members | Discord_member as mode) ->
+       handle_discord_surface_read ~meta ~args ~mode
+     | Ok Local_lane ->
+       let surface = Safe_ops.json_string ~default:"" "surface" args in
+       let limit =
+         Safe_ops.json_int ~default:Keeper_surface_read.default_limit "limit" args
+       in
+       let before = Safe_ops.json_float_opt "before" args in
+       let page =
+         Keeper_chat_store.load_page
+           ~base_dir:config.Workspace.base_path
+           ~keeper_name:meta.name
+           ?before
+           ()
+       in
+       let notes =
+         Keeper_person_notes.notes
+           ~base_dir:config.Workspace.base_path
+           ~keeper_name:meta.name
+       in
+       Keeper_surface_read.respond ~surface ~limit
+         ~has_more:page.Keeper_chat_store.has_more
+         ~notes
+         page.Keeper_chat_store.messages)
 ;;
 
 let handle_person_note_set_with_outcome ~config ~(meta : keeper_meta) ~args =
@@ -357,7 +868,7 @@ let handle_person_note_set_with_outcome ~config ~(meta : keeper_meta) ~args =
        that clears the note (RFC-0229 §3.1); an omitted [note] must be rejected,
        not silently cleared. The prior [json_string ~default:""] collapsed both
        to "", so a keeper that omitted [note] silently deleted an existing note
-       (OAS anti-pattern #2: Unknown -> Permissive Default). The structural
+       (AGENT_CORE anti-pattern #2: Unknown -> Permissive Default). The structural
        dispatch-level gap (in-process dispatch skips required validation) is
        tracked in #21875. *)
     match Safe_ops.json_string_opt "note" args with
@@ -387,10 +898,16 @@ let handle_person_note_set ~config ~meta ~args =
 
 (* Slack bot token, resolved through the config boundary ({!Env_config_slack})
    so [SLACK_BOT_TOKEN] is read from one place — shared with the in-process
-   gateway and the chat-queue consumer — rather than a direct env lookup here. *)
+   gateway and Owner connector delivery — rather than a direct env lookup here. *)
 let slack_token_opt = Env_config_slack.bot_token_opt
 
-let connector_post_gate_input ~connector ~channel_id ~content ?blocks () =
+let connector_post_gate_input ~connector ~channel_id ~content ~mention_user_ids
+    ?thread_ts ?blocks () =
+  let thread_ts_fields =
+    match thread_ts with
+    | None -> []
+    | Some thread_ts -> [ "thread_ts", `String thread_ts ]
+  in
   let block_fields =
     match blocks with
     | None -> []
@@ -400,7 +917,9 @@ let connector_post_gate_input ~connector ~channel_id ~content ?blocks () =
     ([ "connector", `String connector
      ; "channel_id", `String channel_id
      ; "content", `String content
+     ; "mention_user_ids", Json_util.json_string_list mention_user_ids
      ]
+     @ thread_ts_fields
      @ block_fields)
 ;;
 
@@ -411,12 +930,15 @@ type connector_post_replay =
       { input : Yojson.Safe.t
       ; channel_id : string
       ; content : string
+      ; mention_user_ids : string list
       }
   | Replay_slack_post of
       { input : Yojson.Safe.t
       ; channel_id : string
+      ; thread_ts : string option
       ; content : string
       ; blocks : Yojson.Safe.t list
+      ; mention_user_ids : string list
       }
 
 let connector_post_replay_of_gate_input input =
@@ -439,6 +961,52 @@ let connector_post_replay_of_gate_input input =
     | _ ->
       Error (Printf.sprintf "approved connector_post repeats %s" key)
   in
+  (* Absent means the field was never part of the durable request (older
+     approvals predate [thread_ts]); present means it must be a usable value.
+     Absence is never widened into a default coordinate. *)
+  let optional_string key fields =
+    match
+      List.filter_map
+        (fun (name, value) ->
+           if String.equal name key then Some value else None)
+        fields
+    with
+    | [] -> Ok None
+    | [ `String value ] when not (String.equal (String.trim value) "") ->
+      Ok (Some value)
+    | [ `String _ ] ->
+      Error (Printf.sprintf "approved connector_post %s is blank" key)
+    | [ _ ] ->
+      Error
+        (Printf.sprintf "approved connector_post %s must be a string" key)
+    | _ ->
+      Error (Printf.sprintf "approved connector_post repeats %s" key)
+  in
+  let required_string_list key fields =
+    match
+      List.filter_map
+        (fun (name, value) -> if String.equal name key then Some value else None)
+        fields
+    with
+    | [ `List values ] ->
+      let rec decode acc = function
+        | [] -> Ok (List.rev acc)
+        | `String value :: rest when String.trim value <> "" ->
+          decode (String.trim value :: acc) rest
+        | `String _ :: _ ->
+          Error (Printf.sprintf "approved connector_post %s contains a blank id" key)
+        | _ :: _ ->
+          Error
+            (Printf.sprintf
+               "approved connector_post %s must contain only strings"
+               key)
+      in
+      decode [] values
+    | [ _ ] ->
+      Error (Printf.sprintf "approved connector_post %s must be an array" key)
+    | [] -> Error (Printf.sprintf "approved connector_post is missing %s" key)
+    | _ -> Error (Printf.sprintf "approved connector_post repeats %s" key)
+  in
   let reject_unknown ~allowed fields =
     match
       fields
@@ -459,21 +1027,45 @@ let connector_post_replay_of_gate_input input =
     let* connector = required_string "connector" fields in
     let* channel_id = required_string "channel_id" fields in
     let* content = required_string "content" fields in
+    (* [connector_post_gate_input] always writes the list (empty when there
+       are no mentions), so an absent field is a malformed request. *)
+    let* mention_user_ids = required_string_list "mention_user_ids" fields in
+    let* validated_mention_user_ids =
+      Keeper_surface_post.user_mentions_of_args
+        ~surface:connector
+        (`Assoc [ "mention_user_ids", Json_util.json_string_list mention_user_ids ])
+    in
+    let* mention_user_ids =
+      if validated_mention_user_ids = mention_user_ids then Ok mention_user_ids
+      else
+        Error
+          "approved connector_post mention_user_ids must be sorted and unique"
+    in
     if String.equal connector Keeper_surface_post.discord_label
     then (
       let* () =
         reject_unknown
-          ~allowed:[ "connector"; "channel_id"; "content" ]
+          ~allowed:[ "connector"; "channel_id"; "content"; "mention_user_ids" ]
           fields
       in
-      Ok (Replay_discord_post { input; channel_id; content }))
+      Ok
+        (Replay_discord_post
+           { input; channel_id; content; mention_user_ids }))
     else if String.equal connector Keeper_surface_post.slack_label
     then (
       let* () =
         reject_unknown
-          ~allowed:[ "connector"; "channel_id"; "content"; "blocks" ]
+          ~allowed:
+            [ "connector"
+            ; "channel_id"
+            ; "thread_ts"
+            ; "content"
+            ; "blocks"
+            ; "mention_user_ids"
+            ]
           fields
       in
+      let* thread_ts = optional_string "thread_ts" fields in
       match
         List.filter_map
           (fun (name, value) ->
@@ -481,7 +1073,9 @@ let connector_post_replay_of_gate_input input =
           fields
       with
       | [ `List blocks ] ->
-        Ok (Replay_slack_post { input; channel_id; content; blocks })
+        Ok
+          (Replay_slack_post
+             { input; channel_id; thread_ts; content; blocks; mention_user_ids })
       | [ _ ] ->
         Error "approved connector_post blocks must be an array"
       | [] ->
@@ -494,6 +1088,14 @@ let connector_post_replay_of_gate_input input =
            "approved connector_post connector %S is unsupported"
            connector)
   | _ -> Error "approved connector_post input must be an object"
+;;
+
+let connector_post_replay_target = function
+  | Replay_discord_post { channel_id; _ } ->
+    Keeper_surface_post.To_discord { channel_id }
+  | Replay_slack_post { channel_id; thread_ts; blocks; _ } ->
+    Keeper_surface_post.To_slack
+      { channel_id; thread_ts; blocks = Some blocks }
 ;;
 
 let with_connector_post_gate_execution
@@ -527,10 +1129,15 @@ let replay_connector_post_with_outcome
     Keeper_tool_execution.success
       (Keeper_surface_post.ok_json ~surface:connector ?message_id ())
   in
-  let fail connector detail =
+  (* [effect_disposition] decides whether the keeper may correct and retry
+     inside the same provider turn ({!Keeper_runtime_failure_route}: a proven
+     pre-effect rejection must never reach the terminal effect boundary), so
+     each connector supplies what its transport actually proves instead of
+     defaulting every failure to "outcome unknown". *)
+  let fail connector ~effect_disposition detail =
     Keeper_tool_execution.failure
       ~class_:Tool_result.Runtime_failure
-      ~effect_disposition:Tool_result.Effect_outcome_unknown
+      ~effect_disposition
       (Keeper_surface_post.error_json
          (Printf.sprintf "%s send failed: %s" connector detail))
   in
@@ -542,7 +1149,7 @@ let replay_connector_post_with_outcome
          (Printf.sprintf "%s send applied: %s" connector detail))
   in
   function
-  | Replay_discord_post { input; channel_id; content } ->
+  | Replay_discord_post { input; channel_id; content; mention_user_ids } ->
     with_connector_post_gate_execution
       ~config
       ~meta
@@ -551,10 +1158,19 @@ let replay_connector_post_with_outcome
       ?gate_grant
       ~input
     @@ fun () ->
-    (match Channel_gate_discord_state.send_message ~channel_id ~content () with
+    (match
+       Channel_gate_discord_state.send_message ~channel_id ~content
+         ~mention_user_ids ()
+     with
      | Error send_error ->
+       (* Discord stays "outcome unknown": its refusals arrive as non-2xx and
+          {!Discord_rest_client.Discord_api} carries Discord's own error code
+          rather than the HTTP status, so this layer cannot tell a 4xx refusal
+          from a 5xx that may have committed. Claiming pre-effect here would
+          license a duplicate post. *)
        fail
          Keeper_surface_post.discord_label
+         ~effect_disposition:Tool_result.Effect_outcome_unknown
          (Format.asprintf
             "%a"
             Channel_gate_discord_state.pp_send_error
@@ -585,7 +1201,8 @@ let replay_connector_post_with_outcome
             ~content
             ();
           succeed Keeper_surface_post.discord_label ~message_id ()))
-  | Replay_slack_post { input; channel_id; content; blocks } ->
+  | Replay_slack_post
+      { input; channel_id; thread_ts; content; blocks; mention_user_ids } ->
     with_connector_post_gate_execution
       ~config
       ~meta
@@ -603,15 +1220,18 @@ let replay_connector_post_with_outcome
      | Some token ->
        (match
           Keeper_chat_slack.send_message_with_blocks
+            ?thread_ts
             ~token
             ~channel:channel_id
             ~content
             ~blocks
+            ~mention_user_ids
             ()
         with
         | Error send_error ->
           fail
             Keeper_surface_post.slack_label
+            ~effect_disposition:(Keeper_chat_slack.effect_disposition send_error)
             (Format.asprintf "%a" Keeper_chat_slack.pp_error send_error)
         | Ok () ->
           (match
@@ -620,8 +1240,7 @@ let replay_connector_post_with_outcome
                ~keeper_name:meta.name
                ~content
                ~surface:
-                 (Surface_ref.Slack
-                    { team_id = None; channel_id; thread_ts = None })
+                 (Surface_ref.Slack { team_id = None; channel_id; thread_ts })
                ()
            with
            | Error detail ->
@@ -646,7 +1265,10 @@ let handle_surface_post_with_outcome
       ~args
       ()
   =
-  let succeed payload = Keeper_tool_execution.success payload in
+  let succeed target payload =
+    Keeper_tool_execution.success payload
+    |> Keeper_tool_execution.with_surface_post_receipt target
+  in
   let fail
         ?(class_ = Tool_result.Workflow_rejection)
         ~effect_disposition
@@ -656,6 +1278,26 @@ let handle_surface_post_with_outcome
   in
   let surface = String.trim (Safe_ops.json_string ~default:"" "surface" args) in
   let content = Safe_ops.json_string ~default:"" "content" args in
+  let continuation_channel =
+    Option.map
+      (fun channel ->
+         match channel with
+         | Keeper_continuation_channel.Discord
+             { channel_id; parent_channel_id = None; thread_id = None; _ } ->
+           (match
+              Channel_gate_discord_state.parent_channel_of_thread ~channel_id
+            with
+            | Some parent_channel_id ->
+              Keeper_continuation_channel.discord_thread_parent channel
+                ~parent_channel_id
+            | None -> channel)
+         | Keeper_continuation_channel.Discord _
+         | Keeper_continuation_channel.Dashboard _
+         | Keeper_continuation_channel.Slack _
+         | Keeper_continuation_channel.Keeper _
+         | Keeper_continuation_channel.Unrouted _ -> channel)
+      continuation_channel
+  in
   let redaction =
     Keeper_secret_redaction.snapshot
       ~base_path:config.Workspace.base_path
@@ -676,7 +1318,29 @@ let handle_surface_post_with_outcome
     fail
       ~effect_disposition:Tool_result.Proven_pre_effect
       (Keeper_surface_post.error_json "content is required and must be non-empty.")
-  else
+  else match Keeper_surface_post.user_mentions_of_args ~surface args with
+  | Error message ->
+    fail
+      ~effect_disposition:Tool_result.Proven_pre_effect
+      (Keeper_surface_post.error_json message)
+  | Ok mention_user_ids ->
+    match Keeper_surface_post.thread_ts_of_args ~surface args with
+    | Error message ->
+      fail
+        ~effect_disposition:Tool_result.Proven_pre_effect
+        (Keeper_surface_post.error_json message)
+    | Ok requested_thread_ts ->
+    match Keeper_surface_post.blocks_of_args ~surface args with
+    | Error message ->
+      fail
+        ~effect_disposition:Tool_result.Proven_pre_effect
+        (Keeper_surface_post.error_json message)
+    | Ok requested_blocks ->
+    let requested_blocks =
+      Option.map
+        (List.map (Keeper_secret_redaction.redact_json redaction))
+        requested_blocks
+    in
     match
       Channel_gate_discord_state.bound_channels_result ~keeper_name:meta.name
     with
@@ -698,13 +1362,31 @@ let handle_surface_post_with_outcome
        match
          Keeper_surface_post.resolve_target ~surface ~channel_id
            ?continuation_channel
+           ?requested_thread_ts
            ~bound_slack_channels ~bound_discord_channels ()
        with
       | Error message ->
         fail
           ~effect_disposition:Tool_result.Proven_pre_effect
           (Keeper_surface_post.error_json message)
-      | Ok Keeper_surface_post.To_dashboard ->
+      | Ok target ->
+        let target = Keeper_surface_post.set_blocks target requested_blocks in
+        let messages =
+          Keeper_chat_store.load
+            ~base_dir:config.Workspace.base_path
+            ~keeper_name:meta.name
+        in
+        (match
+           Keeper_surface_post.validate_user_mentions_against_roster
+             ~target ~messages mention_user_ids
+         with
+         | Error message ->
+           fail
+             ~effect_disposition:Tool_result.Proven_pre_effect
+             (Keeper_surface_post.error_json message)
+         | Ok () ->
+         match target with
+         | Keeper_surface_post.To_dashboard ->
         (match
            Keeper_chat_store.append_assistant_message_result
              ~base_dir:config.Workspace.base_path
@@ -723,13 +1405,16 @@ let handle_surface_post_with_outcome
              ~source:"dashboard"
              ~content:safe_content
              ();
-           succeed (Keeper_surface_post.ok_json ~surface ()))
-    | Ok (Keeper_surface_post.To_discord { channel_id }) ->
+           succeed
+             Keeper_surface_post.To_dashboard
+             (Keeper_surface_post.ok_json ~surface ()))
+         | Keeper_surface_post.To_discord { channel_id } ->
       let input =
         connector_post_gate_input
           ~connector:surface
           ~channel_id
           ~content:safe_content
+          ~mention_user_ids
           ()
       in
       replay_connector_post_with_outcome
@@ -738,16 +1423,23 @@ let handle_surface_post_with_outcome
         ?continuation_channel
         ?gate_context
         ?gate_grant
-        (Replay_discord_post { input; channel_id; content = safe_content })
-    | Ok (Keeper_surface_post.To_slack { channel_id; blocks = _ }) ->
+        (Replay_discord_post
+           { input; channel_id; content = safe_content; mention_user_ids })
+      |> Keeper_tool_execution.with_surface_post_receipt target
+         | Keeper_surface_post.To_slack { channel_id; thread_ts; blocks } ->
       let slack_blocks =
-        Keeper_chat_slack.content_blocks_of_text safe_content
+        match blocks with
+        | Some blocks -> blocks
+        | None ->
+          Keeper_chat_slack.message_blocks_of_text ~mention_user_ids safe_content
       in
       let input =
         connector_post_gate_input
           ~connector:surface
           ~channel_id
           ~content:safe_content
+          ~mention_user_ids
+          ?thread_ts
           ~blocks:slack_blocks
           ()
       in
@@ -760,9 +1452,12 @@ let handle_surface_post_with_outcome
         (Replay_slack_post
            { input
            ; channel_id
+           ; thread_ts
            ; content = safe_content
            ; blocks = slack_blocks
-           }))
+           ; mention_user_ids
+           })
+      |> Keeper_tool_execution.with_surface_post_receipt target))
 ;;
 
 let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =
@@ -801,10 +1496,6 @@ let handle_voice_with_outcome
     ~name
     ~args
     ()
-;;
-
-let handle_task ~config ~(meta : keeper_meta) ~name ~args =
-  Keeper_tool_task_runtime.handle_keeper_task_tool ~config ~meta ~name ~args
 ;;
 
 (* RFC-0182 §3.1 — shared helper. Converts the [Tool_result.result option]
@@ -883,7 +1574,7 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
   let ctx : Tool_misc.context =
     { config
     ; agent_name = meta.name
-    ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ()
+    ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ~surface:All
     }
   in
   Tool_misc.dispatch ctx ~name ~args
@@ -905,10 +1596,40 @@ let handle_masc_agent_timeline_with_outcome ~(config : Workspace.config) ~(meta 
   |> dispatch_option_to_execution ~name
 ;;
 
-let handle_masc_schedule_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+(* The registry and the switch are bound together on the turn's fiber, so a
+   call that finds one finds the other. Outside a turn there is nowhere for a
+   process to live that the caller could reach again, and saying that beats
+   creating a registry no later call can find. *)
+let handle_keeper_spawn_with_outcome ~name ~args =
+  match Spawn_turn_registry.get_opt (), Eio_context.get_switch_opt () with
+  | Some registry, Some sw ->
+    Tool_spawn.dispatch { Tool_spawn.registry; sw } ~name ~args
+    |> dispatch_option_to_execution ~name
+  | (Some _ | None), (Some _ | None) ->
+    Keeper_tool_execution.failure
+      (Yojson.Safe.to_string
+         (`Assoc
+             [ "error", `String "spawn is only available inside a keeper turn"
+             ; "tool", `String name
+             ]))
+;;
+
+let handle_masc_schedule_with_outcome
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ?continuation_channel
+      ~name
+      ~args
+      ()
+  =
   let ctx : Tool_schedule.context =
     { config
     ; agent_name = meta.name
+    ; stamp_keeper_wake_result_delivery =
+        (fun ~payload ->
+           Schedule_payload_projection.set_keeper_wake_result_delivery
+             ~payload
+             ~channel:continuation_channel)
     ; admit_keeper_wake_creation = Keeper_schedule_creation_admission.run
     }
   in
@@ -1048,27 +1769,6 @@ let handle_masc_local_runtime_with_outcome
     ~name
     ~args
   |> dispatch_option_to_execution ~name
-;;
-
-let handle_masc_local_runtime
-      ~config
-      ~meta
-      ?continuation_channel
-      ?gate_context
-      ?gate_grant
-      ~name
-      ~args
-      ()
-  =
-  (handle_masc_local_runtime_with_outcome
-     ~config
-     ~meta
-     ?continuation_channel
-     ?gate_context
-     ?gate_grant
-     ~name
-     ~args
-     ()).raw_output
 ;;
 
 (* RFC-0182 §3.1 — masc_keeper cluster.  [Keeper_tool_surface] lives in lib/

@@ -3,8 +3,7 @@
 #
 # Invariant: every `.worktrees/<...>` reference in config/ must be inside a
 # keeper sandbox repo path.  The model-facing canonical form is now
-# `repos/<repo>/.worktrees/...`; legacy `.masc/playground/.../repos/...`
-# remains accepted as a compatibility form.  A bare `.worktrees/...` string
+# `repos/<repo>/.worktrees/...`. A bare `.worktrees/...` string
 # teaches keepers a server-root relative path that the harness blocks.
 #
 # Re-run locally:
@@ -29,7 +28,6 @@ cd "$ROOT"
 SEARCH_ROOTS=(
   "config/prompts"
   "config/keepers"
-  "config/personas"
 )
 
 # If any of the search roots has been removed by a future refactor, skip
@@ -58,7 +56,7 @@ if [ -n "$drift_hits" ]; then
   cat <<'EOF' >&2
 ✗ validate-prompt-paths: bare `.worktrees/...` reference found in config/
 
-Keepers see every config/prompts, config/keepers/*.toml, and config/personas/*
+Keepers see their config/keepers/<name>.toml instructions
 as part of their system prompt. A bare `.worktrees/<branch>` path is relative
 to the server root, not the keeper sandbox — the harness rejects it as outside
 the sandbox boundary.

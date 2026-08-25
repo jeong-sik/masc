@@ -65,13 +65,6 @@
   white-space: nowrap;
 }
 
-/* Fusion's dense master list uses a 20px identity sigil. Scope this size so
-   the 8x8 art stays legible without making each history row card-height. */
-.v2-fusion-surface .fus-list .pixel-avatar--sm {
-  width: 20px;
-  height: 20px;
-}
-
 .v2-fusion-surface .fus-list-truth {
   flex: none;
   border: 1px solid var(--warn-border);

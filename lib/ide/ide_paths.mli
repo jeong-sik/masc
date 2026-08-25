@@ -1,67 +1,24 @@
 (** IDE store path SSOT.
 
     Centralises the [.masc-ide/] subdirectory name and store path
-    construction used by the IDE annotation, region tracker, meta sync,
-    and HTTP query modules.
+    construction used by the IDE annotation, region tracker, and HTTP
+    query modules.
 
-    Replaces the previously scattered [Filename.concat _ ".masc-ide"]
-    literal flagged in RFC-0084 §1.7 (Scattered hardcoded default).
-
-    RFC-0128 §4.1, §4.2 extend this module with canonical-URL slug
-    derivation and partitioned store paths ([by-url/<slug>/],
-    [_orphan/]) so keeper writes from a sandbox clone and IDE reads
-    against the user's working tree can join on the same codebase
-    identity. The slug helpers are pure additions in PR-1a and have
-    zero callers until PR-1b/c wire them. *)
-
-val store_subdir : string
-(** The literal subdirectory name [".masc-ide"]. *)
+    RFC-0378 §5.2: the store holds addressed code facts only, laid out
+    as [by-url/<codebase-slug>/]. A store directory is named by the
+    slug directly — the same wire key the scope, the co-view context,
+    and the address mint carry — so keeper writes from a sandbox clone
+    and IDE reads against the user's working tree join on the same
+    codebase identity. *)
 
 val store_path : base_dir:string -> string
 (** [store_path ~base_dir] returns [base_dir/.masc-ide]. *)
 
-val by_url_path : base_dir:string -> canonical_url:string -> string
-(** [by_url_path ~base_dir ~canonical_url] returns
-    [base_dir/.masc-ide/by-url/<canonical_url>]. The caller is
-    responsible for ensuring [canonical_url] is a slug returned from
-    [canonical_url_of_remote]. *)
-
-val orphan_path : base_dir:string -> string
-(** [orphan_path ~base_dir] returns [base_dir/.masc-ide/_orphan].
-    Records whose canonical URL cannot be resolved land here so silent
-    loss is impossible. *)
-
-type partition =
-  Agent_observation.codebase_partition =
-  | By_url of string
-  | No_canonical_url
-  | Unmatched
-  | Base_unresolved
-  | Legacy_default
-(** RFC-0128 §4.2 store partition selector (IDE Observation Plane v2 §7
-    typed reasons).
-
-    [By_url slug] selects [base_dir/.masc-ide/by-url/<slug>/]. The
-    caller must obtain [slug] from {!canonical_url_of_remote}.
-
-    The four non-By_url variants ([No_canonical_url], [Unmatched],
-    [Base_unresolved], [Legacy_default]) all map to
-    [base_dir/.masc-ide/_orphan/] on disk (layout unchanged) but carry
-    distinct typed reasons. Silent loss is avoided by routing failures
-    here instead of dropping them; the reason distinguishes {v2 §7}
-    empty-repo / unmatched-repo_id / base-loss / structural-default. *)
-
-val partition_kind : partition -> string
-(** Stable JSON/debug label for [partition]. *)
-
-val partition_is_orphan : partition -> bool
-(** [partition_is_orphan partition] is [true] when [partition] writes to
-    the shared [_orphan/] store. *)
-
-val partition_store_dir : base_dir:string -> partition -> string
-(** [partition_store_dir ~base_dir partition] returns the directory
-    that holds [annotations.jsonl] / [regions.jsonl] for the chosen
-    partition. Total. *)
+val code_store_dir : base_dir:string -> codebase:string -> string
+(** [code_store_dir ~base_dir ~codebase] returns
+    [base_dir/.masc-ide/by-url/<codebase>]. The caller passes a
+    canonical slug — {!canonical_url_of_remote} output, or a scope value
+    validated by the same acceptance. *)
 
 val canonical_url_of_remote : string -> string option
 (** [canonical_url_of_remote remote] normalises a git remote string

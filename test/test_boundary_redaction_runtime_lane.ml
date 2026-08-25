@@ -21,11 +21,11 @@ let test_runtime_lane_public_surfaces_use_boundary_ssot () =
   Alcotest.(check string)
     "keeper hooks use boundary lane SSOT"
     runtime_lane_string
-    Masc.Keeper_hooks_oas.runtime_lane_label;
+    Masc.Keeper_hooks_agent_core.runtime_lane_label;
   Alcotest.(check string)
-    "keeper hooks OAS types use boundary lane SSOT"
+    "keeper hooks AGENT_CORE types use boundary lane SSOT"
     runtime_lane_string
-    Keeper_hooks_oas_types.runtime_lane_label;
+    Keeper_hooks_agent_core_types.runtime_lane_label;
   Alcotest.(check string)
     "keeper agent result uses boundary lane SSOT"
     runtime_lane_string

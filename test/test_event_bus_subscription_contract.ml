@@ -1,38 +1,38 @@
 open Alcotest
 
-module Bridge = Masc.Agent_sdk_metrics_bridge
+module Bridge = Masc.Runtime_event_bus
 
 let event index =
-  Agent_sdk.Event_bus.mk_event
-    (Agent_sdk.Event_bus.Custom ("test.event", `Int index))
+  Agent_core.Event_bus.mk_event
+    (Agent_core.Event_bus.Custom ("test.event", `Int index))
 ;;
 
-let event_index (event : Agent_sdk.Event_bus.event) =
+let event_index (event : Agent_core.Event_bus.event) =
   match event.payload with
-  | Agent_sdk.Event_bus.Custom ("test.event", `Int index) -> index
+  | Agent_core.Event_bus.Custom ("test.event", `Int index) -> index
   | _ -> fail "unexpected event payload"
 ;;
 
 let subscription_stats purpose bus =
-  Agent_sdk.Event_bus.(stats bus).subscriptions
-  |> List.find (fun (stats : Agent_sdk.Event_bus.subscription_stats) ->
+  Agent_core.Event_bus.(stats bus).subscriptions
+  |> List.find (fun (stats : Agent_core.Event_bus.subscription_stats) ->
     stats.purpose = Some purpose)
 ;;
 
 let test_subscribers_own_independent_overflow () =
   Eio_main.run (fun _env ->
-    let bus = Agent_sdk.Event_bus.create () in
+    let bus = Agent_core.Event_bus.create () in
     let oldest =
       Bridge.subscribe
         ~capacity:2
-        ~overflow:Agent_sdk.Event_bus.Drop_oldest
+        ~overflow:Agent_core.Event_bus.Drop_oldest
         ~purpose:"oldest"
         bus
     in
     let newest =
       Bridge.subscribe
         ~capacity:2
-        ~overflow:Agent_sdk.Event_bus.Drop_newest
+        ~overflow:Agent_core.Event_bus.Drop_newest
         ~purpose:"newest"
         bus
     in

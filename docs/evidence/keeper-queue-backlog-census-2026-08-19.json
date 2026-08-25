@@ -1,0 +1,32 @@
+{
+  "captured_at": "2026-08-19T06:05:00Z",
+  "purpose": "Drain Queue 행 — 전 keeper 이벤트 큐 적체 전수 조사 (#29052 후속, #29071 발견)",
+  "source": "<base-path>/.masc/keepers/*/event-queue-v15.json + <base-path>/.masc/keepers/<name>.json (last_turn_ts)",
+  "census": {
+    "keepers_with_queue_file": 50,
+    "keepers_with_pending": 33,
+    "keepers_with_transition_outbox": 0
+  },
+  "stalled_consumer": {
+    "keeper": "taskmaster",
+    "pending": 52,
+    "kinds": { "schedule_due": 52 },
+    "oldest_arrival": "2026-08-17T02:17Z",
+    "newest_arrival": "2026-08-19T05:17Z",
+    "last_turn_ts": "2026-08-17T02:15Z",
+    "gap_hours": 51.0,
+    "total_turns": 27644,
+    "revision": 1688,
+    "admitted_revision_range": [1636, 1687],
+    "reading": "마지막 턴 2분 뒤부터 큐가 쌓이기 시작했고 유입은 관측 43분 전까지 계속됐다. 배달 경로는 살아 있고 소비만 멈춘 형태."
+  },
+  "control_group": {
+    "note": "pending이 있는 나머지 32 keeper는 전부 최신 유입 시각 == 마지막 턴 시각(gap ~0h) — 종료 시점 잔여이지 정체가 아니다.",
+    "examples": [
+      { "keeper": "polisher", "pending": 2, "newest_arrival": "2026-08-19T00:15Z", "last_turn": "2026-08-19T00:16Z" },
+      { "keeper": "rw-e0-r7-20260818-build-b", "pending": 23, "newest_arrival": "2026-08-18T06:59Z", "last_turn": "2026-08-18T06:59Z" }
+    ]
+  },
+  "verdict": "라이브 정체는 taskmaster 단일 사례 — 대조군 32건이 있어 '큐에 pending이 남는 것' 자체는 정상 종료 형태임을 구분할 수 있다. #29071로 등록.",
+  "method_note": "queue 파일의 항목 필드명은 'entries'/'queue'가 아니라 'pending'이다. 잘못된 키로 세면 전 keeper 0건이라는 반대 결론이 나온다(실제로 1차 집계에서 발생)."
+}

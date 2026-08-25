@@ -1,10 +1,9 @@
-(** Runtime adapter for LLM-owned current Memory OS selection.
+(** Runtime adapter for tool-free LLM-owned current Memory OS selection.
 
-    One OAS exact-output call selects the complete current memory. After domain
-    validation, one atomic current-snapshot replacement is the only MASC-side
-    effect. There is no secondary journal or episode/facts fan-out. *)
-
-val cadence_turns : unit -> int
+    The exact-output flow receives only the immutable Librarian input. No tool
+    output or external research is admitted to the persistent Memory OS
+    mutation path. One atomic current-snapshot replacement remains the sole
+    mutation authority. *)
 
 val cadence_step : cadence:int -> counter:int -> int * bool
 val cadence_step_keyed
@@ -12,52 +11,29 @@ val cadence_step_keyed
   -> current_trace:string
   -> prior:(string * int) option
   -> (string * int) * bool
-val cadence_due : keeper_id:string -> trace_id:string -> bool
-val cadence_record_success : keeper_id:string -> trace_id:string -> unit
-val cadence_record_attempt : keeper_id:string -> trace_id:string -> unit
 val cadence_counter_entries : unit -> int
 
 val max_messages : unit -> int
-val select_recent_messages
-  :  max_messages:int
-  -> Agent_sdk.Types.message list
-  -> Agent_sdk.Types.message list
+val prompt_max_messages : unit -> int
+
+(** The immutable input projected into the Librarian prompt. The exact-run
+    registry records this value as the actual input, so observability and
+    provider dispatch share the same history window. *)
+val prompt_input_for_librarian
+  :  Keeper_librarian.input
+  -> Keeper_librarian.input
 
 val messages_for_librarian
   :  Keeper_librarian.input
-  -> (Agent_sdk.Types.message list, string) result
-
-val exact_lane_id : string
+  -> (Agent_core.Types.message list, string) result
 
 type extraction_error
 
-type extraction_error_kind =
-  | Prompt_render_failure
-  | Execution_clock_unavailable
-  | Exact_setup_failure
-  | Exact_execution_failure
-  | Domain_output_invalid
-  | Memory_snapshot_write_failure
-
-val extraction_error_kind : extraction_error -> extraction_error_kind
-val extraction_error_to_string : extraction_error -> string
-val should_record_cadence_backoff_after_error : extraction_error -> bool
-
-val extract_with_exact_output_classified
-  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> Keeper_librarian.input
-  -> (Keeper_librarian.selection, extraction_error) result
-
-val extract_and_commit_with_exact_output_classified
-  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> keepers_dir:string
-  -> keeper_id:string
-  -> expected_revision:int option
-  -> Keeper_librarian.input
-  -> (Keeper_memory_os_current.t, extraction_error) result
-
+(** Which failure kind this error records in the memory journal. The vocabulary
+    is owned by {!Keeper_memory_os_current} because the journal is the only
+    place it reaches disk; this function is the one place the classification
+    happens, so adding an [extraction_error] case fails to compile until it
+    names its journal kind. *)
 val run_best_effort
   :  keepers_dir:string
   -> keeper_id:string

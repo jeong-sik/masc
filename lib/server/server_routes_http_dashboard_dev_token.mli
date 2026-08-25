@@ -32,11 +32,13 @@ val ensure_dashboard_dev_token :
   ?load:(string -> string) ->
   ?write:(string -> string -> (unit, string) result) ->
   string -> (dashboard_dev_token, token_error) result
-(** Return the reusable Worker token or resume/create one role-aware rotation.
-    Rotation is serialized across Eio and non-Eio callers and is protected
-    against cancellation after the durable transaction starts. Optional I/O
-    functions are scoped to this call so failure-path tests do not mutate
-    process-global credential behavior. *)
+(** Return the reusable Admin token or resume/create one role-aware rotation.
+    The loopback dev-token is the local operator's own session, so the
+    dashboard credential is issued as Admin; a stored token whose credential
+    role differs rotates. Rotation is serialized across Eio and non-Eio
+    callers and is protected against cancellation after the durable
+    transaction starts. Optional I/O functions are scoped to this call so
+    failure-path tests do not mutate process-global credential behavior. *)
 
 val ensure_dashboard_dev_token_for_authority :
   request_authority:Server_request_authority.authority ->

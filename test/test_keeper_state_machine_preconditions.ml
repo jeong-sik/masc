@@ -34,6 +34,119 @@ let apply_err ~current_phase ~conditions ~event =
   | Error e -> e
 ;;
 
+
+(* ── Event precondition coverage ───────────────────────── *)
+
+(* [check_event_precondition] used to end in [| _ -> Ok ()], so an event
+   added to the variant inherited "no precondition" without anyone
+   deciding that. It now enumerates, and a new constructor breaks that
+   match.
+
+   This [event_tag] match is exhaustive for the same reason: it makes a new
+   constructor break this file too, so [all_events] below cannot quietly
+   fall behind the type it is supposed to cover. *)
+let event_tag : SM.event -> string = function
+  | SM.Heartbeat_ok -> "heartbeat_ok"
+  | SM.Heartbeat_failed _ -> "heartbeat_failed"
+  | SM.Turn_succeeded -> "turn_succeeded"
+  | SM.Turn_failed _ -> "turn_failed"
+  | SM.Context_measured _ -> "context_measured"
+  | SM.Compaction_started -> "compaction_started"
+  | SM.Compaction_completed -> "compaction_completed"
+  | SM.Compaction_failed _ -> "compaction_failed"
+  | SM.Handoff_started -> "handoff_started"
+  | SM.Handoff_completed _ -> "handoff_completed"
+  | SM.Handoff_failed _ -> "handoff_failed"
+  | SM.Operator_pause -> "operator_pause"
+  | SM.Operator_resume -> "operator_resume"
+  | SM.Operator_stop _ -> "operator_stop"
+  | SM.Stop_requested -> "stop_requested"
+  | SM.Drain_complete -> "drain_complete"
+  | SM.Fiber_started -> "fiber_started"
+  | SM.Fiber_terminated _ -> "fiber_terminated"
+  | SM.Supervisor_restart_attempt _ -> "supervisor_restart_attempt"
+  | SM.Credential_archived -> "credential_archived"
+  | SM.Operator_compact_requested -> "operator_compact_requested"
+  | SM.Operator_clear_requested _ -> "operator_clear_requested"
+;;
+
+let all_events : SM.event list =
+  [ SM.Heartbeat_ok
+  ; SM.Heartbeat_failed { consecutive = 1 }
+  ; SM.Turn_succeeded
+  ; SM.Turn_failed { consecutive = 1 }
+  ; SM.Context_measured
+      { context_ratio = 0.1
+      ; message_count = 1
+      ; token_count = 1
+      ; context_actions = { SM.compact = false; handoff = false }
+      }
+  ; SM.Compaction_started
+  ; SM.Compaction_completed
+  ; SM.Compaction_failed { reason = "probe" }
+  ; SM.Handoff_started
+  ; SM.Handoff_completed { new_trace_id = "trace" }
+  ; SM.Handoff_failed { reason = "probe" }
+  ; SM.Operator_pause
+  ; SM.Operator_resume
+  ; SM.Operator_stop { remove_meta = false }
+  ; SM.Stop_requested
+  ; SM.Drain_complete
+  ; SM.Fiber_started
+  ; SM.Fiber_terminated
+      { outcome = "ok"; provider_id = None; http_status = None }
+  ; SM.Supervisor_restart_attempt { attempt = 1 }
+  ; SM.Credential_archived
+  ; SM.Operator_compact_requested
+  ; SM.Operator_clear_requested { preserve_system = true; reason = "probe" }
+  ]
+;;
+
+(* A coverage list shorter than the variant would silently test less. *)
+let test_event_witnesses_cover_the_variant () =
+  check int "one witness per event constructor" 22 (List.length all_events);
+  check int "witness tags are distinct" 22
+    (List.length (List.sort_uniq String.compare (List.map event_tag all_events)))
+;;
+
+let precondition_reason ~conditions event =
+  match SM.apply_event ~current_phase:SM.Running ~conditions ~event ~now:1000.0 with
+  | Error (SM.Precondition_violation { reason; _ }) -> Some reason
+  | Error _ | Ok _ -> None
+;;
+
+(* From healthy Running conditions no event has an unmet precondition. The
+   two events that carry one are gated on buffer-op flags, which are false
+   here. *)
+let test_no_precondition_fires_from_healthy_running () =
+  List.iter
+    (fun event ->
+      match precondition_reason ~conditions:running_conditions event with
+      | None -> ()
+      | Some reason ->
+        failf "%s hit a precondition from healthy Running: %s" (event_tag event) reason)
+    all_events
+;;
+
+(* Operator_compact_requested is the one event with buffer-op preconditions,
+   and it must be the only one that reacts to those flags. *)
+let test_only_operator_compact_reacts_to_buffer_flags () =
+  List.iter
+    (fun (label, conditions) ->
+      List.iter
+        (fun event ->
+          let hit = precondition_reason ~conditions event <> None in
+          let expected = event_tag event = "operator_compact_requested" in
+          if hit && not expected
+          then failf "%s hit a precondition under %s" (event_tag event) label
+          else if expected && not hit
+          then failf "operator_compact_requested did not reject under %s" label)
+        all_events)
+    [ "compaction_active", { running_conditions with SM.compaction_active = true }
+    ; "handoff_active", { running_conditions with SM.handoff_active = true }
+    ]
+;;
+
 let outcome_kind_of = function
   | A.Passed -> "passed"
   | A.Policy_failed _ -> "policy_failed"
@@ -140,9 +253,6 @@ let test_attribution_gate_and_origin_invariant () =
       , Error
           (SM.Invalid_transition
              { from_phase = SM.Running; to_phase = SM.Compacting; reason = "test" }) )
-    ; ( SM.Heartbeat_ok
-      , Error (SM.Terminal_state { current = SM.Dead; attempted_event = "Heartbeat_ok" })
-      )
     ]
   in
   List.iter
@@ -245,10 +355,6 @@ let test_snapshot_stopped_requires_drain () =
   assert_snapshot_fails ~property:"StoppedRequiresDrain" SM.Stopped c
 ;;
 
-let test_snapshot_dead_requires_tombstone () =
-  let c = { running_conditions with fiber_alive = false } in
-  assert_snapshot_fails ~property:"DeadRequiresTombstone" SM.Dead c
-;;
 
 let test_snapshot_derive_disagreement () =
   let c = SM.default_conditions in

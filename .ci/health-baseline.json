@@ -16,7 +16,6 @@
     "lib_ml_over_500": 222,
     "bin_ml_over_500": 5,
     "test_ml_over_500": 143,
-    "examples_ml_over_500": 0,
     "mli_open_base": 0,
     "ml_base_stdlib_shadow": 0,
     "bin_ml_base_stdlib_shadow": 0

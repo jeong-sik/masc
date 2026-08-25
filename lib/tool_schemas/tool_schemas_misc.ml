@@ -2,14 +2,6 @@
 
 open Masc_domain
 
-(** Issue #8592: hand-mirrored from [Dashboard.valid_scope_strings].
-    Cycle constraint — Tool_schemas_misc is upstream of Dashboard.
-    The test [test_types.ml :: dashboard_scope_ssot] asserts this
-    mirror stays in sync with the SSOT so adding a 3rd scope
-    constructor fails compilation in [scope_to_string] AND fails the
-    test here, instead of silently dropping from the JSON Schema. *)
-let dashboard_scope_enum_strings = [ "all"; "current" ]
-
 type control_operation =
   | Pause
   | Resume
@@ -24,18 +16,52 @@ let control_operation_id = function
 ;;
 
 let control_schema = function
-  | Pause -> Tool_descriptors_gen.masc_pause_schema
-  | Resume -> Tool_descriptors_gen.masc_resume_schema
-  | Pause_status -> Tool_descriptors_gen.masc_pause_status_schema
+  | Pause -> Tool_schemas_operator_surface.pause
+  | Resume -> Tool_schemas_operator_surface.resume
+  | Pause_status -> Tool_schemas_operator_surface.pause_status
 ;;
 
 let control_schemas = List.map control_schema control_operations
 
-(* [schemas] is the generated public misc schema set. Operator control schemas
-   use the dedicated typed projection above so they remain registered without
-   entering Config's public/front-door inventory. Descriptor-owned web backend
-   names (masc_web_search / masc_web_fetch) are intentionally not generated
-   here; [Config.raw_all_tool_schemas] projects them from
-   [Keeper_tool_descriptor.public_descriptors] so the keeper universe still
-   knows they exist without duplicating their schema ownership. *)
-let schemas : tool_schema list = Tool_descriptors_gen.schemas
+let web_search_schema : tool_schema = Tool_schemas_misc_toml.web_search
+let web_fetch_schema : tool_schema = Tool_schemas_misc_toml.web_fetch
+
+let web_schemas = [ web_search_schema; web_fetch_schema ]
+
+(* [schemas] is the public misc schema set, now read from
+   config/tools/masc_*.toml. Operator control and web runtime schemas use the
+   dedicated projections above. *)
+let schemas : tool_schema list = Tool_schemas_operator_surface.schemas
+
+type mcp_runtime_operation =
+  | Start
+  | Broadcast
+  | Messages
+
+let mcp_runtime_operations = [ Start; Broadcast; Messages ]
+
+let mcp_runtime_tool_name = function
+  | Start -> "masc_start"
+  | Broadcast -> "masc_broadcast"
+  | Messages -> "masc_messages"
+;;
+
+let mcp_runtime_operation_of_tool_name = function
+  | "masc_start" -> Some Start
+  | "masc_broadcast" -> Some Broadcast
+  | "masc_messages" -> Some Messages
+  | _ -> None
+;;
+
+let mcp_runtime_schema operation =
+  let name = mcp_runtime_tool_name operation in
+  match
+    List.find_opt
+      (fun (schema : tool_schema) -> String.equal schema.name name)
+      schemas
+  with
+  | Some schema -> schema
+  | None -> invalid_arg ("missing MCP runtime schema: " ^ name)
+;;
+
+let mcp_runtime_schemas = List.map mcp_runtime_schema mcp_runtime_operations

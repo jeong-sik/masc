@@ -33,7 +33,7 @@ const VIEW_TABS: ReadonlyArray<{ readonly id: ViewTab; readonly label: string }>
 const TOOLBAR_BUTTON_BASE =
   'v2-ide-action h-7 shrink-0 cursor-pointer rounded-[var(--r-1)] px-2 font-mono text-2xs uppercase tracking-[var(--track-caps)] transition-colors'
 
-const VIEW_TAB_BASE = 'ide-v2-view'
+const VIEW_TAB_BASE = 'ide-view'
 
 // 'tools' / 'approve' / 'runtime' / 'explode' were removed (masc#24069 #49):
 // they rendered as toggleable chips but had no backing data source or render

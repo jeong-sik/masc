@@ -55,10 +55,11 @@ let test_mixed_types () =
 (* Source-order preservation: fields must appear in declaration order,
    not alphabetical or hash order. The deriver iterates the AST list
    in order. *)
+module Ordered = struct
+  type t = { z : int; a : int; m : int } [@@deriving tla]
+end
+
 let test_source_order_preserved () =
-  let module Ordered = struct
-    type t = { z : int; a : int; m : int } [@@deriving tla]
-  end in
   assert (Ordered.field_names = [ "z"; "a"; "m" ]);
   assert (Ordered.field_count = 3)
 

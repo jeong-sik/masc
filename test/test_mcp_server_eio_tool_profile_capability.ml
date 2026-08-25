@@ -1,15 +1,5 @@
 open Alcotest
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop index =
-    if nlen = 0 then true
-    else if index + nlen > hlen then false
-    else if String.sub haystack index nlen = needle then true
-    else loop (index + 1)
-  in
-  loop 0
 ;;
 
 let annotation_fields tool_name =
@@ -145,25 +135,73 @@ let test_descriptor_resolution_capabilities_for_public_names () =
     (capability_has Tool_capability.Read_only "Execute")
 ;;
 
-let test_default_instructions_pin_start_transition_workflow () =
-  let instructions = Masc.Mcp_server_eio_tool_profile.default_instructions () in
+let test_full_profile_admission_uses_catalog_direct_call_policy () =
+  let state =
+    Masc.Mcp_server.For_testing.create_state
+      ~base_path:(Filename.get_temp_dir_name ())
+  in
+  let advertised_names =
+    Masc.Mcp_server_eio_tool_profile.tool_schemas_for_profile
+      ~include_hidden:true
+      state
+      Masc.Mcp_server_eio_tool_profile.Full
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+  in
+  (* The corpus is every tool name this binary knows, from both places that
+     know one. [Config.raw_all_tool_schemas] is nine static lists concatenated
+     by hand and the operator family is not among them, because those tools
+     reach the surface through [Tool_spec.register] at load time instead. A
+     corpus that reads only the static side never visits a Hidden tool with
+     direct calls denied, which is the branch the control assertion at the
+     bottom of this test is here to prove was visited. *)
+  let corpus_names =
+    List.map
+      (fun (schema : Masc_domain.tool_schema) -> schema.name)
+      Masc.Config.raw_all_tool_schemas
+    @ Tool_dispatch.all_schema_names ()
+    @ Tool_catalog.known_names ()
+    |> List.sort_uniq String.compare
+  in
+  let hidden_disallowed = ref 0 in
+  List.iter
+    (fun name ->
+      let schema : Masc_domain.tool_schema =
+        { name; description = ""; input_schema = `Assoc [] }
+      in
+      let metadata = Tool_catalog.metadata schema.name in
+      if
+        metadata.visibility = Tool_catalog.Hidden
+        && not metadata.allow_direct_call_when_hidden
+      then incr hidden_disallowed;
+      (* Three conditions, not two. The front-door corpus is one of them, and
+         it was invisible while this loop only walked names that were in it by
+         construction: masc_pause carries a broadcast policy and is dispatched
+         in process, but tool_control keeps its schema out of Config on
+         purpose, so the Full profile does not admit it and should not. *)
+      let expected =
+        Masc.Config.is_raw_tool_name schema.name
+        && Tool_catalog.is_visible ~include_hidden:true schema.name
+        && Tool_catalog.allow_direct_call schema.name
+      in
+      check
+        bool
+        (schema.name ^ " Full-profile admission follows catalog policy")
+        expected
+        (Masc.Mcp_server_eio_tool_profile.tool_allowed_in_profile
+           state
+           Masc.Mcp_server_eio_tool_profile.Full
+           schema.name);
+      check
+        bool
+        (schema.name ^ " Full-profile advertisement matches admission")
+        expected
+        (List.mem schema.name advertised_names))
+    corpus_names;
   check
     bool
-    "write summary names start"
+    "contract corpus includes a hidden direct-call denial"
     true
-    (contains_substring instructions "claim/start/done");
-  check
-    bool
-    "workflow includes start transition"
-    true
-    (contains_substring instructions "masc_transition(start)");
-  check
-    bool
-    "workflow does not skip start"
-    false
-    (contains_substring
-       instructions
-       "masc_transition(claim) -> work in a repo-local worktree")
+    (!hidden_disallowed > 0)
 ;;
 
 let () =
@@ -191,9 +229,9 @@ let () =
             `Quick
             test_descriptor_resolution_capabilities_for_public_names
         ; test_case
-            "default-instructions-pin-start-transition-workflow"
+            "full-profile-admission-uses-catalog-direct-call-policy"
             `Quick
-            test_default_instructions_pin_start_transition_workflow
+            test_full_profile_admission_uses_catalog_direct_call_policy
         ] )
     ]
 ;;

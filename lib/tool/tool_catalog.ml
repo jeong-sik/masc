@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Tool_catalog — Visibility metadata for MCP tools.
 
     Central registry for tool access control:
@@ -48,8 +31,6 @@ type metadata = {
   visibility : visibility;
   lifecycle : lifecycle;
   implementation_status : implementation_status;
-  canonical_name : string option;
-  replacement : string option;
   reason : string option;
   allow_direct_call_when_hidden : bool;
   readonly : bool option;
@@ -122,8 +103,6 @@ let default_metadata ~required_permission =
     visibility = Default;
     lifecycle = Active;
     implementation_status = Real;
-    canonical_name = None;
-    replacement = None;
     reason = None;
     allow_direct_call_when_hidden = false;
     readonly = None;
@@ -132,23 +111,12 @@ let default_metadata ~required_permission =
     required_permission;
   }
 
-(* Runtime-readable so tests and local admin flows can toggle placeholder
-   exposure without restarting the server. Keep the legacy exact-match
-   semantics for "false"/"0" so existing deployments do not change behavior
-   when they use other spellings. *)
-let placeholder_tools_enabled () =
-  match Sys.getenv_opt "MASC_PLACEHOLDER_TOOLS_ENABLED" with
-  | Some "false" | Some "0" -> false
-  | _ -> true
-
-let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden = true)
+let hidden_active ?(allow_direct_call_when_hidden = true)
     ?(implementation_status = Real) ~required_permission reason =
   {
     visibility = Hidden;
     lifecycle = Active;
     implementation_status;
-    canonical_name;
-    replacement;
     reason = Some reason;
     allow_direct_call_when_hidden;
     readonly = None;
@@ -215,6 +183,14 @@ let init_tool = with_required_permission Masc_domain.CanInit mutating_tool
 let reset_tool = with_required_permission Masc_domain.CanReset mutating_tool
 let admin_tool = with_required_permission Masc_domain.CanAdmin mutating_tool
 
+let local_runtime_tool operation =
+  let policy = Local_runtime_tool_policy.execution_policy operation in
+  with_execution_policy
+    ~readonly:policy.read_only
+    ~idempotent:policy.idempotent
+    (default_metadata ~required_permission:policy.required_permission)
+;;
+
 let hidden_runtime_tool reason meta =
   {
     meta with
@@ -232,8 +208,6 @@ let keeper_shard_permission required_permission =
 let keeper_shard_read = keeper_shard_permission Masc_domain.CanReadState
 let keeper_shard_write = keeper_shard_permission Masc_domain.CanBroadcast
 let keeper_shard_add_task = keeper_shard_permission Masc_domain.CanAddTask
-let keeper_shard_vote = keeper_shard_permission Masc_domain.CanVote
-
 (* ================================================================ *)
 (* Explicit metadata registry                                       *)
 (* ================================================================ *)
@@ -285,16 +259,6 @@ let explicit_metadata : (string * metadata) list =
            ~allow_direct_call_when_hidden:false
            ~required_permission:Masc_domain.CanAdmin
            "Operator-profile-only exact recovery of one Board-attention quarantine.")) );
-    ( "masc_operator_chat_recovery_resolve",
-      with_execution_policy
-        ~readonly:false
-        ~idempotent:false
-        (with_required_permission
-           Masc_domain.CanAdmin
-           (hidden_active
-           ~allow_direct_call_when_hidden:false
-           ~required_permission:Masc_domain.CanAdmin
-           "Operator-profile-only exact recovery of one crash-ambiguous Keeper chat receipt.")) );
     ( "masc_operator_task_recovery_resolve",
       with_execution_policy
         ~readonly:false
@@ -321,7 +285,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_heartbeat", broadcast_tool);
     ("masc_goal_list", read_state_tool);
     ("masc_goal_upsert", broadcast_tool);
-    ("masc_goal_assign", broadcast_tool);
     ("masc_goal_transition", broadcast_tool);
     ("masc_plan_init", broadcast_tool);
     ("masc_plan_update", broadcast_tool);
@@ -329,12 +292,15 @@ let explicit_metadata : (string * metadata) list =
     ("masc_keeper_status", read_state_tool);
     ("masc_keeper_sandbox_start", broadcast_tool);
     ("masc_keeper_sandbox_stop", mutating_tool);
-    ("masc_keeper_create_from_persona", broadcast_tool);
     ("masc_keeper_delegate", broadcast_tool);
     ("masc_keeper_delegate_status", read_state_tool);
+    (* Submits an async chat operation (same submit_agent_operation path as
+       masc_keeper_delegate); poll masc_keeper_delegate_status for the
+       outcome. *)
+    ("masc_keeper_msg", broadcast_tool);
     ("masc_keeper_delegate_cancel", broadcast_tool);
     ("masc_keeper_delegate_list", read_state_tool);
-    ("masc_keeper_persona_audit", read_state_tool);
+    ("masc_keeper_audit", read_state_tool);
     ("masc_keeper_waiting_inventory", read_state_tool);
     ("masc_keeper_up", broadcast_tool);
     ("masc_keeper_down", admin_tool);
@@ -355,12 +321,9 @@ let explicit_metadata : (string * metadata) list =
     ("masc_operator_snapshot", read_state_tool);
     ("masc_operator_digest", read_state_tool);
     ("masc_operator_confirm", broadcast_tool);
-    ("masc_persona_list", read_state_tool);
-    ("masc_persona_create", broadcast_tool);
-    ("masc_persona_update", broadcast_tool);
-    ("masc_persona_delete", broadcast_tool);
-    ("masc_runtime_verify", read_state_tool);
-    ("masc_runtime_ollama_probe", read_state_tool);
+    ("masc_runtime_verify", local_runtime_tool Local_runtime_tool_policy.Verify);
+    ( "masc_runtime_ollama_probe"
+    , local_runtime_tool Local_runtime_tool_policy.Ollama_probe );
     ("masc_board_hearths", read_state_tool);
     ("masc_board_search", read_state_tool);
     ("masc_board_profile", read_state_tool);
@@ -379,6 +342,10 @@ let explicit_metadata : (string * metadata) list =
     ("masc_board_cleanup", admin_tool);
     ("masc_board_delete", admin_tool);
     ("masc_gc", admin_tool);
+    (* POST /api/v1/prompts. An override replaces a prompt for every keeper the
+       runtime serves, so it carries the same admin permission as the other
+       fleet-wide mutations here. *)
+    ("masc_prompt_override", admin_tool);
     ("masc_pause", broadcast_tool);
     ("masc_resume", broadcast_tool);
     ("masc_pause_status", read_state_tool);
@@ -390,6 +357,27 @@ let explicit_metadata : (string * metadata) list =
     ("masc_schedule_list", read_state_tool);
     ("masc_schedule_get", read_state_tool);
     ("masc_schedule_cancel", broadcast_tool);
+    (* Keeper-only: a spawned process belongs to the turn's switch, and the
+       MCP boundary has no turn to end it, so these are callable from a keeper
+       and absent from the public schema surface. *)
+    ( "keeper_spawn",
+      hidden_runtime_tool
+        "Keeper spawn runtime tool; the process it starts belongs to the turn, so it is \
+         callable from a keeper and hidden from the public MCP schema surface."
+        broadcast_tool );
+    ( "keeper_spawn_read",
+      hidden_runtime_tool
+        "Keeper spawn-read runtime tool; callable but hidden from the public MCP schema surface."
+        read_state_tool );
+    ( "keeper_spawn_wait",
+      hidden_runtime_tool
+        "Keeper spawn-wait runtime tool; it blocks for a caller-stated bound, so it is not \
+         admitted as read-only, and it is hidden from the public MCP schema surface."
+        broadcast_tool );
+    ( "keeper_spawn_stop",
+      hidden_runtime_tool
+        "Keeper spawn-stop runtime tool; callable but hidden from the public MCP schema surface."
+        broadcast_tool );
     ("masc_fusion", broadcast_tool);
     ("masc_fusion_status", read_state_tool);
     ("masc_library_list", read_state_tool);
@@ -462,6 +450,16 @@ let explicit_metadata : (string * metadata) list =
 let metadata_table : (string, metadata) Hashtbl.t = Hashtbl.create 256
 let () = List.iter (fun (n, m) -> Hashtbl.replace metadata_table n m) explicit_metadata
 
+(* Every name this catalog has an opinion about, static entries and anything
+   registered at load time alike. The contract tests need it because the
+   schema lists they used to walk are not the same set: the catalog decides
+   admission for tools whose schemas live outside Config's front door, and a
+   corpus built from those lists never visits them. *)
+let known_names () =
+  Hashtbl.fold (fun name _ acc -> name :: acc) metadata_table []
+  |> List.sort_uniq String.compare
+;;
+
 let register_metadata_for_testing name (meta : metadata) =
   Hashtbl.replace metadata_table name meta
 
@@ -490,22 +488,10 @@ end
 (* Public MCP surface — delegates to Tool_catalog_surfaces (SSOT)   *)
 (* ================================================================ *)
 
-(* Delegate to surfaces sub-module *)
-let public_mcp_tools = Tool_catalog_surfaces.public_mcp_surface_tools
-
 let public_mcp_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create 64 in
   List.iter (fun name -> Hashtbl.replace tbl name ())
     Tool_catalog_surfaces.public_mcp_surface_tools;
-  (* MASC_PUBLIC_TOOLS_EXTRA: comma-separated tool names to add at runtime.
-     Example: MASC_PUBLIC_TOOLS_EXTRA=masc_board_search,masc_pause *)
-  (match Env_config.Tools.public_tools_extra_opt () with
-   | Some raw ->
-       String.split_on_char ',' raw
-       |> List.iter (fun s ->
-              let name = String.trim s in
-              if not (String.equal name "") then Hashtbl.replace tbl name ())
-   | None -> ());
   tbl
 
 let is_public_mcp name = Hashtbl.mem public_mcp_set name
@@ -548,11 +534,6 @@ let implementation_status name =
   let meta = metadata name in
   meta.implementation_status
 
-let canonical_tool_name name =
-  match (metadata name).canonical_name with
-  | Some canonical_name -> canonical_name
-  | None -> name
-
 let is_placeholder name =
   match implementation_status name with
   | Placeholder -> true
@@ -562,7 +543,13 @@ let is_visible ?(include_hidden = false) name =
   let meta = metadata name in
   match meta.visibility with
   | Hidden when include_hidden -> true
-  | Hidden when placeholder_tools_enabled () && is_placeholder name -> true
+  (* MASC_PLACEHOLDER_TOOLS_ENABLED (compat): RFC-0371 B7 removed the
+     env read because no deployment set it, but operators relied on
+     `MASC_PLACEHOLDER_TOOLS_ENABLED=false` to hide placeholder tools.
+     Restored with [get_bool ~default:true] — setting it to false/0/no
+     hides placeholders; unset or true keeps the pre-B7 behavior. *)
+  | Hidden when is_placeholder name ->
+    Env_config_core.get_bool ~default:true "MASC_PLACEHOLDER_TOOLS_ENABLED"
   | Hidden -> false
   | Default -> implementation_allows_public_visibility meta.implementation_status
 
@@ -591,20 +578,10 @@ let metadata_to_fields name =
       , `String (Masc_domain.permission_to_string meta.required_permission) );
     ]
   in
-  let with_canonical =
-    match meta.canonical_name with
-    | Some canonical_name -> ("canonicalName", `String canonical_name) :: base
-    | None -> base
-  in
-  let with_replacement =
-    match meta.replacement with
-    | Some replacement -> ("replacement", `String replacement) :: with_canonical
-    | None -> with_canonical
-  in
   let with_reason =
     match meta.reason with
-    | Some reason -> ("reason", `String reason) :: with_replacement
-    | None -> with_replacement
+    | Some reason -> ("reason", `String reason) :: base
+    | None -> base
   in
   let with_mcp_context_required =
     match meta.mcp_context_required with
@@ -612,23 +589,6 @@ let metadata_to_fields name =
     | None -> with_reason
   in
   with_mcp_context_required
-
-let public_contract_fields name =
-  let meta = metadata name in
-  let base =
-    [
-      ( "implementationStatus",
-        `String (implementation_status_to_string meta.implementation_status) );
-    ]
-  in
-  let with_mcp_context_required =
-    match meta.mcp_context_required with
-    | Some value -> ("mcpContextRequired", `Bool value) :: base
-    | None -> base
-  in
-  match meta.canonical_name with
-  | Some canonical_name -> ("canonicalName", `String canonical_name) :: with_mcp_context_required
-  | None -> with_mcp_context_required
 
 let allow_direct_call name =
   let meta = metadata name in

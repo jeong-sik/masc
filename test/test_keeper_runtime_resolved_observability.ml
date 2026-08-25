@@ -23,10 +23,23 @@ let test_resolved_config_exposes_timeout_knobs () =
     "resolved config exposes stream_idle_timeout_sec"
     true
     (List.mem "stream_idle_timeout_sec" names);
+  (* RFC-OAS-037: the first-event (TTFT/prefill) budget needs the same
+     configured-vs-effective disambiguation as the idle knob. *)
+  Alcotest.(check bool)
+    "resolved config exposes first_event_timeout_sec"
+    true
+    (List.mem "first_event_timeout_sec" names);
   Alcotest.(check bool)
     "resolved config exposes body_timeout_override_sec"
     true
-    (List.mem "body_timeout_override_sec" names)
+    (List.mem "body_timeout_override_sec" names);
+  (* #27349: same disambiguation need as #25128 -- an operator must be able
+     to tell "provider_call_deadline_sec unset" from "configured but not
+     applied", not infer it from absence. *)
+  Alcotest.(check bool)
+    "resolved config exposes provider_call_deadline_sec"
+    true
+    (List.mem "provider_call_deadline_sec" names)
 
 let test_to_yojson_is_a_json_object () =
   Rr.reset_for_tests ();

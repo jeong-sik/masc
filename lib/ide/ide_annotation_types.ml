@@ -12,32 +12,22 @@ let string_opt_to_json = function
   | Some s -> `String s
 ;;
 
+(* Equality re-declaration of the observation bus's kind, same pattern as
+   {!annotation_reference} below: one variant, one codec, and the compiler
+   proves every consumer against the single axis. This module used to carry
+   its own copy of the type plus both codecs, which forced a hand-written
+   4-arm converter at the ide_bridge boundary — three artifacts that had to
+   move in lockstep with the bus on every new kind. *)
 type annotation_kind =
+  Agent_observation.annotation_kind =
   | Comment
   | Decision
   | Question
   | Bookmark
 [@@deriving show, eq]
 
-(** Stable wire format for {!annotation_kind}.  Pair-counterpart to
-    {!annotation_kind_of_string}; together they round-trip the JSON
-    [kind] field on annotation records.  Locks the contract against
-    [@@deriving show] template drift (and against accidental
-    constructor renames — both directions must update in lockstep). *)
-let annotation_kind_to_string = function
-  | Comment -> "Comment"
-  | Decision -> "Decision"
-  | Question -> "Question"
-  | Bookmark -> "Bookmark"
-;;
-
-let annotation_kind_of_string = function
-  | "Comment" -> Some Comment
-  | "Decision" -> Some Decision
-  | "Question" -> Some Question
-  | "Bookmark" -> Some Bookmark
-  | _ -> None
-;;
+let annotation_kind_to_string = Agent_observation.annotation_kind_to_string
+let annotation_kind_of_string = Agent_observation.annotation_kind_of_string
 
 type annotation_reference = Agent_observation.annotation_reference =
   { relation : string
@@ -117,7 +107,7 @@ let kind_label : Yojson.Safe.t -> string = function
   | `Null -> "null"
   | `Bool _ -> "bool"
   | `Int _ -> "int"
-  | `Intlit _ -> "int"
+  | `Intlit _ -> "intlit"
   | `Float _ -> "float"
   | `String _ -> "string"
   | `Assoc _ -> "object"

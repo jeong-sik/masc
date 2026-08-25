@@ -1,6 +1,6 @@
-(** MASC-owned compaction planning over the provider-neutral OAS exact-output
+(** MASC-owned compaction planning over the provider-neutral AGENT_CORE exact-output
     surface. Target selection, admission, wire serialization, credentials, and
-    dispatch receipts remain OAS-owned. *)
+    dispatch receipts remain AGENT_CORE-owned. *)
 
 type compaction_plan
 type planning_window
@@ -22,7 +22,7 @@ type attempt_observation =
 type before_dispatch_authority =
   attempt_observation -> (unit, string) result
 (** Validate the caller-owned source and Keeper lifecycle immediately before
-    OAS dispatches a candidate. OAS owns execution, advancement, and exact
+    AGENT_CORE dispatches a candidate. AGENT_CORE owns execution, advancement, and exact
     attempt provenance; this callback neither persists a parallel execution
     claim nor interprets provider progress. *)
 
@@ -36,15 +36,16 @@ type summarization_failure =
   | Exact_execution_authority_rejected
   | Exact_flow_already_started
   | Exact_execution_terminal of Keeper_compaction_outcome.exact_execution_terminal
+  | No_reducible_boundary
   | Invalid_plan
 
 type summarizer =
   units:Keeper_compaction_unit.closed_unit list ->
   (completed_plan, summarization_failure) result
 
-(** Pure lane lookup and construction of one immutable OAS exact flow against
+(** Pure lane lookup and construction of one immutable AGENT_CORE exact flow against
     exactly one caller-supplied registry generation. MASC supplies only ordered
-    opaque slot identities and domain messages/schema. OAS freezes candidate
+    opaque slot identities and domain messages/schema. AGENT_CORE freezes candidate
     visits and allocates one non-shared affine attempt only when that candidate
     is reached, before any network effect. *)
 val prepare_lane
@@ -55,17 +56,17 @@ val prepare_lane
   -> units:Keeper_compaction_unit.closed_unit list
   -> (prepared_lane, summarization_failure) result
 
-(** Execute the immutable OAS flow exactly once. OAS exclusively decides
+(** Execute the immutable AGENT_CORE flow exactly once. AGENT_CORE exclusively decides
     whether an execution failure can advance and supplies the predetermined
     successor. MASC validates only the caller-owned source immediately before
     dispatch and never reconstructs execution state from a second durable
     claim. Cancellation is always re-raised rather than projected as a
     compaction outcome; an authorized source observation is retained only for
     the cancellation log.
-    Domain-invalid output is rejected by the validator and OAS advances to the
+    Domain-invalid output is rejected by the validator and AGENT_CORE advances to the
     next caller-declared candidate. The same validator applies the proposed
     rolling summary, selects the next oldest raw source, and projects that next
-    request through every frozen slot's OAS serializer. A summary that would
+    request through every frozen slot's AGENT_CORE serializer. A summary that would
     make the next fold exceed any declared request-body cap is domain-invalid
     before checkpoint installation. Exhaustion is source-terminal. *)
 val execute_prepared_lane
@@ -73,11 +74,12 @@ val execute_prepared_lane
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> ?clock:_ Eio.Time.clock
   -> ?before_dispatch_authority:before_dispatch_authority
+  -> ?observation_registry:Exact_lane_run_registry.t
   -> prepared_lane
   -> (completed_plan, summarization_failure) result
 
 (** Resolve [compaction_exact] from one published immutable registry and hand
-    its ordered opaque slots to one OAS exact flow. OAS owns admission,
+    its ordered opaque slots to one AGENT_CORE exact flow. AGENT_CORE owns admission,
     execute-once, advancement, and provenance. [plan_of_json] alone enforces the
     MASC-owned compaction schema and domain rules after success. *)
 val make
@@ -108,17 +110,17 @@ val exact_execution_terminal
   :  cause:Keeper_compaction_outcome.exact_execution_terminal_cause
   -> exact_execution_evidence
   -> Keeper_compaction_outcome.exact_execution_terminal
-(** Pure typed projection of the OAS receipt identity retained by a successful
+(** Pure typed projection of the AGENT_CORE receipt identity retained by a successful
     exact execution. It owns no claim, lock, waiter, or lifecycle state. *)
 
-val apply : compaction_plan -> Agent_sdk.Types.message list
+val apply : compaction_plan -> Agent_core.Types.message list
 val summarized_indices : compaction_plan -> int list
 val dropped_indices : compaction_plan -> int list
 val has_changes : compaction_plan -> bool
 
 module For_testing : sig
   val messages_for_plan
-    :  window:planning_window -> Agent_sdk.Types.message list
+    :  window:planning_window -> Agent_core.Types.message list
 
   val planning_window_for_units
     :  Keeper_compaction_unit.closed_unit list
@@ -128,7 +130,6 @@ module For_testing : sig
 
   val prepared_window_source_indices : prepared_lane -> int list
   val flow_slot_ids : prepared_lane -> string list
-  val registry_generation : prepared_lane -> int64
 
   val attempt_observations : prepared_lane -> attempt_observation list
   val candidate_snapshot_slot_ids : prepared_lane -> string list

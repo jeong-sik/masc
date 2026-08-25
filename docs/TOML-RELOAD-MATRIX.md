@@ -1,10 +1,5 @@
 ---
 status: reference
-last_verified: 2026-07-17
-code_refs:
-  - scripts/check-doc-truth.sh
-  - config/
-  - lib/fusion/
 ---
 
 # TOML Reload Matrix
@@ -33,7 +28,7 @@ The key distinction is:
 | --- | --- | --- | --- | --- | --- |
 | `<base_path>/.masc/config/runtime.toml` | startup env seeding for `MASC_KEEPER_*` and WebSearch knobs | server bootstrap before env-backed consumers initialize | none | `boot_static` | values are recorded in a process-local boot override store; edits require restart |
 | `<resolved-config-root>/keepers/*.toml` | declarative keeper profile defaults | keeper create/up, explicit keeper operations, supervisor reconcile | next supervisor sweep or next keeper create/up | `sweep_dynamic` | running keepers re-sync declarative fields; no standalone file watcher |
-| `<resolved-config-root>/runtime.toml` | runtime catalog source + optional `[fusion]` policy | model resolve path in OAS/MASC; `masc_fusion` handler reloads `[fusion]` per request | next resolve / next turn / next `masc_fusion` request | `request_dynamic` | invalid TOML blocks runtime or fusion policy load; `runtime.json` is retired |
+| `<resolved-config-root>/runtime.toml` | runtime catalog source + optional `[fusion]` policy | model resolve path in agent core/MASC; `masc_fusion` handler reloads `[fusion]` per request | next resolve / next turn / next `masc_fusion` request | `request_dynamic` | invalid TOML blocks runtime or fusion policy load; `runtime.json` is retired |
 
 ## Current Behavior by File
 

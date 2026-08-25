@@ -77,11 +77,6 @@ let owned_active_tasks_for_meta ~config ~meta =
   owned_active_tasks_snapshot_for_meta ~config ~meta
   |> Result.map (fun snapshot -> snapshot.tasks)
 
-let owned_active_tasks_for_meta_strict ~(config : Workspace.config)
-    ~(meta : Keeper_meta_contract.keeper_meta) =
-  owned_active_tasks_for_meta ~config ~meta
-;;
-
 let owned_active_tasks_snapshot_for_meta_strict ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) =
   owned_active_tasks_snapshot_for_meta ~config ~meta
@@ -138,14 +133,6 @@ let owned_active_task_id_for_meta ~(config : Workspace.config)
   | Ok task_id -> task_id
   | Error _ -> None
 
-let merge_current_task_id ~(latest : Keeper_meta_contract.keeper_meta)
-    ~(caller : Keeper_meta_contract.keeper_meta) =
-  {
-    latest with
-    current_task_id = caller.current_task_id;
-    updated_at = caller.updated_at;
-  }
-
 let sync_current_task_id_from_backlog ~(config : Workspace.config)
     (meta : Keeper_meta_contract.keeper_meta) =
   match owned_active_task_id_result_for_meta ~config ~meta with
@@ -163,42 +150,43 @@ let sync_current_task_id_from_backlog ~(config : Workspace.config)
     in
     if equal then meta
     else
-      let updated_meta =
-        { meta with current_task_id = desired; updated_at = Masc_domain.now_iso () }
-      in
-      Keeper_registry.update_meta ~base_path:config.base_path meta.name updated_meta;
       (match
-         Keeper_meta_store.write_meta_with_merge
-           ~merge:merge_current_task_id config updated_meta
+         Keeper_owner_registry.apply_meta
+           ~base_path:config.base_path
+           ~keeper_name:meta.name
+           (Keeper_owner_reducer.Set_current_task
+              { task_id = desired; updated_at = Masc_domain.now_iso () })
        with
-       | Ok () -> ()
-       | Error msg ->
+       | Ok (Some updated_meta) ->
+         Log.Keeper.debug
+           ~keeper_name:meta.name
+           "reconciled current_task_id=%s from backlog ownership"
+           (match desired with
+            | Some task_id -> Keeper_id.Task_id.to_string task_id
+            | None -> "(cleared)");
+         updated_meta
+       | Ok None ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string WriteMetaFailures)
-           ~labels:[("keeper", meta.name); ("phase", "reconcile_task_id")]
+           ~labels:[ "keeper", meta.name; "phase", "reconcile_task_id" ]
            ();
-         Log.Keeper.warn ~keeper_name:meta.name
+         Log.Keeper.warn
+           ~keeper_name:meta.name
+           "owner removed metadata while reconciling current_task_id";
+         meta
+       | Error error ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string WriteMetaFailures)
+           ~labels:[ "keeper", meta.name; "phase", "reconcile_task_id" ]
+           ();
+         Log.Keeper.warn
+           ~keeper_name:meta.name
            "failed to persist reconciled current_task_id=%s: %s"
            (match desired with
             | Some task_id -> Keeper_id.Task_id.to_string task_id
             | None -> "(cleared)")
-           msg);
-      (* RFC-0142 / audit 2026-05-21 §10.2: this is the success path of a
-         routine drift correction, firing on every observed delta between
-         keeper_meta.current_task_id and backlog ownership.  Live measurement
-         on 5/21 captured 1,183 events/day across the fleet — none of them
-         individually actionable (the WARN branch above + the
-         [metric_keeper_write_meta_failures] counter already cover the
-         failure case).  Demoted to DEBUG so the high-volume verbose path
-         no longer drowns the INFO stream; raise back to INFO only if a
-         per-keeper thrash investigation needs structured timing without
-         a debug-level subscription. *)
-      Log.Keeper.debug ~keeper_name:meta.name
-        "reconciled current_task_id=%s from backlog ownership"
-        (match desired with
-         | Some task_id -> Keeper_id.Task_id.to_string task_id
-         | None -> "(cleared)");
-      updated_meta
+           (Keeper_owner_registry.command_error_to_string error);
+         meta)
 
 let sync_current_task_id_for_agent_name ~(config : Workspace.config) ~agent_name =
   match

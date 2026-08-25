@@ -13,34 +13,32 @@ end
 
 type meta_disposition =
   | Retain_operator_pause
-  | Retain_dead_tombstone
   | Remove_meta
 
 type dashboard_purge_context =
   { requested_name : string
   ; agent_name : string
-  ; meta_version : int
   }
 
 type cleanup_reason =
   | Operator_stop_retain_meta
   | Operator_stop_remove_meta
-  | Dead_tombstone_cleanup
+  | Supervisor_cleanup
   | Dashboard_keeper_purge of dashboard_purge_context
 
 type completion_action =
-  | Dead_tombstone_reaped
+  | Supervisor_cleaned
   | Dashboard_keeper_purged
 
 type dashboard_purge_artifact =
   | Keeper_metrics_store_artifact
-  | Keeper_generation_index_artifact
   | Keeper_decision_log_artifact
   | Keeper_feedback_log_artifact
   | Keeper_runtime_directory_artifact
   | Keeper_memory_current_artifact
   | Keeper_memory_journal_artifact
   | Keeper_configuration_artifact
+  | Keeper_chat_store_artifact
   | Agent_artifact_bundle of string list
 
 type completion_receipt =
@@ -113,6 +111,7 @@ type join_evidence =
 type cleanup_evidence =
   { settled_task_ids : Keeper_id.Task_id.t list
   ; pending_confirms_removed : int
+  ; meta_snapshot_digest : Keeper_meta_json.Snapshot_digest.t
   }
 
 type finalization_evidence =
@@ -125,6 +124,21 @@ type finalization_evidence =
   }
 
 type supersession =
+  | Operator_blocked_purge_released of { actor : string }
+      (** The operator released a [Blocked] dashboard purge whose worker died
+          before it finished. Like {!Operator_metadata_update} this carries no
+          effect-duplication risk -- the work failed -- but it is not a
+          metadata update: a purge leaves no metadata to update, and the
+          admission fence it holds is what stops the purge being reissued.
+          Kept apart so the durable record says which release was signed off.
+
+          Without this the pair ([Blocked], [Dashboard_keeper_purge]) had no
+          exit: the fence blocks meta materialization, {!val:resolve} needs
+          that meta to build a purge target, and supersession refused any
+          intent but [Operator_stop_retain_meta]. A worker that died in
+          [Joining_lanes] left the Keeper permanently half-purged
+          (RFC-0000 1.2 LAW 1 "No dead-end", the same law #25491 restored for
+          [Reconciliation_required]). *)
   | Operator_metadata_update of { actor : string }
   | Operator_reconciliation_accepted of
       { actor : string
@@ -144,6 +158,13 @@ type supersession =
 
 type phase =
   | Prepared
+  | Joining_lanes
+      (** The durable shutdown worker has committed its intent to join the
+          Keeper lane and its detached Librarian lane. This phase is visible
+          for the full cooperative wait; no implicit duration limit is added.
+          If the server process ends here, boot recovery preserves the
+          admission fence as [Blocked Lane_join] because Librarian completion
+          cannot be inferred from the process boundary. *)
   | Joined_idle
   | Finalizing_tasks of Keeper_id.Task_id.t list
   | Cleanup_ready of cleanup_evidence
@@ -159,7 +180,6 @@ type t =
   ; keeper_name : string
   ; lane_ownership : lane_ownership
   ; trace_id : Keeper_id.Trace_id.t
-  ; generation : int
   ; actor : string
   ; cleanup_intent : cleanup_intent
   ; turn_disposition : turn_disposition
@@ -191,8 +211,6 @@ type invariant_error =
 val schema_version : int
 val requires_admission_fence : t -> bool
 val cleanup_reason_label : cleanup_reason -> string
-val meta_disposition_to_string : meta_disposition -> string
-val meta_disposition_of_string : string -> (meta_disposition, string) result
 val meta_disposition_of_cleanup_reason : cleanup_reason -> meta_disposition
 val completion_action_to_string : completion_action -> string
 val completion_action_of_string : string -> (completion_action, string) result
@@ -210,5 +228,14 @@ val immutable_fields_equal : t -> t -> bool
     evidence, phase, and [updated_at]) are intentionally excluded. *)
 val admission_lane_to_string : admission_lane -> string
 val admission_lane_of_string : string -> (admission_lane, string) result
+val phase_to_string : phase -> string
+(** Phase name only, for status surfaces. [keepalive_running] answers whether
+    the Keeper fiber is up, which is a different question from whether its
+    shutdown operation reached a terminal: a Keeper can read as stopped while
+    the operation still sits in [Finalizing_tasks] or [Cleanup_ready], and
+    those phases are outside the supersedable set, so a restart is refused
+    (#29181). *)
+
+
 val failure_stage_to_string : failure_stage -> string
 val failure_stage_of_string : string -> (failure_stage, string) result

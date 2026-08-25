@@ -1,0 +1,38 @@
+{
+  "captured_at": "2026-08-19T06:45:00Z",
+  "purpose": "Librarian 행 duration 축 — memory journal의 librarian 쓰기 지속 실측",
+  "source": "<base-path>/.masc/config/keepers/*.memory-journal.jsonl (123 files)",
+  "totals": {
+    "rows_with_timestamp": 18159,
+    "by_source_kind": { "librarian": 16726, "explicit_write": 450, "absent": 983 },
+    "by_outcome": { "committed": 13119, "failed": 983, "absent": 4057 }
+  },
+  "librarian_duration": {
+    "writes": 16726,
+    "range": "2026-07-31T14:47Z ~ 2026-08-19T06:41Z",
+    "span_hours": 447.9,
+    "span_days": 18.7,
+    "last_24h": 745,
+    "latest_relative": "캡처 4분 전"
+  },
+  "top_keepers_by_journal_rows": {
+    "code-reviewer": 3404,
+    "sangsu": 2551,
+    "taskmaster": 2283,
+    "analyst": 2273,
+    "kidsnote": 2235
+  },
+  "sample_record": {
+    "outcome": "committed",
+    "recorded_at": 1787121718.14,
+    "revision": 2227,
+    "source": { "kind": "librarian", "trace_id": "trace-1785189111927-00005", "generation": 1 },
+    "change": { "added": [], "removed": [], "retained": 44 }
+  },
+  "verdict": "duration 축 충족 — librarian 경로의 메모리 쓰기가 18.7일(447.9시간) 연속으로 기록되고 최근 24시간에만 745건, 최신 쓰기는 캡처 4분 전이다. 1h·4h·24h 사다리를 모두 관통하며 재시작 여러 번을 가로지른다.",
+  "observed_failure_mode": {
+    "failed_outcome": 983,
+    "note": "outcome=failed가 983건 있다. exact_execution_failure·memory_snapshot_write_failure 같은 실패 종류가 journal에 함께 남는 구조라, 지속성과 별개로 실패율 감사가 따로 필요하다."
+  },
+  "method_note": "레코드의 시간 필드는 ts/at이 아니라 recorded_at이고 주체는 source.kind다. ts로 찾으면 18,159행이 있는데도 시간 범위가 비어 나온다."
+}

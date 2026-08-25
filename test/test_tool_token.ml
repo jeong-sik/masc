@@ -95,7 +95,7 @@ let test_token_name_readable () =
 let test_mint_token_registered () =
   let tool = "__test_token_registered" in
   register_test_tool ~tool_name:tool
-    ~handler:(fun ~name:_ ~args:_ -> Some (tool_ok "ok"));
+    ~handler:(fun ~name:_ ~args:_ -> tool_ok "ok");
   match Tool_dispatch.mint_token ~name:tool with
   | Ok token -> check string "name" tool token.name
   | Error e -> fail (Printf.sprintf "mint_token failed for registered tool: %s" e)
@@ -108,7 +108,7 @@ let test_mint_token_unregistered () =
 let test_dispatch_with_token () =
   let tool = "__test_token_dispatch" in
   register_test_tool ~tool_name:tool
-    ~handler:(fun ~name ~args:_ -> Some (tool_ok ~tool_name:name ("dispatched:" ^ name)));
+    ~handler:(fun ~name ~args:_ -> tool_ok ~tool_name:name ("dispatched:" ^ name));
   match Tool_dispatch.mint_token ~name:tool with
   | Error e -> fail e
   | Ok token ->

@@ -3,7 +3,7 @@
 #
 # Background
 #   Jane Street refactor wave (#10664 Session, #10730 Tool_registry +
-#   Oas_worker_runtime) introduced multiple actor-pattern modules.
+#   runtime actors) introduced multiple actor-pattern modules.
 #   Each defines a consumer fiber starter — typically named
 #   [start_loop] or [start_actor_if_needed] — but several were
 #   defined and never called from a bootstrap path.
@@ -14,7 +14,7 @@
 #     - #10777: Session.start_loop never called → restore_sessions
 #       hung the entire keeper autoboot for ~3 minutes per restart
 #       cycle until watchdog killed the server.
-#     - #10895: Oas_worker_runtime.start_actor_if_needed never
+#     - runtime actors must have a production caller
 #       called → runtime_metrics_json hangs the dashboard tool
 #       inspector silently.
 #
@@ -86,7 +86,7 @@ done <<< "$hits"
 if [ "$failed" -ne 0 ]; then
   echo ""
   echo "check-actor-consumer-wired: at least one actor consumer is unwired."
-  echo "Reference: #10777 (Session.start_loop) and #10895 (Oas_worker_runtime)"
+  echo "Every actor entry point requires a production consumer."
   echo "called the missing starter from lib/mcp_server.ml:create_state_eio."
   exit 1
 fi

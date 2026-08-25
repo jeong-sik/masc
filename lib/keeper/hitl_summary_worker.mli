@@ -1,6 +1,6 @@
-(** MASC-owned HITL domain judgment over the opaque-runtime OAS exact-output
+(** MASC-owned HITL domain judgment over the opaque-runtime AGENT_CORE exact-output
     flow. MASC freezes the request and domain schema, validates the returned
-    judgment, and owns approval queue durability. OAS alone owns candidate
+    judgment, and owns approval queue durability. AGENT_CORE alone owns candidate
     admission, attempt allocation, execution, failover, receipts, and
     provenance. *)
 
@@ -11,7 +11,7 @@ val lane_id : string
 
 val snapshot_topology_readiness : unit -> (unit, string) result
 (** Verify only prompt availability and that the registry-owned
-    [hitl_auto_judge] topology can be frozen as an OAS exact-output snapshot.
+    [hitl_auto_judge] topology can be frozen as an AGENT_CORE exact-output snapshot.
     This is not credential, wire, or output admission. *)
 
 exception Exact_terminalization_persistence_failed of string
@@ -32,12 +32,12 @@ type spawn_outcome =
 
 val spawn
   :  sw:Eio.Switch.t
-  -> entry:Keeper_approval_queue.pending_approval
-  -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
+  -> entry:Keeper_approval_queue_rules_types.pending_approval
+  -> on_summary:(Keeper_approval_queue_rules_types.hitl_context_summary -> unit)
   -> on_finish:(finish_outcome -> unit)
   -> unit
   -> (spawn_outcome, string) result
-(** Freeze and admit the whole ordered flow before forking. The production OAS
+(** Freeze and admit the whole ordered flow before forking. The production AGENT_CORE
     callbacks bind/release the real candidate receipt in the durable approval
     queue. A summary reaches [on_summary] only after domain validation, exact
     receipt/provenance verification, and [Fsync_completed] completion.
@@ -45,33 +45,32 @@ val spawn
     [Conclusive_terminalization] permits the caller to drain later owner work. *)
 
 module For_testing : sig
+  val run_outcome_of_observed_summary
+    :  Keeper_approval_queue_rules_types.hitl_context_summary option
+    -> Exact_lane_run_registry.outcome * Yojson.Safe.t
+
   val system_prompt : unit -> (string, string) result
 
   val build_context_bundle
-    :  entry:Keeper_approval_queue.pending_approval
+    :  entry:Keeper_approval_queue_rules_types.pending_approval
     -> Yojson.Safe.t
-
-  val messages_for_summary
-    :  system_prompt:string
-    -> context_bundle:Yojson.Safe.t
-    -> Agent_sdk.Types.message list
 
   val parse_summary
     :  generated_at:float
     -> model_run_id:string
     -> Yojson.Safe.t
-    -> (Keeper_approval_queue.hitl_context_summary, string) result
+    -> (Keeper_approval_queue_rules_types.hitl_context_summary, string) result
 
   type prepared_flow
 
   val prepare_flow
-    :  entry:Keeper_approval_queue.pending_approval
+    :  entry:Keeper_approval_queue_rules_types.pending_approval
     -> (prepared_flow, string) result
 
   val execute_prepared_flow
     :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
     -> ?clock:_ Eio.Time.clock
-    -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
+    -> on_summary:(Keeper_approval_queue_rules_types.hitl_context_summary -> unit)
     -> prepared_flow
     -> execution_boundary
 
@@ -95,7 +94,7 @@ module For_testing : sig
     -> call_id:string
     -> plan_fingerprint:string
     -> request_body_sha256:string
-    -> summary:Keeper_approval_queue.hitl_context_summary
+    -> summary:Keeper_approval_queue_rules_types.hitl_context_summary
     -> ( Keeper_approval_queue.exact_attempt_transition
        , Keeper_approval_queue.exact_attempt_error )
        result
@@ -108,7 +107,7 @@ module For_testing : sig
     -> call_id:string
     -> plan_fingerprint:string
     -> request_body_sha256:string
-    -> cause:Keeper_approval_queue.exact_attempt_quarantine_cause
+    -> cause:Keeper_approval_queue_rules_types.exact_attempt_quarantine_cause
     -> ( Keeper_approval_queue.exact_attempt_transition
        , Keeper_approval_queue.exact_attempt_error )
        result
@@ -128,7 +127,7 @@ module For_testing : sig
     :  queue_ops:exact_queue_ops
     -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
     -> ?clock:_ Eio.Time.clock
-    -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
+    -> on_summary:(Keeper_approval_queue_rules_types.hitl_context_summary -> unit)
     -> prepared_flow
     -> execution_boundary
   (** The production flow with explicit durable queue transition authority.
@@ -138,16 +137,16 @@ module For_testing : sig
   val spawn_with_queue_ops
     :  queue_ops:exact_queue_ops
     -> sw:Eio.Switch.t
-    -> entry:Keeper_approval_queue.pending_approval
-    -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
+    -> entry:Keeper_approval_queue_rules_types.pending_approval
+    -> on_summary:(Keeper_approval_queue_rules_types.hitl_context_summary -> unit)
     -> on_finish:(finish_outcome -> unit)
     -> unit
     -> (spawn_outcome, string) result
   (** Dependency injection over the same [spawn_with] lifecycle used by
       production [spawn]; the worker does not depend on test-only queue APIs. *)
 
-  val flow_evidence : prepared_flow -> Agent_sdk.Exact_output.flow_evidence
-  val success_provenance_matches : Agent_sdk.Exact_output.flow_success -> bool
+  val flow_evidence : prepared_flow -> Agent_core.Exact_output.flow_evidence
+
   val summary_version : int
   val lane_id : string
 end

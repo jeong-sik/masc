@@ -13,25 +13,7 @@ function humanize(code: string): string {
     .trim()
 }
 
-import { isRecord } from './type-guards'
-
-function coerceRawStopCause(raw: unknown): StopCause | null {
-  if (!isRecord(raw)) return null
-  const code = text(raw.code)
-  if (!code) return null
-  const source = text(raw.source) as StopCauseSource | null
-  return {
-    code,
-    source: source ?? 'terminal_reason_code',
-    label: text(raw.label) ?? humanize(code),
-    summary: text(raw.summary),
-    severity: text(raw.severity),
-    next_action: text(raw.next_action),
-  }
-}
-
 export interface StopCauseInput {
-  stop_cause?: unknown
   runtime_blocker_class?: string | null
   runtime_blocker_summary?: string | null
   terminal_reason_code?: string | null
@@ -63,9 +45,6 @@ function buildStopCause(
 }
 
 export function normalizeStopCause(input: StopCauseInput): StopCause | null {
-  const explicit = coerceRawStopCause(input.stop_cause)
-  if (explicit) return explicit
-
   return (
     buildStopCause(
       'runtime_blocker_class',

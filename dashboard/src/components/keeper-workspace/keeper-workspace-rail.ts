@@ -1,10 +1,16 @@
 // Keeper Workspace — context rail (right). Ported to the keeper-v2 prototype DOM
 // (rails.jsx ContextRail): `.ctx` → `.ctx-scroll` → `.ctx-sec` sections (주의 /
-// 런타임 `.rtc-card` / 처리량 `.tps-card` / 컨텍스트 `.ctx-card` / 소유 태스크
-// `.ctx-list`), styled by the vendored SSOT CSS. Live wiring (Keeper object +
-// tasks store + masc_keeper_compact) is unchanged; only the DOM/classes changed.
-// Data gaps (runtime capability flags, effort segments, compaction/memory
-// inspectors) are MARKED, never faked.
+// 드레인 `.drain-card` while Draining/HandingOff / 런타임 `.rtc-card` with the
+// design's collapsed-by-default `.rtc-head`→`.rtc-detail` disclosure and
+// `.rail-hb` heartbeat line / 컨텍스트 `.ctx-card` with `.ctx-usage` +
+// `.ctx-notobs` / 소유 태스크 `.ctx-list`), styled by the vendored SSOT CSS.
+// Live wiring (Keeper object + tasks store + waiting inventory +
+// masc_keeper_compact) is unchanged; only the DOM/classes changed. Documented
+// local divergences: the 처리량 `.tps-card` section was removed as low-signal
+// (#22681), the 컴팩션 스냅샷 button was purged because the backend surface has
+// no writer (#29503), and the last-turn meter stays (design deleted the gauge;
+// #22681 explicitly kept it). Data gaps (runtime capability flags, effort
+// segments, memory inspector, live ctx occupancy) are MARKED, never faked.
 
 import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
@@ -38,13 +44,13 @@ import {
 } from '../../lib/runtime-provider-summary'
 import { formatContextTokens } from '../../lib/format-number'
 import { formatTimeAgo } from '../../lib/format-time'
+import { keeperWaitingInventoryState } from '../../keeper-waiting-inventory-store'
 import { persistentSignal } from '../../lib/persistent-signal'
-import { recordManualCompaction } from './compaction-snapshots'
 import type { MemoryKeeper } from '../memory-inspector'
 import { keepers } from '../../store'
 import { KeeperLaneSection } from './keeper-lane-strip'
+import { KeeperWaitQueueRail } from '../lanes/lane-queue-panel'
 import { openTaskDetail } from '../goals/task-detail-state'
-import { CompactionInspectorOverlay } from './compaction-inspector-overlay'
 
 const LazyMemoryInspector = lazy(async () => ({
   default: (await import('../memory-inspector')).MemoryInspector,
@@ -71,6 +77,46 @@ function contextMax(keeper: Keeper): number | null {
 function formatK(n: number | null | undefined): string | null {
   if (typeof n !== 'number') return null
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`
+}
+
+// Design formats the window size as a round k figure (`(ctxWindow / 1000).toFixed(0)k`,
+// rails.jsx ctx-usage) — 200k, not 200.0k.
+function formatWindowK(n: number | null | undefined): string | null {
+  if (typeof n !== 'number') return null
+  return `${(n / 1000).toFixed(0)}k`
+}
+
+// Design rtc-spec formatting (rails.jsx RailRuntime): round k figures from the
+// catalog's declared max_context / max_output_tokens, '—' when the catalog has
+// no entry — never the mock's hardcoded `max_tokens 4,096`.
+function formatSpecK(n: number | null | undefined): string {
+  return typeof n === 'number' && Number.isFinite(n) && n > 0
+    ? `${(n / 1000).toFixed(0)}k`
+    : '—'
+}
+
+function samplingSpec(entry: { temperature?: number | null, top_p?: number | null } | null): string | null {
+  if (!entry) return null
+  const parts: string[] = []
+  if (typeof entry.temperature === 'number') parts.push(`temp ${entry.temperature}`)
+  if (typeof entry.top_p === 'number') parts.push(`top_p ${entry.top_p}`)
+  return parts.length > 0 ? `샘플링 ${parts.join(' · ')}` : null
+}
+
+// Design heartbeat line (rails.jsx `.rail-hb`): `heartbeat {interval}s · 다음
+// wake ~{eta}s` + a `poll` note. The ETA derives from the keepalive interval
+// and the ledger's last heartbeat; when the ledger could not be read
+// (heartbeat_observation_error) the line marks the observation error instead
+// of substituting a stale ETA.
+function heartbeatEtaSeconds(keeper: Keeper): number | null {
+  const interval = keeper.keeper_keepalive_interval_s
+  if (typeof interval !== 'number' || !Number.isFinite(interval) || interval <= 0) return null
+  if (keeper.heartbeat_observation_error) return null
+  if (!keeper.last_heartbeat) return null
+  const lastMs = Date.parse(keeper.last_heartbeat)
+  if (!Number.isFinite(lastMs)) return null
+  const elapsed = (Date.now() - lastMs) / 1000
+  return Math.max(0, Math.round(interval - elapsed))
 }
 
 function ownedTasks(keeper: Keeper): Task[] {
@@ -123,6 +169,69 @@ function AttentionSection({ keeper }: { keeper: Keeper }): VNode | null {
             <span class="att-text" title=${it.text}>${it.text}</span>
           </div>
         `)}
+      </div>
+    </div>
+  `
+}
+
+// Design drain/handoff card (rails.jsx ContextRail `.drain-card`): visible only
+// while the keeper FSM is Draining or HandingOff. Counts and rows come from the
+// live owned-task list; the 대기 자극 flush sub-list reads the keeper waiting
+// inventory's event_queue_pending rows (the same store the lane strip uses) —
+// nothing is synthesized when the inventory has not reported.
+function drainPhase(keeper: Keeper): 'Draining' | 'HandingOff' | null {
+  const phase = keeper.lifecycle_phase ?? keeper.phase ?? null
+  return phase === 'Draining' || phase === 'HandingOff' ? phase : null
+}
+
+function DrainSection({ keeper }: { keeper: Keeper }): VNode | null {
+  const phase = drainPhase(keeper)
+  if (!phase) return null
+  const owned = ownedTasks(keeper)
+  const inventory = keeperWaitingInventoryState(keeper.name).inventory
+  const entry = inventory?.keepers.find(k => k.keeper_name === keeper.name) ?? null
+  const stimuli =
+    phase === 'Draining'
+      ? (entry?.waiting_on ?? []).filter(row => row.source === 'event_queue_pending')
+      : []
+  return html`
+    <div class="ctx-sec">
+      <h4>${phase === 'Draining' ? '드레인 큐' : '핸드오프 진행'}</h4>
+      <div class="drain-card" data-phase=${phase}>
+        <div class="drain-head">
+          <span class="drain-badge">${phase}</span>
+          <span class="drain-gloss">${phase === 'Draining' ? '작업을 비우고 정상 종료 중' : '소유 태스크를 다른 keeper 에게 인계 중'}</span>
+        </div>
+        <div class="drain-count"><span class="mono">${owned.length}</span>건 ${phase === 'Draining' ? '비우는 중' : '인계 중'}</div>
+        ${owned.length > 0
+          ? html`
+              <div class="drain-list">
+                ${owned.map(t => html`
+                  <div class="drain-item" key=${t.id}>
+                    <span class="drain-spin" aria-hidden="true"></span>
+                    <span class="drain-t-id mono">${t.id}</span>
+                    <span class="drain-t-title">${t.title}</span>
+                    <span class="drain-t-state mono">${t.status}</span>
+                  </div>
+                `)}
+              </div>
+            `
+          : null}
+        ${stimuli.length > 0
+          ? html`
+              <div class="drain-eventq">
+                <div class="drain-eventq-h">대기 자극 flush</div>
+                ${stimuli.map((row, i) => html`
+                  <div class="drain-ev" key=${`${row.source}:${row.waiting_on}:${i}`}>
+                    <span class="drain-ev-gl mono" aria-hidden="true">·</span>
+                    <span class="drain-ev-kind mono">${row.waiting_on}</span>
+                    <span class="drain-ev-from">${row.wake_producer ?? '—'}</span>
+                    <span class="drain-ev-at mono">${row.since_iso ? formatTimeAgo(row.since_iso) : '—'}</span>
+                  </div>
+                `)}
+              </div>
+            `
+          : null}
       </div>
     </div>
   `
@@ -223,6 +332,10 @@ function RuntimeSection({
     loadRuntimeCatalog()
   }, [])
 
+  // Design RailRuntime disclosure (rails.jsx): the card is collapsed to just
+  // the runtime name by default; `.rtc-head` toggles `.rtc-detail` open.
+  const [detailOpen, setDetailOpen] = useState(false)
+
   const runtime = keeperRuntimeLabel(keeper)
   // The card's runtime id is the *live* runtime the keeper is running (from its
   // meta, via the execution snapshot). Saving a new runtime in the config
@@ -248,7 +361,7 @@ function RuntimeSection({
         || entry?.supports_video_input,
       )
     : null
-  // Effort reads OAS-catalog effective_capabilities, the same source request
+  // Effort reads Agent Core-catalog effective_capabilities, the same source request
   // building uses. Catalog transport state, a missing runtime entry, and an
   // entry whose effective capabilities were not projected are distinct facts.
   const effortState = resolveRuntimeEffortState(catalogEntry)
@@ -263,105 +376,131 @@ function RuntimeSection({
   const requestConfig = rawOpen && entry ? runtimeCatalogRequestConfig(entry) : null
   const declaredSpec = rawOpen && entry ? runtimeCatalogDeclaredSpec(entry) : null
   const effectiveCapabilities = rawOpen && entry ? runtimeCatalogEffectiveCapabilities(entry) : null
+  const sampling = samplingSpec(entry)
+  const heartbeatInterval = keeper.keeper_keepalive_interval_s
+  const heartbeatError = keeper.heartbeat_observation_error ?? null
+  const heartbeatEta = heartbeatEtaSeconds(keeper)
 
   return html`
     <div class="ctx-sec">
       <h4>런타임</h4>
-      <div class="rtc-card">
-        <div class="rtc-id mono">${runtime ?? '런타임 미수신'}</div>
+      <div class=${`rtc-card${detailOpen ? ' open' : ''}`}>
+        <button
+          type="button"
+          class="rtc-head"
+          aria-expanded=${detailOpen ? 'true' : 'false'}
+          title=${detailOpen ? '접기' : '런타임 상세 펼치기'}
+          onClick=${() => setDetailOpen(open => !open)}
+        >
+          <span class="rtc-id mono">${runtime ?? '런타임 미수신'}</span>
+          <span class="rtc-chev" aria-hidden="true">▸</span>
+        </button>
         ${pendingRuntime
           ? html`<div
               class="rtc-drift"
               data-testid="runtime-drift"
-              title="저장된 런타임 지정은 키퍼가 다음 turn-up(재시작)할 때 적용됩니다. 현재 표시된 런타임은 지금 실제로 실행 중인 것입니다."
+              title="지정은 다음 turn-up에 적용 · 표시는 현재 실행 중인 런타임"
             >
               지정됨 <span class="mono">${pendingRuntime}</span> · 재시작 시 적용
             </div>`
           : null}
-        <div class="rtc-model mono">
-          ${entry?.model_api_name ?? '—'}${ctxK ? html` · ${ctxK}` : null}
-        </div>
-        ${catalogEntry.status === 'ready'
+        ${detailOpen
           ? html`
-              <div class="rtc-flags">
-                <span class=${`rtc-flag ${catalogEntry.entry.tools_support ? 'on' : 'off'}`}>
-                  ${catalogEntry.entry.tools_support ? '✓' : '✕'} tools
-                </span>
-                <span class=${`rtc-flag ${catalogEntry.entry.thinking_support ? 'on' : 'off'}`}>
-                  ${catalogEntry.entry.thinking_support ? '✓' : '✕'} thinking
-                </span>
-                <span class=${`rtc-flag ${catalogEntry.entry.streaming ? 'on' : 'off'}`}>
-                  ${catalogEntry.entry.streaming ? '✓' : '✕'} streaming
-                </span>
-                <span
-                  class=${`rtc-flag ${multimodal === true ? 'on' : multimodal === false ? 'off' : 'na'}`}
-                  title=${multimodal === null ? '능력 미선언 — 지원 여부 판별 불가' : null}
-                >
-                  ${multimodal === null ? '—' : multimodal ? '✓' : '✕'} multimodal
-                </span>
-              </div>
-            `
-          : html`<${RuntimeCapabilitiesUnavailable} resolution=${catalogEntry} />`}
-        <div class="rtc-effort">
-          <span class="rtc-effort-k">effort</span>
-          <${RuntimeEffortValue} state=${effortState} />
-        </div>
-        ${rawSpecAvailable
-          ? html`
-              <button
-                type="button"
-                class="rtc-raw-toggle"
-                data-testid="runtime-raw-toggle"
-                aria-expanded=${rawOpen ? 'true' : 'false'}
-                title="카탈로그 원시 스펙(params/request/declared/caps) 표시 전환"
-                onClick=${() => {
-                  runtimeRawSpecOpen.value = !runtimeRawSpecOpen.value
-                }}
-              >
-                원시 스펙 ${rawOpen ? '접기' : '보기'}
-              </button>
-            `
-          : null}
-        ${parameterPolicy
-          ? html`
-              <div class="rtc-effort">
-                <span class="rtc-effort-k">params</span>
-                <span class="rtc-eff-na" title=${parameterPolicy}>${parameterPolicy}</span>
-              </div>
-            `
-          : null}
-        ${requestConfig
-          ? html`
-              <div class="rtc-effort">
-                <span class="rtc-effort-k">request</span>
-                <span class="rtc-eff-na" title=${requestConfig}>${requestConfig}</span>
-              </div>
-            `
-          : null}
-        ${declaredSpec
-          ? html`
-              <div class="rtc-effort">
-                <span class="rtc-effort-k">declared</span>
-                <span class="rtc-eff-na" title=${declaredSpec}>${declaredSpec}</span>
-              </div>
-            `
-          : null}
-        ${effectiveCapabilities
-          ? html`
-              <div class="rtc-effort">
-                <span class="rtc-effort-k">caps</span>
-                <span class="rtc-eff-na" title=${effectiveCapabilities}>${effectiveCapabilities}</span>
+              <div class="rtc-detail">
+                <div class="rtc-model mono">
+                  ${entry?.model_api_name ?? '—'}${ctxK ? html` · ${ctxK}` : null}
+                </div>
+                <div class="rtc-spec mono">최대 컨텍스트 ${formatSpecK(entry?.max_context)} · 최대 출력 ${formatSpecK(entry?.max_output_tokens)}</div>
+                ${sampling ? html`<div class="rtc-spec mono">${sampling}</div>` : null}
+                ${catalogEntry.status === 'ready'
+                  ? html`
+                      <div class="rtc-flags">
+                        <span class=${`rtc-flag ${catalogEntry.entry.tools_support ? 'on' : 'off'}`}>
+                          ${catalogEntry.entry.tools_support ? '✓' : '✕'} tools
+                        </span>
+                        <span class=${`rtc-flag ${catalogEntry.entry.thinking_support ? 'on' : 'off'}`}>
+                          ${catalogEntry.entry.thinking_support ? '✓' : '✕'} thinking
+                        </span>
+                        <span class=${`rtc-flag ${catalogEntry.entry.streaming ? 'on' : 'off'}`}>
+                          ${catalogEntry.entry.streaming ? '✓' : '✕'} streaming
+                        </span>
+                        <span
+                          class=${`rtc-flag ${multimodal === true ? 'on' : multimodal === false ? 'off' : 'na'}`}
+                          title=${multimodal === null ? '능력 미선언 — 지원 여부 판별 불가' : null}
+                        >
+                          ${multimodal === null ? '—' : multimodal ? '✓' : '✕'} multimodal
+                        </span>
+                      </div>
+                    `
+                  : html`<${RuntimeCapabilitiesUnavailable} resolution=${catalogEntry} />`}
+                <div class="rtc-effort">
+                  <span class="rtc-effort-k">effort</span>
+                  <${RuntimeEffortValue} state=${effortState} />
+                </div>
+                ${rawSpecAvailable
+                  ? html`
+                      <button
+                        type="button"
+                        class="rtc-raw-toggle"
+                        data-testid="runtime-raw-toggle"
+                        aria-expanded=${rawOpen ? 'true' : 'false'}
+                        title="카탈로그 원시 스펙(params/request/declared/caps) 표시 전환"
+                        onClick=${() => {
+                          runtimeRawSpecOpen.value = !runtimeRawSpecOpen.value
+                        }}
+                      >
+                        원시 스펙 ${rawOpen ? '접기' : '보기'}
+                      </button>
+                    `
+                  : null}
+                ${parameterPolicy
+                  ? html`
+                      <div class="rtc-effort">
+                        <span class="rtc-effort-k">params</span>
+                        <span class="rtc-eff-na" title=${parameterPolicy}>${parameterPolicy}</span>
+                      </div>
+                    `
+                  : null}
+                ${requestConfig
+                  ? html`
+                      <div class="rtc-effort">
+                        <span class="rtc-effort-k">request</span>
+                        <span class="rtc-eff-na" title=${requestConfig}>${requestConfig}</span>
+                      </div>
+                    `
+                  : null}
+                ${declaredSpec
+                  ? html`
+                      <div class="rtc-effort">
+                        <span class="rtc-effort-k">declared</span>
+                        <span class="rtc-eff-na" title=${declaredSpec}>${declaredSpec}</span>
+                      </div>
+                    `
+                  : null}
+                ${effectiveCapabilities
+                  ? html`
+                      <div class="rtc-effort">
+                        <span class="rtc-effort-k">caps</span>
+                        <span class="rtc-eff-na" title=${effectiveCapabilities}>${effectiveCapabilities}</span>
+                      </div>
+                    `
+                  : null}
               </div>
             `
           : null}
       </div>
+      ${typeof heartbeatInterval === 'number' && Number.isFinite(heartbeatInterval) && heartbeatInterval > 0
+        ? html`<div class="rail-hb" title=${heartbeatError ?? null}>
+            <span class="rail-hb-dot" aria-hidden="true"></span>heartbeat ${heartbeatInterval}s <span class="rail-hb-sep">·</span> 다음 wake ~${heartbeatEta === null ? '—' : `${heartbeatEta}s`}<span class="rail-hb-note mono">${heartbeatError ? '관측 오류' : 'poll'}</span>
+          </div>`
+        : null}
     </div>
   `
 }
 
 function compactRequiresForce(keeper: Keeper): boolean {
   const phase = phaseTokenFromKeeper(keeper)
-  if (phase === 'overflowed' || phase === 'paused' || phase === 'compacting') return false
+  if (phase === 'paused' || phase === 'compacting') return false
   if (phase === 'running' || phase === 'failing') return true
   const status = keeper.status.toLowerCase()
   return status === 'running' || status === 'active' || status === 'busy' || status === 'failing'
@@ -369,11 +508,9 @@ function compactRequiresForce(keeper: Keeper): boolean {
 
 function ContextSection({
   keeper,
-  onOpenCompaction,
   onOpenMemory,
 }: {
   keeper: Keeper
-  onOpenCompaction: () => void
   onOpenMemory: () => void
 }): VNode {
   const [compacting, setCompacting] = useState(false)
@@ -381,9 +518,7 @@ function ContextSection({
   const max = contextMax(keeper)
   const baseTokens = keeper.context_tokens ?? keeper.context?.context_tokens ?? null
   const tokens = formatK(baseTokens)
-  const maxLabel = formatK(max)
-  const compactionCount = keeper.compaction_count ?? null
-  const hasCompactionHistory = typeof compactionCount === 'number' && compactionCount > 0
+  const maxLabel = formatWindowK(max)
   const hasMeterData = pct !== null && (pct > 0 || max !== null)
   // The server projects these values from the newest completed TurnRecord.
   // Keep only turn identity and age here; serialized request bytes are
@@ -429,19 +564,12 @@ function ContextSection({
         const after = formatK(parsed.after_tokens)
         if (before && after) {
           // Measured before/after present: a compaction actually ran and reduced tokens.
-          recordManualCompaction(
-            keeper.name,
-            parsed.before_tokens,
-            parsed.after_tokens,
-            keeperRuntimeLabel(keeper) ?? '—',
-          )
           showToast(`${keeper.name} compact 완료: ${before} -> ${after}`, 'success')
         } else if (parsed.queued) {
           // masc_keeper_compact only ENQUEUES the request; the compaction runs later on the
           // keeper's owning lane. Queuing is not completion: a queue stuck behind an
           // unrecovered inflight turn stays pending indefinitely, so rendering it as "완료"
-          // is a false success. Surface the pending state, and do not record a phantom
-          // (null-token) compaction snapshot for a request that has not run.
+          // is a false success. Surface the pending state instead.
           const alreadyQueued = parsed.queue_outcome === 'already_present'
           showToast(
             alreadyQueued
@@ -490,18 +618,25 @@ function ContextSection({
             `
           : html`<div class="ctx-empty" data-missing="context-window"><strong>윈도우 사용률 미측정</strong><span>${ctxUnavailableReason
                 ? html`턴 레코드 기준 측정 불가: <span class="mono">${ctxUnavailableReason}</span>`
-                : '측정된 턴 레코드가 아직 없습니다.'}</span></div>`}
-        <div class="ctx-tok">
-          <span class="mono">${tokens ?? '—'}</span>
+                : '측정된 턴 레코드가 아직 없음'}</span></div>`}
+        <div class="ctx-usage">
+          <span class="ctx-usage-k">마지막 턴 input</span>
+          <span class="mono ctx-usage-v">${tokens ?? '—'}</span>
           <span class="ctx-tok-sep">/</span>
           <span class="mono ctx-tok-full">${maxLabel ?? '—'}</span>
-          <span class="ctx-tok-lbl">provider 입력 토큰 / 모델 윈도우</span>
+          <span class="ctx-tok-lbl">마지막 턴 · 창 크기</span>
         </div>
         ${ctxSource === 'turn_record'
           ? html`<div class="ctx-src" data-testid="ctx-provenance" title=${ctxTurnRef ?? undefined}>
               마지막 완료 요청: <span class="mono">T${ctxAbsoluteTurn ?? '—'}</span>
               ${ctxObservedAt ? html` · ${formatTimeAgo(ctxObservedAt)}` : null}
             </div>`
+          : null}
+        ${hasMeterData
+          // Design's typed not_observed line (rails.jsx): the meter above is
+          // the LAST turn's ratio; the live in-flight occupancy is never
+          // observed, and the design says so instead of implying it.
+          ? html`<div class="ctx-notobs mono">지금 쓰는 양 <b>알 수 없음</b><span class="ctx-notobs-g">마지막 턴 기준 · 재시작하면 초기화</span></div>`
           : null}
         <div class="cmp-actions">
           <button
@@ -512,9 +647,6 @@ function ContextSection({
             onClick=${runCompact}
           >${compacting ? html`<span class="cmp-spin"></span> 컴팩트 실행 중…` : '◉ 지금 컴팩트'}</button>
         </div>
-        <button type="button" class="cmp-open" data-testid="open-compaction-inspector" onClick=${onOpenCompaction}>
-          ◉ 컴팩션 스냅샷${hasCompactionHistory ? ` · ${compactionCount}` : ''} <span class="cmp-open-sub">before/after 보기</span>
-        </button>
         <button type="button" class="cmp-open" data-testid="open-memory-inspector" onClick=${onOpenMemory}>
           ◈ 메모리 보기 <span class="cmp-open-sub">핀 · 스토어 · 회상</span>
         </button>
@@ -575,7 +707,7 @@ export function KeeperWorkspaceRail({
   keeper: Keeper
   runtimeDrift?: KeeperRuntimeLensConfigDriftAxis | null
 }): VNode {
-  const [overlay, setOverlay] = useState<'compaction' | 'memory' | null>(null)
+  const [overlay, setOverlay] = useState<'memory' | null>(null)
   const memoryKeeper = toMemoryKeeper(keeper)
   const memoryKeepers = keepers.value.map(toMemoryKeeper)
 
@@ -583,20 +715,18 @@ export function KeeperWorkspaceRail({
     <aside class="ctx" aria-label="키퍼 컨텍스트">
       <div class="ctx-scroll">
         <${AttentionSection} keeper=${keeper} />
+        <${DrainSection} keeper=${keeper} />
         <${KeeperLaneSection} keeper=${keeper} />
         <${RuntimeSection} keeper=${keeper} drift=${runtimeDrift} />
         <${ContextSection}
           keeper=${keeper}
-          onOpenCompaction=${() => setOverlay('compaction')}
           onOpenMemory=${() => setOverlay('memory')}
         />
+        <${KeeperWaitQueueRail} keeperName=${keeper.name} />
         <${OwnedTasksSection} keeper=${keeper} />
       </div>
     </aside>
 
-    ${overlay === 'compaction'
-      ? html`<${CompactionInspectorOverlay} keeper=${keeper} onClose=${() => setOverlay(null)} />`
-      : null}
     ${overlay === 'memory'
       ? html`
           <${Suspense} fallback=${html`<div class="turn-overlay" role="dialog" aria-modal="true">Keeper 메모리 로딩…</div>`}>

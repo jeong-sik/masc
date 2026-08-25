@@ -370,7 +370,7 @@ export function KeeperRepoMapping() {
                   </label>
 
                   ${repos.length === 0 ? html`
-                    <div class="text-2xs text-text-muted py-2 v2-monitoring-row">사용 가능한 저장소가 없습니다.</div>
+                    <div class="text-2xs text-text-muted py-2 v2-monitoring-row">사용 가능한 저장소 없음</div>
                   ` : html`
                     <div class="grid gap-1.5 ${repos.length > 6 ? 'grid-cols-2' : 'grid-cols-1'} v2-monitoring-row">
                       ${repos.map(repo => {

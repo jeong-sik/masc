@@ -42,8 +42,6 @@ let () =
               spec.mcp_context_required;
             check bool "is_idempotent default" false spec.is_idempotent;
             check bool "allow_direct_call default" false spec.allow_direct_call_when_hidden;
-            check bool "canonical_name default" true (Option.is_none spec.canonical_name);
-            check bool "replacement default" true (Option.is_none spec.replacement);
             check bool "reason default" true (Option.is_none spec.reason);
             check bool "title default" true (Option.is_none spec.title));
           test_case "create with optional args" `Quick (fun () ->
@@ -239,7 +237,7 @@ let () =
          refactor: it exercised the deleted [Tool_catalog.tool_group] display
          classifier (and was already failing on base — it asserted richer
          categories the classifier never produced). *)
-      ( "verify_handler_coverage",
+      ( "handler binding registers through Tool_dispatch",
         [
           test_case "Tag_dispatch binding not in verify missing" `Quick (fun () ->
             let spec =
@@ -253,26 +251,24 @@ let () =
             in
             register_test_metadata "__test_spec_tag_dispatch";
             Tool_spec.register spec;
-            let missing = Tool_spec.verify_handler_coverage () in
-            check bool "Tag_dispatch not in missing" false
-              (List.mem "__test_spec_tag_dispatch" missing));
-          test_case "Direct binding registers handler" `Quick (fun () ->
-            let name = "__test_spec_direct_handler" in
+            (* Tag_dispatch routes through the module tag, so [register] must
+               not put a name in the handler registry. *)
+            check bool "Tag_dispatch registers no direct handler" false
+              (Tool_dispatch.is_registered "__test_spec_tag_dispatch"));
+          test_case "registered binding registers handler" `Quick (fun () ->
+            let name = "__test_spec_registered_handler" in
             let spec =
               Tool_spec.create
                 ~name
-                ~description:"direct handler test"
+                ~description:"registered handler test"
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
-                ~handler_binding:(Direct (fun ~name:_ ~args:_ -> Some (tool_ok "ok")))
+                ~handler_binding:(Registered (fun ~name:_ ~args:_ -> tool_ok "ok"))
                 ()
             in
             register_test_metadata name;
             Tool_spec.register spec;
             check bool "handler registered in Tool_dispatch" true
-              (Tool_dispatch.is_registered name);
-            let missing = Tool_spec.verify_handler_coverage () in
-            check bool "not in missing" false
-              (List.mem name missing));
+              (Tool_dispatch.is_registered name));
         ] );
     ]

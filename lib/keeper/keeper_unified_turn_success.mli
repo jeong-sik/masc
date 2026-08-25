@@ -8,7 +8,6 @@ module For_testing : sig
     | Terminal_checkpoint
     | Terminal_input_required
 
-  val terminal_outcome_of_result : Keeper_agent_run.run_result -> terminal_outcome
 
   val persist_terminal_turn_meta_for_outcome
     :  config:Workspace.config
@@ -22,11 +21,6 @@ module For_testing : sig
     -> updated_meta:Keeper_meta_contract.keeper_meta
     -> Keeper_agent_run.run_result
     -> unit
-
-  val acknowledge_pending_messages
-    :  Keeper_meta_contract.keeper_meta
-    -> Keeper_world_observation.world_observation
-    -> Keeper_meta_contract.keeper_meta
 
   type cycle_post_action =
     | Assign_task
@@ -46,11 +40,14 @@ val handle
   -> meta:Keeper_meta_contract.keeper_meta
   -> turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> observation:Keeper_world_observation.world_observation
-  -> channel:Keeper_world_observation.keeper_cycle_channel
   -> latency_ms:int
   -> degraded_retry_applied:bool
   -> degraded_retry_runtime:string option
   -> fallback_reason:Keeper_error_classify.degraded_retry_reason option
   -> keeper_turn_id:int
-  -> Keeper_agent_run.run_result
+  -> Keeper_execution_outcome.t
   -> handle_result
+(** Common success terminal pipeline for both direct chat and autonomous
+    execution. The normalized outcome declares the lane-specific consumer;
+    lifecycle, durable Owner meta, projections, and terminal FSM commit here
+    exactly once. *)

@@ -63,15 +63,9 @@ val board_sort_label : Board_dispatch.sort_order -> string
 
 (** {1 Board post / comment filtering} *)
 
-val filter_board_posts :
-  exclude_system:bool ->
-  exclude_automation:bool ->
-  Board.post list ->
-  Board.post list
 (** [filter_board_posts ~exclude_system ~exclude_automation posts]
     applies {!Board.post_matches_filters} to every entry. *)
 
-val max_filtered_board_window : int
 (** [5200] — the upper bound on [base_fetch] when either filter
     flag is active.  Pinned because the dashboard pagination
     contract depends on it: the worst-case fetch fans out to 5200
@@ -106,13 +100,10 @@ val board_fetch_limit :
 
     Misses fall through as [`agent`] kind with [source: "raw_agent"]. *)
 
-val board_actor_key : kind:string -> string -> string
 (** [board_actor_key ~kind id] produces the canonical lookup key
     [<kind>:<lowercased trimmed id>].  Used by the dashboard's
     actor-aggregation pipeline. *)
 
-val board_actor_keeper_identity :
-  string -> (string * string option * string) option
 (** [board_actor_keeper_identity raw] returns
     [Some (keeper_name, runtime_agent_name, source)] when [raw]
     resolves to a keeper through any of the three lookup tiers,
@@ -169,36 +160,17 @@ val board_reactions_lookup :
   Board.reaction_target_type * string ->
   Board.reaction_summary list
 
-val board_contributor_quality_json :
-  Reputation.agent_reputation -> Yojson.Safe.t
-(** [board_contributor_quality_json rep] projects the existing agent
-    reputation record into the compact board contributor-quality contract. *)
-
-val board_contributor_quality_lookup :
-  ?config:Workspace.config -> unit -> string -> Yojson.Safe.t option
-(** [board_contributor_quality_lookup ?config ()] returns a request-local
-    memoized lookup by author.  Without [config], it returns [None]. *)
-
 (** {1 Dashboard helpers} *)
 
 val board_comment_dashboard_json :
-  ?include_moderation:bool ->
-  ?blind_votes:bool ->
   ?current_vote:Board.vote_direction option ->
   ?reactions:Board.reaction_summary list ->
   Board.comment ->
   Yojson.Safe.t
 (** [board_comment_dashboard_json c] renders a comment with the
-    [author_identity] field appended for dashboard inspection.  When
-    [include_moderation] is [true], it also appends operator-only
-    [report_count] and [moderation_status] fields.  When [blind_votes]
-    is [true], score fields are hidden until [current_vote] records a
-    viewer vote. *)
+    [author_identity] field appended for dashboard inspection. *)
 
 val board_post_dashboard_json :
-  ?include_moderation:bool ->
-  ?blind_votes:bool ->
-  ?contributor_quality:Yojson.Safe.t ->
   ?current_vote:Board.vote_direction option ->
   ?reactions:Board.reaction_summary list ->
   author_karma:int ->
@@ -215,12 +187,6 @@ val board_post_dashboard_json :
     - [hearth_count] = 0 or 1 (boolean-as-int for the dashboard's
       column that aggregates across multiple hearths).
     - [author_identity] from {!board_actor_identity_json}.
-    - [report_count] / [moderation_status] from {!Board_moderation}
-      only when [include_moderation] is [true].
-    - [vote_blind] / [vote_blind_reason] and null score fields when
-      [blind_votes] is [true] and the viewer has not voted yet.
-    - [contributor_quality] when supplied by the route layer from
-      {!Reputation}.
 
     The base fields [title] / [votes] / [comment_count] /
     [created_at_iso] / [updated_at_iso] / [hearth_count] are
@@ -229,7 +195,6 @@ val board_post_dashboard_json :
     so the dashboard never sees the SDK's structured shapes by
     accident. *)
 
-val dashboard_compact_mode : Httpun.Request.t -> bool
 (** [dashboard_compact_mode request] returns [true] iff the
     [mode] query param equals ["compact"] (case-insensitive,
     trimmed). *)
@@ -254,7 +219,6 @@ val standard_limit : Httpun.Request.t -> int
 (** [standard_limit request] reads the [limit] query param,
     defaulting to [50], and clamps to [\[1, 200\]]. *)
 
-val standard_offset : Httpun.Request.t -> int
 (** [standard_offset request] reads the [offset] query param,
     defaulting to [0], with a non-negative floor.  No upper
     clamp — pagination over very large windows is the caller's

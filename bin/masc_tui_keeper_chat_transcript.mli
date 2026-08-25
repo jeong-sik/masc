@@ -1,0 +1,196 @@
+(** What one keeper turn looks like while it is still running.
+
+    {!Masc_tui_keeper_chat_live} says what arrived; this accumulates it into
+    the shape the chat pane draws: the assistant text so far, the reasoning so
+    far, and one row per tool call with the argument a reader identifies it by.
+
+    It holds no authority over the turn. The recorded reply still comes from
+    the strict whole-body decode when the stream ends, and this is discarded
+    at that point. *)
+
+(** How far along the turn is, as far as the stream has said. *)
+type phase =
+  | Waiting  (** The request went out; the run has not started. *)
+  | Working  (** The run started and the stream is open. *)
+  | Stream_ended  (** The run reported it finished. *)
+  | Stream_failed of string  (** The run reported an error. *)
+
+(** What came of an operator's request to interrupt this turn.
+
+    [Signal_sent] is not "the turn stopped". The server reports whether it
+    signalled the running fiber, and a turn parked in an uncancellable section
+    keeps going after a signal lands — reading it as the outcome is what hid a
+    63-minute hang (masc #29229). The stream ending is the proof. *)
+type interrupt =
+  | Not_requested
+  | Signal_sent of { turn_id : int option }
+  | Signal_declined of string
+      (** The server accepted the request and did not signal — no turn in
+          flight, or the cancel itself failed. Carries its reason. *)
+  | Signal_error of string  (** The request never got an answer. *)
+
+(** What the source says happened to a tool call. Live calls distinguish a
+    call still accepting arguments from one whose invocation ended but whose
+    result has not landed. Durable traces additionally distinguish an explicit
+    failure, an explicitly open call, and an absent outcome. *)
+type tool_outcome =
+  | Started
+  | Awaiting_result
+  | Returned
+  | Failed
+  | Never_returned
+  | Outcome_unrecorded
+
+(** One tool call as shared by the live turn and durable history decoders.
+    This remains typed until {!project_tool_block}; consumers never recover
+    identity or outcome by parsing a rendered row. *)
+type tool_activity = private
+  { call_id : string option
+      (** Stable producer identity when the source carried one. [None] is kept
+          for a trace step that did not carry an id; no positional id is
+          invented. *)
+  ; tool_name : string
+  ; args : string  (** Argument text accumulated or persisted by the source. *)
+  ; subject : string option
+      (** The one argument a reader names the call by, or [None] while the
+          arguments are still arriving or carry no known key. Same naming as
+          the connector trail and the dashboard. *)
+  ; outcome : tool_outcome
+  ; duration : string option
+      (** The source's duration label. Live events do not currently carry one,
+          so they retain [None]. *)
+  }
+
+(** A contiguous block of tool calls. [omitted_steps] is a durable transcript
+    fact, not the number of rows a compact projection hides. *)
+type tool_block = private
+  { activities : tool_activity list
+  ; omitted_steps : int
+  }
+
+type tool_projection_mode =
+  | Compact
+  | Full
+
+(** Rows derived from one typed block. Both modes retain [activities] in the
+    same order. [hidden_activity_rows] is exact: zero for [Full], and the
+    number of per-call detail rows folded into a compact summary. *)
+type tool_projection = private
+  { activities : tool_activity list
+  ; rows : string list
+  ; hidden_activity_rows : int
+  ; omitted_steps : int
+  }
+
+val make_tool_activity :
+  call_id:string option ->
+  tool_name:string ->
+  args:string ->
+  outcome:tool_outcome ->
+  duration:string option ->
+  tool_activity
+(** Build an activity and derive its [subject] through the shared tool-subject
+    authority. History and live projection must not derive it independently. *)
+
+val tool_block : ?omitted_steps:int -> tool_activity list -> tool_block
+
+val project_tool_block : tool_projection_mode -> tool_block -> tool_projection
+(** The only tool-row formatter. [Full] preserves the existing one-row-per-call
+    output. [Compact] folds two or more calls into one outcome summary and
+    states the exact number of hidden detail rows. Neither mode fabricates
+    missing identity, duration, outcome, or omitted transcript steps. *)
+
+(** Lines the live reader could not read. Kept because a pane that drops what
+    it does not understand looks like a keeper that did nothing. *)
+type unreadable =
+  { count : int
+  ; last_detail : string
+  }
+
+(** A tool call the keeper is holding, waiting to be answered. *)
+type awaiting_approval =
+  { call_id : string
+  ; tool_name : string
+  ; question : string
+  }
+
+type t
+
+val create :
+  keeper_name:string -> request_id:string -> started_at:float -> t
+(** [started_at] is when the request was dispatched, not when the run
+    started. The gap between the two is the part a watcher most needs an
+    age for: a request that never reaches RUN_STARTED is what hid a
+    63-minute hang (masc #29229). *)
+
+val keeper_name : t -> string
+val request_id : t -> string
+
+val apply : t -> Masc_tui_keeper_chat_live.delta -> unit
+(** Fold one delta in. Deltas for an unknown call id are dropped: a tool row
+    with no name says less than no row, which is the same call the connector
+    trail makes. *)
+
+val note_interrupt : t -> interrupt -> unit
+
+val phase : t -> phase
+val interrupt : t -> interrupt
+val text : t -> string
+val thinking : t -> string
+
+val thinking_lines : t -> string list
+(** The reasoning trail the pane draws: every non-blank line, in order.
+    Blank lines are dropped because models emit runs of them. Not the
+    last line alone -- reasoning is the only part of a live turn the
+    durable transcript does not keep, so the pane is the one place it can
+    be read. *)
+val tool_calls : t -> tool_activity list
+(** In the order the stream opened them. *)
+val unreadable : t -> unreadable option
+
+(** One stretch of the turn, in arrival order. A tool-call round interleaves
+    reasoning, calls and reply text; {!text}, {!thinking_lines} and
+    {!tool_rows} answer the totals, this answers the order, which is what a
+    reader follows a long turn by. Tool stretches stay typed; text and
+    reasoning strings are terminal-safe. *)
+type trail_item =
+  | Trail_thinking of string list
+      (** Non-blank reasoning lines of one contiguous stretch. *)
+  | Trail_tools of tool_block
+      (** One contiguous run of typed calls. A call keeps updating its facts
+          (arguments, outcome) after later stretches open. *)
+  | Trail_text of string  (** One contiguous stretch of reply text. *)
+
+val trail : t -> trail_item list
+(** Empty stretches are dropped, so every item draws at least one row. *)
+
+val tool_rows : t -> string list
+
+(** One line per tool call, in stream order, the way the pane draws them: a
+    marker for how far the call got, the tool's name, and the argument it is
+    known by.
+
+    This is the [Full] compatibility accessor for the current pane. New live
+    and history consumers carry {!tool_block} to the render boundary and call
+    {!project_tool_block} explicitly. *)
+(** How a status row reads. *)
+type status_kind =
+  | Progress  (** How the turn is going. *)
+  | Attention  (** Something an operator has to know about. *)
+
+val awaiting_approval : t -> awaiting_approval option
+(** The call the turn is held at, if any. One at a time: the turn cannot reach
+    a second call while it is waiting on this one. *)
+
+val status_rows : now:float -> t -> (status_kind * string) list
+(** The status rows the chat pane draws for this turn.
+
+    Returned as a list rather than drawn directly because the pane's row
+    budget has to know how many there are before it lays the pane out, and the
+    budget answering differently from the drawing is how the unavailable row
+    once went missing while the send hint still read Enter:send
+    (see [keeper_message_status_rows]). One list, counted and drawn.
+
+    The progress row carries the turn's age, measured against [now] rather
+    than a clock read here so a test can state the instant. A [now] before
+    [started_at] drops the age instead of printing a negative one. *)

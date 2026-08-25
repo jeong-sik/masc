@@ -1,18 +1,18 @@
 type t =
-  | Oas_parse
-  | Oas_store
-  | Oas_io
-  | Oas_sdk
-  | Oas_sanitize_save
+  | Agent_core_parse
+  | Agent_core_store
+  | Agent_core_io
+  | Agent_core_failure
+  | Agent_core_sanitize_save
   | Create_initial_save
   | Compaction_save
 
 let to_label = function
-  | Oas_parse -> "oas_parse"
-  | Oas_store -> "oas_store"
-  | Oas_io -> "oas_io"
-  | Oas_sdk -> "oas_sdk"
-  | Oas_sanitize_save -> "oas_sanitize_save"
+  | Agent_core_parse -> "agent_core_parse"
+  | Agent_core_store -> "agent_core_store"
+  | Agent_core_io -> "agent_core_io"
+  | Agent_core_failure -> "agent_core"
+  | Agent_core_sanitize_save -> "agent_core_sanitize_save"
   | Create_initial_save -> "create_initial_save"
   | Compaction_save -> "compaction_save"
 ;;

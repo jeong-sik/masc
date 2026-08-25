@@ -2,6 +2,24 @@ open Alcotest
 
 module Authority = Server_request_authority
 
+let resolve_auth_config raw =
+  match Server_auth_config.resolve raw with
+  | Ok config -> config
+  | Error error -> fail (Server_auth_config.resolve_error_to_string error)
+;;
+
+let default_auth_config =
+  resolve_auth_config
+    Server_auth_config.
+      { allow_anonymous_mutations = None; loopback_dev_mutation_origins = None }
+;;
+
+let () =
+  match Server_auth.configure default_auth_config with
+  | Ok () -> ()
+  | Error error -> fail (Server_auth.configure_error_to_string error)
+;;
+
 let trust_policy ?(bind_host = "127.0.0.1") ?(bind_port = 8935)
     ?explicit_base_url () =
   match
@@ -52,6 +70,78 @@ let check_classification expected actual =
   | `Single, Authority.Single _ ->
     ()
   | _ -> fail "unexpected request-authority classification"
+;;
+
+let test_auth_config_rejects_malformed_values () =
+  (match
+     Server_auth_config.resolve
+       { allow_anonymous_mutations = Some "sometimes"
+       ; loopback_dev_mutation_origins = None
+       }
+   with
+   | Error
+       (Server_auth_config.Malformed_boolean
+          { name = "MASC_ALLOW_ANONYMOUS_MUTATIONS"; raw = "sometimes" }) ->
+     ()
+   | Error _ | Ok _ -> fail "malformed anonymous-mutation flag was not rejected");
+  match
+    Server_auth_config.resolve
+      { allow_anonymous_mutations = None
+      ; loopback_dev_mutation_origins = Some "http://localhost:4173/path"
+      }
+  with
+  | Error
+      (Server_auth_config.Malformed_origin
+         { name = "MASC_HTTP_DEV_MUTATION_ORIGINS"
+         ; raw = "http://localhost:4173/path"
+         }) ->
+    ()
+  | Error _ | Ok _ -> fail "malformed development Origin was not rejected"
+;;
+
+let test_auth_config_resolves_typed_policy () =
+  let config =
+    resolve_auth_config
+      { allow_anonymous_mutations = Some "on"
+      ; loopback_dev_mutation_origins = Some ""
+      }
+  in
+  check
+    bool
+    "anonymous mutations"
+    true
+    (Server_auth_config.allow_anonymous_mutations config);
+  check
+    int
+    "explicit empty development allowlist"
+    0
+    (List.length (Server_auth_config.loopback_dev_mutation_origins config))
+;;
+
+let test_auth_config_blank_anonymous_mutations_defaults_false () =
+  List.iter
+    (fun raw ->
+       let config =
+         resolve_auth_config
+           { allow_anonymous_mutations = Some raw
+           ; loopback_dev_mutation_origins = None
+           }
+       in
+       check
+         bool
+         (Printf.sprintf "blank %S is false" raw)
+         false
+         (Server_auth_config.allow_anonymous_mutations config))
+    [ ""; " \t " ]
+;;
+
+let test_auth_config_identical_reinstall_is_idempotent () =
+  match Server_auth.configure default_auth_config with
+  | Ok () -> ()
+  | Error error ->
+    failf
+      "identical policy reinstall failed: %s"
+      (Server_auth.configure_error_to_string error)
 ;;
 
 let test_http1_closed_classification () =
@@ -367,6 +457,34 @@ let check_origin_admission label expected request_authority headers =
     failf "%s did not produce one parsed Origin" label
 ;;
 
+let test_auth_config_is_resolved_once_before_origin_admission () =
+  let configured =
+    resolve_auth_config
+      { allow_anonymous_mutations = None
+      ; loopback_dev_mutation_origins = Some "http://localhost:4173"
+      }
+  in
+  (match Server_auth.configure configured with
+   | Error Server_auth.Already_configured -> ()
+   | Ok () -> fail "authorization policy accepted a second production install");
+  Fun.protect
+    ~finally:(fun () ->
+      Server_auth.For_testing.restore_auth_config (Some default_auth_config))
+    (fun () ->
+      Server_auth.For_testing.restore_auth_config (Some configured);
+      let request_authority = admitted_http1 [ "host", "localhost:8935" ] in
+      check_origin_admission
+        "configured development Origin"
+        Server_auth.Allowed_dev_origin
+        request_authority
+        [ "origin", "http://localhost:4173" ];
+      check_origin_admission
+        "unconfigured default Origin"
+        Server_auth.Rejected
+        request_authority
+        [ "origin", "http://localhost:5173" ])
+;;
+
 let test_origin_exact_grammar_and_cardinality () =
   let request_authority = admitted_http1 [ "host", "localhost:8935" ] in
   check_origin_admission
@@ -608,7 +726,29 @@ let test_fiber_binding_has_no_fallback () =
 let () =
   run
     "server-request-authority"
-    [ ( "HTTP/1.1"
+    [ ( "auth config"
+      , [ test_case
+            "malformed values are rejected"
+            `Quick
+            test_auth_config_rejects_malformed_values
+        ; test_case
+            "policy is typed"
+            `Quick
+            test_auth_config_resolves_typed_policy
+        ; test_case
+            "blank anonymous mutations default false"
+            `Quick
+            test_auth_config_blank_anonymous_mutations_defaults_false
+        ; test_case
+            "identical policy reinstall is idempotent"
+            `Quick
+            test_auth_config_identical_reinstall_is_idempotent
+        ; test_case
+            "policy is resolved before admission"
+            `Quick
+            test_auth_config_is_resolved_once_before_origin_admission
+        ] )
+    ; ( "HTTP/1.1"
       , [ test_case "closed classification" `Quick test_http1_closed_classification
         ; test_case "normalization" `Quick test_http1_normalizes_authority
         ; test_case

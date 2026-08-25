@@ -11,21 +11,6 @@ include Dashboard_goals_types
 
 
 
-let observe_goal_attainment_metrics (goal : Goal_store.goal) attainment =
-  let labels = [ ("goal_id", goal.id) ] in
-  let measured, pct =
-    match Json_util.get_int attainment "attainment_pct" with
-    | Some pct -> (1.0, float_of_int pct)
-    | None -> (0.0, 0.0)
-  in
-  Otel_metric_store.register_gauge ~name:Otel_metric_store.metric_goal_attainment_pct
-    ~help:goal_attainment_pct_help ~labels ();
-  Otel_metric_store.set_gauge Otel_metric_store.metric_goal_attainment_pct ~labels pct;
-  Otel_metric_store.register_gauge ~name:Otel_metric_store.metric_goal_attainment_measured
-    ~help:goal_attainment_measured_help ~labels ();
-  Otel_metric_store.set_gauge Otel_metric_store.metric_goal_attainment_measured ~labels
-    measured
-
 let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_meta_contract.keeper_meta) =
   try Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta with
   | exn ->
@@ -44,12 +29,6 @@ let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_meta_contract.kee
 
 let build_forest ~(config : Workspace.config) ~goals ~tasks
     ~(pending_approvals : Yojson.Safe.t list) =
-  let goal_ids = List.map (fun (goal : Goal_store.goal) -> goal.id) goals in
-  let is_root (goal : Goal_store.goal) =
-    match goal.parent_goal_id with
-    | None -> true
-    | Some parent_id -> not (List.mem parent_id goal_ids)
-  in
   let keeper_metas =
     Keeper_meta_store.keeper_names config
     |> List.filter_map (fun keeper_name ->
@@ -78,9 +57,7 @@ let build_forest ~(config : Workspace.config) ~goals ~tasks
       goal_task_index;
     }
   in
-  goals
-  |> List.filter is_root
-  |> List.map (build_tree context goals)
+  goals |> List.map (build_tree context goals)
 
 
 
@@ -108,28 +85,9 @@ let build_goal_events_projection ~(config : Workspace.config) goals =
   fun goal_id ->
     Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]
 
-let emit_all_goal_attainment_metrics ~(config : Workspace.config) =
-  let goals = Goal_store.list_goals config () in
-  let tasks = Workspace.get_tasks_safe config in
-  (* Goal attainment is derived from goals and linked tasks. Approval rows are
-     not an attainment input, so queue unavailability must not freeze these
-     independent gauges. The empty projection remains internal to this
-     attainment-only traversal and is never emitted as queue state. *)
-  let forest = build_forest ~config ~goals ~tasks ~pending_approvals:[] in
-  let all_nodes = flatten_tree [] forest in
-  List.iter
-    (fun (node : tree_node) ->
-      let goal = node.goal in
-      let attainment = goal_attainment_to_json goal node in
-      observe_goal_attainment_metrics goal attainment)
-    all_nodes
-
 let rec tree_node_to_json ?(events_for_goal = fun _ -> []) node =
   let goal = node.goal in
-  let attainment = goal_attainment_to_json goal node in
   let task_summary = task_summary_to_json node.tasks in
-  let completion_summary = goal_completion_to_json goal node ~attainment in
-  observe_goal_attainment_metrics goal attainment;
   `Assoc
     [
       ("id", `String goal.id);
@@ -141,9 +99,6 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> []) node =
       ("metric", Json_util.string_opt_to_json goal.metric);
       ("target_value", Json_util.string_opt_to_json goal.target_value);
       ("due_date", Json_util.string_opt_to_json goal.due_date);
-      ("parent_goal_id", Json_util.string_opt_to_json goal.parent_goal_id);
-      ("owner", Json_util.string_opt_to_json goal.owner);
-      ("attainment", attainment);
       ("tasks", `List (List.map task_to_tree_json node.tasks));
       ("task_count", `Int (List.length node.tasks));
       ("task_done_count",
@@ -153,8 +108,15 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> []) node =
                (fun (task : Masc_domain.task) -> task_is_done task)
                node.tasks)));
       ("task_summary", task_summary);
-      ("completion_summary", completion_summary);
-      ("timeline_events", `List (events_for_goal goal.id));
+      (* The normalizer, not the raw ledger row. [build_goal_events_projection]
+         hands back whatever [goal_events.jsonl] holds — {event_type, payload} —
+         and every consumer of this field reads the normalized shape
+         {kind, lane, title, summary, severity}. The detail view has always
+         mapped through [goal_event_timeline_json] (see [build_goal_timeline]);
+         the tree emitted the raw rows, so the dashboard's strict decoder
+         dropped all of them and every goal read as having no history (#29299). *)
+      ( "timeline_events",
+        `List (List.map goal_event_timeline_json (events_for_goal goal.id)) );
       ( "children",
         `List
           (List.map
@@ -318,8 +280,7 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
               `Assoc
                 [
                   ("executing", `Int (count_phase Goal_phase.Executing));
-                  ("blocked", `Int (count_phase Goal_phase.Blocked));
-                  ("paused", `Int (count_phase Goal_phase.Paused));
+                  ("verifying", `Int (count_phase Goal_phase.Verifying));
                   ("completed", `Int (count_phase Goal_phase.Completed));
                   ("dropped", `Int (count_phase Goal_phase.Dropped));
                 ] );
@@ -356,7 +317,4 @@ let dashboard_goals_tree_json ~(config : Workspace.config) =
 module For_testing = struct
   let dashboard_goals_tree_json_with_pending_reader =
     dashboard_goals_tree_json_with_pending_reader
-
-  let goal_detail_json_with_pending_reader =
-    goal_detail_json_with_pending_reader
 end

@@ -40,7 +40,8 @@ let make_req ?(title = "Fix auth bug") ?(desc = "Fix the login issue")
 let make_result ?(verdict = AR.Approve) ?(runtime = "verifier")
     ?gen_runtime ?(gate = AR.Structured_tool) ?fallback_reason () : AR.review_result =
   { verdict = Some verdict; evaluator_runtime = runtime;
-    generator_runtime = gen_runtime; gate; fallback_reason }
+    generator_runtime = gen_runtime; gate; fallback_reason;
+      evaluator_error_retryable = None }
 
 (* ================================================================ *)
 (* Hashing tests                                                     *)
@@ -73,11 +74,46 @@ let test_notes_hash_known_vector () =
 (* Record verdict tests                                              *)
 (* ================================================================ *)
 
+(* Both windowed readers capped their unfiltered branch and left the filtered
+   one on [Dated_jsonl.read_range], which carries no row bound — so supplying a
+   date, which narrows the request, removed the cap. [Dashboard_harness_health]
+   passes user-supplied dates straight into [calibration_stats].
+
+   The assertion is the invariant, not the constant: a date filter must not
+   widen the read. Pinning 5000 would break on any future tuning of the bound
+   and the test would stop being read. *)
+let test_a_date_filter_does_not_remove_the_row_cap () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir () in
+  Cal.For_testing.set_store ~base_dir:dir;
+  Fun.protect ~finally:Cal.For_testing.reset_store (fun () ->
+    Cal.record_verdict ~task_id:"cap-seed" ~req:(make_req ()) ~result:(make_result ()) ();
+    (* Replicate the row the public API just wrote rather than hand-writing the
+       record schema, so this test survives changes to that shape. *)
+    let template =
+      match Dated_jsonl.read_recent (Cal.get_store ()) 1 with
+      | [ row ] -> Yojson.Safe.to_string row
+      | _ -> fail "expected exactly one seeded record"
+    in
+    let seeded = 6000 in
+    let store = Cal.get_store () in
+    for _ = 1 to seeded do
+      Dated_jsonl.append store (Yojson.Safe.from_string template)
+    done;
+    let total stats = Yojson.Safe.Util.(stats |> member "total_verdicts" |> to_int) in
+    let unfiltered = total (Cal.calibration_stats ()) in
+    let filtered = total (Cal.calibration_stats ~since:"2020-01-01" ()) in
+    check bool "the unfiltered read is capped below what was seeded" true
+      (unfiltered <= seeded);
+    check int "a date filter reads no more than an unfiltered read" unfiltered
+      filtered)
+
 let test_record_verdict_writes () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.For_testing.set_store ~base_dir:dir;
   let req = make_req () in
   let result = make_result () in
   Cal.record_verdict ~task_id:"task-1" ~req ~result ();
@@ -87,13 +123,13 @@ let test_record_verdict_writes () =
   let first = List.hd records in
   let rt = Yojson.Safe.Util.(first |> member "record_type" |> to_string) in
   check string "record_type = verdict" "verdict" rt;
-  Cal.reset_store_for_testing ()
+  Cal.For_testing.reset_store ()
 
 let test_record_verdict_reject () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.For_testing.set_store ~base_dir:dir;
   let req = make_req () in
   let result =
     make_result ~verdict:(AR.Reject "vague notes") ~gate:AR.Structured_tool ()
@@ -104,13 +140,13 @@ let test_record_verdict_reject () =
   let first = List.hd records in
   let v = Yojson.Safe.Util.(first |> member "verdict" |> to_string) in
   check string "verdict = reject:vague notes" "reject:vague notes" v;
-  Cal.reset_store_for_testing ()
+  Cal.For_testing.reset_store ()
 
 let test_record_verdict_hash_matches () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.For_testing.set_store ~base_dir:dir;
   let req = make_req () in
   let result = make_result () in
   Cal.record_verdict ~task_id:"task-3" ~req ~result ();
@@ -120,7 +156,7 @@ let test_record_verdict_hash_matches () =
   let stored_hash = Yojson.Safe.Util.(first |> member "notes_hash" |> to_string) in
   check string "record stores the independently pinned hash"
     expected_default_notes_hash stored_hash;
-  Cal.reset_store_for_testing ()
+  Cal.For_testing.reset_store ()
 
 (* ================================================================ *)
 (* Human label tests                                                 *)
@@ -130,7 +166,7 @@ let test_record_human_label () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.For_testing.set_store ~base_dir:dir;
   Cal.record_human_label
     ~notes_hash:"abc123" ~human_verdict:Cal.Reject_label
     ~labeler:"vincent" ~reason:"work was incomplete";
@@ -141,7 +177,7 @@ let test_record_human_label () =
   let hv = Yojson.Safe.Util.(first |> member "human_verdict" |> to_string) in
   check string "record_type = label" "label" rt;
   check string "human_verdict = reject" "reject" hv;
-  Cal.reset_store_for_testing ()
+  Cal.For_testing.reset_store ()
 
 (* ================================================================ *)
 (* Divergence analysis tests                                         *)
@@ -151,7 +187,7 @@ let test_find_divergences_false_positive () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.For_testing.set_store ~base_dir:dir;
   let req = make_req ~title:"FP task" ~notes:"looks ok but not" () in
   let result = make_result ~verdict:AR.Approve ~gate:AR.Structured_tool () in
   Cal.record_verdict ~task_id:"t1" ~req ~result ();
@@ -166,13 +202,13 @@ let test_find_divergences_false_positive () =
     (Cal.verdict_to_string d.evaluator_verdict);
   check string "human rejected" "reject"
     (Cal.label_verdict_to_string d.human_verdict);
-  Cal.reset_store_for_testing ()
+  Cal.For_testing.reset_store ()
 
 let test_find_divergences_false_negative () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.For_testing.set_store ~base_dir:dir;
   let req = make_req ~title:"FN task" ~notes:"actually good work" () in
   let result =
     make_result ~verdict:(AR.Reject "unclear") ~gate:AR.Structured_tool ()
@@ -187,13 +223,13 @@ let test_find_divergences_false_negative () =
   let d = List.hd divs in
   check string "human approved" "approve"
     (Cal.label_verdict_to_string d.human_verdict);
-  Cal.reset_store_for_testing ()
+  Cal.For_testing.reset_store ()
 
 let test_find_divergences_agreement () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.For_testing.set_store ~base_dir:dir;
   let req = make_req ~title:"OK task" ~notes:"done correctly" () in
   let result = make_result ~verdict:AR.Approve () in
   Cal.record_verdict ~task_id:"t3" ~req ~result ();
@@ -203,19 +239,19 @@ let test_find_divergences_agreement () =
     ~labeler:"vincent" ~reason:"";
   let divs = Cal.find_divergences () in
   check int "no divergences when agreement" 0 (List.length divs);
-  Cal.reset_store_for_testing ()
+  Cal.For_testing.reset_store ()
 
 let test_find_divergences_no_labels () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.For_testing.set_store ~base_dir:dir;
   let req = make_req () in
   let result = make_result () in
   Cal.record_verdict ~task_id:"t4" ~req ~result ();
   let divs = Cal.find_divergences () in
   check int "no divergences without labels" 0 (List.length divs);
-  Cal.reset_store_for_testing ()
+  Cal.For_testing.reset_store ()
 
 (* ================================================================ *)
 (* Few-shot example tests                                            *)
@@ -225,7 +261,7 @@ let test_select_examples_max () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.For_testing.set_store ~base_dir:dir;
   (* Create 3 false positives *)
   for i = 1 to 3 do
     let title = Printf.sprintf "task-%d" i in
@@ -240,16 +276,16 @@ let test_select_examples_max () =
   done;
   let examples = Cal.select_examples ~max_examples:2 in
   check int "capped at max_examples" 2 (List.length examples);
-  Cal.reset_store_for_testing ()
+  Cal.For_testing.reset_store ()
 
 let test_select_examples_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.For_testing.set_store ~base_dir:dir;
   let examples = Cal.select_examples ~max_examples:5 in
   check int "empty when no data" 0 (List.length examples);
-  Cal.reset_store_for_testing ()
+  Cal.For_testing.reset_store ()
 
 let test_format_few_shot_block_empty () =
   let block = Cal.format_few_shot_block [] in
@@ -275,7 +311,7 @@ let test_calibration_stats () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.For_testing.set_store ~base_dir:dir;
   (* 2 approvals, 1 rejection *)
   let req1 = make_req ~title:"t1" ~notes:"n1" () in
   Cal.record_verdict ~task_id:"id1" ~req:req1
@@ -304,14 +340,14 @@ let test_calibration_stats () =
   check int "verdicts_with_generator_runtime = 0 when not recorded" 0 with_gen;
   check int "cross_model_match_count = 0 when no generator" 0 cross_match;
   check (float 1e-6) "cross_model_rate = 0.0 when no generator" 0.0 cross_rate;
-  Cal.reset_store_for_testing ()
+  Cal.For_testing.reset_store ()
 
 let test_calibration_stats_cross_model_mix () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
-  Fun.protect ~finally:Cal.reset_store_for_testing @@ fun () ->
+  Cal.For_testing.set_store ~base_dir:dir;
+  Fun.protect ~finally:Cal.For_testing.reset_store @@ fun () ->
   (* Four verdicts:
      - same runtime (generator = evaluator)     → NOT cross-model
      - distinct runtime (generator ≠ evaluator) → cross-model
@@ -323,7 +359,7 @@ let test_calibration_stats_cross_model_mix () =
   let cross_a =
     make_result ~runtime:"verifier" ~gen_runtime:"default-runtime-fixture" () in
   let cross_b =
-    make_result ~runtime:"cross_verifier" ~gen_runtime:"local_only" () in
+    make_result ~runtime:"evaluator_runtime" ~gen_runtime:"local_only" () in
   let no_generator = make_result ~runtime:"verifier" () in
   let req = make_req () in
   Cal.record_verdict ~task_id:"cm1"
@@ -345,7 +381,7 @@ let test_calibration_stats_cross_model_mix () =
   check (float 1e-3) "cross_model_rate approx 0.667" (2.0 /. 3.0) cross_rate
 
 (* ================================================================ *)
-(* OAS Harness.verdict conversion tests (#3165)                      *)
+(* AGENT_CORE Harness.verdict conversion tests (#3165)                      *)
 (* ================================================================ *)
 
 let test_to_harness_verdict_approve () =
@@ -358,7 +394,7 @@ let test_to_harness_verdict_approve () =
     timestamp = 0.0;
   } in
   let hv = Cal.to_harness_verdict record in
-  check bool "passed" true hv.Agent_sdk.Harness.passed;
+  check bool "passed" true hv.Agent_core.Harness.passed;
   check (option (float 0.01)) "score 1.0" (Some 1.0) hv.score;
   check bool "evidence has gate" true
     (List.exists (fun s -> contains ~sub:"gate=structured_tool" s) hv.evidence);
@@ -385,7 +421,7 @@ let test_on_harness_verdict_callback () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.For_testing.set_store ~base_dir:dir;
   let received = ref None in
   let req = make_req () in
   let result = make_result () in
@@ -394,32 +430,32 @@ let test_on_harness_verdict_callback () =
   (match !received with
    | None -> Alcotest.fail "on_harness_verdict not called"
    | Some hv ->
-     check bool "passed" true hv.Agent_sdk.Harness.passed;
+     check bool "passed" true hv.Agent_core.Harness.passed;
      check (option (float 0.01)) "score" (Some 1.0) hv.score);
-  Cal.reset_store_for_testing ()
+  Cal.For_testing.reset_store ()
 
 let test_on_harness_verdict_with_collector () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
-  let collector = Agent_sdk.Eval.create_collector
+  Cal.For_testing.set_store ~base_dir:dir;
+  let collector = Agent_core.Eval.create_collector
     ~agent_name:"test-agent" ~run_id:"run-1" in
   let req = make_req () in
   let result = make_result () in
   Cal.record_verdict ~task_id:"col-1" ~req ~result
-    ~on_harness_verdict:(Agent_sdk.Eval.add_verdict collector) ();
-  let metrics = Agent_sdk.Eval.finalize collector in
+    ~on_harness_verdict:(Agent_core.Eval.add_verdict collector) ();
+  let metrics = Agent_core.Eval.finalize collector in
   check int "1 harness verdict" 1 (List.length metrics.harness_verdicts);
   let hv = List.hd metrics.harness_verdicts in
   check bool "passed" true hv.passed;
-  Cal.reset_store_for_testing ()
+  Cal.For_testing.reset_store ()
 
 let test_on_harness_verdict_exception_safe () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir () in
-  Cal.set_store_for_testing ~base_dir:dir;
+  Cal.For_testing.set_store ~base_dir:dir;
   let req = make_req () in
   let result = make_result () in
   Cal.record_verdict ~task_id:"exc-1" ~req ~result
@@ -428,7 +464,7 @@ let test_on_harness_verdict_exception_safe () =
   let records = Dated_jsonl.read_recent store 10 in
   check bool "record persisted despite callback failure" true
     (List.length records >= 1);
-  Cal.reset_store_for_testing ()
+  Cal.For_testing.reset_store ()
 
 (* ================================================================ *)
 (* resolve_record_verdicts_store — verdict-store isolation guard     *)
@@ -545,66 +581,6 @@ let test_store_no_live_no_collision () =
   | Ok (Some d) -> check string "accepts dir when no live store" live_store d
   | _ -> fail "expected Ok (Some _) when there is no live store to collide with"
 
-(* ================================================================ *)
-(* resolve_record_verdicts_evaluator — cross-model guard            *)
-(* ================================================================ *)
-
-let test_evaluator_not_recording_passthrough () =
-  match
-    Cal.resolve_record_verdicts_evaluator ~record_verdicts:false
-      ~generator_runtime:"generator" ~evaluator_runtime:(Some " judge ")
-      ~cross_verifier_runtime:None
-  with
-  | Ok (Some id) -> check string "passthrough" " judge " id
-  | _ -> fail "expected non-recording path to preserve evaluator_runtime"
-
-let test_evaluator_requires_cross_verifier () =
-  match
-    Cal.resolve_record_verdicts_evaluator ~record_verdicts:true
-      ~generator_runtime:"generator" ~evaluator_runtime:None
-      ~cross_verifier_runtime:None
-  with
-  | Error msg ->
-    check bool "mentions cross_verifier" true (contains ~sub:"cross_verifier" msg)
-  | Ok _ -> fail "expected Error when cross_verifier is missing"
-
-let test_evaluator_rejects_default_same_as_generator () =
-  match
-    Cal.resolve_record_verdicts_evaluator ~record_verdicts:true
-      ~generator_runtime:"local.json" ~evaluator_runtime:None
-      ~cross_verifier_runtime:(Some " local.json ")
-  with
-  | Error msg ->
-    check bool "mentions distinct" true (contains ~sub:"distinct" msg);
-    check bool "mentions --runtime" true (contains ~sub:"--runtime" msg)
-  | Ok _ -> fail "expected Error when default cross_verifier equals generator"
-
-let test_evaluator_accepts_default_distinct_cross_verifier () =
-  match
-    Cal.resolve_record_verdicts_evaluator ~record_verdicts:true
-      ~generator_runtime:"generator" ~evaluator_runtime:None
-      ~cross_verifier_runtime:(Some "judge")
-  with
-  | Ok None -> ()
-  | _ -> fail "expected Ok None for distinct default cross_verifier"
-
-let test_evaluator_accepts_explicit_same_model_override () =
-  match
-    Cal.resolve_record_verdicts_evaluator ~record_verdicts:true
-      ~generator_runtime:"local.json" ~evaluator_runtime:(Some " local.json ")
-      ~cross_verifier_runtime:(Some "local.json")
-  with
-  | Ok (Some id) -> check string "trimmed explicit evaluator" "local.json" id
-  | _ -> fail "expected explicit same-model evaluator override to be accepted"
-
-let test_evaluator_rejects_empty_explicit_override () =
-  match
-    Cal.resolve_record_verdicts_evaluator ~record_verdicts:true
-      ~generator_runtime:"generator" ~evaluator_runtime:(Some "  ")
-      ~cross_verifier_runtime:(Some "judge")
-  with
-  | Error msg -> check bool "mentions empty" true (contains ~sub:"empty" msg)
-  | Ok _ -> fail "expected Error for empty explicit evaluator runtime"
 
 (* ================================================================ *)
 (* Test Suite                                                        *)
@@ -620,6 +596,8 @@ let () =
     ];
     "record_verdict", [
       test_case "writes to store" `Quick test_record_verdict_writes;
+      test_case "a date filter does not remove the row cap" `Quick
+        test_a_date_filter_does_not_remove_the_row_cap;
       test_case "reject verdict" `Quick test_record_verdict_reject;
       test_case "hash matches" `Quick test_record_verdict_hash_matches;
     ];
@@ -654,23 +632,11 @@ let () =
       test_case "accepts isolated" `Quick test_store_accepts_isolated;
       test_case "no live store -> no collision" `Quick test_store_no_live_no_collision;
     ];
-    "record_verdicts_evaluator", [
-      test_case "not recording passthrough" `Quick test_evaluator_not_recording_passthrough;
-      test_case "requires cross verifier" `Quick test_evaluator_requires_cross_verifier;
-      test_case "rejects default same as generator" `Quick
-        test_evaluator_rejects_default_same_as_generator;
-      test_case "accepts default distinct cross verifier" `Quick
-        test_evaluator_accepts_default_distinct_cross_verifier;
-      test_case "accepts explicit same-model override" `Quick
-        test_evaluator_accepts_explicit_same_model_override;
-      test_case "rejects empty explicit override" `Quick
-        test_evaluator_rejects_empty_explicit_override;
-    ];
-    "oas_conversion", [
+    "agent_core_conversion", [
       test_case "approve verdict" `Quick test_to_harness_verdict_approve;
       test_case "reject verdict" `Quick test_to_harness_verdict_reject;
     ];
-    "oas_integration", [
+    "agent_core_integration", [
       test_case "callback invoked" `Quick test_on_harness_verdict_callback;
       test_case "with Eval.collector" `Quick test_on_harness_verdict_with_collector;
       test_case "callback exception safe" `Quick test_on_harness_verdict_exception_safe;

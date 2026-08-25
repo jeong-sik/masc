@@ -5,4 +5,9 @@
  (public_name masc.time_codec)
  (wrapped false)
  (modules time_codec)
- (libraries ptime))
+ (flags
+  (:standard -w +4 -w +33))
+ ; [unix] is for [Unix.gmtime] in the writer. Every library that already
+ ; depends on this one also depends on unix, so no consumer's dependency
+ ; closure changes.
+ (libraries ptime unix))

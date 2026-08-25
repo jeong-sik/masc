@@ -32,22 +32,25 @@ val truncate_to_limit : string -> string
 (** Truncate to {!message_content_limit} Unicode scalar values on a
     codepoint boundary (valid UTF-8). Used for PATCH edits. *)
 
-(** Typed error from Discord REST. Closed sum — anything Discord
-    returns that does not map to one of these becomes [Other]
-    (preserving the JSON for inspection) so we never silently consume
-    a new error variant. *)
+(** Typed error from Discord REST. Response bodies never cross this
+    boundary; failures retain only request correlation, status/code,
+    reason, and body byte count. *)
 type error =
   | Network of string
     (** Transport-level failure (DNS, TLS, timeout, body cap). *)
-  | Http_status of { code : int; body : string }
+  | Http_status of { request_id : string; code : int; body_bytes : int }
     (** Non-2xx HTTP status whose body did not parse as a Discord
         error envelope. *)
-  | Discord_api of { code : int; message : string }
-    (** Non-2xx HTTP status carrying a Discord error envelope
-        ({ "code": int, "message": string }). *)
-  | Other of string
-    (** 2xx response whose body did not contain an [id], or any
-        other unexpected shape. Always includes a one-line reason. *)
+  | Discord_api of { request_id : string; code : int }
+    (** Non-2xx HTTP status carrying a Discord error envelope. *)
+  | Other of { request_id : string; reason : string; body_bytes : int }
+    (** A response whose body or shape was not usable. *)
+
+type snowflake
+(** Validated Discord identifier: a non-empty decimal string. *)
+
+val snowflake_of_string : string -> (snowflake, string) result
+val snowflake_to_string : snowflake -> string
 
 val pp_error : Format.formatter -> error -> unit
 
@@ -58,13 +61,16 @@ val send_message :
   channel_id:string ->
   content:string ->
   ?reply_to_message_id:string ->
+  ?allowed_user_mentions:string list ->
   unit ->
   (string, error) result
 (** [send_message ~token ~channel_id ~content ?reply_to_message_id ()]
     posts to [POST /api/v10/channels/{channel_id}/messages].
     When [reply_to_message_id] is provided, the message is sent as
-    a reply (Discord threads the conversation). Returns the created
-    message id on [Ok].
+    a reply (Discord threads the conversation). [allowed_user_mentions]
+    contains the only user snowflakes Discord may notify; when omitted or
+    empty, user, role, and everyone mentions are all suppressed. Returns the
+    created message id on [Ok].
 
     Works for guild text channels, DM channels, and threads.
 
@@ -102,6 +108,54 @@ val trigger_typing :
 
     @raise nothing — failures are surfaced as typed {!error}. *)
 
+(** {1 Read-only Discord resources} *)
+
+val get_channel :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  token:string ->
+  channel_id:snowflake ->
+  unit ->
+  (Yojson.Safe.t, error) result
+(** Fetch the Discord channel object for [channel_id]. *)
+
+val get_channel_messages :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  token:string ->
+  channel_id:snowflake ->
+  ?limit:int ->
+  ?before:snowflake ->
+  ?after:snowflake ->
+  unit ->
+  (Yojson.Safe.t, error) result
+(** Fetch channel messages, newest first. [before] and [after] are mutually
+    exclusive at the Discord API boundary. *)
+
+val get_guild_members :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  token:string ->
+  guild_id:snowflake ->
+  ?query:string ->
+  ?limit:int ->
+  ?after:snowflake ->
+  unit ->
+  (Yojson.Safe.t, error) result
+(** List or search members of [guild_id]. A non-empty [query] uses Discord's
+    guild-member search endpoint; without it, the paged member-list endpoint
+    is used. *)
+
+val get_guild_member :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  token:string ->
+  guild_id:snowflake ->
+  user_id:snowflake ->
+  unit ->
+  (Yojson.Safe.t, error) result
+(** Fetch one guild member, retaining the user's guild nickname and roles. *)
+
 (** {1 Embed support} *)
 
 type embed =
@@ -119,12 +173,10 @@ type embed =
 val embed_to_json : embed -> Yojson.Safe.t
 (** Convert an embed to its JSON representation. Exposed for testing. *)
 
-val embed_field_value_limit : int
 (** Discord embed field value limit, in characters. *)
 
 val color_blue : int
 val color_green : int
-val color_red : int
 (** Predefined embed colors: blue=running, green=success, red=error. *)
 
 val link_embed :
@@ -150,16 +202,6 @@ val send_embed_message :
 (** [send_embed_message] posts a message with optional embeds.
     Returns the created message id on [Ok]. *)
 
-val edit_embed_message :
-  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  ?timeout_sec:float ->
-  token:string ->
-  channel_id:string ->
-  message_id:string ->
-  content:string ->
-  ?embeds:embed list ->
-  unit ->
-  (unit, error) result
 (** [edit_embed_message] patches a message with updated content/embeds. *)
 
 (** {1 Internal — exposed for unit testing}
@@ -171,29 +213,62 @@ val edit_embed_message :
 
 val build_request :
   token:string ->
-  channel_id:string ->
+  channel_id:snowflake ->
   content:string ->
-  ?reply_to_message_id:string ->
+  ?reply_to_message_id:snowflake ->
+  ?allowed_user_mentions:snowflake list ->
   unit ->
   string * (string * string) list * string
 (** [(url, headers, body) = build_request ~token ~channel_id ~content
     ?reply_to_message_id ()].  Headers include Authorization (Bot
-    scheme), Content-Type, and a Discord-required User-Agent.  When
+    scheme), Content-Type, a fail-closed [allowed_mentions] object, and a
+    Discord-required User-Agent. When
     [reply_to_message_id] is provided, the body includes a
     [message_reference] field so Discord threads the reply. *)
 
 val build_typing_request :
   token:string ->
-  channel_id:string ->
+  channel_id:snowflake ->
   unit ->
   string * (string * string) list * string
 (** [(url, headers, body) = build_typing_request ~token ~channel_id ()].
     The body is empty; headers include Authorization and User-Agent. *)
 
+val build_channel_request :
+  token:string ->
+  channel_id:snowflake ->
+  unit ->
+  string * (string * string) list * string
+
+val build_channel_messages_request :
+  token:string ->
+  channel_id:snowflake ->
+  ?limit:int ->
+  ?before:snowflake ->
+  ?after:snowflake ->
+  unit ->
+  string * (string * string) list * string
+
+val build_guild_members_request :
+  token:string ->
+  guild_id:snowflake ->
+  ?query:string ->
+  ?limit:int ->
+  ?after:snowflake ->
+  unit ->
+  string * (string * string) list * string
+
+val build_guild_member_request :
+  token:string ->
+  guild_id:snowflake ->
+  user_id:snowflake ->
+  unit ->
+  string * (string * string) list * string
+
 val build_edit_request :
   token:string ->
-  channel_id:string ->
-  message_id:string ->
+  channel_id:snowflake ->
+  message_id:snowflake ->
   content:string ->
   unit ->
   string * (string * string) list * string
@@ -203,7 +278,7 @@ val build_edit_request :
 
 val build_embed_request :
   token:string ->
-  channel_id:string ->
+  channel_id:snowflake ->
   content:string ->
   ?embeds:embed list ->
   unit ->
@@ -213,8 +288,8 @@ val build_embed_request :
 
 val build_edit_embed_request :
   token:string ->
-  channel_id:string ->
-  message_id:string ->
+  channel_id:snowflake ->
+  message_id:snowflake ->
   content:string ->
   ?embeds:embed list ->
   unit ->
@@ -223,8 +298,10 @@ val build_edit_embed_request :
     updated content and/or embeds. Exposed for unit testing. *)
 
 val parse_response :
+  ?request_id:string ->
   status:int ->
   body:string ->
+  unit ->
   (string, error) result
 (** Classifies a Discord HTTP response:
     - 2xx with JSON object containing [id] string  → [Ok id]
@@ -233,10 +310,21 @@ val parse_response :
     - non-2xx without that envelope                → [Error (Http_status _)] *)
 
 val parse_empty_response :
+  ?request_id:string ->
   status:int ->
   body:string ->
+  unit ->
   (unit, error) result
 (** Classifies a Discord HTTP response for empty-success endpoints:
     - 2xx → [Ok ()]
     - non-2xx with Discord error envelope → [Error (Discord_api _)]
     - non-2xx without that envelope → [Error (Http_status _)] *)
+
+val parse_json_response :
+  ?request_id:string ->
+  status:int ->
+  body:string ->
+  unit ->
+  (Yojson.Safe.t, error) result
+(** Classifies a JSON Discord response without imposing an endpoint-specific
+    top-level shape. *)

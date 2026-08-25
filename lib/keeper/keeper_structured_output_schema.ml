@@ -201,11 +201,11 @@ let fusion_judge_output_schema =
    all.
 
    Note the parse path never read a provider-side structured field:
-   [Agent_sdk.Structured.response_json_extractor] extracts JSON from the
+   [Agent_core.Structured.response_json_extractor] extracts JSON from the
    response's visible text, so parser behavior is independent of a provider
    response format. *)
 let without_response_format (provider_cfg : Llm_provider.Provider_config.t) =
-  { provider_cfg with response_format = Agent_sdk.Types.Off }
+  { provider_cfg with response_format = Agent_core.Types.Off }
 ;;
 
 (* The anti-rationalization reviewer's verdict channel is the

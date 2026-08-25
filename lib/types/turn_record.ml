@@ -43,6 +43,29 @@ type request_wire_observation =
   ; body_bytes : int
   }
 
+type model_input_measurement =
+  | Wire_shape
+  | Durable_shape
+
+let model_input_measurement_to_string = function
+  | Wire_shape -> "wire_shape"
+  | Durable_shape -> "durable_shape"
+;;
+
+let model_input_measurement_of_string = function
+  | "wire_shape" -> Ok Wire_shape
+  | "durable_shape" -> Ok Durable_shape
+  | other ->
+    Error
+      (Printf.sprintf "turn_record: unknown model_input_measurement %S" other)
+;;
+
+type model_input_window =
+  { transmitted_atoms : int
+  ; total_atoms : int
+  ; measurement : model_input_measurement
+  }
+
 type turn_kind =
   | Autonomous
   | Direct
@@ -60,7 +83,6 @@ type t =
   { execution_ids : Ids.Execution_id.t list
   ; keeper : string
   ; agent_name : string
-  ; generation : int
   ; turn_kind : turn_kind
   ; trace_id : string
   ; absolute_turn : int
@@ -68,7 +90,7 @@ type t =
   ; blocks : prompt_block list
   ; input_components : input_component list option
   ; runtime_profile : string
-  ; model : string option
+  ; selected_model : string option
   ; finish_reason : string option
   ; context_window : int option
   ; price_input_per_million : float option
@@ -76,6 +98,7 @@ type t =
   ; request_latency_ms : int option
   ; ttfrc_ms : float option
   ; request_wire_observation : request_wire_observation option
+  ; model_input_window : model_input_window option
   ; raw_trace_run_ref : raw_trace_run_ref option
   ; sampling : sampling
   ; usage : usage
@@ -141,12 +164,19 @@ let to_json (r : t) : Yojson.Safe.t =
       `String observation.runtime_profile, `Int observation.body_bytes
     | None -> `Null, `Null
   in
+  let transmitted_atoms, total_atoms, model_input_measurement =
+    match r.model_input_window with
+    | Some window ->
+      ( `Int window.transmitted_atoms
+      , `Int window.total_atoms
+      , `String (model_input_measurement_to_string window.measurement) )
+    | None -> `Null, `Null, `Null
+  in
   `Assoc
     ([ ( "execution_ids"
        , `List (List.map Ids.Execution_id.to_yojson r.execution_ids) )
      ; ("keeper", `String r.keeper)
      ; ("agent_name", `String r.agent_name)
-     ; ("generation", `Int r.generation)
      ; ("turn_kind", `String (turn_kind_to_string r.turn_kind))
      ; ("trace_id", `String r.trace_id)
      ; ("absolute_turn", `Int r.absolute_turn)
@@ -160,12 +190,15 @@ let to_json (r : t) : Yojson.Safe.t =
      ; ("runtime_profile", `String r.runtime_profile)
      ; "request_runtime_profile", request_runtime_profile
      ; "request_body_bytes", request_body_bytes
+     ; "transmitted_atoms", transmitted_atoms
+     ; "total_atoms", total_atoms
+     ; "model_input_measurement", model_input_measurement
      ; ( "raw_trace_run_ref"
        , match r.raw_trace_run_ref with
          | Some run_ref -> raw_trace_run_ref_to_json run_ref
          | None -> `Null )
      ]
-    @ opt_field "model" (fun v -> `String v) r.model
+    @ opt_field "selected_model" (fun v -> `String v) r.selected_model
     @ opt_field "finish_reason" (fun v -> `String v) r.finish_reason
     @ opt_field "context_window" (fun v -> `Int v) r.context_window
     @ opt_field "price_input_per_million" (fun v -> `Float v) r.price_input_per_million
@@ -415,7 +448,6 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             [ "execution_ids"
             ; "keeper"
             ; "agent_name"
-            ; "generation"
             ; "turn_kind"
             ; "trace_id"
             ; "absolute_turn"
@@ -425,8 +457,11 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "runtime_profile"
             ; "request_runtime_profile"
             ; "request_body_bytes"
+            ; "transmitted_atoms"
+            ; "total_atoms"
+            ; "model_input_measurement"
             ; "raw_trace_run_ref"
-            ; "model"
+            ; "selected_model"
             ; "finish_reason"
             ; "context_window"
             ; "price_input_per_million"
@@ -459,8 +494,6 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
       let* keeper = as_nonempty_string "keeper" keeper_json in
       let* agent_name_json = require "agent_name" fields in
       let* agent_name = as_nonempty_string "agent_name" agent_name_json in
-      let* generation_json = require "generation" fields in
-      let* generation = as_nonnegative_int "generation" generation_json in
       let* turn_kind_json = require "turn_kind" fields in
       let* turn_kind_string = as_string "turn_kind" turn_kind_json in
       let* turn_kind = turn_kind_of_string turn_kind_string in
@@ -519,6 +552,27 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             "turn_record: request_runtime_profile and request_body_bytes must \
              both be present or both be null"
       in
+      let* transmitted_atoms =
+        nullable "transmitted_atoms" fields as_nonnegative_int
+      in
+      let* total_atoms = nullable "total_atoms" fields as_nonnegative_int in
+      let* measurement =
+        nullable "model_input_measurement" fields (fun name json ->
+          let* raw = as_nonempty_string name json in
+          model_input_measurement_of_string raw)
+      in
+      let* model_input_window =
+        match transmitted_atoms, total_atoms, measurement with
+        | Some transmitted_atoms, Some total_atoms, Some measurement ->
+          if transmitted_atoms > total_atoms
+          then Error "turn_record: transmitted_atoms cannot exceed total_atoms"
+          else Ok (Some { transmitted_atoms; total_atoms; measurement })
+        | None, None, None -> Ok None
+        | _ ->
+          Error
+            "turn_record: transmitted_atoms, total_atoms and \
+             model_input_measurement must all be present or all be null"
+      in
       let* raw_trace_run_ref_json = require "raw_trace_run_ref" fields in
       let* raw_trace_run_ref =
         match raw_trace_run_ref_json with
@@ -532,7 +586,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
           in
           Ok (Some run_ref)
       in
-      let* model = opt_member "model" fields as_string in
+      let* selected_model = opt_member "selected_model" fields as_nonempty_string in
       let* finish_reason = opt_member "finish_reason" fields as_string in
       let* context_window = opt_member "context_window" fields as_int in
       let* price_input_per_million = opt_member "price_input_per_million" fields as_float in
@@ -558,7 +612,6 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         { execution_ids
         ; keeper
         ; agent_name
-        ; generation
         ; turn_kind
         ; trace_id
         ; absolute_turn
@@ -566,7 +619,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; blocks
         ; input_components
         ; runtime_profile
-        ; model
+        ; selected_model
         ; finish_reason
         ; context_window
         ; price_input_per_million
@@ -574,6 +627,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; request_latency_ms
         ; ttfrc_ms
         ; request_wire_observation
+        ; model_input_window
         ; raw_trace_run_ref
         ; sampling = { temperature; top_p; max_tokens; thinking_budget; enable_thinking }
         ; usage =

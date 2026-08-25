@@ -15,12 +15,8 @@ type t
 
 (** {1 Limiter Creation} *)
 
-val default_rate : float
-val default_burst : int
-val default_agent_rate : float
-(** Default per-agent requests per second: [20.0]. *)
-val default_agent_burst : int
-(** Default per-agent burst capacity: [50]. *)
+(** The default values live in [Env_config.Rate_bucket]. This module used to
+    restate them and the copies drifted apart, so it no longer does. *)
 val rate_of_config : unit -> float
 val burst_of_config : unit -> int
 val agent_rate_of_config : unit -> float
@@ -29,7 +25,7 @@ val agent_burst_of_config : unit -> int
 (** Per-agent burst from cached [MASC_AGENT_RATE_BURST] config (default [50]). *)
 val rate : t -> float
 val burst : t -> int
-val create : ?rate:float -> ?burst:int -> unit -> t
+val create : rate:float -> burst:int -> unit -> t
 val create_of_config : unit -> t
 val create_agent_of_config : unit -> t
 (** Like [create_of_config] but uses the per-agent rate/burst config. *)
@@ -56,10 +52,6 @@ val remaining_global : key:string -> int
 
 (** {1 Per-Agent Global Instance} *)
 
-val agent_global : t Eio.Lazy.t
-(** Lazy per-agent token-bucket limiter keyed by a provided Authorization bearer
-    token or internal token-derived key. Separate from the per-IP limiter. *)
-
 val check_agent_global : key:string -> bool
 (** [check_agent_global ~key] consumes one per-agent token.
     Returns [true] if allowed, [false] if rate-limited. *)
@@ -73,23 +65,12 @@ val headers_agent_global : key:string -> (string * string) list
 
 (** {1 Automatic Cleanup Loop} *)
 
-val start_cleanup_loop :
-  sw:Eio.Switch.t ->
-  clock:_ Eio.Time.clock ->
-  ?label:string ->
-  ?interval:float ->
-  t ->
-  unit
-
 (** {1 HTTP Helpers} *)
 
 val headers : t -> key:string -> (string * string) list
 val too_many_requests_body : unit -> string
 val too_many_agent_requests_body : unit -> string
 (** JSON body for per-agent 429 responses. *)
-
-(** Headers for a 429 response: [X-RateLimit-*] plus [Retry-After] (seconds). *)
-val too_many_requests_headers : t -> key:string -> (string * string) list
 
 val headers_global : key:string -> (string * string) list
 

@@ -27,6 +27,35 @@ let with_config f =
       let config = Lib.Workspace.default_config dir in
       f config)
 
+(* The store used to spell the YYYY-MM/DD.jsonl layout out for itself, and it
+   read the clock once for the month directory and once more for the day file,
+   so a write crossing midnight on the last of a month could land the new
+   day's file under the old month's directory (#27143). The layout comes from
+   Jsonl_writer now; this pins that it still does. *)
+let test_day_file_follows_the_shared_layout () =
+  with_config (fun config ->
+      ignore
+        (Activity_graph.emit config ~kind:"agent.joined"
+           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
+           ~payload:(`Assoc [])
+           ());
+      let path = Activity_graph.For_testing.current_day_path config in
+      check bool "the emitted day file exists" true (Sys.file_exists path);
+      let expected =
+        (Jsonl_writer.dated_path_now
+           ~base_dir:
+             (Filename.concat
+                (Workspace_utils.masc_dir config)
+                "activity-events"))
+          .Jsonl_writer.path
+      in
+      check string "and Jsonl_writer names the same file" expected path;
+      check bool
+        "its directory is the one the writer would make"
+        true
+        (Sys.is_directory (Filename.dirname path)))
+;;
+
 let test_emit_and_list_events () =
   with_config (fun config ->
       ignore
@@ -45,22 +74,64 @@ let test_emit_and_list_events () =
            ());
       let events =
         Activity_graph.list_events config ~after_seq:0
-          ~limit:10 ()
+          ~limit:10 ~keep:(fun _ -> true) ()
       in
       check int "two events" 2 (List.length events);
       check string "latest kind is task.created" "task.created"
         ((List.hd (List.rev events)).kind);
       let task_only =
         Activity_graph.list_events config
-          ~kinds:[ "task.created" ] ~after_seq:0 ~limit:10 ()
+          ~kinds:[ "task.created" ] ~after_seq:0 ~limit:10 ~keep:(fun _ -> true) ()
       in
       check int "task filter" 1 (List.length task_only))
+
+(* [limit] pages the events the caller asked for, so [keep] has to run before
+   the cut. Filtering afterwards leaves no value of [limit] that means "this
+   agent's newest N": the page fills with whatever the workspace was busy
+   doing, and the quiet agent's events fall out of it entirely. The first
+   check pins that behaviour; the second pins the filtered read. *)
+let test_keep_runs_before_the_page_is_cut () =
+  with_config (fun config ->
+      let emit_for agent subject =
+        ignore
+          (Activity_graph.emit config ~kind:"keeper.turn_completed"
+             ~actor:(Activity_graph.entity ~kind:"agent" agent)
+             ~subject:(Activity_graph.entity ~kind:"log" subject)
+             ~payload:(`Assoc [ ("keeper_name", `String agent) ])
+             ())
+      in
+      emit_for "quiet" "quiet-1";
+      emit_for "quiet" "quiet-2";
+      for i = 1 to 20 do
+        emit_for "busy" (Printf.sprintf "busy-%d" i)
+      done;
+      let is_quiet (e : Activity_graph.event) =
+        match e.actor with
+        | Some a -> String.equal a.id "quiet"
+        | None -> false
+      in
+      let unfiltered =
+        Activity_graph.list_events config ~after_seq:0 ~limit:5
+          ~keep:(fun _ -> true) ()
+      in
+      check int "an unfiltered page of 5 holds none of the quiet agent's events" 0
+        (List.length (List.filter is_quiet unfiltered));
+      let filtered =
+        Activity_graph.list_events config ~after_seq:0 ~limit:5 ~keep:is_quiet ()
+      in
+      check int "the filtered read returns every match under the limit" 2
+        (List.length filtered);
+      let bounded =
+        Activity_graph.list_events config ~after_seq:0 ~limit:3
+          ~keep:(fun e -> not (is_quiet e)) ()
+      in
+      check int "limit bounds the matches" 3 (List.length bounded))
 
 let test_events_json_derives_ide_context () =
   with_config (fun config ->
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~actor:(Activity_graph.entity ~kind:"keeper" "alpha")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-9")
            ~tags:[
              "file:lib/keeper/keeper_tool_ide_runtime.ml:27";
@@ -109,7 +180,7 @@ let test_events_json_normalizes_ide_context_file_paths () =
   with_config (fun config ->
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~actor:(Activity_graph.entity ~kind:"keeper" "alpha")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-payload")
            ~tags:[]
            ~payload:
@@ -121,7 +192,7 @@ let test_events_json_normalizes_ide_context_file_paths () =
            ());
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~actor:(Activity_graph.entity ~kind:"keeper" "alpha")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-tag")
            ~tags:[ "file: lib\\tag.ml:27" ]
            ~payload:(`Assoc [])
@@ -144,7 +215,7 @@ let test_events_json_omits_unsafe_ide_context_file_paths () =
   with_config (fun config ->
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~actor:(Activity_graph.entity ~kind:"keeper" "alpha")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-absolute")
            ~tags:[]
            ~payload:
@@ -156,21 +227,21 @@ let test_events_json_omits_unsafe_ide_context_file_paths () =
            ());
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~actor:(Activity_graph.entity ~kind:"keeper" "alpha")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-drive")
            ~tags:[ "file:C:\\workspace\\lib\\tag.ml:27" ]
            ~payload:(`Assoc [])
            ());
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~actor:(Activity_graph.entity ~kind:"keeper" "alpha")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-traversal")
            ~tags:[ "file:lib/../tag.ml:31" ]
            ~payload:(`Assoc [])
            ());
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~actor:(Activity_graph.entity ~kind:"keeper" "alpha")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-mismatch")
            ~tags:[ "file:/workspace/lib/tag.ml:99" ]
            ~payload:
@@ -210,7 +281,7 @@ let test_events_json_ignores_invalid_derived_pr_number () =
   with_config (fun config ->
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
+           ~actor:(Activity_graph.entity ~kind:"keeper" "alpha")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-10")
            ~tags:[]
            ~payload:(`Assoc [ ("pr_number", `Int 0) ])
@@ -279,7 +350,7 @@ let test_emit_sanitizes_invalid_utf8_before_persisting () =
            ~payload:(`Assoc [ ("content", `String "bad\xffpayload") ])
            ());
       let events =
-        Activity_graph.list_events config ~after_seq:0 ~limit:10 ()
+        Activity_graph.list_events config ~after_seq:0 ~limit:10 ~keep:(fun _ -> true) ()
       in
       let event =
         match events with
@@ -317,13 +388,13 @@ let test_read_self_heals_historic_invalid_utf8_event_file () =
       let event_path = Filename.concat month_dir "01.jsonl" in
       let raw_line =
         "{\"seq\":1,\"ts_ms\":1,\"ts_iso\":\"2000-01-01T00:00:00Z\",\
-         \"workspace_id\":\"default\",\"kind\":\"message.broadcast\",\
+         \"kind\":\"message.broadcast\",\
          \"payload\":{\"content\":\"bad\xffpayload\"},\"tags\":[]}\n"
       in
       Fs_compat.save_file event_path raw_line;
       check bool "fixture starts invalid" false
         (String.is_valid_utf_8 (Fs_compat.load_file event_path));
-      let events = Activity_graph.list_events config ~after_seq:0 ~limit:10 () in
+      let events = Activity_graph.list_events config ~after_seq:0 ~limit:10 ~keep:(fun _ -> true) () in
       let event =
         match events with
         | [ event ] -> event
@@ -340,7 +411,7 @@ let test_read_self_heals_historic_invalid_utf8_event_file () =
       check int "file repair counted once" 1 stats_after_first.repaired_reads;
       check bool "backing file rewritten valid" true
         (String.is_valid_utf_8 (Fs_compat.load_file event_path));
-      ignore (Activity_graph.list_events config ~after_seq:0 ~limit:10 ());
+      ignore (Activity_graph.list_events config ~after_seq:0 ~limit:10 ~keep:(fun _ -> true) ());
       let stats_after_second = Safe_ops.persistence_utf8_repair_stats () in
       check int "second read does not repair again" 1
         stats_after_second.repaired_reads)
@@ -636,16 +707,60 @@ let strip_generated_at_iso json =
          fields)
   | other -> other
 
+(* The gauge exists so an operator reads the cache instead of estimating it
+   from RSS, so what has to hold is that the number follows the cache. A
+   fixture day file from the past is what puts anything in the past-day cache
+   at all: today's file belongs to the current-day cache. *)
+let write_past_day_file config ~lines =
+  let root = Filename.concat (Workspace_utils.masc_dir config) Activity_graph.store_dirname in
+  let dir = Filename.concat root "2020-01" in
+  let rec mkdir_p path =
+    if not (Sys.file_exists path)
+    then (
+      mkdir_p (Filename.dirname path);
+      try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  in
+  mkdir_p dir;
+  let path = Filename.concat dir "02.jsonl" in
+  let oc = open_out path in
+  for i = 1 to lines do
+    Printf.fprintf oc
+      {|{"seq":%d,"ts_ms":1577923200000,"ts_iso":"2020-01-02T00:00:00Z","workspace_id":"default","kind":"test.fixture","actor":{"kind":"agent","id":"fixture"},"subject":{"kind":"tool","id":"fixture"},"payload":{}}|}
+      i;
+    output_char oc '\n'
+  done;
+  close_out oc;
+  path
+;;
+
+let test_cache_stats_follow_the_cache () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_past_day_cache_for_testing ();
+      let empty = Activity_graph.cache_stats () in
+      check int "a cleared cache holds no files" 0 empty.Activity_graph.past_day_files;
+      check int "and no records" 0 empty.Activity_graph.past_day_records;
+      let _ = write_past_day_file config ~lines:7 in
+      (* Reading is what populates it; the stats are a read, not a trigger. *)
+      ignore
+        (Activity_graph.list_events config ~after_seq:0 ~limit:100 ~keep:(fun _ -> true) ());
+      let warm = Activity_graph.cache_stats () in
+      check int "the past day file is held" 1 warm.Activity_graph.past_day_files;
+      check int "and its records are counted" 7 warm.Activity_graph.past_day_records;
+      Activity_graph.For_testing.reset_past_day_cache_for_testing ();
+      let cleared = Activity_graph.cache_stats () in
+      check int "clearing the cache clears the count" 0 cleared.Activity_graph.past_day_files)
+;;
+
 let test_current_day_cache_reparses_only_appended_delta () =
   with_config (fun config ->
       Activity_graph.For_testing.reset_current_day_cache_for_testing ();
       emit_n config 10;
-      let first = Activity_graph.list_events config ~after_seq:0 ~limit:100 () in
+      let first = Activity_graph.list_events config ~after_seq:0 ~limit:100 ~keep:(fun _ -> true) () in
       check int "first read sees 10 events" 10 (List.length first);
       check int "cold-miss full parse does not touch the delta counter" 0
         (Activity_graph.For_testing.current_day_parsed_line_count ());
       emit_n config 5;
-      let second = Activity_graph.list_events config ~after_seq:0 ~limit:100 () in
+      let second = Activity_graph.list_events config ~after_seq:0 ~limit:100 ~keep:(fun _ -> true) () in
       check int "second read sees all 15 events" 15 (List.length second);
       check int "warm cache re-parses only the 5 appended lines" 5
         (Activity_graph.For_testing.current_day_parsed_line_count ()))
@@ -676,7 +791,7 @@ let test_current_day_cache_rescans_from_zero_on_truncation () =
   with_config (fun config ->
       Activity_graph.For_testing.reset_current_day_cache_for_testing ();
       emit_n config 6;
-      let baseline = Activity_graph.list_events config ~after_seq:0 ~limit:100 () in
+      let baseline = Activity_graph.list_events config ~after_seq:0 ~limit:100 ~keep:(fun _ -> true) () in
       check int "baseline has 6 events" 6 (List.length baseline);
       (* Simulate rotation/truncation: rewrite the current-day file
          smaller than the cached boundary. *)
@@ -684,12 +799,12 @@ let test_current_day_cache_rescans_from_zero_on_truncation () =
       let raw_line seq =
         Printf.sprintf
           "{\"seq\":%d,\"ts_ms\":%d,\"ts_iso\":\"2026-01-01T00:00:00Z\",\
-           \"workspace_id\":\"default\",\"kind\":\"message.broadcast\",\
+           \"kind\":\"message.broadcast\",\
            \"payload\":{},\"tags\":[]}\n"
           seq seq
       in
       Fs_compat.save_file path (raw_line 1 ^ raw_line 2);
-      let after_truncate = Activity_graph.list_events config ~after_seq:0 ~limit:100 () in
+      let after_truncate = Activity_graph.list_events config ~after_seq:0 ~limit:100 ~keep:(fun _ -> true) () in
       check int "truncated file rescanned from zero, not merged with stale cache"
         2 (List.length after_truncate))
 
@@ -704,14 +819,14 @@ let test_past_day_cache_evicts_entries_for_deleted_files () =
       let day_path = Filename.concat month_dir "01.jsonl" in
       Fs_compat.save_file day_path
         "{\"seq\":1,\"ts_ms\":1,\"ts_iso\":\"2000-01-01T00:00:00Z\",\
-         \"workspace_id\":\"default\",\"kind\":\"message.broadcast\",\
+         \"kind\":\"message.broadcast\",\
          \"payload\":{},\"tags\":[]}\n";
-      ignore (Activity_graph.list_events config ~after_seq:0 ~limit:100 ());
+      ignore (Activity_graph.list_events config ~after_seq:0 ~limit:100 ~keep:(fun _ -> true) ());
       check bool "past-day file is now cached" true
         (Activity_graph.For_testing.past_day_cache_entry_count () > baseline_count);
       Sys.remove day_path;
       Unix.rmdir month_dir;
-      ignore (Activity_graph.list_events config ~after_seq:0 ~limit:100 ());
+      ignore (Activity_graph.list_events config ~after_seq:0 ~limit:100 ~keep:(fun _ -> true) ());
       check int "cache entry evicted once the backing file is gone"
         baseline_count (Activity_graph.For_testing.past_day_cache_entry_count ()))
 
@@ -734,6 +849,49 @@ let test_span_status_of_string_opt_returns_none_for_unknown () =
     (Activity_graph.span_status_of_string_opt "open"
      |> Option.map Activity_graph.span_status_to_string)
 
+
+(* Node accumulators are values, not cells. A record read out of the table
+   before a later event keeps what it was read with, while the table itself
+   advances. Against the previous in-place form both checks on [first] would
+   fail, because [first] and the table entry were the same physical record. *)
+let test_reducer_replaces_node_entries_instead_of_writing_through () =
+  let nodes = Hashtbl.create 8 in
+  let edges = Hashtbl.create 8 in
+  let event seq ts_iso : Activity_graph_types.event =
+    {
+      seq;
+      ts_ms = seq * 1000;
+      ts_iso;
+      kind = "task.assigned";
+      actor = Some { kind = "agent"; id = "a1" };
+      subject = Some { kind = "task"; id = "t1" };
+      payload = `Assoc [];
+      tags = [];
+    }
+  in
+  Activity_graph_reducer.reduce_event ~nodes ~edges
+    (event 1 "2026-01-01T00:00:00Z");
+  let first : Activity_graph_reducer.node_acc =
+    match Hashtbl.find_opt nodes "agent:a1" with
+    | Some node -> node
+    | None -> fail "actor node missing after the first event"
+  in
+  check int "first read sees one hit" 1 first.weight;
+  Activity_graph_reducer.reduce_event ~nodes ~edges
+    (event 2 "2026-01-02T00:00:00Z");
+  check int "the earlier record keeps its weight" 1 first.weight;
+  check string "the earlier record keeps its timestamp" "2026-01-01T00:00:00Z"
+    first.last_event_at;
+  let second : Activity_graph_reducer.node_acc =
+    match Hashtbl.find_opt nodes "agent:a1" with
+    | Some node -> node
+    | None -> fail "actor node missing after the second event"
+  in
+  check int "the table advances the weight" 2 second.weight;
+  check string "the table advances the timestamp" "2026-01-02T00:00:00Z"
+    second.last_event_at
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -741,6 +899,8 @@ let () =
     [
       ( "core",
         [
+          test_case "day file follows the shared layout" `Quick
+            test_day_file_follows_the_shared_layout;
           test_case "emit and list events" `Quick test_emit_and_list_events;
           test_case "events json derives IDE context" `Quick
             test_events_json_derives_ide_context;
@@ -777,11 +937,20 @@ let () =
         [
           test_case "warm cache re-parses only the appended delta" `Quick
             test_current_day_cache_reparses_only_appended_delta;
+          test_case "cache_stats follow the cache" `Quick
+            test_cache_stats_follow_the_cache;
           test_case "incremental path output matches full-reparse reference"
             `Quick test_current_day_cache_matches_uncached_golden;
           test_case "truncated file rescans from zero" `Quick
             test_current_day_cache_rescans_from_zero_on_truncation;
           test_case "past-day cache evicts entries for deleted files" `Quick
             test_past_day_cache_evicts_entries_for_deleted_files;
+          test_case "keep runs before the page is cut" `Quick
+            test_keep_runs_before_the_page_is_cut;
+        ] );
+      ( "reducer",
+        [
+          test_case "a later event replaces the node entry rather than writing through"
+            `Quick test_reducer_replaces_node_entries_instead_of_writing_through;
         ] );
     ]

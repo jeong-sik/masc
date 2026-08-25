@@ -8,7 +8,6 @@
   anti_rationalization
   planning_eio
   task_goal_assignment
-  task_goal_reconciliation
   tool_task
   tool_task_args
   tool_task_completion_review
@@ -17,9 +16,10 @@
   tool_task_no_eligible
   tool_task_payloads
   tool_task_schemas
+  tool_task_schemas_toml
   workflow_rejection_payload)
  (flags
-  (:standard -w -4))
+  (:standard -w -4 -w +37))
  (libraries
   yojson
   unix
@@ -38,10 +38,14 @@
   masc_bounded_event_dedupe
   masc_eio_context
   masc.masc_tool_dispatch
+  ; tool_task_schemas_toml reads config/tools/masc_*.toml from the
+  ; binary-embedded config tree.
+  masc.embedded_config
+  masc.masc_tool_surface
   masc.tool_types
   masc.config_dir_resolver
   masc.prompt_registry
   masc_goal
-  agent_sdk)
+  masc.agent_core)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_tla)))

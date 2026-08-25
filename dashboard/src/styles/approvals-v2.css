@@ -33,14 +33,16 @@
    ════════════════════════════════════════════════════════════════ */
 
 .ap-head-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; }
-.ap-viewseg { display: inline-flex; align-items: center; gap: 4px; padding: 3px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg-sunken); }
-.ap-viewbtn { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-dim); font-size: var(--fs-12); font-family: var(--font-ui); cursor: pointer; }
-.ap-viewbtn:hover { color: var(--text-primary); background: var(--bg-panel); }
-.ap-viewbtn.on { color: var(--text-bright); background: var(--volt-wash); box-shadow: inset 0 0 0 1px var(--volt-dim); }
-.ap-viewbtn-n { min-width: 16px; padding: 1px 5px; border-radius: var(--radius-pill); color: var(--status-bad); background: color-mix(in oklab, var(--status-bad) 12%, transparent); }
-/* The queue badge is red because a waiting queue is a problem. The history
-   badge counts decisions already made, so it stays neutral. */
-.ap-viewbtn-n.neutral { color: var(--text-dim); background: color-mix(in oklab, var(--text-dim) 12%, transparent); }
+/* Queue / history segmented control, from the design's surfaces.css: one pill
+   outline with hairline dividers between the segments, not a rounded box of
+   separately rounded buttons. The count is plain text at 10.5px — under the
+   tempered tone a chip's colour survives as text, not as a filled ground.
+   The queue count is `warn`, not `bad`: the design reserves the failure colour
+   for failure, and a queue that is waiting has not failed. The history count
+   counts decisions already made, so it stays neutral. */
+/* The segmented control itself is the design's, owned by keeper-v2/surfaces.css
+   — including its flex:none. Only the neutral count tone is live-only. */
+.ap-viewbtn-n.neutral { color: var(--text-dim); }
 
 /* Queue ↔ detail-rail two-column workspace (live surface; not in the prototype,
    which uses a right operations aside instead). */
@@ -128,6 +130,14 @@
 
 /* Fetch error banner (live surface). */
 .ap-error { font-size: var(--fs-12); color: var(--status-bad); border: 1px solid color-mix(in oklab, var(--status-bad) 35%, var(--border-main)); background: color-mix(in oklab, var(--status-bad) 7%, transparent); padding: 10px 12px; border-radius: var(--radius-sm); margin-bottom: 14px; }
+.ap-audit-write-alert { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.ap-audit-write-alert > strong { color: var(--status-bad); }
+.ap-audit-write-alert > .ap-viewbtn { align-self: flex-start; border: 1px solid color-mix(in oklab, var(--status-bad) 35%, var(--border-main)); }
+.ap-audit-failure { display: grid; gap: 6px; padding: 10px; border: 1px solid color-mix(in oklab, var(--status-bad) 24%, var(--border-soft)); border-radius: var(--radius-xs); background: var(--bg-sunken); }
+.ap-audit-failure > span { overflow-wrap: anywhere; }
+.ap-audit-failure details { color: var(--text-dim); }
+.ap-audit-failure summary { cursor: pointer; font-family: var(--font-mono); font-size: var(--fs-11); }
+.ap-audit-failure pre { max-height: 260px; margin: 8px 0 0; padding: 10px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--border-soft); border-radius: var(--radius-xs); color: var(--text-primary); background: var(--bg-panel); font-family: var(--font-mono); font-size: var(--fs-11); line-height: 1.5; }
 
 /* Nav-rail count badge / dot for the approvals surface (open-approval count). */
 .ap-nav-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 6px; border-radius: var(--radius-pill); font-family: var(--font-mono); font-size: 9.5px; font-weight: 700; line-height: 1; color: var(--status-bad); background: color-mix(in oklab, var(--status-bad) 16%, transparent); border: 1px solid color-mix(in oklab, var(--status-bad) 38%, transparent); }
@@ -145,37 +155,25 @@
 }
 
 /* Queue/history view, audit list, and HITL aside (live surface augmentation). */
-.ap-hist { display: flex; flex-direction: column; gap: 14px; }
-.ap-hist-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-.ap-hist-stat { min-width: 0; padding: 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg-panel); color: var(--text-dim); font-size: var(--fs-12); }
-.ap-hist-stat b { display: block; margin-bottom: 2px; color: var(--text-bright); font-size: var(--fs-18); }
-.ap-hist-stat b.ok { color: var(--status-ok); }
-.ap-hist-stat b.bad { color: var(--status-bad); }
 /* Scope line above the history list: what window the rows cover and whether
    they are all of it. Warn tint only when the list is a slice. */
 .ap-hist-scope { margin: 0; color: var(--text-dim); font-size: var(--fs-12); }
 .ap-hist-scope b { color: var(--text-bright); }
 .ap-hist-scope.warn { color: var(--status-warn); }
 .ap-hist-scope.warn b { color: var(--status-warn); }
-.ap-hist-filters { display: flex; flex-wrap: wrap; gap: 6px; }
-.ap-hist-f { border: 1px solid var(--border-soft); border-radius: var(--radius-xs); background: var(--bg-sunken); color: var(--text-dim); padding: 6px 9px; font-size: var(--fs-11); cursor: pointer; }
-.ap-hist-f:hover { color: var(--text-primary); border-color: var(--border-main); }
-.ap-hist-f.on { color: var(--text-bright); border-color: var(--volt-dim); background: var(--volt-wash); }
-.ap-history { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border-soft); }
-.ap-history-title { font-size: var(--fs-14); font-weight: 600; color: var(--text-dim); margin: 0 0 12px; }
-.ap-history-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.ap-hist-list { margin-top: 0; }
-.ap-history-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--bg-panel); border: 1px solid var(--border-soft); font-size: var(--fs-12); min-width: 0; }
-.ap-history-decision { flex: none; min-width: 48px; text-align: center; padding: 2px 8px; border-radius: var(--radius-xs); font-weight: 600; text-transform: uppercase; font-size: var(--fs-10); }
-.ap-history-decision.decision-approve { color: var(--status-ok); background: color-mix(in oklab, var(--status-ok) 12%, transparent); }
-.ap-history-decision.decision-reject { color: var(--status-bad); background: color-mix(in oklab, var(--status-bad) 12%, transparent); }
-.ap-history-decision.decision-edit { color: var(--volt-strong); background: var(--volt-wash); }
-.ap-history-decision.decision-unknown { color: var(--text-dim); background: var(--bg-sunken); }
-.ap-history-tool { flex: 1 1 140px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-bright); }
-.ap-history-keeper { flex: 1 1 120px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
-.ap-history-id { flex: 1 1 140px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-size: 10.5px; }
-.ap-history-rule { flex: 0 1 130px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--volt-strong); font-size: var(--fs-10); }
-.ap-history-at { flex: none; color: var(--text-dim); font-size: 10.5px; }
+.ap-recent-dec { flex: none; min-width: 48px; text-align: center; padding: 2px 8px; border-radius: var(--radius-xs); font-weight: 600; text-transform: uppercase; font-size: var(--fs-10); }
+.ap-recent-dec.decision-approve { color: var(--status-ok); background: color-mix(in oklab, var(--status-ok) 12%, transparent); }
+.ap-recent-dec.decision-reject { color: var(--status-bad); background: color-mix(in oklab, var(--status-bad) 12%, transparent); }
+/* OVERRIDE: the kit's first track is 48px, which holds the mock's `14:22`. Live
+   rows span days and print a full date, so the column is widened here. Scoped to
+   the surface because this sheet loads before the kit and would otherwise lose
+   the cascade at equal specificity. */
+.v2-app[data-surface="approvals"] .ap-hist-row { grid-template-columns: 104px 84px minmax(0, 1fr) auto; }
+.ap-hist-slot { font-size: var(--fs-10); color: var(--volt-strong); }
+.ap-hist-src { font-size: 9.5px; color: var(--text-dim); }
+.ap-hist-judge { font-size: var(--fs-11); color: var(--text-dim); }
+.ap-hist-judge > summary { cursor: pointer; }
+
 .ap-clear.compact { min-height: 190px; }
 
 .ap-aside { position: sticky; top: 14px; display: flex; flex-direction: column; gap: 12px; align-self: start; min-width: 0; }
@@ -229,7 +227,4 @@ button.wka-switch:focus-visible { outline: 2px solid var(--volt-strong); outline
     min-width: var(--mobile-touch-target-min);
     min-height: var(--mobile-touch-target-min);
   }
-  .ap-hist-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ap-history-item { flex-wrap: wrap; }
-  .ap-history-at { flex-basis: 100%; }
 }

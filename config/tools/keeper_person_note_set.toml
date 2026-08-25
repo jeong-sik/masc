@@ -1,0 +1,21 @@
+name = "keeper_person_note_set"
+description = """
+Remember (or clear) a note about a person met on a connected surface, keyed \
+by their roster speaker_id. Deliberate memory: the note survives after their \
+chat rows age out of the log window and shows up on the keeper_surface_read \
+roster."""
+
+[[params]]
+name = "speaker_id"
+type = "string"
+required = true
+description = """
+Stable speaker id from the roster (Discord snowflake). Notes attach to ids, \
+never to display names."""
+
+[[params]]
+name = "note"
+type = "string"
+required = true
+description = """
+What to remember about this person. Blank clears the note (tombstone)."""

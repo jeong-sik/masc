@@ -1,10 +1,3 @@
-module Option = Stdlib.Option
-module Sys = Stdlib.Sys
-module List = Stdlib.List
-module String = Stdlib.String
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Runtime operations used by the keeper MCP tool surface. *)
 open Tool_args
 open Keeper_types
@@ -14,9 +7,6 @@ open Keeper_types_profile
 open Keeper_runtime
 open Result.Syntax
 module Turn = Keeper_turn
-module Status = Keeper_status
-module Persona = Keeper_persona
-module Persona_audit = Keeper_tool_persona_audit
 type 'a context = 'a Keeper_types_profile.context = {
   config : Workspace.config;
   agent_name : string;
@@ -45,10 +35,9 @@ type json_cache = {
   key : string option;
   value : Yojson.Safe.t option;
   expires_at : float;
-  generation : int;
 }
-let empty_json_cache ~generation = { key = None; value = None; expires_at = 0.0; generation }
-let keeper_list_cache = Atomic.make (empty_json_cache ~generation:0)
+let empty_json_cache () = { key = None; value = None; expires_at = 0.0 }
+let keeper_list_cache = Atomic.make (empty_json_cache ())
 let cache_ttl_seconds env_var ~default =
   match Sys.getenv_opt env_var with
   | None -> default
@@ -78,8 +67,7 @@ let cache_ttl_seconds env_var ~default =
 let keeper_list_cache_ttl_s () =
   cache_ttl_seconds "MASC_KEEPER_LIST_CACHE_TTL_S" ~default:2.0
 let invalidate_json_cache cache_ref =
-  Lockfree_atomic.update cache_ref (fun current ->
-    empty_json_cache ~generation:(current.generation + 1))
+  Atomic.set cache_ref (empty_json_cache ())
 let invalidate_keeper_list_cache () = invalidate_json_cache keeper_list_cache
 let rec cached_json_by_key cache_ref ~key ~ttl_s compute =
   let now = Time_compat.now () in
@@ -95,7 +83,6 @@ let rec cached_json_by_key cache_ref ~key ~ttl_s compute =
           key = Some key;
           value = Some value;
           expires_at = Time_compat.now () +. ttl_s;
-          generation = cache.generation;
         }
       in
       if Atomic.compare_and_set cache_ref cache next then value
@@ -105,39 +92,12 @@ let rec cached_json_by_key cache_ref ~key ~ttl_s compute =
         cached_json_by_key cache_ref ~key ~ttl_s compute
       end
 
-let submit_keeper_msg_with_captured_event_bus
-      ~background_sw
-      ~base_path
-      ~caller
-      ~request
-      ~(f :
-          ?event_bus:Agent_sdk.Event_bus.t
-          -> Keeper_invocation_contract.request
-          -> Eio.Switch.t
-          -> tool_result)
-      () =
-  let event_bus = Event_bus_slots.get_keeper () in
-  Keeper_invocation_contract.submit
-    ~background_sw
-    ~base_path
-    ~caller
-    ~request
-    ~f:(fun request request_sw -> f ?event_bus request request_sw)
-    ()
-
-let submit_outcome_with_keeper_json ~request outcome =
-  Keeper_invocation_contract.submission_to_json request outcome
-;;
-
 module For_testing = struct
   let reset_keeper_list_cache () =
-    Atomic.set keeper_list_cache (empty_json_cache ~generation:0)
+    Atomic.set keeper_list_cache (empty_json_cache ())
   let invalidate_keeper_list_cache = invalidate_keeper_list_cache
   let cached_keeper_list_data ~key ~ttl_s compute =
     cached_json_by_key keeper_list_cache ~key ~ttl_s compute
-  let submit_keeper_msg_with_captured_event_bus =
-    submit_keeper_msg_with_captured_event_bus
-  let submit_outcome_with_keeper_json = submit_outcome_with_keeper_json
 end
 let annotate_keeper_json ~runtime_class json =
   match json with
@@ -163,31 +123,39 @@ let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : kee
             "failed to reseed keeper identity for %s: invalid trace_id %s (%s)"
             meta.name new_trace_id_raw err)
     in
+    let* updated_meta =
+      match
+        Keeper_owner_registry.apply_meta
+          ~base_path:config.base_path
+          ~keeper_name:meta.name
+          (Keeper_owner_reducer.Handoff_identity
+             { keeper_id = meta.keeper_id
+             ; agent_name = expected_agent_name
+             ; trace_id = new_trace_id
+             ; trace_history =
+                 Json_util.dedupe_keep_order
+                   (previous_trace_id :: meta.runtime.trace_history)
+             ; updated_at = Keeper_meta_contract.now_iso ()
+             })
+      with
+      | Ok (Some updated_meta) -> Ok updated_meta
+      | Ok None ->
+        Error
+          (Printf.sprintf
+             "failed to reseed keeper identity for %s: owner metadata missing"
+             meta.name)
+      | Error error ->
+        Error
+          (Printf.sprintf
+             "failed to persist reseeded keeper identity for %s: %s"
+             meta.name
+             (Keeper_owner_registry.command_error_to_string error))
+    in
     let base_dir = Keeper_types_profile.session_base_dir config in
-    let _session =
-      Keeper_context_runtime.create_session ~session_id:new_trace_id_raw ~base_dir
-    in
-    let updated_meta =
-      { meta with
-        agent_name = expected_agent_name;
-        updated_at = Keeper_meta_contract.now_iso ();
-        runtime =
-          { meta.runtime with
-            trace_id = new_trace_id;
-            trace_history =
-              Json_util.dedupe_keep_order (previous_trace_id :: meta.runtime.trace_history);
-            nonce = meta.runtime.nonce + 1;
-          };
-      }
-    in
-    let* () =
-      Keeper_meta_store.write_meta_with_merge
-        ~merge:Keeper_meta_merge.monotonic_usage_counters config updated_meta
-      |> Result.map_error (fun err ->
-          Printf.sprintf
-            "failed to persist reseeded keeper identity for %s: %s"
-            meta.name err)
-    in
+    ignore
+      (Keeper_context_runtime.create_session
+         ~session_id:new_trace_id_raw
+         ~base_dir);
     Ok
       ( updated_meta,
         Some
@@ -231,10 +199,9 @@ let startup_not_ready_error_data elapsed =
           (Printf.sprintf
              "MASC server is still starting (%.0fs elapsed). Retry in a few seconds."
              elapsed) )
-    ; ("retry_after_ms", `Int 3000)
     ]
 let with_keeper_startup_gate f =
-  if not Server_startup_state.((!state).state_ready) then begin
+  if not (Server_startup_state.snapshot ()).state_ready then begin
     let elapsed = Server_startup_state.elapsed_since_start () in
     Log.Keeper.warn "keeper_up rejected: server not ready (%.1fs since start)" elapsed;
     tool_result_error_data (startup_not_ready_error_data elapsed)
@@ -274,7 +241,7 @@ let keeper_list_effective_meta_error_json name err =
       ("terminal_reason", `String "effective_meta_read_failed");
       ("severity", `String "error");
       ("operator_action_required", `Bool true);
-      ("next_action", `String "fix_keeper_toml_or_persona_profile");
+      ("next_action", `String "fix_keeper_toml_or_keeper_instructions");
     ]
 
 let keeper_list_error_row_json ~runtime_class config name err =
@@ -323,13 +290,10 @@ let keeper_list_row_json ~runtime_class config name =
   | Ok (Some (meta : keeper_meta)) ->
       let now_ts = Time_compat.now () in
       let keepalive_running = Keeper_status_bridge.runtime_keepalive_running config meta in
-      let agent_status =
-        Keeper_status_runtime.parse_agent_status config ~agent_name:meta.agent_name
-      in
       let diagnostic =
         Keeper_status_runtime.keeper_diagnostic_json
+          ~config
           ~meta
-          ~agent_status
           ~keepalive_running ~history_items:[] ~now_ts
         |> Keeper_status_runtime.augment_keeper_diagnostic_json
              ~keepalive_running
@@ -337,17 +301,52 @@ let keeper_list_row_json ~runtime_class config name =
                (Keeper_status_bridge.runtime_keepalive_started_at config meta)
              ~now_ts
       in
-      let status =
-        Keeper_status_runtime.keeper_surface_status ~agent_status ~diagnostic
+      (* One keeper is described by four separate readings, and each row
+         carries its own field for one of them rather than a single word that
+         answers for all four:
+
+           phase        lifecycle state machine  - which cell it is in
+           health       observed signal          - is it reporting on time
+           paused       operator override        - did a person stop it
+           next_action  what to do about it      - already derived from health
+
+         [status] is a fifth field that re-answers [health] with three of its
+         values folded into "inactive". The TUI counted that word as running
+         while the dashboard counted it as attention, because a folded word
+         leaves the reader to guess. Both are published here so neither has to.
+
+         The diagnostic already carries health and next_action; this only stops
+         discarding them. *)
+      let status = Keeper_status_runtime.keeper_surface_status ~diagnostic in
+      let health =
+        Keeper_status_runtime.keeper_health_to_string
+          (Keeper_status_runtime.keeper_diagnostic_health
+             ~diagnostic
+             ~source:"keeper_list_row")
+      in
+      (* The action the diagnostic already derived. Absent means the diagnostic
+         did not name one, which is a different thing from "nothing to do", so
+         it publishes as null rather than as an empty string. *)
+      let next_action =
+        Json_util.string_opt_to_json
+          (Json_util.get_string diagnostic "next_action_path")
+      in
+      let phase =
+        match Keeper_registry.get_phase ~base_path:config.base_path meta.name with
+        | Some p -> Keeper_state_machine.phase_to_string p
+        | None -> "offline"
       in
       Some
         (`Assoc (
           [
             ("runtime_class", `String runtime_class); ("name", `String meta.name);
             ("meta", keeper_brief_meta_json meta); ("agent_name", `String meta.agent_name);
-            ("status", `String status); ("keepalive_running", `Bool keepalive_running);
+            ("status", `String status); ("phase", `String phase);
+            ("health", `String health);
+            ("paused", `Bool meta.paused);
+            ("next_action", next_action);
+            ("keepalive_running", `Bool keepalive_running);
             ("autoboot_enabled", `Bool meta.autoboot_enabled); ("proactive_enabled", `Bool meta.proactive.enabled);
-            ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
             ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
           ]))
@@ -379,73 +378,10 @@ let prepare_passive_keeper_identity_config ~(config : Workspace.config) ~(agent_
         in
         Ok (with_keeper_name args updated_meta.name, identity_reseed)
 
-let prepare_passive_keeper_identity ctx args =
-  prepare_passive_keeper_identity_config
-    ~config:ctx.config
-    ~agent_name:ctx.agent_name
-    args
 let attach_identity_reseed ?identity_reseed json =
   match identity_reseed with
   | None -> json
   | Some note -> attach_assoc_field "identity_reseed" note json
-let handle_keeper_create_from_persona ctx args : tool_result =
-  if not Server_startup_state.((!state).state_ready) then begin
-    let elapsed = Server_startup_state.elapsed_since_start () in
-    Log.Keeper.warn "create_from_persona rejected: server not ready (%.1fs)" elapsed;
-    tool_result_error_data (startup_not_ready_error_data elapsed)
-  end else
-    match
-      let* persona, resolved_args =
-        Keeper_tool_persona_runtime.resolved_keeper_args_from_persona args
-        |> Result.map_error (fun e -> "" ^ e)
-      in
-      let dry_run = get_bool args "dry_run" false in
-      if dry_run then
-        Ok
-          (tool_result_ok_data
-             (`Assoc
-                [
-                  ( "persona",
-                    Keeper_tool_persona_runtime.persona_summary_to_json persona );
-                  ("created", `Bool false);
-                  ("resolved_args", resolved_args);
-                ]))
-      else
-        let* _rendered_toml =
-          Keeper_tool_persona_runtime.render_keeper_toml_from_resolved_args
-            resolved_args
-          |> Result.map_error (fun e -> "" ^ e)
-        in
-        let result =
-          with_keeper_startup_gate (fun () -> execute_keeper_up ctx resolved_args)
-        in
-        if not (tool_result_success result) then
-          Ok result
-        else
-          let* durable_config =
-            Keeper_tool_persona_runtime.persist_keeper_toml_from_resolved_args
-              resolved_args
-            |> Result.map_error (fun e ->
-                "keeper created but durable config write failed: " ^ e)
-          in
-          let created_json = Tool_result.data result in
-          let json =
-            `Assoc
-              [
-                ( "persona",
-                  Keeper_tool_persona_runtime.persona_summary_to_json persona );
-                ("created", `Bool true);
-                ("durable_config", durable_config);
-                ( "result",
-                  annotate_keeper_json ~runtime_class:"keeper" created_json );
-                ("resolved_args", resolved_args);
-              ]
-          in
-          invalidate_keeper_list_cache ();
-          Ok (tool_result_ok_data json)
-    with
-    | Ok result -> result
-    | Error err -> tool_result_error err
 let handle_keeper_up ctx args : tool_result =
   with_keeper_startup_gate (fun () -> execute_keeper_up ctx args)
 
@@ -516,17 +452,26 @@ let keeper_name_lookup_candidates raw_name =
     in
     trimmed :: aliases
 
-let resolve_keeper_name_string_config ~(config : Workspace.config) name =
+(* Resolution carries the meta it read (RFC-0371 B6). The name-only shape
+   below discarded it, which forced the preflight one call later to read the
+   same keeper again from disk — two reads per submitted message for one
+   question. Effective meta (TOML overlay) is read here because the only
+   downstream consumer of the carried meta is the runtime-id preflight,
+   which must see overlay-owned fields. *)
+let resolve_keeper_config ~(config : Workspace.config) name =
   let name = String.trim name in
   let rec loop = function
     | [] -> Error (Printf.sprintf "keeper not found: %s" name)
     | candidate :: rest ->
-        let* resolved = read_meta_resolved config candidate in
+        let* resolved = read_effective_meta_resolved config candidate in
         (match resolved with
-         | Some (resolved_name, _meta) -> Ok resolved_name
+         | Some (resolved_name, meta) -> Ok (resolved_name, meta)
          | None -> loop rest)
   in
   loop (keeper_name_lookup_candidates name)
+
+let resolve_keeper_name_string_config ~(config : Workspace.config) name =
+  Result.map fst (resolve_keeper_config ~config name)
 
 let resolve_keeper_name_config ~(config : Workspace.config) args =
   resolve_keeper_name_string_config
@@ -534,179 +479,228 @@ let resolve_keeper_name_config ~(config : Workspace.config) args =
     (get_string args "name" "")
 
 
-let resolve_keeper_name ctx message =
-  resolve_keeper_name_string_config
+let resolve_keeper ctx message =
+  resolve_keeper_config
     ~config:ctx.config
     (Keeper_invocation_contract.direct_message_target_name message)
+
+type direct_reply_decode_error =
+  | Turn_outcome_decode_error of Keeper_turn_outcome.decode_error
+  | Visible_reply_missing_reply
+
+let direct_reply_decode_error_to_string = function
+  | Turn_outcome_decode_error error ->
+    Keeper_turn_outcome.decode_error_to_string error
+  | Visible_reply_missing_reply ->
+    "keeper reply payload is missing reply for visible_reply"
+;;
 
 let direct_reply_projection json =
   match Keeper_turn_outcome.of_reply_payload (Some json) with
   | Ok Keeper_turn_outcome.Visible_reply ->
-    let reply =
-      match Json_util.get_string json "reply" with
-      | Some reply -> Some reply
-      | None ->
-        invalid_arg
-          "keeper reply payload is missing reply for visible_reply"
-    in
-    Keeper_chat_blocks.connector_projection
-      ~turn_outcome:Keeper_turn_outcome.Visible_reply
-      ~reply
+    (match Json_util.get_string json "reply" with
+     | Some reply ->
+       Ok
+         (Keeper_chat_blocks.connector_projection
+            ~turn_outcome:Keeper_turn_outcome.Visible_reply
+            ~reply:(Some reply))
+     | None -> Error Visible_reply_missing_reply)
   | Ok turn_outcome ->
-    Keeper_chat_blocks.connector_projection
-      ~turn_outcome
-      ~reply:(Json_util.get_string json "reply")
-  | Error error ->
-    invalid_arg (Keeper_turn_outcome.decode_error_to_string error)
+    Ok
+      (Keeper_chat_blocks.connector_projection
+         ~turn_outcome
+         ~reply:(Json_util.get_string json "reply"))
+  | Error error -> Error (Turn_outcome_decode_error error)
 ;;
 
 let direct_reply_visible_text json =
   match direct_reply_projection json with
-  | Keeper_chat_blocks.Connector_text text -> Some text
-  | Connector_status _ | Connector_no_visible_reply -> None
+  | Ok (Keeper_chat_blocks.Connector_text text) -> Ok (Some text)
+  | Ok (Connector_status _ | Connector_no_visible_reply) -> Ok None
+  | Error error -> Error error
 ;;
 
-let append_direct_chat_pair_if_reply
-      ~(config : Workspace.config)
-      ~name
-      ~message
-      result
-  =
-  if Keeper_invocation_contract.direct_message_direct_reply message
-     && tool_result_success result
-  then (
-    let user_content =
-      Keeper_invocation_contract.direct_message_prompt message |> String.trim
-    in
-    (* RFC-0233 §7: the join key the keeper minted into the reply payload,
-       threaded onto the persisted row of this agent-initiated / connector
-       turn (parse, don't repair — absent/malformed reads as None). *)
-    let turn_ref =
-      Keeper_turn_outcome.turn_ref_of_reply_payload
-        (Some (Tool_result.data result))
-    in
-    let projected_assistant =
-      match direct_reply_projection (Tool_result.data result) with
-      | Keeper_chat_blocks.Connector_text text -> Some (text, None)
-      | Connector_status status ->
-        Some ("", Some [ Keeper_chat_blocks.Status status ])
-      | Connector_no_visible_reply -> None
-    in
-    match user_content, projected_assistant with
-    | "", _ | _, None -> ()
-    | _, Some (assistant_content, blocks) ->
-        (* Agent-initiated [masc_keeper_msg] path: only the final tool
-           result is visible here (no stream events), so no tool lines
-           are persisted for this surface. *)
-        (* RFC-0226 ownership split: connector traffic (a non-empty
-           [channel], set by [Gate_keeper_backend.dispatch]) had its
-           user line recorded at the gate inbound boundary, at delivery
-           time — appending it again here would double-record. This
-           site owns the assistant reply only. Without [channel] this
-           is a genuine agent-initiated message with no upstream
-           recorder, so it still owns the full pair. *)
-        let channel = Keeper_invocation_contract.direct_message_channel message in
-        if channel = "" then begin
-          Keeper_chat_store.append_turn
-            ~base_dir:config.base_path
-            ~keeper_name:name
-            ~user_content
-            ~user_attachments:[]
-            ~surface:Surface_ref.Agent
-            ~assistant_content
-            ?blocks
-            ?turn_ref
-            ();
-          Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source:"agent"
-            ~content:assistant_content
-            ()
-        end
-        else begin
-          Keeper_chat_store.append_assistant_message
-            ~base_dir:config.base_path
-            ~keeper_name:name
-            ~content:assistant_content
-            ~surface:(Surface_ref.Gate { label = channel; address = [] })
-            ?blocks
-            ?turn_ref
-            ();
-          Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source:channel
-            ~content:assistant_content
-            ()
-        end)
+let owner_operation_error_code = function
+  | Keeper_owner_registry.Command_lifecycle_reserved _ -> "owner_stopping"
+  | Command_lookup_failed Inventory_stopping -> "owner_stopping"
+  | Command_lookup_failed
+      (Inventory_not_installed _ | Owner_not_found _ | Owner_unavailable _
+      | Owner_initialization_failed _) ->
+    "store_unavailable"
+  | Command_rejected (Keeper_owner.Owner_stopping | Owner_closed) ->
+    "owner_stopping"
+  | Command_rejected (Keeper_owner.Operation_rejected error) ->
+    (match Keeper_owner.operation_error_kind error with
+     | Invalid_operation_input -> "invalid_input"
+     | Unknown_operation -> "unknown_operation"
+     | Operation_not_queued -> "not_queued"
+     | Operation_idempotency_conflict -> "idempotency_conflict"
+     | Operation_store_unavailable -> "store_unavailable")
+  | Command_rejected (Keeper_owner.Store_unavailable _ | Reducer_rejected _) ->
+    "store_unavailable"
 ;;
 
-let submit_keeper_invocation
+let operation_payload_error code detail =
+  Payload_error
+    (`Assoc
+       [ "error", `String code
+       ; "message", `String detail
+       ])
+;;
+
+let operation_id_of_invocation_ref invocation_ref =
+  let canonical =
+    Tool_invocation_ref.to_yojson invocation_ref |> Yojson.Safe.to_string
+  in
+  let digest = Digestif.SHA256.(digest_string canonical |> to_hex) in
+  "kmsg-" ^ String.sub digest 0 32
+;;
+
+let submit_agent_operation
+      ?continuation_channel
+      ?operation_id_raw
       ~submitted_by
-      ~submission_to_json
-      ~submission_error_to_json
-      ~run_turn
+      ~keeper_name
+      ~message
+      ~user_blocks
+      ~turn_instructions
+      ~surface_context
+      ~attachments
       ctx
-      ~request
   =
+  let ( let* ) = Result.bind in
+  let operation_id_raw =
+    Option.value
+      operation_id_raw
+      ~default:(Random_id.prefixed ~prefix:"kmsg-" ~bytes:16)
+  in
+  let* operation_id =
+    Keeper_owner.Chat_operation.Operation_id.of_string operation_id_raw
+    |> Result.map_error (operation_payload_error "invalid_input")
+  in
+  let thread_id = "keeper:" ^ keeper_name in
+  let* continuation_channel =
+    match continuation_channel with
+    | Some continuation_channel -> Ok continuation_channel
+    | None ->
+      Keeper_continuation_channel.dashboard ~thread_id
+      |> Result.map_error (operation_payload_error "invalid_input")
+  in
+  let* source =
+    Keeper_chat_operation_payload.source_to_json
+      ~submitted_by
+      ~thread_id
+      ~continuation_channel
+      ~surface:Surface_ref.Agent
+      ~channel:"agent"
+      ~channel_user_id:""
+      ~channel_user_name:""
+      ~channel_workspace_id:""
+      ~conversation_id:None
+      ~external_message_id:None
+      ~workspace_id:None
+      ~extra_mentions:[]
+      ~user_row_origin:Keeper_chat_store.Needs_append
+    |> Result.map_error (operation_payload_error "invalid_input")
+  in
+  let input =
+    Keeper_chat_operation_payload.input_to_json
+      ~message
+      ~user_blocks
+      ~turn_instructions
+      ~surface_context
+      ~attachments
+  in
   match
-    let* background_sw =
-      Keeper_msg_async.server_background_switch ()
-      |> Result.map_error (fun error ->
-        Payload_error (submission_error_to_json error))
-    in
-    let* submission =
-      submit_keeper_msg_with_captured_event_bus
-        ~background_sw
-        ~base_path:ctx.config.base_path
-        ~caller:submitted_by
-        ~request
-        ~f:(fun ?event_bus request request_sw ->
-          let worker_ctx = { ctx with sw = request_sw } in
-          let result = run_turn ?event_bus request worker_ctx in
-          if tool_result_success result
-          then invalidate_keeper_list_cache ();
-          result)
-        ()
-      |> Result.map_error (fun error ->
-        Payload_error (submission_error_to_json error))
-    in
+    Keeper_owner_registry.submit_operation
+      ~base_path:ctx.config.base_path
+      ~keeper_name
+      ~operation_id
+      ~source
+      ~input
+  with
+  | Ok acceptance ->
     Ok
       (tool_result_ok_data
-         (submission_to_json request submission))
-  with
-  | Ok result -> result
-  | Error error -> tool_result_of_handler_error error
+         (`Assoc
+            [ "operation_id", `String operation_id_raw
+            ; "state",
+              `String
+                (Keeper_owner.Chat_operation.state_to_string
+                   acceptance.operation.state)
+            ; "queued_count", `Int acceptance.queued_count
+            ; "existing", `Bool acceptance.existing
+            ]))
+  | Error error ->
+    Error
+      (operation_payload_error
+         (owner_operation_error_code error)
+         (Keeper_owner_registry.command_error_to_string error))
 ;;
 
 let handle_keeper_msg ?continuation_channel ~submitted_by ctx message : tool_result =
   match
-    let* name = message_error (resolve_keeper_name ctx message) in
+    let* name, meta = message_error (resolve_keeper ctx message) in
     let* message =
       Keeper_invocation_contract.direct_message_with_keeper_name message name
       |> Result.map_error Keeper_invocation_contract.request_error_to_string
       |> message_error
     in
-    let* message = message_error (Turn.preflight_keeper_msg ctx message) in
-    let request = Keeper_invocation_contract.direct_message_request message in
-    Ok
-      (submit_keeper_invocation
-         ~submitted_by
-         ~submission_to_json:Keeper_invocation_contract.submission_to_json
-         ~submission_error_to_json:Keeper_msg_async.submit_error_to_json
-         ~run_turn:(fun ?event_bus _request worker_ctx ->
-           let result =
-             Turn.handle_keeper_msg
-               ?event_bus
-               ?continuation_channel
-               worker_ctx
-               message
-           in
-           append_direct_chat_pair_if_reply
-             ~config:ctx.config ~name ~message result;
-           result)
-         ctx ~request)
+    let* message =
+      message_error
+        (Turn.preflight_keeper_msg_resolved
+           ~base_path:ctx.config.base_path
+           ~meta
+           message)
+    in
+    submit_agent_operation
+      ?continuation_channel
+      ~submitted_by
+      ~keeper_name:name
+      ~message:(Keeper_invocation_contract.direct_message_prompt message)
+      ~user_blocks:(Keeper_invocation_contract.direct_message_user_blocks message)
+      ~turn_instructions:
+        (Keeper_invocation_contract.direct_message_turn_instructions message)
+      ~surface_context:
+        (Keeper_invocation_contract.direct_message_surface_context message)
+      ~attachments:(Keeper_invocation_contract.direct_message_attachments message)
+      ctx
   with
   | Ok result -> result
   | Error error -> tool_result_of_handler_error error
 ;;
 
-let handle_keeper_delegate ~submitted_by ctx args =
+(* Where the answer goes. A Keeper that delegates is the reader of the reply
+   and reads it from its own queue, so it names itself as the destination.
+   Everyone else — an operator or an agent driving the tool over HTTP — keeps
+   the dashboard thread, which is where they are watching. Registry
+   membership decides it, not the shape of the name: writing a queue for a
+   name no Keeper owns would leave the answer somewhere nobody drains. *)
+let delegate_continuation_channel ~(config : Workspace.config) ~submitted_by =
+  (* The blank name leaves here, before the lookup. It is the one input the
+     constructor below refuses, so ruling it out up front is what makes the
+     [Error] arm unreachable -- and a reader can see that in these four lines
+     instead of having to go read what [is_registered] accepts. *)
+  if String.equal (String.trim submitted_by) ""
+  then None
+  else if not (Keeper_registry.is_registered ~base_path:config.base_path submitted_by)
+  then None
+  else (
+    match Keeper_continuation_channel.keeper ~keeper_name:submitted_by with
+    | Ok channel -> Some channel
+    | Error message ->
+      (* Unreachable: the only refusal is a blank name and that left above.
+         It says so rather than returning [None], which would spell "this
+         Keeper owns no queue" -- and by the comment on this function, that
+         is how a reply lands somewhere nobody drains. *)
+      invalid_arg
+        (Printf.sprintf
+           "keeper delegate: registered Keeper %S has no continuation channel: %s"
+           submitted_by
+           message))
+;;
+
+let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
   match
     let* request =
       Keeper_invocation_contract.request_of_json args
@@ -714,153 +708,223 @@ let handle_keeper_delegate ~submitted_by ctx args =
       |> message_error
     in
     let* request = message_error (Turn.preflight_keeper_delegate ctx request) in
-    Ok
-      (submit_keeper_invocation
-         ~submitted_by
-         ~submission_to_json:Keeper_invocation_contract.delegate_submission_to_json
-         ~submission_error_to_json:
-           (Keeper_invocation_contract.delegate_submission_error_to_json request)
-         ~run_turn:(fun ?event_bus request worker_ctx ->
-           Turn.handle_keeper_delegate ?event_bus worker_ctx request)
-         ctx
-         ~request)
+    submit_agent_operation
+      ?operation_id_raw:(Option.map operation_id_of_invocation_ref invocation_ref)
+      ?continuation_channel:
+        (delegate_continuation_channel ~config:ctx.config ~submitted_by)
+      ~submitted_by
+      ~keeper_name:(Keeper_invocation_contract.target_name request)
+      ~message:(Keeper_invocation_contract.prompt request)
+      ~user_blocks:[]
+      ~turn_instructions:None
+      ~surface_context:None
+      ~attachments:[]
+      ctx
   with
   | Ok result -> result
   | Error error -> tool_result_of_handler_error error
 ;;
 
-let run_ref_arg args =
-  match args with
-  | `Assoc [ ("run_ref", value) ] -> Keeper_invocation_contract.run_ref_of_json value
-  | _ ->
-    Error
-      (Keeper_invocation_contract.Invalid_wire_value
-         { field = "delegate_operation"; expected = "object containing only run_ref" })
+(* Raw-args boundary for masc_keeper_msg, mirroring [handle_keeper_delegate]'s
+   args decode so both dispatch tables (Keeper_tool_surface.dispatch and
+   Keeper_dispatch_ref.dispatch) can register it the same way. Target
+   resolution, preflight, and submission stay inside [handle_keeper_msg]. *)
+let handle_keeper_msg_from_args ~submitted_by ctx args : tool_result =
+  match
+    Keeper_invocation_contract.direct_message
+      ~keeper_name:(get_string args "name" "")
+      ~prompt:(get_string args "message" "")
+      ~direct_reply:true
+      ~channel:""
+      ~user_blocks:[]
+      ~attachments:[]
+      ()
+    |> Result.map_error Keeper_invocation_contract.request_error_to_string
+    |> message_error
+  with
+  | Ok message -> handle_keeper_msg ~submitted_by ctx message
+  | Error error -> tool_result_of_handler_error error
 ;;
 
-let run_ref_error error =
+let operation_reference_arg args =
+  let invalid detail =
+    Error
+      (`Assoc
+         [ "error", `String "invalid_input"
+         ; "message", `String detail
+         ])
+  in
+  match args with
+  | `Assoc fields ->
+    let keys = List.map fst fields |> List.sort String.compare in
+    if keys <> [ "operation_id"; "target" ]
+    then invalid "operation lookup requires exactly operation_id and target"
+    else
+      (match
+         Keeper_invocation_contract.target_of_json (List.assoc "target" fields),
+         List.assoc "operation_id" fields
+       with
+       | Error error, _ ->
+         invalid (Keeper_invocation_contract.request_error_to_string error)
+       | Ok target, `String operation_id ->
+         (match
+            Keeper_owner.Chat_operation.Operation_id.of_string operation_id
+          with
+          | Ok operation_id ->
+            Ok
+              ( Keeper_invocation_contract.target_name_of_target target
+              , operation_id )
+          | Error detail -> invalid detail)
+       | Ok _, _ -> invalid "operation_id must be a string")
+  | _ -> invalid "operation lookup must be an object"
+;;
+
+let operation_target_arg args =
+  match args with
+  | `Assoc [ ("target", target) ] ->
+    Keeper_invocation_contract.target_of_json target
+    |> Result.map Keeper_invocation_contract.target_name_of_target
+    |> Result.map_error (fun error ->
+      `Assoc
+        [ "error", `String "invalid_input"
+        ; "message",
+          `String (Keeper_invocation_contract.request_error_to_string error)
+        ])
+  | _ ->
+    Error
+      (`Assoc
+         [ "error", `String "invalid_input"
+         ; "message", `String "operation list requires exactly target"
+         ])
+;;
+
+let owner_command_error_result error =
   tool_result_error_data
     (`Assoc
-       [ "error", `String "invalid_run_ref"
-       ; "message", `String (Keeper_invocation_contract.request_error_to_string error)
+       [ "error", `String (owner_operation_error_code error)
+       ; "message",
+         `String (Keeper_owner_registry.command_error_to_string error)
        ])
 ;;
 
-let delegate_access_rejection reference rejection =
-  let error, message =
-    match rejection with
-    | Keeper_msg_async.Invalid_base_path { reason } -> "invalid_base_path", reason
-    | Keeper_msg_async.Invalid_caller -> "invalid_caller", "caller identity is invalid"
-    | Keeper_msg_async.Invalid_request_id -> "invalid_run_ref", "run_ref.run_id is invalid"
-    | Keeper_msg_async.Caller_mismatch ->
-      "run_ref_caller_mismatch", "run_ref does not belong to the authenticated caller"
-  in
-  `Assoc
-    [ "error", `String error
-    ; "message", `String message
-    ; "run_ref", Keeper_invocation_contract.run_ref_to_json reference
-    ]
+let operation_is_owned_by ~caller (operation : Keeper_owner.Chat_operation.t) =
+  match Keeper_chat_operation_payload.source_of_json operation.source with
+  | Ok source -> Ok (String.equal caller source.submitted_by)
+  | Error detail -> Error detail
 ;;
 
 let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
-  match run_ref_arg args with
-  | Error error -> run_ref_error error
-  | Ok reference ->
-    let run_id = Keeper_invocation_contract.run_id reference in
-    (match Keeper_msg_async.poll ~base_path:config.base_path ~caller run_id with
-    | Keeper_msg_async.Absent ->
-      tool_result_error_data
-        (`Assoc [ "error", `String "run_not_found"; "run_ref", Keeper_invocation_contract.run_ref_to_json reference ])
-    | Keeper_msg_async.Unreadable reason ->
-      tool_result_error_data
-        (`Assoc
-           [ "error", `String "invocation_record_unreadable"
-           ; "message", `String reason
-           ; "run_ref", Keeper_invocation_contract.run_ref_to_json reference
-           ])
-    | Keeper_msg_async.Rejected rejection ->
-      tool_result_error_data (delegate_access_rejection reference rejection)
-    | Keeper_msg_async.Found entry
-      when not (Keeper_invocation_contract.run_ref_matches_entry reference entry) ->
-      run_ref_error Keeper_invocation_contract.Run_ref_mismatch
-    | Keeper_msg_async.Found entry ->
-      (match Keeper_invocation_contract.delegate_entry_to_json entry with
-       | Ok json -> tool_result_ok_data json
-       | Error error ->
-         run_ref_error error))
+  match operation_reference_arg args with
+  | Error json -> tool_result_error_data json
+  | Ok (keeper_name, operation_id) ->
+    (match
+       Keeper_owner_registry.exact_operation
+         ~base_path:config.base_path
+         ~keeper_name
+         operation_id
+     with
+     | Error error -> owner_command_error_result error
+     | Ok None ->
+       tool_result_error_data
+         (`Assoc
+            [ "error", `String "unknown_operation"
+            ; "message", `String "Keeper chat operation was not found"
+            ])
+     | Ok (Some operation) ->
+       (match operation_is_owned_by ~caller operation with
+        | Error detail ->
+          tool_result_error_data
+            (`Assoc
+               [ "error", `String "store_unavailable"
+               ; "message", `String detail
+               ])
+        | Ok false ->
+          tool_result_error_data
+            (`Assoc
+               [ "error", `String "unknown_operation"
+               ; "message", `String "Keeper chat operation was not found"
+               ])
+        | Ok true ->
+          tool_result_ok_data (Keeper_owner.Chat_operation.to_json operation)))
 ;;
 
 let keeper_delegate_cancel_body ~(config : Workspace.config) ~caller args =
-  match run_ref_arg args with
-  | Error error -> run_ref_error error
-  | Ok reference ->
-    let run_id = Keeper_invocation_contract.run_id reference in
-    (match Keeper_msg_async.poll ~base_path:config.base_path ~caller run_id with
-     | Keeper_msg_async.Found entry
-       when not (Keeper_invocation_contract.run_ref_matches_entry reference entry) ->
-       run_ref_error Keeper_invocation_contract.Run_ref_mismatch
-     | Keeper_msg_async.Found _ ->
-    let result =
-      Keeper_msg_async.cancel ~base_path:config.base_path ~caller run_id
-    in
-    let json = Keeper_invocation_contract.delegate_cancellation_to_json reference result in
-    (match result with
-     | Keeper_msg_async.Cancellation_requested _ ->
-       tool_result_ok_data json
-     | Keeper_msg_async.Cancel_not_found
-     | Keeper_msg_async.Cancel_unreadable _
-     | Keeper_msg_async.Cancel_rejected _
-     | Keeper_msg_async.Cancel_worker_ownership_unknown _
-     | Keeper_msg_async.Cancel_already_terminal _
-     | Keeper_msg_async.Cancel_persistence_failed _
-     | Keeper_msg_async.Cancel_worker_signal_failed _
-     | Keeper_msg_async.Cancel_state_invariant_failed _ ->
-       tool_result_error_data json)
-     | Keeper_msg_async.Absent ->
-       tool_result_error_data (Keeper_invocation_contract.delegate_cancellation_to_json reference Keeper_msg_async.Cancel_not_found)
-     | Keeper_msg_async.Unreadable reason ->
-       tool_result_error_data (Keeper_invocation_contract.delegate_cancellation_to_json reference (Keeper_msg_async.Cancel_unreadable reason))
-     | Keeper_msg_async.Rejected rejection ->
-       tool_result_error_data (delegate_access_rejection reference rejection))
+  match operation_reference_arg args with
+  | Error json -> tool_result_error_data json
+  | Ok (keeper_name, operation_id) ->
+    (match
+       Keeper_owner_registry.exact_operation
+         ~base_path:config.base_path
+         ~keeper_name
+         operation_id
+     with
+     | Error error -> owner_command_error_result error
+     | Ok None ->
+       tool_result_error_data
+         (`Assoc
+            [ "error", `String "unknown_operation"
+            ; "message", `String "Keeper chat operation was not found"
+            ])
+     | Ok (Some operation) ->
+       (match operation_is_owned_by ~caller operation with
+        | Error detail ->
+          tool_result_error_data
+            (`Assoc
+               [ "error", `String "store_unavailable"
+               ; "message", `String detail
+               ])
+        | Ok false ->
+          tool_result_error_data
+            (`Assoc
+               [ "error", `String "unknown_operation"
+               ; "message", `String "Keeper chat operation was not found"
+               ])
+        | Ok true ->
+          (match
+             Keeper_owner_registry.cancel_queued_operation
+               ~base_path:config.base_path
+               ~keeper_name
+               operation_id
+           with
+           | Error error -> owner_command_error_result error
+           | Ok operation ->
+             tool_result_ok_data
+               (Keeper_owner.Chat_operation.to_json operation))))
 ;;
 
 let keeper_delegate_list_body ~(config : Workspace.config) ~caller args =
-  let target =
-    match args with
-    | `Assoc [] -> Ok None
-    | `Assoc [ ("target", value) ] ->
-      Keeper_invocation_contract.target_of_json value |> Result.map (fun target -> Some target)
-    | _ ->
-      Error
-        (Keeper_invocation_contract.Invalid_wire_value
-           { field = "delegate_list"; expected = "empty object or typed target" })
-  in
-  match target with
-  | Error error -> run_ref_error error
-  | Ok target ->
-  let keeper_name = Option.map Keeper_invocation_contract.target_name_of_target target in
-  match
-    Keeper_msg_async.list_for_keeper
-      ~base_path:config.base_path
-      ~caller
-      ?keeper_name
-      ()
-  with
-  | Ok entries ->
-    let rec project = function
-      | [] -> Ok []
-      | entry :: rest ->
-        let* json = Keeper_invocation_contract.delegate_entry_to_json entry in
-        let* rest = project rest in
-        Ok (json :: rest)
-    in
-    (match project entries with
-     | Ok json_list -> tool_result_ok_data (`List json_list)
-     | Error error -> run_ref_error error)
-  | Error rejection ->
-    tool_result_error_data (Keeper_msg_async.access_rejection_to_json rejection)
+  match operation_target_arg args with
+  | Error json -> tool_result_error_data json
+  | Ok keeper_name ->
+    (match
+       Keeper_owner_registry.list_queued_operations
+         ~base_path:config.base_path
+         ~keeper_name
+         ~after_sequence:None
+         ~limit:100
+     with
+     | Error error -> owner_command_error_result error
+     | Ok operations ->
+       let rec owned acc = function
+         | [] -> Ok (List.rev acc)
+         | operation :: rest ->
+           (match operation_is_owned_by ~caller operation with
+            | Error detail -> Error detail
+            | Ok false -> owned acc rest
+            | Ok true ->
+              owned
+                (Keeper_owner.Chat_operation.to_json operation :: acc)
+                rest)
+       in
+       (match owned [] operations with
+        | Ok operations -> tool_result_ok_data (`List operations)
+        | Error detail ->
+          tool_result_error_data
+            (`Assoc
+               [ "error", `String "store_unavailable"
+               ; "message", `String detail
+               ])))
 ;;
-
 let complete_keeper_msg_stream_result result =
   if not (tool_result_success result) then result
   else begin
@@ -869,91 +933,38 @@ let complete_keeper_msg_stream_result result =
       (annotate_keeper_json ~runtime_class:"keeper" (Tool_result.data result))
   end
 
-let handle_keeper_msg_stream
+let handle_keeper_msg_stream_admitted
+      ~admission_token
       ?on_text_delta
       ?on_event
+      ?on_tool_result_ready
+      ?approval_gate
       ?continuation_channel
-      ?on_admission_rejected
-      ?on_admitted
       ctx
       message
-  : tool_result
   =
-  let run name =
-    match
-      Keeper_invocation_contract.direct_message_with_keeper_name message name
-    with
-    | Error error ->
-      tool_result_error (Keeper_invocation_contract.request_error_to_string error)
-    | Ok message ->
-      (* Stream turns are synchronous today, but still pin the bus visible at the
-         public surface boundary so later refactors cannot reintroduce a nested
-         fallback lookup in the turn body. *)
-      let event_bus = Event_bus_slots.get_keeper () in
-      let result =
-        Turn.handle_keeper_msg
-          ?on_text_delta
-          ?on_event
-          ?event_bus
-          ?continuation_channel
-          ?on_admission_rejected
-          ?on_admitted
-          ctx
-          message
-      in
-      complete_keeper_msg_stream_result result
+  let raw_name =
+    Keeper_invocation_contract.direct_message_target_name message
   in
-  match resolve_keeper_name ctx message with
-  | Ok name -> run name
-  | Error err ->
-    let raw_name = Keeper_invocation_contract.direct_message_target_name message in
-    (* Preserve typed admission truth after lifecycle teardown removes the
-       metadata row: a shutdown-fenced queued receipt must return to Pending,
-       not become a terminal lookup failure. An open lane still runs the
-       admitted body and surfaces its authoritative metadata error. *)
-    ignore err;
-    run raw_name
-
-let handle_keeper_msg_stream_if_free
+  match
+    Keeper_invocation_contract.direct_message_with_keeper_name message raw_name
+  with
+  | Error error ->
+    tool_result_error (Keeper_invocation_contract.request_error_to_string error)
+  | Ok message ->
+    let event_bus = Event_bus_slots.get_keeper () in
+    Turn.handle_keeper_msg_admitted
+      ~admission_token
       ?on_text_delta
       ?on_event
+      ?on_tool_result_ready
+      ?approval_gate
+      ?event_bus
       ?continuation_channel
       ctx
       message
-  =
-  match resolve_keeper_name ctx message with
-  | Error err ->
-    let raw_name = Keeper_invocation_contract.direct_message_target_name message in
-    (* A connector message already accepted for a live/raw Keeper identity
-       must remain queueable even if metadata resolution is temporarily
-       unavailable. Run the resolution error itself through the same
-       post-lock admission boundary: a held slot, parked waiter, active
-       receipt, or queue read error returns Busy; only an atomically free
-       lane returns the original metadata error. *)
-    Keeper_turn_admission.run_chat_if_free
-      ~base_path:ctx.config.base_path
-      ~keeper_name:raw_name
-      (fun () -> tool_result_error err)
-  | Ok name ->
-    (match Keeper_invocation_contract.direct_message_with_keeper_name message name with
-     | Error error ->
-       `Ran
-         (tool_result_error
-            (Keeper_invocation_contract.request_error_to_string error))
-     | Ok message ->
-       let event_bus = Event_bus_slots.get_keeper () in
-       (match
-          Turn.handle_keeper_msg_if_free
-            ?on_text_delta
-            ?on_event
-            ?event_bus
-            ?continuation_channel
-            ctx
-            message
-        with
-        | `Busy rejection -> `Busy rejection
-        | `Ran result ->
-          `Ran (complete_keeper_msg_stream_result result)))
+    |> complete_keeper_msg_stream_result
+
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let resolve_keeper_meta_config ~(config : Workspace.config) args =
   let name = String.trim (get_string args "name" "") in
@@ -964,9 +975,6 @@ let resolve_keeper_meta_config ~(config : Workspace.config) args =
   match resolved with
   | Some (_resolved_name, meta) -> Ok meta
   | None -> Error (Printf.sprintf "keeper not found: %s" name)
-
-let resolve_keeper_meta ctx args =
-  resolve_keeper_meta_config ~config:ctx.config args
 
 let handle_keeper_down ctx args : tool_result =
   invalidate_keeper_list_cache ();

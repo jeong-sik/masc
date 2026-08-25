@@ -1,0 +1,13 @@
+name = "masc_run_get"
+description = """
+Retrieve the run record and execution plan for a task. \\nIf the task has no \
+run record yet, create an empty run scaffold and return it so resume flow \
+can continue. \\nUse when resuming work on a task, reviewing progress, or \
+preparing a handoff. \\nPair with masc_run_plan to set the plan."""
+additional_properties = false
+
+[[params]]
+name = "task_id"
+type = "string"
+required = true
+description = "Task ID to retrieve"

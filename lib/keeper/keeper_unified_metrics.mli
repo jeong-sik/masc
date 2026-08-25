@@ -28,15 +28,15 @@ type usage_trust = Keeper_usage_trust.t =
 
 val classify_usage_trust :
   usage_reported:bool ->
-  usage:Agent_sdk.Types.api_usage ->
+  usage:Agent_core.Types.api_usage ->
   usage_trust
 (** Classify usage counters without reconstructing concrete provider/model
     identity. *)
 
 val estimate_usage_cost_usd :
-  Agent_sdk.Types.api_usage ->
+  Agent_core.Types.api_usage ->
   float
-(** Return the OAS-reported turn cost verbatim. cost_usd is the provider's authoritative
+(** Return the AGENT_CORE-reported turn cost verbatim. cost_usd is the provider's authoritative
     cost field and is accounted independently of token-count trust (token⊥cost).
     MASC does not estimate provider/model pricing locally. Missing cost uses
     the aggregate identity [0.0]; a reported zero or negative value is not
@@ -135,7 +135,6 @@ val update_metrics_from_result :
   latency_ms:int ->
   observation:Keeper_world_observation.world_observation ->
   ?is_autonomous_turn:bool ->
-  ?update_proactive_rt:bool ->
   Keeper_agent_run.run_result ->
   Keeper_meta_contract.keeper_meta
 
@@ -144,7 +143,7 @@ val update_metrics_from_failure :
   latency_ms:int ->
   observation:Keeper_world_observation.world_observation ->
   reason:string ->
-  ?sdk_error:Agent_sdk.Error.sdk_error ->
+  ?core_error:Agent_core.Error.t ->
   unit ->
   Keeper_meta_contract.keeper_meta
 
@@ -155,7 +154,6 @@ val append_metrics_snapshot :
   result:Keeper_agent_run.run_result ->
   latency_ms:int ->
   turn_cost:float ->
-  turn_generation:int ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   checkpoint_bytes:int ->
   message_count:int ->
@@ -170,6 +168,7 @@ val append_decision_record :
   observation:Keeper_world_observation.world_observation ->
   latency_ms:int ->
   outcome:string ->
+  ?channel:Keeper_world_observation.keeper_cycle_channel ->
   ?degraded_retry_applied:bool ->
   ?degraded_retry_runtime:string ->
   ?fallback_reason:string ->
@@ -182,7 +181,6 @@ val append_decision_record :
 
 val broadcast_lifecycle_events :
   name:string ->
-  turn_generation:int ->
   handoff_json:Yojson.Safe.t option ->
   unit
 
@@ -192,7 +190,7 @@ val broadcast_compaction :
 val has_substantive_tool_calls : string list -> bool
 
 val visible_run_validation :
-  Keeper_agent_run.run_result -> Agent_sdk.Raw_trace.run_validation option
+  Keeper_agent_run.run_result -> Agent_core.Raw_trace.run_validation option
 
 val turn_mode_of_result : Keeper_agent_run.run_result -> turn_mode
 
@@ -205,13 +203,6 @@ val turn_mode_of_json : Yojson.Safe.t -> turn_mode option
 val work_kind_of_turn_mode : turn_mode -> string
 
 val work_kind_of_json : Yojson.Safe.t -> string option
-
-val accountability_evidence_refs :
-  trace_id:string ->
-  turn_number:int ->
-  result:Keeper_agent_run.run_result ->
-  validated_evidence:Agent_sdk.Raw_trace.run_validation option ->
-  string list
 
 val decision_channel_of_observation :
   Keeper_world_observation.world_observation ->

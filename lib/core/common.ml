@@ -64,6 +64,7 @@ type keeper_runtime_store =
   | Keeper_turn_records
   | Keeper_reaction_ledger
   | Keeper_trajectories
+  | Keeper_crash_events
 
 let keeper_runtime_store_dirname = function
   | Keeper_tool_usage -> "tool_usage"
@@ -73,6 +74,7 @@ let keeper_runtime_store_dirname = function
   | Keeper_turn_records -> "turn-records"
   | Keeper_reaction_ledger -> "reaction-ledger"
   | Keeper_trajectories -> "trajectories"
+  | Keeper_crash_events -> "crash-events"
 
 let keeper_runtime_stores =
   [ Keeper_tool_usage
@@ -82,10 +84,23 @@ let keeper_runtime_stores =
   ; Keeper_turn_records
   ; Keeper_reaction_ledger
   ; Keeper_trajectories
+  ; Keeper_crash_events
   ]
 
-let keeper_runtime_store_dirnames =
-  List.map keeper_runtime_store_dirname keeper_runtime_stores
+type keeper_runtime_store_placement =
+  | Keeper_scoped_dated
+  | Keeper_scoped_versioned
+  | Keeper_scoped_rotated
+  | Workspace_scoped
+
+let keeper_runtime_store_placement = function
+  | Keeper_metrics
+  | Keeper_execution_receipts
+  | Keeper_turn_records
+  | Keeper_crash_events -> Keeper_scoped_dated
+  | Keeper_reaction_ledger -> Keeper_scoped_versioned
+  | Keeper_runtime_manifests -> Keeper_scoped_rotated
+  | Keeper_tool_usage | Keeper_trajectories -> Workspace_scoped
 
 let keeper_runtime_store_of_dirname name =
   List.find_opt
@@ -98,15 +113,48 @@ let auth_dir_from_base_path ~base_path =
 let agents_dir_from_base_path ~base_path =
   Filename.concat (auth_dir_from_base_path ~base_path) "agents"
 
-(** Maximum output bytes for tool responses. SSOT for the 64KB cap. *)
+(** Maximum output bytes for tool responses. SSOT for the 64KB cap.
+    Inline-vs-blob threshold only; see [max_process_capture_*_bytes] for the
+    separate ceiling on what the runtime accepts from a subprocess. *)
 let max_tool_output_bytes = 65_536
+
+(** Acceptance ceiling for one captured subprocess stream, split head/tail.
+
+    Head is an [Exec_buffer] head buffer, which grows only as far as the
+    output actually reaches, so a large head budget costs nothing on the
+    common short-output call. Tail is a ring buffer allocated eagerly at
+    [tail_cap], so it is sized to the 256KB already used per keeper by the
+    dashboard retained-stream buffer rather than to the head budget.
+
+    claude-code's comparable ceiling is 64 MiB, but it streams bash output to
+    a file on disk; MASC retains the capture in memory for the turn, so the
+    ceiling here is set lower. 8 MiB still leaves the blob store 128x the
+    64KB inline budget for range reads. *)
+let max_process_capture_head_bytes = 8 * 1024 * 1024
+
+let max_process_capture_tail_bytes = 256 * 1024
 
 (** BUG-016: Truncate large tool responses to prevent MCP transport overload.
     Default max: 64KB. Appends truncation metadata when trimmed. *)
-let truncate_response ?(max_bytes=max_tool_output_bytes) ~total_count response =
-  let len = String.length response in
-  if len <= max_bytes then response
-  else
-    let truncated = String.sub response 0 max_bytes in
-    Printf.sprintf "%s\n\n... [truncated: %d/%d bytes shown, total_count=%d]"
-      truncated max_bytes len total_count
+
+(* One spelling of "this string is going into a path component". It lived in
+   [Workspace_utils_ops], which sits above [masc_auth], so the auth layer built
+   its credential paths by concatenating [agent_name] raw while the workspace
+   layer sanitised the same value. Two answers for one question, and the
+   unsanitised one was the layer holding tokens. *)
+let safe_filename name =
+  let buf = Buffer.create (String.length name * 3) in
+  String.iter
+    (fun c ->
+      let c_lower = Char.lowercase_ascii c in
+      let valid =
+        (c_lower >= 'a' && c_lower <= 'z')
+        || (c_lower >= '0' && c_lower <= '9')
+        || c_lower = '.'
+        || c_lower = '_'
+        || c_lower = '-'
+      in
+      if valid then Buffer.add_char buf c_lower
+      else Printf.bprintf buf "_%02x" (Char.code c))
+    name;
+  Buffer.contents buf

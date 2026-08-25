@@ -78,13 +78,6 @@ val dashboard_goals_tree_json :
     by the [/api/dashboard/goals/tree] route and the
     regression test. *)
 
-val emit_all_goal_attainment_metrics :
-  config:Workspace.config -> unit
-(** Recomputes the goal forest and emits OTLP gauge metrics
-    ([masc_goal_attainment_pct] + [masc_goal_attainment_measured])
-    for every goal.  Safe to call from the background snapshot
-    refresh loop. *)
-
 (** {1 Per-goal detail} *)
 
 val goal_detail_json :
@@ -102,11 +95,4 @@ module For_testing : sig
     config:Workspace.config ->
     Yojson.Safe.t
 
-  val goal_detail_json_with_pending_reader :
-    read_pending:
-      (base_path:string ->
-      (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result) ->
-    config:Workspace.config ->
-    goal_id:string ->
-    (Yojson.Safe.t, string) result
 end

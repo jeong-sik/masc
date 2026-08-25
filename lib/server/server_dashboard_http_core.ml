@@ -26,51 +26,30 @@ include Dashboard_http_helpers
 include Dashboard_http_monitoring
 include Dashboard_http_keeper
 
-let dashboard_request_timeout_s = Server_dashboard_http_core_cache.dashboard_request_timeout_s
 let shell_warmed = Server_dashboard_http_core_cache.shell_warmed
 let shell_warming = Server_dashboard_http_core_cache.shell_warming
 let last_good_shell = Server_dashboard_http_core_cache.last_good_shell
 let last_good_shell_light = Server_dashboard_http_core_cache.last_good_shell_light
 let with_dashboard_timeout = Server_dashboard_http_core_cache.with_dashboard_timeout
-let cache_partition_segment = Server_dashboard_http_core_cache.cache_partition_segment
 let dashboard_cache_key = Server_dashboard_http_core_cache.dashboard_cache_key
 let dashboard_briefing_timeout_s = Server_dashboard_http_core_cache.dashboard_briefing_timeout_s
-let attach_projection_diagnostics = Server_dashboard_http_core_cache.attach_projection_diagnostics
-let projection_diagnostics_json = Server_dashboard_http_core_cache.projection_diagnostics_json
-let with_projection_diagnostics = Server_dashboard_http_core_cache.with_projection_diagnostics
-let initialized_json_opt = Server_dashboard_http_core_cache.initialized_json_opt
 
 
 type operator_snapshot_publication =
   Server_dashboard_http_core_operator.operator_snapshot_publication
 
-let operator_snapshot_broadcast_ref =
-  Server_dashboard_http_core_operator.operator_snapshot_broadcast_ref
 ;;
-let operator_digest_broadcast_ref = Server_dashboard_http_core_operator.operator_digest_broadcast_ref
+
+;;
+
+;;
 let operator_snapshot_cache_diagnostics_json =
   Server_dashboard_http_core_operator.operator_snapshot_cache_diagnostics_json
 ;;
 let operator_digest_cache = Server_dashboard_http_core_operator.operator_digest_cache
-let operator_refresh_interval_s = Server_dashboard_http_core_operator.operator_refresh_interval_s
-let operator_snapshot_extra = Server_dashboard_http_core_operator.operator_snapshot_extra
 let json_assoc_int_opt = Server_dashboard_http_core_json.json_assoc_int_opt
-let projection_diagnostics_fields = Server_dashboard_http_core_json.projection_diagnostics_fields
-let projection_diagnostics_field = Server_dashboard_http_core_json.projection_diagnostics_field
-let operator_generated_at_iso = Server_dashboard_http_core_json.operator_generated_at_iso
-let operator_cache_json = Server_dashboard_http_core_json.operator_cache_json
-
 (* Operator query-JSON + envelope metadata helpers extracted to
    [Server_dashboard_http_core_operator_query] (godfile decomp). *)
-let operator_retention_json = Server_dashboard_http_core_operator_query.operator_retention_json
-let operator_snapshot_query_json = Server_dashboard_http_core_operator_query.operator_snapshot_query_json
-let operator_digest_query_json = Server_dashboard_http_core_operator_query.operator_digest_query_json
-let with_operator_surface_metadata = Server_dashboard_http_core_operator_query.with_operator_surface_metadata
-let with_operator_snapshot_metadata = Server_dashboard_http_core_operator_query.with_operator_snapshot_metadata
-let with_operator_digest_metadata = Server_dashboard_http_core_operator_query.with_operator_digest_metadata
-let operator_snapshot_default_query = Server_dashboard_http_core_operator_query.operator_snapshot_default_query
-let operator_digest_default_query = Server_dashboard_http_core_operator_query.operator_digest_default_query
-
 let start_operator_snapshot_refresh_loop = Server_dashboard_http_core_snapshot_refresh.start_operator_snapshot_refresh_loop
 
 let start_operator_digest_refresh_loop = Server_dashboard_http_core_digest_refresh.start_operator_digest_refresh_loop
@@ -137,7 +116,12 @@ let start_mission_refresh_loop ~state ~sw ~clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"mission" ~interval_s:120.0) with
         timeout_s = mission_refresh_timeout_s
-      ; on_error = Some (mark_cached_surface_error mission_cache)
+      ; on_failure =
+          Some
+            (fun failure ->
+              mark_cached_surface_error_message
+                mission_cache
+                (Proactive_refresh.failure_message failure))
       ; warm_delay_s = 90.0
       }
     ~compute
@@ -166,7 +150,8 @@ let dashboard_briefing_http_json ~state ~sw ~clock request =
            ~clock
            ~proc_mgr:state.Mcp_server.proc_mgr
            ())
-    |> with_projection_diagnostics ~surface:"mission" ~started_at ~extra:[]
+    |> Server_dashboard_http_core_cache.with_projection_diagnostics
+         ~surface:"mission" ~started_at ~extra:[]
   in
   let full_json =
     match actor with
@@ -239,7 +224,6 @@ let dashboard_shell_status_json =
 let dashboard_agent_json = Server_dashboard_http_core_entities.dashboard_agent_json
 let dashboard_message_json = Server_dashboard_http_core_entities.dashboard_message_json
 
-(* dashboard_current_workspace_id removed — namespace retired (#unify-namespace). *)
 
 let dashboard_tasks_safe = Server_dashboard_http_core_entities.dashboard_tasks_safe
 let dashboard_agents_safe = Server_dashboard_http_core_entities.dashboard_agents_safe
@@ -312,20 +296,7 @@ let remember_dashboard_shell_last_good ~light json =
   else Atomic.set last_good_shell json
 ;;
 
-let is_dashboard_cache_timeout_json = function
-  | `Assoc fields ->
-    (match List.assoc_opt "error" fields with
-     | Some (`String ("Compute timeout" | "computation_timeout")) -> true
-     | _ -> false)
-  | _ -> false
-;;
-
 module Shell_projection_trace = Server_dashboard_shell_projection_trace
-
-type shell_projection_timing = Shell_projection_trace.shell_projection_timing =
-  { projection_label : string
-  ; projection_ms : int
-  }
 
 type shell_projection_trace_status =
   Shell_projection_trace.shell_projection_trace_status =
@@ -333,34 +304,10 @@ type shell_projection_trace_status =
   | Shell_trace_finished
   | Shell_trace_failed
 
-type shell_projection_trace = Shell_projection_trace.shell_projection_trace =
-  { trace_light : bool
-  ; trace_started_at : float
-  ; mutable trace_status : shell_projection_trace_status
-  ; mutable trace_active : string list
-  ; mutable trace_completed : shell_projection_timing list
-  ; mutable trace_finished_at : float option
-  }
-
-type shell_projection_trace_snapshot =
-  Shell_projection_trace.shell_projection_trace_snapshot =
-  { snapshot_status : shell_projection_trace_status
-  ; snapshot_light : bool
-  ; snapshot_elapsed_ms : int
-  ; snapshot_active : string list
-  ; snapshot_completed : shell_projection_timing list
-  ; snapshot_finished_at : float option
-  }
-
-let shell_trace_status_string = Shell_projection_trace.status_string
-let shell_projection_timing_top = Shell_projection_trace.timing_top
-let shell_projection_timing_json = Shell_projection_trace.timing_json
-let shell_projection_timing_log = Shell_projection_trace.timing_log
 let shell_projection_trace_start = Shell_projection_trace.start
 let shell_projection_trace_start_projection = Shell_projection_trace.start_projection
 let shell_projection_trace_finish_projection = Shell_projection_trace.finish_projection
 let shell_projection_trace_finish = Shell_projection_trace.finish
-let shell_projection_trace_snapshot = Shell_projection_trace.snapshot
 let shell_projection_trace_diagnostics = Shell_projection_trace.diagnostics
 let shell_projection_trace_log = Shell_projection_trace.log
 
@@ -517,7 +464,7 @@ let dashboard_shell_payload_json
       ; "config_resolution", config_resolution_json
       ; "runtime_resolution", runtime_resolution_json
       ]
-    |> with_projection_diagnostics
+    |> Server_dashboard_http_core_cache.with_projection_diagnostics
          ~surface:"shell"
          ~started_at
          ~extra:
@@ -742,12 +689,11 @@ let dashboard_shell_http_json
        ; "fallback_source", `String fallback_source
        ; "timeout_cache_key", `String cache_key
        ; "timeout_sec", `Float timeout_sec
-       ; "timeout_light", `Bool light
        ]
        @ shell_projection_trace_diagnostics cache_key)
   in
   let startup_shell_bootstrap_pending =
-    let current = Server_startup_state.(!state) in
+    let current = Server_startup_state.snapshot () in
     (not (Atomic.get shell_warmed))
     && current.state_ready
     && Server_startup_state.elapsed_since_start () < dashboard_shell_timeout_s +. startup_grace_period_s
@@ -778,7 +724,7 @@ let dashboard_shell_http_json
         | None -> cache_load ()
         | Some t -> Server_timing.measure t Cache_lookup cache_load
       in
-      if is_dashboard_cache_timeout_json computed
+      if Dashboard_cache.is_timeout_envelope computed
       then timeout_fallback_payload (dashboard_shell_timeout_for ~light)
       else (
         remember_dashboard_shell_last_good ~light computed;

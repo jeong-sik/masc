@@ -23,10 +23,14 @@ export type TrajectoryEntry = {
   result?: string | null
   duration_ms?: number
   error?: string | null
-  cost_usd?: number
-  // Thinking-specific fields
-  content?: string
-  content_length?: number
+  // Metadata-only reasoning fields. Content is always null when withheld.
+  content?: null
+  content_withheld?: boolean
+  observation?: 'withheld'
+  reasoning_kind?: 'thinking' | 'reasoning_details' | 'redacted_thinking'
+  present?: boolean
+  char_count?: number
+  identity?: { source: 'trajectory_block'; block_index: number }
   redacted?: boolean
 }
 
@@ -51,13 +55,8 @@ export function fetchKeeperTrajectory(
   // so omitting the param means "don't include".
   params.set('include_thinking', includeThinking ? 'true' : 'false')
   // Request full output for session trace detail view.
-  // content_max_len=0 → no cap: surface the COMPLETE reasoning text in the
-  // detail view (남김없이). The backend persists thinking untruncated and
-  // treats 0 as "no truncation"; size is intentionally accepted here, this is
-  // the drill-in surface (the timeline list keeps the default preview cap).
   if (fullOutput) {
     params.set('result_max_len', '10000')
-    params.set('content_max_len', '0')
   }
   const qs = params.toString()
   return get<TrajectoryResponse>(

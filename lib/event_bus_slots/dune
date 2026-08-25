@@ -5,4 +5,6 @@
  (public_name masc.event_bus_slots)
  (wrapped false)
  (modules event_bus_slots)
- (libraries agent_sdk))
+ (flags
+  (:standard -w +4 -w +33))
+ (libraries masc.agent_core))

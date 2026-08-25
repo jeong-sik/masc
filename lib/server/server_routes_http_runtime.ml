@@ -39,15 +39,11 @@ let is_http_error_response = function
              | _ -> None)
         | _ -> None
       in
-      let is_parse_or_invalid = function
-        | Mcp_error_code.Parse_error | Invalid_request -> true
-        | _ -> false
-      in
       id_is_null
       && (match code with
           | Some c ->
               (match Mcp_error_code.of_wire_code c with
-               | Some ec -> is_parse_or_invalid ec
+               | Some ec -> Mcp_error_code.allows_null_request_id ec
                | None -> false)
           | None -> false)
   | _ -> false
@@ -57,11 +53,8 @@ let is_http_error_response = function
    (godfile decomp). *)
 
 let server_start_time = Server_routes_http_runtime_health_helpers.server_start_time
-let configured_http_port () =
-  Env_config_core.masc_http_port_int ()
-
-let configured_http_host () =
-  Env_config_core.masc_host ()
+let configured_http_port = Transport_read_model.configured_http_port
+let configured_http_host = Transport_read_model.configured_http_host
 
 let authority_host host =
   match Ipaddr.of_string host with
@@ -160,7 +153,6 @@ let agent_card_json ~request_authority request =
             ("task_backlog", `Bool true);
             ("keeper_runtime", `Bool true);
             ("dashboard", `Bool true);
-            ("graphql_readonly", `Bool true);
           ] );
     ]
 
@@ -296,6 +288,7 @@ let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
       ("schedule_runner", schedule_runner_status_json ());
       ("runtime_startup_degradation",
        Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ()));
+      ("dashboard_surface", Web_dashboard.surface_status_json ());
       ("subsystems", Subsystem_health.to_yojson ());
       ("logs", Log.Ring.summary_json ());
       ("gc", quick_gc_json ());
@@ -312,9 +305,6 @@ include Server_routes_http_runtime_fleet_scan
 (* Fleet-level health field helpers extracted to
    [Server_routes_http_runtime_health_fleet] (godfile decomp). *)
 include Server_routes_http_runtime_health_fleet
-
-let full_health_refresh_timeout_error error =
-  String_util.contains_substring error "refresh_timeout label=full_health_snapshot"
 
 let full_health_component_placeholder ?error ?(component_timed_out = false) ~status
     component =
@@ -348,9 +338,11 @@ let compute_section ~name ?section_timings_ref f =
        | Some ref -> ref := (name, elapsed_ms) :: !ref
        | None -> ());
       let error = Printexc.to_string exn in
-      let timed_out = full_health_refresh_timeout_error error in
-      let status = if timed_out then "timeout" else "error" in
-      full_health_component_placeholder ~error ~component_timed_out:true ~status name
+      full_health_component_placeholder
+        ~error
+        ~component_timed_out:false
+        ~status:"error"
+        name
 
 let assoc_member_opt name = function
   | `Assoc fields -> List.assoc_opt name fields
@@ -370,13 +362,11 @@ let assoc_string_list name json =
       | _ -> None)
   | _ -> []
 
-let health_status_rank = Health_status.rank_string
-
 let max_health_status = Health_status.max_string
 
 let full_health_operator_summary ~keeper_fleet_safety
     ~keeper_identity_drift_json ~publication_recovery_activation_json
-    ~reaction_ledger_json ~turn_admission_json ~board_event_collection_json
+    ~reaction_ledger_json ~keeper_owner_json ~board_event_collection_json
     ~keeper_event_queue_json ~runtime_startup_degradation_json
     ~keeper_config_schema_status ~keeper_config_schema_blocking
     ~keeper_config_schema_terminal_reason ~keeper_config_operator_action_required
@@ -427,7 +417,7 @@ let full_health_operator_summary ~keeper_fleet_safety
     publication_recovery_activation_json
     (assoc_string_opt "reason" publication_recovery_activation_json);
   note_status "keeper_reaction_ledger" reaction_ledger_json None;
-  note_status "keeper_turn_admission" turn_admission_json None;
+  note_status "keeper_owner" keeper_owner_json None;
   note_status "keeper_board_event_collection" board_event_collection_json None;
   note_status "keeper_event_queue" keeper_event_queue_json None;
   note_status "runtime_startup_degradation" runtime_startup_degradation_json
@@ -515,7 +505,6 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
               ("configured_keeper_names", `List []);
               ("materializable_configured_keeper_count", `Int 0);
               ("materializable_configured_keeper_names", `List []);
-              ("persisted_meta_count", `Int 0);
               ("persisted_meta_names", `List []);
               ("configured_without_meta_count", `Int 0);
               ("configured_without_meta_names", `List []);
@@ -556,9 +545,9 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     compute_section ~name:"keeper_reaction_ledger" ?section_timings_ref
       keeper_reaction_ledger_health_json
   in
-  let turn_admission_json =
-    compute_section ~name:"keeper_turn_admission" ?section_timings_ref
-      keeper_turn_admission_health_json
+  let keeper_owner_json =
+    compute_section ~name:"keeper_owner" ?section_timings_ref
+      keeper_owner_health_json
   in
   let board_event_collection_json =
     compute_section ~name:"keeper_board_event_collection" ?section_timings_ref
@@ -621,7 +610,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
       ~keeper_identity_drift_json
       ~publication_recovery_activation_json
       ~reaction_ledger_json
-      ~turn_admission_json
+      ~keeper_owner_json
       ~board_event_collection_json
       ~keeper_event_queue_json
       ~runtime_startup_degradation_json
@@ -652,6 +641,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ("sse_clients", `Int (Sse.client_count ()));
     ("startup", Server_startup_state.to_yojson ());
     ("runtime_startup_degradation", runtime_startup_degradation_json);
+    ("dashboard_surface", Web_dashboard.surface_status_json ());
     ("subsystems", Subsystem_health.to_yojson ());
     (* Server log visibility belongs on the first health probe too.  Keep the
        payload cheap and redacted: only ring counters, latest metadata, and
@@ -676,9 +666,13 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ("keeper_identity_drift", keeper_identity_drift_json);
     ("publication_recovery_activation", publication_recovery_activation_json);
     ("keeper_reaction_ledger", reaction_ledger_json);
-    ("keeper_turn_admission", turn_admission_json);
+    ("keeper_owner", keeper_owner_json);
     ("keeper_board_event_collection", board_event_collection_json);
     ("keeper_event_queue", keeper_event_queue_json);
+    ( "keeper_terminal_effect_policy"
+    , Keeper_terminal_effect_policy.matrix_to_yojson () );
+    ( "keeper_observability_artifacts"
+    , Keeper_observability_artifact_registry.to_yojson () );
     (* Paused-keeper visibility: a keeper with [meta.paused = true] does not
        run turns and may no longer have a live registry entry. Operators still
        need a durable count and the typed pause cause. *)
@@ -721,7 +715,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
 (* [stale_since_ts] records the wall-clock time of the FIRST refresh
    failure since the last successful refresh.  It is preserved across
    subsequent consecutive failures (never overwritten — see
-   [mark_full_health_snapshot_error]) and cleared on the next
+   [mark_full_health_snapshot_failure]) and cleared on the next
    successful [store_full_health_snapshot].  This lets downstream
    consumers compute "how long has the snapshot been stale?" without
    relying on the per-failure [computed_at] timestamp, which under
@@ -731,7 +725,7 @@ type full_health_snapshot = {
   fields : (string * Yojson.Safe.t) list;
   computed_at : float;
   duration_ms : int;
-  error : string option;
+  failure : Proactive_refresh.failure option;
   stale_since_ts : float option;
   last_good_available : bool;
   section_timings : (string * int) list;
@@ -745,7 +739,7 @@ let full_health_refresh_requested = ref false
 (* Consecutive [/health?full=1] refresh failures (timeouts or
    exceptions).  Reset to 0 on every successful
    [store_full_health_snapshot]; incremented inside
-   [mark_full_health_snapshot_error].  Guarded by
+   [mark_full_health_snapshot_failure].  Guarded by
    [full_health_snapshot_mu] like every other piece of refresh
    bookkeeping. *)
 let full_health_consecutive_failures = ref 0
@@ -782,9 +776,11 @@ let full_health_cached_field_names =
     "keeper_identity_drift";
     "publication_recovery_activation";
     "keeper_reaction_ledger";
-    "keeper_turn_admission";
+    "keeper_owner";
     "keeper_board_event_collection";
     "keeper_event_queue";
+    "keeper_terminal_effect_policy";
+    "keeper_observability_artifacts";
     "paused_keepers";
     "keeper_config_error_count";
     "keeper_config_errors";
@@ -835,7 +831,6 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
           ("configured_keeper_names", `List []);
           ("materializable_configured_keeper_count", `Int 0);
           ("materializable_configured_keeper_names", `List []);
-          ("persisted_meta_count", `Int 0);
           ("persisted_meta_names", `List []);
           ("configured_without_meta_count", `Int 0);
           ("configured_without_meta_names", `List []);
@@ -853,49 +848,66 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ( "keeper_reaction_ledger",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "keeper_reaction_ledger" );
-    ( "keeper_turn_admission",
+    ( "keeper_owner",
       full_health_component_placeholder ?error ~component_timed_out ~status
-        "keeper_turn_admission" );
+        "keeper_owner" );
     ( "keeper_board_event_collection",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "keeper_board_event_collection" );
     ( "keeper_event_queue",
       `Assoc
-        [ ("schema", `String "masc.keeper_event_queue.fleet_summary.v3")
+        [ ("schema", `String "masc.keeper_event_queue.fleet_summary.v4")
         ; ("status", `String status)
         ; ("operator_action_required", `Bool false)
+        ; ("status_reasons", `List [])
+        ; ("backlog_clean", `Bool false)
+        ; ( "storage_integrity"
+          , `Assoc
+              [ ( "schema"
+                , `String "masc.keeper_event_queue.storage_integrity.v1" )
+              ; ("status", `String status)
+              ; ("counts_complete", `Bool false)
+              ; ("read_error_count", `Int 0)
+              ; ("transition_outbox_count", `Int 0)
+              ; ("operator_action_required", `Bool false)
+              ] )
+        ; ( "work_liveness"
+          , `Assoc
+              [ ("schema", `String "masc.keeper_event_queue.work_liveness.v1")
+              ; ("status", `String status)
+              ; ("state", `String "unknown")
+              ; ("runnable_backlog_count", `Int 0)
+              ; ("runnable_oldest_age_seconds", `Null)
+              ; ( "stale_after_seconds"
+                , `Float (Env_config.KeeperHealth.durable_queue_stale_sec ()) )
+              ; ("operator_action_required", `Bool false)
+              ] )
         ; ("keeper_count", `Int 0)
         ; ("keeper_names", `List [])
         ; ("pending_count", `Int 0)
         ; ("total_count", `Int 0)
         ; ("oldest_arrived_at_unix", `Null)
         ; ("oldest_age_seconds", `Null)
-        ; ("runnable_pending_count", `Int 0)
         ; ("runnable_backlog_count", `Int 0)
         ; ("runnable_oldest_arrived_at_unix", `Null)
         ; ("runnable_oldest_age_seconds", `Null)
         ; ("runnable_by_keeper", `List [])
-        ; ("recoverable_pending_count", `Int 0)
         ; ("recoverable_backlog_count", `Int 0)
         ; ("recoverable_oldest_arrived_at_unix", `Null)
         ; ("recoverable_oldest_age_seconds", `Null)
         ; ("recoverable_by_keeper", `List [])
-        ; ("retained_disabled_pending_count", `Int 0)
         ; ("retained_disabled_backlog_count", `Int 0)
         ; ("retained_disabled_oldest_arrived_at_unix", `Null)
         ; ("retained_disabled_oldest_age_seconds", `Null)
         ; ("retained_disabled_by_keeper", `List [])
-        ; ("paused_dead_pending_count", `Int 0)
         ; ("paused_dead_backlog_count", `Int 0)
         ; ("paused_dead_oldest_arrived_at_unix", `Null)
         ; ("paused_dead_oldest_age_seconds", `Null)
         ; ("paused_dead_by_keeper", `List [])
-        ; ("shutdown_fenced_pending_count", `Int 0)
         ; ("shutdown_fenced_backlog_count", `Int 0)
         ; ("shutdown_fenced_oldest_arrived_at_unix", `Null)
         ; ("shutdown_fenced_oldest_age_seconds", `Null)
         ; ("shutdown_fenced_by_keeper", `List [])
-        ; ("unclassified_pending_count", `Int 0)
         ; ("unclassified_count", `Int 0)
         ; ("unclassified_oldest_arrived_at_unix", `Null)
         ; ("unclassified_oldest_age_seconds", `Null)
@@ -906,6 +918,10 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
         ; ("keepers", `List [])
         ; ("component_timed_out", `Bool component_timed_out)
         ] );
+    ( "keeper_terminal_effect_policy"
+    , Keeper_terminal_effect_policy.matrix_to_yojson () );
+    ( "keeper_observability_artifacts"
+    , Keeper_observability_artifact_registry.to_yojson () );
     ( "paused_keepers",
       `Assoc
         [
@@ -967,7 +983,7 @@ let compute_full_health_snapshot ?(listener = "http/1.1") ~request_authority
       fields;
       computed_at = finished_at;
       duration_ms = duration_ms ~started_at ~finished_at;
-      error = None;
+      failure = None;
       stale_since_ts = None;
       last_good_available = true;
       section_timings = List.rev !section_timings_ref;
@@ -976,12 +992,13 @@ let compute_full_health_snapshot ?(listener = "http/1.1") ~request_authority
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
       let finished_at = Unix.gettimeofday () in
-      let error = Printexc.to_string exn in
+      let failure = Proactive_refresh.Raised exn in
+      let error = Proactive_refresh.failure_message failure in
       {
         fields = full_health_placeholder_fields ~error ~status:"error" ();
         computed_at = finished_at;
         duration_ms = duration_ms ~started_at ~finished_at;
-        error = Some error;
+        failure = Some failure;
         stale_since_ts = Some finished_at;
         last_good_available = false;
         section_timings = List.rev !section_timings_ref;
@@ -995,20 +1012,24 @@ let store_full_health_snapshot snapshot =
       full_health_refresh_requested := false;
       (* Successful refresh — clear consecutive-failure counter so the
          critical alarm only re-fires after another N successive
-         failures.  A snapshot is "successful" iff [error] is None;
+         failures.  A snapshot is "successful" iff [failure] is None;
          the inline error path in [compute_full_health_snapshot]
          routes through here too, so guard on the field. *)
-      match snapshot.error with
+      match snapshot.failure with
       | None -> full_health_consecutive_failures := 0
       | Some _ -> ())
 
-let mark_full_health_snapshot_error exn =
+let mark_full_health_snapshot_failure failure =
   let now = Unix.gettimeofday () in
-  let error = Printexc.to_string exn in
-  let timed_out = full_health_refresh_timeout_error error in
+  let error = Proactive_refresh.failure_message failure in
+  let timed_out =
+    match failure with
+    | Proactive_refresh.Timed_out _ -> true
+    | Proactive_refresh.Raised _ -> false
+  in
   with_full_health_snapshot_lock (fun () ->
       (* Partial degradation: preserve the last successful snapshot's
-         per-component [fields] and overwrite only the [error] /
+         per-component [fields] and overwrite only the [failure] /
          [stale_since_ts] / refresh-bookkeeping signals.  If we have
          no prior snapshot (warm path on cold boot), fall back to the
          all-error placeholder so the field set stays well-typed. *)
@@ -1061,7 +1082,7 @@ let mark_full_health_snapshot_error exn =
             fields = preserved_fields;
             computed_at = preserved_computed_at;
             duration_ms = preserved_duration_ms;
-            error = Some error;
+            failure = Some failure;
             stale_since_ts;
             last_good_available;
             section_timings = preserved_section_timings;
@@ -1104,15 +1125,13 @@ let full_health_snapshot_stale_reason ~now snapshot =
   match snapshot with
   | None -> None
   | Some snapshot ->
-      (match snapshot.error with
-       | Some error
-         when snapshot.last_good_available
-              && full_health_refresh_timeout_error error ->
+      (match snapshot.failure with
+       | Some (Proactive_refresh.Timed_out _) when snapshot.last_good_available ->
            Some "last_good_refresh_timeout"
-       | Some _ when snapshot.last_good_available -> Some "last_good_refresh_error"
-       | Some error when full_health_refresh_timeout_error error ->
-           Some "refresh_timeout"
-       | Some _ -> Some "refresh_error"
+       | Some (Proactive_refresh.Raised _) when snapshot.last_good_available ->
+           Some "last_good_refresh_error"
+       | Some (Proactive_refresh.Timed_out _) -> Some "refresh_timeout"
+       | Some (Proactive_refresh.Raised _) -> Some "refresh_error"
        | None when snapshot_is_stale ~now snapshot -> Some "ttl_expired"
        | None -> None)
 
@@ -1140,7 +1159,7 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
         now -. started_at > full_health_refresh_timeout_sec
     | _ ->
         (match snapshot with
-         | Some { error = Some error; _ } -> full_health_refresh_timeout_error error
+         | Some { failure = Some (Proactive_refresh.Timed_out _); _ } -> true
          | _ -> false)
   in
   let snapshot_age_ms, computed_at, duration_ms, error, stale_since_ts, status =
@@ -1148,10 +1167,12 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
     | None -> (`Null, `Null, `Null, `Null, `Null, "warming")
     | Some snapshot ->
         let status =
-          match snapshot.error with
-          | Some _ when snapshot.last_good_available -> "stale"
-          | Some error when full_health_refresh_timeout_error error -> "timeout"
-          | Some _ -> "error"
+          match snapshot.failure with
+          | Some (Proactive_refresh.Timed_out _ | Proactive_refresh.Raised _)
+            when snapshot.last_good_available ->
+            "stale"
+          | Some (Proactive_refresh.Timed_out _) -> "timeout"
+          | Some (Proactive_refresh.Raised _) -> "error"
           | None when snapshot_is_stale ~now snapshot -> "stale"
           | None -> "ready"
         in
@@ -1163,7 +1184,9 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
         ( `Int (duration_ms ~started_at:snapshot.computed_at ~finished_at:now),
           `Float snapshot.computed_at,
           `Int snapshot.duration_ms,
-          (Json_util.string_opt_to_json snapshot.error),
+          (match snapshot.failure with
+           | Some failure -> `String (Proactive_refresh.failure_message failure)
+           | None -> `Null),
           stale_since_ts_json,
           status )
   in
@@ -1264,7 +1287,7 @@ let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
            ~interval_s:full_health_refresh_interval_sec)
         with
         timeout_s = full_health_refresh_timeout_sec;
-        on_error = Some mark_full_health_snapshot_error;
+        on_failure = Some mark_full_health_snapshot_failure;
         warm_delay_s = 0.5;
         warn_first_failure = false;
       }
@@ -1296,7 +1319,7 @@ module For_testing = struct
       ~request_authority request =
     refresh_full_health_snapshot_sync ~listener ~request_authority request
 
-  let mark_full_health_snapshot_error = mark_full_health_snapshot_error
+  let mark_full_health_snapshot_failure = mark_full_health_snapshot_failure
 
   let full_health_refresh_timing () =
     ( full_health_refresh_interval_sec,
@@ -1335,7 +1358,7 @@ let liveness_handler _request reqd =
 
 (** Readiness probe: responds 200 only when server_state is initialized. *)
 let readiness_handler _request reqd =
-  let current = Server_startup_state.(!state) in
+  let current = Server_startup_state.snapshot () in
   if current.state_ready then
     Http.Response.json_value
       (`Assoc
@@ -1354,7 +1377,7 @@ let readiness_handler _request reqd =
          ])
       reqd
 
-let board_post_detail_json ~include_moderation ~blind_votes ~config ~voter
+let board_post_detail_json ~config ~voter
     ~reaction_actor ~response_format ~post_id =
   match Board_dispatch.get_post ~post_id with
   | Error err ->
@@ -1390,19 +1413,16 @@ let board_post_detail_json ~include_moderation ~blind_votes ~config ~voter
       in
       let reactions_for = board_reactions_lookup reaction_rows in
       let reactions = reactions_for (Board.Reaction_post, post_id) in
-      let contributor_quality =
-        board_contributor_quality_lookup ?config () author
-      in
       let post_json =
-        board_post_dashboard_json ~include_moderation ~blind_votes ?current_vote
-          ?contributor_quality ~reactions ~author_karma post
+        board_post_dashboard_json ?current_vote
+          ~reactions ~author_karma post
       in
       let comments_json =
         `List (List.map (fun (comment : Board.comment) ->
           let comment_id = Board.Comment_id.to_string comment.id in
           let current_vote = board_current_vote_for_comment ~voter ~comment_id in
           let reactions = reactions_for (Board.Reaction_comment, comment_id) in
-          board_comment_dashboard_json ~include_moderation ~blind_votes
+          board_comment_dashboard_json
             ?current_vote ~reactions comment
         ) comments)
       in

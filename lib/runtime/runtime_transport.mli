@@ -1,4 +1,4 @@
-(** Runtime_transport — Transport and tool-lane helpers for OAS worker exec.
+(** Runtime_transport — Transport and tool-lane helpers for AGENT_CORE worker exec.
 
     Keeps provider label resolution and per-call CLI transport construction
     separate from the build/run orchestration in {!Runtime_agent}. *)
@@ -10,9 +10,9 @@ type label_resolution_error =
 (** Render a label-resolution error for log/diagnostic surfaces. *)
 val label_resolution_error_to_string : label_resolution_error -> string
 
-(** Lift a label-resolution error into the OAS SDK error envelope. *)
-val label_resolution_error_to_sdk_error :
-  label_resolution_error -> Agent_sdk.Error.sdk_error
+(** Lift a label-resolution error into the AGENT_CORE agent-core error envelope. *)
+val label_resolution_error_to_core_error :
+  label_resolution_error -> Agent_core.Error.t
 
 (** Resolve a model label string to a provider config via the MASC runtime
     parser.  Explicit labels never silently fall through to discovery-only
@@ -20,12 +20,12 @@ val label_resolution_error_to_sdk_error :
 val resolve_provider_config_of_label :
   string -> (Llm_provider.Provider_config.t, label_resolution_error) result
 
-(** Construct an [Agent_sdk.Error.InvalidConfig] with the supplied [field] name and
+(** Construct an [Agent_core.Error.InvalidConfig] with the supplied [field] name and
     [detail] text. *)
-val invalid_runtime_config : string -> string -> Agent_sdk.Error.sdk_error
+val invalid_runtime_config : string -> string -> Agent_core.Error.t
 
-(** OAS capability snapshot for a provider config.  Alias for
-    {!Provider_tool_support.oas_capabilities_of_config}. *)
+(** AGENT_CORE capability snapshot for a provider config.  Alias for
+    {!Provider_tool_support.agent_core_capabilities_of_config}. *)
 val provider_caps_of_config :
   Llm_provider.Provider_config.t -> Llm_provider.Capabilities.capabilities
 

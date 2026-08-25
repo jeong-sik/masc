@@ -1,0 +1,36 @@
+module Local_transport = struct
+  let post () = ()
+end
+
+module Local_alias = Local_transport
+module Trace = Exact_output_provider_trace
+module type Local_transport_signature = sig
+  val post : unit -> unit
+end
+
+module Local_constrained : Local_transport_signature = Local_transport
+include Local_transport
+
+let local_post = Local_alias.post
+let exercise_local_alias () = local_post ()
+let constrained_local_post = (Local_constrained.post : unit -> unit)
+let exercise_constrained_local_alias () = constrained_local_post ()
+
+let post_sync_once_after_commit dispatch_intent =
+  let current = make_connection () in
+  if not (Atomic.compare_and_set dispatch_intent.dispatch_started false true)
+  then invalid_arg "already started";
+  dispatch_intent.mark_dispatch_started ();
+  let response = Cohttp_eio.Client.post () in
+  current, response
+;;
+
+let post_sync_once dispatch_intent =
+  ignore (Http_client.resolve_explicit_deadline ());
+  ignore (Http_client.resolve_explicit_deadline ());
+  ignore (validate_uri ());
+  ignore (validate_headers_and_body ());
+  ignore (Atomic.compare_and_set dispatch_intent.committed false true);
+  ignore (dispatch_intent.commit_fence ());
+  post_sync_once_after_commit dispatch_intent
+;;

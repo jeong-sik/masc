@@ -90,7 +90,7 @@ vi.mock('./board-state', () => ({
   visibilityBadgeColor: () => '',
   postVisibilityAuditLabel: (post: any) => {
     const visibility = post.visibility === 'internal' ? '내부' : '공개'
-    const score = post.vote_blind ? '점수 투표 후 공개' : `점수 ${post.votes ?? 0}`
+    const score = `점수 ${post.votes ?? 0}`
     const updated = post.updated_at !== post.created_at ? '최근 갱신됨' : '원본 작성 시각 기준'
     return `표시 중 · ${visibility} · 댓글 ${post.comment_count ?? 0}개 · ${score} · ${updated}`
   },
@@ -288,46 +288,6 @@ describe('CommentThread', () => {
 
     expect(voteComment).toHaveBeenCalledWith('c1', 'up')
     expect(screen.getByText('4')).toBeInTheDocument()
-  })
-
-  it('renders comment moderation projection badges', () => {
-    const comments = [
-      {
-        id: 'c1',
-        post_id: 'post-1',
-        parent_id: null,
-        author: 'agent',
-        content: 'review me',
-        created_at: '2026-04-02T00:00:00Z',
-        report_count: 1,
-        moderation_status: 'hidden',
-      },
-    ] as any
-
-    render(h(CommentThread, { comments, postId: 'post-1' }))
-
-    expect(screen.getByLabelText('댓글 moderation 숨김 1건')).toHaveTextContent('숨김 1')
-  })
-
-  it('renders vote-blind comment scores as hidden until voting', () => {
-    const comments = [
-      {
-        id: 'c1',
-        post_id: 'post-1',
-        parent_id: null,
-        author: 'agent',
-        content: 'review me',
-        created_at: '2026-04-02T00:00:00Z',
-        votes: null,
-        vote_balance: null,
-        vote_blind: true,
-        vote_blind_reason: 'vote_before_score',
-      },
-    ] as any
-
-    render(h(CommentThread, { comments, postId: 'post-1' }))
-
-    expect(screen.getByLabelText('댓글 점수 투표 후 공개')).toHaveTextContent('투표 후 공개')
   })
 
   it('marks the current comment vote as pressed', () => {
@@ -535,8 +495,6 @@ describe('PostDetail', () => {
       comment_count: 0,
       post_kind: 'direct',
       classification_reason: 'Direct board post without automation provenance.',
-      report_count: 1,
-      moderation_status: 'approved',
       comments: [],
     } as any
 
@@ -545,7 +503,6 @@ describe('PostDetail', () => {
     expect(screen.getByText(/분류 근거:/)).toBeInTheDocument()
     expect(screen.getByText(/Direct board post without automation provenance/)).toBeInTheDocument()
     expect(screen.getByText('직접')).toBeInTheDocument()
-    expect(screen.getByLabelText('게시글 moderation 승인됨 1건')).toHaveTextContent('승인됨 1')
   })
 
   it('marks the current post vote as pressed', async () => {
@@ -577,29 +534,6 @@ describe('PostDetail', () => {
     await waitFor(() => {
       expect(votePost).toHaveBeenCalledWith('post-1', 'up')
     })
-  })
-
-  it('renders vote-blind post scores as hidden until voting', () => {
-    const post = {
-      id: 'post-1',
-      author: 'sleepers',
-      title: 'Post',
-      body: 'Body',
-      content: 'Body',
-      created_at: '2026-04-02T00:00:00Z',
-      updated_at: '2026-04-02T00:00:00Z',
-      votes: null,
-      vote_balance: null,
-      vote_blind: true,
-      vote_blind_reason: 'vote_before_score',
-      comment_count: 0,
-      post_kind: 'direct',
-      comments: [],
-    } as any
-
-    render(h(PostDetail, { post }))
-
-    expect(screen.getByLabelText('게시글 점수 투표 후 공개')).toHaveTextContent('투표 후 공개')
   })
 
   it('renders permalink, trackback, context inference, and X share actions on the full post detail route', async () => {
@@ -654,9 +588,8 @@ describe('PostDetail', () => {
       content: 'Body',
       created_at: '2026-04-02T00:00:00Z',
       updated_at: '2026-04-02T01:00:00Z',
-      votes: null,
-      vote_balance: null,
-      vote_blind: true,
+      votes: 2,
+      vote_balance: 2,
       comment_count: 5,
       visibility: 'internal',
       post_kind: 'direct',
@@ -666,7 +599,7 @@ describe('PostDetail', () => {
     render(h(PostDetail, { post }))
 
     const audit = screen.getByLabelText(/게시글 표시 감사:/)
-    expect(audit).toHaveTextContent('표시 감사: 표시 중 · 내부 · 댓글 5개 · 점수 투표 후 공개 · 최근 갱신됨')
+    expect(audit).toHaveTextContent('표시 감사: 표시 중 · 내부 · 댓글 5개 · 점수 2 · 최근 갱신됨')
     expect(audit).toHaveTextContent('목록 정렬/필터에 따라 위치가 바뀔 수 있습니다.')
   })
 
@@ -697,7 +630,7 @@ describe('PostDetail', () => {
           {
             model: 'ollama_cloud.minimax-m3',
             status: 'failed',
-            reason: '(Fusion_types.Provider_error\n   "Provider \'unknown\' timeout phase=http_operation: HTTP operation exceeded wall-clock timeout")',
+            reason: "Provider 'unknown' timeout phase=http_operation: HTTP operation exceeded wall-clock timeout",
           },
         ],
         judge: {
@@ -723,7 +656,6 @@ describe('PostDetail', () => {
     expect(evidence).toHaveTextContent('Should we ship the fusion board renderer?')
     expect(evidence).toHaveTextContent('Panel one answer')
     expect(evidence).toHaveTextContent("Provider 'ollama_cloud.minimax-m3' timeout phase=http_operation")
-    expect(evidence).not.toHaveTextContent('Fusion_types.Provider_error')
     expect(evidence).not.toHaveTextContent("Provider 'unknown'")
     expect(evidence).toHaveTextContent('**[judge]** synthesis')
     expect(evidence).toHaveTextContent('Consensus')
@@ -812,7 +744,6 @@ describe('PostDetail', () => {
       votes: 0,
       comment_count: 0,
       post_kind: 'direct',
-      moderation_status: 'none',
       origin: { turn_ref: 'trace-x#5', source: 'dashboard', fusion_run_id: null },
       comments: [],
     } as any
@@ -843,7 +774,6 @@ describe('PostDetail', () => {
       votes: 0,
       comment_count: 0,
       post_kind: 'direct',
-      moderation_status: 'none',
       // A fusion-origin post carries fusion_run_id but no turn_ref → no affordance.
       origin: { turn_ref: null, source: 'fusion', fusion_run_id: 'fus-1' },
       comments: [],

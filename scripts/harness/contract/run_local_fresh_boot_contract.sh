@@ -203,10 +203,8 @@ echo "[run-local-smoke] log=${LOG_FILE}"
 env \
   -u MASC_BASE_PATH \
   -u MASC_CONFIG_DIR \
-  -u MASC_PERSONAS_DIR \
   -u MASC_HOST \
   -u MASC_PORT \
-  -u MASC_PUBLIC_TOOLS_EXTRA \
   bash "$RUN_LOCAL_SCRIPT" --target-dir "$BASE_PATH" --host 127.0.0.1 --port "$PORT" \
   --bootstrap-only >"$LOG_FILE" 2>&1
 
@@ -214,10 +212,8 @@ env \
   env \
     -u MASC_BASE_PATH \
     -u MASC_CONFIG_DIR \
-    -u MASC_PERSONAS_DIR \
     -u MASC_HOST \
     -u MASC_PORT \
-    -u MASC_PUBLIC_TOOLS_EXTRA \
     MASC_KEEPER_BOOTSTRAP_ENABLED=0 \
     bash "$RUN_LOCAL_SCRIPT" --target-dir "$BASE_PATH" --host 127.0.0.1 --port "$PORT"
 ) >"$LOG_FILE" 2>&1 &

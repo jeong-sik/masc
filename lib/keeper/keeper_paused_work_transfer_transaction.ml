@@ -1,8 +1,6 @@
 type request =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
-  ; target_generation : int
   ; continuation_binding : Keeper_paused_work_disposition_receipt.continuation_binding
   ; operator_operation_id : string
   }
@@ -13,7 +11,8 @@ type projection_stage =
 
 type failure =
   | Invalid_request of string
-  | Admission_busy of Keeper_turn_admission.autonomous_block
+  | Admission_busy of Keeper_owner.autonomous_block
+  | Owner_unavailable of string
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
   | Receipt_lock_failed of string
   | Receipt_read_failed of string
@@ -25,17 +24,8 @@ type failure =
       }
   | Durable_meta_missing of string
   | Source_owner_not_paused
-  | Source_owner_dead_tombstone
-  | Source_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Source_owner_identity_changed
   | Target_owner_not_active
-  | Target_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Target_owner_identity_changed
   | Continuation_binding_mismatch
   | Source_queue_validation_failed of string
@@ -81,8 +71,9 @@ let failure_to_string = function
   | Invalid_request detail -> "invalid Transfer_owner request: " ^ detail
   | Admission_busy block ->
     Printf.sprintf
-      "keeper_turn_admission_busy: operation=transfer_pending %s"
-      (Keeper_turn_admission.autonomous_block_to_string block)
+      "keeper_owner_busy: operation=transfer_pending %s"
+      (Keeper_owner.autonomous_block_to_string block)
+  | Owner_unavailable detail -> "Transfer_owner Keeper owner unavailable: " ^ detail
   | Reservation_conflict owner ->
     "Transfer_owner lifecycle reservation conflict: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner
@@ -90,9 +81,8 @@ let failure_to_string = function
   | Receipt_read_failed detail -> "Transfer_owner receipt read failed: " ^ detail
   | Receipt_conflict receipt ->
     Printf.sprintf
-      "Transfer_owner operation ID conflicts with keeper=%s generation=%d requested_at=%.17g"
+      "Transfer_owner operation ID conflicts with keeper=%s requested_at=%.17g"
       receipt.keeper_name
-      receipt.expected_generation
       receipt.requested_at
   | Receipt_write_failed detail -> "Transfer_owner receipt write failed: " ^ detail
   | Durable_meta_read_failed { keeper_name; detail } ->
@@ -100,21 +90,9 @@ let failure_to_string = function
   | Durable_meta_missing keeper_name ->
     "Transfer_owner durable Keeper metadata is missing: " ^ keeper_name
   | Source_owner_not_paused -> "Transfer_owner source Keeper must be paused"
-  | Source_owner_dead_tombstone ->
-    "Transfer_owner cannot use a Dead source tombstone"
-  | Source_owner_nonce_changed { expected; actual } ->
-    Printf.sprintf
-      "Transfer_owner source generation changed: expected %d, actual %d"
-      expected
-      actual
   | Source_owner_identity_changed ->
     "Transfer_owner source trace identity changed"
   | Target_owner_not_active -> "Transfer_owner target Keeper must be active"
-  | Target_owner_nonce_changed { expected; actual } ->
-    Printf.sprintf
-      "Transfer_owner target generation changed: expected %d, actual %d"
-      expected
-      actual
   | Target_owner_identity_changed ->
     "Transfer_owner target trace identity changed"
   | Continuation_binding_mismatch ->
@@ -153,10 +131,6 @@ let validate_request ~from_keeper ~to_keeper request =
   then Error "target Keeper must not be empty"
   else if String.equal from_keeper to_keeper
   then Error "source and target Keepers must differ"
-  else if request.owner_nonce < 0
-  then Error "source owner generation must not be negative"
-  else if request.target_generation < 0
-  then Error "target owner generation must not be negative"
   else if Int64.compare request.source_incarnation 0L < 0
   then Error "source incarnation must not be negative"
   else if String.equal (String.trim request.source.post_id) ""
@@ -185,31 +159,17 @@ let validate_source_owner request (meta : Keeper_meta_contract.keeper_meta) =
       ~latched_reason:meta.latched_reason
   with
   | Keeper_lifecycle_admission.Active -> Error Source_owner_not_paused
-  | Keeper_lifecycle_admission.Dead_tombstone -> Error Source_owner_dead_tombstone
-  | Keeper_lifecycle_admission.Paused _ ->
-    if Int.equal meta.runtime.nonce request.owner_nonce
-    then Ok meta
-    else
-      Error
-        (Source_owner_nonce_changed
-           { expected = request.owner_nonce; actual = meta.runtime.nonce })
+  | Keeper_lifecycle_admission.Paused _ -> Ok meta
 ;;
 
 let validate_target_owner request (meta : Keeper_meta_contract.keeper_meta) =
-  if not (Int.equal meta.runtime.nonce request.target_generation)
-  then
-    Error
-      (Target_owner_nonce_changed
-         { expected = request.target_generation; actual = meta.runtime.nonce })
-  else
-    match
+  match
       Keeper_lifecycle_admission.state
         ~paused:meta.paused
         ~latched_reason:meta.latched_reason
     with
     | Keeper_lifecycle_admission.Active -> Ok meta
-    | Keeper_lifecycle_admission.Paused _
-    | Keeper_lifecycle_admission.Dead_tombstone -> Error Target_owner_not_active
+    | Keeper_lifecycle_admission.Paused _ -> Error Target_owner_not_active
 ;;
 
 let validate_source_queue config ~from_keeper request =
@@ -246,12 +206,10 @@ let receipt_matches_request ~from_keeper ~to_keeper request receipt =
   | Error _ -> false
   | Ok transfer ->
     String.equal receipt.keeper_name from_keeper
-    && Int.equal receipt.expected_generation request.owner_nonce
-    && String.equal receipt.operator_operation_id request.operator_operation_id
+      && String.equal receipt.operator_operation_id request.operator_operation_id
     && String.equal transfer.from_keeper from_keeper
     && String.equal transfer.to_keeper to_keeper
-    && Int.equal transfer.target_generation request.target_generation
-    && transfer.source = request.source
+      && transfer.source = request.source
     && Int64.equal transfer.source_incarnation request.source_incarnation
     && transfer.continuation_binding = request.continuation_binding
 ;;
@@ -266,7 +224,6 @@ let create_receipt config ~from_keeper ~to_keeper request =
     { from_keeper
     ; to_keeper
     ; target_trace_id = target_meta.runtime.trace_id
-    ; target_generation = request.target_generation
     ; source = request.source
     ; source_incarnation = request.source_incarnation
     ; continuation_binding = request.continuation_binding
@@ -275,29 +232,27 @@ let create_receipt config ~from_keeper ~to_keeper request =
   Ok
     ({ keeper_name = from_keeper
      ; expected_trace_id = source_meta.runtime.trace_id
-     ; expected_generation = request.owner_nonce
-     ; operator_operation_id = request.operator_operation_id
+      ; operator_operation_id = request.operator_operation_id
      ; requested_at = Time_compat.now ()
      ; operation = Keeper_paused_work_disposition_receipt.Transfer_owner transfer
      }
      : Keeper_paused_work_disposition_receipt.t)
 ;;
 
-let accepted_transfer receipt
+let accepted_transfer (receipt : Keeper_paused_work_disposition_receipt.t)
       (transfer : Keeper_paused_work_disposition_receipt.transfer_owner)
     : Keeper_registry_event_queue.accepted_transfer =
   { source = transfer.Keeper_paused_work_disposition_receipt.source
   ; source_incarnation = transfer.source_incarnation
-  ; owner_nonce = receipt.Keeper_paused_work_disposition_receipt.expected_generation
   ; operator_operation_id = receipt.operator_operation_id
   ; from_keeper = transfer.from_keeper
   ; to_keeper = transfer.to_keeper
-  ; target_generation = transfer.target_generation
   ; target_trace_id = transfer.target_trace_id
   }
 ;;
 
-let ack_source ?intake_token config receipt transfer =
+let ack_source ?intake_token config
+      (receipt : Keeper_paused_work_disposition_receipt.t) transfer =
   let causal = accepted_transfer receipt transfer in
   let base_path = config.Workspace.base_path in
   let* source_state =
@@ -317,14 +272,7 @@ let ack_source ?intake_token config receipt transfer =
   | None ->
     let* current = read_meta config transfer.from_keeper in
     let* () =
-      if not (Int.equal current.runtime.nonce receipt.expected_generation)
-      then
-        Error
-          (Source_owner_nonce_changed
-             { expected = receipt.expected_generation
-             ; actual = current.runtime.nonce
-             })
-      else if not (Keeper_id.Trace_id.equal current.runtime.trace_id receipt.expected_trace_id)
+      if not (Keeper_id.Trace_id.equal current.runtime.trace_id receipt.expected_trace_id)
       then Error Source_owner_identity_changed
       else Ok ()
     in
@@ -335,7 +283,6 @@ let ack_source ?intake_token config receipt transfer =
         ?intake_token
         ~base_path
         transfer.from_keeper
-        ~current_owner_nonce:current.runtime.nonce
         ~applied_at:receipt.requested_at
         ~transfer:causal
       |> Result.map_error (function
@@ -381,10 +328,6 @@ let target_enqueue ?intake_token config receipt transfer =
   | Keeper_registry_event_queue.Transfer_projection_storage_error detail ->
     Error (Committed_projection_failed { stage = Target_enqueue; detail })
   | Keeper_registry_event_queue.Transfer_projection_target_unavailable
-      (Keeper_registry_event_queue.Transfer_target_generation_changed
-         { expected; actual }) ->
-    Error (Target_owner_nonce_changed { expected; actual })
-  | Keeper_registry_event_queue.Transfer_projection_target_unavailable
       Keeper_registry_event_queue.Transfer_target_trace_changed ->
     Error Target_owner_identity_changed
   | Keeper_registry_event_queue.Transfer_projection_target_unavailable error ->
@@ -410,11 +353,9 @@ let receipt_matches_accepted_transfer
       (accepted : Keeper_registry_event_queue.accepted_transfer)
   =
   String.equal receipt.Keeper_paused_work_disposition_receipt.keeper_name accepted.from_keeper
-  && Int.equal receipt.expected_generation accepted.owner_nonce
   && String.equal receipt.operator_operation_id accepted.operator_operation_id
   && String.equal receipt_transfer.from_keeper accepted.from_keeper
   && String.equal receipt_transfer.to_keeper accepted.to_keeper
-  && Int.equal receipt_transfer.target_generation accepted.target_generation
   && Keeper_id.Trace_id.equal receipt_transfer.target_trace_id accepted.target_trace_id
   && receipt_transfer.source = accepted.source
   && Int64.equal receipt_transfer.source_incarnation accepted.source_incarnation
@@ -543,7 +484,6 @@ let transfer_pending_with_reservation config ~from_keeper ~to_keeper request =
     Keeper_lifecycle_reservation.acquire
       ~base_path:config.Workspace.base_path
       ~keeper_name:from_keeper
-      ~expected_generation:request.owner_nonce
       ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
   with
   | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
@@ -552,7 +492,7 @@ let transfer_pending_with_reservation config ~from_keeper ~to_keeper request =
   | Ok token ->
     (try
        let outcome =
-         Keeper_turn_admission.run_transfer_intake_if_open
+         Keeper_shutdown_intake_fence.run_transfer_intake_if_open
            ~base_path:config.Workspace.base_path
            ~from_keeper
            ~to_keeper
@@ -567,17 +507,17 @@ let transfer_pending_with_reservation config ~from_keeper ~to_keeper request =
        in
        let reservation_release = Keeper_lifecycle_reservation.release token in
        (match outcome with
-        | Keeper_turn_admission.Transfer_intake_committed
+        | Keeper_shutdown_intake_fence.Transfer_intake_committed
             (Ok (receipt, commit_status, projection)) ->
           Ok { receipt; commit_status; projection; reservation_release }
-        | Keeper_turn_admission.Transfer_intake_committed (Error cause) ->
+        | Keeper_shutdown_intake_fence.Transfer_intake_committed (Error cause) ->
           Error { cause; reservation_release = Some reservation_release }
-        | Keeper_turn_admission.Transfer_intake_source_shutdown_reserved operation_id ->
+        | Keeper_shutdown_intake_fence.Transfer_intake_source_shutdown_reserved operation_id ->
           Error
             { cause = Source_transfer_shutdown_reserved operation_id
             ; reservation_release = Some reservation_release
             }
-        | Keeper_turn_admission.Transfer_intake_target_shutdown_reserved operation_id ->
+        | Keeper_shutdown_intake_fence.Transfer_intake_target_shutdown_reserved operation_id ->
           Error
             { cause = Target_transfer_shutdown_reserved operation_id
             ; reservation_release = Some reservation_release
@@ -595,7 +535,7 @@ let transfer_pending config ~from_keeper ~to_keeper request =
     Error { cause = Invalid_request detail; reservation_release = None }
   | Ok () ->
     (match
-       Keeper_turn_admission.run_if_free
+       Keeper_owner_registry.run_maintenance_if_idle
          ~base_path:config.Workspace.base_path
          ~keeper_name:from_keeper
          (fun () ->
@@ -605,7 +545,13 @@ let transfer_pending config ~from_keeper ~to_keeper request =
               ~to_keeper
               request)
      with
-     | `Busy block ->
+     | Ok (`Busy block) ->
        Error { cause = Admission_busy block; reservation_release = None }
-     | `Ran outcome -> outcome)
+     | Ok (`Ran outcome) -> outcome
+     | Error error ->
+       Error
+         { cause =
+             Owner_unavailable (Keeper_owner_registry.command_error_to_string error)
+         ; reservation_release = None
+         })
 ;;

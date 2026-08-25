@@ -1,6 +1,7 @@
 (** Durable, nonblocking HITL requests for Keeper external effects. *)
 
-include Keeper_approval_queue_rules
+open Keeper_approval_queue_rules_types
+open Keeper_approval_queue_rules
 
 type storage_error =
   { path : string
@@ -92,9 +93,19 @@ type approved_resolution_delivery =
   }
 
 type grant_consumption =
-  | Consumption_committed
+  | Consumption_committed of Keeper_approval.Audit.receipt
   | Consumption_already_committed
   | Consumption_not_matching
+
+type pending_submission_disposition =
+  | Pending_created of Keeper_approval.Audit.receipt
+  | Pending_deduplicated
+  | Folded_onto_unconsumed_grant
+
+type pending_submission =
+  { approval_id : string
+  ; disposition : pending_submission_disposition
+  }
 
 type replay_recording =
   | Replay_recorded
@@ -113,6 +124,11 @@ type install_report =
   }
 
 type install_error = Install_storage_failed of storage_error
+
+type resolution_result =
+  { remembered_rule : approval_rule option
+  ; audit_receipts : Keeper_approval.Audit.receipt list
+  }
 
 type persisted_delivery =
   { entry : pending_approval
@@ -285,7 +301,12 @@ let install_error_to_string = function
   | Install_storage_failed error -> storage_error_to_string error
 ;;
 
-let pending_store_version = 8
+(* Bumped to 9 by the goal_ids removal: #29256 dropped the field from the entry
+   contract without moving the version, so an installed v8 store failed the
+   field check with "contains unsupported field goal_ids" instead of the version
+   check that tells an operator what to do about it. A format change the version
+   does not record is a format change nobody can diagnose. *)
+let pending_store_version = 9
 let pending_store_surface = "keeper_gate_pending"
 let replay_results_store_version = 1
 let replay_results_store_surface = "keeper_gate_replay_results"
@@ -353,11 +374,13 @@ let replay_results_store_path ~base_path =
 ;;
 
 let report_pending_read_drop ~reason ~path ~detail =
+
+  let reason_wire = Read_drop_reason.to_wire reason in
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
       Otel_metric_store.inc_counter
         Otel_metric_store.metric_persistence_read_drops
-        ~labels:[ "surface", pending_store_surface; "reason", reason ]
+        ~labels:[ "surface", pending_store_surface; "reason", reason_wire ]
         ())
     ~surface:pending_store_surface
     ~reason
@@ -366,13 +389,15 @@ let report_pending_read_drop ~reason ~path ~detail =
 ;;
 
 let report_replay_results_read_drop ~reason ~path ~detail =
+
+  let reason_wire = Read_drop_reason.to_wire reason in
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
       Otel_metric_store.inc_counter
         Otel_metric_store.metric_persistence_read_drops
         ~labels:
           [ "surface", replay_results_store_surface
-          ; "reason", reason
+          ; "reason", reason_wire
           ]
         ())
     ~surface:replay_results_store_surface
@@ -409,7 +434,6 @@ let pending_entry_to_yojson
         | None -> `Null )
     ; "task_id", Json_util.string_opt_to_json entry.task_id
     ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-    ; "goal_ids", Json_util.json_string_list entry.goal_ids
       ; "continuation_channel", Keeper_continuation_channel.to_yojson entry.continuation_channel
       ; "summary_status", summary_status_to_yojson entry.summary_status
       ; "exact_attempt", exact_attempt_state_to_yojson entry.exact_attempt
@@ -423,8 +447,6 @@ let approval_decision_to_yojson = function
   | Decision.Approve -> `Assoc [ "kind", `String "approve" ]
   | Decision.Reject reason ->
     `Assoc [ "kind", `String "reject"; "reason", `String reason ]
-  | Decision.Edit input ->
-    `Assoc [ "kind", `String "edit"; "input", input ]
 ;;
 
 let resolution_replay_outcome_to_yojson = function
@@ -689,8 +711,6 @@ let reject_unknown_fields = Json_util.reject_unknown_fields
 let required_string = Json_util.require_field_string
 let required_float = Json_util.require_field_float
 let required_positive_int = Json_util.require_field_positive_int
-let required_string_list = Json_util.require_field_string_list
-
 let required_member ~surface field fields =
   match List.assoc_opt field fields with
   | Some value -> Ok value
@@ -839,7 +859,6 @@ let pending_entry_of_yojson ~base_path json =
           ; "request_context_version"
           ; "task_id"
           ; "goal_id"
-          ; "goal_ids"
           ; "continuation_channel"
           ; "summary_status"
           ; "exact_attempt"
@@ -892,7 +911,6 @@ let pending_entry_of_yojson ~base_path json =
     in
     let* task_id = optional_string ~surface "task_id" fields in
     let* goal_id = optional_string ~surface "goal_id" fields in
-    let* goal_ids = required_string_list ~surface "goal_ids" fields in
     let* continuation_json = required_member ~surface "continuation_channel" fields in
     let* continuation_channel = Keeper_continuation_channel.of_yojson continuation_json in
       let* summary_json = required_member ~surface "summary_status" fields in
@@ -927,7 +945,6 @@ let pending_entry_of_yojson ~base_path json =
       ; request_context
       ; task_id
       ; goal_id
-      ; goal_ids
       ; continuation_channel
         ; audit_base_path = base_path
         ; summary_status
@@ -960,15 +977,6 @@ let approval_decision_of_yojson json =
        in
        let* reason = required_string ~surface:"gate_pending.decision" "reason" fields in
        Ok (Decision.Reject reason)
-     | "edit" ->
-       let* () =
-         reject_unknown_fields
-           ~surface:"gate_pending.decision"
-           ~allowed:[ "kind"; "input" ]
-           fields
-       in
-       let* input = required_member ~surface:"gate_pending.decision" "input" fields in
-       Ok (Decision.Edit input)
      | other -> Error (Printf.sprintf "gate_pending.decision kind %S is unknown" other))
   | _ -> Error "gate_pending.decision must be a JSON object"
 ;;
@@ -1094,8 +1102,8 @@ let persisted_delivery_of_yojson ~base_path json =
     let* () =
       match decision, grant_consumed with
       | Decision.Approve, (true | false) -> Ok ()
-      | (Decision.Reject _ | Decision.Edit _), false -> Ok ()
-      | (Decision.Reject _ | Decision.Edit _), true ->
+      | Decision.Reject _, false -> Ok ()
+      | Decision.Reject _, true ->
         Error (surface ^ ".grant_consumed is valid only for approve")
     in
     Ok
@@ -1371,7 +1379,7 @@ let load_snapshot_unlocked ~base_path =
       match Safe_ops.read_json_file_safe path with
       | Error reason ->
         report_pending_read_drop
-          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~reason:Read_drop_reason.Entry_load_error
           ~path
           ~detail:reason;
         Error { path; reason }
@@ -1402,7 +1410,7 @@ let load_snapshot_unlocked ~base_path =
            else Ok (loaded_pending, loaded_deliveries, loaded_next_sequence)
          | Error reason ->
            report_pending_read_drop
-             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+             ~reason:Read_drop_reason.Invalid_payload
              ~path
              ~detail:reason;
            Error { path; reason }))
@@ -1411,7 +1419,7 @@ let load_snapshot_unlocked ~base_path =
   | exn ->
     let reason = Printexc.to_string exn in
     report_pending_read_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~reason:Read_drop_reason.Entry_load_error
       ~path
       ~detail:reason;
     Error { path; reason }
@@ -1446,7 +1454,7 @@ let attach_replay_results ~delivery_map replay_results =
                  "gate_replay_results outcome %s requires a consumed approve grant"
                  approval_id)
           | Some
-              { decision = (Decision.Reject _ | Decision.Edit _); _ } ->
+              { decision = Decision.Reject _; _ } ->
             Error
               (Printf.sprintf
                  "gate_replay_results outcome %s belongs to a non-approved delivery"
@@ -1469,7 +1477,7 @@ let load_replay_results_unlocked ~base_path ~delivery_map =
       match Safe_ops.read_json_file_safe path with
       | Error reason ->
         report_replay_results_read_drop
-          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~reason:Read_drop_reason.Entry_load_error
           ~path
           ~detail:reason;
         delivery_map, Some { path; reason }
@@ -1477,7 +1485,7 @@ let load_replay_results_unlocked ~base_path ~delivery_map =
         (match replay_results_of_yojson json with
          | Error reason ->
            report_replay_results_read_drop
-             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+             ~reason:Read_drop_reason.Invalid_payload
              ~path
              ~detail:reason;
            delivery_map, Some { path; reason }
@@ -1486,7 +1494,7 @@ let load_replay_results_unlocked ~base_path ~delivery_map =
             | Ok delivery_map -> delivery_map, None
             | Error reason ->
               report_replay_results_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path
                 ~detail:reason;
               delivery_map, Some { path; reason })))
@@ -1495,7 +1503,7 @@ let load_replay_results_unlocked ~base_path ~delivery_map =
   | exn ->
     let reason = Printexc.to_string exn in
     report_replay_results_read_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~reason:Read_drop_reason.Entry_load_error
       ~path
       ~detail:reason;
     delivery_map, Some { path; reason }
@@ -1527,482 +1535,9 @@ let merge_loaded_map ~surface ~existing ~loaded =
    hashtable and creates a Dated_jsonl handle. It is also used by synchronous
    tests outside an Eio context, so an Eio mutex would either raise Get_context
    or poison the registry after a recoverable store-creation failure. *)
-(** Dated JSONL audit trail for approval events.
-    Stored at [<base_path>/.masc/audit-approvals/YYYY-MM/DD.jsonl].
-    Dashboard and workspace-scoped keeper runs pass [base_path] explicitly so approval
-    history stays with the workspace that made the decision. *)
-let audit_stores_mu = Stdlib.Mutex.create ()
-
-let audit_io_mutex = Cross_context_mutex.create ()
-let audit_stores : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
-
-(* Runtime trust asks for per-keeper latest audit state across the same global
-   audit tail. Cache the raw tail briefly so a keeper snapshot does one shared
-   JSONL read instead of N identical scans. *)
-type recent_audit_cache_entry =
-  { rows : Yojson.Safe.t list
-  ; observed_at : float
-  }
-;;
-
-let recent_audit_cache_mu = Stdlib.Mutex.create ()
-let recent_audit_cache : (string, recent_audit_cache_entry) Hashtbl.t =
-  Hashtbl.create 4
-;;
-
-let recent_audit_cache_ttl_sec = 1.0
-let recent_resolved_history_limit = 20
-let audit_wide_scan_min_rows = 500
-let audit_wide_scan_multiplier = 64
-
-let wide_audit_scan_window n =
-  max audit_wide_scan_min_rows (max n 1 * audit_wide_scan_multiplier)
-;;
-
-(* Resolved-history bounds. The wall-clock window is what an operator reasons
-   about ("the last day"); the row cap is what keeps one dashboard poll from
-   parsing the whole audit store. The two are independent because the store
-   interleaves [resolved] rows with far more numerous [summary_updated] and
-   [pending] rows, so a row cap alone silently returns fewer decisions as
-   non-resolved traffic grows. Both bounds are reported to the caller. *)
-let recent_resolved_max_limit = 200
-let recent_resolved_default_window_minutes = 1440
-let recent_resolved_min_window_minutes = 5
-let recent_resolved_max_window_minutes = 10_080
-let resolved_history_scan_min_rows = 2_000
-let resolved_history_scan_max_rows = 20_000
-
-let resolved_history_scan_rows limit =
-  max
-    resolved_history_scan_min_rows
-    (min
-       resolved_history_scan_max_rows
-       (max limit 1 * audit_wide_scan_multiplier))
-;;
-
-(* A page of resolved decisions plus the evidence needed to tell "this is
-   everything in the window" from "this is the newest slice of more". Callers
-   that render only [resolved_rows] would repeat the silent truncation this
-   record exists to remove. *)
-type resolved_history =
-  { resolved_rows : Yojson.Safe.t list (* newest first, at most [resolved_limit] *)
-  ; resolved_matched : int (* resolved decisions inside the window that were scanned *)
-  ; resolved_limit : int
-  ; resolved_window_minutes : int
-  ; resolved_scan_exhausted : bool
-      (* the row cap stopped the scan before it reached the window start *)
-  }
-
-let recent_audit_cache_key store limit =
-  Printf.sprintf "%s:%d" (Dated_jsonl.base_dir store) limit
-;;
-
-let invalidate_recent_audit_cache_for_store store =
-  let prefix = Dated_jsonl.base_dir store ^ ":" in
-  Stdlib.Mutex.protect recent_audit_cache_mu (fun () ->
-    Hashtbl.filter_map_inplace
-      (fun key entry -> if String.starts_with ~prefix key then None else Some entry)
-      recent_audit_cache)
-;;
-
-let read_recent_audit_raw store limit =
-  let key = recent_audit_cache_key store limit in
-  let now = Unix.gettimeofday () in
-  let cached =
-    Stdlib.Mutex.protect recent_audit_cache_mu (fun () ->
-      match Hashtbl.find_opt recent_audit_cache key with
-      | Some entry when now -. entry.observed_at <= recent_audit_cache_ttl_sec ->
-        Some entry.rows
-      | _ -> None)
-  in
-  match cached with
-  | Some rows -> rows
-  | None ->
-    let rows = Dated_jsonl.read_recent store limit in
-    Stdlib.Mutex.protect recent_audit_cache_mu (fun () ->
-      Hashtbl.replace recent_audit_cache key { rows; observed_at = now });
-    rows
-;;
-
-let approval_audit_pending_event = "pending"
-let approval_audit_resolved_event = "resolved"
-let approval_audit_summary_event = "summary_updated"
 let approval_sse_pending_event = "approval:pending"
 let approval_sse_resolved_event = "approval:resolved"
 let approval_sse_summary_event = "approval:summary_updated"
-
-let non_empty_reason reason =
-  let reason = String.trim reason in
-  if String.equal reason "" then None else Some reason
-;;
-
-let approval_decision_kind_and_reason = function
-  | Decision.Approve -> "approve", None
-  | Decision.Reject reason -> "reject", non_empty_reason reason
-  | Decision.Edit _ -> "edit", None
-;;
-
-let keeper_audit_metric_label = function
-  | Some keeper when String.trim keeper <> "" -> keeper
-  | Some _ | None -> "aggregate"
-;;
-
-let audit_today_path base_dir =
-  let open Unix in
-  let tm = gmtime (gettimeofday ()) in
-  let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
-  let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
-  let dir = Filename.concat base_dir month in
-  Fs_compat.mkdir_p dir;
-  Filename.concat dir day
-;;
-
-let get_audit_store ~base_path () =
-  let report_failure exn =
-    Keeper_fd_pressure.note_exception ~site:"approval_audit.store_create" exn;
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ApprovalQueueFailures)
-      ~labels:
-        [ "keeper", "aggregate"
-        ; "site", Keeper_approval_queue_failure_site.(to_label Audit_store_create)
-        ]
-      ();
-    Log.Keeper.warn
-      "approval_queue: audit store creation failed: %s"
-      (Printexc.to_string exn);
-    None
-  in
-  try
-    match
-      Stdlib.Mutex.protect audit_stores_mu (fun () ->
-        try
-          Ok
-            (match Hashtbl.find_opt audit_stores base_path with
-             | Some store -> Some store
-             | None ->
-               let dir =
-                 Filename.concat
-                   (Common.masc_dir_from_base_path ~base_path)
-                   "audit-approvals"
-               in
-               let store = Dated_jsonl.create ~base_dir:dir () in
-               Hashtbl.replace audit_stores base_path store;
-               Some store)
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn -> Error exn)
-    with
-    | Ok store -> store
-    | Error exn -> report_failure exn
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> report_failure exn
-;;
-
-let audit_approval_event
-      ~base_path
-      ~event_type
-      ~id
-      ~keeper_name
-      ~tool_name
-      ?turn_id
-      ?task_id
-      ?goal_id
-      ?(goal_ids = [])
-      ?rule_match
-      ?source_approval_id
-      ?actor
-      ?decision_source
-      ?decision
-      ?summary_status
-      ?exact_attempt
-      ()
-  =
-  let decision, decision_kind, decision_reason =
-    match decision with
-    | None -> "", None, None
-    | Some decision ->
-      let kind, reason = approval_decision_kind_and_reason decision in
-      approval_decision_to_string decision, Some kind, reason
-  in
-  match get_audit_store ~base_path () with
-  | None -> ()
-  | Some store ->
-    let json =
-      `Assoc
-        ([ "ts", `Float (Unix.gettimeofday ())
-         ; "event", `String event_type
-         ; "id", `String id
-         ; "keeper", `String keeper_name
-         ; "tool", `String tool_name
-         ; "decision", `String decision
-         ; "turn_id", Json_util.int_opt_to_json turn_id
-         ; "task_id", Json_util.string_opt_to_json task_id
-         ; "goal_id", Json_util.string_opt_to_json goal_id
-         ; "goal_ids", `List (List.map (fun goal -> `String goal) goal_ids)
-         ; "actor", Json_util.string_opt_to_json actor
-         ; ( "decision_source"
-           , match decision_source with
-             | Some source -> `String (decision_source_to_string source)
-             | None -> `Null )
-         ]
-         @ (match rule_match with
-            | Some matched -> [ "rule_match", rule_match_to_yojson matched ]
-            | None -> [])
-         @ (match source_approval_id with
-            | Some approval_id -> [ "source_approval_id", `String approval_id ]
-            | None -> [])
-         @ (match decision_kind with
-            | Some kind -> [ "decision_kind", `String kind ]
-            | None -> [])
-         @ (match decision_reason with
-            | Some reason -> [ "decision_reason", `String reason ]
-            | None -> [])
-         @ (match summary_status with
-            | Some status -> [ "summary_status", summary_status_to_yojson status ]
-            | None -> [])
-         @ (match exact_attempt with
-            | Some attempt ->
-              [ "exact_attempt", exact_attempt_state_to_yojson attempt ]
-            | None -> [])
-         )
-    in
-    Cross_context_mutex.with_durable_lock audit_io_mutex (fun () ->
-      try
-        Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json;
-        invalidate_recent_audit_cache_for_store store
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn -> record_queue_failure ~keeper_name ~site:"audit_append" ~id ~event_type exn)
-;;
-
-let audit_rule_event ~base_path ~event_type (rule : approval_rule) =
-  audit_approval_event
-    ~base_path
-    ~event_type
-    ~id:rule.id
-    ~keeper_name:rule.keeper_name
-    ~tool_name:rule.tool_name
-    ?source_approval_id:rule.source_approval_id
-    ()
-;;
-
-let audit_scan_window ?keeper_name n =
-  match keeper_name with
-  | None -> max n 1
-  | Some _ ->
-    (* Approval audit is global, but runtime trust asks for per-keeper
-         "latest" records. Scan a bounded wider window before filtering so a
-         busy fleet cannot hide the target keeper behind unrelated events. *)
-    wide_audit_scan_window n
-;;
-
-
-let record_audit_read_failure ?keeper_name ?(metric_site = Keeper_approval_queue_failure_site.Audit_read_recent) ~site exn =
-  Keeper_fd_pressure.note_exception ~site exn;
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string ApprovalQueueFailures)
-    ~labels:
-      [ "keeper",
-        keeper_audit_metric_label keeper_name;
-        "site",
-        Keeper_approval_queue_failure_site.to_label metric_site
-      ]
-    ()
-;;
-
-let read_recent_audit ~base_path ?keeper_name ?(n = 20) () : Yojson.Safe.t list =
-  if n <= 0
-  then []
-  else (
-    match get_audit_store ~base_path () with
-    | None -> []
-    | Some store ->
-      try
-        let raw = read_recent_audit_raw store (audit_scan_window ?keeper_name n) in
-        let filtered =
-          match keeper_name with
-          | None -> raw
-          | Some name ->
-            raw
-            |> List.filter (fun json ->
-              String.equal name (Safe_ops.json_string ~default:"" "keeper" json))
-        in
-        filtered |> List.rev |> List.filteri (fun idx _ -> idx < n)
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        record_audit_read_failure ?keeper_name ~site:"approval_audit.read_recent" exn;
-        [])
-;;
-
-let json_member_or_null key json =
-  match Json_util.assoc_member_opt key json with
-  | Some value -> value
-  | None -> `Null
-;;
-
-let closed_decision_kind_of_string value =
-  match String.trim value with
-  | "approve" -> Some "approve"
-  | "reject" -> Some "reject"
-  | "edit" -> Some "edit"
-  | _ -> None
-;;
-
-let resolved_approval_decision_kind json =
-  Option.bind
-    (Safe_ops.json_string_opt "decision_kind" json)
-    closed_decision_kind_of_string
-;;
-
-let resolved_history_event json =
-  match Safe_ops.json_string_opt "event" json with
-  | Some event -> String.equal event approval_audit_resolved_event
-  | None -> false
-;;
-
-let resolved_approval_json_of_audit_event json =
-  let resolved_at = Safe_ops.json_float_opt "ts" json in
-  `Assoc
-    [ "id", `String (Safe_ops.json_string ~default:"" "id" json)
-    ; "event", `String (Safe_ops.json_string ~default:"" "event" json)
-    ; "keeper_name", `String (Safe_ops.json_string ~default:"" "keeper" json)
-    ; "tool_name", `String (Safe_ops.json_string ~default:"" "tool" json)
-    ; "decision", Json_util.string_opt_to_json_trimmed (Safe_ops.json_string_opt "decision" json)
-    ; "decision_kind", Json_util.string_opt_to_json_trimmed (resolved_approval_decision_kind json)
-    ; "decision_reason", json_member_or_null "decision_reason" json
-    ; "resolved_at", Json_util.float_opt_to_json resolved_at
-    ; "turn_id", json_member_or_null "turn_id" json
-    ; "task_id", json_member_or_null "task_id" json
-    ; "goal_id", json_member_or_null "goal_id" json
-    ; "goal_ids", json_member_or_null "goal_ids" json
-    ; "actor", json_member_or_null "actor" json
-    ; "decision_source", json_member_or_null "decision_source" json
-    ; "rule_match", json_member_or_null "rule_match" json
-      (* Judge evidence recorded at resolution time (#26126). Events written
-         before that enrichment have no such members and project as [`Null]. *)
-    ; "summary_status", json_member_or_null "summary_status" json
-    ; "exact_attempt", json_member_or_null "exact_attempt" json
-    ]
-;;
-
-(* Day key for the [YYYY-MM/DD.jsonl] layout. Must stay UTC: the write path
-   ([Jsonl_writer.dated_path]) picks the day file with [Unix.gmtime], so a
-   local-time key here would look in the wrong file for the hours where the
-   two calendars disagree. Pinned by
-   [test_keeper_approval_resolved_history.ml]. *)
-let audit_day_string_of_ts ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf
-    "%04d-%02d-%02d"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday
-;;
-
-let clamp_int value ~low ~high = max low (min high value)
-
-let resolved_history_empty ~limit ~window_minutes =
-  { resolved_rows = []
-  ; resolved_matched = 0
-  ; resolved_limit = limit
-  ; resolved_window_minutes = window_minutes
-  ; resolved_scan_exhausted = false
-  }
-;;
-
-let list_recent_resolved
-      ~base_path
-      ~now_ts
-      ?(limit = recent_resolved_history_limit)
-      ?(window_minutes = recent_resolved_default_window_minutes)
-      ()
-  : resolved_history
-  =
-  let limit = clamp_int limit ~low:0 ~high:recent_resolved_max_limit in
-  let window_minutes =
-    clamp_int
-      window_minutes
-      ~low:recent_resolved_min_window_minutes
-      ~high:recent_resolved_max_window_minutes
-  in
-  let empty = resolved_history_empty ~limit ~window_minutes in
-  if limit <= 0
-  then empty
-  else (
-    match get_audit_store ~base_path () with
-    | None -> empty
-    | Some store ->
-      (try
-         let window_start =
-           now_ts -. (float_of_int window_minutes *. Masc_time_constants.minute)
-         in
-         let scan_rows = resolved_history_scan_rows limit in
-         (* Chronological, oldest first, tail-bounded to [scan_rows]. *)
-         let scanned =
-           Dated_jsonl.read_range_recent
-             store
-             ~since:(audit_day_string_of_ts window_start)
-             ~until:(audit_day_string_of_ts now_ts)
-             scan_rows
-         in
-         let scanned_count = List.length scanned in
-         (* The row cap only hides decisions when it stopped us before we
-            reached back to the window start. If the oldest row we read is
-            already older than the window, the window is fully covered and the
-            cap is irrelevant. *)
-         let scan_exhausted =
-           scanned_count >= scan_rows
-           &&
-           match scanned with
-           | [] -> true
-           | oldest :: _ ->
-             (match Safe_ops.json_float_opt "ts" oldest with
-              | None -> true
-              | Some ts -> ts > window_start)
-         in
-         (* An undated row cannot be placed in a wall-clock window, so it is
-            excluded rather than dated by guesswork. The audit writer always
-            stamps [ts]; this is the boundary that keeps a future regression
-            from silently mis-dating history. *)
-         let matched_rows =
-           scanned
-           |> List.filter_map (fun json ->
-             if resolved_history_event json
-             then (
-               match Safe_ops.json_float_opt "ts" json with
-               | Some ts when ts >= window_start -> Some (ts, json)
-               | Some _ | None -> None)
-             else None)
-           (* Newest first by timestamp, not by file position. The audit writer
-              stamps [ts] before it takes the append lock, so two concurrent
-              resolutions can land in the file in the opposite order from the
-              one they were decided in. [stable_sort] keeps file order as the
-              tie-break for identical stamps. *)
-           |> List.stable_sort (fun (left, _) (right, _) -> Float.compare right left)
-           |> List.map snd
-         in
-         let rows =
-           matched_rows
-           |> List.filteri (fun idx _ -> idx < limit)
-           |> List.map resolved_approval_json_of_audit_event
-         in
-         { resolved_rows = rows
-         ; resolved_matched = List.length matched_rows
-         ; resolved_limit = limit
-         ; resolved_window_minutes = window_minutes
-         ; resolved_scan_exhausted = scan_exhausted
-         }
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         record_audit_read_failure
-           ~metric_site:Keeper_approval_queue_failure_site.Audit_list_recent_resolved
-           ~site:"approval_audit.list_recent_resolved"
-           exn;
-         empty))
-;;
 
 let generate_id () = make_generated_id "appr"
 
@@ -2043,7 +1578,7 @@ let approved_delivery_unlocked ~base_path ~id =
             if delivery.grant_consumed
             then Ok (Approved_delivery_consumed delivery)
             else Ok (Approved_delivery_unconsumed delivery)
-          | Decision.Reject _ | Decision.Edit _ ->
+          | Decision.Reject _ ->
             Error (Grant_resolution_not_approved id))
      | None ->
        (match SMap.find_opt id (Atomic.get pending) with
@@ -2211,21 +1746,22 @@ let consume_approved_resolution
   | Ok (Consumption_without_audit consumption) -> Ok consumption
   | Ok (Consumption_with_audit delivery) ->
     let entry = delivery.entry in
-    audit_approval_event
-      ~base_path
-      ~event_type:"grant_consumed"
-      ~id
-      ~keeper_name:entry.keeper_name
-      ~tool_name:entry.tool_name
-      ?turn_id:entry.turn_id
-      ?task_id:entry.task_id
-      ?goal_id:entry.goal_id
-      ~goal_ids:entry.goal_ids
-      ~source_approval_id:id
-      ~decision_source:delivery.source
-      ~decision:Decision.Approve
-      ();
-    Ok Consumption_committed
+    let audit_receipt =
+      Keeper_approval.Audit.record
+        ~base_path
+        ~event_type:Keeper_approval.Audit.Grant_consumed
+        ~id
+        ~keeper_name:entry.keeper_name
+        ~tool_name:entry.tool_name
+        ?turn_id:entry.turn_id
+        ?task_id:entry.task_id
+        ?goal_id:entry.goal_id
+        ~source_approval_id:id
+        ~decision_source:delivery.source
+        ~decision:Decision.Approve
+        ()
+    in
+    Ok (Consumption_committed audit_receipt)
 ;;
 
 let input_preview_of_json (json : Yojson.Safe.t) =
@@ -2248,7 +1784,6 @@ let create_entry
       ?request_context
       ?task_id
       ?goal_id
-      ?(goal_ids = [])
       ~continuation_channel
       ~audit_base_path
       ()
@@ -2265,7 +1800,6 @@ let create_entry
   ; request_context
   ; task_id
   ; goal_id
-  ; goal_ids
     ; continuation_channel
     ; audit_base_path
     ; summary_status = Summary_not_requested
@@ -2288,7 +1822,6 @@ let pending_entry_json_fields
   ; "turn_id", Json_util.int_opt_to_json entry.turn_id
   ; "task_id", Json_util.string_opt_to_json entry.task_id
   ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-  ; "goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids)
   ]
   @ (if include_input
      then
@@ -2306,7 +1839,7 @@ let pending_entry_json_fields
       ]
 ;;
 
-let broadcast_pending entry =
+let broadcast_pending entry audit_receipt =
   try
     Sse.broadcast
       (`Assoc
@@ -2315,7 +1848,8 @@ let broadcast_pending entry =
             , `Assoc
                 (pending_entry_json_fields
                    ~include_input:true
-                   entry) )
+                   entry
+                 @ [ "audit", Keeper_approval.Audit.receipt_to_yojson audit_receipt ]) )
           ])
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -2324,7 +1858,7 @@ let broadcast_pending entry =
       ~keeper_name:entry.keeper_name
       ~site:"broadcast_pending"
       ~id:entry.id
-      ~event_type:approval_audit_pending_event
+      ~event_type:(Keeper_approval.Audit.event_to_string Keeper_approval.Audit.Pending)
       exn
 ;;
 
@@ -2335,18 +1869,20 @@ let record_pending (entry : pending_approval) =
     entry.sequence
     entry.keeper_name
     entry.tool_name;
-  audit_approval_event
-    ~base_path:entry.audit_base_path
-    ~event_type:approval_audit_pending_event
-    ~id:entry.id
-    ~keeper_name:entry.keeper_name
-    ~tool_name:entry.tool_name
-    ?turn_id:entry.turn_id
-    ?task_id:entry.task_id
-    ?goal_id:entry.goal_id
-    ~goal_ids:entry.goal_ids
-    ();
-  broadcast_pending entry
+  let audit_receipt =
+    Keeper_approval.Audit.record
+      ~base_path:entry.audit_base_path
+      ~event_type:Keeper_approval.Audit.Pending
+      ~id:entry.id
+      ~keeper_name:entry.keeper_name
+      ~tool_name:entry.tool_name
+      ?turn_id:entry.turn_id
+      ?task_id:entry.task_id
+      ?goal_id:entry.goal_id
+      ()
+  in
+  broadcast_pending entry audit_receipt;
+  audit_receipt
 ;;
 
 let summary_audit_extras (entry : pending_approval) : (string * Yojson.Safe.t) list =
@@ -2362,35 +1898,19 @@ let record_summary_updated ~now (entry : pending_approval) =
     | Summary_available summary -> summary.generated_at
     | Summary_not_requested | Summary_pending | Summary_failed _ -> now
   in
-  (try
-     match get_audit_store ~base_path:entry.audit_base_path () with
-     | None -> ()
-     | Some store ->
-       let json =
-         `Assoc
-           ([ "ts", `Float event_ts
-            ; "event", `String approval_audit_summary_event
-             ; "id", `String entry.id
-             ; "summary_status", summary_status_to_yojson entry.summary_status
-             ; "exact_attempt", exact_attempt_state_to_yojson entry.exact_attempt
-             ; ( "summary_attempt_disposition"
-               , summary_attempt_disposition_to_yojson
-                   entry.summary_attempt_disposition )
-             ]
-            @ summary_audit_extras entry)
-       in
-       Cross_context_mutex.with_durable_lock audit_io_mutex (fun () ->
-         Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json;
-         invalidate_recent_audit_cache_for_store store)
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     record_queue_failure
-       ~keeper_name:entry.keeper_name
-       ~site:"audit_summary"
+  ignore
+    (Keeper_approval.Audit.record
+       ~base_path:entry.audit_base_path
+       ~event_type:Keeper_approval.Audit.Summary_updated
        ~id:entry.id
-       ~event_type:approval_audit_summary_event
-       exn);
+       ~keeper_name:entry.keeper_name
+       ~tool_name:entry.tool_name
+       ~summary_status:entry.summary_status
+       ~exact_attempt:entry.exact_attempt
+       ~summary_attempt_disposition:entry.summary_attempt_disposition
+       ~timestamp:event_ts
+       ~extra_fields:(summary_audit_extras entry)
+       ());
   try
     Sse.broadcast
       (`Assoc
@@ -3310,7 +2830,6 @@ let commit_keeper_approval_resolution
 let hitl_resolution_decision_of_approval_decision = function
   | Decision.Approve -> Keeper_event_queue.Hitl_approved
   | Decision.Reject rationale -> Keeper_event_queue.Hitl_rejected rationale
-  | Decision.Edit input -> Keeper_event_queue.Hitl_edited input
 ;;
 
 let deliver_resolution ~base_path (entry : pending_approval) decision =
@@ -3327,6 +2846,7 @@ let resolve_entry
       ~base_path
       (entry : pending_approval)
       ~(source : decision_source)
+      ?actor
       (decision : decision)
   =
   let decision_str = approval_decision_to_string decision in
@@ -3336,65 +2856,72 @@ let resolve_entry
     entry.keeper_name
     entry.tool_name
     decision_str;
-  audit_approval_event
-    ~base_path:base_path
-    ~event_type:approval_audit_resolved_event
-    ~id:entry.id
-    ~keeper_name:entry.keeper_name
-    ~tool_name:entry.tool_name
-    ?turn_id:entry.turn_id
-    ?task_id:entry.task_id
-    ?goal_id:entry.goal_id
-    ~goal_ids:entry.goal_ids
-    ~decision_source:source
-    ~decision
-    ~summary_status:entry.summary_status
-    ~exact_attempt:entry.exact_attempt
-    ();
-  before_terminal_publish ();
-  try
-    Sse.broadcast
-      (`Assoc
-          [ "type", `String approval_sse_resolved_event
-          ; ( "payload"
-            , `Assoc
-                [ "id", `String entry.id
-                ; "keeper_name", `String entry.keeper_name
-                ; "tool_name", `String entry.tool_name
-                ; "decision", `String decision_str
-                ] )
-          ])
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    record_queue_failure
-      ~keeper_name:entry.keeper_name
-      ~site:"broadcast_resolved"
+  let audit_receipt =
+    Keeper_approval.Audit.record
+      ~base_path
+      ~event_type:Keeper_approval.Audit.Resolved
       ~id:entry.id
-      ~event_type:approval_audit_resolved_event
-      exn
+      ~keeper_name:entry.keeper_name
+      ~tool_name:entry.tool_name
+      ?turn_id:entry.turn_id
+      ?task_id:entry.task_id
+      ?goal_id:entry.goal_id
+      ?actor
+      ~decision_source:source
+      ~decision
+      ~summary_status:entry.summary_status
+      ~exact_attempt:entry.exact_attempt
+      ()
+  in
+  before_terminal_publish ();
+  (try
+     Sse.broadcast
+       (`Assoc
+           [ "type", `String approval_sse_resolved_event
+           ; ( "payload"
+             , `Assoc
+                 [ "id", `String entry.id
+                 ; "keeper_name", `String entry.keeper_name
+                 ; "tool_name", `String entry.tool_name
+                 ; "decision", `String decision_str
+                 ; "audit", Keeper_approval.Audit.receipt_to_yojson audit_receipt
+                 ] )
+           ])
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     record_queue_failure
+       ~keeper_name:entry.keeper_name
+       ~site:"broadcast_resolved"
+       ~id:entry.id
+       ~event_type:(Keeper_approval.Audit.event_to_string Keeper_approval.Audit.Resolved)
+       exn);
+  audit_receipt
 ;;
 
+(* The effect request's identity. [turn_id] is deliberately absent: it names
+   the turn that asked, not the effect being asked for. Keeping it in this
+   comparison made every next-turn retry of the same call a fresh approval —
+   measured 2026-08-16: one identical web_search deferred in turns
+   28959/28960/28961 produced three approvals, three auto-judge approvals,
+   and three replays of the same 17,712-byte output into the same context
+   (#28866). The turn that asked is still recorded on the entry for audit. *)
 let pending_entry_matches
       (entry : pending_approval)
       ~base_path
       ~keeper_name
       ~tool_name
       ~input_hash
-      ~turn_id
       ~task_id
       ~goal_id
-      ~goal_ids
       ~continuation_channel
   =
   String.equal entry.audit_base_path base_path
   && String.equal entry.keeper_name keeper_name
   && String.equal entry.tool_name tool_name
   && String.equal entry.input_hash input_hash
-  && entry.turn_id = turn_id
   && entry.task_id = task_id
   && entry.goal_id = goal_id
-  && entry.goal_ids = goal_ids
   && Yojson.Safe.equal
        (Keeper_continuation_channel.to_yojson entry.continuation_channel)
        (Keeper_continuation_channel.to_yojson continuation_channel)
@@ -3406,10 +2933,8 @@ let find_pending_id_in_map
       ~keeper_name
       ~tool_name
       ~input_hash
-      ~turn_id
       ~task_id
       ~goal_id
-      ~goal_ids
       ~continuation_channel
   =
   SMap.fold
@@ -3424,13 +2949,53 @@ let find_pending_id_in_map
              ~keeper_name
              ~tool_name
              ~input_hash
-             ~turn_id
              ~task_id
              ~goal_id
-             ~goal_ids
              ~continuation_channel
          then Some id
          else None)
+    map
+    None
+;;
+
+(* An approved resolution whose one-shot grant is still unconsumed is the
+   same effect request one step further along: the host owes the Keeper a
+   replay of exactly this call. A resubmission folds onto it instead of
+   opening a second approval — "an approval owns its effect" (RFC-0356)
+   implies its dual, an effect has one approval. Rejected and
+   grant-consumed deliveries never match: a retry after rejection is a new
+   approval cycle, and a retry after the effect ran is a new effect. *)
+let find_unconsumed_grant_id_in_deliveries
+      (map : persisted_delivery SMap.t)
+      ~base_path
+      ~keeper_name
+      ~tool_name
+      ~input_hash
+      ~task_id
+      ~goal_id
+      ~continuation_channel
+  =
+  SMap.fold
+    (fun id (delivery : persisted_delivery) acc ->
+       match acc with
+       | Some _ -> acc
+       | None ->
+         (match delivery.decision with
+          | Decision.Reject _ -> None
+          | Decision.Approve ->
+            if
+              (not delivery.grant_consumed)
+              && pending_entry_matches
+                   delivery.entry
+                   ~base_path
+                   ~keeper_name
+                   ~tool_name
+                   ~input_hash
+                   ~task_id
+                   ~goal_id
+                   ~continuation_channel
+            then Some id
+            else None))
     map
     None
 ;;
@@ -3446,10 +3011,9 @@ let submit_pending
       ?request_context
       ?task_id
       ?goal_id
-      ?(goal_ids = [])
       ?continuation_channel
       ()
-  : (string, storage_error) result
+  : (pending_submission, storage_error) result
   =
   let input_hash = normalized_input_hash input in
   let continuation_channel =
@@ -3474,14 +3038,25 @@ let submit_pending
              ~keeper_name
              ~tool_name
              ~input_hash
-             ~turn_id
              ~task_id
              ~goal_id
-             ~goal_ids
              ~continuation_channel
          with
-         | Some id -> Ok (id, None)
+         | Some id -> Ok (`Deduplicated id)
          | None ->
+           (match
+              find_unconsumed_grant_id_in_deliveries
+                (Atomic.get deliveries)
+                ~base_path
+                ~keeper_name
+                ~tool_name
+                ~input_hash
+                ~task_id
+                ~goal_id
+                ~continuation_channel
+            with
+            | Some id -> Ok (`Folded_onto_unconsumed_grant id)
+            | None ->
            let id = generate_id () in
            if sequence = max_int
            then
@@ -3501,7 +3076,6 @@ let submit_pending
               ?request_context
               ?task_id
               ?goal_id
-              ~goal_ids
               ~continuation_channel
               ~audit_base_path:base_path
               ()
@@ -3521,14 +3095,20 @@ let submit_pending
              Atomic.set
                next_sequences
                (SMap.add base_path following_sequence (Atomic.get next_sequences));
-             Ok (id, Some entry))))
+             Ok (`Created entry)))))
   in
   match stored with
   | Error _ as error -> error
-  | Ok (id, None) -> Ok id
-  | Ok (id, Some entry) ->
-    record_pending entry;
-    Ok id
+  | Ok (`Deduplicated approval_id) ->
+    Ok { approval_id; disposition = Pending_deduplicated }
+  | Ok (`Folded_onto_unconsumed_grant approval_id) ->
+    Ok { approval_id; disposition = Folded_onto_unconsumed_grant }
+  | Ok (`Created entry) ->
+    let audit_receipt = record_pending entry in
+    Ok
+      { approval_id = entry.id
+      ; disposition = Pending_created audit_receipt
+      }
 ;;
 
 (* ── Resolve (operator action) ────────────────────────────── *)
@@ -3649,16 +3229,15 @@ let approval_decision_equal left right =
   match left, right with
   | Decision.Approve, Decision.Approve -> true
   | Decision.Reject left, Decision.Reject right -> String.equal left right
-  | Decision.Edit left, Decision.Edit right -> Yojson.Safe.equal left right
-  | (Decision.Approve | Decision.Reject _ | Decision.Edit _),
-    (Decision.Approve | Decision.Reject _ | Decision.Edit _) ->
+  | (Decision.Approve | Decision.Reject _),
+    (Decision.Approve | Decision.Reject _) ->
     false
 ;;
 
 let remember_rule_for_entry ~base_path ?created_by ?rule_expires_at (entry : pending_approval) =
   try
     match
-      upsert_rule
+      Keeper_approval_queue_rules.upsert_rule
         ~base_path
         ~keeper_name:entry.keeper_name
         ~tool_name:entry.tool_name
@@ -3669,8 +3248,17 @@ let remember_rule_for_entry ~base_path ?created_by ?rule_expires_at (entry : pen
         ()
     with
     | Ok (rule, created) ->
-      if created then audit_rule_event ~base_path ~event_type:"rule_created" rule;
-      Ok rule
+      let audit_receipts =
+        if created
+        then
+          [ Keeper_approval.Audit.record_rule
+              ~base_path
+              ~event_type:Keeper_approval.Audit.Rule_created
+              rule
+          ]
+        else []
+      in
+      Ok (rule, audit_receipts)
     | Error reason -> Error reason
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -3704,16 +3292,16 @@ let remember_rule_for_delivery delivery =
          ?rule_expires_at:delivery.rule_expires_at
          delivery.entry
      with
-     | Ok rule -> Ok (Some rule)
+     | Ok (rule, audit_receipts) -> Ok (Some rule, audit_receipts)
      | Error rule_error ->
        Error
          { path = rule_error.path
          ; reason = rule_error.reason
          })
-  | (Decision.Approve | Decision.Reject _ | Decision.Edit _),
+  | (Decision.Approve | Decision.Reject _),
     false ->
-    Ok None
-  | (Decision.Reject _ | Decision.Edit _), true -> Ok None
+    Ok (None, [])
+  | Decision.Reject _, true -> Ok (None, [])
 ;;
 
 let complete_delivery delivery =
@@ -3723,7 +3311,7 @@ let complete_delivery delivery =
   | Error _ as error -> error
   | Ok () ->
     if delivery.grant_consumed
-    then Ok { remembered_rule = None }
+    then Ok { remembered_rule = None; audit_receipts = [] }
     else
       (match deliver_resolution ~base_path delivery.entry delivery.decision with
        | Error reason -> Error (Delivery_failed { approval_id = id; reason })
@@ -3731,18 +3319,30 @@ let complete_delivery delivery =
          (match remember_rule_for_delivery delivery with
           | Error storage_error ->
             Error (Persistence_failed { approval_id = id; storage_error })
-          | Ok remembered_rule ->
+          | Ok (remembered_rule, rule_audit_receipts) ->
             let finish () =
-              resolve_entry
-                ~base_path
-                delivery.entry
-                ~source:delivery.source
-                delivery.decision;
+              let actor =
+                match delivery.created_by with
+                | Some actor when String.trim actor <> "" -> Some actor
+                | Some _ | None -> None
+              in
+              let resolution_audit_receipt =
+                resolve_entry
+                  ~base_path
+                  delivery.entry
+                  ~source:delivery.source
+                  ?actor
+                  delivery.decision
+              in
               signal_resolution_after_commit
                 ~base_path
                 ~keeper_name:delivery.entry.keeper_name
                 ~approval_id:id;
-              Ok { remembered_rule }
+              Ok
+                { remembered_rule
+                ; audit_receipts =
+                    rule_audit_receipts @ [ resolution_audit_receipt ]
+                }
             in
             (match delivery.decision with
              | Decision.Approve ->
@@ -3750,7 +3350,7 @@ let complete_delivery delivery =
                   consumes it. The wake event is only a correlation message and
                   cannot become a second authorization SSOT. *)
                finish ()
-             | Decision.Reject _ | Decision.Edit _ ->
+             | Decision.Reject _ ->
                (match remove_delivery_from_store delivery with
                 | Error storage_error ->
                   Error (Persistence_failed { approval_id = id; storage_error })
@@ -3847,7 +3447,7 @@ let install_persistence_internal ~after_load ~base_path =
          | Error reason, _ | _, Error reason ->
            let path = pending_store_path ~base_path in
            report_pending_read_drop
-             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+             ~reason:Read_drop_reason.Invalid_payload
              ~path
              ~detail:reason;
            let error = { path; reason } in
@@ -3863,7 +3463,7 @@ let install_persistence_internal ~after_load ~base_path =
                   id
               in
               report_pending_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~reason:Read_drop_reason.Invalid_payload
                 ~path
                 ~detail:reason;
               let error = { path; reason } in
@@ -3936,12 +3536,6 @@ let install_persistence ~base_path =
 module For_testing = struct
   type strict_snapshot_writer =
     string -> string -> (unit, Fs_compat.atomic_replace_failure) result
-
-  let reset_audit_store () =
-    Stdlib.Mutex.protect audit_stores_mu (fun () -> Hashtbl.clear audit_stores);
-    Stdlib.Mutex.protect recent_audit_cache_mu (fun () ->
-      Hashtbl.clear recent_audit_cache)
-  ;;
 
   let with_pending_store_lock = with_pending_store_lock
   let get_pending_entry_unchecked = find_pending_entry_unchecked
@@ -4016,7 +3610,7 @@ let resolve_with_policy
              let remember_rule =
                match decision with
                | Decision.Approve -> remember_rule
-               | Decision.Reject _ | Decision.Edit _ -> false
+               | Decision.Reject _ -> false
              in
              let rule_expires_at =
                if remember_rule then rule_expires_at else None

@@ -61,18 +61,18 @@ let make_meta () : Masc.Keeper_meta_contract.keeper_meta =
 ;;
 
 let make_checkpoint () =
-  Agent_sdk.Checkpoint.
+  Agent_core.Checkpoint.
     { version = checkpoint_version
     ; session_id = "trace-clockless-exact-output"
     ; agent_name = "clockless-exact-output"
     ; model = "test-model"
     ; system_prompt = None
     ; messages =
-        [ Agent_sdk.Types.text_message Agent_sdk.Types.User "keep"
-        ; Agent_sdk.Types.text_message Agent_sdk.Types.Assistant (String.make 2048 'x')
-        ; Agent_sdk.Types.text_message Agent_sdk.Types.User (String.make 2048 'y')
+        [ Agent_core.Types.text_message Agent_core.Types.User "keep"
+        ; Agent_core.Types.text_message Agent_core.Types.Assistant (String.make 2048 'x')
+        ; Agent_core.Types.text_message Agent_core.Types.User (String.make 2048 'y')
         ]
-    ; usage = Agent_sdk.Types.empty_usage
+    ; usage = Agent_core.Types.empty_usage
     ; turn_count = 7
     ; created_at = 1_700_000_000.0
     ; tools = []
@@ -84,11 +84,11 @@ let make_checkpoint () =
     ; min_p = None
     ; enable_thinking = None
     ; preserve_thinking = None
-    ; response_format = Agent_sdk.Types.Off
+    ; response_format = Agent_core.Types.Off
     ; thinking_budget = None
     ; reasoning_effort = None
     ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create_sync ()
+    ; context = Agent_core.Context.create_sync ()
     ; mcp_sessions = []
     ; working_context = None
     }
@@ -108,7 +108,7 @@ let with_clockless_eio_context env sw f =
 let test_domain_invalid_and_clockless_flow_failure_are_terminal () =
   (* Both typed failures cross the real production composition boundary.
      MASC never reads receipt phase/count: domain-invalid output remains a
-     domain terminal, while the opaque OAS flow failure becomes a generic
+     domain terminal, while the opaque AGENT_CORE flow failure becomes a generic
      source-bound execution terminal. *)
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -127,7 +127,7 @@ let test_domain_invalid_and_clockless_flow_failure_are_terminal () =
            meta.name
            meta);
       let context =
-        Masc.Keeper_context_core.context_of_oas_checkpoint (make_checkpoint ())
+        Masc.Keeper_context_core.context_of_agent_core_checkpoint (make_checkpoint ())
       in
       let decision () =
         Compact_policy.compact_for_request_typed
@@ -176,7 +176,7 @@ let test_domain_invalid_and_clockless_flow_failure_are_terminal () =
            , Exact_execution_terminal
                { cause = Keeper_compaction_outcome.Exact_execution_failed; _ } ) ->
          ()
-       | _ -> fail "clockless OAS flow failure was not a generic source terminal");
+       | _ -> fail "clockless AGENT_CORE flow failure was not a generic source terminal");
       check int
         "before-dispatch lane performs no HTTP request"
         0
@@ -201,7 +201,7 @@ let test_absent_source_authority_is_typed_at_before_dispatch () =
            meta.name
            meta);
       let context =
-        Masc.Keeper_context_core.context_of_oas_checkpoint (make_checkpoint ())
+        Masc.Keeper_context_core.context_of_agent_core_checkpoint (make_checkpoint ())
       in
       let server =
         Exact_fixture.start_server

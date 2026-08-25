@@ -43,15 +43,13 @@ export const FSM_STATES = [
   'Compacting',
   'HandingOff',
   'Failing',
-  'Overflowed',
   'Draining',
   'Paused',
   'Stopped',
   'Crashed',
-  'Dead',
 ] as const
 
-// phase → status-dot tone (12 phases collapse into 5 buckets).
+// phase → status-dot tone (11 phases collapse into 5 buckets).
 const PHASE_TONE: Readonly<Record<KeeperPhase, KeeperTone>> = {
   Running: 'ok',
   Paused: 'warn',
@@ -60,9 +58,7 @@ const PHASE_TONE: Readonly<Record<KeeperPhase, KeeperTone>> = {
   HandingOff: 'busy',
   Restarting: 'busy',
   Failing: 'bad',
-  Overflowed: 'bad',
   Crashed: 'bad',
-  Dead: 'bad',
   Stopped: 'idle',
   Offline: 'idle',
 }
@@ -77,9 +73,7 @@ const PHASE_PULSE: Readonly<Record<KeeperPhase, boolean>> = {
   Failing: true,
   Paused: false,
   Draining: false,
-  Overflowed: false,
   Crashed: false,
-  Dead: false,
   Stopped: false,
   Offline: false,
 }
@@ -92,19 +86,17 @@ const PHASE_INFO: Readonly<Record<KeeperPhase, string>> = {
   Compacting: '컨텍스트 압축 중',
   HandingOff: '작업을 다른 keeper 에게 인계하는 중',
   Failing: '실패 처리 중',
-  Overflowed: '컨텍스트 윈도우 초과',
   Draining: '정상 종료를 위해 작업을 비우는 중',
   Paused: '슈퍼바이저가 일시정지함',
   Stopped: '중지됨',
   Crashed: '비정상 종료',
-  Dead: '복구 불가 — 종료됨',
 }
 
 // Reusable action literals (shared across phases keeps the table honest).
 const A_STOP: FsmAction = { id: 'stop', label: '중지', glyph: '⏹', via: 'Draining', to: 'Stopped', ms: 1500, danger: true, hint: '작업을 비우고 종료 (Drain → Stopped)' }
 
 // phase → ordered operator actions. Phases absent here (Compacting,
-// HandingOff, Draining, Restarting, Dead) expose no action — they are
+// HandingOff, Draining, Restarting) expose no action — they are
 // transient or terminal.
 const FSM_ACTIONS: Readonly<Partial<Record<KeeperPhase, readonly FsmAction[]>>> = {
   Running: [
@@ -116,10 +108,6 @@ const FSM_ACTIONS: Readonly<Partial<Record<KeeperPhase, readonly FsmAction[]>>> 
   Paused: [
     { id: 'resume', label: '재개', glyph: '▶', to: 'Running', hint: '멈춘 지점부터 다시 실행' },
     A_STOP,
-  ],
-  Overflowed: [
-    { id: 'compact', label: '컴팩션', glyph: '◉', via: 'Compacting', to: 'Running', ms: 2000, hint: '윈도우 초과 — 압축으로 복구' },
-    { ...A_STOP, hint: '복구 대신 종료' },
   ],
   Failing: [
     { id: 'restart', label: '재시작', glyph: '↻', via: 'Restarting', to: 'Running', ms: 1700, hint: '실패 처리 후 재시작' },
@@ -184,11 +172,9 @@ const KEEPER_PHASE_REGISTRY: Readonly<Record<string, true>> = Object.freeze(
     Compacting: true,
     HandingOff: true,
     Failing: true,
-    Overflowed: true,
     Draining: true,
     Paused: true,
     Stopped: true,
     Crashed: true,
-    Dead: true,
   } as Record<string, true>),
 )

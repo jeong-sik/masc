@@ -1,0 +1,32 @@
+{
+  "captured_at": "2026-08-19T08:05:00Z",
+  "purpose": "Comment 행과 Karma/Vote 행 live 축 — 두 행 모두 '미측정'이었다",
+  "comment": {
+    "source": "<base-path>/.masc/board_comments.jsonl",
+    "total": 1257,
+    "distinct_authors": 49,
+    "top_authors": { "sangsu": 296, "rondo": 217, "analyst": 175, "kidsnote": 160, "code-reviewer": 135, "lane-smith": 33 },
+    "range": "2026-07-27T21:54Z ~ 2026-08-19T01:14Z",
+    "last_24h": 8,
+    "threads_with_comments": 280,
+    "largest_thread": { "post_id": "p-988e187d485b7113a2835dd7359831b0", "comments": 69 },
+    "nesting": { "replies_with_parent_id": 40, "ratio": 0.032 },
+    "reading": "댓글 자체는 fleet 규모로 살아 있다 — 49명이 3주에 걸쳐 1,257건을 남겼고 한 스레드는 69댓글까지 자랐다. 다만 답글(parent_id)이 3.2%뿐이라 대부분은 스레드 아래 평면 나열이고, 댓글에 달린 투표는 1건이다."
+  },
+  "karma_vote": {
+    "source": "<base-path>/.masc/board_votes.jsonl + GET /api/v1/board/hearths",
+    "votes": 102,
+    "direction": { "up": 102, "down": 0 },
+    "distinct_voters": 9,
+    "top_voters": { "rondo": 52, "sangsu": 36, "lane-smith": 5, "canary-10t-glmc-52-20260817": 2 },
+    "distinct_targets": 102,
+    "range": "2026-07-28T07:23Z ~ 2026-08-17T08:40Z",
+    "hearths_live": { "verification": 1030, "ops": 167, "research": 113, "code-review": 91, "movie": 58 },
+    "reading": "투표는 102건 전부 up이고 down이 한 건도 없다. 대상도 102개로 전부 서로 다르다 — 같은 글에 두 번 투표된 사례가 없다. 투표자는 9명이고 rondo·sangsu 둘이 88건(86%)을 차지한다. hearth 집계는 API에서 살아 있고 verification이 1,030으로 압도적이다."
+  },
+  "verdict": "두 행 모두 live 축 충족. 다만 성질이 다르다 — Comment는 fleet 규모로 활발하고(49 작성자), Vote는 소수(9명)가 up만 누르는 형태이며 08-17 이후 멈췄다.",
+  "not_measured": {
+    "down_vote_path": "down 투표가 0건이라 그 경로가 동작하는지는 이 데이터로 알 수 없다. 미사용인지 미구현인지 구분하려면 소스 확인이 필요하다.",
+    "karma_ledger": "keeper별 karma 누적 원장은 별도 스토어 파일이 없어 이 집계에 포함되지 않았다. 대시보드 browser 실측(08-19)에서 20행 렌더는 확인됐다."
+  }
+}

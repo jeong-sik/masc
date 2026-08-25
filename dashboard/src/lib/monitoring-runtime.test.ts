@@ -215,7 +215,7 @@ describe('summarizeKeeperMonitoring', () => {
       status: 'idle',
       phase: 'Running',
       last_heartbeat: new Date().toISOString(),
-      runtime_blocker_class: 'turn_timeout',
+      runtime_blocker_class: 'stale_turn_timeout',
       runtime_blocker_summary: 'turn timed out after queue wait',
     } as Keeper)
 
@@ -230,7 +230,7 @@ describe('summarizeKeeperMonitoring', () => {
       status: 'idle',
       phase: 'Running',
       last_heartbeat: new Date().toISOString(),
-      runtime_blocker_class: 'turn_timeout',
+      runtime_blocker_class: 'stale_turn_timeout',
       runtime_blocker_summary: 'turn timed out after queue wait',
     } as Keeper
 
@@ -358,7 +358,7 @@ describe('summarizeKeeperMonitoring', () => {
           status: 'busy',
           phase: 'Running',
           pipeline_stage: 'compacting',
-          runtime_blocker_class: 'turn_timeout',
+          runtime_blocker_class: 'stale_turn_timeout',
           runtime_blocker_summary: 'turn timed out after queue wait',
         } as Keeper,
         { keeper: 'keeper-transient-blocked', phase: 'compacting' } as unknown as Parameters<
@@ -374,7 +374,7 @@ describe('summarizeKeeperMonitoring', () => {
       const summary = summarizeKeeperMonitoring(
         {
           name: 'keeper-offline-restarting',
-          status: 'offline',
+          diagnostic: { health_state: 'offline' },
           phase: 'Restarting',
           pipeline_stage: 'restarting',
         } as Keeper,
@@ -462,7 +462,7 @@ describe('summarizeKeeperMonitoring', () => {
     it('offline beats Draining-→-paused band when both apply', () => {
       const summary = summarizeKeeperMonitoring({
         name: 'keeper-offline-draining',
-        status: 'offline',
+        diagnostic: { health_state: 'offline' },
         phase: 'Draining',
         pipeline_stage: 'draining',
         last_heartbeat: new Date().toISOString(),

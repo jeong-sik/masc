@@ -51,13 +51,11 @@ function normalizeReadinessPillar(raw: unknown): DashboardReadinessPillar | null
   const label = asString(raw.label)
   const status = asString(raw.status)
   const summary = asString(raw.summary)
-  const score = asNumber(raw.score)
-  if (!key || !label || !status || !summary || score == null) return null
+  if (!key || !label || !status || !summary) return null
   return {
     key,
     label,
     status,
-    score,
     summary,
     blocking_reasons: asStringArray(raw.blocking_reasons),
     metrics: isRecord(raw.metrics)
@@ -76,11 +74,9 @@ function normalizeReadinessPillar(raw: unknown): DashboardReadinessPillar | null
 function normalizeReadiness(raw: unknown): DashboardReadinessSummary | null {
   if (!isRecord(raw)) return null
   const status = asString(raw.status)
-  const score = asNumber(raw.score)
-  if (!status || score == null) return null
+  if (!status) return null
   return {
     status,
-    score,
     decision_required_count: asNumber(raw.decision_required_count) ?? 0,
     blocking_count: asNumber(raw.blocking_count) ?? 0,
     pillars: extractArray(raw.pillars)

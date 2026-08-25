@@ -8,7 +8,7 @@ module Receipt = Masc.Keeper_execution_receipt_types
 let failures = ref []
 let check name cond = if not cond then failures := name :: !failures
 
-let input_required_request () : Agent_sdk.Error.input_required =
+let input_required_request () : Agent_core.Error.input_required =
   { request_id = "receipt-input-1"
   ; participant_name = None
   ; question = "Which repository?"

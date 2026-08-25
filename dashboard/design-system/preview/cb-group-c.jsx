@@ -380,8 +380,7 @@ function BoardPostCard() {
   // --white-6 (legacy alias) → rgb(--color-fg-primary / .06).
   const posts = [
     { id: 'p-841', author: 'nick0cave',     t: '2m',  title: 'Runtime weight=0 trial: descriptor-adapter-a regression?', votes: 12, replies: 4 },
-    { id: 'p-842', author: 'masc-improver', t: '14m', title: 'Persona TOML reconcile drift — 2880 redundant writes/day',  votes: 7,  replies: 2 },
-    { id: 'p-843', author: 'sangsu',        t: '38m', title: 'OAS pin SHA vs cap range drift checklist', votes: 5,  replies: 1 },
+    { id: 'p-843', author: 'sangsu',        t: '38m', title: 'Agent Core pin SHA vs cap range drift checklist', votes: 5,  replies: 1 },
   ];
   return (
     <div className="cb-board" style={{padding:14, gap:8, overflow:'auto'}}>

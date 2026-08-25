@@ -1,0 +1,62 @@
+{
+  "schema": "masc.keeper.board_write_effect_boundary.live.v1",
+  "measured_at": "2026-08-13T14:05:50Z",
+  "live_endpoint": "http://127.0.0.1:8935",
+  "identity": {
+    "runtime_repo_head": "f83f655904",
+    "binary_commit": null,
+    "binary_identity_status": "unknown"
+  },
+  "browser_matrix": {
+    "runner": "dashboard/e2e/board-interaction-matrix.mjs",
+    "playwright_version": "1.61.1",
+    "request_timeout_ms": 20000,
+    "result": "blocked_on_first_post",
+    "completed_assertions": 0,
+    "artifact_count": 0,
+    "error": "page.evaluate: TimeoutError: signal timed out"
+  },
+  "instrumented_canary": {
+    "run_id": "board-latency-1786629950865-86735",
+    "title": "Board latency probe board-latency-1786629950865-86735",
+    "post_id": "p-3fd63a0bfb53d170b9c964ad470c44e6",
+    "create": {
+      "route": "POST /api/v1/tools/masc_board_post",
+      "status": 201,
+      "elapsed_ms": 46836
+    },
+    "read_after_create": {
+      "route": "GET /api/v1/board?limit=200",
+      "status": 200,
+      "elapsed_ms": 92007,
+      "persisted": true
+    },
+    "cleanup": {
+      "route": "POST /api/v1/dashboard/board/delete",
+      "status": 200,
+      "elapsed_ms": 27081,
+      "deleted": true
+    }
+  },
+  "source_trace": {
+    "write_route": "lib/server/server_routes_http_routes_activity.ml",
+    "typed_dispatch": "lib/board_tool_adapter/board_tool_post.ml",
+    "durable_mutation": "lib/board/board_core.ml",
+    "post_commit_hooks": "lib/board/board_dispatch.ml",
+    "keeper_effect": "lib/server/server_bootstrap_loops.ml",
+    "finding": "The durable Board mutation completed, but the request fiber synchronously ran Keeper routing/wake and SSE/activity projection before returning the receipt."
+  },
+  "repair": {
+    "pr": 28620,
+    "head": "2bc6849b58ccbc4c2f7fdd1e388545c62fc53be1",
+    "state_at_capture": "draft_exact_head_ci_green",
+    "ci_run": "https://github.com/jeong-sik/masc/actions/runs/31712442428",
+    "scope": "Defer registered initialized Keeper lanes for Discoverable posts to their durable owner cursors; retain producer-side durable candidates for registered zero-cursor lanes; keep addressed delivery unchanged.",
+    "known_limit": "A Discoverable post created before a bootable Keeper has registered any lane still has no producer-side lane to record. That pre-registration startup window predates this repair and remains a separate lifecycle requirement."
+  },
+  "interpretation": {
+    "verified": "The unique post was durably visible after the delayed 201 response and was removed by exact-id cleanup.",
+    "not_verified": "Comment, vote, reaction, reload durability, karma UI, and screenshots were not reached.",
+    "timeout_policy": "The 20 second browser timeout was retained as a detector; it was not raised to hide the latency defect."
+  }
+}

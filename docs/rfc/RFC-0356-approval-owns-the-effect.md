@@ -1,16 +1,21 @@
+---
+rfc: "0356"
+status: Draft
+---
+
 # RFC-0356: Approval owns the effect (replay the approved payload, do not require byte-identical resubmission)
 
 **Status**: Draft
 **Created**: 2026-07-27
 **Fixes**: #25947
-**Related**: RFC-0000 §3.4 (Effect Permission Boundary), RFC-0347 (typed effect intent capability floor), #25943 (dogfood full-cycle ledger)
+**Related**: #25943 (dogfood full-cycle ledger)
 
 ## 배경
 
 Gate가 external effect를 `Deferred{Judge_requested}`로 미루면, 승인이 나도 그 효과는 실행되지 않는다. 실행되려면 Keeper가 **바이트 단위로 동일한 도구 호출을 다시 내야** 한다. `keeper_approval_queue.ml consume_approved_resolution`이 grant를 소비하는 조건이
 
 ```
-entry.keeper_name = keeper_name
+entry.name = keeper_name
 ∧ entry.tool_name = tool_name
 ∧ entry.input_hash = normalized_input_hash input
 ```
@@ -34,7 +39,7 @@ entry.keeper_name = keeper_name
 
 ### 이것은 게이트 결함이 아니다
 
-`Auto_judge` 모드가 모든 요청을 defer하는 것은 설계다 (`keeper_gate.ml` `decide_from_selected_mode`, `keeper_gate_mode.ml let default = Auto_judge`, 커밋 7b62a87d44 / #24332). RFC-0000 §3.4는 sandbox-confinement이 authorization 면제가 아님을 명시하고, "edited args는 approval 무효화(새 EffectIntent)"도 의도된 의미론이다.
+`Auto_judge` 모드가 모든 요청을 defer하는 것은 설계다 (`keeper_gate.ml` `decide_from_selected_mode`, `keeper_gate_mode.ml let default = Auto_judge`). Sandbox confinement is not an authorization exemption, and edited arguments form a different request.
 
 위반된 것은 같은 §3.4의 다른 불변식이다: **"approval 요청은 durable commit + Keeper lane 즉시 해제(lane-held time = 0)"** 는 "승인 후 그 효과가 실행된다"를 전제한다. 현재는 lane을 놓아준 뒤 승인된 효과를 실행할 주체가 없다.
 
@@ -65,7 +70,7 @@ entry.keeper_name = keeper_name
 |---|---|
 | TOCTOU 핀 | 저장된 locator의 `device`/`inode`를 **실행 시점에 검증**. 불일치면 typed 실패(승인 무효). 우회가 아니라 강화 — 지금은 재현이 안 되면 아무것도 검증되지 않는다 |
 | 승인한 내용만 실행 | 실행 입력이 승인 입력과 **동일한 객체**다. 모델이 다른 내용을 끼워 넣을 경로가 사라진다 |
-| edited args = 새 EffectIntent | 유지. 다른 인자는 애초에 다른 요청이며, 이전 승인은 자기 페이로드만 실행한다 |
+| edited args = 새 요청 | 유지. 다른 인자는 애초에 다른 요청이며, 이전 승인은 자기 페이로드만 실행한다 |
 | at-most-once | 기존 `grant_consumed` 플래그 + durable delivery 스냅샷 재사용 |
 
 ### 변경 지점
@@ -94,5 +99,5 @@ entry.keeper_name = keeper_name
 | 대안 | 기각 사유 |
 |---|---|
 | wake 페이로드에 원본 input을 실어 보내 재제출시킴 | 여전히 모델 충실도에 의존. 큰 페이로드를 컨텍스트로 왕복해 컨텍스트 비용(성공지표)을 악화 |
-| `input_hash` 비교 완화 / 경로·연산 단위 승인 | 안전검사 약화. RFC-0000 §3.4 비-재도입 규칙(risk band, 경로 분류기) 위반 |
+| `input_hash` 비교 완화 / 경로·연산 단위 승인 | 안전검사 약화. 승인한 페이로드와 실행할 페이로드가 달라진다 |
 | 지문에서 `device`/`inode` 제거 | TOCTOU 방어 상실 |

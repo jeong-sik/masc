@@ -12,9 +12,7 @@ let keeper_dir_ (config : Workspace.config) =
   let d = Workspace.keepers_runtime_dir config in
   ensure_dir_ d
 
-let session_base_dir_ (config : Workspace.config) =
-  let d = Filename.concat (Workspace.masc_root_dir config) "traces" in
-  ensure_dir_ d
+let session_base_dir_ (config : Workspace.config) = Keeper_fs.session_base_dir config
 
 (** Date-split metrics store: [.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl].
     Cached per keeper name so all callers share the same Eio.Mutex. *)
@@ -78,10 +76,10 @@ let keeper_runtime_dir config name =
   let dir = Filename.concat (keeper_dir_ config) name in
   ensure_dir_ dir
 
-(* Per-keeper OAS raw-trace store: one JSONL file per keeper turn under
+(* Per-keeper AGENT_CORE raw-trace store: one JSONL file per keeper turn under
    [.masc/keepers/<name>/raw-traces/].  A fresh file per turn keeps
-   [Agent_sdk.Raw_trace.create] from ever scanning previous turns' data
-   (OAS [create -> scan_next_seq -> read_all] parses the whole target
+   [Agent_core.Raw_trace.create] from ever scanning previous turns' data
+   (AGENT_CORE [create -> scan_next_seq -> read_all] parses the whole target
    file to resume its seq counter), so a corrupt or oversized historical
    trace cannot block keeper dispatch and per-turn sink creation stays
    O(1) in lifetime trace volume.  Each turn's [run_ref] (path + seq
@@ -104,7 +102,7 @@ let raw_trace_turn_counter = Atomic.make 0
    resume-appends to the (tiny, same-millisecond) existing file. *)
 let raw_trace_fresh_name_attempts = 8
 
-(* Shape mirrors OAS [Raw_trace.next_worker_run_id] (ts + pid + counter). *)
+(* Shape mirrors AGENT_CORE [Raw_trace.next_worker_run_id] (ts + pid + counter). *)
 let raw_trace_turn_basename () =
   let now_ms =
     (* NDT-OK: file-name prefix only — zero-padded ms sorts retention
@@ -135,18 +133,8 @@ let keeper_raw_trace_turn_path config name =
   in
   fresh 0
 
-let keeper_generation_index_path config name =
-  Filename.concat
-    (keeper_dir_ config)
-    (Keeper_runtime_root_entry.keeper_basename
-       ~keeper_name:name
-       Keeper_runtime_root_entry.Generation_index_log)
-
 let keeper_session_dir config trace_id =
   Filename.concat (session_base_dir_ config) trace_id
-
-let keeper_generation_manifest_path config trace_id =
-  Filename.concat (keeper_session_dir config trace_id) "generation_manifest.json"
 
 let keeper_history_path config trace_id =
   Filename.concat (keeper_session_dir config trace_id) "history.jsonl"

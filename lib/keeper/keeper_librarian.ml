@@ -2,7 +2,7 @@
 
 open Keeper_memory_os_types
 
-module Canonical_tool = Agent_sdk.Canonical_tool
+module Canonical_tool = Agent_core.Canonical_tool
 module String_map = Map.Make (String)
 module String_set = Set.Make (String)
 
@@ -15,11 +15,11 @@ type current_selection =
 
 type input =
   { turn_ref : Ids.Turn_ref.t
-  ; generation : int
-  ; persona : string
+  ; keeper_instructions : string
   ; current : current_selection option
   ; max_recall_fact_bytes : int
-  ; messages : Agent_sdk.Types.message list
+  ; messages : Agent_core.Types.message list
+  ; counterpart_observations : Keeper_counterpart_observation.t list
   }
 
 type selection =
@@ -46,7 +46,7 @@ let trim_nonempty s =
   if String.equal s "" then None else Some s
 ;;
 
-let role_to_string = Agent_sdk.Types.role_to_string
+let role_to_string = Agent_core.Types.role_to_string
 
 let text_of_content block =
   match Canonical_tool.tool_result_of_block block with
@@ -55,7 +55,7 @@ let text_of_content block =
       (Printf.sprintf
          "[tool result omitted: id=%s is_error=%b]"
          result.Canonical_tool.call_id
-         (Agent_sdk.Types.tool_result_outcome_is_error
+         (Agent_core.Types.tool_result_outcome_is_error
             result.Canonical_tool.outcome))
   | None -> (
     match Canonical_tool.tool_call_of_block block with
@@ -67,22 +67,22 @@ let text_of_content block =
            call.Canonical_tool.name)
     | None -> (
       match block with
-      | Agent_sdk.Types.Text s -> trim_nonempty s
-      | Agent_sdk.Types.ToolResult _ ->
+      | Agent_core.Types.Text s -> trim_nonempty s
+      | Agent_core.Types.ToolResult _ ->
         invalid_arg
-          "keeper_librarian: OAS canonical tool-result projection unavailable"
-      | Agent_sdk.Types.ToolUse _ ->
+          "keeper_librarian: AGENT_CORE canonical tool-result projection unavailable"
+      | Agent_core.Types.ToolUse _ ->
         invalid_arg
-          "keeper_librarian: OAS canonical tool-call projection unavailable"
-      | Agent_sdk.Types.Thinking _
-      | Agent_sdk.Types.ReasoningDetails _
-      | Agent_sdk.Types.RedactedThinking _ -> None
-      | Agent_sdk.Types.Image _ -> Some "[image omitted]"
-      | Agent_sdk.Types.Document _ -> Some "[document omitted]"
-      | Agent_sdk.Types.Audio _ -> Some "[audio omitted]"))
+          "keeper_librarian: AGENT_CORE canonical tool-call projection unavailable"
+      | Agent_core.Types.Thinking _
+      | Agent_core.Types.ReasoningDetails _
+      | Agent_core.Types.RedactedThinking _ -> None
+      | Agent_core.Types.Image _ -> Some "[image omitted]"
+      | Agent_core.Types.Document _ -> Some "[document omitted]"
+      | Agent_core.Types.Audio _ -> Some "[audio omitted]"))
 ;;
 
-let message_to_text ~turn (m : Agent_sdk.Types.message) : string =
+let message_to_text ~turn (m : Agent_core.Types.message) : string =
   let parts = List.filter_map text_of_content m.content in
   let body = String.concat "\n" parts |> String.trim in
   let header = Printf.sprintf "turn=%d role=%s" turn (role_to_string m.role) in
@@ -100,9 +100,19 @@ let format_messages_for_prompt messages =
     |> String.concat "\n\n---\n\n"
 ;;
 
-let current_fact_json fact =
+(* The LLM never sees the cryptographic identity. A 64-hex digest cannot be
+   echoed verbatim reliably — observed live 2026-08-22 (masc#29558): hamming-1
+   miscopies of current identities and stale digests recopied from recall
+   renderings in conversation history, each looping for hours under exact
+   decoding. The prompt renders short surrogate identities [m1], [m2], ... in
+   current-fact order, and the parser maps them back to real identities before
+   validation. Unknown tokens still reject the whole answer, so a stale or
+   invented identity stays fail-closed. *)
+let surrogate_id_of_index index = Printf.sprintf "m%d" (index + 1)
+
+let current_fact_json index fact =
   `Assoc
-    [ wire_field_memory_id, `String (memory_id fact)
+    [ wire_field_memory_id, `String (surrogate_id_of_index index)
     ; ( "fact"
       , `Assoc
           [ wire_field_claim, `String fact.claim
@@ -113,7 +123,7 @@ let current_fact_json fact =
 
 let current_selection_json (current : current_selection) =
   `Assoc
-    [ "facts", `List (List.map current_fact_json current.facts) ]
+    [ "facts", `List (List.mapi current_fact_json current.facts) ]
 ;;
 
 let format_current_selection_for_prompt
@@ -125,18 +135,22 @@ let format_current_selection_for_prompt
     current_selection_json current |> Yojson.Safe.pretty_to_string
 ;;
 
-let format_persona_for_prompt persona =
-  match trim_nonempty persona with
-  | None -> "[no persona]"
-  | Some persona -> persona
+let format_keeper_instructions_for_prompt instructions =
+  match trim_nonempty instructions with
+  | None -> "[no keeper instructions]"
+  | Some instructions -> instructions
 ;;
 
 let prompt_variables (inp : input) : (string * string) list =
-  [ "persona", format_persona_for_prompt inp.persona
+  [ ( "keeper_instructions"
+    , format_keeper_instructions_for_prompt inp.keeper_instructions )
   ; "current_memory", format_current_selection_for_prompt inp.current
   ; "max_recall_fact_bytes", string_of_int inp.max_recall_fact_bytes
   ; ( "conversation_history"
     , format_messages_for_prompt inp.messages )
+  ; ( "counterpart_observations"
+    , Keeper_counterpart_observation.render_for_prompt
+        inp.counterpart_observations )
   ]
 ;;
 
@@ -269,6 +283,35 @@ let current_facts_by_id facts =
     facts
 ;;
 
+let surrogate_identity_map facts =
+  List.mapi (fun index fact -> surrogate_id_of_index index, memory_id fact) facts
+  |> List.to_seq
+  |> String_map.of_seq
+;;
+
+let translate_retained_ids ~by_surrogate retained_memory_ids =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | token :: rest ->
+      (match String_map.find_opt token by_surrogate with
+       | Some identity -> loop (identity :: acc) rest
+       | None -> Error (Unknown_retained_memory_id token))
+  in
+  loop [] retained_memory_ids
+;;
+
+let translate_dropped_ids ~by_surrogate dropped =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | (statement : dropped_statement) :: rest ->
+      (match String_map.find_opt statement.memory_id by_surrogate with
+       | Some identity ->
+         loop ({ statement with memory_id = identity } :: acc) rest
+       | None -> Error (Unknown_dropped_memory_id statement.memory_id))
+  in
+  loop [] dropped
+;;
+
 let current_facts inp =
   match inp.current with
   | None -> []
@@ -379,14 +422,24 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
                    , traverse dropped_statement_of_json dropped_items
                  with
                  | Some new_claims, Some dropped ->
+                   let by_surrogate =
+                     surrogate_identity_map (current_facts inp)
+                   in
                    (match
-                      materialize_facts
-                        ~current_facts:(current_facts inp)
-                        ~retained_memory_ids
-                        ~new_claims
-                        ~dropped
+                      ( translate_retained_ids
+                          ~by_surrogate
+                          retained_memory_ids
+                      , translate_dropped_ids ~by_surrogate dropped )
                     with
-                    | Ok facts ->
+                   | Ok retained_memory_ids, Ok dropped ->
+                     (match
+                        materialize_facts
+                          ~current_facts:(current_facts inp)
+                          ~retained_memory_ids
+                          ~new_claims
+                          ~dropped
+                      with
+                      | Ok facts ->
                       (match
                          Keeper_memory_os_budget.measure
                            ~max_bytes:inp.max_recall_fact_bytes
@@ -404,6 +457,7 @@ let selection_of_json_result ?now (inp : input) (json : Yojson.Safe.t) :
                            (Recall_fact_budget_exceeded
                               { actual_bytes; max_bytes }))
                     | Error _ as error -> error)
+                   | (Error _ as error), _ | _, (Error _ as error) -> error)
                  | Some _, None -> Error Dropped_schema_mismatch
                  | None, _ -> Error Claim_schema_mismatch)))
         | _ -> Error Missing_required_fields))

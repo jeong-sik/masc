@@ -1,5 +1,41 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeOperatorDigest, normalizeOperatorSnapshot } from './operator-normalizers'
+import {
+  normalizeOperatorDigest,
+  normalizeOperatorSnapshot as normalizeOperatorSnapshotWire,
+} from './operator-normalizers'
+
+const emptyPendingConfirmEnvelope = {
+  items: [],
+  summary: {
+    actor_filter: null,
+    filter_active: false,
+    visible_count: 0,
+    total_count: 0,
+    hidden_count: 0,
+    hidden_actors: [],
+    confirm_required_actions: [],
+  },
+}
+
+const validPendingConfirmation = {
+  confirm_token: 'tok-1',
+  trace_id: 'trace-1',
+  actor: 'agent-1',
+  action_type: 'keeper_probe',
+  target_type: 'keeper',
+  target_id: 'janitor',
+  payload: {},
+  delegated_tool: 'masc_keeper_status',
+  created_at: '2026-08-08T00:00:00Z',
+  expires_at: null,
+}
+
+function normalizeOperatorSnapshot(raw: Record<string, unknown>) {
+  return normalizeOperatorSnapshotWire({
+    pending_confirm_envelope: emptyPendingConfirmEnvelope,
+    ...raw,
+  })
+}
 
 // ================================================================
 // normalizeOperatorDigest
@@ -14,7 +50,6 @@ describe('normalizeOperatorDigest', () => {
     expect(result.health).toBeUndefined()
     expect(result.attention_items).toEqual([])
     expect(result.recommended_actions).toEqual([])
-    expect(result.recent_reviews).toEqual([])
   })
 
   it('returns safe defaults for undefined', () => {
@@ -144,20 +179,12 @@ describe('normalizeOperatorDigest', () => {
 // ================================================================
 
 describe('normalizeOperatorSnapshot', () => {
-  it('returns safe defaults for null', () => {
-    const result = normalizeOperatorSnapshot(null)
-    expect(result.root).toEqual({})
-    expect(result.keepers).toEqual([])
-    expect(result.persistent_agents).toEqual([])
-    expect(result.inference_inflight).toBeNull()
-    expect(result.recent_messages).toEqual([])
-    expect(result.pending_confirms).toEqual([])
-    expect(result.available_actions).toEqual([])
+  it('rejects null', () => {
+    expect(() => normalizeOperatorSnapshotWire(null)).toThrow('invalid operator snapshot')
   })
 
-  it('returns safe defaults for undefined', () => {
-    const result = normalizeOperatorSnapshot(undefined)
-    expect(result.keepers).toEqual([])
+  it('rejects undefined', () => {
+    expect(() => normalizeOperatorSnapshotWire(undefined)).toThrow('invalid operator snapshot')
   })
 
   it('extracts root namespace', () => {
@@ -387,16 +414,16 @@ describe('normalizeOperatorSnapshot', () => {
           name: 'blocked-keeper',
           status: 'active',
           needs_attention: true,
-          attention_reason: 'turn_timeout',
+          attention_reason: 'stale_turn_timeout',
           next_human_action: 'inspect_runtime_blocker',
           runtime_trust: {
             disposition: 'Alert',
             operator_disposition: 'pause_runtime',
-            operator_disposition_reason: 'turn_timeout',
+            operator_disposition_reason: 'stale_turn_timeout',
             needs_attention: true,
-            attention_reason: 'turn_timeout',
+            attention_reason: 'stale_turn_timeout',
             latest_terminal_reason: {
-              code: 'turn_timeout',
+              code: 'stale_turn_timeout',
               source: 'execution_receipt',
               severity: 'bad',
               summary: 'Turn execution exceeded the keeper turn deadline',
@@ -410,15 +437,14 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.keepers).toHaveLength(1)
     const keeper = result.keepers[0]!
     expect(keeper.needs_attention).toBe(true)
-    expect(keeper.attention_reason).toBe('turn_timeout')
     expect(keeper.next_human_action).toBe('inspect_runtime_blocker')
     expect(keeper.runtime_trust).toMatchObject({
       disposition: 'Alert',
       operator_disposition: 'pause_runtime',
-      operator_disposition_reason: 'turn_timeout',
+      operator_disposition_reason: 'stale_turn_timeout',
       needs_attention: true,
       latest_terminal_reason: {
-        code: 'turn_timeout',
+        code: 'stale_turn_timeout',
         severity: 'bad',
         summary: 'Turn execution exceeded the keeper turn deadline',
         next_action: 'inspect_runtime_blocker',
@@ -469,53 +495,72 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.recent_messages[0]!.id).toBe('msg-1')
   })
 
-  it('extracts pending_confirms with confirm_token', () => {
+  it('keeps pending confirmations inside the envelope', () => {
     const result = normalizeOperatorSnapshot({
-      pending_confirms: [
-        { confirm_token: 'tok-1', actor: 'agent-1', action_type: 'pause' },
-      ],
+      pending_confirm_envelope: {
+        items: [
+          validPendingConfirmation,
+        ],
+        summary: {
+          ...emptyPendingConfirmEnvelope.summary,
+          visible_count: 1,
+          total_count: 1,
+        },
+      },
     })
-    expect(result.pending_confirms).toHaveLength(1)
-    expect(result.pending_confirms[0]!.confirm_token).toBe('tok-1')
+    expect(result.pending_confirm_envelope.items).toHaveLength(1)
+    expect(result.pending_confirm_envelope.items[0]!.confirm_token).toBe('tok-1')
   })
 
-  it('filters pending_confirms without token', () => {
-    const result = normalizeOperatorSnapshot({
-      pending_confirms: [
-        { actor: 'agent-1' }, // no token
-      ],
-    })
-    expect(result.pending_confirms).toEqual([])
+  it('rejects a snapshot with an invalid envelope item', () => {
+    expect(() => normalizeOperatorSnapshotWire({
+      pending_confirm_envelope: {
+        items: [
+          { actor: 'agent-1' },
+        ],
+        summary: {
+          ...emptyPendingConfirmEnvelope.summary,
+          visible_count: 1,
+          total_count: 1,
+        },
+      },
+    })).toThrow('invalid pending_confirm_envelope')
+  })
+
+  it('rejects a snapshot without the canonical envelope', () => {
+    expect(() => normalizeOperatorSnapshotWire({})).toThrow(
+      'invalid pending_confirm_envelope',
+    )
   })
 
   it('extracts available_actions', () => {
     const result = normalizeOperatorSnapshot({
       available_actions: [
-        { action_type: 'pause', target_type: 'keeper', description: 'Pause' },
+        { action_type: 'keeper_probe', tool_name: 'masc_keeper_status', target_type: 'keeper', description: 'Immediate keeper diagnostic snapshot.', confirm_required: false },
       ],
     })
     expect(result.available_actions).toHaveLength(1)
-    expect(result.available_actions[0]!.action_type).toBe('pause')
+    expect(result.available_actions[0]!.action_type).toBe('keeper_probe')
   })
 
-  it('normalizes the exact OAS inference observation', () => {
+  it('normalizes the exact Agent Core inference observation', () => {
     const result = normalizeOperatorSnapshot({
       inference_inflight: {
-        boundary_owner: 'oas_runtime',
+        boundary_owner: 'agent_core_runtime',
         active: 1,
       },
     })
     expect(result.inference_inflight).toEqual({
-      boundary_owner: 'oas_runtime',
+      boundary_owner: 'agent_core_runtime',
       active: 1,
     })
   })
 
   it.each([
     { boundary_owner: 'runtime', active: 1 },
-    { boundary_owner: 'oas_runtime', active: -1 },
-    { boundary_owner: 'oas_runtime', active: 1.5 },
-    { boundary_owner: 'oas_runtime' },
+    { boundary_owner: 'agent_core_runtime', active: -1 },
+    { boundary_owner: 'agent_core_runtime', active: 1.5 },
+    { boundary_owner: 'agent_core_runtime' },
   ])('rejects inference observations outside the exact boundary contract', (inferenceInflight) => {
     const result = normalizeOperatorSnapshot({ inference_inflight: inferenceInflight })
 
@@ -536,26 +581,18 @@ describe('normalizeOperatorSnapshot', () => {
     const result = normalizeOperatorSnapshot({
       pending_confirm_envelope: {
         items: [
-          { confirm_token: 'tok-e1', actor: 'agent-1' },
+          { ...validPendingConfirmation, confirm_token: 'tok-e1' },
         ],
         summary: {
+          ...emptyPendingConfirmEnvelope.summary,
           visible_count: 1,
           total_count: 5,
+          hidden_count: 4,
         },
       },
     })
-    expect(result.pending_confirms).toHaveLength(1)
-    expect(result.pending_confirms[0]!.confirm_token).toBe('tok-e1')
-  })
-
-  it('falls back to pending_confirms when no envelope', () => {
-    const result = normalizeOperatorSnapshot({
-      pending_confirms: [
-        { confirm_token: 'tok-raw', actor: 'system' },
-      ],
-    })
-    expect(result.pending_confirms).toHaveLength(1)
-    expect(result.pending_confirms[0]!.confirm_token).toBe('tok-raw')
+    expect(result.pending_confirm_envelope.items).toHaveLength(1)
+    expect(result.pending_confirm_envelope.items[0]!.confirm_token).toBe('tok-e1')
   })
 
   it('extracts top-level needs_attention, attention_reason and next_human_action from keeper payload', () => {

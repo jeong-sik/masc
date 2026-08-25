@@ -14,6 +14,7 @@ module Tool_result = Tool_result
 module Keeper_types = Keeper_types
 module Keeper_identity = Masc.Keeper_identity
 module Keeper_registry = Masc.Keeper_registry
+module Keeper_lifecycle_reservation = Masc.Keeper_lifecycle_reservation
 module Masc_log = Log
 
 let () =
@@ -21,7 +22,9 @@ let () =
   let (_operator_force_link : unit) = Operator_tool.force_link in
   let (_dashboard_ws_sessions : int) = Server_mcp_transport_ws.session_count () in
   Atomic.set Workspace_hooks.get_default_runtime_id_fn (fun () -> "test.local");
-  Atomic.set Workspace_hooks.get_cross_verifier_runtime_id_fn (fun () -> None)
+  Atomic.set
+    Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+    (fun () -> Ok [ "test.local" ])
 
 let () =
   (* These process-global registries are installed by module initializers in the
@@ -51,16 +54,6 @@ let cleanup_dir dir =
       Unix.unlink path
   in
   try rm dir with _ -> ()
-
-let contains_substring s needle =
-  let s_len = String.length s in
-  let n_len = String.length needle in
-  let rec loop i =
-    if i + n_len > s_len then false
-    else if String.sub s i n_len = needle then true
-    else loop (i + 1)
-  in
-  if n_len = 0 then true else loop 0
 
 let with_env key value f =
   let old = Sys.getenv_opt key in
@@ -177,7 +170,11 @@ let json_string_field_exn label json field =
         (Yojson.Safe.to_string json)
 
 let log_detail_string (entry : Masc_log.Ring.entry) field =
-  Yojson.Safe.Util.(entry.details |> member field |> to_string_option)
+  match Yojson.Safe.Util.member field entry.details with
+  | `String value | `Intlit value -> Some value
+  | `Int value -> Some (string_of_int value)
+  | `Null -> None
+  | _ -> None
 
 let find_mcp_tool_log_exn ~phase ~tool_name ~request_id entries =
   match
@@ -413,9 +410,9 @@ let test_is_jsonrpc_v2 () =
   let valid = `Assoc [("jsonrpc", `String "2.0"); ("method", `String "test")] in
   let invalid = `Assoc [("jsonrpc", `String "1.0")] in
   let no_version = `Assoc [("method", `String "test")] in
-  Alcotest.(check bool) "valid 2.0" true (Masc.Mcp_server.is_jsonrpc_v2 valid);
-  Alcotest.(check bool) "invalid 1.0" false (Masc.Mcp_server.is_jsonrpc_v2 invalid);
-  Alcotest.(check bool) "no version" false (Masc.Mcp_server.is_jsonrpc_v2 no_version)
+  Alcotest.(check bool) "valid 2.0" true (Mcp_transport_protocol.is_jsonrpc_v2 valid);
+  Alcotest.(check bool) "invalid 1.0" false (Mcp_transport_protocol.is_jsonrpc_v2 invalid);
+  Alcotest.(check bool) "no version" false (Mcp_transport_protocol.is_jsonrpc_v2 no_version)
 
 let test_jsonrpc_request_parsing () =
   let json = `Assoc [
@@ -424,7 +421,7 @@ let test_jsonrpc_request_parsing () =
     ("method", `String "initialize");
     ("params", `Assoc []);
   ] in
-  match Masc.Mcp_server.jsonrpc_request_of_yojson json with
+  match Mcp_transport_protocol.jsonrpc_request_of_yojson json with
   | Ok req ->
       Alcotest.(check string) "method" "initialize" req.method_;
       Alcotest.(check bool) "has id" true (req.id <> None)
@@ -441,36 +438,36 @@ let test_is_notification () =
     ("jsonrpc", `String "2.0");
     ("method", `String "notifications/initialized");
   ] in
-  (match Masc.Mcp_server.jsonrpc_request_of_yojson with_id with
-   | Ok req -> Alcotest.(check bool) "with id" false (Masc.Mcp_server.is_notification req)
+  (match Mcp_transport_protocol.jsonrpc_request_of_yojson with_id with
+   | Ok req -> Alcotest.(check bool) "with id" false (Mcp_transport_protocol.is_notification req)
    | Error _ -> Alcotest.fail "parse error");
-  (match Masc.Mcp_server.jsonrpc_request_of_yojson without_id with
-   | Ok req -> Alcotest.(check bool) "without id" true (Masc.Mcp_server.is_notification req)
+  (match Mcp_transport_protocol.jsonrpc_request_of_yojson without_id with
+   | Ok req -> Alcotest.(check bool) "without id" true (Mcp_transport_protocol.is_notification req)
    | Error _ -> Alcotest.fail "parse error")
 
 let test_protocol_version () =
   let params = Some (`Assoc [("protocolVersion", `String "2025-06-18")]) in
-  let version = Masc.Mcp_server.protocol_version_from_params params in
+  let version = Mcp_transport_protocol.protocol_version_from_params params in
   Alcotest.(check string) "version extracted" "2025-06-18" version;
 
-  (match Mcp.validate_protocol_version "2025-06-18" with
+  (match Mcp_transport_protocol.validate_protocol_version "2025-06-18" with
    | Ok version ->
        Alcotest.(check string) "2025-06-18 is supported" "2025-06-18" version
    | Error msg -> Alcotest.fail msg);
 
-  let normalized = Masc.Mcp_server.normalize_protocol_version "unknown" in
+  let normalized = Mcp_transport_protocol.normalize_protocol_version "unknown" in
   Alcotest.(check string) "normalized to default" "2025-11-25" normalized;
 
-  match Mcp.validate_protocol_version "unknown" with
+  match Mcp_transport_protocol.validate_protocol_version "unknown" with
   | Error msg ->
       Alcotest.(check bool) "unsupported version rejected" true
-        (contains_substring msg "Unsupported protocolVersion")
+        (String_util.contains_substring msg "Unsupported protocolVersion")
   | Ok _ -> Alcotest.fail "expected unsupported protocol version to be rejected"
 
 (* ===== Unit Tests for Response Builders ===== *)
 
 let test_make_response () =
-  let response = Masc.Mcp_server.make_response ~id:(`Int 42) (`String "result") in
+  let response = Mcp_transport_protocol.make_response ~id:(`Int 42) (`String "result") in
   match response with
   | `Assoc fields ->
       let id = List.assoc "id" fields in
@@ -481,7 +478,7 @@ let test_make_response () =
   | _ -> Alcotest.fail "not an object"
 
 let test_make_error () =
-  let response = Masc.Mcp_server.make_error ~id:(`Int 1) (-32600) "Invalid Request" in
+  let response = Mcp_transport_protocol.make_error ~id:(`Int 1) (-32600) "Invalid Request" in
   match response with
   | `Assoc fields ->
       let error = List.assoc "error" fields in
@@ -564,7 +561,7 @@ let test_handle_request_initialize_rejects_unsupported_protocol_version () =
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
   Alcotest.(check bool) "unsupported protocol message" true
-    (contains_substring (error_message_exn response) "Unsupported protocolVersion");
+    (String_util.contains_substring (error_message_exn response) "Unsupported protocolVersion");
 
   cleanup_dir base_path
 
@@ -667,9 +664,25 @@ let test_handle_request_tools_list () =
     false
     (List.mem "masc_voice_ping_pong" names);
   Alcotest.(check bool)
-    "board_search hidden from public surface"
-    false
+    "contains masc_board_search (public surface)"
+    true
     (List.mem "masc_board_search" names);
+  Alcotest.(check bool)
+    "contains masc_task_history (public surface)"
+    true
+    (List.mem "masc_task_history" names);
+  Alcotest.(check bool)
+    "contains masc_keeper_delegate_status (public surface)"
+    true
+    (List.mem "masc_keeper_delegate_status" names);
+  Alcotest.(check bool)
+    "contains masc_keeper_msg (public surface)"
+    true
+    (List.mem "masc_keeper_msg" names);
+  Alcotest.(check bool)
+    "omits masc_fusion_status (keeper-internal, RFC-0266)"
+    false
+    (List.mem "masc_fusion_status" names);
   Alcotest.(check bool)
     "removed experiment_start absent from list"
     false
@@ -744,11 +757,11 @@ let test_handle_request_initialize_operator_profile () =
               | _ -> ""
             in
             Alcotest.(check bool) "mentions operator profile" true
-              (contains_substring instructions "seven operator tools");
+              (String_util.contains_substring instructions "six operator tools");
             Alcotest.(check bool) "does not mention surface audit" false
-              (contains_substring instructions "surface audit");
+              (String_util.contains_substring instructions "surface audit");
             Alcotest.(check bool) "mentions confirm workflow" true
-              (contains_substring instructions "confirm_required=true")
+              (String_util.contains_substring instructions "confirm_required=true")
         | _ -> Alcotest.fail "result not an object")
    | _ -> Alcotest.fail "response not an object");
   cleanup_dir base_path
@@ -786,7 +799,6 @@ let test_handle_request_tools_list_operator_profile () =
                    [
                      "masc_operator_action";
                      "masc_operator_board_attention_quarantine_requeue";
-                     "masc_operator_chat_recovery_resolve";
                      "masc_operator_confirm";
                      "masc_operator_digest";
                      "masc_operator_snapshot";
@@ -880,9 +892,9 @@ let test_handle_request_initialize_managed_profile () =
               | _ -> ""
             in
             Alcotest.(check bool) "mentions managed profile" true
-              (contains_substring instructions "managed-agent profile");
-            Alcotest.(check bool) "mentions canonical task control" true
-              (contains_substring instructions "masc_transition")
+              (String_util.contains_substring instructions "managed-agent profile");
+            Alcotest.(check bool) "distinguishes public inventory" true
+              (String_util.contains_substring instructions "public /mcp surface")
         | _ -> Alcotest.fail "result not an object")
    | _ -> Alcotest.fail "response not an object");
   cleanup_dir base_path
@@ -1005,7 +1017,7 @@ let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias ()
   in
   let response_text = Yojson.Safe.to_string response in
   Alcotest.(check bool) "removed alias rejected" true
-    (contains_substring response_text
+    (String_util.contains_substring response_text
        "Tool 'masc_claim_task' is not available on this MCP endpoint");
   Alcotest.(check (float 0.0001)) "rejected tools/call records duration count"
     1.0
@@ -1058,14 +1070,14 @@ let test_handle_request_tools_call_missing_params_records_duration () =
   in
   let response_text = Yojson.Safe.to_string response in
   Alcotest.(check bool) "missing params rejected" true
-    (contains_substring response_text "Missing params");
+    (String_util.contains_substring response_text "Missing params");
   Alcotest.(check (float 0.0001)) "missing params records duration count"
     1.0
     (Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
      -. before_count);
   cleanup_dir base_path
 
-let test_handle_request_tools_call_managed_translation_error_records_duration () =
+let test_handle_request_tools_call_managed_invalid_arguments_records_duration () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -1115,9 +1127,9 @@ let test_handle_request_tools_call_managed_translation_error_records_duration ()
       request
   in
   let response_text = Yojson.Safe.to_string response in
-  Alcotest.(check bool) "translation error is returned" true
-    (contains_substring response_text "managed agent tool translation failed");
-  Alcotest.(check (float 0.0001)) "translation error records duration count"
+  Alcotest.(check bool) "invalid arguments are rejected at admission" true
+    (String_util.contains_substring response_text "arguments must be an object");
+  Alcotest.(check (float 0.0001)) "admission error records duration count"
     1.0
     (Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
      -. before_count);
@@ -1132,7 +1144,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
-  Masc.Auth.disable_auth base_path;
+  Auth.disable_auth base_path;
   let sid = "mcp-transition-claim-guidance" in
   let init_result =
     Mcp_eio.execute_tool_eio ~sw ~clock
@@ -1164,9 +1176,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
                 ( "arguments",
                   `Assoc
                     [
-                      ("agent_name", `String "codex");
                       ("task_id", `String "task-001");
-                      ("agent_name", `String "codex");
                       ("action", `String "claim");
                     ] );
               ] );
@@ -1191,7 +1201,7 @@ let test_handle_request_tools_call_transition_done_requires_llm_verdict () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
-  Masc.Auth.disable_auth base_path;
+  Auth.disable_auth base_path;
   let sid = "mcp-transition-done-guidance" in
   let init_result =
     Mcp_eio.execute_tool_eio ~sw ~clock
@@ -1217,9 +1227,7 @@ let test_handle_request_tools_call_transition_done_requires_llm_verdict () =
       ~arguments:
         (`Assoc
           [
-            ("agent_name", `String "codex");
             ("task_id", `String "task-001");
-            ("agent_name", `String "codex");
             ("action", `String "claim");
           ])
   in
@@ -1238,9 +1246,7 @@ let test_handle_request_tools_call_transition_done_requires_llm_verdict () =
                 ( "arguments",
                   `Assoc
                     [
-                      ("agent_name", `String "codex");
                       ("task_id", `String "task-001");
-                      ("agent_name", `String "codex");
                       ("action", `String "done");
                       ("notes", `String "Completed task and verified output");
                     ] );
@@ -1281,7 +1287,7 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
-  Masc.Auth.disable_auth base_path;
+  Auth.disable_auth base_path;
   let sid = "mcp-deprecated-claim-alias" in
   let init_result =
     Mcp_eio.execute_tool_eio ~sw ~clock
@@ -1314,7 +1320,6 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
                   `Assoc
                     [
                       ("task_id", `String "task-001");
-                      ("agent_name", `String "codex");
                     ] );
               ] );
         ])
@@ -1324,8 +1329,8 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
   in
   let response_text = Yojson.Safe.to_string response in
   Alcotest.(check bool) "missing action rejected" true
-    (contains_substring response_text "action"
-     && contains_substring response_text "MISSING");
+    (String_util.contains_substring response_text "action"
+     && String_util.contains_substring response_text "MISSING");
   cleanup_dir base_path
 
 let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
@@ -1354,7 +1359,7 @@ let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
             Alcotest.(check bool) "method not available" true
               (match List.assoc_opt "message" error_fields with
                | Some (`String msg) ->
-                   contains_substring msg "not available on this MCP endpoint"
+                   String_util.contains_substring msg "not available on this MCP endpoint"
                | _ -> false)
         | _ -> Alcotest.fail "error missing")
    | _ -> Alcotest.fail "response not an object");
@@ -1390,8 +1395,11 @@ let test_handle_request_tools_list_rejects_nonstandard_names_filter () =
     [ "masc_messages"; "masc_status" ] names;
   cleanup_dir base_path
 
+(* The MASC_PLACEHOLDER_TOOLS_ENABLED putenv wrapper is gone with the knob
+   (RFC-0371 B7): the assertion below never depended on it — placeholder
+   removal from tools/list is decided elsewhere. *)
 let test_handle_request_tools_list_with_placeholder_flag () =
-  with_env "MASC_PLACEHOLDER_TOOLS_ENABLED" "1" (fun () ->
+  (
     Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
     let clock = Eio.Stdenv.clock env in
@@ -1413,6 +1421,36 @@ let test_handle_request_tools_list_with_placeholder_flag () =
       (List.mem "masc_archive_save" names);
 
     cleanup_dir base_path)
+
+(* Regression: task-271 — MASC_PLACEHOLDER_TOOLS_ENABLED=false must hide
+   placeholder tools (RFC-0371 B7 removed the env read; restored here). *)
+let test_placeholder_tools_hidden_when_env_false () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  (* Save and override the env var *)
+  let prev = Sys.getenv_opt "MASC_PLACEHOLDER_TOOLS_ENABLED" in
+  Unix.putenv "MASC_PLACEHOLDER_TOOLS_ENABLED" "false";
+  let base_path = temp_dir () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
+  let tools = tools_list_all ~clock ~sw state in
+  let names =
+    tools
+    |> List.filter_map (function
+         | `Assoc fields -> List.assoc_opt "name" fields
+         | _ -> None)
+    |> List.filter_map (function `String s -> Some s | _ -> None)
+  in
+  (* With the env false, masc_archive_save (a placeholder) must be absent *)
+  Alcotest.(check bool)
+    "placeholder hidden when MASC_PLACEHOLDER_TOOLS_ENABLED=false"
+    false
+    (List.mem "masc_archive_save" names);
+  (* Restore env *)
+  (match prev with None -> Unix.unsetenv "MASC_PLACEHOLDER_TOOLS_ENABLED"
+   | Some v -> Unix.putenv "MASC_PLACEHOLDER_TOOLS_ENABLED" v);
+  cleanup_dir base_path
 
 let test_handle_request_tools_list_include_hidden_metadata () =
   Eio_main.run @@ fun env ->
@@ -1572,9 +1610,9 @@ let test_execute_tool_generated_agent_name_uses_token_identity () =
 
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
-  ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Masc.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
+    match Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
@@ -1601,13 +1639,13 @@ let test_execute_tool_actor_mismatch_reports_typed_code () =
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore
-    (Masc.Auth.enable_auth
+    (Auth.enable_auth
        base_path
        ~require_token:true
        ~agent_name:"bootstrap-admin");
   let raw_token =
     match
-      Masc.Auth.create_token
+      Auth.create_token
         base_path
         ~agent_name:"codex"
         ~role:Masc_domain.Worker
@@ -1682,9 +1720,9 @@ let check_auth_preflight_result ~tool_name result =
     false
     (Tool_result.is_success result);
   Alcotest.(check bool) (tool_name ^ " reports auth/credential blocker") true
-    (contains_substring msg "Token required"
-     || contains_substring msg "Unauthorized"
-     || contains_substring msg "No credential");
+    (String_util.contains_substring msg "Token required"
+     || String_util.contains_substring msg "Unauthorized"
+     || String_util.contains_substring msg "No credential");
   Alcotest.(check (option string))
     (tool_name ^ " policy rejection class")
     (Some "policy_rejection")
@@ -1716,9 +1754,9 @@ let test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
-  ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Masc.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
+    match Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
@@ -1749,9 +1787,9 @@ let test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
-  ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Masc.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
+    match Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
@@ -1789,9 +1827,9 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_rejected_without_mut
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
-  ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Masc.Auth.create_token base_path ~agent_name:"qa-king" ~role:Masc_domain.Admin with
+    match Auth.create_token base_path ~agent_name:"mu-king" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
@@ -1804,12 +1842,12 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_rejected_without_mut
       ~mcp_session_id:"sid-hyphenated-generated-alias"
       ~auth_token:raw_token state
       ~name:"keeper_task_claim"
-      ~arguments:(`Assoc [ ("agent_name", `String "qa-king-warm-heron") ])
+      ~arguments:(`Assoc [ ("agent_name", `String "mu-king-warm-heron") ])
   in
   Alcotest.(check bool) "claim_next rejected by public MCP path" false
     (Tool_result.is_success result);
   Alcotest.(check bool) "claim_next points to in-process task handler" true
-    (contains_substring
+    (String_util.contains_substring
        (Tool_result.message result)
        "keeper in-process task handler");
   check_task_still_todo (Mcp_server.workspace_config state) "task-001";
@@ -1828,7 +1866,7 @@ let test_execute_tool_claim_next_requires_auth_before_mutation () =
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
-  ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   ignore (Masc.Workspace.bind_session (Mcp_server.workspace_config state) ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
   ignore
     (Masc.Workspace.add_task (Mcp_server.workspace_config state) ~title:"claim-next-auth-preflight"
@@ -1857,7 +1895,7 @@ let test_execute_tool_transition_requires_auth_before_mutation () =
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
-  ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   ignore (Masc.Workspace.bind_session (Mcp_server.workspace_config state) ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
   ignore
     (Masc.Workspace.add_task (Mcp_server.workspace_config state) ~title:"transition-auth-preflight"
@@ -1892,9 +1930,9 @@ let test_execute_tool_add_task_with_admin_token_without_join () =
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
-  ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+  ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
-    match Masc.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
+    match Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
     | Ok (token, _cred) -> token
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
@@ -1913,7 +1951,7 @@ let test_execute_tool_add_task_with_admin_token_without_join () =
   in
   Alcotest.(check bool) "add_task succeeds" true (Tool_result.is_success result);
   Alcotest.(check bool) "response mentions added task" true
-    (contains_substring ((Tool_result.message result)) "Added task-001");
+    (String_util.contains_substring ((Tool_result.message result)) "Added task-001");
   let task =
     match Masc.Workspace.get_tasks_raw (Mcp_server.workspace_config state) with
     | [ task ] -> task
@@ -1951,18 +1989,18 @@ let test_execute_tool_http_auth_token_overrides_stale_argument_token () =
     result.token;
   cleanup_dir base_path
 
-let test_execute_tool_legacy_argument_token_ignored_without_http_auth () =
+let test_execute_tool_argument_token_ignored_without_http_auth () =
   let base_path = temp_dir () in
   let config = Masc.Workspace.default_config base_path in
   let identity =
     test_agent_identity
-      ~uuid:"legacy-token-ignored-test"
-      ~session_key:"legacy-token-ignored-session"
+      ~uuid:"argument-token-ignored-test"
+      ~session_key:"argument-token-ignored-session"
   in
   let result =
     Masc.Mcp_server_eio_caller_identity.resolve ~config
       ~tool_name:"masc_status"
-      ~arguments:(`Assoc [ ("token", `String "legacy-argument-token") ])
+      ~arguments:(`Assoc [ ("token", `String "argument-token") ])
       ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
       ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
@@ -1970,7 +2008,7 @@ let test_execute_tool_legacy_argument_token_ignored_without_http_auth () =
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
   Alcotest.(check (option string))
-    "legacy argument token ignored without HTTP auth"
+    "argument token ignored without HTTP auth"
     None
     result.token;
   cleanup_dir base_path
@@ -1986,7 +2024,7 @@ let test_execute_tool_without_mcp_session_uses_generated_identity () =
   let result =
     Masc.Mcp_server_eio_caller_identity.resolve ~config
       ~tool_name:"masc_broadcast"
-      ~arguments:(`Assoc [ ("message", `String "generated identity check") ])
+      ~arguments:(`Assoc [ ("content", `String "generated identity check") ])
       ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
       ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
@@ -2136,7 +2174,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
       Keeper_registry.For_testing.clear ();
       cleanup_dir base_path)
     (fun () ->
-      let keeper_name = "sangsu" in
+      let keeper_name = "alpha" in
       let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
       let keeper_meta =
         make_keeper_meta ~agent_name:keeper_agent_name keeper_name
@@ -2174,7 +2212,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
           Masc.Keeper_registry_tool_usage_persistence.flush ~base_path keeper_name;
           let persisted =
             Yojson.Safe.from_file
-              (Filename.concat base_path ".masc/keepers/tool_usage/sangsu.json")
+              (Filename.concat base_path ".masc/keepers/tool_usage/alpha.json")
           in
           let open Yojson.Safe.Util in
           Alcotest.(check int) "persisted schema version" 2
@@ -2185,7 +2223,38 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
             (persisted |> member "tools" |> index 0 |> member "deferred" |> to_int);
           Keeper_registry.For_testing.unregister ~base_path keeper_name;
           ignore (Keeper_registry.For_testing.register ~base_path keeper_name keeper_meta);
-          Masc.Keeper_registry_tool_usage_persistence.restore ~base_path keeper_name;
+          let registered =
+            Keeper_registry.get ~base_path keeper_name
+            |> Option.get
+          in
+          let launch_token =
+            match
+              Keeper_lifecycle_reservation.acquire
+                ~base_path
+                ~keeper_name
+                ~purpose:Keepalive_launch
+            with
+            | Ok token -> token
+            | Error _ -> Alcotest.fail "failed to reserve keeper launch lifecycle"
+          in
+          Fun.protect
+            ~finally:(fun () ->
+              ignore (Keeper_lifecycle_reservation.release launch_token))
+            (fun () ->
+              (* The ordinary replay is fenced while launch owns the key. The
+                 launch path must carry its exact mutation authority instead of
+                 silently dropping the persisted counters. *)
+              Masc.Keeper_registry_tool_usage_persistence.restore
+                ~base_path
+                keeper_name;
+              Alcotest.(check (list string))
+                "unqualified restore is fenced"
+                []
+                (Keeper_registry.tool_usage_of ~base_path keeper_name
+                 |> List.map fst);
+              Masc.Keeper_registry_tool_usage_persistence.restore_for_lifecycle
+                launch_token
+                registered);
           let restored =
             List.assoc_opt
               "masc_status"
@@ -2196,7 +2265,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
             (Some 1)
             (Option.map (fun restored -> restored.Keeper_types.count) restored);
           let persisted_path =
-            Filename.concat base_path ".masc/keepers/tool_usage/sangsu.json"
+            Filename.concat base_path ".masc/keepers/tool_usage/alpha.json"
           in
           Fs_compat.save_file
             persisted_path
@@ -2247,8 +2316,14 @@ let test_handle_request_tools_call_blocks_keeper_internal_tool () =
         | _ -> Alcotest.fail "missing content text")
     | _ -> Alcotest.fail "missing content"
   in
-  Alcotest.(check bool) "mentions unknown keeper internal tool" true
-    (contains_substring msg "Unknown tool: keeper_time_now");
+  (* keeper_time_now is registered but keeper-internal: the endpoint blocks
+     it with the typed refusal, not the "Unknown tool" misreport. *)
+  Alcotest.(check bool) "names keeper_time_now" true
+    (String_util.contains_substring msg "keeper_time_now");
+  Alcotest.(check bool) "mentions keeper-internal refusal" true
+    (String_util.contains_substring msg "keeper-internal");
+  Alcotest.(check bool) "mentions endpoint unavailability" true
+    (String_util.contains_substring msg "not available on this MCP endpoint");
   cleanup_dir base_path
 
 let tool_names_from_list_response response =
@@ -2278,7 +2353,7 @@ let test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
       let state = Mcp_eio.For_testing.create_state ~base_path () in
-      let token = Masc.Auth.ensure_internal_keeper_token base_path in
+      let token = Auth.ensure_internal_keeper_token base_path in
       let request = Yojson.Safe.to_string (`Assoc [
         ("jsonrpc", `String "2.0");
         ("id", `Int 119);
@@ -2290,19 +2365,10 @@ let test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal
           ~internal_keeper_runtime:true state request
       in
       let names = tool_names_from_list_response response in
-      (* internal_keeper_runtime no longer exposes keeper-internal tools to
-         tools/list: the Agent_internal surface was removed and
-         include_agent_internal adds no schema (see
-         mcp_server_eio_tool_profile.ml), so the Full-profile is_public_mcp
-         filter still drops them. Pin that tool_execute remains outside external
-         MCP discovery even when the flag is set. A prior half-finished refactor left a
-         contradictory "tool_execute listed = true" assertion here against the
-         identical [List.mem] expression; it could never co-pass with the
-         hidden check below and is removed. *)
-      Alcotest.(check bool) "retired tool_execute not externally discovered" false
+      Alcotest.(check bool) "tool_execute is not externally discovered" false
         (List.mem "tool_execute" names))
 
-let test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execute
+let test_handle_request_tools_call_internal_keeper_runtime_rejects_unknown_execute
     () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2315,13 +2381,13 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execu
       cleanup_dir base_path)
     (fun () ->
       Keeper_registry.For_testing.clear ();
-      let keeper_name = "sangsu" in
+      let keeper_name = "alpha" in
       let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
       ignore
         (Keeper_registry.For_testing.register ~base_path keeper_name
            (make_keeper_meta ~agent_name:keeper_agent_name keeper_name));
       let state = Mcp_eio.For_testing.create_state ~base_path () in
-      let token = Masc.Auth.ensure_internal_keeper_token base_path in
+      let token = Auth.ensure_internal_keeper_token base_path in
       let request = Yojson.Safe.to_string (`Assoc [
         ("jsonrpc", `String "2.0");
         ("id", `Int 120);
@@ -2353,10 +2419,15 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execu
             | _ -> Alcotest.fail "missing content text")
         | _ -> Alcotest.fail "missing content"
       in
-      Alcotest.(check bool) "mentions retired tool_execute" true
-        (contains_substring msg "Unknown tool: tool_execute");
-      Alcotest.(check bool) "mentions registry inconsistency" true
-        (contains_substring msg "registry inconsistency"))
+      (* tool_execute is registered (tag registry) but has no executor on the
+         MCP endpoint: the rejection is the typed keeper-internal refusal,
+         not the "Unknown tool (registry inconsistency)" misreport. *)
+      Alcotest.(check bool) "names tool_execute" true
+        (String_util.contains_substring msg "tool_execute");
+      Alcotest.(check bool) "mentions keeper-internal refusal" true
+        (String_util.contains_substring msg "keeper-internal");
+      Alcotest.(check bool) "mentions endpoint unavailability" true
+        (String_util.contains_substring msg "not available on this MCP endpoint"))
 
 let test_handle_request_batch_rejected () =
   Eio_main.run @@ fun env ->
@@ -2381,7 +2452,7 @@ let test_handle_request_batch_rejected () =
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   Alcotest.(check int) "batch rejected" (-32600) (error_code_exn response);
   Alcotest.(check bool) "mentions batch unsupported" true
-    (contains_substring (error_message_exn response) "batch requests are not supported");
+    (String_util.contains_substring (error_message_exn response) "batch requests are not supported");
   cleanup_dir base_path
 
 let test_handle_request_jsonrpc_response_returns_null () =
@@ -2478,7 +2549,7 @@ let test_handle_request_tools_list_rejects_tier_field () =
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
   Alcotest.(check bool) "unsupported tier error" true
-    (contains_substring (error_message_exn response) "unsupported field(s): tier");
+    (String_util.contains_substring (error_message_exn response) "unsupported field(s): tier");
   cleanup_dir base_path
 
 let test_handle_request_resources_list_rejects_unknown_field () =
@@ -2501,7 +2572,7 @@ let test_handle_request_resources_list_rejects_unknown_field () =
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   Alcotest.(check int) "invalid params code" (-32602) (error_code_exn response);
   Alcotest.(check bool) "unknown field rejected" true
-    (contains_substring (error_message_exn response) "unsupported field");
+    (String_util.contains_substring (error_message_exn response) "unsupported field");
   cleanup_dir base_path
 
 let test_handle_request_resources_templates_rejects_invalid_cursor () =
@@ -2526,10 +2597,10 @@ let test_handle_request_resources_templates_rejects_invalid_cursor () =
   let msg = error_message_exn response in
   Alcotest.(check bool)
     "invalid cursor error preserves contract label" true
-    (contains_substring msg "Invalid params: cursor");
+    (String_util.contains_substring msg "Invalid params: cursor");
   Alcotest.(check bool)
     "invalid cursor error names received string" true
-    (contains_substring msg "not-base64");
+    (String_util.contains_substring msg "not-base64");
   cleanup_dir base_path
 
 let test_handle_request_prompts_list_rejects_invalid_cursor () =
@@ -2554,10 +2625,10 @@ let test_handle_request_prompts_list_rejects_invalid_cursor () =
   let msg = error_message_exn response in
   Alcotest.(check bool)
     "invalid cursor error preserves contract label" true
-    (contains_substring msg "Invalid params: cursor");
+    (String_util.contains_substring msg "Invalid params: cursor");
   Alcotest.(check bool)
     "invalid cursor error names received string" true
-    (contains_substring msg "bad-cursor");
+    (String_util.contains_substring msg "bad-cursor");
   cleanup_dir base_path
 
 let test_handle_request_prompts_list_non_empty () =
@@ -2669,7 +2740,7 @@ let test_handle_request_prompts_get_tool_help () =
     | _ -> Alcotest.fail "response not an object"
   in
   Alcotest.(check bool) "description contains help intent" true
-    (contains_substring description "tool");
+    (String_util.contains_substring description "tool");
   Alcotest.(check bool) "prompt has one or more messages" true
     (messages <> []);
   cleanup_dir base_path
@@ -2811,7 +2882,7 @@ let test_handle_request_tool_help_resource_read () =
     | _ -> Alcotest.fail "response not an object"
   in
   Alcotest.(check bool) "resource contains heading" true
-    (contains_substring text "# masc_status");
+    (String_util.contains_substring text "# masc_status");
   cleanup_dir base_path
 
 let test_handle_request_resources_read_matrix () =
@@ -2871,7 +2942,7 @@ Alpha body
       Alcotest.(check string) (uri ^ " mime type") expected_mime
         (resource_mime_type_exn response);
       Alcotest.(check bool) (uri ^ " text contains expected") true
-        (contains_substring (resource_text_exn response) expected_text))
+        (String_util.contains_substring (resource_text_exn response) expected_text))
     cases;
   cleanup_dir base_path
 
@@ -2919,7 +2990,7 @@ let test_handle_request_dashboard_ping_requires_session () =
   in
   let response = Mcp_eio.handle_request ~clock ~sw state request in
   Alcotest.(check bool) "ping requires ws session" true
-    (contains_substring
+    (String_util.contains_substring
        (Yojson.Safe.to_string response)
        "dashboard/ping requires a WebSocket session");
   cleanup_dir base_path
@@ -2950,7 +3021,7 @@ let test_handle_request_dashboard_ping_reports_unknown_ws_session () =
       request
   in
   Alcotest.(check bool) "unknown ws session reported" true
-    (contains_substring
+    (String_util.contains_substring
        (Yojson.Safe.to_string response)
        "WebSocket session not found");
   cleanup_dir base_path
@@ -3067,6 +3138,8 @@ let eio_tests = [
   "handle tools/list operator profile", `Quick,
     test_handle_request_tools_list_operator_profile;
   "handle tools/list with placeholder flag", `Quick, test_handle_request_tools_list_with_placeholder_flag;
+  "placeholder tools hidden when MASC_PLACEHOLDER_TOOLS_ENABLED=false", `Quick,
+    test_placeholder_tools_hidden_when_env_false;
   "handle tools/list include hidden metadata", `Quick,
     test_handle_request_tools_list_include_hidden_metadata;
   "handle tools/list include usage metadata", `Quick,
@@ -3081,8 +3154,8 @@ let eio_tests = [
     test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias;
   "handle tools/call missing params records duration", `Quick,
     test_handle_request_tools_call_missing_params_records_duration;
-  "handle tools/call managed translation error records duration", `Quick,
-    test_handle_request_tools_call_managed_translation_error_records_duration;
+  "handle tools/call managed invalid arguments record duration", `Quick,
+    test_handle_request_tools_call_managed_invalid_arguments_records_duration;
   "handle tools/call transition claim guidance", `Quick,
     test_handle_request_tools_call_transition_claim_guidance;
   "handle tools/call transition done requires LLM verdict", `Quick,
@@ -3100,8 +3173,8 @@ let eio_tests = [
     test_handle_request_tools_call_blocks_keeper_internal_tool;
   "handle tools/list internal keeper runtime hides keeper internal tools", `Quick,
     test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal_tools;
-  "handle tools/call internal keeper runtime rejects retired execute", `Quick,
-    test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execute;
+  "handle tools/call internal keeper runtime rejects unknown execute", `Quick,
+    test_handle_request_tools_call_internal_keeper_runtime_rejects_unknown_execute;
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
   (* TRPG tool tests removed — modules archived *)
@@ -3128,8 +3201,8 @@ let eio_tests = [
     test_execute_tool_add_task_with_admin_token_without_join;
   "http auth token overrides stale argument token", `Quick,
     test_execute_tool_http_auth_token_overrides_stale_argument_token;
-  "legacy argument token ignored without http auth", `Quick,
-    test_execute_tool_legacy_argument_token_ignored_without_http_auth;
+  "argument token ignored without http auth", `Quick,
+    test_execute_tool_argument_token_ignored_without_http_auth;
   "without mcp session uses generated identity", `Quick,
     test_execute_tool_without_mcp_session_uses_generated_identity;
 ]

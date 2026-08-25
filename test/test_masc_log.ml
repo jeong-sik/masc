@@ -1,48 +1,3 @@
-let temp_dir () =
-  let path = Filename.temp_file "masc_log_test" "" in
-  Sys.remove path;
-  Unix.mkdir path 0o755;
-  path
-
-let rm_rf dir =
-  let rec rm path =
-    if Sys.file_exists path then
-      if Sys.is_directory path then begin
-        Sys.readdir path
-        |> Array.iter (fun entry -> rm (Filename.concat path entry));
-        Unix.rmdir path
-      end else
-        Sys.remove path
-  in
-  try rm dir with _ -> ()
-
-let today_log_path dir =
-  let tm = Unix.localtime (Unix.gettimeofday ()) in
-  Filename.concat dir
-    (Printf.sprintf "system_log_%04d-%02d-%02d.jsonl"
-       (tm.Unix.tm_year + 1900)
-       (tm.Unix.tm_mon + 1)
-       tm.Unix.tm_mday)
-
-let read_log_messages path =
-  if not (Sys.file_exists path) then
-    []
-  else
-    let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      let messages = ref [] in
-      (try
-         while true do
-           let message =
-             Yojson.Safe.from_string (input_line ic)
-             |> Yojson.Safe.Util.member "message"
-             |> Yojson.Safe.Util.to_string
-           in
-           messages := message :: !messages
-         done
-       with End_of_file -> ());
-      List.rev !messages)
-
 let find_entry ~module_name ~message =
   Log.Ring.recent ~limit:50 ~module_filter:module_name ()
   |> List.find_opt (fun (entry : Log.Ring.entry) -> String.equal entry.message message)
@@ -175,29 +130,50 @@ let test_entry_to_json_keeper_name_some_preserves () =
   in
   Alcotest.(check string) "keeper_name Some preserved" "my-keeper" keeper_name_val
 
-let test_file_sink_reopens_when_log_path_is_deleted () =
-  let dir = temp_dir () in
-  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () ->
-    let log_path = today_log_path dir in
-    let first_message =
-      Printf.sprintf "file sink first %f" (Unix.gettimeofday ())
-    in
-    let second_message =
-      Printf.sprintf "file sink second %f" (Unix.gettimeofday ())
-    in
-    Log.Ring.init_file_sink dir;
-    Log.emit Log.Info ~module_name:"TestLogFileSink" first_message;
-    Alcotest.(check bool) "initial log file created" true
-      (Sys.file_exists log_path);
-    Sys.remove log_path;
-    Alcotest.(check bool) "log file removed" false
-      (Sys.file_exists log_path);
-    Log.emit Log.Info ~module_name:"TestLogFileSink" second_message;
-    Alcotest.(check bool) "log file recreated" true
-      (Sys.file_exists log_path);
-    let messages = read_log_messages log_path in
-    Alcotest.(check bool) "recreated log contains latest entry" true
-      (List.exists (String.equal second_message) messages))
+(* Local helper: this binary intentionally depends only on masc_log +
+   alcotest-adjacent modules, so no String_util import. *)
+let contains_substring haystack needle =
+  let h = String.length haystack and n = String.length needle in
+  let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+  n = 0 || go 0
+
+let newest_entry ~module_name =
+  match Log.Ring.recent ~limit:1 ~module_filter:module_name () with
+  | entry :: _ -> entry
+  | [] -> Alcotest.fail "no ring entry recorded"
+
+(* #28925 gap 3: the recording path (ring + JSONL file sink render the same
+   stored entry) must mask secret-shaped values at the sink, regardless of
+   which emit wrapper produced the record. Token literals are concatenated
+   synthetic values, not live credentials. *)
+let test_push_masks_github_token_in_message () =
+  let module_name = "TestLogRedactMsg" in
+  let token = "ghp_" ^ "16C7e42F292c6912E7710c838347Ae178B4a" in
+  Log.info ~ctx:module_name "deploy used %s" token;
+  let entry = newest_entry ~module_name in
+  Alcotest.(check bool) "token body absent from ring" false
+    (contains_substring entry.message "16C7e42F292c6912");
+  Alcotest.(check bool) "redaction marker present" true
+    (contains_substring entry.message "[REDACTED]")
+
+let test_push_masks_secrets_in_details () =
+  let module_name = "TestLogRedactDetails" in
+  let token = "github_pat_" ^ "11ABCDEFG0abcdefghijkl" in
+  Log.emit Log.Info ~module_name
+    ~details:
+      (`Assoc
+         [ ("note", `String ("auth via " ^ token))
+         ; ("api_key", `String "plain-value-that-must-not-persist")
+         ])
+    "details redaction probe";
+  let entry = newest_entry ~module_name in
+  let rendered = Yojson.Safe.to_string entry.details in
+  Alcotest.(check bool) "token absent from details leaf" false
+    (contains_substring rendered "11ABCDEFG0abcdefghijkl");
+  Alcotest.(check bool) "sensitive key value replaced" false
+    (contains_substring rendered "plain-value-that-must-not-persist");
+  Alcotest.(check bool) "marker present" true
+    (contains_substring rendered "[REDACTED]")
 
 let () =
   Alcotest.run "Masc_log" [
@@ -210,13 +186,14 @@ let () =
         Alcotest.test_case "recent before_seq returns only older entries" `Quick
           test_recent_before_seq_returns_only_older_entries;
         Alcotest.test_case
-          "file sink reopens when current log path is deleted"
-          `Quick test_file_sink_reopens_when_log_path_is_deleted;
-        Alcotest.test_case
           "entry_to_json: keeper_name=None serializes as \"system\" (#18465)"
           `Quick test_entry_to_json_keeper_name_none_serializes_system;
         Alcotest.test_case
           "entry_to_json: keeper_name=Some preserves value"
           `Quick test_entry_to_json_keeper_name_some_preserves;
+        Alcotest.test_case "push masks github token in message" `Quick
+          test_push_masks_github_token_in_message;
+        Alcotest.test_case "push masks secrets in details" `Quick
+          test_push_masks_secrets_in_details;
       ] );
   ]

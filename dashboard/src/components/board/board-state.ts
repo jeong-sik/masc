@@ -24,7 +24,6 @@ import {
   fetchSubBoards,
   fetchBoardPost,
   commentPost,
-  createPost,
   type BoardHearth,
   type BoardFlair,
 } from '../../api'
@@ -85,32 +84,14 @@ export const commentText = signal('')
 export const commentSubmitting = signal(false)
 export const replyingTo = signal<string | null>(null)
 
-// ── Signals: new post form ─────────────────────────────────────────
-export const showNewPostForm = signal(false)
-export const newPostTitle = signal('')
-export const newPostContent = signal('')
-export const newPostHearth = signal('')
-export const newPostFlair = signal('')
-export const newPostSubmitting = signal(false)
-
 // ── Signals: v2 board surface chrome ───────────────────────────────
 export const selectedBoardPostId = signal<string | null>(null)
-export const boardFilterMode = signal<'all' | 'mod'>('all')
 export const boardComposerMode = signal<'post' | 'mention'>('post')
 export const boardComposerDraft = signal('')
 
 // ── Pagination ─────────────────────────────────────────────────────
 export const PAGE_SIZE = 20
-export const visibleLimit = signal(PAGE_SIZE)
-export const automationVisibleLimit = signal(PAGE_SIZE)
-export const systemVisibleLimit = signal(PAGE_SIZE)
-/** Per-category pagination limits */
-export const categoryVisibleLimits = signal<Record<string, number>>({
-  article: PAGE_SIZE,
-  review: PAGE_SIZE,
-  notice: PAGE_SIZE,
-  system: PAGE_SIZE,
-})
+export const feedVisibleLimit = signal(PAGE_SIZE)
 
 // ── Selection / bulk delete ────────────────────────────────────────
 export const deletingPostId = signal<string | null>(null)
@@ -135,7 +116,10 @@ export async function refreshBoardHearths(): Promise<void> {
   const requestId = ++boardHearthsRequestId
   boardHearthsLoading.value = true
   try {
-    const hearths = await fetchBoardHearths()
+    const hearths = await fetchBoardHearths({
+      excludeSystem: boardExcludeSystem.value,
+      excludeAutomation: boardExcludeAutomation.value,
+    })
     if (requestId !== boardHearthsRequestId) return
     boardHearths.value = hearths
     boardHearthsError.value = false
@@ -359,7 +343,7 @@ function visibilityAuditLabel(vis: string | null | undefined): string {
 }
 
 export function postVisibilityAuditDetails(post: BoardPost): string {
-  const scoreLabel = post.vote_blind ? '점수 투표 후 공개' : `점수 ${post.votes ?? 0}`
+  const scoreLabel = `점수 ${post.votes}`
   const updatedLabel = isUpdated(post) ? '최근 갱신됨' : '원본 작성 시각 기준'
   return [
     visibilityAuditLabel(post.visibility),
@@ -441,34 +425,6 @@ export async function submitComment(postId: string, parentId?: string) {
     showToast('댓글 등록에 실패했습니다', 'error')
   } finally {
     commentSubmitting.value = false
-  }
-}
-
-export async function submitNewPost() {
-  const title = newPostTitle.value.trim()
-  const content = newPostContent.value.trim()
-  const hearth = newPostHearth.value.trim()
-  const flair = newPostFlair.value.trim()
-  if (!title || !content) return
-  newPostSubmitting.value = true
-  try {
-    const contentWithFlair = flair
-      ? `[flair:${flair}]\n${content.replace(/^\[flair:[a-z]+\]\s*/i, '')}`
-      : content
-    await createPost(title, contentWithFlair, commentAuthor.value, { hearth: hearth || undefined })
-    newPostTitle.value = ''
-    newPostContent.value = ''
-    newPostHearth.value = ''
-    newPostFlair.value = ''
-    showNewPostForm.value = false
-    showToast('글을 등록했습니다', 'success')
-    refreshBoard()
-    void refreshBoardHearths()
-  } catch (err) {
-    console.warn('[board] post submit failed', err instanceof Error ? err.message : err)
-    showToast('글 등록에 실패했습니다', 'error')
-  } finally {
-    newPostSubmitting.value = false
   }
 }
 

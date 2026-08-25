@@ -1,0 +1,13 @@
+name = "keeper_tasks_audit"
+description = """
+Find tasks whose exact assignee identity is absent from explicit active \
+workspace/session membership. Returns the task status and assignee. This \
+audit is read-only: it never releases or reassigns tasks."""
+
+[[params]]
+name = "limit"
+type = "integer"
+description = "Max orphans to return (default: 20)"
+minimum = 1
+maximum = 50
+default = 20

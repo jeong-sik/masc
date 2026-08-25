@@ -7,7 +7,6 @@ include Dashboard_utils
 
 type attention_context = {
   severity : string;
-  has_action : bool;
   related_agent_names : string list;
   json : Yojson.Safe.t;
 }
@@ -51,18 +50,18 @@ let latest_message_to agent_name messages =
   let lowered = String.lowercase_ascii (String.trim agent_name) in
   List.fold_left
     (fun best (message : Masc_domain.message) ->
-      let content = String.lowercase_ascii message.content in
       let from_self = String.equal (String.lowercase_ascii (String.trim message.from_agent)) lowered in
       let mentioned =
-        (* [lowered] can be "" for a degenerate agent record with an empty or
-           whitespace-only name (agent_of_yojson accepts "name":""; the brief
-           loop does not drop empties — cf. the [agent_name <> ""] guard on the
-           event path). Without this length check [String.get lowered 0] would
-           raise Invalid_argument and crash the briefing fiber. *)
+        (* Mention identity comes from the message's own mention surface —
+           the typed [mention] field plus @word tokens in the body, both via
+           {!Dashboard_workspace.mentions_of_message} (the one extractor the
+           workspace read model already uses). The [lowered <> ""] guard
+           keeps a degenerate agent record with an empty/whitespace name
+           (agent_of_yojson accepts "name":"") from matching anything. *)
         String.length lowered > 0
-        && String.contains content '@'
-        && (String.contains content (String.get lowered 0)
-            || String.contains content (String.get lowered (String.length lowered - 1)))
+        && List.exists
+             (fun target -> String.equal (String.lowercase_ascii target) lowered)
+             (Dashboard_workspace.mentions_of_message message)
       in
       if from_self || not mentioned
       then best
@@ -77,8 +76,8 @@ let keeper_alias_by_agent_name (keepers : Yojson.Safe.t list) =
   let table = Hashtbl.create 8 in
   List.iter
     (fun keeper ->
-      let keeper_name = String_util.trim_to_option (string_field "name" keeper) in
-      let agent_name = String_util.trim_to_option (string_field "agent_name" keeper) in
+      let keeper_name = String_util.trim_nonempty (string_field "name" keeper) in
+      let agent_name = String_util.trim_nonempty (string_field "agent_name" keeper) in
       match keeper_name, agent_name with
       | Some keeper_name, Some agent_name ->
           Hashtbl.replace table agent_name keeper_name
@@ -145,13 +144,13 @@ let build_agent_briefs config attention_queue (keepers : Yojson.Safe.t list) =
          in
          let last_activity_at =
            match agent with
-           | Some value -> String_util.trim_to_option value.last_seen
+           | Some value -> String_util.trim_nonempty value.last_seen
             | None -> None
          in
          let last_seen_ts =
            match agent with
             | Some value ->
-                Dashboard_utils.parse_iso_opt (String_util.trim_to_option value.last_seen) |> Option.value ~default:0.0
+                Dashboard_utils.parse_iso_opt (String_util.trim_nonempty value.last_seen) |> Option.value ~default:0.0
             | None -> 0.0
          in
          let last_activity_age_sec =

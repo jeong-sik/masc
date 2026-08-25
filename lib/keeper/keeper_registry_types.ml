@@ -14,6 +14,30 @@ include Keeper_registry_types_failure
 
 exception Operator_interrupt
 
+(* One string for every [Operator_interrupt] terminal (ledger rows, queued
+   outcomes, tool responses) so the incident class stays greppable as one
+   thing. The classification itself is typed on the exception; this is only
+   the human-facing detail. *)
+let operator_interrupt_detail = "operator interrupted the turn"
+
+(* Recursive classifier for every shape Eio can deliver the interrupt in:
+   bare at the [Switch.run] boundary, [Cancelled]-wrapped inside the switch,
+   [Fun.Finally_raised] when a cancellable finalizer trips a cancellation
+   point, and [Eio.Exn.Multiple] when the switch combines the interrupt with
+   what cancelled fibers raised. A [Multiple] counts only when every member
+   reduces to the interrupt — a real co-occurring error must keep its crash
+   classification. Mirrors [Shutdown.is_benign_termination] (#28868 review:
+   constructor-only arms missed the combined shapes). *)
+let rec is_operator_interrupt = function
+  | Operator_interrupt -> true
+  | Eio.Cancel.Cancelled inner -> is_operator_interrupt inner
+  | Stdlib.Fun.Finally_raised inner -> is_operator_interrupt inner
+  | Eio.Exn.Multiple [] -> false
+  | Eio.Exn.Multiple members ->
+    List.for_all (fun (member, _bt) -> is_operator_interrupt member) members
+  | _ -> false
+;;
+
 (* Turn_phase FSM types, witnesses, transitions, and resolver extracted to
    [Keeper_registry_types_turn_phase] (500-line decomp). *)
 include Keeper_registry_types_turn_phase
@@ -93,10 +117,10 @@ type done_resolution = [ `Stopped | `Crashed of string ]
 
 type lifecycle_transaction_purpose =
   | Paused_work_disposition
+  | Keepalive_launch
 
 type lifecycle_reservation_snapshot =
   { owner_id : string
-  ; expected_generation : int
   ; purpose : lifecycle_transaction_purpose
   }
 
@@ -110,6 +134,11 @@ type registry_entry =
     (** Observable conditions that derive [phase]. *)
   ; fiber_stop : bool Atomic.t
   ; fiber_wakeup : bool Atomic.t
+  ; cadence_sleeping : bool Atomic.t
+    (** Ephemeral sleep handshake for runtime cadence decreases. [true] only
+        while the heartbeat fiber is inside its inter-cycle sleep. A cadence
+        wake consumes it with CAS, so active pre-turn work cannot queue an
+        extra paid cycle. *)
   ; event_queue : Keeper_event_queue.t Atomic.t
   ; started_at : float
   ; grpc_close : (unit -> unit) option Atomic.t
@@ -118,7 +147,6 @@ type registry_entry =
   ; done_r : done_resolution Eio.Promise.u
   ; restart_count : int
   ; last_restart_ts : float
-  ; dead_since_ts : float option
   ; crash_log : (float * string) list
   ; last_error : string option
   ; last_failure_reason : failure_reason option
@@ -132,7 +160,7 @@ type registry_entry =
   ; transition_seq : int
   ; waiting_for_inference : bool Atomic.t
     (** Ephemeral flag: true when keeper is blocked in admission queue.
-          Set/cleared around the OAS inference boundary.
+          Set/cleared around the AGENT_CORE inference boundary.
           Does not affect state machine phase derivation. *)
   ; last_context_actions : (float * Keeper_state_machine.context_actions) option
   ; last_event_bus_correlation : string option

@@ -9,15 +9,6 @@ let read_file path = In_channel.with_open_bin path In_channel.input_all
 
 let read_source_file rel = read_file (Filename.concat (source_root ()) rel)
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    idx + nlen <= hlen
-    && (String.sub haystack idx nlen = needle || loop (idx + 1))
-  in
-  nlen = 0 || loop 0
-
 let substring_index haystack needle =
   let hlen = String.length haystack in
   let nlen = String.length needle in
@@ -30,10 +21,10 @@ let substring_index haystack needle =
   loop 0
 
 let require_contains label source needle =
-  check bool label true (contains_substring source needle)
+  check bool label true (String_util.contains_substring source needle)
 
 let require_not_contains label source needle =
-  check bool label false (contains_substring source needle)
+  check bool label false (String_util.contains_substring source needle)
 
 let require_order label source first second =
   match (substring_index source first, substring_index source second) with

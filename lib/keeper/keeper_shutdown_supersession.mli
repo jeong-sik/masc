@@ -18,6 +18,7 @@ type error =
   | Metadata_committed_successor_lookup_failed of Keeper_shutdown_store.error
   | Metadata_committed_admission_owned_by_other of
       Keeper_shutdown_types.Operation_id.t
+  | Owner_command_failed of string
 
 val error_to_string : error -> string
 

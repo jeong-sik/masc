@@ -20,21 +20,10 @@ type tool_call_entry = {
   result : string option;
   duration_ms : int;
   error : string option;
-  cost_usd : float;
   execution_id : string option;
       (** RFC-0233 canonical join key shared with the tool_calls JSONL row
           for the same execution. [None] only for rows written by paths
           that have not adopted the id yet (and historical rows). *)
-}
-
-type gate_decode_summary = {
-  parsed_gate_count : int;
-  legacy_default_count : int;
-}
-
-type entries_read_result = {
-  entries : tool_call_entry list;
-  gate_decode : gate_decode_summary;
 }
 
 type trajectory_outcome =
@@ -48,48 +37,47 @@ type trajectory = {
   scenario_id : string option;
   keeper_name : string;
   trace_id : string;
-  generation : int;
   started_at : float;
   ended_at : float;
   entries : tool_call_entry list;
-  total_cost_usd : float;
   total_turns : int;
   total_tool_calls : int;
   outcome : trajectory_outcome;
   task_id : string option;
 }
 
-(** {1 Thinking entries}
+(** {1 Withheld reasoning entries} *)
 
-    Thinking blocks from LLM responses, persisted alongside tool call entries
-    in the same JSONL file with [type = "thinking"]. *)
+type withheld_reasoning_kind =
+  | Thinking_block
+  | Reasoning_details
+  | Redacted_thinking
 
-type thinking_entry = {
+type withheld_thinking_entry = {
   ts : float;
   ts_iso : string;
   turn : int;
-  content : string;
-  content_length : int;
-  redacted : bool;
+  block_index : int;
+  reasoning_kind : withheld_reasoning_kind;
+  char_count : int;
 }
+(** Metadata for one newly observed reasoning block. The type cannot carry
+    hidden content or provider replay signatures. *)
 
-(** Tagged union for reading mixed JSONL (tool calls + thinking). *)
+(** Tagged union for reading tool calls and metadata-only reasoning evidence.
+    Content-bearing historical thinking rows are rejected by the decoder. *)
 type trajectory_line =
   | Tool_call of tool_call_entry
-  | Thinking of thinking_entry
+  | Withheld_thinking of withheld_thinking_entry
 
 (** {1 Cost estimation} *)
 
-val tool_cost_estimate : string -> float
 (** Rough per-call cost estimate for keeper tools. *)
 
 (** {1 JSON serialization} *)
 
-val gate_decision_to_json : gate_decision -> Yojson.Safe.t
 val outcome_to_json : trajectory_outcome -> Yojson.Safe.t
 val outcome_to_string : trajectory_outcome -> string
-val default_result_truncation : int
-val default_thinking_truncation : int
 val entry_to_json :
   ?result_max_len:int ->
   ?runtime_contract:Yojson.Safe.t ->
@@ -97,15 +85,8 @@ val entry_to_json :
   tool_call_entry ->
   Yojson.Safe.t
 
-val tool_call_entry_of_json :
-  Yojson.Safe.t -> (tool_call_entry * bool) option
-(** Decode one persisted JSONL row back into a [tool_call_entry].
-    Returns [None] for non-entry rows (summary/thinking) and malformed
-    JSON. The [bool] is true when the gate field parsed from a
-    persisted value rather than the legacy default. Exposed for
-    RFC-0233 consumers that join rows on [execution_id]. *)
-val thinking_entry_to_json : ?content_max_len:int -> thinking_entry -> Yojson.Safe.t
-val trajectory_line_to_json : ?result_max_len:int -> ?content_max_len:int -> trajectory_line -> Yojson.Safe.t
+val tool_call_entry_of_json : Yojson.Safe.t -> tool_call_entry option
+val trajectory_line_to_json : ?result_max_len:int -> trajectory_line -> Yojson.Safe.t
 val trajectory_to_json : trajectory -> Yojson.Safe.t
 
 (** {1 Persistence} *)
@@ -123,9 +104,11 @@ val append_summary :
   masc_root:string -> keeper_name:string -> trace_id:string ->
   trajectory -> unit
 
-val append_thinking :
+val append_withheld_thinking :
   masc_root:string -> keeper_name:string -> trace_id:string ->
-  thinking_entry -> unit
+  withheld_thinking_entry -> unit
+(** Persist one metadata-only reasoning observation. [content] is always JSON
+    null at this writer boundary. *)
 
 val read_entries :
   masc_root:string -> keeper_name:string -> trace_id:string ->
@@ -172,12 +155,10 @@ type pending_entry = {
 
 type accumulator = {
   mutable entries : tool_call_entry list;
-  mutable total_cost : float;
   mutable total_calls : int;
   mutable turn : int;
   keeper_name : string;
   trace_id : string;
-  generation : int;
   started_at : float;
   masc_root : string;
   mutable task_id : string option;
@@ -190,7 +171,7 @@ type accumulator = {
 val create_accumulator :
   ?on_flush_error:(exn -> unit) ->
   masc_root:string -> keeper_name:string -> trace_id:string ->
-  generation:int -> unit -> accumulator
+  unit -> accumulator
 
 val set_task_id : accumulator -> string -> unit
 val clear_task_id : accumulator -> unit
@@ -236,7 +217,6 @@ type tool_stat = {
   avg_duration_ms : int;
   p95_duration_ms : int;
   max_duration_ms : int;
-  total_cost_usd : float;
   last_used_at : string;
 }
 
@@ -262,8 +242,4 @@ val read_entries_since :
 (** Read entries from all trace files for a keeper with ts >= [since].
     Results sorted chronologically. *)
 
-val read_entries_since_result :
-  masc_root:string -> keeper_name:string -> since:float ->
-  entries_read_result
-(** Like {!read_entries_since}, plus whether the persisted gate object was
-    parsed or defaulted for legacy rows that had no readable gate payload. *)
+

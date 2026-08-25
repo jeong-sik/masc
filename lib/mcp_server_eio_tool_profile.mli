@@ -6,7 +6,7 @@
     advertised on a given endpoint:
 
     - [Full]: developer / internal MCP surface (full catalog).
-    - [Managed_agent]: spawned agent surface (SDK contract +
+    - [Managed_agent]: spawned agent surface (Agent Core contract +
       passthrough subset).
     - [Operator_remote]: observation and intervention surface.
 
@@ -15,16 +15,14 @@
     fields are part of the contract.  Cursor values themselves are
     opaque base64 strings produced by {!page_items_with_cursor}.
 
-    Internal: [StringSet] / [StringMap], [dedupe_tool_schemas_by_name],
+    Internal: [StringSet] / [StringMap],
     [managed_agent_passthrough_tool_names] (consumed by
     {!tool_schemas_for_profile} only), [label_words_from_identifier]
     + the [custom_tool_titles] / [custom_title_table] data tables
     (consumed by {!tool_title_of_name}), [tool_icons_for_name]
     (consumed by {!tool_json_for_profile}), the parsing helpers
     [strict_assoc_params] / [cursor_param] / [bool_param] /
-    [decode_cursor_offset] / [drop_list] / [take_list] /
-    [paginate_json_items] / [cursor_only_params] /
-    [validate_optional_meta], and the raw cursor codec
+    [take_list] / [validate_optional_meta], and the raw cursor codec
     [encode_cursor] / [decode_cursor] (callers go through
     {!page_items_with_cursor}). *)
 
@@ -56,11 +54,10 @@ val managed_agent_instructions : string
     surface and the managed-agent surface diverge in inventory. *)
 
 val operator_remote_instructions : string
-(** [Operator_remote] profile instructions.  Names the 7 operator
+(** [Operator_remote] profile instructions.  Names the 6 operator
     tools ([masc_operator_snapshot], [masc_operator_digest],
     [masc_operator_action],
     [masc_operator_board_attention_quarantine_requeue],
-    [masc_operator_chat_recovery_resolve],
     [masc_operator_task_recovery_resolve], [masc_operator_confirm])
     and the confirm_token contract for [confirm_required = true]. *)
 
@@ -68,19 +65,16 @@ val operator_remote_instructions : string
 
 val tool_schemas_for_profile :
   ?include_hidden:bool ->
-  ?include_agent_internal:bool ->
   Mcp_server.server_state ->
   tool_profile ->
   Masc_domain.tool_schema list
-(** [tool_schemas_for_profile ?include_hidden ?include_agent_internal
+(** [tool_schemas_for_profile ?include_hidden
       state profile] returns the schema
     list visible on [profile]:
 
-    - [Full]: [Config.visible_tool_schemas] (gated by [include_hidden]),
-      deduped by name.  [include_agent_internal] is a retained no-op:
-      the Agent_internal surface was empty and was deleted in the
-      surface-cut refactor, so it adds no schema.
-    - [Managed_agent]: SDK tool contract +
+    - [Full]: [Config.visible_tool_schemas] gated by [include_hidden], public
+      surface membership, and [Tool_catalog.allow_direct_call].
+    - [Managed_agent]: agent-core tool contract +
       [managed_agent_passthrough_tool_names] subset.
     - [Operator_remote]: pinned [Tool_operator.remote_schemas].
 
@@ -88,21 +82,17 @@ val tool_schemas_for_profile :
     state-dependent filtering; currently unused. *)
 
 val tool_allowed_in_profile :
-  ?internal_keeper_runtime:bool ->
   Mcp_server.server_state ->
   tool_profile ->
   string ->
   bool
-(** [tool_allowed_in_profile ?internal_keeper_runtime state
+(** [tool_allowed_in_profile state
       profile tool_name] is the call-time gate (vs the
       list-time {!tool_schemas_for_profile}):
 
-    - [Full]: [tool_name] is in
-      [Config.visible_tool_schemas].  [internal_keeper_runtime] is a
-      retained no-op (default [false]): the Agent_internal surface was
-      empty and was deleted in the surface-cut refactor, so no tool is
-      gated by it.
-    - [Managed_agent]: SDK binding by name, OR present in the
+    - [Full]: [tool_name] is in the raw schema inventory, remains active, and
+      satisfies [Tool_catalog.allow_direct_call].
+    - [Managed_agent]: Agent Core binding by name, OR present in the
       managed-agent profile schema list.
     - [Operator_remote]: in [Tool_operator.remote_tool_names]. *)
 
@@ -125,14 +115,6 @@ val tool_title_of_name : string -> string
       when present.
     + Otherwise auto-generated Title Case from the identifier
       (drops [masc_] prefix, splits on [_], capitalises each word). *)
-
-val tool_output_schema_field : string -> Yojson.Safe.t option
-(** [tool_output_schema_field _] currently returns [None] for
-    every tool — outputSchema advertising is intentionally
-    disabled until handlers can guarantee structuredContent.
-    Pinned at the contract seam: drift here breaks strict clients
-    (Anthropic/FastMCP) which reject malformed tool results.  See the
-    inline rationale in the implementation. *)
 
 val tool_json_for_profile :
   ?usage_summary:Telemetry_eio.tool_usage_summary ->

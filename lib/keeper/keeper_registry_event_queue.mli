@@ -9,7 +9,6 @@
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -17,23 +16,21 @@ type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellatio
 type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
-  ; target_generation : int
   ; target_trace_id : Keeper_id.Trace_id.t
   }
 
 type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
+  | Turn_completed
   | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -83,6 +80,16 @@ val select_when_result :
   ready:(Keeper_event_queue.stimulus -> bool) ->
   (Keeper_event_queue_state.pending_selection option, string) result
 
+val connector_attention_conversation_batch_result :
+  base_path:string ->
+  string ->
+  primary:Keeper_event_queue_state.pending_selection ->
+  (Keeper_event_queue_state.pending_selection list, string) result
+(** Every OTHER pending [Connector_attention] entry for [primary]'s
+    conversation, in arrival order (RFC-0377). [[]] when [primary] is not a
+    [Connector_attention] selection. See
+    {!Keeper_event_queue_state.connector_attention_conversation_batch}. *)
+
 val validate_pending_selection_result :
   base_path:string ->
   string ->
@@ -98,7 +105,6 @@ val ack_pending_result :
 val cancel_pending_accepted_result :
   base_path:string ->
   string ->
-  current_owner_nonce:int ->
   applied_at:float ->
   cancellation:accepted_cancellation ->
   (transition_result, string) result
@@ -106,10 +112,9 @@ val cancel_pending_accepted_result :
     pending projection when the owner currently has a live registry lane. *)
 
 val transfer_pending_accepted_result :
-  ?intake_token:Keeper_turn_admission.intake_token ->
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
   base_path:string ->
   string ->
-  current_owner_nonce:int ->
   applied_at:float ->
   transfer:accepted_transfer ->
   (transition_result, transfer_pending_error) result
@@ -123,23 +128,33 @@ val transfer_pending_accepted_result :
 val ack_pending_source_terminal_result :
   base_path:string ->
   string ->
-  current_owner_nonce:int ->
   acked_at:float ->
   source_terminal:accepted_source_terminal ->
   (source_ack_result, string) result
-(** Commit one exact terminal source ACK and publish the post-commit pending
-    projection when the owner is registered. *)
+(** Commit one exact terminal source ACK, publish the post-commit pending
+    projection when the owner is registered, and project its durable reaction
+    evidence before another source can settle. *)
 
 val terminalize_pending_turn_attempt_result :
   base_path:string ->
   string ->
-  current_owner_nonce:int ->
   applied_at:float ->
   selection:Keeper_event_queue_state.pending_selection ->
   detail:string ->
   (source_ack_result, string) result
-(** Commit a source-bearing terminal receipt for one failed admitted turn and
-    publish the post-commit pending projection. *)
+(** Commit a source-bearing terminal receipt for one failed admitted turn,
+    publish the post-commit pending projection, and project its durable reaction
+    evidence before another source can settle. *)
+
+val terminalize_pending_turn_completed_result :
+  base_path:string ->
+  string ->
+  applied_at:float ->
+  selection:Keeper_event_queue_state.pending_selection ->
+  (source_ack_result, string) result
+(** Commit a source-bearing completion receipt for one successful admitted
+    turn, publish the post-commit pending projection, and project its durable
+    reaction evidence before another source can settle. *)
 
 (** Enqueue a stimulus on the keeper's event queue. An owner not registered yet
     may receive durable work so a later lane can replay it. A finalized
@@ -150,11 +165,11 @@ val terminalize_pending_turn_attempt_result :
     retirement. A surrounding durable-intake fence supplies [intake_token];
     otherwise this function acquires the Keeper fence itself. *)
 val enqueue :
-  ?intake_token:Keeper_turn_admission.intake_token ->
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
   base_path:string -> string -> Keeper_event_queue.stimulus -> unit
 
 val enqueue_durable_result :
-  ?intake_token:Keeper_turn_admission.intake_token
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token
   -> base_path:string
   -> string
   -> Keeper_event_queue.stimulus
@@ -173,7 +188,7 @@ type enqueue_if_missing_durable_result =
   | Storage_error of string
 
 val enqueue_if_missing_durable_result :
-  ?intake_token:Keeper_turn_admission.intake_token
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token
   -> base_path:string
   -> event_id:string
   -> string
@@ -196,10 +211,6 @@ type transfer_target_error =
       }
   | Transfer_target_metadata_read_failed of string
   | Transfer_target_metadata_absent
-  | Transfer_target_generation_changed of
-      { expected : int
-      ; actual : int
-      }
   | Transfer_target_trace_changed
 
 val transfer_target_error_to_string : transfer_target_error -> string
@@ -212,7 +223,7 @@ type transfer_projection_result =
   | Transfer_projection_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
 val enqueue_stimulus_durable_result :
-  ?intake_token:Keeper_turn_admission.intake_token
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token
   -> base_path:string
   -> string
   -> Keeper_event_queue.stimulus
@@ -225,7 +236,7 @@ val enqueue_stimulus_durable_result :
     opaque-event-id API above. *)
 
 val project_accepted_transfer_durable_result :
-  ?intake_token:Keeper_turn_admission.intake_token
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token
   -> base_path:string
   -> string
   -> transfer:accepted_transfer
@@ -272,6 +283,13 @@ val reprioritize_pending_result :
   selection:Keeper_event_queue_state.pending_selection ->
   urgency:Keeper_event_queue.urgency ->
   (int64, string) result
+
+val defer_pending_result :
+  base_path:string ->
+  string ->
+  selection:Keeper_event_queue_state.pending_selection ->
+  (int64, string) result
+(** Durable queue-tail rotation for a transiently blocked exact source. *)
 
 val drop_by_post_id :
   base_path:string

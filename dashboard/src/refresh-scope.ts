@@ -1,6 +1,6 @@
 import type { RouteState } from './types'
 
-export type RouteRefreshTarget = 'execution' | 'board' | 'operator' | 'activity' | 'fusion' | 'ide'
+export type RouteRefreshTarget = 'execution' | 'board' | 'operator' | 'activity' | 'fusion' | 'internalAgents' | 'ide'
 
 export function routeWantsRefreshTarget(
   routeState: Pick<RouteState, 'tab' | 'params'>,
@@ -19,6 +19,9 @@ export function routeWantsRefreshTarget(
       // The fusion run-status panel only mounts on the top-level fusion surface,
       // so its registry refetch is scoped to that route (RFC-0266 Phase 4).
       return routeState.tab === 'fusion'
+    case 'internalAgents':
+      return (routeState.tab === 'monitoring' && routeState.params.section === 'internal-agents')
+        || (routeState.tab === 'workspace' && routeState.params.section === 'verification')
     case 'ide':
       // The IDE workspace store is an app-lifetime singleton, so its live push
       // refresh must be scoped to the code surface — otherwise a keeper editing

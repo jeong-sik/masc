@@ -17,7 +17,7 @@ import { MutedSpan, DetailCard } from './keeper-detail-kpi'
 //     Rendered as compact inline counters + a stacked proportion bar.
 //     Secondary row lists compactions_ok / handoffs_ok as chips.
 //
-//   Row 2 — Validator Pass Rate (OAS verdicts)
+//   Row 2 — Validator Pass Rate (Agent Core verdicts)
 //     "pass N/M (P%)" with a horizontal progress bar colored by tone,
 //     plus up to 3 top failure reasons rendered as muted chips.
 //
@@ -28,8 +28,7 @@ import { MutedSpan, DetailCard } from './keeper-detail-kpi'
 // by the backend rollup, so this component can treat the numbers as
 // internally consistent — no client-side reconciliation needed.
 
-export function OutcomesLedger({ keeper, outcomes }: {
-  keeper: Keeper
+export function OutcomesLedger({ outcomes }: {
   outcomes: NonNullable<Keeper['outcomes']>
 }) {
   const { successes, failures, validation, observed_turns } = outcomes
@@ -37,7 +36,7 @@ export function OutcomesLedger({ keeper, outcomes }: {
   const pctSuccess = ledgerTotal > 0 ? (successes.substantive_turns / ledgerTotal) * 100 : 0
   const pctFail    = ledgerTotal > 0 ? (failures.turn_failed        / ledgerTotal) * 100 : 0
 
-  const verdicts = validation.oas_verdicts
+  const verdicts = validation.agent_core_verdicts
   const verdictTotal = verdicts.pass + verdicts.fail + verdicts.unknown
   const passRatePct = verdictTotal > 0 ? Math.round((verdicts.pass / verdictTotal) * 100) : null
   const passBarColor =
@@ -75,7 +74,7 @@ export function OutcomesLedger({ keeper, outcomes }: {
       ${'' /* Row 2 — Validator Pass Rate */}
       <${DetailCard} class="px-3 py-2">
         <div class="flex items-baseline justify-between gap-2 mb-1.5">
-          <${SectionHeader} size="xs">검증자 (OAS verdict)</${SectionHeader}>
+          <${SectionHeader} size="xs">검증자 (Agent Core verdict)</${SectionHeader}>
           <${MutedSpan}>
             ${verdictTotal > 0 ? `${verdicts.pass}/${verdictTotal} pass` : 'verdict 없음'}
           </${MutedSpan}>
@@ -95,7 +94,7 @@ export function OutcomesLedger({ keeper, outcomes }: {
           ` : null}
         ` : html`
           <div class="text-2xs text-[var(--color-fg-disabled)] leading-snug">
-            이 키퍼에 대해 기록된 OAS verdict가 아직 없습니다.
+            이 키퍼에 대해 기록된 Agent Core verdict가 아직 없습니다.
           </div>
         `}
       <//>
@@ -107,7 +106,6 @@ export function OutcomesLedger({ keeper, outcomes }: {
           <${MutedSpan}>supervisor 이력</${MutedSpan}>
         </div>
         <div class="flex flex-wrap gap-1.5 text-2xs">
-          <span class="px-2 py-0.5 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] tabular-nums">세대 ${keeper.generation ?? '-'}</span>
           <span class=${`px-2 py-0.5 rounded-[var(--r-0)] tabular-nums ${failures.crashes > 0 ? 'border border-[var(--bad-20)] bg-[var(--bad-6)] text-[var(--color-status-err)]' : 'border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-primary)]'}`}>크래시 ${failures.crashes}회</span>
           <span class=${`px-2 py-0.5 rounded-[var(--r-0)] tabular-nums ${failures.restarts > 0 ? 'border border-[var(--warn-20)] bg-[var(--warn-8)] text-[var(--color-status-warn)]' : 'border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-primary)]'}`}>재시작 ${failures.restarts}회</span>
           ${failures.consecutive_fail_current > 0 ? html`

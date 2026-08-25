@@ -1,6 +1,6 @@
 (** Typed operator command for one Board-attention quarantine.
 
-    The command never invokes OAS and never retries automatically. Candidate
+    The command never invokes AGENT_CORE and never retries automatically. Candidate
     [Requeue_requested], candidate [Requeued], and exact partition [Ready] are
     committed in that order. The opaque quarantine id fences a later failure
     generation on the same singleton partition. *)
@@ -42,14 +42,17 @@ type execution_error =
 type report =
   { candidate : Keeper_board_attention_candidate.candidate
   ; partition : Keeper_board_attention_partition.t
+  ; failure_category :
+      Keeper_board_attention_candidate.quarantine_failure_category
+      (** Typed category captured when the command resolves the quarantine;
+          renderers never reopen the candidate status or synthesize an
+          ["unknown"] success value. *)
   ; wake : Keeper_board_attention_worker_wake.wake_result
   }
 
 val input_error_to_string : input_error -> string
 val input_error_to_json : input_error -> Yojson.Safe.t
 val execution_error_label : execution_error -> string
-val execution_error_to_json : execution_error -> Yojson.Safe.t
-
 val parse_request : Yojson.Safe.t -> (request, input_error) result
 val parse_tool_command : Yojson.Safe.t -> (t, input_error) result
 

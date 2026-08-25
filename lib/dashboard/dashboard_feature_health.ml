@@ -50,11 +50,6 @@ let feature_to_health_item (flag : Feature_flag_registry.flag) : feature_health_
 let get_all_features () : feature_health_item list =
   List.map feature_to_health_item Feature_flag_registry.all_flags
 
-let get_features_by_category category : feature_health_item list =
-  Feature_flag_registry.all_flags
-  |> List.filter (fun f -> f.Feature_flag_registry.category = category)
-  |> List.map feature_to_health_item
-
 let get_feature_categories () : string list =
   Feature_flag_registry.all_flags
   |> List.map (fun f -> f.Feature_flag_registry.category)

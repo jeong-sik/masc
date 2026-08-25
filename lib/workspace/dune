@@ -5,7 +5,7 @@
  (public_name masc.masc_workspace)
  (wrapped false)
  (flags
-  (:standard -w +4 -w +32))
+  (:standard -w +4 -w +33 -w +37))
  (modules
   workspace_core
   telemetry_observe
@@ -56,6 +56,10 @@
   masc_eio_context
   masc_process
   masc.masc_exec
+  ; #27397: the evidence snapshot cap is the Read ceiling, read from the leaf
+  masc_tool_types
+  ; #27143: the day-file layout has one owner; this module used to rebuild it
+  masc.jsonl_writer
   ; RFC-0085 PR-9 — workspace_utils_backend_setup reads the env-derived
   ; base_path via Host_config.from_env now that the dep direction is
   ; reversed (host_config no longer depends on masc_workspace; audit
@@ -76,6 +80,7 @@
   eio.unix
   uri
   uuidm
+  base64
   digestif
   masc_random_id)
  (preprocess

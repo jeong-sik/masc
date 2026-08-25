@@ -1,7 +1,7 @@
 (test
  (name test_board_api_e2e)
  (modules test_board_api_e2e)
- (libraries alcotest masc_test_runtime unix)
+ (libraries alcotest masc_test_runtime masc.string_util unix)
  (deps ../bin/main_eio.exe)
  (enabled_if (= %{env:MASC_E2E_TESTS=false} "true"))
  (action

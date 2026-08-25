@@ -60,9 +60,6 @@ function makeRow(overrides: Partial<FleetRow> = {}): FleetRow {
     runtime_blocker_class: null,
     runtime_blocker_summary: null,
     tool_audit_at: null,
-    goal_label: null,
-    goal_linked: false,
-    active_goal_count: 0,
     sandbox_profile: null,
     sandbox_last_error: null,
     provider_health_status: null,
@@ -155,7 +152,7 @@ describe('buildFleetRows runtime labels', () => {
         name: 'runtime-keeper',
         status: 'active',
         keepalive_running: true,
-        runtime_id: 'oas-keeper_unified',
+        runtime_id: 'agent-core-keeper_unified',
         runtime_canonical: 'primary',
         active_model_label: 'codex-cli:auto',
         trust: {
@@ -189,10 +186,6 @@ describe('buildFleetRows runtime labels', () => {
             runtime_id: 'primary',
             runtime_attempt_count: 2,
             runtime_outcome: 'passed_to_next_model',
-            runtime_strategy: 'round_robin',
-            fallback_applied: true,
-            fallback_hops: 1,
-            fallback_reason: 'turn_timeout',
           },
         ],
       },
@@ -209,9 +202,9 @@ describe('buildFleetRows runtime labels', () => {
 
     expect(row).toMatchObject({
       model: 'runtime',
-      runtime_label: 'oas-keeper_unified -> primary',
+      runtime_label: 'agent-core-keeper_unified -> primary',
       provider_label: 'passed_to_next_model · 2 attempts · fallback',
-      fallback_label: 'fallback · turn_timeout · 1 hops',
+      fallback_label: 'fallback',
     })
   })
 
@@ -291,7 +284,6 @@ describe('fleetBand', () => {
   })
 
   it('classifies offline for dead/stopped/crashed status', () => {
-    expect(fleetBand(makeRow({ status: 'dead' }))).toBe('offline')
     expect(fleetBand(makeRow({ status: 'stopped' }))).toBe('offline')
     expect(fleetBand(makeRow({ status: 'crashed' }))).toBe('offline')
   })
@@ -315,12 +307,27 @@ describe('fleetBand', () => {
     expect(fleetBand(makeRow({ status: 'paused' }))).toBe('paused')
   })
 
-  it('classifies inactive keepalive rows as attention, not offline', () => {
-    expect(fleetBand(makeRow({ status: 'inactive', keepalive_running: true }))).toBe('attention')
+  // `status` answers with a vocabulary that folds stale, degraded and zombie
+  // into one word, so it cannot say which of the three a row is in — or
+  // whether the keeper is simply resting. The band reads the health the
+  // diagnostic carries instead, and each of the three still raises attention.
+  it.each(['stale', 'degraded', 'zombie'])(
+    'classifies attention for %s diagnostic health state',
+    state => {
+      expect(fleetBand(makeRow({ status: 'inactive', diagnostic_health_state: state })))
+        .toBe('attention')
+    },
+  )
+
+  it('does not raise attention on the folded status word alone', () => {
+    // A resting keeper and a stalled one both reach the wire as 'inactive'.
+    // Badging the word made every resting keeper look like it needed a look.
+    expect(fleetBand(makeRow({ status: 'inactive', keepalive_running: true }))).toBe('active')
   })
 
-  it('classifies attention for stale diagnostic health state', () => {
-    expect(fleetBand(makeRow({ status: 'inactive', diagnostic_health_state: 'stale' }))).toBe('attention')
+  it('still raises attention for an idle keeper the diagnostic calls stale', () => {
+    expect(fleetBand(makeRow({ status: 'idle', diagnostic_health_state: 'stale' })))
+      .toBe('attention')
   })
 
   it('classifies attention for runtime blocker', () => {
@@ -363,7 +370,7 @@ describe('fleetBandScore', () => {
 
 describe('rowUrgencyScore', () => {
   it('scores runtime blocker highest', () => {
-    const withBlocker = makeRow({ runtime_blocker_class: 'turn_timeout' })
+    const withBlocker = makeRow({ runtime_blocker_class: 'stale_turn_timeout' })
     const without = makeRow()
     expect(rowUrgencyScore(withBlocker)).toBeGreaterThan(rowUrgencyScore(without))
   })
@@ -383,7 +390,7 @@ describe('rowUrgencyScore', () => {
 
 describe('compareFleetRows', () => {
   it('sorts by band score descending', () => {
-    const a = makeRow({ name: 'a', runtime_blocker_class: 'turn_timeout' })
+    const a = makeRow({ name: 'a', runtime_blocker_class: 'stale_turn_timeout' })
     const b = makeRow({ name: 'b' })
     expect(compareFleetRows(a, b)).toBeLessThan(0) // attention before active
   })
@@ -430,14 +437,13 @@ describe('statusClass', () => {
   it.each([
     'offline',
     'unbooted',
-    'dead',
     'crashed',
   ])('returns bad-light for status=%s', (status) => {
     expect(statusClass(makeRow({ status }))).toContain('var(--bad-light)')
   })
 
   it('returns warn for runtime blocker', () => {
-    expect(statusClass(makeRow({ runtime_blocker_class: 'turn_timeout' }))).toContain('var(--color-status-warn)')
+    expect(statusClass(makeRow({ runtime_blocker_class: 'stale_turn_timeout' }))).toContain('var(--color-status-warn)')
   })
 
   it('returns warn for stale diagnostic health state', () => {
@@ -646,7 +652,7 @@ describe('buildFleetRows', () => {
 
 describe('buildRuntimeWarnings', () => {
   it('warns about runtime blockers', () => {
-    const rows = [makeRow({ runtime_blocker_class: 'turn_timeout' })]
+    const rows = [makeRow({ runtime_blocker_class: 'stale_turn_timeout' })]
     const warnings = buildRuntimeWarnings(rows)
     expect(warnings.length).toBe(1)
     expect(warnings[0]).toContain('runtime blockers')

@@ -7,6 +7,11 @@
 open Alcotest
 module R = Discord_rest_client
 
+let sf value =
+  match R.snowflake_of_string value with
+  | Ok value -> value
+  | Error message -> failf "invalid test snowflake: %s" message
+
 (* ---------------------------------------------------------------- *)
 (* build_request                                                    *)
 (* ---------------------------------------------------------------- *)
@@ -18,7 +23,7 @@ let header_value headers name =
 
 let test_build_request_url_targets_channel () =
   let url, _, _ =
-    R.build_request ~token:"abc" ~channel_id:"1234567890" ~content:"hi" ()
+    R.build_request ~token:"abc" ~channel_id:(sf "1234567890") ~content:"hi" ()
   in
   check string "v10 channel URL"
     "https://discord.com/api/v10/channels/1234567890/messages"
@@ -26,7 +31,7 @@ let test_build_request_url_targets_channel () =
 
 let test_build_request_authorization_uses_bot_scheme () =
   let _, headers, _ =
-    R.build_request ~token:"sekret" ~channel_id:"CH" ~content:"." ()
+    R.build_request ~token:"sekret" ~channel_id:(sf "123") ~content:"." ()
   in
   check string "Authorization header" "Bot sekret"
     (header_value headers "Authorization");
@@ -35,7 +40,7 @@ let test_build_request_authorization_uses_bot_scheme () =
 
 let test_build_request_user_agent_present () =
   let _, headers, _ =
-    R.build_request ~token:"t" ~channel_id:"c" ~content:"." ()
+    R.build_request ~token:"t" ~channel_id:(sf "1") ~content:"." ()
   in
   let ua = header_value headers "User-Agent" in
   (* Discord requires DiscordBot ($url, $version) shape. *)
@@ -45,19 +50,37 @@ let test_build_request_user_agent_present () =
 
 let test_build_request_body_is_content_object () =
   let _, _, body =
-    R.build_request ~token:"t" ~channel_id:"c" ~content:"hello \"world\"" ()
+    R.build_request ~token:"t" ~channel_id:(sf "1") ~content:"hello \"world\"" ()
   in
   let json = Yojson.Safe.from_string body in
   match json with
-  | `Assoc [ ("content", `String "hello \"world\"") ] -> ()
+  | `Assoc
+      [ ("content", `String "hello \"world\"")
+      ; ("allowed_mentions", `Assoc [ ("parse", `List []) ])
+      ] -> ()
   | _ ->
       failf
         "body shape wrong: %s"
         (Yojson.Safe.to_string json)
 
+let test_build_request_allows_only_explicit_users () =
+  let _, _, body =
+    R.build_request ~token:"t" ~channel_id:(sf "1")
+      ~content:"<@123> @everyone <@&456>"
+      ~allowed_user_mentions:[ sf "123" ] ()
+  in
+  let open Yojson.Safe.Util in
+  let allowed =
+    Yojson.Safe.from_string body |> member "allowed_mentions"
+  in
+  check (list string) "only explicit user snowflakes"
+    [ "123" ] (allowed |> member "users" |> to_list |> List.map to_string);
+  check bool "broad parse modes absent" true
+    (allowed |> member "parse" = `Null)
+
 let test_build_typing_request_url_targets_channel () =
   let url, _, body =
-    R.build_typing_request ~token:"abc" ~channel_id:"1234567890" ()
+    R.build_typing_request ~token:"abc" ~channel_id:(sf "1234567890") ()
   in
   check string "v10 typing URL"
     "https://discord.com/api/v10/channels/1234567890/typing"
@@ -66,7 +89,7 @@ let test_build_typing_request_url_targets_channel () =
 
 let test_build_typing_request_authorization_uses_bot_scheme () =
   let _, headers, _ =
-    R.build_typing_request ~token:"sekret" ~channel_id:"CH" ()
+    R.build_typing_request ~token:"sekret" ~channel_id:(sf "123") ()
   in
   check string "Authorization header" "Bot sekret"
     (header_value headers "Authorization");
@@ -75,23 +98,91 @@ let test_build_typing_request_authorization_uses_bot_scheme () =
     (String.length ua >= 10
      && String.sub ua 0 10 = "DiscordBot")
 
+let test_snowflake_decoder_rejects_non_decimal_ids () =
+  List.iter
+    (fun value ->
+      match R.snowflake_of_string value with
+      | Ok _ -> failf "accepted invalid Discord snowflake %S" value
+      | Error _ -> ())
+    [ ""; " 123"; "123 "; "123/456"; "abc" ]
+
+let test_error_rendering_does_not_disclose_response_body () =
+  let secret = "gateway secret response" in
+  match R.parse_response ~request_id:"req-1" ~status:502 ~body:secret () with
+  | Ok _ -> fail "expected a redacted HTTP error"
+  | Error error ->
+    let rendered = Format.asprintf "%a" R.pp_error error in
+    check bool "raw response is not rendered" false
+      (String_util.string_contains_substring ~needle:secret rendered);
+    check bool "request correlation is rendered" true
+      (String_util.string_contains_substring ~needle:"req-1" rendered)
+
+let test_build_channel_read_request_url () =
+  let url, headers, body =
+    R.build_channel_request ~token:"sekret" ~channel_id:(sf "123") ()
+  in
+  check string "channel read URL"
+    "https://discord.com/api/v10/channels/123" url;
+  check string "channel read auth" "Bot sekret"
+    (header_value headers "Authorization");
+  check string "channel read body" "" body
+
+let test_build_messages_read_request_query () =
+  let url, _, body =
+    R.build_channel_messages_request ~token:"t" ~channel_id:(sf "123")
+      ~limit:25 ~before:(sf "456") ()
+  in
+  check bool "messages read path"
+    true (String_util.string_contains_substring ~needle:"/channels/123/messages?" url);
+  check bool "messages limit" true
+    (String_util.string_contains_substring ~needle:"limit=25" url);
+  check bool "messages before" true
+    (String_util.string_contains_substring ~needle:"before=456" url);
+  check string "GET body" "" body
+
+let test_build_member_search_request_escapes_query () =
+  let url, _, _ =
+    R.build_guild_members_request ~token:"t" ~guild_id:(sf "123")
+      ~query:"min su" ~limit:10 ()
+  in
+  check bool "member search path" true
+    (String_util.string_contains_substring ~needle:"/guilds/123/members/search?" url);
+  check bool "member search query" true
+    (String_util.string_contains_substring ~needle:"query=min%20su" url);
+  check bool "member search limit" true
+    (String_util.string_contains_substring ~needle:"limit=10" url)
+
+let test_build_member_request_url () =
+  let url, _, _ =
+    R.build_guild_member_request ~token:"t" ~guild_id:(sf "123")
+      ~user_id:(sf "456") ()
+  in
+  check string "guild member URL"
+    "https://discord.com/api/v10/guilds/123/members/456" url
+
+let test_parse_json_response_accepts_array () =
+  match R.parse_json_response ~status:200 ~body:"[{\"id\":\"USER\"}]" () with
+  | Ok (`List [ `Assoc [ ("id", `String "USER") ] ]) -> ()
+  | Ok json -> failf "unexpected JSON: %s" (Yojson.Safe.to_string json)
+  | Error _ -> fail "expected JSON response to parse"
+
 (* ---------------------------------------------------------------- *)
 (* build_edit_request                                               *)
 (* ---------------------------------------------------------------- *)
 
 let test_build_edit_request_url_targets_message () =
   let url, _, _ =
-    R.build_edit_request ~token:"abc" ~channel_id:"CH123"
-      ~message_id:"MSG456" ~content:"hi" ()
+    R.build_edit_request ~token:"abc" ~channel_id:(sf "123")
+      ~message_id:(sf "456") ~content:"hi" ()
   in
   check string "v10 edit URL"
-    "https://discord.com/api/v10/channels/CH123/messages/MSG456"
+    "https://discord.com/api/v10/channels/123/messages/456"
     url
 
 let test_build_edit_request_authorization_uses_bot_scheme () =
   let _, headers, _ =
-    R.build_edit_request ~token:"sekret" ~channel_id:"c"
-      ~message_id:"m" ~content:"." ()
+    R.build_edit_request ~token:"sekret" ~channel_id:(sf "1")
+      ~message_id:(sf "2") ~content:"." ()
   in
   check string "Authorization header" "Bot sekret"
     (header_value headers "Authorization");
@@ -100,8 +191,8 @@ let test_build_edit_request_authorization_uses_bot_scheme () =
 
 let test_build_edit_request_body_is_content_object () =
   let _, _, body =
-    R.build_edit_request ~token:"t" ~channel_id:"c"
-      ~message_id:"m" ~content:"updated text" ()
+    R.build_edit_request ~token:"t" ~channel_id:(sf "1")
+      ~message_id:(sf "2") ~content:"updated text" ()
   in
   let json = Yojson.Safe.from_string body in
   match json with
@@ -114,8 +205,8 @@ let test_build_edit_request_body_is_content_object () =
 let test_build_edit_request_content_truncated_at_limit () =
   let long_content = String.make 2500 'x' in
   let _, _, body =
-    R.build_edit_request ~token:"t" ~channel_id:"c"
-      ~message_id:"m" ~content:long_content ()
+    R.build_edit_request ~token:"t" ~channel_id:(sf "1")
+      ~message_id:(sf "2") ~content:long_content ()
   in
   let json = Yojson.Safe.from_string body in
   match json with
@@ -127,8 +218,8 @@ let test_build_edit_request_content_truncated_at_limit () =
 let test_build_edit_request_short_content_not_truncated () =
   let short_content = "hello" in
   let _, _, body =
-    R.build_edit_request ~token:"t" ~channel_id:"c"
-      ~message_id:"m" ~content:short_content ()
+    R.build_edit_request ~token:"t" ~channel_id:(sf "1")
+      ~message_id:(sf "2") ~content:short_content ()
   in
   let json = Yojson.Safe.from_string body in
   match json with
@@ -144,7 +235,7 @@ let test_parse_response_2xx_with_id_returns_ok () =
   let body =
     {|{"id":"MSG123","channel_id":"CH","content":"hi","author":{"id":"BOT"}}|}
   in
-  match R.parse_response ~status:200 ~body with
+  match R.parse_response ~status:200 ~body () with
   | Ok "MSG123" -> ()
   | Ok other -> failf "expected MSG123, got %s" other
   | Error e ->
@@ -153,15 +244,26 @@ let test_parse_response_2xx_with_id_returns_ok () =
 
 let test_parse_response_2xx_without_id_is_other () =
   let body = {|{"foo":"bar"}|} in
-  match R.parse_response ~status:201 ~body with
+  match R.parse_response ~status:201 ~body () with
   | Error (R.Other _) -> ()
   | Ok _ -> fail "expected Error Other for 2xx without id"
   | Error e ->
       failf "expected Other, got %s"
         (Format.asprintf "%a" R.pp_error e)
 
+let test_parse_response_rejects_duplicate_id () =
+  let body = {|{"id":"first","id":"second"}|} in
+  match R.parse_response ~status:200 ~body () with
+  | Error (R.Other { reason; _ }) ->
+    check bool "duplicate id is named" true
+      (String_util.string_contains_substring ~needle:"repeats object key \"id\"" reason)
+  | Ok _ -> fail "duplicate response id must not be selected"
+  | Error error ->
+    failf "expected duplicate id rejection, got %s"
+      (Format.asprintf "%a" R.pp_error error)
+
 let test_parse_response_2xx_non_json_is_other () =
-  match R.parse_response ~status:200 ~body:"<html>oops</html>" with
+  match R.parse_response ~status:200 ~body:"<html>oops</html>" () with
   | Error (R.Other _) -> ()
   | _ -> fail "expected Error Other for 2xx non-JSON body"
 
@@ -171,41 +273,36 @@ let test_parse_response_discord_error_envelope () =
   let body =
     {|{"code":50007,"message":"Cannot send messages to this user"}|}
   in
-  match R.parse_response ~status:403 ~body with
+  match R.parse_response ~status:403 ~body () with
   | Error
-      (R.Discord_api
-        { code = 50007
-        ; message = "Cannot send messages to this user"
-        }) ->
+      (R.Discord_api { code = 50007; request_id = _ }) ->
       ()
   | _ -> fail "expected Discord_api { 50007; ... }"
 
 let test_parse_response_5xx_non_json_is_http_status () =
-  match R.parse_response ~status:502 ~body:"Bad Gateway" with
-  | Error (R.Http_status { code = 502; body = "Bad Gateway" }) -> ()
-  | _ -> fail "expected Http_status { 502; \"Bad Gateway\" }"
+  match R.parse_response ~status:502 ~body:"Bad Gateway" () with
+  | Error (R.Http_status { code = 502; body_bytes = 11; request_id = _ }) -> ()
+  | _ -> fail "expected redacted Http_status { 502; body_bytes=11 }"
 
-let test_parse_response_non2xx_json_without_envelope_falls_back () =
-  (* Non-2xx with a JSON object that has no Discord code/message —
-     parse_response falls back to (status, body) as code/message. *)
+let test_parse_response_non2xx_json_without_envelope_is_redacted () =
+  (* Non-2xx JSON without a Discord error envelope remains redacted. *)
   let body = {|{"hint":"bad request"}|} in
-  match R.parse_response ~status:400 ~body with
-  | Error (R.Discord_api { code = 400; _ }) -> ()
+  match R.parse_response ~status:400 ~body () with
+  | Error (R.Http_status { code = 400; body_bytes = 22; request_id = _ }) -> ()
   | _ ->
       fail
-        "expected Discord_api with code=400 fallback when JSON lacks \
-         'code' field"
+        "expected redacted Http_status when JSON lacks an error envelope"
 
 let test_parse_empty_response_204_returns_ok () =
-  match R.parse_empty_response ~status:204 ~body:"" with
+  match R.parse_empty_response ~status:204 ~body:"" () with
   | Ok () -> ()
   | Error e ->
       failf "expected Ok, got %s" (Format.asprintf "%a" R.pp_error e)
 
 let test_parse_empty_response_discord_error_envelope () =
   let body = {|{"code":50013,"message":"Missing Permissions"}|} in
-  match R.parse_empty_response ~status:403 ~body with
-  | Error (R.Discord_api { code = 50013; message = "Missing Permissions" }) ->
+  match R.parse_empty_response ~status:403 ~body () with
+  | Error (R.Discord_api { code = 50013; request_id = _ }) ->
       ()
   | Ok () -> fail "expected Discord_api error"
   | Error e ->
@@ -301,15 +398,15 @@ let test_image_embed_to_json () =
 
 let test_build_embed_request_url_targets_channel () =
   let url, _, _ =
-    R.build_embed_request ~token:"t" ~channel_id:"CH1"
+    R.build_embed_request ~token:"t" ~channel_id:(sf "1")
       ~content:"hi" ~embeds:[] ()
   in
   check string "URL targets channel"
-    "https://discord.com/api/v10/channels/CH1/messages" url
+    "https://discord.com/api/v10/channels/1/messages" url
 
 let test_build_embed_request_empty_content_omits_field () =
   let _, _, body =
-    R.build_embed_request ~token:"t" ~channel_id:"c"
+    R.build_embed_request ~token:"t" ~channel_id:(sf "1")
       ~content:"" ~embeds:[] ()
   in
   let json = Yojson.Safe.from_string body in
@@ -322,7 +419,7 @@ let test_build_embed_request_embeds_included () =
     { title = "T"; description = None; url = None; color = 1; image = None; fields = [] }
   in
   let _, _, body =
-    R.build_embed_request ~token:"t" ~channel_id:"c"
+    R.build_embed_request ~token:"t" ~channel_id:(sf "1")
       ~content:"" ~embeds:[embed] ()
   in
   let json = Yojson.Safe.from_string body in
@@ -340,11 +437,11 @@ let test_build_embed_request_embeds_included () =
 
 let test_build_edit_embed_request_url_targets_message () =
   let url, _, _ =
-    R.build_edit_embed_request ~token:"t" ~channel_id:"CH"
-      ~message_id:"MSG1" ~content:"hi" ~embeds:[] ()
+    R.build_edit_embed_request ~token:"t" ~channel_id:(sf "1")
+      ~message_id:(sf "9") ~content:"hi" ~embeds:[] ()
   in
   check string "URL targets message"
-    "https://discord.com/api/v10/channels/CH/messages/MSG1" url
+    "https://discord.com/api/v10/channels/1/messages/9" url
 
 let test_build_edit_embed_request_embeds_and_content () =
   let embed : R.embed =
@@ -352,8 +449,8 @@ let test_build_edit_embed_request_embeds_and_content () =
     ; image = None; fields = [] }
   in
   let _, _, body =
-    R.build_edit_embed_request ~token:"t" ~channel_id:"c"
-      ~message_id:"m" ~content:"ok" ~embeds:[embed] ()
+    R.build_edit_embed_request ~token:"t" ~channel_id:(sf "1")
+      ~message_id:(sf "2") ~content:"ok" ~embeds:[embed] ()
   in
   let json = Yojson.Safe.from_string body in
   match json with
@@ -433,7 +530,10 @@ let test_truncate_to_limit_korean_valid_utf8 () =
 
 let () =
   run "discord_rest_client"
-    [ ( "build_request"
+    [ ( "snowflake"
+      , [ test_case "rejects non-decimal IDs" `Quick
+            test_snowflake_decoder_rejects_non_decimal_ids ] )
+    ; ( "build_request"
       , [ test_case "URL targets channel" `Quick
             test_build_request_url_targets_channel
         ; test_case "Authorization uses Bot scheme" `Quick
@@ -442,10 +542,20 @@ let () =
             test_build_request_user_agent_present
         ; test_case "body is { content: <content> } JSON" `Quick
             test_build_request_body_is_content_object
+        ; test_case "only explicit user mentions are allowed" `Quick
+            test_build_request_allows_only_explicit_users
         ; test_case "typing URL targets channel" `Quick
             test_build_typing_request_url_targets_channel
         ; test_case "typing Authorization uses Bot scheme" `Quick
             test_build_typing_request_authorization_uses_bot_scheme
+        ; test_case "channel read URL and headers" `Quick
+            test_build_channel_read_request_url
+        ; test_case "messages read query" `Quick
+            test_build_messages_read_request_query
+        ; test_case "member search query escaping" `Quick
+            test_build_member_search_request_escapes_query
+        ; test_case "guild member URL" `Quick
+            test_build_member_request_url
         ] )
     ; ( "build_edit_request"
       , [ test_case "URL targets channel/message" `Quick
@@ -500,17 +610,23 @@ let () =
             test_parse_response_2xx_with_id_returns_ok
         ; test_case "2xx without id => Other" `Quick
             test_parse_response_2xx_without_id_is_other
+        ; test_case "duplicate response id => Other" `Quick
+            test_parse_response_rejects_duplicate_id
         ; test_case "2xx non-JSON => Other" `Quick
             test_parse_response_2xx_non_json_is_other
         ; test_case "Discord error envelope => Discord_api" `Quick
             test_parse_response_discord_error_envelope
         ; test_case "5xx non-JSON => Http_status" `Quick
             test_parse_response_5xx_non_json_is_http_status
-        ; test_case "non-2xx JSON without envelope => Discord_api fallback"
-            `Quick test_parse_response_non2xx_json_without_envelope_falls_back
+        ; test_case "error rendering omits raw response body" `Quick
+            test_error_rendering_does_not_disclose_response_body
+        ; test_case "non-2xx JSON without envelope => redacted Http_status"
+            `Quick test_parse_response_non2xx_json_without_envelope_is_redacted
         ; test_case "empty 204 => Ok" `Quick
             test_parse_empty_response_204_returns_ok
         ; test_case "empty non-2xx Discord envelope => Discord_api"
             `Quick test_parse_empty_response_discord_error_envelope
+        ; test_case "JSON response accepts array" `Quick
+            test_parse_json_response_accepts_array
         ] )
     ]

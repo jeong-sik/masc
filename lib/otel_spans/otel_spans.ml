@@ -105,6 +105,9 @@ let probe_endpoint ~(env : Eio_unix.Stdenv.base) endpoint =
         Eio.Flow.close conn);
       true
   with
+  (* The body is all Eio cancellation points; folding Cancelled into
+     [false] would let a cancelled health fiber report "collector down". *)
+  | Eio.Cancel.Cancelled _ as e -> raise e
   | _ -> false
 
 let setup_exporter ~sw (env : Eio_unix.Stdenv.base) =

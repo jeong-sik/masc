@@ -3,7 +3,6 @@ title: Typed persistence read-drop reason + Result-based reads
 rfc: 0044
 status: Active
 created: 2026-05-08
-implementation_prs: []
 ---
 
 # RFC-0044 — Typed persistence read-drop reason + Result-based reads
@@ -177,22 +176,21 @@ growth is bounded by the closed sum.
 
 ## 5. Drift guards
 
--   `scripts/lint/no-free-string-read-drop-reason.sh`: greps for
+-   Free-string guard (not built): would reject
     `Otel_metric_store.inc_counter ... metric_persistence_read_drops`
     invocations whose `reason` argument is a string literal not
-    sourced from `Read_drop_reason.to_wire`. Runs in
-    `fundamental-check.yml`.
--   Linter for `Other` reuse: any PR that adds a `Read_drop_reason.Other "X"`
-    where `X` is already used at another site fails CI; the value must
-    be promoted to a constructor.
+    sourced from `Read_drop_reason.to_wire`.
+-   `Other` reuse guard (not built): would reject a
+    `Read_drop_reason.Other "X"` whose `X` is already used at another
+    site; the value belongs in a constructor.
 
 ## 6. Trade-offs
 
 -   **Cost of the closed sum**: every new surface that needs a new
     drop reason now requires a code change in `Read_drop_reason.t`.
     This is the explicit goal — visibility decisions become reviewable.
--   **`Other` escape hatch**: leaves a small back door. Mitigated by
-    the §5 lint that blocks reuse.
+-   **`Other` escape hatch**: leaves a small back door, and neither §5
+    guard exists, so nothing closes it automatically.
 -   **Wire compatibility cost**: new constructor wire names should
     follow `snake_case` to match the existing convention; trivial.
 -   **No recovery story**: this RFC explicitly does not solve data

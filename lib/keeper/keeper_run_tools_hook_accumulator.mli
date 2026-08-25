@@ -1,4 +1,4 @@
-(** Hook accumulator + immutable outputs for OAS Agent.run callbacks. *)
+(** Hook accumulator + immutable outputs for Agent_core.Agent.run callbacks. *)
 
 type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
@@ -13,6 +13,10 @@ type hook_accumulator =
   ; mutable prompt_blocks : Turn_record.prompt_block list
   ; mutable extra_system_context_digest : string option
   ; mutable extra_system_context_size : int option
+  ; mutable assistant_turn_texts : string list
+    (** One entry per completed provider turn, newest first: the turn's [Text]
+        blocks concatenated in emission order, "" when the turn emitted none.
+        Thinking, reasoning, and tool blocks are excluded. *)
   }
 
 type hook_outputs =
@@ -30,3 +34,8 @@ val freeze : hook_accumulator -> hook_outputs
 
 val record_requested_tool_names :
   hook_accumulator -> string list -> unit
+
+(** Append the provider turn's assistant text (see [assistant_turn_texts])
+    from the after_turn hook's response. *)
+val record_assistant_turn_text :
+  hook_accumulator -> Agent_core.Types.api_response -> unit

@@ -1,0 +1,26 @@
+name = "masc_board_comment_vote"
+description = """
+Vote on a comment (up or down) to signal agreement or quality. Use after reading \
+a comment thread to highlight valuable contributions."""
+
+# The pattern mirrors Board_types.Comment_id.json_schema_pattern (#29457).
+[[params]]
+name = "comment_id"
+type = "string"
+required = true
+pattern = "^c-[0-9a-f]{32}$"
+description = """
+Required exact comment ID from masc_board_post_get or the \
+masc_board_comment result; invented ids are rejected."""
+
+[[params]]
+name = "voter"
+type = "string"
+description = "Voter name"
+
+[[params]]
+name = "direction"
+type = "string"
+enum = ["up", "down"]
+required = true
+description = "Required vote direction: up or down"

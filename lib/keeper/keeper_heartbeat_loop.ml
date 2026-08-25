@@ -29,9 +29,6 @@ let collect_keepalive_board_events = Keeper_heartbeat_loop_board_events.collect_
 let in_turn_liveness_pulse_interval_sec =
   Keeper_heartbeat_loop_in_turn_pulse.in_turn_liveness_pulse_interval_sec
 
-let with_in_turn_liveness_pulse_for_test =
-  Keeper_heartbeat_loop_in_turn_pulse.with_in_turn_liveness_pulse_for_test
-
 let emit_in_turn_liveness_pulse =
   Keeper_heartbeat_loop_in_turn_pulse.emit_in_turn_liveness_pulse
 
@@ -52,6 +49,7 @@ type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
   pending_selection : Keeper_event_queue_state.pending_selection option;
+  consumed_selections : Keeper_event_queue_state.pending_selection list;
   event_queue_intake_error : Stimulus_intake.event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
@@ -115,25 +113,28 @@ let run_keeper_cycle = Cycle.run_keeper_cycle
 type keepalive_cycle_status =
   | Turn_cycle_completed
   | Turn_cycle_crashed
-  | Turn_cycle_busy of Keeper_turn_admission.autonomous_block
+  | Turn_cycle_busy of Keeper_owner.autonomous_block
 
-type keepalive_cycle_accounting =
-  { record_turn_status : bool
-  ; refresh_work_heartbeat : bool
-  }
+type work_heartbeat_action =
+  | Refresh_work_heartbeat
+  | Preserve_work_heartbeat
 
-let keepalive_cycle_accounting = function
-  | Turn_cycle_completed ->
-    { record_turn_status = true; refresh_work_heartbeat = true }
-  | Turn_cycle_crashed ->
-    { record_turn_status = true; refresh_work_heartbeat = false }
-  | Turn_cycle_busy _ ->
-    { record_turn_status = false; refresh_work_heartbeat = false }
+type keepalive_cycle_action =
+  | Defer_autonomous_work of Keeper_owner.autonomous_block
+  | Record_turn_status of work_heartbeat_action
+
+let decide_keepalive_cycle_action = function
+  | Turn_cycle_completed -> Record_turn_status Refresh_work_heartbeat
+  | Turn_cycle_crashed -> Record_turn_status Preserve_work_heartbeat
+  | Turn_cycle_busy block -> Defer_autonomous_work block
 ;;
 
 type keepalive_turn_outcome = {
   meta : keeper_meta;
   cycle_status : keepalive_cycle_status;
+  stimuli_acked : bool;
+      (** The cycle admitted at least one event-queue stimulus and acked
+          every entry of that batch on completion. *)
 }
 
 let consume_deferred_runtime_lane_hint hint_ref expected =
@@ -159,10 +160,10 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Bootstrap
       | Keeper_event_queue.Hitl_resolved _
       | Keeper_event_queue.Manual_compaction_requested
-      | Keeper_event_queue.Goal_assigned _
-      | Keeper_event_queue.Goal_reconciliation_ready _
       | Keeper_event_queue.Completion_authority_rejected _
-      | Keeper_event_queue.Task_cancelled _ ->
+      | Keeper_event_queue.Task_cancelled _
+      | Keeper_event_queue.Workspace_message _
+      | Keeper_event_queue.Delegate_completed _ ->
         None)
     stimuli
 ;;
@@ -180,10 +181,10 @@ let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
        | Keeper_event_queue.Bootstrap
        | Keeper_event_queue.Connector_attention _
        | Keeper_event_queue.Manual_compaction_requested
-       | Keeper_event_queue.Goal_assigned _
-       | Keeper_event_queue.Goal_reconciliation_ready _
        | Keeper_event_queue.Completion_authority_rejected _
-       | Keeper_event_queue.Task_cancelled _ -> ())
+       | Keeper_event_queue.Task_cancelled _
+       | Keeper_event_queue.Workspace_message _
+       | Keeper_event_queue.Delegate_completed _ -> ())
     stimuli
 ;;
 
@@ -206,6 +207,67 @@ let mark_connector_attention_ignored_after_turn ~base_path ~keeper_name event_id
          keeper_name
          (String.concat "," event_ids)
          err)
+;;
+
+let mark_connector_attention_resolved_after_delivery ~base_path ~keeper_name event_ids =
+  match event_ids with
+  | [] -> ()
+  | _ :: _ ->
+    (match
+       Keeper_external_attention.mark_resolved
+         ~base_path
+         ~keeper_name
+         ~event_ids
+         ~reason:"connector_attention_reply_delivered"
+         ()
+     with
+     | Ok () -> ()
+     | Error err ->
+       Log.Keeper.warn
+         "connector attention mark_resolved after delivery failed keeper=%s events=[%s]: %s"
+         keeper_name
+         (String.concat "," event_ids)
+         err)
+;;
+
+(* The queue entry and the external-attention row are two separate writes. A
+   quarantining turn failure terminalizes the entry, so nothing is left to
+   deliver the row to a Keeper: the wake is edge-triggered (RFC-connector-
+   ambient-attention-wake) and only a *new* ambient message in that conversation
+   arms another stimulus. Without this append the row stays [Recorded] forever
+   and the waiting inventory reports work that no producer will ever pick up.
+   [Quarantined], not [Ignored] — no turn judged this row. *)
+let mark_connector_attention_quarantined_after_turn
+      ~base_path ~keeper_name ~detail event_ids =
+  match event_ids with
+  | [] -> ()
+  | _ :: _ ->
+    (match
+       Keeper_external_attention.mark_quarantined
+         ~base_path
+         ~keeper_name
+         ~event_ids
+         ~reason:(Printf.sprintf "connector_attention_turn_quarantined: %s" detail)
+         ()
+     with
+     | Ok () -> ()
+     | Error err ->
+       Log.Keeper.warn
+         "connector attention mark_quarantined after turn failed keeper=%s events=[%s]: %s"
+         keeper_name
+         (String.concat "," event_ids)
+         err)
+;;
+
+type connector_attention_outcome =
+  | Attention_resolved
+  | Attention_ignored
+
+let connector_attention_outcome_of_route
+    (route : Keeper_unified_turn.continuation_route_disposition) =
+  match route with
+  | Keeper_unified_turn.Continuation_route_addressed -> Attention_resolved
+  | Keeper_unified_turn.Continuation_route_not_addressed -> Attention_ignored
 ;;
 
 (* T6 audit: record a swallowed cycle exception as a turn failure.
@@ -237,21 +299,25 @@ let manual_compaction_requested_of_stimuli = function
   | [] | [ _ ] | _ :: _ :: _ -> false
 ;;
 
+
+
+
 let rec compaction_outcomes_of_cycle_outcome = function
-  | Cycle.Manual_compaction_applied { receipt; followup } ->
-    `Manual_committed receipt.commit_count
+  | Cycle.Manual_compaction_applied { receipt; evidence; followup } ->
+    `Manual_committed
+      ( receipt.commit_count
+      , evidence.Keeper_compaction_evidence.before_checkpoint_bytes
+      , evidence.Keeper_compaction_evidence.after_checkpoint_bytes )
     :: compaction_outcomes_of_cycle_outcome followup
   | Cycle.Manual_compaction_failed _ -> [ `Failed ]
   | Cycle.Failed { failure; _ } ->
     (match failure.Keeper_unified_turn.source_disposition with
-     | Keeper_unified_turn.Follow_failure_route
-     | Keeper_unified_turn.Pause_after_transcript_corruption _ -> [])
+     | Keeper_unified_turn.Follow_failure_route -> [])
   | Cycle.Completed _
   | Cycle.Checkpointed _
   | Cycle.Input_required _
   | Cycle.Cancelled _
   | Cycle.Skipped _
-  | Cycle.Busy _
   | Cycle.Manual_compaction_not_applied _ ->
     []
 ;;
@@ -268,46 +334,113 @@ let record_compaction_outcome_metric ~keeper_name outcome =
     ()
 ;;
 
-(* Pure: source-disposal decision for a [Cycle.Failed] outcome that holds a
-   pending Event Queue selection. With automatic overflow-compaction recovery
-   removed (#26546), a typed context overflow has no automatic repair step.
-   Without a deferred runtime successor, retry has no evidence of a smaller
-   request. [Some detail] terminalizes the selection so the keeper moves on.
-   Everything else preserves the selection:
-   - a pending [deferred_runtime_lane] freezes a successor runtime for this
-     exact selection; the next cycle re-runs it on that lane, and a lane list
-     is finite, so the walk terminates without a timed retry cycle;
-   - other terminal classes ([Config_mismatch], [Internal_opaque],
-     [Terminal_effect_*], ...) may resolve without compaction (operator fix,
-     transient internal failure) and effect/durability outcomes must never be
-     acknowledged while unresolved;
-   - retryable routes stay pending for the next cycle;
-   - transcript corruption is consumed by its own pause path, not here. *)
-let failed_selection_terminal_detail
+(* Pure liveness policy for a [Cycle.Failed] outcome holding one exact source.
+   A frozen runtime successor keeps that selection bound to the failover walk.
+   Retryable failures rotate to the urgency-lane tail. Deterministic failures
+   move only the source into a durable terminal receipt. An effect-fenced
+   provider failure always moves the exact source to that receipt even when a
+   stale deferred successor exists, because replay could duplicate an external
+   effect. Transcript corruption alone pauses the Keeper because continuing
+   with a structurally invalid history can duplicate or misattribute effects. *)
+type failed_source_disposition =
+  | Preserve_for_deferred_runtime
+  | Defer_to_queue_tail
+  | Quarantine_source of { detail : string }
+
+let failed_source_disposition
       (failure : Keeper_unified_turn.turn_failure)
-  : string option
   =
   match failure.Keeper_unified_turn.source_disposition with
-  | Keeper_unified_turn.Pause_after_transcript_corruption _ -> None
   | Keeper_unified_turn.Follow_failure_route ->
-    (match failure.Keeper_unified_turn.deferred_runtime_lane with
-     | Some _ -> None
-     | None ->
-       (match failure.Keeper_unified_turn.route with
-        | Keeper_runtime_failure_route.Exhausted_visible_alive
-            { terminal = Keeper_runtime_failure_route.Context_overflow
-            ; detail
-            ; _
-            } -> Some detail
-        | Keeper_runtime_failure_route.Exhausted_visible_alive _
-        | Keeper_runtime_failure_route.Retry_after_observed _
-        | Keeper_runtime_failure_route.Rotate_now _ -> None))
+    (match failure.Keeper_unified_turn.route with
+     | Keeper_runtime_failure_route.Exhausted_visible_alive
+         { terminal =
+             ( Keeper_runtime_failure_route.Provider_attempt_effect_fenced
+             | Keeper_runtime_failure_route.Tool_correction_lost )
+         ; detail
+         ; _
+         } -> Quarantine_source { detail }
+     | route ->
+       (match failure.Keeper_unified_turn.deferred_runtime_lane with
+        | Some _ -> Preserve_for_deferred_runtime
+        | None ->
+          (match route with
+           | Keeper_runtime_failure_route.Exhausted_visible_alive
+               { detail; _ } -> Quarantine_source { detail }
+           | Keeper_runtime_failure_route.Retry_after_observed _
+           | Keeper_runtime_failure_route.Rotate_now _ -> Defer_to_queue_tail)))
 ;;
 
-module For_testing = struct
-  let consume_deferred_runtime_lane_hint =
-    consume_deferred_runtime_lane_hint
-end
+(* RFC-0377 batch disposition: the queue action a turn outcome implies for
+   every stimulus admitted into that turn (the primary plus any
+   Connector_attention companions), extracted as a pure function of
+   [cycle_outcome] alone. Before this extraction the decision lived inline
+   in [run_keepalive_turn]'s closure, reachable only through the full Eio
+   ctx + durable-registry harness, so a regression from "ack the whole
+   batch" back to "ack only the primary" would still pass every existing
+   test (nothing exercised the decision directly — see
+   test_keeper_connector_attention_batch_disposition.ml). One turn always
+   produces one disposition applied uniformly to every admitted selection:
+   the outcome is a property of the turn, not of any individual stimulus. *)
+type batch_disposition =
+  | Batch_ack_completed of
+      { connector_attention_outcome : connector_attention_outcome }
+  | Batch_quarantine of { detail : string }
+  | Batch_defer of { reason : string }
+  | Batch_no_action
+
+let batch_disposition_of_cycle_outcome
+      (cycle_outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option)
+  : batch_disposition
+  =
+  match cycle_outcome with
+  | Some (Cycle.Completed completion) ->
+    Batch_ack_completed
+      { connector_attention_outcome =
+          connector_attention_outcome_of_route completion.continuation_route
+      }
+  | Some (Cycle.Manual_compaction_applied _) ->
+    Batch_ack_completed { connector_attention_outcome = Attention_ignored }
+  | Some (Cycle.Failed { failure; _ }) ->
+    (match failed_source_disposition failure with
+     | Quarantine_source { detail } -> Batch_quarantine { detail }
+     | Defer_to_queue_tail -> Batch_defer { reason = "transient_turn_failure" }
+     | Preserve_for_deferred_runtime -> Batch_no_action)
+  | Some (Cycle.Manual_compaction_failed { failure; _ }) ->
+    Batch_quarantine { detail = Keeper_manual_compaction.failure_to_string failure }
+  | Some (Cycle.Manual_compaction_not_applied { no_compaction; _ }) ->
+    Batch_quarantine
+      { detail =
+          Keeper_post_turn.compaction_recovery_error_to_string
+            (Keeper_post_turn.No_compaction no_compaction)
+      }
+  | Some
+      ( Cycle.Checkpointed _
+      | Cycle.Input_required _
+      | Cycle.Cancelled _
+      | Cycle.Skipped _ )
+  | None ->
+    Batch_no_action
+;;
+
+type connector_attention_settlement =
+  | Settle_resolved
+  | Settle_ignored
+  | Settle_quarantined of { detail : string }
+  | Settle_pending_in_queue
+
+let connector_attention_settlement_of_disposition = function
+  | Batch_ack_completed { connector_attention_outcome = Attention_resolved } ->
+    Settle_resolved
+  | Batch_ack_completed { connector_attention_outcome = Attention_ignored } ->
+    Settle_ignored
+  | Batch_quarantine { detail } -> Settle_quarantined { detail }
+  (* These two leave the queue entry in place, so the turn that finally drains
+     it owns the terminal event. Settling here would retire a row that is still
+     live. *)
+  | Batch_defer _ | Batch_no_action -> Settle_pending_in_queue
+;;
+
 
 (* Pure: post-turn status event derived from the registry turn-failure
    counter. Extracted from the loop body so the crashed-cycle ->
@@ -318,6 +451,26 @@ let turn_status_event ~turn_fail_count : Keeper_state_machine.event =
   else Keeper_state_machine.Turn_succeeded
 ;;
 
+(* Whether the event queue still holds any pending entry. Read errors are
+   logged and answered [false]: the cycle then sleeps the cadence and the
+   next intake reports the same error through its own path. *)
+let pending_stimulus_remains ~ctx ~keeper_name =
+  match
+    Keeper_registry_event_queue.peek_when_result
+      ~base_path:ctx.config.base_path
+      keeper_name
+      ~ready:(fun (_ : Keeper_event_queue.stimulus) -> true)
+  with
+  | Ok (Some _) -> true
+  | Ok None -> false
+  | Error detail ->
+    Log.Keeper.warn
+      ~keeper_name
+      "event queue peek after acked cycle failed; sleeping the cadence: %s"
+      detail;
+    false
+;;
+
 let run_keepalive_unified_turn
       ~(ctx : _ context)
       ~(meta_after_triage : keeper_meta)
@@ -325,7 +478,7 @@ let run_keepalive_unified_turn
       ~(stop : bool Atomic.t)
       ~(proactive_warmup_elapsed : bool)
       ~(reactive_wake : bool)
-      ~(shared_context : Agent_sdk.Context.t)
+      ~(shared_context : Agent_core.Context.t)
       ~(deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option)
       ~(on_deferred_runtime_consumed : unit -> unit)
       ~(record_deferred_runtime_lane :
@@ -333,21 +486,40 @@ let run_keepalive_unified_turn
   : keepalive_turn_outcome
   =
   if not proactive_warmup_elapsed
-  then { meta = meta_after_triage; cycle_status = Turn_cycle_completed }
+  then
+    { meta = meta_after_triage
+    ; cycle_status = Turn_cycle_completed
+    ; stimuli_acked = false
+    }
   else
     match
-      Keeper_turn_admission.run_if_free_with_token
+      Keeper_owner_registry.run_autonomous_if_idle
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
-        (fun admission_token ->
+        (fun () ->
+           Keeper_turn_dispatch_authority.run (fun admission_token ->
     let consumed_stimuli = ref [] in
     let pending_selection
       : Keeper_event_queue_state.pending_selection option ref
       =
       ref None
     in
+    (* RFC-0377: [pending_selection] above stays the single primary entry
+       (transient-board-withdrawal reporting and pre-dispatch validation are
+       unchanged by batching). [consumed_selections] is the full admitted
+       batch — [[]], a singleton mirroring [pending_selection], or the
+       primary plus every same-conversation Connector_attention companion.
+       Turn completion/failure disposition acks or defers every entry in
+       this list, not just the primary, so a companion is never left
+       durably stuck once its turn has already run. *)
+    let consumed_selections
+      : Keeper_event_queue_state.pending_selection list ref
+      =
+      ref []
+    in
     let cycle_outcome_ref = ref None in
     let selection_acked = ref false in
+    let stimuli_acked = ref false in
     let event_queue_failed = ref false in
     let record_event_queue_failure message =
       event_queue_failed := true;
@@ -362,7 +534,6 @@ let run_keepalive_unified_turn
           | Cycle.Input_required _
           | Cycle.Cancelled _
           | Cycle.Skipped _
-          | Cycle.Busy _
           | Cycle.Manual_compaction_failed _
           | Cycle.Manual_compaction_not_applied _
           | Cycle.Manual_compaction_applied _ )
@@ -400,6 +571,7 @@ let run_keepalive_unified_turn
       in
       consumed_stimuli := event_intake.consumed_stimuli;
       pending_selection := event_intake.pending_selection;
+      consumed_selections := event_intake.consumed_selections;
       let selected_source_authority () =
         match
           Keeper_meta_store.read_effective_meta
@@ -412,16 +584,31 @@ let run_keepalive_unified_turn
         | Ok (Some current) when current.paused ->
           Error "keeper paused before dispatch"
         | Ok (Some _) ->
-          (match !pending_selection with
-           | None -> Ok ()
-           | Some selection ->
-             Keeper_registry_event_queue.validate_pending_selection_result
-               ~base_path:ctx.config.base_path
-               meta_after_triage.name
-               ~selection)
+          (* Batch case: validate every admitted selection, not only the
+             primary, so a companion whose durable entry changed out from
+             under this turn is caught before dispatch instead of only at
+             ack time. Falls back to the pre-batch single [pending_selection]
+             when nothing was consumed as a batch (e.g. the transient-board
+             withdrawal case, which never populates [consumed_selections]). *)
+          let selections_to_validate =
+            match !consumed_selections with
+            | [] -> Option.to_list !pending_selection
+            | (_ :: _) as selections -> selections
+          in
+          List.fold_left
+            (fun result selection ->
+               match result with
+               | Error _ as error -> error
+               | Ok () ->
+                 Keeper_registry_event_queue.validate_pending_selection_result
+                   ~base_path:ctx.config.base_path
+                   meta_after_triage.name
+                   ~selection)
+            (Ok ())
+            selections_to_validate
       in
       (match
-         Keeper_turn_admission.install_before_dispatch_authority
+         Keeper_turn_dispatch_authority.install
            admission_token
            selected_source_authority
        with
@@ -475,7 +662,7 @@ let run_keepalive_unified_turn
       then (
         (* #10008 fm3: emit per-reason skip counter so operators can
            see why proactive scheduler never fires for a given keeper.
-           scholar/executor stayed at [proactive_count_total=0,
+           two Keepers stayed at [proactive_count_total=0,
            last_proactive_ts=0.0] for 45+ min despite
            proactive_enabled=true — the info log alone buried the
            reason across many lines.  Labelled counter lets Grafana
@@ -503,15 +690,6 @@ let run_keepalive_unified_turn
         let paused_info =
           if meta_after_triage.paused
           then (
-            let blocker_str =
-              match meta_after_triage.runtime.last_blocker with
-              | Some info ->
-                let trimmed = String.trim info.detail in
-                if String.equal trimmed ""
-                then Keeper_meta_contract.blocker_class_to_string info.klass
-                else trimmed
-              | None -> "unknown"
-            in
             let paused_since_sec =
               match
                 Workspace_resilience.Time.parse_iso8601_opt meta_after_triage.updated_at
@@ -519,7 +697,7 @@ let run_keepalive_unified_turn
               | Some ts -> int_of_float (max 0.0 (Time_compat.now () -. ts))
               | None -> -1
             in
-            Printf.sprintf " blocker=%s paused_since=%ds" blocker_str paused_since_sec)
+            Printf.sprintf " paused_since=%ds" paused_since_sec)
           else ""
         in
         let log_not_scheduled =
@@ -575,7 +753,6 @@ let run_keepalive_unified_turn
                 meta_after_triage.name
                 (Int64.of_float (audit_wall_clock *. 1000.0)))
            ~keeper_name:meta_after_triage.name
-           ~generation:meta_after_triage.runtime.nonce
            ~turn_verdict:turn_decision.verdict
            ~wall_clock:audit_wall_clock
            ?tool_diversity_entropy
@@ -600,28 +777,40 @@ let run_keepalive_unified_turn
             !consumed_stimuli;
           let event_bus = Event_bus_slots.get_keeper () in
           (* Preserve the typed resolution as input to the originating
-             Keeper's external-effect Gate. It is not an OAS approval. *)
+             Keeper's external-effect Gate. It is not an AGENT_CORE approval. *)
           let hitl_resolution =
-            List.find_map
-              (fun (stim : Keeper_event_queue.stimulus) ->
-                match stim.Keeper_event_queue.payload with
-                | Keeper_event_queue.Hitl_resolved resolution -> Some resolution
-                | _ -> None)
-              !consumed_stimuli
-          in
-          (* Non-board intake consumes exactly one stimulus per turn. Project
-             its exact reply route without choosing between wake families or
-             coalescing unrelated connector conversations. Board batches carry
-             no continuation channel and therefore leave this [None]. *)
-          let continuation_delivery_channel =
-            match !consumed_stimuli with
-            | [ { Keeper_event_queue.payload = Hitl_resolved resolution; _ } ]
-              when Keeper_continuation_channel.is_routable resolution.channel ->
-              Some resolution.channel
-            | [ { Keeper_event_queue.payload = Fusion_completed completion; _ } ]
-              when Keeper_continuation_channel.is_routable completion.channel ->
-              Some completion.channel
-            | [] | [ _ ] | _ :: _ :: _ -> None
+            match
+              List.find_map
+                (fun (stim : Keeper_event_queue.stimulus) ->
+                  match stim.Keeper_event_queue.payload with
+                  | Keeper_event_queue.Hitl_resolved resolution -> Some resolution
+                  | _ -> None)
+                !consumed_stimuli
+            with
+            | Some resolution -> Some resolution
+            | None ->
+              (* #28809: a ready resolution may be queued behind the stimulus
+                 that woke this turn (e.g. a redelivered workspace message
+                 whose own earlier turn deferred on this very approval).
+                 Project the durable resolution into this turn instead of
+                 waiting for its queue position; the untouched queue entry is
+                 retired as a spent grant by [reconcile_spent_selection]
+                 without costing a turn. *)
+              (match
+                 Stimulus_intake.ready_hitl_resolution_peek
+                   ~base_path:ctx.config.base_path
+                   ~keeper_name:meta_after_triage.name
+               with
+               | None -> None
+               | Some resolution ->
+                 Log.Keeper.info
+                   "hitl resolution projected from pending queue approval=%s \
+                    decision=%s (keeper=%s)"
+                   resolution.Keeper_event_queue.approval_id
+                   (Keeper_event_queue.hitl_resolution_decision_to_string
+                      resolution.Keeper_event_queue.decision)
+                   meta_after_triage.name;
+                 Some resolution)
           in
           (* The event intake is the exact turn input. Keep its attribution in
              the existing wake record even when the cadence, rather than a
@@ -638,14 +827,13 @@ let run_keepalive_unified_turn
             | [], true -> Keeper_registry.Woken []
             | [], false -> Keeper_registry.Proactive_tick
           in
-          let run_cycle () =
+          let run_fresh_cycle () =
             run_keeper_cycle
               ~admission_token
               ?deferred_runtime_lane
               ~on_deferred_runtime_consumed
               ?event_bus
               ?hitl_resolution
-              ?continuation_delivery_channel
               ~ctx
               ~meta_after_triage
               ~stop
@@ -656,6 +844,7 @@ let run_keepalive_unified_turn
               ~manual_compaction_requested
               ()
           in
+          let run_cycle () = run_fresh_cycle () in
           let cycle_outcome = run_cycle () in
           Option.iter
             record_deferred_runtime_lane
@@ -664,21 +853,15 @@ let run_keepalive_unified_turn
           Cycle.meta cycle_outcome)
         else meta_after_triage
       in
-      let terminalize_failed_selection ~selection ~detail =
-        match
-          Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
-            ~base_path:ctx.config.base_path
-            meta_after_triage.name
-            ~current_owner_nonce:meta_after_triage.runtime.nonce
-            ~applied_at:(Time_compat.now ())
-            ~selection
-            ~detail
-        with
-        | Error message -> record_event_queue_failure message
+      let record_terminal_selection_result ~label = function
+        | Error message ->
+          record_event_queue_failure message;
+          false
         | Ok
             ( Keeper_registry_event_queue.Acked _
             | Keeper_registry_event_queue.Already_acked _ ) ->
-          selection_acked := true
+          selection_acked := true;
+          true
         | Ok
             (Keeper_registry_event_queue.Ack_committed_followup_failed
                { stage; detail = followup_detail; _ }) ->
@@ -691,123 +874,126 @@ let run_keepalive_unified_turn
           in
           record_event_queue_failure
             (Printf.sprintf
-               "turn-attempt terminal receipt committed but %s follow-up \
+               "%s receipt committed but %s follow-up \
                 failed: %s"
+               label
                stage
-               followup_detail)
+               followup_detail);
+          true
       in
-      let persist_transcript_corruption_pause ~detail =
-        let pause_result =
-          try
-            Keeper_meta_store.persist_transcript_corruption_pause
-              ctx.config
-              ~keeper_name:meta_after_triage.name
-              ~trace_id:meta_after_triage.runtime.trace_id
-              ~generation:meta_after_triage.runtime.nonce
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn ->
-            Error
-              ("transcript corruption pause raised: "
-               ^ Printexc.to_string exn)
-        in
-        match pause_result with
-        | Ok `Persisted -> true
-        | Ok `No_durable_meta ->
-          record_event_queue_failure
-            "transcript corruption pause has no durable Keeper metadata";
-          Log.Keeper.error
-            ~keeper_name:meta_after_triage.name
-            "transcript corruption retained its exact pending source because \
-             the Keeper has no durable metadata: %s"
-            detail;
-          false
-        | Error pause_detail ->
-          record_event_queue_failure
-            ("transcript corruption pause failed: " ^ pause_detail);
-          Log.Keeper.error
-            ~keeper_name:meta_after_triage.name
-            "transcript corruption retained its exact pending source because \
-             the durable pause failed: %s; pause_error=%s"
-            detail
-            pause_detail;
-          false
+      let terminalize_failed_selection ~selection ~detail =
+        Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
+          ~base_path:ctx.config.base_path
+          meta_after_triage.name
+          ~applied_at:(Time_compat.now ())
+          ~selection
+          ~detail
+        |> record_terminal_selection_result ~label:"turn-attempt terminal"
+        |> ignore
       in
-      let commit_transcript_corruption ~detail =
-        Eio.Cancel.protect (fun () ->
-          Atomic.set stop true;
-          if persist_transcript_corruption_pause ~detail
-          then
-            Option.iter
-              (fun selection ->
-                 terminalize_failed_selection
-                   ~selection
-                   ~detail)
-              !pending_selection)
+      let terminalize_completed_selection ~selection =
+        Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+          ~base_path:ctx.config.base_path
+          meta_after_triage.name
+          ~applied_at:(Time_compat.now ())
+          ~selection
+        |> record_terminal_selection_result ~label:"turn completion"
+      in
+      let defer_selection_to_queue_tail ~selection ~reason =
+        match
+          Keeper_registry_event_queue.defer_pending_result
+            ~base_path:ctx.config.base_path
+            meta_after_triage.name
+            ~selection
+        with
+        | Ok _ ->
+          Log.Keeper.info
+            ~keeper_name:meta_after_triage.name
+            "source moved to queue tail post_id=%s reason=%s"
+            selection.source.post_id
+            reason
+        | Error detail ->
+          record_event_queue_failure
+            (Printf.sprintf
+               "failed to defer source to queue tail: reason=%s detail=%s"
+               reason
+               detail)
       in
       (match !cycle_outcome_ref with
-       | Some (Cycle.Failed { failure; _ }) ->
-         (match failure.Keeper_unified_turn.source_disposition with
-          | Keeper_unified_turn.Pause_after_transcript_corruption { detail } ->
-            commit_transcript_corruption ~detail
-          | Keeper_unified_turn.Follow_failure_route -> ())
+       | Some (Cycle.Failed _)
        | Some
            ( Cycle.Completed _
            | Cycle.Checkpointed _
            | Cycle.Input_required _
            | Cycle.Cancelled _
            | Cycle.Skipped _
-           | Cycle.Busy _
            | Cycle.Manual_compaction_applied _
            | Cycle.Manual_compaction_failed _
            | Cycle.Manual_compaction_not_applied _ )
        | None ->
          ());
-      (match !pending_selection with
-       | None -> ()
-       | Some selection ->
-           let remove_completed_selection () =
-             match
-               Keeper_registry_event_queue.ack_pending_result
+      (* RFC-0377: every entry admitted into this turn (the primary plus any
+         Connector_attention batch companions) shares the turn's outcome. A
+         turn completion acks all of them; a turn failure applies the same
+         quarantine/defer/preserve disposition to all of them, so a
+         companion is never silently left un-acked while the primary is. *)
+      (match !consumed_selections with
+       | [] -> ()
+       | (_ :: _) as selections ->
+           let settle_connector_attention settlement =
+             let event_ids =
+               connector_attention_event_ids_of_stimuli !consumed_stimuli
+             in
+             match settlement with
+             | Settle_resolved ->
+               mark_connector_attention_resolved_after_delivery
                  ~base_path:ctx.config.base_path
-                 meta_after_triage.name
-                 ~selection
-             with
-             | Ok () ->
-               selection_acked := true;
+                 ~keeper_name:meta_after_triage.name
+                 event_ids
+             | Settle_ignored ->
                mark_connector_attention_ignored_after_turn
                  ~base_path:ctx.config.base_path
                  ~keeper_name:meta_after_triage.name
-                 (connector_attention_event_ids_of_stimuli !consumed_stimuli)
-             | Error message -> record_event_queue_failure message
+                 event_ids
+             | Settle_quarantined { detail } ->
+               mark_connector_attention_quarantined_after_turn
+                 ~base_path:ctx.config.base_path
+                 ~keeper_name:meta_after_triage.name
+                 ~detail
+                 event_ids
+             | Settle_pending_in_queue -> ()
            in
-           match !cycle_outcome_ref with
-           | Some
-               ( Cycle.Completed _
-               | Cycle.Manual_compaction_applied _ ) ->
-             remove_completed_selection ()
-           | Some (Cycle.Failed { failure; _ }) ->
-             (match failed_selection_terminal_detail failure with
-              | Some detail -> terminalize_failed_selection ~selection ~detail
-              | None -> ())
-           | Some (Cycle.Manual_compaction_failed { failure; _ }) ->
-             terminalize_failed_selection
-               ~selection
-               ~detail:(Keeper_manual_compaction.failure_to_string failure)
-           | Some (Cycle.Manual_compaction_not_applied { no_compaction; _ }) ->
-             terminalize_failed_selection
-               ~selection
-               ~detail:
-                 (Keeper_post_turn.compaction_recovery_error_to_string
-                    (Keeper_post_turn.No_compaction no_compaction))
-           | Some
-               ( Cycle.Checkpointed _
-               | Cycle.Input_required _
-               | Cycle.Cancelled _
-               | Cycle.Skipped _
-               | Cycle.Busy _ )
-           | None ->
-             ());
+           let remove_completed_selections ~settlement =
+             let all_acked =
+               List.for_all
+                 (fun selection -> terminalize_completed_selection ~selection)
+                 selections
+             in
+             stimuli_acked := all_acked;
+             (* A failed queue ack leaves the entry live, so the row it carries
+                is still someone's to settle. *)
+             if all_acked then settle_connector_attention settlement
+           in
+           let disposition = batch_disposition_of_cycle_outcome !cycle_outcome_ref in
+           let settlement =
+             connector_attention_settlement_of_disposition disposition
+           in
+           match disposition with
+           | Batch_ack_completed _ -> remove_completed_selections ~settlement
+           | Batch_quarantine { detail } ->
+             List.iter
+               (fun selection -> terminalize_failed_selection ~selection ~detail)
+               selections;
+             (* The entries are gone from the queue whether or not each receipt
+                committed, and no new stimulus is coming for these rows. A late
+                duplicate terminal event is harmless — the projection keeps the
+                first terminal state — while skipping the append is not. *)
+             settle_connector_attention settlement
+           | Batch_defer { reason } ->
+             List.iter
+               (fun selection -> defer_selection_to_queue_tail ~selection ~reason)
+               selections
+           | Batch_no_action -> ());
       (let compaction_outcomes =
          match !cycle_outcome_ref with
          | Some outcome -> compaction_outcomes_of_cycle_outcome outcome
@@ -819,19 +1005,32 @@ let run_keepalive_unified_turn
              record_compaction_outcome_metric
                ~keeper_name:meta_after_triage.name
                `Failed
-           | `Manual_committed commit_count as outcome ->
+           | `Manual_committed (commit_count, before_bytes, after_bytes) as outcome ->
              record_compaction_outcome_metric
                ~keeper_name:meta_after_triage.name
                outcome;
              (match
-                Keeper_meta_store.persist_compaction_commit_projection
-                  ctx.config
+                Keeper_owner_registry.apply_meta
+                  ~base_path:ctx.config.base_path
                   ~keeper_name:meta_after_triage.name
-                  ~commit_count
+                  (Keeper_owner_reducer.Record_compaction_commit
+                     { trace_id = meta_after_triage.runtime.trace_id
+                     ; commit_count
+                     ; at = Unix.gettimeofday () (* NDT-OK: stamps when this commit landed; no branch reads it *)
+                     ; before_bytes
+                     ; after_bytes
+                     ; updated_at = Masc_domain.now_iso ()
+                     })
               with
-              | Ok `Persisted -> ()
-              | Ok `No_durable_meta -> ()
-              | Error message ->
+              | Ok (Some _) -> ()
+              | Ok None ->
+                Log.Keeper.warn
+                  "compaction commit owner metadata disappeared keeper=%s"
+                  meta_after_triage.name
+              | Error error ->
+                let message =
+                  Keeper_owner_registry.command_error_to_string error
+                in
                 Log.Keeper.warn
                   "compaction commit count not persisted keeper=%s: %s"
                   meta_after_triage.name
@@ -840,6 +1039,7 @@ let run_keepalive_unified_turn
       { meta = meta_after_cycle
       ; cycle_status =
           if !event_queue_failed then Turn_cycle_crashed else Turn_cycle_completed
+      ; stimuli_acked = !stimuli_acked
       }
     with
     | Eio.Cancel.Cancelled _ as e ->
@@ -856,15 +1056,42 @@ let run_keepalive_unified_turn
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
         exn;
-      { meta = meta_after_triage; cycle_status = Turn_cycle_crashed })
-  with
-  | `Ran outcome -> outcome
-  | `Busy block ->
+      { meta = meta_after_triage
+      ; cycle_status = Turn_cycle_crashed
+      ; stimuli_acked = false
+      }))
+    with
+  | Ok (`Ran outcome) -> outcome
+  | Ok (`Busy ((Keeper_owner.Turn_busy (Some in_flight)) as block)) ->
     Log.Keeper.info
       ~keeper_name:meta_after_triage.name
-      "keeper turn admission busy before stimulus intake: %s"
-      (Keeper_turn_admission.autonomous_block_to_string block);
-    { meta = meta_after_triage; cycle_status = Turn_cycle_busy block }
+      "keeper owner busy before stimulus intake: %s"
+      (Keeper_owner.autonomous_block_to_string
+         (Keeper_owner.Turn_busy (Some in_flight)));
+    { meta = meta_after_triage
+    ; cycle_status = Turn_cycle_busy block
+    ; stimuli_acked = false
+    }
+  | Ok (`Busy block) ->
+    { meta = meta_after_triage
+    ; cycle_status = Turn_cycle_busy block
+    ; stimuli_acked = false
+    }
+  | Error
+      (Keeper_owner_registry.Command_rejected Keeper_owner.Owner_stopping) ->
+    { meta = meta_after_triage
+    ; cycle_status = Turn_cycle_completed
+    ; stimuli_acked = false
+    }
+  | Error error ->
+    Log.Keeper.error
+      ~keeper_name:meta_after_triage.name
+      "keeper owner rejected autonomous turn: %s"
+      (Keeper_owner_registry.command_error_to_string error);
+    { meta = meta_after_triage
+    ; cycle_status = Turn_cycle_crashed
+    ; stimuli_acked = false
+    }
 ;;
 
 let refresh_work_as_heartbeat = Keeper_heartbeat_loop_refresh_work.refresh_work_as_heartbeat
@@ -912,6 +1139,7 @@ let run_heartbeat_loop
       (m : keeper_meta)
       (stop : bool Atomic.t)
       ~(wakeup : bool Atomic.t)
+      ~(cadence_sleeping : bool Atomic.t)
   : unit
   =
   let keepalive_started_ts = Time_compat.now () in
@@ -938,26 +1166,19 @@ let run_heartbeat_loop
   in
   let timing_cursor = ref 0 in
   let timing_filled = ref 0 in
-  (* Phase 1: work-as-heartbeat freshness tracking.
-     Updated ONLY on Workspace.heartbeat success after turn. *)
-  let last_successful_heartbeat_ts = ref (Time_compat.now ()) in
   let work_as_hb () = Runtime_params.get Runtime_settings.keeper_work_as_hb_enabled in
-  let _max_silence () =
-    Runtime_params.get Runtime_settings.keeper_work_as_hb_max_silence_sec
-  in
-  (* Persistent OAS Context.t — created once per keeper lifecycle.
-     OAS Context.t is a mutable cross-turn state container for values
+  (* Persistent AGENT_CORE Context.t — created once per keeper lifecycle.
+     AGENT_CORE Context.t is a mutable cross-turn state container for values
      written directly into the shared context. This preserves shared
      metadata across turns, but per-turn context_injector-local timing
      and tool-call counters are recreated inside run_turn and therefore
      do not accumulate for the full keeper lifecycle. *)
-  let shared_context = Agent_sdk.Context.create () in
+  let shared_context = Agent_core.Context.create () in
   let deferred_runtime_lane_ref = ref None in
   (* Mtime-based change detection for keeper meta disk reads.
      Avoids re-parsing the JSON file on every heartbeat cycle when
      no operator has modified it.  Initialized to 0.0 so the first
      cycle always reads. *)
-  let last_meta_mtime = ref 0.0 in
   (* Wake-source carry (thundering-herd fix). Records whether the most recent
      sleep ended via an external broadcast wakeup ([Woken]) or this keeper's own
      cadence timer ([Timeout]). Read at turn dispatch so a broadcast-driven early
@@ -974,39 +1195,31 @@ let run_heartbeat_loop
       Eio_guard.fair_yield ();
       (* Phase 0: timing markers *)
       let t_presence_start = Time_compat.now () in
-      let disk_meta_opt, new_meta_mtime =
-        match read_meta_if_changed ctx.config m.name ~last_mtime:!last_meta_mtime with
-        | Some (latest, new_mtime) -> Some latest, Some new_mtime
-        | None -> None, None
+      let owner_meta =
+        match
+          Keeper_owner_registry.get
+            ~base_path:ctx.config.base_path
+            ~keeper_name:m.name
+        with
+        | Ok owner -> (Keeper_owner.projection owner).meta
+        | Error error ->
+          Log.Keeper.error
+            "%s: heartbeat owner projection unavailable: %s"
+            m.name
+            (Keeper_owner_registry.lookup_error_to_string error);
+          None
       in
-      Option.iter (fun new_mtime -> last_meta_mtime := new_mtime) new_meta_mtime;
       let meta_current =
         effective_keepalive_meta
           ~base_path:ctx.config.base_path
           ~fallback:m
-          ~disk_meta_opt
+          ~disk_meta_opt:owner_meta
       in
       let meta_current =
         match repair_identity_drift_for_keepalive ~ctx meta_current with
         | Some repaired -> repaired
         | None -> meta_current
       in
-      (* Sync disk meta to registry so dashboard reads live values.  #5364.
-         When disk meta is unchanged we still prefer the registry copy because
-         runtime writes update it via the write_meta hook. This keeps
-         continuity/runtime fields fresh even if disk mtime does not advance
-         between rapid writes inside a single loop window. *)
-      let registry_meta =
-        match Keeper_registry.get ~base_path:ctx.config.base_path meta_current.name with
-        | Some entry -> entry.meta
-        | None -> m
-      in
-      if meta_current != registry_meta
-      then
-        Keeper_registry.update_meta
-          ~base_path:ctx.config.base_path
-          meta_current.name
-          meta_current;
       (* A live lane evaluates every configured heartbeat tick. Busy/idle
          labels, observer count, and prior activity never suppress the cycle;
          an explicit wake atomically cuts the sleep for this Keeper only. *)
@@ -1017,7 +1230,6 @@ let run_heartbeat_loop
             ~ctx
             ~meta_current
             ~consecutive_failures
-            ~last_successful_heartbeat_ts
         in
         if !consecutive_failures > 0
         then
@@ -1069,13 +1281,6 @@ let run_heartbeat_loop
           | Intake_lifecycle_blocked _ -> true
           | Intake_admitted -> false
         in
-        let terminal_lifecycle_blocked =
-          match intake_admission with
-          | Intake_lifecycle_blocked
-              Keeper_lifecycle_admission.Autonomous_dead_tombstone -> true
-          | Intake_lifecycle_blocked (Keeper_lifecycle_admission.Autonomous_paused _) -> false
-          | Intake_admitted -> false
-        in
         (match intake_admission with
          | Intake_admitted -> ()
          | Intake_lifecycle_blocked denial ->
@@ -1098,15 +1303,12 @@ let run_heartbeat_loop
              "%s: heartbeat intake denied by lifecycle admission: %s"
              meta_current.name
              reason;
-           if terminal_lifecycle_blocked
-           then
-             (* A dead tombstone owns no runnable lane. Ordinary pause keeps
-                its lane parked so an explicit resume remains local. *)
-             Atomic.set stop true
-           else
-             Keeper_registry.touch_last_turn_ts
-               ~base_path:ctx.config.base_path
-               meta_current.name
+           (* [autonomous_denial] carries one variant, an ordinary pause, which
+              keeps the lane parked so an explicit resume stays local. The loop
+              therefore never stops itself here. *)
+           Keeper_registry.touch_last_turn_ts
+             ~base_path:ctx.config.base_path
+             meta_current.name
          );
         let pending_board_events, meta_after_triage =
           if admitted_turn
@@ -1121,7 +1323,11 @@ let run_heartbeat_loop
         let t_turn_start = t_board_end in
         let turn_outcome =
           if not admitted_turn
-          then { meta = meta_current; cycle_status = Turn_cycle_completed }
+          then
+            { meta = meta_current
+            ; cycle_status = Turn_cycle_completed
+            ; stimuli_acked = false
+            }
           else (
             (* Cycle 43: KeeperHeartbeat.tla TurnComplete bracket — the
                [turn_running] flag toggles around the dispatch and the
@@ -1167,26 +1373,22 @@ let run_heartbeat_loop
             r)
         in
         let meta_after_proactive = turn_outcome.meta in
-        let accounting = keepalive_cycle_accounting turn_outcome.cycle_status in
-        if not accounting.record_turn_status
-        then (
-          match turn_outcome.cycle_status with
-          | Turn_cycle_busy block ->
+        (match decide_keepalive_cycle_action turn_outcome.cycle_status with
+         | Defer_autonomous_work block ->
             Keeper_registry.record_skip_reasons
               ~base_path:ctx.config.base_path
               m.name
               ~reasons:
-                [ "turn_admission_"
-                  ^ Keeper_turn_admission.autonomous_block_kind block
+                [ "keeper_owner_"
+                  ^ Keeper_owner.autonomous_block_kind block
                 ];
             Log.Keeper.info
               ~keeper_name:m.name
-              "turn admission deferred autonomous work: %s; this keepalive cycle \
+              "Keeper Owner deferred autonomous work: %s; this keepalive cycle \
                records no turn status, crash, or work-health refresh"
-              (Keeper_turn_admission.autonomous_block_to_string block)
-          | Turn_cycle_completed | Turn_cycle_crashed -> assert false)
-        else if not lifecycle_blocked
-        then (
+              (Keeper_owner.autonomous_block_to_string block)
+         | Record_turn_status _ when lifecycle_blocked -> ()
+         | Record_turn_status work_heartbeat_action ->
              (* The registry tracks failure count as observation. A
                 lifecycle-blocked cycle did not run a turn and must not emit a
                 false [Turn_succeeded]. *)
@@ -1209,27 +1411,22 @@ let run_heartbeat_loop
                  (Some (Keeper_registry.Turn_consecutive_failures turn_fail_count));
              (* Phase 1: work-as-heartbeat — renew point (b).
                 After turn, call Workspace.heartbeat to prove workspace I/O health.
-                On success: refresh freshness lease + reset consecutive_failures.
-                On failure: leave timestamp unchanged → presence sync resumes next cycle.
+                On success: reset consecutive_failures.
                 T6 audit: a crashed cycle proves nothing about health — do not
-                refresh the lease or reset consecutive_failures for it. *)
-             if accounting.refresh_work_heartbeat
-             then
+                reset consecutive_failures for it. *)
+             (match work_heartbeat_action with
+              | Refresh_work_heartbeat ->
                refresh_work_as_heartbeat
                  ~ctx
                  ~meta_after_proactive
                  ~proactive_warmup_elapsed
                  ~work_as_hb
-                 ~last_successful_heartbeat_ts
                  ~consecutive_failures
-             else
+              | Preserve_work_heartbeat ->
                Log.Keeper.info
                  "%s: skipping work-as-heartbeat refresh after crashed keepalive cycle"
-                 m.name);
+                 m.name));
         let t_turn_end = Time_compat.now () in
-        let interval =
-          float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())
-        in
         (* Phase 0: push stage timing to ring buffer *)
         record_keepalive_stage_timing
           ~timing_ring
@@ -1246,14 +1443,30 @@ let run_heartbeat_loop
           ~t_turn_end;
         (* Carry the inter-cycle sleep result into the next iteration so the
            turn evaluator can distinguish a broadcast wakeup ([Woken]) from this
-           keeper's configured cadence ([Timeout]). *)
+           keeper's configured cadence ([Timeout]).
+
+           A cycle that acked its stimulus batch and left more entries pending
+           does not sleep the cadence: the queue is the wake signal, and the
+           next cycle dispatches as [Woken]. A checkpointed, failed, or busy
+           cycle keeps the cadence so a turn that made no progress is not
+           re-run back to back. *)
         last_wake_source :=
-          Keeper_keepalive_signal.interruptible_sleep
-            ~clock:ctx.clock
-            ~stop
-            ~wakeup
-            interval;
+          (if turn_outcome.stimuli_acked
+              && pending_stimulus_remains ~ctx ~keeper_name:m.name
+           then Keeper_keepalive_signal.Woken
+           else
+             Keeper_keepalive_signal.interruptible_sleep
+               ~cadence_sleeping
+               ~clock:ctx.clock
+               ~stop
+               ~wakeup
+               (fun () ->
+                 float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())));
       if Atomic.get stop then () else loop ())
   in
   loop ()
 ;;
+
+module For_testing = struct
+  let consume_deferred_runtime_lane_hint = consume_deferred_runtime_lane_hint
+end

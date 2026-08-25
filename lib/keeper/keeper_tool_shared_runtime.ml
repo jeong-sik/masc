@@ -5,36 +5,9 @@ open Keeper_alerting
 module StringMap = Set_util.StringMap
 module StringSet = Set_util.StringSet
 
-let has_json_field name fields =
-  List.exists (fun (field, _) -> String.equal field name) fields
-;;
-
 let error_json ?(fields = []) (message : string) =
   Yojson.Safe.to_string (`Assoc (("error", `String message) :: fields))
 ;;
-
-let tool_result_error_json (tr : Tool_result.result) =
-  let fields =
-    match Tool_result.failure_class tr with
-    | None -> []
-    | Some cls ->
-      [ "failure_class", `String (Tool_result.tool_failure_class_to_string cls) ]
-  in
-  match Tool_result.data tr with
-  | `Assoc payload_fields ->
-    let payload_fields =
-      List.fold_left
-        (fun acc (key, value) ->
-           if has_json_field key acc then acc else acc @ [ key, value ])
-        payload_fields
-        fields
-    in
-    Yojson.Safe.to_string (`Assoc payload_fields)
-  | _ ->
-    error_json ~fields (Tool_result.message tr)
-;;
-
-let file_not_found_prefix = "File not found:"
 
 let missing_file_error_json
       ~(raw_path : string option)
@@ -322,23 +295,10 @@ let verify_keeper_confined_root (confined : Keeper_alerting_path.confined_path) 
      | Eio.Io _ as exn -> Error (Printexc.to_string exn))
 ;;
 
-let resolve_keeper_execute_cwd ~config ~meta ~raw_path =
-  match resolve_keeper_execute_cwd_typed ~config ~meta ~raw_path with
-  | Error rejection -> Error (Keeper_alerting_path.rejection_to_user_message rejection)
-  | Ok confined ->
-    (match verify_keeper_confined_root confined with
-     | Ok () -> Ok (Keeper_alerting_path.confined_host_path confined)
-     | Error detail -> Error ("cwd_root_verification_failed: " ^ detail))
-;;
-
 let keeper_agent_sender ~(meta : keeper_meta) = meta.agent_name
 
 let shell_readonly_limit args =
   max 1 (min 200 (Safe_ops.json_int ~default:40 "limit" args))
-;;
-
-let shell_readonly_cat_max_bytes args =
-  max 256 (min 100000 (Safe_ops.json_int ~default:4000 "max_bytes" args))
 ;;
 
 let lines_to_json ?(limit = max_int) ?(max_bytes = 32_000) (text : string) : Yojson.Safe.t
@@ -429,7 +389,7 @@ let descriptor_discovery_json active_name_set descriptor =
 
 let keeper_tools_list_json ~(meta : keeper_meta) =
   let active_name_set =
-    Keeper_tool_policy.keeper_model_tool_schemas ()
+    Keeper_tool_policy.keeper_model_tool_schemas_for meta.tool_groups ()
     |> List.fold_left
          (fun names (schema : Masc_domain.tool_schema) ->
             StringSet.add schema.name names)

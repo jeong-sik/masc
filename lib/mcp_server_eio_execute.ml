@@ -65,9 +65,7 @@ let execute_tool_eio
       Mcp_server_eio_caller_identity.Catalog_policy
     | Managed_agent | Operator_remote ->
       if
-        Mcp_server_eio_tool_profile.tool_allowed_in_profile
-          ~internal_keeper_runtime
-          state
+        Mcp_server_eio_tool_profile.tool_allowed_in_profile state
           profile
           name
       then Mcp_server_eio_caller_identity.Restricted_profile
@@ -140,9 +138,7 @@ let execute_tool_eio
       let details =
         `Assoc
           [ "source", `String "mcp_server_eio_execute"
-          ; "visible_in_tools_list", `Bool (Tool_catalog.is_visible name)
           ; "allow_direct_call", `Bool (Tool_catalog.allow_direct_call name)
-          ; "mcp_session_id_present", `Bool (Option.is_some mcp_session_id)
           ; "argument_keys", `List argument_keys_json
           ]
       in
@@ -269,7 +265,7 @@ let execute_tool_eio
                 ()
             in
             (* Dispatch a single module by tag — creates only that module's context.
-     Pre-hooks may coerce arguments (e.g. OAS type coercion: "42" -> 42).
+     Pre-hooks may coerce arguments (e.g. AGENT_CORE type coercion: "42" -> 42).
      Returns [Tool_result.result option] directly — no tuple intermediary. *)
             let dispatch_by_tag (tag : Tool_dispatch.module_tag) : Tool_result.result option =
               let start_time = Time_compat.now () in
@@ -314,7 +310,6 @@ let execute_tool_eio
                       : Tool_local_runtime_core.context)
                      ~name
                      ~args:coerced_args
-                 (* Mod_handover, Mod_heartbeat, Mod_auth removed: tools pruned *)
                  | Mod_compact -> None
                  | Mod_run ->
                    Tool_run.dispatch
@@ -366,10 +361,33 @@ let execute_tool_eio
                      { Tool_agent_timeline.config; agent_name }
                      ~name
                      ~args:coerced_args
+                 (* Keeper-only. A process started at this boundary would
+                    need a switch outliving the request, and the only one here
+                    is the server root -- which owns it for the life of the
+                    server, with no turn to end it. The name is registered and
+                    this endpoint simply cannot run it, so it says that rather
+                    than answering "Unknown tool". *)
+                 | Mod_spawn ->
+                   Some
+                     (Tool_result.error
+                        ~failure_class:Tool_result.Workflow_rejection
+                        ~tool_name:name
+                        ~start_time
+                        (Printf.sprintf
+                           "tool '%s' is keeper-internal; not available on this MCP endpoint \
+                            (a spawned process needs the turn's switch, which this endpoint \
+                            does not have)"
+                           name))
                  | Mod_schedule ->
                    Tool_schedule.dispatch
                      { Tool_schedule.config
                      ; agent_name
+                     ; stamp_keeper_wake_result_delivery =
+                         (fun ~payload ->
+                            Schedule_payload_projection
+                            .set_keeper_wake_result_delivery
+                              ~payload
+                              ~channel:None)
                      ; admit_keeper_wake_creation =
                          Keeper_schedule_creation_admission.run
                      }
@@ -395,18 +413,39 @@ let execute_tool_eio
                       per-request context built above. The [Tool_dispatch] tag
                       stays subsystem-agnostic; this is where the concrete
                       handler is bound. *)
-                   Keeper_tool_boundary.dispatch
-                     (make_keeper_tool_ctx ())
-                     ~name
-                     ~args:coerced_args
+                   (match
+                      Keeper_tool_boundary.dispatch
+                        (make_keeper_tool_ctx ())
+                        ~name
+                        ~args:coerced_args
+                    with
+                    | Some result -> Some result
+                    | None ->
+                      (* This composition root binds [Mod_external] to the
+                         keeper subsystem, so a [Mod_external] name the keeper
+                         boundary declines is a keeper-internal runtime tool
+                         (descriptor-owned executor, e.g. keeper_time_now,
+                         keeper_voice_*, tool_read_file). This endpoint has no
+                         executor for it; reporting "Unknown tool (registry
+                         inconsistency)" was a lie — the name is registered,
+                         the endpoint just cannot run it. *)
+                      Some
+                        (Tool_result.error
+                           ~failure_class:Tool_result.Workflow_rejection
+                           ~tool_name:name
+                           ~start_time
+                           (Printf.sprintf
+                              "tool '%s' is keeper-internal; not available on this MCP endpoint"
+                              name)))
                  | Mod_keeper_task ->
                    Some
                      (Tool_result.error
-                        ~failure_class:(Some Tool_result.Workflow_rejection)
+                        ~failure_class:Tool_result.Workflow_rejection
                         ~tool_name:name
                         ~start_time
                         (Printf.sprintf
-                           "tool '%s' is a keeper task tool; use the keeper in-process task handler"
+                           "tool '%s' is keeper-internal; not available on this MCP endpoint \
+                            (use the keeper in-process task handler)"
                            name))
                  | Mod_inline ->
                    let mcp_runtime_ctx : Mcp_tool_runtime.context =
@@ -454,12 +493,7 @@ let execute_tool_eio
                        (* Keep MCP tools/call on the shared post-dispatch
                           transformer and observer contract. *)
                        let r = Tool_dispatch_emit.finalize_from_handler r in
-                       let outcome =
-                         match r with
-                         | Some _ -> "handled"
-                         | None -> "no_handler"
-                       in
-                       r, outcome)
+                       r, Dispatch_outcome.(to_string (of_result_option r)))
                    in
                    result
                  in

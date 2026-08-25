@@ -27,15 +27,6 @@ let read_file path =
 let canonical_path path =
   try Unix.realpath path with _ -> path
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    idx + nlen <= hlen
-    && (String.sub haystack idx nlen = needle || loop (idx + 1))
-  in
-  nlen = 0 || loop 0
-
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
@@ -78,9 +69,7 @@ let scrubbed_env_names =
       "MASC_BASE_PATH_INPUT";
       "MASC_BASE_PATH_RESOLUTION_SOURCE";
       "MASC_CONFIG_DIR";
-      "MASC_PERSONAS_DIR";
       "MASC_WS_ENABLED";
-      "MASC_WEBRTC_ENABLED";
     ]
 
 let env_array overrides =
@@ -175,7 +164,6 @@ let make_config_root root =
   let config = Filename.concat root "config" in
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
-  mkdir_p (Filename.concat config "personas");
   write_file (Filename.concat config "runtime.toml") "# repo runtime seed\n";
   config
 
@@ -197,7 +185,6 @@ capture="${FAKE_CAPTURE_FILE:?}"
   printf 'MASC_GRPC_PORT=%%s\n' "${MASC_GRPC_PORT:-}"
   printf 'MASC_WS_PORT=%%s\n' "${MASC_WS_PORT:-}"
   printf 'MASC_WS_ENABLED=%%s\n' "${MASC_WS_ENABLED:-}"
-  printf 'MASC_WEBRTC_ENABLED=%%s\n' "${MASC_WEBRTC_ENABLED:-}"
   printf 'ARGS=%%s\n' "$*"
 } >"$capture"
 exit 0
@@ -244,7 +231,7 @@ case "$cmd" in
       echo 1 > "$state"
       echo "Error: Files lib/.masc.objs/native/masc__Keeper_context_core.cmx" >&2
       echo "       and lib/.masc.objs/native/masc__Inference_utils.cmx" >&2
-      echo "       make inconsistent assumptions over implementation Agent_sdk__Streaming" >&2
+      echo "       make inconsistent assumptions over implementation Agent_core__Streaming" >&2
       exit 1
     fi
     mkdir -p _build/default/bin
@@ -376,12 +363,12 @@ let test_explicit_env_overrides_repo_env_files () =
           stderr;
       let captured = read_file capture in
       check bool "explicit env wins over env file" true
-        (contains_substring captured "MASC_WS_ENABLED=1");
+        (String_util.contains_substring captured "MASC_WS_ENABLED=1");
       check bool "base path passed through" true
-        (contains_substring captured
+        (String_util.contains_substring captured
            ("MASC_BASE_PATH=" ^ canonical_path dir));
       check bool "explicit config dir preserved" true
-        (contains_substring captured ("MASC_CONFIG_DIR=" ^ Filename.concat dir "config")))
+        (String_util.contains_substring captured ("MASC_CONFIG_DIR=" ^ Filename.concat dir "config")))
 
 let test_realtime_transports_default_to_base_path_config_and_preserve_override ()
     =
@@ -413,11 +400,9 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
           code_default stdout_default stderr_default;
       let captured_default = read_file capture_default in
       check bool "ws enabled by default" true
-        (contains_substring captured_default "MASC_WS_ENABLED=1");
-      check bool "webrtc enabled by default" true
-        (contains_substring captured_default "MASC_WEBRTC_ENABLED=1");
+        (String_util.contains_substring captured_default "MASC_WS_ENABLED=1");
       check bool "config dir defaults to base path config" true
-        (contains_substring captured_default
+        (String_util.contains_substring captured_default
            ("MASC_CONFIG_DIR=" ^ bootstrapped_config));
       check bool "base path config bootstrapped" true
         (Sys.file_exists (Filename.concat bootstrapped_config "runtime.toml"));
@@ -430,7 +415,6 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
               ("MASC_BASE_PATH", dir);
               ("MASC_CONFIG_DIR", Filename.concat dir "custom-config");
               ("MASC_WS_ENABLED", "0");
-              ("MASC_WEBRTC_ENABLED", "0");
             ]
           [ "--http"; "--port"; "9957"; "--base-path"; dir ]
       in
@@ -439,12 +423,10 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
           code_override stdout_override stderr_override;
       let captured_override = read_file capture_override in
       check bool "config dir override preserved" true
-        (contains_substring captured_override
+        (String_util.contains_substring captured_override
            ("MASC_CONFIG_DIR=" ^ Filename.concat dir "custom-config"));
       check bool "ws override preserved" true
-        (contains_substring captured_override "MASC_WS_ENABLED=0");
-      check bool "webrtc override preserved" true
-        (contains_substring captured_override "MASC_WEBRTC_ENABLED=0"))
+        (String_util.contains_substring captured_override "MASC_WS_ENABLED=0"))
 
 let test_bootstraps_base_path_config_from_repo_when_unset () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -472,7 +454,7 @@ let test_bootstraps_base_path_config_from_repo_when_unset () =
           code stdout stderr;
       let captured = read_file capture in
       check bool "defaults to base path config" true
-        (contains_substring captured
+        (String_util.contains_substring captured
            ("MASC_CONFIG_DIR=" ^ bootstrapped_config));
       check bool "repo config copied to base path config" true
         (Sys.file_exists (Filename.concat bootstrapped_config "runtime.toml")))
@@ -502,9 +484,9 @@ let test_default_base_path_requires_explicit_base_path () =
       check bool "does not invoke server executable" false
         (Sys.file_exists capture);
       check bool "stderr names required base path" true
-        (contains_substring stderr "MASC base path is required");
+        (String_util.contains_substring stderr "MASC base path is required");
       check bool "stderr rejects HOME inference" true
-        (contains_substring stderr "Refusing to infer a runtime root from HOME");
+        (String_util.contains_substring stderr "Refusing to infer a runtime root from HOME");
       ignore stdout)
 
 let test_absolute_env_base_path_is_preserved () =
@@ -534,7 +516,7 @@ let test_absolute_env_base_path_is_preserved () =
       let captured = read_file capture in
       let expected_root = canonical_path stale_root in
       check bool "absolute env base path preserved" true
-        (contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
+        (String_util.contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
 
 let test_absolute_parent_project_base_path_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -565,7 +547,7 @@ let test_absolute_parent_project_base_path_is_preserved () =
       let captured = read_file capture in
       let expected_root = canonical_path parent in
       check bool "absolute parent root inheritance preserved" true
-        (contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
+        (String_util.contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
 
 let test_cli_sidecar_root_is_exported () =
   with_temp_dir "start-masc-script-sidecar-root" (fun dir ->
@@ -599,7 +581,7 @@ let test_cli_sidecar_root_is_exported () =
           stderr;
       let captured = read_file capture in
       check bool "sidecar root exported to server env" true
-        (contains_substring captured
+        (String_util.contains_substring captured
            ("MASC_SIDECAR_ROOT=" ^ canonical_path sidecar_root)))
 
 let test_zshenv_absolute_base_path_is_ignored () =
@@ -629,7 +611,7 @@ let test_zshenv_absolute_base_path_is_ignored () =
       let _ = stdout in
       check bool "zshenv base path alone is rejected" true (code <> 0);
       check bool "stderr rejects HOME/profile inference" true
-        (contains_substring stderr
+        (String_util.contains_substring stderr
            "Refusing to infer a runtime root from HOME"))
 
 let test_shared_root_env_base_path_is_preserved () =
@@ -659,7 +641,7 @@ let test_shared_root_env_base_path_is_preserved () =
       let captured = read_file capture in
       let expected_root = canonical_path inherited_root in
       check bool "shared-root env base path preserved" true
-        (contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
+        (String_util.contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
 
 let test_worktree_prefers_local_build_over_workspace_build () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -691,7 +673,7 @@ let test_worktree_prefers_local_build_over_workspace_build () =
           stderr;
       let captured = read_file capture in
       check bool "local build wins in worktree" true
-        (contains_substring captured "FAKE_EXE_MARKER=local"))
+        (String_util.contains_substring captured "FAKE_EXE_MARKER=local"))
 
 let test_explicit_base_path_execs_from_base_path () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -722,7 +704,7 @@ let test_explicit_base_path_execs_from_base_path () =
       let captured = read_file capture in
       let expected_root = canonical_path parent in
       check bool "exec cwd matches explicit base path" true
-        (contains_substring captured ("PWD=" ^ expected_root)))
+        (String_util.contains_substring captured ("PWD=" ^ expected_root)))
 
 let test_explicit_base_path_ignores_config_from_zshenv () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -734,9 +716,8 @@ let test_explicit_base_path_ignores_config_from_zshenv () =
       ignore (make_config_root repo);
       write_file (Filename.concat home_dir ".zshenv")
         (Printf.sprintf
-           "export MASC_CONFIG_DIR=%s\nexport MASC_PERSONAS_DIR=%s\n"
-           (Filename.concat repo "config")
-           (Filename.concat repo "config/personas"));
+           "export MASC_CONFIG_DIR=%s\n"
+           (Filename.concat repo "config"));
       let script = Filename.concat repo "start-masc.sh" in
       copy_script (script_path ()) script;
       make_fake_eio_exe repo;
@@ -756,12 +737,10 @@ let test_explicit_base_path_ignores_config_from_zshenv () =
       let captured = read_file capture in
       let expected_parent = canonical_path parent in
       check bool "explicit base path resets config root to base path" true
-        (contains_substring captured
+        (String_util.contains_substring captured
            ("MASC_CONFIG_DIR=" ^ Filename.concat expected_parent ".masc/config"));
       check bool "zshenv config was not imported" false
-        (contains_substring stderr "Ignoring repo-local MASC_CONFIG_DIR");
-      check bool "zshenv personas were not imported" false
-        (contains_substring stderr "Ignoring repo-local MASC_PERSONAS_DIR"))
+        (String_util.contains_substring stderr "Ignoring repo-local MASC_CONFIG_DIR"))
 
 let test_explicit_base_path_ignores_repo_local_config_from_parent_env () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -779,7 +758,6 @@ let test_explicit_base_path_ignores_repo_local_config_from_parent_env () =
             [
               ("FAKE_CAPTURE_FILE", capture);
               ("MASC_CONFIG_DIR", Filename.concat repo "config");
-              ("MASC_PERSONAS_DIR", Filename.concat repo "config/personas");
             ]
           [ "--http"; "--port"; "9968"; "--base-path"; parent ]
       in
@@ -790,10 +768,10 @@ let test_explicit_base_path_ignores_repo_local_config_from_parent_env () =
       let expected_parent = canonical_path parent in
       check bool "parent env repo-local config ignored under external base path"
         true
-        (contains_substring captured
+        (String_util.contains_substring captured
            ("MASC_CONFIG_DIR=" ^ Filename.concat expected_parent ".masc/config"));
       check bool "parent env repo-local config ignore is logged" true
-        (contains_substring stderr "Ignoring repo-local MASC_CONFIG_DIR"))
+        (String_util.contains_substring stderr "Ignoring repo-local MASC_CONFIG_DIR"))
 
 let test_explicit_http_port_derives_sidecar_ports () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -815,9 +793,9 @@ let test_explicit_http_port_derives_sidecar_ports () =
           stderr;
       let captured = read_file capture in
       check bool "grpc port derived from explicit http port" true
-        (contains_substring captured "MASC_GRPC_PORT=9952");
+        (String_util.contains_substring captured "MASC_GRPC_PORT=9952");
       check bool "ws port derived from explicit http port" true
-        (contains_substring captured "MASC_WS_PORT=9953"))
+        (String_util.contains_substring captured "MASC_WS_PORT=9953"))
 
 let test_grpc_direct_banner_is_preserved_in_stderr () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -836,11 +814,11 @@ let test_grpc_direct_banner_is_preserved_in_stderr () =
         failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
           stderr;
       check bool "grpc-direct tls banner preserved" true
-        (contains_substring stderr "Running without TLS (plaintext h2c)");
+        (String_util.contains_substring stderr "Running without TLS (plaintext h2c)");
       check bool "grpc-direct server banner preserved" true
-        (contains_substring stderr "gRPC server on 127.0.0.1:9952");
+        (String_util.contains_substring stderr "gRPC server on 127.0.0.1:9952");
       check bool "other stderr preserved" true
-        (contains_substring stderr "stderr-keep"))
+        (String_util.contains_substring stderr "stderr-keep"))
 
 let test_stale_dune_artifacts_are_cleaned_and_retried () =
   with_temp_dir "start-masc-script-stale-dune" (fun dir ->
@@ -879,27 +857,27 @@ let test_stale_dune_artifacts_are_cleaned_and_retried () =
               code stdout stderr;
           let captured = read_file capture in
           check bool "server started from retry-built executable" true
-            (contains_substring captured
+            (String_util.contains_substring captured
                "FAKE_EXE_MARKER=eio-after-stale-retry");
           check bool "dune clean ran before retry" true
             (Sys.file_exists clean_marker);
           let dune_local_calls = read_file dune_local_log in
           check bool "startup build uses dune-local wrapper" true
-            (contains_substring dune_local_calls
+            (String_util.contains_substring dune_local_calls
                "dune-local build bin/main_eio.exe");
           check bool "startup forwards DUNE_JOBS into wrapper under CI" true
-            (contains_substring dune_local_calls
+            (String_util.contains_substring dune_local_calls
                "DUNE_JOBS=2");
           check bool "stale cleanup uses dune-local wrapper" true
-            (contains_substring dune_local_calls "dune-local clean");
+            (String_util.contains_substring dune_local_calls "dune-local clean");
           check bool "original stale artifact error preserved" true
-            (contains_substring stderr
-               "make inconsistent assumptions over implementation Agent_sdk__Streaming");
+            (String_util.contains_substring stderr
+               "make inconsistent assumptions over implementation Agent_core__Streaming");
           check bool "retry is explained" true
-            (contains_substring stderr
+            (String_util.contains_substring stderr
                "Stale Dune artifacts detected while building main_eio.exe");
           check bool "retry output preserved" true
-            (contains_substring stderr "fake dune build recovered")))
+            (String_util.contains_substring stderr "fake dune build recovered")))
 
 let test_dune_cache_temp_error_retries_with_cache_disabled () =
   with_temp_dir "start-masc-script-cache-temp-dune" (fun dir ->
@@ -938,25 +916,25 @@ let test_dune_cache_temp_error_retries_with_cache_disabled () =
               code stdout stderr;
           let captured = read_file capture in
           check bool "server started from cache-disabled retry executable" true
-            (contains_substring captured
+            (String_util.contains_substring captured
                "FAKE_EXE_MARKER=eio-after-cache-temp-retry");
           check bool "dune clean was not used for cache temp retry" false
             (Sys.file_exists clean_marker);
           let dune_local_calls = read_file dune_local_log in
           check bool "initial startup build used cache default" true
-            (contains_substring dune_local_calls
+            (String_util.contains_substring dune_local_calls
                "dune-local build bin/main_eio.exe DUNE_JOBS=2 DUNE_CACHE=");
           check bool "retry disabled Dune cache" true
-            (contains_substring dune_local_calls
+            (String_util.contains_substring dune_local_calls
                "dune-local build bin/main_eio.exe DUNE_JOBS=2 DUNE_CACHE=disabled");
           check bool "original cache temp error preserved" true
-            (contains_substring stderr
+            (String_util.contains_substring stderr
                "rmdir(/Users/test/.cache/dune/db/temp/dune_6eb519_artifacts): Directory not empty");
           check bool "cache retry is explained" true
-            (contains_substring stderr
+            (String_util.contains_substring stderr
                "Dune cache temp cleanup failed while building main_eio.exe");
           check bool "cache retry output preserved" true
-            (contains_substring stderr
+            (String_util.contains_substring stderr
                "fake dune build recovered with cache disabled")))
 
 let test_stale_executable_requires_build_lock () =
@@ -994,9 +972,9 @@ let test_stale_executable_requires_build_lock () =
           check bool "stale executable was not started" false
             (Sys.file_exists capture);
           check bool "lock holder is reported" true
-            (contains_substring stderr "Another MASC build in progress");
+            (String_util.contains_substring stderr "Another MASC build in progress");
 	          check bool "stale executable refusal is explicit" true
-	            (contains_substring stderr
+	            (String_util.contains_substring stderr
 	               "refusing to continue with a stale or missing executable")))
 
 let test_build_tempfail_runs_only_hash_verified_lkg () =
@@ -1046,17 +1024,17 @@ let test_build_tempfail_runs_only_hash_verified_lkg () =
               code stdout stderr;
           let captured = read_file capture in
           check bool "verified LKG executable was selected" true
-            (contains_substring captured "FAKE_EXE_MARKER=verified-lkg");
+            (String_util.contains_substring captured "FAKE_EXE_MARKER=verified-lkg");
           check bool "unverified stale executable was not selected" false
-            (contains_substring captured "FAKE_EXE_MARKER=local");
+            (String_util.contains_substring captured "FAKE_EXE_MARKER=local");
           check bool "fallback decision is explicit" true
-            (contains_substring stderr
+            (String_util.contains_substring stderr
                "using health-verified last-known-good artifact");
           check bool "launched artifact candidate is published" true
             (Sys.file_exists candidate_file);
           let candidate = read_file candidate_file in
           check bool "candidate preserves exact LKG hash" true
-            (contains_substring candidate lkg_hash)))
+            (String_util.contains_substring candidate lkg_hash)))
 
 let test_build_tempfail_rejects_lkg_hash_mismatch () =
   with_temp_dir "start-masc-invalid-lkg" (fun dir ->
@@ -1102,7 +1080,7 @@ let test_build_tempfail_rejects_lkg_hash_mismatch () =
           check bool "mismatched LKG never executed" false
             (Sys.file_exists capture);
           check bool "hash mismatch is operator-visible" true
-            (contains_substring stderr
+            (String_util.contains_substring stderr
                "last-known-good artifact failed exact verification")))
 
 let test_promoted_dune_lkg_survives_build_tree_cleanup () =
@@ -1130,7 +1108,7 @@ let test_promoted_dune_lkg_survives_build_tree_cleanup () =
       let descriptor_lines = String.split_on_char '\n' (read_file lkg_file) in
       let promoted_path = List.nth descriptor_lines 2 in
       check bool "promoted path is outside dune build tree" false
-        (contains_substring promoted_path "/_build/");
+        (String_util.contains_substring promoted_path "/_build/");
       rm_rf build_root;
       let verify_code, verify_stdout, verify_stderr =
         run_contract ~cwd:repo_root [ "verify"; lkg_file ]
@@ -1143,18 +1121,18 @@ let test_promoted_dune_lkg_survives_build_tree_cleanup () =
 let test_log_tee_preserves_server_pid () =
   let source = read_file (script_path ()) in
   check bool "log tee uses PID-preserving process substitution" true
-    (contains_substring source
+    (String_util.contains_substring source
        "exec \"$@\" > >(tee -a \"$MASC_LOG_FILE\") 2>&1");
   check bool "log tee does not retain a pipeline wrapper" false
-    (contains_substring source "exec \"$@\" 2>&1 | tee")
+    (String_util.contains_substring source "exec \"$@\" 2>&1 | tee")
 
 let test_default_build_lock_is_worktree_local () =
   let source = read_file (script_path ()) in
   check bool "default build lock is worktree-local" true
-    (contains_substring source
+    (String_util.contains_substring source
        "MASC_BUILD_LOCK=\"${MASC_BUILD_LOCK_PATH:-$SCRIPT_DIR/.masc-build.lock}\"");
   check bool "default build lock is not global /tmp" false
-    (contains_substring source "MASC_BUILD_LOCK_PATH:-/tmp/masc-build.lock")
+    (String_util.contains_substring source "MASC_BUILD_LOCK_PATH:-/tmp/masc-build.lock")
 
 let test_stdio_entrypoint_uses_shared_base_path_guard () =
   let source = read_file (source_file "bin/main_stdio_eio.ml") in
@@ -1162,20 +1140,44 @@ let test_stdio_entrypoint_uses_shared_base_path_guard () =
     read_file (source_file "lib/server/server_runtime_bootstrap.ml")
   in
   check bool "stdio resolves base path through shared guard" true
-    (contains_substring source
+    (String_util.contains_substring source
        "Server_base_path_guard.resolve_startup_base_path");
   check bool "stdio enforces shared base path guard" true
-    (contains_substring source "Server_base_path_guard.enforce");
+    (String_util.contains_substring source "Server_base_path_guard.enforce");
   check bool "stdio uses common owner initialization" true
-    (contains_substring source
+    (String_util.contains_substring source
        "Server_runtime_bootstrap.initialize_owner_state_blocking");
   check bool "HTTP runtime uses common owner initialization" true
-    (contains_substring http_runtime_source
+    (String_util.contains_substring http_runtime_source
        "initialize_owner_state_blocking ~sw ~env ~base_path");
   check bool "stdio uses common owner activation" true
-    (contains_substring source "Server_runtime_bootstrap.activate_owner_state");
+    (String_util.contains_substring source "Server_runtime_bootstrap.activate_owner_state");
   check bool "HTTP runtime uses common owner activation" true
-    (contains_substring http_runtime_source "activate_owner_state")
+    (String_util.contains_substring http_runtime_source "activate_owner_state")
+
+let test_keeper_owner_inventory_precedes_persistence_recovery () =
+  let source = read_file (source_file "lib/server/server_runtime_bootstrap.ml") in
+  let find needle =
+    let nlen = String.length needle in
+    let rec loop index =
+      if index + nlen > String.length source then None
+      else if String.sub source index nlen = needle then Some index
+      else loop (index + 1)
+    in
+    loop 0
+  in
+  let owner_install =
+    find "Keeper_owner_registry.install_from_store"
+    |> Option.get
+  in
+  let persistence_prepare =
+    find "Server_bootstrap_loops.prepare_keeper_persistence"
+    |> Option.get
+  in
+  check bool
+    "Owner inventory is installed before shutdown persistence restore"
+    true
+    (owner_install < persistence_prepare)
 
 let test_stdio_skips_dashboard_build_and_http_preflight () =
   with_temp_dir "start-masc-script-stdio" (fun dir ->
@@ -1219,11 +1221,11 @@ exit 0
           stderr;
       let captured = read_file capture in
       check bool "stdio executable selected without HTTP build" true
-        (contains_substring captured "FAKE_EXE_MARKER=stdio");
+        (String_util.contains_substring captured "FAKE_EXE_MARKER=stdio");
       check bool "dashboard helper not invoked in stdio mode" false
         (Sys.file_exists dashboard_marker);
       check bool "stderr explains stdio dashboard skip" true
-        (contains_substring stderr "Skipping SPA build in stdio mode."))
+        (String_util.contains_substring stderr "Skipping SPA build in stdio mode."))
 
 let test_http_dashboard_build_failure_is_non_blocking_by_default () =
   with_temp_dir "start-masc-script-dashboard-nonblocking" (fun dir ->
@@ -1244,9 +1246,9 @@ let test_http_dashboard_build_failure_is_non_blocking_by_default () =
           stderr;
       let captured = read_file capture in
       check bool "HTTP server starts despite dashboard helper failure" true
-        (contains_substring captured "FAKE_EXE_MARKER=local");
+        (String_util.contains_substring captured "FAKE_EXE_MARKER=local");
       check bool "dashboard build is non-blocking by default" true
-        (contains_substring stderr "Background SPA build started"))
+        (String_util.contains_substring stderr "Background SPA build started"))
 
 let test_http_dashboard_build_blocking_mode_fails_closed () =
   with_temp_dir "start-masc-script-dashboard-blocking" (fun dir ->
@@ -1272,9 +1274,9 @@ let test_http_dashboard_build_blocking_mode_fails_closed () =
       check bool "HTTP server is not launched after blocking build failure" false
         (Sys.file_exists capture);
       check bool "blocking dashboard build is explicit in stderr" true
-        (contains_substring stderr "Building SPA before server start");
+        (String_util.contains_substring stderr "Building SPA before server start");
       check bool "helper failure is surfaced in blocking mode" true
-        (contains_substring stderr "dashboard build failed"))
+        (String_util.contains_substring stderr "dashboard build failed"))
 
 let test_http_preflight_waits_for_port_to_clear_before_build () =
   with_temp_dir "start-masc-script-port-wait" (fun dir ->
@@ -1319,9 +1321,9 @@ exit 1
           stderr;
       let captured = read_file capture in
       check bool "server started after transient port conflict" true
-        (contains_substring captured "FAKE_EXE_MARKER=local");
+        (String_util.contains_substring captured "FAKE_EXE_MARKER=local");
       check bool "preflight waited before build" true
-        (contains_substring stderr
+        (String_util.contains_substring stderr
            "HTTP Port 9954 in use, waiting before build/init"))
 
 let test_loopback_disables_keeper_autoboot_by_default_and_requires_opt_in ()
@@ -1354,7 +1356,7 @@ let test_loopback_disables_keeper_autoboot_by_default_and_requires_opt_in ()
           code_default stdout_default stderr_default;
       let captured_default = read_file capture_default in
       check bool "loopback disables keeper autoboot by default" true
-        (contains_substring captured_default "MASC_KEEPER_BOOTSTRAP_ENABLED=false");
+        (String_util.contains_substring captured_default "MASC_KEEPER_BOOTSTRAP_ENABLED=false");
       let capture_override =
         Filename.concat dir "captured-loopback-override.txt"
       in
@@ -1373,7 +1375,7 @@ let test_loopback_disables_keeper_autoboot_by_default_and_requires_opt_in ()
           code_override stdout_override stderr_override;
       let captured_override = read_file capture_override in
       check bool "loopback honors explicit keeper autoboot opt-in" true
-        (contains_substring captured_override "MASC_KEEPER_BOOTSTRAP_ENABLED=true"))
+        (String_util.contains_substring captured_override "MASC_KEEPER_BOOTSTRAP_ENABLED=true"))
 
 let test_supervisor_stops_on_startup_without_candidate () =
   with_temp_dir "start-masc-supervisor-terminal" (fun repo_root ->
@@ -1407,7 +1409,7 @@ let test_supervisor_stops_on_startup_without_candidate () =
         (read_file invocation_count);
       check string "supervisor writes no stdout" "" stdout;
       check bool "terminal startup state is operator-visible" true
-        (contains_substring stderr
+        (String_util.contains_substring stderr
            "terminal startup state: no runtime candidate was published"))
 
 let test_supervisor_zero_exit_without_health_proof_fails_closed () =
@@ -1461,9 +1463,9 @@ hash="$(${MASC_RUNTIME_ARTIFACT_CONTRACT:?} hash "$0")"
           (read_file invocation_count);
         check string "supervisor writes no stdout" "" stdout;
         check bool "terminal state is operator-visible" true
-          (contains_substring stderr terminal_message);
+          (String_util.contains_substring stderr terminal_message);
         check bool "successful child is reclassified as supervisor failure" true
-          (contains_substring stderr
+          (String_util.contains_substring stderr
              "child exited successfully without a health-verified runtime"))
   in
   run_case ~name:"start-masc-supervisor-zero-without-candidate"
@@ -1543,12 +1545,12 @@ exit 72
             (Sys.file_exists lkg_file);
           let expected_hash = artifact_hash ~cwd:repo_root child_script in
           check bool "promoted descriptor retains exact artifact hash" true
-            (contains_substring (read_file lkg_file) expected_hash);
+            (String_util.contains_substring (read_file lkg_file) expected_hash);
           check bool "configured bind host determines health probe" true
-            (contains_substring (read_file curl_capture)
+            (String_util.contains_substring (read_file curl_capture)
                "http://192.0.2.10:9999/health");
           check bool "promotion is operator-visible" true
-            (contains_substring stderr
+            (String_util.contains_substring stderr
                "health-verified runtime artifact promoted")))
 
 let test_supervisor_rejects_malformed_health_proof () =
@@ -1603,7 +1605,7 @@ exit 23
             (read_file invocation_count);
           check string "supervisor writes no stdout" "" stdout;
           check bool "invalid proof is operator-visible" true
-            (contains_substring stderr
+            (String_util.contains_substring stderr
                "lacks an exact PID-bound health proof")))
 
 let test_supervisor_restarts_without_exit_limit_and_preserves_status () =
@@ -1681,16 +1683,16 @@ exit 23
             "6\n" (read_file invocation_count);
           let log = read_file log_file in
           check bool "real child exit status is recorded" true
-            (contains_substring log "masc exited code=23");
+            (String_util.contains_substring log "masc exited code=23");
           check bool "each restart is preceded by health proof" true
-            (contains_substring log "health-verified runtime artifact promoted");
+            (String_util.contains_substring log "health-verified runtime artifact promoted");
           check bool "child failure is not rewritten as success" false
-            (contains_substring log "masc exited code=0");
+            (String_util.contains_substring log "masc exited code=0");
           check string "supervisor writes no stdout" "" stdout;
           check bool "external stop is logged" true
-            (contains_substring stderr "supervisor received SIGTERM");
+            (String_util.contains_substring stderr "supervisor received SIGTERM");
           check bool "finite crash-loop abort is absent" false
-            (contains_substring stderr "ABORT:")))
+            (String_util.contains_substring stderr "ABORT:")))
 
 let () =
   run "start_masc_script"
@@ -1749,6 +1751,10 @@ let () =
 	            test_default_build_lock_is_worktree_local;
 	          test_case "stdio entrypoint uses shared base path guard" `Quick
 	            test_stdio_entrypoint_uses_shared_base_path_guard;
+	          test_case
+	            "Keeper Owner inventory precedes persistence recovery"
+	            `Quick
+	            test_keeper_owner_inventory_precedes_persistence_recovery;
 	          test_case "stdio skips dashboard build and HTTP preflight" `Quick
             test_stdio_skips_dashboard_build_and_http_preflight;
           test_case

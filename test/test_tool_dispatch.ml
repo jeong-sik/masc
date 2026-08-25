@@ -29,10 +29,10 @@ let make_schema ?(props = []) name =
       `Assoc [ "type", `String "object"; "properties", `Assoc prop_entries ] }
 
 (** Helper: a handler that returns a successful result with "ok:<name>". *)
-let echo_handler ~name ~args:_ = Some (tool_ok ~tool_name:name ("ok:" ^ name))
+let echo_handler ~name ~args:_ = tool_ok ~tool_name:name ("ok:" ^ name)
 
 (** Helper: a handler that returns (false, "fail"). *)
-let fail_handler ~name:_ ~args:_ = Some (tool_error "fail")
+let fail_handler ~name:_ ~args:_ = tool_error "fail"
 
 (** Helper: register a tool in handler, tag, and schema registries.
     The validation pre-hook is fail-closed for schema-less tools. *)
@@ -69,28 +69,6 @@ let () =
                   ~name:"__test_dispatch_nonexistent_xyz"
               in
               check bool "is Error" true (Result.is_error result));
-          test_case "register_module bulk registers" `Quick (fun () ->
-              let schemas =
-                List.map make_schema
-                  [ "__test_bulk_a"; "__test_bulk_b"; "__test_bulk_c" ]
-              in
-              Tool_dispatch.register_module ~schemas ~handler:echo_handler;
-              Tool_dispatch.register_module_tag ~schemas ~tag:Mod_misc;
-              List.iter
-                (fun name ->
-                  check bool (name ^ " registered") true
-                    (Tool_dispatch.is_registered name))
-                [ "__test_bulk_a"; "__test_bulk_b"; "__test_bulk_c" ]);
-          test_case "register_module dispatches each name" `Quick (fun () ->
-              let token = match Tool_dispatch.mint_token ~name:"__test_bulk_b" with Ok t -> t | Error e -> Alcotest.fail e in
-              let result =
-                Tool_dispatch.guarded_dispatch ~token ~args:`Null ()
-              in
-              let tr = Option.get result in
-              let ok = (Tool_result.is_success tr) in
-              let msg = (Tool_result.message tr) in
-              check bool "ok" true ok;
-              check string "msg" "ok:__test_bulk_b" msg);
           test_case "handler-only registration does not authorize token" `Quick
             (fun () ->
               let tool = "__test_dispatch_handler_only" in
@@ -121,14 +99,22 @@ let () =
       ( "registry_queries",
         [
           test_case "is_registered reflects state" `Quick (fun () ->
-              check bool "bulk_a exists" true
-                (Tool_dispatch.is_registered "__test_bulk_a");
+              let tool = "__test_query_registered" in
+              register_full ~tool_name:tool ~handler:echo_handler ();
+              check bool "registered tool exists" true
+                (Tool_dispatch.is_registered tool);
               check bool "unknown absent" false
                 (Tool_dispatch.is_registered "__test_query_unknown"));
           test_case "registered_count >= registered tools" `Quick (fun () ->
-              (* We registered at least 5 tools above *)
-              check bool "count >= 5" true
-                (Tool_dispatch.registered_count () >= 5));
+              let before = Tool_dispatch.registered_count () in
+              register_full
+                ~tool_name:"__test_count_increment"
+                ~handler:echo_handler
+                ();
+              check int
+                "registration increments count"
+                (before + 1)
+                (Tool_dispatch.registered_count ()));
           test_case "all_registered_names enumerates registry" `Quick (fun () ->
               register_full ~tool_name:"__enum_check_xyz" ~handler:echo_handler ();
               let all = Tool_dispatch.all_registered_names () in
@@ -181,7 +167,7 @@ let () =
               let received_args = ref `Null in
               let capture_handler ~name:_ ~args =
                 received_args := args;
-                Some (tool_ok "captured")
+                tool_ok "captured"
               in
               register_full
                 ~tool_name:tool
@@ -210,6 +196,37 @@ let () =
               check bool "marked as failure" false ok;
               check bool "contains error info" true
                 (String.length msg > 0 && Astring.String.is_infix ~affix:"boom" msg));
+        ] );
+      ( "immutable_registry_snapshots",
+        [
+          test_case "concurrent registration and lookup stay coherent" `Quick
+            (fun () ->
+              let registrations_per_domain = 24 in
+              let domains =
+                List.init 4 (fun domain_index ->
+                  Domain.spawn (fun () ->
+                    for registration_index = 1 to registrations_per_domain do
+                      let tool_name =
+                        Printf.sprintf "__test_dispatch_concurrent_%d_%d"
+                          domain_index registration_index
+                      in
+                      Tool_dispatch.register ~tool_name ~handler:echo_handler;
+                      if not (Tool_dispatch.is_registered tool_name) then
+                        Alcotest.failf "registered handler %s was not visible"
+                          tool_name
+                    done))
+              in
+              List.iter Domain.join domains;
+              for domain_index = 0 to 3 do
+                for registration_index = 1 to registrations_per_domain do
+                  let tool_name =
+                    Printf.sprintf "__test_dispatch_concurrent_%d_%d"
+                      domain_index registration_index
+                  in
+                  check bool "registered snapshot contains handler" true
+                    (Tool_dispatch.is_registered tool_name)
+                done
+              done);
         ] );
       (* PR-S3: the OTel/Otel_metric_store span wrapper is injected, not referenced
          inline. These tests assert the injection MECHANISM fires — they prove

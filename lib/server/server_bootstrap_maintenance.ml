@@ -219,18 +219,22 @@ let recover_projected_durable_demand_owner
      | Ok None -> ()
      | Ok (Some meta) ->
        let admission =
-         Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
+         Keeper_owner_registry.shutdown_operation_id ~base_path ~keeper_name
        in
        let runtime =
          Keeper_activation_readiness.owner_runtime_of_registry_entry
            (Keeper_registry.get ~base_path keeper_name)
        in
        let truth =
-         Keeper_activation_readiness.classify_durable_demand_execution
-           ~shutdown_operation_id:
-             admission.snapshot_shutdown_operation_id
-           ~runtime
-           (Ok meta)
+         match admission with
+         | Error error ->
+           Keeper_activation_readiness.Unknown
+             (Keeper_owner_registry.lookup_error_to_string error)
+         | Ok shutdown_operation_id ->
+           Keeper_activation_readiness.classify_durable_demand_execution
+             ~shutdown_operation_id
+             ~runtime
+             (Ok meta)
        in
        (match truth with
         | Keeper_activation_readiness.Executable -> ()
@@ -306,8 +310,39 @@ module Recovery_for_testing = struct
   let consume_owner_projection_batch = consume_owner_projection_batch
 end
 
+let recover_keeper_msg_requests_on_startup ~base_path =
+  let report = Keeper_msg_async.recover_lost_disk_records ~base_path () in
+  if
+    report.lost > 0
+    || report.finalized > 0
+    || report.cleaned > 0
+    || report.unreadable > 0
+    || report.failed > 0
+    || report.staging_files_deleted > 0
+    || report.staging_files_preserved > 0
+  then
+    Log.Server.info
+      "keeper_msg_async: startup recovery lost=%d finalized=%d cleaned=%d unreadable=%d failed=%d staging_inspected=%d staging_deleted=%d staging_preserved=%d"
+      report.lost
+      report.finalized
+      report.cleaned
+      report.unreadable
+      report.failed
+      report.staging_files_inspected
+      report.staging_files_deleted
+      report.staging_files_preserved;
+  report
+;;
+
 let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =
   let config = Mcp_server.workspace_config state in
+  (* Exclusive startup ownership: before any new server request can submit a
+     worker, settle disk-only nonterminal rows left by the prior process.  Poll
+     and cancel deliberately cannot infer process death, so this bootstrap
+     boundary is the sole production authority for that transition. *)
+  ignore
+    (recover_keeper_msg_requests_on_startup ~base_path:config.base_path
+      : Keeper_msg_async.recovery_report);
   let recovery_ctx : _ Keeper_types_profile.context =
     { config
     ; agent_name = "keeper-maintenance-recovery"
@@ -473,26 +508,28 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      span / no [tool_dispatch_total] metric). *)
   Tool_dispatch.set_span_wrapper Tool_telemetry.with_span;
   Otel_metric_store.register_otel_source_once ();
-  Otel_runtime_observables.register_once
+  Otel_runtime_observables.start_store_writer
+    ~sw
+    ~clock
     ~masc_root:(Workspace.masc_root_dir (Mcp_server.workspace_config state))
     ();
   Otel_spans.setup_exporter ~sw env;
   Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;
-  (* RFC-0217 S4-2: wire OAS OTLP exporter so OAS spans/metrics reach the
+  (* RFC-0217 S4-2: wire AGENT_CORE OTLP exporter so AGENT_CORE spans/metrics reach the
      same collector as MASC-native telemetry.  The endpoint is read from
      the same env-var that MASC's own OTLP client uses. *)
   (match Sys.getenv_opt "OTEL_EXPORTER_OTLP_ENDPOINT" with
    | Some endpoint ->
-     let config = Agent_sdk.Otel_export.default_export_config ~endpoint in
-     let instance = Agent_sdk.Otel_tracer.create_instance_eio () in
-     let tracer = Agent_sdk.Otel_tracer.tracer_of_instance instance in
-     Runtime_agent_context.set_oas_tracer tracer;
-     let (_state : Agent_sdk.Otel_export.t) =
-       Agent_sdk.Otel_export.start_daemon ~sw ~clock:env#clock ~net:env#net ~config instance
+     let config = Agent_core.Otel_export.default_export_config ~endpoint in
+     let instance = Agent_core.Otel_tracer.create_instance_eio () in
+     let tracer = Agent_core.Otel_tracer.tracer_of_instance instance in
+     Runtime_agent_context.set_agent_core_tracer tracer;
+     let (_state : Agent_core.Otel_export.t) =
+       Agent_core.Otel_export.start_daemon ~sw ~clock:env#clock ~net:env#net ~config instance
      in
-     Log.Server.info "OAS OTLP exporter daemon started (endpoint=%s)" endpoint
+     Log.Server.info "AGENT_CORE OTLP exporter daemon started (endpoint=%s)" endpoint
    | None ->
-     Log.Server.info "OTEL_EXPORTER_OTLP_ENDPOINT not set; OAS telemetry export disabled");
+     Log.Server.info "OTEL_EXPORTER_OTLP_ENDPOINT not set; AGENT_CORE telemetry export disabled");
   (* Scheduler-lag probe: 1s sleep, gauge = overshoot. A pure-Eio fiber
      cannot observe a blocked domain from inside while it is blocked, but
      the first tick after the block lands carries the full stall duration,
@@ -547,16 +584,51 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
              recovery_ctx)
         transition_projection_budget
     in
+    let reconcile_broadcast_mentions () =
+      match
+        Workspace_broadcast.reconcile_pending_mentions
+          (Mcp_server.workspace_config state)
+      with
+      | Error detail ->
+        Log.Server.warn "broadcast mention reconciliation unavailable: %s" detail
+      | Ok report ->
+        List.iter
+          (fun (receipt : Workspace_broadcast.mention_outbox_quarantine_receipt) ->
+             Log.Server.error
+               "broadcast mention quarantine source=%s quarantine=%s reason=%s sha256=%s detail=%s"
+               receipt.source_name
+               receipt.quarantine_name
+               (Workspace_broadcast.mention_outbox_quarantine_reason_to_string
+                  receipt.reason)
+               receipt.raw_sha256
+               receipt.detail)
+          report.quarantine_receipts;
+        if report.pending_rows > 0 || report.corrupt_rows > 0
+        then
+          Log.Server.info
+            "broadcast mention reconciliation outbox=%d pending=%d accepted=%d already_accepted=%d deferred=%d rejected=%d corrupt=%d"
+            report.outbox_rows
+            report.pending_rows
+            report.accepted
+            report.already_accepted
+            report.deferred
+            report.rejected
+            report.corrupt_rows
+    in
     recover_durable_demand_owners Startup_projection;
     (* Restore MCP transport sessions from disk before first cleanup cycle.
        Grace period timestamps survive server restart, so recently-active
        clients can reconnect without "Unknown Mcp-Session-Id" errors. *)
     (try Server_mcp_transport_http_session.load_sessions_from_file ()
-     with exn ->
+     with
+     | Eio.Cancel.Cancelled _ as e ->
+       Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
+     | exn ->
        Log.Server.warn "session restore failed: %s" (Printexc.to_string exn));
     let rec loop () =
       Eio.Time.sleep clock Env_config_runtime.InternalTimers.janitor_interval_sec;
       recover_durable_demand_owners Maintenance_projection;
+      reconcile_broadcast_mentions ();
       (try
          let stale_sids = Sse.cleanup_stale () in
          List.iter Server_routes_http_common.stop_sse_session stale_sids;
@@ -596,15 +668,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            (Sse.external_subscriber_count_with_prefix "grpc-subscribe-");
          if ext_reaped > 0
          then Log.Server.info "reaped %d dead external subscribers" ext_reaped;
-         if Server_webrtc_transport.is_enabled ()
-         then (
-           let webrtc_expired = Server_webrtc_transport.cleanup_expired_offers () in
-           let webrtc_stale_peers = Server_webrtc_transport.cleanup_stale_peers () in
-           if webrtc_expired > 0 || webrtc_stale_peers > 0
-           then
-             Log.Server.info "WebRTC: cleaned %d expired offers, %d stale peers"
-               webrtc_expired
-               webrtc_stale_peers);
          (* Rate-limit buckets: evict keys unused for
              [MASC_RATE_LIMIT_BUCKET_TTL_SEC] (default 5 minutes) *)
          let rl = Eio.Lazy.force Rate_limit.global in
@@ -648,7 +711,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            last_prune := now;
            try
              let days =
-               Safe_ops.get_env_int_logged "MASC_JSONL_RETENTION_DAYS" ~default:30
+               Env_config_core.jsonl_retention_days ()
              in
              let masc = Workspace.masc_dir (Mcp_server.workspace_config state) in
              let prune_dir dir =

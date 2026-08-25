@@ -4,7 +4,6 @@ type phase =
   | Offline
   | Running
   | Failing
-  | Overflowed
   | Compacting
   | HandingOff
   | Draining
@@ -12,7 +11,6 @@ type phase =
   | Stopped
   | Crashed
   | Restarting
-  | Dead
 
 val phase_to_string : phase -> string
 val phase_of_string : string -> phase option

@@ -12,9 +12,9 @@ let label_resolution_error_to_string = function
   | Invalid_model_label label -> Printf.sprintf "invalid model label %S" label
 ;;
 
-let label_resolution_error_to_sdk_error err =
-  Agent_sdk.Error.Config
-    (Agent_sdk.Error.InvalidConfig
+let label_resolution_error_to_core_error err =
+  Agent_core.Error.Config
+    (Agent_core.Error.InvalidConfig
        { field = "model_label"; detail = label_resolution_error_to_string err })
 ;;
 
@@ -24,12 +24,12 @@ let resolve_provider_config_of_label (label : string)
   match Runtime_model_string.parse_model_string label with
   | Some pc -> Ok pc
   | None ->
-    Log.Oas_worker_exec.error "refusing unresolved explicit model label=%S; execution never falls back to \
+    Log.Runtime_agent.error "refusing unresolved explicit model label=%S; execution never falls back to \
        discovery-only models"
       label;
     Error (Invalid_model_label label)
 ;;
 
 let invalid_runtime_config field detail =
-  Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail })
+  Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })
 ;;

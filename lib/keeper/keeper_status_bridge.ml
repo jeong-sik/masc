@@ -5,13 +5,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 
 
-let drift_surface_json ~unknown_toml_keys =
-  `Assoc
-    [ "unknown_toml_keys", Json_util.json_string_list unknown_toml_keys
-    ; "unknown_toml_keys_count", `Int (List.length unknown_toml_keys)
-    ]
-;;
-
 let auto_execution_session_surface_json () =
   `Assoc [ "status", `String "removed"; "enabled", `Bool false ]
 ;;
@@ -26,7 +19,7 @@ let effective_declarative_runtime_id
       (_defaults : keeper_profile_defaults)
       (meta : keeper_meta)
   =
-  (* persona⊥{model,runtime}: the keeper's runtime is assigned in runtime.toml,
+  (* The keeper's runtime is assigned in runtime.toml,
      not in [_defaults].  Delegate to
      {!Keeper_meta_contract.runtime_id_of_meta} (the dispatcher), matching the
      keeper_runtime.ml copy, so the status override view and the wire share ONE
@@ -46,9 +39,6 @@ let maybe_string_override = Keeper_status_bridge_override.maybe_string_override
 let maybe_bool_override = Keeper_status_bridge_override.maybe_bool_override
 let nonempty_string_list_override =
   Keeper_status_bridge_override.nonempty_string_list_override
-let maybe_string_option_override =
-  Keeper_status_bridge_override.maybe_string_option_override
-
 let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaults)
   : override_field_detail list
   =
@@ -117,11 +107,10 @@ include Keeper_status_bridge_blocker
 
 
 let runtime_blocker_surface_opt (config : Workspace_utils.config) (meta : keeper_meta) =
-  match meta.runtime.last_blocker with
-  | Some info ->
-    Some (runtime_blocker_surface_of_typed_class ~summary:info.detail info.klass)
-  | None ->
-    (match runtime_registry_entry config meta.name with
+  (* The registry is the only writer of a runtime blocker; the meta field that
+     used to shadow it was written on one failure path and cleared on the next
+     success, so it reported a past instant as a present state. *)
+  (match runtime_registry_entry config meta.name with
      | Some entry ->
        (match entry.last_failure_reason with
         | Some reason -> runtime_blocker_surface_of_failure_reason reason
@@ -207,8 +196,6 @@ let attention_fields_json_with_approval_queue
         true, Some "runtime_attempts_exhausted", Some "inspect_runtime_attempts"
       | Some blocker when is_provider_runtime_blocker_class blocker.blocker_class ->
         true, Some "provider_runtime_error", Some "inspect_provider_runtime_cause"
-      | Some blocker when is_stale_turn_timeout_blocker_class blocker.blocker_class ->
-        true, Some "stale_turn_timeout", Some "inspect_stale_turn_root_cause"
       | Some blocker when is_fiber_unresolved_blocker_class blocker.blocker_class ->
         true, Some "fiber_unresolved", Some "inspect_turn_finalization"
       | Some _ -> true, Some "runtime_blocked", Some "inspect_runtime_blocker"
@@ -310,11 +297,6 @@ let attention_fields_with_runtime_trust attention_fields runtime_trust =
       (Json_util.string_opt_to_json next_human_action))
 ;;
 
-let trimmed_string_json value =
-  let trimmed = String.trim value in
-  if trimmed = "" then `Null else `String trimmed
-;;
-
 let runtime_surface_json config (meta : keeper_meta) =
   let keepalive_running = runtime_keepalive_running config meta in
   let fiber_health =
@@ -327,10 +309,51 @@ let runtime_surface_json config (meta : keeper_meta) =
     | Some entry -> Some (Keeper_state_machine.phase_to_string entry.phase)
     | None -> None
   in
+  (* [phase] above is the Keeper lifecycle; this is the shutdown operation's
+     own phase, a different axis. A Keeper can read Stopped while its
+     operation still sits in Finalizing_tasks or Cleanup_ready, and those are
+     outside the supersedable set, so a restart is refused there (#29181).
+     Latest revision wins: earlier records are superseded history. *)
+  let shutdown_operation_phase =
+    match
+      Keeper_shutdown_store.list_for_keeper ~config ~keeper_name:meta.name
+    with
+    | Error _ | Ok [] -> None
+    | Ok (first :: rest) ->
+      let latest =
+        List.fold_left
+          (fun (acc : Keeper_shutdown_types.t) (candidate : Keeper_shutdown_types.t) ->
+             if candidate.revision > acc.revision then candidate else acc)
+          first
+          rest
+      in
+      Some (Keeper_shutdown_types.phase_to_string latest.phase)
+  in
+  (* The phase name alone does not answer whether a restart is admitted:
+     [Finalized] splits on its completion field — Completion_pending still
+     fences, Completion_not_requested and Completion_delivered do not
+     (keeper_shutdown_types.ml:200). This is the predicate the admission
+     preflight actually consults, so a consumer waiting to restart reads
+     this, not the name (#29181). *)
+  let shutdown_admission_fence =
+    match
+      Keeper_shutdown_store.list_for_keeper ~config ~keeper_name:meta.name
+    with
+    | Error _ | Ok [] -> None
+    | Ok operations ->
+      Some
+        (List.exists Keeper_shutdown_types.requires_admission_fence operations)
+  in
   `Assoc
     ([ "paused", `Bool meta.paused
      ; "keepalive_running", `Bool keepalive_running
      ; ( "phase", Json_util.string_opt_to_json phase )
+     ; ( "shutdown_operation_phase"
+       , Json_util.string_opt_to_json shutdown_operation_phase )
+     ; ( "shutdown_admission_fence"
+       , match shutdown_admission_fence with
+         | None -> `Null
+         | Some fenced -> `Bool fenced )
      ; "fiber_health", `String (Keeper_status_runtime.string_of_fiber_health fiber_health)
      ; "last_runtime_attempt", last_runtime_attempt_json meta
      ]
@@ -359,13 +382,6 @@ let optional_existing_path_json ?source = function
    dropped from the status payload because there is no runtime JSON
    sibling to point at. Source identity is now fully described by the
    TOML path + the single-arm [source_kind]. *)
-let runtime_catalog_source_fields (resolution : Config_dir_resolver.resolution) =
-  [ ( "runtime_catalog_source_kind"
-    , `String "runtime" )
-  ; "runtime_catalog_source_path", `String resolution.config_root.path
-  ]
-;;
-
 let override_field_source_json ~default_source_kind ~default_manifest_path detail =
   let default_missing =
     match detail.default_value with
@@ -424,7 +440,7 @@ let source_provenance_json config (meta : keeper_meta) =
      ; ( "active_config_root_source"
        , `String (Config_dir_resolver.source_to_string resolution.config_root.source) )
      ; "config_resolution", Config_dir_resolver.to_json resolution
-     ; "precedence", `List [ `String "live_meta"; `String "toml"; `String "persona" ]
+     ; "precedence", `List [ `String "live_meta"; `String "keeper_config" ]
      ]
      @ [ "has_live_override", `Bool (override_fields <> [])
        ; "override_fields", Json_util.json_string_list override_fields

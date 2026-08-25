@@ -20,19 +20,6 @@ let schema_names schemas =
   List.map (fun (schema : Types.tool_schema) -> schema.name) schemas
 ;;
 
-let dedupe_names names =
-  let _, names_rev =
-    List.fold_left
-      (fun (seen, names_rev) name ->
-         if Set_util.StringSet.mem name seen
-         then seen, names_rev
-         else Set_util.StringSet.add name seen, name :: names_rev)
-      (Set_util.StringSet.empty, [])
-      names
-  in
-  List.rev names_rev
-;;
-
 let get_json_assoc key = function
   | `Assoc fields ->
     (match List.assoc_opt key fields with
@@ -55,7 +42,7 @@ let family_catalog =
 ;;
 
 let test_complete_flat_schema_catalog () =
-  let expected_names = family_catalog |> schema_names |> dedupe_names in
+  let expected_names = family_catalog |> schema_names in
   let catalog_names = schema_names Tool_shard.all_keeper_tool_schemas in
   Alcotest.(check (list string))
     "catalog contains every schema family exactly once"
@@ -66,7 +53,7 @@ let test_complete_flat_schema_catalog () =
 let test_catalog_names_are_unique () =
   let names = schema_names Tool_shard.all_keeper_tool_schemas in
   Alcotest.(check int)
-    "exact-name de-duplication"
+    "schema names are unique"
     (List.length (List.sort_uniq String.compare names))
     (List.length names)
 ;;
@@ -159,7 +146,7 @@ let test_board_projections_are_not_in_flat_keeper_catalog () =
   |> List.filter_map Tool_shard_types.keeper_board_schema
   |> List.iter (fun (schema : Types.tool_schema) ->
     Alcotest.(check bool)
-      (schema.name ^ " is not a global first-wins schema")
+      (schema.name ^ " is not in the flat handler catalog")
       false
       (List.mem schema.name flat_names))
 ;;
@@ -208,6 +195,39 @@ let test_masc_board_post_schema_supports_judgment () =
       "claim-specific evidence gate absent"
       false
       (List.mem_assoc "quantitative_evidence" properties)
+;;
+
+(* The Board is majority machine-authored (task verdict receipts, heartbeats).
+   The handler reads exclude_system / exclude_automation straight from args and
+   Board_dispatch.list_posts implements both, but the Keeper projection is a
+   closed schema: a knob it omits is not merely unadvertised, it is rejected. *)
+let test_keeper_board_list_can_exclude_machine_posts () =
+  let schema = required_keeper_board_schema Tool_name.Board_name.Board_list in
+  match get_json_assoc "properties" schema.input_schema with
+  | None -> Alcotest.fail "masc_board_list missing properties"
+  | Some properties ->
+    List.iter
+      (fun field ->
+         Alcotest.(check bool)
+           (field ^ " reaches the Keeper model")
+           true
+           (List.mem_assoc field properties))
+      [ "exclude_system"; "exclude_automation" ]
+;;
+
+(* Same class: the handler reads parent_id (board_tool_post.ml:404) and the
+   renderer already builds the reply tree from it (board_tool_format.ml:183),
+   but the projection dropped it -- so a Keeper could reply to a post and never
+   to another Keeper's comment. *)
+let test_keeper_board_comment_can_reply_to_a_comment () =
+  let schema = required_keeper_board_schema Tool_name.Board_name.Board_comment in
+  match get_json_assoc "properties" schema.input_schema with
+  | None -> Alcotest.fail "masc_board_comment missing properties"
+  | Some properties ->
+    Alcotest.(check bool)
+      "parent_id reaches the Keeper model"
+      true
+      (List.mem_assoc "parent_id" properties)
 ;;
 
 let test_ide_annotation_schema_uses_opaque_references () =
@@ -286,6 +306,14 @@ let () =
             "board post judgment"
             `Quick
             test_masc_board_post_schema_supports_judgment
+        ; Alcotest.test_case
+            "board list can exclude machine posts"
+            `Quick
+            test_keeper_board_list_can_exclude_machine_posts
+        ; Alcotest.test_case
+            "board comment can reply to a comment"
+            `Quick
+            test_keeper_board_comment_can_reply_to_a_comment
         ; Alcotest.test_case
             "IDE opaque references"
             `Quick

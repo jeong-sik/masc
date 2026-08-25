@@ -1,8 +1,5 @@
 ---
 status: reference
-last_verified: 2026-04-17
-code_refs:
-  - lib/keeper/
 ---
 
 # Keeper Agent System
@@ -12,25 +9,25 @@ code_refs:
 | Status | Draft |
 | Team | Keeper |
 | Maps to | `lib/keeper/` |
-| Dependencies | 02-types-and-invariants, 13-oas-integration |
+| Dependencies | 02-types-and-invariants, 13-agent-core-integration |
 | Modules | `lib/keeper/` source tree is the inventory SSOT |
 | LOC | Derived from the source tree, not duplicated here |
 | MCP Tools | `tool_keeper` |
-| External Deps | `Agent_sdk` (OAS), `Llm_provider`, `Workspace`, `Runtime_inference` |
+| External Deps | `Agent_core` (agent core), `Llm_provider`, `Workspace`, `Runtime_inference` |
 
 ---
 
 ## 1. Purpose
 
-Keeper는 MASC의 자율 에이전트 하네스(harness)다. OAS `Agent.run` 위에서 동작하며, 장기 실행 루프, 컨텍스트 관리, 메모리 계층, 심의(deliberation), 승계(succession)을 담당한다. Task verification verdict는 Keeper lifecycle 밖의 application-owned system LLM agent 또는 authenticated HITL authority가 typed completion-authority 경계에서 결정한다. Keeper는 evidence를 제출할 수 있지만 verifier가 되지 않는다.
+Keeper는 MASC의 자율 에이전트 하네스(harness)다. agent core `Agent.run` 위에서 동작하며, 장기 실행 루프, 컨텍스트 관리, 메모리 계층, 심의(deliberation), 승계(succession)을 담당한다. Task verification verdict는 Keeper lifecycle 밖의 application-owned system LLM agent 또는 authenticated HITL authority가 typed completion-authority 경계에서 결정한다. Keeper는 evidence를 제출할 수 있지만 verifier가 되지 않는다.
 
 Keeper 하나는 다음을 소유한다:
-- **identity**: `keeper_meta` 레코드 (이름, persona, instructions, typed goal/task links)
-- **context**: `working_context` (system prompt + messages + token count + OAS context)
+- **identity**: `keeper_meta` 레코드 (이름, keeper, instructions, typed goal/task links)
+- **context**: `working_context` (system prompt + messages + token count + agent core context)
 - **memory**: Memory OS fact/episode store (legacy memory bank 제거 — RFC keeper-memory-consolidation Stage 4)
 - **lifecycle**: heartbeat fiber + supervisor + checkpoint store
 
-Keeper는 외부 세계를 관찰(`world_observation`)하고, 프롬프트를 구성하고, OAS `Agent.run`에 위임하고, 결과로부터 메트릭을 갱신하는 루프를 반복한다.
+Keeper는 외부 세계를 관찰(`world_observation`)하고, 프롬프트를 구성하고, agent core `Agent.run`에 위임하고, 결과로부터 메트릭을 갱신하는 루프를 반복한다.
 
 ---
 
@@ -40,20 +37,16 @@ Keeper는 외부 세계를 관찰(`world_observation`)하고, 프롬프트를 �
 graph LR
   subgraph Types
     KT[keeper_types] --> KC[keeper_config]
-    KT --> KCT[keeper_contract]
   end
   subgraph Context
-    KWC[working_context] --> KEC[exec_context] --> KCS[checkpoint_store]
+    KCC[context_core] --> KCR[context_runtime] --> KCS[checkpoint_store]
   end
   subgraph Memory
-    KMO[memory_os_io] --> KMR[memory_recall]
+    KMO[memory_os_current] --> KMR[memory_os_recall]
   end
   subgraph Turn
     KUT[unified_turn] --> KAR[agent_run] --> KTO[tools_oas]
     KAR --> KHO[hooks_oas]
-  end
-  subgraph Decision
-    KD --> KL[learning]
   end
   subgraph Completion Authority
     CA[system LLM agent] --> CV[typed verdict]
@@ -63,7 +56,7 @@ graph LR
     KRS[supervisor] --> KKA[keepalive]
   end
   KUT --> KWO[world_observation]
-  KAR -.-> OAS["OAS Agent.run()"]
+  KAR -.-> agent core["agent core Agent.run()"]
 ```
 
 ### 2.1 모듈 분류 (12 범주)
@@ -74,11 +67,10 @@ graph LR
 | Config | `keeper_config.ml`, `keeper_toml_loader.ml` | 2 |
 | Context | `keeper_context_core.ml`, `keeper_context_runtime.ml`, `keeper_checkpoint_store.ml` | 3 |
 | Memory | `keeper_memory*.ml` (bank, policy, recall) | 4 |
-| Prompt / Skill | `keeper_prompt.ml`, `keeper_unified_prompt.ml`, `keeper_skill_routing.ml` | 3 |
-| Turn Execution | `keeper_agent_run.ml`, `keeper_unified_turn.ml`, `keeper_tools_oas.ml`, `keeper_hooks_oas.ml` | 4 |
-| Decision | `keeper_deliberation.ml` | 1 |
+| Prompt | `keeper_prompt.ml`, `keeper_unified_prompt.ml` | 2 |
+| Turn Execution | `keeper_agent_run.ml`, `keeper_unified_turn.ml`, `keeper_tools_agent_core.ml`, `keeper_hooks_agent_core.ml` | 4 |
 | Supervision | `keeper_supervisor.ml`, `keeper_keepalive.ml`, `keeper_world_observation.ml` | 3 |
-| MCP Surface | `keeper_turn.ml`, `keeper_status.ml`, `keeper_persona.ml`, `keeper_schema.ml` | 4 |
+| MCP Surface | `keeper_turn.ml`, `keeper_status.ml`, `keeper_keeper.ml`, `keeper_schema.ml` | 4 |
 | Alerting / Metrics | `keeper_alerting*.ml`, `keeper_status_runtime*.ml`, `keeper_status_detail.ml` | 6+ |
 
 ---
@@ -87,7 +79,7 @@ graph LR
 
 ### 3.1 keeper_meta
 
-Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정의되며, 약 100개 필드를 가진다.
+Keeper의 전체 상태를 담는 레코드. `lib/keeper_types/keeper_types.ml`에 정의되며, 약 100개 필드를 가진다.
 
 **소스**: `keeper_types.ml` (lines 9-106)
 
@@ -102,7 +94,7 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정
 - **Scope**: `mention_targets`, `bound_workspace_ids`
 - **Proactive**: `proactive_enabled`, `proactive_idle_sec`, `proactive_cooldown_sec`
 - **Metrics**: `total_turns`, `total_tokens`, `total_cost_usd`, `last_turn_ts` 등
-- **Team/Autonomy**: `active_goal_ids`, `autonomous_turn_count`, `board_reactive_turn_count`, `mention_reactive_turn_count`
+- **Team/Autonomy**: `active_goal_ids`
 
 직렬화: `meta_to_json` / `meta_of_json`로 JSON 왕복. `validate_name`이 역직렬화 시점에 이름/trace_id를 검증한다.
 
@@ -115,15 +107,15 @@ Generation semantics are operational, not genealogical: a successful rollover ke
 ```ocaml
 type working_context = {
   system_prompt : string;
-  messages : Agent_sdk.Types.message list;
+  messages : Agent_core.Types.message list;
   token_count : int;
   max_tokens : int;
   importance_scores : (int * float) list;
-  oas_context : Agent_sdk.Context.t;
+  agent_core_context : Agent_core.Context.t;
 }
 ```
 
-Keeper의 실행 중 대화 컨텍스트. `oas_context`는 OAS Context 모듈과 동기화된다(`sync_oas_context`).
+Keeper의 실행 중 대화 컨텍스트. `agent_core_context`는 agent core Context 모듈과 동기화된다(`sync_agent_core_context`).
 
 토큰 추정: `msg_tokens = (String.length text / 4) + 4` (문자 기반 근사치).
 
@@ -192,8 +184,8 @@ stateDiagram-v2
 
 1. **Observe**: `keeper_world_observation.observe`로 workspace 상태, 멘션, board 이벤트, idle 시간, 경제 압력 등을 수집
 2. **BuildPrompt**: `keeper_unified_prompt.build_prompt`로 keeper identity + observation을 단일 (system_prompt, user_message) 쌍으로 조립
-3. **AgentRun**: `keeper_agent_run.run_turn`이 OAS `Agent.run`에 위임. tools + hooks + context_reducer를 전달하며 memory object는 전달하지 않는다
-4. **ToolExecution**: Agent가 tool을 호출하면 `keeper_tools_oas`가 `agent_tool_dispatch_runtime.execute_keeper_tool_call`로 디스패치
+3. **AgentRun**: `keeper_agent_run.run_turn`이 agent core `Agent.run`에 위임. tools + hooks + context_reducer를 전달하며 memory object는 전달하지 않는다
+4. **ToolExecution**: Agent가 tool을 호출하면 `keeper_tools_agent_core`가 `agent_tool_dispatch_runtime.execute_keeper_tool_call`로 디스패치
 5. **UpdateMetrics**: `keeper_unified_turn.update_metrics_from_result`가 turn count, token 사용량, cost 등을 keeper_meta에 반영하고 `observation.idle_seconds`를 `masc_keeper_idle_seconds{keeper_name}` OTel metric-store gauge로 노출
 6. **PostTurnLifecycle**: `keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles`가 compaction, handoff rollover, typed checkpoint metadata를 single-writer로 처리
 7. **Checkpoint / Compact / Handoff**: checkpoint 저장 후 gate에 따라 compaction 또는 handoff rollover를 실행
@@ -204,9 +196,9 @@ stateDiagram-v2
 | 경계 | OCaml owner | 저장소 | TLA/FSM |
 |------|-------------|--------|---------|
 | compaction | `keeper_post_turn.ml` | 현재 trace checkpoint | post-turn single-writer |
-| handoff rollover | `keeper_post_turn.ml` + `keeper_rollover.ml` | 새 trace checkpoint + keeper meta lineage | `KeeperGenerationLineage.tla`, keeper FSM `Handoff_*` events |
+| handoff rollover | `keeper_post_turn.ml` + `keeper_rollover.ml` | 새 trace checkpoint + keeper meta generation/trace | keeper FSM `Handoff_*` events |
 | typed checkpoint metadata | `keeper_post_turn.ml` | keeper meta | keeper post-turn contract |
-| Memory OS facts/episodes | `keeper_librarian_runtime.ml` | `.masc/config/keepers/<name>.facts.jsonl` + `episodes/` | librarian 계약 (RFC-0247/0272) |
+| Memory OS current snapshot | `keeper_memory_os_current.ml` + `keeper_librarian.ml` | `.masc/keepers/<name>.memory-current.json` | revision-CAS librarian contract |
 | collaboration activity signal | `workspace_task.ml` + `workspace.ml` | `.masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl` | task lifecycle + activity graph event contract |
 
 ### 4.2 Keeper Supervisor Lifecycle
@@ -246,7 +238,7 @@ compaction 진입은 명시적 manual stimulus뿐이다: provider overflow가
 compaction을 자동으로 시작하는 경로는 committed compaction을 한 번도 만들지
 못해 제거되었다(#26546). overflow는 일반 typed failure route로 처리된다.
 #26545는 conversation history만 제한하고 전체 요청 provider-fit은 #26551에서
-추적한다. OAS는 model call과 provider 오류를 typed 결과로 전달하며, MASC의
+추적한다. agent core는 model call과 provider 오류를 typed 결과로 전달하며, MASC의
 compaction profile이나 ratio/message/token gate를 알지 않는다.
 
 ### 4.4 Deliberation Pipeline
@@ -265,7 +257,7 @@ Triage -> BudgetCheck -> (ModelDeliberation | DeterministicBaseline) -> Execute 
 2. `load_context_from_checkpoint`로 세션/컨텍스트 복원
 3. `build_keeper_system_prompt` + `build_turn_prompt` callback으로 프롬프트 구성
 4. `make_tools` (keeper tool bridge) + `make_hooks` (passive timing/usage/tool-result observation) 생성
-5. `Keeper_turn_driver.run_named` -> OAS `Agent.run` loop. OAS Guardrails는 permissive이며 실제 외부 효과 adapter가 실행 직전에 Keeper Gate를 호출
+5. `Keeper_turn_driver.run_named` -> agent core `Agent.run` loop. agent core Guardrails는 permissive이며 실제 외부 효과 adapter가 실행 직전에 Keeper Gate를 호출
 6. `persist_message` (assistant 응답 영속화)
 7. 결과 반환: `run_result { response_text, model_used, turn_count, tool_calls_made, usage, tools_used }`
 
@@ -277,14 +269,14 @@ Triage -> BudgetCheck -> (ModelDeliberation | DeterministicBaseline) -> Execute 
 4. `update_metrics_from_result` -> keeper_meta 갱신
 5. `write_meta` -> 메타데이터 영속화
 
-### 5.3 OAS 통합 구성
+### 5.3 agent core 통합 구성
 
-`run_turn`은 OAS에 `runtime_id`, model-visible `tools`, passive observation
-`hooks`, configured `context_reducer`, `initial_messages`를 전달한다. OAS
+`run_turn`은 agent core에 `runtime_id`, model-visible `tools`, passive observation
+`hooks`, configured `context_reducer`, `initial_messages`를 전달한다. agent core
 Guardrails는 permissive이고 hooks는 timing, usage, trajectory, tool outcome을
 기록할 뿐 실행 권한을 만들지 않는다. 외부 효과는 MASC adapter가 실제
 effect sink 직전에 opaque operation + normalized input으로 Keeper Gate를
-호출한다. MASC-owned memory object는 OAS에 투영하지 않는다.
+호출한다. MASC-owned memory object는 agent core에 투영하지 않는다.
 
 ---
 
@@ -314,7 +306,7 @@ typed history/tail 읽기 기반만 남아 있다.
 
 ### 6.4 MASC-Owned Memory
 
-`run_turn`은 더 이상 OAS memory object를 만들거나 memory hook을 설치하지 않는다. 기억 기록은 명시적 `keeper_memory_write` 도구와 librarian 추출 경로에서만 수행한다 (Institution memory는 제거됨).
+`run_turn`은 더 이상 agent core memory object를 만들거나 memory hook을 설치하지 않는다. 기억 기록은 명시적 `keeper_memory_write` 도구와 librarian 추출 경로에서만 수행한다 (Institution memory는 제거됨).
 
 ---
 
@@ -344,21 +336,17 @@ turn, and latency values remain observations.
 
 시나리오 기반 행동 평가. `scenario`(goal + graders + tool expectations) -> `Deterministic`(Exact/Contains/Regex) 또는 `ModelBased`(MODEL 채점) grader -> weight 합산 점수.
 
-### 7.3 Anti-Fake (retired)
-
-테스트 코드 품질 점수화 모듈(`lib/anti_fake.ml`)은 #2848 dead-code sweep에서 제거됐다. 테스트 품질은 현재 alcotest + QCheck assertion 및 CI의 `test_ci_hardening_source.ml` contract test가 담당한다.
-
-### 7.4 Trajectory (`lib/trajectory.ml`)
+### 7.3 Trajectory (`lib/trajectory/trajectory.ml`)
 
 Tool call을 `.masc/trajectories/{name}/{trace_id}.jsonl`에 JSONL 기록. 용도: replay, cost 추적, eval 입력.
 
 ---
 
-## 8. Hooks (OAS Integration)
+## 8. Hooks (agent core Integration)
 
-**소스**: `lib/keeper/keeper_hooks_oas.ml`
+**소스**: `lib/keeper/keeper_hooks_agent_core.ml`
 
-OAS Agent.run의 hook lifecycle에 keeper 동작을 주입:
+agent core Agent.run의 hook lifecycle에 keeper 동작을 주입:
 
 ### 8.1 pre_tool_use
 
@@ -374,7 +362,7 @@ OAS Agent.run의 hook lifecycle에 keeper 동작을 주입:
 ### 8.2 Tool surface projection
 
 `Keeper_tool_descriptor.model_visible_descriptors`가 선언한 모델 이름과 schema는
-매 turn 실제 OAS `Tool.t`로 전부 materialize된다. Keeper, runtime, provider,
+매 turn 실제 agent core `Tool.t`로 전부 materialize된다. Keeper, runtime, provider,
 credential 상태는 이 목록을 줄이지 않으며 per-turn ranking, Top-K, allow/deny
 list, affinity, discovery overlay를 적용하지 않는다.
 
@@ -402,7 +390,7 @@ dependency가 unavailable이면 해당 handler가 명시적 typed failure를 반
 **Cost Gates**: `TOOL_COST_MAX_USD`(disabled by default; set a positive USD value to enable the live unified-turn accumulated cost ceiling, `0` keeps it disabled), `COST_GATE_USD`(0.10, legacy compatibility knob; not used by the unified turn cost guard)
 
 **Unified Turn**: runtime/provider capabilities determine temperature and output
-token intent. OAS `max_turns = 0` and Keeper `max_idle_turns = 0` are the
+token intent. agent core `max_turns = 0` and Keeper `max_idle_turns = 0` are the
 unbounded sentinels; MASC observes turn/token/cost usage but does not impose a
 Keeper work budget.
 
@@ -421,60 +409,24 @@ Keeper work budget.
 Canonical file model:
 
 ```text
-<basepath>/.masc/config/personas/{name}/profile.json
+<basepath>/.masc/config/keepers/{name}.toml
 <basepath>/.masc/config/keepers/{name}.toml
 <basepath>/.masc/keepers/{name}.json
 <basepath>/.masc/keepers/{name}/...
 ```
 
-- `profile.json`: identity / persona blueprint
+- `keeper.instructions`: complete Keeper prompt
 - `keepers/{name}.toml`: deployment declaration for this basepath
 - `.masc/keepers/{name}.json`: durable runtime state
 - `.masc/keepers/{name}/...`: metrics, decisions, trajectories, checkpoints, and other high-cardinality runtime artifacts
 
-keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML, persona defaults를 합쳐 초기 `keeper_meta`를 생성한다. runtime 중지 여부는 `paused` 또는 `keeper_down`으로 표현한다.
-
-Current implementation note: compatibility reasons may still cause some authored fields to be materialized into `.masc/keepers/{name}.json`, but the intended edit surfaces remain persona profile and keeper TOML.
+keeper는 durable always-on으로 취급되며, `keeper_up`은 inline args, TOML, Keeper prompt를 합쳐 초기 `keeper_meta`를 생성한다. runtime 중지 여부는 `paused` 또는 `keeper_down`으로 표현한다.
 
 ---
 
 ## 10. Proactive Behavior
 
 Keeper는 idle 상태에서 주기적으로 자발적 행동을 생성한다.
-
-### 10.1 Quality Gate
-
-`proactive_quality_check`가 생성된 텍스트를 검증:
-
-1. `extract_checkin_text`: `CHECKIN:` 접두사 추출 또는 전체 텍스트 사용
-2. `proactive_looks_fragmentary`: 미완성 문장 감지 (`"`, `(`, `:`, `-` 등으로 끝남)
-3. `proactive_has_terminal_ending`: 종결 구두점 또는 한국어 종결 어미(`다`, `요`, `니다`, `습니다`) 확인
-4. Similarity check: 이전 출력과 Jaccard 유사도 >= threshold(0.72) 시 재생성
-
-실패 시 최대 3회 재시도, temperature를 점진적으로 상승(0.55 -> 0.75 -> 0.9).
-
-### 10.2 Fallback Reply
-
-3회 모두 실패하면 deterministic fallback 템플릿을 사용한다. 모든 keeper에 동일한 통합 fallback 문구가 적용된다.
-
----
-
-## 12. Learning System (retired)
-
-전용 learning 모듈(`lib/keeper/keeper_learning.ml`, `keeper_feedback_tool.ml`)은 #2589 dead-module sweep에서 제거됐다. decision_record JSONL 스키마와 `record_decision`/`record_outcome`/`record_feedback` 파이프라인도 runtime에서 사라졌다. 심의 기록은 현재 `keeper_deliberation.ml` + trajectory(`lib/trajectory.ml`) + procedural memory(`lib/procedural_memory.ml`)가 나눠 담당한다.
-
----
-
-## 13. Skill Routing
-
-**소스**: `lib/keeper/keeper_skill_routing.ml`
-
-Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
-
-허용 skill 목록: `masc-heartbeat`, `masc-keeper-autonomy`
-
-선택 모드:
-- `SkillSelectAgent`: MODEL에 skill 선택을 위임하는 단일 모드
 
 ---
 
@@ -563,18 +515,16 @@ External memory projection은 제거됐다. 남은 경계 이슈는 keeper conte
 
 | 문서 | 경로 |
 |------|------|
-| Keeper Types | `lib/keeper/keeper_types.ml` |
+| Keeper Types | `lib/keeper_types/keeper_types.ml` |
 | Context Core | `lib/keeper/keeper_context_core.ml` (구 `keeper_working_context.ml` 흡수) |
 | Execution Context | `lib/keeper/keeper_context_runtime.ml` |
 | Agent Run | `lib/keeper/keeper_agent_run.ml` |
 | Unified Turn | `lib/keeper/keeper_unified_turn.ml` |
-| Deliberation | `lib/keeper/keeper_deliberation.ml` |
 | Task verification evidence | `lib/workspace/workspace_task_verification.ml` |
-| OAS hook observations | `lib/keeper/keeper_hooks_oas.ml` |
+| Agent Core hook observations | `lib/keeper/keeper_hooks_agent_core.ml` |
 | Eval Harness | `lib/eval_harness.ml` |
-| Trajectory | `lib/trajectory.ml` |
+| Trajectory | `lib/trajectory/trajectory.ml` |
 | Supervisor | `lib/keeper/keeper_supervisor.ml` |
 | Config | `lib/keeper/keeper_config.ml` |
 | TOML Example | `config/keepers/janitor.toml` |
-| Memory facade | `lib/memory.mli` |
 | Memory: keeper 재설계 | `memory/project_dashboard-keeper-detail-redesign.md` |

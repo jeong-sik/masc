@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Tool_local_runtime_http -- HTTP helpers for local runtime probing. *)
 
 let default_timeout_sec = 10
@@ -35,10 +18,6 @@ let curl_meta_marker = "\n--MASC-CURL-META--\n"
 let curl_write_out =
   curl_meta_marker
   ^ "%{http_code}\n%{url_effective}\n%{redirect_url}\n%{content_type}\n%{size_download}"
-
-let trim_to_option raw =
-  let trimmed = String.trim raw in
-  if String.equal trimmed "" then None else Some trimmed
 
 let find_last_substring ~needle haystack =
   let needle_len = String.length needle in
@@ -69,9 +48,9 @@ let response_of_payload_and_meta payload meta =
   match lines with
   | status_raw :: effective_url_raw :: redirect_url_raw :: content_type_raw :: size_raw :: _ ->
       { http_status = parse_int_opt (String.trim status_raw)
-      ; effective_url = trim_to_option effective_url_raw
-      ; redirect_url = trim_to_option redirect_url_raw
-      ; content_type = trim_to_option content_type_raw
+      ; effective_url = String_util.trim_nonempty effective_url_raw
+      ; redirect_url = String_util.trim_nonempty redirect_url_raw
+      ; content_type = String_util.trim_nonempty content_type_raw
       ; downloaded_bytes = parse_downloaded_bytes size_raw
       ; body = payload
       }
@@ -229,14 +208,6 @@ let http_post_json_text_with_status_with_headers ~timeout_sec ?(headers = []) ~u
 let http_post_json_text_with_status ~timeout_sec ~url ~body_json =
   http_post_json_text_with_status_with_headers ~timeout_sec ~url ~body_json ()
 
-let http_post_json_with_status ~timeout_sec ~url ~body_json =
-  match http_post_json_text_with_status ~timeout_sec ~url ~body_json with
-  | Error _ as err -> err
-  | Ok (http_status, payload) -> (
-      try Ok (http_status, Yojson.Safe.from_string payload)
-      with Yojson.Json_error msg ->
-        Error (Printf.sprintf "invalid json from %s: %s" url msg))
-
 let int_member json key =
   match Json_util.assoc_member_opt key json with
   | None | Some `Null -> None
@@ -247,5 +218,5 @@ let int_member json key =
 let string_member json key =
   match Json_util.assoc_member_opt key json with
   | None | Some `Null -> None
-  | Some (`String value) -> String_util.trim_to_option value
+  | Some (`String value) -> String_util.trim_nonempty value
   | Some _ -> None

@@ -3,13 +3,14 @@
    Implements {!Channel_gate_connector.S} so it can be registered at server
    startup via [Channel_gate_connector.register (module Channel_gate_slack_state)].
 
-   The in-process Slack gateway ({!Slack_socket_client}, RFC-0317 PR-1) is the
-   only Slack transport; the Python sidecar is removed in PR-4. Mirrors
+   The in-process Slack gateway ({!Slack_socket_client}, RFC-0317) is the
+   only Slack transport. Mirrors
    {!Channel_gate_discord_state} but is simpler — no threads (Slack threads
    share the parent channel id; a [thread_ts] is not a separate channel), no
    typing indicator (Slack's is a separate Web API we don't surface yet). *)
 
 module Store = Channel_gate_binding_store
+module U = Yojson.Safe.Util
 
 type binding = Store.binding = {
   channel_id : string;
@@ -20,7 +21,6 @@ let connector_id = "slack"
 let display_name = "Slack"
 let channel = "slack"
 
-let default_status_path = ".gate/runtime/slack/status.json"
 let default_binding_store_path = ".gate/runtime/slack/bindings.json"
 let default_binding_audit_path = ".gate/runtime/slack/binding_audit.jsonl"
 
@@ -30,9 +30,6 @@ let slack_path ~env_var ~default () =
   match Env_config_core.raw_value_opt env_var |> Env_config_core.trim_opt with
   | Some path -> Env_config_core.resolve_against_base_path path
   | None -> Env_config_core.resolve_against_base_path default
-
-let status_path () =
-  slack_path ~env_var:"MASC_SLACK_STATUS_PATH" ~default:default_status_path ()
 
 let binding_store_path () =
   slack_path ~env_var:"MASC_SLACK_BINDING_STORE_PATH"
@@ -53,8 +50,17 @@ let read_bindings_result () = Store.read_bindings_result binding_store
 let binding_json = Store.binding_json
 let read_recent_audit ~limit = Store.read_recent_audit binding_store ~limit
 
-let stale_after_sec () =
-  Env_config_core.get_int ~default:30 "MASC_SLACK_STATUS_STALE_SEC"
+(* The one definition of "the transport is live", used both by [status_json]
+   and by the [Channel_gate_connector.S] registry export [connected]. Keeping
+   them as one function is the point: they used to disagree, because
+   [status_json] folded startup and binding-store health into the same boolean
+   while the registry read the socket alone. Those two facts have their own
+   fields ([error], [binding_store_read_ok]) and their own effect on
+   [available]. *)
+let transport_connected () =
+  match Slack_socket_client.connection_state () with
+  | Slack_gateway_state.Connected -> true
+  | Disconnected | Awaiting_hello | Reconnect_pending _ | Failed _ -> false
 
 (* Trigger policy registry — set once at gateway startup, read for dashboard. *)
 let trigger_policy_ref : Slack_gateway_state.trigger_policy option ref =
@@ -64,6 +70,12 @@ let set_trigger_policy (p : Slack_gateway_state.trigger_policy) =
   trigger_policy_ref := Some p
 
 let get_trigger_policy () = !trigger_policy_ref
+
+let trigger_policy_json () =
+  match get_trigger_policy () with
+  | None -> `Null
+  | Some policy ->
+    `String (Slack_gateway_state.trigger_policy_to_string policy)
 
 (* Outbound REST uses the bot token (xoxb-...). The app token (xapp-...) is read
    only by {!Slack_socket_client} for apps.connections.open. Both resolve
@@ -82,10 +94,7 @@ let gateway_state_label = function
 
 (* Bot identity. Slack has no READY dispatch; [record_ready] is called from the
    gateway's hello handler once the bot user id is known. *)
-type ready_info = {
-  ready_bot_user_id : string;
-  ready_at : string;
-}
+type ready_info = Channel_gate_connector.ready_info
 
 let last_ready : ready_info option Atomic.t = Atomic.make None
 let startup_error : string option Atomic.t = Atomic.make None
@@ -114,48 +123,60 @@ let status_json ?(audit_limit = 10) () =
     | Ok bindings -> bindings, ""
     | Error error -> [], Store.binding_store_error_to_string error
   in
-  let available = app_present && startup_ok && binding_store_read_ok in
-  let connected =
-    startup_ok
-    && binding_store_read_ok
-    && match gateway_state with
-       | Connected -> true
-       | Disconnected | Awaiting_hello | Reconnect_pending _ | Failed _ -> false
+  (* Slack needs both credentials to do its job, and they fail differently:
+     without SLACK_APP_TOKEN the Socket Mode gateway never starts, and without
+     SLACK_BOT_TOKEN it starts and receives but every reply fails
+     ([send_message] returns [Missing_token]). A connector that cannot answer
+     is not available, so both are part of the verdict. *)
+  let credential_error =
+    if not app_present then "SLACK_APP_TOKEN is unset or empty"
+    else if not bot_present then
+      "SLACK_BOT_TOKEN is unset or empty: inbound connects but every outbound \
+       chat.postMessage fails"
+    else ""
   in
-  let stale = false in
+  let available =
+    app_present && bot_present && startup_ok && binding_store_read_ok
+  in
+  let connected = transport_connected () in
   (* NDT-OK: status_json is a dashboard observation boundary; this timestamp
      reports gateway freshness and is not used for control flow. *)
   let updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
-  let transport_error =
+  (* A recorded startup error is why the gateway is not running; the rest is
+     downstream of it, so it stays the whole message. Otherwise report every
+     independent reason at once rather than letting one mask the others. *)
+  let error =
     match startup_error with
     | Some message -> message
     | None ->
-      (match gateway_state with
-       | Disconnected ->
-         if app_present then "" else "SLACK_APP_TOKEN is unset or empty"
-       | Failed msg -> msg
-       | Awaiting_hello | Connected | Reconnect_pending _ -> "")
-  in
-  let error =
-    if not binding_store_read_ok then binding_store_error else transport_error
+      [ (if binding_store_read_ok then None else Some binding_store_error)
+      ; (match gateway_state with
+         | Failed msg -> Some msg
+         | Disconnected | Awaiting_hello | Connected | Reconnect_pending _ ->
+           None)
+      ; (if String.equal credential_error "" then None
+         else Some credential_error)
+      ]
+      |> List.filter_map Fun.id
+      |> String.concat "; "
   in
   let recent_audit = read_recent_audit ~limit:audit_limit in
   let configured_binding_json = List.map binding_json configured_bindings in
   `Assoc
     [ ("channel", `String channel)
     ; ("capabilities", Channel_gate_connector_capability.all_json)
+    ; ("trigger_policy", trigger_policy_json ())
     ; ("available", `Bool available)
     ; ("connected", `Bool connected)
-    ; ("stale", `Bool stale)
-    ; ("stale_after_sec", `Int (stale_after_sec ()))
     ; ("status",
        `String
+         (* The gateway state machine is the liveness source; it has no
+            heartbeat file that could age out, so it is never stale. *)
          (Channel_gate_connector.connector_state_label ~available ~connected
-            ~stale))
+            ~stale:false))
     ; ("error", `String error)
     ; ("status_source", `String "in_process_gateway")
     ; ("gateway_state", `String (gateway_state_label gateway_state))
-    ; ("status_path", `String (status_path ()))
     ; ("binding_store_path", `String (binding_store_path ()))
     ; ("audit_path", `String (binding_audit_path ()))
     ; ("binding_source", `String "persisted")
@@ -164,8 +185,6 @@ let status_json ?(audit_limit = 10) () =
     ; ("runtime_bindings_count", `Int (List.length configured_bindings))
     ; ("configured_bindings", `List configured_binding_json)
     ; ("recent_audit", `List recent_audit)
-    ; ("bindings", `List configured_binding_json)
-    ; ("audit", `List recent_audit)
     ; ("bot_token_present", `Bool bot_present)
     ; ("app_token_present", `Bool app_present)
     ; ("updated_at", `String updated_at)
@@ -181,39 +200,35 @@ let status_json ?(audit_limit = 10) () =
            | None -> "") )
     ]
 
-let connector_json ?gate_status_json ?(audit_limit = 10) () =
+let connector_json ?(audit_limit = 10) () =
   let status = status_json ~audit_limit () in
-  let base =
-    match gate_status_json with
-    | None -> status
-    | Some extra ->
-      `Assoc
-        (match (status, extra) with
-         | `Assoc s, `Assoc e -> s @ e
-         | _ -> [ ("status", status); ("gate_status", extra) ])
+  let fields =
+    [ "channel"
+    ; "capabilities"
+    ; "trigger_policy"
+    ; "available"
+    ; "connected"
+    ; "status"
+    ; "error"
+    ; "status_source"
+    ; "gateway_state"
+    ; "binding_store_path"
+    ; "audit_path"
+    ; "binding_source"
+    ; "binding_store_read_ok"
+    ; "binding_store_error"
+    ; "runtime_bindings_count"
+    ; "configured_bindings"
+    ; "recent_audit"
+    ; "updated_at"
+    ; "last_ready_at"
+    ; "bot_user_id"
+    ]
   in
-  (* The dashboard connectors endpoint
-     ([Channel_gate_connector.connectors_json]) matches each connector to its
-     tile by [connector_id]; the dashboard's [findConnector(connectors,
-     "slack")] returns null without it, so a connected Slack gateway rendered
-     as an unstarted "설정 필요" placeholder. Mirror Discord/Telegram
-     [connector_json], which carry both identity fields at the top level.
-     Prepend (with a dedupe filter) so the identity is authoritative even if a
-     merged [gate_status_json] also supplied the keys. *)
-  match base with
-  | `Assoc fields ->
-    let without_identity =
-      List.filter
-        (fun (k, _) ->
-          not
-            (String.equal k "connector_id" || String.equal k "display_name"))
-        fields
-    in
-    `Assoc
-      (("connector_id", `String connector_id)
-      :: ("display_name", `String display_name)
-      :: without_identity)
-  | other -> other
+  `Assoc
+    (("connector_id", `String connector_id)
+     :: ("display_name", `String display_name)
+     :: List.map (fun field -> field, status |> U.member field) fields)
 
 let bind ~channel_id ~keeper_name ~actor_name =
   let channel_id = String.trim channel_id in
@@ -249,7 +264,6 @@ let bind ~channel_id ~keeper_name ~actor_name =
                    telemetry only. *)
                 Gate_time_util.iso8601_of_unix (Unix.gettimeofday ())
             ; action = "bind"
-            ; guild_id = None
             ; channel_id
             ; keeper_name
             ; actor_id = actor_name
@@ -285,7 +299,6 @@ let unbind ~channel_id ~actor_name =
                      telemetry only. *)
                   Gate_time_util.iso8601_of_unix (Unix.gettimeofday ())
               ; action = "unbind"
-              ; guild_id = None
               ; channel_id
               ; keeper_name = removed.keeper_name
               ; actor_id = actor_name
@@ -296,7 +309,7 @@ let unbind ~channel_id ~actor_name =
     |> Result.map_error Store.mutation_error_to_string
     |> Result.map (fun () -> status_json ())
 
-(* ---- In-process gateway support (replaces sidecars/slack-bot/) ---- *)
+(* ---- In-process gateway support ---- *)
 
 type keeper_binding_resolution = {
   keeper_name : string;
@@ -333,10 +346,9 @@ let bound_channels ~keeper_name =
 
 let connected () =
   (* The in-process gateway (RFC-0317) is the only Slack transport; its run
-     loop publishes the typed connection state. *)
-  match Slack_socket_client.connection_state () with
-  | Slack_gateway_state.Connected -> true
-  | Disconnected | Awaiting_hello | Reconnect_pending _ | Failed _ -> false
+     loop publishes the typed connection state. Same definition [status_json]
+     reports — see [transport_connected]. *)
+  transport_connected ()
 
 (* ---- Outbound REST (delegates to Slack_rest_client with the bot token) ---- *)
 

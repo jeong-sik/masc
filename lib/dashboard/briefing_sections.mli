@@ -8,7 +8,6 @@
 
 val build_briefing_sections :
   briefing_summary_json:Yojson.Safe.t ->
-  sessions:Yojson.Safe.t list ->
   agents:Yojson.Safe.t list ->
   recent_messages:Yojson.Safe.t list ->
   metadata_gaps:Yojson.Safe.t list ->

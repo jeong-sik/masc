@@ -9,8 +9,9 @@ let status_running = function
   | R.Completed _ -> false
 ;;
 
-let status_completed_ok = function
-  | R.Completed { ok; _ } -> Some ok
+let status_succeeded = function
+  | R.Completed R.Succeeded -> Some true
+  | R.Completed (R.Failed _) -> Some false
   | R.Running -> None
 ;;
 
@@ -28,7 +29,7 @@ let yojson_str j k =
 
 let test_register_then_query () =
   let t = R.create () in
-  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"balanced" ~started_at:10.0;
+  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"balanced" ~topology:Fusion_types.Simple ~started_at:10.0;
   (match R.get t ~run_id:"r1" with
    | Some run ->
      check string "keeper" "k" run.R.keeper;
@@ -40,17 +41,18 @@ let test_register_then_query () =
 
 let test_mark_completed () =
   let t = R.create () in
-  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"deep" ~started_at:1.0;
-  R.mark_completed t ~run_id:"r1" ~ok:true ();
+  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"deep" ~topology:Fusion_types.Simple ~started_at:1.0;
+  R.mark_completed t ~run_id:"r1" ~outcome:R.Succeeded;
   (match R.get t ~run_id:"r1" with
-   | Some run -> check (option bool) "completed ok=true" (Some true) (status_completed_ok run.R.status)
+   | Some run -> check (option bool) "completed successfully" (Some true) (status_succeeded run.R.status)
    | None -> fail "run should still be tracked after completion");
-  (* a failed completion records ok=false, not a drop *)
-  R.register_running t ~run_id:"r2" ~keeper:"k" ~preset:"deep" ~started_at:2.0;
-  R.mark_completed t ~run_id:"r2" ~ok:false ();
+  (* a failed completion remains visible, not dropped *)
+  R.register_running t ~run_id:"r2" ~keeper:"k" ~preset:"deep" ~topology:Fusion_types.Simple ~started_at:2.0;
+  R.mark_completed t ~run_id:"r2"
+    ~outcome:(R.Failed { reason = "judge failed"; code = "judge_failed" });
   match R.get t ~run_id:"r2" with
-  | Some run -> check (option bool) "completed ok=false" (Some false) (status_completed_ok run.R.status)
-  | None -> fail "failed run must remain visible as Completed{ok=false}"
+  | Some run -> check (option bool) "completed with failure" (Some false) (status_succeeded run.R.status)
+  | None -> fail "failed run must remain visible as a typed completion"
 ;;
 
 (* Models the finalize-before-suspend invariant that fusion_tool.ml
@@ -62,23 +64,26 @@ let test_mark_completed () =
    whether the run is finalized or leaks. [Exit] therefore faithfully stands in
    for that raise. [~finalize_first] is exactly the fix vs the bug. *)
 let simulate_failure_path ~finalize_first t ~run_id =
-  R.register_running t ~run_id ~keeper:"k" ~preset:"deep" ~started_at:3.0;
+  R.register_running t ~run_id ~keeper:"k" ~preset:"deep" ~topology:Fusion_types.Simple ~started_at:3.0;
   try
-    if finalize_first then R.mark_completed t ~run_id ~ok:false ();
+    if finalize_first
+    then
+      R.mark_completed t ~run_id
+        ~outcome:(R.Failed { reason = "delivery interrupted"; code = "interrupted" });
     raise Exit (* the suspending append re-propagates Cancelled here *)
   with
   | Exit -> ()
 ;;
 
 let test_finalize_before_suspend_keeps_completed () =
-  (* clean: mark_completed precedes the raising step -> run is Completed{ok=false}
+  (* clean: mark_completed precedes the raising step -> run is a failed completion
      even though the notification step never ran. This is the post-#21821 order. *)
   let t = R.create () in
   simulate_failure_path ~finalize_first:true t ~run_id:"clean";
   (match R.get t ~run_id:"clean" with
    | Some run ->
-     check (option bool) "finalize-before-raise -> Completed{ok=false}" (Some false)
-       (status_completed_ok run.R.status)
+     check (option bool) "finalize-before-raise -> failed completion" (Some false)
+       (status_succeeded run.R.status)
    | None -> fail "run must remain visible");
   (* buggy: mark_completed would follow the raising step -> it never runs and the
      run leaks as Running forever (prune never evicts Running). This is the state
@@ -95,14 +100,14 @@ let test_finalize_before_suspend_keeps_completed () =
 
 let test_mark_unknown_is_noop () =
   let t = R.create () in
-  R.mark_completed t ~run_id:"ghost" ~ok:true ();
+  R.mark_completed t ~run_id:"ghost" ~outcome:R.Succeeded;
   check int "unknown run_id does not create an entry" 0 (List.length (R.list_runs t))
 ;;
 
 let test_list_newest_first () =
   let t = R.create () in
-  R.register_running t ~run_id:"old" ~keeper:"k" ~preset:"p" ~started_at:1.0;
-  R.register_running t ~run_id:"new" ~keeper:"k" ~preset:"p" ~started_at:9.0;
+  R.register_running t ~run_id:"old" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:1.0;
+  R.register_running t ~run_id:"new" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:9.0;
   match R.list_runs t with
   | first :: _ -> check string "newest started_at first" "new" first.R.run_id
   | [] -> fail "expected runs"
@@ -112,11 +117,11 @@ let test_list_newest_first () =
    evicted while the newest are kept (newest-first retention). *)
 let test_prune_keeps_running_and_recent () =
   let t = R.create () in
-  R.register_running t ~run_id:"active" ~keeper:"k" ~preset:"p" ~started_at:1000.0;
+  R.register_running t ~run_id:"active" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:1000.0;
   for i = 0 to 99 do
     let id = Printf.sprintf "c%d" i in
-    R.register_running t ~run_id:id ~keeper:"k" ~preset:"p" ~started_at:(float_of_int i);
-    R.mark_completed t ~run_id:id ~ok:true ()
+    R.register_running t ~run_id:id ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:(float_of_int i);
+    R.mark_completed t ~run_id:id ~outcome:R.Succeeded
   done;
   (* the Running run is never evicted *)
   (match R.get t ~run_id:"active" with
@@ -130,16 +135,13 @@ let test_prune_keeps_running_and_recent () =
 ;;
 
 (* Phase 4: the shared status vocabulary used by the dashboard route + SSE +
-   keeper tool. "failed" (ok=false) must never collapse into "completed". *)
+   keeper tool. A typed failure must never collapse into "completed". *)
 let test_status_label () =
   check string "running label" "running" (R.status_label R.Running);
-  check string "completed label" "completed" (R.status_label (R.Completed { ok = true; failure = None; failure_code = None }));
+  check string "completed label" "completed" (R.status_label (R.Completed R.Succeeded));
   check string "failed label" "failed" (R.status_label
        (R.Completed
-          { ok = false
-          ; failure = Some "judge failed"
-          ; failure_code = Some "parse_error"
-          }))
+          (R.Failed { reason = "judge failed"; code = "parse_error" })))
 ;;
 
 (* Phase 4: run_to_yojson is the one per-run serializer for every fusion-run
@@ -147,10 +149,13 @@ let test_status_label () =
    between the HTTP list, the SSE delta, and the tool is caught at the source. *)
 let test_run_to_yojson_shape () =
   let t = R.create () in
-  R.register_running t ~run_id:"r-ser" ~keeper:"kx" ~preset:"deep" ~started_at:42.0;
+  R.register_running t ~run_id:"r-ser" ~keeper:"kx" ~preset:"deep" ~topology:Fusion_types.Simple ~started_at:42.0;
   R.mark_completed t ~run_id:"r-ser"
-    ~failure:"fusion aborted: 0 of 3 panels answered, preset requires at least 1"
-    ~failure_code:"panels_unavailable" ~ok:false ();
+    ~outcome:
+      (R.Failed
+         { reason = "fusion aborted: 0 of 3 panels answered, preset requires at least 1"
+         ; code = "panels_unavailable"
+         });
   match R.get t ~run_id:"r-ser" with
   | None -> fail "run must be present"
   | Some run ->
@@ -158,7 +163,7 @@ let test_run_to_yojson_shape () =
     check string "run_id" "r-ser" (yojson_str j "run_id");
     check string "keeper" "kx" (yojson_str j "keeper");
     check string "preset" "deep" (yojson_str j "preset");
-    check string "status label (ok=false -> failed)" "failed" (yojson_str j "status");
+    check string "typed failure status label" "failed" (yojson_str j "status");
     (match yojson_field j "started_at" with
      | Some (`Float f) -> check (float 0.001) "started_at" 42.0 f
      | _ -> fail "started_at must serialize as a float field");
@@ -173,8 +178,8 @@ let test_run_to_yojson_shape () =
 (* 성공 run에는 error/failure_code 필드가 없어야 한다(additive-only 계약). *)
 let test_run_to_yojson_success_has_no_failure_fields () =
   let t = R.create () in
-  R.register_running t ~run_id:"r-ok" ~keeper:"kx" ~preset:"deep" ~started_at:1.0;
-  R.mark_completed t ~run_id:"r-ok" ~ok:true ();
+  R.register_running t ~run_id:"r-ok" ~keeper:"kx" ~preset:"deep" ~topology:Fusion_types.Simple ~started_at:1.0;
+  R.mark_completed t ~run_id:"r-ok" ~outcome:R.Succeeded;
   match R.get t ~run_id:"r-ok" with
   | None -> fail "run must be present"
   | Some run ->
@@ -189,7 +194,7 @@ let () =
     "fusion_run_registry"
     [ ( "rfc-0266-phase2"
       , [ test_case "register then query" `Quick test_register_then_query
-        ; test_case "mark completed (ok true/false)" `Quick test_mark_completed
+        ; test_case "mark completed with typed outcomes" `Quick test_mark_completed
         ; test_case
             "finalize before suspend keeps Completed (buggy order leaks Running)"
             `Quick

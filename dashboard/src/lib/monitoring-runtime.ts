@@ -3,6 +3,7 @@ import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { parseAgentStatus } from './agent-status'
 import { UNKNOWN_STATUS_LABEL } from './format-string'
 import {
+  keeperNeedsAttention,
   deriveKeeperRuntimeProjection,
   type KeeperRuntimeProjection,
 } from './keeper-runtime-projection'
@@ -72,10 +73,9 @@ function phaseMetaFromToken(key: string, token: KeeperPhaseToken): PhaseMeta {
 // `PHASE_LABEL_KO.running = '실행 중'` differed only by a space, and
 // `listening: '대기중'` against `수신 대기` differed outright.
 const PHASE_LABELS: Record<string, PhaseMeta> = {
-  Offline: { key: 'Offline', label: PHASE_LABEL_KO.offline, description: '런타임이 올라오지 않았거나 연결 정보가 없습니다.' },
+  Offline: { key: 'Offline', label: PHASE_LABEL_KO.offline, description: '런타임이 올라오지 않았거나 연결 정보 없음' },
   Running: phaseMetaFromToken('Running', 'running'),
   Failing: phaseMetaFromToken('Failing', 'failing'),
-  Overflowed: phaseMetaFromToken('Overflowed', 'overflowed'),
   Compacting: phaseMetaFromToken('Compacting', 'compacting'),
   HandingOff: phaseMetaFromToken('HandingOff', 'handoff'),
   Draining: phaseMetaFromToken('Draining', 'draining'),
@@ -83,7 +83,6 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
   Stopped: phaseMetaFromToken('Stopped', 'stopped'),
   Crashed: phaseMetaFromToken('Crashed', 'crashed'),
   Restarting: phaseMetaFromToken('Restarting', 'restarting'),
-  Dead: phaseMetaFromToken('Dead', 'dead'),
   // `active` / `busy` are wire synonyms of `running` (see
   // KEEPER_STATUS_ALIASES in fleet-tone.ts) — same word, same sentence.
   active: phaseMetaFromToken('active', 'running'),
@@ -100,17 +99,16 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
 // PipelineStage SSOT: `types/core.ts#PipelineStage` (11 values from
 // `Keeper_status_runtime.pipeline_stage_of_phase`).
 const STAGE_LABELS: Record<string, StageMeta> = {
-  idle: { key: 'idle', label: '활동 없음', description: '지금 진행 중인 세부 활동 단계가 없습니다.' },
+  idle: { key: 'idle', label: '활동 없음', description: '지금 진행 중인 세부 활동 단계 없음' },
   compacting: { key: 'compacting', label: '압축', description: '컨텍스트 압축 단계를 수행 중입니다.' },
   handoff: { key: 'handoff', label: '승계', description: '같은 keeper를 새 trace와 새 세대로 이어붙이는 중입니다.' },
   offline: { key: 'offline', label: '오프라인', description: '활동 정보를 확인하지 못했습니다.' },
   failing: { key: 'failing', label: '오류', description: '세부 파이프라인 단계에서 오류를 감지했습니다.' },
-  overflowed: { key: 'overflowed', label: '초과', description: '파이프라인이 용량을 초과했습니다.' },
   draining: { key: 'draining', label: '종료', description: '활동 종료를 위해 파이프라인을 비우는 중입니다.' },
   paused: { key: 'paused', label: '일시정지', description: '활동 단계도 함께 정지된 상태입니다.' },
   crashed: { key: 'crashed', label: '중단', description: '파이프라인 실행이 비정상 종료되었습니다.' },
   restarting: { key: 'restarting', label: '재시작', description: '파이프라인을 다시 올리는 중입니다.' },
-  unknown: { key: 'unknown', label: '미상', description: '파이프라인 단계 정보가 없습니다.' },
+  unknown: { key: 'unknown', label: '미상', description: '파이프라인 단계 정보 없음' },
 }
 
 const DEFAULT_PHASE_BY_BAND: Partial<Record<RuntimeBand, string>> = {
@@ -125,7 +123,6 @@ const STAGE_PHASE_EQUIVALENTS: Record<string, string> = {
   compacting: 'Compacting',
   handoff: 'HandingOff',
   failing: 'Failing',
-  overflowed: 'Overflowed',
   draining: 'Draining',
   paused: 'Paused',
   crashed: 'Crashed',
@@ -268,7 +265,7 @@ function keeperBand(projection: KeeperRuntimeProjection): RuntimeBand {
   if (projection.opState.kind === 'offline') return 'offline'
   if (projection.opState.phase === 'Draining') return 'paused'
   if (isTransientPhase(projection.opState.phase)) return 'transient'
-  if (projection.signals.some(signal => signal.contributesToAttention)) {
+  if (keeperNeedsAttention(projection)) {
     return 'attention'
   }
   return 'active'
@@ -284,7 +281,7 @@ function keeperHint(
   if (signalHint) return signalHint
   if (band === 'paused') return '재개 대기 상태입니다. 원인은 차단/오류 근거를 확인하세요.'
   if (band === 'attention') return stage.description
-  if (band === 'offline' && keeper.generation === 0 && (keeper.turn_count ?? 0) === 0) {
+  if (band === 'offline' && (keeper.turn_count ?? 0) === 0) {
     return '아직 부팅된 적 없는 등록 런타임입니다.'
   }
   if (stage.key === 'idle' || stage.key === 'offline') return null
@@ -338,9 +335,7 @@ function agentBand(status: string | undefined | null): RuntimeBand {
   // Active|Busy|Listening|Inactive, plus `dashboard_mission_agents.ml:206-207`
   // adds `"offline" | "unknown"` via typed-union bypass.
   //
-  // Wire-format audit 2026-05-20: `rg -n '"dead"|"left"' lib/` returned
-  // zero hits in the `agent.status` slot — `"dead"` belongs to
-  // `Fiber_dead`/`KH_dead`/`subsystem_health`, `"left"` belongs to
+  // Wire-format audit 2026-05-20: `"left"` belongs to
   // `Span_left` (different axis vocabularies). Defensive arms for
   // those tokens dropped.
   //

@@ -3,19 +3,16 @@ import { html } from 'htm/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { shellAuthSummary, tasks } from '../../store'
 import { callMcpTool } from '../../api/mcp'
-import { fetchKeeperCompactionSnapshots, fetchKeeperTurnRecords, fetchRuntimeProviders } from '../../api/dashboard'
+import { fetchRuntimeProviders } from '../../api/dashboard'
 import { requestConfirm } from '../common/confirm-dialog'
 import { showToast } from '../common/toast'
 import { KeeperWorkspaceRail, runtimeRawSpecOpen } from './keeper-workspace-rail'
 import { selectedTask } from '../goals/task-detail-selection'
 import type { Keeper, Task } from '../../types'
 import type { KeeperRuntimeLensConfigDriftAxis } from '../../api/keeper-runtime-trace'
+import type { DashboardKeeperWaitingInventory } from '../../api'
+import { keeperWaitingInventoryStates } from '../../keeper-waiting-inventory-store'
 import { resetRuntimeCatalog } from '../../lib/runtime-catalog-resource'
-import {
-  compactionSnapshots,
-  hydrateCompactionSnapshots,
-  recordManualCompaction,
-} from './compaction-snapshots'
 
 // The recent-tool-calls section now lazy-loads via fetchKeeperToolCalls (rather
 // than rendering keeper.recent_tool_names). Stub it so these rail tests never hit
@@ -70,15 +67,15 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
             absolute_turn: 12,
             turn_ref: 'trace-cmp#12',
             blocks: [
-              { block: 'persona', bytes: 2048, digest: 'persona-digest-aaaaaaaa' },
+              { block: 'keeper_instructions', bytes: 2048, digest: 'keeper-instructions-digest-aaaaaaaa' },
               { block: 'dynamic_context', bytes: 1024, digest: 'dynamic-digest-bbbbbbbb' },
               { block: 'memory_os_recall', bytes: 512, digest: 'memory-digest-cccccccc' },
             ],
             input_components: [],
             request_runtime_profile: null,
             request_body_bytes: null,
-            runtime_profile: 'oas-seoul-1',
-            model: 'runtime',
+            runtime_profile: 'agent-core-seoul-1',
+            selected_model: 'gpt-5.4',
             finish_reason: 'completed',
             input_tokens: 33000,
             output_tokens: 120,
@@ -94,52 +91,6 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
                 next: { block: 'dynamic_context', bytes: 1024, digest: 'dynamic-digest-bbbbbbbb' },
               },
             ],
-          },
-        },
-      ],
-    }),
-    fetchKeeperCompactionSnapshots: vi.fn().mockResolvedValue({
-      schema: 'keeper.compaction_snapshots.v1',
-      keeper: 'masc-improver',
-      source: 'runtime_manifest|keeper_meta',
-      producer: 'keeper_runtime_manifest|keeper_meta_store',
-      limit: 25,
-      count: 1,
-      read_error_count: 0,
-      read_errors: [],
-      scan_truncated: false,
-      hydration_status: 'ready',
-      items: [
-        {
-          id: 'manifest:trace-cmp:event_bus_correlated:2026-06-26T03:03:00Z',
-          keeper: 'masc-improver',
-          ts_iso: '2026-06-26T03:03:00Z',
-          ts_unix: 1_782_444_580,
-          trace_id: 'trace-cmp',
-          keeper_turn_id: 12,
-          source: 'runtime_manifest',
-          trigger: 'proactive(85%)',
-          runtime_id: 'oas-seoul-1',
-          display_runtime: 'oas-seoul-1',
-          before_tokens: 210000,
-          after_tokens: 120000,
-          saved_tokens: 90000,
-          compaction_id: 'cmp-42',
-          compaction_source: 'event_bus',
-          compaction_outcome: 'checkpoint_committed',
-          cause: null,
-          status: 'observed',
-          links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
-          exact_evidence: {
-            before_checkpoint_bytes: 4096, after_checkpoint_bytes: 1024,
-            before_message_count: 8, after_message_count: 3,
-            summarized_message_count: 4, dropped_message_count: 1,
-            before_tool_use_count: 2, after_tool_use_count: 1,
-            before_tool_result_count: 2, after_tool_result_count: 1,
-          },
-          reinjection_observation: {
-            state: 'reinserted', keeper_turn_id: 13,
-            checkpoint_loaded_receipts: 1, context_injected_receipts: 1,
           },
         },
       ],
@@ -171,6 +122,13 @@ function mkTask(partial: Partial<Task>): Task {
   return { id: 'T-0', title: 'task', ...partial } as Task
 }
 
+// The runtime card follows the design's collapsed-by-default disclosure
+// (rails.jsx RailRuntime): click `.rtc-head` to open `.rtc-detail`.
+function openRuntimeDetail(container: Element): void {
+  const head = container.querySelector('.rtc-head') as HTMLButtonElement | null
+  if (head) fireEvent.click(head)
+}
+
 beforeEach(() => {
   selectedTask.value = null
   tasks.value = [
@@ -184,7 +142,7 @@ afterEach(() => {
   tasks.value = []
   selectedTask.value = null
   shellAuthSummary.value = null
-  compactionSnapshots.value = {}
+  keeperWaitingInventoryStates.value = {}
   runtimeRawSpecOpen.value = false
   vi.clearAllMocks()
   vi.useRealTimers()
@@ -194,7 +152,7 @@ afterEach(() => {
 describe('KeeperWorkspaceRail', () => {
   const keeper = mkKeeper({
     active_model_label: 'sonnet-4.6',
-    runtime_canonical: 'oas·seoul-1',
+    runtime_canonical: 'agentCore·seoul-1',
     context_ratio: 0.62,
     context_tokens: 124000,
     context_max: 200000,
@@ -203,13 +161,14 @@ describe('KeeperWorkspaceRail', () => {
 
   it('renders the runtime vitals (throughput section removed)', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
+    openRuntimeDetail(container)
     // The 처리량 (throughput) section was removed from the keeper rail as
     // low-signal in the detail view; the 런타임 section keeps its vitals.
     expect(container.textContent).not.toContain('처리량')
     expect(container.textContent).toContain('런타임')
     expect(container.textContent).not.toContain('sonnet-4.6')
     expect(container.querySelector('.rtc-model')?.textContent).toContain('—')
-    expect(container.textContent).toContain('oas·seoul-1')
+    expect(container.textContent).toContain('agentCore·seoul-1')
   })
 
   function mkDrift(partial: Partial<KeeperRuntimeLensConfigDriftAxis>): KeeperRuntimeLensConfigDriftAxis {
@@ -220,8 +179,8 @@ describe('KeeperWorkspaceRail', () => {
       has_live_override: true,
       runtime_override: true,
       override_fields: ['model.runtime_id'],
-      default_runtime_id: 'oas·tokyo-2',
-      live_runtime_id: 'oas·seoul-1',
+      default_runtime_id: 'agentCore·tokyo-2',
+      live_runtime_id: 'agentCore·seoul-1',
       active_config_root: null,
       active_config_root_source: null,
       default_manifest_path: null,
@@ -236,14 +195,14 @@ describe('KeeperWorkspaceRail', () => {
     // Live runtime stays as the card's primary id; the pending assignment is
     // shown as a distinct drift line so a saved-but-not-adopted runtime is
     // visible instead of looking like the save did nothing.
-    expect(container.textContent).toContain('oas·seoul-1')
+    expect(container.textContent).toContain('agentCore·seoul-1')
     const drift = getByTestId('runtime-drift')
     expect(drift.textContent).toContain('지정됨')
-    expect(drift.textContent).toContain('oas·tokyo-2')
+    expect(drift.textContent).toContain('agentCore·tokyo-2')
   })
 
   it('does not render the drift line when assigned and live runtimes match', () => {
-    const noDrift = mkDrift({ runtime_override: false, default_runtime_id: 'oas·seoul-1' })
+    const noDrift = mkDrift({ runtime_override: false, default_runtime_id: 'agentCore·seoul-1' })
     const { container } = render(
       html`<${KeeperWorkspaceRail} keeper=${keeper} runtimeDrift=${noDrift} />`,
     )
@@ -271,6 +230,7 @@ describe('KeeperWorkspaceRail', () => {
   it('shows the model line as missing when no model was reported', () => {
     const k = mkKeeper({ runtime_canonical: 'runpod_gemma' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
     expect(container.textContent).toContain('런타임')
     expect(container.textContent).toContain('runpod_gemma')
     // v2 always renders the model cell; when no model is reported it falls back
@@ -284,6 +244,7 @@ describe('KeeperWorkspaceRail', () => {
 
     const k = mkKeeper({ runtime_canonical: 'ollama_cloud.pending' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
 
     await waitFor(() => {
       expect(container.querySelector('[data-effort-status="loading"]')).not.toBeNull()
@@ -297,6 +258,7 @@ describe('KeeperWorkspaceRail', () => {
 
     const k = mkKeeper({ runtime_canonical: 'ollama_cloud.failed' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
 
     await waitFor(() => {
       expect(container.querySelector('[data-effort-status="error"]')).not.toBeNull()
@@ -312,6 +274,7 @@ describe('KeeperWorkspaceRail', () => {
 
     const k = mkKeeper({ runtime_canonical: 'ollama_cloud.unregistered' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
 
     await waitFor(() => {
       expect(container.querySelector('[data-effort-status="missing"]')).not.toBeNull()
@@ -344,7 +307,7 @@ describe('KeeperWorkspaceRail', () => {
             always_ignored_sampling_params: ['temperature'],
           },
           request_config: {
-            source: 'oas-provider-config',
+            source: 'agent-core-provider-config',
             provider_kind: 'openai_compat',
             request_path: '/chat/completions',
             request_path_targets_responses_api: false,
@@ -379,7 +342,7 @@ describe('KeeperWorkspaceRail', () => {
             connect_timeout_s: 120,
           },
           effective_capabilities: {
-            source: 'oas-provider-config-model',
+            source: 'agent-core-provider-config-model',
             max_context_tokens: 131072,
             max_output_tokens: 65536,
             supports_tools: true,
@@ -484,7 +447,6 @@ describe('KeeperWorkspaceRail', () => {
                 supports_computer_use: false,
                 supports_code_execution: true,
               },
-              match_prefixes: ['minimax'],
             },
             binding: {
               provider_id: 'ollama_cloud',
@@ -504,6 +466,7 @@ describe('KeeperWorkspaceRail', () => {
 
     const k = mkKeeper({ runtime_canonical: 'ollama_cloud.minimax-m3' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
 
     await waitFor(() => {
       expect(container.querySelector('[data-effort-mode="chat-template-kwargs"]')).not.toBeNull()
@@ -545,7 +508,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('wire:chat_template_kwargs · replay:preserve_always')
     expect(container.textContent).toContain('request')
     expect(container.textContent).toContain(
-      'kind:openai_compat · source:oas-provider-config · path:/chat/completions · out:65536 · ctx:131072',
+      'kind:openai_compat · source:agent-core-provider-config · path:/chat/completions · out:65536 · ctx:131072',
     )
     expect(container.textContent).toContain('system-prompt')
     expect(container.textContent).toContain('tool:required')
@@ -560,7 +523,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain(
       'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
     )
-    expect(container.textContent).toContain('source:oas-provider-config-model')
+    expect(container.textContent).toContain('source:agent-core-provider-config-model')
     expect(container.textContent).toContain('ctx:131072 · out:65536 · tools · tool-choice+required+named+parallel')
     expect(container.textContent).toContain('ignored:temperature,top_p,presence_penalty,frequency_penalty')
     expect(container.textContent).toContain('input:multimodal,image,audio')
@@ -601,6 +564,7 @@ describe('KeeperWorkspaceRail', () => {
 
     const k = mkKeeper({ runtime_canonical: 'runpod.gemma' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('gemma')
@@ -617,7 +581,7 @@ describe('KeeperWorkspaceRail', () => {
     // effort is likewise unknown, not the definitive "effort 제어 없음" claim that
     // the top-level thinking_control_format ('none', still set above to prove
     // it is ignored) would otherwise imply. The catalog entry exists, but its
-    // OAS-derived effective capabilities were not projected.
+    // Agent Core-derived effective capabilities were not projected.
     expect(container.textContent).toContain('유효 capability 미수신')
     expect(container.querySelector('[data-effort-status="unknown"]')).not.toBeNull()
     expect(container.textContent).not.toContain('카탈로그 미등재')
@@ -649,6 +613,7 @@ describe('KeeperWorkspaceRail', () => {
 
     const k = mkKeeper({ runtime_canonical: 'ollama_cloud.unknown-wire' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
 
     await waitFor(() => {
       expect(container.querySelector('[data-effort-status="unknown"]')).not.toBeNull()
@@ -660,7 +625,7 @@ describe('KeeperWorkspaceRail', () => {
   it('renders the effort row from effective_capabilities even when capabilities_declared is false', async () => {
     // capabilities_declared gates the runtime.toml-derived multimodal flag,
     // NOT the effort row (fix design: "no capabilities_declared gating for
-    // effort"). The OAS catalog can know a model's reasoning wire even when
+    // effort"). The Agent Core catalog can know a model's reasoning wire even when
     // MASC's runtime.toml never declared a [models.<id>.capabilities] block
     // for it — the two sources are independent.
     vi.mocked(fetchRuntimeProviders).mockResolvedValueOnce({
@@ -674,7 +639,7 @@ describe('KeeperWorkspaceRail', () => {
           streaming: true,
           capabilities_declared: false,
           effective_capabilities: {
-            source: 'oas-provider-config-model',
+            source: 'agent-core-provider-config-model',
             supports_reasoning: true,
             supports_reasoning_budget: false,
             accepted_reasoning_efforts: null,
@@ -689,6 +654,7 @@ describe('KeeperWorkspaceRail', () => {
 
     const k = mkKeeper({ runtime_canonical: 'ollama_cloud.deepseek-v3-1' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
 
     await waitFor(() => {
       expect(container.querySelector('[data-effort-mode="ollama-think"]')).not.toBeNull()
@@ -716,7 +682,12 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).not.toContain('윈도우 사용량')
     expect(container.textContent).toContain('62%')
     expect(container.textContent).toContain('124.0k')
-    expect(container.textContent).toContain('provider 입력 토큰 / 모델 윈도우')
+    // Design's ctx-usage row (rails.jsx): leading "마지막 턴 input" label,
+    // volt-accented value, trailing "마지막 턴 · 창 크기" label.
+    expect(container.querySelector('.ctx-usage .ctx-usage-k')?.textContent).toBe('마지막 턴 input')
+    expect(container.textContent).toContain('마지막 턴 · 창 크기')
+    // ...and the design's typed not_observed line for live occupancy.
+    expect(container.querySelector('.ctx-notobs')).not.toBeNull()
     expect(meter).not.toBeNull()
     expect(meter?.getAttribute('role')).toBe('meter')
     expect(meter?.getAttribute('aria-label')).toBe('마지막 완료 요청의 컨텍스트 윈도우 사용률')
@@ -874,11 +845,11 @@ describe('KeeperWorkspaceRail', () => {
   })
 
   it('runs overflow compaction without force through the existing MCP tool', async () => {
-    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
+    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
     // Use lifecycle_phase (the canonical wire field per Keeper type —
     // `phaseTokenFromKeeper` reads `keeperDisplayStatus(keeper)` which
     // routes through `lifecycle_phase`, not the deprecated `phase` alias).
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Overflowed' })} />`)
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Paused' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
     await waitFor(() => {
@@ -891,7 +862,7 @@ describe('KeeperWorkspaceRail', () => {
   })
 
   it('confirms before forcing compaction on running keepers', async () => {
-    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
+    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
     const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Running' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
@@ -909,7 +880,7 @@ describe('KeeperWorkspaceRail', () => {
 
   it('does not compact running keepers when force confirmation is cancelled', async () => {
     vi.mocked(requestConfirm).mockResolvedValueOnce(false)
-    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
+    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
     const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Running' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
@@ -925,8 +896,8 @@ describe('KeeperWorkspaceRail', () => {
     vi.mocked(callMcpTool).mockResolvedValueOnce(
       '{"name":"masc-improver","queued":true,"queue_outcome":"enqueued","stimulus":"manual_compaction_requested"}',
     )
-    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Overflowed' })} />`)
+    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Paused' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
     // The compaction toast names the keeper; a later refresh toast does not, so
@@ -942,14 +913,12 @@ describe('KeeperWorkspaceRail', () => {
     expect(compactCall?.[0]).toContain('예약됨')
     expect(compactCall?.[0]).not.toContain('완료')
     expect(compactCall?.[1]).toBe('warning')
-    // A request that only queued must not leave a phantom (null-token) snapshot.
-    expect(compactionSnapshots.value['masc-improver']).toBeUndefined()
   })
 
   it('reports completion only when the tool returns measured before/after tokens', async () => {
     vi.mocked(callMcpTool).mockResolvedValueOnce('{"before_tokens":1000,"after_tokens":800}')
-    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Overflowed' })} />`)
+    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Paused' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
     await waitFor(() =>
@@ -962,264 +931,6 @@ describe('KeeperWorkspaceRail', () => {
     )
     expect(compactCall?.[0]).toContain('완료')
     expect(compactCall?.[1]).toBe('success')
-    // A measured compaction is recorded as a durable snapshot.
-    expect(compactionSnapshots.value['masc-improver']).toBeDefined()
-  })
-
-  it('opens the compaction inspector overlay from the context rail and hydrates durable snapshots', async () => {
-    const { container, findByTestId } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
-    const btn = Array.from(container.querySelectorAll('.cmp-open')).find(
-      el => el.textContent?.includes('before/after'),
-    ) as HTMLElement | undefined
-    expect(btn).toBeTruthy()
-    fireEvent.click(btn as HTMLElement)
-    expect(container.querySelector('.turn-overlay')).toBeTruthy()
-    expect(container.textContent).toContain('컴팩션 스냅샷')
-    await waitFor(() => expect(container.textContent).toContain('210.0k'))
-    expect(container.querySelector('[data-testid="compaction-scan-diagnostics"]')).toBeNull()
-    const coverage = await findByTestId('compaction-coverage-status')
-    expect(coverage.textContent).toContain('표시 1/1')
-    expect(coverage.textContent).toContain('source=runtime_manifest|keeper_meta')
-    expect(coverage.textContent).toContain('producer=keeper_runtime_manifest|keeper_meta_store')
-    expect(container.textContent).toContain('proactive(85%)')
-    expect(container.textContent).toContain('runtime_manifest · observed')
-    expect(container.textContent).toContain('trace-cmp#12')
-    expect(container.textContent).toContain('reinserted · load=1 · inject=1')
-    expect(container.textContent).toContain('checkpoint bytes')
-    expect(container.textContent).toContain('summarized=4 · dropped=1')
-    const promptContext = await findByTestId('compaction-prompt-context')
-    expect(fetchKeeperTurnRecords).toHaveBeenCalledWith('masc-improver', 12, expect.any(Object))
-    expect(promptContext.textContent).toContain('snapshot-linked turn-record')
-    expect(promptContext.textContent).toContain('trace-cmp#12')
-    expect(promptContext.textContent).toContain('dynamic_context')
-    expect(promptContext.textContent).toContain('memory_os_recall')
-    expect(promptContext.textContent).toContain('raw prompt text는 이 화면/API에서 노출하지 않습니다')
-  })
-
-  it('renders no-checkpoint compaction outcome and cause without success wording', async () => {
-    vi.mocked(fetchKeeperCompactionSnapshots).mockResolvedValueOnce({
-      schema: 'keeper.compaction_snapshots.v1',
-      keeper: 'masc-improver',
-      source: 'runtime_manifest|keeper_meta',
-      producer: 'keeper_runtime_manifest|keeper_meta_store',
-      limit: 25,
-      count: 1,
-      read_error_count: 0,
-      read_errors: [],
-      scan_truncated: false,
-      hydration_status: 'ready',
-      items: [
-        {
-          id: 'manifest:trace-failed:context_compacted:2026-06-03T11:02:00Z',
-          keeper: 'masc-improver',
-          ts_iso: '2026-06-03T11:02:00Z',
-          ts_unix: 1_780_464_120,
-          trace_id: 'trace-failed',
-          keeper_turn_id: 13,
-          source: 'runtime_manifest',
-          trigger: 'provider_overflow',
-          runtime_id: 'oas-seoul-1',
-          display_runtime: 'oas-seoul-1',
-          before_tokens: null,
-          after_tokens: null,
-          saved_tokens: null,
-          compaction_id: 'cmp-failed',
-          compaction_source: 'provider_overflow',
-          compaction_outcome: 'retry_without_checkpoint',
-          cause: 'compaction dispatch failed',
-          status: 'retryable_failure',
-          links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
-          exact_evidence: null,
-          reinjection_observation: {
-            state: 'not_linked',
-            keeper_turn_id: null,
-            checkpoint_loaded_receipts: 0,
-            context_injected_receipts: 0,
-          },
-        },
-      ],
-    })
-
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
-    const btn = Array.from(container.querySelectorAll('.cmp-open')).find(
-      el => el.textContent?.includes('before/after'),
-    ) as HTMLElement | undefined
-    fireEvent.click(btn as HTMLElement)
-
-    await waitFor(() => expect(container.textContent).toContain('체크포인트 없이 재시도'))
-    expect(container.textContent).toContain('compaction dispatch failed')
-    expect(container.textContent).toContain('원인')
-    expect(container.textContent).not.toContain('실패 원인')
-    expect(container.textContent).not.toContain('체크포인트 커밋 완료')
-  })
-
-  it('renders live durable compaction snapshots even when token counts are missing', async () => {
-    vi.mocked(fetchKeeperCompactionSnapshots).mockResolvedValueOnce({
-      schema: 'keeper.compaction_snapshots.v1',
-      keeper: 'masc-improver',
-      source: 'runtime_manifest|keeper_meta',
-      producer: 'keeper_runtime_manifest|keeper_meta_store',
-      limit: 25,
-      count: 1,
-      read_error_count: 1,
-      read_errors: [
-        { scope: 'runtime_manifest_row:trace-cmp.jsonl:1', error: 'unknown event: "old_event"' },
-      ],
-      scan_truncated: true,
-      hydration_status: 'ready',
-      items: [
-        {
-          id: 'manifest:trace-live:context_compacted:2026-06-03T11:01:24Z',
-          keeper: 'masc-improver',
-          ts_iso: '2026-06-03T11:01:24Z',
-          ts_unix: 1_780_464_084,
-          trace_id: 'trace-live',
-          keeper_turn_id: null,
-          source: 'runtime_manifest',
-          trigger: 'pre_dispatch_hygiene',
-          runtime_id: null,
-          display_runtime: 'pre_dispatch_hygiene',
-          before_tokens: null,
-          after_tokens: null,
-          saved_tokens: null,
-          compaction_id: null,
-          compaction_source: 'pre_dispatch_hygiene',
-          compaction_outcome: null,
-          cause: null,
-          status: 'compacted',
-          links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
-          exact_evidence: null,
-          reinjection_observation: {
-            state: 'not_linked', keeper_turn_id: null,
-            checkpoint_loaded_receipts: 0, context_injected_receipts: 0,
-          },
-        },
-      ],
-    })
-
-    const { container, findByTestId } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
-    const btn = Array.from(container.querySelectorAll('.cmp-open')).find(
-      el => el.textContent?.includes('before/after'),
-    ) as HTMLElement | undefined
-    expect(btn).toBeTruthy()
-    fireEvent.click(btn as HTMLElement)
-
-    const diagnostics = await findByTestId('compaction-scan-diagnostics')
-    expect(diagnostics.textContent).toContain('manifest row 1개')
-    expect(diagnostics.textContent).toContain('scan budget')
-    const coverage = await findByTestId('compaction-coverage-status')
-    expect(coverage.textContent).toContain('표시 1/1')
-    expect(coverage.textContent).toContain('더 오래된 snapshot은 누락')
-    expect(container.textContent).toContain('pre_dispatch_hygiene')
-    expect(container.textContent).toContain('runtime_manifest · compacted')
-    expect(container.textContent).toContain('trace-live')
-    expect(container.textContent).toContain('before/after token count는 기록하지 않았습니다')
-    expect(container.textContent).toContain('latest turn-record')
-    expect(container.textContent).toContain('선택한 snapshot trace가 최근 1개 turn-records 안에 없어')
-    expect(container.textContent).not.toContain('아직 이 keeper에서 durable compaction snapshot이 없습니다.')
-  })
-
-  it('surfaces compaction snapshot scan diagnostics when successful payload has no items', async () => {
-    vi.mocked(fetchKeeperCompactionSnapshots).mockResolvedValueOnce({
-      schema: 'keeper.compaction_snapshots.v1',
-      keeper: 'masc-improver',
-      source: 'runtime_manifest|keeper_meta',
-      producer: 'keeper_runtime_manifest|keeper_meta_store',
-      limit: 25,
-      count: 0,
-      read_error_count: 2,
-      read_errors: [
-        { scope: 'runtime_manifest_row:trace-a.jsonl:1', error: 'unknown event: "memory_injected"' },
-        { scope: 'runtime_manifest_row:trace-a.jsonl:2', error: 'unknown event: "memory_flushed"' },
-      ],
-      scan_truncated: true,
-      hydration_status: 'ready',
-      items: [],
-    })
-
-    const { container, findByTestId } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
-    const btn = Array.from(container.querySelectorAll('.cmp-open')).find(
-      el => el.textContent?.includes('before/after'),
-    ) as HTMLElement | undefined
-    expect(btn).toBeTruthy()
-    fireEvent.click(btn as HTMLElement)
-
-    const diagnostics = await findByTestId('compaction-scan-diagnostics')
-    expect(diagnostics.textContent).toContain('manifest row 2개')
-    expect(diagnostics.textContent).toContain('unknown event: "memory_injected"')
-    expect(diagnostics.textContent).toContain('scan budget')
-    const coverage = await findByTestId('compaction-coverage-status')
-    expect(coverage.textContent).toContain('표시 0/0')
-    expect(container.textContent).toContain('컴팩션 이력 유무를 확인하지 못했습니다.')
-    expect(container.textContent).not.toContain('아직 이 keeper에서 durable compaction snapshot이 없습니다.')
-  })
-
-  it('distinguishes empty durable compaction results from decoded schema drift', async () => {
-    vi.mocked(fetchKeeperCompactionSnapshots).mockResolvedValueOnce({
-      schema: 'keeper.compaction_snapshots.v1',
-      keeper: 'masc-improver',
-      source: 'runtime_manifest|keeper_meta',
-      producer: 'keeper_runtime_manifest|keeper_meta_store',
-      limit: 25,
-      count: 2,
-      read_error_count: 0,
-      read_errors: [],
-      scan_truncated: false,
-      hydration_status: 'ready',
-      items: [],
-    })
-
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
-    const btn = Array.from(container.querySelectorAll('.cmp-open')).find(
-      el => el.textContent?.includes('before/after'),
-    ) as HTMLElement | undefined
-    expect(btn).toBeTruthy()
-    fireEvent.click(btn as HTMLElement)
-
-    await waitFor(() => expect(container.textContent).toContain('API는 masc-improver snapshot 2건을 보고'))
-    expect(container.querySelector('[data-testid="compaction-coverage-status"]')?.textContent).toContain('표시 0/2')
-    expect(container.textContent).toContain('api_count=2 · decoded=0')
-    expect(container.textContent).toContain('source=runtime_manifest|keeper_meta')
-  })
-
-  it('keeps newly recorded optimistic compactions above older durable snapshots', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-06-27T10:00:00Z'))
-
-    recordManualCompaction('masc-improver', 1000, 800, 'runtime-a')
-    hydrateCompactionSnapshots('masc-improver', [
-      {
-        id: 'manifest:old:event_bus_correlated:2026-06-26T03:03:00Z',
-        keeper: 'masc-improver',
-        ts_iso: '2026-06-26T03:03:00Z',
-        ts_unix: 1_782_444_580,
-        trace_id: 'old',
-        keeper_turn_id: 1,
-        source: 'runtime_manifest',
-        trigger: 'proactive(85%)',
-        runtime_id: 'runtime-old',
-        display_runtime: 'runtime-old',
-        before_tokens: 210000,
-        after_tokens: 120000,
-        saved_tokens: 90000,
-        compaction_id: 'cmp-old',
-        compaction_source: 'event_bus',
-        compaction_outcome: null,
-        cause: null,
-        status: 'observed',
-        links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
-        exact_evidence: null,
-        reinjection_observation: {
-          state: 'not_linked', keeper_turn_id: null,
-          checkpoint_loaded_receipts: 0, context_injected_receipts: 0,
-        },
-      },
-    ])
-
-    const snapshots = compactionSnapshots.value['masc-improver'] ?? []
-    expect(snapshots[0]?.source).toBe('manual')
-    expect(snapshots[0]?.atIso).toBe('2026-06-27T10:00:00.000Z')
-    expect(snapshots[1]?.source).toBe('backend')
   })
 
   it('opens the memory inspector overlay from the context rail', () => {
@@ -1237,5 +948,144 @@ describe('KeeperWorkspaceRail', () => {
     tasks.value = []
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
     expect(container.textContent).toContain('할당된 태스크 없음')
+  })
+
+  it('renders the design rtc-spec rows from catalog max context/output only', async () => {
+    vi.mocked(fetchRuntimeProviders).mockResolvedValueOnce({
+      providers: [
+        {
+          provider: 'ollama_cloud.spec',
+          runtime_id: 'ollama_cloud.spec',
+          model_api_name: 'spec-model',
+          max_context: 131072,
+          max_output_tokens: 65536,
+          temperature: 0.65,
+          top_p: 0.91,
+          tools_support: true,
+          thinking_support: true,
+          streaming: true,
+          models: ['spec-model'],
+        },
+      ],
+    } as unknown as Awaited<ReturnType<typeof fetchRuntimeProviders>>)
+
+    const k = mkKeeper({ runtime_canonical: 'ollama_cloud.spec' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
+
+    await waitFor(() => {
+      expect(container.querySelector('.rtc-spec')?.textContent).toContain('최대 컨텍스트')
+    })
+    const specs = Array.from(container.querySelectorAll('.rtc-spec')).map(node => node.textContent)
+    expect(specs[0]).toContain('최대 출력')
+    // Sampling row renders only catalog-declared fields — never the design's
+    // hardcoded mock (`temp 0.3 · top_p 0.95 · max_tokens 4,096`).
+    expect(specs[1]).toContain('샘플링 temp 0.65 · top_p 0.91')
+    expect(container.textContent).not.toContain('temp 0.3')
+  })
+
+  it('renders rtc-spec placeholders instead of inventing context/output limits', () => {
+    const k = mkKeeper({ runtime_canonical: 'runpod_gemma' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    openRuntimeDetail(container)
+    const spec = container.querySelector('.rtc-spec')
+    expect(spec?.textContent).toContain('최대 컨텍스트 — · 최대 출력 —')
+    expect(container.textContent).not.toContain('샘플링')
+  })
+
+  it('renders the heartbeat line from the keepalive interval and last heartbeat', () => {
+    const k = mkKeeper({
+      keeper_keepalive_interval_s: 60,
+      last_heartbeat: new Date(Date.now() - 15_000).toISOString(),
+    })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    const hb = container.querySelector('.rail-hb')
+    expect(hb).not.toBeNull()
+    expect(hb?.textContent).toContain('heartbeat 60s')
+    expect(hb?.textContent).toContain('다음 wake ~45s')
+    expect(hb?.querySelector('.rail-hb-note')?.textContent).toBe('poll')
+  })
+
+  it('omits the heartbeat line when no keepalive interval is reported', () => {
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
+    expect(container.querySelector('.rail-hb')).toBeNull()
+  })
+
+  it('marks heartbeat observation errors instead of substituting a stale ETA', () => {
+    const k = mkKeeper({
+      keeper_keepalive_interval_s: 60,
+      last_heartbeat: new Date(Date.now() - 15_000).toISOString(),
+      heartbeat_observation_error: 'ledger unreadable',
+    })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    const hb = container.querySelector('.rail-hb')
+    expect(hb?.textContent).toContain('다음 wake ~—')
+    expect(hb?.querySelector('.rail-hb-note')?.textContent).toBe('관측 오류')
+    expect(hb?.getAttribute('title')).toBe('ledger unreadable')
+  })
+
+  it('renders the drain card with owned tasks while Draining', () => {
+    const k = mkKeeper({ lifecycle_phase: 'Draining' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    const card = container.querySelector('.drain-card')
+    expect(card).not.toBeNull()
+    expect(card?.getAttribute('data-phase')).toBe('Draining')
+    expect(container.querySelector('.drain-badge')?.textContent).toBe('Draining')
+    expect(container.querySelector('.drain-count')?.textContent).toContain('1건 비우는 중')
+    expect(container.querySelector('.drain-t-id')?.textContent).toBe('T-4412')
+    expect(container.querySelector('.drain-t-title')?.textContent).toContain('세그먼트 리텐션')
+    expect(container.querySelector('.drain-t-state')?.textContent).toBe('in_progress')
+    expect(container.textContent).not.toContain('T-9999')
+  })
+
+  it('renders the handoff gloss and no event flush while HandingOff', () => {
+    const k = mkKeeper({ lifecycle_phase: 'HandingOff' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    expect(container.textContent).toContain('핸드오프 진행')
+    expect(container.querySelector('.drain-gloss')?.textContent).toContain('인계 중')
+    expect(container.querySelector('.drain-eventq')).toBeNull()
+  })
+
+  it('lists queued stimuli from the waiting inventory while Draining', () => {
+    const inventory = {
+      schema: 'masc.dashboard.keeper_waiting_inventory.v3',
+      source: 'server_keeper_waiting_inventory',
+      keepers: [
+        {
+          keeper_name: 'masc-improver',
+          state: 'waiting',
+          waiting_count: 1,
+          waiting_count_truncated: false,
+          sources: { event_queue_pending: 1 },
+          truncated_sources: {},
+          waiting_on: [
+            {
+              source: 'event_queue_pending',
+              waiting_on: 'board_mention',
+              what: 'board mention 대기',
+              wake_producer: 'board watcher',
+              since: 1_800_000_000,
+              since_iso: '2027-01-15T00:00:00Z',
+              next_action: 'drain',
+            },
+          ],
+        },
+      ],
+    } as unknown as DashboardKeeperWaitingInventory
+    keeperWaitingInventoryStates.value = {
+      'masc-improver': { inventory, ready: true, loading: false, error: null },
+    }
+    const k = mkKeeper({ lifecycle_phase: 'Draining' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+    expect(container.querySelector('.drain-eventq-h')?.textContent).toBe('대기 자극 flush')
+    const ev = container.querySelector('.drain-ev')
+    expect(ev?.querySelector('.drain-ev-kind')?.textContent).toBe('board_mention')
+    expect(ev?.querySelector('.drain-ev-from')?.textContent).toBe('board watcher')
+    expect(ev?.querySelector('.drain-ev-at')?.textContent).not.toBe('—')
+  })
+
+  it('does not render the drain card for a running keeper', () => {
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
+    expect(container.querySelector('.drain-card')).toBeNull()
   })
 })

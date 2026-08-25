@@ -1,11 +1,11 @@
 module Types = Masc_domain
 
-(** Unit tests for Tool_input_validation — OAS-delegated strict validation.
+(** Unit tests for Tool_input_validation — AGENT_CORE-delegated strict validation.
 
     Tests the integration: MASC JSON Schema -> Tool_bridge.params_of_json_schema
-    -> Agent_sdk.Tool_input_validation.validate -> pre_hook_action mapping.
+    -> Agent_core.Tool_input_validation.validate -> pre_hook_action mapping.
 
-    OAS 0.212 (oas@6f3648d6, "hard-cut implicit agent governance") removed
+    AGENT_CORE 0.212 (agent_core@6f3648d6, "hard-cut implicit agent governance") removed
     implicit type coercion from validate: a string value for an
     integer/boolean/number parameter is now a deterministic Reject with a
     typed error the caller can act on, not a silent repair. These tests
@@ -33,28 +33,38 @@ let assert_contains label haystack needle =
 (* ================================================================ *)
 
 (** Reproduce the exact validation pipeline used in the pre-hook:
-    JSON Schema -> params_of_json_schema -> OAS validate. *)
-let validate_via_oas ~tool_name ~(schema : Yojson.Safe.t) ~(args : Yojson.Safe.t)
+    JSON Schema -> params_of_json_schema -> AGENT_CORE validate. *)
+let validate_via_agent_core ~tool_name ~(schema : Yojson.Safe.t) ~(args : Yojson.Safe.t)
   : Tool_dispatch.pre_hook_action =
   let parameters = Tool_bridge.params_of_json_schema schema in
   if parameters = [] then Pass
   else
-    let oas_schema : Agent_sdk.Types.tool_schema =
-      { name = tool_name; description = ""; parameters; strict = None }
+    let json =
+      `Assoc
+        [ ("name", `String tool_name)
+        ; ("description", `String "")
+        ; ("parameters", `List (List.map Agent_core.Types.tool_param_to_json parameters))
+        ]
     in
-    match Agent_sdk.Tool_input_validation.validate oas_schema args with
-    | Agent_sdk.Tool_input_validation.Valid coerced ->
+    let agent_core_schema : Agent_core.Types.tool_schema =
+      match Agent_core.Types.tool_schema_of_json json with
+      | Ok s -> s
+      | Error err -> failwith ("test_tool_input_validation: " ^ err)
+    in
+    match Agent_core.Tool_input_validation.validate agent_core_schema args with
+    | Agent_core.Tool_input_validation.Valid coerced ->
       if Yojson.Safe.equal coerced args then Pass
       else Proceed coerced
-    | Agent_sdk.Tool_input_validation.Invalid errors ->
+    | Agent_core.Tool_input_validation.Invalid errors ->
       let msg =
-        Agent_sdk.Tool_input_validation.format_errors ~tool_name errors
+        Agent_core.Tool_input_validation.format_errors ~tool_name errors
       in
       Reject
         (Tool_result.Failed
            { Tool_result.class_ = Tool_result.Runtime_failure
            ; message = msg
            ; data = `Assoc [("error", `String msg)]
+           ; metadata = None
            ; tool_name
            ; duration_ms = 0.0
            })
@@ -91,7 +101,7 @@ let run_registered_hook ?schema ~tool_name ~(args : Yojson.Safe.t) () =
 let test_required_present () =
   let schema = make_schema ~required:["name"] [("name", "string")] in
   let args = `Assoc [("name", `String "alice")] in
-  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  match validate_via_agent_core ~tool_name:"test" ~schema ~args with
   | Pass -> ()
   | Proceed _ -> ()  (* coerced but still valid *)
   | Reject r -> Alcotest.fail (Printf.sprintf "Expected Pass, got Reject: %s"
@@ -100,7 +110,7 @@ let test_required_present () =
 let test_required_missing () =
   let schema = make_schema ~required:["name"; "workspace"] [("name", "string"); ("workspace", "string")] in
   let args = `Assoc [("name", `String "alice")] in
-  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  match validate_via_agent_core ~tool_name:"test" ~schema ~args with
   | Reject r ->
     let msg = Yojson.Safe.to_string (Tool_result.data r) in
     Alcotest.(check bool) "mentions workspace" true (string_contains msg "workspace")
@@ -110,7 +120,7 @@ let test_required_missing_multiple () =
   let schema = make_schema ~required:["a"; "b"; "c"]
     [("a", "string"); ("b", "string"); ("c", "string")] in
   let args = `Assoc [("a", `String "ok")] in
-  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  match validate_via_agent_core ~tool_name:"test" ~schema ~args with
   | Reject r ->
     let msg = Yojson.Safe.to_string (Tool_result.data r) in
     Alcotest.(check bool) "mentions b" true (string_contains msg "b");
@@ -120,7 +130,7 @@ let test_required_missing_multiple () =
 let test_no_required_fields () =
   let schema = make_schema [("name", "string")] in
   let args = `Assoc [] in
-  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  match validate_via_agent_core ~tool_name:"test" ~schema ~args with
   | Pass -> ()
   | Proceed _ -> ()
   | Reject r -> Alcotest.fail (Printf.sprintf "Expected Pass, got Reject: %s"
@@ -128,13 +138,13 @@ let test_no_required_fields () =
 
 (* ================================================================ *)
 (* Test: strict typing — string never repairs to a scalar type       *)
-(* (OAS 0.212 removed implicit coercion; Reject carries the field)   *)
+(* (AGENT_CORE 0.212 removed implicit coercion; Reject carries the field)   *)
 (* ================================================================ *)
 
 let test_string_for_integer_rejected () =
   let schema = make_schema [("count", "integer")] in
   let args = `Assoc [("count", `String "42")] in
-  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  match validate_via_agent_core ~tool_name:"test" ~schema ~args with
   | Reject r ->
     let msg = Yojson.Safe.to_string (Tool_result.data r) in
     Alcotest.(check bool) "mentions count" true (string_contains msg "count")
@@ -144,7 +154,7 @@ let test_string_for_integer_rejected () =
 let test_string_for_boolean_rejected () =
   let schema = make_schema [("flag", "boolean")] in
   let args = `Assoc [("flag", `String "true")] in
-  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  match validate_via_agent_core ~tool_name:"test" ~schema ~args with
   | Reject r ->
     let msg = Yojson.Safe.to_string (Tool_result.data r) in
     Alcotest.(check bool) "mentions flag" true (string_contains msg "flag")
@@ -154,7 +164,7 @@ let test_string_for_boolean_rejected () =
 let test_string_for_number_rejected () =
   let schema = make_schema [("value", "number")] in
   let args = `Assoc [("value", `String "3.14")] in
-  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  match validate_via_agent_core ~tool_name:"test" ~schema ~args with
   | Reject r ->
     let msg = Yojson.Safe.to_string (Tool_result.data r) in
     Alcotest.(check bool) "mentions value" true (string_contains msg "value")
@@ -164,7 +174,7 @@ let test_string_for_number_rejected () =
 let test_coerce_int_to_number () =
   let schema = make_schema [("value", "number")] in
   let args = `Assoc [("value", `Int 42)] in
-  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  match validate_via_agent_core ~tool_name:"test" ~schema ~args with
   | Pass -> ()  (* Int is valid Number, may not need coercion *)
   | Proceed _ -> ()  (* widened to Float, also ok *)
   | Reject r -> Alcotest.fail (Printf.sprintf "Expected Pass/Proceed, got Reject: %s"
@@ -173,7 +183,7 @@ let test_coerce_int_to_number () =
 let test_coerce_intlit_to_integer () =
   let schema = make_schema [("count", "integer")] in
   let args = `Assoc [("count", `Intlit "123")] in
-  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  match validate_via_agent_core ~tool_name:"test" ~schema ~args with
   | Proceed coerced ->
     let count = Yojson.Safe.Util.member "count" coerced in
     Alcotest.(check string) "normalized to Int" "123"
@@ -185,7 +195,7 @@ let test_coerce_intlit_to_integer () =
 let test_invalid_string_to_integer () =
   let schema = make_schema ~required:["count"] [("count", "integer")] in
   let args = `Assoc [("count", `String "not_a_number")] in
-  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  match validate_via_agent_core ~tool_name:"test" ~schema ~args with
   | Reject r ->
     let msg = Yojson.Safe.to_string (Tool_result.data r) in
     Alcotest.(check bool) "mentions count" true (string_contains msg "count")
@@ -198,7 +208,7 @@ let test_invalid_string_to_integer () =
 let test_correct_string () =
   let schema = make_schema [("name", "string")] in
   let args = `Assoc [("name", `String "alice")] in
-  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  match validate_via_agent_core ~tool_name:"test" ~schema ~args with
   | Pass -> ()
   | Proceed _ -> Alcotest.fail "Expected Pass (no coercion needed)"
   | Reject r -> Alcotest.fail (Yojson.Safe.to_string (Tool_result.data r))
@@ -206,7 +216,7 @@ let test_correct_string () =
 let test_correct_integer () =
   let schema = make_schema [("count", "integer")] in
   let args = `Assoc [("count", `Int 5)] in
-  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  match validate_via_agent_core ~tool_name:"test" ~schema ~args with
   | Pass -> ()
   | Proceed _ -> ()  (* normalization is acceptable *)
   | Reject r -> Alcotest.fail (Yojson.Safe.to_string (Tool_result.data r))
@@ -214,7 +224,7 @@ let test_correct_integer () =
 let test_correct_boolean () =
   let schema = make_schema [("flag", "boolean")] in
   let args = `Assoc [("flag", `Bool true)] in
-  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  match validate_via_agent_core ~tool_name:"test" ~schema ~args with
   | Pass -> ()
   | Proceed _ -> Alcotest.fail "Expected Pass (no coercion needed)"
   | Reject r -> Alcotest.fail (Yojson.Safe.to_string (Tool_result.data r))
@@ -223,33 +233,94 @@ let test_correct_boolean () =
 (* Test: edge cases                                                  *)
 (* ================================================================ *)
 
-(* Raw OAS validate rejects `Null args ("expected object, got null").
+(* Raw AGENT_CORE validate rejects `Null args ("expected object, got null").
    The MCP boundary normalizes an omitted/null [arguments] field to
    [`Assoc []] before validation (Mcp_server_eio_call_tool.
    arguments_of_params), so this strict raw behavior never rejects a
    spec-legal argument-less tools/call. *)
-let test_null_args_rejected_at_oas_layer () =
+let test_null_args_rejected_at_agent_core_layer () =
   let schema = make_schema [("optional", "string")] in
   let args = `Null in
-  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  match validate_via_agent_core ~tool_name:"test" ~schema ~args with
   | Reject _ -> ()
   | Pass | Proceed _ ->
-    Alcotest.fail "expected raw OAS validate to reject null args"
+    Alcotest.fail "expected raw AGENT_CORE validate to reject null args"
 
 let test_null_args_with_required () =
   let schema = make_schema ~required:["name"] [("name", "string")] in
   let args = `Null in
-  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  match validate_via_agent_core ~tool_name:"test" ~schema ~args with
   | Reject _ -> ()
   | Pass | Proceed _ -> Alcotest.fail "Expected Reject for null args with required fields"
 
 let test_extra_fields_allowed () =
   let schema = make_schema ~required:["name"] [("name", "string")] in
   let args = `Assoc [("name", `String "alice"); ("extra", `Int 42)] in
-  match validate_via_oas ~tool_name:"test" ~schema ~args with
+  match validate_via_agent_core ~tool_name:"test" ~schema ~args with
   | Pass -> ()
   | Proceed _ -> ()
   | Reject r -> Alcotest.fail (Yojson.Safe.to_string (Tool_result.data r))
+
+(* The four input template shapes used to live only in the tool's description
+   while the schema said `{"type":"object"}`, so a malformed template reached
+   the executor and failed there. Stated in the schema, it is refused at the
+   boundary. *)
+let plan_schema = Masc.Keeper_tool_composition_surface.plan_execute_input_schema
+
+let plan_args input =
+  `Assoc
+    [ ( "nodes"
+      , `List
+          [ `Assoc
+              [ "id", `String "n"
+              ; "tool", `String "keeper_time_now"
+              ; "input", input
+              ]
+          ] )
+    ]
+;;
+
+let test_plan_accepts_an_output_reference () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:plan_schema
+      ~name:"keeper_plan_execute"
+      ~args:
+        (plan_args
+           (`Assoc
+             [ "kind", `String "output"
+             ; "node", `String "clock"
+             ; "pointer", `String "/now_iso"
+             ]))
+      ()
+  with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "an output reference must pass, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+;;
+
+(* Where the schema stops. [validate_args] reads [oneOf] and [properties] off
+   the top-level schema only, so a template stated inside [nodes.items] is
+   what the model is told, not what it is held to: an [output] with no [node]
+   passes here and is refused later by [Keeper_tool_plan]. Pinned so the day
+   the validator descends, this test says so rather than the schema quietly
+   becoming load-bearing. *)
+let test_plan_template_is_advertised_not_enforced () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:plan_schema
+      ~name:"keeper_plan_execute"
+      ~args:(plan_args (`Assoc [ "kind", `String "output" ]))
+      ()
+  with
+  | Ok _ -> ()
+  | Error _ ->
+    Alcotest.fail
+      "the nested template is not checked here; if it now is, move this \
+       assertion rather than deleting it"
+;;
 
 let test_empty_schema_allows_empty_args () =
   let schema = `Assoc [] in
@@ -345,23 +416,23 @@ let test_schema_nullable_union_preserves_non_null_type () =
       ]
   in
   match Tool_bridge.params_of_json_schema schema with
-  | [ (param : Agent_sdk.Types.tool_param) ] ->
+  | [ (param : Agent_core.Types.tool_param) ] ->
       Alcotest.(check string) "name" "payload" param.name;
       Alcotest.(check bool) "optional" false param.required;
       (match param.param_type with
-       | Agent_sdk.Types.Object -> ()
+       | Agent_core.Types.Object -> ()
        | _ -> Alcotest.fail "nullable object must remain object")
   | params ->
       Alcotest.failf "expected one converted parameter, got %d"
         (List.length params)
 
-let test_all_masc_tool_schemas_project_through_oas () =
+let test_all_masc_tool_schemas_project_through_agent_core () =
   List.iter
     (fun (schema : Masc_domain.tool_schema) ->
       match Tool_bridge.params_of_json_schema schema.input_schema with
       | _ -> ()
       | exception Invalid_argument detail ->
-          Alcotest.failf "tool %s has invalid OAS schema: %s" schema.name detail)
+          Alcotest.failf "tool %s has invalid AGENT_CORE schema: %s" schema.name detail)
     Config.raw_all_tool_schemas
 
 (* ================================================================ *)
@@ -457,8 +528,8 @@ let test_validate_args_uses_explicit_schema_without_registry () =
     let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool) "mentions missing path" true
       (string_contains msg "path");
-    Alcotest.(check bool) "marks oas validation" true
-      (string_contains msg "oas_tool_middleware")
+    Alcotest.(check bool) "marks agent_core validation" true
+      (string_contains msg "agent_core_tool_middleware")
   | Ok _ -> Alcotest.fail "Expected Error for missing required field"
 
 let find_schema_exn name schemas =
@@ -478,22 +549,22 @@ let tool_edit_file_schema =
 let keeper_model_board_post_schema =
   find_schema_exn
     "masc_board_post"
-    (Keeper_tool_descriptor.model_visible_schemas ())
+    (Keeper_tool_descriptor.model_visible_schemas ~surface:All)
 
 let keeper_model_board_list_schema =
   find_schema_exn
     "masc_board_list"
-    (Keeper_tool_descriptor.model_visible_schemas ())
+    (Keeper_tool_descriptor.model_visible_schemas ~surface:All)
 
 let keeper_model_board_search_schema =
   find_schema_exn
     "masc_board_search"
-    (Keeper_tool_descriptor.model_visible_schemas ())
+    (Keeper_tool_descriptor.model_visible_schemas ~surface:All)
 
 let keeper_model_board_post_get_schema =
   find_schema_exn
     "masc_board_post_get"
-    (Keeper_tool_descriptor.model_visible_schemas ())
+    (Keeper_tool_descriptor.model_visible_schemas ~surface:All)
 
 let keeper_memory_search_schema =
   find_schema_exn "keeper_memory_search" Config.raw_all_tool_schemas
@@ -591,6 +662,62 @@ let test_validate_args_masc_board_post_accepts_sources_array () =
       "expected masc_board_post sources array to pass validation, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
+(* Live keepers titled their posts 44 times on 2026-08-13 and every attempt
+   was rejected as an undeclared field, even though the handler
+   (Board_tool_post.handle_post_create) and the store both carry titles.
+   The schema is the only layer that hid the field. *)
+let test_validate_args_masc_board_post_accepts_title () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_model_board_post_schema
+      ~name:"masc_board_post"
+      ~args:
+        (`Assoc
+          [ "title", `String "Turn continuity findings"
+          ; "content", `String "Keeper board post with a list title"
+          ; "hearth", `String "ops"
+          ])
+      ()
+  with
+  | Ok forwarded ->
+    (match Yojson.Safe.Util.member "title" forwarded with
+     | `String value ->
+       Alcotest.(check string) "title preserved" "Turn continuity findings" value
+     | other ->
+       Alcotest.failf
+         "expected title to be preserved, got %s"
+         (Yojson.Safe.to_string other))
+  | Error result ->
+    Alcotest.failf
+      "expected masc_board_post title to pass validation, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+
+(* Declaring title must not loosen the closed schema: tags stays undeclared
+   and rejected. *)
+let test_validate_args_masc_board_post_still_rejects_tags () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_model_board_post_schema
+      ~name:"masc_board_post"
+      ~args:
+        (`Assoc
+          [ "title", `String "Turn continuity findings"
+          ; "content", `String "body"
+          ; "tags", `List [ `String "ops" ]
+          ])
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.failf
+      "expected tags to be rejected, but it passed: %s"
+      (Yojson.Safe.to_string forwarded)
+  | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    Alcotest.(check bool)
+      "error names tags"
+      true
+      (string_contains msg "unsupported field(s): tags")
+
 let test_registered_hook_masc_board_post_accepts_sources_array () =
   let blocked, forwarded =
     run_registered_hook
@@ -605,7 +732,7 @@ let test_registered_hook_masc_board_post_accepts_sources_array () =
 (* Regression: the board_list/search backends already read [compact]
    (board_tool_post.ml handle_post_list, board_tool_handlers.ml
    handle_search), but the Keeper Board projection omitted it, so
-   qa-king's masc_board_list compact=true was rejected as an
+   mu-king's masc_board_list compact=true was rejected as an
    unsupported field. Assert the keeper surface now accepts compact while
    additionalProperties stays false (unknown fields still rejected). *)
 let test_validate_args_masc_board_list_accepts_compact () =
@@ -671,7 +798,7 @@ let test_validate_args_masc_board_list_rejects_unknown_field () =
       (Yojson.Safe.to_string forwarded)
   | Error _ -> ()
 
-(* Keeper/persona tool schemas are closed: undeclared input cannot reach a
+(* Keeper tool schemas are closed: undeclared input cannot reach a
    handler and disappear silently. *)
 let keeper_schema_input name =
   find_schema_exn name Masc.Keeper_schema.schemas
@@ -706,20 +833,15 @@ let test_keeper_down_rejects_undeclared_field () =
    ~/me/.masc tool-call logs must still be accepted. Closing a schema turns
    a silent drop into a hard rejection, so an under-declared property breaks
    a working call — the same failure the missing [compact] declaration
-   produced above. [persona_name] is in this list because
-   [Keeper_turn_up_args.parse] reads it and
-   [Keeper_turn_up_config_persistence] writes it to the keeper TOML, while
-   the schema did not declare it. *)
+   produced above. *)
 let test_keeper_up_accepts_live_traffic_fields () =
   let args =
     `Assoc
-      [ "name", `String "sangsu"
-      ; "persona_name", `String "sangsu"
+      [ "name", `String "alpha"
       ; "instructions", `String "do the thing"
-      ; "active_goal_ids", `List [ `String "g1" ]
       ; "sandbox_profile", `String "local"
       ; "allowed_paths", `List [ `String "/tmp" ]
-      ; "mention_targets", `List [ `String "sangsu" ]
+      ; "mention_targets", `List [ `String "alpha" ]
       ; "autoboot_enabled", `Bool true
       ; "proactive_enabled", `Bool true
       ; "runtime_id", `String "rt"
@@ -746,7 +868,7 @@ let test_keeper_clear_accepts_live_traffic_fields () =
       ~name:"masc_keeper_clear"
       ~args:
         (`Assoc
-          [ "name", `String "sangsu"
+          [ "name", `String "alpha"
           ; "preserve_system_prompt", `Bool true
           ; "reason", `String "context overflow"
           ])
@@ -758,9 +880,7 @@ let test_keeper_clear_accepts_live_traffic_fields () =
       "expected masc_keeper_clear to accept its live-traffic fields, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
-(* [network_mode] stays undeclared on purpose: it is accepted only on the
-   dashboard HTTP path, which calls [Keeper_turn_up_args.parse] with
-   [~allow_sandbox_fields:true] and never validates against this schema. *)
+(* [network_mode] stays undeclared on the MCP contract. *)
 let test_keeper_up_rejects_network_mode () =
   assert_rejects_undeclared_field ~tool:"masc_keeper_up" ~field:"network_mode"
 
@@ -805,7 +925,7 @@ let test_validate_args_keeper_memory_search_rejects_removed_kind () =
    breaking cat/pwd/find/head/tail/wc/git_log/git_diff. *)
 let param_by_name name params =
   List.find_opt
-    (fun (param : Agent_sdk.Types.tool_param) -> String.equal param.name name)
+    (fun (param : Agent_core.Types.tool_param) -> String.equal param.name name)
     params
 
 let legacy_background_flag_name = "run_" ^ "in_background"
@@ -821,16 +941,16 @@ let execute_async_lifecycle_field_names =
 
 let check_param_type name expected params =
   match param_by_name name params with
-  | Some (param : Agent_sdk.Types.tool_param) ->
+  | Some (param : Agent_core.Types.tool_param) ->
     Alcotest.(check bool)
-      (name ^ " is optional at OAS boundary")
+      (name ^ " is optional at AGENT_CORE boundary")
       false
       param.required;
     Alcotest.(check string)
       (name ^ " param type")
       expected
       (match param.param_type with
-       | Agent_sdk.Types.String -> "string"
+       | Agent_core.Types.String -> "string"
        | Integer -> "integer"
        | Number -> "number"
        | Boolean -> "boolean"
@@ -901,9 +1021,9 @@ let test_validate_args_tool_execute_rejects_cmd_string () =
       (String.length msg > 0);
     assert_policy_validation_payload ~label:"cmd string" result;
     Alcotest.(check bool)
-      "validation error points to typed argv"
+      "validation error names the accepted fields"
       true
-      (string_contains msg "argv=[\\\"git\\\",\\\"status\\\",\\\"--short\\\"]")
+      (string_contains msg "accepted: argv")
 
 let test_validate_args_tool_execute_rejects_command_string () =
   let args = `Assoc [ "command", `String "pwd" ] in
@@ -922,9 +1042,9 @@ let test_validate_args_tool_execute_rejects_command_string () =
       true
       (string_contains msg "unsupported field(s): command");
     Alcotest.(check bool)
-      "validation error says command field is unavailable"
+      "validation error names the accepted fields"
       true
-      (string_contains msg "no cmd/command field")
+      (string_contains msg "accepted: argv")
 
 let test_validate_args_tool_execute_rejects_background_flag () =
   let args =
@@ -1053,8 +1173,7 @@ let test_validate_args_tool_execute_accepts_typed_pipeline () =
 let test_validate_args_masc_transition_rejects_json_string_handoff_context () =
   let args =
     `Assoc
-      [ "agent_name", `String "codex-local-admin"
-      ; "task_id", `String "task-1823"
+      [ "task_id", `String "task-1823"
       ; "action", `String "release"
       ; ( "handoff_context"
         , `String
@@ -1272,12 +1391,21 @@ let test_tool_execute_write_validation_stays_structural () =
 
 let tool_execute_exec_stage args =
   match Keeper_tool_execute_typed_input.of_json args with
-  | Ok (Keeper_tool_execute_typed_input.Exec { argv = program :: arguments; _ }) ->
+  | Ok
+      { source =
+          Staged
+            { program = { head = { argv = program :: arguments; _ }; tail = [] }
+            ; _
+            }
+      ; _
+      } ->
     program, arguments
-  | Ok (Keeper_tool_execute_typed_input.Exec { argv = []; _ }) ->
+  | Ok { source = Staged { program = { head = { argv = []; _ }; _ }; _ }; _ } ->
     Alcotest.fail "expected non-empty argv"
-  | Ok (Keeper_tool_execute_typed_input.Pipeline _) ->
-    Alcotest.fail "expected exec input"
+  | Ok { source = Staged { program = { tail = _ :: _; _ }; _ }; _ } ->
+    Alcotest.fail "expected a single-stage program"
+  | Ok { source = Script _; _ } ->
+    Alcotest.fail "expected the staged form"
   | Error msg ->
     Alcotest.failf "expected typed tool_execute parse to pass, got %s" msg
 
@@ -1341,15 +1469,24 @@ let test_tool_execute_pipeline_find_expression_not_rewritten () =
         ])
   with
   | Ok
-      (Keeper_tool_execute_typed_input.Pipeline
-        { stages = { Keeper_tool_execute_typed_input.argv = argv; _ } :: _; _ }) ->
+      { source =
+          Keeper_tool_execute_typed_input.Staged
+            { program =
+                { head = { Keeper_tool_execute_typed_input.argv; _ }
+                ; tail = _ :: _
+                }
+            ; _
+            }
+      ; _
+      } ->
     Alcotest.(check (list string))
       "pipeline find stage remains caller-authored"
       [ "find"; "-type"; "f" ]
       argv
-  | Ok (Keeper_tool_execute_typed_input.Pipeline { stages = []; _ }) ->
-    Alcotest.fail "expected non-empty pipeline"
-  | Ok (Keeper_tool_execute_typed_input.Exec _) -> Alcotest.fail "expected pipeline input"
+  | Ok { source = Keeper_tool_execute_typed_input.Staged { program = { tail = []; _ }; _ }; _ } ->
+    Alcotest.fail "expected a multi-stage program"
+  | Ok { source = Keeper_tool_execute_typed_input.Script _; _ } ->
+    Alcotest.fail "expected the staged form"
   | Error msg ->
     Alcotest.failf "expected typed tool_execute pipeline parse to pass, got %s" msg
 
@@ -1416,7 +1553,7 @@ let test_validation_telemetry_records_pass_and_fail_counters () =
            (Printf.sprintf
               "expected valid input, got %s"
               (Yojson.Safe.to_string (Tool_result.data result))));
-  (* OAS 0.212 strict typing: a numeric string for an integer parameter
+  (* AGENT_CORE 0.212 strict typing: a numeric string for an integer parameter
      no longer repairs — it records the same fail counter as any other
      invalid input. *)
   let strict_string_tool = "__tool_input_validation_metric_strict_string" in
@@ -1501,7 +1638,6 @@ let test_validation_telemetry_rejects_retired_transition_aliases () =
            ~args:
              (`Assoc
                 [
-                  "agent_name", `String "codex-local-admin";
                   "task_id", `String "task-239";
                   "action", `String "claim";
                   "to", `String "claimed";
@@ -1560,7 +1696,6 @@ let test_registered_hook_transition_rejects_to_and_note () =
   let args =
     `Assoc
       [
-        ("agent_name", `String "codex-local-admin");
         ("task_id", `String "task-239");
         ("action", `String "claim");
         ("to", `String "claimed");
@@ -1588,7 +1723,6 @@ let test_registered_hook_transition_preserves_canonical_action () =
   let args =
     `Assoc
       [
-        ("agent_name", `String "keeper-ani1999-agent");
         ("task_id", `String "task-193");
         ("action", `String "claim");
       ]
@@ -1609,7 +1743,6 @@ let test_registered_hook_transition_strips_internal_agent_marker () =
     `Assoc
       [
         ("_agent_name", `String "codex-local-admin");
-        ("agent_name", `String "codex-local-admin");
         ("task_id", `String "task-216");
         ("action", `String "done");
       ]
@@ -1624,8 +1757,8 @@ let test_registered_hook_transition_strips_internal_agent_marker () =
   Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
   Alcotest.(check bool) "_agent_name removed before schema validation" true
     (Yojson.Safe.Util.member "_agent_name" forwarded = `Null);
-  Alcotest.(check string) "agent_name preserved" "codex-local-admin"
-    (assoc_string "agent_name" forwarded)
+  Alcotest.(check bool) "caller identity is not forwarded as a tool argument" true
+    (Yojson.Safe.Util.member "agent_name" forwarded = `Null)
 
 let test_registered_hook_goal_list_preserves_blank_optional_enums () =
   let args =
@@ -1747,7 +1880,7 @@ let test_typed_tool_contract_rejection_corpus () =
       , "tool_execute"
       , tool_execute_schema
       , `Assoc [ "cmd", `String "git status --short" ]
-      , [ "cmd"; "non-empty argv" ] )
+      , [ "cmd"; "accepted: argv" ] )
     ; ( "keeper_task_done notes-only drift"
       , "keeper_task_done"
       , keeper_task_done_schema
@@ -1770,8 +1903,7 @@ let test_typed_tool_contract_rejection_corpus () =
       , "masc_transition"
       , masc_transition_schema
       , `Assoc
-          [ "agent_name", `String "codex-local-admin"
-          ; "task_id", `String "task-239"
+          [ "task_id", `String "task-239"
           ; "action", `String "claim"
           ; "to", `String "claimed"
           ; "note", `String "PR #8308 Draft"
@@ -2129,7 +2261,7 @@ let test_oneof_null_const_matches_non_null_branch () =
 (* ================================================================ *)
 
 let () =
-  Alcotest.run "Tool_input_validation (OAS delegation)" [
+  Alcotest.run "Tool_input_validation (AGENT_CORE delegation)" [
     ("required", [
       Alcotest.test_case "present" `Quick test_required_present;
       Alcotest.test_case "missing" `Quick test_required_missing;
@@ -2150,9 +2282,13 @@ let () =
       Alcotest.test_case "boolean passes" `Quick test_correct_boolean;
     ]);
     ("edge_cases", [
-      Alcotest.test_case "null args rejected at OAS layer" `Quick test_null_args_rejected_at_oas_layer;
+      Alcotest.test_case "null args rejected at AGENT_CORE layer" `Quick test_null_args_rejected_at_agent_core_layer;
       Alcotest.test_case "null args with required" `Quick test_null_args_with_required;
       Alcotest.test_case "extra fields allowed" `Quick test_extra_fields_allowed;
+      Alcotest.test_case "plan accepts an output reference" `Quick
+        test_plan_accepts_an_output_reference;
+      Alcotest.test_case "plan template is advertised, not enforced" `Quick
+        test_plan_template_is_advertised_not_enforced;
       Alcotest.test_case "empty schema allows empty args" `Quick
         test_empty_schema_allows_empty_args;
       Alcotest.test_case "empty schema rejects arguments" `Quick
@@ -2163,8 +2299,8 @@ let () =
         test_schema_ambiguous_union_is_rejected;
       Alcotest.test_case "nullable schema union keeps its type" `Quick
         test_schema_nullable_union_preserves_non_null_type;
-      Alcotest.test_case "all MASC schemas project through OAS" `Quick
-        test_all_masc_tool_schemas_project_through_oas;
+      Alcotest.test_case "all MASC schemas project through AGENT_CORE" `Quick
+        test_all_masc_tool_schemas_project_through_agent_core;
     ]);
     ("telemetry", [
       Alcotest.test_case "records pass and fail counters" `Quick
@@ -2253,6 +2389,10 @@ let () =
         test_validate_args_uses_explicit_schema_without_registry;
       Alcotest.test_case "direct masc_board_post accepts sources array" `Quick
         test_validate_args_masc_board_post_accepts_sources_array;
+      Alcotest.test_case "direct masc_board_post accepts title" `Quick
+        test_validate_args_masc_board_post_accepts_title;
+      Alcotest.test_case "direct masc_board_post still rejects tags" `Quick
+        test_validate_args_masc_board_post_still_rejects_tags;
       Alcotest.test_case "masc_transition rejects to/note aliases" `Quick
         test_registered_hook_transition_rejects_to_and_note;
       Alcotest.test_case "masc_transition canonical action value" `Quick

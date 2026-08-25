@@ -7,12 +7,14 @@
  (private_modules
   keeper_grpc_heartbeat
   server_grpc_tool_dispatch
+  server_dashboard_fusion_run_projection
   server_dashboard_http_schedule_actions
   server_dashboard_http_keeper_event_queue_operator_execute
   server_schedule_runner_policy)
- (flags :standard -open Masc)
+ (flags :standard -open Masc -w +33)
  (libraries
   masc
+  masc.agent_observation
   masc.markup_document
   masc.dashboard
   masc.fd_accountant
@@ -25,10 +27,12 @@
   ;; #20929: server bootstrap converges <base>/.masc/config/prompts onto the
   ;; binary-embedded config/ tree so merged prompt edits ship on restart.
   masc.embedded_config
+  masc.keeper_chat_operations
   ;; server_dashboard_http_keeper_api reads the manifest decision payload
   ;; through Keeper_compaction_evidence.exact_evidence_key; dune does not
   ;; re-export it through the masc dep, so masc_server lists it explicitly.
   masc.keeper_compaction_evidence
+  masc.keeper_approval
   ;; RFC-0266 Phase 4: GET /api/v1/dashboard/fusion-runs names
   ;; Fusion_run_registry directly; dune does not re-export it through the masc
   ;; dep, so masc_server lists masc.fusion_core explicitly.
@@ -67,7 +71,6 @@
   grpc-direct-core
   h2
   h2-eio
-  ocaml-webrtc
   eio
   eio_main
   eio.unix
@@ -79,15 +82,16 @@
   fmt
   cohttp
   cohttp-eio
-  agent_sdk
-  agent_sdk.base
-  agent_sdk.llm_provider
+  masc.agent_core
+  masc.agent_core.base
+  masc.agent_core.llm_provider
   masc_schedule
   masc.tool_types
   masc.time_codec
   masc.attribution
   masc.exec_policy
   masc.keeper_registry
+  masc.keeper_checkpoint_ref
   masc.keeper_metrics
   masc.keeper_types
   masc.keeper_runtime
@@ -165,7 +169,6 @@
   masc.prompt_registry
   masc.mcp_transport_protocol
   masc.mcp_session
-  masc.response
   masc.ag_ui
   opentelemetry
   opentelemetry.client
@@ -174,7 +177,6 @@
   masc.autonomous
   masc.shared_audit
   masc.shared_types
-  masc.resilience
   masc.multimodal
   masc.repo_manager
   masc.parse_outcome

@@ -7,14 +7,10 @@
 
     @since Phase B+C *)
 
-(* Fail-closed by types: [~assignee] is passed directly by the caller,
-   which already destructures [AwaitingVerification { assignee; _ }]. Removes
-   the prior "unknown" fallback that violated Silent Failure 금지. Issue #7547.
-
-   Contract source rules (must stay aligned with [task_contract] in
+(* Contract source rules (must stay aligned with [task_contract] in
    types_core.ml):
    - [criteria]: the operator-facing "must be true" statements →
-     [task.contract.completion_contract] wrapped in [Verification.Custom].
+     [task.contract.completion_contract] as exact criterion strings.
    - [evidence_refs]: the artefact list the completion authority expects to see →
      [task.contract.verify_gate_evidence] plus required evidence refs,
      passed in by the caller at task-state lifecycle so this function does
@@ -23,49 +19,36 @@ type submit_request_spec =
   { criteria : Verification.criterion list
   ; output : Yojson.Safe.t
   ; request_kind : string
-  ; request_summary : string
   ; next_action : string
   ; board_type : string
   ; board_title : string
   ; board_content : string
   ; evidence_fields : (string * Yojson.Safe.t) list
-      (* task-1664: transient required/submitted role split for Board/SSE.
-         Request persistence replaces the raw [submitted_evidence] list with
-         its one typed submit-time snapshot SSOT. *)
+      (* Request persistence replaces [submitted_evidence] with its typed
+         submit-time snapshot SSOT. *)
   ; submitted_evidence : string list
   }
 
 let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
     ~assignee ~evidence_refs =
-  let request_kind, request_summary, next_action, board_type, board_title, board_content =
-    match Masc_task_handlers.Planning_eio.load config ~task_id:task.id with
-    | Ok plan_ctx
-      when Task_completion_claim.deliverable_claims_completion ~task_id:task.id
-             plan_ctx.deliverable ->
-        ( "conflict_triage",
-          "Conflict verification required: board / planning / mutation path disagree.",
-          "Reconcile board / planning / mutation surfaces before ordinary approval.",
-          "verification_conflict_request",
-          Printf.sprintf "Conflict verify: %s" task.title,
-          Printf.sprintf
-            "Conflict verification required for task %s (%s) by %s. Do not approve as ordinary merged-PR verification; reconcile board / planning / mutation surfaces first."
-            task.id task.title assignee )
-    | Ok _ | Error _ ->
-        ( "normal",
-          "",
-          "",
-          "verification_request",
-          Printf.sprintf "Verify: %s" task.title,
-          Printf.sprintf "Verification requested for task %s (%s) by %s"
-            task.id task.title assignee )
+  (* Every submission is an ordinary verification request. *)
+  let request_kind = "normal" in
+  let request_summary = "" in
+  let next_action = "" in
+  let board_type = "verification_request" in
+  let board_title = Printf.sprintf "Verify: %s" task.title in
+  let board_content =
+    Printf.sprintf "Verification requested for task %s (%s) by %s"
+      task.id task.title assignee
   in
-  let criteria = List.map (fun s -> Verification.Custom s)
-    (match task.contract with
-     | Some c -> c.completion_contract
-     | None -> []) in
-  (* task-1664: derive the required/submitted role split from the task SSOT.
-     The submitted strings remain transient here; [create_submit_request]
-     replaces them with the typed persisted snapshot. *)
+  let criteria =
+    match task.contract with
+    | Some c -> c.completion_contract
+    | None -> []
+  in
+  (* Derive the required/submitted role split from the task SSOT. The strings
+     remain transient here; [create_submit_request] persists the typed
+     snapshot. *)
   let verification_evidence =
     Masc_task_handlers.Tool_task_completion_review.concrete_verification_evidence
       ~submitted_evidence_refs:evidence_refs
@@ -88,7 +71,6 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
   { criteria
   ; output
   ; request_kind
-  ; request_summary
   ; next_action
   ; board_type
   ; board_title
@@ -121,6 +103,26 @@ let warn_contract_gap (task : Masc_domain.task) =
        task.id
    | Some _ -> ())
 
+(* A truncated artifact cannot be judged from the snapshot — the review
+   instructions order the judge to treat it as unavailable and its prefix is
+   not transmitted (#29615). The producer can still act at submit time: split
+   the artifact, summarize it, or expect the verdict to rest on the readable
+   evidence alone. Saying so here is the earliest honest place. *)
+let warn_oversized_evidence ~(task : Masc_domain.task) ~(snapshot : Yojson.Safe.t) =
+  List.iter
+    (fun (reference, bytes) ->
+       Log.Task.warn
+         ~keeper_name:task.id
+         "[verification-submit] task=%s evidence %s is %d bytes — over the \
+          %d-byte snapshot cap; the judge treats it as unavailable. Split or \
+          summarize the artifact, or the verdict rests on the readable \
+          evidence alone"
+         task.id
+         reference
+         bytes
+         Workspace_verification_store.verification_evidence_max_bytes)
+    (Workspace_verification_store.truncated_snapshot_items snapshot)
+
 let create_submit_request ~(config : Workspace.config)
     ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs =
   let base_path = config.Workspace.base_path in
@@ -132,6 +134,7 @@ let create_submit_request ~(config : Workspace.config)
       ~worker:assignee
       spec.submitted_evidence
   in
+  warn_oversized_evidence ~task ~snapshot:evidence_snapshot;
   let output =
     match spec.output with
     | `Assoc fields ->
@@ -214,14 +217,6 @@ let notify_submit_for_verification ~(config : Workspace.config)
     ("timestamp", `Float (Time_compat.now ()));
   ] @ spec.evidence_fields));
   ()
-
-let on_submit_for_verification ~(config : Workspace.config)
-    ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs =
-  match create_submit_request ~config ~task ~assignee ~verification_id ~evidence_refs with
-  | Error e -> Error e
-  | Ok () ->
-    notify_submit_for_verification ~config ~task ~assignee ~verification_id ~evidence_refs;
-    Ok ()
 
 let completion_authority_fields (authority : Masc_domain.completion_authority) =
   [ ( "authority_kind"
@@ -369,6 +364,63 @@ let notify_reject_verification
    authenticated operator or typed system-LLM judge commits a verdict. Long-waiting
    obligations are surfaced from the activity-event stream, not a poll-timer. *)
 
+let stalled_board_content ~task_id ~verification_id ~gate ~detail =
+  Printf.sprintf
+    "Stalled task %s (vrf:%s) — review will not retry. gate=%s: %s. Forward \
+     path: the assignee resubmits with submit_for_verification (supersedes \
+     this verification), or an operator commits a HITL verdict."
+    task_id
+    verification_id
+    gate
+    detail
+
+let stalled_metadata
+      ~(authority : Masc_domain.completion_authority)
+      ~task_id
+      ~verification_id
+      ~gate
+      ~detail
+  =
+  `Assoc
+    ([ ("type", `String "verification_stalled")
+     ; ("task_id", `String task_id)
+     ; ("verification_id", `String verification_id)
+     ]
+     @ completion_authority_fields authority
+     @ [ ("gate", `String gate)
+       ; ("detail", `String detail)
+       ; ("timestamp", `Float (Time_compat.now ()))
+       ])
+
+let notify_stalled_verification
+      ~(authority : Masc_domain.completion_authority)
+      ~task_id
+      ~verification_id
+      ~gate
+      ~detail
+  =
+  match
+    Board_dispatch.create_post
+      ~author:(Masc_domain.completion_authority_actor authority)
+      ~content:(stalled_board_content ~task_id ~verification_id ~gate ~detail)
+      ~post_kind:Board.System_post
+      ~meta_json:
+        (stalled_metadata ~authority ~task_id ~verification_id ~gate ~detail)
+      ~visibility:Board.Internal
+      ~hearth:"verification"
+      ()
+  with
+  | Ok _ -> ()
+  | Error e ->
+    Log.Task.error
+      ~keeper_name:task_id
+      "stalled-review board post failed (task=%s vrf=%s): %s"
+      task_id verification_id (Board_types.show_board_error e)
+
 module For_testing = struct
   let verdict_event_json = verdict_event_json
+  let stalled_board_content = stalled_board_content
+
+  let stalled_metadata ~authority ~task_id ~verification_id ~gate ~detail =
+    stalled_metadata ~authority ~task_id ~verification_id ~gate ~detail
 end

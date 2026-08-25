@@ -1,14 +1,13 @@
 /* ══════════════════════════════════════════════════════════════
-   MASC v2 — Prompt library · Paper catalog surface.
-   Read-only catalog of the registered prompts grouped by family. Scoped to
-   .pb-wrap[data-theme="paper"] so the warm paper palette applies ONLY inside
-   the catalog, never the dark chrome. Paper/ink/brass tokens come from
-   colors_and_type.css ([data-theme="paper"]). font-size uses --fs-N tokens
-   where one exists; sizes with no matching token (26 and .5px) stay raw.
+   MASC v2 — 注入書 (Injection Book) · Paper manuscript surface.
+   Scoped to .pb-wrap[data-theme="paper"] so the warm paper palette +
+   Garamond/Cinzel apply ONLY inside the book, never the dark chrome.
+   Reuses the real paper/ink tokens from colors_and_type.css.
    ══════════════════════════════════════════════════════════════ */
 
 .pb-wrap {
   display: flex; flex-direction: column; min-height: 0; gap: 14px;
+  /* the paper tokens are declared by [data-theme="paper"] on this node */
   background:
     radial-gradient(120% 80% at 50% -10%, #FBF8F0 0%, transparent 60%),
     var(--paper-2);
@@ -19,7 +18,43 @@
   box-shadow: inset 0 1px 0 #FFFDF7, 0 1px 2px rgba(0,0,0,0.05);
 }
 
-/* ── the paper sheet ── */
+/* ── keeper filmstrip ── */
+.pb-film { display: flex; align-items: center; gap: 8px; }
+.pb-flip {
+  flex: none; width: 34px; height: 34px; border-radius: 50%;
+  border: 1px solid var(--paper-4); background: var(--paper);
+  color: var(--ink-3); font-size: 15px; cursor: pointer; line-height: 1;
+  transition: border-color .18s ease, color .18s ease, background .18s ease;
+}
+.pb-flip:hover { border-color: var(--brass); color: var(--brass); }
+.pb-film-track {
+  flex: 1; display: flex; gap: 8px; overflow-x: auto; padding: 2px;
+  scrollbar-width: none; justify-content: center;
+}
+.pb-film-track::-webkit-scrollbar { display: none; }
+.pb-film-chip {
+  flex: none; display: flex; align-items: center; gap: 7px;
+  padding: 6px 11px 6px 7px; border-radius: 999px;
+  border: 1px solid var(--paper-4); background: var(--paper);
+  color: var(--ink-3); cursor: pointer; opacity: 0.7;
+  transition: all .18s ease;
+}
+.pb-film-chip:hover { opacity: 1; border-color: var(--ink-5); }
+.pb-film-chip.on {
+  opacity: 1; border-color: color-mix(in oklab, var(--kc) 60%, var(--ink-5));
+  background: color-mix(in oklab, var(--kc) 12%, var(--paper));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--kc) 30%, transparent);
+}
+.pb-film-sigil {
+  flex: none; width: 22px; height: 22px; display: grid; place-items: center;
+  border-radius: 5px; font-size: var(--fs-9); font-weight: 600; letter-spacing: .04em;
+  background: color-mix(in oklab, var(--kc) 22%, var(--paper));
+  color: color-mix(in oklab, var(--kc) 55%, var(--ink)); border: 1px solid color-mix(in oklab, var(--kc) 35%, transparent);
+}
+.pb-film-name { font-family: var(--font-ui); font-size: var(--fs-12); }
+.pb-film-chip.on .pb-film-name { color: var(--ink); font-weight: 500; }
+
+/* ── the book ── */
 .pb-book {
   flex: 1; min-height: 0; overflow-y: auto;
   background:
@@ -33,12 +68,97 @@
 .pb-book::-webkit-scrollbar { width: 10px; }
 .pb-book::-webkit-scrollbar-thumb { background: var(--paper-4); border-radius: 6px; border: 2px solid var(--paper); background-clip: padding-box; }
 
+/* frontispiece */
+.pb-frontis { display: flex; gap: 18px; align-items: flex-start; padding-bottom: 20px; margin-bottom: 8px; border-bottom: 1px solid var(--paper-3); }
+.pb-frontis-mark {
+  flex: none; font-size: 30px; font-weight: 700; letter-spacing: .04em;
+  width: 60px; height: 60px; display: grid; place-items: center;
+  border: 1.5px solid currentColor; border-radius: 6px; opacity: 0.85;
+}
+.pb-frontis-t h1 { font-family: var(--font-display); font-size: 30px; letter-spacing: .18em; color: var(--ink); margin: 0 0 6px; font-weight: 500; }
 .pb-frontis-sub { font-family: var(--font-body); font-size: 15px; font-style: italic; color: var(--ink-3); margin-bottom: 6px; }
+.pb-frontis-meta { font-size: var(--fs-11); color: var(--ink-4); letter-spacing: .04em; }
 
-/* ── source chips ── */
+/* composition gauge */
+.pb-comp { margin: 4px 0 22px; }
+.pb-comp-bar { display: flex; height: 8px; border-radius: 2px; overflow: hidden; border: 1px solid var(--paper-4); background: var(--paper-2); }
+.pb-comp-seg { height: 100%; transition: width .35s cubic-bezier(.4,0,.2,1); }
+.pb-comp-seg + .pb-comp-seg { border-left: 1px solid rgba(245,242,234,0.5); }
+.pb-comp-total { margin-top: 6px; font-size: 10.5px; color: var(--ink-4); letter-spacing: .04em; }
+.pb-envelope { margin: -4px 0 2px; font-size: 11.5px; line-height: 1.6; color: var(--ink-4); text-wrap: pretty; }
+.pb-envelope b { font-weight: 500; color: var(--ink); }
+
+/* chapters */
+.pb-chapters { display: flex; flex-direction: column; }
+.pb-ch { border-bottom: 1px solid var(--paper-3); padding: 16px 0; }
+.pb-ch:last-child { border-bottom: 0; }
+.pb-ch-head {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  background: none; border: 0; cursor: pointer; text-align: left; padding: 0;
+}
+.pb-ch-num { flex: none; font-size: var(--fs-12); color: var(--ink-5); width: 22px; font-variant-numeric: tabular-nums; }
+.pb-ch-swatch { flex: none; width: 9px; height: 9px; border-radius: 2px; }
+.pb-ch-title { font-family: var(--font-display); font-size: 15px; letter-spacing: .06em; color: var(--ink); font-weight: 500; }
+.pb-ch-cond { flex: none; font-family: var(--font-ui); font-size: var(--fs-9); letter-spacing: .08em; text-transform: uppercase; color: var(--ember, #B35A1F); border: 1px solid color-mix(in oklab, var(--ember, #B35A1F) 40%, transparent); border-radius: 3px; padding: 1px 5px; }
+.pb-ch-src { margin-left: auto; font-size: 10.5px; color: var(--ink-5); }
+.pb-ch-rev { flex: none; font-size: var(--fs-10); color: var(--ink-5); border: 1px solid color-mix(in oklab, var(--ink-5) 30%, transparent); border-radius: 2px; padding: 0 4px; }
+.pb-ch-bytes { flex: none; font-size: 10.5px; color: var(--ink-4); min-width: 44px; text-align: right; }
+.pb-ch-caret { flex: none; font-size: var(--fs-10); color: var(--ink-5); width: 12px; }
+.pb-ch-gloss { font-family: var(--font-body); font-style: italic; font-size: 13.5px; color: var(--ink-3); margin: 8px 0 0 32px; line-height: 1.5; text-wrap: pretty; }
+
+/* expanded chapter body — the actual manuscript prose */
+.pb-ch-body {
+  margin: 14px 0 4px 32px; padding: 16px 20px;
+  background: var(--paper-2); border: 1px solid var(--paper-4);
+  border-left: 2px solid var(--paper-4); border-radius: 3px;
+  font-family: var(--font-body); font-size: 14.5px; line-height: 1.7; color: var(--ink-2);
+}
+.pb-ch.open .pb-ch-body { border-left-color: var(--brass); }
+.pb-line { text-wrap: pretty; }
+.pb-br { height: 10px; }
+.pb-h2 { font-family: var(--font-display); font-size: var(--fs-13); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin: 12px 0 4px; }
+.pb-h3 { font-family: var(--font-ui); font-size: var(--fs-12); font-weight: 600; color: var(--ink-3); margin: 8px 0 2px; }
+.pb-code { font-family: var(--font-mono); font-size: 12.5px; background: var(--paper-3); color: #6B4E1E; padding: 1px 5px; border-radius: 3px; }
+.pb-name { font-style: italic; color: var(--ink); font-weight: 500; }
+
+/* the fill-in-the-blank chips — the heart of the metaphor */
+.pb-blank {
+  font-family: var(--font-ui); font-size: 12.5px; font-weight: 500;
+  padding: 1px 7px; border-radius: 3px; white-space: nowrap;
+  background: color-mix(in oklab, var(--brass) 16%, var(--paper));
+  color: #6B4E1E; border: 1px solid color-mix(in oklab, var(--brass) 42%, transparent);
+  box-shadow: inset 0 -1px 0 color-mix(in oklab, var(--brass) 25%, transparent);
+}
+.pb-blank.empty {
+  font-family: var(--font-mono); font-size: 11.5px; font-style: normal;
+  background: repeating-linear-gradient(-45deg, var(--paper-3) 0 5px, var(--paper-2) 5px 10px);
+  color: var(--ink-5); border-color: var(--paper-4); box-shadow: none;
+}
+.pb-blank.empty::before { content: '{{'; opacity: 0.5; }
+.pb-blank.empty::after { content: '}}'; opacity: 0.5; }
+
+/* template_variables footer per chapter */
+.pb-ch-vars { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 10px 0 0 32px; }
+.pb-ch-vars-k { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--ink-5); letter-spacing: .04em; }
+.pb-var-chip { font-size: 10.5px; padding: 1px 6px; border-radius: 3px; background: color-mix(in oklab, var(--brass) 12%, var(--paper)); color: #6B4E1E; border: 1px solid color-mix(in oklab, var(--brass) 30%, transparent); }
+.pb-var-chip.empty { background: var(--paper-2); color: var(--ink-5); border-color: var(--paper-4); }
+
+/* colophon */
+.pb-colophon { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--paper-3); font-family: var(--font-ui); font-size: var(--fs-11); color: var(--ink-4); }
+.pb-colophon-note { color: var(--ink-5); }
+
+/* ── view toggle bar (assembled book vs full library) ── */
+.pb-viewbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.pb-seg { display: flex; flex-wrap: wrap; gap: 2px; padding: 2px; border: 1px solid var(--paper-4); border-radius: 5px; background: var(--paper-2); }
+.pb-seg-btn { font-family: var(--font-ui); font-size: var(--fs-12); padding: 5px 12px; border: 0; border-radius: 3px; background: none; color: var(--ink-3); cursor: pointer; transition: all .16s ease; white-space: nowrap; }
+.pb-seg-btn:hover { color: var(--ink); }
+.pb-seg-btn.on { background: color-mix(in oklab, var(--brass) 18%, var(--paper)); color: #6B4E1E; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--brass) 34%, transparent); }
+.pb-viewbar-note { font-family: var(--font-body); font-style: italic; font-size: 12.5px; color: var(--ink-4); }
+
+/* ── composed-from / source chips ── */
 .pb-src-chip { font-family: var(--font-mono); font-size: 10.5px; padding: 1px 6px; border-radius: 3px; background: var(--paper-2); color: var(--ink-3); border: 1px solid var(--paper-4); }
 
-/* ── catalog ── */
+/* ── catalog view ── */
 .pb-catalog { padding-top: 26px; }
 .pb-cat-intro { padding-bottom: 18px; margin-bottom: 14px; border-bottom: 1px solid var(--paper-3); }
 .pb-cat-intro h1 { font-family: var(--font-display); font-size: 26px; letter-spacing: .16em; color: var(--ink); margin: 0 0 6px; font-weight: 500; }
@@ -55,11 +175,106 @@
 .pb-cat-files { display: flex; flex-wrap: wrap; gap: 6px; margin-left: 17px; }
 .pb-cat-fam:not(.feeds) .pb-src-chip { opacity: 0.72; }
 
-/* ── host: break the catalog out of the settings column + give it height ── */
+/* ── Full Text view: one continuous assembled document ── */
+.pb-full-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding-bottom: 14px; margin-bottom: 16px; border-bottom: 1px solid var(--paper-3); }
+.pb-full-head-t h1 { font-family: var(--font-display); font-size: 24px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink); margin: 0 0 6px; font-weight: 500; }
+.pb-full-head-meta { font-size: var(--fs-11); color: var(--ink-4); letter-spacing: .03em; }
+.pb-copy-btn {
+  flex: none; font-family: var(--font-ui); font-size: 11.5px; letter-spacing: .04em;
+  padding: 6px 14px; border: 1px solid var(--paper-4); border-radius: 4px;
+  background: var(--paper-2); color: var(--ink-2); cursor: pointer; transition: all .16s ease;
+}
+.pb-copy-btn:hover { border-color: color-mix(in oklab, var(--brass) 55%, var(--paper-4)); color: #6B4E1E; }
+.pb-copy-btn.done { border-color: color-mix(in oklab, var(--brass) 60%, transparent); color: #6B4E1E; background: color-mix(in oklab, var(--brass) 14%, var(--paper)); }
+.pb-full-doc {
+  margin: 0; padding: 0;
+  font-family: var(--font-body); font-size: 13.5px; line-height: 1.68; color: var(--ink-2);
+  white-space: pre-wrap; word-break: break-word; text-wrap: pretty;
+}
+.pb-doc-marker {
+  display: block; margin: 22px 0 6px; padding-left: 8px;
+  border-left: 3px solid var(--mk, var(--paper-4));
+  font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ink-5); font-weight: 500;
+}
+.pb-full-doc > :first-child .pb-doc-marker,
+.pb-doc-marker:first-child { margin-top: 0; }
+
+.pb-full-flow { display: flex; flex-direction: column; gap: 0; margin-top: 6px; }
+.pb-seg-row { border-top: 1px solid var(--paper-3); padding: 14px 0; }
+.pb-seg-row:first-child { border-top: 0; }
+.pb-seg-gutter { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.pb-seg-ord { font-size: var(--fs-11); color: var(--ink-5); font-variant-numeric: tabular-nums; }
+.pb-seg-swatch { flex: none; width: 8px; height: 8px; border-radius: 2px; }
+.pb-seg-lbl { font-family: var(--font-display); font-size: 12.5px; letter-spacing: .06em; color: var(--ink); font-weight: 500; }
+.pb-seg-file { font-size: 10.5px; color: var(--ink-5); }
+.pb-seg-cond { font-family: var(--font-ui); font-size: var(--fs-9); letter-spacing: .08em; text-transform: uppercase; color: var(--ember, #B35A1F); border: 1px solid color-mix(in oklab, var(--ember, #B35A1F) 40%, transparent); border-radius: 3px; padding: 0 5px; }
+.pb-seg-text {
+  margin: 0; padding: 0 0 0 20px; border-left: 2px solid var(--paper-4);
+  font-family: var(--font-body); font-size: 13.5px; line-height: 1.62; color: var(--ink-2);
+  white-space: pre-wrap; word-break: break-word; text-wrap: pretty;
+}
+
+/* ── 치환 지도 (substitution map) view ── */
+.pb-map { padding-top: 30px; }
+.pb-map-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 4px 0 20px; padding-bottom: 14px; border-bottom: 1px solid var(--paper-3); }
+.pb-map-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.pb-map-legend-swatch { flex: none; width: 9px; height: 9px; border-radius: 2px; }
+.pb-map-legend-lbl { font-family: var(--font-ui); font-size: 11.5px; color: var(--ink-2); }
+.pb-map-legend-src { font-size: var(--fs-10); color: var(--ink-5); }
+
+.pb-map-grp { margin-bottom: 20px; }
+.pb-map-grp:last-of-type { margin-bottom: 8px; }
+.pb-map-grp-head { display: flex; align-items: center; gap: 8px; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--paper-3); }
+.pb-map-grp-swatch { flex: none; width: 8px; height: 8px; border-radius: 2px; }
+.pb-map-grp-lbl { font-family: var(--font-display); font-size: var(--fs-13); letter-spacing: .08em; text-transform: uppercase; color: var(--ink); font-weight: 500; }
+.pb-map-grp-src { font-size: 10.5px; color: var(--ink-5); }
+.pb-map-grp-count { margin-left: auto; font-size: 10.5px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+
+.pb-map-row {
+  display: grid; grid-template-columns: minmax(180px, 260px) 14px 1fr; align-items: start; gap: 10px;
+  padding: 10px 0 10px 12px; border-left: 2px solid var(--src, var(--paper-4));
+  border-bottom: 1px solid var(--paper-3);
+}
+.pb-map-row:last-child { border-bottom: 0; }
+.pb-map-row.empty { border-left-color: var(--paper-4); opacity: 0.82; }
+.pb-map-var { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.pb-map-var-name { font-size: var(--fs-12); color: #6B4E1E; font-weight: 500; word-break: break-word; }
+.pb-map-row.empty .pb-map-var-name { color: var(--ink-5); }
+.pb-map-used { display: flex; flex-wrap: wrap; gap: 4px; }
+.pb-map-used-chip {
+  font-family: var(--font-ui); font-size: 9.5px; letter-spacing: .02em; padding: 1px 6px; border-radius: 3px;
+  color: color-mix(in oklab, var(--bc) 60%, var(--ink)); background: color-mix(in oklab, var(--bc) 12%, var(--paper));
+  border: 1px solid color-mix(in oklab, var(--bc) 34%, transparent); white-space: nowrap;
+}
+.pb-map-used-none { font-family: var(--font-ui); font-size: 9.5px; color: var(--ink-5); font-style: italic; }
+.pb-map-arrow { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--ink-5); padding-top: 1px; }
+.pb-map-val {
+  font-size: 12.5px; line-height: 1.55; color: var(--ink-2); min-width: 0;
+  background: var(--paper-2); border: 1px solid var(--paper-4); border-radius: 3px;
+  padding: 6px 10px; white-space: pre-wrap; word-break: break-word; text-wrap: pretty;
+}
+.pb-map-val.empty {
+  font-family: var(--font-mono); font-size: var(--fs-11); font-style: normal; color: var(--ink-5);
+  background: repeating-linear-gradient(-45deg, var(--paper-3) 0 5px, var(--paper-2) 5px 10px);
+  border-color: var(--paper-4);
+}
+
+@media (max-width: 760px) {
+  .pb-map-row { grid-template-columns: 1fr; }
+  .pb-map-arrow { display: none; }
+}
+
+/* ── host: break the book out of the 760px settings column + give it height ── */
+.settings-surf .set-card-b:has(.set-promptbook-host) { max-width: 1120px; padding-bottom: 20px; }
 .set-promptbook-host { display: flex; flex-direction: column; min-height: 0; height: calc(100vh - 210px); min-height: 460px; }
 .set-promptbook-host .pb-wrap { flex: 1; min-height: 0; }
 
 /* narrow */
 @media (max-width: 760px) {
   .pb-book { padding: 24px 18px 22px 26px; background-position: 20px 0; }
+  .pb-ch-src { display: none; }
+  .pb-ch-rev { display: none; }
+  .pb-frontis-mark { width: 48px; height: 48px; font-size: 22px; }
+  .pb-frontis-t h1 { font-size: 24px; }
 }

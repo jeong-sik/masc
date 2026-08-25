@@ -133,7 +133,7 @@ type trace_step =
       text : string;
       content_withheld : bool;
       ts : string option;
-      oas_block_index : int option;
+      agent_core_block_index : int option;
     }
       (** [content_withheld = true] states that the step happened and its
           content is not carried on this surface — the public autonomous
@@ -160,10 +160,21 @@ type trace_step =
       args : Yojson.Safe.t option;
       result : Yojson.Safe.t option;
       ts : string option;
-      oas_block_index : int option;
+      agent_core_block_index : int option;
     }
 
-type trace_block = { trace : trace_step list }
+type trace_block =
+  { trace : trace_step list
+  ; omitted : int
+      (** Steps this surface did not carry, 0 when the trace is whole. A
+          truncated [trace] with no count reads as a shorter turn, which is a
+          different fact from a turn whose trace was abridged for transport.
+
+          The chat transcript sets it: a trace block is one turn's steps, and
+          one runaway turn on the author's host held 16,882 of the 22,296 steps
+          in a keeper's whole transcript (1.65 MB of 2.29 MB) while the median
+          block held 17. The turn's steps stay available in full from the
+          raw-trace surface. *) }
 
 (** A block of keeper/assistant reasoning persisted so the dashboard can
     replay assistant thinking on reload (RFC-0302). [content] is the
@@ -203,7 +214,6 @@ type chat_block =
 type dropped_http_url_reason =
   | Missing_scheme
   | Unsupported_scheme of string
-  | Invalid_url
 
 val dropped_http_url_reason_to_string : dropped_http_url_reason -> string
 

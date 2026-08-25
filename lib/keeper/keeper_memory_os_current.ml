@@ -12,7 +12,6 @@ type source_kind =
 type source =
   { kind : source_kind
   ; trace_id : string
-  ; generation : int
   }
 
 type change =
@@ -28,6 +27,34 @@ type t =
   ; facts : fact list
   ; change : change
   }
+
+type librarian_failure_kind =
+  | Prompt_render_failure
+  | Execution_clock_unavailable
+  | Exact_setup_failure
+  | Exact_execution_failure
+  | Domain_output_invalid
+  | Memory_snapshot_write_failure
+  | Runtime_context_unavailable
+  | Lane_cancelled
+  | Unhandled_exception
+
+type journal_entry =
+  | Journal_committed of
+      { recorded_at : float
+      ; revision : int
+      ; source : source
+      ; change : change
+      ; dropped : Keeper_memory_os_types.dropped_statement list option
+      }
+  | Journal_failed of
+      { recorded_at : float
+      ; trace_id : string
+      ; kind : librarian_failure_kind
+      ; detail : string
+      ; snapshot_present : bool
+      ; cadence_deferred : bool
+      }
 
 let path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ suffix)
@@ -79,23 +106,21 @@ let source_to_json source =
   `Assoc
     [ "kind", `String (source_kind_to_string source.kind)
     ; "trace_id", `String source.trace_id
-    ; "generation", `Int source.generation
     ]
 ;;
 
 let source_of_json = function
   | `Assoc fields
-    when exact_object_fields [ "kind"; "trace_id"; "generation" ] fields ->
+    when exact_object_fields [ "kind"; "trace_id" ] fields ->
     (match
        List.assoc_opt "kind" fields
        , List.assoc_opt "trace_id" fields
-       , List.assoc_opt "generation" fields
      with
-     | Some (`String kind), Some (`String trace_id), Some (`Int generation) ->
+     | Some (`String kind), Some (`String trace_id) ->
        (match source_kind_of_string kind with
         | Some kind
-          when not (String.equal (String.trim trace_id) "") && generation >= 0 ->
-          Some { kind; trace_id; generation }
+          when not (String.equal (String.trim trace_id) "") ->
+          Some { kind; trace_id }
         | Some _ | None -> None)
      | _ -> None)
   | _ -> None
@@ -294,6 +319,34 @@ let compute_change ~previous ~next =
     }
 ;;
 
+let librarian_failure_kind_to_string = function
+  | Prompt_render_failure -> "prompt_render_failure"
+  | Execution_clock_unavailable -> "execution_clock_unavailable"
+  | Exact_setup_failure -> "exact_setup_failure"
+  | Exact_execution_failure -> "exact_execution_failure"
+  | Domain_output_invalid -> "domain_output_invalid"
+  | Memory_snapshot_write_failure -> "memory_snapshot_write_failure"
+  | Runtime_context_unavailable -> "runtime_context_unavailable"
+  | Lane_cancelled -> "lane_cancelled"
+  | Unhandled_exception -> "unhandled_exception"
+;;
+
+let librarian_failure_kind_of_string = function
+  | "prompt_render_failure" -> Some Prompt_render_failure
+  | "execution_clock_unavailable" -> Some Execution_clock_unavailable
+  | "exact_setup_failure" -> Some Exact_setup_failure
+  | "exact_execution_failure" -> Some Exact_execution_failure
+  | "domain_output_invalid" -> Some Domain_output_invalid
+  | "memory_snapshot_write_failure" -> Some Memory_snapshot_write_failure
+  | "runtime_context_unavailable" -> Some Runtime_context_unavailable
+  | "lane_cancelled" -> Some Lane_cancelled
+  | "unhandled_exception" -> Some Unhandled_exception
+  | _ -> None
+;;
+
+let committed_outcome = "committed"
+let failed_outcome = "failed"
+
 (* [dropped_statements = None] means the writer makes no drop-reason
    statements (explicit keeper writes, upserts); [Some list] is the
    librarian's own account of every drop in this commit, possibly empty.
@@ -301,7 +354,8 @@ let compute_change ~previous ~next =
    frozen, so existing on-disk snapshots keep parsing unchanged. *)
 let journal_entry_to_json ~dropped_statements snapshot =
   `Assoc
-    ([ "recorded_at", `Float snapshot.updated_at
+    ([ "outcome", `String committed_outcome
+     ; "recorded_at", `Float snapshot.updated_at
      ; "revision", `Int snapshot.revision
      ; "source", source_to_json snapshot.source
      ; "change", change_to_json snapshot.change
@@ -315,16 +369,31 @@ let journal_entry_to_json ~dropped_statements snapshot =
        ])
 ;;
 
+let journal_failure_to_json
+      ~now
+      ~trace_id
+      ~kind
+      ~detail
+      ~snapshot_present
+      ~cadence_deferred
+  =
+  `Assoc
+    [ "outcome", `String failed_outcome
+    ; "recorded_at", `Float now
+    ; "trace_id", `String trace_id
+    ; "kind", `String (librarian_failure_kind_to_string kind)
+    ; "detail", `String detail
+    ; "snapshot_present", `Bool snapshot_present
+    ; "cadence_deferred", `Bool cadence_deferred
+    ]
+;;
+
 (* The journal is observation only: the snapshot commit it describes already
    reached disk, so an append failure degrades to a warning instead of
    vetoing the commit. Cancellation is never absorbed. *)
-let append_journal_entry ~keepers_dir ~keeper_id ~dropped_statements snapshot =
+let append_journal_line ~keepers_dir ~keeper_id json =
   let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-  try
-    Fs_compat.append_jsonl
-      path
-      (journal_entry_to_json ~dropped_statements snapshot)
-  with
+  try Fs_compat.append_jsonl path json with
   | Eio.Cancel.Cancelled _ as error -> raise error
   | exn ->
     Log.Keeper.warn
@@ -333,7 +402,136 @@ let append_journal_entry ~keepers_dir ~keeper_id ~dropped_statements snapshot =
       (Printexc.to_string exn)
 ;;
 
-let lock_path snapshot_path = snapshot_path ^ ".lock"
+let append_journal_entry ~keepers_dir ~keeper_id ~dropped_statements snapshot =
+  append_journal_line
+    ~keepers_dir
+    ~keeper_id
+    (journal_entry_to_json ~dropped_statements snapshot)
+;;
+
+let append_librarian_failure
+      ~keepers_dir
+      ~keeper_id
+      ~now
+      ~trace_id
+      ~kind
+      ~detail
+      ~snapshot_present
+      ~cadence_deferred
+  =
+  append_journal_line
+    ~keepers_dir
+    ~keeper_id
+    (journal_failure_to_json
+       ~now
+       ~trace_id
+       ~kind
+       ~detail
+       ~snapshot_present
+       ~cadence_deferred)
+;;
+
+let committed_entry_of_fields fields =
+  let dropped_of_json = function
+    | `List items ->
+      List.fold_left
+        (fun acc item ->
+           match acc, Keeper_memory_os_types.dropped_statement_of_json item with
+           | Some acc, Some statement -> Some (statement :: acc)
+           | _, _ -> None)
+        (Some [])
+        items
+      |> Option.map List.rev
+    | _ -> None
+  in
+  match
+    ( List.assoc_opt "recorded_at" fields
+    , List.assoc_opt "revision" fields
+    , List.assoc_opt "source" fields
+    , List.assoc_opt "change" fields )
+  with
+  | Some (`Float recorded_at), Some (`Int revision), Some source, Some change ->
+    (match source_of_json source, change_of_json change with
+     | Some source, Some change when revision >= 0 ->
+       (match List.assoc_opt "dropped" fields with
+        | None -> Ok (Journal_committed { recorded_at; revision; source; change; dropped = None })
+        | Some dropped ->
+          (match dropped_of_json dropped with
+           | Some statements ->
+             Ok
+               (Journal_committed
+                  { recorded_at; revision; source; change; dropped = Some statements })
+           | None -> Error "committed line has an undecodable dropped list"))
+     | _, _ -> Error "committed line has an undecodable source or change")
+  | _ -> Error "committed line is missing recorded_at/revision/source/change"
+;;
+
+let failed_entry_of_fields fields =
+  match
+    ( List.assoc_opt "recorded_at" fields
+    , List.assoc_opt "trace_id" fields
+    , List.assoc_opt "kind" fields
+    , List.assoc_opt "detail" fields
+    , List.assoc_opt "snapshot_present" fields
+    , List.assoc_opt "cadence_deferred" fields )
+  with
+  | ( Some (`Float recorded_at)
+    , Some (`String trace_id)
+    , Some (`String kind)
+    , Some (`String detail)
+    , Some (`Bool snapshot_present)
+    , Some (`Bool cadence_deferred) ) ->
+    (match librarian_failure_kind_of_string kind with
+     | Some kind ->
+       Ok
+         (Journal_failed
+            { recorded_at; trace_id; kind; detail; snapshot_present; cadence_deferred })
+     | None -> Error (Printf.sprintf "failed line has an unknown kind %S" kind))
+  | _ ->
+    Error
+      "failed line is missing recorded_at/trace_id/kind/detail/snapshot_present/cadence_deferred"
+;;
+
+(* Lines written before the [outcome] tag existed decode to [Error]. Guessing
+   that an untagged line is a commit would let the pre-tag shape keep flowing
+   through a reader that believes every line is self-describing, and no
+   migration code is written for retired shapes. *)
+let journal_entry_of_json = function
+  | `Assoc fields ->
+    (match List.assoc_opt "outcome" fields with
+     | Some (`String outcome) when String.equal outcome committed_outcome ->
+       committed_entry_of_fields fields
+     | Some (`String outcome) when String.equal outcome failed_outcome ->
+       failed_entry_of_fields fields
+     | Some (`String outcome) ->
+       Error (Printf.sprintf "journal line has an unknown outcome %S" outcome)
+     | Some _ -> Error "journal line has a non-string outcome"
+     | None -> Error "journal line has no outcome tag")
+  | _ -> Error "journal line is not a JSON object"
+;;
+
+let read_journal_tail ~keepers_dir ~keeper_id ~limit =
+  if limit <= 0
+  then []
+  else (
+    let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+    match Fs_compat.load_file_opt path with
+    | None -> []
+    | Some contents ->
+      let lines =
+        String.split_on_char '\n' contents
+        |> List.filter (fun line -> not (String.equal (String.trim line) ""))
+      in
+      let total = List.length lines in
+      let skip = if total > limit then total - limit else 0 in
+      lines
+      |> List.filteri (fun index _ -> index >= skip)
+      |> List.map (fun line ->
+        match Yojson.Safe.from_string line with
+        | json -> journal_entry_of_json json
+        | exception Yojson.Json_error message ->
+          Error (Printf.sprintf "journal line is not valid JSON: %s" message)))
+;;
 
 let update_locked
       ?clock
@@ -344,7 +542,9 @@ let update_locked
   =
   Fs_compat.mkdir_p keepers_dir;
   let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-  File_lock_eio.with_lock ?clock (lock_path snapshot_path) (fun () ->
+  (* File_lock_eio.with_lock appends ".lock" itself; a pre-suffixed path
+     locked "<snapshot>.lock.lock" and left a stray file per keeper. *)
+  File_lock_eio.with_lock ?clock snapshot_path (fun () ->
     let* previous =
       match Fs_compat.load_file_opt snapshot_path with
       | None -> Ok None
@@ -458,6 +658,46 @@ let upsert_fact
         current_facts
     in
     let facts = if !found then facts else facts @ [ incoming ] in
+    (* When the rendered payload exceeds the byte budget, evict the oldest
+       facts (by [first_seen]) other than the incoming one until it fits, so an
+       explicit write never deadlocks a full memory. A single incoming fact
+       larger than the whole budget still fails closed below. *)
+    let facts =
+      match
+        Keeper_memory_os_budget.measure ~max_bytes:max_fact_bytes facts
+      with
+      | Fits _ -> facts
+      | Exceeds _ ->
+        let incoming_id = memory_id incoming in
+        let others, incoming_fact =
+          List.partition
+            (fun f -> not (String.equal (memory_id f) incoming_id))
+            facts
+        in
+        let others =
+          List.sort
+            (fun a b -> Float.compare a.first_seen b.first_seen)
+            others
+        in
+        let rec evict_oldest remaining =
+          match remaining with
+          | [] -> remaining
+          | _ :: rest ->
+            (match
+               Keeper_memory_os_budget.measure
+                 ~max_bytes:max_fact_bytes
+                 (incoming_fact @ remaining)
+             with
+             | Fits _ -> remaining
+             | Exceeds _ -> evict_oldest rest)
+        in
+        let evicted = evict_oldest others in
+        Log.Keeper.warn
+          "memory os upsert evicted %d fact(s) to fit byte budget keeper=%s"
+          (List.length others - List.length evicted)
+          keeper_id;
+        incoming_fact @ evicted
+    in
     make_snapshot
       ~max_fact_bytes
       ~previous
@@ -465,4 +705,46 @@ let upsert_fact
       ~source
       ~facts
       ())
+;;
+
+(* Read-side projection. The write-side [journal_entry_to_json] above encodes a
+   committed snapshot for the append; this projects a line that was read back,
+   including the shapes that only exist on the failure path. Reusing the
+   existing field encoders keeps one owner for source/change on the wire. *)
+let decoded_journal_entry_to_json = function
+  | Journal_committed { recorded_at; revision; source; change; dropped } ->
+    `Assoc
+      ([ "outcome", `String committed_outcome
+       ; "recorded_at", `Float recorded_at
+       ; "revision", `Int revision
+       ; "source", source_to_json source
+       ; "change", change_to_json change
+       ]
+       @
+       match dropped with
+       | None -> []
+       | Some statements ->
+         [ "dropped", `List (List.map dropped_statement_to_json statements) ])
+  | Journal_failed
+      { recorded_at; trace_id; kind; detail; snapshot_present; cadence_deferred } ->
+    `Assoc
+      [ "outcome", `String failed_outcome
+      ; "recorded_at", `Float recorded_at
+      ; "trace_id", `String trace_id
+      ; "kind", `String (librarian_failure_kind_to_string kind)
+      ; "detail", `String detail
+      ; "snapshot_present", `Bool snapshot_present
+      ; "cadence_deferred", `Bool cadence_deferred
+      ]
+;;
+
+(* A line this build could not decode keeps its position and says why. Dropping
+   it would make a journal with a torn line read as a shorter one, and the
+   operator counting passes is the one who would be misled. *)
+let journal_line_to_json = function
+  | Ok entry ->
+    (match decoded_journal_entry_to_json entry with
+     | `Assoc fields -> `Assoc (("ok", `Bool true) :: fields)
+     | json -> json)
+  | Error reason -> `Assoc [ "ok", `Bool false; "error", `String reason ]
 ;;

@@ -14,6 +14,11 @@ module type Config = sig
   val binding_store_path_env_names : string list
   val binding_audit_path_env_names : string list
   val stale_after_env_name : string
+  val guild_id_field : Channel_gate_binding_store.guild_id_field
+  val default_poll_interval_sec : float
+
+  val extra_status_fields :
+    Yojson.Safe.t option -> (string * Yojson.Safe.t) list
 end
 
 module Make (Config : Config) = struct
@@ -29,18 +34,15 @@ module Make (Config : Config) = struct
   let stale_after_sec () =
     Env_config_core.get_int ~default:30 Config.stale_after_env_name
 
-  let resolve_path raw_path =
-    if Filename.is_relative raw_path then
-      Filename.concat (Env_config_core.base_path ()) raw_path
-    else
-      raw_path
-
+  (* [raw_value_opt] rather than [Sys.getenv_opt]: it falls back to the
+     boot-time config overrides, so a path declared in runtime.toml is seen
+     the way every other MASC setting is (#21972 P2-1). *)
   let configured_write_path env_names ~default =
     env_names
     |> List.find_map (fun name ->
-           Sys.getenv_opt name |> Env_config_core.trim_opt)
+           Env_config_core.raw_value_opt name |> Env_config_core.trim_opt)
     |> Option.value ~default
-    |> resolve_path
+    |> Env_config_core.resolve_against_base_path
 
   let status_path () =
     configured_write_path Config.status_path_env_names
@@ -61,7 +63,7 @@ module Make (Config : Config) = struct
   let binding_store =
     Store.create ~binding_store_path ~binding_store_read_path
       ~binding_audit_path ~binding_audit_read_path
-      ~guild_id_field:Store.Include_empty
+      ~guild_id_field:Config.guild_id_field
 
   let read_json_file_opt = Store.read_json_file_opt
   let read_bindings_result () = Store.read_bindings_result binding_store
@@ -74,9 +76,6 @@ module Make (Config : Config) = struct
   let int_member json key =
     Json_util.get_int json key |> Option.value ~default:0
 
-  let float_member json key =
-    Json_util.get_float json key |> Option.value ~default:0.0
-
   let bool_member json key =
     Json_util.get_bool json key |> Option.value ~default:false
 
@@ -86,12 +85,6 @@ module Make (Config : Config) = struct
     match Gate_time_util.parse_iso8601_opt updated_at with
     | Some ts -> Unix.gettimeofday () -. ts > float_of_int (stale_after_sec ())
     | None -> true
-
-  let connector_state_label ~available ~connected ~stale =
-    if not available then "offline"
-    else if stale then "stale"
-    else if connected then "connected"
-    else "disconnected"
 
   (* RFC-0223 P2: presence surface. Both recomputed per call — no
      cached presence state. *)
@@ -108,6 +101,12 @@ module Make (Config : Config) = struct
         let updated_at = string_member json "updated_at" in
         bool_member json "connected" && not (stale_of_updated_at updated_at)
 
+  (* Every numeric field below is a display projection of what the sidecar
+     last wrote, so an absent field reads as its zero rather than an error.
+     That is the shape this whole record already had; [poll_interval_sec] is
+     the one whose zero differs per connector, which is why it comes from the
+     config instead of being written in twice. Only [available], [stale] and
+     [connected] decide anything, and none of them defaults. *)
   let status_json ?(audit_limit = 10) () =
     let status_path = status_path () in
     let live_status = read_json_file_opt status_path in
@@ -144,13 +143,16 @@ module Make (Config : Config) = struct
       | None -> default
     in
     `Assoc
-      [
+      ([
         ("channel", `String channel);
         ("available", `Bool available);
         ("connected", `Bool connected);
         ("stale", `Bool stale);
         ("stale_after_sec", `Int (stale_after_sec ()));
-        ("status", `String (connector_state_label ~available ~connected ~stale));
+        ( "status",
+          `String
+            (Channel_gate_connector.connector_state_label ~available ~connected
+               ~stale) );
         ("error", `String error);
         ("status_path", `String status_path);
         ("binding_store_path", `String binding_store_path);
@@ -163,7 +165,13 @@ module Make (Config : Config) = struct
           `Int (status_field "messages_processed" int_member 0) );
         ("messages_failed", `Int (status_field "messages_failed" int_member 0));
         ( "poll_interval_sec",
-          `Float (status_field "poll_interval_sec" float_member 0.0) );
+          `Float
+            (status_field "poll_interval_sec"
+               (fun json key ->
+                 (* sound-partial: allow — relocated default, see below *)
+                 Json_util.get_float json key
+                 |> Option.value ~default:Config.default_poll_interval_sec)
+               Config.default_poll_interval_sec) );
         ("gate_base_url", `String (status_field "gate_base_url" string_member ""));
         ( "gate_healthy",
           Option.value ~default:`Null
@@ -183,83 +191,18 @@ module Make (Config : Config) = struct
         ("configured_bindings", `List (List.map binding_json configured_bindings));
         ("recent_audit", `List recent_audit);
       ]
+      @ Config.extra_status_fields live_status)
 
-  let list_assoc_field key = function
-    | `Assoc fields -> List.assoc_opt key fields
-    | _ -> None
-
-  let find_assoc_by_string_field ~field ~value = function
-    | `List rows ->
-        List.find_map
-          (function
-            | (`Assoc _ as row) -> (
-                match list_assoc_field field row with
-                | Some (`String candidate) when String.equal candidate value -> Some row
-                | _ -> None)
-            | _ -> None)
-          rows
-    | _ -> None
-
-  let connector_json ?gate_status_json ?(audit_limit = 10) () =
+  let connector_json ?(audit_limit = 10) () =
     let status = status_json ~audit_limit () in
-    let observed_channel =
-      match gate_status_json with
-      | None -> `Null
-      | Some json -> (
-          match list_assoc_field "channels" json with
-          | Some channels -> (
-              match find_assoc_by_string_field ~field:"channel" ~value:channel channels with
-              | Some row -> row
-              | None -> `Null)
-          | None -> `Null)
-    in
-    let storage_paths =
-      `Assoc
-        [
-          ("status_path", `String (string_member status "status_path"));
-          ( "binding_store_path",
-            `String (string_member status "binding_store_path") );
-          ("audit_path", `String (string_member status "audit_path"));
-          ("names_path", `String "");
-        ]
-    in
-    let runtime_summary =
-      `Assoc
-        [
-          ("available", `Bool (bool_member status "available"));
-          ("connected", `Bool (bool_member status "connected"));
-          ("stale", `Bool (bool_member status "stale"));
-          ("stale_after_sec", `Int (int_member status "stale_after_sec"));
-          ("status", `String (string_member status "status"));
-          ("error", `String (string_member status "error"));
-          ("updated_at", `String (string_member status "updated_at"));
-          ("last_message_at", `String (string_member status "last_message_at"));
-          ("gate_base_url", `String (string_member status "gate_base_url"));
-          ( "gate_healthy",
-            Option.value ~default:`Null
-              (Option.map (fun value -> `Bool value)
-                 (bool_option_member status "gate_healthy")) );
-          ( "gate_health_checked_at",
-            `String (string_member status "gate_health_checked_at") );
-          ("pid", `Int (int_member status "pid"));
-        ]
-    in
-    let configured_bindings =
-      match status |> U.member "configured_bindings" with
-      | `List rows -> rows
-      | _ -> []
-    in
-    let binding_summary =
-      `Assoc
-        [
-          ("binding_source", `String (string_member status "binding_source"));
-          ( "runtime_bindings_count",
-            `Int (int_member status "runtime_bindings_count") );
-          ("configured_bindings_count", `Int (List.length configured_bindings));
-        ]
+    (* [status] already carries the connector-specific fields; copy them by
+       the keys the config declares so the two views cannot drift. *)
+    let extra_fields =
+      Config.extra_status_fields None
+      |> List.map (fun (key, _default) -> (key, U.member key status))
     in
     `Assoc
-      [
+      ([
         ("connector_id", `String connector_id);
         ("display_name", `String display_name);
         ("channel", `String channel);
@@ -292,19 +235,8 @@ module Make (Config : Config) = struct
         ("pid", `Int (int_member status "pid"));
         ("configured_bindings", status |> U.member "configured_bindings");
         ("recent_audit", status |> U.member "recent_audit");
-        ("storage_paths", storage_paths);
-        ("runtime_summary", runtime_summary);
-        ("binding_summary", binding_summary);
-        ("observed_channel", observed_channel);
-        ( "names",
-          `Assoc
-            [
-              ("guild_names", `Assoc []);
-              ("channel_names", `Assoc []);
-              ("channel_to_guild", `Assoc []);
-              ("updated_at", `String "");
-            ] );
       ]
+      @ extra_fields)
 
   let bind ~channel_id ~keeper_name ~actor_name =
     let channel_id = String.trim channel_id in
@@ -337,7 +269,6 @@ module Make (Config : Config) = struct
         let event = Store.{
             timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
             action = "bind";
-            guild_id = None;
             channel_id;
             keeper_name;
             actor_id = actor_name;
@@ -370,7 +301,6 @@ module Make (Config : Config) = struct
           let event = Store.{
                 timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
                 action = "unbind";
-                guild_id = None;
                 channel_id;
                 keeper_name = previous.keeper_name;
                 actor_id = actor_name;

@@ -2,9 +2,8 @@
 rfc: "0221"
 title: "Atomic verification submission — task_status as the sole outcome authority"
 status: Implemented (steps 1-3 merged #20613/#20617; steps 4-5 measured then dropped, §3.3/§3.4)
-supersedes: "Withdrawn RFC-0220 startup-reconciler proposal"
-relates: "RFC-0220 (withdrawn cross-Keeper verification scheduling)"
-date: 2026-06-09
+supersedes: "split verification evidence and status writes"
+created: 2026-06-09
 ---
 
 # RFC-0221: Atomic verification submission
@@ -23,19 +22,11 @@ pre-write `let* ()` guard, and only if they return `Ok` does `write_backlog`
 commit the status (`workspace_task_transitions.ml:212-363` then `:444`).
 
 A partial failure — `write_backlog` raising, or a crash between the two writes —
-leaves the stores disagreeing. The withdrawn RFC-0220 called this the
-"illegal pair": a
-non-terminal record whose task is not `AwaitingVerification` (the empirical
-task-628 / task-629 case: `Pending` record, `Todo` task).
-
-The first implementation step made `task_status` the **scheduling** authority
-and deleted the cross-store join, so a record-without-status is now *inert* —
-ignored by scheduling, the task is a normal claimable `Todo`, and the fleet is
-not stuck. The withdrawn design proposed an **every-boot startup reconciler**
-to repair the pair.
-That is repair-on-read (CLAUDE.md "Repair / Sanitize on read" workaround
-signature): it makes the symptom non-fatal on each boot without removing the
-root — the two-write submission that can still drift.
+leaves the stores disagreeing. `task_status` is the scheduling authority, so a
+record without the matching status is inert: scheduling ignores it and keeps
+the task claimable. Submission must therefore make the outcome transition
+atomic at the task-status boundary instead of repairing divergent records on
+read.
 
 ## 2. The asymmetry that makes atomicity tractable
 

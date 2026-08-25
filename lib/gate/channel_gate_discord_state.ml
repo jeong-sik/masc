@@ -6,44 +6,45 @@ type binding = Store.binding = {
   keeper_name : string;
 }
 
-module Names = Channel_gate_discord_names
-
 let connector_id = "discord"
 let display_name = "Discord"
 let channel = "discord"
 
 
-let default_status_path = ".gate/runtime/discord/status.json"
 let default_binding_store_path = ".gate/runtime/discord/bindings.json"
 let default_binding_audit_path = ".gate/runtime/discord/binding_audit.jsonl"
 
-let stale_after_sec () =
-  Env_config_core.get_int ~default:30 "MASC_DISCORD_STATUS_STALE_SEC"
-
-let status_path () =
-  Names.configured_write_path "MASC_DISCORD_STATUS_PATH"
-    ~default:default_status_path
-
+(* [raw_value_opt] rather than [Sys.getenv_opt]: it falls back to the
+   boot-time config overrides, so a path declared in runtime.toml is seen the
+   way every other MASC setting is (#21972 P2-1). *)
+let configured_write_path env_name ~default =
+  match Env_config_core.raw_value_opt env_name |> Env_config_core.trim_opt with
+  | Some raw -> Env_config_core.resolve_against_base_path raw
+  | None -> Env_config_core.resolve_against_base_path default
 
 let binding_store_path () =
-  Names.configured_write_path "MASC_DISCORD_BINDING_STORE_PATH"
+  configured_write_path "MASC_DISCORD_BINDING_STORE_PATH"
     ~default:default_binding_store_path
 
 let binding_store_read_path () =
-  Names.configured_write_path "MASC_DISCORD_BINDING_STORE_PATH"
+  configured_write_path "MASC_DISCORD_BINDING_STORE_PATH"
     ~default:default_binding_store_path
 
 let binding_audit_path () =
-  Names.configured_write_path "MASC_DISCORD_BINDING_AUDIT_PATH"
+  configured_write_path "MASC_DISCORD_BINDING_AUDIT_PATH"
     ~default:default_binding_audit_path
 
 let binding_audit_read_path () =
-  Names.configured_write_path "MASC_DISCORD_BINDING_AUDIT_PATH"
+  configured_write_path "MASC_DISCORD_BINDING_AUDIT_PATH"
     ~default:default_binding_audit_path
 
+(* [Include_empty], not [Omit]: the audit wire shape carries a [guild_id]
+   key for Discord rows and the dashboard reads that shape. Nothing resolves
+   guild ids, so the constant-empty field is declared at the store level
+   instead of resolved per event. *)
 let binding_store =
   Store.create ~binding_store_path ~binding_store_read_path ~binding_audit_path
-    ~binding_audit_read_path ~guild_id_field:Store.Include_event_value
+    ~binding_audit_read_path ~guild_id_field:Store.Include_empty
 
 let read_bindings_result () = Store.read_bindings_result binding_store
 let binding_json = Store.binding_json
@@ -137,12 +138,7 @@ let bool_member json key =
 let bool_option_member json key =
   Json_util.get_bool json key
 
-let bot_token_opt () =
-  match Sys.getenv_opt "DISCORD_BOT_TOKEN" with
-  | None -> None
-  | Some raw ->
-    let trimmed = String.trim raw in
-    if String.equal trimmed "" then None else Some trimmed
+let bot_token_opt () = Env_config_discord.bot_token_opt ()
 
 let gateway_state_label = function
   | Discord_gateway_state.Disconnected -> "disconnected"
@@ -153,13 +149,9 @@ let gateway_state_label = function
   | Reconnect_pending _ -> "reconnect_pending"
   | Failed _ -> "failed"
 
-(* Bot identity captured from the gateway's READY dispatch. The legacy
-   sidecar wrote this to status.json; the in-process gateway (RFC-0203)
-   keeps it in memory — nothing writes that file anymore. *)
-type ready_info = {
-  ready_bot_user_id : string;
-  ready_at : string;
-}
+(* Bot identity captured from the gateway's READY dispatch; the in-process
+   gateway (RFC-0203) keeps it in memory. *)
+type ready_info = Channel_gate_connector.ready_info
 
 let last_ready : ready_info option Atomic.t = Atomic.make None
 
@@ -174,11 +166,8 @@ let record_ready ~bot_user_id =
        })
 
 let status_json ?(audit_limit = 10) () =
-  let status_path = status_path () in
   let binding_store_path = binding_store_read_path () in
   let audit_path = binding_audit_read_path () in
-  let names_path = Names.names_read_path () in
-  let name_map = Names.read () in
   let configured_bindings_result = read_bindings_lookup_result () in
   let configured_bindings = Result.value ~default:[] configured_bindings_result in
   let binding_store_error =
@@ -203,7 +192,6 @@ let status_json ?(audit_limit = 10) () =
     | Disconnected | Awaiting_hello | Identifying | Resuming
     | Reconnect_pending _ | Failed _ -> false
   in
-  let stale = false in
   (* NDT-OK: status_json is a dashboard observation boundary; this timestamp
      only reports gateway freshness and is not used for control flow. *)
   let updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
@@ -227,21 +215,18 @@ let status_json ?(audit_limit = 10) () =
       ("channel", `String channel);
       ("available", `Bool available);
       ("connected", `Bool connected);
-      ("stale", `Bool stale);
-      ("stale_after_sec", `Int (stale_after_sec ()));
       ( "status",
         `String
+          (* The gateway state machine is the liveness source; it has no
+             heartbeat file that could age out, so it is never stale. *)
           (Channel_gate_connector.connector_state_label ~available ~connected
-             ~stale) );
+             ~stale:false) );
       ("error", `String error);
       ("status_source", `String "in_process_gateway");
       ("gateway_state", `String (gateway_state_label gateway_state));
       ("trigger_policy", trigger_policy_json ());
-      ("status_path", `String status_path);
       ("binding_store_path", `String binding_store_path);
       ("audit_path", `String audit_path);
-      ("names_path", `String names_path);
-      ("names", Names.to_json name_map);
       ("updated_at", `String updated_at);
       ( "last_ready_at",
         (* The READY timestamp survives reconnect_pending/resuming dips,
@@ -252,8 +237,7 @@ let status_json ?(audit_limit = 10) () =
            | Some { ready_at; _ } -> ready_at
            | None -> "") );
       (* READY carries only the bot user id; the gateway does not parse
-         the username. Empty is honest — the dead sidecar file used to
-         supply a stale value here. *)
+         the username. *)
       ("bot_user_name", `String "");
       ( "bot_user_id",
         `String
@@ -277,74 +261,8 @@ let status_json ?(audit_limit = 10) () =
       ("recent_audit", `List recent_audit);
     ]
 
-let list_assoc_field key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
-
-let connector_json ?gate_status_json ?(audit_limit = 10) () =
+let connector_json ?(audit_limit = 10) () =
   let status = status_json ~audit_limit () in
-  let observed_channel =
-    match gate_status_json with
-    | None -> `Null
-    | Some json -> (
-        match list_assoc_field "channels" json with
-        | Some channels -> (
-            match
-              Json_util.find_assoc_row_by_string_field ~field:"channel"
-                ~value:channel channels
-            with
-            | Some row -> row
-            | None -> `Null)
-        | None -> `Null)
-  in
-  let storage_paths =
-    `Assoc
-      [
-        ("status_path", `String (string_member status "status_path"));
-        ( "binding_store_path",
-          `String (string_member status "binding_store_path") );
-        ("audit_path", `String (string_member status "audit_path"));
-        ("names_path", `String (string_member status "names_path"));
-      ]
-  in
-  let runtime_summary =
-    `Assoc
-      [
-        ("available", `Bool (bool_member status "available"));
-        ("connected", `Bool (bool_member status "connected"));
-        ("stale", `Bool (bool_member status "stale"));
-        ("stale_after_sec", `Int (int_member status "stale_after_sec"));
-        ("status", `String (string_member status "status"));
-        ("error", `String (string_member status "error"));
-        ("updated_at", `String (string_member status "updated_at"));
-        ("last_ready_at", `String (string_member status "last_ready_at"));
-        ("bot_user_name", `String (string_member status "bot_user_name"));
-        ("bot_user_id", `String (string_member status "bot_user_id"));
-        ("guild_count", `Int (int_member status "guild_count"));
-        ("gate_base_url", `String (string_member status "gate_base_url"));
-        ( "gate_healthy",
-          Option.value ~default:`Null
-            (Option.map (fun value -> `Bool value)
-               (bool_option_member status "gate_healthy")) );
-        ( "gate_health_checked_at",
-          `String (string_member status "gate_health_checked_at") );
-        ("pid", `Int (int_member status "pid"));
-      ]
-  in
-  let binding_summary =
-    `Assoc
-      [
-        ("binding_source", `String (string_member status "binding_source"));
-        ( "runtime_bindings_count",
-          `Int (int_member status "runtime_bindings_count") );
-        ( "configured_bindings_count",
-          `Int
-            (Json_util.get_array status "configured_bindings"
-             |> Option.map (function `List l -> List.length l | _ -> 0)
-             |> Option.value ~default:0)
-        );
-      ]
-  in
   `Assoc
     [
       ("connector_id", `String connector_id);
@@ -355,11 +273,12 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
       ("status", `String (string_member status "status"));
       ("available", `Bool (bool_member status "available"));
       ("connected", `Bool (bool_member status "connected"));
-      ("stale", `Bool (bool_member status "stale"));
-      ("stale_after_sec", `Int (int_member status "stale_after_sec"));
+      ("status_source", status |> U.member "status_source");
+      ("gateway_state", status |> U.member "gateway_state");
       ("error", `String (string_member status "error"));
-      ("status_path", `String (string_member status "status_path"));
       ("binding_store_path", `String (string_member status "binding_store_path"));
+      ("binding_store_read_ok", status |> U.member "binding_store_read_ok");
+      ("binding_store_error", status |> U.member "binding_store_error");
       ("audit_path", `String (string_member status "audit_path"));
       ("names_path", `String (string_member status "names_path"));
       ("names", status |> U.member "names");
@@ -380,10 +299,6 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
       ("pid", `Int (int_member status "pid"));
       ("configured_bindings", status |> U.member "configured_bindings");
       ("recent_audit", status |> U.member "recent_audit");
-      ("storage_paths", storage_paths);
-      ("runtime_summary", runtime_summary);
-      ("binding_summary", binding_summary);
-      ("observed_channel", observed_channel);
     ]
 
 let bind ~channel_id ~keeper_name ~actor_name =
@@ -418,7 +333,6 @@ let bind ~channel_id ~keeper_name ~actor_name =
         |> List.sort (fun (a : binding) (b : binding) ->
              String.compare a.channel_id b.channel_id)
       in
-      let guild_id = Names.resolve_guild_id_for_channel ~channel_id in
       Ok
         ( updated_bindings
         , Store.{
@@ -426,7 +340,6 @@ let bind ~channel_id ~keeper_name ~actor_name =
                evidence only; mutation ordering comes from the durable lock. *)
             timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
             action = "bind";
-            guild_id;
             channel_id;
             keeper_name;
             actor_id = actor_name;
@@ -456,7 +369,6 @@ let unbind ~channel_id ~actor_name =
               not (String.equal binding.channel_id channel_id))
             original_bindings
         in
-        let guild_id = Names.resolve_guild_id_for_channel ~channel_id in
         Ok
           ( updated_bindings
           , Store.{
@@ -464,7 +376,6 @@ let unbind ~channel_id ~actor_name =
                  evidence only; mutation ordering comes from the durable lock. *)
               timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
               action = "unbind";
-              guild_id;
               channel_id;
               keeper_name = removed_binding.keeper_name;
               actor_id = actor_name;
@@ -476,7 +387,7 @@ let unbind ~channel_id ~actor_name =
     |> Result.map (fun () -> status_json ())
 
 (* ---------------------------------------------------------------- *)
-(* In-process gateway support — replaces sidecars/discord-bot/      *)
+(* In-process gateway support                                       *)
 (* ---------------------------------------------------------------- *)
 
 type keeper_binding_resolution = {
@@ -542,9 +453,7 @@ let bound_channels ~keeper_name =
 
 let connected () =
   (* The in-process gateway (RFC-0203) is the only Discord transport;
-     its run loop publishes the typed connection state. The legacy
-     sidecar status file is not consulted: nothing writes it since the
-     Python sidecar was deleted. *)
+     its run loop publishes the typed connection state. *)
   match Discord_gateway_client.connection_state () with
   | Discord_gateway_state.Connected _ -> true
   | Disconnected | Awaiting_hello | Identifying | Resuming
@@ -561,36 +470,102 @@ let pp_send_error fmt = function
   | Rest_error e ->
     Format.fprintf fmt "discord rest error: %a" Discord_rest_client.pp_error e
 
-let send_message ~channel_id ~content ?reply_to_message_id () =
+type outbound_message =
+  { content : string
+  ; allowed_user_mentions : string list
+  }
+
+let text_chunks ~limit content =
+  let rec split acc rest =
+    if String.equal rest "" then List.rev acc
+    else
+      let chunk, remaining = Discord_rest_client.split_at_codepoint rest ~limit in
+      split (chunk :: acc) remaining
+  in
+  match split [] content with
+  | [] -> [ "" ]
+  | chunks -> chunks
+
+let mention_messages ~limit mention_user_ids =
+  let flush content ids acc =
+    if ids = [] then acc
+    else
+      { content; allowed_user_mentions = List.rev ids } :: acc
+  in
+  let rec group content ids acc = function
+    | [] -> List.rev (flush content ids acc)
+    | id :: rest ->
+      let token = Printf.sprintf "<@%s>" id in
+      let candidate = if ids = [] then token else content ^ " " ^ token in
+      if String.length candidate <= limit
+      then group candidate (id :: ids) acc rest
+      else
+        group token [ id ] (flush content ids acc) rest
+  in
+  group "" [] [] mention_user_ids
+
+let message_chunks_with_mentions ~limit ~content ~mention_user_ids =
+  match mention_user_ids with
+  | [] ->
+    text_chunks ~limit content
+    |> List.map (fun content -> { content; allowed_user_mentions = [] })
+  | user_ids ->
+    let prefix =
+      user_ids |> List.map (Printf.sprintf "<@%s>") |> String.concat " "
+    in
+    let combined = prefix ^ "\n" ^ content in
+    if String.length combined <= limit
+    then [ { content = combined; allowed_user_mentions = user_ids } ]
+    else
+      mention_messages ~limit user_ids
+      @ (text_chunks ~limit content
+         |> List.map (fun content -> { content; allowed_user_mentions = [] }))
+
+module For_testing = struct
+  type nonrec outbound_message = outbound_message =
+    { content : string
+    ; allowed_user_mentions : string list
+    }
+
+  let message_chunks_with_mentions = message_chunks_with_mentions
+end
+
+let send_message ~channel_id ~content ?reply_to_message_id
+    ?(mention_user_ids = []) () =
   match bot_token_opt () with
   | None -> Error Missing_token
   | Some token ->
     let limit = Discord_rest_client.message_content_limit in
-    let len = String.length content in
-    if len <= limit then
-      (match Discord_rest_client.send_message ~token ~channel_id ~content ?reply_to_message_id () with
-       | Ok id -> Ok id
-       | Error e -> Error (Rest_error e))
-    else
-      let rec send_chunks first rest =
-        (* Split on a codepoint boundary: the Discord limit is in Unicode
-           scalar values, and a mid-codepoint byte cut yields invalid
-           UTF-8 that Discord rejects with a 400. *)
-        let chunk, remaining_str =
-          Discord_rest_client.split_at_codepoint rest ~limit
-        in
-        let remaining =
-          if remaining_str = "" then None else Some remaining_str
-        in
+    let messages =
+      message_chunks_with_mentions ~limit ~content ~mention_user_ids
+    in
+    let rec send_chunks first last_id = function
+      | [] ->
+        (match last_id with
+         | Some id -> Ok id
+         | None ->
+           Error
+             (Rest_error
+                (Discord_rest_client.Other
+                   { request_id = ""
+                   ; reason = "Discord message chunker produced no output"
+                   ; body_bytes = 0
+                   })))
+      | message :: rest ->
         let ref_id = if first then reply_to_message_id else None in
-        match Discord_rest_client.send_message ~token ~channel_id ~content:chunk ?reply_to_message_id:ref_id () with
-        | Ok id ->
-            (match remaining with
-             | None -> Ok id
-             | Some next -> send_chunks false next)
+        match
+          Discord_rest_client.send_message
+            ~token
+            ~channel_id
+            ~content:message.content
+            ?reply_to_message_id:ref_id
+            ~allowed_user_mentions:message.allowed_user_mentions
+            ()
+        with
+        | Ok id -> send_chunks false (Some id) rest
         | Error e -> Error (Rest_error e)
-      in
-      send_chunks true content
+    in
+    send_chunks true None messages
 
 let edit_message ~channel_id ~message_id ~content () =
   match bot_token_opt () with

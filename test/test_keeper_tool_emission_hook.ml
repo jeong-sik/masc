@@ -1,5 +1,6 @@
-(* Keeper tool-emission capture accepts only producer-owned typed objects.
-   JSON-looking text from the model-facing OAS body is never reparsed. *)
+(* Keeper tool-emission capture retains only explicitly tagged,
+   producer-owned typed objects. JSON-looking text from the model-facing
+   AGENT_CORE body is never reparsed. *)
 
 module H = Masc.Keeper_tool_emission_hook
 
@@ -66,10 +67,11 @@ let test_snapshot_does_not_drain () =
   assert_size "snapshot preserves" 1 acc
 ;;
 
-let test_drain_skips_unmarked_object () =
+let test_capture_does_not_retain_unmarked_object () =
   let acc = H.create_accumulator () in
   H.capture_typed_result acc (tagged ~kind:"doc" ~id:"doc-2" []);
   H.capture_typed_result acc (`Assoc [ "echo", `String "hello" ]);
+  assert_size "only tagged object retained" 1 acc;
   let context = H.drain_into_working_context acc ~working_context:None in
   let artifacts, _ =
     match Multimodal.Wirein_helpers.extract_raw_artifacts context with
@@ -122,9 +124,9 @@ let () =
         ; Alcotest.test_case "drain empties" `Quick test_drain_empties_accumulator
         ; Alcotest.test_case "snapshot preserves" `Quick test_snapshot_does_not_drain
         ; Alcotest.test_case
-            "unmarked object not emitted"
+            "unmarked object not retained"
             `Quick
-            test_drain_skips_unmarked_object
+            test_capture_does_not_retain_unmarked_object
         ] )
     ; ( "keeper registry"
       , [ Alcotest.test_case "isolates keepers" `Quick test_registry_isolates_keepers

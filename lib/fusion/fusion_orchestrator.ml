@@ -5,7 +5,7 @@ type compute_outcome =
   | Compute_denied of Fusion_types.deny_reason
   | Computed of Fusion_types.deliberation_evidence
 
-let compute ~sw ~net ~policy ~topology ~request () : compute_outcome =
+let compute ~base_dir ~sw ~net ~policy ~topology ~request () : compute_outcome =
   match Fusion_policy.decide ~policy request with
   | Fusion_types.Deny reason ->
     Fusion_metrics.record_invocation ~topology `Denied;
@@ -27,7 +27,7 @@ let compute ~sw ~net ~policy ~topology ~request () : compute_outcome =
               groups
           in
           let panel =
-            Fusion_panel.run ~sw ~net
+            Fusion_panel.run ~base_dir ~sw ~net
               ~groups:effective_groups ~prompt:req.Fusion_types.prompt ()
           in
           let judge_web_tools =
@@ -37,6 +37,7 @@ let compute ~sw ~net ~policy ~topology ~request () : compute_outcome =
           let run_single_judge () =
             Fusion_judge.run ~sw ~net
               ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
+              ?timeout_s:preset.Fusion_policy.judge_timeout_s
               ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
               ~judge_model:preset.Fusion_policy.judge
               ~question:req.Fusion_types.prompt ~panel ~web_tools:judge_web_tools ()
@@ -49,6 +50,7 @@ let compute ~sw ~net ~policy ~topology ~request () : compute_outcome =
             match
               Fusion_judge.run_refine ~sw ~net
                 ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
+                ?timeout_s:preset.Fusion_policy.judge_timeout_s
                 ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                 ~judge_model:preset.Fusion_policy.judge
                 ~question:req.Fusion_types.prompt ~panel ~prior:s1
@@ -132,6 +134,7 @@ let compute ~sw ~net ~policy ~topology ~request () : compute_outcome =
                  (match
                     Fusion_judge.run_meta ~sw ~net
                       ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
+                      ?timeout_s:preset.Fusion_policy.judge_timeout_s
                       ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                       ~judge_model:preset.Fusion_policy.judge
                       ~question:req.Fusion_types.prompt ~panel ~priors
@@ -213,6 +216,7 @@ let compute ~sw ~net ~policy ~topology ~request () : compute_outcome =
                   (match
                      Fusion_judge.run_meta ~sw ~net
                        ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
+                       ?timeout_s:preset.Fusion_policy.judge_timeout_s
                        ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                        ~judge_model:preset.Fusion_policy.judge
                        ~question:req.Fusion_types.prompt ~panel ~priors
@@ -265,6 +269,7 @@ let compute ~sw ~net ~policy ~topology ~request () : compute_outcome =
                  (match
                     Fusion_judge.run_meta ~sw ~net
                       ?max_tokens:preset.Fusion_policy.judge_max_output_tokens
+                      ?timeout_s:preset.Fusion_policy.judge_timeout_s
                       ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
                       ~judge_model:preset.Fusion_policy.judge
                       ~question:req.Fusion_types.prompt ~panel ~priors
@@ -374,6 +379,7 @@ let compute ~sw ~net ~policy ~topology ~request () : compute_outcome =
             })
 
 let project
+    ~registry
     ~base_dir
     ~topology
     ~channel
@@ -381,8 +387,8 @@ let project
     (deliberation : Fusion_types.deliberation_evidence)
   =
   match
-    Fusion_sink.emit ~base_dir ~keeper:request.keeper ~run_id:request.run_id ~channel
-      ~question:deliberation.question ~panel:deliberation.panel
+    Fusion_sink.emit ~registry ~base_dir ~keeper:request.keeper ~run_id:request.run_id
+      ~channel ~question:deliberation.question ~panel:deliberation.panel
       ~judge:deliberation.judge ~judges:deliberation.judges
       ~judge_usage:deliberation.judge_usage
   with

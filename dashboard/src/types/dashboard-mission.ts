@@ -7,7 +7,7 @@ import type {
   MissionSignalTruth,
   MissionEvidenceSource,
 } from './core'
-import type { PendingConfirmEnvelope, PendingConfirmation, PendingConfirmSummary, OperatorActionDescriptor } from './gate'
+import type { PendingConfirmEnvelope, OperatorActionDescriptor } from './gate'
 
 export interface DashboardMissionSummary {
   workspace_health?: string
@@ -35,7 +35,6 @@ export interface DashboardMissionCommandFocus {
 
 export interface DashboardMissionTargets {
   keepers: OperatorKeeperSnapshot[]
-  pending_confirms: PendingConfirmation[]
   available_actions: OperatorActionDescriptor[]
 }
 
@@ -46,7 +45,6 @@ export interface DashboardMissionAttentionQueueItem {
   summary: string
   target_type: string
   target_id?: string | null
-  top_action?: OperatorRecommendedAction | null
   related_agent_names: string[]
   evidence?: unknown
   evidence_preview: string[]
@@ -72,7 +70,6 @@ export interface DashboardMissionAgentBrief {
   archived_reason?: string | null
   status?: string
   where?: string | null
-  with_whom: string[]
   current_work?: string | null
   related_attention_count: number
   last_activity_at?: string | null
@@ -97,7 +94,6 @@ export interface DashboardMissionKeeperBrief {
   context_ratio?: number | null
   last_turn_ago_s?: number | null
   current_work?: string | null
-  last_autonomous_action_at?: string | null
   // Mission keeper briefs carry observed audit freshness, not authored policy.
   latest_tool_names?: string[]
   latest_tool_call_count?: number | null
@@ -159,7 +155,6 @@ export interface DashboardMissionBriefingResponse {
   criteria: string[]
   basis?: {
     namespace?: string | null
-    crew_count?: number
     agent_count?: number
     keeper_count?: number
   }
@@ -233,13 +228,14 @@ export interface OperatorKeeperSnapshot {
   phase?: string | null
   pipeline_stage?: string | null
   paused?: boolean | null
+  /** `Keeper_status_runtime.keeper_health` as published by the keeper brief
+   *  row. Separate from `status`, which folded this axis into the phase. */
+  health?: string | null
   registered?: boolean
   agent_name?: string
   status?: string
   context_ratio?: number | null
   generation?: number
-  active_goal_ids?: string[]
-  last_autonomous_action_at?: string | null
   last_turn_ago_s?: number
   model?: string
   turn_count?: number
@@ -249,10 +245,6 @@ export interface OperatorKeeperSnapshot {
   context_metrics_unavailable?: OperatorContextMetricsUnavailable | null
   last_turn_usage?: KeeperLastTurnUsage | null
   keepalive_running?: boolean
-  autonomous_action_count?: number
-  autonomous_turn_count?: number
-  autonomous_text_turn_count?: number
-  autonomous_tool_turn_count?: number
   last_model_used?: string
   last_model_used_label?: string | null
   active_model?: string
@@ -321,18 +313,6 @@ export interface OperatorJudgment {
   provenance?: string | null
 }
 
-export interface OperatorReviewDecision {
-  item_id: string
-  fingerprint: string
-  decision: 'resolved' | 'deferred'
-  actor: string
-  reason: string
-  at: string
-  target_type: string
-  target_id?: string | null
-  recommended_action_type?: string | null
-}
-
 export interface OperatorDigest {
   trace_id?: string
   target_type: 'root' | 'namespace' | 'workspace' | 'keeper'
@@ -351,7 +331,6 @@ export interface OperatorDigest {
   root?: OperatorNamespaceSnapshot
   attention_items: OperatorAttentionItem[]
   recommended_actions: OperatorRecommendedAction[]
-  recent_reviews: OperatorReviewDecision[]
 }
 
 export interface KeeperProbeResult {
@@ -369,7 +348,7 @@ export interface KeeperRecoverResult {
 }
 
 export interface InferenceInflightSnapshot {
-  boundary_owner: 'oas_runtime'
+  boundary_owner: 'agent_core_runtime'
   active: number
 }
 
@@ -379,9 +358,7 @@ export interface OperatorSnapshot {
   inference_inflight?: InferenceInflightSnapshot | null
   persistent_agents?: OperatorKeeperSnapshot[]
   recent_messages: Message[]
-  pending_confirms: PendingConfirmation[]
-  pending_confirm_envelope?: PendingConfirmEnvelope | null
-  pending_confirm_summary?: PendingConfirmSummary
+  pending_confirm_envelope: PendingConfirmEnvelope
   available_actions: OperatorActionDescriptor[]
 }
 

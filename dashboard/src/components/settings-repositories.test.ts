@@ -42,9 +42,9 @@ const REPO_MASC = {
 
 const REPO_MANUAL = {
   ...REPO_MASC,
-  id: 'oas',
-  name: 'oas',
-  url: 'https://github.com/jeong-sik/oas.git',
+  id: 'agentCore',
+  name: 'agentCore',
+  url: 'https://github.com/jeong-sik/agentCore.git',
   auto_sync: false,
 }
 
@@ -101,7 +101,7 @@ describe('SettingsRepositoriesSection', () => {
 
     const entry = container.querySelector('[data-testid="settings-repo-mapping-entry"]')
     expect(entry?.textContent).toContain('Keeper 접근')
-    expect(entry?.textContent).toContain('매핑이 없으면 등록된 keeper 개인 clone 기본 범위를 사용합니다')
+    expect(entry?.textContent).toContain('없으면 keeper 기본 범위')
 
     ;(container.querySelector('[data-testid="settings-repo-mapping-open"]') as HTMLButtonElement).click()
     await flush()

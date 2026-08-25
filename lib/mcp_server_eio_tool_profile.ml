@@ -11,10 +11,9 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Operator_remote
 
 let operator_remote_instructions =
-  "MASC remote operator profile exposes seven operator tools: \
-masc_operator_snapshot, masc_operator_digest, masc_operator_action, masc_operator_board_attention_quarantine_requeue, masc_operator_chat_recovery_resolve, masc_operator_task_recovery_resolve, and masc_operator_confirm. \
+  "MASC remote operator profile exposes six operator tools: \
+masc_operator_snapshot, masc_operator_digest, masc_operator_action, masc_operator_board_attention_quarantine_requeue, masc_operator_task_recovery_resolve, and masc_operator_confirm. \
 masc_operator_board_attention_quarantine_requeue accepts only with the exact Keeper, partition, candidate, and quarantine id observed from durable state; it never auto-retries. \
-masc_operator_chat_recovery_resolve accepts only the exact receipt_id, revision, and lease_id observed from queue state; it never auto-redelivers. \
 masc_operator_task_recovery_resolve accepts only the exact task owner and backlog version observed from Task state; it performs no liveness inference. \
 When confirm_required=true, you must call masc_operator_confirm with the returned confirm_token before the action executes. \
 Do not assume access to any other MASC tool from this endpoint."
@@ -24,7 +23,7 @@ let managed_agent_instructions =
 Do not assume that the public /mcp surface and the managed-agent surface have the same inventory."
 
 let managed_agent_passthrough_tool_names =
-  Keeper_tool_surfaces.spawned_agent_public_tool_names
+  Tool_catalog_surfaces.spawned_agent_surface_tools
 
 (* O(1) membership view of [managed_agent_passthrough_tool_names].
    Used by [tool_schemas_for_profile Managed_agent] to filter
@@ -42,16 +41,6 @@ let managed_agent_passthrough_tool_set : (string, unit) Hashtbl.t =
 module StringSet = Set_util.StringSet
 module StringMap = Set_util.StringMap
 
-let dedupe_tool_schemas_by_name (schemas : Masc_domain.tool_schema list) =
-  let _, result =
-    List.fold_left
-      (fun (seen, acc) (schema : Masc_domain.tool_schema) ->
-        if StringSet.mem schema.name seen then (seen, acc)
-        else (StringSet.add schema.name seen, schema :: acc))
-      (StringSet.empty, []) schemas
-  in
-  List.rev result
-
 let default_instructions () =
   "MASC (Multi-Agent Streaming Workspace) enables AI agent collaboration. \
 PROJECT: Agents sharing the same base path (.masc/ folder) align together. \
@@ -60,26 +49,19 @@ READ: use resources/list + resources/read (status/tasks/agents/events/schema) fo
 WRITE: task state changes are CAS-guarded; pass expected_version."
 
 let tool_schemas_for_profile ?(include_hidden = false)
-    ?(include_agent_internal = false) _state
-    profile =
+    _state profile =
   let schemas =
     match profile with
     | Full ->
         let show_all = include_hidden in
-        (* The Agent_internal surface was empty (agent_internal_surface_tools =
-           []), so no schema was ever agent-internal.  Surface deleted in the
-           surface-cut refactor; [include_agent_internal] no longer adds any
-           schema and the per-schema agent-internal branch is unreachable. *)
         let all =
-          Config.visible_tool_schemas
-            ~include_hidden:(show_all || include_agent_internal)
-            ()
-          |> dedupe_tool_schemas_by_name
+          Config.visible_tool_schemas ~include_hidden:show_all ()
         in
         let full_profile_tools =
           List.filter
             (fun (schema : Masc_domain.tool_schema) ->
-              show_all || Tool_catalog.is_public_mcp schema.name)
+              Tool_catalog.allow_direct_call schema.name
+              && (show_all || Tool_catalog.is_public_mcp schema.name))
             all
         in
         full_profile_tools
@@ -88,34 +70,30 @@ let tool_schemas_for_profile ?(include_hidden = false)
           Config.visible_tool_schemas ~include_hidden:true ()
           |> List.filter (fun (schema : Masc_domain.tool_schema) ->
                  Hashtbl.mem managed_agent_passthrough_tool_set schema.name
+                 && Option.is_none
+                      (Agent_core_tool_contract.agent_core_binding_by_name schema.name)
                  && Tool_catalog.is_visible ~include_hidden:true schema.name)
         in
-        dedupe_tool_schemas_by_name
-          (Sdk_tool_contract.sdk_tool_schemas @ passthrough)
+        Agent_core_tool_contract.agent_core_tool_schemas @ passthrough
     | Operator_remote -> Tool_operator.remote_schemas ()
   in
+  Config.validate_schemas schemas;
   schemas
 
-let tool_allowed_in_profile ?(internal_keeper_runtime = false) state profile
-    tool_name =
+let tool_allowed_in_profile state profile tool_name =
   match profile with
   | Full ->
-      (* The Agent_internal surface was empty, so no tool was ever
-         agent-internal; [internal_keeper_runtime] no longer gates anything.
-         Surface deleted in the surface-cut refactor.
-         Equivalent to [List.mem tool_name (names from
+      (* Equivalent to [List.mem tool_name (names from
          visible_tool_schemas ~include_hidden:true)]: that helper
-         composes raw schemas → dedupe → canonicalize → filter
-         is_visible.  Dedupe and
-         canonicalize do not change the name set, so the name set is
+         composes raw schemas → canonicalize → filter is_visible. The name set is
          exactly { n | n ∈ raw_all_tool_schemas.names ∧ is_visible n }.
          Two O(1) checks replace ~150 schema canonicalizations + a
          List.mem per dispatch. *)
-      ignore (internal_keeper_runtime : bool);
       Config.is_raw_tool_name tool_name
       && Tool_catalog.is_visible ~include_hidden:true tool_name
+      && Tool_catalog.allow_direct_call tool_name
   | Managed_agent ->
-      Option.is_some (Sdk_tool_contract.sdk_binding_by_name tool_name)
+      Option.is_some (Agent_core_tool_contract.agent_core_binding_by_name tool_name)
       || (tool_schemas_for_profile state Managed_agent
           |> List.exists (fun (schema : Masc_domain.tool_schema) ->
                  String.equal schema.name tool_name))
@@ -206,10 +184,9 @@ let custom_tool_titles : (string * string) list = [
   ("masc_operator_digest", "Operator Digest");
   ("masc_operator_action", "Operator Action");
   ("masc_operator_board_attention_quarantine_requeue", "Requeue Board Quarantine");
-  ("masc_operator_chat_recovery_resolve", "Resolve Chat Recovery");
   ("masc_operator_task_recovery_resolve", "Resolve Task Recovery");
   ("masc_operator_confirm", "Operator Confirm");
-  (* SDK projections *)
+  (* agent-core projections *)
 ]
 
 let custom_title_table : string StringMap.t =
@@ -319,55 +296,6 @@ let bool_param payload key =
       Error
         (Printf.sprintf "Invalid params: %s must be a boolean (received %s)"
            key (Json_util.kind_name other))
-
-let decode_cursor_offset = function
-  | None -> Ok 0
-  | Some raw -> (
-      match int_of_string_opt raw with
-      | Some offset when offset >= 0 -> Ok offset
-      | Some offset ->
-          Error
-            (Printf.sprintf
-               "Invalid params: cursor offset must be non-negative \
-                (parsed %d from %S)"
-               offset raw)
-      | None ->
-          Error
-            (Printf.sprintf
-               "Invalid params: cursor must be a non-negative integer \
-                string (could not parse %S as an integer)"
-               raw))
-
-let rec drop_list n = function
-  | xs when n <= 0 -> xs
-  | [] -> []
-  | _ :: rest -> drop_list (n - 1) rest
-
-let paginate_json_items ?(page_size = 128) ~field_name items cursor =
-  match decode_cursor_offset cursor with
-  | Error msg -> Error msg
-  | Ok offset ->
-      let total = List.length items in
-      let page = items |> drop_list offset |> List_util.take_first page_size in
-      let next_offset = offset + List.length page in
-      let fields =
-        [ (field_name, `List page) ]
-        @
-        if next_offset < total then
-          [ ("nextCursor", `String (string_of_int next_offset)) ]
-        else
-          []
-      in
-      Ok (`Assoc fields)
-
-let cursor_only_params params =
-  match params with
-  | None -> Ok None
-  | Some (`Assoc _ as payload) -> cursor_param payload
-  | Some other ->
-      Error
-        (Printf.sprintf "Invalid params: expected object (received %s)"
-           (Json_util.kind_name other))
 
 let validate_optional_meta payload =
   match Json_util.assoc_member_opt "_meta" payload with

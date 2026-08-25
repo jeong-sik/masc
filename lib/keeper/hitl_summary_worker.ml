@@ -1,6 +1,7 @@
 open Keeper_approval_queue
+open Keeper_approval_queue_rules_types
 
-module Exact_output = Agent_sdk.Exact_output
+module Exact_output = Agent_core.Exact_output
 module Registry = Runtime_exact_output_registry
 module Schema = Keeper_structured_output_schema
 
@@ -21,7 +22,7 @@ let () =
     ~help:
       "Total HITL exact-output flow outcomes classified by [outcome]. MASC \
        records domain and durability outcomes only; provider selection, \
-       admission, dispatch, and failover remain OAS-owned."
+       admission, dispatch, and failover remain AGENT_CORE-owned."
     ()
 ;;
 
@@ -46,7 +47,6 @@ let build_context_bundle ~(entry : pending_approval) =
     ; "turn_id", Json_util.int_opt_to_json entry.turn_id
     ; "task_id", Json_util.string_opt_to_json entry.task_id
     ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-    ; "goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids)
     ; "input", entry.input
     ]
   in
@@ -60,7 +60,7 @@ let build_context_bundle ~(entry : pending_approval) =
   | None -> `Assoc (request_identity @ [ "partial_context", `Bool true ])
 ;;
 
-let message role text = Agent_sdk.Types.text_message role text
+let message role text = Agent_core.Types.text_message role text
 
 let canonical_output_contract =
   Printf.sprintf
@@ -70,9 +70,9 @@ let canonical_output_contract =
 ;;
 
 let messages_for_summary ~system_prompt ~context_bundle =
-  [ message Agent_sdk.Types.System system_prompt
-  ; message Agent_sdk.Types.User canonical_output_contract
-  ; message Agent_sdk.Types.User (Yojson.Safe.to_string context_bundle)
+  [ message Agent_core.Types.System system_prompt
+  ; message Agent_core.Types.User canonical_output_contract
+  ; message Agent_core.Types.User (Yojson.Safe.to_string context_bundle)
   ]
 ;;
 
@@ -437,10 +437,7 @@ let log_exact_error (entry : pending_approval) operation detail =
 (* The renderers themselves moved to [Keeper_exact_flow_detail] so the
    librarian runtime and this worker print slot provenance identically. *)
 let flow_evidence_detail = Keeper_exact_flow_detail.flow_evidence_detail
-let rejection_disposition_detail = Keeper_exact_flow_detail.rejection_disposition_detail
 let candidate_rejection_detail = Keeper_exact_flow_detail.candidate_rejection_detail
-let execution_cause_detail = Keeper_exact_flow_detail.execution_cause_detail
-
 let exact_attempt_source_resolved (entry : pending_approval) = function
   | Exact_attempt_rejected (Exact_attempt_not_found approval_id) ->
     String.equal approval_id entry.id
@@ -808,6 +805,24 @@ let last_semantic_rejection
     (fun _ rejection -> rejection)
     trace.first
     trace.rest
+;;
+
+(* The outcome a finished exact run earns, decided by whether a summary was
+   observed. Named rather than inline because both arms are load-bearing: a
+   summary reaches [on_summary] only after domain validation, provenance
+   verification and fsync (see the .mli), so its absence is the failure, not a
+   shape to synthesise an output for. *)
+let run_outcome_of_observed_summary = function
+  | Some summary ->
+    Exact_lane_run_registry.Succeeded, hitl_context_summary_to_yojson summary
+  | None ->
+    ( Exact_lane_run_registry.Failed
+        { code = "no_summary_produced"
+        ; detail =
+            "exact flow terminalized without a judgment summary; the candidate \
+             was quarantined"
+        }
+    , `Null )
 ;;
 
 let handle_semantic_exhaustion ~queue_ops (prepared : prepared_flow) trace =
@@ -1182,6 +1197,52 @@ let spawn_with
   | Error detail -> Error detail
   | Ok prepared ->
     let clock = Eio_context.get_clock_opt () in
+    let registry = Exact_lane_run_registry.global () in
+    let run_id = Random_id.prefixed ~prefix:"exact-hitl-judge-" ~bytes:16 in
+    let started_at = Time_compat.now () in
+    let observed_summary = ref None in
+    let on_summary summary =
+      observed_summary := Some summary;
+      on_summary summary
+    in
+    Exact_lane_run_registry.register_running
+      registry
+      ~run_id
+      ~lane:Exact_lane_run_registry.Hitl_auto_judge
+      ~actor:entry.keeper_name
+      ~started_at
+      ~input:
+        (Exact_lane_run_registry.Exact_input
+           (`Assoc
+           [ "tool_name", `String entry.tool_name
+           ; "tool_input", entry.input
+           ; ( "request_context"
+             , match entry.request_context with
+               | Some context -> context
+               | None -> `Null )
+           ; "turn_id", Json_util.int_opt_to_json entry.turn_id
+           ; "task_id", Json_util.string_opt_to_json entry.task_id
+           ; "goal_id", Json_util.string_opt_to_json entry.goal_id
+                  ; "partial_context", `Bool (Option.is_none entry.request_context)
+           ]));
+    let complete outcome output =
+      match
+        Exact_lane_run_registry.mark_completed
+          registry
+          ~run_id
+          ~outcome
+          ~elapsed_s:(Time_compat.now () -. started_at)
+          ~selected_slot:None
+          ~output
+      with
+      | Ok () -> ()
+      | Error error ->
+        Log.Keeper.error
+          ~keeper_name:entry.keeper_name
+          "HITL exact-run observation completion failed run_id=%s: %s"
+          run_id
+          (Exact_lane_run_registry.completion_error_to_string error)
+    in
     Eio.Fiber.fork ~sw (fun () ->
     let execution_outcome =
       try
@@ -1217,26 +1278,66 @@ let spawn_with
       | exn -> `Uncertain exn
     in
     match execution_outcome with
-    | `Completed -> on_finish Conclusive_terminalization
+    | `Completed ->
+      (* The flow can reach here without ever producing a summary: when every
+         candidate is rejected, [Flow_semantic_candidates_exhausted] routes to
+         [handle_semantic_exhaustion], which quarantines the candidate and
+         returns [Executed] like a judged run. Recording [Succeeded] with a
+         synthesised output made a run that judged nothing indistinguishable
+         from one that did, and the .mli already says a summary reaches
+         [on_summary] only after validation, provenance and fsync. So the
+         absence of one is the failure, and the outcome type has a variant for
+         it.
+
+         [on_finish] is unchanged: whether an exhausted flow should still
+         permit draining later owner work is a separate contract question. *)
+      let outcome, output = run_outcome_of_observed_summary !observed_summary in
+      complete outcome output;
+      on_finish Conclusive_terminalization
     | `Cancelled (cancellation, cancellation_backtrace) ->
+      complete Exact_lane_run_registry.Cancelled `Null;
       on_finish Terminalization_persistence_uncertain;
       Printexc.raise_with_backtrace cancellation cancellation_backtrace
     | `Cancelled_uncertain
         (cancellation, cancellation_backtrace, _detail) ->
+      complete Exact_lane_run_registry.Cancelled `Null;
       on_finish Terminalization_persistence_uncertain;
       Printexc.raise_with_backtrace cancellation cancellation_backtrace
     | `Cancelled_identity_unbound
         (cancellation, cancellation_backtrace) ->
+      complete Exact_lane_run_registry.Cancelled `Null;
       on_finish Terminalization_identity_unbound;
       Printexc.raise_with_backtrace cancellation cancellation_backtrace
     | `Cancelled_rejected
         (cancellation, cancellation_backtrace, _rejection) ->
+      complete Exact_lane_run_registry.Cancelled `Null;
       on_finish Terminalization_rejected;
       Printexc.raise_with_backtrace cancellation cancellation_backtrace
     | `Identity_unbound ->
+      complete
+        (Exact_lane_run_registry.Failed
+           { code = "terminalization_identity_unbound"
+           ; detail = "exact attempt identity was not durably bound"
+           })
+        `Null;
       on_finish Terminalization_identity_unbound
-    | `Rejected _ -> on_finish Terminalization_rejected
+    | `Rejected rejection ->
+      let detail =
+        Keeper_approval_queue.exact_attempt_error_to_string
+          (Exact_attempt_rejected rejection)
+      in
+      complete
+        (Exact_lane_run_registry.Failed
+           { code = "terminalization_rejected"; detail })
+        `Null;
+      on_finish Terminalization_rejected
     | `Uncertain uncertainty ->
+      complete
+        (Exact_lane_run_registry.Failed
+           { code = "terminalization_persistence_uncertain"
+           ; detail = Printexc.to_string uncertainty
+           })
+        `Null;
       on_finish Terminalization_persistence_uncertain;
       raise uncertainty);
     Ok Worker_forked
@@ -1249,6 +1350,8 @@ let spawn =
 ;;
 
 module For_testing = struct
+  let run_outcome_of_observed_summary = run_outcome_of_observed_summary
+
   type nonrec prepared_flow = prepared_flow
   type nonrec exact_transition = exact_transition
   type nonrec exact_completion_transition = exact_completion_transition
@@ -1256,7 +1359,6 @@ module For_testing = struct
   type nonrec exact_queue_ops = exact_queue_ops
 
   let build_context_bundle = build_context_bundle
-  let messages_for_summary = messages_for_summary
   let parse_summary = parse_summary
   let prepare_flow = prepare_flow
   let execute_prepared_flow = execute_prepared_flow
@@ -1312,7 +1414,6 @@ module For_testing = struct
   ;;
 
   let flow_evidence prepared = Exact_output.flow_attempt_evidence prepared.attempt
-  let success_provenance_matches = success_provenance_matches
   let system_prompt = system_prompt
   let summary_version = summary_version
   let lane_id = lane_id

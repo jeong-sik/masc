@@ -9,18 +9,17 @@ include Keeper_state_machine_types
 
 (** [is_terminal phase] is true iff [phase] cannot accept new turns.
 
-    Stopped and Dead are terminal: in [can_transition] every
-    outgoing edge from these sources is denied. Centralized here so the
-    FSM, health surfaces, and the mermaid renderer share one source of
-    truth instead of re-matching the terminal triple at each consumer.
+    Stopped is terminal: in [can_transition] every outgoing edge from that
+    source is denied. Centralized here so the FSM, health surfaces, and the
+    mermaid renderer share one source of truth instead of re-matching the
+    terminal phase at each consumer.
     Exhaustive (no [_] wildcard) so adding a phase variant surfaces a
     compile-time warning here. *)
 let is_terminal = function
-  | Stopped | Dead -> true
+  | Stopped -> true
   | Offline
   | Running
   | Failing
-  | Overflowed
   | Compacting
   | HandingOff
   | Draining
@@ -50,10 +49,8 @@ let derive_phase (c : conditions) : phase =
      which includes buffer operations. Guard Stopped against active buffer
      ops so the keeper stays in Draining until compaction/handoff exits. *)
 
-  (* 0. Explicit durable terminal state. Runtime failures cannot synthesize it. *)
-  if c.dead_tombstone_latched
-  then Dead (* 1. Completed stop — drain succeeded AND no buffer ops in flight *)
-  else if
+  (* 1. Completed stop — drain succeeded AND no buffer ops in flight *)
+  if
     c.stop_requested
     && c.drain_complete
     && (not c.compaction_active)
@@ -75,10 +72,6 @@ let derive_phase (c : conditions) : phase =
   then HandingOff
   else if c.compaction_active
   then Compacting
-  (* [Overflowed] is retired vocabulary (#26546): the automatic
-     overflow-compaction trigger was removed, no condition derives it, and
-     the phase variant remains only so historical durable lifecycle records
-     ("overflowed") still decode. *)
   else if
     (not c.heartbeat_healthy)
     || (not c.turn_healthy)
@@ -159,8 +152,8 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     { c with compaction_active = true }
   | Operator_clear_requested _ ->
     (* Last resort: context fully dropped by [masc_keeper_clear]. The
-       context payload change is owned by the clear runtime; with the
-       overflow latch retired (#26546) no lifecycle condition changes. *)
+       context payload change is owned by the clear runtime; no lifecycle
+       condition changes. *)
     c
 ;;
 
@@ -184,12 +177,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
   | Compacting -> [ Start_compaction; lifecycle "compaction_started" "" ]
   | HandingOff -> [ Start_handoff; lifecycle "handoff_started" "" ]
   | Draining -> [ Start_drain; lifecycle "draining" "" ]
-  | Dead ->
-    [ Mark_dead_tombstone
-    ; lifecycle "dead" (event_to_string event)
-    ; Trigger_immediate_cleanup
-    ; Cancel_pending_oas
-    ]
   | Stopped ->
     [ Cleanup_and_unregister
     ; lifecycle
@@ -218,12 +205,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
          | Operator_compact_requested
          | Operator_clear_requested _ -> event_to_string event)
     ]
-  | Overflowed ->
-    (* Retired phase (#26546): no condition derives [Overflowed] anymore, so
-       this arm is unreachable at runtime. It stays for phase-match
-       exhaustiveness because the variant is preserved to decode historical
-       durable lifecycle records. *)
-    [ lifecycle "overflowed" (event_to_string event) ]
   | Failing -> [ lifecycle "failing" (event_to_string event) ]
   | Paused ->
     let detail =
@@ -262,14 +243,12 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
      | Offline
      | Running
      | Failing
-     | Overflowed
-     | Compacting
+        | Compacting
      | HandingOff
      | Draining
      | Paused
      | Stopped
-     | Restarting
-     | Dead ->
+     | Restarting ->
        (* Direct transitions to Restarting from non-Crashed phases are not
           a normal lifecycle path; the supervisor / registry owns publishing
           for those rare corner cases. Intentional no-op (matches the
@@ -311,17 +290,15 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
        [ lifecycle "resumed" detail ]
      | Offline
      | Running
-     | Overflowed
-     | Compacting
+        | Compacting
      | HandingOff
      | Draining
      | Stopped
-     | Crashed
-     | Dead ->
+     | Crashed ->
        (* [register] takes Init → Running without traversing this function
           (it uses [register_with_state] directly). For other prevs (e.g.
-          Compacting → Running on auto-compact success, Overflowed →
-          Running similarly), the registry runtime publishes its own
+          Compacting → Running on auto-compact success), the registry
+          runtime publishes its own
           lifecycle event covering the recovery semantics. Intentional
           no-op (matches the pre-refactor catch-all [| _ -> []]). *)
        [])
@@ -352,10 +329,8 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
        exclusivity).  Operator_clear_requested is deliberately *not*
        arm-enforced beyond the terminal guard — see its arm below for
        the operator escape-hatch rationale.
-   Other events have no spec preconditions beyond NotTerminal and
-   fall through the catch-all.  The overflow-lifecycle preconditions
-   (Context_overflow_detected, Auto_compact_triggered) were retired with
-   their events (#26546).
+   Other events have no spec preconditions beyond NotTerminal and are
+   listed explicitly in the final arm.
 
    Background:
      - iter 9 audit memo: docs/tla-audit/ksm-precondition-enforcement-gap-2026-05-12.md
@@ -373,7 +348,8 @@ let check_event_precondition (c : conditions) (ev : event)
   | Operator_compact_requested ->
     (* TLA+ §OperatorCompactRequested.  Operator path differs from
        AutoCompactTriggered: it does NOT require [context_overflow], so
-       an operator can pre-emptively compact a not-yet-overflowed
+       an operator can pre-emptively compact a keeper whose context is not
+       yet near its budget
        keeper.  But the two buffer-op exclusivity preconditions are
        identical — concurrent compaction or handoff entangles ops. *)
     if c.compaction_active
@@ -406,13 +382,37 @@ let check_event_precondition (c : conditions) (ev : event)
        to make the deliberate minimal precondition explicit — adding any
        check beyond NotTerminal would weaken the operator escape-hatch. *)
     Ok ()
-  (* Other events have no TLA+ state preconditions beyond what
+  (* The remaining events have no TLA+ state preconditions beyond what
      [apply_event]'s terminal guard already enforces; their semantics
      are encoded in [update_conditions] + [derive_phase] (e.g.
      [Heartbeat_failed] always flips [heartbeat_healthy] to false
-     regardless of prior state).  Adding speculative arms here would
-     drift from the spec. *)
-  | _ -> Ok ()
+     regardless of prior state).  Adding speculative checks here would
+     drift from the spec.
+
+     They are listed rather than caught by [| _ ->] so that adding an
+     event forces this decision to be made once, in this arm, instead of
+     inheriting Ok () silently.  Listing is not a check: the answer for
+     every event below is still "no precondition". *)
+  | Heartbeat_ok
+  | Heartbeat_failed _
+  | Turn_succeeded
+  | Turn_failed _
+  | Context_measured _
+  | Compaction_started
+  | Compaction_completed
+  | Compaction_failed _
+  | Handoff_started
+  | Handoff_completed _
+  | Handoff_failed _
+  | Operator_pause
+  | Operator_resume
+  | Operator_stop _
+  | Stop_requested
+  | Drain_complete
+  | Fiber_started
+  | Fiber_terminated _
+  | Supervisor_restart_attempt _
+  | Credential_archived -> Ok ()
 ;;
 
 (* ── apply_event ───────────────────────────────────────── *)
@@ -425,13 +425,12 @@ let apply_event ~current_phase ~conditions ~event ~now =
      (which is wrong if the new phase is itself intended terminal).
      Mirrors the [can_transition] exhaustive refactor in #16747. *)
   match current_phase with
-  | Stopped | Dead ->
+  | Stopped ->
     Error
       (Terminal_state { current = current_phase; attempted_event = event_to_string event })
   | Offline
   | Running
   | Failing
-  | Overflowed
   | Compacting
   | HandingOff
   | Draining

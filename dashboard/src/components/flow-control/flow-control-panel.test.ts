@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type MockOperatorSnapshot = {
   inference_inflight?: {
-    boundary_owner: 'oas_runtime'
+    boundary_owner: 'agent_core_runtime'
     active: number
   } | null
 } | null
@@ -102,10 +102,10 @@ describe('FlowControlPanel', () => {
     expect(container.textContent).not.toContain('Refresh')
   })
 
-  it('shows the exact OAS inference observation when present', async () => {
+  it('shows the exact Agent Core inference observation when present', async () => {
     operatorSnapshot.value = {
       inference_inflight: {
-        boundary_owner: 'oas_runtime',
+        boundary_owner: 'agent_core_runtime',
         active: 1,
       },
     }
@@ -115,7 +115,7 @@ describe('FlowControlPanel', () => {
 
     const status = container.querySelector('[data-testid="flow-inference-inflight"]')
     expect(status).not.toBeNull()
-    expect(status!.textContent).toContain('oas_runtime')
+    expect(status!.textContent).toContain('agent_core_runtime')
     expect(status!.textContent).toContain('1 active inference')
   })
 

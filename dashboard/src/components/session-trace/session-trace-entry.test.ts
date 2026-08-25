@@ -192,7 +192,7 @@ describe('SessionTraceEntry', () => {
         ts: 4,
         ts_iso: '2026-04-03T00:03:00Z',
         kind: 'lifecycle',
-        sourceLane: 'oas',
+        sourceLane: 'agentCore',
         summary: 'LLM response',
         detail: {
           durable_kind: 'llm_response',

@@ -8,7 +8,13 @@ import type {
   DashboardScheduledAutomationSignal,
 } from '../../api'
 
-import { ScheduleAside, ScheduledAutomationPanel, selectWakeSignals, filterMatches } from './scheduled-automation-panel'
+import {
+  ScheduleAside,
+  ScheduledAutomationPanel,
+  filterMatches,
+  recurrenceLabel,
+  selectWakeSignals,
+} from './scheduled-automation-panel'
 
 function request(
   overrides: Partial<DashboardScheduledAutomationRequest> & { schedule_id: string },
@@ -80,6 +86,12 @@ describe('filterMatches', () => {
   it('treats the "all" filter as universal', () => {
     expect(filterMatches('all', request({ schedule_id: 'a1', status: 'failed' }))).toBe(true)
     expect(filterMatches('all', request({ schedule_id: 'a2', status: 'running' }))).toBe(true)
+  })
+})
+
+describe('recurrenceLabel', () => {
+  it('does not invent a one-shot recurrence when the wire omits it', () => {
+    expect(recurrenceLabel(request({ schedule_id: 'missing-recurrence' }))).toBe('-')
   })
 })
 
@@ -425,6 +437,28 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.textContent).toContain('페이로드')
   })
 
+  it('renders a controlled exact request that is absent from aggregate rows', () => {
+    const selectedRequest = request({
+      schedule_id: 'sched-outside-page',
+      payload_summary: 'Exact route payload',
+    })
+
+    render(
+      html`<${ScheduledAutomationPanel}
+        automation=${automation([])}
+        variant="v2"
+        selectedScheduleId=${selectedRequest.schedule_id}
+        selectedRequest=${selectedRequest}
+        onSelectSchedule=${vi.fn()}
+      />`,
+      container,
+    )
+
+    expect(container.querySelector(
+      '[data-schedule-detail-panel="sched-outside-page"]',
+    )?.textContent).toContain('Exact route payload')
+  })
+
   it('renders keeper wake dispatch receipts as queue proof in diagnostics and v2', async () => {
     const auto = automation([
       request({
@@ -459,6 +493,7 @@ describe('ScheduledAutomationPanel', () => {
           keeper_name: 'schedule-keeper',
           schedule_id: 'sched-keeper-wake',
           urgency: 'immediate',
+          result_delivery_policy: 'reply_to_origin',
           occurrence_status: 'awaiting_ack',
           activation_status: 'deferred',
           activation_reason: 'owner_unknown',
@@ -518,6 +553,7 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.querySelector('[data-dispatch-receipt-row="activation_reason"]')?.textContent).toContain('owner_unknown')
     expect(container.querySelector('[data-dispatch-receipt-row="activation_detail"]')?.textContent).toContain('owner metadata unavailable')
     expect(container.querySelector('[data-dispatch-receipt-row="post_id"]')?.textContent).toContain('schedule-due:sched-keeper-wake')
+    expect(container.querySelector('[data-dispatch-receipt-row="result_delivery_policy"]')?.textContent).toContain('reply_to_origin')
     const queueEvidence = container.querySelector('[data-schedule-keeper-queue-evidence="matched_pending"]')
     expect(queueEvidence).not.toBeNull()
     expect(queueEvidence?.getAttribute('data-schedule-keeper-queue-evidence-source')).toBe('durable_event_queue_snapshot')
@@ -746,6 +782,14 @@ describe('ScheduledAutomationPanel', () => {
         payload_kind: 'keeper.unknown',
         payload_summary: 'Missing recurrence projection',
       }),
+      request({
+        schedule_id: 'sched-retired-oneshot',
+        status: 'scheduled',
+        recurrence: { kind: 'oneshot' },
+        recurrence_kind: 'oneshot',
+        payload_kind: 'keeper.unknown',
+        payload_summary: 'Invalid recurrence projection',
+      }),
     ])
 
     render(html`<${ScheduledAutomationPanel} automation=${auto} variant="v2" />`, container)
@@ -756,7 +800,7 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.querySelector('[data-schedule-cadence-filter="daily"]')?.getAttribute('data-schedule-cadence-count')).toBe('1')
     expect(container.querySelector('[data-schedule-cadence-filter="oneshot"]')?.getAttribute('data-schedule-cadence-count')).toBe('1')
     expect(container.querySelector('[data-schedule-cadence-filter="cron"]')?.getAttribute('data-schedule-cadence-count')).toBe('1')
-    expect(container.querySelector('[data-schedule-cadence-filter="unknown"]')?.getAttribute('data-schedule-cadence-count')).toBe('1')
+    expect(container.querySelector('[data-schedule-cadence-filter="unknown"]')?.getAttribute('data-schedule-cadence-count')).toBe('2')
     expect(container.querySelector('[data-schedule-polling-strip]')?.getAttribute('data-schedule-polling-count')).toBe('1')
     expect(container.querySelector('[data-schedule-polling-card="sched-poll-live"]')).not.toBeNull()
     expect(container.querySelector('[data-schedule-polling-card="sched-poll-terminal"]')).toBeNull()
@@ -788,6 +832,8 @@ describe('ScheduledAutomationPanel', () => {
 
     expect(container.querySelector('[data-schedule-id="sched-unknown-cadence"]')).not.toBeNull()
     expect(container.querySelector('[data-schedule-cadence-card="sched-unknown-cadence"]')?.getAttribute('data-schedule-cadence')).toBe('unknown')
+    expect(container.querySelector('[data-schedule-id="sched-retired-oneshot"]')).not.toBeNull()
+    expect(container.querySelector('[data-schedule-cadence-card="sched-retired-oneshot"]')?.getAttribute('data-schedule-cadence')).toBe('unknown')
   })
 
   it('filters schedule cards without filtering the wake signal feed', async () => {

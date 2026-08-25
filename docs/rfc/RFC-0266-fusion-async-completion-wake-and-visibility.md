@@ -1,3 +1,8 @@
+---
+rfc: "0266"
+status: Draft
+---
+
 # RFC-0266 — Fusion async-completion wake + in-progress 가시성
 
 | | |
@@ -26,7 +31,7 @@ RFC-0252 §4(line 71)는 "키퍼가 다음 턴에 observation으로 resolved_ans
 
 - **panel/judge/orchestrator 로직 무변경.** 이 RFC는 *완료 후 전달*만 다룬다.
 - **self-author board_signal 게이트 무변경.** board post가 작성자 키퍼를 깨우지 않는 것(self-author score 0)은 board 도배 방지를 위한 *의도된* 게이트다. 우회·약화하지 않는다. wake는 별도 typed stimulus로 구현한다.
-- **OAS 경계 무변경.** fusion 개념은 OAS에 노출하지 않는다(RFC-0252 §2 유지).
+- **agent_core 경계 무변경.** fusion 개념은 agent_core에 노출하지 않는다(RFC-0252 §2 유지).
 - **키퍼 턴 루프 단일 모델 유지.** wake는 평범한 단일-모델 턴을 시작시킬 뿐이다(심의는 이미 out-of-band로 끝났다).
 - **휴면 `Keeper_chat_queue` 경로 미사용.** `keeper_chat_consumer.ml`(1초 폴링 → turn)은 production enqueue 호출처가 0이라 휴면 상태다. 이를 깨워 쓰는 대신, 타입 안전한 닫힌 합타입 stimulus를 택한다(아래 §5 근거).
 

@@ -1,7 +1,7 @@
 
-(** Tool_input_validation — Pre-dispatch validation via OAS Tool_middleware.
+(** Tool_input_validation — Pre-dispatch validation via AGENT_CORE Tool_middleware.
 
-    Delegates to [Agent_sdk.Tool_middleware.make_validation_hook] for strict
+    Delegates to [Agent_core.Tool_middleware.make_validation_hook] for strict
     type coercion and structured error feedback.  The pre-hook preserves the
     MASC transport contract by stripping underscore-prefixed protocol markers
     before validation. *)
@@ -10,10 +10,10 @@
     Must be called after all tool schemas are registered (server init). *)
 val register_pre_hook : unit -> unit
 
-(** Validate and normalize a tool argument object through the same OAS
+(** Validate and normalize a tool argument object through the same AGENT_CORE
     middleware used by [register_pre_hook].
 
-    [?schema] lets direct OAS tool handlers validate against the schema they
+    [?schema] lets direct AGENT_CORE tool handlers validate against the schema they
     already hold, without depending on the global Tool_dispatch schema registry
     being populated in that execution path. When omitted, validation falls back
     to [Tool_dispatch.lookup_schema]. *)
@@ -39,3 +39,14 @@ val schema_shape : Yojson.Safe.t -> schema_shape
 val schema_shape_json : Yojson.Safe.t -> Yojson.Safe.t
 (** JSON form of {!schema_shape}. Omits [one_of_required] and [schema_errors]
     when empty. *)
+
+val constraint_declaration_paths : Yojson.Safe.t -> string list
+(** Every declared range/length constraint that pre-dispatch validation can
+    reach, as ["<field path>:<keyword>"] — [minimum], [maximum],
+    [exclusiveMinimum], [exclusiveMaximum], [minLength], [maxLength],
+    [minItems], [maxItems].
+
+    Enforcement descends through [properties] and object-form [items] only.
+    A declaration placed anywhere else (a [oneOf] branch, a tuple-form
+    [items]) would never be enforced, so tests compare this list against a
+    raw scan of the whole schema. *)

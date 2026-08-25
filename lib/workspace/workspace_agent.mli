@@ -4,7 +4,6 @@
     as a [Yojson.Safe.t] document for the MCP resource handlers and
     the [tool_agent] tool. *)
 
-open Masc_domain
 include module type of Workspace_utils
 include module type of Workspace_state
 

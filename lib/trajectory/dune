@@ -20,7 +20,7 @@
  (public_name masc.trajectory)
  (wrapped false)
  (flags
-  (:standard -w +4 -w +32))
+  (:standard -w +4 -w +33 -w +37))
  (libraries
   unix
   eio

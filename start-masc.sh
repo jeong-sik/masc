@@ -383,7 +383,7 @@ ask_config_bootstrap() {
     echo "Config directory not found: $config_dir" >&2
     echo "How would you like to proceed?" >&2
     echo "  [1] Bootstrap from repo config (excludes keepers)" >&2
-    echo "  [2] Create empty config (no keepers, no personas)" >&2
+    echo "  [2] Create empty config (no keepers)" >&2
     echo "  [3] Cancel" >&2
     printf "Choose [1]: " >&2
     read -r choice </dev/tty
@@ -423,7 +423,7 @@ bootstrap_base_path_config() {
     mkdir -p "$local_masc_dir"
     case "$mode" in
         empty)
-            mkdir -p "$local_config_dir/keepers" "$local_config_dir/personas" "$local_config_dir/prompts"
+            mkdir -p "$local_config_dir/keepers" "$local_config_dir/prompts"
             echo "[startup] Created empty config: $local_config_dir" >&2
             ;;
         skip)
@@ -547,9 +547,7 @@ load_base_path_env_local() {
         MASC_BASE_PATH \
         MASC_SIDECAR_ROOT \
         MASC_CONFIG_DIR \
-        MASC_PERSONAS_DIR \
-        MASC_WS_ENABLED \
-        MASC_WEBRTC_ENABLED
+        MASC_WS_ENABLED
     do
         preserve_env_override "$env_name"
     done
@@ -563,9 +561,7 @@ load_base_path_env_local() {
         MASC_BASE_PATH \
         MASC_SIDECAR_ROOT \
         MASC_CONFIG_DIR \
-        MASC_PERSONAS_DIR \
-        MASC_WS_ENABLED \
-        MASC_WEBRTC_ENABLED
+        MASC_WS_ENABLED
     do
         restore_env_override "$env_name"
     done
@@ -578,13 +574,6 @@ repo_local_config_dir_match() {
     candidate="${candidate%/}"
     [ -n "$candidate" ] || return 1
     [ "$candidate" = "$REPO_ENV_ROOT/config" ] || [ "$candidate" = "$SCRIPT_DIR/config" ]
-}
-
-repo_local_personas_dir_match() {
-    local candidate="${1:-}"
-    candidate="${candidate%/}"
-    [ -n "$candidate" ] || return 1
-    [ "$candidate" = "$REPO_ENV_ROOT/config/personas" ] || [ "$candidate" = "$SCRIPT_DIR/config/personas" ]
 }
 
 clear_repo_local_config_for_explicit_base_path() {
@@ -609,11 +598,6 @@ clear_repo_local_config_for_explicit_base_path() {
         echo "[startup] Ignoring repo-local MASC_CONFIG_DIR=${MASC_CONFIG_DIR%/} because --base-path was supplied; defaulting to $resolved_base_path/.masc/config" >&2
         unset MASC_CONFIG_DIR
     fi
-
-    if repo_local_personas_dir_match "${MASC_PERSONAS_DIR:-}"; then
-        echo "[startup] Ignoring repo-local MASC_PERSONAS_DIR=${MASC_PERSONAS_DIR%/} because --base-path was supplied; personas will resolve from the active config root" >&2
-        unset MASC_PERSONAS_DIR
-    fi
 }
 
 # Caller-provided env must win over repo-local .env/.env.local files.
@@ -624,9 +608,7 @@ for env_name in \
     MASC_BASE_PATH \
     MASC_SIDECAR_ROOT \
     MASC_CONFIG_DIR \
-    MASC_PERSONAS_DIR \
-    MASC_WS_ENABLED \
-    MASC_WEBRTC_ENABLED
+    MASC_WS_ENABLED
 do
     preserve_env_override "$env_name"
 done
@@ -648,9 +630,7 @@ for env_name in \
     MASC_BASE_PATH \
     MASC_SIDECAR_ROOT \
     MASC_CONFIG_DIR \
-    MASC_PERSONAS_DIR \
-    MASC_WS_ENABLED \
-    MASC_WEBRTC_ENABLED
+    MASC_WS_ENABLED
 do
     restore_env_override "$env_name"
 done
@@ -719,9 +699,6 @@ if [ -z "${MASC_WS_ENABLED+x}" ]; then
     export MASC_WS_ENABLED=1
 fi
 
-if [ -z "${MASC_WEBRTC_ENABLED+x}" ]; then
-    export MASC_WEBRTC_ENABLED=1
-fi
 
 # Shared local runtime should keep the streamable-HTTP MCP entry aligned
 # with the bearer token minted during server bootstrap. Set to 0 to opt out.
@@ -1003,9 +980,6 @@ bootstrap_base_path_config "$RESOLVED_BASE_PATH"
 if [ -z "${MASC_CONFIG_DIR:-}" ]; then
     export MASC_CONFIG_DIR="$RESOLVED_BASE_PATH/.masc/config"
 fi
-# Leave MASC_PERSONAS_DIR unset unless the caller explicitly overrides it.
-# The server-side config resolver will then use "$MASC_CONFIG_DIR/personas".
-
 # Load provider credentials from the active workspace after base-path resolution
 # and config bootstrap. This keeps --base-path/--path starts from importing
 # another workspace's .masc/config/.env.local via the caller's current directory.

@@ -1,21 +1,5 @@
 open Masc_board_handlers
 
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
 
 (** Board_tool_format — formatters, parsers, JSON arg coercion,
     truncated-markdown detector, and the Yojson-error boundary shared
@@ -33,7 +17,7 @@ let author_raw_agent_name_meta_key = raw_agent_name_meta_key ~field:"author"
    [Time_compat.now ()] inside functions whose signatures promised a pure
    [float -> string]: the clock was a hidden second input. A re-listed post
    therefore drifted "7m ago" -> "8m ago" while nothing about the post changed.
-   Measured on one rondo turn: 42 [masc_board_list] calls returning the same
+   Measured on one live Keeper turn: 42 [masc_board_list] calls returning the same
    878B of board state split across three distinct byte sequences, purely
    because the minute counter advanced.
 
@@ -61,7 +45,17 @@ let format_expiry expires_at =
 let board_error_to_string = function
   | Board.Invalid_id s -> Printf.sprintf "Invalid ID: %s" s
   | Board.Post_not_found s -> Printf.sprintf "Post not found: %s" s
-  | Board.Comment_not_found s -> Printf.sprintf "Comment not found: %s" s
+  | Board.Comment_not_found s ->
+    (* A guessed id can pass the [Comment_id] shape check — all-zero hex is
+       valid hex — so this lookup miss is the first place a caller learns the
+       address was made up (keeper:polisher voted c-000…0, 2026-08-24). The
+       id parsers' [Invalid_id] message already names the two producers of
+       real ids; the miss teaches the same recovery, not just the dead id. *)
+    Printf.sprintf
+      "Comment not found: %s. Use an id the masc_board_post_get comment \
+       listing or the masc_board_comment result returns; a guessed id that \
+       matches the c-hex shape still fails here."
+      s
   | Board.Io_error s -> Printf.sprintf "I/O error: %s" s
   | Board.Validation_error s -> Printf.sprintf "Validation error: %s" s
   | Board.Already_voted s -> Printf.sprintf "Already voted: %s" s
@@ -73,9 +67,16 @@ let board_error_failure_class = function
   | Board.Post_not_found _ | Board.Comment_not_found _
   (* Owner-gated rejection: retrying with the same actor cannot succeed,
      so it is a workflow rejection rather than a transient runtime failure. *)
-  | Board.Unauthorized _ ->
+  | Board.Unauthorized _
+  (* The id itself has the wrong shape (a typed id parser refused it), so
+     the same call can never succeed; the message names the accepted shape. *)
+  | Board.Invalid_id _ ->
     Tool_result.Workflow_rejection
-  | _ -> Tool_result.Runtime_failure
+  | Board.Io_error _
+  | Board.Validation_error _
+  | Board.Already_voted _
+  | Board.Already_exists _ ->
+    Tool_result.Runtime_failure
 ;;
 
 (* RFC-0189 PR-1b.2 — typed helper. Returns [Tool_result.result] directly
@@ -157,12 +158,20 @@ let format_comment ?(indent = 0) (c : Board.comment) =
     then Printf.sprintf ", 👍%d 👎%d" c.votes_up c.votes_down
     else ""
   in
+  (* The id is what [masc_board_comment_vote] and a threaded
+     [masc_board_comment] take, and this listing is where the rejection tells a
+     caller to look for it ("the id masc_board_post_get and masc_board_comment
+     return"). It was not in the line. Live tool-call logs carry the cost:
+     [masc_board_comment_vote] failed 160 times out of 239, and the ids sent
+     were c-placeholder, c-b1, c-???, and in 28 calls the comment's own text in
+     place of an id. *)
   Printf.sprintf
-    "%s%s%s: %s [%s%s]"
+    "%s%s%s: %s [%s, %s%s]"
     prefix
     tree_prefix
     (Board.Agent_id.to_string c.author)
     c.content
+    (Board.Comment_id.to_string c.id)
     time_str
     vote_str
 ;;
@@ -463,7 +472,7 @@ let provenance_arg args =
     Convert a stray [Yojson.Safe.Util.Type_error] from a board-tool
     handler into a structured [Tool_result.error] so the MCP transport
     sees a typed message rather than an opaque exception payload (cf.
-    task-213 board post p-1efba4b2311478dff37fff9fdbfea483, sangsu
+    task-213 board post p-1efba4b2311478dff37fff9fdbfea483, example-keeper
     broadcast 2026-05-15T10:51:20Z). Diagnostic, not a workaround: the
     offending value field points the next triager at the failing
     field. *)

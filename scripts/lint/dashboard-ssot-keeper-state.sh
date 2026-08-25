@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# RFC-0135 §9 — dashboard keeper-state SSOT guard.
+# Dashboard keeper-state SSOT guard.
 #
 # Block patterns that re-introduce the dual-path normalization fixed
 # across PR-1 ~ PR-7. Each pattern below either:
@@ -9,8 +9,6 @@
 #   (c) re-introduces a Korean label that collides between state-noun
 #       and action-verb contexts.
 #
-# Reference RFC: docs/rfc/RFC-0135-dashboard-keeper-operational-ssot.md
-#
 # Signals checked:
 #   §9-1  Flat `keeper.runtime_blocker_*` read outside the SSOT module
 #         (caller must go through deriveKeeperOperationalState).
@@ -19,7 +17,7 @@
 #   §9-3  Local `normalizePhase` declaration in dashboard/src — phase
 #         casing SSOT lives in `toKeeperPhase` (keeper-store-normalize).
 #   §9-4  `default:` arm added to deriveKeeperOperationalState `switch`
-#         on state.kind — RFC-0135 §9 forbids catch-all.
+#         on state.kind; the closed sum forbids a catch-all.
 #   §9-5  Same Korean word emitted as both a state noun (badge/chip) and
 #         an action verb (button label) in the same file — append `하기`
 #         to the verb form per PR-7.
@@ -244,7 +242,7 @@ if [[ -n "$allowlist_lines" ]]; then
 fi
 
 if (( ${#unmatched_violations[@]} > 0 )); then
-  echo "RFC-0135 §9 SSOT guard — ${#unmatched_violations[@]} new violation(s):"
+  echo "Keeper-state SSOT guard — ${#unmatched_violations[@]} new violation(s):"
   for v in "${unmatched_violations[@]}"; do
     echo "  $v"
   done
@@ -255,7 +253,7 @@ if (( ${#unmatched_violations[@]} > 0 )); then
 fi
 
 if (( ${#stale_allowlist[@]} > 0 )); then
-  echo "RFC-0135 §9 SSOT guard — ${#stale_allowlist[@]} stale allowlist entry/entries:"
+  echo "Keeper-state SSOT guard — ${#stale_allowlist[@]} stale allowlist entry/entries:"
   for entry in "${stale_allowlist[@]}"; do
     echo "  $entry"
   done
@@ -263,5 +261,5 @@ if (( ${#stale_allowlist[@]} > 0 )); then
 fi
 
 violations_count=${#violations[@]}
-echo "RFC-0135 §9 SSOT guard: clean (${violations_count} allowlisted violation(s))"
+echo "Keeper-state SSOT guard: clean (${violations_count} allowlisted violation(s))"
 exit 0

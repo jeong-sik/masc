@@ -23,9 +23,6 @@ let () = Mirage_crypto_rng_unix.use_default ()
 let active_verifications_dir base_path =
   Filename.concat (CU.masc_dir_from_base_path ~base_path) "verifications"
 
-let legacy_verifications_dir base_path =
-  Filename.concat base_path "verifications"
-
 (** Use a temporary directory for each test.
 
     Cleanup goes through [Masc_test_deps.cleanup_test_workspace], which stats
@@ -53,20 +50,53 @@ let with_eio_temp_dir_and_clock f =
     ~finally:Fs_compat.clear_fs
     (fun () -> with_temp_dir (f ~clock:(Eio.Stdenv.clock env)))
 
-let contains_substring text needle =
-  let text_len = String.length text in
-  let needle_len = String.length needle in
-  let rec loop offset =
-    if offset + needle_len > text_len then false
-    else if String.sub text offset needle_len = needle then true
-    else loop (offset + 1)
+let scan_exn base_path =
+  match V.list_requests base_path with
+  | Ok scan -> scan
+  | Error detail -> Alcotest.fail detail
+;;
+
+(* Most cases here care only about the requests that read. Asserting the scan
+   found nothing unreadable keeps them honest: without it a case could pass
+   while quietly rejecting the record it meant to be reading. *)
+let list_requests_exn base_path =
+  let scan = scan_exn base_path in
+  Alcotest.(check int)
+    "no unreadable requests" 0 (List.length scan.V.unreadable);
+  scan.V.readable
+;;
+
+let ensure_keeper_meta config name =
+  match
+    Result.bind
+      (Masc_test_deps.meta_of_json_fixture
+         (`Assoc [ "name", `String name; "always_allow", `Bool true ]))
+      (Masc.Keeper_meta_store.replace_snapshot config)
+  with
+  | Ok _ -> ()
+  | Error detail -> Alcotest.failf "write keeper meta failed: %s" detail
+;;
+
+let ensure_producer_playground (config : Workspace_core.config) producer =
+  let path =
+    Keeper_sandbox_config.host_root_abs_of_agent
+      ~base_path:
+        (Workspace_verification_store.project_root_of_base_path config.base_path)
+      ~agent_name:producer
   in
-  needle_len = 0 || loop 0
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir)
+    then (
+      mkdir_p (Filename.dirname dir);
+      try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  in
+  mkdir_p path
+;;
 
 let test_verdict_event_preserves_typed_authority () =
   let event =
     VP.For_testing.verdict_event_json
-      ~authority:(Masc_domain.System_llm_agent { agent_run_id = "oas-agent-run-7" })
+      ~authority:(Masc_domain.System_llm_agent { agent_run_id = "agent_core-agent-run-7" })
       ~task_id:"task-001"
       ~verification_id:"vrf-001"
       ~verdict:Masc_domain.Verdict_approved
@@ -84,7 +114,7 @@ let test_verdict_event_preserves_typed_authority () =
     (event |> member "authority_kind" |> to_string);
   Alcotest.(check string)
     "authority actor"
-    "oas-agent-run-7"
+    "agent_core-agent-run-7"
     (event |> member "authority_actor" |> to_string);
   Alcotest.(check bool)
     "event does not expose verifier role"
@@ -93,10 +123,74 @@ let test_verdict_event_preserves_typed_authority () =
      | `Assoc fields -> List.mem_assoc "verifier" fields
      | _ -> Alcotest.fail "verdict event must be an object")
 
+(* The stalled-review board projection is the only surface that tells the
+   assignee a non-retryable deferral happened and how to move forward.
+   Pin the content naming both forward paths and the typed metadata. *)
+let test_stalled_projection_names_forward_paths () =
+  let content =
+    VP.For_testing.stalled_board_content
+      ~task_id:"task-101"
+      ~verification_id:"vrf-101"
+      ~gate:"artifact_unreadable"
+      ~detail:"evidence path escapes the playground"
+  in
+  let contains needle =
+    let nl = String.length needle and hl = String.length content in
+    let rec loop i =
+      i + nl <= hl
+      && (String.equal (String.sub content i nl) needle || loop (i + 1))
+    in
+    nl = 0 || loop 0
+  in
+  List.iter
+    (fun needle ->
+       Alcotest.(check bool)
+         (Printf.sprintf "content names %S" needle)
+         true
+         (contains needle))
+    [ "task-101"
+    ; "vrf:vrf-101"
+    ; "artifact_unreadable"
+    ; "evidence path escapes the playground"
+    ; "submit_for_verification"
+    ; "HITL"
+    ]
+
+let test_stalled_metadata_preserves_typed_authority () =
+  let metadata =
+    VP.For_testing.stalled_metadata
+      ~authority:(Masc_domain.System_llm_agent { agent_run_id = "agent_core-agent-run-9" })
+      ~task_id:"task-102"
+      ~verification_id:"vrf-102"
+      ~gate:"review_preparation"
+      ~detail:"required artifact list is empty"
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "metadata type"
+    "verification_stalled"
+    (metadata |> member "type" |> to_string);
+  Alcotest.(check string)
+    "task id"
+    "task-102"
+    (metadata |> member "task_id" |> to_string);
+  Alcotest.(check string)
+    "authority kind"
+    "system_llm_agent"
+    (metadata |> member "authority_kind" |> to_string);
+  Alcotest.(check string)
+    "gate"
+    "review_preparation"
+    (metadata |> member "gate" |> to_string);
+  Alcotest.(check string)
+    "detail"
+    "required artifact list is empty"
+    (metadata |> member "detail" |> to_string)
+
 let test_rejected_verdict_event_preserves_wire_type () =
   let event =
     VP.For_testing.verdict_event_json
-      ~authority:(Masc_domain.System_llm_agent { agent_run_id = "oas-agent-run-8" })
+      ~authority:(Masc_domain.System_llm_agent { agent_run_id = "agent_core-agent-run-8" })
       ~task_id:"task-002"
       ~verification_id:"vrf-002"
       ~verdict:(Masc_domain.Verdict_rejected { reason = "insufficient evidence" })
@@ -116,7 +210,7 @@ let test_rejected_verdict_event_preserves_wire_type () =
 (* --- Criterion tests --- *)
 
 let test_criterion_roundtrip () =
-  let criteria = [ V.Custom "output should be helpful"; V.Custom "" ] in
+  let criteria = [ "output should be helpful"; "artifact exists" ] in
   List.iter (fun c ->
     let json = V.criterion_to_yojson c in
     match V.criterion_of_yojson json with
@@ -128,17 +222,10 @@ let test_criterion_roundtrip () =
 
 let test_criterion_of_yojson_errors () =
   let bad_cases = [
-    (`String "not an object", "not object");
-    (`Assoc [], "missing type");
-    (`Assoc [("type", `String "banana")], "unknown type");
-    (* The three criteria that no producer ever built -- a substring check, its
-       negation and a schema match -- are gone. A persisted request naming one
-       is now rejected at the parse instead of loading and being refused by the
-       completion authority. *)
-    (`Assoc [("type", `String "contains"); ("value", `String "hello")], "contains");
-    (`Assoc [("type", `String "not_contains"); ("value", `String "err")], "not_contains");
-    (`Assoc [("type", `String "schema_match"); ("schema", `Assoc [])], "schema_match");
-    (`Assoc [("type", `String "custom")], "custom missing description");
+    (`String "", "blank");
+    (`String "  ", "whitespace");
+    (`Assoc [], "object");
+    (`Null, "null");
   ] in
   List.iter (fun (json, label) ->
     match V.criterion_of_yojson json with
@@ -151,7 +238,7 @@ let valid_request_json =
     [ "id", `String "vrf-1"
     ; "task_id", `String "task-1"
     ; "output", `Assoc [ "evidence_refs", `List [ `String "note:done" ] ]
-    ; "criteria", `List [ `Assoc [ "type", `String "custom"; "description", `String "done" ] ]
+    ; "criteria", `List [ `String "done" ]
     ; "worker", `String "worker-1"
     ; "created_at", `Float 1234.5
     ]
@@ -183,7 +270,7 @@ let test_request_of_yojson_is_strict () =
       [ "id", `String "vrf-1"
       ; "task_id", `String "task-1"
       ; "output", `Null
-      ; "criteria", `List [ `Assoc [ "type", `String "custom" ] ]
+      ; "criteria", `List [ `String "" ]
       ; "worker", `String "worker-1"
       ; "created_at", `Float 1234.5
       ]);
@@ -225,14 +312,68 @@ let test_system_llm_authority_helpers_are_typed () =
     Alcotest.(check string) "typed rejection reason" "missing evidence" reason
   | Masc_domain.Verdict_approved -> Alcotest.fail "reject must remain a rejection"
 
+let test_system_llm_retry_disposition_is_typed () =
+  let module For_testing = Masc.Completion_authority_agent.For_testing in
+  (match For_testing.process_outcome_of_evaluator_retryable (Some true) with
+   | For_testing.Retryable_deferred -> ()
+   | For_testing.Committed | For_testing.Deferred ->
+     Alcotest.fail "typed retryable evaluator failure must re-arm the lane");
+  List.iter
+    (fun retryable ->
+       match For_testing.process_outcome_of_evaluator_retryable retryable with
+       | For_testing.Deferred -> ()
+       | For_testing.Committed | For_testing.Retryable_deferred ->
+         Alcotest.fail "non-retryable or unclassified deferral must await action")
+    [ Some false; None ]
+
+(* One submission must review that submission. The backlog read stays whole —
+   the daemon still needs fresh task state — but the scope decides which awaiting
+   entries it acts on, so an unrelated submit no longer re-reviews every other
+   awaiting Task (task-443, 2026-08-23: 45 attempts in 5h on the same input). *)
+let test_scan_scope_limits_a_submission_to_its_own_verification () =
+  let module For_testing = Masc.Completion_authority_agent.For_testing in
+  let key task_id verification_id : For_testing.review_key =
+    { task_id; verification_id }
+  in
+  let stuck = key "task-443" "vrf-1" in
+  let fresh = key "task-465" "vrf-9" in
+  let entries = [ stuck, "producer-a"; fresh, "producer-b" ] in
+  let names selected =
+    List.map
+      (fun ((k : For_testing.review_key), _) -> k.task_id ^ "/" ^ k.verification_id)
+      selected
+  in
+  Alcotest.(check (list string))
+    "a named target reviews only itself"
+    [ "task-465/vrf-9" ]
+    (names (For_testing.entries_in_scope ~scope:(For_testing.Targets [ fresh ]) entries));
+  Alcotest.(check (list string))
+    "boot recovery still reads everything"
+    [ "task-443/vrf-1"; "task-465/vrf-9" ]
+    (names (For_testing.entries_in_scope ~scope:For_testing.Whole_backlog entries));
+  (* A re-submission carries a new verification_id, so it is a different key and
+     is admitted; the stale key matches nothing and drops out on its own. *)
+  Alcotest.(check (list string))
+    "a stale target admits nothing"
+    []
+    (names
+       (For_testing.entries_in_scope
+          ~scope:(For_testing.Targets [ key "task-443" "vrf-0" ])
+          entries));
+  Alcotest.(check (list string))
+    "an empty target list reviews nothing"
+    []
+    (names (For_testing.entries_in_scope ~scope:(For_testing.Targets []) entries))
+
+
 let test_system_llm_review_notes_are_metadata_only () =
   let request : V.verification_request =
     { id = "vrf-metadata-only"
     ; task_id = "task-metadata-only"
     ; output =
         `Assoc [ "secret_output", `String "must not be duplicated" ]
-    ; criteria = [ V.Custom "secret criterion should stay in the audit store" ]
-    ; worker = "keeper-executor-agent"
+    ; criteria = [ "secret criterion should stay in the audit store" ]
+    ; worker = "keeper-omega-agent"
     ; created_at = 1234.5
     }
   in
@@ -270,6 +411,7 @@ let test_system_llm_review_notes_are_metadata_only () =
     ; generator_runtime = None
     ; gate = Masc.Task.Anti_rationalization.Structured_tool
     ; fallback_reason = None
+    ; evaluator_error_retryable = None
     }
   in
   let notes =
@@ -282,55 +424,55 @@ let test_system_llm_review_notes_are_metadata_only () =
   Alcotest.(check bool)
     "artifact content is not duplicated into task notes"
     false
-    (contains_substring notes "secret artifact content must not be duplicated");
+    (String_util.contains_substring notes "secret artifact content must not be duplicated");
   Alcotest.(check bool)
     "narrative content is not duplicated into task notes"
     false
-    (contains_substring notes "secret narrative must not be duplicated");
+    (String_util.contains_substring notes "secret narrative must not be duplicated");
   Alcotest.(check bool)
     "verification output is not duplicated into task notes"
     false
-    (contains_substring notes "must not be duplicated");
+    (String_util.contains_substring notes "must not be duplicated");
   Alcotest.(check bool)
     "verification criteria are not duplicated into task notes"
     false
-    (contains_substring notes "secret criterion should stay in the audit store");
+    (String_util.contains_substring notes "secret criterion should stay in the audit store");
   Alcotest.(check bool)
     "artifact reference remains observable"
     true
-    (contains_substring notes "artifact:proof.txt");
+    (String_util.contains_substring notes "artifact:proof.txt");
   Alcotest.(check bool)
     "truncation remains observable"
     true
-    (contains_substring notes "truncated");
+    (String_util.contains_substring notes "truncated");
   Alcotest.(check bool)
     "verification creation time remains observable"
     true
-    (contains_substring notes "1234.5");
+    (String_util.contains_substring notes "1234.5");
   Alcotest.(check bool)
     "rejection reason remains observable"
     true
-    (contains_substring notes "insufficient proof");
+    (String_util.contains_substring notes "insufficient proof");
   Alcotest.(check bool)
     "verification identity remains observable"
     true
-    (contains_substring notes "vrf-metadata-only");
+    (String_util.contains_substring notes "vrf-metadata-only");
   Alcotest.(check bool)
     "read error detail is not duplicated into task notes"
     false
-    (contains_substring notes "/private/producer/secret.txt");
+    (String_util.contains_substring notes "/private/producer/secret.txt");
   Alcotest.(check bool)
     "stable read error code remains observable"
     true
-    (contains_substring notes "read_error");
+    (String_util.contains_substring notes "read_error");
   Alcotest.(check bool)
     "invalid raw reference is not duplicated into task notes"
     false
-    (contains_substring notes "/private/producer/invalid-reference.txt");
+    (String_util.contains_substring notes "/private/producer/invalid-reference.txt");
   Alcotest.(check bool)
     "stable invalid-reference code remains observable"
     true
-    (contains_substring notes "invalid_reference");
+    (String_util.contains_substring notes "invalid_reference");
   let unavailable_metadata =
     VS.submitted_evidence_access_metadata_to_yojson
       (VS.Evidence_unavailable
@@ -343,11 +485,11 @@ let test_system_llm_review_notes_are_metadata_only () =
   Alcotest.(check bool)
     "unavailable detail is not duplicated into metadata"
     false
-    (contains_substring unavailable_metadata "/private/producer/request.json")
+    (String_util.contains_substring unavailable_metadata "/private/producer/request.json")
   ; Alcotest.(check bool)
       "unavailable reason code remains observable"
       true
-      (contains_substring unavailable_metadata "request_load_error")
+      (String_util.contains_substring unavailable_metadata "request_load_error")
   ; let unavailable_audit =
       VS.submitted_evidence_access_to_yojson
         (VS.Evidence_unavailable
@@ -360,13 +502,13 @@ let test_system_llm_review_notes_are_metadata_only () =
     Alcotest.(check bool)
       "full audit keeps the unavailable detail"
       true
-      (contains_substring unavailable_audit "/private/producer/request.json")
+      (String_util.contains_substring unavailable_audit "/private/producer/request.json")
 
 let test_unreadable_evidence_uses_structured_current_contract () =
   let request : VS.request_header =
     { id = "vrf-structured-reason"
     ; task_id = "task-structured-reason"
-    ; worker = "keeper-executor-agent"
+    ; worker = "keeper-omega-agent"
     ; created_at = 1.0
     }
   in
@@ -425,7 +567,7 @@ let test_invalid_reference_snapshot_rejects_hidden_payload () =
          ~task_id:"task-001"
          ~output
          ~criteria:[]
-         ~worker:"keeper-executor-agent"
+         ~worker:"keeper-omega-agent"
          ()
      with
      | Ok _ -> ()
@@ -435,14 +577,14 @@ let test_invalid_reference_snapshot_rejects_hidden_payload () =
         ~base_path
         ~request_id
         ~task_id:"task-001"
-        ~task_worker:"keeper-executor-agent"
+        ~task_worker:"keeper-omega-agent"
         ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
     with
     | VS.Evidence_unavailable { reason = VS.Evidence_snapshot_invalid detail; _ } ->
       Alcotest.(check bool)
         "hidden invalid-reference payload is rejected"
         true
-        (contains_substring detail "payload-free")
+        (String_util.contains_substring detail "payload-free")
     | _ -> Alcotest.fail "hidden invalid-reference payload was accepted")
 
 let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
@@ -466,10 +608,9 @@ let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
       | Error detail -> Alcotest.fail detail
     in
     (match
-       Masc.Keeper_meta_store.persist_meta
-         config
+       Masc.Keeper_fs.save_json_atomic
          (Masc.Keeper_types_profile.keeper_meta_path config keeper_name)
-         meta
+         (Masc.Keeper_meta_json.meta_to_json meta)
      with
      | Ok () -> ()
      | Error detail -> Alcotest.fail detail);
@@ -530,8 +671,8 @@ let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
 let test_system_llm_rejection_prefers_registered_producer_binding () =
   with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in
-    let keeper_name = "keeper-executor-agent" in
-    let producer = "keeper-executor-agent-agent" in
+    let keeper_name = "keeper-omega-agent" in
+    let producer = "keeper-omega-agent-agent" in
     let meta_json =
       `Assoc
         [ "name", `String keeper_name
@@ -609,7 +750,7 @@ let test_system_llm_rejection_prefers_registered_producer_binding () =
 let test_system_llm_rejection_does_not_derive_unregistered_keeper () =
   with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in
-    let producer = "keeper-executor-agent-agent" in
+    let producer = "keeper-omega-agent-agent" in
     Masc.Keeper_registry.For_testing.clear ();
     Fun.protect
       ~finally:Masc.Keeper_registry.For_testing.clear
@@ -652,6 +793,9 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
     Prompt_registry.set_markdown_dir prompt_dir;
     Masc.Prompt_defaults.init ();
     let previous_runtime = Atomic.get Workspace_hooks.get_default_runtime_id_fn in
+    let previous_lane_slots =
+      Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+    in
     let previous_reviewer =
       Atomic.get Masc.Task.Anti_rationalization.run_llm_reviewer_fn
     in
@@ -659,35 +803,90 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
       Atomic.get Workspace_hooks.verification_notify_verdict_fn
     in
     let previous_submitted = Atomic.get Workspace_hooks.verification_submitted_fn in
+    let previous_change_observer =
+      Atomic.get Masc.Verification_run_registry.change_observer_fn
+    in
     Fun.protect
       ~finally:(fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_runtime;
+        Atomic.set
+          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+          previous_lane_slots;
         Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer;
         Atomic.set Workspace_hooks.verification_notify_verdict_fn previous_notification;
-        Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted)
+        Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted;
+        Atomic.set
+          Masc.Verification_run_registry.change_observer_fn
+          previous_change_observer)
       (fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn
           (fun () -> "test-system-evaluator");
+        (* RFC-0361 D7(a): the completion-authority review resolves only the
+           verifier_exact lane; the default runtime hook above no longer
+           reaches it. *)
+        Atomic.set
+          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+          (fun () -> Ok [ "test-system-evaluator" ]);
         Eio.Switch.run (fun sw ->
           let reviewer_called, resolve_reviewer_called = Eio.Promise.create () in
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
+          let run_completed, resolve_run_completed = Eio.Promise.create () in
+          let committed_verification_id = ref None in
+          (* The verdict notification fires inside Workspace.commit_verdict_r,
+             which the authority evaluates as an argument to its own [complete]
+             -- so mark_completed necessarily runs after it. That order is not
+             incidental: a failed commit becomes the Commit_failed outcome, so
+             the outcome cannot be known before the commit is attempted. Waiting
+             on the notification and then reading the registry therefore always
+             observes Running. Wait for the registry's own change instead. *)
+          Atomic.set Masc.Verification_run_registry.change_observer_fn (fun () ->
+            previous_change_observer ();
+            match !committed_verification_id with
+            | None -> ()
+            | Some verification_id ->
+              (match
+                 Masc.Verification_run_registry.get
+                   (Masc.Verification_run_registry.global ())
+                   ~verification_id
+               with
+               | Some { status = Masc.Verification_run_registry.Completed _; _ }
+                 when not (Eio.Promise.is_resolved run_completed) ->
+                 Eio.Promise.resolve resolve_run_completed ()
+               | _ -> ()));
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result ~on_runtime_attempt_error:_ () ->
+               on_tool_result
+                 ~input:(`Assoc [ "path", `String "evidence.md" ])
+                 (Tool_result.ok
+                    ~tool_name:"verification_read_file"
+                    ~start_time:0.0
+                    "verified evidence");
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok (Some Masc.Task.Anti_rationalization.Approve));
           Atomic.set Workspace_hooks.verification_notify_verdict_fn
             (fun ~task_id ~authority ~verification_id ~decision ->
+               committed_verification_id := Some verification_id;
                previous_notification
                  ~task_id
                  ~authority
                  ~verification_id
-                 ~decision;
+               ~decision;
                Eio.Promise.resolve resolve_verdict_committed ());
+          let contract : Masc_domain.task_contract =
+            { strict = true
+            ; completion_contract = [ "system evaluator approves the submitted evidence" ]
+            ; required_evidence = [ "system review evidence" ]
+            ; inspect_gate_evidence = []
+            ; verify_gate_evidence = []
+            }
+          in
           let config = W.default_config base_path in
           ignore (W.init config ~agent_name:(Some "system-test-worker"));
+          ensure_producer_playground config "system-test-worker";
           ignore
             (W.add_task
                config
+               ~contract
                ~title:"system authority test"
                ~priority:1
                ~description:"the system LLM must review this evidence");
@@ -708,8 +907,36 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
            with
            | Ok _ -> ()
            | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error));
-          Eio.Promise.await reviewer_called;
-          Eio.Promise.await verdict_committed;
+          Eio.Time.with_timeout_exn clock 5.0 (fun () ->
+            Eio.Promise.await reviewer_called;
+            Eio.Promise.await verdict_committed;
+            Eio.Promise.await run_completed);
+          let verification_id =
+            match !committed_verification_id with
+            | Some verification_id -> verification_id
+            | None -> Alcotest.fail "completion notification omitted verification id"
+          in
+          (match
+             Masc.Verification_run_registry.get
+               (Masc.Verification_run_registry.global ())
+               ~verification_id
+           with
+           | Some
+               { status = Masc.Verification_run_registry.Completed { tools = [ tool ]; _ }
+               ; _
+               } ->
+             Alcotest.(check string)
+               "lookup evidence tool"
+               "verification_read_file"
+               tool.tool_name
+           | Some
+               { status = Masc.Verification_run_registry.Completed { tools; _ }
+               ; _
+               } ->
+             Alcotest.failf "expected one lookup observation, got %d" (List.length tools)
+           | Some { status = Masc.Verification_run_registry.Running; _ } ->
+             Alcotest.fail "verification run stayed running after verdict commit"
+           | None -> Alcotest.fail "verification run record was not persisted");
           match W.get_tasks_raw config with
           | [ { task_status = Masc_domain.Done _; _ } ] -> ()
           | [ task ] ->
@@ -719,28 +946,15 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
           | tasks -> Alcotest.failf "expected one task, got %d" (List.length tasks)))
   )
 
-let test_system_llm_agent_rejects_invalid_contract_without_stalling () =
+let test_system_llm_agent_defers_invalid_contract_without_rejecting_task () =
   with_eio_temp_dir_and_clock (fun ~clock base_path ->
     Masc.Workspace_metric_hooks.install ();
-    let previous_notification =
-      Atomic.get Workspace_hooks.verification_notify_verdict_fn
-    in
     let previous_submitted = Atomic.get Workspace_hooks.verification_submitted_fn in
     Fun.protect
       ~finally:(fun () ->
-        Atomic.set Workspace_hooks.verification_notify_verdict_fn previous_notification;
         Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted)
       (fun () ->
         Eio.Switch.run (fun sw ->
-          let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
-          Atomic.set Workspace_hooks.verification_notify_verdict_fn
-            (fun ~task_id ~authority ~verification_id ~decision ->
-               previous_notification
-                 ~task_id
-                 ~authority
-                 ~verification_id
-                 ~decision;
-               Eio.Promise.resolve resolve_verdict_committed ());
           let config = W.default_config base_path in
           ignore (W.init config ~agent_name:(Some "contract-retry-worker"));
           ignore
@@ -779,20 +993,51 @@ let test_system_llm_agent_rejects_invalid_contract_without_stalling () =
             ~task
             ~assignee:"contract-retry-worker"
             ~verification_id;
-          Eio.Promise.await verdict_committed;
+          let outcome =
+            Eio.Time.with_timeout_exn clock 5.0 (fun () ->
+              let rec await () =
+                match
+                  Masc.Verification_run_registry.get
+                    (Masc.Verification_run_registry.global ())
+                    ~verification_id
+                with
+                | Some
+                    { status =
+                        Masc.Verification_run_registry.Completed { outcome; _ }
+                    ; _
+                    } -> outcome
+                | Some { status = Masc.Verification_run_registry.Running; _ }
+                | None ->
+                  Eio.Time.sleep clock 0.01;
+                  await ()
+              in
+              await ())
+          in
+          (match outcome with
+           | Masc.Verification_run_registry.Infrastructure_unavailable
+               { stage = Masc.Verification_run_registry.Review_preparation; _ } -> ()
+           | _ -> Alcotest.fail "missing request was not a preparation failure");
           match W.get_tasks_raw config with
-          | [ { task_status = Masc_domain.InProgress { assignee; started_at }; _ } ] ->
+          | [ { task_status =
+                  Masc_domain.AwaitingVerification
+                    { assignee; started_at; verification_id = observed_id; _ }
+              ; _
+              } ] ->
             Alcotest.(check string)
-              "rejection returns task to its producer"
+              "infrastructure failure keeps the submitted producer"
               "contract-retry-worker"
               assignee;
             Alcotest.(check string)
-              "rejection preserves original claim time"
+              "infrastructure failure preserves original claim time"
               original_started_at
-              started_at
+              started_at;
+            Alcotest.(check string)
+              "infrastructure failure keeps the verification obligation"
+              verification_id
+              observed_id
           | [ task ] ->
             Alcotest.failf
-              "invalid contract left task stranded: %s"
+              "infrastructure failure changed task authority: %s"
               (Masc_domain.task_status_to_string task.task_status)
           | tasks -> Alcotest.failf "expected one task, got %d" (List.length tasks)))
   )
@@ -808,6 +1053,9 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
     Prompt_registry.set_markdown_dir prompt_dir;
     Masc.Prompt_defaults.init ();
     let previous_runtime = Atomic.get Workspace_hooks.get_default_runtime_id_fn in
+    let previous_lane_slots =
+      Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+    in
     let previous_reviewer =
       Atomic.get Masc.Task.Anti_rationalization.run_llm_reviewer_fn
     in
@@ -818,18 +1066,24 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
     Fun.protect
       ~finally:(fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_runtime;
+        Atomic.set
+          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+          previous_lane_slots;
         Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer;
         Atomic.set Workspace_hooks.verification_notify_verdict_fn previous_notification;
         Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted)
       (fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn
           (fun () -> "test-system-evaluator");
+        Atomic.set
+          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+          (fun () -> Ok [ "test-system-evaluator" ]);
         Eio.Switch.run (fun sw ->
           let reviewer_called, resolve_reviewer_called = Eio.Promise.create () in
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
           let captured_prompt = ref None in
           Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn
-            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_ ~lookup:_ () ->
+            (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~on_runtime_attempt_error:_ () ->
                captured_prompt := Some prompt;
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok (Some Masc.Task.Anti_rationalization.Approve));
@@ -847,11 +1101,12 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
             ; required_evidence = [ "persisted required artifact" ]
             ; inspect_gate_evidence = []
             ; verify_gate_evidence = [ "persisted gate artifact" ]
-            ; links = { operation_id = None; session_id = None }
             }
           in
           let config = W.default_config base_path in
           ignore (W.init config ~agent_name:(Some "snapshot-test-worker"));
+          ensure_keeper_meta config "snapshot-test-worker";
+          ensure_producer_playground config "snapshot-test-worker";
           ignore
             (W.add_task
                config
@@ -893,27 +1148,28 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           in
           W.write_backlog config { backlog with tasks };
           CA.start ~sw ~clock ~config;
-          Eio.Promise.await reviewer_called;
-          Eio.Promise.await verdict_committed;
+          Eio.Time.with_timeout_exn clock 5.0 (fun () ->
+            Eio.Promise.await reviewer_called;
+            Eio.Promise.await verdict_committed);
           (match !captured_prompt with
            | None -> Alcotest.fail "system LLM reviewer did not receive a prompt"
            | Some prompt ->
              Alcotest.(check bool)
                "prompt uses persisted completion criterion"
                true
-               (contains_substring prompt "persisted completion criterion");
+               (String_util.contains_substring prompt "persisted completion criterion");
              Alcotest.(check bool)
                "prompt does not use mutated live completion criterion"
                false
-               (contains_substring prompt "mutated live completion criterion");
+               (String_util.contains_substring prompt "mutated live completion criterion");
              Alcotest.(check bool)
                "prompt uses persisted required artifact"
                true
-               (contains_substring prompt "persisted required artifact");
+               (String_util.contains_substring prompt "persisted required artifact");
              Alcotest.(check bool)
                "prompt does not use mutated live required artifact"
                false
-               (contains_substring prompt "mutated live required artifact"));
+               (String_util.contains_substring prompt "mutated live required artifact"));
           match W.get_tasks_raw config with
           | [ { task_status = Masc_domain.Done _; _ } ] -> ()
           | [ task ] ->
@@ -966,6 +1222,22 @@ let test_rejected_verdict_audit_preserves_reason () =
      with
      | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
      | Ok _ -> ());
+    (match W.get_tasks_raw config with
+     | [ { handoff_context = Some handoff; _ } ] ->
+       Alcotest.(check string)
+         "task keeps the exact rejection reason"
+         "required deployment evidence is missing"
+         handoff.summary;
+       Alcotest.(check (list string))
+         "task keeps the rejected verification identity"
+         [ "vrf-audit-rejected" ]
+         handoff.evidence_refs;
+       Alcotest.(check (option string))
+         "task keeps the rejecting authority"
+         (Some "system-audit-agent")
+         handoff.updated_by
+     | [ _ ] -> Alcotest.fail "rejected task lost its durable continuation"
+     | tasks -> Alcotest.failf "expected one task, got %d" (List.length tasks));
     let open Unix in
     let tm = gmtime (gettimeofday ()) in
     let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
@@ -998,6 +1270,128 @@ let test_rejected_verdict_audit_preserves_reason () =
         "audit keeps the system authority boundary"
         "system_llm_agent"
         (json |> member "authority_kind" |> to_string))
+
+(* The judging runtime is the axis a verdict history can be grouped on:
+   since RFC-0361 D7(b) [authority_actor] is the fixed [verifier_exact]
+   identity, so 74 verdicts carry one actor. The runtime was already computed
+   and carried inside the review notes blob, but every structured projection
+   dropped it. *)
+let test_verdict_audit_names_the_judging_runtime () =
+  with_eio_temp_dir (fun base_path ->
+    let config = W.default_config base_path in
+    ignore (W.init config ~agent_name:(Some "runtime-producer"));
+    ignore
+      (W.add_task
+         config
+         ~title:"name the judging runtime"
+         ~priority:1
+         ~description:"the durable audit must say which runtime judged");
+    let backlog = W.read_backlog config in
+    let tasks =
+      List.map
+        (fun (task : Masc_domain.task) ->
+           if String.equal task.id "task-001"
+           then
+             { task with
+               task_status =
+                 Masc_domain.AwaitingVerification
+                   { assignee = "runtime-producer"
+                   ; started_at = "2026-08-05T00:00:00Z"
+                   ; submitted_at = Masc_domain.now_iso ()
+                   ; verification_id = "vrf-runtime-named"
+                   }
+             }
+           else task)
+        backlog.tasks
+    in
+    W.write_backlog config { backlog with tasks };
+    (match
+       W.commit_verdict_r
+         config
+         ~authority:
+           (Masc_domain.System_llm_agent { agent_run_id = "system-runtime-agent" })
+         ~verdict:Masc_domain.Verdict_approved
+         ~task_id:"task-001"
+         ~verification_id:"vrf-runtime-named"
+         ~evaluator_runtime:"judge-runtime-model"
+         ()
+     with
+     | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+     | Ok _ -> ());
+    let open Unix in
+    let tm = gmtime (gettimeofday ()) in
+    let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
+    let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
+    let events_dir = Filename.concat (CU.masc_dir_from_base_path ~base_path) "events" in
+    let event_path = Filename.concat (Filename.concat events_dir month) day in
+    let event =
+      Fs_compat.load_jsonl event_path
+      |> List.find_opt (fun json ->
+        match json with
+        | `Assoc fields ->
+          (match List.assoc_opt "type" fields with
+           | Some (`String value) -> String.equal value "task_completion_verdict"
+           | _ -> false)
+        | _ -> false)
+    in
+    match event with
+    | None -> Alcotest.fail "verdict audit event was not persisted"
+    | Some json ->
+      let open Yojson.Safe.Util in
+      Alcotest.(check string)
+        "audit names the runtime that judged"
+        "judge-runtime-model"
+        (json |> member "evaluator_runtime" |> to_string);
+      Alcotest.(check string)
+        "audit still carries the run-scoped actor"
+        "system-runtime-agent"
+        (json |> member "authority_actor" |> to_string))
+;;
+
+(* RFC-0361 D7(b): the completion authority no longer mints a random actor
+   per judgement. N judgements registered with the agent's authority identity
+   must all record the same fixed [authority_actor] — the [verifier_exact]
+   lane id — so verdicts aggregate by actor; run identity stays with
+   [verification_id]. *)
+let test_judgements_share_fixed_authority_actor () =
+  let module R = Masc.Verification_run_registry in
+  let registry = R.create () in
+  let authority =
+    Masc_domain.System_llm_agent
+      { agent_run_id = CA.For_testing.authority_actor }
+  in
+  for i = 1 to 3 do
+    let verification_id = Printf.sprintf "vrf-fixed-actor-%d" i in
+    R.register_running
+      registry
+      ~verification_id
+      ~task_id:(Printf.sprintf "task-fixed-actor-%d" i)
+      ~producer:"keeper-producer-agent"
+      ~authority_kind:(Masc_domain.completion_authority_kind authority)
+      ~authority_actor:(Masc_domain.completion_authority_actor authority)
+      ~started_at:(100.0 +. Float.of_int i);
+    R.mark_completed
+      registry
+      ~verification_id
+      ~outcome:R.Approved
+      ~tools:[]
+      ~elapsed_s:1.0
+      ()
+  done;
+  let actors =
+    R.list_runs registry
+    |> List.map (fun (run : R.run) -> run.authority_actor)
+    |> List.sort_uniq String.compare
+  in
+  Alcotest.(check int)
+    "all three judgements were recorded"
+    3
+    (List.length (R.list_runs registry));
+  Alcotest.(check (list string))
+    "every judgement records the same fixed authority actor"
+    [ "verifier_exact" ]
+    actors
+;;
 
 let test_raw_workspace_submission_notifies_once () =
   with_eio_temp_dir (fun base_path ->
@@ -1064,7 +1458,7 @@ let test_raw_workspace_submission_notifies_once () =
 let test_create_and_load () =
   with_temp_dir (fun base_path ->
     match V.create_request ~base_path ~task_id:"task-1"
-        ~output:(`String "result") ~criteria:[V.Custom "result"]
+        ~output:(`String "result") ~criteria:[ "result" ]
         ~worker:"claude" () with
     | Error e -> Alcotest.fail e
     | Ok req ->
@@ -1079,13 +1473,31 @@ let test_create_and_load () =
             Alcotest.(check string) "task_id" "task-1" loaded.task_id;
             Alcotest.(check string) "worker" "claude" loaded.worker)
 
+let test_create_rejects_blank_criterion_before_write () =
+  with_temp_dir (fun base_path ->
+    match
+      V.create_request
+        ~base_path
+        ~task_id:"task-blank-criterion"
+        ~output:`Null
+        ~criteria:[ " " ]
+        ~worker:"worker"
+        ()
+    with
+    | Ok _ -> Alcotest.fail "blank completion criterion reached persistence"
+    | Error _ ->
+      Alcotest.(check int)
+        "no request was written"
+        0
+        (List.length (list_requests_exn base_path)))
+
 (* RFC-0221 §3.1: [delete_request] removes the record (compensation) and is
    idempotent — deleting a missing record is success, so a caller can compensate
    without first checking existence. *)
 let test_delete_request () =
   with_temp_dir (fun base_path ->
     match V.create_request ~base_path ~task_id:"task-1"
-        ~output:(`String "result") ~criteria:[V.Custom "result"]
+        ~output:(`String "result") ~criteria:[ "result" ]
         ~worker:"claude" () with
     | Error e -> Alcotest.fail e
     | Ok req ->
@@ -1110,97 +1522,141 @@ let test_list_requests () =
         ~output:`Null ~criteria:[] ~worker:"a" () in
     let _ = V.create_request ~base_path ~task_id:"t2"
         ~output:`Null ~criteria:[] ~worker:"b" () in
-    let reqs = V.list_requests base_path in
+    let reqs = list_requests_exn base_path in
     Alcotest.(check int) "two requests" 2 (List.length reqs))
 
 let test_list_requests_missing_dir_stays_quiet () =
   with_temp_dir (fun base_path ->
     let before =
-      persistence_counter Safe_ops.persistence_read_drop_reason_list_dir_error
+      persistence_counter (Read_drop_reason.to_wire Read_drop_reason.List_dir_error)
     in
-    let reqs = V.list_requests base_path in
+    let reqs = list_requests_exn base_path in
     Alcotest.(check int) "no requests" 0 (List.length reqs);
     Alcotest.(check (float 0.1)) "missing dir does not increment metric"
       before
-      (persistence_counter Safe_ops.persistence_read_drop_reason_list_dir_error))
+      (persistence_counter (Read_drop_reason.to_wire Read_drop_reason.List_dir_error)))
 
 let test_verifications_dir_resolves_active_store () =
   with_temp_dir (fun base_path ->
-    let legacy_dir = legacy_verifications_dir base_path in
-    Fs_compat.mkdir_p legacy_dir;
-    Fs_compat.save_file (Filename.concat legacy_dir "vrf-legacy.json")
-      {|{"id":"vrf-legacy","task_id":"task-legacy"}|};
     let active_dir = active_verifications_dir base_path in
     let resolved = VS.verifications_dir base_path in
-    Alcotest.(check string) "resolved active store" active_dir resolved;
-    Alcotest.(check bool) "resolved path is not legacy root" false
-      (String.equal legacy_dir resolved))
+    Alcotest.(check string) "resolved current store" active_dir resolved)
 
-let test_request_path_ignores_legacy_root_store () =
+let test_request_path_uses_current_store () =
   with_temp_dir (fun base_path ->
-    let req_id = "vrf-shadowed" in
-    let legacy_dir = legacy_verifications_dir base_path in
-    Fs_compat.mkdir_p legacy_dir;
-    Fs_compat.save_file (Filename.concat legacy_dir (req_id ^ ".json"))
-      {|{"id":"vrf-shadowed","task_id":"task-legacy"}|};
+    let req_id = "vrf-current" in
     Alcotest.(check string) "request path uses active store"
       (Filename.concat (active_verifications_dir base_path) (req_id ^ ".json"))
       (VS.request_path base_path req_id))
 
-let test_list_requests_skips_bad_entries_with_metric () =
+(* A file the schema cannot read is reported, not silently skipped, and it does
+   not take the readable requests down with it.
+
+   The earlier contract failed the whole scan here. That kept the failure loud
+   but made it total: 171 records written by a producer removed on 2026-08-07
+   were enough to answer /api/v1/dashboard/proof with 500 for five days, naming
+   one path while saying nothing about the other 170 or the 122 that read fine. *)
+let test_list_requests_isolates_bad_entry_with_metric () =
   with_temp_dir (fun base_path ->
     let _ = V.create_request ~base_path ~task_id:"t1"
         ~output:`Null ~criteria:[] ~worker:"a" () in
     let dir = active_verifications_dir base_path in
     Fs_compat.save_file (Filename.concat dir "broken.json") "{not-json";
     let before =
-      persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
+      persistence_counter (Read_drop_reason.to_wire Read_drop_reason.Entry_load_error)
     in
-    let reqs = V.list_requests base_path in
-    Alcotest.(check int) "only valid request returned" 1 (List.length reqs);
+    (match V.list_requests base_path with
+     | Error detail -> Alcotest.fail detail
+     | Ok scan ->
+       Alcotest.(check int)
+         "the readable request survives its broken neighbour"
+         1
+         (List.length scan.V.readable);
+       Alcotest.(check int)
+         "the broken file is reported, not dropped"
+         1
+         (List.length scan.V.unreadable);
+       (match scan.V.unreadable with
+        | [ entry ] ->
+          Alcotest.(check bool)
+            "malformed path is named"
+            true
+            (Astring.String.is_infix ~affix:"broken.json" entry.V.unreadable_path);
+          Alcotest.(check bool)
+            "the parse detail is carried, not discarded"
+            false
+            (String.equal (String.trim entry.V.unreadable_detail) "")
+        | entries ->
+          Alcotest.failf "expected exactly one unreadable entry, got %d"
+            (List.length entries)));
     Alcotest.(check (float 0.1)) "broken file increments metric" 1.0
-      (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
+      (persistence_counter (Read_drop_reason.to_wire Read_drop_reason.Entry_load_error)
        -. before))
 
-let test_list_requests_ignores_legacy_only_stale_entries () =
-  with_temp_dir (fun base_path ->
-    let legacy_dir = legacy_verifications_dir base_path in
-    Fs_compat.mkdir_p legacy_dir;
-    Fs_compat.save_file (Filename.concat legacy_dir "broken.json") "{not-json";
-    Fs_compat.save_file (Filename.concat legacy_dir "vrf-foreign.json")
-      {|{"id":"vrf-foreign","task_id":"t-foreign","evaluator":"oracle","overall_verdict":"approve"}|};
-    let before =
-      persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
-    in
-    let reqs = V.list_requests base_path in
-    Alcotest.(check int) "legacy-only store ignored" 0 (List.length reqs);
-    Alcotest.(check (float 0.1)) "legacy-only stale files stay silent"
-      before
-      (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error))
-
-let test_list_requests_ignores_legacy_root_entries () =
+(* The scan reports every unreadable file, not just the one it stopped at. The
+   old contract could only ever name one, which is what made a 171-record
+   problem look like a 1-record problem. *)
+let test_list_requests_reports_every_unreadable_entry () =
   with_temp_dir (fun base_path ->
     let _ = V.create_request ~base_path ~task_id:"t1"
         ~output:`Null ~criteria:[] ~worker:"a" () in
-    let legacy_dir = legacy_verifications_dir base_path in
-    Fs_compat.mkdir_p legacy_dir;
-    Fs_compat.save_file (Filename.concat legacy_dir "broken.json") "{not-json";
-    Fs_compat.save_file (Filename.concat legacy_dir "vrf-foreign.json")
-      {|{"id":"vrf-foreign","task_id":"t-foreign","evaluator":"oracle","overall_verdict":"approve"}|};
-    let before =
-      persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
+    let dir = active_verifications_dir base_path in
+    Fs_compat.save_file (Filename.concat dir "broken-a.json") "{not-json";
+    Fs_compat.save_file (Filename.concat dir "broken-b.json") "{also-not-json";
+    (* Well-formed JSON that the request schema still rejects — the shape that
+       actually accumulated on disk, as opposed to a truncated write. *)
+    Fs_compat.save_file (Filename.concat dir "broken-c.json")
+      {|{"id":"x","task_id":"t","output":null,"criteria":[{"type":"custom","description":"d"}],"worker":"w","created_at":1.0}|};
+    match V.list_requests base_path with
+    | Error detail -> Alcotest.fail detail
+    | Ok scan ->
+      Alcotest.(check int)
+        "readable request still returned" 1 (List.length scan.V.readable);
+      Alcotest.(check int)
+        "all three unreadable files reported" 3 (List.length scan.V.unreadable))
+
+let test_list_requests_rereads_current_request_content () =
+  with_temp_dir (fun base_path ->
+    let request =
+      match
+        V.create_request
+          ~base_path
+          ~task_id:"t1"
+          ~output:`Null
+          ~criteria:[]
+          ~worker:"a"
+          ()
+      with
+      | Ok request -> request
+      | Error detail -> Alcotest.fail detail
     in
-    let reqs = V.list_requests base_path in
-    Alcotest.(check int) "legacy root ignored" 1 (List.length reqs);
-    Alcotest.(check (float 0.1)) "legacy root does not increment metric"
-      before
-      (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error))
+    Alcotest.(check int)
+      "initial request is readable"
+      1
+      (List.length (list_requests_exn base_path));
+    Fs_compat.save_file (VS.request_path base_path request.id) "{not-json";
+    (* The point of the case is that the second scan reads the file again
+       instead of reusing the first result. It used to observe that through the
+       scan failing; now the same re-read shows as the record moving out of
+       [readable] and into [unreadable], which says where it went as well as
+       that it moved. *)
+    match V.list_requests base_path with
+    | Error detail -> Alcotest.fail detail
+    | Ok scan ->
+      Alcotest.(check int)
+        "changed malformed request reused an earlier list"
+        0
+        (List.length scan.V.readable);
+      Alcotest.(check int)
+        "the rewritten file is accounted for"
+        1
+        (List.length scan.V.unreadable))
 
 let create_evidence_request ~base_path ~request_id ~artifact_path =
   let profile_path =
     Keeper_sandbox_config.keeper_toml_path
       ~base_path
-      ~agent_name:"keeper-executor-agent"
+      ~agent_name:"keeper-omega-agent"
   in
   Fs_compat.mkdir_p (Filename.dirname profile_path);
   Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\n";
@@ -1210,15 +1666,15 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
         ~base_path
         ~abs_path:artifact_path
     with
-    | Some { keeper_name = "executor"; relative_path } ->
-      [ "artifact:" ^ relative_path; "note:executor summary" ]
+    | Some { keeper_name = "omega"; relative_path } ->
+      [ "artifact:" ^ relative_path; "note:producer summary" ]
     | Some _ | None ->
-      [ "artifact:../outside-worker-playground"; "note:executor summary" ]
+      [ "artifact:../outside-worker-playground"; "note:producer summary" ]
   in
   let evidence_snapshot =
     VS.snapshot_submitted_evidence_json
       ~base_path
-      ~worker:"keeper-executor-agent"
+      ~worker:"keeper-omega-agent"
       submitted_evidence
   in
   match
@@ -1229,8 +1685,8 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
       ~output:
         (`Assoc
             [ "submitted_evidence", evidence_snapshot ])
-      ~criteria:[ V.Custom "inspect artifact" ]
-      ~worker:"keeper-executor-agent"
+      ~criteria:[ "inspect artifact" ]
+      ~worker:"keeper-omega-agent"
       ()
   with
   | Ok request -> request
@@ -1266,7 +1722,7 @@ let create_protocol_evidence_request ~base_path ~request_id ~evidence_refs =
      VP.create_submit_request
        ~config
        ~task
-       ~assignee:"keeper-executor-agent"
+       ~assignee:"keeper-omega-agent"
        ~verification_id:request_id
        ~evidence_refs
    with
@@ -1275,7 +1731,7 @@ let create_protocol_evidence_request ~base_path ~request_id ~evidence_refs =
   task
 
 let inspect_evidence ?(task_id = "task-001")
-    ?(task_worker = "keeper-executor-agent") ~base_path ~request_id
+    ?(task_worker = "keeper-omega-agent") ~base_path ~request_id
     () =
   VS.inspect_submitted_evidence_for_authority
     ~base_path
@@ -1289,7 +1745,7 @@ let test_submitted_evidence_inspection_is_authority_scoped_and_contained () =
     let artifact_dir =
       Filename.concat
         base_path
-        ".masc/playground/docker/executor"
+        ".masc/playground/docker/omega"
     in
     Fs_compat.mkdir_p artifact_dir;
     let artifact_path = Filename.concat artifact_dir "artifact-task-001.txt" in
@@ -1305,7 +1761,7 @@ let test_submitted_evidence_inspection_is_authority_scoped_and_contained () =
      | VS.Evidence_available
          { items =
              VS.Evidence_artifact { content; truncated = false; _ }
-             :: VS.Evidence_note "executor summary"
+             :: VS.Evidence_note "producer summary"
              :: []
          ; _
          } ->
@@ -1319,7 +1775,7 @@ let test_submitted_evidence_inspection_is_authority_scoped_and_contained () =
         ~base_path
         ~request_id
         ~task_id:"task-001"
-        ~task_worker:"keeper-executor-agent"
+        ~task_worker:"keeper-omega-agent"
         ~authority:(Masc_domain.Human_operator { operator_id = "" })
     with
     | VS.Evidence_unavailable _ -> ()
@@ -1329,13 +1785,13 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
   with_eio_temp_dir (fun base_path ->
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-executor-agent"
+      ~keeper_name:"keeper-omega-agent"
       ~sandbox_profile:"docker";
     let artifact_dir =
       Filename.concat
         (Keeper_sandbox_config.host_root_abs_of_agent
            ~base_path
-           ~agent_name:"keeper-executor-agent")
+           ~agent_name:"keeper-omega-agent")
         "artifacts"
     in
     Fs_compat.mkdir_p artifact_dir;
@@ -1348,7 +1804,7 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
         ~base_path
         ~request_id
         ~evidence_refs:
-          [ "artifact:artifacts/proof.txt"; "note:executor summary" ]
+          [ "artifact:artifacts/proof.txt"; "note:producer summary" ]
     in
     match
       inspect_evidence
@@ -1361,7 +1817,7 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
         { items =
             VS.Evidence_artifact
               { reference = "artifact:artifacts/proof.txt"; content; _ }
-            :: VS.Evidence_note "executor summary"
+            :: VS.Evidence_note "producer summary"
             :: []
         ; _
         } ->
@@ -1398,13 +1854,13 @@ let test_submit_snapshot_survives_mutation_deletion_and_authority_cwd () =
   with_eio_temp_dir (fun base_path ->
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-executor-agent"
+      ~keeper_name:"keeper-omega-agent"
       ~sandbox_profile:"docker";
     let artifact_dir =
       Filename.concat
         (Keeper_sandbox_config.host_root_abs_of_agent
            ~base_path
-           ~agent_name:"keeper-executor-agent")
+           ~agent_name:"keeper-omega-agent")
         "artifacts"
     in
     Fs_compat.mkdir_p artifact_dir;
@@ -1470,12 +1926,12 @@ let test_submit_snapshot_rejects_relative_traversal_and_symlink_escape () =
   with_eio_temp_dir (fun base_path ->
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-executor-agent"
+      ~keeper_name:"keeper-omega-agent"
       ~sandbox_profile:"docker";
     let producer_root =
       Keeper_sandbox_config.host_root_abs_of_agent
         ~base_path
-        ~agent_name:"keeper-executor-agent"
+        ~agent_name:"keeper-omega-agent"
     in
     let artifact_dir = Filename.concat producer_root "artifacts" in
     Fs_compat.mkdir_p artifact_dir;
@@ -1522,12 +1978,12 @@ let test_submit_snapshot_rejects_bare_and_absolute_references () =
   with_eio_temp_dir (fun base_path ->
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-executor-agent"
+      ~keeper_name:"keeper-omega-agent"
       ~sandbox_profile:"docker";
     let producer_root =
       Keeper_sandbox_config.host_root_abs_of_agent
         ~base_path
-        ~agent_name:"keeper-executor-agent"
+        ~agent_name:"keeper-omega-agent"
     in
     Fs_compat.mkdir_p producer_root;
     let absolute_path = Filename.concat producer_root "absolute.txt" in
@@ -1536,15 +1992,15 @@ let test_submit_snapshot_rejects_bare_and_absolute_references () =
     let snapshot =
       VS.snapshot_submitted_evidence_json
         ~base_path
-        ~worker:"keeper-executor-agent"
+        ~worker:"keeper-omega-agent"
         [ "artifacts/bare.txt"; absolute_path ]
     in
     let persisted_snapshot = Yojson.Safe.to_string snapshot in
     Alcotest.(check bool)
       "invalid references are absent from the persisted snapshot"
       false
-      (contains_substring persisted_snapshot "artifacts/bare.txt"
-       || contains_substring persisted_snapshot absolute_path);
+      (String_util.contains_substring persisted_snapshot "artifacts/bare.txt"
+       || String_util.contains_substring persisted_snapshot absolute_path);
     ignore
       (match
          V.create_request
@@ -1552,8 +2008,8 @@ let test_submit_snapshot_rejects_bare_and_absolute_references () =
            ~request_id
            ~task_id:"task-001"
            ~output:(`Assoc [ "submitted_evidence", snapshot ])
-           ~criteria:[ V.Custom "inspect explicit refs" ]
-           ~worker:"keeper-executor-agent"
+           ~criteria:[ "inspect explicit refs" ]
+           ~worker:"keeper-omega-agent"
            ()
        with
        | Ok request -> request
@@ -1603,34 +2059,28 @@ let test_submitted_evidence_inspection_rejects_cross_playground_path () =
       ()
     | _ -> Alcotest.fail "cross-playground artifact must remain unreadable")
 
-(* Records written before [content_sha256] was dropped still carry it: 58
-   evidence items in the live store are shaped this way. The artifact branch
-   must ignore the extra field rather than reject the record, and it must no
-   longer validate it — the hash below is deliberately wrong, so this decodes
-   only because the check is gone. *)
-let test_submitted_evidence_decodes_legacy_content_sha256 () =
+let test_submitted_evidence_rejects_unknown_artifact_field () =
   with_eio_temp_dir (fun base_path ->
     let profile_path =
       Keeper_sandbox_config.keeper_toml_path
         ~base_path
-        ~agent_name:"keeper-executor-agent"
+        ~agent_name:"keeper-omega-agent"
     in
     Fs_compat.mkdir_p (Filename.dirname profile_path);
     Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\n";
-    let request_id = "vrf-legacy-content-sha256" in
-    let content = "legacy artifact body" in
-    let legacy_snapshot =
+    let request_id = "vrf-unknown-artifact-field" in
+    let content = "artifact body" in
+    let snapshot =
       `List
         [ `Assoc
             [ "kind", `String "artifact"
-            ; "reference", `String "artifact:artifacts/legacy.txt"
+            ; "reference", `String "artifact:artifacts/current.txt"
             ; "content", `String content
             ; "bytes", `Int (String.length content)
             ; "truncated", `Bool false
-            ; ( "content_sha256"
-              , `String (String.make 64 '0') )
+            ; "unexpected_field", `String "not part of the current contract"
             ]
-        ; `Assoc [ "kind", `String "note"; "content", `String "executor summary" ]
+        ; `Assoc [ "kind", `String "note"; "content", `String "producer summary" ]
         ]
     in
     (match
@@ -1638,47 +2088,40 @@ let test_submitted_evidence_decodes_legacy_content_sha256 () =
          ~base_path
          ~request_id
          ~task_id:"task-001"
-         ~output:(`Assoc [ "submitted_evidence", legacy_snapshot ])
-         ~criteria:[ V.Custom "inspect artifact" ]
-         ~worker:"keeper-executor-agent"
+         ~output:(`Assoc [ "submitted_evidence", snapshot ])
+         ~criteria:[ "inspect artifact" ]
+         ~worker:"keeper-omega-agent"
          ()
      with
      | Ok _ -> ()
      | Error detail -> Alcotest.fail detail);
     match inspect_evidence ~base_path ~request_id () with
-    | VS.Evidence_available
-        { items =
-            VS.Evidence_artifact
-              { reference; content = decoded; truncated = false; _ }
-            :: VS.Evidence_note "executor summary"
-            :: []
-        ; _
-        } ->
-      Alcotest.(check string)
-        "legacy record keeps its artifact reference"
-        "artifact:artifacts/legacy.txt"
-        reference;
-      Alcotest.(check string)
-        "legacy record keeps its persisted content"
-        content
-        decoded
+    | VS.Evidence_unavailable { reason = VS.Evidence_snapshot_invalid detail; _ } ->
+      Alcotest.(check bool)
+        "unknown artifact field is named"
+        true
+        (Astring.String.is_infix ~affix:"unexpected_field" detail)
     | VS.Evidence_unavailable { reason; _ } ->
       Alcotest.failf
-        "legacy record was rejected: %s"
+        "wrong rejection: %s"
         (VS.evidence_access_failure_to_string ~request_id reason)
-    | VS.Evidence_available _ ->
-      Alcotest.fail "expected the legacy record to decode as artifact + note")
+    | VS.Evidence_available _ -> Alcotest.fail "unknown artifact field accepted")
 
 let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
   with_eio_temp_dir (fun base_path ->
     let artifact_dir =
       Filename.concat
         base_path
-        ".masc/playground/docker/executor"
+        ".masc/playground/docker/omega"
     in
     Fs_compat.mkdir_p artifact_dir;
     let artifact_path = Filename.concat artifact_dir "large-artifact.txt" in
-    let ascii_prefix = String.make 19_999 'a' in
+    (* One byte short of the cap, so the multibyte character that follows
+       straddles it and the scanner has to drop the partial codepoint.
+       Derived from the cap so raising the cap does not require editing an
+       assertion about UTF-8. *)
+    let cap = VS.verification_evidence_max_bytes in
+    let ascii_prefix = String.make (cap - 1) 'a' in
     let full_artifact = ascii_prefix ^ "한글" ^ String.make 250_000 'z' in
     Fs_compat.save_file artifact_path full_artifact;
     let request_id = "vrf-bounded-evidence" in
@@ -1698,18 +2141,275 @@ let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
         } ->
       Alcotest.(check int) "full artifact byte count preserved"
         (String.length full_artifact) bytes;
-      Alcotest.(check int) "UTF-8 boundary stays below 20KB cap" 19_999
+      Alcotest.(check int) "truncation stops before the partial codepoint" (cap - 1)
         (String.length content);
       Alcotest.(check string) "incomplete UTF-8 codepoint removed"
         ascii_prefix content
     | _ -> Alcotest.fail "expected bounded UTF-8-safe artifact projection")
+
+(* #29596: the per-item cap bounds one artifact, not their sum. A submission of
+   many sub-cap artifacts still built a request no verifier_exact slot could
+   carry — 12 artifacts, every one [truncated=false], 1,005,015 bytes in the
+   atom that stalled task-465 (2026-08-25). Each artifact here is far under the
+   cap and none is truncated; only their total crosses it. *)
+let test_transport_projection_bounds_the_evidence_total () =
+  with_eio_temp_dir (fun base_path ->
+    let artifact_dir = Filename.concat base_path ".masc/playground/docker/omega" in
+    Fs_compat.mkdir_p artifact_dir;
+    write_keeper_profile
+      ~base_path
+      ~keeper_name:"keeper-omega-agent"
+      ~sandbox_profile:"docker";
+    let cap = VS.verification_evidence_max_bytes in
+    let each = cap / 3 in
+    let names = [ "a"; "b"; "c"; "d"; "e" ] in
+    List.iter
+      (fun name ->
+        Fs_compat.save_file
+          (Filename.concat artifact_dir (name ^ "-proof.json"))
+          (String.make each 'x'))
+      names;
+    let request_id = "vrf-transport-total" in
+    let evidence_snapshot =
+      VS.snapshot_submitted_evidence_json
+        ~base_path
+        ~worker:"keeper-omega-agent"
+        (List.map (fun name -> "artifact:" ^ name ^ "-proof.json") names)
+    in
+    (match
+       V.create_request
+         ~base_path
+         ~request_id
+         ~task_id:"task-001"
+         ~output:(`Assoc [ "submitted_evidence", evidence_snapshot ])
+         ~criteria:[ "inspect artifact" ]
+         ~worker:"keeper-omega-agent"
+         ()
+     with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.fail detail);
+    match inspect_evidence ~base_path ~request_id () with
+    | VS.Evidence_available { items; _ } as access ->
+      List.iter
+        (fun item ->
+          match item with
+          | VS.Evidence_artifact { truncated; _ } ->
+            Alcotest.(check bool) "no item is truncated on its own" false truncated
+          | VS.Evidence_note _ | VS.Evidence_invalid_reference
+          | VS.Evidence_artifact_unreadable _ -> ())
+        items;
+      Alcotest.(check bool)
+        "the stored snapshot carries every byte"
+        true
+        (String.length
+           (Yojson.Safe.to_string (VS.submitted_evidence_access_to_yojson access))
+         > cap);
+      let transport =
+        Yojson.Safe.to_string (VS.submitted_evidence_access_transport_to_yojson access)
+      in
+      Alcotest.(check bool)
+        "the judge request stays inside the cap"
+        true
+        (String.length transport <= cap + 4_096);
+      let rendered =
+        match VS.submitted_evidence_access_transport_to_yojson access with
+        | `Assoc fields ->
+          (match List.assoc "items" fields with
+           | `List rendered -> List.map (function
+               | `Assoc item -> item
+               | _ -> Alcotest.fail "transport item must be an object") rendered
+           | _ -> Alcotest.fail "transport items must be a list")
+        | _ -> Alcotest.fail "transport access must be an object"
+      in
+      let carried = List.filter (List.mem_assoc "content") rendered in
+      let withheld = List.filter (List.mem_assoc "content_omitted") rendered in
+      Alcotest.(check int) "every artifact is still listed" 5 (List.length rendered);
+      Alcotest.(check bool)
+        "the ones that fit keep their content"
+        true
+        (List.length carried > 0);
+      Alcotest.(check bool)
+        "the ones past the cap are withheld"
+        true
+        (List.length withheld > 0);
+      Alcotest.(check int)
+        "each artifact is carried or withheld, never both"
+        5
+        (List.length carried + List.length withheld);
+      List.iter
+        (fun item ->
+          Alcotest.(check bool)
+            "a withheld artifact still names its reference"
+            true
+            (List.mem_assoc "reference" item && List.mem_assoc "bytes" item))
+        withheld
+    | VS.Evidence_unavailable _ -> Alcotest.fail "evidence must be available")
+;;
+
+(* #29615: a truncated artifact's prefix must not travel to the judge. The
+   persistence serializer keeps it for the audit record; the transport
+   projection replaces it with the size, the fact, and how to read the real
+   file. The length guard is the regression: one over-cap artifact plus a
+   readable one must not push the review request toward any slot's input
+   budget. *)
+let test_transport_projection_omits_truncated_prefix () =
+  with_eio_temp_dir (fun base_path ->
+    let artifact_dir =
+      Filename.concat base_path ".masc/playground/docker/omega"
+    in
+    Fs_compat.mkdir_p artifact_dir;
+    write_keeper_profile
+      ~base_path
+      ~keeper_name:"keeper-omega-agent"
+      ~sandbox_profile:"docker";
+    let cap = VS.verification_evidence_max_bytes in
+    let large = String.make (cap + 50_000) 'x' in
+    Fs_compat.save_file (Filename.concat artifact_dir "large-proof.json") large;
+    Fs_compat.save_file
+      (Filename.concat artifact_dir "small-proof.txt")
+      "small readable proof";
+    let request_id = "vrf-transport-projection" in
+    let evidence_snapshot =
+      VS.snapshot_submitted_evidence_json
+        ~base_path
+        ~worker:"keeper-omega-agent"
+        [ "artifact:large-proof.json"
+        ; "artifact:small-proof.txt"
+        ; "note:producer summary"
+        ]
+    in
+    (match
+       V.create_request
+         ~base_path
+         ~request_id
+         ~task_id:"task-001"
+         ~output:(`Assoc [ "submitted_evidence", evidence_snapshot ])
+         ~criteria:[ "inspect artifact" ]
+         ~worker:"keeper-omega-agent"
+         ()
+     with
+    | Ok _ -> ()
+    | Error detail -> Alcotest.fail detail);
+    match inspect_evidence ~base_path ~request_id () with
+    | VS.Evidence_available _ as access ->
+      Alcotest.(check bool)
+        "persistence serializer still carries the truncated prefix"
+        true
+        (String.length
+           (Yojson.Safe.to_string
+              (VS.submitted_evidence_access_to_yojson access))
+         > cap);
+      let transport =
+        Yojson.Safe.to_string
+          (VS.submitted_evidence_access_transport_to_yojson access)
+      in
+      Alcotest.(check bool)
+        "transport stays far under the snapshot cap"
+        true
+        (String.length transport < cap / 2);
+      let items =
+        match
+          VS.submitted_evidence_access_transport_to_yojson access
+        with
+        | `Assoc fields ->
+          (match List.assoc "items" fields with
+           | `List items -> items
+           | _ -> Alcotest.fail "transport items must be a list")
+        | _ -> Alcotest.fail "transport access must be an object"
+      in
+      let fields_of = function
+        | `Assoc fields -> fields
+        | _ -> Alcotest.fail "transport item must be an object"
+      in
+      let by_reference reference =
+        List.find_opt
+          (fun item ->
+             match List.assoc_opt "reference" (fields_of item) with
+             | Some (`String value) -> String.equal value reference
+             | _ -> false)
+          items
+        |> Option.get
+      in
+      let large_item = fields_of (by_reference "artifact:large-proof.json") in
+      Alcotest.(check bool)
+        "truncated artifact carries no content key"
+        true
+        (not (List.mem_assoc "content" large_item));
+      Alcotest.(check bool)
+        "truncated artifact declares content_omitted"
+        true
+        (List.assoc_opt "content_omitted" large_item = Some (`Bool true));
+      (match List.assoc_opt "bytes" large_item with
+       | Some (`Int bytes) ->
+         Alcotest.(check int) "transport keeps the full byte count"
+           (String.length large) bytes
+       | _ -> Alcotest.fail "truncated artifact must keep its byte count");
+      (match List.assoc_opt "content_note" large_item with
+       | Some (`String note) ->
+         Alcotest.(check bool)
+           "note states the file size"
+           true
+           (Astring.String.is_infix
+              ~affix:(string_of_int (String.length large))
+              note);
+         Alcotest.(check bool)
+           "note points at the verification tools"
+           true
+           (Astring.String.is_infix ~affix:"verification tools" note)
+       | _ -> Alcotest.fail "truncated artifact must explain the omission");
+      let small_item = fields_of (by_reference "artifact:small-proof.txt") in
+      Alcotest.(check string)
+        "readable artifact still travels in full"
+        "small readable proof"
+        (match List.assoc "content" small_item with
+         | `String content -> content
+         | _ -> Alcotest.fail "readable artifact content must be a string")
+    | VS.Evidence_unavailable { reason; _ } ->
+      Alcotest.failf
+        "evidence unavailable: %s"
+        (VS.evidence_access_failure_to_string
+           ~request_id
+           reason))
+
+let test_truncated_snapshot_items_names_only_truncated_artifacts () =
+  with_eio_temp_dir (fun base_path ->
+    let artifact_dir =
+      Filename.concat base_path ".masc/playground/docker/omega"
+    in
+    Fs_compat.mkdir_p artifact_dir;
+    write_keeper_profile
+      ~base_path
+      ~keeper_name:"keeper-omega-agent"
+      ~sandbox_profile:"docker";
+    let cap = VS.verification_evidence_max_bytes in
+    let large = String.make (cap + 1_000) 'y' in
+    Fs_compat.save_file (Filename.concat artifact_dir "bulky.json") large;
+    Fs_compat.save_file
+      (Filename.concat artifact_dir "compact.json")
+      "{\"ok\":true}";
+    let evidence_snapshot =
+      VS.snapshot_submitted_evidence_json
+        ~base_path
+        ~worker:"keeper-omega-agent"
+        [ "artifact:bulky.json"; "artifact:compact.json" ]
+    in
+    match VS.truncated_snapshot_items evidence_snapshot with
+    | [ (reference, bytes) ] ->
+      Alcotest.(check string)
+        "only the over-cap artifact is reported"
+        "artifact:bulky.json"
+        reference;
+      Alcotest.(check int) "reported size is the full file" (String.length large)
+        bytes
+    | other ->
+      Alcotest.failf "expected exactly one truncated item, got %d" (List.length other))
 
 let test_submitted_evidence_rejects_malformed_utf8 () =
   with_eio_temp_dir (fun base_path ->
     let artifact_dir =
       Filename.concat
         base_path
-        ".masc/playground/docker/executor"
+        ".masc/playground/docker/omega"
     in
     Fs_compat.mkdir_p artifact_dir;
     let artifact_path = Filename.concat artifact_dir "malformed.txt" in
@@ -1737,7 +2437,7 @@ let test_submitted_evidence_rejects_symlink_escape_and_fifo () =
     let artifact_dir =
       Filename.concat
         base_path
-        ".masc/playground/docker/executor"
+        ".masc/playground/docker/omega"
     in
     Fs_compat.mkdir_p artifact_dir;
     let outside_path = Filename.concat base_path "outside-secret.txt" in
@@ -1802,7 +2502,7 @@ let test_submitted_evidence_requires_exact_task_assignment_identity () =
     let artifact_dir =
       Filename.concat
         base_path
-        ".masc/playground/docker/executor"
+        ".masc/playground/docker/omega"
     in
     Fs_compat.mkdir_p artifact_dir;
     let artifact_path = Filename.concat artifact_dir "assignment.txt" in
@@ -1819,11 +2519,11 @@ let test_submitted_evidence_requires_exact_task_assignment_identity () =
                 [ ( "submitted_evidence"
                   , VS.snapshot_submitted_evidence_json
                       ~base_path
-                      ~worker:"keeper-executor-agent"
+                      ~worker:"keeper-omega-agent"
                       [ "artifact:assignment.txt" ] )
                 ])
-          ~criteria:[ V.Custom "inspect artifact" ]
-          ~worker:"keeper-executor-agent"
+          ~criteria:[ "inspect artifact" ]
+          ~worker:"keeper-omega-agent"
           ()
       with
       | Ok request -> request
@@ -1869,7 +2569,7 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
     let artifact_dir =
       Filename.concat
         base_path
-        ".masc/playground/docker/executor"
+        ".masc/playground/docker/omega"
     in
     Fs_compat.mkdir_p artifact_dir;
     let artifact_path = Filename.concat artifact_dir "artifact-task-001.txt" in
@@ -1883,7 +2583,7 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
            { task with
              task_status =
                Masc_domain.AwaitingVerification
-                 { assignee = "keeper-executor-agent"
+                 { assignee = "keeper-omega-agent"
                  ; started_at = "2026-07-27T23:59:00Z"
                  ; submitted_at = "2026-07-28T00:00:00Z"
                  ; verification_id = request_id
@@ -1896,14 +2596,14 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
     Alcotest.(check bool)
       "row identifies the completion-authority wait"
       true
-      (contains_substring projection
+      (String_util.contains_substring projection
          "awaiting_completion_authority task_id=task-001");
     Alcotest.(check bool)
       "keeper row does not choose a verdict action"
       false
-      (contains_substring projection "ACTION:");
+      (String_util.contains_substring projection "ACTION:");
     (match
-       W.claim_task_r config ~agent_name:"keeper-executor-agent" ~task_id:"task-001" ()
+       W.claim_task_r config ~agent_name:"keeper-omega-agent" ~task_id:"task-001" ()
      with
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "producer must not claim its pending obligation");
@@ -1913,26 +2613,26 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "no Keeper may claim a pending obligation");
     (match
-       W.claim_task_r config ~agent_name:"keeper-sangsu-agent" ~task_id:"task-001" ()
+       W.claim_task_r config ~agent_name:"keeper-alpha-agent" ~task_id:"task-001" ()
      with
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "another Keeper claimed the pending obligation");
     Alcotest.(check bool)
       "task projection contains no evidence bytes"
       false
-      (contains_substring projection "full-cycle-evidence");
+      (String_util.contains_substring projection "full-cycle-evidence");
     Alcotest.(check bool)
       "task projection keeps request metadata"
       true
-      (contains_substring projection request_id);
+      (String_util.contains_substring projection request_id);
     Alcotest.(check bool)
       "task projection has no assigned verifier"
       false
-      (contains_substring projection "assigned_verifier=");
+      (String_util.contains_substring projection "assigned_verifier=");
     Alcotest.(check bool)
       "task projection has no verdict action"
       false
-      (contains_substring projection "ACTION:"))
+      (String_util.contains_substring projection "ACTION:"))
 
 (* --- ID generation property test (#7544) --- *)
 
@@ -1954,8 +2654,82 @@ let test_generate_id_no_collisions () =
   done;
   Alcotest.(check int) "all 10k ids unique" n (StringSet.cardinal !seen)
 
+(* [tool_task_completion_review.ml] says of [verification_evidence_fields]:
+   "Shares the derived [verification_evidence_to_yojson] so the serialization
+   tested by the roundtrip is the one production emits."
+
+   There was no such roundtrip. The type reaches the verification request
+   output, the Board meta and SSE through [verification_evidence_fields], so its
+   wire shape is a contract with readers outside this repo's control, and
+   nothing pinned it.
+
+   Both expectations below are literals. Encoding with the function under test
+   and comparing against itself would pass whatever the encoder became. *)
+
+module CR = Masc.Task.Completion_review
+
+let evidence_fixture : CR.verification_evidence =
+  { required_artifacts = [ "artifact:spec.md"; "artifact:bench.json" ]
+  ; submitted_evidence = [ "note:tsc passes"; "artifact:run.log" ]
+  }
+
+let evidence_wire : Yojson.Safe.t =
+  `Assoc
+    [ ( "required_artifacts"
+      , `List [ `String "artifact:spec.md"; `String "artifact:bench.json" ] )
+    ; ( "submitted_evidence"
+      , `List [ `String "note:tsc passes"; `String "artifact:run.log" ] )
+    ]
+
+let test_verification_evidence_roundtrip () =
+  Alcotest.(check string)
+    "encodes to the stated wire shape"
+    (Yojson.Safe.to_string evidence_wire)
+    (Yojson.Safe.to_string (CR.verification_evidence_to_yojson evidence_fixture));
+  match CR.verification_evidence_of_yojson evidence_wire with
+  | Error detail -> Alcotest.failf "the stated wire shape must decode: %s" detail
+  | Ok decoded ->
+    Alcotest.(check (list string))
+      "required_artifacts survives the trip"
+      evidence_fixture.required_artifacts
+      decoded.required_artifacts;
+    Alcotest.(check (list string))
+      "submitted_evidence survives the trip"
+      evidence_fixture.submitted_evidence
+      decoded.submitted_evidence
+
+(* The half the comment is actually about: what production splices into the
+   request, the Board meta and SSE is the encoder this roundtrip pins, not a
+   second hand-built object beside it. *)
+let test_verification_evidence_fields_are_the_encoded_object () =
+  let fields = CR.verification_evidence_fields evidence_fixture in
+  Alcotest.(check string)
+    "the spliced fields are the encoded object"
+    (Yojson.Safe.to_string evidence_wire)
+    (Yojson.Safe.to_string (`Assoc fields))
+
+(* An absent list is not an empty one: a reader that sees no key cannot tell
+   "nothing was required" from "the producer did not say". *)
+let test_verification_evidence_decode_requires_both_keys () =
+  List.iter
+    (fun (label, json) ->
+       match CR.verification_evidence_of_yojson json with
+       | Ok _ -> Alcotest.failf "%s must not decode" label
+       | Error _ -> ())
+    [ ("a missing submitted_evidence", `Assoc [ ("required_artifacts", `List []) ])
+    ; ("a missing required_artifacts", `Assoc [ ("submitted_evidence", `List []) ])
+    ; ("a non-object", `List [])
+    ]
+
 let () =
   Alcotest.run "Verification" [
+    "verification_evidence wire", [
+      Alcotest.test_case "roundtrip" `Quick test_verification_evidence_roundtrip;
+      Alcotest.test_case "spliced fields are the encoded object" `Quick
+        test_verification_evidence_fields_are_the_encoded_object;
+      Alcotest.test_case "decode requires both keys" `Quick
+        test_verification_evidence_decode_requires_both_keys;
+    ];
     "criterion", [
       Alcotest.test_case "roundtrip" `Quick test_criterion_roundtrip;
       Alcotest.test_case "of_yojson errors" `Quick test_criterion_of_yojson_errors;
@@ -1965,6 +2739,10 @@ let () =
     "completion_authority", [
       Alcotest.test_case "system LLM helpers keep typed facts" `Quick
         test_system_llm_authority_helpers_are_typed;
+      Alcotest.test_case "system LLM retry disposition is typed" `Quick
+        test_system_llm_retry_disposition_is_typed;
+      Alcotest.test_case "scan scope limits a submission to its own verification" `Quick
+        test_scan_scope_limits_a_submission_to_its_own_verification;
       Alcotest.test_case "system LLM notes keep metadata only" `Quick
         test_system_llm_review_notes_are_metadata_only;
       Alcotest.test_case "unreadable evidence uses structured current contract" `Quick
@@ -1979,12 +2757,16 @@ let () =
         test_system_llm_rejection_does_not_derive_unregistered_keeper;
       Alcotest.test_case "system LLM commits without Keeper verifier" `Quick
         test_system_llm_agent_commits_without_a_keeper_verifier;
-      Alcotest.test_case "system LLM invalid contract returns to producer" `Quick
-        test_system_llm_agent_rejects_invalid_contract_without_stalling;
+      Alcotest.test_case "system LLM invalid contract remains pending" `Quick
+        test_system_llm_agent_defers_invalid_contract_without_rejecting_task;
       Alcotest.test_case "system LLM uses persisted request contract" `Quick
         test_system_llm_agent_uses_persisted_request_contract_snapshot;
       Alcotest.test_case "rejected verdict audit keeps reason" `Quick
         test_rejected_verdict_audit_preserves_reason;
+      Alcotest.test_case "verdict audit names the judging runtime" `Quick
+        test_verdict_audit_names_the_judging_runtime;
+      Alcotest.test_case "judgements share the fixed authority actor" `Quick
+        test_judgements_share_fixed_authority_actor;
     ];
     "workspace_boundary", [
       Alcotest.test_case "raw submit notifies once" `Quick
@@ -1999,23 +2781,29 @@ let () =
         test_verdict_event_preserves_typed_authority;
       Alcotest.test_case "rejected verdict keeps wire type" `Quick
         test_rejected_verdict_event_preserves_wire_type;
+      Alcotest.test_case "stalled projection names forward paths" `Quick
+        test_stalled_projection_names_forward_paths;
+      Alcotest.test_case "stalled metadata keeps typed authority" `Quick
+        test_stalled_metadata_preserves_typed_authority;
     ];
     "storage", [
       Alcotest.test_case "create and load" `Quick test_create_and_load;
+      Alcotest.test_case "create rejects blank criterion" `Quick
+        test_create_rejects_blank_criterion_before_write;
       Alcotest.test_case "delete request (idempotent)" `Quick test_delete_request;
       Alcotest.test_case "list requests" `Quick test_list_requests;
       Alcotest.test_case "list requests missing dir stays quiet" `Quick
         test_list_requests_missing_dir_stays_quiet;
       Alcotest.test_case "verifications dir resolves active store" `Quick
         test_verifications_dir_resolves_active_store;
-      Alcotest.test_case "request path ignores legacy root store" `Quick
-        test_request_path_ignores_legacy_root_store;
-      Alcotest.test_case "list requests skips bad entries with metric" `Quick
-        test_list_requests_skips_bad_entries_with_metric;
-      Alcotest.test_case "list requests ignores legacy-only stale entries" `Quick
-        test_list_requests_ignores_legacy_only_stale_entries;
-      Alcotest.test_case "list requests ignores legacy root entries" `Quick
-        test_list_requests_ignores_legacy_root_entries;
+      Alcotest.test_case "request path uses current store" `Quick
+        test_request_path_uses_current_store;
+      Alcotest.test_case "list requests isolates bad entry with metric" `Quick
+        test_list_requests_isolates_bad_entry_with_metric;
+      Alcotest.test_case "list requests reports every unreadable entry" `Quick
+        test_list_requests_reports_every_unreadable_entry;
+      Alcotest.test_case "list requests rereads current content" `Quick
+        test_list_requests_rereads_current_request_content;
       Alcotest.test_case "submitted evidence authority-scoped and contained" `Quick
         test_submitted_evidence_inspection_is_authority_scoped_and_contained;
       Alcotest.test_case "submit snapshot resolves Docker relative refs" `Quick
@@ -2030,8 +2818,15 @@ let () =
         test_submitted_evidence_inspection_rejects_cross_playground_path;
       Alcotest.test_case "submitted evidence bounded UTF-8" `Quick
         test_submitted_evidence_inspection_is_bounded_and_utf8_safe;
-      Alcotest.test_case "submitted evidence decodes legacy content_sha256" `Quick
-        test_submitted_evidence_decodes_legacy_content_sha256;
+      Alcotest.test_case "transport projection omits truncated prefix" `Quick
+        test_transport_projection_omits_truncated_prefix;
+      Alcotest.test_case "transport projection bounds the evidence total" `Quick
+        test_transport_projection_bounds_the_evidence_total;
+      Alcotest.test_case "truncated snapshot items names over-cap artifacts"
+        `Quick
+        test_truncated_snapshot_items_names_only_truncated_artifacts;
+      Alcotest.test_case "submitted evidence rejects unknown artifact field" `Quick
+        test_submitted_evidence_rejects_unknown_artifact_field;
       Alcotest.test_case "submitted evidence rejects malformed UTF-8" `Quick
         test_submitted_evidence_rejects_malformed_utf8;
       Alcotest.test_case "submitted evidence rejects symlink and FIFO" `Quick

@@ -1,0 +1,31 @@
+name = "keeper_memory_write"
+description = """
+Record a durable claim that later turns read back. Your context resets \
+between turns, so a conclusion you leave only in this turn's reasoning is \
+gone. Task sequencing and operating constraints belong to their typed domain \
+stores, not memory prose. The runtime records explicit typed provenance and \
+returns validation or persistence failures directly."""
+additional_properties = false
+
+[[params]]
+name = "title"
+type = "string"
+description = "Short hook (≤120 chars). Optional; may be empty."
+
+[[params]]
+name = "content"
+type = "string"
+required = true
+description = """
+Body. Required, must be non-empty. For decisions, lead with the decision \
+then **Why** and **How to apply** lines."""
+
+[help]
+short_description = "Persist a durable keeper memory claim."
+when_to_use = "Use when something from this turn must outlive it: every write is a durable claim later turns read back."
+key_constraints = [
+  "There is no kind argument; sending one is rejected.",
+  "Do not use for transient scratch notes.",
+]
+details_markdown = "Writes a bounded durable claim into the Memory OS fact store that recall renders into later turns."
+examples = ["title='verification wrapper retired' content='Use keeper_task_done evidence_refs; do not call separate submit evidence wrappers.'"]

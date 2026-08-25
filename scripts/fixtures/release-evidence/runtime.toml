@@ -13,8 +13,9 @@
 # only proves the installed binary boots and serves /health.
 
 [runtime]
-# The default model id must be known to the OAS capability catalog, or the
-# startup capability gate (validate_runtime_model_capabilities, RFC-0206)
+# The default model id must be known to the AGENT_CORE capability catalog, or the
+# startup capability gate (missing_runtime_model_capabilities ->
+# Missing_catalog_models, RFC-0206)
 # refuses to boot (a fixture model named "smoke" is absent from the catalog and
 # was rejected, breaking this evidence step on every OCaml push to main).
 # deepseek-v4-flash is the catalog-known fleet default; the provider endpoint
@@ -25,8 +26,8 @@ default = "ollama_cloud.deepseek-v4-flash"
 
 # Startup requires every id in Server_runtime_bootstrap.mandatory_exact_output_lane_ids
 # to be declared here with a non-empty slot list; it synthesizes nothing. The
-# slots name OAS target refs, which resolve through the sibling
-# oas-models-overlay.toml — that overlay declares release_evidence.smoke with an
+# slots name AGENT_CORE target refs, which resolve through the sibling
+# agent-core-models-overlay.toml — that overlay declares release_evidence.smoke with an
 # empty api_key_env so admission needs no credential. Without it the second
 # startup gate (require_usable_mandatory_exact_output_lanes) would reject this
 # config for having no credential-usable slot.

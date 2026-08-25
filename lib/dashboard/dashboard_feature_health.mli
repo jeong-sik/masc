@@ -36,8 +36,6 @@ val feature_to_health_item :
 
 val get_all_features : unit -> feature_health_item list
 
-val get_features_by_category : string -> feature_health_item list
-
 val get_feature_categories : unit -> string list
 
 val count_by_status :
@@ -49,9 +47,6 @@ val feature_health_item_to_json :
   feature_health_item -> Yojson.Safe.t
 
 val overview_json : feature_health_item list -> Yojson.Safe.t
-
-val features_by_category_json :
-  feature_health_item list -> Yojson.Safe.t
 
 (** Full dashboard payload: [generated_at], [overview],
     [features_by_category], [all_features]. *)

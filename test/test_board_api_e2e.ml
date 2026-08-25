@@ -78,16 +78,6 @@ let run_curl ~port ~path () =
   (try Sys.remove body_file with _ -> ());
   { status; body; curl_exit; stderr }
 
-let contains_substr needle haystack =
-  let n = String.length needle in
-  let h = String.length haystack in
-  let rec loop i =
-    if i + n > h then false
-    else if String.sub haystack i n = needle then true
-    else loop (i + 1)
-  in
-  n = 0 || loop 0
-
 let find_free_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Fun.protect
@@ -111,7 +101,8 @@ let wait_for_health ~port ~timeout_s =
     else
       let res = run_curl ~port ~path:"/health" () in
       match res.status with
-      | Some 200 when contains_substr "\"state_ready\":true" res.body -> true
+      | Some 200
+        when String_util.contains_substring res.body "\"state_ready\":true" -> true
       | _ ->
           Unix.sleepf 0.1;
           loop ()
@@ -166,7 +157,7 @@ let with_server f =
   let env =
     merge_env_overrides
       [
-        ("MASC_AUTONOMY_ENABLED", "0");
+        ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
       ]
@@ -202,7 +193,9 @@ let test_board_missing_post_returns_404 () =
     match (res.status, retries_left) with
     | Some 503, retries
       when retries > 0
-           && contains_substr "Server is starting up, not ready yet" res.body ->
+           && String_util.contains_substring
+                res.body
+                "Server is starting up, not ready yet" ->
         Unix.sleepf 0.5;
         get_until_ready (retries - 1)
     | None, retries when retries > 0 && res.curl_exit = 28 ->
@@ -220,7 +213,7 @@ let test_board_missing_post_returns_404 () =
             res.curl_exit
             res.stderr));
   check bool "error payload contains message" true
-    (contains_substr "Post not found" res.body)
+    (String_util.contains_substring res.body "Post not found")
 
 let () =
   run "board_api_e2e"

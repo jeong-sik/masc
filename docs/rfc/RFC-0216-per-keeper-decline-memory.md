@@ -1,7 +1,12 @@
+---
+rfc: "0216"
+status: Draft
+---
+
 # RFC-0216: Per-Keeper Decline Memory (orphan-task churn root fix)
 
 - **Status**: Draft
-- **Supersedes**: RFC-0034 cooldown approach (unimplemented Draft — see §"Why not RFC-0034's cooldown")
+- **Supersedes**: the task-oscillation cooldown approach (see §"Why not a cooldown")
 - **Related**: RFC-0123 (briefing as typed contract), RFC-0124 (typed denial boundary), #20075 (stale-claim TTL — orthogonal; see §Composition)
 
 ## Problem
@@ -16,7 +21,7 @@ The decline signal is recorded but write-only — never read at the two decision
 
 - `task.cycle_count` (`lib/types/types_core.ml:535`) is incremented on every Release (`lib/workspace/workspace_task_transitions.ml:402`) and WARN-logged at 5/10/20, but `claim_next_r` (`lib/workspace/workspace_task_schedule.ml:314-388`) sorts by priority+age and never reads it.
 - `handoff_context.reason` (`types_core.ml:511-520`, the keeper's "unsuitable" rationale) is persisted but never consulted in selection — narrative text, not a typed signal.
-- Keeper `world_observation` (`lib/keeper/keeper_world_observation.ml:29-47`) carries only aggregate counts (`unclaimed_task_count`, `claimable_task_count`, ...) — no per-task decline history. `wip_rejections` is a turn-local `ref []` discarded at turn end (`lib/keeper/keeper_tool_task_runtime.ml:526-552`).
+- Keeper `world_observation` carries claimable task summaries, but no per-task decline history. `wip_rejections` is a turn-local `ref []` discarded at turn end (`lib/keeper/keeper_tool_task_runtime.ml:526-552`).
 
 Every keeper re-selects a declined task as if it were new: the system has the decline information but does not consult it when deciding what to offer.
 
@@ -47,9 +52,9 @@ Per-keeper decline memory must expire; otherwise a keeper that declined a task w
 
 #20075 added `stale_claim_timeout_sec` / `Stale_claim_outcome` (`lib/orchestrator.ml`): a claim held too long without progress is force-released. That is orthogonal — a stale-claim auto-release is *not* a suitability judgment. Decline memory must record **only** Release events that carry an explicit decline reason; stale-claim auto-releases and normal completions do not poison decline memory.
 
-## Why not RFC-0034's cooldown (workaround bar)
+## Why not a cooldown (workaround bar)
 
-RFC-0034 is an unimplemented Draft (git history shows only mechanical sweep commits; the cooldown machinery `Task_cooldowns`/`TaskInCooldown` exists nowhere in `lib/`; its "Pure observation: does not block" line describes the *current* observation-only logging, not a deliberate decision to never block). It proposes a `cycle_count`-based cooldown (delay re-offer for COOLDOWN_SEC) plus human escalation at cycle_count≥20.
+The alternative on the table was a `cycle_count`-based cooldown: delay re-offer for COOLDOWN_SEC, then escalate to a human at cycle_count≥20. No such machinery exists — `Task_cooldowns`/`TaskInCooldown` appear nowhere in `lib/`, and the "pure observation: does not block" behavior in the tree today is observation-only logging, not a deliberate decision never to block.
 
 That is the `cap/cooldown` symptom-suppression signature (CLAUDE.md workaround bar): it delays re-offer and dumps undoable tasks on a human without making the discarded decline signal load-bearing. Per-keeper decline memory instead consumes the existing signal at the point of decision:
 
@@ -61,7 +66,7 @@ The existing oscillation WARN logging (observation) is preserved.
 
 ## Deferred (build only on evidence the core is insufficient)
 
-- **Threshold quarantine + escalation routing** (a decline-semantic version of RFC-0034): build only if per-keeper memory does not drain the churn. Building a quarantine state + escalation queue + recovery action + dashboard now would be speculative machinery with no consumer.
+- **Threshold quarantine + escalation routing** (a decline-semantic version of the cooldown above): build only if per-keeper memory does not drain the churn. Building a quarantine state + escalation queue + recovery action + dashboard now would be speculative machinery with no consumer.
 - **Task↔keeper capability typing/routing**: the ideal *proactive* match, but it requires a capability taxonomy (string-classifier risk) and per-task assignment effort. Defer; per-keeper memory captures most of the benefit reactively.
 
 ## Code touch points

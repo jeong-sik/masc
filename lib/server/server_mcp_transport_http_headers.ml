@@ -18,15 +18,11 @@ let is_http_error_response = function
             | _ -> None)
         | _ -> None
       in
-      let is_parse_or_invalid = function
-        | Mcp_error_code.Parse_error | Invalid_request -> true
-        | _ -> false
-      in
       id_is_null
       && (match code with
           | Some c ->
               (match Mcp_error_code.of_wire_code c with
-               | Some ec -> is_parse_or_invalid ec
+               | Some ec -> Mcp_error_code.allows_null_request_id ec
                | None -> false)
           | None -> false)
   | _ -> false
@@ -182,17 +178,6 @@ let should_use_sse_for_body (request : Httpun.Request.t) body_str accept_mode =
       accept_mode = Http_negotiation.Streamable
       && Http_negotiation.accepts_sse_header
            (Httpun.Headers.get request.headers "accept")
-
-(* MCP_FORCE_JSON_RESPONSE was retired (masc#25123 Wave 2):
-   MASC_FORCE_JSON_RESPONSE is the single spelling, matching the MASC_*
-   namespace every other knob uses. A set-but-ignored legacy spelling would
-   silently change transport behavior for whoever still exports it, so it
-   warns once at module init. *)
-let () =
-  if env_flag "MCP_FORCE_JSON_RESPONSE" then
-    Log.Server.warn
-      "retired env knob ignored env=MCP_FORCE_JSON_RESPONSE; use \
-       MASC_FORCE_JSON_RESPONSE"
 
 let force_json_response = env_flag "MASC_FORCE_JSON_RESPONSE"
 

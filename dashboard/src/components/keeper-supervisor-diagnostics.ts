@@ -33,7 +33,6 @@ function registryStateBadge(state: string | null) {
   const colors: Record<string, { bg: string; text: string }> = {
     Running: { bg: 'bg-[var(--emerald-12)]', text: 'text-[var(--color-status-ok)]' },
     Crashed: { bg: 'bg-[var(--bad-soft)]', text: 'text-[var(--color-status-err)]' },
-    Dead: { bg: 'bg-[var(--color-bg-hover)]', text: 'text-[var(--color-fg-muted)]' },
     Stopped: { bg: 'bg-[var(--warn-soft)]', text: 'text-[var(--color-status-warn)]' },
     Paused: { bg: 'bg-[var(--color-bg-hover)]', text: 'text-[var(--stalled-fg)]' },
   }
@@ -87,7 +86,6 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
     restart_count = 0,
     crash_log,
     last_failure_reason,
-    dead_since,
   } = diag
   return html`
     <${PanelCard} title="감독 진단">
@@ -104,11 +102,6 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
           <div class="flex items-center justify-between v2-monitoring-row">
             <${MutedLabel}>마지막 실패 원인</${MutedLabel}>
             <span class="text-2xs font-mono text-[var(--rose-light)]" title=${last_failure_reason}>${failureReasonLabel(last_failure_reason)}</span>
-          </div>
-        ` : null}
-        ${dead_since ? html`
-          <div class="py-2 px-3 rounded-[var(--r-1)] bg-[var(--bad-6)] border border-[var(--bad-soft)] text-xs text-[var(--rose-light)] v2-monitoring-panel">
-            ${formatTimeAgo(dead_since)} 이후 Dead tombstone 유지 중.
           </div>
         ` : null}
         <div class="v2-monitoring-row"><${CrashCohortBar} crash_log=${crash_log} /></div>
@@ -146,7 +139,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
               ` : null}
               <div class="space-y-1 ${crashShowAll.value ? 'max-h-64' : 'max-h-32'} overflow-y-auto v2-monitoring-row">
                 ${visible.length === 0 ? html`
-                  <div class="py-2 px-2 text-2xs text-[var(--color-fg-muted)] italic v2-monitoring-row">선택된 카테고리에 해당하는 장애가 없습니다.</div>
+                  <div class="py-2 px-2 text-2xs text-[var(--color-fg-muted)] italic v2-monitoring-row">선택된 카테고리에 해당하는 장애 없음</div>
                 ` : visible.map((e) => html`
                   <div class="flex items-center justify-between py-1 px-2 rounded-[var(--r-1)] text-2xs bg-[var(--color-bg-surface)] v2-monitoring-row">
                     <span class="font-mono text-[var(--color-fg-muted)]">${formatTimeAgo(e.ts ?? 0)}</span>

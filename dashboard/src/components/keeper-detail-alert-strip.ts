@@ -15,11 +15,13 @@ import { StrongSecondary, RuntimeBadge } from './keeper-detail-primitives'
 import {
   trustDispositionLabel,
   isTurnTerminalFailureCode,
+  operatorDispositionReasonLabel,
   type RuntimeAttemptObservation,
 } from './fsm-hub-types'
 import { keeperNeedsDiagnosticAttention, refreshAfterRuntimeAction } from './keeper-detail-helpers'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import { showToast } from './common/toast'
+import { keeperHeartbeatStaleMs } from '../config/constants'
 import {
   attentionReasonLabel,
   canonicalAttentionReason,
@@ -148,6 +150,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     && !isTurnTerminalFailureCode(latestTerminalCode)
   const latestNextAction = canonicalNextHumanAction(keeper.trust?.latest_next_action?.trim() || null)
   const operatorDispositionReason = keeper.trust?.operator_disposition_reason?.trim() || null
+  const operatorDispositionReasonText = operatorDispositionReasonLabel(operatorDispositionReason)
   const shouldShowOperatorDispositionReason =
     operatorDispositionReason !== null && operatorDispositionReason !== trustSummary
   const executionSummary = keeper.trust?.execution_summary ?? null
@@ -169,8 +172,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
       const point = series[index]
       if (!point) continue
       if (
-        point.fallback_applied
-        || point.runtime_outcome?.trim()
+        point.runtime_outcome?.trim()
         || point.runtime_id?.trim()
         || typeof point.runtime_attempt_count === 'number'
       ) return point
@@ -182,29 +184,22 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
       ? providerAttempts
       : latestRuntimeMetric?.runtime_attempt_count ?? null
   const observedProviderFallback =
-    typeof providerFallback === 'boolean'
-      ? providerFallback
-      : latestRuntimeMetric?.fallback_applied ?? null
+    typeof providerFallback === 'boolean' ? providerFallback : null
   const observedRuntimeOutcome =
     runtimeOutcome || latestRuntimeMetric?.runtime_outcome?.trim() || null
-  const fallbackReason = latestRuntimeMetric?.fallback_reason?.trim() || null
-  const fallbackHops =
-    typeof latestRuntimeMetric?.fallback_hops === 'number'
-      ? latestRuntimeMetric.fallback_hops
-      : 0
   const trustLatestEvent = keeper.trust?.latest_causal_event ?? null
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
-  const hbStale = hbAgeMs != null && hbAgeMs > 300_000 // 5 minutes
+  const hbStale = hbAgeMs != null
+    && hbAgeMs > keeperHeartbeatStaleMs(keeper.heartbeat_stale_after_s)
   const needsAttention = keeperNeedsDiagnosticAttention(keeper)
-  const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
+  const activity = keeperActivityDisplay(keeper)
   const hasActivitySignal = activity.timestamp != null || activity.ageSeconds != null
   const hasRuntimeIdentitySignal =
     Boolean(runtimeLabel)
     || Boolean(observedRuntimeOutcome)
     || typeof observedProviderAttempts === 'number'
     || observedProviderFallback === true
-    || (latestRuntimeMetric?.fallback_applied === true && Boolean(fallbackReason || fallbackHops > 0))
   const hasExecutionEvidenceSignal =
     Boolean(stopCause)
     || Boolean(latestTerminalCode)
@@ -243,7 +238,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         action === 'pause'
           ? await pauseKeeper(keeper.name)
           : action === 'resume'
-            ? await resumeKeeper(keeper.name, keeper.generation)
+            ? await resumeKeeper(keeper.name)
             : await wakeKeeper(keeper.name)
       if (res.ok) {
         const msg =
@@ -311,7 +306,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
                   class="!py-0.5 inline-flex items-center"
                   disabled=${directiveLoading.value}
                   onClick=${() => handleDirective('wakeup')}
-                  title="깨우기: idle 또는 stuck 상태에서 다음 turn 을 즉시 시도합니다. 실행 중이어도 노출되는 이유는 runtime/oas/turn timeout 같은 stuck signal 이 backend 보다 먼저 frontend 에 보이는 케이스를 다루기 위함입니다."
+                  title="다음 turn 즉시 시도 (idle/stuck 회복용)입니다."
                 >깨우기<//>`
               : null}`}
         ${isPaused && keeper.keepalive_running
@@ -364,7 +359,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span title=${latestNextAction}><strong class="text-[var(--color-fg-secondary)]">권장 조치</strong> · ${nextHumanActionLabel(latestNextAction)}</span>`
           : null}
         ${shouldShowOperatorDispositionReason && operatorDispositionReason
-          ? html`<span><${StrongSecondary}>운영자 판단</${StrongSecondary}> · ${operatorDispositionReason}</span>`
+          ? html`<span><${StrongSecondary}>운영자 판단</${StrongSecondary}> · ${operatorDispositionReasonText}</span>`
           : null}
         ${trustDisposition
           ? html`
@@ -377,15 +372,6 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">런타임</strong> · ${runtimeLabel}</span>`
           : null}
         ${renderRuntimeAttempt ? renderRuntimeAttemptObservation(runtimeAttempt) : null}
-        ${latestRuntimeMetric?.fallback_applied === true && (fallbackReason || fallbackHops > 0)
-          ? html`
-              <span class="text-[var(--color-status-warn)]">
-                <strong>폴백</strong>
-                ${fallbackReason ? ` · ${fallbackReason}` : ''}
-                ${fallbackHops > 0 ? ` · ${fallbackHops} hops` : ''}
-              </span>
-            `
-          : null}
         ${trustLatestEvent
           ? html`
               <span>

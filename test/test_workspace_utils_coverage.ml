@@ -295,33 +295,6 @@ let test_env_opt_home () =
   | None -> ()  (* Some systems might not have HOME *)
 
 (* ============================================================
-   storage_backend Type Tests
-   ============================================================ *)
-
-let test_storage_backend_memory_variant () =
-  (* Just test that the type exists and can be constructed indirectly *)
-  let _ : string = "Memory" in
-  ()
-
-let test_storage_backend_filesystem_variant () =
-  let _ : string = "FileSystem" in
-  ()
-
-(* ============================================================
-   config Record Tests
-   ============================================================ *)
-
-let test_config_base_path_type () =
-  (* config record has base_path: string *)
-  let _ : string = "test_path" in
-  ()
-
-let test_config_lock_expiry_type () =
-  (* config record has lock_expiry_minutes: int *)
-  let _ : int = 30 in
-  ()
-
-(* ============================================================
    strip_prefix Tests
    ============================================================ *)
 
@@ -388,59 +361,6 @@ let test_contains_substring_middle () =
 
 let test_contains_substring_special_chars () =
   check bool "special chars" true (String_util.contains_substring "a<b>c" "<b>")
-
-(* ============================================================
-   sanitize_html Tests
-   ============================================================ *)
-
-let test_sanitize_html_no_special () =
-  check string "no change" "hello world" (Workspace_utils.sanitize_html "hello world")
-
-let test_sanitize_html_less_than () =
-  check string "escape <" "&lt;script&gt;" (Workspace_utils.sanitize_html "<script>")
-
-let test_sanitize_html_greater_than () =
-  check string "escape >" "a &gt; b" (Workspace_utils.sanitize_html "a > b")
-
-let test_sanitize_html_ampersand () =
-  check string "escape &" "a &amp; b" (Workspace_utils.sanitize_html "a & b")
-
-let test_sanitize_html_double_quote () =
-  check string "escape \"" "say &quot;hi&quot;" (Workspace_utils.sanitize_html "say \"hi\"")
-
-let test_sanitize_html_single_quote () =
-  check string "escape '" "it&#x27;s" (Workspace_utils.sanitize_html "it's")
-
-let test_sanitize_html_all_special () =
-  let input = "<script>alert('xss' & \"evil\")</script>" in
-  let expected = "&lt;script&gt;alert(&#x27;xss&#x27; &amp; &quot;evil&quot;)&lt;/script&gt;" in
-  check string "all escaped" expected (Workspace_utils.sanitize_html input)
-
-let test_sanitize_html_empty () =
-  check string "empty" "" (Workspace_utils.sanitize_html "")
-
-let test_sanitize_html_unicode () =
-  check string "unicode preserved" "안녕하세요" (Workspace_utils.sanitize_html "안녕하세요")
-
-(* ============================================================
-   sanitize_agent_name Tests
-   ============================================================ *)
-
-let test_sanitize_agent_name_normal () =
-  check string "normal name" "claude" (Workspace_utils.sanitize_agent_name "claude")
-
-let test_sanitize_agent_name_xss () =
-  check string "xss attempt" "&lt;script&gt;" (Workspace_utils.sanitize_agent_name "<script>")
-
-(* ============================================================
-   sanitize_message Tests
-   ============================================================ *)
-
-let test_sanitize_message_normal () =
-  check string "normal message" "Hello world" (Workspace_utils.sanitize_message "Hello world")
-
-let test_sanitize_message_html () =
-  check string "html stripped" "&lt;b&gt;bold&lt;/b&gt;" (Workspace_utils.sanitize_message "<b>bold</b>")
 
 (* ============================================================
    safe_filename Tests
@@ -535,6 +455,32 @@ let make_test_config ~base_path ~cluster_name : Workspace_utils.config =
     backend_config;
     backend = Workspace_utils.Memory memory_backend;
   }
+
+(* ============================================================
+   storage_backend / config Tests
+
+   These replaced four cases that bound a literal and returned unit
+   ([let _ : string = "Memory" in ()]). They named the type in a comment
+   and never referenced it, so they passed whatever Workspace_utils did.
+   ============================================================ *)
+
+(* Exhaustive on purpose: a third storage_backend breaks this file, which
+   is the part a value-based case cannot cover -- FileSystem needs an Eio
+   fs capability, so only its arm is pinned here. *)
+let storage_backend_tag : Workspace_utils.storage_backend -> string = function
+  | Workspace_utils.Memory _ -> "memory"
+  | Workspace_utils.FileSystem _ -> "filesystem"
+
+let test_storage_backend_memory_is_tagged () =
+  let backend = Workspace_utils.Memory (Backend.Memory.create ()) in
+  check string "memory backend" "memory" (storage_backend_tag backend)
+
+let test_config_carries_its_fields () =
+  let cfg = make_test_config ~base_path:"/tmp/cfg" ~cluster_name:"c1" in
+  check string "base_path" "/tmp/cfg" cfg.Workspace_utils.base_path;
+  check string "workspace_path" "/tmp/cfg" cfg.Workspace_utils.workspace_path;
+  check int "lock_expiry_minutes" 30 cfg.Workspace_utils.lock_expiry_minutes;
+  check string "backend" "memory" (storage_backend_tag cfg.Workspace_utils.backend)
 
 let test_masc_root_dir_default_cluster () =
   let cfg = make_test_config ~base_path:"/home/user/project" ~cluster_name:"default" in
@@ -716,6 +662,50 @@ let test_memory_backend_fallback_keys_by_backend_base_path () =
    Test Runners
    ============================================================ *)
 
+(* The previous fold replaced every unsafe character with '-', so "a.b",
+   "a/b" and "a b" all landed on "a-b" and two keepers wrote one file
+   (#24342); nothing bounded the length either, so a name past the
+   filesystem's component limit produced a path the OS rejects (#24343). *)
+let segment = Workspace_utils_backend_setup.sanitize_namespace_segment
+
+let test_namespace_segment_separates_representative_names () =
+  let names =
+    [ "alpha.beta"; "alpha/beta"; "alpha beta"; "alpha-beta"
+    ; "ALPHA"; "alpha"; "a:b"; "a*b"; ""; " "; String.make 300 'a'
+    ; String.make 300 'a' ^ "x"
+    ]
+  in
+  let table = Hashtbl.create 16 in
+  List.iter
+    (fun name ->
+      let seg = segment name in
+      match Hashtbl.find_opt table seg with
+      | Some other when not (String.equal other name) ->
+        Alcotest.failf "%S and %S share the segment %S" other name seg
+      | Some _ | None -> Hashtbl.replace table seg name)
+    names
+;;
+
+let test_namespace_segment_is_bounded () =
+  let bound = Workspace_utils_backend_setup.namespace_segment_max_length + 17 in
+  List.iter
+    (fun name ->
+      let seg = segment name in
+      Alcotest.(check bool)
+        (Printf.sprintf "a %d-char name yields %d chars" (String.length name)
+           (String.length seg))
+        true
+        (String.length seg <= bound && String.length seg > 0))
+    [ ""; "a"; String.make 300 'a'; String.make 300 '/'; String.make 1000 'z' ]
+;;
+
+let test_canonical_names_are_unchanged () =
+  (* Every name in this workspace is already canonical, so no path moves. *)
+  List.iter
+    (fun name -> Alcotest.(check string) name name (segment name))
+    [ "alpha"; "keeper-1"; "a_b-c"; "orbiter"; "rw-e0-r9-20260820-coord" ]
+;;
+
 let () =
   run "Workspace_utils Coverage" [
     "parse_gitdir_to_main_root", [
@@ -756,12 +746,10 @@ let () =
       test_case "home" `Quick test_env_opt_home;
     ];
     "storage_backend", [
-      test_case "memory variant" `Quick test_storage_backend_memory_variant;
-      test_case "filesystem variant" `Quick test_storage_backend_filesystem_variant;
+      test_case "memory is tagged" `Quick test_storage_backend_memory_is_tagged;
     ];
     "config", [
-      test_case "base_path type" `Quick test_config_base_path_type;
-      test_case "lock_expiry type" `Quick test_config_lock_expiry_type;
+      test_case "carries its fields" `Quick test_config_carries_its_fields;
     ];
     "strip_prefix", [
       test_case "basic" `Quick test_strip_prefix_basic;
@@ -785,23 +773,10 @@ let () =
       test_case "special chars" `Quick test_contains_substring_special_chars;
     ];
     "sanitize_html", [
-      test_case "no special" `Quick test_sanitize_html_no_special;
-      test_case "less than" `Quick test_sanitize_html_less_than;
-      test_case "greater than" `Quick test_sanitize_html_greater_than;
-      test_case "ampersand" `Quick test_sanitize_html_ampersand;
-      test_case "double quote" `Quick test_sanitize_html_double_quote;
-      test_case "single quote" `Quick test_sanitize_html_single_quote;
-      test_case "all special" `Quick test_sanitize_html_all_special;
-      test_case "empty" `Quick test_sanitize_html_empty;
-      test_case "unicode" `Quick test_sanitize_html_unicode;
     ];
     "sanitize_agent_name", [
-      test_case "normal" `Quick test_sanitize_agent_name_normal;
-      test_case "xss" `Quick test_sanitize_agent_name_xss;
     ];
     "sanitize_message", [
-      test_case "normal" `Quick test_sanitize_message_normal;
-      test_case "html" `Quick test_sanitize_message_html;
     ];
     "safe_filename", [
       test_case "normal" `Quick test_safe_filename_normal;
@@ -838,5 +813,13 @@ let () =
         test_default_config_memory_fallback_isolated_by_base_path;
       test_case "memory fallback keys by backend base path" `Quick
         test_memory_backend_fallback_keys_by_backend_base_path;
+    ];
+    "namespace_segment", [
+      test_case "representative names get distinct segments" `Quick
+        test_namespace_segment_separates_representative_names;
+      test_case "segments stay inside a path component" `Quick
+        test_namespace_segment_is_bounded;
+      test_case "canonical names are unchanged" `Quick
+        test_canonical_names_are_unchanged;
     ];
   ]

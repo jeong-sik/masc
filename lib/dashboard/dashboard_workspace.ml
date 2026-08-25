@@ -1,19 +1,8 @@
 let clamp_limit limit = Server_utils.clamp ~min_v:1 ~max_v:200 limit
-let fetch_limit limit = Server_utils.clamp ~min_v:limit ~max_v:1000 (limit * 5)
 let workspace_id = "workspace"
 let workspace_name = "Workspace timeline"
 
 let take = List.take
-
-let decode_message_entities content =
-  content
-  |> String_util.replace_substring ~needle:"&quot;" ~by:"\""
-  |> String_util.replace_substring ~needle:"&#x27;" ~by:"'"
-  |> String_util.replace_substring ~needle:"&apos;" ~by:"'"
-  |> String_util.replace_substring ~needle:"&lt;" ~by:"<"
-  |> String_util.replace_substring ~needle:"&gt;" ~by:">"
-  |> String_util.replace_substring ~needle:"&amp;" ~by:"&"
-;;
 
 let is_space = function
   | ' ' | '\t' | '\r' | '\n' -> true
@@ -86,11 +75,11 @@ let unique_preserving_order xs =
 
 let mentions_of_message (msg : Masc_domain.message) =
   let body_mentions =
-    decode_message_entities msg.content |> words |> List.filter_map mention_of_word
+    msg.content |> words |> List.filter_map mention_of_word
   in
   let direct =
     match msg.mention with
-    | Some value -> Option.to_list (String_util.trim_to_option value)
+    | Some value -> Option.to_list (String_util.trim_nonempty value)
     | _ -> []
   in
   unique_preserving_order (direct @ body_mentions)
@@ -98,18 +87,27 @@ let mentions_of_message (msg : Masc_domain.message) =
 
 let message_id (msg : Masc_domain.message) = Printf.sprintf "msg-%09d" msg.seq
 
+(* The three session messages are the whole of what this hides. A second arm
+   used to hide anything starting with "lifecycle_" as well, but nothing in
+   the repo writes such a msg_type: [Workspace_broadcast.broadcast] defaults
+   to "broadcast" and the only callers that override it are the three named
+   here (workspace_lifecycle.ml:120, :190, :257). A prefix guard for a
+   namespace no producer uses does not hide anything -- it only makes the
+   next reader look for the producer. *)
 let is_workspace_message (msg : Masc_domain.message) =
-  let msg_type = String.lowercase_ascii (String.trim msg.msg_type) in
-  match msg_type with
+  match String.lowercase_ascii (String.trim msg.msg_type) with
   | "session_bound" | "session_rebound" | "session_ended" -> false
-  | _ -> not (String.starts_with ~prefix:"lifecycle_" msg_type)
+  | _ -> true
 ;;
 
 let message_json (msg : Masc_domain.message) =
-  let body = decode_message_entities msg.content in
+  let body = msg.content in
   let mentions = mentions_of_message msg in
   let base =
     [ "id", `String (message_id msg)
+    ; "request_id", `String msg.request_id
+    ; ( "mention_delivery"
+      , `String (Masc_domain.message_mention_delivery_to_string msg.mention_delivery) )
     ; "workspace_id", `String workspace_id
     ; "ts", `String msg.timestamp
     ; "sender", `String msg.from_agent
@@ -117,7 +115,6 @@ let message_json (msg : Masc_domain.message) =
     ; "body", `String body
     ; "mentions", `List (List.map (fun target -> `String target) mentions)
     ; ("expires_at", Json_util.float_opt_to_json msg.expires_at)
-    ; "relevance", `String msg.relevance
     ]
   in
   `Assoc base
@@ -143,10 +140,14 @@ let mention_inbox_json ?me (msg : Masc_domain.message) =
     Some
       (`Assoc
           [ "message_id", `String (message_id msg)
+          ; "request_id", `String msg.request_id
+          ; ( "mention_delivery"
+            , `String
+                (Masc_domain.message_mention_delivery_to_string msg.mention_delivery) )
           ; "workspace_id", `String workspace_id
           ; "ts", `String msg.timestamp
           ; "sender", `String msg.from_agent
-          ; "snippet", `String (decode_message_entities msg.content |> snippet)
+          ; "snippet", `String (snippet msg.content)
           ; "ack_at", `Null
           ])
 ;;
@@ -189,9 +190,11 @@ let workspace_json ~config messages =
 let compute_json ~config ?me ~limit () =
   let limit = clamp_limit limit in
   let recent_desc =
-    Workspace.get_messages_raw config ~since_seq:0 ~limit:(fetch_limit limit)
-    |> List.filter is_workspace_message
-    |> take limit
+    (* [limit] workspace messages, not [limit] messages of which some are
+       workspace ones. The old form asked for five times as many and hoped the
+       filter left enough; it left none whenever direct messages dominated. *)
+    Workspace.get_messages_matching config ~since_seq:0 ~limit
+      ~keep:is_workspace_message
   in
   let timeline = List.rev recent_desc in
   let messages_json = List.map message_json timeline in

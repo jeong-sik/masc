@@ -2,7 +2,7 @@
 
     Public MCP tools and internal agent-facing tool surfaces are projections
     over one capability inventory. Some surfaces intentionally reuse the same
-    tool name with a narrower schema (for example local worker projections).
+    tool name with a narrower schema (for example spawned-agent projections).
 *)
 
 open Masc_domain
@@ -13,13 +13,11 @@ module StringMap = Set_util.StringMap
 type audience =
   | External_mcp_client
   | Spawned_managed_agent
-  | Local_worker_agent
   | Keeper_agent
 
 type surface =
   | Public_mcp
   | Spawned_agent_mcp
-  | Local_worker
   | Keeper
 
 type projection = {
@@ -46,55 +44,55 @@ type capability_seed = {
   projection : projection;
 }
 
-let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
-  let _, results =
+let require_unique_schemas ~label (schemas : Masc_domain.tool_schema list) =
+  let duplicates, _ =
     List.fold_left
-      (fun (seen, acc) (schema : Masc_domain.tool_schema) ->
-        if StringSet.mem schema.name seen then (seen, acc)
-        else (StringSet.add schema.name seen, schema :: acc))
-      (StringSet.empty, []) schemas
+      (fun (duplicates, seen) (schema : Masc_domain.tool_schema) ->
+        if StringSet.mem schema.name seen
+        then schema.name :: duplicates, seen
+        else duplicates, StringSet.add schema.name seen)
+      ([], StringSet.empty) schemas
   in
-  List.rev results
+  match duplicates with
+  | [] -> schemas
+  | names ->
+    invalid_arg
+      (Printf.sprintf "%s: duplicate tool schema(s): %s"
+         label
+         (names |> List.sort_uniq String.compare |> String.concat ", "))
 
-let dedupe_projections projections =
-  let _, results =
+let require_unique_projections ~label projections =
+  let duplicates, _ =
     List.fold_left
-      (fun (seen, acc) (projection : projection) ->
+      (fun (duplicates, seen) (projection : projection) ->
         let key =
           Printf.sprintf "%s|%s"
             (match projection.surface with
             | Public_mcp -> "public_mcp"
             | Spawned_agent_mcp -> "spawned_agent_mcp"
-            | Local_worker -> "local_worker"
             | Keeper -> "keeper")
             projection.tool_name
         in
-        if StringSet.mem key seen then (seen, acc)
-        else (StringSet.add key seen, projection :: acc))
-      (StringSet.empty, []) projections
+        if StringSet.mem key seen
+        then key :: duplicates, seen
+        else duplicates, StringSet.add key seen)
+      ([], StringSet.empty) projections
   in
-  List.rev results
+  match duplicates with
+  | [] -> projections
+  | keys ->
+    invalid_arg
+      (Printf.sprintf "%s: duplicate tool projection(s): %s"
+         label
+         (keys |> List.sort_uniq String.compare |> String.concat ", "))
 
 let prefixed_tool_names names =
-  names |> List.map (fun name -> "mcp__masc__" ^ name)
-
-let canonical_capability_id tool_name =
-  match (Tool_catalog.metadata tool_name).Tool_catalog.canonical_name with
-  | Some canonical_name -> canonical_name
-  | None -> tool_name
-
+  names |> List.map Tool_transport_prefix.add
 
 let surface_to_string = function
   | Public_mcp -> "public_mcp"
   | Spawned_agent_mcp -> "spawned_agent_mcp"
-  | Local_worker -> "local_worker"
   | Keeper -> "keeper"
-
-let audience_to_string = function
-  | External_mcp_client -> "external_mcp_client"
-  | Spawned_managed_agent -> "spawned_managed_agent"
-  | Local_worker_agent -> "local_worker_agent"
-  | Keeper_agent -> "keeper_agent"
 
 let projection_to_schema (projection : projection) : Masc_domain.tool_schema =
   {
@@ -110,8 +108,7 @@ let make_seed ?capability_id
   let backend_tool_name = Option.value ~default:schema.name backend_tool_name in
   {
     capability_id =
-      Option.value ~default:(canonical_capability_id backend_tool_name)
-        capability_id;
+      Option.value ~default:backend_tool_name capability_id;
     audiences;
     supports_audit_evidence;
     supports_direct_user_discovery;
@@ -131,12 +128,6 @@ let spawned_agent_public_tool_names : string list =
 let spawned_agent_prefixed_tools : string list =
   prefixed_tool_names Tool_catalog_surfaces.spawned_agent_surface_tools
 
-let local_worker_public_tool_names : string list =
-  Tool_catalog_surfaces.local_worker_surface_tools
-
-let local_worker_internal_schemas : Masc_domain.tool_schema list =
-  Keeper_tool_surfaces.local_worker_internal_schemas
-
 let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_seed list =
   let public_schemas =
@@ -147,8 +138,7 @@ let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_
     let audiences =
       Json_util.dedupe_keep_order
         (External_mcp_client
-         :: (if List.mem name spawned_agent_public_tool_names then [ Spawned_managed_agent ] else [])
-         @ (if List.mem name local_worker_public_tool_names then [ Local_worker_agent ] else []))
+         :: (if List.mem name spawned_agent_public_tool_names then [ Spawned_managed_agent ] else []))
     in
     let supports_audit_evidence =
       List.mem name spawned_agent_public_tool_names
@@ -170,31 +160,9 @@ let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_
       else
         base
     in
-    let with_local_worker =
-      if List.mem name local_worker_public_tool_names then
-        with_spawned
-        @ [
-            make_seed ~audiences ~supports_audit_evidence
-              ~supports_direct_user_discovery:false ~surface:Local_worker schema;
-          ]
-      else
-        with_spawned
-    in
-    with_local_worker
+    with_spawned
   in
   public_schemas |> List.concat_map make_public_seed
-
-let local_worker_internal_seeds : capability_seed list =
-  let base =
-    local_worker_internal_schemas
-    |> List.map (fun schema ->
-           make_seed
-             ~audiences:[ Local_worker_agent ]
-             ~supports_audit_evidence:true
-             ~supports_direct_user_discovery:false ~surface:Local_worker
-             schema)
-  in
-  base
 
 let keeper_projection_seeds : capability_seed list =
   Keeper_tool_descriptor.model_visible_descriptors ()
@@ -218,7 +186,7 @@ let keeper_projection_seeds : capability_seed list =
 let all_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_seed list =
   public_projection_seeds_from public_tool_source_schemas
-  @ local_worker_internal_seeds @ keeper_projection_seeds
+  @ keeper_projection_seeds
 
 let all_capabilities_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_def list =
@@ -251,7 +219,9 @@ let all_capabilities_from (public_tool_source_schemas : Masc_domain.tool_schema 
                   existing.supports_direct_user_discovery
                   || seed.supports_direct_user_discovery;
                 projections =
-                  dedupe_projections (existing.projections @ [ seed.projection ]);
+                  require_unique_projections
+                    ~label:("capability " ^ seed.capability_id)
+                    (existing.projections @ [ seed.projection ]);
               }
             in
             (StringMap.add seed.capability_id def tbl, ordered_ids))
@@ -267,21 +237,17 @@ let surface_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_sch
       |> Tool_help_registry.canonicalize_schemas
       |> List.filter (fun (schema : Masc_domain.tool_schema) ->
              Tool_catalog.is_public_mcp schema.name)
-      |> dedupe_schemas
+      |> require_unique_schemas ~label:"public MCP capability surface"
   | _ ->
       all_projection_seeds_from public_tool_source_schemas
       |> List.filter (fun (seed : capability_seed) -> seed.projection.surface = surface)
       |> List.map (fun (seed : capability_seed) -> projection_to_schema seed.projection)
-      |> dedupe_schemas
+      |> require_unique_schemas ~label:"capability surface"
 
 let surface_tool_names_from (public_tool_source_schemas : Masc_domain.tool_schema list)
     surface : string list =
   surface_tool_schemas_from public_tool_source_schemas surface
   |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
-
-let public_raw_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
-    Masc_domain.tool_schema list =
-  dedupe_schemas public_tool_source_schemas
 
 (* Surface filtering at this layer removed in #1961 — all registered tools pass
    through here unchanged. The public MCP surface is now filtered at the profile
@@ -297,21 +263,17 @@ let public_raw_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_
    PR-8 wires the MCP server; PR-9 wires tag-dispatch fallback.
    PR-11 removes the legacy [dispatch] and [dispatch_structured] entries
    once all callers migrate. *)
-let public_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
+let canonical_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     Masc_domain.tool_schema list =
-  dedupe_schemas public_tool_source_schemas
+  require_unique_schemas ~label:"public tool catalog" public_tool_source_schemas
   |> Tool_help_registry.canonicalize_schemas
 
-let visible_public_tool_schemas_from
+let visible_tool_schemas_from
     ?(include_hidden = false)
     (public_tool_source_schemas : Masc_domain.tool_schema list) : Masc_domain.tool_schema list =
-  public_tool_schemas_from public_tool_source_schemas
+  canonical_tool_schemas_from public_tool_source_schemas
   |> List.filter (fun (schema : Masc_domain.tool_schema) ->
          Tool_catalog.is_visible ~include_hidden schema.name)
-
-let local_worker_tool_schemas ?names () :
-    (Masc_domain.tool_schema list, string) result =
-  Keeper_tool_surfaces.local_worker_tool_schemas ?names ()
 
 let surface_snapshot_json
     (public_tool_source_schemas : Masc_domain.tool_schema list) =
@@ -327,31 +289,5 @@ let surface_snapshot_json
     [
       ("public_mcp", surface_json Public_mcp);
       ("spawned_agent_mcp", surface_json Spawned_agent_mcp);
-      ("local_worker", surface_json Local_worker);
       ("keeper", surface_json Keeper);
-    ]
-
-let capability_to_json (capability : capability_def) =
-  `Assoc
-    [
-      ("capability_id", `String capability.capability_id);
-      ( "audiences",
-        `List
-          (List.map
-             (fun audience -> `String (audience_to_string audience))
-             capability.audiences) );
-      ("supports_audit_evidence", `Bool capability.supports_audit_evidence);
-      ( "supports_direct_user_discovery",
-        `Bool capability.supports_direct_user_discovery );
-      ( "projections",
-        `List
-          (List.map
-             (fun (projection : projection) ->
-               `Assoc
-                 [
-                   ("surface", `String (surface_to_string projection.surface));
-                   ("tool_name", `String projection.tool_name);
-                   ("backend_tool_name", `String projection.backend_tool_name);
-                 ])
-             capability.projections) );
     ]

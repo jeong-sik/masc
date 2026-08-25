@@ -1,10 +1,10 @@
 import { isRecord, asString, asNumber, asBoolean, extractArray, asStringArray } from './components/common/normalize'
-import { normalizePendingConfirmation } from './pending-confirm'
 import {
   normalizeAttentionItem,
   normalizeRecommendedAction,
 } from './store-normalizers'
 import { normalizeKeeperTrust } from './keeper-store-normalize'
+import { normalizeOperatorActionDescriptor } from './pending-confirm'
 import {
   normalizeAgentBrief,
   normalizeAttentionQueueItem,
@@ -27,7 +27,6 @@ import type {
   OperatorAttentionItem,
   OperatorKeeperSnapshot,
   OperatorRecommendedAction,
-  PendingConfirmation,
 } from './types'
 
 function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
@@ -39,12 +38,14 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     phase: asString(raw.phase) ?? null,
     pipeline_stage: asString(raw.pipeline_stage) ?? null,
     paused: asBoolean(raw.paused) ?? null,
+    // The brief row publishes health as a top-level word; the execution
+    // route publishes the same axis under `diagnostic.health_state`. Two
+    // placements, one axis — `isKeeperOffline` parses either.
+    health: asString(raw.health) ?? null,
     agent_name: asString(raw.agent_name),
     status: asString(raw.status),
     context_ratio: asNumber(raw.context_ratio),
     generation: asNumber(raw.generation),
-    active_goal_ids: asStringArray(raw.active_goal_ids),
-    last_autonomous_action_at: asString(raw.last_autonomous_action_at) ?? null,
     last_turn_ago_s: asNumber(raw.last_turn_ago_s),
     model: asString(raw.model),
     needs_attention: typeof raw.needs_attention === 'boolean' ? raw.needs_attention : null,
@@ -55,19 +56,6 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
 }
 
 // normalizePendingConfirmation imported from pending-confirm.ts (SSOT)
-
-function normalizeActionDescriptor(raw: unknown): OperatorActionDescriptor | null {
-  if (!isRecord(raw)) return null
-  const actionType = asString(raw.action_type)
-  const targetType = asString(raw.target_type)
-  if (!actionType || !targetType) return null
-  return {
-    action_type: actionType,
-    target_type: targetType,
-    description: asString(raw.description),
-    confirm_required: asBoolean(raw.confirm_required),
-  }
-}
 
 function normalizeSummary(raw: unknown): DashboardMissionSummary {
   const root = isRecord(raw) ? raw : {}
@@ -105,11 +93,8 @@ function normalizeTargets(raw: unknown): DashboardMissionTargets {
     keepers: extractArray(root.keepers, ['items'])
       .map(normalizeKeeper)
       .filter((item): item is OperatorKeeperSnapshot => item !== null),
-    pending_confirms: extractArray(root.pending_confirms)
-      .map(normalizePendingConfirmation)
-      .filter((item): item is PendingConfirmation => item !== null),
     available_actions: extractArray(root.available_actions)
-      .map(normalizeActionDescriptor)
+      .map(normalizeOperatorActionDescriptor)
       .filter((item): item is OperatorActionDescriptor => item !== null),
   }
 }
@@ -220,7 +205,6 @@ export function normalizeMissionBriefing(raw: unknown): DashboardMissionBriefing
     criteria: asStringArray(root.criteria),
     basis: {
       namespace: asString(basis.namespace) ?? null,
-      crew_count: asNumber(basis.crew_count),
       agent_count: asNumber(basis.agent_count),
       keeper_count: asNumber(basis.keeper_count),
     },

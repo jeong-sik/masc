@@ -17,17 +17,11 @@ val stream_max_buffer : unit -> int
 (** Create the gRPC service with all handlers wired to the given workspace config.
 
     @param workspace_config The MASC workspace configuration.
-    @param tool_dispatcher Function that dispatches typed tool calls.
-    @param lsp_dispatcher Function that forwards LSP JSON-RPC requests:
-      [language_id -> jsonrpc_request_json -> workspace_root -> (response_json, error) result]. *)
+    @param tool_dispatcher Function that dispatches typed tool calls. *)
 val create_service :
   workspace_config:Workspace_utils_backend_setup.config ->
   tool_dispatcher:
     (string ->
      string ->
      (string, Server_grpc_tool_dispatch.error) result) ->
-  lsp_dispatcher:(language_id:string ->
-                   jsonrpc_request_json:string ->
-                   workspace_root:string option ->
-                   (string, string) result) ->
   Grpc_eio.Service.t

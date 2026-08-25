@@ -1,7 +1,7 @@
-(** Masc_eio_env — per-domain Eio environment for OAS HTTP
+(** Masc_eio_env — per-domain Eio environment for AGENT_CORE HTTP
     calls.
 
-    The OAS provider completions use [cohttp-eio] for HTTP
+    The AGENT_CORE provider completions use [cohttp-eio] for HTTP
     transport, which needs an Eio switch and net handle.
     {!init} is called at server bootstrap and may be called again
     by additional OCaml domains that own their own Eio handles.
@@ -9,7 +9,7 @@
     the captured handles via {!get} or {!get_opt}.
 
     Internal storage is hidden and domain-local. There is no
-    process-wide fallback; an OCaml domain that performs OAS HTTP calls
+    process-wide fallback; an OCaml domain that performs AGENT_CORE HTTP calls
     must call {!init} with handles owned by that domain. *)
 
 type t = {

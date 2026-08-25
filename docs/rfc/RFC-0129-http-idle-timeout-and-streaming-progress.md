@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0107", "0121"]
-implementation_prs: [16084, 16158]
 ---
 
 ## Implementation summary (2026-05-21)
@@ -29,7 +28,7 @@ no re-emergence of the symptoms PR-2 fixed.
 #16084's commit subject mentions RFC-0121 only, but RFC-0129 §4.2
 absorbs it as PR-1. This is the same dual-listing pattern caught for
 #16189 across RFC-0126 / RFC-0127 (see #17160). Both RFCs retain the
-PR in their `implementation_prs` for bidirectional traceability.
+PR number in their bodies, which is where that trace now lives.
 `related: ["0121"]` added so future readers can trace the
 config_dir_resolver overlap.
 
@@ -52,15 +51,15 @@ audit-sweep RFC to land directly at Implemented (after RFC-0132
 ## §0 Diagnosis reversal (2026-05-18)
 
 A first draft of this RFC framed the fix as a cross-repo change
-("OAS HTTP body lacks timeout, add idle-timeout to OAS"). Evidence
+("agent_core HTTP body lacks timeout, add idle-timeout to agent_core"). Evidence
 collected during PR-1 implementation contradicted that premise:
 
 | layer | claim in first draft | actual state on 2026-05-18 |
 |---|---|---|
-| `oas/lib/llm_provider/http_client.ml` `post_sync` body read | unbounded `take_all` | wrapped in `Eio.Time.with_timeout_exn` via `body_timeout_s` since OAS 0.195.0 (`complete.ml:656-686`) |
-| `oas/lib/llm_provider/http_client.ml` SSE / NDJSON | unbounded line read | per-line `idle_timeout` via `Eio.Time.with_timeout_exn` (`http_client.mli:204-243`) |
-| masc ↔ OAS cumulative per-attempt cap | not wired | no longer forwarded for active streaming: `per_provider_timeout_s` does not populate `Runtime_agent_context.max_execution_time_s`; streaming liveness is progress-based |
-| masc ↔ OAS per-line idle cap | not wired | wired: `Agent_sdk.Builder.with_stream_idle_timeout` (`runtime_agent_context.ml:174`), default `stream_idle_timeout_sec = 120s` (`keeper_runtime_config.mli:75`) |
+| `agent_core/lib/llm_provider/http_client.ml` `post_sync` body read | unbounded `take_all` | wrapped in `Eio.Time.with_timeout_exn` via `body_timeout_s` since agent_core 0.195.0 (`complete.ml:656-686`) |
+| `agent_core/lib/llm_provider/http_client.ml` SSE / NDJSON | unbounded line read | per-line `idle_timeout` via `Eio.Time.with_timeout_exn` (`http_client.mli:204-243`) |
+| masc ↔ agent_core cumulative per-attempt cap | not wired | no longer forwarded for active streaming: `per_provider_timeout_s` does not populate `Runtime_agent_context.max_execution_time_s`; streaming liveness is progress-based |
+| masc ↔ agent_core per-line idle cap | not wired | wired: `Agent_sdk.Builder.with_stream_idle_timeout` (`runtime_agent_context.ml:174`), default `stream_idle_timeout_sec = 120s` (`keeper_runtime_config.mli:75`) |
 
 The premise `keeper_turn_runtime_budget.ml:173-174` was written
 against is no longer true. Both caps the band-aid was protecting
@@ -102,7 +101,7 @@ and route through the same cap chain.
 self-incriminating comments:
 
 ```
-/* Root cause is OAS HTTP body lacking timeout
+/* Root cause is agent_core HTTP body lacking timeout
    (`http_client.ml take_all`); this is a band-aid until that lands. */
 
 /* Profiles with a declared fallback must not spend the whole turn on
@@ -112,10 +111,10 @@ self-incriminating comments:
 
 Both comments **predate**:
 
-1. **OAS 0.195.0** — added `body_timeout_s` on `post_sync`
+1. **agent_core 0.195.0** — added `body_timeout_s` on `post_sync`
    (`lib/llm_provider/complete.ml:656-686`). The non-streaming HTTP
    body read is now wall-clock-bounded.
-2. **OAS streaming `?idle_timeout`** — `read_sse`/`read_ndjson`
+2. **agent_core streaming `?idle_timeout`** — `read_sse`/`read_ndjson`
    raise `Eio.Time.Timeout` if no line arrives within
    `idle_timeout` seconds. The deadline resets on each line.
 3. **masc wiring**:
@@ -125,7 +124,7 @@ Both comments **predate**:
    from `per_provider_timeout_s`.
 
 Given these three pieces have all landed, the reserve_fraction is
-no longer protecting against "OAS can hang the body read". It is
+no longer protecting against "agent_core can hang the body read". It is
 only producing a smaller per-attempt budget than necessary, which
 deterministically truncates healthy slow streams at 307.5s.
 
@@ -134,7 +133,7 @@ Receipt-side scenarios in light of the corrected diagnosis:
 | scenario | what the system sees today | what is true |
 |---|---|---|
 | **A.** provider streaming for 280s, would have finished at 320s | timeout at 307.5s | output exists but is discarded; runtime rotates and pays double cost |
-| **B.** provider produces zero bytes after 280s (real hang) | also timeout at 307.5s | OAS `stream_idle_timeout_s=120s` would have caught this at 120s already, but `with_max_execution_time` fires first because reserve_fraction halved it down to 292.5s |
+| **B.** provider produces zero bytes after 280s (real hang) | also timeout at 307.5s | agent_core `stream_idle_timeout_s=120s` would have caught this at 120s already, but `with_max_execution_time` fires first because reserve_fraction halved it down to 292.5s |
 | **C.** provider finishes at 290s | success | the only path the band-aid does not corrupt |
 
 Across the 14-event sample on 2026-05-18 every observed case is **A**.
@@ -149,7 +148,7 @@ A single, narrow change scope:
 2. **Update** the stale comment block to reflect the cap chain that
    now exists end-to-end.
 3. **Keep** the streaming-progress wiring: `with_stream_idle_timeout`
-   continues to bound inter-line silence; OAS `body_timeout_s` is
+   continues to bound inter-line silence; agent_core `body_timeout_s` is
    sync-only and remains opt-in for explicit non-streaming body ceilings.
 
 Two related-but-non-gating tracks are explicitly separated below
@@ -181,15 +180,15 @@ No new flag, no new counter, no cooldown, no transitional baseline.
 
 Independent infrastructure work in `lib/masc_http_client/pool.ml`
 (piaf-based) to give the masc Pool the same idle-timeout +
-body-progress shape that OAS already has at its HTTP layer.
+body-progress shape that agent_core already has at its HTTP layer.
 
 Scope and rationale:
 
 - Pool callers today: `lib/server/server_dashboard_http_link_preview.ml`
-  and `lib/local/worker_container_types.ml`. Neither is an OAS LLM
+  and `lib/local/worker_container_types.ml`. Neither is an agent_core LLM
   call. Pool fixes do **not** affect runtime attempt timeouts.
 - Value of the PR: correct generic API at the Pool layer that
-  mirrors OAS's existing idle-timeout pattern, with unit tests for
+  mirrors agent_core's existing idle-timeout pattern, with unit tests for
   steady stream / silent-from-start / mid-stream silence.
 - Not gating the fleet fix. PR-2 lands independently of PR-1.
 
@@ -201,8 +200,8 @@ as part of the same RFC. It is now out of scope because:
 
 - The fleet 307.5s cluster does not require body-progress to fix —
   it requires the reserve to go away.
-- Sourcing body-progress from the OAS layer to masc receipt
-  schema requires an agent_sdk surface extension, which deserves
+- Sourcing body-progress from the agent_core layer to masc receipt
+  schema requires an agent_core surface extension, which deserves
   its own RFC (provider HTTP boundary cross-cut).
 - Deferring is consistent with the workaround-rejection bar's
   "make X visible" anti-pattern — if we made it visible without
@@ -252,7 +251,7 @@ Expected:
 - Streaming UI / token-by-token rendering.
 - Replacing `Piaf` in the Pool. PR-1's idle-timeout API fits inside
   Piaf's chunk-iteration; no library swap.
-- Modifying OAS. The 0.195.0+ caps are already correct.
+- Modifying agent_core. The 0.195.0+ caps are already correct.
 
 ## §8 Evidence
 
@@ -263,9 +262,9 @@ Expected:
 - Self-admitting comment at
   `lib/keeper/keeper_turn_runtime_budget.ml:173-174` (replaced by
   PR-2).
-- OAS `body_timeout_s` on the non-streaming `Complete.complete` path since
+- agent_core `body_timeout_s` on the non-streaming `Complete.complete` path since
   0.195.0, `complete.ml:656-686`.
-- OAS streaming `idle_timeout` at `http_client.mli:204-243`; streaming has
+- agent_core streaming `idle_timeout` at `http_client.mli:204-243`; streaming has
   no total body-duration cap.
 - masc `stream_idle_timeout_s` wiring at
   `runtime_agent_context.ml:174-180`.
@@ -282,5 +281,5 @@ Expected:
    happens; if §6 surfaces post-PR-2 fallback-starvation cases,
    revisit with a *separate* RFC rather than reintroducing reserve.
 3. Should `body_progress` follow up under a new RFC, or fold into
-   RFC-0132 (agent_sdk surface extensions)? Pending RFC backlog
+   RFC-0132 (agent_core surface extensions)? Pending RFC backlog
    triage.

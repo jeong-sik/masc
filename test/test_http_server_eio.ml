@@ -179,12 +179,7 @@ let test_frontend_transport_routes_present () =
   Alcotest.(check bool)
     "GET /api/v1/voice/config route"
     true
-    (has_route `GET "/api/v1/voice/config");
-  Alcotest.(check bool) "POST /webrtc/offer route" true (has_route `POST "/webrtc/offer");
-  Alcotest.(check bool)
-    "POST /webrtc/answer route"
-    true
-    (has_route `POST "/webrtc/answer")
+    (has_route `GET "/api/v1/voice/config")
 ;;
 
 (* RFC-0281: typed WebSocket-upgrade routes.  [ws_get] registers a
@@ -483,15 +478,6 @@ let request_tests =
 (* RFC 7230 §3.3.2: a 204 response with no payload should still carry
    an explicit [Content-Length: 0] so keep-alive clients and proxies
    know the body is empty. *)
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec scan i =
-    if i + nlen > hlen then false
-    else if String.equal (String.sub haystack i nlen) needle then true
-    else scan (i + 1)
-  in
-  nlen = 0 || scan 0
 ;;
 
 let test_response_empty_includes_content_length_zero () =
@@ -519,7 +505,232 @@ let test_response_empty_includes_content_length_zero () =
   Alcotest.(check bool)
     "204 Response.empty includes Content-Length: 0"
     true
-    (contains_substring response "content-length: 0")
+    (String_util.contains_substring response "content-length: 0")
+;;
+
+(* ===== JSON conditional-request rule ===== *)
+
+(* [Response.json] offers a validator so a polling client can be told "still
+   the same" instead of being sent the body again. Measured on the live
+   server, 11 of 12 polled dashboard routes return byte-identical bodies
+   across repeated polls, ~1.86 MB per full cycle.
+
+   The rule is exercised here rather than through a live server because what
+   can go wrong is the decision, not the socket write: tagging a response that
+   must not be reused, or answering 304 to a client that never claimed to hold
+   the body. *)
+
+let conditional_body = {|{"keepers":[],"generated_at":1.0}|}
+
+let tag_of body =
+  match
+    Response.json_conditional ~status:`OK ~meth:`GET ~if_none_match:None ~body
+  with
+  | Response.Tagged etag -> etag
+  | Response.Untagged -> Alcotest.fail "a 200 GET should carry a tag"
+  | Response.Not_modified _ ->
+    Alcotest.fail "no If-None-Match cannot be a match"
+
+let outcome_label = function
+  | Response.Untagged -> "untagged"
+  | Response.Tagged _ -> "tagged"
+  | Response.Not_modified _ -> "not_modified"
+
+let check_outcome name expected actual =
+  Alcotest.(check string) name expected (outcome_label actual)
+
+let test_json_conditional_matching_tag_is_not_modified () =
+  let etag = tag_of conditional_body in
+  check_outcome
+    "a client presenting the current tag is told nothing changed"
+    "not_modified"
+    (Response.json_conditional ~status:`OK ~meth:`GET
+       ~if_none_match:(Some etag) ~body:conditional_body)
+
+let test_json_conditional_stale_tag_sends_the_body () =
+  let stale = tag_of {|{"keepers":[],"generated_at":0.0}|} in
+  check_outcome
+    "a tag from an older body does not suppress the new one"
+    "tagged"
+    (Response.json_conditional ~status:`OK ~meth:`GET
+       ~if_none_match:(Some stale) ~body:conditional_body)
+
+let test_json_conditional_absent_header_sends_the_body () =
+  check_outcome
+    "a client that claims no copy always receives the body"
+    "tagged"
+    (Response.json_conditional ~status:`OK ~meth:`GET ~if_none_match:None
+       ~body:conditional_body)
+
+(* A tag on an error would invite a client to revalidate it and be told the
+   failure is unchanged, so failures carry none — even if the client happens
+   to present a matching tag. *)
+let test_json_conditional_error_status_carries_no_tag () =
+  let etag = tag_of conditional_body in
+  List.iter
+    (fun status ->
+      check_outcome
+        "an unsuccessful response carries no validator"
+        "untagged"
+        (Response.json_conditional ~status ~meth:`GET
+           ~if_none_match:(Some etag) ~body:conditional_body))
+    [ `Bad_request; `Not_found; `Internal_server_error; `Accepted ]
+
+(* Mutations answer with the result of the mutation. Tagging one would let a
+   client be told its stale copy still stands after it changed something. *)
+let test_json_conditional_unsafe_method_carries_no_tag () =
+  let etag = tag_of conditional_body in
+  List.iter
+    (fun meth ->
+      check_outcome
+        "an unsafe method carries no validator"
+        "untagged"
+        (Response.json_conditional ~status:`OK ~meth
+           ~if_none_match:(Some etag) ~body:conditional_body))
+    [ `POST; `PUT; `DELETE ]
+
+let test_json_conditional_tag_is_weak_and_body_derived () =
+  let etag = tag_of conditional_body in
+  Alcotest.(check bool)
+    "the tag is weak, because one payload goes out under several encodings"
+    true
+    (String.starts_with ~prefix:"W/\"" etag);
+  Alcotest.(check bool)
+    "a different body produces a different tag"
+    false
+    (String.equal etag (tag_of {|{"keepers":[],"generated_at":2.0}|}));
+  Alcotest.(check string)
+    "the same body produces the same tag"
+    etag
+    (tag_of conditional_body)
+
+(* [json_conditional] is a pure function, which is what lets the cases above
+   cover every combination of method, status, and If-None-Match. It also means
+   none of them touches a response, so the step that turns a [Tagged] decision
+   into bytes stayed unverified: whether the validator headers reach the client
+   at all, and whether a matching tag produces a bodiless 304.
+
+   A client cannot revalidate on a decision it never sees, so that step is
+   exercised here against a real [Server_connection] rather than inferred from
+   the branch that builds it. *)
+
+let serve_json_over_wire ?if_none_match body =
+  Eio_main.run (fun _env ->
+    let response_buf = Buffer.create 1024 in
+    let conn =
+      Httpun.Server_connection.create (fun reqd ->
+        Response.json ~request:(Httpun.Reqd.request reqd) body reqd)
+    in
+    let headers =
+      let base = [ ("host", "127.0.0.1") ] in
+      match if_none_match with
+      | None -> base
+      | Some tag -> ("if-none-match", tag) :: base
+    in
+    let request =
+      Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/probe"
+    in
+    let request_head =
+      Printf.sprintf
+        "%s %s HTTP/1.1\r\n%s"
+        (Httpun.Method.to_string request.Httpun.Request.meth)
+        request.Httpun.Request.target
+        (Httpun.Headers.to_string request.Httpun.Request.headers)
+    in
+    let bytes =
+      Bigstringaf.of_string ~off:0 ~len:(String.length request_head) request_head
+    in
+    let rec feed off =
+      let remaining = Bigstringaf.length bytes - off in
+      if remaining > 0
+      then (
+        let consumed = Httpun.Server_connection.read conn bytes ~off ~len:remaining in
+        if consumed <= 0 then Alcotest.fail "httpun test feed made no progress";
+        feed (off + consumed))
+    in
+    feed 0;
+    let rec flush () =
+      match Httpun.Server_connection.next_write_operation conn with
+      | `Write iovecs ->
+        List.iter
+          (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
+             Buffer.add_string
+               response_buf
+               (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
+          iovecs;
+        let written =
+          List.fold_left
+            (fun total (iov : Bigstringaf.t Httpun.IOVec.t) -> total + iov.len)
+            0
+            iovecs
+        in
+        Httpun.Server_connection.report_write_result conn (`Ok written);
+        flush ()
+      | `Yield | `Close _ -> ()
+    in
+    flush ();
+    Buffer.contents response_buf)
+;;
+
+let response_header response name =
+  let field = String.lowercase_ascii name ^ ":" in
+  String.split_on_char '\n' response
+  |> List.filter_map (fun line ->
+       let line = String.trim line in
+       if String.starts_with ~prefix:field (String.lowercase_ascii line)
+       then
+         Some
+           (String.trim
+              (String.sub
+                 line
+                 (String.length field)
+                 (String.length line - String.length field)))
+       else None)
+  |> function
+  | value :: _ -> Some value
+  | [] -> None
+;;
+
+let response_status_line response =
+  match String.index_opt response '\r' with
+  | Some idx -> String.sub response 0 idx
+  | None -> response
+;;
+
+let test_json_response_puts_the_validator_on_the_wire () =
+  let response = serve_json_over_wire conditional_body in
+  Alcotest.(check string)
+    "a plain read is answered in full"
+    "HTTP/1.1 200 OK"
+    (response_status_line response);
+  Alcotest.(check (option string))
+    "the client receives the tag it must present to revalidate"
+    (Some (tag_of conditional_body))
+    (response_header response "etag");
+  Alcotest.(check (option string))
+    "and is told to revalidate rather than invent a freshness window"
+    (Some "no-cache")
+    (response_header response "cache-control")
+;;
+
+let test_json_response_matching_tag_sends_no_body () =
+  let response =
+    serve_json_over_wire ~if_none_match:(tag_of conditional_body) conditional_body
+  in
+  Alcotest.(check string)
+    "a client holding the current body is told so"
+    "HTTP/1.1 304 Not Modified"
+    (response_status_line response);
+  Alcotest.(check (option string))
+    "with nothing to read"
+    (Some "0")
+    (response_header response "content-length");
+  Alcotest.(check bool)
+    "and the body itself never reaches the socket"
+    false
+    (List.exists
+       (fun line -> String.equal (String.trim line) conditional_body)
+       (String.split_on_char '\n' response))
 ;;
 
 let response_tests =
@@ -529,6 +740,30 @@ let response_tests =
   ; ( "empty response includes Content-Length: 0"
     , `Quick
     , test_response_empty_includes_content_length_zero )
+  ; ( "matching If-None-Match is 304"
+    , `Quick
+    , test_json_conditional_matching_tag_is_not_modified )
+  ; ( "stale If-None-Match sends the body"
+    , `Quick
+    , test_json_conditional_stale_tag_sends_the_body )
+  ; ( "absent If-None-Match sends the body"
+    , `Quick
+    , test_json_conditional_absent_header_sends_the_body )
+  ; ( "error statuses carry no validator"
+    , `Quick
+    , test_json_conditional_error_status_carries_no_tag )
+  ; ( "unsafe methods carry no validator"
+    , `Quick
+    , test_json_conditional_unsafe_method_carries_no_tag )
+  ; ( "the tag is weak and body-derived"
+    , `Quick
+    , test_json_conditional_tag_is_weak_and_body_derived )
+  ; ( "a JSON response puts the validator on the wire"
+    , `Quick
+    , test_json_response_puts_the_validator_on_the_wire )
+  ; ( "a matching tag sends no body"
+    , `Quick
+    , test_json_response_matching_tag_sends_no_body )
   ]
 ;;
 

@@ -1,12 +1,7 @@
-(** A keeper is handed only the goals it can still progress.
+(** A keeper is handed only the shared Goals it can still progress.
 
-    [keeper_meta.active_goal_ids] records which goals were assigned to a keeper.
-    Nothing removes an id when the goal reaches a terminal phase, and
-    [resolve_active_goal_ids] only checks that the id exists — so a Completed or
-    Dropped goal stays on the list indefinitely.
-
-    Two prompt surfaces read that list: [<available_goals>] in the system prompt
-    (via {!Keeper_unified_prompt.active_goal_summaries}) and [### Active Goals]
+    Two prompt surfaces read the open Goal store: [<available_goals>] in the system prompt
+    (via {!Keeper_unified_prompt.active_goal_summaries_of_store}) and [### Active Goals]
     in the per-turn world state (via [world_observation.active_goals]). Both
     announced terminal goals as this keeper's work, on every turn, under
     headings that call them available.
@@ -48,97 +43,106 @@ let goal_in phase id title =
   ; due_date = None
   ; priority = 3
   ; phase
-  ; parent_goal_id = None
   ; last_review_note = None
   ; last_review_at = None
-  ; owner = None
   ; created_at = ts
   ; updated_at = ts
   }
 ;;
 
 (* One goal per phase, so a future phase added to [Goal_phase.t] shows up here
-   as an unclassified id rather than silently inheriting a neighbour's verdict. *)
+   as an unclassified id rather than silently inheriting a neighbour's verdict.
+   [Verifying] (RFC-0387 stage 2) admits self-directed progress — the gate
+   holds the phase, not the work — so it survives alongside Executing. *)
 let seed_all_phases config =
   Goal_store.write_state config
     { version = 1
     ; updated_at = Masc_domain.now_iso ()
     ; goals =
         [ goal_in Goal_phase.Executing "goal-executing" "still work"
-        ; goal_in Goal_phase.Blocked "goal-blocked" "waiting on someone"
-        ; goal_in Goal_phase.Paused "goal-paused" "set aside"
+        ; goal_in Goal_phase.Verifying "goal-verifying" "proof pending"
         ; goal_in Goal_phase.Completed "goal-completed" "already achieved"
         ; goal_in Goal_phase.Dropped "goal-dropped" "abandoned"
         ]
     }
 ;;
 
-let meta_with_goals ids =
+(* Only terminal Goals: nothing on the surface, and nothing that could be
+   mistaken for an empty list produced some other way. *)
+let seed_terminal_phases_only config =
+  Goal_store.write_state config
+    { version = 1
+    ; updated_at = Masc_domain.now_iso ()
+    ; goals =
+        [ goal_in Goal_phase.Completed "goal-completed" "already achieved"
+        ; goal_in Goal_phase.Dropped "goal-dropped" "abandoned"
+        ]
+    }
+;;
+
+let keeper_meta () =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
          [ "name", `String "goal-phase-keeper"
          ; "trace_id", `String "test-trace-goal-phase"
-         ; "active_goal_ids", `List (List.map (fun id -> `String id) ids)
          ])
   with
   | Ok m -> m
   | Error e -> failwith ("meta_of_json failed: " ^ e)
 ;;
 
-let all_ids =
-  [ "goal-executing"
-  ; "goal-blocked"
-  ; "goal-paused"
-  ; "goal-completed"
-  ; "goal-dropped"
-  ]
+let summary_ids summaries =
+  List.map
+    (fun (s : Keeper_unified_prompt.goal_summary) -> s.summary_goal_id)
+    summaries
+;;
+
+let summary_title_opt goal_id summaries =
+  match
+    List.find_opt
+      (fun (s : Keeper_unified_prompt.goal_summary) ->
+        String.equal s.summary_goal_id goal_id)
+      summaries
+  with
+  | Some s -> Some s.summary_title
+  | None -> None
 ;;
 
 let test_system_prompt_surface_drops_terminal_goals () =
   with_workspace @@ fun config ->
   seed_all_phases config;
-  let meta = meta_with_goals all_ids in
-  let summaries = Keeper_unified_prompt.active_goal_summaries ~config ~meta in
-  let ids = List.map fst summaries in
-  check (list string) "only a progressable goal is offered" [ "goal-executing" ]
-    ids;
+  let _meta = keeper_meta () in
+  let summaries = Keeper_unified_prompt.active_goal_summaries_of_store ~config in
+  check (list string) "only progressable goals are offered"
+    [ "goal-executing"; "goal-verifying" ]
+    (summary_ids summaries);
   check (option string) "its title still resolves" (Some "still work")
-    (List.assoc_opt "goal-executing" summaries)
+    (summary_title_opt "goal-executing" summaries)
 ;;
 
 let test_world_observation_drops_terminal_goals () =
   with_workspace @@ fun config ->
   seed_all_phases config;
-  let meta = meta_with_goals all_ids in
+  let meta = keeper_meta () in
   let observation =
     Keeper_world_observation.observe ~pending_board_events:(Some []) ~config
       ~meta
   in
   check (list string) "the per-turn frame agrees with the system prompt"
-    [ "goal-executing" ] observation.Keeper_world_observation.active_goals
+    [ "goal-executing"; "goal-verifying" ]
+    observation.Keeper_world_observation.active_goals
 ;;
 
-let test_unresolved_goal_id_stays_visible () =
-  (* An assigned goal that no longer exists is a different fault. Dropping it
-     alongside the terminal ones would replace a visible inconsistency with a
-     silent one, so it keeps its bare-id rendering. *)
-  with_workspace @@ fun config ->
-  seed_all_phases config;
-  let meta = meta_with_goals [ "goal-completed"; "goal-vanished" ] in
-  let summaries = Keeper_unified_prompt.active_goal_summaries ~config ~meta in
-  check (list string) "the terminal goal goes, the unknown id stays"
-    [ "goal-vanished" ] (List.map fst summaries);
-  check (option string) "unknown id renders with no title" (Some "")
-    (List.assoc_opt "goal-vanished" summaries)
-;;
-
+(* Terminal phases are the only thing that removes a Goal from the surface.
+   Seed a store whose Goals are all terminal and neither surface offers any --
+   an empty block rather than one that looks empty for a different reason. *)
 let test_no_goals_surface_when_all_are_terminal () =
   with_workspace @@ fun config ->
-  seed_all_phases config;
-  let meta = meta_with_goals [ "goal-completed"; "goal-dropped" ] in
+  seed_terminal_phases_only config;
+  let meta = keeper_meta () in
   check (list string) "no goal block rather than an empty-looking one" []
-    (List.map fst (Keeper_unified_prompt.active_goal_summaries ~config ~meta));
+    (summary_ids (Keeper_unified_prompt.active_goal_summaries_of_store ~config));
   let observation =
     Keeper_world_observation.observe ~pending_board_events:(Some []) ~config
       ~meta
@@ -147,82 +151,46 @@ let test_no_goals_surface_when_all_are_terminal () =
     observation.Keeper_world_observation.active_goals
 ;;
 
-
-(* RFC-0362 §4.3 — the owner consumer. The Goal carries the owner; the keeper's
-   [active_goal_ids] is empty here on purpose, because it is empty for every
-   keeper on the live workspace and the fact must surface without it.
-
-   Three cases in one predicate: owned + executing + no linked Task surfaces;
-   owned but terminal does not; owned, executing, but already carrying a Task
-   does not (the owner has nothing to decide there). *)
-let owner_meta () =
-  match
-    Masc_test_deps.meta_of_json_fixture
-      (`Assoc
-         [ "name", `String "owner-keeper"
-         ; "trace_id", `String "test-trace-owner"
-         ; "active_goal_ids", `List []
-         ])
-  with
-  | Ok m -> m
-  | Error e -> failwith ("meta_of_json failed: " ^ e)
+(* A Goal is a standing question, not an assignment. Nothing in a turn frame
+   invites a Keeper to pick one up. *)
+let rendered_world_state config =
+  let meta = keeper_meta () in
+  let observation =
+    Keeper_world_observation.observe ~pending_board_events:(Some []) ~config ~meta
+  in
+  let { Keeper_unified_prompt.world_state; _ } =
+    Keeper_unified_prompt.build_prompt
+      ~meta
+      ~config
+      ~turn_decision:(Keeper_world_observation.keeper_cycle_decision ~meta observation)
+      ~current_task:Keeper_world_observation_inputs.No_current_task
+      ~observation
+      ()
+  in
+  world_state
 ;;
 
-let goal_owned_by owner phase id title =
-  { (goal_in phase id title) with Goal_store.owner = Some owner }
+let contains_in haystack needle =
+  let n = String.length needle and h = String.length haystack in
+  let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+  n = 0 || go 0
 ;;
 
-let test_owned_executing_goal_without_task_surfaces () =
-  with_workspace (fun config ->
-    Goal_store.write_state config
-      { version = 1
-      ; updated_at = Masc_domain.now_iso ()
-      ; goals =
-          [ goal_owned_by "owner-keeper" Goal_phase.Executing "goal-mine" "mine to split"
-          ; goal_owned_by "owner-keeper" Goal_phase.Completed "goal-done" "already achieved"
-          ; goal_in Goal_phase.Executing "goal-unowned" "nobody holds this"
-          ]
-      };
-    let found =
-      Keeper_unified_prompt.owned_executing_goals_without_tasks
-        ~config
-        ~keeper_name:"owner-keeper"
-    in
-    check (list string) "only the owned, executing, task-less goal"
-      [ "goal-mine" ]
-      (List.map fst found))
-;;
-
-let test_owner_of_a_terminal_goal_is_told_nothing () =
-  with_workspace (fun config ->
-    Goal_store.write_state config
-      { version = 1
-      ; updated_at = Masc_domain.now_iso ()
-      ; goals =
-          [ goal_owned_by "owner-keeper" Goal_phase.Completed "goal-done" "achieved" ]
-      };
-    check (list string) "terminal goals are not the owner's open work"
-      []
-      (List.map fst
-         (Keeper_unified_prompt.owned_executing_goals_without_tasks
-            ~config
-            ~keeper_name:"owner-keeper")))
-;;
-
-let test_another_keepers_goal_is_not_surfaced () =
-  with_workspace (fun config ->
-    Goal_store.write_state config
-      { version = 1
-      ; updated_at = Masc_domain.now_iso ()
-      ; goals =
-          [ goal_owned_by "someone-else" Goal_phase.Executing "goal-theirs" "not mine" ]
-      };
-    check (list string) "ownership is not shared"
-      []
-      (List.map fst
-         (Keeper_unified_prompt.owned_executing_goals_without_tasks
-            ~config
-            ~keeper_name:"owner-keeper")))
+let test_no_goal_is_offered_as_work_to_pick_up () =
+  with_workspace @@ fun config ->
+  Goal_store.write_state config
+    { version = 1
+    ; updated_at = Masc_domain.now_iso ()
+    ; goals =
+        [ goal_in Goal_phase.Executing "goal-open" "nobody started this"
+        ; goal_in Goal_phase.Completed "goal-done" "already achieved"
+        ]
+    };
+  let world = rendered_world_state config in
+  check bool "no heading invites the keeper to start work on a goal" false
+    (contains_in world "no Task yet");
+  check bool "no goal is named as a move to make" false
+    (contains_in world "picking one up")
 ;;
 
 let () =
@@ -232,18 +200,12 @@ let () =
             test_system_prompt_surface_drops_terminal_goals
         ; test_case "world observation drops terminal goals" `Quick
             test_world_observation_drops_terminal_goals
-        ; test_case "unresolved goal id stays visible" `Quick
-            test_unresolved_goal_id_stays_visible
         ; test_case "all-terminal yields no goals at either surface" `Quick
             test_no_goals_surface_when_all_are_terminal
         ] )
-    ; ( "rfc-0362 owner consumer"
-      , [ test_case "owned executing goal without a task surfaces" `Quick
-            test_owned_executing_goal_without_task_surfaces
-        ; test_case "terminal owned goal is not open work" `Quick
-            test_owner_of_a_terminal_goal_is_told_nothing
-        ; test_case "another keeper's goal is not surfaced" `Quick
-            test_another_keepers_goal_is_not_surfaced
+    ; ( "goals are not assignments"
+      , [ test_case "no goal is offered as work to pick up" `Quick
+            test_no_goal_is_offered_as_work_to_pick_up
         ] )
     ]
 ;;

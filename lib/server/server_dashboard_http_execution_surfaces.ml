@@ -9,7 +9,6 @@ type cached_surface = Server_dashboard_http_cache.cached_surface
 
 let deep_surface_cache_ttl_s = Server_dashboard_http_core_cache.deep_surface_cache_ttl_s
 let shell_surface_cache_ttl_s = Server_dashboard_http_core_cache.shell_surface_cache_ttl_s
-let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
 
 (* Transport health probe timeout — env-overridable with sane bounds.
    SSOT: env_config_snapshot.ml also registers the same env var. *)
@@ -48,7 +47,7 @@ let warm_shell_cache (state : Mcp_server.server_state) =
        in
        (try
           let light_result = cache_shell_payload ~light:true in
-          if is_dashboard_cache_timeout_json light_result
+          if Dashboard_cache.is_timeout_envelope light_result
           then
             Log.Dashboard.warn
               "light shell cache pre-warm timed out during compute (%.0fs)"
@@ -66,7 +65,7 @@ let warm_shell_cache (state : Mcp_server.server_state) =
             (Printexc.to_string exn));
        try
          let result = cache_shell_payload ~light:false in
-         if is_dashboard_cache_timeout_json result
+         if Dashboard_cache.is_timeout_envelope result
          then
            Log.Dashboard.warn
              "shell cache pre-warm timed out during compute (%.0fs)"
@@ -124,13 +123,14 @@ let execution_actor_for_request ~base_path request =
   Server_auth.sanitized_dashboard_actor_for_request ~base_path request
 ;;
 
-(* Wire operator broadcast refs now that Sse is in scope. *)
-let () =
-  operator_snapshot_broadcast_ref
-  := (fun
-       (publication :
-         Server_dashboard_http_core_operator.operator_snapshot_publication)
-     ->
+(* These two used to be installed into process-global Atomics from module
+   initializers, because Server_dashboard_http_core_operator is compiled before
+   Sse is in scope here and so cannot name these bodies. They are ordinary
+   functions now; the refresh loops take them as arguments (#25927). *)
+let broadcast_operator_snapshot
+      (publication :
+        Server_dashboard_http_core_operator.operator_snapshot_publication)
+  =
     let current =
       Server_dashboard_http_core_operator.operator_snapshot_publication ()
     in
@@ -146,7 +146,7 @@ let () =
       broadcast_cached_surface
         ~event_type:"operator_snapshot"
         (Server_dashboard_http_core_operator.operator_snapshot_publication_json
-           publication))
+           publication)
 ;;
 
 let () =
@@ -158,12 +158,10 @@ let () =
            ~generation
        with
        | None -> ()
-       | Some publication -> !operator_snapshot_broadcast_ref publication)
+       | Some publication -> broadcast_operator_snapshot publication)
 ;;
 
-let () =
-  operator_digest_broadcast_ref := broadcast_cached_surface ~event_type:"operator_digest"
-;;
+let broadcast_operator_digest = broadcast_cached_surface ~event_type:"operator_digest"
 
 let execution_cache : cached_surface =
   Server_dashboard_http_cache.create_cached_surface
@@ -176,16 +174,98 @@ let execution_cache : cached_surface =
 
 let execution_default_light_cache_key = "execution:default:light"
 let execution_default_light_http_body : string option Atomic.t = Atomic.make None
+let execution_publication_mu = Stdlib.Mutex.create ()
+let execution_publication_generation = ref 0
+let execution_publication_epoch =
+  (* NDT-OK: process-incarnation identity entropy only. *)
+  Uuidm.v4_gen (Random.State.make_self_init ()) () |> Uuidm.to_string
+;;
+
+let execution_publication_epoch_field = "execution_publication_epoch"
+let execution_publication_generation_field = "execution_publication_generation"
+let execution_invalidated_field = "execution_invalidated"
+
+let with_execution_publication_lock f =
+  Stdlib.Mutex.protect execution_publication_mu f
+;;
 
 let clear_execution_default_light_http_body () =
   Atomic.set execution_default_light_http_body None
 ;;
 
-let execution_surface_has_fresh_success () =
-  match execution_cache.last_success_unix, execution_cache.last_error_unix with
+let execution_surface_has_fresh_success_unlocked () =
+  let execution_snapshot = Server_dashboard_http_cache.snapshot execution_cache in
+  match execution_snapshot.last_success_unix, execution_snapshot.last_error_unix with
   | Some success_ts, Some error_ts when error_ts > success_ts -> false
   | Some _, _ -> true
   | None, _ -> false
+;;
+
+let begin_execution_publication_attempt () =
+  with_execution_publication_lock (fun () ->
+    let generation = !execution_publication_generation in
+    clear_execution_default_light_http_body ();
+    Server_dashboard_http_cache.mark_cached_surface_attempt execution_cache;
+    generation)
+;;
+
+let current_execution_publication_generation () =
+  with_execution_publication_lock (fun () -> !execution_publication_generation)
+;;
+
+let with_execution_publication_generation ~generation = function
+  | `Assoc fields ->
+    let fields =
+      fields
+      |> List.remove_assoc execution_publication_epoch_field
+      |> List.remove_assoc execution_publication_generation_field
+      |> List.remove_assoc execution_invalidated_field
+    in
+    `Assoc
+      ((execution_publication_epoch_field, `String execution_publication_epoch)
+       :: (execution_publication_generation_field, `Int generation)
+       :: (execution_invalidated_field, `Bool false)
+       :: fields)
+  | json ->
+    `Assoc
+      [ execution_publication_epoch_field, `String execution_publication_epoch
+      ; execution_publication_generation_field, `Int generation
+      ; execution_invalidated_field, `Bool false
+      ; "snapshot", json
+      ]
+;;
+
+let publish_execution_success_if_current ~generation json =
+  with_execution_publication_lock (fun () ->
+    if generation <> !execution_publication_generation
+    then false
+    else (
+      Server_dashboard_http_cache.mark_cached_surface_success
+        execution_cache
+        (with_execution_publication_generation ~generation json);
+      true))
+;;
+
+let publish_execution_error_if_current ~generation exn =
+  with_execution_publication_lock (fun () ->
+    if generation <> !execution_publication_generation
+    then false
+    else (
+      clear_execution_default_light_http_body ();
+      Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn;
+      true))
+;;
+
+let publish_execution_error_message_if_current ~generation message =
+  with_execution_publication_lock (fun () ->
+    if generation <> !execution_publication_generation
+    then false
+    else (
+      clear_execution_default_light_http_body ();
+      Server_dashboard_http_cache.mark_cached_surface_error_message
+        execution_cache
+        message;
+      true))
 ;;
 
 let execution_trust_cache_key = "execution-trust:default"
@@ -216,9 +296,8 @@ let with_execution_trust_cache f =
 
 (** Invalidate the execution surface cache so the next
     [/api/v1/dashboard/execution] request recomputes fresh data.
-    Called via [Workspace_hooks.on_task_mutation_fn] after task add,
-    batch_add, and all transitions (claim, start, done, cancel,
-    release) routed through [observe_task_transition].
+    Called via [Workspace_hooks.on_task_mutation_fn] from the authoritative
+    backlog and goal-link commit boundaries.
     Best-effort: never raises — cache staleness must not break
     the mutation path. *)
 let record_invalidation_failure ~callback ~message exn =
@@ -235,14 +314,12 @@ let invalidate_execution_cache_with_hooks_for_testing
       ()
   =
   (try invalidate_execution_surface () with
-   | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
      record_invalidation_failure
        ~callback:"execution_surface_cache_invalidate"
        ~message:"Failed to invalidate execution surface cache"
        exn);
   try invalidate_light_cache () with
-  | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     record_invalidation_failure
       ~callback:"dashboard_execution_light_cache_invalidate"
@@ -251,22 +328,62 @@ let invalidate_execution_cache_with_hooks_for_testing
 ;;
 
 let invalidate_execution_cache () =
+  let invalidate () =
+  let invalidated_generation = ref None in
   invalidate_execution_cache_with_hooks_for_testing
     ~invalidate_execution_surface:(fun () ->
-      clear_execution_default_light_http_body ();
-      Server_dashboard_http_cache.invalidate_cached_surface execution_cache)
+      with_execution_publication_lock (fun () ->
+        incr execution_publication_generation;
+        invalidated_generation := Some !execution_publication_generation;
+        clear_execution_default_light_http_body ();
+        Server_dashboard_http_cache.invalidate_cached_surface execution_cache))
     ~invalidate_light_cache:(fun () ->
-      Dashboard_cache.invalidate execution_default_light_cache_key)
-    ()
+      Dashboard_cache.invalidate_prefix "execution:")
+    ();
+  Option.iter
+    (fun generation ->
+       try
+         broadcast_cached_surface
+           ~event_type:"execution_snapshot"
+           (`Assoc
+               [ execution_publication_epoch_field, `String execution_publication_epoch
+               ; execution_publication_generation_field, `Int generation
+               ; execution_invalidated_field, `Bool true
+               ])
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         record_invalidation_failure
+           ~callback:"execution_snapshot_invalidation_broadcast"
+           ~message:"Failed to broadcast execution cache invalidation"
+           exn)
+    !invalidated_generation
+  in
+  match Eio_guard.execution_context () with
+  | Eio_guard.Eio_fiber -> Eio.Cancel.protect invalidate
+  | Eio_guard.Non_eio -> invalidate ()
 ;;
+
+let install_task_mutation_cache_invalidation () =
+  Atomic.set Workspace_hooks.on_task_mutation_fn invalidate_execution_cache
+;;
+
+module For_testing = struct
+  let execution_publication_generation () =
+    with_execution_publication_lock (fun () -> !execution_publication_generation)
+  ;;
+
+  let publish_execution_success_if_current = publish_execution_success_if_current
+end
 
 (** Bypass the proactive warm-up guard so tests that call
     [dashboard_namespace_truth_http_json] get the full response instead of
     the "initializing" short-circuit. *)
 let seed_execution_cache_for_test () =
-  Server_dashboard_http_cache.mark_cached_surface_success
-    execution_cache
-    (`Assoc [ "status", `String "seeded_for_test" ])
+  with_execution_publication_lock (fun () ->
+    Server_dashboard_http_cache.mark_cached_surface_success
+      execution_cache
+      (`Assoc [ "status", `String "seeded_for_test" ]))
 ;;
 
 let transport_health_cache =
@@ -331,8 +448,6 @@ let cached_surface_cache_json
     ; "stale_reason", diagnostic_field "stale_reason"
     ; "stale_age_ms", diagnostic_field "stale_age_ms"
     ; "request_cache_key", Json_util.string_opt_to_json cache_key
-    ; "request_cache_ttl_s", `Float ttl_s
-    ; "request_timeout_s", `Float timeout_s
     ; "background_refresh_interval_s", `Float background_refresh_interval_s
     ; "policy", `String "cached_surface plus HTTP stale-while-revalidate"
     ]
@@ -375,9 +490,7 @@ let with_cached_dashboard_surface_metadata
             ; "producer", `String producer
             ; "store_kind", `String store_kind
             ; "cache_surface", `String "Server_dashboard_http_execution_surfaces.cached_surface"
-            ; "http_swr_ttl_s", `Float ttl_s
             ; "background_refresh_interval_s", `Float background_refresh_interval_s
-            ; "request_timeout_s", `Float timeout_s
             ; ( "cache_policy"
               , `String
                   "default route uses proactive cached_surface; parameterized route uses HTTP stale-while-revalidate"
@@ -446,8 +559,8 @@ let execution_default_light_response_json ~config =
        ~query:default_light_execution_query
 ;;
 
-let cache_execution_default_light_http_body response_json =
-  if execution_surface_has_fresh_success ()
+let cache_execution_default_light_http_body_unlocked response_json =
+  if execution_surface_has_fresh_success_unlocked ()
   then
     Atomic.set
       execution_default_light_http_body
@@ -456,34 +569,59 @@ let cache_execution_default_light_http_body response_json =
 ;;
 
 let refresh_execution_default_light_http_body ~config =
-  let response_json = execution_default_light_response_json ~config in
-  cache_execution_default_light_http_body response_json;
-  response_json
+  with_execution_publication_lock (fun () ->
+    let response_json = execution_default_light_response_json ~config in
+    cache_execution_default_light_http_body_unlocked response_json;
+    response_json)
 ;;
 
-let transport_health_query_json () =
-  `Assoc [ "default_snapshot_request", `Bool true ]
+let cached_execution_or_first_success_json ~clock ~timeout_sec compute =
+  let cached_success () =
+    with_execution_publication_lock (fun () ->
+      if execution_surface_has_fresh_success_unlocked ()
+      then Some (Server_dashboard_http_cache.cached_surface_json execution_cache)
+      else None)
+  in
+  match cached_success () with
+  | Some json -> json
+  | None ->
+    let compute_and_track () =
+      let generation = begin_execution_publication_attempt () in
+      try
+        let json = compute () in
+        let (_ : bool) = publish_execution_success_if_current ~generation json in
+        json
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        let (_ : bool) = publish_execution_error_if_current ~generation exn in
+        raise exn
+    in
+    let json =
+      Dashboard_cache.get_or_compute_with_timeout
+        execution_default_light_cache_key
+        ~ttl:deep_surface_cache_ttl_s
+        ~clock
+        ~timeout_sec
+        compute_and_track
+    in
+    (match cached_success () with
+     | Some current -> current
+     | None ->
+       (* DET-OK: invalidation won the publication race, so this request may
+          receive only its own completed pre-invalidation value.  It is left
+          unstamped and cannot republish either cache; clients with a mutation
+          watermark reject identity-less late responses. *)
+       json)
 ;;
 
-let with_transport_health_metadata ~config ~timeout_s json =
-  with_cached_dashboard_surface_metadata
-    ~config
-    ~dashboard_surface:"/api/v1/dashboard/transport-health"
-    ~source:"transport_health_read_model"
-    ~scope:"dashboard_transport_health"
-    ~producer:"Transport_metrics.transport_health_json"
-    ~store_kind:"process_cache"
-    ~ttl_s:config_cache_ttl_s
-    ~timeout_s
-    ~background_refresh_interval_s:30.0
-    ~query:(transport_health_query_json ())
-    json
+let with_transport_health_metadata json =
+  extend_projection_diagnostics json [ "source", `String "cached_surface" ]
 ;;
 
-let dashboard_execution_snapshot_json () = Server_dashboard_http_cache.cached_surface_json execution_cache
-
-let dashboard_transport_health_snapshot_json () =
-  Server_dashboard_http_cache.cached_surface_json transport_health_cache
+let dashboard_execution_snapshot_json () =
+  with_execution_publication_lock (fun () ->
+    Server_dashboard_http_cache.cached_surface_json execution_cache)
 ;;
 
 (* Cache patchers project a typed lifecycle transition onto dashboard row fields
@@ -512,7 +650,7 @@ let display_of_custom_event (verb : Keeper_lifecycle_events.t) : lifecycle_displ
   | Admission_denied ->
     (* admission guard refused to launch a fiber *)
     { ld_keepalive_running = false; ld_phase = "offline"; ld_pipeline_stage = "offline"; ld_paused = Some false }
-  | Dead_cleaned ->
+  | Supervisor_cleaned ->
     (* cleanup == no longer alive *)
     { ld_keepalive_running = false; ld_phase = "dead"; ld_pipeline_stage = "offline"; ld_paused = Some false }
 ;;
@@ -526,13 +664,10 @@ let display_of_phase_event = function
   | Keeper_state_machine.Crashed ->
     Some
       { ld_keepalive_running = false; ld_phase = "crashed"; ld_pipeline_stage = "crashed"; ld_paused = Some false }
-  | Keeper_state_machine.Dead ->
-    Some { ld_keepalive_running = false; ld_phase = "dead"; ld_pipeline_stage = "offline"; ld_paused = Some false }
   | Keeper_state_machine.Paused ->
     Some { ld_keepalive_running = true; ld_phase = "paused"; ld_pipeline_stage = "paused"; ld_paused = Some true }
   | Keeper_state_machine.Offline
   | Keeper_state_machine.Failing
-  | Keeper_state_machine.Overflowed
   | Keeper_state_machine.Compacting
   | Keeper_state_machine.HandingOff
   | Keeper_state_machine.Draining
@@ -570,15 +705,6 @@ let keeper_top_level_status_opt row =
   | _ -> None
 ;;
 
-let keeper_agent_status_opt row =
-  match Json_util.assoc_member_opt "agent" row with
-  | Some (`Assoc _ as agent) ->
-    (match Json_util.assoc_member_opt "status" agent with
-     | Some (`String status) -> Some status
-     | _ -> keeper_top_level_status_opt row)
-  | None | Some _ -> keeper_top_level_status_opt row
-;;
-
 let lifecycle_display_for_row row event =
   match
     ( event
@@ -607,9 +733,7 @@ let control_status_override_of_lifecycle_event row event =
   | Keeper_lifecycle_events.Phase_event Keeper_state_machine.Stopped ->
     (match
        Option.bind
-         (match keeper_top_level_status_opt row with
-          | Some _ as status -> status
-          | None -> keeper_agent_status_opt row)
+         (keeper_top_level_status_opt row)
          Keeper_status_runtime.control_plane_status_of_string_opt
      with
      | Some Keeper_status_runtime.Cp_paused ->
@@ -619,14 +743,12 @@ let control_status_override_of_lifecycle_event row event =
   | Keeper_lifecycle_events.Phase_event
       ( Keeper_state_machine.Offline
       | Keeper_state_machine.Failing
-      | Keeper_state_machine.Overflowed
       | Keeper_state_machine.Compacting
       | Keeper_state_machine.HandingOff
       | Keeper_state_machine.Draining
       | Keeper_state_machine.Paused
       | Keeper_state_machine.Crashed
-      | Keeper_state_machine.Restarting
-      | Keeper_state_machine.Dead ) ->
+      | Keeper_state_machine.Restarting ) ->
     None)
 ;;
 
@@ -643,7 +765,7 @@ let patched_keeper_status row ~event ~keepalive_running =
        [rebuild_continuity_briefs] read the row as live. Missing or unknown
        values fail loudly instead of manufacturing an idle keeper. *)
     let status =
-      match keeper_agent_status_opt row with
+      match keeper_top_level_status_opt row with
       | Some status -> status
       | None ->
         invalid_arg
@@ -652,7 +774,7 @@ let patched_keeper_status row ~event ~keepalive_running =
     match Keeper_status_runtime.control_plane_status_of_string_opt status with
     | Some
         (Cp_surface
-           ((Surface_busy | Surface_active | Surface_listening | Surface_idle) as s)) ->
+           ((Surface_active | Surface_idle) as s)) ->
       `String (Keeper_status_runtime.surface_status_to_string s)
     | Some (Cp_surface (Surface_offline | Surface_inactive)) -> `String "offline"
     | Some Cp_paused ->
@@ -807,26 +929,34 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
 ;;
 
 let patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
-  clear_execution_default_light_http_body ();
-  match execution_cache.json with
-  | `Assoc fields ->
-    (match List.assoc_opt "keepers" fields with
-     | Some (`List rows) ->
-       let keeper_rows =
-         patch_keeper_rows ~keeper_name ~event ~keepalive_running rows
-       in
-       if keeper_rows <> rows
-       then
-         execution_cache.json
-         <- `Assoc
+  with_execution_publication_lock (fun () ->
+    incr execution_publication_generation;
+    let generation = !execution_publication_generation in
+    clear_execution_default_light_http_body ();
+    match (Server_dashboard_http_cache.snapshot execution_cache).json with
+    | `Assoc fields ->
+      let json =
+        match List.assoc_opt "keepers" fields with
+        | Some (`List rows) ->
+          let keeper_rows =
+            patch_keeper_rows ~keeper_name ~event ~keepalive_running rows
+          in
+          if keeper_rows = rows
+          then `Assoc fields
+          else
+            `Assoc
               (replace_keeper_rows_and_rebuild_briefs
                  ~now_ts:(Time_compat.now ())
                  ~keeper_rows
                  ~keepers_json:(`List keeper_rows)
                  fields)
-     | Some _ -> ()
-     | None -> ())
-  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ()
+        | Some _ | None -> `Assoc fields
+      in
+      execution_cache.Server_dashboard_http_cache.current
+      <- { (Server_dashboard_http_cache.snapshot execution_cache) with
+           json = with_execution_publication_generation ~generation json
+         }
+    | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ())
 ;;
 
 let patch_keeper_dependent_caches ~keeper_name ~event =
@@ -858,33 +988,36 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
       ~min_v:30.0
       ~max_v:300.0
   in
+  let attempt_generation = Atomic.make 0 in
   let compute () =
-    clear_execution_default_light_http_body ();
-    Server_dashboard_http_cache.mark_cached_surface_attempt execution_cache;
+    let generation = begin_execution_publication_attempt () in
+    Atomic.set attempt_generation generation;
     let started_at = Unix.gettimeofday () in
     try
-      run_dashboard_compute
-        ~mode:Offloaded_readonly
-        ~sw
-        ~clock
-        ~net
-        ~mono_clock
-        ~config:workspace_config
-        (fun ~config ~sw ->
-           Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
-           |> patch_surface_json_for_running_keepers config
-           |> with_projection_diagnostics
-                ~surface:"execution"
-                ~started_at
-                ~extra:
-                  [ ( "readonly_pool"
-                    , Workspace_utils.domain_local_pg_backend_diagnostics_json () )
-                  ])
+      let json =
+        run_dashboard_compute
+          ~mode:Offloaded_readonly
+          ~sw
+          ~clock
+          ~net
+          ~mono_clock
+          ~config:workspace_config
+          (fun ~config ~sw ->
+             Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
+             |> patch_surface_json_for_running_keepers config
+             |> Server_dashboard_http_core_cache.with_projection_diagnostics
+                  ~surface:"execution"
+                  ~started_at
+                  ~extra:
+                    [ ( "readonly_pool"
+                      , Workspace_utils.domain_local_pg_backend_diagnostics_json () )
+                    ])
+      in
+      generation, json
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      clear_execution_default_light_http_body ();
-      Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn;
+      let (_ : bool) = publish_execution_error_if_current ~generation exn in
       raise exn
   in
   Proactive_refresh.start
@@ -893,20 +1026,23 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0) with
         timeout_s = execution_refresh_timeout_s
-      ; on_error =
+      ; on_failure =
           Some
-            (fun exn ->
-              clear_execution_default_light_http_body ();
-              Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn)
+            (fun failure ->
+              ignore
+                (publish_execution_error_message_if_current
+                   ~generation:(Atomic.get attempt_generation)
+                   (Proactive_refresh.failure_message failure)))
       ; warm_delay_s = 0.0
       }
     ~compute
-    ~on_result:(fun json ->
-      Server_dashboard_http_cache.mark_cached_surface_success execution_cache json;
-      broadcast_cached_surface
-        ~event_type:"execution_snapshot"
-        (refresh_execution_default_light_http_body ~config:workspace_config);
-      !broadcast_namespace_truth_ref state)
+    ~on_result:(fun (generation, json) ->
+      if publish_execution_success_if_current ~generation json
+      then (
+        broadcast_cached_surface
+          ~event_type:"execution_snapshot"
+          (refresh_execution_default_light_http_body ~config:workspace_config);
+        !broadcast_namespace_truth_ref state))
 ;;
 
 let dashboard_execution_cached_http_body ~state request =
@@ -915,9 +1051,12 @@ let dashboard_execution_cached_http_body ~state request =
   let actor = execution_actor_for_request ~base_path:config.base_path request in
   let full_mode = bool_query_param request "full" ~default:false in
   let force = bool_query_param request "force" ~default:false in
-  match fixture, actor, full_mode, force, Atomic.get execution_default_light_http_body with
-  | None, None, false, false, Some body when execution_surface_has_fresh_success () ->
-    Some body
+  match fixture, actor, full_mode, force with
+  | None, None, false, false ->
+    with_execution_publication_lock (fun () ->
+      match Atomic.get execution_default_light_http_body with
+      | Some body when execution_surface_has_fresh_success_unlocked () -> Some body
+      | Some _ | None -> None)
   | _ -> None
 ;;
 
@@ -931,11 +1070,13 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
   in
   let compute () =
     Server_dashboard_http_cache.mark_cached_surface_attempt transport_health_cache;
-    try Transport_metrics.transport_health_json ~config:(Mcp_server.workspace_config state) with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Server_dashboard_http_cache.mark_cached_surface_error transport_health_cache exn;
-      raise exn
+    Transport_metrics.transport_health_json ()
+  in
+  let broadcast_snapshot () =
+    broadcast_cached_surface
+      ~event_type:"transport_health_snapshot"
+      (Server_dashboard_http_cache.cached_surface_json transport_health_cache
+       |> with_transport_health_metadata)
   in
   let interval_s = 30.0 in
   Proactive_refresh.start
@@ -944,18 +1085,19 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"transport_health" ~interval_s) with
         timeout_s
-      ; on_error = Some (Server_dashboard_http_cache.mark_cached_surface_error transport_health_cache)
+      ; on_failure =
+          Some
+            (fun failure ->
+              Server_dashboard_http_cache.mark_cached_surface_error_message
+                transport_health_cache
+                (Proactive_refresh.failure_message failure);
+              broadcast_snapshot ())
       ; warm_delay_s = 0.0
       }
     ~compute
     ~on_result:(fun json ->
       Server_dashboard_http_cache.mark_cached_surface_success transport_health_cache json;
-      broadcast_cached_surface
-        ~event_type:"transport_health_snapshot"
-        (Server_dashboard_http_cache.cached_surface_json transport_health_cache
-         |> with_transport_health_metadata
-              ~config:(Mcp_server.workspace_config state)
-              ~timeout_s))
+      broadcast_snapshot ())
 ;;
 
 let compute_execution_trust_json ~state ~sw ~clock =
@@ -971,7 +1113,7 @@ let compute_execution_trust_json ~state ~sw ~clock =
     ~config:(Mcp_server.workspace_config state)
     (fun ~config ~sw:_ ->
        Dashboard_http_keeper.execution_trust_dashboard_json config
-       |> with_projection_diagnostics
+       |> Server_dashboard_http_core_cache.with_projection_diagnostics
             ~surface:"execution_trust"
             ~started_at
             ~extra:[])
@@ -992,13 +1134,13 @@ let start_execution_trust_refresh_loop ~state ~sw ~clock =
            ~interval_s:Dashboard_http_keeper_types.execution_trust_refresh_interval_s)
         with
         timeout_s = Env_config_runtime.Dashboard.execution_trust_timeout_sec
-      ; on_error =
+      ; on_failure =
           Some
-            (fun exn ->
+            (fun failure ->
               with_execution_trust_cache (fun () ->
-                Server_dashboard_http_cache.mark_cached_surface_error
+                Server_dashboard_http_cache.mark_cached_surface_error_message
                   execution_trust_cache
-                  exn))
+                  (Proactive_refresh.failure_message failure)))
       ; warm_delay_s = 0.0
       }
     ~compute
@@ -1050,7 +1192,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
            ~proc_mgr:state.Mcp_server.proc_mgr
            ()
          |> patch_surface_json_for_running_keepers config
-         |> with_projection_diagnostics
+         |> Server_dashboard_http_core_cache.with_projection_diagnostics
               ~surface:"execution"
               ~started_at
               ~extra:
@@ -1060,21 +1202,23 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
   match fixture, actor, full_mode with
   | None, None, false when force ->
     let timeout_sec = Env_config_runtime.Dashboard.execution_timeout_sec in
+    let attempt_generation = Atomic.make 0 in
     let compute_and_track () =
-      clear_execution_default_light_http_body ();
-      Server_dashboard_http_cache.mark_cached_surface_attempt execution_cache;
+      let generation = begin_execution_publication_attempt () in
+      Atomic.set attempt_generation generation;
       try
         let json = compute ~light:true () in
-        Server_dashboard_http_cache.mark_cached_surface_success execution_cache json;
-        let (_ : Yojson.Safe.t) =
-          refresh_execution_default_light_http_body ~config
-        in
-        Server_dashboard_http_cache.cached_surface_json execution_cache
+        if publish_execution_success_if_current ~generation json
+        then (
+          let (_ : Yojson.Safe.t) =
+            refresh_execution_default_light_http_body ~config
+          in
+          dashboard_execution_snapshot_json ())
+        else json
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
-        clear_execution_default_light_http_body ();
-        Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn;
+        let (_ : bool) = publish_execution_error_if_current ~generation exn in
         raise exn
     in
     (match
@@ -1085,8 +1229,10 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
        let exn =
          Dashboard_cache.Compute_timeout (execution_default_light_cache_key, false)
        in
-       clear_execution_default_light_http_body ();
-       Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn;
+       ignore
+         (publish_execution_error_if_current
+            ~generation:(Atomic.get attempt_generation)
+            exn);
        Log.Dashboard.warn
          "dashboard execution force refresh timed out: %s (%.0fs)"
          execution_default_light_cache_key
@@ -1113,10 +1259,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
          serving the empty initializing payload forever when proactive warm-up
          misses its first build window. *)
     let json =
-      Server_dashboard_http_cache.cached_surface_or_first_success_json
-        execution_cache
-        ~cache_key:execution_default_light_cache_key
-        ~ttl:deep_surface_cache_ttl_s
+      cached_execution_or_first_success_json
         ~clock
         ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
         (compute ~light:true)
@@ -1128,7 +1271,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
         ~query
         json
     in
-    cache_execution_default_light_http_body response_json;
+    let (_ : Yojson.Safe.t) = refresh_execution_default_light_http_body ~config in
     response_json
   | _ ->
     (* Parameterized requests (fixture/actor/full): on-demand with SWR cache.
@@ -1140,12 +1283,17 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
         (Option.value ~default:"" fixture)
         (if full_mode then "full" else "light")
     in
+    let compute_with_generation () =
+      let generation = current_execution_publication_generation () in
+      compute ?actor ?fixture ~light ()
+      |> with_execution_publication_generation ~generation
+    in
     Dashboard_cache.get_or_compute_with_timeout
       cache_key
       ~ttl:deep_surface_cache_ttl_s
       ~clock
       ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
-      (compute ?actor ?fixture ~light)
+      compute_with_generation
     |> with_execution_metadata ~config ~cache_key ~query
 ;;
 
@@ -1169,28 +1317,7 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
   |> attach_surface_envelope
 ;;
 
-let transport_health_cache_diagnostics () =
-  match Server_dashboard_http_cache.cached_surface_json transport_health_cache with
-  | `Assoc fields ->
-    (match List.assoc_opt "projection_diagnostics" fields with
-     | Some (`Assoc diagnostics) -> diagnostics
-     | _ -> [])
-  | _ -> []
-;;
-
-let dashboard_transport_health_http_json ~state =
-  let timeout_s =
-    float_of_env_default
-      "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
-      ~default:transport_health_timeout_default_s
-      ~min_v:transport_health_timeout_min_s
-      ~max_v:transport_health_timeout_max_s
-  in
-  let json = Server_dashboard_http_cache.cached_surface_json transport_health_cache in
-  extend_projection_diagnostics
-    json
-    (("source", `String "cached_surface") :: transport_health_cache_diagnostics ())
+let dashboard_transport_health_http_json ~state:_ =
+  Server_dashboard_http_cache.cached_surface_json transport_health_cache
   |> with_transport_health_metadata
-       ~config:(Mcp_server.workspace_config state)
-       ~timeout_s
 ;;

@@ -1,4 +1,5 @@
 ---
+rfc: "0299"
 title: RFC-0299 — Typed-Boundary Sweep (string-classifier → closed-sum, dead SSOT reclamation)
 status: Draft
 updated: 2026-07-13
@@ -9,9 +10,9 @@ updated: 2026-07-13
 | Field | Value |
 |---|---|
 | Status | Draft |
-| Repo | `jeong-sik/masc` (refs `jeong-sik/oas`) |
+| Repo | `jeong-sik/masc` (refs `jeong-sik/agent_core`) |
 | Supersedes / absorbs | masc #22071, #18840, #20674, #22042, #22246, #22639, #15257, #22177 (workaround-rejection signature #2/#3 cluster) |
-| Relates | oas #2051 (capability ingestion 4 paths), manifesto "NO string-match / NO SSOT violations", CLAUDE.md workaround-rejection §2 |
+| Relates | agent_core #2051 (capability ingestion 4 paths), manifesto "NO string-match / NO SSOT violations", CLAUDE.md workaround-rejection §2 |
 | Audit | 2026-06-29 8-lens manifesto audit — the single most repeated structural anti-pattern (7+ sites). |
 
 ## 0. Summary
@@ -47,7 +48,7 @@ The 2026-06-29 audit found the pattern compounds: `string catch-all` → `silent
 | Config category enum | #15257 | `config_category_enum_strings` duplicated 5 files (regrew after RFC-0057) | `config_category` variant + single SSOT |
 | masc_run_* tool schemas | #22177 | 4 tool JSON schemas defined twice (`tool_schemas_run.ml` vs `tool_run.ml:115-184`) with divergent fields (`additionalProperties:false` vs descriptions) | single schema SSOT, both consumers import |
 
-oas #2051 (capability ingestion 4 paths) is the same shape in the sibling repo; referenced for cross-repo coordination, not migrated here.
+agent_core #2051 (capability ingestion 4 paths) is the same shape in the sibling repo; referenced for cross-repo coordination, not migrated here.
 
 ## 3. Goal — the typed boundary
 
@@ -89,7 +90,7 @@ The 2026-06-29 audit noted every issue here *reports* a violation and proposes a
 ## 7. Non-goals
 
 - Per-issue behavioral fixes beyond the type boundary (e.g. #22042's anti-thrash semantics are the issue's scope; this RFC only fixes the classification type).
-- oas #2051 capability ingestion (sibling repo; coordinated, not migrated).
+- agent_core #2051 capability ingestion (sibling repo; coordinated, not migrated).
 - The silent-failure sink cluster (#21990 `write_json` `Result.t`) — separate axis; covered by its own issue, not this RFC.
 
 ## 8. Open questions

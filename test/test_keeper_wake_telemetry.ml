@@ -1,7 +1,7 @@
 open Alcotest
 
 module WT = Masc.Keeper_wake_telemetry
-module Types = Agent_sdk.Types
+module Types = Agent_core.Types
 
 let text_msg role s : Types.message =
   { role; content = [ Types.Text s ]; name = None; tool_call_id = None; metadata = [] }
@@ -200,10 +200,11 @@ let test_role_counts_are_stably_sorted () =
 let test_phase0_record_always_emits_observation () =
   let meta =
     match
-      Masc.Keeper_meta_json_parse.meta_of_json
+      (* The fixture fills every field the current keeper-meta schema
+         requires; this test only cares about the name. *)
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [ "name", `String "wake-observation-test"
-          ; "agent_name", `String "wake-observation-test"
           ; "trace_id", `String "trace-wake-observation-test"
           ])
     with

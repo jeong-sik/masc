@@ -49,7 +49,7 @@ def parse_args(repo_root: Path) -> argparse.Namespace:
     parser.add_argument(
         "--roots",
         nargs="*",
-        default=["lib", "bin", "test", "examples"],
+        default=["lib", "bin", "test"],
         help="Repo-relative roots to scan.")
     args = parser.parse_args(sys.argv[2:])
     args.repo_root = repo_root
@@ -78,7 +78,6 @@ def scan_tree(base_dir: Path, roots: list[str], exceptions: set[str], max_lines:
         "lib_ml_over_500": 0,
         "bin_ml_over_500": 0,
         "test_ml_over_500": 0,
-        "examples_ml_over_500": 0,
     }
     skip_dirs = {".git", "_build", ".worktrees", "node_modules", "dist", "coverage", ".next"}
 
@@ -155,7 +154,6 @@ def baseline_from_file(args: argparse.Namespace) -> tuple[dict, str]:
         "lib_ml_over_500": int(counts.get("lib_ml_over_500", 0)),
         "bin_ml_over_500": int(counts.get("bin_ml_over_500", 0)),
         "test_ml_over_500": int(counts.get("test_ml_over_500", 0)),
-        "examples_ml_over_500": int(counts.get("examples_ml_over_500", 0)),
     }, f"file:{args.baseline_file}"
 
 
@@ -271,8 +269,7 @@ def main() -> int:
         f"excepted={current['counts']['excepted_ml_over_500']} "
         f"lib={current['counts']['lib_ml_over_500']} "
         f"bin={current['counts']['bin_ml_over_500']} "
-        f"test={current['counts']['test_ml_over_500']} "
-        f"examples={current['counts']['examples_ml_over_500']}"
+        f"test={current['counts']['test_ml_over_500']}"
     )
     print(f"Aggregate: {aggregate_status} ({aggregate_message})")
     print(f"Changed: {changed_status} ({changed_message})")

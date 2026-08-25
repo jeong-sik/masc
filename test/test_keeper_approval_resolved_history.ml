@@ -9,7 +9,17 @@
 
 open Alcotest
 
-module AQ = Masc.Keeper_approval_queue
+module Audit = Keeper_approval.Audit
+
+module AQ = struct
+  include Audit
+
+  let list_recent_resolved ~base_path ~now_ts ?limit ?window_minutes () =
+    match Audit.list_recent_resolved ~base_path ~now_ts ?limit ?window_minutes () with
+    | Ok history -> history
+    | Error error -> failwith (Audit.read_error_to_string error)
+  ;;
+end
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_approval_resolved_history_" "" in
@@ -38,7 +48,7 @@ let rec mkdir_p path =
 
 (* Day file for [ts] computed independently of the module under test, mirroring
    the write path ([Jsonl_writer.dated_path], UTC). Seeding through this rather
-   than through [AQ.audit_day_string_of_ts] keeps the reader honest: a reader
+   than through [AQ.day_string_of_ts] keeps the reader honest: a reader
    that switched to local time would stop finding rows the writer placed here. *)
 let audit_day_file ~base_path ts =
   let tm = Unix.gmtime ts in
@@ -59,21 +69,36 @@ let append_row ~base_path ~ts (row : Yojson.Safe.t) =
     (fun () -> output_string oc (Yojson.Safe.to_string row ^ "\n"))
 ;;
 
-(* A resolved decision as the audit writer records it. [?ts_field:false] drops
-   the timestamp to exercise the undated-row boundary. *)
-let seed_resolved ~base_path ~ts ~id ?(keeper = "rondo") ?(tool = "tool_execute")
-      ?(decision = "approve") ?(source = "auto_judge") ?(ts_field = true) ()
+let seed_resolved ~base_path ~ts ~id ?(keeper = "beta") ?(tool = "tool_execute")
+      ?(decision = "approve") ?(source = "auto_judge") ()
   =
+  let decision_kind, decision_reason =
+    if String.equal decision "approve"
+    then `String "approve", `Null
+    else `String "reject", `String "operator rejected"
+  in
   let fields =
-    [ "event", `String "resolved"
+    [ "ts", `Float ts
+    ; "event", `String "resolved"
     ; "id", `String id
     ; "keeper", `String keeper
     ; "tool", `String tool
     ; "decision", `String decision
+    ; "turn_id", `Null
+    ; "task_id", `Null
+    ; "goal_id", `Null
+    ; "actor", `String "operator"
     ; "decision_source", `String source
+    ; "authorization_source", `Null
+    ; "rule_match", `Null
+    ; "source_approval_id", `Null
+    ; "decision_kind", decision_kind
+    ; "decision_reason", decision_reason
+    ; "summary_status", `String "not_requested"
+    ; "exact_attempt", `Assoc [ "state", `String "unbound" ]
+    ; "summary_attempt_disposition", `Null
     ]
   in
-  let fields = if ts_field then ("ts", `Float ts) :: fields else fields in
   append_row ~base_path ~ts (`Assoc fields)
 ;;
 
@@ -92,7 +117,7 @@ let seed_noise ~base_path ~ts ~count =
             [ "event", `String "summary_updated"
             ; "id", `String (Printf.sprintf "noise_%d" i)
             ; "ts", `Float ts
-            ; "keeper", `String "rondo"
+            ; "keeper", `String "beta"
             ]
         in
         output_string oc (Yojson.Safe.to_string row ^ "\n")
@@ -101,10 +126,10 @@ let seed_noise ~base_path ~ts ~count =
 
 let with_store f () =
   let base_path = temp_dir () in
-  AQ.For_testing.reset_audit_store ();
+  AQ.For_testing.reset_store ();
   Fun.protect
     ~finally:(fun () ->
-      AQ.For_testing.reset_audit_store ();
+      AQ.For_testing.reset_store ();
       cleanup_dir base_path)
     (fun () -> f base_path)
 ;;
@@ -133,9 +158,9 @@ let now = 1785207600.0
    every such hour. *)
 let test_day_key_is_utc () =
   check string "23:30Z stays on the UTC day" "2026-07-27"
-    (AQ.audit_day_string_of_ts 1785195000.0);
+    (AQ.day_string_of_ts 1785195000.0);
   check string "00:30Z is the next UTC day" "2026-07-28"
-    (AQ.audit_day_string_of_ts 1785198600.0)
+    (AQ.day_string_of_ts 1785198600.0)
 ;;
 
 (* Seeded newest-first on purpose: file position must not decide the order. The
@@ -207,14 +232,34 @@ let test_limit_zero_returns_empty_page base_path =
   check bool "scan not claimed exhausted" false history.resolved_scan_exhausted
 ;;
 
-(* An undated decision cannot be placed in a wall-clock window. It is excluded
-   rather than dated by guesswork, and it must not inflate [matched] either. *)
-let test_undated_decision_is_excluded base_path =
-  seed_resolved ~base_path ~ts:(now -. minutes 5) ~id:"dated" ();
-  seed_resolved ~base_path ~ts:(now -. minutes 5) ~id:"undated" ~ts_field:false ();
-  let history = AQ.list_recent_resolved ~base_path ~now_ts:now ~window_minutes:1440 () in
-  check (list string) "only the dated decision" [ "dated" ] (ids history);
-  check int "matched excludes the undated row" 1 history.resolved_matched
+let test_resolved_row_missing_current_field_is_rejected base_path =
+  let row =
+    `Assoc
+      [ "ts", `Float (now -. minutes 5)
+      ; "event", `String "resolved"
+      ; "id", `String "missing-actor"
+      ]
+  in
+  append_row ~base_path ~ts:(now -. minutes 5) row;
+  match Audit.list_recent_resolved ~base_path ~now_ts:now () with
+  | Error { stage = List_recent_resolved; detail } ->
+    check bool "missing current field is named" true (String.length detail > 0)
+  | Error _ -> fail "wrong audit read stage"
+  | Ok _ -> fail "incomplete resolved row was accepted"
+;;
+
+let test_malformed_jsonl_is_unavailable base_path =
+  let path = audit_day_file ~base_path (now -. minutes 5) in
+  Out_channel.with_open_gen
+    [ Open_append; Open_creat; Open_wronly ]
+    0o644
+    path
+    (fun channel -> output_string channel "{not-json\n");
+  match Audit.list_recent_resolved ~base_path ~now_ts:now () with
+  | Error { stage = List_recent_resolved; detail } ->
+    check bool "physical parse failure is named" true (String.length detail > 0)
+  | Error _ -> fail "wrong audit read stage"
+  | Ok _ -> fail "malformed audit JSONL was reported as ready"
 ;;
 
 let test_empty_store_is_an_empty_page base_path =
@@ -226,10 +271,100 @@ let test_empty_store_is_an_empty_page base_path =
   check bool "scan not exhausted" false history.resolved_scan_exhausted
 ;;
 
-(* #26126: judge evidence recorded on the resolved audit event at resolution
-   time must survive projection verbatim; events written before the enrichment
-   project the members as [`Null] rather than being dropped or invented. *)
 let yojson = testable Yojson.Safe.pretty_print Yojson.Safe.equal
+
+let test_nullable_string_projection_is_literal base_path =
+  let approve_ts = now -. minutes 2 in
+  let reject_ts = now -. minutes 1 in
+  append_row
+    ~base_path
+    ~ts:approve_ts
+    (`Assoc
+        [ "event", `String "resolved"
+        ; "id", `String "approve-nullable"
+        ; "ts", `Float approve_ts
+        ; "keeper", `String "beta"
+        ; "tool", `String "tool_execute"
+        ; "decision", `String "approve"
+        ; "turn_id", `Null
+        ; "task_id", `Null
+        ; "goal_id", `Null
+        ; "actor", `Null
+        ; "decision_source", `String "auto_judge"
+        ; "authorization_source", `Null
+        ; "rule_match", `Null
+        ; "source_approval_id", `Null
+        ; "decision_kind", `String "approve"
+        ; "decision_reason", `Null
+        ; "summary_status", `String "not_requested"
+        ; "exact_attempt", `Assoc [ "state", `String "unbound" ]
+        ; "summary_attempt_disposition", `Null
+        ]);
+  append_row
+    ~base_path
+    ~ts:reject_ts
+    (`Assoc
+        [ "event", `String "resolved"
+        ; "id", `String "reject-present"
+        ; "ts", `Float reject_ts
+        ; "keeper", `String "beta"
+        ; "tool", `String "tool_execute"
+        ; "decision", `String "reject"
+        ; "turn_id", `Null
+        ; "task_id", `String "task-7"
+        ; "goal_id", `String "goal-9"
+        ; "actor", `String "operator"
+        ; "decision_source", `String "human_operator"
+        ; "authorization_source", `Null
+        ; "rule_match", `Null
+        ; "source_approval_id", `Null
+        ; "decision_kind", `String "reject"
+        ; "decision_reason", `String "unsafe arguments"
+        ; "summary_status", `String "not_requested"
+        ; "exact_attempt", `Assoc [ "state", `String "unbound" ]
+        ; "summary_attempt_disposition", `Null
+        ]);
+  let history = AQ.list_recent_resolved ~base_path ~now_ts:now ~window_minutes:60 () in
+  check
+    (list yojson)
+    "nullable strings project to the literal resolved contract"
+    [ `Assoc
+        [ "id", `String "reject-present"
+        ; "event", `String "resolved"
+        ; "keeper_name", `String "beta"
+        ; "tool_name", `String "tool_execute"
+        ; "decision", `String "reject"
+        ; "decision_kind", `String "reject"
+        ; "decision_reason", `String "unsafe arguments"
+        ; "resolved_at", `Float reject_ts
+        ; "turn_id", `Null
+        ; "task_id", `String "task-7"
+        ; "goal_id", `String "goal-9"
+        ; "actor", `String "operator"
+        ; "decision_source", `String "human_operator"
+        ; "summary_status", `String "not_requested"
+        ; "exact_attempt", `Assoc [ "state", `String "unbound" ]
+        ]
+    ; `Assoc
+        [ "id", `String "approve-nullable"
+        ; "event", `String "resolved"
+        ; "keeper_name", `String "beta"
+        ; "tool_name", `String "tool_execute"
+        ; "decision", `String "approve"
+        ; "decision_kind", `String "approve"
+        ; "decision_reason", `Null
+        ; "resolved_at", `Float approve_ts
+        ; "turn_id", `Null
+        ; "task_id", `Null
+        ; "goal_id", `Null
+        ; "actor", `Null
+        ; "decision_source", `String "auto_judge"
+        ; "summary_status", `String "not_requested"
+        ; "exact_attempt", `Assoc [ "state", `String "unbound" ]
+        ]
+    ]
+    history.resolved_rows
+;;
 
 let test_judge_evidence_passes_through base_path =
   let summary_status : Yojson.Safe.t =
@@ -243,14 +378,23 @@ let test_judge_evidence_passes_through base_path =
         [ "event", `String "resolved"
         ; "id", `String "with-judge"
         ; "ts", `Float (now -. minutes 5)
-        ; "keeper", `String "rondo"
+        ; "keeper", `String "beta"
         ; "tool", `String "tool_execute"
         ; "decision", `String "approve"
+        ; "turn_id", `Null
+        ; "task_id", `Null
+        ; "goal_id", `Null
+        ; "actor", `String "operator"
         ; "decision_source", `String "auto_judge"
+        ; "authorization_source", `Null
+        ; "rule_match", `Null
+        ; "source_approval_id", `Null
+        ; "decision_kind", `String "approve"
+        ; "decision_reason", `Null
         ; "summary_status", summary_status
         ; "exact_attempt", exact_attempt
+        ; "summary_attempt_disposition", `Null
         ]);
-  seed_resolved ~base_path ~ts:(now -. minutes 10) ~id:"legacy" ();
   let history = AQ.list_recent_resolved ~base_path ~now_ts:now ~window_minutes:60 () in
   let member name row =
     match row with
@@ -269,9 +413,7 @@ let test_judge_evidence_passes_through base_path =
     yojson
     "exact_attempt passes through"
     exact_attempt
-    (member "exact_attempt" (find "with-judge"));
-  check yojson "legacy summary_status is null" `Null (member "summary_status" (find "legacy"));
-  check yojson "legacy exact_attempt is null" `Null (member "exact_attempt" (find "legacy"))
+    (member "exact_attempt" (find "with-judge"))
 ;;
 
 let test_bounds_are_clamped base_path =
@@ -307,13 +449,19 @@ let () =
             (with_store test_bounds_are_clamped)
         ] )
     ; ( "boundaries"
-      , [ test_case "undated decision is excluded" `Quick
-            (with_store test_undated_decision_is_excluded)
+      , [ test_case "missing current resolved field is rejected" `Quick
+            (with_store test_resolved_row_missing_current_field_is_rejected)
+        ; test_case "malformed JSONL is unavailable" `Quick
+            (with_store test_malformed_jsonl_is_unavailable)
         ; test_case "empty store is an empty page" `Quick
             (with_store test_empty_store_is_an_empty_page)
         ] )
+    ; ( "projection"
+      , [ test_case "nullable strings keep the literal resolved shape" `Quick
+            (with_store test_nullable_string_projection_is_literal)
+        ] )
     ; ( "judge evidence"
-      , [ test_case "judge evidence passes through, legacy rows project null" `Quick
+      , [ test_case "judge evidence passes through" `Quick
             (with_store test_judge_evidence_passes_through)
         ] )
     ]

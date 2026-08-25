@@ -189,7 +189,7 @@ function describeTaskEventsError(err: unknown): string {
     return '태스크 이벤트 요청이 시간 초과되었습니다. 다시 시도해 주세요'
   }
   if (api.status === 403) {
-    return '태스크 이벤트를 읽을 권한이 없습니다'
+    return '태스크 이벤트를 읽을 권한 없음'
   }
   if (api.status === 404) {
     return '태스크 이벤트 경로를 찾지 못했습니다'
@@ -340,7 +340,7 @@ async function loadActivity(task: Task): Promise<void> {
   try {
     const keeper = findKeeper(task.assignee)
     const timelineName = keeper?.agent_name ?? task.assignee
-    const isKeeper = task.assignee_kind === 'keeper' || keeper !== null
+    const isKeeper = keeper !== null
     const trajectoryName = isKeeper ? task.assignee : null
 
     const [timeline, trajectory] = await Promise.all([
@@ -365,12 +365,5 @@ export function hasActivityTab(task: Task): boolean {
 
 /** Whether the assignee is a keeper (affects tool call visibility). */
 export function isKeeperAssignee(task: Task): boolean {
-  return task.assignee_kind === 'keeper' || (task.assignee ? findKeeper(task.assignee) !== null : false)
-}
-
-// -- Goal relationship (keeper's active goals) ----------------------
-
-export function assigneeGoalIds(task: Task): string[] {
-  const keeper = findKeeper(task.assignee)
-  return keeper?.active_goal_ids ?? []
+  return task.assignee ? findKeeper(task.assignee) !== null : false
 }

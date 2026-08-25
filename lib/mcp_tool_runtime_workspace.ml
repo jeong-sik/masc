@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Mcp_tool_runtime_workspace — project startup tool handler.
 
     Handles: masc_start.
@@ -54,9 +37,6 @@ let masc_add_task_name =
 (** Argument extraction helpers bound to ctx.arguments. *)
 let arg_get_string ctx key default =
   Safe_ops.json_string ~default key ctx.arguments
-
-let arg_get_string_list ctx key =
-  Safe_ops.json_string_list key ctx.arguments
 
 let expand_start_path_home ~path_syntax ~suffix =
   match Config_dir_resolver.initial_env_home with
@@ -214,9 +194,29 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
           with
           | Error error ->
             let failure_class =
-              if Masc_domain.is_retryable error
-              then Tool_result.Transient_error
-              else Tool_result.Workflow_rejection
+              match error with
+              | Masc_domain.Task _ | Masc_domain.Agent _ ->
+                Tool_result.Workflow_rejection
+              | Masc_domain.Auth _ ->
+                Tool_result.Policy_rejection
+              | Masc_domain.RateLimitExceeded _
+              | Masc_domain.System
+                  (Masc_domain.System_error.IoError _
+                  | Masc_domain.System_error.StorageError _
+                  | Masc_domain.System_error.LockContention _)
+              | Masc_domain.CacheError
+                  (Masc_domain.CacheReadFailed _
+                  | Masc_domain.CacheWriteFailed _
+                  | Masc_domain.CacheExpired _) ->
+                Tool_result.Dependency_unavailable
+              | Masc_domain.System
+                  (Masc_domain.System_error.NotInitialized
+                  | Masc_domain.System_error.AlreadyInitialized
+                  | Masc_domain.System_error.InvalidJson _
+                  | Masc_domain.System_error.InvalidFilePath _
+                  | Masc_domain.System_error.ValidationError _)
+              | Masc_domain.CacheError (Masc_domain.CacheCorrupted _) ->
+                Tool_result.Runtime_failure
             in
             Some
               (Tool_result.make_err

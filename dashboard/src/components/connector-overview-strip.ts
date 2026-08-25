@@ -14,7 +14,7 @@ import { signal } from '@preact/signals'
 import type { GateConnectorInfo } from '../api/gate'
 import { SurfaceCard } from './common/card'
 import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight } from './connector-readiness-rail'
-import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS, channelIcon, connectorAccentStyle, connectorStateLabel, startSidecar, stopSidecar, type KnownConnectorId } from './connector-status'
+import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS, channelIcon, isInProcessConnector, connectorAccentStyle, connectorStateLabel, startSidecar, stopSidecar, type KnownConnectorId } from './connector-status'
 import { openConnectorConfig } from './connector-config-form'
 import { formatElapsedCompact } from '../lib/format-time'
 import { ActionButton } from './common/button'
@@ -131,6 +131,14 @@ export function detectRecentDrops(
   return dropped
 }
 
+/** The connectors this strip can actually start and stop. discord and slack
+    run inside the server process: /api/v1/sidecar/{start,stop} answers 400
+    "unknown sidecar id" for them (#29513), so offering the button spends the
+    operator's click on a toast. Before that, slack did launch a second Python
+    bot on the same token (#29456). connector-status and connector-onboarding
+    already branch on this; the strip did not. */
+const SIDECAR_CONNECTOR_IDS = KNOWN_CONNECTOR_IDS.filter(id => !isInProcessConnector(id))
+
 async function runBulk(
   kind: 'start' | 'stop',
   predicate: (c: GateConnectorInfo | null) => boolean,
@@ -139,7 +147,7 @@ async function runBulk(
   if (bulkInflight.value[kind]) return
   bulkInflight.value = { ...bulkInflight.value, [kind]: true }
   try {
-    const targets = KNOWN_CONNECTOR_IDS.filter(id => predicate(findConnector(connectors, id)))
+    const targets = SIDECAR_CONNECTOR_IDS.filter(id => predicate(findConnector(connectors, id)))
     // Per-connector pulse (the same withRailInflight that single-pill uses) so
     // each tile's Process pill shows progress; runs in parallel.
     await Promise.allSettled(
@@ -232,8 +240,8 @@ export function summarizeOverviewTile(
       badge: '바인딩 필요',
       badgeClass: 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]',
       detail: keeperCount > 0
-        ? '실행 중 · 아직 channel binding이 없습니다'
-        : '실행 중 · keeper 디렉토리가 비어 있습니다',
+        ? '실행 중 · 아직 channel binding 없음'
+        : '실행 중 · keeper 디렉토리가 비어 있음',
     }
   }
 
@@ -262,6 +270,7 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
   const pills = deriveRail(
     {
       sidecarUp,
+      hasSidecarProcess: !isInProcessConnector(id),
       gateHealthy: connector?.gate_healthy ?? null,
       bindingCount: connector?.configured_bindings?.length ?? 0,
       keeperCount,
@@ -388,7 +397,12 @@ interface TilePrimaryActionView {
 export function tilePrimaryActionView(
   sidecarUp: boolean,
   inflight: boolean,
-): TilePrimaryActionView {
+  hasSidecarProcess: boolean,
+): TilePrimaryActionView | null {
+  // No process to start or stop, so no button: the tile's primary action for
+  // an in-process connector is opening its card, which the tile body already
+  // does.
+  if (!hasSidecarProcess) return null
   if (sidecarUp) {
     return {
       label: inflight ? '정지 중...' : '■ Stop',
@@ -421,7 +435,8 @@ const TILE_ACTION_TONE_CLASS: Record<'start' | 'stop', string> = {
     reads "Start" as the obvious next step. */
 function TilePrimaryAction({ id, sidecarUp }: { id: KnownConnectorId; sidecarUp: boolean }) {
   const inflight = getRailInflight(id).process === true
-  const view = tilePrimaryActionView(sidecarUp, inflight)
+  const view = tilePrimaryActionView(sidecarUp, inflight, !isInProcessConnector(id))
+  if (view === null) return null
   const tone = TILE_ACTION_TONE_CLASS[view.tone]
   return html`
     <button
@@ -579,8 +594,8 @@ export function ConnectorBulkActions({ connectors }: { connectors: GateConnector
 }
 
 function BulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
-  const downCount = KNOWN_CONNECTOR_IDS.filter(id => findConnector(connectors, id)?.available !== true).length
-  const upCount = KNOWN_CONNECTOR_IDS.length - downCount
+  const downCount = SIDECAR_CONNECTOR_IDS.filter(id => findConnector(connectors, id)?.available !== true).length
+  const upCount = SIDECAR_CONNECTOR_IDS.length - downCount
   const startBusy = bulkInflight.value.start
   const stopBusy = bulkInflight.value.stop
   return html`

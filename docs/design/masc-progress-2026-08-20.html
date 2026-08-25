@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MASC 진행률</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --panel: #ffffff; --ink: #1b1b19; --muted: #6b6b66;
+    --line: #e3e3df; --green: #2f7a4f; --partial: #b7791f; --notrun: #a33a3a;
+    --chip: #eeeeea; --accent: #2c5f8a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16161a; --panel: #1e1e23; --ink: #e8e8e4; --muted: #9a9a94;
+      --line: #32323a; --green: #63b98a; --partial: #d9a441; --notrun: #d97070;
+      --chip: #2a2a31; --accent: #7fb0d8;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16161a; --panel: #1e1e23; --ink: #e8e8e4; --muted: #9a9a94;
+    --line: #32323a; --green: #63b98a; --partial: #d9a441; --notrun: #d97070;
+    --chip: #2a2a31; --accent: #7fb0d8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.62 -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo", sans-serif;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 40px 24px 80px; }
+  header { border-bottom: 1px solid var(--line); padding-bottom: 20px; margin-bottom: 28px; }
+  h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  h2 { font-size: 18px; margin: 40px 0 12px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0; }
+  .metrics { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .metric { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+  .metric-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .metric-label { font-weight: 600; font-size: 14px; }
+  .metric-count { font-variant-numeric: tabular-nums; font-size: 15px; color: var(--muted); }
+  .track { height: 7px; background: var(--chip); border-radius: 4px; margin: 10px 0 8px; overflow: hidden; }
+  .fill { height: 100%; border-radius: 4px; }
+  .fill.green { background: var(--green); }
+  .fill.partial { background: var(--partial); }
+  .fill.notrun { background: var(--notrun); }
+  .metric-detail { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  .row-name { font-weight: 600; white-space: nowrap; }
+  .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12.5px; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px;
+           font-weight: 600; white-space: nowrap; }
+  .badge.green { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
+  .badge.partial { background: color-mix(in srgb, var(--partial) 20%, transparent); color: var(--partial); }
+  .badge.notrun { background: color-mix(in srgb, var(--notrun) 16%, transparent); color: var(--notrun); }
+  .chips { white-space: nowrap; }
+  .chip { display: inline-block; padding: 2px 8px; margin: 1px 3px 1px 0; border-radius: 5px;
+           background: var(--chip); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .chip.planned { border: 1px dashed var(--notrun); color: var(--notrun); background: transparent; }
+  .axis { display: inline-block; padding: 1px 7px; margin: 1px 3px 1px 0; border-radius: 5px;
+           background: color-mix(in srgb, var(--notrun) 14%, transparent); color: var(--notrun); font-size: 12px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .note { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+           border-radius: 0 8px 8px 0; padding: 12px 16px; font-size: 13px; margin: 14px 0; }
+  footer { margin-top: 48px; padding-top: 18px; border-top: 1px solid var(--line);
+            color: var(--muted); font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>MASC 진행률</h1>
+    <p class="sub">생성 2026-08-20 14:50 KST · 최근 라운드 <strong>e0-campaign-20260818-r7</strong> — assertion 30/37 · 미션 11/19 · 라이브 0.23.0 1f56232835d72f3b15caac421a2b06ce09fddf98 <code></code></p>
+  </header>
+
+  <section class="metrics">
+      <div class="metric">
+        <div class="metric-head"><span class="metric-label">제품 시나리오</span><span class="metric-count">0 / 12</span></div>
+        <div class="track"><div class="fill notrun" style="width:0.0%"></div></div>
+        <p class="metric-detail">헌법 target_scenarios 와 1:1 대응하는 행. GREEN 만 센다.</p>
+      </div>
+      <div class="metric">
+        <div class="metric-head"><span class="metric-label">RW 미션 카탈로그</span><span class="metric-count">22 / 30</span></div>
+        <div class="track"><div class="fill partial" style="width:73.3%"></div></div>
+        <p class="metric-detail">카탈로그에 실재하는 미션 22개, 이 계획에서 신설할 미션 8개.</p>
+      </div>
+      <div class="metric">
+        <div class="metric-head"><span class="metric-label">기능 매트릭스 축</span><span class="metric-count">39 / 47</span></div>
+        <div class="track"><div class="fill partial" style="width:83.0%"></div></div>
+        <p class="metric-detail">required 축이 evidence 로 전부 채워진 행.</p>
+      </div>
+      <div class="metric">
+        <div class="metric-head"><span class="metric-label">헌법↔코드 격차</span><span class="metric-count">0 / 23</span></div>
+        <div class="track"><div class="fill notrun" style="width:0.0%"></div></div>
+        <p class="metric-detail">constitution-code parity matrix 의 완료 건수.</p>
+      </div>
+      <div class="metric">
+        <div class="metric-head"><span class="metric-label">keeper 위생</span><span class="metric-count">15 / 17</span></div>
+        <div class="track"><div class="fill partial" style="width:88.2%"></div></div>
+        <p class="metric-detail">활동 15 · 정지 2. 이름이 아니라 마지막 턴으로 가른다.</p>
+      </div>
+  </section>
+
+  <h2>제품 시나리오 12행</h2>
+  <p class="sub">헌법 <code>target_scenarios</code> 와 1:1 대응한다. 점선 칩은 아직 카탈로그에 없는 미션이다.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>시나리오</th><th>상태</th><th>미션</th><th>필수 조합</th><th>빠진 실행</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="row-name">협업</td>
+          <td><span class="badge partial">PARTIAL</span></td>
+          <td class="chips"><span class="chip" title="카탈로그에 있음">RW01</span><span class="chip" title="카탈로그에 있음">RW02</span><span class="chip" title="카탈로그에 있음">RW03</span><span class="chip" title="카탈로그에 있음">RW04</span><span class="chip" title="카탈로그에 있음">RW16</span></td>
+          <td class="muted">Goal · Task · Board · Comment · Memory · Multi Lane</td>
+          <td class="muted small">RW01/03 재판정은 r7에서 통과(#28990 확증). 남은 것: 동일 artifact causal ID 전 구간 chain은 RW16 계열로 확장.</td>
+        </tr>
+        <tr>
+          <td class="row-name">PoC</td>
+          <td><span class="badge notrun">NOT RUN</span></td>
+          <td class="chips"><span class="chip" title="카탈로그에 있음">RW20</span></td>
+          <td class="muted">Goal · Task · Tool · File System · Verification</td>
+          <td class="muted small">PoC 전용 미션을 카탈로그에 추가(요구→구현→실행 proof→review→terminal artifact).</td>
+        </tr>
+        <tr>
+          <td class="row-name">QA 100% coverage</td>
+          <td><span class="badge notrun">NOT RUN</span></td>
+          <td class="chips"><span class="chip" title="카탈로그에 있음">RW22</span></td>
+          <td class="muted">Task · Parallel/Batch Tool · Log · Cross-Verification</td>
+          <td class="muted small">대상 패키지와 측정 명령을 manifest에 고정하고 기능 E2E와 coverage artifact 대조.</td>
+        </tr>
+        <tr>
+          <td class="row-name">동작 증명 팀</td>
+          <td><span class="badge notrun">NOT RUN</span></td>
+          <td class="chips"><span class="chip planned" title="미정의 — 이 계획에서 신설">RW23</span></td>
+          <td class="muted">Task · Judge · Cross-Verification · Dashboard</td>
+          <td class="muted small">producer와 verifier를 다른 lane/runtime에 배치하고 상충 결과도 보존.</td>
+        </tr>
+        <tr>
+          <td class="row-name">연작 소설</td>
+          <td><span class="badge notrun">NOT RUN</span></td>
+          <td class="chips"><span class="chip planned" title="미정의 — 이 계획에서 신설">RW24</span></td>
+          <td class="muted">MultiTurn · Memory · Librarian · Comment</td>
+          <td class="muted small">다중 Keeper 작가/편집자, session restart, 설정·인물 관계·반복 검출.</td>
+        </tr>
+        <tr>
+          <td class="row-name">정부 지침 반론</td>
+          <td><span class="badge notrun">NOT RUN</span></td>
+          <td class="chips"><span class="chip planned" title="미정의 — 이 계획에서 신설">RW25</span></td>
+          <td class="muted">Web · Librarian · Fusion · Judge of Judge</td>
+          <td class="muted small">출처 snapshot, 입장별 Keeper, 반박 chain, 최종 synthesis provenance.</td>
+        </tr>
+        <tr>
+          <td class="row-name">논문·개념 실측</td>
+          <td><span class="badge notrun">NOT RUN</span></td>
+          <td class="chips"><span class="chip planned" title="미정의 — 이 계획에서 신설">RW26</span></td>
+          <td class="muted">Goal · Tool · Log · Fusion · Verification</td>
+          <td class="muted small">측정 데이터와 분석 code/artifact, 독립 재현, judge verdict.</td>
+        </tr>
+        <tr>
+          <td class="row-name">새 연구주제 발견</td>
+          <td><span class="badge notrun">NOT RUN</span></td>
+          <td class="chips"><span class="chip planned" title="미정의 — 이 계획에서 신설">RW27</span></td>
+          <td class="muted">Web · Memory · Fusion · Judge</td>
+          <td class="muted small">검색 corpus, novelty 반론, 선행연구 충돌, 후속 experiment plan.</td>
+        </tr>
+        <tr>
+          <td class="row-name">과학·수학·CS 난제</td>
+          <td><span class="badge notrun">NOT RUN</span></td>
+          <td class="chips"><span class="chip planned" title="미정의 — 이 계획에서 신설">RW28</span></td>
+          <td class="muted">Thinking · Tool · Fusion · Cross-Verification</td>
+          <td class="muted small">문제별 verifier와 계산 도구, 반례 lane, 최종 uncertainty.</td>
+        </tr>
+        <tr>
+          <td class="row-name">웹 연구</td>
+          <td><span class="badge notrun">NOT RUN</span></td>
+          <td class="chips"><span class="chip planned" title="미정의 — 이 계획에서 신설">RW29</span></td>
+          <td class="muted">Connector · Web(citation artifact) · Librarian · Browser</td>
+          <td class="muted small">Keeper가 직접 검색하고 source URL/artifact와 결과를 UI에서 대조.</td>
+        </tr>
+        <tr>
+          <td class="row-name">기고문 작성</td>
+          <td><span class="badge notrun">NOT RUN</span></td>
+          <td class="chips"><span class="chip planned" title="미정의 — 이 계획에서 신설">RW30</span></td>
+          <td class="muted">Memory · Comment · Connector · Slack/Discord/Dashboard</td>
+          <td class="muted small">작성/편집/검증 역할과 승인된 surface 한 곳의 exact delivery.</td>
+        </tr>
+        <tr>
+          <td class="row-name">상호 반론·이해·피드백·도구 사용</td>
+          <td><span class="badge notrun">NOT RUN</span></td>
+          <td class="chips"><span class="chip" title="카탈로그에 있음">RW21</span></td>
+          <td class="muted">Board · Comment · Fusion · MultiTurn · Tool · Memory</td>
+          <td class="muted small">주장 identity, steelman, 반론, 수정 이력, tool receipt, 합의/비합의 terminal.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>E0 라운드 이력</h2>
+  <div class="note">
+    두 축을 함께 본다. 미션 단위는 assertion 하나만 떨어져도 전체가 fail 이라 크게 흔들리고,
+    assertion 단위가 실제 전진을 더 잘 나타낸다. 미션 수만 보면 표본 분산을 회귀로 오독한다.
+  </div>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>라운드</th><th>assertion</th><th>미션</th><th>실패 미션</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="row-name">e0-campaign-20260818-r4</td>
+          <td class="num">22 / 37</td>
+          <td class="num">6 / 19</td>
+          <td class="muted small">RW02, RW03, RW05, RW06, RW08, RW09, RW11, RW13, RW14, RW15, RW16, RW17, RW19</td>
+        </tr>
+        <tr>
+          <td class="row-name">e0-campaign-20260818-r5</td>
+          <td class="num">30 / 37</td>
+          <td class="num">11 / 19</td>
+          <td class="muted small">RW03, RW05, RW08, RW09, RW15, RW17, RW18, RW19</td>
+        </tr>
+        <tr>
+          <td class="row-name">e0-campaign-20260818-r6</td>
+          <td class="num">33 / 37</td>
+          <td class="num">15 / 19</td>
+          <td class="muted small">RW01, RW03, RW17, RW19</td>
+        </tr>
+        <tr>
+          <td class="row-name">e0-campaign-20260818-r7</td>
+          <td class="num">30 / 37</td>
+          <td class="num">11 / 19</td>
+          <td class="muted small">RW05, RW07, RW08, RW09, RW13, RW15, RW17, RW19</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>기능 매트릭스 결손 축</h2>
+  <p class="sub">required 로 선언됐지만 evidence 가 없는 축이다.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>도메인</th><th>기능</th><th>비어 있는 축</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="muted">Autonomy</td>
+          <td class="row-name">Team scenarios</td>
+          <td class="chips"><span class="axis">browser</span> <span class="axis">ci</span> <span class="axis">duration</span> <span class="axis">test</span></td>
+        </tr>
+        <tr>
+          <td class="muted">Memory</td>
+          <td class="row-name">Compaction</td>
+          <td class="chips"><span class="axis">duration</span> <span class="axis">live</span></td>
+        </tr>
+        <tr>
+          <td class="muted">Execution</td>
+          <td class="row-name">Multi Lane</td>
+          <td class="chips"><span class="axis">duration</span></td>
+        </tr>
+        <tr>
+          <td class="muted">Execution</td>
+          <td class="row-name">Parallel Tool</td>
+          <td class="chips"><span class="axis">scenario</span></td>
+        </tr>
+        <tr>
+          <td class="muted">Execution</td>
+          <td class="row-name">Async Tool / Job</td>
+          <td class="chips"><span class="axis">duration</span> <span class="axis">live</span></td>
+        </tr>
+        <tr>
+          <td class="muted">Execution</td>
+          <td class="row-name">MultiModal</td>
+          <td class="chips"><span class="axis">browser</span> <span class="axis">live</span></td>
+        </tr>
+        <tr>
+          <td class="muted">Surface</td>
+          <td class="row-name">Browser automation</td>
+          <td class="chips"><span class="axis">browser</span> <span class="axis">live</span> <span class="axis">scenario</span> <span class="axis">source</span> <span class="axis">test</span></td>
+        </tr>
+        <tr>
+          <td class="muted">Operations</td>
+          <td class="row-name">Long-run performance</td>
+          <td class="chips"><span class="axis">duration</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>헌법 ↔ 코드 격차</h2>
+  <div class="scroll">
+      <table>
+        <thead><tr><th>ID</th><th>항목</th><th>근거</th><th>상태</th></tr></thead>
+        <tbody>
+        <tr>
+          <td class="row-name">A1</td>
+          <td>reclaim claim gate 폐지 (RFC-0323). reclaim_policy는 claim을 막지 않고 release/cancel 데이터 파이프라이닝 용도</td>
+          <td class="muted small"><code>`workspace_task_claim.ml:103-104`, `types_core.ml:654-659`</code></td>
+          <td><span class="badge notrun">PR #29140</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">A2</td>
+          <td>karma 예외: 자기투표·삭제 콘텐츠는 이벤트 미생성. &quot;upvote 1건당 1건&quot; → &quot;타인 콘텐츠 upvote당 1건&quot;으로 정정</td>
+          <td class="muted small"><code>`board_votes.ml:904-907,921`</code></td>
+          <td><span class="badge notrun">PR #29140</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">A3</td>
+          <td>karma ledger는 비영속, vote_log에서 재구축. delta 보존은 wire 계약 수준</td>
+          <td class="muted small"><code>`board_votes.ml:924-932`</code></td>
+          <td><span class="badge notrun">PR #29140</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">A4</td>
+          <td>AwaitingVerification 재시도: 지수 backoff가 아니라 고정 간격 + `retryable` boolean + 전역 동시성 세마포어</td>
+          <td class="muted small"><code>`completion_authority_agent.ml:296-319,619-626,658`</code></td>
+          <td><span class="badge notrun">PR #29140</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">A5</td>
+          <td>Fusion 구현 확장: `Bridge_error`/`Invalid_max_output_tokens`/`Invalid_timeout_s` variant, `web_tools` 필드, topology 확장(RFC-0283/0284)</td>
+          <td class="muted small"><code>`fusion_types.ml:64-71,329-338`</code></td>
+          <td><span class="badge notrun">PR #29140</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">A6</td>
+          <td>RFC 경로 표기: `docs/rfc/` (설계서의 `docs/rfcs`는 오기)</td>
+          <td class="muted small"><code>—</code></td>
+          <td><span class="badge notrun">PR #29140</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">A7</td>
+          <td>keeper.env는 OCaml 런타임이 읽지 않음. `scripts/deploy.sh` 전용 API 키 env 파일</td>
+          <td class="muted small"><code>`deploy.sh:125`, lib/ 참조 0건</code></td>
+          <td><span class="badge notrun">PR #29140</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">A8</td>
+          <td>명칭 매핑 정리: Cross-Verification→`cross_verifier` lane, GithubCredential→`keeper_github_identity`, CoT→thinking trajectory, MultiTurn→stream bridge</td>
+          <td class="muted small"><code>`runtime_toml.ml:1314`, `keeper_github_identity.ml`</code></td>
+          <td><span class="badge notrun">PR #29140</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">A9</td>
+          <td>Goal drop 사유는 전용 필드 없이 공용 `note`</td>
+          <td class="muted small"><code>`workspace_goals.ml:399`</code></td>
+          <td><span class="badge notrun">PR #29140</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">A10</td>
+          <td>visibility 시맨틱은 타입 강제가 아니라 docstring 선언 (&quot;enforced by callers&quot;)</td>
+          <td class="muted small"><code>`board_types.mli:7,72-76`</code></td>
+          <td><span class="badge notrun">PR #29140</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">B1</td>
+          <td>Goal 생성 시 정량 성공조건 필수화 — 생성 경로가 non-blank `metric`+`target_value` 요구</td>
+          <td class="muted small"><code>`goal_store.mli`, `workspace_goals.ml`</code></td>
+          <td><span class="badge notrun">PR #29152</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">B2</td>
+          <td>Goal Verifier 검증 게이트 — 생성 시 `Criterion_pending` durable 기록(`.masc/goal_verifications.json`), `record_criterion_*` verdict</td>
+          <td class="muted small"><code>`lib/goal/goal_verification.ml`</code></td>
+          <td><span class="badge notrun">PR #29152</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">B3</td>
+          <td>Goal 완료 = Verifier 증명 + 인간 최종 확인 — `Verifying`/`Awaiting_confirmation` gate phase, `Request_complete → Completed` 직행 폐기</td>
+          <td class="muted small"><code>`goal_phase.ml`, RFC-0387</code></td>
+          <td><span class="badge notrun">PR #29152</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">B4</td>
+          <td>ParallelTool — read 툴 4종 Concurrent 승격 + fail-closed admission (fan-out 엔진은 기존 `Agent_tool_batch_plan`이 커버)</td>
+          <td class="muted small"><code>`keeper_tool_descriptor.ml`</code></td>
+          <td><span class="badge notrun">PR #29146</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">B5</td>
+          <td>스트리밍 문자열 dedup — exact-prefix retransmission drop / 누적 스냅샷 suffix reconcile, `masc_keeper_stream_text_delta_dedup_total{action=drop\|reconcile}`</td>
+          <td class="muted small"><code>`keeper_chat_agent_core_stream_bridge.ml`</code></td>
+          <td><span class="badge notrun">PR #29149</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">B6</td>
+          <td>tool_kind 닫힌 합타입 선언 (실행 기계는 기존 plan IR/executor가 커버)</td>
+          <td class="muted small"><code>RFC-0386, `keeper_tool_descriptor.mli:69-82`</code></td>
+          <td><span class="badge notrun">PR #29148</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">B7</td>
+          <td>Verifier keeper급 standalone 격상 — RFC-0361 D7 개정 + 코드 1단계 `verifier_exact` lane(cross_verifier 흡수, frozen-order failover). 2단계(identity+lifecycle)는 RFC 후속</td>
+          <td class="muted small"><code>RFC-0361 D7</code></td>
+          <td><span class="badge notrun">RFC PR #29147, 코드 PR #29155</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">C1</td>
+          <td>연속 실패 예산 숫자 게이트 (3, 5) — crash accounting 전환</td>
+          <td class="muted small"><code>`keeper_unified_turn_failure.ml:14,26,43,62`</code></td>
+          <td><span class="badge notrun">PR #29141</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">C2</td>
+          <td>반복 툴 호출 threshold=3 → 턴 yield 직접 결정</td>
+          <td class="muted small"><code>`keeper_agent_run.ml:135,165,776`</code></td>
+          <td><span class="badge notrun">PR #29141</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">C3</td>
+          <td>`&quot;SKIP:&quot;` 접두사 문자열 매칭으로 turn_mode 분류 (dead branch 추정)</td>
+          <td class="muted small"><code>`keeper_unified_metrics_support.ml:347`</code></td>
+          <td><span class="badge notrun">PR #29141</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">C4</td>
+          <td>provider 에러 detail 자유 텍스트 접두사 검사 잔여 (RFC-0371 §3.7 인정됨)</td>
+          <td class="muted small"><code>`keeper_error_classify.ml:172`</code></td>
+          <td><span class="badge notrun">PR #29141</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">D1</td>
+          <td>`per_hour_budget`/`Over_hourly_budget` 제거 미반영 (PR #22051)</td>
+          <td class="muted small"><code>`fusion_types.ml:340-344`</code></td>
+          <td><span class="badge notrun">PR #29142</span></td>
+        </tr>
+        <tr>
+          <td class="row-name">D2</td>
+          <td>`Budget_exhausted` variant, `confidence` 필드, `max_fibers` 다이어그램 잔재</td>
+          <td class="muted small"><code>`docs/rfc/RFC-0252` §4-5</code></td>
+          <td><span class="badge notrun">PR #29142</span></td>
+        </tr>
+        </tbody>
+      </table>
+  </div>
+
+  <h2>keeper 위생</h2>
+  <p class="sub">이름이 아니라 마지막 턴으로 가른다 — adm-race 는 테스트 잔재처럼 읽히지만 실제로 계속 돌고 있었다.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>keeper</th><th>상태</th><th>역할</th><th>마지막 턴</th><th>비고</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="row-name">adm-race-cf-001</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">admission 프로브</td>
+          <td class="num muted">0.0h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">adm-race-cf-002</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">admission 프로브</td>
+          <td class="num muted">0.1h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">adm-race-sf-000</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">admission 프로브</td>
+          <td class="num muted">0.0h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">adm-race-sf-001</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">admission 프로브</td>
+          <td class="num muted">0.0h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">adm-race-sf-002</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">admission 프로브</td>
+          <td class="num muted">0.0h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">rw-e0-r6-20260818-coord</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">캠페인 라운드</td>
+          <td class="num muted">4.6h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">rw-e0-r9-20260820-build-a</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">캠페인 라운드</td>
+          <td class="num muted">4.5h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">rw-e0-r9-20260820-review</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">캠페인 라운드</td>
+          <td class="num muted">0.4h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">analyst</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">0.1h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">code-reviewer</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">0.0h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">kidsnote</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">0.1h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">lane-smith</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">0.0h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">polisher</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">0.0h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">rondo</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">0.4h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">sangsu</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">0.0h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">claude-probe</td>
+          <td><span class="badge notrun">정지</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">156.7h 전</td>
+          <td class="muted small">paused</td>
+        </tr>
+        <tr>
+          <td class="row-name">taskmaster</td>
+          <td><span class="badge notrun">정지</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">75.6h 전</td>
+          <td class="muted small"></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <footer>
+    이 페이지의 모든 수치는 <code>scripts/progress/extract_progress.py</code> 가 측정 산출물에서 뽑는다.
+    갱신은 추출기를 다시 돌려서 한다 — 문장을 고쳐서 하지 않는다.<br>
+    소스: <code>./docs/design/keeper-feature-state-matrix-2026-08-13.html</code> · <code>/Users/dancer/me/workspace/yousleepwhen/masc/reports</code> · <code>/Users/dancer/me/.masc</code>
+  </footer>
+</div>
+</body>
+</html>

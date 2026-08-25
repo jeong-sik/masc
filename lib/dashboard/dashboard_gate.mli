@@ -15,4 +15,4 @@ val dashboard_json :
     [window_minutes], [truncated], [scan_exhausted]). A client that renders the
     rows alone cannot distinguish a complete history from the newest slice of a
     larger one. Both bounds are enforced by
-    {!Keeper_approval_queue.list_recent_resolved}. *)
+    {!Keeper_approval.Audit.list_recent_resolved}. *)

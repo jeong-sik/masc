@@ -7,9 +7,9 @@
     ({!Keeper_meta_json}) and store I/O.
 
     Internal: ~3 helpers stay private —
-    \[blocker_class_of_serialized_string] (deserializer used
-    only by JSON parsing), \[map_compaction_rt] /
-    \[map_proactive_rt]
+    [blocker_class_of_serialized_string] (deserializer used
+    only by JSON parsing), [map_compaction_rt] /
+    [map_proactive_rt]
     (nested-record updaters that callers reach via the higher-level
     {!map_runtime} / {!map_usage}).  All consumed only via the runtime
     contract or the JSON pipeline. *)
@@ -37,32 +37,12 @@ type proactive_cycle_outcome =
 
 (** {1 Runtime state types} *)
 
-type compaction_runtime_decision = Compaction_runtime_decision of string
-(** Last compaction gate result as persisted in keeper meta.  JSON and
-    dashboard boundaries still use the historical string value via
-    {!compaction_runtime_decision_to_string}. *)
-
-val compaction_runtime_decision_to_string :
-  compaction_runtime_decision -> string
-
-val compaction_runtime_decision_of_string :
-  string -> compaction_runtime_decision
-
-val compaction_decision_json_or_null :
-  compaction_runtime_decision -> Yojson.Safe.t
-(** API/dashboard projection of [last_compaction_decision]: the decision
-    string, or [`Null] when empty. Shared by keeper_status.ml and
-    dashboard_http_keeper.ml so the null-guard policy has one definition
-    (issue #25323). Not used by keeper_meta_json.ml, whose on-disk
-    representation serializes the raw string. *)
 
 type compaction_runtime = {
   count : int;
   last_ts : float;
   last_before_tokens : int;
   last_after_tokens : int;
-  last_check_ts : float;
-  last_decision : compaction_runtime_decision;
 }
 
 type proactive_runtime = {
@@ -138,11 +118,20 @@ type blocker_class =
   | Capacity_backpressure
   | Fiber_unresolved
   | Stale_turn_timeout
-  | Sdk_context_window_exceeded
-  | Sdk_unrecognized_stop_reason
-  | Sdk_guardrail_violation
-  | Sdk_tripwire_violation
-  | Sdk_input_required
+  | Agent_core_context_window_exceeded
+  | Agent_core_unrecognized_stop_reason
+  | Agent_core_guardrail_violation
+  | Agent_core_tripwire_violation
+  | Agent_core_input_required
+  | Internal_unhandled_exception
+  | Internal_bridge_exception
+  | Internal_contract_rejected
+  | Incomplete_tool_transcript
+  | Terminal_effect_failed
+  | Provider_attempt_effect_fenced
+  | Tool_correction_lost
+  | Receipt_persistence_failed
+  | Gate_replay_repair_required
 
 val blocker_class_to_string : blocker_class -> string
 (** Canonical lowercase labels.  Pinned literals — operator
@@ -197,15 +186,6 @@ val blocker_info_of_class :
 (** [blocker_info_of_class ?detail klass] constructs a [blocker_info]
     for [klass].  [detail] defaults to [""]. *)
 
-val blocker_info_to_json : blocker_info -> Yojson.Safe.t
-(** Round-trippable JSON encoding.  [Runtime_exhausted reason] uses
-    a structured object so the inner [runtime_exhaustion_reason] is
-    preserved across read/write cycles. *)
-
-val blocker_info_of_json : Yojson.Safe.t -> blocker_info option
-(** Parses the JSON shape emitted by {!blocker_info_to_json}.
-    Returns [None] for [`Null] or any value whose [klass] field is
-    absent / not recognisable. *)
 
 (** {1 Runtime attempt provenance} *)
 
@@ -222,28 +202,15 @@ type runtime_attempt_record = {
 val runtime_attempt_record_to_json :
   runtime_attempt_record -> Yojson.Safe.t
 
-val runtime_attempt_record_of_json :
-  Yojson.Safe.t -> runtime_attempt_record option
-
 (** {1 Agent runtime state record} *)
 
 type agent_runtime_state = {
   usage : usage_metrics;
   compaction_rt : compaction_runtime;
   proactive_rt : proactive_runtime;
-  nonce : int;
   trace_id : Keeper_id.Trace_id.t;
   trace_history : string list;
   last_handoff_ts : float;
-  last_autonomous_action_at : string;
-  autonomous_action_count : int;
-  autonomous_turn_count : int;
-  autonomous_text_turn_count : int;
-  autonomous_tool_turn_count : int;
-  board_reactive_turn_count : int;
-  mention_reactive_turn_count : int;
-  noop_turn_count : int;
-  last_blocker : blocker_info option;
   last_runtime_attempt : runtime_attempt_record option;
   message_scope_ack_id : string option;
   (** Stable chat-row id of the newest message-scope row injected into a
@@ -257,8 +224,12 @@ type keeper_meta = {
   id : Ids.Keeper_id.t option;
   name : string;
   agent_name : string;
-  persona : string option;
   instructions : string;
+  autonomous_instructions : string option;
+      (** Per-keeper autonomous-turn instructions. When non-empty and the turn
+          channel is Scheduled_autonomous, this replaces [instructions] in the
+          system prompt. When absent, autonomous turns fall back to
+          [instructions] — zero behavioral change for keepers that don't set it. *)
   (* Policy *)
   sandbox_profile : Keeper_types_profile.sandbox_profile;
   sandbox_image : string option;
@@ -273,12 +244,10 @@ type keeper_meta = {
   (* Performance & limits *)
   max_context_override : int option;
   (* Operational control *)
-  active_goal_ids : string list;
   paused : bool;
   latched_reason : Keeper_latched_reason.t option;
-      (** Typed companion to [paused]. Explicit operator pause, terminal
-          dead-tombstone, and transcript-corruption reset-required paths may
-          write it. [None] while paused is a fail-closed unclassified state
+      (** Typed companion to [paused]. Explicit operator pause and
+          transcript-corruption reset-required paths may write it. [None] while paused is a fail-closed unclassified state
           requiring operator action. *)
   autoboot_enabled : bool;
   current_task_id : Keeper_id.Task_id.t option;
@@ -293,34 +262,36 @@ type keeper_meta = {
   runtime : agent_runtime_state;
   (* Identity & concurrency *)
   keeper_id : Keeper_id.Uid.t option;
-  oas_env : (string * string) list;
-  meta_version : int;
+  agent_core_env : (string * string) list;
+  tool_groups : string list option;
+      (** RFC-0389: declared [keeper.tools.groups] from the keeper TOML
+          profile. [None] means no declaration → the full model surface
+          ([All]). When set, the per-turn tool bundle is narrowed to the
+          declared groups (plus always-retained Core/Meta groups). *)
 }
 
-(** Stamp the current Keeper state as structurally corrupted and requiring
-    checkpoint reset. This is current-state persistence, not a migration. *)
-val mark_transcript_corruption_reset_required : keeper_meta -> keeper_meta
-
 (** Sanctioned generic unpause transform. Clears ordinary/operator/dead
-    latches with the pause bit and [runtime.last_blocker]. A
+    latches with the pause bit. A
     [Transcript_corruption_reset_required] latch is returned unchanged, so
     generic resume cannot replay a poisoned checkpoint. *)
 val mark_resumed : keeper_meta -> keeper_meta
 
-(** Reject [paused = false] paired with a terminal or reset-required latch. *)
-val terminal_latch_pause_violation : keeper_meta -> string option
-
-(** Overlay TOML/persona defaults onto persisted runtime meta for
+(** Overlay Keeper configuration defaults onto persisted runtime meta for
     status-facing reads. Persisted runtime JSON intentionally omits
     TOML-owned fields such as [sandbox_profile] and [network_mode]. *)
 val effective_meta_result :
   base_path:string -> keeper_meta -> (keeper_meta, string) result
 
-(** Pure variant for callers that already loaded profile defaults. *)
+(** The overlay alone, over defaults the caller already holds.
+
+    {!effective_meta_result} loads the profile and applies it in one step,
+    which is right for a one-shot status read. A turn that overlays more than
+    once must not re-read the profile between them, or two reads of the same
+    turn can disagree; it loads once and applies with this. *)
 val effective_meta_of_profile_defaults :
-  Keeper_types_profile.keeper_profile_defaults ->
-  keeper_meta ->
-  (keeper_meta, string) result
+     Keeper_types_profile.keeper_profile_defaults
+  -> keeper_meta
+  -> (keeper_meta, string) result
 
 val missing_required_sandbox_profile_error :
   keeper_name:string ->
@@ -385,27 +356,3 @@ val map_compaction_rt :
   keeper_meta
 (** Nested update of [m.runtime.compaction_rt]. *)
 
-val map_proactive_rt :
-  (proactive_runtime -> proactive_runtime) ->
-  keeper_meta ->
-  keeper_meta
-(** Nested update of [m.runtime.proactive_rt]. *)
-
-(** {1 Removed model-arg marker list} *)
-
-val removed_keeper_model_arg_names : string list
-(** Names of removed keeper-creation tool arguments that have
-    been retired because runtime/provider/model selection is not part
-    of the keeper contract
-    (["models"], ["allowed_models"], ["active_model"]).
-    Consumed by {!reject_removed_model_args} which
-    surfaces operator-readable rejection messages instead of
-    silently ignoring removed args.  Pinned data table —
-    drift would either re-accept removed args silently or
-    reject newly added args by mistake. *)
-
-val reject_removed_model_args :
-  tool_name:string -> Yojson.Safe.t -> (unit, string) result
-(** Reject retired keeper model-selection input fields at tool/API boundaries.
-    Model and provider identity is resolved from the default Runtime binding,
-    not per-call keeper arguments. *)

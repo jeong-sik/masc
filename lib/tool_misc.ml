@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Tool_misc — Miscellaneous operations (facade).
 
     Dispatches config introspection and tool inventory helpers to
@@ -43,7 +26,7 @@ type context = {
    Failure-class mapping (caller-input violations only in this cluster):
    - [Workflow_rejection] : invalid dashboard scope; missing
                             tool_name; unknown tool.
-   - No [Runtime_failure] / [Transient_error] sites here — the
+   - No [Runtime_failure] / [Dependency_unavailable] sites here — the
      [Workspace.gc] / [Dashboard.generate]
      backends assume-success or raise. When a backend later returns
      a typed Error variant, the construction site here gets the
@@ -105,12 +88,7 @@ let handle_keeper_waiting_inventory ~tool_name ~start_time ctx args : Tool_resul
         ~data:(Server_keeper_waiting_inventory.dashboard_json ctx.config)
         ()
 
-let strip_mcp_prefix name =
-  let prefix = "mcp__masc__" in
-  let plen = String.length prefix in
-  if String.length name > plen && String.equal (Stdlib.String.sub name 0 plen) prefix
-  then String.sub name plen (String.length name - plen)
-  else name
+let strip_mcp_prefix = Tool_transport_prefix.strip
 
 (* TEL-OK: help schema selection and formatting are read-only; the outer tool
    execution boundary owns invocation telemetry for every caller projection. *)
@@ -200,14 +178,15 @@ let () =
            ~is_read_only:(List.mem s.name tool_spec_read_only)
            ()))
     schemas
-let parse_bing_rss_items = Tool_misc_web_search.parse_bing_rss_items
 let parse_searxng_json = Tool_misc_web_search.parse_searxng_json
-let parse_ddg_html = Tool_misc_web_search.parse_ddg_html
 let parse_brave_json = Tool_misc_web_search.parse_brave_json
+let parse_brave_llm_context_json = Tool_misc_web_search.parse_brave_llm_context_json
+let parse_ollama_search_json = Tool_misc_web_search.parse_ollama_search_json
 let parse_tavily_json = Tool_misc_web_search.parse_tavily_json
 let parse_exa_json = Tool_misc_web_search.parse_exa_json
 let parse_bing_search_json = Tool_misc_web_search.parse_bing_search_json
 let redact_transport_error_detail = Tool_misc_web_search.redact_transport_error_detail
+let web_search_provider_error_to_string = Tool_misc_web_search.provider_error_to_string
 let web_search_provider_plan = Tool_misc_web_search.provider_plan
 let web_search_simulate_for_test ~query ~limit outcomes =
   Tool_misc_web_search.simulate_for_test ~query ~limit outcomes

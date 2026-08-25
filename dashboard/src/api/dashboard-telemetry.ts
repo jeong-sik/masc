@@ -12,7 +12,7 @@ export type TelemetrySource =
   | 'tool_call_io'
   | 'trajectory_tool_call'
   | 'tool_usage'
-  | 'oas_event'
+  | 'agent_core_event'
   | 'execution_receipt'
   | 'goal_event'
   | 'tool_metric'
@@ -34,7 +34,7 @@ export type TelemetryResponse = {
   query?: Record<string, unknown>
   count: number
   total_matching_entries?: number
-  offset?: number
+  offset: number
   has_more?: boolean
   truncated?: boolean
   entries: TelemetryEntry[]
@@ -88,7 +88,7 @@ function decodeTelemetrySource(value: unknown): TelemetrySource | null {
     case 'tool_call_io':
     case 'trajectory_tool_call':
     case 'tool_usage':
-    case 'oas_event':
+    case 'agent_core_event':
     case 'execution_receipt':
     case 'goal_event':
     case 'tool_metric':
@@ -115,7 +115,8 @@ function decodeTelemetryEntry(raw: unknown): TelemetryEntry | null {
 function decodeTelemetryResponse(raw: unknown): TelemetryResponse | null {
   if (!isRecord(raw)) return null
   const generatedAt = asString(raw.generated_at)
-  if (!generatedAt) return null
+  const offset = asNumber(raw.offset)
+  if (!generatedAt || offset == null || !Number.isSafeInteger(offset) || offset < 0) return null
   return {
     generated_at: generatedAt,
     generated_at_iso: asString(raw.generated_at_iso),
@@ -125,7 +126,7 @@ function decodeTelemetryResponse(raw: unknown): TelemetryResponse | null {
     query: isRecord(raw.query) ? raw.query : undefined,
     count: asNumber(raw.count, 0),
     total_matching_entries: asNumber(raw.total_matching_entries, asNumber(raw.count, 0)),
-    offset: asNumber(raw.offset, 0),
+    offset,
     has_more: asBoolean(raw.has_more, false),
     truncated: asBoolean(raw.truncated, false),
     entries: asRecordArray(raw.entries)

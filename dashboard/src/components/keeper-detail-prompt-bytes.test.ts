@@ -29,9 +29,6 @@ function metricPoint(overrides: Partial<KeeperMetricPoint>): KeeperMetricPoint {
     total_tokens: null,
     wall_tokens_per_second: null,
     inference_telemetry: null,
-    fallback_applied: false,
-    fallback_hops: 0,
-    fallback_reason: null,
     ...overrides,
   }
 }
@@ -73,7 +70,7 @@ describe('keeper prompt byte telemetry', () => {
           actual_input_tokens: 1000,
           attributed_bytes: 1160,
           segments: {
-            'prompt.persona': { bytes: 320, fingerprint: null },
+            'prompt.keeper_instructions': { bytes: 320, fingerprint: null },
             message_tool_result: { bytes: 840, fingerprint: null },
           },
         },
@@ -86,7 +83,7 @@ describe('keeper prompt byte telemetry', () => {
     expect(container.textContent).toContain('1,160 bytes')
     expect(container.textContent).toContain('provider input')
     expect(container.textContent).toContain('reported separately; not byte-attributed')
-    expect(container.textContent).toContain('페르소나')
+    expect(container.textContent).toContain('Keeper 지침')
     expect(container.textContent).toContain('메시지 · tool result')
     expect(container.textContent).not.toContain('residual')
   })

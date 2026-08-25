@@ -1,0 +1,109 @@
+(* The two matchers behind the [:] palette and the [/] roster search.
+
+   Both are pure, and both were shipped without a test. They also share an
+   unstated contract: each lowercases the haystack itself and expects the
+   caller to have lowercased the needle. All three call sites do
+   (masc_tui_types.palette_matches, masc_tui.roster_search_jump, and the n/N
+   repeat beside it), so the contract holds today -- these cases pin it so a
+   fourth caller that forgets is a failure here rather than a search box that
+   quietly finds nothing. *)
+
+open Masc_tui_types
+
+let check_bool = Alcotest.(check bool)
+
+let test_contains_is_a_substring_over_a_lowercased_haystack () =
+  check_bool "plain substring" true (palette_contains ~needle:"adm" "keeper adm-race");
+  check_bool "haystack case is ignored" true
+    (palette_contains ~needle:"adm" "Keeper ADM-race");
+  check_bool "absent substring" false (palette_contains ~needle:"zzz" "keeper adm-race");
+  check_bool "empty needle matches anything" true (palette_contains ~needle:"" "anything");
+  check_bool "needle longer than haystack" false (palette_contains ~needle:"keeper" "kee")
+;;
+
+let test_subsequence_takes_the_characters_in_order () =
+  (* The comment on the function names this exact case. *)
+  check_bool "kadm finds keeper adm-race" true
+    (palette_subsequence ~needle:"kadm" "keeper adm-race");
+  check_bool "order matters" false
+    (palette_subsequence ~needle:"mdak" "keeper adm-race");
+  check_bool "a substring is also a subsequence" true
+    (palette_subsequence ~needle:"adm" "keeper adm-race");
+  check_bool "empty needle matches anything" true
+    (palette_subsequence ~needle:"" "anything");
+  check_bool "a character the haystack lacks" false
+    (palette_subsequence ~needle:"kz" "keeper adm-race")
+;;
+
+let test_the_caller_owns_the_needle_case () =
+  (* Not a nicety: an uppercase needle reaches the comparison unchanged and
+     matches nothing, because the haystack is already lowercase by then. The
+     three call sites lowercase before calling. *)
+  check_bool "uppercase needle finds nothing in contains" false
+    (palette_contains ~needle:"ADM" "keeper adm-race");
+  check_bool "uppercase needle finds nothing in subsequence" false
+    (palette_subsequence ~needle:"KADM" "keeper adm-race")
+;;
+
+
+let test_the_palette_lists_tasks_and_posts () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  state.tasks <-
+    [ { id = "task-532"
+      ; title = "다섯 도구 축 사용 증명"
+      ; status = Masc_domain.Todo
+      ; priority = 2
+      } ];
+  state.board_posts <-
+    [ { bp_id = "p-1"
+      ; bp_author = "alpha"
+      ; bp_title = "release evidence sweep"
+      ; bp_body = ""
+      ; bp_votes = 0
+      ; bp_comment_count = 0
+      ; bp_created_at = "2026-08-25T00:00:00Z"
+      ; bp_hearth = None
+      ; bp_kind = None
+      } ];
+  let labels = List.map fst (palette_entries state) in
+  check_bool "a task is an entry" true
+    (List.exists
+       (fun l -> palette_contains ~needle:"task-532" l)
+       labels);
+  check_bool "a post is an entry" true
+    (List.exists
+       (fun l -> palette_contains ~needle:"release evidence" l)
+       labels);
+  (* The actions carry the ids the executor needs, not list positions that a
+     refresh can move. *)
+  check_bool "the task action carries its id" true
+    (List.exists
+       (function _, Palette_task id -> String.equal id "task-532" | _ -> false)
+       (palette_entries state));
+  check_bool "the post action carries its id" true
+    (List.exists
+       (function
+         | _, Palette_board_post id -> String.equal id "p-1"
+         | _ -> false)
+       (palette_entries state))
+;;
+
+let () =
+  Alcotest.run
+    "masc-tui-palette-matching"
+    [ ( "matchers"
+      , [ Alcotest.test_case "contains is a substring over a lowercased haystack" `Quick
+            test_contains_is_a_substring_over_a_lowercased_haystack
+        ; Alcotest.test_case "subsequence takes the characters in order" `Quick
+            test_subsequence_takes_the_characters_in_order
+        ; Alcotest.test_case "the caller owns the needle case" `Quick
+            test_the_caller_owns_the_needle_case
+        ] )
+    ; ( "sources"
+      , [ Alcotest.test_case "the palette lists tasks and posts" `Quick
+            test_the_palette_lists_tasks_and_posts
+        ] )
+    ]
+;;

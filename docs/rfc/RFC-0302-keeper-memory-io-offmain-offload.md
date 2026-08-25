@@ -1,9 +1,14 @@
+---
+rfc: "0302"
+status: Draft
+---
+
 # RFC-0302: Keeper 메모리 파일 I/O off-main-domain 오프로드 (HOL fix)
 
 - Status: Draft
 - Author: Claude Opus 4.8
 - Date: 2026-07-01
-- Related: issue #22823 (tracking), RFC-0243/0259/0272 (keeper memory store), 2026-06-19 keeper stall (mutex poison via Eio-in-systhread)
+- Related: issue #22823 (tracking), RFC-0259/0272 (keeper memory store), 2026-06-19 keeper stall (mutex poison via Eio-in-systhread)
 - 근거 메모리: `reference-masc-compaction-not-hol-cause-measured-7ms-20260630.md`
 
 **2026-07-29 current-state amendment**: periodic full-store Memory OS
@@ -39,7 +44,7 @@ Eio는 **단일 도메인 cooperative 스케줄러**다. main 도메인에서 �
 
 ## 2. 경계 분석
 
-이건 **MASC-internal**이다. OAS 무관(OAS는 single-provider completion만; 파일 저장/메모리는 MASC 소유). MASC↔OAS 경계 변경 없음. 대상은 `lib/keeper/keeper_memory_os_io.ml`(781줄) 및 동일 패턴의 `Skill_candidate_store`/`Keeper_memory_recall`(후속).
+이건 **MASC-internal**이다. agent_core 무관(agent_core는 single-provider completion만; 파일 저장/메모리는 MASC 소유). MASC↔agent_core 경계 변경 없음. 대상은 `lib/keeper/keeper_memory_os_io.ml`(781줄) 및 동일 패턴의 `Skill_candidate_store`/`Keeper_memory_recall`(후속).
 
 ## 3. 근본 원인
 

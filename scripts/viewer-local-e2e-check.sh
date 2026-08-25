@@ -106,46 +106,6 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1
 }
 
-resolve_repo_script() {
-  local script_path="$1"
-  local primary="$REPO_ROOT/$script_path"
-  local archived="$REPO_ROOT/archive/trpg/$script_path"
-  local archived_actual=""
-
-  case "$script_path" in
-    scripts/harness_game_view_precondition.sh)
-      archived_actual="$REPO_ROOT/archive/trpg/scripts/game_view_precondition.sh"
-      ;;
-    scripts/harness_trpg_session_contract.sh)
-      archived_actual="$REPO_ROOT/archive/trpg/scripts/trpg_session_contract.sh"
-      ;;
-    scripts/run_trpg_grimland_smoke.sh)
-      archived_actual="$REPO_ROOT/archive/trpg/scripts/trpg_grimland_smoke.sh"
-      ;;
-  esac
-
-  if [ -x "$primary" ]; then
-    printf '%s\n' "$primary"
-    return 0
-  fi
-  if [ -n "$archived_actual" ] && [ -x "$archived_actual" ]; then
-    printf '%s\n' "$archived_actual"
-    return 0
-  fi
-  if [ -x "$archived" ]; then
-    printf '%s\n' "$archived"
-    return 0
-  fi
-
-  echo "missing harness script: $script_path" >&2
-  echo "checked: $primary" >&2
-  if [ -n "$archived_actual" ]; then
-    echo "checked: $archived_actual" >&2
-  fi
-  echo "checked: $archived" >&2
-  return 1
-}
-
 ensure_mcp_harness() {
   if [ "$HARNESS_HELPERS_LOADED" -eq 1 ]; then
     return 0

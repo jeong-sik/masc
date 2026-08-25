@@ -21,8 +21,10 @@ import { cancelPendingServerPushRefreshes, registerGateRefresh, registerMissionR
 import { initNotificationDelivery } from './notifications'
 import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
-import { ensureDevToken } from './api/dev-token'
-import { fetchDashboardConfig, parseContextThresholds } from './api/dashboard-logs'
+import {
+  devTokenBootstrapNeedsReadinessProbe,
+  ensureDevToken,
+} from './api/dev-token'
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
 import { setContextThresholds } from './config/context-thresholds'
 import { DashboardMain, DashboardHealthStrip, isKeeperDetailDashboardRoute } from './components/dashboard-shell'
@@ -159,6 +161,7 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false
+    let devTokenReadinessTimer: number | null = null
 
     // Initialize hash router and compatible deep links
     initRouter()
@@ -168,15 +171,32 @@ export function App() {
         console.warn('[app] dashboard dev-token bootstrap failed', err instanceof Error ? err.message : err)
       })
 
+    const scheduleDevTokenReadinessProbe = () => {
+      if (cancelled || !devTokenBootstrapNeedsReadinessProbe()) return
+      devTokenReadinessTimer = window.setTimeout(() => {
+        devTokenReadinessTimer = null
+        void ensureLoopbackAuth().finally(scheduleDevTokenReadinessProbe)
+      }, 1_000)
+    }
+
     void ensureLoopbackAuth()
       .finally(() => {
         if (cancelled) return
+        scheduleDevTokenReadinessProbe()
         void refreshShell({ light: true })
         requestNamespaceTruthNow()
 
-        void fetchDashboardConfig()
-          .then(data => {
-            const thresholds = parseContextThresholds(data, {
+        void Promise.all([
+          import('./api/dashboard-config'),
+          import('./api/effect-http'),
+        ])
+          .then(([configApi, effectHttp]) =>
+            effectHttp.dashboardRuntime
+              .runPromise(configApi.fetchDashboardConfig())
+              .then(data => ({ configApi, data })),
+          )
+          .then(({ configApi, data }) => {
+            const thresholds = configApi.parseContextThresholds(data, {
               critical: CONTEXT_RATIO_CRITICAL,
               warn: CONTEXT_RATIO_WARN,
               compacting: CONTEXT_RATIO_COMPACTING,
@@ -222,6 +242,10 @@ export function App() {
 
     return () => {
       cancelled = true
+      if (devTokenReadinessTimer !== null) {
+        window.clearTimeout(devTokenReadinessTimer)
+        devTokenReadinessTimer = null
+      }
       disconnectDashboardWS()
       unsubscribeServerPush()
       unsubNotify()
@@ -274,11 +298,15 @@ export function App() {
     focusMode,
   })
 
-  // sync volt and theme to document root (skin-v2 voltage + paper theme)
+  // Volt only. The document theme attribute has one owner, theme-switch.ts,
+  // which also holds the storage keys and the URL parameter. This effect used
+  // to write it too, from tweaksTheme, whose vocabulary is 'dark' | 'paper' --
+  // so selecting styleseed and reloading rewrote the attribute to '' and the
+  // theme vanished (#22899). The app element below still carries its own
+  // data-theme; that one is app-scoped and not the document root.
   useEffect(() => {
     document.documentElement.setAttribute('data-volt', tweaksVolt.value)
-    document.documentElement.setAttribute('data-theme', tweaksTheme.value === 'paper' ? 'paper' : '')
-  }, [tweaksVolt.value, tweaksTheme.value])
+  }, [tweaksVolt.value])
 
   const approvalsBadge =
     gateData.value?.approval_queue_state?.state === 'ready'

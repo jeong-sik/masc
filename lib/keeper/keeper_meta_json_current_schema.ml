@@ -15,14 +15,14 @@ let invalid_currentf format =
 ;;
 
 type field =
+  | Schema
   | Name
   | Agent_name
-  | Persona
   | Instructions
+  | Autonomous_instructions
   | Trace_id
   | Multimodal_policy
   | Trace_history
-  | Generation
   | Last_handoff_ts
   | Created_at
   | Updated_at
@@ -48,36 +48,23 @@ type field =
   | Last_proactive_reason
   | Last_proactive_preview
   | Consecutive_noop_count
-  | Last_compaction_check_ts
-  | Last_compaction_decision
-  | Active_goal_ids
-  | Last_autonomous_action_at
-  | Autonomous_action_count
-  | Autonomous_turn_count
-  | Autonomous_text_turn_count
-  | Autonomous_tool_turn_count
-  | Board_reactive_turn_count
-  | Mention_reactive_turn_count
-  | Noop_turn_count
   | Message_scope_ack_id
-  | Last_blocker
   | Last_runtime_attempt
   | Paused
   | Latched_reason
   | Current_task_id
   | Keeper_id
-  | Oas_env
-  | Meta_version
+  | Agent_core_env
 
 let all_fields =
-  [ Name
+  [ Schema
+  ; Name
   ; Agent_name
-  ; Persona
   ; Instructions
+  ; Autonomous_instructions
   ; Trace_id
   ; Multimodal_policy
   ; Trace_history
-  ; Generation
   ; Last_handoff_ts
   ; Created_at
   ; Updated_at
@@ -103,37 +90,24 @@ let all_fields =
   ; Last_proactive_reason
   ; Last_proactive_preview
   ; Consecutive_noop_count
-  ; Last_compaction_check_ts
-  ; Last_compaction_decision
-  ; Active_goal_ids
-  ; Last_autonomous_action_at
-  ; Autonomous_action_count
-  ; Autonomous_turn_count
-  ; Autonomous_text_turn_count
-  ; Autonomous_tool_turn_count
-  ; Board_reactive_turn_count
-  ; Mention_reactive_turn_count
-  ; Noop_turn_count
   ; Message_scope_ack_id
-  ; Last_blocker
   ; Last_runtime_attempt
   ; Paused
   ; Latched_reason
   ; Current_task_id
   ; Keeper_id
-  ; Oas_env
-  ; Meta_version
+  ; Agent_core_env
   ]
 
 let field_name = function
+  | Schema -> "schema"
   | Name -> "name"
   | Agent_name -> "agent_name"
-  | Persona -> "persona"
   | Instructions -> "instructions"
+  | Autonomous_instructions -> "autonomous_instructions"
   | Trace_id -> "trace_id"
   | Multimodal_policy -> "multimodal_policy"
   | Trace_history -> "trace_history"
-  | Generation -> "generation"
   | Last_handoff_ts -> "last_handoff_ts"
   | Created_at -> "created_at"
   | Updated_at -> "updated_at"
@@ -159,26 +133,13 @@ let field_name = function
   | Last_proactive_reason -> "last_proactive_reason"
   | Last_proactive_preview -> "last_proactive_preview"
   | Consecutive_noop_count -> "consecutive_noop_count"
-  | Last_compaction_check_ts -> "last_compaction_check_ts"
-  | Last_compaction_decision -> "last_compaction_decision"
-  | Active_goal_ids -> "active_goal_ids"
-  | Last_autonomous_action_at -> "last_autonomous_action_at"
-  | Autonomous_action_count -> "autonomous_action_count"
-  | Autonomous_turn_count -> "autonomous_turn_count"
-  | Autonomous_text_turn_count -> "autonomous_text_turn_count"
-  | Autonomous_tool_turn_count -> "autonomous_tool_turn_count"
-  | Board_reactive_turn_count -> "board_reactive_turn_count"
-  | Mention_reactive_turn_count -> "mention_reactive_turn_count"
-  | Noop_turn_count -> "noop_turn_count"
   | Message_scope_ack_id -> "message_scope_ack_id"
-  | Last_blocker -> "last_blocker"
   | Last_runtime_attempt -> "last_runtime_attempt"
   | Paused -> "paused"
   | Latched_reason -> "latched_reason"
   | Current_task_id -> "current_task_id"
   | Keeper_id -> "keeper_id"
-  | Oas_env -> "oas_env"
-  | Meta_version -> "meta_version"
+  | Agent_core_env -> "agent_core_env"
 ;;
 
 let current_field_names = List.map field_name all_fields
@@ -215,7 +176,7 @@ let validate_current_object (json : Yojson.Safe.t) =
          (invalid_currentf "duplicate field %s" key)
      | None ->
        let present = List.map fst fields in
-       let outside_current =
+        let outside_current =
          List.filter (fun key -> not (List.mem key current_field_names)) present
        in
        let missing =

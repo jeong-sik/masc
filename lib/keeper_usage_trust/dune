@@ -5,4 +5,6 @@
  (public_name masc.keeper_usage_trust)
  (wrapped false)
  (modules keeper_usage_trust)
- (libraries agent_sdk yojson))
+ (flags
+  (:standard -w +4 -w +33))
+ (libraries masc.agent_core yojson))

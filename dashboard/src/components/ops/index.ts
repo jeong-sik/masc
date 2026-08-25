@@ -2,14 +2,12 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { CARD_STANDARD } from '../common/card'
 import { EmptyState } from '../common/feedback-state'
-import { CountBadge } from '../common/badge'
 import { TimeAgo } from '../common/time-ago'
 import { route } from '../../router'
 import {
   operatorActionLog,
   operatorDigestError,
   operatorError,
-  operatorWorkspaceDigest,
   operatorSnapshot,
 } from '../../operator-store'
 import {
@@ -21,7 +19,6 @@ import type {
   OperatorActionLogEntry,
   OperatorContextMetricsUnavailable,
   OperatorKeeperSnapshot,
-  OperatorReviewDecision,
   OperatorSnapshot,
 } from '../../types'
 import { ComposerV2 } from '../board/composer-v2'
@@ -34,8 +31,12 @@ import {
   workflowTargetReady,
 } from './helpers'
 import { FlowControlPanel } from '../flow-control/flow-control-panel'
+import { CmdGateLinks, CmdInterveneForm } from './cmd-intervene-form'
 
-type ActivityTone = 'default' | 'warn' | 'ok' | 'bad' | 'accent'
+// keeper-v2 command.jsx tones: confirmed/executed → ok, preview → warn,
+// error → bad. The design's cmd-log badge only marks ok/bad (CMD_TONE warn
+// renders with no tone class).
+type ActivityTone = 'ok' | 'bad' | ''
 
 export const ACTIVITY_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000
 
@@ -82,25 +83,21 @@ function renderContextMetricsDiagnostic(diagnostic: ContextMetricsDiagnostic) {
   if (error.kind === 'not_observed') {
     return html`
       <li
-        class="grid gap-1 text-sm text-[var(--color-fg-primary)]"
         data-testid="ops-context-metrics-diagnostic"
         data-error-kind=${error.kind}
       >
-        <strong>${sourceLabel} ${keeper.name}</strong>
-        <span>context measurement not observed</span>
+        <span class="mono">${sourceLabel} ${keeper.name}</span> — context measurement <span class="mono">not_observed</span>
       </li>
     `
   }
   return html`
     <li
-      class="grid gap-1 text-sm text-[var(--color-fg-primary)]"
       data-testid="ops-context-metrics-diagnostic"
       data-error-kind=${error.kind}
     >
-      <strong>${sourceLabel} ${keeper.name}</strong>
-      <span>invalid context metrics diagnostic</span>
-      ${error.reported_kind ? html`<span>kind: ${error.reported_kind}</span>` : null}
-      ${error.reported_reason ? html`<span>reason: ${error.reported_reason}</span>` : null}
+      <span class="mono">${sourceLabel} ${keeper.name}</span> — invalid context metrics diagnostic
+      ${error.reported_kind ? html`<span>kind: <span class="mono">${error.reported_kind}</span></span>` : null}
+      ${error.reported_reason ? html`<span>reason: <span class="mono">${error.reported_reason}</span></span>` : null}
     </li>
   `
 }
@@ -111,43 +108,16 @@ function parseTimestamp(value?: string | null): number {
   return Number.isNaN(parsed) ? 0 : parsed
 }
 
-function reviewDecisionLabel(value?: string | null): string {
-  switch ((value ?? '').trim().toLowerCase()) {
-    case 'resolved':
-      return 'Review Resolved'
-    case 'deferred':
-      return 'Review Deferred'
-    default:
-      return value?.trim() || 'Review Action'
-  }
-}
-
-function reviewDecisionTone(value?: string | null): ActivityTone {
-  switch ((value ?? '').trim().toLowerCase()) {
-    case 'resolved':
-      return 'ok'
-    case 'deferred':
-      return 'warn'
-    default:
-      return 'accent'
-  }
-}
-
 function actionLogTone(entry: OperatorActionLogEntry): ActivityTone {
   switch (entry.outcome) {
     case 'error':
       return 'bad'
-    case 'preview':
-      return 'warn'
+    case 'executed':
     case 'confirmed':
-      return 'accent'
+      return 'ok'
     default:
-      return 'default'
+      return ''
   }
-}
-
-function targetSummary(targetType?: string | null, targetId?: string | null): string {
-  return `${targetTypeLabel(targetType)}${targetId ? ` · ${targetId}` : ''}`
 }
 
 function prettyTargetLabel(label?: string | null): string {
@@ -161,17 +131,6 @@ function prettyTargetLabel(label?: string | null): string {
 }
 
 function timelineEntries(limit = 10): OpsActivityTimelineEntry[] {
-  const reviews = (operatorWorkspaceDigest.value?.recent_reviews ?? []).map((item: OperatorReviewDecision) => ({
-    key: `review:${item.item_id}:${item.at}`,
-    kind: 'review' as const,
-    at: item.at,
-    actor: item.actor || 'unknown',
-    label: reviewDecisionLabel(item.decision),
-    target: targetSummary(item.target_type, item.target_id),
-    detail: item.reason || 'No reason recorded',
-    tone: reviewDecisionTone(item.decision),
-  }))
-
   const interventions = operatorActionLog.value.map((entry: OperatorActionLogEntry) => ({
     key: `intervention:${entry.id}`,
     kind: 'intervention' as const,
@@ -184,7 +143,7 @@ function timelineEntries(limit = 10): OpsActivityTimelineEntry[] {
   }))
 
   const cutoff = Date.now() - ACTIVITY_MAX_AGE_MS
-  return [...reviews, ...interventions]
+  return interventions
     .filter(entry => parseTimestamp(entry.at) >= cutoff)
     .sort((left, right) => parseTimestamp(right.at) - parseTimestamp(left.at))
     .slice(0, limit)
@@ -220,21 +179,21 @@ function renderActivityTimeline() {
   }
 
   return html`
-    <div class="v2-command-panel grid gap-2" data-testid="ops-activity-timeline">
+    <div class="v2-command-panel cmd-log" data-testid="ops-activity-timeline">
       ${entries.map(entry => html`
         <article
           key=${entry.key}
           data-testid="ops-activity-item"
           data-activity-kind=${entry.kind}
-          class="v2-command-row rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
+          class="v2-command-row cmd-log-row"
         >
-          <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
-            <${CountBadge} tone=${entry.tone}>${entry.label}<//>
-            <span>${entry.target}</span>
-            <span>${entry.actor}</span>
-            <span><${TimeAgo} timestamp=${entry.at} /></span>
+          <div class="cmd-log-h">
+            <span class="ai-b ${entry.tone}">${entry.label}</span>
+            <span class="mono dim">${entry.target}</span>
+            <span class="mono dim">${entry.actor}</span>
+            <span class="mono dim"><${TimeAgo} timestamp=${entry.at} /></span>
           </div>
-          <div class="mt-2 text-sm leading-paragraph text-[var(--color-fg-primary)]">${entry.detail}</div>
+          <div class="cmd-log-b">${entry.detail}</div>
         </article>
       `)}
     </div>
@@ -275,12 +234,13 @@ export function Ops() {
       ${operatorDigestError.value ? html`<section class="ops-banner v2-command-panel rounded-[var(--r-1)] py-3 px-3.5 border border-[var(--color-border-default)] error" role="alert">${operatorDigestError.value}</section>` : null}
       ${metricsDiagnostics.length > 0 ? html`
         <section
-          class="ops-banner v2-command-panel rounded-[var(--r-1)] py-3 px-3.5 border border-[var(--color-border-default)] error"
+          class="ops-banner v2-command-panel cmd-banner"
           role="alert"
           data-testid="ops-context-metrics-unavailable"
         >
-          <strong>Context metrics unavailable</strong>
-          <ul class="mt-2 grid gap-2">${metricsDiagnostics.map(renderContextMetricsDiagnostic)}</ul>
+          <b>Context metrics unavailable</b>
+          <ul>${metricsDiagnostics.map(renderContextMetricsDiagnostic)}</ul>
+          <span class="mono dim">스냅샷은 occupancy 를 관측하지 않습니다 — 잘못된 kind/reason 은 별도 진단으로 표시됩니다.</span>
         </section>
       ` : null}
 
@@ -302,8 +262,9 @@ export function Ops() {
       ` : null}
 
       <${FlowControlPanel} />
-      <section class="v2-command-panel grid grid-cols-2 gap-4 max-[1200px]:grid-cols-1" aria-label="Operations controls">
+      <section class="v2-command-panel cmd-cols" aria-label="Operations controls">
         <div class="grid gap-4 order-1 max-[1200px]:order-2">
+          <${CmdInterveneForm} />
           <${ComposerV2} workspaceId="ops" />
         </div>
 
@@ -315,6 +276,7 @@ export function Ops() {
           <${renderActivityTimeline} />
         </section>
       </section>
+      ${route.value.params.view === 'ops' ? html`<${CmdGateLinks} />` : null}
     </section>
   `
 }

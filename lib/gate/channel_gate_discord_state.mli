@@ -4,14 +4,12 @@
     can be registered at server startup via
     [Channel_gate_connector.register (module Channel_gate_discord_state)].
 
-    Internal helpers (the [U] / [Names] / [Store] aliases, the
-    [binding] record, the [default_*_path] / [legacy_*_path] /
-    path resolvers, the shared binding-store wrappers, the
-    [string_member] / [int_member] / [bool_member] /
-    [bool_option_member] yojson lookups, [stale_of_updated_at],
-    [list_assoc_field], and binding transaction helpers) are
-    hidden — only the {!Channel_gate_connector.S} surface is
-    public.  The status label comes from
+    Internal helpers (the [U] / [Store] aliases, the [binding] record,
+    the [default_*_path] resolvers, the shared binding-store wrappers,
+    the [string_member] / [int_member] / [bool_member] /
+    [bool_option_member] yojson lookups, and binding transaction
+    helpers) are hidden — only the {!Channel_gate_connector.S} surface
+    is public.  The status label comes from
     {!Channel_gate_connector.connector_state_label} and the observed
     channel row from {!Json_util.find_assoc_row_by_string_field}. *)
 
@@ -29,17 +27,15 @@ val channel : string
 (** {1 Connector status} *)
 
 val status_json : ?audit_limit:int -> unit -> Yojson.Safe.t
-(** Runtime status snapshot — bindings, recent audit events,
-    staleness flag, and connector liveness. [audit_limit] caps the
-    audit-history slice (default [10]). *)
+(** Runtime status snapshot — bindings, recent audit events, and
+    connector liveness from the gateway state machine. [audit_limit]
+    caps the audit-history slice (default [10]). *)
 
 val connector_json :
-  ?gate_status_json:Yojson.Safe.t ->
   ?audit_limit:int ->
   unit ->
   Yojson.Safe.t
-(** Full connector descriptor for the dashboard, layering
-    [gate_status_json] (if provided) on top of {!status_json}. *)
+(** Full connector descriptor for the dashboard. *)
 
 (** {1 Binding lifecycle} *)
 
@@ -61,8 +57,7 @@ val unbind :
 (** {1 In-process gateway support}
 
     Used by {!Server_discord_in_process_gateway}, the OCaml gateway
-    that replaces the deleted [sidecars/discord-bot/] Python
-    connector. *)
+    that is the only Discord transport. *)
 
 type keeper_binding_resolution = {
   keeper_name : string;
@@ -161,12 +156,15 @@ val send_message :
   channel_id:string ->
   content:string ->
   ?reply_to_message_id:string ->
+  ?mention_user_ids:string list ->
   unit ->
   (string, send_error) result
 (** Post a single message to a Discord channel.  When
     [reply_to_message_id] is provided, the message is sent as a
-    reply (Discord threads the conversation).  Returns the created
-    message id on success.  Bot token is resolved from
+    reply (Discord threads the conversation). [mention_user_ids] are prefixed
+    as visible mentions and are the only user ids Discord is allowed to
+    notify; absent means all mention kinds are suppressed. Returns the created
+    message id on success. Bot token is resolved from
     [DISCORD_BOT_TOKEN] at call time so a token rotation doesn't
     require a server restart.
 
@@ -192,3 +190,16 @@ val trigger_typing :
 (** Trigger Discord's typing indicator for [channel_id]. Bot token is
     resolved from [DISCORD_BOT_TOKEN] at call time, matching
     {!send_message}. *)
+
+module For_testing : sig
+  type outbound_message =
+    { content : string
+    ; allowed_user_mentions : string list
+    }
+
+  val message_chunks_with_mentions :
+    limit:int ->
+    content:string ->
+    mention_user_ids:string list ->
+    outbound_message list
+end

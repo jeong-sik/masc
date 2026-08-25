@@ -15,9 +15,6 @@ type operator_snapshot_compute =
   ; sequence : int
   }
 
-val operator_snapshot_broadcast_ref : (operator_snapshot_publication -> unit) ref
-val operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref
-val _operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref
 val operator_snapshot_publication : unit -> operator_snapshot_publication
 val operator_snapshot_publication_with_freshness :
   unit -> operator_snapshot_publication * bool
@@ -46,7 +43,6 @@ val mark_operator_snapshot_error_if_current :
   operator_snapshot_publication option
 
 val operator_digest_cache : Server_dashboard_http_cache.cached_surface
-val _operator_digest_cache : Server_dashboard_http_cache.cached_surface
 val operator_refresh_interval_s : float
 val operator_snapshot_extra : unit -> (string * Yojson.Safe.t) list
 

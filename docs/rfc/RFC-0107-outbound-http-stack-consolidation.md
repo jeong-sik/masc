@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0097", "0100", "0101"]
-implementation_prs: [15932, 15950, 15965, 15985, 15990, 16017, 15993, 15991, 16102, 16150]
 # Excluded from list (RFC body / design-spec merges, per README convention):
 #   #15912  Phase C.0   — Eio_context audit + RFC §3.3 amend
 #   #15941  Phase D.1   — Pool design (interface-first spec)
@@ -31,10 +30,10 @@ Prior Art 는 `~/me/knowledge/research/2026-05-17-piaf-ocsigen-eio-fd-prior-art.
 - **결과**: 매 호출 `connection: close` 강제 → keep-alive 0건 → runtime 마다 N socket burst.
 - **상위 issue**: [`ocaml-cohttp#85`](https://github.com/mirage/ocaml-cohttp/issues/85) "Support HTTP Keep-Alive" — 2014-01 개설, Closed (milestone "1.0 Stable API"), 결과적으로 abandoned/out-of-scope. masc 의 워크어라운드는 그 gap 의 lower bound.
 
-### 1.2 Connection pool 부재 — masc + oas 양쪽
+### 1.2 Connection pool 부재 — masc + agent_core 양쪽
 
 - **masc**: `lib/masc_http_client/masc_http_client.ml` 가 매 호출 fresh `Eio.Switch.run` → `Client.make` → 1 request → switch release → tracked socket close.
-- **oas**: `oas/lib/llm_provider/http_client.ml:380-410` 의 `get_sync` / `post_sync` 가 동일 패턴.
+- **agent_core**: `agent_core/lib/llm_provider/http_client.ml:380-410` 의 `get_sync` / `post_sync` 가 동일 패턴.
 - **RFC-0100 (Streamable HTTP)** 가 명시적으로 connection pooling 을 *out-of-scope* 로 명시 (line 20).
 - **Runtime 영향**: 12+ keeper 가 runtime 재시도 안에서 매 호출 새 TCP+TLS 를 염. runtime 1 turn 에 5~12 fd burst (provider probe + runtime attempt + tool call HTTP).
 
@@ -156,7 +155,7 @@ sandbox_exec
 
 ## 4. Implementation phases
 
-본 RFC 의 phase 구성은 plan `~/me/planning/claude-plans/me-workspace-yousleepwhen-masc-oas-vast-moonbeam.md` 와 동기화. 요약:
+본 RFC 의 phase 구성은 plan `~/me/planning/claude-plans/me-workspace-yousleepwhen-masc-agent_core-vast-moonbeam.md` 와 동기화. 요약:
 
 | Phase | Scope | Critical path? |
 |---|---|---|

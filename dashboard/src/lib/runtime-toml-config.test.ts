@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   createRuntimeTomlBinding,
   deleteRuntimeTomlKey,
+  enabledRuntimeIds,
   getRuntimeTomlKey,
   isReservedRuntimeTomlId,
   isValidRuntimeTomlIdFormat,
@@ -47,10 +48,10 @@ describe('runtime TOML dashboard editing helpers', () => {
     const environment = parseRuntimeTomlEnvironment(sourceText)
 
     expect(environment.defaultRuntimeId).toBe('runpod_mtp.qwen')
-    expect(environment.crossVerifierRuntimeId).toBe('')
     expect(environment.assignments).toEqual({})
     expect(environment.providers[0]).toMatchObject({
       id: 'runpod_mtp',
+      enabled: true,
       displayName: 'RunPod',
       protocol: 'openai-http',
       transportKind: 'endpoint',
@@ -69,15 +70,54 @@ describe('runtime TOML dashboard editing helpers', () => {
     })
     expect(environment.bindings[0]).toMatchObject({
       id: 'runpod_mtp.qwen',
+      enabled: true,
       maxConcurrent: 4,
       keepAlive: '10m',
+    })
+  })
+
+  it('parses and edits explicit provider and binding disable state', () => {
+    let next = setRuntimeTomlProviderField(sourceText, 'runpod_mtp', 'enabled', false)
+    next = setRuntimeTomlBindingField(next, 'runpod_mtp.qwen', 'enabled', false)
+
+    const environment = parseRuntimeTomlEnvironment(next)
+    expect(environment.providers[0]?.enabled).toBe(false)
+    expect(environment.bindings[0]?.enabled).toBe(false)
+    expect(enabledRuntimeIds(environment)).toEqual([])
+    expect(next.match(/^enabled = false$/gm)).toHaveLength(2)
+  })
+
+  it('projects the Codex official-client subscription boundary without credentials', () => {
+    const codexSource = `[runtime]
+default = "codex_subscription.spark"
+
+[providers.codex_subscription]
+display-name = "Codex Subscription"
+protocol = "codex-app-server"
+command = "/usr/local/bin/codex"
+is-non-interactive = true
+
+[models.spark]
+api-name = "gpt-5.3-codex-spark"
+max-context = 131072
+
+[codex_subscription.spark]
+`
+
+    const environment = parseRuntimeTomlEnvironment(codexSource)
+    expect(environment.providers[0]).toMatchObject({
+      protocol: 'codex-app-server',
+      transportKind: 'command',
+      command: '/usr/local/bin/codex',
+      credentialType: 'none',
+      isNonInteractive: true,
     })
   })
 
   it('projects runtime routing lanes and keeper assignments from runtime.toml source', () => {
     const withRouting = `${sourceText.replace(
       'default = "runpod_mtp.qwen"',
-      'default = "runpod_mtp.qwen"\ncross_verifier = "runpod_mtp.qwen"',
+      'default = "runpod_mtp.qwen"',
     )}
 
 [runtime.assignments]
@@ -87,7 +127,6 @@ mad-improver = "runpod_mtp.qwen"
 
     const environment = parseRuntimeTomlEnvironment(withRouting)
 
-    expect(environment.crossVerifierRuntimeId).toBe('runpod_mtp.qwen')
     expect(environment.assignments).toEqual({
       sangsu: 'runpod_mtp.qwen',
       'mad-improver': 'runpod_mtp.qwen',
@@ -333,7 +372,7 @@ sangsu = "runpod_mtp.qwen"
   it('retargets default and clears the dependent route when deleting a provider with a fallback binding', () => {
     const withFallback = `${sourceText.replace(
       'default = "runpod_mtp.qwen"',
-      'default = "runpod_mtp.qwen"\ncross_verifier = "runpod_mtp.qwen"',
+      'default = "runpod_mtp.qwen"',
     )}
 
 [providers.openai]
@@ -357,7 +396,6 @@ sangsu = "runpod_mtp.qwen"
     const env = parseRuntimeTomlEnvironment(next)
 
     expect(env.defaultRuntimeId).toBe('openai.gpt')
-    expect(env.crossVerifierRuntimeId).toBe('')
     expect(env.assignments).toEqual({})
     expect(env.providers.map(p => p.id)).toEqual(['openai'])
     expect(env.bindings.map(b => b.id)).toEqual(['openai.gpt'])
@@ -419,7 +457,7 @@ thinking-control-format = "reasoning-effort"
     const structuredModel = env.models.find(m => m.id === 'structured')
     // thinking-control-format is present in the fixture (mirroring a real
     // runtime.toml) but intentionally NOT projected into RuntimeTomlModel:
-    // OAS request-building never reads this key (masc #21521), so the parser
+    // Agent Core request-building never reads this key (masc #21521), so the parser
     // does not resurface it as a client-editable field.
     expect(structuredModel).toMatchObject({
       jsonSupport: true,

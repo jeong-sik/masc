@@ -1,0 +1,44 @@
+{
+ "schema": "masc.keeper.async_tool_live.v1",
+ "measured_at": "2026-08-17T11:15:00Z",
+ "live_endpoint": "http://127.0.0.1:8935",
+ "server_commit": "1a8be94d618503090d5882193466d718b1456566",
+ "verdict": "NOT_LIVE_REACHABLE",
+ "scope_requested": "accept -> poll -> cancel live chain for the Async Tool / Job matrix row (restart/process-recovery explicitly excluded by the task).",
+ "protocol": "Static trace of the async-tool execution path from the external MCP surface down to the composition catalog, cross-checked against the live server's actual filesystem config, without issuing any tool call that could perturb other keepers (including the protected 24h canary).",
+ "finding": {
+  "summary": "Async tool/job accept, poll, and cancel are not MCP tools on the external coordination surface at all, and are not reachable from any keeper's own turn on this live server right now, because the composition catalog that would register them is absent from the live config directory.",
+  "chain": [
+   {
+    "step": "external MCP surface has no async-tool-job entrypoint",
+    "evidence": "Live tools/list on http://127.0.0.1:8935/mcp returns exactly 40 masc_* tools (masc_add_task .. masc_transition); none of them match 'async' or 'composition'. There is no masc_keeper_msg_async, masc_async_*, or equivalent externally-callable tool."
+   },
+   {
+    "step": "async accept/poll/cancel are keeper-turn-internal model tools, not MCP admin tools",
+    "evidence": "lib/keeper/keeper_tool_composition_catalog.ml:88-89 defines status_tool_name='keeper_composition_status', cancel_tool_name='keeper_composition_cancel'; lib/keeper/keeper_tool_composition_catalog.ml:104-109 model_tool_names only adds them to a KEEPER's own model-visible tool list, and only when at least one catalog entry has execution=Async. These are dispatched from lib/keeper/keeper_tool_composition_surface.ml (status_result/cancel_result), which is invoked from within a keeper's own agent-core turn loop -- there is no HTTP/MCP route that calls these functions from outside a keeper turn."
+   },
+   {
+    "step": "execution mode (inline vs async) is a static per-composition-entry property, not a caller-supplied argument",
+    "evidence": "lib/keeper/keeper_tool_composition_catalog.ml:71-79: type execution_mode = Inline | Async, fixed per TOML [[compositions]] entry at catalog-parse time. A caller (external or the keeper's own model) cannot request execution_mode=async for an arbitrary tool call; only whichever keeper_compose_<name> tools are declared Async in the catalog file expose async semantics at all."
+   },
+   {
+    "step": "the composition catalog is absent on this live server",
+    "evidence": "lib/keeper/keeper_tool_composition_catalog.ml:96: path ~config_root = Filename.concat config_root 'tool-compositions.toml'. lib/keeper/keeper_run_tools_setup.ml:112-127: load_composition_catalog returns Ok None when the file is missing (Fs_compat.Exact_missing), and expected_model_tool_names with composition_catalog=None adds no compose/status/cancel tools to any keeper. Verified live: ls <base-path>/.masc/config/ (the same directory that holds the live runtime.toml, 91KB, last modified 2026-08-17T11:37Z) has no tool-compositions.toml; a filesystem-wide search for the filename under <base-path>/.masc found only inert fixture copies inside checked-out worktree scripts/fixtures/ trees (test data, not the live config_root)."
+   },
+   {
+    "step": "conclusion",
+    "evidence": "With composition_catalog=None for every keeper, no keeper on this live server -- old or newly created -- has keeper_compose_*, keeper_composition_status, or keeper_composition_cancel in its tool list right now. There is nothing to accept, poll, or cancel: the feature has zero live surface at this moment, independent of internal-vs-external reachability."
+   }
+  ]
+ },
+ "why_not_forced": [
+  "tool-compositions.toml lives at <base-path>/config/, the same shared directory as runtime.toml and models-overlay.toml -- it is a single global catalog, not scoped to one keeper.",
+  "Creating this file to manufacture a test case would add keeper_compose_*/keeper_composition_status/keeper_composition_cancel to EVERY live keeper's next-turn tool list, including the protected canary-24h-ollama-b-20260816 (24h run in progress, hard rule: do not touch). That crosses the same boundary the no-restart/no-canary-contact rule protects, even though it is a config write rather than a direct message or restart.",
+  "The task's own guidance ('억지 우회 금지') was read as: do not fabricate live conditions the server does not currently have just to produce a receipt. This verdict is reported honestly instead."
+ ],
+ "what_would_make_this_measurable": [
+  "A per-keeper or per-request composition catalog override (so a scoped test keeper could get an Async-mode entry without mutating every other keeper's tool list), or",
+  "A genuinely isolated masc server instance with its own base_path and its own provider credentials (not a shared-shell-env throwaway -- see memory note on throwaway-server live-bot connection risk), with a deliberately populated tool-compositions.toml containing at least one Async entry, driven by a fresh keeper prompted to call it.",
+  "Neither existed at measurement time and neither was built for this task, since both are scope changes beyond a live-receipt measurement."
+ ]
+}

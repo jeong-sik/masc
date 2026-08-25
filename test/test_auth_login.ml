@@ -19,20 +19,6 @@ let with_temp_dir prefix f =
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
-let contains_substring ~needle s =
-  let nl = String.length needle in
-  let sl = String.length s in
-  if nl = 0 || nl > sl then
-    false
-  else
-    let limit = sl - nl in
-    let rec loop i =
-      if i > limit then false
-      else if String.sub s i nl = needle then true
-      else loop (i + 1)
-    in
-    loop 0
-
 (* With_expiry path: caller passes the default env var name, mint
    honors it verbatim. Agent_name is just a free string — the server
    no longer derives env names from it. *)
@@ -91,12 +77,35 @@ let test_login_with_expiry_uses_caller_env_var () =
              (Masc_domain.masc_error_to_string err));
       let shell = Auth_login.render_shell report in
       check bool "shell exports caller-named env var" true
-        (contains_substring ~needle:"export MASC_TOKEN="
+        (String_util.string_contains_substring ~needle:"export MASC_TOKEN="
            shell);
       let json = Auth_login.to_yojson report in
       check string "json status" "ok"
         (Yojson.Safe.Util.member "status" json
-        |> Yojson.Safe.Util.to_string)
+        |> Yojson.Safe.Util.to_string);
+      check (list string) "json login schema"
+        [ "agent_name"
+        ; "auth_change"
+        ; "auth_config_path"
+        ; "base_path"
+        ; "bearer_token"
+        ; "dashboard_url"
+        ; "mcp_client"
+        ; "mcp_url"
+        ; "raw_token_file"
+        ; "role"
+        ; "status"
+        ]
+        (json
+         |> Yojson.Safe.Util.to_assoc
+         |> List.map fst
+         |> List.sort String.compare);
+      check string "json raw token file" report.raw_token_file
+        (Yojson.Safe.Util.member "raw_token_file" json
+         |> Yojson.Safe.Util.to_string);
+      check string "json mcp url" report.mcp_url
+        (Yojson.Safe.Util.member "mcp_url" json
+         |> Yojson.Safe.Util.to_string)
 
 (* Long_lived path: caller passes an arbitrary env var name and
    asks for a no-expiry credential. The server passes the name
@@ -129,13 +138,92 @@ let test_login_long_lived_passes_env_var_through () =
              (Masc_domain.masc_error_to_string err));
       let shell = Auth_login.render_shell report in
       check bool "shell exports caller-named env var" true
-        (contains_substring ~needle:"export CUSTOM_MCP_TOKEN="
+        (String_util.string_contains_substring ~needle:"export CUSTOM_MCP_TOKEN="
            shell);
       let json = Auth_login.to_yojson report in
       check string "json client env passthrough" "CUSTOM_MCP_TOKEN"
         (Yojson.Safe.Util.member "mcp_client" json
          |> Yojson.Safe.Util.member "token_env_var"
          |> Yojson.Safe.Util.to_string)
+
+(* Expires_in_hours path: the caller names the window and the credential
+   carries it. The workspace default is a day, so a credential that outlives a
+   day is proof the caller's number won rather than the config's.
+
+   The bound is checked by bracketing rather than parsing: rfc3339 UTC strings
+   are fixed-width and zero-padded, so string order is time order, and a
+   two-day bracket around the target cannot flake on clock skew or on the test
+   running across a midnight. *)
+let test_login_expires_in_hours_outlives_the_config_window () =
+  with_temp_dir "auth-login-named-window" @@ fun base_path ->
+  let hours = 24 * 30 in
+  match
+    Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name:"month-long-client" ~role:Masc_domain.Worker
+      ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:(Auth_login.Expires_in_hours hours) ()
+  with
+  | Error err ->
+      failf "named-window login mint failed: %s"
+        (Masc_domain.masc_error_to_string err)
+  | Ok report -> (
+      match
+        Auth.find_credential_by_token base_path ~token:report.bearer_token
+      with
+      | Error err ->
+          failf "minted named-window token did not verify: %s"
+            (Masc_domain.masc_error_to_string err)
+      | Ok cred -> (
+          match cred.expires_at with
+          | None ->
+              fail "a named window must still expire; this one never does"
+          | Some expires_at ->
+              let day = 24. *. 3600. in
+              let at offset_days =
+                Masc_domain.iso8601_of_unix_seconds
+                  (Unix.gettimeofday () +. (offset_days *. day))
+              in
+              check bool "later than twenty-nine days out" true
+                (String.compare expires_at (at 29.) > 0);
+              check bool "sooner than thirty-one days out" true
+                (String.compare expires_at (at 31.) < 0)))
+
+(* A window the auth config could never hold comes back as an error. The config
+   path answers the same question by raising, because a config that got past
+   decoding cannot be out of range; a number a caller computed can be, and the
+   caller is the one who can report it. *)
+let test_login_rejects_a_window_outside_the_bound () =
+  with_temp_dir "auth-login-impossible-window" @@ fun base_path ->
+  let mint hours =
+    Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name:"impossible-window" ~role:Masc_domain.Worker
+      ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:(Auth_login.Expires_in_hours hours) ()
+  in
+  check bool "zero hours is not a window" true (Result.is_error (mint 0));
+  check bool "a negative window is not a window" true
+    (Result.is_error (mint (-1)));
+  check bool "beyond a year is not a window" true
+    (Result.is_error (mint 8_761));
+  check bool "a year exactly still is" true (Result.is_ok (mint 8_760))
+
+(* The two flags that can name a lifetime name different ones, so asking for
+   both is refused rather than resolved by precedence. A precedence rule would
+   quietly hand back the policy the operator did not ask for, and how long a
+   bearer lives is not something to pick for them. *)
+let test_lifetime_flags_refuse_to_pick_for_the_operator () =
+  let asked ~no_expiry ~expiry_hours =
+    Auth_login.lifetime_of_flags ~no_expiry ~expiry_hours
+  in
+  check bool "neither flag leaves the workspace's window" true
+    (asked ~no_expiry:false ~expiry_hours:None = Ok Auth_login.With_expiry);
+  check bool "--no-expiry alone means no expiry" true
+    (asked ~no_expiry:true ~expiry_hours:None = Ok Auth_login.Long_lived);
+  check bool "--expiry-hours alone names the window" true
+    (asked ~no_expiry:false ~expiry_hours:(Some 720)
+     = Ok (Auth_login.Expires_in_hours 720));
+  check bool "both together is refused, not resolved" true
+    (Result.is_error (asked ~no_expiry:true ~expiry_hours:(Some 720)))
 
 let test_login_url_uses_uri_components () =
   with_temp_dir "auth-login-uri" @@ fun base_path ->
@@ -157,6 +245,28 @@ let test_login_url_uses_uri_components () =
     check (option string) "MCP IPv6 host" (Some "::1") (Uri.host mcp);
     check string "MCP path" "/mcp" (Uri.path mcp)
 
+(* What login persists is what a local client can read back. Asserting the
+   round trip rather than the path keeps the two sides free to move together
+   and pinned to each other. *)
+let test_persisted_token_round_trips () =
+  with_temp_dir "auth-login-read" @@ fun base_path ->
+  check (option string) "absent agent has no persisted token" None
+    (Auth_login.read_persisted_token ~base_path ~agent_name:"masc-tui");
+  match
+    Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name:"masc-tui" ~role:Masc_domain.Worker
+      ~token_env_var:"MASC_TOKEN"
+      ~token_lifetime:Auth_login.With_expiry ()
+  with
+  | Error err ->
+      failf "login mint failed: %s" (Masc_domain.masc_error_to_string err)
+  | Ok report ->
+      check (option string) "the client reads back what login wrote"
+        (Some report.bearer_token)
+        (Auth_login.read_persisted_token ~base_path ~agent_name:"masc-tui");
+      check (option string) "another agent's file is not borrowed" None
+        (Auth_login.read_persisted_token ~base_path ~agent_name:"other-agent")
+
 let () =
   run "auth_login"
     [
@@ -166,7 +276,15 @@ let () =
             test_login_with_expiry_uses_caller_env_var;
           test_case "long-lived honors caller env var + no expires_at"
             `Quick test_login_long_lived_passes_env_var_through;
+          test_case "naming both lifetimes is refused" `Quick
+            test_lifetime_flags_refuse_to_pick_for_the_operator;
+          test_case "a named window outlives the config window" `Quick
+            test_login_expires_in_hours_outlives_the_config_window;
+          test_case "a window outside the bound is refused, not raised" `Quick
+            test_login_rejects_a_window_outside_the_bound;
           test_case "URL uses URI components" `Quick
             test_login_url_uses_uri_components;
+          test_case "persisted token round-trips" `Quick
+            test_persisted_token_round_trips;
         ] );
     ]

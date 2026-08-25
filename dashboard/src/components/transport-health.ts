@@ -1,23 +1,29 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
+import { Option } from 'effect'
 import { lastEvent } from '../sse'
 import type { SSEEvent } from '../types'
 import { FetchScheduler } from '../lib/fetch-scheduler'
 import { SECONDS_PER_MINUTE, SECONDS_PER_HOUR } from '../lib/format-time'
+import { createEffectResource } from '../lib/effect-resource'
 import {
-  fetchTransportHealth,
   decodeTransportHealthData,
+  fetchTransportHealth,
+  isTransportHealthReady,
   type HotSession,
   type TransportHealthData,
+  type TransportHealthError,
+  type TransportHealthSnapshot,
 } from '../api/transport-health'
-import { createManagedAsyncResource } from '../lib/async-state'
+import { dashboardRuntime, type DashboardHttp } from '../api/effect-http'
 import { TextInput } from './common/input'
 import { StatusDot } from './common/status-dot'
 import { CopyIdButton } from './common/copy-id-button'
 import { ActionButton } from './common/button'
 import { StatTile } from './common/stat-tile'
 import { SectionCard } from './common/card'
+import { sseEventFamily } from '../lib/sse-event-type'
 
 export type StatusTone = 'ok' | 'warn' | 'bad'
 
@@ -34,8 +40,11 @@ type PracticalCase = {
   live: (data: TransportHealthData) => string
 }
 
-const transportHealthResource = createManagedAsyncResource<TransportHealthData>()
-let inflightTransportHealthRefresh: Promise<void> | null = null
+const transportHealthResource = createEffectResource<
+  DashboardHttp,
+  TransportHealthError,
+  TransportHealthSnapshot
+>(dashboardRuntime)
 
 // Module-scoped search state for the hot-sessions list (stale-filter-carryover
 // bug guard: must be cleared in resetTransportHealthState).
@@ -64,16 +73,13 @@ export function filterHotSessions(
 }
 
 export function resetTransportHealthState(): void {
-  inflightTransportHealthRefresh = null
   hotSessionsSearchQuery.value = ''
   transportHealthResource.reset()
 }
 
 /** Hydrate transport health from a server-push payload — zero HTTP fetch. */
 export function hydrateTransportHealthFromSSE(data: unknown): void {
-  const decoded = decodeTransportHealthData(data)
-  if (!decoded) return
-  transportHealthResource.reset(decoded)
+  void transportHealthResource.load(decodeTransportHealthData(data))
 }
 
 const PRACTICAL_CASES: PracticalCase[] = [
@@ -99,15 +105,7 @@ const PRACTICAL_CASES: PracticalCase[] = [
     transport: 'WebSocket',
     endpoint: () => '/ws',
     description: '양방향 소켓. operator UI 제어용.',
-    live: (data) => `${data.websocket.listening ? 'live' : 'down'} · ${data.websocket.sessions} sessions · port ${data.websocket.port}`,
-  },
-  {
-    id: 'p2p-fastlane',
-    title: 'P2P 패스트 레인',
-    transport: 'WebRTC',
-    endpoint: () => '/webrtc/offer -> /webrtc/answer',
-    description: 'DataChannel P2P. signaling 후 직접 연결.',
-    live: (data) => `${data.webrtc.connected_channels} channels · ${data.webrtc.active_peers} peers`,
+    live: (data) => `${data.websocket.listening ? 'live' : 'down'} · ${data.websocket.sessions} sessions · same-origin`,
   },
   {
     id: 'stateless-control',
@@ -115,19 +113,12 @@ const PRACTICAL_CASES: PracticalCase[] = [
     transport: 'Streamable HTTP',
     endpoint: (data) => data.streamable_http.endpoint,
     description: 'Stateless POST. 세션 불필요.',
-    live: (data) => `${formatMetricValue(data.summary.recent_messages)} recent msgs · ${formatMetricValue(data.cluster.active_operations)} active ops`,
+    live: (data) => `${data.http2.listener_mode} · ${data.streamable_http.supports_post ? 'POST ready' : 'POST unavailable'}`,
   },
 ]
 
-async function refreshTransportHealth(): Promise<void> {
-  if (inflightTransportHealthRefresh) return inflightTransportHealthRefresh
-  inflightTransportHealthRefresh = transportHealthResource
-    .load((signal) => fetchTransportHealth({ signal }))
-    .then(() => {})
-    .finally(() => {
-      inflightTransportHealthRefresh = null
-    })
-  return inflightTransportHealthRefresh
+function refreshTransportHealth(): Promise<void> {
+  return transportHealthResource.load(fetchTransportHealth())
 }
 
 export function shouldRefreshFromEvent(event: SSEEvent): boolean {
@@ -135,12 +126,10 @@ export function shouldRefreshFromEvent(event: SSEEvent): boolean {
   if (!type) return false
   if (type === 'keeper_heartbeat') return false
   if (type === 'broadcast' || type === 'masc/broadcast') return true
-  if (type === 'agent_bound' || type === 'masc/agent_bound') return true
-  if (type === 'agent_unbound' || type === 'masc/agent_unbound') return true
-  if (type.startsWith('task_') || type.startsWith('masc/task_')) return true
-  if (type.startsWith('keeper_') || type.startsWith('masc/keeper_')) return true
-  if (type.startsWith('decision_') || type === 'runtime_param_changed') return true
-  return type.startsWith('client_input_')
+  // 예전에는 계열마다 bare 이름과 masc/ 쌍둥이를 각각 startsWith 로 물었다.
+  const family = sseEventFamily(type)
+  if (family === 'task' || family === 'keeper' || family === 'decision') return true
+  return type === 'runtime_param_changed'
 }
 
 /**
@@ -265,20 +254,6 @@ export function websocketTone(data: TransportHealthData): StatusTone {
   return base
 }
 
-export function webrtcActive(data: TransportHealthData): boolean {
-  return data.webrtc.connected_channels > 0
-    || data.webrtc.live_connections > 0
-    || data.webrtc.active_peers > 0
-}
-
-export function webrtcTone(data: TransportHealthData): StatusTone {
-  return transportTone(
-    data.webrtc.configured,
-    data.webrtc.signaling_available,
-    webrtcActive(data),
-  )
-}
-
 export function http2Tone(data: TransportHealthData): StatusTone {
   return data.http2.multiplex_ready ? 'ok' : 'warn'
 }
@@ -295,23 +270,20 @@ export function agentPoolTone(data: TransportHealthData): StatusTone {
   return data.agent_health.lifecycle_dispatch_rejections_total > 0 ? 'warn' : 'ok'
 }
 
-export function formatMetricValue(value: number | null): string | number {
-  return value === null ? 'n/a' : value
-}
-
-export function transportTruthLine(data: TransportHealthData): string | null {
+export function transportTruthLine(data: TransportHealthData): string {
   const diagnostics = data.projection_diagnostics
-  if (!diagnostics) return null
   const parts = [
     diagnostics.source,
     `cache ${diagnostics.cache_state}`,
   ]
-  if (diagnostics.stale_age_ms !== null) {
-    parts.push(`stale ${diagnostics.stale_age_ms}ms`)
-  } else if (diagnostics.last_success_at) {
-    parts.push(`last ok ${diagnostics.last_success_at}`)
-  }
-  return parts.join(' · ')
+  const freshness = Option.orElse(
+    Option.map(diagnostics.stale_age_ms, staleAgeMs => `stale ${staleAgeMs}ms`),
+    () => Option.map(diagnostics.last_success_at, lastSuccessAt => `last ok ${lastSuccessAt}`),
+  )
+  return Option.match(freshness, {
+    onSome: value => [...parts, value].join(' · '),
+    onNone: () => parts.join(' · '),
+  })
 }
 
 function MetricRow({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
@@ -331,11 +303,10 @@ export function transportEyebrow(configured: boolean, listening: boolean, port: 
   return listening ? `:${port} 활성` : `:${port} 중단`
 }
 
-export function webrtcEyebrow(data: TransportHealthData): string {
-  if (!data.webrtc.configured) return '비활성'
-  return data.webrtc.signaling_available
-    ? `${data.webrtc.ice_server_count} ICE · 시그널링 준비`
-    : '시그널링 중단'
+/** WebSocket rides the HTTP listener, so there is no separate port to show. */
+export function sameOriginEyebrow(configured: boolean, listening: boolean): string {
+  if (!configured) return '비활성'
+  return listening ? '/ws 활성' : '/ws 중단'
 }
 
 function TransportStatusBadge({ status, label }: { status: StatusTone; label: string }) {
@@ -364,71 +335,73 @@ export function TransportHealthPanel() {
       { cooldownMs: 0, debounceMs: 1200 },
     )
 
-    const interval = setInterval(() => {
-      void refreshTransportHealth()
-    }, 30_000)
-
+    // No periodic poll: the server recomputes this surface on a 30s
+    // Proactive_refresh and pushes `transport_health_snapshot`, which
+    // sse-store hydrates into this same resource. A client timer could
+    // only re-read the same 30s cache entry the push already delivered.
     const unsubscribe = lastEvent.subscribe((event) => {
       if (!event || !shouldRefreshFromEvent(event)) return
       sseRefreshScheduler.request()
     })
 
     return () => {
-      clearInterval(interval)
       unsubscribe()
       sseRefreshScheduler.dispose()
+      transportHealthResource.cancel()
     }
   }, [])
 
-  const { data, loading, error } = transportHealthResource.state.value
-
-  if (loading && !data) {
-    return html`<div class="p-6 text-center text-text-muted text-sm" role="status">트랜스포트 상태 로딩 중...</div>`
+  const state = transportHealthResource.state.value
+  switch (state._tag) {
+    case 'Initial':
+      return null
+    case 'Failure':
+      return html`<div class="p-6 text-center text-[var(--color-status-err)] text-sm" role="alert">${state.error.message}</div>`
+    case 'Loading':
+      return Option.match(state.previous, {
+        onNone: () =>
+          html`<div class="p-6 text-center text-text-muted text-sm" role="status">트랜스포트 상태 로딩 중...</div>`,
+        onSome: data => html`<${TransportHealthContent} data=${data} />`,
+      })
+    case 'Success':
+      return html`<${TransportHealthContent} data=${state.value} />`
   }
+}
 
-  if (error && !data) {
-    return html`<div class="p-6 text-center text-[var(--color-status-err)] text-sm" role="alert">${error}</div>`
+function TransportHealthContent({ data }: { data: TransportHealthSnapshot }) {
+  const producerFailure = Option.map(
+    data.projection_diagnostics.stale_reason,
+    reason =>
+      Option.match(data.projection_diagnostics.last_error_at, {
+        onNone: () => reason,
+        onSome: errorAt => `${reason} · ${errorAt}`,
+      }),
+  )
+  if (Option.isSome(producerFailure)) {
+    return html`<div class="p-6 text-center text-[var(--color-status-err)] text-sm" role="alert">${producerFailure.value}</div>`
   }
-
-  if (!data) return null
-  if (!data.summary || !data.agent_health) {
-    return html`<div class="p-6 text-center text-text-muted text-sm">트랜스포트 데이터 불완전. <${ActionButton} variant="subtle" size="sm" class="underline" onClick=${() => void refreshTransportHealth()}>재시도<//></div>`
+  if (!isTransportHealthReady(data)) {
+    return html`<div class="p-6 text-center text-text-muted text-sm" role="status">${data.message}</div>`
   }
 
   const sseStatus = sseTone(data)
   const grpcStatus = grpcTone(data)
   const wsStatus = websocketTone(data)
-  const webrtcStatus = webrtcTone(data)
   const h2Status = http2Tone(data)
-  const clusterStatus = data.cluster.topology_available ? agentPoolTone(data) : 'warn'
-  const hasAnyBadTransport = [sseStatus, grpcStatus, wsStatus, webrtcStatus, h2Status, clusterStatus].includes('bad')
-  const clusterEyebrow = data.cluster.topology_available
-    ? `${formatMetricValue(data.cluster.live_agents)} live`
-    : data.cluster.topology_source
-  const managedUnitsSub = data.cluster.topology_available
-    ? `${formatMetricValue(data.cluster.total_units)} 전체`
-    : `topology ${data.cluster.topology_source}`
-  const namespaceChip =
-    data.cluster.cluster && data.cluster.cluster !== 'unknown' && data.cluster.cluster !== 'default'
-      ? `${data.cluster.cluster} / namespace ${data.cluster.workspace_id}`
-      : `namespace ${data.cluster.workspace_id}`
+  const agentStatus = agentPoolTone(data)
+  const hasAnyBadTransport = [sseStatus, grpcStatus, wsStatus, h2Status, agentStatus].includes('bad')
   const truthLine = transportTruthLine(data)
 
   return html`
     <div class="v2-monitoring-surface flex flex-col gap-4">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <div class="flex items-center gap-2">
-            <span class="text-base text-text-strong">트랜스포트</span>
-            <span class="text-3xs uppercase tracking-wider text-text-muted">${namespaceChip}</span>
-          </div>
+          <div class="text-base text-text-strong">트랜스포트</div>
           <div class="mt-1 text-sm text-text-body">
             primary path: <span class="font-mono text-text-strong">${data.summary.primary_path}</span>
             <span class=${`ml-2 text-2xs uppercase tracking-wider ${toneTextClass(sseStatus)}`}>${data.summary.queue_pressure}</span>
           </div>
-          ${truthLine
-            ? html`<div class="mt-1 text-2xs text-text-muted">${truthLine}</div>`
-            : null}
+          <div class="mt-1 text-2xs text-text-muted">${truthLine}</div>
         </div>
         <${ActionButton}
           variant="subtle"
@@ -451,15 +424,14 @@ export function TransportHealthPanel() {
           status=${toneToStatus(queuePressureTone(data.summary.queue_pressure))}
         />
         <${StatTile}
-          label="최근 메시지"
-          value=${formatMetricValue(data.summary.recent_messages)}
-          status="brass"
+          label="gRPC 구독자"
+          value=${String(data.grpc.subscribers)}
+          status=${toneToStatus(grpcStatus)}
         />
         <${StatTile}
-          label="Live 에이전트"
-          value=${formatMetricValue(data.cluster.live_agents)}
-          status=${toneToStatus(clusterStatus)}
-          delta=${data.cluster.active_operations ? { direction: 'flat', text: `${formatMetricValue(data.cluster.active_operations)} ops` } : undefined}
+          label="WebSocket 세션"
+          value=${String(data.websocket.sessions)}
+          status=${toneToStatus(wsStatus)}
         />
       </div>
 
@@ -470,7 +442,6 @@ export function TransportHealthPanel() {
             <${TransportStatusBadge} status=${sseStatus} label="SSE" />
             <${TransportStatusBadge} status=${grpcStatus} label="gRPC" />
             <${TransportStatusBadge} status=${wsStatus} label="WS" />
-            <${TransportStatusBadge} status=${webrtcStatus} label="RTC" />
             <${TransportStatusBadge} status=${h2Status} label="HTTP" />
           </span>
         </summary>
@@ -505,17 +476,12 @@ export function TransportHealthPanel() {
               </div>
             <//>
 
-            <${SectionCard} label="WebSocket" status=${wsStatus} eyebrow=${transportEyebrow(data.websocket.configured, data.websocket.listening, data.websocket.port)}>
+            <${SectionCard} label="WebSocket" status=${wsStatus} eyebrow=${sameOriginEyebrow(data.websocket.configured, data.websocket.listening)}>
               <div class="divide-y divide-card-border/50">
                 <${MetricRow} label="리스너" value=${data.websocket.listening ? 'live' : 'down'} />
                 <${MetricRow} label="세션" value=${data.websocket.sessions} />
                 <${MetricRow} label="모드" value=${data.websocket.mode} />
                 <${MetricRow} label="릴레이 소스" value=${data.websocket.relay_source} />
-                <${MetricRow}
-                  label="파싱 캐시"
-                  value=${formatHitRate(data.websocket.delivery.parse_cache_hits, data.websocket.delivery.parse_cache_misses)}
-                  sub=${`${data.websocket.delivery.parse_cache_hits} 히트 / ${data.websocket.delivery.parse_cache_misses} 미스`}
-                />
                 <${MetricRow}
                   label="바이트 캐시"
                   value=${formatHitRate(data.websocket.delivery.bytes_cache_hits, data.websocket.delivery.bytes_cache_misses)}
@@ -534,31 +500,16 @@ export function TransportHealthPanel() {
               </div>
             <//>
 
-            <${SectionCard} label="WebRTC" status=${webrtcStatus} eyebrow=${webrtcEyebrow(data)}>
-              <div class="divide-y divide-card-border/50">
-                <${MetricRow} label="시그널링" value=${data.webrtc.signaling_available ? 'ready' : 'down'} sub=${data.webrtc.signaling_mode} />
-                <${MetricRow} label="연결된 채널" value=${data.webrtc.connected_channels} />
-                <${MetricRow} label="활성 피어" value=${data.webrtc.active_peers} />
-                <${MetricRow} label="대기 오퍼" value=${data.webrtc.pending_offers} />
-                <${MetricRow} label="라이브 연결" value=${data.webrtc.live_connections} />
-              </div>
-            <//>
-
             <${SectionCard} label="HTTP" status=${h2Status} eyebrow=${data.http2.listener_mode}>
               <div class="divide-y divide-card-border/50">
                 <${MetricRow} label="POST" value=${data.streamable_http.endpoint} />
                 <${MetricRow} label="옵저버 스트림" value=${data.streamable_http.observer_stream} />
                 <${MetricRow} label="프레즌스 스트림" value=${data.streamable_http.presence_stream} />
-                <${MetricRow} label="오퍼레이터 표면" value=${data.streamable_http.operator_endpoint} />
               </div>
             <//>
 
-            <${SectionCard} label="에이전트 풀" status=${clusterStatus} eyebrow=${clusterEyebrow}>
+            <${SectionCard} label="에이전트 상태" status=${agentStatus} eyebrow=${data.agent_health.stale_total === 0 ? '정상' : `${data.agent_health.stale_total} stale`}>
               <div class="divide-y divide-card-border/50">
-                <div class="text-3xs text-text-muted mb-2">클러스터 내 관리 유닛 풀. 부실(stale) = 하트비트가 끊긴 에이전트.</div>
-                <${MetricRow} label="관리 유닛" value=${formatMetricValue(data.cluster.managed_units)} sub=${managedUnitsSub} />
-                <${MetricRow} label="활성 작업" value=${formatMetricValue(data.cluster.active_operations)} />
-                <${MetricRow} label="부실 유닛" value=${formatMetricValue(data.cluster.stale_units)} />
                 <${MetricRow} label="부실 에이전트" value=${data.agent_health.stale_total} />
                 <${MetricRow} label="라이프사이클 거부" value=${data.agent_health.lifecycle_dispatch_rejections_total} />
               </div>
@@ -580,7 +531,7 @@ export function TransportHealthPanel() {
               </summary>
               <div class="p-4">
                 <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-                  <div class="text-2xs text-text-muted">SSE 세션 중 메시지 큐가 쌓여 있는 세션입니다. 큐 depth가 높으면 해당 클라이언트가 이벤트 처리를 따라가지 못하고 있습니다.</div>
+                  <div class="text-2xs text-text-muted">메시지 큐가 쌓인 SSE 세션 — depth가 높으면 클라이언트 처리 지연</div>
                   <${TextInput}
                     type="search"
                     class="min-w-45 flex-1 !py-1 !text-2xs"
@@ -628,7 +579,7 @@ export function TransportHealthPanel() {
           <span class="ml-auto text-2xs font-normal text-text-muted">각 트랜스포트의 실제 연결 방법 레퍼런스</span>
         </summary>
         <div class="p-4">
-          <div class="text-2xs text-text-muted mb-3">5가지 트랜스포트(SSE, gRPC, WebSocket, WebRTC, HTTP)를 실제로 어떻게 연결하는지 보여주는 가이드입니다. 운영 데이터가 아닌 참조용 정보입니다.</div>
+          <div class="text-2xs text-text-muted mb-3">트랜스포트 연결 가이드 (참조용)</div>
           <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
             ${PRACTICAL_CASES.map((item) => html`<${CaseCard} item=${item} data=${data} />`)}
           </div>

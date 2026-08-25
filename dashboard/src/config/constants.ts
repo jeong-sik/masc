@@ -7,11 +7,17 @@ export const DEFAULT_MASC_HOST = 'localhost'
 export const DEFAULT_MASC_PORT = 8935
 export const DEFAULT_MASC_ORIGIN = `http://${DEFAULT_MASC_HOST}:${DEFAULT_MASC_PORT}`
 
-// --- OAS event namespace ---
-// SSE event types emitted by the OAS keeper runtime are namespaced with this
-// prefix (e.g. "oas:context_compacted"). Single source so the prefix string and
+// --- Agent Core event namespace ---
+// SSE event types emitted by the Agent Core keeper runtime are namespaced with this
+// prefix (e.g. "agent_core:context_compacted"). Single source so the prefix string and
 // its strip length stay in sync across the parser and ingress guards.
-export const OAS_EVENT_PREFIX = 'oas:'
+export const AGENT_CORE_EVENT_PREFIX = 'agent_core:'
+
+// --- MASC event namespace ---
+// A subset of events is published twice: once bare and once under this
+// namespace. `SSEEventType` lists both spellings; the prefix lived as a bare
+// literal in sse-store.ts and a local const in sse.ts before this.
+export const MASC_EVENT_PREFIX = 'masc/'
 
 // --- HTTP timeouts (milliseconds) ---
 // Backend dashboard timeout is 30s; frontend must wait slightly longer.
@@ -19,9 +25,6 @@ export const DEFAULT_GET_TIMEOUT_MS = 35_000
 export const DEFAULT_POST_TIMEOUT_MS = 30_000
 export const DEFAULT_MCP_TIMEOUT_MS = 60_000
 export const NAMESPACE_TRUTH_GET_TIMEOUT_MS = 30_000
-export const MCP_INITIALIZE_TIMEOUT_MS = 10_000
-export const MCP_INITIALIZED_NOTIFY_TIMEOUT_MS = 5_000
-export const MCP_INIT_COOLDOWN_MS = 2_000
 // Dashboard WS JSON-RPC timeout. Matches the backend dashboard handler budget
 // so a slow first response under Executor_pool contention is not turned into
 // a reconnect by the client side.
@@ -42,17 +45,28 @@ export const TRANSPORT_RETRY_MAX_MS = 30_000
 export const TRANSPORT_RETRY_JITTER_MS = 1_000
 export const TRANSPORT_RETRY_MAX_ATTEMPTS = 10
 
-// --- Reconnect backoff (shared by SSE and dashboard WS) ---
+// --- Reconnect backoff (dashboard WS) ---
 // Cap at 60s with plus/minus 1s jitter to break reconnect storms when the server is
 // degraded; fleets of dashboards retrying every 15s synchronously was
 // observed to amplify Executor_pool starvation on cold start.
-export const RECONNECT_BASE_MS = 1_000
 export const RECONNECT_MAX_MS = 60_000
 export const RECONNECT_JITTER_MS = 1_000
 
 // --- Refresh & debounce (milliseconds) ---
 export const SHELL_TTL_MS = 5_000
-export const HEARTBEAT_STALE_MS = 120_000
+// Ordinary agents retain the backend's two-minute liveness window. Keeper
+// freshness is cadence-aware and comes from the server's resolved runtime
+// parameter projection; the fallback is deliberately conservative for an old
+// server that does not expose that field yet.
+export const AGENT_HEARTBEAT_STALE_MS = 120_000
+export const KEEPER_HEARTBEAT_STALE_FALLBACK_MS = 120_000
+export function keeperHeartbeatStaleMs(staleAfterSeconds: unknown): number {
+  return typeof staleAfterSeconds === 'number'
+    && Number.isFinite(staleAfterSeconds)
+    && staleAfterSeconds > 0
+    ? staleAfterSeconds * 1000
+    : KEEPER_HEARTBEAT_STALE_FALLBACK_MS
+}
 export const UI_REFRESH_TTL_MS = 1_000
 export const MISSION_BRIEFING_POLL_DELAY_MS = 1_500
 export const SSE_DEFAULT_DEBOUNCE_MS = 500
@@ -74,27 +88,19 @@ export const CONTEXT_RATIO_COMPACTING = 0.50 // compacting
 
 // --- Keeper UI/runtime limits ---
 export const KEEPER_HISTORY_TAIL_MESSAGES = 200
-export const KEEPER_STREAM_IDLE_POLL_MS = 5_000
 export const STREAMING_THINKING_PREVIEW_CHARS = 6_000
-
-// --- Keeper catch-up digest ---
-// Minimum count of aggregate new activity (messages + turns + tasks + board +
-// lifecycle events + transport failures) required before the since-last-seen
-// digest card is rendered. Below this the card is noise; the transcript and the
-// unread divider still carry the detail. read_errors override this (fail-visible).
-export const KEEPER_DIGEST_MIN_ACTIVITY = 1
 
 // --- Buffer & cache sizes (Vite env overridable) ---
 // Defaults balance memory/render cost against available history. Users who
-// want deeper replay (e.g. OAS telemetry) can raise the ceiling at build
+// want deeper replay (e.g. Agent Core telemetry) can raise the ceiling at build
 // time without editing this file:
-//   VITE_OAS_TELEMETRY_REPLAY_LIMIT=2000 pnpm --filter masc-dashboard build
+//   VITE_AGENT_CORE_TELEMETRY_REPLAY_LIMIT=2000 pnpm --filter masc-dashboard build
 import { envInt, envString } from './env'
 
 export const MAX_JOURNAL_ENTRIES = envInt('VITE_MAX_JOURNAL_ENTRIES', 200)
-export const OAS_AGENT_EVENT_BUFFER = envInt('VITE_OAS_AGENT_EVENT_BUFFER', 50)
-export const OAS_TELEMETRY_REPLAY_LIMIT = envInt('VITE_OAS_TELEMETRY_REPLAY_LIMIT', 500)
-export const OAS_OPENTELEMETRY_UI_URL = envString('VITE_OAS_OPENTELEMETRY_UI_URL', null)
+export const AGENT_CORE_AGENT_EVENT_BUFFER = envInt('VITE_AGENT_CORE_AGENT_EVENT_BUFFER', 50)
+export const AGENT_CORE_TELEMETRY_REPLAY_LIMIT = envInt('VITE_AGENT_CORE_TELEMETRY_REPLAY_LIMIT', 500)
+export const AGENT_CORE_OPENTELEMETRY_UI_URL = envString('VITE_AGENT_CORE_OPENTELEMETRY_UI_URL', null)
 // Overview telemetry renders a fixed 28-bar sparkline; this bounds raw samples
 // per 5-minute bucket before the summary model takes over for totals/freshness.
 export const OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET = envInt(

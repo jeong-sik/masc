@@ -6,8 +6,7 @@
 (* tla-lint: file-scope: structured audit trail types for FSM transitions. *)
 
 type transition_record =
-  { snapshot : Keeper_measurement.measurement_snapshot option
-  ; events_fired : Keeper_state_machine.event list
+  { events_fired : Keeper_state_machine.event list
   ; selected_event : Keeper_state_machine.event
   ; prev_phase : Keeper_state_machine.phase
   ; new_phase : Keeper_state_machine.phase
@@ -27,11 +26,7 @@ let event_type_of_event event =
 let to_json (r : transition_record) : Yojson.Safe.t =
   let event_type = event_type_of_event r.selected_event in
   `Assoc
-    [ ( "snapshot"
-      , match r.snapshot with
-        | Some s -> Keeper_measurement.measurement_snapshot_to_json s
-        | None -> `Null )
-    ; "events_fired", `List (List.map Keeper_state_machine_json.event_to_json r.events_fired)
+    [ "events_fired", `List (List.map Keeper_state_machine_json.event_to_json r.events_fired)
     ; "selected_event", Keeper_state_machine_json.event_to_json r.selected_event
     ; "event_type", `String event_type
     ; "prev_phase", Keeper_state_machine_json.phase_to_json r.prev_phase
@@ -93,6 +88,62 @@ let turn_fsm_transition_to_json (r : turn_fsm_transition_record) : Yojson.Safe.t
     ; "stop_signaled_after", Json_util.bool_opt_to_json r.turn_fsm_stop_signaled_after
     ; "wall_clock_at", `Float r.turn_fsm_wall_clock_at
     ]
+;;
+
+let turn_fsm_transition_of_json = function
+  | `Assoc fields ->
+    let open Result.Syntax in
+    let surface = "turn_fsm_transition" in
+    let json = `Assoc fields in
+    let allowed =
+      [ "turn_id"
+      ; "prev_state"
+      ; "new_state"
+      ; "action"
+      ; "stop_signaled_before"
+      ; "stop_signaled_after"
+      ; "wall_clock_at"
+      ]
+    in
+    let require_optional_bool field =
+      match List.assoc_opt field fields with
+      | Some `Null -> Ok None
+      | Some (`Bool value) -> Ok (Some value)
+      | Some value ->
+        Error
+          (Printf.sprintf
+             "%s.%s must be a bool or null, got %s"
+             surface
+             field
+             (Json_util.kind_name value))
+      | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+    in
+    let* () = Json_util.reject_unknown_fields ~surface ~allowed fields in
+    let* turn_fsm_turn_id = Json_util.require_int json "turn_id" in
+    let* turn_fsm_prev_state = Json_util.require_string json "prev_state" in
+    let* turn_fsm_new_state = Json_util.require_string json "new_state" in
+    let* turn_fsm_action = Json_util.require_string json "action" in
+    let* turn_fsm_stop_signaled_before =
+      require_optional_bool "stop_signaled_before"
+    in
+    let* turn_fsm_stop_signaled_after =
+      require_optional_bool "stop_signaled_after"
+    in
+    let* turn_fsm_wall_clock_at = Json_util.require_float json "wall_clock_at" in
+    Ok
+      { turn_fsm_turn_id
+      ; turn_fsm_prev_state
+      ; turn_fsm_new_state
+      ; turn_fsm_action
+      ; turn_fsm_stop_signaled_before
+      ; turn_fsm_stop_signaled_after
+      ; turn_fsm_wall_clock_at
+      }
+  | json ->
+    Error
+      (Printf.sprintf
+         "turn_fsm_transition must be an object, got %s"
+         (Json_util.kind_name json))
 ;;
 
 let completed_turn_of_json = function

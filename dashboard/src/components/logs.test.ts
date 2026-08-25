@@ -3,7 +3,8 @@ import { resolve } from 'node:path'
 import { h } from 'preact'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { LogEntry } from '../api/dashboard'
+import { Effect } from 'effect'
+import type { LogEntry, LogsData } from '../api/dashboard-logs'
 import {
   deltaMergeCap,
   logDiagnosticCause,
@@ -14,15 +15,33 @@ import {
 function entry(overrides: Partial<LogEntry>): LogEntry {
   return {
     seq: 1,
-    ts: '2026-05-14T00:00:00Z',
+    timestamp: '2026-05-14T00:00:00Z',
     level: 'INFO',
     source: 'structured',
     module: 'Keeper',
     message: 'ok',
-    keeper_name: null,
-    turn_id: null,
-    details: null,
+    keeperName: 'system',
+    hasTurn: false,
+    details: {},
     category: null,
+    ...overrides,
+  }
+}
+
+function logData(
+  entries: readonly LogEntry[],
+  overrides: Partial<LogsData> = {},
+): LogsData {
+  return {
+    generatedAt: '2026-05-15T01:00:00Z',
+    source: 'masc_log_ring',
+    retention: {
+      scope: 'dashboard_logs',
+      durableStore: '/Users/dancer/me/.masc/logs/system_log_2026-05-15.jsonl',
+    },
+    ring: { startSeq: 0, total: entries.length, droppedBefore: false },
+    total: entries.length,
+    entries,
     ...overrides,
   }
 }
@@ -37,20 +56,16 @@ function deferred<T>() {
 
 async function loadLogs(
   fetchLogs: ReturnType<typeof vi.fn>,
-  providerMocks?: {
-    fetchProviderLogsCatalog?: ReturnType<typeof vi.fn>
-    fetchProviderLogTail?: ReturnType<typeof vi.fn>
-  },
 ) {
-  const fetchProviderLogsCatalog = providerMocks?.fetchProviderLogsCatalog
-    ?? vi.fn().mockResolvedValue({ providers: [] })
-  const fetchProviderLogTail = providerMocks?.fetchProviderLogTail
-    ?? vi.fn().mockResolvedValue({ provider: { id: 'none', display_name: 'none', protocol: 'none' }, entries: [] })
   vi.resetModules()
-  vi.doMock('../api/dashboard.js', () => ({
-    fetchLogs,
-    fetchProviderLogsCatalog,
-    fetchProviderLogTail,
+  vi.doMock('../api/dashboard-logs', () => ({
+    fetchLogs: (request: unknown) => Effect.promise(async () => {
+      const callFetchLogs = fetchLogs as (request: unknown) => unknown
+      const response = await callFetchLogs(request) as Partial<LogsData> & {
+        readonly entries: readonly LogEntry[]
+      }
+      return logData(response.entries, response)
+    }),
   }))
   return import('./logs')
 }
@@ -62,7 +77,7 @@ describe('log diagnostics', () => {
         entry({
           level: 'WARN',
           message:
-            'keeper_llm_bridge: OAS execution timed out after 300.0s (budget=300s)',
+            'keeper_llm_bridge: Agent Core execution timed out after 300.0s (budget=300s)',
         }),
       ),
     ).toBeNull()
@@ -121,8 +136,8 @@ describe('log diagnostics', () => {
         message: 'keeper provider timeout',
         details: {
           failure_envelope: {
-            surface: 'keeper_oas_bridge',
-            entity_kind: 'oas_execution',
+            surface: 'keeper_agent_core_bridge',
+            entity_kind: 'agent_core_execution',
             entity_id: null,
             cause_code: 'provider_timeout',
             severity: 'bad',
@@ -205,18 +220,18 @@ describe('LogViewer Code links', () => {
     vi.useRealTimers()
     vi.clearAllMocks()
     vi.resetModules()
-    vi.doUnmock('../api/dashboard.js')
+    vi.doUnmock('../api/dashboard-logs')
     window.location.hash = ''
   })
 
-  it('preserves delta rows when an older page resolves after auto-refresh', async () => {
+  it('serializes older paging before the next delta refresh', async () => {
     vi.useFakeTimers()
     const olderPage = deferred<{ total: number; entries: LogEntry[] }>()
-    const fetchLogs = vi.fn((opts?: { since_seq?: number; before_seq?: number }) => {
-      if (typeof opts?.before_seq === 'number') {
+    const fetchLogs = vi.fn((opts?: { sinceSeq?: number; beforeSeq?: number }) => {
+      if (typeof opts?.beforeSeq === 'number') {
         return olderPage.promise
       }
-      if (typeof opts?.since_seq === 'number') {
+      if (typeof opts?.sinceSeq === 'number') {
         return Promise.resolve({
           total: 3,
           entries: [entry({ seq: 11, module: 'Keeper', message: 'delta fresh' })],
@@ -243,13 +258,13 @@ describe('LogViewer Code links', () => {
       fireEvent.click(loadOlderButton!)
     })
     await waitFor(() =>
-      expect(fetchLogs).toHaveBeenCalledWith(expect.objectContaining({ before_seq: 9 })),
+      expect(fetchLogs).toHaveBeenCalledWith(expect.objectContaining({ beforeSeq: 9 })),
     )
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000)
     })
-    await waitFor(() => expect(container.textContent).toContain('delta fresh'))
+    expect(container.textContent).not.toContain('delta fresh')
 
     await act(async () => {
       olderPage.resolve({
@@ -259,36 +274,30 @@ describe('LogViewer Code links', () => {
       await olderPage.promise
     })
 
+    await waitFor(() => expect(container.textContent).toContain('older page'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+
     await waitFor(() => {
       expect(container.textContent).toContain('delta fresh')
       expect(container.textContent).toContain('newest visible')
       expect(container.textContent).toContain('oldest visible')
       expect(container.textContent).toContain('older page')
     })
-    expect(fetchLogs).toHaveBeenCalledWith(expect.objectContaining({ since_seq: 10 }))
+    expect(fetchLogs).toHaveBeenCalledWith(expect.objectContaining({ sinceSeq: 10 }))
   })
 
   it('links safe structured log file details back to the Code IDE route', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue({
-      total: 1,
-      generated_at_iso: '2026-05-15T01:00:00Z',
-      dashboard_surface: '/api/v1/dashboard/logs',
-      source: 'masc_log_ring',
-      retention: {
-        scope: 'dashboard_logs',
-        durable_store: '/Users/dancer/me/.masc/logs/system_log_2026-05-15.jsonl',
-      },
-      latest_seq: 1,
-      entries: [{
+    const fetchLogs = vi.fn().mockResolvedValue(logData([entry({
         seq: 1,
-        ts: '2026-05-14T00:00:00Z',
+        timestamp: '2026-05-14T00:00:00Z',
         level: 'INFO',
         source: 'structured',
         module: 'keeper_tool',
         message: 'read file',
         details: { file_path: 'lib/runtime.ml', line: 12 },
-      }],
-    })
+      })]))
     const { LogViewer } = await loadLogs(fetchLogs)
     const { container } = render(h(LogViewer, {}))
 
@@ -309,109 +318,43 @@ describe('LogViewer Code links', () => {
     )
   })
 
-  it('renders enabled provider log tail from the configured provider path', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue({ total: 0, entries: [] })
-    const fetchProviderLogsCatalog = vi.fn().mockResolvedValue({
-      providers: [{
-        id: 'ollama',
-        display_name: 'Ollama Local',
-        protocol: 'ollama-http',
-        enabled: true,
-        path: '~/.ollama/logs/server.log',
-        resolved_path: '/Users/dancer/.ollama/logs/server.log',
-        default_lines: 200,
-        max_bytes: 1048576,
-      }],
-    })
-    const fetchProviderLogTail = vi.fn().mockResolvedValue({
-      provider: {
-        id: 'ollama',
-        display_name: 'Ollama Local',
-        protocol: 'ollama-http',
-      },
-      entries: [
-        { line: 1, text: 'aborting completion request due to client closing the connection' },
-      ],
-    })
-
-    const { LogViewer } = await loadLogs(fetchLogs, {
-      fetchProviderLogsCatalog,
-      fetchProviderLogTail,
-    })
-    const { container } = render(h(LogViewer, {}))
-
-    await waitFor(() =>
-      expect(container.querySelector('[data-testid="provider-log-tail"]')?.textContent)
-        .toContain('client closing the connection'),
-    )
-    expect(fetchProviderLogTail).toHaveBeenCalledWith('ollama', { lines: 200 })
-    expect(container.textContent).toContain('server.log')
-  })
-
-  // RFC-0079 removed the dropped-rows surface. parseLogsResponse now
+  // RFC-0079 removed the dropped-rows surface. decodeLogsData now
   // throws LogsSchemaDriftError instead of silently dropping bad rows,
   // so there is no "parser dropped N rows" state to render here.
 
   it('renders v2 surface marker classes for CSS scoping', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue({
-      total: 1,
-      entries: [{
+    const fetchLogs = vi.fn().mockResolvedValue(logData([entry({
         seq: 1,
-        ts: '2026-05-14T00:00:00Z',
+        timestamp: '2026-05-14T00:00:00Z',
         level: 'INFO',
         source: 'structured',
         module: 'keeper_tool',
         message: 'read file',
         details: { file_path: 'lib/runtime.ml', line: 12 },
-      }],
-    })
-    const fetchProviderLogsCatalog = vi.fn().mockResolvedValue({
-      providers: [{
-        id: 'ollama',
-        display_name: 'Ollama Local',
-        protocol: 'ollama-http',
-        enabled: true,
-        path: '~/.ollama/logs/server.log',
-        resolved_path: '/Users/dancer/.ollama/logs/server.log',
-        default_lines: 200,
-        max_bytes: 1048576,
-      }],
-    })
-    const fetchProviderLogTail = vi.fn().mockResolvedValue({
-      provider: { id: 'ollama', display_name: 'Ollama Local', protocol: 'ollama-http' },
-      entries: [{ line: 1, text: 'tail line' }],
-    })
-    const { LogViewer } = await loadLogs(fetchLogs, { fetchProviderLogsCatalog, fetchProviderLogTail })
+      })]))
+    const { LogViewer } = await loadLogs(fetchLogs)
     const { container } = render(h(LogViewer, {}))
 
-    await waitFor(() => expect(container.querySelector('.v2-logs-surface')).not.toBeNull())
+    await waitFor(() => expect(container.querySelector('.v2-logs-row')).not.toBeNull())
+    expect(container.querySelector('.v2-logs-surface')).not.toBeNull()
     expect(container.querySelector('.v2-logs-panel')).not.toBeNull()
     expect(container.querySelector('.v2-logs-toolbar')).not.toBeNull()
     expect(container.querySelector('[data-testid="logs-filter-tool"]')).not.toBeNull()
     expect(container.querySelector('.v2-logs-table-header')).not.toBeNull()
-    expect(container.querySelector('.v2-logs-row')).not.toBeNull()
     expect(container.querySelector('[data-testid="logs-row"]')?.getAttribute('data-log-seq')).toBe('1')
     expect(container.querySelector('.v2-logs-summary')).not.toBeNull()
-    expect(container.querySelector('.v2-logs-provider-panel')).not.toBeNull()
-    const diagnostics = container.querySelector('[data-testid="logs-provider-diagnostics"]') as HTMLDetailsElement
-    expect(diagnostics).not.toBeNull()
-    expect(diagnostics.open).toBe(false)
-    expect(diagnostics.querySelector('summary')?.textContent).toContain('Provider diagnostics')
   })
 
   it('does not render Code links for unsafe absolute log file paths', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue({
-      total: 1,
-      entries: [{
+    const fetchLogs = vi.fn().mockResolvedValue(logData([entry({
         seq: 2,
-        ts: '2026-05-14T00:00:00Z',
+        timestamp: '2026-05-14T00:00:00Z',
         level: 'INFO',
         source: 'structured',
         module: 'keeper_tool',
         message: 'read file',
         details: { file_path: '/tmp/runtime.ml', line: 12 },
-      }],
-    })
+      })]))
     const { LogViewer } = await loadLogs(fetchLogs)
     const { container } = render(h(LogViewer, {}))
 
@@ -420,11 +363,9 @@ describe('LogViewer Code links', () => {
   })
 
   it('links nested log evidence into operational IDE routes', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue({
-      total: 1,
-      entries: [{
+    const fetchLogs = vi.fn().mockResolvedValue(logData([entry({
         seq: 3,
-        ts: '2026-05-14T00:00:00Z',
+        timestamp: '2026-05-14T00:00:00Z',
         level: 'WARN',
         source: 'structured',
         module: 'keeper_tool',
@@ -449,8 +390,7 @@ describe('LogViewer Code links', () => {
             },
           },
         },
-      }],
-    })
+      })]))
     const { LogViewer } = await loadLogs(fetchLogs)
     const { container } = render(h(LogViewer, {}))
 
@@ -475,20 +415,10 @@ describe('LogViewer Code links', () => {
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-nested&operation_id=op-nested&worker_run_id=wr-nested&q=turn-8')
   })
   it('filters rows by kind chips and keeps kind-aware details for toolbar view', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue({
-      total: 3,
-      generated_at_iso: '2026-05-15T01:00:00Z',
-      dashboard_surface: '/api/v1/dashboard/logs',
-      source: 'masc_log_ring',
-      retention: {
-        scope: 'dashboard_logs',
-        durable_store: '/Users/dancer/me/.masc/logs/system_log_2026-05-15.jsonl',
-      },
-      latest_seq: 3,
-      entries: [
+    const fetchLogs = vi.fn().mockResolvedValue(logData([
         entry({
           seq: 1,
-          ts: '2026-05-14T00:00:00Z',
+          timestamp: '2026-05-14T00:00:00Z',
           level: 'INFO',
           module: 'keeper_tool',
           category: 'tool',
@@ -502,11 +432,11 @@ describe('LogViewer Code links', () => {
         }),
         entry({
           seq: 2,
-          ts: '2026-05-14T00:00:01Z',
+          timestamp: '2026-05-14T00:00:01Z',
           level: 'INFO',
           module: 'keeper_turn',
-          category: 'routine',
-          turn_id: 2,
+          category: 'turn',
+          hasTurn: true,
           message: 'turn event',
           details: {
             model: 'gpt-4o-mini',
@@ -517,7 +447,7 @@ describe('LogViewer Code links', () => {
         }),
         entry({
           seq: 3,
-          ts: '2026-05-14T00:00:02Z',
+          timestamp: '2026-05-14T00:00:02Z',
           level: 'WARN',
           module: 'keeper_fsm',
           category: 'fsm',
@@ -528,8 +458,7 @@ describe('LogViewer Code links', () => {
             trigger: 'wake',
           },
         }),
-      ],
-    })
+      ]))
 
     const { LogViewer } = await loadLogs(fetchLogs)
     const { container } = render(h(LogViewer, {}))
@@ -584,6 +513,62 @@ describe('LogViewer Code links', () => {
       expect((toolRow as HTMLDivElement).querySelector('.v2-logs-kind-grid')?.textContent).toContain('tool'),
     )
   })
+
+  it('kind chip clicks yield the same rows as the server category filter', async () => {
+    // The chips are the only classification control (the category dropdown is
+    // gone). Each kind is a projection of the producer's typed category, so a
+    // chip click must surface exactly the rows the server `?category=` filter
+    // would for that kind's categories — no more, no less.
+    const fetchLogs = vi.fn().mockResolvedValue(logData([
+        entry({ seq: 1, module: 'keeper_tool', category: 'tool', message: 'tool event' }),
+        entry({ seq: 2, module: 'keeper_turn', category: 'turn', message: 'turn event' }),
+        entry({ seq: 3, module: 'keeper_fsm', category: 'fsm', message: 'fsm event' }),
+        entry({ seq: 4, module: 'keeper_lifecycle', category: 'lifecycle', message: 'lifecycle event' }),
+        entry({ seq: 5, module: 'keeper_heartbeat', category: 'heartbeat', message: 'heartbeat event' }),
+        entry({ seq: 6, module: 'keeper_directive', category: 'directive', message: 'directive event' }),
+        entry({ seq: 7, module: 'keeper_broadcast', category: 'broadcast', message: 'broadcast event' }),
+        entry({ seq: 8, module: 'keeper_routine', category: 'routine', message: 'routine event' }),
+      ]))
+
+    const { LogViewer } = await loadLogs(fetchLogs)
+    const { container } = render(h(LogViewer, {}))
+
+    await waitFor(() => expect(container.textContent).toContain('tool event'))
+
+    // tool kind == server ?category=tool (single category).
+    const toolChip = container.querySelector('[data-testid="logs-filter-tool"]') as HTMLButtonElement
+    await act(async () => { fireEvent.click(toolChip) })
+    await waitFor(() => expect(container.textContent).toContain('tool event'))
+    expect(container.textContent).not.toContain('turn event')
+    expect(container.textContent).not.toContain('fsm event')
+    expect(container.textContent).not.toContain('lifecycle event')
+
+    // lifecycle kind == server ?category=lifecycle|fsm|heartbeat (three categories).
+    const lifecycleChip = container.querySelector('[data-testid="logs-filter-lifecycle"]') as HTMLButtonElement
+    await act(async () => { fireEvent.click(lifecycleChip) })
+    await waitFor(() => expect(container.textContent).toContain('fsm event'))
+    expect(container.textContent).toContain('lifecycle event')
+    expect(container.textContent).toContain('heartbeat event')
+    expect(container.textContent).not.toContain('tool event')
+    expect(container.textContent).not.toContain('turn event')
+    expect(container.textContent).not.toContain('directive event')
+    expect(container.textContent).not.toContain('broadcast event')
+    expect(container.textContent).not.toContain('routine event')
+
+    // approval kind == server ?category=directive|boundary.
+    const approvalChip = container.querySelector('[data-testid="logs-filter-approval"]') as HTMLButtonElement
+    await act(async () => { fireEvent.click(approvalChip) })
+    await waitFor(() => expect(container.textContent).toContain('directive event'))
+    expect(container.textContent).not.toContain('fsm event')
+    expect(container.textContent).not.toContain('tool event')
+
+    // broadcast kind == server ?category=broadcast (single category).
+    const broadcastChip = container.querySelector('[data-testid="logs-filter-broadcast"]') as HTMLButtonElement
+    await act(async () => { fireEvent.click(broadcastChip) })
+    await waitFor(() => expect(container.textContent).toContain('broadcast event'))
+    expect(container.textContent).not.toContain('directive event')
+    expect(container.textContent).not.toContain('routine event')
+  })
 })
 
 describe('LogViewer kind column', () => {
@@ -592,14 +577,12 @@ describe('LogViewer kind column', () => {
     vi.useRealTimers()
     vi.clearAllMocks()
     vi.resetModules()
-    vi.doUnmock('../api/dashboard.js')
+    vi.doUnmock('../api/dashboard-logs')
     window.location.hash = ''
   })
 
   it('renders the logs surface with the kind column header and a kind cell per row', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue({
-      total: 1,
-      entries: [
+    const fetchLogs = vi.fn().mockResolvedValue(logData([
         entry({
           seq: 42,
           level: 'INFO',
@@ -609,8 +592,7 @@ describe('LogViewer kind column', () => {
           category: 'tool',
           details: { tool_name: 'tool_read_file', file_path: 'lib/runtime.ml' },
         }),
-      ],
-    })
+      ]))
     const { LogViewer } = await loadLogs(fetchLogs)
     const { container } = render(h(LogViewer, {}))
 

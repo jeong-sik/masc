@@ -174,31 +174,6 @@ let test_force_refresh_with_cached_result_returns_stale_cached_payload () =
       check string "summary preserved" "cached summary"
         (json |> member "summary" |> to_string))
 
-let test_compact_session_json_normalizes_missing_fields () =
-  let json =
-    `Assoc
-      [
-        ("session_id", `String "sess-1");
-        ( "status",
-          `Assoc
-            [
-              ("session", `Assoc [ ("goal", `Null); ("status", `Null) ]);
-              ("summary", `Assoc []);
-              ("team_health", `Assoc []);
-              ("communication_metrics", `Assoc []);
-            ] );
-        ("recent_events", `List []);
-      ]
-  in
-  let compact = Briefing.compact_session_json json in
-  check_null_field compact "goal";
-  check_null_field compact "project";
-  check_null_field compact "status";
-  check_list_field compact "agent_names" 0;
-  check_int_field compact "active_agents_count" 0;
-  check_null_field compact "communication_mode";
-  check_string_field compact "communication_summary" "broadcast 0"
-
 let test_compact_keeper_json_normalizes_missing_fields () =
   let json =
     `Assoc
@@ -207,7 +182,7 @@ let test_compact_keeper_json_normalizes_missing_fields () =
         ("status", `Null);
         ("agent_name", `Null);
         ("diagnostic", `Assoc []);
-        ("agent", `Assoc [ ("current_task", `Null) ]);
+        ("current_task_id", `Null);
       ]
   in
   let compact = Briefing.compact_keeper_json json in
@@ -215,8 +190,7 @@ let test_compact_keeper_json_normalizes_missing_fields () =
   check_null_field compact "agent_name";
   check_null_field compact "current_task";
   check_null_field compact "last_reply_status";
-  check_null_field compact "last_reply_preview";
-  check_list_field compact "active_goal_ids" 0
+  check_null_field compact "last_reply_preview"
 
 let test_compact_agent_json_uses_current_focus () =
   let agent : Masc_domain.agent =
@@ -238,66 +212,7 @@ let test_compact_agent_json_uses_current_focus () =
   check_null_field compact "goal_hint";
   check_list_field compact "capabilities" 2
 
-let test_relevant_sessions_for_briefing_filters_stale_terminal_sessions () =
-  let now_ts = Unix.gettimeofday () in
-  let stale_terminal =
-    `Assoc
-      [
-        ("session_id", `String "old");
-        ( "status",
-          `Assoc
-            [
-              ("session", `Assoc [ ("project", `String "default"); ("status", `String "interrupted") ]);
-              ("summary", `Assoc []);
-            ] );
-        ("recent_events", `List []);
-      ]
-  in
-  let active_session =
-    `Assoc
-      [
-        ("session_id", `String "live");
-        ( "status",
-          `Assoc
-            [
-              ("session", `Assoc [ ("project", `String "default"); ("status", `String "running") ]);
-              ("summary", `Assoc []);
-            ] );
-        ( "recent_events",
-          `List
-            [
-              `Assoc [ ("ts_iso", `String (iso_of_unix (now_ts -. 30.0))) ];
-            ] );
-      ]
-  in
-  let relevant =
-    Briefing.relevant_sessions_for_briefing ~current_namespace:"default" ~now_ts
-      [ stale_terminal; active_session ]
-  in
-  check int "relevant session count" 1 (List.length relevant);
-  match relevant with
-  | [ json ] -> check_string_field json "session_id" "live"
-  | _ -> fail "expected one relevant session"
-
 let test_collect_metadata_gaps_separates_null_like_inputs () =
-  let sessions =
-    [
-      Briefing.compact_session_json
-        (`Assoc
-          [
-            ("session_id", `String "sess-gap");
-            ( "status",
-              `Assoc
-                [
-                  ("session", `Assoc [ ("goal", `Null); ("namespace_id", `String "default") ]);
-                  ("summary", `Assoc []);
-                  ("team_health", `Assoc []);
-                  ("communication_metrics", `Assoc []);
-                ] );
-            ("recent_events", `List []);
-          ]);
-    ]
-  in
   let keepers =
     [
       Briefing.compact_keeper_json
@@ -305,7 +220,7 @@ let test_collect_metadata_gaps_separates_null_like_inputs () =
           [
             ("name", `String "keeper-gap");
             ("diagnostic", `Assoc []);
-            ("agent", `Assoc [ ("current_task", `Null) ]);
+            ("current_task_id", `Null);
           ]);
     ]
   in
@@ -323,10 +238,10 @@ let test_collect_metadata_gaps_separates_null_like_inputs () =
     }
   in
   let gaps =
-    Briefing.collect_metadata_gaps ~sessions ~keepers
+    Briefing.collect_metadata_gaps ~keepers
       ~agents:[ Briefing.compact_agent_json agent ]
   in
-  check int "gap count" 4 (List.length gaps)
+  check int "gap count" 2 (List.length gaps)
 
 let test_collect_metadata_gaps_ignores_inactive_agents () =
   let inactive_agent : Masc_domain.agent =
@@ -350,7 +265,7 @@ let test_collect_metadata_gaps_ignores_inactive_agents () =
     }
   in
   let gaps =
-    Briefing.collect_metadata_gaps ~sessions:[] ~keepers:[]
+    Briefing.collect_metadata_gaps ~keepers:[]
       ~agents:
         [
           Briefing.compact_agent_json inactive_agent;
@@ -373,7 +288,7 @@ let test_build_briefing_sections_demotes_metadata_only_communication () =
       ]
   in
   let watch_summary, sections =
-    Briefing.build_briefing_sections ~briefing_summary_json ~sessions:[]
+    Briefing.build_briefing_sections ~briefing_summary_json
       ~agents:[] ~recent_messages:[]
       ~metadata_gaps:
         [
@@ -406,28 +321,8 @@ let test_build_briefing_sections_keeps_metadata_evidence_visible () =
         ("top_attention_summary", `String "");
       ]
   in
-  let session =
-    `Assoc
-      [
-        ("session_id", `String "sess-live");
-        ("goal", `String "goal-a");
-        ("namespace_id", `String "default");
-        ("status", `String "running");
-        ("agent_names", `List []);
-        ("elapsed_sec", `Int 10);
-        ("progress_pct", `Float 0.1);
-        ("done_delta_total", `Int 0);
-        ("team_health", `String "ok");
-        ("active_agents_count", `Int 1);
-        ("required_agents", `Int 1);
-        ("communication_mode", `String "broadcast");
-        ("broadcast_count", `Int 1);
-        ("communication_summary", `String "broadcast · broadcast 1");
-        ("last_event", `Assoc []);
-      ]
-  in
   let _watch_summary, sections =
-    Briefing.build_briefing_sections ~briefing_summary_json ~sessions:[ session ]
+    Briefing.build_briefing_sections ~briefing_summary_json
       ~agents:[] ~recent_messages:[ `Assoc [ ("from", `String "agent-a") ] ]
       ~metadata_gaps:
         [
@@ -467,7 +362,7 @@ let test_build_briefing_sections_watch_evidence_uses_namespace_wording () =
       ]
   in
   let _watch_summary, sections =
-    Briefing.build_briefing_sections ~briefing_summary_json ~sessions:[]
+    Briefing.build_briefing_sections ~briefing_summary_json
       ~agents:[] ~recent_messages:[]
       ~metadata_gaps:[]
   in
@@ -491,8 +386,6 @@ let () =
         ] );
       ( "normalization",
         [
-          test_case "session defaults" `Quick
-            test_compact_session_json_normalizes_missing_fields;
           test_case "keeper defaults" `Quick
             test_compact_keeper_json_normalizes_missing_fields;
           test_case "agent current focus" `Quick
@@ -500,8 +393,6 @@ let () =
         ] );
       ( "filtering",
         [
-          test_case "stale terminal sessions filtered" `Quick
-            test_relevant_sessions_for_briefing_filters_stale_terminal_sessions;
           test_case "metadata gaps collected" `Quick
             test_collect_metadata_gaps_separates_null_like_inputs;
           test_case "inactive agents ignored for focus gaps" `Quick

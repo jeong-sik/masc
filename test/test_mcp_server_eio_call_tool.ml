@@ -21,7 +21,7 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = []) name =
+let make_keeper_meta ?agent_name ?current_task_id name =
   let agent_name =
     Option.value agent_name
       ~default:(Masc.Keeper_identity.keeper_agent_name name)
@@ -36,14 +36,6 @@ let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = []) name =
     (match current_task_id with
      | Some task_id -> [ ("current_task_id", `String task_id) ]
      | None -> [])
-    @
-    (match goal_ids with
-     | [] -> []
-     | ids ->
-         [
-           ( "active_goal_ids",
-             `List (List.map (fun goal_id -> `String goal_id) goal_ids) );
-         ])
   in
   match Masc_test_deps.meta_of_json_fixture (`Assoc fields) with
   | Ok meta -> meta
@@ -56,11 +48,6 @@ let empty_contract : Masc_domain.task_contract =
     required_evidence = [];
     inspect_gate_evidence = [];
     verify_gate_evidence = [];
-    links =
-      {
-        operation_id = None;
-        session_id = None;
-      };
   }
 
 let extract_json_from_text text =
@@ -103,6 +90,119 @@ let with_call_tool_state f =
       f env sw state)
 ;;
 
+let admit_call params =
+  match Masc.Mcp_server_eio_call_request.decode (Some params) with
+  | Ok request -> request
+  | Error error ->
+    fail
+      ("test supplied invalid tools/call params: "
+       ^ Masc.Mcp_server_eio_call_request.error_message error)
+;;
+
+let test_call_request_decodes_current_shape_once () =
+  let module Call = Masc.Mcp_server_eio_call_request in
+  let arguments = `Assoc [ "query", `String "status" ] in
+  (match
+     Call.decode
+       (Some
+          (`Assoc
+            [ "name", `String "masc_status"; "arguments", arguments ]))
+   with
+   | Ok request ->
+     check string "typed name" "masc_status" (Call.requested_name request);
+     check yojson "typed arguments" arguments (Call.arguments request)
+   | Error error -> fail (Call.error_message error));
+  (match Call.decode (Some (`Assoc [ "name", `String "masc_status" ])) with
+   | Ok request -> check yojson "absent arguments mean empty object" (`Assoc []) (Call.arguments request)
+   | Error error -> fail (Call.error_message error))
+;;
+
+let test_call_request_rejects_noncanonical_shapes () =
+  let module Call = Masc.Mcp_server_eio_call_request in
+  let rejected expected params =
+    match Call.decode params with
+    | Error error -> check string expected expected (Call.error_message error)
+    | Ok _ -> fail ("accepted invalid tools/call params: " ^ expected)
+  in
+  rejected "Missing params" None;
+  rejected "Invalid params: expected object" (Some (`List []));
+  rejected "Invalid params: name must be a string" (Some (`Assoc []));
+  rejected
+    "Invalid params: name must be a non-empty string"
+    (Some (`Assoc [ "name", `String "  " ]));
+  rejected
+    "Invalid params: name must not contain surrounding whitespace"
+    (Some (`Assoc [ "name", `String " masc_status" ]));
+  rejected
+    "Invalid params: arguments must be an object"
+    (Some
+       (`Assoc
+         [ "name", `String "masc_status"; "arguments", `Null ]));
+  rejected
+    "Invalid params: duplicate name field"
+    (Some
+       (`Assoc
+         [ "name", `String "masc_status"; "name", `String "masc_status" ]));
+  rejected
+    "Invalid params: duplicate arguments field"
+    (Some
+       (`Assoc
+         [ "name", `String "masc_status"
+         ; "arguments", `Assoc []
+         ; "arguments", `Assoc []
+         ]))
+;;
+
+let test_invalid_call_params_do_not_reach_dispatch_handler () =
+  with_call_tool_state (fun env sw state ->
+    Auth.disable_auth (Masc.Mcp_server.workspace_config state).base_path;
+    let handler_calls = ref 0 in
+    let handle_call_tool_eio
+          ~sw:_
+          ~clock:_
+          ~profile:_
+          ?mcp_session_id:_
+          ?auth_token:_
+          ~internal_keeper_runtime:_
+          _state
+          _id
+          _request
+      =
+      incr handler_calls;
+      `Assoc []
+    in
+    let request params =
+      Yojson.Safe.to_string
+        (`Assoc
+          [ "jsonrpc", `String "2.0"
+          ; "id", `Int 1
+          ; "method", `String "tools/call"
+          ; "params", params
+          ])
+    in
+    List.iter
+      (fun params ->
+         let response =
+           Masc.Mcp_server_eio_protocol.handle_request
+             ~handle_call_tool_eio
+             ~handle_read_resource_eio:(fun _state _id _params -> `Assoc [])
+             ~clock:(Eio.Stdenv.clock env)
+             ~sw
+             state
+             (request params)
+         in
+         check
+           int
+           "wire error is Invalid_params"
+           (Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Invalid_params)
+           U.(response |> member "error" |> member "code" |> to_int))
+      [ `Assoc [ "name", `String "masc_status"; "arguments", `Null ]
+      ; `Assoc [ "name", `String " " ]
+      ; `Assoc [ "name", `String "masc_status"; "name", `String "masc_status" ]
+      ];
+    check int "invalid calls never reach dispatch" 0 !handler_calls)
+;;
+
 let call_with_result ?mcp_session_id ?observe_invocation ~env ~sw state result =
   Masc.Mcp_server_eio_call_tool.handle_call_tool_eio
     ~execute_tool_eio:
@@ -127,10 +227,11 @@ let call_with_result ?mcp_session_id ?observe_invocation ~env ~sw state result =
     ?mcp_session_id
     state
     (`Int 1)
-    (`Assoc
-      [ "name", `String "masc_status"
-      ; "arguments", `Assoc [ "_agent_name", `String "projection-test" ]
-      ])
+    (admit_call
+       (`Assoc
+         [ "name", `String "masc_status"
+         ; "arguments", `Assoc [ "_agent_name", `String "projection-test" ]
+         ]))
 ;;
 
 let test_threads_exact_mcp_invocation_identity () =
@@ -259,12 +360,12 @@ let test_typed_outcome_alone_controls_projection () =
     let transient =
       Tool_result.make_err
         ~tool_name:"masc_status"
-        ~class_:Tool_result.Transient_error
+        ~class_:Tool_result.Dependency_unavailable
         ~start_time:0.0
         "ordinary producer failure"
     in
     let transient_response = call_with_result ~env ~sw state transient in
-    check string "typed transient class is preserved" "transient_error"
+    check string "typed transient class is preserved" "dependency_unavailable"
       (result_fields transient_response
        |> U.member "_meta"
        |> U.member "failure_class"
@@ -304,7 +405,7 @@ let test_handle_call_executes_transient_failure_once () =
               incr calls;
               Tool_result.make_err
                 ~tool_name:name
-                ~class_:Tool_result.Transient_error
+                ~class_:Tool_result.Dependency_unavailable
                 ~start_time:0.0
                 "transient failure")
           ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
@@ -313,10 +414,11 @@ let test_handle_call_executes_transient_failure_once () =
           ~clock:(Eio.Stdenv.clock env)
           state
           (`Int 1)
-          (`Assoc
-            [ "name", `String "masc_status"
-            ; "arguments", `Assoc [ "_agent_name", `String "single-call-test" ]
-            ])
+          (admit_call
+             (`Assoc
+               [ "name", `String "masc_status"
+               ; "arguments", `Assoc [ "_agent_name", `String "single-call-test" ]
+               ]))
       in
       check int "transient tool invoked once" 1 !calls;
       check int
@@ -390,11 +492,12 @@ let test_call_captures_admission_scope_across_workspace_switch () =
           ~clock:(Eio.Stdenv.clock env)
           state
           (`Int 41)
-          (`Assoc
-            [ "name", `String "masc_status"
-            ; ( "arguments"
-              , `Assoc [ "_agent_name", `String "scope-admission-test" ] )
-            ])
+          (admit_call
+             (`Assoc
+               [ "name", `String "masc_status"
+               ; ( "arguments"
+                 , `Assoc [ "_agent_name", `String "scope-admission-test" ] )
+               ]))
       in
       check string "tool call succeeds" "ok"
         (result_envelope response |> U.member "status" |> U.to_string);
@@ -442,6 +545,7 @@ let test_failure_observation_uses_typed_failed_payload () =
       { class_ = Tool_result.Policy_rejection
       ; message = "operator denied"
       ; data = `Null
+      ; metadata = None
       ; tool_name = "restricted-tool"
       ; duration_ms = 0.0
       }
@@ -524,11 +628,10 @@ let test_records_mcp_server_operation_duration_metric () =
 
 let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
   let base_path = temp_dir () in
-  let keeper_name = "sangsu-context" in
+  let keeper_name = "alpha-context" in
   let meta =
     make_keeper_meta
       ~current_task_id:"task-123"
-      ~goal_ids:[ "goal-1"; "goal-2" ]
       keeper_name
   in
   Fun.protect
@@ -560,13 +663,9 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
       check (option string) "session_id"
         (Some "session-explicit")
         ctx.session_id;
-      check bool "generation present" true (Option.is_some ctx.generation);
       check (option int) "turn" (Some 1) ctx.turn;
       check (option int) "keeper_turn_id" (Some 1) ctx.keeper_turn_id;
       check (option string) "task_id" (Some "task-123") ctx.task_id;
-      check (option (list string)) "goal_ids"
-        (Some [ "goal-1"; "goal-2" ])
-        ctx.goal_ids;
       check bool "model populated" true (String.trim ctx.model <> "");
       check bool "sandbox profile present" true (Option.is_some ctx.sandbox_profile);
       check bool "sandbox root present" true (Option.is_some ctx.sandbox_root);
@@ -577,7 +676,7 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
-  let keeper_name = "sangsu-task-contract" in
+  let keeper_name = "alpha-task-contract" in
   let config = Masc.Workspace.default_config base_path in
   ignore (Masc.Workspace.init config ~agent_name:(Some keeper_name));
   let contract = empty_contract in
@@ -617,11 +716,10 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
-  let keeper_name = "sangsu-runtime-mcp" in
+  let keeper_name = "alpha-runtime-mcp" in
   let meta =
     make_keeper_meta
       ~current_task_id:"task-456"
-      ~goal_ids:[ "goal-runtime" ]
       keeper_name
   in
   let subscriber_id = "test-runtime-mcp-tool-trace" in
@@ -646,7 +744,8 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       in
       Masc.Sse.subscribe_external
         ~id:subscriber_id
-        ~callback:(fun payload -> received_sse := Some payload)
+        ~callback:(fun (ev : Masc.Sse.external_event) ->
+          received_sse := Some ev.Masc.Sse.ext_frame)
         ();
       Masc.Mcp_server_eio_call_tool.record_runtime_mcp_keeper_tool_trace
         ~mcp_session_id:"mcp-session-9"
@@ -660,6 +759,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
             ])
         ~message:"command exited 1"
         ~disposition:(Tool_result.Failed Tool_result.Runtime_failure)
+        ~execution_id:(Ids.Execution_id.generate ())
         ~duration_ms:87;
       let rows =
         Masc.Keeper_tool_call_log.read_recent ~keeper_name ~n:1 ()
@@ -681,16 +781,10 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (row |> U.member "keeper_turn_id" |> U.to_int);
       check string "task id" "task-456"
         (row |> U.member "task_id" |> U.to_string);
-      check int "goal id count" 1
-        (row |> U.member "goal_ids" |> U.to_list |> List.length);
       let runtime_contract = row |> U.member "runtime_contract" in
       check string "runtime contract agent"
         (Masc.Keeper_identity.keeper_agent_name keeper_name)
         (runtime_contract |> U.member "agent_name" |> U.to_string);
-      check bool "runtime contract has generation" true
-        (match runtime_contract |> U.member "generation" with
-         | `Int _ -> true
-         | _ -> false);
       check string "runtime contract sandbox profile"
         (row |> U.member "sandbox_profile" |> U.to_string)
         (runtime_contract |> U.member "sandbox_profile" |> U.to_string);
@@ -792,6 +886,12 @@ let () =
         [
           test_case "free-form text does not control response" `Quick
             test_free_form_failure_text_does_not_control_response;
+          test_case "call request decodes current shape once" `Quick
+            test_call_request_decodes_current_shape_once;
+          test_case "call request rejects noncanonical shapes" `Quick
+            test_call_request_rejects_noncanonical_shapes;
+          test_case "invalid call params stop before dispatch" `Quick
+            test_invalid_call_params_do_not_reach_dispatch_handler;
           test_case "typed outcome alone controls projection" `Quick
             test_typed_outcome_alone_controls_projection;
           test_case "transient failure executes once" `Quick

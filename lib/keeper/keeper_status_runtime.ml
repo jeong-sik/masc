@@ -1,4 +1,4 @@
-(** Keeper_status_runtime — agent status parsing, health/diagnostic state,
+(** Keeper_status_runtime — keeper health/diagnostic state,
     quiet-hours logic, and surface status helpers.
     Metrics summary aggregation is in Keeper_status_metrics. *)
 
@@ -11,6 +11,77 @@ open Keeper_types_profile
    detection, live-work detection, startup-vs-never-started classification,
    and zombie/stale assessment. *)
 let agent_staleness_threshold_s = 120.0
+
+(* Slack over the slower of the two producer cadences, for the scheduling and
+   transport delay between a heartbeat being written and being read. The .mli
+   calls it "one minute of scheduling / transport jitter"; it was spelled 60.0
+   inside the expression, where nothing said which of the two windows below it
+   belonged to. *)
+let heartbeat_transport_jitter_s = 60.0
+
+(* A turn record is emitted after a cycle completes, so its freshness window
+   carries the cycle's own execution time on top of the configured sleep. Two
+   separate numbers: how long a cycle may take, and the floor the window never
+   drops below however short the cadence is configured. *)
+let turn_cycle_execution_slack_s = 120.0
+let turn_record_freshness_floor_s = 300.0
+
+(* A keepalive loop that has only just started has not had time to write the
+   evidence the health read looks for, so it reads as recovering rather than
+   unhealthy until this window passes. Distinct from the jitter above: that one
+   widens a staleness window, this one suppresses a verdict. *)
+let keepalive_recovery_window_s = 60.0
+
+let keeper_heartbeat_stale_after_s ~keepalive_interval_s ~snapshot_interval_s =
+  Float.max
+    agent_staleness_threshold_s
+    (Float.max keepalive_interval_s snapshot_interval_s +. heartbeat_transport_jitter_s)
+;;
+
+let keeper_turn_record_freshness_slo_s ~keepalive_interval_s =
+  Float.max
+    turn_record_freshness_floor_s
+    (keepalive_interval_s +. turn_cycle_execution_slack_s)
+;;
+
+let keeper_turn_record_source_health
+      ~skipped_rows
+      ~live_turn_in_progress
+      ~latest_age_s
+      ~freshness_slo_s
+  =
+  match latest_age_s, live_turn_in_progress with
+  | None, _ when skipped_rows > 0 -> "incompatible", "incompatible_rows"
+  (* A turn is running, so the age of the newest finished record says nothing
+     about whether this store is keeping up — the record for the running turn
+     has not been written yet. This used to report "ok", which also means "the
+     newest record is inside the SLO", and the dashboard could not tell the two
+     apart: it recomputed the age, found it over the SLO, read the response as
+     a contract violation and dropped the whole payload (#28720). *)
+  | _, true -> "live", ""
+  | None, false -> "empty", "no_entries"
+  | Some age, false when age > freshness_slo_s ->
+    "stale", "freshness_slo_exceeded"
+  | Some _, false -> "ok", ""
+;;
+
+let keeper_metric_producer_active ~base_path =
+  Keeper_registry.all ~base_path ()
+  |> List.exists (fun (entry : Keeper_registry.registry_entry) ->
+       Option.is_some entry.current_turn_observation
+       ||
+       match entry.phase with
+       | Keeper_state_machine.Failing -> Atomic.get entry.cadence_sleeping
+       | Keeper_state_machine.Offline
+       | Keeper_state_machine.Running
+       | Keeper_state_machine.Compacting
+       | Keeper_state_machine.HandingOff
+       | Keeper_state_machine.Draining
+       | Keeper_state_machine.Paused
+       | Keeper_state_machine.Stopped
+       | Keeper_state_machine.Crashed
+       | Keeper_state_machine.Restarting -> false)
+;;
 
 let unknown_model_label =
   Boundary_redaction.to_string Boundary_redaction.unknown_model_label
@@ -43,7 +114,6 @@ let keeper_health_to_string = function
   | KH_stale -> "stale"
   | KH_degraded -> "degraded"
   | KH_zombie -> "zombie"
-  | KH_dead -> "dead"
 
 (** Issue #8670: strict parser returning [None] on unknown strings so
     drift (producer typo, future variant) is visible to callers instead
@@ -56,7 +126,6 @@ let keeper_health_of_string_opt = function
   | "stale" -> Some KH_stale
   | "degraded" -> Some KH_degraded
   | "zombie" -> Some KH_zombie
-  | "dead" -> Some KH_dead
   | _ -> None
 
 let keeper_health_or_offline ~source s =
@@ -74,106 +143,9 @@ let keeper_continuity_to_string = function
   | Continuity_recovering -> "recovering"
   | Continuity_not_running -> "not_running"
 
-let parse_agent_status (config : Workspace.config) ~(agent_name : string) : Yojson.Safe.t =
-  let agent_file =
-    Filename.concat (Workspace.agents_dir config) (Workspace.safe_filename agent_name ^ ".json")
-  in
-  if not (Workspace.path_exists config agent_file) then
-    `Assoc []
-  else (
-    match Workspace.read_json_opt config agent_file with
-    | None ->
-        `Assoc [ ("error", `String "failed_to_read") ]
-    | Some json -> (
-        match Masc_domain.agent_of_yojson json with
-        | Error _ ->
-            `Assoc [ ("error", `String "failed_to_parse") ]
-        | Ok (agent : Masc_domain.agent) ->
-            let now_ts = Time_compat.now () in
-            let session_bound_ts =
-              Workspace_resilience.Time.parse_iso8601_opt agent.session_bound_at
-              |> Option.value ~default:0.0
-            in
-            let last_seen_ts =
-              Workspace_resilience.Time.parse_iso8601_opt agent.last_seen
-              |> Option.value ~default:0.0
-            in
-            (* An unparseable timestamp is absence of evidence, so omit the
-               derived age instead of emitting 0.0. Both readers —
-               [agent_last_seen_ago_s] and [keeper_health_state] — already fall
-               back to [max_float] when the field is missing, i.e. treat it as
-               infinitely stale. Emitting 0.0 read as "seen just now" and made
-               that fail-closed fallback unreachable, because the field was
-               always present. *)
-            let derived_age key ts =
-              if ts <= 0.0 then [] else [ (key, `Float (now_ts -. ts)) ]
-            in
-            `Assoc
-              ([
-                 ("name", `String agent.name);
-                 ("agent_type", `String agent.agent_type);
-                 ("status", `String (Masc_domain.string_of_agent_status agent.status));
-                 ( "capabilities",
-                   `List (List.map (fun s -> `String s) agent.capabilities) );
-                 ( "current_task", Json_util.string_opt_to_json agent.current_task );
-                 ("session_bound_at", `String agent.session_bound_at);
-                 ("last_seen", `String agent.last_seen);
-               ]
-               @ derived_age "age_s" session_bound_ts
-               @ derived_age "last_seen_ago_s" last_seen_ts)))
-
 let json_string_opt key json = Json_util.get_string_nonempty json key
 
-let json_float_opt key json =
-  Safe_ops.json_float_opt key json
-
-(* RFC-0089 (String Classifier to Typed Variant). The agent-status snapshot
-   blob's "status" field is produced exclusively by [parse_agent_status], which
-   serializes a typed [Masc_domain.agent_status] (active | busy | listening |
-   inactive). Parse it back into the closed ADT here so the liveness/surface
-   consumers below match the four constructors exhaustively instead of comparing
-   string literals — the compiler then rejects any arm naming a value outside
-   the domain. The previous string-literal matches carried dead "idle"/"offline"
-   arms (keeper_health vocabulary this producer never emits); those vanish under
-   the typed match. Unknown / absent / garbage "status" parses to [None],
-   preserving the old "unknown"-default semantics (neither live nor inactive). *)
-let agent_runtime_status_opt agent_status : Masc_domain.agent_status option =
-  match json_string_opt "status" agent_status with
-  | Some s -> Masc_domain.agent_status_of_string_opt (String.lowercase_ascii s)
-  | None -> None
-
-let agent_last_seen_ts_opt agent_status =
-  match json_string_opt "last_seen" agent_status with
-  | Some value -> Workspace_resilience.Time.parse_iso8601_opt value
-  | None -> None
-
-let agent_last_seen_ago_s agent_status =
-  json_float_opt "last_seen_ago_s" agent_status |> Option.value ~default:max_float
-
-let agent_runtime_has_live_signal agent_status =
-  match agent_runtime_status_opt agent_status with
-  | Some (Masc_domain.Active | Masc_domain.Busy | Masc_domain.Listening) ->
-      agent_last_seen_ago_s agent_status <= agent_staleness_threshold_s
-  | Some Masc_domain.Inactive | None -> false
-
-let agent_runtime_has_live_work agent_status =
-  match agent_runtime_status_opt agent_status with
-  | Some (Masc_domain.Active | Masc_domain.Busy | Masc_domain.Listening) ->
-      agent_last_seen_ago_s agent_status <= agent_staleness_threshold_s
-  | Some Masc_domain.Inactive | None -> false
-
-
-let quiet_hours_active ~now_ts =
-  let current_hour =
-    let tm = Unix.gmtime now_ts in
-    (* KST = UTC+9; must use gmtime, not localtime *)
-    (tm.Unix.tm_hour + 9) mod 24
-  in
-  let quiet_start = Env_config.Autonomy.quiet_start in
-  let quiet_end = Env_config.Autonomy.quiet_end in
-  quiet_start < quiet_end
-  && current_hour >= quiet_start
-  && current_hour < quiet_end
+let json_float_opt key json = Safe_ops.json_float_opt key json
 
 let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
   let normalize_content item =
@@ -217,147 +189,113 @@ let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
   | None, Some (assistant_ts, preview) ->
       (`String "delivered", `Float assistant_ts, `String preview)
 
-(* The only error evidence here is the one [parse_agent_status] writes:
-   "failed_to_read" or "failed_to_parse" when the agent file cannot be read or
-   decoded. [meta.runtime.proactive_rt.last_reason] used to be searched for
-   error keywords, but its producer documents it as display detail and a
-   successful cycle formats it as "unified:tools=[...]" — so a cycle that
-   called masc_runtime_status matched one of those keywords on the tool name
-   alone and reported the keeper as degraded. *)
-let keeper_error_hint ~agent_status = json_string_opt "error" agent_status
+(* Wire vocabularies shared with the dashboard. Both are closed here so a new
+   case cannot reach the wire without the compiler naming every consumer. *)
+type keeper_quiet_reason =
+  | Proactive_disabled
+  | Keepalive_not_running
+  | Starting_up
+  | Never_started
 
-(* A live signal newer than the persisted error snapshot means
-   [last_proactive_reason] is stale and must not surface as a current error.
-   Shared by quiet-reason classification and the dashboard diagnostic so a
-   running keeper that has recovered does not keep showing a dead error string
-   — including across server restarts, where the persisted snapshot is reloaded
-   verbatim and never reset.
+let keeper_quiet_reason_to_string = function
+  | Proactive_disabled -> "disabled"
+  | Keepalive_not_running -> "not_running"
+  | Starting_up -> "startup"
+  | Never_started -> "never_started"
 
-   Two independent supersede paths, because the persisted error and the live
-   signal can come from different sources:
+type keeper_next_action_path =
+  | Auto_restart
+  | Recover
+  | Probe
+  | Direct_message
 
-   - Keeper self-progress: the error is recorded on the last *proactive* cycle
-     ([proactive_rt.last_ts]). If the keeper has completed any later turn
-     ([usage.last_turn_ts] strictly greater), the proactive error predates the
-     keeper's current activity and is stale. Keepers do not publish an external
-     agent-registry record ([.masc/agents/]), so this is the only path that
-     fires for them. Equality (the erroring proactive turn *is* the latest
-     turn) does not supersede — a fresh error stays visible.
+(* Strict inverse of {!keeper_next_action_path_to_string}. [None] outside the
+   published vocabulary: a reader that cannot spell an action must say so
+   rather than resolve it to whichever action happens to be first. *)
+let keeper_next_action_path_of_string_opt = function
+  | "auto_restart" -> Some Auto_restart
+  | "recover" -> Some Recover
+  | "probe" -> Some Probe
+  | "direct_message" -> Some Direct_message
+  | _ -> None
 
-   - External agent-registry signal: present for non-keeper participants that
-     write an agent record. A fresh live presence newer than all recorded
-     activity. Threshold preserved verbatim so non-keeper behaviour is
-     unchanged. *)
-let live_signal_supersedes_persisted_error ~keepalive_running ~agent_status ~meta =
-  if not keepalive_running then false
-  else begin
-    let proactive_error_ts = meta.runtime.proactive_rt.last_ts in
-    let last_turn_ts = meta.runtime.usage.last_turn_ts in
-    let self_progressed_past_proactive_error =
-      proactive_error_ts > 0.0 && last_turn_ts > proactive_error_ts
-    in
-    let external_live_signal =
-      agent_runtime_has_live_signal agent_status
-      &&
-      match agent_last_seen_ts_opt agent_status with
-      | Some last_seen_ts -> last_seen_ts > max proactive_error_ts last_turn_ts
-      | None -> false
-    in
-    self_progressed_past_proactive_error || external_live_signal
-  end
+let keeper_next_action_path_to_string = function
+  | Auto_restart -> "auto_restart"
+  | Recover -> "recover"
+  | Probe -> "probe"
+  | Direct_message -> "direct_message"
 
-let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts =
-  let quiet_active = quiet_hours_active ~now_ts in
-  let error_hint =
-    if live_signal_supersedes_persisted_error ~keepalive_running ~agent_status ~meta
-    then None
-    else keeper_error_hint ~agent_status
-  in
+let classify_keeper_quiet_reason ~meta ~keepalive_running ~now_ts =
   if not meta.proactive.enabled then
-    Some "disabled"
+    Some Proactive_disabled
   else if not keepalive_running then
-    Some "not_running"
+    Some Keepalive_not_running
   else if meta.runtime.usage.total_turns = 0 && meta.runtime.proactive_rt.count_total = 0 then
     let keeper_age_s =
       match Workspace_resilience.Time.parse_iso8601_opt meta.created_at with
       | Some created_ts when created_ts > 0.0 -> max 0.0 (now_ts -. created_ts)
       | _ -> 0.0
     in
-    if keeper_age_s <= agent_staleness_threshold_s then Some "startup" else Some "never_started"
-  else if quiet_active then
-    Some "quiet_hours"
-  else
-    match error_hint with
-    | Some _ -> Some "agent_status_error"
-    | None -> None
+    if keeper_age_s <= agent_staleness_threshold_s then Some Starting_up
+    else Some Never_started
+  else None
 
 let keeper_health_state ?(fiber_health = Fiber_unknown)
-    ?(keepalive_interval_s = 300.0)
-    ~meta ~keepalive_running ~agent_status ~quiet_reason () : keeper_health =
+    ?(keepalive_interval_s =
+      float_of_int
+        (Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec))
+    ?(snapshot_interval_s =
+      float_of_int (Runtime_params.get Runtime_settings.keeper_snapshot_sec))
+    ?last_heartbeat_age_s
+    ~meta ~keepalive_running () : keeper_health =
   (* Supervisor-level health takes priority *)
   match fiber_health with
   | Fiber_zombie -> KH_zombie
-  | Fiber_dead -> KH_dead
+  | Fiber_dead -> KH_zombie
   | Fiber_alive | Fiber_unknown ->
-  let agent_runtime_status = agent_runtime_status_opt agent_status in
-  let agent_registry_status_present = Option.is_some agent_runtime_status in
-  let last_seen_ago_s =
-    json_float_opt "last_seen_ago_s" agent_status |> Option.value ~default:max_float
-  in
-  let stale_threshold_s = agent_staleness_threshold_s in
-  if
-    (not keepalive_running)
-    &&
-    (not agent_registry_status_present
-    || agent_runtime_status = Some Masc_domain.Inactive)
-  then KH_offline
-  else if keepalive_running then
-    if agent_registry_status_present && last_seen_ago_s > 2.0 *. keepalive_interval_s
+  if not keepalive_running then KH_offline
+  else
+    if Option.exists
+         (fun heartbeat_age_s ->
+           heartbeat_age_s
+           > keeper_heartbeat_stale_after_s
+               ~keepalive_interval_s
+               ~snapshot_interval_s)
+         last_heartbeat_age_s
     then KH_stale
     else
-      (match quiet_reason with
-    | Some "agent_status_error" -> KH_degraded
-    | _ ->
-        if meta.runtime.usage.total_turns = 0 && meta.runtime.proactive_rt.count_total = 0 then KH_idle
-        else KH_healthy)
-  else if last_seen_ago_s > stale_threshold_s then KH_stale
-  else KH_offline
+      if meta.runtime.usage.total_turns = 0
+         && meta.runtime.proactive_rt.count_total = 0
+      then KH_idle
+      else KH_healthy
 
 let keeper_next_action_path ~(health_state : keeper_health) ~quiet_reason =
   match health_state with
-  | KH_zombie -> "auto_restart"
-  | KH_dead -> "manual_restart"
-  | KH_offline | KH_stale | KH_degraded -> "recover"
+  | KH_zombie -> Auto_restart
+  | KH_offline | KH_stale | KH_degraded -> Recover
   | KH_healthy | KH_idle -> (
       match quiet_reason with
-      | Some "quiet_hours" -> "manual_social_poke"
-      | Some "not_running" | Some "agent_missing" -> "recover"
-      | Some "agent_status_error" | Some "startup" ->
-          "probe"
-      | Some "disabled" -> "recover"
-      | _ -> "direct_message")
+      | Some Keepalive_not_running -> Recover
+      | Some Proactive_disabled -> Recover
+      | Some Starting_up -> Probe
+      | Some Never_started | None -> Direct_message)
 
 let keeper_diagnostic_summary ~meta ~(health_state : keeper_health) ~quiet_reason =
   match health_state with
   | KH_zombie ->
       "Keeper fiber has terminated but registry entry persists. Supervisor will auto-restart."
-  | KH_dead ->
-      "Keeper has an explicit durable Dead tombstone. Operator lifecycle action is required."
   | KH_offline | KH_stale | KH_degraded ->
       "Keeper is not in a healthy reply state. Probe or recover before relying on automation."
   | KH_healthy | KH_idle -> (
       match quiet_reason with
-      | Some "disabled" ->
+      | Some Proactive_disabled ->
           "Keeper proactive automation is disabled. Direct messages still work, but scheduled social ticks will stay quiet."
-      | Some "not_running" ->
+      | Some Keepalive_not_running ->
           "Keeper keepalive is enabled, but its loop is not running."
-      | Some "agent_missing" ->
-          "Keeper keepalive is running, but the live agent record is missing or offline."
-      | Some "quiet_hours" ->
-          "Quiet hours are active. Direct messages still work, but scheduled social ticks may look asleep."
-      | Some "never_started" ->
+      | Some Never_started ->
           "Keeper metadata exists but no reply turn has been recorded yet."
-      | _ -> "Keeper is reachable. Send a direct message for an immediate response.")
+      | Some Starting_up | None ->
+          "Keeper is reachable. Send a direct message for an immediate response.")
 
 let keeper_continuity_state
     ~(keepalive_running : bool)
@@ -365,13 +303,13 @@ let keeper_continuity_state
     ~(health_state : keeper_health)
     ~(now_ts : float) : keeper_continuity =
   let healthy_like =
-    match health_state with KH_healthy | KH_idle -> true | KH_offline | KH_stale | KH_degraded | KH_zombie | KH_dead -> false
+    match health_state with
+    | KH_healthy | KH_idle -> true
+    | KH_offline | KH_stale | KH_degraded | KH_zombie -> false
   in
   let recently_started =
     match keepalive_started_at with
-    | Some started_at ->
-        let recovery_window_s = 60.0 in
-        now_ts -. started_at < recovery_window_s
+    | Some started_at -> now_ts -. started_at < keepalive_recovery_window_s
     | None -> false
   in
   if not keepalive_running then Continuity_not_running
@@ -423,25 +361,19 @@ let augment_keeper_diagnostic_json
   | other -> other
 
 (* RFC-0089 — the keeper "surface status" is the display status that
-   [keeper_surface_status] derives from (keeper_health × agent_status). It is
-   carried on the wire as a string and re-classified by literal in the operator
-   align step, the server row patcher, and the dashboard pressure ranker. Close
-   it into a sum so the producer builds it exhaustively and those consumers
-   match it via [surface_status_of_string_opt] instead of comparing literals.
-   "paused" is NOT part of this domain — it is an operator override
-   (meta.paused) applied one layer above, at operator_control_snapshot. *)
+   [keeper_surface_status] derives from keeper health. It is carried on the wire
+   as a string and re-classified by the server row patcher and dashboard
+   pressure ranker. Close it into a sum so the producer builds it exhaustively
+   and consumers match via [surface_status_of_string_opt]. "paused" is not part
+   of this domain; it is an operator override applied one layer above. *)
 type surface_status =
   | Surface_active
-  | Surface_busy
-  | Surface_listening
   | Surface_inactive
   | Surface_offline
   | Surface_idle
 
 let surface_status_to_string = function
   | Surface_active -> "active"
-  | Surface_busy -> "busy"
-  | Surface_listening -> "listening"
   | Surface_inactive -> "inactive"
   | Surface_offline -> "offline"
   | Surface_idle -> "idle"
@@ -449,8 +381,6 @@ let surface_status_to_string = function
 let surface_status_of_string_opt s =
   match String.lowercase_ascii (String.trim s) with
   | "active" -> Some Surface_active
-  | "busy" -> Some Surface_busy
-  | "listening" -> Some Surface_listening
   | "inactive" -> Some Surface_inactive
   | "offline" -> Some Surface_offline
   | "idle" -> Some Surface_idle
@@ -469,67 +399,92 @@ let control_plane_status_of_string_opt s =
   | "paused" -> Some Cp_paused
   | _ -> Option.map (fun surface -> Cp_surface surface) (surface_status_of_string_opt s)
 
-let keeper_surface_status
-    ~(agent_status : Yojson.Safe.t)
-    ~(diagnostic : Yojson.Safe.t) =
+(* Health as the diagnostic reports it. An unreadable diagnostic falls to
+   KH_offline with a warning rather than to a healthy-looking word, the same
+   way every other reader of this field resolves it. *)
+let keeper_diagnostic_health ~(diagnostic : Yojson.Safe.t) ~source =
+  json_string_opt "health_state" diagnostic
+  |> Option.value ~default:"offline"
+  |> keeper_health_or_offline ~source
+
+let keeper_surface_status ~(diagnostic : Yojson.Safe.t) =
   let health_state =
-    json_string_opt "health_state" diagnostic
-    |> Option.value ~default:"offline"
-    |> keeper_health_or_offline ~source:"keeper_surface_status"
+    keeper_diagnostic_health ~diagnostic ~source:"keeper_surface_status"
   in
-  let agent_runtime_status = agent_runtime_status_opt agent_status in
   let surface =
     match health_state with
-    | KH_healthy -> (
-        match agent_runtime_status with
-        | Some Masc_domain.Active -> Surface_active
-        | Some Masc_domain.Busy -> Surface_busy
-        | Some Masc_domain.Listening -> Surface_listening
-        | Some Masc_domain.Inactive -> Surface_offline
-        | None -> Surface_active)
+    | KH_healthy -> Surface_active
     | KH_idle -> Surface_idle
-    | KH_stale | KH_degraded | KH_zombie | KH_dead -> Surface_inactive
+    | KH_stale | KH_degraded | KH_zombie -> Surface_inactive
     | KH_offline -> Surface_offline
   in
   surface_status_to_string surface
 
 let keeper_diagnostic_json
+    ~(config : Workspace.config)
     ~(meta : keeper_meta)
-    ~(agent_status : Yojson.Safe.t)
     ~(keepalive_running : bool)
     ~(history_items : Yojson.Safe.t list)
     ~(now_ts : float) : Yojson.Safe.t =
-  let quiet_reason =
-    classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts
+  let heartbeat_snapshot, heartbeat_observation_error =
+    match
+      Keeper_heartbeat_persisted_snapshot.latest
+        ~config
+        ~keeper_name:meta.name
+    with
+    | Ok snapshot -> snapshot, None
+    | Error error ->
+      Log.Keeper.warn
+        ~keeper_name:meta.name
+        "keeper heartbeat snapshot read failed: %s"
+        error;
+      None, Some error
   in
+  let last_heartbeat_age_s =
+    Option.map
+      (fun (snapshot : Keeper_heartbeat_persisted_snapshot.t) ->
+         Float.max 0.0 (now_ts -. snapshot.timestamp_unix))
+      heartbeat_snapshot
+  in
+  let quiet_reason = classify_keeper_quiet_reason ~meta ~keepalive_running ~now_ts in
   let health_state =
-    keeper_health_state ~meta ~keepalive_running ~agent_status ~quiet_reason ()
+    keeper_health_state
+      ?last_heartbeat_age_s
+      ~meta
+      ~keepalive_running
+      ()
   in
   let next_action_path = keeper_next_action_path ~health_state ~quiet_reason in
   let last_reply_status, last_reply_at, last_reply_preview =
     keeper_reply_snapshot_of_history history_items
   in
-  let last_error =
-    (* Mirror classify_keeper_quiet_reason: a recovered running keeper whose
-       live signal postdates the persisted error must not surface the stale
-       reason. Without this guard the dashboard "이전 오류" badge survives
-       server restarts because the snapshot is reloaded verbatim. *)
-    if live_signal_supersedes_persisted_error ~keepalive_running ~agent_status ~meta
-    then `Null
-    else Json_util.string_opt_to_json (keeper_error_hint ~agent_status)
-  in
+  (* The deleted workspace-agent projection was the only producer for this
+     field. Do not reinterpret the display-oriented proactive reason as an
+     error classifier. *)
+  let last_error = `Null in
   `Assoc
     [
       ("health_state", `String (keeper_health_to_string health_state));
-      ( "quiet_reason", Json_util.string_opt_to_json quiet_reason );
-      ("next_action_path", `String next_action_path);
-      ("recoverable", `Bool (String.equal next_action_path "recover"));
+      ( "quiet_reason",
+        Json_util.string_opt_to_json
+          (Option.map keeper_quiet_reason_to_string quiet_reason) );
+      ("next_action_path",
+       `String (keeper_next_action_path_to_string next_action_path));
+      ("recoverable", `Bool (next_action_path = Recover));
       ("summary", `String (keeper_diagnostic_summary ~meta ~health_state ~quiet_reason));
       ("last_reply_status", last_reply_status);
       ("last_reply_at", last_reply_at);
       ("last_reply_preview", last_reply_preview);
       ("last_error", last_error);
       ("keepalive_running", `Bool keepalive_running);
+      ( "last_heartbeat"
+      , match heartbeat_snapshot with
+        | Some snapshot -> `String snapshot.timestamp
+        | None -> `Null );
+      ( "last_heartbeat_age_s"
+      , Json_util.float_opt_to_json last_heartbeat_age_s );
+      ( "heartbeat_observation_error"
+      , Json_util.string_opt_to_json heartbeat_observation_error );
     ]
 
 (** Derive pipeline stage directly from the Keeper lifecycle phase. *)
@@ -538,7 +493,6 @@ let pipeline_stage_of_phase (phase : Keeper_state_machine.phase) : string =
   | Keeper_state_machine.Offline -> "offline"
   | Keeper_state_machine.Running -> "idle"
   | Keeper_state_machine.Failing -> "failing"
-  | Keeper_state_machine.Overflowed -> "overflowed"
   | Keeper_state_machine.Compacting -> "compacting"
   | Keeper_state_machine.HandingOff -> "handoff"
   | Keeper_state_machine.Draining -> "draining"
@@ -546,7 +500,6 @@ let pipeline_stage_of_phase (phase : Keeper_state_machine.phase) : string =
   | Keeper_state_machine.Stopped -> "offline"
   | Keeper_state_machine.Crashed -> "crashed"
   | Keeper_state_machine.Restarting -> "restarting"
-  | Keeper_state_machine.Dead -> "offline"
 
 (** Explain the lossy [pipeline_stage] label without changing its wire value.
     Consumers that need exact lifecycle authority should read [lifecycle_phase];
@@ -556,9 +509,6 @@ let pipeline_stage_detail_of_phase (phase : Keeper_state_machine.phase) : string
   | Keeper_state_machine.Offline -> "launch_pending_no_fiber"
   | Keeper_state_machine.Running -> "phase_running_idle"
   | Keeper_state_machine.Failing -> "health_or_turn_failure_probe"
-  | Keeper_state_machine.Overflowed ->
-    (* Retired phase (#26546): only historical records can carry it. *)
-    "context_overflow_retired_phase"
   | Keeper_state_machine.Compacting -> "context_compaction_in_progress"
   | Keeper_state_machine.HandingOff -> "generation_handoff_in_progress"
   | Keeper_state_machine.Draining -> "graceful_shutdown_draining"
@@ -566,4 +516,3 @@ let pipeline_stage_detail_of_phase (phase : Keeper_state_machine.phase) : string
   | Keeper_state_machine.Stopped -> "clean_stop_terminal"
   | Keeper_state_machine.Crashed -> "crashed_restart_candidate"
   | Keeper_state_machine.Restarting -> "supervisor_restart_requested"
-  | Keeper_state_machine.Dead -> "dead_tombstone_terminal"

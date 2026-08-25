@@ -6,12 +6,16 @@
 
 val metric_sse_sessions : string
 val metric_sse_broadcast_duration : string
+val metric_sse_broadcast_duration_count : string
 val metric_sse_broadcast_events : string
 val metric_sse_broadcast_failures : string
+val metric_sse_broadcast_skipped_no_observer : string
+(** Broadcasts short-circuited because nothing could observe them: bufferless,
+    no external subscriber, and no session of the target kind. *)
+
 val metric_sse_external_subscriber_callback_failures : string
 val metric_sse_external_fanout_duration_seconds : string
-val metric_oas_sse_relay_drop_marker_failures : string
-val metric_sse_stream_queue_depth : string
+val metric_agent_core_sse_relay_drop_marker_failures : string
 val metric_sse_queue_depth_avg : string
 val metric_sse_queue_depth_max : string
 val metric_sse_external_subscribers : string
@@ -21,20 +25,13 @@ val metric_file_lock_retries : string
 val metric_file_lock_acquire_seconds : string
 val metric_grpc_active_streams : string
 val metric_grpc_heartbeat_latency : string
+val metric_grpc_heartbeat_latency_count : string
 val metric_grpc_subscribers : string
 val metric_grpc_events_delivered : string
 val metric_grpc_events_dropped : string
 val metric_ws_sessions : string
-val metric_ws_parse_cache_hits : string
-val metric_ws_parse_cache_misses : string
 val metric_ws_bytes_cache_hits : string
 val metric_ws_bytes_cache_misses : string
-
-(** Counter of WebSocket transport incoming-frame JSON parse failures.
-    Frame is dropped (parse_sse_dashboard_event returns None) but
-    operators now have a counter + warn log.
-    Labels: [error_kind = yojson_parse_error | other]. Iter 28. *)
-val metric_server_mcp_ws_frame_json_parse_failures : string
 
 (** Counter of sidecar HTTP route [schema_field_types] JSON parse
     failures. Previously the catch-all returned [] silently, allowing
@@ -162,6 +159,7 @@ val metric_cache_stuck_elapsed_seconds : string
 
 (** Companion to {!metric_cache_hits_total}; same [cache] label values. *)
 val metric_ws_client_buffered_bytes : string
+val metric_ws_client_buffered_bytes_count : string
 
 val metric_ws_client_acks : string
 val metric_ws_throttled_deliveries : string
@@ -177,15 +175,6 @@ val metric_ws_delta_payload_serializations : string
     distribution (p50/p95/p99) so operators can distinguish a few
     large frames from many small frames. *)
 val metric_ws_message_bytes : string
-
-(** Lines walked while replaying [.masc/backlog.jsonl] on a gRPC
-    Subscribe RPC, including those filtered out by [since_seq]. *)
-val metric_grpc_backlog_replay_lines_scanned : string
-
-(** Backlog events actually delivered (post-[since_seq] filter)
-    on a gRPC Subscribe RPC. The gap between scanned-lines and
-    replayed-events isolates wasted scan cost. *)
-val metric_grpc_backlog_replay_events_replayed : string
 
 (** Primary HTTP listener accepted TCP connections. Labels: [mode]. *)
 val metric_http_accepts : string

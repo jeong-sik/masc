@@ -52,7 +52,7 @@ type usage_trust = Keeper_usage_trust.t =
 let runtime_lane_label = Boundary_redaction.to_string Boundary_redaction.runtime_lane_label
 
 let classify_usage_trust ~(usage_reported : bool)
-    ~(usage : Agent_sdk.Types.api_usage) : usage_trust =
+    ~(usage : Agent_core.Types.api_usage) : usage_trust =
   Keeper_usage_trust.classify ~usage_reported ~usage
 
 (* #9953: bucket the raw [context_max] integer into a tightly
@@ -176,7 +176,7 @@ let record_turn_latency_by_model_bucket
    anomaly remains diagnosable instead of being silently rewritten. Missing is
    represented by the existing 0.0 aggregate identity. *)
 let estimate_usage_cost_usd usage =
-  match usage.Agent_sdk.Types.cost_usd with
+  match usage.Agent_core.Types.cost_usd with
   | Some cost -> cost
   | None -> 0.0
 
@@ -186,10 +186,8 @@ let usage_trust_reasons = Keeper_usage_trust.reasons
 
 let usage_trust_json_fields = Keeper_usage_trust.json_fields
 
-(* #9959 defensive observability: surface usage-field trust into
-   Otel_metric_store so operators can alert on rising untrusted/missing
-   rates while the upstream OAS fix (jeong-sik/oas#1181 —
-   accumulated values leaking into per-response [api_usage]) lands.
+(* Surface usage-field trust into [Otel_metric_store] so operators can alert
+   on rising untrusted or missing rates.
 
    Two counters:
    - [masc_keeper_usage_trust_total{keeper, outcome}] — high-level
@@ -262,7 +260,7 @@ let is_noop_cycle ~has_text ~(tools_used : string list) : bool =
   (not has_text) && tools_used = []
 
 let visible_run_validation (result : Keeper_agent_run.run_result) :
-    Agent_sdk.Raw_trace.run_validation option =
+    Agent_core.Raw_trace.run_validation option =
   match result.run_validation with
   | Some v when v.ok && v.evidence <> [] -> Some v
   | _ -> None
@@ -286,7 +284,7 @@ let coverage_stage_of_result
     (result : Keeper_agent_run.run_result) : string option =
   if result.usage_reported && telemetry_reported_of_result result
   then None
-  else Some "oas"
+  else Some "agent_core"
 
 let coverage_stage_of_no_result_outcome = function
   | "skipped" | "cancelled" -> "pre_dispatch"
@@ -304,7 +302,7 @@ let has_visible_tool_signal (result : Keeper_agent_run.run_result) : bool =
   || Option.is_some (visible_run_validation result)
 
 let validated_evidence_preview
-    (v : Agent_sdk.Raw_trace.run_validation) : string =
+    (v : Agent_core.Raw_trace.run_validation) : string =
   match v.tool_names with
   | [] -> "(validated evidence)"
   | names ->
@@ -312,7 +310,7 @@ let validated_evidence_preview
 
 (* RFC-0232: the scheduled-autonomous "what is this keeper doing" preview, by
    precedence. [is_visible_reply] is the typed reply-surface outcome
-   carried by [Keeper_agent_result.turn_outcome] — an OAS turn-limit observation
+   carried by [Keeper_agent_result.turn_outcome] — an AGENT_CORE turn-limit observation
    may have no visible reply text, and a
    completed runtime turn may still have no visible reply. Neither case may be
    sniffed as model output, so visible model text only wins when the outcome is
@@ -335,30 +333,6 @@ let select_proactive_preview
     | Some preview -> preview
     | None -> previous
 
-let accountability_evidence_refs
-    ~(trace_id : string)
-    ~(turn_number : int)
-    ~(result : Keeper_agent_run.run_result)
-    ~(validated_evidence : Agent_sdk.Raw_trace.run_validation option) =
-  let tool_refs =
-    Keeper_agent_result.tool_names result
-    |> List.filter_map (fun tool_name ->
-           let trimmed = String.trim tool_name in
-           if trimmed = "" then None
-           else Some ("tool:" ^ trimmed))
-  in
-  let validation_refs =
-    match validated_evidence with
-    | Some validation ->
-      validation.evidence
-      |> List.map String.trim
-      |> List.filter (fun entry -> entry <> "")
-      |> List.map (fun entry -> "validation:" ^ entry)
-    | None -> []
-  in
-  let turn_refs = [ Printf.sprintf "turn:%s:%d" trace_id turn_number ] in
-  tool_refs @ validation_refs @ turn_refs
-
 let scheduled_autonomous_outcome_for_result
     (result : Keeper_agent_run.run_result) :
     proactive_cycle_outcome =
@@ -370,7 +344,6 @@ let turn_mode_of_result (result : Keeper_agent_run.run_result) : turn_mode =
   let text = String.trim result.response_text in
   if has_visible_tool_signal result then Tool_use
   else if text = "" then Noop
-  else if String.starts_with ~prefix:"SKIP:" text then Skip_text
   else Text_response
 
 let turn_mode_of_json = Turn_mode_codec.turn_mode_of_json
@@ -378,7 +351,7 @@ let work_kind_of_json = Turn_mode_codec.work_kind_of_json
 
 let claim_backlog_actionable
     (observation : Keeper_world_observation.world_observation) : bool =
-  observation.claimable_task_count > 0
+  Keeper_world_observation.claimable_task_count observation > 0
 
 let singleton_when condition label =
   if condition then [ label ] else []

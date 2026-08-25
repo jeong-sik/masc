@@ -25,14 +25,14 @@ let base_credential ~agent_name ~role =
 let test_compare_equal_credentials () =
   let a = base_credential ~agent_name:"alice" ~role:Masc_domain.Worker in
   let b = base_credential ~agent_name:"alice" ~role:Masc_domain.Worker in
-  match Masc.Auth.compare_credentials ~token_hash_prefix a b with
+  match Auth.compare_credentials ~token_hash_prefix a b with
   | Equal -> ()
   | Different _ -> Alcotest.fail "expected Equal for identical credentials"
 
 let test_compare_different_agent_name () =
   let a = base_credential ~agent_name:"alice" ~role:Masc_domain.Worker in
   let b = base_credential ~agent_name:"bob" ~role:Masc_domain.Worker in
-  match Masc.Auth.compare_credentials ~token_hash_prefix a b with
+  match Auth.compare_credentials ~token_hash_prefix a b with
   | Equal -> Alcotest.fail "expected Different for distinct agent_name"
   | Different log ->
     Alcotest.(check string) "left agent" "alice" log.left_agent;
@@ -40,20 +40,20 @@ let test_compare_different_agent_name () =
     Alcotest.(check bool) "has agent_name diff" true
       (List.exists
          (function
-           | Masc.Auth.Agent_name _ -> true
+           | Auth.Agent_name _ -> true
            | _ -> false)
          log.field_diffs)
 
 let test_compare_different_role () =
   let a = base_credential ~agent_name:"alice" ~role:Masc_domain.Worker in
   let b = base_credential ~agent_name:"alice" ~role:Masc_domain.Admin in
-  match Masc.Auth.compare_credentials ~token_hash_prefix a b with
+  match Auth.compare_credentials ~token_hash_prefix a b with
   | Equal -> Alcotest.fail "expected Different for distinct role"
   | Different log ->
     Alcotest.(check bool) "has role diff" true
       (List.exists
          (function
-           | Masc.Auth.Role _ -> true
+           | Auth.Role _ -> true
            | _ -> false)
          log.field_diffs)
 
@@ -77,32 +77,28 @@ let with_temp_base f =
     (fun () -> f base)
 
 let write_cred ~base ~agent_name ~role ~token_hash =
-  let agents_dir = Filename.concat base ".masc/auth/agents" in
-  let rec mkdirs p =
-    if Sys.file_exists p then ()
-    else begin
-      mkdirs (Filename.dirname p);
-      try Unix.mkdir p 0o755 with Unix.Unix_error _ -> ()
-    end
+  (* Write through the production writer so a credential schema change breaks
+     this fixture at compile time instead of at [of_yojson] runtime. The
+     hand-written JSON this replaces omitted [id]/[agent_id]/[expires_at], which
+     the decoder requires as keys even where the record type defaults them. *)
+  let cred : Masc_domain.agent_credential =
+    { id = None
+    ; agent_id = None
+    ; agent_name
+    ; token = token_hash
+    ; role = role
+    ; created_at = "2026-06-24T00:00:00Z"
+    ; expires_at = None
+    }
   in
-  mkdirs agents_dir;
-  let path = Filename.concat agents_dir (agent_name ^ ".json") in
-  let role_str = Masc_domain.agent_role_to_string role in
-  let json =
-    Printf.sprintf
-      "{\"agent_name\":%S,\"token\":%S,\"role\":%S,\"created_at\":\"2026-06-24T00:00:00Z\"}"
-      agent_name token_hash role_str
-  in
-  let oc = open_out path in
-  output_string oc json;
-  close_out oc
+  Auth.save_credential base cred
 
 let test_unknown_token_is_mismatch () =
   with_temp_base (fun base ->
     let raw = "known_raw_token_collision" in
-    let hash = Masc.Auth.sha256_hash raw in
+    let hash = Auth.sha256_hash raw in
     write_cred ~base ~agent_name:"alice" ~role:Masc_domain.Worker ~token_hash:hash;
-    match Masc.Auth.find_credential_by_token base ~token:"totally-unknown-token" with
+    match Auth.find_credential_by_token base ~token:"totally-unknown-token" with
     | Ok cred ->
       Alcotest.fail
         (Printf.sprintf "expected mismatch for unknown token, got %s" cred.agent_name)
@@ -111,9 +107,9 @@ let test_unknown_token_is_mismatch () =
 let test_single_match_returns_ok () =
   with_temp_base (fun base ->
     let raw = "single_match_collision" in
-    let hash = Masc.Auth.sha256_hash raw in
+    let hash = Auth.sha256_hash raw in
     write_cred ~base ~agent_name:"alice" ~role:Masc_domain.Worker ~token_hash:hash;
-    match Masc.Auth.find_credential_by_token base ~token:raw with
+    match Auth.find_credential_by_token base ~token:raw with
     | Ok cred -> Alcotest.(check string) "resolved agent" "alice" cred.agent_name
     | Error e ->
       Alcotest.fail
@@ -122,10 +118,10 @@ let test_single_match_returns_ok () =
 let test_artificially_equal_hashes_reject () =
   with_temp_base (fun base ->
     let raw = "shared_raw_token_collision" in
-    let hash = Masc.Auth.sha256_hash raw in
+    let hash = Auth.sha256_hash raw in
     write_cred ~base ~agent_name:"alice" ~role:Masc_domain.Worker ~token_hash:hash;
     write_cred ~base ~agent_name:"bob" ~role:Masc_domain.Worker ~token_hash:hash;
-    match Masc.Auth.find_credential_by_token base ~token:raw with
+    match Auth.find_credential_by_token base ~token:raw with
     | Ok cred ->
       Alcotest.fail
         (Printf.sprintf "expected collision error, got Ok for %s" cred.agent_name)

@@ -1,6 +1,11 @@
+---
+rfc: "0284"
+status: Implemented
+---
+
 # RFC-0284 — Fusion 심판 실행 관측 record (judge observation record)
 
-- Status: Draft
+- Status: Implemented
 - Author: Vincent (with Claude Opus 4.8)
 - Parent: RFC-0252 (fusion panel-judge deliberation), RFC-0277/0278 (panel observation), RFC-0283 (judge-of-judges)
 - implementation_prs: (this PR)

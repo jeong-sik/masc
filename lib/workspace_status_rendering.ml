@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Workspace_status_rendering - Logic for masc_status rendering *)
 
 open Masc_domain
@@ -143,11 +126,11 @@ let status_summary_string
     ~(in_progress_count : int)
     ~(done_count : int)
     ~(cancelled_count : int)
-    ~(todo_conflict_task_ids : string list)
     ~(binding : current_binding)
     ~(planning_state : planning_context_state)
     ~(attention_items : string list)
     ~(state : Masc_domain.workspace_state)
+    ~(task_goal_index : (string, string list) Hashtbl.t)
     ~(backlog : Masc_domain.backlog) =
   let max_agents_display = 40 in
   let max_active_tasks_display = 30 in
@@ -185,12 +168,6 @@ let status_summary_string
   | Some task_id ->
       Buffer.add_string buf
         (Printf.sprintf "Planning: missing=yes | task=%s\n" task_id)
-  | None -> ());
-  (match planning_state.deliverable_conflict_task with
-  | Some task_id ->
-      Buffer.add_string buf
-        (Printf.sprintf "Planning: deliverable_conflict=yes | task=%s\n"
-           task_id)
   | None -> ());
   if credential_state.credential_required then
     Buffer.add_string buf
@@ -240,16 +217,19 @@ let status_summary_string
   List.iter
     (fun (task : Masc_domain.task) ->
       Workspace_query.safe_yield ();
-      let (status_icon, status_label) =
-        if List.exists (String.equal task.id) todo_conflict_task_ids then
-          ("warning", "todo_conflict")
-        else
-          task_status_badge task.task_status
-      in
+      let status_icon, status_label = task_status_badge task.task_status in
       let assignee = task_assignee task.task_status in
+      let goal_ids =
+        Workspace_goal_index.goals_for_task task_goal_index ~task_id:task.id
+      in
+      let goal_suffix =
+        match goal_ids with
+        | [] -> ""
+        | ids -> " goal:" ^ String.concat "," ids
+      in
       Buffer.add_string buf
-        (Printf.sprintf "  %s %s P%d [%s] %s (%s)\n" status_icon task.id
-           task.priority status_label task.title assignee))
+        (Printf.sprintf "  %s %s P%d [%s] %s (%s)%s\n" status_icon task.id
+           task.priority status_label task.title assignee goal_suffix))
     shown_active_tasks;
   if (match active_tasks with [] -> true | _ -> false) then
     Buffer.add_string buf "  (no active tasks)\n";

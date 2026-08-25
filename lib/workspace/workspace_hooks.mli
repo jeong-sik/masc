@@ -6,12 +6,11 @@
     no-ops; the runtime overrides each ref via the wiring in
     [lib/workspace.ml]. *)
 
-open Masc_domain
 
 type activity_entity = { kind: string; id: string }
 
 type operator_pending_confirm_request = {
-  token : string;
+  confirm_token : string;
   trace_id : string;
   actor : string;
   action_type : string;
@@ -70,6 +69,16 @@ val observe_task_transition_fn : (Workspace_utils_backend_setup.config ->
            Atomic.t
 val on_task_mutation_fn : (unit -> unit) Atomic.t
 
+(** A workspace message's authoritative row was committed or its delivery
+    state changed. Runtime wiring invalidates projections and emits the
+    corresponding refresh signal. *)
+val on_workspace_message_mutation_fn :
+  (Workspace_utils_backend_setup.config ->
+   request_id:string ->
+   mention_delivery:Masc_domain.message_mention_delivery ->
+   unit)
+    Atomic.t
+
 val operator_pending_confirm_trace_id_fn : (string -> string) Atomic.t
 
 val operator_pending_confirm_upsert_fn :
@@ -93,13 +102,14 @@ val tool_assigned_fn : (agent_id:string ->
             tool_list:string list ->
             ?config_hash:string -> ?reason:string -> unit -> string)
            Atomic.t
-(** Fires once per [Workspace_broadcast.broadcast] return, with the wall-clock
+(** Fires once per successful [Workspace_broadcast.broadcast] commit, with the wall-clock
     duration of the broadcast body (next_seq + agent.json read +
     msg.json write + activity emit + on_broadcast_mention).  Wired at
     startup ([lib/workspace.ml]) to a Otel_metric_store histogram
     [masc_workspace_broadcast_duration_seconds] labelled by [msg_type] so
     operators can compare regular broadcasts against
-    [cache_invalidated] / mention follow-ups. *)
+    [cache_invalidated] / mention follow-ups. Authoritative write failures are
+    excluded rather than merged into the success latency distribution. *)
 val workspace_broadcast_observed_fn :
   (msg_type:string -> elapsed_s:float -> unit) Atomic.t
 
@@ -111,12 +121,12 @@ val active_agents_change_fn : ([ `Inc | `Dec ] -> unit) Atomic.t
 val telemetry_observe_failure_fn : (string -> unit) Atomic.t
 val get_default_runtime_id_fn : (unit -> string) Atomic.t
 
-(** [\[runtime\].cross_verifier] runtime id for the anti-rationalization
-    evaluator, or [None] to use {!get_default_runtime_id_fn}. Wired to
-    [Runtime.cross_verifier_runtime_id] at startup; defaults to [fun () -> None]
-    (use the global default) when not connected, so callers in test contexts
-    fall back rather than crash. *)
-val get_cross_verifier_runtime_id_fn : (unit -> string option) Atomic.t
+(** Admitted [\[runtime.exact_output_lanes.verifier_exact\]] slot ids in frozen
+    declaration order for the completion-authority evaluator (RFC-0361 D7(a)).
+    Wired to [Runtime.verifier_exact_lane_slot_ids] at startup; the unconnected
+    default is an explicit [Error], so test contexts that drive a review must
+    install their own slot list rather than inherit a silent runtime default. *)
+val get_verifier_exact_lane_slot_ids_fn : (unit -> (string list, string) result) Atomic.t
 
 val record_task_metric_fn :
   (Workspace_utils_backend_setup.config ->
@@ -180,6 +190,14 @@ val verification_submitted_fn :
    assignee:string ->
    verification_id:string ->
    unit) Atomic.t
+
+(** Notify the goal verifier lane (RFC-0387 stage 2) after a durable
+    verification request committed on the goal ledger — the [Proof_pending]
+    row written before the phase enters [Verifying]. The
+    goal-side analogue of {!verification_submitted_fn}: the callback only
+    schedules the out-of-band review; it is never a Keeper wake-up. *)
+val goal_verification_pending_fn :
+  (Workspace_utils_backend_setup.config -> goal_id:string -> unit) Atomic.t
 
 (** Publishes the completion-verdict notification after the task status
     commit. A missing runtime adapter is logged explicitly by the default. *)

@@ -63,7 +63,7 @@ describe('IdeActivityPanel', () => {
     expect(container.textContent).toContain('no keeper activity')
   })
 
-  it('shows a no-scope message instead of "no recent activity" when neither repoId nor keeperLane is set', async () => {
+  it('shows a no-scope message instead of "no recent activity" when codebase is absent', async () => {
     const container = document.createElement('div')
     render(h(IdeActivityPanel, {}), container)
 
@@ -90,7 +90,7 @@ describe('IdeActivityPanel', () => {
     }))
 
     const container = document.createElement('div')
-    render(h(IdeActivityPanel, { repoId: 'masc' }), container)
+    render(h(IdeActivityPanel, { codebase: 'github.com_x_masc' }), container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('no recent activity')
@@ -130,7 +130,7 @@ describe('IdeActivityPanel', () => {
     }))
 
     const container = document.createElement('div')
-    render(h(IdeActivityPanel, { repoId: 'repo-a' }), container)
+    render(h(IdeActivityPanel, { codebase: 'github.com_x_repo-a' }), container)
     await waitFor(() => expect(container.textContent).toContain('turn-repo-a'))
 
     render(h(IdeActivityPanel, {}), container)
@@ -157,7 +157,7 @@ describe('IdeActivityPanel', () => {
           headers: { 'Content-Type': 'application/json' },
         })
       }
-      if (url.includes('repo_id=repo-a')) {
+      if (url.includes('codebase=github.com_x_repo-a')) {
         return new Response(JSON.stringify({
           ok: true,
           data: {
@@ -171,7 +171,7 @@ describe('IdeActivityPanel', () => {
           },
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
-      if (url.includes('repo_id=repo-b')) {
+      if (url.includes('codebase=github.com_x_repo-b')) {
         return new Promise<Response>(resolve => {
           resolveRepoB = resolve
         })
@@ -180,10 +180,10 @@ describe('IdeActivityPanel', () => {
     }))
 
     const container = document.createElement('div')
-    render(h(IdeActivityPanel, { repoId: 'repo-a' }), container)
+    render(h(IdeActivityPanel, { codebase: 'github.com_x_repo-a' }), container)
     await waitFor(() => expect(container.textContent).toContain('turn-repo-a'))
 
-    render(h(IdeActivityPanel, { repoId: 'repo-b' }), container)
+    render(h(IdeActivityPanel, { codebase: 'github.com_x_repo-b' }), container)
     expect(container.textContent).not.toContain('turn-repo-a')
     await waitFor(() => expect(resolveRepoB).not.toBeNull())
 
@@ -439,7 +439,7 @@ describe('IdeActivityPanel', () => {
     const container = document.createElement('div')
     // Bridge events are fetched only under an explicit scope: without a
     // repo or keeper lane the server rejects unscoped /api/v1/ide/events.
-    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', repoId: 'masc' }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', codebase: 'github.com_x_masc' }), container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('tool:execute')
@@ -476,12 +476,12 @@ describe('IdeActivityPanel', () => {
     }))
 
     const container = document.createElement('div')
-    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', repoId: 'masc' }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', codebase: 'github.com_x_masc' }), container)
 
     await waitFor(() => expect(ideEventUrls).toHaveLength(1))
     const url = new URL(ideEventUrls[0]!, 'http://localhost')
     expect(url.pathname).toBe('/api/v1/ide/events')
-    expect(url.searchParams.get('repo_id')).toBe('masc')
+    expect(url.searchParams.get('codebase')).toBe('github.com_x_masc')
     expect(url.searchParams.get('limit')).toBe('50')
   })
 
@@ -743,72 +743,10 @@ describe('IdeActivityPanel', () => {
     await waitFor(() => {
       expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('offline 1 failed')
     })
-    // No repoId/keeperLane was passed: the empty list explains the missing
+    // No codebase was passed: the empty list explains the missing
     // scope rather than claiming "no recent activity" (which would imply
     // a real, merely-empty fetch happened).
     expect(container.querySelector('[data-testid="ide-activity-no-scope"]')).not.toBeNull()
-  })
-
-  it('degrades the refresh tone when the keeper lane fetch fails', async () => {
-    const fetchMock = vi.fn(async input => {
-      const url = String(input)
-      if (url.includes('/api/v1/ide/events')) {
-        return new Response(JSON.stringify({ ok: false, error: 'lane unavailable' }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
-      return new Response(JSON.stringify({ events: [] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })
-    })
-    vi.stubGlobal('fetch', fetchMock)
-
-    const container = document.createElement('div')
-    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', keeperLane: 'sangsu' }), container)
-
-    await waitFor(() => {
-      expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('offline 1 failed')
-    })
-    const laneUrl = fetchMock.mock.calls
-      .map(call => String(call[0]))
-      .find(url => url.includes('/api/v1/ide/events'))
-    expect(laneUrl).toContain('keeper_lane=sangsu')
-  })
-
-  it('merges keeper lane events into the feed when the lane fetch succeeds', async () => {
-    const fetchMock = vi.fn(async input => {
-      const url = String(input)
-      if (url.includes('/api/v1/ide/events')) {
-        return new Response(JSON.stringify({
-          ok: true,
-          data: {
-            events: [{
-              type: 'turn',
-              keeper_id: 'sangsu',
-              turn_id: 'turn-lane-1',
-              phase: 'completed',
-              timestamp_ms: 1717400000000,
-            }],
-          },
-        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
-      }
-      return new Response(JSON.stringify({ events: [] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })
-    })
-    vi.stubGlobal('fetch', fetchMock)
-
-    const container = document.createElement('div')
-    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', keeperLane: 'sangsu' }), container)
-
-    // Single load without polling reports 'loaded' on success.
-    await waitFor(() => {
-      expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('loaded')
-    })
-    expect(container.textContent).toContain('sangsu')
   })
 
   it('renders active run goal progress from activity goal and task links', async () => {

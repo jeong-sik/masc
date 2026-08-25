@@ -1,7 +1,6 @@
 (** IDE Bridge — collects Keeper activity events and surfaces them in
-    the [.masc-ide/] partition structure for IDE consumption. *)
+    the per-codebase [.masc-ide/] store layout for IDE consumption. *)
 
-open Ide_event_types
 
 type event_kind =
   | Tool
@@ -12,7 +11,7 @@ val event_kind_to_string : event_kind -> string
 
 val list_events :
   base_path:string ->
-  ?partition:Ide_paths.partition ->
+  codebase:string ->
   ?kind:event_kind ->
   ?keeper_id:string ->
   ?limit:int ->
@@ -22,7 +21,7 @@ val list_events :
 
 val list_cursors :
   base_path:string ->
-  ?partition:Ide_paths.partition ->
+  codebase:string ->
   ?keeper_id:string ->
   ?file_path:string ->
   ?limit:int ->
@@ -43,7 +42,7 @@ val register_cursor_changed_sink : (keeper_id:string -> unit) -> unit
     context and uses the provided [source] label as the tool_name field. *)
 val ingest_cursor_event :
   base_path:string ->
-  ?partition:Ide_paths.partition ->
+  codebase:string ->
   keeper_id:string ->
   file_path:string ->
   line:int ->
@@ -67,7 +66,7 @@ val observation_snapshot_json : take:bool -> Yojson.Safe.t
 
 val ingest_tool_event :
   base_path:string ->
-  ?partition:Ide_paths.partition ->
+  codebase:string ->
   tool_name:string ->
   keeper_id:string ->
   turn_id:string ->
@@ -79,25 +78,16 @@ val ingest_tool_event :
   timestamp_ms:int64 ->
   unit ->
   unit
-
-val ingest_turn_event :
-  base_path:string ->
-  partition:Ide_paths.partition ->
-  turn_id:string ->
-  keeper_id:string ->
-  phase:string ->
-  model_used:string option ->
-  tools_used:string list ->
-  stop_reason:string option ->
-  duration_ms:int option ->
-  timestamp_ms:int64 ->
-  unit
+(** Low-level writer: the caller names the codebase and the file
+    path explicitly. Producers go through
+    {!ingest_tool_event_from_hook}, which projects both from the fact's
+    attribution. *)
 
 (** Extract and ingest tool event from raw hook parameters.
     [typed_outcome_str] is pre-computed from [Keeper_tool_outcome.t]. *)
 val ingest_tool_event_from_hook :
   base_path:string ->
-  partition:Ide_paths.partition ->
+  attribution:Agent_observation.attribution ->
   tool_name:string ->
   keeper_id:string ->
   turn_id:string ->
@@ -112,8 +102,7 @@ val ingest_tool_event_from_hook :
     reaches these through [append_event]/[list_events] with the default
     thresholds. *)
 module For_testing : sig
-  val default_max_segment_bytes : int
-  val default_max_retained_segments : int
+
 
   (** Rotation-aware append: rotate the live segment out when it reaches
       [max_segment_bytes], append the row, then prune archives beyond

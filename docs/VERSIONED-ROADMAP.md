@@ -1,10 +1,5 @@
 ---
 status: reference
-last_verified: 2026-04-17
-code_refs:
-  - ROADMAP.md
-  - dune-project
-  - CHANGELOG.md
 ---
 
 # masc Versioned Roadmap — Feature Trains First
@@ -64,23 +59,23 @@ The user remains the primary dogfooding reporter, but Agent-Code and internal ag
 Agent-filed reports should follow the same evidence standard as human-filed reports.
 To keep reports actionable, intake is split into three buckets:
 
-| Type | Use for | Default routing |
+| Kind | Use for | Default routing |
 |------|---------|-----------------|
-| `type:bug` | Broken behavior, regression, data loss, incorrect result | Current patch or current train blocker |
-| `type:friction` | Usable but annoying, confusing, too slow, sharp UX edge | Current patch if small, next minor if workflow redesign |
-| `type:feature` | New capability, new workflow, new public surface | Next unopened minor train |
+| `kind/defect` | Implementation breaks its contract: regression, data loss, incorrect result | Current patch or current train blocker |
+| `kind/gap` | The contract or the wiring is absent | Current patch if small, next minor if it needs a design |
+| `kind/capability` | New capability, new workflow, new public surface | Next unopened minor train |
+| `kind/erosion` | Dead code, stale artifacts, wrong docs | Any patch train |
+| `kind/inquiry` | Not yet known to be a defect | Not routed until it resolves |
 
 Release labeling rules:
 
-- Every issue gets exactly one `target:*` label.
-- `release-blocker` means the issue must be closed before the tagged release.
-- Legacy labels such as `bug` or `enhancement` may remain, but `type:*` and `target:*` are the planning SSOT going forward.
+- Every issue declares exactly one `kind`, one `area`, and one `impact` in its `masc-triage` block.
+- `must-do: true` means the product promise is broken right now.
+- `.github/issue-taxonomy.json` is the planning SSOT. A value that is not in that file does not exist.
 - Agent-filed reports should include reproducible evidence, a concrete symptom, and the smallest plausible planning lane.
 - Blank issues stay disabled so intake goes through a typed issue form by default.
-- Current issue forms collect a planning area plus `target:now|next|later`, and automation adds `triage-required`
-  until the issue has exactly one `type:*`, one `area:*`, and one `target:*` label.
-- `triage-required` means the issue is not in the execution queue yet. Ownership,
-  duplicate handling, and exact release placement must be resolved before work starts.
+- The issue form and `gh issue create` both produce the same fenced `masc-triage` block, so one parser covers both.
+- An issue filed without the block gets a comment naming the expected shape and carries no labels.
 
 ## Source Documents
 

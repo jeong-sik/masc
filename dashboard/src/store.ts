@@ -29,6 +29,7 @@ import { fetchDashboardBootstrap, fetchDashboardShell } from './api/dashboard-ho
 import { journal } from './sse'
 import { showToast } from './components/common/toast'
 import { errorMessageOr } from './lib/format-string'
+import { isAbortError } from './lib/async-state'
 import {
   keeperFreshnessTs,
   normalizeKeepers,
@@ -42,8 +43,10 @@ import {
 import { groupByKey } from './components/common/collection'
 import { setArrayByKeyIfChanged } from './signal-utils'
 import { FetchScheduler } from './lib/fetch-scheduler'
+import { WARM_MAX_RETRIES, warmRetryDelayFor } from './lib/warm-retry'
 import { isRecord, asString, asNumber } from './components/common/normalize'
 import { setCanonicalDashboardActor } from './lib/dashboard-session-actor'
+import { refreshDevTokenAfterAuthError } from './api/dev-token'
 import { timeBoardRequest } from './board-metrics'
 import { namespaceTruth, namespaceTruthError, namespaceTruthInitializing } from './namespace-truth-signals'
 import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
@@ -73,11 +76,11 @@ import {
 // --- Shell counts (lightweight fallback from /dashboard/shell) ---
 
 interface ShellCounts {
-  agents: number
-  tasks: number
-  keepers: number
-  total_runtimes: number
-  configured_keepers: number
+  agents?: number
+  tasks?: number
+  keepers?: number
+  total_runtimes?: number
+  configured_keepers?: number
 }
 
 export const shellCounts = signal<ShellCounts | null>(null)
@@ -90,7 +93,48 @@ export const shellRuntimeResolution = signal<DashboardRuntimeResolution | null>(
 export const agents = signal<Agent[]>([])
 export const tasks = signal<Task[]>([])
 export const messages = signal<Message[]>([])
+export const workspaceMessagesLoading = signal(false)
+export const workspaceMessagesError = signal<string | null>(null)
 export const keepers = signal<Keeper[]>([])
+
+// Names whose purge the server accepted but has not finished. Purge answers
+// 202 with an operation id and deletes asynchronously, so the refresh that
+// follows the submit still returns the keeper — without this the row redraws
+// unchanged and the operator sees nothing happen.
+//
+// A typed Purged lifecycle event does exist and is already projected: the
+// server publishes it at completion and the execution surface maps it to
+// phase="stopped" (server_dashboard_http_execution_surfaces.ml). What is
+// missing is a projection that REMOVES the row rather than patching it, and a
+// keeper-row field carrying the durable shutdown-operation phase so a purge
+// that blocks after acceptance becomes visible. Until then the name's
+// disappearance from a refresh is the signal available here — which is why the
+// button below stays clickable rather than gating on this marker.
+export const keeperPurgePending = signal<ReadonlySet<string>>(new Set<string>())
+
+export function markKeeperPurgePending(name: string): void {
+  const trimmed = name.trim()
+  if (trimmed === '' || keeperPurgePending.value.has(trimmed)) return
+  keeperPurgePending.value = new Set([...keeperPurgePending.value, trimmed])
+}
+
+/** A pending name survives a refresh only while the refresh still returns it.
+ *  Once the server has finished deleting, the keeper drops out of the payload
+ *  and the name leaves the set — that disappearance is the completion signal. */
+export function purgePendingAfterRefresh(
+  pending: ReadonlySet<string>,
+  rows: readonly { name: string }[],
+): ReadonlySet<string> {
+  if (pending.size === 0) return pending
+  const present = new Set(rows.map(row => row.name))
+  const survivors = [...pending].filter(name => present.has(name))
+  return survivors.length === pending.size ? pending : new Set(survivors)
+}
+
+function prunePurgePendingAgainst(rows: readonly Keeper[]): void {
+  const next = purgePendingAfterRefresh(keeperPurgePending.value, rows)
+  if (next !== keeperPurgePending.value) keeperPurgePending.value = next
+}
 export const serverStatus = signal<ServerStatus | null>(null)
 // Authoritative backlog size from the execution payload's `task_counts.total`.
 // The `tasks` signal holds only what the payload chose to send — active rows
@@ -338,72 +382,82 @@ export const fusionRuns = signal<FusionRunRecord[]>([])
 export const fusionRunsLoading = signal(false)
 export const fusionRunsError = signal<string | null>(null)
 
-// --- OAS monitoring state ---
+// --- Agent Core monitoring state ---
 
-import type { OasAgentEvent, OasHealthSummary } from './types/oas'
+import type { AgentCoreAgentEvent, AgentCoreHealthSummary } from './types/agent-core'
 
 import {
-  OAS_AGENT_EVENT_BUFFER,
-  HEARTBEAT_STALE_MS,
+  AGENT_CORE_AGENT_EVENT_BUFFER,
+  keeperHeartbeatStaleMs,
   SHELL_TTL_MS,
 } from './config/constants'
 import { RingBuffer } from './lib/ring-buffer'
 
-const oasAgentEventsRing = new RingBuffer<OasAgentEvent>(OAS_AGENT_EVENT_BUFFER)
-export const oasAgentEvents = signal<OasAgentEvent[]>([])
-export const oasTotalEvents = signal(0)
-export const oasReplayLoadedEvents = signal(0)
-export const oasReplayTotalMatchingEvents = signal(0)
-export const oasReplayTruncated = signal(false)
-export const oasTotalLlmCalls = signal(0)
-export const oasTotalErrors = signal(0)
-export const oasLastLlmCallTs = signal<number | null>(null)
-export const oasLastErrorTs = signal<number | null>(null)
-export const oasEvidenceRefsCount = signal(0)
-export const oasArtifactRefsCount = signal(0)
-export const oasRawTraceRefsCount = signal(0)
-export const oasReportRefsCount = signal(0)
-export const oasProofRefsCount = signal(0)
-export const oasTelemetryRefsCount = signal(0)
-export const oasRuntimeEvidenceRefsCount = signal(0)
-export const oasLastEvidenceTs = signal<number | null>(null)
+const agentCoreAgentEventsRing = new RingBuffer<AgentCoreAgentEvent>(AGENT_CORE_AGENT_EVENT_BUFFER)
+export const agentCoreAgentEvents = signal<AgentCoreAgentEvent[]>([])
+export const agentCoreTotalEvents = signal(0)
+export const agentCoreReplayLoadedEvents = signal(0)
+export const agentCoreReplayTotalMatchingEvents = signal(0)
+export const agentCoreReplayTruncated = signal(false)
+export const agentCoreReplayCapped = signal(false)
+export const agentCoreTotalLlmCalls = signal(0)
+export const agentCoreTotalErrors = signal(0)
+export const agentCoreLastLlmCallTs = signal<number | null>(null)
+export const agentCoreLastErrorTs = signal<number | null>(null)
+export const agentCoreEvidenceRefsCount = signal(0)
+export const agentCoreArtifactRefsCount = signal(0)
+export const agentCoreRawTraceRefsCount = signal(0)
+export const agentCoreReportRefsCount = signal(0)
+export const agentCoreProofRefsCount = signal(0)
+export const agentCoreTelemetryRefsCount = signal(0)
+export const agentCoreRuntimeEvidenceRefsCount = signal(0)
+export const agentCoreLastEvidenceTs = signal<number | null>(null)
 
-export function resetOasRuntimeSignals(): void {
-  oasAgentEventsRing.clear()
-  oasAgentEvents.value = []
-  oasTotalEvents.value = 0
-  oasReplayLoadedEvents.value = 0
-  oasReplayTotalMatchingEvents.value = 0
-  oasReplayTruncated.value = false
-  oasTotalLlmCalls.value = 0
-  oasTotalErrors.value = 0
-  oasLastLlmCallTs.value = null
-  oasLastErrorTs.value = null
-  oasEvidenceRefsCount.value = 0
-  oasArtifactRefsCount.value = 0
-  oasRawTraceRefsCount.value = 0
-  oasReportRefsCount.value = 0
-  oasProofRefsCount.value = 0
-  oasTelemetryRefsCount.value = 0
-  oasRuntimeEvidenceRefsCount.value = 0
-  oasLastEvidenceTs.value = null
+export function resetAgentCoreRuntimeSignals(): void {
+  agentCoreAgentEventsRing.clear()
+  agentCoreAgentEvents.value = []
+  agentCoreTotalEvents.value = 0
+  agentCoreReplayLoadedEvents.value = 0
+  agentCoreReplayTotalMatchingEvents.value = 0
+  agentCoreReplayTruncated.value = false
+  agentCoreReplayCapped.value = false
+  agentCoreTotalLlmCalls.value = 0
+  agentCoreTotalErrors.value = 0
+  agentCoreLastLlmCallTs.value = null
+  agentCoreLastErrorTs.value = null
+  agentCoreEvidenceRefsCount.value = 0
+  agentCoreArtifactRefsCount.value = 0
+  agentCoreRawTraceRefsCount.value = 0
+  agentCoreReportRefsCount.value = 0
+  agentCoreProofRefsCount.value = 0
+  agentCoreTelemetryRefsCount.value = 0
+  agentCoreRuntimeEvidenceRefsCount.value = 0
+  agentCoreLastEvidenceTs.value = null
 }
 
-export function noteOasReplayWindow(input: {
+export function noteAgentCoreReplayWindow(input: {
   loadedEvents: number
   totalMatchingEvents: number
   truncated: boolean
+  capped?: boolean
+  observedTotalEvents?: number
 }): void {
   const loadedEvents = Math.max(0, Math.floor(input.loadedEvents))
   const totalMatchingEvents = Math.max(loadedEvents, Math.floor(input.totalMatchingEvents))
+  const observedTotalEvents = Math.max(
+    totalMatchingEvents,
+    Math.floor(input.observedTotalEvents ?? totalMatchingEvents),
+  )
   const truncated = input.truncated && totalMatchingEvents > loadedEvents
-  oasReplayLoadedEvents.value = loadedEvents
-  oasReplayTotalMatchingEvents.value = totalMatchingEvents
-  oasReplayTruncated.value = truncated
-  oasTotalEvents.value = totalMatchingEvents
+  const capped = Boolean(input.capped) && totalMatchingEvents > loadedEvents
+  agentCoreReplayLoadedEvents.value = loadedEvents
+  agentCoreReplayTotalMatchingEvents.value = totalMatchingEvents
+  agentCoreReplayTruncated.value = truncated && !capped
+  agentCoreReplayCapped.value = capped
+  agentCoreTotalEvents.value = observedTotalEvents
 }
 
-function sameOasAgentEvent(left: OasAgentEvent, right: OasAgentEvent): boolean {
+function sameAgentCoreAgentEvent(left: AgentCoreAgentEvent, right: AgentCoreAgentEvent): boolean {
   if (left.event_key != null && right.event_key != null) {
     return left.event_key === right.event_key
   }
@@ -423,46 +477,33 @@ function sameOasAgentEvent(left: OasAgentEvent, right: OasAgentEvent): boolean {
         && left.phase === right.phase
         && left.detail === right.detail
       )
-    case 'trust_updated':
-      return (
-        right.type === 'trust_updated'
-        && left.secondary_agent === right.secondary_agent
-        && left.trust_score === right.trust_score
-      )
-    case 'reputation_changed':
-      return (
-        right.type === 'reputation_changed'
-        && left.old_score === right.old_score
-        && left.new_score === right.new_score
-        && left.trend === right.trend
-      )
   }
 }
 
-export function pushOasAgentEvent(event: OasAgentEvent): void {
-  const head = oasAgentEventsRing.peek()
-  if (head != null && sameOasAgentEvent(head, event)) {
+export function pushAgentCoreAgentEvent(event: AgentCoreAgentEvent): void {
+  const head = agentCoreAgentEventsRing.peek()
+  if (head != null && sameAgentCoreAgentEvent(head, event)) {
     return
   }
-  oasAgentEventsRing.push(event)
-  oasAgentEvents.value = oasAgentEventsRing.toArray() as OasAgentEvent[]
+  agentCoreAgentEventsRing.push(event)
+  agentCoreAgentEvents.value = agentCoreAgentEventsRing.toArray() as AgentCoreAgentEvent[]
 }
 
-/** Record an OAS durable LLM-call event. Increments the global
+/** Record an Agent Core durable LLM-call event. Increments the global
  *  counter and pins the latest timestamp so the runtime panel can
  *  surface recency. */
-export function recordOasLlmCall(tsMs: number): void {
-  oasTotalLlmCalls.value++
-  oasLastLlmCallTs.value = Math.max(oasLastLlmCallTs.value ?? 0, tsMs)
+export function recordAgentCoreLlmCall(tsMs: number): void {
+  agentCoreTotalLlmCalls.value++
+  agentCoreLastLlmCallTs.value = Math.max(agentCoreLastLlmCallTs.value ?? 0, tsMs)
 }
 
-/** Record an OAS durable error event. */
-export function recordOasError(tsMs: number): void {
-  oasTotalErrors.value++
-  oasLastErrorTs.value = Math.max(oasLastErrorTs.value ?? 0, tsMs)
+/** Record an Agent Core durable error event. */
+export function recordAgentCoreError(tsMs: number): void {
+  agentCoreTotalErrors.value++
+  agentCoreLastErrorTs.value = Math.max(agentCoreLastErrorTs.value ?? 0, tsMs)
 }
 
-export function recordOasEvidenceRefs(input: {
+export function recordAgentCoreEvidenceRefs(input: {
   evidenceRefsCount?: number
   artifactRefsCount?: number
   rawTraceRefsCount?: number
@@ -490,37 +531,38 @@ export function recordOasEvidenceRefs(input: {
   ) {
     return
   }
-  oasEvidenceRefsCount.value += evidenceRefsCount
-  oasArtifactRefsCount.value += artifactRefsCount
-  oasRawTraceRefsCount.value += rawTraceRefsCount
-  oasReportRefsCount.value += reportRefsCount
-  oasProofRefsCount.value += proofRefsCount
-  oasTelemetryRefsCount.value += telemetryRefsCount
-  oasRuntimeEvidenceRefsCount.value += runtimeEvidenceRefsCount
+  agentCoreEvidenceRefsCount.value += evidenceRefsCount
+  agentCoreArtifactRefsCount.value += artifactRefsCount
+  agentCoreRawTraceRefsCount.value += rawTraceRefsCount
+  agentCoreReportRefsCount.value += reportRefsCount
+  agentCoreProofRefsCount.value += proofRefsCount
+  agentCoreTelemetryRefsCount.value += telemetryRefsCount
+  agentCoreRuntimeEvidenceRefsCount.value += runtimeEvidenceRefsCount
   if (typeof input.tsMs === 'number' && Number.isFinite(input.tsMs)) {
-    oasLastEvidenceTs.value = Math.max(oasLastEvidenceTs.value ?? 0, input.tsMs)
+    agentCoreLastEvidenceTs.value = Math.max(agentCoreLastEvidenceTs.value ?? 0, input.tsMs)
   }
 }
 
-export const oasHealthSummary: ReadonlySignal<OasHealthSummary> = computed(() => ({
-  agentEventsCount: oasAgentEvents.value.length,
-  totalEvents: oasTotalEvents.value,
-  replayLoadedEvents: oasReplayLoadedEvents.value,
-  replayTotalMatchingEvents: oasReplayTotalMatchingEvents.value,
-  replayTruncated: oasReplayTruncated.value,
-  hasMore: oasReplayTruncated.value,
-  totalLlmCalls: oasTotalLlmCalls.value,
-  totalErrors: oasTotalErrors.value,
-  lastLlmCallTs: oasLastLlmCallTs.value,
-  lastErrorTs: oasLastErrorTs.value,
-  evidenceRefsCount: oasEvidenceRefsCount.value,
-  artifactRefsCount: oasArtifactRefsCount.value,
-  rawTraceRefsCount: oasRawTraceRefsCount.value,
-  reportRefsCount: oasReportRefsCount.value,
-  proofRefsCount: oasProofRefsCount.value,
-  telemetryRefsCount: oasTelemetryRefsCount.value,
-  runtimeEvidenceRefsCount: oasRuntimeEvidenceRefsCount.value,
-  lastEvidenceTs: oasLastEvidenceTs.value,
+export const agentCoreHealthSummary: ReadonlySignal<AgentCoreHealthSummary> = computed(() => ({
+  agentEventsCount: agentCoreAgentEvents.value.length,
+  totalEvents: agentCoreTotalEvents.value,
+  replayLoadedEvents: agentCoreReplayLoadedEvents.value,
+  replayTotalMatchingEvents: agentCoreReplayTotalMatchingEvents.value,
+  replayTruncated: agentCoreReplayTruncated.value,
+  replayCapped: agentCoreReplayCapped.value,
+  hasMore: agentCoreReplayTruncated.value,
+  totalLlmCalls: agentCoreTotalLlmCalls.value,
+  totalErrors: agentCoreTotalErrors.value,
+  lastLlmCallTs: agentCoreLastLlmCallTs.value,
+  lastErrorTs: agentCoreLastErrorTs.value,
+  evidenceRefsCount: agentCoreEvidenceRefsCount.value,
+  artifactRefsCount: agentCoreArtifactRefsCount.value,
+  rawTraceRefsCount: agentCoreRawTraceRefsCount.value,
+  reportRefsCount: agentCoreReportRefsCount.value,
+  proofRefsCount: agentCoreProofRefsCount.value,
+  telemetryRefsCount: agentCoreTelemetryRefsCount.value,
+  runtimeEvidenceRefsCount: agentCoreRuntimeEvidenceRefsCount.value,
+  lastEvidenceTs: agentCoreLastEvidenceTs.value,
 }))
 
 // --- Loading flags ---
@@ -635,7 +677,7 @@ export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
   const hb = keeperHeartbeats.value
   for (const k of keepers.value) {
     const lastTs = keeperFreshnessTs(k, hb)
-    if (lastTs != null && (now - lastTs) > HEARTBEAT_STALE_MS) {
+    if (lastTs != null && (now - lastTs) > keeperHeartbeatStaleMs(k.heartbeat_stale_after_s)) {
       stale.add(k.name)
     }
   }
@@ -651,7 +693,107 @@ export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
 let inflightDashboardRefresh: Promise<void> | null = null
 let inflightShellRefresh: Promise<boolean> | null = null
 let inflightShellRefreshLight = false
+let inflightWorkspaceMessagesRefresh: Promise<void> | null = null
+let inflightWorkspaceMessagesRefreshProject: string | null = null
+let workspaceMessagesRefreshController: AbortController | null = null
+let workspaceMessagesRefreshGeneration = 0
+let workspaceMessagesRefreshInvalidated = false
+// Once the dedicated workspace endpoint has committed a snapshot, execution
+// payload messages are only a lower-fidelity fallback: they do not carry the
+// producer request id or durable mention-delivery status.  Letting a later
+// execution snapshot merge them back creates a second seq-identical row and
+// can make an accepted delivery look pending again.
+let workspaceMessagesDurableAuthority: { project: string | null } | null = null
 let lastShellRefreshAt = 0
+
+export function refreshDashboardWorkspaceMessages(
+  expectedProject = serverStatus.value?.project ?? null,
+): Promise<void> {
+  if (inflightWorkspaceMessagesRefresh) {
+    if (inflightWorkspaceMessagesRefreshProject === expectedProject) {
+      workspaceMessagesRefreshInvalidated = true
+      return inflightWorkspaceMessagesRefresh
+    }
+    // The inflight refresh targets a different project. Joining it would let
+    // its result satisfy this call's expectedProject guard by coincidence;
+    // abort it and start a fresh request scoped to this project instead.
+    workspaceMessagesRefreshController?.abort()
+  }
+
+  workspaceMessagesLoading.value = true
+  workspaceMessagesError.value = null
+  workspaceMessagesRefreshInvalidated = false
+  const generation = ++workspaceMessagesRefreshGeneration
+  const controller = new AbortController()
+  workspaceMessagesRefreshController = controller
+  inflightWorkspaceMessagesRefreshProject = expectedProject
+  inflightWorkspaceMessagesRefresh = (async () => {
+    try {
+      const { fetchDashboardWorkspaceMessages } = await import('./api/dashboard-workspace')
+      let settled = false
+      while (!settled && generation === workspaceMessagesRefreshGeneration) {
+        workspaceMessagesRefreshInvalidated = false
+        const nextMessages = await fetchDashboardWorkspaceMessages({
+          signal: controller.signal,
+        })
+        if (generation !== workspaceMessagesRefreshGeneration || controller.signal.aborted) {
+          return
+        }
+        if (workspaceMessagesRefreshInvalidated) {
+          continue
+        }
+        if ((serverStatus.value?.project ?? null) === expectedProject) {
+          // This endpoint is the durable Workspace message SSOT. Replace the
+          // execution-derived cache instead of merging rows that the light
+          // execution response intentionally omits.
+          messages.value = nextMessages
+          workspaceMessagesDurableAuthority = { project: expectedProject }
+        }
+        settled = true
+      }
+    } catch (error) {
+      if (generation === workspaceMessagesRefreshGeneration && !isAbortError(error)) {
+        // The durable endpoint failed after previously committing a snapshot
+        // for this project: release authority so the execution-snapshot
+        // fallback (see the comment above workspaceMessagesDurableAuthority's
+        // declaration) can resume covering messages instead of freezing on
+        // the last durable snapshot. Scoped to expectedProject so a stale
+        // failure can't clear an authority a newer, still-inflight refresh
+        // already set for a different project.
+        if (workspaceMessagesDurableAuthority?.project === expectedProject) {
+          workspaceMessagesDurableAuthority = null
+        }
+        workspaceMessagesError.value = errorMessageOr(
+          error,
+          'Workspace messages failed to load',
+        )
+        console.warn('[Workspace messages] fetch error:', error)
+      }
+    } finally {
+      if (generation === workspaceMessagesRefreshGeneration) {
+        workspaceMessagesLoading.value = false
+        workspaceMessagesRefreshController = null
+        inflightWorkspaceMessagesRefresh = null
+        inflightWorkspaceMessagesRefreshProject = null
+      }
+    }
+  })()
+  return inflightWorkspaceMessagesRefresh
+}
+
+export function cancelDashboardWorkspaceMessagesRefresh(): void {
+  workspaceMessagesRefreshGeneration += 1
+  workspaceMessagesRefreshInvalidated = false
+  workspaceMessagesRefreshController?.abort()
+  workspaceMessagesRefreshController = null
+  inflightWorkspaceMessagesRefresh = null
+  inflightWorkspaceMessagesRefreshProject = null
+  workspaceMessagesLoading.value = false
+  // The durable refresh loop is no longer running, so its snapshot can no
+  // longer be trusted to stay current — release authority so the
+  // execution-snapshot fallback resumes covering messages.
+  workspaceMessagesDurableAuthority = null
+}
 
 export function invalidateDashboardCache(): void {
   // Projection endpoints are intentionally fresh-first after the operator-console rewrite.
@@ -665,7 +807,10 @@ async function refreshDashboardFallback(opts?: RefreshOptions): Promise<void> {
   await Promise.all([refreshShell(opts), refreshExecution(opts)])
 }
 
-function hydrateDashboardBootstrap(data: DashboardBootstrapResponse): void {
+function hydrateDashboardBootstrap(
+  data: DashboardBootstrapResponse,
+  executionRequestGeneration: number,
+): void {
   if (!data.shell || bootstrapSliceError(data.shell)) {
     throw new Error('dashboard bootstrap shell slice unavailable')
   }
@@ -674,7 +819,7 @@ function hydrateDashboardBootstrap(data: DashboardBootstrapResponse): void {
   }
 
   hydrateShellSnapshot(data.shell, { light: true })
-  hydrateExecutionSnapshot(data.execution)
+  hydrateExecutionSnapshot(data.execution, { requestGeneration: executionRequestGeneration })
 
   if (data.planning && !bootstrapSliceError(data.planning)) {
     hydratePlanningSnapshot(data.planning)
@@ -702,11 +847,15 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
   if (inflightDashboardRefresh) return inflightDashboardRefresh
   dashboardLoading.value = true
   inflightDashboardRefresh = (async () => {
+    const executionRequestGeneration = executionSnapshotRequestGeneration()
     try {
       executionLoading.value = true
       executionError.value = null
       try {
-        hydrateDashboardBootstrap(await fetchDashboardBootstrap())
+        hydrateDashboardBootstrap(
+          await fetchDashboardBootstrap(),
+          executionRequestGeneration,
+        )
       } catch (bootstrapErr) {
         console.warn('[Dashboard] bootstrap refresh failed, falling back:', bootstrapErr)
         await refreshDashboardFallback(opts)
@@ -741,7 +890,6 @@ function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
         due_date: asString(row.due_date) ?? null,
         priority: asNumber(row.priority) ?? 3,
         phase,
-        parent_goal_id: asString(row.parent_goal_id) ?? null,
         last_review_note: asString(row.last_review_note) ?? null,
         last_review_at: asString(row.last_review_at) ?? null,
         created_at: createdAt,
@@ -766,7 +914,6 @@ function normalizeShellAuthSummary(raw: unknown): DashboardShellAuthSummary | nu
   return {
     enabled: raw.enabled === true,
     require_token: raw.require_token === true,
-    default_role: asString(raw.default_role) ?? null,
     token_present: raw.token_present === true,
     token_valid: raw.token_valid === true,
     token_agent: asString(raw.token_agent) ?? null,
@@ -780,6 +927,30 @@ function normalizeShellAuthSummary(raw: unknown): DashboardShellAuthSummary | nu
   }
 }
 
+/* The shell reports a rejected credential inside the body of a 200 response
+   — `token_valid: false` plus the typed `auth_error_code` — because the
+   loopback read contract stays available to an unauthenticated caller. The
+   MCP client recovers from a rejected token by inspecting the auth error
+   envelope of a *failed* call (`api/mcp.ts`), so a tab whose traffic is the
+   shell/bootstrap poll never reaches that path and re-sends the same
+   rejected token for the life of the tab.
+
+   Measured on the live fleet 2026-08-12: one browser session re-sent a
+   single rejected token (`sha256[0:8] = 75598b82`) every 6 minutes across
+   two server restarts, and the server answered each one with
+   `[silent:dashboard_actor_fallback] outcome=error err_kind=token_mismatch`
+   — 7 in the 33 minutes sampled, with no terminating condition.
+
+   `refreshDevTokenAfterAuthError` owns the whole policy: it ignores codes
+   that a new token cannot fix, refuses to touch a manually pasted token,
+   deduplicates concurrent attempts, and reports failure when the refetched
+   token is identical, so a token that is rejected for some other reason
+   cannot drive a refresh loop. */
+function recoverFromRejectedShellAuth(auth: DashboardShellAuthSummary | null): void {
+  if (auth === null || auth.token_valid || !auth.token_present) return
+  void refreshDevTokenAfterAuthError(auth.auth_error_code)
+}
+
 export function hydrateShellSnapshot(
   data: DashboardShellResponse,
   opts?: { light?: boolean; preserveAuth?: boolean },
@@ -788,6 +959,7 @@ export function hydrateShellSnapshot(
   const preserveAuth = opts?.preserveAuth === true
   const normalizedAuth = normalizeShellAuthSummary(data.auth)
   if (!preserveAuth) {
+    recoverFromRejectedShellAuth(normalizedAuth)
     setCanonicalDashboardActor(
       normalizedAuth?.token_valid
         ? normalizedAuth.effective_agent ?? normalizedAuth.token_agent ?? null
@@ -799,12 +971,18 @@ export function hydrateShellSnapshot(
     serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
   }
   if (data.counts) {
+    const agents = data.counts.agents
+    const keepers = data.counts.keepers
+    const totalRuntimes = data.counts.total_runtimes
+      ?? (agents != null && keepers != null ? agents + keepers : undefined)
     shellCounts.value = {
-      agents: data.counts.agents ?? 0,
-      tasks: data.counts.tasks ?? 0,
-      keepers: data.counts.keepers ?? 0,
-      total_runtimes: data.counts.total_runtimes ?? ((data.counts.agents ?? 0) + (data.counts.keepers ?? 0)),
-      configured_keepers: data.configured_keepers ?? 0,
+      ...(agents != null ? { agents } : {}),
+      ...(data.counts.tasks != null ? { tasks: data.counts.tasks } : {}),
+      ...(keepers != null ? { keepers } : {}),
+      ...(totalRuntimes != null ? { total_runtimes: totalRuntimes } : {}),
+      ...(data.configured_keepers != null
+        ? { configured_keepers: data.configured_keepers }
+        : {}),
     }
   }
   if (!preserveAuth) {
@@ -855,9 +1033,138 @@ export async function refreshShell(opts?: RefreshOptions): Promise<boolean> {
   return inflightShellRefresh
 }
 
+let executionPublicationEpoch: string | null = null
+let executionReconnectPreviousEpoch: string | null = null
+let executionReconnectAwaitingHttp = false
+const executionReconnectInvalidationFloors = new Map<string, number>()
+let executionPublicationGenerationWatermark = -1
+let executionHydrationRequestGeneration = 0
+const retiredExecutionPublicationEpochs = new Set<string>()
+
+function retireExecutionPublicationEpoch(epoch: string): void {
+  retiredExecutionPublicationEpochs.add(epoch)
+}
+
+function executionSnapshotRequestGeneration(): number {
+  return executionHydrationRequestGeneration
+}
+
+function executionPublicationIdentityOf(
+  data: DashboardExecutionResponse,
+): { epoch: string; generation: number } | null {
+  const epoch = data.execution_publication_epoch
+  const generation = data.execution_publication_generation
+  return typeof epoch === 'string'
+    && epoch.trim() !== ''
+    && typeof generation === 'number'
+    && Number.isSafeInteger(generation)
+    && generation >= 0
+    ? { epoch, generation }
+    : null
+}
+
+export function invalidateExecutionSnapshotGeneration(
+  epoch: string,
+  generation: number,
+): boolean {
+  if (
+    epoch.trim() === ''
+    || !Number.isSafeInteger(generation)
+    || generation < 0
+    || retiredExecutionPublicationEpochs.has(epoch)
+  ) return false
+  if (executionReconnectAwaitingHttp) {
+    executionReconnectInvalidationFloors.set(
+      epoch,
+      Math.max(executionReconnectInvalidationFloors.get(epoch) ?? -1, generation),
+    )
+    return true
+  }
+  if (executionPublicationEpoch !== epoch) {
+    const previousEpoch = executionPublicationEpoch ?? executionReconnectPreviousEpoch
+    if (previousEpoch !== null && previousEpoch !== epoch) {
+      retireExecutionPublicationEpoch(previousEpoch)
+    }
+    executionPublicationEpoch = epoch
+    executionReconnectPreviousEpoch = null
+    executionPublicationGenerationWatermark = generation
+    return true
+  }
+  executionPublicationGenerationWatermark = Math.max(
+    executionPublicationGenerationWatermark,
+    generation,
+  )
+  return true
+}
+
+export function resetExecutionSnapshotGeneration(): void {
+  executionReconnectPreviousEpoch = executionPublicationEpoch
+  executionPublicationEpoch = null
+  executionPublicationGenerationWatermark = -1
+  executionReconnectAwaitingHttp = true
+  executionReconnectInvalidationFloors.clear()
+  executionHydrationRequestGeneration += 1
+}
+
 /** Hydrate all execution-related signals from a raw data payload.
  *  Shared by doFetchExecution (HTTP) and SSE execution_snapshot handler. */
-export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void {
+export function hydrateExecutionSnapshot(
+  data: DashboardExecutionResponse,
+  opts?: { requestGeneration?: number },
+): boolean {
+  if (
+    opts?.requestGeneration !== undefined
+    && opts.requestGeneration !== executionHydrationRequestGeneration
+  ) {
+    return false
+  }
+  const identity = executionPublicationIdentityOf(data)
+  if (executionReconnectAwaitingHttp && opts?.requestGeneration === undefined) {
+    return false
+  }
+  if (identity !== null && retiredExecutionPublicationEpochs.has(identity.epoch)) {
+    return false
+  }
+  if (
+    executionReconnectAwaitingHttp
+    && (
+      identity === null
+      || (
+        identity.generation
+        < (executionReconnectInvalidationFloors.get(identity.epoch) ?? -1)
+      )
+    )
+  ) {
+    return false
+  }
+  if (
+    executionPublicationEpoch !== null
+    && (
+      identity === null
+      || identity.epoch !== executionPublicationEpoch
+      || identity.generation < executionPublicationGenerationWatermark
+    )
+  ) {
+    return false
+  }
+  if (identity !== null) {
+    if (executionPublicationEpoch === null) {
+      if (
+        executionReconnectPreviousEpoch !== null
+        && executionReconnectPreviousEpoch !== identity.epoch
+      ) {
+        retireExecutionPublicationEpoch(executionReconnectPreviousEpoch)
+      }
+      executionPublicationEpoch = identity.epoch
+      executionReconnectPreviousEpoch = null
+      executionReconnectAwaitingHttp = false
+      executionReconnectInvalidationFloors.clear()
+    }
+    executionPublicationGenerationWatermark = Math.max(
+      executionPublicationGenerationWatermark,
+      identity.generation,
+    )
+  }
   const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
   const previousProject = serverStatus.value?.project
   if (normalizedStatus) {
@@ -867,6 +1174,11 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
     previousProject != null
     && normalizedStatus?.project != null
     && previousProject !== normalizedStatus.project
+  if (workspaceChanged) {
+    // cancelDashboardWorkspaceMessagesRefresh() releases
+    // workspaceMessagesDurableAuthority itself.
+    cancelDashboardWorkspaceMessagesRefresh()
+  }
   const normalizedAgents = (Array.isArray(data.agents) ? data.agents : [])
     .map(normalizeAgent)
     .filter((row): row is Agent => row !== null)
@@ -881,8 +1193,16 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
   const executionMessages = (Array.isArray(data.messages) ? data.messages : [])
     .map(normalizeMessage)
     .filter((row): row is Message => row !== null)
-  messages.value = workspaceChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
+  const currentProject = serverStatus.value?.project ?? null
+  const durableMessagesOwnCurrentProject =
+    workspaceMessagesDurableAuthority?.project === currentProject
+  if (!durableMessagesOwnCurrentProject) {
+    messages.value = workspaceChanged
+      ? executionMessages
+      : mergeMessages(messages.value, executionMessages)
+  }
   keepers.value = reconcileKeepers(keepers.value, normalizeKeepers(data.keepers))
+  prunePurgePendingAgainst(keepers.value)
   const normalizedWorkerBriefs = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
     .map(normalizeExecutionWorkerSupportBrief)
     .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)
@@ -892,19 +1212,51 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
     .filter((row): row is DashboardExecutionContinuityBrief => row !== null)
   setArrayByKeyIfChanged(executionContinuityBriefs, normalizedContinuityBriefs, c => c.name, stableValueEqual)
   executionLoaded.value = true
+  return true
 }
 
 let nextExecutionForce = false
 
+// A warm-up envelope carries no fleet. Hydrating it would reconcile the
+// keeper list against [] and report the fleet as loaded-and-empty (the
+// "일치하는 키퍼가 없습니다" screen 37s after a restart, 2026-08-22).
+export function isInitializingExecutionPayload(data: DashboardExecutionResponse): boolean {
+  return data.status?.project === 'initializing'
+}
+
+let executionWarmRetryAttempt = 0
+let executionWarmRetryTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleExecutionWarmRetry(): void {
+  executionWarmRetryAttempt += 1
+  if (executionWarmRetryAttempt > WARM_MAX_RETRIES) {
+    executionWarmRetryAttempt = 0
+    executionError.value = 'Server warm-up timed out. Try refreshing.'
+    return
+  }
+  const delayMs = warmRetryDelayFor(executionWarmRetryAttempt)
+  if (executionWarmRetryTimer) clearTimeout(executionWarmRetryTimer)
+  executionWarmRetryTimer = setTimeout(() => {
+    executionWarmRetryTimer = null
+    executionScheduler.requestNow()
+  }, delayMs)
+}
+
 async function doFetchExecution(): Promise<void> {
   const force = nextExecutionForce
   nextExecutionForce = false
+  const requestGeneration = executionSnapshotRequestGeneration()
   executionLoading.value = true
   executionError.value = null
   try {
     const { fetchDashboardExecution } = await import('./api/dashboard-execution')
     const data = await fetchDashboardExecution({ force })
-    hydrateExecutionSnapshot(data)
+    if (isInitializingExecutionPayload(data)) {
+      scheduleExecutionWarmRetry()
+      return
+    }
+    executionWarmRetryAttempt = 0
+    hydrateExecutionSnapshot(data, { requestGeneration })
   } catch (err) {
     console.warn('[Dashboard] execution fetch error:', err)
     executionError.value = errorMessageOr(err, 'Execution projection load failed')

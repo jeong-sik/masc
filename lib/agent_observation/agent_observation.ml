@@ -1,49 +1,3 @@
-type codebase_partition =
-  | By_url of string
-      (** canonical URL 정상 resolved: host_path slug. *)
-  | No_canonical_url
-      (** [canonical_url_of_remote] returned None: blank [repo.url] or malformed
-          remote. IDE Observation Plane v2 §7 "(1) 빈 repo/remote 없음". *)
-  | Unmatched
-      (** Caller passed [repo_id] but the repository store could not resolve it
-          (not-found / empty-url / load-error). v2 §7 "(2) repo_id unmatched". *)
-  | Base_unresolved
-      (** [file_path] falls under no registered repo [local_path] (unregistered
-          worktree, outside [.masc/playground]). v2 §7 "(4) base 경로 소실" —
-          the write-path [unregistered_repo] producer is the live instance. *)
-  | Legacy_default
-      (** Neither [canonical_url] nor [repo_id] was supplied, or the record
-          carries no [partition] field at all (tool/turn,
-          annotation_request). Structural ceiling, NOT a soft fallback.
-          v2 §7 "(3) default 미갱신". *)
-
-type tool_event =
-  { base_path : string
-  ; partition : codebase_partition
-  ; tool_name : string
-  ; keeper_id : string
-  ; turn_id : string
-  ; outcome : string
-  ; typed_outcome : string
-  ; duration_ms : float
-  ; output_text : string
-  ; input : Yojson.Safe.t
-  }
-
-type turn_event =
-  { base_path : string
-  ; partition : codebase_partition
-  ; turn_id : string
-  ; keeper_id : string
-  ; phase : string
-  ; model_used : string option
-  ; tools_used : string list
-  ; stop_reason : string option
-  ; duration_ms : int option
-  ; timestamp_ms : int64
-  }
-
-
 (* RFC-0128 §4.1 neutral codebase slug derivation.
 
    Kept below the Keeper/IDE boundary so runtime producers can route
@@ -112,6 +66,7 @@ let is_slug_char c =
 
 let path_segment_to_slug seg =
   if seg = "" then None
+  else if String.equal seg "." then None
   else if String.length seg >= 2 && String.sub seg 0 2 = ".."
   then None
   else if String.for_all is_slug_char seg
@@ -151,9 +106,172 @@ let canonical_url_of_remote raw =
            | Some segs -> Some (String.concat "_" (host_slug :: segs)))
 ;;
 
+(* RFC-0378 §5.1: a code fact's address, minted once where the write is
+   attributed and carried as a parsed value from then on. Consumers never
+   re-derive either half from tool input or store layout — [v] is the only
+   way in, and it rejects every shape the per-codebase store cannot join on
+   instead of repairing it. *)
+module Code_address = struct
+  type t =
+    { codebase : string
+    ; path : string
+    }
+
+  type invalid =
+    | Empty_codebase
+    | Malformed_codebase
+    | Empty_path
+    | Absolute_path
+    | Malformed_path
+    | Unnormalized_path
+
+  let invalid_to_string = function
+    | Empty_codebase -> "empty codebase slug"
+    | Malformed_codebase ->
+      "codebase is not a canonical host_path slug (e.g. example.com_owner_repo)"
+    | Empty_path -> "empty repo-relative path"
+    | Absolute_path -> "path is absolute, expected repo-root relative"
+    | Malformed_path -> "path is not syntactically valid"
+    | Unnormalized_path -> "path has ., .., or empty segments"
+  ;;
+
+  (* Same closed character set and leading-[..] guard as
+     [path_segment_to_slug], so every slug [canonical_url_of_remote] can
+     emit is accepted and nothing outside that alphabet is. Structure is
+     part of the acceptance too: every canonical slug joins a host and at
+     least one path segment with ['_'], so a bare host token is not an
+     address. Live proof 2026-08-14: minutes after the RFC-0378 cut a
+     bare-token scope probe passed this check and seeded a second store
+     directory beside the canonical one. *)
+  let valid_codebase slug =
+    (* [canonical_url_of_remote] joins a non-empty host and at least one
+       non-empty repository path segment with [_]. Requiring both the join
+       marker and the shortest possible [a_b] shape keeps callers from
+       inventing host-only partitions that the resolver can never emit. *)
+    let joins =
+      String.fold_left
+        (fun count char -> if Char.equal char '_' then count + 1 else count)
+        0
+        slug
+    in
+    let single_join_suffix_is_dotdot =
+      match String.index_opt slug '_' with
+      | Some join when joins = 1 && String.length slug - join - 1 >= 2 ->
+        String.sub slug (join + 1) 2 = ".."
+      | Some _ | None -> false
+    in
+    let rec has_interior_join index =
+      index < String.length slug - 1
+      && (Char.equal slug.[index] '_' || has_interior_join (index + 1))
+    in
+    String.length slug >= 3
+    && has_interior_join 1
+    && not single_join_suffix_is_dotdot
+    && not (String.length slug >= 2 && String.sub slug 0 2 = "..")
+    && String.for_all is_slug_char slug
+  ;;
+
+  let v ~codebase ~path =
+    if codebase = ""
+    then Error Empty_codebase
+    else if not (valid_codebase codebase)
+    then Error Malformed_codebase
+    else if path = ""
+    then Error Empty_path
+    else
+      match Fpath.of_string path with
+      | Error _ -> Error Malformed_path
+      | Ok parsed ->
+        if Fpath.is_abs parsed
+        then Error Absolute_path
+        else if
+          not (String.equal path (Fpath.to_string parsed))
+          || not (Fpath.equal parsed (Fpath.rem_empty_seg parsed))
+          || List.exists Fpath.is_rel_seg (Fpath.segs parsed)
+        then Error Unnormalized_path
+        else Ok { codebase; path }
+  ;;
+
+  let codebase t = t.codebase
+  let path t = t.path
+  let equal a b = String.equal a.codebase b.codebase && String.equal a.path b.path
+end
+
+(* Typed reasons a write's file path failed attribution to a codebase.
+   RFC-0378 §5.1: attribution failure is a fact kind, not a store
+   location — the reason rides the fact as a queryable field.
+   RFC-keeper-workspace-root-only 2a owns this vocabulary's evolution
+   once attribution moves to git observation. *)
+module Unattributed = struct
+  type reason =
+    | Blank_remote_url
+    | Unparseable_remote_url of string
+    | Unregistered_repo_id of string
+    | Unregistered_path
+    | Repository_catalog_unavailable
+    | Unmintable of Code_address.invalid
+      (* The repo and relative path were recovered but the address
+         constructor rejected the residue. Reaching this is a resolver
+         invariant break worth diagnosing, so the rejection is carried
+         instead of being collapsed into another reason. *)
+
+  let reason_to_string = function
+    | Blank_remote_url -> "blank_remote_url"
+    | Unparseable_remote_url _ -> "unparseable_remote_url"
+    | Unregistered_repo_id _ -> "unregistered_repo_id"
+    | Unregistered_path -> "unregistered_path"
+    | Repository_catalog_unavailable -> "repository_catalog_unavailable"
+    | Unmintable _ -> "unmintable_address"
+  ;;
+end
+
+type addressed =
+  { address : Code_address.t
+  ; checkout : string option
+    (* Projection metadata: which checkout the write was observed in.
+       Never part of the join key. [None] until attribution measures it
+       (workspace-root-only 2b). *)
+  }
+
+type unaddressed =
+  { reason : Unattributed.reason
+  ; attempted_path : string
+    (* The path exactly as the resolver saw it — forensic identity for
+       records that never joined a codebase. *)
+  }
+
+(* Where a fact that names a file belongs. An annotation or write region
+   always names a file, so [Pathless] is unrepresentable for them. *)
+type file_attribution =
+  | Addressed of addressed
+  | Unaddressed of unaddressed
+
+(* Where any tool fact belongs: a pathless call is a keeper-timeline
+   fact with no document — distinct from a failed attribution. *)
+type attribution =
+  | File of file_attribution
+  | Pathless
+
+type tool_event =
+  { base_path : string
+  ; attribution : attribution
+    (* RFC-0378 §5.1: the address is minted where the write is attributed
+       and carried as a parsed value. Producers must not hand consumers a
+       raw tool argument — a consumer re-deriving the path from [input]
+       produced three incompatible shapes in one store (masc#28582). *)
+  ; tool_name : string
+  ; keeper_id : string
+  ; turn_id : string
+  ; outcome : string
+  ; typed_outcome : string
+  ; duration_ms : float
+  ; output_text : string
+  ; input : Yojson.Safe.t
+  }
+
 type write_region_event =
   { base_path : string
-  ; partition : codebase_partition
+  ; attribution : file_attribution
   ; keeper_id : string
   ; turn : int
   ; tool_call_json : Yojson.Safe.t
@@ -250,9 +368,8 @@ let annotation_references_of_json = function
 
 type annotation_request =
   { base_path : string
-  ; partition : codebase_partition
+  ; attribution : file_attribution
   ; keeper_id : string
-  ; file_path : string
   ; line_start : int
   ; line_end : int
   ; kind : annotation_kind
@@ -270,7 +387,6 @@ type annotation_result =
   }
 
 type tool_event_sink = tool_event -> unit
-type turn_event_sink = turn_event -> unit
 type write_region_error =
   | Write_region_sink_not_installed
   | Write_region_sink_failed
@@ -284,17 +400,14 @@ type write_region_sink = write_region_event -> (unit, write_region_error) result
 type annotation_sink = annotation_request -> (annotation_result, string) result
 
 let noop_tool_event_sink (_ : tool_event) = ()
-let noop_turn_event_sink (_ : turn_event) = ()
 let noop_write_region_sink (_ : write_region_event) = Error Write_region_sink_not_installed
 let noop_annotation_sink (_ : annotation_request) = Error "annotation sink is not installed"
 
 let tool_event_sink = Atomic.make noop_tool_event_sink
-let turn_event_sink = Atomic.make noop_turn_event_sink
 let write_region_sink = Atomic.make noop_write_region_sink
 let annotation_sink = Atomic.make noop_annotation_sink
 
 let register_tool_event_sink sink = Atomic.set tool_event_sink sink
-let register_turn_event_sink sink = Atomic.set turn_event_sink sink
 let register_write_region_sink sink = Atomic.set write_region_sink sink
 let register_annotation_sink sink = Atomic.set annotation_sink sink
 
@@ -302,18 +415,11 @@ let register_annotation_sink sink = Atomic.set annotation_sink sink
 
 type snapshot =
   { tool_events : tool_event list
-  ; turn_events : turn_event list
   ; write_regions : write_region_event list
   ; annotations : annotation_request list
   }
 
-let empty_snapshot =
-  { tool_events = []
-  ; turn_events = []
-  ; write_regions = []
-  ; annotations = []
-  }
-;;
+let empty_snapshot = { tool_events = []; write_regions = []; annotations = [] }
 
 let current_snapshot = Atomic.make empty_snapshot
 
@@ -325,24 +431,43 @@ let rec update_snapshot f =
 
 let reverse_snapshot snap =
   { tool_events = List.rev snap.tool_events
-  ; turn_events = List.rev snap.turn_events
   ; write_regions = List.rev snap.write_regions
   ; annotations = List.rev snap.annotations
   }
 ;;
 
-let partition_to_json = function
-  | By_url slug -> `Assoc [ ("type", `String "By_url"); ("slug", `String slug) ]
-  | No_canonical_url -> `String "No_canonical_url"
-  | Unmatched -> `String "Unmatched"
-  | Base_unresolved -> `String "Base_unresolved"
-  | Legacy_default -> `String "Legacy_default"
+let code_address_to_json address =
+  `Assoc
+    [ ("codebase", `String (Code_address.codebase address))
+    ; ("path", `String (Code_address.path address))
+    ]
+;;
+
+let file_attribution_to_json = function
+  | Addressed { address; checkout } ->
+    `Assoc
+      ([ ("type", `String "Addressed"); ("address", code_address_to_json address) ]
+       @
+       match checkout with
+       | None -> []
+       | Some c -> [ ("checkout", `String c) ])
+  | Unaddressed { reason; attempted_path } ->
+    `Assoc
+      [ ("type", `String "Unaddressed")
+      ; ("reason", `String (Unattributed.reason_to_string reason))
+      ; ("attempted_path", `String attempted_path)
+      ]
+;;
+
+let attribution_to_json = function
+  | File file_attribution -> file_attribution_to_json file_attribution
+  | Pathless -> `String "Pathless"
 ;;
 
 let tool_event_to_json (e : tool_event) =
   `Assoc
     [ ("base_path", `String e.base_path)
-    ; ("partition", partition_to_json e.partition)
+    ; ("attribution", attribution_to_json e.attribution)
     ; ("tool_name", `String e.tool_name)
     ; ("keeper_id", `String e.keeper_id)
     ; ("turn_id", `String e.turn_id)
@@ -351,21 +476,10 @@ let tool_event_to_json (e : tool_event) =
     ]
 ;;
 
-let turn_event_to_json (e : turn_event) =
-  `Assoc
-    [ ("base_path", `String e.base_path)
-    ; ("partition", partition_to_json e.partition)
-    ; ("turn_id", `String e.turn_id)
-    ; ("keeper_id", `String e.keeper_id)
-    ; ("phase", `String e.phase)
-    ; ("timestamp_ms", `Int (Int64.to_int e.timestamp_ms))
-    ]
-;;
-
 let write_region_to_json (e : write_region_event) =
   `Assoc
     [ ("base_path", `String e.base_path)
-    ; ("partition", partition_to_json e.partition)
+    ; ("attribution", file_attribution_to_json e.attribution)
     ; ("keeper_id", `String e.keeper_id)
     ; ("turn", `Int e.turn)
     ; ("tool_call", e.tool_call_json)
@@ -374,13 +488,12 @@ let write_region_to_json (e : write_region_event) =
 
 let annotation_to_json (a : annotation_request) =
   `Assoc
-    [ ("file_path", `String a.file_path)
+    [ ("attribution", file_attribution_to_json a.attribution)
     ; ("line_start", `Int a.line_start)
     ; ("line_end", `Int a.line_end)
     ; ("keeper_id", `String a.keeper_id)
     ; ("kind", `String (annotation_kind_to_string a.kind))
     ; ("content", `String a.content)
-    ; ("partition", partition_to_json a.partition)
     ; ("references", annotation_references_to_json a.references)
     ]
 ;;
@@ -388,14 +501,11 @@ let annotation_to_json (a : annotation_request) =
 let snapshot_to_json (snap : snapshot) =
   `Assoc
     [ ("tool_events", `List (List.map tool_event_to_json snap.tool_events))
-    ; ("turn_events", `List (List.map turn_event_to_json snap.turn_events))
     ; ("write_regions", `List (List.map write_region_to_json snap.write_regions))
     ; ("annotations", `List (List.map annotation_to_json snap.annotations))
     ; ( "summary"
       , `Assoc
           [ ("tool_event_count", `Int (List.length snap.tool_events))
-          ; ("turn_event_count", `Int (List.length snap.turn_events))
-          ; ("write_region_count", `Int (List.length snap.write_regions))
           ; ("annotation_count", `Int (List.length snap.annotations))
           ] )
     ]
@@ -410,11 +520,6 @@ let emit_tool_event event =
   Atomic.get tool_event_sink event
 ;;
 
-let emit_turn_event event =
-  update_snapshot (fun snap -> { snap with turn_events = event :: snap.turn_events });
-  Atomic.get turn_event_sink event
-;;
-
 let emit_write_region_event event =
   update_snapshot (fun snap -> { snap with write_regions = event :: snap.write_regions });
   Atomic.get write_region_sink event
@@ -427,7 +532,6 @@ let emit_annotation_request request =
 
 let reset_for_testing () =
   Atomic.set tool_event_sink noop_tool_event_sink;
-  Atomic.set turn_event_sink noop_turn_event_sink;
   Atomic.set write_region_sink noop_write_region_sink;
   Atomic.set annotation_sink noop_annotation_sink;
   Atomic.set current_snapshot empty_snapshot

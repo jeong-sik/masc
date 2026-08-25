@@ -1,0 +1,44 @@
+{
+  "captured_at": "2026-08-19T02:45:00Z",
+  "purpose": "Cross-Verification·Tool·Schedule Job 3행의 browser 축 실측 (한 세션)",
+  "binary": "0.23.0 · 3bd64d9548 (페이지 헤더 표기)",
+  "rows": {
+    "cross_verification": {
+      "route": "#workspace?section=verification",
+      "markers": {
+        "table_rows": 164,
+        "task_refs": 170,
+        "task_ref_samples": ["task-386", "task-384", "task-385", "task-383"],
+        "submit_mentions": 36,
+        "evidence_mentions": 90,
+        "approve_mentions": 3,
+        "sections": ["Keeper 지속성 근거", "판정 실행"]
+      },
+      "note": "monitoring 탭이 아니라 workspace 탭 소속 — #monitoring?section=verification 은 agents 로 리다이렉트"
+    },
+    "tool": {
+      "route": "#lab?section=tools",
+      "markers": {
+        "masc_tool_mentions": 98,
+        "masc_tools_distinct": 88,
+        "keeper_tool_mentions": 78
+      },
+      "note": "등록된 MCP 도구 표면(서버별)이 렌더 — Tool 행의 '도구 표면이 운영자에게 가시화' 증거"
+    },
+    "schedule_job": {
+      "route": "#schedule",
+      "entry_via": "전역 헤더 statchip 버튼 '◷ 예약' 클릭 → #schedule",
+      "markers": {
+        "summary": { "scheduled": 8, "due_running": 0, "total": 34, "queue_missing": 12 },
+        "views": ["캘린더", "목록"],
+        "kind_split": { "정기_시각": 2, "폴링_주기": 7, "1회_ad_hoc": 11 },
+        "entry_samples": [
+          "↻ every 3600s · scheduled · hourly board sweep · dashboard-admin · 다음 ~11:16",
+          "↻ every 3600s · scheduled · 빈정 탄약고 시간별 업데이트 · sangsu · 다음 ~11:20"
+        ]
+      },
+      "note": "관측 전용 명시(schedule runner projection). '큐 누락 12' 지표도 렌더 — 후속 조사 후보"
+    }
+  },
+  "verdict": "3행 모두 browser PASS — 운영 데이터(검증 사슬·도구 표면·예약 큐)가 각 전용 뷰에 렌더"
+}

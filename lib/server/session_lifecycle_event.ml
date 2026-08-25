@@ -1,4 +1,4 @@
-type transport = SSE | WS | GRPC | WebRTC
+type transport = SSE | WS | GRPC
 
 type evict_reason =
   | Cap_exceeded
@@ -46,13 +46,11 @@ let transport_to_string = function
   | SSE -> "sse"
   | WS -> "ws"
   | GRPC -> "grpc"
-  | WebRTC -> "webrtc"
 
 let transport_of_string = function
   | "sse" -> Some SSE
   | "ws" -> Some WS
   | "grpc" -> Some GRPC
-  | "webrtc" -> Some WebRTC
   | _ -> None
 
 let evict_reason_to_string = function
@@ -215,8 +213,9 @@ let _installed : bool Atomic.t = Atomic.make false
 
 let publish evt =
   let p = Atomic.get _publisher in
-  try p evt
-  with exn ->
+  try p evt with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
     (* Swallow + log: a failing observer must not break the eviction
        path. The whole point of PR-3 is that transport teardown
        remains predictable regardless of subscriber state. *)

@@ -15,8 +15,6 @@
 module StringMap = Set_util.StringMap
 module IntMap = Map.Make (Int)
 
-let model_id_unknown = "unknown"
-
 (* ── Types ──────────────────────────────────────────────── *)
 
 type recent_entry =
@@ -80,7 +78,7 @@ type model_stats =
   ; (* Hardware decode rate (eval_count / eval_duration from Ollama), separate
      from wall-clock tok_per_sec which includes queue wait + prefill + thinking.
      None when no entry in the window carried timings (e.g. providers other
-     than Ollama or responses before OAS started emitting inference_timings). *)
+     than Ollama or responses before AGENT_CORE started emitting inference_timings). *)
     hw_decode_avg_tok_per_sec : float option
   ; hw_decode_p50_tok_per_sec : float option
   ; hw_decode_p95_tok_per_sec : float option
@@ -107,7 +105,6 @@ type model_stats =
   ; primary_coverage_stage : string option
   ; primary_coverage_reason : string option
   ; coverage_reason_counts : coverage_reason_count list
-  ; fallback_count : int
   ; success_count : int
   ; error_count : int
   ; total_cost_usd : float option
@@ -143,21 +140,6 @@ type aggregate =
   ; cost_read : cost_read_result
   }
 
-(** Per-provider rollup of {!model_stats} aggregated across every model id
-    whose [provider] matches. *)
-type provider_stats =
-  { ps_provider : string
-  ; ps_entry_count : int
-  ; ps_model_count : int
-  ; ps_avg_tok_per_sec : float option
-  ; ps_avg_prompt_tok_per_sec : float option
-  ; ps_avg_decode_tok_per_sec : float option
-  ; ps_avg_latency_ms : float option
-  ; ps_p50_latency_ms : float option
-  ; ps_p95_latency_ms : float option
-  ; ps_total_cost_usd : float option
-  }
-
 (* ── Internal: in-memory representation of a parsed JSONL row ─────── *)
 
 type raw_entry =
@@ -183,7 +165,6 @@ type raw_entry =
   ; cache_read_tokens : int option
   ; cache_creation_tokens : int option
   ; reasoning_tokens : int option
-  ; fallback_applied : bool
   ; cost_usd : float option
   ; tool_call_count : int
   ; tools_used : string list
@@ -217,7 +198,7 @@ type parse_error =
   | Missing_telemetry_reported
   | Missing_success_model          (* no selected_model / model_used / runtime_id *)
   | Missing_success_inference_identity
-  | Missing_error_model_attribution (* no candidate_models / runtime_id on error turn *)
+  | Missing_error_model_attribution (* no runtime_id on error turn *)
   | Invalid_current_cost_row of Cost_ledger.decode_error
 
 let parse_error_label = function

@@ -88,28 +88,20 @@ count_mli_open_base() {
 
 # Number of .ml files in lib/ that contain both an actual "open Base"
 # directive and the Stdlib-shadow anti-pattern.
+# Counted on the shadow block alone, not on files that also carry
+# `open Base`. Requiring both meant the counter read zero the moment the
+# opens were removed, while 82 files kept the block the policy calls an
+# anti-pattern — the residue was invisible to its own audit.
 count_ml_base_stdlib_shadow() {
-  local count=0
-  while IFS= read -r file; do
-    if rg -q "$STDLIB_LIST_SHADOW_RE" "$file" 2>/dev/null; then
-      count=$((count + 1))
-    fi
-  done < <(rg -l "$OPEN_BASE_DIRECTIVE_RE" lib/ -g '*.ml' 2>/dev/null)
-  printf '%s' "$count"
+  { rg -l "$STDLIB_LIST_SHADOW_RE" lib/ -g '*.ml' 2>/dev/null || true; } | wc -l | tr -d ' '
 }
 
 count_bin_ml_base_stdlib_shadow() {
-  local count=0
   if [ ! -d bin ]; then
     printf '0'
     return
   fi
-  while IFS= read -r file; do
-    if rg -q "$STDLIB_LIST_SHADOW_RE" "$file" 2>/dev/null; then
-      count=$((count + 1))
-    fi
-  done < <(rg -l "$OPEN_BASE_DIRECTIVE_RE" bin/ -g '*.ml' 2>/dev/null)
-  printf '%s' "$count"
+  { rg -l "$STDLIB_LIST_SHADOW_RE" bin/ -g '*.ml' 2>/dev/null || true; } | wc -l | tr -d ' '
 }
 
 # Read a single numeric key from a JSON baseline file.

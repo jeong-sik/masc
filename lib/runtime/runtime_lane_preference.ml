@@ -2,18 +2,14 @@
 
     See the [.mli] for the contract.  Implementation notes:
 
-    - State is a small [Hashtbl] guarded by [Stdlib.Mutex], matching the
-      {!Dashboard_oas_bridge} convention in this library (record/read may be
-      called from outside Eio fibers, so [Eio.Mutex] is not required).
-    - Expiry is lazy: [prefer_order] compares the entry age against
-      {!ttl_s} at call time and drops stale entries on read. *)
+    - One immutable state value is swapped under [Stdlib.Mutex] (record/read
+      may be called outside Eio fibers, so [Eio.Mutex] is not required).
+    - The shell observes clock and TTL once before locking. The pure state
+      transition resolves absence versus expiry and prunes stale entries. *)
 
-type entry =
-  { candidate : string
-  ; noted_at : float
-  }
+module State = Runtime_lane_preference_state
 
-let entries : (string, entry) Hashtbl.t = Hashtbl.create 8
+let state = ref State.empty
 let mu = Stdlib.Mutex.create ()
 
 let ttl_s = Env_config_runtime.Lane.preference_ttl_s
@@ -22,39 +18,29 @@ let ttl_s = Env_config_runtime.Lane.preference_ttl_s
    deterministic replay logic branches on these timestamps. *)
 let now () = Unix.gettimeofday ()
 
+let apply_transition transition =
+  Stdlib.Mutex.protect mu (fun () ->
+    let next, output = transition !state in
+    state := next;
+    output)
+;;
+
+let observe ~lane_id =
+  let observed_at = now () in
+  let ttl = ttl_s () in
+  apply_transition (State.observe ~now:observed_at ~ttl_s:ttl ~lane_id)
+;;
+
 let prefer_order ~lane_id candidates =
-  let preferred =
-    Stdlib.Mutex.protect mu (fun () ->
-      match Hashtbl.find_opt entries lane_id with
-      | None -> None
-      | Some entry ->
-        if Float.compare (now () -. entry.noted_at) (ttl_s ()) < 0
-        then Some entry.candidate
-        else begin
-          Hashtbl.remove entries lane_id;
-          None
-        end)
-  in
-  match preferred with
-  | Some candidate when List.exists (String.equal candidate) candidates ->
-    candidate :: List.filter (fun id -> not (String.equal id candidate)) candidates
-  | _ -> candidates
+  State.reorder (observe ~lane_id) candidates
 
 let note_success ~lane_id ~candidate =
-  Stdlib.Mutex.protect mu (fun () ->
-    Hashtbl.replace entries lane_id { candidate; noted_at = now () })
+  let noted_at = now () in
+  apply_transition (fun state ->
+    State.remember ~lane_id ~candidate ~noted_at state, ())
 
 let preferred_of_lane ~lane_id =
-  Stdlib.Mutex.protect mu (fun () ->
-    match Hashtbl.find_opt entries lane_id with
-    | None -> None
-    | Some entry ->
-      if Float.compare (now () -. entry.noted_at) (ttl_s ()) < 0
-      then Some (entry.candidate, entry.noted_at)
-      else begin
-        Hashtbl.remove entries lane_id;
-        None
-      end)
+  State.preferred (observe ~lane_id)
 
 let reset_for_testing () =
-  Stdlib.Mutex.protect mu (fun () -> Hashtbl.reset entries)
+  Stdlib.Mutex.protect mu (fun () -> state := State.empty)

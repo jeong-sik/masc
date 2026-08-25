@@ -20,7 +20,7 @@
     prompts with no declared [template_variables] (see
     [unexpected_template_variables]) — so manually-edited
     or stale entries are dropped with an error log and a
-    fallback to the file/default value instead of silently
+    fallback to the file value instead of silently
     accepted.
 
     Concurrency: override and prompt-contract mutations first take the
@@ -37,61 +37,26 @@
     ([parse_frontmatter], [parse_list_value],
     [extract_variables], [store],
     [version_index], [meta_tbl], [prompts_dir],
-    [markdown_dir], [make_key], [is_valid_prompt_key],
+    [markdown_dir], [is_valid_prompt_key],
     [prompt_markdown_path], [read_file_if_exists],
     [replace_substring_all], [render_template],
-    [default_prompt_value_unlocked],
     [build_resolved_from_snapshot], [resolved_of_snapshot],
     [unexpected_template_variables],
     [prompt_item_json_of_resolved], [compare_prompt_items],
     [register_prompt], [register_prompt_unlocked],
     [validated_override], [prompt_snapshot] type).
 
-    The mutable entry API ([register], [init], [get], [render],
-    [register_default], [get_versions], [list_all], [list_ids], [exists],
-    [unregister], [deprecate], [update_metrics], [stats], [count],
-    [count_unique], [to_json], [of_json]) was deleted, not hidden: nothing
-    called it. Prompts are added by dropping a markdown file into the
+    Prompts are added by dropping a markdown file into the
     directory read by {!load_prompts_from_directory}. *)
 
 (** {1 Type re-exports} *)
-
-module Types = Prompt_registry_types
-(** Re-export of the type-only sub-module so callers reach
-    record / variant types via [Prompt_registry.Types.X]
-    after [open Masc].
-    [test/test_prompt_registry_pbt.ml] uses this alias. *)
-
-type prompt_metrics = Prompt_registry_types.prompt_metrics = {
-  usage_count : int;
-  avg_score : float;
-  last_used : float;
-}
-
-val prompt_metrics_to_yojson : prompt_metrics -> Yojson.Safe.t
-val prompt_metrics_of_yojson :
-  Yojson.Safe.t -> (prompt_metrics, string) result
 
 type prompt_entry = Prompt_registry_types.prompt_entry = {
   id : string;
   template : string;
   version : string;
   variables : string list;
-  metrics : prompt_metrics option;
   created_at : float;
-  deprecated : bool;
-}
-
-val prompt_entry_to_yojson : prompt_entry -> Yojson.Safe.t
-val prompt_entry_of_yojson :
-  Yojson.Safe.t -> (prompt_entry, string) result
-
-type registry_stats = Prompt_registry_types.registry_stats = {
-  total_prompts : int;
-  active_prompts : int;
-  deprecated_prompts : int;
-  most_used : string option;
-  avg_usage : float;
 }
 
 type prompt_meta = Prompt_registry_types.prompt_meta = {
@@ -106,7 +71,6 @@ type prompt_resolution = Prompt_registry_types.prompt_resolution = {
   source : string;
   file_value : string option;
   override_value : string option;
-  default_value : string option;
   file_path : string option;
   file_exists : bool;
   has_override : bool;
@@ -117,11 +81,6 @@ type persisted_mutation_error =
   | Persistence_error of string
 
 (** {1 Markdown parsing} *)
-
-val markdown_body : string -> string
-(** Return the body of a markdown asset after removing one leading YAML-style
-    frontmatter block. Content without frontmatter is returned unchanged. *)
-
 
 (** {1 Markdown directory} *)
 
@@ -159,7 +118,7 @@ val get_prompt : string -> string
 
 val prompt_source : string -> string
 (** [(resolve_prompt key).source]: ["override"] /
-    ["file"] / ["default"] / ["missing"]. *)
+    ["file"] / ["missing"]. *)
 
 (** {1 Rendering} *)
 
@@ -211,7 +170,7 @@ val restore_overrides : string -> unit
     in one mutex transaction, so rejected entries cannot leave stale live
     overrides behind.  Legacy envelopes, malformed entries, and stale or
     manually-edited entries are rejected with an observable error and fallback
-    to file/default content. *)
+    to file content. *)
 
 val set_restore_failure_observer : (unit -> unit) -> unit
 (** Installs the process-local observer called whenever override
@@ -234,13 +193,6 @@ val prompts_json : unit -> Yojson.Safe.t
     canonical envelope for the dashboard prompt route. *)
 
 (** {1 Validation} *)
-
-val validate_required_prompt_files : unit -> (string * string) list
-(** Returns [(key, path)] for every prompt whose meta
-    declares [required_file = true] but whose markdown
-    file is missing or unreadable.  [path] is the
-    expected location, or ["<invalid-key>"] when the
-    markdown dir is unset. *)
 
 val validate_prompt_templates : unit -> (string * string) list
 (** Returns [(key, variable)] pairs for every template

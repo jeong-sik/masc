@@ -36,8 +36,8 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
   mkdir_p base_path;
   List.iter
     (fun name -> mkdir_p (Filename.concat config_root name))
-    [ "keepers"; "personas"; "prompts" ];
-  let overlay_path = Filename.concat config_root "oas-models-overlay.toml" in
+    [ "keepers"; "prompts" ];
+  let overlay_path = Filename.concat config_root "agent-core-models-overlay.toml" in
   let replacement_path = Filename.concat root "replacement-models.toml" in
   let runtime_path = Filename.concat config_root "runtime.toml" in
   write_file overlay_path overlay_catalog;
@@ -58,7 +58,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
   require_not_admitted replacement_snapshot overlay_target;
 
   Unix.putenv "MASC_CONFIG_DIR" config_root;
-  Unix.putenv "OAS_MODEL_CATALOG" replacement_path;
+  Unix.putenv "AGENT_CORE_MODEL_CATALOG" replacement_path;
   let create_server_state () =
     Eio.Switch.run @@ fun sw ->
     ignore
@@ -147,7 +147,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
              selected_slots)
     in
     require_slots "replacement-only lane" registry;
-    let stable_generation = Registry.generation registry in
+    let stable_registry_snapshot = registry in
     let prepared =
       match Registry.prepare_replacement ~lanes with
       | Ok prepared -> prepared
@@ -158,10 +158,10 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
     in
     (match Registry.current () with
      | Ok current ->
-       Alcotest.(check int64)
+       Alcotest.(check bool)
          "pure preparation does not fence current"
-         stable_generation
-         (Registry.generation current)
+         true
+         (current == stable_registry_snapshot)
      | Error error ->
        Alcotest.failf
          "pure preparation fenced current: %s"
@@ -201,10 +201,10 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
           "same-lane finish did not republish: %s"
           (Registry.publication_error_to_string error)
     in
-    Alcotest.(check int64)
+    Alcotest.(check bool)
       "same lanes preserve registry generation"
-      stable_generation
-      (Registry.generation after_noop);
+      true
+      (after_noop == stable_registry_snapshot);
     require_slots "same-lane finish preserves slots" after_noop;
     let successor_prepared =
       match Registry.prepare_replacement ~lanes with
@@ -242,10 +242,10 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
           "successor abort did not restore the published registry: %s"
           (Registry.publication_error_to_string error)
     in
-    Alcotest.(check int64)
+    Alcotest.(check bool)
       "stale tokens preserve registry generation"
-      stable_generation
-      (Registry.generation after_stale_tokens);
+      true
+      (after_stale_tokens == stable_registry_snapshot);
     require_slots "stale tokens preserve slots" after_stale_tokens;
     let stable_file = Fs_compat.load_file runtime_path in
     let stable_runtime = Runtime.get_default_runtime_id () in
@@ -278,10 +278,10 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
       "failed published save preserves runtime cache"
       stable_runtime
       (Runtime.get_default_runtime_id ());
-    Alcotest.(check int64)
+    Alcotest.(check bool)
       "failed published save preserves registry generation"
-      stable_generation
-      (Registry.generation after_failed_save);
+      true
+      (after_failed_save == stable_registry_snapshot);
     require_slots "failed published save preserves slots" after_failed_save;
     let stale_prepared =
       match Registry.prepare_replacement ~lanes with
@@ -291,7 +291,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
           "stale-candidate preparation failed: %s"
           (Registry.publication_error_to_string error)
     in
-    let concurrent_registry =
+    let (_ : Registry.t) =
       match Registry.publish ~lanes replacement_snapshot with
       | Ok registry -> registry
       | Error error ->
@@ -299,12 +299,9 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
           "concurrent publication fixture failed: %s"
           (Registry.publication_error_to_string error)
     in
-    let concurrent_generation = Registry.generation concurrent_registry in
     Registry.reserve_replacement stale_prepared
     |> require_replacement_base_changed
-         "stale prepared candidate"
-         ~expected_generation:(Some stable_generation)
-         ~actual_generation:(Some concurrent_generation);
+         "stale prepared candidate";
     let successor_prepared =
       match Registry.prepare_replacement ~lanes with
       | Ok prepared -> prepared
@@ -414,6 +411,83 @@ let test_registry_preserves_admitted_slots_without_resolving_credentials () =
     registry
 ;;
 
+let test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity () =
+  let snapshot =
+    load_control_snapshot
+      (Exact_output.Full_replacement
+         { source = "unknown-slot-local-degradation"
+         ; contents = replacement_catalog
+         })
+  in
+  let optional_lane = "optional-exact" in
+  let unknown_target = "not-in-frozen-catalog" in
+  let optional_registry =
+    match
+      Registry.publish
+        ~lanes:[ { id = optional_lane; slot_ids = [ unknown_target ] } ]
+        snapshot
+    with
+    | Ok registry -> registry
+    | Error error ->
+      Alcotest.failf
+        "unknown optional slot must not block publication: %s"
+        (Registry.publication_error_to_string error)
+  in
+  (match Registry.resolve_lane optional_registry ~lane_id:optional_lane with
+   | Error (Registry.No_admitted_lane_slots { lane_id }) ->
+     Alcotest.(check string) "degraded optional lane" optional_lane lane_id
+   | Error error ->
+     Alcotest.failf
+       "unknown optional slot returned the wrong typed result: %s"
+       (Registry.lane_resolution_error_to_string error)
+   | Ok _ -> Alcotest.fail "unknown optional lane must have no selected slots");
+  (match Registry.rejected_slots optional_registry with
+   | [ rejected ] ->
+     Alcotest.(check string) "rejected optional slot" unknown_target rejected.slot_id
+   | rejected ->
+     Alcotest.failf
+       "expected one rejected optional slot, got %d"
+       (List.length rejected));
+  let required_lane = "required-exact" in
+  let stable_registry =
+    match
+      Registry.publish
+        ~required_lane_ids:[ required_lane ]
+        ~lanes:[ { id = required_lane; slot_ids = [ replacement_target ] } ]
+        snapshot
+    with
+    | Ok registry -> registry
+    | Error error ->
+      Alcotest.failf
+        "required lane fixture failed to publish: %s"
+        (Registry.publication_error_to_string error)
+  in
+  let stable_registry_snapshot = stable_registry in
+  (match
+     Registry.publish
+       ~required_lane_ids:[ required_lane ]
+       ~lanes:[ { id = required_lane; slot_ids = [ unknown_target ] } ]
+       snapshot
+   with
+   | Error (Registry.Required_lane_unavailable { lane_id }) ->
+     Alcotest.(check string) "unavailable required lane" required_lane lane_id
+   | Error error ->
+     Alcotest.failf
+       "unknown required slot returned the wrong typed error: %s"
+       (Registry.publication_error_to_string error)
+   | Ok _ -> Alcotest.fail "unknown required slot must block publication");
+  match Registry.current () with
+  | Ok current ->
+    Alcotest.(check bool)
+      "failed required publication preserves the prior generation"
+      true
+      (current == stable_registry_snapshot)
+  | Error error ->
+    Alcotest.failf
+      "failed required publication lost the prior registry: %s"
+      (Registry.publication_error_to_string error)
+;;
+
 let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs () =
   with_temp_dir "exact-output-hitl-lane-bootstrap" @@ fun root ->
   let config_root = Filename.concat root "config" in
@@ -422,12 +496,12 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
   mkdir_p base_path;
   List.iter
     (fun name -> mkdir_p (Filename.concat config_root name))
-    [ "keepers"; "personas"; "prompts" ];
+    [ "keepers"; "prompts" ];
   let replacement_path = Filename.concat root "replacement-models.toml" in
   let runtime_path = Filename.concat config_root "runtime.toml" in
   write_file replacement_path replacement_catalog;
   Unix.putenv "MASC_CONFIG_DIR" config_root;
-  Unix.putenv "OAS_MODEL_CATALOG" replacement_path;
+  Unix.putenv "AGENT_CORE_MODEL_CATALOG" replacement_path;
   let create_server_state () =
     Eio.Switch.run @@ fun sw ->
     ignore
@@ -484,12 +558,85 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
    | Ok _ -> Alcotest.fail "missing HITL exact lane was synthesized");
   write_file runtime_path (runtime_toml replacement_target);
   create_server_state ();
-let default_registry = current_registry "default HITL lane bootstrap" in
-require_lane_slots
-  "explicit default HITL lane keeps its configured slot"
+  let default_registry = current_registry "default HITL lane bootstrap" in
+  require_lane_slots
+    "explicit default HITL lane keeps its configured slot"
     ~lane_id:"hitl_auto_judge"
-~expected:[ replacement_target ]
-default_registry;
+    ~expected:[ replacement_target ]
+    default_registry;
+  write_file
+    runtime_path
+    (runtime_toml
+       ~compaction_slots:[ overlay_target; replacement_target ]
+       replacement_target);
+  create_server_state ();
+  let degraded_optional_registry =
+    current_registry "unknown optional exact-output slot bootstrap"
+  in
+  require_lane_slots
+    "unknown optional slot is excluded while admitted fallback remains"
+    ~lane_id:"compaction_exact"
+    ~expected:[ replacement_target ]
+    degraded_optional_registry;
+  (match Registry.rejected_slots degraded_optional_registry with
+   | [ rejected ] ->
+     Alcotest.(check string)
+       "rejected lane"
+       "compaction_exact"
+       rejected.lane_id;
+     Alcotest.(check int) "rejected position" 1 rejected.position;
+     Alcotest.(check string) "rejected slot" overlay_target rejected.slot_id;
+     Alcotest.(check string) "rejected target" overlay_target rejected.target_ref
+   | rejected ->
+     Alcotest.failf
+       "expected one typed rejected slot, got %d"
+       (List.length rejected));
+  write_file replacement_path replacement_catalog_with_unbound_target;
+  write_file
+    runtime_path
+    (runtime_toml
+       ~compaction_slots:[ unbound_target; replacement_target ]
+       replacement_target);
+  create_server_state ();
+  let unbound_optional_registry =
+    current_registry "unbound optional exact-output target bootstrap"
+  in
+  require_lane_slots
+    "unbound optional target is excluded while admitted fallback remains"
+    ~lane_id:"compaction_exact"
+    ~expected:[ replacement_target ]
+    unbound_optional_registry;
+  (match Registry.rejected_slots unbound_optional_registry with
+   | [ rejected ] ->
+     Alcotest.(check string) "unbound rejected slot" unbound_target rejected.slot_id
+   | rejected ->
+     Alcotest.failf
+       "expected one unbound rejected slot, got %d"
+       (List.length rejected));
+  let stable_registry_snapshot = unbound_optional_registry in
+  write_file
+    runtime_path
+    (runtime_toml
+       ~hitl_slots:[ unbound_target ]
+       replacement_target);
+  (match create_server_state () with
+   | exception Env_config_core.Config_error _ -> ()
+   | () -> Alcotest.fail "an entirely unbound mandatory lane must block startup"
+   | exception exn ->
+     Alcotest.failf
+       "unbound mandatory lane returned the wrong exception: %s"
+       (Printexc.to_string exn));
+  (match Registry.current () with
+   | Ok registry ->
+     Alcotest.(check bool)
+       "failed mandatory admission preserves the published registry"
+       true
+       (registry == stable_registry_snapshot)
+   | Error error ->
+     Alcotest.failf
+       "failed mandatory admission lost the published registry: %s"
+       (Registry.publication_error_to_string error));
+  write_file replacement_path replacement_catalog;
   let runtime_lane_candidates =
     [ replacement_runtime_target
     ; replacement_secondary_runtime_target
@@ -539,31 +686,25 @@ let test_published_registry_value_is_generation_stable () =
       Alcotest.failf "failed to publish immutable generation fixture: %s" detail
   in
   let first = publish [ replacement_target ] in
-  let first_generation = Runtime_exact_output_registry.generation first in
   let second = publish [ replacement_secondary_target ] in
-  let second_generation = Runtime_exact_output_registry.generation second in
-  Alcotest.(check int64)
-    "later publication advances generation"
-    (Int64.succ first_generation)
-    second_generation;
-  Alcotest.(check int64)
-    "captured publication retains its generation"
-    first_generation
-    (Runtime_exact_output_registry.generation first);
+  Alcotest.(check bool)
+    "later publication replaces the earlier one"
+    true
+    (not (first == second));
   (match Runtime_exact_output_registry.resolve_lane first ~lane_id with
    | Ok _ -> ()
    | Error _ ->
      Alcotest.fail
-       "captured publication must remain resolvable after the global generation swaps");
+       "captured publication must remain resolvable after the global swap");
   (match Runtime_exact_output_registry.resolve_lane second ~lane_id with
    | Ok _ -> ()
    | Error _ -> Alcotest.fail "latest publication must remain resolvable");
   match Runtime_exact_output_registry.current () with
   | Ok current ->
-    Alcotest.(check int64)
+    Alcotest.(check bool)
       "global registry points at the latest publication"
-      second_generation
-      (Runtime_exact_output_registry.generation current)
+      true
+      (current == second)
   | Error _ -> Alcotest.fail "latest publication must be globally installed"
 ;;
 
@@ -574,16 +715,16 @@ let test_repo_seed_board_attention_lane_admits () =
   let repo_root = Masc_test_deps.find_project_root () in
   let source_config = Filename.concat repo_root "config" in
   let runtime_path = Filename.concat config_root "runtime.toml" in
-  let overlay_path = Filename.concat config_root "oas-models-overlay.toml" in
+  let overlay_path = Filename.concat config_root "agent-core-models-overlay.toml" in
   write_file
     runtime_path
     (Fs_compat.load_file (Filename.concat source_config "runtime.toml"));
   write_file
     overlay_path
     (Fs_compat.load_file
-       (Filename.concat source_config "oas-models-overlay.toml"));
+       (Filename.concat source_config "agent-core-models-overlay.toml"));
   Unix.putenv "MASC_CONFIG_DIR" config_root;
-  Unix.putenv "OAS_MODEL_CATALOG" "";
+  Unix.putenv "AGENT_CORE_MODEL_CATALOG" "";
   (match Runtime.init_default ~config_path:runtime_path with
    | Ok () -> ()
    | Error detail -> Alcotest.failf "repo runtime seed failed to load: %s" detail);
@@ -646,7 +787,7 @@ let test_repo_seed_board_attention_lane_admits () =
        require_published_seed "credential-populated repo config plus deployment overlay";
        let overlay_without_pricing =
          Fs_compat.load_file
-           (Filename.concat source_config "oas-models-overlay.toml")
+           (Filename.concat source_config "agent-core-models-overlay.toml")
          |> String.split_on_char '\n'
          |> List.filter (fun line ->
            let line = String.trim line in
@@ -694,6 +835,10 @@ let () =
             "registry preserves admitted slots without resolving credentials"
             `Quick
             test_registry_preserves_admitted_slots_without_resolving_credentials
+        ; Alcotest.test_case
+            "unknown slots degrade locally while required lanes stay atomic"
+            `Quick
+            test_unknown_slots_degrade_locally_and_preserve_required_lane_atomicity
         ; Alcotest.test_case
             "closed registry transaction publishes final generation and lane"
             `Quick

@@ -18,11 +18,11 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import { AgentAvatar } from './agent-avatar'
-import { SCHED_TERMINAL_NORMALIZED } from '../v2/schedule-constants'
-import { tasks, keepers, boardPosts, boardTotal, lastBoardRefreshAt, goals, fusionRuns } from '../../store'
+import { SCHED_TERMINAL_SET } from '../v2/schedule-constants'
+import { tasks, keepers, boardPosts, boardTotal, lastBoardRefreshAt, goals, fusionRuns, shellRuntimeResolution } from '../../store'
 import type { Agent, Task, Keeper, Message, BoardPost, Goal, KeeperRuntimeBlockerClass } from '../../types/core'
 import type {
-  DashboardScheduledAutomation,
+  DashboardScheduledAutomationProjection,
   DashboardScheduledAutomationRequest,
   FusionRunRecord,
 } from '../../api/dashboard'
@@ -41,21 +41,35 @@ import {
   type KeeperPhaseToken,
 } from '../../lib/fleet-tone'
 import { UNKNOWN_STATUS_LABEL } from '../../lib/format-string'
-import { keeperRowLooksRunning } from '../../runtime-counts'
+import {
+  keeperRowLooksRunning,
+  resolveKeeperFleetExecutionCounts,
+  type KeeperFleetExecutionCounts,
+} from '../../runtime-counts'
+import {
+  projectDashboardCompositeHealth,
+  type DashboardCompositeHealthVerdict,
+} from '../../lib/dashboard-composite-health'
 import { createAsyncResource, type AsyncResource, type AsyncState } from '../../lib/async-state'
 import { navigate } from '../../router'
 import { gateData } from '../gate-signals'
 import type { TabId } from '../../types/sse'
-import { toolsData } from '../tools/tool-state'
+import {
+  scheduledAutomationProjection,
+  subscribeScheduledAutomationRefresh,
+} from '../schedule/schedule-state'
 import {
   fetchTelemetry,
   fetchTelemetrySummary,
-  fetchDashboardFullHealth,
   type TelemetryEntry,
   type TelemetrySourceSummary,
-  type DashboardFullHealthResponse,
+  type DashboardKeeperEventQueueHealth,
   type DashboardScheduleRunnerStatus,
 } from '../../api/dashboard'
+import {
+  dashboardFullHealth,
+  subscribeDashboardFullHealthRefresh,
+} from '../dashboard-full-health-state'
 import {
   OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET,
 } from '../../config/constants'
@@ -70,19 +84,11 @@ export interface KeeperAttentionReason {
 
 const DEFAULT_ATTENTION_REASON: KeeperAttentionReason = { sev: 'warn', text: '주의 사유 미보고', act: '상태 상세' }
 
-const OPERATOR_ATTENTION_BLOCKERS = new Set<KeeperRuntimeBlockerClass>([
-  'awaiting_operator',
-])
-
 const CRITICAL_ATTENTION_BLOCKERS = new Set<KeeperRuntimeBlockerClass>([
   'exception',
   'turn_failures',
   'heartbeat_failures',
 ])
-
-function hasOperatorAttentionBlocker(blockerClass: Keeper['runtime_blocker_class'] | null | undefined): boolean {
-  return blockerClass != null && OPERATOR_ATTENTION_BLOCKERS.has(blockerClass)
-}
 
 function hasCriticalAttentionBlocker(blockerClass: Keeper['runtime_blocker_class'] | null | undefined): boolean {
   return blockerClass != null && CRITICAL_ATTENTION_BLOCKERS.has(blockerClass)
@@ -104,12 +110,7 @@ export function deriveKeeperAttentionReason(keeper: Keeper): KeeperAttentionReas
   const attention = attentionReasonLabel(attentionRaw, false) ?? undefined
   const nextAction = nextHumanActionLabel(nextActionRaw) ?? undefined
 
-  if (hasOperatorAttentionBlocker(blockerClass)) {
-    return { sev: 'warn', text: attention ?? 'Human 판단 대기', act: nextAction ?? 'HITL 검토' }
-  }
-
   const isCritical = hasCriticalAttentionBlocker(blockerClass)
-    || keeper.lifecycle_phase === 'Dead'
     || keeper.lifecycle_phase === 'Crashed'
 
   if (isCritical) {
@@ -132,7 +133,6 @@ export function pickAttentionKeepers(keeperList: readonly Keeper[]): Keeper[] {
   return keeperList.filter(k =>
     k.needs_attention === true
     || k.trust?.needs_attention === true
-    || hasOperatorAttentionBlocker(k.runtime_blocker_class)
     || !!k.attention_reason?.trim()
     || !!k.trust?.attention_reason?.trim(),
   )
@@ -140,8 +140,12 @@ export function pickAttentionKeepers(keeperList: readonly Keeper[]): Keeper[] {
 
 // ─── KPI stats ───────────────────────────────────────────────────────────────
 
+/** Roster-derived counts. Keeper *execution* counts deliberately live outside
+ *  this type: they come from the runtime-health fleet projection via
+ *  {!resolveKeeperFleetExecutionCounts}, because a roster row's status string
+ *  describes what the row last recorded, not whether a keeper fiber is running
+ *  right now. */
 export interface OverviewStats {
-  run: number
   att: number
   hot: number
   avgCtx: number | null
@@ -151,7 +155,7 @@ export interface OverviewStats {
 }
 
 function keeperTraceCount(keeper: Keeper): number {
-  return keeper.total_turns ?? keeper.turn_count ?? keeper.autonomous_turn_count ?? 0
+  return keeper.total_turns ?? keeper.turn_count ?? 0
 }
 
 export function keeperRuntimeLabel(keeper: Keeper): string {
@@ -160,7 +164,6 @@ export function keeperRuntimeLabel(keeper: Keeper): string {
 
 export function computeOverviewStats(keeperList: readonly Keeper[], taskList: readonly Task[]): OverviewStats {
   const total = keeperList.length
-  const run = keeperList.filter(keeperRowLooksRunning).length
   const att = pickAttentionKeepers(keeperList).length
   const hot = keeperList.filter(k => (k.context_ratio ?? 0) >= 0.85).length
   const traces = keeperList.reduce((sum, k) => sum + keeperTraceCount(k), 0)
@@ -168,12 +171,22 @@ export function computeOverviewStats(keeperList: readonly Keeper[], taskList: re
   const keeperNames = new Set(keeperList.map(k => k.name.toLowerCase()))
   const tasks = taskList.filter(t => t.assignee && keeperNames.has(t.assignee.toLowerCase())).length
 
+  // Still roster-scoped: context_ratio is only carried on roster rows, and the
+  // fleet projection reports running keepers as a count without the per-keeper
+  // ratios needed to average them.
   const liveCtx = keeperList.filter(k => keeperRowLooksRunning(k) && typeof k.context_ratio === 'number')
   const avgCtx = liveCtx.length
     ? Math.round(liveCtx.reduce((sum, k) => sum + (k.context_ratio ?? 0), 0) / liveCtx.length * 100)
     : null
 
-  return { run, att, hot, avgCtx, tasks, traces, total }
+  return { att, hot, avgCtx, tasks, traces, total }
+}
+
+/** Renders a fleet execution count. `—` means the runtime-health fleet
+ *  projection did not report the number; a rendered `0` always means the
+ *  projection reported zero. */
+export function fleetCountText(value: number | null | undefined): string {
+  return typeof value === 'number' ? String(value) : '—'
 }
 
 // ─── Cross-surface digest (overview.jsx:71-92) ───────────────────────────────
@@ -201,6 +214,18 @@ export interface OverviewDigest {
   scheduledAutomation: OverviewScheduledAutomationDigest
   /** schedule_runner liveness summary from /health?full=1. */
   scheduleRunner: OverviewScheduleRunnerDigest
+  /** Durable queue storage and runnable work are intentionally separate. */
+  keeperQueue: OverviewKeeperQueueDigest
+}
+
+export interface OverviewKeeperQueueDigest {
+  hasProjection: boolean
+  storageStatus: string
+  workStatus: string
+  workState: string
+  runnableBacklogCount: number
+  runnableOldestAgeSeconds: number | null
+  backlogClean: boolean
 }
 
 export interface OverviewScheduleRunnerDigest {
@@ -237,13 +262,14 @@ export interface OverviewScheduleRunnerDigest {
     | null
 }
 
-export interface OverviewScheduledAutomationDigest {
-  /** Whether the scheduled-automation projection is present on this surface. */
-  hasProjection: boolean
-  /** Total request count (projection or inferred). */
-  requestCount: number
+interface OverviewScheduledAutomationAvailableDigest {
+  state: 'available'
+  /** Rows materialized in this projection page. */
+  visibleCount: number
+  /** Total rows reported by the schedule ledger. */
+  totalCount: number
   /** Projection quota metadata for diagnostics. */
-  requestLimit: number
+  limit: number
   /** FSM state from the scheduler surface. */
   fsmState: string
   /** FSM active_count from scheduler projection. */
@@ -270,15 +296,22 @@ export interface OverviewScheduledAutomationDigest {
   tone: 'ok' | 'warn' | 'bad' | 'volt'
 }
 
-function normalizeScheduleStatus(value: string | undefined): string {
-  return value?.trim().toLowerCase() ?? ''
-}
+export type OverviewScheduledAutomationDigest =
+  | OverviewScheduledAutomationAvailableDigest
+  | {
+    state: 'unavailable'
+    reason: string
+    tone: 'bad'
+  }
+  | {
+    state: 'not_loaded'
+    tone: 'warn'
+  }
 
 function requestCountByStatus(requests: readonly DashboardScheduledAutomationRequest[], target: string): number {
-  const key = normalizeScheduleStatus(target)
   let count = 0
   for (const request of requests) {
-    if (normalizeScheduleStatus(request.status) === key) count += 1
+    if (request.status === target) count += 1
   }
   return count
 }
@@ -300,17 +333,16 @@ function requestCountByProjectionCount(
   counts: Record<string, number> | undefined,
   target: string,
 ): number {
-  const key = normalizeScheduleStatus(target)
-  const projected = counts?.[key]
+  const projected = counts?.[target]
   if (typeof projected === 'number' && Number.isFinite(projected)) {
     return projected
   }
-  return requestCountByStatus(requests, key)
+  return requestCountByStatus(requests, target)
 }
 
 function sumTerminalCountFromProjection(counts: Record<string, number> | undefined): number {
   let sum = 0
-  for (const terminalStatus of SCHED_TERMINAL_NORMALIZED) {
+  for (const terminalStatus of SCHED_TERMINAL_SET) {
     const n = counts?.[terminalStatus]
     if (typeof n === 'number' && Number.isFinite(n)) sum += n
   }
@@ -425,31 +457,51 @@ function summarizeScheduleRunnerStatus(
   }
 }
 
-export function summarizeScheduledAutomation(
-  automation: DashboardScheduledAutomation | null | undefined,
-): OverviewScheduledAutomationDigest {
-  if (!automation) {
+function summarizeKeeperQueueHealth(
+  queue: DashboardKeeperEventQueueHealth | null | undefined,
+): OverviewKeeperQueueDigest {
+  if (!queue) {
     return {
       hasProjection: false,
-      requestCount: 0,
-      requestLimit: 0,
-      fsmState: 'unknown',
-      fsmActiveCount: 0,
-      fsmTerminalCount: 0,
-      nextDueAt: null,
-      dueCount: 0,
-      runningCount: 0,
-      scheduledCount: 0,
-      warningCount: 0,
-      unsupportedPayloadCount: 0,
-      unknownPayloadCount: 0,
-      truncated: false,
+      storageStatus: 'unknown',
+      workStatus: 'unknown',
+      workState: 'unknown',
+      runnableBacklogCount: 0,
+      runnableOldestAgeSeconds: null,
+      backlogClean: false,
+    }
+  }
+  return {
+    hasProjection: true,
+    storageStatus: queue.storage_integrity?.status ?? 'unknown',
+    workStatus: queue.work_liveness?.status ?? 'unknown',
+    workState: queue.work_liveness?.state ?? 'unknown',
+    runnableBacklogCount: queue.work_liveness?.runnable_backlog_count ?? 0,
+    runnableOldestAgeSeconds: queue.work_liveness?.runnable_oldest_age_seconds ?? null,
+    backlogClean: queue.backlog_clean,
+  }
+}
+
+export function summarizeScheduledAutomation(
+  projection: DashboardScheduledAutomationProjection | null | undefined,
+): OverviewScheduledAutomationDigest {
+  if (!projection) {
+    return {
+      state: 'not_loaded',
       tone: 'warn',
     }
   }
+  if (projection.state === 'unavailable') {
+    return {
+      state: 'unavailable',
+      reason: projection.reason,
+      tone: 'bad',
+    }
+  }
 
+  const automation = projection.data
   const requests = automation.requests ?? []
-  const counts = automation.counts && typeof automation.counts === 'object' ? automation.counts : {}
+  const counts = automation.counts
   const payloadSupport = automation.payload_support
 
   const warningCount = automation.warnings?.length ?? 0
@@ -462,29 +514,15 @@ export function summarizeScheduledAutomation(
     requestCountByPayloadSupport(requests, 'unknown'),
   )
 
-  const fsmActiveCount = Math.max(0, Number(automation.fsm?.active_count ?? 0))
+  const fsmActiveCount = Math.max(0, automation.fsm.active_count)
   const fsmTerminalCount = Math.max(
     0,
-    Number(automation.fsm?.terminal_count ?? 0),
+    automation.fsm.terminal_count,
     sumTerminalCountFromProjection(counts),
   )
   const dueCount = requestCountByProjectionCount(requests, counts, 'due')
   const runningCount = requestCountByProjectionCount(requests, counts, 'running')
   const scheduledCount = requestCountByProjectionCount(requests, counts, 'scheduled')
-
-  const hasProjection = true
-  const requestCount = Math.max(
-    0,
-    Number.isFinite(automation.request_count ?? Number.NaN)
-      ? Number(automation.request_count)
-      : requests.length,
-  )
-  const requestLimit = Math.max(
-    0,
-    Number.isFinite(automation.request_limit ?? Number.NaN)
-      ? Number(automation.request_limit)
-      : requests.length,
-  )
 
   const fsmState = automation.fsm?.state?.trim() ? automation.fsm.state.trim() : 'unknown'
   const nextDueAt = automation.fsm?.next_due_at?.trim() ? automation.fsm.next_due_at.trim() : null
@@ -493,9 +531,10 @@ export function summarizeScheduledAutomation(
   const hasWarnings = unsupportedPayloadCount > 0 || unknownPayloadCount > 0 || warningCount > 0
 
   return {
-    hasProjection,
-    requestCount,
-    requestLimit,
+    state: 'available',
+    visibleCount: projection.page.visibleCount,
+    totalCount: projection.page.totalCount,
+    limit: projection.page.limit,
     fsmState,
     fsmActiveCount,
     fsmTerminalCount,
@@ -506,7 +545,7 @@ export function summarizeScheduledAutomation(
     warningCount,
     unsupportedPayloadCount,
     unknownPayloadCount,
-    truncated: typeof automation.truncated === 'boolean' ? automation.truncated : false,
+    truncated: projection.page.truncated,
     tone: hasWarnings ? 'warn' : hasActive ? 'volt' : 'ok',
   }
 }
@@ -522,8 +561,9 @@ export function computeOverviewDigest(
   openGateRequests: number | null,
   goalList: readonly Goal[],
   fusionList: readonly FusionRunRecord[],
-  scheduledAutomation?: DashboardScheduledAutomation | null,
+  scheduledAutomation?: DashboardScheduledAutomationProjection | null,
   scheduleRunnerStatus?: DashboardScheduleRunnerStatus | null,
+  keeperQueueHealth?: DashboardKeeperEventQueueHealth | null,
 ): OverviewDigest {
   // Highest priority first; ties keep input order (stable sort).
   const topGoals = [...goalList].sort((a, b) => b.priority - a.priority).slice(0, 3)
@@ -535,6 +575,7 @@ export function computeOverviewDigest(
   const fusionLatest = [...fusionList].sort((a, b) => b.startedAt - a.startedAt)[0] ?? null
   const scheduledAutomationDigest = summarizeScheduledAutomation(scheduledAutomation)
   const scheduleRunnerDigest = summarizeScheduleRunnerStatus(scheduleRunnerStatus)
+  const keeperQueueDigest = summarizeKeeperQueueHealth(keeperQueueHealth)
 
   return {
     openGateRequests,
@@ -546,6 +587,7 @@ export function computeOverviewDigest(
     fusionLatest,
     scheduledAutomation: scheduledAutomationDigest,
     scheduleRunner: scheduleRunnerDigest,
+    keeperQueue: keeperQueueDigest,
   }
 }
 
@@ -620,7 +662,7 @@ export function buildOverviewTelemetrySnapshot({
 
   const peakPerBucket = Math.max(0, ...buckets)
   const averagePerBucket = roundOne(buckets.reduce((sum, count) => sum + count, 0) / buckets.length)
-  const oasEventSummary = sources.find(source => source.source === 'oas_event')
+  const agentCoreEventSummary = sources.find(source => source.source === 'agent_core_event')
   const healthySourceCount = sources.filter(source => source.health === 'ok').length
   const activeCoverageGaps = sources.reduce(
     (sum, source) => sum + (source.active_coverage_gap_count ?? 0),
@@ -632,8 +674,8 @@ export function buildOverviewTelemetrySnapshot({
     peakPerBucket,
     averagePerBucket,
     eventCount: totalMatchingEntries ?? entries.length,
-    latestAgeSeconds: oasEventSummary?.latest_age_s ?? null,
-    sourceHealth: oasEventSummary?.health ?? 'unknown',
+    latestAgeSeconds: agentCoreEventSummary?.latest_age_s ?? null,
+    sourceHealth: agentCoreEventSummary?.health ?? 'unknown',
     activeCoverageGaps,
     healthySourceCount,
     sourceCount: sources.length,
@@ -759,7 +801,6 @@ function keeperTickerTone(status?: string | null): FleetTickerEvent['tone'] {
     case 'executing':
       return 'info'
     case 'offline':
-    case 'dead':
     case 'stopped':
     case 'unbooted':
       return 'err'
@@ -942,7 +983,7 @@ function loadOverviewTelemetry(nowMs = Date.now()): Promise<void> {
     const sinceMs = nowMs - OVERVIEW_TELEMETRY_WINDOW_MINUTES * 60 * 1000
     const [telemetry, summary] = await Promise.all([
       fetchTelemetry({
-        source: 'oas_event',
+        source: 'agent_core_event',
         since_ms: sinceMs,
         n: OVERVIEW_TELEMETRY_EVENT_SAMPLE_LIMIT,
       }),
@@ -955,14 +996,6 @@ function loadOverviewTelemetry(nowMs = Date.now()): Promise<void> {
       totalMatchingEntries: telemetry.total_matching_entries,
       truncated: telemetry.truncated ?? false,
     })
-  })
-}
-
-const overviewFullHealthResource: AsyncResource<DashboardFullHealthResponse> = createAsyncResource()
-
-function loadOverviewFullHealth(): Promise<void> {
-  return overviewFullHealthResource.load(async () => {
-    return fetchDashboardFullHealth()
   })
 }
 
@@ -1035,17 +1068,41 @@ function OverviewKpi({
 // its surface. Labels and `sub` separators are copied verbatim from the prototype.
 function OverviewKpiStrip({
   stats,
+  fleet,
+  health,
   digest,
   approvalQueueState,
 }: {
   stats: OverviewStats
+  fleet: KeeperFleetExecutionCounts | null
+  health: DashboardCompositeHealthVerdict
   digest: OverviewDigest
   approvalQueueState: NonNullable<typeof gateData.value>['approval_queue_state'] | undefined
 }) {
+  const attentionCount = stats.att + health.issueCount
+  const attentionValue = health.state === 'unavailable'
+    ? stats.att > 0 ? `${stats.att}+?` : '—'
+    : String(attentionCount)
+  const attentionTone = health.state === 'attention' && health.severity === 'warn' && stats.att === 0
+    ? 'warn'
+    : attentionCount > 0 || health.state === 'unavailable'
+      ? 'bad'
+      : undefined
+  const hasKeeperAttention = stats.att > 0
+  const hasHealthRow = health.state !== 'healthy'
+  const openAttention = () => {
+    if (hasKeeperAttention && hasHealthRow) {
+      document.getElementById('overview-attention')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    } else if (hasHealthRow) {
+      navigate('monitoring', { section: 'fleet-health' })
+    } else {
+      navigate('monitoring', { section: 'agents' })
+    }
+  }
   return html`
     <section class="ov-kpis v2-overview-kpis" aria-label="Cross-surface KPIs" data-testid="overview-kpis">
-      <${OverviewKpi} label="실행 중 keeper" value=${String(stats.run)} sub=${` / ${stats.total}`} tone="ok" testId="kpi-run" onClick=${() => navigate('monitoring')} />
-      <${OverviewKpi} label="주의 필요" value=${String(stats.att)} tone=${stats.att > 0 ? 'bad' : undefined} testId="kpi-att" onClick=${() => navigate('monitoring')} />
+      <${OverviewKpi} label="실행 중 keeper" value=${fleetCountText(fleet?.running)} sub=${` / ${stats.total}`} tone=${fleet?.running != null ? 'ok' : undefined} testId="kpi-run" onClick=${() => navigate('monitoring')} />
+      <${OverviewKpi} label="주의 필요" value=${attentionValue} tone=${attentionTone} testId="kpi-att" onClick=${openAttention} />
       ${approvalQueueState && approvalQueueState.state !== 'ready'
         ? html`<${OverviewKpi}
             label="열린 Gate"
@@ -1074,7 +1131,13 @@ function attentionToneClass(sev: KeeperAttentionReason['sev']): string {
   return sev === 'bad' ? 'bg-destructive' : 'bg-warning'
 }
 
-function OverviewAttentionPanel({ keeperList }: { keeperList: readonly Keeper[] }) {
+function OverviewAttentionPanel({
+  keeperList,
+  health,
+}: {
+  keeperList: readonly Keeper[]
+  health: DashboardCompositeHealthVerdict
+}) {
   const attn = useMemo(
     () => pickAttentionKeepers(keeperList).slice().sort((a, b) => {
       const aBad = deriveKeeperAttentionReason(a).sev === 'bad'
@@ -1086,9 +1149,9 @@ function OverviewAttentionPanel({ keeperList }: { keeperList: readonly Keeper[] 
     [keeperList],
   )
 
-  if (attn.length === 0) {
+  if (attn.length === 0 && health.state === 'healthy') {
     return html`
-      <section class="ov-card ov-attn v2-overview-attention" data-testid="overview-attention">
+      <section id="overview-attention" class="ov-card ov-attn v2-overview-attention" data-testid="overview-attention">
         <div class="ov-card-h">
           <h3>주의 필요 · 지금 손이 필요한 것</h3>
           <span class="ov-count">0</span>
@@ -1098,13 +1161,51 @@ function OverviewAttentionPanel({ keeperList }: { keeperList: readonly Keeper[] 
     `
   }
 
+  const attentionCount = attn.length + health.issueCount
+  const attentionCountLabel = health.state === 'unavailable'
+    ? attn.length > 0 ? `${attn.length}+?` : '—'
+    : String(attentionCount)
+
   return html`
-    <section class="ov-card ov-attn v2-overview-attention" data-testid="overview-attention">
+    <section id="overview-attention" class="ov-card ov-attn v2-overview-attention" data-testid="overview-attention">
       <div class="ov-card-h">
-        <h3>주의 필요 · 지금 손이 필요한 것</h3>
-        <span class="ov-count">${attn.length}</span>
+        <h3>${attentionCount === 0 && health.state === 'status' ? '상태 참고' : '주의 필요 · 지금 손이 필요한 것'}</h3>
+        <span class="ov-count">${attentionCountLabel}</span>
       </div>
       <div class="ov-attn-list v2-overview-attention-list">
+        ${health.state === 'unavailable'
+          ? html`
+              <div
+                class="ov-attn-row v2-overview-attention-row"
+                data-testid="attention-row-composite-health-unavailable"
+                onClick=${() => navigate('monitoring', { section: 'fleet-health' })}
+              >
+                <span class="inline-block size-2 rounded-full bg-warning"></span>
+                <div class="ov-attn-meta">
+                  <div class="ov-attn-name">Fleet health 미연결</div>
+                  <div class="ov-attn-reason sev-warn">Backend composite health verdict has not loaded.</div>
+                </div>
+                <button type="button" class="ov-attn-act">상태 상세 →</button>
+              </div>
+            `
+          : health.state === 'attention' || health.state === 'status'
+            ? health.issues.map(issue => html`
+                <div
+                  key=${issue.kind}
+                  class="ov-attn-row v2-overview-attention-row"
+                  data-testid=${`attention-row-${issue.kind}`}
+                  title=${issue.detail}
+                  onClick=${() => navigate('monitoring', { section: 'fleet-health' })}
+                >
+                  <span class=${`inline-block size-2 rounded-full ${issue.severity === 'bad' ? 'bg-destructive' : 'bg-warning'}`}></span>
+                  <div class="ov-attn-meta">
+                    <div class="ov-attn-name">${issue.label}</div>
+                    <div class=${`ov-attn-reason sev-${issue.severity}`}>${issue.detail}</div>
+                  </div>
+                  <button type="button" class="ov-attn-act">상태 상세 →</button>
+                </div>
+              `)
+            : null}
         ${attn.map(k => {
           const reason = deriveKeeperAttentionReason(k)
           const displayName = k.koreanName && k.koreanName !== '' ? k.koreanName : k.name
@@ -1174,7 +1275,7 @@ function OverviewTelemetry({
       </div>
       ${snapshot
         ? html`
-          <div class="ov-bars v2-overview-bars" role="img" aria-label="Live OAS telemetry histogram">
+          <div class="ov-bars v2-overview-bars" role="img" aria-label="Live Agent Core telemetry histogram">
             ${snapshot.bars.map((b, i) => html`
               <span
                 key=${i}
@@ -1244,15 +1345,18 @@ function DomainCard({
 
 function OverviewDomainSection({
   stats,
+  fleet,
   digest,
   approvalQueueState,
 }: {
   stats: OverviewStats
+  fleet: KeeperFleetExecutionCounts | null
   digest: OverviewDigest
   approvalQueueState: NonNullable<typeof gateData.value>['approval_queue_state'] | undefined
 }) {
   const scheduleSummary = digest.scheduledAutomation
   const scheduleRunnerSummary = digest.scheduleRunner
+  const keeperQueueSummary = digest.keeperQueue
 
   const scheduleRunnerRows: string[] = []
   if (scheduleRunnerSummary.hasProjection) {
@@ -1334,15 +1438,21 @@ function OverviewDomainSection({
       <!-- SCHEDULE · overview.jsx:201-215 -->
       <${DomainCard}
         title="예약 · 자동화"
-        count=${scheduleSummary.hasProjection ? String(scheduleSummary.requestCount) : null}
-        tone=${scheduleSummary.hasProjection ? scheduleSummary.tone : 'warn'}
+        count=${scheduleSummary.state === 'available' ? String(scheduleSummary.totalCount) : '—'}
+        tone=${scheduleSummary.tone}
         linkLabel="예약"
         nav=${{ tab: 'schedule' }}
         testId="domain-schedule"
       >
-      ${scheduleSummary.hasProjection
+      ${scheduleSummary.state === 'available'
         ? html`
               <div class="ov-mini-list">
+                <div class="ov-mini-row" data-testid="overview-schedule-page-metadata">
+                  <span class="inline-block size-1.5 rounded-full bg-warning"></span>
+                  <span class="ov-mini-txt">
+                    ${`표시 ${scheduleSummary.visibleCount} / 전체 ${scheduleSummary.totalCount} · 최대 ${scheduleSummary.limit}${scheduleSummary.truncated ? ' · 일부만 표시' : ''}`}
+                  </span>
+                </div>
                 <div class="ov-mini-row">
                   <span class="inline-block size-1.5 rounded-full bg-warning"></span>
                   <span class="ov-mini-txt">상태: ${scheduleSummary.fsmState}</span>
@@ -1387,7 +1497,22 @@ function OverviewDomainSection({
                 `)}
               </div>
             `
-          : html`
+          : scheduleSummary.state === 'unavailable'
+            ? html`
+              <div class="ov-mini-list" data-testid="overview-schedule-unavailable">
+                <div class="ov-mini-row">
+                  <span class="inline-block size-1.5 rounded-full bg-destructive"></span>
+                  <span class="ov-mini-txt">schedule ledger 읽기 실패: ${scheduleSummary.reason}</span>
+                </div>
+                ${scheduleRunnerRows.map((row, index) => html`
+                  <div class="ov-mini-row" key=${index}>
+                    <span class="inline-block size-1.5 rounded-full bg-warning"></span>
+                    <span class="ov-mini-txt">${row}</span>
+                  </div>
+                `)}
+              </div>
+            `
+            : html`
               <div class="ov-mini-list">
                 <div class="ov-mini-empty ov-empty">예약 자동화 projection 미연결</div>
                 ${scheduleRunnerRows.map((row, index) => html`
@@ -1455,11 +1580,30 @@ function OverviewDomainSection({
       <!-- FLEET summary · overview.jsx:252-260 -->
       <${DomainCard} title="Fleet 요약" linkLabel="Monitor" nav=${{ tab: 'monitoring' }} testId="domain-fleet">
         <div class="ov-fleet-sum">
-          <div class="ov-fleet-stat"><span class="v ok">${stats.run}</span><span class="k">실행</span></div>
+          <div class="ov-fleet-stat" data-testid="fleet-stat-running"><span class="v ok">${fleetCountText(fleet?.running)}</span><span class="k">실행</span></div>
+          <div class="ov-fleet-stat" data-testid="fleet-stat-recovering"><span class=${`v ${(fleet?.recovering ?? 0) > 0 ? 'warn' : ''}`}>${fleetCountText(fleet?.recovering)}</span><span class="k">복구</span></div>
+          <div class="ov-fleet-stat" data-testid="fleet-stat-paused"><span class="v">${fleetCountText(fleet?.paused)}</span><span class="k">일시정지</span></div>
           <div class="ov-fleet-stat"><span class="v warn">${stats.att}</span><span class="k">주의</span></div>
           <div class="ov-fleet-stat"><span class=${`v ${stats.hot > 0 ? 'bad' : ''}`}>${stats.hot}</span><span class="k">압박</span></div>
           <div class="ov-fleet-stat"><span class="v">${stats.total}</span><span class="k">전체</span></div>
         </div>
+        ${keeperQueueSummary.hasProjection
+          ? html`
+              <div class="ov-stat-row" data-testid="fleet-queue-storage">
+                <span class="k">queue storage</span>
+                <span class="v mono">${keeperQueueSummary.storageStatus}</span>
+              </div>
+              <div class="ov-stat-row" data-testid="fleet-queue-work">
+                <span class="k">work liveness</span>
+                <span class=${`v mono ${keeperQueueSummary.backlogClean ? 'ok' : 'warn'}`}>
+                  ${keeperQueueSummary.workState} · ${keeperQueueSummary.runnableBacklogCount}
+                  ${keeperQueueSummary.runnableOldestAgeSeconds == null
+                    ? ''
+                    : ` · oldest ${Math.round(keeperQueueSummary.runnableOldestAgeSeconds)}s`}
+                </span>
+              </div>
+            `
+          : html`<div class="ov-stat-row"><span class="k">queue health</span><span class="v mono">unknown</span></div>`}
         <div class="ov-stat-row"><span class="k">전체 keeper</span><span class="v mono">${stats.total}</span></div>
       <//>
     </div>
@@ -1472,12 +1616,22 @@ export function Overview() {
   useNowSecondsTicker()
   useEffect(() => {
     void loadOverviewTelemetry()
-    void loadOverviewFullHealth()
     const interval = window.setInterval(() => {
       void loadOverviewTelemetry()
-      void loadOverviewFullHealth()
     }, 60_000)
-    return () => window.clearInterval(interval)
+    // Overview and the shell consume one shared full-health resource. The
+    // subscriber owns ref-counted refresh lifetime, so mounting both surfaces
+    // never creates a second backend poller.
+    const stopFullHealthRefresh = subscribeDashboardFullHealthRefresh()
+    // Schedule state is its own projection with its own poller. Root used to
+    // reach it through the tool inventory, which meant entering the home
+    // surface fetched the whole tool registry.
+    const stopScheduleRefresh = subscribeScheduledAutomationRefresh()
+    return () => {
+      window.clearInterval(interval)
+      stopFullHealthRefresh()
+      stopScheduleRefresh()
+    }
   }, [])
   const taskList = tasks.value
   const keeperList = keepers.value
@@ -1488,15 +1642,27 @@ export function Overview() {
     approvalQueueState?.state === 'ready'
       ? gateData.value?.approval_queue?.length ?? null
       : null
-  const scheduledAutomation = toolsData.value?.scheduled_automation ?? null
-  const scheduleRunnerStatus =
-    overviewFullHealthResource.state.value.status === 'loaded'
-      ? overviewFullHealthResource.state.value.data.schedule_runner ?? null
-      : null
+  const scheduledAutomationData = scheduledAutomationProjection.value ?? null
+  const fullHealth = dashboardFullHealth.value
+  const scheduleRunnerStatus = fullHealth?.schedule_runner ?? null
+  const keeperQueueHealth = fullHealth?.keeper_event_queue ?? null
+  // Keeper execution counts come from the runtime-health fleet projection the
+  // shell already holds — the same `keeper_fleet_safety_health_json` payload
+  // `/health?full=1` embeds, so reading it here adds no request.
+  const fleetSafety = shellRuntimeResolution.value?.fleet_safety ?? null
+  const fleet = useMemo(() => resolveKeeperFleetExecutionCounts(fleetSafety), [fleetSafety])
+  const compositeHealth = useMemo(() => projectDashboardCompositeHealth(fullHealth), [fullHealth])
   const stats = useMemo(() => computeOverviewStats(keeperList, taskList), [keeperList, taskList])
   const digest = useMemo(
-    () => computeOverviewDigest(openGateRequests, goalList, fusionList, scheduledAutomation, scheduleRunnerStatus),
-    [openGateRequests, goalList, fusionList, scheduledAutomation, scheduleRunnerStatus],
+    () => computeOverviewDigest(
+      openGateRequests,
+      goalList,
+      fusionList,
+      scheduledAutomationData,
+      scheduleRunnerStatus,
+      keeperQueueHealth,
+    ),
+    [openGateRequests, goalList, fusionList, scheduledAutomationData, scheduleRunnerStatus, keeperQueueHealth],
   )
   const telemetry = overviewTelemetryResource.state.value
 
@@ -1506,15 +1672,18 @@ export function Overview() {
         <${OverviewHeader} />
         <${OverviewKpiStrip}
           stats=${stats}
+          fleet=${fleet}
+          health=${compositeHealth}
           digest=${digest}
           approvalQueueState=${approvalQueueState}
         />
         <div class="ov-grid v2-overview-primary-grid" data-testid="overview-primary-grid">
-          <${OverviewAttentionPanel} keeperList=${keeperList} />
+          <${OverviewAttentionPanel} keeperList=${keeperList} health=${compositeHealth} />
           <${OverviewTelemetry} telemetry=${telemetry} />
         </div>
         <${OverviewDomainSection}
           stats=${stats}
+          fleet=${fleet}
           digest=${digest}
           approvalQueueState=${approvalQueueState}
         />

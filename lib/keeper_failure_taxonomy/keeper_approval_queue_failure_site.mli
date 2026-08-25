@@ -4,6 +4,7 @@
 type t =
   | Upsert_rule_save
   | Audit_store_create
+  | Audit_append
   | Resolution_delivery
   | Resolution_signal
   | Remember_rule

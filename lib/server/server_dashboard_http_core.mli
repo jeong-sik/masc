@@ -43,8 +43,6 @@ val last_good_shell_light : Yojson.Safe.t Atomic.t
 type operator_snapshot_publication =
   Server_dashboard_http_core_operator.operator_snapshot_publication
 
-val operator_snapshot_broadcast_ref : (operator_snapshot_publication -> unit) ref
-val operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref
 val mission_cache : cached_surface
 
 (** {1 Dashboard Timeout} *)
@@ -57,15 +55,6 @@ val with_dashboard_timeout :
 (** {1 Cache Key Helpers} *)
 
 val dashboard_cache_key : Workspace.config -> string -> string -> string
-
-(** {1 Projection Diagnostics} *)
-
-val with_projection_diagnostics :
-  surface:string ->
-  started_at:float ->
-  extra:(string * Yojson.Safe.t) list ->
-  Yojson.Safe.t ->
-  Yojson.Safe.t
 
 (** {1 Sanitization and Request Helpers} *)
 
@@ -84,18 +73,21 @@ val start_operator_snapshot_refresh_loop :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  broadcast_snapshot:(operator_snapshot_publication -> unit) ->
   unit
 
 val start_operator_digest_refresh_loop :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  broadcast_digest:(Yojson.Safe.t -> unit) ->
   unit
 
 val operator_snapshot_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  broadcast_snapshot:(operator_snapshot_publication -> unit) ->
   Httpun.Request.t ->
   Yojson.Safe.t
 
@@ -133,7 +125,6 @@ val dashboard_briefing_sections_http_json :
 val dashboard_shell_status_json : Workspace.config -> Yojson.Safe.t
 val dashboard_agent_json : Masc_domain.agent -> Yojson.Safe.t
 val dashboard_message_json : Masc_domain.message -> Yojson.Safe.t
-(* dashboard_current_workspace_id removed — namespace retired (#unify-namespace). *)
 val dashboard_tasks_safe : Workspace.config -> Masc_domain.task list
 val dashboard_agents_safe : Workspace.config -> Masc_domain.agent list
 val dashboard_messages_safe :
@@ -158,6 +149,3 @@ val dashboard_shell_payload_json :
   ?timing:Server_timing.t ->
   ?light:bool ->
   Workspace.config -> Yojson.Safe.t
-
-val is_dashboard_cache_timeout_json :
-  Yojson.Safe.t -> bool

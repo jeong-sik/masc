@@ -4,11 +4,9 @@
     Contains keeper reaction ledger, FD accountant, fleet resolution,
     runtime truth, and contract-verification health JSON renderers. *)
 
-val take : int -> 'a list -> 'a list
-
 val keeper_reaction_ledger_health_json : unit -> Yojson.Safe.t
 
-val keeper_turn_admission_health_json : unit -> Yojson.Safe.t
+val keeper_owner_health_json : unit -> Yojson.Safe.t
 
 val keeper_board_event_collection_health_json : unit -> Yojson.Safe.t
 
@@ -16,16 +14,18 @@ val paused_keeper_count : Yojson.Safe.t -> int
 
 val runtime_base_path_opt : unit -> string option
 
+val keeper_event_queue_health_dimensions
+  :  stale_after_sec:float
+  -> Yojson.Safe.t
+  -> Yojson.Safe.t
+(** Split durable storage integrity from work liveness. A readable queue with
+    runnable or retained non-runnable backlog, read errors, or pending
+    transition projection is never returned as backlog-clean [status=ok]. *)
+
 val keeper_event_queue_health_json :
   execution_snapshot:Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot ->
   unit ->
   Yojson.Safe.t
-
-val keeper_fleet_runtime_resolution_base_fields :
-  ?meta_scan:Server_routes_http_runtime_fleet_scan.keeper_fleet_meta_scan ->
-  ?include_reaction_ledger:bool ->
-  unit ->
-  (string * Yojson.Safe.t) list
 
 val fd_accountant_snapshot_json : unit -> Yojson.Safe.t
 

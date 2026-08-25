@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 
 import * as ts from 'typescript'
 import { describe, expect, it } from 'vitest'
+import { KEEPER_CHAT_CUSTOM_EVENT_NAMES } from './lib/keeper-chat-stream-contract'
 
 // Cross-boundary parity gate for the SSE event-type strings the dashboard
 // routes by EXACT MATCH (`event.type === 'X'` in sse-store.ts). These are the
@@ -30,8 +31,20 @@ import { describe, expect, it } from 'vitest'
 // uses TypeScript AST comparisons, so a suffix rename ("approval:pending:v2")
 // does not satisfy "approval:pending".
 
-// event-type -> the backend .ml that emits the quoted literal.
+// event-type -> the backend .ml that EMITS the quoted literal.
+//
+// Emits, not merely mentions. A consumer that matches on the same literal
+// satisfies the assertion just as well as the producer does, and binding one
+// here makes the gate green while the real emitter is free to rename -- which
+// is the exact failure this file exists to prevent. Four entries pointed at
+// server_mcp_transport_ws.ml, whose dashboard_slice_for_sse_type matches these
+// literals to pick a delta slice; it reads them, it does not emit them.
+//
+// When adding an entry, find the site that builds the broadcast payload
+// (`"type", `String "..."` or `~event_type:"..."`), not the site that branches
+// on it.
 const BACKEND_EMITTED: Record<string, string> = {
+  'approval:audit': '../lib/keeper/keeper_gate.ml',
   'approval:pending': '../lib/keeper/keeper_approval_queue.ml',
   'approval:resolved': '../lib/keeper/keeper_approval_queue.ml',
   'approval:summary_updated': '../lib/keeper/keeper_approval_queue.ml',
@@ -39,27 +52,25 @@ const BACKEND_EMITTED: Record<string, string> = {
   runtime_param_changed: '../lib/server/server_routes_http_routes_activity.ml',
   keeper_chat_appended: '../lib/keeper/keeper_chat_broadcast.ml',
   keeper_waiting_inventory_changed: '../lib/keeper/keeper_waiting_inventory_broadcast.ml',
-  keeper_compaction_snapshots_changed: '../lib/server/server_dashboard_http_keeper_api.ml',
   ide_cursor_changed: '../lib/server/server_ide_http.ml',
-  keeper_composite_changed: '../lib/server/server_mcp_transport_ws.ml',
+  keeper_composite_changed: '../lib/keeper/keeper_registry_broadcast.ml',
   keeper_heartbeat: '../lib/keeper/keeper_heartbeat_snapshot.ml',
-  keeper_turn_complete: '../lib/keeper/keeper_hooks_oas.ml',
-  oas_telemetry_sample: '../lib/runtime/dashboard_oas_bridge.ml',
-  namespace_truth_snapshot: '../lib/server/server_mcp_transport_ws.ml',
+  keeper_turn_complete: '../lib/keeper/keeper_hooks_agent_core.ml',
+  agent_core_telemetry_sample: '../lib/runtime/dashboard_agent_core_bridge.ml',
   operator_digest: '../lib/server/server_dashboard_http_core_digest_refresh.ml',
-  operator_snapshot: '../lib/server/server_mcp_transport_ws.ml',
+  operator_snapshot: '../lib/server/server_dashboard_http_execution_surfaces.ml',
   post_created: '../lib/keeper_runtime/keeper_event_queue.ml',
-  project_snapshot: '../lib/server/server_mcp_transport_ws.ml',
+  project_snapshot: '../lib/server/server_dashboard_http_namespace_truth.ml',
   transport_health_snapshot: '../lib/server/server_dashboard_http_execution_surfaces.ml',
+  fusion_run_status: '../lib/fusion/fusion_sink.ml',
+  workspace_message_delivery_changed: '../lib/server/server_bootstrap_loops.ml',
 }
 
 // event-type -> why it has no masc backend literal to bind to. Keep short and
 // justified; every entry is an event the FE routes but masc lib/ does not emit.
 const FE_ONLY_OR_EXTERNAL: Record<string, string> = {
-  'oas:agent_failed':
-    'OAS-subsystem event bridged into the masc SSE stream, not emitted by masc lib/ (oas: prefix).',
-  'oas:context_compacted':
-    'OAS-subsystem event bridged into the masc SSE stream, not emitted by masc lib/ (oas: prefix).',
+  'agent_core:agent_failed':
+    'Agent Core subsystem event bridged into the masc SSE stream, not emitted by masc lib/ (agent_core: prefix).',
 }
 
 function parseExportedStringConstants(source: string): Map<string, string> {
@@ -226,5 +237,36 @@ describe('SSE event-type cross-boundary parity (exact-match routes)', () => {
       unrouted,
       `backend emits these approval events but sse-store.ts never routes them, so the HITL queue will not refresh on them: ${unrouted.join(', ')}`,
     ).toEqual([])
+  })
+})
+
+describe('Keeper chat custom-event cross-language parity', () => {
+  const projectorSource = readFileSync(
+    resolve(process.cwd(), '../lib/server/server_keeper_chat_agui_projection.ml'),
+    'utf8',
+  )
+  const streamRouteSource = readFileSync(
+    resolve(process.cwd(), '../lib/server/server_routes_http_keeper_stream.ml'),
+    'utf8',
+  )
+  const mappingStart = projectorSource.indexOf('let custom_event_name_to_string = function')
+  const mappingEnd = projectorSource.indexOf('\nlet custom ', mappingStart)
+  const mappingSource = projectorSource.slice(mappingStart, mappingEnd)
+  const ocamlNames = [...`${mappingSource}\n${streamRouteSource}`.matchAll(/"(KEEPER_[A-Z_]+)"/g)]
+    .map(match => match[1])
+    .filter((name): name is string => name !== undefined)
+
+  it('binds the OCaml wire codec to the Dashboard vocabulary', () => {
+    expect(mappingStart).toBeGreaterThanOrEqual(0)
+    expect(mappingEnd).toBeGreaterThan(mappingStart)
+    expect([...new Set(ocamlNames)].sort()).toEqual([...KEEPER_CHAT_CUSTOM_EVENT_NAMES].sort())
+  })
+
+  it('has no open Keeper_chat_events custom constructor', () => {
+    const eventSource = readFileSync(
+      resolve(process.cwd(), '../lib/keeper/keeper_chat_events.ml'),
+      'utf8',
+    )
+    expect(eventSource).not.toMatch(/\|\s*Custom\s+of/)
   })
 })

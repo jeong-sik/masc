@@ -2,7 +2,7 @@
 """Mock OpenAI-compatible provider for the keeper-load perf harness.
 
 Serves POST /v1/chat/completions with a non-streaming JSON response in the
-OpenAI chat.completions shape that agent_sdk's backend_openai_parse.ml reads
+OpenAI chat.completions shape that agent_core's backend_openai_parse.ml reads
 (choices[0].message.content + finish_reason + usage). Non-streaming is the
 default request path (backend_openai_request.ml: `?(stream = false)`), so the
 mock model must be configured with streaming disabled. No SSE required.

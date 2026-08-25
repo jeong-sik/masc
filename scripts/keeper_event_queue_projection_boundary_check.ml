@@ -661,6 +661,9 @@ let run () =
   let ledger_ml = "lib/keeper/keeper_reaction_ledger.ml" in
   let ledger_mli = "lib/keeper/keeper_reaction_ledger.mli" in
   let recovery_ml = "lib/keeper/keeper_event_queue_recovery.ml" in
+  let registry_event_queue_ml =
+    "lib/keeper/keeper_registry_event_queue.ml"
+  in
   let schedule_consumers_ml = "lib/server/server_schedule_consumers.ml" in
   let definition_expectations =
     [ "append_event_queue_transition_outbox_result", []
@@ -709,6 +712,7 @@ let run () =
       , [ persistence_ml, "project_transition_outbox_result" ] )
     ; ( "project_event_queue_transition_outbox_result"
       , [ recovery_ml, "project_open_owner"
+        ; registry_event_queue_ml, "project_source_ack_receipt"
         ; schedule_consumers_ml, "accept_terminal"
         ] )
     ; "project_transition_outbox_after_append_result", []

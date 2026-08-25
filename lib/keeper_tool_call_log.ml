@@ -14,24 +14,89 @@
 
 let max_output_len = 4000
 
-(** Pre-truncation info, keyed by keeper name.
-    Set by the tool handler wrapper (keeper_tools_oas), consumed by the
-    OAS on_tool_result hook (keeper_hooks_oas).  Per-keeper isolation
-    prevents cross-keeper corruption when multiple keepers call tools
-    concurrently. Within a single keeper's Agent.run, tool calls are
-    sequential so set→consume ordering is guaranteed. *)
-let pending_truncation : (string, int * int option) Hashtbl.t = Hashtbl.create 8
+module Invocation_key = struct
+  type t = Agent_core.Tool_contract.Invocation.t
 
-let set_truncation_info ~keeper_name ~original_bytes ?truncated_to () =
-  Hashtbl.replace pending_truncation keeper_name (original_bytes, truncated_to)
+  let equal left right = left == right
+  let hash = Hashtbl.hash
+end
+
+module Invocation_table = Ephemeron.K1.Make (Invocation_key)
+
+(** Pre-truncation info, keyed by the exact Agent Core occurrence. Set by the
+    tool handler wrapper and consumed by the on-tool-result hook. The weak key
+    prevents cancellation before that hook from retaining the invocation. *)
+let pending_truncation : (int * int option) Invocation_table.t =
+  Invocation_table.create 8
 ;;
 
-let consume_truncation_info ~keeper_name () =
-  match Hashtbl.find_opt pending_truncation keeper_name with
-  | Some info ->
-    Hashtbl.remove pending_truncation keeper_name;
-    info
-  | None -> 0, None
+let pending_truncation_mu = Stdlib.Mutex.create ()
+
+let with_pending_truncation_lock f =
+  Stdlib.Mutex.lock pending_truncation_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock pending_truncation_mu)
+    f
+;;
+
+let set_truncation_info ~invocation ~original_bytes ?truncated_to () =
+  with_pending_truncation_lock (fun () ->
+    Invocation_table.replace
+      pending_truncation
+      invocation
+      (original_bytes, truncated_to))
+;;
+
+let consume_truncation_info ~invocation () =
+  with_pending_truncation_lock (fun () ->
+    match Invocation_table.find_opt pending_truncation invocation with
+    | Some info ->
+      Invocation_table.remove pending_truncation invocation;
+      info
+    | None -> 0, None)
+;;
+
+(** The typed disposition, keyed the same way and for the same reason.
+
+    The row this module writes is the only per-call record MASC keeps, and
+    until now the ordinary path filled its outcome from a boolean: the hook
+    receives AGENT_CORE's [tool_result], which says whether the call errored
+    and not why. [Deferred] has no representation there at all, and
+    agent_core's own error class is a different taxonomy. The value exists at
+    the masc dispatch boundary and is already handed to two other stores
+    ([Keeper_registry.record_tool_use], [Tool_registry.record_call]); this
+    carries it to the third.
+
+    Same weak key as the truncation table above, so a cancelled invocation
+    releases its pending entry rather than holding it. *)
+let pending_disposition :
+      (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition
+        Invocation_table.t
+  =
+  Invocation_table.create 8
+;;
+
+let pending_disposition_mu = Stdlib.Mutex.create ()
+
+let with_pending_disposition_lock f =
+  Stdlib.Mutex.lock pending_disposition_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock pending_disposition_mu)
+    f
+;;
+
+let set_disposition ~invocation ~disposition =
+  with_pending_disposition_lock (fun () ->
+    Invocation_table.replace pending_disposition invocation disposition)
+;;
+
+let consume_disposition ~invocation () =
+  with_pending_disposition_lock (fun () ->
+    match Invocation_table.find_opt pending_disposition invocation with
+    | Some disposition ->
+      Invocation_table.remove pending_disposition invocation;
+      Some disposition
+    | None -> None)
 ;;
 
 type turn_ctx_cell = Keeper_tool_call_log_context.cell
@@ -58,8 +123,15 @@ let route_evidence_json_of_tool_io ~tool_name ~input ~output_text =
     ~output_text
 ;;
 
-let store_ref : Dated_jsonl.t option ref = ref None
-let configured_store_ref : (string * string) option ref = ref None
+type store_state =
+  { store : Dated_jsonl.t option
+  ; configured : (string * string) option
+  }
+
+let store_state = Atomic.make { store = None; configured = None }
+let committed_revision_ref = Atomic.make 0
+
+let committed_revision () = Atomic.get committed_revision_ref
 
 type append_entry =
   { store : Dated_jsonl.t
@@ -99,14 +171,17 @@ let queued_count_for_testing () =
    MASC_TOOL_CALL_LOG_RETENTION_DAYS=0. *)
 let retention_days_default = 30
 
+(* Opt-out: unset prunes after [retention_days_default]. A malformed value
+   lands on that same default and warns, rather than being the one store that
+   treated garbage differently from the two that cite this one (#27110). *)
 let retention_days () =
-  match Sys.getenv_opt "MASC_TOOL_CALL_LOG_RETENTION_DAYS" with
-  | Some raw ->
-    (match int_of_string_opt (String.trim raw) with
-     | Some days when days > 0 -> Some days
-     | Some _ -> None      (* explicit 0 or negative → retain forever *)
-     | None -> Some retention_days_default  (* malformed → safe default *))
-  | None -> Some retention_days_default
+  match
+    Env_config_core.get_retention_days
+      ~default:(Env_config_core.Prune_after_days retention_days_default)
+      "MASC_TOOL_CALL_LOG_RETENTION_DAYS"
+  with
+  | Env_config_core.Retain_forever -> None
+  | Env_config_core.Prune_after_days days -> Some days
 
 let init ?cluster_name ~base_path () =
   let cluster_name =
@@ -114,15 +189,16 @@ let init ?cluster_name ~base_path () =
   in
   let masc_root = Workspace_utils.masc_root_dir_from ~base_path ~cluster_name in
   let dir = Filename.concat masc_root "tool_calls" in
-  configured_store_ref := Some (masc_root, dir);
+  Atomic.set store_state { store = None; configured = Some (masc_root, dir) };
   try
     let retention_days = retention_days () in
     let store = Dated_jsonl.create ~base_dir:dir ?retention_days () in
-    store_ref := Some store
+    Atomic.set store_state
+      { store = Some store; configured = Some (masc_root, dir) }
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    store_ref := None;
+    Atomic_util.update store_state (fun state -> { state with store = None });
     Log.Misc.warn "keeper_tool_call_log: init failed: %s" (Printexc.to_string exn);
     (try
        Telemetry_coverage_gap.record
@@ -143,16 +219,22 @@ let init ?cluster_name ~base_path () =
 ;;
 
 let reset_for_testing () =
-  store_ref := None;
-  configured_store_ref := None;
+  Atomic.set store_state { store = None; configured = None };
+  Atomic.set committed_revision_ref 0;
   Atomic.set async_append_active false;
   Atomic.set append_queue_dropped 0;
   with_append_queue_lock (fun () -> Stdlib.Queue.clear append_queue);
-  Hashtbl.reset pending_truncation
+  with_pending_truncation_lock (fun () -> Invocation_table.reset pending_truncation)
+;;
+
+let pending_truncation_count_for_testing () =
+  with_pending_truncation_lock (fun () ->
+    Invocation_table.clean pending_truncation;
+    Invocation_table.length pending_truncation)
 ;;
 
 let store_dir () =
-  match !store_ref with
+  match (Atomic.get store_state).store with
   | Some store -> Some (Dated_jsonl.base_dir store)
   | None -> None
 ;;
@@ -161,15 +243,15 @@ let current_log_path () =
   match store_dir () with
   | None -> None
   | Some dir ->
-    let tm = Unix.gmtime (Unix.gettimeofday ()) in
-    let month =
-      Printf.sprintf "%04d-%02d" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1)
-    in
-    let day = Printf.sprintf "%02d.jsonl" tm.Unix.tm_mday in
-    Some (Filename.concat (Filename.concat dir month) day)
+    (* Same layout this file already reads through Jsonl_writer.day_key below;
+       it was spelled out again here (#27143). *)
+    Some (Jsonl_writer.dated_path_now ~base_dir:dir).Jsonl_writer.path
 ;;
 
-let configured_masc_root () = Option.map fst !configured_store_ref
+let configured_masc_root () =
+  Option.map fst (Atomic.get store_state).configured
+
+exception Commit_required_but_store_unavailable
 
 let record_append_coverage_gap ~store ~keeper_name ~tool_name ?trace_id exn =
   let durable_store = Dated_jsonl.base_dir store in
@@ -178,7 +260,7 @@ let record_append_coverage_gap ~store ~keeper_name ~tool_name ?trace_id exn =
     Telemetry_coverage_gap.record
       ~masc_root
       ~source:"tool_call_io"
-      ~producer:"keeper_hooks_oas|mcp_server_eio_call_tool"
+      ~producer:"keeper_hooks_agent_core|mcp_server_eio_call_tool"
       ~durable_store
       ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
       ~stale_reason:"tool_call_io_append_failed"
@@ -198,14 +280,14 @@ let record_append_coverage_gap ~store ~keeper_name ~tool_name ?trace_id exn =
 ;;
 
 let record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id () =
-  match !configured_store_ref with
+  match (Atomic.get store_state).configured with
   | None -> ()
   | Some (masc_root, durable_store) ->
     (try
        Telemetry_coverage_gap.record
          ~masc_root
          ~source:"tool_call_io"
-         ~producer:"keeper_hooks_oas|mcp_server_eio_call_tool"
+         ~producer:"keeper_hooks_agent_core|mcp_server_eio_call_tool"
          ~durable_store
          ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
          ~stale_reason:"tool_call_io_store_unavailable"
@@ -224,8 +306,13 @@ let record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id () =
          (Printexc.to_string gap_exn))
 ;;
 
-let append_to_store (entry : append_entry) =
-  try Dated_jsonl.append entry.store entry.json with
+let append_to_store_result (entry : append_entry) =
+  try
+    Dated_jsonl.append entry.store entry.json;
+    (* fire-and-forget: pre-increment count is unused; committed_revision () reads the counter directly. *)
+    ignore (Atomic.fetch_and_add committed_revision_ref 1 : int);
+    Ok ()
+  with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     let trace_id = entry.trace_id in
@@ -241,7 +328,13 @@ let append_to_store (entry : append_entry) =
       ~keeper_name:entry.keeper_name
       ~tool_name:entry.tool_name
       ?trace_id
-      exn
+      exn;
+    Error exn
+;;
+
+let append_to_store entry =
+  match append_to_store_result entry with
+  | Ok () | Error _ -> ()
 ;;
 
 let take_queued_append () =
@@ -327,7 +420,7 @@ let start_flush_fiber ~sw ~clock =
 (** [blob_aware_output_json safe_output] wraps a tool-output string for
     persistence as the [output] field. When [safe_output] is the OCaml
     [%S]-quoted [masc:blob ...] marker produced by
-    [Tool_output.encode_for_oas], the wire format escapes the inner
+    [Tool_output.encode_for_agent_core], the wire format escapes the inner
     preview JSON twice (OCaml string-literal + JSON string), which makes
     the telemetry record illegible and inflates disk usage by 30-40%.
 
@@ -338,10 +431,17 @@ let start_flush_fiber ~sw ~clock =
     older readers (dashboard, jq scripts) keep working. The dashboard
     consumers are updated in the same change to accept either shape. *)
 let blob_aware_output_json (output : string) : Yojson.Safe.t =
-  match Tool_output.decode_from_oas output with
+  match Tool_output.decode_from_agent_core output with
   | Tool_output.Decoded reference ->
     Tool_output.normalized_artifact_ref_to_json reference
   | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> `String output
+;;
+
+let normalized_artifact_refs_in_typed_data data =
+  Tool_output.normalized_artifact_refs_in_json data
+  |> List.map (fun reference ->
+    Tool_output.with_preview reference ""
+    |> Tool_output.normalized_artifact_ref_to_json)
 ;;
 
 let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
@@ -366,6 +466,7 @@ let log_call
       ~(duration_ms : float)
       ?(model : string = "")
       ?agent_name
+      ?turn_kind
       ?lane
       ?tool_choice
       ?thinking_enabled
@@ -374,13 +475,22 @@ let log_call
       ?execution_id
       ?tool_use_id
       ?planned_index
+      ?batch_index
+      ?batch_size
+      ?execution_mode
+      ?typed_result
+      ?disposition
+      ?composition_tool
+      ?composition_run_id
+      ?composition_node_id
+      ?composition_execution
+      ?composition_tool_kind
+      ?parent_tool_use_id
       ?trace_id
       ?session_id
-      ?generation
       ?turn
       ?keeper_turn_id
       ?task_id
-      ?goal_ids
       ?sandbox_profile
       ?sandbox_root
       ?allowed_paths
@@ -388,13 +498,18 @@ let log_call
       ?runtime_profile
       ?result_bytes
       ?truncated_to
+      ?on_committed
       ()
   =
-  match !store_ref with
-    | None -> record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id ()
+  match (Atomic.get store_state).store with
+    | None ->
+      record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id ();
+      (match on_committed with
+       | None -> ()
+       | Some _ -> raise Commit_required_but_store_unavailable)
     | Some store ->
       (* RFC-0225 §3.3: no ambient turn-context fallback. Both production
-         callers (keeper_hooks_oas, mcp_server_eio_call_tool) pass their
+         callers (keeper_hooks_agent_core, mcp_server_eio_call_tool) pass their
          run identity explicitly; filling [None] from a keeper-name-keyed
          global could attach an unrelated concurrent run's identity. A
          [None] field now persists as absent, which is honest. *)
@@ -413,6 +528,15 @@ let log_call
         | Some n -> [ "result_bytes", `Int n ]
         | None -> []
       in
+      (* The dated log itself clamps [output_text] to [max_output_len].  Derive
+         the observation truncation marker here when callers supplied exact
+         producer bytes but no stricter upstream clamp.  This keeps direct and
+         composed invocations on the same metric contract. *)
+      let truncated_to =
+        match truncated_to, result_bytes with
+        | None, Some n when n > max_output_len -> Some max_output_len
+        | explicit, _ -> explicit
+      in
       let truncated_to_field =
         match truncated_to with
         | Some n -> [ "truncated_to", `Int n ]
@@ -421,6 +545,16 @@ let log_call
       let lane_field =
         match lane with
         | Some value -> [ "lane", `String value ]
+        | None -> []
+      in
+      (* Names the turn that made the call: a submitted operation's turn or
+         the keeper's own autonomous cycle. Both produce identical rows
+         otherwise, so a reader joining calls to a submission had to guess
+         from timestamps (#28977). *)
+      let turn_kind_field =
+        match turn_kind with
+        | Some value ->
+          [ "turn_kind", `String (Turn_record.turn_kind_to_string value) ]
         | None -> []
       in
       let tool_choice_field =
@@ -456,8 +590,8 @@ let log_call
           [ "execution_id", `String (Ids.Execution_id.to_string value) ]
         | None -> []
       in
-      (* RFC-0233 PR-2: provider call id — the key the oas-event rows
-         carry, joining this store to oas:tool_called/oas:tool_completed. *)
+      (* RFC-0233 PR-2: provider call id — the key the agent_core-event rows
+         carry, joining this store to agent_core:tool_called/agent_core:tool_completed. *)
       let tool_use_id_field =
         match tool_use_id with
         | Some value -> [ "tool_use_id", `String value ]
@@ -468,14 +602,73 @@ let log_call
         | Some value -> [ "planned_index", `Int value ]
         | None -> []
       in
+      let batch_index_field =
+        match batch_index with
+        | Some value -> [ "batch_index", `Int value ]
+        | None -> []
+      in
+      let batch_size_field =
+        match batch_size with
+        | Some value -> [ "batch_size", `Int value ]
+        | None -> []
+      in
+      let execution_mode_field =
+        match execution_mode with
+        | Some value ->
+          [ ( "execution_mode"
+            , Agent_core.Tool_contract.execution_mode_to_yojson value ) ]
+        | None -> []
+      in
+      let typed_result_fields =
+        match typed_result with
+        | Some result ->
+          let artifact_refs =
+            normalized_artifact_refs_in_typed_data (Tool_result.data result)
+          in
+          [ "disposition", `String (Tool_result.string_of_disposition result) ]
+          @ (if artifact_refs = []
+             then []
+             else [ "artifact_refs", `List artifact_refs ])
+        | None ->
+          (* The ordinary path knows the disposition but not the payload, so it
+             cannot supply [typed_result] and cannot name artifact refs. Kept
+             as a separate argument rather than a synthesised result: a made-up
+             payload would put an empty [artifact_refs] on a row that simply
+             does not know. *)
+          (match disposition with
+           | Some d ->
+             [ "disposition", `String (Tool_result.string_of_disposition d) ]
+           | None -> [])
+      in
+      let composition_fields =
+        [ "composition_tool", composition_tool
+        ; "composition_run_id", composition_run_id
+        ; "composition_node_id", composition_node_id
+        ; "parent_tool_use_id", parent_tool_use_id
+        ]
+        |> List.filter_map (fun (key, value) ->
+          Option.map (fun value -> key, `String value) value)
+      in
+      let composition_execution_field =
+        match composition_execution with
+        | Some value ->
+          [ ( "composition_execution"
+            , `String
+                (Keeper_tool_composition_catalog.execution_mode_to_string value) )
+          ]
+        | None -> []
+      in
+      let composition_tool_kind_field =
+        match composition_tool_kind with
+        | Some value ->
+          [ ( "composition_tool_kind"
+            , `String (Keeper_tool_descriptor.tool_kind_to_string value) )
+          ]
+        | None -> []
+      in
       let session_id_field =
         match session_id with
         | Some value -> [ "session_id", `String value ]
-        | None -> []
-      in
-      let generation_field =
-        match generation with
-        | Some value -> [ "generation", `Int value ]
         | None -> []
       in
       let turn_field =
@@ -491,12 +684,6 @@ let log_call
       let task_id_field =
         match task_id with
         | Some value -> [ "task_id", `String value ]
-        | None -> []
-      in
-      let goal_ids_field =
-        match goal_ids with
-        | Some values ->
-          [ "goal_ids", `List (List.map (fun value -> `String value) values) ]
         | None -> []
       in
       let sandbox_profile_field =
@@ -520,10 +707,8 @@ let log_call
           ?agent_name
           ?trace_id
           ?session_id
-          ?generation
           ?keeper_turn_id
           ?task_id
-          ?goal_ids
           ?sandbox_profile
           ?sandbox_root
           ?allowed_paths
@@ -564,6 +749,7 @@ let log_call
            @ route_evidence_field
            @ model_field
            @ runtime_profile_field
+           @ turn_kind_field
            @ lane_field
            @ tool_choice_field
            @ thinking_enabled_field
@@ -572,13 +758,18 @@ let log_call
            @ execution_id_field
            @ tool_use_id_field
            @ planned_index_field
+           @ batch_index_field
+           @ batch_size_field
+           @ execution_mode_field
+           @ typed_result_fields
+           @ composition_fields
+           @ composition_execution_field
+           @ composition_tool_kind_field
            @ trace_id_field
            @ session_id_field
-           @ generation_field
            @ turn_field
            @ keeper_turn_id_field
            @ task_id_field
-           @ goal_ids_field
            @ sandbox_profile_field
            @ network_mode_field
            @ result_bytes_field
@@ -589,7 +780,13 @@ let log_call
          captures) that would corrupt the JSONL file and cause downstream
          readers — including the dashboard — to silently skip entire rows. *)
       let safe_json = Inference_utils.sanitize_json_utf8 json in
-      append_or_enqueue { store; keeper_name; tool_name; trace_id; json = safe_json }
+      let entry = { store; keeper_name; tool_name; trace_id; json = safe_json } in
+      (match on_committed with
+       | None -> append_or_enqueue entry
+       | Some notify ->
+         (match append_to_store_result entry with
+          | Ok () -> notify ()
+          | Error exn -> raise exn))
 ;;
 
 (* Scan multiplier applied before the keeper filter: [read_recent] reads
@@ -633,7 +830,7 @@ let read_recent_rows ~n () : Yojson.Safe.t list =
   if n <= 0
   then []
   else (
-    match !store_ref with
+    match (Atomic.get store_state).store with
     | None -> []
     | Some store -> Dated_jsonl.read_recent store n)
 ;;
@@ -646,7 +843,22 @@ let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =
   if n <= 0
   then []
   else (
-    let raw = read_recent_rows ~n:(n * read_over_scan_factor) () in
+    (* The over-scan pays for the keeper filter: to end up with [n] rows from
+       one keeper you must read more than [n] fleet rows. With no keeper the
+       filter keeps everything, so the extra rows are read, parsed, and then
+       discarded by [ring_keep_last] — four fifths of the work for an answer
+       that cannot change.
+
+       It is not a rounding error at this size. The tool-call log averages
+       6.8 KB per row on this host, so the fleet-wide dashboard aggregate
+       (n = 5000) read 25,000 rows = 165 MB and took 3.5 s in the tail read
+       alone, where 5,000 rows = 33 MB and 0.65 s answer the same question. *)
+    let scan_factor =
+      match keeper_name with
+      | None -> 1
+      | Some _ -> read_over_scan_factor
+    in
+    let raw = read_recent_rows ~n:(n * scan_factor) () in
     let keep =
       match keeper_name with
       | None -> fun (_ : Yojson.Safe.t) -> true
@@ -655,14 +867,7 @@ let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =
     ring_keep_last ~n ~keep raw)
 ;;
 
-let iso_date_of_unix ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf
-    "%04d-%02d-%02d"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday
-;;
+let iso_date_of_unix ts = Jsonl_writer.day_key ~ts
 
 let ts_of_entry (json : Yojson.Safe.t) : float option =
   match json with
@@ -678,7 +883,7 @@ let read_window ?keeper_name ~(window_hours : float) () : Yojson.Safe.t list =
   if window_hours <= 0.0
   then []
   else (
-    match !store_ref with
+    match (Atomic.get store_state).store with
     | None -> []
     | Some store ->
       let now = Time_compat.now () in
@@ -710,7 +915,7 @@ let read_latest ?keeper_name () : Yojson.Safe.t option =
     | Some k -> String.equal k name
     | None -> false
   in
-  match !store_ref with
+  match (Atomic.get store_state).store with
   | None -> None
   | Some store ->
     let scan_limit =

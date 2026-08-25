@@ -25,13 +25,26 @@ let handle_broadcast state agent_name reqd body_str =
     in
     Http.Response.json_value (`Assoc fields) reqd
   in
+  let reply_delivery delivery =
+    Http.Response.json_value
+      (Workspace_broadcast.broadcast_delivery_to_yojson delivery)
+      reqd
+  in
   try
     let json = Yojson.Safe.from_string body_str in
     match Json_util.assoc_member_opt "message" json with
     | Some (`String message) ->
         let config = (Mcp_server.workspace_config state) in
-        let _ = Workspace.broadcast config ~from_agent:agent_name ~content:message in
-        reply true None
+        (* The operator addressing the workspace is speech, same as a
+           Keeper's masc_broadcast. *)
+        (match
+           Workspace.broadcast
+             ~audience:Workspace_broadcast.Fleet_conversation
+             config ~from_agent:agent_name ~content:message
+         with
+         | Ok delivery -> reply_delivery delivery
+         | Error error ->
+           reply false (Some (Workspace.broadcast_error_to_string error)))
     | Some `Null -> reply false (Some "missing required field: message")
     | None | Some _ -> reply false (Some "field 'message' must be a string")
   with

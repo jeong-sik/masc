@@ -6,7 +6,7 @@
     stores. Diffing two consecutive records by [(block, digest)] answers
     "which instruction blocks entered, left, or changed between turns".
 
-    The assembly chain re-runs once per SDK turn inside one keeper turn.
+    The assembly chain re-runs once per agent-core turn inside one keeper turn.
     When a request reached the wire boundary, [blocks] and
     [input_components] describe that same latest serialized request. If no
     request reached the boundary, [blocks] records the last assembly and
@@ -51,7 +51,7 @@ type usage =
   ; cache_creation_input_tokens : int option
   ; cache_read_input_tokens : int option
     (* The provider reports these alongside [input_tokens]
-       (Agent_sdk.Types.api_usage) and this record used to drop them, so a reader
+       (Agent_core.Types.api_usage) and this record used to drop them, so a reader
        could not tell whether a large [input_tokens] was mostly cache reads. That
        matters against [context_window] below: the fill percentage it denominates is
        read as pressure on the compaction ceiling, and cache-heavy turns and
@@ -64,6 +64,41 @@ type request_wire_observation =
   ; body_bytes : int
   }
 
+type model_input_measurement =
+  | Wire_shape
+      (** Blocks the target's dialect will not replay were removed before the
+          history was sized, so the budget counted what the request carries. *)
+  | Durable_shape
+      (** The projection declined and the budget counted the checkpoint's
+          shape instead, which includes reasoning the wire deletes. The turn
+          is correct and its window is narrower than it needs to be — a
+          keeper can sit here indefinitely, because nothing about the decline
+          ages out, so this is recorded rather than only logged. *)
+
+type model_input_window =
+  { transmitted_atoms : int
+  ; total_atoms : int
+  ; measurement : model_input_measurement
+  }
+(** How much of the keeper's own history the dispatched request carried, in
+    atoms — one organic user message, or one assistant message together with
+    the tool messages answering it.
+
+    Reported beside {!request_wire_observation}, never in place of it: that one
+    counts the bytes the provider admitted, this one counts how much
+    conversation the turn reached back over. The two do not decompose into each
+    other — the admitted bytes also carry pinned context, the synthetic
+    preamble, and anything the per-turn assembler appends after the window
+    stage has run, none of which these atoms cover.
+    [input_components] answers a third question: which block kinds the bytes
+    went to.
+
+    Both counts are recorded because a share cannot be recovered from the
+    transmitted messages alone: dropped atoms leave no trace, so a reader given
+    only the request cannot distinguish a keeper that sent all of a short
+    history from one that sent the tail of a long one. Pinned messages are not
+    atoms and appear in neither count. *)
+
 type turn_kind =
   | Autonomous
   | Direct
@@ -74,7 +109,7 @@ type raw_trace_run_ref =
   ; start_seq : int
   ; end_seq : int
   ; agent_name : string
-    (* OAS runtime identity for the dispatched run. This is intentionally a
+    (* AGENT_CORE runtime identity for the dispatched run. This is intentionally a
        different namespace from [t.agent_name], which is the Keeper identity;
        the autonomous-turn reader validates it against the selected raw rows. *)
   ; session_id : string
@@ -85,7 +120,6 @@ type t =
   { execution_ids : Ids.Execution_id.t list (* tool calls in this turn *)
   ; keeper : string
   ; agent_name : string
-  ; generation : int
   ; turn_kind : turn_kind
   ; trace_id : string
   ; absolute_turn : int
@@ -101,10 +135,11 @@ type t =
        never substituted for, [request_wire_observation]. [None] means exact
        attribution was unavailable; an observed empty input is [Some []]. *)
   ; runtime_profile : string
-  ; model : string option
-    (* RFC-0233 §2.2/§2.3 — boundary-redacted runtime model label, the
-       same value the execution receipt surfaces (RFC-0132 redaction
-       SSOT). [None] on error turns before runtime grounding; the inspector
+  ; selected_model : string option
+    (* RFC-0233 §2.2/§2.3 — exact model selected by the successful runtime
+       attempt, sourced from that attempt's [Runtime_observation]. This is
+       durable operator evidence, not an aggregate telemetry label. [None]
+       when the turn completed without selected-model evidence; the inspector
        renders absence rather than a fabricated name. *)
   ; finish_reason : string option
     (* RFC-0233 §2.3 — keeper turn stop reason, serialized via the
@@ -128,8 +163,8 @@ type t =
        [price_input_per_million]. *)
   ; request_latency_ms : int option
     (* RFC-0233 §9 — wall-clock duration of the provider call in
-       milliseconds, sourced from OAS
-       [inference_telemetry.request_latency_ms] (the OAS transport layer
+       milliseconds, sourced from AGENT_CORE
+       [inference_telemetry.request_latency_ms] (the AGENT_CORE transport layer
        synthesizes it for every provider — [complete_common.patch_telemetry]
        non-streaming, [complete_stream] streaming — so it is populated
        whenever a response is produced). [None] on the error path; the
@@ -143,10 +178,10 @@ type t =
        lifted to its own §10 field below. *)
   ; ttfrc_ms : float option
     (* RFC-0233 §10 — time-to-first-response-chunk in milliseconds
-       (wall-clock), sourced from OAS [inference_telemetry.ttfrc_ms]. Unlike
+       (wall-clock), sourced from AGENT_CORE [inference_telemetry.ttfrc_ms]. Unlike
        [request_latency_ms] (end-to-end), this measures only the wait for
        the first response chunk, isolating time-to-first-token on the
-       streaming path. The OAS streaming transport ([complete_stream]) fills
+       streaming path. The AGENT_CORE streaming transport ([complete_stream]) fills
        it for every provider as soon as the first SSE chunk arrives, so it
        is populated across the (streaming) keeper fleet; non-streaming turns
        and the error path leave it [None]. The decode (post-first-chunk)
@@ -155,16 +190,20 @@ type t =
        indistinguishable from a measurement (§9.6), so decode stays
        not_recorded until a provider reports it natively. *)
   ; request_wire_observation : request_wire_observation option
+  ; model_input_window : model_input_window option
+    (* [None] is an explicit observation that no model-input projection ran for
+       this turn — a runtime that assembles its own input, or a turn that ended
+       before any cut was selected. It is not a zero-length history. *)
   ; raw_trace_run_ref : raw_trace_run_ref option
-    (* Exact OAS run selected by this turn's completed provider dispatch.
+    (* Exact AGENT_CORE run selected by this turn's completed provider dispatch.
        [None] is an explicit observation that the raw-trace sink degraded or
        the turn ended before a run reference existed. *)
-    (* Runtime id and exact serialized body size for the latest request OAS
-       serialized. Admitted requests arrive through OAS's pre-dispatch
+    (* Runtime id and exact serialized body size for the latest request AGENT_CORE
+       serialized. Admitted requests arrive through AGENT_CORE's pre-dispatch
        observer; a locally rejected [Request_body_too_large] arrives through
        that typed error's measured [actual_bytes]. This is not derived from
        prompt blocks or provider token usage. [None] means this turn ended
-       before OAS exposed either exact measurement; both JSON fields are then
+       before AGENT_CORE exposed either exact measurement; both JSON fields are then
        required explicit nulls. *)
   ; sampling : sampling
   ; usage : usage
@@ -173,7 +212,6 @@ type t =
 
 val prompt_block_to_json : prompt_block -> Yojson.Safe.t
 val input_component_id_to_string : input_component_id -> string
-val input_component_to_json : input_component -> Yojson.Safe.t
 val turn_kind_to_string : turn_kind -> string
 val raw_trace_run_ref_to_json : raw_trace_run_ref -> Yojson.Safe.t
 

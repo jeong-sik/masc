@@ -144,7 +144,7 @@ function ToolTable({
   const hasQuery = query.trim() !== ''
   if (hasQuery && filtered.length === 0) {
     return html`
-      <div class="text-2xs text-[var(--color-fg-disabled)] py-2">조건에 맞는 도구가 없습니다.</div>
+      <div class="text-2xs text-[var(--color-fg-disabled)] py-2">조건에 맞는 도구 없음</div>
     `
   }
   return html`
@@ -392,7 +392,7 @@ export function ToolQualityPanel() {
   const d = data.value
   if (loading.value && !d) return html`<${LoadingState}>도구 품질 불러오는 중...<//>`
   if (error.value) return html`<${ErrorState} message=${error.value} class="m-4" />`
-  if (!d || d.total === 0) return html`<div class="p-4 text-2xs text-[var(--color-fg-disabled)]">도구 호출 데이터 없음</div>`
+  if (!d || (d.total === 0 && (d.deferred ?? 0) === 0)) return html`<div class="p-4 text-2xs text-[var(--color-fg-disabled)]">도구 호출 데이터 없음</div>`
   const coverageGap = coverageGapDisplay(d)
 
   return html`
@@ -426,7 +426,7 @@ export function ToolQualityPanel() {
         </div>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
         <div class="text-center">
           <div class="text-lg font-mono ${successColor.value}">${d.success_rate.toFixed(1)}%</div>
           <div class="text-3xs text-[var(--color-fg-disabled)] uppercase">성공률</div>
@@ -440,6 +440,10 @@ export function ToolQualityPanel() {
         <div class="text-center">
           <div class="text-lg font-mono text-[var(--bad-light)]/80">${d.failure}</div>
           <div class="text-3xs text-[var(--color-fg-disabled)] uppercase">실패</div>
+        </div>
+        <div class="text-center">
+          <div class="text-lg font-mono text-[var(--color-status-warn)]">${d.deferred ?? 0}</div>
+          <div class="text-3xs text-[var(--color-fg-disabled)] uppercase">대기</div>
         </div>
       </div>
 

@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0088", "0126", "0142", "0148", "0154"]
-implementation_prs: [16837, 16887]
 ---
 
 # RFC-0141 — TOML Field Resolution Typed Variant

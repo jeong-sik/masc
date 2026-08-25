@@ -1,0 +1,1 @@
+module Wrapped : External.Callback_surface with type state = unit

@@ -4,22 +4,32 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
+import { Effect, Option } from 'effect'
 import {
   SETTINGS_ROUTE_SECTION_IDS,
   type SettingsRouteSectionId,
 } from '../config/navigation'
 import { navigate, route } from '../router'
-import { fetchDashboardConfig, fetchDashboardTools, fetchLogs, fetchRuntimeDefaults, fetchRuntimeProviders, fetchRuntimeResolved } from '../api/dashboard.js'
+import { fetchDashboardTools, fetchRuntimeDefaults, fetchRuntimeProviders, fetchRuntimeResolved } from '../api/dashboard.js'
 import type {
-  ConfigEntry,
-  DashboardConfigResponse,
   DashboardRuntimeProviderSnapshot,
   DashboardRuntimeProvidersResponse,
   DashboardToolInventoryItem,
-  LogEntry,
   RuntimeDefaultsResponse,
   RuntimeResolvedResponse,
 } from '../api/dashboard.js'
+import {
+  fetchDashboardConfig,
+  type ConfigEntry,
+  type DashboardConfig,
+  type DashboardConfigError,
+} from '../api/dashboard-config'
+import {
+  fetchLogs,
+  type LogEntry,
+  type LogsError,
+} from '../api/dashboard-logs'
+import { dashboardRuntime, type DashboardHttp } from '../api/effect-http'
 import {
   patchRuntimeMediaFailover,
   patchRuntimeRouting,
@@ -64,6 +74,8 @@ import {
 } from '../notifications'
 import type { ComponentChildren } from 'preact'
 import { errorToString } from '../lib/format-string'
+import { createEffectResource } from '../lib/effect-resource'
+import { remotePrevious } from '../lib/remote-data'
 import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
 import {
   runtimeCatalogDeclaredSpec,
@@ -78,6 +90,12 @@ type SectionId = SettingsRouteSectionId
 type LogFilter = 'all' | 'tool' | 'success' | 'failure'
 type RuntimeRoutingSaveState = 'idle' | 'saving' | 'saved' | 'error'
 type SettingsControlKind = 'live-read' | 'live-write' | 'browser-local' | 'unsupported'
+
+const settingsConfigResource = createEffectResource<
+  DashboardHttp,
+  DashboardConfigError,
+  DashboardConfig
+>(dashboardRuntime)
 type RuntimeSelectOption = {
   readonly id: string
   readonly label: string
@@ -152,7 +170,7 @@ const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
     section: 'runtime',
     label: 'Runtime catalog cards',
     kind: 'live-read',
-    source: 'GET /api/v1/dashboard/runtime-providers',
+    source: 'GET /api/v1/providers',
     action: 'read-only projection',
   },
   {
@@ -161,7 +179,7 @@ const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
     label: 'Model routing lanes',
     kind: 'live-write',
     source: 'GET /api/v1/dashboard/runtime-defaults',
-    action: 'PATCH /api/v1/runtime/routing for default/cross_verifier',
+    action: 'PATCH /api/v1/runtime/routing for default',
   },
   {
     id: 'runtime-media-failover',
@@ -284,6 +302,31 @@ export function mcpExposedToolNames(items: readonly DashboardToolInventoryItem[]
     .sort((a, b) => a.localeCompare(b))
 }
 
+export type McpToolGroup = {
+  readonly category: string
+  readonly names: readonly string[]
+}
+
+// Group the exposed public-MCP inventory by the registry's own category so the
+// list renders the design's tool-group rows (settings.jsx:410-422, .set-tg-*)
+// from live data. The group id is the registry category; the kind tag is
+// 'masc' because every tool on the public_mcp surface is a server-side tool —
+// the design's 'local'/guard/opt-in kinds belong to tool_policy.toml groups,
+// which the runtime does not read (no live signal, not rendered).
+export function mcpExposedToolGroups(items: readonly DashboardToolInventoryItem[]): McpToolGroup[] {
+  const byCategory = new Map<string, string[]>()
+  for (const item of items) {
+    if (!item.surfaces.includes(MCP_PUBLIC_SURFACE)) continue
+    const category = item.category.trim() || 'general'
+    const names = byCategory.get(category) ?? []
+    names.push(item.name)
+    byCategory.set(category, names)
+  }
+  return [...byCategory.entries()]
+    .map(([category, names]) => ({ category, names: names.sort((a, b) => a.localeCompare(b)) }))
+    .sort((a, b) => a.category.localeCompare(b.category))
+}
+
 // System-log row: [time, level, identity, message, status, isTool]. Derived from live
 // ring entries (`/api/v1/dashboard/logs`) — the same source the Logs surface
 // polls. Status is derived from the entry level only (error→fail, warn→warn,
@@ -318,10 +361,20 @@ function logRowClock(ts: string): string {
 
 export function logEntryToSysRow(entry: LogEntry): SysLogRow {
   const level = entry.level.toLowerCase()
-  const identity = entry.keeper_name?.trim() || entry.module?.trim() || '(root)'
-  const isTool = logDisplayKind(entry) === 'tool' || /masc_/.test(entry.message)
-  return [logRowClock(entry.ts), level, identity, entry.message, logRowStatus(entry.level), isTool]
+  const identity = entry.keeperName
+  // The producer's typed category alone, the way log-classification.ts states
+  // it. The /masc_/ test that used to sit here read the message body, so
+  // "[masc_log] WARN: ...", "[masc_agent_core_error] ..." and any line naming a
+  // .masc_atomic_stage_ path were shown as tool rows (#24036 / #25853).
+  const isTool = logDisplayKind(entry) === 'tool'
+  return [logRowClock(entry.timestamp), level, identity, entry.message, logRowStatus(entry.level), isTool]
 }
+
+const settingsLogsResource = createEffectResource<
+  DashboardHttp,
+  LogsError,
+  readonly SysLogRow[]
+>(dashboardRuntime)
 
 function SetSeg({
   value,
@@ -384,11 +437,10 @@ function SettingsControlLedger({ section }: { section: SectionId }) {
   const items = settingsControlInventory(section)
   if (items.length === 0) return null
   return html`
-    <section class="set-control-ledger" data-testid="settings-control-ledger">
-      <div class="set-control-ledger-h">
-        <span>Control backing</span>
-        <span class="mono" data-testid="settings-control-ledger-count">${items.length}</span>
-      </div>
+    <details class="set-control-ledger" data-testid="settings-control-ledger">
+      <summary class="set-control-ledger-h">
+        <span>이 화면을 뒷받침하는 것 ${items.length}건 — 읽기 전용 안내</span>
+      </summary>
       <div class="set-control-ledger-grid">
         ${items.map(item => html`
           <div
@@ -405,7 +457,7 @@ function SettingsControlLedger({ section }: { section: SectionId }) {
           </div>
         `)}
       </div>
-    </section>
+    </details>
   `
 }
 
@@ -413,7 +465,7 @@ function AccountSettingsSection() {
   const [clearing, setClearing] = useState(false)
   const summary = shellAuthSummary.value
   const actor = summary?.effective_agent ?? summary?.token_agent ?? currentDashboardActor()
-  const role = summary?.effective_role ?? summary?.default_role ?? 'unknown'
+  const role = summary?.effective_role ?? 'unknown'
   const tokenPresent = dashboardBearerToken() !== null
   const tokenMeta = getStoredTokenMeta()
   const tokenState = summary?.token_valid === true
@@ -751,29 +803,28 @@ function RuntimeMediaFailoverEditor({
   `
 }
 
-function configEntry(data: DashboardConfigResponse | null, env: string): ConfigEntry | null {
-  if (!data) return null
+function configEntry(data: DashboardConfig | undefined, env: string): ConfigEntry | undefined {
+  if (data === undefined) return undefined
   for (const entries of Object.values(data.categories)) {
     const found = entries.find(entry => entry.env === env)
     if (found) return found
   }
-  return null
+  return undefined
 }
 
-function configEntryDisplayValue(entry: ConfigEntry | null): string | null {
-  if (!entry) return null
-  return entry.value ?? entry.default
+function configEntryDisplayValue(entry: ConfigEntry | undefined): string | undefined {
+  return entry?.displayValue
 }
 
-function concreteConfigValue(entry: ConfigEntry | null): string | null {
+function concreteConfigValue(entry: ConfigEntry | undefined): string | undefined {
   const value = configEntryDisplayValue(entry)?.trim()
-  if (!value || /^\(.+\)$/.test(value)) return null
+  if (!value || /^\(.+\)$/.test(value)) return undefined
   return value
 }
 
-function formatConfigSource(entry: ConfigEntry | null): string {
+function formatConfigSource(entry: ConfigEntry | undefined): string {
   if (!entry) return 'missing'
-  return entry.source_detail ?? entry.source
+  return entry.sourceDetail
 }
 
 function endpointFromWindow(): string {
@@ -783,7 +834,7 @@ function endpointFromWindow(): string {
   return `${origin.replace(/\/$/, '')}/mcp`
 }
 
-function mcpEndpointFromConfig(config: DashboardConfigResponse | null): string {
+function mcpEndpointFromConfig(config: DashboardConfig | undefined): string {
   const mcpUrl = concreteConfigValue(configEntry(config, 'MASC_URL'))
   if (mcpUrl) return mcpUrl
   const httpBaseUrl = concreteConfigValue(configEntry(config, 'MASC_HTTP_BASE_URL'))
@@ -797,8 +848,8 @@ function mcpEndpointFromConfig(config: DashboardConfigResponse | null): string {
   return endpointFromWindow()
 }
 
-function formatThresholdPercent(value: string | null): string {
-  const parsed = value == null ? NaN : Number.parseFloat(value)
+function formatThresholdPercent(value: string | undefined): string {
+  const parsed = value === undefined ? NaN : Number.parseFloat(value)
   if (!Number.isFinite(parsed)) return value ?? '미수집'
   return `${Math.round(parsed * 100)}%`
 }
@@ -809,8 +860,8 @@ function ConfigTruthRow({
   fallback,
 }: {
   label: string
-  entry: ConfigEntry | null
-  fallback?: string | null
+  entry: ConfigEntry | undefined
+  fallback?: string
 }) {
   const value = configEntryDisplayValue(entry) ?? fallback ?? '미수집'
   return html`
@@ -829,7 +880,7 @@ function ThresholdTruthRow({
   value,
 }: {
   label: string
-  entry: ConfigEntry | null
+  entry: ConfigEntry | undefined
   value: string
 }) {
   return html`
@@ -999,38 +1050,42 @@ function LogFilter({
 
 function LogViewer() {
   const [filter, setFilter] = useState<LogFilter>('all')
-  const [allRows, setAllRows] = useState<SysLogRow[]>([])
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
 
   useEffect(() => {
-    let active = true
     let timer: ReturnType<typeof setInterval> | null = null
 
-    const tick = async () => {
-      try {
-        const resp = await fetchLogs({ limit: SETTINGS_LOG_LIMIT })
-        if (!active) return
-        const rows = [...resp.entries]
-          .sort((a, b) => b.seq - a.seq)
-          .map(logEntryToSysRow)
-        setAllRows(rows)
-        setStatus('ready')
-      } catch {
-        if (!active) return
-        // No fabricated rows on failure — surface the error state instead.
-        setStatus('error')
-      }
+    const tick = () => {
+      if (settingsLogsResource.state.value._tag === 'Loading') return
+      void settingsLogsResource.load(
+        fetchLogs({ limit: SETTINGS_LOG_LIMIT }).pipe(
+          Effect.map(resp => [...resp.entries]
+            .sort((a, b) => b.seq - a.seq)
+            .map(logEntryToSysRow)),
+        ),
+      )
     }
 
-    void tick()
-    timer = setInterval(() => { void tick() }, SETTINGS_LOG_POLL_MS)
+    settingsLogsResource.reset()
+    tick()
+    timer = setInterval(tick, SETTINGS_LOG_POLL_MS)
 
     return () => {
-      active = false
       if (timer) clearInterval(timer)
+      settingsLogsResource.cancel()
+      settingsLogsResource.reset()
     }
   }, [])
 
+  const resourceState = settingsLogsResource.state.value
+  const allRows = Option.getOrElse(
+    remotePrevious(resourceState),
+    () => [] as readonly SysLogRow[],
+  )
+  const status = resourceState._tag === 'Failure'
+    ? 'error'
+    : resourceState._tag === 'Success'
+      ? 'ready'
+      : 'loading'
   const rows = allRows.filter(r => {
     if (filter === 'all') return true
     if (filter === 'tool') return r[5]
@@ -1043,7 +1098,7 @@ function LogViewer() {
   const emptyLabel =
     status === 'loading' ? '로그를 불러오는 중…'
     : status === 'error' ? '시스템 로그를 불러오지 못했습니다.'
-    : '조건에 맞는 로그가 없습니다.'
+    : '조건에 맞는 로그 없음'
 
   return html`
     <div class="log-view" data-testid="log-viewer">
@@ -1105,33 +1160,31 @@ export function SettingsSurface() {
   }
 
   // Server config projection — used by Paths, MCP and Notifications.
-  const [dashboardConfig, setDashboardConfig] = useState<DashboardConfigResponse | null>(null)
-  const [dashboardConfigStatus, setDashboardConfigStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [dashboardConfigError, setDashboardConfigError] = useState<string | null>(null)
-
   useEffect(() => {
-    let active = true
-    setDashboardConfigStatus('loading')
-    setDashboardConfigError(null)
-    void (async () => {
-      try {
-        const resp = await fetchDashboardConfig()
-        if (!active) return
-        setDashboardConfig(resp)
-        setDashboardConfigStatus('ready')
-        setDashboardConfigError(null)
-      } catch (err) {
-        if (!active) return
-        setDashboardConfig(null)
-        setDashboardConfigStatus('error')
-        setDashboardConfigError(err instanceof Error ? err.message : String(err))
-      }
-    })()
-    return () => { active = false }
+    settingsConfigResource.reset()
+    void settingsConfigResource.load(fetchDashboardConfig())
+    return () => {
+      settingsConfigResource.cancel()
+      settingsConfigResource.reset()
+    }
   }, [])
 
+  const dashboardConfigState = settingsConfigResource.state.value
+  const dashboardConfig = Option.getOrUndefined(
+    remotePrevious(dashboardConfigState),
+  )
+  const dashboardConfigStatus: 'loading' | 'ready' | 'error' =
+    dashboardConfigState._tag === 'Failure'
+      ? 'error'
+      : dashboardConfigState._tag === 'Success'
+        ? 'ready'
+        : 'loading'
+  const dashboardConfigError = dashboardConfigState._tag === 'Failure'
+    ? dashboardConfigState.error.message
+    : undefined
+
   // mcp — exposed tools come from the live capability registry (public_mcp surface)
-  const [mcpTools, setMcpTools] = useState<string[]>([])
+  const [mcpToolGroups, setMcpToolGroups] = useState<McpToolGroup[]>([])
   const [mcpToolsStatus, setMcpToolsStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [mcpToolsError, setMcpToolsError] = useState('')
   const [mcpCheck, setMcpCheck] = useState<{ status: 'idle' | 'checking' | 'ok' | 'error'; message: string }>({
@@ -1147,13 +1200,12 @@ export function SettingsSurface() {
       try {
         const resp = await fetchDashboardTools()
         if (!active) return
-        const names = mcpExposedToolNames(resp.tool_inventory?.tools ?? [])
-        setMcpTools(names)
+        setMcpToolGroups(mcpExposedToolGroups(resp.tool_inventory?.tools ?? []))
         setMcpToolsStatus('ready')
       } catch (err) {
         if (!active) return
         // No fabricated empty inventory on failure.
-        setMcpTools([])
+        setMcpToolGroups([])
         setMcpToolsStatus('error')
         const message = err instanceof Error ? err.message : String(err)
         setMcpToolsError(`도구 inventory를 불러오지 못했습니다: ${message}`)
@@ -1355,8 +1407,12 @@ export function SettingsSurface() {
   const runtimeConfigPath = runtimeResolved?.config_path ?? null
   const defaultRuntimeId = runtimeResolved?.default_runtime?.id ?? null
   const runtimeCount = runtimeResolved?.runtimes.length ?? 0
-  const crossVerifierRuntime = runtimeDefaults?.model_routing.cross_verifier_runtime_id ?? null
   const mediaFailover = runtimeDefaults?.model_routing.media_failover ?? []
+  // Configured runtime lanes with their ordered candidate chains — the live
+  // counterpart of the design's failover section (runtime-editor.jsx:191-229,
+  // .rt-fo-*). Read-only: the routing PATCH writer covers default +
+  // media_failover only, so no reorder/add/remove controls are rendered.
+  const runtimeLanes = runtimeResolved?.lanes ?? []
   const runtimeSelectOptions = runtimeSelectOptionsFromResolved(runtimeResolved?.runtimes ?? [])
   const runtimeRoutingDisabled = runtimeRoutingStatus === 'saving' || runtimeResolvedStatus !== 'ready'
   const runtimeResolution = shellRuntimeResolution.value
@@ -1374,7 +1430,8 @@ export function SettingsSurface() {
         ? { mode: 'mixed' as const, label: 'config unavailable' }
         : baseSectionState
   const mcpEndpoint = mcpEndpointFromConfig(dashboardConfig)
-  const mcpToolCountLabel = mcpToolsStatus === 'ready' ? String(mcpTools.length) : '—'
+  const mcpToolCount = mcpToolGroups.reduce((sum, group) => sum + group.names.length, 0)
+  const mcpToolCountLabel = mcpToolsStatus === 'ready' ? String(mcpToolCount) : '—'
   const mcpUrlEntry = configEntry(dashboardConfig, 'MASC_URL')
   const httpBaseUrlEntry = configEntry(dashboardConfig, 'MASC_HTTP_BASE_URL')
   const basePathEntry = configEntry(dashboardConfig, 'MASC_BASE_PATH')
@@ -1417,7 +1474,7 @@ export function SettingsSurface() {
               })}
             </div>
           `)}
-          <div class="set-nav-note">live-backed 섹션은 API나 대시보드 shell 상태를 직접 읽고 씁니다. writer가 없는 값은 read-only로만 표시합니다.</div>
+          <div class="set-nav-note">live-backed = 직접 읽고 씀 · writer 없는 값은 read-only</div>
         </nav>
 
         <div class="set-content">
@@ -1456,6 +1513,9 @@ export function SettingsSurface() {
                   <span class="set-truth-source">POST /mcp · Accept: application/json, text/event-stream</span>
                 </div>
               <//>
+              <div class="set-mcp-detail mono" data-testid="settings-mcp-transport-detail">
+                POST ${mcpEndpoint} · Content-Type: application/json · Authorization: Bearer ••••
+              </div>
               <${SetRow} label="Server check" hint="Calls masc_status through the same MCP client used by dashboard actions">
                 <div class="set-mcp-check">
                   <button
@@ -1475,10 +1535,22 @@ export function SettingsSurface() {
                 ? html`<div class="set-hint" data-testid="mcp-tools-loading">MCP 도구 inventory를 불러오는 중...</div>`
                 : mcpToolsStatus === 'error'
                   ? html`<div class="set-err" data-testid="mcp-tools-error">${mcpToolsError}</div>`
-                  : mcpTools.length === 0
+                  : mcpToolGroups.length === 0
                     ? html`<div class="set-hint" data-testid="mcp-tools-empty">노출된 MCP 도구가 없습니다.</div>`
-                    : html`<div class="set-tg-tools" data-testid="mcp-tools-list">
-                      ${mcpTools.map(t => html`<span key=${t} class="set-tg-chip mono">${t}</span>`)}
+                    : html`<div data-testid="mcp-tools-list">
+                      ${mcpToolGroups.map(group => html`
+                        <div key=${group.category} class="set-tg-row" data-testid="mcp-tool-group">
+                          <div class="set-tg-l">
+                            <div class="set-tg-head">
+                              <span class="set-tg-id mono">${group.category}</span>
+                              <span class="set-tg-kind masc">masc</span>
+                            </div>
+                            <div class="set-tg-tools">
+                              ${group.names.map(t => html`<span key=${t} class="set-tg-chip mono">${t}</span>`)}
+                            </div>
+                          </div>
+                        </div>
+                      `)}
                     </div>`}
             `}
 
@@ -1536,15 +1608,15 @@ export function SettingsSurface() {
                     : html`
                       <${SetRow} label="Default runtime" hint="[runtime].default">
                         ${defaultRuntimeId
-                          ? html`<span class="mono" data-testid="runtime-default-readonly">${defaultRuntimeId}</span>`
+                          ? html`<span class="set-ro mono" data-testid="runtime-default-readonly">${defaultRuntimeId}</span>`
                           : html`<span class="set-hint" data-testid="runtime-default-empty">런타임 설정을 불러오지 못했습니다.</span>`}
                       <//>
                     `}
                   <${SetRow} label="Default model" hint="Resolved model API name">
-                    <span class="mono" data-testid="runtime-default-model">${runtimeResolved?.default_runtime?.model ?? '—'}</span>
+                    <span class="set-ro mono" data-testid="runtime-default-model">${runtimeResolved?.default_runtime?.model ?? '—'}</span>
                   <//>
                   <${SetRow} label="Default context" hint="Resolved context window">
-                    <span class="mono" data-testid="runtime-default-context">
+                    <span class="set-ro mono" data-testid="runtime-default-context">
                       ${formatRuntimeContext(runtimeResolved?.default_runtime?.effective_max_context ?? null)}
                     </span>
                     ${runtimeResolved?.default_runtime?.max_context_source
@@ -1603,16 +1675,6 @@ export function SettingsSurface() {
                         if (runtimeId && runtimeId !== defaultRuntimeId) void applyRuntimeRoutingPatch('default', runtimeId)
                       }}
                     />
-                    <${RuntimeRoutingSelect}
-                      label="Cross verifier"
-                      hint="[runtime].cross_verifier · 반-합리화 평가자"
-                      value=${crossVerifierRuntime}
-                      fallbackLabel="default runtime"
-                      options=${runtimeSelectOptions}
-                      disabled=${runtimeRoutingDisabled}
-                      testId="runtime-routing-cross-verifier"
-                      onChange=${(runtimeId: string | null) => void applyRuntimeRoutingPatch('cross_verifier', runtimeId)}
-                    />
                     <${RuntimeMediaFailoverEditor}
                       value=${mediaFailover}
                       options=${runtimeSelectOptions}
@@ -1626,6 +1688,42 @@ export function SettingsSurface() {
                         : null}
                   </div>
                 </div>
+
+                ${runtimeLanes.length > 0
+                  ? html`
+                    <div class="settings-runtime-section" data-testid="runtime-lanes-section">
+                      <div class="set-sub-h">Runtime lanes (${runtimeLanes.length})</div>
+                      <div class="set-hint" style=${{ marginBottom: '8px' }}>
+                        lane 별 후보 체인 — resolved runtime projection 읽기 전용. 후보 순서 writer는 아직 없으므로 편집 컨트롤은 렌더하지 않습니다.
+                      </div>
+                      ${runtimeLanes.map(lane => html`
+                        <div key=${lane.id} class="rt-fo" data-testid=${`runtime-lane-${lane.id}`}>
+                          <div class="rt-fo-h">
+                            <span class="rt-fo-lane">${lane.id}</span>
+                            <span class="rt-fo-lane-id mono">[runtime].${lane.id}</span>
+                          </div>
+                          <div class="rt-fo-chain">
+                            ${lane.runtime_ids.map((runtimeId, index) => html`
+                              <div key=${runtimeId} class=${`rt-fo-cand ${index === 0 ? 'head' : ''}`}>
+                                <span class="rt-fo-rank mono">${index === 0 ? '1차' : `${index + 1}`}</span>
+                                <span class="rt-fo-id mono">${runtimeId}</span>
+                              </div>
+                            `)}
+                          </div>
+                          ${lane.preferred_candidate !== null
+                            ? html`
+                              <div class="rt-fo-foot">
+                                <span class="set-hint mono" data-testid=${`runtime-lane-${lane.id}-sticky`}>
+                                  sticky → ${lane.preferred_candidate} (TTL 내 마지막 성공 후보)
+                                </span>
+                              </div>
+                            `
+                            : null}
+                        </div>
+                      `)}
+                    </div>
+                  `
+                  : null}
               </div>
             `}
 
@@ -1684,7 +1782,7 @@ export function SettingsSurface() {
                   ${hasConfigPathResolution || runtimeConfigPath
                     ? html`
                       <div class="set-sub-h">Config path resolution</div>
-                      <${PathTruthRow} label="Runtime TOML" item=${configResolution?.runtime ?? null} fallback=${runtimeConfigPath} />
+                      <${PathTruthRow} label="Runtime TOML" fallback=${runtimeConfigPath} />
                       ${hasConfigPathResolution || dashboardConfigStatus === 'ready'
                         ? html`<${PathTruthRow} label="Config root" item=${configResolution?.config_root ?? null} fallback=${concreteConfigValue(configDirEntry)} />`
                         : null}

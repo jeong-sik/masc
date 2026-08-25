@@ -2,13 +2,17 @@
 
     @since 2.260.0 *)
 
+type ready_info = {
+  ready_bot_user_id : string;
+  ready_at : string;
+}
+
 module type S = sig
   val connector_id : string
   val display_name : string
   val channel : string
   val status_json : ?audit_limit:int -> unit -> Yojson.Safe.t
   val connector_json :
-    ?gate_status_json:Yojson.Safe.t ->
     ?audit_limit:int ->
     unit ->
     Yojson.Safe.t
@@ -57,12 +61,12 @@ let all () =
   with_registry_lock (fun () ->
     Hashtbl.fold (fun _k v acc -> v :: acc) registry [])
 
-let connectors_json ?gate_status_json ?(audit_limit = 10) () =
+let connectors_json ?(audit_limit = 10) () =
   let connectors = all () in
   let connector_jsons =
     List.map
       (fun (module C : S) ->
-        C.connector_json ?gate_status_json ~audit_limit ())
+        C.connector_json ~audit_limit ())
       connectors
   in
   let active_count =

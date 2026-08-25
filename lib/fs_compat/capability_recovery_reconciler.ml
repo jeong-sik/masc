@@ -1621,26 +1621,6 @@ let core_subject_to_yojson = function
       ]
 ;;
 
-let core_operation_to_string = function
-  | Core.Inspect_directory -> "inspect_directory"
-  | Core.Create_directory -> "create_directory"
-  | Core.Open_directory -> "open_directory"
-  | Core.Close_directory -> "close_directory"
-  | Core.Sync_directory -> "sync_directory"
-  | Core.Read_directory -> "read_directory"
-  | Core.Inspect_record -> "inspect_record"
-  | Core.Open_record -> "open_record"
-  | Core.Read_record -> "read_record"
-  | Core.Decode_record -> "decode_record"
-  | Core.Create_record -> "create_record"
-  | Core.Apply_permissions -> "apply_permissions"
-  | Core.Write_record -> "write_record"
-  | Core.Sync_record -> "sync_record"
-  | Core.Close_record -> "close_record"
-  | Core.Verify_record_identity -> "verify_record_identity"
-  | Core.Remove_record -> "remove_record"
-;;
-
 let core_failure_cause_to_yojson = function
   | Core.Validation_failed error ->
     `Assoc
@@ -1680,7 +1660,7 @@ let core_failure_cause_to_yojson = function
 
 let core_failure_to_yojson (failure : Core.failure) =
   `Assoc
-    [ "operation", `String (core_operation_to_string failure.operation)
+    [ "operation", `String (Core.operation_to_string failure.operation)
     ; "subject", core_subject_to_yojson failure.subject
     ; "cause", core_failure_cause_to_yojson failure.cause
     ]

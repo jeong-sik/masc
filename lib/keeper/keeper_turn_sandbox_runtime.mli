@@ -20,6 +20,13 @@ val create :
 
 val turn_id : t -> int
 val host_root : t -> string
+val prepare_github_identity_secret_files :
+  ?timeout_sec:float -> t -> (string list, string) result
+(** After authorization, observe and bind the container to the current GitHub
+    identity, then return every turn snapshot whose token must remain
+    redacted. The observation is the operation's linearization point: a later
+    central login change is picked up by the next Execute. Superseded snapshots
+    remain redaction-only until turn cleanup. *)
 
 val cleanup : t -> unit
 (** Best-effort teardown. Safe to call multiple times. *)
@@ -64,19 +71,6 @@ val run_command_with_status :
   max_bytes:int ->
   unit ->
   (Unix.process_status * string, string) result
-
-val run_exec_with_status :
-  ?stdin_content:string ->
-  ?on_stdout_chunk:(string -> unit) ->
-  ?on_stderr_chunk:(string -> unit) ->
-  ?timeout_sec:float ->
-  t ->
-  cwd:string ->
-  command_argv:string list ->
-  (Unix.process_status * string, string) result
-(** Execute [command_argv] inside the turn-scoped container and return the raw
-    process status and merged output without applying success-code policy.
-    Existing read-backend callers use this for legacy merged-output behavior. *)
 
 val run_exec_with_status_split :
   ?stdin_content:string ->

@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 open Tool_call_quality_benchmark_types
 
 let default_case_set_path ~repo_root =
@@ -100,9 +83,7 @@ let parse_arg_check json =
         (match Eval_tool_selector.of_yojson value with
          | Ok selector -> Ok selector
          | Error msg -> errorf "invalid arg_check selector: %s" msg)
-    | None ->
-        let* tool_name = required_string_field json "tool_name" in
-        Ok (Eval_tool_selector.Tool_name tool_name)
+    | None -> errorf "arg_check requires a selector"
   in
   let* path = required_string_field json "path" in
   Ok {
@@ -177,12 +158,14 @@ let benchmark_case_of_yojson json =
     recovery_policy;
   }
 
+(* [tool_name] is what selectors match against, so an absent one does not
+   produce a call that matches nothing — it produces a row nobody can reason
+   about. The empty-string default made that indistinguishable from a tool
+   actually named "" (#29396 A5). *)
 let tool_call_of_yojson json =
-  {
-    tool_name =
-      (match Json_util.get_string json "tool_name" with
-       | Some value -> value
-       | None -> Json_util.get_string_with_default json ~key:"tool" ~default:"");
+  let* tool_name = required_string_field json "tool_name" in
+  Ok {
+    tool_name;
     success = Json_util.get_bool json "success" |> Option.value ~default:false;
     input = (match member_opt "input" json with Some value -> value | None -> `Assoc []);
     output = member_opt "output" json;
@@ -196,6 +179,7 @@ let evidence_run_of_yojson json =
   let* model = required_string_field json "model" in
   let* keeper_profile = required_string_field json "keeper_profile" in
   let* tool_call_items = list_field json "tool_calls" in
+  let* tool_calls = map_m tool_call_of_yojson tool_call_items in
   Ok {
     case_id;
     provider;
@@ -214,7 +198,7 @@ let evidence_run_of_yojson json =
     status =
       Json_util.get_string json "status" |> Option.value ~default:"ok"
       |> run_status_of_string;
-    tool_calls = List.map tool_call_of_yojson tool_call_items;
+    tool_calls;
   }
 
 let load_cases_from_file path =

@@ -1,0 +1,1 @@
+val measure : string -> (unit -> unit) -> unit

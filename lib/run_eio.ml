@@ -17,8 +17,6 @@ type run_record = {
   updated_at: string;
 }
 
-let now_iso () = Masc_domain.now_iso ()
-
 let run_record_to_json (r : run_record) : Yojson.Safe.t =
   `Assoc [
     ("task_id", `String r.task_id);

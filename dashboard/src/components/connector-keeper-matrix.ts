@@ -18,7 +18,7 @@
 
 import { html } from 'htm/preact'
 import type { GateConnectorInfo } from '../api/gate'
-import type { GateKeeperInfo } from '../api/schemas/gate-keepers'
+import type { GateKeeper, KeeperListing } from '../api/gate-keepers'
 import {
   CONNECTOR_DISPLAY_NAMES,
   KNOWN_CONNECTOR_IDS,
@@ -54,6 +54,10 @@ export interface MatrixData {
     totalBindings: number
     liveConnectors: number
   }
+  /** How much of the keeper directory this grid is drawn from. Required, not
+      optional: a grid rendered from a truncated list must say so, and an
+      optional field would let a caller drop it and keep the old silence. */
+  listing: KeeperListing
 }
 
 /** Per-row or per-column state breakdown. Airflow / GitHub Actions
@@ -94,7 +98,8 @@ function findConnector(connectors: GateConnectorInfo[], id: string): GateConnect
 /** Derive the matrix from connectors + keepers. Pure, unit-testable. */
 export function deriveMatrix(
   connectors: GateConnectorInfo[],
-  keepers: GateKeeperInfo[],
+  keepers: readonly GateKeeper[],
+  listing: KeeperListing,
 ): MatrixData {
   const columns: KnownConnectorId[] = [...KNOWN_CONNECTOR_IDS]
   const knownKeeperNames = new Set(keepers.map(k => k.name))
@@ -143,6 +148,7 @@ export function deriveMatrix(
   return {
     columns,
     rows,
+    listing,
     totals: {
       knownKeepers: keepers.length,
       unknownKeepers: unknownKeeperNames.size,
@@ -244,6 +250,18 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
               ? html`· <span class="text-[var(--color-status-warn)]">${matrix.totals.unknownKeepers} unknown</span>`
               : null}
           </p>
+          ${matrix.listing.truncated
+            ? html`
+                <p
+                  class="mt-1 text-3xs text-[var(--color-status-warn)]"
+                  data-testid="keeper-matrix-truncated"
+                >
+                  ${matrix.listing.total}개 중 ${matrix.listing.limit}개만
+                  받았어요 — 나머지 ${matrix.listing.total - matrix.listing.limit}개는
+                  이 표에 없고, 그 키퍼에 걸린 바인딩은 unknown으로 보여요.
+                </p>
+              `
+            : null}
         </div>
         <div class="text-3xs text-[var(--color-fg-disabled)]">
           <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--ok-10)]" aria-hidden="true"></span>bound</span>

@@ -1,0 +1,38 @@
+{
+ "schema": "masc.keeper.thinking_privacy.live.v1",
+ "measured_at": "2026-08-17T09:00:00Z",
+ "live_endpoint": "http://127.0.0.1:8935",
+ "server_commit": "bd2e27e60b",
+ "keeper": {
+  "name": "canary-10t-glmc-52-20260817",
+  "runtime": "glm-coding.glm-5.2"
+ },
+ "thinking_measurement": {
+  "turn_log_sample": "turn=26 thinking_present=true thinking_blocks=1 thinking_chars=187 (server log line 6748; turns 27-28 alike)",
+  "raw_trace_block_shape": {
+   "type": "reasoning_observation",
+   "reasoning_kind": "thinking",
+   "present": true,
+   "char_count": "N",
+   "observation": "withheld",
+   "content": null
+  },
+  "providers_observed": [
+   "glm-coding.glm-5.2 (this receipt; the only provider with a verified serving-path observation)"
+  ],
+  "retracted": "An earlier draft also claimed deepseek-0731 via taskmaster turn logs; that observation came from a previous server-log file and its serving runtime was never verified (nominal assignment is not serving attribution — the same lesson as #28912), so the claim is withdrawn."
+ },
+ "privacy_measurement": {
+  "raw_trace_survey": "last 6 raw-trace files of the keeper (sample scope, not exhaustive): 12/12 thinking blocks carry observation=withheld and content=null — no raw CoT text stored",
+  "public_chat_history": "GET /api/v1/keepers/<name>/chat/history: 49 rows, the union of all row keys contains no thinking/reasoning/cot key",
+  "board_projection": "board posts/comments carry text content only (see keeper-board-family-live-2026-08-17.json reads)"
+ },
+ "remaining": [
+  "private continuation semantics per provider dialect",
+  "browser (E5) axis",
+  "CI-enforced schema guard for the projection boundary"
+ ],
+ "notes": [
+  "Measurement is observational (store+API reads), no keeper instruction involved for the privacy half."
+ ]
+}

@@ -10,9 +10,13 @@
     Relationship to other modules:
     - {!Channel_gate} handles message routing (inbound/outbound).
     - {!Channel_gate_connector} handles connector state (status/bind/unbind).
-    - {!Channel_gate_metrics} tracks per-channel traffic metrics.
-
     @since 2.260.0 *)
+
+(** Common connector ready status info. *)
+type ready_info = {
+  ready_bot_user_id : string;
+  ready_at : string;
+}
 
 (** {1 Connector Module Type} *)
 
@@ -30,7 +34,6 @@ module type S = sig
   (** Runtime status snapshot for this connector. *)
 
   val connector_json :
-    ?gate_status_json:Yojson.Safe.t ->
     ?audit_limit:int ->
     unit ->
     Yojson.Safe.t
@@ -87,6 +90,6 @@ val find : string -> (module S) option
 val all : unit -> (module S) list
 (** Snapshot of all registered connectors, in unspecified order. *)
 
-val connectors_json : ?gate_status_json:Yojson.Safe.t -> ?audit_limit:int -> unit -> Yojson.Safe.t
+val connectors_json : ?audit_limit:int -> unit -> Yojson.Safe.t
 (** Aggregate descriptor for all registered connectors.
     Returns [{connectors: [...], total: N, active_count: N, generated_at: "..."}]. *)

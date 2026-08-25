@@ -7,9 +7,9 @@ let contains ~needle haystack =
   in
   needle_len = 0 || loop 0
 
-let response ?(content = []) ?(stop_reason = Agent_sdk.Types.EndTurn) () =
+let response ?(content = []) ?(stop_reason = Agent_core.Types.EndTurn) () =
   {
-    Agent_sdk.Types.id = "resp-test";
+    Agent_core.Types.id = "resp-test";
     model = "model-test";
     stop_reason;
     content;
@@ -17,18 +17,18 @@ let response ?(content = []) ?(stop_reason = Agent_sdk.Types.EndTurn) () =
     telemetry = None;
   }
 
-let message ?(role = Agent_sdk.Types.Assistant) content : Agent_sdk.Types.message =
+let message ?(role = Agent_core.Types.Assistant) content : Agent_core.Types.message =
   { role; content; name = None; tool_call_id = None; metadata = [] }
 
-let checkpoint_with_messages messages : Agent_sdk.Checkpoint.t =
+let checkpoint_with_messages messages : Agent_core.Checkpoint.t =
   {
-    Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version;
+    Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version;
     session_id = "session-test";
     agent_name = "agent-test";
     model = "model-test";
     system_prompt = None;
     messages;
-    usage = Agent_sdk.Types.empty_usage;
+    usage = Agent_core.Types.empty_usage;
     turn_count = 1;
     created_at = 0.0;
     tools = [];
@@ -41,11 +41,11 @@ let checkpoint_with_messages messages : Agent_sdk.Checkpoint.t =
     reasoning_effort = None;
     enable_thinking = None;
     preserve_thinking = None;
-    response_format = Agent_sdk.Types.Off;
+    response_format = Agent_core.Types.Off;
     thinking_budget = None;
     cache_system_prompt = false;
 
-    context = Agent_sdk.Context.create_sync ();
+    context = Agent_core.Context.create_sync ();
     mcp_sessions = [];
     working_context = None;
   }
@@ -62,7 +62,7 @@ let run_result ?content ?stop_reason ?checkpoint () : Runtime_agent.run_result =
     stop_reason = Runtime_agent.Completed;
   }
 
-let input_required_request () : Agent_sdk.Error.input_required =
+let input_required_request () : Agent_core.Error.input_required =
   { request_id = "input-request-1"
   ; participant_name = Some "operator"
   ; question = "Which repository should I inspect?"
@@ -173,14 +173,14 @@ let test_dispatch_rejects_runtime_without_serialized_request_cap () =
               "test_provider.test_model"
           with
           | Error
-              (Agent_sdk.Error.Config
-                (Agent_sdk.Error.InvalidConfig
+              (Agent_core.Error.Config
+                (Agent_core.Error.InvalidConfig
                   { field = "max-request-body-bytes"; _ })) ->
             ()
           | Error error ->
             Alcotest.failf
               "wrong typed cap rejection: %s"
-              (Agent_sdk.Error.to_string error)
+              (Agent_core.Error.to_string error)
           | Ok _ ->
             Alcotest.fail
               "uncapped Keeper runtime must be rejected before provider dispatch"))
@@ -195,7 +195,7 @@ type direct_retry_observed_attempt =
   }
 
 let test_keeper_hook_relaxes_strict_tool_choice () =
-  let open Agent_sdk.Types in
+  let open Agent_core.Types in
   let relax = Masc.Keeper_run_tools_hooks.relax_strict_tool_choice_for_keeper in
   Alcotest.(check bool) "Any -> Auto" true (relax (Some Any) = Some Auto);
   Alcotest.(check bool)
@@ -224,11 +224,11 @@ let test_accept_keeps_result () =
     Alcotest.(check string) "session preserved" "session-test" kept.session_id
   | Error err ->
     Alcotest.failf "accepted response should pass through: %s"
-      (Agent_sdk.Error.to_string err)
+      (Agent_core.Error.to_string err)
 
 let test_input_required_bypasses_response_accept () =
   let accept_calls = ref 0 in
-  let reject (_ : Agent_sdk.Types.api_response) =
+  let reject (_ : Agent_core.Types.api_response) =
     incr accept_calls;
     false
   in
@@ -248,14 +248,68 @@ let test_input_required_bypasses_response_accept () =
    | Error error ->
      Alcotest.failf
        "InputRequired rotated through response acceptance: %s"
-       (Agent_sdk.Error.to_string error));
+       (Agent_core.Error.to_string error));
   Alcotest.(check int)
     "InputRequired never invokes the deliverable accept predicate"
     0
     !accept_calls
 
+let test_terminal_tool_completion_bypasses_empty_response_rejection () =
+  let accept_calls = ref 0 in
+  let reject (_ : Agent_core.Types.api_response) =
+    incr accept_calls;
+    false
+  in
+  let completed_state () =
+    Masc.Keeper_tools_agent_core.Terminal_effect_completed
+      (Masc.Keeper_tool_execution.Surface_post_completed
+         Masc.Keeper_surface_post.To_dashboard)
+  in
+  (match
+     Masc.Keeper_turn_driver.For_testing.apply_official_client_accept
+       ~runtime_id:"runtime.official-client"
+       ~accept:reject
+       ~terminal_effect_state:completed_state
+       (run_result ~content:[] ())
+   with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.failf
+       "settled terminal tool completion was rejected: %s"
+       (Agent_core.Error.to_string error));
+  Alcotest.(check int)
+    "terminal completion does not invoke response-content acceptance"
+    0
+    !accept_calls
+
+let test_open_terminal_state_keeps_empty_response_rejection () =
+  match
+    Masc.Keeper_turn_driver.For_testing.apply_official_client_accept
+      ~runtime_id:"runtime.official-client"
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      ~terminal_effect_state:(fun () ->
+        Masc.Keeper_tools_agent_core.Terminal_effect_open)
+      (run_result ~content:[] ())
+  with
+  | Error error ->
+    (match Keeper_internal_error.classify_masc_internal_error error with
+     | Some (Keeper_internal_error.Accept_rejected { reason; _ }) ->
+       Alcotest.(check bool)
+         "ordinary empty response remains typed no-progress"
+         true
+         (contains ~needle:"response rejected by accept" reason)
+     | Some other ->
+       Alcotest.failf
+         "ordinary empty response produced %s"
+         (Keeper_internal_error.kind_of_masc_internal_error other)
+     | None ->
+       Alcotest.failf
+         "ordinary empty response produced the wrong rejection: %s"
+         (Agent_core.Error.to_string error))
+  | Ok _ -> Alcotest.fail "ordinary empty response was incorrectly accepted"
+
 let test_replay_projection_failure_preserves_provider_success () =
-  let open Agent_sdk.Types in
+  let open Agent_core.Types in
   let canonical_prefix =
     [ message
         ~role:User
@@ -281,9 +335,9 @@ let test_replay_projection_failure_preserves_provider_success () =
    | Error error ->
      Alcotest.failf
        "provider success source was overwritten: %s"
-       (Agent_sdk.Error.to_string error));
+       (Agent_core.Error.to_string error));
   match Masc.Keeper_turn_driver.For_testing.turn_result outcomes with
-  | Error (Agent_sdk.Error.Internal detail) ->
+  | Error (Agent_core.Error.Internal detail) ->
     Alcotest.(check bool)
       "local replay-prefix drift fails the turn explicitly"
       true
@@ -291,7 +345,7 @@ let test_replay_projection_failure_preserves_provider_success () =
   | Error error ->
     Alcotest.failf
       "expected typed Internal replay-prefix failure, got %s"
-      (Agent_sdk.Error.to_string error)
+      (Agent_core.Error.to_string error)
   | Ok _ -> Alcotest.fail "replay-prefix drift did not fail closed"
 
 let test_rejects_as_typed_accept_error () =
@@ -319,7 +373,7 @@ let test_rejects_as_typed_accept_error () =
          (Keeper_internal_error.kind_of_masc_internal_error other)
      | None ->
        Alcotest.failf "expected typed keeper error, got %s"
-         (Agent_sdk.Error.to_string err))
+         (Agent_core.Error.to_string err))
 
 let expect_accept_rejected result =
   match result with
@@ -333,14 +387,14 @@ let expect_accept_rejected result =
          (Keeper_internal_error.kind_of_masc_internal_error other)
      | None ->
        Alcotest.failf "expected typed keeper error, got %s"
-         (Agent_sdk.Error.to_string err))
+         (Agent_core.Error.to_string err))
 
-let accept_rejected_sdk_error
+let accept_rejected_core_error
     ?(stop_reason = None)
     ~response_shape
     ~reason
     () =
-  Keeper_internal_error.sdk_error_of_masc_internal_error
+  Keeper_internal_error.core_error_of_masc_internal_error
     (Keeper_internal_error.Accept_rejected
        { scope = "runtime.changed-diagnostic"
        ; model = None
@@ -370,15 +424,15 @@ let test_accept_rejected_threads_stop_reason () =
        | _ -> Alcotest.fail "expected Accept_rejected")
   in
   Alcotest.(check bool) "MaxTokens threaded" true
-    (threaded Agent_sdk.Types.MaxTokens = Some Agent_sdk.Types.MaxTokens);
+    (threaded Agent_core.Types.MaxTokens = Some Agent_core.Types.MaxTokens);
   Alcotest.(check bool) "EndTurn threaded" true
-    (threaded Agent_sdk.Types.EndTurn = Some Agent_sdk.Types.EndTurn)
+    (threaded Agent_core.Types.EndTurn = Some Agent_core.Types.EndTurn)
 
 let test_accept_rejected_stop_reason_survives_codec () =
   (* to_json -> of_json preserves the typed stop_reason (Slice 1 codec). *)
   let err =
-    accept_rejected_sdk_error
-      ~stop_reason:(Some Agent_sdk.Types.MaxTokens)
+    accept_rejected_core_error
+      ~stop_reason:(Some Agent_core.Types.MaxTokens)
       ~response_shape:(Some Keeper_internal_error.Accept_response_empty)
       ~reason:"response rejected by accept (runtime=x): shape=empty"
       ()
@@ -386,18 +440,18 @@ let test_accept_rejected_stop_reason_survives_codec () =
   match Keeper_internal_error.classify_masc_internal_error err with
   | Some (Keeper_internal_error.Accept_rejected { stop_reason; _ }) ->
     Alcotest.(check bool) "stop_reason survives codec round-trip" true
-      (stop_reason = Some Agent_sdk.Types.MaxTokens)
+      (stop_reason = Some Agent_core.Types.MaxTokens)
   | _ -> Alcotest.fail "expected Accept_rejected after codec round-trip"
 
 let test_reject_reason_describes_thinking_only_response () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.thinking-model"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
          ~content:
            [
-             Agent_sdk.Types.Thinking
+             Agent_core.Types.Thinking
                { signature = None; content = "abcde" };
            ]
          ())
@@ -484,7 +538,7 @@ let test_finalization_blank_response_is_typed_accept_rejection () =
          (Keeper_internal_error.kind_of_masc_internal_error other)
      | None ->
        Alcotest.failf "expected typed keeper error, got %s"
-         (Agent_sdk.Error.to_string err))
+         (Agent_core.Error.to_string err))
 
 let test_external_effect_finalization_returns_no_synthetic_prose () =
   let run_result =
@@ -509,7 +563,7 @@ let test_external_effect_finalization_returns_no_synthetic_prose () =
   | Error error ->
     Alcotest.failf
       "external effect typed status unexpectedly rejected: %s"
-      (Agent_sdk.Error.to_string error)
+      (Agent_core.Error.to_string error)
 ;;
 
 let test_finalization_does_not_surface_hidden_reasoning () =
@@ -517,8 +571,8 @@ let test_finalization_does_not_surface_hidden_reasoning () =
   let response =
     run_result
       ~content:
-        [ Agent_sdk.Types.Thinking { signature = None; content = hidden }
-        ; Agent_sdk.Types.ReasoningDetails
+        [ Agent_core.Types.Thinking { signature = None; content = hidden }
+        ; Agent_core.Types.ReasoningDetails
             { reasoning_content = Some "provider-private reasoning"
             ; details = []
             }
@@ -536,7 +590,7 @@ let test_finalization_does_not_surface_hidden_reasoning () =
   in
   (match finalize [ "masc_schedule_get" ] with
    | Error err ->
-     Alcotest.failf "tool fallback should succeed: %s" (Agent_sdk.Error.to_string err)
+     Alcotest.failf "tool fallback should succeed: %s" (Agent_core.Error.to_string err)
    | Ok text ->
      Alcotest.(check string)
        "tool-only completion does not fabricate assistant prose"
@@ -567,7 +621,7 @@ let test_finalization_does_not_surface_hidden_reasoning () =
 let test_direct_no_progress_retry_uses_runtime_decision () =
   with_direct_retry_runtime (fun () ->
     let empty_err =
-      accept_rejected_sdk_error
+      accept_rejected_core_error
         ~response_shape:(Some Keeper_internal_error.Accept_response_empty)
         ~reason:"shape=empty"
         ()
@@ -582,7 +636,7 @@ let test_direct_no_progress_retry_uses_runtime_decision () =
      | Masc.Keeper_turn_runtime_budget.No_degraded_retry ->
        Alcotest.fail "fresh direct empty retry should rotate");
     let thinking_only_err =
-      accept_rejected_sdk_error
+      accept_rejected_core_error
         ~response_shape:(Some Keeper_internal_error.Accept_response_thinking_only)
         ~reason:"shape=thinking_only"
         ()
@@ -632,7 +686,7 @@ let test_prepare_degraded_retry_rejects_empty_runtime () =
     prepare_retry_observers ()
   in
   let setup_called = ref false in
-  let err = Agent_sdk.Error.Internal "empty direct response" in
+  let err = Agent_core.Error.Internal "empty direct response" in
   let retry : Masc.Keeper_error_classify.degraded_retry =
     {
       next_runtime = " \t ";
@@ -663,7 +717,7 @@ let test_prepare_degraded_retry_rejects_empty_runtime () =
       true
       (contains
          ~needle:"degraded retry selected empty next_runtime"
-         (Agent_sdk.Error.to_string fail_open_err));
+         (Agent_core.Error.to_string fail_open_err));
     Alcotest.(check (list (pair string string)))
       "no runtime-selected metric for empty target"
       []
@@ -696,8 +750,8 @@ let test_prepare_degraded_retry_reports_setup_failure () =
       emit_runtime_selected, emit_runtime_rotation =
     prepare_retry_observers ()
   in
-  let err = Agent_sdk.Error.Internal "empty direct response" in
-  let setup_err = Agent_sdk.Error.Internal "retry setup failed" in
+  let err = Agent_core.Error.Internal "empty direct response" in
+  let setup_err = Agent_core.Error.Internal "retry setup failed" in
   let retry : Masc.Keeper_error_classify.degraded_retry =
     {
       next_runtime = " runtime.fallback ";
@@ -729,8 +783,8 @@ let test_prepare_degraded_retry_reports_setup_failure () =
     Alcotest.(check string) "reason" "empty_no_progress" reason;
     Alcotest.(check string)
       "failure propagated"
-      (Agent_sdk.Error.to_string setup_err)
-      (Agent_sdk.Error.to_string fail_open_err);
+      (Agent_core.Error.to_string setup_err)
+      (Agent_core.Error.to_string fail_open_err);
     Alcotest.(check (list (pair string string)))
       "no runtime-selected metric on setup failure"
       []
@@ -754,7 +808,7 @@ let test_prepare_degraded_retry_reports_setup_failure () =
 let test_plan_degraded_retry_step_covers_direct_outcomes () =
   with_direct_retry_runtime (fun () ->
     let empty_err =
-      accept_rejected_sdk_error
+      accept_rejected_core_error
         ~response_shape:(Some Keeper_internal_error.Accept_response_empty)
         ~reason:"shape=empty"
         ()
@@ -848,7 +902,7 @@ let test_plan_degraded_retry_step_covers_direct_outcomes () =
      | rows ->
        Alcotest.failf "expected one prepared cascade event, got %d"
          (List.length rows));
-    let setup_err = Agent_sdk.Error.Internal "plan setup failed" in
+    let setup_err = Agent_core.Error.Internal "plan setup failed" in
     let step, published, selected, rotated =
       plan ~setup_runtime:(fun _ -> Error setup_err) empty_err
     in
@@ -862,8 +916,8 @@ let test_plan_degraded_retry_step_covers_direct_outcomes () =
        Alcotest.(check string) "setup failure reason" "empty_no_progress" reason;
        Alcotest.(check string)
          "setup failure error"
-         (Agent_sdk.Error.to_string setup_err)
-         (Agent_sdk.Error.to_string fail_open_err)
+         (Agent_core.Error.to_string setup_err)
+         (Agent_core.Error.to_string fail_open_err)
      | _ -> Alcotest.fail "setup error should produce setup-failed step");
     Alcotest.(check (list (pair string string)))
       "setup failure emits no selected metric"
@@ -881,7 +935,7 @@ let test_plan_degraded_retry_step_covers_direct_outcomes () =
 let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
   with_direct_retry_runtime (fun () ->
     let empty_err =
-      accept_rejected_sdk_error
+      accept_rejected_core_error
         ~response_shape:(Some Keeper_internal_error.Accept_response_empty)
         ~reason:"shape=empty"
         ()
@@ -903,6 +957,28 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
       ; effective_budget = 4096
       }
     in
+    (* #27331: distinct from [retry_context_resolution] on purpose. The two
+       assertions below ("first attempt uses initial max context" = 1024,
+       "final max context comes from fallback runtime" = 4096) exist to prove
+       [run_direct_no_progress_retry_loop] threads each attempt's OWN
+       [runtime_execution.max_context] through instead of reusing whichever
+       runtime happened to run first. #26177 migrated this call site from
+       [~initial_max_context:1024] to [~initial_execution] but built the new
+       value via [retry_execution], which carries [retry_context_resolution]
+       (4096) — collapsing the two runtimes onto one budget and silently
+       making the first assertion false. Restoring a resolution of its own
+       is the fix; the sibling test below (2048, its own record) shows the
+       migration done correctly. *)
+    let initial_context_resolution
+        : Masc.Keeper_context_runtime.max_context_resolution =
+      { requested_override = None
+      ; primary_budget = 1024
+      ; runtime_budget = 1024
+      ; runtime_budget_source = Some Runtime.Capability
+      ; requested_context_window = 1024
+      ; effective_budget = 1024
+      }
+    in
     let attempts = ref [] in
     let published = ref [] in
     let selected = ref [] in
@@ -917,8 +993,12 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
       ; temperature = 0.0
       }
     in
-    let initial_execution =
-      retry_execution "runtime.direct-empty"
+    let initial_execution : Masc.Keeper_turn_runtime_budget.runtime_execution =
+      { runtime_id = "runtime.direct-empty"
+      ; max_context_resolution = initial_context_resolution
+      ; max_context = initial_context_resolution.requested_context_window
+      ; temperature = 0.0
+      }
     in
     let result =
       Masc.Keeper_turn_runtime_budget.run_direct_no_progress_retry_loop
@@ -972,7 +1052,7 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
      | Error err ->
        Alcotest.failf
          "retry loop should succeed on fallback runtime: %s"
-         (Agent_sdk.Error.to_string err)
+         (Agent_core.Error.to_string err)
      | Ok (value, final_max_context) ->
        Alcotest.(check string)
          "retry result comes from fallback runtime"
@@ -1058,7 +1138,7 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
          (List.length published)))
 
 let test_direct_retry_loop_publishes_non_retry_terminal_cascade () =
-  let terminal_err = Agent_sdk.Error.Internal "not retryable" in
+  let terminal_err = Agent_core.Error.Internal "not retryable" in
   let initial_execution : Masc.Keeper_turn_runtime_budget.runtime_execution =
     { runtime_id = "runtime.initial"
     ; max_context_resolution =
@@ -1117,8 +1197,8 @@ let test_direct_retry_loop_publishes_non_retry_terminal_cascade () =
    | Error err ->
      Alcotest.(check string)
        "terminal error propagated"
-       (Agent_sdk.Error.to_string terminal_err)
-       (Agent_sdk.Error.to_string err));
+       (Agent_core.Error.to_string terminal_err)
+       (Agent_core.Error.to_string err));
   Alcotest.(check int) "only initial attempt runs" 1 !run_count;
   match List.rev !published with
   | [ (runtime_id, decision, reason, next_runtime, attempt) ] ->
@@ -1137,13 +1217,13 @@ let test_thinking_with_text_is_accepted () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.thinking-text"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
          ~content:
            [
-             Agent_sdk.Types.Thinking
+             Agent_core.Types.Thinking
                { signature = None; content = "internal chain" };
-             Agent_sdk.Types.Text "final answer";
+             Agent_core.Types.Text "final answer";
            ]
          ())
   in
@@ -1152,19 +1232,19 @@ let test_thinking_with_text_is_accepted () =
     Alcotest.(check string) "session preserved" "session-test" kept.session_id
   | Error err ->
     Alcotest.failf "thinking plus text should pass accept: %s"
-      (Agent_sdk.Error.to_string err)
+      (Agent_core.Error.to_string err)
 
 let test_thinking_with_tool_use_is_accepted () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.thinking-tool"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
          ~content:
            [
-             Agent_sdk.Types.Thinking
+             Agent_core.Types.Thinking
                { signature = None; content = "internal chain" };
-             Agent_sdk.Types.ToolUse
+             Agent_core.Types.ToolUse
                { id = "tool-1"; name = "masc_board_search"; input = `Assoc [] };
            ]
          ())
@@ -1174,55 +1254,55 @@ let test_thinking_with_tool_use_is_accepted () =
     Alcotest.(check string) "session preserved" "session-test" kept.session_id
   | Error err ->
     Alcotest.failf "thinking plus tool use should pass accept: %s"
-      (Agent_sdk.Error.to_string err)
+      (Agent_core.Error.to_string err)
 
-let check_accept_matches_oas_shape label content =
+let check_accept_matches_agent_core_shape label content =
   let response = response ~content () in
   let expected =
     response
-    |> Agent_sdk.Response_shape.summarize
-    |> Agent_sdk.Response_shape.has_deliverable_content
+    |> Agent_core.Response_shape.summarize
+    |> Agent_core.Response_shape.has_deliverable_content
   in
   Alcotest.(check bool)
     label
     expected
-    (Keeper_tool_response.response_has_text_or_tool_progress response)
+    (Keeper_tooling.Response.response_has_text_or_tool_progress response)
 
-let test_accept_contract_delegates_to_oas_response_shape () =
-  check_accept_matches_oas_shape "empty" [];
-  check_accept_matches_oas_shape
+let test_accept_contract_delegates_to_agent_core_response_shape () =
+  check_accept_matches_agent_core_shape "empty" [];
+  check_accept_matches_agent_core_shape
     "thinking only"
     [
-      Agent_sdk.Types.Thinking
+      Agent_core.Types.Thinking
         { signature = None; content = "internal chain" };
     ];
-  check_accept_matches_oas_shape "blank text" [ Agent_sdk.Types.Text " \n\t " ];
-  check_accept_matches_oas_shape "text" [ Agent_sdk.Types.Text "visible answer" ];
-  check_accept_matches_oas_shape
+  check_accept_matches_agent_core_shape "blank text" [ Agent_core.Types.Text " \n\t " ];
+  check_accept_matches_agent_core_shape "text" [ Agent_core.Types.Text "visible answer" ];
+  check_accept_matches_agent_core_shape
     "tool use"
     [
-      Agent_sdk.Types.ToolUse
+      Agent_core.Types.ToolUse
         { id = "tool-1"; name = "masc_board_search"; input = `Assoc [] };
     ];
-  check_accept_matches_oas_shape
+  check_accept_matches_agent_core_shape
     "tool result"
     [
-      Agent_sdk.Types.ToolResult
+      Agent_core.Types.ToolResult
         {
           tool_use_id = "tool-1";
           content = "ok";
-          outcome = Agent_sdk.Types.Tool_succeeded;
+          outcome = Agent_core.Types.Tool_succeeded;
           json = None;
           content_blocks = None;
         };
     ];
-  check_accept_matches_oas_shape
+  check_accept_matches_agent_core_shape
     "media"
     [
-      Agent_sdk.Types.Image
+      Agent_core.Types.Image
         { media_type = "image/png"
         ; data = "redacted"
-        ; source_type = Agent_sdk.Types.Base64
+        ; source_type = Agent_core.Types.Base64
         };
     ]
 
@@ -1230,14 +1310,14 @@ let test_thinking_only_non_end_turn_response_is_rejected () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.thinking-stop-sequence"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
          ~content:
            [
-             Agent_sdk.Types.Thinking
+             Agent_core.Types.Thinking
                { signature = None; content = "internal chain" };
            ]
-         ~stop_reason:Agent_sdk.Types.StopSequence
+         ~stop_reason:Agent_core.Types.StopSequence
          ())
   in
   let _err, reason_kind, reason = expect_accept_rejected result in
@@ -1258,11 +1338,11 @@ let test_thinking_only_no_tool_can_try_next_candidate () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.thinking-only-no-tool"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
          ~content:
            [
-             Agent_sdk.Types.Thinking
+             Agent_core.Types.Thinking
                { signature = None; content = "internal chain" };
            ]
          ())
@@ -1299,8 +1379,8 @@ let test_empty_non_end_turn_response_is_rejected () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.empty-stop-sequence"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
-      (run_result ~stop_reason:Agent_sdk.Types.StopSequence ())
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      (run_result ~stop_reason:Agent_core.Types.StopSequence ())
   in
   let err, reason_kind, reason = expect_accept_rejected result in
   Alcotest.(check bool)
@@ -1348,7 +1428,7 @@ let test_empty_non_end_turn_response_is_rejected () =
              (contains ~needle:"empty assistant turn")
              (Masc.Keeper_turn_driver.summary_of_masc_internal_error internal_error)))
    | None -> Alcotest.fail "expected typed accept rejection");
-  (match Masc.Keeper_status_bridge.blocker_class_of_sdk_error err with
+  (match Masc.Keeper_status_bridge.blocker_class_of_core_error err with
    | None -> ()
    | Some other ->
      Alcotest.failf
@@ -1363,10 +1443,10 @@ let test_blank_text_non_end_turn_response_is_rejected () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.blank-max-tokens"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
-         ~content:[ Agent_sdk.Types.Text " \n\t " ]
-         ~stop_reason:Agent_sdk.Types.MaxTokens
+         ~content:[ Agent_core.Types.Text " \n\t " ]
+         ~stop_reason:Agent_core.Types.MaxTokens
          ())
   in
   let _err, reason_kind, reason = expect_accept_rejected result in
@@ -1392,7 +1472,7 @@ let test_custom_accept_reject_preserves_predicate_reason () =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.custom"
       ~accept:(fun _ -> false)
-      (run_result ~content:[ Agent_sdk.Types.Text "visible answer" ] ())
+      (run_result ~content:[ Agent_core.Types.Text "visible answer" ] ())
   in
   let err, reason_kind, _reason = expect_accept_rejected result in
   Alcotest.(check bool)
@@ -1412,23 +1492,23 @@ let test_media_with_tool_result_is_deliverable () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.mixed"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
       (run_result
          ~content:
            [
-             Agent_sdk.Types.ToolResult
+             Agent_core.Types.ToolResult
                {
                  tool_use_id = "tool-1";
                  content = "ok";
-                 outcome = Agent_sdk.Types.Tool_succeeded;
+                 outcome = Agent_core.Types.Tool_succeeded;
                  json = None;
                  content_blocks = None;
                };
-             Agent_sdk.Types.Image
+             Agent_core.Types.Image
                {
                  media_type = "image/png";
                  data = "redacted";
-                 source_type = Agent_sdk.Types.Base64;
+                 source_type = Agent_core.Types.Base64;
                };
            ]
          ())
@@ -1438,16 +1518,16 @@ let test_media_with_tool_result_is_deliverable () =
   | Error err ->
     Alcotest.failf
       "multimodal response with an image must remain deliverable: %s"
-      (Agent_sdk.Error.to_string err)
+      (Agent_core.Error.to_string err)
 
 let test_sse_event_progress_kind_classifies_known_deltas () =
-  let open Agent_sdk.Types in
+  let open Agent_core.Types in
   let kind event = Masc.Keeper_agent_run_turn_helpers.sse_event_progress_kind event in
   let watchdog_kind event =
     Masc.Keeper_agent_run_turn_helpers.sse_event_watchdog_progress_kind event
   in
   Alcotest.(check (option string))
-    "tool block start follows SDK stream classifier"
+    "tool block start follows agent-core stream classifier"
     (Some "sse_tool_block_start")
     (kind
        (ContentBlockStart
@@ -1547,7 +1627,7 @@ let registry_recorded_progress events =
   (List.rev !recorded, !downstream_count)
 
 let test_registry_progress_on_event_records_only_watchdog_progress () =
-  let open Agent_sdk.Types in
+  let open Agent_core.Types in
   let recorded, downstream_count =
     registry_recorded_progress
       [ ContentBlockDelta { index = 0; delta = TextDelta "" }
@@ -1566,7 +1646,7 @@ let test_registry_progress_on_event_records_only_watchdog_progress () =
   Alcotest.(check int) "downstream still sees every event" 6 downstream_count
 
 let test_carrier_only_stream_remains_observable_without_lifecycle_gate () =
-  let open Agent_sdk.Types in
+  let open Agent_core.Types in
   let recorded, downstream_count =
     registry_recorded_progress
       [ ContentBlockDelta { index = 0; delta = TextDelta "" }
@@ -1587,7 +1667,7 @@ let test_carrier_only_stream_remains_observable_without_lifecycle_gate () =
    matching. *)
 let test_dns_failure_exhaustion_classifies_as_runtime_exhausted () =
   let mapped =
-    Keeper_internal_error.sdk_error_of_masc_internal_error
+    Keeper_internal_error.core_error_of_masc_internal_error
       (Keeper_internal_error.Runtime_exhausted
          { runtime_id = "runtime.dns-test"
          ; reason = Keeper_internal_error.Dns_failure
@@ -1618,11 +1698,11 @@ let test_dns_failure_exhaustion_classifies_as_runtime_exhausted () =
       (Keeper_internal_error.kind_of_masc_internal_error other)
   | None ->
     Alcotest.failf "expected typed keeper error, got %s"
-      (Agent_sdk.Error.to_string mapped)
+      (Agent_core.Error.to_string mapped)
 
 let test_no_candidates_exhaustion_classifies_as_no_providers_available () =
   let mapped =
-    Keeper_internal_error.sdk_error_of_masc_internal_error
+    Keeper_internal_error.core_error_of_masc_internal_error
       (Keeper_internal_error.Runtime_exhausted
          { runtime_id = "runtime.no-candidates"
          ; reason = Keeper_internal_error.No_providers_available
@@ -1639,11 +1719,11 @@ let test_no_candidates_exhaustion_classifies_as_no_providers_available () =
       (Keeper_internal_error.kind_of_masc_internal_error other)
   | None ->
     Alcotest.failf "expected typed keeper error, got %s"
-      (Agent_sdk.Error.to_string mapped)
+      (Agent_core.Error.to_string mapped)
 
 let test_capacity_failure_exhaustion_classifies_as_capacity_exhausted () =
   let mapped =
-    Keeper_internal_error.sdk_error_of_masc_internal_error
+    Keeper_internal_error.core_error_of_masc_internal_error
       (Keeper_internal_error.Runtime_exhausted
          { runtime_id = "runtime.capacity-test"
          ; reason = Keeper_internal_error.Capacity_exhausted
@@ -1668,11 +1748,11 @@ let test_capacity_failure_exhaustion_classifies_as_capacity_exhausted () =
       (Keeper_internal_error.kind_of_masc_internal_error other)
   | None ->
     Alcotest.failf "expected typed keeper error, got %s"
-      (Agent_sdk.Error.to_string mapped)
+      (Agent_core.Error.to_string mapped)
 
 let test_session_conflict_exhaustion_preserves_typed_terminal_reason () =
   let mapped =
-    Keeper_internal_error.sdk_error_of_masc_internal_error
+    Keeper_internal_error.core_error_of_masc_internal_error
       (Keeper_internal_error.Runtime_exhausted
          { runtime_id = "runtime.session-conflict"
          ; reason = Keeper_internal_error.Session_conflict
@@ -1707,7 +1787,7 @@ let test_session_conflict_exhaustion_preserves_typed_terminal_reason () =
       (Keeper_internal_error.kind_of_masc_internal_error other)
   | None ->
     Alcotest.failf "expected typed keeper error, got %s"
-      (Agent_sdk.Error.to_string mapped)
+      (Agent_core.Error.to_string mapped)
 
 let test_runtime_exhaustion_label_caps_free_text_detail () =
   let detail = String.make 260 'x' ^ "\nwith newline\tand spacing" in
@@ -1746,6 +1826,14 @@ let () =
             "InputRequired bypasses response acceptance"
             `Quick
             test_input_required_bypasses_response_accept;
+          Alcotest.test_case
+            "terminal tool completion bypasses empty response rejection"
+            `Quick
+            test_terminal_tool_completion_bypasses_empty_response_rejection;
+          Alcotest.test_case
+            "open terminal state keeps empty response rejection"
+            `Quick
+            test_open_terminal_state_keeps_empty_response_rejection;
           Alcotest.test_case
             "replay projection failure preserves provider success"
             `Quick
@@ -1798,8 +1886,8 @@ let () =
 	            test_thinking_with_text_is_accepted;
           Alcotest.test_case "thinking plus tool use is accepted" `Quick
             test_thinking_with_tool_use_is_accepted;
-          Alcotest.test_case "accept delegates to OAS response shape" `Quick
-            test_accept_contract_delegates_to_oas_response_shape;
+          Alcotest.test_case "accept delegates to AGENT_CORE response shape" `Quick
+            test_accept_contract_delegates_to_agent_core_response_shape;
           Alcotest.test_case "thinking-only non-end-turn response is rejected" `Quick
             test_thinking_only_non_end_turn_response_is_rejected;
           Alcotest.test_case

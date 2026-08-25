@@ -126,11 +126,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="flex flex-col gap-3 mb-5 v2-monitoring-surface">
       <${KpiSection} title="정체성">
-        <div class="grid grid-cols-3 gap-2">
-          <${StatTile}
-            label="세대"
-            value=${String(keeper.generation ?? '-')}
-          />
+        <div class="grid grid-cols-2 gap-2">
           <${StatTile}
             label="턴"
             value=${String(keeper.turn_count ?? '-')}
@@ -181,26 +177,6 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
         </div>
       <//>
 
-      <${KpiSection} title="자율성 패턴">
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <${StatTile}
-            label="자율 턴"
-            value=${String(keeper.autonomous_turn_count ?? 0)}
-          />
-          <${StatTile}
-            label="자율 행동"
-            value=${String(keeper.autonomous_action_count ?? 0)}
-          />
-          <${StatTile}
-            label="보드 반응"
-            value=${String(keeper.board_reactive_turn_count ?? 0)}
-          />
-          <${StatTile}
-            label="비활동"
-            value=${String(keeper.noop_turn_count ?? 0)}
-          />
-        </div>
-      <//>
 
       <${KpiSection} title="결과">
         ${outcomes ? html`<${OutcomesLedger} keeper=${keeper} outcomes=${outcomes} />` : html`

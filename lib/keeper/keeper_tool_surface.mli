@@ -41,28 +41,13 @@ module For_testing : sig
     key:string -> ttl_s:float -> (unit -> Yojson.Safe.t) -> Yojson.Safe.t
 end
 
-(** Private direct-delivery stream with real-time text delta callback.
-    The [on_text_delta] callback receives each text fragment from the MODEL
-    as it arrives. This is not a registered tool-name dispatch surface.
-
-    @since 2.110.0 *)
-val dispatch_keeper_msg_stream :
+val dispatch_keeper_msg_stream_admitted :
+  admission_token:Keeper_turn_dispatch_authority.token ->
   ?on_text_delta:(string -> unit) ->
-  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
+  ?on_event:(Agent_core.Types.sse_event -> unit) ->
+  ?on_tool_result_ready:(tool_call_id:string -> unit) ->
+  ?approval_gate:Keeper_tool_approval_gate.t ->
   ?continuation_channel:Keeper_continuation_channel.t ->
-  ?on_admission_rejected:(Keeper_turn_admission.rejection -> unit) ->
-  ?on_admitted:(unit -> (unit, string) result) ->
   _ context ->
   message:Keeper_invocation_contract.direct_message ->
   tool_result option
-
-(** Non-blocking streaming dispatch for direct chat admission. The Keeper turn
-    slot performs the authoritative post-lock durable-queue recheck; [`Busy]
-    callers must route the accepted message to their deferred transport. *)
-val dispatch_keeper_msg_stream_if_free :
-  ?on_text_delta:(string -> unit) ->
-  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
-  ?continuation_channel:Keeper_continuation_channel.t ->
-  _ context ->
-  message:Keeper_invocation_contract.direct_message ->
-  [ `Ran of tool_result option | `Busy of Keeper_turn_admission.rejection ]

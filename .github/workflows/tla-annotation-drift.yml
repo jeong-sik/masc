@@ -115,8 +115,7 @@ jobs:
         # same drift.  iter 64 N-2.a converted those to function-name-
         # only references; this guard prevents the next preamble that
         # adds a line number from regressing the same way.
-        # See scripts/audit-tla-ml-line-refs.sh and docs/tla-audit/
-        # kaq-n1-approval-queue-line-ref-drift-2026-05-12.md.
+        # See scripts/audit-tla-ml-line-refs.sh.
         run: bash scripts/audit-tla-ml-line-refs.sh
 
       - name: Run OCaml-docstring spec-nav line-ref validator (R-1.a)

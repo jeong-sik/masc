@@ -61,37 +61,18 @@ val working_agents : config -> string list
     actor identity; name-shape aliases have no ownership authority. *)
 val same_task_actor : config -> string -> string -> bool
 
-val normalize_execution_links
-  :  Masc_domain.task_execution_links
-  -> Masc_domain.task_execution_links
-
 val normalize_task_contract : Masc_domain.task_contract -> Masc_domain.task_contract
-val empty_task_contract : Masc_domain.task_contract
 
-val default_verification_evidence_refs : string list
-val first_line : string -> string
-val truncate : max_len:int -> string -> string
-val default_completion_contract_text : title:string -> description:string -> string
-
-val ensure_task_contract_for_verification
-  :  ?contract:Masc_domain.task_contract
-  -> title:string
-  -> description:string
-  -> unit
-  -> Masc_domain.task_contract
-
+(** [merge_execution_links existing ?session_id ?operation_id ()] keeps the
+    identifiers already linked and adds the ones supplied. It touches only
+    execution identity — completion criteria are written when the task is
+    created and are not derived, defaulted, or rewritten anywhere. *)
 val merge_execution_links
   :  Masc_domain.task_execution_links
   -> ?session_id:string
   -> ?operation_id:string
   -> unit
   -> Masc_domain.task_execution_links
-
-val merge_envelope_into_payload
-  :  ?correlation_id:string
-  -> ?run_id:string
-  -> Yojson.Safe.t
-  -> Yojson.Safe.t
 
 val task_status_to_string : Masc_domain.task_status -> string
 val task_assignee_of_status : Masc_domain.task_status -> string option
@@ -135,8 +116,6 @@ val observe_task_transition
 type transition_event_type =
   | Task_transition
   | Task_cancelled
-
-val transition_event_type_to_string : transition_event_type -> string
 
 val transition_log_event
   :  event_type:transition_event_type

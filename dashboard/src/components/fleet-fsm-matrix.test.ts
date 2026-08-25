@@ -95,6 +95,14 @@ function execution(
     duration_ms: 12_000,
     error: null,
     runtime: null,
+    claim_attempt: {
+      present: false,
+      source: 'keeper_task_claim_tool_call',
+      status: 'not_observed',
+      result: null,
+      claimed_task_id: null,
+      claimed_goal_id: null,
+    },
     ...overrides,
   }
 }
@@ -599,7 +607,7 @@ describe('filterKeeperSnapshots', () => {
   const alpha = snapshot({ name: 'gen12-alpha' })
   const beta = snapshot({
     name: 'gen14-beta',
-    phase: 'Overflowed',
+    phase: 'Draining',
     runtime: { state: 'trying' },
   })
   const gamma = snapshot({
@@ -622,7 +630,7 @@ describe('filterKeeperSnapshots', () => {
   })
 
   it('matches phase (KSM) axis value', () => {
-    const out = filterKeeperSnapshots(rows, 'overflowed')
+    const out = filterKeeperSnapshots(rows, 'draining')
     expect(out.map(inferKeeperNameFrom)).toEqual(['gen14-beta'])
   })
 

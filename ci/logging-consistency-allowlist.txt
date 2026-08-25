@@ -40,9 +40,6 @@ bin/masc_trace.ml
 bin/trace_to_tla.ml
 bin/masc_tui_loader.ml
 bin/masc_cost.ml
-bin/masc_compaction_audit.ml
-bin/keeper_feature_proof_report.ml
-bin/env_knob_catalog.ml
 
 # --- RFC-0079 legacy raw-stderr bridge (embedded [LEVEL] prefix) ---
 # Log.legacy_stderr / Log.legacy_traceln deliberately emit a raw, unprefixed
@@ -65,11 +62,11 @@ lib/mcp_server_eio_resource.ml
 lib/config_dir_resolver/config_dir_resolver.ml
 
 # --- Runtime-computed component on Log.emit ---
-# agent_sdk_log_bridge.ml uses Log.emit with ~module_name:("oas:" ^
+# agent_core_log_bridge.ml uses Log.emit with ~module_name:("agent_core:" ^
 # record.module_name) — the component is built at runtime from a per-record
 # value, so no static module preserves it. The top-level Log.emit is required
 # here to carry the dynamic component string.
-# (keeper_event_bridge.ml previously appeared here for ~module_name:"oas:event";
-#  that is a static literal and is now the Oas_event module — a module name
+# (keeper_event_bridge.ml previously appeared here for ~module_name:"agent_core:event";
+#  that is a static literal and is now the Agent_core_event module — a module name
 #  string may contain a colon even though the OCaml identifier cannot.)
-lib/agent_sdk_log_bridge.ml
+lib/agent_core_log_bridge.ml

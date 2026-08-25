@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 open Masc_domain
 open Tool_args
 
@@ -33,10 +16,6 @@ let operator_tool_name name =
 
 let board_attention_quarantine_requeue_tool_name =
   operator_tool_name Operator_name.Operator_board_attention_quarantine_requeue
-;;
-
-let chat_recovery_tool_name =
-  operator_tool_name Operator_name.Operator_chat_recovery_resolve
 ;;
 
 let task_recovery_tool_name =
@@ -62,7 +41,18 @@ let task_recovery_tool_name =
 
 let result_of_json ~tool_name ~start_time = function
   | Ok json ->
-      Tool_result.make_ok ~tool_name ~start_time ~data:json ()
+      (match Json_util.assoc_string_opt "status" json with
+       | Some "deferred" ->
+         Tool_result.make_deferred ~tool_name ~start_time ~data:json ()
+       | Some "error" ->
+         Tool_result.make_err
+           ~tool_name
+           ~class_:Tool_result.Workflow_rejection
+           ~start_time
+           ~data:json
+           "Workspace message persisted, but Keeper delivery was rejected; do not resend"
+       | Some _ | None ->
+         Tool_result.make_ok ~tool_name ~start_time ~data:json ())
   | Error message ->
       let data = Tool_args.error_assoc [ "message", `String message ] in
       Tool_result.make_err
@@ -72,8 +62,7 @@ let result_of_json ~tool_name ~start_time = function
         ~data
         (Yojson.Safe.to_string data)
 
-let json_ok ~tool_name ~start_time (json : Yojson.Safe.t) : Tool_result.result =
-  Tool_result.make_ok ~tool_name ~start_time ~data:json ()
+let json_ok = Tool_agent.json_ok
 
 let schema_properties entries = `Assoc entries
 
@@ -119,12 +108,6 @@ let snapshot_schema ~remote =
 
 let digest_target_type_enums =
   [ `String Operator_action_constants.workspace_target_type ]
-let judgment_surface_enums =
-  [
-    `String "command.namespace";
-    `String "intervene";
-  ]
-
 let digest_schema ~remote =
   {
     name = "masc_operator_digest";
@@ -153,174 +136,9 @@ let digest_schema ~remote =
         ];
   }
 
-let chat_recovery_decision_schema =
-  `Assoc
-    [ ( "oneOf"
-      , `List
-          [ `Assoc
-              [ "type", `String "object"
-              ; "additionalProperties", `Bool false
-              ; ( "properties"
-                , `Assoc
-                    [ ( "kind"
-                      , `Assoc
-                          [ "type", `String "string"
-                          ; "enum", `List [ `String "requeue_unconfirmed" ]
-                          ] )
-                    ] )
-              ; "required", `List [ `String "kind" ]
-              ]
-          ; `Assoc
-              [ "type", `String "object"
-              ; "additionalProperties", `Bool false
-              ; ( "properties"
-                , `Assoc
-                    [ ( "kind"
-                      , `Assoc
-                          [ "type", `String "string"
-                          ; "enum", `List [ `String "cancel_unconfirmed" ]
-                          ] )
-                    ; "detail", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-                    ; ( "outcome_ref"
-                      , `Assoc
-                          [ ( "oneOf"
-                            , `List
-                                [ `Assoc
-                                    [ "type", `String "string"
-                                    ; "minLength", `Int 1
-                                    ]
-                                ; `Assoc [ "type", `String "null" ]
-                                ] )
-                          ] )
-                    ] )
-              ; ( "required"
-                , `List
-                    [ `String "kind"; `String "detail"; `String "outcome_ref" ] )
-              ]
-          ] )
-    ]
-;;
+let board_attention_quarantine_requeue_schema = Operator_tool_toml.quarantine_requeue
 
-let chat_recovery_schema =
-  { name = chat_recovery_tool_name
-  ; description =
-      "Resolve exactly one crash-ambiguous Keeper chat receipt. The observed receipt_id, canonical revision string, and lease_id must all match; this tool never auto-redelivers."
-  ; input_schema =
-      `Assoc
-        [ "type", `String "object"
-        ; "additionalProperties", `Bool false
-        ; ( "properties"
-          , schema_properties
-              [ ( "schema"
-                , `Assoc
-                    [ "type", `String "string"
-                    ; ( "enum"
-                      , `List
-                          [ `String Keeper_chat_recovery_command.tool_command_schema ] )
-                    ] )
-              ; "keeper_name", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-              ; "receipt_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-              ; ( "expected_revision"
-                , `Assoc
-                    [ "type", `String "string"
-                    ; "pattern", `String "^(0|[1-9][0-9]*)$"
-                    ] )
-              ; "lease_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-              ; "decision", chat_recovery_decision_schema
-              ] )
-        ; ( "required"
-          , `List
-              [ `String "schema"
-              ; `String "keeper_name"
-              ; `String "receipt_id"
-              ; `String "expected_revision"
-              ; `String "lease_id"
-              ; `String "decision"
-              ] )
-        ]
-  }
-;;
-
-let board_attention_quarantine_requeue_schema =
-  { name = board_attention_quarantine_requeue_tool_name
-  ; description =
-      "Acknowledge and requeue exactly one Board-attention quarantine. The observed keeper, partition, candidate, and opaque quarantine id must all match; this tool never auto-retries."
-  ; input_schema =
-      `Assoc
-        [ "type", `String "object"
-        ; "additionalProperties", `Bool false
-        ; ( "properties"
-          , schema_properties
-              [ ( "schema"
-                , `Assoc
-                    [ "type", `String "string"
-                    ; ( "enum"
-                      , `List
-                          [ `String
-                              Keeper_board_attention_quarantine_command
-                              .tool_command_schema
-                          ] )
-                    ] )
-              ; "keeper_name", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-              ; "partition_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-              ; "candidate_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-              ; ( "expected_quarantine_id"
-                , `Assoc [ "type", `String "string"; "minLength", `Int 1 ] )
-              ; ( "decision"
-                , `Assoc
-                    [ "type", `String "string"
-                    ; "enum", `List [ `String "acknowledge_and_requeue" ]
-                    ] )
-              ] )
-        ; ( "required"
-          , `List
-              [ `String "schema"
-              ; `String "keeper_name"
-              ; `String "partition_id"
-              ; `String "candidate_id"
-              ; `String "expected_quarantine_id"
-              ; `String "decision"
-              ] )
-        ]
-  }
-;;
-
-let task_recovery_schema =
-  { name = task_recovery_tool_name
-  ; description =
-      "Recover exactly one claimed or in-progress Task to todo. The observed task_id, persisted assignee, and backlog version must all match; this tool performs no liveness or elapsed-time inference."
-  ; input_schema =
-      `Assoc
-        [ "type", `String "object"
-        ; "additionalProperties", `Bool false
-        ; ( "properties"
-          , schema_properties
-              [ ( "schema"
-                , `Assoc
-                    [ "type", `String "string"
-                    ; ( "enum"
-                      , `List
-                          [ `String Operator_task_recovery_command.tool_command_schema ] )
-                    ] )
-              ; "task_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-              ; ( "expected_assignee"
-                , `Assoc [ "type", `String "string"; "minLength", `Int 1 ] )
-              ; ( "expected_version"
-                , `Assoc
-                    [ "type", `String "integer"; "minimum", `Int 0 ] )
-              ; "reason", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
-              ] )
-        ; ( "required"
-          , `List
-              [ `String "schema"
-              ; `String "task_id"
-              ; `String "expected_assignee"
-              ; `String "expected_version"
-              ; `String "reason"
-              ] )
-        ]
-  }
-;;
+let task_recovery_schema = Operator_tool_toml.task_recovery_resolve
 
 let action_schema ~remote =
   {
@@ -357,46 +175,7 @@ let action_schema ~remote =
         ];
   }
 
-let confirm_schema =
-  {
-    name = "masc_operator_confirm";
-    description =
-      "Confirm and execute a previously previewed operator action. Use this only after masc_operator_action returns confirm_required=true.";
-    input_schema =
-      `Assoc
-        [
-          ("type", `String "object");
-          ( "properties",
-            schema_properties
-              [
-                ("actor", `Assoc [ ("type", `String "string") ]);
-                ("confirm_token", `Assoc [ ("type", `String "string") ]);
-                ( "decision",
-                  `Assoc
-                    [
-                      ("type", `String "string");
-                      ("enum", `List [ `String "confirm"; `String "deny" ]);
-                    ] );
-              ] );
-          ("required", `List [ `String "confirm_token" ]);
-        ];
-  }
-
-let recovery_mutation_failure_class = function
-  | Keeper_chat_queue.Invalid_input _
-  | Keeper_chat_queue.Receipt_already_terminal _
-  | Keeper_chat_queue.Receipt_not_recovery_required _
-  | Keeper_chat_queue.Receipt_not_pending _
-  | Keeper_chat_queue.Pending_revision_mismatch _
-  | Keeper_chat_queue.Recovery_revision_mismatch _
-  | Keeper_chat_queue.Recovery_lease_mismatch _ ->
-    Tool_result.Workflow_rejection
-  | Keeper_chat_queue.Persistence_not_configured
-  | Keeper_chat_queue.Snapshot_unavailable _
-  | Keeper_chat_queue.Revision_exhausted
-  | Keeper_chat_queue.Persist_failed _ ->
-    Tool_result.Runtime_failure
-;;
+let confirm_schema = Operator_tool_toml.confirm
 
 let board_attention_quarantine_failure_class = function
   | Keeper_board_attention_quarantine_command.Candidate_state_conflict _
@@ -461,55 +240,12 @@ let board_attention_quarantine_requeue_result
          (Yojson.Safe.to_string data))
 ;;
 
-let chat_recovery_result ~tool_name ~start_time (ctx : _ context) args =
-  match Keeper_chat_recovery_command.parse_tool_command args with
-  | Error error ->
-    let data = Keeper_chat_recovery_command.input_error_to_json error in
-    Tool_result.make_err
-      ~tool_name
-      ~class_:Tool_result.Workflow_rejection
-      ~start_time
-      ~data
-      (Yojson.Safe.to_string data)
-  | Ok command ->
-    let result =
-      Keeper_chat_recovery_command.execute ~now:(Time_compat.now ()) command
-    in
-    let audit =
-      Keeper_chat_recovery_command.audit
-        ctx.config
-        ~actor:ctx.agent_name
-        command
-        ~outcome:
-          (match result with
-           | Ok _ -> Audit_log.Success
-           | Error error ->
-             Audit_log.Failure (Keeper_chat_queue.mutation_error_to_string error))
-      |> Keeper_chat_recovery_command.audit_json
-    in
-    (match result with
-     | Ok report ->
-       Tool_result.make_ok
-         ~tool_name
-         ~start_time
-         ~data:(Keeper_chat_recovery_command.success_json ~audit command report)
-         ()
-     | Error error ->
-       let data = Keeper_chat_recovery_command.mutation_error_json ~audit error in
-       Tool_result.make_err
-         ~tool_name
-         ~class_:(recovery_mutation_failure_class error)
-         ~start_time
-         ~data
-         (Yojson.Safe.to_string data))
-;;
-
 let task_recovery_failure_class = function
   | Masc_domain.Task _ | Masc_domain.Agent _ -> Tool_result.Workflow_rejection
   | Masc_domain.Auth _ -> Tool_result.Policy_rejection
   | Masc_domain.System (Masc_domain.System_error.LockContention _)
   | Masc_domain.RateLimitExceeded _ ->
-    Tool_result.Transient_error
+    Tool_result.Dependency_unavailable
   | Masc_domain.System _ | Masc_domain.CacheError _ -> Tool_result.Runtime_failure
 ;;
 
@@ -588,50 +324,7 @@ let task_recovery_result ~tool_name ~start_time (ctx : _ context) args =
          (Yojson.Safe.to_string data))
 ;;
 
-let judgment_write_schema =
-  {
-    name = "masc_operator_judgment_write";
-    description =
-      "Internal operator-judge write path. Use this to store a durable operator judgment for namespace supervision. Hidden from the default catalog and intended for keeper/automation experiments.";
-    input_schema =
-      `Assoc
-        [
-          ("type", `String "object");
-          ( "properties",
-            schema_properties
-              [
-                ( "surface",
-                  `Assoc
-                    [
-                      ("type", `String "string");
-                      ("enum", `List judgment_surface_enums);
-                    ] );
-                ( "target_type",
-                  `Assoc
-                    [
-                      ("type", `String "string");
-                      ("enum", `List digest_target_type_enums);
-                    ] );
-                ("target_id", `Assoc [ ("type", `String "string") ]);
-                ("summary", `Assoc [ ("type", `String "string") ]);
-                ("confidence", `Assoc [ ("type", `String "number") ]);
-                ("fresh_ttl_sec", `Assoc [ ("type", `String "integer") ]);
-                ("keeper_name", `Assoc [ ("type", `String "string") ]);
-                ("model_name", `Assoc [ ("type", `String "string") ]);
-                ("runtime_name", `Assoc [ ("type", `String "string") ]);
-                ( "evidence_refs",
-                  `Assoc
-                    [
-                      ("type", `String "array");
-                      ("items", `Assoc [ ("type", `String "string") ]);
-                    ] );
-                ("recommended_action", `Assoc [ ("type", `String "object") ]);
-                ("fallback_used", `Assoc [ ("type", `String "boolean") ]);
-                ("disagreement_with_truth", `Assoc [ ("type", `String "boolean") ]);
-              ] );
-          ("required", `List [ `String "surface"; `String "target_type"; `String "summary" ]);
-        ];
-  }
+let judgment_write_schema = Operator_tool_toml.judgment_write
 
 let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
@@ -683,8 +376,6 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
            ~start_time:start
            ctx
            args)
-  | tool_name when String.equal tool_name chat_recovery_tool_name ->
-      Some (chat_recovery_result ~tool_name ~start_time:start ctx args)
   | tool_name when String.equal tool_name task_recovery_tool_name ->
       Some (task_recovery_result ~tool_name ~start_time:start ctx args)
   | "masc_operator_confirm" ->
@@ -705,7 +396,6 @@ let schemas : tool_schema list =
     digest_schema ~remote:false;
     action_schema ~remote:false;
     board_attention_quarantine_requeue_schema;
-    chat_recovery_schema;
     task_recovery_schema;
     confirm_schema;
     judgment_write_schema;
@@ -717,7 +407,6 @@ let remote_schemas : tool_schema list =
     digest_schema ~remote:true;
     action_schema ~remote:true;
     board_attention_quarantine_requeue_schema;
-    chat_recovery_schema;
     task_recovery_schema;
     confirm_schema;
   ]
@@ -737,7 +426,6 @@ let tool_spec_read_only =
 (* Tools with explicit catalog metadata that must be preserved. *)
 let operator_profile_only_tools =
   [ board_attention_quarantine_requeue_tool_name
-  ; chat_recovery_tool_name
   ; task_recovery_tool_name
   ]
 ;;
@@ -772,7 +460,6 @@ let () =
 
 let () =
   Tool_operator.register_operator_tools ~dispatch ~schemas ~remote_schemas;
-  Dashboard_briefing_sections.register_operator_snapshot_json { Dashboard_projection_cache.snapshot = Operator_control.snapshot_json };
   Dashboard_projection_cache.register_operator_snapshot_json { Dashboard_projection_cache.snapshot = Operator_control.snapshot_json };
   Dashboard_projection_cache.register_operator_digest_json { Dashboard_projection_cache.digest = Operator_control.digest_json };
   Atomic.set
@@ -781,38 +468,11 @@ let () =
   Atomic.set
     Workspace_hooks.operator_pending_confirm_upsert_fn
     (fun config (entry : Workspace_hooks.operator_pending_confirm_request) ->
-      Operator_pending_confirm.upsert_pending_confirm
-        config
-        { token = entry.token
-        ; trace_id = entry.trace_id
-        ; actor = entry.actor
-        ; action_type = entry.action_type
-        ; target_type = entry.target_type
-        ; target_id = entry.target_id
-        ; payload = entry.payload
-        ; delegated_tool = entry.delegated_tool
-        ; created_at = entry.created_at
-        ; expires_at = entry.expires_at
-        });
+      Operator_pending_confirm.upsert_pending_confirm config entry);
   Atomic.set
     Workspace_hooks.operator_pending_confirm_read_result_fn
     (fun config ->
-      Operator_pending_confirm.read_pending_confirms_result config
-      |> Result.map
-           (List.map
-              (fun (entry : Operator_pending_confirm.pending_confirm) :
-                   Workspace_hooks.operator_pending_confirm_request ->
-                { token = entry.token
-                ; trace_id = entry.trace_id
-                ; actor = entry.actor
-                ; action_type = entry.action_type
-                ; target_type = entry.target_type
-                ; target_id = entry.target_id
-                ; payload = entry.payload
-                ; delegated_tool = entry.delegated_tool
-                ; created_at = entry.created_at
-                ; expires_at = entry.expires_at
-                })));
+      Operator_pending_confirm.read_pending_confirms_result config);
   Atomic.set
     Workspace_hooks.operator_pending_confirm_remove_fn
     Operator_pending_confirm.remove_pending_confirm;
@@ -821,13 +481,14 @@ let () =
       match target.Operator_pending_confirm.target_type, target.target_id with
       | Operator_action_constants.Keeper, Some keeper_name ->
         let admission =
-          Keeper_turn_admission.snapshot_for
+          Keeper_owner_registry.shutdown_operation_id
             ~base_path:config.Workspace.base_path
             ~keeper_name
         in
-        (match admission.snapshot_shutdown_operation_id with
-         | None -> Ok ()
-         | Some operation_id ->
+        (match admission with
+         | Error error -> Error (Keeper_owner_registry.lookup_error_to_string error)
+         | Ok None -> Ok ()
+         | Ok (Some operation_id) ->
            Error
              (Printf.sprintf
                 "Keeper %s is shutting down under operation %s"

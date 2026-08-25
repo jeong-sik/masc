@@ -33,4 +33,4 @@ done
 
 export MASC_KEEPER_BOOTSTRAP_ENABLED="$keeper_bootstrap_enabled"
 
-exec "$REPO_ROOT/start-masc.sh" --http --host 127.0.0.1 --port 8935 "${args[@]}"
+exec "$REPO_ROOT/start-masc.sh" --http --host 127.0.0.1 --port 8935 ${args[@]+"${args[@]}"}

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Verify every test_*.ml file under test/ is registered in a dune or .inc file.
+"""Verify every test_*.ml file under test/ is registered in a Dune input.
 
 Parses dune S-expressions properly (handling multiline, nested forms, strings,
-and comments) to avoid the false-positive flood from regex-based approaches.
+and comments) and consumes generated-stanza name manifests directly.
 """
 
 import sys
@@ -165,6 +165,15 @@ def extract_includes(tokens):
     return includes
 
 
+def extract_name_manifest(content: str):
+    """Extract one Dune executable name per non-comment line."""
+    return {
+        line
+        for raw_line in content.splitlines()
+        if (line := raw_line.partition("#")[0].strip())
+    }
+
+
 def main():
     repo_root = Path(".").resolve()
     test_dir = repo_root / "test"
@@ -177,7 +186,7 @@ def main():
     ml_files = sorted(test_dir.rglob("test_*.ml"))
     ml_names = {f.stem for f in ml_files}
 
-    # 2. Parse all dune and .inc files under test/
+    # 2. Parse all static Dune inputs under test/.
     registered = set()
     files_to_parse = []
     files_to_parse.extend(sorted(test_dir.rglob("dune")))
@@ -206,18 +215,31 @@ def main():
             if inc_path.exists() and inc_path not in parsed_paths:
                 pending.append(inc_path)
 
+    # coverage_tests.inc is generated at Dune evaluation time and therefore is
+    # absent from a clean checkout. Its source manifest is the authoritative
+    # registration input; audits must consume that SSOT rather than duplicate
+    # its names or pretend the generated file is available.
+    coverage_manifest = test_dir / "stanzas" / "coverage_test_names.txt"
+    if not coverage_manifest.exists():
+        print(
+            f"error: Dune test-name manifest not found: {coverage_manifest}",
+            file=sys.stderr,
+        )
+        return 1
+    registered.update(extract_name_manifest(coverage_manifest.read_text()))
+
     # 3. Compare
     unregistered = sorted(ml_names - registered)
     # Only flag orphaned registrations that look like test files
     orphaned = sorted({r for r in (registered - ml_names) if r.startswith("test_")})
 
     print(f"test_*.ml files found:    {len(ml_names)}")
-    print(f"Registered in dune/.inc:  {len(registered)}")
+    print(f"Registered in Dune inputs: {len(registered)}")
     print(f"Unregistered:             {len(unregistered)}")
     print(f"Orphaned registrations:   {len(orphaned)}")
 
     if unregistered:
-        print("\nUnregistered test_*.ml files (no dune registration found):")
+        print("\nUnregistered test_*.ml files (no Dune registration found):")
         for name in unregistered:
             print(f"  {name}")
 

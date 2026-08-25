@@ -2,11 +2,13 @@
 import { h } from 'preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { RuntimeMonitor } from './runtime-monitor'
 
 const apiMocks = vi.hoisted(() => ({
   fetchDashboardRuntimeProbe: vi.fn(),
   fetchRuntimeProviders: vi.fn(),
   fetchRuntimeModelMetrics: vi.fn(),
+  probeOfficialClientLogin: vi.fn(),
 }))
 
 vi.mock('../api/dashboard', () => apiMocks)
@@ -23,7 +25,7 @@ describe('RuntimeMonitor', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
-    vi.resetModules()
+    apiMocks.probeOfficialClientLogin.mockReset()
     apiMocks.fetchRuntimeProviders.mockReset().mockResolvedValue({
       updated_at: '2026-05-13T13:00:00Z',
       summary: {
@@ -94,7 +96,7 @@ describe('RuntimeMonitor', () => {
             always_ignored_sampling_params: ['temperature'],
           },
           request_config: {
-            source: 'oas-provider-config',
+            source: 'agent-core-provider-config',
             provider_kind: 'openai_compat',
             request_path: '/chat/completions',
             request_path_targets_responses_api: false,
@@ -129,7 +131,7 @@ describe('RuntimeMonitor', () => {
             connect_timeout_s: 120,
           },
           effective_capabilities: {
-            source: 'oas-provider-config-model',
+            source: 'agent-core-provider-config-model',
             max_context_tokens: 131072,
             max_output_tokens: 65536,
             supports_tools: true,
@@ -235,7 +237,6 @@ describe('RuntimeMonitor', () => {
                 supports_computer_use: true,
                 supports_code_execution: true,
               },
-              match_prefixes: ['Qwen/'],
             },
             binding: {
               provider_id: 'runpod_mtp',
@@ -251,14 +252,6 @@ describe('RuntimeMonitor', () => {
           source: 'runtime.toml',
           endpoint_url: 'https://example.invalid/v1',
           note: 'verified by runtime discovery',
-          discovery: {
-            healthy: true,
-            discovered_model: 'Qwen/Qwen3-32B',
-            ctx_size: 200000,
-            total_slots: 4,
-            busy_slots: 1,
-            idle_slots: 3,
-          },
         },
       ],
     })
@@ -276,6 +269,7 @@ describe('RuntimeMonitor', () => {
       cache_ttl_sec: 30,
       cache_age_sec: 0,
       cache_hit: false,
+      refresh_state: 'served_stale',
       probe: {
         source: 'runtime.toml',
         status: 'reachable',
@@ -293,18 +287,31 @@ describe('RuntimeMonitor', () => {
           {
             runtime_id: 'runpod_mtp.qwen',
             provider_id: 'runpod_mtp',
+            provider_display_name: 'RunPod MTP',
+            model_id: 'qwen',
             model_api_name: 'Qwen/Qwen3-32B',
+            protocol: 'openai-compatible-http',
+            runtime_kind: 'http',
+            transport: 'http',
+            auth_kind: 'env:RUNPOD_API_KEY',
             status: 'reachable',
             reachable: true,
             http_status: 200,
             latency_ms: 42.5,
             model_count: 1,
+            content_type: 'application/json',
+            downloaded_bytes: 128,
             credential_required: true,
             auth_present: true,
+            endpoint_url: 'https://example.invalid/v1',
             probe_url: 'https://example.invalid/v1/models',
+            error: null,
+            checked_at: '2026-06-06T02:47:31Z',
           },
         ],
         errors: [],
+        observations: ['runtime.toml provider reachability: 1 reachable, 0 failed, 0 skipped'],
+        limitations: ['Probe checks provider metadata endpoints only; it does not send a completion request.'],
       },
     })
     container = document.createElement('div')
@@ -317,8 +324,6 @@ describe('RuntimeMonitor', () => {
   })
 
   it('shows runtime.toml binding identity on provider status cards', async () => {
-    const { RuntimeMonitor } = await import('./runtime-monitor')
-
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
@@ -331,8 +336,6 @@ describe('RuntimeMonitor', () => {
   })
 
   it('separates configured inventory from live provider reachability', async () => {
-    const { RuntimeMonitor } = await import('./runtime-monitor')
-
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
@@ -348,9 +351,34 @@ describe('RuntimeMonitor', () => {
     expect(container.querySelector('article.v2-monitoring-card')).not.toBeNull()
   })
 
-  it('surfaces declared and effective provider/model parameter facts', async () => {
-    const { RuntimeMonitor } = await import('./runtime-monitor')
+  it('embeds an explicit subscription probe only for official-client protocols', async () => {
+    const baseline = await apiMocks.fetchRuntimeProviders()
+    apiMocks.fetchRuntimeProviders.mockReset().mockResolvedValue({
+      ...baseline,
+      providers: [{
+        ...baseline.providers[0],
+        provider: 'codex.codex',
+        runtime_id: 'codex.codex',
+        provider_id: 'codex',
+        protocol: 'codex-app-server',
+        runtime_kind: 'cli',
+        model_api_name: 'gpt-5.3-codex-spark',
+        status: 'configured_unverified',
+        available: false,
+      }],
+    })
+    render(h(RuntimeMonitor, {}), container)
+    await waitFor(
+      () => container.querySelector('[data-testid="official-client-login-probe-codex.codex"]') != null,
+      'official-client login probe',
+    )
 
+    expect(apiMocks.probeOfficialClientLogin).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('gpt-5.3-codex-spark')
+    expect(container.textContent).toContain('configured · unverified')
+  })
+
+  it('surfaces declared and effective provider/model parameter facts', async () => {
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
@@ -359,7 +387,7 @@ describe('RuntimeMonitor', () => {
 
     expect(container.textContent).toContain('params · wire:chat_template_kwargs')
     expect(container.textContent).toContain(
-      'request · kind:openai_compat · source:oas-provider-config · path:/chat/completions',
+      'request · kind:openai_compat · source:agent-core-provider-config · path:/chat/completions',
     )
     expect(container.textContent).toContain('system-prompt')
     expect(container.textContent).toContain('preserve:off')
@@ -392,8 +420,8 @@ describe('RuntimeMonitor', () => {
       'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,system-prompt,cache,prompt-cache@1024,seed+images,usage,computer-use,code-exec',
     )
     expect(container.textContent).toContain('price-in:0.1')
-    expect(container.textContent).toContain('effective · source:oas-provider-config-model · ctx:131072 · out:65536')
-    expect(container.textContent).toContain('source:oas-provider-config-model · ctx:131072 · out:65536 · tools · tool-choice+required+named+parallel')
+    expect(container.textContent).toContain('effective · source:agent-core-provider-config-model · ctx:131072 · out:65536')
+    expect(container.textContent).toContain('source:agent-core-provider-config-model · ctx:131072 · out:65536 · tools · tool-choice+required+named+parallel')
     expect(container.textContent).toContain('runtime-mcp-tools')
     expect(container.textContent).toContain('reasoning · extended-thinking · reasoning-budget · effort:low,medium,high')
     expect(container.textContent).toContain('reasoning-stream:delta-reasoning-field:reasoning_content')
@@ -406,36 +434,10 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('task:transcription · native-stream')
     expect(container.textContent).toContain('seed+images')
     expect(container.textContent).toContain('code-exec')
-    expect(container.textContent).toContain('discovered · Qwen/Qwen3-32B')
-    expect(container.textContent).toContain('idle · 3')
   })
 
-  it('falls back to provider snapshot model count and auth kind when live probe rows are absent', async () => {
-    apiMocks.fetchDashboardRuntimeProbe.mockResolvedValueOnce({
-      generated_at: '2026-06-06T02:47:31Z',
-      refreshed_at_unix: 1780714051,
-      cache_ttl_sec: 30,
-      cache_age_sec: 0,
-      cache_hit: false,
-      probe: {
-        source: 'runtime.toml',
-        status: 'reachable',
-        checked_at: '2026-06-06T02:47:31Z',
-        probe_ok: true,
-        summary: {
-          runtimes: 1,
-          probed: 0,
-          reachable: 0,
-          failed: 0,
-          skipped: 1,
-          default_runtime_id: 'runpod_mtp.qwen',
-        },
-        providers: [],
-        errors: [],
-      },
-    })
-    const { RuntimeMonitor } = await import('./runtime-monitor')
-
+  it('uses provider snapshot model count and auth kind when the live probe request fails', async () => {
+    apiMocks.fetchDashboardRuntimeProbe.mockRejectedValueOnce(new Error('runtime probe unavailable'))
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
@@ -448,8 +450,6 @@ describe('RuntimeMonitor', () => {
   })
 
   it('renders parameter facts as structured request declared and effective rows', async () => {
-    const { RuntimeMonitor } = await import('./runtime-monitor')
-
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
@@ -460,14 +460,14 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('policy · replay on tool call')
     expect(container.textContent).toContain('required')
     expect(container.textContent).toContain('request · source')
-    expect(container.textContent).toContain('oas-provider-config')
+    expect(container.textContent).toContain('agent-core-provider-config')
     expect(container.textContent).toContain('request · system prompt')
     expect(container.textContent).toContain('declared provider · capabilities block')
     expect(container.textContent).toContain('declared model · capability source')
     expect(container.textContent).toContain('binding · provider.model')
     expect(container.textContent).toContain('runpod_mtp,qwen')
     expect(container.textContent).toContain('effective · source')
-    expect(container.textContent).toContain('oas-provider-config-model')
+    expect(container.textContent).toContain('agent-core-provider-config-model')
     expect(container.textContent).toContain('effective · max context')
     expect(container.textContent).toContain('131,072')
     expect(container.textContent).toContain('effective · tools')
@@ -538,8 +538,6 @@ describe('RuntimeMonitor', () => {
         },
       ],
     })
-    const { RuntimeMonitor } = await import('./runtime-monitor')
-
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runtime_lane_cache') ?? false,
@@ -597,15 +595,13 @@ describe('RuntimeMonitor', () => {
               usage_reported: false,
               telemetry_reported: true,
               coverage_reason: 'missing_usage_and_inference',
-              coverage_stage: 'oas',
+              coverage_stage: 'agentCore',
             },
           ],
           buckets: [],
         },
       ],
     })
-    const { RuntimeMonitor } = await import('./runtime-monitor')
-
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runtime_lane_missing_cache') ?? false,
@@ -624,9 +620,9 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).not.toContain('no-usage/no-usage')
   })
 
-  it('renders the latest oas telemetry sample from the push-fed read model', async () => {
-    const { latestOasTelemetrySample } = await import('../oas-telemetry-store')
-    latestOasTelemetrySample.value = {
+  it('renders the latest agentCore telemetry sample from the push-fed read model', async () => {
+    const { latestAgentCoreTelemetrySample } = await import('../agent-core-telemetry-store')
+    latestAgentCoreTelemetrySample.value = {
       provider_id: 'runtime',
       model_id: 'runtime',
       ttfb_ms: 121.4,
@@ -636,32 +632,28 @@ describe('RuntimeMonitor', () => {
       status_kind: 'success',
       recorded_at: 1_712_000_000.5,
     }
-    const { RuntimeMonitor } = await import('./runtime-monitor')
-
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
-      () => container.querySelector('[data-testid="oas-latest-telemetry-sample"]') != null,
-      'oas latest telemetry sample line',
+      () => container.querySelector('[data-testid="agent-core-latest-telemetry-sample"]') != null,
+      'agentCore latest telemetry sample line',
     )
 
-    const line = container.querySelector('[data-testid="oas-latest-telemetry-sample"]')?.textContent ?? ''
-    expect(line).toContain('oas latest · runtime')
+    const line = container.querySelector('[data-testid="agent-core-latest-telemetry-sample"]')?.textContent ?? ''
+    expect(line).toContain('agentCore latest · runtime')
     expect(line).toContain('ttfb 121ms')
     expect(line).toContain('total 845ms')
     expect(line).toContain('42.1 tok/s')
     expect(line).toContain('success')
-    latestOasTelemetrySample.value = null
+    latestAgentCoreTelemetrySample.value = null
   })
 
-  it('omits the oas telemetry sample line before any push arrives', async () => {
-    const { RuntimeMonitor } = await import('./runtime-monitor')
-
+  it('omits the agentCore telemetry sample line before any push arrives', async () => {
     render(h(RuntimeMonitor, {}), container)
     await waitFor(
       () => container.textContent?.includes('runpod_mtp.qwen') ?? false,
       'runtime binding',
     )
 
-    expect(container.querySelector('[data-testid="oas-latest-telemetry-sample"]')).toBeNull()
+    expect(container.querySelector('[data-testid="agent-core-latest-telemetry-sample"]')).toBeNull()
   })
 })

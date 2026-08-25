@@ -1,0 +1,60 @@
+name = "keeper_task_done"
+description = """
+Submit your claimed task for verification with a result summary and trusted \
+evidence_refs. The task must be claimed by you. This does not make the task \
+done: it moves to awaiting_verification and waits for a completion \
+authority's verdict, which no Keeper can produce. It also does not hold your \
+next claim while it waits. Every evidence_refs entry must be \
+artifact:<producer-root-relative-path> or note:<text>; this tool refuses any \
+other form at submit. Only an artifact: path is opened and snapshotted for \
+the reviewer — a note: entry is text the reviewer reads but cannot inspect. \
+Pure-placeholder results ('done', 'ok', etc.) are rejected."""
+
+[[params]]
+name = "task_id"
+type = "string"
+required = true
+description = "Task ID returned by keeper_task_claim"
+min_length = 1
+
+[[params]]
+name = "result"
+type = "string"
+required = true
+description = "What was done: files changed, tests run, outcome observed"
+min_length = 1
+
+[[params]]
+name = "evidence_refs"
+type = "array"
+required = true
+items = { type = "string" }
+min_items = 1
+description = """
+Trusted references substantiating completion. Every entry must be \
+artifact:<producer-root-relative-path> or note:<text>; nothing else can be \
+read back at review, so this tool refuses it here rather than letting the \
+reviewer see missing evidence. An artifact: path is opened and snapshotted, \
+and that is what satisfies the completion gate. A Board post id, a commit, a \
+PR number, or a file:// URI is narrative until something opens it: pass it \
+as note:<text> next to an artifact: entry, never on its own."""
+
+[[params]]
+name = "notes"
+type = "string"
+description = """
+Verification handoff notes (>= 20 chars). For contracted tasks: summarise \
+what changed AND mention each contract.required_evidence entry verbatim. \
+Ignored when the task has no contract."""
+
+[help]
+short_description = "Submit your owned task for verification with a result summary and evidence_refs."
+when_to_use = "Use when the current keeper has finished an owned task and can cite concrete evidence_refs."
+key_constraints = [
+  "Caller must own the task; no tool overrides task ownership.",
+  "evidence_refs must include at least one locally validated base-path artifact, local git commit, or .masc trace/turn/receipt artifact.",
+  "The task moves to awaiting_verification, not done. Only a completion authority commits the verdict.",
+]
+details_markdown = "Issues submit_for_verification. The task waits for an operator or auto-judge verdict, which no Keeper can produce; it does not hold your next claim while it waits, and cancelling it discards the evidence you just submitted. For PR-bearing work, include the PR URL or artifact reference in evidence_refs."
+examples = ["task_id='task-123' result='Implemented the task; checks passed.' evidence_refs=['artifact:review-42']"]
+alternatives = ["masc_transition"]

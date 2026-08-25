@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Tool_metrics_persist — JSONL disk persistence for tool metrics.
 
     Uses {!Dated_jsonl} for date-split storage under
@@ -46,7 +29,7 @@ let write_queue_mu = Mutex.create ()
 let write_queue : Yojson.Safe.t Queue.t = Queue.create ()
 let dropped_full_queue = Atomic.make 0
 
-let store_ref : (string * Dated_jsonl.t) option ref = ref None
+let store = Atomic.make None
 
 let with_write_queue_lock f = Mutex.protect write_queue_mu f
 
@@ -65,10 +48,11 @@ let reset_for_testing () =
   if dropped > 0 then
     Log.Metrics.warn "tool_metrics_persist: reset dropped %d queued records" dropped;
   Atomic.set dropped_full_queue 0;
-  store_ref := None
+  Atomic.set store None
 
-let get_or_create_store ~base_path : Dated_jsonl.t =
-  match !store_ref with
+let rec get_or_create_store ~base_path : Dated_jsonl.t =
+  let current = Atomic.get store in
+  match current with
   | Some (cached_path, s) when String.equal cached_path base_path -> s
   | _ ->
     (* RFC-0121: layout SSOT via [Config_dir_resolver.data_dir]. *)
@@ -78,9 +62,10 @@ let get_or_create_store ~base_path : Dated_jsonl.t =
         "tool-metrics"
     in
     Fs_compat.mkdir_p dir;
-    let s = Dated_jsonl.create ~base_dir:dir () in
-    store_ref := Some (base_path, s);
-    s
+    let candidate = Dated_jsonl.create ~base_dir:dir () in
+    if Atomic.compare_and_set store current (Some (base_path, candidate))
+    then candidate
+    else get_or_create_store ~base_path
 
 let enqueue (result : Tool_result.result) =
   let json = record_to_json result in

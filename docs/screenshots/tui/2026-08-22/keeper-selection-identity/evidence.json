@@ -1,0 +1,136 @@
+{
+  "schema": "masc.tui.screenshot_evidence.v1",
+  "kind": "fixture_backed_actual_binary_tui_capture",
+  "captured_at_start": "2026-08-22T03:28:45Z",
+  "captured_at_end": "2026-08-22T03:28:54Z",
+  "pull_request": 29476,
+  "issue": 29453,
+  "evidence_asset_commit_sha": "80f09eec2ae27ed1f73332e8d39512be53848bdb",
+  "worktree_clean_before_capture": true,
+  "source": {
+    "code_source_sha": "a451478677bbbce1f7b3fc8bcea50d5af1af18cf",
+    "executable": "_build/default/bin/masc_tui.exe",
+    "executable_bytes": 39392160,
+    "executable_sha256": "db03557c032799d51dbdfa2766123fa6adc898d5ad7d0c7b429a7e428bcd5074",
+    "build_command": "scripts/dune-local.sh build bin/masc_tui.exe @test/runtest-test_tui_keeper_selection @test/runtest-test_tui_keyboard_input @test/runtest-test_tui_http_ast",
+    "fixture_module": "test/test_tui_keyboard_input.py",
+    "fixture_functions": [
+      "seed_workspace",
+      "keeper_metadata",
+      "overview_event_http_fixtures"
+    ]
+  },
+  "terminal": {
+    "kind": "real_pty_via_ttyd",
+    "columns": 99,
+    "rows": 30,
+    "term": "xterm-256color",
+    "ttyd_version": "1.7.7-unknown",
+    "renderer": "dom",
+    "xterm_version": null,
+    "xterm_version_note": "ttyd does not report its bundled xterm.js version separately",
+    "font_family": "Menlo",
+    "font_size_px": 14,
+    "playwright_version": "1.59.0",
+    "chromium_version": "147.0.7727.15",
+    "browser_viewport_width_px": 860,
+    "browser_viewport_height_px": 496,
+    "device_scale_factor": 1,
+    "screenshot_width_px": 834,
+    "screenshot_height_px": 480
+  },
+  "runtime": {
+    "TERM": "xterm-256color",
+    "MASC_TUI_SYNC": "off",
+    "screenshot_selector": ".xterm-screen"
+  },
+  "fixtures": {
+    "initial": [
+      {"name": "alpha", "generation": 1},
+      {"name": "beta", "generation": 1}
+    ],
+    "detail_removal": [
+      {"name": "alpha", "generation": 29454}
+    ],
+    "message_target_removal": [
+      {"name": "alpha", "generation": 1}
+    ],
+    "unreliable_roster": {
+      "alpha.json": "malformed JSON",
+      "beta": {"name": "beta", "generation": 1}
+    }
+  },
+  "screenshots": [
+    {
+      "file": "01-keeper-list-after-detail-removal.png",
+      "captured_at": "2026-08-22T03:28:48Z",
+      "bytes": 16020,
+      "sha256": "d926566f65d05b85583487275844f43b8e134ee0375bbebee6b1a4187e18a522",
+      "width_px": 834,
+      "height_px": 480,
+      "terminal_columns": 99,
+      "terminal_rows": 30,
+      "visible_fixture_port": 54936,
+      "refresh_seconds": 60.0,
+      "input_before_screenshot": ["2", "j", "Enter", "r"],
+      "input_hex_before_screenshot": ["32", "6a", "0d", "72"],
+      "fixture_transition": "open beta detail; [alpha,beta] -> [alpha generation=29454]",
+      "assertion": "missing beta detail returns to MASC Keepers (1) without opening alpha detail"
+    },
+    {
+      "file": "02-message-after-target-removal.png",
+      "captured_at": "2026-08-22T03:28:50Z",
+      "bytes": 24806,
+      "sha256": "41daba8f270faef15ecc085af944617d81c433b4792fe7cba896df9ebbcd0e3f",
+      "width_px": 834,
+      "height_px": 480,
+      "terminal_columns": 99,
+      "terminal_rows": 30,
+      "visible_fixture_port": 54969,
+      "refresh_seconds": 0.05,
+      "input_before_screenshot": ["2", "j", "Enter", "m", "beta-periodic-draft-29453"],
+      "input_hex_prefix_before_screenshot": ["32", "6a", "0d", "6d"],
+      "fixture_transition": "open beta message; [alpha,beta] -> [alpha] via periodic refresh",
+      "assertion": "missing beta target retains its identity and draft while Enter is disabled",
+      "post_screenshot_measurement": {
+        "input": ["Enter", "x"],
+        "draft_suffix_observed": "x",
+        "chat_post_count": 0
+      }
+    },
+    {
+      "file": "03-message-after-roster-read-error.png",
+      "captured_at": "2026-08-22T03:28:53Z",
+      "bytes": 24306,
+      "sha256": "953617c93be67a496701596f2f5e648188c6eccb030019b0529b8482593701f1",
+      "width_px": 834,
+      "height_px": 480,
+      "terminal_columns": 99,
+      "terminal_rows": 30,
+      "visible_fixture_port": 55126,
+      "refresh_seconds": 0.05,
+      "input_before_screenshot": ["2", "j", "Enter", "m", "beta-unreliable-draft-29453"],
+      "input_hex_prefix_before_screenshot": ["32", "6a", "0d", "6d"],
+      "fixture_transition": "open beta message; alpha metadata valid -> malformed while beta remains",
+      "assertion": "unreliable roster retains the beta target and draft while new sends are disabled",
+      "post_screenshot_measurement": {
+        "input": ["Enter", "x"],
+        "draft_suffix_observed": "x",
+        "chat_post_count": 0
+      }
+    }
+  ],
+  "verification": {
+    "targeted_pty_scenarios": "PASS 3/3",
+    "full_keyboard_pty_regression": "PASS",
+    "pure_keeper_selection_tests": "PASS 4/4",
+    "independent_review": "KEEP; P0/P1/P2 = 0/0/0"
+  },
+  "limits": [
+    "The HTTP responses and Keeper metadata are deterministic synthetic fixtures, not a production runtime.",
+    "The screenshots are rendering evidence; the PTY regression tests are the behavior proof.",
+    "The capture proves the terminal projection for this executable and viewport only.",
+    "No DOM text was replaced and no screenshot was edited, redacted, or AI-generated after capture.",
+    "Deployment and live API health are separate evidence axes."
+  ]
+}

@@ -8,6 +8,7 @@ import {
   type KeeperOperationalState,
 } from './keeper-operational-state'
 import { formatDuration } from './format-time'
+import { keeperHeartbeatStaleMs } from '../config/constants'
 
 export type KeeperLinkedRuntimeState = 'offline' | 'online' | 'unlinked'
 export type KeeperRuntimeProjectionTone = 'ok' | 'warn' | 'bad' | 'info' | 'neutral'
@@ -22,6 +23,7 @@ export type KeeperRuntimeProjectionSignalKind =
   | 'runtime_trace'
   | 'runtime_warning'
   | 'fsm_raw_lanes'
+  | 'blocked_tasks'
 
 export type KeeperRuntimeProjectionSignalState =
   | 'ok'
@@ -50,6 +52,7 @@ export interface KeeperRuntimeProjectionRuntimeInput {
   readonly workspace_git_commit?: string | null
   readonly build?: {
     readonly commit?: string | null
+    readonly binary_commit?: string | null
     readonly started_at?: string | null
   } | null
 }
@@ -114,11 +117,24 @@ interface DeriveKeeperRuntimeProjectionInput {
   readonly nowMs?: number
 }
 
-// 5-minute threshold for the operator-facing monitoring band. This is longer
-// than transport heartbeat checks so short SSE reconnects do not become keeper
-// attention events.
-// NOTE: HEARTBEAT_STALE_MS(120s)와 다른 5분 윈도우 — 의도 차이인지 확인 필요 (SSOT 감사 2026-07)
-export const KEEPER_RUNTIME_HEARTBEAT_STALE_MS = 5 * 60 * 1000
+/** The attention axis of a keeper runtime projection.
+ *
+ *  Every fleet surface must answer "does this keeper need me" from this one
+ *  list. The keepers roster used to answer it from two flat record fields
+ *  (`needs_attention`, `blocked_task_count`) while the monitoring roster read
+ *  these signals, so the same keeper showed 주의 on one surface and 실행 중 on
+ *  the other — a stale heartbeat, a context breach or a dead fiber was
+ *  visible in monitoring and invisible in the roster. */
+export function keeperAttentionSignals(
+  projection: KeeperRuntimeProjection,
+): KeeperRuntimeProjectionSignal[] {
+  return projection.signals.filter(signal => signal.contributesToAttention)
+}
+
+export function keeperNeedsAttention(projection: KeeperRuntimeProjection): boolean {
+  return projection.signals.some(signal => signal.contributesToAttention)
+}
+
 export const KEEPER_RUNTIME_CONTEXT_ATTENTION_RATIO = 0.95
 
 export function compactToken(value: string | null | undefined, fallback = 'unknown'): string {
@@ -133,7 +149,6 @@ export function shortCommit(value: string | null | undefined): string | null {
 
 export function deriveKeeperLinkedRuntimeState(keeper: Keeper | null | undefined): KeeperLinkedRuntimeState {
   if (!keeper) return 'unlinked'
-  if (keeper.agent?.exists === false) return 'offline'
   return isKeeperOffline(keeper) ? 'offline' : 'online'
 }
 
@@ -165,18 +180,18 @@ export function deriveKeeperRuntimeProjection({
         ? `${formatDuration(keeper.last_turn_ago_s)} since turn`
         : 'idle age unknown'
   const runtimeReason = compactToken(opState.displaySummary, 'no blocker reason')
-  const runtimeCommit =
-    shortCommit(runtimeResolution?.server_repo_git_commit)
-    ?? shortCommit(runtimeResolution?.build?.commit)
+  const runtimeCommit = shortCommit(runtimeResolution?.build?.binary_commit)
   const workspaceCommit = shortCommit(runtimeResolution?.workspace_git_commit)
   const runtimeBuildLabel = runtimeCommit
-    ? workspaceCommit && workspaceCommit !== runtimeCommit
-      ? `${runtimeCommit} vs workspace ${workspaceCommit}`
-      : runtimeCommit
-    : null
-  const runtimeRepoLabel = runtimeResolution?.server_repo_path?.path
+  const runtimeRepoPath = runtimeResolution?.server_repo_path?.path
     ? runtimeResolution.server_repo_path.path.split('/').slice(-2).join('/')
     : null
+  const runtimeRepoCommit = shortCommit(runtimeResolution?.server_repo_git_commit)
+  const runtimeRepoLabel = [
+    runtimeRepoPath,
+    runtimeRepoCommit ? `head ${runtimeRepoCommit}` : null,
+    workspaceCommit ? `workspace ${workspaceCommit}` : null,
+  ].filter((value): value is string => value !== null).join(' · ') || null
 
   const signals = buildProjectionSignals({
     opState,
@@ -188,6 +203,7 @@ export function deriveKeeperRuntimeProjection({
     runtimeWarnings,
     fsmLanes,
     runtimeReason,
+    backlog: deriveBacklogAttention(keeper),
   })
   const attentionSignals = signals.filter(signal => signal.contributesToAttention)
   const headline =
@@ -249,12 +265,13 @@ export function deriveKeeperRuntimeProjection({
 
 function deriveHeartbeatProjection(keeper: Keeper, nowMs: number): KeeperHeartbeatProjection {
   const lastHeartbeat = keeper.last_heartbeat ?? null
+  const thresholdMs = keeperHeartbeatStaleMs(keeper.heartbeat_stale_after_s)
   if (!lastHeartbeat) {
     return {
       stale: false,
       lastHeartbeat,
       ageMs: null,
-      thresholdMs: KEEPER_RUNTIME_HEARTBEAT_STALE_MS,
+      thresholdMs,
     }
   }
   const ts = Date.parse(lastHeartbeat)
@@ -263,16 +280,35 @@ function deriveHeartbeatProjection(keeper: Keeper, nowMs: number): KeeperHeartbe
       stale: false,
       lastHeartbeat,
       ageMs: null,
-      thresholdMs: KEEPER_RUNTIME_HEARTBEAT_STALE_MS,
+      thresholdMs,
     }
   }
   const ageMs = nowMs - ts
   return {
-    stale: ageMs > KEEPER_RUNTIME_HEARTBEAT_STALE_MS,
+    stale: ageMs > thresholdMs,
     lastHeartbeat,
     ageMs,
-    thresholdMs: KEEPER_RUNTIME_HEARTBEAT_STALE_MS,
+    thresholdMs,
   }
+}
+
+/** Blocked work the keeper is carrying, read from the execution row.
+ *
+ *  This is the fact the keepers roster used to answer 주의 with on its own,
+ *  while the monitoring roster answered from the runtime signals. Carrying it
+ *  as a signal makes it part of the one attention axis both surfaces read,
+ *  instead of a second definition living on one surface. */
+export interface KeeperBacklogAttention {
+  readonly blockedTasks: number
+  readonly flagged: boolean
+}
+
+function deriveBacklogAttention(keeper: Keeper): KeeperBacklogAttention {
+  const blockedTasks =
+    typeof keeper.blocked_task_count === 'number' && Number.isFinite(keeper.blocked_task_count)
+      ? Math.max(0, keeper.blocked_task_count)
+      : 0
+  return { blockedTasks, flagged: keeper.needs_attention === true }
 }
 
 function deriveContextProjection(keeper: Keeper): KeeperContextProjection {
@@ -325,7 +361,7 @@ function terminalEventLabel(trace: KeeperRuntimeTraceResponse | null): KeeperRun
           ? 'ok'
           : 'info'
   const detailParts = [
-    `oas ${clock.max_oas_turn_count ?? '-'}`,
+    `agentCore ${clock.max_agent_core_turn_count ?? '-'}`,
     `manifest ${trace.manifest_total_rows}`,
     `health ${compactToken(trace.health)}`,
     gapCount > 0 ? `${gapCount} lens gap${gapCount === 1 ? '' : 's'}` : 'no lens gaps',
@@ -373,6 +409,7 @@ function fsmLaneSummary(lanes: readonly KeeperRuntimeProjectionFsmLane[]): strin
 
 function buildProjectionSignals({
   opState,
+  backlog,
   heartbeat,
   context,
   fiberAlive,
@@ -391,6 +428,7 @@ function buildProjectionSignals({
   readonly runtimeWarnings: readonly string[]
   readonly fsmLanes: readonly KeeperRuntimeProjectionFsmLane[]
   readonly runtimeReason: string
+  readonly backlog: KeeperBacklogAttention
 }): KeeperRuntimeProjectionSignal[] {
   const blockerAttention = opState.kind === 'stuck' || opState.attention !== 'clean'
   const ksmAttention = fsmLanes.some(lane => lane.axis === 'KSM' && lane.contributesToAttention)
@@ -440,6 +478,29 @@ function buildProjectionSignals({
       hint: context.breach ? `컨텍스트 사용량이 ${contextValue}입니다.` : null,
     },
     {
+      kind: 'blocked_tasks',
+      label: 'blocked work',
+      value:
+        backlog.blockedTasks > 0
+          ? `${backlog.blockedTasks} blocked`
+          : backlog.flagged
+            ? 'flagged'
+            : 'clear',
+      detail:
+        backlog.blockedTasks > 0
+          ? `blocked_task_count ${backlog.blockedTasks}`
+          : 'blocked_task_count 0',
+      tone: backlog.blockedTasks > 0 || backlog.flagged ? 'warn' : 'neutral',
+      state: backlog.blockedTasks > 0 || backlog.flagged ? 'attention' : 'ok',
+      contributesToAttention: backlog.blockedTasks > 0 || backlog.flagged,
+      hint:
+        backlog.blockedTasks > 0
+          ? `차단된 작업이 ${backlog.blockedTasks}건 있습니다.`
+          : backlog.flagged
+            ? '주의 플래그가 설정되어 있습니다.'
+            : null,
+    },
+    {
       kind: 'fiber_alive',
       label: 'fiber',
       value: fiberAlive.alive ? 'alive' : 'not_proven',
@@ -447,7 +508,7 @@ function buildProjectionSignals({
       tone: fiberAlive.alive ? 'ok' : 'warn',
       state: fiberAlive.alive ? 'ok' : 'attention',
       contributesToAttention: !fiberAlive.alive,
-      hint: fiberAlive.alive ? null : 'fiber 생존 증거가 없습니다.',
+      hint: fiberAlive.alive ? null : 'fiber 생존 증거 없음',
     },
     {
       kind: 'stop_requested',

@@ -6,54 +6,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const {
   bootKeeper,
   shutdownKeeper,
-  fetchKeeperChatPending,
-  fetchKeeperChatReceipt,
-  fetchKeeperEventQueuePending,
-  cancelKeeperChatPendingReceipt,
-  editKeeperChatPendingReceipt,
-  moveKeeperChatPendingReceiptToEnd,
-  operateKeeperEventQueue,
-  resolveKeeperChatRecovery,
-  KeeperEventQueueOperationError,
+  cancelKeeperChatOperation,
+  editQueuedKeeperChatOperation,
+  listQueuedKeeperChatOperations,
+  moveQueuedKeeperChatOperationToEnd,
 } = vi.hoisted(() => ({
   bootKeeper: vi.fn(),
   shutdownKeeper: vi.fn(),
-  fetchKeeperChatPending: vi.fn(),
-  fetchKeeperChatReceipt: vi.fn(),
-  fetchKeeperEventQueuePending: vi.fn(),
-  cancelKeeperChatPendingReceipt: vi.fn(),
-  editKeeperChatPendingReceipt: vi.fn(),
-  moveKeeperChatPendingReceiptToEnd: vi.fn(),
-  operateKeeperEventQueue: vi.fn(),
-  resolveKeeperChatRecovery: vi.fn(),
-  KeeperEventQueueOperationError: class KeeperEventQueueOperationError extends Error {
-    readonly operation: {
-      action: 'cancel' | 'transfer'
-      operationId: string
-      reason?: string
-      sourceIncarnation: string
-      sourceRef: string
-      targetKeeper?: string
-    }
-    readonly commitState: 'committed' | 'unknown'
-
-    constructor(
-      message: string,
-      operation: {
-        action: 'cancel' | 'transfer'
-        operationId: string
-        reason?: string
-        sourceIncarnation: string
-        sourceRef: string
-        targetKeeper?: string
-      },
-      commitState: 'committed' | 'unknown',
-    ) {
-      super(message)
-      this.operation = operation
-      this.commitState = commitState
-    }
-  },
+  cancelKeeperChatOperation: vi.fn(),
+  editQueuedKeeperChatOperation: vi.fn(),
+  listQueuedKeeperChatOperations: vi.fn(),
+  moveQueuedKeeperChatOperationToEnd: vi.fn(),
 }))
 
 const { invalidateDashboardCache, refreshDashboard } = vi.hoisted(() => ({
@@ -75,9 +38,8 @@ vi.mock('../keeper-actions', () => ({
   hydrateKeeperChatHistory: vi.fn(async () => undefined),
   loadFullKeeperHistory: vi.fn(async () => null),
   probeKeeperRuntime: vi.fn(),
-  reconcileKeeperChatReceipts: vi.fn(async () => undefined),
   recoverKeeperRuntime: vi.fn(),
-  resumePendingKeeperChatRequests: vi.fn(async () => undefined),
+  hydrateTrackedKeeperChatOperations: vi.fn(async () => undefined),
   sendKeeperThreadMessage: vi.fn(async () => null),
   interruptKeeperTurn: vi.fn(async () => true),
   isKeeperThreadMessageSendInFlight: vi.fn(() => false),
@@ -106,7 +68,6 @@ vi.mock('../keeper-state', async () => {
       turnRef: opts.turnRef ?? undefined,
       traceEventCount: opts.traceEventCount ?? undefined,
       lifecycleEvents: opts.lifecycleEvents ?? undefined,
-      deliveryReceipt: opts.deliveryReceipt ?? undefined,
       reason: opts.reason ?? undefined,
     }),
     setRecordValue: (state: { value: Record<string, unknown> }, key: string, value: unknown) => {
@@ -120,21 +81,17 @@ vi.mock('../keeper-state', async () => {
           && entry.source !== 'tool_result'
           && entry.source !== 'system'),
     ),
+    isAutonomousTurnEntry: (entry: { source?: string }) => entry.source === 'autonomous_turn',
   }
 })
 
 vi.mock('../api/keeper', () => ({
   bootKeeper,
   shutdownKeeper,
-  fetchKeeperChatPending,
-  fetchKeeperChatReceipt,
-  fetchKeeperEventQueuePending,
-  cancelKeeperChatPendingReceipt,
-  editKeeperChatPendingReceipt,
-  moveKeeperChatPendingReceiptToEnd,
-  operateKeeperEventQueue,
-  resolveKeeperChatRecovery,
-  KeeperEventQueueOperationError,
+  cancelKeeperChatOperation,
+  editQueuedKeeperChatOperation,
+  listQueuedKeeperChatOperations,
+  moveQueuedKeeperChatOperationToEnd,
 }))
 
 vi.mock('../store', async (importOriginal) => {
@@ -172,14 +129,14 @@ import {
   isKeeperThreadMessageSendInFlight,
   sendKeeperThreadMessage,
 } from '../keeper-actions'
-import { _resetChatStoreForTests, enqueueInput, getQueuedMessages, getQueueLength } from '../keeper-chat-store'
 import {
   markToolCallOutputsHydrationFailed,
   markToolCallOutputsHydrating,
   resetToolCallOutputs,
 } from '../tool-call-output-store'
 import { shellAuthSummary } from '../store'
-import type { ChatBlock, KeeperConversationAttachment, KeeperConversationEntry, KeeperUserInputBlock } from '../types'
+import { chatShowAutonomous, chatShowInternal } from '../lib/chat-view-prefs'
+import type { KeeperConversationEntry } from '../types'
 import {
   KeeperConversationPanel,
   KeeperDiagnosticSummary,
@@ -254,6 +211,8 @@ describe('KeeperConversationPanel', () => {
     })
     keeperThreads.value = {}
     keeperSending.value = {}
+    chatShowAutonomous.value = true
+    chatShowInternal.value = true
     keeperHydrating.value = {}
     keeperStatusDetails.value = {}
     keeperActionErrors.value = {}
@@ -261,27 +220,22 @@ describe('KeeperConversationPanel', () => {
     shellAuthSummary.value = null
     mockedToolsData.value = null
     mockedToolsError.value = null
-    _resetChatStoreForTests()
     vi.mocked(sendKeeperThreadMessage).mockReset()
     vi.mocked(sendKeeperThreadMessage).mockResolvedValue(undefined)
     vi.mocked(cancelActiveKeeperThreadMessage).mockReset()
     vi.mocked(cancelActiveKeeperThreadMessage).mockResolvedValue(true)
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReset()
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReturnValue(false)
-    fetchKeeperChatPending.mockReset()
-    fetchKeeperChatReceipt.mockReset()
-    fetchKeeperEventQueuePending.mockReset()
-    cancelKeeperChatPendingReceipt.mockReset()
-    editKeeperChatPendingReceipt.mockReset()
-    moveKeeperChatPendingReceiptToEnd.mockReset()
-    operateKeeperEventQueue.mockReset()
-    resolveKeeperChatRecovery.mockReset()
+    cancelKeeperChatOperation.mockReset()
+    editQueuedKeeperChatOperation.mockReset()
+    listQueuedKeeperChatOperations.mockReset()
+    listQueuedKeeperChatOperations.mockResolvedValue([])
+    moveQueuedKeeperChatOperationToEnd.mockReset()
   })
 
   afterEach(() => {
     render(null, container)
     container.remove()
-    _resetChatStoreForTests()
     resetToolCallOutputs()
     vi.unstubAllGlobals()
   })
@@ -351,6 +305,112 @@ describe('KeeperConversationPanel', () => {
     expect(container.querySelector('[data-chat-variant="messenger"]')).not.toBeNull()
     expect(container.querySelector('textarea')?.getAttribute('placeholder')).toBe('메시지 입력...')
     expect(hydrateKeeperStatus).not.toHaveBeenCalled()
+  })
+
+  it('hides autonomous turns when the autonomous view pref is off', async () => {
+    keeperThreads.value = {
+      sangsu: [
+        {
+          id: 'direct-user',
+          role: 'user',
+          source: 'direct_user',
+          label: '사용자',
+          text: '직접 질문',
+          rawText: '직접 질문',
+          timestamp: '2026-03-24T00:01:00.000Z',
+          delivery: 'history',
+          streamState: null,
+          details: null,
+          error: null,
+        },
+        {
+          id: 'autonomous-1',
+          role: 'assistant',
+          source: 'autonomous_turn',
+          label: 'sangsu',
+          text: '자율 작업 결과',
+          rawText: '자율 작업 결과',
+          timestamp: '2026-03-24T00:02:00.000Z',
+          delivery: 'history',
+          streamState: null,
+          details: null,
+          error: null,
+        },
+      ],
+    }
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+    expect(container.textContent).toContain('자율턴')
+
+    chatShowAutonomous.value = false
+    await waitFor(() => {
+      expect(container.textContent).not.toContain('자율턴')
+    })
+    expect(container.textContent).toContain('직접 질문')
+  })
+
+  it('internal-message banner count excludes autonomously hidden turns', async () => {
+    keeperThreads.value = {
+      sangsu: [
+        {
+          id: 'world',
+          role: 'user',
+          source: 'world_state_prompt',
+          label: 'system',
+          text: '## Current World State',
+          rawText: '## Current World State',
+          timestamp: '2026-03-24T00:00:00.000Z',
+          delivery: 'history',
+          streamState: null,
+          details: null,
+          error: null,
+        },
+        {
+          id: 'direct-user',
+          role: 'user',
+          source: 'direct_user',
+          label: '사용자',
+          text: '직접 질문',
+          rawText: '직접 질문',
+          timestamp: '2026-03-24T00:01:00.000Z',
+          delivery: 'history',
+          streamState: null,
+          details: null,
+          error: null,
+        },
+        {
+          id: 'autonomous-1',
+          role: 'assistant',
+          source: 'autonomous_turn',
+          label: 'sangsu',
+          text: '자율 작업 결과',
+          rawText: '자율 작업 결과',
+          timestamp: '2026-03-24T00:02:00.000Z',
+          delivery: 'history',
+          streamState: null,
+          details: null,
+          error: null,
+        },
+      ],
+    }
+    chatShowInternal.value = false
+    chatShowAutonomous.value = false
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+
+    // Only the world-state prompt counts as a hidden internal message; the
+    // autonomous turn was hidden by its own toggle and must not inflate it.
+    expect(container.textContent).toContain('1개의 내부 메시지가 숨겨져 있습니다')
+    expect(container.textContent).not.toContain('자율턴')
+    expect(container.textContent).toContain('직접 질문')
   })
 
   it('renders the primary conversation layout as an airy canvas', async () => {
@@ -498,7 +558,7 @@ describe('KeeperConversationPanel', () => {
     expect(container.querySelector('input[name="keeper_chat_search"]')).not.toBeNull()
   })
 
-  it('does not enqueue a duplicate submit for the active client action', async () => {
+  it('does not resubmit an active client action', async () => {
     keeperSending.value = { sangsu: true }
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReturnValue(true)
 
@@ -515,12 +575,11 @@ describe('KeeperConversationPanel', () => {
     const sendButton = container.querySelector('.send') as HTMLButtonElement
     fireEvent.click(sendButton)
 
-    expect(getQueueLength('sangsu')).toBe(0)
+    expect(sendKeeperThreadMessage).not.toHaveBeenCalled()
   })
 
-  it('enqueues repeated same-draft submits as separate queued actions', async () => {
+  it('submits a new durable operation immediately while another reply streams', async () => {
     keeperSending.value = { sangsu: true }
-    enqueueInput('sangsu', 'same draft', undefined, 'queued-action-1')
 
     render(
       html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
@@ -529,61 +588,17 @@ describe('KeeperConversationPanel', () => {
     await Promise.resolve()
 
     const textarea = container.querySelector('textarea') as HTMLTextAreaElement
-    fireEvent.input(textarea, { target: { value: 'same draft' } })
+    fireEvent.input(textarea, { target: { value: 'second operation' } })
     await Promise.resolve()
+    fireEvent.click(container.querySelector('.send') as HTMLButtonElement)
 
-    const sendButton = container.querySelector('.send') as HTMLButtonElement
-    fireEvent.click(sendButton)
-
-    expect(getQueueLength('sangsu')).toBe(2)
-  })
-
-  it('renders queued drafts inside the transcript while the keeper is busy', async () => {
-    keeperSending.value = { sangsu: true }
-    enqueueInput('sangsu', 'queued transcript draft', undefined, 'queued-action-1')
-
-    render(
-      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
-      container,
-    )
-    await Promise.resolve()
-
-    expect(container.textContent).toContain('queued transcript draft')
-    expect(container.querySelector('[data-chat-delivery="queued"]')).not.toBeNull()
-  })
-
-  it('renders queue card and transcript placeholder with the same FIFO identity', async () => {
-    keeperSending.value = { sangsu: true }
-    enqueueInput('sangsu', 'queued first', undefined, 'queued-click-1')
-    enqueueInput('sangsu', 'queued second', undefined, 'queued-click-2')
-
-    render(
-      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout="workspace" />`,
-      container,
-    )
-    await Promise.resolve()
-
-    const queueCards = [...container.querySelectorAll('[data-chat-queue-item]')] as HTMLElement[]
-    const queuedBubbles = [...container.querySelectorAll('[data-chat-entry-id^="queued-user-"]')] as HTMLElement[]
-
-    expect(queueCards.map(node => node.getAttribute('data-chat-queue-seq'))).toEqual(['1', '2'])
-    expect(queuedBubbles.map(node => node.getAttribute('data-chat-queue-seq'))).toEqual(['1', '2'])
-    expect(queueCards.map(node => node.getAttribute('data-chat-queue-client-action-id'))).toEqual([
-      'queued-click-1',
-      'queued-click-2',
-    ])
-    expect(queuedBubbles.map(node => node.getAttribute('data-chat-queue-client-action-id'))).toEqual([
-      'queued-click-1',
-      'queued-click-2',
-    ])
-    expect(queuedBubbles.map(node => node.getAttribute('data-chat-stream-contract-delivery-receipt'))).toEqual([
-      'no_delivery_receipt',
-      'no_delivery_receipt',
-    ])
-    expect(queuedBubbles.map(node => node.getAttribute('data-chat-stream-contract-reason'))).toEqual([
-      'client-side composer queue item; not yet submitted to keeper runtime',
-      'client-side composer queue item; not yet submitted to keeper runtime',
-    ])
+    await waitFor(() => {
+      expect(sendKeeperThreadMessage).toHaveBeenCalledWith(
+        'sangsu',
+        'second operation',
+        expect.objectContaining({ clientActionId: expect.any(String) }),
+      )
+    })
   })
 
   it('wires the live tool-output hydration contract store into the transcript', async () => {
@@ -677,182 +692,6 @@ describe('KeeperConversationPanel', () => {
     })
   })
 
-  it('renders queued voice draft display blocks inside the transcript', async () => {
-    keeperSending.value = { sangsu: true }
-    const voiceBlocks: ChatBlock[] = [
-      { t: 'voice', secs: 3, size: '12 KB', wave: [0.2, 0.8], transcript: 'hello voice' },
-      { t: 'p', html: '[Voice memo 00:03 (12 KB)]<br />hello voice' },
-    ]
-    enqueueInput(
-      'sangsu',
-      '[Voice memo 00:03 (12 KB)]\nhello voice',
-      undefined,
-      'queued-voice-1',
-      voiceBlocks,
-      [{ type: 'text', text: '[Voice memo 00:03 (12 KB)]\nhello voice' }],
-    )
-
-    render(
-      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
-      container,
-    )
-    await Promise.resolve()
-
-    expect(container.querySelector('[data-chat-delivery="queued"]')).not.toBeNull()
-    expect(container.querySelector('[data-chat-block="voice"]')).not.toBeNull()
-    expect(container.textContent).toContain('hello voice')
-  })
-
-  it('keeps queued attachment drafts visible with multimodal provenance and no delivery receipt', async () => {
-    keeperSending.value = { sangsu: true }
-    const attachments: KeeperConversationAttachment[] = [
-      {
-        id: 'queued-att',
-        type: 'image',
-        name: 'queued.png',
-        size: 1024,
-        mimeType: 'image/png',
-        data: 'data:image/png;base64,iVBORw0KGgo=',
-      },
-    ]
-    const displayBlocks: ChatBlock[] = [
-      {
-        t: 'attach',
-        id: 'queued-att',
-        name: 'queued.png',
-        kind: 'image',
-        src: 'data:image/png;base64,iVBORw0KGgo=',
-        mimeType: 'image/png',
-        sizeBytes: 1024,
-      },
-    ]
-    const userBlocks: KeeperUserInputBlock[] = [
-      {
-        type: 'image',
-        attachmentId: 'queued-att',
-        name: 'queued.png',
-        mimeType: 'image/png',
-        size: 1024,
-      },
-    ]
-    enqueueInput('sangsu', '', attachments, 'queued-attachment-1', displayBlocks, userBlocks)
-
-    render(
-      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
-      container,
-    )
-    await Promise.resolve()
-
-    const bubble = container.querySelector('[data-chat-entry-id^="queued-user-"]') as HTMLElement
-    expect(bubble.getAttribute('data-chat-delivery-state')).toBe('queued')
-    expect(bubble.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
-    expect(bubble.getAttribute('data-chat-attachment-count')).toBe('1')
-    expect(bubble.getAttribute('data-chat-server-attach-block-count')).toBe('1')
-    expect(bubble.getAttribute('data-chat-multimodal-sources')).toBe('persisted_attachment,server_block')
-    expect(bubble.getAttribute('data-chat-multimodal-kinds')).toBe('image')
-    expect(bubble.querySelector('[data-chat-delivery="queued"]')).not.toBeNull()
-    expect(bubble.querySelector('[data-chat-attachment-card="queued-att"]')).not.toBeNull()
-    expect(bubble.querySelector('[data-chat-block="attach"][data-chat-multimodal-source="server_block"]')).not.toBeNull()
-  })
-
-  it('renders queued drafts with invalid timestamps without throwing', async () => {
-    keeperSending.value = { sangsu: true }
-    const msg = enqueueInput('sangsu', 'queued invalid timestamp', undefined, 'queued-action-1')
-    msg.timestamp = Number.NaN
-
-    expect(() => render(
-      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
-      container,
-    )).not.toThrow()
-    await Promise.resolve()
-
-    expect(container.textContent).toContain('queued invalid timestamp')
-    expect(container.querySelector('[data-chat-delivery="queued"]')).not.toBeNull()
-  })
-
-  it('keeps queued client action ids attached when draining the queue as independent turns', async () => {
-    enqueueInput('sangsu', 'queued one', undefined, 'queued-click-1')
-    enqueueInput('sangsu', 'queued two', undefined, 'queued-click-2')
-
-    render(
-      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
-      container,
-    )
-    await Promise.resolve()
-
-    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
-    fireEvent.input(textarea, { target: { value: 'trigger drain' } })
-    await Promise.resolve()
-
-    const sendButton = container.querySelector('.send') as HTMLButtonElement
-    fireEvent.click(sendButton)
-
-    await waitFor(() => expect(sendKeeperThreadMessage).toHaveBeenCalledTimes(3))
-    expect(vi.mocked(sendKeeperThreadMessage).mock.calls[1]?.[1]).toBe('queued one')
-    expect(vi.mocked(sendKeeperThreadMessage).mock.calls[1]?.[2]).toEqual(expect.objectContaining({
-      clientActionId: 'queued-click-1',
-    }))
-    expect(vi.mocked(sendKeeperThreadMessage).mock.calls[2]?.[1]).toBe('queued two')
-    expect(vi.mocked(sendKeeperThreadMessage).mock.calls[2]?.[2]).toEqual(expect.objectContaining({
-      clientActionId: 'queued-click-2',
-    }))
-  })
-
-  it('continues draining messages queued while a queue batch is in flight', async () => {
-    vi.mocked(sendKeeperThreadMessage).mockImplementation(async (_keeperName, message) => {
-      if (message === 'queued one') {
-        enqueueInput('sangsu', 'queued during drain', undefined, 'queued-click-3')
-      }
-    })
-    enqueueInput('sangsu', 'queued one', undefined, 'queued-click-1')
-
-    render(
-      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
-      container,
-    )
-    await Promise.resolve()
-
-    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
-    fireEvent.input(textarea, { target: { value: 'trigger drain' } })
-    await Promise.resolve()
-
-    const sendButton = container.querySelector('.send') as HTMLButtonElement
-    fireEvent.click(sendButton)
-
-    await waitFor(() => expect(sendKeeperThreadMessage).toHaveBeenCalledTimes(3))
-    expect(vi.mocked(sendKeeperThreadMessage).mock.calls[1]?.[1]).toBe('queued one')
-    expect(vi.mocked(sendKeeperThreadMessage).mock.calls[2]?.[1]).toBe('queued during drain')
-    expect(vi.mocked(sendKeeperThreadMessage).mock.calls[2]?.[2]).toEqual(expect.objectContaining({
-      clientActionId: 'queued-click-3',
-    }))
-    expect(getQueueLength('sangsu')).toBe(0)
-  })
-
-  it('drops an aborted queued send instead of requeueing it', async () => {
-    vi.mocked(sendKeeperThreadMessage).mockImplementation(async (_keeperName, message) => {
-      if (message === 'queued one') throw new DOMException('cancelled', 'AbortError')
-    })
-    enqueueInput('sangsu', 'queued one', undefined, 'queued-click-1')
-    enqueueInput('sangsu', 'queued two', undefined, 'queued-click-2')
-
-    render(
-      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
-      container,
-    )
-    await Promise.resolve()
-
-    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
-    fireEvent.input(textarea, { target: { value: 'trigger drain' } })
-    await Promise.resolve()
-
-    const sendButton = container.querySelector('.send') as HTMLButtonElement
-    fireEvent.click(sendButton)
-
-    await waitFor(() => expect(sendKeeperThreadMessage).toHaveBeenCalledTimes(2))
-    expect(vi.mocked(sendKeeperThreadMessage).mock.calls[1]?.[1]).toBe('queued one')
-    expect(getQueuedMessages('sangsu').map(msg => msg.content)).toEqual(['queued two'])
-  })
-
   it('forwards the message-level turn inspector action to the transcript', async () => {
     const onInspectTurn = vi.fn()
     keeperThreads.value = {
@@ -934,7 +773,7 @@ describe('KeeperConversationPanel', () => {
     expect(container.textContent).toContain('Snapshot says the keeper heartbeat is stale.')
   })
 
-  it('shows an explicit running-turn state when the keeper waiting inventory reports busy', async () => {
+  it('shows the running owner state while a Keeper turn is active', async () => {
     mockedToolsData.value = {
       keeper_waiting_inventory: {
         keepers: [
@@ -946,544 +785,82 @@ describe('KeeperConversationPanel', () => {
       html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
       container,
     )
+
     await waitFor(() => {
       expect(container.textContent).toContain('Keeper 턴 실행 중')
-      expect(container.textContent).toContain('다른 턴 실행 중')
+      expect(container.querySelector('[data-keeper-operation-status]')?.textContent).toContain('Running')
     })
   })
 
-  it('separates every durable server queue state from browser-local drafts', async () => {
-    mockedToolsData.value = {
-      keeper_waiting_inventory: {
-        keepers: [
-          {
-            keeper_name: 'sangsu',
-            state: 'busy',
-            waiting_on: [],
-            waiting_count: 5,
-            sources: {
-              chat_queue_pending: 2,
-              chat_queue_inflight: 1,
-              chat_queue_recovery_required: 1,
-              chat_queue_persistence_blocked: 1,
-            },
-            next_action: 'keeper_chat_consumer_drain',
-          },
-        ],
-      },
-    }
-    render(
-      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
-      container,
-    )
-
-    await waitFor(() => {
-      const status = container.querySelector('[data-server-chat-queue]') as HTMLElement | null
-      expect(status?.getAttribute('data-server-chat-queue-pending')).toBe('2')
-      expect(status?.getAttribute('data-server-chat-queue-inflight')).toBe('1')
-      expect(status?.getAttribute('data-server-chat-queue-recovery-required')).toBe('1')
-      expect(status?.getAttribute('data-server-chat-queue-persistence-blocked')).toBe('1')
-      expect(status?.textContent).toContain('서버 대기 2')
-      expect(status?.textContent).toContain('처리 중 1')
-      expect(status?.textContent).toContain('배송 복구 확인 필요 1')
-      expect(status?.textContent).toContain('영속화 조정 필요 1')
-      expect(container.textContent).not.toContain('브라우저 초안 · 서버 미접수')
-    })
-  })
-
-  it('does not open Admin-only queue controls for the loopback Worker session', async () => {
-    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
-    mockedToolsData.value = {
-      keeper_waiting_inventory: {
-        keepers: [{
-          keeper_name: 'sangsu',
-          state: 'waiting',
-          waiting_count: 1,
-          sources: { chat_queue_pending: 1 },
-          waiting_on: [],
-        }],
-      },
-    }
-
-    render(
-      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
-      container,
-    )
-
-    const button = await waitFor(() => {
-      const node = container.querySelector('[data-open-keeper-queue-control]') as HTMLButtonElement | null
-      expect(node?.disabled).toBe(true)
-      expect(node?.textContent).toContain('Admin 권한 필요')
-      return node!
-    })
-    fireEvent.click(button)
-
-    expect(container.querySelector('[data-keeper-queue-control-panel]')).toBeNull()
-    expect(fetchKeeperChatPending).not.toHaveBeenCalled()
-    expect(fetchKeeperEventQueuePending).not.toHaveBeenCalled()
-  })
-
-  it('opens an operator drawer with exact durable chat and event queue evidence', async () => {
-    shellAuthSummary.value = { effective_role: 'admin', default_role: 'admin' } as typeof shellAuthSummary.value
-    const receiptId = 'chatq_00000000-0000-4000-8000-000000000022'
-    fetchKeeperChatPending.mockResolvedValue({
-      keeperName: 'sangsu',
-      revision: '22',
-      currentWork: null,
-      totalPending: 1,
-      nextAfter: null,
-      pending: [{
-        receipt: {
-          keeperName: 'sangsu',
-          receiptId,
-          revision: '22',
-          state: { kind: 'pending' },
+  it('renders and mutates queued chat operations by singular operation id', async () => {
+    shellAuthSummary.value = { effective_role: 'admin' } as typeof shellAuthSummary.value
+    const operation = {
+      operationId: 'kmsg-operation-1',
+      sequence: '7',
+      createdAt: 42,
+      input: {
+        message: 'durable operation input',
+        wire: {
+          schema: 'masc.keeper_chat_operation.input.v1',
+          message: 'durable operation input',
+          user_blocks: [{ type: 'text', text: 'durable operation input' }],
+          turn_instructions: null,
+          surface_context: null,
+          attachments: [],
         },
-        content: 'durable queued operator request',
-        source: { kind: 'dashboard', threadId: 'operator-thread-22' },
-        userBlocks: [],
-        attachments: [],
-        submittedAt: 42,
-      }],
-    })
-    fetchKeeperEventQueuePending.mockResolvedValue({
-      keeperName: 'sangsu',
-      revision: '9',
-      totalPending: 1,
-      nextAfter: null,
-      pending: [{
-        queueIndex: 0,
-        postId: 'board-post-9',
-        sourceIncarnation: '9',
-        sourceRef: 'a'.repeat(64),
-        urgency: 'normal',
-        arrivedAt: 41,
-        payloadKind: 'board_signal',
-      }],
-    })
-    mockedToolsData.value = {
-      keeper_waiting_inventory: {
-        keepers: [{
-          keeper_name: 'sangsu',
-          state: 'busy',
-          waiting_count: 2,
-          sources: {
-            chat_queue_pending: 1,
-            event_queue_pending: 1,
-          },
-          waiting_on: [{
-            source: 'event_queue_pending',
-            waiting_on: 'board_signal',
-            next_action: 'keeper_drain_event_queue',
-            detail: {
-              queue_index: 0,
-              post_id: 'board-post-9',
-              urgency: 'normal',
-              arrived_at_unix: 41,
-              payload_kind: 'board_signal',
-            },
-          }],
-        }],
       },
+      state: { kind: 'queued' as const },
     }
+    listQueuedKeeperChatOperations.mockResolvedValue([operation])
+    editQueuedKeeperChatOperation.mockResolvedValue(operation)
+    moveQueuedKeeperChatOperationToEnd.mockResolvedValue(operation)
+    cancelKeeperChatOperation.mockResolvedValue({
+      ...operation,
+      input: null,
+      state: { kind: 'cancelled', completedAt: 43 },
+    })
+    Object.defineProperty(window, 'prompt', {
+      configurable: true,
+      value: vi.fn(() => 'edited operation input'),
+    })
 
     render(
       html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
       container,
     )
-    fireEvent.click(await waitFor(() => {
-      const button = container.querySelector('[data-open-keeper-queue-control]')
-      expect(button).not.toBeNull()
-      return button as HTMLElement
-    }))
+    fireEvent.click(container.querySelector('[data-open-keeper-operation-control]') as HTMLButtonElement)
 
     await waitFor(() => {
-      const panel = container.querySelector('[data-keeper-queue-control-panel]')
-      expect(panel?.getAttribute('role')).toBe('dialog')
-      expect(panel?.textContent).toContain('durable queued operator request')
-      expect(panel?.textContent).toContain(receiptId)
-      expect(panel?.textContent).toContain('dashboard · thread operator-thread-22')
-      expect(panel?.textContent).toContain('board-post-9')
-      expect(panel?.textContent).toContain('수정')
-      expect(panel?.textContent).toContain('맨 뒤로')
-      expect(panel?.textContent).toContain('이관')
-      expect(panel?.textContent).toContain('취소')
-    })
-  })
-
-  it('shows exact inflight and recovery evidence and resolves recovery with a fresh receipt fence', async () => {
-    shellAuthSummary.value = { effective_role: 'admin', default_role: 'admin' } as typeof shellAuthSummary.value
-    const inflightReceiptId = 'chatq_00000000-0000-4000-8000-000000000031'
-    const recoveryReceiptId = 'chatq_00000000-0000-4000-8000-000000000032'
-    fetchKeeperChatPending.mockResolvedValue({
-      keeperName: 'sangsu',
-      revision: '31',
-      currentWork: { lane: 'interactive', startedAt: 1_785_000_000 },
-      totalPending: 0,
-      nextAfter: null,
-      pending: [],
-    })
-    fetchKeeperEventQueuePending.mockResolvedValue({
-      keeperName: 'sangsu',
-      revision: '31',
-      totalPending: 0,
-      nextAfter: null,
-      pending: [],
-    })
-    fetchKeeperChatReceipt.mockResolvedValue({
-      keeperName: 'sangsu',
-      receiptId: recoveryReceiptId,
-      revision: '32',
-      state: {
-        kind: 'recovery_required',
-        leaseId: 'lease-recovery-32',
-        startedAt: 1_784_999_000,
-        dispatchable: false,
-      },
-    })
-    resolveKeeperChatRecovery.mockResolvedValue({
-      decision: 'requeue_unconfirmed',
-      receipt: {
-        keeperName: 'sangsu',
-        receiptId: recoveryReceiptId,
-        revision: '33',
-        state: { kind: 'pending' },
-      },
-      audit: { recorded: true },
-    })
-    mockedToolsData.value = {
-      keeper_waiting_inventory: {
-        keepers: [{
-          keeper_name: 'sangsu',
-          state: 'busy',
-          waiting_count: 2,
-          sources: {
-            chat_queue_inflight: 1,
-            chat_queue_recovery_required: 1,
-          },
-          current_execution: {
-            turn_phase: 'executing_tools',
-            decision: { stage: 'tool_loop' },
-            runtime: { state: 'running' },
-            latest_tool: { name: 'masc_board_list', used_at: 1_785_000_010 },
-            run_state: {
-              kind: 'running',
-              wake_kind: 'interactive',
-              stimulus_kinds: ['chat'],
-              active_tool_count: 1,
-            },
-            live_turn: {
-              turn_id: 77,
-              started_at: 1_785_000_000,
-              last_progress_at: 1_785_000_010,
-              last_progress_kind: 'tool_finished',
-              selected_model: 'operator-model',
-              active_tool_count: 1,
-            },
-          },
-          waiting_on: [
-            {
-              source: 'chat_queue_inflight',
-              waiting_on: 'dashboard',
-              next_action: 'keeper_chat_turn_terminal_receipt',
-              detail: {
-                queue_index: 0,
-                receipt_id: inflightReceiptId,
-                message_source: { kind: 'dashboard', thread_id: 'thread-31' },
-                content_length: 23,
-                lifecycle: {
-                  state: 'inflight',
-                  lease_id: 'lease-inflight-31',
-                  started_at: 1_785_000_000,
-                },
-              },
-            },
-            {
-              source: 'chat_queue_recovery_required',
-              waiting_on: 'slack',
-              next_action: 'resolve_keeper_chat_queue_recovery',
-              detail: {
-                queue_index: 0,
-                receipt_id: recoveryReceiptId,
-                message_source: {
-                  kind: 'slack',
-                  channel_id: 'channel-32',
-                  user_id: 'user-32',
-                },
-                content_length: 17,
-                lifecycle: {
-                  state: 'recovery_required',
-                  lease_id: 'lease-recovery-32',
-                  started_at: 1_784_999_000,
-                  dispatchable: false,
-                },
-              },
-            },
-          ],
-        }],
-      },
-    }
-
-    render(
-      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
-      container,
-    )
-    fireEvent.click(await waitFor(() => {
-      const button = container.querySelector('[data-open-keeper-queue-control]')
-      expect(button).not.toBeNull()
-      return button as HTMLElement
-    }))
-
-    const panel = await waitFor(() => {
-      const node = container.querySelector('[data-keeper-queue-control-panel]')
-      expect(node?.textContent).toContain('executing_tools')
-      expect(node?.textContent).toContain('tool_loop')
-      expect(node?.textContent).toContain('operator-model')
-      expect(node?.textContent).toContain('masc_board_list')
-      expect(node?.querySelector(
-        `[data-operator-chat-inflight="${inflightReceiptId}"]`,
-      )).not.toBeNull()
-      expect(node?.querySelector(
-        `[data-operator-chat-recovery="${recoveryReceiptId}"]`,
-      )).not.toBeNull()
-      expect(node?.textContent).toContain('자동 재실행이 차단됐습니다')
-      return node as HTMLElement
+      const row = container.querySelector('[data-operator-chat-operation="kmsg-operation-1"]')
+      expect(row?.textContent).toContain('seq 7')
+      expect(row?.textContent).toContain('durable operation input')
     })
 
-    const recovery = panel.querySelector(
-      `[data-operator-chat-recovery="${recoveryReceiptId}"]`,
-    )
-    const requeue = [...(recovery?.querySelectorAll('button') ?? [])]
-      .find(button => button.textContent === '재대기')
-    expect(requeue).not.toBeUndefined()
-    fireEvent.click(requeue as HTMLElement)
-
+    const row = container.querySelector('[data-operator-chat-operation="kmsg-operation-1"]') as HTMLElement
+    const buttons = Array.from(row.querySelectorAll('button'))
+    fireEvent.click(buttons.find(button => button.textContent === '수정') as HTMLButtonElement)
     await waitFor(() => {
-      expect(fetchKeeperChatReceipt).toHaveBeenCalledWith(
+      expect(editQueuedKeeperChatOperation).toHaveBeenCalledWith(
         'sangsu',
-        recoveryReceiptId,
+        operation,
+        'edited operation input',
       )
-      expect(resolveKeeperChatRecovery).toHaveBeenCalledWith(
-        'sangsu',
-        recoveryReceiptId,
-        '32',
-        'lease-recovery-32',
-        { kind: 'requeue_unconfirmed' },
-      )
-    })
-
-    const interrupt = [...panel.querySelectorAll('button')]
-      .find(button => button.textContent === '현재 턴 중단')
-    expect(interrupt).not.toBeUndefined()
-    fireEvent.click(interrupt as HTMLElement)
-    await waitFor(() => {
-      expect(interruptKeeperTurn).toHaveBeenCalledWith('sangsu')
     })
   })
 
-  it('replays an ambiguous event mutation with the exact preserved operation identity', async () => {
-    shellAuthSummary.value = { effective_role: 'admin', default_role: 'admin' } as typeof shellAuthSummary.value
-    fetchKeeperChatPending.mockResolvedValue({
-      keeperName: 'sangsu',
-      revision: '22',
-      currentWork: null,
-      totalPending: 0,
-      nextAfter: null,
-      pending: [],
-    })
-    fetchKeeperEventQueuePending.mockResolvedValue({
-      keeperName: 'sangsu',
-      revision: '9',
-      totalPending: 1,
-      nextAfter: null,
-      pending: [{
-        queueIndex: 0,
-        postId: 'board-post-9',
-        sourceIncarnation: '9',
-        sourceRef: 'a'.repeat(64),
-        urgency: 'normal',
-        arrivedAt: 41,
-        payloadKind: 'board_signal',
-      }],
-    })
-    mockedToolsData.value = {
-      keeper_waiting_inventory: {
-        keepers: [{
-          keeper_name: 'sangsu',
-          state: 'busy',
-          waiting_count: 1,
-          sources: { event_queue_pending: 1 },
-          waiting_on: [],
-        }],
-      },
-    }
-    const recoveryOperation = {
-      action: 'transfer' as const,
-      operationId: 'operation-replay-9',
-      sourceIncarnation: '9',
-      sourceRef: 'a'.repeat(64),
-      targetKeeper: 'rondo',
-    }
-    operateKeeperEventQueue
-      .mockRejectedValueOnce(new KeeperEventQueueOperationError(
-        'connection reset after possible commit',
-        recoveryOperation,
-        'unknown',
-      ))
-      .mockResolvedValueOnce(undefined)
-    vi.stubGlobal('prompt', vi.fn(() => 'rondo'))
-
-    render(
-      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
-      container,
-    )
-    fireEvent.click(await waitFor(() => {
-      const button = container.querySelector('[data-open-keeper-queue-control]')
-      expect(button).not.toBeNull()
-      return button as HTMLElement
-    }))
-    const transfer = await waitFor(() => {
-      const row = container.querySelector('[data-operator-event-row]')
-      const button = [...(row?.querySelectorAll('button') ?? [])]
-        .find(node => node.textContent === '이관')
-      expect(button).not.toBeUndefined()
-      return button as HTMLElement
-    })
-
-    fireEvent.click(transfer)
-
-    const recovery = await waitFor(() => {
-      const node = container.querySelector(
-        '[data-event-operation-recovery="operation-replay-9"]',
-      )
-      expect(node).not.toBeNull()
-      expect(node?.textContent).toContain('commit 결과 확인 필요')
-      return node as HTMLElement
-    })
-    const retry = [...recovery.querySelectorAll('button')]
-      .find(node => node.textContent === '동일 작업 결과 확인·복구')
-    expect(retry).not.toBeUndefined()
-
-    fireEvent.click(retry as HTMLElement)
-
-    await waitFor(() => {
-      expect(operateKeeperEventQueue).toHaveBeenNthCalledWith(
-        2,
-        'sangsu',
-        recoveryOperation,
-      )
-      expect(container.querySelector(
-        '[data-event-operation-recovery="operation-replay-9"]',
-      )).toBeNull()
-    })
-  })
-
-  it('surfaces a server queue snapshot read failure instead of showing an empty queue', async () => {
-    mockedToolsData.value = {
-      keeper_waiting_inventory: {
-        keepers: [
-          {
-            keeper_name: 'sangsu',
-            state: 'waiting',
-            waiting_on: [],
-            waiting_count: 1,
-            sources: { read_error: 1 },
-            next_action: 'repair_keeper_chat_queue_snapshot',
-          },
-        ],
-      },
-    }
+  it('keeps operation controls closed for a Worker session', async () => {
+    shellAuthSummary.value = { effective_role: 'worker' } as typeof shellAuthSummary.value
     render(
       html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
       container,
     )
 
-    await waitFor(() => {
-      const status = container.querySelector('[data-server-chat-queue]') as HTMLElement | null
-      expect(status?.getAttribute('data-server-chat-queue-read-errors')).toBe('1')
-      expect(status?.textContent).toContain('대기열 조회 실패 1')
-      expect(status?.textContent).toContain('repair_keeper_chat_queue_snapshot')
-    })
+    const openButton = container.querySelector('[data-open-keeper-operation-control]') as HTMLButtonElement
+    expect(openButton.disabled).toBe(true)
+    fireEvent.click(openButton)
+    expect(container.querySelector('[data-keeper-operation-control-panel]')).toBeNull()
   })
 
-  it('surfaces a failed tools refresh even when stale queue counts remain cached', async () => {
-    mockedToolsData.value = {
-      keeper_waiting_inventory: {
-        keepers: [
-          {
-            keeper_name: 'sangsu',
-            state: 'waiting',
-            waiting_on: [],
-            waiting_count: 1,
-            sources: { chat_queue_pending: 1 },
-          },
-        ],
-      },
-    }
-    mockedToolsError.value = 'HTTP 502 Bad Gateway'
-
-    render(
-      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
-      container,
-    )
-
-    await waitFor(() => {
-      const status = container.querySelector('[data-server-chat-queue]') as HTMLElement | null
-      expect(status?.getAttribute('data-server-chat-queue-projection')).toBe('read-failed')
-      expect(status?.textContent).toContain('서버 대기열 갱신 실패')
-      expect(status?.textContent).toContain('표시 수치는 이전 snapshot일 수 있습니다')
-    })
-  })
-
-  it('shows each durable receipt lifecycle in messenger mode with receipt identity', async () => {
-    const receiptStates = [
-      'pending',
-      'inflight',
-      'recovery_required',
-      'delivered',
-      'failed',
-    ] as const
-    keeperThreads.value = {
-      sangsu: receiptStates.map((queueState, index) => ({
-        id: `receipt-${queueState}`,
-        role: 'assistant' as const,
-        source: 'direct_assistant' as const,
-        label: 'sangsu',
-        text: `receipt ${queueState}`,
-        timestamp: null,
-        delivery: queueState === 'failed' ? 'error' as const : queueState === 'delivered' ? 'delivered' as const : 'queued' as const,
-        streamState: null,
-        details: {
-          queueReceiptId: `chatq_00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
-          queueShutdownOperationId: queueState === 'pending' ? 'shutdown-op-7' : null,
-          queueRevision: String(index + 1),
-          queueState,
-        },
-      })),
-    }
-    mockedToolsData.value = {
-      keeper_waiting_inventory: {
-        keepers: [{ keeper_name: 'sangsu', state: 'waiting', waiting_on: [], waiting_count: 0 }],
-      },
-    }
-
-    render(
-      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="Say something" layout="primary" />`,
-      container,
-    )
-
-    await waitFor(() => {
-      expect(container.querySelector('[data-chat-queue-state-badge="pending"]')?.textContent).toContain('대기 중')
-      expect(container.querySelector('[data-chat-queue-state-badge="inflight"]')?.textContent).toContain('처리 중')
-      expect(container.querySelector('[data-chat-queue-state-badge="recovery_required"]')?.textContent).toContain('복구 확인 필요')
-      expect(container.querySelector('[data-chat-queue-state-badge="delivered"]')?.textContent).toContain('처리 완료')
-      expect(container.querySelector('[data-chat-queue-state-badge="failed"]')?.textContent).toContain('처리 실패')
-      expect(container.querySelector('[data-chat-queue-state-badge="delivered"]')?.getAttribute('title')).toContain('chatq_')
-      const shutdownBadge = container.querySelector('[data-chat-queue-state-badge][data-chat-queue-shutdown-operation-id="shutdown-op-7"]')
-      expect(shutdownBadge?.textContent).toContain('종료 후 처리')
-      expect(shutdownBadge?.getAttribute('title')).toContain('shutdown operation shutdown-op-7')
-    })
-  })
 
   it('calls interruptKeeperTurn when the busy toolbar interrupt button is clicked', async () => {
     mockedToolsData.value = {

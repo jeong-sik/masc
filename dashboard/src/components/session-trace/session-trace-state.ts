@@ -1,6 +1,6 @@
 // Session trace state — unified event store for GitHub Agents-style trace view.
 // Merges agent-timeline (broadcast/task), keeper-trajectory (turn/thinking),
-// keeper tool-call log (full I/O), and live OAS runtime SSE events into a
+// keeper tool-call log (full I/O), and live Agent Core runtime SSE events into a
 // single chronological event stream.
 // State is keyed per agent to avoid cross-overlay collisions.
 // Each SessionTraceView instance passes its own agentName to derived helpers.
@@ -36,13 +36,13 @@ export type TraceEventKind =
   | 'heartbeat'
   | 'lifecycle'
   | 'thinking'
-  | 'oas_tool'
-  | 'oas_turn'
-  | 'oas_context'
+  | 'agent_core_tool'
+  | 'agent_core_turn'
+  | 'agent_core_context'
 
 export type TraceStatus = 'success' | 'failure' | 'gate_rejected'
 
-type TraceSourceLane = 'masc' | 'oas'
+type TraceSourceLane = 'masc' | 'agentCore'
 
 export interface UnifiedTraceEvent {
   id: string
@@ -67,7 +67,7 @@ export interface UnifiedTraceEvent {
   cost_usd?: number
   error?: string | null
   // RFC-0233: canonical execution identity — same id across trajectory,
-  // tool_call log, and oas-event rows for one physical execution.
+  // tool_call log, and agent-core-event rows for one physical execution.
   // Absent on rows written before PR-1 and on timeline rows.
   executionId?: string
   // thinking fields
@@ -77,9 +77,9 @@ export interface UnifiedTraceEvent {
 
 export interface TraceSummary {
   tool_call_count: number
-  oas_tool_count: number
-  oas_turn_count: number
-  oas_context_count: number
+  agent_core_tool_count: number
+  agent_core_turn_count: number
+  agent_core_context_count: number
   broadcast_count: number
   task_completed_count: number
   task_claimed_count: number
@@ -87,14 +87,14 @@ export interface TraceSummary {
   lifecycle_count: number
   thinking_count: number
   total_cost_usd: number
-  oas_input_tokens: number
-  oas_output_tokens: number
-  oas_cache_creation_tokens: number
-  oas_cache_read_tokens: number
-  oas_cache_miss_input_tokens: number
-  oas_llm_call_count: number
-  oas_error_count: number
-  oas_tokens_saved: number
+  agent_core_input_tokens: number
+  agent_core_output_tokens: number
+  agent_core_cache_creation_tokens: number
+  agent_core_cache_read_tokens: number
+  agent_core_cache_miss_input_tokens: number
+  agent_core_llm_call_count: number
+  agent_core_error_count: number
+  agent_core_tokens_saved: number
 }
 
 interface TraceSlot {
@@ -163,7 +163,7 @@ export function getTraceSearchQuery(agent: string): string {
 function getEventStatus(e: UnifiedTraceEvent): TraceStatus | null {
   if (e.gate?.status === 'reject') return 'gate_rejected'
   if (e.error) return 'failure'
-  if (e.kind === 'tool_call' || e.kind === 'oas_tool') return 'success'
+  if (e.kind === 'tool_call' || e.kind === 'agent_core_tool') return 'success'
   return null
 }
 
@@ -222,9 +222,9 @@ function detailNumber(detail: Record<string, unknown>, ...keys: string[]): numbe
 export function getTraceSummary(agent: string): TraceSummary {
   const events = getTraceEvents(agent)
   let tool_call_count = 0
-  let oas_tool_count = 0
-  let oas_turn_count = 0
-  let oas_context_count = 0
+  let agent_core_tool_count = 0
+  let agent_core_turn_count = 0
+  let agent_core_context_count = 0
   let broadcast_count = 0
   let task_completed_count = 0
   let task_claimed_count = 0
@@ -232,33 +232,32 @@ export function getTraceSummary(agent: string): TraceSummary {
   let lifecycle_count = 0
   let thinking_count = 0
   let total_cost_usd = 0
-  let oas_input_tokens = 0
-  let oas_output_tokens = 0
-  let oas_cache_creation_tokens = 0
-  let oas_cache_read_tokens = 0
-  let oas_cache_miss_input_tokens = 0
-  let oas_llm_call_count = 0
-  let oas_error_count = 0
-  let oas_tokens_saved = 0
+  let agent_core_input_tokens = 0
+  let agent_core_output_tokens = 0
+  let agent_core_cache_creation_tokens = 0
+  let agent_core_cache_read_tokens = 0
+  let agent_core_cache_miss_input_tokens = 0
+  let agent_core_llm_call_count = 0
+  let agent_core_error_count = 0
+  let agent_core_tokens_saved = 0
 
   for (const e of events) {
     switch (e.kind) {
       case 'tool_call':
         tool_call_count++
-        total_cost_usd += e.cost_usd ?? 0
         break
-      case 'oas_tool':
-        oas_tool_count++
+      case 'agent_core_tool':
+        agent_core_tool_count++
         break
-      case 'oas_turn':
-        oas_turn_count++
+      case 'agent_core_turn':
+        agent_core_turn_count++
         break
-      case 'oas_context': {
-        oas_context_count++
+      case 'agent_core_context': {
+        agent_core_context_count++
         const before = e.detail.before_tokens
         const after = e.detail.after_tokens
         if (typeof before === 'number' && typeof after === 'number' && before > after) {
-          oas_tokens_saved += before - after
+          agent_core_tokens_saved += before - after
         }
         break
       }
@@ -295,14 +294,14 @@ export function getTraceSummary(agent: string): TraceSummary {
                 ? Math.max(0, inTok - (cacheCreation ?? 0) - (cacheRead ?? 0))
                 : null
             )
-          if (inTok != null) oas_input_tokens += inTok
-          if (outTok != null) oas_output_tokens += outTok
-          if (cacheCreation != null) oas_cache_creation_tokens += cacheCreation
-          if (cacheRead != null) oas_cache_read_tokens += cacheRead
-          if (cacheMiss != null) oas_cache_miss_input_tokens += cacheMiss
+          if (inTok != null) agent_core_input_tokens += inTok
+          if (outTok != null) agent_core_output_tokens += outTok
+          if (cacheCreation != null) agent_core_cache_creation_tokens += cacheCreation
+          if (cacheRead != null) agent_core_cache_read_tokens += cacheRead
+          if (cacheMiss != null) agent_core_cache_miss_input_tokens += cacheMiss
           const durableKind = e.detail.durable_kind
-          if (durableKind === 'llm_request') oas_llm_call_count++
-          if (durableKind === 'error_occurred') oas_error_count++
+          if (durableKind === 'llm_request') agent_core_llm_call_count++
+          if (durableKind === 'error_occurred') agent_core_error_count++
         }
         break
       case 'thinking':
@@ -313,9 +312,9 @@ export function getTraceSummary(agent: string): TraceSummary {
 
   return {
     tool_call_count,
-    oas_tool_count,
-    oas_turn_count,
-    oas_context_count,
+    agent_core_tool_count,
+    agent_core_turn_count,
+    agent_core_context_count,
     broadcast_count,
     task_completed_count,
     task_claimed_count,
@@ -323,14 +322,14 @@ export function getTraceSummary(agent: string): TraceSummary {
     lifecycle_count,
     thinking_count,
     total_cost_usd,
-    oas_input_tokens,
-    oas_output_tokens,
-    oas_cache_creation_tokens,
-    oas_cache_read_tokens,
-    oas_cache_miss_input_tokens,
-    oas_llm_call_count,
-    oas_error_count,
-    oas_tokens_saved,
+    agent_core_input_tokens,
+    agent_core_output_tokens,
+    agent_core_cache_creation_tokens,
+    agent_core_cache_read_tokens,
+    agent_core_cache_miss_input_tokens,
+    agent_core_llm_call_count,
+    agent_core_error_count,
+    agent_core_tokens_saved,
   }
 }
 
@@ -344,9 +343,9 @@ export function getKindCounts(agent: string): Record<TraceEventKind | 'all', num
     heartbeat: 0,
     lifecycle: 0,
     thinking: 0,
-    oas_tool: 0,
-    oas_turn: 0,
-    oas_context: 0,
+    agent_core_tool: 0,
+    agent_core_turn: 0,
+    agent_core_context: 0,
   }
   for (const e of events) counts[e.kind] = (counts[e.kind] ?? 0) + 1
   return counts as Record<TraceEventKind | 'all', number>
@@ -427,6 +426,13 @@ function toolCallMetadataDetail(entry: ToolCallEntry, traceOrigin: string): Reco
   if (entry.lane) detail.lane = entry.lane
   if (entry.model) detail.model = entry.model
   if (entry.execution_id) detail.execution_id = entry.execution_id
+  if (entry.disposition) detail.disposition = entry.disposition
+  if (entry.result_bytes != null) detail.result_bytes = entry.result_bytes
+  if (entry.truncated_to != null) detail.truncated_to = entry.truncated_to
+  if (entry.planned_index != null) detail.planned_index = entry.planned_index
+  if (entry.batch_index != null) detail.batch_index = entry.batch_index
+  if (entry.batch_size != null) detail.batch_size = entry.batch_size
+  if (entry.execution_mode) detail.execution_mode = entry.execution_mode
   return detail
 }
 
@@ -446,6 +452,10 @@ function toolEventTurn(event: UnifiedTraceEvent): number | undefined {
 
 function toolEventSuccess(event: UnifiedTraceEvent): boolean {
   return event.gate?.status !== 'reject' && event.error == null
+}
+
+function toolCallEntryIsFailure(entry: ToolCallEntry): boolean {
+  return entry.disposition ? entry.disposition === 'failed' : !entry.success
 }
 
 function toolCallEntryMatchesTraceEvent(
@@ -486,7 +496,7 @@ function toolCallEntryMatchesTraceEvent(
     && entry.duration_ms != null
     && Math.abs(event.duration_ms - entry.duration_ms) > 1
   ) return false
-  if (toolEventSuccess(event) !== entry.success) return false
+  if (toolEventSuccess(event) === toolCallEntryIsFailure(entry)) return false
 
   return Math.abs(event.ts - (entry.ts * 1000)) <= TOOL_CALL_MATCH_WINDOW_MS
 }
@@ -525,7 +535,8 @@ function enrichToolCallTrace(
   entry: ToolCallEntry,
 ): UnifiedTraceEvent {
   const outputText = formatToolCallOutput(entry)
-  const error = entry.success ? null : outputText || event.error || 'tool call failed'
+  const isFailure = toolCallEntryIsFailure(entry)
+  const error = isFailure ? outputText || event.error || 'tool call failed' : null
   return {
     ...event,
     agentName: entry.keeper,
@@ -534,7 +545,7 @@ function enrichToolCallTrace(
     detail: { ...event.detail, ...toolCallMetadataDetail(entry, 'trajectory+tool_call_log') },
     toolName: entry.tool,
     toolArgs: normalizeToolCallInput(entry.input) ?? event.toolArgs,
-    toolResult: entry.success ? outputText : null,
+    toolResult: isFailure ? null : outputText,
     duration_ms: entry.duration_ms ?? event.duration_ms,
     // Trajectory turn is trace-relative and pairs with `round`; the log's
     // session-absolute turn stays readable as detail.turn. Mixing the two
@@ -548,6 +559,7 @@ function enrichToolCallTrace(
 function toolCallEntryToSyntheticTrace(entry: ToolCallEntry, index: number): UnifiedTraceEvent {
   const ts = entry.ts * 1000
   const outputText = formatToolCallOutput(entry)
+  const isFailure = toolCallEntryIsFailure(entry)
   return {
     // execution_id is unique per physical execution — a stable row id that
     // survives refetch; the composite form remains for pre-PR-1 rows.
@@ -564,11 +576,11 @@ function toolCallEntryToSyntheticTrace(entry: ToolCallEntry, index: number): Uni
     sessionId: entry.session_id ?? null,
     toolName: entry.tool,
     toolArgs: normalizeToolCallInput(entry.input),
-    toolResult: entry.success ? outputText : null,
+    toolResult: isFailure ? null : outputText,
     duration_ms: entry.duration_ms ?? undefined,
     turn: entry.turn ?? entry.keeper_turn_id,
     executionId: entry.execution_id,
-    error: entry.success ? null : outputText || 'tool call failed',
+    error: isFailure ? outputText || 'tool call failed' : null,
   }
 }
 
@@ -701,7 +713,7 @@ function trajectoryEntryToTrace(
   entry: TrajectoryEntry,
   index: number,
   traceId?: string,
-): UnifiedTraceEvent {
+): UnifiedTraceEvent | null {
   // Backend sends `ts` in seconds (Unix float); normalize to milliseconds for sorting.
   const ts = typeof entry.ts === 'number' ? entry.ts * 1000 : safeTimestamp(entry.ts_iso)
   const detail: Record<string, unknown> = traceId ? { trace_id: traceId, trace_origin: 'trajectory' } : { trace_origin: 'trajectory' }
@@ -709,17 +721,25 @@ function trajectoryEntryToTrace(
 
   // Handle thinking entries (type === 'thinking')
   if (entry.type === 'thinking') {
+    const contentWithheld = entry.content_withheld === true || entry.observation === 'withheld'
+    if (!contentWithheld) return null
+    detail.content_withheld = true
+    if (entry.reasoning_kind) detail.reasoning_kind = entry.reasoning_kind
+    if (entry.char_count != null) detail.char_count = entry.char_count
+    if (entry.identity?.source === 'trajectory_block') {
+      detail.agent_core_block_index = entry.identity.block_index
+    }
     return {
       id: `tj-${ts}-thinking-T${entry.turn}-${index}`,
       ts,
       ts_iso: entry.ts_iso,
       kind: 'thinking',
       sourceLane: 'masc',
-      summary: entry.redacted ? '[비공개 사고]' : (entry.content?.slice(0, 120) ?? ''),
+      summary: '[비공개 사고]',
       detail,
       turn: entry.turn,
-      thinkingContent: entry.content,
-      thinkingRedacted: entry.redacted,
+      thinkingContent: undefined,
+      thinkingRedacted: true,
     }
   }
 
@@ -738,7 +758,6 @@ function trajectoryEntryToTrace(
     gate: entry.gate,
     turn: entry.turn,
     round: entry.round,
-    cost_usd: entry.cost_usd,
     executionId: entry.execution_id,
     error: entry.error,
   }
@@ -755,9 +774,10 @@ export function buildTraceEvents(
 ): UnifiedTraceEvent[] {
   const timelineTraces = (timeline.events ?? []).map(timelineEventToTrace)
   const trajectoryTraces = trajectory
-    ? (trajectory.entries ?? []).map((entry, index) =>
-        trajectoryEntryToTrace(entry, index, trajectory.trace_id),
-      )
+    ? (trajectory.entries ?? []).flatMap((entry, index) => {
+        const event = trajectoryEntryToTrace(entry, index, trajectory.trace_id)
+        return event === null ? [] : [event]
+      })
     : []
   const toolCallEntries = toolCalls?.entries ?? []
   const usedToolCallIndexes = new Set<number>()

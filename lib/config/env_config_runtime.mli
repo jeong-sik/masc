@@ -16,6 +16,36 @@ module Session : sig
   val sse_grace_period_seconds : float
 end
 
+(** {1 SSE reconnect guard} *)
+
+module Sse_connect_guard : sig
+  val reconnect_min_interval_seconds : float
+  (** Minimum interval between SSE reconnects for one session.
+      [<= 0.0] disables the per-session cooldown. *)
+
+  val connect_window_seconds : float
+  (** Sliding window over which reconnects are counted.
+      [<= 0.0] disables the window limit. *)
+
+  val connect_max_in_window : int
+  (** Reconnects admitted inside one window. [<= 0] disables the window
+      limit. *)
+
+  (** Re-readable reads of the same three knobs.  The [float]/[int]
+      bindings above are evaluated once at process start; these thunks
+      read the environment at each call, so tests can pin the
+      documented disable semantics ([<= 0], including negative
+      values) without forking a process.  An operator flipping the
+      env-var mid-flight is {e not} promised a hot reload — the
+      transport still reads the cached bindings — only that the
+      reader itself never clamps a negative to the default. *)
+  module Re_read : sig
+    val reconnect_min_interval_seconds : unit -> float
+    val connect_window_seconds : unit -> float
+    val connect_max_in_window : unit -> int
+  end
+end
+
 (** {1 Tempo (polling interval)} *)
 
 module Tempo : sig
@@ -78,31 +108,17 @@ module Transport : sig
     | Auto
     | H1_only
     | H2_only
-    | Unknown_h2_mode of string
 
-  val normalize_token : string -> string
   val h2_mode_of_string : string -> h2_mode
   val h2_mode_to_string : h2_mode -> string
-
-  type agent_transport =
-    | Http
-    | Grpc
-    | Ws
-    | Webrtc
-    | Local
-    | Unknown_agent_transport of string
-
-  val agent_transport_of_string : string -> agent_transport
-  val agent_transport_to_string : agent_transport -> string
+  val configure_h2_from_env : unit -> h2_mode
+  val effective_h2_mode : unit -> h2_mode
+  val h2_snapshot_entry : Env_config_snapshot_collector.t
 
   val grpc_port : int
   val grpc_enabled : unit -> bool
   val grpc_target_opt : unit -> string option
-  val ws_port : int
   val ws_enabled : unit -> bool
-  val webrtc_enabled : unit -> bool
-  val use_h2 : unit -> h2_mode
-  val agent_transport_opt : unit -> agent_transport option
   val http_auth_strict_env_enabled : unit -> bool
   val startup_watchdog_sec : unit -> float
 end
@@ -117,10 +133,7 @@ end
 (** {1 Tool surface} *)
 
 module Tools : sig
-  (* RFC-0084 host-config-cleanup-J — [val dispatch_v2_enabled : bool]
-     removed alongside the [MASC_DISPATCH_V2] feature flag. *)
   val list_page_size : unit -> int
-  val public_tools_extra_opt : unit -> string option
   val web_search_provider_opt : unit -> string option
   val web_search_provider_order_opt : unit -> string option
   val web_search_fallbacks_opt : unit -> string option
@@ -144,12 +157,11 @@ end
 module Worker : sig
   val local_runtime_debug : bool
   val local_runtime_cooldown_sec_opt : unit -> string option
-  val local_worker_heartbeat_sec : int
 end
 
-(** {1 OAS SSE bridge} *)
+(** {1 AGENT_CORE SSE bridge} *)
 
-module Oas_sse : sig
+module Agent_core_sse : sig
   val drain_interval_sec : float
 end
 

@@ -1,0 +1,29 @@
+[runtime]
+default = "deepseek.smoke"
+
+[runtime.exact_output_lanes.hitl_auto_judge]
+slots = ["deepseek.smoke"]
+
+[runtime.exact_output_lanes.board_attention_exact]
+slots = ["deepseek.smoke"]
+
+[providers.deepseek]
+display-name = "Transport Harness Smoke"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:9/v1"
+
+[models.smoke]
+# Harness-local opaque runtime alias. The adjacent typed capability block is
+# the sole declaration used when no exact AGENT_CORE catalog row exists.
+api-name = "transport-harness-smoke"
+max-context = 32768
+tools-support = true
+streaming = true
+
+[models.smoke.capabilities]
+supports-tool-choice = true
+
+[deepseek.smoke]
+is-default = true
+max-concurrent = 1
+max-request-body-bytes = 65536

@@ -12,6 +12,6 @@ let record_provider_timeout_observation ~base_path ~keeper_name =
   Keeper_registry.touch_last_turn_ts ~base_path keeper_name
 ;;
 
-let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) =
+let is_provider_timeout_error (err : Agent_core.Error.t) =
   Keeper_provider_runtime_boundary.is_provider_timeout_error err
 ;;

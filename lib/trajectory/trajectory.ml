@@ -30,23 +30,12 @@ type tool_call_entry = {
   result : string option;           (** None if gated/pending, Some output *)
   duration_ms : int;                (** Wall-clock execution time *)
   error : string option;            (** Exception message if failed *)
-  cost_usd : float;                 (** Estimated cost of this call *)
   execution_id : string option;
       (** RFC-0233 canonical join key minted at the dispatch boundary; the
           tool_calls JSONL row for the same execution carries the identical
           value. Plain string here: Trajectory is a dependency-leaf
           persistence record, the typed [Ids.Execution_id.t] lives at the
           mint site. *)
-}
-
-type gate_decode_summary = {
-  parsed_gate_count : int;
-  legacy_default_count : int;
-}
-
-type entries_read_result = {
-  entries : tool_call_entry list;
-  gate_decode : gate_decode_summary;
 }
 
 type trajectory_outcome =
@@ -60,11 +49,9 @@ type trajectory = {
   scenario_id : string option;      (** None for live runs, Some for eval *)
   keeper_name : string;
   trace_id : string;
-  generation : int;
   started_at : float;
   ended_at : float;
   entries : tool_call_entry list;
-  total_cost_usd : float;
   total_turns : int;
   total_tool_calls : int;
   outcome : trajectory_outcome;
@@ -79,38 +66,23 @@ type trajectory = {
 (* Thinking entries                                                  *)
 (* ================================================================ *)
 
-type thinking_entry = {
+type withheld_reasoning_kind =
+  | Thinking_block
+  | Reasoning_details
+  | Redacted_thinking
+
+type withheld_thinking_entry = {
   ts : float;
   ts_iso : string;
   turn : int;
-  content : string;
-  content_length : int;
-  redacted : bool;
+  block_index : int;
+  reasoning_kind : withheld_reasoning_kind;
+  char_count : int;
 }
 
 type trajectory_line =
   | Tool_call of tool_call_entry
-  | Thinking of thinking_entry
-
-(* ================================================================ *)
-(* Cost estimation                                                  *)
-(* ================================================================ *)
-
-(* model_token_pricing and estimate_turn_cost removed (#3029).
-   Pricing belongs to OAS runtime, not MASC.
-   MASC records cost_usd from OAS responses via emit_cost_event. *)
-
-(** Rough per-call cost estimates for keeper tools.
-    Most are local/free; only MODEL-calling tools have cost. *)
-let tool_cost_estimate (tool_name : string) : float =
-  match tool_name with
-  (* MODEL-intensive tools *)
-  | "masc_board_post" -> 0.002
-  | "masc_board_comment" -> 0.001
-  | "tool_execute" -> 0.0001
-  | "tool_edit_file" | "tool_write_file" -> 0.0001
-  (* Read-only tools are essentially free *)
-  | _ -> 0.0
+  | Withheld_thinking of withheld_thinking_entry
 
 (* ================================================================ *)
 (* JSON serialization                                               *)
@@ -174,47 +146,50 @@ let entry_to_json ?(result_max_len = default_result_truncation)
               else `String r) );
        ("duration_ms", `Int e.duration_ms);
        ("error", Json_util.string_opt_to_json e.error);
-       ("cost_usd", `Float e.cost_usd);
      ]
     @ (match e.execution_id with
        | Some id -> [ ("execution_id", `String id) ]
        | None -> [])
     @ runtime_contract_field @ action_radius_field)
 
-let default_thinking_truncation = 2000
+let withheld_reasoning_kind_to_string = function
+  | Thinking_block -> "thinking"
+  | Reasoning_details -> "reasoning_details"
+  | Redacted_thinking -> "redacted_thinking"
+;;
 
-let thinking_entry_to_json ?(content_max_len = default_thinking_truncation) (e : thinking_entry) : Yojson.Safe.t =
-  let content =
-    if content_max_len > 0 then
-      String_util.utf8_safe ~max_bytes:(content_max_len + 3) ~suffix:"..."
-        e.content
-      |> String_util.to_string
-    else e.content
-  in
-  `Assoc [
-    ("type", `String "thinking");
-    ("ts", `Float e.ts);
-    ("ts_iso", `String e.ts_iso);
-    ("turn", `Int e.turn);
-    ("content", `String content);
-    ("content_length", `Int e.content_length);
-    ("redacted", `Bool e.redacted);
-  ]
+let withheld_thinking_entry_to_json (e : withheld_thinking_entry) : Yojson.Safe.t =
+  `Assoc
+    [ "type", `String "thinking"
+    ; "ts", `Float e.ts
+    ; "ts_iso", `String e.ts_iso
+    ; "turn", `Int e.turn
+    ; ( "identity"
+      , `Assoc
+          [ "source", `String "trajectory_block"
+          ; "block_index", `Int e.block_index
+          ] )
+    ; "observation", `String "withheld"
+    ; "reasoning_kind", `String (withheld_reasoning_kind_to_string e.reasoning_kind)
+    ; "present", `Bool true
+    ; "char_count", `Int e.char_count
+    ; "redacted", `Bool (e.reasoning_kind = Redacted_thinking)
+    ; "content_withheld", `Bool true
+    ; "content", `Null
+    ]
+;;
 
-let trajectory_line_to_json ?(result_max_len = default_result_truncation)
-    ?(content_max_len = default_thinking_truncation) = function
+let trajectory_line_to_json ?(result_max_len = default_result_truncation) = function
   | Tool_call e -> entry_to_json ~result_max_len e
-  | Thinking e -> thinking_entry_to_json ~content_max_len e
+  | Withheld_thinking e -> withheld_thinking_entry_to_json e
 
 let trajectory_to_json (t : trajectory) : Yojson.Safe.t =
   `Assoc [
     ("scenario_id", Json_util.string_opt_to_json t.scenario_id);
     ("keeper_name", `String t.keeper_name);
     ("trace_id", `String t.trace_id);
-    ("generation", `Int t.generation);
     ("started_at", `Float t.started_at);
     ("ended_at", `Float t.ended_at);
-    ("total_cost_usd", `Float t.total_cost_usd);
     ("total_turns", `Int t.total_turns);
     ("total_tool_calls", `Int t.total_tool_calls);
     ("outcome", outcome_to_json t.outcome);
@@ -228,35 +203,40 @@ let trajectory_to_json (t : trajectory) : Yojson.Safe.t =
 (* Decoders live next to the serializers above and are shared by the read
    paths. *)
 
+(* [None] when the row carries no readable gate object. It used to read as
+   [Pass], which is a verdict the row never recorded; rows that predate the
+   gate payload are dropped by the caller instead. *)
 let gate_decision_of_json = function
   | `Assoc fields -> (
       match List.assoc_opt "status" fields with
       | Some (`String status) -> (
           match String.lowercase_ascii status with
-          | "pass" | "passed" -> (Pass, true)
+          | "pass" | "passed" -> Some Pass
           | "reject" | "rejected" | "gated" ->
               let reason =
                 match List.assoc_opt "reason" fields with
                 | Some (`String value) when String.trim value <> "" -> value
                 | _ -> "persisted gate rejection"
               in
-              (Reject reason, true)
-          | _ -> (Pass, false))
-      | _ -> (Pass, false))
-  | _ -> (Pass, false)
+              Some (Reject reason)
+          | _ -> None)
+      | _ -> None)
+  | _ -> None
 
-let tool_call_entry_of_json (json : Yojson.Safe.t) :
-    (tool_call_entry * bool) option =
+let tool_call_entry_of_json (json : Yojson.Safe.t) : tool_call_entry option =
   try
     match Json_util.assoc_member_opt "type" json with
     | Some (`String "trajectory_summary") -> None
     | Some (`String "thinking") -> None
-    | _ ->
-        let gate_decision, parsed_gate =
-          gate_decision_of_json (Option.value ~default:`Null (Json_util.assoc_member_opt "gate" json))
-        in
+    | _ -> (
+        match
+          gate_decision_of_json
+            (Option.value ~default:`Null (Json_util.assoc_member_opt "gate" json))
+        with
+        | None -> None
+        | Some gate_decision ->
         Some
-          ( {
+          ({
               ts = (match Json_util.assoc_member_opt "ts" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
               ts_iso = (match Json_util.assoc_member_opt "ts_iso" json with Some (`String s) -> s | _ -> "");
               turn = (match Json_util.assoc_member_opt "turn" json with Some (`Int n) -> n | _ -> 0);
@@ -275,13 +255,11 @@ let tool_call_entry_of_json (json : Yojson.Safe.t) :
                  | None | Some `Null -> None
                  | Some (`String s) -> Some s
                  | Some _ -> None);
-              cost_usd = (match Json_util.assoc_member_opt "cost_usd" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
               execution_id =
                 (match Json_util.assoc_member_opt "execution_id" json with
                  | Some (`String s) -> Some s
                  | _ -> None);
-            },
-            parsed_gate )
+            }))
   with
   | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
@@ -494,19 +472,13 @@ let reset_round_counters_for_testing () =
     Hashtbl.reset round_counters;
     Hashtbl.reset round_high_water)
 
-(** Append a thinking block entry to the JSONL trajectory file. *)
-let append_thinking ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string)
-    (entry : thinking_entry) : unit =
+let append_withheld_thinking ~(masc_root : string) ~(keeper_name : string)
+    ~(trace_id : string) (entry : withheld_thinking_entry) : unit =
   let dir = trajectories_dir masc_root keeper_name in
   Fs_compat.mkdir_p dir;
   let path = trajectory_path masc_root keeper_name trace_id in
-  (* 남김없이: the thinking trajectory is the eval/audit SSOT, so persist the
-     FULL untruncated reasoning text. Truncation is a read/display concern
-     ([content_max_len] query param on the trajectory endpoint), never a
-     write-time one — truncating here destroyed reasoning before it was ever
-     stored. [content_length] still records the true length either way. *)
-  let json = thinking_entry_to_json ~content_max_len:0 entry in
-  Fs_compat.append_jsonl path json
+  Fs_compat.append_jsonl path (withheld_thinking_entry_to_json entry)
+;;
 
 (** Write a trajectory summary line (appended after session ends). *)
 let append_summary ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string)
@@ -518,8 +490,6 @@ let append_summary ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
     ("type", `String "trajectory_summary");
     ("keeper_name", `String traj.keeper_name);
     ("trace_id", `String traj.trace_id);
-    ("generation", `Int traj.generation);
-    ("total_cost_usd", `Float traj.total_cost_usd);
     ("total_turns", `Int traj.total_turns);
     ("total_tool_calls", `Int traj.total_tool_calls);
     ("outcome", outcome_to_json traj.outcome);
@@ -548,12 +518,10 @@ type pending_entry = {
 
 type accumulator = {
   mutable entries : tool_call_entry list;
-  mutable total_cost : float;
   mutable total_calls : int;
   mutable turn : int;
   keeper_name : string;
   trace_id : string;
-  generation : int;
   started_at : float;
   masc_root : string;
   mutable task_id : string option;
@@ -579,15 +547,13 @@ let unregister_accumulator (acc : accumulator) =
   Stdlib.Mutex.protect active_acc_mu (fun () ->
     Hashtbl.remove active_accumulators (acc.keeper_name, acc.trace_id))
 
-let create_accumulator ?on_flush_error ~masc_root ~keeper_name ~trace_id ~generation () : accumulator =
+let create_accumulator ?on_flush_error ~masc_root ~keeper_name ~trace_id () : accumulator =
   let acc = {
     entries = [];
-    total_cost = 0.0;
     total_calls = 0;
     turn = 0;
     keeper_name;
     trace_id;
-    generation;
     started_at = Time_compat.now ();
     masc_root;
     task_id = None;
@@ -616,7 +582,6 @@ let set_turn (acc : accumulator) (turn : int) : unit =
 let record_entry ?runtime_contract ?action_radius ?on_persist_error
     (acc : accumulator) (entry : tool_call_entry) : unit =
   acc.entries <- entry :: acc.entries;
-  acc.total_cost <- acc.total_cost +. entry.cost_usd;
   acc.total_calls <- acc.total_calls + 1;
   (* Store on_persist_error for use during batch flush *)
   (match on_persist_error, acc.on_flush_error with
@@ -680,11 +645,9 @@ let finalize (acc : accumulator) (outcome : trajectory_outcome) : trajectory =
     scenario_id = None;
     keeper_name = acc.keeper_name;
     trace_id = acc.trace_id;
-    generation = acc.generation;
     started_at = acc.started_at;
     ended_at = Time_compat.now ();
     entries = List.rev acc.entries;
-    total_cost_usd = acc.total_cost;
     total_turns = acc.turn;
     total_tool_calls = acc.total_calls;
     outcome;
@@ -711,7 +674,6 @@ type tool_stat = {
   avg_duration_ms : int;
   p95_duration_ms : int;
   max_duration_ms : int;
-  total_cost_usd : float;
   last_used_at : string;
 }
 
@@ -730,7 +692,7 @@ let p95_of_sorted (durations : int array) : int =
     durations.(idx)
 
 let aggregate_tool_stats (entries : tool_call_entry list) : tool_stat list =
-  let tbl : (string, int list * int * int * float * float * string) Hashtbl.t =
+  let tbl : (string, int list * int * int * float * string) Hashtbl.t =
     Hashtbl.create 32
   in
   List.iter (fun (e : tool_call_entry) ->
@@ -740,15 +702,15 @@ let aggregate_tool_stats (entries : tool_call_entry list) : tool_stat list =
       let succ = if is_failure then 0 else 1 in
       let fail = if is_failure then 1 else 0 in
       Hashtbl.replace tbl e.tool_name
-        ([e.duration_ms], succ, fail, e.cost_usd, e.ts, e.ts_iso)
-    | Some (durations, succ, fail, cost, max_ts, max_iso) ->
+        ([e.duration_ms], succ, fail, e.ts, e.ts_iso)
+    | Some (durations, succ, fail, max_ts, max_iso) ->
       let succ' = if is_failure then succ else succ + 1 in
       let fail' = if is_failure then fail + 1 else fail in
       let (ts', iso') = if e.ts > max_ts then (e.ts, e.ts_iso) else (max_ts, max_iso) in
       Hashtbl.replace tbl e.tool_name
-        (e.duration_ms :: durations, succ', fail', cost +. e.cost_usd, ts', iso')
+        (e.duration_ms :: durations, succ', fail', ts', iso')
   ) entries;
-  let stats = Hashtbl.fold (fun name (durations, succ, fail, cost, _max_ts, last_iso) acc ->
+  let stats = Hashtbl.fold (fun name (durations, succ, fail, _max_ts, last_iso) acc ->
     let count = succ + fail in
     let total_dur = List.fold_left (+) 0 durations in
     let avg = if count > 0 then total_dur / count else 0 in
@@ -762,7 +724,6 @@ let aggregate_tool_stats (entries : tool_call_entry list) : tool_stat list =
       avg_duration_ms = avg;
       p95_duration_ms = p95_of_sorted sorted;
       max_duration_ms = max_d;
-      total_cost_usd = cost;
       last_used_at = last_iso;
     } :: acc
   ) tbl [] in
@@ -797,7 +758,6 @@ let tool_stat_to_json (s : tool_stat) : Yojson.Safe.t =
     ("avg_duration_ms", `Int s.avg_duration_ms);
     ("p95_duration_ms", `Int s.p95_duration_ms);
     ("max_duration_ms", `Int s.max_duration_ms);
-    ("total_cost_usd", `Float s.total_cost_usd);
     ("last_used_at", `String s.last_used_at);
   ]
 
@@ -810,16 +770,13 @@ let hourly_bucket_to_json (b : hourly_bucket) : Yojson.Safe.t =
 
 (** Read all .jsonl trace files for a keeper. Filter entries with ts >= since.
     Scans the keeper's trajectory directory for all trace files. *)
-let read_entries_since_result ~(masc_root : string) ~(keeper_name : string)
-    ~(since : float) : entries_read_result =
+let read_entries_since ~(masc_root : string) ~(keeper_name : string)
+    ~(since : float) : tool_call_entry list =
   let dir = trajectories_dir masc_root keeper_name in
-  if not (Sys.file_exists dir) then
-    { entries = []; gate_decode = { parsed_gate_count = 0; legacy_default_count = 0 } }
+  if not (Sys.file_exists dir) then []
   else
     let files = Sys.readdir dir in
     let all_entries = ref [] in
-    let parsed_gate_count = ref 0 in
-    let legacy_default_count = ref 0 in
     Array.iter (fun fname ->
       if Filename.check_suffix fname ".jsonl" then begin
         let path = Filename.concat dir fname in
@@ -831,30 +788,16 @@ let read_entries_since_result ~(masc_root : string) ~(keeper_name : string)
                try
                  let json = Yojson.Safe.from_string line in
                  (match tool_call_entry_of_json json with
-                  | Some (entry, parsed_gate) when entry.ts >= since ->
-                      if parsed_gate then incr parsed_gate_count
-                      else incr legacy_default_count;
+                  | Some entry when entry.ts >= since ->
                       all_entries := entry :: !all_entries
                   | _ -> ())
                with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ())
          with Sys_error _ -> ())
       end
     ) files;
-    {
-      entries =
-        List.sort
-          (fun (a : tool_call_entry) (b : tool_call_entry) -> compare a.ts b.ts)
-          !all_entries;
-      gate_decode =
-        {
-          parsed_gate_count = !parsed_gate_count;
-          legacy_default_count = !legacy_default_count;
-        };
-    }
-
-let read_entries_since ~(masc_root : string) ~(keeper_name : string)
-    ~(since : float) : tool_call_entry list =
-  (read_entries_since_result ~masc_root ~keeper_name ~since).entries
+    List.sort
+      (fun (a : tool_call_entry) (b : tool_call_entry) -> compare a.ts b.ts)
+      !all_entries
 
 (* ================================================================ *)
 (* Read trajectory from JSONL (for replay/eval)                     *)
@@ -871,9 +814,7 @@ let read_entries ~(masc_root : string) ~(keeper_name : string) ~(trace_id : stri
     |> List.filter_map (fun line ->
         try
           let json = Yojson.Safe.from_string line in
-          match tool_call_entry_of_json json with
-          | Some (entry, _parsed_gate) -> Some entry
-          | None -> None
+          tool_call_entry_of_json json
         with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
 
 type trajectory_line_decode_result =
@@ -881,41 +822,70 @@ type trajectory_line_decode_result =
   | Skipped_line
   | Malformed_line
 
+let withheld_thinking_entry_of_json json =
+  let ts =
+    match Json_util.assoc_member_opt "ts" json with
+    | Some (`Float ts) -> Some ts
+    | Some (`Int ts) -> Some (Float.of_int ts)
+    | _ -> None
+  in
+  match
+    ( ts
+    , Json_util.assoc_member_opt "ts_iso" json
+    , Json_util.assoc_member_opt "turn" json
+    , Json_util.assoc_member_opt "identity" json
+    , Json_util.assoc_member_opt "reasoning_kind" json
+    , Json_util.assoc_member_opt "present" json
+    , Json_util.assoc_member_opt "char_count" json
+    , Json_util.assoc_member_opt "redacted" json
+    , Json_util.assoc_member_opt "content_withheld" json
+    , Json_util.assoc_member_opt "content" json )
+  with
+  | ( Some ts
+    , Some (`String ts_iso)
+    , Some (`Int turn)
+    , Some (`Assoc identity)
+    , Some (`String reasoning_kind)
+    , Some (`Bool true)
+    , Some (`Int char_count)
+    , Some (`Bool redacted)
+    , (None | Some (`Bool true))
+    , Some `Null ) when turn >= 0 && char_count >= 0 ->
+    let block_index =
+      match List.assoc_opt "source" identity, List.assoc_opt "block_index" identity with
+      | Some (`String "trajectory_block"), Some (`Int block_index)
+        when block_index >= 0 ->
+        Some block_index
+      | _ -> None
+    in
+    let reasoning_kind =
+      match reasoning_kind with
+      | "thinking" when not redacted -> Some Thinking_block
+      | "reasoning_details" when not redacted -> Some Reasoning_details
+      | "redacted_thinking" when redacted && char_count = 0 ->
+        Some Redacted_thinking
+      | _ -> None
+    in
+    (match block_index, reasoning_kind with
+     | Some block_index, Some reasoning_kind ->
+       Some { ts; ts_iso; turn; block_index; reasoning_kind; char_count }
+     | _ -> None)
+  | _ -> None
+;;
+
 let trajectory_line_of_json json =
   match Json_util.assoc_member_opt "type" json with
   | Some (`String "trajectory_summary") -> Skipped_line
   | Some (`String "thinking") ->
-      Parsed_line
-        (Thinking
-           { ts =
-               (match Json_util.assoc_member_opt "ts" json with
-                | Some (`Float f) -> f
-                | Some (`Int n) -> Float.of_int n
-                | _ -> 0.0)
-           ; ts_iso =
-               (match Json_util.assoc_member_opt "ts_iso" json with
-                | Some (`String s) -> s
-                | _ -> "")
-           ; turn =
-               (match Json_util.assoc_member_opt "turn" json with
-                | Some (`Int n) -> n
-                | _ -> 0)
-           ; content =
-               (match Json_util.assoc_member_opt "content" json with
-                | Some (`String s) -> s
-                | _ -> "")
-           ; content_length =
-               (match Json_util.assoc_member_opt "content_length" json with
-                | Some (`Int n) -> n
-                | _ -> 0)
-           ; redacted =
-               (match Json_util.assoc_member_opt "redacted" json with
-                | Some (`Bool b) -> b
-                | _ -> false)
-           })
+      (match Json_util.assoc_member_opt "observation" json with
+       | Some (`String "withheld") ->
+         (match withheld_thinking_entry_of_json json with
+          | Some entry -> Parsed_line (Withheld_thinking entry)
+          | None -> Malformed_line)
+       | _ -> Malformed_line)
   | _ ->
       (match tool_call_entry_of_json json with
-       | Some (entry, _parsed_gate) -> Parsed_line (Tool_call entry)
+       | Some entry -> Parsed_line (Tool_call entry)
        | None -> Malformed_line)
 ;;
 

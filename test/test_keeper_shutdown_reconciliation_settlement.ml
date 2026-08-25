@@ -48,6 +48,12 @@ let with_workspace f =
          (fun () ->
             let config = Workspace.default_config base in
             let (_init_msg : string) = Workspace.init config ~agent_name:None in
+            Eio.Switch.run @@ fun sw ->
+            (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+             | Ok 0 -> ()
+             | Ok count -> failf "unexpected initial owner count: %d" count
+             | Error error ->
+               fail (Keeper_owner_registry.install_error_to_string error));
             f ~config))
 ;;
 
@@ -60,7 +66,7 @@ let trace_id_exn value =
 (* Finalization reads the keeper's meta file (Meta_update stage), so the
    settled operation only completes for a keeper that exists — as every
    live wedged keeper did. *)
-let write_keeper_meta_exn ~config ~keeper_name =
+let write_keeper_meta_exn ~(config : Workspace.config) ~keeper_name =
   let json =
     `Assoc
       [ "name", `String keeper_name
@@ -70,9 +76,13 @@ let write_keeper_meta_exn ~config ~keeper_name =
   in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta ->
-    (match Keeper_meta_store.write_meta config meta with
-     | Ok () -> ()
-     | Error detail -> failf "write_meta failed: %s" detail)
+    (match Keeper_owner_registry.create_meta ~base_path:config.base_path meta with
+     | Ok (Some _) -> ()
+     | Ok None -> fail "owner create removed metadata"
+     | Error error ->
+       failf
+         "owner create failed: %s"
+         (Keeper_owner_registry.command_error_to_string error))
   | Error detail -> failf "meta fixture rejected: %s" detail
 ;;
 
@@ -91,7 +101,6 @@ let make_operation ~keeper_name ~phase ~turn_disposition =
   ; keeper_name
   ; lane_ownership = Dormant_meta
   ; trace_id = trace_id_exn "trace-reconciliation-settlement-test"
-  ; generation = 0
   ; actor = "test"
   ; cleanup_intent = { reason = Operator_stop_retain_meta; remove_session = false }
   ; turn_disposition
@@ -131,6 +140,7 @@ let recover_exn ~config operation =
 let phase_label operation =
   match operation.phase with
   | Prepared -> "prepared"
+  | Joining_lanes -> "joining_lanes"
   | Joined_idle -> "joined_idle"
   | Finalizing_tasks _ -> "finalizing_tasks"
   | Cleanup_ready _ -> "cleanup_ready"
@@ -231,13 +241,51 @@ let test_recovery_still_settles_prepared_without_turn () =
       (requires_admission_fence recovered))
 ;;
 
+(* [Joining_lanes] proves that the previous process crossed the point where
+   the primary and Librarian lanes were being joined. Unlike [Prepared], boot
+   cannot infer whether the accepted Librarian input committed. Recovery must
+   retain admission and name that uncertainty instead of silently finalizing. *)
+let test_recovery_blocks_interrupted_lane_join () =
+  with_workspace (fun ~config ->
+    let operation =
+      make_operation
+        ~keeper_name:"reconciliation-joining-lanes"
+        ~phase:Joining_lanes
+        ~turn_disposition:No_inflight_turn
+    in
+    write_keeper_meta_exn ~config ~keeper_name:operation.keeper_name;
+    persist_exn ~config operation;
+    let recovered = recover_exn ~config operation in
+    (match recovered.phase with
+     | Blocked { stage = Lane_join; detail } ->
+       check string
+         "blocked evidence names unknown Librarian completion"
+         "server process ended while joining Keeper and Librarian lanes; Librarian completion is unknown"
+         detail
+     | _ -> fail "interrupted lane join did not recover as blocked");
+    check bool "interrupted join retains admission" true (requires_admission_fence recovered);
+    match
+      Keeper_shutdown_store.load
+        ~config
+        ~keeper_name:operation.keeper_name
+        operation.operation_id
+    with
+    | Ok { phase = Blocked { stage = Lane_join; _ }; _ } -> ()
+    | Ok persisted ->
+      failf "durable interrupted join phase=%s" (phase_label persisted)
+    | Error error ->
+      failf
+        "durable interrupted join missing: %s"
+        (Keeper_shutdown_store.error_to_string error))
+;;
+
 (* A shutdown whose lane is unregistered by a concurrent fiber (supervisor,
    keepalive, or a sibling shutdown) must not block. Reading the registry one
    step earlier already returns [Ok ()] for an absent lane, so blocking when
    the same absence is observed one step later is a TOCTOU verdict split — and
    the losing side is permanent: a blocked operation fences keeper admission
    with no runtime release, so every later boot of that keeper fails until the
-   process restarts. Observed live on 2026-07-27 (sangsu).
+   process restarts. Observed live on 2026-07-27.
 
    Lane *replacement* is a different fact and must still fail: someone else
    owns the keeper, and this operation must not write its retained meta over
@@ -256,94 +304,6 @@ let meta_fixture_exn ~keeper_name =
   | Error detail -> failf "meta fixture rejected: %s" detail
 ;;
 
-let registry_projection ~keeper_name ~lane_ownership ~entry =
-  let operation =
-    { (make_operation
-         ~keeper_name
-         ~phase:Prepared
-         ~turn_disposition:No_inflight_turn)
-      with
-      lane_ownership
-    }
-  in
-  Keeper_shutdown_finalize.For_testing.update_registry_meta_exact
-    operation
-    entry
-    (meta_fixture_exn ~keeper_name)
-;;
-
-let test_vanished_lane_matches_absent_lane () =
-  let base_path = temp_dir "shutdown_lane_vanish_" in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_registry.For_testing.clear ();
-      cleanup_dir base_path)
-    (fun () ->
-       let keeper_name = "vanished-lane" in
-       let entry =
-         Keeper_registry.register_offline
-           ~base_path
-           keeper_name
-           (meta_fixture_exn ~keeper_name)
-       in
-       let lane_ownership = Registered_lane (Keeper_lane.id entry.lane) in
-       (* Baseline: the lane was already gone when the entry was read. The
-          [Registered_lane _, None] arm returns Ok. *)
-       (match registry_projection ~keeper_name ~lane_ownership ~entry:None with
-        | Ok () -> ()
-        | Error detail -> failf "absent lane must succeed, got: %s" detail);
-       (* The race: the entry was read, then a concurrent fiber unregistered
-          the lane before the projection ran, so [update_entry_exact] reports
-          [Exact_update_missing]. Identical end state, so identical verdict. *)
-       Keeper_registry.For_testing.unregister ~base_path keeper_name;
-       check
-         bool
-         "precondition: the lane is gone from the registry"
-         true
-         (Option.is_none (Keeper_registry.get ~base_path keeper_name));
-       match registry_projection ~keeper_name ~lane_ownership ~entry:(Some entry) with
-       | Ok () -> ()
-       | Error detail ->
-         failf
-           "a lane that vanished mid-operation must succeed like an absent \
-            lane, got: %s"
-           detail)
-;;
-
-let test_replaced_lane_still_fails () =
-  let base_path = temp_dir "shutdown_lane_replaced_" in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_registry.For_testing.clear ();
-      cleanup_dir base_path)
-    (fun () ->
-       let keeper_name = "replaced-lane" in
-       let meta = meta_fixture_exn ~keeper_name in
-       let original = Keeper_registry.register_offline ~base_path keeper_name meta in
-       (* A different lane now owns the keeper. The operation still names the
-          lane it owned, so its retained meta must not overwrite the new one. *)
-       Keeper_registry.For_testing.unregister ~base_path keeper_name;
-       let replacement =
-         Keeper_registry.register_offline ~base_path keeper_name meta
-       in
-       check
-         bool
-         "precondition: the replacement lane differs from the original"
-         false
-         (Keeper_lane.Id.equal
-            (Keeper_lane.id original.lane)
-            (Keeper_lane.id replacement.lane));
-       match
-         registry_projection
-           ~keeper_name
-           ~lane_ownership:(Registered_lane (Keeper_lane.id original.lane))
-           ~entry:(Some replacement)
-       with
-       | Ok () ->
-         fail "a replaced lane must not be projected over: another owner holds it"
-       | Error _ -> ())
-;;
-
 let () =
   run
     "keeper-shutdown-reconciliation-settlement"
@@ -360,16 +320,10 @@ let () =
             "still settles a prepared operation without a turn"
             `Quick
             test_recovery_still_settles_prepared_without_turn
-        ] )
-    ; ( "registry projection"
-      , [ test_case
-            "a lane that vanished mid-operation settles like an absent lane"
-            `Quick
-            test_vanished_lane_matches_absent_lane
         ; test_case
-            "a replaced lane is still rejected"
+            "blocks a process interrupted during lane join"
             `Quick
-            test_replaced_lane_still_fails
+            test_recovery_blocks_interrupted_lane_join
         ] )
     ]
 ;;

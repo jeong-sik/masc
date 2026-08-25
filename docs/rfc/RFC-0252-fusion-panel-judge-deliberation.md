@@ -1,15 +1,27 @@
+---
+rfc: "0252"
+status: Draft
+---
+
 # RFC-0252 — Fusion: 패널+심판(panel+judge) 심의 루프 (MASC 내장)
 
 - Status: Draft
 - Author: Vincent (yousleepwhen) + Claude
 - Created: 2026-06-16
 - Scope: `lib/fusion/` (신규), `lib/runtime/` (config 확장), `.masc/config/runtime.toml` (`[fusion]` 테이블)
-- Boundary: OAS(`~/me/workspace/yousleepwhen/oas`)는 **0줄 변경**. 본 루프는 OAS의 범용 프리미티브만 소비한다.
+- Boundary: agent_core(`~/me/workspace/yousleepwhen/agent_core`)는 **0줄 변경**. 본 루프는 agent_core의 범용 프리미티브만 소비한다.
 - 참조: OpenRouter Fusion API — [plugin](https://openrouter.ai/docs/guides/features/plugins/fusion), [router](https://openrouter.ai/docs/guides/routing/routers/fusion-router)
 - Concurrency update (2026-07-17): the retired
   `max_concurrent_panels`/`max_concurrent_judges` settings never controlled
   execution. Configured model identities are the exact Fusion fan-out set;
   durable host draining is tracked in #25032.
+- Contract refresh (2026-08-19): 본문을 현재 구현(`lib/fusion_core/`,
+  `lib/fusion/`)에 맞춰 갱신했다. 시간당 발동 예산(`per_hour_budget` /
+  `Over_hourly_budget`)은 PR #22051에서 제거됐고 호출 rate limit은 존재하지
+  않는다 — deny 사유는 `Disabled`/`Preset_unknown`/`Depth_exceeded` 3개뿐이다.
+  `fusion_request`에는 `web_tools : bool` 필드가 있다. 위상(topology) 확장
+  (Refine/Conditional/Judge_of_judges/Staged_judge_of_judges)은
+  RFC-0283(judge-of-judges)·RFC-0284(심판 관측 record)로 이관됐다.
 
 ---
 
@@ -32,7 +44,7 @@ MASC는 이미 멀티 fiber로 N개 키퍼를 상시 병렬 구동한다. 같은
 
 ## 2. Non-goals / 경계
 
-- **OAS 변경 금지.** OAS는 single-provider completion + 범용 fan-out(`Async_agent.all`) + 구조화 출력(`Structured.extract`)만 제공한다. 멀티모델 오케스트레이션·심판 프롬프트·게이트·가시성은 전부 MASC.
+- **agent_core 변경 금지.** agent_core는 single-provider completion + 범용 fan-out(`Async_agent.all`) + 구조화 출력(`Structured.extract`)만 제공한다. 멀티모델 오케스트레이션·심판 프롬프트·게이트·가시성은 전부 MASC.
 - **죽은 합의 코드에 의존 금지.** MAGI 삼두정치·walph·cascade·board curation은 작동/사용된 적 없음(사용자 확인). 본 루프는 그 위에 쌓지 않고 새로 만든다. (죽은 3종의 *삭제*는 본 RFC 범위 밖, 별도 정리.)
 - **v1은 advisory만.** 패널/심판은 분석·종합을 산출하는 read-only. tool-call을 패널이 제안하고 심판이 골라 *실행*하는 action 모드는 side-effect atomicity가 필요 → v2(§14).
 - **재귀 금지.** 패널·심판은 fusion을 다시 못 부른다(§10). OpenRouter의 `x-openrouter-fusion-depth`에 대응하는 타입드 depth guard.
@@ -45,7 +57,7 @@ MASC는 이미 멀티 fiber로 N개 키퍼를 상시 병렬 구동한다. 같은
 |---|---|---|
 | 패널 | 1–8 모델 병렬, 각자 web 도구 | `Async_agent.all` N개 `Agent.t`, web 도구는 MASC가 주입 |
 | 심판 구조화 | JSON `{consensus, contradictions, partial_coverage, unique_insights, blind_spots}` | 동일 5필드 + `resolved_answer` + `decision`, **`Structured.extract` provider-native JSON schema 강제**(닫힌 타입, substring 파싱 아님) |
-| 발동 | 모델이 `openrouter:fusion` 자가 호출(비결정) | **결정론적 게이트 우선**(§6), 모델 요청은 budget cap에 종속 |
+| 발동 | 모델이 `openrouter:fusion` 자가 호출(비결정) | **결정론적 게이트 우선**(§6) — 구조/자원 안전만 판정 |
 | 재귀 | depth 헤더로 1단계 차단 | 타입드 `Fusion_depth.t` (`Top`/`Nested`, descend가 2단계 거부) |
 | 비용 | 추상화(개별 완성 합산) | MASC가 패널 N + 심판 1 토큰/비용 명시 회계(§10) |
 | 가시성 | (없음) | **사용자 요구**: 키퍼 chat lane + 대시보드 board에 패널/심판 메시지 증명·표시(§8) |
@@ -62,7 +74,7 @@ MASC는 이미 멀티 fiber로 N개 키퍼를 상시 병렬 구동한다. 같은
         ┌─────────┴───────── gate: Fusion_policy.decide ──▶ Allow req | Deny reason
         │ (Deny면 사유를 chat lane에 1줄로 남기고 종료)
         ▼
-   Fusion_panel.run ── Async_agent.all ~max_fibers ── (model×N, 각자 web 도구·tool budget)
+   Fusion_panel.run ── Async_agent.all ── (model×N, 각자 web 도구·tool budget)
         │   → (name × api_response result) list → panel_outcome list (실패 격리)
         ▼
    Fusion_judge.run ── Structured.extract(judge_synthesis schema, provider=judge model)
@@ -77,9 +89,11 @@ MASC는 이미 멀티 fiber로 N개 키퍼를 상시 병렬 구동한다. 같은
 
 키퍼 턴 루프는 단일 모델로 유지(응답성) — fusion은 그 옆에서 도는 가시적 미니 라운드테이블.
 
+구현은 `Async_agent.all`에 `max_fibers`를 넘기지 않는다(`lib/fusion/fusion_panel.ml`) — fan-out 집합은 preset이 구성한 모델 identity 전체다.
+
 ---
 
-## 5. 타입드 계약 (`lib/fusion/fusion_types.mli`)
+## 5. 타입드 계약 (`lib/fusion_core/fusion_types.mli`)
 
 모든 분기는 **catch-all 없는 닫힌 합**. 새 변형 추가 시 컴파일러가 누락 사이트를 강제로 드러낸다(CLAUDE.md §FSM Sparse Match 회피).
 
@@ -93,13 +107,19 @@ end
 (* 패널 한 명의 결과 — 실패도 닫힌 합, silent default 없음 *)
 type panel_failure =
   | Timeout
+  | Bridge_error of string
   | Provider_error of string
+  | Invalid_structured_response of string
   | Empty_response of string
-  | Budget_exhausted
+  | Invalid_max_output_tokens of int
+  | Invalid_timeout_s of float
+
+type panel_answer = { model : string; answer : string; usage : usage }
+type panel_error  = { failed_model : string; reason : panel_failure }
 
 type panel_outcome =
-  | Answered of { model : string; answer : string; confidence : float option; usage : Usage.t }
-  | Failed   of { model : string; reason : panel_failure }
+  | Answered of panel_answer
+  | Failed   of panel_error
 
 (* 심판 구조화 출력 — Structured.extract로 provider-native JSON schema 강제 *)
 type claim          = { text : string; supporting_models : string list }
@@ -137,6 +157,7 @@ type fusion_request =
   ; keeper    : string                              (* 결과를 받을 키퍼 chat lane *)
   ; prompt    : string
   ; preset    : string                              (* runtime.toml [fusion.presets.*] 이름 *)
+  ; web_tools : bool                                (* 패널/심판에 web_search/web_fetch 주입 요청 *)
   ; depth     : Fusion_depth.t
   ; trigger   : fusion_trigger
   }
@@ -144,7 +165,6 @@ type fusion_request =
 (* 게이트 출력 *)
 type deny_reason =
   | Disabled | Preset_unknown of string | Depth_exceeded
-  | Over_hourly_budget
 
 type gate_decision = Allow of fusion_request | Deny of deny_reason
 ```
@@ -152,19 +172,19 @@ type gate_decision = Allow of fusion_request | Deny of deny_reason
 > 비용 *제약*(cost cap / per-call USD 상한)은 v1에서 제외한다 — 모델별 가격
 > 추정기가 없으면 inert한 결정론 게이트가 되기 때문(괴상한 제약 제거 원칙).
 > 비용은 *관측*만 한다: panel 응답의 `usage`(실측 토큰)를 sink가 합산·표시한다.
-> 발동 통제는 `per_hour_budget`(실측 카운터)가 담당한다.
+> 호출 rate cap은 두지 않는다(§10).
 
-> `Usage.t`는 기존 MASC usage 타입 재사용(없으면 `{ input_tokens:int; output_tokens:int }` 최소 정의).
+> `usage`는 `{ input_tokens:int; output_tokens:int }` 최소 record를 `fusion_types`에 둔다.
 
 ---
 
 ## 6. 게이트 (`fusion_policy`) — 구조는 결정론, 판단은 LLM
 
-게이트는 **구조/자원 안전**만 결정론적으로 본다. "이 턴이 심의할 가치가 있나"라는 *판단*은 게이트가 score 임계값(`score < low_confidence_threshold`)이나 task_kind 문자열 매칭(`task_kind ∈ high_stakes_task_kinds`)으로 대신 내리지 않는다 — 그건 memory-os 점수머신과 같은 안티패턴(가치 미입증 수치 판정)이다. 심의 가치는 키퍼(이미 LLM)가 스스로 판단해 `masc_fusion`을 호출하는 것으로 표현되고, 발동 남용은 결정론적 `per_hour_budget` cap이 막는다. **판단=LLM, 억제=구조적 cap.**
+게이트는 **구조/자원 안전**만 결정론적으로 본다. "이 턴이 심의할 가치가 있나"라는 *판단*은 게이트가 score 임계값(`score < low_confidence_threshold`)이나 task_kind 문자열 매칭(`task_kind ∈ high_stakes_task_kinds`)으로 대신 내리지 않는다 — 그건 memory-os 점수머신과 같은 안티패턴(가치 미입증 수치 판정)이다. 심의 가치는 키퍼(이미 LLM)가 스스로 판단해 `masc_fusion`을 호출하는 것으로 표현된다. **판단=LLM, 게이트=구조적 안전만.**
 
 ```ocaml
 val decide
-  :  policy:Fusion_policy.t          (* runtime.toml [fusion] + [fusion.gate]에서 로드 *)
+  :  policy:Fusion_policy.t          (* runtime.toml [fusion]에서 로드 *)
   -> fusion_request
   -> gate_decision
 ```
@@ -176,17 +196,17 @@ val decide
 3. `depth = Nested` → `Deny Depth_exceeded`.
 4. 그 외 → `Allow request`.
 
-`trigger`는 "왜 발동했나"의 이유 라벨일 뿐 적격성 판정에 쓰이지 않는다 (board meta·로그용). `per_hour_budget` 초과는 호출자가 `Fusion_budget.try_incr_if_under`로 원자적으로 강제해 `Deny Over_hourly_budget`을 낸다 (TOCTOU 회피, §10).
+`trigger`는 "왜 발동했나"의 이유 라벨일 뿐 적격성 판정에 쓰이지 않는다 (board meta·로그용).
 
-키퍼가 `masc_fusion`을 호출하는 것 자체가 "심의가 필요하다"는 LLM 판단이다. 게이트는 그 판단을 score로 재판정하지 않고 구조적 안전과 시간당 cap만 강제한다. (MEMORY: 키퍼 wake-cascade thrash는 score 게이트가 아니라 `per_hour_budget` cap으로 막는다.)
+키퍼가 `masc_fusion`을 호출하는 것 자체가 "심의가 필요하다"는 LLM 판단이다. 게이트는 그 판단을 score로 재판정하지 않고 구조적 안전만 강제한다.
 
 ---
 
-## 7. 패널 + 심판 (OAS 프리미티브 소비)
+## 7. 패널 + 심판 (agent_core 프리미티브 소비)
 
 ### 7.1 패널 — `Async_agent.all`
 
-`oas/lib/async_agent.mli:78`:
+`agent_core/lib/async_agent.mli:78`:
 ```ocaml
 val all : sw:Eio.Switch.t -> ?clock:_ -> ?max_fibers:int
        -> (Agent.t * string) list
@@ -213,7 +233,7 @@ val all : sw:Eio.Switch.t -> ?clock:_ -> ?max_fibers:int
 > 이 절은 `lib/fusion/fusion_judge.mli` 헤더가 "RFC가 요구하는지 확인하지 않았다"로 남겨둔
 > 미해결 항목이었다. 요구는 실재했고, 맞추는 쪽이 RFC다.
 
-`oas/lib/structured.mli:38` (provider-native JSON schema 강제, 미지원 provider fail-fast):
+`agent_core/lib/structured.mli:38` (provider-native JSON schema 강제, 미지원 provider fail-fast):
 ```ocaml
 val extract : sw:_ -> net:_ -> ?provider:Provider.config -> config:agent_config
            -> schema:'a schema -> string -> ('a, Error.sdk_error) result
@@ -243,7 +263,7 @@ judge 결론만 키퍼 **메인** conversation에 남긴다. 패널 트랜스크
 ```json
 { "fusion_deliberation": {
     "run_id": "...", "preset": "...", "trigger": "...",
-    "panel": [ { "model": "...", "answer": "...", "confidence": 0.0, "usage": {...} } ],
+    "panel": [ { "model": "...", "answer": "...", "usage": {...} } ],
     "judge": { "model": "...", "consensus": [...], "contradictions": [...],
                "blind_spots": [...], "resolved_answer": "...", "decision": {...} },
     "cost_usd": 0.0, "latency_ms": 0 } }
@@ -264,16 +284,12 @@ judge 결론만 키퍼 **메인** conversation에 남긴다. 패널 트랜스크
 enabled = false                       # opt-in. 기본 OFF (fail-safe)
 default_preset = "budget"
 
-[fusion.gate]
-low_confidence_threshold = 0.55
-high_stakes_task_kinds = ["goal_decision", "architecture"]
-per_hour_budget = 20                  # 시간당 발동 상한 (유일한 비-disabled deny 노브)
-
 [fusion.presets.budget]
 panel = ["deepseek.v4-flash", "glm.5-turbo", "ollama.gemma4-26b"]
 judge = "deepseek.v4-flash"
 panel_system_prompt = "..."           # 행동 정의 — 코드 default 없음, 비면 Missing_prompt
 judge_system_prompt = "..."
+web_tools = false                     # 패널/심판에 web_search/web_fetch 주입 여부
 max_output_tokens_per_panel = 4096    # 생략 시 Runtime_agent 기본 출력 예산
 judge_max_output_tokens = 4096        # 생략 시 Runtime_agent 기본 출력 예산
 ```
@@ -285,10 +301,9 @@ judge_max_output_tokens = 4096        # 생략 시 Runtime_agent 기본 출력 �
 
 ---
 
-## 10. 재귀 가드 · 발동 예산 · 비용 관측
+## 10. 재귀 가드 · 비용 관측
 
 - **재귀**: 패널/심판 `Agent.t`는 fusion 도구를 주입받지 않는다(도구 목록에서 배제). 추가로 `request.depth = Nested`면 게이트가 `Deny Depth_exceeded`. 이중 차단.
-- **발동 예산**: `per_hour_budget`(UTC hour bucket 카운터, `Fusion_budget` CAS)가 시간당 발동 수를 제한. 유일한 비-disabled deny 노브.
 - **비용 관측(제약 아님)**: 패널 응답의 `usage`(실측 input/output 토큰)를 sink가 합산해 심의 메시지에 표시한다. v1은 비용을 *제약*하지 않는다 — 모델별 가격 추정기가 없으면 cost cap은 inert 게이트(괴상한 제약)가 되기 때문. 가격 추정기 도입 시 별도 RFC로 cost cap을 다시 추가한다.
 
 ---
@@ -297,11 +312,11 @@ judge_max_output_tokens = 4096        # 생략 시 Runtime_agent 기본 출력 �
 
 CLAUDE.md §Harness First: 측정 없이 AI 에이전트 코드 진행 금지. fusion의 전 존재 이유가 "cost-matched 대안보다 낫다"이므로 이를 **재현 가능하게 측정·판정**하는 게 최우선. 측정(출력·토큰 비용)은 결정론, 우열 판정은 판단이다 — 정답을 string-match로 채점해 정답률 delta를 자동 게이트로 쓰는 건 표현 변이를 못 잡고 심의를 단답 정답률로 환원하는 어거지다.
 
-`test/fusion/fusion_harness.ml`:
+`bin/fusion_run.ml` (standalone 실행기, `dune exec bin/fusion_run.exe -- [--preset NAME] <prompt...>`):
 
 | 구성 | 내용 |
 |---|---|
-| 입력 | 고정 eval 셋: `question` N개 (+ 선택적 참고 컨텍스트) (`test/fusion/cases/*.json`). 재현성을 위해 질문만 고정하고, string-match 채점용 정답은 두지 않는다(우열은 판단). |
+| 입력 | CLI 인자로 받은 `question` (+ 선택적 참고 컨텍스트). 재현성을 위해 질문만 고정하고, string-match 채점용 정답은 두지 않는다(우열은 판단). |
 | 비교군 | 같은 질문 · **같은 토큰 예산**에서 4-way: (A) single 1×, (B) self-consistency(같은 모델 N회 샘플 + 다수결) ~N×, (C) Self-MoA(최강 모델 1개를 N회 샘플 → judge 종합) ~N×, (D) fusion(다른 모델 panel → judge) ~N× |
 | 산출 | 각 전략의 **출력 전문** + **토큰 비용 실측**(panel + judge 합산) + (self-consistency) **다수결 집계**. 자동 정답률·delta 수치는 내지 않는다 — 정답을 string-match로 채점하는 건 표현 변이("42" vs "The answer is 42")를 못 잡고 심의 가치를 단답 정답률로 환원하는 어거지다. 채점·우열은 판단 몫. |
 | 게이트 | fusion이 **cost-matched 대안(B/C)보다 나은가를 판단**한다 — 리뷰어(사람), 또는 별도 evaluator judge(후속). 비용이 실제로 비슷한지는 토큰 실측으로 확인. single(A) 대비 우위는 "더 많은 컴퓨트"로 자명해 정당화 근거가 못 된다. fusion의 고유 기여(모델 다양성 + judge 종합)가 같은 비용의 self-consistency/Self-MoA보다 나아야 4×를 정당화한다. |
@@ -317,21 +332,19 @@ CLAUDE.md §Harness First: 측정 없이 AI 에이전트 코드 진행 금지. f
 ## 12. 모듈 배치 · 빌드 · 테스트
 
 ```
-lib/fusion/                          # 단일 masc 라이브러리에 자동 포함 (include_subdirs)
-  fusion_types.ml(i)                 # §5 닫힌 합 (외부 의존 최소, 독립 컴파일)
+lib/fusion_core/                     # 순수 계약/게이트 (외부 의존 최소, 독립 컴파일)
+  fusion_types.ml(i)                 # §5 닫힌 합
   fusion_config.ml(i)                # [fusion.*] 파싱 -> Fusion_policy.t (fail-fast)
   fusion_policy.ml(i)                # §6 결정론 게이트 (순수)
+lib/fusion/                          # 실행/가시성 (단일 masc 라이브러리에 자동 포함)
   fusion_panel.ml(i)                 # §7.1 Async_agent.all fan-out
-  fusion_judge.ml(i)                 # §7.2 Structured.extract 종합
+  fusion_judge.ml(i)                 # §7.2 종합 + strict 파싱
   fusion_sink.ml(i)                  # §8 chat lane + board 가시성
   fusion_orchestrator.ml(i)          # §4 gate->panel->judge->sink 루프 (Eio.Switch)
   fusion_tool.ml(i)                  # masc_fusion 키퍼 도구 (dispatch table 등록)
-test/fusion/
-  fusion_harness.ml                  # §11 전략별 출력+비용 수집 (판정 입력, 필수)
-  test_fusion_policy.ml              # 게이트 전 분기 + deny 사유 (alcotest)
-  test_fusion_depth.ml               # descend Top->Nested->None (qcheck)
-  test_fusion_judge_schema.ml        # judge_synthesis parse round-trip + 악성 입력
-  test_fusion_panel_failure.ml       # panel_outcome 실패 격리 (mock provider)
+bin/fusion_run.ml                    # §11 standalone 하네스 (전략별 출력+비용 수집, 판정 입력)
+test/fusion_core/
+  test_fusion.ml                     # 게이트 전 분기 + deny 사유 + depth/topology round-trip
 ```
 
 - 모듈명 `fusion_*` 전역 유일(단일 라이브러리 flat namespace).
@@ -345,7 +358,7 @@ test/fusion/
 
 | Phase | 산출물 | 완료 기준 |
 |---|---|---|
-| **0** | `fusion_types` + `fusion_harness` + mock provider | 하네스가 전략별 출력+토큰 비용을 나란히 산출(실제 모델 1셋), 판정 입력 제공 |
+| **0** | `fusion_types` + `bin/fusion_run` 하네스 + mock provider | 하네스가 전략별 출력+토큰 비용을 나란히 산출(실제 모델 1셋), 판정 입력 제공 |
 | **1** | `fusion_config` + `fusion_policy` + 단위 테스트 | 게이트 전 분기 green, unknown preset fail-fast |
 | **2** | `fusion_panel` + `fusion_judge` | 실모델 패널 3 + 심판 1 round-trip, judge_synthesis 닫힌 타입 파싱 |
 | **3** | `fusion_sink` + `fusion_orchestrator` + `fusion_tool` | chat lane + board에 심의 가시(대시보드 확인), out-of-band 비차단 |
@@ -376,7 +389,7 @@ test/fusion/
 | string/substring 분류기 | **회피** — judge는 `Structured.extract` 닫힌 타입, surface-string 리스트 없음 |
 | N-of-M 패치 | N/A — 신규 서브시스템, 단일 abstraction |
 | catch-all `_ ->` 추가 | **회피** — 모든 분기 닫힌 합(trigger/decision/failure/deny) |
-| cap/cooldown/dedup/repair | per_hour_budget/cost cap은 *기능적 게이트*(비용 통제)지 증상 억제 아님. host draining은 #25032의 durable queue 계약 |
+| cap/cooldown/dedup/repair | 발동 rate cap은 두지 않는다(PR #22051에서 제거). 비용은 제약 없이 관측만(§10). host draining은 #25032의 durable queue 계약 |
 | test backdoor | mock provider는 test 디렉토리 한정, prod 경로 비노출 |
 | Unknown→Permissive | **회피** — unknown preset/model = fail-fast 에러, silent default 없음 |
 

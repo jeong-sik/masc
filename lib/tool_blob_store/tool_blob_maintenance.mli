@@ -2,9 +2,12 @@
 
     Live references are the union of exact {!Tool_output} markers in the
     closed durable-consumer registry: Keeper state/checkpoints, Gate replay,
-    tool-call logs, trajectories, traces, messages, Keeper chat, and bounded
-    wire captures. Repository mirrors, build products, operator config, and
-    unrelated observational logs are not blob consumers and are never
+    tool-call logs, traces, messages, Keeper chat, and bounded wire captures.
+    A marker whose media type is {!Tool_output.artifact_manifest_mime} adds the
+    manifest's strictly decoded normalized children transitively. No other
+    blob content is parsed or treated as an ownership edge.
+    Trajectory previews, repository mirrors, build products, operator config,
+    and unrelated observational logs are not blob consumers and are never
     traversed. A new durable consumer must be added to this registry in the
     same change that persists a reference.
 
@@ -12,11 +15,10 @@
     [Observe_only] records every currently unreferenced blob as a durable
     candidate and deletes nothing. [Delete_previous_candidates] deletes only
     hashes that were candidates in the previous durable snapshot and remain
-    unreferenced in the new complete scan. Production calls it only at the
-    quiescent startup boundary, so two complete startup scans are required.
-    A malformed reference, scan failure, exhausted scan budget, candidate-store
-    failure, or unlink failure aborts visibly. Because the blob store is shared
-    across clusters
+    unreferenced in the new complete scan. The offline deployment helper runs
+    it only while holding the BasePath process lease, so two complete offline
+    scans are required. A malformed reference, scan failure, candidate-store
+    failure, or unlink failure aborts visibly. Because the blob store is shared across clusters
     while several consumers are cluster-aware, any non-empty
     [<base>/.masc/clusters] tree currently disables maintenance fail-closed
     until cross-cluster writer quiescence has one coordination owner. *)
@@ -24,17 +26,6 @@
 type mode =
   | Observe_only
   | Delete_previous_candidates
-
-(** Wall-clock ceiling for one durable scan. [Bounded_by] aborts the traversal
-    with {!Scan_budget_exhausted} once [deadline_epoch_seconds] passes, which
-    short-circuits {!run} before the candidate snapshot is written: a partial
-    scan can never record a still-referenced blob as a deletion candidate.
-    Callers on a deadline (server startup, bounded by the startup watchdog)
-    must bound the scan; offline callers with no competing deadline pass
-    [Unbounded]. *)
-type scan_budget =
-  | Unbounded
-  | Bounded_by of { deadline_epoch_seconds : float }
 
 type error =
   | Clustered_durable_roots_uncoordinated of
@@ -60,6 +51,14 @@ type error =
       ; line : int
       ; detail : string
       }
+  | Artifact_manifest_read_failed of
+      { sha256 : string
+      ; reason : string
+      }
+  | Artifact_manifest_invalid of
+      { sha256 : string
+      ; detail : string
+      }
   | Candidate_snapshot_invalid of
       { path : string
       ; detail : string
@@ -71,11 +70,6 @@ type error =
   | Candidate_snapshot_write_failed of
       { path : string
       ; detail : string
-      }
-  | Scan_budget_exhausted of
-      { elapsed_seconds : float
-      ; files_scanned : int
-      ; last_path : string
       }
   | Blob_listing_failed of Tool_blob_store.list_error
   | Blob_delete_failed of Tool_blob_store.delete_error
@@ -89,8 +83,4 @@ type report =
 
 val error_to_string : error -> string
 val candidate_snapshot_path : base_path:string -> string
-val run
-  :  base_path:string
-  -> mode:mode
-  -> budget:scan_budget
-  -> (report, error) result
+val run : base_path:string -> mode:mode -> (report, error) result

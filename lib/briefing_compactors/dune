@@ -1,10 +1,9 @@
 ; RFC-0056 Phase 1D — extract Briefing_compactors leaf module from flat
 ; masc namespace. Stacked on Phase 1C (host_config).
 ;
-; Briefing_compactors is dependency-leaf: stdlib (Float, List, Option,
-; Printf, String) + Yojson + Masc_domain (already its own sub-library
-; lib/types/, dune name masc.masc_types). 174+21 LoC, fan-in 2 (1
-; lib caller + 1 test).
+; Briefing_compactors is dependency-leaf: stdlib (List, Option, String)
+; + Yojson + Masc_domain (already its own sub-library lib/types/, dune
+; name masc.masc_types). 42+9 LoC, fan-in 2 (1 lib caller + 1 test).
 ;
 ; Note: was previously listed in parent (private_modules) — promoting to
 ; its own (wrapped false) sub-library keeps it accessible to the same
@@ -21,5 +20,5 @@
  (public_name masc.briefing_compactors)
  (wrapped false)
  (flags
-  (:standard -w +4 -w +32))
+  (:standard -w +4 -w +33 -w +37))
  (libraries yojson masc_core masc.masc_types masc.dashboard_utils))

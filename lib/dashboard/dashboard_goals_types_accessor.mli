@@ -19,21 +19,6 @@ type goal_detail_keeper = {
   runtime_trust : Yojson.Safe.t;
 }
 
-type attainment_unit =
-  | Percent
-  | Count
-  | Unknown
-
-(** Whether a goal's declared metric has actually been evaluated (task-1743).
-    [Metric_unevaluated] means [goal.metric] is set but no evaluator produced
-    a value; attainment percentages are task-derived, not metric-derived.
-    [Metric_absent] means the goal
-    declares no metric. Lets consumers distinguish an unmeasured metric from
-    a genuine measured zero. *)
-type metric_evaluation =
-  | Metric_unevaluated
-  | Metric_absent
-
 (** [Some ()] when the link table places this Task under this Goal. Replaces
     [task_linkage_source_opt], which returned a constant "explicit" and made
     three unreachable linkage kinds look like real cases. *)

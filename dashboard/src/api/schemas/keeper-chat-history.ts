@@ -31,6 +31,13 @@ import {
   unknown,
   type InferOutput,
 } from 'valibot'
+import {
+  decodeKeeperChatDeliveryProvenance,
+} from './keeper-chat-delivery-provenance'
+import type {
+  KeeperChatDeliveryProvenance,
+  KeeperChatDeliveryProvenanceDecode,
+} from '../../keeper-delivery-provenance'
 
 // Attachment row shape persisted by keeper_chat_store.ml (to_json_array
 // :848-861): snake_case mime_type and an open `type` string. Normalized to
@@ -96,8 +103,8 @@ const KeeperChatTraceStepSchema = union([
     text: string(),
     content_withheld: optional(boolean()),
     ts: optional(string()),
-    oas_block_index: optional(number()),
-    oasBlockIndex: optional(number()),
+    agent_core_block_index: optional(number()),
+    agentCoreBlockIndex: optional(number()),
   }),
   object({
     kind: literal('reason'),
@@ -115,8 +122,8 @@ const KeeperChatTraceStepSchema = union([
     args: optional(unknown()),
     result: optional(unknown()),
     ts: optional(string()),
-    oas_block_index: optional(number()),
-    oasBlockIndex: optional(number()),
+    agent_core_block_index: optional(number()),
+    agentCoreBlockIndex: optional(number()),
   }),
 ])
 
@@ -225,6 +232,14 @@ export const KeeperChatBlockSchema = union([
 
 export type KeeperChatBlock = InferOutput<typeof KeeperChatBlockSchema>
 
+// `object`, not `strictObject`: this row-level schema feeds a tolerant
+// per-row drop, so an unknown key here does not reject one field — it
+// silently deletes the whole message from the transcript. #28225 adding
+// `delivery_receipt` to the backend emission wiped every direct-conversation
+// row while only autonomous rows (no stream_contract) survived (#28407).
+// Additive backend fields must degrade to "ignored", never to "row dropped";
+// the deploy-window rationale documented on `role`/`speaker_authority`
+// applies to this nested object the same way.
 export const KeeperChatHistoryStreamContractSchema = object({
   source: string(),
   status: string(),
@@ -238,9 +253,12 @@ export const KeeperChatHistoryStreamContractSchema = object({
   traceEventCount: optional(number()),
   lifecycle_events: optional(array(string())),
   lifecycleEvents: optional(array(string())),
-  delivery_receipt: optional(string()),
-  deliveryReceipt: optional(string()),
   reason: optional(string()),
+  // keeper_chat_store.ml stream_delivery_receipt_field (#28225): names how the
+  // persisted row relates to live delivery (e.g. "no_delivery_receipt",
+  // "server_lifecycle_replay_only"). Open string for the same deploy-window
+  // reason as `source`/`status`.
+  delivery_receipt: optional(string()),
 })
 
 export type KeeperChatHistoryStreamContract = InferOutput<typeof KeeperChatHistoryStreamContractSchema>
@@ -250,13 +268,12 @@ const KeeperAutonomousTurnSchema = object({
 })
 
 export const KeeperChatHistoryMessageSchema = object({
-  // R3: producer-assigned stable message id (keeper_chat_store.ml mints it
-  // at append and the read boundary stamps legacy rows, so the backend now
-  // emits it on every row). Left optional for the deploy window — a
-  // dashboard deployed ahead of the backend would otherwise drop every
-  // message; the consumer falls back to a stable content-derived id when
-  // it is absent.
-  id: optional(string()),
+  // Current-record contract: keeper_chat_store mints a stable id on every
+  // append and rejects persisted rows whose id is absent or blank. Rows
+  // projected outside the chat store (autonomous turns via
+  // Keeper_autonomous_turn_source) must mint one too — safeParse drops any
+  // row without a non-blank id, with no error surface.
+  id: string(),
   role: string(),
   // Autonomous turns can complete through tools without terminal prose. The
   // backend keeps that distinct as null while still projecting the work trace.
@@ -300,12 +317,13 @@ export const KeeperChatHistoryMessageSchema = object({
   // :848-861). Without decoding these, a user's upload appears live but
   // vanishes on reload even though it is on disk.
   attachments: optional(array(KeeperChatHistoryAttachmentSchema)),
-  // Turn identity stamped by the backend on every dashboard-originated row
-  // (keeper_chat_store.ml delivery_key, e.g.
-  // `{"kind":"direct_request","request_id":"kmsg-..."}`). Accepted as
-  // `unknown` so a shape drift never drops the row; the consumer extracts
-  // `request_id` tolerantly (absent/malformed -> undefined).
+  // The raw provenance pair is decoded together immediately after this
+  // row-level tolerant schema succeeds. Keeping the two raw fields unknown at
+  // this first pass lets a malformed identity degrade to a visible but
+  // non-reconcilable row instead of deleting the message. Unknown does not
+  // escape this module; callers receive the closed delivery_provenance ADT.
   delivery_key: optional(unknown()),
+  transcript_slot: optional(unknown()),
   // RFC-0235 P3: server-parsed rich chat blocks. Carried on history rows so
   // reloads preserve the structured render instead of re-parsing plain text.
   blocks: optional(array(KeeperChatBlockSchema)),
@@ -321,11 +339,27 @@ export const KeeperChatHistoryMessageSchema = object({
   autonomous_turn: optional(KeeperAutonomousTurnSchema),
 })
 
-export type KeeperChatHistoryMessage = InferOutput<typeof KeeperChatHistoryMessageSchema>
+type RawKeeperChatHistoryMessage = InferOutput<typeof KeeperChatHistoryMessageSchema>
+
+export type KeeperChatHistoryMessage = Omit<
+  RawKeeperChatHistoryMessage,
+  'delivery_key' | 'transcript_slot'
+> & {
+  delivery_provenance: KeeperChatDeliveryProvenance | null
+  delivery_provenance_status: KeeperChatDeliveryProvenanceDecode['status']
+}
 
 export function safeParseKeeperChatHistoryMessage(
   data: unknown,
 ): KeeperChatHistoryMessage | null {
   const result = safeParse(KeeperChatHistoryMessageSchema, data)
-  return result.success ? result.output : null
+  if (!result.success) return null
+  const { delivery_key, transcript_slot, ...message } = result.output
+  if (!message.id.trim()) return null
+  const provenance = decodeKeeperChatDeliveryProvenance(delivery_key, transcript_slot)
+  return {
+    ...message,
+    delivery_provenance: provenance.value,
+    delivery_provenance_status: provenance.status,
+  }
 }

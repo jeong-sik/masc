@@ -13,8 +13,7 @@
     [truncate], [help_doc_refs], [help_prompt_hints],
     [default_when_to_use], [manual_help_entry]),
     [canonicalize_schema] (singular — folded into
-    {!canonicalize_schemas}),
-    [validate_short_description] (no external caller).
+    {!canonicalize_schemas}).
 
     [trim_terminal_punctuation], [constraints_from_metadata],
     [derived_short_description], [derived_details] and [index_json] were

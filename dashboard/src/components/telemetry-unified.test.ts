@@ -14,6 +14,7 @@ const baseTelemetry: TelemetryResponse = {
   source: 'telemetry_unified',
   query: { source: 'tool_metric', n: 100 },
   count: 1,
+  offset: 0,
   entries: [
     {
       source: 'tool_metric',
@@ -119,8 +120,8 @@ async function loadPanel(
     fetchDashboardNamespaceTruth: opts?.fetchDashboardNamespaceTruth ?? vi.fn().mockResolvedValue({ execution: { summary: { active_operations: 3, blocked_operations: 1, continuity_alerts: 0 } } }),
     fetchDashboardCacheStats: opts?.fetchDashboardCacheStats ?? vi.fn().mockResolvedValue(baseCacheStats),
   }))
-  vi.doMock('./oas-health-chip', () => ({
-    OasHealthChip: () => null,
+  vi.doMock('./agent-core-health-chip', () => ({
+    AgentCoreHealthChip: () => null,
   }))
   return import('./telemetry-unified')
 }
@@ -146,7 +147,7 @@ describe('TelemetryUnified', () => {
     vi.clearAllMocks()
     vi.resetModules()
     vi.doUnmock('../api/dashboard')
-    vi.doUnmock('./oas-health-chip')
+    vi.doUnmock('./agent-core-health-chip')
     vi.useRealTimers()
     if (originalVisibility) {
       Object.defineProperty(document, 'visibilityState', originalVisibility)
@@ -349,7 +350,7 @@ describe('TelemetryUnified', () => {
   })
 
   it('hydrates telemetry scope and entry focus from route params', async () => {
-    window.location.hash = '#monitoring?section=fleet-health&view=event-log&source=oas_event&n=500&session_id=sess-route&operation_id=op-route&worker_run_id=wr-route&q=turn-9'
+    window.location.hash = '#monitoring?section=fleet-health&view=event-log&source=agent_core_event&n=500&session_id=sess-route&operation_id=op-route&worker_run_id=wr-route&q=turn-9'
     const fetchTelemetry = vi.fn().mockResolvedValue({
       ...baseTelemetry,
       count: 2,
@@ -384,7 +385,7 @@ describe('TelemetryUnified', () => {
     await flushUi()
 
     expect(fetchTelemetry).toHaveBeenCalledWith(expect.objectContaining({
-      source: 'oas_event',
+      source: 'agent_core_event',
       session_id: 'sess-route',
       operation_id: 'op-route',
       worker_run_id: 'wr-route',
@@ -393,7 +394,7 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('session sess-route')
     expect(container.textContent).toContain('operation op-route')
     expect(container.textContent).toContain('worker_run wr-route')
-    expect(container.textContent).toContain('source OAS 이벤트')
+    expect(container.textContent).toContain('source Agent Core 이벤트')
     expect(container.textContent).toContain('limit 500')
     expect(container.textContent).toContain('focus turn-9')
     expect(container.querySelector('[data-testid="telemetry-route-focus"]')).not.toBeNull()
@@ -403,7 +404,7 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('QUERY turn-9')
     expect(container.textContent).toContain('1 focused item')
     const sourceSelect = container.querySelector<HTMLSelectElement>('select[aria-label="텔레메트리 소스 필터"]')
-    expect(sourceSelect?.value).toBe('oas_event')
+    expect(sourceSelect?.value).toBe('agent_core_event')
     const limitSelect = container.querySelector<HTMLSelectElement>('select[aria-label="표시 개수 제한"]')
     expect(limitSelect?.value).toBe('500')
     const searchInput = container.querySelector<HTMLInputElement>('input[aria-label="엔트리 텍스트 검색"]')
@@ -425,7 +426,7 @@ describe('TelemetryUnified', () => {
     expect(window.location.hash).not.toContain('operation_id=')
     expect(window.location.hash).not.toContain('worker_run_id=')
     expect(window.location.hash).not.toContain('q=')
-    expect(window.location.hash).toContain('source=oas_event')
+    expect(window.location.hash).toContain('source=agent_core_event')
     expect(window.location.hash).toContain('n=500')
   })
 
@@ -666,14 +667,14 @@ describe('TelemetryUnified', () => {
 
     const items = buildTelemetryDisplayItems([
       {
-        source: 'oas_event',
+        source: 'agent_core_event',
         ts_unix: 1_775_709_400,
         event_type: 'turn_ready',
         agent_name: 'keeper-alpha-agent',
         turn: 42,
       },
       {
-        source: 'oas_event',
+        source: 'agent_core_event',
         ts_unix: 1_775_709_399,
         event_type: 'telemetry_event',
         payload: [
@@ -696,7 +697,7 @@ describe('TelemetryUnified', () => {
         },
       },
       {
-        source: 'oas_event',
+        source: 'agent_core_event',
         ts_unix: 1_775_709_397,
         event_type: 'telemetry_event',
         payload: [
@@ -718,7 +719,7 @@ describe('TelemetryUnified', () => {
     })
     expect(items[1]).toMatchObject({ kind: 'entry' })
     if (items[1]?.kind === 'entry') {
-      expect(items[1].entry.source).toBe('oas_event')
+      expect(items[1].entry.source).toBe('agent_core_event')
       expect(items[1].entry.event_type).toBe('telemetry_event')
     }
 
@@ -745,7 +746,7 @@ describe('TelemetryUnified', () => {
     // with run-scope they MUST stay in two distinct groups.
     const items = buildTelemetryDisplayItems([
       {
-        source: 'oas_event',
+        source: 'agent_core_event',
         ts_unix: 1_775_710_000,
         event_type: 'turn_ready',
         agent_name: 'keeper-alpha-agent',
@@ -753,7 +754,7 @@ describe('TelemetryUnified', () => {
         session_id: 'sess-foo',
       },
       {
-        source: 'oas_event',
+        source: 'agent_core_event',
         ts_unix: 1_775_709_999,
         event_type: 'telemetry_event',
         session_id: 'sess-foo',
@@ -763,7 +764,7 @@ describe('TelemetryUnified', () => {
         ],
       },
       {
-        source: 'oas_event',
+        source: 'agent_core_event',
         ts_unix: 1_775_709_998,
         event_type: 'turn_ready',
         agent_name: 'keeper-alpha-agent',
@@ -771,7 +772,7 @@ describe('TelemetryUnified', () => {
         session_id: 'sess-bar',
       },
       {
-        source: 'oas_event',
+        source: 'agent_core_event',
         ts_unix: 1_775_709_997,
         event_type: 'telemetry_event',
         session_id: 'sess-bar',
@@ -824,7 +825,7 @@ describe('TelemetryUnified', () => {
         runtime_contract: { agent_name: 'keeper-alpha-agent' },
       },
       {
-        source: 'oas_event',
+        source: 'agent_core_event',
         ts_unix: 1_775_710_998,
         event_type: 'telemetry_event',
         payload: [
@@ -841,7 +842,7 @@ describe('TelemetryUnified', () => {
     expect(turnGroups).toHaveLength(0)
   })
 
-  it('surfaces cloud Ollama provider details in OAS telemetry previews and search', async () => {
+  it('surfaces cloud Ollama model details in runtime telemetry previews and search', async () => {
     const { buildTelemetryDisplayItems, filterTelemetryDisplayItems } = await loadPanel(
       vi.fn().mockResolvedValue(baseTelemetry),
       vi.fn().mockResolvedValue(baseSummary),
@@ -849,21 +850,7 @@ describe('TelemetryUnified', () => {
 
     const items = buildTelemetryDisplayItems([
       {
-        source: 'oas_event',
-        ts_unix: 1_775_709_500,
-        event_type: 'masc:oas_worker:build',
-        agent_name: 'oas-tier-group.ollama_cloud_stable',
-        payload: {
-          agent: 'oas-tier-group.ollama_cloud_stable',
-          provider_kind: 'openai_compat',
-          model_id: 'kimi-k2.6:cloud',
-          provider_model_id: 'kimi-k2.6:cloud',
-          base_url: 'https://ollama.com/v1',
-          endpoint: 'https://ollama.com/v1/chat/completions',
-        },
-      },
-      {
-        source: 'oas_event',
+        source: 'agent_core_event',
         ts_unix: 1_775_709_499,
         event_type: 'telemetry_event',
         payload: [
@@ -876,10 +863,6 @@ describe('TelemetryUnified', () => {
         ],
       },
     ])
-
-    const buildMatches = filterTelemetryDisplayItems(items, 'ollama.com')
-    expect(buildMatches).toHaveLength(1)
-    expect(buildMatches[0]).toMatchObject({ kind: 'entry' })
 
     const streamingMatches = filterTelemetryDisplayItems(items, 'Streaming_summary')
     expect(streamingMatches).toHaveLength(1)

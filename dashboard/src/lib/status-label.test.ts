@@ -12,6 +12,18 @@ describe('statusLabel', () => {
     expect(statusLabel('running')).toBe('진행 중')
   })
   it('maps paused', () => { expect(statusLabel('paused')).toBe('일시정지') })
+  // These three reach the surface from types/health_status.ml and
+  // keeper/keeper_status_runtime.ml. The default arm returns the wire token
+  // unchanged, so a missing case is not a missing label — it is the English
+  // token printed inside a Korean surface (#27165). The expectations are
+  // literals: comparing against statusLabel's own output would pass either way.
+  it('maps health tokens the backend emits', () => {
+    expect(statusLabel('warming')).toBe('예열 중')
+    expect(statusLabel('snapshot_not_ready')).toBe('스냅샷 준비 안 됨')
+    expect(statusLabel('zombie')).toBe('좀비')
+    expect(statusLabel('timeout')).toBe('시간 초과')
+    expect(statusLabel('settled')).toBe('정리됨')
+  })
   it('maps error variants', () => {
     expect(statusLabel('error')).toBe('오류')
     expect(statusLabel('failed')).toBe('오류')

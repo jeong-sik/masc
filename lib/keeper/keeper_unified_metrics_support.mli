@@ -21,11 +21,11 @@ val observed_affordances_of_observation :
 
 val classify_usage_trust :
   usage_reported:bool ->
-  usage:Agent_sdk.Types.api_usage ->
+  usage:Agent_core.Types.api_usage ->
   usage_trust
 
 val estimate_usage_cost_usd :
-  Agent_sdk.Types.api_usage ->
+  Agent_core.Types.api_usage ->
   float
 (** Return the provider-reported value verbatim. Missing cost uses the numeric
     aggregate identity [0.0]; anomaly provenance is emitted separately. *)
@@ -65,21 +65,14 @@ val has_substantive_tool_calls : string list -> bool
 val is_noop_cycle : has_text:bool -> tools_used:string list -> bool
 
 val visible_run_validation :
-  Keeper_agent_run.run_result -> Agent_sdk.Raw_trace.run_validation option
+  Keeper_agent_run.run_result -> Agent_core.Raw_trace.run_validation option
 
 val telemetry_reported_of_result : Keeper_agent_run.run_result -> bool
 val coverage_reason_of_result : Keeper_agent_run.run_result -> string option
 val coverage_stage_of_result : Keeper_agent_run.run_result -> string option
 val coverage_stage_of_no_result_outcome : string -> string
 val coverage_reason_of_no_result_outcome : string -> string
-val validated_evidence_preview : Agent_sdk.Raw_trace.run_validation -> string
-
-val accountability_evidence_refs :
-  trace_id:string ->
-  turn_number:int ->
-  result:Keeper_agent_run.run_result ->
-  validated_evidence:Agent_sdk.Raw_trace.run_validation option ->
-  string list
+val validated_evidence_preview : Agent_core.Raw_trace.run_validation -> string
 
 val scheduled_autonomous_outcome_of_result :
   has_text:bool ->

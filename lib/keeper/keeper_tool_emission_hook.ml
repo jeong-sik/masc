@@ -58,9 +58,14 @@ let accumulator_size acc =
   Stdlib.Mutex.unlock acc.mutex;
   n
 
-let capture_typed_result acc = function
-  | `Assoc _ as data -> push acc data
-  | (`List _ | `String _ | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Null) -> ()
+let capture_typed_result acc data =
+  match
+    ( Multimodal.Tool_emission.extract_kind_from_result data
+    , Multimodal.Tool_emission.extract_id_from_result data )
+  with
+  | Some _, Some _ -> push acc data
+  | None, _ | _, None -> ()
+;;
 
 let drain_into_working_context acc ~(working_context : Yojson.Safe.t option)
     : Yojson.Safe.t option =
@@ -69,8 +74,6 @@ let drain_into_working_context acc ~(working_context : Yojson.Safe.t option)
   else
     Multimodal.Tool_emission.emit_from_tool_results
       ~emit:Multimodal.Keeper_emitter.emit ~working_context items
-
-let global_accumulator = create_accumulator ()
 
 (* Tier K4c — per-keeper registry. Each keeper gets its own
    accumulator so concurrent multi-keeper tool emissions cannot

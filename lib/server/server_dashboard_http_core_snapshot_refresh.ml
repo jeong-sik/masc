@@ -7,7 +7,7 @@
     cycle invokes [Operator_control.snapshot_json] under a fresh
     [Operator_control.context], decorates the result with
     [with_projection_diagnostics] / [with_operator_snapshot_metadata],
-    and republishes via [!operator_snapshot_broadcast_ref].
+    and republishes through the [broadcast_snapshot] it was given.
 
     Pure helper move (no callback injection). All cross-module
     references reach existing siblings or top-level libraries — no
@@ -27,17 +27,11 @@ module Core_cache = Server_dashboard_http_core_cache
 module Core_operator = Server_dashboard_http_core_operator
 module Core_operator_query = Server_dashboard_http_core_operator_query
 
-let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
+let start_operator_snapshot_refresh_loop ~state ~sw ~clock ~broadcast_snapshot =
   let workspace_scope = Mcp_server.workspace_scope state in
   let config = workspace_scope.config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let net, mono_clock = Core_runtime.state_dashboard_runtime_caps state in
-  let default_cache_key generation =
-    Core_cache.dashboard_cache_key
-      config
-      "operator_snapshot"
-      (Printf.sprintf "default-summary:g%d" generation)
-  in
   let compute () =
     let compute = Core_operator.begin_operator_snapshot_compute () in
     let started_at = Unix.gettimeofday () in
@@ -90,7 +84,6 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
                   ~extra:(Core_operator.operator_snapshot_extra ())
              |> Core_operator_query.with_operator_snapshot_metadata
                   ~config
-                  ~cache_key:(default_cache_key compute.generation)
                   ~query:(Core_operator_query.operator_snapshot_default_query ()))
       in
       compute, json
@@ -104,7 +97,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
        with
        | None -> ()
        | Some publication ->
-         !Core_operator.operator_snapshot_broadcast_ref publication);
+         broadcast_snapshot publication);
       raise exn
   in
   Proactive_refresh.start
@@ -125,5 +118,5 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
       with
       | None -> ()
       | Some publication ->
-        !Core_operator.operator_snapshot_broadcast_ref publication)
+        broadcast_snapshot publication)
 ;;

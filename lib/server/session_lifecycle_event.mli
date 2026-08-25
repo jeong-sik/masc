@@ -9,13 +9,16 @@
     encoding land. PR-3+ wire the publish calls from the SSE eviction
     and lifecycle sites in {!Server_mcp_transport_http_sse}. *)
 
-type transport = SSE | WS | GRPC | WebRTC
+type transport = SSE | WS | GRPC
 
 type evict_reason =
   | Cap_exceeded
       (** oldest-eviction triggered by [max_clients] cap. *)
   | Idle_timeout
-      (** [cleanup_stale] crossed [MASC_TRANSPORT_IDLE_EVICT_SEC]. *)
+      (** [cleanup_stale] crossed its idle age. The bound is
+          [Sse.cleanup_stale]'s own [?max_age_s] default of 1800 s, applied
+          because the caller passes no argument; RFC-0099 PR-5 is where the
+          transport keep-alive knobs become configuration. *)
   | Backpressure
       (** mailbox-full beyond drain grace, or {!Fd_accountant} pressure
           escalation (RFC-0101 §3.6, 5 s sustained). *)
@@ -94,7 +97,7 @@ val pp : Format.formatter -> t -> unit
 (** {1 Publisher injection (PR-3)}
 
     The transport layer ({!Server_mcp_transport_http}, AGUI, etc.)
-    cannot reach into the running {!Agent_sdk.Event_bus} directly —
+    cannot reach into the running {!Agent_core.Event_bus} directly —
     the bus handle lives behind {!Server_bootstrap_loops}. PR-3
     introduces a publisher hook so transport-side eviction sites can
     emit events without taking a hard dependency on bus plumbing. *)

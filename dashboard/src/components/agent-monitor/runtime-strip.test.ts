@@ -98,19 +98,6 @@ describe('AgentRuntimeStrip', () => {
     expect(fill!.classList.contains('warn')).toBe(true)
   })
 
-  it('renders generation when present', () => {
-    mockFindKeeper.mockReturnValue({
-      pipeline_stage: null,
-      context_ratio: null,
-      generation: 42,
-    })
-    mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
-    const container = document.createElement('div')
-    render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)
-    expect(container.textContent).toContain('GEN')
-    expect(container.textContent).toContain('42')
-  })
-
   it('does not load runtime catalog when no runtime evidence exists', () => {
     mockFindKeeper.mockReturnValue({
       pipeline_stage: null,
@@ -133,38 +120,38 @@ describe('AgentRuntimeStrip', () => {
       context_ratio: null,
       generation: null,
     })
-    mockKeeperDisplayRuntime.mockReturnValue({ label: 'Runtime', value: 'oas.primary' })
+    mockKeeperDisplayRuntime.mockReturnValue({ label: 'Runtime', value: 'agentCore.primary' })
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     const container = document.createElement('div')
     render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)
     expect(mockLoadRuntimeCatalog).toHaveBeenCalled()
     expect(container.textContent).toContain('Runtime')
-    expect(container.textContent).toContain('oas.primary')
+    expect(container.textContent).toContain('agentCore.primary')
   })
 
   it('renders runtime catalog facts when a catalog entry is loaded', () => {
-    const entry = { runtime_id: 'oas.primary' }
+    const entry = { runtime_id: 'agentCore.primary' }
     mockFindKeeper.mockReturnValue({
       pipeline_stage: null,
       context_ratio: null,
       generation: null,
     })
     mockRuntimeCatalogState.value = { status: 'loaded', data: [entry] }
-    mockKeeperDisplayRuntime.mockReturnValue({ label: 'Runtime', value: 'oas.primary' })
+    mockKeeperDisplayRuntime.mockReturnValue({ label: 'Runtime', value: 'agentCore.primary' })
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     mockFindRuntimeCatalogEntry.mockReturnValue(entry)
     mockRuntimeCatalogSnapshotFacts.mockReturnValue('caps:declared · format:json,schema')
     mockRuntimeCatalogEffectiveCapabilities.mockReturnValue(
-      'source:oas-provider-config-model · input:multimodal,image · wire:chat-template-kwargs',
+      'source:agent-core-provider-config-model · input:multimodal,image · wire:chat-template-kwargs',
     )
     const container = document.createElement('div')
     render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)
-    expect(mockFindRuntimeCatalogEntry).toHaveBeenCalledWith([entry], 'oas.primary')
+    expect(mockFindRuntimeCatalogEntry).toHaveBeenCalledWith([entry], 'agentCore.primary')
     expect(mockRuntimeCatalogSnapshotFacts).toHaveBeenCalledWith(entry)
     expect(mockRuntimeCatalogEffectiveCapabilities).toHaveBeenCalledWith(entry)
     expect(container.textContent).toContain('SPEC')
     expect(container.textContent).toContain('caps:declared · format:json,schema')
-    expect(container.textContent).toContain('source:oas-provider-config-model')
+    expect(container.textContent).toContain('source:agent-core-provider-config-model')
     expect(container.textContent).toContain('input:multimodal,image')
     expect(container.textContent).toContain('wire:chat-template-kwargs')
   })
@@ -176,7 +163,7 @@ describe('AgentRuntimeStrip', () => {
       generation: null,
     })
     mockRuntimeCatalogState.value = { status: 'error', message: 'fetch failed' }
-    mockKeeperDisplayRuntime.mockReturnValue({ label: 'Runtime', value: 'oas.primary' })
+    mockKeeperDisplayRuntime.mockReturnValue({ label: 'Runtime', value: 'agentCore.primary' })
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     const container = document.createElement('div')
     render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)
@@ -192,7 +179,7 @@ describe('AgentRuntimeStrip', () => {
       generation: null,
     })
     mockRuntimeCatalogState.value = { status: 'loaded', data: [] }
-    mockKeeperDisplayRuntime.mockReturnValue({ label: 'Runtime', value: 'oas.primary' })
+    mockKeeperDisplayRuntime.mockReturnValue({ label: 'Runtime', value: 'agentCore.primary' })
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     mockFindRuntimeCatalogEntry.mockReturnValue(null)
     const container = document.createElement('div')

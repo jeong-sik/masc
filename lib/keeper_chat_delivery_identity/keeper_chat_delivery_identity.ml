@@ -31,65 +31,10 @@ module Request_id = struct
   let equal = String.equal
 end
 
-module Receipt_id = struct
-  type t = string
-
-  let prefix = "chatq_"
-  let rng = Random.State.make_self_init ()
-  let rng_mutex = Stdlib.Mutex.create ()
-
-  let generate () =
-    let uuid =
-      Stdlib.Mutex.protect rng_mutex (fun () -> Uuidm.v4_gen rng ())
-    in
-    prefix ^ Uuidm.to_string uuid
-  ;;
-
-  let of_request_id request_id = Request_id.to_string request_id
-
-  let of_string value =
-    let prefix_length = String.length prefix in
-    if
-      String.length value > prefix_length
-      && String.equal (String.sub value 0 prefix_length) prefix
-    then
-      let uuid =
-        String.sub value prefix_length (String.length value - prefix_length)
-      in
-      (match Uuidm.of_string uuid with
-       | Some _ -> Ok value
-       | None -> Error "chat queue receipt id must contain a UUID")
-    else
-      Request_id.of_string value
-      |> Result.map of_request_id
-  ;;
-
-  let to_string value = value
-  let equal = String.equal
-end
-
-module Receipt_ids = struct
-  type t = Receipt_id.t * Receipt_id.t list
-  type error = Empty
-
-  let singleton receipt_id = receipt_id, []
-
-  let of_list = function
-    | [] -> Error Empty
-    | first :: rest -> Ok (first, rest)
-  ;;
-
-  let error_to_string = function
-    | Empty -> "queue delivery identity requires at least one receipt id"
-  ;;
-
-  let to_list (first, rest) = first :: rest
-end
-
 type delivery_key =
-  | Direct_request of Request_id.t
-  | Async_request of Request_id.t
-  | Queue_receipts of Receipt_ids.t
+  | Operation of Request_id.t
+  | Fusion_run of Request_id.t
+  | Workspace_message of Request_id.t
 
 type transcript_slot =
   | Accepted_user
@@ -98,6 +43,11 @@ type transcript_slot =
       ; ordinal : int
       }
   | Terminal_assistant
+
+type delivery_provenance =
+  { delivery_key : delivery_key
+  ; transcript_slot : transcript_slot
+  }
 
 let ( let* ) = Result.bind
 
@@ -131,24 +81,20 @@ let string_field name fields =
 ;;
 
 let delivery_key_to_yojson = function
-  | Direct_request request_id ->
+  | Operation operation_id ->
     `Assoc
-      [ "kind", `String "direct_request"
+      [ "kind", `String "operation"
+      ; "operation_id", `String (Request_id.to_string operation_id)
+      ]
+  | Fusion_run request_id ->
+    `Assoc
+      [ "kind", `String "fusion_run"
       ; "request_id", `String (Request_id.to_string request_id)
       ]
-  | Async_request request_id ->
+  | Workspace_message request_id ->
     `Assoc
-      [ "kind", `String "async_request"
+      [ "kind", `String "workspace_message"
       ; "request_id", `String (Request_id.to_string request_id)
-      ]
-  | Queue_receipts receipt_ids ->
-    `Assoc
-      [ "kind", `String "queue_receipts"
-      ; ( "receipt_ids"
-        , `List
-            (List.map
-               (fun receipt_id -> `String (Receipt_id.to_string receipt_id))
-               (Receipt_ids.to_list receipt_ids)) )
       ]
 ;;
 
@@ -156,89 +102,48 @@ let delivery_key_of_yojson = function
   | `Assoc fields ->
     let* kind = string_field "kind" fields in
     (match kind with
-     | "direct_request" ->
+     | "operation" ->
        let* () =
          validate_fields
-           ~context:"direct request delivery identity"
+           ~context:"operation delivery identity"
+           ~expected:[ "kind"; "operation_id" ]
+           fields
+       in
+       let* operation_id = string_field "operation_id" fields in
+       let* operation_id = Request_id.of_string operation_id in
+       Ok (Operation operation_id)
+     | "fusion_run" ->
+       let* () =
+         validate_fields
+           ~context:"Fusion run delivery identity"
            ~expected:[ "kind"; "request_id" ]
            fields
        in
        let* request_id = string_field "request_id" fields in
        let* request_id = Request_id.of_string request_id in
-       Ok (Direct_request request_id)
-     | "async_request" ->
+       Ok (Fusion_run request_id)
+     | "workspace_message" ->
        let* () =
          validate_fields
-           ~context:"async request delivery identity"
+           ~context:"workspace message delivery identity"
            ~expected:[ "kind"; "request_id" ]
            fields
        in
        let* request_id = string_field "request_id" fields in
        let* request_id = Request_id.of_string request_id in
-       Ok (Async_request request_id)
-     | "queue_receipts" ->
-       let* () =
-         validate_fields
-           ~context:"queue receipt delivery identity"
-           ~expected:[ "kind"; "receipt_ids" ]
-           fields
-       in
-       let* receipt_ids = assoc_field "receipt_ids" fields in
-       let* receipt_ids =
-         match receipt_ids with
-         | `List values ->
-           List.fold_right
-             (fun value result ->
-                let* rest = result in
-                match value with
-                | `String value ->
-                  let* receipt_id = Receipt_id.of_string value in
-                  Ok (receipt_id :: rest)
-                | _ -> Error "queue receipt identity must be a string")
-             values
-             (Ok [])
-         | _ -> Error "delivery identity receipt_ids must be a list"
-       in
-       let* receipt_ids =
-         match Receipt_ids.of_list receipt_ids with
-         | Ok receipt_ids -> Ok receipt_ids
-         | Error error -> Error (Receipt_ids.error_to_string error)
-       in
-       Ok (Queue_receipts receipt_ids)
+       Ok (Workspace_message request_id)
      | _ -> Error (Printf.sprintf "unsupported delivery identity kind %S" kind))
   | _ -> Error "delivery identity must be an object"
 ;;
 
 let delivery_key_equal left right =
   match left, right with
-  | Direct_request left, Direct_request right -> Request_id.equal left right
-  | Async_request left, Async_request right -> Request_id.equal left right
-  | Queue_receipts left, Queue_receipts right ->
-    let rec equal_lists left right =
-      match left, right with
-      | [], [] -> true
-      | left :: left_rest, right :: right_rest ->
-        Receipt_id.equal left right && equal_lists left_rest right_rest
-      | [], _ :: _ | _ :: _, [] -> false
-    in
-    equal_lists (Receipt_ids.to_list left) (Receipt_ids.to_list right)
-  | Direct_request _, (Async_request _ | Queue_receipts _)
-  | Async_request _, (Direct_request _ | Queue_receipts _)
-  | Queue_receipts _, (Direct_request _ | Async_request _) -> false
-;;
-
-let delivery_key_file_stem key =
-  let digest =
-    key
-    |> delivery_key_to_yojson
-    |> Yojson.Safe.to_string
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
-  in
-  match key with
-  | Direct_request _ -> "direct-" ^ digest
-  | Async_request _ -> "async-" ^ digest
-  | Queue_receipts _ -> "queue-" ^ digest
+  | Operation left, Operation right -> Request_id.equal left right
+  | Fusion_run left, Fusion_run right -> Request_id.equal left right
+  | Workspace_message left, Workspace_message right -> Request_id.equal left right
+  | (Operation _ | Fusion_run _ | Workspace_message _),
+    (Operation _ | Fusion_run _ | Workspace_message _) ->
+    false
 ;;
 
 let transcript_slot_to_yojson = function
@@ -306,4 +211,28 @@ let transcript_slot_equal left right =
   | Accepted_user, (Terminal_assistant | Tool_call _)
   | Terminal_assistant, (Accepted_user | Tool_call _)
   | Tool_call _, (Accepted_user | Terminal_assistant) -> false
+;;
+
+let delivery_provenance_fields { delivery_key; transcript_slot } =
+  [ "delivery_key", delivery_key_to_yojson delivery_key
+  ; "transcript_slot", transcript_slot_to_yojson transcript_slot
+  ]
+;;
+
+let delivery_provenance_of_fields fields =
+  match
+    List.assoc_opt "delivery_key" fields, List.assoc_opt "transcript_slot" fields
+  with
+  | None, None -> Ok None
+  | Some _, None | None, Some _ ->
+    Error "delivery_key and transcript_slot must appear together"
+  | Some delivery_key_json, Some transcript_slot_json ->
+    let* delivery_key = delivery_key_of_yojson delivery_key_json in
+    let* transcript_slot = transcript_slot_of_yojson transcript_slot_json in
+    Ok (Some { delivery_key; transcript_slot })
+;;
+
+let delivery_provenance_equal left right =
+  delivery_key_equal left.delivery_key right.delivery_key
+  && transcript_slot_equal left.transcript_slot right.transcript_slot
 ;;

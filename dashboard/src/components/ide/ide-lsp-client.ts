@@ -28,6 +28,50 @@ import { DEFAULT_LANGUAGE_ID } from './ide-language'
 
 // ── Types ─────────────────────────────────────────────────────────
 
+/**
+ * Which codebase this editor's LSP connection is looking at.
+ *
+ * `codebase` addresses the optional MASC overlay store. `repoId`/`keeper`
+ * independently select the workspace tree. A connection without a codebase
+ * gets language-server passthrough with no guessed MASC overlay.
+ */
+export interface LspScope {
+  readonly repoId: string | null
+  readonly codebase: string | null
+  readonly keeper: string | null
+}
+
+const EMPTY_LSP_SCOPE: LspScope = { repoId: null, codebase: null, keeper: null }
+
+/**
+ * Deliberately a plain cell, not a signal. The publisher writes it from
+ * inside the workspace store's `effect`, and a signal write there forces an
+ * intermediate flush that re-runs that effect — it re-fetched the active
+ * file twice. Nothing needs to react to this value: the connection reads it
+ * when it opens a socket and when it checks whether its socket went stale.
+ */
+let currentLspScope: LspScope = EMPTY_LSP_SCOPE
+
+export function publishLspScope(scope: LspScope): void {
+  currentLspScope = scope
+}
+
+export function lspScopeSnapshot(): LspScope {
+  return currentLspScope
+}
+
+function lspScopeQuery(scope: LspScope): string {
+  const params = new URLSearchParams()
+  if (scope.repoId) {
+    params.set('repo_id', scope.repoId)
+  } else if (scope.keeper) {
+    params.set('keeper', scope.keeper)
+  }
+  if (scope.codebase) params.set('codebase', scope.codebase)
+  const query = params.toString()
+  return query === '' ? '' : `?${query}`
+}
+
 export interface LspCodeLens {
   range: {
     start: { line: number; character: number }
@@ -394,6 +438,15 @@ export class LspConnection {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectAttempts = 0
   private reconnectDelayMs = TRANSPORT_RETRY_BASE_MS
+  /**
+   * Absolute host path of the workspace tree, from the initialize result.
+   * Until it arrives we cannot name a document: we know the repo-relative
+   * path we browsed, not the tree it hangs off, and `textDocument.uri` has
+   * to be an absolute `file:` URI. Requests are skipped rather than sent
+   * with a path the server would have to guess at.
+   */
+  private workspaceRoot: string | null = null
+  private connectedScope: LspScope = EMPTY_LSP_SCOPE
 
   constructor(
     private readonly onDiagnostics: (uri: string | undefined, diags: ReadonlyMap<number, LspDiagnostic[]>) => void,
@@ -405,7 +458,11 @@ export class LspConnection {
     if (this.disposed) return
     this.clearReconnectTimer()
     const origin = typeof window !== 'undefined' ? window.location.origin : DEFAULT_MASC_ORIGIN
-    const wsUrl = origin.replace(/^http/, 'ws') + '/api/v1/ide/lsp'
+    const scope = lspScopeSnapshot()
+    this.connectedScope = scope
+    this.workspaceRoot = null
+    const wsUrl =
+      origin.replace(/^http/, 'ws') + '/api/v1/ide/lsp' + lspScopeQuery(scope)
     const ws = new WebSocket(wsUrl)
     this.ws = ws
 
@@ -521,6 +578,30 @@ export class LspConnection {
     this.scheduleReconnect()
   }
 
+  /**
+   * The socket carries its scope in its URL, so a scope change makes the
+   * live connection address the wrong partition and the wrong tree.
+   * Reconnecting is the only way to re-declare it. The old socket's handlers
+   * no-op once `this.ws` moves on.
+   */
+  refreshScopeIfStale(): void {
+    if (this.disposed) return
+    const scope = lspScopeSnapshot()
+    if (
+      scope.repoId === this.connectedScope.repoId
+      && scope.codebase === this.connectedScope.codebase
+      && scope.keeper === this.connectedScope.keeper
+    ) return
+    const previous = this.ws
+    this.ws = null
+    this.initialized = false
+    this.workspaceRoot = null
+    this.rejectPending(new Error('LSP scope changed'))
+    previous?.close()
+    this.resetReconnectBackoff()
+    this.connect()
+  }
+
   private scheduleReconnect(): void {
     if (this.disposed) return
     if (this.reconnectTimer !== null) return
@@ -530,7 +611,7 @@ export class LspConnection {
     }
     const delayMs =
       Math.min(this.reconnectDelayMs, TRANSPORT_RETRY_MAX_MS)
-      + Math.random() * TRANSPORT_RETRY_JITTER_MS
+      + Math.random() * TRANSPORT_RETRY_JITTER_MS // real-randomness-needed: transport retry jitter
     this.reconnectAttempts += 1
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
@@ -541,10 +622,12 @@ export class LspConnection {
 
   private async initialize(): Promise<void> {
     try {
-      await this.sendRequest('initialize', {
+      const result = await this.sendRequest('initialize', {
         processId: null,
         clientInfo: { name: 'masc-ide', version: '1.0.0' },
         locale: 'ko',
+        // The server resolves the tree from the scope on the connection URL
+        // and reports it back; a browser client has no host path to offer.
         rootUri: '',
         capabilities: {
           textDocument: {
@@ -554,6 +637,7 @@ export class LspConnection {
           },
         },
       })
+      this.workspaceRoot = workspaceRootOfInitializeResult(result)
       this.initialized = this.sendNotification('initialized', {})
       if (this.initialized) {
         this.resetReconnectBackoff()
@@ -566,8 +650,19 @@ export class LspConnection {
     }
   }
 
+  /**
+   * Absolute URI for a repo-relative document path, or `null` while the
+   * workspace tree is still unknown (before the initialize result lands, or
+   * on a connection the server declined to anchor).
+   */
+  private documentUri(filePath: string): string | null {
+    const root = this.workspaceRoot
+    return root === null ? null : toFileUri(root, filePath)
+  }
+
   async requestCodeLenses(filePath: string): Promise<ReadonlyMap<number, LspCodeLens[]>> {
-    const uri = toFileUri(filePath)
+    const uri = this.documentUri(filePath)
+    if (uri === null) return new Map()
     try {
       const result = await this.sendRequest('textDocument/codeLens', {
         textDocument: { uri },
@@ -579,7 +674,8 @@ export class LspConnection {
   }
 
   async requestInlayHints(filePath: string, lineCount: number): Promise<ReadonlyMap<number, LspInlayHint[]>> {
-    const uri = toFileUri(filePath)
+    const uri = this.documentUri(filePath)
+    if (uri === null) return new Map()
     const range = {
       start: { line: 0, character: 0 },
       end: { line: lineCount, character: 0 },
@@ -596,7 +692,8 @@ export class LspConnection {
   }
 
   async requestDiagnostics(filePath: string): Promise<ReadonlyMap<number, LspDiagnostic[]>> {
-    const uri = toFileUri(filePath)
+    const uri = this.documentUri(filePath)
+    if (uri === null) return new Map()
     try {
       const result = await this.sendRequest('textDocument/diagnostic', {
         textDocument: { uri },
@@ -609,7 +706,8 @@ export class LspConnection {
   }
 
   async requestHover(filePath: string, line: number, character: number): Promise<unknown> {
-    const uri = toFileUri(filePath)
+    const uri = this.documentUri(filePath)
+    if (uri === null) return null
     try {
       return await this.sendRequest('textDocument/hover', {
         textDocument: { uri },
@@ -622,7 +720,8 @@ export class LspConnection {
 
   notifyDidOpen(filePath: string, languageId: string): void {
     if (!this.initialized) return
-    const uri = toFileUri(filePath)
+    const uri = this.documentUri(filePath)
+    if (uri === null) return
     this.sendNotification('textDocument/didOpen', {
       textDocument: { uri, languageId, version: 1, text: '' },
     })
@@ -630,7 +729,8 @@ export class LspConnection {
 
   notifyDidClose(filePath: string): void {
     if (!this.initialized) return
-    const uri = toFileUri(filePath)
+    const uri = this.documentUri(filePath)
+    if (uri === null) return
     this.sendNotification('textDocument/didClose', {
       textDocument: { uri },
     })
@@ -638,7 +738,8 @@ export class LspConnection {
 
   notifyDidSave(filePath: string): void {
     if (!this.initialized) return
-    const uri = toFileUri(filePath)
+    const uri = this.documentUri(filePath)
+    if (uri === null) return
     this.sendNotification('textDocument/didSave', {
       textDocument: { uri },
     })
@@ -675,8 +776,23 @@ export class LspConnection {
 
 // ── Helpers ───────────────────────────────────────────────────────
 
-function toFileUri(filePath: string): string {
-  return `file://${filePath}`
+/**
+ * `textDocument.uri` must be an absolute `file:` URI. Prefixing a
+ * repo-relative path with `file://` does not produce one — the first path
+ * segment lands in the authority slot — so the server rejected every such
+ * document as outside its workspace and answered with an empty result.
+ */
+function toFileUri(workspaceRoot: string, filePath: string): string {
+  const root = workspaceRoot.endsWith('/') ? workspaceRoot.slice(0, -1) : workspaceRoot
+  return filePath.startsWith('/') ? `file://${filePath}` : `file://${root}/${filePath}`
+}
+
+function workspaceRootOfInitializeResult(result: unknown): string | null {
+  if (typeof result !== 'object' || result === null) return null
+  const masc = (result as { masc?: unknown }).masc
+  if (typeof masc !== 'object' || masc === null) return null
+  const root = (masc as { workspaceRoot?: unknown }).workspaceRoot
+  return typeof root === 'string' && root !== '' ? root : null
 }
 
 function lspCloseReason(event: CloseEvent): string {
@@ -905,6 +1021,7 @@ const lspViewPlugin = ViewPlugin.fromClass(
 
     update(update: ViewUpdate) {
       if (update.docChanged) this.hideTooltip()
+      this.conn.refreshScopeIfStale()
       const newFilePath = update.state.field(lspConfigField).filePath
       if (newFilePath !== this.filePath) {
         const oldFilePath = this.filePath

@@ -1,3 +1,8 @@
+---
+rfc: "0009"
+status: Implemented
+---
+
 # RFC-0009 — Runtime Trust Phase 2: Operator Recommendations + Opt-in Persist
 
 **Status**: Implemented (Phase 0a/0b via #10292/#10331. Phase 1 first via #10365, reverted, reinstated as `runtime_trust` module via #12589. Phase 2a operator recommendations live in `lib/dashboard_runtime_recommendations.ml` (action variants `Reduce_weight | Disable | Investigate`); Phase 2b opt-in persist live in `lib/runtime/runtime_trust_persist.{ml,mli}` (JSONL snapshot + hydrate, gated by `MASC_RUNTIME_TRUST_PERSIST`).)
@@ -132,7 +137,7 @@ Recommendation: mtime threshold + a process-local flag (`Atomic.t` with timestam
 
 ## Out of scope
 
-- **Phase 3** (cost-aware boost via OAS `cost_tracker` token usage) — separate RFC.
+- **Phase 3** (cost-aware boost via agent_core `cost_tracker` token usage) — separate RFC.
 - **Cross-host trust sync** — every host has its own `<base_path>/.masc`; no fleet-level reputation in this RFC.
 - **Auto-disable of dead runtime** — operator decides; the recommendation only suggests.
 

@@ -76,6 +76,38 @@ let get_int ~default name =
         reject_malformed_env ~name ~raw:v ~type_name:"int";
         default)
 
+(* One reading of a MASC_*_RETENTION_DAYS knob, because the value decides
+   whether files are deleted and the stores disagreed about a malformed one.
+   tool_usage_log and keeper_runtime_manifest_housekeeping kept files forever;
+   keeper_tool_call_log started pruning at its 30-day default. Both cited the
+   third in a comment as the model they followed. A single operator typo —
+   3O for 30 — therefore deleted from one store and stopped deleting from
+   another, silently (#27110).
+
+   Malformed now means the same thing everywhere: the store's declared
+   default, with the WARN [reject_malformed_env] already emits. An explicit
+   zero or negative is the one way to say "keep everything", and it means that
+   in every store. *)
+type retention =
+  | Retain_forever
+  | Prune_after_days of int
+
+let get_retention_days ~default name =
+  match raw_value_opt name with
+  | None -> default
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = ""
+    then default
+    else (
+      match Safe_ops.int_of_string_safe trimmed with
+      | Some days when days > 0 -> Prune_after_days days
+      | Some _ -> Retain_forever
+      | None ->
+        reject_malformed_env ~name ~raw ~type_name:"retention days (integer)";
+        default)
+;;
+
 let get_float ~default name =
   match raw_value_opt name with
   | None -> default
@@ -101,6 +133,17 @@ let get_float ~default name =
     [true] so it would already fall through, but using
     {!Float.is_finite} as the single guard captures all three
     pathological values uniformly. *)
+(* Canonical clamped read (RFC-0371 B7): before this, four modules each
+   carried their own [int_of_env_default] with a raw getenv + parse +
+   clamp body — the same helper, re-derived, drifting. *)
+let get_int_clamped ~default ~min_v ~max_v name =
+  let v = get_int ~default name in
+  max min_v (min max_v v)
+
+let get_float_clamped ~default ~min_v ~max_v name =
+  let v = get_float ~default name in
+  Float.max min_v (Float.min max_v v)
+
 let get_int_nonneg ~default name =
   let parsed = get_int ~default name in
   if parsed < 0 then default else parsed
@@ -138,17 +181,36 @@ let get_ratio ~default name =
   let parsed = get_float_nonneg ~default:safe_default name in
   if parsed > 1.0 then safe_default else parsed
 
+let bool_of_raw_value raw =
+  match String.trim raw |> String.lowercase_ascii with
+  | "true" | "1" | "yes" | "on" -> Some true
+  | "false" | "0" | "no" | "off" -> Some false
+  | _ -> None
+
 let get_bool ~default name =
   match raw_value_opt name with
   | None -> default
-  | Some v ->
-      (match String.trim v |> String.lowercase_ascii with
-       | "true" | "1" | "yes" | "on" -> true
-       | "false" | "0" | "no" | "off" -> false
-       | "" -> default
-       | _ ->
-           reject_malformed_env ~name ~raw:v ~type_name:"bool";
-           default)
+  | Some raw ->
+      if String.trim raw = "" then default
+      else (
+        match bool_of_raw_value raw with
+        | Some value -> value
+        | None ->
+            reject_malformed_env ~name ~raw ~type_name:"bool";
+            default)
+
+let get_bool_strict ~default name =
+  match raw_value_opt name with
+  | None -> default
+  | Some raw ->
+      if String.trim raw = "" then default
+      else (
+        match bool_of_raw_value raw with
+        | Some value -> value
+        | None ->
+            raise
+              (Config_error
+                 (Printf.sprintf "malformed env %s=%S (expected bool)" name raw)))
 
 let trim_opt = function
   | Some raw ->
@@ -156,13 +218,7 @@ let trim_opt = function
       if trimmed = "" then None else Some trimmed
   | None -> None
 
-let strip_trailing_slashes value =
-  let rec loop idx =
-    if idx <= 0 then ""
-    else if value.[idx - 1] = '/' then loop (idx - 1)
-    else String.sub value 0 idx
-  in
-  loop (String.length value)
+let strip_trailing_slashes = Masc_network_defaults.trim_trailing_slashes
 
 let strip_path_trailing_slashes value =
   let trimmed = String.trim value in
@@ -224,9 +280,6 @@ let existing_file path =
 
 let home_dir_opt () =
   raw_value_opt "HOME" |> trim_opt
-
-let default_http_port = Masc_network_defaults.masc_http_default_port_s
-let default_http_port_int = Masc_network_defaults.masc_http_default_port
 
 (** SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352).
     Defined here so in-process readers and out-of-process callers
@@ -476,26 +529,14 @@ let sb_path () =
     env_config_snapshot entry, and orchestrator bootstrap. *)
 let orchestrator_enabled_env_key = "MASC_ORCHESTRATOR_ENABLED"
 
-(** SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352).
-    Shared by snapshot catalog and docker worker inheritance list. *)
+(** SSOT for the MASC_CONFIG_DIR env-var name (issue 8352). *)
 let config_dir_env_key = "MASC_CONFIG_DIR"
-let personas_dir_env_key = "MASC_PERSONAS_DIR"
-
-(* RFC-0085 PR-8 — [config_dir_opt] and [personas_dir_opt] removed.
-   All readers now obtain these path values from
-   [Host_config.from_env ()] (fields [config_dir] / [personas_dir]).
-   The two [_env_key] string constants above remain because docker
-   inheritance lists and snapshot catalogs still need them as
-   identifier strings, not as readers. *)
 
 (** SSOT for the MASC_DATA_DIR env-var name (issue 8352).
     Overrides [<base_path>/data] as the root for runtime data stores. *)
 let data_dir_env_key = "MASC_DATA_DIR"
 
 (** Data directory override. *)
-let data_dir_opt () =
-  raw_value_opt data_dir_env_key |> trim_opt
-
 (** {1 Auth} *)
 
 (** SSOT for auth env-var names (issue 8352). *)
@@ -530,9 +571,6 @@ let telemetry_enabled_env_key = "MASC_TELEMETRY_ENABLED"
    malformed handler that consumes it). *)
 
 (** Log level string (e.g. "debug", "info", "warn", "error"). *)
-let log_level_opt () =
-  raw_value_opt log_level_env_key |> trim_opt
-
 (** Whether telemetry tracking is enabled. Default: true. *)
 let telemetry_enabled () =
   get_bool ~default:true telemetry_enabled_env_key
@@ -540,16 +578,20 @@ let telemetry_enabled () =
 (** Whether malformed env parses are escalated to a hard [Config_error]
     (fail-fast boot) instead of a warn + default. Controlled by
     [MASC_PARSE_WARN]. Default: false (warn + use default). *)
-let parse_warn_enabled () = parse_strict_mode ()
-
-(** {1 Build Identity} *)
-
-(** Git commit hash override for build identity. *)
-let build_git_commit_opt () =
-  raw_value_opt "MASC_BUILD_GIT_COMMIT" |> trim_opt
-
 (** PubSub max messages per read. Default: 1000. *)
 let pubsub_max_messages () =
   get_int ~default:1000 "MASC_PUBSUB_MAX_MESSAGES"
+
+(** Day-file retention for the JSONL stores under [.masc]. Default: 30.
+
+    Read by the startup prune and the periodic maintenance prune. Both decide
+    which day files are deleted; a default that differed between them would
+    let one prune delete files the other still expects to keep.
+
+    @category Policies @ops_class operator *)
+let default_jsonl_retention_days = 30
+
+let jsonl_retention_days () =
+  get_int ~default:default_jsonl_retention_days "MASC_JSONL_RETENTION_DAYS"
 
 (** {1 Keeper Defaults} *)

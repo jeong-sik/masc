@@ -19,6 +19,13 @@ module KeeperBootstrap : sig
 end
 (** {1 Keeper metrics rotation} *)
 
+module KeeperSpawn : sig
+  val spawn_output_buffer_bytes : int
+  (** Bytes of each spawned process stream {!Spawn_registry} keeps. Bounded
+      because a process can outrun any reader; [read] reports every byte the
+      bound cost, so this is a limit rather than a silent truncation. *)
+end
+
 module KeeperMetrics : sig
   val max_file_bytes : int
   val max_rotated_files : int
@@ -36,13 +43,42 @@ end
 
 module KeeperSupervisor : sig
   val sweep_interval_sec : float
-  val dead_ttl_sec : float
 end
 
 (** {1 Keeper poll intervals} *)
 
 module KeeperPollIntervals : sig
   val crash_persistence_drain_sec : float
+end
+
+(** {1 Autonomous turns} *)
+
+module KeeperAutonomous : sig
+  val max_wake_prompt_bytes : int
+  (** Byte bound on a wake prompt. The value is appended to the durable
+      checkpoint every autonomous turn, so its cost recurs for the life of the
+      conversation rather than being paid once. *)
+
+  val validate_wake_prompt : string -> (string, string) result
+  (** Trims, then rejects blank and over-bound values with an operator-facing
+      reason. Shared by [MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT] and the per-keeper
+      [autonomous_wake_prompt], so the two authoring surfaces cannot accept
+      different values. *)
+
+  val default_wake_prompt : string
+  (** Wording used when neither fleet nor keeper configures one. Single
+      definition; {!Keeper_unified_prompt.autonomous_wake_marker} aliases it. *)
+
+  val wake_prompt_opt : unit -> string option
+  (** Fleet wake prompt, [None] when unset. Raises
+      {!Env_config_core.Config_error} on a set-but-invalid value rather than
+      falling back, so a typo surfaces at read time instead of silently
+      restoring the default. *)
+
+  val wake_prompt : unit -> string
+  (** Fleet value else {!default_wake_prompt} -- what a keeper with no override
+      of its own is woken with, and what the operator settings projection
+      reports. *)
 end
 
 (** {1 Keeper runtime} *)
@@ -89,15 +125,6 @@ module KeeperMemoryOs : sig
       Memory OS recall. Floored to 1. *)
 end
 
-(** {1 Keeper dashboard compaction snapshots} *)
-
-module KeeperCompactionSnapshots : sig
-  val default_limit : int
-  val max_limit : int
-  val manifest_scan_min_files : int
-  val manifest_scan_limit_multiplier : int
-end
-
 (** {1 Keeper vision tool} *)
 
 module KeeperVision : sig
@@ -131,7 +158,6 @@ end
 
 module WorkAsHeartbeat : sig
   val enabled : bool
-  val max_silence_sec : float
 end
 
 (** {1 Keeper health policy} *)
@@ -145,6 +171,10 @@ end
 module KeeperKeepalive : sig
   val interval_sec : int
   val sleep_chunk_sec : float
+  val stream_idle_failsafe_floor_sec : float
+  (** Resolved runtime fallback used only when the explicit idle timeout is
+      absent. Kept here so runtime execution and operator projection share one
+      value. *)
 
   val parse_stream_idle_timeout_sec : string -> (float, string) result
   (** Parse the operator-supplied seconds value. This schema parser performs
@@ -156,14 +186,46 @@ module KeeperKeepalive : sig
       value must be finite and strictly positive or configuration loading
       raises {!Env_config_core.Config_error}. *)
 
+  val first_event_failsafe_floor_sec : float
+  (** Resolved runtime fallback used only when the explicit first-event
+      timeout is absent. Kept beside {!stream_idle_failsafe_floor_sec} so
+      runtime execution and operator projection share one value. *)
+
+  val first_event_timeout_sec : unit -> float option
+  (** Explicit streaming-provider first-event (TTFT/prefill) timeout. Bounds
+      only the wait for the FIRST provider event; {!stream_idle_timeout_sec}
+      bounds inter-line gaps after it (RFC-OAS-037). [None] means no explicit
+      value (the resolved layer substitutes the fail-safe floor). A configured
+      value must be finite and strictly positive or configuration loading
+      raises {!Env_config_core.Config_error}. *)
+
+  val body_timeout_sec_override_live : unit -> float option
+  (** Re-reads the env var on every call. [body_timeout_sec_override] is this
+      same reader run once at module load; both exist because one surface
+      reports what the process booted with and another resolves what is in
+      effect now. The parse and the clamp live here only. *)
+
   val body_timeout_sec_override : float option
-  (** Total HTTP body-consumption deadline for non-streaming OAS completion
+  (** Total HTTP body-consumption deadline for non-streaming AGENT_CORE completion
       calls. [None] (env unset) leaves the runtime builder wire untouched.
       [Some s] forwards to [Builder.with_body_timeout] for sync completion
       paths. Streaming paths ignore it and rely on an explicitly configured
       {!stream_idle_timeout_sec} plus attempt liveness observation.
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Clamp range: [10, 600] s. *)
+
+  val provider_call_deadline_sec_override_live : unit -> float option
+  (** Live counterpart of [provider_call_deadline_sec_override], same relation
+      as {!body_timeout_sec_override_live}. *)
+
+  val provider_call_deadline_sec_override : float option
+  (** Total wall-clock deadline for one provider call attempt, independent
+      of streaming progress and covering both streaming and non-streaming
+      calls (#27349). [None] (env unset) means no MASC-side enforcement;
+      deliberately no failsafe floor, unlike {!stream_idle_timeout_sec}'s
+      RFC-0345 fallback.
+
+      Env: [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC]. Clamp range: [30, 3600] s. *)
 
 end
 

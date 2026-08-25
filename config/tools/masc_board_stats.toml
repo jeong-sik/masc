@@ -1,0 +1,10 @@
+name = "masc_board_stats"
+description = """
+Get board activity statistics: total posts, comments, votes, active hearths. Use \
+to understand overall board health and engagement levels."""
+
+[keeper_projection]
+description = """
+Get board activity statistics: total posts, comments, votes, active hearths. \
+Use to understand overall board health and engagement levels."""
+additional_properties = false

@@ -1,5 +1,5 @@
 ---
-number: 0103
+rfc: "0103"
 title: Log retention opt-in + JSONL volume root reduction
 status: Draft
 author: Agent-LLM-A Opus 4.7 (agent)
@@ -15,12 +15,12 @@ related:
 
 ## 1. Summary
 
-JSONL log retention (tool_calls, tool_usage, oas-events, runtime-manifests)
+JSONL log retention (tool_calls, tool_usage, agent-core-events, runtime-manifests)
 는 PR-5 (#PENDING) 에서 *opt-in* (env-gated) 으로 wiring. **default disabled**.
 
 이 RFC 는:
 1. *왜 default disabled 인가* — retention 이 root fix 가 아니라 symptom 억제
-2. *진짜 root* — JSONL volume reduction (특히 `oas-events` 의
+2. *진짜 root* — JSONL volume reduction (특히 `agent-core-events` 의
    `Context_window_usage` telemetry-as-fix anti-pattern)
 3. *Phase 별 step* — RFC-0089 (string→typed) 와 정렬
 
@@ -30,12 +30,12 @@ JSONL log retention (tool_calls, tool_usage, oas-events, runtime-manifests)
 
 | Path | Size | 24-hour growth |
 |---|---|---|
-| `.masc/oas-events` | 226M | ~38M/day (5/05, 5/06 측정) |
+| `.masc/agent-core-events` | 226M | ~38M/day (5/05, 5/06 측정) |
 | `.masc/keepers/*/runtime-manifests/` | (~per-keeper) | append-only, no archive |
 | `.masc/tool_calls` | 115M | 16 keeper burst proxy |
 | `.masc/tool_usage` | 128K | rolling stable |
 
-`oas-events` 가 가장 큰 hotspot. 분석:
+`agent-core-events` 가 가장 큰 hotspot. 분석:
 - 14 emits/min sustained
 - **84% noise** = `Context_window_usage` event (RFC-0089 anti-pattern target)
 - event format = `[name_string, props_dict]` (string-classifier 의 변종 —
@@ -51,7 +51,7 @@ JSONL log retention (tool_calls, tool_usage, oas-events, runtime-manifests)
 
 ### 3.2 Retention 은 symptom 억제, root 아님
 
-- `oas-events` 226M 의 84% 가 `Context_window_usage` telemetry-as-fix —
+- `agent-core-events` 226M 의 84% 가 `Context_window_usage` telemetry-as-fix —
   retention 으로 *지운다 해서 emit rate 가 줄지 않음*
 - 30일 후 다시 226M 가 누적, 60일 후 같음 — *volume 자체 reduction* 이 root
 - `Workaround Rejection Bar` §Symptom 억제 패턴 ④ "Log Dedup/Demote" 변종
@@ -75,7 +75,7 @@ default disabled 면:
 - 4 모듈의 `retention_days ()` default → `None`
   - `lib/keeper_tool_call_log.ml`
   - `lib/tool_usage_log.ml`
-  - `lib/runtime/runtime_event_bridge.ml` (oas-events)
+  - `lib/runtime/runtime_event_bridge.ml` (agent-core-events)
   - `lib/keeper/keeper_runtime_manifest.ml`
 - env vars 유지: `MASC_*_RETENTION_DAYS` (positive int 일 때만 enable)
 - invalid env 값 (non-positive 또는 non-int) = disabled (안전한 default)

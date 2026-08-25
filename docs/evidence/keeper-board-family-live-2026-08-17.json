@@ -1,0 +1,67 @@
+{
+ "schema": "masc.keeper.board_family.live.v1",
+ "measured_at": "2026-08-17T08:42:00Z",
+ "live_endpoint": "http://127.0.0.1:8935",
+ "server_commit": "bd2e27e60b",
+ "keeper": {
+  "name": "canary-10t-glmc-52-20260817",
+  "runtime": "glm-coding.glm-5.2"
+ },
+ "protocol": "Five operator chat turns over /api/v1/keepers/chat/stream instructed the keeper to exercise one board-family tool each; every claim below is cross-checked against the server tool_call log and an independent MCP read of the resource.",
+ "turns": [
+  {
+   "request_id": "m5-live-board-post-1",
+   "tool": "masc_board_post",
+   "result_id": "p-57b9db4db1933c9d791006347b4c078b"
+  },
+  {
+   "request_id": "m5-live-comment-1",
+   "tool": "masc_board_comment",
+   "result_id": "c-c697a84bfb20fe657dd08cb6805f9b7f"
+  },
+  {
+   "request_id": "m5-live-vote-1",
+   "tool": "masc_board_vote + masc_board_comment_vote",
+   "result_id": "post +1, comment +1"
+  },
+  {
+   "request_id": "m5-live-goal-1",
+   "tool": "masc_goal_upsert + masc_goal_list",
+   "result_id": "m5-live-goal-20260817"
+  },
+  {
+   "request_id": "m5-live-task-1",
+   "tool": "masc_add_task",
+   "result_id": "task-346"
+  }
+ ],
+ "server_tool_call_log": {
+  "file": "<base-path>/.masc/logs/start-masc-nohup-20260817c.log",
+  "lines": [
+   6326,
+   6353,
+   6376,
+   6377,
+   6421,
+   6453
+  ],
+  "all_outcomes": "ok",
+  "tools": [
+   "masc_board_post",
+   "masc_board_comment",
+   "masc_board_vote",
+   "masc_board_comment_vote",
+   "masc_goal_upsert",
+   "masc_add_task"
+  ]
+ },
+ "independent_reads": {
+  "masc_board_post_get": "post exists, author=canary-10t-glmc-52-20260817, votes +1/-0, 1 comment (author=keeper, up 1)",
+  "masc_tasks": "task-346: M5 live task receipt 20260817 present",
+  "masc_goal_list": "id m5-live-goal-20260817 present, phase=executing, count=37"
+ },
+ "notes": [
+  "Tool invocations were operator-instructed but keeper-executed: the receipts prove the keeper's own tool path (projection, dispatch, effect, attribution), not autonomous initiative.",
+  "Browser (E5) axis is not claimed by this receipt."
+ ]
+}

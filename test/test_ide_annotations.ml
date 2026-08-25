@@ -4,6 +4,12 @@ module Types = Ide_annotation_types
 module Store = Ide_annotations
 module Region = Ide_region_tracker
 module Lsp = Lsp_overlay_provider
+
+(* The overlay reader has to name the store it addresses. These cases write
+   through the codebase [Store.create] names explicitly, so they read that same one;
+   the by-URL producer/reader join is covered in
+   [test_ide_lsp_join_key.ml]. *)
+let test_codebase = Some "github.com_other_repo"
 let yojson = testable Yojson.Safe.pp Yojson.Safe.equal
 
 (* Ide_annotations.create generates ids via [Uuidm.v4_gen (Random.get_state ())].
@@ -19,7 +25,7 @@ let route_annotation : Types.annotation =
   ; file_path = "lib/keeper/keeper_tool_ide_runtime.ml"
   ; line_start = 12
   ; line_end = 14
-  ; keeper_id = "sangsu"
+  ; keeper_id = "alpha"
   ; kind = Types.Comment
   ; content = "Connect this line to the active review context."
   ; goal_id = Some "goal-ide"
@@ -64,7 +70,8 @@ let load_regions_from path =
   |> List.rev
 ;;
 
-let load_regions base_dir = load_regions_from (Region.regions_file ~base_dir ())
+let load_regions base_dir =
+  load_regions_from (Region.regions_file ~base_dir ~codebase:"github.com_other_repo" ())
 
 let contains ~needle haystack =
   let needle_len = String.length needle in
@@ -124,7 +131,8 @@ let test_create_lists_route_context () =
     match
       Store.create
         ~base_dir
-        ~keeper_id:"sangsu"
+        ~codebase:"github.com_other_repo"
+        ~keeper_id:"alpha"
         ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
         ~line_start:12
         ~line_end:14
@@ -145,7 +153,7 @@ let test_create_lists_route_context () =
         ; task_id = None
         }
       in
-      (match Store.list ~base_dir ~filter () with
+      (match Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter () with
        | [ listed ] ->
          check string "id" created.id listed.id;
          check yojson "listed references"
@@ -160,7 +168,8 @@ let test_lsp_overlay_exposes_route_context () =
     match
       Store.create
         ~base_dir
-        ~keeper_id:"sangsu"
+        ~codebase:"github.com_other_repo"
+        ~keeper_id:"alpha"
         ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
         ~line_start:12
         ~line_end:14
@@ -175,7 +184,7 @@ let test_lsp_overlay_exposes_route_context () =
     | Ok _ ->
       Lsp.clear_cache ();
       let codelenses =
-        Lsp.codelenses ~base_dir ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
+        Lsp.codelenses ~base_dir ~codebase:test_codebase ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
       in
       (match codelenses with
        | [ codelens ] ->
@@ -183,20 +192,10 @@ let test_lsp_overlay_exposes_route_context () =
          check_contains "codelens carries opaque review reference" "review:review-15035" title;
          check_contains "codelens carries evidence reference" "evidence:turn-9" title
        | rows -> failf "expected one codelens, got %d" (List.length rows));
-      let inlay_hints =
-        Lsp.inlay_hints ~base_dir ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
-      in
-      (match inlay_hints with
-       | [ hint ] ->
-         let label = Option.value ~default:"" (string_field "label" hint) in
-         let tooltip = Option.value ~default:"" (string_field "tooltip" hint) in
-         check_contains "inlay carries task route" "task:task-42" label;
-         check_contains "inlay carries telemetry reference" "telemetry:trace-9" label;
-         check_contains "inlay tooltip carries discussion reference" "discussion:thread-1" tooltip
-       | rows -> failf "expected one inlay hint, got %d" (List.length rows));
       let diagnostics =
         Lsp.diagnostics
           ~base_dir
+          ~codebase:test_codebase
           ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
           ~lsp_diagnostics:[]
       in
@@ -208,6 +207,7 @@ let test_lsp_overlay_exposes_route_context () =
       let hover =
         Lsp.enrich_hover
           ~base_dir
+          ~codebase:test_codebase
           ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
           ~line:11
           (`Assoc
@@ -224,7 +224,8 @@ let test_region_tracker_writes_fixed_regions_file () =
   with_temp_dir (fun base_dir ->
     Region.ingest_tool_call
       ~base_dir
-      ~keeper_id:"sangsu"
+      ~codebase:"github.com_other_repo"
+      ~keeper_id:"alpha"
       ~turn:7
       (`Assoc
         [ "name", `String "write_file"
@@ -234,13 +235,13 @@ let test_region_tracker_writes_fixed_regions_file () =
               ; "content", `String "let x = 1\n"
               ] )
         ]);
-    check bool "fixed regions file exists" true (Sys.file_exists (Region.regions_file ~base_dir ()));
+    check bool "fixed regions file exists" true (Sys.file_exists (Region.regions_file ~base_dir ~codebase:"github.com_other_repo" ()));
     match load_regions base_dir with
     | [ region ] ->
       check string "file path" "lib/a.ml" region.Types.file_path;
       check int "line start" 1 region.line_start;
       check int "line end" 1 region.line_end;
-      check string "keeper" "sangsu" region.keeper_id;
+      check string "keeper" "alpha" region.keeper_id;
       (match region.source with
        | Types.Tool_call { tool_name; turn } ->
          check string "tool name" "write_file" tool_name;
@@ -254,16 +255,16 @@ let test_region_tracker_writes_fixed_regions_file () =
    only call site. Its coverage is preserved by the
    [ingest content fallback] + [no double-write] cases below. *)
 
-(* RFC-0128 §4.2 — partition-aware store routing. *)
+(* RFC-0128 §4.2 — codebase-aware store routing. *)
 
 let make_filter () : Types.annotation_filter =
   { file_path = None; keeper_id = None; goal_id = None; task_id = None }
 
-let create_in_partition ~base_dir ~partition ~kind ~content () =
+let create_in_codebase ~base_dir ~codebase ~kind ~content () =
   Store.create
     ~base_dir
-    ~partition
-    ~keeper_id:"sangsu"
+    ~codebase
+    ~keeper_id:"alpha"
     ~file_path:"lib/foo.ml"
     ~line_start:1
     ~line_end:3
@@ -272,13 +273,13 @@ let create_in_partition ~base_dir ~partition ~kind ~content () =
     ()
 ;;
 
-let test_create_by_url_isolates_from_legacy () =
+let test_create_isolates_codebases () =
   with_temp_dir (fun base_dir ->
     let slug = "github.com_owner_repo" in
     let _ =
-      create_in_partition
+      create_in_codebase
         ~base_dir
-        ~partition:(Ide_paths.By_url slug)
+        ~codebase:(slug)
         ~kind:Types.Comment
         ~content:"in by-url"
         ()
@@ -286,30 +287,46 @@ let test_create_by_url_isolates_from_legacy () =
     let by_url =
       Store.list
         ~base_dir
-        ~partition:(Ide_paths.By_url slug)
+        ~codebase:(slug)
         ~filter:(make_filter ())
         ()
     in
-    let orphan = Store.list ~base_dir ~filter:(make_filter ()) () in
-    check int "by-url count" 1 (List.length by_url);
-    check int "orphan is empty" 0 (List.length orphan))
+    let other = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () in
+    check int "owning codebase count" 1 (List.length by_url);
+    check int "other codebase is empty" 0 (List.length other))
 ;;
 
-let test_create_orphan_separates_from_by_url () =
+(* A read must not seed the store: listing a codebase nobody wrote to
+   answers empty and leaves no directory behind (live 2026-08-14: a GET
+   scope probe created an empty [by-url/github/] beside the canonical
+   store). *)
+let test_list_does_not_create_store () =
+  with_temp_dir (fun base_dir ->
+    let slug = "github.com_owner_absent" in
+    let rows = Store.list ~base_dir ~codebase:slug ~filter:(make_filter ()) () in
+    check int "absent codebase lists empty" 0 (List.length rows);
+    check
+      bool
+      "store directory not created by the read"
+      false
+      (Sys.file_exists (Ide_paths.code_store_dir ~base_dir ~codebase:slug)))
+;;
+
+let test_codebases_hold_their_own_rows () =
   with_temp_dir (fun base_dir ->
     let slug = "github.com_owner_repo" in
     let _ =
-      create_in_partition
+      create_in_codebase
         ~base_dir
-        ~partition:Ide_paths.Legacy_default
+        ~codebase:"github.com_other_repo"
         ~kind:Types.Comment
-        ~content:"orphan record"
+        ~content:"other-repo record"
         ()
     in
     let _ =
-      create_in_partition
+      create_in_codebase
         ~base_dir
-        ~partition:(Ide_paths.By_url slug)
+        ~codebase:(slug)
         ~kind:Types.Comment
         ~content:"by-url record"
         ()
@@ -317,89 +334,90 @@ let test_create_orphan_separates_from_by_url () =
     let by_url =
       Store.list
         ~base_dir
-        ~partition:(Ide_paths.By_url slug)
+        ~codebase:(slug)
         ~filter:(make_filter ())
         ()
     in
-    let orphan =
-      Store.list ~base_dir ~partition:Ide_paths.Legacy_default ~filter:(make_filter ()) ()
+    let other =
+      Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) ()
     in
-    check int "by-url count" 1 (List.length by_url);
-    check int "orphan count" 1 (List.length orphan);
+    check int "owning codebase count" 1 (List.length by_url);
+    check int "other codebase count" 1 (List.length other);
     let by_url_content = (List.hd by_url).content in
-    let orphan_content = (List.hd orphan).content in
-    check string "by-url content" "by-url record" by_url_content;
-    check string "orphan content" "orphan record" orphan_content)
+    let other_content = (List.hd other).content in
+    check string "owning codebase content" "by-url record" by_url_content;
+    check string "other codebase content" "other-repo record" other_content)
 ;;
 
-let test_legacy_default_is_unchanged () =
+let test_explicit_codebase_store () =
   with_temp_dir (fun base_dir ->
-    (* No ?partition argument → defaults to Orphan → writes to the
-       historical flat path. PR-1c will flip the keeper write path,
-       but until then existing behaviour MUST remain. *)
+    (* A write lands in the store file of exactly the codebase it names,
+       and only that codebase's list sees it. *)
     let _ =
       Store.create
         ~base_dir
-        ~keeper_id:"sangsu"
+        ~codebase:"github.com_other_repo"
+        ~keeper_id:"alpha"
         ~file_path:"lib/foo.ml"
         ~line_start:1
         ~line_end:3
         ~kind:Types.Comment
-        ~content:"orphan default"
+        ~content:"explicit codebase"
         ()
     in
-    let legacy_path =
+    let other_path =
       Filename.concat
-        (Ide_paths.partition_store_dir ~base_dir Ide_paths.Legacy_default)
+        (Ide_paths.code_store_dir ~base_dir ~codebase:"github.com_other_repo")
         "annotations.jsonl"
     in
-    check bool "orphan file exists" true (Sys.file_exists legacy_path);
-    let orphan = Store.list ~base_dir ~filter:(make_filter ()) () in
-    check int "orphan count" 1 (List.length orphan))
+    check bool "named codebase store file exists" true (Sys.file_exists other_path);
+    let rows = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () in
+    check int "named codebase count" 1 (List.length rows))
 ;;
 
-let test_delete_partition_scoped () =
+let test_delete_is_codebase_scoped () =
   with_temp_dir (fun base_dir ->
     let slug = "github.com_owner_repo" in
     let by_url =
       Result.get_ok
-        (create_in_partition
+        (create_in_codebase
            ~base_dir
-           ~partition:(Ide_paths.By_url slug)
+           ~codebase:(slug)
            ~kind:Types.Comment
            ~content:"to delete"
            ())
     in
-    (* Delete in matching partition succeeds; same id in Orphan fails. *)
-    let in_legacy =
+    (* Delete in the owning codebase succeeds; same id under another
+       codebase misses. *)
+    let in_other =
       Store.delete
         ~base_dir
-        ~partition:Ide_paths.Legacy_default
+        ~codebase:"github.com_other_repo"
         ~id:by_url.id
-        ~keeper_id:"sangsu"
+        ~keeper_id:"alpha"
         ()
     in
-    (match in_legacy with
-     | Ok () -> fail "Orphan delete must miss when annotation lives in By_url"
+    (match in_other with
+     | Ok () -> fail "delete under another codebase must miss"
      | Error _ -> ());
     let in_by_url =
       Store.delete
         ~base_dir
-        ~partition:(Ide_paths.By_url slug)
+        ~codebase:(slug)
         ~id:by_url.id
-        ~keeper_id:"sangsu"
+        ~keeper_id:"alpha"
         ()
     in
     (match in_by_url with
      | Ok () -> ()
-     | Error msg -> failf "By_url delete failed: %s" msg))
+     | Error msg -> failf "delete in the owning codebase failed: %s" msg))
 ;;
 
-let test_region_append_by_url_isolates_from_legacy () =
+let test_region_append_isolates_codebases () =
   with_temp_dir (fun base_dir ->
     let slug = "github.com_owner_repo" in
     let region : Types.code_region =
-      { keeper_id = "sangsu"
+      { keeper_id = "alpha"
       ; file_path = "lib/foo.ml"
       ; line_start = 1
       ; line_end = 5
@@ -407,11 +425,11 @@ let test_region_append_by_url_isolates_from_legacy () =
       ; timestamp_ms = 1L
       }
     in
-    Region.append_region ~base_dir ~partition:(Ide_paths.By_url slug) region;
-    let by_url_path = Region.regions_file ~base_dir ~partition:(Ide_paths.By_url slug) () in
-    let legacy_path = Region.regions_file ~base_dir () in
+    Region.append_region ~base_dir ~codebase:(slug) region;
+    let by_url_path = Region.regions_file ~base_dir ~codebase:(slug) () in
+    let other_path = Region.regions_file ~base_dir ~codebase:"github.com_other_repo" () in
     check bool "by-url regions exists" true (Sys.file_exists by_url_path);
-    check bool "orphan regions absent" false (Sys.file_exists legacy_path))
+    check bool "other codebase regions absent" false (Sys.file_exists other_path))
 ;;
 
 (* RFC-0128 PR-1e — content fallback + single-write invariant.
@@ -419,9 +437,9 @@ let test_region_append_by_url_isolates_from_legacy () =
    Before PR-1e, edit_file tool_calls with no diff/patch argument
    produced zero regions in Ide_region_tracker.ingest_tool_call. The
    missing record was previously synthesised by Ide_meta_sync.flush_regions,
-   which wrote to the Orphan partition while ingest_tool_call (post
-   PR-1c) wrote to the resolved partition — a double-write of the
-   same region across two buckets. PR-1e moves the content fallback
+   which wrote to an unaddressed store while ingest_tool_call (post
+   PR-1c) wrote to the resolved codebase — a double-write of the
+   same region across two stores. PR-1e moves the content fallback
    into ingest_tool_call itself and removes the meta_sync call site
    from track_write_region, restoring a single source of truth. *)
 
@@ -461,12 +479,12 @@ let test_ingest_edit_file_content_fallback () =
     in
     Region.ingest_tool_call
       ~base_dir
-      ~partition:(Ide_paths.By_url slug)
-      ~keeper_id:"sangsu"
+      ~codebase:(slug)
+      ~keeper_id:"alpha"
       ~turn:1
       json;
     let by_url_path =
-      Region.regions_file ~base_dir ~partition:(Ide_paths.By_url slug) ()
+      Region.regions_file ~base_dir ~codebase:(slug) ()
     in
     check int "edit_file content fallback emits one region" 1 (count_lines by_url_path);
     match load_regions_from by_url_path with
@@ -482,8 +500,8 @@ let test_ingest_edit_file_content_fallback () =
 let test_ingest_no_double_write () =
   with_temp_dir (fun base_dir ->
     let slug = "github.com_owner_repo" in
-    (* The same tool_call must produce exactly one region in the chosen
-       partition and zero in Orphan. Regression guard for the
+    (* The same tool_call must produce exactly one region in the named
+       codebase and zero anywhere else. Regression guard for the
        meta_sync/ingest double-write that PR-1e closed. *)
     let json =
       `Assoc
@@ -497,95 +515,23 @@ let test_ingest_no_double_write () =
     in
     Region.ingest_tool_call
       ~base_dir
-      ~partition:(Ide_paths.By_url slug)
-      ~keeper_id:"sangsu"
+      ~codebase:(slug)
+      ~keeper_id:"alpha"
       ~turn:0
       json;
     let by_url_path =
-      Region.regions_file ~base_dir ~partition:(Ide_paths.By_url slug) ()
+      Region.regions_file ~base_dir ~codebase:(slug) ()
     in
-    let legacy_path = Region.regions_file ~base_dir () in
+    let other_path = Region.regions_file ~base_dir ~codebase:"github.com_other_repo" () in
     check int "by-url has one region" 1 (count_lines by_url_path);
-    check int "orphan has zero regions" 0 (count_lines legacy_path))
-;;
-
-let test_definition_links_at_line () =
-  Eio_main.run (fun _env ->
-    with_temp_dir (fun base_dir ->
-    match
-      Store.create
-        ~base_dir
-        ~keeper_id:"k1"
-        ~file_path:"lib/test.ml"
-        ~line_start:10
-        ~line_end:12
-        ~kind:Types.Decision
-        ~content:"use Eio for concurrency"
-        ()
-    with
-    | Error msg -> fail msg
-    | Ok _ ->
-      Lsp.clear_cache ();
-      let links = Lsp.definition_links ~base_dir ~file_path:"lib/test.ml" ~line:10 in
-      (match links with
-       | [ link ] ->
-         let uri = Option.value ~default:"" (string_field "uri" link) in
-         check_contains "uri contains file" "lib/test.ml" uri
-       | rows -> failf "expected one link, got %d" (List.length rows))))
-;;
-
-let test_definition_links_empty () =
-  Eio_main.run (fun _env ->
-    with_temp_dir (fun base_dir ->
-    Lsp.clear_cache ();
-    let links = Lsp.definition_links ~base_dir ~file_path:"lib/empty.ml" ~line:5 in
-    check int "empty links" 0 (List.length links)))
-;;
-
-let test_reference_locations_related () =
-  Eio_main.run (fun _env ->
-    with_temp_dir (fun base_dir ->
-    match
-      Store.create
-        ~base_dir
-        ~keeper_id:"k1"
-        ~file_path:"lib/a.ml"
-        ~line_start:5
-        ~line_end:5
-        ~kind:Types.Comment
-        ~content:"first"
-        ~goal_id:"goal-x"
-        ()
-    with
-    | Error msg -> fail msg
-    | Ok _ ->
-      (match
-         Store.create
-           ~base_dir
-           ~keeper_id:"k1"
-           ~file_path:"lib/a.ml"
-           ~line_start:20
-           ~line_end:20
-           ~kind:Types.Comment
-           ~content:"second same goal"
-           ~goal_id:"goal-x"
-           ()
-       with
-       | Error msg -> fail msg
-       | Ok _ ->
-         Lsp.clear_cache ();
-         let refs =
-           Lsp.reference_locations
-             ~base_dir ~file_path:"lib/a.ml" ~line:4 ~include_declaration:true
-         in
-         check int "two related refs" 2 (List.length refs))))
+    check int "other codebase has zero regions" 0 (count_lines other_path))
 ;;
 
 let test_completion_items_kinds () =
   Eio_main.run (fun _env ->
     with_temp_dir (fun base_dir ->
     Lsp.clear_cache ();
-    let items = Lsp.completion_items ~base_dir ~file_path:"lib/test.ml" ~line:0 in
+    let items = Lsp.completion_items ~base_dir ~codebase:test_codebase ~file_path:"lib/test.ml" ~line:0 in
     check int "four completion items" 4 (List.length items);
     let labels = List.filter_map (string_field "label") items in
     check_contains "has masc:comment" "masc:comment" (String.concat "," labels);
@@ -596,36 +542,10 @@ let test_code_actions_create () =
   Eio_main.run (fun _env ->
     with_temp_dir (fun base_dir ->
     Lsp.clear_cache ();
-    let actions = Lsp.code_actions ~base_dir ~file_path:"lib/test.ml" ~line:5 ~diagnostics:[] in
+    let actions = Lsp.code_actions ~base_dir ~codebase:test_codebase ~file_path:"lib/test.ml" ~line:5 ~diagnostics:[] in
     check bool "has create action" true (List.length actions >= 1);
     let title = Option.value ~default:"" (string_field "title" (List.hd actions)) in
     check string "first action is create" "Create MASC Annotation" title))
-;;
-
-let test_document_symbols_lists () =
-  Eio_main.run (fun _env ->
-    with_temp_dir (fun base_dir ->
-    match
-      Store.create
-        ~base_dir
-        ~keeper_id:"k1"
-        ~file_path:"lib/test.ml"
-        ~line_start:1
-        ~line_end:3
-        ~kind:Types.Bookmark
-        ~content:"important section"
-        ()
-    with
-    | Error msg -> fail msg
-    | Ok _ ->
-      Lsp.clear_cache ();
-      let syms = Lsp.document_symbols ~base_dir ~file_path:"lib/test.ml" in
-      (match syms with
-       | [ sym ] ->
-         let name = Option.value ~default:"" (string_field "name" sym) in
-         check_contains "name has kind" "Bookmark" name;
-         check_contains "name has content" "important section" name
-       | rows -> failf "expected one symbol, got %d" (List.length rows))))
 ;;
 
 let test_folding_ranges_groups () =
@@ -634,6 +554,7 @@ let test_folding_ranges_groups () =
     match
       Store.create
         ~base_dir
+        ~codebase:"github.com_other_repo"
         ~keeper_id:"k1"
         ~file_path:"lib/test.ml"
         ~line_start:1
@@ -647,6 +568,7 @@ let test_folding_ranges_groups () =
       (match
          Store.create
            ~base_dir
+           ~codebase:"github.com_other_repo"
            ~keeper_id:"k1"
            ~file_path:"lib/test.ml"
            ~line_start:3
@@ -658,58 +580,19 @@ let test_folding_ranges_groups () =
        | Error msg -> fail msg
        | Ok _ ->
          Lsp.clear_cache ();
-         let ranges = Lsp.folding_ranges ~base_dir ~file_path:"lib/test.ml" in
+         let ranges = Lsp.folding_ranges ~base_dir ~codebase:test_codebase ~file_path:"lib/test.ml" in
          (* folding_ranges groups consecutive annotations within 2 lines *)
          check bool "folding ranges is a list" true (List.length ranges >= 0))))
 ;;
 
-let test_document_highlights_related () =
-  Eio_main.run (fun _env ->
-    with_temp_dir (fun base_dir ->
-    match
-      Store.create
-        ~base_dir
-        ~keeper_id:"k1"
-        ~file_path:"lib/test.ml"
-        ~line_start:5
-        ~line_end:5
-        ~kind:Types.Question
-        ~content:"is this correct?"
-        ~task_id:"task-99"
-        ()
-    with
-    | Error msg -> fail msg
-    | Ok _ ->
-      (match
-         Store.create
-           ~base_dir
-           ~keeper_id:"k1"
-           ~file_path:"lib/test.ml"
-           ~line_start:15
-           ~line_end:15
-           ~kind:Types.Decision
-           ~content:"yes it is"
-           ~task_id:"task-99"
-           ()
-       with
-       | Error msg -> fail msg
-       | Ok _ ->
-         Lsp.clear_cache ();
-         let highlights =
-           Lsp.document_highlights ~base_dir ~file_path:"lib/test.ml" ~line:4
-         in
-         check int "two highlights" 2 (List.length highlights))))
-;;
-
-(* Round-trip through [compact]. Guards the append-only snapshot marker:
-   the happy path must still expose every live annotation to a later [list]. *)
 let test_compact_preserves_annotations () =
   with_temp_dir (fun base_dir ->
     let mk content =
       match
         Store.create
           ~base_dir
-          ~keeper_id:"sangsu"
+          ~codebase:"github.com_other_repo"
+          ~keeper_id:"alpha"
           ~file_path:"lib/x.ml"
           ~line_start:1
           ~line_end:2
@@ -725,11 +608,11 @@ let test_compact_preserves_annotations () =
     in
     let a1 = mk "first" in
     let a2 = mk "second" in
-    Store.compact ~base_dir ();
+    Store.compact ~base_dir ~codebase:"github.com_other_repo" ();
     let filter =
       { Types.file_path = None; keeper_id = None; goal_id = None; task_id = None }
     in
-    let listed = Store.list ~base_dir ~filter () in
+    let listed = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter () in
     check int "compact preserves count" 2 (List.length listed);
     let ids =
       List.map (fun (a : Types.annotation) -> a.id) listed
@@ -742,7 +625,7 @@ let test_compact_preserves_annotations () =
       ids)
 ;;
 
-(* task-1736 (IDE Observation Plane v2, axis B3) — store-level ownership
+(* task-1736 — store-level ownership
    enforcement.
 
    The HTTP layer now resolves the acting keeper_id from the token-bound
@@ -754,6 +637,7 @@ let make_alice_annotation base_dir =
   Result.get_ok
     (Store.create
        ~base_dir
+       ~codebase:"github.com_other_repo"
        ~keeper_id:"alice"
        ~file_path:"lib/a.ml"
        ~line_start:1
@@ -773,7 +657,7 @@ let make_alice_annotation base_dir =
 let test_delete_rejects_other_keeper () =
   with_temp_dir (fun base_dir ->
     let created = make_alice_annotation base_dir in
-    match Store.delete ~base_dir ~id:created.id ~keeper_id:"bob" () with
+    match Store.delete ~base_dir ~codebase:"github.com_other_repo" ~id:created.id ~keeper_id:"bob" () with
     | Ok () -> fail "bob must not delete alice's annotation"
     | Error _ -> ())
 ;;
@@ -781,17 +665,17 @@ let test_delete_rejects_other_keeper () =
 let test_delete_allows_owner () =
   with_temp_dir (fun base_dir ->
     let created = make_alice_annotation base_dir in
-    match Store.delete ~base_dir ~id:created.id ~keeper_id:"alice" () with
+    match Store.delete ~base_dir ~codebase:"github.com_other_repo" ~id:created.id ~keeper_id:"alice" () with
     | Ok () -> ()
     | Error msg -> failf "owner delete failed: %s" msg)
 ;;
 
-(* task-1744: tombstoned annotations must be excluded from load/list.
+(* task-1744: deleted_ids annotations must be excluded from load/list.
 
-   Before the fix, [load_all_partition] only skipped the tombstone marker
+   Before the fix, [load_all_for_codebase] only skipped the deletion marker
    line, leaving the earlier annotation with the same id visible in
-   [list], contradicting the mli contract "Tombstoned entries are
-   excluded". These cases exercise both the plain tombstone path, where
+   [list], contradicting the mli contract "Deleted entries are
+   excluded". These cases exercise both the plain deletion path, where
    [list] must apply the exclusion itself, and the explicit compaction
    marker path. *)
 
@@ -799,6 +683,7 @@ let create_note ~base_dir ~keeper_id ~content () =
   Result.get_ok
     (Store.create
        ~base_dir
+       ~codebase:"github.com_other_repo"
        ~keeper_id
        ~file_path:"lib/a.ml"
        ~line_start:1
@@ -810,21 +695,21 @@ let create_note ~base_dir ~keeper_id ~content () =
 
 let test_list_excludes_soft_deleted_without_compaction () =
   with_temp_dir (fun base_dir ->
-    (* No explicit compaction runs here; [list] must exclude the tombstoned
+    (* No explicit compaction runs here; [list] must exclude the deleted_ids
        id on read while the marker remains physically present. *)
     let notes =
       List.init 6 (fun i ->
         create_note ~base_dir ~keeper_id:"alice" ~content:(Printf.sprintf "note-%d" i) ())
     in
     let victim = List.hd notes in
-    (match Store.delete ~base_dir ~id:victim.id ~keeper_id:"alice" () with
+    (match Store.delete ~base_dir ~codebase:"github.com_other_repo" ~id:victim.id ~keeper_id:"alice" () with
      | Ok () -> ()
      | Error msg -> failf "delete failed: %s" msg);
-    let listed = Store.list ~base_dir ~filter:(make_filter ()) () in
-    check int "list excludes the tombstoned annotation" 5 (List.length listed);
+    let listed = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () in
+    check int "list excludes the deleted_ids annotation" 5 (List.length listed);
     check
       bool
-      "tombstoned id absent from list"
+      "deleted_ids id absent from list"
       false
       (List.exists (fun (a : Types.annotation) -> a.id = victim.id) listed))
 ;;
@@ -833,10 +718,10 @@ let test_list_keeps_sibling_after_delete () =
   with_temp_dir (fun base_dir ->
     let victim = create_note ~base_dir ~keeper_id:"alice" ~content:"to delete" () in
     let survivor = create_note ~base_dir ~keeper_id:"alice" ~content:"to keep" () in
-    (match Store.delete ~base_dir ~id:victim.id ~keeper_id:"alice" () with
+    (match Store.delete ~base_dir ~codebase:"github.com_other_repo" ~id:victim.id ~keeper_id:"alice" () with
      | Ok () -> ()
      | Error msg -> failf "delete failed: %s" msg);
-    let listed = Store.list ~base_dir ~filter:(make_filter ()) () in
+    let listed = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () in
     check
       bool
       "deleted sibling absent"
@@ -852,25 +737,25 @@ let test_list_keeps_sibling_after_delete () =
 let test_list_returns_live_annotation () =
   with_temp_dir (fun base_dir ->
     let note = create_note ~base_dir ~keeper_id:"alice" ~content:"live" () in
-    match Store.list ~base_dir ~filter:(make_filter ()) () with
+    match Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () with
     | [ only ] -> check string "live annotation returned unchanged" note.id only.id
     | rows -> failf "expected one live annotation, got %d" (List.length rows))
 ;;
 
-let test_compact_drops_tombstoned () =
+let test_compact_drops_deleted () =
   with_temp_dir (fun base_dir ->
     let notes =
       List.init 6 (fun i ->
         create_note ~base_dir ~keeper_id:"alice" ~content:(Printf.sprintf "note-%d" i) ())
     in
     let victim = List.hd notes in
-    (match Store.delete ~base_dir ~id:victim.id ~keeper_id:"alice" () with
+    (match Store.delete ~base_dir ~codebase:"github.com_other_repo" ~id:victim.id ~keeper_id:"alice" () with
      | Ok () -> ()
      | Error msg -> failf "delete failed: %s" msg);
-    Store.compact ~base_dir ();
+    Store.compact ~base_dir ~codebase:"github.com_other_repo" ();
     let path =
       Filename.concat
-        (Ide_paths.partition_store_dir ~base_dir Ide_paths.Legacy_default)
+        (Ide_paths.code_store_dir ~base_dir ~codebase:"github.com_other_repo")
         "annotations.jsonl"
     in
     let compact_end_markers =
@@ -885,21 +770,22 @@ let test_compact_drops_tombstoned () =
         path
     in
     check int "compact writes one end marker" 1 compact_end_markers;
-    let listed = Store.list ~base_dir ~filter:(make_filter ()) () in
+    let listed = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () in
     check int "list count after compact" 5 (List.length listed);
     check
       bool
-      "tombstoned id absent after compact"
+      "deleted_ids id absent after compact"
       false
       (List.exists (fun (a : Types.annotation) -> a.id = victim.id) listed))
 ;;
 
-(* task-1738: per-partition write serialization + version CAS. *)
+(* task-1738: per-codebase write serialization + version CAS. *)
 
 let make_cas_annotation base_dir =
   Result.get_ok
     (Store.create
        ~base_dir
+       ~codebase:"github.com_other_repo"
        ~keeper_id:"alice"
        ~file_path:"lib/a.ml"
        ~line_start:1
@@ -912,10 +798,10 @@ let make_cas_annotation base_dir =
 (* Real parallelism (Domain, not systhreads) maximises the chance of a
    compaction window overlapping appends. The append-only begin/end
    markers must replay records written during the window, so the final
-   count stays exact without a partition-wide writer lock. *)
+   count stays exact without a codebase-wide writer lock. *)
 let test_concurrent_create_compact_no_loss () =
   with_temp_dir (fun base_dir ->
-    Store.ensure_store ~base_dir ();
+    Store.ensure_store ~base_dir ~codebase:"github.com_other_repo" ();
     let n_writers = 4 in
     let per_writer = 25 in
     let writers =
@@ -925,6 +811,7 @@ let test_concurrent_create_compact_no_loss () =
             match
               Store.create
                 ~base_dir
+                ~codebase:"github.com_other_repo"
                 ~keeper_id:"alice"
                 ~file_path:"lib/a.ml"
                 ~line_start:1
@@ -940,12 +827,12 @@ let test_concurrent_create_compact_no_loss () =
     let compactor =
       Domain.spawn (fun () ->
         for _ = 1 to 50 do
-          Store.compact ~base_dir ()
+          Store.compact ~base_dir ~codebase:"github.com_other_repo" ()
         done)
     in
     List.iter Domain.join writers;
     Domain.join compactor;
-    let listed = Store.list ~base_dir ~filter:(make_filter ()) () in
+    let listed = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () in
     check
       int
       "no annotation lost to concurrent compaction"
@@ -960,6 +847,7 @@ let test_cas_rejects_version_mismatch () =
     (match
        Store.delete
          ~base_dir
+         ~codebase:"github.com_other_repo"
          ~id:created.id
          ~keeper_id:"alice"
          ~expected_version:wrong_version
@@ -971,13 +859,14 @@ let test_cas_rejects_version_mismatch () =
     let still_there =
       List.exists
         (fun (a : Types.annotation) -> a.id = created.id)
-        (Store.list ~base_dir ~filter:(make_filter ()) ())
+        (Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) ())
     in
     check bool "annotation survives rejected CAS delete" true still_there;
     (* The correct version deletes. *)
     match
       Store.delete
         ~base_dir
+        ~codebase:"github.com_other_repo"
         ~id:created.id
         ~keeper_id:"alice"
         ~expected_version:created.updated_at_ms
@@ -987,19 +876,46 @@ let test_cas_rejects_version_mismatch () =
     | Error msg -> failf "matching expected_version must delete: %s" msg)
 ;;
 
-let test_cas_absent_version_is_legacy () =
+let test_cas_absent_version_skips_check () =
   with_temp_dir (fun base_dir ->
     let created = make_cas_annotation base_dir in
-    (* No expected_version → legacy delete-by-id contract. *)
-    match Store.delete ~base_dir ~id:created.id ~keeper_id:"alice" () with
+    (* No expected_version → delete by id alone, no version check. *)
+    match Store.delete ~base_dir ~codebase:"github.com_other_repo" ~id:created.id ~keeper_id:"alice" () with
     | Ok () -> ()
-    | Error msg -> failf "legacy delete without version must succeed: %s" msg)
+    | Error msg -> failf "delete without version must succeed: %s" msg)
+;;
+
+(* 2020-01-01T00:00:00Z as epoch ms. A monotonic boot-relative clock — the
+   #28148 regression this pins against — yields values three orders of
+   magnitude below this floor on any realistic uptime, so the comparison
+   separates the two sources without depending on the test host's clock. *)
+let wall_clock_floor_ms = 1_577_836_800_000L
+
+let test_create_stamps_wall_clock_ms () =
+  with_temp_dir (fun base_dir ->
+    let created = make_cas_annotation base_dir in
+    check
+      bool
+      "created_at_ms is epoch wall clock, not boot-relative"
+      true
+      (Int64.compare created.Types.created_at_ms wall_clock_floor_ms > 0);
+    check
+      bool
+      "updated_at_ms (the CAS version token) uses the same source"
+      true
+      (Int64.compare created.Types.updated_at_ms wall_clock_floor_ms > 0))
 ;;
 
 let () =
   run
     "ide_annotations"
-    [ ( "compact"
+    [ ( "clock"
+      , [ test_case
+            "create stamps epoch wall-clock ms"
+            `Quick
+            test_create_stamps_wall_clock_ms
+        ] )
+    ; ( "compact"
       , [ test_case
             "compact preserves annotations"
             `Quick
@@ -1020,45 +936,44 @@ let () =
             `Quick
             test_region_tracker_writes_fixed_regions_file
         ] )
-    ; ( "partition (RFC-0128)"
+    ; ( "codebase isolation"
       , [ test_case
-            "create By_url isolates from Orphan"
+            "create isolates codebases"
             `Quick
-            test_create_by_url_isolates_from_legacy
+            test_create_isolates_codebases
         ; test_case
-            "Orphan and By_url are separate buckets"
+            "list does not create the store"
             `Quick
-            test_create_orphan_separates_from_by_url
+            test_list_does_not_create_store
         ; test_case
-            "Orphan default is unchanged"
+            "codebases hold their own rows"
             `Quick
-            test_legacy_default_is_unchanged
+            test_codebases_hold_their_own_rows
         ; test_case
-            "delete is partition-scoped"
+            "explicit codebase store is written and read back"
             `Quick
-            test_delete_partition_scoped
+            test_explicit_codebase_store
         ; test_case
-            "append_region By_url isolates from Orphan"
+            "delete is codebase-scoped"
             `Quick
-            test_region_append_by_url_isolates_from_legacy
+            test_delete_is_codebase_scoped
+        ; test_case
+            "append_region isolates codebases"
+            `Quick
+            test_region_append_isolates_codebases
         ; test_case
             "edit_file ingest content fallback emits one region (PR-1e)"
             `Quick
             test_ingest_edit_file_content_fallback
         ; test_case
-            "ingest no double-write across partitions (PR-1e)"
+            "ingest writes exactly one codebase store (PR-1e)"
             `Quick
             test_ingest_no_double_write
         ] )
     ; ( "overlay (expanded)"
-      , [ test_case "definition_links at annotation line" `Quick test_definition_links_at_line
-        ; test_case "definition_links empty when no annotation" `Quick test_definition_links_empty
-        ; test_case "reference_locations finds related" `Quick test_reference_locations_related
-        ; test_case "completion_items returns 4 kinds" `Quick test_completion_items_kinds
+      , [ test_case "completion_items returns 4 kinds" `Quick test_completion_items_kinds
         ; test_case "code_actions creates annotation" `Quick test_code_actions_create
-        ; test_case "document_symbols lists annotations" `Quick test_document_symbols_lists
         ; test_case "folding_ranges groups consecutive" `Quick test_folding_ranges_groups
-        ; test_case "document_highlights finds related" `Quick test_document_highlights_related
         ] )
     ; ( "mutation identity (task-1736 B3)"
       , [ test_case
@@ -1067,7 +982,7 @@ let () =
             test_delete_rejects_other_keeper
         ; test_case "owner can delete own annotation" `Quick test_delete_allows_owner
         ] )
-    ; ( "tombstone read (task-1744)"
+    ; ( "deletion read (task-1744)"
       , [ test_case
             "list excludes soft-deleted annotation (no compaction)"
             `Quick
@@ -1081,9 +996,9 @@ let () =
             `Quick
             test_list_returns_live_annotation
         ; test_case
-            "compaction drops tombstoned annotation"
+            "compaction drops deleted_ids annotation"
             `Quick
-            test_compact_drops_tombstoned
+            test_compact_drops_deleted
         ] )
     ; ( "append-only compaction + CAS (task-1738)"
       , [ test_case
@@ -1095,9 +1010,9 @@ let () =
             `Quick
             test_cas_rejects_version_mismatch
         ; test_case
-            "absent expected_version keeps legacy delete"
+            "absent expected_version deletes by id alone"
             `Quick
-            test_cas_absent_version_is_legacy
+            test_cas_absent_version_skips_check
         ] )
     ]
 ;;

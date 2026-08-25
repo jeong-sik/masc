@@ -9,8 +9,6 @@
 
 type keeper_persistence_report =
   { shutdown : Keeper_shutdown_runtime.restored_inventory
-  ; queue : Keeper_chat_queue.configure_report
-  ; requests : Keeper_msg_async.recovery_report
   ; fusion_delivery :
       ( Fusion_delivery_projector.recovery_report
       , Fusion_delivery_obligation.error )
@@ -20,8 +18,7 @@ type keeper_persistence_report =
 type keeper_persistence_failure_phase =
   | Resolving_base_path
   | Restoring_shutdown
-  | Configuring_queue
-  | Recovering_requests
+  | Recovering_persistence
   | Starting_keeper_loops
 
 type keeper_persistence_raised_cause =
@@ -97,13 +94,8 @@ val prepare_keeper_persistence :
     [requested_base_path] is diagnostic identity only; every persistence and
     backend operation uses the canonical [config]. *)
 
-val keeper_persistence_report :
-  prepared_keeper_persistence -> keeper_persistence_report
-
 val keeper_persistence_prepare_error_to_string :
   keeper_persistence_prepare_error -> string
-
-val keeper_persistence_failure_to_string : keeper_persistence_failure -> string
 
 val claim_prepared_keeper_persistence :
   config:Workspace.config ->
@@ -141,14 +133,6 @@ val start_keeper_loops :
 module For_testing : sig
   type keeper_loops_start_ownership
 
-  type queued_chat_projection = {
-    payload_channel : string;
-    payload_channel_user_id : string;
-    payload_channel_user_name : string;
-    payload_channel_workspace_id : string;
-    agent_name : string;
-  }
-
   val autoboot_proactive_warmup_sec :
     base_warmup:int -> stagger_window_sec:int -> keeper_name:string -> int
 
@@ -157,8 +141,21 @@ module For_testing : sig
   val broadcast_mention_wakeup_action :
     string option -> [ `Suppress_no_target | `Wake_keeper of string ]
 
-  val queued_chat_projection :
-    Keeper_chat_queue.queued_message -> queued_chat_projection
+  val deliver_broadcast_mention :
+    config:Workspace.config ->
+    base_path:string ->
+    is_running:(string -> bool) ->
+    wakeup:(string -> unit) ->
+    Workspace_broadcast.broadcast_delivery ->
+    Workspace_broadcast.mention_delivery
+
+  val project_workspace_message_to_fleet :
+    base_path:string ->
+    registered_keepers:(unit -> (string * string) list) ->
+    Workspace_broadcast.broadcast_delivery ->
+    unit
+
+  val mention_transcript_settled : Workspace_broadcast.mention_delivery -> bool
 
   val reset_keeper_persistence_lifecycle : unit -> unit
 

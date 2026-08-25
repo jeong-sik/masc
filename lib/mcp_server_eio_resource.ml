@@ -4,6 +4,12 @@
     Handles resources/read JSON-RPC method for MASC resources.
 *)
 
+(* The library resource ids. The topic form carries the separator so a name
+   like [libraryfoo] is not read as the topic [oo]. *)
+let library_index_id = "library"
+let library_index_json_id = "library.json"
+let library_topic_prefix = "library/"
+
 let make_response = Mcp_transport_protocol.make_response
 let make_error = Mcp_transport_protocol.make_error
 
@@ -22,6 +28,16 @@ let public_tool_help_schemas () =
 let cache_hint_fields ~scope ~ttl_ms =
   [ ("ttlMs", `Int ttl_ms); ("cacheScope", `String scope) ]
 
+(* Resource projections use the synchronous Workspace/Fs_compat APIs.  Keep
+   those reads off the cooperative Eio domain; Session actor access remains on
+   the calling fiber because it may yield through the registry mailbox. *)
+let run_blocking_resource_io f = Eio_unix.run_in_systhread f
+
+module For_testing = struct
+  let blocking_io_execution_context () =
+    run_blocking_resource_io Eio_guard.execution_context
+end
+
 let handle_read_resource_eio state id params =
   match params with
   | None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
@@ -35,64 +51,80 @@ let handle_read_resource_eio state id params =
         let registry = state.Mcp_server.session_registry in
 
         let read_messages_json ~since_seq ~limit =
-          let msgs_path = Workspace.messages_dir config in
-          if Sys.file_exists msgs_path then
-            let extract_seq name =
-              match String.index_opt name '_' with
-              | None -> 0
-              | Some idx ->
-                Safe_ops.int_of_string_with_default ~default:0 (String.sub name 0 idx)
-            in
-            let files = Sys.readdir msgs_path |> Array.to_list
-              |> List.sort (fun a b -> compare (extract_seq b) (extract_seq a)) in
-            let count = ref 0 in
-            let msgs = ref [] in
-            List.iter (fun name ->
-              if !count < limit then begin
-                let path = Filename.concat msgs_path name in
-                let json = Workspace.read_json config path in
-                match Masc_domain.message_of_yojson json with
-                | Ok msg when msg.Masc_domain.seq > since_seq ->
-                    msgs := (Masc_domain.message_to_yojson msg) :: !msgs;
-                    incr count
-                | Ok _ -> ()
-                | Error detail ->
-                  Log.legacy_traceln
-                    ~level:Log.Warn
-                    ~module_name:"MCP"
-                    (Printf.sprintf
-                       "[WARN] Failed to decode message resource %s: %s"
-                       path
-                       detail)
-              end
-            ) files;
-            `List (List.rev !msgs)
-          else
-            `List []
+          run_blocking_resource_io (fun () ->
+            let msgs_path = Workspace.messages_dir config in
+            if Sys.file_exists msgs_path then
+              let extract_seq name =
+                match String.index_opt name '_' with
+                | None -> 0
+                | Some idx ->
+                  Safe_ops.int_of_string_with_default
+                    ~default:0
+                    (String.sub name 0 idx)
+              in
+              let files =
+                Sys.readdir msgs_path
+                |> Array.to_list
+                |> List.sort (fun a b -> compare (extract_seq b) (extract_seq a))
+              in
+              let count = ref 0 in
+              let msgs = ref [] in
+              List.iter
+                (fun name ->
+                   if !count < limit
+                   then (
+                     let path = Filename.concat msgs_path name in
+                     let json = Workspace.read_json config path in
+                     match Masc_domain.message_of_yojson json with
+                     | Ok msg when msg.Masc_domain.seq > since_seq ->
+                       msgs := Masc_domain.message_to_yojson msg :: !msgs;
+                       incr count
+                     | Ok _ -> ()
+                     | Error detail ->
+                       Log.legacy_traceln
+                         ~level:Log.Warn
+                         ~module_name:"MCP"
+                         (Printf.sprintf
+                            "[WARN] Failed to decode message resource %s: %s"
+                            path
+                            detail)))
+                files;
+              `List (List.rev !msgs)
+            else `List [])
         in
 
         let read_events_json ~limit =
-          let lines = Mcp_server.read_event_lines config ~limit in
-          let events =
-            List.filter_map (fun line ->
-              match Yojson.Safe.from_string line with
-              | json -> Some json
-              | exception Yojson.Json_error msg ->
-                let preview = String_util.utf8_safe ~max_bytes:53 ~suffix:"..." line |> String_util.to_string in
-                Log.legacy_traceln ~level:Log.Warn ~module_name:"MCP"
-                  (Printf.sprintf
-                     "[WARN] Failed to parse event JSON: %s (line: %s)" msg
-                     preview);
-                None
-            ) lines
-          in
-          `List events
+          run_blocking_resource_io (fun () ->
+            let lines = Mcp_server.read_event_lines config ~limit in
+            let events =
+              List.filter_map
+                (fun line ->
+                   match Yojson.Safe.from_string line with
+                   | json -> Some json
+                   | exception Yojson.Json_error msg ->
+                     let preview =
+                       String_util.utf8_safe ~max_bytes:53 ~suffix:"..." line
+                       |> String_util.to_string
+                     in
+                     Log.legacy_traceln
+                       ~level:Log.Warn
+                       ~module_name:"MCP"
+                       (Printf.sprintf
+                          "[WARN] Failed to parse event JSON: %s (line: %s)"
+                          msg
+                          preview);
+                     None)
+                lines
+            in
+            `List events)
         in
 
         let read_events_markdown ~limit =
-          let lines = Mcp_server.read_event_lines config ~limit in
-          if lines = [] then "(no events)"
-          else String.concat "\n" (List.map (fun line -> "- " ^ line) lines)
+          run_blocking_resource_io (fun () ->
+            let lines = Mcp_server.read_event_lines config ~limit in
+            if lines = []
+            then "(no events)"
+            else String.concat "\n" (List.map (fun line -> "- " ^ line) lines))
         in
 
         let (mime_type, text_opt) =
@@ -114,10 +146,15 @@ let handle_read_resource_eio state id params =
                 | None -> None
               in
               ("text/markdown", text_opt)
-          | "status" -> ("text/markdown", Some (Workspace.status config))
+          | "status" ->
+              ( "text/markdown"
+              , Some (run_blocking_resource_io (fun () -> Workspace.status config)) )
           | "status.json" ->
-              let state_json = Masc_domain.workspace_state_to_yojson (Workspace.read_state config) in
-              let backlog_json = Masc_domain.backlog_to_yojson (Workspace.read_backlog config) in
+              let state_json, backlog_json =
+                run_blocking_resource_io (fun () ->
+                  ( Masc_domain.workspace_state_to_yojson (Workspace.read_state config)
+                  , Masc_domain.backlog_to_yojson (Workspace.read_backlog config) ))
+              in
               let connected_agents = Session.get_agent_statuses registry in
               let json = `Assoc [
                 ("base_path", `String config.base_path);
@@ -126,9 +163,14 @@ let handle_read_resource_eio state id params =
                 ("connected_agents", `List connected_agents);
               ] in
               ("application/json", Some (Yojson.Safe.pretty_to_string json))
-          | "tasks" -> ("text/markdown", Some (Workspace.list_tasks config))
+          | "tasks" ->
+              ( "text/markdown"
+              , Some (run_blocking_resource_io (fun () -> Workspace.list_tasks config)) )
           | "tasks.json" ->
-              let backlog_json = Masc_domain.backlog_to_yojson (Workspace.read_backlog config) in
+              let backlog_json =
+                run_blocking_resource_io (fun () ->
+                  Masc_domain.backlog_to_yojson (Workspace.read_backlog config))
+              in
               ("application/json", Some (Yojson.Safe.pretty_to_string backlog_json))
           | "who" -> ("text/markdown", Some (Session.status_string registry))
           | "who.json" ->
@@ -154,7 +196,10 @@ let handle_read_resource_eio state id params =
           | "messages" | "messages/recent" ->
               let since_seq = Mcp_server.int_query_param uri "since_seq" ~default:0 in
               let limit = Mcp_server.int_query_param uri "limit" ~default:10 in
-              ("text/markdown", Some (Workspace.get_messages config ~since_seq ~limit))
+              ( "text/markdown"
+              , Some
+                  (run_blocking_resource_io (fun () ->
+                     Workspace.get_messages config ~since_seq ~limit)) )
           | "messages.json" | "messages.json/recent" ->
               let since_seq = Mcp_server.int_query_param uri "since_seq" ~default:0 in
               let limit = Mcp_server.int_query_param uri "limit" ~default:10 in
@@ -170,17 +215,18 @@ let handle_read_resource_eio state id params =
           | "worktrees.json" ->
               let worktrees_dir = Filename.concat config.base_path ".worktrees" in
               let entries =
-                if Sys.file_exists worktrees_dir && Sys.is_directory worktrees_dir
-                then
-                  Sys.readdir worktrees_dir
-                  |> Array.to_list
-                  |> List.sort String.compare
-                  |> List.map (fun name ->
-                    `Assoc
-                      [ "name", `String name
-                      ; "path", `String (Filename.concat worktrees_dir name)
-                      ])
-                else []
+                run_blocking_resource_io (fun () ->
+                  if Sys.file_exists worktrees_dir && Sys.is_directory worktrees_dir
+                  then
+                    Sys.readdir worktrees_dir
+                    |> Array.to_list
+                    |> List.sort String.compare
+                    |> List.map (fun name ->
+                      `Assoc
+                        [ "name", `String name
+                        ; "path", `String (Filename.concat worktrees_dir name)
+                        ])
+                  else [])
               in
               let json =
                 `Assoc
@@ -189,84 +235,59 @@ let handle_read_resource_eio state id params =
                   ]
               in
               ("application/json", Some (Yojson.Safe.pretty_to_string json))
-          | s when String.starts_with s ~prefix:"library" ->
-              let library_dir = Filename.concat config.base_path "docs/library" in
-              if not (Sys.file_exists library_dir) then
-                ("text/markdown", Some "Library directory not found. Create docs/library/ first.")
-              else begin
+          | s
+            when s = library_index_id
+                 || s = library_index_json_id
+                 || String.starts_with s ~prefix:library_topic_prefix ->
+              run_blocking_resource_io (fun () ->
+                let library_dir = Filename.concat config.base_path "docs/library" in
+                if not (Sys.file_exists library_dir)
+                then
+                  ( "text/markdown"
+                  , Some "Library directory not found. Create docs/library/ first." )
+                else begin
                 let parse_frontmatter path fallback_name =
                   try
-                    let content = Fs_compat.load_file path in
-                    let lines = String.split_on_char '\n' content in
-                    match lines with
-                    | "---" :: rest ->
-                        let title = ref fallback_name in
-                        let source = ref "" in
-                        let verified_by = ref "" in
-                        let date = ref "" in
-                        let tags = ref [] in
-                        let rec scan = function
-                          | [] -> ()
-                          | "---" :: _ -> ()
-                          | line :: tl ->
-                              let try_field prefix r =
-                                let plen = String.length prefix in
-                                if String.length line > plen
-                                   && String.sub line 0 plen = prefix then
-                                  r := String.trim (String.sub line plen (String.length line - plen))
-                              in
-                              try_field "title: " title;
-                              try_field "source: " source;
-                              try_field "verified_by: " verified_by;
-                              try_field "date: " date;
-                              let tp = "tags: " in
-                              let tplen = String.length tp in
-                              if String.length line > tplen
-                                 && String.sub line 0 tplen = tp then begin
-                                let raw = String.trim (String.sub line tplen (String.length line - tplen)) in
-                                let inner =
-                                  if String.length raw >= 2
-                                     && raw.[0] = '[' && raw.[String.length raw - 1] = ']' then
-                                    String.sub raw 1 (String.length raw - 2)
-                                  else raw
-                                in
-                                tags := String.split_on_char ',' inner
-                                  |> List.map String.trim
-                                  |> List.filter (fun s -> s <> "")
-                              end;
-                              scan tl
-                        in
-                        scan rest;
-                        (!title, !source, !verified_by, !date, !tags)
-                    | _ -> (fallback_name, "", "", "", [])
-                  with Sys_error _ -> (fallback_name, "", "", "", [])
+                    let parsed = Frontmatter.parse (Fs_compat.load_file path) in
+                    if parsed.Frontmatter.fields = []
+                       && not (Frontmatter.has_frontmatter (Fs_compat.load_file path))
+                    then fallback_name, "", "", "", []
+                    else (
+                      let field name = Frontmatter.field parsed name in
+                      let title =
+                        match field "title" with
+                        | "" -> fallback_name
+                        | value -> value
+                      in
+                      ( title
+                      , field "source"
+                      , field "verified_by"
+                      , field "date"
+                      , Frontmatter.list_field parsed "tags" ))
+                  with
+                  | Sys_error _ -> fallback_name, "", "", "", []
                 in
+                (* Trimmed here, not in the parser. The three readers this
+                   replaced disagreed: prompt_registry kept the body verbatim
+                   and this one trimmed it. Frontmatter.parse follows the
+                   verbatim reading -- it returns what the file says -- so the
+                   surface that wants a tidy body asks for it. Without the
+                   trim, a file ending in a newline renders as "Alpha body\n"
+                   in the JSON resource. *)
                 let strip_frontmatter content =
-                  if String.starts_with content ~prefix:"---" then
-                    match String.index_from_opt content 3 '\n' with
-                    | None -> content
-                    | Some first_nl ->
-                        let rec find_end pos =
-                          match String.index_from_opt content pos '\n' with
-                          | None -> content
-                          | Some nl ->
-                              let line_start = pos in
-                              let line = String.sub content line_start (nl - line_start) in
-                              if line = "---" then
-                                let rest_start = nl + 1 in
-                                if rest_start < String.length content then
-                                  String.trim (String.sub content rest_start (String.length content - rest_start))
-                                else ""
-                              else find_end (nl + 1)
-                        in
-                        find_end (first_nl + 1)
-                  else content
+                  String.trim (Frontmatter.parse content).Frontmatter.body
                 in
                 let is_json, topic =
-                  if s = "library.json" then (true, "")
-                  else if s = "library" then (false, "")
+                  if s = library_index_json_id then (true, "")
+                  else if s = library_index_id then (false, "")
                   else
-                    let rest = if String.length s > 8 then String.sub s 8 (String.length s - 8) else "" in
+                    (* Past the prefix, not past a hardcoded 8: the guard above
+                       matched [library_topic_prefix], and the two lengths have
+                       to be the same number. *)
+                    let prefix_len = String.length library_topic_prefix in
+                    let rest =
+                      String.sub s prefix_len (String.length s - prefix_len)
+                    in
                     if Filename.check_suffix rest ".json" then
                       (true, Filename.chop_suffix rest ".json")
                     else (false, rest)
@@ -275,6 +296,16 @@ let handle_read_resource_eio state id params =
                   Sys.readdir library_dir |> Array.to_list
                     |> List.filter (fun f -> Filename.check_suffix f ".md" && f <> "README.md")
                     |> List.sort String.compare
+                in
+                (* [topic] arrives from the client's URI. Resolving it against
+                   the listing rather than concatenating it onto [library_dir]
+                   means a topic like [../../secrets] has nothing to match:
+                   readdir never returns a name with a separator in it. *)
+                let library_doc_path topic =
+                  let want = topic ^ ".md" in
+                  if List.exists (String.equal want) (library_files ()) then
+                    Some (Filename.concat library_dir want)
+                  else None
                 in
                 if topic = "" && not is_json then begin
                   let files = library_files () in
@@ -313,8 +344,8 @@ let handle_read_resource_eio state id params =
                   ] in
                   ("application/json", Some (Yojson.Safe.to_string json))
                 end else if is_json then begin
-                  let path = Filename.concat library_dir (topic ^ ".md") in
-                  if Sys.file_exists path then begin
+                  match library_doc_path topic with
+                  | Some path -> begin
                     let raw = Fs_compat.load_file path in
                     let (title, source, verified_by, date, tags) = parse_frontmatter path topic in
                     let body = strip_frontmatter raw in
@@ -328,17 +359,18 @@ let handle_read_resource_eio state id params =
                       ("content", `String body);
                     ] in
                     ("application/json", Some (Yojson.Safe.to_string json))
-                  end else
+                  end
+                  | None ->
                     ("application/json", Some (Yojson.Safe.to_string (`Assoc [("error", `String (Printf.sprintf "Library document '%s' not found" topic))])))
                 end else begin
-                  let path = Filename.concat library_dir (topic ^ ".md") in
-                  if Sys.file_exists path then
+                  match library_doc_path topic with
+                  | Some path ->
                     let content = Fs_compat.load_file path in
                     ("text/markdown", Some content)
-                  else
+                  | None ->
                     ("text/markdown", Some (Printf.sprintf "Library document '%s' not found." topic))
                 end
-              end
+              end)
           | _ -> ("text/plain", None)
         in
 

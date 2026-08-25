@@ -16,7 +16,7 @@ let bool_member key json =
 
 let test_tool_io_preview_fields_are_redacted () =
   let fields =
-    Keeper_tools_oas_handler_telemetry.tool_io_preview_fields
+    Keeper_tools_agent_core_handler_telemetry.tool_io_preview_fields
       ~tool_name:"tool_execute"
       ~input:
         (`Assoc
@@ -55,7 +55,7 @@ let test_tool_io_preview_fields_are_redacted () =
 
 let test_sensitive_named_tool_preserves_redacted_io () =
   let fields =
-    Keeper_tools_oas_handler_telemetry.tool_io_preview_fields
+    Keeper_tools_agent_core_handler_telemetry.tool_io_preview_fields
       ~tool_name:"keeper_auth_token"
       ~input:(`Assoc [ "token", `String "abcdefghijklmnopqrstuvwxyz123456" ])
       ~output:"abcdefghijklmnopqrstuvwxyz123456"
@@ -86,8 +86,8 @@ let test_sensitive_named_tool_preserves_redacted_io () =
 
 let test_tool_call_event_uses_canonical_disposition () =
   let event =
-    Keeper_tools_oas_handler_telemetry.keeper_tool_call_event_json
-      ~keeper_name:"sangsu"
+    Keeper_tools_agent_core_handler_telemetry.keeper_tool_call_event_json
+      ~keeper_name:"alpha"
       ~tool_name:"keeper_file_write"
       ~duration_ms:12
       ~disposition:(Tool_result.Deferred ())
@@ -104,22 +104,22 @@ let test_tool_call_event_uses_canonical_disposition () =
     (bool_member "success" event)
 ;;
 
-let test_oas_invocation_fields_preserve_exact_occurrence () =
+let test_agent_core_invocation_fields_preserve_exact_occurrence () =
   let invocation =
-    Agent_sdk.Tool_contract.Invocation.create
+    Agent_core.Tool_contract.Invocation.create
       ~tool_use_id:""
       ~turn:11
-      ~completion:Agent_sdk.Tool_contract.Continue_after_success
+      ~completion:Agent_core.Tool_contract.Continue_after_success
       ~schedule:
         { planned_index = 3
-        ; batch_index = 0
-        ; batch_size = 1
-        ; execution_mode = Agent_sdk.Tool_contract.Serial
+        ; batch_index = 2
+        ; batch_size = 4
+        ; execution_mode = Agent_core.Tool_contract.Concurrent
         }
   in
   let json =
     `Assoc
-      (Keeper_tools_oas_handler_telemetry.oas_invocation_fields
+      (Keeper_tools_agent_core_handler_telemetry.agent_core_invocation_fields
          (Some invocation))
   in
   Alcotest.(check (option string))
@@ -130,7 +130,19 @@ let test_oas_invocation_fields_preserve_exact_occurrence () =
   Alcotest.(check int)
     "planned index preserved"
     3
-    Yojson.Safe.Util.(member "planned_index" json |> to_int)
+    Yojson.Safe.Util.(member "planned_index" json |> to_int);
+  Alcotest.(check int)
+    "batch index preserved"
+    2
+    Yojson.Safe.Util.(member "batch_index" json |> to_int);
+  Alcotest.(check int)
+    "batch size preserved"
+    4
+    Yojson.Safe.Util.(member "batch_size" json |> to_int);
+  Alcotest.(check string)
+    "execution mode preserved"
+    "concurrent"
+    Yojson.Safe.Util.(member "execution_mode" json |> to_string)
 ;;
 
 let () =
@@ -150,9 +162,9 @@ let () =
             `Quick
             test_tool_call_event_uses_canonical_disposition
         ; Alcotest.test_case
-            "preserves exact OAS occurrence"
+            "preserves exact AGENT_CORE occurrence"
             `Quick
-            test_oas_invocation_fields_preserve_exact_occurrence
+            test_agent_core_invocation_fields_preserve_exact_occurrence
         ] )
     ]
 ;;

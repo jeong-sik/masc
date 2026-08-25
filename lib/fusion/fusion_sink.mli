@@ -58,7 +58,8 @@ val judge_node_meta : Fusion_types.judge_outcome -> Yojson.Safe.t
     non-cancel 예외는 counter+warn으로 흡수하는 best-effort 알림이며, chat/board
     영속 성공을 실패로 되돌리지 않는다. [Eio.Cancel.Cancelled]는 재전파한다. *)
 val emit
-  :  base_dir:string
+  :  registry:Fusion_run_registry.t
+  -> base_dir:string
   -> keeper:string
   -> run_id:string
   -> channel:Keeper_continuation_channel.t
@@ -88,20 +89,45 @@ val wake_keeper_on_fusion_completion :
   -> keeper:string
   -> run_id:string
   -> channel:Keeper_continuation_channel.t
-  -> ok:bool
-  -> resolved_answer:string
+  -> terminal:Keeper_event_queue.fusion_terminal
   -> board_post_id:string
   -> (unit, string) result
+(** [terminal] 은 키퍼가 받는 typed 종결이다. 이전 시그니처는 [~ok:bool] 이라
+    성공/실패 둘로만 접혔고, 그래서 [Keeper_event_queue.Fusion_cancelled] 는 코덱과
+    렌더러를 갖추고도 생산자가 없었다. *)
+
+(** 종결 실패의 사유. wake 가 보낼 terminal 이 여기에 달려 있으므로 문자열 code 가
+    아니라 닫힌 합으로 전달한다: 취소는 실패가 아니라 취소로 도착해야 키퍼가 재시도
+    여부를 판단할 수 있다. registry wire 의 [code] 문자열은 이 합에서 파생된다. *)
+type delivery_failure =
+  | Computation_failed of string
+  | Lost of string
+  | Cancelled of
+      { reason : string
+      ; cancelled_by : string
+      }
+  | Persistence_failed of
+      { attempted_status : string
+      ; reason : string
+      }
+  | Evidence_unavailable
+
+(** registry/대시보드가 읽는 안정 wire 라벨. *)
+val delivery_failure_code : delivery_failure -> string
+
+(** 사람이 읽는 한 줄. 사유별 부가 정보(cancelled_by, attempted_status)를 포함한다. *)
+val delivery_failure_detail : delivery_failure -> string
 
 (** Idempotently project a terminal Fusion lifecycle failure to the Keeper chat
-    lane and its exact continuation channel. *)
+    lane and its exact continuation channel. [Cancelled] 는 키퍼에게
+    [Fusion_cancelled] 로, 나머지는 [Fusion_failed] 로 도착한다. *)
 val emit_failure :
-     base_dir:string
+     registry:Fusion_run_registry.t
+  -> base_dir:string
   -> keeper:string
   -> run_id:string
   -> channel:Keeper_continuation_channel.t
-  -> failure_code:string
-  -> detail:string
+  -> failure:delivery_failure
   -> (unit, string) result
 
 (** RFC-0266 §7 Phase 4: broadcast a [fusion_run_status] SSE event carrying the

@@ -1,0 +1,119 @@
+{
+  "captured_at": "2026-08-15T22:48:52+0900",
+  "script": "scripts/bench-web-tools.py",
+  "server_health": {
+    "status": "ok",
+    "version": "0.22.0",
+    "commit": null,
+    "commit_source": null
+  },
+  "provider_direct": {
+    "searxng": [
+      {
+        "query": "OCaml 5.5 effect handlers tutorial",
+        "http_status": 200,
+        "elapsed_ms": 1728.7,
+        "bytes": 265,
+        "result_count": 0,
+        "engines": []
+      },
+      {
+        "query": "Claude Opus latest model context window",
+        "http_status": 200,
+        "elapsed_ms": 1837.2,
+        "bytes": 270,
+        "result_count": 0,
+        "engines": []
+      },
+      {
+        "query": "장마철 제습기 원리",
+        "http_status": 200,
+        "elapsed_ms": 1385.0,
+        "bytes": 281,
+        "result_count": 0,
+        "engines": []
+      }
+    ],
+    "duckduckgo_html": {
+      "query": "OCaml 5.5 effect handlers tutorial",
+      "http_status": 202,
+      "elapsed_ms": 292.6,
+      "bytes": 14268,
+      "result_anchor_count": 0
+    },
+    "bing_rss": {
+      "query": "OCaml 5.5 effect handlers tutorial",
+      "http_status": 200,
+      "elapsed_ms": 139.8,
+      "bytes": 5721,
+      "item_count": 10
+    }
+  },
+  "mcp_tool": {
+    "auth_source": "dashboard.token",
+    "auth_attempts_rejected": 1,
+    "initialize_ms": 1.6,
+    "server_info": {
+      "name": "masc",
+      "title": "MASC MCP Server",
+      "version": "0.22.0",
+      "description": "Multi-agent MCP server exposing MASC workspace state, tools, prompts, and resources.",
+      "websiteUrl": "https://github.com/yousleepwhen/masc",
+      "icons": [
+        {
+          "src": "data:image/svg+xml;utf8,%3Csvg%20xmlns='http:%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width='64'%20height='64'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='%237C3AED'%2F%3E%3Ctext%20x='32'%20y='38'%20font-family='Arial,%20sans-serif'%20font-size='22'%20font-weight='700'%20text-anchor='middle'%20fill='%23F5F3FF'%3EMM%3C%2Ftext%3E%3C%2Fsvg%3E",
+          "mimeType": "image/svg+xml",
+          "sizes": [
+            "64x64"
+          ]
+        }
+      ]
+    },
+    "url": "http://localhost:8935/mcp",
+    "tool_count": 40,
+    "web_search_tool": null,
+    "web_fetch_tool": null,
+    "tool_names": [
+      "masc_add_task",
+      "masc_agent_card",
+      "masc_agent_timeline",
+      "masc_batch_add_tasks",
+      "masc_board_comment",
+      "masc_board_comment_vote",
+      "masc_board_curation_read",
+      "masc_board_curation_submit",
+      "masc_board_list",
+      "masc_board_post",
+      "masc_board_post_get",
+      "masc_board_reaction",
+      "masc_board_vote",
+      "masc_broadcast",
+      "masc_check",
+      "masc_goal_assign",
+      "masc_goal_list",
+      "masc_goal_transition",
+      "masc_goal_upsert",
+      "masc_heartbeat",
+      "masc_keeper_compact",
+      "masc_keeper_down",
+      "masc_keeper_list",
+      "masc_keeper_status",
+      "masc_keeper_up",
+      "masc_keeper_waiting_inventory",
+      "masc_messages",
+      "masc_plan_get",
+      "masc_plan_init",
+      "masc_plan_set_task",
+      "masc_plan_update",
+      "masc_schedule_cancel",
+      "masc_schedule_create",
+      "masc_schedule_get",
+      "masc_schedule_list",
+      "masc_start",
+      "masc_status",
+      "masc_tasks",
+      "masc_tool_help",
+      "masc_transition"
+    ]
+  }
+}

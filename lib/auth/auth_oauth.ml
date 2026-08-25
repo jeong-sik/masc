@@ -135,19 +135,10 @@ let validate_loopback_redirect_uri value =
       | Some scheme -> String.equal (String.lowercase_ascii scheme) "http"
       | None -> false
     in
-    let host_ok =
-      match Uri.host uri with
-      | Some host when String.equal (String.lowercase_ascii host) "localhost" -> true
-      | Some host ->
-        (match Ipaddr.of_string host with
-         | Ok (Ipaddr.V4 address) ->
-           let octets = Ipaddr.V4.to_octets address in
-           String.length octets = 4 && Char.code octets.[0] = 127
-         | Ok (Ipaddr.V6 address) ->
-           Ipaddr.V6.compare address Ipaddr.V6.localhost = 0
-         | Error _ -> false)
-      | None -> false
-    in
+    (* One answer to "is this loopback" (#27576). This used to carry its own
+       octet test, which agreed with 127.0.0.0/8 but not with the SSOT, and
+       neither recognised an IPv4-mapped address. *)
+    let host_ok = Masc_network_defaults.is_loopback_host_opt (Uri.host uri) in
     if
       scheme_ok
       && host_ok
@@ -180,7 +171,6 @@ type pending_grant =
   ; agent_name : string
   ; bootstrap_token_hash : string
   ; role : agent_role
-  ; issued_at_unix : float
   ; expires_at_unix : float
   }
 
@@ -316,12 +306,6 @@ let json_float fields name =
   match List.assoc_opt name fields with
   | Some (`Float value) -> Ok value
   | Some (`Int value) -> Ok (float_of_int value)
-  | _ -> Error (Store_error (Printf.sprintf "invalid OAuth store field %s" name))
-;;
-
-let json_nonnegative_int fields name =
-  match List.assoc_opt name fields with
-  | Some (`Int value) when value >= 0 -> Ok value
   | _ -> Error (Store_error (Printf.sprintf "invalid OAuth store field %s" name))
 ;;
 
@@ -649,7 +633,6 @@ let issue_authorization_code
     ; agent_name = bootstrap_credential.agent_name
     ; bootstrap_token_hash = token_hash bootstrap_credential.token
     ; role
-    ; issued_at_unix
     ; expires_at_unix = issued_at_unix +. float_of_int (code_ttl_sec ())
     }
   in

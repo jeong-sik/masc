@@ -149,18 +149,6 @@ let record_mcp_server_operation_duration result ~duration_ms =
     ~duration_seconds:(float_of_int duration_ms /. 1000.0)
 ;;
 
-(** MCP tools/call [arguments] is optional (spec: "arguments?: object").
-    Absence therefore means an empty object. An explicitly supplied [`Null]
-    is not absence and must remain [`Null] so OAS strict validation rejects it
-    instead of silently repairing an invalid wire value. *)
-let arguments_of_params = function
-  | `Assoc fields ->
-    (match List.assoc_opt "arguments" fields with
-     | None -> `Assoc []
-     | Some value -> value)
-  | _ -> `Null
-;;
-
 let failure_observation ~duration_ms
     : Tool_result.result -> (Tool_result.tool_failure_class * string) option
   = function
@@ -176,7 +164,6 @@ let failure_observation ~duration_ms
 
 module For_testing = struct
   let activity_tool_called_payload = activity_tool_called_payload
-  let arguments_of_params = arguments_of_params
   let failure_observation = failure_observation
   let record_mcp_server_operation_duration = record_mcp_server_operation_duration
   let record_mcp_server_operation_duration_sample =
@@ -195,11 +182,9 @@ type keeper_runtime_mcp_log_context = {
   model : string;
   trace_id : string option;
   session_id : string option;
-  generation : int option;
   turn : int option;
   keeper_turn_id : int option;
   task_id : string option;
-  goal_ids : string list option;
   sandbox_profile : string option;
   sandbox_root : string option;
   allowed_paths : string list option;
@@ -228,11 +213,6 @@ let runtime_mcp_keeper_log_context_of_entry
     | Some obs -> Some obs.turn_id
     | None -> None
   in
-  let goal_ids =
-    match entry.meta.active_goal_ids with
-    | [] -> None
-    | ids -> Some ids
-  in
   let config = Workspace.default_config entry.base_path in
   {
     keeper_name = entry.name;
@@ -240,11 +220,9 @@ let runtime_mcp_keeper_log_context_of_entry
     model;
     trace_id = Some trace_id;
     session_id;
-    generation = Some entry.meta.runtime.nonce;
     turn;
     keeper_turn_id = turn;
     task_id = Option.map Keeper_id.Task_id.to_string entry.meta.current_task_id;
-    goal_ids;
     sandbox_profile =
       Some (Keeper_types_profile_sandbox.sandbox_profile_to_string entry.meta.sandbox_profile);
     sandbox_root =
@@ -288,7 +266,7 @@ let runtime_mcp_keeper_tool_call_sse_payload
       [ ("error_text", `String (runtime_mcp_keeper_error_preview message)) ]
   in
   let io_fields =
-    Keeper_tools_oas_handler_telemetry.tool_io_preview_fields
+    Keeper_tools_agent_core_handler_telemetry.tool_io_preview_fields
       ~tool_name
       ~input:arguments
       ~output:message
@@ -357,10 +335,8 @@ let record_runtime_mcp_keeper_trajectory
       ?agent_name:ctx.agent_name
       ?trace_id:ctx.trace_id
       ?session_id:ctx.session_id
-      ?generation:ctx.generation
       ?keeper_turn_id:ctx.keeper_turn_id
       ?task_id:ctx.task_id
-      ?goal_ids:ctx.goal_ids
       ?sandbox_profile:ctx.sandbox_profile
       ?sandbox_root:ctx.sandbox_root
       ?allowed_paths:ctx.allowed_paths
@@ -392,7 +368,6 @@ let record_runtime_mcp_keeper_trajectory
       result = Some safe_output;
       duration_ms;
       error;
-      cost_usd = Trajectory.tool_cost_estimate tool_name;
       execution_id = Some (Ids.Execution_id.to_string execution_id);
     }
   in
@@ -421,6 +396,7 @@ let record_runtime_mcp_keeper_tool_trace
     ~(arguments : Yojson.Safe.t)
     ~(message : string)
     ~(disposition : ('completed, 'deferred, 'failed) Tool_result.disposition)
+    ~(execution_id : Ids.Execution_id.t)
     ~(duration_ms : int) : unit =
   let ctx =
     runtime_mcp_keeper_log_context_of_entry
@@ -428,9 +404,6 @@ let record_runtime_mcp_keeper_tool_trace
       entry
       ~arguments
   in
-  (* RFC-0233 PR-1: one mint per execution at this dispatch boundary;
-     the tool_calls row and the trajectory row below share the value. *)
-  let execution_id = Ids.Execution_id.generate () in
   let success =
     match disposition with
     | Tool_result.Completed _ | Tool_result.Deferred _ -> true
@@ -449,11 +422,9 @@ let record_runtime_mcp_keeper_tool_trace
     ~execution_id
     ?trace_id:ctx.trace_id
     ?session_id:ctx.session_id
-    ?generation:ctx.generation
     ?turn:ctx.turn
     ?keeper_turn_id:ctx.keeper_turn_id
     ?task_id:ctx.task_id
-    ?goal_ids:ctx.goal_ids
     ?sandbox_profile:ctx.sandbox_profile
     ?sandbox_root:ctx.sandbox_root
       ?allowed_paths:ctx.allowed_paths
@@ -480,20 +451,27 @@ let record_runtime_mcp_keeper_tool_trace
        ~message)
 
 (** Resolve managed agent tool call to canonical operation *)
-let resolve_managed_agent_call ?mcp_session_id params =
-  let requested_name = Json_util.get_string params "name" |> Option.value ~default:"" in
-  let arguments = arguments_of_params params in
+(* The protocol layer answers this with Invalid_params rather than a generic
+   failure. It used to tell the two apart by prefix-matching the message of an
+   [Invalid_argument] -- the sentinel text was the whole contract, written once
+   at the raise and once at the catch, and a reword on either side would have
+   quietly downgraded the answer with nothing going red. *)
+exception Managed_agent_translation_failed of string
+
+let resolve_managed_agent_call ?mcp_session_id request =
+  let requested_name = Mcp_server_eio_call_request.requested_name request in
+  let arguments = Mcp_server_eio_call_request.arguments request in
   let identity =
     Client_registry_eio.get_or_create_identity ?mcp_session_id arguments
   in
-  Sdk_tool_contract.resolve_requested_tool_call
+  Agent_core_tool_contract.resolve_requested_tool_call
     ~agent_name:identity.Client_identity.agent_name
     ~requested_name ~arguments
 
 (** Handle tools/call JSON-RPC method *)
 let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     ~broadcast_tools_list_changed ~sw ~clock ?(profile = Full) ?mcp_session_id
-    ?auth_token ?(internal_keeper_runtime = false) state id params =
+    ?auth_token ?(internal_keeper_runtime = false) state id request =
   (* The active workspace is an admission fact for this call.  In particular,
      [masc_start] may publish a new current scope while executing, but the
      initiating call and every post-execution observation remain attributed to
@@ -522,18 +500,16 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
            ("handle_call_tool_eio admitted an invalid MCP invocation scope: "
             ^ Tool_invocation_ref.error_to_string error))
   in
-  let (name, arguments) =
+  let requested_name = Mcp_server_eio_call_request.requested_name request in
+  let admitted_arguments = Mcp_server_eio_call_request.arguments request in
+  let name, arguments =
     match profile with
     | Managed_agent -> (
-        match resolve_managed_agent_call ?mcp_session_id params with
+        match resolve_managed_agent_call ?mcp_session_id request with
         | Ok resolved -> resolved
         | Error msg ->
-            raise
-              (Invalid_argument
-                 ("managed agent tool translation failed: " ^ msg)))
-    | Full | Operator_remote ->
-        (* DET-OK: pre-existing empty-name default fails typed downstream; arguments_of_params maps MCP-optional absence to a typed empty object. *)
-        (Json_util.get_string params "name" |> Option.value ~default:"", arguments_of_params params)
+            raise (Managed_agent_translation_failed msg))
+    | Full | Operator_remote -> requested_name, admitted_arguments
   in
   (* Measure execution time for telemetry *)
   let start_time = Eio.Time.now clock in
@@ -553,14 +529,30 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         ~arguments
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
+    | Auth.Auth_config_error _ ->
+      Tool_result.error
+        ~failure_class:Tool_result.Runtime_failure
+        ~tool_name:name
+        ~start_time
+        "Authentication configuration unavailable"
     | Workspace.Not_initialized ->
       (* RFC-0189: server bootstrap incomplete — Masc_domain
          System NotInitialized.  [Runtime_failure] (caller
          cannot fix; the operator must initialise MASC). *)
       Tool_result.error
-        ~failure_class:(Some Tool_result.Runtime_failure)
+        ~failure_class:Tool_result.Runtime_failure
         ~tool_name:name ~start_time
         (Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
+    | exn when Keeper_registry_types.is_operator_interrupt exn ->
+      (* #28810: operator-requested turn interrupt is a typed cancellation,
+         not a crash. The guard covers every Eio delivery shape
+         (#28868 review). *)
+      Log.Mcp.info "tools/call interrupted by operator: %s" name;
+      Tool_result.error
+        ~failure_class:Tool_result.Operator_cancelled
+        ~tool_name:name
+        ~start_time
+        Keeper_registry_types.operator_interrupt_detail
     | exn ->
       (* Never let a tool exception crash the MCP server. *)
       let err = Printexc.to_string exn in
@@ -573,7 +565,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
             now blanket Runtime preserves operator-visible
             severity (the existing log line stays ERROR). *)
          Tool_result.error
-           ~failure_class:(Some Tool_result.Runtime_failure)
+           ~failure_class:Tool_result.Runtime_failure
            ~tool_name:name ~start_time
            (Printf.sprintf "Internal error: %s" err_detail))
   in
@@ -655,6 +647,14 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       |> List.find_opt (fun (entry : Keeper_registry.registry_entry) ->
         String.equal entry.meta.agent_name agent_name)
   in
+  (* RFC-0233 PR-1: one mint per execution at this dispatch boundary. The
+     tool_calls row, the trajectory row and the [Tool_called] telemetry event
+     all carry this value, so a reader of two streams can tell one physical
+     call reported twice from two calls. Minted only when a keeper owns the
+     call, because that is when a tool_calls row is written. *)
+  let execution_id =
+    Option.map (fun _ -> Ids.Execution_id.generate ()) keeper_entry
+  in
   let source : Tool_registry.call_source =
     match keeper_entry with
     | Some _ -> Agent_internal
@@ -691,6 +691,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
                 ?session_id:telemetry_session_id
                 ?operation_id:telemetry_operation_id
                 ?worker_run_id:telemetry_worker_run_id
+                ?execution_id:(Option.map Ids.Execution_id.to_string execution_id)
                 ?failure_class:telemetry_failure_class
                 ?error_kind:telemetry_error_kind
                 ?error_message:error_detail
@@ -779,8 +780,8 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     | Some tid -> tid
     | None -> request_id_trace_fallback
   in
-  (match keeper_entry with
-   | Some entry ->
+  (match keeper_entry, execution_id with
+   | Some entry, Some execution_id ->
        (try
           record_runtime_mcp_keeper_tool_trace
             ?mcp_session_id
@@ -789,10 +790,11 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
             ~arguments
             ~message
             ~disposition:result
+            ~execution_id
             ~duration_ms
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           log_mcp_exn ~label:"runtime MCP keeper tool trace failed" exn)
-   | None -> ());
+   | Some _, None | None, _ -> ());
   let status = status_of_result result in
   let envelope =
     `Assoc [

@@ -62,7 +62,6 @@ module Goal_name : sig
     | Goal_list
     | Goal_transition
     | Goal_upsert
-    | Goal_assign
 
   val to_string : t -> string
   val of_string : string -> t option
@@ -73,7 +72,6 @@ module Operator_name : sig
   type t =
     | Operator_action
     | Operator_board_attention_quarantine_requeue
-    | Operator_chat_recovery_resolve
     | Operator_confirm
     | Operator_digest
     | Operator_snapshot
@@ -127,4 +125,3 @@ val to_string : t -> string
 val of_string : string -> t option
 val pp : Stdlib.Format.formatter -> t -> unit
 val is_masc : t -> bool
-val is_board : t -> bool

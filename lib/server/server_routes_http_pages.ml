@@ -219,11 +219,11 @@ let dashboard_asset_root () =
 let dashboard_index_path () =
   Filename.concat (dashboard_asset_root ()) "index.html"
 
-let dashboard_etag_hex_chars = 12
-
-let dashboard_etag_of_body body =
-  let hash = Digest.string body |> Digest.to_hex in
-  String.sub hash 0 (min dashboard_etag_hex_chars (String.length hash))
+(* The tag policy lives with the responder that emits it, so the HTML route
+   here and the JSON responses share one definition rather than two copies
+   that agree until one is edited. *)
+let dashboard_etag_hex_chars = Http.Response.etag_hex_chars
+let dashboard_etag_of_body = Http.Response.etag_of_body
 
 let dashboard_index_cache_control = "no-store, max-age=0, must-revalidate"
 
@@ -357,10 +357,10 @@ let bonsai_keeper_status_of_phase phase =
   let open Keeper_state_machine in
   match phase with
   | Running -> K.Live
-  | Failing | Overflowed | Compacting | HandingOff | Draining | Paused
+  | Failing | Compacting | HandingOff | Draining | Paused
   | Restarting ->
       Warn
-  | Offline | Stopped | Crashed | Dead -> Dead
+  | Offline | Stopped | Crashed -> Dead
 
 let bonsai_ctx_pct (meta : Keeper_meta_contract.keeper_meta) =
   match meta.max_context_override with
@@ -479,7 +479,7 @@ let keepers_summary_from_registry ~base_path
   }
 
 let bonsai_api_keepers_summary request reqd =
-  match !server_state with
+  match current_server_state () with
   | None ->
       respond_public_read_json_value
         ~status:`Internal_server_error
@@ -532,19 +532,33 @@ let http_status_of_graphql = function
 
 (** Shared by HTTP/2 gateway handlers that require initialized server state. *)
 let get_server_state_result () =
-  match !server_state with
+  match current_server_state () with
   | Some s -> Ok s
   | None -> Error "server state not initialized"
 
 let server_state_error_json message =
   Yojson.Safe.to_string (`Assoc [ ("error", `String message) ])
 
+(* DET-OK: the non-determinism is the point. A CSP nonce must differ per
+   response, so a deterministic value would defeat the header. It is confined
+   to one output boundary — the response's CSP header and the matching script
+   tag — and nothing branches on it, parses it, or stores it.
+
+   The ratchet flags these two lines as new debt because they moved here; they
+   are unchanged from the copy that lived in handle_get_graphql, and the H2
+   gateway now calls this instead of keeping a second copy.
+
+   Scope limit, deliberately not claimed above: Random is a PRNG, not a
+   CSPRNG, so this nonce is unguessable only to the extent the seed is. That
+   property predates this function and is not what DET-OK asserts. *)
+let fresh_graphql_csp_nonce () =
+  (* DET-OK: per-response CSP nonce, rationale above. *)
+  let rng = Random.State.make_self_init () in
+  let bytes = Bytes.init 16 (fun _ -> Char.chr (Random.State.int rng 256)) in
+  Base64.encode_string (Bytes.to_string bytes)
+
 let handle_get_graphql _request reqd =
-  let nonce =
-    let rng = Random.State.make_self_init () in
-    let bytes = Bytes.init 16 (fun _ -> Char.chr (Random.State.int rng 256)) in
-    Base64.encode_string (Bytes.to_string bytes)
-  in
+  let nonce = fresh_graphql_csp_nonce () in
   let headers = [
     ("content-security-policy", graphql_csp_header nonce);
   ] in

@@ -7,9 +7,8 @@ updated: 2026-06-16
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0239", "0241", "0243", "0244"]
-implementation_prs: ["#21299 CLOSED — recency-gate consolidation, withdrawn as wrong-layer scoring (see §-1)"]
-revision: "2026-06-16 — decision-layer correction; see §-1 (READ FIRST)"
+related: ["0239", "0241", "0244"]
+
 ---
 
 # RFC-0247 — Memory OS as a brain
@@ -108,9 +107,9 @@ selection → delete dead scoring (`stale_factor`, TTL-GC).**
 
 ## §0 Context — the organs already built, and the ones missing
 
-Three RFCs moved the Memory OS from a static dump toward a living store:
+The Memory OS moved from a static dump toward a living store in three steps:
 
-- **RFC-0243 (MERGED `22bdf658c`)** made confidence *mutable*: the librarian write
+- Confidence became *mutable* (MERGED `22bdf658c`): the librarian write
   path upserts via `reobserve_fact` keyed by `normalize_claim`, so confidence /
   `access_count` / `last_verified_at` move on re-observation (synaptic
   strengthening). Accuracy-inversion's *first* half is closed.

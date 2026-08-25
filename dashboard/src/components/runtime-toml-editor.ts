@@ -13,6 +13,7 @@ import { errorToString } from '../lib/format-string'
 import {
   cascadeDeleteProvider,
   createRuntimeTomlBinding,
+  enabledRuntimeIds,
   parseRuntimeTomlEnvironment,
   runtimeTomlImpactSummary,
   setRuntimeTomlBindingField,
@@ -201,11 +202,15 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   async function adoptSavedRuntimeConfig(saved: RuntimeTomlConfig) {
     setConfig(saved)
     setDraft(saved.source_text)
+    const keeperOverlay = saved.application?.keeper_overlay
+    const applicationNotice = keeperOverlay?.requires_restart
+      ? `라우팅 적용됨 · Keeper 설정 ${keeperOverlay.pending_keys.length}개 재시작 대기`
+      : '적용됨'
     try {
       await refreshRuntimeConfigConsumers()
-      setNotice('적용됨')
+      setNotice(applicationNotice)
     } catch (err: unknown) {
-      setNotice('적용됨')
+      setNotice(applicationNotice)
       setError(`대시보드 런타임 갱신 실패: ${errorToString(err)}`)
     } finally {
       onSaved?.()
@@ -291,7 +296,7 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   function handleBindingFieldChange(
     runtimeId: string,
     field: RuntimeBindingEditableField,
-    value: string | number | null,
+    value: string | number | boolean | null,
   ) {
     if (saving || loadState !== 'loaded') return
     setDraft(current => setRuntimeTomlBindingField(current, runtimeId, field, value))
@@ -310,6 +315,9 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
       let next = setRuntimeTomlProviderField(current, input.id, 'display-name', input.displayName || input.id)
       next = setRuntimeTomlProviderField(next, input.id, 'protocol', input.protocol)
       next = setRuntimeTomlProviderField(next, input.id, input.transportKind, input.transportValue)
+      if (input.isNonInteractive) {
+        next = setRuntimeTomlProviderField(next, input.id, 'is-non-interactive', true)
+      }
       if (input.credentialType !== 'none' && input.credentialValue.trim() !== '') {
         next = setRuntimeTomlProviderCredential(next, input.id, input.credentialType, input.credentialValue)
       }
@@ -357,6 +365,13 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
   ) {
     if (saving || loadState !== 'loaded') return
     setDraft(current => setRuntimeTomlProviderField(current, providerId, field, value))
+    setNotice(null)
+    setError(null)
+  }
+
+  function handleProviderEnabledChange(providerId: string, enabled: boolean) {
+    if (saving || loadState !== 'loaded') return
+    setDraft(current => setRuntimeTomlProviderField(current, providerId, 'enabled', enabled))
     setNotice(null)
     setError(null)
   }
@@ -454,8 +469,12 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
     [config, dirty, draft],
   )
   const environment = useMemo(() => parseRuntimeTomlEnvironment(draft), [draft])
-  const runtimeCount = environment.bindings.length
+  const runtimeCount = enabledRuntimeIds(environment).length
   const providerCount = environment.providers.length
+  const keeperSettings = config?.keeper_settings ?? []
+  const keeperPendingCount = keeperSettings.filter(setting =>
+    setting.application_status === 'pending_restart'
+    || setting.application_status === 'pending_effect_boundary').length
 
   // Structured sections (routing/providers/models/bindings/assignments) all map
   // to RuntimeEnvironmentEditor, which already wires the parsed Provider × Model
@@ -524,13 +543,13 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
             onClick=${handleSave}
             disabled=${!dirty || saving || loadState === 'loading'}
             ariaBusy=${saving}
-            ariaLabel="runtime.toml 라이브 적용"
-            title="라이브 적용"
+            ariaLabel="runtime.toml 저장 및 적용"
+            title="저장 및 적용 경계 확인"
             testId="runtime-toml-save"
             class="inline-flex items-center gap-1"
           >
             <${Save} size=${13} strokeWidth=${2.25} aria-hidden="true" />
-            <span>${saving ? '적용 중' : '라이브 적용'}</span>
+            <span>${saving ? '적용 중' : '저장/적용'}</span>
           <//>
         </div>
       </div>
@@ -619,10 +638,63 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
                 ${notice}
               </div>
             ` : null}
+            ${keeperSettings.length > 0 ? html`
+              <details
+                class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-3"
+                data-testid="runtime-keeper-setting-matrix"
+              >
+                <summary class="cursor-pointer text-xs font-semibold text-[var(--color-fg-primary)]">
+                  Keeper 설정 authority · ${keeperSettings.length}개
+                  ${keeperPendingCount > 0 ? ` · 재시작 대기 ${keeperPendingCount}개` : ''}
+                </summary>
+                <div class="mt-3 overflow-x-auto">
+                  <table class="w-full min-w-[64rem] text-left text-xs">
+                    <thead class="text-[var(--color-fg-muted)]">
+                      <tr>
+                        <th class="p-2">key / env</th>
+                        <th class="p-2">configured → effective</th>
+                        <th class="p-2">source / status</th>
+                        <th class="p-2">effect boundary</th>
+                        <th class="p-2">consumers</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${keeperSettings.map(setting => html`
+                        <tr key=${setting.env} class="border-t border-[var(--color-border-default)] align-top">
+                          <td class="p-2 font-mono">
+                            <div>${setting.key ?? 'env_only'}</div>
+                            <div class="text-[var(--color-fg-muted)]">${setting.env}</div>
+                          </td>
+                          <td class="p-2 font-mono">
+                            ${setting.configured_value ?? '—'} → ${setting.effective_value ?? '—'}
+                            ${setting.effective_error ? html`
+                              <div
+                                class="mt-1 text-[var(--color-status-error)]"
+                                data-testid=${`runtime-keeper-setting-error-${setting.env}`}
+                              >${setting.effective_error}</div>
+                            ` : null}
+                          </td>
+                          <td class="p-2">
+                            <div>${setting.source}</div>
+                            <div class="text-[var(--color-fg-muted)]">${setting.application_status}</div>
+                          </td>
+                          <td class="p-2">
+                            ${setting.reload_class}${setting.requires_restart ? ' · restart' : ''}
+                            ${setting.applied_at !== null ? html`<div class="font-mono text-[var(--color-fg-muted)]">${setting.applied_at}</div>` : null}
+                          </td>
+                          <td class="p-2">${setting.consumers.join(', ') || '—'}</td>
+                        </tr>
+                      `)}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            ` : null}
 
             <div class=${structuredActive ? '' : 'hidden'} data-testid="runtime-toml-structured">
-              <${RuntimeEnvironmentEditor}
+              ${config ? html`<${RuntimeEnvironmentEditor}
                 sourceText=${draft}
+                providerProtocols=${config.provider_protocols}
                 section=${structuredSection}
                 disabled=${loadState !== 'loaded'}
                 draftDirty=${dirty}
@@ -638,16 +710,17 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
                 onAddModel=${handleAddModel}
                 onAddBinding=${handleAddBinding}
                 onDeleteProvider=${handleDeleteProvider}
-                onProviderTransportChange=${handleProviderTransportChange}
-                onProviderCredentialChange=${handleProviderCredentialChange}
-              />
+              onProviderTransportChange=${handleProviderTransportChange}
+              onProviderEnabledChange=${handleProviderEnabledChange}
+              onProviderCredentialChange=${handleProviderCredentialChange}
+              />` : null}
             </div>
 
             <div class=${tomlActive ? 'flex flex-col gap-3' : 'hidden'} data-testid="runtime-toml-section">
               <div class="rt-toml-wrap">
                 <div class="rt-toml-bar">
                   <span class="mono">${path}</span>
-                  <span class="rt-toml-ro">직접 편집 가능 · 저장 시 라이브 적용</span>
+                  <span class="rt-toml-ro">직접 편집 가능 · routing 즉시 적용 / Keeper overlay 재시작 적용</span>
                   <button
                     type="button"
                     class="rt-copy"

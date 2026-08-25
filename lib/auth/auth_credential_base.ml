@@ -46,6 +46,15 @@ let internal_keeper_token_hash_file config =
 ;;
 
 let internal_keeper_token_env_key = "MASC_INTERNAL_MCP_TOKEN"
+
+(* In-process holder for the internal keeper token (RFC-0371 B11). The env
+   var stays as the cross-process surface (startup import, diagnostics),
+   but in-process consumers read this typed value: before it existed, boot
+   wrote the token with putenv and the tool-workspace credential check read
+   it back with getenv on every call — the process using its own
+   environment as a mutable in-memory channel. *)
+let internal_keeper_token_holder : string option Atomic.t = Atomic.make None
+let internal_keeper_token () = Atomic.get internal_keeper_token_holder
 let run_blocking_io f = Eio_guard.run_in_systhread f
 let file_exists path = run_blocking_io (fun () -> Sys.file_exists path)
 let read_text_file path = Fs_compat.load_file path
@@ -72,14 +81,9 @@ let write_initial_admin config agent_name =
 ;;
 
 let save_private_text_file path content =
-  run_blocking_io (fun () ->
-    let oc = open_out_gen [ Open_wronly; Open_creat; Open_trunc; Open_text ] 0o600 path in
-    (* This body already runs in a systhread; use plain OCaml cleanup so it
-       does not require an Eio fiber context in that systhread. *)
-    Fun.protect
-      ~finally:(fun () -> close_out_noerr oc)
-      (fun () -> output_string oc content));
-  chmod path 0o600
+  match Fs_compat.save_file_atomic_strict path content with
+  | Ok () -> chmod path 0o600
+  | Error reason -> raise (Sys_error reason)
 ;;
 
 let load_internal_keeper_token_hash config =
@@ -117,11 +121,13 @@ let ensure_internal_keeper_token config =
   match existing_env with
   | Some raw_token ->
     save_internal_keeper_token_hash config ~raw_token;
+    Atomic.set internal_keeper_token_holder (Some raw_token);
     raw_token
   | None ->
     let raw_token = generate_token () in
     save_internal_keeper_token_hash config ~raw_token;
     Unix.putenv internal_keeper_token_env_key raw_token;
+    Atomic.set internal_keeper_token_holder (Some raw_token);
     raw_token
 ;;
 
@@ -149,83 +155,56 @@ let persist_auth_config config (auth_cfg : auth_config) =
   save_private_text_file file (Yojson.Safe.pretty_to_string json)
 ;;
 
-(* mtime-keyed cache for [load_auth_config].
-
-   Every authenticated HTTP request and every WS/MCP transport
-   credential check funnels through [Auth.load_auth_config], which
-   did a [file_exists] + [read_text_file] + [Yojson.Safe.from_string]
-   on every call.  Under live dashboard load that meant hundreds of
-   identical disk reads per second of the same JSON file, with the
-   parse showing up on Eio main-domain profiles.
-
-   Cache policy: keep the most recently observed
-   [{ file; mtime; parsed }] in an [Atomic.t].  If the next call's
-   [(file, mtime)] pair matches, return the cached value.  Different
-   file path, newer mtime, or missing file all fall through to a
-   fresh read.
-
-   Why mtime alone (no content hash): the auth config is mutated in
-   this process only by [persist_auth_config], which writes via
-   [save_private_text_file] (atomic rename).  Any external editor
-   bumps mtime.  Hashing would catch the case where a tool restores
-   an identical-content file with an older mtime, but the worst
-   outcome there is one extra reload — still cheaper than reloading
-   on every request.
-
-   Why a single-slot cache instead of a per-base-path map: the server
-   runs against one [base_path] for the lifetime of the process.
-   Tests that swap configs pay the miss-rebuild cost on the first
-   call after each swap.
-
-   Multi-domain safety: [Atomic.set] publishes the new immutable
-   record atomically; readers see either the previous record or the
-   new one, never a torn entry. *)
-type auth_config_cache_entry = {
+exception Auth_config_error of {
   file : string;
-  mtime : float;
-  parsed : auth_config;
+  reason : string;
 }
 
-let auth_config_cache : auth_config_cache_entry option Atomic.t =
-  Atomic.make None
+let () =
+  Printexc.register_printer (function
+    | Auth_config_error _ -> Some "Auth.Auth_config_error"
+    | _ -> None)
+
+let raise_auth_config_error ~file reason =
+  Log.Auth.error "auth configuration rejected file=%s reason=%s" file reason;
+  raise (Auth_config_error { file; reason })
+;;
 
 (** Load auth config *)
 let load_auth_config config : auth_config =
   let file = auth_config_file config in
-  (* RFC-0145 — narrow from a wildcard catch-all to the only exception
-     [Unix.stat] raises on a missing or unreadable file.  Other runtime
-     exceptions are intentionally not caught here so we do not silently
-     poison the auth config cache on novel filesystem failure modes. *)
   match
-    try Some (Unix.stat file).Unix.st_mtime with
-    | Unix.Unix_error _ -> None
+    try Some (Unix.stat file) with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> None
+    | Unix.Unix_error (error, function_name, argument) ->
+      raise_auth_config_error
+        ~file
+        (Printf.sprintf
+           "%s(%s): %s"
+           function_name
+           argument
+           (Unix.error_message error))
   with
-  | None ->
-    (* File missing or unreadable — same fallback as the historical
-       [file_exists] branch.  Do not poison the cache. *)
-    default_auth_config
-  | Some mtime ->
-    (match Atomic.get auth_config_cache with
-     | Some entry
-       when String.equal entry.file file && Float.equal entry.mtime mtime ->
-       entry.parsed
-     | _ ->
-       (try
-          let content = read_text_file file in
-          let json = Yojson.Safe.from_string content in
-          match auth_config_of_yojson json with
-          | Ok parsed ->
-            Atomic.set auth_config_cache (Some { file; mtime; parsed });
-            parsed
-          | Error msg ->
-            Log.Auth.warn "[load_auth_config] parse error for %s: %s" file msg;
-            default_auth_config
-        with
-        | Sys_error _ | Yojson.Json_error _ -> default_auth_config))
+  | None -> default_auth_config
+  | Some _ ->
+    (try
+       let content = read_text_file file in
+       let json = Yojson.Safe.from_string content in
+       match auth_config_of_yojson json with
+       | Ok parsed -> parsed
+       | Error msg -> raise_auth_config_error ~file msg
+     with
+     | Sys_error msg -> raise_auth_config_error ~file msg
+     | Yojson.Json_error msg -> raise_auth_config_error ~file msg)
 ;;
 
 (** Save auth config *)
-let save_auth_config config (auth_cfg : auth_config) = persist_auth_config config auth_cfg
+let save_auth_config config (auth_cfg : auth_config) =
+  let file = auth_config_file config in
+  match auth_config_of_yojson (auth_config_to_yojson auth_cfg) with
+  | Ok _ -> persist_auth_config config auth_cfg
+  | Error reason -> raise_auth_config_error ~file reason
+;;
 
 (* ============================================ *)
 (* Credential management                        *)
@@ -233,7 +212,7 @@ let save_auth_config config (auth_cfg : auth_config) = persist_auth_config confi
 
 (** Get credential file path for an agent *)
 let credential_file config agent_name =
-  Filename.concat (agents_dir config) (agent_name ^ ".json")
+  Filename.concat (agents_dir config) (Common.safe_filename agent_name ^ ".json")
 ;;
 
 module Nickname_helpers = Auth_nickname
@@ -244,23 +223,7 @@ let extract_agent_type_prefix = Nickname_helpers.extract_agent_type_prefix
 let credential_agent_name = Nickname_helpers.credential_agent_name
 
 let raw_token_file config agent_name =
-  Filename.concat (auth_dir config) (agent_name ^ ".token")
-;;
-
-let load_credential_from_path config agent_name path : agent_credential option =
-  if file_exists path
-  then (
-    try
-      let content = read_text_file path in
-      let json = Yojson.Safe.from_string content in
-      match agent_credential_of_yojson json with
-      | Ok cred -> Some cred
-      | Error msg ->
-        Log.Auth.warn "[load_credential] parse error for %s: %s" agent_name msg;
-        None
-    with
-    | Sys_error _ | Yojson.Json_error _ -> None)
-  else None
+  Filename.concat (auth_dir config) (Common.safe_filename agent_name ^ ".token")
 ;;
 
 (** Load agent credential.
@@ -268,9 +231,9 @@ let load_credential_from_path config agent_name path : agent_credential option =
     Tries an exact filename match first. If that misses and [agent_name]
     looks like a generated nickname ({agent_type}-{adj}-{animal}[...]),
     retry with just the agent_type prefix — shared-token aliases
-    provisioned for stable keeper names (e.g. [adversary.json]) then
+    provisioned for stable keeper names (e.g. [example-keeper.json]) then
     cover every dynamically generated nickname in that family
-    (e.g. [adversary-fair-tapir]).
+    (e.g. [example-keeper-fair-tapir]).
 
     Without this fallback, Workspace.bind_session's nickname output caused a
     chronic "No credential found for <type>-<adj>-<animal>" noise band
@@ -670,8 +633,8 @@ let () =
 (** #9786: detect credentials sharing the same bearer token.
 
     The 2026-04-23 audit found [external MCP clients] and [admin]
-    tokens being presented for [keeper-sangsu-agent] /
-    [nick0cave-sage-heron] requests — symptom of multiple
+    tokens being presented for [keeper-example-keeper-agent] /
+    [example-keeper-sage-heron] requests — symptom of multiple
     credentials hashing to the same token, or a single MCP
     client connection being reused across agent identities.
 

@@ -147,13 +147,13 @@ let test_agent_event_source () =
     Alcotest.(check string) "tagged as agent_event" "agent_event" source
   | _ -> Alcotest.fail "expected Assoc"
 
-let test_oas_event_source_and_scope_filter () =
+let test_agent_core_event_source_and_scope_filter () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "telem_oas_event" in
-  let oas_events_dir = Filename.concat dir ".masc/oas-events" in
-  Fs_compat.mkdir_p oas_events_dir;
-  write_jsonl oas_events_dir [
+  let dir = tmpdir "telem_agent_core_event" in
+  let agent_core_events_dir = Filename.concat dir ".masc/agent-core-events" in
+  Fs_compat.mkdir_p agent_core_events_dir;
+  write_jsonl agent_core_events_dir [
     `Assoc
       [
         ("ts_unix", `Float 1000.0);
@@ -175,17 +175,17 @@ let test_oas_event_source_and_scope_filter () =
   ];
   let entries =
     Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
-      ~sources:[Telemetry_unified.Oas_event]
+      ~sources:[Telemetry_unified.Agent_core_event]
       ~session_id:"sess-2" ~worker_run_id:"run-2" ()
   in
-  Alcotest.(check int) "one filtered oas event" 1 (List.length entries);
+  Alcotest.(check int) "one filtered agent_core event" 1 (List.length entries);
   match List.hd entries with
   | `Assoc fields ->
     let source = match List.assoc_opt "source" fields with
       | Some (`String s) -> s | _ -> "" in
     let event_type = match List.assoc_opt "event_type" fields with
       | Some (`String s) -> s | _ -> "" in
-    Alcotest.(check string) "tagged as oas_event" "oas_event" source;
+    Alcotest.(check string) "tagged as agent_core_event" "agent_core_event" source;
     Alcotest.(check string) "event type preserved" "turn_completed" event_type
   | _ -> Alcotest.fail "expected Assoc"
 
@@ -259,7 +259,8 @@ let test_shadow_keeper_tool_called_deduped_from_unified_view () =
                   ("tool_name", `String "masc_status");
                   ("success", `Bool true);
                   ("duration_ms", `Int 12);
-                  ("agent_id", `String "keeper-sangsu-agent");
+                  ("agent_id", `String "keeper-alpha-agent");
+                  ("execution_id", `String "exec-a");
                 ];
             ] );
       ];
@@ -268,10 +269,11 @@ let test_shadow_keeper_tool_called_deduped_from_unified_view () =
     `Assoc
       [
         ("ts", `Float 1000.0);
-        ("keeper", `String "sangsu");
+        ("keeper", `String "alpha");
         ("tool", `String "masc_status");
         ("success", `Bool true);
         ("duration_ms", `Float 12.0);
+        ("execution_id", `String "exec-a");
       ];
   ];
   let result =
@@ -293,22 +295,127 @@ let test_shadow_keeper_tool_called_deduped_from_unified_view () =
   Alcotest.(check int) "source-filtered agent event remains available" 1
     (List.length raw_agent_entries)
 
+(* Two physical calls of the same tool by the same keeper with the same
+   outcome, one second apart. Sameness is decided by [execution_id], so both
+   agent events survive. The proximity match this replaced treated any two
+   such calls inside a five-second window as one report of one call and
+   dropped the second agent event. *)
+let test_distinct_calls_within_the_old_window_are_both_kept () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_distinct_calls" in
+  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  let tool_calls_dir = Filename.concat dir ".masc/tool_calls" in
+  Fs_compat.mkdir_p telemetry_dir;
+  Fs_compat.mkdir_p tool_calls_dir;
+  let agent_event ~ts ~execution_id =
+    `Assoc
+      [
+        ("timestamp", `Float ts);
+        ( "event",
+          `List
+            [
+              `String "Tool_called";
+              `Assoc
+                [
+                  ("tool_name", `String "masc_status");
+                  ("success", `Bool true);
+                  ("duration_ms", `Int 12);
+                  ("agent_id", `String "keeper-alpha-agent");
+                  ("execution_id", `String execution_id);
+                ];
+            ] );
+      ]
+  in
+  let io_row ~ts ~execution_id =
+    `Assoc
+      [
+        ("ts", `Float ts);
+        ("keeper", `String "alpha");
+        ("tool", `String "masc_status");
+        ("success", `Bool true);
+        ("duration_ms", `Float 12.0);
+        ("execution_id", `String execution_id);
+      ]
+  in
+  write_jsonl telemetry_dir
+    [ agent_event ~ts:1000.2 ~execution_id:"exec-1"
+    ; agent_event ~ts:1001.2 ~execution_id:"exec-2"
+    ];
+  (* Only the first call reached the durable tool_calls store. *)
+  write_jsonl tool_calls_dir [ io_row ~ts:1000.0 ~execution_id:"exec-1" ];
+  let result =
+    Telemetry_unified.read_unified_result ~base_path:dir
+      ~masc_root:(masc_root dir)
+      ~sources:[ Telemetry_unified.Agent_event; Telemetry_unified.Tool_call_io ]
+      ()
+  in
+  let sources =
+    result.entries |> List.map (json_string_field "source") |> List.sort compare
+  in
+  Alcotest.(check (list string))
+    "the unmatched agent event survives alongside the logged row"
+    [ "agent_event"; "tool_call_io" ]
+    sources
+
+(* An agent event with no [execution_id] cannot be proven to duplicate any
+   row, so it is kept. *)
+let test_agent_event_without_execution_id_is_kept () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_unidentified_call" in
+  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  let tool_calls_dir = Filename.concat dir ".masc/tool_calls" in
+  Fs_compat.mkdir_p telemetry_dir;
+  Fs_compat.mkdir_p tool_calls_dir;
+  write_jsonl telemetry_dir
+    [ `Assoc
+        [ ("timestamp", `Float 1000.2)
+        ; ( "event"
+          , `List
+              [ `String "Tool_called"
+              ; `Assoc
+                  [ ("tool_name", `String "masc_status")
+                  ; ("success", `Bool true)
+                  ; ("duration_ms", `Int 12)
+                  ; ("agent_id", `String "keeper-alpha-agent")
+                  ] ] ) ]
+    ];
+  write_jsonl tool_calls_dir
+    [ `Assoc
+        [ ("ts", `Float 1000.0)
+        ; ("keeper", `String "alpha")
+        ; ("tool", `String "masc_status")
+        ; ("success", `Bool true)
+        ; ("duration_ms", `Float 12.0)
+        ; ("execution_id", `String "exec-a")
+        ]
+    ];
+  let result =
+    Telemetry_unified.read_unified_result ~base_path:dir
+      ~masc_root:(masc_root dir)
+      ~sources:[ Telemetry_unified.Agent_event; Telemetry_unified.Tool_call_io ]
+      ()
+  in
+  Alcotest.(check int) "unidentified agent event is not suppressed" 2
+    (List.length result.entries)
+
 (* ── Keeper metrics discovery ────────────────────── *)
 
 let test_keeper_metrics_per_keeper () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_keeper_metrics" in
-  let cheolsu_dir = Filename.concat dir ".masc/keepers/cheolsu/metrics" in
-  let sangsu_dir = Filename.concat dir ".masc/keepers/sangsu/metrics" in
-  Fs_compat.mkdir_p cheolsu_dir;
-  Fs_compat.mkdir_p sangsu_dir;
-  write_jsonl cheolsu_dir [
-    `Assoc [("ts_unix", `Float 3000.0); ("name", `String "cheolsu");
+  let beta_dir = Filename.concat dir ".masc/keepers/beta/metrics" in
+  let alpha_dir = Filename.concat dir ".masc/keepers/alpha/metrics" in
+  Fs_compat.mkdir_p beta_dir;
+  Fs_compat.mkdir_p alpha_dir;
+  write_jsonl beta_dir [
+    `Assoc [("ts_unix", `Float 3000.0); ("name", `String "beta");
             ("channel", `String "turn")];
   ];
-  write_jsonl sangsu_dir [
-    `Assoc [("ts_unix", `Float 4000.0); ("name", `String "sangsu");
+  write_jsonl alpha_dir [
+    `Assoc [("ts_unix", `Float 4000.0); ("name", `String "alpha");
             ("channel", `String "turn")];
   ];
   (* All keepers *)
@@ -316,10 +423,10 @@ let test_keeper_metrics_per_keeper () =
       ~sources:[Telemetry_unified.Keeper_metric] () in
   Alcotest.(check int) "two keeper entries" 2 (List.length all);
   (* Filter by keeper *)
-  let cheolsu_only = Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+  let beta_only = Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Keeper_metric]
-      ~keeper_name:"cheolsu" () in
-  Alcotest.(check int) "one cheolsu entry" 1 (List.length cheolsu_only)
+      ~keeper_name:"beta" () in
+  Alcotest.(check int) "one beta entry" 1 (List.length beta_only)
 
 let test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n () =
   Eio_main.run @@ fun env ->
@@ -348,7 +455,7 @@ let test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n () =
   let result =
     Telemetry_unified.read_unified_result ~base_path:dir
       ~masc_root:(masc_root dir) ~sources:[ Telemetry_unified.Keeper_metric ]
-      ~n:100 ()
+      ~limit:(Telemetry_unified.read_limit_of_int 100) ()
   in
   Alcotest.(check int) "limited result" 100 (List.length result.entries);
   Alcotest.(check int) "marker total" 101 result.total_matching_entries;
@@ -383,7 +490,7 @@ let test_keeper_metrics_fast_path_sets_truncated_with_marker () =
   let result =
     Telemetry_unified.read_unified_result ~base_path:dir
       ~masc_root:(masc_root dir) ~sources:[ Telemetry_unified.Keeper_metric ]
-      ~n:2 ()
+      ~limit:(Telemetry_unified.read_limit_of_int 2) ()
   in
   Alcotest.(check int) "returned limit" 2 (List.length result.entries);
   Alcotest.(check int) "marker total" 3 result.total_matching_entries;
@@ -431,9 +538,36 @@ let test_n_limits_output () =
   );
   let entries =
     Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
-      ~sources:[Telemetry_unified.Agent_event] ~n:10 ()
+      ~sources:[Telemetry_unified.Agent_event] ~limit:(Telemetry_unified.read_limit_of_int 10) ()
   in
   Alcotest.(check int) "limited to 10" 10 (List.length entries)
+
+let test_offset_windows_final_page () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_offset_final_page" in
+  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  Fs_compat.mkdir_p telemetry_dir;
+  write_jsonl telemetry_dir
+    (List.init 3 (fun i ->
+       `Assoc [ "timestamp", `Float (Float.of_int i); "i", `Int i ]));
+  let read offset =
+    Telemetry_unified.read_unified_result
+      ~base_path:dir
+      ~masc_root:(masc_root dir)
+      ~sources:[ Telemetry_unified.Agent_event ]
+      ~limit:(Telemetry_unified.read_limit_of_int 2)
+      ~offset
+      ()
+  in
+  let final_page = read 2 in
+  Alcotest.(check int) "total remains pre-page" 3
+    final_page.total_matching_entries;
+  Alcotest.(check bool) "final page is not truncated" false final_page.truncated;
+  Alcotest.(check (list int)) "offset drops the preceding rows" [ 0 ]
+    (List.map (json_int_field "i") final_page.entries);
+  Alcotest.(check int) "offset at end is empty" 0
+    (List.length (read 3).entries)
 
 let test_time_window_reports_total_before_limit () =
   Eio_main.run @@ fun env ->
@@ -451,7 +585,7 @@ let test_time_window_reports_total_before_limit () =
   let result =
     Telemetry_unified.read_unified_result ~base_path:dir ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event]
-      ~since_ts:(now -. 3_600.0) ~until_ts:now ~n:2 ()
+      ~since_ts:(now -. 3_600.0) ~until_ts:now ~limit:(Telemetry_unified.read_limit_of_int 2) ()
   in
   Alcotest.(check int) "total matching preserved before limit" 3
     result.total_matching_entries;
@@ -496,7 +630,7 @@ let test_time_window_reads_matching_day_files () =
   Alcotest.(check (list string)) "range spans multiple day files"
     ["today"; "yesterday"] events
 
-let test_time_window_n_zero_disables_truncation () =
+let test_time_window_n_zero_is_bounded () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_window_unbounded" in
@@ -511,17 +645,24 @@ let test_time_window_n_zero_disables_truncation () =
   let result =
     Telemetry_unified.read_unified_result ~base_path:dir ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Agent_event]
-      ~since_ts:(now -. 3_600.0) ~until_ts:now ~n:0 ()
+      ~since_ts:(now -. 3_600.0) ~until_ts:now ~limit:(Telemetry_unified.read_limit_of_int 0) ()
   in
-  Alcotest.(check int) "returns every matching entry" 3 (List.length result.entries);
+  (* RFC-0372: n=0 no longer opts out of truncation. It resolves to
+     [default_read_entries], which still covers these three entries, so the
+     window contract holds — what changed is that a store larger than the
+     limit is now truncated instead of scanned whole. *)
+  Alcotest.(check int) "window entries within the limit are all returned" 3
+    (List.length result.entries);
   Alcotest.(check int) "total matching preserved" 3 result.total_matching_entries;
-  Alcotest.(check bool) "unbounded result is not truncated" false result.truncated
+  Alcotest.(check bool) "below the limit, nothing is truncated" false
+    result.truncated
 
-(* n=0 ("unlimited") with no time window must reach the tail-bounded reader
-   ([read_recent]), not the full-store [read_range] scan (1970->today) that
-   Yojson-parsed the whole store and starved keeper fibers, and not the empty
-   list the #20649 regression produced for fixed sources. With fewer entries
-   than [unbounded_window_scan_cap], all are returned. *)
+(* n=0 with no time window must reach the tail-bounded reader ([read_recent]),
+   not the full-store [read_range] scan (1970->today) that Yojson-parsed the
+   whole store and starved keeper fibers, and not the empty list the #20649
+   regression produced for fixed sources. Since RFC-0372 n=0 is not "unlimited"
+   at all — it resolves to [default_read_entries] — so with fewer entries than
+   that, all are returned. *)
 let test_n_zero_no_window_returns_bounded () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -537,10 +678,27 @@ let test_n_zero_no_window_returns_bounded () =
   let result =
     Telemetry_unified.read_unified_result ~base_path:dir
       ~masc_root:(masc_root dir)
-      ~sources:[ Telemetry_unified.Agent_event ] ~n:0 ()
+      ~sources:[ Telemetry_unified.Agent_event ] ~limit:(Telemetry_unified.read_limit_of_int 0) ()
   in
   Alcotest.(check int) "n=0 no-window returns all via bounded reader" 3
     (List.length result.entries)
+
+(* RFC-0372 Phase 1: the request-level limit is a closed type. No input can
+   express "unbounded", which is what let one request materialise every store
+   to its own 50k cap. These are the boundary values a caller can supply. *)
+let test_read_limit_has_no_unbounded_form () =
+  let to_int n = Telemetry_unified.read_limit_to_int
+                   (Telemetry_unified.read_limit_of_int n) in
+  Alcotest.(check int) "zero maps to the default, not to unbounded"
+    Telemetry_unified.default_read_entries (to_int 0);
+  Alcotest.(check int) "negative maps to the default"
+    Telemetry_unified.default_read_entries (to_int (-1));
+  Alcotest.(check int) "a request above the ceiling is clamped to it"
+    Telemetry_unified.max_read_entries
+    (to_int (Telemetry_unified.max_read_entries + 1));
+  Alcotest.(check int) "an in-range request is preserved" 42 (to_int 42);
+  Alcotest.(check bool) "every limit is positive" true
+    (to_int 0 > 0 && to_int (-1) > 0)
 
 (* ── Summary with data ───────────────────────────── *)
 
@@ -631,6 +789,70 @@ let test_summary_includes_freshness_metadata () =
     Alcotest.(check string) "producer" "telemetry_eio" producer;
     Alcotest.(check (float 0.1)) "freshness SLO" 900.0 freshness_slo_s
   | None -> Alcotest.fail "expected agent_event source summary"
+
+let test_keeper_metric_summary_freshness_tracks_runtime_cadence () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_keeper_metric_freshness" in
+  let json =
+    Telemetry_unified.summary_json
+      ~keeper_keepalive_interval_s:300.0
+      ~base_path:dir
+      ~masc_root:(masc_root dir)
+      ()
+  in
+  let keeper_metric = source_summary "keeper_metric" json in
+  let freshness_slo_s =
+    match keeper_metric with
+    | `Assoc fields ->
+      (match List.assoc_opt "freshness_slo_s" fields with
+       | Some (`Float value) -> value
+       | Some (`Int value) -> float_of_int value
+       | _ -> Alcotest.fail "expected Keeper metric freshness_slo_s")
+    | _ -> Alcotest.fail "expected Keeper metric source summary"
+  in
+  Alcotest.(check (float 0.1))
+    "summary receives runtime cadence plus cycle slack"
+    420.0
+    freshness_slo_s
+;;
+
+let test_keeper_metric_summary_stays_healthy_while_producer_active () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_keeper_metric_active" in
+  let config = Workspace.default_config dir in
+  let keeper_name = "long-running" in
+  let old_ts = Unix.gettimeofday () -. 900.0 in
+  Dated_jsonl.append
+    (Keeper_types_support.keeper_metrics_store config keeper_name)
+    (`Assoc
+      (Keeper_metrics_record.fields Keeper_metrics_record.Heartbeat
+       @ [ "ts", `String (Masc_domain.iso8601_of_unix_seconds old_ts)
+         ; "ts_unix", `Float old_ts
+         ; "name", `String keeper_name
+         ]));
+  let summary producer_active =
+    Telemetry_unified.summary_json
+      ~keeper_keepalive_interval_s:300.0
+      ~keeper_metric_producer_active:producer_active
+      ~base_path:dir
+      ~masc_root:(masc_root dir)
+      ()
+    |> source_summary "keeper_metric"
+  in
+  let open Yojson.Safe.Util in
+  let active = summary true in
+  Alcotest.(check string) "active producer suppresses age-only staleness" "ok"
+    (active |> member "health" |> to_string);
+  Alcotest.(check bool) "active producer evidence is explicit" true
+    (active |> member "producer_active" |> to_bool);
+  let inactive = summary false in
+  Alcotest.(check string) "inactive old producer remains stale" "stale"
+    (inactive |> member "health" |> to_string);
+  Alcotest.(check bool) "inactive producer evidence is explicit" false
+    (inactive |> member "producer_active" |> to_bool)
+;;
 
 let test_summary_tool_metric_surface_points_to_raw_metrics () =
   Eio_main.run @@ fun env ->
@@ -762,7 +984,7 @@ let test_read_unified_reads_trajectory_and_execution_receipts () =
           Telemetry_unified.Execution_receipt;
         ]
       ~keeper_name:"alice"
-      ~n:10
+      ~limit:(Telemetry_unified.read_limit_of_int 10)
       ()
   in
   if List.length entries <> 2 then
@@ -818,7 +1040,7 @@ let test_scope_filter_matches_runtime_contract_fields () =
       ~session_id:"sess-nested"
       ~operation_id:"op-nested"
       ~worker_run_id:"run-nested"
-      ~n:10
+      ~limit:(Telemetry_unified.read_limit_of_int 10)
       ()
   in
   Alcotest.(check int) "runtime contract scoped row visible" 1
@@ -865,7 +1087,7 @@ let test_goal_event_source_and_summary () =
       ~base_path:dir
       ~masc_root:root
       ~sources:[ Telemetry_unified.Goal_event ]
-      ~n:10
+      ~limit:(Telemetry_unified.read_limit_of_int 10)
       ()
   in
   Alcotest.(check int) "two goal events" 2 (List.length entries);
@@ -1102,7 +1324,7 @@ let test_summary_ignores_recovered_coverage_gap () =
   Telemetry_coverage_gap.record
     ~masc_root:root
     ~source:"tool_call_io"
-    ~producer:"keeper_hooks_oas"
+    ~producer:"keeper_hooks_agent_core"
     ~durable_store:(Filename.concat root "tool_calls")
     ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
     ~stale_reason:"tool_call_io_append_failed"
@@ -1160,7 +1382,8 @@ let test_replay_retention_lists_selected_sources () =
   let root = masc_root dir in
   let json =
     Telemetry_unified.replay_retention_json ~base_path:dir ~masc_root:root
-      ~sources:[ Telemetry_unified.Oas_event; Telemetry_unified.Tool_metric ]
+      ~sources:[ Telemetry_unified.Agent_core_event; Telemetry_unified.Tool_metric ]
+      ()
   in
   match json with
   | `Assoc fields ->
@@ -1177,7 +1400,7 @@ let test_replay_retention_lists_selected_sources () =
       | _ -> Alcotest.fail "expected selected_sources"
     in
     Alcotest.(check (list string)) "selected sources"
-      [ "oas_event"; "tool_metric" ]
+      [ "agent_core_event"; "tool_metric" ]
       selected_sources;
     let durable_stores =
       match List.assoc_opt "durable_stores" fields with
@@ -1185,18 +1408,18 @@ let test_replay_retention_lists_selected_sources () =
       | _ -> Alcotest.fail "expected durable_stores"
     in
     Alcotest.(check int) "durable store count" 2 (List.length durable_stores);
-    let oas_store =
+    let agent_core_store =
       List.find
         (fun value ->
-          String.equal "oas_event" (json_string_field "source" value))
+          String.equal "agent_core_event" (json_string_field "source" value))
         durable_stores
     in
-    Alcotest.(check string) "oas durable store"
-      (Filename.concat root "oas-events")
-      (json_string_field "durable_store" oas_store);
-    Alcotest.(check string) "oas dashboard surface"
+    Alcotest.(check string) "agent_core durable store"
+      (Filename.concat root "agent-core-events")
+      (json_string_field "durable_store" agent_core_store);
+    Alcotest.(check string) "agent_core dashboard surface"
       "/api/v1/dashboard/telemetry"
-      (json_string_field "dashboard_surface" oas_store)
+      (json_string_field "dashboard_surface" agent_core_store)
   | _ -> Alcotest.fail "expected Assoc"
 
 (* ── Cluster-aware path ─────────────────────────── *)
@@ -1317,12 +1540,16 @@ let () =
         [
           Alcotest.test_case "empty base" `Quick test_empty_returns_empty;
           Alcotest.test_case "agent events" `Quick test_agent_event_source;
-          Alcotest.test_case "oas events + scope filter" `Quick
-            test_oas_event_source_and_scope_filter;
+          Alcotest.test_case "agent_core events + scope filter" `Quick
+            test_agent_core_event_source_and_scope_filter;
           Alcotest.test_case "agent tool_called scope promotion" `Quick
             test_keeper_tool_called_scope_promoted_for_filters;
           Alcotest.test_case "dedupe shadow agent tool_called" `Quick
             test_shadow_keeper_tool_called_deduped_from_unified_view;
+          Alcotest.test_case "distinct calls in the old window both survive"
+            `Quick test_distinct_calls_within_the_old_window_are_both_kept;
+          Alcotest.test_case "agent event without execution_id is kept" `Quick
+            test_agent_event_without_execution_id_is_kept;
           Alcotest.test_case "keeper metrics" `Quick test_keeper_metrics_per_keeper;
           Alcotest.test_case "keeper metrics fast path keeps noisy top n" `Quick
             test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n;
@@ -1330,14 +1557,18 @@ let () =
             test_keeper_metrics_fast_path_sets_truncated_with_marker;
           Alcotest.test_case "sorted newest first" `Quick test_sorted_newest_first;
           Alcotest.test_case "n limits output" `Quick test_n_limits_output;
+          Alcotest.test_case "offset windows final page" `Quick
+            test_offset_windows_final_page;
           Alcotest.test_case "time window reports total before limit" `Quick
             test_time_window_reports_total_before_limit;
           Alcotest.test_case "time window reads matching day files" `Quick
             test_time_window_reads_matching_day_files;
-          Alcotest.test_case "time window n=0 disables truncation" `Quick
-            test_time_window_n_zero_disables_truncation;
+          Alcotest.test_case "time window n=0 is bounded" `Quick
+            test_time_window_n_zero_is_bounded;
           Alcotest.test_case "n=0 no-window returns bounded (not full scan)"
             `Quick test_n_zero_no_window_returns_bounded;
+          Alcotest.test_case "read_limit has no unbounded form" `Quick
+            test_read_limit_has_no_unbounded_form;
           Alcotest.test_case "trajectory and receipts" `Quick
             test_read_unified_reads_trajectory_and_execution_receipts;
           Alcotest.test_case "runtime contract scope filter" `Quick
@@ -1358,6 +1589,12 @@ let () =
           Alcotest.test_case "with data" `Quick test_summary_with_data;
           Alcotest.test_case "includes freshness metadata" `Quick
             test_summary_includes_freshness_metadata;
+          Alcotest.test_case "keeper metric freshness tracks runtime cadence"
+            `Quick
+            test_keeper_metric_summary_freshness_tracks_runtime_cadence;
+          Alcotest.test_case "active Keeper metric producer stays healthy"
+            `Quick
+            test_keeper_metric_summary_stays_healthy_while_producer_active;
           Alcotest.test_case "tool_metric surface points to raw metrics" `Quick
             test_summary_tool_metric_surface_points_to_raw_metrics;
           Alcotest.test_case "includes trajectory and execution receipt sources"

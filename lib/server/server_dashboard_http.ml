@@ -11,47 +11,6 @@ let dashboard_projection_cache_ttl_s =
   Server_dashboard_http_core_cache.dashboard_projection_cache_ttl_s
 ;;
 
-(* Repository observation snapshot handler *)
-let handle_repository_observation_snapshot ~sw:_ ~clock request reqd =
-  Server_auth.with_public_read (fun state req inner_reqd ->
-    let base_path = (Mcp_server.workspace_config state).base_path in
-    match Repo_store.load_all ~base_path with
-    | Error error ->
-      Http_server_eio.Response.json_value
-        ~status:`Internal_server_error
-        ~compress:true
-        ~request:req
-        (`Assoc [ "ok", `Bool false; "error", `String error ])
-        inner_reqd
-    | Ok repos ->
-      let repo_list =
-        List.map
-          (Server_routes_http_routes_repositories.repository_json ~base_path)
-          repos
-      in
-      let snapshot =
-        `Assoc
-          [ "ok", `Bool true
-          ; "timestamp", `Float (Eio.Time.now clock)
-          ; "repository_count", `Int (List.length repos)
-          ; "repositories", `List repo_list
-          ]
-      in
-      Http_server_eio.Response.json_value
-        ~compress:true
-        ~request:req
-        snapshot
-        inner_reqd)
-    request reqd
-
-(* Wire task mutation hook: invalidate execution cache on any task
-   add/transition so the dashboard serves fresh backlog data. *)
-let () = Atomic.set Workspace_hooks.on_task_mutation_fn invalidate_execution_cache
-
-let dashboard_namespace_truth_focus_json =
-  Server_dashboard_http_namespace_truth_support.dashboard_namespace_truth_focus_json
-;;
-
 let dashboard_namespace_truth_http_json =
   Server_dashboard_http_namespace_truth.dashboard_namespace_truth_http_json
 ;;
@@ -66,7 +25,6 @@ let dashboard_board_json
       ?(limit = 100)
       ?(offset = 0)
       ?voter
-      ?(blind_votes = false)
       ()
   : Yojson.Safe.t
   =
@@ -80,7 +38,7 @@ let dashboard_board_json
   in
   let cache_key =
     Printf.sprintf
-      "board:memory:%s;%s;%s;%b;%b;%d;%d;%s;%s;%b"
+      "board:memory:%s;%s;%s;%b;%b;%d;%d;%s;%s"
       (Option.value ~default:"-" hearth)
       (Option.value ~default:"-" author_filter)
       (board_sort_label sort_by)
@@ -90,7 +48,6 @@ let dashboard_board_json
       offset
       config_key
       (Option.value ~default:"-" voter)
-      blind_votes
   in
   Dashboard_cache.get_or_compute cache_key ~ttl:dashboard_projection_cache_ttl_s (fun () ->
     (* /api/v1/dashboard/board was measured at 30-44s on hot keeper
@@ -126,18 +83,14 @@ let dashboard_board_json
       let has_more = fetched_len > window_end in
       let total_json : Yojson.Safe.t = if has_more then `Null else `Int fetched_len in
       let paged = posts |> drop offset |> take limit in
-      let contributor_quality_for = board_contributor_quality_lookup ?config () in
       let posts_json =
         List.map
           (fun (post : Board.post) ->
              let author = Board.Agent_id.to_string post.author in
              let post_id = Board.Post_id.to_string post.id in
              let current_vote = board_current_vote_for_post ~voter ~post_id in
-             let contributor_quality = contributor_quality_for author in
              board_post_dashboard_json
-               ~blind_votes
                ?current_vote
-               ?contributor_quality
                ~author_karma:(get_karma author)
                post)
           paged
@@ -177,7 +130,6 @@ let dashboard_memory_http_json ?config request : Yojson.Safe.t =
     int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000
   in
   let voter = board_voter_query request in
-  let blind_votes = bool_query_param request "blind_votes" ~default:false in
   dashboard_board_json
     ?config
     ?hearth
@@ -188,7 +140,6 @@ let dashboard_memory_http_json ?config request : Yojson.Safe.t =
     ~limit
     ~offset
     ?voter
-    ~blind_votes
     ()
 ;;
 
@@ -206,17 +157,17 @@ let dashboard_gate_http_json request ~base_path : Yojson.Safe.t =
     int_query_param
       request
       "limit"
-      ~default:Keeper_approval_queue.recent_resolved_history_limit
-    |> clamp ~min_v:1 ~max_v:Keeper_approval_queue.recent_resolved_max_limit
+      ~default:Keeper_approval.Audit.recent_resolved_history_limit
+    |> clamp ~min_v:1 ~max_v:Keeper_approval.Audit.recent_resolved_max_limit
   in
   let window_minutes =
     int_query_param
       request
       "window"
-      ~default:Keeper_approval_queue.recent_resolved_default_window_minutes
+      ~default:Keeper_approval.Audit.recent_resolved_default_window_minutes
     |> clamp
-         ~min_v:Keeper_approval_queue.recent_resolved_min_window_minutes
-         ~max_v:Keeper_approval_queue.recent_resolved_max_window_minutes
+         ~min_v:Keeper_approval.Audit.recent_resolved_min_window_minutes
+         ~max_v:Keeper_approval.Audit.recent_resolved_max_window_minutes
   in
   let force = bool_query_param request "force" ~default:false in
   let approval_queue_revision =
@@ -280,9 +231,6 @@ let dashboard_proof_compute ~config ~limit () : Yojson.Safe.t =
       proof_source ~id:"tlc_results"
         ~label:"TLA+ verification logs"
         ~route:"/api/v1/verification/tlc-results";
-      proof_source ~id:"keeper_feature_proof"
-        ~label:"Keeper autonomy feature proof"
-        ~route:"/api/v1/dashboard/keeper-feature-proof";
       proof_source ~id:"execution_trust"
         ~label:"Execution trust provenance"
         ~route:"/api/v1/dashboard/execution-trust";
@@ -301,7 +249,6 @@ let dashboard_proof_compute ~config ~limit () : Yojson.Safe.t =
                  | Some (`Int n) -> `Int n
                  | _ -> `Int 0)
              | _ -> `Int 0);
-            "proof_source_count", `Int (List.length proof_sources);
           ] );
       ( "verification",
         `Assoc
@@ -311,6 +258,57 @@ let dashboard_proof_compute ~config ~limit () : Yojson.Safe.t =
           ] );
       "proof_sources", `List proof_sources;
     ]
+;;
+
+(* Both the HTTP/1 router and the H2 gateway serve this projection, and the H2
+   registration carries a comment requiring the two to stay identical. Caching
+   at each call site would have been two copies of the policy and the first
+   chance for them to drift, so the cache lives with the projection and both
+   routes call this.
+
+   The route was offloaded but uncached, so a polling dashboard re-ran the
+   schedule scan every time: measured 272 ms cold and 204 ms warm for a 96 KB
+   response, the second pass no cheaper than the first. Its siblings
+   (briefing/sections, tool-quality) already pair the offload with the cache;
+   this one only ever had half the pair.
+
+   [live_cache_ttl_s] is the 30 s tier documented for "frequently-changing data
+   such as active keeper state" — schedule state belongs there rather than in
+   the 120 s projection tier. The aggregate response takes no selectors, so
+   base_path is the whole key. Exact lookups bypass this aggregate cache below. *)
+let dashboard_scheduled_automation_http_json ~(config : Workspace.config) :
+  Yojson.Safe.t
+  =
+  let cache_key =
+    Server_dashboard_http_core_cache.dashboard_query_cache_key
+      config
+      "scheduled_automation"
+      []
+  in
+  Dashboard_cache.get_or_compute
+    cache_key
+    ~ttl:Server_dashboard_http_core_cache.live_cache_ttl_s
+    (fun () ->
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+          config))
+;;
+
+let dashboard_scheduled_automation_query_http_json
+  ~(config : Workspace.config)
+  (request : Httpun.Request.t)
+  : Yojson.Safe.t
+  =
+  match Server_utils.query_param request "schedule_id" with
+  | None -> dashboard_scheduled_automation_http_json ~config
+  | Some schedule_id ->
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      Server_dashboard_schedule_projection.scheduled_automation_exact_lookup_json
+        config
+        (* NDT-OK: the request boundary is where wall-clock enters, so the
+           projection stays a pure function of (state, now). *)
+        ~now:(Unix.gettimeofday ())
+        ~schedule_id)
 ;;
 
 let dashboard_proof_http_json ~config request : Yojson.Safe.t =
@@ -346,8 +344,8 @@ let approval_resolve_decision_name = function
 ;;
 
 let approval_resolve_decision_to_queue_decision = function
-  | Approval_resolve_approve -> Keeper_approval_queue.Decision.Approve
-  | Approval_resolve_reject reason -> Keeper_approval_queue.Decision.Reject reason
+  | Approval_resolve_approve -> Keeper_approval_queue_rules_types.Decision.Approve
+  | Approval_resolve_reject reason -> Keeper_approval_queue_rules_types.Decision.Reject reason
 ;;
 
 let approval_resolve_decision_of_json args =
@@ -413,6 +411,11 @@ let dashboard_gate_resolve_http_json ~base_path ~created_by ~(args : Yojson.Safe
                   , match result.remembered_rule with
                     | Some rule -> `String rule.id
                     | None -> `Null )
+                ; ( "audit_receipts"
+                  , `List
+                      (List.map
+                         Keeper_approval.Audit.receipt_to_yojson
+                         result.audit_receipts) )
                 ])
         | Error (Keeper_approval_queue.Delivery_failed _ as err) ->
           Error (Unavailable err)
@@ -467,7 +470,7 @@ let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe
   let* input_hash_json = required "input_hash" in
   let* expected_input_hash =
     match input_hash_json with
-    | `String value when Keeper_approval_queue.is_lowercase_sha256 value ->
+    | `String value when Keeper_approval_queue_rules_types.is_lowercase_sha256 value ->
       Ok value
     | _ -> Error "retry request.input_hash must be a lowercase SHA-256"
   in
@@ -479,20 +482,20 @@ let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe
   in
   let* exact_attempt_json = required "exact_attempt" in
   let* expected_exact_attempt =
-    Keeper_approval_queue.exact_attempt_state_of_yojson_with_error
+    Keeper_approval_queue_rules_types.exact_attempt_state_of_yojson_with_error
       exact_attempt_json
   in
   let* disposition_json = required "summary_attempt_disposition" in
   let* expected_disposition =
-    Keeper_approval_queue.summary_attempt_disposition_of_yojson_with_error
+    Keeper_approval_queue_rules_types.summary_attempt_disposition_of_yojson_with_error
       disposition_json
   in
   let* () =
     match expected_disposition with
-    | Keeper_approval_queue.Summary_attempt_identity_unbound
-    | Keeper_approval_queue.Summary_attempt_persistence_uncertain ->
+    | Keeper_approval_queue_rules_types.Summary_attempt_identity_unbound
+    | Keeper_approval_queue_rules_types.Summary_attempt_persistence_uncertain ->
       Ok ()
-    | Keeper_approval_queue.Summary_attempt_pre_worker_unavailable _ ->
+    | Keeper_approval_queue_rules_types.Summary_attempt_pre_worker_unavailable _ ->
       Ok ()
     | _ -> Error "retry request disposition is not operator-rearmable"
   in
@@ -516,15 +519,22 @@ let dashboard_gate_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
   match Safe_ops.json_string_opt "id" args with
   | None -> Error "id is required"
   | Some id ->
-    (match Keeper_approval_queue.delete_rule ~base_path ~id () with
+    (match Keeper_approval_queue_rules.delete_rule ~base_path ~id () with
      | Ok deleted ->
-         Keeper_approval_queue.audit_rule_event
-           ~base_path
-           ~event_type:"rule_deleted"
-           deleted;
-         Ok (`Assoc [ "ok", `Bool true; "id", `String deleted.id ])
+         let audit_receipt =
+           Keeper_approval.Audit.record_rule
+             ~base_path
+             ~event_type:Keeper_approval.Audit.Rule_deleted
+             deleted
+         in
+         Ok
+           (`Assoc
+               [ "ok", `Bool true
+               ; "id", `String deleted.id
+               ; "audit", Keeper_approval.Audit.receipt_to_yojson audit_receipt
+               ])
        | Error error ->
-         Error (Keeper_approval_queue.rule_store_error_to_string error))
+         Error (Keeper_approval_queue_rules_types.rule_store_error_to_string error))
 ;;
 
 let dashboard_schedule_prune_http_json
@@ -540,6 +550,33 @@ let dashboard_schedule_prune_http_json
 let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
   let goals = Goal_store.list_goals config () in
   let rollup = Goal_store.compute_rollup goals in
+  (* RFC-0387 (stage 1): the verification ledger joins each goal at the API
+     boundary (goal_to_yojson is the persistence codec and stays untouched).
+     The ledger is loaded ONCE per request and joined in memory; a store that
+     does not decode renders the explicit [ledger_error] marker per goal —
+     never the pre-verification default, which would disguise corruption as
+     "not verified yet". *)
+  let records = Goal_verification.load_records config in
+  let goal_json (goal : Goal_store.goal) =
+    let verification =
+      match records with
+      | Error detail -> Goal_verification.ledger_error_to_yojson detail
+      | Ok records ->
+        (match
+           List.find_opt
+             (fun (record : Goal_verification.record) ->
+               String.equal record.goal_id goal.id)
+             records
+         with
+         | Some record -> record
+         | None -> Goal_verification.default_record ~goal_id:goal.id)
+        |> Goal_verification.record_to_yojson
+    in
+    match Goal_store.goal_to_yojson goal with
+    | `Assoc fields ->
+      `Assoc (fields @ [ "verification", verification ])
+    | json -> json
+  in
   let task_rollup =
     dashboard_tasks_safe config
     |> List.fold_left
@@ -558,7 +595,7 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
   in
   `Assoc
     [ "generated_at", `String (Masc_domain.now_iso ())
-    ; "goals", `List (List.map Goal_store.goal_to_yojson goals)
+    ; "goals", `List (List.map goal_json goals)
     ; "rollup", Goal_store.rollup_to_yojson rollup
     ; ( "task_backlog"
       , `Assoc
@@ -575,110 +612,7 @@ let dashboard_goals_tree_http_json ~(config : Workspace.config) : Yojson.Safe.t 
   Dashboard_goals.dashboard_goals_tree_json ~config
 ;;
 
-let dashboard_goals_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
-  `Assoc
-    [ "planning", dashboard_planning_http_json ~config
-    ; "tree", dashboard_goals_tree_http_json ~config
-    ]
-
-let dashboard_ide_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
-  let base_path = config.base_path in
-  let partition = Ide_paths.Legacy_default in
-  let limit = 10 in
-  let events =
-    Ide_bridge.list_events
-      ~base_path
-      ~partition
-      ~limit
-      ~offset:0
-      ()
-  in
-  let cursors =
-    Ide_bridge.list_cursors
-      ~base_path
-      ~partition
-      ~limit
-      ~offset:0
-      ()
-  in
-  let annotations =
-    Ide_annotations.list
-      ~base_dir:base_path
-      ~partition
-      ~filter:{ file_path = None; keeper_id = None; goal_id = None; task_id = None }
-      ()
-  in
-  let regions =
-    Ide_region_tracker.read_regions
-      ~base_dir:base_path
-      ~partition
-      ()
-  in
-  let active_keepers =
-    try
-      Workspace.get_active_agents config
-      |> List.filter_map (fun (agent : Masc_domain.agent) ->
-           match Option.bind agent.meta (fun meta -> meta.Masc_domain.keeper_name) with
-           | None -> None
-           | Some keeper_name ->
-             let last_seen_ms =
-               Server_presence.last_seen_ms
-                 ~context:"dashboard IDE presence"
-                 agent
-             in
-             Some
-               (`Assoc
-                 [ "keeper_id", `String keeper_name
-                 ; "last_seen_ms", `Intlit (Int64.to_string last_seen_ms)
-                 ]))
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Server.warn
-        "client registry active projection failed: %s"
-        (Printexc.to_string exn);
-      []
-  in
-  let events_count = List.length events in
-  let cursors_count = List.length cursors in
-  let annotations_count = List.length annotations in
-  let regions_count = List.length regions in
-  let active_keepers_count = List.length active_keepers in
-  `Assoc
-    [ "partition_kind", `String (Ide_paths.partition_kind partition)
-    ; "partition_orphan", `Bool (Ide_paths.partition_is_orphan partition)
-    ; "events_count", `Int events_count
-    ; "cursors_count", `Int cursors_count
-    ; "annotations_count", `Int annotations_count
-    ; "regions_count", `Int regions_count
-    ; "active_keepers_count", `Int active_keepers_count
-    ; "events", `Assoc
-        [ "count", `Int events_count
-        ; "recent", `List events
-        ]
-    ; "cursors", `Assoc
-        [ "count", `Int cursors_count
-        ; "recent", `List cursors
-        ]
-    ; "annotations", `Assoc
-        [ "count", `Int annotations_count
-        ]
-    ; "regions", `Assoc
-        [ "count", `Int regions_count
-        ]
-    ; "presence", `Assoc
-        [ "active_keepers", `List active_keepers
-        ; "count", `Int active_keepers_count
-        ]
-    ; "freshness", `Assoc
-        [ "snapshot_at", `String (Masc_domain.now_iso ())
-        ]
-    ]
-;;
-;;
-
-
-(* Composite fleet snapshot / runtime attention / recommended-actions
+(* Composite keeper JSON, goal collect_* helpers, and error taxonomy are
    extracted to [Server_dashboard_http_composite] (godfile decomp). *)
 include Server_dashboard_http_composite
 

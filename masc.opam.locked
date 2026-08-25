@@ -1,6 +1,6 @@
 opam-version: "2.0"
 name: "masc"
-version: "0.21.2"
+version: "0.24.0"
 synopsis: "Multi-Agent Shared Context MCP Server in OCaml"
 description:
   "MASC Protocol: File-based workspace collaboration for Claude, Gemini, and Codex agents"
@@ -11,7 +11,6 @@ homepage: "https://github.com/jeong-sik/masc"
 doc: "https://github.com/jeong-sik/masc"
 bug-reports: "https://github.com/jeong-sik/masc/issues"
 depends: [
-  "agent_sdk" {= "0.231.13"}
   "alcotest" {= "1.9.1" & with-test}
   "ambient-context" {= "0.2"}
   "ambient-context-eio" {= "0.2"}
@@ -43,11 +42,10 @@ depends: [
   "cmdliner" {= "2.1.1"}
   "cohttp" {= "6.2.1"}
   "cohttp-eio" {= "6.2.1"}
-  "compiler-cloning" {= "enabled"}
-  "conduit" {= "8.0.0"}
   "conf-gmp" {= "5"}
   "conf-gmp-powm-sec" {= "4"}
   "conf-libssl" {= "4"}
+  "conf-ncurses" {= "1"}
   "conf-pkg-config" {= "4"}
   "conf-protoc" {= "4.4.0"}
   "conf-sqlite3" {= "1"}
@@ -61,7 +59,7 @@ depends: [
   "digestif" {= "1.3.0"}
   "domain-local-await" {= "1.0.1"}
   "domain-name" {= "0.5.0"}
-  "dune" {= "3.22.2"}
+  "dune" {= "3.24.1"}
   "dune-build-info" {= "3.22.2"}
   "dune-compiledb" {= "0.6.0"}
   "dune-configurator" {= "3.22.2"}
@@ -97,7 +95,6 @@ depends: [
   "integers" {= "0.7.0"}
   "iomux" {= "0.4"}
   "ipaddr" {= "5.6.2"}
-  "ipaddr-sexp" {= "5.6.2"}
   "jane-street-headers" {= "v0.17.0"}
   "js_of_ocaml-compiler" {= "6.4.1"}
   "jsonm" {= "1.0.2"}
@@ -109,6 +106,7 @@ depends: [
   "lwt-dllist" {= "1.1.0"}
   "macaddr" {= "5.6.2"}
   "magic-mime" {= "1.3.1"}
+  "markup" {= "1.0.3"}
   "mcp_protocol" {= "1.3.0"}
   "menhir" {= "20250912"}
   "menhirCST" {= "20250912"}
@@ -128,13 +126,12 @@ depends: [
   "ocaml-options-vanilla" {= "1"}
   "ocaml-protoc-plugin" {= "6.2.0"}
   "ocaml-syntax-shims" {= "1.0.0"}
-  "ocaml-webrtc" {= "0.2.6"}
   "ocaml_intrinsics_kernel" {= "v0.17.1"}
   "ocamlbuild" {= "0.16.1"}
-  "ocamlfind" {= "1.9.8"}
+  "ocamlfind" {= "1.9.9~preview"}
   "ocplib-endian" {= "1.2"}
-  "odoc" {= "3.1.0" & with-doc}
-  "odoc-parser" {= "3.1.0" & with-doc}
+  "odoc" {= "3.2.1" & with-doc}
+  "odoc-parser" {= "3.2.1" & with-doc}
   "ohex" {= "0.2.0"}
   "omd" {= "2.0.0~alpha4"}
   "opentelemetry" {= "0.13"}
@@ -186,12 +183,14 @@ depends: [
   "tls-eio" {= "2.0.4"}
   "topkg" {= "1.1.1"}
   "tyxml" {= "4.6.0" & with-doc}
+  "uchar" {= "0.0.2"}
   "unstrctrd" {= "0.4"}
   "uri" {= "4.4.0"}
   "uri-sexp" {= "4.4.0"}
   "uucp" {= "17.0.0"}
   "uuidm" {= "0.9.10"}
   "uunf" {= "17.0.0"}
+  "uuseg" {= "17.0.0"}
   "uutf" {= "1.0.4"}
   "ws-direct-core" {= "0.1.0"}
   "ws-direct-eio" {= "0.1.0"}
@@ -218,10 +217,6 @@ build: [
 dev-repo: "git+https://github.com/jeong-sik/masc.git"
 pin-depends: [
   [
-  "agent_sdk.0.231.13"
-  "git+https://github.com/jeong-sik/oas.git#59ccced68c2dc96389a91eee24d0b2c6bd5c53a6"
-]
-  [
     "bisect_ppx.2.8.3"
     "git+https://github.com/patricoferris/bisect_ppx.git#5.2"
   ]
@@ -238,20 +233,16 @@ pin-depends: [
     "git+https://github.com/jeong-sik/mcp-protocol-sdk.git#v1.3.0"
   ]
   [
-    "ocaml-webrtc.0.2.6"
-    "git+https://github.com/jeong-sik/ocaml-webrtc.git#1b7993605b293f45169369d488f970ba15132a9f"
-  ]
-  [
   "ws-direct-core.0.1.0"
-  "git+https://github.com/jeong-sik/ws-direct.git#88f325956e8d03e5d68838145ada08a19e221c42"
+  "git+https://github.com/jeong-sik/ws-direct.git#05e01cf008d4a5024474d13cee35cda42e2bea09"
 ]
   [
   "ws-direct-eio.0.1.0"
-  "git+https://github.com/jeong-sik/ws-direct.git#88f325956e8d03e5d68838145ada08a19e221c42"
+  "git+https://github.com/jeong-sik/ws-direct.git#05e01cf008d4a5024474d13cee35cda42e2bea09"
 ]
   [
   "ws-direct-gluten.0.1.0"
-  "git+https://github.com/jeong-sik/ws-direct.git#88f325956e8d03e5d68838145ada08a19e221c42"
+  "git+https://github.com/jeong-sik/ws-direct.git#05e01cf008d4a5024474d13cee35cda42e2bea09"
 ]
 ]
 x-maintenance-intent: ["(latest)"]

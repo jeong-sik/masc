@@ -2,9 +2,10 @@
 
     Queue-visible stimuli and queue transition reactions are
     written to a replayable JSONL store under
-    [.masc/keepers/<keeper>/reaction-ledger/v5/YYYY-MM/DD.jsonl].  The
-    generation namespace is a hard boundary: older stores are neither read nor
-    written by this module. *)
+    [.masc/keepers/<keeper>/reaction-ledger/<generation>/YYYY-MM/DD.jsonl].
+    The generation namespace is a hard boundary: older stores are neither read
+    nor written by this module. Ask {!store_dir} for the path rather than
+    spelling the generation out. *)
 
 type stimulus_kind =
   | Board_signal
@@ -15,14 +16,13 @@ type stimulus_kind =
       (** RFC-connector-ambient-attention-wake: ambient connector message wake *)
   | Hitl_resolved  (** HITL resolution delivered as an ordinary Keeper wake. *)
   | Manual_compaction
-  | Goal_assigned
-      (** RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
-  | Goal_reconciliation_ready
-      (** Linked Tasks reached a terminal boundary and Goal synthesis is ready. *)
   | Completion_authority_rejected
       (** System completion authority rejected Keeper evidence. *)
   | Task_cancelled
       (** Another Keeper cancelled a Task this Keeper authored. *)
+  | Workspace_message
+  | Delegate_completed
+      (** A committed workspace message named this Keeper. *)
 
 type reaction_kind =
   | Turn_started
@@ -31,6 +31,21 @@ type reaction_kind =
 
 type reaction_decode_error = Unknown_reaction_kind of string
 type row_quarantine_reason
+
+val digest_id : string -> string -> string
+(** [digest_id prefix payload] is the durable event id: [prefix], a colon, and
+    the SHA-256 of [payload] in full hex. Readers recompute and compare it, so
+    a collision is a replay decision rather than a display artefact. *)
+
+val schema : string
+(** The schema string current rows carry. Readers reject any other value, so
+    a test that spells the generation out is asserting against a literal the
+    writer can move without it. *)
+
+val store_dir : masc_root:string -> keeper_name:string -> string
+(** Where rows are written and read, generation included. A reader that
+    rebuilds this path itself keeps looking at the old namespace after a
+    generation bump and sees an empty store rather than an error. *)
 
 val stimulus_kind_to_string : stimulus_kind -> string
 val reaction_kind_to_string : reaction_kind -> string
@@ -46,9 +61,6 @@ val reaction_kind_of_string : string -> (reaction_kind, reaction_decode_error) r
 (** Closed inverse of {!reaction_kind_to_string}. Strings outside the current
     reaction algebra return a typed decoder error and can never become a
     current reaction. *)
-
-val board_stimulus_id : post_id:string -> string
-(** Stable id for board-originated stimuli. *)
 
 val stimulus_id_of_event_queue : Keeper_event_queue.stimulus -> string
 (** Stable id derived from the event queue stimulus payload. Scheduled wakes
@@ -120,6 +132,21 @@ val event_queue_reaction_evidence_result :
     terminals remain distinct typed evidence. Empty query identities and
     storage failures remain typed errors. *)
 
+val event_queue_reaction_evidence_batch_result :
+  base_path:string ->
+  keeper_name:string ->
+  stimulus_ids:string list ->
+  ( (string * event_queue_reaction_evidence_outcome) list
+  , event_queue_reaction_evidence_error )
+  result
+(** Read the complete keeper-local ledger exactly once and build exact
+    evidence for every requested stimulus identity. Duplicate identities are
+    collapsed while preserving first-request order. This is the request-level
+    projection seam for bounded dashboards: rendering N rows for one Keeper
+    performs one ledger scan, not N complete scans. An empty identity rejects
+    the whole batch with {!Evidence_invalid_stimulus_id}; an empty query list
+    returns [Ok []]. *)
+
 val event_queue_turn_started_seen_for_source_result :
   base_path:string ->
   keeper_name:string ->
@@ -144,6 +171,11 @@ val fleet_summary_json :
   Yojson.Safe.t
 (** Summarize recent reaction-ledger state for a bounded keeper fleet. *)
 
+val fleet_summary_status_strings : string list
+(** Every value the fleet summary's ["status"] field can carry. A reader that
+    has to enumerate them was previously reading four from a type and a fifth
+    from a string literal elsewhere in the same file (#27560). *)
+
 val unavailable_fleet_summary_json : unit -> Yojson.Safe.t
 (** Canonical empty fleet projection used when server state is unavailable.
     Kept here so schema and field ownership remain single-source. *)
@@ -154,5 +186,11 @@ module For_testing : sig
     (unit -> 'a) ->
     'a
   (** Scoped post-append fault seam. The callback must invoke the canonical
-      recovery projector; this seam cannot read or retire an outbox itself. *)
+      recovery projector; this seam cannot read or retire an outbox itself.
+
+      This declaration is part of the projection boundary contract that
+      [scripts/keeper_event_queue_projection_boundary_check.ml] enforces: the
+      seam must exist exactly once as a definition and once as a declaration,
+      so the fault path cannot acquire a second entry point. No test calls it,
+      which is why an unused-declaration sweep read it as dead. *)
 end

@@ -117,31 +117,31 @@ let eager_read ~media_type ~bytes : (string, string) result option =
    else — including an already-evicted [Text] placeholder — passes through
    unchanged, so re-running on a rehydrated message is a no-op (idempotent: no
    double-store, no double-extract). *)
-let evict_block ~mode ~keeper_name ~eager_budget (block : Agent_sdk.Types.content_block) =
+let evict_block ~mode ~keeper_name ~eager_budget (block : Agent_core.Types.content_block) =
   match block with
-  | Agent_sdk.Types.Image { media_type; data; source_type } ->
+  | Agent_core.Types.Image { media_type; data; source_type } ->
     (match source_type with
-     | Agent_sdk.Types.Url | Agent_sdk.Types.File_id ->
+     | Agent_core.Types.Url | Agent_core.Types.File_id ->
        record_eviction ~mode ~result:"error" ~reason:"invalid_source_type";
-       Agent_sdk.Types.Text
+       Agent_core.Types.Text
          (image_store_failed_placeholder ~reason:"unsupported image source")
-     | Agent_sdk.Types.Base64 ->
+     | Agent_core.Types.Base64 ->
        match raw_bytes_of_image_data data with
       | Error _ ->
         record_eviction ~mode ~result:"error" ~reason:"bad_base64";
-        Agent_sdk.Types.Text
+        Agent_core.Types.Text
           (image_store_failed_placeholder ~reason:"invalid image payload")
       | Ok bytes ->
         (match Keeper_vision_tool.validate_image_size bytes with
          | Error _ ->
            record_eviction ~mode ~result:"error" ~reason:"image_too_large";
-           Agent_sdk.Types.Text
+           Agent_core.Types.Text
              (image_store_failed_placeholder ~reason:"image too large")
          | Ok () ->
            (match Keeper_vision_tool.validate_media_type media_type with
             | Error _ ->
               record_eviction ~mode ~result:"error" ~reason:"invalid_media_type";
-              Agent_sdk.Types.Text
+              Agent_core.Types.Text
                 (image_store_failed_placeholder ~reason:"unsupported image media type")
             | Ok media_type ->
               (match
@@ -149,38 +149,38 @@ let evict_block ~mode ~keeper_name ~eager_budget (block : Agent_sdk.Types.conten
                with
                | Error _ ->
                  record_eviction ~mode ~result:"error" ~reason:"store_failed";
-                 Agent_sdk.Types.Text
+                 Agent_core.Types.Text
                    (image_store_failed_placeholder ~reason:"artifact store failed")
                | Ok handle ->
                  (match mode with
                   | Store_only ->
                     record_eviction ~mode ~result:"ok" ~reason:"stored";
-                    Agent_sdk.Types.Text
+                    Agent_core.Types.Text
                       (image_unread_placeholder ~handle ~media_type ~reason:"not read")
                   | Eager when !eager_budget > 0 ->
                     decr eager_budget;
                     (match eager_read ~media_type ~bytes with
                      | Some (Ok read_text) ->
                        record_eviction ~mode ~result:"ok" ~reason:"eager_read";
-                       Agent_sdk.Types.Text
+                       Agent_core.Types.Text
                          (image_read_placeholder ~handle ~media_type ~read_text)
                      | Some (Error reason) ->
                        record_eviction ~mode ~result:"error" ~reason;
-                       Agent_sdk.Types.Text
+                       Agent_core.Types.Text
                          (image_unread_placeholder
                             ~handle
                             ~media_type
                             ~reason:"vision read failed")
                      | None ->
                        record_eviction ~mode ~result:"ok" ~reason:"stored_unread";
-                       Agent_sdk.Types.Text
+                       Agent_core.Types.Text
                          (image_unread_placeholder
                             ~handle
                             ~media_type
                             ~reason:"not yet read"))
                   | Eager ->
                     record_eviction ~mode ~result:"ok" ~reason:"eager_budget_exhausted";
-                    Agent_sdk.Types.Text
+                    Agent_core.Types.Text
                       (image_unread_placeholder
                          ~handle
                          ~media_type
@@ -206,12 +206,12 @@ let evict_blocks ~mode ~policy ~keeper_name blocks =
   else blocks
 ;;
 
-let evict_message ~mode ~policy ~keeper_name (message : Agent_sdk.Types.message) =
+let evict_message ~mode ~policy ~keeper_name (message : Agent_core.Types.message) =
   if delegating policy
   then
     { message with
-      Agent_sdk.Types.content =
-        evict_blocks ~mode ~policy ~keeper_name message.Agent_sdk.Types.content
+      Agent_core.Types.content =
+        evict_blocks ~mode ~policy ~keeper_name message.Agent_core.Types.content
     }
   else message
 ;;

@@ -1,10 +1,31 @@
 module Keeper_name = struct
   type t = string
 
+  (* A keeper name is a filesystem component: .masc/keepers/<name>/ and
+     .masc/playground/<name>/ are directories. POSIX NAME_MAX is 255 bytes and
+     every filesystem this runs on enforces it, so a longer name is not a
+     keeper with an awkward name — it is a keeper whose directories cannot be
+     created. [Trace_id] below already bounds itself at 64 for the same reason;
+     this is the same rule applied to the other name that becomes a path.
+
+     128 leaves room for the [keeper-<name>-agent] spelling
+     ([Keeper_name_codec.keeper_agent_name] adds 13 bytes) and for the suffixes
+     stores append, while sitting far above what names are: the longest of the
+     14 on this machine is 24 bytes. *)
+  let max_length = 128
+
   let of_string s =
-    if Safe_identifier.is_portable_name s
-    then Ok s
-    else Error (Safe_identifier.portable_name_error ~field:"keeper_name")
+    if not (Safe_identifier.is_portable_name s)
+    then Error (Safe_identifier.portable_name_error ~field:"keeper_name")
+    else if String.length s > max_length
+    then
+      Error
+        (Printf.sprintf
+           "keeper_name length %d exceeds %d: the name becomes a filesystem \
+            component"
+           (String.length s)
+           max_length)
+    else Ok s
   ;;
 
   let to_string s = s
@@ -57,12 +78,13 @@ end
 
 module Task_id = struct
   type t = string
-  let is_valid s = String.length s > 0
+
   let of_string s =
-    if is_valid s then Ok s
-    else
-      Error
-        (Printf.sprintf "Invalid task_id %S: empty string" (preview_id s))
+    match Validation.Task_id.validate s with
+    | Ok task_id -> Ok (Validation.Task_id.to_string task_id)
+    | Error reason -> Error reason
+  ;;
+
   let to_string s = s
   let equal = String.equal
 end
@@ -101,18 +123,6 @@ module Uid = struct
   let to_string s = s
   let equal = String.equal
   let compare = String.compare
-
-  let to_json s = `String s
-
-  let of_json = function
-    | `String s ->
-        (match of_string s with
-         | Ok t -> Ok t
-         | Error e -> Error e)
-    | other ->
-        Error
-          (Printf.sprintf "Expected string for Keeper_id.Uid (received %s)"
-             (Json_util.kind_name other))
 end
 
 module For_testing = struct

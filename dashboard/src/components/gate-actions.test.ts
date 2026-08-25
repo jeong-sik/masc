@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   refreshGate: vi.fn(),
   setGateMode: vi.fn(),
   retryGateAutoJudge: vi.fn(),
+  resolveGateApproval: vi.fn(),
+  deleteGateApprovalRule: vi.fn(),
   showToast: vi.fn(),
 }))
 
@@ -12,8 +14,8 @@ vi.mock('./common/toast', () => ({
 }))
 
 vi.mock('../api/dashboard-gate', () => ({
-  deleteGateApprovalRule: vi.fn(),
-  resolveGateApproval: vi.fn(),
+  deleteGateApprovalRule: mocks.deleteGateApprovalRule,
+  resolveGateApproval: mocks.resolveGateApproval,
   retryGateAutoJudge: mocks.retryGateAutoJudge,
   setGateMode: mocks.setGateMode,
 }))
@@ -22,8 +24,19 @@ vi.mock('./gate-refresh', () => ({
   refreshGate: mocks.refreshGate,
 }))
 
-import { retryKeeperAutoJudge, setKeeperGateMode } from './gate-actions'
-import { gateApprovalActing, gateError } from './gate-signals'
+import {
+  deleteKeeperApprovalRule,
+  respondToKeeperApproval,
+  retryKeeperAutoJudge,
+  setKeeperGateMode,
+} from './gate-actions'
+import {
+  clearGateAuditWriteFailures,
+  gateApprovalActing,
+  gateAuditWriteFailures,
+  gateError,
+  observeGateAuditReceipts,
+} from './gate-signals'
 
 const baseResponse = {
   ok: true,
@@ -42,9 +55,78 @@ beforeEach(() => {
   mocks.refreshGate.mockReset().mockResolvedValue(undefined)
   mocks.setGateMode.mockReset()
   mocks.retryGateAutoJudge.mockReset().mockResolvedValue({ ok: true, id: 'appr-1' })
+  mocks.resolveGateApproval.mockReset()
+  mocks.deleteGateApprovalRule.mockReset()
   mocks.showToast.mockReset()
+  clearGateAuditWriteFailures()
   gateApprovalActing.value = null
   gateError.value = ''
+})
+
+describe('committed Gate mutation audit degradation', () => {
+  it('keeps resolution successful and publishes the failed audit receipt', async () => {
+    mocks.resolveGateApproval.mockResolvedValue({
+      ok: true,
+      id: 'appr-audit',
+      decision: 'approve',
+      rule_id: null,
+      audit_receipts: [{
+        event: 'resolved',
+        recorded: false,
+        stage: 'append',
+        detail: 'audit append unavailable',
+      }],
+    })
+
+    await respondToKeeperApproval('appr-audit', 'approve')
+
+    expect(mocks.showToast).toHaveBeenCalledWith(
+      'keeper 승인 요청을 승인했습니다 · 감사 기록은 저장되지 않았습니다',
+      'warning',
+    )
+    expect(gateAuditWriteFailures.value).toMatchObject([{
+      id: 'appr-audit',
+      transport: 'http',
+      receipt: { event: 'resolved', recorded: false, stage: 'append' },
+    }])
+  })
+
+  it('keeps rule deletion successful and publishes the failed audit receipt', async () => {
+    mocks.deleteGateApprovalRule.mockResolvedValue({
+      ok: true,
+      id: 'rule-audit',
+      audit: {
+        event: 'rule_deleted',
+        recorded: false,
+        stage: 'store_create',
+        detail: 'audit store unavailable',
+      },
+    })
+
+    await deleteKeeperApprovalRule('rule-audit')
+
+    expect(mocks.showToast).toHaveBeenCalledWith(
+      'Always 규칙을 삭제했습니다 · 감사 기록은 저장되지 않았습니다',
+      'warning',
+    )
+    expect(gateAuditWriteFailures.value[0]).toMatchObject({
+      id: 'rule-audit',
+      receipt: { event: 'rule_deleted', stage: 'store_create' },
+    })
+  })
+
+  it('does not collapse distinct uncorrelated authorization failures', () => {
+    const receipt = {
+      event: 'gate_allowed' as const,
+      recorded: false as const,
+      stage: 'append' as const,
+      detail: 'approval audit write failed',
+    }
+    observeGateAuditReceipts([receipt], { id: null, transport: 'sse' })
+    observeGateAuditReceipts([receipt], { id: null, transport: 'sse' })
+
+    expect(gateAuditWriteFailures.value).toHaveLength(2)
+  })
 })
 
 describe('retryKeeperAutoJudge exact observation', () => {

@@ -1,0 +1,34 @@
+name = "Grep"
+description = """
+Search file contents with ripgrep: provide a regex `pattern` (and \
+optionally path/glob/type). To list a directory, read a file, or run \
+git status/log/diff, use the Execute tool (e.g. \
+argv=['ls','-la','<path>']). Patterns match within a single line; a \
+literal newline in `pattern` is rejected. To match across lines, run \
+`rg -U` through the Execute tool."""
+
+[[params]]
+name = "pattern"
+type = "string"
+required = true
+description = "Regular expression to search file contents for (ripgrep)."
+
+[[params]]
+name = "path"
+type = "string"
+description = "Directory or file to search in. Defaults to the keeper sandbox when omitted."
+
+[[params]]
+name = "glob"
+type = "string"
+description = "Glob filter, e.g. '*.ml' or 'lib/**/*.ml'."
+
+[[params]]
+name = "type"
+type = "string"
+description = "Ripgrep file-type filter, e.g. 'ml', 'py'."
+
+[[params]]
+name = "-i"
+type = "boolean"
+description = "Case-insensitive search."

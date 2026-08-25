@@ -1,6 +1,6 @@
-(** MASC-owned composition proof for the compaction OAS exact-flow boundary.
+(** MASC-owned composition proof for the compaction AGENT_CORE exact-flow boundary.
 
-    OAS owns admission, affine attempts, execute-once, advancement, and receipt
+    AGENT_CORE owns admission, affine attempts, execute-once, advancement, and receipt
     semantics. These tests observe only MASC-owned ordered opaque slot identity,
     source authority, domain validation, registry generation, and source
     terminalization. *)
@@ -11,7 +11,7 @@ module C = Keeper_compaction_llm_summarizer
 module F = Compaction_exact_output_fixture
 module Registry = Runtime_exact_output_registry
 module S = Keeper_structured_output_schema
-module T = Agent_sdk.Types
+module T = Agent_core.Types
 module U = Keeper_compaction_unit
 
 exception Cancel_after_request_arrived
@@ -55,7 +55,6 @@ let persisted_checkpoint_source_exn trace_id =
     (match
        Keeper_checkpoint_ref.of_persisted
          ~trace_id
-         ~generation:1
          ~turn_count:1
          ~sha256:(String.make 64 'a')
      with
@@ -68,6 +67,7 @@ let execute_prepared_lane
       ~net
       ?clock
       ?(before_dispatch_authority = fun _ -> Ok ())
+      ?observation_registry
       prepared_lane
   =
   C.execute_prepared_lane
@@ -75,6 +75,7 @@ let execute_prepared_lane
     ~net
     ?clock
     ~before_dispatch_authority
+    ?observation_registry
     prepared_lane
 ;;
 
@@ -159,7 +160,7 @@ let completed_exn = function
 
 let captured_observation_exn label = function
   | Some observation -> observation
-  | None -> Alcotest.failf "%s did not observe an OAS attempt identity" label
+  | None -> Alcotest.failf "%s did not observe an AGENT_CORE attempt identity" label
 ;;
 
 let check_identity label (observation : C.attempt_observation) =
@@ -205,11 +206,44 @@ let test_missing_compaction_lane_is_explicit_degraded_state () =
       ~keeper_name
       ~registry
       ~lane_id:"compaction_exact"
-      ~units
+      ~units:
+        [ U.Ordinary_message
+            (message T.Assistant "one valid but irreducible source")
+        ]
   with
   | Error C.Exact_lane_unconfigured -> ()
+  | Error C.No_reducible_boundary ->
+    Alcotest.fail "lane resolution must precede irreducible-window classification"
   | Error _ -> Alcotest.fail "missing lane returned the wrong typed failure"
   | Ok _ -> Alcotest.fail "missing lane must not be synthesized"
+;;
+
+let test_irreducible_window_is_a_distinct_terminal_noop () =
+  let slot_id = "irreducible-window-slot" in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"irreducible compaction window"
+      [ { id = slot_id; base_url = "http://127.0.0.1:9" } ]
+  in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  let keeper_name = "keeper-irreducible-window" in
+  let source_units =
+    [ U.Ordinary_message (message T.Assistant "only eligible source") ]
+  in
+  ensure_registered_keeper ~base_path:exact_flow_base_path keeper_name;
+  match
+    C.prepare_lane
+      ~base_path:exact_flow_base_path
+      ~keeper_name
+      ~registry
+      ~lane_id:conformance_lane_id
+      ~units:source_units
+  with
+  | Error C.No_reducible_boundary -> ()
+  | Error C.Invalid_plan ->
+    Alcotest.fail "a valid irreducible window regressed to invalid_plan"
+  | Error _ -> Alcotest.fail "irreducible window returned the wrong typed failure"
+  | Ok _ -> Alcotest.fail "a one-source window cannot produce a reducing boundary"
 ;;
 
 let test_preparation_freezes_order_generation_and_defers_attempt_identity () =
@@ -232,12 +266,8 @@ let test_preparation_freezes_order_generation_and_defers_attempt_identity () =
     "MASC opaque declaration order"
     [ "prepare-first"; "prepare-second" ]
     (C.For_testing.flow_slot_ids prepared);
-  Alcotest.(check int64)
-    "one immutable MASC registry generation"
-    (Registry.generation registry)
-    (C.For_testing.registry_generation prepared);
   Alcotest.(check (list string))
-    "OAS freezes the effective candidate snapshot"
+    "AGENT_CORE freezes the effective candidate snapshot"
     [ "prepare-first"; "prepare-second" ]
     (C.For_testing.candidate_snapshot_slot_ids prepared);
   Alcotest.(check int)
@@ -277,9 +307,9 @@ let test_preparation_bounds_oldest_window_by_exact_request_body () =
     | Ok _ | Error _ -> Alcotest.fail "fixture did not resolve both ordered slots"
   in
   let requirement =
-    Agent_sdk.Exact_output.make_output_requirement
+    Agent_core.Exact_output.make_output_requirement
       ~schema:S.compaction_plan_output_schema
-      ~minimum_guarantee:Agent_sdk.Exact_output.Json_syntax
+      ~minimum_guarantee:Agent_core.Exact_output.Json_syntax
   in
   let projection_bytes units =
     let window =
@@ -288,7 +318,7 @@ let test_preparation_bounds_oldest_window_by_exact_request_body () =
       | Error detail -> Alcotest.failf "projection window failed: %s" detail
     in
     match
-      Agent_sdk.Exact_output.project_request_body
+      Agent_core.Exact_output.project_request_body
         ~target:admitted_target
         ~messages:(C.For_testing.messages_for_plan ~window)
         requirement
@@ -363,9 +393,9 @@ let test_published_replacement_cannot_mix_prepared_generation () =
   in
   let registry_b = publish_exn ~slot_ids:[ "replacement-slot" ] snapshot_b in
   Alcotest.(check bool)
-    "MASC publication generation advances"
+    "MASC publication replaces the registry"
     true
-    (Int64.compare (Registry.generation registry_a) (Registry.generation registry_b) < 0);
+    (not (registry_a == registry_b));
   let completed =
     execute_prepared_lane
       ~keeper_name:"keeper-frozen-a"
@@ -398,7 +428,7 @@ let test_source_authority_precedes_successor_post () =
   let third = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
   let snapshot =
     F.resolver_snapshot
-      ~source:"masc OAS advancement order"
+      ~source:"masc AGENT_CORE advancement order"
       [ { id = "unreachable-first"; base_url = "http://127.0.0.1:9" }
       ; { id = "successful-second"; base_url = second.base_url }
       ; { id = "forbidden-third"; base_url = third.base_url }
@@ -423,7 +453,7 @@ let test_source_authority_precedes_successor_post () =
      |> completed_exn
       : C.completed_plan);
   Alcotest.(check (list string))
-    "source authority precedes each OAS dispatch"
+    "source authority precedes each AGENT_CORE dispatch"
     [ "authorize:unreachable-first"
     ; "authorize:successful-second"
     ; "post:second"
@@ -578,13 +608,13 @@ let test_summary_that_blocks_next_exact_fold_advances_to_successor () =
       Alcotest.failf "future-fold initial window failed: %s" detail
   in
   let requirement =
-    Agent_sdk.Exact_output.make_output_requirement
+    Agent_core.Exact_output.make_output_requirement
       ~schema:S.compaction_plan_output_schema
-      ~minimum_guarantee:Agent_sdk.Exact_output.Json_syntax
+      ~minimum_guarantee:Agent_core.Exact_output.Json_syntax
   in
   let initial_request_bytes =
     match
-      Agent_sdk.Exact_output.project_request_body
+      Agent_core.Exact_output.project_request_body
         ~target:first_target
         ~messages:(C.For_testing.messages_for_plan ~window:initial_window)
         requirement
@@ -684,7 +714,7 @@ let test_semantic_exhaustion_terminalizes_final_bound () =
     !events
 ;;
 
-let test_final_oas_flow_failure_is_generic_source_terminal () =
+let test_final_agent_core_flow_failure_is_generic_source_terminal () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let failed = F.start_server ~sw ~net ~clock F.Abort_after_request in
@@ -692,7 +722,7 @@ let test_final_oas_flow_failure_is_generic_source_terminal () =
   let first_slot = "generic-flow-failure" in
   let snapshot =
     F.resolver_snapshot
-      ~source:"masc generic OAS flow failure"
+      ~source:"masc generic AGENT_CORE flow failure"
       [ { id = first_slot; base_url = failed.base_url }
       ; { id = "forbidden-failure-successor"; base_url = successor.base_url }
       ]
@@ -712,8 +742,8 @@ let test_final_oas_flow_failure_is_generic_source_terminal () =
         prepared
     with
     | Error (C.Exact_execution_terminal terminal) -> terminal
-    | Error _ -> Alcotest.fail "OAS flow failure returned the wrong failure"
-    | Ok _ -> Alcotest.fail "failed OAS flow unexpectedly succeeded"
+    | Error _ -> Alcotest.fail "AGENT_CORE flow failure returned the wrong failure"
+    | Ok _ -> Alcotest.fail "failed AGENT_CORE flow unexpectedly succeeded"
   in
   Alcotest.(check bool)
     "generic terminal does not claim receipt phase"
@@ -722,6 +752,68 @@ let test_final_oas_flow_failure_is_generic_source_terminal () =
   Alcotest.(check string) "generic terminal retains bound slot" first_slot terminal.slot_id;
   Alcotest.(check int) "failed request posts once" 1 (F.post_count failed);
   Alcotest.(check int) "terminal flow failure never advances" 0 (F.post_count successor)
+;;
+
+let test_observation_completion_failure_does_not_mask_source_terminal () =
+  with_temp_dir "compaction-observation-failure-"
+  @@ fun temp_dir ->
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  let failed = F.start_server ~sw ~net ~clock F.Abort_after_request in
+  let slot_id = "observation-write-failure" in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"compaction observation completion failure"
+      [ { id = slot_id; base_url = failed.base_url } ]
+  in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  let prepared = prepare_exn ~keeper_name:"keeper-observation-failure" ~registry () in
+  let observation_path = Filename.concat temp_dir "exact-lane-runs.jsonl" in
+  let observation_registry = Exact_lane_run_registry.create ~path:observation_path () in
+  let break_completion_path _observation =
+    (* Registration has already fsynced by the time source authority runs.
+       Replace the file with a directory so only the completion append fails. *)
+    Sys.remove observation_path;
+    Unix.mkdir observation_path 0o700;
+    Ok ()
+  in
+  let terminal =
+    match
+      execute_prepared_lane
+        ~keeper_name:"keeper-observation-failure"
+        ~net
+        ~clock
+        ~before_dispatch_authority:break_completion_path
+        ~observation_registry
+        prepared
+    with
+    | Error (C.Exact_execution_terminal terminal) -> terminal
+    | Error _ -> Alcotest.fail "observation failure changed the typed source terminal"
+    | Ok _ -> Alcotest.fail "failed provider unexpectedly produced a compaction plan"
+  in
+  Alcotest.(check bool)
+    "primary terminal survives the secondary write failure"
+    true
+    (terminal.cause = Keeper_compaction_outcome.Exact_execution_failed);
+  Alcotest.(check string) "source identity survives" slot_id terminal.slot_id;
+  Alcotest.(check int) "provider is dispatched exactly once" 1 (F.post_count failed);
+  match Exact_lane_run_registry.list_runs observation_registry with
+  | [ { status = Exact_lane_run_registry.Completion_persistence_failed
+          { failure; _ }; _ } as run ] ->
+    Alcotest.(check string)
+      "failed observation append is explicitly uncertain"
+      "completion_durability_unknown"
+      (Exact_lane_run_registry.status_label run.status);
+    Alcotest.(check bool)
+      "failure detail survives"
+      true
+      (String.trim failure.detail <> "")
+  | [ _ ] ->
+    Alcotest.fail "failed observation append was not exposed as a persistence failure"
+  | runs ->
+    Alcotest.failf
+      "expected one observation row after completion failure, got %d"
+      (List.length runs)
 ;;
 
 let test_cancellation_preserves_lifecycle_authorized_identity () =
@@ -871,6 +963,46 @@ let test_admission_rejection_then_cancellation_propagates () =
 ;;
 
 
+(* The four identifiers on a compaction terminal say which call failed; none of
+   them says why. Measured on a live compaction that spent 470 s on
+   glm-coding.glm-5-turbo — a slot completing 97% of its work elsewhere — and
+   left only slot_id, call_id, and two fingerprints. The sibling consumer of the
+   same agent-core branch (hitl_summary_worker) was already rendering the
+   provider's account; compaction discarded it in the pattern match. *)
+let test_terminal_carries_the_provider_account () =
+  let base : Keeper_compaction_outcome.exact_execution_terminal =
+    { cause = Keeper_compaction_outcome.Exact_execution_failed
+    ; slot_id = "glm-coding.glm-5-turbo"
+    ; call_id = "call-fixture"
+    ; plan_fingerprint = "plan-fixture"
+    ; request_body_sha256 = String.make 64 'a'
+    ; detail = None
+    }
+  in
+  let render t = Keeper_compaction_outcome.exact_execution_terminal_to_string t in
+  let contains needle text =
+    let n = String.length needle in
+    let rec scan i =
+      i + n <= String.length text && (String.sub text i n = needle || scan (i + 1))
+    in
+    scan 0
+  in
+  (* Control: without an account the rendering is exactly what it was before
+     this field existed. A change here would be a silent format break for every
+     terminal that has no provider account to carry. *)
+  let without = render base in
+  Alcotest.(check bool) "keeps the identifiers" true (contains "slot_id=glm-coding.glm-5-turbo" without);
+  Alcotest.(check bool) "adds nothing when there is no account" false (contains "detail=" without);
+  (* An empty account is the same as none: a bare "detail=" would read as an
+     account that says nothing, which is worse than not claiming one. *)
+  Alcotest.(check bool) "blank account is not rendered" false
+    (contains "detail=" (render { base with detail = Some "   " }));
+  let with_account = render { base with detail = Some "slot=x completion failed (http_status=429)" } in
+  Alcotest.(check bool) "carries the account" true (contains "detail=slot=x completion failed" with_account);
+  Alcotest.(check bool) "still carries the identifiers" true
+    (contains "call_id=call-fixture" with_account)
+;;
+
 let () =
   Alcotest.run
     "compaction exact-flow conformance"
@@ -879,6 +1011,10 @@ let () =
             "missing lane is explicit"
             `Quick
             test_missing_compaction_lane_is_explicit_degraded_state
+        ; Alcotest.test_case
+            "irreducible window is a terminal no-op"
+            `Quick
+            test_irreducible_window_is_a_distinct_terminal_noop
         ; Alcotest.test_case
             "order and generation freeze before attempt allocation"
             `Quick
@@ -916,9 +1052,13 @@ let () =
             `Quick
             test_summary_that_blocks_next_exact_fold_advances_to_successor
         ; Alcotest.test_case
-            "final OAS failure is generic terminal"
+            "final AGENT_CORE failure is generic terminal"
             `Quick
-            test_final_oas_flow_failure_is_generic_source_terminal
+            test_final_agent_core_flow_failure_is_generic_source_terminal
+        ; Alcotest.test_case
+            "observation completion failure preserves source terminal"
+            `Quick
+            test_observation_completion_failure_does_not_mask_source_terminal
         ; Alcotest.test_case
             "semantic exhaustion terminalizes final bound"
             `Quick
@@ -931,6 +1071,10 @@ let () =
             "admission rejection then cancellation propagates"
             `Quick
             test_admission_rejection_then_cancellation_propagates
+        ; Alcotest.test_case
+            "terminal carries the provider account"
+            `Quick
+            test_terminal_carries_the_provider_account
         ] )
       (* The "affinity and non-sharing" group held only cases whose functions
          #25993 removed; its registrations were left behind and the group is now

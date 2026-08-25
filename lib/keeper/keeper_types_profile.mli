@@ -1,4 +1,4 @@
-(** Keeper profile defaults, persona loading, and path helpers. *)
+(** Keeper config and prompt loading. *)
 
 include module type of Keeper_config
 include module type of Keeper_types_profile_sandbox
@@ -42,33 +42,12 @@ val dedupe_keep_order : 'a list -> 'a list
 val normalize_name_list : string list -> string list
 val normalize_name_list_opt : string list -> string list option
 val lower_string_list_opt : string list -> string list option
-val workspace_seq_map_to_json : (string * int) list -> Yojson.Safe.t
-val workspace_seq_map_of_json : Yojson.Safe.t -> (string * int) list
-
 include module type of Keeper_types_profile_defaults
 
-type persona_summary =
-  { persona_name : string
-  ; display_name : string
-  ; role : string option
-  ; trait : string option
-  ; profile_path : string
-  ; has_keeper_defaults : bool
-  }
-
-val operator_todo_placeholder_marker : string
-val string_has_operator_todo_placeholder : string -> bool
-val json_has_operator_todo_placeholder : Yojson.Safe.t -> bool
-val json_operator_todo_placeholder_paths : Yojson.Safe.t -> string list
-val reject_placeholder_persona_profile : label:string -> path:string -> Yojson.Safe.t -> bool
-val keeper_profile_defaults_materializable : keeper_profile_defaults -> bool
 val keeper_profile_defaults_materializable_for_name :
   ?base_path:string -> string -> bool
 
-val personas_root_opt : unit -> string option
-val persona_profile_path_opt : string -> string option
-
-include module type of Keeper_types_profile_oas_env
+include module type of Keeper_types_profile_agent_core_env
 
 val profile_defaults_of_toml :
   Keeper_toml_loader.toml_doc -> (keeper_profile_defaults, string) result
@@ -76,16 +55,6 @@ val profile_defaults_of_toml :
 val parsed_field_key_names : string list
 val canonical_keeper_toml_key_names : string list
 val detect_unknown_keeper_toml_keys : Keeper_toml_loader.toml_doc -> string list
-val unknown_keeper_toml_warning_key_limit : int
-
-val current_unknown_keeper_toml_warning_keys : unit -> string list
-(* Snapshot of the bounded WARN-key cache used by
-   warn_unknown_keeper_toml_keys_once. Test inspection of the bound. *)
-
-val take_warning_keys : int -> 'a list -> 'a list
-val normalize_unknown_keeper_toml_keys : string list -> string list
-val warn_unknown_keeper_toml_keys_once : path:string -> string list -> bool
-val warn_unknown_keeper_toml_keys : path:string -> Keeper_toml_loader.toml_doc -> unit
 val merge_string_list : base:'a list -> 'a list -> 'a list
 
 val merge_keeper_profile_defaults :
@@ -134,7 +103,6 @@ val load_keeper_profile_defaults_result_for_base_path :
   base_path:string ->
   string ->
   (keeper_profile_defaults, keeper_toml_load_error) result
-val resolved_persona_name : keeper_name:string -> keeper_profile_defaults -> string
 val load_keeper_profile_defaults_result :
   string -> (keeper_profile_defaults, keeper_toml_load_error) result
 val invalidate_keeper_profile_defaults_cache : string -> unit
@@ -169,9 +137,6 @@ val keeper_config_probe_error_to_json : keeper_config_probe_error -> Yojson.Safe
 val keeper_toml_config_error_of_load_error :
   keeper_name:string -> keeper_toml_load_error -> keeper_toml_config_error
 val keeper_toml_unknown_keys_to_json : keeper_toml_unknown_keys -> Yojson.Safe.t
-val keeper_name_of_toml_path : string -> string
-val keeper_toml_unknown_keys_of_path : string -> keeper_toml_unknown_keys option
-val keeper_toml_config_error_of_path : string -> keeper_toml_config_error option
 val keeper_toml_config_errors_in_dir_result :
   string -> (keeper_toml_config_error list, keeper_config_probe_error) result
 val keeper_toml_unknown_keys_in_dir : string -> keeper_toml_unknown_keys list
@@ -187,23 +152,6 @@ type keeper_default_source_snapshot =
 
 val keeper_default_source_snapshot :
   base_path:string -> string -> keeper_default_source_snapshot
-val persona_description_max_chars : int
-val load_persona_extended : ?max_chars:int -> string -> string option
-
-(** Persona-name resolution ([resolved_persona_name] when defaults are
-    available, else the keeper name) fused with the extended-persona load.
-    Single source of truth for "the persona text this keeper lives with":
-    the unified system prompt and the Memory OS librarian must both read
-    persona through here so their views cannot diverge. Returns [""] when
-    the resolved persona has no extended text. *)
-val load_resolved_persona_extended :
-  keeper_name:string ->
-  ?profile_defaults:keeper_profile_defaults ->
-  unit ->
-  string
-val load_persona_summary : string -> persona_summary option
-val load_persona_summary_from_path : string -> string -> persona_summary option
-val list_persona_summaries : unit -> persona_summary list
 val keeper_dir : Workspace.config -> string
 val keeper_meta_path : Workspace.config -> string -> string
 val session_base_dir : Workspace.config -> string

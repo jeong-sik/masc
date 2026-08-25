@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** MASC Dashboard - Operator-First Status Visualization
 
     Usage:
@@ -58,30 +41,17 @@ type section = {
   empty_msg: string;
 }
 
-type scope =
-  | All
-  | Current
+(* The schema enum and this parser used to spell the same vocabulary
+   separately, on opposite sides of the cut that keeps the descriptor
+   generator out of its own consumer (#27069). Tool_schemas_specs_types is on
+   the generator's side and depends on nothing here, so both can take it. *)
+type scope = Tool_schemas_specs_types.dashboard_scope =
+  | Dashboard_scope_all
+  | Dashboard_scope_current
 
-(** Issue #8592: SSOT helpers for [scope]. The witness function and
-    canonical string list are mirrored in the JSON Schema layer
-    ([Tool_schemas_misc.dashboard_scope_enum_strings]) — direct
-    dependency would cycle. The test [test_types.ml ::
-    dashboard_scope_ssot] asserts the mirror stays in sync. Adding a
-    new constructor here forces a compile error in [scope_to_string]
-    and fails the schema mirror test instead of silently dropping
-    from the enum. *)
-let scope_to_string = function
-  | All -> "all"
-  | Current -> "current"
-
-let all_scopes = [ All; Current ]
-
-let valid_scope_strings = List.map scope_to_string all_scopes
-
-let scope_of_string_opt = function
-  | "all" -> Some All
-  | "current" -> Some Current
-  | _ -> None
+let scope_to_string = Tool_schemas_specs_types.dashboard_scope_to_string
+let valid_scope_strings = Tool_schemas_specs_types.dashboard_scope_strings
+let scope_of_string_opt = Tool_schemas_specs_types.dashboard_scope_of_string_opt
 
 (** Re-export shared types from Dashboard_labels to avoid breaking existing callers *)
 type workspace_snapshot = Dashboard_labels.workspace_snapshot = {
@@ -325,10 +295,6 @@ let keepers_section now : section =
     let phase_str = Keeper_state_machine.phase_to_string e.phase in
     let since =
       match e.phase with
-      | Dead ->
-        (match e.dead_since_ts with
-         | Some ts -> format_elapsed_float now ts
-         | None -> "?")
       | _ -> format_elapsed_float now e.started_at
     in
     let last_info =
@@ -374,7 +340,7 @@ let attention_section now (snapshots : workspace_snapshot list) : section =
   let content = Dashboard_attention.format_items items in
   { title = "Attention Required"; content; empty_msg = "No action needed" }
 
-let generate ?(scope = All) (config : Workspace_utils.config) : string =
+let generate ?(scope = Dashboard_scope_all) (config : Workspace_utils.config) : string =
   let now = Time_compat.now () in
   let timestamp =
     let tm = Unix.localtime now in
@@ -416,7 +382,7 @@ let generate ?(scope = All) (config : Workspace_utils.config) : string =
   let section_strs = List.map format_section sections in
   String.concat "\n\n" ([header] @ section_strs @ [footer])
 
-let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
+let generate_compact ?(scope = Dashboard_scope_all) (config : Workspace_utils.config) : string =
   let _scope = scope in
   let now = Time_compat.now () in
   let snapshots = [ workspace_snapshot config ] in
@@ -462,8 +428,7 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
       keeper_entries
   in
   let k_running = keeper_by_phase Running in
-  let k_dead = keeper_by_phase Dead in
-  let k_other = List.length keeper_entries - k_running - k_dead in
+  let k_other = List.length keeper_entries - k_running in
   (* Attention *)
   let attention_items = Dashboard_attention.collect ~now snapshots in
   let attention_line = Dashboard_attention.compact_summary attention_items in
@@ -488,7 +453,6 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TaskLoadFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ReconcileFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string DecisionAuditFlushFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string PersonaDriftMissing) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string WorkspaceInitFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string PresenceSyncFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string CycleExceptions) |> int_of_float)
@@ -496,7 +460,7 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string SseBroadcastFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string WorkspaceHeartbeatFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnMetricsSnapshotFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string OasExecutionErrors) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string Agent_coreExecutionErrors) |> int_of_float)
         (* MemoryOsLibrarianFailures is intentionally excluded: librarian
            failures are not tool errors and are surfaced separately in the
            LIBRARIAN header segment (LIBRARIAN-FAILURES-SINCE-START). *)
@@ -525,12 +489,11 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string MetaReadFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ApprovalQueueFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ProfileLoadFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string CompactAuditFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string FsFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string CrashPersistenceFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string KeepaliveSignalFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string MetaJsonFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolsOasFailures) |> int_of_float)
+        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolsAgent_coreFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnUpUpdateFailures) |> int_of_float)
 + (Otel_metric_store.metric_total Keeper_metrics.(to_string ExecutionReceiptFailures) |> int_of_float)
 + (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolExecuteFailures) |> int_of_float)
@@ -553,10 +516,9 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
           ~failures_since_start:librarian_failures_since_start
       in
       Printf.sprintf
-        "KEEPERS: %d running / %d dead / %d other | LIBRARIAN: %s | GUARD: %d | \
+        "KEEPERS: %d running / %d other | LIBRARIAN: %s | GUARD: %d | \
          META-WRITE-ERR: %d%s"
         k_running
-        k_dead
         k_other
         librarian_status
         guard_violations

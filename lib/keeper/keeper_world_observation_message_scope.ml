@@ -30,10 +30,6 @@ let is_self_author ~self_ids (author : string) : bool =
     List.exists (Keeper_identity.Keeper_id.equal author_id) self_ids
 ;;
 
-let is_keeper_authored_message author =
-  Option.is_some (Keeper_identity.canonical_keeper_name_from_agent_name author)
-;;
-
 type pending_kind =
   | Mention
   | Scope
@@ -43,6 +39,13 @@ type pending_message =
   ; speaker : string
   ; content : string
   ; kind : pending_kind
+  }
+
+(* A keeper broadcast projected into this keeper's transcript. Carries no
+   message id: the layer has no watermark, so nothing keys off row identity. *)
+type fleet_message =
+  { fleet_speaker : string
+  ; fleet_content : string
   }
 
 let kind_equal left right =
@@ -227,6 +230,35 @@ let acknowledged_turn_refs messages =
     messages
 ;;
 
+let answered_delivery_keys messages =
+  List.filter_map
+    (fun (message : Keeper_chat_store.chat_message) ->
+      match message.role, message.kind, message.delivery_provenance with
+      | Keeper_chat_store.Role.Assistant,
+        Keeper_chat_store.Row_kind.Utterance,
+        Some provenance ->
+        Some provenance.Keeper_chat_delivery_identity.delivery_key
+      | Keeper_chat_store.Role.Assistant,
+        Keeper_chat_store.Row_kind.Transport_failure,
+        _
+      | Keeper_chat_store.Role.Assistant,
+        Keeper_chat_store.Row_kind.Utterance,
+        None
+      | Keeper_chat_store.Role.User, _, _
+      | Keeper_chat_store.Role.Tool, _, _ ->
+        None)
+    messages
+;;
+
+let exact_delivery_was_answered answered = function
+  | None -> false
+  | Some provenance ->
+    List.exists
+      (Keeper_chat_delivery_identity.delivery_key_equal
+         provenance.Keeper_chat_delivery_identity.delivery_key)
+      answered
+;;
+
 let messages_after_ack ~ack_id messages =
   match ack_id with
   | None -> messages
@@ -241,12 +273,21 @@ let messages_after_ack ~ack_id messages =
 
 let pending_user_lines ?ack_id (messages : Keeper_chat_store.chat_message list) =
   let acknowledged = acknowledged_turn_refs messages in
+  let answered_deliveries = answered_delivery_keys messages in
   messages_after_ack ~ack_id messages
   |> List.filter (fun (message : Keeper_chat_store.chat_message) ->
     match message.role, message.turn_ref with
     | Keeper_chat_store.Role.User, Some turn_ref ->
       not (StringSet.mem (Ids.Turn_ref.to_string turn_ref) acknowledged)
-    | Keeper_chat_store.Role.User, None -> true
+      && not
+           (exact_delivery_was_answered
+              answered_deliveries
+              message.delivery_provenance)
+    | Keeper_chat_store.Role.User, None ->
+      not
+        (exact_delivery_was_answered
+           answered_deliveries
+           message.delivery_provenance)
     | Keeper_chat_store.Role.Assistant, _ | Keeper_chat_store.Role.Tool, _ -> false)
 ;;
 
@@ -254,6 +295,19 @@ let is_owner_authored (m : Keeper_chat_store.chat_message) : bool =
   match m.speaker with
   | Some (s : Keeper_chat_store.speaker) -> s.speaker_authority = Keeper_chat_store.Owner
   | None -> false
+;;
+
+(* Which reactive lane a row belongs to, or [None] when it is addressed to
+   nobody here. Both the reactive lanes and the fleet layer read this one
+   function — the lanes on [Some], the fleet layer on [None] — so a row cannot
+   reach both. Splitting the classification would leave disjointness as a
+   property of two expressions staying complements, which nothing checks. *)
+let lane_of ~target_ids (m : Keeper_chat_store.chat_message) : pending_kind option =
+  if Keeper_lane_mentions.ids_match ~target_ids m.mentions
+  then Some Mention
+  else if is_owner_authored m
+  then Some Scope
+  else None
 ;;
 
 let pending_messages_of_messages
@@ -265,23 +319,13 @@ let pending_messages_of_messages
   let target_ids = Keeper_lane_mentions.target_ids_of targets in
   pending_user_lines ?ack_id messages
   |> List.filter_map (fun (m : Keeper_chat_store.chat_message) ->
-    if Keeper_lane_mentions.ids_match ~target_ids m.mentions
-    then
-      Some
-        { message_id = m.id
-        ; speaker = speaker_display m
-        ; content = m.content
-        ; kind = Mention
-        }
-    else if is_owner_authored m
-    then
-      Some
-        { message_id = m.id
-        ; speaker = speaker_display m
-        ; content = m.content
-        ; kind = Scope
-        }
-    else None)
+    lane_of ~target_ids m
+    |> Option.map (fun kind ->
+      { message_id = m.id
+      ; speaker = speaker_display m
+      ; content = m.content
+      ; kind
+      }))
 ;;
 
 (* RFC-0230 P2 — scope messages: a keeper's lane is, in practice, an operator
@@ -310,15 +354,68 @@ let pending_mentions_of_messages
   |> pairs_of_kind Mention
 ;;
 
-let collect_message_scope ~(config : Workspace.config) ~(meta : keeper_meta)
-  : pending_message list
+(* Fleet messages: keeper broadcasts projected into this keeper's transcript.
+   [Surface_ref.Broadcast] is the typed marker the fleet fanout writes; an
+   [Surface_ref.Agent] row (direct keeper-to-keeper delivery) that lands in no
+   reactive lane is the same standing context, so the filter reads the two
+   variants rather than inspecting content.
+
+   Unlike the two reactive lanes this layer carries no watermark. A projected
+   broadcast is context, not an outstanding obligation, and the lane
+   acknowledgement only advances on autonomous turns — a keeper with
+   [proactive_enabled = false] would accumulate rows forever. Newest [limit]
+   rows, rendered in arrival order. *)
+let fleet_messages_of_messages
+      ~(limit : int)
+      ~(targets : string list)
+      (messages : Keeper_chat_store.chat_message list)
+  : fleet_message list
+  =
+  if limit <= 0
+  then []
+  else (
+    let target_ids = Keeper_lane_mentions.target_ids_of targets in
+    messages
+    |> List.filter (fun (m : Keeper_chat_store.chat_message) ->
+      match m.role, m.surface with
+      | Keeper_chat_store.Role.User, Some (Surface_ref.Agent | Surface_ref.Broadcast)
+        -> Option.is_none (lane_of ~target_ids m)
+      | ( Keeper_chat_store.Role.User
+        , Some
+            ( Surface_ref.Dashboard _
+            | Surface_ref.Discord _
+            | Surface_ref.Slack _
+            | Surface_ref.Webhook _
+            | Surface_ref.Gate _ ) )
+      | Keeper_chat_store.Role.User, None
+      | Keeper_chat_store.Role.Assistant, _
+      | Keeper_chat_store.Role.Tool, _ -> false)
+    |> List.rev
+    |> List.take limit
+    |> List.rev
+    |> List.map (fun (m : Keeper_chat_store.chat_message) ->
+      { fleet_speaker = speaker_display m; fleet_content = m.content }))
+;;
+
+(* Both layers read the same transcript, which reaches 1.8 MB in production.
+   Loading once and deriving both keeps the per-turn read count at one and
+   makes the disjointness visible: the same rows feed both filters. *)
+let collect_message_scope_and_fleet
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~(fleet_limit : int)
+  : pending_message list * fleet_message list
   =
   let messages =
     Keeper_chat_store.load_all ~base_dir:config.base_path ~keeper_name:meta.name
   in
   let targets = message_feed_targets meta in
-  pending_messages_of_messages
-    ?ack_id:meta.runtime.message_scope_ack_id
-    ~targets
-    messages
+  let pending =
+    pending_messages_of_messages
+      ?ack_id:meta.runtime.message_scope_ack_id
+      ~targets
+      messages
+  in
+  let fleet = fleet_messages_of_messages ~limit:fleet_limit ~targets messages in
+  pending, fleet
 ;;

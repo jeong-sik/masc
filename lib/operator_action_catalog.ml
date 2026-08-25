@@ -1,7 +1,7 @@
 (** Product-owned operator action vocabulary.
 
     This module is only a closed parser/serializer for the MASC operator
-    surface. It assigns no authorization category or OAS approval policy.
+    surface. It assigns no authorization category or AGENT_CORE approval policy.
     Every accepted action uses the same explicit confirmation flow. *)
 
 type t =

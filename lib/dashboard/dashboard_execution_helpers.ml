@@ -59,14 +59,6 @@ let cap_string_list ?(limit = execution_tool_preview_limit) values =
 
 let dedup_strings = Dashboard_utils.dedup_strings
 
-(** severity_rank works on raw JSON strings — broader matching than Dashboard_utils.tone_rank.
-    Used by dashboard_briefing / dashboard_briefing_assembly for external JSON data. *)
-let severity_rank = function
-  | "bad" | "critical" | "failed" -> 2
-  | "warn" | "blocked" | "paused" | "interrupted" -> 1
-  | _ -> 0
-
-
 let dashboard_fixture_name ?fixture () =
   let fixtures_enabled = Env_config.Dashboard_config.fixtures_enabled () in
   if not fixtures_enabled then None
@@ -77,73 +69,26 @@ let dashboard_fixture_name ?fixture () =
         if trimmed <> "" then Some trimmed else Env_config.Dashboard_config.fixture_opt ()
     | None -> Env_config.Dashboard_config.fixture_opt ()
 
-(** Agent profile enriched from persona profile.json or Neo4j cache. *)
+(** Agent profile enriched from the Neo4j cache. *)
 type agent_profile = {
   emoji : string;
   korean_name : string;
-  model : string option;
-  traits : string list;
-  interests : string list;
-  activity_level : float option;
-  primary_value : string option;
 }
 
-(** Extract persona name from MASC agent name.
-    "keeper-sangsu-agent" -> "sangsu", "claude-agent-abc" -> "claude-agent-abc"
+(** Extract the Keeper name from a MASC agent name.
+    "keeper-example-agent" -> "example", "claude-agent-abc" -> "claude-agent-abc"
 
     [Keeper_identity] owns this parse. It enumerates the four accepted
     spellings — keeper-/-agent, keeper_/_agent, and the two mixed forms — and
     its own comment records what happens when a spelling is known in one place
     and not another. This function used to hand-roll the first pair with
     [String.sub s 7] and [String.sub s (len - 6) 6], so an agent named
-    keeper_sangsu_agent kept its affixes and the persona lookup below searched
+    keeper_example_agent kept its affixes and the profile lookup below searched
     for a directory of that name. *)
-let extract_persona_name (agent_name : string) : string =
+let extract_keeper_name (agent_name : string) : string =
   match Keeper_identity.keeper_name_of_agent_alias agent_name with
   | Some keeper_name -> keeper_name
   | None -> agent_name
-
-(** Try loading agent profile from local persona profile.json.
-    Path: resolved personas root / <persona_name> / profile.json *)
-let load_persona_profile (persona_name : string) : agent_profile option =
-  let path =
-    match Config_dir_resolver.personas_dir_opt () with
-    | Some personas_root ->
-        Filename.concat
-          (Filename.concat personas_root persona_name)
-          "profile.json"
-    | None -> ""
-  in
-  if not (Sys.file_exists path) then None
-  else
-    match Safe_ops.read_json_file_safe path with
-    | Error _ -> None
-    | Ok json ->
-        let name_val =
-          Safe_ops.json_string_opt "name" json
-          |> Option.value ~default:persona_name
-        in
-        let keeper_json =
-          Safe_ops.protect ~default:None (fun () ->
-            Some (Option.value ~default:`Null (Json_util.assoc_member_opt "keeper" json)))
-        in
-        let model =
-          match keeper_json with
-          | Some kj -> Safe_ops.json_string_opt "active_model" kj
-          | None -> None
-        in
-        let trait = Safe_ops.json_string_opt "trait" json in
-        let traits = match trait with Some t -> [t] | None -> [] in
-        Some
-          {
-            emoji = "🤖";  (* generic default — enriched from Neo4j later *)
-            korean_name = name_val;
-            model;
-            traits;
-            interests = [];
-            activity_level = None;
-            primary_value = None;
-          }
 
 (** Neo4j agent identity cache.  Loaded lazily on first lookup; once
     populated the Hashtbl is read-only.
@@ -165,7 +110,7 @@ let is_neo4j_identity_context_error message =
 
 let populate_neo4j_identity_cache_locked () =
   let body =
-    {|{"query":"{ agents(first: 50) { edges { node { name emoji koreanName model traits interests activityLevel primaryValue } } } }"}|}
+    {|{"query":"{ agents(first: 50) { edges { node { name emoji koreanName } } } }"}|}
   in
   match Graphql_client.request body with
   | Error e when is_neo4j_identity_context_error e ->
@@ -192,79 +137,40 @@ let populate_neo4j_identity_cache_locked () =
                 Safe_ops.json_string_opt "koreanName" node
                 |> Option.value ~default:name
               in
-              let model = Safe_ops.json_string_opt "model" node in
-              let traits =
-                Safe_ops.protect ~default:[] (fun () ->
-                  (match node |> m "traits" with `List l -> List.filter_map (function `String s -> Some s | _ -> None) l | _ -> []))
-              in
-              let interests =
-                Safe_ops.protect ~default:[] (fun () ->
-                  (match node |> m "interests" with `List l -> List.filter_map (function `String s -> Some s | _ -> None) l | _ -> []))
-              in
-              let activity_level = Safe_ops.json_float_opt "activityLevel" node in
-              let primary_value = Safe_ops.json_string_opt "primaryValue" node in
               Hashtbl.replace neo4j_identity_cache name
                 {
                   emoji;
                   korean_name;
-                  model;
-                  traits;
-                  interests;
-                  activity_level;
-                  primary_value;
                 }
             end)
           edges
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         Log.Dashboard.warn "neo4j identity cache update failed: %s" (Printexc.to_string exn))
 
-let lookup_neo4j_profile persona_name =
+let lookup_neo4j_profile keeper_name =
   Eio_guard.with_mutex neo4j_cache_mu (fun () ->
     if not !neo4j_cache_loaded then begin
       populate_neo4j_identity_cache_locked ();
       neo4j_cache_loaded := true
     end;
-    Hashtbl.find_opt neo4j_identity_cache persona_name)
+    Hashtbl.find_opt neo4j_identity_cache keeper_name)
 
-(** Merge two profiles: prefer non-default values from [overlay] over [base]. *)
-let merge_profiles ~(base : agent_profile) ~(overlay : agent_profile) : agent_profile =
-  {
-    emoji = (if overlay.emoji <> "🎭" && overlay.emoji <> "🤖" then overlay.emoji else base.emoji);
-    korean_name = (if overlay.korean_name <> "" then overlay.korean_name else base.korean_name);
-    model = (match overlay.model with Some _ -> overlay.model | None -> base.model);
-    traits = (if overlay.traits <> [] then overlay.traits else base.traits);
-    interests = (if overlay.interests <> [] then overlay.interests else base.interests);
-    activity_level = (match overlay.activity_level with Some _ -> overlay.activity_level | None -> base.activity_level);
-    primary_value = (match overlay.primary_value with Some _ -> overlay.primary_value | None -> base.primary_value);
-  }
-
-(** Get full agent profile: persona + Neo4j merged -> hardcoded fallback *)
+(** Get full agent profile from Neo4j, then use an identity-only fallback. *)
 let get_agent_profile (name : string) : agent_profile =
   (* TODO(task-1823): The fallback below is a fake Keeper v2 dashboard field.
-     When neither persona files nor Neo4j data exist, we return hardcoded values
+     When no Neo4j data exists, we return hardcoded values
      (emoji="🤖", korean_name=name) instead of live-backed surfaces.
      A future change should either:
        (a) require live-backed surfaces and raise/warn when no data is found, or
        (b) populate from a guaranteed registry so no agent falls through. *)
-  let persona_name = extract_persona_name name in
-  let neo4j_profile = lookup_neo4j_profile persona_name in
-  let persona_profile = load_persona_profile persona_name in
-  match (persona_profile, neo4j_profile) with
-  | (Some persona, Some neo4j) ->
-      (* Merge: Neo4j has emoji/traits/interests, persona has model/korean_name *)
-      merge_profiles ~base:persona ~overlay:neo4j
-  | (Some persona, None) -> persona
-  | (None, Some neo4j) -> neo4j
-  | (None, None) ->
-      (* Generic fallback — no persona or Neo4j data available *)
+  let keeper_name = extract_keeper_name name in
+  let neo4j_profile = lookup_neo4j_profile keeper_name in
+  match neo4j_profile with
+  | Some profile -> profile
+  | None ->
       {
         emoji = "🤖";
         korean_name = name;
-        model = None;
-        traits = [];
-        interests = [];
-        activity_level = None;
-        primary_value = None;
       }
 
 let handoff_json ~surface ?command_surface ?operation_id ~label ~target_type ~target_id

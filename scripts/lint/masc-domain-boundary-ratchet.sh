@@ -10,7 +10,7 @@
 #   - Goal domain may not learn new Task state coupling. Existing files that
 #     still inspect Masc_domain.task / Workspace_query are baselined debt.
 #   - Leaf Tool / Turn FSM / Board types / Task state / Memory JSONL
-#     modules may not learn Keeper, OAS provider/runtime, workspace-task, or
+#     modules may not learn Keeper, AGENT_CORE provider/runtime, workspace-task, or
 #     DB/vector persistence concepts.
 #   - MASC persistence remains filesystem/JSONL; DB/vector backend terms are
 #     rejected in the leaf state domains scanned here.
@@ -81,32 +81,32 @@ emit_rule_matches() {
 }
 
 current_entries() {
-  local keeper_pattern oas_provider_pattern workspace_task_pattern db_pattern
-  keeper_pattern='\b(Keeper_[A-Za-z0-9_]+|Agent_tool_descriptor|Agent_tool_descriptor_resolution|Agent_tool_dispatch_runtime|Keeper_tool_alias|Keeper_types_profile|Task_keeper_backend)\b'
-  oas_provider_pattern='\b(Agent_sdk|Provider_runtime_binding|Provider_kind_resolver|Provider_adapter|Masc_oas_bridge)\b|\bOas\.'
+  local keeper_pattern agent_core_provider_pattern workspace_task_pattern db_pattern
+  keeper_pattern='\b(Keeper_[A-Za-z0-9_]+|Agent_tool_descriptor|Agent_tool_descriptor_resolution|Agent_tool_dispatch_runtime|Keeper_types_profile|Task_keeper_backend)\b'
+  agent_core_provider_pattern='\b(Agent_core|Provider_runtime_binding|Provider_kind_resolver|Provider_adapter|Masc_agent_core_bridge)\b|\bAgent_core\.'
   workspace_task_pattern='\b(Workspace_query|Masc_domain\.task)\b'
   db_pattern='(?i)\b(qdrant|pgvector|postgres|postgresql|supabase|sqlite|database)\b'
 
   {
     emit_rule_matches "goal_to_task_state" "$workspace_task_pattern" lib/goal
     emit_rule_matches "goal_to_keeper_runtime" "$keeper_pattern" lib/goal
-    emit_rule_matches "goal_to_oas_provider" "$oas_provider_pattern" lib/goal
+    emit_rule_matches "goal_to_agent_core_provider" "$agent_core_provider_pattern" lib/goal
 
     emit_rule_matches "tool_to_keeper_runtime" "$keeper_pattern" lib/tool
     emit_rule_matches "tool_to_workspace_task" "$workspace_task_pattern" lib/tool
-    emit_rule_matches "tool_to_oas_provider" "$oas_provider_pattern" lib/tool
+    emit_rule_matches "tool_to_agent_core_provider" "$agent_core_provider_pattern" lib/tool
 
     emit_rule_matches "turn_fsm_to_keeper_runtime" "$keeper_pattern" lib/turn_fsm
-    emit_rule_matches "turn_fsm_to_oas_provider" "$oas_provider_pattern" lib/turn_fsm
+    emit_rule_matches "turn_fsm_to_agent_core_provider" "$agent_core_provider_pattern" lib/turn_fsm
     emit_rule_matches "turn_fsm_to_workspace_task" "$workspace_task_pattern" lib/turn_fsm
 
     emit_rule_matches "board_types_to_keeper_runtime" "$keeper_pattern" lib/board_types
-    emit_rule_matches "board_types_to_oas_provider" "$oas_provider_pattern" lib/board_types
+    emit_rule_matches "board_types_to_agent_core_provider" "$agent_core_provider_pattern" lib/board_types
     emit_rule_matches "board_types_to_workspace_task" "$workspace_task_pattern" lib/board_types
 
     emit_rule_matches "task_transition_to_keeper_runtime" "$keeper_pattern" \
       lib/types/types_core.ml lib/types/types_core.mli
-    emit_rule_matches "task_transition_to_oas_provider" "$oas_provider_pattern" \
+    emit_rule_matches "task_transition_to_agent_core_provider" "$agent_core_provider_pattern" \
       lib/types/types_core.ml lib/types/types_core.mli
 
     emit_rule_matches "leaf_state_to_db_backend" "$db_pattern" \
@@ -184,7 +184,7 @@ check() {
   if [[ -s "$new_tmp" ]]; then
     echo "[masc-domain-boundary-ratchet] DRIFT UP: new domain boundary coupling:" >&2
     sed 's/^/  - /' "$new_tmp" >&2
-    echo "  Keep MASC/OAS ownership and leaf domains separate. Move integration" >&2
+    echo "  Keep MASC/AGENT_CORE ownership and leaf domains separate. Move integration" >&2
     echo "  behaviour into a keeper/runtime/workspace adapter instead of teaching" >&2
     echo "  the leaf domain about that external family. Do not add new entries" >&2
     echo "  to the baseline." >&2

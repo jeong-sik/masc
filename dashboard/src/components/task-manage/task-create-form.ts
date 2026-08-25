@@ -54,8 +54,8 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
           <h3 class="text-base font-semibold text-text-strong">새 태스크</h3>
           <p class="mt-1 text-xs leading-relaxed text-text-muted">
             ${linkedGoalId
-              ? 'goal_id가 함께 저장됩니다. 제목에 [goal:<id>] 태그를 붙이지 않아도 Goal Manager에 연결됩니다.'
-              : '간단한 제목만 있어도 backlog에 등록됩니다. 설명은 나중에 보강해도 됩니다.'}
+              ? 'goal_id 자동 연결'
+              : '제목만으로 등록 가능'}
           </p>
         </div>
       </div>

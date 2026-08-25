@@ -1,14 +1,5 @@
 ---
 status: reference
-last_verified: 2026-07-13
-code_refs:
-  - lib/keeper/keeper_keepalive.ml
-  - lib/keeper/keeper_heartbeat_loop.ml
-  - lib/keeper/keeper_unified_turn.ml
-  - lib/keeper/keeper_agent_run.ml
-  - lib/keeper/keeper_keepalive_signal.ml
-  - lib/keeper/keeper_execution_receipt.ml
-  - specs/keeper-state-machine/KeeperHitlDeferred.tla
 ---
 
 # Turn Lifecycle
@@ -35,7 +26,7 @@ wait for typed stimulus
   -> consume next durable lane item
   -> build source observations
   -> configured LLM decides the next action
-  -> execute OAS turn and registered tools
+  -> execute agent core turn and registered tools
   -> persist transcript, tool results, and receipt
   -> enqueue follow-up stimuli/jobs
   -> wait for the next item
@@ -46,11 +37,11 @@ whether to reply, defer, continue existing work, or start another action. A
 string classifier, score, timeout strike, progress count, or hardcoded product
 name cannot make that decision.
 
-## 3. OAS boundary
+## 3. agent core boundary
 
-MASC supplies OAS with the selected runtime, conversation, multimodal parts,
-and the registered tool surface. OAS owns provider/model calls, streaming,
-reasoning/tool protocol support, and typed provider outcomes. OAS remains
+MASC supplies agent core with the selected runtime, conversation, multimodal parts,
+and the registered tool surface. agent core owns provider/model calls, streaming,
+reasoning/tool protocol support, and typed provider outcomes. agent core remains
 generic and imports no Keeper, Task, Goal, Board, Connector, or Gate module.
 
 Provider/model errors return as typed observations. They may cause the Keeper
@@ -101,7 +92,7 @@ Each turn records, in order:
 - assistant reasoning/thinking parts allowed by the provider contract;
 - tool calls, tool results, images/audio/text parts, and interleaving order;
 - Gate and Job references;
-- terminal OAS outcome or cancellation;
+- terminal agent core outcome or cancellation;
 - token, latency, and throughput measurements.
 
 Missing or malformed evidence is an explicit error. A receipt is evidence of

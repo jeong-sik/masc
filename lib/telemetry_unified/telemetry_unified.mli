@@ -8,7 +8,7 @@
     - [<masc_root>/tool_calls/]             — Full I/O for keeper tool calls
     - [<masc_root>/trajectories/<keeper>/]  — Trajectory tool-call rows
     - [<masc_root>/tool_usage/]             — Non-public registered tool calls
-    - [<masc_root>/oas-events/]             — Durable OAS native/custom bus events
+    - [<masc_root>/agent-core-events/]             — Durable AGENT_CORE native/custom bus events
     - [<masc_root>/keepers/<name>/execution-receipts/]
                                               — Keeper execution receipts
     - [<masc_root>/goal_events.jsonl]       — Goal FSM lifecycle events
@@ -26,7 +26,7 @@ type source =
   | Tool_call_io   (** Keeper tool calls with full input/output *)
   | Trajectory_tool_call  (** Trajectory-backed keeper tool call rows *)
   | Tool_usage     (** Non-public registered tool invocations *)
-  | Oas_event      (** Durable OAS native/custom event bus relays *)
+  | Agent_core_event      (** Durable AGENT_CORE native/custom event bus relays *)
   | Execution_receipt  (** Keeper execution receipt rows *)
   | Goal_event     (** Goal FSM lifecycle and verification events *)
   | Tool_metric    (** Tool duration and success metrics *)
@@ -34,12 +34,43 @@ type source =
 val source_to_string : source -> string
 val source_of_string : string -> source option
 val all_sources : source list
+val source_freshness_slo_s : ?keeper_keepalive_interval_s:float -> source -> float
 
 type read_result = {
   entries : Yojson.Safe.t list;
   total_matching_entries : int;
   truncated : bool;
 }
+
+(** How many entries one read may return.
+
+    Abstract so that "no limit" cannot be constructed. Before RFC-0372 the
+    limit was a plain [int] where [n <= 0] meant unbounded, and the scan cap
+    that backed it applied per store rather than per request: with nine
+    sources, three of which fan out per keeper, one request could materialise
+    the whole store and the ceiling rose every time a keeper was added.
+
+    Values are clamped into [1, max_read_entries] at construction, so every
+    reader downstream holds a positive bound by type. A caller that wants
+    "everything in the window" gets [max_read_entries] and a [truncated] flag,
+    not an unbounded scan — the response contract is preserved, the unbounded
+    read is not. *)
+type read_limit
+
+(** Ceiling a single read may return, whatever the store size. *)
+val max_read_entries : int
+
+(** Applied when a request omits the limit. *)
+val default_read_entries : int
+
+(** Clamp into [1, max_read_entries].
+
+    Zero and negatives map to [default_read_entries], NOT to "unbounded":
+    the old permissive reading of [n = 0] is the defect RFC-0372 closes, so it
+    is mapped here once rather than re-checked at each reader. *)
+val read_limit_of_int : int -> read_limit
+
+val read_limit_to_int : read_limit -> int
 
 val read_unified :
   base_path:string ->
@@ -51,16 +82,21 @@ val read_unified :
   ?worker_run_id:string ->
   ?since_ts:float ->
   ?until_ts:float ->
-  ?n:int ->
+  ?limit:read_limit ->
   ?offset:int ->
   unit ->
   Yojson.Safe.t list
 (** [read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id
-      ?operation_id ?worker_run_id ?since_ts ?until_ts ?n ()]
+      ?operation_id ?worker_run_id ?since_ts ?until_ts ?limit ()]
     reads entries from [sources] (default: all sources), optionally filtered
     by [keeper_name], generic correlation keys, and an optional unix-second
-    window. Returns at most [n] entries (default 100) sorted by timestamp
-    descending (newest first).  When [n <= 0], no truncation is applied.
+    window. Returns at most [read_limit_to_int limit] entries (default
+    [default_read_limit]) sorted by timestamp descending (newest first).
+
+    Truncation always applies. There is no "return everything" form: a limit
+    is a positive bound by construction ({!read_limit}), and a caller asking
+    for more than [max_read_entries] receives that ceiling with
+    [truncated = true] rather than a full-store scan (RFC-0372).
 
     [masc_root] is the cluster-aware .masc directory (use
     [Workspace.masc_root_dir config] to obtain it).  [base_path] is the
@@ -78,7 +114,7 @@ val read_unified_result :
   ?worker_run_id:string ->
   ?since_ts:float ->
   ?until_ts:float ->
-  ?n:int ->
+  ?limit:read_limit ->
   ?offset:int ->
   unit ->
   read_result
@@ -86,6 +122,8 @@ val read_unified_result :
     entries before truncation plus whether truncation occurred. *)
 
 val summary_json :
+  ?keeper_keepalive_interval_s:float ->
+  ?keeper_metric_producer_active:bool ->
   base_path:string ->
   masc_root:string ->
   unit ->
@@ -93,14 +131,18 @@ val summary_json :
 (** [summary_json ~base_path ~masc_root ()] returns a JSON overview of
     each source: path, entry count, whether the store directory exists,
     and freshness metadata ([latest_ts_unix], [latest_ts_iso],
-    [latest_age_s]).  [masc_root] is the cluster-aware .masc directory. *)
+    [latest_age_s]). A live Keeper metrics producer suppresses only
+    age-derived staleness; missing, empty, read-error, and coverage-gap states
+    remain fail-visible. [masc_root] is the cluster-aware .masc directory. *)
 
 val replay_retention_json :
+  ?keeper_keepalive_interval_s:float ->
   base_path:string ->
   masc_root:string ->
   sources:source list ->
+  unit ->
   Yojson.Safe.t
-(** [replay_retention_json ~base_path ~masc_root ~sources] returns the
+(** [replay_retention_json ~base_path ~masc_root ~sources ()] returns the
     provenance block for the dashboard telemetry replay endpoint, including
     the selected source list and durable stores read for each source. *)
 

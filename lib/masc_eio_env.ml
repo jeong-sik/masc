@@ -1,7 +1,7 @@
-(** Per-domain Eio environment for OAS HTTP calls.
+(** Per-domain Eio environment for AGENT_CORE HTTP calls.
     Set once per OCaml domain via {!init}.
 
-    The switch and net handle are needed by OAS provider completions
+    The switch and net handle are needed by AGENT_CORE provider completions
     which use cohttp-eio for HTTP transport. They are stored in
     [Domain.DLS] only; a consumer that needs them must call {!init} in its
     own domain. Falling back to another domain's [Eio.Switch.t] or

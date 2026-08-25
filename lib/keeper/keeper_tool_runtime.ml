@@ -5,9 +5,9 @@ open Keeper_tool_descriptor
 (* RFC-0182 Phase 5 PR-A (RFC §12): optional Eio resource fields.
    When set, descriptor handlers like masc_keeper_msg / masc_keeper_up /
    masc_operator_* can call into Eio-bound
-   primitives (start_keepalive, Keeper_msg_async.submit, LLM-call fibers,
+   primitives (start_keepalive, Owner operation submission, LLM-call fibers,
    Operator_control.context) without re-introducing dispatch-ref
-   plumbing.  Default = [None]; callers without Eio context (OAS handler,
+   plumbing.  Default = [None]; callers without Eio context (AGENT_CORE handler,
    tests) leave them unset and the Eio-bound descriptor handlers return
    a typed "Eio context not provided" failure instead of crashing. *)
 type context =
@@ -26,7 +26,7 @@ type context =
     (* RFC-0320: the connector conversation the current turn started from,
        so async tools (masc_fusion) can route their completion wake back to
        the originating channel. [None] on non-connector turns and on callers
-       without turn context (OAS handler defaults, tests). *)
+       without turn context (AGENT_CORE handler defaults, tests). *)
   ; gate_context : (unit -> Keeper_gate.causal_context) option
     (* Exact outer-turn evidence for contextual Gate judgment. Runtime handlers
        pass it through without inspecting the snapshot. *)
@@ -90,6 +90,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
+  | Tool_keeper_spawn_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -98,14 +99,13 @@ let handle_filesystem ctx descriptor args =
   | Tool_analyze_image -> None
 ;;
 
-(* Shell IR mechanics live under Execute lowerers. Keeper_tool_command_runtime is
-   the descriptor-selected runtime boundary that binds Execute/Grep to
-   those lowerers without keeping them under the keeper_exec* axis. *)
+(* Shell IR mechanics live under the Execute owner; Grep workspace operations
+   live under their own owner. Descriptor routing selects those owners here. *)
 let handle_shell_ir ctx descriptor args =
   match descriptor.Keeper_tool_descriptor.runtime_handler with
   | Tool_execute ->
       Some
-        (Keeper_tool_command_runtime.handle_tool_execute_with_outcome
+        (Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
            ~turn_sandbox_factory:ctx.turn_sandbox_factory
          ~config:ctx.config
          ~meta:ctx.meta
@@ -116,7 +116,7 @@ let handle_shell_ir ctx descriptor args =
          ())
   | Tool_search_files ->
     Some
-      (Keeper_tool_command_runtime.handle_tool_search_files_with_outcome
+      (Keeper_workspace_ops.handle_tool_search_files_with_outcome
          ~turn_sandbox_factory:ctx.turn_sandbox_factory
          ~config:ctx.config
          ~meta:ctx.meta
@@ -150,6 +150,7 @@ let handle_shell_ir ctx descriptor args =
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
+  | Tool_keeper_spawn_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -163,7 +164,7 @@ let handle_in_process ctx descriptor args =
   match descriptor.Keeper_tool_descriptor.runtime_handler with
   | Tool_time_now ->
     Some
-      (Keeper_tool_execution.success
+      (Keeper_tool_execution.success_data
          (Keeper_tool_in_process_runtime.handle_time_now ~args))
   | Tool_tools_list ->
     Some
@@ -191,10 +192,14 @@ let handle_in_process ctx descriptor args =
          ~args)
   | Tool_memory_write ->
     Some
-      (Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
+      (Keeper_tool_in_process_runtime.handle_memory_write_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
-         ~args)
+         ?continuation_channel:ctx.continuation_channel
+         ?gate_context:ctx.gate_context
+         ?gate_grant:ctx.gate_grant
+         ~args
+         ())
   | Tool_library_search ->
     Some
       (Keeper_tool_in_process_runtime.handle_library_search_with_outcome
@@ -333,13 +338,17 @@ let handle_in_process ctx descriptor args =
          ~meta:ctx.meta
          ~name
          ~args)
+  | Tool_keeper_spawn_dispatch ->
+    Some (Keeper_tool_in_process_runtime.handle_keeper_spawn_with_outcome ~name ~args)
   | Tool_masc_schedule_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_masc_schedule_with_outcome
          ~config:ctx.config
          ~meta:ctx.meta
+         ?continuation_channel:ctx.continuation_channel
          ~name
-         ~args)
+         ~args
+         ())
   | Tool_masc_keeper_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_masc_keeper_with_outcome

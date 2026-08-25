@@ -119,7 +119,6 @@ const namespaceTruthResponse: DashboardNamespaceTruthResponse = {
   },
   readiness: {
     status: 'warn',
-    score: 0.67,
     decision_required_count: 1,
     blocking_count: 2,
     pillars: [
@@ -127,7 +126,6 @@ const namespaceTruthResponse: DashboardNamespaceTruthResponse = {
         key: 'execution_safety',
         label: 'Execution Safety',
         status: 'ok',
-        score: 1,
         summary: 'Sandbox and approval posture are visible.',
         blocking_reasons: [],
         metrics: { keeper_count: 2 },
@@ -136,7 +134,6 @@ const namespaceTruthResponse: DashboardNamespaceTruthResponse = {
         key: 'autonomy_reliability',
         label: 'Autonomy Reliability',
         status: 'warn',
-        score: 0.5,
         summary: 'One keeper is asking for intervention.',
         blocking_reasons: ['1 keeper has a pending Gate request.'],
         metrics: { decision_required: 1 },
@@ -320,7 +317,6 @@ describe('FleetTelemetryPanel', () => {
       keepers: [
         {
           ...executionResponse.keepers[0],
-          active_goal_ids: ['goal-1'],
           sandbox_profile: 'docker',
           sandbox_last_error: 'bind EPERM at /var/folders/tmp',
         },
@@ -344,9 +340,7 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('Gate 대기')
     expect(container.textContent).toContain('주의 대기열')
     expect(container.textContent).toContain('keeper-alpha has a pending Gate request.')
-    expect(container.textContent).toContain('goal linked')
     expect(container.textContent).toContain('sandbox docker')
-    expect(container.textContent).toContain('goal-1')
     expect(container.textContent).toContain('bind EPERM at /var/folders/tmp')
   }, 60_000)
 
@@ -490,7 +484,6 @@ describe('FleetTelemetryPanel', () => {
         context_ratio: 0.3,
         total_turns: 5,
         last_model_used: 'unknown',
-        last_autonomous_action_at: '2026-04-24T12:00:00Z',
         last_heartbeat: '2026-04-24T17:54:00Z',
         active_model: 'gpt-5.4',
         metrics_series: [
@@ -745,7 +738,7 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('텔레메트리 저장소')
   }, 60_000)
 
-  it('warns when the OAS relay lags behind fresher agent telemetry', async () => {
+  it('warns when the Agent Core relay lags behind fresher agent telemetry', async () => {
     const fetchDashboardExecution = vi.fn().mockResolvedValue(executionResponse)
     const fetchToolQuality = vi.fn().mockResolvedValue(toolQualityResponse)
     const fetchTelemetrySummary = vi.fn().mockResolvedValue({
@@ -760,7 +753,7 @@ describe('FleetTelemetryPanel', () => {
           latest_age_s: 30,
         },
         {
-          source: 'oas_event',
+          source: 'agent_core_event',
           entry_count: 146,
           exists: true,
           latest_ts_unix: 1_000,
@@ -781,7 +774,7 @@ describe('FleetTelemetryPanel', () => {
     await flushUi()
 
     expect(container.textContent).toContain('부분 텔레메트리')
-    expect(container.textContent).toContain('OAS event relay trails agent events by 16m 40s.')
+    expect(container.textContent).toContain('Agent Core event relay trails agent events by 16m 40s.')
     expect(container.textContent).toContain('last 17m 10s ago')
   }, 60_000)
 
@@ -919,7 +912,6 @@ describe('FleetTelemetryPanel', () => {
       attention_events: [],
       readiness: {
         ...namespaceTruthResponse.readiness!,
-        score: 0.9,
         status: 'ok',
       },
     })

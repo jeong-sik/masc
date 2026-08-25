@@ -1,6 +1,8 @@
 type context =
   { config : Workspace.config
   ; agent_name : string
+  ; stamp_keeper_wake_result_delivery :
+      payload:Yojson.Safe.t -> (Yojson.Safe.t, string) result
   ; admit_keeper_wake_creation :
       Workspace.config ->
       keeper_name:string ->
@@ -92,12 +94,22 @@ let required_int args key =
 let validate_recurrence_arg recurrence = Schedule_domain.validate_recurrence recurrence
 
 let recurrence_of_arg args =
-  match string_opt args "recurrence_kind" with
-  | None | Some "one_shot" -> validate_recurrence_arg Schedule_domain.One_shot
-  | Some "interval" ->
+  let* recurrence_kind =
+    match string_opt args "recurrence_kind" with
+    | None -> Ok Schedule_contract_values.One_shot
+    | Some wire_value ->
+      (match Schedule_contract_values.recurrence_kind_of_string wire_value with
+       | Ok recurrence_kind -> Ok recurrence_kind
+       | Error error ->
+         Error (Schedule_contract_values.decode_error_to_string error))
+  in
+  match recurrence_kind with
+  | Schedule_contract_values.One_shot ->
+    validate_recurrence_arg Schedule_domain.One_shot
+  | Schedule_contract_values.Interval ->
     let* interval_sec = required_int args "recurrence_interval_sec" in
     validate_recurrence_arg (Schedule_domain.Interval { interval_sec })
-  | Some "daily" ->
+  | Schedule_contract_values.Daily ->
     let* hour = required_int args "recurrence_hour" in
     let* minute = required_int args "recurrence_minute" in
     let second =
@@ -109,11 +121,10 @@ let recurrence_of_arg args =
     in
     let* timezone = required_string args "recurrence_timezone" in
     validate_recurrence_arg (Schedule_domain.Daily { hour; minute; second; timezone })
-  | Some "cron" ->
+  | Schedule_contract_values.Cron ->
     let* expression = required_string args "recurrence_cron" in
     let* timezone = required_string args "recurrence_timezone" in
     validate_recurrence_arg (Schedule_domain.Cron { expression; timezone })
-  | Some other -> Error ("unknown recurrence_kind: " ^ other)
 ;;
 
 let actor_from_args args ~prefix ~default_id ~default_kind =
@@ -250,6 +261,13 @@ let schedule_request_json ?last_wake (request : Schedule_domain.schedule_request
              | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts) )
          ; ( "requested_at_iso"
            , `String (Masc_domain.iso8601_of_unix_seconds request.requested_at) )
+           (* The dashboard projection emits the structured form through the
+              same serialiser. Sending only the two flattened strings here left
+              the client reconstructing recurrence from them, with an
+              unknown-shape fallback at the end of that chain. Both surfaces
+              now carry the structure, and the flattened pair stays for the
+              readers that already use it. *)
+         ; "recurrence", Schedule_domain.recurrence_to_yojson request.recurrence
          ; ( "recurrence_kind"
            , `String (Schedule_domain.recurrence_kind_to_string request.recurrence) )
          ; ( "recurrence_summary"
@@ -329,6 +347,7 @@ let request_result ~tool_name ~start_time = function
 let handle_create ~tool_name ~start_time ctx args =
   let result =
     let* payload = payload_from_args args in
+    let* payload = ctx.stamp_keeper_wake_result_delivery ~payload in
     let* () = validate_known_payload_request ~payload in
     let* keeper_wake_target =
       Schedule_payload_projection.creation_keeper_wake_target ~payload
@@ -460,7 +479,11 @@ let handle_get ~tool_name ~start_time ctx args =
        ok ~tool_name ~start_time (schedule_request_json ?last_wake request))
 ;;
 
-let handle_cancel ~tool_name ~start_time ctx args =
+(* Takes the config alone, not the full [context]: cancel touches nothing but
+   the schedule store, so requiring the creation-path hooks (or an agent name
+   the arguments already carry) would be a dependency this action does not
+   have. *)
+let handle_cancel ~tool_name ~start_time (config : Workspace.config) args =
   let result =
     let* schedule_id = required_string args "schedule_id" in
     let* cancelled_by_id = required_string args "cancelled_by_id" in
@@ -469,7 +492,7 @@ let handle_cancel ~tool_name ~start_time ctx args =
     in
     let* reason = required_string args "reason" in
     let* request =
-      Schedule_service.cancel ctx.config ~schedule_id
+      Schedule_service.cancel config ~schedule_id
       |> Result.map_error Schedule_service.service_error_to_string
     in
     Ok (request, cancelled_by_id, cancelled_by_kind, reason)
@@ -505,7 +528,9 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | Some { action = Create_request; _ } -> handle handle_create
   | Some { action = List_requests; _ } -> handle handle_list
   | Some { action = Get_request; _ } -> handle handle_get
-  | Some { action = Cancel_request; _ } -> handle handle_cancel
+  | Some { action = Cancel_request; _ } ->
+      handle (fun ~tool_name ~start_time ctx ->
+          handle_cancel ~tool_name ~start_time ctx.config)
   | _ -> None
 ;;
 

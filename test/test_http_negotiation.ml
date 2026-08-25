@@ -78,8 +78,9 @@ let test_protocol_continuity_allows_missing_header () =
     (fun () ->
       match Session.validate_protocol_version_continuity ~session_id request with
       | Ok () -> ()
-      | Error msg ->
-          failf "expected missing protocol header to use session continuity, got %s" msg)
+      | Error rejection ->
+          failf "expected missing protocol header to use session continuity, got %s"
+            (Session.protocol_version_rejection_message rejection))
 
 let test_protocol_version_for_session_falls_back_to_negotiated_version () =
   Eio_main.run @@ fun env ->
@@ -110,10 +111,56 @@ let test_protocol_continuity_rejects_mismatch () =
     (fun () ->
       match Session.validate_protocol_version_continuity ~session_id request with
       | Ok () -> fail "expected mismatched protocol version to be rejected"
-      | Error msg ->
-          check bool "mentions mismatch" true
-            (String.length msg > 0
-            && String.contains msg ':'))
+      | Error (Session.Session_version_mismatch { expected; got; _ }) ->
+          check string "remembered version" "2025-11-25" expected;
+          check string "requested version" "2025-03-26" got
+      | Error (Session.Unsupported_version { requested }) ->
+          failf
+            "expected a session mismatch, got an unsupported-version \
+             rejection for %s"
+            requested)
+
+(* The rejection a modern client reads to decide this server is modern. The
+   assertion runs through the transport rather than the error module so the
+   supported list the body advertises stays the list the transport actually
+   validates against. *)
+let test_unsupported_protocol_version_rejection () =
+  let module Session = Server_mcp_transport_http in
+  let session_id = "compat-session-unsupported-version" in
+  let headers =
+    Httpun.Headers.of_list [("mcp-protocol-version", "1900-01-01")]
+  in
+  let request = Httpun.Request.create ~headers `POST "/mcp" in
+  match Session.validate_protocol_version_continuity ~session_id request with
+  | Ok () -> fail "expected an unsupported protocol version to be rejected"
+  | Error (Session.Session_version_mismatch _) ->
+      fail "an unknown session cannot produce a continuity mismatch"
+  | Error (Session.Unsupported_version { requested } as rejection) ->
+      check string "requested version is echoed" "1900-01-01" requested;
+      let body = Session.protocol_version_rejection_body rejection in
+      let advertised =
+        match Yojson.Safe.from_string body with
+        | `Assoc fields -> (
+            match List.assoc_opt "error" fields with
+            | Some (`Assoc err) -> (
+                (match List.assoc_opt "code" err with
+                | Some (`Int code) ->
+                    check int "wire code fixed by MCP 2026-07-28" (-32022) code
+                | _ -> fail "error.code missing from the body");
+                match List.assoc_opt "data" err with
+                | Some (`Assoc data) -> (
+                    match List.assoc_opt "supported" data with
+                    | Some (`List vs) ->
+                        List.filter_map
+                          (function `String s -> Some s | _ -> None)
+                          vs
+                    | _ -> fail "data.supported missing from the body")
+                | _ -> fail "error.data missing from the body")
+            | _ -> fail "error object missing from the body")
+        | _ -> fail "rejection body is not a JSON object"
+      in
+      check (list string) "body advertises exactly what the transport accepts"
+        Mcp_transport_protocol.supported_protocol_versions advertised
 
 let test_notification_json_only_rejected () =
   let module Transport = Server_mcp_transport_http in
@@ -261,6 +308,23 @@ let test_stateless_headers_do_not_emit_session_id () =
     (Some "2026-07-28")
     (List.assoc_opt "mcp-protocol-version" headers)
 
+(* The transport reads these from Env_config_runtime, not from its own
+   Sys.getenv_opt (#28910). Pinned so a local read cannot come back and drift
+   from the value the rest of the server resolves.  Since task-538 the
+   transport reads through the [Re_read] thunks (per-call), so this compares
+   the cached config binding against the thunk the transport actually
+   calls. *)
+let test_sse_guard_knobs_come_from_the_config_module () =
+  let module Conn = Server_mcp_transport_http_conn in
+  let module Cfg = Env_config_runtime.Sse_connect_guard in
+  check (float 0.0) "min reconnect interval" Cfg.reconnect_min_interval_seconds
+    (Conn.sse_reconnect_min_interval_s ());
+  check (float 0.0) "connect window" Cfg.connect_window_seconds
+    (Conn.sse_connect_window_s ());
+  check int "max in window" Cfg.connect_max_in_window
+    (Conn.sse_connect_max_in_window ())
+;;
+
 let test_sse_guard_registry_is_shared_with_cleanup_loop () =
   let module Transport = Server_mcp_transport_http in
   let module Cleanup_view = Server_mcp_transport_http_sse in
@@ -303,11 +367,96 @@ let test_preserve_guard_keeps_ag_ui_cooldown () =
           check bool "preserved retry-after is positive" true (retry_after_s > 0.0));
       ignore (Cleanup_view.reap_stale_guards ())
 
+(* task-534: the SSE reconnect guard's documented disable semantics are
+   "[<= 0]" — negative {e and} zero both disable (mli of
+   Env_config_runtime.Sse_connect_guard, docs/spec/09-server-transport.md,
+   and Server_mcp_transport_http_conn.mli all say so).  A reader that
+   routes these three knobs through the [*_nonneg] helpers would clamp a
+   negative to the default and silently turn "disable" back into
+   "default cooldown", with every doc still claiming otherwise.  These
+   tests pin the reader itself: the raw value comes through, whatever its
+   sign.  They use the [Re_read] thunks, which since task-538 are the same
+   readers the production transport calls — the transport's [sse_*] bindings
+   are these thunks, so a clamp anywhere in the live path turns these
+   checks red too. *)
+let with_env_var name value f =
+  let prev = Sys.getenv_opt name in
+  Unix.putenv name value;
+  let finally () =
+    match prev with
+    | Some v -> Unix.putenv name v
+    | None -> Unix.putenv name ""
+  in
+  Fun.protect ~finally f
+
+let test_sse_guard_negative_disables_not_clamped () =
+  let module Reread = Env_config_runtime.Sse_connect_guard.Re_read in
+  with_env_var "MASC_SSE_RECONNECT_MIN_INTERVAL_S" "-1" @@ fun () ->
+  check (float 0.0) "negative min-interval reads through (-1.0)" (-1.0)
+    (Reread.reconnect_min_interval_seconds ());
+  with_env_var "MASC_SSE_CONNECT_WINDOW_S" "-0.5" @@ fun () ->
+  check (float 0.0) "negative window reads through (-0.5)" (-0.5)
+    (Reread.connect_window_seconds ());
+  with_env_var "MASC_SSE_CONNECT_MAX_IN_WINDOW" "-3" @@ fun () ->
+  check int "negative max-in-window reads through (-3)" (-3)
+    (Reread.connect_max_in_window ())
+
+let test_sse_guard_zero_and_positive_read_through () =
+  let module Reread = Env_config_runtime.Sse_connect_guard.Re_read in
+  with_env_var "MASC_SSE_RECONNECT_MIN_INTERVAL_S" "0" @@ fun () ->
+  check (float 0.0) "zero min-interval reads through (0.0)" 0.0
+    (Reread.reconnect_min_interval_seconds ());
+  with_env_var "MASC_SSE_CONNECT_WINDOW_S" "30" @@ fun () ->
+  check (float 0.0) "positive window reads through (30.0)" 30.0
+    (Reread.connect_window_seconds ());
+  with_env_var "MASC_SSE_CONNECT_MAX_IN_WINDOW" "5" @@ fun () ->
+  check int "positive max-in-window reads through (5)" 5
+    (Reread.connect_max_in_window ())
+
+(* Non-vacuous note: the guard's decision logic ([guard_deadline] /
+   [check_sse_connect_guard]) answers "disabled" exactly when the knob is
+   [<= 0.0]; that branch is already exercised by the two cooldown tests
+   above, and the reader tests here pin the other half of the contract —
+   that a negative value reaches that branch instead of being clamped to
+   the default by the reader.  A [*_nonneg] reader swap turns these three
+   checks red while every doc still says "[<= 0] disables". *)
+
+(* task-538: pin the {e production path} end-to-end.  The two tests above
+   pin the reader in isolation; this one drives the transport's real entry
+   point, {!Server_mcp_transport_http.check_sse_connect_guard}, with all
+   three knobs set negative.  Two classes of regression turn this check
+   red: a cached-binding regression (toplevel bindings fixed at process
+   start still hold the ambient positive value, so the guard would reject
+   a reconnect the operator asked to allow), and a [min_interval_s] clamp
+   to the positive default (a successful connect records
+   [last_connect_at], so the second call would return
+   [Session_cooldown]).  A [connect_window_s] or [connect_max_in_window]
+   clamp alone does {e not} turn this red — two connects stay under the
+   default [max_in_window] threshold — which is why those two knobs keep
+   their isolated reader tests above. *)
+let test_sse_guard_negative_disables_in_production_path () =
+  let module Transport = Server_mcp_transport_http in
+  with_env_var "MASC_SSE_RECONNECT_MIN_INTERVAL_S" "-1" @@ fun () ->
+  with_env_var "MASC_SSE_CONNECT_WINDOW_S" "-0.5" @@ fun () ->
+  with_env_var "MASC_SSE_CONNECT_MAX_IN_WINDOW" "-3" @@ fun () ->
+  let session_id = "sse-guard-negative-disable-e2e" in
+  (* Prime the guard so a second connect would be rejected if any knob
+     still clamped to its positive default. *)
+  (match Transport.check_sse_connect_guard session_id with
+  | Error (reason, wait_s) ->
+      failf "first connect under disabled guard rejected: %s %.3f"
+        (Sse_reject_reason.to_label reason) wait_s
+  | Ok () -> ());
+  match Transport.check_sse_connect_guard session_id with
+  | Error (reason, wait_s) ->
+      failf "disable semantics did not reach the guard: %s %.3f"
+        (Sse_reject_reason.to_label reason) wait_s
+  | Ok () -> ()
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  run "http_negotiation"
-    [
+  run "http_negotiation"    [
       ("accepts_sse_header", [test_case "parses Accept" `Quick test_accepts_sse_header]);
       ("accepts_streamable_mcp", [test_case "requires json+sse" `Quick test_accepts_streamable_mcp]);
       ("classify_mcp_accept", [test_case "strict classification" `Quick test_classify_mcp_accept]);
@@ -316,6 +465,8 @@ let () =
         test_case "missing header falls back to session" `Quick test_protocol_continuity_allows_missing_header;
         test_case "remembered session version is reused" `Quick test_protocol_version_for_session_falls_back_to_negotiated_version;
         test_case "mismatch still rejects" `Quick test_protocol_continuity_rejects_mismatch;
+        test_case "unsupported version answers -32022" `Quick
+          test_unsupported_protocol_version_rejection;
       ]);
       ("accept_contract", [
         test_case "notification json-only rejected" `Quick
@@ -332,5 +483,15 @@ let () =
           test_sse_guard_registry_is_shared_with_cleanup_loop;
         test_case "preserve guard keeps cooldown" `Quick
           test_preserve_guard_keeps_ag_ui_cooldown;
+        test_case "sse guard knobs come from the config module" `Quick
+          test_sse_guard_knobs_come_from_the_config_module;
+      ]);
+      ("sse_guard_disable_semantics", [
+        test_case "negative reads through, not clamped to default" `Quick
+          test_sse_guard_negative_disables_not_clamped;
+        test_case "zero and positive read through unchanged" `Quick
+          test_sse_guard_zero_and_positive_read_through;
+        test_case "negative disable holds in the production guard path" `Quick
+          test_sse_guard_negative_disables_in_production_path;
       ]);
     ]

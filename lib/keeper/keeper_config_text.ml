@@ -62,75 +62,6 @@ let prompt_render_max_bytes =
      | _ -> 4096)
   | None -> 4096
 
-(* ── Removed / rejected keeper input keys ───────────────────── *)
-
-let removed_keeper_input_key_names =
-  [
-    "goal";
-    "models";
-    "allowed_models";
-    "active_model";
-    "trigger_mode";
-    "policy_action_budget";
-    "initiative_scope";
-    "initiative_enabled";
-    "initiative_idle_sec";
-    "initiative_cooldown_sec";
-    "policy_mode";
-    "policy_shell_mode";
-    "persona_ref";
-    "runtime_ref";
-    "tool_access";
-    "tool_denylist";
-    "shards";
-    "policy_voice_enabled";
-    "compaction_cooldown_sec";
-    "compaction_profile";
-    "compaction_ratio_gate";
-    "compaction_message_gate";
-    "compaction_token_gate";
-  ]
-
-let removed_keeper_sandbox_input_key_names =
-  [
-    "sandbox_profile";
-    "network_mode";
-  ]
-
-let present_json_keys (keys : string list) (json : Yojson.Safe.t) : string list =
-  match json with
-  | `Assoc fields ->
-      keys
-      |> List.filter (fun key -> List.mem_assoc key fields)
-  | _ -> []
-
-let reject_removed_keeper_input_keys ?(allow_sandbox_fields = false) ~tool_name
-    (args : Yojson.Safe.t) =
-  let present = present_json_keys removed_keeper_input_key_names args in
-  if present <> []
-  then
-    Error
-      (Printf.sprintf
-         "removed keeper args for %s: %s. These fields have no keeper runtime contract."
-         tool_name
-         (String.concat ", " present))
-  else
-    if allow_sandbox_fields then Ok ()
-    else
-      let sandbox_fields =
-        present_json_keys removed_keeper_sandbox_input_key_names args
-      in
-      if sandbox_fields = []
-      then Ok ()
-      else
-        Error
-          (Printf.sprintf
-             "removed keeper sandbox args for %s: %s. Configure sandbox posture \
-              in keeper TOML/profile defaults; keeper runtime contracts do not \
-              carry backend details."
-             tool_name
-             (String.concat ", " sandbox_fields))
-
 (* ── UTF-8 string processing ────────────────────────────────── *)
 
 
@@ -157,12 +88,12 @@ let utf8_repair_string (s : string) : string =
 (* #10552: trim BOTH before and after [String_util.utf8_prefix].  The
    pre-fix sequence was [trim → prefix], but [String_util.utf8_prefix]
    can cut at a position that leaves trailing ASCII whitespace
-   (e.g. nick0cave's 322-byte desires field ends with [...는 것.] —
+   (e.g. a 322-byte live desires field ends with [...는 것.] —
    the prefix at max_bytes=320 backs up to byte 318, ending at the
    space before [것]). That made the previous normalizer
    non-idempotent: applying it once produces a 318-byte string ending
    in a space; applying it AGAIN trims the space to 317 bytes.
-   [personality_text_equal] then sees [normalize meta_318 = 317] and
+   instruction comparison then sees [normalize meta_318 = 317] and
    [normalize raw_322 = 318] — unequal — and re-sync fires every
    reconcile tick.  Trimming after prefix makes the function
    idempotent: [normalize(normalize(x)) = normalize(x)]. *)

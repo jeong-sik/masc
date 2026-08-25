@@ -12,6 +12,10 @@ val start :
   unit
 
 module For_testing : sig
+  val authority_actor : string
+  (** The fixed authority identity (RFC-0361 D7(b)): the [verifier_exact]
+      lane id, shared by every judgement so verdicts aggregate by actor. *)
+
   val evidence_refs_of_output :
     Yojson.Safe.t -> (string list, string) result
 
@@ -24,4 +28,43 @@ module For_testing : sig
     result:Task.Anti_rationalization.review_result ->
     authority:Masc_domain.completion_authority ->
     string
+
+  (** How one review attempt ended. [Deferred] carries no payload: a review
+      that did not commit a verdict is reported to the Board and the producer
+      Keeper chooses what happens next. [Retryable_deferred] means the typed
+      evaluator error was retryable and the application-owned lane must
+      re-arm its maintenance scan while the Task stays awaiting verification. *)
+  type process_outcome =
+    | Committed
+    | Deferred
+    | Retryable_deferred
+
+  val process_outcome_of_evaluator_retryable : bool option -> process_outcome
+  (** [Some true] is the only automatic-retry authority. [Some false] and
+      [None] preserve the producer/operator action contract. *)
+
+  type review_key =
+    { task_id : string
+    ; verification_id : string
+    }
+
+  type scan_scope =
+    | Whole_backlog
+    | Targets of review_key list
+
+  val entries_in_scope
+    :  scope:scan_scope
+    -> (review_key * 'a) list
+    -> (review_key * 'a) list
+  (** The awaiting entries one wake is allowed to review. The submission hook
+      receives [task], [assignee] and [verification_id]; forwarding that identity
+      as [Targets] is what keeps one submission from re-reviewing every other
+      awaiting Task. The level read over the whole backlog re-ran a settled
+      review on identical input until a producer acted (task-443, 2026-08-23: 45
+      attempts in 5h against the same 1,012,551-byte atom).
+
+      [Whole_backlog] stays for boot recovery and for a failed backlog read,
+      which have no key to name. Pure, so the scope rule is checkable without a
+      backlog or an Eio runtime. *)
+
 end

@@ -260,11 +260,10 @@ describe('dashboardSlicesForRoute', () => {
     }
   })
 
-  it('keeps global shell namespace and transport slices on every route', () => {
+  it('keeps global namespace and transport slices on every route', () => {
     expect(dashboardSlicesForRoute({ tab: 'overview', params: {} })).toEqual([
       'execution',
       'namespace',
-      'shell',
       'transport',
     ])
   })
@@ -280,21 +279,17 @@ describe('dashboardSlicesForRoute', () => {
     })).toContain('execution')
   })
 
-  it('keeps board data HTTP-owned while subscribing goals and fleet FSM slices', () => {
+  it('keeps board data HTTP-owned while subscribing fleet FSM slices', () => {
     expect(dashboardSlicesForRoute({ tab: 'board', params: {} }))
       .toEqual([
         'namespace',
-        'shell',
         'transport',
       ])
     expect(dashboardSlicesForRoute({ tab: 'workspace', params: { section: 'board' } }))
       .toEqual([
         'namespace',
-        'shell',
         'transport',
       ])
-    expect(dashboardSlicesForRoute({ tab: 'workspace', params: { section: 'planning' } }))
-      .toContain('goals')
     expect(dashboardSlicesForRoute({ tab: 'monitoring', params: { section: 'agents' } }))
       .toContain('composite')
     expect(dashboardSlicesForRoute({ tab: 'keepers', params: { keeper: 'sangsu' } }))
@@ -302,7 +297,6 @@ describe('dashboardSlicesForRoute', () => {
         'composite',
         'execution',
         'namespace',
-        'shell',
         'transport',
       ])
     expect(dashboardSlicesForRoute({ tab: 'registry', params: {} }))
@@ -310,7 +304,6 @@ describe('dashboardSlicesForRoute', () => {
         'composite',
         'execution',
         'namespace',
-        'shell',
         'transport',
       ])
   })
@@ -796,7 +789,7 @@ describe('dashboard websocket route subscriptions', () => {
   it('reconnects with a fresh token after hello auth rejection', async () => {
     vi.useFakeTimers()
     installWebSocketMocks()
-    setStoredToken('stale-token', { source: 'dev', actor: 'dashboard', role: 'worker' })
+    setStoredToken('stale-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
 
     await connectDashboardWS({ tab: 'overview', params: {} })
     const socket = mockSockets[0]!
@@ -813,7 +806,7 @@ describe('dashboard websocket route subscriptions', () => {
     await flushPromises()
     expect(mockSockets).toHaveLength(1)
 
-    setStoredToken('fresh-token', { source: 'dev', actor: 'dashboard', role: 'worker' })
+    setStoredToken('fresh-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
     await flushPromises()
     await flushPromises()
 
@@ -908,7 +901,6 @@ describe('dashboard websocket route subscriptions', () => {
     expect(subscribe.params.route).toBe('workspace:board::')
     expect(subscribe.params.slices).toEqual([
       'namespace',
-      'shell',
       'transport',
     ])
 
@@ -1554,5 +1546,97 @@ describe('dashboard websocket route subscriptions', () => {
       { agents: [] },
       undefined,
     )
+  })
+})
+
+// A monitoring dashboard is left in a background tab by design, and a hidden
+// tab never paints — requestAnimationFrame does not fire there at all
+// (measured: 0 callbacks over 3.4s in Chrome). Scheduling inbound delivery on
+// rAF alone therefore stopped the transport whenever the tab went to the
+// background: the dashboard/hello reply sat in the inbound queue until the
+// RPC timed out, the socket closed, and the reconnect hit the same wall.
+//
+// These cases drive the real scheduler. Every other test in this file
+// delivers through MockWebSocket.receive(), which calls flushPendingInbound()
+// itself and so never exercises scheduleFlush() — which is why the stall was
+// invisible here.
+describe('dashboard ws inbound delivery while the tab is hidden', () => {
+  let visibility: DocumentVisibilityState = 'visible'
+
+  function setVisibility(next: DocumentVisibilityState): void {
+    visibility = next
+    document.dispatchEvent(new Event('visibilitychange'))
+  }
+
+  function installVisibilityStub(): void {
+    visibility = 'visible'
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    })
+  }
+
+  // A hidden tab does not paint, so a frame callback is recorded and never
+  // invoked. Anything that only runs on a frame never runs.
+  function installNeverFiringFrames(): FrameRequestCallback[] {
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb))
+    vi.stubGlobal('cancelAnimationFrame', () => {})
+    return frames
+  }
+
+  // Deliberately not MockWebSocket.receive(): that helper flushes by hand and
+  // would answer the question this test is asking.
+  function deliverRaw(socket: MockWebSocket, payload: unknown): void {
+    socket.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent)
+  }
+
+  afterEach(() => {
+    // The stub is an own property shadowing the prototype getter; removing it
+    // restores the real one. Reflect.deleteProperty rather than `delete`,
+    // which the readonly declaration rejects.
+    Reflect.deleteProperty(document, 'visibilityState')
+  })
+
+  it('completes the handshake in a tab that never paints', async () => {
+    installVisibilityStub()
+    const frames = installNeverFiringFrames()
+    installWebSocketMocks()
+    setVisibility('hidden')
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    deliverRaw(socket, { jsonrpc: '2.0', id: hello.id, result: {} })
+
+    // The timer path the hidden branch takes, not a frame.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await flushPromises()
+
+    expect(dashboardWsReady.value).toBe(true)
+    expect(frames).toHaveLength(0)
+  })
+
+  it('does not strand the queue on a frame scheduled before the tab hid', async () => {
+    installVisibilityStub()
+    installNeverFiringFrames()
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    // Queued while visible: this takes the frame path, and that frame is
+    // still outstanding when the tab hides. The handle it left behind used to
+    // make every later scheduleFlush() a no-op.
+    deliverRaw(socket, { jsonrpc: '2.0', id: hello.id, result: {} })
+    expect(dashboardWsReady.value).toBe(false)
+
+    setVisibility('hidden')
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await flushPromises()
+
+    expect(dashboardWsReady.value).toBe(true)
   })
 })

@@ -8,13 +8,9 @@
 open Masc_domain
 include Workspace_utils
 include Workspace_state
-open Workspace_backlog
-open Workspace_identity
 include Workspace_broadcast
 open Workspace_backlog
-open Workspace_identity
 
-(* activity_workspace_id removed — namespace retired (#unify-namespace). *)
 
 type task_actor_kind =
   | Agent
@@ -61,8 +57,8 @@ let working_agents config =
 
     This helper centralises the pattern, takes [with_file_lock] on the
     agent file, and silently skips the write when the file is missing
-    (matching the pre-existing [if Sys.file_exists agent_file]
-    guards).  It never blocks the caller on a missing/corrupt agent
+    (the guard is backend-aware [path_exists config], so a Memory-backend
+    workspace sees its own agent records).  It never blocks the caller on a missing/corrupt agent
     record — the backlog transition is the source of truth and the
     agent mirror is best-effort telemetry.  On JSON parse failure the
     error is logged with the agent name for diagnostic context. *)
@@ -70,7 +66,7 @@ let update_local_agent_state config ~agent_name f =
   let agent_file =
     Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json")
   in
-  if Sys.file_exists agent_file
+  if path_exists config agent_file
   then
     with_file_lock config agent_file (fun () ->
       let json = read_json config agent_file in
@@ -84,90 +80,24 @@ let same_task_actor _config left right =
   String.equal left right
 ;;
 
-let normalize_execution_links (links : Masc_domain.task_execution_links) =
-  { operation_id = trim_opt links.operation_id
-  ; session_id = trim_opt links.session_id
-  }
-;;
-
+(** Trim and drop blanks from a contract a caller stated. Shaping only — there
+    is deliberately no counterpart that produces a contract from a task that
+    lacks one. A criterion derived from the title ("Task scope satisfied:
+    <title>") answers "what counts as done" with "being done", so a verifier
+    reading it learns nothing and falls back to a standard of its own, which
+    the worker never sees. A task states its criteria or has none, and
+    [contract = None] says which. *)
 let normalize_task_contract (contract : Masc_domain.task_contract) =
   { contract with
     completion_contract = normalized_string_list contract.completion_contract
   ; required_evidence = normalized_string_list contract.required_evidence
   ; inspect_gate_evidence = normalized_string_list contract.inspect_gate_evidence
   ; verify_gate_evidence = normalized_string_list contract.verify_gate_evidence
-  ; links = normalize_execution_links contract.links
   }
 ;;
 
-let empty_task_contract =
-  { strict = false
-  ; completion_contract = []
-  ; required_evidence = []
-  ; inspect_gate_evidence = []
-  ; verify_gate_evidence = []
-  ; links = { operation_id = None; session_id = None }
-  }
-;;
-
-(* RFC-0311 Phase 1: the default verification contract declares no *specific*
-   descriptive evidence entries. The prior default
-   [ "completion_notes"; "reviewable_evidence_ref" ] could be satisfied only by
-   pasting those two literal tokens into the completion notes. That mechanism
-   simultaneously over-blocked unaware keepers and let a completion be faked by
-   copying labels. [required_evidence] now serves only as a fact supplied to the
-   completion authority; the workspace FSM does not interpret it. *)
-let default_verification_evidence_refs = []
-
-let first_line text =
-  match String.index_opt text '\n' with
-  | Some idx -> String.sub text 0 idx
-  | None -> text
-;;
-
-let truncate ~max_len text =
-  if String.length text <= max_len then text else String.sub text 0 max_len ^ "..."
-;;
-
-let default_completion_contract_text ~title ~description =
-  let title = String.trim title in
-  let description = description |> String.trim |> first_line in
-  if description = ""
-  then Printf.sprintf "Task scope satisfied: %s" title
-  else
-    truncate
-      ~max_len:220
-      (Printf.sprintf "Task scope satisfied: %s - %s" title description)
-;;
-
-let ensure_task_contract_for_verification ?contract ~title ~description () =
-  let base =
-    match contract with
-    | Some contract -> normalize_task_contract contract
-    | None -> empty_task_contract
-  in
-  let completion_contract =
-    if base.completion_contract <> []
-    then base.completion_contract
-    else [ default_completion_contract_text ~title ~description ]
-  in
-  let required_evidence =
-    if base.required_evidence <> []
-    then base.required_evidence
-    (* A verify-only task can describe verifier input separately. *)
-    else if base.verify_gate_evidence <> []
-    then []
-    else default_verification_evidence_refs
-  in
-  let verify_gate_evidence =
-    if base.verify_gate_evidence <> []
-    then base.verify_gate_evidence
-    else required_evidence
-  in
-  normalize_task_contract
-    { base with completion_contract; required_evidence; verify_gate_evidence }
-;;
-
+(** Record which runtime carried the task out. Later identifiers win; blanks do
+    not overwrite what is already recorded. *)
 let merge_execution_links
       (existing : Masc_domain.task_execution_links)
       ?session_id
@@ -185,7 +115,7 @@ let merge_execution_links
   }
 ;;
 
-(** Merge optional OAS event_bus envelope identifiers (correlation_id,
+(** Merge optional AGENT_CORE event_bus envelope identifiers (correlation_id,
     run_id) into the task activity payload. When both ids are absent the
     original payload is returned untouched, so existing callers compile
     and behave identically. *)

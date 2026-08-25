@@ -7,7 +7,7 @@
    main.ts:89). The component (memory-inspector.ts) is actually styled by
    ../memory-inspector-v2.css, a superset that additionally owns the
    real-data extension classes (.mem-trust / .mem-policy / .mem-prompt-* /
-   .mem-store-why / .mem-more / .mem-dot / .mem-disclosure).
+   .mem-delta / .mem-more / .mem-dot / .mem-disclosure).
    The shared .mem-* selectors are intentionally duplicated across both
    files; any change to a shared selector here MUST be mirrored in
    ../memory-inspector-v2.css (and vice versa). Consolidating the two into
@@ -72,12 +72,17 @@
 .mem-kind.goal { color: var(--volt-strong); border-color: var(--volt-dim); }
 .mem-kind.constraint { color: var(--info); border-color: color-mix(in oklab, var(--info) 32%, transparent); }
 .mem-kind.blocker { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 40%, transparent); }
+.mem-kind.ephemeral { color: var(--text-dim); border-style: dashed; }
 .mem-kind.unknown { color: var(--text-dim); }
 .mem-kind.entity { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 35%, transparent); }
 .mem-store-main { min-width: 0; flex: 1; }
 .mem-store-text { font-size: 12.5px; line-height: 1.5; color: var(--text-primary); text-wrap: pretty; }
 .mem-store-meta { display: flex; align-items: center; gap: 12px; margin-top: 6px; font-size: 10.5px; color: var(--text-dim); }
 .mem-src { color: var(--text-dim); }
+/* TTL / current badge — replaces the deleted salience bar (RFC-0247) */
+.mem-ttl { flex: none; font-size: var(--fs-9-5); letter-spacing: 0.04em; padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); }
+.mem-ttl.current { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 36%, transparent); }
+.mem-ttl.expired { color: var(--text-dim); border-style: dashed; }
 .mem-leg-tag { margin-left: 6px; font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--status-ok); border: 1px solid color-mix(in oklab, var(--status-ok) 32%, transparent); border-radius: var(--radius-xs); padding: 0 4px; }
 .mem-tl-range { display: block; margin-top: 3px; font-size: 9.5px; color: var(--text-dim); }
 
@@ -91,6 +96,10 @@
 .mem-op.inject { color: var(--status-ok); }
 .mem-op.pin { color: var(--volt-strong); }
 .mem-op.summarize { color: var(--info); }
+/* 보존 정책 고지 — 주기 consolidation 제거(2026-08) */
+.mem-retain { display: flex; flex-direction: column; gap: 3px; margin: 0 0 10px; padding: 8px 10px; border: 1px dashed var(--border-main); border-radius: var(--radius-xs); font-size: var(--fs-10); letter-spacing: 0.04em; color: var(--text-dim); }
+.mem-retain b { color: var(--text-mid); font-weight: 400; }
+.mem-retain-g { font-family: var(--font-ui); font-size: var(--fs-11); letter-spacing: 0; line-height: 1.5; color: var(--text-dim); text-wrap: pretty; }
 .mem-op.compact { color: var(--status-warn); }
 .mem-op.evict { color: var(--text-dim); }
 .mem-tl-text { color: var(--text-mid); min-width: 0; line-height: 1.45; }

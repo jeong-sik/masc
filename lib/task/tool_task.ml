@@ -6,11 +6,6 @@ include Tool_task_handlers
 
 module Workspace = Workspace_core
 
-let task_log_info ~task_id fmt =
-  Stdlib.Format.ksprintf
-    (fun message -> Log.Task.info "task_id=%s %s" task_id message)
-    fmt
-
 let workflow_rejection_result
       ~tool_name
       ~start_time
@@ -94,7 +89,7 @@ and handle_transition ~tool_name ~start_time ctx args =
     (* RFC-0189: schema-rejection — operator passed an unknown
        argument name. [Workflow_rejection]. *)
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       (Printf.sprintf "Unknown argument(s): %s. Valid: %s"
         names (String.concat ", " transition_known_args))
@@ -107,7 +102,7 @@ and handle_transition ~tool_name ~start_time ctx args =
   if String.equal action_raw "" then
     (* RFC-0189: required-field violation. [Workflow_rejection]. *)
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       (Printf.sprintf "action is required (%s)" (String.concat ", " Masc_domain.valid_task_action_strings))
   else
@@ -115,7 +110,7 @@ and handle_transition ~tool_name ~start_time ctx args =
   | Error msg ->
       (* RFC-0189: caller passed an unknown action enum value. *)
       Tool_result.error
-        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~failure_class:Tool_result.Workflow_rejection
         ~tool_name ~start_time msg
   | Ok action ->
   let action_s = Masc_domain.task_action_to_string action in
@@ -223,7 +218,7 @@ and handle_transition ~tool_name ~start_time ctx args =
       (* RFC-0189: handoff_context parse error — caller passed
          malformed payload. *)
       Tool_result.error
-        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~failure_class:Tool_result.Workflow_rejection
         ~tool_name ~start_time error
   | Ok handoff_context ->
   if (=) action Masc_domain.Release && strict_release_requires_handoff task_opt
@@ -231,39 +226,39 @@ and handle_transition ~tool_name ~start_time ctx args =
   then
     (* RFC-0189: strict-release-without-handoff = workflow violation. *)
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
       "Strict task release requires handoff_context.summary"
   else
   let action_s = Masc_domain.task_action_to_string action in
-  let default_time = Time_compat.now () -. 60.0 in
-  let timestamp_or_default value =
-    match Masc_domain.parse_iso8601_opt value with
-    | Some timestamp -> timestamp
-    | None -> default_time
+  (* [now () -. 60.0] used to stand in whenever the status carried no usable
+     start: Todo, Done, Cancelled, an unparseable timestamp, or no task at all.
+     That number reaches [Metrics_store_eio] as [started_at] and the average is
+     computed as [completed_at -. started_at], so every such task recorded a
+     duration of exactly one minute — indistinguishable in the aggregate from a
+     task that really took one. Absence is [None] and the metric is not
+     recorded (#29355). *)
+  let started_at_of value = Masc_domain.parse_iso8601_opt value in
+  let collaborators_of assignee =
+    if (not (String.equal assignee "")) && not (String.equal assignee ctx.agent_name)
+    then [ assignee ]
+    else []
   in
   let (started_at_actual, collaborators_from_task) = match task_opt with
     | Some t -> (match t.task_status with
         | Masc_domain.InProgress { started_at; assignee } ->
-            let ts = timestamp_or_default started_at in
-            let collabs = if not (String.equal assignee "") && not (String.equal assignee ctx.agent_name) then [assignee] else [] in
-            (ts, collabs)
+            (started_at_of started_at, collaborators_of assignee)
         | Masc_domain.Claimed { claimed_at; assignee } ->
-            let ts = timestamp_or_default claimed_at in
-            let collabs = if not (String.equal assignee "") && not (String.equal assignee ctx.agent_name) then [assignee] else [] in
-            (ts, collabs)
-        | Masc_domain.AwaitingVerification { submitted_at; assignee; _ } ->
-            let ts = timestamp_or_default submitted_at in
-            let collabs =
-              if
-                not (String.equal assignee "")
-                && not (String.equal assignee ctx.agent_name)
-              then [ assignee ]
-              else []
-            in
-            (ts, collabs)
-        | _ -> (default_time, []))
-    | None -> (default_time, [])
+            (started_at_of claimed_at, collaborators_of assignee)
+        (* [started_at] is the producer's original work start, preserved across
+           submission and rejection (see task_status). [submitted_at] is when
+           verification began, so using it reported the wait, not the work. *)
+        | Masc_domain.AwaitingVerification { started_at; assignee; _ } ->
+            (started_at_of started_at, collaborators_of assignee)
+        | Masc_domain.Todo
+        | Masc_domain.Done _
+        | Masc_domain.Cancelled _ -> (None, []))
+    | None -> (None, [])
   in
   let completion_owner =
     match task_opt with
@@ -362,34 +357,39 @@ and handle_transition ~tool_name ~start_time ctx args =
    | Error err ->
        log_task_transition_failed ~agent_name:ctx.agent_name err);
   (* Record metrics *)
-  (match result, action with
-   | Ok _, Masc_domain.Done_action ->
+  (* A metric with no real start cannot say how long the work took, and an
+     invented one is worse than a missing row: it lands in the same average.
+     The transition itself is already recorded elsewhere; this hook exists to
+     measure duration. *)
+  (match result, action, started_at_actual with
+   | Ok _, Masc_domain.Done_action, Some started_at ->
        (Atomic.get Workspace_hooks.record_task_metric_fn)
          ctx.config
          ~agent_id:completion_owner
          ~task_id
-         ~started_at:started_at_actual
+         ~started_at
          ~completed_at:(Some (Time_compat.now ()))
          ~success:true
          ~error_message:None
          ~collaborators:completion_collaborators
          ~handoff_from:None
          ~handoff_to:None
-   | Ok _, Masc_domain.Cancel ->
+   | Ok _, Masc_domain.Cancel, Some started_at ->
        (Atomic.get Workspace_hooks.record_task_metric_fn)
          ctx.config
          ~agent_id:ctx.agent_name
          ~task_id
-         ~started_at:started_at_actual
+         ~started_at
          ~completed_at:(Some (Time_compat.now ()))
          ~success:false
          ~error_message:(Some (if String.equal reason "" then "Cancelled" else reason))
          ~collaborators:collaborators_from_task
          ~handoff_from:None
          ~handoff_to:None
+  | Ok _, (Masc_domain.Done_action | Masc_domain.Cancel), None
   | Ok _, (Masc_domain.Claim | Masc_domain.Start | Masc_domain.Submit_for_verification
-            | Masc_domain.Release)
-  | Error _, _ -> ());
+            | Masc_domain.Release), _
+  | Error _, _, _ -> ());
   let transition_result_to_response = function
     | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState message)) ->
       workflow_rejection_result
@@ -418,38 +418,38 @@ let handle_update_priority ~tool_name ~start_time ctx args =
       (Printf.sprintf "Task %s priority: P%d → P%d" task_id old_priority new_priority)
   | Ok (Workspace.Not_found { task_id }) ->
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name
       ~start_time
       (Printf.sprintf "Task %s not found" task_id)
   | Error Workspace.Not_initialized ->
     Tool_result.error
-      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~failure_class:Tool_result.Workflow_rejection
       ~tool_name
       ~start_time
       "MASC workspace is not initialized"
   | Error (Workspace.Backlog_read_error detail) ->
     Tool_result.error
-      ~failure_class:(Some Tool_result.Transient_error)
+      ~failure_class:Tool_result.Dependency_unavailable
       ~tool_name
       ~start_time
       (Printf.sprintf "Task priority update could not read the backlog: %s" detail)
   | Error (Workspace.Backlog_write_error detail) ->
     Tool_result.error
-      ~failure_class:(Some Tool_result.Transient_error)
+      ~failure_class:Tool_result.Dependency_unavailable
       ~tool_name
       ~start_time
       (Printf.sprintf "Task priority update could not commit the backlog: %s" detail)
   | Error (Workspace.Lock_error error) ->
     Tool_result.error
-      ~failure_class:(Some Tool_result.Transient_error)
+      ~failure_class:Tool_result.Dependency_unavailable
       ~tool_name
       ~start_time
       (Printf.sprintf "Task priority update could not acquire the backlog lock: %s"
          (Masc_domain.masc_error_to_string error))
   | Error (Workspace.Unexpected_error detail) ->
     Tool_result.error
-      ~failure_class:(Some Tool_result.Runtime_failure)
+      ~failure_class:Tool_result.Runtime_failure
       ~tool_name
       ~start_time
       (Printf.sprintf "Task priority update failed: %s" detail)
@@ -469,7 +469,17 @@ let handle_tasks ~tool_name ~start_time ctx args =
        ~include_cancelled
        ?status)
 
-let read_event_lines config ~limit =
+(* Walks newest-first and stops once [limit] events satisfy [keep], so [limit]
+   counts the events a caller asked for. Counting raw lines instead made the
+   caller filter afterwards, and no line budget expresses "this task's newest
+   N": the budget fills with whatever the workspace last did, and a task whose
+   events sit further back drops out of its own history entirely.
+
+   Parsing happens here because [keep] asks about fields, and deciding on the
+   raw line would mean matching an id as a substring of unparsed JSON —
+   a different event's payload can carry that text. Malformed lines are skipped
+   rather than counted: they are not events the caller asked for. *)
+let read_matching_events config ~limit ~keep =
   let events_dir = Filename.concat (Workspace.masc_dir config) "events" in
   if not (Sys.file_exists events_dir) then []
   else
@@ -490,8 +500,12 @@ let read_event_lines config ~limit =
           | [] -> ()
           | line :: rest ->
             if !remaining > 0 then begin
-              collected := line :: !collected;
-              decr remaining;
+              (match Yojson.Safe.from_string line with
+               | json when keep json ->
+                 collected := json :: !collected;
+                 decr remaining
+               | _ -> ()
+               | exception Yojson.Json_error _ -> ());
               take rest
             end
         in
@@ -518,11 +532,6 @@ let read_event_lines config ~limit =
     List.rev !collected
 
 let task_history_events_json (config : Workspace.config) ~task_id ~limit =
-  let scan_limit = min 500 (limit * 5) in
-  let lines = read_event_lines config ~limit:scan_limit in
-  let (parsed, _malformed) =
-    Fs_compat.parse_jsonl_lines ~source:"task_events" lines
-  in
   let matches_task json =
     let task = Json_util.get_string json "task" in
     let task_id_field = Json_util.get_string json "task_id" in
@@ -531,14 +540,7 @@ let task_history_events_json (config : Workspace.config) ~task_id ~limit =
     | _, Some t when String.equal t task_id -> true
     | _ -> false
   in
-  let rec take n xs =
-    match xs with
-    | [] -> []
-    | _ when n <= 0 -> []
-    | x :: rest -> x :: take (n - 1) rest
-  in
-  let events = parsed |> List.filter matches_task |> take limit in
-  `List events
+  `List (read_matching_events config ~limit ~keep:matches_task)
 
 let handle_task_history ~tool_name ~start_time ctx args =
   let task_id = get_string args "task_id" "" in

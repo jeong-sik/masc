@@ -39,22 +39,27 @@ let translate_agent_status ~(now : float) (status : Masc_domain.agent_status)
   let stuck_threshold_sec =
     Runtime_params.get Runtime_settings.dashboard_agent_stuck_threshold_sec
   in
-  let elapsed_opt = parse_iso_timestamp last_seen_iso in
-  let elapsed_sec =
-    match elapsed_opt with Some ts -> now -. ts | None -> 0.0
-  in
-  match status with
-  | Masc_domain.Active when elapsed_sec > stuck_threshold_sec ->
-      Printf.sprintf "STUCK (%.0fm, needs check)" (elapsed_sec /. 60.0)
-  | Masc_domain.Busy when elapsed_sec > stuck_threshold_sec ->
+  (* An unparseable [last_seen] is absence of liveness evidence, so it stays an
+     [option] here instead of collapsing to an elapsed of 0.0. That collapse
+     read as "seen just now" and put an agent with a corrupt timestamp in the
+     healthiest bucket the label has. #9751 settled the direction for the
+     missing-field case and keeper_status_runtime.ml applies it to the derived
+     age; the label follows the same rule and names the gap rather than
+     printing a minute count it does not have. *)
+  match status, parse_iso_timestamp last_seen_iso with
+  | (Masc_domain.Active | Masc_domain.Busy), None ->
+      "STUCK (no liveness evidence)"
+  | Masc_domain.Active, Some ts when now -. ts > stuck_threshold_sec ->
+      Printf.sprintf "STUCK (%.0fm, needs check)" ((now -. ts) /. 60.0)
+  | Masc_domain.Busy, Some ts when now -. ts > stuck_threshold_sec ->
       Printf.sprintf "STUCK (%.0fm, marked busy but no progress)"
-        (elapsed_sec /. 60.0)
-  | Masc_domain.Active when elapsed_sec > quiet_threshold_sec ->
-      Printf.sprintf "quiet (%.0fm)" (elapsed_sec /. 60.0)
-  | Masc_domain.Active -> "working"
-  | Masc_domain.Busy -> "working (busy)"
-  | Masc_domain.Listening -> "idle"
-  | Masc_domain.Inactive -> "offline"
+        ((now -. ts) /. 60.0)
+  | Masc_domain.Active, Some ts when now -. ts > quiet_threshold_sec ->
+      Printf.sprintf "quiet (%.0fm)" ((now -. ts) /. 60.0)
+  | Masc_domain.Active, Some _ -> "working"
+  | Masc_domain.Busy, Some _ -> "working (busy)"
+  | Masc_domain.Listening, _ -> "idle"
+  | Masc_domain.Inactive, _ -> "offline"
 
 (** Classify an agent for grouping: Working, Stuck, Idle, or Offline.
     Offline agents (Inactive) are separated from Idle (Listening) so that
@@ -65,12 +70,14 @@ let classify_agent ~(now : float) (agent : Masc_domain.agent) : agent_group =
   let stuck_threshold_sec =
     Runtime_params.get Runtime_settings.dashboard_agent_stuck_threshold_sec
   in
-  let elapsed_opt = parse_iso_timestamp agent.last_seen in
-  let elapsed_sec =
-    match elapsed_opt with Some ts -> now -. ts | None -> 0.0
-  in
-  match agent.status with
-  | Masc_domain.Active | Masc_domain.Busy when elapsed_sec > stuck_threshold_sec -> Stuck
-  | Masc_domain.Active | Masc_domain.Busy -> Working
-  | Masc_domain.Listening -> Idle
-  | Masc_domain.Inactive -> Offline
+  (* Same rule as [translate_agent_status]: no parseable timestamp is no
+     liveness evidence. Only [Active]/[Busy] claim to be running, so only they
+     turn [Stuck] on missing evidence — [Listening] and [Inactive] keep their
+     status-derived group. *)
+  match agent.status, parse_iso_timestamp agent.last_seen with
+  | (Masc_domain.Active | Masc_domain.Busy), None -> Stuck
+  | (Masc_domain.Active | Masc_domain.Busy), Some ts
+    when now -. ts > stuck_threshold_sec -> Stuck
+  | (Masc_domain.Active | Masc_domain.Busy), Some _ -> Working
+  | Masc_domain.Listening, _ -> Idle
+  | Masc_domain.Inactive, _ -> Offline

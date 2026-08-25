@@ -10,16 +10,9 @@ val runtime_warning_ctx_ratio : float
 
 val live_keeper_runtime_id_result :
   string -> (string, [ `Unresolved of string ]) result
-(** Resolve a raw runtime id to its live (post-rotation) identifier.
-    Returns [Error (`Unresolved raw)] when the input cannot be resolved
-    to any catalog member; the caller is expected to surface the
-    unresolved input directly (e.g. as JSON [null] on the canonical
-    field) rather than fall back to a silent default.
-
-    The legacy [live_keeper_runtime_id : string -> string] facade was
-    removed in the RFC-0149 §3.3 sunset closeout.
-
-    @since RFC-0149 Phase 1 *)
+(** [Ok] carries the trimmed runtime id; a blank input is
+    [Error (`Unresolved raw)], which the caller surfaces as JSON [null]
+    on the canonical field. *)
 
 val prompt_block_json : string -> Yojson.Safe.t
 (** Pure: resolve a prompt key and emit the dashboard JSON record. *)
@@ -38,6 +31,9 @@ val last_latency_ms_json : int -> Yojson.Safe.t
 
 val terminal_reason_code_of_decision_json :
   Yojson.Safe.t -> string option
+(** The code of the decision row's typed [terminal_reason] object
+    ({!Keeper_turn_terminal.of_json}); [None] when the row has no such
+    object or it does not decode. *)
 
 val execution_trust_source : string
 val execution_trust_producer : string
@@ -65,8 +61,6 @@ val source_health_fields :
 (** {1 Internal metric / list / decision helpers} *)
 
 val nonempty_string_opt : string -> string option
-val parse_json_line_opt : string -> Yojson.Safe.t option
-val string_member_nonempty : string -> Yojson.Safe.t -> string option
 val take_list : int -> 'a list -> 'a list
 val percentile_sorted_float : float array -> float -> float
 val keeper_cost_metric_row_is_event : Yojson.Safe.t -> bool

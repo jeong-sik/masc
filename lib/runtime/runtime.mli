@@ -12,16 +12,39 @@ type t =
   ; provider : provider
   ; model : model_spec
   ; binding : binding
-  ; provider_config : Llm_provider.Provider_config.t
+  ; execution : Runtime_execution.t
+  ; quota_scope : Runtime_quota_window.scope
+    (** Quota ownership key frozen at materialization, from the same
+        credential-alias selection that resolved the dispatched API key. A
+        later environment change must not re-select the alias at
+        window-recording time, or the window is charged to an account the
+        dispatch never used (PR #28219 review). *)
   }
 
 val id_of_binding : binding -> string
-val of_binding : config -> binding -> t option
 
-val of_binding_result : config -> binding -> (t, string) result
-(** Reason-preserving form of {!of_binding}. [Error reason] when the binding's
-    provider/model id is unresolved or the provider transport/protocol cannot be
-    materialized into a {!Llm_provider.Provider_config.t} (e.g. a [messages-http]
+type drop_reason =
+  | Binding_disabled
+  | Provider_disabled of string
+  | Provider_not_declared of string
+  | Model_not_declared of string
+  | Execution_unbuildable of string
+      (** Why a binding did not become a runtime. Closed so consumers decide per
+          case instead of matching the rendered text: the [*_not_declared] pair
+          is a dangling reference (an operator typo, fatal at
+          {!load_list}), while a disabled binding or provider is a choice the
+          operator wrote down and [Execution_unbuildable] is an adapter
+          capability limit — both non-fatal, per RFC-0206 §2.1. *)
+
+val string_of_drop_reason : drop_reason -> string
+(** Operator-facing rendering. Single source for the wording, so a reason read
+    from a runtime message and one read from a load error cannot drift. *)
+
+val of_binding : config -> binding -> (t, drop_reason) result
+(** Materialize one binding while preserving failure information. [Error reason]
+    when the binding is disabled, its provider/model id is unresolved, or the
+    provider transport/protocol cannot be materialized into a
+    {!Llm_provider.Provider_config.t} (e.g. a [messages-http]
     provider the runtime adapter has no provider_config path for). The binding is
     still excluded from the runtime list (fail-closed, RFC-0206 §2.1); this
     surfaces *why*, so [\[runtime\].default] / [\[runtime.assignments\]] / lane
@@ -33,8 +56,8 @@ val decide_capability_gate :
 (** Pure capability-gate decision applied at startup by [init_default_strict]
     (not by [load_list], which keeps only RFC-0206 routing validation so unit
     tests stay catalog-independent), exposed for testing. [entries] is
-    [(label, known_to_oas_catalog)] per runtime binding. Returns [Error] when any
-    configured model is unknown to the OAS capability catalog: an unknown model
+    [(label, known_to_agent_core_catalog)] per runtime binding. Returns [Error] when any
+    configured model is unknown to the AGENT_CORE capability catalog: an unknown model
     resolves to [provider_default] and silently drops thinking/sampling control
     required by the binding. Empty entries are allowed for focused config
     probes. *)
@@ -45,8 +68,8 @@ type missing_catalog_model =
   ; provider_label : string
   ; model_id : string
   }
-(** Runtime binding whose concrete provider/model pair is absent from the OAS
-    capability catalog. [provider_label] is the exact OAS capability namespace
+(** Runtime binding whose concrete provider/model pair is absent from the AGENT_CORE
+    capability catalog. [provider_label] is the exact AGENT_CORE capability namespace
     used for lookup. *)
 
 type missing_catalog_report =
@@ -81,7 +104,7 @@ type startup_degradation =
   ; dropped_lanes : dropped_runtime_lane list
   }
 (** Operator-visible startup degradation. Missing-catalog runtime bindings are
-    removed from the active runtime set so requests never dispatch through OAS
+    removed from the active runtime set so requests never dispatch through AGENT_CORE
     [provider_default]. The server may continue only when at least one
     catalog-known runtime remains and no routing config references a disabled
     runtime id. *)
@@ -103,18 +126,15 @@ val load_list :
   -> ( t list
        * t
        * (string * string) list
-       * string option
        * string list
        * Runtime_lane.t list
      , string )
      result
 (** [load_list ~config_path] parses runtime.toml into [(runtimes, default,
-    keeper_assignments, cross_verifier_runtime_id, media_failover, lanes)].
+    keeper_assignments, media_failover, lanes)].
     Fails ([Error]) if
     [\[runtime\].default] is missing / unresolved, if any
-    [\[runtime.assignments\]] target does not resolve to a configured runtime, if
-    [\[runtime\].cross_verifier] is set to an
-    unresolved id, if any
+    [\[runtime.assignments\]] target does not resolve to a configured runtime, if any
     [\[runtime\].media_failover] entry does not resolve, or if any
     [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
     validation — no silent fallback for a typo'd id). [keeper_assignments] is the
@@ -140,6 +160,29 @@ val validate_request_body_cap :
     sites must invoke it again after feature-local transforms. The successful
     value is the exact positive cap validated on that final provider config. *)
 
+type keeper_dispatch_readiness =
+  | Dispatchable
+  | Missing_request_body_cap of { table_path : string }
+      (** Whether a materialized runtime could carry a keeper turn if one were
+          routed to it, independent of whether anything routes to it today.
+          Boot validation judges only reachable ids on purpose, which left a
+          declared-but-unassigned blocked runtime with no observer: listed by
+          [/api/v1/runtime/resolved], impossible to assign, and silent about
+          why (masc#28404). *)
+
+val keeper_dispatch_readiness : t -> keeper_dispatch_readiness
+(** The single definition of "blocked", so the operator-facing projection and
+    the fail-closed boot gate cannot disagree. Official-client runtimes are
+    always [Dispatchable]: the spawned vendor client owns its own context
+    window. *)
+
+val keeper_dispatch_blocker : keeper_dispatch_readiness -> string option
+(** Operator-facing reason, [None] when dispatchable. *)
+
+val keeper_dispatch_blocked : t list -> (t * string) list
+(** Every runtime a keeper could not be assigned to, in declaration order, with
+    its reason. Empty is the healthy state. *)
+
 (** {1 Lazy default runtime singleton}
 
     Initialized once at startup via {!init_default}.  All consumer
@@ -148,20 +191,21 @@ val validate_request_body_cap :
 
 val init_default : config_path:string -> (unit, string) result
 (** Parse + RFC-0206 routing validation + populate the singletons. Does NOT apply
-    the OAS capability-catalog gate (use {!init_default_strict} for fail-closed
+    the AGENT_CORE capability-catalog gate (use {!init_default_strict} for fail-closed
     callers or {!init_default_degraded_report} for server boot). Safe for tests
     with arbitrary-model runtime fixtures. *)
 
 val publish_exact_output_registry :
+  ?required_lane_ids:string list ->
   lanes:Runtime_schema.exact_output_lane_decl list ->
-  Agent_sdk.Exact_output.resolver_snapshot ->
+  Agent_core.Exact_output.resolver_snapshot ->
   (Runtime_exact_output_registry.t, string) result
-(** Publish one immutable OAS resolver-and-lane snapshot and return that exact
-    publication. Startup callers validate mandatory lanes against this value,
-    so validation cannot observe a later global generation. *)
+(** Publish one immutable AGENT_CORE resolver-and-lane snapshot and return that exact
+    publication. [required_lane_ids] must each retain an admitted slot; that
+    validation happens before the global publication changes. *)
 
 val init_default_strict : config_path:string -> (unit, string) result
-(** Fail-closed startup entry point: {!init_default} PLUS the OAS
+(** Fail-closed startup entry point: {!init_default} PLUS the AGENT_CORE
     capability-catalog gate ({!decide_capability_gate}). Rejects ([Error]) a
     runtime whose model is absent from the catalog before boot. Used by strict
     validation callers such as fusion run. *)
@@ -173,7 +217,7 @@ val init_default_strict_report :
 
 val init_default_degraded_report :
   config_path:string -> (init_default_outcome, strict_init_error) result
-(** Server bootstrap entry point. Applies the strict OAS catalog gate, but when
+(** Server bootstrap entry point. Applies the strict AGENT_CORE catalog gate, but when
     only unreferenced catalog-membership rows fail it can remove uncatalogued
     runtimes from the active runtime set and continue in an operator-visible
     degraded mode. Routing/parse errors, all-missing runtime sets, and explicit
@@ -189,14 +233,16 @@ module For_testing : sig
   val keeper_dispatch_runtime_ids :
     default_runtime_id:string ->
     assignments:(string * string) list ->
-    cross_verifier_runtime_id:string option ->
+    verifier_exact_slot_ids:string list ->
     media_failover:string list ->
     lanes:Runtime_lane.t list ->
     string list
   (** Ordered, deduplicated runtime ids reachable by Keeper default/assignment
       roots (including a same-named lane's candidates), the explicit
-      cross-verifier runtime, and explicit
-      runtime-only media failover routing. Dormant declared lanes are excluded. *)
+      the [verifier_exact] exact-output lane's declared
+      slots (the completion-authority judgement route, RFC-0361 D7(a)), and
+      explicit runtime-only media failover routing. Dormant declared lanes are
+      excluded. *)
 
   val save_config_text_with_sync_parent :
     ?runtime_config_path:string ->
@@ -205,6 +251,7 @@ module For_testing : sig
     (unit, string) result
   (** Production-equivalent runtime config replacement with an injected
       parent-directory sync operation. *)
+
 end
 
 val get_default_runtime : unit -> t option
@@ -222,9 +269,8 @@ val runtime_id_for_keeper : string -> string option
 (** [runtime_id_for_keeper keeper_name] is the runtime id assigned to
     [keeper_name] in [\[runtime.assignments\]] (runtime.toml SSOT), or [None]
     when no explicit assignment exists (caller falls back to
-    {!get_default_runtime_id}). The id is opaque (only the OAS adapter parses
-    it). persona⊥{model,runtime}: keeper→runtime assignment is NOT sourced from
-    persona JSON or keeper TOML. *)
+    {!get_default_runtime_id}). The id is opaque (only the AGENT_CORE adapter parses
+    it). Keeper-to-runtime assignment is not sourced from keeper TOML. *)
 
 val keeper_assignments : unit -> (string * string) list
 (** Snapshot of explicit [keeper_name -> runtime_id] assignments loaded from
@@ -236,7 +282,6 @@ val keeper_assignments : unit -> (string * string) list
 type dashboard_runtime_defaults_snapshot =
   { default_runtime : t option
   ; runtimes : t list
-  ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option
   }
@@ -245,10 +290,16 @@ val dashboard_runtime_defaults_snapshot : unit -> dashboard_runtime_defaults_sna
 (** Capture every value consumed by the dashboard runtime-defaults endpoint from
     one immutable loaded-state snapshot. *)
 
-val cross_verifier_runtime_id : unit -> string option
-(** [\[runtime\].cross_verifier] runtime id for the anti-rationalization
-    evaluator, or [None] when unset (the evaluator uses [\[runtime\].default]).
-    Validated at load so a [Some] always resolves to a configured runtime. *)
+val verifier_exact_lane_id : string
+(** ["verifier_exact"] — the [\[runtime.exact_output_lanes.verifier_exact\]]
+    lane id (RFC-0361 D7(a)). *)
+
+val verifier_exact_lane_slot_ids : unit -> (string list, string) result
+(** Admitted [verifier_exact] slot ids in frozen declaration order from the
+    published exact-output registry — the single provider-selection SSOT for
+    completion-authority judgement calls. [Error] names why the lane cannot
+    judge (registry not published, lane unconfigured, or no admitted slots);
+    there is no fallback to another route. *)
 
 val media_failover : unit -> string list
 (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted when a
@@ -264,17 +315,18 @@ val lanes : unit -> Runtime_lane.t list
 val get_lane_by_id : string -> Runtime_lane.t option
 (** Lane with the given id, or [None] if no such lane is configured. *)
 
-val resolve_assignment :
-  string -> [ `Lane of Runtime_lane.t | `Single_runtime of t | `Missing ]
-(** Resolve a keeper assignment id to either a lane or a single runtime. Lanes
-    shadow runtimes. [Missing] means the id does not name a known lane or
-    runtime. *)
+val resolve_assignment : string -> [ `Lane of Runtime_lane.t | `Missing ]
+(** Resolve a keeper assignment id to a lane. Declared lanes shadow runtimes;
+    an id naming a bare runtime gets a lane of its own, because the lane id is
+    what keys sticky candidate preference and quota demotion. Every lane ends
+    at [\[runtime\].default], so a walk always has a next candidate.
+    [Missing] means the id does not name a known lane or runtime. *)
 
 val get_runtime_by_id : string -> t option
 (** [get_runtime_by_id id] is the materialized runtime whose binding-key id
     ["provider.model"] equals [id], or [None] if no such runtime is configured.
     Used by the keeper turn driver to dispatch to the requested runtime (a
-    keeper's persona [model] selection or the default); [None] makes the driver
+    keeper's runtime assignment or the default); [None] makes the driver
     fail fast rather than silently substituting the default (RFC-0207). *)
 
 val is_local_runtime : t -> bool
@@ -288,9 +340,9 @@ val is_local_runtime_id : string -> bool option
 
 type max_context_source =
   | Override (** runtime.toml [model.max-context] override applies as-is. *)
-  | Capability (** no override configured; the OAS capability catalog cap applies. *)
+  | Capability (** no override configured; the AGENT_CORE capability catalog cap applies. *)
   | Override_clamped_by_capability
-      (** an override is configured but exceeds the OAS capability catalog
+      (** an override is configured but exceeds the AGENT_CORE capability catalog
           cap, so the cap wins. *)
 
 val max_context_source_to_string : max_context_source -> string
@@ -299,7 +351,7 @@ val max_context_source_to_string : max_context_source -> string
 
 val resolve_max_context_of_runtime : t -> (int * max_context_source) option
 (** Effective input context window and the source that produced it. [None]
-    when neither the runtime.toml [model.max-context] override nor the OAS
+    when neither the runtime.toml [model.max-context] override nor the AGENT_CORE
     capability catalog declares a positive context window for this binding;
     [materialize_config] rejects such a runtime at load (fail-closed), so a
     materialized [t] obtained from {!get_runtimes}/{!get_runtime_by_id} never
@@ -326,14 +378,14 @@ val max_context_of_runtime_id : string -> int option
 (** Effective input context window for the materialized runtime [id], or [None]
     when the id is not configured.  Budgeting callers use this to size a
     per-keeper routed turn against the same runtime that dispatch will use.
-    When the OAS provider capability catalog declares a context cap, the value
+    When the AGENT_CORE provider capability catalog declares a context cap, the value
     is clamped to [min runtime.toml max-context provider cap] so MASC cannot
     admit a prompt larger than the provider-owned window. *)
 
 val max_output_tokens_of_runtime_id : string -> int option
-(** Declared max output tokens (OAS capability catalog) for the model bound to
+(** Declared max output tokens (AGENT_CORE capability catalog) for the model bound to
     runtime [id], or [None] when the id is not configured or the catalog leaves
-    it unset. This is an observable capability ceiling only; OAS owns request
+    it unset. This is an observable capability ceiling only; AGENT_CORE owns request
     validation and clamp policy, and MASC never turns it into a request
     default. *)
 
@@ -351,24 +403,65 @@ val temperature_of_runtime_id : string -> float option
     set and its caller fallback ([MASC_KEEPER_UNIFIED_TEMP]) otherwise.  Required
     for models that reject the default temperature (Kimi K2.7 accepts only 1.0). *)
 
+val reasoning_effort_of_runtime_id : string -> Llm_provider.Reasoning_effort.t option
+(** Per-model [reasoning-effort] from runtime.toml, or [None] when unset or
+    the runtime id is unknown. Consumed by
+    {!Runtime_inference.resolve_reasoning_effort}. *)
+
+val turn_timeout_s_of_runtime_id : string -> float option
+(** Per-model [turn-timeout-s] from runtime.toml, or [None] when unset or the
+    runtime id is unknown. Official-client adapters interpret it as the maximum
+    silence between protocol messages, not total turn duration. [None] means
+    "keep whatever bound the caller already has". Consumed by
+    {!Runtime_inference.resolve_turn_timeout_s}. *)
+
+val quota_scope_of_runtime : t -> Runtime_quota_window.scope
+(** Non-secret quota-scope identity derived from this resolved runtime
+    snapshot.  Use this form across a provider call so a concurrent catalog
+    reload cannot rebind the response to a different credential account. *)
+
+val quota_scope_of_runtime_id : string -> Runtime_quota_window.scope option
+(** Non-secret quota-scope identity of the runtime's provider
+    ({!Runtime_quota_window.scope_of_credential}): rows sharing one
+    credential account share one scope, so an exhausted window recorded on
+    one row demotes every sibling backed by the same account. [None] when
+    the runtime id is unknown. Consumed by
+    {!Runtime_quota_window.demote_order} and the matching note site. *)
+
+val max_prompt_bytes_of_runtime_id : string -> int option
+(** Declared [max-prompt-bytes] for the model bound to this runtime id, or
+    [None] when the model declares none. *)
+
+val declared_input_byte_ceiling_of_runtime_id : string -> int option
+(** The smaller of the two byte ceilings a runtime declares over its model
+    input: the model's [max-prompt-bytes] and the binding's
+    [max-request-body-bytes]. Which one a given path enforces differs —
+    [Keeper_antigravity_runtime] projects against the first, the generic
+    driver against the second through {!validate_request_body_cap} — so a
+    caller that must fit inside whatever this runtime enforces satisfies both.
+    [None] when neither is declared, which is the same answer those paths give
+    such a runtime.
+
+    The two count different things (prompt bytes against whole-request bytes),
+    so this is a ceiling for something known to be one part of the input, not
+    a budget for the input itself. *)
+
 val top_p_of_runtime_id : string -> float option
-(** Request [top_p] from the materialized OAS provider config for runtime [id],
+(** Request [top_p] from the materialized AGENT_CORE provider config for runtime [id],
     or [None] when the runtime is not configured or no explicit value is
     declared.  This projects the Provider_config SSOT used for dispatch. *)
 
-val top_k_of_runtime_id : string -> int option
-(** Request [top_k] from the materialized OAS provider config for runtime [id],
+(** Request [top_k] from the materialized AGENT_CORE provider config for runtime [id],
     or [None] when absent. *)
 
-val min_p_of_runtime_id : string -> float option
-(** Request [min_p] from the materialized OAS provider config for runtime [id],
+(** Request [min_p] from the materialized AGENT_CORE provider config for runtime [id],
     or [None] when absent. *)
 
 val preserve_thinking_of_runtime_id : string -> bool option
 (** Explicit [preserve-thinking] for runtime [id]. [None] means unknown runtime,
     uninitialized cache, or no explicit TOML field.
 
-    OAS owns provider/model capability truth and applies provider-required
+    AGENT_CORE owns provider/model capability truth and applies provider-required
     reasoning replay internally. MASC does not promote a request-side preserve
     capability into default keeper policy. Consumed by
     {!Runtime_inference.for_runtime} without provider/model string matching. *)
@@ -408,6 +501,15 @@ val save_config_text :
     the same write-stage rules apply to the runtime cache while the registry
     remains unpublished. *)
 
+val validate_config_text :
+  ?runtime_config_path:string -> string -> (unit, string) result
+(** Run the raw runtime.toml save precondition — TOML parse, config
+    materialization, and dispatch-cap validation — without writing or mutating
+    the active registry. Preview endpoints call this so [can_save] reflects the
+    same runtime-parser rejection {!save_config_text} enforces, not only the
+    keeper-schema report. Returns [Ok ()] when the text would be accepted for
+    save; [Error msg] with the runtime-parser reason otherwise. *)
+
 val set_runtime_id_for_keeper :
   ?runtime_config_path:string ->
   keeper_name:string ->
@@ -431,12 +533,6 @@ val set_runtime_default :
     validate the resulting config, atomically write it, and refresh the
     in-process runtime cache. *)
 
-val set_runtime_cross_verifier :
-  ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result
-(** Persist or clear [\[runtime\]].cross_verifier through the runtime.toml SSOT
-    writer, validate the resulting config, atomically write it, and refresh the
-    in-process runtime cache. *)
-
 val set_runtime_media_failover :
   ?runtime_config_path:string -> runtime_ids:string list -> unit -> (unit, string) result
 (** Persist [\[runtime\]].media_failover through the runtime.toml SSOT writer,
@@ -445,12 +541,11 @@ val set_runtime_media_failover :
 
 val default_max_context : unit -> int
 (** Effective context-window budget of the default runtime's model (RFC-0206
-    single-binding), clamped by the OAS provider capability catalog when that
+    single-binding), clamped by the AGENT_CORE provider capability catalog when that
     cap is available. Replaces the deleted
     [Runtime_runtime.resolve_*_max_context] label scans. Falls back to
     [Runtime_constants.fallback_context_window] before {!init_default} runs. *)
 
-val default_model_api_name : unit -> string
 (** API model name of the default runtime, sent to the runtime completion
     endpoint (RFC-0206 single-binding). Replaces the deleted
     [Runtime_runtime.default_local_model_label_and_id]. Falls back to ["auto"]

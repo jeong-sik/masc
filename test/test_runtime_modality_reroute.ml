@@ -38,49 +38,6 @@ let string_contains haystack needle =
     in
     loop 0
 
-let test_unset_oas_tool_projector_fails_public_run_typed () =
-  let schema : Masc_domain.tool_schema =
-    { name = "test_tool"
-    ; description = "test"
-    ; input_schema = `Assoc [ "type", `String "object" ]
-    }
-  in
-  let provider_cfg =
-    Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.OpenAI_compat
-      ~model_id:"test-model"
-      ~base_url:"http://127.0.0.1.invalid"
-      ()
-  in
-  let config =
-    Runtime_agent.default_config
-      ~name:"unset-projector-proof"
-      ~provider_cfg
-      ~system_prompt:""
-      ~tools:[]
-  in
-  Eio_main.run
-  @@ fun env ->
-  Eio.Switch.run
-  @@ fun sw ->
-  Runtime_agent.For_testing.with_oas_tool_of_masc_hook_unset (fun () ->
-    match
-      Runtime_agent.run_with_masc_tools
-        ~sw
-        ~net:env#net
-        ~config
-        ~masc_tools:[ schema ]
-        ~dispatch:(fun ~name:_ ~args:_ ->
-          Tool_result.ok ~tool_name:"test_tool" ~start_time:0.0 "unused")
-        "must fail before provider I/O"
-    with
-    | Error (Agent_sdk.Error.Internal detail) ->
-      check bool "typed error names the unset projector" true
-        (string_contains detail "runtime_agent_oas_tool_hook_unset")
-    | Error error ->
-      failf "expected typed Internal error, got %s" (Agent_sdk.Error.to_string error)
-    | Ok _ -> fail "public run unexpectedly accepted an unset OAS tool projector")
-
 let check_contains label ~needle haystack =
   check bool label true (string_contains haystack needle)
 
@@ -89,7 +46,7 @@ let assoc_field key = function
   | _ -> None
 
 let message_with_blocks blocks =
-  { Agent_sdk.Types.role = Agent_sdk.Types.User
+  { Agent_core.Types.role = Agent_core.Types.User
   ; content = blocks
   ; name = None
   ; tool_call_id = None
@@ -127,19 +84,19 @@ let test_image_turn_reroutes_to_first_capable () =
 
 (* Regression: media retained in initial history must drive the same reroute as
    media in the current turn. The dashboard image turn succeeds first; the next
-   text-only follow-up still carries that image in OAS history. *)
+   text-only follow-up still carries that image in AGENT_CORE history. *)
 let test_initial_message_media_drives_reroute () =
   let initial_messages =
     [ message_with_blocks
-        [ Agent_sdk.Types.Text "previous image turn"
-        ; Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+        [ Agent_core.Types.Text "previous image turn"
+        ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ()
         ]
     ]
   in
   let required =
     Runtime_agent.For_testing.required_modalities_for_run
       ~initial_messages
-      ~goal_blocks:[ Agent_sdk.Types.Text "follow up" ]
+      ~goal_blocks:[ Agent_core.Types.Text "follow up" ]
   in
   check string "history image reroutes"
     "reroute:vision_c:assigned runtime lacks image input"
@@ -177,8 +134,8 @@ let test_no_capable_runtime_floor () =
 let test_history_media_floor_rejects_before_provider () =
   let initial_messages =
     [ message_with_blocks
-        [ Agent_sdk.Types.Text "previous image turn"
-        ; Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+        [ Agent_core.Types.Text "previous image turn"
+        ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ()
         ]
     ]
   in
@@ -187,25 +144,25 @@ let test_history_media_floor_rejects_before_provider () =
       ~provider_label:"glm-coding.glm-5-turbo"
       (caps ())
       ~initial_messages
-      ~goal_blocks:[ Agent_sdk.Types.Text "follow up" ]
+      ~goal_blocks:[ Agent_core.Types.Text "follow up" ]
   with
   | Ok () -> fail "expected history image to be rejected before provider dispatch"
-  | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail })) ->
+  | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })) ->
       check string "field" "multimodal_input" field;
       check_contains "mentions unsupported image" ~needle:"unsupported image input" detail;
       check_contains "mentions required modality" ~needle:"required=image" detail;
       check_contains "mentions text-only support" ~needle:"supported=text" detail
   | Error err ->
-      failf "expected InvalidConfig, got %s" (Agent_sdk.Error.to_string err)
+      failf "expected InvalidConfig, got %s" (Agent_core.Error.to_string err)
 
-(* Regression: OAS resume checkpoints are provider input too. A prior image can
-   live only in [oas_checkpoint.messages], not in MASC [initial_messages]; that
+(* Regression: AGENT_CORE resume checkpoints are provider input too. A prior image can
+   live only in [agent_core_checkpoint.messages], not in MASC [initial_messages]; that
    still must drive reroute/floor validation before the provider sees it. *)
 let test_checkpoint_media_drives_reroute_and_floor () =
   let checkpoint_messages =
     [ message_with_blocks
-        [ Agent_sdk.Types.Text "checkpoint image turn"
-        ; Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+        [ Agent_core.Types.Text "checkpoint image turn"
+        ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ()
         ]
     ]
   in
@@ -213,7 +170,7 @@ let test_checkpoint_media_drives_reroute_and_floor () =
     Runtime_agent.For_testing.required_modalities_for_run_with_checkpoint
       ~initial_messages:[]
       ~checkpoint_messages
-      ~goal_blocks:[ Agent_sdk.Types.Text "text-only follow up" ]
+      ~goal_blocks:[ Agent_core.Types.Text "text-only follow up" ]
   in
   check (list string) "checkpoint image required" [ "image" ] required;
   check string "checkpoint image reroutes"
@@ -230,27 +187,27 @@ let test_checkpoint_media_drives_reroute_and_floor () =
       (caps ())
       ~initial_messages:[]
       ~checkpoint_messages
-      ~goal_blocks:[ Agent_sdk.Types.Text "text-only follow up" ]
+      ~goal_blocks:[ Agent_core.Types.Text "text-only follow up" ]
   with
   | Ok () -> fail "expected checkpoint image to be rejected before provider dispatch"
-  | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail })) ->
+  | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })) ->
       check string "field" "multimodal_input" field;
       check_contains "mentions unsupported image" ~needle:"unsupported image input" detail;
       check_contains "mentions required modality" ~needle:"required=image" detail
   | Error err ->
-      failf "expected InvalidConfig, got %s" (Agent_sdk.Error.to_string err)
+      failf "expected InvalidConfig, got %s" (Agent_core.Error.to_string err)
 
 let test_checkpoint_resume_deduplicates_initial_history () =
   let shared =
     message_with_blocks
-      [ Agent_sdk.Types.Text "shared image history"
-      ; Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+      [ Agent_core.Types.Text "shared image history"
+      ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ()
       ]
   in
   let checkpoint_audio =
     message_with_blocks
-      [ Agent_sdk.Types.Text "checkpoint-only audio"
-      ; Agent_sdk.Types.audio_block ~media_type:"audio/wav" ~data:"def" ()
+      [ Agent_core.Types.Text "checkpoint-only audio"
+      ; Agent_core.Types.audio_block ~media_type:"audio/wav" ~data:"def" ()
       ]
   in
   let active_messages =
@@ -264,7 +221,7 @@ let test_checkpoint_resume_deduplicates_initial_history () =
     (Runtime_agent.For_testing.required_modalities_for_run_with_checkpoint
        ~initial_messages:[ shared ]
        ~checkpoint_messages:[ shared; checkpoint_audio ]
-       ~goal_blocks:[ Agent_sdk.Types.Text "follow up" ])
+       ~goal_blocks:[ Agent_core.Types.Text "follow up" ])
 
 (* The decision is a pure function: identical inputs yield identical output. *)
 let test_decision_is_deterministic () =
@@ -314,8 +271,8 @@ let dropped_count modality dropped =
 
 let test_strip_drops_unsupported_image () =
   let blocks =
-    [ Agent_sdk.Types.Text "hello"
-    ; Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+    [ Agent_core.Types.Text "hello"
+    ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ()
     ]
   in
   let kept, dropped =
@@ -326,8 +283,8 @@ let test_strip_drops_unsupported_image () =
 
 let test_strip_keeps_supported_image () =
   let blocks =
-    [ Agent_sdk.Types.Text "hi"
-    ; Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+    [ Agent_core.Types.Text "hi"
+    ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"abc" ()
     ]
   in
   let kept, dropped =
@@ -339,8 +296,8 @@ let test_strip_keeps_supported_image () =
 let test_strip_messages_drops_history_image () =
   let messages =
     [ message_with_blocks
-        [ Agent_sdk.Types.Text "prev"
-        ; Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"x" ()
+        [ Agent_core.Types.Text "prev"
+        ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"x" ()
         ]
     ]
   in
@@ -348,7 +305,7 @@ let test_strip_messages_drops_history_image () =
     Runtime_agent.strip_unsupported_modality_messages (caps ()) messages
   in
   check int "the message is retained" 1 (List.length kept);
-  let msg : Agent_sdk.Types.message = List.hd kept in
+  let msg : Agent_core.Types.message = List.hd kept in
   check int "image stripped from message content" 1 (List.length msg.content);
   check int "one image dropped" 1 (dropped_count "image" dropped)
 
@@ -410,8 +367,8 @@ let test_degrade_manifest_public_projection () =
 let test_media_degrade_restores_canonical_replay_prefix () =
   let canonical_history =
     [ message_with_blocks
-        [ Agent_sdk.Types.Text "pre-turn"
-        ; Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"image" ()
+        [ Agent_core.Types.Text "pre-turn"
+        ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"image" ()
         ]
     ]
   in
@@ -421,8 +378,8 @@ let test_media_degrade_restores_canonical_replay_prefix () =
       canonical_history
   in
   let assistant =
-    { Agent_sdk.Types.role = Agent_sdk.Types.Assistant
-    ; content = [ Agent_sdk.Types.Text "completed" ]
+    { Agent_core.Types.role = Agent_core.Types.Assistant
+    ; content = [ Agent_core.Types.Text "completed" ]
     ; name = None
     ; tool_call_id = None
     ; metadata = []
@@ -442,10 +399,10 @@ let test_media_degrade_restores_canonical_replay_prefix () =
     check bool "current assistant suffix is preserved" true (List.nth restored 1 = assistant)
 
 let test_media_degrade_rejects_checkpoint_prefix_drift () =
-  let canonical_history = [ message_with_blocks [ Agent_sdk.Types.Text "canonical" ] ] in
-  let dispatch_history = [ message_with_blocks [ Agent_sdk.Types.Text "dispatch" ] ] in
+  let canonical_history = [ message_with_blocks [ Agent_core.Types.Text "canonical" ] ] in
+  let dispatch_history = [ message_with_blocks [ Agent_core.Types.Text "dispatch" ] ] in
   let unrelated_checkpoint =
-    [ message_with_blocks [ Agent_sdk.Types.Text "unrelated" ] ]
+    [ message_with_blocks [ Agent_core.Types.Text "unrelated" ] ]
   in
   match
     Masc.Keeper_replay_prefix.restore_messages
@@ -460,8 +417,8 @@ let test_media_degrade_rejects_checkpoint_prefix_drift () =
 let test_media_degrade_preserves_already_canonical_checkpoint () =
   let canonical_history =
     [ message_with_blocks
-        [ Agent_sdk.Types.Text "canonical"
-        ; Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"image" ()
+        [ Agent_core.Types.Text "canonical"
+        ; Agent_core.Types.image_block ~media_type:"image/png" ~data:"image" ()
         ]
     ]
   in
@@ -471,7 +428,7 @@ let test_media_degrade_preserves_already_canonical_checkpoint () =
       canonical_history
   in
   let checkpoint_messages =
-    canonical_history @ [ message_with_blocks [ Agent_sdk.Types.Text "suffix" ] ]
+    canonical_history @ [ message_with_blocks [ Agent_core.Types.Text "suffix" ] ]
   in
   match
     Masc.Keeper_replay_prefix.restore_messages
@@ -511,8 +468,6 @@ let () =
     ; ( "caps_admit_required_modalities"
       , [ test_case "multi-modality predicate" `Quick
             test_caps_admit_required_modalities
-        ; test_case "public run returns typed error for unset OAS projector" `Quick
-            test_unset_oas_tool_projector_fails_public_run_typed
         ] )
     ; ( "media_degrade"
       , [ test_case "strip drops unsupported image" `Quick

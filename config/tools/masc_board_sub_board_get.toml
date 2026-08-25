@@ -1,0 +1,10 @@
+name = "masc_board_sub_board_get"
+description = """
+Get a single SubBoard by slug or ID. Returns full metadata including owner, \
+members, access policy, and post count."""
+
+[[params]]
+name = "sub_board_id"
+type = "string"
+required = true
+description = "SubBoard slug or ID to look up"

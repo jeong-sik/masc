@@ -7,8 +7,6 @@ module MockProvider : Masc.Transport_bridge.PROVIDER = struct
   let protocol = Masc.Transport.Sse
   let is_enabled () = false
   let session_count () = 0
-  let status_json () = `Null
-  let reap_stale () = 0
 end
 
 let test_seal_blocks_registration () =

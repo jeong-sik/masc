@@ -97,7 +97,6 @@ vi.mock('./keeper-detail-history', async () => {
   const actual = await vi.importActual<typeof import('./keeper-detail-history')>('./keeper-detail-history')
   return {
     ...actual,
-    GenerationLineagePanel: () => null,
     KeeperCheckpointPanel: () => null,
   }
 })
@@ -161,7 +160,6 @@ import {
   closeKeeperDetail,
   filterCheckpointHistory,
   keeperMobilePane,
-  lineageTransitionLabel,
   openKeeperDetail,
   selectedKeeper,
 } from './keeper-detail'
@@ -297,7 +295,6 @@ describe('KeeperDetailPage', () => {
       agent_name: 'keeper-analyst-agent',
       runtime_class: 'keeper',
       keepalive_running: true,
-      active_goal_ids: ['goal-evidence-first'],
       recent_output_preview: '현재 대화의 근거와 핵심 수치를 먼저 정리한다.',
       generation: 0,
       turn_count: 97,
@@ -316,7 +313,7 @@ describe('KeeperDetailPage', () => {
         status: 'active',
         capabilities: ['keeper', 'research'],
         current_task: null,
-        joined_at: '2026-05-01T00:46:51Z',
+        session_bound_at: '2026-05-01T00:46:51Z',
         last_seen: '2026-05-01T00:48:26Z',
         age_s: 1206,
         last_seen_ago_s: 1111,
@@ -367,8 +364,11 @@ describe('KeeperDetailPage', () => {
 
     // Secondary inspectors live in the standalone-style overflow. Opening the
     // menu and choosing "상세" flips to the reused full tabbed detail body.
-    fireEvent.click(screen.getByRole('button', { name: '대화 도구' }))
-    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: '상세' }))
+    fireEvent.click(screen.getByTestId('kw-chat-command-menu-toggle'))
+    const detailCommand = screen.getByTestId('kw-chat-command-detail')
+    expect(detailCommand.getAttribute('role')).toBe('menuitemcheckbox')
+    expect(detailCommand.textContent).toContain('상세')
+    fireEvent.click(detailCommand)
     const statusTab = await screen.findByRole('tab', { name: '상태' })
     fireEvent.click(statusTab)
     expect(statusTab.getAttribute('aria-selected')).toBe('true')
@@ -431,7 +431,7 @@ describe('KeeperDetailPage', () => {
 function makeSummary(overrides: Partial<KeeperCheckpointSummary> = {}): KeeperCheckpointSummary {
   return {
     snapshot_id: 'snap-000',
-    source_kind: 'oas_history',
+    source_kind: 'agent_core_history',
     is_current: false,
     path: '/tmp/snap-000.json',
     created_at: 1_700_000_000,
@@ -448,17 +448,17 @@ describe('filterCheckpointHistory', () => {
   const rows: readonly KeeperCheckpointSummary[] = [
     makeSummary({
       snapshot_id: 'snap-abc123',
-      source_kind: 'oas_history',
+      source_kind: 'agent_core_history',
       latest_preview: '유저 질문에 답변 완료',
     }),
     makeSummary({
       snapshot_id: 'snap-def456',
-      source_kind: 'oas_current',
+      source_kind: 'agent_core_current',
       latest_preview: 'Compaction triggered',
     }),
     makeSummary({
       snapshot_id: 'snap-ghi789',
-      source_kind: 'oas_history',
+      source_kind: 'agent_core_history',
       latest_preview: null,
     }),
   ]
@@ -478,7 +478,7 @@ describe('filterCheckpointHistory', () => {
   })
 
   it('matches by source_kind', () => {
-    const result = filterCheckpointHistory(rows, 'oas_current')
+    const result = filterCheckpointHistory(rows, 'agent_core_current')
     expect(result).toHaveLength(1)
     expect(result[0]?.snapshot_id).toBe('snap-def456')
   })
@@ -517,15 +517,5 @@ describe('filterCheckpointHistory', () => {
   it('preserves the original order of matching rows', () => {
     const result = filterCheckpointHistory(rows, 'snap-')
     expect(result.map(r => r.snapshot_id)).toEqual(['snap-abc123', 'snap-def456', 'snap-ghi789'])
-  })
-})
-
-describe('lineageTransitionLabel', () => {
-  it('uses root when the parent generation is absent', () => {
-    expect(lineageTransitionLabel(null, 3)).toBe('root -> gen 3')
-  })
-
-  it('renders explicit generation-to-generation transitions', () => {
-    expect(lineageTransitionLabel(4, 5)).toBe('gen 4 -> gen 5')
   })
 })

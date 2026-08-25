@@ -17,16 +17,6 @@ let with_eio_context env sw f =
     ~mono_clock:(Eio.Stdenv.mono_clock env)
     ~sw f
 
-let contains_substring s needle =
-  let s_len = String.length s in
-  let n_len = String.length needle in
-  let rec loop i =
-    if i + n_len > s_len then false
-    else if String.sub s i n_len = needle then true
-    else loop (i + 1)
-  in
-  if n_len = 0 then true else loop 0
-
 let json_get_field obj field =
   match obj with
   | `Assoc fields ->
@@ -141,11 +131,11 @@ let test_code_search_basic () =
   if is_error then begin
     (* Error is acceptable if rg not installed *)
     check bool "error mentions ripgrep or command" true
-      (contains_substring text "ripgrep" ||
-       contains_substring text "command" ||
-       contains_substring text "rg" ||
-       contains_substring text "git" ||
-       contains_substring text "Internal error")
+      (String_util.contains_substring text "ripgrep" ||
+       String_util.contains_substring text "command" ||
+       String_util.contains_substring text "rg" ||
+       String_util.contains_substring text "git" ||
+       String_util.contains_substring text "Internal error")
   end else begin
     (* Parse the tool-specific JSON from text *)
     let tool_result = Yojson.Safe.from_string text in
@@ -169,7 +159,7 @@ let test_code_search_basic () =
                     (match json_get_string first "path" with
                      | Some path ->
                          check bool "path contains lib/" true
-                           (contains_substring path "lib/")
+                           (String_util.contains_substring path "lib/")
                      | None -> fail "missing path field");
                     (match json_get_int first "line" with
                      | Some line -> check bool "line > 0" true (line > 0)

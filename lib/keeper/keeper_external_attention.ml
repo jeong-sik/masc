@@ -46,6 +46,7 @@ type surface_ref = Surface_ref.t =
     }
   | Webhook of { source : string; event_id : string }
   | Agent
+  | Broadcast
   | Gate of { label : string; address : (string * string) list }
 
 type conversation_ref = {
@@ -98,6 +99,11 @@ type event =
       ignored_at : float;
       reason : string;
     }
+  | Quarantined of {
+      event_id : string;
+      quarantined_at : float;
+      reason : string;
+    }
 
 type record_result =
   [ `Recorded
@@ -121,39 +127,6 @@ let urgency_of_string = function
   | "system" -> Some System
   | _ -> None
 
-let opt_string_field key = function
-  | None -> []
-  | Some value -> [ (key, `String value) ]
-
-let string_assoc_json fields =
-  `Assoc (List.map (fun (key, value) -> (key, `String value)) fields)
-
-let string_assoc_of_json = function
-  | `Assoc fields ->
-      Ok
-        (List.filter_map
-           (fun (key, value) ->
-             match value with
-             | `String s -> Some (key, s)
-             | _ -> None)
-           fields)
-  | _ -> Error "expected string object"
-
-let required_string key = function
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some (`String value) -> Ok value
-      | _ -> Error (Printf.sprintf "missing string field %s" key))
-  | _ -> Error "expected object"
-
-let optional_string key = function
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some (`String value) when String.trim value <> "" -> Some value
-      | Some (`String _) | Some `Null | None -> None
-      | Some _ -> None)
-  | _ -> None
-
 let required_float key = function
   | `Assoc fields -> (
       match List.assoc_opt key fields with
@@ -169,14 +142,6 @@ let required_object key = function
       | _ -> Error (Printf.sprintf "missing object field %s" key))
   | _ -> Error "expected object"
 
-let optional_object key = function
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some (`Assoc _ as obj) -> Some obj
-      | Some `Null | None -> None
-      | Some _ -> None)
-  | _ -> None
-
 let ( let* ) = Result.bind
 
 let surface_ref_to_json = Surface_ref.to_json
@@ -191,7 +156,7 @@ let conversation_ref_to_json c =
     ]
 
 let conversation_ref_of_json json =
-  let* conversation_id = required_string "conversation_id" json in
+  let* conversation_id = Json_util.require_string json "conversation_id" in
   let* surface_json = required_object "surface" json in
   let* surface = surface_ref_of_json surface_json in
   Ok { conversation_id; surface }
@@ -199,32 +164,32 @@ let conversation_ref_of_json json =
 let external_message_ref_to_json m =
   `Assoc
     ([ ("surface", surface_ref_to_json m.surface); ("message_id", `String m.message_id) ]
-    @ opt_string_field "reply_to_message_id" m.reply_to_message_id)
+    @ Json_util.string_field_if_present "reply_to_message_id" m.reply_to_message_id)
 
 let external_message_ref_of_json json =
   let* surface_json = required_object "surface" json in
   let* surface = surface_ref_of_json surface_json in
-  let* message_id = required_string "message_id" json in
-  Ok { surface; message_id; reply_to_message_id = optional_string "reply_to_message_id" json }
+  let* message_id = Json_util.require_string json "message_id" in
+  Ok { surface; message_id; reply_to_message_id = Json_util.assoc_string_opt "reply_to_message_id" json }
 
 let actor_to_json actor =
   `Assoc
-    (opt_string_field "actor_id" actor.actor_id
-    @ opt_string_field "display_name" actor.display_name
+    (Json_util.string_field_if_present "actor_id" actor.actor_id
+    @ Json_util.string_field_if_present "display_name" actor.display_name
     @ [
         ( "authority",
           `String (Keeper_chat_store.authority_label actor.authority) );
       ])
 
 let actor_of_json json =
-  let* authority_label = required_string "authority" json in
+  let* authority_label = Json_util.require_string json "authority" in
   match Keeper_chat_store.authority_of_label authority_label with
   | None -> Error (Printf.sprintf "unknown actor authority %S" authority_label)
   | Some authority ->
       Ok
         {
-          actor_id = optional_string "actor_id" json;
-          display_name = optional_string "display_name" json;
+          actor_id = Json_util.assoc_string_opt "actor_id" json;
+          display_name = Json_util.assoc_string_opt "display_name" json;
           authority;
         }
 
@@ -239,42 +204,42 @@ let item_to_json item =
        ("urgency", `String (urgency_to_string item.urgency));
        ("content_preview", `String item.content_preview);
        ("received_at", `Float item.received_at);
-       ("metadata", string_assoc_json item.metadata);
+       ("metadata", Json_util.string_assoc_to_json item.metadata);
      ]
     @ (match item.external_message with
       | None -> []
       | Some ref_ -> [ ("external_message", external_message_ref_to_json ref_) ])
-    @ opt_string_field "content_ref" item.content_ref)
+    @ Json_util.string_field_if_present "content_ref" item.content_ref)
 
 let item_of_json json =
-  let* event_id = required_string "event_id" json in
-  let* dedupe_key = required_string "dedupe_key" json in
-  let* keeper_name = required_string "keeper_name" json in
+  let* event_id = Json_util.require_string json "event_id" in
+  let* dedupe_key = Json_util.require_string json "dedupe_key" in
+  let* keeper_name = Json_util.require_string json "keeper_name" in
   let* conversation_json = required_object "conversation" json in
   let* conversation = conversation_ref_of_json conversation_json in
   let external_message =
-    match optional_object "external_message" json with
+    match Json_util.assoc_object_opt "external_message" json with
     | None -> Ok None
     | Some obj ->
         let* msg = external_message_ref_of_json obj in
         Ok (Some msg)
   in
   let* external_message = external_message in
-  let* source_label = required_string "source_label" json in
+  let* source_label = Json_util.require_string json "source_label" in
   let* actor_json = required_object "actor" json in
   let* actor = actor_of_json actor_json in
-  let* urgency_label = required_string "urgency" json in
+  let* urgency_label = Json_util.require_string json "urgency" in
   let* urgency =
     match urgency_of_string urgency_label with
     | Some urgency -> Ok urgency
     | None -> Error (Printf.sprintf "unknown urgency %S" urgency_label)
   in
-  let* content_preview = required_string "content_preview" json in
+  let* content_preview = Json_util.require_string json "content_preview" in
   let* received_at = required_float "received_at" json in
   let metadata =
-    match optional_object "metadata" json with
+    match Json_util.assoc_object_opt "metadata" json with
     | None -> Ok []
-    | Some obj -> string_assoc_of_json obj
+    | Some obj -> Json_util.string_assoc_of_json obj
   in
   let* metadata = metadata in
   Ok
@@ -288,7 +253,7 @@ let item_of_json json =
       actor;
       urgency;
       content_preview;
-      content_ref = optional_string "content_ref" json;
+      content_ref = Json_util.assoc_string_opt "content_ref" json;
       received_at;
       metadata;
     }
@@ -311,24 +276,37 @@ let event_to_json = function
           ("ignored_at", `Float ignored_at);
           ("reason", `String reason);
         ]
+  | Quarantined { event_id; quarantined_at; reason } ->
+      `Assoc
+        [
+          ("event", `String "quarantined");
+          ("event_id", `String event_id);
+          ("quarantined_at", `Float quarantined_at);
+          ("reason", `String reason);
+        ]
 
 let event_of_json json =
-  let* tag = required_string "event" json in
+  let* tag = Json_util.require_string json "event" in
   match tag with
   | "recorded" ->
       let* item_json = required_object "item" json in
       let* item = item_of_json item_json in
       Ok (Recorded item)
   | "resolved" ->
-      let* event_id = required_string "event_id" json in
+      let* event_id = Json_util.require_string json "event_id" in
       let* resolved_at = required_float "resolved_at" json in
-      let* reason = required_string "reason" json in
+      let* reason = Json_util.require_string json "reason" in
       Ok (Resolved { event_id; resolved_at; reason })
   | "ignored" ->
-      let* event_id = required_string "event_id" json in
+      let* event_id = Json_util.require_string json "event_id" in
       let* ignored_at = required_float "ignored_at" json in
-      let* reason = required_string "reason" json in
+      let* reason = Json_util.require_string json "reason" in
       Ok (Ignored { event_id; ignored_at; reason })
+  | "quarantined" ->
+      let* event_id = Json_util.require_string json "event_id" in
+      let* quarantined_at = required_float "quarantined_at" json in
+      let* reason = Json_util.require_string json "reason" in
+      Ok (Quarantined { event_id; quarantined_at; reason })
   | other -> Error (Printf.sprintf "unknown external attention event %S" other)
 
 let report_read_drop ~reason ~path ~detail =
@@ -341,7 +319,7 @@ let parse_line_result ~file_path ~line_no line =
     | Ok event -> Ok event
     | Error detail ->
         report_read_drop
-          ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+          ~reason:Read_drop_reason.Invalid_payload
           ~path:file_path ~detail;
         Error
           (Printf.sprintf
@@ -353,7 +331,7 @@ let parse_line_result ~file_path ~line_no line =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | Yojson.Json_error detail ->
       report_read_drop
-        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+        ~reason:Read_drop_reason.Json_syntax_error
         ~path:file_path ~detail;
       Error
         (Printf.sprintf
@@ -392,7 +370,7 @@ let load_events_result ~base_path ~keeper_name =
     with
     | Sys_error detail ->
         report_read_drop
-          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~reason:Read_drop_reason.Entry_load_error
           ~path ~detail;
         Error (Printf.sprintf "%s external attention read failed: %s" path detail)
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -429,27 +407,49 @@ let recorded_item_by_event_id events event_id =
   List.find_map
     (function
       | Recorded item when String.equal item.event_id event_id -> Some item
-      | Recorded _ | Resolved _ | Ignored _ -> None)
+      | Recorded _ | Resolved _ | Ignored _ | Quarantined _ -> None)
     events
 
-(* Events from the last [dedup_window_bytes] of the store, for the
-   redelivery dedup check in [record]. Reads a bounded tail via
-   [read_slice] instead of folding the whole file, so it stays O(window)
-   regardless of how large the append-only store has grown. The slice
-   starts mid-line (and the writer may be mid-append), so only the bytes
-   strictly between the first and last newline are complete lines —
-   parsing just those avoids feeding a partial line to [parse_line]
-   (which would otherwise log a spurious read-drop on every call). *)
-let load_recent_events ~base_path ~keeper_name =
+(* RFC-0377: [load_events] parses the whole file on every call, exactly the
+   O(file)-per-call shape the [dedup_window_bytes] comment above already
+   warns against for [record]'s dedup scan. A caller resolving a *batch* of
+   event_ids (e.g. every stimulus admitted into one turn) must not call
+   [load_events] once per id — that reintroduces the same O(N * file) trap
+   on the read side. Load once, then resolve every id against that one
+   in-memory list via a single pass building an id -> item table (first
+   [Recorded] occurrence per id wins, matching [recorded_item_by_event_id]
+   exactly), so the whole batch costs one file read regardless of size. *)
+let recorded_items_by_event_ids ~base_path ~keeper_name ~event_ids =
+  let events = load_events ~base_path ~keeper_name in
+  let wanted : (string, unit) Hashtbl.t = Hashtbl.create (List.length event_ids) in
+  List.iter (fun event_id -> Hashtbl.replace wanted event_id ()) event_ids;
+  let found : (string, item) Hashtbl.t = Hashtbl.create (List.length event_ids) in
+  List.iter
+    (function
+      | Recorded item
+        when Hashtbl.mem wanted item.event_id
+             && not (Hashtbl.mem found item.event_id) ->
+        Hashtbl.add found item.event_id item
+      | Recorded _ | Resolved _ | Ignored _ | Quarantined _ -> ())
+    events;
+  List.filter_map
+    (fun event_id ->
+       Option.map (fun item -> event_id, item) (Hashtbl.find_opt found event_id))
+    event_ids
+
+(* Read one bounded tail without parsing either boundary fragment. The writer
+   may be mid-append, and [from] usually lands mid-line, so only bytes strictly
+   between the first and last newline are complete records. *)
+let load_tail_events ~window_bytes ~base_path ~keeper_name =
   let path = attention_path ~base_path ~keeper_name in
   match Fs_compat.file_size path with
   | None -> []
-  | Some size when size <= dedup_window_bytes ->
+  | Some size when size <= window_bytes ->
       (* Small store: the full scan is already within the window. *)
       load_events ~base_path ~keeper_name
   | Some size ->
-      let from = size - dedup_window_bytes in
-      let slice = Fs_compat.read_slice ~path ~from ~len:dedup_window_bytes in
+      let from = size - window_bytes in
+      let slice = Fs_compat.read_slice ~path ~from ~len:window_bytes in
       (match String.index_opt slice '\n', String.rindex_opt slice '\n' with
        | Some i, Some j when j > i ->
            String.sub slice (i + 1) (j - i - 1)
@@ -462,6 +462,23 @@ let load_recent_events ~base_path ~keeper_name =
               dedup against. Accept the (rare) duplicate over a partial
               parse. *)
            [])
+
+(* Redelivery is always recent, so duplicate admission keeps its small O(1)
+   tail. This must not be reused as a conversation-history policy. *)
+let load_recent_events ~base_path ~keeper_name =
+  load_tail_events ~window_bytes:dedup_window_bytes ~base_path ~keeper_name
+;;
+
+(* Connector content defaults to a 4 KiB gate. A separate 4 MiB evidence tail
+   therefore leaves ample room for the Librarian's default 72-message window
+   plus lifecycle rows, while remaining O(1) in the append-only file. An
+   operator-raised content limit degrades to a shorter window, never a scan of
+   the whole history. *)
+let evidence_window_bytes = 4 * 1024 * 1024
+
+let load_recent_evidence_events ~base_path ~keeper_name =
+  load_tail_events ~window_bytes:evidence_window_bytes ~base_path ~keeper_name
+;;
 
 let record ~base_path (item : item) =
   let events = load_recent_events ~base_path ~keeper_name:item.keeper_name in
@@ -509,6 +526,15 @@ let mark_ignored ~base_path ~keeper_name ~event_ids ~reason ?now () =
   in
   append_many ~base_path ~keeper_name events
 
+let mark_quarantined ~base_path ~keeper_name ~event_ids ~reason ?now () =
+  let quarantined_at = now_or_default now in
+  let events =
+    List.map
+      (fun event_id -> Quarantined { event_id; quarantined_at; reason })
+      event_ids
+  in
+  append_many ~base_path ~keeper_name events
+
 type projected_state =
   | Pending of item
   | Terminal
@@ -522,7 +548,9 @@ let project_pending events =
           | Some Terminal -> ()
           | Some (Pending _) | None ->
               Hashtbl.replace tbl item.event_id (Pending item))
-      | Resolved { event_id; _ } | Ignored { event_id; _ } ->
+      | Resolved { event_id; _ }
+      | Ignored { event_id; _ }
+      | Quarantined { event_id; _ } ->
           Hashtbl.replace tbl event_id Terminal)
     events;
   Hashtbl.fold

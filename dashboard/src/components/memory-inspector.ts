@@ -2,16 +2,14 @@
 //
 // Pixel-matched to the Claude-Design prototype keeper-v2/memory.jsx — same
 // drawer shell, section headers, scope toggle, and `.mem-*` classes
-// (memory-inspector-v2.css) — but every datum is REAL, fetched from
-// `GET /api/v1/keepers/:name/turn-records` (RFC-keeper-memory-panel-real-data). The prototype's
-// fixture model (fabricated `memComposition` magic + the RFC-0247-deleted
-// salience/uses/lastUsed score fields) is gone.
+// (memory-inspector-v2.css). Every datum is fetched from
+// `GET /api/v1/keepers/:name/turn-records`.
 //
-// Section data sources (RFC-keeper-memory-panel-real-data §4; hybrid treatment confirmed 2026-06-24):
+// Section data sources:
 //   최종 provider 입력   ← real final-input content bytes + provider wire bytes/runtime
 //                           (entries[latest].input_components/request_* fields)
-//   현재 메모리 스냅샷    ← real memory_os.facts.items (typed category, derived memory_id)
-//   최근 기억 변화        ← real memory_os.change.{added,removed,retained}
+//   장기 메모리 스토어    ← real memory_os.facts.items (typed category, derived memory_id)
+//                           with each row's place in memory_os.change.{added,removed}
 //   최근 회상·주입        ← real memory_os_recall prompt blocks (entries[*].blocks)
 // Any future-only section must render an honest disclosure rather than fabricated
 // rows (no-stub): disclose absence instead of faking presence.
@@ -29,12 +27,14 @@ import {
   type MemoryOsTurnRecordSnapshot,
   type MemoryOsFact,
   type MemoryOsFactCategory,
+  type MemoryOsFactCategoryTag,
   type TurnBlock,
   type TurnInputComponent,
   type TurnInputComponentId,
   type TurnPromptBlockId,
   type TurnRecordRow,
 } from '../api/dashboard'
+import { KeeperPromptCapture } from './keeper-turn-inspector-panel'
 
 export interface MemoryKeeper {
   readonly id: string
@@ -63,14 +63,17 @@ interface BlockMeta {
   readonly color: string
   // Whether this block is the memory-os contribution to the prompt. Mirrors the
   // prototype MEM_BLOCKS `mem` flag (memory.jsx) — only memory_os_recall
-  // carries recalled memory; the rest are persona/context/surface.
+  // carries recalled memory; the rest are instructions/context/surface.
   readonly mem: boolean
 }
 const PROMPT_BLOCK_META: Readonly<Record<TurnPromptBlockId, BlockMeta>> = {
-  persona: { lbl: '페르소나', color: 'var(--text-dim)', mem: false },
+  keeper_instructions: { lbl: 'Keeper 지침', color: 'var(--text-dim)', mem: false },
   dynamic_context: { lbl: '동적 컨텍스트', color: 'var(--volt)', mem: false },
   temporal_summary: { lbl: '시간 요약', color: 'var(--status-warn)', mem: false },
   memory_os_recall: { lbl: '메모리 회상', color: 'var(--volt-strong)', mem: true },
+  // RFC-0366: one operator sentence, rendered for one turn and then stamped
+  // consumed. Not memory — it never reaches the recall block.
+  operator_note: { lbl: '운영자 노트', color: 'var(--status-warn)', mem: false },
 }
 export function promptBlockMeta(token: TurnPromptBlockId): BlockMeta {
   return PROMPT_BLOCK_META[token]
@@ -103,10 +106,11 @@ export function memCompositionFromBlocks(blocks: readonly TurnBlock[]): Composit
 }
 
 const INPUT_COMPONENT_META: Readonly<Record<TurnInputComponentId, BlockMeta>> = {
-  'prompt.persona': PROMPT_BLOCK_META.persona,
+  'prompt.keeper_instructions': PROMPT_BLOCK_META.keeper_instructions,
   'prompt.dynamic_context': PROMPT_BLOCK_META.dynamic_context,
   'prompt.temporal_summary': PROMPT_BLOCK_META.temporal_summary,
   'prompt.memory_os_recall': PROMPT_BLOCK_META.memory_os_recall,
+  'prompt.operator_note': PROMPT_BLOCK_META.operator_note,
   tool_schemas: { lbl: '도구 스키마', color: 'var(--status-warn)', mem: false },
   message_user: { lbl: '사용자 메시지', color: 'var(--info)', mem: false },
   message_system: { lbl: '시스템 메시지', color: 'var(--text-dim)', mem: false },
@@ -248,9 +252,44 @@ function formatInstant(ts: number): string {
   return formatDateTimeKo(ts)
 }
 
-export function factSelectionReason(fact: MemoryOsFact): string {
-  const meta = factCategoryMeta(fact.category)
-  return `current snapshot · ${meta.lbl}`
+// A store row's place in the latest librarian delta (memory_os.change).
+// `removed` rows are no longer in the store; they are listed at the tail of the
+// store so the last revision's change is visible in place instead of in a
+// second list that repeats the same claims.
+export type StoreRowDelta = 'added' | 'removed' | null
+
+export interface StoreRow {
+  readonly fact: MemoryOsFact
+  readonly delta: StoreRowDelta
+}
+
+export function storeRowsFromSnapshot(snapshot: MemoryOsTurnRecordSnapshot): StoreRow[] {
+  const addedIds = new Set(snapshot.change.added.map(fact => fact.memory_id))
+  const current: StoreRow[] = sortMemoryFactsForReview(snapshot.facts.items).map(fact => ({
+    fact,
+    delta: addedIds.has(fact.memory_id) ? 'added' : null,
+  }))
+  const removed: StoreRow[] = snapshot.change.removed.map(fact => ({ fact, delta: 'removed' }))
+  return [...current, ...removed]
+}
+
+// Store list filter: every row, only the latest-delta rows, or one category.
+export type StoreFilter =
+  | { readonly kind: 'all' }
+  | { readonly kind: 'delta' }
+  | { readonly kind: 'category'; readonly tag: MemoryOsFactCategoryTag }
+
+export function storeRowMatches(row: StoreRow, filter: StoreFilter): boolean {
+  switch (filter.kind) {
+    case 'all':
+      return true
+    case 'delta':
+      return row.delta !== null
+    case 'category':
+      return row.fact.category.tag === filter.tag
+  }
+  const _exhaustive: never = filter
+  return _exhaustive
 }
 
 function latestMemoryRecallBlock(row: TurnRecordRow | null): TurnBlock | null {
@@ -364,12 +403,15 @@ function MemoryCurrentContract({ snapshot }: { snapshot: MemoryOsTurnRecordSnaps
 function MemoryPromptEvidence({
   snapshot,
   row,
+  keeperId,
 }: {
   snapshot: MemoryOsTurnRecordSnapshot
   row: TurnRecordRow | null
+  keeperId: string
 }) {
   const memoryBlock = latestMemoryRecallBlock(row)
   const writer = snapshot.update_source?.kind ?? 'fresh state'
+  const promptOpen = useSignal(false)
   return html`
     <div class="mem-prompt-evidence">
       <div class="mem-prompt-step">
@@ -386,8 +428,17 @@ function MemoryPromptEvidence({
       </div>
       <div class="mem-prompt-step">
         <span class="mem-prompt-n">4</span>
-        <div><b>Full Prompt</b><span>raw text not persisted here; turn-record keeps ordered block digests and byte sizes.</span></div>
+        <div>
+          <b>Full Prompt</b>
+          <button
+            type="button"
+            class="mem-prompt-toggle"
+            aria-expanded=${promptOpen.value}
+            onClick=${() => { promptOpen.value = !promptOpen.value }}
+          >${promptOpen.value ? '마지막 캡처 닫기' : '마지막 캡처 보기'}</button>
+        </div>
       </div>
+      ${promptOpen.value ? html`<div class="mem-prompt-capture"><${KeeperPromptCapture} keeper=${keeperId} /></div>` : null}
       ${row ? html`
         <div class="mem-prompt-foot mono">
           latest assembly ${row.record.trace_id}#${row.record.absolute_turn} · ${formatInstant(row.record.ts)}
@@ -402,15 +453,20 @@ function RecentRecallTimeline({ rows }: { rows: readonly TurnRecordRow[] }) {
   if (injections.length === 0) {
     return html`<div class="mem-empty">최근 memory_os_recall 주입 없음.</div>`
   }
+  // keeper-v2/memory.jsx 메모리 형성 에피소드 timeline (.mem-timeline >
+  // .mem-tl-row): op chip / timestamp / text+range / freed bytes. Every row
+  // here is a real memory_os_recall injection, so the op chip is always
+  // 'recall' — the design's compact/summarize/evict roles have no live event
+  // source and are not rendered.
   return html`
-    <div class="mem-store">
+    <div class="mem-timeline">
       ${injections.map(inj => html`
         <div class="mem-tl-row" key=${`${inj.traceId}:${inj.turn}:${inj.digest}`}>
-          <span class="mem-kind">회상</span>
+          <span class="mem-op recall">${'◈'} 회상</span>
           <span class="mem-tl-at">${formatTimeAgo(inj.ts)}</span>
           <span class="mem-tl-text">
             <span class="mono">${inj.traceId}#${inj.turn}</span>
-            <span class="mono"> · ${inj.digest}</span>
+            <span class="mem-tl-range mono">${inj.digest}</span>
           </span>
           <span class="mem-tl-tok">${memFmtBytes(inj.bytes)}</span>
         </div>
@@ -419,21 +475,37 @@ function RecentRecallTimeline({ rows }: { rows: readonly TurnRecordRow[] }) {
   `
 }
 
+// Row shape follows keeper-v2/memory.jsx MemStoreRow: category chip, claim,
+// one meta line. The wire carries `first_seen` only (no provenance, no
+// verification time), so the meta line is the insertion age with the absolute
+// instant in the title, plus the row's place in the latest revision delta.
+// The TTL chip (`.mem-ttl`) renders the live `current` flag: store rows are
+// current by construction, change.removed rows carry current=false (만료).
 // `srcOverride` adds the owning keeper label in the aggregate current-facts list.
-function FactRow({ fact, srcOverride }: { fact: MemoryOsFact; srcOverride?: string }) {
+function FactRow({
+  fact,
+  delta = null,
+  srcOverride,
+}: {
+  fact: MemoryOsFact
+  delta?: StoreRowDelta
+  srcOverride?: string
+}) {
   const meta = factCategoryMeta(fact.category)
   return html`
-    <div class="mem-store-row">
+    <div class=${delta === 'removed' ? 'mem-store-row removed' : 'mem-store-row'}>
       <span class="mem-kind" style=${{ color: meta.color, borderColor: meta.color }}>${meta.glyph} ${meta.lbl}</span>
       <div class="mem-store-main">
         <div class="mem-store-text">${fact.claim}</div>
         <div class="mem-store-meta">
-          <span class="mono">저장 ${formatInstant(fact.first_seen)}</span>
-          <span class="mono">기준 ${factAgeLabel(fact)}</span>
-          <span>현재</span>
+          ${fact.current
+            ? html`<span class="mem-ttl current">유효</span>`
+            : html`<span class="mem-ttl expired">만료</span>`}
+          ${delta === 'added' ? html`<span class="mem-delta added">+ 새 기억</span>` : null}
+          ${delta === 'removed' ? html`<span class="mem-delta removed">− 사라진 기억</span>` : null}
+          <span class="mono" title=${formatInstant(fact.first_seen)}>저장 ${factAgeLabel(fact)}</span>
           ${srcOverride ? html`<span class="mem-src mono">${srcOverride}</span>` : null}
         </div>
-        <div class="mem-store-why">${factSelectionReason(fact)}</div>
       </div>
     </div>`
 }
@@ -458,66 +530,12 @@ function MemoryOsMissingState({ response }: { response: TurnRecordsResponse | nu
       <strong>memory-os 소스 없음</strong><br />
       ${hasTurnRecords
         ? html`turn-records ${recordCount}건은 있지만 memory_os projection이 null입니다.`
-        : html`이 keeper의 turn-records가 비어 있습니다.`}
+        : html`이 keeper의 turn-records가 비어 있음`}
       <br />
       <span class="mono">source=${source} · health=${health} · stale=${staleReason} · skipped=${skipped}</span>
       ${durableStore ? html`<br /><span class="mono">${durableStore}</span>` : null}
     </div>
   `
-}
-
-function MemoryChangeFacts({
-  kind,
-  facts,
-}: {
-  kind: 'added' | 'removed'
-  facts: readonly MemoryOsFact[]
-}) {
-  const marker = kind === 'added' ? '+' : '−'
-  const label = kind === 'added' ? '새 기억' : '사라진 기억'
-  const color = kind === 'added' ? 'var(--status-ok)' : 'var(--status-bad)'
-  return html`
-    <div class="mem-store">
-      ${facts.length === 0
-        ? html`<div class="mem-empty">${label} 없음.</div>`
-        : facts.map(fact => html`
-          <div class="mem-store-row" key=${`${kind}:${fact.memory_id}`}>
-            <span class="mem-kind" style=${{ color, borderColor: color }}>${marker} ${label}</span>
-            <div class="mem-store-main">
-              <div class="mem-store-text">${fact.claim}</div>
-              <div class="mem-store-meta">
-                <span class="mono">${fact.memory_id}</span>
-              </div>
-            </div>
-          </div>
-        `)}
-    </div>
-  `
-}
-
-function MemoryChangePanel({ snapshot }: { snapshot: MemoryOsTurnRecordSnapshot }) {
-  return html`
-    <${Fragment}>
-      <div class="mem-trust">
-        <div class="mem-trust-card">
-          <span class="mem-trust-k">added</span>
-          <span class="mem-trust-v mono">+${snapshot.change.added.length}</span>
-          <span class="mem-trust-sub">이번 revision에 들어온 기억</span>
-        </div>
-        <div class="mem-trust-card">
-          <span class="mem-trust-k">removed</span>
-          <span class="mem-trust-v mono">−${snapshot.change.removed.length}</span>
-          <span class="mem-trust-sub">이번 revision에서 빠진 기억</span>
-        </div>
-        <div class="mem-trust-card">
-          <span class="mem-trust-k">retained</span>
-          <span class="mem-trust-v mono">${snapshot.change.retained}</span>
-          <span class="mem-trust-sub">ID와 내용이 그대로 유지된 기억</span>
-        </div>
-      </div>
-      <${MemoryChangeFacts} kind="added" facts=${snapshot.change.added} />
-      <${MemoryChangeFacts} kind="removed" facts=${snapshot.change.removed} />
-    </>`
 }
 
 function ReadErrors({ snapshot }: { snapshot: MemoryOsTurnRecordSnapshot }) {
@@ -530,24 +548,36 @@ function memDotState(status: MemoryKeeper['status']): 'ok' | 'idle' | 'bad' {
   return status === 'run' ? 'ok' : status === 'off' ? 'bad' : 'idle'
 }
 
-function CategoryFilters({
+// Filter chips follow keeper-v2/memory.jsx (전체 + one chip per category
+// present, only when there is more than one category to choose between). The
+// delta chip is added only when the latest revision changed rows, so a chip
+// never filters to an empty list.
+function StoreFilters({
   cats,
+  deltaCount,
   active,
   onPick,
 }: {
   cats: readonly MemoryOsFactCategory[]
-  active: string
-  onPick: (tag: string) => void
+  deltaCount: number
+  active: StoreFilter
+  onPick: (filter: StoreFilter) => void
 }) {
-  if (cats.length <= 1) return null
+  if (cats.length <= 1 && deltaCount === 0) return null
   return html`
     <div class="mem-filters">
-      <button class=${`mem-filter ${active === 'all' ? 'on' : ''}`} onClick=${() => onPick('all')}>전체</button>
-      ${cats.map(c => {
-        const meta = factCategoryMeta(c)
-        const tag = c.tag
-        return html`<button key=${tag} class=${`mem-filter ${active === tag ? 'on' : ''}`} onClick=${() => onPick(tag)}>${meta.glyph} ${meta.lbl}</button>`
-      })}
+      <button class=${`mem-filter ${active.kind === 'all' ? 'on' : ''}`} onClick=${() => onPick({ kind: 'all' })}>전체</button>
+      ${cats.length > 1
+        ? cats.map(c => {
+          const meta = factCategoryMeta(c)
+          const tag = c.tag
+          const on = active.kind === 'category' && active.tag === tag
+          return html`<button key=${tag} class=${`mem-filter ${on ? 'on' : ''}`} onClick=${() => onPick({ kind: 'category', tag })}>${meta.glyph} ${meta.lbl}</button>`
+        })
+        : null}
+      ${deltaCount > 0
+        ? html`<button class=${`mem-filter ${active.kind === 'delta' ? 'on' : ''}`} title="이번 revision에서 들어오거나 빠진 기억만" onClick=${() => onPick({ kind: 'delta' })}>± 변경 ${deltaCount}</button>`
+        : null}
     </div>`
 }
 
@@ -558,27 +588,35 @@ function factTag(fact: MemoryOsFact): string {
 function OneKeeperMemoryReal({
   snapshot,
   rows,
+  keeperId,
 }: {
   snapshot: MemoryOsTurnRecordSnapshot
   rows: readonly TurnRecordRow[]
+  keeperId: string
 }) {
-  const kindFilter = useSignal<string>('all')
+  const storeFilter = useSignal<StoreFilter>({ kind: 'all' })
   const latestPromptRow = latestEntryWithBlocks(rows)
   const latestInputRow = latestEntryWithInputComponents(rows)
-  const facts = sortMemoryFactsForReview(snapshot.facts.items)
-  const seen = new Set<string>()
+  const storeRows = storeRowsFromSnapshot(snapshot)
+  const seen = new Set<MemoryOsFactCategoryTag>()
   const cats: MemoryOsFactCategory[] = []
-  for (const f of facts) {
-    const tag = factTag(f)
+  for (const row of storeRows) {
+    const tag = row.fact.category.tag
     if (!seen.has(tag)) {
       seen.add(tag)
-      cats.push(f.category)
+      cats.push(row.fact.category)
     }
   }
-  const filter = kindFilter.value
-  const effectiveFilter = filter === 'all' || seen.has(filter) ? filter : 'all'
-  const storeRows =
-    effectiveFilter === 'all' ? facts : facts.filter(f => factTag(f) === effectiveFilter)
+  const deltaCount = storeRows.filter(row => row.delta !== null).length
+  // A chip that no longer has rows behind it (the snapshot changed under the
+  // open drawer) falls back to the full list rather than an empty one.
+  const requested = storeFilter.value
+  const filter: StoreFilter =
+    (requested.kind === 'category' && !seen.has(requested.tag))
+      || (requested.kind === 'delta' && deltaCount === 0)
+      ? { kind: 'all' }
+      : requested
+  const visibleRows = storeRows.filter(row => storeRowMatches(row, filter))
   return html`
     <${Fragment}>
       <${ReadErrors} snapshot=${snapshot} />
@@ -591,7 +629,7 @@ function OneKeeperMemoryReal({
 
       <div class="turn-sec">
         <h4>회상 연결 · Full Prompt</h4>
-        <${MemoryPromptEvidence} snapshot=${snapshot} row=${latestPromptRow} />
+        <${MemoryPromptEvidence} snapshot=${snapshot} row=${latestPromptRow} keeperId=${keeperId} />
       </div>
 
       <div class="turn-sec">
@@ -603,26 +641,22 @@ function OneKeeperMemoryReal({
         <div class="mem-sec-head">
           <h4>장기 메모리 스토어 · memory-os</h4>
           <span class="mem-n mono">${snapshot.facts.shown}</span>
+          <span class="mem-n mono" title=${`revision ${snapshot.revision}에서 들어온 / 빠진 기억`}>+${snapshot.change.added.length} −${snapshot.change.removed.length}</span>
         </div>
-        ${facts.length
+        ${storeRows.length
           ? html`
             <${Fragment}>
-              <${CategoryFilters} cats=${cats} active=${effectiveFilter} onPick=${(t: string) => { kindFilter.value = t }} />
-              ${storeRows.length > 0
-                ? html`<div class="mem-store">${storeRows.map(f => html`<${FactRow} key=${f.memory_id} fact=${f} />`)}</div>`
-                : html`
-                  <div class="mem-empty">
-                    현재 필터에 표시할 memory-os fact가 없습니다.<br />
-                    <span class="mono">current=${snapshot.facts.current} · total=${facts.length}</span>
-                  </div>
-                `}
+              <${StoreFilters}
+                cats=${cats}
+                deltaCount=${deltaCount}
+                active=${filter}
+                onPick=${(next: StoreFilter) => { storeFilter.value = next }}
+              />
+              <div class="mem-store">
+                ${visibleRows.map(row => html`<${FactRow} key=${row.fact.memory_id} fact=${row.fact} delta=${row.delta} />`)}
+              </div>
             </>`
           : html`<div class="mem-empty">장기 메모리 항목 없음.</div>`}
-      </div>
-
-      <div class="turn-sec">
-        <h4>최근 기억 변화 · revision ${snapshot.revision}</h4>
-        <${MemoryChangePanel} snapshot=${snapshot} />
       </div>
 
       <div class="turn-sec">
@@ -830,10 +864,16 @@ function AggregateMemoryReal({
   const categoryTotals = mergeAggregateCategoryCounts(data)
   const categorizedFacts = categoryTotals.reduce((sum, entry) => sum + entry.count, 0)
   const recentFacts = mergeAggregateFacts(data)
+  const maxRecallBytes = Math.max(1, ...data.map(row => row.recallBlockBytes))
   return html`
     <${Fragment}>
       <div class="turn-sec">
         <h4>전체 memory-os</h4>
+        <div class="mem-stats" data-testid="memory-aggregate-stats">
+          <div class="mem-stat"><span class="v mono">${keepers.length}</span><span class="k">keeper</span></div>
+          <div class="mem-stat"><span class="v mono">${shownTotal}</span><span class="k">스토어 항목</span></div>
+          <div class="mem-stat"><span class="v mono">${memFmtBytes(recallBytes)}</span><span class="k">메모리 블록</span></div>
+        </div>
         <div class="mem-trust">
           <div class="mem-trust-card">
             <span class="mem-trust-k">keepers</span>
@@ -890,7 +930,10 @@ function AggregateMemoryReal({
                   <span class="mono">${row.currentFacts}/${row.shownFacts}</span>
                   <span class="mono">${row.revision}${row.readErrors > 0 ? html` · err ${row.readErrors}` : null}</span>
                   <span class="mono">+${row.added} / −${row.removed}</span>
-                  <span class="mono">${row.recallBlockBytes > 0 ? html`${memFmtBytes(row.recallBlockBytes)} · ${row.latestPrompt}` : html`no memory block · ${row.latestPrompt}`}</span>
+                  <span class="mem-td-bar">
+                    <i style=${{ width: `${(row.recallBlockBytes / maxRecallBytes) * 100}%` }}></i>
+                    <b class="mono">${row.recallBlockBytes > 0 ? html`${memFmtBytes(row.recallBlockBytes)} · ${row.latestPrompt}` : html`no memory block · ${row.latestPrompt}`}</b>
+                  </span>
                 `}
             </button>`)}
         </div>
@@ -1010,7 +1053,7 @@ export function MemoryInspector({
               : state.error
                 ? html`<div class="mem-read-error" role="alert">${'⚠'} 메모리 불러오기 실패 — ${state.error}</div>`
                 : response?.memory_os
-                  ? html`<${OneKeeperMemoryReal} snapshot=${response.memory_os} rows=${response.entries} />`
+                  ? html`<${OneKeeperMemoryReal} snapshot=${response.memory_os} rows=${response.entries} keeperId=${activeId} />`
                   : html`<${MemoryOsMissingState} response=${response} />`}
         </div>
       </div>

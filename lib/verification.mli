@@ -5,15 +5,23 @@
 
 (** {1 Types} *)
 
-(** One constructor, because one is what is produced: request criteria are
-    built as [Custom] over the task's completion contract, and the completion
-    authority accepts only [Custom]. The wire tag stays ["custom"]. *)
-type criterion = Custom of string
+(** One non-empty completion-contract statement. There is one semantic value,
+    so the wire is the string itself rather than a tagged one-arm union. *)
+type criterion = string
 
-val show_criterion : criterion -> string
 val equal_criterion : criterion -> criterion -> bool
 val criterion_to_yojson : criterion -> Yojson.Safe.t
 val criterion_of_yojson : Yojson.Safe.t -> (criterion, string) result
+
+(** A stored file the current schema cannot read, carried as a value so one
+    such file does not decide the fate of the requests beside it. Nothing here
+    accepts a superseded schema — an unreadable file stays unreadable. *)
+type unreadable_request = {
+  unreadable_path: string;
+  unreadable_detail: string;
+}
+
+val unreadable_to_yojson : unreadable_request -> Yojson.Safe.t
 
 type verification_request = {
   id: string;
@@ -22,6 +30,14 @@ type verification_request = {
   criteria: criterion list;
   worker: string;
   created_at: float;
+}
+
+(** What one pass over the request directory found. Callers report both fields:
+    [readable] alone is a silent drop, and failing the scan over one entry in
+    [unreadable] loses every readable request with it. *)
+type request_scan = {
+  readable: verification_request list;
+  unreadable: unreadable_request list;
 }
 
 (** {1 Serialization} *)
@@ -40,7 +56,16 @@ val save_request : string -> verification_request -> (string, string) result
 val delete_request : string -> string -> (unit, string) result
 
 val load_request : string -> string -> (verification_request, string) result
-val list_requests : string -> verification_request list
+val list_requests : string -> (request_scan, string) result
+(** Missing storage is an empty scan. A file the schema cannot read lands in
+    [unreadable] with its path and the parse detail, and every file that did
+    read lands in [readable] — one bad file no longer costs the rest. [Error]
+    is reserved for the directory itself being unenumerable, where neither
+    list is known.
+
+    Each unreadable entry still increments the [persistence_read_drops] counter
+    at read time, so the metric keeps meaning "this many records did not make
+    it into the projection". *)
 
 (** {1 High-level API} *)
 

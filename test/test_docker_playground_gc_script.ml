@@ -100,15 +100,6 @@ let run_process_ok ?(env = []) ~cwd prog argv =
 let git_ok ?(env = []) ~cwd args =
   ignore (run_process_ok ~env ~cwd "git" (Array.of_list ("git" :: args)))
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    idx + nlen <= hlen
-    && (String.sub haystack idx nlen = needle || loop (idx + 1))
-  in
-  nlen = 0 || loop 0
-
 let init_repo repo_dir =
   mkdir_p repo_dir;
   git_ok ~cwd:repo_dir [ "init"; "-q" ];
@@ -179,23 +170,23 @@ EOF
         |]
     in
     check bool "worktree entries surfaced" true
-      (contains_substring stdout "worktree_entries=2");
+      (String_util.contains_substring stdout "worktree_entries=2");
     check bool "worktree fanout columns surfaced" true
-      (contains_substring stdout
+      (String_util.contains_substring stdout
          "worktree_fanout_columns=count keeper repo worktrees_dir");
     check bool "keeper fanout row surfaced" true
-      (contains_substring stdout "2 keeper-a masc");
+      (String_util.contains_substring stdout "2 keeper-a masc");
     check bool "top fanout cleanup command surfaced" true
-      (contains_substring stdout
+      (String_util.contains_substring stdout
          "top_fanout_cleanup_dry_run_command=");
     check bool "top holder count surfaced" true
-      (contains_substring stdout "top_holder_fd_count=2");
+      (String_util.contains_substring stdout "top_holder_fd_count=2");
     check bool "warning surfaced" true
-      (contains_substring stdout "hotspot_status=warning");
+      (String_util.contains_substring stdout "hotspot_status=warning");
     check bool "cleanup dry-run surfaced" true
-      (contains_substring stdout "cleanup_dry_run_command=");
+      (String_util.contains_substring stdout "cleanup_dry_run_command=");
     check bool "restart recommendation surfaced" true
-      (contains_substring stdout "docker_desktop_restart_recommended=true"))
+      (String_util.contains_substring stdout "docker_desktop_restart_recommended=true"))
 
 let test_status_warns_on_worktree_hotspot_when_lsof_fails () =
   with_temp_dir "docker-playground-status-no-lsof" (fun dir ->
@@ -227,15 +218,15 @@ let test_status_warns_on_worktree_hotspot_when_lsof_fails () =
         |]
     in
     check bool "lsof failure surfaced" true
-      (contains_substring stdout "fd_holders=unavailable (lsof failed)");
+      (String_util.contains_substring stdout "fd_holders=unavailable (lsof failed)");
     check bool "worktree-only warning surfaced" true
-      (contains_substring stdout "hotspot_status=warning");
+      (String_util.contains_substring stdout "hotspot_status=warning");
     check bool "worktree reason surfaced" true
-      (contains_substring stdout "hotspot_reasons=worktree_entries");
+      (String_util.contains_substring stdout "hotspot_reasons=worktree_entries");
     check bool "fanout still surfaces on lsof failure" true
-      (contains_substring stdout "2 keeper-a masc");
+      (String_util.contains_substring stdout "2 keeper-a masc");
     check bool "top fanout action still surfaces on lsof failure" true
-      (contains_substring stdout
+      (String_util.contains_substring stdout
          "top_fanout_cleanup_dry_run_command="))
 
 let test_status_cleanup_summary_surfaces_candidate_counts () =
@@ -275,23 +266,23 @@ let test_status_cleanup_summary_surfaces_candidate_counts () =
         |]
     in
     check bool "cleanup summary surfaced" true
-      (contains_substring stdout "Cleanup dry-run summary:");
+      (String_util.contains_substring stdout "Cleanup dry-run summary:");
     check bool "root candidate count surfaced" true
-      (contains_substring stdout "cleanup_summary_candidates=1");
+      (String_util.contains_substring stdout "cleanup_summary_candidates=1");
     check bool "root projected count surfaced" true
-      (contains_substring stdout
+      (String_util.contains_substring stdout
          "cleanup_summary_projected_worktree_entries=0");
     check bool "top fanout candidate count surfaced" true
-      (contains_substring stdout "top_fanout_cleanup_summary_candidates=1");
+      (String_util.contains_substring stdout "top_fanout_cleanup_summary_candidates=1");
     check bool "top fanout projected count surfaced" true
-      (contains_substring stdout "top_fanout_cleanup_summary_projected_count=0");
+      (String_util.contains_substring stdout "top_fanout_cleanup_summary_projected_count=0");
     check bool "aggressive summary surfaced" true
-      (contains_substring stdout "aggressive_cleanup_summary_candidates=1");
+      (String_util.contains_substring stdout "aggressive_cleanup_summary_candidates=1");
     check bool "aggressive projected count surfaced" true
-      (contains_substring stdout
+      (String_util.contains_substring stdout
          "aggressive_cleanup_summary_projected_worktree_entries=0");
     check bool "top aggressive projected count surfaced" true
-      (contains_substring stdout
+      (String_util.contains_substring stdout
          "top_fanout_aggressive_cleanup_summary_projected_count=0");
     check bool "dry-run does not remove worktree" true (Sys.file_exists wt_path))
 
@@ -310,8 +301,8 @@ let test_dry_run_lists_stale_clean_worktree () =
       run_process_ok ~cwd:(source_root ()) (cleanup_script_path ())
         [| cleanup_script_path (); "--root"; root; "--days"; "1"; "--repo"; "masc" |]
     in
-    check bool "candidate listed" true (contains_substring stdout "CANDID");
-    check bool "dry-run reminder" true (contains_substring stdout "Pass --apply");
+    check bool "candidate listed" true (String_util.contains_substring stdout "CANDID");
+    check bool "dry-run reminder" true (String_util.contains_substring stdout "Pass --apply");
     check bool "worktree retained" true (Sys.file_exists wt_path))
 
 let test_recent_checkout_of_old_commit_is_not_candidate () =
@@ -328,8 +319,8 @@ let test_recent_checkout_of_old_commit_is_not_candidate () =
       run_process_ok ~cwd:(source_root ()) (cleanup_script_path ())
         [| cleanup_script_path (); "--root"; root; "--days"; "1"; "--repo"; "masc" |]
     in
-    check bool "candidate not listed" false (contains_substring stdout "CANDID");
-    check bool "recent counted" true (contains_substring stdout "recent=1");
+    check bool "candidate not listed" false (String_util.contains_substring stdout "CANDID");
+    check bool "recent counted" true (String_util.contains_substring stdout "recent=1");
     check bool "worktree retained" true (Sys.file_exists wt_path))
 
 let test_apply_removes_stale_clean_worktree () =
@@ -356,7 +347,7 @@ let test_apply_removes_stale_clean_worktree () =
           "--apply";
         |]
     in
-    check bool "removed listed" true (contains_substring stdout "REMOVED");
+    check bool "removed listed" true (String_util.contains_substring stdout "REMOVED");
     check bool "worktree removed" false (Sys.file_exists wt_path))
 
 let test_apply_skips_dirty_worktree () =
@@ -384,9 +375,13 @@ let test_apply_skips_dirty_worktree () =
           "--apply";
         |]
     in
-    check bool "dirty listed" true (contains_substring stdout "DIRTY");
+    check bool "dirty listed" true (String_util.contains_substring stdout "DIRTY");
     check bool "dirty worktree retained" true (Sys.file_exists wt_path))
 
+(* "Broken" means a worktree whose gitdir is gone, not any directory that
+   happens to sit under a worktree path. A directory with no .git was never a
+   worktree, and removing one would put this script outside what it owns —
+   which is what the fixture used to assert. *)
 let test_include_broken_removes_old_non_git_directory () =
   with_temp_dir "docker-playground-gc-broken" (fun dir ->
     let root = Filename.concat dir ".masc/playground/docker" in
@@ -394,6 +389,9 @@ let test_include_broken_removes_old_non_git_directory () =
       Filename.concat root "keeper-a/repos/masc/.worktrees/broken-task"
     in
     mkdir_p broken_path;
+    write_file
+      (Filename.concat broken_path ".git")
+      "gitdir: /nonexistent/masc/.git/worktrees/broken-task\n";
     write_file (Filename.concat broken_path "note.txt") "orphan\n";
     mark_path_old ~cwd:dir broken_path;
     let dry_stdout, _ =
@@ -404,13 +402,15 @@ let test_include_broken_removes_old_non_git_directory () =
           root;
           "--days";
           "1";
-          "--repo";
-          "masc";
+          (* No --repo here: that filter now reads the repository name from the
+             primary checkout's git metadata, and a worktree whose gitdir is
+             gone has none. Passing a name would exclude exactly the entries
+             this case is about. *)
           "--include-broken";
         |]
     in
     check bool "broken candidate listed" true
-      (contains_substring dry_stdout "BROKEN_CANDID");
+      (String_util.contains_substring dry_stdout "BROKEN_CANDID");
     check bool "broken retained after dry-run" true (Sys.file_exists broken_path);
     let apply_stdout, _ =
       run_process_ok ~cwd:(source_root ()) (cleanup_script_path ())
@@ -420,14 +420,12 @@ let test_include_broken_removes_old_non_git_directory () =
           root;
           "--days";
           "1";
-          "--repo";
-          "masc";
           "--include-broken";
           "--apply";
         |]
     in
     check bool "broken removed listed" true
-      (contains_substring apply_stdout "BROKEN_REMOVED");
+      (String_util.contains_substring apply_stdout "BROKEN_REMOVED");
     check bool "broken removed" false (Sys.file_exists broken_path))
 
 let () =

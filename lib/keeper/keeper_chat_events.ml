@@ -28,51 +28,75 @@ type stream_protocol_error = {
   raw_bytes : int option;
 }
 
+type reply_details =
+  { reply : string
+  ; turn_outcome : Keeper_turn_outcome.t
+  ; turn_ref : Ids.Turn_ref.t
+  }
+
+type continuation_checkpoint =
+  { message : string
+  ; request_id : string option
+  }
+
 type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }
   | Text_message_start of { message_id : string; role : role }
   | Text_delta of string
   | Text_message_end
-  | External_effect_completed
+  | External_effect_completed of
+      { target : Keeper_surface_post.delivery_target }
   | Run_finished of { run_id : string }
   | Event_error of { message : string }
-  | Custom of { name : string; value : Yojson.Safe.t }
-  | Oas_stream_connected
-  | Oas_stream_message_start of
+  | Reply_details of reply_details
+  | Continuation_checkpoint of continuation_checkpoint
+  | Agent_core_stream_connected
+  | Agent_core_stream_message_start of
       { provider_message_id : string
       ; model : string
-      ; usage : Agent_sdk.Types.api_usage option
+      ; usage : Agent_core.Types.api_usage option
       }
-  | Oas_stream_message_delta of
-      { stop_reason : Agent_sdk.Types.stop_reason option
-      ; usage : Agent_sdk.Types.api_usage option
+  | Agent_core_stream_message_delta of
+      { stop_reason : Agent_core.Types.stop_reason option
+      ; usage : Agent_core.Types.delta_usage option
       }
-  | Oas_stream_message_stop
-  | Oas_stream_ping
-  | Oas_content_block_start of
+  | Agent_core_stream_message_stop
+  | Agent_core_stream_ping
+  | Agent_core_content_block_start of
       { index : int
       ; content_type : string
       ; tool_call_id : string option
       ; tool_call_name : string option
       }
-  | Oas_content_block_stop of { index : int }
-  | Oas_thinking_delta of { index : int; delta : string }
-  | Oas_thinking_signature_delta of { index : int; signature_bytes : int }
-  | Oas_media_delta of
+  | Agent_core_content_block_stop of { index : int }
+  | Agent_core_thinking_delta of { index : int; delta : string }
+  | Agent_core_thinking_signature_delta of { index : int; signature_bytes : int }
+  | Agent_core_media_delta of
       { index : int
       ; media_type : string
-      ; source_type : Agent_sdk.Types.media_source_kind
+      ; source_type : Agent_core.Types.media_source_kind
       ; media_ref : string
           (* RFC-0301: reader-facing URL of the persisted media
              ([/api/v1/media/<token>], via Keeper_chat_media_store), replacing the
              pre-RFC byte count. The data channel carries the reference to the
              actual payload, not a telemetry count. *)
       }
-  | Oas_stream_protocol_error of stream_protocol_error
+  | Agent_core_stream_protocol_error of stream_protocol_error
   | Tool_call_start of { tool_call_id : string; tool_call_name : string }
   | Tool_call_args of { tool_call_id : string; delta : string }
   | Tool_call_args_snapshot of { tool_call_id : string; snapshot : string }
   | Tool_call_end of { tool_call_id : string }
+  | Tool_approval_requested of
+      { tool_call_id : string
+      ; tool_call_name : string
+      ; args : string
+      ; question : string
+      }
+  | Tool_approval_settled of
+      { tool_call_id : string
+      ; outcome : string
+      }
+  | Tool_result_ready of { tool_call_id : string }
   | Link_block of
       { url : string
       ; title : string
@@ -105,17 +129,28 @@ let json_opt key value =
   | None -> []
   | Some value -> [ (key, value) ]
 
-let api_usage_to_json (usage : Agent_sdk.Types.api_usage) =
+let api_usage_to_json (usage : Agent_core.Types.api_usage) =
   `Assoc
     ([
        ("input_tokens", `Int usage.input_tokens);
        ("output_tokens", `Int usage.output_tokens);
-       ("total_tokens", `Int (Agent_sdk.Types.total_tokens usage));
+       ("total_tokens", `Int (Agent_core.Types.total_tokens usage));
        ("cache_creation_input_tokens", `Int usage.cache_creation_input_tokens);
        ("cache_read_input_tokens", `Int usage.cache_read_input_tokens);
      ]
      @ json_opt "cost_usd"
          (Option.map (fun value -> `Float value) usage.cost_usd))
+
+(* Cumulative mid-stream counters: only the fields the delta actually
+   reported appear, so a reader can tell "not reported" from 0. *)
+let delta_usage_to_json (usage : Agent_core.Types.delta_usage) =
+  `Assoc
+    (json_opt "input_tokens" (Option.map (fun v -> `Int v) usage.input_tokens)
+    @ json_opt "output_tokens" (Option.map (fun v -> `Int v) usage.output_tokens)
+    @ json_opt "cache_creation_input_tokens"
+        (Option.map (fun v -> `Int v) usage.cache_creation_input_tokens)
+    @ json_opt "cache_read_input_tokens"
+        (Option.map (fun v -> `Int v) usage.cache_read_input_tokens))
 
 let stream_protocol_error_kind_to_string = function
   | Tool_start_duplicate_index -> "tool_start_duplicate_index"

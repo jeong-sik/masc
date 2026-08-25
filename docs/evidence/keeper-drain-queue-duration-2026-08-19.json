@@ -1,0 +1,75 @@
+{
+  "captured_at": "2026-08-19T10:59:32Z",
+  "purpose": "Drain Queue 행 duration 축 — 큐 durable 보존과 배수 지속 실측",
+  "source": "<base-path>/.masc/keepers/*/event-queue-v15.json (52 queues) + <name>.json meta",
+  "server_restart": {
+    "bootstrap_completed": "2026-08-19T18:34:19+09:00",
+    "log": "logs/masc-8935-restart-20260819.log",
+    "note": "Bootstrap completed in 3.2s"
+  },
+  "totals": {
+    "queues": 52,
+    "cumulative_revisions": 14283,
+    "pending_total": 620,
+    "fully_drained_queues": 19
+  },
+  "durability": {
+    "items_predating_restart": 617,
+    "share_of_pending": 99.5,
+    "oldest_pending_hours": 68.7,
+    "reading": "재시작 이전에 도착한 항목이 재시작 뒤에도 큐에 남아 있다. 24h를 넘겨 보존된 항목이 존재한다."
+  },
+  "pending_by_kind": {
+    "board_signal": 423,
+    "board_attention": 116,
+    "schedule_due": 59,
+    "completion_authority_rejected": 15,
+    "goal_assigned": 2,
+    "connector_attention": 2,
+    "fusion_completed": 2,
+    "hitl_resolved": 1
+  },
+  "stalled_queues": {
+    "count": 32,
+    "paused_consumers": 31,
+    "rw_e0_mission_keepers": 30,
+    "detail": {
+      "canary-10t-kimi-k2-6-20260816": [
+        1,
+        68.7
+      ],
+      "taskmaster": [
+        57,
+        56.7
+      ],
+      "rw-e0-collab-202608-build-a": [
+        22,
+        32.1
+      ],
+      "rw-e0-collab-202608-coord": [
+        9,
+        32.0
+      ],
+      "rw-e0-collab-202608-research": [
+        15,
+        32.0
+      ],
+      "rw-e0-collab-202608-build-b": [
+        11,
+        32.0
+      ],
+      "rw-e0-collab-202608-review": [
+        2,
+        32.0
+      ],
+      "rw-e0-r3-20260818-review": [
+        19,
+        31.3
+      ]
+    },
+    "reading": "정체 32큐 가운데 31큐는 소비자가 멈춰 있다 — rw-e0-* 미션 keeper 30개가 모두 paused=true, latched_reason={kind:operator_paused, actor:keeper_down}이고 28~32h 전에 정지했다. 소비자가 없는데도 board_signal 423건과 board_attention 116건이 계속 배달되어 큐가 자란다. 살아 있으면서 배수되지 않는 큐는 taskmaster 하나뿐이고 그것은 #29071로 이미 기록돼 있다."
+  },
+  "method_note": "pending 항목의 arrived_at_unix는 source 아래 flat 필드다. keeper meta의 정지 상태는 phase가 아니라 paused(bool)와 latched_reason에 있다. 두 번 다른 필드명을 가정했다가 빈손을 얻어 바로잡았다.",
+  "verdict": "PASS. 배수와 durable 보존이 재시작을 관통해 이어진다. 620건 중 617건(99.5%)이 18:34 재시작 이전에 도착했고 지금도 큐에 있으며 최고령은 68.7h다. 52큐 중 19큐는 완전히 비었고 누적 전이는 14,283건이다. 남은 정체는 배수 결함이 아니라 소비자 부재이며, 그 예외 하나는 #29071로 추적 중이다.",
+  "caveat": "paused keeper에게 board_signal이 계속 큐잉되는 것은 재개를 위한 보존으로 읽히지만, 30개 큐에 560건이 쌓인 사실이 어디에도 드러나지 않는다. 처분 경로(keeper_paused_work_disposition_receipt)는 operator의 명시적 결정을 받도록 설계돼 있는데, 결정이 필요하다는 신호가 없다."
+}

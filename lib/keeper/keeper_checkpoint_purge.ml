@@ -44,52 +44,69 @@ type item =
   ; flat_last : int
   }
 
-let is_text_only (message : Agent_sdk.Types.message) =
+let is_text_only (message : Agent_core.Types.message) =
   (match message.role with
-   | Agent_sdk.Types.User | Agent_sdk.Types.Assistant -> true
-   | Agent_sdk.Types.System | Agent_sdk.Types.Tool -> false)
+   | Agent_core.Types.User | Agent_core.Types.Assistant -> true
+   | Agent_core.Types.System | Agent_core.Types.Tool -> false)
   && Option.is_none message.tool_call_id
   && message.content <> []
   && List.for_all
        (function
-         | Agent_sdk.Types.Text _ -> true
+         | Agent_core.Types.Text _ -> true
          | _ -> false)
        message.content
 ;;
 
-let has_tool_use (message : Agent_sdk.Types.message) =
-  List.exists
-    (function
-      | Agent_sdk.Types.ToolUse _ -> true
-      | _ -> false)
-    message.content
+let is_assistant (message : Agent_core.Types.message) =
+  match message.role with
+  | Agent_core.Types.Assistant -> true
+  | Agent_core.Types.User | Agent_core.Types.System | Agent_core.Types.Tool -> false
 ;;
 
 (* R2: remove unsigned reasoning blocks. Signed thinking and
-   [RedactedThinking] replay byte-exact on tool turns and are kept. *)
-let strip_reasoning_blocks (message : Agent_sdk.Types.message) =
+   [RedactedThinking] replay byte-exact on tool turns and are kept — that
+   distinction lives in the match below, which is the whole safety argument.
+
+   R2 originally also skipped any assistant message carrying a ToolUse
+   (#25537). That outer guard had no rationale of its own: the commit message
+   justified it with "providers replay [signed thinking] byte-exact", which the
+   [signature = None] pattern already enforces per block. On an agentic keeper
+   the guard swallows nearly everything — measured on a live Keeper checkpoint
+   after a full purge, 418 of 422 surviving unsigned Thinking blocks (490,370 B,
+   41.0% of the 1,196,574 B file) sat in messages that also carried a ToolUse.
+   Unsigned thinking additionally cannot be replayed to Anthropic in that
+   position at all: extended-thinking replay requires the signature, so these
+   blocks originate from non-Anthropic runtimes and are inert bulk on the wire. *)
+let strip_reasoning_blocks (message : Agent_core.Types.message) =
   let kept, stripped =
     List.fold_left
       (fun (kept, stripped) block ->
          match block with
-         | Agent_sdk.Types.Thinking { signature = None; _ }
-         | Agent_sdk.Types.ReasoningDetails _ -> kept, stripped + 1
+         | Agent_core.Types.Thinking { signature = None; _ }
+         | Agent_core.Types.ReasoningDetails _ -> kept, stripped + 1
          | _ -> block :: kept, stripped)
       ([], 0)
       message.content
   in
-  { message with Agent_sdk.Types.content = List.rev kept }, stripped
+  { message with Agent_core.Types.content = List.rev kept }, stripped
 ;;
 
-(* R3: replace a tool result's payload with the fixed marker while keeping the
-   [tool_use_id] pairing and the typed delivery outcome. *)
-let clear_tool_result_blocks (message : Agent_sdk.Types.message) =
+(* R3: replace a SUCCESSFUL tool result's payload with the fixed marker while
+   keeping the [tool_use_id] pairing and the typed delivery outcome.
+   Failed results ([Tool_failed]) are exempt: their payload is the feedback
+   the keeper reads on later turns and the only lesson evidence the librarian
+   could learn from, and the exemption is a type-level distinction (the typed
+   outcome), not content classification — RFC-0351 §2 permits judging by
+   type. *)
+let clear_tool_result_blocks (message : Agent_core.Types.message) =
   let cleared_count = ref 0 in
   let content =
     List.map
       (fun block ->
          match block with
-         | Agent_sdk.Types.ToolResult
+         | Agent_core.Types.ToolResult { outcome = Agent_core.Types.Tool_failed _; _ }
+           -> block
+         | Agent_core.Types.ToolResult
              ({ content; json; content_blocks; _ } as result) ->
            if String.equal content cleared_tool_result_content
               && Option.is_none json
@@ -97,7 +114,7 @@ let clear_tool_result_blocks (message : Agent_sdk.Types.message) =
            then block
            else (
              incr cleared_count;
-             Agent_sdk.Types.ToolResult
+             Agent_core.Types.ToolResult
                { result with
                  content = cleared_tool_result_content
                ; json = None
@@ -106,14 +123,14 @@ let clear_tool_result_blocks (message : Agent_sdk.Types.message) =
          | _ -> block)
       message.content
   in
-  { message with Agent_sdk.Types.content }, !cleared_count
+  { message with Agent_core.Types.content }, !cleared_count
 ;;
 
 (* An item after R2/R3: its surviving messages ([] when R2 emptied and
    dropped it) and, when it is an unprotected text-only ordinary message, the
    R1 grouping key over its full derived representation. *)
 type transformed_item =
-  { messages : Agent_sdk.Types.message list
+  { messages : Agent_core.Types.message list
   ; dedup_key : string option
   }
 
@@ -192,11 +209,11 @@ let purge_messages ~config messages =
          distinct assistant messages byte-identical, and only the stripped
          form participates in duplicate grouping. This ordering is what makes
          a single pass a fixpoint (verified by the idempotence test; measured
-         on the sangsu checkpoint, R1-first left 229 duplicates for a second
+         on the same checkpoint, R1-first left 229 duplicates for a second
          pass to find). *)
       let dedup_key_of message =
         if is_text_only message
-        then Some (Agent_sdk.Types.show_message message)
+        then Some (Agent_core.Types.show_message message)
         else None
       in
       let purge_item item =
@@ -208,17 +225,11 @@ let purge_messages ~config messages =
         else (
           match item.unit_ with
           | Keeper_compaction_unit.Ordinary_message message ->
-            if config.strip_thinking
-               && (match message.role with
-                   | Agent_sdk.Types.Assistant -> true
-                   | Agent_sdk.Types.User
-                   | Agent_sdk.Types.System
-                   | Agent_sdk.Types.Tool -> false)
-               && not (has_tool_use message)
+            if config.strip_thinking && is_assistant message
             then (
               let stripped_message, stripped = strip_reasoning_blocks message in
               reasoning_blocks_stripped := !reasoning_blocks_stripped + stripped;
-              match stripped_message.Agent_sdk.Types.content with
+              match stripped_message.Agent_core.Types.content with
               | [] ->
                 incr reasoning_messages_dropped;
                 { messages = []; dedup_key = None }
@@ -238,6 +249,37 @@ let purge_messages ~config messages =
                      in
                      tool_results_cleared := !tool_results_cleared + cleared;
                      cleared_message)
+                  cycle_messages
+              else cycle_messages
+            in
+            (* R2 inside the cycle. The assistant message that OPENS a tool
+               cycle is grouped here, never in [Ordinary_message], so before
+               this branch existed R2 could not reach it at all — the single
+               largest reason unsigned reasoning survived a full purge.
+               The opening ToolUse and matching ToolResult anchors always
+               survive. An interstitial assistant message containing only
+               unsigned reasoning has no anchor, so it can be removed without
+               breaking the indivisible ToolUse/ToolResult pair. *)
+            let cycle_messages =
+              if config.strip_thinking
+              then
+                List.filter_map
+                  (fun message ->
+                     if not (is_assistant message)
+                     then Some message
+                     else (
+                       let stripped, count = strip_reasoning_blocks message in
+                       match stripped.Agent_core.Types.content with
+                       | [] when count > 0 ->
+                         reasoning_blocks_stripped
+                         := !reasoning_blocks_stripped + count;
+                         incr reasoning_messages_dropped;
+                         None
+                       | [] -> Some stripped
+                       | _ :: _ ->
+                         reasoning_blocks_stripped
+                         := !reasoning_blocks_stripped + count;
+                         Some stripped))
                   cycle_messages
               else cycle_messages
             in
@@ -272,9 +314,9 @@ let purge_messages ~config messages =
              } )))
 ;;
 
-let purge ~config (ckpt : Agent_sdk.Checkpoint.t) =
+let purge ~config (ckpt : Agent_core.Checkpoint.t) =
   match purge_messages ~config ckpt.messages with
   | Error error -> Error error
   | Ok (messages, report) ->
-    Ok ({ ckpt with Agent_sdk.Checkpoint.messages }, report)
+    Ok ({ ckpt with Agent_core.Checkpoint.messages }, report)
 ;;

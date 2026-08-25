@@ -91,6 +91,147 @@ let test_audit_events_filter_severity_before_paging () =
   check string "older error retained" "keeper-a" (row |> member "actor" |> to_string);
   check string "severity" "error" (row |> member "severity" |> to_string)
 
+(* ── get_stats ─────────────────────────────────────────────────────
+   [get_stats] projects each row to its timestamp during the read instead of
+   materialising the window. The reader hands rows over oldest-first, so the
+   first timestamp seen is the oldest and the last is the newest; a projection
+   that folded the other way would swap these two silently. *)
+
+let test_get_stats_reports_oldest_and_newest_in_read_order () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      List.iter
+        (fun ts ->
+          Audit_log.append_entry config
+            (entry ~timestamp:ts ~agent_id:"keeper-a"
+               ~action:Audit_log.AuthSuccess ~outcome:Audit_log.Success))
+        [ 100.0; 200.0; 300.0 ];
+      let stats = Audit_log.get_stats config in
+      check int "counts every row" 3 stats.Audit_log.total_entries;
+      check (option (float 0.001)) "oldest is the first row read" (Some 100.0)
+        stats.Audit_log.oldest_timestamp;
+      check (option (float 0.001)) "newest is the last row read" (Some 300.0)
+        stats.Audit_log.newest_timestamp)
+
+(* [read_entries] decodes rows during the read. The reader calls its
+   projection newest-first while returning the rows oldest-first, so the
+   caller-visible order is what needs pinning; the rate-limited corrupt-entry
+   logging stays out of the projection precisely so it cannot follow the scan
+   direction. *)
+let test_read_entries_is_chronological_and_drops_corrupt_rows () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      List.iter
+        (fun ts ->
+          Audit_log.append_entry config
+            (entry ~timestamp:ts ~agent_id:(Printf.sprintf "keeper-%.0f" ts)
+               ~action:Audit_log.AuthSuccess ~outcome:Audit_log.Success))
+        [ 100.0; 200.0; 300.0 ];
+      (* Well-formed JSON that is not a decodable audit entry: it survives the
+         reader's own malformed-row filter and must be dropped by the decode
+         path instead. *)
+      let audit_dir =
+        Filename.concat (Workspace_utils.masc_dir config) "audit"
+      in
+      let day_file =
+        match Sys.readdir audit_dir with
+        | [| month |] ->
+          let month_dir = Filename.concat audit_dir month in
+          Filename.concat month_dir (Sys.readdir month_dir).(0)
+        | _ -> fail "expected exactly one month directory"
+      in
+      Fs_compat.append_file day_file ({|{"not":"an audit entry"}|} ^ "\n");
+      let entries = Audit_log.read_entries ~n:10 config in
+      check (list (float 0.001)) "oldest first"
+        [ 100.0; 200.0; 300.0 ]
+        (List.map (fun (e : Audit_log.audit_entry) -> e.timestamp) entries);
+      check (list string) "agents follow the same order"
+        [ "keeper-100"; "keeper-200"; "keeper-300" ]
+        (List.map (fun (e : Audit_log.audit_entry) -> e.agent_id) entries))
+
+(* Locate the single day-file the fixtures above write into, so a row the
+   decoder rejects can be placed at a chosen position rather than only at the
+   end. *)
+let sole_audit_day_file config =
+  let audit_dir =
+    Filename.concat (Workspace_utils.masc_dir config) Audit_log.store_dirname
+  in
+  match Sys.readdir audit_dir with
+  | [| month |] ->
+    let month_dir = Filename.concat audit_dir month in
+    (match Sys.readdir month_dir with
+     | [| day |] -> Filename.concat month_dir day
+     | _ -> fail "expected exactly one day file")
+  | _ -> fail "expected exactly one month directory"
+
+let append_undecodable_row config label =
+  Fs_compat.append_file
+    (sole_audit_day_file config)
+    (Printf.sprintf {|{"not":"an audit entry","label":%S}|} label ^ "\n")
+
+let append_entry_at config ts =
+  Audit_log.append_entry config
+    (entry ~timestamp:ts ~agent_id:"keeper-a" ~action:Audit_log.AuthSuccess
+       ~outcome:Audit_log.Success)
+
+let read_timestamps ?n config =
+  Audit_log.read_entries ?n config
+  |> List.map (fun (e : Audit_log.audit_entry) -> e.Audit_log.timestamp)
+
+(* Position matters. The neighbouring case appends its undecodable row last, so
+   a reader that abandoned the scan at the first rejection would still return
+   every good entry and pass. Interleaving the rejections leaves such a reader
+   holding only what it read before the first one. *)
+let test_read_entries_survives_interleaved_undecodable_rows () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      append_entry_at config 100.0;
+      append_undecodable_row config "between-100-and-200";
+      append_entry_at config 200.0;
+      append_undecodable_row config "between-200-and-300";
+      append_entry_at config 300.0;
+      check (list (float 0.001))
+        "every decodable row survives its rejected neighbours, in order"
+        [ 100.0; 200.0; 300.0 ]
+        (read_timestamps ~n:10 config))
+
+(* [n] is a bound on rows read, not on entries produced, so a window that spans
+   a rejected row yields fewer entries than [n]. A reader that kept consuming
+   until it had [n] *entries* would return both good rows here. *)
+let test_read_entries_window_bounds_rows_read_not_entries_returned () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      append_entry_at config 100.0;
+      append_undecodable_row config "inside-the-window";
+      append_entry_at config 200.0;
+      (* The two newest rows are the rejected one and 200.0. *)
+      check (list (float 0.001)) "the window bounds rows read"
+        [ 200.0 ]
+        (read_timestamps ~n:2 config);
+      check (list (float 0.001)) "a window covering everything still drops it"
+        [ 100.0; 200.0 ]
+        (read_timestamps ~n:10 config))
+
 (* ── Codec round-trip tests ────────────────────────────────────────── *)
 
 let action_roundtrip label action expected_wire =
@@ -274,6 +415,88 @@ let test_runtime_config_write_routing_list_projection () =
   check string "target" "/x/config/runtime.toml" (field "target");
   check string "severity" "warn" (field "severity")
 
+(* [read_entries ~n] counts rows, so a caller that filters afterwards cannot
+   ask for "the newest n of mine": the audit store holds every agent's actions
+   and one busy agent fills any window. The first check pins that; the rest pin
+   the filtered read that replaces it. *)
+let test_matching_read_counts_matches_not_rows () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      let say agent_id tool =
+        Audit_log.log_non_public_tool_call config ~agent_id ~tool_name:tool
+          ~success:true ~error_msg:None ()
+      in
+      say "quiet" "masc_status";
+      say "quiet" "masc_tasks";
+      for i = 1 to 20 do
+        say "busy" (Printf.sprintf "masc_tool_%d" i)
+      done;
+      let is_quiet (e : Audit_log.audit_entry) = String.equal e.agent_id "quiet" in
+      let unfiltered = Audit_log.read_entries ~n:5 config in
+      check int "an unfiltered window of 5 holds none of the quiet agent's rows" 0
+        (List.length (List.filter is_quiet unfiltered));
+      let matched = Audit_log.read_entries_matching ~n:5 ~keep:is_quiet config in
+      check int "the filtered read returns every match under the limit" 2
+        (List.length matched);
+      let bounded =
+        Audit_log.read_entries_matching ~n:3
+          ~keep:(fun e -> not (is_quiet e))
+          config
+      in
+      check int "n bounds the matches" 3 (List.length bounded);
+      let by_actor =
+        Audit_log.read_entries_matching ~n:5
+          ~keep:(Audit_log.audit_entry_matches ~actor:"quiet")
+          config
+      in
+      check int "the shared predicate selects the same rows" 2
+        (List.length by_actor))
+
+(* [since]/[until] are turned into day keys and compared against the day-file
+   names [Jsonl_writer] wrote. Formatting those keys separately meant a change
+   to the writer's layout would narrow every audit range silently instead of
+   failing, so the bound is derived from the writer now (#29358). A row written
+   today has to fall inside a window that starts today. *)
+let test_day_bounds_match_the_written_day_file () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      Audit_log.log_non_public_tool_call
+        config
+        ~agent_id:"bounded"
+        ~tool_name:"masc_status"
+        ~success:true
+        ~error_msg:None
+        ();
+      let now = Unix.gettimeofday () in
+      let day = 86_400.0 in
+      let keep (e : Audit_log.audit_entry) = String.equal e.agent_id "bounded" in
+      check
+        int
+        "a window starting today holds today's row"
+        1
+        (List.length (Audit_log.read_entries_matching ~n:5 ~since:now ~keep config));
+      check
+        int
+        "a window that ends yesterday holds none of it"
+        0
+        (List.length
+           (Audit_log.read_entries_matching ~n:5 ~until:(now -. day) ~keep config));
+      check
+        int
+        "a window that starts tomorrow holds none of it"
+        0
+        (List.length
+           (Audit_log.read_entries_matching ~n:5 ~since:(now +. day) ~keep config)))
+;;
+
 let () =
   run "Audit_log"
     [
@@ -283,6 +506,16 @@ let () =
             test_non_public_details_deduplicate_canonical_keys;
           test_case "audit event severity filters before paging" `Quick
             test_audit_events_filter_severity_before_paging;
+          test_case "get_stats reports oldest and newest in read order" `Quick
+            test_get_stats_reports_oldest_and_newest_in_read_order;
+          test_case "day bounds match the written day file" `Quick
+            test_day_bounds_match_the_written_day_file;
+          test_case "read_entries is chronological and drops corrupt rows"
+            `Quick test_read_entries_is_chronological_and_drops_corrupt_rows;
+          test_case "read_entries survives interleaved undecodable rows" `Quick
+            test_read_entries_survives_interleaved_undecodable_rows;
+          test_case "read_entries window bounds rows read" `Quick
+            test_read_entries_window_bounds_rows_read_not_entries_returned;
         ] );
       ( "codec_roundtrip",
         [
@@ -300,5 +533,7 @@ let () =
             test_runtime_config_write_assignment_projection;
           test_case "runtime_config_write routing list projection" `Quick
             test_runtime_config_write_routing_list_projection;
+          test_case "matching read counts matches not rows" `Quick
+            test_matching_read_counts_matches_not_rows;
         ] );
     ]

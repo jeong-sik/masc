@@ -9,9 +9,15 @@ type t
 val empty : t
 
 val snapshot : base_path:string -> keeper_name:string -> t
-(** Snapshot exact secret values from the keeper's projected secret
-    root. Missing or unreadable roots produce {!empty}; redaction must
-    never fail a chat turn. *)
+(** Snapshot exact secret values from the keeper's projected secret root. *)
+
+val snapshot_with_additional_secret_files :
+  additional_secret_files:string list -> base_path:string -> keeper_name:string -> t
+(** Snapshot exact secret values from the keeper's projected secret root and
+    caller-owned structured secret files. For additional files,
+    non-empty mapping scalar values are captured as well as complete lines so
+    emitting only a scalar cannot bypass redaction. Missing or unreadable
+    roots/files are ignored; redaction must never fail a chat turn. *)
 
 val redact_text : t -> string -> string
 (** Replace exact projected secret values and generic sensitive patterns
@@ -20,23 +26,18 @@ val redact_text : t -> string -> string
 
 type stream_state
 
-val create_stream_state : unit -> stream_state
-
-val redact_stream_chunk : t -> stream_state -> string -> string
-(** Stateful chunk redaction for streaming output. Buffers raw bytes up to
-    the last ['\n'] so a single-line secret split across chunk boundaries is
-    reassembled into one {!redact_text} call. Returns only the bytes safe
-    to emit now; the remainder is held until the next chunk or
-    {!redact_stream_finish}. *)
-
-val redact_stream_finish : t -> stream_state -> string
-(** Flush any remaining buffered bytes at end of stream and redact them as
-    one unit. *)
+val create_stream_state : t -> stream_state
+val redact_stream_chunk : stream_state -> string -> string
+val redact_stream_finish : stream_state -> string
+(** Boundary-safe streaming redaction. Newline and carriage-return records are
+    emitted immediately. Long unterminated records are emitted in bounded
+    chunks while retaining a suffix large enough for every snapshotted exact
+    secret (and a bounded structural-pattern overlap), so process progress does
+    not require buffering an unbounded line. Call [finish] once to redact and
+    emit the remaining suffix. *)
 
 val redact_json : t -> Yojson.Safe.t -> Yojson.Safe.t
-(** Redact all string leaves in a JSON value, preserving shape. *)
+(** Redact a JSON value's object keys as well as its string leaves, preserving
+    shape. A secret can be the key -- a header name, or a parameter a tool used
+    as a dict key -- so a leaves-only traversal emits it (#22941). *)
 
-val redact_json_keys : t -> Yojson.Safe.t -> Yojson.Safe.t
-(** Redact string literals that appear as JSON object keys. Values are left
-    untouched so this can be composed with {!redact_json} for full key+value
-    coverage without duplicating the traversal. *)

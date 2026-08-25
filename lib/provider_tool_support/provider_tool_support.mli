@@ -1,4 +1,4 @@
-(** OAS provider capability projection used by MASC tool-lane selection. *)
+(** AGENT_CORE provider capability projection used by MASC tool-lane selection. *)
 
 type capabilities =
   { supports_inline_tools : bool
@@ -10,9 +10,9 @@ type runtime_capabilities_override =
   ; supports_inline_tool_choice : bool option
   }
 
-val oas_capabilities_of_config :
+val agent_core_capabilities_of_config :
   Llm_provider.Provider_config.t -> Llm_provider.Capabilities.capabilities
-(** Return the OAS-owned provider capability row without local reclassification. *)
+(** Return the AGENT_CORE-owned provider capability row without local reclassification. *)
 
 val capabilities_of_config :
   ?override:runtime_capabilities_override ->
@@ -24,5 +24,4 @@ val provider_supports_inline_tools :
   Llm_provider.Provider_config.t ->
   bool
 
-val provider_debug_label : Llm_provider.Provider_config.t -> string
 val provider_kind_label : Llm_provider.Provider_config.t -> string

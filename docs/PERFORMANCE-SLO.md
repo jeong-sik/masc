@@ -14,7 +14,7 @@
 추가 지표:
 
 - `initialize + notifications/initialized` 세션 생성 비용은 별도 추적
-- raw local runtime 비용은 `masc_runtime_verify`로 MCP read-path와 분리해서 읽음
+- raw local runtime 비용은 Admin-only effectful diagnostic인 `masc_runtime_verify`로 MCP read-path와 분리해서 측정
 
 ### REST API
 - /api/v1/status P95 < 150ms
@@ -27,10 +27,10 @@
 
 ### LLM Provider Streaming Latency
 
-현재 MASC는 OAS provider의 **TTFRC**(Time To First Response Chunk)만 측정한다.
-OAS `Streaming_summary.ttft_ms`(Time To First Token)는 MASC가 직접 소비하지 않는다.
+현재 MASC는 agent core provider의 **TTFRC**(Time To First Response Chunk)만 측정한다.
+agent core `Streaming_summary.ttft_ms`(Time To First Token)는 MASC가 직접 소비하지 않는다.
 
-- `keeper_telemetry_consumer.ml`은 OAS telemetry event를 counter-only로 관찰하며,
+- `keeper_telemetry_consumer.ml`은 agent core telemetry event를 counter-only로 관찰하며,
   provider model-bearing payload는 역직렬화하지 않는다.
 - `llm_metric_bridge.ml`의 `on_streaming_first_chunk` 콜백은 response chunk가
   도착한 시점(`ttfrc_ms`)만 기록한다.
@@ -41,7 +41,7 @@ OAS `Streaming_summary.ttft_ms`(Time To First Token)는 MASC가 직접 소비하
 - `gen_ai.response.time_to_first_chunk` — OpenTelemetry GenAI semconv TTFRC
 
 **TTFT-to-client**(= provider TTFT + transport overhead)는 현재 측정되지 않는다.
-OAS RFC-OAS-020이 요구하는 consumer SLO를 추가하려면 OAS `Streaming_summary`를
+agent core RFC-agent core-020이 요구하는 consumer SLO를 추가하려면 agent core `Streaming_summary`를
 파싱하거나 `Metrics.t` 콜백 계약에 TTFT 필드를 추가해야 한다.
 
 ## 측정 방법
@@ -56,13 +56,16 @@ OAS RFC-OAS-020이 요구하는 consumer SLO를 추가하려면 OAS `Streaming_s
 - `benchmark.sh`는 `session`, `read`, `workspace collaboration`, `runtime`, `a2a`, `lock` lane을 분리하고 `avg/p50/p95/max`를 CSV로 남긴다.
 - `benchmark.sh`는 기본적으로 tool lane당 warmup 1회를 제외하고, 결과 CSV 옆에 metadata와 baseline diff를 같이 남긴다.
 - `runtime` lane 숫자는 MCP transport가 아니라 local runtime ceiling 영향을 크게 받는다.
+- 인증이 켜진 서버에서 `quick-bench.sh` 또는 `runtime` lane을 실행할 때는
+  `MASC_TOKEN`에 Admin credential이 필요하다. `masc_runtime_verify`는 endpoint마다
+  실제 chat completion을 호출하므로 read-only benchmark가 아니다.
 - `local64`는 target runtime profile 이름이지 achieved fact가 아니다. 실제 용량은 `masc_runtime_verify`의 `configured_capacity`, `healthy_runtime_count`로 확인한다.
 
 환경 변수:
 ```
 MASC_URL=http://127.0.0.1:8935/mcp
 MASC_AGENT=bench
-MASC_TOKEN=<optional>
+MASC_TOKEN=<Admin token required for quick-bench/runtime lane when auth is enabled>
 ```
 
 ## 경고 기준

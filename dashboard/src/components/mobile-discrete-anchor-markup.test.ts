@@ -9,7 +9,7 @@ function source(file: string): string {
 describe('hidden discrete anchor mobile contract', () => {
   it.each([
     ['keeper-detail-comms.ts', 'target="_blank" rel="noopener" class="v2-mobile-operator-target'],
-    ['oas-health-chip.ts', 'v2-shell-action v2-mobile-operator-target'],
+    ['agent-core-health-chip.ts', 'v2-shell-action v2-mobile-operator-target'],
   ])('opts %s into the semantic runtime target (%s)', (file, marker) => {
     expect(source(file)).toContain(marker)
     expect(source(file)).toContain('v2-mobile-operator-target')

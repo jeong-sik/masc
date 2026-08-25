@@ -74,11 +74,6 @@ type tlc_result_entry = {
   log_path : string option;
 }
 
-val tlc_results_dir : unit -> string
-(** Directory containing TLC logs. Reads [MASC_TLC_RESULTS_DIR], falling back
-    to the host temporary directory. This matches [specs/Makefile], which
-    writes logs as [tlc-<cfg-stem>.log]. *)
-
 val list_tlc_results : unit -> tlc_result_entry list
 (** Project every discovered clean / buggy cfg to its last observed TLC result.
     Missing logs are reported as [Tlc_not_run]; this function never runs TLC. *)

@@ -59,8 +59,8 @@
 - `lib/tool_permission_map.ml`: 7 entries
 - `lib/tool_prefilter.ml`: 4 entries (cycle/start/status/stop)
 
-### D. Persona prompt 자동 호출
-`lib/keeper/keeper_persona*.ml` + prompt 파일 grep: **0 hit**. autoresearch는 manual user invocation tool. persona가 자동 호출하지 않음 → 제거 시 persona behavior 영향 없음.
+### D. Keeper prompt 자동 호출
+`lib/keeper/keeper_keeper*.ml` + prompt 파일 grep: **0 hit**. autoresearch는 manual user invocation tool. keeper가 자동 호출하지 않음 → 제거 시 keeper behavior 영향 없음.
 
 ### E. Test
 - `test/test_env_config_exec_timeout_10426.ml` 1건 — `Autoresearch_*` 모듈 사용 (timeout test)
@@ -72,10 +72,10 @@
 | Subsystem 모듈 (A) | 자동 사라짐 | `lib/autoresearch/` + `tool_autoresearch.ml`/`_schemas.ml` + `autoresearch_codegen.ml` 디렉토리/파일 삭제 |
 | 표면 등록 (B) | feature catalog block + surface label 4 + dashboard endpoint | 4 파일 touch |
 | Tool catalog 메타 (C) | 7 entries × 4 파일 = 28 라인 제거 | mechanical |
-| Persona (D) | **영향 없음** (자동 호출 없음) | skip |
+| Keeper (D) | **영향 없음** (자동 호출 없음) | skip |
 | Test (E) | timeout test가 Autoresearch_serde 사용 | test 마이그레이션 또는 삭제 |
 
-**verdict**: SAFE REMOVAL. persona 자동 호출 0 + caller chain이 자체 subsystem + 표면 등록만이라 deletion 명확. 단 **LOC 큼** (~700-1000 LOC 삭제).
+**verdict**: SAFE REMOVAL. keeper 자동 호출 0 + caller chain이 자체 subsystem + 표면 등록만이라 deletion 명확. 단 **LOC 큼** (~700-1000 LOC 삭제).
 
 ## PR-N2b 권장 분할
 

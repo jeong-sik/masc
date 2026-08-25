@@ -61,9 +61,17 @@ function authBadgeSummary(): {
   const summary = shellAuthSummary.value
   const remote = isRemoteAccess()
   const validated = summary?.token_valid === true
-  const role = summary?.effective_role ?? summary?.default_role ?? 'unknown'
+  const role = summary?.effective_role ?? 'unknown'
   const actor = summary?.effective_agent ?? summary?.token_agent ?? currentDashboardActor()
-  const hasError = summary?.auth_error_code != null || (summary?.token_present === true && !validated)
+  // `missing_token` says no credential was sent. That is the operator's next
+  // action, not a broken system, and it already has a label below. Folding it
+  // into the error branch showed a red "Auth error" on a dashboard whose data
+  // was loading fine, which reads as an outage and sends people looking for
+  // one. Every other code means a credential was sent and rejected.
+  const errorCode = summary?.auth_error_code ?? null
+  const credentialRejected =
+    (errorCode != null && errorCode !== 'missing_token')
+    || (summary?.token_present === true && !validated)
   const hasToken = !!dashboardBearerToken()
   const bootstrap = devTokenBootstrapStatus.value
 
@@ -73,10 +81,16 @@ function authBadgeSummary(): {
       label: `Verified @${actor} · ${role}`,
     }
   }
-  if (hasError) {
+  if (credentialRejected) {
     return {
       dotColor: 'bg-[var(--color-status-err)] shadow-[0_0_6px_rgb(var(--err-glow)/0.45)]',
       label: 'Auth error',
+    }
+  }
+  if (errorCode === 'missing_token' && !hasToken && bootstrap !== 'warming') {
+    return {
+      dotColor: 'bg-[var(--color-status-err)] shadow-[0_0_6px_rgb(var(--err-glow)/0.45)]',
+      label: 'Login required',
     }
   }
   if (!hasToken && bootstrap === 'warming') {
@@ -122,7 +136,7 @@ async function handleSetToken(): Promise<void> {
   popoverOpen.value = false
   if (summary?.token_valid) {
     const actor = summary.effective_agent ?? summary.token_agent ?? currentDashboardActor()
-    const role = summary.effective_role ?? summary.default_role ?? 'unknown'
+    const role = summary.effective_role ?? 'unknown'
     showToast(`Verified @${actor} · ${role}`, 'success')
     return
   }
@@ -265,7 +279,7 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
   const storedActor = readStoredDashboardActorName()
   const requestedActor = summary?.requested_agent ?? resolveDashboardActorName() ?? 'dashboard'
   const effectiveActor = summary?.effective_agent ?? summary?.token_agent ?? requestedActor
-  const effectiveRole = summary?.effective_role ?? summary?.default_role ?? 'unknown'
+  const effectiveRole = summary?.effective_role ?? 'unknown'
   const mutationAccess = dashboardAuthAccess(summary, 'worker')
   const blockReason = cleanErrorMessage(summary?.auth_error_detail ?? summary?.keeper_msg_error ?? mutationAccess.reason)
     ?? 'None'

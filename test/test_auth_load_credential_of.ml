@@ -34,57 +34,54 @@ let with_temp_base f =
     (fun () -> f base)
 
 let write_cred ~base ~agent_name ~token_hash =
-  let agents_dir = Filename.concat base ".masc/auth/agents" in
-  let rec mkdirs p =
-    if Sys.file_exists p then ()
-    else begin
-      mkdirs (Filename.dirname p);
-      try Unix.mkdir p 0o755 with Unix.Unix_error _ -> ()
-    end
+  (* Write through the production encoder so a credential schema change breaks
+     this fixture at compile time instead of at [of_yojson] runtime. The
+     hand-written JSON this replaces omitted [id]/[agent_id]/[expires_at], which
+     the decoder requires as keys even where the record type defaults them. *)
+  let cred : Masc_domain.agent_credential =
+    { id = None
+    ; agent_id = None
+    ; agent_name
+    ; token = token_hash
+    ; role = Masc_domain.Worker
+    ; created_at = "2026-04-26T00:00:00Z"
+    ; expires_at = None
+    }
   in
-  mkdirs agents_dir;
-  let path = Filename.concat agents_dir (agent_name ^ ".json") in
-  let json =
-    Printf.sprintf
-      "{\"agent_name\":%S,\"token\":%S,\"role\":\"worker\",\"created_at\":\"2026-04-26T00:00:00Z\"}"
-      agent_name token_hash
-  in
-  let oc = open_out path in
-  output_string oc json;
-  close_out oc
+  Auth.save_credential base cred
 
 let test_exact_match_load_ok () =
   with_temp_base (fun base ->
-    write_cred ~base ~agent_name:"keeper-sangsu-agent"
+    write_cred ~base ~agent_name:"keeper-alpha-agent"
       ~token_hash:"abc123";
     match
-      Masc.Auth.load_credential_of base
-        ~ctx_agent_name:"keeper-sangsu-agent"
-        ~resolved_credential_stem:"keeper-sangsu-agent"
+      Auth.load_credential_of base
+        ~ctx_agent_name:"keeper-alpha-agent"
+        ~resolved_credential_stem:"keeper-alpha-agent"
     with
     | Ok cred ->
-        assert (cred.agent_name = "keeper-sangsu-agent");
+        assert (cred.agent_name = "keeper-alpha-agent");
         print_endline "PASS: exact match -> Ok cred"
     | Error e ->
         Printf.printf "FAIL: expected Ok, got Error %s\n"
-          (Masc.Auth.show_load_credential_error e);
+          (Auth.show_load_credential_error e);
         exit 1)
 
 let test_exact_match_missing_returns_credential_missing () =
   with_temp_base (fun base ->
     (* No cred file written *)
     match
-      Masc.Auth.load_credential_of base
+      Auth.load_credential_of base
         ~ctx_agent_name:"keeper-ghost-agent"
         ~resolved_credential_stem:"keeper-ghost-agent"
     with
     | Ok _ ->
         print_endline "FAIL: expected Credential_missing, got Ok";
         exit 1
-    | Error (Masc.Auth.Credential_missing { ctx_agent_name }) ->
+    | Error (Auth.Credential_missing { ctx_agent_name }) ->
         assert (ctx_agent_name = "keeper-ghost-agent");
         print_endline "PASS: missing file -> Credential_missing"
-    | Error (Masc.Auth.Credential_mismatch _) ->
+    | Error (Auth.Credential_mismatch _) ->
         print_endline "FAIL: expected Credential_missing, got Credential_mismatch";
         exit 1)
 
@@ -92,43 +89,43 @@ let test_mismatch_rejects_even_when_resolved_stem_exists () =
   (* Dual-identity scenario: bare nickname cred exists on disk, but ctx
      is canonical. load_credential_of must reject rather than fall back. *)
   with_temp_base (fun base ->
-    write_cred ~base ~agent_name:"sangsu" ~token_hash:"bare-token";
-    write_cred ~base ~agent_name:"keeper-sangsu-agent"
+    write_cred ~base ~agent_name:"alpha" ~token_hash:"bare-token";
+    write_cred ~base ~agent_name:"keeper-alpha-agent"
       ~token_hash:"canonical-token";
     match
-      Masc.Auth.load_credential_of base
-        ~ctx_agent_name:"keeper-sangsu-agent"
-        ~resolved_credential_stem:"sangsu"
+      Auth.load_credential_of base
+        ~ctx_agent_name:"keeper-alpha-agent"
+        ~resolved_credential_stem:"alpha"
     with
     | Ok _ ->
         print_endline "FAIL: expected Credential_mismatch, got Ok (silent fallback)";
         exit 1
-    | Error (Masc.Auth.Credential_missing _) ->
+    | Error (Auth.Credential_missing _) ->
         print_endline "FAIL: expected Credential_mismatch, got Credential_missing";
         exit 1
     | Error
-        (Masc.Auth.Credential_mismatch
+        (Auth.Credential_mismatch
            { ctx_agent_name; resolved_credential_stem }) ->
-        assert (ctx_agent_name = "keeper-sangsu-agent");
-        assert (resolved_credential_stem = "sangsu");
+        assert (ctx_agent_name = "keeper-alpha-agent");
+        assert (resolved_credential_stem = "alpha");
         print_endline
           "PASS: ctx<>stem -> Credential_mismatch (no silent fallback)")
 
 let test_mismatch_rejects_even_when_neither_exists () =
   with_temp_base (fun base ->
     match
-      Masc.Auth.load_credential_of base
+      Auth.load_credential_of base
         ~ctx_agent_name:"keeper-a-agent"
         ~resolved_credential_stem:"b"
     with
     | Ok _ ->
         print_endline "FAIL: expected Credential_mismatch";
         exit 1
-    | Error (Masc.Auth.Credential_missing _) ->
+    | Error (Auth.Credential_missing _) ->
         print_endline "FAIL: ctx<>stem must take mismatch branch even when nothing exists";
         exit 1
     | Error
-        (Masc.Auth.Credential_mismatch
+        (Auth.Credential_mismatch
            { ctx_agent_name; resolved_credential_stem }) ->
         assert (ctx_agent_name = "keeper-a-agent");
         assert (resolved_credential_stem = "b");

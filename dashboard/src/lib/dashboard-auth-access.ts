@@ -77,7 +77,7 @@ export function dashboardAuthAccess(
     }
   }
 
-  const effectiveRole = asRole(summary.effective_role ?? summary.default_role)
+  const effectiveRole = asRole(summary.effective_role)
   const roleInsufficient =
     effectiveRole == null
     || ROLE_ORDER[effectiveRole] < ROLE_ORDER[requiredRole]

@@ -1,4 +1,4 @@
-(** Total typed failure routing over [Agent_sdk.Error.sdk_error].
+(** Total typed failure routing over [Agent_core.Error.t].
 
     Every turn-failure error maps to exactly one typed route; there is no
     [None] family and no catch-all arm. A route is an observation for telemetry
@@ -34,7 +34,7 @@ type retry_class =
   | Network_transient  (** transport-level network failure *)
   | Provider_timeout  (** provider or transport deadline expiry *)
 
-val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
+val core_error_is_hard_quota : Agent_core.Error.t -> bool
 (** True only for the typed [PaymentRequired] and provider [HardQuota]
     constructors. Free-form messages and numeric status codes are ignored. *)
 
@@ -64,10 +64,13 @@ type terminal_class =
   | Provider_integration
       (** provider response unparseable / unknown variant / provider-terminal
           / sub-500 unclassified server errors *)
-  | Terminal_effect_transient_failure
+  | Terminal_effect_dependency_unavailable
   | Terminal_effect_policy_rejection
   | Terminal_effect_runtime_failure
   | Terminal_effect_workflow_rejection
+  | Terminal_effect_operator_cancelled
+  | Provider_attempt_effect_fenced
+  | Tool_correction_lost
   | Internal_opaque
       (** unhandled internal exceptions, serialization/io/orchestration/agent
           family errors; the failure stays visible while the keeper remains
@@ -75,22 +78,22 @@ type terminal_class =
 
 (** Typed origin of a terminal observation. *)
 type failure_provenance =
-  | Oas_api_error
-  | Oas_provider_error
-  | Oas_agent_error
-  | Oas_mcp_error
-  | Oas_config_error
-  | Oas_serialization_error
-  | Oas_io_error
-  | Oas_orchestration_error
-  | Oas_internal_error
+  | Agent_core_api_error
+  | Agent_core_provider_error
+  | Agent_core_agent_error
+  | Agent_core_mcp_error
+  | Agent_core_config_error
+  | Agent_core_serialization_error
+  | Agent_core_io_error
+  | Agent_core_orchestration_error
+  | Agent_core_internal_error
   | Masc_internal_error
   | Completion_contract
 
 type error_boundary =
   | Masc_execution
-  | Oas_execution
-(** Actual producer boundary supplied by the caller. Ambiguous SDK constructors
+  | Agent_core_execution
+(** Actual producer boundary supplied by the caller. Ambiguous agent-core constructors
     such as [Config] and [Internal] do not carry their own origin. *)
 
 type route =
@@ -108,12 +111,12 @@ type route =
         (** Display-only bounded failure summary. Never matched. *)
       }
 
-val route_of_error : boundary:error_boundary -> Agent_sdk.Error.sdk_error -> route
-(** Total over every [sdk_error] class. The caller supplies the actual execution
-    boundary so constructors shared by MASC and OAS are never used as provenance
+val route_of_error : boundary:error_boundary -> Agent_core.Error.t -> route
+(** Total over every [core_error] class. The caller supplies the actual execution
+    boundary so constructors shared by MASC and AGENT_CORE are never used as provenance
     inference. MASC-internal typed envelopes are decoded only at
     [Masc_execution], except [Terminal_effect_failed]: that MASC-owned effect
-    crosses the live OAS tool boundary and is therefore decoded at either
+    crosses the live AGENT_CORE tool boundary and is therefore decoded at either
     boundary. No arm returns "no route". *)
 
 val retry_after_of_route : route -> float option
@@ -123,8 +126,6 @@ val route_kind_label : route -> string
 (** Stable telemetry label: ["retry_after_observed" | "rotate_now" |
     "exhausted_visible_alive"]. *)
 
-val retry_class_label : retry_class -> string
-val rotate_class_label : rotate_class -> string
 val route_class_label : route -> string
 (** The route's class label ([retry_class_label] / [rotate_class_label] /
     [terminal_class_label] respectively). *)

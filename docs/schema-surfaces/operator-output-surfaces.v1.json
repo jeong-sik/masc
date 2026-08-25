@@ -1,7 +1,7 @@
 {
   "version": 1,
   "updated_at": "2026-05-14",
-  "description": "Operator-facing index of MASC runtime output, dashboard, and OAS bridge schema surfaces.",
+  "description": "Operator-facing index of MASC runtime output, dashboard, and agent core bridge schema surfaces.",
   "surfaces": [
     {
       "id": "masc.keeper_composite.http.v1",
@@ -41,7 +41,7 @@
       "tests": ["dashboard/src/schemas/sse.test.ts", "test/test_sse.ml"],
       "stability": "operator_internal",
       "version_field": null,
-      "external_refs": ["oas.event_bus.v1"],
+      "external_refs": ["agent_core.event_bus.v1"],
       "notes": "SSE freshness signals are not authoritative read models; consumers re-fetch authoritative snapshots."
     },
     {
@@ -59,7 +59,7 @@
       ],
       "stability": "operator_internal",
       "version_field": "schema_version",
-      "external_refs": ["oas.runtime_protocol.v1", "oas.event_bus.v1"],
+      "external_refs": ["agent_core.runtime_protocol.v2", "agent_core.event_bus.v1"],
       "notes": "Records decision context before and during provider attempts; narrower than execution receipts."
     },
     {
@@ -73,12 +73,11 @@
       "validator": "Keeper_execution_receipt.to_json and receipt invariant tests",
       "tests": [
         "test/test_keeper_receipt_authoritative.ml",
-        "test/test_keeper_receipt_authoritative_matrix.ml",
-        "test/test_keeper_receipt_outcome_tla_parity.ml"
+        "test/test_keeper_receipt_authoritative_matrix.ml"
       ],
       "stability": "operator_internal",
       "version_field": "schema",
-      "external_refs": ["oas.raw_trace_record.v1"],
+      "external_refs": ["agent_core.raw_trace_record.v1"],
       "notes": "Terminal keeper turn receipt, including completion contract and runtime outcome summary."
     },
     {
@@ -93,7 +92,7 @@
       "tests": ["test/test_keeper_tool_call_log.ml"],
       "stability": "operator_internal",
       "version_field": null,
-      "external_refs": ["oas.raw_trace_record.v1"],
+      "external_refs": ["agent_core.raw_trace_record.v1"],
       "notes": "Persists redacted full I/O and effective turn policy context for keeper tool calls."
     },
     {
@@ -131,22 +130,22 @@
       "notes": "OpenAPI is generated from REST-bound MCP tools; per-tool output schemas are not uniformly versioned in v1."
     },
     {
-      "id": "masc.oas_bridge_events.v1",
+      "id": "masc.agent_core_bridge_events.v1",
       "kind": "event_bus",
       "owner": "MASC",
-      "producer": "Runtime/OAS event bridge",
-      "consumer": ["dashboard SSE bridge", "OAS event subscribers"],
-      "wire_or_artifact": "OAS Custom events relayed into MASC surfaces",
+      "producer": "Runtime/agent core event bridge",
+      "consumer": ["dashboard SSE bridge", "agent core event subscribers"],
+      "wire_or_artifact": "agent core Custom events relayed into MASC surfaces",
       "schema_source": [
         "lib/keeper/keeper_event_bridge.mli",
         "docs/SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md"
       ],
-      "validator": "OAS integration bridge tests",
+      "validator": "agent core integration bridge tests",
       "tests": ["test/test_keeper_execution_join.ml"],
       "stability": "operator_internal",
       "version_field": null,
-      "external_refs": ["oas.event_bus.v1", "oas.runtime_protocol.v1"],
-      "notes": "MASC domain events stay MASC-owned and correlate with OAS via bridge payloads."
+      "external_refs": ["agent_core.event_bus.v1", "agent_core.runtime_protocol.v2"],
+      "notes": "MASC domain events stay MASC-owned and correlate with agent core via bridge payloads."
     }
   ]
 }

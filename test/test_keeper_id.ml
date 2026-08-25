@@ -27,6 +27,24 @@ let test_keeper_name_portable_grammar () =
   expect_invalid Keeper_name.of_string "path separator" "owner/escape"
 ;;
 
+(* The name becomes a directory. #24343 is a name longer than a filesystem
+   component can be, and the grammar alone does not stop one: [A-Za-z0-9._-]+
+   matches any length. *)
+let test_keeper_name_is_bounded () =
+  let at_limit = String.make Keeper_name.max_length 'a' in
+  expect_valid
+    Keeper_name.of_string
+    Keeper_name.to_string
+    "a name exactly at the limit"
+    at_limit;
+  expect_invalid
+    Keeper_name.of_string
+    "a name one byte past the limit"
+    (String.make (Keeper_name.max_length + 1) 'a');
+  (* POSIX NAME_MAX, the constraint the bound exists for. *)
+  expect_invalid Keeper_name.of_string "a name past NAME_MAX" (String.make 255 'a')
+;;
+
 let test_trace_id_keeps_bounded_non_dotted_grammar () =
   expect_valid Trace_id.of_string Trace_id.to_string "trace id" "trace-01";
   expect_invalid Trace_id.of_string "dotted trace id" "trace.with.dot";
@@ -100,6 +118,8 @@ let () =
             "portable grammar and reserved path components"
             `Quick
             test_keeper_name_portable_grammar
+        ; test_case "bounded as a filesystem component" `Quick
+            test_keeper_name_is_bounded
         ] );
       ( "Trace_id",
         [ test_case

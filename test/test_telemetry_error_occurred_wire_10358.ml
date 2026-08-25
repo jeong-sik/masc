@@ -121,7 +121,7 @@ let test_failure_with_error_kind_pairs () =
   with_temp_config @@ fun config ->
   T.track_tool_called config ~tool_name:"tool_execute"
     ~success:false ~duration_ms:30000
-    ~agent_id:"keeper-executor-agent"
+    ~agent_id:"keeper-omega-agent"
     ~source:"keeper_internal"
     ~session_id:"sess-10358"
     ~error_kind:(error_kind "timeout")

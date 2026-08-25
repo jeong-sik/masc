@@ -4,7 +4,7 @@
     데이터 모델. 모든 분기는 catch-all(`_`) 없이 명시되어, 새 변형 추가 시
     컴파일러가 누락 사이트를 강제로 드러낸다 (CLAUDE.md §FSM Sparse Match 회피).
 
-    이 모듈은 순수 데이터 타입만 담는다: OAS·키퍼·보드 의존 0, 독립 컴파일 가능.
+    이 모듈은 순수 데이터 타입만 담는다: AGENT_CORE·키퍼·보드 의존 0, 독립 컴파일 가능.
     fan-out(패널), 구조화 출력(심판), 게이트, 가시성은 별도 모듈이 이 타입을 소비한다.
 
     설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md
@@ -31,10 +31,6 @@ val add_usage : usage -> usage -> usage
     ([Ok]은 무시). 전원 실패 등 degrade 경로에서 첫 에러의 usage만 전파해 나머지 심판이
     태운 토큰을 잃는 undercount를 막는다(적대 리뷰 #22093 all-fail). *)
 val sum_error_usage : ('id * ('ok, 'msg * usage) result) list -> usage
-
-(** [first_error_message results]는 results의 첫 [Error] 메시지를 추출한다(usage는 버림).
-    [Error]가 없으면 [None]. all-fail 분기의 대표 메시지 선정용. *)
-val first_error_message : ('id * ('ok, 'msg * usage) result) list -> 'msg option
 
 (** [all_fail_error ~fallback results]는 전원 실패 경로의 회계를 한 번에 계산한다:
     [sum_error_usage]로 실패 usage를 합산하고 첫 [Error] 메시지를 대표로 묶는다.
@@ -65,8 +61,8 @@ end
     (CLAUDE.md §Unknown→Permissive 회피). [Async_agent.all]이 per-agent 에러를
     격리하므로 한 패널 실패가 나머지를 죽이지 않는다. *)
 type panel_failure =
-  | Timeout  (** 구조적 타임아웃 (Masc_oas_bridge) *)
-  | Bridge_error of string  (** MASC/OAS bridge bootstrap or wrapper error *)
+  | Timeout  (** 구조적 타임아웃 (Masc_agent_core_bridge) *)
+  | Bridge_error of string  (** MASC/AGENT_CORE bridge bootstrap or wrapper error *)
   | Provider_error of string  (** provider/transport 에러, 메시지 보존 *)
   | Invalid_structured_response of string
       (** provider returned non-empty output that violated the requested panel
@@ -76,11 +72,18 @@ type panel_failure =
           reasoning/thinking 본문은 노출하지 않는다. *)
   | Invalid_max_output_tokens of int
       (** Runtime defense-in-depth: output token override must be positive. *)
+  | Invalid_timeout_s of float
+      (** Runtime defense-in-depth: a response deadline must be finite and
+          positive. Config load already rejects these
+          ({!Fusion_policy.valid_timeout_s}), so reaching this means a direct
+          [build_agent] caller supplied one — fail loudly instead of dropping
+          the deadline. *)
 [@@deriving to_yojson, show, eq]
 
 val panel_failure_of_yojson : Yojson.Safe.t -> (panel_failure, string) result
-(** Accepts the current ppx-style tagged-list encoding and the legacy bare
-    string encodings for [Timeout] / [Empty_response]. *)
+(** Accepts the ppx-style tagged-list encoding only. The bare string forms of
+    [Timeout] / [Empty_response], and an [`Int] in the [Invalid_timeout_s]
+    float slot, are rejected like any other unsupported shape. *)
 
 (** 성공한 패널 한 명의 답. (variant inline record는 ppx_deriving_yojson 비호환이라
     named record로 분리한다.) *)
@@ -120,9 +123,6 @@ type skip_reason =
       (** 응답은 있으나 런타임 quorum(min_answered) 미달 — N-of-M 정책.
           전멸([No_panel_answers])과 구분되는 사유다. *)
 [@@deriving yojson, show, eq]
-
-val render_skip_reason : skip_reason -> string
-(** Operator/log boundary renderer for {!skip_reason}. *)
 
 (** judge 실행 전 panel 입력 계약 검사 (런타임 quorum = preset.min_answered).
     응답 0이면 [Some (No_panel_answers _)], 0 < 응답 < [min_answered]면
@@ -219,16 +219,16 @@ type judge_role =
     를 추가로 담는다. [panel_failure]를 literal하게 공유하지 않는 이유: 판(panel) 전용인
     [Invalid_max_output_tokens]가 심판에서 dead variant가 되기 때문이다.
 
-    근원에서 typed로 propagate한다: [Fusion_judge.run] 계열이 {!Agent_sdk.Error}의
+    근원에서 typed로 propagate한다: [Fusion_judge.run] 계열이 {!Agent_core.Error}의
     [Timeout] variant를 match에서 잡아 [Timeout]으로, provider/transport 에러를
     [Provider_error]로 반환한다. 호출자는 [string]을 역분류하지 않고 exhaustive match로
     분류한다. *)
 type judge_failure =
-  | Timeout  (** 구조적 타임아웃 — Agent_sdk.Error.Api (Retry.Timeout _)에서 propagate *)
+  | Timeout  (** 구조적 타임아웃 — Agent_core.Error.Api (Retry.Timeout _)에서 propagate *)
   | Provider_error of string  (** provider/transport 에러, to_string 보존 *)
   | Empty_response of string  (** 모델이 빈 응답 *)
   | Empty_result  (** Async_agent.all 이 빈 결과를 반환 *)
-  | Build_error of string  (** Fusion_oas.build_agent 실패 *)
+  | Build_error of string  (** Fusion_agent_core.build_agent 실패 *)
   | Parse_error of string  (** Fusion_judge_parse.of_string 파싱 실패 *)
   | Panels_unavailable of skip_reason
       (** 패널 정족수 미달로 심판이 실행조차 되지 않음. 2026-07-01 사고에서 이
@@ -243,7 +243,7 @@ type judge_failure =
     충분하므로 별도 bool 필드를 두지 않는다. *)
 val judge_failure_is_timeout : judge_failure -> bool
 
-(** sink/로그용 사람-가독 문자열. {!Fusion_oas.panel_failure_text}와 대칭. *)
+(** sink/로그용 사람-가독 문자열. {!Fusion_agent_core.panel_failure_text}와 대칭. *)
 val judge_failure_text : judge_failure -> string
 
 (** 대시보드 failure_code 키용 정규화 태그(timeout/provider_error/...). *)
@@ -305,9 +305,6 @@ type fusion_trigger =
   | Operator_requested
   | Harness_eval  (** eval 하네스가 결정론적으로 구동 *)
 [@@deriving yojson, show, eq]
-
-(** 안정적 짧은 라벨 (로깅·메트릭·board meta용). [show]의 장황한 출력 대신 사용. *)
-val trigger_label : fusion_trigger -> string
 
 (** {1 심의 요청} *)
 

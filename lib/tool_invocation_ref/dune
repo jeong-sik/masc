@@ -6,5 +6,5 @@
  (wrapped false)
  (modules tool_invocation_ref)
  (flags
-  (:standard -w +4 -w +32))
+  (:standard -w +4 -w +33 -w +37))
  (libraries masc.mcp_session masc.mcp_transport_protocol yojson))

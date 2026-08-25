@@ -1,20 +1,12 @@
-(** masc-trace — print receipts matching a (keeper, turn_id) pair.
+(** masc-trace — print typed runtime evidence matching a
+    [(keeper, turn_id)] pair.
 
-    This is the foundation of the Step 10 turn-tracing CLI from the
-    bloodflow restoration plan.  The first cut intentionally reads
-    only execution-receipts JSONL since that's the path that already
-    populates [turn_count] (post-Step 0a it carries the structured
-    [keeper_turn_id] for silent skip and runtime error
-    paths too).
-
-    Follow-up stacks will widen the source set:
-      - .masc/tool_calls/<YYYY-MM>/<DD>.jsonl
-      - .masc/logs/system_log_<date>.jsonl (post 0a-2 caller adoption)
-      - .masc/traces/<keeper>/<trace_id>/
-      - .masc/keepers/<keeper>/runtime-manifests/<trace_id>.jsonl
+    Reads execution receipts, runtime manifests, FSM transition log details,
+    and tool-call JSONL. Each source is filtered by its structured identity
+    fields; presentation strings do not participate in routing.
 
     Usage:  masc-trace <base-path> <keeper> <turn_id>
-    Example: masc-trace ~/me nick0cave 5
+    Example: masc-trace ~/me example-keeper 5
 *)
 
 let usage_and_exit () =
@@ -46,6 +38,14 @@ let string_field json key =
   | `String s -> Some s
   | _ -> None
 
+let turn_fsm_transition_detail json =
+  match Yojson.Safe.Util.member "details" json with
+  | `Assoc fields ->
+    List.assoc_opt "turn_fsm_transition" fields
+    |> Option.map
+         Keeper_transition_audit_types.turn_fsm_transition_of_json
+  | _ -> None
+
 let decision_int_field json key =
   Yojson.Safe.Util.member "decision" json |> fun decision ->
   int_field decision key
@@ -71,19 +71,6 @@ let tool_calls_dir ~base_path =
   List.fold_left Filename.concat (masc_root ~base_path) [ "tool_calls" ]
 
 (** Naive substring check — avoids pulling in [Str] for one call. *)
-let contains_substring s sub =
-  let lens = String.length s in
-  let lensub = String.length sub in
-  if lensub = 0 then true
-  else if lensub > lens then false
-  else
-    let rec loop i =
-      if i > lens - lensub then false
-      else if String.sub s i lensub = sub then true
-      else loop (i + 1)
-    in
-    loop 0
-
 let dump_receipts ~base_path ~keeper ~turn_id =
   let dir = receipts_dir ~base_path ~keeper in
   if not (Sys.file_exists dir) then begin
@@ -193,9 +180,9 @@ let dump_runtime_manifests ~base_path ~keeper ~turn_id =
                else count)
              0
       in
-      let max_oas_turn_count =
+      let max_agent_core_turn_count =
         json_rows
-        |> List.filter_map (fun json -> int_field json "oas_turn_count")
+        |> List.filter_map (fun json -> int_field json "agent_core_turn_count")
         |> List.fold_left
              (fun acc value ->
                match acc with
@@ -226,11 +213,11 @@ let dump_runtime_manifests ~base_path ~keeper ~turn_id =
       in
       Printf.printf
         "=== turn identity === keeper=%s keeper_turn_id=%d manifest_rows=%d \
-         max_oas_turn_count=%s provider_attempts=%d/%d provider_lanes=%d \
+         max_agent_core_turn_count=%s provider_attempts=%d/%d provider_lanes=%d \
          checkpoints_saved=%d receipts_appended=%d turn_finished=%d \
          event_bus=%d correlation_id=%s compaction=%d/%d\n"
         keeper turn_id (List.length matches)
-        (match max_oas_turn_count with
+        (match max_agent_core_turn_count with
          | None -> "-"
          | Some value -> string_of_int value)
         (count_event "provider_attempt_started")
@@ -261,13 +248,8 @@ let dump_runtime_manifests ~base_path ~keeper ~turn_id =
             ts f event status runtime decision)
         matches
 
-(** Scan [.masc/logs/system_log_*.jsonl] for [\[fsm:transition\]]
-    lines that match the given (keeper, turn_id).
-
-    Step 4b/c/d/g/i/j wired [Keeper_turn_fsm.emit_transition] at
-    every state transition in [run_keeper_cycle].  This widens
-    the [bin/masc-trace] source set so the timeline shows the
-    typed FSM steps next to the receipt rows. *)
+(** Scan [.masc/logs/system_log_*.jsonl] for typed FSM transition details
+    matching the given [(keeper, turn_id)]. *)
 let dump_fsm_transitions ~base_path ~keeper ~turn_id =
   let dir = logs_dir ~base_path in
   if not (Sys.file_exists dir) then ()
@@ -290,23 +272,24 @@ let dump_fsm_transitions ~base_path ~keeper ~turn_id =
           |> List.filter_map (fun line ->
                  try
                    let json = Yojson.Safe.from_string line in
-                   let keeper_match =
-                     string_field json "keeper_name" = Some keeper
-                   in
-                   let turn_match =
-                     int_field json "turn_id" = Some turn_id
-                   in
-                   let msg =
-                     Option.value
-                       (string_field json "message")
-                       ~default:""
-                   in
-                   let is_fsm =
-                     contains_substring msg "[fsm:transition]"
-                   in
-                   if keeper_match && turn_match && is_fsm then
-                     Some json
-                   else None
+                   if string_field json "keeper_name" <> Some keeper then None
+                   else
+                     (match turn_fsm_transition_detail json with
+                      | None -> None
+                      | Some (Ok transition)
+                        when transition.turn_fsm_turn_id = turn_id ->
+                        let ts =
+                          Option.value (string_field json "ts") ~default:"-"
+                        in
+                        Some (ts, transition)
+                      | Some (Ok _) -> None
+                      | Some (Error error) ->
+                        Printf.eprintf
+                          "[masc-trace] warning: skipping malformed FSM \
+                           transition in %s: %s\n"
+                          f
+                          error;
+                        None)
                  with exn ->
                    Printf.eprintf
                      "[masc-trace] warning: skipping malformed line in %s: %s\n"
@@ -316,77 +299,60 @@ let dump_fsm_transitions ~base_path ~keeper ~turn_id =
     in
     if matches = [] then
       Printf.eprintf
-        "[masc-trace] no [fsm:transition] lines for keeper=%s \
-         turn_id=%d\n"
+        "[masc-trace] no typed FSM transitions for keeper=%s turn_id=%d\n"
         keeper turn_id
     else
       List.iter
-        (fun json ->
-          let ts =
-            Option.value (string_field json "ts") ~default:"-"
+        (fun
+          ( ts
+          , (transition :
+              Keeper_transition_audit_types.turn_fsm_transition_record) )
+        ->
+          let render_optional_bool name = function
+            | Some value -> Printf.sprintf " %s=%b" name value
+            | None -> ""
           in
-          let msg =
-            Option.value
-              (string_field json "message")
-              ~default:"-"
+          let stop_fields =
+            render_optional_bool
+              "stop_before"
+              transition.turn_fsm_stop_signaled_before
+            ^ render_optional_bool
+                "stop_after"
+                transition.turn_fsm_stop_signaled_after
           in
-          Printf.printf "%s [fsm] %s\n" ts msg)
+          Printf.printf
+            "%s [fsm] %s -> %s action=%s%s\n"
+            ts
+            transition.turn_fsm_prev_state
+            transition.turn_fsm_new_state
+            transition.turn_fsm_action
+            stop_fields)
         matches;
-    (* Path summary: extract the [to_state] from each [fsm:transition]
-       line and join with arrows.  An operator scanning for "did this
-       turn reach done?" gets the answer in one line without scrolling
-       through the per-row trail above. *)
-    let extract_to_state msg =
-      let needle = "-> " in
-      let lens = String.length msg in
-      let lensub = String.length needle in
-      let rec find i =
-        if i > lens - lensub then None
-        else if String.sub msg i lensub = needle then
-          let rest = String.sub msg (i + lensub) (lens - i - lensub) in
-          Some (String.trim rest)
-        else find (i + 1)
-      in
-      find 0
-    in
+    (* An operator scanning for "did this turn reach done?" gets the typed
+       destination path in one line without parsing presentation text. *)
     if matches <> [] then begin
-      (* Pair each transition's [to_state] with its [ts] field so the
-         summary line carries timestamps the operator can eyeball for
-         per-state duration.  No OCaml-side mutable accumulation: the
-         emit calls are stateless, and any duration derivation is a
-         pure projection of the already-emitted [ts] timeline.  External
-         metric queries and this CLI are the right boundary for time-series math. *)
       let state_with_ts =
-        List.filter_map
-          (fun json ->
-            let msg =
-              string_field json "message" |> Option.value ~default:""
-            in
-            let ts =
-              string_field json "ts" |> Option.value ~default:"-"
-            in
-            extract_to_state msg
-            |> Option.map (fun s -> (s, ts)))
+        List.map
+          (fun
+            ( ts
+            , (transition :
+                Keeper_transition_audit_types.turn_fsm_transition_record) )
+          ->
+            transition.turn_fsm_new_state, ts)
           matches
       in
-      if state_with_ts <> [] then
-        let render (state, ts) = Printf.sprintf "%s @%s" state ts in
-        Printf.printf "=== fsm path === %s -> %s\n" keeper
-          (String.concat " -> "
-             (List.map render state_with_ts))
+      let render (state, ts) = Printf.sprintf "%s @%s" state ts in
+      Printf.printf "=== fsm path === %s -> %s\n" keeper
+        (String.concat " -> " (List.map render state_with_ts))
     end
 
 (** Scan [.masc/tool_calls/<YYYY-MM>/<DD>.jsonl] for tool call
     rows whose [keeper] = our keeper and
     [runtime_contract.keeper_turn_id] = our turn_id.
 
-    Schema (post Step 0a):
+    Current identity fields:
     - top-level [keeper], [tool], [success], [duration_ms], [ts] (epoch float)
-    - nested [runtime_contract.keeper_turn_id] (int option)
-
-    Records pre Step 0a have [keeper_turn_id = null]; those are
-    skipped silently because there's nothing to correlate them
-    with. *)
+    - nested [runtime_contract.keeper_turn_id] (int option) *)
 let dump_tool_calls ~base_path ~keeper ~turn_id =
   let root = tool_calls_dir ~base_path in
   if not (Sys.file_exists root) then ()
@@ -442,9 +408,7 @@ let dump_tool_calls ~base_path ~keeper ~turn_id =
     in
     if matches = [] then
       Printf.eprintf
-        "[masc-trace] no tool_calls for keeper=%s turn_id=%d \
-         (note: pre-Step-0a rows have keeper_turn_id=null and \
-         are unreachable by id)\n"
+        "[masc-trace] no tool_calls for keeper=%s turn_id=%d\n"
         keeper turn_id
     else
       List.iter

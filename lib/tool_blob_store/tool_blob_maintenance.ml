@@ -1,18 +1,17 @@
 module String_set = Set_util.StringSet
 
+module Artifact_reference_set = Set.Make (struct
+  type t = Tool_output.artifact_ref
+
+  let compare left right =
+    match String.compare left.Tool_output.sha256 right.Tool_output.sha256 with
+    | 0 -> String.compare left.mime right.mime
+    | order -> order
+end)
+
 type mode =
   | Observe_only
   | Delete_previous_candidates
-
-(* A scan that stops early must never reach the candidate snapshot. A partial
-   [live_references] set records still-referenced blobs as deletion
-   candidates, and two consecutive partial scans that miss the same durable
-   file intersect into a live blob. Budget exhaustion is therefore an [error]
-   like any other scan failure, so [run] short-circuits before
-   [save_candidate_snapshot]. *)
-type scan_budget =
-  | Unbounded
-  | Bounded_by of { deadline_epoch_seconds : float }
 
 type error =
   | Clustered_durable_roots_uncoordinated of
@@ -38,6 +37,14 @@ type error =
       ; line : int
       ; detail : string
       }
+  | Artifact_manifest_read_failed of
+      { sha256 : string
+      ; reason : string
+      }
+  | Artifact_manifest_invalid of
+      { sha256 : string
+      ; detail : string
+      }
   | Candidate_snapshot_invalid of
       { path : string
       ; detail : string
@@ -49,11 +56,6 @@ type error =
   | Candidate_snapshot_write_failed of
       { path : string
       ; detail : string
-      }
-  | Scan_budget_exhausted of
-      { elapsed_seconds : float
-      ; files_scanned : int
-      ; last_path : string
       }
   | Blob_listing_failed of Tool_blob_store.list_error
   | Blob_delete_failed of Tool_blob_store.delete_error
@@ -89,6 +91,10 @@ let error_to_string = function
       path
       line
       detail
+  | Artifact_manifest_read_failed { sha256; reason } ->
+    Printf.sprintf "artifact manifest read failed sha256=%s: %s" sha256 reason
+  | Artifact_manifest_invalid { sha256; detail } ->
+    Printf.sprintf "artifact manifest invalid sha256=%s: %s" sha256 detail
   | Candidate_snapshot_invalid { path; detail } ->
     Printf.sprintf "blob maintenance candidate snapshot invalid path=%s: %s" path detail
   | Candidate_snapshot_read_failed { path; detail } ->
@@ -98,13 +104,6 @@ let error_to_string = function
       detail
   | Candidate_snapshot_write_failed { path; detail } ->
     Printf.sprintf "blob maintenance candidate snapshot write failed path=%s: %s" path detail
-  | Scan_budget_exhausted { elapsed_seconds; files_scanned; last_path } ->
-    Printf.sprintf
-      "durable scan budget exhausted after %.1fs and %d file(s) at path=%s; \
-       every blob is retained and no candidate snapshot was written"
-      elapsed_seconds
-      files_scanned
-      last_path
   | Blob_listing_failed error ->
     Printf.sprintf
       "blob listing failed path=%s: %s"
@@ -127,52 +126,79 @@ let candidate_snapshot_path ~base_path =
 ;;
 
 let add_references ~path ~line references text =
-  match Tool_output.artifact_refs_in_text text with
-  | Ok found ->
-    Ok
-      (List.fold_left
-         (fun acc reference ->
-            String_set.add reference.Tool_output.sha256 acc)
-         references
-         found)
-  | Error error ->
+  match Tool_output.decode_from_agent_core text with
+  | Tool_output.Not_marker -> Ok references
+  | Tool_output.Invalid_marker { detail } ->
     Error
       (Malformed_artifact_reference
          { path
          ; line
-         ; offset = error.offset
-         ; detail = error.detail
+         ; offset = 0
+         ; detail
          })
+  | Tool_output.Decoded reference ->
+    let canonical =
+      Tool_output.encode_for_agent_core (Tool_output.Stored reference)
+    in
+    if String.equal text canonical
+    then Ok (Artifact_reference_set.add reference references)
+    else
+      Error
+        (Malformed_artifact_reference
+           { path
+           ; line
+           ; offset = 0
+           ; detail = "artifact marker is not in canonical wire form"
+           })
 ;;
 
-let contains_substring ~needle text =
-  let needle_length = String.length needle in
-  let text_length = String.length text in
-  let rec loop offset =
-    if offset + needle_length > text_length
-    then false
-    else if String.sub text offset needle_length = needle
-    then true
-    else loop (offset + 1)
-  in
-  needle_length = 0 || loop 0
+type reference_scan_context =
+  | Durable_value
+  | Route_evidence
+  | Route_evidence_composable_output
+
+let child_reference_scan_context context key =
+  match context, key with
+  | Durable_value, "route_evidence" -> Route_evidence
+  | Route_evidence, "composable_output" -> Route_evidence_composable_output
+  | ( Durable_value
+    | Route_evidence
+    | Route_evidence_composable_output ),
+    _ ->
+    Durable_value
 ;;
 
-let rec references_in_json ~path ~line references = function
+let rec references_in_json
+          ?(context = Durable_value)
+          ~path
+          ~line
+          references
+  = function
   | `String text -> add_references ~path ~line references text
   | (`Assoc fields as json) ->
     (match Tool_output.normalized_artifact_ref_of_json json with
      | Tool_output.Decoded_normalized_artifact_ref reference ->
-       Ok (String_set.add reference.Tool_output.sha256 references)
+       Ok (Artifact_reference_set.add reference references)
      | Tool_output.Invalid_normalized_artifact_ref { detail } ->
        Error
          (Malformed_structured_artifact_reference
             { path; line; detail })
      | Tool_output.Not_normalized_artifact_ref ->
        List.fold_left
-         (fun result (_, value) ->
-            Result.bind result (fun current ->
-              references_in_json ~path ~line current value))
+         (fun result (key, value) ->
+            match context, key with
+            | Route_evidence_composable_output, "schema" -> result
+            | ( Durable_value
+              | Route_evidence
+              | Route_evidence_composable_output ),
+              _ ->
+              Result.bind result (fun current ->
+                references_in_json
+                  ~context:(child_reference_scan_context context key)
+                  ~path
+                  ~line
+                  current
+                  value))
          (Ok references)
          fields)
   | `List values ->
@@ -208,7 +234,7 @@ let references_in_file ~ownership_root path =
       references_in_json
         ~path
         ~line:1
-        String_set.empty
+        Artifact_reference_set.empty
         (Yojson.Safe.from_string payload)
     with
     | Yojson.Json_error _ ->
@@ -226,7 +252,7 @@ let references_in_file ~ownership_root path =
                       (Yojson.Safe.from_string line)
                   with
                   | Yojson.Json_error detail ->
-                    if contains_substring ~needle:"\"_blob\"" line
+                    if String_util.contains_substring line "\"_blob\""
                     then
                       Error
                         (Malformed_structured_artifact_reference
@@ -244,7 +270,7 @@ let references_in_file ~ownership_root path =
                         line)
               in
               line_number + 1, next)
-           (1, Ok String_set.empty)
+           (1, Ok Artifact_reference_set.empty)
       |> snd
 ;;
 
@@ -255,7 +281,6 @@ let durable_consumer_basenames =
   ; "messages"
   ; "tool_calls"
   ; "traces"
-  ; Common.keeper_runtime_store_dirname Common.Keeper_trajectories
   (* The bounded diagnostic store owns every blob reference for as long as
      its dated JSONL row remains inside wire-capture retention. *)
   ; "wire-capture"
@@ -335,29 +360,7 @@ let reject_uncoordinated_cluster_roots ~base_path =
             }))
 ;;
 
-(* [files_scanned] rides along only so an exhausted budget can report how far
-   the traversal reached; it is dropped once the scan completes. *)
-type scan_progress =
-  { references : String_set.t
-  ; files_scanned : int
-  }
-
-let live_references ~base_path ~budget =
-  let started_at = Unix.gettimeofday () in
-  let within_budget () =
-    match budget with
-    | Unbounded -> true
-    | Bounded_by { deadline_epoch_seconds } ->
-      Unix.gettimeofday () <= deadline_epoch_seconds
-  in
-  let budget_exhausted path progress =
-    Error
-      (Scan_budget_exhausted
-         { elapsed_seconds = Unix.gettimeofday () -. started_at
-         ; files_scanned = progress.files_scanned
-         ; last_path = path
-         })
-  in
+let live_references ~base_path =
   let read_directory path =
     let inspect () =
       match
@@ -405,20 +408,14 @@ let live_references ~base_path ~budget =
                  Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
              })
   in
-  let rec scan_entry path progress =
-    if not (within_budget ())
-    then budget_exhausted path progress
-    else (
-      try
-        match (Unix.lstat path).Unix.st_kind with
-        | Unix.S_DIR -> scan_directory path progress
-        | Unix.S_REG ->
-          Result.map
-            (fun found ->
-               { references = String_set.union progress.references found
-               ; files_scanned = progress.files_scanned + 1
-               })
-            (references_in_file ~ownership_root:base_path path)
+  let rec scan_entry path references =
+    try
+      match (Unix.lstat path).Unix.st_kind with
+      | Unix.S_DIR -> scan_directory path references
+      | Unix.S_REG ->
+        Result.map
+          (Artifact_reference_set.union references)
+          (references_in_file ~ownership_root:base_path path)
         | Unix.S_LNK ->
           Error
             (Durable_source_stat_failed
@@ -429,21 +426,20 @@ let live_references ~base_path ~budget =
         | Unix.S_BLK
         | Unix.S_FIFO
         | Unix.S_SOCK ->
-          Ok progress
-      with
-      | Sys_error reason ->
-        Error (Durable_source_stat_failed { path; reason })
-      | Unix.Unix_error (code, fn, arg) ->
-        Error
-          (Durable_source_stat_failed
-             { path
-             ; reason =
-                 Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
-             }))
-  and scan_directory path progress =
+        Ok references
+    with
+    | Sys_error reason -> Error (Durable_source_stat_failed { path; reason })
+    | Unix.Unix_error (code, fn, arg) ->
+      Error
+        (Durable_source_stat_failed
+           { path
+           ; reason =
+               Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
+           })
+  and scan_directory path references =
     match read_directory path with
     | Error _ as error -> error
-    | Ok None -> Ok progress
+    | Ok None -> Ok references
     | Ok (Some entries) ->
       entries
       |> Array.to_list
@@ -452,14 +448,68 @@ let live_references ~base_path ~budget =
            (fun result name ->
               Result.bind result (fun current ->
                 scan_entry (Filename.concat path name) current))
-           (Ok progress)
+           (Ok references)
   in
   durable_consumer_roots ~base_path
   |> List.fold_left
        (fun result root ->
           Result.bind result (fun progress -> scan_directory root progress))
-       (Ok { references = String_set.empty; files_scanned = 0 })
-  |> Result.map (fun progress -> progress.references)
+       (Ok Artifact_reference_set.empty)
+;;
+
+let expand_artifact_manifests ~store references =
+  let rec expand expanded references = function
+    | [] -> Ok references
+    | reference :: rest
+      when not
+             (String.equal
+                reference.Tool_output.mime
+                Tool_output.artifact_manifest_mime) ->
+      expand expanded references rest
+    | reference :: rest
+      when String_set.mem reference.Tool_output.sha256 expanded ->
+      expand expanded references rest
+    | reference :: rest ->
+      let sha256 = reference.Tool_output.sha256 in
+      let expanded = String_set.add sha256 expanded in
+      (match Tool_blob_store.fetch store ~sha256 with
+       | Error error ->
+         Error
+           (Artifact_manifest_read_failed
+              { sha256; reason = Tool_blob_store.fetch_error_to_string error })
+       | Ok None ->
+         Error
+           (Artifact_manifest_read_failed
+              { sha256; reason = "referenced manifest blob is absent" })
+       | Ok (Some payload) ->
+         let decoded =
+           try
+             Yojson.Safe.from_string payload
+             |> Tool_output.artifact_manifest_of_json
+           with
+           | Yojson.Json_error detail ->
+             Tool_output.Invalid_artifact_manifest { detail }
+         in
+         (match decoded with
+          | Tool_output.Decoded_artifact_manifest { artifact_refs; _ } ->
+            let references, added =
+              List.fold_left
+                (fun (references, added) child ->
+                   if Artifact_reference_set.mem child references
+                   then references, added
+                   else Artifact_reference_set.add child references, child :: added)
+                (references, [])
+                artifact_refs
+            in
+            expand expanded references (List.rev_append added rest)
+          | Tool_output.Not_artifact_manifest ->
+            Error
+              (Artifact_manifest_invalid
+                 { sha256; detail = "manifest MIME requires the canonical schema" })
+          | Tool_output.Invalid_artifact_manifest { detail } ->
+            Error (Artifact_manifest_invalid { sha256; detail })))
+  in
+  expand String_set.empty references (Artifact_reference_set.elements references)
 ;;
 
 let candidate_snapshot_to_json candidates =
@@ -586,11 +636,19 @@ let save_candidate_snapshot ~base_path candidates =
     Error (Candidate_snapshot_write_failed { path; detail })
 ;;
 
-let run ~base_path ~mode ~budget =
+let run ~base_path ~mode =
   let open Result.Syntax in
   let* () = reject_uncoordinated_cluster_roots ~base_path in
   let store = Tool_blob_store.create ~base_path in
-  let* live = live_references ~base_path ~budget in
+  let* direct_live = live_references ~base_path in
+  let* live_references = expand_artifact_manifests ~store direct_live in
+  let live =
+    Artifact_reference_set.fold
+      (fun reference hashes ->
+         String_set.add reference.Tool_output.sha256 hashes)
+      live_references
+      String_set.empty
+  in
   let* previous_candidates = load_candidate_snapshot ~base_path in
   let* blob_list =
     match Tool_blob_store.list_all_result store with

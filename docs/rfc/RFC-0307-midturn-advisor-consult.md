@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: []
-implementation_prs: []
 ---
 
 # RFC-0307 — Mid-turn advisor consult for keepers
@@ -35,7 +34,7 @@ A second, higher-capability model already participates in keeper workflows — b
 *after* the producing turn, as a verifier/judge, never *inside* it:
 
 - **Exact-output judgment lanes**: Keeper board attention and HITL judgment
-  resolve immutable OAS target slots through `Runtime_exact_output_registry`
+  resolve immutable agent_core target slots through `Runtime_exact_output_registry`
   (`board_attention_exact` and `hitl_auto_judge`).
 - **Fusion judge**: `lib/fusion/fusion_judge.ml:188` `run_composed
   ~judge_model …` (and `run` / `run_refine` wrappers) — a distinct judge model
@@ -58,7 +57,7 @@ paired with an Anthropic-family advisor (the tool's `model` field), a valid
 executor≤advisor performance pair, and is **API/AWS-only** (not Bedrock, GCP,
 Foundry). (Source: platform.claude.com advisor-tool docs, confirmed 2026-07-04.)
 
-MASC keepers are predominantly routed to **non-Anthropic** providers via OAS
+MASC keepers are predominantly routed to **non-Anthropic** providers via agent_core
 (GLM, kimi, deepseek, ollama, runpod). For those keepers the native advisor tool
 **cannot be attached at all** — there is no Anthropic executor to carry it.
 
@@ -139,8 +138,8 @@ value. Avoid Option B until C (or a T1 benchmark) justifies the blast radius.
 
 Derived from an adversarial mapping of Anthropic's agents-and-tools surface
 (advisor / tool-search / strict / code-execution / computer / text-editor) onto
-MASC/OAS (2026-07-04). Of the six ideas, five were already covered by existing
-MASC/OAS mechanisms or unfit at the boundary; **mid-turn advisor was the only
+MASC/agent_core (2026-07-04). Of the six ideas, five were already covered by existing
+MASC/agent_core mechanisms or unfit at the boundary; **mid-turn advisor was the only
 genuinely novel axis MASC lacks**, and this RFC resolves its disposition.
 Companion analysis:
-`reports/masc-oas-anthropic-tools-orthogonal-blastradius-2026-07-04.html`.
+`reports/masc-agent_core-anthropic-tools-orthogonal-blastradius-2026-07-04.html`.

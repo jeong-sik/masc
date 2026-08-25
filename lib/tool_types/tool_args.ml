@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Tool_args -- Tool-convention argument extraction wrappers over Safe_ops.
 
     All tool_*.ml files should [open Tool_args] instead of defining local helpers.
@@ -150,10 +133,23 @@ let ok_response fields =
 let error_result ?tool_name ?start_time msg =
   let tool_name = Option.value ~default:"" tool_name in
   let start_time = Option.value ~default:(Time_compat.now ()) start_time in
-  Tool_result.error ~tool_name ~start_time msg
+  Tool_result.error
+    ~failure_class:Tool_result.Workflow_rejection
+    ~tool_name
+    ~start_time
+    msg
 
-(** [Tool_result.result] error with machine-readable error code. *)
-let error_result_typed ?tool_name ?start_time ~code msg =
+(** [Tool_result.result] error with machine-readable error code.
+    [~failure_class] defaults to [Runtime_failure]; pass it explicitly when
+    the caller-input rejection is a [Policy_rejection] or [Workflow_rejection]
+    so the typed envelope is used without losing the failure classification. *)
+let error_result_typed
+      ?tool_name
+      ?start_time
+      ?(failure_class = Tool_result.Runtime_failure)
+      ~code
+      msg
+  =
   let data =
     error_assoc
       [ ("error_code", `String (error_code_to_string code))
@@ -164,7 +160,7 @@ let error_result_typed ?tool_name ?start_time ~code msg =
   let start_time = Option.value ~default:(Time_compat.now ()) start_time in
   Tool_result.make_err
     ~tool_name
-    ~class_:Tool_result.Runtime_failure
+    ~class_:failure_class
     ~start_time
     ~data
     (Yojson.Safe.to_string data)
@@ -192,18 +188,17 @@ let get_string_required args key =
       else Error (Printf.sprintf "%s must not be empty" key)
   | None -> Error (Printf.sprintf "%s is required" key)
 
-(** Required integer. *)
-let get_int_required args key =
-  match Safe_ops.json_int_opt key args with
-  | Some i -> Ok i
-  | None -> Error (Printf.sprintf "%s is required" key)
-
 (** Monadic bind for [('a, string) Result.t] → [Tool_result.result].
     Chains required field extractions with early error return. *)
 let ( let*! ) r f =
   match r with
   | Ok v -> f v
-  | Error e -> Tool_result.error ~tool_name:"" ~start_time:(Time_compat.now ()) e
+  | Error e ->
+    Tool_result.error
+      ~failure_class:Tool_result.Workflow_rejection
+      ~tool_name:""
+      ~start_time:(Time_compat.now ())
+      e
 
 (** {1 Structured Field Validation}
 

@@ -57,8 +57,8 @@ sub-lanes accept any general text Runtime in a frozen declared order. Different
 lanes may use different first slots for load distribution. Runtime order is
 never inferred from price, tier, provider name, or error prose.
 
-Native JSON mode and JSON Schema are optional OAS wire optimizations, not MASC
-admission requirements. Without them, OAS uses the ordinary text path and the
+Native JSON mode and JSON Schema are optional agent core wire optimizations, not MASC
+admission requirements. Without them, agent core uses the ordinary text path and the
 domain validator decides whether the result is accepted. Only intrinsically
 different work such as image, audio, embedding, or another non-text modality
 may require a special Runtime capability.
@@ -80,7 +80,7 @@ One fresh-state proof must show this uninterrupted sequence:
 11. The next Keeper turn uses the updated context.
 12. Vincent and an agent see the same status, reason, receipt, and next action.
 13. Every selected Keeper remains alive or visibly blocked with a reason.
-14. Each Keeper can clearly distinguish its Persona, current Goal, assigned Task, recent decisions, and another Keeper's evidence.
+14. Each Keeper can clearly distinguish its Keeper, current Goal, assigned Task, recent decisions, and another Keeper's evidence.
 15. The collaborating agent completes the project through public MASC surfaces; direct filesystem access is used only to verify evidence.
 
 Partial source evidence does not satisfy this definition.
@@ -91,8 +91,8 @@ Partial source evidence does not satisfy this definition.
 |---|---|---|
 | MASC domain | the question, domain schema, semantic validator, and use of the accepted value | provider names, model quirks, wire dialects, or candidate ranking |
 | Runtime slot | opaque identity plus the declared execution specification | hidden policy inferred from pricing, tier, or past preference |
-| OAS | provider/model resolution, capability facts, vendor wire encoding, strict output parsing, typed transport errors, and frozen-order failover | MASC domain meaning, Task state, Keeper lifecycle, or domain persistence |
-| Dashboard/API | read-only projections of the same MASC domain state and OAS evidence | a second status calculation or mutable execution truth |
+| agent core | provider/model resolution, capability facts, vendor wire encoding, strict output parsing, typed transport errors, and frozen-order failover | MASC domain meaning, Task state, Keeper lifecycle, or domain persistence |
+| Dashboard/API | read-only projections of the same MASC domain state and agent core evidence | a second status calculation or mutable execution truth |
 
 For an ordinary LLM judgment, MASC sends input and consumes either an accepted
 domain value or a typed exhausted result. It does not select a provider-specific
@@ -227,9 +227,10 @@ must not revive periodic full-store consolidation.
 
 **Current verdict:** `WIRED_FAILING_LIVE`
 
-**Observed:** all eight public compaction snapshot inventories are empty while
-turn request and recall sizes grow. No live checkpoint replacement has been
-observed.
+**Observed:** no configured Keeper has a recorded compaction (no
+`Context_compacted` runtime-manifest row and a zero `compaction_rt` count for
+every Keeper, #29454) while turn request and recall sizes grow. No live
+checkpoint replacement has been observed.
 
 **Missing:** bounded input, new-delta/backlog selection, Runtime failover,
 checkpoint install, and next-turn proof.
@@ -288,7 +289,7 @@ with immediate equality after an activation config POST.
 
 **Expected behavior:**
 
-- Persona instructions remain recognizable without overriding the current Task.
+- Keeper instructions remain recognizable without overriding the current Task.
 - The current Goal and assigned Task are present and correctly prioritized.
 - Recent decisions replace superseded decisions instead of appearing beside them as equal truth.
 - Recalled facts retain source, owner, and time.
@@ -309,7 +310,7 @@ with immediate equality after an activation config POST.
 
 **Live measurements:**
 
-- `identity_correct`: correct Persona and role
+- `identity_correct`: correct Keeper and role
 - `task_correct`: correct Goal and Task identifiers
 - `decision_fresh`: latest decision selected over superseded history
 - `provenance_correct`: owner and source preserved
@@ -331,7 +332,7 @@ MVP failover does not ask another LLM what an already typed runtime failure mean
 The required path is:
 
 ```text
-typed OAS failure
+typed agent core failure
   -> next declared Runtime slot
   -> visible exhausted reason if none remain
   -> Keeper remains alive
@@ -353,7 +354,7 @@ Pricing may be measured and displayed later. It does not limit, route, rank, adm
 |---|---|---|---|
 | 2026-08-03 19:34 KST | live `GET /health?full=1` | `status=ok`, `overall_status=ok`; configured, materializable, running, and executable Keeper counts were all 8 (`analyst`, `code-reviewer`, `full-cycle-probe`, `kidsnote`, `lane-smith`, `rondo`, `sangsu`, `taskmaster`); `completion_authority_pending=false`; no operator action required | High for the current roster/authority boundary, not full behavior proof |
 | 2026-07-27 17:31 KST | `GET /health?full=1` | old build `0.21.2@b91dcb6995`; `keeper_fibers=0`; five lifecycle authority blockers | High |
-| 2026-07-27 17:33 KST | fresh-state filesystem operation | old `.masc` retired; only active config, Keeper TOML, Persona, and prompts copied | High |
+| 2026-07-27 17:33 KST | fresh-state filesystem operation | old `.masc` retired; only active config, Keeper TOML, Keeper, and prompts copied | High |
 | 2026-07-27 17:38 KST | GitHub CLI open PR list and close results | all 13 previously open MASC PRs closed as superseded | High |
 | 2026-07-27 17:37 KST | authenticated `POST https://ollama.com/api/show` | Qwen 3.5 Cloud and Gemma 4 31B Cloud available; both 262,144 context; tools/thinking/vision declared | High |
 | 2026-07-27 17:38 KST | authenticated `POST https://ollama.com/v1/chat/completions` with `json_object` | Qwen and Gemma returned valid JSON; DeepSeek Flash reached the service but 32 output tokens were insufficient | High |
@@ -362,7 +363,6 @@ Pricing may be measured and displayed later. It does not limit, route, rank, adm
 | 2026-07-27 22:24 KST | `GET /health?full=1` | current process reported `status=ok` and `keeper_fibers=8` | High for fiber presence only; Keeper role attribution was not proven |
 | 2026-07-27 22:25 KST | `GET /api/v1/keepers/:name/turn-records?limit=1` over the historical configured roster | seven entries had fresh-runtime turn records; `kinobot-frontend` had none | High for endpoint observation, not current Keeper-fleet proof |
 | 2026-07-27 22:28 KST | `kinobot-frontend` config, composite, turn records, and system log | config said proactive true; effective activation was false; scheduler skipped with `scheduled_autonomous_disabled`; turn record count remained zero | High |
-| 2026-07-27 22:24 KST | `GET /api/v1/keepers/:name/compaction-snapshots` over the historical configured roster | every inventory was empty; no live compaction or checkpoint-install proof | High for the observed endpoints |
 | 2026-07-27 22:25 KST | latest turn records and earlier live trace comparison | the system LLM verifier had one Gemma-to-GLM recovery, but later post-checkpoint failures did not retain the successor; this is not Keeper failover evidence | High for the trace, not Keeper attribution |
 | 2026-07-27 22:25 KST | fresh turn-record prompt blocks | recall was active, but representative blocks ranged from 1,455 to 9,962 bytes and continued accumulating without a semantic replacement cycle | Medium |
 

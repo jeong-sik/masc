@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Tool_library - Agent Knowledge Library operations
 
     Manages the personal knowledge base at [<base>/docs/library/]
@@ -29,8 +12,9 @@ open Printf
     independently — the docstring drifted (claimed 3, runtime had 4).
     The witness pattern below is the standard Variant SSOT shape used by
     #8486 (tail_order), #8467 (sandbox_profile), #8592 (dashboard scope).
-    Adding a 5th source forces compile errors in [source_to_string] and
-    fails the [library_source_ssot] test in test_types.ml. *)
+    Adding a 5th source forces compile errors in [source_to_string].
+    There is no [library_source_ssot] test; the compile errors are the
+    whole guard. *)
 type library_source =
   | Direct_experience
   | Research
@@ -79,49 +63,18 @@ type frontmatter = {
 }
 
 let parse_frontmatter content =
-  (* Simple YAML parser for frontmatter between --- delimiters *)
-  let lines = String.split_on_char '\n' content in
-  let rec find_end acc = function
-    | [] -> (List.rev acc, [])
-    | "---" :: rest when Stdlib.List.length acc > 0 -> (List.rev acc, rest)
-    | line :: rest -> find_end (line :: acc) rest
-  in
-  match lines with
-  | "---" :: rest ->
-      let yaml_lines, _body = find_end [] rest in
-      let _yaml = String.concat "\n" yaml_lines in
-      (* Extract fields with simple pattern matching *)
-      let get_field name =
-        let pattern = name ^ ":" in
-        List.find_map (fun line ->
-          if String.length line > String.length pattern &&
-             String.equal (Stdlib.String.sub line 0 (String.length pattern)) pattern then
-            Some (String.trim (String.sub line (String.length pattern)
-                    (String.length line - String.length pattern)))
-          else None
-        ) yaml_lines |> Option.value ~default:""
-      in
-      let get_tags () =
-        let raw = get_field "tags" in
-        (* Parse [tag1, tag2] format *)
-        let stripped = String.trim raw in
-        if String.length stripped > 2 &&
-           Char.equal stripped.[0] '[' &&
-           Char.equal stripped.[String.length stripped - 1] ']' then
-          let inner = String.sub stripped 1 (String.length stripped - 2) in
-          String.split_on_char ',' inner
-          |> List.map String.trim
-          |> List.filter (fun s -> not (String.equal s ""))
-        else []
-      in
-      Some {
-        title = get_field "title";
-        source = get_field "source";
-        author = get_field "author";
-        created = get_field "created";
-        tags = get_tags ();
-      }
-  | _ -> None
+  if not (Frontmatter.has_frontmatter content)
+  then None
+  else (
+    let parsed = Frontmatter.parse content in
+    Some
+      { title = Frontmatter.field parsed "title"
+      ; source = Frontmatter.field parsed "source"
+      ; author = Frontmatter.field parsed "author"
+      ; created = Frontmatter.field parsed "created"
+      ; tags = Frontmatter.list_field parsed "tags"
+      })
+;;
 
 (* List documents *)
 let list_documents () =
@@ -260,8 +213,14 @@ let handle_add ~tool_name ~start_time ctx args : Tool_result.result =
        (sprintf "Invalid source. Must be one of: %s"
          (String.concat ", " valid_source_strings))
     | Some _ -> begin
+      (* Local, not UTC, and deliberately left that way: [date_str] lands in the
+         document's filename, so switching it would rename where documents are
+         written. Everything derived from this one [tm] is spelled here rather
+         than at each use — [created] and [updated] used to carry the same
+         sprintf twice on adjacent lines. *)
       let date = Time_compat.now () |> Unix.localtime in
       let date_str = sprintf "%04d%02d%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday in
+      let day = sprintf "%04d-%02d-%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday in
       let topic_slug = String.lowercase_ascii title
         |> String.map (fun c -> if Char.equal c ' ' then '-' else c)
         |> Stdlib.String.to_seq |> Stdlib.Seq.filter (fun c ->
@@ -283,8 +242,8 @@ tags: %s
 
 %s
 |} title source ctx.agent_name
-        (sprintf "%04d-%02d-%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday)
-        (sprintf "%04d-%02d-%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday)
+        day
+        day
         tags_str content in
 
       (* Write file *)

@@ -14,63 +14,38 @@ val parse_hunk_header : string -> int option
     unified diff hunk header like [@@ -1,5 +2,7 @@].  Returns [None]
     if the line does not match the hunk pattern. *)
 
-val extract_regions_from_diff :
-  keeper_id:string ->
-  file_path:string ->
-  turn:int ->
-  tool_name:string ->
-  diff_text:string ->
-  code_region list
-(** Parse unified diff text into one [code_region] per hunk.
-    [turn] and [tool_name] preserve the tool-call provenance. *)
-
-val extract_region_from_full_file :
-  keeper_id:string ->
-  file_path:string ->
-  turn:int ->
-  tool_name:string ->
-  content:string ->
-  code_region
-(** When a Keeper provides full content, the region is the entire file
-    (lines 1 to line count of [content]) while preserving the original
-    tool-call provenance. *)
-
 val regions_file
   :  base_dir:string
-  -> ?partition:Ide_paths.partition
+  -> codebase:string
   -> unit
   -> string
-(** Append-only region store path under the chosen
-    {!Ide_paths.partition}. Default [partition] is
-    {!Ide_paths.Legacy_default}. *)
+(** Append-only region store path under the codebase's store directory. *)
 
 val append_region
   :  base_dir:string
-  -> ?partition:Ide_paths.partition
+  -> codebase:string
   -> code_region
   -> unit
-(** Append one region to the chosen partition's [regions.jsonl].
-    Default [partition] is {!Ide_paths.Legacy_default}. *)
+(** Append one region to the codebase's [regions.jsonl]. *)
 
 val ingest_tool_call
   :  base_dir:string
-  -> ?partition:Ide_paths.partition
+  -> codebase:string
   -> keeper_id:string
   -> turn:int
   -> Yojson.Safe.t
   -> unit
 (** Inspect a tool_call JSON record. If it is a file-writing tool,
-    extract regions and append them to the chosen partition's
-    [regions.jsonl]. Non-matching tool_calls are silently ignored.
-    Default [partition] is {!Ide_paths.Legacy_default}. *)
+    extract regions and append them to the codebase's
+    [regions.jsonl]. Non-matching tool_calls are silently ignored. *)
 
 val read_regions
   :  base_dir:string
-  -> ?partition:Ide_paths.partition
+  -> codebase:string
   -> ?file_path:string
   -> unit
   -> code_region list
-(** Read regions from the chosen partition.
+(** Read regions from the codebase's store.
 
     [?file_path] filters by [file_path] field; when omitted every
     region is returned. Streaming-friendly: lines whose JSON does not

@@ -1,7 +1,6 @@
 (** Operator broadcast + cache state cluster for dashboard HTTP core,
     extracted from server_dashboard_http_core.ml. *)
 
-open Server_auth
 open Server_dashboard_http_cache
 open Dashboard_http_helpers
 
@@ -21,27 +20,11 @@ type operator_snapshot_compute =
   }
 
 (* --- Operator proactive refresh ---
-   Default (no-param) requests are served from a background-refreshed ref.
-   Parameterized requests fall back to on-demand compute with SWR cache.
+   Default requests read the background-refreshed publication and synchronously
+   replace it when stale. Parameterized requests compute directly. *)
 
-   Using Proactive_refresh gives circuit breaker + exponential backoff on
-   repeated failures, matching the pattern used by execution and mission loops.
-
-   Interval: 10s (was 120s). Even if compute takes ~8s, the ref is updated
-   every ~18s worst-case, which is acceptable for dashboard SSE polling. *)
-
-(* Late-bound broadcast refs — set by server_dashboard_http.ml after
-   Sse module is in scope.  Same pattern as _broadcast_workspace_truth_ref. *)
-let operator_snapshot_broadcast_ref : (operator_snapshot_publication -> unit) ref =
-  ref (fun (_publication : operator_snapshot_publication) -> ())
-;;
-
-let operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref =
-  ref (fun (_json : Yojson.Safe.t) -> ())
-;;
-
-let _operator_digest_broadcast_ref = operator_digest_broadcast_ref
-
+(* Late-bound broadcasters — installed after [Sse] is in scope.  Atomic
+   replacement keeps refresh domains from racing initialization or tests. *)
 let operator_snapshot_cache =
   let initializing_json () =
     `Assoc
@@ -63,6 +46,13 @@ let operator_snapshot_epoch =
 let invalidated_operator_snapshot_json () =
   `Assoc
     [ "status", `String "invalidated"
+    ; "generated_at", `String (Masc_domain.now_iso ())
+    ]
+;;
+
+let unavailable_operator_snapshot_json () =
+  `Assoc
+    [ "status", `String "unavailable"
     ; "generated_at", `String (Masc_domain.now_iso ())
     ]
 ;;
@@ -98,7 +88,10 @@ let operator_snapshot_publication_ref =
 
 let install_operator_snapshot_invalidation generation =
   invalidate_cached_surface operator_snapshot_cache;
-  operator_snapshot_cache.json <- invalidated_operator_snapshot_json ();
+  operator_snapshot_cache.current <-
+    { (snapshot operator_snapshot_cache) with
+      json = invalidated_operator_snapshot_json ()
+    };
   let publication =
     make_operator_snapshot_publication
       ~generation
@@ -252,17 +245,18 @@ let mark_operator_snapshot_error_if_current ~compute exn =
            && compute.sequence > publication.terminal_sequence
         then (
           mark_cached_surface_error operator_snapshot_cache exn;
+          operator_snapshot_cache.current <-
+            { (snapshot operator_snapshot_cache) with
+              json = unavailable_operator_snapshot_json ()
+            ; last_success_at = None
+            ; last_success_unix = None
+            };
           let terminal =
-            let fresh_until_unix =
-              Option.map
-                (fun deadline -> Float.min deadline (Time_compat.now ()))
-                publication.fresh_until_unix
-            in
             make_operator_snapshot_publication
               ~generation:compute.generation
               ~compute_sequence:publication.compute_sequence
               ~terminal_sequence:compute.sequence
-              ~fresh_until_unix
+              ~fresh_until_unix:None
           in
           operator_snapshot_publication_ref := terminal;
           Some terminal)
@@ -277,8 +271,6 @@ let operator_digest_cache =
         ; "generated_at", `String (Masc_domain.now_iso ())
         ])
 ;;
-
-let _operator_digest_cache = operator_digest_cache
 
 let operator_refresh_interval_s =
   float_of_env_default

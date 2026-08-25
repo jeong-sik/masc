@@ -4,6 +4,6 @@
     definitions. *)
 
 val checkpoint_after_attempt :
-  ?agent_ref:Agent_sdk.Agent.t option ref ->
-  Agent_sdk.Agent.t option ->
-  Agent_sdk.Checkpoint.t option
+  ?agent_ref:Agent_core.Agent.t option ref ->
+  Agent_core.Agent.t option ->
+  Agent_core.Checkpoint.t option

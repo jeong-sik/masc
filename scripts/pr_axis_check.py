@@ -15,6 +15,7 @@ Exit codes:
 """
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -64,8 +65,12 @@ class RfcCollision:
         return f"RFC-{self.rfc_number}: claimed by {claimants}"
 
 
-def _run_gh(args: List[str]) -> Any:
-    """Run gh cli and return JSON output."""
+def _run_gh(args: List[str], *, allow_not_found: bool = False) -> Any:
+    """Run gh cli and return JSON output.
+
+    With ``allow_not_found`` an HTTP 404 returns ``None`` instead of exiting:
+    the caller owns the typed meaning of an unreachable object (e.g. a merge
+    commit orphaned when its stacked parent branch was auto-deleted)."""
     rendered_args = " ".join(args)
     for attempt in range(1, GH_RETRIES + 1):
         result = subprocess.run(
@@ -74,6 +79,8 @@ def _run_gh(args: List[str]) -> Any:
             text=True,
         )
         if result.returncode != 0:
+            if allow_not_found and "(HTTP 404)" in result.stderr:
+                return None
             if attempt < GH_RETRIES:
                 time.sleep(attempt)
                 continue
@@ -194,7 +201,9 @@ def get_repo_slug() -> Tuple[str, str]:
     return data["owner"]["login"], data["name"]
 
 
-def merged_pr_in_scope(pr_base_ref: Optional[str], merged_base_ref: Optional[str]) -> bool:
+def merged_pr_in_scope(
+    pr_base_ref: Optional[str], merged_base_ref: Optional[str]
+) -> bool:
     """A merged PR is comparison-relevant only when it landed on the open PR's
     own base branch: default-branch PRs compare against default-branch merges,
     stacked PRs compare against sibling merges into the same parent branch.
@@ -223,10 +232,80 @@ def merge_commit_already_in_base(
     # status == "ahead"   -> head is ahead of base (base is ancestor of head)
     # status == "identical" -> same
     resp = _run_gh(
-        [f"/repos/{owner}/{repo}/compare/{merge_commit_sha}...{pr_base_sha}"]
+        [f"/repos/{owner}/{repo}/compare/{merge_commit_sha}...{pr_base_sha}"],
+        allow_not_found=True,
     )
+    if resp is None:
+        # The merge commit is unreachable — typical for a stacked child whose
+        # parent branch was auto-deleted after folding. Containment cannot be
+        # proven, so do not skip: let the overlap analysis run.
+        print(
+            f"axis compare 404 for {merge_commit_sha[:12]}...{pr_base_sha[:12]}: "
+            "unreachable merge commit, treating as not-contained",
+            file=sys.stderr,
+        )
+        return False
     status = resp.get("status", "")
     return status in ("ahead", "identical")
+
+
+_TREE_BLOBS_CACHE: Dict[str, Optional[Dict[str, str]]] = {}
+
+
+def _tree_blobs(commit_sha: str, owner: str, repo: str) -> Optional[Dict[str, str]]:
+    """Map every blob path in a commit's tree to its blob SHA.
+
+    Returns None when the tree is unreachable or GitHub truncated it, so the
+    caller falls back to the conservative path instead of comparing a partial
+    tree against a whole one.
+    """
+    cached = _TREE_BLOBS_CACHE.get(commit_sha)
+    if cached is not None or commit_sha in _TREE_BLOBS_CACHE:
+        return cached
+    resp = _run_gh(
+        [f"/repos/{owner}/{repo}/git/trees/{commit_sha}?recursive=1"],
+        allow_not_found=True,
+    )
+    blobs: Optional[Dict[str, str]] = None
+    if isinstance(resp, dict) and not resp.get("truncated"):
+        blobs = {
+            entry["path"]: entry["sha"]
+            for entry in resp.get("tree", [])
+            if isinstance(entry, dict)
+            and entry.get("type") == "blob"
+            and entry.get("path")
+            and entry.get("sha")
+        }
+    _TREE_BLOBS_CACHE[commit_sha] = blobs
+    return blobs
+
+
+def merged_delta_is_present_in_base(
+    merged_files: Set[str],
+    merge_commit_sha: str,
+    pr_base_sha: str,
+    owner: str,
+    repo: str,
+) -> bool:
+    """Check whether a merged PR's result already stands in the PR base.
+
+    A force-restack rewrites commits, so the original merge commit stops being
+    an ancestor even though the same delta is present. Compare content instead
+    of ancestry: every path the merged PR touched must carry the same blob SHA
+    in the base as it does at the merge commit. A path absent from both trees
+    matches too, which is how a merged deletion reads.
+
+    Content equality is stricter than patch equivalence. A base that changed
+    those files further returns False and the overlap analysis runs, which is
+    the conservative direction.
+    """
+    if not merged_files:
+        return False
+    merged_tree = _tree_blobs(merge_commit_sha, owner, repo)
+    base_tree = _tree_blobs(pr_base_sha, owner, repo)
+    if merged_tree is None or base_tree is None:
+        return False
+    return all(merged_tree.get(path) == base_tree.get(path) for path in merged_files)
 
 
 def _payload_preview(payload: Any) -> str:
@@ -293,7 +372,7 @@ query {{
         title
         mergedAt
         baseRefName
-        mergeCommit {{ oid }}
+        mergeCommit {{ oid parents(first: 1) {{ nodes {{ oid }} }} }}
         files(first: 100) {{
           nodes {{ path }}
         }}
@@ -314,17 +393,132 @@ query {{
     return filtered
 
 
-def _get_dune_libraries_from_diff(owner: str, repo: str, pr_number: int) -> Set[str]:
-    """Check if a merged PR changed dune library dependencies."""
-    # This is a heuristic: check if any dune file was changed
-    files = get_pr_files(pr_number, owner, repo)
-    dune_files = {f for f in files if f.endswith("/dune") or f == "dune"}
-    return dune_files
+# The dune fields that decide what a build links. Changing one of them can
+# break a PR compiled against the old set; changing (name), a (rule), or a
+# comment in the same file cannot. BUILD_DEP_BREAK is a claim about these
+# forms, so it is these forms that get compared -- not the file's name.
+_DUNE_DEPENDENCY_FIELDS = ("libraries", "pps", "instrumentation")
+
+_DUNE_FIELD_RE = re.compile(r"\((" + "|".join(_DUNE_DEPENDENCY_FIELDS) + r")(?=[\s)])")
 
 
-def _touches_dune_deps(pr_number: int, owner: str, repo: str) -> bool:
-    """Check if PR changed any dune file (potential dependency change)."""
-    return len(_get_dune_libraries_from_diff(owner, repo, pr_number)) > 0
+def _strip_dune_comments(source: str) -> str:
+    """Drop `;` comments from dune source, leaving string literals intact."""
+    out: List[str] = []
+    in_string = False
+    in_comment = False
+    i = 0
+    while i < len(source):
+        ch = source[i]
+        if in_comment:
+            if ch == "\n":
+                in_comment = False
+                out.append(ch)
+            i += 1
+            continue
+        if in_string:
+            out.append(ch)
+            if ch == "\\" and i + 1 < len(source):
+                out.append(source[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+            out.append(ch)
+        elif ch == ";":
+            in_comment = True
+            i += 1
+            continue
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def dune_dependency_forms(source: str) -> List[str]:
+    """Every dependency stanza in a dune file, whitespace-normalised and sorted.
+
+    Two revisions produce equal lists exactly when they declare the same
+    dependencies, however much else moved in the file. The stanza text is kept
+    raw rather than parsed into atoms so that `(re_export foo)`, variables and
+    `%{...}` forms compare by what they say instead of by what we guess they
+    mean.
+    """
+    text = _strip_dune_comments(source)
+    forms: List[str] = []
+    for match in _DUNE_FIELD_RE.finditer(text):
+        start = match.start()
+        depth = 0
+        i = start
+        while i < len(text):
+            ch = text[i]
+            if ch == '"':
+                i += 1
+                while i < len(text) and text[i] != '"':
+                    i += 2 if text[i] == "\\" else 1
+            elif ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    forms.append(" ".join(text[start : i + 1].split()))
+                    break
+            i += 1
+    return sorted(forms)
+
+
+_BLOB_TEXT_CACHE: Dict[str, Optional[str]] = {}
+
+
+def _blob_text(blob_sha: str, owner: str, repo: str) -> Optional[str]:
+    """Decode a blob to text. None when it is unreachable or not UTF-8."""
+    if blob_sha in _BLOB_TEXT_CACHE:
+        return _BLOB_TEXT_CACHE[blob_sha]
+    resp = _run_gh(
+        [f"/repos/{owner}/{repo}/git/blobs/{blob_sha}"], allow_not_found=True
+    )
+    text: Optional[str] = None
+    if isinstance(resp, dict) and resp.get("encoding") == "base64":
+        try:
+            text = base64.b64decode(resp.get("content", "")).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            text = None
+    _BLOB_TEXT_CACHE[blob_sha] = text
+    return text
+
+
+def dune_deps_changed(
+    paths: Set[str], after_sha: str, before_sha: str, owner: str, repo: str
+) -> Optional[bool]:
+    """Whether any of `paths` changed a dune dependency stanza between two commits.
+
+    None means the answer is not knowable here -- an unreachable or truncated
+    tree, or a blob we could not decode. Callers must keep their conservative
+    verdict on None rather than reading it as "nothing changed".
+    """
+    after = _tree_blobs(after_sha, owner, repo)
+    before = _tree_blobs(before_sha, owner, repo)
+    if after is None or before is None:
+        return None
+    for path in sorted(paths):
+        after_blob = after.get(path)
+        before_blob = before.get(path)
+        if after_blob == before_blob:
+            continue
+        if after_blob is None or before_blob is None:
+            # The dune file itself appeared or disappeared.
+            return True
+        after_text = _blob_text(after_blob, owner, repo)
+        before_text = _blob_text(before_blob, owner, repo)
+        if after_text is None or before_text is None:
+            return None
+        if dune_dependency_forms(after_text) != dune_dependency_forms(before_text):
+            return True
+    return False
 
 
 def check_pr_axis_stale(
@@ -382,16 +576,47 @@ def check_pr_axis_stale(
                 merge_commit, pr_base_sha, owner, repo
             ):
                 continue
+            # A restacked parent gives the same delta new SHAs, so ancestry
+            # says absent while the content is already there (#29377).
+            if merge_commit and merged_delta_is_present_in_base(
+                merged_files, merge_commit, pr_base_sha, owner, repo
+            ):
+                print(
+                    f"axis: #{merged_num} delta already present in base "
+                    f"{pr_base_sha[:12]} by content; skipping overlap analysis",
+                    file=sys.stderr,
+                )
+                continue
 
         # Determine risk type and confidence
         confidence = "LOW"
         risk_type = "FILE_OVERLAP"
 
-        # Check if dune files changed
+        # A shared dune file only breaks a dependent build when the merged PR
+        # actually changed what it links. Comparing the (libraries ...) stanzas
+        # across the merge is the property BUILD_DEP_BREAK names; the file's
+        # name is not (#29359 R11).
         dune_overlap = {f for f in overlap if f.endswith("/dune") or f == "dune"}
         if dune_overlap:
-            risk_type = "BUILD_DEP_BREAK"
-            confidence = "HIGH"
+            merge_commit = (merged.get("mergeCommit") or {}).get("oid")
+            parents = ((merged.get("mergeCommit") or {}).get("parents") or {}).get(
+                "nodes"
+            ) or []
+            parent_sha = parents[0].get("oid") if parents else None
+            deps_changed: Optional[bool] = None
+            if merge_commit and parent_sha:
+                deps_changed = dune_deps_changed(
+                    dune_overlap, merge_commit, parent_sha, owner, repo
+                )
+            if deps_changed is not False:
+                risk_type = "BUILD_DEP_BREAK"
+                confidence = "HIGH"
+                if deps_changed is None:
+                    print(
+                        f"axis: #{merged_num} dune dependency stanzas unreadable; "
+                        f"keeping BUILD_DEP_BREAK unverified",
+                        file=sys.stderr,
+                    )
 
         # Check if .mli files changed (potential signature change)
         mli_overlap = {f for f in overlap if f.endswith(".mli")}
@@ -589,6 +814,133 @@ def self_test() -> int:
     )
     assert merged_pr_in_scope(None, "trunk"), "missing base ref stays in scope"
     print("self-test: per-base staleness scope incl. stacked siblings (PASS)")
+
+    # Content containment (#29377). Seed the tree cache so the cases stay
+    # offline; a restack rewrites SHAs but leaves the same blobs behind.
+    saved_cache = dict(_TREE_BLOBS_CACHE)
+    try:
+        _TREE_BLOBS_CACHE.clear()
+        _TREE_BLOBS_CACHE["merge-sha"] = {"lib/dune": "blob-a", "lib/x.ml": "blob-b"}
+        _TREE_BLOBS_CACHE["restacked-base"] = {
+            "lib/dune": "blob-a",
+            "lib/x.ml": "blob-b",
+            "lib/unrelated.ml": "blob-c",
+        }
+        _TREE_BLOBS_CACHE["diverged-base"] = {
+            "lib/dune": "blob-a",
+            "lib/x.ml": "blob-z",
+        }
+        _TREE_BLOBS_CACHE["deleted-base"] = {"lib/dune": "blob-a"}
+        _TREE_BLOBS_CACHE["truncated"] = None
+        touched = {"lib/dune", "lib/x.ml"}
+
+        assert merged_delta_is_present_in_base(
+            touched, "merge-sha", "restacked-base", "o", "r"
+        ), "a restacked base carrying the same blobs contains the delta"
+        assert not merged_delta_is_present_in_base(
+            touched, "merge-sha", "diverged-base", "o", "r"
+        ), "a base that changed a touched file must fall through to overlap analysis"
+        assert not merged_delta_is_present_in_base(
+            touched, "merge-sha", "truncated", "o", "r"
+        ), "a truncated tree proves nothing"
+        assert not merged_delta_is_present_in_base(
+            set(), "merge-sha", "restacked-base", "o", "r"
+        ), "an empty file set proves nothing"
+        assert merged_delta_is_present_in_base(
+            {"lib/x.ml"}, "deleted-base", "deleted-base", "o", "r"
+        ), "a path missing from both trees is a merged deletion, not a difference"
+        print("self-test: restacked delta recognised by content (PASS)")
+    finally:
+        _TREE_BLOBS_CACHE.clear()
+        _TREE_BLOBS_CACHE.update(saved_cache)
+
+    # BUILD_DEP_BREAK is a claim about dependency stanzas (#29359 R11). The
+    # parser is pure, so every case below is exact and offline.
+    base_dune = """
+(library
+ (name masc)
+ (libraries eio yojson (re_export uri))
+ (preprocess (pps ppx_deriving.show)))
+"""
+    # The comment sits *inside* the stanza: a parser that does not strip it
+    # carries the prose into the compared text and reports a false change.
+    commented = """
+; a note about the library
+(library
+ (name masc)
+
+ (libraries eio ; the effects runtime
+            yojson
+            (re_export uri))
+ (preprocess (pps ppx_deriving.show)))
+"""
+    assert dune_dependency_forms(base_dune) == dune_dependency_forms(commented), (
+        "comments and blank lines are not dependency changes"
+    )
+    print("self-test: dune comment/whitespace edit is not a dep change (PASS)")
+
+    added = base_dune.replace("(libraries eio yojson", "(libraries eio yojson digestif")
+    assert dune_dependency_forms(added) != dune_dependency_forms(base_dune), (
+        "a new library is a dependency change"
+    )
+    renamed = base_dune.replace("(name masc)", "(name masc_core)")
+    assert dune_dependency_forms(renamed) == dune_dependency_forms(base_dune), (
+        "renaming the library does not change what it links"
+    )
+    ppx = base_dune.replace("ppx_deriving.show", "ppx_deriving.eq")
+    assert dune_dependency_forms(ppx) != dune_dependency_forms(base_dune), (
+        "a ppx swap is a dependency change"
+    )
+    print("self-test: added library and ppx swap detected, rename ignored (PASS)")
+
+    # The `;` lives inside a string *inside* the stanza. Treating it as a
+    # comment eats the closing parens, so the form never balances and vanishes.
+    quoted = base_dune.replace(
+        "(pps ppx_deriving.show)", '(pps ppx_deriving.show -flag "a;b")'
+    )
+    quoted_forms = dune_dependency_forms(quoted)
+    assert len(quoted_forms) == len(dune_dependency_forms(base_dune)), (
+        "a semicolon inside a string literal must not end the stanza"
+    )
+    assert any('"a;b"' in form for form in quoted_forms), (
+        "the quoted flag belongs in the compared text"
+    )
+    print("self-test: `;` inside a string literal is not a comment (PASS)")
+
+    # dune_deps_changed over seeded trees/blobs: the same three cases the
+    # parser answers, now through the lookup the live path uses.
+    saved_tree = dict(_TREE_BLOBS_CACHE)
+    saved_blob = dict(_BLOB_TEXT_CACHE)
+    try:
+        _TREE_BLOBS_CACHE.clear()
+        _BLOB_TEXT_CACHE.clear()
+        _TREE_BLOBS_CACHE["after-comment"] = {"lib/dune": "blob-commented"}
+        _TREE_BLOBS_CACHE["after-added"] = {"lib/dune": "blob-added"}
+        _TREE_BLOBS_CACHE["before"] = {"lib/dune": "blob-base"}
+        _TREE_BLOBS_CACHE["unreadable"] = None
+        _BLOB_TEXT_CACHE["blob-base"] = base_dune
+        _BLOB_TEXT_CACHE["blob-commented"] = commented
+        _BLOB_TEXT_CACHE["blob-added"] = added
+
+        assert (
+            dune_deps_changed({"lib/dune"}, "after-comment", "before", "o", "r")
+            is False
+        ), "a comment-only dune edit is not a BUILD_DEP_BREAK"
+        assert (
+            dune_deps_changed({"lib/dune"}, "after-added", "before", "o", "r") is True
+        ), "an added library is a BUILD_DEP_BREAK"
+        assert (
+            dune_deps_changed({"lib/dune"}, "unreadable", "before", "o", "r") is None
+        ), "an unreachable tree is unknown, never a silent False"
+        assert dune_deps_changed({"lib/dune"}, "before", "before", "o", "r") is False, (
+            "an identical blob needs no content fetch"
+        )
+        print("self-test: dune dep verdict incl. unknown-is-not-false (PASS)")
+    finally:
+        _TREE_BLOBS_CACHE.clear()
+        _TREE_BLOBS_CACHE.update(saved_tree)
+        _BLOB_TEXT_CACHE.clear()
+        _BLOB_TEXT_CACHE.update(saved_blob)
 
     print("pr_axis_check self-test: all structural cases passed")
     return 0

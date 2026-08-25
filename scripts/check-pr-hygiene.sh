@@ -58,7 +58,29 @@ if [[ "$DUPLICATE_POLICY" != "warn" && "$DUPLICATE_POLICY" != "fail" ]]; then
   exit 2
 fi
 
+# On a shallow clone `git merge-base` does not fail when the real ancestor was
+# never fetched — it returns a grafted boundary commit and exits 0. The range
+# then spans everything that was fetched, and every commit in it is reported as
+# this PR's. CI fetches the base at --depth=100, so a branch whose ancestor sits
+# further back (a merge commit pulls main history in, which is enough) had
+# masc's oldest commits attributed to it.
+#
+# Deepening is the recovery the `if ! merge_base=...` guard in ci.yml was
+# written for and never reached, because the command it tests does not fail.
 MERGE_BASE="$(git merge-base "$BASE_REF" "$HEAD_REF")"
+
+if [[ -f "$(git rev-parse --git-dir)/shallow" ]]; then
+  while grep -qx "$MERGE_BASE" "$(git rev-parse --git-dir)/shallow"; do
+    echo "merge-base ${MERGE_BASE:0:12} is a shallow boundary; deepening" >&2
+    before="$MERGE_BASE"
+    git fetch --deepen=500 --quiet origin "$BASE_REF" 2>/dev/null \
+      || git fetch --deepen=500 --quiet 2>/dev/null \
+      || break
+    MERGE_BASE="$(git merge-base "$BASE_REF" "$HEAD_REF")"
+    [[ "$MERGE_BASE" == "$before" ]] && break
+  done
+fi
+
 RANGE="${MERGE_BASE}..${HEAD_REF}"
 
 RANGE_COMMITS=()
@@ -145,7 +167,7 @@ if [[ "$duplicate_hits" -ne 0 && "$DUPLICATE_POLICY" == "fail" ]]; then
 fi
 
 # Guard: detect Request_priority type erasure (priority : () or ~priority:())
-# See #4186 — a bulk rewrite once replaced Request_priority.t with () across OAS files.
+# See #4186 — a bulk rewrite once replaced Request_priority.t with () across AGENT_CORE files.
 priority_erasure=0
 while IFS= read -r line; do
   echo "::error title=Priority type erasure::Added line matches erased priority pattern: ${line}"

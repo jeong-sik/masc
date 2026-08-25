@@ -21,8 +21,6 @@ let error_kind_of_yojson = function
 let pp_error_kind fmt kind =
   Format.pp_print_string fmt (error_kind_to_string kind)
 
-let show_error_kind = error_kind_to_string
-
 (** Telemetry event types *)
 type event =
   | Agent_session_bound of { agent_id: string; capabilities: string list }
@@ -39,6 +37,12 @@ type event =
       session_id: string option [@default None];
       operation_id: string option [@default None];
       worker_run_id: string option [@default None];
+      (* RFC-0233 canonical join key, minted once at the dispatch boundary.
+         The tool_calls row for the same execution carries the identical
+         value, so a consumer reading both streams can tell one physical
+         call reported twice from two calls. [None] on lanes that write no
+         tool_calls row — nothing there is a duplicate to begin with. *)
+      execution_id: string option [@default None];
       error_kind: error_kind option [@default None];
       error_message: string option [@default None];
       exit_code: int option [@default None];
@@ -166,21 +170,24 @@ let observe_telemetry_drop ~reason =
     ()
 
 let report_telemetry_drop ~reason ~path ~detail =
+  let reason_wire = Read_drop_reason.to_wire reason in
   Safe_ops.report_persistence_read_drop
-    ~on_drop:(fun () -> observe_telemetry_drop ~reason)
+    ~on_drop:(fun () -> observe_telemetry_drop ~reason:reason_wire)
     ~surface:telemetry_eio_surface ~reason ~path ~detail
 
+(* Per-row decode. Reporting a drop only logs and bumps a counter, with no
+   quota or early stop, so this is safe to run under a newest-first scan. *)
+let parse_event_record (json : Yojson.Safe.t) : event_record option =
+  match event_record_of_yojson json with
+  | Ok record -> Some record
+  | Error msg ->
+      report_telemetry_drop
+        ~reason:Read_drop_reason.Invalid_payload
+        ~path:"<in-memory>" ~detail:msg;
+      None
+
 let parse_event_records (jsons : Yojson.Safe.t list) : event_record list =
-  List.filter_map
-    (fun json ->
-      match event_record_of_yojson json with
-      | Ok record -> Some record
-      | Error msg ->
-          report_telemetry_drop
-            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-            ~path:"<in-memory>" ~detail:msg;
-          None)
-    jsons
+  List.filter_map parse_event_record jsons
 
 let event_to_json event =
   let record = {
@@ -198,13 +205,7 @@ let track ?fs:_ config event : unit =
 (** Read all current date-split events. *)
 let read_all_events ?fs:_ config : event_record list =
   let store = get_telemetry_store config in
-  Dated_jsonl.read_recent store 100_000 |> parse_event_records
-
-let read_recent_events ?fs:_ config ~limit : event_record list =
-  if limit <= 0 then []
-  else
-    let store = get_telemetry_store config in
-    Dated_jsonl.read_recent store limit |> parse_event_records
+  Dated_jsonl.filter_map_recent store 100_000 ~f:parse_event_record
 
 (* ── Tool usage summary cache ──────────────────────────────────────
    The dashboard refreshes Tool Monitor / Fleet Health / Tool Quality
@@ -427,7 +428,8 @@ let nonempty_error_kind_opt value =
   | None -> None
 
 let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
-    ?source ?session_id ?operation_id ?worker_run_id ?failure_class ?error_kind
+    ?source ?session_id ?operation_id ?worker_run_id ?execution_id
+    ?failure_class ?error_kind
     ?error_message ?exit_code ?stderr_excerpt () =
   let failure_class = if success then None else failure_class in
   let error_kind =
@@ -449,6 +451,7 @@ let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
          session_id;
          operation_id;
          worker_run_id;
+         execution_id;
          error_kind;
          error_message;
          exit_code;
@@ -485,9 +488,6 @@ let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
           let context = String.concat " " context_parts in
           track ?fs config
             (Error_occurred { code = trimmed_kind; message; context })
-
-let track_tool_assigned ?fs config ~agent_id ~profile ~tool_count ~assignment_id () =
-  track ?fs config (Tool_assigned { agent_id; profile; tool_count; assignment_id })
 
 (** Prune telemetry entries older than [max_age_days] days.
     Replaces the old rotate function; date-split makes rewriting unnecessary. *)

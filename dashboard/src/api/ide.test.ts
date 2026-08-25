@@ -55,22 +55,22 @@ const region = {
 }
 
 describe('ide API', () => {
-  it('fetchIdeAnnotations appends keeper and repo_id params', async () => {
+  it('fetchIdeAnnotations appends keeper and codebase params', async () => {
     stubFetch({ ok: true, data: [annotation] })
 
     await fetchIdeAnnotations(
       { file_path: 'lib/a.ml' },
-      { keeper: 'sangsu', repoId: 'masc' },
+      { keeper: 'sangsu', codebase: 'github.com_jeong-sik_masc' },
     )
 
     const url = String(mockFetch.mock.calls[0]![0])
     expect(url).toContain('/api/v1/ide/annotations?')
     expect(url).toContain('file_path=lib%2Fa.ml')
     expect(url).toContain('keeper=sangsu')
-    expect(url).toContain('repo_id=masc')
+    expect(url).toContain('codebase=github.com_jeong-sik_masc')
   })
 
-  it('fetchIdeAnnotations appends canonical_url scope without repo_id', async () => {
+  it('fetchIdeAnnotations appends an explicit codebase scope', async () => {
     stubFetch({ ok: true, data: [annotation] })
 
     await fetchIdeAnnotations(
@@ -78,15 +78,15 @@ describe('ide API', () => {
       {
         keeper: 'sangsu',
         scope: {
-          kind: 'canonical_url',
-          canonicalUrl: 'https://github.com/jeong-sik/masc.git',
+          kind: 'codebase',
+          codebase: 'github.com_jeong-sik_masc',
         },
       },
     )
 
     const url = String(mockFetch.mock.calls[0]![0])
     expect(url).toContain('/api/v1/ide/annotations?')
-    expect(url).toContain('canonical_url=https%3A%2F%2Fgithub.com%2Fjeong-sik%2Fmasc.git')
+    expect(url).toContain('codebase=github.com_jeong-sik_masc')
     expect(url).not.toContain('repo_id=')
   })
 
@@ -94,8 +94,8 @@ describe('ide API', () => {
     stubFetch({ ok: true, data: [annotation] })
 
     await expect(fetchIdeAnnotations({}, {
-      scope: { kind: 'repo_id', repoId: 'masc' },
-      canonicalUrl: 'https://github.com/jeong-sik/masc.git',
+      scope: { kind: 'codebase', codebase: 'github.com_jeong-sik_masc' },
+      codebase: 'github.com_jeong-sik_masc_other',
     })).rejects.toThrow('IDE scope must resolve to exactly one')
     expect(mockFetch).not.toHaveBeenCalled()
   })
@@ -164,14 +164,14 @@ describe('ide API', () => {
       kind: 'Comment',
       content: 'Review this line',
       references,
-    }, { keeper: 'sangsu', repoId: 'masc' })
+    }, { keeper: 'sangsu', codebase: 'github.com_jeong-sik_masc' })
 
     const url = String(mockFetch.mock.calls[0]![0])
     const init = mockFetch.mock.calls[0]![1] as RequestInit
     const body = JSON.parse(String(init.body)) as Record<string, unknown>
     expect(url).toContain('/api/v1/ide/annotations?')
     expect(url).toContain('keeper=sangsu')
-    expect(url).toContain('repo_id=masc')
+    expect(url).toContain('codebase=github.com_jeong-sik_masc')
     expect(body).not.toHaveProperty('keeper_id')
     expect(body.references).toEqual(references)
   })
@@ -203,12 +203,12 @@ describe('ide API', () => {
   it('fetchIdeRegions appends repo_id param', async () => {
     stubFetch({ ok: true, data: [region] })
 
-    await fetchIdeRegions('lib/a.ml', { repoId: 'masc' })
+    await fetchIdeRegions('lib/a.ml', { codebase: 'github.com_jeong-sik_masc' })
 
     const url = String(mockFetch.mock.calls[0]![0])
     expect(url).toContain('/api/v1/ide/regions?')
     expect(url).toContain('file_path=lib%2Fa.ml')
-    expect(url).toContain('repo_id=masc')
+    expect(url).toContain('codebase=github.com_jeong-sik_masc')
   })
 
   it('fetchIdeRegions rejects malformed response data', async () => {
@@ -231,11 +231,11 @@ describe('ide API', () => {
     setStoredToken('delete-test-token', { source: 'manual' })
     stubFetch({}, true)
 
-    await deleteIdeAnnotation('ann-1', { repoId: 'masc' })
+    await deleteIdeAnnotation('ann-1', { codebase: 'github.com_jeong-sik_masc' })
 
     const url = String(mockFetch.mock.calls[0]![0])
     expect(url).toContain('/api/v1/ide/annotations/ann-1?')
-    expect(url).toContain('repo_id=masc')
+    expect(url).toContain('codebase=github.com_jeong-sik_masc')
     expect(url).not.toContain('keeper_id=')
     // The DELETE route is token-bound (CanBroadcast) — a header-less
     // request is rejected 401 in every server configuration.
@@ -246,7 +246,7 @@ describe('ide API', () => {
   it('deleteIdeAnnotation maps success to deleted', async () => {
     stubFetch({}, true)
 
-    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('deleted')
+    await expect(deleteIdeAnnotation('ann-1', { codebase: 'github.com_jeong-sik_masc' })).resolves.toBe('deleted')
   })
 
   it('deleteIdeAnnotation maps the coded 403 (ownership/not-found) to rejected', async () => {
@@ -256,32 +256,32 @@ describe('ide API', () => {
       403,
     )
 
-    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('rejected')
+    await expect(deleteIdeAnnotation('ann-1', { codebase: 'github.com_jeong-sik_masc' })).resolves.toBe('rejected')
   })
 
   it('deleteIdeAnnotation maps an uncoded 403 (auth tier) to forbidden', async () => {
     stubFetch({ ok: false, error: 'permission denied' }, false, 403)
 
-    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('forbidden')
+    await expect(deleteIdeAnnotation('ann-1', { codebase: 'github.com_jeong-sik_masc' })).resolves.toBe('forbidden')
   })
 
   it('deleteIdeAnnotation maps 401 to unauthorized', async () => {
     stubFetch({ ok: false, error: 'missing token' }, false, 401)
 
-    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('unauthorized')
+    await expect(deleteIdeAnnotation('ann-1', { codebase: 'github.com_jeong-sik_masc' })).resolves.toBe('unauthorized')
   })
 
   it('deleteIdeAnnotation maps non-auth failures to error', async () => {
     stubFetch({}, false)
 
-    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('error')
+    await expect(deleteIdeAnnotation('ann-1', { codebase: 'github.com_jeong-sik_masc' })).resolves.toBe('error')
   })
 
   it('deleteIdeAnnotation maps network failure to error', async () => {
     mockFetch.mockRejectedValue(new Error('network down'))
     vi.stubGlobal('fetch', mockFetch)
 
-    await expect(deleteIdeAnnotation('ann-1', { repoId: 'masc' })).resolves.toBe('error')
+    await expect(deleteIdeAnnotation('ann-1', { codebase: 'github.com_jeong-sik_masc' })).resolves.toBe('error')
   })
 
   it('fetchIdeEvents appends event filters and parses bridge events', async () => {
@@ -306,7 +306,7 @@ describe('ide API', () => {
     const events = await fetchIdeEvents({
       kind: 'tool',
       keeperId: 'sangsu',
-      repoId: 'masc',
+      codebase: 'github.com_jeong-sik_masc',
       limit: 25,
     })
 
@@ -314,7 +314,7 @@ describe('ide API', () => {
     expect(url).toContain('/api/v1/ide/events?')
     expect(url).toContain('kind=tool')
     expect(url).toContain('keeper_id=sangsu')
-    expect(url).toContain('repo_id=masc')
+    expect(url).toContain('codebase=github.com_jeong-sik_masc')
     expect(url).toContain('limit=25')
     expect(events).toEqual([expect.objectContaining({
       type: 'tool',
@@ -325,27 +325,12 @@ describe('ide API', () => {
     })])
   })
 
-  it('fetchIdeEvents serializes keeper_lane scope without repo params', async () => {
-    stubFetch({ ok: true, data: { events: [] } })
-
-    await fetchIdeEvents({
-      limit: 50,
-      scope: { kind: 'keeper_lane', keeperId: 'sangsu' },
-    })
-
-    const url = String(mockFetch.mock.calls[0]![0])
-    expect(url).toContain('/api/v1/ide/events?')
-    expect(url).toContain('keeper_lane=sangsu')
-    expect(url).not.toContain('repo_id=')
-    expect(url).not.toContain('canonical_url=')
-  })
-
-  it('rejects keeper_lane scope combined with repo_id before issuing a request', async () => {
+  it('rejects two codebase authorities before issuing a request', async () => {
     stubFetch({ ok: true, data: { events: [] } })
 
     await expect(fetchIdeEvents({
-      scope: { kind: 'keeper_lane', keeperId: 'sangsu' },
-      repoId: 'masc',
+      scope: { kind: 'codebase', codebase: 'github.com_other_repo' },
+      codebase: 'github.com_jeong-sik_masc',
     })).rejects.toThrow('IDE scope must resolve to exactly one')
     expect(mockFetch).not.toHaveBeenCalled()
   })
@@ -392,7 +377,7 @@ describe('ide API', () => {
     const snapshot = await fetchIdeCursors({
       keeperId: 'sangsu',
       filePath: 'lib/a.ml',
-      repoId: 'masc',
+      codebase: 'github.com_jeong-sik_masc',
       limit: 10,
     })
 
@@ -400,7 +385,7 @@ describe('ide API', () => {
     expect(url).toContain('/api/v1/ide/cursors?')
     expect(url).toContain('keeper_id=sangsu')
     expect(url).toContain('file_path=lib%2Fa.ml')
-    expect(url).toContain('repo_id=masc')
+    expect(url).toContain('codebase=github.com_jeong-sik_masc')
     expect(url).toContain('limit=10')
     expect(snapshot?.cursors).toEqual([expect.objectContaining({
       keeper_id: 'sangsu',

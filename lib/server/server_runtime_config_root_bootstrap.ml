@@ -59,7 +59,7 @@ let copy_file_if_missing ~src ~dst =
     Fs_compat.save_file dst (Fs_compat.load_file src))
 ;;
 
-let oas_models_overlay_toml_filename = "oas-models-overlay.toml"
+let agent_core_models_overlay_toml_filename = "agent-core-models-overlay.toml"
 
 let existing_file path =
   try Sys.file_exists path && not (Sys.is_directory path) with
@@ -128,8 +128,8 @@ let copy_missing_prompt_seed ~src_config_root ~dst_config_root =
 ;;
 
 let copy_missing_model_catalog_overlay_seed ~src_config_root ~dst_config_root =
-  let src = Filename.concat src_config_root oas_models_overlay_toml_filename in
-  let dst = Filename.concat dst_config_root oas_models_overlay_toml_filename in
+  let src = Filename.concat src_config_root agent_core_models_overlay_toml_filename in
+  let dst = Filename.concat dst_config_root agent_core_models_overlay_toml_filename in
   if existing_file src && not (Sys.file_exists dst)
   then (
     copy_file_if_missing ~src ~dst;
@@ -153,7 +153,7 @@ let config_bootstrap_mode () =
 
 let ensure_config_root_scaffold config_root =
   Fs_compat.mkdir_p config_root;
-  [ "prompts"; "keepers"; "personas" ]
+  [ "prompts"; "keepers" ]
   |> List.iter (fun name -> Fs_compat.mkdir_p (Filename.concat config_root name))
 ;;
 
@@ -170,7 +170,7 @@ let copy_missing_config_root_seed ~src ~dst =
       copy_missing_tree
         ~src:(Filename.concat src name)
         ~dst:(Filename.concat dst name));
-  Fs_compat.mkdir_p (Filename.concat dst "keepers")
+  Fs_compat.mkdir_p (Filename.concat dst Common.keepers_runtime_dirname)
 ;;
 
 let bootstrap_base_path_config_root ~base_path =
@@ -246,6 +246,5 @@ let startup_config_resolution ~base_path =
       ; executable_name = Sys.executable_name
       ; env_base_path = Some base_path
       ; env_config_dir = Config_dir_resolver.current_env_config_dir_opt ()
-      ; env_personas_dir = Config_dir_resolver.current_env_personas_dir_opt ()
       }
 ;;

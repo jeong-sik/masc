@@ -28,7 +28,6 @@ module Attr_key : sig
   val keeper_name : string
   val keeper_agent_name : string
   val keeper_trace_id : string
-  val keeper_generation : string
   val keeper_max_context : string
   val keeper_channel : string
   val keeper_is_retry : string
@@ -44,7 +43,6 @@ module Attr_key : sig
 
   val official_gen_ai : string list
   val masc_extensions : string list
-  val legacy : string list
   val is_official_gen_ai : string -> bool
   val is_masc_extension : string -> bool
 end
@@ -89,20 +87,6 @@ module Event_name : sig
   val client_operation_exception : string
 end
 
-val keeper_turn_span_name : keeper_name:string -> string
-
-val keeper_turn_attrs
-  :  keeper_name:string
-  -> agent_name:string
-  -> runtime_id:string
-  -> trace_id:string
-  -> generation:int
-  -> max_context:int
-  -> channel:string
-  -> is_retry:bool
-  -> current_task_id:string option
-  -> attr list
-
 val tool_execution_attrs : tool_name:string -> attr list
 
 val with_keeper_turn_span
@@ -110,7 +94,6 @@ val with_keeper_turn_span
   -> agent_name:string
   -> runtime_id:string
   -> trace_id:string
-  -> generation:int
   -> max_context:int
   -> channel:string
   -> is_retry:bool

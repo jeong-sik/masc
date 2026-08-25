@@ -105,18 +105,6 @@ let is_within_root_norm ~(root_norm : string) (path : string) : bool =
   | None, _ | _, None -> false
 ;;
 
-let is_within_allowed_norms ~(target_norm : string) (allowed_norms : string list) : bool =
-  match absolute_path_components target_norm with
-  | None -> false
-  | Some target ->
-    List.exists
-      (fun allowed_norm ->
-         match absolute_path_components allowed_norm with
-         | None -> false
-         | Some root -> Option.is_some (relative_components_under ~root ~target))
-      allowed_norms
-;;
-
 type confined_path =
   { root : string
   ; root_identity : resource_identity option
@@ -212,10 +200,6 @@ let confined_relative_path (target : confined_path) =
 let confined_host_path (target : confined_path) = target.host_path
 let confined_containment_path (target : confined_path) = target.containment_path
 let confined_endpoint_components (target : confined_path) = target.endpoint_components
-let confined_endpoint_relative_path (target : confined_path) =
-  relative_path_of_components target.endpoint_components
-;;
-
 let path_effect_projection_error_to_string = function
   | Allowed_root_identity_unavailable { root } ->
     Printf.sprintf
@@ -785,9 +769,14 @@ let sandbox_path_of_meta ~(meta : Keeper_meta_contract.keeper_meta) =
   Keeper_sandbox.allowed_root_rel_of_meta ~meta
 ;;
 
+(* The workspace root, and nothing under it. A [repos/] directory used to be
+   created here, which outlived every other trace of that convention: a keeper
+   listing its root would find an empty [repos/] and infer the rule the prompts
+   no longer teach. The system creates the root; the keeper decides what goes
+   in it. *)
 let sandbox_bundle_paths_of_meta ~(meta : Keeper_meta_contract.keeper_meta) =
   let root = sandbox_path_of_meta ~meta |> strip_trailing_slashes in
-  [ root ^ "/"; root ^ "/repos/" ]
+  [ root ^ "/" ]
 ;;
 
 let ensure_sandbox_bundle ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta)
@@ -809,7 +798,7 @@ let ensure_sandbox_bundle_for_profile
   let sandbox_root =
     Keeper_sandbox.host_root_rel_of_profile sandbox_profile name |> strip_trailing_slashes
   in
-  [ sandbox_root ^ "/"; sandbox_root ^ "/repos/" ]
+  [ sandbox_root ^ "/" ]
   |> List.map (Filename.concat root)
   |> List.map Keeper_fs.ensure_dir
 ;;
@@ -850,10 +839,10 @@ let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
 
 let extract_user_messages (ctx_work : Keeper_types.working_context) : string list =
   Keeper_context_runtime.messages_of_context ctx_work
-  |> List.filter_map (fun (m : Agent_sdk.Types.message) ->
-    if m.role = Agent_sdk.Types.User
+  |> List.filter_map (fun (m : Agent_core.Types.message) ->
+    if m.role = Agent_core.Types.User
     then (
-      let c = String.trim (Agent_sdk.Types.text_of_message m) in
+      let c = String.trim (Agent_core.Types.text_of_message m) in
       if c = "" then None else Some c)
     else None)
 ;;

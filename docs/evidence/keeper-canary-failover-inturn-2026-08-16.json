@@ -1,0 +1,412 @@
+{
+  "schema": "masc.keeper_canary_run.v1",
+  "captured_at": "2026-08-16T10:37:41Z",
+  "harness": { "git_commit": "551d20969a59466f4a8b23fb0a71c44c4526c5f9" },
+  "run_id": "canary-failover-smoke-20260816-t4",
+  "keeper": {
+    "name": "canary-failover-20260816-t4",
+    "runtime": null,
+    "base_path": "/Users/dancer/me"
+  },
+  "transport": {
+    "endpoint": "http://127.0.0.1:8935/api/v1/keepers/chat/stream",
+    "turn_interval_s": 0.0,
+    "wall_clock_target_s": null
+  },
+  "facts_established": [
+    {
+      "category": "project_codename",
+      "statement": "The project codename is Codename-402959828985.",
+      "value": "Codename-402959828985"
+    },
+    {
+      "category": "lead_reviewer",
+      "statement": "The lead reviewer is Reviewer-6e6aa0d47599.",
+      "value": "Reviewer-6e6aa0d47599"
+    },
+    {
+      "category": "deadline",
+      "statement": "The deadline is 2026-04-11.",
+      "value": "2026-04-11"
+    },
+    {
+      "category": "blocked_dependency",
+      "statement": "The blocked dependency is dep-0030b432323a.",
+      "value": "dep-0030b432323a"
+    },
+    {
+      "category": "fallback_runtime",
+      "statement": "The fallback runtime is runtime-e7670a623b02.",
+      "value": "runtime-e7670a623b02"
+    },
+    {
+      "category": "incident_number",
+      "statement": "The incident number is 6626.",
+      "value": "6626"
+    },
+    {
+      "category": "reviewer_timezone",
+      "statement": "The reviewer timezone is Asia/Tokyo.",
+      "value": "Asia/Tokyo"
+    },
+    {
+      "category": "artifact_name",
+      "statement": "The artifact name is artifact-00e2a7afe54e.json.",
+      "value": "artifact-00e2a7afe54e.json"
+    },
+    {
+      "category": "rollback_switch",
+      "statement": "The rollback switch is called rollback-30d7c7b22e7c.",
+      "value": "rollback-30d7c7b22e7c"
+    }
+  ],
+  "turns": [
+    {
+      "index": 1,
+      "category": "project_codename",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-47c25a751665621f"
+      },
+      "turn_ref": "trace-1786875288709-00000#3",
+      "sent_at": "2026-08-16T10:27:04Z",
+      "round_trip_s": 300.15675115585327,
+      "reply_digest": "e3736d38e77f16ed9eb0990bdbc738239fc17502c3527a60a03f9becb8f7d486"
+    },
+    {
+      "index": 2,
+      "category": "lead_reviewer",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-a5b2834cfb70758d"
+      },
+      "turn_ref": "trace-1786875288709-00000#5",
+      "sent_at": "2026-08-16T10:32:04Z",
+      "round_trip_s": 301.8203761577606,
+      "reply_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "index": 3,
+      "category": "deadline",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-24ea87c94069a42a"
+      },
+      "turn_ref": "trace-1786875288709-00000#6",
+      "sent_at": "2026-08-16T10:37:06Z",
+      "round_trip_s": 2.298354148864746,
+      "reply_digest": "1c48b9688694795adab149b8cae1df145fd7ec26377cb56b5578861da123a3a8"
+    },
+    {
+      "index": 4,
+      "category": "blocked_dependency",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-491059570b9d4ab4"
+      },
+      "turn_ref": "trace-1786875288709-00000#7",
+      "sent_at": "2026-08-16T10:37:08Z",
+      "round_trip_s": 5.731442928314209,
+      "reply_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "index": 5,
+      "category": "fallback_runtime",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-b78f91c729f1378c"
+      },
+      "turn_ref": "trace-1786875288709-00000#8",
+      "sent_at": "2026-08-16T10:37:14Z",
+      "round_trip_s": 3.992866039276123,
+      "reply_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "index": 6,
+      "category": "incident_number",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-8d972b4a3c645677"
+      },
+      "turn_ref": "trace-1786875288709-00000#9",
+      "sent_at": "2026-08-16T10:37:18Z",
+      "round_trip_s": 3.371422052383423,
+      "reply_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "index": 7,
+      "category": "reviewer_timezone",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-44e92dac63c76034"
+      },
+      "turn_ref": "trace-1786875288709-00000#10",
+      "sent_at": "2026-08-16T10:37:22Z",
+      "round_trip_s": 3.595590114593506,
+      "reply_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "index": 8,
+      "category": "artifact_name",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-92607b735f16bf78"
+      },
+      "turn_ref": "trace-1786875288709-00000#11",
+      "sent_at": "2026-08-16T10:37:25Z",
+      "round_trip_s": 3.188889980316162,
+      "reply_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "index": 9,
+      "category": "rollback_switch",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-74b3cfe197de49df"
+      },
+      "turn_ref": "trace-1786875288709-00000#12",
+      "sent_at": "2026-08-16T10:37:28Z",
+      "round_trip_s": 2.802659034729004,
+      "reply_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "index": 10,
+      "category": null,
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-bf39ebc4b40bf97e"
+      },
+      "turn_ref": "trace-1786875288709-00000#13",
+      "sent_at": "2026-08-16T10:37:31Z",
+      "round_trip_s": 9.23159384727478,
+      "reply_digest": "ef4432d7f83a13e08f55faac071705beb7d282b9c9187ce704dc15fc9ccffc40"
+    }
+  ],
+  "recall": {
+    "turn_index": 10,
+    "request_id": "canary-bf39ebc4b40bf97e",
+    "prompt": "Without looking anything up, please list every fact I told you to remember earlier in this conversation, in the order I gave them to you.",
+    "reply": "Here are the facts in the order you gave them:\n\n1. The project codename is Codename-402959828985.\n2. The lead reviewer is Reviewer-6e6aa0d47599.\n3. The deadline is 2026-04-11.\n4. The blocked dependency is dep-0030b432323a.\n5. The fallback runtime is runtime-e7670a623b02.\n6. The incident number is 6626.\n7. The reviewer timezone is Asia/Tokyo.\n8. The artifact name is artifact-00e2a7afe54e.json.\n9. The rollback switch is called rollback-30d7c7b22e7c."
+  },
+  "timing": {
+    "min_s": 2.298354148864746,
+    "median_s": 3.7942280769348145,
+    "max_s": 301.8203761577606
+  },
+  "deterministic_signal": {
+    "facts_total": 9,
+    "facts_recalled": 9,
+    "order_matches": true,
+    "recalled_categories": [
+      "project_codename", "lead_reviewer", "deadline", "blocked_dependency",
+      "fallback_runtime", "incident_number", "reviewer_timezone",
+      "artifact_name", "rollback_switch"
+    ],
+    "missing_categories": [],
+    "per_fact": [
+      {
+        "category": "project_codename",
+        "value": "Codename-402959828985",
+        "recalled": true,
+        "first_index": 75
+      },
+      {
+        "category": "lead_reviewer",
+        "value": "Reviewer-6e6aa0d47599",
+        "recalled": true,
+        "first_index": 122
+      },
+      {
+        "category": "deadline",
+        "value": "2026-04-11",
+        "recalled": true,
+        "first_index": 164
+      },
+      {
+        "category": "blocked_dependency",
+        "value": "dep-0030b432323a",
+        "recalled": true,
+        "first_index": 205
+      },
+      {
+        "category": "fallback_runtime",
+        "value": "runtime-e7670a623b02",
+        "recalled": true,
+        "first_index": 250
+      },
+      {
+        "category": "incident_number",
+        "value": "6626",
+        "recalled": true,
+        "first_index": 298
+      },
+      {
+        "category": "reviewer_timezone",
+        "value": "Asia/Tokyo",
+        "recalled": true,
+        "first_index": 332
+      },
+      {
+        "category": "artifact_name",
+        "value": "artifact-00e2a7afe54e.json",
+        "recalled": true,
+        "first_index": 368
+      },
+      {
+        "category": "rollback_switch",
+        "value": "rollback-30d7c7b22e7c",
+        "recalled": true,
+        "first_index": 429
+      }
+    ]
+  },
+  "judgment": null,
+  "injections": [
+    {
+      "kind": "failover",
+      "after_turn": 2,
+      "started_at": "2026-08-16T10:37:06Z",
+      "duration_s": 0.2415459156036377,
+      "down_cmd": "pids=$(lsof -ti :9010 -sTCP:LISTEN); [ -n \"$pids\" ] && kill -9 $pids",
+      "up_cmd": "nohup /opt/homebrew/bin/llama-server -m /Users/dancer/.ollama/models/blobs/sha256-bee238bbeb3dc0a34bde4d0dedbaee1f98c009e8bb4226f03070054c12fb1372 --alias qwen3.8-27b --host 127.0.0.1 --port 9010 -c 65536 -np 1 --jinja --reasoning-format deepseek --cache-reuse 256 >> /Users/dancer/me/.masc/logs/llama-server-9010.log 2>&1 &",
+      "window_start": "2026-08-16T10:37:06Z",
+      "mode": "in_turn",
+      "attempts": [
+        {
+          "ts": "2026-08-16T10:37:06Z",
+          "keeper_turn_id": 5,
+          "event": "completed",
+          "runtime_id": "llama_cpp.qwen3-8-27b-llama",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T10:37:06Z",
+          "keeper_turn_id": 6,
+          "event": "routed",
+          "runtime_id": "llama_cpp.qwen3-8-27b-llama",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T10:37:06Z",
+          "keeper_turn_id": 6,
+          "event": "failed",
+          "runtime_id": "llama_cpp.qwen3-8-27b-llama",
+          "error_kind": "api"
+        },
+        {
+          "ts": "2026-08-16T10:37:06Z",
+          "keeper_turn_id": 6,
+          "event": "routed",
+          "runtime_id": "glm-coding.glm-5-turbo",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T10:37:08Z",
+          "keeper_turn_id": 6,
+          "event": "completed",
+          "runtime_id": "glm-coding.glm-5-turbo",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T10:37:09Z",
+          "keeper_turn_id": 7,
+          "event": "routed",
+          "runtime_id": "glm-coding.glm-5-turbo",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T10:37:14Z",
+          "keeper_turn_id": 7,
+          "event": "completed",
+          "runtime_id": "glm-coding.glm-5-turbo",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T10:37:14Z",
+          "keeper_turn_id": 8,
+          "event": "routed",
+          "runtime_id": "glm-coding.glm-5-turbo",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T10:37:18Z",
+          "keeper_turn_id": 8,
+          "event": "completed",
+          "runtime_id": "glm-coding.glm-5-turbo",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T10:37:18Z",
+          "keeper_turn_id": 9,
+          "event": "routed",
+          "runtime_id": "glm-coding.glm-5-turbo",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T10:37:22Z",
+          "keeper_turn_id": 9,
+          "event": "completed",
+          "runtime_id": "glm-coding.glm-5-turbo",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T10:37:22Z",
+          "keeper_turn_id": 10,
+          "event": "routed",
+          "runtime_id": "glm-coding.glm-5-turbo",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T10:37:25Z",
+          "keeper_turn_id": 10,
+          "event": "completed",
+          "runtime_id": "glm-coding.glm-5-turbo",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T10:37:25Z",
+          "keeper_turn_id": 11,
+          "event": "routed",
+          "runtime_id": "glm-coding.glm-5-turbo",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T10:37:28Z",
+          "keeper_turn_id": 11,
+          "event": "completed",
+          "runtime_id": "glm-coding.glm-5-turbo",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T10:37:28Z",
+          "keeper_turn_id": 12,
+          "event": "routed",
+          "runtime_id": "glm-coding.glm-5-turbo",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T10:37:31Z",
+          "keeper_turn_id": 12,
+          "event": "completed",
+          "runtime_id": "glm-coding.glm-5-turbo",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T10:37:31Z",
+          "keeper_turn_id": 13,
+          "event": "routed",
+          "runtime_id": "glm-coding.glm-5-turbo",
+          "error_kind": null
+        },
+        {
+          "ts": "2026-08-16T10:37:40Z",
+          "keeper_turn_id": 13,
+          "event": "completed",
+          "runtime_id": "glm-coding.glm-5-turbo",
+          "error_kind": null
+        }
+      ]
+    }
+  ],
+  "notes": []
+}

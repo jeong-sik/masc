@@ -46,12 +46,12 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
     | _ -> None
   in
 
-  let oas_telemetry_limit_param req =
+  let agent_core_telemetry_limit_param req =
     Server_utils.int_query_param req "limit" ~default:50
     |> Server_utils.clamp ~min_v:1 ~max_v:200
   in
 
-  let oas_telemetry_provider_param req =
+  let agent_core_telemetry_provider_param req =
     trimmed_query_param req "provider"
   in
 
@@ -98,7 +98,13 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
         h2_reqd
         (auth_error_json err)
         ~status:(status :> H2.Status.t)
-        ~extra_headers:(auth_error_headers ~status ~cors)
+        (* One policy for both protocols (#28166). Same result as the [cors]
+           computed above for this request; naming it here keeps H1 and H2
+           reading the same function. *)
+        ~extra_headers:
+          (auth_error_headers
+             ~status
+             ~cors:(auth_error_cors_headers httpun_request))
     in
     let mcp_auth_error_body failure =
       Server_mcp_transport_http_respond.error_body
@@ -219,6 +225,25 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
              | Error () -> ())
         | Error err -> h2_respond_auth_error h2_reqd err)
     in
+    (* H2 counterpart of [Server_auth.with_read_auth]: authorize on every
+       request, with no [http_auth_strict_enabled] / [is_public_read_path]
+       precondition. [with_h2_public_read] applies those preconditions and is
+       therefore NOT interchangeable — a route the H1 side guards with
+       [with_read_auth] must use this one, or the same path enforces different
+       authorization depending on which transport the client negotiated. *)
+    let with_h2_read_auth h2_reqd f =
+      with_server_state h2_reqd (fun state ->
+        match
+          authorize_read_request
+            ~base_path:(Mcp_server.workspace_config state).base_path
+            httpun_request
+        with
+        | Ok () ->
+            (match h2_check_agent_rate_limit h2_reqd with
+             | Ok () -> f state
+             | Error () -> ())
+        | Error err -> h2_respond_auth_error h2_reqd err)
+    in
     let h2_respond_board_reaction_result h2_reqd = function
       | Ok json -> h2_respond_json_value h2_reqd json ~extra_headers:cors
       | Error error ->
@@ -280,7 +305,7 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
           h2_respond_json_value h2_reqd json ~extra_headers:cors
 
       | `GET, p when String.equal p Server_health_paths.readiness ->
-          let current = Server_startup_state.(!state) in
+          let current = Server_startup_state.snapshot () in
           let json, status =
             if current.state_ready then
               (`Assoc [
@@ -414,66 +439,6 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json_value h2_reqd json ~extra_headers:cors
 
-      | `POST, "/webrtc/offer" ->
-          if not (Server_webrtc_transport.is_enabled ()) then
-            h2_respond_json_value h2_reqd
-              (`Assoc [ ("error", `String "webrtc transport disabled") ])
-              ~status:`Not_found ~extra_headers:cors
-          else
-            with_server_state h2_reqd (fun state ->
-              match
-                authorize_permission_request
-                  ~base_path:(Mcp_server.workspace_config state).base_path
-                  ~permission:Masc_domain.CanBroadcast
-                  httpun_request
-              with
-              | Error err ->
-                  let status = http_status_of_auth_error err in
-                  h2_respond_json
-                    h2_reqd
-                    (auth_error_json err)
-                    ~status:(status :> H2.Status.t)
-                    ~extra_headers:(auth_error_headers ~status ~cors)
-              | Ok () ->
-                  h2_read_body h2_reqd (fun body_str ->
-                    match Server_webrtc_transport.handle_offer_request body_str with
-                    | Ok body ->
-                        h2_respond_json h2_reqd body ~extra_headers:cors
-                    | Error msg ->
-                        h2_respond_json_value h2_reqd
-                          (`Assoc [ ("error", `String msg) ])
-                          ~status:`Bad_request ~extra_headers:cors))
-
-      | `POST, "/webrtc/answer" ->
-          if not (Server_webrtc_transport.is_enabled ()) then
-            h2_respond_json_value h2_reqd
-              (`Assoc [ ("error", `String "webrtc transport disabled") ])
-              ~status:`Not_found ~extra_headers:cors
-          else
-            with_server_state h2_reqd (fun state ->
-              match
-                authorize_permission_request
-                  ~base_path:(Mcp_server.workspace_config state).base_path
-                  ~permission:Masc_domain.CanBroadcast
-                  httpun_request
-              with
-              | Error err ->
-                  let status = http_status_of_auth_error err in
-                  h2_respond_json
-                    h2_reqd
-                    (auth_error_json err)
-                    ~status:(status :> H2.Status.t)
-                    ~extra_headers:(auth_error_headers ~status ~cors)
-              | Ok () ->
-                  h2_read_body h2_reqd (fun body_str ->
-                    match Server_webrtc_transport.handle_answer_request body_str with
-                    | Ok body ->
-                        h2_respond_json h2_reqd body ~extra_headers:cors
-                    | Error msg ->
-                        h2_respond_json_value h2_reqd
-                          (`Assoc [ ("error", `String msg) ])
-                          ~status:`Bad_request ~extra_headers:cors))
-
       (* RFC-0217 S4-2 — Otel_metric_store scrape endpoint removed; metrics
          now export via OTLP push (Otel_metrics observable). *)
       | `GET, "/" ->
@@ -500,9 +465,6 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
       (* ─────────────────────────────────────────────────────────────────────
          MCP Endpoints
          ───────────────────────────────────────────────────────────────────── *)
-      | `POST, "/mcp/operator" ->
-          h2_respond_removed_surface h2_reqd ~surface:"operator_remote" ~extra_headers:cors
-
       | `POST, "/mcp" | `POST, "/" | `POST, "/mcp/managed" ->
           let session_id = match session_id_opt with
             | Some id -> id
@@ -514,7 +476,7 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             else Server_mcp_transport_http.Full
           in
           (* HTTP-level auth check for MCP endpoints *)
-          let base_path = match !server_state with
+          let base_path = match current_server_state () with
             | Some s -> (Mcp_server.workspace_config s).base_path
             | None -> default_base_path ()
           in
@@ -548,13 +510,24 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
            | Ok () ->
                (match Server_mcp_transport_http.validate_protocol_version_continuity
                         ~session_id httpun_request with
-                | Error msg ->
-                    let body = json_rpc_error Mcp_error_code.Invalid_request msg in
+                | Error rejection ->
+                    let body =
+                      Server_mcp_transport_http
+                      .protocol_version_rejection_body rejection
+                    in
                     h2_respond_json h2_reqd body ~status:`Bad_request
                       ~extra_headers:(cors @ mcp_headers session_id protocol_version)
                 | Ok () ->
                     (match auth_result with
                      | Error failure ->
+                         Server_mcp_transport_http_respond
+                         .record_mcp_auth_reject
+                           ~endpoint:
+                             ("h2 POST "
+                             ^ Server_mcp_transport_http.profile_label profile)
+                           ~claimed_agent:(agent_from_request httpun_request)
+                           ~token_presented:(Option.is_some auth_token)
+                           ~session_id:(Some session_id) failure;
                          let body = mcp_auth_error_body failure in
                          h2_respond_json h2_reqd body ~status:`Unauthorized
                            ~extra_headers:
@@ -675,16 +648,13 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                                    | json ->
                                        h2_respond_json_value h2_reqd json ~extra_headers:mcp_hdrs)))))
 
-      | `DELETE, "/mcp/operator" ->
-          h2_respond_removed_surface h2_reqd ~surface:"operator_remote" ~extra_headers:cors
-
       | `DELETE, "/mcp" | `DELETE, "/mcp/managed" ->
           let profile =
             if String.equal path "/mcp/managed"
             then Server_mcp_transport_http.Managed_agent
             else Server_mcp_transport_http.Full
           in
-          let base_path = match !server_state with
+          let base_path = match current_server_state () with
             | Some s -> (Mcp_server.workspace_config s).base_path
             | None -> default_base_path ()
           in
@@ -702,6 +672,14 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
           in
           (match auth_result with
            | Error failure ->
+               Server_mcp_transport_http_respond.record_mcp_auth_reject
+                 ~endpoint:
+                   ("h2 DELETE "
+                   ^ Server_mcp_transport_http.profile_label profile)
+                 ~claimed_agent:(agent_from_request httpun_request)
+                 ~token_presented:
+                   (Option.is_some (auth_token_from_request httpun_request))
+                 ~session_id:session_id_opt failure;
                let body = mcp_auth_error_body failure in
                h2_respond_json h2_reqd body ~status:`Unauthorized
                  ~extra_headers:
@@ -720,8 +698,11 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                     | Ok () ->
                         (match Server_mcp_transport_http.validate_protocol_version_continuity
                                  ~session_id httpun_request with
-                         | Error msg ->
-                             let body = json_rpc_error Mcp_error_code.Invalid_request msg in
+                         | Error rejection ->
+                             let body =
+                               Server_mcp_transport_http
+                               .protocol_version_rejection_body rejection
+                             in
                              h2_respond_json h2_reqd body ~status:`Bad_request
                                ~extra_headers:(cors @ mcp_headers session_id (get_protocol_version httpun_request))
                          | Ok () ->
@@ -760,18 +741,19 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
       (* ─────────────────────────────────────────────────────────────────────
          GraphQL
          ───────────────────────────────────────────────────────────────────── *)
+      (* Both arms carry the same read gate the H1 route applies
+         (server_routes_http_routes_frontend.ml wraps GET and POST /graphql in
+         [with_read_auth]). /graphql is not in [is_public_read_path], so an
+         unauthenticated caller must be rejected on either transport. *)
       | `GET, "/graphql" ->
-          let nonce =
-            let rng = Random.State.make_self_init () in
-            let bytes = Bytes.init 16 (fun _ -> Char.chr (Random.State.int rng 256)) in
-            Base64.encode_string (Bytes.to_string bytes)
-          in
-          let csp_header = ("content-security-policy", graphql_csp_header nonce) in
-          h2_respond_html h2_reqd (graphql_playground_html ~nonce) ~extra_headers:(csp_header :: cors)
+          with_h2_read_auth h2_reqd (fun _state ->
+            let nonce = fresh_graphql_csp_nonce () in
+            let csp_header = ("content-security-policy", graphql_csp_header nonce) in
+            h2_respond_html h2_reqd (graphql_playground_html ~nonce) ~extra_headers:(csp_header :: cors))
 
       | `POST, "/graphql" ->
           h2_read_body h2_reqd (fun body_str ->
-            with_server_state h2_reqd (fun state ->
+            with_h2_read_auth h2_reqd (fun state ->
               let response = Graphql_api.handle_request ~config:(Mcp_server.workspace_config state) body_str in
               let status = match response.status with `OK -> `OK | `Bad_request -> `Bad_request in
               h2_respond_json h2_reqd response.body ~status ~extra_headers:cors))
@@ -803,8 +785,38 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
+      | `GET, "/api/v1/dashboard/fusion-runs" ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let json =
+              Server_dashboard_fusion_run_projection.list_response
+                ~generated_at:(Masc_domain.now_iso ())
+                ~registry:(Fusion_run_registry.global ())
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      | `GET, p
+        when String.starts_with
+               ~prefix:Server_dashboard_fusion_run_projection.detail_prefix
+               p ->
+          with_h2_public_read h2_reqd (fun _state ->
+            let status, json =
+              Server_dashboard_fusion_run_projection.detail_response
+                ~generated_at:(Masc_domain.now_iso ())
+                ~registry:(Fusion_run_registry.global ())
+                ~path
+            in
+            h2_respond_json_value
+              h2_reqd
+              json
+              ~status:(status :> H2.Status.t)
+              ~extra_headers:cors)
+
+      (* H1 serves this through [with_public_read]
+         (server_routes_http_routes_dashboard.ml). [with_server_state] only
+         fetches state; under MASC_HTTP_AUTH_STRICT it left the workspace
+         timeline readable over h2c while H1 demanded a token. *)
       | `GET, "/api/v1/dashboard/workspace" ->
-          with_server_state h2_reqd (fun state ->
+          with_h2_public_read h2_reqd (fun state ->
             let limit =
               Server_utils.int_query_param httpun_request "limit" ~default:50
               |> Server_utils.clamp ~min_v:1 ~max_v:200
@@ -824,6 +836,32 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
       | `GET, "/api/v1/dashboard/config" ->
           with_h2_public_read h2_reqd (fun _state ->
             let json = Env_config_introspect.to_json () in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      (* Same owner and same shape as the HTTP/1 route; a client that reaches
+         the server over H2 must not see a different projection. *)
+      | `GET, "/api/v1/dashboard/scheduled-automation" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let json =
+              dashboard_scheduled_automation_query_http_json
+                ~config:(Mcp_server.workspace_config state)
+                httpun_request
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+
+      (* The tool inventory had no H2 route at all: an H2 client got 404 where
+         an HTTP/1 client got the inventory. Same selector as the HTTP/1 route,
+         so the snapshot fast path and the per-actor fallback both apply. *)
+      | `GET, "/api/v1/dashboard/tools" ->
+          with_h2_public_read h2_reqd (fun state ->
+            let json =
+              Server_dashboard_snapshot_select.select_tools_json
+                ?actor:
+                  (dashboard_actor_for_request
+                     ~base_path:(Mcp_server.workspace_config state).base_path
+                     httpun_request)
+                (Mcp_server.workspace_config state)
+            in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/project-snapshot"
@@ -973,24 +1011,25 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             let json = dashboard_perf_http_json (Mcp_server.workspace_config state) in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
-      | `GET, "/api/v1/dashboard/oas/telemetry/recent" ->
+      | `GET, "/api/v1/dashboard/agent_core/telemetry/recent" ->
           with_h2_public_read h2_reqd (fun _state ->
-            let provider = oas_telemetry_provider_param httpun_request in
-            let limit = oas_telemetry_limit_param httpun_request in
-            let json = Dashboard_oas_bridge.recent_json ?provider ~limit () in
+            let provider = agent_core_telemetry_provider_param httpun_request in
+            let limit = agent_core_telemetry_limit_param httpun_request in
+            let json = Dashboard_agent_core_bridge.recent_json ?provider ~limit () in
             h2_respond_json_value h2_reqd json
               ~extra_headers:cors)
 
-      | `GET, "/api/v1/dashboard/oas/telemetry/summary" ->
+      | `GET, "/api/v1/dashboard/agent_core/telemetry/summary" ->
           with_h2_public_read h2_reqd (fun _state ->
-            let provider = oas_telemetry_provider_param httpun_request in
-            let limit = oas_telemetry_limit_param httpun_request in
-            let json = Dashboard_oas_bridge.summary_json ?provider ~limit () in
+            let provider = agent_core_telemetry_provider_param httpun_request in
+            let limit = agent_core_telemetry_limit_param httpun_request in
+            let json = Dashboard_agent_core_bridge.summary_json ?provider ~limit () in
             h2_respond_json_value h2_reqd json
               ~extra_headers:cors)
 
+      (* H1 serves this through [with_public_read] (server_ide_http.ml:609). *)
       | `GET, "/api/v1/status" ->
-          with_server_state h2_reqd (fun state ->
+          with_h2_public_read h2_reqd (fun state ->
             let config = (Mcp_server.workspace_config state) in
             let workspace_state = Workspace.read_state config in
             let tempo = Tempo.get_tempo config in
@@ -1003,23 +1042,214 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/openapi.json" ->
-          let resolved_host = Server_request_authority.host request_authority in
-          let resolved_port =
-            Option.value
-              ~default:(Env_config_core.masc_http_port_int ())
-              (Server_request_authority.port request_authority)
-          in
-          let json =
-            Transport.Rest.generate_openapi_document
-              ~host:resolved_host ~port:resolved_port ()
-          in
-          h2_respond_json_value h2_reqd json ~extra_headers:cors
+          (* HTTP/1 wraps this in Server_auth.with_public_read and the path is
+             not in the public-read allowlist, so strict mode answers 401
+             there; this arm used to answer the document (#28161). *)
+          with_h2_public_read h2_reqd (fun _state ->
+            let resolved_host = Server_request_authority.host request_authority in
+            let resolved_port =
+              Option.value
+                ~default:(Env_config_core.masc_http_port_int ())
+                (Server_request_authority.port request_authority)
+            in
+            let json =
+              Transport.Rest.generate_openapi_document
+                ~host:resolved_host ~port:resolved_port ()
+            in
+            h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
-      | `GET, "/api/v1/namespace/current"
-      | `GET, "/api/v1/workspace/current"
-      | `POST, "/api/v1/namespace/current"
-      | `POST, "/api/v1/workspace/current" ->
-          h2_respond_removed_surface h2_reqd ~surface:"namespace" ~extra_headers:cors
+      | `GET, keeper_path
+        when String.starts_with ~prefix:"/api/v1/keepers/" keeper_path
+             && String.ends_with
+                  ~suffix:
+                    Server_dashboard_http_keeper_api_types.keeper_suffix_github_identity
+                  keeper_path ->
+          with_h2_token_permission_auth
+            h2_reqd
+            ~permission:Masc_domain.CanAdmin
+            (fun state _actor ->
+               let suffix =
+                 Server_dashboard_http_keeper_api_types.keeper_suffix_github_identity
+               in
+               let keeper_name =
+                 Server_dashboard_http_keeper_api_types.extract_keeper_name_for_suffix
+                   keeper_path
+                   suffix
+               in
+               let config = Mcp_server.workspace_config state in
+               if String.equal keeper_name ""
+               then
+                 h2_respond_json_value
+                   h2_reqd
+                   (`Assoc [ "error", `String "missing or invalid keeper name" ])
+                   ~status:`Bad_request
+                   ~extra_headers:cors
+               else if not (Keeper_config.validate_name keeper_name)
+               then
+                 h2_respond_json_value
+                   h2_reqd
+                   (`Assoc
+                      [ "error"
+                      , `String (Printf.sprintf "invalid keeper name: %s" keeper_name)
+                      ])
+                   ~status:`Bad_request
+                   ~extra_headers:cors
+               else
+                 match Keeper_meta_store.read_meta config keeper_name with
+                 | Error message ->
+                   h2_respond_json_value
+                     h2_reqd
+                     (`Assoc [ "error", `String message ])
+                     ~status:`Internal_server_error
+                     ~extra_headers:cors
+                 | Ok None ->
+                   h2_respond_json_value
+                     h2_reqd
+                     (`Assoc
+                        [ "error"
+                        , `String (Printf.sprintf "keeper %S not found" keeper_name)
+                        ])
+                     ~status:`Not_found
+                     ~extra_headers:cors
+                 | Ok (Some _) ->
+                   let hostname =
+                     Option.value
+                       ~default:"github.com"
+                       (Server_utils.query_param httpun_request "hostname")
+                   in
+                   (match
+                      Keeper_github_identity.observe
+                        ~config
+                        ~keeper_name
+                        ~hostname
+                    with
+                    | Ok observation ->
+                      h2_respond_json_value
+                        h2_reqd
+                        (Keeper_github_identity.observation_to_yojson observation)
+                        ~extra_headers:cors
+                    | Error message ->
+                      h2_respond_json_value
+                        h2_reqd
+                        (`Assoc [ "error", `String message ])
+                        ~status:`Bad_request
+                        ~extra_headers:cors))
+
+      | `POST, keeper_path
+        when String.starts_with ~prefix:"/api/v1/keepers/" keeper_path
+             && String.ends_with
+                  ~suffix:
+                    Server_dashboard_http_keeper_api_types.keeper_suffix_github_login
+                  keeper_path ->
+          with_h2_token_permission_auth
+            h2_reqd
+            ~permission:Masc_domain.CanAdmin
+            (fun state _actor ->
+               let suffix =
+                 Server_dashboard_http_keeper_api_types.keeper_suffix_github_login
+               in
+               let keeper_name =
+                 Server_dashboard_http_keeper_api_types.extract_keeper_name_for_suffix
+                   keeper_path
+                   suffix
+               in
+               let config = Mcp_server.workspace_config state in
+               if String.equal keeper_name ""
+               then
+                 h2_respond_json_value
+                   h2_reqd
+                   (`Assoc [ "error", `String "missing or invalid keeper name" ])
+                   ~status:`Bad_request
+                   ~extra_headers:cors
+               else if not (Keeper_config.validate_name keeper_name)
+               then
+                 h2_respond_json_value
+                   h2_reqd
+                   (`Assoc
+                      [ "error"
+                      , `String (Printf.sprintf "invalid keeper name: %s" keeper_name)
+                      ])
+                   ~status:`Bad_request
+                   ~extra_headers:cors
+               else
+                 match Keeper_meta_store.read_meta config keeper_name with
+                 | Error message ->
+                   h2_respond_json_value
+                     h2_reqd
+                     (`Assoc [ "error", `String message ])
+                     ~status:`Internal_server_error
+                     ~extra_headers:cors
+                 | Ok None ->
+                   h2_respond_json_value
+                     h2_reqd
+                     (`Assoc
+                        [ "error"
+                        , `String (Printf.sprintf "keeper %S not found" keeper_name)
+                        ])
+                     ~status:`Not_found
+                     ~extra_headers:cors
+                 | Ok (Some _) ->
+                   let hostname =
+                     Option.value
+                       ~default:"github.com"
+                       (Server_utils.query_param httpun_request "hostname")
+                   in
+                   (match
+                      Keeper_github_identity.login_env
+                        ~config
+                        ~keeper_name
+                    with
+                    | Error message ->
+                      h2_respond_json_value
+                        h2_reqd
+                        (`Assoc [ "error", `String message ])
+                        ~status:`Bad_request
+                        ~extra_headers:cors
+                    | Ok env ->
+                      let headers =
+                        H2.Headers.of_list
+                          ([ "content-type", "text/event-stream"
+                           ; "cache-control", "no-cache"
+                           ; "x-accel-buffering", "no"
+                           ]
+                           @ cors)
+                      in
+                      let response = H2.Response.create ~headers `OK in
+                      let writer =
+                        H2.Reqd.respond_with_streaming
+                          ~flush_headers_immediately:true
+                          h2_reqd
+                          response
+                      in
+                      let send_event event json =
+                        H2.Body.Writer.write_string
+                          writer
+                          (Printf.sprintf
+                             "event: %s\ndata: %s\n\n"
+                             event
+                             (Yojson.Safe.to_string json));
+                        H2.Body.Writer.flush writer (fun _ -> ())
+                      in
+                      Fun.protect
+                        ~finally:(fun () -> H2.Body.Writer.close writer)
+                        (fun () ->
+                           match
+                             Keeper_github_identity.stream_login
+                               ~config
+                               ~keeper_name
+                               ~hostname
+                               ~env
+                               ~is_closed:(fun () ->
+                                 H2.Body.Writer.is_closed writer)
+                               ~send_event
+                           with
+                           | Ok () -> ()
+                           | Error message
+                             when not (H2.Body.Writer.is_closed writer) ->
+                             send_event
+                               "error"
+                               (`Assoc [ "message", `String message ])
+                           | Error _ -> ())))
 
       | `GET, "/api/v1/board/reactions/catalog" ->
           with_h2_public_read h2_reqd (fun _state ->
@@ -1027,6 +1257,22 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
               h2_reqd
               (Server_board_reaction_http.catalog_json ())
               ~extra_headers:cors)
+
+      | `GET, "/api/v1/board/reactions/batch" ->
+          with_h2_token_permission_auth
+            h2_reqd
+            ~permission:Masc_domain.CanReadState
+            (fun _state actor ->
+               let actor = Server_utils.board_actor_author_for_write actor in
+               let result =
+                 Server_board_reaction_http.targets_of_strings
+                   ~target_type:
+                     (Server_utils.query_param httpun_request "target_type")
+                   ~target_ids:
+                     (Server_utils.query_param httpun_request "target_ids")
+                 |> Result.map (Server_board_reaction_http.list_batch_json ~actor)
+               in
+               h2_respond_board_reaction_result h2_reqd result)
 
       | `GET, "/api/v1/board/reactions" ->
           with_h2_token_permission_auth
@@ -1074,7 +1320,12 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                ~config:
                  (Option.map
                     (fun state -> (Mcp_server.workspace_config state))
-                    !server_state)
+                    (current_server_state ()))
+               (* The delegated routes take this gateway's own public-read gate
+                  rather than deciding for themselves; five of them answered
+                  unauthenticated over h2c while HTTP/1 answered 401 (#28161). *)
+               ~with_public_read:(fun f ->
+                 with_h2_public_read h2_reqd (fun _state -> f ()))
                httpun_meth ->
           ()
 
@@ -1108,6 +1359,12 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
     else
       try dispatch_h2_route () with
       | Eio.Cancel.Cancelled _ as e -> raise e
+      | Auth.Auth_config_error _ ->
+        h2_respond_text
+          h2_reqd
+          "Authentication configuration unavailable"
+          ~status:`Service_unavailable
+          ~extra_headers:cors
       | exn ->
         let msg = Printexc.to_string exn in
         Log.Http.error "Handler error: %s" msg;

@@ -1,3 +1,8 @@
+---
+rfc: "0274"
+status: Draft
+---
+
 # RFC-0274: Workspace base_path SSOT — retire env runtime read, thread Workspace.config
 
 - Status: Draft

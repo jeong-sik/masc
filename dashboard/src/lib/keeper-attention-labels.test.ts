@@ -17,6 +17,15 @@ describe('keeper attention labels', () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
+  it('labels a fenced provider effect without exposing the raw token', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    expect(attentionReasonLabel('provider_attempt_effect_fenced', false)).toBe(
+      'Provider 효과 결과 확인 필요',
+    )
+    expect(warn).not.toHaveBeenCalled()
+  })
+
   it('labels typed next actions without warning', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 

@@ -39,7 +39,6 @@ refresh_repository() {
 
 check_wiring() {
   require_once "id: opam-toolchain-cache" "${ACTION_PATH}"
-  require_once "scripts/oas-agent-sdk-pin.sh" "${ACTION_PATH}"
   require_once "scripts/opam-pin-external-deps.sh" "${ACTION_PATH}"
   require_once \
     'OPAM_CACHE_EXACT_HIT: ${{ steps.opam-toolchain-cache.outputs.cache-hit }}' \

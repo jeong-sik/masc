@@ -15,7 +15,7 @@ include Keeper_unified_metrics_json_support
 let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
     ~(reason : string)
-    ?sdk_error
+    ?core_error
     () : keeper_meta =
   let now_ts = Time_compat.now () in
   record_keeper_idle_seconds
@@ -25,7 +25,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     is_scheduled_autonomous_cycle_of_observation observation
   in
   let public_reason =
-    match sdk_error with
+    match core_error with
     | Some err -> (
         match Keeper_turn_driver.classify_masc_internal_error err with
         | Some (Keeper_turn_driver.Resumable_cli_session { detail; _ }) ->
@@ -49,7 +49,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
   let failure_counts_for_proactive_backoff =
     is_scheduled_autonomous_cycle
     &&
-    match sdk_error with
+    match core_error with
     | Some err -> (
         match Keeper_turn_driver.classify_masc_internal_error err with
         | Some
@@ -107,25 +107,5 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
              meta.runtime.proactive_rt.consecutive_noop_count + 1
            else meta.runtime.proactive_rt.consecutive_noop_count);
       };
-      last_blocker =
-        (* Merge: typed klass from sdk_error becomes authoritative;
-           detail is the public-reason preview as observability context.
-           When the SDK error carries no typed mapping we refuse to
-           fabricate a class — the previous string-only stamp is the
-           substring anti-pattern this refactor closes (CLAUDE.md
-           "워크어라운드 거부 기준 #2").  cap_blocker_detail preserves a
-           structured [masc_oas_error] payload up to ~2000 chars (#9933) and
-           truncates plain narrative to the narrative budget. *)
-        (match sdk_error with
-         | Some err ->
-             (match Keeper_status_bridge.blocker_class_of_sdk_error err with
-              | Some klass ->
-                  let detail =
-                    Keeper_internal_error.cap_blocker_detail public_reason
-                  in
-                  Some (Keeper_meta_contract.blocker_info_of_class
-                          ~detail klass)
-              | None -> None)
-         | None -> None);
     };
   }

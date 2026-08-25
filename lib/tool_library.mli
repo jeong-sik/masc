@@ -15,12 +15,13 @@
     Issue #8601 SSOT shape: {!library_source} variant +
     {!source_to_string} + {!valid_source_strings} +
     {!source_of_string_opt} are kept in sync — adding a 5th
-    constructor forces compile errors in [source_to_string] and
-    fails the [library_source_ssot] test in [test_types.ml].
+    constructor forces compile errors in [source_to_string].  There is
+    no [library_source_ssot] test; the compile errors are the whole
+    guard.
 
-    Internal: \[all_sources], the \[frontmatter] type +
-    \[parse_frontmatter] + \[list_documents], and \[handle_list] /
-    \[handle_add] (reachable via {!dispatch}).  All consumed only
+    Internal: [all_sources], the [frontmatter] type +
+    [parse_frontmatter] + [list_documents], and [handle_list] /
+    [handle_add] (reachable via {!dispatch}).  All consumed only
     inside the dispatch handlers or {!schemas}. *)
 
 (** {1 Library source SSOT} *)
@@ -43,8 +44,7 @@ val source_to_string : library_source -> string
 val all_sources : library_source list
 (** [all_sources] is the canonical witness list — one entry per
     {!library_source} constructor (in declaration order).  Used
-    by {!valid_source_strings} and by behaviour-tests under
-    {!test/test_types}. *)
+    by {!valid_source_strings}. *)
 
 val valid_source_strings : string list
 (** [valid_source_strings] is [List.map source_to_string

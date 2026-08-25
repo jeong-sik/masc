@@ -69,20 +69,8 @@ let mkdir_if_missing path =
   if not (Sys.file_exists path) then Unix.mkdir path 0o755
 ;;
 
-let contains_substring ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  if needle_len = 0 then true
-  else
-    let rec loop idx =
-      idx + needle_len <= haystack_len
-      && (String.sub haystack idx needle_len = needle || loop (idx + 1))
-    in
-    loop 0
-;;
-
 let check_json_omits label needle json =
-  check bool label false (contains_substring ~needle (Yojson.Safe.to_string json))
+  check bool label false (String_util.string_contains_substring ~needle (Yojson.Safe.to_string json))
 ;;
 
 let test_resolve_voice_aliases () =
@@ -137,7 +125,7 @@ let elevenlabs_tts_endpoint : Voice_config.endpoint =
   ; api_key_env = Some "ELEVENLABS_API_KEY"
   ; enabled = true
   ; timeout_seconds = Some 30.0
-  ; max_retries = Some 2
+  ; default_voice = None
   }
 ;;
 
@@ -215,7 +203,7 @@ let test_stt_request_elevenlabs_direct () =
     ; api_key_env = Some "ELEVENLABS_API_KEY"
     ; enabled = true
     ; timeout_seconds = Some 30.0
-    ; max_retries = Some 2
+    ; default_voice = None
     }
   in
   with_env "ELEVENLABS_API_KEY" (Some "test-key-123") (fun () ->
@@ -254,7 +242,7 @@ let test_stt_request_openai_compat () =
     ; api_key_env = Some "OPENAI_API_KEY"
     ; enabled = true
     ; timeout_seconds = Some 30.0
-    ; max_retries = Some 2
+    ; default_voice = None
     }
   in
   match
@@ -289,7 +277,7 @@ let test_stt_request_mcp_rejected () =
     ; api_key_env = None
     ; enabled = true
     ; timeout_seconds = Some 5.0
-    ; max_retries = Some 1
+    ; default_voice = None
     }
   in
   match
@@ -306,11 +294,10 @@ let test_stt_request_mcp_rejected () =
 let make_keeper_meta name =
   match
     Masc_test_deps.meta_of_json_fixture
+      (* agent_name is omitted: the fixture derives the canonical
+         keeper-<name>-agent form, which the parser requires. *)
       (`Assoc
-          [ "name", `String name
-          ; "agent_name", `String name
-          ; "trace_id", `String "voice-queue-test"
-          ])
+          [ "name", `String name; "trace_id", `String "voice-queue-test" ])
   with
   | Ok meta -> meta
   | Error err -> fail ("make_keeper_meta: " ^ err)
@@ -1041,7 +1028,7 @@ let test_playback_open_fallback_reports_handoff () =
     match
       Voice_bridge_core.run_local_playback
         ~sw
-        ~agent_id:"sangsu"
+        ~agent_id:"alpha"
         ~message:"open fallback regression"
         ~audio_file
         ()

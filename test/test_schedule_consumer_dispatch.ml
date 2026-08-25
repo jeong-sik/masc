@@ -62,13 +62,11 @@ let read_file path =
 ;;
 
 let reaction_ledger_dir ~base_path ~keeper_name =
-  Filename.concat
-    (Filename.concat
-       (Filename.concat
-          (Common.keepers_runtime_dir_of_base ~base_path)
-          keeper_name)
-       "reaction-ledger")
-    "v5"
+  (* Ask the writer where it writes. Rebuilding the path here made a storage
+     generation bump silently point the test at an empty old namespace. *)
+  Masc.Keeper_reaction_ledger.store_dir
+    ~masc_root:(Common.masc_dir_from_base_path ~base_path)
+    ~keeper_name
 ;;
 
 let write_malformed_reaction_ledger_row ~base_path ~keeper_name =
@@ -99,6 +97,9 @@ let with_workspace f =
   Board_dispatch.init_jsonl ();
   let config = Workspace.default_config dir in
   ignore (Workspace.init config ~agent_name:(Some "test"));
+  (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+   | Ok _ -> ()
+   | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
   Executor_pool_ref.For_testing.with_pool
     (Domain_pool.executor_pool pool)
     (fun () -> f config)
@@ -136,14 +137,31 @@ let persist_keeper_meta ?proactive_enabled config keeper_name =
       ; proactive = { enabled }
       }
   in
-  (match Keeper_meta_store.write_meta config meta with
+  (match Keeper_meta_store.replace_snapshot config meta with
    | Ok () -> ()
    | Error detail -> fail ("keeper meta write failed: " ^ detail));
   meta
 ;;
 
 let register_keeper ?proactive_enabled config keeper_name =
-  let meta = persist_keeper_meta ?proactive_enabled config keeper_name in
+  let meta =
+    let meta = keeper_meta_for_name keeper_name in
+    match proactive_enabled with
+    | None -> meta
+    | Some enabled ->
+      { meta with
+        autoboot_enabled = true
+      ; proactive = { enabled }
+      }
+  in
+  (match
+     Keeper_owner_registry.create_meta
+       ~base_path:config.Workspace_utils.base_path
+       meta
+   with
+   | Ok (Some _) -> ()
+   | Ok None -> fail "owner metadata creation removed its snapshot"
+   | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
   Keeper_registry.For_testing.register
     ~base_path:config.Workspace_utils.base_path
     keeper_name
@@ -195,6 +213,16 @@ let keeper_wake_payload_for keeper_name =
 
 let keeper_wake_payload = keeper_wake_payload_for "schedule-keeper"
 
+let keeper_wake_payload_with_result_delivery channel =
+  match
+    Schedule_payload_projection.set_keeper_wake_result_delivery
+      ~payload:keeper_wake_payload
+      ~channel:(Some channel)
+  with
+  | Ok payload -> payload
+  | Error detail -> fail detail
+;;
+
 let unsupported_payload =
   `Assoc
     [ "kind", `String "legacy.unsupported_scheduler_payload"
@@ -213,6 +241,7 @@ let canonical_keeper_wake_receipt_fields () =
   ; "queue", `String "keeper_event_queue"
   ; "stimulus", `String "schedule_due"
   ; "stimulus_id", `String "canonical-occurrence"
+  ; "result_delivery_policy", `String "none"
   ; "reaction_ledger_status", `String "recorded"
   ; "reaction_ledger_error", `Null
   ; "occurrence_status", `String "awaiting_ack"
@@ -281,7 +310,11 @@ let test_keeper_wake_receipt_decoder_rejects_noncanonical_shapes () =
     (canonical
      |> set_receipt_field "activation_status" (`String "not_required")
      |> set_receipt_field "activation_reason" `Null
-     |> set_receipt_field "activation_detail" `Null)
+     |> set_receipt_field "activation_detail" `Null);
+  reject
+    "unknown result delivery policy"
+    (canonical
+     |> set_receipt_field "result_delivery_policy" (`String "best_effort"))
 ;;
 
 let create_board_schedule config =
@@ -303,6 +336,24 @@ let create_keeper_wake_schedule ?recurrence config =
       ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
       ~payload:keeper_wake_payload ~source:Schedule_domain.Operator_request
       ?recurrence ()
+  with
+  | Ok request -> request
+  | Error err ->
+    fail ("create failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
+let create_routed_keeper_wake_schedule config channel =
+  match
+    Schedule_service.create
+      config
+      ~schedule_id:"keeper-wake-routed-sched-1"
+      ~requested_at:100.0
+      ~requested_by:(human "operator")
+      ~scheduled_by:(automated "scheduler-agent")
+      ~due_at:200.0
+      ~payload:(keeper_wake_payload_with_result_delivery channel)
+      ~source:Schedule_domain.Operator_request
+      ()
   with
   | Ok request -> request
   | Error err ->
@@ -484,6 +535,8 @@ let test_keeper_wake_consumer_records_wake_receipt () =
           (detail |> member "queue" |> to_string);
         check string "wake detail stimulus" "schedule_due"
           (detail |> member "stimulus" |> to_string);
+        check string "legacy wake has explicit no-result receipt" "none"
+          (detail |> member "result_delivery_policy" |> to_string);
         check string "wake keeper" "schedule-keeper"
           (detail |> member "keeper_name" |> to_string);
         check string "durable enqueue is separate from activation" "deferred"
@@ -511,19 +564,22 @@ let test_keeper_wake_consumer_records_wake_receipt () =
      check (float 0.001) "arrived_at from tick now" 201.0 stimulus.arrived_at;
      (match stimulus.payload with
      | Keeper_event_queue.Schedule_due wake ->
+       check string "wake occurrence identity" occurrence_id wake.occurrence_id;
        check string "wake schedule" request.schedule_id wake.schedule_id;
        check string "wake title" "Scheduled lane wake" (Option.get wake.title);
        check string "wake message" "Run the scheduled maintenance lane now."
          wake.message;
        check string "wake digest"
          (Schedule_domain.payload_digest request.payload)
-         wake.payload_digest
+         wake.payload_digest;
+       check bool "legacy schedule has no result destination" true
+         (Option.is_none wake.result_delivery)
       | _ -> fail "expected Schedule_due payload"))
   ;
   check int "keeper wake does not create board posts" 0
     (List.length (Board_dispatch.list_posts ~limit:10 ()));
   let dashboard =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
   in
   let open Yojson.Safe.Util in
   let row = dashboard_schedule_row_exn dashboard ~schedule_id:request.schedule_id in
@@ -556,6 +612,8 @@ let test_keeper_wake_consumer_records_wake_receipt () =
       (receipt |> member "post_id" |> to_string);
     check string "receipt reaction ledger recorded" "recorded"
       (receipt |> member "reaction_ledger_status" |> to_string);
+    check string "receipt result policy remains explicit" "none"
+      (receipt |> member "result_delivery_policy" |> to_string);
     let queue_evidence = row |> member "keeper_queue_evidence" in
     check string "queue evidence matched" "matched_pending"
       (queue_evidence |> member "projection_status" |> to_string);
@@ -589,7 +647,7 @@ let test_keeper_wake_consumer_records_wake_receipt () =
     check int "queue evidence read errors" 0
       (queue_evidence |> member "read_errors" |> to_list |> List.length)
   ; let terminal_dashboard =
-      Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+      Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
     in
     let terminal_row =
       dashboard_schedule_row_exn terminal_dashboard ~schedule_id:request.schedule_id
@@ -600,7 +658,69 @@ let test_keeper_wake_consumer_records_wake_receipt () =
       (terminal_row
        |> member "dispatch_receipt"
        |> member "projection_status"
-       |> to_string)
+       |> to_string);
+    check string "dispatch success is explicit" "succeeded"
+      (terminal_row |> member "dispatch_status" |> to_string)
+;;
+
+let test_routed_schedule_carries_occurrence_destination_to_keeper () =
+  with_workspace
+  @@ fun config ->
+  let channel =
+    match
+      Keeper_continuation_channel.slack
+        ~team_id:(Some "team-1")
+        ~channel_id:"channel-1"
+        ~thread_ts:(Some "1710000000.100")
+        ~user_id:"user-1"
+    with
+    | Ok channel -> channel
+    | Error detail -> fail detail
+  in
+  let request = create_routed_keeper_wake_schedule config channel in
+  let result =
+    Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+      tick_ok config ~now:201.0)
+  in
+  let occurrence_id = single_occurrence_id result in
+  let queue =
+    Keeper_registry_event_queue.snapshot
+      ~base_path:config.Workspace_utils.base_path
+      "schedule-keeper"
+  in
+  let stimulus =
+    match Keeper_event_queue.dequeue queue with
+    | Some (stimulus, _) -> stimulus
+    | None -> fail "expected routed scheduled wake"
+  in
+  (match stimulus.payload with
+   | Keeper_event_queue.Schedule_due wake ->
+     check string "schedule occurrence survives due consumption"
+       occurrence_id
+       wake.occurrence_id;
+     (match wake.result_delivery with
+      | Some persisted ->
+        check bool "exact schedule result route survives due consumption" true
+          (Keeper_continuation_channel.same_route channel persisted)
+      | None -> fail "scheduled result destination was lost");
+     (match Keeper_event_queue.continuation_channel_of_payload stimulus.payload with
+      | Some named ->
+        check bool "payload accessor names the exact continuation channel" true
+          (Keeper_continuation_channel.same_route channel named)
+      | None -> fail "routed schedule payload names no continuation channel")
+   | _ -> fail "expected Schedule_due payload");
+  let dashboard =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
+  in
+  let open Yojson.Safe.Util in
+  let row = dashboard_schedule_row_exn dashboard ~schedule_id:request.schedule_id in
+  check string "schedule FSM reports dispatch acceptance" "succeeded"
+    (row |> member "dispatch_status" |> to_string);
+  check string "dispatch receipt preserves routed result policy" "reply_to_origin"
+    (row
+     |> member "dispatch_receipt"
+     |> member "result_delivery_policy"
+     |> to_string);
 ;;
 
 let test_recurring_wakes_keep_distinct_occurrence_ids () =
@@ -642,7 +762,6 @@ let test_reused_schedule_id_does_not_match_pruned_terminal_receipt () =
      Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
        ~base_path
        keeper_name
-       ~current_owner_nonce:17
        ~applied_at:202.0
        ~selection:first_selection
        ~detail:"first schedule occurrence completed"
@@ -659,8 +778,8 @@ let test_reused_schedule_id_does_not_match_pruned_terminal_receipt () =
        ~base_path
        ~keeper_name
    with
-   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
-   | Ok _ -> fail "first terminal receipt projection did not converge"
+   | Ok Keeper_event_queue_recovery.No_pending_transition -> ()
+   | Ok _ -> fail "owner terminalization left a transition for recovery"
    | Error error ->
      fail (Keeper_event_queue_recovery.projection_error_to_string error));
   (match Schedule_store.prune_completed config with
@@ -724,22 +843,22 @@ let test_shutdown_fence_rejects_schedule_intake_before_enqueue () =
   let base_path = config.Workspace_utils.base_path in
   let operation_id = Keeper_shutdown_types.Operation_id.generate () in
   (match
-     Keeper_turn_admission.begin_shutdown
+     Keeper_shutdown_intake_fence.begin_shutdown
        ~base_path
        ~keeper_name
        ~operation_id
    with
-   | Keeper_turn_admission.Shutdown_reserved _ -> ()
-   | Keeper_turn_admission.Shutdown_already_reserved _ ->
+   | Keeper_shutdown_intake_fence.Reserved _ -> ()
+   | Keeper_shutdown_intake_fence.Already_reserved _ ->
      fail "fresh shutdown fence was already reserved");
   Fun.protect
     ~finally:(fun () ->
       ignore
-        (Keeper_turn_admission.rollback_shutdown
+        (Keeper_shutdown_intake_fence.rollback_shutdown
            ~base_path
            ~keeper_name
            ~operation_id
-         : Keeper_turn_admission.rollback_shutdown_result))
+         : Keeper_shutdown_intake_fence.rollback_result))
     (fun () ->
        let request = create_keeper_wake_schedule config in
        let result = tick_ok config ~now:201.0 in
@@ -777,22 +896,22 @@ let test_shutdown_fence_covers_direct_durable_queue_producers () =
   in
   let operation_id = Keeper_shutdown_types.Operation_id.generate () in
   (match
-     Keeper_turn_admission.begin_shutdown
+     Keeper_shutdown_intake_fence.begin_shutdown
        ~base_path
        ~keeper_name
        ~operation_id
    with
-   | Keeper_turn_admission.Shutdown_reserved _ -> ()
-   | Keeper_turn_admission.Shutdown_already_reserved _ ->
+   | Keeper_shutdown_intake_fence.Reserved _ -> ()
+   | Keeper_shutdown_intake_fence.Already_reserved _ ->
      fail "fresh direct-producer shutdown fence was already reserved");
   Fun.protect
     ~finally:(fun () ->
       ignore
-        (Keeper_turn_admission.rollback_shutdown
+        (Keeper_shutdown_intake_fence.rollback_shutdown
            ~base_path
            ~keeper_name
            ~operation_id
-         : Keeper_turn_admission.rollback_shutdown_result))
+         : Keeper_shutdown_intake_fence.rollback_result))
     (fun () ->
        let expected_rejection =
          Printf.sprintf
@@ -854,11 +973,9 @@ let test_transferred_retry_uses_resolved_owner_shutdown_fence () =
   let transfer : Keeper_registry_event_queue.accepted_transfer =
     { source = selection.source
     ; source_incarnation = selection.admitted_revision
-    ; owner_nonce = 53
     ; operator_operation_id = "resolved-owner-fence-transfer"
     ; from_keeper = source_keeper
     ; to_keeper = target_keeper
-    ; target_generation = target_meta.runtime.nonce
     ; target_trace_id = target_meta.runtime.trace_id
     }
   in
@@ -866,7 +983,6 @@ let test_transferred_retry_uses_resolved_owner_shutdown_fence () =
      Keeper_registry_event_queue.transfer_pending_accepted_result
        ~base_path
        source_keeper
-       ~current_owner_nonce:53
        ~applied_at:201.5
        ~transfer
    with
@@ -890,22 +1006,22 @@ let test_transferred_retry_uses_resolved_owner_shutdown_fence () =
      fail (Keeper_event_queue_recovery.projection_error_to_string error));
   let operation_id = Keeper_shutdown_types.Operation_id.generate () in
   (match
-     Keeper_turn_admission.begin_shutdown
+     Keeper_shutdown_intake_fence.begin_shutdown
        ~base_path
        ~keeper_name:target_keeper
        ~operation_id
    with
-   | Keeper_turn_admission.Shutdown_reserved _ -> ()
-   | Keeper_turn_admission.Shutdown_already_reserved _ ->
+   | Keeper_shutdown_intake_fence.Reserved _ -> ()
+   | Keeper_shutdown_intake_fence.Already_reserved _ ->
      fail "fresh target shutdown fence was already reserved");
   Fun.protect
     ~finally:(fun () ->
       ignore
-        (Keeper_turn_admission.rollback_shutdown
+        (Keeper_shutdown_intake_fence.rollback_shutdown
            ~base_path
            ~keeper_name:target_keeper
            ~operation_id
-         : Keeper_turn_admission.rollback_shutdown_result))
+         : Keeper_shutdown_intake_fence.rollback_result))
     (fun () ->
        let retried = tick_ok config ~now:202.0 in
        (match retried.dispatches with
@@ -979,26 +1095,26 @@ let test_shutdown_join_waits_for_inflight_schedule_intake () =
     (fun () ->
        Eio.Promise.await intake_started;
        (match
-          Keeper_turn_admission.begin_shutdown
+          Keeper_shutdown_intake_fence.begin_shutdown
             ~base_path
             ~keeper_name
             ~operation_id
         with
-        | Keeper_turn_admission.Shutdown_reserved _ -> ()
-        | Keeper_turn_admission.Shutdown_already_reserved _ ->
+        | Keeper_shutdown_intake_fence.Reserved _ -> ()
+        | Keeper_shutdown_intake_fence.Already_reserved _ ->
           fail "fresh shutdown fence was already reserved");
        Fun.protect
          ~finally:(fun () ->
            ignore
-             (Keeper_turn_admission.rollback_shutdown
+             (Keeper_shutdown_intake_fence.rollback_shutdown
                 ~base_path
                 ~keeper_name
                 ~operation_id
-              : Keeper_turn_admission.rollback_shutdown_result))
+              : Keeper_shutdown_intake_fence.rollback_result))
          (fun () ->
             Eio.Fiber.both
               (fun () ->
-                 Keeper_turn_admission.await_idle_after_shutdown
+                 Keeper_shutdown_intake_fence.await_idle_after_shutdown
                    ~base_path
                    ~keeper_name;
                  Eio.Promise.resolve join_completed_u ())
@@ -1020,7 +1136,7 @@ let test_keeper_wake_durable_state_failure_retries_same_occurrence () =
       "schedule-keeper"
   in
   mkdir_p keeper_owner_path;
-  let queue_path = Filename.concat keeper_owner_path "event-queue-v15.json" in
+  let queue_path = Filename.concat keeper_owner_path "event-queue-v17.json" in
   mkdir_p queue_path;
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
@@ -1108,7 +1224,6 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
         | Ok state -> state
         | Error detail -> fail detail
       in
-      let generation = entry.meta.runtime.nonce in
       let selection =
         Keeper_event_queue_state.select_when
           ~ready:(fun _ -> true)
@@ -1120,7 +1235,6 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
       let cancellation : Keeper_event_queue_state.accepted_cancellation =
         { source = selection.source
         ; source_incarnation = selection.admitted_revision
-        ; owner_nonce = generation
         ; operator_operation_id = "cancel-schedule-occurrence"
         ; reason = "operator cancelled retained schedule work"
         }
@@ -1129,7 +1243,6 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
          Keeper_registry_event_queue.cancel_pending_accepted_result
            ~base_path
            keeper_name
-          ~current_owner_nonce:generation
           ~applied_at:203.0
           ~cancellation
        with
@@ -1272,7 +1385,6 @@ let test_terminal_retry_repairs_missing_stimulus_ledger () =
      Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
        ~base_path
        keeper_name
-       ~current_owner_nonce:91
        ~applied_at:201.5
        ~selection
        ~detail:"terminal before schedule retry"
@@ -1350,7 +1462,6 @@ let test_terminal_retry_requires_acceptance_commit () =
      Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
        ~base_path
        keeper_name
-       ~current_owner_nonce:97
        ~applied_at:201.5
        ~selection
        ~detail:"terminal acceptance evidence"
@@ -1501,12 +1612,14 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
     | Error message -> fail ("stale payload parse failed: " ^ message)
   in
   let stale_wake : Keeper_event_queue.scheduled_wake =
-    { schedule_instance_id = request.schedule_instance_id
+    { occurrence_id = "stale-schedule-occurrence"
+    ; schedule_instance_id = request.schedule_instance_id
     ; schedule_id = request.schedule_id
     ; due_at = request.due_at +. 60.0
     ; payload_digest = Schedule_domain.payload_digest stale_payload
     ; title = Some "Scheduled lane wake"
     ; message = "Run a different scheduled occurrence."
+    ; result_delivery = None
     }
   in
   let stale_stimulus : Keeper_event_queue.stimulus =
@@ -1518,7 +1631,7 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
   in
   Keeper_registry_event_queue.enqueue ~base_path keeper_name stale_stimulus;
   let dashboard =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
   in
   let open Yojson.Safe.Util in
   let row =
@@ -1550,7 +1663,7 @@ let test_dashboard_live_supported_non_terminal_evidence_matches_supported_reques
   @@ fun config ->
   let request = create_keeper_wake_schedule config in
   let dashboard =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
   in
   let open Yojson.Safe.Util in
   let evidence = dashboard |> member "live_supported_non_terminal_evidence" in
@@ -1577,7 +1690,7 @@ let test_dashboard_live_supported_non_terminal_evidence_reports_absent_supported
   @@ fun config ->
   ignore (create_unsupported_schedule config : Schedule_domain.schedule_request);
   let dashboard =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
   in
   let open Yojson.Safe.Util in
   let evidence = dashboard |> member "live_supported_non_terminal_evidence" in
@@ -1711,7 +1824,7 @@ let test_dashboard_keeps_unattributed_damage_out_of_exact_evidence () =
     ~base_path:config.Workspace_utils.base_path
     ~keeper_name:"schedule-keeper";
   let evidence =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
     |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
     |> Yojson.Safe.Util.member "keeper_reaction_evidence"
   in
@@ -1739,7 +1852,7 @@ let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
        ~base_dir:(reaction_ledger_dir ~base_path ~keeper_name)
        ())
     (`Assoc
-        [ "schema", `String "keeper.reaction_ledger.v5"
+        [ "schema", `String Masc.Keeper_reaction_ledger.schema
         ; "record_kind", `String "reaction"
         ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
         ; "keeper_name", `String keeper_name
@@ -1752,7 +1865,7 @@ let test_dashboard_projects_quarantined_and_unreadable_reaction_evidence () =
               ] )
         ]);
   let evidence () =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config
     |> dashboard_schedule_row_exn ~schedule_id:request.schedule_id
     |> Yojson.Safe.Util.member "keeper_reaction_evidence"
   in
@@ -1836,14 +1949,14 @@ let approved_grant_fixture ~base_path ~keeper_name ~input =
         ~base_path
         ()
     with
-    | Ok id -> id
+    | Ok submission -> submission.approval_id
     | Error error -> fail (Keeper_approval_queue.storage_error_to_string error)
   in
   (match
      Keeper_approval_queue.resolve_with_policy
        ~base_path
        ~id:approval_id
-       ~decision:Keeper_approval_queue.Decision.Approve
+       ~decision:Keeper_approval_queue_rules_types.Decision.Approve
        ()
    with
    | Ok _ -> ()
@@ -1887,7 +2000,7 @@ let test_consumed_grant_without_outcome_stays_actionable () =
        ~tool_name:"external-effect"
        ~input
    with
-   | Ok Keeper_approval_queue.Consumption_committed -> ()
+   | Ok (Keeper_approval_queue.Consumption_committed _) -> ()
    | Ok Keeper_approval_queue.Consumption_already_committed ->
      fail "grant was already consumed before the test consumed it"
    | Ok Keeper_approval_queue.Consumption_not_matching ->
@@ -1925,7 +2038,7 @@ let test_consumed_grant_with_outcome_retires_without_a_turn () =
        ~tool_name:"external-effect"
        ~input
    with
-   | Ok Keeper_approval_queue.Consumption_committed -> ()
+   | Ok (Keeper_approval_queue.Consumption_committed _) -> ()
    | Ok Keeper_approval_queue.Consumption_already_committed ->
      fail "grant was already consumed before the test consumed it"
    | Ok Keeper_approval_queue.Consumption_not_matching ->
@@ -1989,6 +2102,8 @@ let () =
             test_board_post_schedule_is_rejected_without_mutation
         ; test_case "keeper wake records wake receipt" `Quick
             test_keeper_wake_consumer_records_wake_receipt
+        ; test_case "routed schedule carries occurrence destination to Keeper" `Quick
+            test_routed_schedule_carries_occurrence_destination_to_keeper
         ; test_case "recurring wakes keep distinct occurrence ids" `Quick
             test_recurring_wakes_keep_distinct_occurrence_ids
         ; test_case "reused schedule id does not match pruned terminal receipt"

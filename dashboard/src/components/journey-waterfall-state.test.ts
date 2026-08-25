@@ -44,8 +44,6 @@ function runtimeTrace(overrides: Partial<KeeperRuntimeTraceResponse> = {}): Keep
     manifest_scan_diagnostics: {
       state: 'available',
       schema: 'keeper.runtime_manifest_scan_diagnostics.v1',
-      retired_event_count: 0,
-      retired_event_counts: [],
       unsupported_event_count: 0,
       unsupported_event_counts: [],
       unsupported_event_unattributed_count: 0,
@@ -57,7 +55,7 @@ function runtimeTrace(overrides: Partial<KeeperRuntimeTraceResponse> = {}): Keep
       requested_keeper_turn_id: 2,
       manifest_keeper_turn_ids: [2],
       receipt_turn_counts: [4],
-      max_oas_turn_count: 4,
+      max_agent_core_turn_count: 4,
       provider_lane_resolved_count: 1,
       provider_attempt_started_count: 1,
       provider_attempt_finished_count: 1,
@@ -97,7 +95,7 @@ function runtimeTrace(overrides: Partial<KeeperRuntimeTraceResponse> = {}): Keep
       turn_clock: {
         trace_id: 'trace-1',
         keeper_turn_id: 2,
-        max_oas_turn_count: 4,
+        max_agent_core_turn_count: 4,
         terminal_event_present: true,
         terminal_event: 'turn_finished',
         manifest_total_rows: 10,
@@ -131,9 +129,13 @@ describe('buildJourneyWaterfall', () => {
           ts: 1,
           ts_iso: '2026-05-14T00:00:01.000Z',
           turn: 2,
-          content: 'Need to inspect the file.',
-          content_length: 25,
-          redacted: false,
+          content: null,
+          content_withheld: true,
+          observation: 'withheld',
+          reasoning_kind: 'thinking',
+          char_count: 25,
+          identity: { source: 'trajectory_block', block_index: 0 },
+          redacted: true,
         },
         {
           ts: 2,
@@ -145,7 +147,6 @@ describe('buildJourneyWaterfall', () => {
           gate: { status: 'pass' },
           result: 'old result',
           duration_ms: 250,
-          cost_usd: 0.001,
         },
       ]),
       toolCalls: toolCalls([
@@ -159,6 +160,10 @@ describe('buildJourneyWaterfall', () => {
           duration_ms: 250,
           trace_id: 'trace-1',
           turn: 2,
+          planned_index: 3,
+          batch_index: 1,
+          batch_size: 2,
+          execution_mode: 'concurrent',
         },
       ]),
       runtimeTrace: runtimeTrace(),
@@ -168,12 +173,15 @@ describe('buildJourneyWaterfall', () => {
     expect(model.turns[0]?.turn).toBe(2)
     expect(model.turns[0]?.thinkingCount).toBe(1)
     expect(model.turns[0]?.toolCallCount).toBe(1)
-    expect(model.turns[0]?.runtimeEvidence?.maxOasTurnCount).toBe(4)
-    expect(model.summary.totalCostUsd).toBe(0.001)
+    expect(model.turns[0]?.runtimeEvidence?.maxAgentCoreTurnCount).toBe(4)
     const toolEntry = model.turns[0]?.entries.find(entry => entry.kind === 'tool_call')
     expect(toolEntry?.source).toBe('trajectory+tool_call_log')
     expect(toolEntry?.toolArgs).toEqual({ file_path: '/tmp/current' })
     expect(toolEntry?.toolResult).toBe('current result')
+    expect(toolEntry?.plannedIndex).toBe(3)
+    expect(toolEntry?.batchIndex).toBe(1)
+    expect(toolEntry?.batchSize).toBe(2)
+    expect(toolEntry?.executionMode).toBe('concurrent')
   })
 
   it('keeps tool-call-log rows when trajectory is missing', () => {
@@ -191,6 +199,10 @@ describe('buildJourneyWaterfall', () => {
           duration_ms: 10,
           trace_id: 'trace-1',
           keeper_turn_id: 5,
+          planned_index: 4,
+          batch_index: 2,
+          batch_size: 1,
+          execution_mode: 'serial',
         },
       ]),
       runtimeTrace: null,
@@ -199,6 +211,10 @@ describe('buildJourneyWaterfall', () => {
     expect(model.turns).toHaveLength(1)
     expect(model.turns[0]?.turn).toBe(5)
     expect(model.turns[0]?.entries[0]?.source).toBe('tool_call_log')
+    expect(model.turns[0]?.entries[0]?.plannedIndex).toBe(4)
+    expect(model.turns[0]?.entries[0]?.batchIndex).toBe(2)
+    expect(model.turns[0]?.entries[0]?.batchSize).toBe(1)
+    expect(model.turns[0]?.entries[0]?.executionMode).toBe('serial')
     expect(model.turns[0]?.runtimeEvidence).toBeNull()
   })
 

@@ -3,7 +3,6 @@ type phase =
     Offline
   | Running
   | Failing
-  | Overflowed
   | Compacting
   | HandingOff
   | Draining
@@ -11,7 +10,6 @@ type phase =
   | Stopped
   | Crashed
   | Restarting
-  | Dead
 val phase_to_string : Keeper_state_machine_phase.phase -> string
 val phase_of_string :
   string -> Keeper_state_machine_phase.phase option
@@ -26,7 +24,6 @@ type conditions = {
   handoff_active : bool;
   operator_paused : bool;
   stop_requested : bool;
-  dead_tombstone_latched : bool;
   restart_requested : bool;
   drain_complete : bool;
   credential_archived : bool;
@@ -48,7 +45,7 @@ type event =
   | Compaction_completed
   | Compaction_failed of { reason : string; }
   | Handoff_started
-  | Handoff_completed of { new_trace_id : string; generation : int; }
+  | Handoff_completed of { new_trace_id : string; }
   | Handoff_failed of { reason : string; }
   | Operator_pause
   | Operator_resume
@@ -70,10 +67,9 @@ type entry_action =
   | Start_drain
   | Schedule_restart of { delay_sec : float; }
   | Publish_lifecycle of { event_name : string; detail : string; }
-  | Mark_dead_tombstone
   | Cleanup_and_unregister
   | Trigger_immediate_cleanup
-  | Cancel_pending_oas
+  | Cancel_pending_agent_core
 type transition_result = {
   prev_phase : phase;
   new_phase : phase;

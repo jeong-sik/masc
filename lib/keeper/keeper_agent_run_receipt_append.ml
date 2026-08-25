@@ -25,15 +25,21 @@ let append_with_coverage_gap
        let masc_root = Workspace.masc_root_dir config in
        Telemetry_coverage_gap.record
          ~masc_root
-         ~source:"execution_receipt"
-         ~producer:"keeper_agent_run.execution_receipt"
+         ~source:
+           (Telemetry_unified_source.source_to_string
+              Telemetry_unified_source.Execution_receipt)
+         ~producer:
+           (Telemetry_unified_source_meta.source_producer
+              Telemetry_unified_source.Execution_receipt)
          ~durable_store:
            (Filename.concat
               (Filename.concat
                  (Filename.concat masc_root Common.keepers_runtime_dirname)
                  keeper_name)
               Keeper_types_support.execution_receipts_dirname)
-         ~dashboard_surface:"/api/v1/dashboard/execution-trust"
+         ~dashboard_surface:
+           (Telemetry_unified_source_meta.source_dashboard_surface
+              Telemetry_unified_source.Execution_receipt)
          ~stale_reason:"execution_receipt_append_failed"
          ~keeper_name
          ~trace_id

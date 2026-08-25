@@ -73,6 +73,19 @@ let test_keeper_prefixed_tools_fall_to_other () =
     ]
 ;;
 
+(* The catalog is the first authority: where a tool declares [readonly], that
+   declaration decides read-vs-write instead of the name. keeper_tasks_list is
+   28% of recorded calls and read-only; the name chain labelled it "other". *)
+let test_catalog_declaration_beats_the_name_chain () =
+  List.iter
+    (fun (name, expected) -> check string name expected (T.tool_type_of_name name))
+    [ "keeper_tasks_list", "read"
+    ; "keeper_tools_list", "read"
+    ; "keeper_task_claim", "write"
+    ; "keeper_task_done", "write"
+    ]
+;;
+
 let test_external_tool_names_keep_their_labels () =
   List.iter
     (fun (name, expected) -> check string name expected (T.tool_type_of_name name))
@@ -94,6 +107,8 @@ let () =
       , [ test_case "board tools are not mcp" `Quick test_board_tools_are_not_labelled_mcp
         ; test_case "keeper-prefixed tools fall to other" `Quick
             test_keeper_prefixed_tools_fall_to_other
+        ; test_case "catalog declaration beats the name chain" `Quick
+            test_catalog_declaration_beats_the_name_chain
         ; test_case "external tool names keep their labels" `Quick
             test_external_tool_names_keep_their_labels
         ] )

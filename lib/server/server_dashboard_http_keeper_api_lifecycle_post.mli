@@ -1,4 +1,5 @@
-(** Lifecycle POST handler (boot/shutdown/reset/clear) for keeper dashboard API. *)
+(** Lifecycle POST handler (boot/up/shutdown/reset/clear) for keeper dashboard
+    API. *)
 
 val handle_keeper_lifecycle_post :
   ?body_str:string ->
@@ -8,10 +9,13 @@ val handle_keeper_lifecycle_post :
   action:String.t ->
   Mcp_server.server_state ->
   string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Generic handler for boot / shutdown / reset / clear posts; the [action]
-    parameter selects the keeper FSM event. Boot rejects an ordinary paused
-    owner instead of implicitly resuming it; Dead-tombstone revival remains a
-    separate boot transaction. *)
+(** Generic handler for boot / up / shutdown / reset / clear posts; the
+    [action] parameter selects the keeper FSM event. Boot rejects an ordinary
+    paused owner instead of implicitly resuming it, and wakes an already-live
+    keeper instead of dispatching [masc_keeper_up]. Up skips both boot-only
+    paths so the dispatch reaches [masc_keeper_up]'s own create-or-update
+    contract: the body carries the TOML-level settings and a changed keeper is
+    intentionally stopped and restarted by that contract. *)
 
 val refresh_keeper_execution_surfaces :
   config:Workspace.config ->

@@ -85,13 +85,36 @@ val append : t -> Yojson.Safe.t -> unit
 (** Append [json] to today's [DD.jsonl] inside [YYYY-MM/].
     Creates directories as needed.  Thread-safe via internal mutex. *)
 
-val append_if_current_file_fits :
-  t -> max_current_file_bytes:int -> Yojson.Safe.t -> bool
-(** Append [json] only when today's current [DD.jsonl] would remain at or
-    below [max_current_file_bytes] after the row is added. Returns [true] when
-    appended and [false] when skipped. The size check and append share the
-    same internal mutex as {!append}. Retention and completed-file byte pruning
-    still run after a successful append. *)
+type append_outcome =
+  | Appended_to_current
+      (** The row landed in today's current [DD.jsonl]. *)
+  | Appended_after_rotation of { segment : string }
+      (** Today's file reached the cap and was renamed to the completed
+          segment [DD.NNN.jsonl] named here; the row landed in a fresh
+          current file. *)
+  | Skipped_rotation_exhausted of { sequence_limit : int }
+      (** The day already holds [sequence_limit] rotated segments — the
+          [NNN] name space is spent — so the row was dropped. *)
+  | Skipped_by_append_guard
+      (** The installed {!set_append_guard} declined to run the append. *)
+
+val append_rotating :
+  t -> max_current_file_bytes:int -> Yojson.Safe.t -> append_outcome
+(** Append [json] to today's current [DD.jsonl], rotating the file to a
+    completed [DD.NNN.jsonl] segment first when the row would push it
+    over [max_current_file_bytes] (a non-positive cap never rotates).
+    Rotated segments are ordinary completed files: readers include them
+    in day order, and the [?max_bytes] byte-budget prune from {!create}
+    removes the oldest of them first while the current file survives —
+    so a capped store keeps the newest records and sheds the oldest,
+    instead of dropping new rows for the rest of the day.
+
+    A single row larger than the cap lands in an empty current file
+    anyway (the segment runs oversized once) — rotating an empty file
+    out would spin without ever accepting the row. The size check,
+    rename, and append share the same internal mutex as {!append};
+    retention and byte-budget pruning still run after a successful
+    append. *)
 
 val set_append_guard : ((unit -> unit) -> unit) -> unit
 (** [set_append_guard guard] installs a process-wide wrapper around
@@ -99,10 +122,74 @@ val set_append_guard : ((unit -> unit) -> unit) -> unit
     runtimes can install resource accounting/backpressure without making this
     low-level storage library depend on those policy modules. *)
 
+val collect_matching :
+  ?offset:int -> t -> int -> f:(Yojson.Safe.t -> 'a option) -> 'a list
+(** [collect_matching ?offset t n ~f] returns the newest [n] values [f]
+    produced. Where {!filter_map_recent} counts rows read, this counts values
+    selected, so [n] means what a filtering caller intended by it.
+
+    Use it whenever [f] rejects rows. With {!filter_map_recent} such a caller
+    has no value of [n] that means "the newest [n] matches": the budget fills
+    with whatever was written last, and unrelated writes can consume all of it.
+    Multiplying [n] to compensate only moves the write rate at which the answer
+    goes empty.
+
+    Day files are walked newest-first and scanned backwards in fixed-size
+    chunks. The scan stops at the [n]-th match and never materialises a whole
+    day file; memory is bounded by the current chunk/line fragment plus the
+    selected values.
+
+    [offset] skips selected values, not rows. Ordering and malformed-row
+    skipping match {!filter_map_recent}, including that {b [f] is called
+    newest-first}. *)
+
+val collect_matching_range :
+  ?offset:int ->
+  t ->
+  since:string ->
+  until:string ->
+  int ->
+  f:(Yojson.Safe.t -> 'a option) ->
+  'a list
+(** Range-bounded {!collect_matching}. Only day files in the inclusive
+    [[since, until]] UTC date range are opened. Invalid or reversed dates
+    return [[]], matching {!filter_map_range_recent}; row-level [f] remains
+    responsible for exact timestamp boundaries within the edge days. *)
+
+val filter_map_recent :
+  ?offset:int -> t -> int -> f:(Yojson.Safe.t -> 'a option) -> 'a list
+(** [filter_map_recent ?offset t n ~f] is [List.filter_map f (read_recent
+    ?offset t n)] without ever holding the intermediate [Yojson.Safe.t list].
+    [f] is applied to each parsed row as it is read, so a row's tree is
+    unreachable before the next row is parsed; the result list is the only
+    thing that accumulates.
+
+    [n] and [offset] count parsed rows, not selected ones: [f] returning [None]
+    does not make the reader consume an extra row. The returned list, the
+    offset semantics, and malformed-row skipping match {!read_recent} exactly.
+
+    {b [f] is called newest-first.} The scan walks months, day-files, and rows
+    in descending order and prepends, which is what makes the {e result}
+    chronological. So for a pure [f] this is exactly [List.filter_map f
+    (read_recent ?offset t n)], but for an [f] whose side effects depend on
+    call order — rate-limited error logging, "report the first N drops",
+    anything that stops after a quota — it is not: those effects see the
+    newest rows first. Convert such a call site with a test that pins the
+    effect, not by substitution.
+
+    Callers that decode rows into their own record type should prefer this over
+    [read_recent |> List.filter_map]: a [`Assoc] holds one cons cell, one tuple,
+    and one boxed value per field, so the tree is roughly 25x the source bytes
+    and a 100k-row window materialises gigabytes that the decoder immediately
+    discards. *)
+
 val read_recent : ?offset:int -> t -> int -> Yojson.Safe.t list
 (** [read_recent ?offset t n] returns the newest [n] entries in chronological
     order (oldest first), skipping the first [offset] newest entries.
-    Scans day-files from newest to oldest, stops early. *)
+    Scans day-files from newest to oldest, stops early.
+
+    Holds every row's parsed tree at once. Use {!filter_map_recent} when the
+    rows are being decoded into something smaller. *)
 
 val read_recent_result :
   ?offset:int -> t -> int -> (recent_entry list, read_error) result
@@ -128,6 +215,24 @@ val read_range : t -> since:string -> until:string -> Yojson.Safe.t list
 (** [read_range t ~since ~until] returns entries whose day-file falls
     within [[since, until]] (inclusive, format ["YYYY-MM-DD"]).
     Result is in chronological order. *)
+
+val filter_map_range_recent
+  :  ?offset:int
+  -> t
+  -> since:string
+  -> until:string
+  -> int
+  -> f:(Yojson.Safe.t -> 'a option)
+  -> 'a list
+(** Range counterpart to {!filter_map_recent}: [List.filter_map f
+    (read_range_recent ?offset t ~since ~until n)] without ever holding the
+    intermediate [Yojson.Safe.t list].
+
+    Same contract as {!filter_map_recent} in every respect that matters —
+    [n] and [offset] count parsed rows rather than selected ones, the returned
+    list is chronological, and {b [f] is called newest-first}, so a projection
+    whose side effects depend on call order is not interchangeable with the
+    [read_range_recent |> List.filter_map] form. *)
 
 val read_range_recent
   :  ?offset:int

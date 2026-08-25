@@ -4,15 +4,10 @@
     (retention metadata, query echo, surface wrapping, default queries).
     No side effects, no I/O. *)
 
-open Masc_domain
 
 (* Sibling dependencies — already extracted in earlier godfile decomp PRs. *)
 let operator_generated_at_iso = Server_dashboard_http_core_json.operator_generated_at_iso
-let operator_cache_json = Server_dashboard_http_core_json.operator_cache_json
-
 let operator_refresh_interval_s = Server_dashboard_http_core_operator.operator_refresh_interval_s
-let dashboard_request_timeout_s = Server_dashboard_http_core_cache.dashboard_request_timeout_s
-let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 
 let operator_retention_json ~(config : Workspace.config) ~scope ~producer =
   `Assoc
@@ -21,13 +16,9 @@ let operator_retention_json ~(config : Workspace.config) ~scope ~producer =
     ; "workspace_path", `String config.workspace_path
     ; "producer", `String producer
     ; "store_kind", `String "process_cache"
-    ; "cache_surface", `String "Server_dashboard_http_core.cached_surface"
-    ; "http_swr_ttl_s", `Float standard_cache_ttl_s
     ; "background_refresh_interval_s", `Float operator_refresh_interval_s
-    ; "request_timeout_s", `Float dashboard_request_timeout_s
     ; ( "cache_policy"
-      , `String
-          "default route uses proactive cached_surface; parameterized route uses HTTP stale-while-revalidate"
+      , `String "default publication refreshes synchronously when stale"
       )
     ]
 ;;
@@ -65,7 +56,6 @@ let operator_digest_query_json ~actor ~target_type ~target_id ~include_workers
 
 let with_operator_surface_metadata
     ~config
-    ?cache_key
     ~dashboard_surface
     ~source
     ~scope
@@ -81,7 +71,6 @@ let with_operator_surface_metadata
       ; "generated_at_iso", `String generated_at
       ; "retention", operator_retention_json ~config ~scope ~producer
       ; "query", query
-      ; "cache", operator_cache_json ?cache_key ~scope json
       ]
     in
     let metadata_keys =
@@ -90,7 +79,6 @@ let with_operator_surface_metadata
       ; "generated_at_iso"
       ; "retention"
       ; "query"
-      ; "cache"
       ]
     in
     let fields =
@@ -100,10 +88,9 @@ let with_operator_surface_metadata
   | other -> other
 ;;
 
-let with_operator_snapshot_metadata ~config ?cache_key ~query json =
+let with_operator_snapshot_metadata ~config ~query json =
   with_operator_surface_metadata
     ~config
-    ?cache_key
     ~dashboard_surface:"/api/v1/operator"
     ~source:"operator_snapshot_read_model"
     ~scope:"operator_snapshot"
@@ -112,10 +99,9 @@ let with_operator_snapshot_metadata ~config ?cache_key ~query json =
     json
 ;;
 
-let with_operator_digest_metadata ~config ?cache_key ~query json =
+let with_operator_digest_metadata ~config ~query json =
   with_operator_surface_metadata
     ~config
-    ?cache_key
     ~dashboard_surface:"/api/v1/operator/digest"
     ~source:"operator_digest_read_model"
     ~scope:"operator_digest"

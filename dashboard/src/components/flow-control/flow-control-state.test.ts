@@ -46,7 +46,6 @@ describe('flow-control-state', () => {
     serverStatus.value = null
     shellAuthSummary.value = {
       effective_role: 'worker',
-      default_role: 'worker',
       auth_error_code: null,
       auth_error_detail: null,
     }
@@ -154,7 +153,6 @@ describe('flow-control-state', () => {
   it('runs garbage collection for an admin', async () => {
     shellAuthSummary.value = {
       effective_role: 'admin',
-      default_role: 'worker',
       auth_error_code: null,
       auth_error_detail: null,
     }

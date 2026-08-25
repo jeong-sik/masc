@@ -1,4 +1,4 @@
-(** Sum-typed provider-kind resolver inside the runtime/OAS boundary.
+(** Sum-typed provider-kind resolver inside the runtime/AGENT_CORE boundary.
     See .mli for the contract. *)
 
 type resolution =
@@ -43,21 +43,3 @@ let resolve (spec : string) : resolution =
            "unknown provider %S in spec %S; not found in Provider_registry"
            provider_name spec)
 
-let kind_of_spec (spec : string) :
-    Llm_provider.Provider_config.provider_kind option =
-  match resolve spec with
-  | Registered { kind; _ } -> Some kind
-  | Custom_url _ -> Some Llm_provider.Provider_config.OpenAI_compat
-  | Unknown _ -> None
-
-let uses_anthropic_caching_for_kind kind =
-  let cfg =
-    Llm_provider.Provider_config.make ~kind ~model_id:"auto" ~base_url:"" ()
-  in
-  let caps =
-    Agent_sdk.Provider_runtime_binding.capabilities_for_provider_config cfg
-  in
-  caps.supports_prompt_caching || caps.supports_caching
-
-let uses_anthropic_caching_for_spec spec =
-  kind_of_spec spec |> Option.map uses_anthropic_caching_for_kind

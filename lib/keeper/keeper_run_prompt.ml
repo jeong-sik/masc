@@ -10,10 +10,9 @@
 type turn_prompt_context =
   { turn_system_prompt : string
   ; dynamic_context : string
-  ; memory_context : string
   ; temporal_context : string
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
-  ; history_messages : Agent_sdk.Types.message list
+  ; history_messages : Agent_core.Types.message list
   ; ctx_work : Keeper_context_runtime.working_context
   }
 
@@ -27,7 +26,7 @@ type user_turn_record =
           a HITL resolution, chat-lane input, or the autonomous continuation
           cue. *)
   | Skip_already_checkpointed_user_turn
-      (** The resumed OAS checkpoint already owns this exact user turn. Do not
+      (** The resumed AGENT_CORE checkpoint already owns this exact user turn. Do not
           append or persist a second copy before replay. *)
 
 type extra_system_context_assembly =
@@ -35,7 +34,6 @@ type extra_system_context_assembly =
   ; blocks : (Prompt_block_id.t * string) list
   }
 
-let normalize_memory_fragment = Inference_utils.sanitize_text_utf8
 let sanitize_user_message = Inference_utils.sanitize_text_utf8
 
 let append_extra_system_context ctx text =
@@ -62,11 +60,30 @@ let assemble_extra_system_context
   ; blocks
   }
 
+(* See the mli: a position question about the last message, deliberately not
+   [Hooks.last_tool_results], which answers containment over the whole
+   history. *)
+let ends_with_tool_results (messages : Agent_core.Types.message list) =
+  let rec last = function
+    | [] -> None
+    | [ message ] -> Some message
+    | _ :: rest -> last rest
+  in
+  match last messages with
+  | Some { Agent_core.Types.role = Agent_core.Types.Tool; _ } -> true
+  | Some
+      { Agent_core.Types.role =
+          Agent_core.Types.User | Agent_core.Types.System
+          | Agent_core.Types.Assistant
+      ; _
+      }
+  | None -> false
+
 let build_turn_context
       ~(ctx : Keeper_run_context.run_context)
       ~(build_turn_prompt :
            base_system_prompt:string
-        -> messages:Agent_sdk.Types.message list
+        -> messages:Agent_core.Types.message list
         -> Keeper_agent_prompt_metrics.turn_prompt)
       ~(user_message : string)
       ~config:(_ : Workspace.config)
@@ -89,7 +106,6 @@ let build_turn_context
       ~base_system_prompt
       ~messages:(Keeper_context_runtime.messages_of_context ctx_work)
   in
-  let memory_context = "" in
   let temporal_context =
     Masc_context_injector.render_temporal_summary shared_context
     |> Option.value ~default:""
@@ -126,7 +142,7 @@ let build_turn_context
      meta.agent_name (start_turn_count + 1) user_seg.Keeper_agent_prompt_metrics.bytes
      (pick_hash16 user_seg) dyn_seg.Keeper_agent_prompt_metrics.bytes (pick_hash16 dyn_seg));
   (* 6. Append user message and persist. *)
-  let user_msg = Agent_sdk.Types.user_msg user_message in
+  let user_msg = Agent_core.Types.user_msg user_message in
   let history_messages =
     Keeper_context_runtime.messages_of_context ctx_work
   in
@@ -144,7 +160,6 @@ let build_turn_context
    | Record_user_turn, true | Skip_already_checkpointed_user_turn, _ -> ());
   { turn_system_prompt
   ; dynamic_context
-  ; memory_context
   ; temporal_context
   ; prompt_metrics
   ; history_messages

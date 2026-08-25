@@ -29,17 +29,10 @@ type protocol =
   | Grpc
   | Sse
   | Ws
-  | Webrtc
 
 val protocol_to_string : protocol -> string
 val protocol_of_string : string -> protocol option
 
-(** Transport binding configuration *)
-type binding = {
-  protocol: protocol;
-  url: string;
-  options: (string * string) list;
-}
 
 (** {1 Error Codes} *)
 
@@ -80,23 +73,12 @@ module Rest : sig
 
   val method_to_string : http_method -> string
   val tool_to_endpoint : string -> http_method * string
-  val parse_request :
-    http_method:string ->
-    path:string ->
-    query_params:(string * Yojson.Safe.t) list ->
-    body:string ->
-    request
   val generate_openapi_paths : unit -> Yojson.Safe.t
   val generate_openapi_document :
     ?host:string -> ?port:int -> unit -> Yojson.Safe.t
   val operation_catalog_entry :
     string -> Masc_domain.tool_schema -> Yojson.Safe.t
 end
-
-(** {1 Bindings} *)
-
-val get_bindings : host:string -> port:int -> binding list
-val bindings_to_json : binding list -> Yojson.Safe.t
 
 (** {1 Statistics} *)
 

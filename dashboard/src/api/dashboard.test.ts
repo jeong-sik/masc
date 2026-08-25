@@ -11,7 +11,6 @@ vi.mock('./dev-token', () => ({
 import {
   fetchDashboardShell,
   fetchDashboardExecution,
-  fetchLogs,
   fetchDashboardExecutionTrust,
   fetchDashboardGate,
   fetchDashboardGoalDetail,
@@ -23,7 +22,6 @@ import {
   fetchDashboardFullHealth,
   fetchKeeperToolCalls,
   fetchKeeperToolStats,
-  fetchKeeperCompactionSnapshots,
   fetchKeeperTurnRecords,
   parseMemoryOsFactCategory,
   fetchKeeperTurnTranscript,
@@ -39,10 +37,14 @@ import {
   fetchRuntimeTomlConfig,
   fetchRuntimeDefaults,
   fetchRuntimeModelMetrics,
+  fetchOfficialClientSession,
+  resolveOfficialClientSession,
+  probeOfficialClientLogin,
   patchRuntimeAssignment,
   patchRuntimeMediaFailover,
   patchRuntimeRouting,
   patchKeeperConfig,
+  previewRuntimeTomlConfig,
   saveRuntimeTomlConfig,
   fetchDashboardCacheStats,
   fetchTelemetry,
@@ -50,6 +52,8 @@ import {
   fetchTlcResults,
   fetchToolQuality,
   setGateMode,
+  resolveGateApproval,
+  deleteGateApprovalRule,
 } from './dashboard'
 import { fetchDashboardShell as fetchDashboardShellHot } from './dashboard-hot'
 import { keeperRuntimeBlockerLabel } from '../lib/keeper-runtime-display'
@@ -72,7 +76,6 @@ function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
     metric: null,
     target_value: null,
     due_date: null,
-    parent_goal_id: null,
     tasks: [],
     task_count: 0,
     task_done_count: 0,
@@ -171,10 +174,6 @@ describe('fetchDashboardExecutionTrust', () => {
           latest_age_s: null,
           health: 'coverage_gap',
         },
-        migration: {
-          body_shape: 'root_fields_preserved',
-          rule: 'additive envelope first',
-        },
       },
       freshness_slo_s: 900,
       entry_count: 0,
@@ -220,7 +219,6 @@ describe('fetchDashboardExecutionTrust', () => {
         key: 'execution-trust:default',
         stale_reason: 'execution_receipt_append_failed',
       },
-      migration: { body_shape: 'root_fields_preserved' },
     })
     expect(result.coverage_gaps?.[0]).toMatchObject({
       producer: 'keeper_agent_run.execution_receipt',
@@ -240,7 +238,7 @@ describe('dashboard briefing fetchers', () => {
       incidents: [],
       recommended_actions: [],
       command_focus: {},
-      operator_targets: { keepers: [], pending_confirms: [], available_actions: [] },
+      operator_targets: { keepers: [], available_actions: [] },
       attention_queue: [],
       sessions: [],
       agent_briefs: [],
@@ -266,7 +264,7 @@ describe('dashboard briefing fetchers', () => {
       incidents: [],
       recommended_actions: [],
       command_focus: {},
-      operator_targets: { keepers: [], pending_confirms: [], available_actions: [] },
+      operator_targets: { keepers: [], available_actions: [] },
       attention_queue: [],
       sessions: [],
       agent_briefs: [],
@@ -322,7 +320,7 @@ describe('keeper tool telemetry fetchers', () => {
             ts: 1_777_100_000,
             ts_iso: '2026-05-14T00:00:00Z',
             source: 'trajectory_tool_call',
-            producer: 'keeper_hooks_oas.post_tool_use',
+            producer: 'keeper_hooks_agentCore.post_tool_use',
             durable_store: '.masc/keepers/keeper-alpha/trajectories',
             dashboard_surface: '/api/v1/keepers/:name/tool-stats',
             stale_reason: 'trajectory_append_failed',
@@ -345,7 +343,7 @@ describe('keeper tool telemetry fetchers', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/keeper-alpha/tool-stats')
     expect(result.coverage_gap_count).toBe(1)
     expect(result.coverage_gaps?.[0]).toMatchObject({
-      producer: 'keeper_hooks_oas.post_tool_use',
+      producer: 'keeper_hooks_agentCore.post_tool_use',
       durable_store: '.masc/keepers/keeper-alpha/trajectories',
       dashboard_surface: '/api/v1/keepers/:name/tool-stats',
       stale_reason: 'trajectory_append_failed',
@@ -395,7 +393,7 @@ describe('keeper tool telemetry fetchers', () => {
     })
   })
 
-  it('decodes objective success, goals, and exact OAS occurrence', async () => {
+  it('decodes objective success, goals, and exact Agent Core occurrence', async () => {
     const fetchMock = vi.fn(() => Promise.resolve(
       new Response(JSON.stringify({
         keeper: 'keeper-alpha',
@@ -413,6 +411,15 @@ describe('keeper tool telemetry fetchers', () => {
             tool_use_id: '',
             turn: 6,
             planned_index: 2,
+            batch_index: 1,
+            batch_size: 3,
+            execution_mode: 'concurrent',
+            disposition: 'deferred',
+            composition_tool: 'keeper_research_pipeline',
+            composition_run_id: 'run-42',
+            composition_node_id: 'fetch_sources',
+            composition_execution: 'async',
+            parent_tool_use_id: 'outer-7',
             goal_ids: ['g-1', 'g-2'],
           },
         ],
@@ -427,6 +434,208 @@ describe('keeper tool telemetry fetchers', () => {
     expect(entry?.tool_use_id).toBe('')
     expect(entry?.turn).toBe(6)
     expect(entry?.planned_index).toBe(2)
+    expect(entry?.batch_index).toBe(1)
+    expect(entry?.batch_size).toBe(3)
+    expect(entry?.execution_mode).toBe('concurrent')
+    expect(entry?.disposition).toBe('deferred')
+    expect(entry?.composition_tool).toBe('keeper_research_pipeline')
+    expect(entry?.composition_run_id).toBe('run-42')
+    expect(entry?.composition_node_id).toBe('fetch_sources')
+    expect(entry?.composition_execution).toBe('async')
+    expect(entry?.parent_tool_use_id).toBe('outer-7')
+  })
+
+  it('decodes recorded execution evidence (runtime contract, action radius, route evidence)', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 1,
+        source: 'tool_call_io',
+        entries: [
+          {
+            // Field shapes mirror a recorded .masc/tool_calls row (2026-08-18),
+            // anonymized. Nested nullable fields arrive as explicit nulls.
+            ts: 1787024860.1,
+            keeper: 'keeper-alpha',
+            tool: 'keeper_time_now',
+            input: {},
+            output: '{"now_iso":"2026-08-18T05:00:00Z"}',
+            success: true,
+            duration_ms: 0.5,
+            thinking_enabled: true,
+            prompt_fingerprint: '464ce7b3280c24fe1cbdcd990a70db87',
+            runtime_contract: {
+              keeper_name: 'keeper-alpha',
+              agent_name: 'keeper-alpha-agent',
+              trace_id: 'trace-1',
+              session_id: 'trace-1',
+              generation: 1,
+              keeper_turn_id: 29567,
+              task_id: null,
+              goal_ids: [],
+              sandbox_profile: 'local',
+              sandbox_root: '/sandbox/keeper-alpha/',
+              allowed_paths: ['.masc/playground/keeper-alpha/'],
+              path_resolution: {
+                read_implicit_cwd: false,
+                read_explicit_cwd_supported: true,
+                read_basis: 'Read file_path resolves against explicit cwd when cwd is provided.',
+                discover_before_read: 'Inspect visible paths before Read.',
+                execute_path_basis: 'Execute path arguments resolve against cwd.',
+                masc_state_basis: '.masc runtime state is not a sandbox filesystem target.',
+              },
+              network_mode: 'inherit',
+              runtime_profile: 'ollama_cloud.example-model',
+            },
+            action_radius: {
+              tool_name: 'keeper_time_now',
+              action_key: 'keeper_time_now',
+              target_kind: 'tool',
+              target_path: null,
+              sandbox_target: 'local',
+              observed_paths: [],
+              success: true,
+              duration_ms: 0.5,
+              error: null,
+            },
+            route_evidence: {
+              descriptor_id: 'keeper.time.now',
+              capability_id: 'keeper_time_now',
+              keeper_model_projection: 'internal_name',
+              public_name: 'keeper_time_now',
+              canonical_name: 'keeper_time_now',
+              executor: 'in_process',
+              backend: 'ocaml_runtime',
+              sandbox: 'none',
+              runtime_handler: 'tool_time_now',
+              execution: 'concurrent',
+              composable_output: { kind: 'json' },
+              receipt_labels: {
+                descriptor_id: 'keeper.time.now',
+                executor: 'in_process',
+                keeper_tool_group: 'meta',
+                input_schema_source: 'descriptor_owned',
+              },
+              eval_tags: [],
+              readonly: true,
+              cwd_scope: null,
+              polling_read: false,
+              tool_name: 'keeper_time_now',
+            },
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperToolCalls('keeper-alpha')
+    const entry = result.entries[0]
+    expect(entry?.thinking_enabled).toBe(true)
+    expect(entry?.thinking_budget).toBeUndefined()
+    expect(entry?.tool_choice).toBeUndefined()
+    expect(entry?.prompt_fingerprint).toBe('464ce7b3280c24fe1cbdcd990a70db87')
+    expect(entry?.runtime_contract).toMatchObject({
+      agent_name: 'keeper-alpha-agent',
+      generation: 1,
+      sandbox_root: '/sandbox/keeper-alpha/',
+      allowed_paths: ['.masc/playground/keeper-alpha/'],
+      network_mode: 'inherit',
+      runtime_profile: 'ollama_cloud.example-model',
+    })
+    expect(entry?.runtime_contract?.path_resolution).toMatchObject({
+      read_implicit_cwd: false,
+      read_explicit_cwd_supported: true,
+    })
+    expect(entry?.action_radius).toMatchObject({
+      action_key: 'keeper_time_now',
+      target_kind: 'tool',
+      observed_paths: [],
+    })
+    // Explicit wire nulls decode to absent, not to empty strings.
+    expect(entry?.action_radius?.target_path).toBeUndefined()
+    expect(entry?.action_radius?.error).toBeUndefined()
+    expect(entry?.route_evidence).toMatchObject({
+      descriptor_id: 'keeper.time.now',
+      capability_id: 'keeper_time_now',
+      executor: 'in_process',
+      backend: 'ocaml_runtime',
+      runtime_handler: 'tool_time_now',
+      readonly: true,
+    })
+    expect(entry?.route_evidence?.receipt_labels).toEqual({
+      descriptor_id: 'keeper.time.now',
+      executor: 'in_process',
+      keeper_tool_group: 'meta',
+      input_schema_source: 'descriptor_owned',
+    })
+  })
+
+  it('projects route_evidence.status from both wire shapes', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 2,
+        source: 'tool_call_io',
+        entries: [
+          {
+            ts: 1,
+            keeper: 'keeper-alpha',
+            tool: 'WebSearch',
+            input: {},
+            output: 'ok',
+            success: true,
+            duration_ms: 5,
+            route_evidence: { descriptor_id: 'agent.search_web', status: 'ok' },
+          },
+          {
+            ts: 2,
+            keeper: 'keeper-alpha',
+            tool: 'Execute',
+            input: {},
+            output: 'done',
+            success: true,
+            duration_ms: 5,
+            route_evidence: { descriptor_id: 'agent.execute', status: { kind: 'exit', code: 0 } },
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperToolCalls('keeper-alpha')
+
+    expect(result.entries[0]?.route_evidence?.status).toBe('ok')
+    expect(result.entries[1]?.route_evidence?.status).toBe('exit 0')
+  })
+
+  it('leaves execution evidence absent on rows recorded before it was written', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 1,
+        source: 'tool_call_io',
+        entries: [
+          {
+            ts: 1,
+            keeper: 'keeper-alpha',
+            tool: 'keeper_context_status',
+            input: {},
+            output: 'ok',
+            success: true,
+            duration_ms: 5,
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperToolCalls('keeper-alpha')
+    const entry = result.entries[0]
+    expect(entry?.runtime_contract).toBeUndefined()
+    expect(entry?.action_radius).toBeUndefined()
+    expect(entry?.route_evidence).toBeUndefined()
+    expect(entry?.thinking_enabled).toBeUndefined()
+    expect(entry?.prompt_fingerprint).toBeUndefined()
   })
 
   it('keeps missing or malformed tool-call duration unmeasured', async () => {
@@ -463,7 +672,7 @@ describe('keeper tool telemetry fetchers', () => {
     expect(result.entries.map(entry => entry.duration_ms)).toEqual([null, null])
   })
 
-  it('grounds turn-record model / finish_reason, leaving absent fields undefined', async () => {
+  it('grounds turn-record selected_model / finish_reason, leaving absent fields undefined', async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({
         keeper: 'keeper-alpha',
@@ -474,6 +683,9 @@ describe('keeper tool telemetry fetchers', () => {
         durable_store: '.masc/keepers/keeper-alpha/turn-records',
         dashboard_surface: '/api/v1/keepers/:name/turn-records',
         freshness_slo_s: 300,
+        live_turn_in_progress: false,
+        live_turn_started_at_unix: null,
+        live_turn_last_progress_at_unix: null,
         latest_ts_unix: 11,
         latest_ts_iso: '1970-01-01T00:00:11Z',
         latest_age_s: 1,
@@ -503,7 +715,7 @@ describe('keeper tool telemetry fetchers', () => {
               turn_ref: 'trace-grounded#7',
               ts: 10,
               runtime_profile: 'local',
-              model: 'deepseek-v4-flash',
+              selected_model: 'deepseek-v4-flash',
               finish_reason: 'completed',
               blocks: [],
               input_components: [],
@@ -514,7 +726,7 @@ describe('keeper tool telemetry fetchers', () => {
             diff_vs_prev: null,
           },
           {
-            // RFC-0233 §2.3: error turn omits model/finish_reason — must
+            // RFC-0233 §2.3: error turn omits selected_model/finish_reason — must
             // decode to undefined, never a fabricated "stop"/placeholder.
             record: {
               keeper: 'keeper-alpha',
@@ -543,182 +755,10 @@ describe('keeper tool telemetry fetchers', () => {
     const result = await fetchKeeperTurnRecords('keeper-alpha')
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/keeper-alpha/turn-records')
-    expect(result.entries[0]?.record.model).toBe('deepseek-v4-flash')
+    expect(result.entries[0]?.record.selected_model).toBe('deepseek-v4-flash')
     expect(result.entries[0]?.record.finish_reason).toBe('completed')
-    expect(result.entries[1]?.record.model).toBeUndefined()
+    expect(result.entries[1]?.record.selected_model).toBeUndefined()
     expect(result.entries[1]?.record.finish_reason).toBeUndefined()
-  })
-
-  it('decodes durable compaction snapshots with nullable token fields', async () => {
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
-      new Response(JSON.stringify({
-        schema: 'keeper.compaction_snapshots.v1',
-        keeper: 'keeper-alpha',
-        source: 'runtime_manifest|keeper_meta',
-        producer: 'keeper_runtime_manifest|keeper_meta_store',
-        limit: 2,
-        count: 2,
-        read_error_count: 1,
-        read_errors: [{ scope: 'runtime_manifest_row:/tmp/bad.jsonl:1', error: 'bad row' }],
-        scan_truncated: false,
-        hydration_status: 'ready',
-        items: [
-          {
-            id: 'manifest:trace-a:context_compacted:2026-06-26T03:03:00Z',
-            keeper: 'keeper-alpha',
-            ts_iso: '2026-06-26T03:03:00Z',
-            ts_unix: 1_782_444_580,
-            trace_id: 'trace-a',
-            keeper_turn_id: 12,
-            source: 'runtime_manifest',
-            trigger: 'proactive(85%)',
-            runtime_id: 'oas-seoul-1',
-            display_runtime: 'oas-seoul-1',
-            before_tokens: 210000,
-            after_tokens: 120000,
-            saved_tokens: 90000,
-            compaction_id: 'cmp-42',
-            compaction_source: 'provider_overflow',
-            compaction_outcome: 'checkpoint_committed',
-            cause: 'compaction completion dispatch failed',
-            status: 'retryable_failure',
-            links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
-            exact_evidence: {
-              before_checkpoint_bytes: 4096, after_checkpoint_bytes: 1024,
-              before_message_count: 8, after_message_count: 3,
-              summarized_message_count: 4, dropped_message_count: 1,
-              before_tool_use_count: 2, after_tool_use_count: 1,
-              before_tool_result_count: 2, after_tool_result_count: 1,
-            },
-            reinjection_observation: {
-              state: 'reinserted', keeper_turn_id: 13,
-              checkpoint_loaded_receipts: 1, context_injected_receipts: 1,
-            },
-          },
-          {
-            id: 'manifest:trace-b:context_compacted:2026-06-26T04:03:00Z',
-            keeper: 'keeper-alpha',
-            ts_iso: '2026-06-26T04:03:00Z',
-            ts_unix: null,
-            trace_id: 'trace-b',
-            keeper_turn_id: null,
-            source: 'runtime_manifest',
-            trigger: 'pre_dispatch_hygiene',
-            runtime_id: null,
-            display_runtime: 'pre_dispatch_hygiene',
-            before_tokens: null,
-            after_tokens: null,
-            saved_tokens: null,
-            compaction_id: null,
-            compaction_source: 'pre_dispatch_hygiene',
-            compaction_outcome: 'retry_without_checkpoint',
-            cause: 'compaction dispatch failed',
-            status: 'retryable_failure',
-            links: {},
-            exact_evidence: null,
-            reinjection_observation: {
-              state: 'not_linked', keeper_turn_id: null,
-              checkpoint_loaded_receipts: 0, context_injected_receipts: 0,
-            },
-          },
-          {
-            id: 'manifest:trace-c:context_compacted:2026-06-26T04:04:00Z',
-            keeper: 'keeper-alpha',
-            ts_iso: '2026-06-26T04:04:00Z',
-            ts_unix: null,
-            trace_id: 'trace-c',
-            keeper_turn_id: 14,
-            source: 'runtime_manifest',
-            trigger: 'proactive(90%)',
-            runtime_id: 'oas-seoul-1',
-            display_runtime: 'oas-seoul-1',
-            before_tokens: 180000,
-            after_tokens: 90000,
-            saved_tokens: 90000,
-            compaction_id: 'cmp-43',
-            compaction_source: 'event_bus',
-            compaction_outcome: 'checkpoint_committed',
-            cause: 'lifecycle cleanup failed',
-            status: 'lifecycle_cleanup_failed',
-            links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
-            exact_evidence: {
-              before_checkpoint_bytes: 2048, after_checkpoint_bytes: 512,
-              before_message_count: 9, after_message_count: 3,
-              summarized_message_count: 4, dropped_message_count: 1,
-              before_tool_use_count: 2, after_tool_use_count: 1,
-              before_tool_result_count: 2, after_tool_result_count: 1,
-            },
-            reinjection_observation: {
-              state: 'not_linked', keeper_turn_id: null,
-              checkpoint_loaded_receipts: 0, context_injected_receipts: 0,
-            },
-          },
-          {
-            id: 'manifest:trace-contradictory:context_compacted:2026-06-26T04:05:00Z',
-            keeper: 'keeper-alpha',
-            ts_iso: '2026-06-26T04:05:00Z',
-            ts_unix: null,
-            trace_id: 'trace-contradictory',
-            keeper_turn_id: 15,
-            source: 'runtime_manifest',
-            trigger: 'provider_overflow',
-            runtime_id: 'oas-seoul-1',
-            display_runtime: 'oas-seoul-1',
-            before_tokens: null,
-            after_tokens: null,
-            saved_tokens: null,
-            compaction_id: 'cmp-contradictory',
-            compaction_source: 'provider_overflow',
-            compaction_outcome: 'retry_without_checkpoint',
-            cause: 'compaction dispatch failed',
-            status: 'retryable_failure',
-            links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
-            exact_evidence: {
-              before_checkpoint_bytes: 4096, after_checkpoint_bytes: 1024,
-              before_message_count: 8, after_message_count: 3,
-              summarized_message_count: 4, dropped_message_count: 1,
-              before_tool_use_count: 2, after_tool_use_count: 1,
-              before_tool_result_count: 2, after_tool_result_count: 1,
-            },
-            reinjection_observation: {
-              state: 'not_linked', keeper_turn_id: null,
-              checkpoint_loaded_receipts: 0, context_injected_receipts: 0,
-            },
-          },
-        ],
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-    ))
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchKeeperCompactionSnapshots('keeper-alpha', 2)
-
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/keeper-alpha/compaction-snapshots?limit=2')
-    expect(result.items[0]?.before_tokens).toBe(210000)
-    expect(result.items[0]?.saved_tokens).toBe(90000)
-    expect(result.items[0]?.display_runtime).toBe('oas-seoul-1')
-    expect(result.items[0]?.reinjection_observation.state).toBe('reinserted')
-    expect(result.read_error_count).toBe(1)
-    expect(result.read_errors).toEqual([
-      { scope: 'runtime_manifest_row:/tmp/bad.jsonl:1', error: 'bad row' },
-    ])
-    expect(result.scan_truncated).toBe(false)
-    expect(result.items[0]?.links.receipt_path).toBeNull()
-    expect(result.items[1]?.before_tokens).toBeNull()
-    expect(result.items[1]?.runtime_id).toBeNull()
-    expect(result.items[1]?.links.checkpoint_path).toBeNull()
-    expect(result.items[0]?.exact_evidence?.before_checkpoint_bytes).toBe(4096)
-    expect(result.items[0]?.compaction_outcome).toBe('checkpoint_committed')
-    expect(result.items[0]?.cause).toBe('compaction completion dispatch failed')
-    expect(result.items[2]?.compaction_outcome).toBe('checkpoint_committed')
-    expect(result.items[2]?.exact_evidence?.before_checkpoint_bytes).toBe(2048)
-    expect(result.items[2]?.cause).toBe('lifecycle cleanup failed')
-    expect(result.items).toHaveLength(3)
-    expect(result.items.some(item => item.trace_id === 'trace-contradictory')).toBe(false)
-
-    await fetchKeeperCompactionSnapshots('keeper-alpha', 2, { refresh: true })
-    expect(fetchMock.mock.calls[1]?.[0]).toBe(
-      '/api/v1/keepers/keeper-alpha/compaction-snapshots?limit=2&refresh=true',
-    )
   })
 })
 
@@ -744,7 +784,7 @@ describe('parseMemoryOsFactCategory (SSOT mirror of category_of_string)', () => 
   })
 })
 
-describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel-real-data §4a)', () => {
+describe('decodeMemoryOsFact via fetchKeeperTurnRecords', () => {
   function turnRecordsPayload() {
     const first = {
       memory_id: 'id:retention-d0',
@@ -769,6 +809,9 @@ describe('decodeMemoryOsFact via fetchKeeperTurnRecords (RFC-keeper-memory-panel
       durable_store: '.masc/keepers/keeper-alpha/turn-records',
       dashboard_surface: '/api/v1/keepers/:name/turn-records',
       freshness_slo_s: 300,
+      live_turn_in_progress: false,
+      live_turn_started_at_unix: null,
+      live_turn_last_progress_at_unix: null,
       latest_ts_unix: null,
       latest_ts_iso: null,
       latest_age_s: null,
@@ -1012,12 +1055,12 @@ describe('fetchTlcResults', () => {
 })
 
 describe('fetchDashboardTools', () => {
-  it('parses the shutdown admission source without accepting source drift', () => {
-    expect(parseDashboardKeeperWaitingSource('turn_admission_shutdown')).toBe('turn_admission_shutdown')
-    expect(parseDashboardKeeperWaitingSource('chat_queue_recovery_required')).toBe('chat_queue_recovery_required')
-    expect(parseDashboardKeeperWaitingSource('chat_queue_persistence_blocked')).toBe('chat_queue_persistence_blocked')
-    expect(parseDashboardKeeperWaitingSource(' turn_admission_shutdown ')).toBeNull()
-    expect(parseDashboardKeeperWaitingSource('turn_admission_stopping')).toBeNull()
+  it('parses the owner shutdown source without accepting source drift', () => {
+    expect(parseDashboardKeeperWaitingSource('owner_shutdown')).toBe('owner_shutdown')
+    expect(parseDashboardKeeperWaitingSource('chat_operation_queued')).toBe('chat_operation_queued')
+    expect(parseDashboardKeeperWaitingSource('chat_operation_running')).toBe('chat_operation_running')
+    expect(parseDashboardKeeperWaitingSource(' owner_shutdown ')).toBeNull()
+    expect(parseDashboardKeeperWaitingSource('owner_stopping')).toBeNull()
     expect(parseDashboardKeeperWaitingSource(null)).toBeNull()
   })
 
@@ -1062,7 +1105,7 @@ describe('fetchDashboardTools', () => {
           { name: 'tool_c', tier: 'essential' },
         ],
       },
-      tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, dispatch_v2_enabled: false, registered_count: 3 },
+      tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, registered_count: 3 },
     }
 
     const fetchMock = vi.fn().mockResolvedValue(
@@ -1096,7 +1139,7 @@ describe('fetchDashboardTools', () => {
           { name: 'tool_with_surfaces', surfaces: ['public_mcp'] },
         ],
       },
-      tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, dispatch_v2_enabled: false, registered_count: 2 },
+      tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, registered_count: 2 },
     }
 
     const fetchMock = vi.fn().mockResolvedValue(
@@ -1118,7 +1161,7 @@ describe('fetchDashboardTools', () => {
     const tools = [{ name: 'tool_x' }]
     const rawResponse = {
       tool_inventory: { tools },
-      tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, dispatch_v2_enabled: false, registered_count: 1 },
+      tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, registered_count: 1 },
     }
 
     const fetchMock = vi.fn().mockResolvedValue(
@@ -1138,61 +1181,10 @@ describe('fetchDashboardTools', () => {
     expect(tools[0]).not.toHaveProperty('tier')
   })
 
-  it('normalizes drifted scheduled automation projection fields', async () => {
-    const rawResponse = {
-      tool_inventory: { tools: [] },
-      tool_usage: {
-        total_calls: 0,
-        distinct_tools_called: 0,
-        top_20: [],
-        never_called_count: 0,
-        dispatch_v2_enabled: false,
-        registered_count: 1,
-      },
-      scheduled_automation: {
-        schema: 'masc.dashboard.scheduled_automation.v1',
-        source: 'schedule_store',
-        generated_at: '2026-06-21T00:00:00Z',
-        request_count: null,
-        request_limit: null,
-        truncated: null,
-        counts: null,
-        fsm: null,
-        signals: null,
-        requests: null,
-      },
-    }
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(rawResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchDashboardTools()
-
-    expect(result.scheduled_automation).toBeDefined()
-    expect(result.scheduled_automation?.counts).toEqual({})
-    expect(result.scheduled_automation?.signals).toEqual([])
-    expect(result.scheduled_automation?.requests).toEqual([])
-    expect(result.scheduled_automation?.warnings).toEqual([])
-    expect(result.scheduled_automation?.fsm).toEqual({
-      state: 'unknown',
-      active_count: 0,
-      terminal_count: 0,
-      next_due_at: null,
-    })
-    expect(result.scheduled_automation?.request_count).toBe(0)
-    expect(result.scheduled_automation?.request_limit).toBe(0)
-    expect(result.scheduled_automation?.truncated).toBe(false)
-  })
-
   it('handles missing tool_inventory gracefully', async () => {
     const rawResponse = {
       tool_inventory: {},
-      tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, dispatch_v2_enabled: false, registered_count: 0 },
+      tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, registered_count: 0 },
     }
 
     const fetchMock = vi.fn().mockResolvedValue(
@@ -1215,7 +1207,6 @@ describe('fetchDashboardTools', () => {
         distinct_tools_called: 0,
         top_20: [],
         never_called_count: 0,
-        dispatch_v2_enabled: false,
         registered_count: 0,
         source: 'tool_usage',
         health: 'coverage_gap',
@@ -1261,6 +1252,15 @@ describe('fetchDashboardFullHealth', () => {
   it('uses the full health path', async () => {
     const rawResponse = {
       health_detail: 'full',
+      full_health_snapshot: {
+        status: 'ready',
+        stale_reason: null,
+        last_good_available: true,
+        component_timed_out: false,
+      },
+      overall_status: 'degraded',
+      operator_action_required: true,
+      operator_action_reasons: ['keeper_fleet_safety', 'keeper_event_queue'],
       schedule_runner: {
         schema: 'masc.schedule.runner_status.v1',
         status: 'ok',
@@ -1280,6 +1280,28 @@ describe('fetchDashboardFullHealth', () => {
         last_success_age_sec: 12.5,
         last_error_age_sec: null,
       },
+      keeper_event_queue: {
+        schema: 'masc.keeper_event_queue.fleet_summary.v4',
+        status: 'degraded',
+        operator_action_required: true,
+        status_reasons: ['runnable_backlog', 'runnable_backlog_stale'],
+        backlog_clean: false,
+        storage_integrity: {
+          status: 'ok',
+          counts_complete: true,
+          read_error_count: 0,
+          transition_outbox_count: 0,
+          operator_action_required: false,
+        },
+        work_liveness: {
+          status: 'degraded',
+          state: 'stalled',
+          runnable_backlog_count: 18,
+          runnable_oldest_age_seconds: 3360,
+          stale_after_seconds: 300,
+          operator_action_required: true,
+        },
+      },
     }
 
     const fetchMock = vi.fn().mockResolvedValue(
@@ -1294,6 +1316,17 @@ describe('fetchDashboardFullHealth', () => {
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/health?full=1')
     expect(result.health_detail).toBe('full')
+    expect(result).toMatchObject({
+      full_health_snapshot: {
+        status: 'ready',
+        stale_reason: null,
+        last_good_available: true,
+        component_timed_out: false,
+      },
+      overall_status: 'degraded',
+      operator_action_required: true,
+      operator_action_reasons: ['keeper_fleet_safety', 'keeper_event_queue'],
+    })
     expect(result.schedule_runner).toMatchObject({
       schema: 'masc.schedule.runner_status.v1',
       status: 'ok',
@@ -1307,6 +1340,45 @@ describe('fetchDashboardFullHealth', () => {
       last_tick_age_sec: 12.5,
       last_error_age_sec: null,
     })
+    expect(result.keeper_event_queue).toMatchObject({
+      status: 'degraded',
+      backlog_clean: false,
+      storage_integrity: { status: 'ok', counts_complete: true },
+      work_liveness: {
+        status: 'degraded',
+        state: 'stalled',
+        runnable_backlog_count: 18,
+      },
+    })
+  })
+
+  it('preserves the backend blocked queue liveness state', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        keeper_event_queue: {
+          status: 'warning',
+          operator_action_required: false,
+          status_reasons: ['non_runnable_backlog'],
+          backlog_clean: false,
+          work_liveness: {
+            status: 'warning',
+            state: 'blocked',
+            runnable_backlog_count: 0,
+            runnable_oldest_age_seconds: null,
+            stale_after_seconds: 300,
+            operator_action_required: false,
+          },
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    const result = await fetchDashboardFullHealth()
+
+    expect(result.keeper_event_queue?.work_liveness?.state).toBe('blocked')
+    expect(result.keeper_event_queue?.work_liveness?.runnable_backlog_count).toBe(0)
   })
 
   it('normalizes invalid schedule_runner values safely', async () => {
@@ -1472,6 +1544,7 @@ describe('fetchTelemetrySummary', () => {
       retention: { window_days: 7 },
       query: { source: 'tool_metric', n: 100 },
       count: 1,
+      offset: 0,
       total_matching_entries: 2,
       truncated: true,
       entries: [
@@ -1498,6 +1571,7 @@ describe('fetchTelemetrySummary', () => {
     expect(result.source).toBe('telemetry_unified')
     expect(result.retention).toMatchObject({ window_days: 7 })
     expect(result.query).toMatchObject({ source: 'tool_metric', n: 100 })
+    expect(result.offset).toBe(0)
     expect(result.total_matching_entries).toBe(2)
     expect(result.truncated).toBe(true)
   })
@@ -1607,7 +1681,7 @@ describe('fetchTelemetrySummary', () => {
 })
 
 describe('fetchDashboardMemory', () => {
-  it('requests vote-blind dashboard board rows for the current actor', async () => {
+  it('requests dashboard board rows for the current actor', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ posts: [] }), {
         status: 200,
@@ -1621,17 +1695,60 @@ describe('fetchDashboardMemory', () => {
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('/api/v1/dashboard/board?')
     expect(url).toContain('voter=')
-    expect(url).toContain('blind_votes=true')
   })
 })
 
 describe('fetchDashboardGate', () => {
+  const gateHitl = {
+    gate_mode: { mode: 'manual', configured: true, state: 'ready' },
+    judge_lane: { status: 'available', lane_id: 'gate-judge', slots: ['judge'] },
+  } as const
+
+  const emptyResolvedHistory = {
+    recent_resolved: [],
+    recent_resolved_page: {
+      returned: 0,
+      matched: 0,
+      limit: 20,
+      window_minutes: 1440,
+      truncated: false,
+      scan_exhausted: false,
+    },
+    recent_resolved_state: { state: 'ready' },
+  } as const
+
+  function currentResolvedRow(overrides: Record<string, unknown> = {}) {
+    const decisionKind = overrides.decision_kind === 'reject' ? 'reject' : 'approve'
+    return {
+      id: 'appr-current',
+      event: 'resolved',
+      keeper_name: 'keeper-a',
+      tool_name: 'fs_write',
+      decision: decisionKind === 'approve' ? 'approve' : 'reject:operator denied',
+      decision_kind: decisionKind,
+      decision_reason: decisionKind === 'approve' ? null : 'operator denied',
+      resolved_at: 1_782_522_123,
+      turn_id: null,
+      task_id: null,
+      goal_id: null,
+      goal_ids: [],
+      actor: 'operator',
+      decision_source: 'human_operator',
+      summary_status: 'not_requested',
+      exact_attempt: { state: 'unbound' },
+      ...overrides,
+    }
+  }
+
   it('requests a forced Gate snapshot when asked', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         approval_queue: [],
         approval_queue_state: { state: 'ready' },
-        recent_resolved: [],
+        ...emptyResolvedHistory,
+        approval_rules: [],
+        approval_rules_state: { state: 'ready' },
+        hitl: gateHitl,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1651,7 +1768,7 @@ describe('fetchDashboardGate', () => {
         approval_queue: [],
         approval_queue_state: { state: 'ready' },
         recent_resolved: [
-          {
+          currentResolvedRow({
             id: 'appr-done',
             keeper_name: 'keeper-a',
             tool_name: 'fs_write',
@@ -1659,16 +1776,29 @@ describe('fetchDashboardGate', () => {
             decision_kind: 'reject',
             decision_reason: 'operator denied',
             resolved_at: 1_782_522_123,
-          },
-          {
+          }),
+          currentResolvedRow({
             id: 'appr-approved',
             keeper_name: 'keeper-a',
             tool_name: 'shell_exec',
             decision: 'approve',
             decision_kind: 'approve',
+            actor: null,
             resolved_at: 1_782_522_183,
-          },
+          }),
         ],
+        recent_resolved_page: {
+          returned: 2,
+          matched: 2,
+          limit: 20,
+          window_minutes: 1440,
+          truncated: false,
+          scan_exhausted: false,
+        },
+        recent_resolved_state: { state: 'ready' },
+        approval_rules: [],
+        approval_rules_state: { state: 'ready' },
+        hitl: gateHitl,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1695,6 +1825,7 @@ describe('fetchDashboardGate', () => {
         decision: 'approve',
         decision_raw: 'approve',
         decision_reason: null,
+        actor: null,
         resolved_at: '2026-06-27T01:03:03.000Z',
       }),
     ])
@@ -1706,14 +1837,19 @@ describe('fetchDashboardGate', () => {
       new Response(JSON.stringify({
         approval_queue: [],
         approval_queue_state: { state: 'ready' },
-        recent_resolved: [],
+        ...emptyResolvedHistory,
+        approval_rules_state: { state: 'ready' },
         approval_rules: [{
           id: 'rule-1',
           keeper_name: 'keeper-a',
           tool_name: 'fs_write',
-          request_fingerprint: 'abcdef1234567890',
+          request_fingerprint: 'a'.repeat(64),
           created_at: 1_783_123_200,
+          created_by: 'operator',
+          source_approval_id: 'appr-1',
+          expires_at: null,
         }],
+        hitl: gateHitl,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1725,16 +1861,61 @@ describe('fetchDashboardGate', () => {
 
     expect(result.approval_rules).toEqual([
       expect.objectContaining({
-        request_fingerprint: 'abcdef1234567890',
-        created_at: '2026-07-04T00:00:00.000Z',
+        request_fingerprint: 'a'.repeat(64),
+        created_at: 1_783_123_200,
+        expires_at: null,
       }),
     ])
   })
 
-  // The resolved history is capped by the server. Without the page bounds a
-  // client renders a slice as the whole history, so a page that is absent or
-  // incomplete must normalize to null ("completeness unknown") rather than to
-  // a zeroed record that reads as "this is everything".
+  it('preserves approval rule-store unavailability', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        approval_queue: [],
+        approval_queue_state: { state: 'ready' },
+        ...emptyResolvedHistory,
+        approval_rules: [],
+        approval_rules_state: {
+          state: 'unavailable',
+          error: 'approval rules store unreadable',
+        },
+        hitl: gateHitl,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    const result = await fetchDashboardGate()
+
+    expect(result.approval_rules_state).toEqual({
+      state: 'unavailable',
+      error: 'approval rules store unreadable',
+    })
+  })
+
+  it('rejects a malformed approval rule instead of dropping it', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        approval_queue: [],
+        approval_queue_state: { state: 'ready' },
+        ...emptyResolvedHistory,
+        approval_rules_state: { state: 'ready' },
+        approval_rules: [{
+          id: 'rule-invalid',
+          keeper_name: 'keeper-a',
+          tool_name: 'fs_write',
+          request_fingerprint: 'not-a-sha256',
+          created_at: 1_783_123_200,
+          created_by: null,
+          source_approval_id: null,
+          expires_at: null,
+        }],
+        hitl: gateHitl,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    await expect(fetchDashboardGate()).rejects.toThrow('approval_rules contains an invalid rule')
+  })
+
+  // Rows, bounds, and availability form one exact current snapshot contract.
   function gateResponseWithPage(page: unknown) {
     return vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
@@ -1742,6 +1923,10 @@ describe('fetchDashboardGate', () => {
         approval_queue_state: { state: 'ready' },
         recent_resolved: [],
         recent_resolved_page: page,
+        recent_resolved_state: { state: 'ready' },
+        approval_rules: [],
+        approval_rules_state: { state: 'ready' },
+        hitl: gateHitl,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1751,27 +1936,27 @@ describe('fetchDashboardGate', () => {
 
   it('normalizes a complete resolved-history page', async () => {
     vi.stubGlobal('fetch', gateResponseWithPage({
-      returned: 20,
-      matched: 149,
+      returned: 0,
+      matched: 0,
       limit: 20,
       window_minutes: 1440,
-      truncated: true,
+      truncated: false,
       scan_exhausted: false,
     }))
 
     const result = await fetchDashboardGate()
 
     expect(result.recent_resolved_page).toEqual({
-      returned: 20,
-      matched: 149,
+      returned: 0,
+      matched: 0,
       limit: 20,
       window_minutes: 1440,
-      truncated: true,
+      truncated: false,
       scan_exhausted: false,
     })
   })
 
-  it('rejects a partial resolved-history page instead of defaulting it', async () => {
+  it('rejects a partial resolved-history page', async () => {
     vi.stubGlobal('fetch', gateResponseWithPage({
       returned: 20,
       matched: 149,
@@ -1779,17 +1964,13 @@ describe('fetchDashboardGate', () => {
       // window_minutes and the two flags are missing: an older server, or drift.
     }))
 
-    const result = await fetchDashboardGate()
-
-    expect(result.recent_resolved_page).toBeNull()
+    await expect(fetchDashboardGate()).rejects.toThrow('ready recent_resolved_page is invalid')
   })
 
-  it('reports an absent resolved-history page as unknown, not as a full history', async () => {
+  it('rejects an absent resolved-history page', async () => {
     vi.stubGlobal('fetch', gateResponseWithPage(undefined))
 
-    const result = await fetchDashboardGate()
-
-    expect(result.recent_resolved_page).toBeNull()
+    await expect(fetchDashboardGate()).rejects.toThrow('ready recent_resolved_page is invalid')
   })
 
   it('rejects a resolved-history page with a nonsensical window', async () => {
@@ -1802,9 +1983,35 @@ describe('fetchDashboardGate', () => {
       scan_exhausted: false,
     }))
 
+    await expect(fetchDashboardGate()).rejects.toThrow('ready recent_resolved_page is invalid')
+  })
+
+  it('preserves resolved-history storage unavailability', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        approval_queue: [],
+        approval_queue_state: { state: 'ready' },
+        recent_resolved: null,
+        recent_resolved_page: null,
+        recent_resolved_state: {
+          state: 'unavailable',
+          stage: 'list_recent_resolved',
+          error: 'audit JSONL unreadable',
+        },
+        approval_rules: [],
+        approval_rules_state: { state: 'ready' },
+        hitl: gateHitl,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
     const result = await fetchDashboardGate()
 
-    expect(result.recent_resolved_page).toBeNull()
+    expect(result.recent_resolved).toBeNull()
+    expect(result.recent_resolved_state).toEqual({
+      state: 'unavailable',
+      stage: 'list_recent_resolved',
+      error: 'audit JSONL unreadable',
+    })
   })
 
   it('preserves typed unavailable queue state without fabricating an empty ready queue', async () => {
@@ -1819,7 +2026,10 @@ describe('fetchDashboardGate', () => {
           severity: 'bad',
           icon: '!',
         },
-        recent_resolved: [],
+        ...emptyResolvedHistory,
+        approval_rules: [],
+        approval_rules_state: { state: 'ready' },
+        hitl: gateHitl,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1894,7 +2104,10 @@ describe('fetchDashboardGate', () => {
           },
         ],
         approval_queue_state: { state: 'ready' },
-        recent_resolved: [],
+        ...emptyResolvedHistory,
+        approval_rules: [],
+        approval_rules_state: { state: 'ready' },
+        hitl: gateHitl,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1910,7 +2123,7 @@ describe('fetchDashboardGate', () => {
     ])
   })
 
-  it('carries judge evidence on resolved rows and null for pre-enrichment events', async () => {
+  it('carries judge evidence on resolved rows', async () => {
     const judgeSummary = {
       summary_version: 2,
       generated_at: 1_782_522_120,
@@ -1925,7 +2138,7 @@ describe('fetchDashboardGate', () => {
         approval_queue: [],
         approval_queue_state: { state: 'ready' },
         recent_resolved: [
-          {
+          currentResolvedRow({
             id: 'appr-judged',
             keeper_name: 'keeper-a',
             tool_name: 'shell_exec',
@@ -1946,18 +2159,20 @@ describe('fetchDashboardGate', () => {
               status: 'completed',
               quarantine_cause: null,
             },
-          },
-          {
-            id: 'appr-legacy',
-            keeper_name: 'keeper-a',
-            tool_name: 'fs_write',
-            decision: 'approve',
-            decision_kind: 'approve',
-            resolved_at: 1_782_522_100,
-            summary_status: null,
-            exact_attempt: null,
-          },
+          }),
         ],
+        recent_resolved_page: {
+          returned: 1,
+          matched: 1,
+          limit: 20,
+          window_minutes: 1440,
+          truncated: false,
+          scan_exhausted: false,
+        },
+        recent_resolved_state: { state: 'ready' },
+        approval_rules: [],
+        approval_rules_state: { state: 'ready' },
+        hitl: gateHitl,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1976,16 +2191,15 @@ describe('fetchDashboardGate', () => {
     expect(
       judged?.exact_attempt?.state === 'bound' ? judged.exact_attempt.slot_id : null,
     ).toBe('glm-coding.glm-5-turbo')
-    const legacy = result.recent_resolved?.find(item => item.id === 'appr-legacy')
-    expect(legacy?.summary_status).toBeNull()
-    expect(legacy?.exact_attempt).toBeNull()
   })
 
-  it('parses the closed judge_lane variant and drops shapes outside it', async () => {
+  it('parses the closed judge_lane variant and rejects shapes outside it', async () => {
     const snapshot = (judgeLane: unknown) => new Response(JSON.stringify({
       approval_queue: [],
       approval_queue_state: { state: 'ready' },
-      recent_resolved: [],
+      ...emptyResolvedHistory,
+      approval_rules: [],
+      approval_rules_state: { state: 'ready' },
       hitl: {
         gate_mode: { mode: 'auto_judge', configured: false, state: 'ready' },
         judge_lane: judgeLane,
@@ -2022,7 +2236,141 @@ describe('fetchDashboardGate', () => {
       lane_id: 'hitl_auto_judge',
       slots: [],
     })))
-    expect((await fetchDashboardGate()).hitl?.judge_lane).toBeUndefined()
+    await expect(fetchDashboardGate()).rejects.toThrow('hitl.judge_lane.slots is invalid')
+  })
+})
+
+describe('Gate mutation audit receipts', () => {
+  it('keeps a committed resolution successful while decoding failed audit writes', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        id: 'appr-audit',
+        decision: 'approve',
+        rule_id: null,
+        audit_receipts: [{
+          event: 'resolved',
+          recorded: false,
+          stage: 'append',
+          detail: 'audit append unavailable',
+        }],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    await expect(resolveGateApproval('appr-audit', {
+      decision: 'approve',
+      rememberRule: false,
+    })).resolves.toMatchObject({
+      ok: true,
+      audit_receipts: [{ recorded: false, stage: 'append' }],
+    })
+  })
+
+  it('rejects a committed resolution response that hides its audit receipt', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        id: 'appr-audit',
+        decision: 'approve',
+        rule_id: null,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    await expect(resolveGateApproval('appr-audit', {
+      decision: 'approve',
+      rememberRule: false,
+    })).rejects.toMatchObject({
+      name: 'ApiRequestError',
+      errorCode: 'protocol_drift',
+    })
+  })
+
+  it('decodes a committed rule deletion with its exact failed audit stage', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        id: 'rule-audit',
+        audit: {
+          event: 'rule_deleted',
+          recorded: false,
+          stage: 'store_create',
+          detail: 'audit store unavailable',
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    await expect(deleteGateApprovalRule('rule-audit')).resolves.toMatchObject({
+      ok: true,
+      audit: { recorded: false, stage: 'store_create' },
+    })
+  })
+
+  it('rejects a resolution receipt for an unrelated mutation', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        id: 'appr-audit',
+        decision: 'approve',
+        rule_id: null,
+        audit_receipts: [{ event: 'pending', recorded: true }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    await expect(resolveGateApproval('appr-audit', {
+      decision: 'approve',
+      rememberRule: false,
+    })).rejects.toMatchObject({ errorCode: 'protocol_drift' })
+  })
+
+  it('rejects a rule deletion receipt for an unrelated mutation', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        id: 'rule-audit',
+        audit: { event: 'resolved', recorded: true },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    await expect(deleteGateApprovalRule('rule-audit'))
+      .rejects.toMatchObject({ errorCode: 'protocol_drift' })
+  })
+
+  it('preserves a recorded resolution receipt with cleanup failure evidence', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        id: 'appr-cleanup',
+        decision: 'approve',
+        rule_id: null,
+        audit_receipts: [{
+          event: 'resolved',
+          recorded: true,
+          cleanup_failure: {
+            stage: 'append_cleanup',
+            detail: 'descriptor cleanup failed',
+          },
+        }],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+
+    await expect(resolveGateApproval('appr-cleanup', {
+      decision: 'approve',
+      rememberRule: false,
+    })).resolves.toMatchObject({
+      audit_receipts: [{
+        recorded: true,
+        cleanup_failure: { stage: 'append_cleanup' },
+      }],
+    })
   })
 })
 
@@ -2202,7 +2550,6 @@ describe('dashboard goals decoding', () => {
       tree: [makeRawGoalNode()],
       summary: {
         total_goals: 3,
-        active_goals: 2,
         phase_counts: { executing: 1, blocked: 1, completed: 1 },
       },
     }
@@ -2217,94 +2564,7 @@ describe('dashboard goals decoding', () => {
 
     const result = await fetchDashboardGoalsTree()
 
-    expect(result.summary.active_goals).toBe(2)
     expect(result.summary.phase_counts).toEqual({ executing: 1, blocked: 1, completed: 1 })
-  })
-
-  it('decodes goal attainment projections on tree payloads', async () => {
-    const rawResponse = {
-      approval_queue_state: { state: 'ready' },
-      tree: [
-        makeRawGoalNode({
-          metric: 'completion_pct',
-          target_value: '75%',
-          attainment: {
-            state: 'attained',
-            basis: 'metric_target_percent',
-            metric: 'completion_pct',
-            target_value: '75%',
-            target_parse_status: 'parseable',
-            unit: 'percent',
-            observed_value: 75,
-            target_numeric: 75,
-            attainment_pct: 100,
-            task_done_count: 3,
-            task_count: 4,
-            note: 'Derived from linked task completion against a percent target.',
-          },
-        }),
-      ],
-      summary: {},
-    }
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(rawResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchDashboardGoalsTree()
-
-    expect(result.tree[0]?.attainment).toMatchObject({
-      state: 'attained',
-      basis: 'metric_target_percent',
-      metric: 'completion_pct',
-      target_value: '75%',
-      target_parse_status: 'parseable',
-      unit: 'percent',
-      observed_value: 75,
-      target_numeric: 75,
-      attainment_pct: 100,
-      task_done_count: 3,
-      task_count: 4,
-    })
-  })
-
-  it('falls back to unmeasured goal attainment when payloads are old', async () => {
-    const rawResponse = {
-      approval_queue_state: { state: 'ready' },
-      tree: [
-        makeRawGoalNode({
-          metric: 'latency',
-          target_value: 'fast enough',
-          task_done_count: 1,
-          task_count: 2,
-        }),
-      ],
-      summary: {},
-    }
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(rawResponse), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchDashboardGoalsTree()
-
-    expect(result.tree[0]?.attainment).toMatchObject({
-      state: 'unmeasured',
-      basis: 'unmeasured',
-      metric: 'latency',
-      target_value: 'fast enough',
-      target_parse_status: 'unparseable',
-      task_done_count: 1,
-      task_count: 2,
-    })
   })
 
   it('retains keeper trust summary and latest event on goal detail payloads', async () => {
@@ -2317,7 +2577,6 @@ describe('dashboard goals decoding', () => {
           name: 'keeper-sangsu',
           agent_name: 'sangsu',
           current_task_id: 'task-1',
-          active_goal_ids: ['goal-1'],
           sandbox_profile: 'docker',
           network_mode: 'none',
           runtime_id: 'keeper_unified',
@@ -2451,7 +2710,6 @@ describe('dashboard goals decoding', () => {
           name: 'keeper-sangsu',
           agent_name: 'sangsu',
           current_task_id: null,
-          active_goal_ids: ['goal-1'],
           sandbox_profile: 'docker',
           network_mode: 'none',
           runtime_id: 'keeper_unified',
@@ -2510,9 +2768,9 @@ describe('fetchKeeperConfig', () => {
   it('normalizes singleton and boolean string fields with a canonical context override', async () => {
     const rawResponse = {
       name: 'keeper-sangsu',
-      active_goal_ids: ['goal-runtime'],
       autoboot_enabled: 'false',
       max_context_override: 64_000,
+      autonomous_wake_prompt: '백로그를 확인하고 하나 진행해.',
       sandbox_profile: 'docker',
       network_mode: 'none',
       sandbox_last_error: 'sandbox docker exec failed',
@@ -2540,19 +2798,12 @@ describe('fetchKeeperConfig', () => {
       proactive: {
         enabled: 'true',
       },
-      drift: {
-        status: 'wired',
-        enabled: 'true',
-        min_turn_gap: '4',
-        count_total: '2',
-        last_reason: 'board quiet',
-      },
       hooks: {
         scope: 'keeper_runtime_composite',
         slots: {
           pre_tool_use: {
             active: 'true',
-            source: 'keeper_hooks_oas',
+            source: 'keeper_hooks_agentCore',
             features: 'tool_start_timing',
           },
         },
@@ -2574,12 +2825,6 @@ describe('fetchKeeperConfig', () => {
       workspace: {
         mention_targets: 'sangsu',
         bound_workspace_ids: 'default',
-        active_goal_ids: ['goal-runtime'],
-        active_goals: [
-          { id: 'goal-runtime', title: 'Ship runtime clarity' },
-        ],
-        active_goal_count: '1',
-        missing_active_goal_ids: [],
       },
       sources: {
         live_meta_path: '/tmp/.masc/keepers/keeper-sangsu/live.json',
@@ -2620,6 +2865,7 @@ describe('fetchKeeperConfig', () => {
     expect(result.allowed_paths).toEqual(['/tmp/workspace'])
     expect(result.autoboot_enabled).toBe(false)
     expect(result.max_context_override).toBe(64000)
+    expect(result.autonomous_wake_prompt).toBe('백로그를 확인하고 하나 진행해.')
     expect(result.sandbox_profile).toBe('docker')
     expect(result.network_mode).toBe('none')
     expect(result.sandbox_last_error).toBe('sandbox docker exec failed')
@@ -2634,9 +2880,6 @@ describe('fetchKeeperConfig', () => {
     expect(result.metrics.total_cost_usd).toBe(0.12)
     expect(result.runtime.runtime_blocker_class).toBe('stale_termination_storm')
     expect(result.runtime.runtime_blocker_summary).toBe('Fleet batch paused after stale termination storm.')
-    expect(result.active_goal_ids).toEqual(['goal-runtime'])
-    expect(result.workspace.active_goal_ids).toEqual(['goal-runtime'])
-    expect(result.workspace.active_goals[0]?.title).toBe('Ship runtime clarity')
     expect(result.runtime_trust?.disposition).toBe('Pass')
     expect(result.field_presence?.present_paths).toContain('prompt.system_prompt_blocks.capabilities.text')
     expect(result.field_presence?.producer).toBe('dashboard-keeper-config.normalizer')
@@ -2679,6 +2922,19 @@ describe('fetchKeeperConfig', () => {
     await expect(fetchKeeperConfig('keeper-sangsu')).rejects.toThrowError(
       'Invalid keeper config response: max_context_override must be a positive safe integer or null',
     )
+  })
+
+  it('decodes an absent autonomous_wake_prompt as inherit (null)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"name":"keeper-sangsu","max_context_override":null}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperConfig('keeper-sangsu')
+    expect(result.autonomous_wake_prompt).toBeNull()
   })
 
   it('tracks raw keeper config field presence before defaults are normalized', async () => {
@@ -2778,17 +3034,10 @@ describe('fetchKeeperConfig', () => {
       ['provider_runtime_error', '런타임 호출 오류'],
       ['fiber_unresolved', 'Fiber 미해결'],
       ['stale_turn_timeout', '오래된 턴 만료'],
-      ['awaiting_operator', '운영자 조치 대기'],
-      ['awaiting_sandbox_egress', '샌드박스 egress 대기'],
-      ['supervisor_paused', 'Supervisor 일시정지'],
-      ['synthetic_stall', '합성 상태 정체'],
-      ['self_imposed_idle', '자체 대기'],
-      ['sdk_context_window_exceeded', 'SDK 컨텍스트 윈도 초과'],
-      ['sdk_unrecognized_stop_reason', 'SDK 미식별 정지 사유'],
-      ['sdk_idle_detected', 'SDK Idle 감지'],
-      ['sdk_guardrail_violation', 'SDK 가드레일 위반'],
-      ['sdk_tripwire_violation', 'SDK Tripwire 위반'],
-      ['sdk_exit_condition_met', 'SDK 종료 조건 충족'],
+      ['agent_core_context_window_exceeded', 'Agent Core 컨텍스트 윈도 초과'],
+      ['agent_core_unrecognized_stop_reason', 'Agent Core 미식별 정지 사유'],
+      ['agent_core_guardrail_violation', 'Agent Core 가드레일 위반'],
+      ['agent_core_tripwire_violation', 'Agent Core Tripwire 위반'],
     ] as const
 
     for (const [blockerClass, label] of cases) {
@@ -2856,17 +3105,63 @@ describe('keeper config mutation API', () => {
 })
 
 describe('dashboard runtime probe API', () => {
+  function runtimeProbeWire() {
+    return {
+      generated_at: '2026-06-10T12:00:00Z',
+      refreshed_at_unix: 1781092800,
+      cache_ttl_sec: 30,
+      cache_age_sec: 0.5,
+      cache_hit: true,
+      refresh_state: 'fresh',
+      probe: {
+        source: 'runtime.toml',
+        status: 'reachable',
+        probe_ok: true,
+        checked_at: '2026-06-10T12:00:00Z',
+        summary: {
+          runtimes: 1,
+          probed: 1,
+          reachable: 1,
+          failed: 0,
+          skipped: 0,
+          default_runtime_id: 'runpod.qwen',
+        },
+        providers: [
+          {
+            runtime_id: 'runpod.qwen',
+            provider_id: 'runpod',
+            provider_display_name: 'RunPod',
+            model_id: 'qwen',
+            model_api_name: 'Qwen/Qwen3-32B',
+            protocol: 'openai-compatible-http',
+            runtime_kind: 'http',
+            transport: 'http',
+            auth_kind: 'env:RUNPOD_API_KEY',
+            credential_required: true,
+            auth_present: true,
+            status: 'reachable',
+            reachable: true,
+            http_status: 200,
+            latency_ms: 42.5,
+            model_count: 1,
+            content_type: 'application/json',
+            downloaded_bytes: 128,
+            endpoint_url: 'https://example.invalid/v1',
+            probe_url: 'https://example.invalid/v1/models',
+            error: null,
+            checked_at: '2026-06-10T12:00:00Z',
+          },
+        ],
+        errors: [],
+        observations: ['runtime.toml provider reachability: 1 reachable, 0 failed, 0 skipped'],
+        limitations: ['Probe checks provider metadata endpoints only; it does not send a completion request.'],
+      },
+    }
+  }
+
   it('ensures dashboard auth before fetching runtime probe status', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        generated_at: '2026-06-10T12:00:00Z',
-        probe: {
-          status: 'ok',
-          probe_ok: true,
-          summary: { runtimes: 1, reachable: 1, failed: 0 },
-          providers: [],
-        },
-      }), {
+      new Response(JSON.stringify(runtimeProbeWire()), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -2883,9 +3178,57 @@ describe('dashboard runtime probe API', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/runtime-probe?force=1')
     expect(result.probe?.probe_ok).toBe(true)
   })
+
+  it('rejects legacy KV-cache fields at the API boundary', async () => {
+    const legacy = runtimeProbeWire()
+    Object.assign(legacy.probe, { kv_cache_assessment: { signal: 'likely_reused' } })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(legacy), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    await expect(fetchDashboardRuntimeProbe()).rejects.toThrow(
+      'runtime_probe schema drift',
+    )
+  })
+
+  it('rejects unknown provider status values at the API boundary', async () => {
+    const unknownStatus = runtimeProbeWire()
+    const provider = unknownStatus.probe.providers[0]
+    if (provider) provider.status = 'healthy'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(unknownStatus), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    await expect(fetchDashboardRuntimeProbe()).rejects.toThrow(
+      'runtime_probe schema drift',
+    )
+  })
 })
 
 describe('runtime.toml raw config API', () => {
+  const providerProtocols = [
+    {
+      protocol: 'openai-compatible-http',
+      transport: 'endpoint',
+      semantics: 'http_provider',
+      credential_policy: 'optional',
+      requires_non_interactive: false,
+    },
+    {
+      protocol: 'codex-app-server',
+      transport: 'command',
+      semantics: 'official_client',
+      credential_policy: 'forbidden',
+      requires_non_interactive: true,
+    },
+  ]
+
   it('fetches and normalizes the raw runtime.toml source', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
@@ -2893,7 +3236,33 @@ describe('runtime.toml raw config API', () => {
         path: '/tmp/.masc/config/runtime.toml',
         file_name: 'runtime.toml',
         source_text: '[runtime]\ndefault = "runpod_mtp.qwen"\n',
-        reloaded: false,
+        application: {
+          operation: 'read',
+          routing: { status: 'active', requires_restart: false, applied_at: null },
+          keeper_overlay: {
+            status: 'not_configured',
+            requires_restart: false,
+            applied_at: null,
+            configured_count: 0,
+            pending_keys: [],
+            applied_keys: [],
+            preempted_keys: [],
+          },
+        },
+        keeper_settings: [{
+          key: 'memory_os.librarian_enabled',
+          env: 'MASC_KEEPER_MEMORY_OS_LIBRARIAN',
+          configured_value: 'invalid',
+          source: 'env',
+          effective_value: null,
+          effective_error: 'expected a boolean',
+          applied_at: null,
+          reload_class: 'restart',
+          requires_restart: false,
+          application_status: 'invalid',
+          consumers: ['Keeper_memory_os'],
+        }],
+        provider_protocols: providerProtocols,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -2911,7 +3280,42 @@ describe('runtime.toml raw config API', () => {
     expect(result.path).toBe('/tmp/.masc/config/runtime.toml')
     expect(result.file_name).toBe('runtime.toml')
     expect(result.source_text).toContain('[runtime]')
-    expect(result.reloaded).toBe(false)
+    expect(result.application?.routing.status).toBe('active')
+    expect(result.application?.keeper_overlay.requires_restart).toBe(false)
+    expect(result.keeper_settings?.[0]).toMatchObject({
+      effective_value: null,
+      effective_error: 'expected a boolean',
+    })
+    expect(result.provider_protocols).toEqual(providerProtocols)
+  })
+
+  it.each([
+    ['missing inventory', undefined],
+    ['empty inventory', []],
+    ['duplicate protocol', [providerProtocols[0], providerProtocols[0]]],
+    ['inconsistent official-client contract', [{
+      ...providerProtocols[1],
+      transport: 'endpoint',
+    }]],
+    ['unknown entry field', [{
+      ...providerProtocols[0],
+      client_owned: true,
+    }]],
+  ])('rejects %s from the backend protocol inventory', async (_label, inventory) => {
+    const payload: Record<string, unknown> = {
+      ok: true,
+      path: '/tmp/.masc/config/runtime.toml',
+      file_name: 'runtime.toml',
+      source_text: '[runtime]\n',
+      reloaded: false,
+    }
+    if (inventory !== undefined) payload.provider_protocols = inventory
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+
+    await expect(fetchRuntimeTomlConfig()).rejects.toThrow(/runtime provider protocol/)
   })
 
   it('posts the full raw TOML source through source_text', async () => {
@@ -2922,7 +3326,20 @@ describe('runtime.toml raw config API', () => {
         path: '/tmp/.masc/config/runtime.toml',
         file_name: 'runtime.toml',
         source_text: sourceText,
-        reloaded: true,
+        application: {
+          operation: 'raw_save',
+          routing: { status: 'applied', requires_restart: false, applied_at: '2026-08-11T00:00:00Z' },
+          keeper_overlay: {
+            status: 'pending_restart',
+            requires_restart: true,
+            applied_at: null,
+            configured_count: 1,
+            pending_keys: ['turn.temperature'],
+            applied_keys: [],
+            preempted_keys: [],
+          },
+        },
+        provider_protocols: providerProtocols,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -2941,19 +3358,30 @@ describe('runtime.toml raw config API', () => {
     expect(url).toBe('/api/v1/runtime/config/raw')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({ source_text: sourceText })
-    expect(result.reloaded).toBe(true)
+    expect(result.application?.routing.status).toBe('applied')
+    expect(result.application?.keeper_overlay.status).toBe('pending_restart')
     expect(result.source_text).toBe(sourceText)
   })
 
-  it('posts runtime routing patches without client-side TOML text', async () => {
-    const sourceText = '[runtime]\ndefault = "openai.gpt"\ncross_verifier = "openai.gpt"\n'
+  it('previews Keeper setting validation before raw save', async () => {
+    const sourceText = '[keeper_settings]\nschema_version = 1\n[turn]\ntemperatur = 0.4\n'
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         ok: true,
-        path: '/tmp/.masc/config/runtime.toml',
-        file_name: 'runtime.toml',
-        source_text: sourceText,
-        reloaded: true,
+        can_save: false,
+        validation: {
+          valid: false,
+          schema_version: 1,
+          current_schema_version: 1,
+          forward_schema: false,
+          issues: [{
+            key: 'turn.temperatur',
+            kind: 'unknown_key',
+            severity: 'error',
+            detail: 'unknown Keeper runtime setting',
+          }],
+        },
+        keeper_setting_schema: { authority: 'Keeper_runtime_setting_registry' },
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -2961,14 +3389,38 @@ describe('runtime.toml raw config API', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await patchRuntimeRouting('cross_verifier', 'openai.gpt')
+    const preview = await previewRuntimeTomlConfig(sourceText)
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/runtime/config/raw/preview')
+    expect(preview.can_save).toBe(false)
+    expect(preview.validation.issues[0]?.kind).toBe('unknown_key')
+  })
+
+  it('posts runtime routing patches without client-side TOML text', async () => {
+    const sourceText = '[runtime]\ndefault = "openai.gpt"\n'
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        path: '/tmp/.masc/config/runtime.toml',
+        file_name: 'runtime.toml',
+        source_text: sourceText,
+        reloaded: true,
+        provider_protocols: providerProtocols,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await patchRuntimeRouting('default', 'openai.gpt')
 
     expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/v1/runtime/config/routing')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({
-      lane: 'cross_verifier',
+      lane: 'default',
       runtime_id: 'openai.gpt',
     })
     expect(result.source_text).toBe(sourceText)
@@ -2983,6 +3435,7 @@ describe('runtime.toml raw config API', () => {
         file_name: 'runtime.toml',
         source_text: sourceText,
         reloaded: true,
+        provider_protocols: providerProtocols,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -3012,6 +3465,7 @@ describe('runtime.toml raw config API', () => {
         file_name: 'runtime.toml',
         source_text: sourceText,
         reloaded: true,
+        provider_protocols: providerProtocols,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -3092,7 +3546,7 @@ describe('fetchRuntimeProviders', () => {
               always_ignored_sampling_params: ['temperature'],
             },
             request_config: {
-              source: 'oas-provider-config',
+              source: 'agent-core-provider-config',
               provider_kind: 'openai_compat',
               request_path: '/chat/completions',
               request_path_targets_responses_api: false,
@@ -3132,7 +3586,7 @@ describe('fetchRuntimeProviders', () => {
               connect_timeout_s: 120,
             },
             effective_capabilities: {
-              source: 'oas-provider-config-model',
+              source: 'agent-core-provider-config-model',
               max_context_tokens: 131072,
               max_output_tokens: 65536,
               supports_tools: true,
@@ -3238,7 +3692,6 @@ describe('fetchRuntimeProviders', () => {
                   supports_computer_use: false,
                   supports_code_execution: true,
                 },
-                match_prefixes: ['Qwen/'],
               },
               binding: {
                 provider_id: 'runpod_mtp',
@@ -3252,11 +3705,6 @@ describe('fetchRuntimeProviders', () => {
               },
             },
             source: 'runtime.toml',
-            discovery: {
-              healthy: true,
-              discovered_model: 'Qwen/Qwen3-32B',
-              ctx_size: 200000,
-            },
           },
           {
             provider: 'openai.gpt',
@@ -3287,7 +3735,7 @@ describe('fetchRuntimeProviders', () => {
           status: 'degraded',
           degraded: true,
           operator_action_required: true,
-          terminal_reason: 'missing_oas_catalog_models',
+          terminal_reason: 'missing_agent_core_catalog_models',
           message: 'runtime catalog degraded boot',
           config_path: '/tmp/masc-test/runtime.toml',
           configured_default_runtime_id: 'runpod_mtp.qwen',
@@ -3306,7 +3754,7 @@ describe('fetchRuntimeProviders', () => {
             { keeper_name: 'budgettest', runtime_id: 'mimo.mimo-v2.5-pro' },
           ],
           dropped_routes: [
-            { route_name: 'runtime.cross_verifier', runtime_id: 'mimo.mimo-v2.5-pro' },
+            { route_name: 'runtime.default', runtime_id: 'mimo.mimo-v2.5-pro' },
           ],
           dropped_media_failover: ['mimo.mimo-v2.5-pro'],
           dropped_lane_candidates: [
@@ -3315,7 +3763,7 @@ describe('fetchRuntimeProviders', () => {
           dropped_lanes: [
             { lane_id: 'mimo-only', runtime_ids: ['mimo.mimo-v2.5-pro'] },
           ],
-          next_action: 'Add deployment rows to oas-models-overlay.toml (or upstream OAS).',
+          next_action: 'Add deployment rows to agent-core-models-overlay.toml (or upstream Agent Core).',
         },
         config_path: '/tmp/masc-test/runtime.toml',
       }), {
@@ -3399,19 +3847,17 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.declared_spec?.model?.min_p).toBe(0.07)
     expect(result.providers[0]?.declared_spec?.binding?.max_concurrent).toBe(4)
     expect(result.providers[1]?.temperature).toBeNull()
-    expect(result.providers[0]?.discovery?.discovered_model).toBe('Qwen/Qwen3-32B')
-    expect(result.providers[0]?.discovery?.ctx_size).toBe(200000)
     expect(result.assignment_status?.status).toBe('degraded')
     expect(result.assignment_status?.assignment_count).toBe(2)
     expect(result.assignment_status?.assigned_runtimes).toEqual(['openai.gpt'])
     expect(result.assignment_status?.assignments[0]?.keeper).toBe('budgettest')
     expect(result.startup_degradation?.status).toBe('degraded')
-    expect(result.startup_degradation?.terminal_reason).toBe('missing_oas_catalog_models')
+    expect(result.startup_degradation?.terminal_reason).toBe('missing_agent_core_catalog_models')
     expect(result.startup_degradation?.effective_default_runtime_id).toBe('runpod_mtp.qwen')
     expect(result.startup_degradation?.missing_catalog_models[0]?.provider_label).toBe('openai_compat')
     expect(result.startup_degradation?.disabled_runtime_ids).toEqual(['mimo.mimo-v2.5-pro'])
     expect(result.startup_degradation?.dropped_assignments[0]?.keeper_name).toBe('budgettest')
-    expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('runtime.cross_verifier')
+    expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('runtime.default')
     expect(result.startup_degradation?.dropped_lane_candidates[0]?.lane_id).toBe('coding')
   })
 
@@ -3467,7 +3913,7 @@ describe('fetchRuntimeModelMetrics', () => {
           usage_missing_count: 1,
           telemetry_missing_count: 1,
           coverage_status: 'none',
-          primary_coverage_stage: 'oas',
+          primary_coverage_stage: 'agentCore',
           primary_coverage_reason: 'missing_usage_and_inference',
           coverage_reason_counts: [
             { reason: 'missing_usage_and_inference', count: 1 },
@@ -3491,7 +3937,7 @@ describe('fetchRuntimeModelMetrics', () => {
               usage_reported: false,
               telemetry_reported: false,
               coverage_reason: 'missing_usage_and_inference',
-              coverage_stage: 'oas',
+              coverage_stage: 'agentCore',
             },
           ],
           buckets: [
@@ -3529,7 +3975,7 @@ describe('fetchRuntimeModelMetrics', () => {
     expect(metric.usage_missing_count).toBe(1)
     expect(metric.telemetry_missing_count).toBe(1)
     expect(metric.coverage_status).toBe('none')
-    expect(metric.primary_coverage_stage).toBe('oas')
+    expect(metric.primary_coverage_stage).toBe('agentCore')
     expect(metric.primary_coverage_reason).toBe('missing_usage_and_inference')
     expect(metric.coverage_reason_counts).toEqual([
       { reason: 'missing_usage_and_inference', count: 1 },
@@ -3546,7 +3992,7 @@ describe('fetchRuntimeModelMetrics', () => {
     expect(metric.recent_entries?.[0]?.usage_reported).toBe(false)
     expect(metric.recent_entries?.[0]?.telemetry_reported).toBe(false)
     expect(metric.recent_entries?.[0]?.coverage_reason).toBe('missing_usage_and_inference')
-    expect(metric.recent_entries?.[0]?.coverage_stage).toBe('oas')
+    expect(metric.recent_entries?.[0]?.coverage_stage).toBe('agentCore')
     expect(metric.buckets?.[0]?.p95_latency_ms).toBeNull()
     expect(metric.buckets?.[0]?.cache_hit_ratio).toBeNull()
   })
@@ -3765,53 +4211,6 @@ describe('fetchCostLatency', () => {
   })
 })
 
-describe('fetchLogs', () => {
-  function stubLogsFetch() {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ total: 0, entries: [] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-    return fetchMock
-  }
-
-  function requestedUrl(fetchMock: ReturnType<typeof vi.fn>): string {
-    return String(fetchMock.mock.calls[0]?.[0])
-  }
-
-  it('sets before_seq for backward "load older" paging', async () => {
-    const fetchMock = stubLogsFetch()
-
-    await fetchLogs({ limit: 200, level: 'INFO', before_seq: 4096 })
-
-    const params = new URLSearchParams(requestedUrl(fetchMock).split('?')[1] ?? '')
-    expect(params.get('before_seq')).toBe('4096')
-    expect(params.get('limit')).toBe('200')
-    expect(params.get('level')).toBe('INFO')
-  })
-
-  it('omits before_seq when negative (no cursor)', async () => {
-    const fetchMock = stubLogsFetch()
-
-    await fetchLogs({ before_seq: -1 })
-
-    const params = new URLSearchParams(requestedUrl(fetchMock).split('?')[1] ?? '')
-    expect(params.has('before_seq')).toBe(false)
-  })
-
-  it('combines before_seq and since_seq into a bounded window', async () => {
-    const fetchMock = stubLogsFetch()
-
-    await fetchLogs({ since_seq: 10, before_seq: 20 })
-
-    const params = new URLSearchParams(requestedUrl(fetchMock).split('?')[1] ?? '')
-    expect(params.get('since_seq')).toBe('10')
-    expect(params.get('before_seq')).toBe('20')
-  })
-})
-
 describe('fetchRuntimeDefaults', () => {
   it('reads the resolved runtime-defaults surface and parses it', async () => {
     const rawResponse = {
@@ -3826,7 +4225,6 @@ describe('fetchRuntimeDefaults', () => {
         { id: 'openai.gpt-4o', provider: 'OpenAI', model: 'gpt-4o', max_context: 128000, is_default: true },
       ],
       model_routing: {
-        cross_verifier_runtime_id: null,
         media_failover: [],
       },
     }
@@ -3844,6 +4242,431 @@ describe('fetchRuntimeDefaults', () => {
     expect(result.default_runtime_id).toBe('openai.gpt-4o')
     expect(result.default_model).toBe('gpt-4o')
     expect(result.runtimes[0]?.is_default).toBe(true)
-    expect(result.model_routing.cross_verifier_runtime_id).toBeNull()
+  })
+})
+
+describe('official-client session API', () => {
+  const recoveryPayload = {
+    schema: 'masc.dashboard.official-client-session.v1',
+    ok: true,
+    keeper_name: 'sangsu',
+    session: {
+      client_kind: 'codex',
+      runtime_id: 'codex.codex',
+      phase: {
+        kind: 'recovery_required',
+        recovery_id: '018f3a4a-27f4-7c9a-8fd8-330c2a3845aa',
+        failure: 'protocol_failed',
+        detail: 'malformed app-server event',
+        required_at: 1_786_230_000,
+        owner_epoch: '018f3a4a-27f4-7c9a-8fd8-330c2a3845ab',
+        observed_session_id: 'thread-1',
+        observed_turn_id: null,
+        previous_settlement: null,
+      },
+      turn_count: 1,
+      tool_surface_sha256: 'a'.repeat(64),
+      last_recovery_resolution: null,
+      last_transient_release: null,
+      updated_at: 1_786_230_000,
+    },
+  }
+
+  it('reads exact measured recovery evidence for one Keeper', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(recoveryPayload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchOfficialClientSession('sangsu')
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/runtime/sessions/official-client?keeper_name=sangsu')
+    const phase = result.session?.phase
+    expect(phase?.kind).toBe('recovery_required')
+    if (phase?.kind !== 'recovery_required') throw new Error('expected recovery-required phase')
+    expect(phase.failure).toBe('protocol_failed')
+    expect(phase.observed_session_id).toBe('thread-1')
+  })
+
+  it.each([
+    {
+      kind: 'start',
+      phase: {
+        kind: 'start',
+        owner_epoch: recoveryPayload.session.phase.owner_epoch,
+        previous_settlement: null,
+      },
+    },
+    {
+      kind: 'active',
+      phase: {
+        kind: 'active',
+        owner_epoch: recoveryPayload.session.phase.owner_epoch,
+        session_id: 'thread-active',
+        previous_settlement: null,
+      },
+    },
+    {
+      kind: 'turn_inflight',
+      phase: {
+        kind: 'turn_inflight',
+        owner_epoch: recoveryPayload.session.phase.owner_epoch,
+        session_id: 'thread-active',
+        turn_id: null,
+        previous_settlement: null,
+      },
+    },
+    {
+      kind: 'settled',
+      phase: {
+        kind: 'settled',
+        session_id: 'thread-settled',
+        turn_id: 'turn-settled',
+      },
+    },
+  ])('accepts exact $kind phase', async ({ phase }) => {
+    const payload = {
+      ...recoveryPayload,
+      session: { ...recoveryPayload.session, phase },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchOfficialClientSession('sangsu')
+
+    expect(result.session?.phase.kind).toBe(phase.kind)
+  })
+
+  it('rejects phase, record, identity, and nullable-field drift', async () => {
+    const malformedPayloads: Array<{ name: string; payload: unknown }> = [
+      {
+        name: 'unknown response field',
+        payload: { ...recoveryPayload, extra: true },
+      },
+      {
+        name: 'unknown session field',
+        payload: {
+          ...recoveryPayload,
+          session: { ...recoveryPayload.session, extra: true },
+        },
+      },
+      {
+        name: 'unknown phase field',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...recoveryPayload.session,
+            phase: { ...recoveryPayload.session.phase, extra: true },
+          },
+        },
+      },
+      {
+        name: 'missing required nullable phase field',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...recoveryPayload.session,
+            phase: Object.fromEntries(
+              Object.entries(recoveryPayload.session.phase)
+                .filter(([key]) => key !== 'observed_turn_id'),
+            ),
+          },
+        },
+      },
+      {
+        name: 'invalid recovery UUID',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...recoveryPayload.session,
+            phase: { ...recoveryPayload.session.phase, recovery_id: 'not-a-uuid' },
+          },
+        },
+      },
+      {
+        name: 'observed turn without observed session',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...recoveryPayload.session,
+            phase: {
+              ...recoveryPayload.session.phase,
+              observed_session_id: null,
+              observed_turn_id: 'turn-without-session',
+            },
+          },
+        },
+      },
+      {
+        name: 'invalid lowercase SHA-256',
+        payload: {
+          ...recoveryPayload,
+          session: { ...recoveryPayload.session, tool_surface_sha256: 'A'.repeat(64) },
+        },
+      },
+      {
+        name: 'zero completed turns outside ready',
+        payload: {
+          ...recoveryPayload,
+          session: { ...recoveryPayload.session, turn_count: 0 },
+        },
+      },
+      {
+        name: 'ready phase carrying another phase field',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...recoveryPayload.session,
+            phase: { kind: 'ready', owner_epoch: recoveryPayload.session.phase.owner_epoch },
+          },
+        },
+      },
+      {
+        name: 'settlement with an unknown field',
+        payload: {
+          ...recoveryPayload,
+          session: {
+            ...recoveryPayload.session,
+            phase: {
+              ...recoveryPayload.session.phase,
+              previous_settlement: {
+                session_id: 'thread-previous',
+                turn_id: 'turn-previous',
+                extra: true,
+              },
+            },
+          },
+        },
+      },
+    ]
+
+    for (const { name, payload } of malformedPayloads) {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      await expect(fetchOfficialClientSession('sangsu'), name)
+        .rejects.toThrow('유효하지 않은 official-client session payload')
+    }
+  })
+
+  it('posts the exact recovery fence and selected resolution', async () => {
+    const resolvedPayload = {
+      ...recoveryPayload,
+      resolution_application: 'applied',
+      audit: { recorded: true },
+      session: {
+        ...recoveryPayload.session,
+        phase: { kind: 'ready' },
+        // restart_fresh abandons the conversation, so the server resets the
+        // completed-turn count with it. Spreading recoveryPayload's turn_count: 1
+        // would mock a response the server cannot emit.
+        turn_count: 0,
+        last_recovery_resolution: {
+          recovery_id: recoveryPayload.session.phase.recovery_id,
+          failure: 'protocol_failed',
+          resolution: { kind: 'restart_fresh' },
+          resolved_by: 'dashboard',
+          resolved_at: 1_786_230_010,
+        },
+      },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(resolvedPayload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await resolveOfficialClientSession(
+      'sangsu',
+      recoveryPayload.session.phase.recovery_id,
+      { resolution: 'restart_fresh' },
+    )
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/runtime/sessions/official-client/resolve')
+    expect(JSON.parse(init.body as string)).toEqual({
+      keeper_name: 'sangsu',
+      recovery_id: recoveryPayload.session.phase.recovery_id,
+      resolution: 'restart_fresh',
+    })
+    expect(result.session?.phase.kind).toBe('ready')
+    expect(result.session?.last_recovery_resolution?.resolved_by).toBe('dashboard')
+    expect(result.resolution_application).toBe('applied')
+    expect(result.audit).toEqual({ recorded: true })
+  })
+
+  it.each([
+    {
+      name: 'missing application',
+      payload: {
+        ...recoveryPayload,
+        audit: { recorded: true },
+      },
+    },
+    {
+      name: 'unknown application',
+      payload: {
+        ...recoveryPayload,
+        resolution_application: 'guessed',
+        audit: { recorded: true },
+      },
+    },
+    {
+      name: 'malformed audit receipt',
+      payload: {
+        ...recoveryPayload,
+        resolution_application: 'replayed',
+        audit: { recorded: false },
+      },
+    },
+  ])('rejects recovery operation drift: $name', async ({ payload }) => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(resolveOfficialClientSession(
+      'sangsu',
+      recoveryPayload.session.phase.recovery_id,
+      { resolution: 'restart_fresh' },
+    )).rejects.toThrow('유효하지 않은 official-client recovery payload')
+  })
+})
+
+describe('official-client login probe API', () => {
+  const readyPayload = {
+    schema: 'masc.dashboard.official-client-probe.v1',
+    ok: true,
+    runtime_id: 'codex.codex',
+    client_kind: 'codex',
+    configured_model: 'gpt-5.3-codex-spark',
+    measured_at: 1_786_230_100,
+    login: {
+      status: 'ready',
+      authenticated: true,
+      evidence_source: 'configured_executable_self_report',
+      identity_verified: false,
+      auth_method: 'chatgpt',
+      subscription_type: 'pro',
+      api_provider: null,
+    },
+    client: { user_agent: 'codex_cli_rs/0.147.0' },
+    execution: {
+      status: 'not_measured',
+      reason: 'login_probe_does_not_submit_model_turn',
+    },
+  }
+
+  it('posts the exact runtime id and preserves the login/execution boundary', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(readyPayload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await probeOfficialClientLogin('codex.codex')
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/runtime/official-client/probe')
+    expect(JSON.parse(init.body as string)).toEqual({ runtime_id: 'codex.codex' })
+    expect(result.login).toMatchObject({
+      status: 'ready',
+      authenticated: true,
+      evidence_source: 'configured_executable_self_report',
+      identity_verified: false,
+    })
+    expect(result.execution.status).toBe('not_measured')
+  })
+
+  it('rejects a payload that claims execution was measured', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ...readyPayload,
+        execution: { status: 'ready', reason: 'login_ok' },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(probeOfficialClientLogin('codex.codex')).rejects.toThrow(
+      '유효하지 않은 official-client probe payload',
+    )
+  })
+
+  it('accepts a measured login failure without inventing login metadata', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ...readyPayload,
+        login: {
+          status: 'login_required',
+          authenticated: false,
+          evidence_source: 'configured_executable_self_report',
+          identity_verified: false,
+          detail: 'the official CLI has no active account',
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await probeOfficialClientLogin('codex.codex')
+
+    expect(result.login).toEqual({
+      status: 'login_required',
+      authenticated: false,
+      evidence_source: 'configured_executable_self_report',
+      identity_verified: false,
+      auth_method: null,
+      subscription_type: null,
+      api_provider: null,
+      detail: 'the official CLI has no active account',
+    })
+    expect(result.execution.status).toBe('not_measured')
+  })
+
+  it('rejects fields outside the current probe contract', async () => {
+    for (const payload of [
+      { ...readyPayload, unexpected_status: 'ready' },
+      { ...readyPayload, login: { ...readyPayload.login, detail: 'extra field' } },
+      { ...readyPayload, login: { ...readyPayload.login, identity_verified: true } },
+      { ...readyPayload, login: { ...readyPayload.login, evidence_source: 'official_client' } },
+      { ...readyPayload, client: { ...readyPayload.client, version: 'extra field' } },
+    ]) {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      await expect(probeOfficialClientLogin('codex.codex')).rejects.toThrow(
+        '유효하지 않은 official-client probe payload',
+      )
+    }
   })
 })

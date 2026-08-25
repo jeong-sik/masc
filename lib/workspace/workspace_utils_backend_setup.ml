@@ -17,14 +17,9 @@ type config = {
 let domain_local_pg_backend_diagnostics_json () =
   `Assoc
     [
-      ("creations", `Int 0);
       ("failures", `Int 0);
       ("last_error", `Null);
     ]
-
-let with_domain_local_pg_backend ~sw ~net ~clock ~mono_clock config =
-  let _ = sw, net, clock, mono_clock in
-  Some config
 
 (* ============================================ *)
 (* Git Root Detection (Worktree Support)        *)
@@ -164,13 +159,13 @@ let resolve_requested_base_path path =
       ignored unless it matches the requested path or the test explicitly opts
       in via [MASC_TEST_ALLOW_BASE_PATH_OVERRIDE]
     - otherwise resolve the requested path to its git root *)
-let resolved_base_path_cache : string option ref = ref None
+let resolved_base_path_cache = Atomic.make None
 
 let cache_resolved_base_path path =
-  resolved_base_path_cache := Some path
+  Atomic.set resolved_base_path_cache (Some path)
 
 let resolve_masc_base_path path =
-  match !resolved_base_path_cache with
+  match Atomic.get resolved_base_path_cache with
   | Some cached -> cached
   | None ->
     let requested = resolve_requested_base_path path in
@@ -227,21 +222,52 @@ let env_opt name =
 (* Backend creation                             *)
 (* ============================================ *)
 
-(* Sanitize namespace/cluster name for filesystem path segments.
-   Keep alnum, '-', '_' and replace others with '-'. *)
+(* A filesystem path segment for a logical name.
+
+   Replacing every unsafe character with '-' folded distinct names onto one
+   path: "a.b", "a/b" and "a b" all became "a-b", so two keepers wrote the same
+   file (#24342). Case folded too, on the case-insensitive filesystems this
+   runs on. And nothing bounded the length, so a name past the 255-byte
+   component limit produced a path the OS rejects (#24343).
+
+   A name that is already a safe, short, lowercase segment maps to itself --
+   which is every name in this workspace, so paths do not move. Anything else
+   carries a 64-bit digest prefix of the exact name. This distinguishes the
+   known folding collisions while keeping accidental collisions unlikely. *)
+let namespace_segment_max_length = 96
+
+let namespace_segment_is_canonical name =
+  name <> ""
+  && String.length name <= namespace_segment_max_length
+  && String.for_all
+       (fun c ->
+         (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '-' || c = '_')
+       name
+
 let sanitize_namespace_segment name =
-  let buf = Buffer.create (String.length name) in
-  String.iter (fun c ->
-    let is_safe =
-      (c >= 'a' && c <= 'z') ||
-      (c >= 'A' && c <= 'Z') ||
-      (c >= '0' && c <= '9') ||
-      c = '-' || c = '_'
+  if namespace_segment_is_canonical name
+  then name
+  else (
+    let buf = Buffer.create (String.length name) in
+    String.iter
+      (fun c ->
+        let is_safe =
+          (c >= 'a' && c <= 'z')
+          || (c >= 'A' && c <= 'Z')
+          || (c >= '0' && c <= '9')
+          || c = '-'
+          || c = '_'
+        in
+        Buffer.add_char buf (if is_safe then c else '-'))
+      name;
+    let folded = Buffer.contents buf in
+    let head =
+      if String.length folded > namespace_segment_max_length
+      then String.sub folded 0 namespace_segment_max_length
+      else folded
     in
-    Buffer.add_char buf (if is_safe then c else '-')
-  ) name;
-  let sanitized = String.trim (Buffer.contents buf) in
-  if sanitized = "" then "default" else sanitized
+    let digest = String.sub Digestif.SHA256.(digest_string name |> to_hex) 0 16 in
+    if head = "" then "x-" ^ digest else head ^ "-" ^ digest)
 
 let backend_config_for base_path =
   let cluster_name =

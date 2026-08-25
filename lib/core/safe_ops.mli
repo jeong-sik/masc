@@ -82,10 +82,23 @@ val parse_json_safe : context:string -> string -> (Yojson.Safe.t, string) result
 
 (** {1 File I/O} *)
 
+type read_file_error =
+  | File_not_found of string
+  | Read_failed of
+      { path : string
+      ; detail : string
+      }
+
+val read_file_error_to_string : read_file_error -> string
+
+val read_file_result : string -> (string, read_file_error) result
+(** Read file contents with a typed error, so callers that branch on the
+    missing-file case match a constructor rather than the rendered
+    message's prefix. Uses Eio-native I/O via Fs_compat when available
+    (after set_fs), falls back to blocking I/O in non-Eio contexts. *)
+
 val read_file_safe : string -> (string, string) result
-(** Read file contents with error handling.
-    Uses Eio-native I/O via Fs_compat when available (after set_fs),
-    falls back to blocking I/O in non-Eio contexts. *)
+(** [read_file_result] with the error rendered for display. *)
 
 val read_json_file_safe : string -> (Yojson.Safe.t, string) result
 (** Read JSON file safely. *)
@@ -94,33 +107,16 @@ val read_json_file_logged : label:string -> string -> Yojson.Safe.t option
 (** Read JSON file safely, logging errors instead of silently discarding them.
     Returns [Some json] on success, [None] on failure with a warning log. *)
 
-val persistence_read_drop_reason_list_dir_error : string
-(** Failure listing a directory that backs a persistence surface. *)
-
-val persistence_read_drop_reason_entry_load_error : string
-(** Failure loading an entry's bytes (file IO error) or, when the loader
-    combines IO + parse in a single result, either of those failures.
-    Use the more specific {!persistence_read_drop_reason_json_syntax_error}
-    when IO and JSON parse are split into separate code paths. *)
-
-val persistence_read_drop_reason_invalid_payload : string
-(** Entry parsed successfully but failed schema/structural validation
-    (e.g. record-of-yojson [Error _], required field missing). *)
-
-val persistence_read_drop_reason_json_syntax_error : string
-
-val persistence_read_drop_reason_tail_partial_write : string
-(** The final line of an append-only file was mid-write when a tail reader
-    parsed it. Not data loss; see [Read_drop_reason.Tail_partial_write]. *)
-(** [Yojson.Json_error] raised while parsing a single line/value.  Use
-    this when the load step is logically split from the parse step
-    (typical of JSONL surfaces) so the metric distinguishes "file
-    unreadable" from "lines malformed". *)
+(* The five reason words used to be exported here as strings while
+   [Read_drop_reason] held the same vocabulary as a closed variant that nothing
+   passed. Two spellings, and the compiler compared neither: a new reason could
+   be added to one and missed by the other, and a typo in a call site was a
+   valid string. The reporters below take the variant. *)
 
 val report_persistence_read_drop :
   on_drop:(unit -> unit) ->
   surface:string ->
-  reason:string ->
+  reason:Read_drop_reason.t ->
   path:string ->
   detail:string ->
   unit
@@ -128,7 +124,7 @@ val report_persistence_read_drop :
 
 val report_persistence_read_drop_counted :
   surface:string ->
-  reason:string ->
+  reason:Read_drop_reason.t ->
   path:string ->
   detail:string ->
   unit
@@ -140,7 +136,7 @@ val report_persistence_read_drop_counted :
 val result_to_option_logged :
   on_drop:(unit -> unit) ->
   surface:string ->
-  reason:string ->
+  reason:Read_drop_reason.t ->
   path:string ->
   ('a, string) result ->
   'a option
@@ -203,14 +199,8 @@ val json_int_opt : string -> Yojson.Safe.t -> int option
 val json_float_opt : string -> Yojson.Safe.t -> float option
 val json_bool_opt : string -> Yojson.Safe.t -> bool option
 
-val json_list : string -> Yojson.Safe.t -> Yojson.Safe.t list
-(** Extract a JSON list by key. Returns [[]] if missing or non-list. *)
-
 val json_list_opt : string -> Yojson.Safe.t -> Yojson.Safe.t list option
 (** Extract a JSON list by key. Returns [None] if missing or non-list. *)
-
-val json_assoc : string -> Yojson.Safe.t -> (string * Yojson.Safe.t) list
-(** Extract a JSON object by key. Returns [[]] if missing or non-object. *)
 
 val json_member_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
 (** Extract any non-null JSON value by key. Returns [None] for [`Null] or missing key. *)

@@ -7,7 +7,7 @@
 
     Motivation: the three call sites in [Workspace] that invoke
     [warn_telemetry_drop] (after catching [Stdlib.Effect.Unhandled] when
-    the lifecycle/task/accountability hook runs outside an Eio scheduler)
+    the lifecycle/task hook runs outside an Eio scheduler)
     previously passed free strings for [event_family] / [event_kind].
     [Read_drop_reason.t] closed-sums the [reason] label of
     [metric_persistence_read_drops]; this module mirrors that pattern for
@@ -47,16 +47,10 @@ type t =
       (** Task transition observer ([observe_task_transition_event])
           caught [Effect.Unhandled] from [Audit_log.log_action] or
           [Telemetry_eio.track_task_*]. *)
-  | Accountability of Masc_domain.task_action
-      (** Keeper accountability hook ([Keeper_accountability.record_task_transition])
-          caught [Effect.Unhandled]. Carries the originating
-          [task_action] so dashboards can correlate dropped
-          accountability records with the transition that produced
-          them. *)
 
 (** Wire label for the [event_family] Otel_metric_store label. Stable: matches
     the byte-for-byte strings emitted before the typed swap-over
-    (["agent_lifecycle"], ["task_transition"], ["accountability"]) so
+    (["agent_lifecycle"], ["task_transition"]) so
     Otel_metric_store label cardinality does not change at the migration
     boundary. *)
 val family_to_wire : t -> string
@@ -65,7 +59,7 @@ val family_to_wire : t -> string
     [Agent_lifecycle] this is one of ["session_bound" / "session_rebound" /
     "session_ended"]
     (matching {!Workspace_hooks.agent_lifecycle_event_to_string}). For
-    [Task_transition] / [Accountability] it is
+    [Task_transition] it is
     {!Masc_domain.task_action_to_string} of the carried action
     (["claim" / "start" / "done" / ...]).
 

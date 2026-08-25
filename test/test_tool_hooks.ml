@@ -14,6 +14,23 @@ let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
 ;;
 
+let test_schema tool_name : Masc_domain.tool_schema =
+  { name = tool_name
+  ; description = "dispatch hook test"
+  ; input_schema =
+      `Assoc
+        [ "type", `String "object"
+        ; "properties", `Assoc []
+        ; "required", `List []
+        ]
+  }
+;;
+
+let register_test_tool ~tool_name ~handler =
+  Tool_dispatch.register ~tool_name ~handler;
+  Tool_dispatch.register_module_tag ~schemas:[ test_schema tool_name ] ~tag:Mod_misc
+;;
+
 let setup () =
   reset_log ();
   Tool_dispatch.clear_hooks ()
@@ -22,12 +39,11 @@ let setup () =
 
 let test_pre_hook_observes () =
   setup ();
-  Tool_dispatch.register
+  register_test_tool
     ~tool_name:"__hook_test"
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
-      Some (tool_ok "ok"));
-  Tool_dispatch.register_name_tag ~tool_name:"__hook_test" ~tag:Mod_misc;
+      tool_ok "ok");
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre";
     Tool_dispatch.Pass);
@@ -40,12 +56,11 @@ let test_pre_hook_observes () =
 
 let test_pre_hook_short_circuits () =
   setup ();
-  Tool_dispatch.register
+  register_test_tool
     ~tool_name:"__hook_blocked"
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
-      Some (tool_ok "should not reach"));
-  Tool_dispatch.register_name_tag ~tool_name:"__hook_blocked" ~tag:Mod_misc;
+      tool_ok "should not reach");
   Tool_dispatch.register_pre_hook (fun ~name ~args:_ ->
     log_call "pre_block";
     Tool_dispatch.Reject
@@ -53,6 +68,7 @@ let test_pre_hook_short_circuits () =
          { Tool_result.class_ = Tool_result.Runtime_failure
          ; message = "blocked"
          ; data = `String "blocked"
+         ; metadata = None
          ; tool_name = name
          ; duration_ms = 0.0
          }));
@@ -69,12 +85,11 @@ let test_pre_hook_short_circuits () =
 
 let test_multiple_pre_hooks_first_wins () =
   setup ();
-  Tool_dispatch.register
+  register_test_tool
     ~tool_name:"__hook_multi"
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
-      Some (tool_ok "ok"));
-  Tool_dispatch.register_name_tag ~tool_name:"__hook_multi" ~tag:Mod_misc;
+      tool_ok "ok");
   (* First hook: observe only *)
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre1";
@@ -87,6 +102,7 @@ let test_multiple_pre_hooks_first_wins () =
          { Tool_result.class_ = Tool_result.Runtime_failure
          ; message = "denied"
          ; data = `String "denied"
+         ; metadata = None
          ; tool_name = name
          ; duration_ms = 0.0
          }));
@@ -104,12 +120,11 @@ let test_multiple_pre_hooks_first_wins () =
 
 let test_dispatch_observer_observes () =
   setup ();
-  Tool_dispatch.register
+  register_test_tool
     ~tool_name:"__hook_observer"
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
-      Some (tool_ok "original"));
-  Tool_dispatch.register_name_tag ~tool_name:"__hook_observer" ~tag:Mod_misc;
+      tool_ok "original");
   Tool_dispatch.register_dispatch_observer (fun outcome result ->
     match outcome, result with
     | Dispatch_outcome.Handled, Some _ -> log_call "observer"
@@ -124,11 +139,10 @@ let test_dispatch_observer_observes () =
 
 let test_dispatch_observers_chain () =
   setup ();
-  Tool_dispatch.register
+  register_test_tool
     ~tool_name:"__hook_chain"
     ~handler:(fun ~name:_ ~args:_ ->
-      Some (tool_ok "0"));
-  Tool_dispatch.register_name_tag ~tool_name:"__hook_chain" ~tag:Mod_misc;
+      tool_ok "0");
   Tool_dispatch.register_dispatch_observer (fun outcome result ->
     match outcome, result with
     | Dispatch_outcome.Handled, Some _ -> log_call "observer1"
@@ -150,12 +164,11 @@ let test_dispatch_observers_chain () =
 
 let test_full_lifecycle () =
   setup ();
-  Tool_dispatch.register
+  register_test_tool
     ~tool_name:"__hook_full"
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
-      Some (tool_ok "data"));
-  Tool_dispatch.register_name_tag ~tool_name:"__hook_full" ~tag:Mod_misc;
+      tool_ok "data");
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre";
     Tool_dispatch.Pass);
@@ -171,11 +184,10 @@ let test_full_lifecycle () =
 let test_no_hooks_default () =
   setup ();
   (* No hooks registered *)
-  Tool_dispatch.register
+  register_test_tool
     ~tool_name:"__hook_none"
     ~handler:(fun ~name ~args:_ ->
-      Some (tool_ok ~tool_name:name "plain"));
-  Tool_dispatch.register_name_tag ~tool_name:"__hook_none" ~tag:Mod_misc;
+      tool_ok ~tool_name:name "plain");
   let token = match Tool_dispatch.mint_token ~name:"__hook_none" with Ok t -> t | Error e -> Alcotest.fail e in
   match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
   | Some r ->

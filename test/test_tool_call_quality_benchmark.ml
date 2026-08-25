@@ -17,6 +17,40 @@ let fixture_runs repo_root =
 let repo_source_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with Some root -> root | None -> Sys.getcwd ()
 
+(* A tool call without [tool_name] used to decode to one named "", which
+   matches no selector and is indistinguishable from a tool actually named ""
+   (#29396 A5). Absence is now a load error naming the field. *)
+let test_evidence_run_without_tool_name_is_rejected () =
+  let dir = Filename.temp_file "tcqb_missing_tool_name" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let path = Filename.concat dir "evidence_runs.json" in
+  let contents =
+    {|{"runs":[{"case_id":"c","provider":"p","model":"m","keeper_profile":"k",|}
+    ^ {|"tool_calls":[{"success":true}]}]}|}
+  in
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () ->
+      close_out_noerr oc;
+      (try Sys.remove path with Sys_error _ -> ());
+      try Unix.rmdir dir with Unix.Unix_error _ -> ())
+    (fun () ->
+       output_string oc contents;
+       close_out oc;
+       match Tool_call_quality_benchmark.load_runs_from_file path with
+       | Ok runs ->
+         failf "a tool call without tool_name loaded as %d run(s)" (List.length runs)
+       | Error msg ->
+         check bool
+           ("the error names the missing field: " ^ msg)
+           true
+           (let needle = "tool_name" in
+            let n = String.length needle and h = String.length msg in
+            let rec scan i = i + n <= h && (String.sub msg i n = needle || scan (i + 1)) in
+            scan 0))
+;;
+
 let load_fixture () =
   let repo_root = repo_source_root () in
   let cases =
@@ -123,18 +157,18 @@ let test_summary_rollups_and_stability () =
   check int "scored runs" 6 summary.scored_runs;
   check int "unsupported runs" 1 summary.unsupported_runs;
   check int "runtime unreachable runs" 0 summary.runtime_unreachable_runs;
-  let analyst_row =
+  let delta_row =
     find_row
       ~provider:(Some "openai")
       ~model:(Some "gpt-5.4")
-      ~keeper:(Some "bench-analyst")
+      ~keeper:(Some "bench-delta")
       summary.grouped_by_provider_model_keeper
   in
-  check int "analyst unique cases" 2 analyst_row.cases_total;
-  check int "analyst passed cases" 2 analyst_row.cases_passed;
-  check (option (float 0.0001)) "analyst stability score" (Some 1.0)
-    analyst_row.stability_score;
-  check int "analyst repeated groups" 1 analyst_row.repeated_case_groups;
+  check int "delta unique cases" 2 delta_row.cases_total;
+  check int "delta passed cases" 2 delta_row.cases_passed;
+  check (option (float 0.0001)) "delta stability score" (Some 1.0)
+    delta_row.stability_score;
+  check int "delta repeated groups" 1 delta_row.repeated_case_groups;
   let executor_row =
     find_row
       ~provider:(Some "openai")
@@ -180,8 +214,8 @@ let test_csv_render_has_headers () =
   in
   check bool "csv header includes stability column" true
     (String_util.contains_substring csv "stability_score");
-  check bool "csv contains analyst keeper row" true
-    (String_util.contains_substring csv "bench-analyst")
+  check bool "csv contains delta keeper row" true
+    (String_util.contains_substring csv "bench-delta")
 
 let test_forbidden_selector_matches_descriptor_evidence () =
   let route_evidence =
@@ -414,54 +448,6 @@ let test_loader_parses_selector_backed_case_fields () =
                (List.length cases))
       | Error msg -> fail ("load_cases_from_file failed: " ^ msg))
 
-(* Regression guard for the legacy [tool_name] arg_check shape: case JSON that
-   predates typed selectors carries a bare ["tool_name"] field instead of a
-   ["selector"] object. parse_arg_check must keep parsing it as
-   [Eval_tool_selector.Tool_name], so removing that fallback fails here. *)
-let test_loader_parses_legacy_tool_name_arg_check () =
-  let path = Filename.temp_file "tool-call-quality-legacy" ".json" in
-  Fun.protect
-    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
-    (fun () ->
-      Fs_compat.save_file path
-        {|{
-  "cases": [
-    {
-      "id": "legacy_arg_check_case",
-      "prompt": "synthetic legacy arg_check case",
-      "category": "tool_use",
-      "keeper_profiles": ["bench-selector"],
-      "forbidden_tools": [],
-      "forbidden_selectors": [],
-      "required_selectors": [],
-      "max_tool_calls": 3,
-      "success_checks": [
-        {"path": "$.status", "equals": "completed"}
-      ],
-      "arg_checks": [
-        {
-          "tool_name": "tool_read_file",
-          "path": "$.path",
-          "contains": "keeper_tool_call_log"
-        }
-      ]
-    }
-  ]
-}|};
-      match Tool_call_quality_benchmark.load_cases_from_file path with
-      | Ok [ case ] ->
-          check int "arg check count" 1
-            (List.length case.Tool_call_quality_benchmark.arg_checks);
-          let arg_check = List.hd case.Tool_call_quality_benchmark.arg_checks in
-          check string "legacy tool_name selector" "tool_name:tool_read_file"
-            (Eval_tool_selector.label
-               arg_check.Tool_call_quality_benchmark.selector)
-      | Ok cases ->
-          fail
-            (Printf.sprintf "expected one parsed case, got %d"
-               (List.length cases))
-      | Error msg -> fail ("load_cases_from_file failed: " ^ msg))
-
 (* When a case uses semantic selectors but none of the run's tool calls carry
    usable route_evidence, scoring cannot distinguish "wrong tool" from
    "missing evidence". Per the evidence-quality contract, such runs are excluded
@@ -631,8 +617,6 @@ let () =
              test_route_evidence_quality_reports_semantic_case_gaps;
            test_case "loader parses selector-backed case fields" `Quick
              test_loader_parses_selector_backed_case_fields;
-           test_case "loader parses legacy tool_name arg check" `Quick
-             test_loader_parses_legacy_tool_name_arg_check;
            test_case "route evidence quality treats empty fields as missing"
              `Quick test_route_evidence_quality_treats_empty_evidence_as_missing;
            test_case "unavailable route evidence excludes run from scoring"
@@ -641,5 +625,7 @@ let () =
              test_case_selectors_resolve_to_live_descriptors;
            test_case "arg check paths exist in descriptor schema" `Quick
              test_arg_check_paths_exist_in_descriptor_schema;
+           test_case "a tool call without tool_name is rejected" `Quick
+             test_evidence_run_without_tool_name_is_rejected;
          ]);
     ]

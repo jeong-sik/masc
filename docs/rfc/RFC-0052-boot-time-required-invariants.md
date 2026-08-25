@@ -45,7 +45,6 @@ in
 |------|------|------|
 | `lib/masc_oas_bridge.ml` | 26 | `get_opt ()` → `None -> None` fallback |
 | `lib/runtime/runtime_catalog_runtime.ml` | 463 | `get_opt ()` → `None -> Eio_context.get_clock_opt ()` |
-| `lib/oas_worker_named.ml` | 591 | `get_opt ()` → `None -> Eio_context.get_clock_opt ()` runtime fallback |
 | `lib/keeper/keeper_llm_bridge.ml` | 14 | **`get ()` (raising)** — `clock_opt` 추출 후 `None -> fn ()` |
 
 → **Dual global Eio context systems**: `Masc_eio_env`와 `Eio_context`가 병존. 같은 bootstrap 시점(`server_runtime_bootstrap.ml:308-314`)에 각각 `init`/`set_*` 되나 서로 다른 atomic store. Drift 가능.
@@ -79,7 +78,7 @@ let start_probe ~sw ~base_path ~interval_sec =
 | `keeper_unified_turn.ml` | 402, 730, 886 | `Some -> sleep` / `None -> ()` |
 | `keeper_turn_runtime_budget.ml` | 754 | `Some -> sleep` / `None -> ()` |
 | `agent_tool_execute_runtime.ml` | 748 | conditional clock access |
-| `keeper_agent_run.ml` | 478 | optional arg to OAS callback |
+| `keeper_agent_run.ml` | 478 | optional arg to agent_core callback |
 
 **핵심**: 모든 keeper 모듈이 개별적으로 `match Some/None`을 처리. 중앙 집중식 enforcement 없음.
 

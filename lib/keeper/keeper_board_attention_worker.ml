@@ -27,11 +27,26 @@ type retry_reason =
   | Exact_claim_contended
   | Selected_generation_changed
 
+(* What the drain loop actually did before it stopped. A wake that finds an
+   empty partition returns the same verdict as one that judged twenty
+   candidates, so without these counts the log line cannot tell an operator
+   whether the worker did any work: the two hours to 2026-08-22T02:03Z held
+   120 pairs of textually identical [outcome=drained] lines, each pair a real
+   drain followed by a wake that found nothing left. *)
+type drain_progress =
+  { judgments : int
+      (* Candidates that produced a judgment on this drain. *)
+  ; steps : int
+      (* Loop iterations, including visits that found the candidate already
+         consumed or its partition blocked. *)
+  }
+
 type drain_outcome =
-  | Drained
+  | Drained of drain_progress
   | Retry_later of
       { contention : contention
       ; reason : retry_reason
+      ; progress : drain_progress
       }
 
 type rearm_schedule =
@@ -353,7 +368,7 @@ let reset_contention_rearms scheduler ~keep =
    another flow holds the claim, Selected_generation_changed means the partition
    moved under this worker. *)
 let drain_outcome_label = function
-  | Drained -> "drained"
+  | Drained _ -> "drained"
   | Retry_later { reason = Exact_claim_contended; _ } -> "retry_claim_contended"
   | Retry_later { reason = Selected_generation_changed; _ } ->
     "retry_generation_changed"
@@ -364,12 +379,17 @@ let drain_outcome_label = function
    worker that keeps returning it makes no progress while its candidate ledger
    grows; at [Info] that state reads the same as normal draining. *)
 let drain_outcome_log_level = function
-  | Drained -> Log.Info
+  | Drained _ -> Log.Info
   | Retry_later _ -> Log.Warn
 ;;
 
+let drain_outcome_progress = function
+  | Drained progress -> progress
+  | Retry_later { progress; _ } -> progress
+;;
+
 let apply_drain_rearm scheduler = function
-  | Drained ->
+  | Drained _ ->
     reset_contention_rearms scheduler ~keep:None;
     None
   | Retry_later { contention; reason = _ } ->
@@ -680,24 +700,6 @@ let signal_completion = function
          { candidate_id = completed.candidate_id; owner_wake })
 ;;
 
-let complete_and_signal
-      ~now
-      ~worker_epoch
-      ~base_path
-      latest_partition
-      judgment
-  =
-  let* projection =
-    complete_projection
-      ~now
-      ~worker_epoch
-      ~base_path
-      latest_partition
-      judgment
-  in
-  signal_completion projection
-;;
-
 let partition_provenance
       (provenance : Exact_flow.attempt_provenance)
       : Partition.exact_provenance
@@ -739,8 +741,8 @@ let setup_error_detail = function
     "board exact lane has no admitted slots"
   | Exact_flow.Candidate_invalid { position; slot_id = _ } ->
     Printf.sprintf "board exact lane slot %d has invalid identity" position
-  | Exact_flow.Flow_snapshot_failed -> "OAS exact-flow snapshot failed"
-  | Exact_flow.Flow_start_failed -> "OAS exact-flow start failed"
+  | Exact_flow.Flow_snapshot_failed -> "AGENT_CORE exact-flow snapshot failed"
+  | Exact_flow.Flow_start_failed -> "AGENT_CORE exact-flow start failed"
 ;;
 
 let exact_provenance_equal
@@ -1067,8 +1069,10 @@ let process_claimed
          partition
          (Partition.Candidate_membership_conflict detail)
      | Ok () ->
-       (match Candidate.resumable_status candidate.status with
-        | Some (Candidate.Resumable_pending _) ->
+       (match Candidate.status_view candidate.status with
+        | Candidate.Direct_resumable (Candidate.Resumable_pending _)
+        | Candidate.Requeued_resumable
+            { resumable = Candidate.Resumable_pending _; _ } ->
           (match prepared with
            | Some (candidate_id, prepared)
              when String.equal candidate_id candidate.candidate_id ->
@@ -1084,21 +1088,25 @@ let process_claimed
                ("Board attention claimed Pending candidate without successful "
                 ^ "pre-claim exact setup: "
                 ^ candidate.candidate_id))
-        | Some (Candidate.Resumable_judged judged) ->
+        | Candidate.Direct_resumable (Candidate.Resumable_judged judged)
+        | Candidate.Requeued_resumable
+            { resumable = Candidate.Resumable_judged judged; _ } ->
           complete_existing_judgment
             ~now
             ~worker_epoch
             ~base_path
             latest_partition
             judged.judgment
-        | Some (Candidate.Resumable_consumed consumed) ->
+        | Candidate.Direct_resumable (Candidate.Resumable_consumed consumed)
+        | Candidate.Requeued_resumable
+            { resumable = Candidate.Resumable_consumed consumed; _ } ->
           settle_existing_consumed
             ~now
             ~worker_epoch
             ~base_path
             latest_partition
             consumed.judgment
-        | None ->
+        | Candidate.Suspended_quarantine _ ->
           Error
             ("Quarantined Board attention candidate became claimable: "
              ^ candidate.candidate_id)))
@@ -1133,8 +1141,10 @@ let prepare_next_ready
        (match validate_partition_member partition candidate with
         | Error _ -> selected None
         | Ok () ->
-          (match Candidate.resumable_status candidate.status with
-           | Some (Candidate.Resumable_pending _) ->
+          (match Candidate.status_view candidate.status with
+           | Candidate.Direct_resumable (Candidate.Resumable_pending _)
+           | Candidate.Requeued_resumable
+               { resumable = Candidate.Resumable_pending _; _ } ->
              (match prepare candidate with
               | Ok prepared ->
                 selected (Some (candidate.candidate_id, prepared))
@@ -1142,10 +1152,16 @@ let prepare_next_ready
                 Error
                   ("Board attention exact setup unavailable before claim: "
                    ^ setup_error_detail error))
-           | Some
+           | Candidate.Direct_resumable
                (Candidate.Resumable_judged _
                | Candidate.Resumable_consumed _)
-           | None -> selected None)))
+           | Candidate.Requeued_resumable
+               { resumable =
+                   (Candidate.Resumable_judged _
+                   | Candidate.Resumable_consumed _)
+               ; _
+               }
+           | Candidate.Suspended_quarantine _ -> selected None)))
 ;;
 
 let confirm_requeue_transition ~base_path transition =
@@ -1188,10 +1204,13 @@ let rec converge_requeue_conflict
          ^ partition.candidate_id)
   in
   let* () =
-    match Candidate.quarantine_state candidate.status with
-    | Some
-        { quarantine
-        ; phase = Candidate.Requeued _
+    match Candidate.status_view candidate.status with
+    | Candidate.Requeued_resumable
+        { quarantine =
+            { quarantine
+            ; phase = Candidate.Requeued _
+            }
+        ; _
         }
       when String.equal quarantine.partition_id partition.partition_id
            && String.equal quarantine.quarantine_id expected_quarantine_id
@@ -1199,7 +1218,9 @@ let rec converge_requeue_conflict
                 quarantine.partition_generation
                 partition.generation ->
       Ok ()
-    | Some _ | None ->
+    | Candidate.Direct_resumable _
+    | Candidate.Requeued_resumable _
+    | Candidate.Suspended_quarantine _ ->
       Error
         ("candidate quarantine generation changed during requeue convergence: "
          ^ partition.partition_id)
@@ -1281,23 +1302,40 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
     | [] -> Ok ()
     | partition :: rest ->
       let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
-      let* candidate =
-        match
-          List.find_opt
-            (fun candidate ->
-               String.equal
-                 candidate.Candidate.candidate_id
-                 partition.Partition.candidate_id)
-            candidates
-        with
-        | Some candidate -> Ok candidate
-        | None ->
-          Error
-            ("partition candidate is absent during quarantine reconciliation: "
-             ^ partition.candidate_id)
-      in
-      (match partition.state, Candidate.quarantine_state candidate.status with
-       | Partition.Blocked _, Some state
+      (match
+         List.find_opt
+           (fun candidate ->
+              String.equal
+                candidate.Candidate.candidate_id
+                partition.Partition.candidate_id)
+           candidates
+       with
+       | None ->
+         (* Mirror of the Completed finalizer's [Candidate_absent] outcome
+            (#28770): a retire moves the whole candidate store aside and
+            leaves no tombstone, so a quarantine naming a retired candidate
+            can never be acknowledged or requeued. Erroring here fataled the
+            whole worker at every process start (stage=process_recovery,
+            2026-08-16, three fleet keepers), which is exactly the permanent
+            re-encounter the finalizer branch exists to stop. Terminal
+            Blocked settles; every other state passes through the same way a
+            present candidate with a non-quarantine status does below. *)
+         (match partition.state with
+          | Partition.Blocked _ ->
+            Log.Keeper.error
+              "Board attention candidate permanently absent during quarantine reconciliation; settling blocked partition keeper=%s partition=%s candidate=%s"
+              keeper_name
+              partition.partition_id
+              partition.candidate_id;
+            let* (_ : Partition.t) = Partition.settle ~now ~base_path ~partition in
+            loop rest
+          | Partition.Ready | Partition.Running _ | Partition.Completed _
+          | Partition.Settled _ -> loop rest)
+       | Some candidate ->
+         (match partition.state, Candidate.status_view candidate.status with
+       | ( Partition.Blocked _
+         , (Candidate.Suspended_quarantine state
+           | Candidate.Requeued_resumable { quarantine = state; _ }) )
          when String.equal
                 state.quarantine.partition_id
                 partition.partition_id
@@ -1339,7 +1377,9 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
        | Partition.Blocked _, _ ->
          let* () = quarantine_blocked_partition ~base_path partition in
          loop rest
-       | Partition.Ready, Some state
+       | ( Partition.Ready
+         , (Candidate.Suspended_quarantine state
+           | Candidate.Requeued_resumable { quarantine = state; _ }) )
          when String.equal
                 state.quarantine.partition_id
                 partition.partition_id
@@ -1363,18 +1403,20 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
               confirm_requeue_transition ~base_path confirmation
             in
             loop rest)
-       | Partition.Ready, Some state
+       | ( Partition.Ready
+         , (Candidate.Suspended_quarantine state
+           | Candidate.Requeued_resumable { quarantine = state; _ }) )
          when String.equal
                 state.quarantine.partition_id
                 partition.partition_id ->
          Error
            ("Ready partition is not the quarantined generation successor: "
             ^ partition.partition_id)
-       | Partition.Ready, _
-       | Partition.Running _, _
-       | Partition.Completed _, _
-       | Partition.Settled _, _ ->
-         loop rest)
+          | Partition.Ready, _
+          | Partition.Running _, _
+          | Partition.Completed _, _
+          | Partition.Settled _, _ ->
+            loop rest))
   in
   loop partitions
 ;;
@@ -1595,6 +1637,32 @@ let settles_without_admitting (item : Partition.completed_item) =
   | Keeper_board_attention_judgment.Relevant -> false
 ;;
 
+(* Each settlement performs at least the candidate-consumption write and the
+   partition transition write, so one owner turn performs at most twice the
+   configured settlement bound (default 8, see Keeper_config) such durability
+   operations before persisting a continuation wake for the remainder.
+   This is deliberately a settlement bound, not a scan or arrival-window
+   heuristic: every successful iteration removes one exact Completed
+   partition.
+
+   This is a batch-size knob, not a workaround cap: continuation_wake
+   re-wakes the owner for exactly one more Completed partition per
+   heartbeat cycle rather than moving remaining work off-turn, so the
+   choice is cycle-count vs per-cycle-blocking-time, not block-vs-don't
+   (masc#27054 adversarial review). See Keeper_config for the runtime_params
+   registration and its value derivation. *)
+let max_completed_settlements_per_owner_turn () =
+  Keeper_config.keeper_board_attention_settlements_per_turn ()
+
+(* [Eio.Fiber.yield] raises [Effect.Unhandled] when no Eio event loop is
+   running — the Alcotest suite drives [settle_one_completed] directly without
+   [Eio_main.run]. Production heartbeats always run under Eio, so the yield is
+   effective there; end-to-end drain behavior is tracked by masc#27055. *)
+let yield_between_discard_settlements () =
+  try Eio.Fiber.yield () with
+  | Effect.Unhandled _ -> ()
+;;
+
 let settle_one_completed
       ~base_path
       ~keeper_name
@@ -1608,17 +1676,42 @@ let settle_one_completed
     in
     match partition.Partition.state with
     | Partition.Completed { item; _ } ->
-      let* (_ : Candidate.candidate) =
+      let* delivery =
         Candidate.apply_judgment_and_deliver
           ~base_path
           ~keeper_name
           ~candidate_id:item.candidate_id
           ~judgment:item.judgment
       in
+      (* [Candidate_absent] means the candidate this item names is gone from
+         the live ledger for good (a retire moves the whole store aside as one
+         directory and leaves no tombstone to re-check later), so no delivery
+         can ever land for it. Settling the partition here without one is the
+         terminal outcome, not a fallback: the alternative is exactly what
+         this branch exists to stop — a settlement error that propagates and
+         leaves the same [Completed] item to be handed to this function again
+         next cycle, permanently, since the ledger it depends on cannot come
+         back (masc, board attention finalizer, 2026-08-16). Discarded rather
+         than [settles_without_admitting item]: no stimulus reached the
+         Keeper regardless of what the lost judgment's verdict was, so the
+         owner-turn batch must keep draining instead of stopping as if this
+         had been an admission. *)
+      let discarded_only =
+        match delivery with
+        | Candidate.Candidate_absent ->
+          Log.Keeper.error
+            "Board attention candidate permanently absent from the ledger; settling partition without delivery keeper=%s partition=%s candidate=%s"
+            keeper_name
+            partition.partition_id
+            item.candidate_id;
+          true
+        | Candidate.Delivered (_ : Candidate.candidate) ->
+          settles_without_admitting item
+      in
       let* settled =
         Partition.settle ~now:(Time_compat.now ()) ~base_path ~partition
       in
-      Ok (settled, settles_without_admitting item)
+      Ok (settled, discarded_only)
     | Partition.Ready
     | Partition.Running _
     | Partition.Settled _
@@ -1627,19 +1720,22 @@ let settle_one_completed
         ("completed partition query returned non-Completed state: "
          ^ partition.partition_id)
   in
-  (* Terminates: every iteration settles one partition out of [completed], and
-     the list is the snapshot taken before the loop. Completions the worker
-     adds while this runs are left for the continuation wake. *)
+  (* Terminates within the owner-turn bound: every iteration settles one
+     partition out of [completed]. Completions beyond the bound, including ones
+     the worker adds while this runs, are left for the continuation wake. *)
   let rec settle_until_admission ~last_settled ~discarded = function
     | [] -> Ok (last_settled, discarded)
+    | _ when discarded >= max_completed_settlements_per_owner_turn () ->
+      Ok (last_settled, discarded)
     | partition :: rest ->
       let* settled, discarded_only = settle_head partition in
       if discarded_only
-      then
+      then (
+        yield_between_discard_settlements ();
         settle_until_admission
           ~last_settled:settled
           ~discarded:(discarded + 1)
-          rest
+          rest)
       else Ok (settled, discarded)
   in
   let* completed = completed_in_order ~base_path ~keeper_name in
@@ -1714,17 +1810,26 @@ let observe_error ~base_path ~keeper_name detail =
   Log.Keeper.error "Board attention worker failed keeper=%s: %s" keeper_name detail
 ;;
 
-let rec drain_available_with_process ~yield ~process =
-  match process () with
-  | Ok Idle -> Ok Drained
-  | Ok (Contended contention) ->
-    Ok (Retry_later { contention; reason = Exact_claim_contended })
-  | Ok (Rescan_later contention) ->
-    Ok (Retry_later { contention; reason = Selected_generation_changed })
-  | Ok (Judgment_completed _ | Candidate_already_consumed _ | Partition_blocked _) ->
-    yield ();
-    drain_available_with_process ~yield ~process
-  | Error detail -> Error detail
+let drain_available_with_process ~yield ~process =
+  let rec loop progress =
+    match process () with
+    | Ok Idle -> Ok (Drained progress)
+    | Ok (Contended contention) ->
+      Ok (Retry_later { contention; reason = Exact_claim_contended; progress })
+    | Ok (Rescan_later contention) ->
+      Ok
+        (Retry_later
+           { contention; reason = Selected_generation_changed; progress })
+    | Ok (Judgment_completed _) ->
+      yield ();
+      loop
+        { judgments = progress.judgments + 1; steps = progress.steps + 1 }
+    | Ok (Candidate_already_consumed _ | Partition_blocked _) ->
+      yield ();
+      loop { progress with steps = progress.steps + 1 }
+    | Error detail -> Error detail
+  in
+  loop { judgments = 0; steps = 0 }
 ;;
 
 let drain_available_current
@@ -1852,12 +1957,16 @@ let run
                  ~execute
              with
              | Ok outcome ->
+               let progress = drain_outcome_progress outcome in
                Log.Keeper.emit
                  (drain_outcome_log_level outcome)
                  (Printf.sprintf
-                    "board_attention_worker_drain keeper=%s outcome=%s"
+                    "board_attention_worker_drain keeper=%s outcome=%s \
+                     judgments=%d steps=%d"
                     keeper_name
-                    (drain_outcome_label outcome));
+                    (drain_outcome_label outcome)
+                    progress.judgments
+                    progress.steps);
                ignore
                  (apply_drain_rearm contention_rearms outcome
                   : rearm_schedule option);
@@ -1876,6 +1985,7 @@ let run
 module For_testing = struct
   type nonrec rearm_scheduler = rearm_scheduler
 
+  let reconcile_quarantines = reconcile_quarantines
   let process_next = process_next
   let process_next_exact = process_next_exact
   let process_next_with_claim_ready_exact = process_next_with_claim_ready_exact
@@ -1885,6 +1995,7 @@ module For_testing = struct
   let schedule_contention_rearm = schedule_contention_rearm
   let reset_contention_rearms = reset_contention_rearms
   let drain_outcome_label = drain_outcome_label
+  let drain_outcome_progress = drain_outcome_progress
   let drain_outcome_log_level = drain_outcome_log_level
   let apply_drain_rearm = apply_drain_rearm
   let replay_completed_owner_wake = replay_completed_owner_wake

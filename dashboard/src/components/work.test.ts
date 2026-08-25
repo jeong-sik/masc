@@ -21,7 +21,12 @@ vi.mock('../api/mcp', () => ({
   callMcpTool: callMcpToolMock,
 }))
 
-vi.mock('../router', () => ({
+// Only the two entry points this file drives are replaced. The rest of the
+// module stays real because the surface renders RouteLink, which calls
+// hashForRoute: a mock listing just route and navigate left that undefined,
+// and every case here failed on the call once Work mounted its section nav.
+vi.mock('../router', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../router')>(),
   get route() { return routeSignal },
   navigate: navigateMock,
 }))
@@ -32,10 +37,6 @@ vi.mock('../store', () => ({
   keepers: signal([]),
   executionTaskTotal: signal<number | null>(null),
   refreshGoals: vi.fn().mockResolvedValue(undefined),
-}))
-
-vi.mock('./board/board-moderation-surface', () => ({
-  BoardModerationSurface: () => html`<div data-testid="board-moderation-surface">Moderation</div>`,
 }))
 
 vi.mock('./board/board-surface', () => ({
@@ -52,6 +53,14 @@ vi.mock('./planning-panel', () => ({
 
 vi.mock('./verification-requests-panel', () => ({
   VerificationRequestsPanel: () => html`<div data-testid="verification-panel">Verification</div>`,
+}))
+
+vi.mock('./verification-runs-panel', () => ({
+  VerificationRunsPanel: () => html`<div data-testid="verification-runs-panel">Verification runs</div>`,
+}))
+
+vi.mock('./goal-verification-runs-panel', () => ({
+  GoalVerificationRunsPanel: () => html`<div data-testid="goal-verification-runs-panel">Goal verification runs</div>`,
 }))
 
 vi.mock('./repository-management', () => ({
@@ -112,23 +121,6 @@ function goalTreeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
     metric: null,
     target_value: null,
     due_date: null,
-    parent_goal_id: null,
-    owner: null,
-    attainment: {
-      state: 'unmeasured',
-      basis: 'unmeasured',
-      metric: null,
-      metric_evaluation: 'absent',
-      target_value: null,
-      target_parse_status: 'absent',
-      unit: 'unknown',
-      observed_value: null,
-      target_numeric: null,
-      attainment_pct: null,
-      task_done_count: 0,
-      task_count: 0,
-      note: '',
-    },
     tasks: [],
     task_count: 0,
     task_done_count: 0,
@@ -179,19 +171,6 @@ describe('Work', () => {
     expect(screen.queryByTestId('work-kpis')).toBeNull()
   })
 
-  it('renders the board moderation surface for the workspace moderation section', () => {
-    routeSignal.value = {
-      tab: 'workspace',
-      params: { section: 'moderation' },
-      postId: null,
-    }
-
-    render(html`<${Work} />`)
-
-    expect(screen.getByTestId('board-moderation-surface')).toBeTruthy()
-    expect(screen.queryByTestId('work-kpis')).toBeNull()
-  })
-
   it('renders the board feed surface for the workspace board section', () => {
     routeSignal.value = {
       tab: 'workspace',
@@ -215,6 +194,8 @@ describe('Work', () => {
     render(html`<${Work} />`)
 
     expect(screen.getByTestId('verification-panel')).toBeTruthy()
+    expect(screen.getByTestId('verification-runs-panel')).toBeTruthy()
+    expect(screen.getByTestId('goal-verification-runs-panel')).toBeTruthy()
     expect(screen.queryByTestId('work-kpis')).toBeNull()
   })
 
@@ -371,7 +352,7 @@ describe('Work', () => {
       const card = container.querySelector('[data-goal-id="G-1"]')
       expect(card).toBeTruthy()
       fireEvent.click(card!.querySelector('.wk-goal-h')!)
-      expect(card?.querySelector('.wk-jobs')).toBeTruthy()
+      expect(card?.querySelector('.wk-tasks')).toBeTruthy()
 
       const row = screen.getByTestId('job-row')
       expect(row).toBeTruthy()
@@ -381,6 +362,40 @@ describe('Work', () => {
       expect(within(card! as HTMLElement).getByText('Blocked job')).toBeTruthy()
       expect(screen.getByTestId('job-blocker').textContent).toContain('dependency missing')
       expect(screen.queryByTestId('job-detail')).toBeNull()
+    })
+
+    it('marks the goal list with the design tree class and shows the raw phase chip', () => {
+      goals.value = [
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      ]
+      tasks.value = []
+
+      const { container } = render(html`<${Work} />`)
+
+      expect(container.querySelector('main.ov-flush')).toBeTruthy()
+      expect(screen.getByTestId('work-goal-list').classList.contains('wk-tree')).toBe(true)
+      expect(container.querySelector('.wk-goal-phase')?.textContent).toBe('executing')
+    })
+
+    it('renders a re-run chip on task rows carrying predecessor_task_id (RFC-0323)', () => {
+      goals.value = [
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      ]
+      tasks.value = [
+        { id: 'J-1', title: 'Rerun job', goal_id: 'G-1', status: 'todo', predecessor_task_id: 'J-0' },
+        { id: 'J-2', title: 'Plain job', goal_id: 'G-1', status: 'todo' },
+      ]
+
+      const { container } = render(html`<${Work} />`)
+
+      const card = container.querySelector('[data-goal-id="G-1"]')
+      fireEvent.click(card!.querySelector('.wk-goal-h')!)
+
+      const rerun = screen.getByTestId('job-rerun')
+      expect(rerun.textContent).toContain('J-0')
+      expect(rerun.getAttribute('title')).toContain('predecessor_task_id = J-0')
+      // Only the re-run task carries the chip.
+      expect(card?.querySelectorAll('[data-testid="job-rerun"]').length).toBe(1)
     })
 
     it('navigates to keeper workspace when keeper assignment is clicked', () => {
@@ -514,10 +529,6 @@ describe('Work', () => {
             strict: true,
             completion_contract: ['merge-ready proof'],
             required_evidence: ['typed test evidence'],
-            links: {
-              session_id: null,
-              operation_id: 'op-contract',
-            },
           },
           handoff_context: {
             summary: '',
@@ -537,7 +548,6 @@ describe('Work', () => {
       expect(ledger.textContent).toContain('sess-ledger')
       expect(ledger.textContent).toContain('op-ledger')
       expect(ledger.textContent).toContain('strict')
-      expect(ledger.textContent).toContain('op-contract')
       expect(ledger.textContent).toContain('merge-ready proof')
       expect(ledger.textContent).toContain('typed test evidence')
       expect(ledger.textContent).toContain('receipt-1')
@@ -1227,6 +1237,37 @@ describe('Work', () => {
         expect(screen.getByTestId('work-view-list').classList.contains('on')).toBe(true)
       })
 
+      it('renders re-run chip and handoff marker on kanban cards from live task fields', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          {
+            id: 'J-1',
+            title: 'Rerun with handoff',
+            goal_id: 'G-1',
+            status: 'in_progress',
+            assignee: 'keeper-x',
+            predecessor_task_id: 'J-0',
+            handoff_context: { summary: 'handed off from keeper-y' },
+          },
+          { id: 'J-2', title: 'Plain task', goal_id: 'G-1', status: 'todo' },
+        ]
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('work-view-kanban'))
+
+        const board = screen.getByTestId('work-kanban')
+        const card = board.querySelector('[data-kanban-task-id="J-1"]')
+        const rerun = card?.querySelector('[data-testid="kanban-rerun"]')
+        expect(rerun?.textContent).toContain('J-0')
+        expect(card?.querySelector('[data-testid="kanban-handoff"]')).toBeTruthy()
+
+        const plain = board.querySelector('[data-kanban-task-id="J-2"]')
+        expect(plain?.querySelector('[data-testid="kanban-rerun"]')).toBeNull()
+        expect(plain?.querySelector('[data-testid="kanban-handoff"]')).toBeNull()
+      })
+
       // The tree used to speak its own status spelling ("completed" for done,
       // "pending" for todo) and the frontend translated it. Both sides now use
       // Masc_domain.task_status_to_string, so the fixture carries the spelling
@@ -1516,9 +1557,23 @@ describe('Work', () => {
         expect(screen.getByTestId('work-backlog').textContent).toContain('Tree Only Goal')
       })
 
-      it('renders Goal Store projection dossier evidence on matching goal cards', () => {
+      it('renders the declared completion criteria and the operator context on a goal card', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-04' },
+          {
+            id: 'G-1',
+            title: 'Goal One',
+            priority: 5,
+            phase: 'executing',
+            created_at: '2026-01-01',
+            updated_at: '2026-01-04',
+            last_review_note: 'metric 미충족 — merged PR은 1건뿐',
+            // The card header reads the goals feed, not the tree — `displayGoals`
+            // lets a goals-feed row win over the tree node of the same id. Live
+            // both feeds carry these: /api/v1/dashboard/planning serves metric
+            // on 35 of 48 goals and target_value on 32.
+            metric: 'merged PR count',
+            target_value: '5 PRs',
+          },
         ]
         tasks.value = []
         goalTreeData.value = {
@@ -1528,32 +1583,31 @@ describe('Work', () => {
               title: 'Goal One',
               priority: 5,
               phase: 'executing',
-              goal_fsm: {
-                state: 'executing',
-                source: 'goal.phase',
-                next_actions: ['request completion'],
-                activity_observation: 'task',
+              metric: 'merged PR count',
+              target_value: '5 PRs',
+              task_summary: {
+                total: 4,
+                done: 3,
+                open: 0,
+                terminal: 4,
+                awaiting_verification: 0,
+                cancelled: 1,
+                unassigned: 0,
+                completion_pct: 75,
+                by_status: {},
               },
-              completion_summary: {
-                state: 'in_progress',
-                pct: 75,
-                pct_source: 'goal_store',
-                attainment_state: 'in_progress',
-                attainment_basis: 'linked_tasks',
-                metric_evaluation: 'absent',
-                task_total: 4,
-                task_done: 3,
-                task_open: 1,
-                is_complete: false,
-                is_terminal: false,
-                ready_to_request_completion: false,
-              },
-              timeline_events: [{ kind: 'turn' }],
+              timeline_events: [{
+                ts: '2026-01-04T10:00:00Z',
+                kind: 'goal_owner',
+                lane: 'goal',
+                title: 'Goal Owner',
+                summary: 'owner: <unassigned> -> dancer by operator',
+                severity: 'ok',
+              }],
               last_activity_at: '2026-01-04T10:00:00Z',
               stagnation_seconds: 3600,
               linked_keeper_names: ['sangsu'],
               pending_approval_count: 2,
-              owner: 'dancer',
               latest_keeper_ref: 'sangsu',
               latest_turn_ref: 42,
             }),
@@ -1568,16 +1622,280 @@ describe('Work', () => {
 
         const dossier = within(goalCard).getByTestId('goal-dossier')
         expect(dossier).toHaveAttribute('data-goal-dossier', 'G-1')
-        expect(dossier).toHaveAttribute('data-goal-dossier-fsm-state', 'executing')
+        expect(dossier).toHaveAttribute('data-goal-dossier-phase', 'executing')
         expect(dossier).toHaveAttribute('data-goal-dossier-timeline-count', '1')
-        expect(dossier.textContent).toContain('state executing')
-        expect(dossier.textContent).toContain('request completion')
-        expect(dossier.textContent).toContain('state in_progress')
-        expect(dossier.textContent).toContain('tasks 3/4')
-        expect(dossier.textContent).toContain('owner dancer')
-        expect(dossier.textContent).toContain('keeper sangsu')
-        expect(dossier.textContent).toContain('turn 42')
-        expect(dossier.textContent).toContain('approvals 2')
+
+        const text = dossier.textContent ?? ''
+        // Why the goal sits where it does.
+        expect(text).toContain('metric 미충족 — merged PR은 1건뿐')
+        // Where to go next.
+        expect(text).toContain('sangsu')
+        expect(text).toContain('2건 승인 대기')
+        // What the card header already states is not restated below it: the id
+        // rides `data-goal-id` on the card, and the goals endpoint serves no
+        // owner, so there is no 담당 row to fill or to excuse as empty.
+        expect(dossier.querySelector('[data-goal-detail-row="id"]')).toBeNull()
+        expect(dossier.querySelector('[data-goal-detail-row="owner"]')).toBeNull()
+        expect(text).not.toContain('G-1')
+        expect(text).not.toContain('담당')
+        // The latest keeper/turn pair is not a row of its own; the keeper link
+        // above is the way to that keeper.
+        expect(dossier.querySelector('[data-goal-detail-row="latest-run"]')).toBeNull()
+        expect(text).not.toContain('턴 42')
+        expect(text).not.toContain('최근 실행')
+
+        // What counts as done is declared once, in the card header, next to the
+        // progress bar it qualifies.
+        expect(goalCard.querySelector('[data-goal-metric]')?.textContent?.trim())
+          .toBe('merged PR count · 5 PRs')
+        expect(text).not.toContain('merged PR count')
+      })
+
+      it('declares the metric once in the header and never a second task tally', () => {
+        goals.value = [
+          {
+            id: 'G-1', title: 'Goal One', priority: 5, phase: 'blocked',
+            created_at: '2026-01-01', updated_at: '2026-01-04',
+            metric: 'merged PR count', target_value: '5 PRs',
+          },
+        ]
+        // Six done, one cancelled. The header excludes cancelled from the
+        // denominator on purpose (see goalProgressCounts) and reads 6/6.
+        tasks.value = [
+          ...Array.from({ length: 6 }, (_, i) => ({
+            id: `J-${i}`, title: `Done ${i}`, goal_id: 'G-1', status: 'done' as const,
+          })),
+          { id: 'J-X', title: 'Called off', goal_id: 'G-1', status: 'cancelled' as const },
+        ]
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              phase: 'blocked',
+              metric: 'merged PR count',
+              target_value: '5 PRs',
+              task_count: 7,
+              task_done_count: 6,
+              // task_summary keeps cancelled in `total`. The panel used to
+              // print this alongside the header's 6/6, so one card answered
+              // "how many tasks" twice, with 6 and with 7, and nothing said
+              // which rule applied. The panel no longer answers it at all.
+              task_summary: {
+                total: 7, done: 6, open: 0, terminal: 7, awaiting_verification: 0,
+                cancelled: 1, unassigned: 0, completion_pct: 85, by_status: {},
+              },
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
+        }
+
+        render(html`<${Work} />`)
+        const goalCard = screen.getByTestId('goal-card')
+        fireEvent.click(goalCard.querySelector('.wk-goal-h')!)
+
+        // The declaration sits next to the bar it qualifies, stated once.
+        expect(goalCard.querySelector('[data-goal-metric]')?.textContent?.trim())
+          .toBe('merged PR count · 5 PRs')
+        expect(goalCard.querySelector('.wk-prog-lbl')?.textContent).toContain('6/6')
+
+        const dossier = screen.getByTestId('goal-dossier')
+        const text = dossier.textContent ?? ''
+        expect(text).not.toContain('merged PR count')
+        expect(text).not.toContain('5 PRs')
+        expect(text).not.toContain('전체 7')
+        expect(dossier.querySelector('[data-goal-detail-row="metric"]')).toBeNull()
+        expect(dossier.querySelector('[data-goal-detail-row="target"]')).toBeNull()
+        expect(dossier.querySelector('[data-goal-detail-row="tasks"]')).toBeNull()
+
+        // No verdict. The backend used to answer `attained` at 100% here, from
+        // observed=6 (finished linked tasks) against a target scraped out of
+        // "5 PRs" — a task count wearing the metric's name. Nothing computes
+        // that any more, and nothing in this panel may reintroduce it.
+        expect(dossier.querySelector('[data-goal-detail-row="verdict"]')).toBeNull()
+        expect(dossier.querySelector('[data-goal-detail-row="basis"]')).toBeNull()
+        expect(dossier.querySelector('[data-goal-detail-row="observed"]')).toBeNull()
+        expect(dossier.querySelector('[data-goal-detail-row="ready"]')).toBeNull()
+        expect(dossier.querySelector('[data-goal-detail-caveat]')).toBeNull()
+        expect(text).not.toContain('%')
+        expect(text).not.toContain('달성')
+      })
+
+      it('shows no metric chip at all when the goal declares none', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-04' },
+        ]
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [goalTreeNode({ id: 'G-1' })],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
+        }
+
+        render(html`<${Work} />`)
+        const goalCard = screen.getByTestId('goal-card')
+        fireEvent.click(goalCard.querySelector('.wk-goal-h')!)
+
+        // A goal with nothing declared gets no chip. There is no "정해진 지표가
+        // 없어요" row any more — a placeholder telling the operator a field is
+        // empty costs a line and settles nothing.
+        expect(goalCard.querySelector('[data-goal-metric]')).toBeNull()
+        const dossier = screen.getByTestId('goal-dossier')
+        expect(dossier.querySelector('[data-goal-detail-row="metric"]')).toBeNull()
+        expect(dossier.querySelector('[data-goal-detail-row="target"]')).toBeNull()
+      })
+
+      it('drops the goal_fsm projection tokens from the goal detail panel', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'blocked', created_at: '2026-01-01', updated_at: '2026-01-04' },
+        ]
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              phase: 'blocked',
+              goal_fsm: {
+                state: 'blocked',
+                source: 'goal.phase',
+                next_actions: ['unblock', 'drop'],
+                activity_observation: 'runtime',
+              },
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
+        }
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
+
+        // `source` was the constant `goal.phase` on every node, and the
+        // next_actions strings named transitions this panel does not perform.
+        const text = screen.getByTestId('goal-dossier').textContent ?? ''
+        expect(text).not.toContain('goal.phase')
+        expect(text).not.toContain('unblock')
+        expect(text).not.toContain('drop')
+        expect(text).not.toContain('activity runtime')
+      })
+
+      it('opens the keeper workspace from a linked keeper in the goal detail panel', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-04' },
+        ]
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [goalTreeNode({ id: 'G-1', linked_keeper_names: ['polisher', 'rondo'] })],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
+        }
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
+
+        const link = screen.getByTestId('goal-dossier')
+          .querySelector<HTMLButtonElement>('[data-goal-detail-keeper="rondo"]')
+        expect(link).not.toBeNull()
+        fireEvent.click(link!)
+
+        expect(navigateMock).toHaveBeenCalledWith(
+          'monitoring',
+          { section: 'agents', view: 'keepers', keeper: 'rondo' },
+        )
+      })
+
+      it('expands the goal detail timeline events behind the toggle', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-04' },
+        ]
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              title: 'Goal One',
+              priority: 5,
+              phase: 'executing',
+              timeline_events: [{
+                ts: '2026-01-04T10:00:00Z',
+                kind: 'goal_owner',
+                lane: 'goal',
+                title: 'Goal Owner',
+                summary: 'owner: <unassigned> -> dancer by operator',
+                severity: 'ok',
+              }],
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
+        }
+
+        render(html`<${Work} />`)
+
+        const goalCard = screen.getByTestId('goal-card')
+        fireEvent.click(goalCard.querySelector('.wk-goal-h')!)
+
+        const dossier = within(goalCard).getByTestId('goal-dossier')
+        const toggle = dossier.querySelector('[data-goal-dossier-timeline-toggle="G-1"]')
+        expect(toggle).not.toBeNull()
+        expect(toggle).toHaveAttribute('aria-expanded', 'false')
+        expect(toggle!.textContent).toContain('기록 1건 보기')
+        expect(dossier.querySelectorAll('[data-goal-dossier-timeline-event]')).toHaveLength(0)
+
+        fireEvent.click(toggle!)
+
+        expect(toggle).toHaveAttribute('aria-expanded', 'true')
+        const rows = dossier.querySelectorAll('[data-goal-dossier-timeline-event]')
+        expect(rows).toHaveLength(1)
+        expect(rows[0]!.textContent).toContain('goal_owner')
+        expect(rows[0]!.textContent).toContain('2026-01-04T10:00:00Z')
+        expect(rows[0]!.textContent).toContain('owner: <unassigned> -> dancer by operator')
+        // The count hook stays put while the list opens.
+        expect(dossier).toHaveAttribute('data-goal-dossier-timeline-count', '1')
+      })
+
+      it('folds created, last changed and last active into one relative-time activity row', () => {
+        const now = Date.now()
+        const createdAt = new Date(now - 3 * 24 * 60 * 60 * 1000)
+        const updatedAt = new Date(now - 2 * 60 * 60 * 1000)
+        const lastActivityAt = new Date(now - 5 * 60 * 1000)
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'executing', created_at: createdAt.toISOString(), updated_at: updatedAt.toISOString() },
+        ]
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              created_at: createdAt.toISOString(),
+              updated_at: updatedAt.toISOString(),
+              last_activity_at: lastActivityAt.toISOString(),
+              // The live maximum (#29472). It is not printed anywhere.
+              stagnation_seconds: 2154748,
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
+        }
+
+        render(html`<${Work} />`)
+        const goalCard = screen.getByTestId('goal-card')
+        fireEvent.click(goalCard.querySelector('.wk-goal-h')!)
+
+        const dossier = within(goalCard).getByTestId('goal-dossier')
+        const activity = dossier.querySelector('[data-goal-detail-row="activity"]')
+        expect(activity).not.toBeNull()
+        // Three instants on the one row, each a <time> carrying the absolute
+        // instant while the row text reads relative.
+        expect(Array.from(activity!.querySelectorAll('[data-goal-detail-when]'), el => el.getAttribute('data-goal-detail-when')))
+          .toEqual(['created', 'updated', 'last-activity'])
+        expect(Array.from(activity!.querySelectorAll('time'), el => el.getAttribute('datetime')))
+          .toEqual([createdAt.toISOString(), updatedAt.toISOString(), lastActivityAt.toISOString()])
+        const text = activity!.textContent ?? ''
+        expect(text).toContain('만든 날 3일 전')
+        expect(text).toContain('마지막 변경 2시간 전')
+        expect(text).toContain('마지막 활동 5분 전')
+        expect(text).not.toContain(createdAt.toISOString())
+        // No raw-seconds stagnation figure, and no separate created/changed rows.
+        expect(text).not.toContain('초째')
+        expect(text).not.toContain('2154748')
+        expect(dossier.querySelector('[data-goal-detail-row="created"]')).toBeNull()
+        expect(dossier.querySelector('[data-goal-detail-row="updated"]')).toBeNull()
+        expect(dossier.querySelectorAll('[data-goal-detail-row]')).toHaveLength(1)
       })
 
       it('renders tree-only Goal Store goals in the list without an execution goal mirror', () => {
@@ -1590,12 +1908,6 @@ describe('Work', () => {
               title: 'Tree Only Goal',
               priority: 4,
               phase: 'blocked',
-              goal_fsm: {
-                state: 'blocked',
-                source: 'goal.phase',
-                next_actions: ['unblock linked task'],
-                activity_observation: 'task',
-              },
               tasks: [goalTreeTask({ id: 'T-tree', goal_id: 'G-tree', status: 'todo' })],
             }),
           ],
@@ -1610,11 +1922,9 @@ describe('Work', () => {
         fireEvent.click(goalCard.querySelector('.wk-goal-h')!)
 
         const dossier = within(goalCard).getByTestId('goal-dossier')
-        expect(dossier).toHaveAttribute('data-goal-dossier-fsm-state', 'blocked')
-        expect(dossier.textContent).toContain('unblock linked task')
+        expect(dossier).toHaveAttribute('data-goal-dossier', 'G-tree')
         expect(screen.getByTestId('work-backlog').textContent).toContain('Tree Only Goal')
       })
-
       it('preserves blocked and unknown Goal Store task statuses instead of remapping them', () => {
         goals.value = [
           { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },

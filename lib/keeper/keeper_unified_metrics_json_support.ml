@@ -35,13 +35,11 @@ let provider_context_json ~(meta : keeper_meta)
       `Assoc
         [ ("runtime_id", `String runtime_id)
         ; "selected_model", `Null
-        ; "candidate_models", `List []
         ]
   | None ->
       `Assoc
         [ ("runtime_id", `String (runtime_id_of_meta meta))
         ; ("selected_model", `Null)
-        ; "candidate_models", `List []
         ]
 
 let redacted_runtime_attempt_to_json
@@ -53,11 +51,6 @@ let redacted_runtime_attempt_to_json
     ]
 ;;
 
-let redacted_runtime_fallback_event_to_json
-    (event : Runtime_observation.runtime_fallback_event) : Yojson.Safe.t =
-  `Assoc [ "reason", `String event.reason ]
-;;
-
 let redacted_runtime_observation_to_json
     (obs : Runtime_observation.runtime_observation) : Yojson.Safe.t =
   let runtime_id =
@@ -65,21 +58,10 @@ let redacted_runtime_observation_to_json
   in
   `Assoc
     [ "runtime_id", `String runtime_id
-    ; "strategy", Json_util.string_opt_to_json obs.strategy
-    ; "configured_labels", `List []
-    ; "candidate_models", `List []
-    ; "primary_model", `Null
     ; "selected_model", `Null
     ; "selected_model_raw", `Null
-    ; "selected_index", Json_util.int_opt_to_json obs.selected_index
-    ; "fallback_hops", Json_util.int_opt_to_json obs.fallback_hops
-    ; "fallback_applied", `Bool obs.fallback_applied
     ; ( "attempts"
       , `List (List.map redacted_runtime_attempt_to_json obs.attempts) )
-    ; ( "fallback_events"
-      , `List
-          (List.map redacted_runtime_fallback_event_to_json obs.fallback_events)
-      )
     ; "attempt_details_available", `Bool obs.attempt_details_available
     ; "attempt_details_source", `String obs.attempt_details_source
     ]

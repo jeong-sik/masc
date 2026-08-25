@@ -8,12 +8,8 @@
     [handle_join] directly (which requires a full
     [Mcp_tool_runtime_types.context] with Eio fiber infrastructure).
 
-    Note on persona path resolution: [normalize_all_names] uses
-    [Config_dir_resolver.personas_dir_opt()] first, which can ignore
-    [base_path].  That resolver exposes [MASC_PERSONAS_DIR] only after the
-    config root is resolved, so the join-gate contract test pins both
-    [MASC_CONFIG_DIR] and [MASC_PERSONAS_DIR] to known-empty temporary
-    directories for deterministic CI behavior. *)
+    The join gate validates the Keeper-owned
+    [<base_path>/.masc/config/keepers/<name>.toml] declaration. *)
 
 open Alcotest
 open Masc
@@ -25,11 +21,11 @@ let () =
 let validation_error =
   testable Keeper_identity.pp_validation_error ( = )
 
-let normalize ~input ?base_path ?(check_persona = true) () =
+let normalize ~input ?base_path ?(check_keeper = true) () =
   Keeper_identity.normalize_all_names
     ~input_agent_name:input
     ?base_path
-    ~check_persona
+    ~check_keeper
     ()
 
 let with_temp_dir prefix f =
@@ -46,33 +42,9 @@ let with_temp_dir prefix f =
   in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 
-let restore_env name = function
-  | Some value -> Unix.putenv name value
-  | None ->
-      (* OCaml 5.5 adds [Unix.unsetenv], but the supported 5.4 floor used here
-         does not expose it. Config_dir_resolver normalizes empty env values to
-         [None], so this restores the effective resolver state for these tests. *)
-      Unix.putenv name ""
-
-let with_empty_personas_dir f =
-  with_temp_dir "workspace-bind-personas" @@ fun personas_dir ->
-  with_temp_dir "workspace-bind-config" @@ fun config_dir ->
-  let original_config = Sys.getenv_opt "MASC_CONFIG_DIR" in
-  let original_personas = Sys.getenv_opt "MASC_PERSONAS_DIR" in
-  Fun.protect
-    ~finally:(fun () ->
-      restore_env "MASC_CONFIG_DIR" original_config;
-      restore_env "MASC_PERSONAS_DIR" original_personas;
-      Config_dir_resolver.reset ())
-    (fun () ->
-      Unix.putenv "MASC_CONFIG_DIR" config_dir;
-      Unix.putenv "MASC_PERSONAS_DIR" personas_dir;
-      Config_dir_resolver.reset ();
-      f personas_dir)
-
 (* Same flags as handle_join uses *)
 let join_normalize ~input ?base_path () =
-  normalize ~input ?base_path ~check_persona:true ()
+  normalize ~input ?base_path ~check_keeper:true ()
 
 (* --------------------------------------------------------------------- *)
 (* Identity-level rejections (canonical_keeper_name returns None)         *)
@@ -95,39 +67,41 @@ let test_whitespace_rejected () =
 let test_invalid_chars_rejected () =
   match join_normalize ~input:"bad@name!#%" () with
   | Ok _ -> fail "invalid chars should be rejected by join gate"
-  | Error (Keeper_identity.Persona_not_found _) -> ()
+  | Error (Keeper_identity.Keeper_not_found _) -> ()
   | Error other ->
       fail
-        (Printf.sprintf "invalid chars expected Persona_not_found, got %s"
+        (Printf.sprintf "invalid chars expected Keeper_not_found, got %s"
            (Keeper_identity.show_validation_error other))
 
 (* --------------------------------------------------------------------- *)
 (* Join gate flags verification — documents the handle_join contract       *)
 (* --------------------------------------------------------------------- *)
 
-let test_join_gate_uses_persona_check () =
-  with_empty_personas_dir @@ fun personas_dir ->
-  let input = "missing-persona" in
+let test_join_gate_uses_keeper_check () =
+  with_temp_dir "workspace-bind-keeper" @@ fun base_path ->
+  let input = "missing-keeper" in
   begin
-    match normalize ~input ~check_persona:false () with
+    match normalize ~input ~base_path ~check_keeper:false () with
     | Ok _ -> ()
     | Error other ->
         fail
           (Printf.sprintf
-             "plain normalize without persona check should accept valid name, got %s"
+             "plain normalize without Keeper check should accept valid name, got %s"
              (Keeper_identity.show_validation_error other))
   end;
-  match join_normalize ~input () with
-  | Error (Keeper_identity.Persona_not_found { resolved; searched; _ }) ->
-      check string "resolved persona" input resolved;
-      check string "searched persona path"
-        (Filename.concat personas_dir input)
+  match join_normalize ~input ~base_path () with
+  | Error (Keeper_identity.Keeper_not_found { resolved; searched; _ }) ->
+      check string "resolved Keeper" input resolved;
+      check string "searched Keeper prompt path"
+        (Filename.concat
+           (Filename.concat base_path ".masc/config/keepers")
+           (input ^ ".toml"))
         searched
   | Error other ->
       fail
-        (Printf.sprintf "join gate expected Persona_not_found, got %s"
+        (Printf.sprintf "join gate expected Keeper_not_found, got %s"
            (Keeper_identity.show_validation_error other))
-  | Ok _ -> fail "join gate must reject missing persona with check enabled"
+  | Ok _ -> fail "join gate must reject missing Keeper prompt with check enabled"
 
 (* --------------------------------------------------------------------- *)
 (* Test runner                                                            *)
@@ -144,7 +118,7 @@ let () =
         ] );
       ( "join_gate_contract",
         [
-          test_case "join gate uses persona check" `Quick
-            test_join_gate_uses_persona_check;
+          test_case "join gate uses Keeper check" `Quick
+            test_join_gate_uses_keeper_check;
         ] );
     ]

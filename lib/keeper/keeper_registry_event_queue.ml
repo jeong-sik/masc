@@ -19,7 +19,6 @@ let publish_pending ~base_path name pending =
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -27,23 +26,21 @@ type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellatio
 type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
-  ; target_generation : int
   ; target_trace_id : Keeper_id.Trace_id.t
   }
 
 type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_receipt =
   | Fusion_terminal of Keeper_event_queue.fusion_completion
   | Hitl_terminal of Keeper_event_queue.hitl_resolution
+  | Turn_completed
   | Turn_attempt_terminal of { detail : string }
 
 type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -86,6 +83,43 @@ type source_ack_result =
       ; detail : string
       }
 
+(* A source has not settled while its exact reaction evidence is still waiting
+   in the transition outbox: the next terminal ACK is deliberately rejected in
+   that state. Complete the existing handoff on the owner-facing path instead
+   of making the next Keeper turn wait for the maintenance sweep. *)
+let project_source_ack_receipt ~base_path ~keeper_name receipt success =
+  match
+    Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+      ~base_path
+      ~keeper_name
+      ~expected_transition_id:
+        receipt.Keeper_event_queue_state.transition_id
+  with
+  | Ok () -> Ok (success receipt)
+  | Error detail ->
+    Ok
+      (Ack_committed_followup_failed
+         { receipt; stage = `Projection; detail })
+;;
+
+let project_source_ack_result ~base_path ~keeper_name result =
+  match result with
+  | Error _ as error -> error
+  | Ok (Transition_applied receipt) ->
+    project_source_ack_receipt
+      ~base_path
+      ~keeper_name
+      receipt
+      (fun receipt -> Acked receipt)
+  | Ok (Transition_already_applied receipt) ->
+    project_source_ack_receipt
+      ~base_path
+      ~keeper_name
+      receipt
+      (fun receipt -> Already_acked receipt)
+  | Ok (Transition_committed_followup_failed { receipt; stage; detail }) ->
+    Ok (Ack_committed_followup_failed { receipt; stage; detail })
+;;
 
 let enqueue_if_missing queue stimulus =
   if Keeper_event_queue.contains queue stimulus
@@ -157,12 +191,11 @@ let authorize_durable_intake_owner ~base_path ~keeper_name =
          (match current_meta with
           | None -> true
           | Some meta ->
-            Int.equal meta.runtime.nonce operation.generation
-            && Keeper_id.Trace_id.equal meta.runtime.trace_id operation.trace_id)
-       | Keeper_shutdown_types.Retain_operator_pause
-       | Keeper_shutdown_types.Retain_dead_tombstone -> false)
+            Keeper_id.Trace_id.equal meta.runtime.trace_id operation.trace_id)
+       | Keeper_shutdown_types.Retain_operator_pause -> false)
     | Keeper_shutdown_types.Finalized { meta_removed = false; _ }
     | Keeper_shutdown_types.Prepared
+    | Keeper_shutdown_types.Joining_lanes
     | Keeper_shutdown_types.Joined_idle
     | Keeper_shutdown_types.Finalizing_tasks _
     | Keeper_shutdown_types.Cleanup_ready _
@@ -193,7 +226,7 @@ let with_durable_intake
   match intake_token with
   | Some token ->
     if
-      Keeper_turn_admission.intake_token_matches
+      Keeper_shutdown_intake_fence.intake_token_matches
         token
         ~base_path
         ~keeper_name
@@ -204,7 +237,7 @@ let with_durable_intake
     else Error Durable_intake_token_not_live
   | None ->
     (match
-       Keeper_turn_admission.run_durable_intake_if_open
+       Keeper_shutdown_intake_fence.run_durable_intake_if_open
          ~base_path
          ~keeper_name
          (fun _intake_token ->
@@ -212,8 +245,8 @@ let with_durable_intake
             | Ok () -> Ok (operation ())
             | Error _ as error -> error)
      with
-     | Keeper_turn_admission.Intake_committed result -> result
-     | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+     | Keeper_shutdown_intake_fence.Intake_committed result -> result
+     | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
        Error (Durable_intake_shutdown_reserved operation_id))
 ;;
 
@@ -316,10 +349,10 @@ let board_attention_event_id (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
   | Keeper_event_queue.Manual_compaction_requested
-  | Keeper_event_queue.Goal_assigned _
-  | Keeper_event_queue.Goal_reconciliation_ready _
   | Keeper_event_queue.Completion_authority_rejected _
-  | Keeper_event_queue.Task_cancelled _ ->
+  | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Workspace_message _
+  | Keeper_event_queue.Delegate_completed _ ->
     None
 ;;
 
@@ -422,10 +455,6 @@ type transfer_target_error =
       }
   | Transfer_target_metadata_read_failed of string
   | Transfer_target_metadata_absent
-  | Transfer_target_generation_changed of
-      { expected : int
-      ; actual : int
-      }
   | Transfer_target_trace_changed
 
 let transfer_target_error_to_string = function
@@ -437,11 +466,6 @@ let transfer_target_error_to_string = function
   | Transfer_target_metadata_read_failed detail ->
     "target Keeper metadata read failed: " ^ detail
   | Transfer_target_metadata_absent -> "target Keeper metadata is absent"
-  | Transfer_target_generation_changed { expected; actual } ->
-    Printf.sprintf
-      "target Keeper generation changed: expected=%d actual=%d"
-      expected
-      actual
   | Transfer_target_trace_changed -> "target Keeper trace identity changed"
 ;;
 
@@ -500,11 +524,6 @@ let project_accepted_transfer_durable_result
     | Error detail -> Error (Transfer_target_metadata_read_failed detail)
     | Ok None -> Error Transfer_target_metadata_absent
     | Ok (Some meta)
-      when not (Int.equal meta.runtime.nonce transfer.target_generation) ->
-      Error
-        (Transfer_target_generation_changed
-           { expected = transfer.target_generation; actual = meta.runtime.nonce })
-    | Ok (Some meta)
       when not (Keeper_id.Trace_id.equal meta.runtime.trace_id transfer.target_trace_id) ->
       Error Transfer_target_trace_changed
     | Ok (Some _) -> Ok ()
@@ -532,7 +551,7 @@ let project_accepted_transfer_durable_result
   match intake_token with
   | Some token ->
     if
-      Keeper_turn_admission.intake_token_matches
+      Keeper_shutdown_intake_fence.intake_token_matches
         token
         ~base_path
         ~keeper_name:name
@@ -542,14 +561,14 @@ let project_accepted_transfer_durable_result
         "target transfer durable intake token is not live for this Keeper"
   | None ->
     (match
-       Keeper_turn_admission.run_durable_intake_if_open
+       Keeper_shutdown_intake_fence.run_durable_intake_if_open
          ~base_path
          ~keeper_name:name
          (fun _intake_token -> project ())
      with
-     | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+     | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
        Transfer_projection_shutdown_reserved operation_id
-     | Keeper_turn_admission.Intake_committed result -> interpret result)
+     | Keeper_shutdown_intake_fence.Intake_committed result -> interpret result)
 ;;
 
 let enqueue_hitl_resolution_durable_result
@@ -618,6 +637,15 @@ let reprioritize_pending_result
     ()
 ;;
 
+let defer_pending_result ~base_path name ~selection =
+  Keeper_event_queue_persistence.defer_pending_result
+    ~base_path
+    ~keeper_name:name
+    ~selection
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
 let peek_when_result ~base_path name ~ready =
   match Keeper_registry.get ~base_path name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" name)
@@ -636,6 +664,16 @@ let select_when_result ~base_path name ~ready =
       ~base_path
       ~keeper_name:name
       ~ready
+;;
+
+let connector_attention_conversation_batch_result ~base_path name ~primary =
+  match Keeper_registry.get ~base_path name with
+  | None -> Error (Printf.sprintf "keeper not registered: %s" name)
+  | Some _ ->
+    Keeper_event_queue_persistence.connector_attention_conversation_batch_result
+      ~base_path
+      ~keeper_name:name
+      ~primary
 ;;
 
 let validate_pending_selection_result ~base_path name ~selection =
@@ -657,14 +695,12 @@ let ack_pending_result ~base_path name ~selection =
 let cancel_pending_accepted_result
       ~base_path
       name
-      ~current_owner_nonce
       ~applied_at
       ~cancellation
   =
   Keeper_event_queue_persistence.cancel_pending_accepted_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_nonce
     ~applied_at
     ~cancellation
     ~after_commit:(publish_pending ~base_path name)
@@ -675,7 +711,6 @@ let transfer_pending_accepted_result
       ?intake_token
       ~base_path
       name
-      ~current_owner_nonce
       ~applied_at
       ~transfer
   =
@@ -683,7 +718,6 @@ let transfer_pending_accepted_result
     Keeper_event_queue_persistence.transfer_pending_accepted_result
       ~base_path
       ~keeper_name:name
-      ~current_owner_nonce
       ~applied_at
       ~transfer
       ~after_commit:(publish_pending ~base_path name)
@@ -693,7 +727,7 @@ let transfer_pending_accepted_result
   match intake_token with
   | Some token ->
     if
-      Keeper_turn_admission.intake_token_matches
+      Keeper_shutdown_intake_fence.intake_token_matches
         token
         ~base_path
         ~keeper_name:name
@@ -704,42 +738,35 @@ let transfer_pending_accepted_result
            "source transfer durable intake token is not live for this Keeper")
   | None ->
     (match
-       Keeper_turn_admission.run_durable_intake_if_open
+       Keeper_shutdown_intake_fence.run_durable_intake_if_open
          ~base_path
          ~keeper_name:name
          (fun _intake_token -> commit ())
      with
-     | Keeper_turn_admission.Intake_committed result -> result
-     | Keeper_turn_admission.Intake_shutdown_reserved operation_id ->
+     | Keeper_shutdown_intake_fence.Intake_committed result -> result
+     | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
        Error (Transfer_pending_shutdown_reserved operation_id))
 ;;
 
 let ack_pending_source_terminal_result
       ~base_path
       name
-      ~current_owner_nonce
       ~acked_at
       ~source_terminal
   =
   Keeper_event_queue_persistence.ack_pending_source_terminal_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_nonce
     ~acked_at
     ~source_terminal
     ~after_commit:(publish_pending ~base_path name)
     ()
-  |> Result.map (function
-    | Transition_applied receipt -> Acked receipt
-    | Transition_already_applied receipt -> Already_acked receipt
-    | Transition_committed_followup_failed { receipt; stage; detail } ->
-      Ack_committed_followup_failed { receipt; stage; detail })
+  |> project_source_ack_result ~base_path ~keeper_name:name
 ;;
 
 let terminalize_pending_turn_attempt_result
       ~base_path
       name
-      ~current_owner_nonce
       ~applied_at
       ~selection
       ~detail
@@ -747,15 +774,26 @@ let terminalize_pending_turn_attempt_result
   Keeper_event_queue_persistence.terminalize_pending_turn_attempt_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_nonce
     ~applied_at
     ~selection
     ~detail
     ~after_commit:(publish_pending ~base_path name)
     ()
-  |> Result.map (function
-    | Transition_applied receipt -> Acked receipt
-    | Transition_already_applied receipt -> Already_acked receipt
-    | Transition_committed_followup_failed { receipt; stage; detail } ->
-      Ack_committed_followup_failed { receipt; stage; detail })
+  |> project_source_ack_result ~base_path ~keeper_name:name
+;;
+
+let terminalize_pending_turn_completed_result
+      ~base_path
+      name
+      ~applied_at
+      ~selection
+  =
+  Keeper_event_queue_persistence.terminalize_pending_turn_completed_result
+    ~base_path
+    ~keeper_name:name
+    ~applied_at
+    ~selection
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+  |> project_source_ack_result ~base_path ~keeper_name:name
 ;;

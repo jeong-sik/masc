@@ -20,12 +20,12 @@ module TD = Tool_dispatch
 
 (** Closed set of keeper task-operation names handled by
     [Keeper_tool_task_runtime.handle_keeper_task_tool]. Derived from
-    [Keeper_tool_name] so the registry and the typed handler cluster stay
+    [Keeper_tooling.Name] so the registry and the typed handler cluster stay
     in sync. *)
 let keeper_task_tool_names =
   List.map
-    Keeper_tool_name.to_string
-    Keeper_tool_name.
+    Keeper_tooling.Name.to_string
+    Keeper_tooling.Name.
       [ Tasks_list
       ; Tasks_audit
       ; Broadcast
@@ -45,10 +45,20 @@ let workspace_state_tool_names =
 let is_workspace_state_tool_name name = List.mem name workspace_state_tool_names
 
 let inline_runtime_tool_names =
-  List.map (fun (s : Masc_domain.tool_schema) -> s.name) Tool_schemas_inline.schemas
+  List.map
+    Tool_schemas_misc.mcp_runtime_tool_name
+    Tool_schemas_misc.mcp_runtime_operations
 ;;
 
 let is_inline_runtime_tool_name name = List.mem name inline_runtime_tool_names
+
+let control_tool_names =
+  List.map
+    (fun (schema : Masc_domain.tool_schema) -> schema.name)
+    Tool_schemas_misc.control_schemas
+;;
+
+let is_control_tool_name name = List.mem name control_tool_names
 
 (** Exact dispatch tag for one typed descriptor handler. *)
 let tag_of_runtime_handler
@@ -66,6 +76,7 @@ let tag_of_runtime_handler
   | Tool_masc_control_dispatch -> Mod_control
   | Tool_masc_agent_timeline_dispatch -> Mod_agent_timeline
   | Tool_masc_schedule_dispatch -> Mod_schedule
+  | Tool_keeper_spawn_dispatch -> Mod_spawn
   | Tool_masc_misc_dispatch | Tool_web_search | Tool_web_fetch -> Mod_misc
   | Tool_masc_local_runtime_dispatch -> Mod_local_runtime
   | Tool_masc_library_dispatch -> Mod_library
@@ -99,6 +110,7 @@ let tag_of_name name : TD.module_tag option =
   if is_workspace_state_tool_name name then Some TD.Mod_state
   else if is_keeper_task_tool_name name then Some TD.Mod_keeper_task
   else if is_inline_runtime_tool_name name then Some TD.Mod_inline
+  else if is_control_tool_name name then Some TD.Mod_control
   else
     match Keeper_tool_descriptor.descriptors_for_internal name with
     | [ descriptor ] -> Some (tag_of_runtime_handler descriptor.runtime_handler)
@@ -108,11 +120,14 @@ let tag_of_name name : TD.module_tag option =
        | None -> None)
     | _ :: _ :: _ -> invalid_arg ("duplicate tool descriptors for " ^ name)
 
-(** Register a tag + schema only if the name is not already in the tag
-    registry. Existing [Tool_spec] registrations are preserved. *)
-let register_schema_if_missing (schema : Masc_domain.tool_schema) tag =
-  if Option.is_none (TD.lookup_tag schema.name)
-  then TD.register_module_tag ~schemas:[ schema ] ~tag
+(** Register the canonical schema while preserving an existing precise tag. *)
+let register_canonical_schema (schema : Masc_domain.tool_schema) default_tag =
+  let tag =
+    match TD.lookup_tag schema.name with
+    | Some registered_tag -> registered_tag
+    | None -> default_tag
+  in
+  TD.register_module_tag ~schemas:[ schema ] ~tag
 
 (** 1. Register every LLM-visible schema from [Config.raw_all_tool_schemas]
     that does not already have a tag. *)
@@ -122,24 +137,46 @@ let register_visible_raw_schemas () =
        if Tool_catalog.is_visible schema.name
        then
          match tag_of_name schema.name with
-         | Some tag -> register_schema_if_missing schema tag
+         | Some tag -> register_canonical_schema schema tag
          | None ->
            invalid_arg
              ("visible tool schema has no exact dispatch owner: " ^ schema.name))
 
-(** 2. Register each descriptor's internal handler name with the schema owned
-    by that descriptor. Model aliases are canonicalised before dispatch and
-    never receive fabricated placeholder schemas. *)
+(** Resolve a descriptor's validation schema from its runtime owner. Control
+    schemas stay outside the Config front-door inventory and are registered by
+    [Tool_control]; every other descriptor handler resolves through the raw
+    runtime inventory. *)
+let runtime_schema_for_descriptor
+      (descriptor : Keeper_tool_descriptor.t)
+  : Masc_domain.tool_schema option
+  =
+  let inventory =
+    match descriptor.runtime_handler with
+    | Keeper_tool_descriptor.Tool_masc_control_dispatch ->
+      Tool_schemas_misc.control_schemas
+    | _ -> Config.raw_all_tool_schemas
+  in
+  List.find_opt
+    (fun (schema : Masc_domain.tool_schema) ->
+       String.equal schema.name descriptor.internal_name)
+    inventory
+;;
+
+(** 2. Register each descriptor's internal handler name with its exact runtime
+    schema. Descriptor schemas remain the model-facing, pre-translation
+    contract. *)
 let register_descriptor_handlers () =
   Keeper_tool_descriptor.all_descriptors ()
   |> List.iter (fun (descriptor : Keeper_tool_descriptor.t) ->
-         let schema : Masc_domain.tool_schema =
-           { name = descriptor.internal_name
-           ; description = descriptor.description
-           ; input_schema = descriptor.input_schema
-           }
+         let schema =
+           match runtime_schema_for_descriptor descriptor with
+           | Some schema -> schema
+           | None ->
+             invalid_arg
+               ("descriptor internal handler has no exact runtime schema: "
+                ^ descriptor.internal_name)
          in
-         register_schema_if_missing
+         register_canonical_schema
            schema
            (tag_of_runtime_handler descriptor.runtime_handler))
 

@@ -21,7 +21,6 @@
       {!dashboard_runtime_probe_payload_json_of_runtimes},
       {!runtime_inventory_json},
       {!dashboard_perf_http_json},
-      {!scheduled_automation_dashboard_json},
       {!dashboard_tools_http_json}).
     - {b runtime probe test seams}
       ({!set_dashboard_runtime_probe_runner_for_tests},
@@ -114,6 +113,9 @@ val maybe_fork_dashboard_runtime_probe_refresh : unit -> unit
 val dashboard_runtime_probe_payload_json_of_runtimes :
   ?default_id:string -> Runtime.t list -> Yojson.Safe.t
 (** Pure reachability-probe projection over an explicit [Runtime.t list].
+    Exactly one metadata request is made per provider; its observation is
+    projected onto each model/runtime row so callers keep the runtime-shaped
+    schema without multiplying identical endpoint probes.
     [run_dashboard_runtime_probe] calls this with the live runtime fleet;
     exposed directly (rather than via a [_for_tests] alias) so tests can drive
     it with synthetic runtimes. HTTP execution is supplied by the production
@@ -147,11 +149,6 @@ val dashboard_tools_http_json :
     provided, internal phases (config_resolution, runtime_resolution,
     tools_compute) are accumulated into the [Server_timing.t] for surfacing
     via the [Server-Timing] response header. *)
-
-val scheduled_automation_dashboard_json : Workspace.config -> Yojson.Safe.t
-(** Renders the read-only dashboard projection for scheduled internal
-    automation. This summarizes the schedule store as a small FSM envelope
-    plus recent request rows; it does not refresh due state or run work. *)
 
 (** {1 Runtime-probe test seams} *)
 

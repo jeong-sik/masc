@@ -14,8 +14,8 @@ type runtime_blocker_surface = {
   summary : string;
 }
 
-val blocker_class_of_sdk_error :
-  Agent_sdk.Error.sdk_error -> blocker_class option
+val blocker_class_of_core_error :
+  Agent_core.Error.t -> blocker_class option
 
 val runtime_blocker_surface_of_typed_class :
   ?summary:string -> blocker_class -> runtime_blocker_surface
@@ -25,8 +25,5 @@ val runtime_blocker_surface_of_failure_reason :
 
 val is_runtime_exhausted_blocker_class : string -> bool
 val is_provider_runtime_blocker_class : string -> bool
-val is_stale_turn_timeout_blocker_class : string -> bool
 val is_fiber_unresolved_blocker_class : string -> bool
 
-val runtime_blocker_surface_class : blocker_class -> blocker_class
-val runtime_blocker_class_label : blocker_class -> string

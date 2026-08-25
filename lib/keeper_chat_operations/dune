@@ -1,0 +1,13 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_chat_operations)
+ (public_name masc.keeper_chat_operations)
+ (wrapped false)
+ (modules
+  keeper_chat_operation
+  keeper_chat_operation_reducer
+  keeper_chat_operation_store)
+ (flags
+  (:standard -w +4 -w +33))
+ (libraries digestif sqlite3 unix yojson))

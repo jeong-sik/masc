@@ -3,6 +3,13 @@ import { formatKeeperVisibleReply } from './keeper-message'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
 import { isInFlightDelivery } from './lib/keeper-delivery'
 import { isRecord, asString, asNumber, asBoolean, toIsoTimestamp } from './components/common/normalize'
+import { asStrictStringArray, withoutUndefined } from './lib/json-coerce'
+import { keeperStreamContract, normalizeStreamContract } from './keeper-stream-contract'
+import {
+  sameDeliveryProvenance,
+  type KeeperChatDeliveryProvenance,
+  type KeeperChatDeliveryProvenanceDecode,
+} from './keeper-delivery-provenance'
 import {
   nonBlankToolCallId,
   toolEntryIdFromCallId,
@@ -14,9 +21,6 @@ import type {
   KeeperConversationRole,
   KeeperConversationSource,
   KeeperConversationStreamContract,
-  KeeperConversationStreamDeliveryReceipt,
-  KeeperConversationStreamContractSource,
-  KeeperConversationStreamContractStatus,
   KeeperConversationStreamState,
   KeeperConversationDelivery,
   KeeperDiagnostic,
@@ -24,6 +28,7 @@ import type {
   KeeperRecoverResult,
   KeeperStatusDetail,
   SurfaceRef,
+  SurfaceRefKind,
   ChatBlock,
   ChatBroadcastRecipient,
   ChatShellLine,
@@ -60,8 +65,15 @@ export const THREAD_ENTRY_CAP = 200
 
 // --- Private stream tracking ---
 
-const keeperStreamControllers = new Map<string, AbortController>()
-const keeperStreamEntryIds = new Map<string, string>()
+interface KeeperActiveStream {
+  entryId: string
+  controller: AbortController
+}
+
+// keeperName -> operationId -> stream. Map insertion order is the owner FIFO
+// order, so the first entry is the currently runnable operation and later
+// entries remain independently cancellable while queued.
+const keeperActiveStreams = new Map<string, Map<string, KeeperActiveStream>>()
 // requestId -> keeperName: which queued requests a live in-session send
 // stream currently owns. Resume defers to this so an SPA remount does not
 // spin up a second handler/entry for a request the live send already drives.
@@ -70,6 +82,15 @@ const keeperStreamEntryIds = new Map<string, string>()
 // Module state, so it survives unmount/remount exactly like the controller
 // maps above; a full page reload resets it, leaving cold-start resume intact.
 const liveSendRequestOwners = new Map<string, string>()
+// A locally minted id is owned before the POST starts so observer broadcasts
+// cannot race the direct stream. Server-side mutation is safe only after the
+// direct stream has observed KEEPER_CHAT_OPERATION_ACCEPTED, so keep that
+// stronger fact independently.
+const acceptedLiveSendRequestIds = new Set<string>()
+
+export function _resetActiveKeeperStreamsForTests(): void {
+  keeperActiveStreams.clear()
+}
 
 // --- Helpers ---
 
@@ -150,7 +171,7 @@ export function isVisibleDirectConversationEntry(entry: KeeperConversationEntry)
 }
 
 /** Turns the keeper ran on its own. Their semantic conversation is persisted
- *  in the OAS checkpoint; typed turn records provide a stable dashboard
+ *  in the Agent Core checkpoint; typed turn records provide a stable dashboard
  *  projection without duplicating it into the chat store. Shown without the
  *  internal toggle and folded into one collapsed group. */
 export function isAutonomousTurnEntry(entry: KeeperConversationEntry): boolean {
@@ -245,150 +266,6 @@ function normalizeAttachments(raw: unknown): KeeperConversationAttachment[] | un
   return atts.length > 0 ? atts : undefined
 }
 
-function normalizeStringArray(raw: unknown): string[] | null {
-  if (!Array.isArray(raw)) return null
-  const values = raw.map((value) => asString(value))
-  if (values.some((value) => value === undefined)) return null
-  return values as string[]
-}
-
-function withoutUndefined<const T extends Record<string, unknown>>(record: T): T {
-  const next: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(record)) {
-    if (value !== undefined) next[key] = value
-  }
-  return next as T
-}
-
-export function keeperStreamContract(
-  source: KeeperConversationStreamContractSource,
-  status: KeeperConversationStreamContractStatus,
-  opts: {
-    eventName?: string | null
-    requestId?: string | null
-    turnRef?: string | null
-    traceEventCount?: number | null
-    lifecycleEvents?: string[] | null
-    deliveryReceipt?: KeeperConversationStreamDeliveryReceipt | null
-    reason?: string | null
-  } = {},
-): KeeperConversationStreamContract {
-  return withoutUndefined({
-    source,
-    status,
-    eventName: opts.eventName ?? undefined,
-    requestId: opts.requestId ?? undefined,
-    turnRef: opts.turnRef ?? undefined,
-    traceEventCount: opts.traceEventCount ?? undefined,
-    lifecycleEvents: opts.lifecycleEvents ?? undefined,
-    deliveryReceipt: opts.deliveryReceipt ?? undefined,
-    reason: opts.reason ?? undefined,
-  })
-}
-
-export function keeperClientObservedSseStreamContract(
-  source: KeeperConversationStreamContractSource,
-  status: KeeperConversationStreamContractStatus,
-  opts: {
-    eventName?: string | null
-    requestId?: string | null
-    turnRef?: string | null
-    traceEventCount?: number | null
-    lifecycleEvents?: string[] | null
-    reason?: string | null
-  } = {},
-): KeeperConversationStreamContract {
-  return keeperStreamContract(source, status, {
-    ...opts,
-    deliveryReceipt: 'client_observed_sse_event',
-  })
-}
-
-function normalizeStreamContractSource(value: unknown): KeeperConversationStreamContractSource | null {
-  switch (asString(value)?.trim()) {
-    case 'keeper_chat_store':
-      return 'keeper_chat_store'
-    case 'backend_stream_lifecycle':
-      return 'backend_stream_lifecycle'
-    case 'backend_turn_trace':
-      return 'backend_turn_trace'
-    case 'rest_history':
-      return 'rest_history'
-    case 'sse_event':
-      return 'sse_event'
-    case 'queue_event':
-      return 'queue_event'
-    case 'queue_poll':
-      return 'queue_poll'
-    case 'pending_request_store':
-      return 'pending_request_store'
-    case 'client_local_send':
-      return 'client_local_send'
-    case 'client_reconciliation':
-      return 'client_reconciliation'
-    default:
-      return null
-  }
-}
-
-function normalizeStreamContractStatus(value: unknown): KeeperConversationStreamContractStatus | null {
-  switch (asString(value)?.trim()) {
-    case 'backend_stream_event':
-      return 'backend_stream_event'
-    case 'backend_terminal_event':
-      return 'backend_terminal_event'
-    case 'backend_lifecycle_replay':
-      return 'backend_lifecycle_replay'
-    case 'backend_trace_join':
-      return 'backend_trace_join'
-    case 'history_without_turn_ref':
-      return 'history_without_turn_ref'
-    case 'history_without_stream_events':
-      return 'history_without_stream_events'
-    case 'queue_request_event':
-      return 'queue_request_event'
-    case 'queue_poll_result':
-      return 'queue_poll_result'
-    case 'client_placeholder':
-      return 'client_placeholder'
-    case 'client_reconciled_history':
-      return 'client_reconciled_history'
-    case 'contract_gap':
-      return 'contract_gap'
-    default:
-      return null
-  }
-}
-
-function normalizeStreamDeliveryReceipt(value: unknown): KeeperConversationStreamDeliveryReceipt | null {
-  switch (asString(value)?.trim()) {
-    case 'client_observed_sse_event':
-      return 'client_observed_sse_event'
-    case 'server_lifecycle_replay_only':
-      return 'server_lifecycle_replay_only'
-    case 'no_delivery_receipt':
-      return 'no_delivery_receipt'
-    default:
-      return null
-  }
-}
-
-function normalizeStreamContract(raw: unknown): KeeperConversationStreamContract | null {
-  if (!isRecord(raw)) return null
-  const source = normalizeStreamContractSource(raw.source)
-  const status = normalizeStreamContractStatus(raw.status)
-  if (source === null || status === null) return null
-  return keeperStreamContract(source, status, {
-    eventName: asString(raw.event_name) ?? asString(raw.eventName) ?? null,
-    requestId: asString(raw.request_id) ?? asString(raw.requestId) ?? null,
-    turnRef: asString(raw.turn_ref) ?? asString(raw.turnRef) ?? null,
-    traceEventCount: asNumber(raw.trace_event_count) ?? asNumber(raw.traceEventCount) ?? null,
-    lifecycleEvents: normalizeStringArray(raw.lifecycle_events) ?? normalizeStringArray(raw.lifecycleEvents) ?? null,
-    deliveryReceipt: normalizeStreamDeliveryReceipt(raw.delivery_receipt) ?? normalizeStreamDeliveryReceipt(raw.deliveryReceipt) ?? null,
-    reason: asString(raw.reason) ?? null,
-  })
-}
-
 function normalizeTableCell(raw: unknown): ChatTableCellValue | null {
   const text = asString(raw)
   if (text !== undefined) return text
@@ -468,7 +345,7 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
         text: '',
         contentWithheld: true,
         ts: asString(raw.ts),
-        oasBlockIndex: asNumber(raw.oasBlockIndex) ?? asNumber(raw.oas_block_index) ?? undefined,
+        agentCoreBlockIndex: asNumber(raw.agentCoreBlockIndex) ?? asNumber(raw.agent_core_block_index) ?? undefined,
       })
     }
     const text = asString(raw.text)
@@ -477,7 +354,7 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
           kind,
           text,
           ts: asString(raw.ts),
-          oasBlockIndex: asNumber(raw.oasBlockIndex) ?? asNumber(raw.oas_block_index) ?? undefined,
+          agentCoreBlockIndex: asNumber(raw.agentCoreBlockIndex) ?? asNumber(raw.agent_core_block_index) ?? undefined,
         })
       : null
   }
@@ -494,7 +371,7 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
           kind: 'progress',
           text,
           ts: asString(raw.ts),
-          oasBlockIndex: asNumber(raw.oasBlockIndex) ?? asNumber(raw.oas_block_index) ?? undefined,
+          agentCoreBlockIndex: asNumber(raw.agentCoreBlockIndex) ?? asNumber(raw.agent_core_block_index) ?? undefined,
         })
       : null
   }
@@ -513,7 +390,7 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
       args: normalizeTracePayload(raw.args),
       result: normalizeTracePayload(raw.result),
       ts: asString(raw.ts) ?? undefined,
-      oasBlockIndex: asNumber(raw.oasBlockIndex) ?? asNumber(raw.oas_block_index) ?? undefined,
+      agentCoreBlockIndex: asNumber(raw.agentCoreBlockIndex) ?? asNumber(raw.agent_core_block_index) ?? undefined,
     })
   }
   return null
@@ -593,7 +470,7 @@ function normalizeBlocks(raw: unknown, role: KeeperConversationRole): ChatBlock[
           : null
       }
       if (t === 'ul') {
-        const items = normalizeStringArray(item.items)
+        const items = asStrictStringArray(item.items)
         return items && items.length > 0 ? { t: 'ul', items } : null
       }
       if (t === 'callout') {
@@ -816,13 +693,12 @@ const KEEPER_HEALTH_STATES: ReadonlySet<NonNullable<KeeperDiagnostic['health_sta
 
 const KEEPER_QUIET_REASONS: ReadonlySet<NonNullable<KeeperDiagnostic['quiet_reason']>> =
   new Set<NonNullable<KeeperDiagnostic['quiet_reason']>>([
-    'quiet_hours', 'min_gap', 'no_recent_activity', 'disabled',
-    'startup', 'model_error', 'graphql_error', 'never_started', 'unknown',
+    'disabled', 'not_running', 'startup', 'never_started',
   ])
 
 const KEEPER_NEXT_ACTION_PATHS: ReadonlySet<NonNullable<KeeperDiagnostic['next_action_path']>> =
   new Set<NonNullable<KeeperDiagnostic['next_action_path']>>([
-    'direct_message', 'probe', 'recover',
+    'auto_restart', 'recover', 'probe', 'direct_message',
   ])
 
 const KEEPER_REPLY_STATUSES: ReadonlySet<NonNullable<KeeperDiagnostic['last_reply_status']>> =
@@ -898,43 +774,77 @@ export function normalizeKeeperRecoverResult(raw: unknown): KeeperRecoverResult 
 
 // --- Thread state management ---
 
-// Stable fallback id for a message whose backend predates R3 and so
-// carries no producer-assigned id. Derived from the content (not the merge
-// index) so it does not shift when history pages are merged.
-function fallbackHistoryEntryId(
-  role: string,
-  timestamp: string | null | undefined,
-  text: string,
-): string {
-  let hash = 5381
-  for (let i = 0; i < text.length; i += 1) {
-    hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0
+function deliveryProvenanceFromRaw(raw: Record<string, unknown>): KeeperChatDeliveryProvenanceDecode {
+  if (raw.delivery_provenance_status === 'invalid') {
+    return { status: 'invalid', value: null }
   }
-  return `${role}-${timestamp ?? 'entry'}-${(hash >>> 0).toString(36)}`
+  if (raw.delivery_provenance_status === 'valid') {
+    return isRecord(raw.delivery_provenance)
+      ? {
+          status: 'valid',
+          value: raw.delivery_provenance as unknown as KeeperChatDeliveryProvenance,
+        }
+      : { status: 'invalid', value: null }
+  }
+  if (raw.delivery_key !== undefined || raw.transcript_slot !== undefined) {
+    // Raw wire provenance must be decoded at the lazy API schema boundary.
+    // Failing closed here prevents an accidental direct caller from making
+    // malformed identity reconcilable.
+    return { status: 'invalid', value: null }
+  }
+  return { status: 'absent', value: null }
 }
 
-interface DeliveryIdentity {
-  requestId: string | null
-  queueReceiptIds: string[]
+function isSurfaceRefKind(value: string): value is SurfaceRefKind {
+  switch (value) {
+    case 'dashboard':
+    case 'discord':
+    case 'slack':
+    case 'webhook':
+    case 'agent':
+    case 'broadcast':
+    case 'gate':
+      return true
+    default:
+      return false
+  }
 }
 
-// Typed delivery identity carried on persisted history rows. Unknown or
-// malformed shapes fail closed for reconciliation without dropping the row.
-function deliveryIdentityFromKey(raw: unknown): DeliveryIdentity {
-  if (!isRecord(raw)) return { requestId: null, queueReceiptIds: [] }
+const SURFACE_REF_STRING_FIELDS = [
+  'session_id',
+  'guild_id',
+  'channel_id',
+  'parent_channel_id',
+  'thread_id',
+  'team_id',
+  'thread_ts',
+  'source',
+  'event_id',
+  'label',
+] as const
+
+/** Closed parse of the wire surface payload, mirroring
+ * lib/keeper/surface_ref.ml `of_json`: an unknown or missing `kind`
+ * yields no surface — the row keeps rendering with no origin badge,
+ * the same policy keeper_chat_store.load applies to an invalid
+ * persisted surface. Never a default kind. */
+function normalizeSurfaceRef(raw: unknown): SurfaceRef | null {
+  if (!isRecord(raw)) return null
   const kind = asString(raw.kind)
-  if (kind === 'direct_request' || kind === 'async_request') {
-    const requestId = asString(raw.request_id)?.trim() ?? ''
-    return { requestId: requestId || null, queueReceiptIds: [] }
+  if (!kind || !isSurfaceRefKind(kind)) return null
+  const surface: SurfaceRef = { kind }
+  for (const field of SURFACE_REF_STRING_FIELDS) {
+    const value = asString(raw[field])
+    if (value !== null) surface[field] = value
   }
-  const rawReceiptIds = normalizeStringArray(raw.receipt_ids)
-  if (kind === 'queue_receipts' && rawReceiptIds !== null) {
-    const queueReceiptIds = rawReceiptIds
-      .map(receiptId => receiptId.trim())
-      .filter((receiptId): receiptId is string => receiptId.length > 0)
-    return { requestId: null, queueReceiptIds: [...new Set(queueReceiptIds)] }
+  if (isRecord(raw.address)) {
+    const address: Record<string, string> = {}
+    for (const [key, value] of Object.entries(raw.address)) {
+      if (typeof value === 'string') address[key] = value
+    }
+    if (Object.keys(address).length > 0) surface.address = address
   }
-  return { requestId: null, queueReceiptIds: [] }
+  return surface
 }
 
 function normalizeHistoryEntry(
@@ -943,6 +853,8 @@ function normalizeHistoryEntry(
   previousSource: KeeperConversationSource | null = null,
 ): KeeperConversationEntry | null {
   if (!isRecord(raw)) return null
+  const id = asString(raw.id)?.trim() ?? ''
+  if (!id) return null
   const role = normalizeRole(raw.role)
   const rawText = asString(raw.content) ?? asString(raw.preview) ?? ''
   const attachments = normalizeAttachments(raw.attachments)
@@ -958,7 +870,7 @@ function normalizeHistoryEntry(
   if (!text && !attachments?.length && !audio && !hasRenderableBlocks) return null
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)
   const label = role === 'assistant' && keeperName ? keeperName : roleLabel(role)
-  const surface = isRecord(raw.surface) ? (raw.surface as unknown as SurfaceRef) : null
+  const surface = normalizeSurfaceRef(raw.surface)
   const conversationId = asString(raw.conversation_id) ?? null
   const externalMessageId = asString(raw.external_message_id) ?? null
   const speakerId = asString(raw.speaker_id) ?? null
@@ -966,7 +878,7 @@ function normalizeHistoryEntry(
   const speakerAuthority = asString(raw.speaker_authority) ?? null
   // RFC-0233 §7: asString rejects malformed join keys instead of repairing them.
   const turnRef = asString(raw.turn_ref) ?? null
-  const deliveryIdentity = deliveryIdentityFromKey(raw.delivery_key)
+  const deliveryProvenance = deliveryProvenanceFromRaw(raw)
   // keeper_chat_store mints kind=transport_failure (row content is the
   // "Keeper request failed: ..." text) so a reload can tell a failed request
   // apart from a real reply. Preserve that writer-declared provenance as its
@@ -978,16 +890,16 @@ function normalizeHistoryEntry(
     ?? ((role === 'assistant' || role === 'system') && text
       ? parseTextToChatBlocks(text)
       : undefined)
-  const streamContract = normalizeStreamContract(raw.stream_contract)
-    ?? keeperStreamContract('rest_history', 'history_without_stream_events', {
-      reason: 'history rows do not carry stream lifecycle events',
-    })
+  const streamContract = deliveryProvenance.status === 'invalid'
+    ? keeperStreamContract('rest_history', 'contract_gap', {
+        reason: 'history row carries malformed or incomplete delivery provenance',
+      })
+    : normalizeStreamContract(raw.stream_contract)
+      ?? keeperStreamContract('rest_history', 'history_without_stream_events', {
+        reason: 'history rows do not carry stream lifecycle events',
+      })
   return {
-    // R3: key off the producer-assigned server id when present so the
-    // render key is stable across history-page merges (the former
-    // `${role}-${ts}-${index}` shifted with the merge index and remounted
-    // bubbles). Pre-R3 rows fall back to a stable content-derived id.
-    id: asString(raw.id) ?? fallbackHistoryEntryId(role, timestamp, rawText),
+    id,
     role,
     source,
     label,
@@ -995,8 +907,7 @@ function normalizeHistoryEntry(
     rawText,
     timestamp,
     turnRef,
-    requestId: deliveryIdentity.requestId,
-    queueReceiptIds: deliveryIdentity.queueReceiptIds,
+    deliveryProvenance: deliveryProvenance.value,
     delivery,
     error: delivery === 'transport_failure' ? rawText : null,
     streamState: null,
@@ -1165,7 +1076,6 @@ export function appendAssistantDelta(name: string, entryId: string, delta: strin
     delivery: 'streaming',
     streamContract: entry.streamContract ?? keeperStreamContract('sse_event', 'backend_stream_event', {
       eventName: 'TEXT_MESSAGE_CONTENT',
-      deliveryReceipt: 'client_observed_sse_event',
     }),
   }))
 }
@@ -1177,7 +1087,7 @@ export function appendAssistantDelta(name: string, entryId: string, delta: strin
 export function promoteAssistantTextToProgress(
   name: string,
   entryId: string,
-  meta: { oasBlockIndex?: number } = {},
+  meta: { agentCoreBlockIndex?: number } = {},
 ): void {
   updateThreadEntry(name, entryId, entry => {
     const text = entry.rawText ?? entry.text
@@ -1186,7 +1096,7 @@ export function promoteAssistantTextToProgress(
       kind: 'progress' as const,
       text,
       ts: new Date().toISOString(),
-      oasBlockIndex: meta.oasBlockIndex,
+      agentCoreBlockIndex: meta.agentCoreBlockIndex,
     })
     return {
       ...entry,
@@ -1202,19 +1112,19 @@ function writeAssistantThinkingText(
   name: string,
   entryId: string,
   text: string,
-  meta: { oasBlockIndex?: number } = {},
+  meta: { agentCoreBlockIndex?: number } = {},
   mode: 'append' | 'snapshot',
 ): void {
   if (!text.trim()) return
-  const oasBlockIndex = meta.oasBlockIndex
+  const agentCoreBlockIndex = meta.agentCoreBlockIndex
   updateThreadEntry(name, entryId, entry => {
     const existing = entry.traceSteps ?? []
     const last = existing[existing.length - 1]
     const sameThinkingBlock =
       last?.kind === 'think'
-      && (oasBlockIndex === undefined
-        ? last.oasBlockIndex === undefined
-        : last.oasBlockIndex === oasBlockIndex)
+      && (agentCoreBlockIndex === undefined
+        ? last.agentCoreBlockIndex === undefined
+        : last.agentCoreBlockIndex === agentCoreBlockIndex)
     // Stamp the occurrence time on a NEW think step so the work-trace card can
     // interleave it with tool entries by occurrence order. When consecutive
     // deltas merge into the same step, the first stamp is preserved: the step
@@ -1233,7 +1143,7 @@ function writeAssistantThinkingText(
               kind: 'think',
               text: nextText,
               ts: last.ts,
-              oasBlockIndex: last.oasBlockIndex,
+              agentCoreBlockIndex: last.agentCoreBlockIndex,
             }),
           ]
         : [
@@ -1242,7 +1152,7 @@ function writeAssistantThinkingText(
               kind: 'think',
               text: nextText,
               ts: new Date().toISOString(),
-              oasBlockIndex,
+              agentCoreBlockIndex,
             }),
           ]
     return {
@@ -1252,7 +1162,6 @@ function writeAssistantThinkingText(
       delivery: 'streaming',
       streamContract: entry.streamContract ?? keeperStreamContract('sse_event', 'backend_stream_event', {
         eventName: 'KEEPER_THINKING_DELTA',
-        deliveryReceipt: 'client_observed_sse_event',
       }),
     }
   })
@@ -1262,7 +1171,7 @@ export function appendAssistantThinkingDelta(
   name: string,
   entryId: string,
   delta: string,
-  meta: { oasBlockIndex?: number } = {},
+  meta: { agentCoreBlockIndex?: number } = {},
 ): void {
   writeAssistantThinkingText(name, entryId, delta, meta, 'append')
 }
@@ -1271,7 +1180,7 @@ export function setAssistantThinkingSnapshot(
   name: string,
   entryId: string,
   text: string,
-  meta: { oasBlockIndex?: number } = {},
+  meta: { agentCoreBlockIndex?: number } = {},
 ): void {
   writeAssistantThinkingText(name, entryId, text, meta, 'snapshot')
 }
@@ -1288,7 +1197,7 @@ function warnMissingToolTrace(
 export function appendAssistantToolTraceStep(
   name: string,
   entryId: string,
-  step: { toolCallId: string; name: string; ts?: string; oasBlockIndex?: number },
+  step: { toolCallId: string; name: string; ts?: string; agentCoreBlockIndex?: number },
 ): void {
   const toolCallId = nonBlankToolCallId(step.toolCallId)
   const toolName = step.name.trim()
@@ -1307,7 +1216,7 @@ export function appendAssistantToolTraceStep(
       name: toolName,
       status: 'pending',
       ts: step.ts ?? new Date().toISOString(),
-      oasBlockIndex: step.oasBlockIndex,
+      agentCoreBlockIndex: step.agentCoreBlockIndex,
     })
     const traceSteps =
       index === -1
@@ -1320,7 +1229,7 @@ export function appendAssistantToolTraceStep(
                   toolCallId,
                   status: trace.status ?? 'pending',
                   ts: trace.ts ?? nextStep.ts,
-                  oasBlockIndex: trace.oasBlockIndex ?? nextStep.oasBlockIndex,
+                  agentCoreBlockIndex: trace.agentCoreBlockIndex ?? nextStep.agentCoreBlockIndex,
                 })
               : trace,
           )
@@ -1439,70 +1348,6 @@ export function markAssistantToolTraceErrored(
   if (!found) warnMissingToolTrace('error patch', name, entryId, id)
 }
 
-/** Live tool-call progress broadcast ([keeper_chat_turn_progress]) for
- *  queued/consumer-side turns, whose chat body otherwise stays silent until
- *  the terminal transcript commit. Attaches trace steps to the newest
- *  in-flight assistant entry (the queue placeholder, which already carries
- *  the receipt identity that converges with history); when no in-flight
- *  entry exists (e.g. a second browser), a synthetic placeholder keyed by
- *  run id is created carrying the same receipt ids so the standard
- *  history-convergence path folds its trace into the canonical transcript
- *  row at turn end. Idempotent per tool call via [toolCallId] upsert. */
-export interface KeeperTurnProgress {
-  runId: string
-  kind: 'tool_call_start' | 'tool_call_end'
-  toolCallId: string
-  toolName?: string | null
-  receiptIds?: string[]
-}
-
-export function applyKeeperTurnProgress(name: string, progress: KeeperTurnProgress): void {
-  const toolCallId = nonBlankToolCallId(progress.toolCallId)
-  const runId = progress.runId.trim()
-  if (!toolCallId || !runId) return
-  const entries = keeperThreads.value[name] ?? []
-  const inFlight = [...entries].reverse().find(
-    entry => entry.role === 'assistant' && isInFlightDelivery(entry.delivery),
-  )
-  let entryId = inFlight?.id
-  if (!entryId) {
-    entryId = `turn-progress-${runId}`
-    if (!entries.some(entry => entry.id === entryId)) {
-      const receiptIds = (progress.receiptIds ?? [])
-        .map(receiptId => receiptId.trim())
-        .filter(receiptId => receiptId.length > 0)
-      appendThreadEntry(name, withoutUndefined({
-        id: entryId,
-        role: 'assistant' as const,
-        source: 'direct_assistant' as const,
-        label: name,
-        text: '',
-        rawText: null,
-        timestamp: null,
-        delivery: 'streaming' as const,
-        streamState: 'streaming' as const,
-        streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', {
-          eventName: 'keeper_chat_turn_progress',
-        }),
-        queueReceiptIds: receiptIds.length > 0 ? receiptIds : undefined,
-        details: null,
-      }))
-    }
-  }
-  if (progress.kind === 'tool_call_start') {
-    const toolName = progress.toolName?.trim()
-    if (!toolName) return
-    appendAssistantToolTraceStep(name, entryId, { toolCallId, name: toolName })
-    return
-  }
-  // tool_call_end carries no tool name, so only close a step this client saw
-  // start; an unnamed step cannot be rendered for a mid-turn attach.
-  const entry = (keeperThreads.value[name] ?? []).find(candidate => candidate.id === entryId)
-  const hasStep = entry?.traceSteps?.some(
-    step => step.kind === 'tool' && step.toolCallId === toolCallId,
-  ) ?? false
-  if (hasStep) markAssistantToolTraceEnded(name, entryId, toolCallId)
-}
 
 export function finalizeAssistantEntry(
   name: string,
@@ -1518,48 +1363,22 @@ export function finalizeAssistantEntry(
   })
 }
 
-// Dedup key for merging server history with locally-appended entries.
-// Server ids win when both sides have already converged. User/assistant
-// rows converge through exact producer identities only: request id first,
-// then a shared queue receipt, then turn_ref when neither side carries a
-// delivery key. Conflicting delivery identities fail closed. The legacy
-// role+text heuristic stays hard-cut because it collapsed distinct same-text
-// turns. Tool rows only dedup by their explicit `tool-<tool_call_id>` id.
-function queueReceiptIds(entry: KeeperConversationEntry): string[] {
-  const receiptIds = new Set(
-    (entry.queueReceiptIds ?? [])
-      .map(receiptId => receiptId.trim())
-      .filter(receiptId => receiptId.length > 0),
-  )
-  const localReceiptId = entry.details?.queueReceiptId?.trim()
-  if (localReceiptId) receiptIds.add(localReceiptId)
-  return [...receiptIds]
-}
-
+// Dedup key for merging server history with locally-appended entries. Server
+// ids win when both sides already name the same row. Otherwise the atomic
+// append-once provenance pair is the sole convergence authority. Role, text,
+// timestamp, and turn_ref are projections/correlation data, never row identity.
 function sameConversationEntry(
   left: KeeperConversationEntry,
   right: KeeperConversationEntry,
 ): boolean {
   if (left.id === right.id) return true
-  if (left.role === 'tool' || right.role === 'tool') return false
-  if (left.role !== right.role) return false
-  const leftRequestId = left.requestId?.trim()
-  const rightRequestId = right.requestId?.trim()
-  if (leftRequestId && rightRequestId) return leftRequestId === rightRequestId
-
-  const leftReceiptIds = queueReceiptIds(left)
-  const rightReceiptIds = queueReceiptIds(right)
-  if (leftReceiptIds.length > 0 && rightReceiptIds.length > 0) {
-    const rightReceipts = new Set(rightReceiptIds)
-    return leftReceiptIds.some(receiptId => rightReceipts.has(receiptId))
-  }
-  if (leftRequestId || rightRequestId || leftReceiptIds.length > 0 || rightReceiptIds.length > 0) {
-    return false
-  }
-
-  const leftTurnRef = left.turnRef?.trim()
-  const rightTurnRef = right.turnRef?.trim()
-  return Boolean(leftTurnRef && rightTurnRef && leftTurnRef === rightTurnRef)
+  const leftProvenance = left.deliveryProvenance
+  const rightProvenance = right.deliveryProvenance
+  return Boolean(
+    leftProvenance
+    && rightProvenance
+    && sameDeliveryProvenance(leftProvenance, rightProvenance),
+  )
 }
 
 // Entries with no parseable timestamp (live placeholders, still-streaming
@@ -1575,58 +1394,35 @@ function mergeLocalAssistantTraceSteps(
   historyEntry: KeeperConversationEntry,
   localEntries: KeeperConversationEntry[],
   // Tracks local trace sources already claimed by an earlier history row.
-  // Join order: requestId (backend-stamped turn identity) first, then
-  // turn_ref when OAS/MASC provides it on both the live reply details and
-  // the persisted history row. There is no text-based fallback: a local
+  // Join order: exact delivery provenance first, then turn_ref only for trace
+  // correlation when neither row has provenance. There is no text fallback: a local
   // trace source that shares neither key with the history row stays
-  // unmerged (and is dropped by the same requestId rule in replaceThread
-  // once its turn converges). `consumed` keeps every match 1:1 instead of
+  // unmerged (and is dropped by exact provenance in replaceThread once its
+  // turn converges). `consumed` keeps every match 1:1 instead of
   // letting duplicate assistant text reuse the first local trace source
   // (#21748).
   consumed: Set<string>,
 ): KeeperConversationEntry {
   if (historyEntry.role !== 'assistant') return historyEntry
-  // requestId join first: a placeholder whose stream died before REPLY_DETAILS
-  // has no turnRef and possibly no text, but it does carry the request id.
-  const historyRequestId = historyEntry.requestId?.trim()
-  const localTraceSourceByRequestId = historyRequestId
+  const historyProvenance = historyEntry.deliveryProvenance
+  const localTraceSourceByProvenance = historyProvenance
     ? localEntries.find(
         entry =>
           entry.role === 'assistant'
           && (entry.traceSteps?.length ?? 0) > 0
           && !consumed.has(entry.id)
-          && entry.requestId?.trim() === historyRequestId,
+          && entry.deliveryProvenance != null
+          && sameDeliveryProvenance(entry.deliveryProvenance, historyProvenance),
       )
     : undefined
-  if (localTraceSourceByRequestId?.traceSteps?.length) {
-    consumed.add(localTraceSourceByRequestId.id)
+  if (localTraceSourceByProvenance?.traceSteps?.length) {
+    consumed.add(localTraceSourceByProvenance.id)
     return {
       ...historyEntry,
-      traceSteps: localTraceSourceByRequestId.traceSteps,
+      traceSteps: localTraceSourceByProvenance.traceSteps,
     }
   }
-  // Queue-lane join: a keeper that was busy answers through the chat queue, so
-  // the stream carries KEEPER_CHAT_QUEUED (receipt id, no request id). Such a
-  // placeholder has neither request id nor turnRef, and its receipt is the only
-  // producer identity shared with the history row. Without this the trace stays
-  // unmerged and the transcript renders a second "턴 타임라인".
-  const historyReceiptIds = new Set(queueReceiptIds(historyEntry))
-  const localTraceSourceByReceipt = historyReceiptIds.size > 0
-    ? localEntries.find(
-        entry =>
-          entry.role === 'assistant'
-          && (entry.traceSteps?.length ?? 0) > 0
-          && !consumed.has(entry.id)
-          && queueReceiptIds(entry).some(receiptId => historyReceiptIds.has(receiptId)),
-      )
-    : undefined
-  if (localTraceSourceByReceipt?.traceSteps?.length) {
-    consumed.add(localTraceSourceByReceipt.id)
-    return {
-      ...historyEntry,
-      traceSteps: localTraceSourceByReceipt.traceSteps,
-    }
-  }
+  if (historyProvenance) return historyEntry
   const historyTurnRef = historyEntry.turnRef?.trim()
   const localTraceSourceByTurnRef = historyTurnRef
     ? localEntries.find(
@@ -1634,6 +1430,7 @@ function mergeLocalAssistantTraceSteps(
           entry.role === 'assistant'
           && (entry.traceSteps?.length ?? 0) > 0
           && !consumed.has(entry.id)
+          && entry.deliveryProvenance == null
           && entry.turnRef?.trim() === historyTurnRef,
       )
     : undefined
@@ -1670,19 +1467,6 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
       const isCoveredToolRow = entry.role === 'tool' && coveredByHistory
       // In-flight (sending/streaming/queued) entries represent live state and
       // must survive history merges until they finalize.
-      // A terminal durable-receipt observation is also operator evidence, not
-      // a duplicate assistant reply: keep it alongside the canonical history
-      // row so its Pending/Inflight/Delivered/Failed lifecycle remains visible.
-      // ...unless the history row already carries this placeholder's identity
-      // and its trace was folded in above (mergeLocalAssistantTraceSteps).
-      // A queue-lane placeholder whose stream died holds only the trace and an
-      // empty text; keeping it next to the converged history row renders the
-      // same turn twice, and only the placeholder copy shows per-tool
-      // durations (live 2026-07-28).
-      const isReceiptObservation =
-        entry.role === 'assistant'
-        && Boolean(entry.details?.queueReceiptId)
-        && !coveredByHistory
       // A converged assistant row supersedes its own placeholder even while the
       // placeholder still reads in-flight: a stream that died before
       // REPLY_DETAILS leaves `sending` set forever, so treating in-flight as
@@ -1692,7 +1476,6 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
       const supersededByHistory = entry.role === 'assistant' && coveredByHistory
       const shouldKeepLocalEntry = !supersededByHistory
         && (isInFlightDelivery(entry.delivery)
-          || isReceiptObservation
           || !coveredByHistory)
       return entry.delivery !== 'history' && !isCoveredToolRow && shouldKeepLocalEntry
     },
@@ -1731,14 +1514,16 @@ export function mergeServerHistoryEntries(
 }
 
 interface RestChatHistoryMessage {
-  id?: string
+  id: string
   role: string
   content: string | null
   ts: number
   tool_call_id?: string
   tool_call_name?: string
   source?: string
-  surface?: SurfaceRef
+  // Raw wire payload — decoded once by normalizeSurfaceRef at each
+  // consuming entry builder; never asserted into SurfaceRef.
+  surface?: unknown
   conversation_id?: string
   external_message_id?: string
   speaker_id?: string
@@ -1746,9 +1531,11 @@ interface RestChatHistoryMessage {
   speaker_authority?: string
   // RFC-0233 §7: MASC-minted "<trace_id>#<absolute_turn>" turn join key.
   turn_ref?: string | null
-  // Backend-stamped delivery identity: direct/async request id or queue
-  // receipt ids. Unknown shapes are ignored without dropping the row.
-  delivery_key?: unknown
+  // Canonical append-once identity decoded at the HTTP boundary. Direct
+  // normalizeStatusDetail callers may still supply the raw sibling fields;
+  // normalizeHistoryEntry runs the same closed decoder for that path.
+  delivery_provenance?: KeeperChatDeliveryProvenance | null
+  delivery_provenance_status?: KeeperChatDeliveryProvenanceDecode['status']
   audio?: unknown
   // Persisted upload rows (snake_case from keeper_chat_store) — normalized to
   // KeeperConversationAttachment at consume time so reload keeps the cards.
@@ -1786,6 +1573,9 @@ function autonomousTurnEntry(
     ?.flatMap(block => block.t === 'trace' ? block.trace : [])
   const blocks = normalizedBlocks?.filter(block => block.t !== 'trace')
   return {
+    // Re-minted from turn_id, NOT the raw row's `autonomous:<turn_id>` id:
+    // that backend field exists only to satisfy the history schema's
+    // required-id check (keeper-chat-history.ts) and is never read here.
     id: `autonomous-${turnId}`,
     role: 'assistant',
     source: 'autonomous_turn',
@@ -1817,6 +1607,7 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
   const toolCallId = nonBlankToolCallId(message.tool_call_id)
   const toolCallName = message.tool_call_name?.trim()
   if (!toolCallId || !toolCallName || typeof message.content !== 'string') return null
+  const deliveryProvenance = message.delivery_provenance ?? null
   return {
     id: toolEntryIdFromCallId(toolCallId),
     role: 'tool',
@@ -1831,7 +1622,7 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
       reason: 'tool history rows carry arguments, not live stream lifecycle',
     }),
     details: null,
-    surface: message.surface ?? null,
+    surface: normalizeSurfaceRef(message.surface),
     conversationId: asString(message.conversation_id) ?? null,
     externalMessageId: asString(message.external_message_id) ?? null,
     speakerId: asString(message.speaker_id) ?? null,
@@ -1840,6 +1631,7 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
     // Tool rows share the same untrusted REST boundary; reject malformed
     // turn_ref values here too so this path matches normalizeHistoryEntry.
     turnRef: asString(message.turn_ref) ?? null,
+    deliveryProvenance,
   }
 }
 
@@ -1853,6 +1645,7 @@ export function chatHistoryEntriesFromRest(
   let previousSource: KeeperConversationSource | null = null
   const entries: KeeperConversationEntry[] = []
   messages.forEach((message) => {
+    if (!message.id.trim()) return
     if (message.autonomous_turn !== undefined) {
       // Nobody addressed the keeper, so this row must not advance the
       // user/assistant source chain that infers direct-conversation roles.
@@ -1885,7 +1678,8 @@ export function chatHistoryEntriesFromRest(
         kind: message.kind,
         blocks: message.blocks,
         turn_ref: message.turn_ref,
-        delivery_key: message.delivery_key,
+        delivery_provenance: message.delivery_provenance,
+        delivery_provenance_status: message.delivery_provenance_status,
         stream_contract: message.stream_contract,
       },
       keeperName,
@@ -1909,54 +1703,45 @@ export function setStatusDetail(name: string, detail: KeeperStatusDetail): void 
 
 // --- Stream controller management ---
 
-export function setActiveStream(name: string, entryId: string, controller: AbortController): void {
-  keeperStreamEntryIds.set(name, entryId)
-  keeperStreamControllers.set(name, controller)
+export function setActiveStream(
+  name: string,
+  operationId: string,
+  entryId: string,
+  controller: AbortController,
+): void {
+  const streams = keeperActiveStreams.get(name) ?? new Map<string, KeeperActiveStream>()
+  streams.set(operationId, { entryId, controller })
+  keeperActiveStreams.set(name, streams)
+  // The client mints the operation id before opening the direct response
+  // stream. Claim it at the same lifecycle boundary as the stream controller,
+  // before an observer broadcast can race the ACCEPTED event.
+  claimLiveSendRequest(operationId, name)
 }
 
-export function clearActiveStream(name: string): void {
-  keeperStreamEntryIds.delete(name)
-  keeperStreamControllers.delete(name)
-  clearActiveStreamRequestId(name)
+export function clearActiveStream(name: string, operationId: string): void {
+  const streams = keeperActiveStreams.get(name)
+  streams?.delete(operationId)
+  if (streams?.size === 0) keeperActiveStreams.delete(name)
+  releaseLiveSendRequest(operationId)
 }
 
 export function activeStreamEntryId(name: string): string | null {
-  return keeperStreamEntryIds.get(name) ?? null
+  return keeperActiveStreams.get(name)?.values().next().value?.entryId ?? null
+}
+
+export function activeStreamOperationId(name: string): string | null {
+  return keeperActiveStreams.get(name)?.keys().next().value ?? null
 }
 
 export function getStreamController(name: string): AbortController | undefined {
-  return keeperStreamControllers.get(name)
-}
-
-export function setActiveStreamRequestId(name: string, requestId: string): void {
-  claimLiveSendRequest(requestId, name)
+  return keeperActiveStreams.get(name)?.values().next().value?.controller
 }
 
 export function activeStreamRequestId(name: string): string | null {
-  const keeperName = name.trim()
-  if (!keeperName) return null
-  for (const [requestId, owner] of liveSendRequestOwners) {
-    if (owner === keeperName) return requestId
-  }
-  return null
-}
-
-export function clearActiveStreamRequestId(name: string): void {
-  const keeperName = name.trim()
-  if (!keeperName) return
-  for (const [requestId, owner] of liveSendRequestOwners) {
-    if (owner === keeperName) liveSendRequestOwners.delete(requestId)
-  }
-}
-
-/** Release a specific request id from live-send ownership. Returns true if
- *  the id was owned. Use this for race-free cleanup after a confirmed server
- *  cancel so a stale cleanup cannot wipe a newer request id claimed for the
- *  same keeper. */
-export function releaseActiveStreamRequestId(requestId: string): boolean {
-  const id = requestId.trim()
-  if (!id) return false
-  return liveSendRequestOwners.delete(id)
+  const operationId = activeStreamOperationId(name)
+  return operationId && acceptedLiveSendRequestIds.has(operationId)
+    ? operationId
+    : null
 }
 
 // --- Live send ownership (in-session, requestId-keyed) ---
@@ -1965,12 +1750,18 @@ export function claimLiveSendRequest(requestId: string, name: string): void {
   const id = requestId.trim()
   const keeperName = name.trim()
   if (!id || !keeperName) return
-  clearActiveStreamRequestId(keeperName)
   liveSendRequestOwners.set(id, keeperName)
 }
 
+export function markLiveSendRequestAccepted(requestId: string): void {
+  const id = requestId.trim()
+  if (liveSendRequestOwners.has(id)) acceptedLiveSendRequestIds.add(id)
+}
+
 export function releaseLiveSendRequest(requestId: string): void {
-  liveSendRequestOwners.delete(requestId.trim())
+  const id = requestId.trim()
+  liveSendRequestOwners.delete(id)
+  acceptedLiveSendRequestIds.delete(id)
 }
 
 export function liveSendOwnsRequest(requestId: string): boolean {
@@ -1979,4 +1770,5 @@ export function liveSendOwnsRequest(requestId: string): boolean {
 
 export function _resetLiveSendRequestOwnersForTests(): void {
   liveSendRequestOwners.clear()
+  acceptedLiveSendRequestIds.clear()
 }

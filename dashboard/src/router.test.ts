@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
+  initRouter,
   navigate,
   navigateToPost,
   replaceRoute,
@@ -451,5 +452,50 @@ describe('redirect-ledger contract (RFC-0048 §4.3)', () => {
       }
     }
     expect(empty).toEqual([])
+  })
+})
+
+// A URL that names a destination must reach it or say it cannot. Landing on
+// overview is a silent answer: the person who wrote the link concludes the
+// screen does not exist. Observed while looking for the Internal Agents panel,
+// which was rendering fine the whole time.
+describe('deep links written by hand', () => {
+  function bootWith(pathname: string, search: string, hash = ''): void {
+    window.history.replaceState(null, '', `${pathname}${search}${hash}`)
+    initRouter()
+  }
+
+  it('resolves the tab from a query on /dashboard', () => {
+    bootWith('/dashboard', '?tab=monitoring&section=internal-agents')
+    expect(route.value.tab).toBe('monitoring')
+    expect(route.value.params.section).toBe('internal-agents')
+  })
+
+  // The server answers the dashboard at the root too, so the same link written
+  // without /dashboard is the same request.
+  it('resolves the tab from a query on the root path', () => {
+    bootWith('/', '?tab=monitoring&section=internal-agents')
+    expect(route.value.tab).toBe('monitoring')
+    expect(route.value.params.section).toBe('internal-agents')
+  })
+
+  it('still lands on overview when the query names no tab', () => {
+    bootWith('/dashboard', '?section=internal-agents')
+    expect(route.value.tab).toBe('overview')
+  })
+
+  it('keeps the canonical hash form working', () => {
+    bootWith('/dashboard', '', '#monitoring?section=internal-agents')
+    expect(route.value.tab).toBe('monitoring')
+    expect(route.value.params.section).toBe('internal-agents')
+  })
+
+  it('decodes query values exactly once', () => {
+    bootWith(
+      '/dashboard',
+      '?tab=monitoring&section=agents&keeper=a%2Bb%2520c',
+    )
+    expect(route.value.tab).toBe('monitoring')
+    expect(route.value.params.keeper).toBe('a+b%20c')
   })
 })

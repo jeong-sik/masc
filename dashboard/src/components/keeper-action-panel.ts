@@ -7,14 +7,15 @@
 // Actions available per keeper:
 //   pause     → POST /api/v1/keepers/:name/directive  { action: "pause" }
 //   resume    → POST /api/v1/keepers/:name/directive
-//               { action: "resume", owner_nonce, operator_operation_id }
+//               { action: "resume", operator_operation_id }
 //   wakeup    → POST /api/v1/keepers/:name/directive  { action: "wakeup" }
 //   boot      → POST /api/v1/keepers/:name/boot
 //   shutdown  → POST /api/v1/keepers/:name/shutdown
+//   purge     → POST /api/v1/dashboard/agents/purge  { agent_name }
 
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
-import { Pause, Play, Power, RotateCcw, Square } from 'lucide-preact'
+import { Pause, Play, Power, RotateCcw, Square, Trash2 } from 'lucide-preact'
 import { ActionButton } from './common/button'
 import { requestConfirm } from './common/confirm-dialog'
 import { showToast } from './common/toast'
@@ -25,8 +26,11 @@ import {
   shutdownKeeper,
   wakeKeeper,
 } from '../api/keeper'
+import { KEEPER_PURGE_ARTIFACTS, purgeKeeper } from '../api/keeper-lifecycle'
 import {
   applyOptimisticKeeperDirective,
+  keeperPurgePending,
+  markKeeperPurgePending,
   refreshKeeperRuntimeStatus,
 } from '../store'
 import type { Keeper } from '../types'
@@ -46,7 +50,13 @@ function afterAction(): void {
   })
 }
 
-export type KeeperActionKey = 'pause' | 'resume' | 'wakeup' | 'boot' | 'shutdown'
+export type KeeperActionKey =
+  | 'pause'
+  | 'resume'
+  | 'wakeup'
+  | 'boot'
+  | 'shutdown'
+  | 'purge'
 
 /**
  * Single source of truth for keeper-action 한국어 라벨.
@@ -93,7 +103,7 @@ export const KEEPER_ACTION_LABELS: Record<KeeperActionKey, KeeperActionLabel> = 
   },
   wakeup: {
     noun: '깨우기', verb: '깨우기', compact: '깨움', label: '깨우기',
-    title: '깨우기: idle 또는 stuck 상태에서 다음 turn 을 즉시 시도합니다. 실행 중이어도 노출되는 이유는 runtime/oas/turn timeout 같은 stuck signal 이 backend 보다 먼저 frontend 에 보이는 케이스를 다루기 위함입니다.',
+    title: '다음 turn 즉시 시도 (idle/stuck 회복용)입니다.',
     icon: RotateCcw,
   },
   boot: {
@@ -109,7 +119,23 @@ export const KEEPER_ACTION_LABELS: Record<KeeperActionKey, KeeperActionLabel> = 
     icon: Square,
     danger: true,
   },
+  purge: {
+    noun: '제거', verb: '제거하기', compact: '제거', label: '제거',
+    title:
+      '제거: keeper 와 그 저장소를 영구 삭제합니다 (되돌릴 수 없음). 실행 중이 아닌 keeper 에만 보입니다.',
+    icon: Trash2,
+    danger: true,
+  },
 }
+
+/** Shown while the server has accepted a purge but has not finished it. The
+ *  button stays clickable: the endpoint is idempotent (a repeat call returns
+ *  the existing operation), and a purge that fails after acceptance would
+ *  otherwise leave the only control for that keeper disabled for good. */
+export const KEEPER_PURGE_PENDING_LABEL = {
+  compact: '제거 중',
+  title: '제거 요청이 접수됐고 서버가 삭제하는 중입니다. 완료되면 목록에서 사라집니다. 멈춘 것 같으면 다시 눌러 상태를 확인할 수 있습니다.',
+} as const
 
 /** Execute a lifecycle action for a single keeper with toast feedback.
  *  The shutdown confirm lives HERE, not in individual button surfaces —
@@ -119,7 +145,6 @@ export const KEEPER_ACTION_LABELS: Record<KeeperActionKey, KeeperActionLabel> = 
 export async function runKeeperAction(
   name: string,
   action: KeeperActionKey,
-  ownerGeneration?: number,
 ): Promise<void> {
   if (action === 'shutdown') {
     const confirmed = await requestConfirm({
@@ -130,6 +155,37 @@ export async function runKeeperAction(
     if (!confirmed) return
   }
   const noun = KEEPER_ACTION_LABELS[action].noun
+
+  // Purge is not a lifecycle directive: it deletes the keeper and every store
+  // it owns, and the endpoint answers 202 with an operation id rather than the
+  // { ok, error } shape the directive calls share. It is handled here, ahead of
+  // the directive switch, so the confirmation naming the deleted stores cannot
+  // be bypassed by a caller surface.
+  if (action === 'purge') {
+    const confirmed = await requestConfirm({
+      title: '키퍼 영구 제거',
+      message:
+        `${name} 키퍼를 영구 제거합니다. 되돌릴 수 없습니다.\n\n`
+        + `함께 삭제되는 항목:\n`
+        + KEEPER_PURGE_ARTIFACTS.map(item => `  · ${item}`).join('\n'),
+      confirmText: '영구 제거',
+      tone: 'danger',
+    })
+    if (!confirmed) return
+    try {
+      const result = await purgeKeeper(name)
+      // The row stays until a refresh stops returning this keeper. Mark it
+      // pending first so the operator sees the submit land instead of an
+      // unchanged row — the refresh below still returns the keeper, because
+      // the server deletes asynchronously.
+      markKeeperPurgePending(name)
+      showToast(`${name} ${noun} 요청됨 (operation ${result.operation_id})`, 'success')
+      afterAction()
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : `${noun} 실패`, 'error')
+    }
+    return
+  }
 
   // Optimistic UI: pause/resume/wakeup mutate `paused` + phase locally
   // before the POST returns so the row's button set flips instantly. On
@@ -143,7 +199,7 @@ export async function runKeeperAction(
     let res: { ok: boolean; error?: string }
     switch (action) {
       case 'pause':    res = await pauseKeeper(name);    break
-      case 'resume':   res = await resumeKeeper(name, ownerGeneration);   break
+      case 'resume':   res = await resumeKeeper(name);   break
       case 'wakeup':   res = await wakeKeeper(name);     break
       case 'boot':     res = await bootKeeper(name);     break
       case 'shutdown': res = await shutdownKeeper(name); break
@@ -188,6 +244,7 @@ export function KeeperActionButtons({
 }) {
   const busy = useSignal(false)
   const vis = keeperActionVisibility(keeper)
+  const purgePending = keeperPurgePending.value.has(keeper.name.trim())
 
   async function handle(e: Event, action: KeeperActionKey) {
     if (stopPropagation) e.stopPropagation()
@@ -195,7 +252,7 @@ export function KeeperActionButtons({
     busy.value = true
     try {
       if (action === 'resume') {
-        await runKeeperAction(keeper.name, action, keeper.generation)
+        await runKeeperAction(keeper.name, action)
       } else {
         await runKeeperAction(keeper.name, action)
       }
@@ -259,6 +316,18 @@ export function KeeperActionButtons({
             onClick=${(e: Event) => handle(e, 'shutdown')}
             title=${KEEPER_ACTION_LABELS.shutdown.title}
           >${text('shutdown')}<//>`
+        : null}
+      ${vis.canPurge
+        ? html`<${ActionButton}
+            variant="danger"
+            size=${size}
+            disabled=${busy.value}
+            onClick=${(e: Event) => handle(e, 'purge')}
+            title=${purgePending
+              ? KEEPER_PURGE_PENDING_LABEL.title
+              : KEEPER_ACTION_LABELS.purge.title}
+            testId="keeper-action-purge"
+          >${purgePending ? KEEPER_PURGE_PENDING_LABEL.compact : text('purge')}<//>`
         : null}
     </div>
   `

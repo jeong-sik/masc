@@ -12,7 +12,7 @@ import type { Keeper } from '../../types'
 function makeKeeper(overrides: Partial<Keeper> = {}): Keeper {
   return {
     name: 'janitor',
-    status: 'healthy',
+    status: 'active',
     ...overrides,
   }
 }
@@ -30,28 +30,26 @@ describe('linkedRuntimeState', () => {
     expect(linkedRuntimeState(undefined)).toBe('unlinked')
   })
 
-  it('returns offline when agent exists=false', () => {
-    const keeper = makeKeeper({ agent: { exists: false } })
+  it('health=offline 이면 offline', () => {
+    const keeper = makeKeeper({ diagnostic: { health_state: 'offline' } } as Partial<Keeper>)
     expect(linkedRuntimeState(keeper)).toBe('offline')
   })
 
-  it('returns offline for offline status', () => {
-    const keeper = makeKeeper({ status: 'offline' })
+  it('phase=Stopped 면 offline', () => {
+    const keeper = makeKeeper({ phase: 'Stopped' })
     expect(linkedRuntimeState(keeper)).toBe('offline')
   })
 
-  it('returns offline for inactive status', () => {
-    const keeper = makeKeeper({ status: 'inactive' })
-    expect(linkedRuntimeState(keeper)).toBe('offline')
-  })
-
-  it('returns online for healthy keeper', () => {
-    const keeper = makeKeeper({ status: 'healthy' })
+  // 이 픽스처는 예전에 status='inactive' 하나로 offline 을 주장했다.
+  // 그 한 단어가 stale·degraded·zombie 를 함께 가리켰기 때문에, 하트비트만
+  // 늦은 키퍼가 죽은 키퍼와 같은 화면을 받았다.
+  it('health=stale 은 조용해진 것이지 끊긴 것이 아니다', () => {
+    const keeper = makeKeeper({ diagnostic: { health_state: 'stale' } } as Partial<Keeper>)
     expect(linkedRuntimeState(keeper)).toBe('online')
   })
 
-  it('returns online for running keeper', () => {
-    const keeper = makeKeeper({ status: 'running' })
+  it('health=healthy 면 online', () => {
+    const keeper = makeKeeper({ diagnostic: { health_state: 'healthy' } } as Partial<Keeper>)
     expect(linkedRuntimeState(keeper)).toBe('online')
   })
 })
@@ -96,7 +94,7 @@ describe('allowlistEmptyState', () => {
   })
 
   it('returns offline for offline keeper', () => {
-    const keeper = makeKeeper({ status: 'offline' })
+    const keeper = makeKeeper({ diagnostic: { health_state: 'offline' } } as Partial<Keeper>)
     expect(allowlistEmptyState(keeper)).toBe('offline')
   })
 
@@ -116,7 +114,7 @@ describe('observedToolsEmptyState', () => {
   })
 
   it('returns offline for offline keeper', () => {
-    const keeper = makeKeeper({ status: 'offline' })
+    const keeper = makeKeeper({ diagnostic: { health_state: 'offline' } } as Partial<Keeper>)
     expect(observedToolsEmptyState(keeper)).toBe('offline')
   })
 
@@ -156,7 +154,7 @@ describe('auditMetadataState', () => {
   })
 
   it('returns offline for offline keeper', () => {
-    const keeper = makeKeeper({ status: 'offline' })
+    const keeper = makeKeeper({ diagnostic: { health_state: 'offline' } } as Partial<Keeper>)
     expect(auditMetadataState(keeper)).toBe('offline')
   })
 
@@ -186,7 +184,7 @@ describe('linkedRecentToolsEmptyState', () => {
   })
 
   it('returns offline for offline keeper', () => {
-    const keeper = makeKeeper({ status: 'offline' })
+    const keeper = makeKeeper({ diagnostic: { health_state: 'offline' } } as Partial<Keeper>)
     expect(linkedRecentToolsEmptyState(keeper)).toBe('offline')
   })
 

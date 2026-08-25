@@ -7,14 +7,8 @@ import {
   type GateStatusData,
 } from './schemas/gate-status'
 import {
-  parseGateKeepersData,
-  type GateKeeperInfo,
-  type GateKeepersData,
-} from './schemas/gate-keepers'
-import {
   parseGateConnectorsData,
   type ConnectorBindingSummary,
-  type ConnectorNames,
   type ConnectorRuntimeSummary,
   type ConnectorStoragePaths,
   type DiscordAuditEntry,
@@ -25,11 +19,8 @@ import {
 
 export type { BindingInfo, ChannelInfo, GateEventInfo, GateStatusData }
 export { GateStatusSchemaDriftError } from './schemas/gate-status'
-export type { GateKeeperInfo, GateKeepersData }
-export { GateKeepersSchemaDriftError } from './schemas/gate-keepers'
 export type {
   ConnectorBindingSummary,
-  ConnectorNames,
   ConnectorRuntimeSummary,
   ConnectorStoragePaths,
   DiscordAuditEntry,
@@ -47,9 +38,4 @@ export async function fetchGateStatus(signal?: AbortSignal): Promise<GateStatusD
 export async function fetchGateConnectors(signal?: AbortSignal): Promise<GateConnectorsData> {
   const raw = await get<unknown>('/api/v1/gate/connectors', { signal })
   return parseGateConnectorsData(raw)
-}
-
-export async function fetchGateKeepers(signal?: AbortSignal): Promise<GateKeepersData> {
-  const raw = await get<unknown>('/api/v1/gate/keepers?limit=50&detailed=true', { signal })
-  return parseGateKeepersData(raw)
 }

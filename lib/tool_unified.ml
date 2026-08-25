@@ -1,20 +1,3 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
-
 (** Tool_unified — Unified query interface across catalog, registry, and dispatch.
 
     Combines:
@@ -86,7 +69,9 @@ let summary_report ?(runtime_metrics = fun () -> `Null) () : Yojson.Safe.t =
   let total_count = List.length all_names in
   let visible_count = List.length allowed_names in
   let hidden_count = total_count - visible_count in
-  let public_count = List.length Tool_catalog.public_mcp_tools in
+  let public_count =
+    List.length Tool_catalog_surfaces.public_mcp_surface_tools
+  in
   let tool_dist =
     `Assoc [
       ("total", `Int total_count);
@@ -115,10 +100,6 @@ let summary_report ?(runtime_metrics = fun () -> `Null) () : Yojson.Safe.t =
      ) top_20));
     ("never_called_count", `Int (List.length never_called));
     ("tool_distribution", tool_dist);
-    (* RFC-0084 host-config-cleanup-J — [dispatch_v2_enabled] JSON
-       field removed alongside the [MASC_DISPATCH_V2] flag.  The
-       Hashtbl dispatch path is now the only code path so the field
-       carried no signal. *)
     ("registered_count", `Int (Tool_dispatch.registered_count ()));
     ("runtime_metrics", runtime_metrics ());
   ]

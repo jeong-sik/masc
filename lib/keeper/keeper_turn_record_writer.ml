@@ -1,13 +1,17 @@
+let context_window_of_turn ~turn_budget = function
+  | `Produced_result -> Some turn_budget
+  | `Errored -> None
+;;
+
 let write
       ~config
       ~keeper_name
       ~agent_name
-      ~generation
       ~turn_kind
       ~trace_id
       ~absolute_turn
       ~runtime_profile
-      ~model
+      ~selected_model
       ~finish_reason
       ~context_window
       ~price_input_per_million
@@ -15,6 +19,7 @@ let write
       ~request_latency_ms
       ~ttfrc_ms
       ~request_wire_observation
+      ~model_input_window
       ~raw_trace_run_ref
       ~sampling
       ~usage
@@ -27,7 +32,6 @@ let write
     { execution_ids
     ; keeper = keeper_name
     ; agent_name
-    ; generation
     ; turn_kind
     ; trace_id
     ; absolute_turn
@@ -35,7 +39,7 @@ let write
     ; blocks
     ; input_components
     ; runtime_profile
-    ; model
+    ; selected_model
     ; finish_reason
     ; context_window
     ; price_input_per_million
@@ -43,6 +47,7 @@ let write
     ; request_latency_ms
     ; ttfrc_ms
     ; request_wire_observation
+    ; model_input_window
     ; raw_trace_run_ref
     ; sampling
     ; usage

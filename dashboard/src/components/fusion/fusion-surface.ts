@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
-import { useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { BoardPost } from '../../types'
-import type { FusionRunRecord, FusionRunStatusLabel } from '../../api/dashboard'
+import type { FusionRunRecord, FusionRunStatusLabel, FusionTopologyLabel } from '../../api/dashboard'
 import { navigate, replaceRoute, route } from '../../router'
 import {
   fusionBoardError,
@@ -12,6 +12,8 @@ import {
   refreshFusionBoard,
   refreshFusionRuns,
 } from '../../store'
+import { registerFusionBoardRefresh } from '../../sse-store'
+import { FusionRunForm } from './fusion-run-form'
 import { TimeAgo } from '../common/time-ago'
 import { ringFocusClasses } from '../common/ring'
 import { RichContent } from '../common/rich-content'
@@ -133,6 +135,10 @@ interface FusionRunView {
   usage: FusionUsage
   preset: string | null
   params: FusionRunParams
+  // Run start (unix seconds) as the board sink copied it from the registry;
+  // null when the evidence predates that copy. The list resolves the start
+  // from the registry record in that case (buildMergedRuns).
+  startedAt: number | null
   createdAt: string
   updatedAt: string
 }
@@ -352,6 +358,11 @@ function fusionRunFromPost(post: BoardPost): FusionRunView | null {
   const judges = normalizeFusionJudgeNodes(meta.judges)
   const usage = normalizeUsage(meta, panel)
   const params = normalizeParams(meta)
+  const rawStartedAt = firstNumber(meta, ['started_at'])
+  const startedAt =
+    rawStartedAt !== null && Number.isFinite(rawStartedAt) && rawStartedAt >= 0
+      ? rawStartedAt
+      : null
   const question = firstString(meta, ['question', 'prompt']) ?? post.body ?? post.content ?? post.title
   const status = statusFor(judge, panel)
   const tone = toneFor(status, judge.decision)
@@ -370,17 +381,13 @@ function fusionRunFromPost(post: BoardPost): FusionRunView | null {
     usage,
     preset: null,
     params,
+    startedAt,
     createdAt: post.created_at,
     updatedAt: post.updated_at || post.created_at,
   }
 }
 
-function timeValue(iso: string): number {
-  const parsed = Date.parse(iso)
-  return Number.isFinite(parsed) ? parsed : 0
-}
-
-// No sort here: ordering is owned exclusively by buildMergedRuns (creation/
+// No sort here: ordering is owned exclusively by buildMergedRuns (durable
 // start axis). A second, different sort key at this layer is exactly the
 // mixed-axis bug this file just removed.
 function buildFusionRuns(posts: readonly BoardPost[]): FusionRunView[] {
@@ -402,7 +409,7 @@ function registryToRunStatus(status: FusionRunStatusLabel): FusionRunStatus {
 // surface matches the prototype's 2-pane master/detail instead of stacking a
 // separate registry panel above it.
 type MergedRun =
-  | { kind: 'board'; runId: string; sortTime: number; view: FusionRunView }
+  | { kind: 'board'; runId: string; sortTime: number; startedAt: number; view: FusionRunView }
   | { kind: 'registry'; runId: string; sortTime: number; record: FusionRunRecord }
 
 // Master-list page size: rows rendered initially and added per "더 보기" click.
@@ -410,25 +417,27 @@ const FUSION_LIST_PAGE_SIZE = 30
 
 // Dedup key is runId: once a deliberation lands a board post the board entry wins
 // (it carries the detail), so the registry duplicate is dropped. Ordering uses
-// one visible policy — newest first — on a SINGLE stable axis per row kind:
-// board post creation (createdAt ISO — the post lands when the deliberation
-// completes) and registry start (startedAt unix seconds), both normalized to ms.
-// The two kinds approximate different moments of a run's life, but each is
-// immutable, which is the property that matters: sorting board rows by
-// updatedAt let an old run leapfrog newer ones whenever its post was touched,
-// which read as a jumbled list (38-bug campaign #34).
+// one visible policy — newest first — on a SINGLE axis for every row: the run's
+// START time. The registry records it and the board sink copies it into the
+// evidence so a completed row outlives the registry's Latest-64 retention. A
+// board row whose evidence has no copy takes the start from its registry
+// record; without either there is no start coordinate and the row is not
+// listed. Sorting board rows by createdAt and registry rows by startedAt was
+// the mixed axis this list must not reintroduce (38-bug campaign #34).
 function buildMergedRuns(
   boardRuns: readonly FusionRunView[],
   registryRuns: readonly FusionRunRecord[],
 ): MergedRun[] {
   const boardIds = new Set(boardRuns.map(run => run.runId))
+  const registryByRun = new Map(registryRuns.map(record => [record.runId, record]))
+  const boardRows: MergedRun[] = []
+  for (const view of boardRuns) {
+    const startedAt = view.startedAt ?? registryByRun.get(view.runId)?.startedAt ?? null
+    if (startedAt === null) continue
+    boardRows.push({ kind: 'board', runId: view.runId, sortTime: startedAt * 1000, startedAt, view })
+  }
   const merged: MergedRun[] = [
-    ...boardRuns.map((view): MergedRun => ({
-      kind: 'board',
-      runId: view.runId,
-      sortTime: timeValue(view.createdAt),
-      view,
-    })),
+    ...boardRows,
     ...registryRuns
       .filter(record => !boardIds.has(record.runId))
       .map((record): MergedRun => ({
@@ -594,6 +603,24 @@ interface FusionShapeInfo {
   okFirstCount: number
 }
 
+
+// The topology the run was *asked* to execute, from the registry. This is not
+// the same fact as [classifyFusionJudgeShape], which infers the shape after the
+// fact from the judge nodes the sink recorded: a run that requested
+// judge_of_judges but lost its meta judge shows first-pass nodes only, and the
+// two chips side by side are what makes that visible. A registry row written
+// before topology was tracked has none, so the chip is omitted rather than
+// guessed.
+function topologyChip(topology: FusionTopologyLabel | null) {
+  if (!topology) return null
+  return html`<span
+    class="fus-preset"
+    title="masc_fusion topology — the deliberation shape this run requested"
+    data-testid="fusion-topology-chip"
+    >topology · ${topology.replace(/_/g, ' ')}</span
+  >`
+}
+
 function fusionShapeInfo(judges: readonly FusionJudgeNode[]): FusionShapeInfo {
   const shape = classifyFusionJudgeShape(judges)
   const firstNodes = judges.filter(node => node.role === 'first')
@@ -638,7 +665,7 @@ function firstJudgeContradictionCount(judge: FusionJudge, identity: string): num
 // (excluded from meta reconcile, RFC-0283 §2.3); a synthesized node shows its
 // decision badge, resolved-answer gist, derived 합의/상충 counts, and token spend.
 // No lens/model split — the backend carries only `identity` (= panelist_id) for a
-// first node, so inventing a persona/model split would fabricate data.
+// first node, so inventing an identity/model split would fabricate data.
 function FusionFirstJudgeCard({ node, judge }: { node: FusionJudgeNode; judge: FusionJudge }) {
   if (node.failed) {
     return html`
@@ -906,10 +933,8 @@ function FusionJudgeEvidence({ judge }: { judge: FusionJudge }) {
   `
 }
 
-// Row timestamp renders createdAt to match the list's sort axis: showing
-// updatedAt made an edited old post wear a fresher timestamp than the rows
-// above it, reproducing the jumbled impression the sort fix removed.
-function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) {
+// Row timestamp renders the same durable start coordinate used for sorting.
+function FusionRunRow({ run, startedAt, active }: { run: FusionRunView; startedAt: number; active: boolean }) {
   const dec = decisionSpecFor(run.judge.decision)
   return html`
     <button
@@ -921,12 +946,12 @@ function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) 
       <span class="fus-row-h">
         <${FusionStatusGlyph} status=${run.status} />
         <span class="fus-run-id mono">${run.runId}</span>
-        <span class="fus-row-ts"><${TimeAgo} timestamp=${run.createdAt} /></span>
+        <span class="fus-row-ts"><${TimeAgo} timestamp=${startedAt} /></span>
       </span>
       <span class="fus-row-prompt">${compactText(run.question, 110)}</span>
       <span class="fus-row-f">
         <span class="fus-who static" title=${run.keeperName}>
-          <${AgentAvatar} name=${run.keeperName} size="sm" />
+          <${AgentAvatar} name=${run.keeperName} size="xs" />
           <span class="nm">${run.keeperName}</span>
         </span>
         <span class="spacer"></span>
@@ -963,7 +988,7 @@ function FusionRegistryRow({ record, active }: { record: FusionRunRecord; active
       </span>
       <span class="fus-row-f">
         <span class="fus-who static" title=${keeper}>
-          <${AgentAvatar} name=${keeper} size="sm" />
+          <${AgentAvatar} name=${keeper} size="xs" />
           <span class="nm">${keeper}</span>
         </span>
         <span class="spacer"></span>
@@ -979,6 +1004,13 @@ function FusionRegistryRow({ record, active }: { record: FusionRunRecord; active
 
 function findPreset(runId: string): string | null {
   return fusionRuns.value.find(run => run.runId === runId)?.preset ?? null
+}
+
+// Board-sink evidence carries the panel and judge nodes but not the requested
+// topology; only the registry row has it. Looked up by run id for the same
+// reason [findPreset] is.
+function findTopology(runId: string): FusionTopologyLabel | null {
+  return fusionRuns.value.find(run => run.runId === runId)?.topology ?? null
 }
 
 function paramChip(label: string, value: number | null): ReturnType<typeof html> | null {
@@ -1036,6 +1068,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
   const decClass = dec && dec.cls ? `dec-${dec.cls}` : ''
   const tokenLabel = combinedTokenLabel(run.usage)
   const preset = run.preset ?? findPreset(run.runId)
+  const requestedTopology = findTopology(run.runId)
   const shape = fusionShapeInfo(run.judges)
   return html`
     <div class="fus-run-scroll" data-testid="fusion-detail">
@@ -1044,6 +1077,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
           <${FusionStatusGlyph} status=${run.status} />
           <h1 class="mono">${run.runId}</h1>
           ${preset ? html`<span class="fus-preset" title="runtime.toml [fusion.presets.*]">preset · ${preset}</span>` : null}
+          ${topologyChip(requestedTopology)}
           <span class=${`fus-status tone-${run.tone}`}>${statusLabel(run.status)}</span>
         </div>
         <div class="fus-run-by">
@@ -1245,6 +1279,7 @@ function FusionRegistryDetail({ record }: { record: FusionRunRecord }) {
           ${record.preset
             ? html`<span class="fus-preset" title="runtime.toml [fusion.presets.*]">preset · ${record.preset}</span>`
             : null}
+          ${topologyChip(record.topology)}
           <span class=${`fus-status tone-${tone}`}>${fusionRunStatusText(record.status)}</span>
         </div>
         <div class="fus-run-by">
@@ -1270,6 +1305,11 @@ function FusionRegistryDetail({ record }: { record: FusionRunRecord }) {
 }
 
 export function FusionSurface() {
+  // A completed deliberation lands as a board-sink post. post_created carries
+  // only a preview and no meta, so the detail browser cannot be built from the
+  // event — refetch the board-sink track instead, the same call the Refresh
+  // button makes (#21822).
+  useEffect(() => registerFusionBoardRefresh(() => { void refreshFusionBoard() }), [])
   const posts = fusionBoardPosts.value
   const runs = useMemo(() => buildFusionRuns(posts), [posts])
   const registryRuns = fusionRuns.value
@@ -1307,6 +1347,10 @@ export function FusionSurface() {
         <strong>부분 지원</strong>
         <span>보드 sink + registry 관측 · live JoJ judges 미구성 시 fail-closed</span>
       </div>
+      <details class="fus-block" data-testid="fusion-run-form-disclosure">
+        <summary>심의 실행</summary>
+        <${FusionRunForm} />
+      </details>
       ${boardError
         ? html`<div
             class="fus-board-error"
@@ -1332,7 +1376,7 @@ export function FusionSurface() {
               : null}
             <span
               class="fus-list-truth"
-              title="보드 sink와 registry 관측을 표시합니다. live JoJ는 judges 패널 구성이 없으면 fail-closed 상태로 남습니다."
+              title="보드 sink · registry 관측 — judges 미구성 시 live JoJ는 fail-closed"
             >관측</span>
             <button
               type="button"
@@ -1355,6 +1399,7 @@ export function FusionSurface() {
                     ? html`<${FusionRunRow}
                         key=${run.runId}
                         run=${run.view}
+                        startedAt=${run.startedAt}
                         active=${selected?.runId === run.runId}
                       />`
                     : html`<${FusionRegistryRow}
@@ -1385,7 +1430,7 @@ export function FusionSurface() {
                 <div class="fus-block">
                   <div class="fus-block-lbl">${boardError ? '보드 sink 확인 실패' : '보드 sink 대기'}</div>
                   <div class="fus-judge-wait">
-                    ${boardError ? '보드 심의 기록을 확인하지 못했습니다.' : '아직 기록된 보드 심의가 없습니다.'}
+                    ${boardError ? '보드 심의 기록을 확인하지 못했습니다.' : '아직 기록된 보드 심의 없음'}
                   </div>
                   <p class="fus-rec-rationale">
                     ${boardError

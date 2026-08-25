@@ -1,0 +1,29 @@
+name = "masc_keeper_clear"
+description = """
+Last-resort context clear for a keeper. Wipes user/assistant/tool messages \
+from the checkpoint; keeps the system prompt by default \
+(preserve_system_prompt=true). Set preserve_system_prompt=false to drop the \
+system prompt too. Dispatches Operator_clear_requested to the keeper FSM, \
+which resets context_overflow. Use only when compaction is insufficient and \
+the keeper cannot recover otherwise. Requires a reason for the audit trail."""
+additional_properties = false
+
+[[params]]
+name = "name"
+type = "string"
+required = true
+description = "Keeper handle"
+
+[[params]]
+name = "preserve_system_prompt"
+type = "boolean"
+description = """
+Keep the system prompt in the cleared context. Defaults to true."""
+
+[[params]]
+name = "reason"
+type = "string"
+required = true
+description = """
+Required. Operator explanation for why the context is being cleared (audit \
+trail)."""

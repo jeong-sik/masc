@@ -244,7 +244,6 @@ export function runtimeCatalogDeclaredSpec(item: DashboardRuntimeProviderSnapsho
     samplingConfig.length > 0 ? `sampling-config:${samplingConfig.join(',')}` : null,
     sampling.length > 0 ? `sampling:${sampling.join(',')}` : null,
     controls.length > 0 ? `controls:${controls.join(',')}` : null,
-    spec.model?.match_prefixes.length ? `match:${spec.model.match_prefixes.join(',')}` : null,
     spec.binding?.is_default ? 'default' : null,
     typeof spec.binding?.max_concurrent === 'number' ? `concurrency:${spec.binding.max_concurrent}` : null,
     typeof spec.binding?.price_input === 'number' ? `price-in:${spec.binding.price_input}` : null,

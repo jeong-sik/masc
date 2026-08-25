@@ -134,7 +134,7 @@ let quiet_obs : WO.world_observation =
   ; idle_seconds = 0
   ; active_goals = []
   ; unclaimed_task_count = 0
-  ; claimable_task_count = 0
+  ; claimable_tasks = []
   ; failed_task_count = 0
   ; scheduled_automation = WO.empty_scheduled_automation_observation
   ; backlog_revision = Some 1
@@ -142,6 +142,8 @@ let quiet_obs : WO.world_observation =
   ; connected_surfaces = []
   ; connected_surface_failures = []
   ; own_recent_board_posts = []
+  ; fleet_messages = []
+  ; own_recent_actions = []
   }
 
 let reasons_of_verdict = function
@@ -187,6 +189,7 @@ let test_connector_attention_codec_roundtrips () =
                  ~parent_channel_id:(Some "parent-77")
                  ~thread_id:(Some "thread-77")
                  ~user_id:"user-77"
+                 ()
                |> Result.get_ok)
           }
     }
@@ -205,6 +208,7 @@ let test_connector_attention_codec_roundtrips () =
               ~parent_channel_id:(Some "parent-77")
               ~thread_id:(Some "thread-77")
               ~user_id:"user-77"
+              ()
             |> Result.get_ok))
     | _ -> check bool "round-trip payload stays Connector_attention" true false)
   | Error e -> check bool ("round-trip decode failed: " ^ e) true false
@@ -224,6 +228,7 @@ let connector_stimulus ~event_id ~arrived_at =
                ~parent_channel_id:None
                ~thread_id:None
                ~user_id:"user-durable"
+               ()
              |> Result.get_ok)
         }
   }
@@ -279,7 +284,35 @@ let test_external_attention_projects_to_prompt_event () =
   check bool "ambient is not an explicit mention" false ev.WO.explicit_mention;
   check string "connector actor remains context" "Alex" ev.WO.author;
   check bool "post kind remains context" true
-    (ev.WO.post_kind = Masc.Board.Human_post)
+    (ev.WO.post_kind = Masc.Board.Human_post);
+  let prompt_fields = Masc.Keeper_unified_prompt.For_testing.board_event_fields ev in
+  check string "world prompt carries typed workspace" "guild-1"
+    (List.assoc "external_workspace_id" prompt_fields);
+  check string "world prompt carries typed actor" "user-1"
+    (List.assoc "external_user_id" prompt_fields);
+  check string "world prompt keeps external authority" "external"
+    (List.assoc "external_authority" prompt_fields);
+  (match ev.WO.event_kind with
+   | WO.External_attention observation ->
+     check string "typed connector channel survives" "discord" observation.channel;
+     check (option string) "typed workspace survives" (Some "guild-1")
+       observation.workspace_id;
+     check (option string) "typed actor id survives" (Some "user-1")
+       observation.user_id;
+     check (option string) "typed display name survives" (Some "Alex")
+       observation.user_name;
+     check string "typed content survives the world projection"
+       item.A.content_preview observation.content
+   | WO.Board_post_created
+   | WO.Board_comment_added
+   | WO.Board_reaction_changed _
+   | WO.Board_vote_cast _
+   | WO.Fusion_completed
+   | WO.Schedule_due _
+   | WO.Completion_authority_rejected _
+   | WO.Task_cancelled _
+   | WO.Delegate_completed ->
+     fail "connector attention must retain its typed counterpart projection")
 
 let () =
   init_runtime_default_for_tests ();

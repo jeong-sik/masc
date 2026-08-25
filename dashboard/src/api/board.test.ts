@@ -162,38 +162,37 @@ describe('asNullableIsoTimestamp', () => {
 // ================================================================
 
 describe('normalizePendingConfirmation (board)', () => {
+  const pendingConfirmation = {
+    confirm_token: 'tok-1',
+    trace_id: 'trace-1',
+    actor: 'agent-1',
+    action_type: 'keeper_probe',
+    target_type: 'keeper',
+    target_id: 'janitor',
+    payload: {},
+    delegated_tool: 'masc_keeper_status',
+    created_at: '2026-04-17T12:00:00Z',
+    expires_at: null,
+  }
+
   it('returns null for null', () => {
     expect(normalizePendingConfirmation(null)).toBeNull()
   })
 
-  it('returns null when no confirm_token or token', () => {
+  it('returns null when confirm_token is missing', () => {
     expect(normalizePendingConfirmation({ actor: 'a1' })).toBeNull()
   })
 
   it('extracts confirm_token', () => {
-    const result = normalizePendingConfirmation({ confirm_token: 'tok-1' })
+    const result = normalizePendingConfirmation(pendingConfirmation)
     expect(result!.confirm_token).toBe('tok-1')
   })
 
-  it('falls back to token field', () => {
-    const result = normalizePendingConfirmation({ token: 'tok-fallback' })
-    expect(result!.confirm_token).toBe('tok-fallback')
-  })
-
-  it('extracts all optional fields', () => {
-    const result = normalizePendingConfirmation({
-      confirm_token: 'tok-1',
-      actor: 'agent-1',
-      action_type: 'pause',
-      target_type: 'keeper',
-      target_id: 'janitor',
-      delegated_tool: 'shell',
-      created_at: '2026-04-17T12:00:00Z',
-      preview: { msg: 'hi' },
-    })
+  it('extracts the complete item', () => {
+    const result = normalizePendingConfirmation(pendingConfirmation)
     expect(result!.actor).toBe('agent-1')
     expect(result!.target_id).toBe('janitor')
-    expect(result!.preview).toEqual({ msg: 'hi' })
+    expect(result!.delegated_tool).toBe('masc_keeper_status')
   })
 })
 
@@ -567,15 +566,6 @@ describe('fetchBoard', () => {
           updated_at: 1_713_000_000,
           current_vote: 'up',
           has_voted: true,
-          report_count: 2,
-          moderation_status: 'flagged',
-          contributor_quality: {
-            source: 'agent_reputation',
-            completion_rate: 0.8,
-            response_rate: 0.6,
-            board_posts: 3,
-            board_comments: 5,
-          },
           reactions: [
             {
               emoji: '🔥',
@@ -610,15 +600,6 @@ describe('fetchBoard', () => {
     expect(result.posts[0]).toMatchObject({
       current_vote: 'up',
       has_voted: true,
-      report_count: 2,
-      moderation_status: 'flagged',
-      contributor_quality: {
-        source: 'agent_reputation',
-        completion_rate: 0.8,
-        response_rate: 0.6,
-        board_posts: 3,
-        board_comments: 5,
-      },
       reactions: [
         {
           emoji: '🔥',
@@ -656,43 +637,6 @@ describe('fetchBoard', () => {
     expect(url).toContain('/api/v1/board?')
     expect(url).toContain('hearth=ops')
     expect(url).toContain('limit=150')
-  })
-
-  it('normalizes vote-blind rows and opts into the board projection when requested', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        posts: [
-          {
-            id: 'post-blind',
-            author: 'analyst',
-            title: 'Blind score',
-            body: 'Working',
-            created_at: 1_713_000_000,
-            updated_at: 1_713_000_000,
-            votes: null,
-            score: null,
-            votes_up: null,
-            votes_down: null,
-            vote_blind: true,
-            vote_blind_reason: 'vote_before_score',
-          },
-        ],
-      }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await fetchBoard('hot', { blindVotes: true })
-
-    expect(result.posts[0]).toMatchObject({
-      id: 'post-blind',
-      vote_blind: true,
-      vote_blind_reason: 'vote_before_score',
-    })
-    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(url).toContain('blind_votes=true')
   })
 
   it('normalizes the RFC-0233 origin (turn_ref / source / fusion_run_id)', async () => {
@@ -773,11 +717,17 @@ describe('fetchBoardHearths', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(fetchBoardHearths()).resolves.toEqual([
+    await expect(fetchBoardHearths({
+      excludeSystem: true,
+      excludeAutomation: true,
+    })).resolves.toEqual([
       { name: 'ops', count: 3 },
       { name: 'research', count: 0 },
     ])
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/board/hearths', expect.any(Object))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/board/hearths?exclude_system=true&exclude_automation=true',
+      expect.any(Object),
+    )
   })
 })
 
@@ -920,8 +870,6 @@ describe('fetchBoardPost', () => {
           score: 3,
           current_vote: 'up',
           has_voted: true,
-          report_count: 1,
-          moderation_status: 'hidden',
           reactions: [
             {
               emoji: '🚀',
@@ -952,8 +900,6 @@ describe('fetchBoardPost', () => {
       votes_down: 2,
       current_vote: 'up',
       has_voted: true,
-      report_count: 1,
-      moderation_status: 'hidden',
       reactions: [
         {
           emoji: '🚀',
@@ -979,7 +925,6 @@ describe('fetchBoardPost', () => {
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('format=flat')
     expect(url).toContain('voter=')
-    expect(url).toContain('blind_votes=true')
   })
 })
 
@@ -1188,10 +1133,9 @@ describe('voteComment', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/v1/tools/masc_board_comment_vote')
-    expect(JSON.parse(String(init.body))).toMatchObject({
+    expect(JSON.parse(String(init.body))).toEqual({
       comment_id: 'comment-1',
       direction: 'down',
-      vote: 'down',
       voter: 'dashboard-reviewer',
     })
   })

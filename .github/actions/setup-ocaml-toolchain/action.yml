@@ -6,18 +6,10 @@ inputs:
     description: OCaml compiler version (MASC supports exactly 5.5.0)
     required: false
     default: "5.5.0"
-  dune-cache:
-    description: Whether to enable dune cache
-    required: false
-    default: "true"
-  dune-cache-save:
-    description: Whether this job is the authoritative main-branch Dune cache writer
-    required: false
-    default: "false"
   cache-prefix:
-    description: Prefix for the dune cache key
+    description: Prefix for the OCaml toolchain cache key
     required: false
-    default: oas-otel-02
+    default: agent_core-otel-02
 
 runs:
   using: composite
@@ -37,7 +29,6 @@ runs:
       uses: ocaml/setup-ocaml@v3.6.0
       with:
         ocaml-compiler: ${{ inputs.ocaml-compiler }}
-        dune-cache: ${{ inputs.dune-cache }}
 
     - name: Cache OCaml toolchain (Linux)
       id: opam-toolchain-cache
@@ -47,63 +38,18 @@ runs:
         path: |
           ~/.opam
           ~/.local/share/opam
-        key: opam-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ hashFiles('*.opam', 'dune-project', 'scripts/oas-agent-sdk-pin.sh', 'scripts/opam-pin-external-deps.sh') }}-v2
+        # runner.arch 가 키에 들어가야 한다. 없으면 arm64 러너가 x86_64 러너의
+        # ~/.opam 을 복원하고, opam switch list 는 switch 가 있다고 답하는데
+        # 그 안의 ocamlc 는 x86_64 ELF 라 실행되지 않는다. 그 결과
+        # `ocamlc -version` 이 빈 문자열이 되어 opam-pin-external-deps.sh 가
+        # "OCaml unknown detected" 로 거부한다 (run 32332266041).
+        # masc.opam.locked has to be in the key: it does not match the *.opam
+        # glob, so bumping the lock left every runner restoring a switch built
+        # from the previous one — the file CI installs from was invisible to
+        # the cache that decides whether to install at all (#28543).
+        key: opam-linux-${{ runner.arch }}-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ hashFiles('*.opam', 'masc.opam.locked', 'dune-project', 'scripts/opam-pin-external-deps.sh') }}-v3
         restore-keys: |
-          opam-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
-
-    # The opam cache above only restores the toolchain/switch; every dune
-    # build of masc itself still started cold (~50 min Build and Test).
-    # Cache dune's content-addressed artifact store so an unchanged module
-    # graph rebuilds incrementally. Pull requests and non-authoritative jobs are
-    # restore-only: PR caches are ref-scoped and cannot warm other PRs, while
-    # partial Health/Lint artifacts must not race the full Build cache. Exactly
-    # one authoritative job per cache-prefix opts into the main-branch writer.
-    # The run id gives each main publication an immutable key; restore picks the
-    # newest cache in that trusted lineage.
-    - name: Restore dune build artifacts (Linux)
-      if: runner.os == 'Linux' && inputs.dune-cache == 'true' && (inputs.dune-cache-save != 'true' || github.event_name != 'push' || github.ref != 'refs/heads/main')
-      uses: actions/cache/restore@v5
-      with:
-        path: ~/.cache/dune
-        key: dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ github.run_id }}
-        restore-keys: |
-          dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
-
-    - name: Cache dune build artifacts (Linux authoritative main writer)
-      if: runner.os == 'Linux' && inputs.dune-cache == 'true' && inputs.dune-cache-save == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-      uses: actions/cache@v5
-      with:
-        path: ~/.cache/dune
-        key: dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ github.run_id }}
-        restore-keys: |
-          dune-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
-
-    # Storage mode is hardlink, not copy. `copy` keeps every artifact twice:
-    # once in _build and once in ~/.cache/dune. On ubuntu-latest that
-    # duplication exhausted the runner disk and the Build and Test job of run
-    # 29090394322 (main, the #23996 merge) died while linking a test
-    # executable, with zero free space reported by the runner. Both paths live
-    # on `/`, so dune can hardlink cache entries into _build and keep a single
-    # copy on disk.
-    #
-    # This explanation stays a YAML comment on purpose. GitHub echoes the whole
-    # `run:` script into the job log, so a shell comment quoting the linker and
-    # disk-space messages would plant those exact strings in every job log —
-    # scripts/ci-run-tests.sh preserves them in failure diagnostics.
-    - name: Enable dune cache (Linux)
-      if: runner.os == 'Linux' && inputs.dune-cache == 'true'
-      shell: bash
-      run: |
-        # hardlink, NOT copy: copy mode duplicates every artifact into
-        # ~/.cache/dune, roughly doubling disk while the cache populates.
-        # The first cache-cold Build and Test after #23996 died at link time
-        # with "/usr/bin/ld: final link failed: No space left on device"
-        # (run 29091172837). ~/.cache/dune and the workspace share one
-        # filesystem on GitHub runners, so hardlinks add no meaningful space.
-        {
-          echo "DUNE_CACHE=enabled"
-          echo "DUNE_CACHE_STORAGE_MODE=hardlink"
-        } >> "$GITHUB_ENV"
+          opam-linux-${{ runner.arch }}-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
 
     - name: Bootstrap local opam switch (Linux)
       if: runner.os == 'Linux'

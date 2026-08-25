@@ -1,3 +1,8 @@
+---
+rfc: "0214"
+status: Draft
+---
+
 # RFC-0214: OTel GenAI Semantic Convention Migration
 
 | | |
@@ -137,7 +142,7 @@ Why OTel-backed migration:
 
 ```
                     ┌─────────────────┐
-                    │  OAS Callbacks   │
+                    │  agent_core Callbacks   │
                     │  (on_token_usage, │
                     │   on_error, etc)  │
                     └────────┬─────────┘

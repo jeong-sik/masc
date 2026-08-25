@@ -84,7 +84,7 @@ describe('KeeperToolCallInspector render', () => {
     expect(outputCopy?.getAttribute('title')).toBe('도구 호출 출력 복사')
   })
 
-  it('links safe tool-call file inputs back to the Code IDE route', async () => {
+  it('links recorded path targets back to the Code IDE route', async () => {
     const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
       keeper: 'analyst',
       count: 1,
@@ -95,10 +95,21 @@ describe('KeeperToolCallInspector render', () => {
           ts: 1_777_100_000,
           keeper: 'analyst',
           tool: 'keeper_fs_read',
+          // The recorded action_radius mirrors the input's path (the server
+          // derives it from the input at record time). The client reads only
+          // the recorded value: the input's line number is not re-parsed, so
+          // the link carries no line.
           input: { file_path: 'lib/runtime.ml', line: 12 },
           output: 'file contents',
           success: true,
           duration_ms: 42,
+          action_radius: {
+            action_key: 'keeper_fs_read',
+            target_kind: 'path',
+            target_path: 'lib/runtime.ml',
+            observed_paths: ['lib/runtime.ml'],
+            error: null,
+          },
         },
       ],
     })
@@ -120,16 +131,16 @@ describe('KeeperToolCallInspector render', () => {
     const codeLink = container.querySelector('[data-testid="keeper-tool-code-link"]') as HTMLButtonElement | null
     expect(codeLink).not.toBeNull()
     expect(codeLink?.textContent).toBe('Code')
-    expect(codeLink?.getAttribute('title')).toBe('Code lib/runtime.ml:12')
+    expect(codeLink?.getAttribute('title')).toBe('Code lib/runtime.ml')
 
     await act(async () => {
       codeLink?.click()
       await Promise.resolve()
     })
-    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=12&surface=Tool&label=keeper_fs_read&source_id=tool%3Aanalyst%3A1777100000%3Akeeper_fs_read&keeper=analyst')
+    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&surface=Tool&label=keeper_fs_read&source_id=tool%3Aanalyst%3A1777100000%3Akeeper_fs_read&keeper=analyst')
   })
 
-  it('routes nested tool-call evidence to operational IDE surfaces', async () => {
+  it('routes recorded identity fields to operational IDE surfaces', async () => {
     const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
       keeper: 'analyst',
       count: 1,
@@ -140,29 +151,20 @@ describe('KeeperToolCallInspector render', () => {
           ts: 1_777_100_000,
           keeper: 'analyst',
           tool: 'keeper_apply_patch',
-          input: {
-            context: {
-              goal_id: 'goal-runtime',
-              task_id: 'task-runtime',
-              board_post_id: 'post-1',
-              comment_id: 'comment-1',
-            },
-            failure_envelope: {
-              evidence_ref: {
-                file_path: 'lib/runtime.ml',
-                line_start: '8',
-                pr_number: 15125,
-                branch: 'fix/runtime',
-                log_id: 'turn-8',
-                session_id: 'sess-nested',
-                operation_id: 'op-nested',
-                worker_run_id: 'wr-nested',
-              },
-            },
-          },
+          input: { patch: '...' },
           output: 'patched',
           success: true,
           duration_ms: 42,
+          task_id: 'task-runtime',
+          goal_ids: ['goal-runtime'],
+          session_id: 'sess-nested',
+          action_radius: {
+            action_key: 'keeper_apply_patch',
+            target_kind: 'path',
+            target_path: 'lib/runtime.ml',
+            observed_paths: ['lib/runtime.ml'],
+            error: null,
+          },
         },
       ],
     })
@@ -186,11 +188,6 @@ describe('KeeperToolCallInspector render', () => {
       'Code',
       'Goal',
       'Task',
-      'Board',
-      'Comment',
-      'PR',
-      'Git',
-      'Log',
       'Telemetry',
       'Keeper',
     ])
@@ -199,13 +196,13 @@ describe('KeeperToolCallInspector render', () => {
       routeLinks.find(link => link.textContent?.trim() === 'Code')?.click()
       await Promise.resolve()
     })
-    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&line=8&surface=Tool&label=keeper_apply_patch&source_id=tool%3Aanalyst%3A1777100000%3Akeeper_apply_patch&keeper=analyst')
+    expect(window.location.hash).toBe('#code?section=ide-shell&view=source&file=lib%2Fruntime.ml&surface=Tool&label=keeper_apply_patch&source_id=tool%3Aanalyst%3A1777100000%3Akeeper_apply_patch&keeper=analyst')
 
     await act(async () => {
       routeLinks.find(link => link.textContent?.trim() === 'Telemetry')?.click()
       await Promise.resolve()
     })
-    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-nested&operation_id=op-nested&worker_run_id=wr-nested&q=turn-8')
+    expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-nested')
   })
 
   it('renders an activity dossier for recent tool-call evidence', async () => {
@@ -233,19 +230,36 @@ describe('KeeperToolCallInspector render', () => {
           output: 'file contents',
           success: true,
           duration_ms: 42,
+          action_radius: {
+            action_key: 'keeper_fs_read',
+            target_kind: 'path',
+            target_path: 'lib/runtime.ml',
+            observed_paths: ['lib/runtime.ml'],
+            error: null,
+          },
         },
         {
           ts: 1_777_100_010,
           keeper: 'analyst',
           tool: 'Execute',
-          input: { cmd: 'false', context: { task_id: 'task-runtime' } },
+          input: { cmd: 'false' },
           output: 'exit 1',
           success: false,
           duration_ms: 2_600,
+          task_id: 'task-runtime',
           trace_id: 'trace-runtime',
           tool_use_id: '',
           turn: 9,
           planned_index: 4,
+          batch_index: 0,
+          batch_size: 2,
+          execution_mode: 'concurrent',
+          disposition: 'failed',
+          composition_tool: 'keeper_research_pipeline',
+          composition_run_id: 'run-42',
+          composition_node_id: 'publish_report',
+          composition_execution: 'inline',
+          parent_tool_use_id: 'outer-7',
           lane: 'autonomous',
         },
       ],
@@ -270,10 +284,62 @@ describe('KeeperToolCallInspector render', () => {
     expect(text).toContain('Evidence links')
     expect(text).toContain('Code')
     expect(text).toContain('Task')
-    expect(text).toContain('turn 9 · plan 4 · tool_use_id (blank)')
+    expect(text).toContain(
+      'turn 9 · plan 4 · batch 0 · size 2 · mode concurrent · result failed',
+    )
+    expect(text).toContain('composition keeper_research_pipeline')
+    expect(text).toContain('node publish_report')
+    expect(text).toContain('execution inline')
+    expect(text).toContain('parent_tool_use_id outer-7')
+    const compositionRow = container.querySelector('[data-composition-node="publish_report"]')
+    expect(compositionRow).not.toBeNull()
+    expect(compositionRow?.getAttribute('data-composition-run')).toBe('run-42')
+    expect(compositionRow?.getAttribute('data-composition-execution')).toBe('inline')
+    expect(compositionRow?.getAttribute('data-tool-call-disposition')).toBe('failed')
+    expect(compositionRow?.textContent).toContain('↳ publish_report · inline')
   })
 
-  it('does not render Code links for unsafe absolute tool-call file inputs', async () => {
+  it('renders a typed deferred composition action without counting it as failed', async () => {
+    const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
+      keeper: 'analyst',
+      count: 1,
+      source: 'tool_call_io',
+      health: 'fresh',
+      entry_count: 1,
+      entries: [
+        {
+          ts: 1_777_100_020,
+          keeper: 'analyst',
+          tool: 'keeper_board_await',
+          input: {},
+          output: 'waiting',
+          success: false,
+          duration_ms: 15,
+          disposition: 'deferred',
+          composition_tool: 'keeper_watch_pipeline',
+          composition_run_id: 'run-43',
+          composition_node_id: 'wait_for_board',
+          composition_execution: 'async',
+          parent_tool_use_id: 'outer-8',
+        },
+      ],
+    })
+
+    const { KeeperToolCallInspector } = await loadInspector(fetchKeeperToolCalls)
+    await act(async () => {
+      render(html`<${KeeperToolCallInspector} keeperName="analyst" />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const dossier = container.querySelector('[data-testid="keeper-tool-call-dossier"]')
+    expect(dossier?.textContent).toContain('1 deferred / 1')
+    expect(dossier?.textContent).toContain('no failed calls in this window')
+    expect(container.querySelector('[title="deferred"]')?.textContent).toBe('D')
+    expect(container.querySelector('[data-composition-node="wait_for_board"]')).not.toBeNull()
+  })
+
+  it('does not promote Execute cwd targets to Code links', async () => {
     const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
       keeper: 'analyst',
       count: 1,
@@ -283,11 +349,24 @@ describe('KeeperToolCallInspector render', () => {
         {
           ts: 1_777_100_000,
           keeper: 'analyst',
-          tool: 'keeper_fs_read',
-          input: { file_path: '/tmp/runtime.ml', line: 12 },
-          output: 'file contents',
+          tool: 'Execute',
+          input: { argv: ['git', 'status'], cwd: 'repos/masc' },
+          output: 'clean',
           success: true,
           duration_ms: 42,
+          // Recorded shape for Execute rows: the writer stores the cwd as
+          // target_path and says so with target_kind "directory" (masc#29013).
+          // It used to say "path", which a file target also says.
+          action_radius: {
+            action_key: 'Execute',
+            target_kind: 'directory',
+            target_path: 'repos/masc',
+            observed_paths: ['repos/masc'],
+            error: null,
+          },
+          route_evidence: {
+            descriptor_id: 'agent.execute',
+          },
         },
       ],
     })
@@ -307,6 +386,198 @@ describe('KeeperToolCallInspector render', () => {
     await flushUi()
 
     expect(container.querySelector('[data-testid="keeper-tool-code-link"]')).toBeNull()
+  })
+
+  it('does not render Code links for unsafe absolute recorded target paths', async () => {
+    const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
+      keeper: 'analyst',
+      count: 1,
+      source: 'tool_call_io',
+      health: 'ok',
+      entries: [
+        {
+          ts: 1_777_100_000,
+          keeper: 'analyst',
+          tool: 'keeper_fs_read',
+          input: { file_path: '/tmp/runtime.ml', line: 12 },
+          output: 'file contents',
+          success: true,
+          duration_ms: 42,
+          action_radius: {
+            action_key: 'keeper_fs_read',
+            target_kind: 'path',
+            target_path: '/tmp/runtime.ml',
+            observed_paths: ['/tmp/runtime.ml'],
+            error: null,
+          },
+        },
+      ],
+    })
+
+    const { KeeperToolCallInspector } = await loadInspector(fetchKeeperToolCalls)
+    await act(async () => {
+      render(html`<${KeeperToolCallInspector} keeperName="analyst" />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const rowToggle = container.querySelector('button[aria-expanded="false"]') as HTMLButtonElement | null
+    await act(async () => {
+      rowToggle?.click()
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.querySelector('[data-testid="keeper-tool-code-link"]')).toBeNull()
+  })
+
+  it('renders recorded execution evidence blocks in the expanded row', async () => {
+    const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
+      keeper: 'analyst',
+      count: 1,
+      source: 'tool_call_io',
+      health: 'ok',
+      entries: [
+        {
+          ts: 1_777_100_000,
+          keeper: 'analyst',
+          tool: 'keeper_time_now',
+          input: {},
+          output: '{"now_iso":"2026-08-18T05:00:00Z"}',
+          success: true,
+          duration_ms: 1,
+          thinking_enabled: true,
+          prompt_fingerprint: '464ce7b3280c24fe1cbdcd990a70db87',
+          runtime_contract: {
+            agent_name: 'keeper-analyst-agent',
+            generation: 1,
+            sandbox_root: '/sandbox/analyst/',
+            allowed_paths: ['.masc/playground/analyst/'],
+            network_mode: 'inherit',
+            runtime_profile: 'ollama_cloud.example-model',
+            path_resolution: { read_implicit_cwd: false, read_explicit_cwd_supported: true },
+          },
+          action_radius: {
+            action_key: 'keeper_time_now',
+            target_kind: 'tool',
+            target_path: null,
+            observed_paths: [],
+            error: null,
+          },
+          route_evidence: {
+            descriptor_id: 'keeper.time.now',
+            capability_id: 'keeper_time_now',
+            executor: 'in_process',
+            backend: 'ocaml_runtime',
+            runtime_handler: 'tool_time_now',
+            readonly: true,
+            receipt_labels: { keeper_tool_group: 'meta' },
+          },
+        },
+      ],
+    })
+
+    const { KeeperToolCallInspector } = await loadInspector(fetchKeeperToolCalls)
+    await act(async () => {
+      render(html`<${KeeperToolCallInspector} keeperName="analyst" />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const rowToggle = container.querySelector('button[aria-expanded="false"]') as HTMLButtonElement | null
+    await act(async () => {
+      rowToggle?.click()
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const evidence = container.querySelector('[data-testid="tool-call-evidence"]')
+    expect(evidence).not.toBeNull()
+    const text = evidence?.textContent ?? ''
+    expect(text).toContain('route evidence')
+    expect(text).toContain('keeper.time.now')
+    expect(text).toContain('in_process')
+    expect(text).toContain('ocaml_runtime')
+    expect(text).toContain('tool_time_now')
+    expect(text).toContain('keeper_tool_group=meta')
+    expect(text).toContain('runtime contract')
+    expect(text).toContain('/sandbox/analyst/')
+    expect(text).toContain('.masc/playground/analyst/')
+    expect(text).toContain('inherit')
+    expect(text).toContain('read_implicit_cwd=false read_explicit_cwd_supported=true')
+    expect(text).toContain('action radius')
+    expect(text).toContain('target kind')
+
+    expect(container.textContent).toContain('invocation:')
+    expect(container.textContent).toContain('thinking on')
+    expect(container.textContent).toContain('prompt 464ce7b3280c')
+  })
+
+  it('nests composition children under the composite parent row', async () => {
+    const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
+      keeper: 'analyst',
+      count: 3,
+      source: 'tool_call_io',
+      health: 'ok',
+      entries: [
+        {
+          ts: 1_777_100_000,
+          keeper: 'analyst',
+          tool: 'keeper_time_now',
+          input: {},
+          output: 'now',
+          success: true,
+          duration_ms: 1,
+          composition_tool: 'keeper_compose_mission-snapshot',
+          composition_run_id: 'run-1',
+          composition_node_id: 'clock',
+          composition_execution: 'inline',
+          parent_tool_use_id: 'call_parent',
+          disposition: 'completed',
+        },
+        {
+          ts: 1_777_100_005,
+          keeper: 'analyst',
+          tool: 'masc_board_stats',
+          input: {},
+          output: 'stats',
+          success: true,
+          duration_ms: 2,
+          composition_tool: 'keeper_compose_mission-snapshot',
+          composition_run_id: 'run-1',
+          composition_node_id: 'board',
+          composition_execution: 'inline',
+          parent_tool_use_id: 'call_parent',
+          disposition: 'completed',
+        },
+        {
+          ts: 1_777_100_010,
+          keeper: 'analyst',
+          tool: 'keeper_compose_mission-snapshot',
+          input: {},
+          output: 'snapshot',
+          success: true,
+          duration_ms: 12,
+          tool_use_id: 'call_parent',
+        },
+      ],
+    })
+
+    const { KeeperToolCallInspector } = await loadInspector(fetchKeeperToolCalls)
+    await act(async () => {
+      render(html`<${KeeperToolCallInspector} keeperName="analyst" />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const childGroup = container.querySelector('[data-composition-children="call_parent"]')
+    expect(childGroup).not.toBeNull()
+    expect(childGroup?.querySelector('[data-composition-node="clock"]')).not.toBeNull()
+    expect(childGroup?.querySelector('[data-composition-node="board"]')).not.toBeNull()
+    // The children render only inside the parent's group, not as top-level rows.
+    expect(container.querySelectorAll('[data-composition-node="clock"]')).toHaveLength(1)
+    const parentRow = childGroup?.parentElement
+    expect(parentRow?.textContent).toContain('keeper_compose_mission-snapshot')
   })
 
   it('surfaces coverage gap provenance when tool-call IO is stale', async () => {

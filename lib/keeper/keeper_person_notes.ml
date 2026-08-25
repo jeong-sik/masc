@@ -58,7 +58,7 @@ let parse_row ~file_path line : (string * string) option =
         Some (String.trim id, Option.value (field "note") ~default:"")
     | Some _ | None ->
         report_read_drop
-          ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+          ~reason:Read_drop_reason.Invalid_payload
           ~path:file_path
           ~detail:"person-note row missing non-empty speaker_id";
         None
@@ -66,7 +66,7 @@ let parse_row ~file_path line : (string * string) option =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | Yojson.Json_error detail ->
     report_read_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+      ~reason:Read_drop_reason.Json_syntax_error
       ~path:file_path
       ~detail;
     None
@@ -78,7 +78,7 @@ let notes ~base_dir ~keeper_name : (string * string) list =
     try
       (* Latest row wins per speaker; insertion order of first
          appearance is irrelevant to callers (roster sorts on its own
-         keys). Blank note = tombstone. *)
+         keys). A blank note deletes the entry. *)
       let tbl : (string, string) Hashtbl.t = Hashtbl.create 8 in
       let (), _boundary =
         Fs_compat.fold_appended_lines ~path ~from:0 ~init:()
@@ -94,7 +94,7 @@ let notes ~base_dir ~keeper_name : (string * string) list =
     with
     | Sys_error detail ->
         report_read_drop
-          ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+          ~reason:Read_drop_reason.Entry_load_error
           ~path
           ~detail;
         []

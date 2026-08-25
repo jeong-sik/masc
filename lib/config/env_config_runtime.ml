@@ -13,6 +13,54 @@ module Session = struct
     get_float ~default:300.0 "MASC_SESSION_SSE_GRACE_PERIOD_SEC"
 end
 
+(** {1 SSE Reconnect Guard} *)
+
+module Sse_connect_guard = struct
+  (* The transport read these three with its own Sys.getenv_opt wrappers, which
+     is the one place in the server that did not come through this module
+     (#28910). The numbers are unchanged and they are not measured against any
+     resource boundary; docs/spec/09-server-transport.md described them as
+     disabled by default while the code has always shipped them enabled, and
+     the live server log holds no session_cooldown or window_limit rejection at
+     all. Whether the default should be off is a separate decision from where
+     the value is read. *)
+
+  (** Minimum interval between SSE reconnects for one session (seconds).
+      [<= 0.0] disables the per-session cooldown. *)
+  let reconnect_min_interval_seconds =
+    get_float ~default:1.0 "MASC_SSE_RECONNECT_MIN_INTERVAL_S"
+
+  (** Sliding window over which reconnects are counted (seconds).
+      [<= 0.0] disables the window limit. *)
+  let connect_window_seconds =
+    get_float ~default:60.0 "MASC_SSE_CONNECT_WINDOW_S"
+
+  (** Reconnects admitted inside one window. [<= 0] disables the window
+      limit. *)
+  let connect_max_in_window = get_int ~default:10 "MASC_SSE_CONNECT_MAX_IN_WINDOW"
+
+  (* Re-readable twins of the three bindings above.  They exist so a
+     test can pin the documented disable semantics — [<= 0], negative
+     included — by setting the env-var and calling the thunk, without
+     forking a process (the bindings above are fixed at module init).
+     They deliberately use the raw [get_float]/[get_int] readers, NOT
+     the [*_nonneg] variants: those clamp a negative to the default,
+     which would silently turn "disable" into "default cooldown" — the
+     exact regression this module's contract forbids (task-534).  The
+     transport keeps reading the cached bindings; these thunks are for
+     tests and any future hot-reload call site. *)
+  module Re_read = struct
+    let reconnect_min_interval_seconds () =
+      get_float ~default:1.0 "MASC_SSE_RECONNECT_MIN_INTERVAL_S"
+
+    let connect_window_seconds () =
+      get_float ~default:60.0 "MASC_SSE_CONNECT_WINDOW_S"
+
+    let connect_max_in_window () =
+      get_int ~default:10 "MASC_SSE_CONNECT_MAX_IN_WINDOW"
+  end
+end
+
 (** {1 Tempo (Polling Interval) Configuration} *)
 
 module Tempo = struct
@@ -136,48 +184,37 @@ module Transport = struct
     | Auto
     | H1_only
     | H2_only
-    | Unknown_h2_mode of string
 
-  let normalize_token raw =
-    raw |> String.trim |> String.lowercase_ascii
+  let h2_env_name = "MASC_USE_H2"
+  let h2_default = Auto
+  let h2_description = "HTTP mode (auto|0|h1_only|1|h2_only)"
 
+  let h2_accepted_values =
+    [ "auto", Auto
+    ; "0", H1_only
+    ; "h1_only", H1_only
+    ; "1", H2_only
+    ; "h2_only", H2_only
+    ]
+
+  (* The vocabulary is closed. Only an absent setting selects [Auto]; a present
+     value outside this set is an operator error and stops startup. *)
   let h2_mode_of_string raw =
-    match normalize_token raw with
-    | "1" | "true" | "h2_only" -> H2_only
-    | "0" | "false" | "h1_only" -> H1_only
-    | "auto" -> Auto
-    | other -> Unknown_h2_mode other
+    match List.assoc_opt raw h2_accepted_values with
+    | Some mode -> mode
+    | None ->
+      raise
+        (Env_config_core.Config_error
+           (Printf.sprintf
+              "malformed env %s=%S (expected %s)"
+              h2_env_name
+              raw
+              (h2_accepted_values |> List.map fst |> String.concat "|")))
 
   let h2_mode_to_string = function
     | Auto -> "auto"
     | H1_only -> "h1_only"
     | H2_only -> "h2_only"
-    | Unknown_h2_mode value -> value
-
-  type agent_transport =
-    | Http
-    | Grpc
-    | Ws
-    | Webrtc
-    | Local
-    | Unknown_agent_transport of string
-
-  let agent_transport_of_string raw =
-    match normalize_token raw with
-    | "http" -> Http
-    | "grpc" -> Grpc
-    | "ws" | "websocket" -> Ws
-    | "webrtc" -> Webrtc
-    | "local" -> Local
-    | other -> Unknown_agent_transport other
-
-  let agent_transport_to_string = function
-    | Http -> "http"
-    | Grpc -> "grpc"
-    | Ws -> "ws"
-    | Webrtc -> "webrtc"
-    | Local -> "local"
-    | Unknown_agent_transport value -> value
 
   (** gRPC server port. Default: 8936. *)
   let grpc_port = get_port ~default:8936 "MASC_GRPC_PORT"
@@ -190,37 +227,61 @@ module Transport = struct
   let grpc_target_opt () =
     Sys.getenv_opt "MASC_GRPC_TARGET" |> trim_opt
 
-  (** WebSocket server port. Default: 8937. *)
-  let ws_port = get_port ~default:8937 "MASC_WS_PORT"
-
   (** Whether WebSocket transport is enabled. Default: true.
       Accessor-shaped reader; listener lifecycle is still decided at boot. *)
   let ws_enabled () = Feature_flag_registry.get_bool "MASC_WS_ENABLED"
 
-  (** Whether WebRTC transport is enabled. Default: true.
-      Accessor-shaped reader; listener lifecycle is still decided at boot. *)
-  let webrtc_enabled () = Feature_flag_registry.get_bool "MASC_WEBRTC_ENABLED"
+  type h2_resolution =
+    { value : h2_mode
+    ; source : Env_config_snapshot_core.effective_source
+    }
 
-  (** HTTP mode: typed variant for "auto", "h2_only", "h1_only". *)
-  let use_h2 () =
-    match Sys.getenv_opt "MASC_USE_H2" |> trim_opt with
-    | Some raw -> h2_mode_of_string raw
-    | None -> Auto
+  let resolve_h2_env () =
+    match Sys.getenv_opt h2_env_name with
+    | None ->
+      { value = h2_default; source = Env_config_snapshot_core.Default }
+    | Some raw ->
+      { value = h2_mode_of_string raw
+      ; source = Env_config_snapshot_core.Environment
+      }
 
-  (** Agent transport type variant (e.g. "grpc", "http", "ws"). *)
-  let agent_transport_opt () =
-    Sys.getenv_opt "MASC_AGENT_TRANSPORT"
-    |> trim_opt
-    |> Option.map agent_transport_of_string
+  let configured_h2 = Atomic.make None
 
-  let _http_auth_strict_registry =
-    Feature_flag_registry.get_bool "MASC_HTTP_AUTH_STRICT"
+  let rec configure_h2_from_env () =
+    match Atomic.get configured_h2 with
+    | Some resolution -> resolution.value
+    | None ->
+      let resolution = resolve_h2_env () in
+      if Atomic.compare_and_set configured_h2 None (Some resolution)
+      then resolution.value
+      else configure_h2_from_env ()
 
-  (** Force strict auth for all HTTP endpoints. Default: false. *)
+  let effective_h2_resolution () =
+    match Atomic.get configured_h2 with
+    | Some resolution -> resolution
+    | None -> resolve_h2_env ()
+
+  let effective_h2_mode () = (effective_h2_resolution ()).value
+
+  let h2_snapshot_entry =
+    Env_config_snapshot_collector.effective_entry
+      ~default:(h2_mode_to_string h2_default)
+      ~read:(fun () ->
+        let resolution = effective_h2_resolution () in
+        h2_mode_to_string resolution.value, resolution.source)
+      h2_env_name
+      h2_description
+
+  (** Force strict auth for all HTTP endpoints. Default: false.
+
+      Read through the flag registry, which is what the operator-facing flag
+      listing reports. A second reader here used Sys.getenv_opt directly with
+      its own case-sensitive spelling set, so MASC_HTTP_AUTH_STRICT=TRUE and any
+      boot override made the listing and the enforcement disagree. A malformed
+      explicit value is rejected because falling back to [false] would disable
+      the requested security policy. *)
   let http_auth_strict_env_enabled () =
-    match Sys.getenv_opt "MASC_HTTP_AUTH_STRICT" |> trim_opt with
-    | Some ("1" | "true" | "yes" | "y" | "on") -> true
-    | _ -> false
+    Feature_flag_registry.get_bool_strict "MASC_HTTP_AUTH_STRICT"
 
   (** Startup watchdog timeout, clamped to [30, 600]. Default: 240.
       Re-readable within the process, but operationally a boot-time input. *)
@@ -232,11 +293,6 @@ end
 (** {1 Board Configuration} *)
 
 module Board = struct
-  (* MASC_BOARD_BACKEND and the [backend] type were deleted together with
-     the test-only [Board_dispatch.jsonl_forced] pin: JSONL is the only
-     board lane, so a backend selector had nothing to select. The knob row
-     was removed from docs/runtime-tunables.md in the same change. *)
-
   (** Flush interval for board persistence (seconds). Default: 30. *)
   let flush_interval_sec =
     get_float ~default:30.0 "MASC_BOARD_FLUSH_INTERVAL_SEC"
@@ -254,19 +310,11 @@ end
 (** {1 Tool Surface Configuration} *)
 
 module Tools = struct
-  (* RFC-0084 host-config-cleanup-J — [dispatch_v2_enabled] removed.
-     The [MASC_DISPATCH_V2] feature flag and the legacy match chain
-     it gated are gone; the Hashtbl dispatch path is the only path. *)
-
   (** Tool list page size, clamped to [10, 1024]. Default: 512.
       Re-readable within the process; not a guarantee of shell-level hot reload. *)
   let list_page_size () =
     let v = get_int ~default:512 "MASC_LIST_PAGE_SIZE" in
     max 10 (min 1024 v)
-
-  (** Extra public tools (comma-separated names). *)
-  let public_tools_extra_opt () =
-    Sys.getenv_opt "MASC_PUBLIC_TOOLS_EXTRA" |> trim_opt
 
   let web_search_provider_opt () =
     raw_value_opt "MASC_WEB_SEARCH_PROVIDER" |> trim_opt
@@ -281,8 +329,17 @@ module Tools = struct
     let v = get_int ~default:15 "MASC_WEB_SEARCH_TIMEOUT_SEC" in
     max 1 (min 60 v)
 
+  (* 15 min, matching the Hermes/OpenClaw web-tool cache window. The
+     previous 30 s default expired before a keeper research loop could
+     even repeat a query inside one turn. *)
+  let web_search_cache_ttl_default_sec = 900.0
+
   let web_search_cache_ttl_sec () =
-    let v = get_float ~default:30.0 "MASC_WEB_SEARCH_CACHE_TTL_SEC" in
+    let v =
+      get_float
+        ~default:web_search_cache_ttl_default_sec
+        "MASC_WEB_SEARCH_CACHE_TTL_SEC"
+    in
     if v < 0.0 then 0.0 else v
 
 end
@@ -313,17 +370,14 @@ module Worker = struct
   (** Local runtime cooldown (seconds). *)
   let local_runtime_cooldown_sec_opt () =
     Sys.getenv_opt "MASC_LOCAL_RUNTIME_COOLDOWN_SEC" |> trim_opt
-
-  (** Local worker heartbeat interval (seconds). Default: 60. *)
-  let local_worker_heartbeat_sec = max 1 (get_int ~default:60 "MASC_LOCAL_WORKER_HEARTBEAT_SEC")
 end
 
-(** {1 OAS SSE Bridge Configuration} *)
+(** {1 AGENT_CORE SSE Bridge Configuration} *)
 
-module Oas_sse = struct
+module Agent_core_sse = struct
   (** SSE drain interval (seconds). Default: 2.0. *)
   let drain_interval_sec =
-    let v = get_float ~default:2.0 "MASC_OAS_SSE_DRAIN_INTERVAL_SEC" in
+    let v = get_float ~default:2.0 "MASC_AGENT_CORE_SSE_DRAIN_INTERVAL_SEC" in
     if v < 0.1 then 2.0 else v
 end
 
@@ -533,7 +587,7 @@ module InternalTimers = struct
     get_float ~default:300.0 "MASC_STALLED_SESSION_THRESHOLD_SEC"
 
   (** Bootstrap janitor tick interval (seconds). Drives the SSE/session/
-      rate-limit/webrtc reaper loop in [server_bootstrap_loops]. Default:
+      rate-limit reaper loop in [server_bootstrap_loops]. Default:
       60 (1 min). Shorter interval reclaims stale connections faster at
       the cost of more wake-ups; longer interval is fine if the process
       is sized for the steady-state connection count. *)

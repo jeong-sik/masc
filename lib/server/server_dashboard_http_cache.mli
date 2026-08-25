@@ -16,21 +16,29 @@
     cache-key/TTL machinery with the per-surface attempt/success/
     error tracking. *)
 
-type cached_surface = {
-  mutable json : Yojson.Safe.t;
-  mutable last_success_at : string option;
-  mutable last_success_unix : float option;
-  mutable last_attempt_at : string option;
-  mutable last_attempt_unix : float option;
-  mutable last_error : string option;
-  mutable last_error_at : string option;
-  mutable last_error_unix : float option;
+type surface_snapshot = {
+  json : Yojson.Safe.t;
+  last_success_at : string option;
+  last_success_unix : float option;
+  last_attempt_at : string option;
+  last_attempt_unix : float option;
+  last_error : string option;
+  last_error_at : string option;
+  last_error_unix : float option;
 }
-(** Concrete record because dashboard tests mutate it directly
-    ({!Test_dashboard_namespace_truth}, {!Test_dashboard_execution})
-    via {!mark_cached_surface_success} / {!invalidate_cached_surface}.
-    The three timestamp triples are paired (ISO + Unix) so callers
-    do not have to re-format on every render. *)
+(** One consistent view of a surface. The three timestamp triples are paired
+    (ISO + Unix) so callers do not have to re-format on every render. *)
+
+type cached_surface = { mutable current : surface_snapshot }
+(** The cell that holds the current {!surface_snapshot}. Concrete because
+    dashboard tests construct and read surfaces directly
+    ({!Test_dashboard_namespace_truth}, {!Test_dashboard_http_core}).
+    Every mutator replaces the whole snapshot in one write, so a reader can
+    never observe a half-applied update. *)
+
+val snapshot : cached_surface -> surface_snapshot
+(** [snapshot s] reads the current view. Bind it once and read fields off the
+    result rather than re-reading [s] per field. *)
 
 val create_cached_surface : Yojson.Safe.t -> cached_surface
 (** [create_cached_surface json] returns a fresh surface seeded
@@ -57,6 +65,10 @@ val mark_cached_surface_error : cached_surface -> exn -> unit
     [Printexc.to_string exn] and the current time.  Does NOT
     touch [last_success_*] or [s.json] — the previous successful
     snapshot remains served until the next success refreshes it. *)
+
+val mark_cached_surface_error_message : cached_surface -> string -> unit
+(** Store an already-rendered boundary failure without recreating an exception
+    solely to transport its text. *)
 
 val invalidate_cached_surface : cached_surface -> unit
 (** [invalidate_cached_surface s] clears all six timestamps but
@@ -122,13 +134,6 @@ val upsert_assoc_field :
 
 (** {1 Projection-diagnostics builders} *)
 
-val attach_projection_diagnostics :
-  Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
-(** [attach_projection_diagnostics json diagnostics] prepends
-    [("projection_diagnostics", diagnostics)] to an [`Assoc]
-    payload, returning [json] unchanged for non-objects.  Used by
-    {!with_projection_diagnostics}. *)
-
 val extend_projection_diagnostics :
   Yojson.Safe.t -> (string * Yojson.Safe.t) list -> Yojson.Safe.t
 (** [extend_projection_diagnostics json extra_fields] merges
@@ -137,41 +142,3 @@ val extend_projection_diagnostics :
     overwritten by [extra_fields] (last-write-wins).  Used by
     {!cached_surface_json} to layer cache-state fields onto an
     existing diagnostic block. *)
-
-val projection_diagnostics_json :
-  surface:string ->
-  started_at:float ->
-  extra:(string * Yojson.Safe.t) list ->
-  Yojson.Safe.t ->
-  Yojson.Safe.t
-(** [projection_diagnostics_json ~surface ~started_at ~extra json]
-    builds the diagnostic [`Assoc] with [surface] / [build_ms]
-    (computed from [started_at]) / [payload_bytes] (computed from
-    [json] serialised length) / [generated_at] (current ISO time)
-    plus the caller-supplied [extra] fields.  Pure — does not
-    mutate any cached surface. *)
-
-val with_projection_diagnostics :
-  surface:string ->
-  started_at:float ->
-  extra:(string * Yojson.Safe.t) list ->
-  Yojson.Safe.t ->
-  Yojson.Safe.t
-(** [with_projection_diagnostics ~surface ~started_at ~extra json]
-    is {!projection_diagnostics_json} composed with
-    {!attach_projection_diagnostics}: returns [json] with the
-    diagnostic block prepended.  The convenience wrapper most
-    dashboard handlers use. *)
-
-val initialized_json_opt :
-  ?allow_initializing:bool -> Yojson.Safe.t -> Yojson.Safe.t option
-(** [initialized_json_opt ?allow_initializing json] returns
-    [Some json] when [json] is an [`Assoc] with no
-    [status: "initializing"] field (or when
-    [allow_initializing = true], even with that field).  Returns
-    [None] for non-objects or initializing payloads.
-
-    Used to defer rendering an "initializing" envelope while the
-    cache is still warming up.  [allow_initializing] defaults to
-    [false] — the safe choice for callers that want to surface
-    "no data yet" as a 404 rather than an empty card. *)

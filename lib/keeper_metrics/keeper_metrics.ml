@@ -21,6 +21,8 @@ type t =
   | TurnCompleted
   | FailureRoute
   | IdleSeconds
+  | InFlightElapsedSeconds
+  | SinceLastProgressSeconds
   | StreamProjectionEventCutoff
   | MetricEmitDropped
   | ContextMaxObserved
@@ -46,7 +48,6 @@ type t =
   | ToolUnderusedAllowedCount
   | ToolUnderusedAllowed
   | PathRejection
-  | IdeOrphanWrites
   | PathResolverIdentityMismatch
   | KeeperMetaOverlayDrift
   | HeartbeatSuccesses
@@ -61,7 +62,6 @@ type t =
   | ApprovalQueueFailures
   | ApprovalResolutionSignal
   | ProfileLoadFailures
-  | CompactAuditFailures
   | FsFailures
   | PersistencePreparationStageDuration
   | PersistencePreparationExamined
@@ -72,11 +72,12 @@ type t =
   | CrashPersistenceFailures
   | KeepaliveSignalFailures
   | BoardSignalRoutedTotal
+  | BoardSignalCursorDeferredTotal
   | BoardSignalDeliveryTotal
   | BoardSignalNoWakeTotal
   | BoardSignalAttentionCandidateTotal
   | MetaJsonFailures
-  | ToolsOasFailures
+  | ToolsAgent_coreFailures
   | TurnUpUpdateFailures
   | AgentToolDispatchRuntimeFailures
   | PromptFailures
@@ -96,16 +97,15 @@ type t =
   | UnexpectedToolPartialTolerance
   | ToolCallTotal
   | ProfileConfigConflicts
-  | OasTimeoutClassifications
+  | Agent_coreTimeoutClassifications
   | NoToolProvider
   | ProactiveOutcome
   | TaskLoadFailures
   | ToolSelectionFailures
   | ReconcileFailures
   | DecisionAuditFlushFailures
-  | OasCancel
+  | Agent_coreCancel
   | ClaimAutoProvision
-  | PersonaDriftMissing
   | WorkspaceInitFailures
   | PresenceSyncFailures
   | StaleStormPaused
@@ -115,7 +115,7 @@ type t =
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
   | TurnMetricsSnapshotFailures
-  | OasExecutionErrors
+  | Agent_coreExecutionErrors
   | MemoryOsLibrarianFailures
   | MemoryActivityEmitFailures
   | SupervisorSweepFailures
@@ -129,11 +129,12 @@ type t =
   | CheckpointFailures
   | DecisionAuditRingOverflows
   | HitlSummaryOutcomes
-  | OasEnvKeyRejections
+  | Agent_coreEnvKeyRejections
   | MemoryLaneUnitFailures
   | MemoryLaneSubmitted
   | MemoryLaneRanInline
   | MemoryLaneDropped
+  | MemoryLaneRejectedDraining
   | MemoryLaneCoalesced
   | MemoryLanePending
   | MemoryLaneInFlight
@@ -146,7 +147,7 @@ type t =
   | PersonNoteStoreFailures
   | KeeperMaterializationFailures
   | ObservationQueryFailures
-  | OasOnStop
+  | Agent_coreOnStop
   | InvariantViolations
   | FsmEdgeTransitions
   | TurnFsmTransitions
@@ -162,7 +163,7 @@ type t =
   | UnsupportedStimulus
   | RestartAttempts
   | RestartOutcomes
-  | OasRunTimeout
+  | Agent_coreRunTimeout
   | RuntimeSelected
   | RuntimeRotation
   | ToolUseFailure
@@ -200,10 +201,8 @@ type t =
   | RawTraceRetentionUnlinkFailed (* counter: unreachable raw-trace files that could not be deleted *)
   | WireCaptureResponseSuppressed (* counter: keeper-visible response suppressed before wire capture *)
   | WireCaptureWriteFailures    (* counter: wire-capture write raised an exception *)
-  | WireCaptureRecordSkipped    (* counter: wire-capture record dropped by current-file byte cap *)
-      (* counter: RFC-0320 W3c continuation delivery outcome; label=outcome_tag
-         (Delivered/Skipped_unrouted/Skipped_already_replied/Skipped_empty/Failed).
-         G5 observability — a dropped/unrouted continuation must never be silent. *)
+  | WireCaptureRecordSkipped    (* counter: wire-capture record dropped — rotation name space exhausted or append guard refused *)
+  | StreamTextDeltaDedup        (* counter: streamed text delta dropped as an exact retransmission or reconciled to a cumulative-snapshot suffix *)
 [@@deriving enumerate]
 
 (** String conversion
@@ -224,6 +223,8 @@ let to_string = function
   | TurnCompleted -> "masc_keeper_turn_completed_total"
   | FailureRoute -> "masc_keeper_failure_route_total"
   | IdleSeconds -> "masc_keeper_idle_seconds"
+  | InFlightElapsedSeconds -> "masc_keeper_in_flight_elapsed_seconds"
+  | SinceLastProgressSeconds -> "masc_keeper_since_last_progress_seconds"
   | StreamProjectionEventCutoff ->
     "masc_keeper_stream_projection_event_cutoff_total"
   | MetricEmitDropped -> "masc_keeper_metric_emit_dropped_total"
@@ -250,7 +251,6 @@ let to_string = function
   | ToolUnderusedAllowedCount -> "masc_keeper_tool_underused_allowed_count"
   | ToolUnderusedAllowed -> "masc_keeper_tool_underused_allowed"
   | PathRejection -> "masc_keeper_path_rejection_total"
-  | IdeOrphanWrites -> "masc_ide_orphan_writes_total"
   | PathResolverIdentityMismatch -> "masc_keeper_path_resolver_identity_mismatch_total"
   | KeeperMetaOverlayDrift -> "masc_keeper_meta_overlay_drift_total"
   | HeartbeatSuccesses -> "masc_keeper_heartbeat_successes_total"
@@ -265,7 +265,6 @@ let to_string = function
   | ApprovalQueueFailures -> "masc_keeper_approval_queue_failures_total"
   | ApprovalResolutionSignal -> "masc_keeper_approval_resolution_signal_total"
   | ProfileLoadFailures -> "masc_keeper_profile_load_failures_total"
-  | CompactAuditFailures -> "masc_keeper_compact_audit_failures_total"
   | FsFailures -> "masc_keeper_fs_failures_total"
   | PersistencePreparationStageDuration ->
     "masc_keeper_persistence_preparation_stage_duration_seconds"
@@ -278,12 +277,14 @@ let to_string = function
   | CrashPersistenceFailures -> "masc_keeper_crash_persistence_failures_total"
   | KeepaliveSignalFailures -> "masc_keeper_keepalive_signal_failures_total"
   | BoardSignalRoutedTotal -> "masc_keeper_board_signal_routed_total"
+  | BoardSignalCursorDeferredTotal ->
+    "masc_keeper_board_signal_cursor_deferred_total"
   | BoardSignalDeliveryTotal -> "masc_keeper_board_signal_delivery_total"
   | BoardSignalNoWakeTotal -> "masc_keeper_board_signal_no_wake_total"
   | BoardSignalAttentionCandidateTotal ->
     "masc_keeper_board_signal_attention_candidate_total"
   | MetaJsonFailures -> "masc_keeper_meta_json_failures_total"
-  | ToolsOasFailures -> "masc_keeper_tools_oas_failures_total"
+  | ToolsAgent_coreFailures -> "masc_keeper_tools_agent_core_failures_total"
   | TurnUpUpdateFailures -> "masc_keeper_turn_up_update_failures_total"
   | AgentToolDispatchRuntimeFailures -> "masc_keeper_tool_dispatch_runtime_failures_total"
   | PromptFailures -> "masc_keeper_prompt_failures_total"
@@ -304,16 +305,15 @@ let to_string = function
     "masc_keeper_unexpected_tool_partial_tolerance_total"
   | ToolCallTotal -> "masc_keeper_tool_call_total"
   | ProfileConfigConflicts -> "masc_keeper_profile_config_conflicts_total"
-  | OasTimeoutClassifications -> "masc_keeper_oas_timeout_classifications_total"
+  | Agent_coreTimeoutClassifications -> "masc_keeper_agent_core_timeout_classifications_total"
   | NoToolProvider -> "masc_keeper_no_tool_provider_total"
   | ProactiveOutcome -> "masc_keeper_proactive_outcome_total"
   | TaskLoadFailures -> "masc_keeper_task_load_failures_total"
   | ToolSelectionFailures -> "masc_keeper_tool_selection_failures_total"
   | ReconcileFailures -> "masc_keeper_reconcile_failures_total"
   | DecisionAuditFlushFailures -> "masc_keeper_decision_audit_flush_failures_total"
-  | OasCancel -> "masc_keeper_oas_cancel_total"
+  | Agent_coreCancel -> "masc_keeper_agent_core_cancel_total"
   | ClaimAutoProvision -> "masc_keeper_claim_auto_provision_total"
-  | PersonaDriftMissing -> "masc_keeper_persona_drift_missing_total"
   | WorkspaceInitFailures -> "masc_keeper_workspace_init_failures_total"
   | PresenceSyncFailures -> "masc_keeper_presence_sync_failures_total"
   | StaleStormPaused -> "masc_keeper_stale_storm_paused_total"
@@ -323,7 +323,7 @@ let to_string = function
   | SseBroadcastFailures -> "masc_keeper_sse_broadcast_failures_total"
   | WorkspaceHeartbeatFailures -> "masc_keeper_workspace_heartbeat_failures_total"
   | TurnMetricsSnapshotFailures -> "masc_keeper_turn_metrics_snapshot_failures_total"
-  | OasExecutionErrors -> "masc_keeper_oas_execution_errors_total"
+  | Agent_coreExecutionErrors -> "masc_keeper_agent_core_execution_errors_total"
   | MemoryOsLibrarianFailures -> "masc_keeper_memory_os_librarian_failures_total"
   | MemoryActivityEmitFailures -> "masc_keeper_memory_activity_emit_failures_total"
   | SupervisorSweepFailures -> "masc_keeper_supervisor_sweep_failures_total"
@@ -337,11 +337,13 @@ let to_string = function
   | CheckpointFailures -> "masc_keeper_checkpoint_failures_total"
   | DecisionAuditRingOverflows -> "masc_keeper_decision_audit_ring_overflows_total"
   | HitlSummaryOutcomes -> "masc_keeper_hitl_summary_outcomes_total"
-  | OasEnvKeyRejections -> "masc_keeper_oas_env_key_rejections_total"
+  | Agent_coreEnvKeyRejections -> "masc_keeper_agent_core_env_key_rejections_total"
   | MemoryLaneUnitFailures -> "masc_keeper_memory_lane_unit_failures_total"
   | MemoryLaneSubmitted -> "masc_keeper_memory_lane_submitted_total"
   | MemoryLaneRanInline -> "masc_keeper_memory_lane_ran_inline_total"
   | MemoryLaneDropped -> "masc_keeper_memory_lane_dropped_total"
+  | MemoryLaneRejectedDraining ->
+    "masc_keeper_memory_lane_rejected_draining_total"
   | MemoryLaneCoalesced -> "masc_keeper_memory_lane_coalesced_total"
   | MemoryLanePending -> "masc_keeper_memory_lane_pending"
   | MemoryLaneInFlight -> "masc_keeper_memory_lane_in_flight"
@@ -354,7 +356,7 @@ let to_string = function
   | PersonNoteStoreFailures -> "masc_keeper_person_note_store_failures_total"
   | KeeperMaterializationFailures -> "masc_keeper_materialization_failures_total"
   | ObservationQueryFailures -> "masc_keeper_observation_query_failures_total"
-  | OasOnStop -> "masc_keeper_oas_on_stop_total"
+  | Agent_coreOnStop -> "masc_keeper_agent_core_on_stop_total"
   | InvariantViolations -> "masc_keeper_invariant_violations_total"
   | FsmEdgeTransitions -> "masc_keeper_fsm_edge_transitions_total"
   | TurnFsmTransitions -> "masc_keeper_turn_fsm_transitions_total"
@@ -371,7 +373,7 @@ let to_string = function
   | UnsupportedStimulus -> "masc_keeper_unsupported_stimulus_total"
   | RestartAttempts -> "masc_keeper_restart_attempts_total"
   | RestartOutcomes -> "masc_keeper_restart_outcomes_total"
-  | OasRunTimeout -> "masc_keeper_oas_run_timeout_total"
+  | Agent_coreRunTimeout -> "masc_keeper_agent_core_run_timeout_total"
   | RuntimeSelected -> "masc_keeper_runtime_selected_total"
   | RuntimeRotation -> "masc_keeper_runtime_rotation_total"
   | ToolUseFailure -> "masc_keeper_tool_use_failure_total"
@@ -416,6 +418,7 @@ let to_string = function
     "masc_keeper_wire_capture_response_suppressed_total"
   | WireCaptureWriteFailures -> "masc_keeper_wire_capture_write_failures_total"
   | WireCaptureRecordSkipped -> "masc_keeper_wire_capture_record_skipped_total"
+  | StreamTextDeltaDedup -> "masc_keeper_stream_text_delta_dedup_total"
 ;;
 
 type collection =

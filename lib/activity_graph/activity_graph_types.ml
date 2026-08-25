@@ -69,7 +69,6 @@ type event = {
   seq : int;
   ts_ms : int;
   ts_iso : string;
-  workspace_id : string;
   kind : string;
   actor : entity_ref option;
   subject : entity_ref option;
@@ -83,7 +82,6 @@ type graph_node = {
   label : string;
   status : node_status;
   weight : int;
-  semantic_weight : float;
   last_event_at : string;
   meta : Yojson.Safe.t;
 }
@@ -284,7 +282,6 @@ let event_to_yojson (value : event) =
       ("seq", `Int value.seq);
       ("ts_ms", `Int value.ts_ms);
       ("ts_iso", `String value.ts_iso);
-      ("workspace_id", `String value.workspace_id);
       ("kind", `String value.kind);
       ( "actor",
         match value.actor with
@@ -306,14 +303,13 @@ let event_of_yojson (json : Yojson.Safe.t) : event option =
   match Safe_ops.json_int_opt "seq" json,
         Safe_ops.json_int_opt "ts_ms" json,
         Safe_ops.json_string_opt "ts_iso" json,
-        Safe_ops.json_string_opt "workspace_id" json,
         Safe_ops.json_string_opt "kind" json with
-  | Some seq, Some ts_ms, Some ts_iso, Some workspace_id, Some kind ->
+  | Some seq, Some ts_ms, Some ts_iso, Some kind ->
     let actor = Option.bind (Safe_ops.json_member_opt "actor" json) entity_of_yojson in
     let subject = Option.bind (Safe_ops.json_member_opt "subject" json) entity_of_yojson in
     let payload = Safe_ops.json_member_opt "payload" json |> Option.value ~default:(`Assoc []) in
     let tags = Safe_ops.json_string_list "tags" json in
-    Some { seq; ts_ms; ts_iso; workspace_id; kind; actor; subject; payload; tags }
+    Some { seq; ts_ms; ts_iso; kind; actor; subject; payload; tags }
   | _ -> None
 
 let graph_node_to_yojson (value : graph_node) =
@@ -324,7 +320,6 @@ let graph_node_to_yojson (value : graph_node) =
       ("label", `String value.label);
       ("status", `String (node_status_to_string value.status));
       ("weight", `Int value.weight);
-      ("semantic_weight", `Float value.semantic_weight);
       ("last_event_at", `String value.last_event_at);
       ("meta", value.meta);
     ]

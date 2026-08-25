@@ -1,5 +1,5 @@
 // Keeper Eval Quality Panel — RFC-MASC-005 Phase 3
-// Displays OAS eval verdicts: coverage bar, layer results, 24h trend.
+// Displays Agent Core eval verdicts: coverage bar, layer results, 24h trend.
 // Data source: GET /api/v1/keepers/:name/eval (Phase 2 API)
 
 import { html } from 'htm/preact'
@@ -171,7 +171,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
     return html`
       <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-panel">
         <div class="text-3xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)] mb-2">평가 품질</div>
-        <div class="text-2xs text-[var(--color-fg-disabled)]">eval 결과 없음. OAS harness가 verdict를 생성하면 여기에 표시됩니다.</div>
+        <div class="text-2xs text-[var(--color-fg-disabled)]">eval 결과 없음. Agent Core harness가 verdict를 생성하면 여기에 표시됩니다.</div>
       </div>
     `
   }

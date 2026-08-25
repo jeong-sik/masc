@@ -1,0 +1,26 @@
+name = "masc_runtime_verify"
+description = """
+Admin-only contract probe for the optional typed local OpenAI-compatible \
+runtime pool used for local benchmarks. It issues one real chat completion \
+per selected endpoint and may load models or change warm/cache state, so it \
+is not read-only or idempotent. An explicit runtime_pool that matches no \
+endpoint fails closed. Returns reachability, chat-completions contract \
+status, model match, slots, ctx, configured capacity, active slots, and \
+local blocker codes. Missing local discovery does not assess or block \
+official-client, CLI, or remote Keeper provider lanes."""
+
+[[params]]
+name = "runtime_pool"
+type = "string"
+
+[[params]]
+name = "expected_model"
+type = "string"
+
+[[params]]
+name = "expected_slots"
+type = "integer"
+
+[[params]]
+name = "expected_ctx"
+type = "integer"

@@ -178,16 +178,6 @@ let run_curl_get ~port ~path () =
   let (status, _headers) = parse_headers header_raw in
   { status; body; curl_exit; stderr }
 
-let contains_substr needle haystack =
-  let n = String.length needle in
-  let h = String.length haystack in
-  let rec loop i =
-    if i + n > h then false
-    else if String.sub haystack i n = needle then true
-    else loop (i + 1)
-  in
-  n = 0 || loop 0
-
 let find_free_port () =
   let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Fun.protect
@@ -210,7 +200,8 @@ let wait_for_health ~port ~timeout_s =
     else
       let res = run_curl_get ~port ~path:"/health" () in
       match res.status with
-      | Some 200 when contains_substr "\"state_ready\":true" res.body -> true
+      | Some 200
+        when String_util.contains_substring res.body "\"state_ready\":true" -> true
       | _ ->
           Unix.sleepf 0.1;
           loop ()
@@ -337,7 +328,6 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
   let base_path = Filename.temp_dir "operator-mcp-base-" "" in
   let project_root = Masc_test_deps.find_project_root () in
   let config_dir = Filename.concat project_root "config" in
-  let personas_dir = Filename.concat config_dir "personas" in
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Masc.Workspace.default_config base_path in
@@ -365,10 +355,10 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
   Mirage_crypto_rng_unix.use_default ();
   let supervisor_token, planner_token, implementer_a_token, implementer_b_token =
     if enable_auth then begin
-      ignore (Masc.Auth.enable_auth config.base_path ~require_token:true ~agent_name:"test-supervisor");
+      ignore (Auth.enable_auth config.base_path ~require_token:true ~agent_name:"test-supervisor");
       let supervisor_token =
         match
-          Masc.Auth.create_token config.base_path ~agent_name:supervisor_nickname
+          Auth.create_token config.base_path ~agent_name:supervisor_nickname
             ~role:Masc_domain.Admin
         with
         | Ok (token, _cred) -> token
@@ -379,7 +369,7 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
       in
       let create_worker_token agent_name =
         match
-          Masc.Auth.create_token config.base_path ~agent_name
+          Auth.create_token config.base_path ~agent_name
             ~role:Masc_domain.Worker
         with
         | Ok (token, _cred) -> token
@@ -393,7 +383,7 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
         create_worker_token implementer_a_nickname,
         create_worker_token implementer_b_nickname )
     end else
-      (Masc.Auth.save_auth_config config.base_path
+      (Auth.save_auth_config config.base_path
          { Masc_domain.default_auth_config with enabled = false; require_token = false };
       ("", "", "", "")
       )
@@ -402,14 +392,13 @@ let with_server ?(host = "127.0.0.1") ?(enable_auth = true) f =
     Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
   in
   let env =
-    merge_env_overrides ~remove:[ "OAS_MODEL_CATALOG" ]
+    merge_env_overrides ~remove:[ "AGENT_CORE_MODEL_CATALOG" ]
       [
-        ("MASC_AUTONOMY_ENABLED", "0");
+        ("MASC_KEEPER_AUTONOMOUS_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
         ("MASC_HOST", host);
         ("MASC_CONFIG_DIR", config_dir);
-        ("MASC_PERSONAS_DIR", personas_dir);
       ]
   in
   let argv =
@@ -455,7 +444,9 @@ let test_mcp_requires_auth_when_bound_non_loopback () =
     match (result.status, retries_left) with
     | Some 503, retries
       when retries > 0
-           && contains_substr "Server is starting up, not ready yet" result.body ->
+           && String_util.contains_substring
+                result.body
+                "Server is starting up, not ready yet" ->
         Unix.sleepf 0.5;
         call_until_ready (retries - 1)
     | _ -> result
@@ -463,8 +454,9 @@ let test_mcp_requires_auth_when_bound_non_loopback () =
   let result = call_until_ready 40 in
   Alcotest.(check (option int)) "returns unauthorized" (Some 401) result.status;
   check bool "strict auth message" true
-    (contains_substr "requires workspace auth enabled with require_token=true"
-       result.body)
+    (String_util.contains_substring
+       result.body
+       "requires workspace auth enabled with require_token=true")
 
 let test_agent_json_route_served_on_canonical_path () =
   with_server ~enable_auth:false

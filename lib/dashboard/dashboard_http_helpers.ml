@@ -3,45 +3,19 @@
     Extracted from server_dashboard_http.ml for sub-module reuse. *)
 
 
-let bool_default_true_of_env name =
-  match Sys.getenv_opt name with
-  | None -> true
-  | Some v ->
-      let v = v |> String.trim |> String.lowercase_ascii in
-      not (v = "0" || v = "false" || v = "no" || v = "n")
+(* Delegations to the canonical Env_config_core readers (RFC-0371 B7):
+   this module used to carry raw getenv + parse + clamp copies of them. *)
+let bool_default_true_of_env name = Env_config_core.get_bool ~default:true name
 
 let int_of_env_default name ~default ~min_v ~max_v =
-  let v =
-    match Sys.getenv_opt name with
-    | None -> default
-    | Some s ->
-        (Option.value ~default:default (int_of_string_opt (String.trim s)))
-  in
-  max min_v (min max_v v)
+  Env_config_core.get_int_clamped ~default ~min_v ~max_v name
 
 let float_of_env_default name ~default ~min_v ~max_v =
-  let v =
-    match Sys.getenv_opt name with
-    | None -> default
-    | Some s ->
-        Option.value ~default (float_of_string_opt (String.trim s))
-  in
-  max min_v (min max_v v)
+  Env_config_core.get_float_clamped ~default ~min_v ~max_v name
 
 let operator_snapshot_recent_completed_limit () =
   int_of_env_default "MASC_OPERATOR_SNAPSHOT_RECENT_COMPLETED_LIMIT"
     ~default:5 ~min_v:1 ~max_v:50
-
-let bool_of_tag_value (raw : string) : bool =
-  let v = String.trim raw |> String.lowercase_ascii in
-  v = "1" || v = "true" || v = "yes" || v = "y" || v = "on"
-
-let safe_age_seconds_opt ~(now_ts : float) ~(event_ts : float) : int option =
-  let delta = now_ts -. event_ts in
-  if Float.is_nan delta || Float.is_infinite delta then None
-  else
-    let bounded = max 0.0 (min delta (float_of_int max_int)) in
-    Some (int_of_float bounded)
 
 let safe_member = Safe_ops.safe_member
 
@@ -97,5 +71,5 @@ let count_where items predicate =
     identical forks. *)
 let normalize_text raw =
   raw |> String.trim |> String.split_on_char '\n'
-  |> List.filter_map String_util.trim_to_option
+  |> List.filter_map String_util.trim_nonempty
   |> String.concat " " |> String.trim

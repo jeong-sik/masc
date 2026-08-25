@@ -8,15 +8,6 @@ let source_root () =
 let script_path () =
   Filename.concat (source_root ()) "scripts/pr-open.sh"
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    idx + nlen <= hlen
-    && (String.sub haystack idx nlen = needle || loop (idx + 1))
-  in
-  nlen = 0 || loop 0
-
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
@@ -238,11 +229,14 @@ let init_repo_with_remote dir =
 let test_source_avoids_mapfile_only_bash4_features () =
   let content = read_file (script_path ()) in
   check bool "script no longer uses mapfile" false
-    (contains_substring content "mapfile ");
+    (String_util.contains_substring content "mapfile ");
   check bool "script no longer uses readarray" false
-    (contains_substring content "readarray ");
-  check bool "script has bash-compatible changed file loader" true
-    (contains_substring content "load_changed_files()")
+    (String_util.contains_substring content "readarray ")
+(* load_changed_files() was the third check: the bash-3 replacement for the
+   mapfile call this test removed. The script does not read changed files any
+   more, so asking for the replacement by name asks a deleted function to
+   still be there. What the check is for -- no bash-4-only builtins -- is the
+   two above it. *)
 
 let test_script_runs_under_system_bash_without_watch () =
   with_temp_dir "pr-open-script" (fun dir ->
@@ -278,27 +272,29 @@ let test_script_runs_under_system_bash_without_watch () =
       if code <> 0 then
         failf "pr-open failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
       check bool "prints PR url" true
-        (contains_substring stdout "PR: https://github.com/example/test/pull/42");
+        (String_util.contains_substring stdout "PR: https://github.com/example/test/pull/42");
       check bool "does not mention mapfile failure" false
-        (contains_substring stderr "mapfile: command not found");
+        (String_util.contains_substring stderr "mapfile: command not found");
       let log = read_file gh_log in
-      check bool "creates draft PR" true (contains_substring log "pr create");
+      check bool "creates draft PR" true (String_util.contains_substring log "pr create");
       check bool "does not create legacy failing status" false
-        (contains_substring log "api repos/example/test/statuses/abc123");
+        (String_util.contains_substring log "api repos/example/test/statuses/abc123");
       check bool "skips watched checks with --no-watch" false
-        (contains_substring log "pr checks");
+        (String_util.contains_substring log "pr checks");
       check bool "syncs commit lineage" true
-        (contains_substring log "pr edit");
+        (String_util.contains_substring log "pr edit");
       let synced_body = read_file (gh_labels ^ ".body") in
       check bool "writes commit lineage marker" true
-        (contains_substring synced_body "<!-- COMMIT-LINEAGE:START -->");
+        (String_util.contains_substring synced_body "<!-- COMMIT-LINEAGE:START -->");
       check bool "writes commit lineage commit subject" true
-        (contains_substring synced_body "feature commit");
-      let labels = read_file gh_labels in
-      check bool "adds enhancement label for code changes" true
-        (contains_substring labels "\"enhancement\"");
-      check bool "does not add docs label for code-only change" false
-        (contains_substring labels "\"docs\""))
+        (String_util.contains_substring synced_body "feature commit");
+      (* The label assertions were here. They read a file the fake gh writes
+         only when the script calls the labels endpoint, and the script calls
+         it only for labels passed on the command line: #29309 replaced the
+         labels this script used to derive from the changed files with a
+         declarative taxonomy. The derivation is gone, so is the loader that
+         fed it, and so is what these two checked. *)
+      ())
 
 let test_script_restores_draft_when_create_returns_ready () =
   with_temp_dir "pr-open-script-draft-restore" (fun dir ->
@@ -336,11 +332,11 @@ let test_script_restores_draft_when_create_returns_ready () =
         failf "pr-open failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
       let log = read_file gh_log in
       check bool "restores draft state" true
-        (contains_substring log "pr ready");
+        (String_util.contains_substring log "pr ready");
       check bool "reports restoration" true
-        (contains_substring stderr "restoring draft state");
+        (String_util.contains_substring stderr "restoring draft state");
       check bool "prints PR url" true
-        (contains_substring stdout "PR: https://github.com/example/test/pull/42"))
+        (String_util.contains_substring stdout "PR: https://github.com/example/test/pull/42"))
 
 let test_script_prints_final_status_after_watch () =
   with_temp_dir "pr-open-script-watch-status" (fun dir ->
@@ -376,13 +372,13 @@ let test_script_prints_final_status_after_watch () =
       if code <> 0 then
         failf "pr-open failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
       check bool "runs watched checks" true
-        (contains_substring (read_file gh_log) "pr checks");
+        (String_util.contains_substring (read_file gh_log) "pr checks");
       check bool "prints final status heading" true
-        (contains_substring stdout "PR status:");
+        (String_util.contains_substring stdout "PR status:");
       check bool "prints final draft state" true
-        (contains_substring stdout "draft=true");
+        (String_util.contains_substring stdout "draft=true");
       check bool "prints final merge state" true
-        (contains_substring stdout "mergeState=CLEAN"))
+        (String_util.contains_substring stdout "mergeState=CLEAN"))
 
 let test_script_rejects_body_missing_required_sections () =
   with_temp_dir "pr-open-script-missing-sections" (fun dir ->
@@ -418,13 +414,13 @@ let test_script_rejects_body_missing_required_sections () =
       check bool "command fails" true (code <> 0);
       check bool "stdout empty" true (String.trim stdout = "");
       check bool "mentions hygiene failure" true
-        (contains_substring stderr "body file is missing required PR hygiene sections:");
+        (String_util.contains_substring stderr "body file is missing required PR hygiene sections:");
       check bool "mentions product impact heading" true
-        (contains_substring stderr "## Product impact");
+        (String_util.contains_substring stderr "## Product impact");
       check bool "mentions direct evidence heading" true
-        (contains_substring stderr "## Direct evidence");
+        (String_util.contains_substring stderr "## Direct evidence");
       check bool "mentions linked issue heading" true
-        (contains_substring stderr "## Linked issue");
+        (String_util.contains_substring stderr "## Linked issue");
       check bool "gh never invoked before validation" false
         (Sys.file_exists gh_log))
 
@@ -475,10 +471,10 @@ let test_script_rejects_body_missing_direct_evidence_schema () =
       check bool "command fails" true (code <> 0);
       check bool "stdout empty" true (String.trim stdout = "");
       check bool "mentions direct evidence schema failure" true
-        (contains_substring stderr
+        (String_util.contains_substring stderr
            "body file is missing required Direct evidence schema fields:");
       check bool "mentions direct_ratio" true
-        (contains_substring stderr "direct_ratio");
+        (String_util.contains_substring stderr "direct_ratio");
       check bool "gh never invoked before direct evidence validation" false
         (Sys.file_exists gh_log))
 
@@ -518,9 +514,9 @@ let test_script_rejects_staged_changes_before_push () =
       check bool "command fails" true (code <> 0);
       check bool "stdout empty" true (String.trim stdout = "");
       check bool "mentions staged changes" true
-        (contains_substring stderr "staged changes detected");
+        (String_util.contains_substring stderr "staged changes detected");
       check bool "mentions staged path" true
-        (contains_substring stderr "lib/staged.ml");
+        (String_util.contains_substring stderr "lib/staged.ml");
       check bool "gh never invoked before staged validation" false
         (Sys.file_exists gh_log))
 

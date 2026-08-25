@@ -1,32 +1,9 @@
-(** Operator-snapshot HTTP handler, extracted from
-    [server_dashboard_http_core.ml] (godfile decomp).
+(** Authoritative operator-snapshot HTTP projection.
 
-    [operator_snapshot_http_json] is the GET handler backing the
-    operator dashboard's snapshot surface. Two paths:
-
-    1. **Default summary request** (no actor, no include_messages
-       override, no include_keepers override; view omitted or
-       "summary") — serves the generation-guarded operator snapshot
-       surface with a 5s SWR window. Failures fall back through to a
-       fresh compute under `Offloaded_readonly` mode.
-
-    2. **Parameterized request** — on-demand compute with 5s SWR
-       cache. Cache key is the colon-delimited concatenation of
-       `actor | view | include_messages | include_keepers |
-       lightweight_summary` so distinct query shapes are cached
-       independently. The compute closure runs
-       `Operator_control.snapshot_json` inside `run_dashboard_compute`
-       (mode chosen by `lightweight_summary`: `Inline_shared` when
-       lightweight, `Offloaded_readonly` otherwise) and decorates with
-       `with_projection_diagnostics ~surface:"operator_snapshot"`.
-
-    Timeout failures surface as `{error:"timeout", message:"Operator
-    snapshot timed out after 30s", generated_at}` JSON.
-
-    Pairs with `Server_dashboard_http_core_operator_digest_http`
-    (#17389) for symmetric snapshot+digest handler extraction. *)
-
-let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
+    The default summary reads the current publication while it is fresh. A
+    stale publication is synchronously recomputed and replaced before the
+    response is returned. Parameterized requests are computed directly. Store
+    or projection failures therefore cannot return an earlier approval row. *)
 
 open Server_utils
 open Server_auth
@@ -42,7 +19,7 @@ module Core_operator_query = Server_dashboard_http_core_operator_query
    loop siblings (#17358/#17384) and the digest handler sibling (#17389). *)
 open Server_dashboard_http_runtime_support
 
-let operator_snapshot_http_json ~state ~sw ~clock request =
+let operator_snapshot_http_json ~state ~sw ~clock ~broadcast_snapshot request =
   let workspace_scope = Mcp_server.workspace_scope state in
   let config = workspace_scope.config in
   let proc_mgr = state.Mcp_server.proc_mgr in
@@ -60,13 +37,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
     | None -> true
     | Some raw -> String.equal (String.lowercase_ascii (String.trim raw)) "summary"
   in
-  let default_cache_key generation =
-    Core_cache.dashboard_cache_key
-      config
-      "operator_snapshot"
-      (Printf.sprintf "default-summary:g%d" generation)
-  in
-  let compute_default_summary ~generation =
+  let compute_default_summary () =
     let started_at = Unix.gettimeofday () in
     Core_runtime.run_dashboard_compute
       ~mode:Offloaded_readonly
@@ -101,7 +72,6 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
          ~extra:(Core_operator.operator_snapshot_extra ())
     |> Core_operator_query.with_operator_snapshot_metadata
          ~config
-         ~cache_key:(default_cache_key generation)
          ~query:(Core_operator_query.operator_snapshot_default_query ())
   in
   if default_summary_request
@@ -117,56 +87,26 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
     if is_fresh
     then attach current
     else (
-      let cache_key = default_cache_key current.generation in
-      let compute_and_publish () =
-        let compute = Core_operator.begin_operator_snapshot_compute () in
-        try
-          let json = compute_default_summary ~generation:compute.generation in
-          ignore
-            (Core_operator.publish_operator_snapshot_if_current
-               ~compute
-               json
-             : Core_operator.operator_snapshot_publication option);
-          json
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-          (match
-             Core_operator.mark_operator_snapshot_error_if_current
-               ~compute
-               exn
-           with
-           | None -> ()
-           | Some publication ->
-             !Core_operator.operator_snapshot_broadcast_ref publication);
-          raise exn
-      in
-      let refresh_cache_key =
-        if current.has_success
-        then
-          Printf.sprintf
-            "%s:publication:%s:g%d:c%d"
-            cache_key
-            current.epoch
-            current.generation
-            current.compute_sequence
-        else cache_key
-      in
-      if current.has_success
-      then
-        Dashboard_cache.seed_stale_if_missing
-          refresh_cache_key
-          ~stale_for:standard_cache_ttl_s
-          current.json;
-      ignore
-        (Dashboard_cache.get_or_compute_with_timeout
-           refresh_cache_key
-           ~ttl:standard_cache_ttl_s
-           ~clock
-           ~timeout_sec:Core_cache.dashboard_request_timeout_s
-           compute_and_publish
-         : Yojson.Safe.t);
-      Core_operator.operator_snapshot_publication () |> attach))
+      let compute = Core_operator.begin_operator_snapshot_compute () in
+      try
+        let json = compute_default_summary () in
+        let publication =
+          match Core_operator.publish_operator_snapshot_if_current ~compute json with
+          | Some publication -> publication
+          | None -> Core_operator.operator_snapshot_publication ()
+        in
+        attach publication
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        let publication =
+          match Core_operator.mark_operator_snapshot_error_if_current ~compute exn with
+          | Some publication ->
+            broadcast_snapshot publication;
+            publication
+          | None -> Core_operator.operator_snapshot_publication ()
+        in
+        attach publication))
   else (
     let started_at = Unix.gettimeofday () in
     let include_messages =
@@ -183,22 +123,6 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
       match view with
       | Some raw -> String.equal (String.lowercase_ascii (String.trim raw)) "summary"
       | None -> false
-    in
-    let optional_cache_key_part = function
-      | None -> "n"
-      | Some value -> Printf.sprintf "s%d:%s" (String.length value) value
-    in
-    let cache_key =
-      Core_cache.dashboard_cache_key
-        config
-        "operator_snapshot"
-        (Printf.sprintf
-           "param:%s|%s|%b|%b|%b"
-           (optional_cache_key_part actor)
-           (optional_cache_key_part view)
-           include_messages
-           include_keepers
-           lightweight_summary)
     in
     let query =
       Core_operator_query.operator_snapshot_query_json
@@ -256,20 +180,6 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
          ; "generated_at", `String (Masc_domain.now_iso ())
          ]
     in
-    (* Tier-A perf: parameterized [/api/v1/dashboard/operator/snapshot]
-       requests previously bypassed the cache entirely — every keeper
-       filter / actor view triggered a fresh [run_dashboard_compute]
-       with a 30s timeout.  Under multi-tab dashboard load this was
-       the single largest dashboard-side compute fan-out.  Wrap with
-       a 5s SWR cache keyed on the full parameter tuple so rapid
-       polling (Bond-Web 3s default) hits the cache; mutations
-       continue to invalidate via the existing
-       [Workspace_hooks.on_task_mutation_fn] path. *)
-    Dashboard_cache.get_or_compute_with_timeout
-      cache_key
-      ~ttl:standard_cache_ttl_s
-      ~clock
-      ~timeout_sec:Core_cache.dashboard_request_timeout_s
-      compute
-    |> Core_operator_query.with_operator_snapshot_metadata ~config ~cache_key ~query)
+    compute ()
+    |> Core_operator_query.with_operator_snapshot_metadata ~config ~query)
 ;;

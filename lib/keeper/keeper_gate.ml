@@ -10,7 +10,6 @@ type request =
   ; base_path : string
   ; causal_context : causal_context option
   ; task_id : string option
-  ; goal_ids : string list
   ; continuation_channel : Keeper_continuation_channel.t option
   }
 
@@ -20,7 +19,10 @@ type authorization_source =
   | Keeper_always_allow
   | Workspace_always_allow
 
-type authorization = { source : authorization_source }
+type authorization =
+  { source : authorization_source
+  ; audit_receipts : Keeper_approval.Audit.receipt list
+  }
 
 type deferred_reason =
   | Human_requested
@@ -38,6 +40,7 @@ type decision =
   | Deferred of
       { approval_id : string
       ; reason : deferred_reason
+      ; audit_receipts : Keeper_approval.Audit.receipt list
       }
   | Unavailable of unavailable_reason
 
@@ -157,7 +160,7 @@ type cycle_grant_state =
 type cycle_grant = cycle_grant_state Atomic.t
 
 type cycle_grant_take_result =
-  | Cycle_grant_authorized of string
+  | Cycle_grant_authorized of string * Keeper_approval.Audit.receipt
   | Cycle_grant_not_applicable
   | Cycle_grant_temporarily_unavailable of string * unavailable_reason
 
@@ -167,7 +170,7 @@ let cycle_grant_of_resolution (resolution : Keeper_event_queue.hitl_resolution) 
     Some
       (Atomic.make
          (Cycle_grant_available { approval_id = resolution.approval_id }))
-  | Keeper_event_queue.Hitl_rejected _ | Keeper_event_queue.Hitl_edited _ -> None
+  | Keeper_event_queue.Hitl_rejected _ -> None
 ;;
 
 let rec take_matching_cycle_grant grant request =
@@ -199,9 +202,9 @@ let rec take_matching_cycle_grant grant request =
       | Ok Keeper_approval_queue.Consumption_already_committed ->
         Atomic.set grant Cycle_grant_consumed;
         Cycle_grant_not_applicable
-      | Ok Keeper_approval_queue.Consumption_committed ->
+      | Ok (Keeper_approval_queue.Consumption_committed audit_receipt) ->
         Atomic.set grant Cycle_grant_consumed;
-        Cycle_grant_authorized entry.approval_id)
+        Cycle_grant_authorized (entry.approval_id, audit_receipt))
     else take_matching_cycle_grant grant request
 ;;
 
@@ -216,11 +219,11 @@ let deferred_reason_to_string = function
   | Human_requested -> "human_requested"
   | Judge_requested -> "judge_requested"
   | Auto_judge_unavailable _ ->
-    Keeper_approval_queue.summary_attempt_pre_worker_unavailable_code_to_string
-      Keeper_approval_queue.Summary_pre_worker_auto_judge_unavailable
+    Keeper_approval_queue_rules_types.summary_attempt_pre_worker_unavailable_code_to_string
+      Keeper_approval_queue_rules_types.Summary_pre_worker_auto_judge_unavailable
   | Mode_state_invalid _ ->
-    Keeper_approval_queue.summary_attempt_pre_worker_unavailable_code_to_string
-      Keeper_approval_queue.Summary_pre_worker_mode_state_invalid
+    Keeper_approval_queue_rules_types.summary_attempt_pre_worker_unavailable_code_to_string
+      Keeper_approval_queue_rules_types.Summary_pre_worker_mode_state_invalid
 ;;
 
 let unavailable_reason_to_string = function
@@ -251,10 +254,75 @@ let request_turn_id request =
   Option.bind request.causal_context (fun context -> context.turn_id)
 ;;
 
+let audit_receipts_to_yojson receipts =
+  `List (List.map Keeper_approval.Audit.receipt_to_yojson receipts)
+;;
+
+let approval_sse_audit_event = "approval:audit"
+
+let authorization_subject_id = function
+  | One_shot_resolution approval_id -> Some approval_id
+  | Exact_always_rule rule_id -> Some rule_id
+  | Keeper_always_allow | Workspace_always_allow -> None
+;;
+
+(* Authorization is already committed when these receipts exist.  A failed
+   audit append therefore cannot turn [Allow] into an error or invite the tool
+   caller to retry the external effect.  Publish only the failed receipts as
+   observation; the append boundary has already recorded the same failure in
+   logs and metrics if no Dashboard SSE client is connected. *)
+let broadcast_failed_authorization_audits ~keeper_name ~source receipts =
+  let id = authorization_subject_id source in
+  List.iter
+    (fun (receipt : Keeper_approval.Audit.receipt) ->
+       match receipt.write_result with
+       | Ok () -> ()
+       | Error _ ->
+         (try
+            Sse.broadcast
+              (`Assoc
+                  [ "type", `String approval_sse_audit_event
+                  ; ( "payload"
+                    , `Assoc
+                        [ "id", Json_util.string_opt_to_json id
+                        ; "audit", Keeper_approval.Audit.receipt_to_yojson receipt
+                        ] )
+                  ])
+          with
+          | Eio.Cancel.Cancelled _ as exn ->
+            (* Authorization is already committed.  This observation lane must
+               not turn cancellation into a lost [Allow] or consume a one-shot
+               grant without giving the caller its authorization. *)
+            Log.Keeper.warn
+              ~keeper_name
+              "approval audit failure SSE publish cancelled event=%s err=%s"
+              (Keeper_approval.Audit.event_to_string receipt.event_type)
+              (Printexc.to_string exn)
+          | exn ->
+            Log.Keeper.warn
+              ~keeper_name
+              "approval audit failure SSE publish failed event=%s err=%s"
+              (Keeper_approval.Audit.event_to_string receipt.event_type)
+              (Printexc.to_string exn)))
+    receipts
+;;
+
+let allow request source audit_receipts =
+  broadcast_failed_authorization_audits
+    ~keeper_name:request.keeper_name
+    ~source
+    audit_receipts;
+  Allow { source; audit_receipts }
+;;
+
 let decision_to_yojson = function
   | Allow authorization ->
-    `Assoc ([ "decision", `String "allow" ] @ source_fields authorization.source)
-  | Deferred { approval_id; reason } ->
+    `Assoc
+      ([ "decision", `String "allow"
+       ; "audit_receipts", audit_receipts_to_yojson authorization.audit_receipts
+       ]
+       @ source_fields authorization.source)
+  | Deferred { approval_id; reason; audit_receipts } ->
     let detail =
       match reason with
       | Mode_state_invalid detail -> [ "mode_read_error", `String detail ]
@@ -266,6 +334,16 @@ let decision_to_yojson = function
       ([ "decision", `String "deferred"
        ; "approval_id", `String approval_id
        ; "reason", `String (deferred_reason_to_string reason)
+       (* RFC-0356 host replay, stated where the model reads it: without
+          this line the payload reads as a plain block and the model
+          resubmits the same call while the approval is in flight —
+          measured as three duplicate approvals in #28866. *)
+       ; ( "on_approve"
+         , `String
+             "The host replays this exact call and delivers its output to \
+              you automatically. Do not resubmit it; a resubmission folds \
+              onto this same approval." )
+       ; "audit_receipts", audit_receipts_to_yojson audit_receipts
        ]
        @ detail)
   | Unavailable reason ->
@@ -275,10 +353,38 @@ let decision_to_yojson = function
       ]
 ;;
 
+let authorization_metadata ?producer_metadata authorization =
+  let fields =
+    [ "gate", decision_to_yojson (Allow authorization) ]
+  in
+  `Assoc
+    (fields
+     @ Option.fold
+         ~none:[]
+         ~some:(fun metadata -> [ "producer", metadata ])
+         producer_metadata)
+;;
+
+(* The Gate's own [authorization_source] carries the identifier it resolved
+   with; the audit event already records that identifier in its own fields, so
+   what it is missing is the tag. Map to the payload-free contract variant
+   rather than a string, so a new Gate authority cannot reach the audit log
+   without this match being updated. *)
+let audit_authorization_source
+  : authorization_source -> Keeper_approval_queue_rules_types.authorization_source
+  = function
+  | One_shot_resolution _ -> Keeper_approval_queue_rules_types.One_shot_resolution
+  | Exact_always_rule _ -> Keeper_approval_queue_rules_types.Exact_always_rule
+  | Keeper_always_allow -> Keeper_approval_queue_rules_types.Keeper_always_allow
+  | Workspace_always_allow ->
+    Keeper_approval_queue_rules_types.Workspace_always_allow
+;;
+
 let audit_allow request ?rule_match ?source_approval_id ?decision_source source =
-  Keeper_approval_queue.audit_approval_event
+  Keeper_approval.Audit.record
     ~base_path:request.base_path
-    ~event_type:"gate_allowed"
+    ~event_type:Keeper_approval.Audit.Gate_allowed
+    ~authorization_source:(audit_authorization_source source)
     ~id:
       (match source with
        | One_shot_resolution approval_id -> approval_id
@@ -289,7 +395,6 @@ let audit_allow request ?rule_match ?source_approval_id ?decision_source source 
     ~tool_name:request.operation
     ?turn_id:(request_turn_id request)
     ?task_id:request.task_id
-    ~goal_ids:request.goal_ids
     ?rule_match
     ?source_approval_id
     ?decision_source
@@ -305,7 +410,6 @@ let submit request =
     ?turn_id:(request_turn_id request)
     ?request_context:(Option.map (fun context -> context.snapshot) request.causal_context)
     ?task_id:request.task_id
-    ~goal_ids:request.goal_ids
     ?continuation_channel:request.continuation_channel
     ()
 ;;
@@ -318,40 +422,18 @@ let log_auto_resolution_error ~keeper_name ~approval_id reason =
     reason
 ;;
 
-let log_summary_state_error ~keeper_name ~approval_id ~operation error =
-  let detail = Keeper_approval_queue.summary_transition_error_to_string error in
-  Log.Keeper.error
-    ~keeper_name
-    "auto judge summary transition rejected operation=%s approval=%s: %s"
-    operation
-    approval_id
-    detail;
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string ApprovalQueueFailures)
-    ~labels:[ "keeper", keeper_name; "site", "auto_judge_summary_transition" ]
-    ()
-;;
-
-let log_summary_transition_miss ~keeper_name ~approval_id ~operation =
-  Log.Keeper.warn
-    ~keeper_name
-    "auto judge summary state not changed operation=%s approval=%s"
-    operation
-    approval_id
-;;
-
 type judgment_finalize_outcome =
   | Judgment_finalized
   | Judgment_skipped
 
-let resolve_judgment (entry : Keeper_approval_queue.pending_approval) ~approval_id
-      (summary : Keeper_approval_queue.hitl_context_summary) =
+let resolve_judgment (entry : Keeper_approval_queue_rules_types.pending_approval) ~approval_id
+      (summary : Keeper_approval_queue_rules_types.hitl_context_summary) =
   let decision =
-    match summary.Keeper_approval_queue.judgment with
-    | Keeper_approval_queue.Approve -> Some Keeper_approval_queue.Decision.Approve
-    | Keeper_approval_queue.Deny ->
-      Some (Keeper_approval_queue.Decision.Reject summary.rationale)
-    | Keeper_approval_queue.Require_human -> None
+    match summary.Keeper_approval_queue_rules_types.judgment with
+    | Keeper_approval_queue_rules_types.Approve -> Some Keeper_approval_queue_rules_types.Decision.Approve
+    | Keeper_approval_queue_rules_types.Deny ->
+      Some (Keeper_approval_queue_rules_types.Decision.Reject summary.rationale)
+    | Keeper_approval_queue_rules_types.Require_human -> None
   in
   match decision with
   | None -> Ok Judgment_skipped
@@ -361,7 +443,7 @@ let resolve_judgment (entry : Keeper_approval_queue.pending_approval) ~approval_
          ~base_path:entry.audit_base_path
          ~id:approval_id
          ~decision
-         ~source:Keeper_approval_queue.Auto_judge
+         ~source:Keeper_approval_queue_rules_types.Auto_judge
          ~created_by:("auto_judge:" ^ summary.model_run_id)
          ()
      with
@@ -391,7 +473,7 @@ end
 module Auto_judge_owners = Map.Make (Auto_judge_owner)
 module Auto_judge_owner_set = Set.Make (Auto_judge_owner)
 
-let auto_judge_owner (entry : Keeper_approval_queue.pending_approval) =
+let auto_judge_owner (entry : Keeper_approval_queue_rules_types.pending_approval) =
   entry.audit_base_path, entry.keeper_name
 ;;
 
@@ -401,7 +483,7 @@ let active_auto_judges : string Auto_judge_owners.t Atomic.t =
   Atomic.make Auto_judge_owners.empty
 ;;
 
-let rec claim_auto_judge (entry : Keeper_approval_queue.pending_approval) =
+let rec claim_auto_judge (entry : Keeper_approval_queue_rules_types.pending_approval) =
   let active = Atomic.get active_auto_judges in
   let owner = auto_judge_owner entry in
   match Auto_judge_owners.find_opt owner active with
@@ -413,7 +495,7 @@ let rec claim_auto_judge (entry : Keeper_approval_queue.pending_approval) =
     else claim_auto_judge entry
 ;;
 
-let rec release_auto_judge (entry : Keeper_approval_queue.pending_approval) =
+let rec release_auto_judge (entry : Keeper_approval_queue_rules_types.pending_approval) =
   let active = Atomic.get active_auto_judges in
   let owner = auto_judge_owner entry in
   match Auto_judge_owners.find_opt owner active with
@@ -433,30 +515,30 @@ let active_auto_judge_for_owner ~base_path ~keeper_name =
 type auto_judge_entry_class =
   | Auto_judge_not_requested
   | Auto_judge_pending_unbound
-  | Auto_judge_finalizable of Keeper_approval_queue.hitl_context_summary
+  | Auto_judge_finalizable of Keeper_approval_queue_rules_types.hitl_context_summary
   | Auto_judge_ineligible
 
 let classify_auto_judge_entry
-      (entry : Keeper_approval_queue.pending_approval)
+      (entry : Keeper_approval_queue_rules_types.pending_approval)
   =
   match
     entry.summary_attempt_disposition,
     entry.exact_attempt,
     entry.summary_status
   with
-  | Keeper_approval_queue.Summary_attempt_ready,
-    Keeper_approval_queue.Exact_unbound,
-    Keeper_approval_queue.Summary_not_requested ->
+  | Keeper_approval_queue_rules_types.Summary_attempt_ready,
+    Keeper_approval_queue_rules_types.Exact_unbound,
+    Keeper_approval_queue_rules_types.Summary_not_requested ->
     Auto_judge_not_requested
-  | Keeper_approval_queue.Summary_attempt_ready,
-    Keeper_approval_queue.Exact_unbound,
-    Keeper_approval_queue.Summary_pending ->
+  | Keeper_approval_queue_rules_types.Summary_attempt_ready,
+    Keeper_approval_queue_rules_types.Exact_unbound,
+    Keeper_approval_queue_rules_types.Summary_pending ->
     Auto_judge_pending_unbound
-  | ( Keeper_approval_queue.Summary_attempt_settled
-    | Keeper_approval_queue.Summary_attempt_persistence_uncertain ),
-    Keeper_approval_queue.Exact_bound
-      { status = Keeper_approval_queue.Exact_completed; _ },
-    Keeper_approval_queue.Summary_available summary ->
+  | ( Keeper_approval_queue_rules_types.Summary_attempt_settled
+    | Keeper_approval_queue_rules_types.Summary_attempt_persistence_uncertain ),
+    Keeper_approval_queue_rules_types.Exact_bound
+      { status = Keeper_approval_queue_rules_types.Exact_completed; _ },
+    Keeper_approval_queue_rules_types.Summary_available summary ->
     Auto_judge_finalizable summary
   | _ ->
     Auto_judge_ineligible
@@ -473,8 +555,8 @@ let auto_judge_entry_ready entry =
 ;;
 
 let compare_auto_judge_entries
-      (left : Keeper_approval_queue.pending_approval)
-      (right : Keeper_approval_queue.pending_approval)
+      (left : Keeper_approval_queue_rules_types.pending_approval)
+      (right : Keeper_approval_queue_rules_types.pending_approval)
   =
   Int.compare left.sequence right.sequence
 ;;
@@ -484,7 +566,7 @@ let compare_auto_judge_entries
    Auto Judge may start. *)
 let owner_auto_judges_in_fifo_order ~base_path ~keeper_name entries =
   entries
-  |> List.filter (fun (entry : Keeper_approval_queue.pending_approval) ->
+  |> List.filter (fun (entry : Keeper_approval_queue_rules_types.pending_approval) ->
     String.equal entry.audit_base_path base_path
     && String.equal entry.keeper_name keeper_name)
   |> List.sort compare_auto_judge_entries
@@ -492,7 +574,7 @@ let owner_auto_judges_in_fifo_order ~base_path ~keeper_name entries =
 
 let auto_judge_entry_has_start_reservation
       reserved_id
-      (entry : Keeper_approval_queue.pending_approval)
+      (entry : Keeper_approval_queue_rules_types.pending_approval)
   =
   String.equal entry.id reserved_id
   &&
@@ -501,11 +583,11 @@ let auto_judge_entry_has_start_reservation
     entry.exact_attempt,
     entry.summary_attempt_disposition
   with
-  | Keeper_approval_queue.Summary_pending,
-    Keeper_approval_queue.Exact_unbound,
-    Keeper_approval_queue.Summary_attempt_pre_worker_unavailable
+  | Keeper_approval_queue_rules_types.Summary_pending,
+    Keeper_approval_queue_rules_types.Exact_unbound,
+    Keeper_approval_queue_rules_types.Summary_attempt_pre_worker_unavailable
       { reason_code =
-          Keeper_approval_queue.Summary_pre_worker_start_reserved
+          Keeper_approval_queue_rules_types.Summary_pre_worker_start_reserved
       ; _
       } ->
     true
@@ -533,7 +615,7 @@ let ready_auto_judges_for_owner
       ~keeper_name
       entries
   =
-  let startable (entry : Keeper_approval_queue.pending_approval) =
+  let startable (entry : Keeper_approval_queue_rules_types.pending_approval) =
     auto_judge_entry_ready entry
     ||
     (match reserved_id with
@@ -634,14 +716,14 @@ let drain_auto_judge_owners_with ~drain_owner owners =
 
 type hitl_worker_spawner =
   sw:Eio.Switch.t ->
-  entry:Keeper_approval_queue.pending_approval ->
-  on_summary:(Keeper_approval_queue.hitl_context_summary -> unit) ->
+  entry:Keeper_approval_queue_rules_types.pending_approval ->
+  on_summary:(Keeper_approval_queue_rules_types.hitl_context_summary -> unit) ->
   on_finish:(Hitl_summary_worker.finish_outcome -> unit) ->
   unit ->
   (Hitl_summary_worker.spawn_outcome, string) result
 
 let mark_pre_worker_unavailable
-      (entry : Keeper_approval_queue.pending_approval)
+      (entry : Keeper_approval_queue_rules_types.pending_approval)
       ~reason_code
       ~operator_detail
   =
@@ -665,12 +747,12 @@ let durable_pre_worker_unavailable_error reason = function
 ;;
 
 let reserve_pre_worker_start
-      (entry : Keeper_approval_queue.pending_approval)
+      (entry : Keeper_approval_queue_rules_types.pending_approval)
   =
   match
     mark_pre_worker_unavailable
       entry
-      ~reason_code:Keeper_approval_queue.Summary_pre_worker_start_reserved
+      ~reason_code:Keeper_approval_queue_rules_types.Summary_pre_worker_start_reserved
       ~operator_detail:
         Keeper_approval_queue.summary_attempt_start_reserved_operator_detail
   with
@@ -685,7 +767,7 @@ let reserve_pre_worker_start
 
 let rec spawn_claimed_auto_judge_entry_with
       ~(spawn_worker : hitl_worker_spawner)
-      (entry : Keeper_approval_queue.pending_approval)
+      (entry : Keeper_approval_queue_rules_types.pending_approval)
   =
   let approval_id = entry.id in
   let on_summary summary =
@@ -704,7 +786,7 @@ let rec spawn_claimed_auto_judge_entry_with
          mark_pre_worker_unavailable
            entry
            ~reason_code:
-             Keeper_approval_queue.Summary_pre_worker_auto_judge_unavailable
+             Keeper_approval_queue_rules_types.Summary_pre_worker_auto_judge_unavailable
            ~operator_detail:reason
          |> durable_pre_worker_unavailable_error reason
          |> Result.error)
@@ -780,7 +862,7 @@ and spawn_claimed_auto_judge_entry entry =
 
 and spawn_auto_judge_entry_with
       ~(spawn_worker : hitl_worker_spawner)
-      (entry : Keeper_approval_queue.pending_approval)
+      (entry : Keeper_approval_queue_rules_types.pending_approval)
   =
   if claim_auto_judge entry
   then spawn_claimed_auto_judge_entry_with ~spawn_worker entry
@@ -797,7 +879,7 @@ and retry_auto_judge_entry
       ~expected_sequence
       ~expected_exact_attempt
       ~expected_disposition
-      (entry : Keeper_approval_queue.pending_approval)
+      (entry : Keeper_approval_queue_rules_types.pending_approval)
   =
   match
     Keeper_approval_queue.reserve_summary_attempt_retry
@@ -817,7 +899,7 @@ and retry_auto_judge_entry
       mark_pre_worker_unavailable
         entry
         ~reason_code:
-          Keeper_approval_queue.Summary_pre_worker_auto_judge_unavailable
+          Keeper_approval_queue_rules_types.Summary_pre_worker_auto_judge_unavailable
         ~operator_detail:reason
       |> durable_pre_worker_unavailable_error reason
     in
@@ -869,7 +951,7 @@ and retry_auto_judge_entry
        in
        Error (reblock reason))
 
-and start_auto_judge (entry : Keeper_approval_queue.pending_approval) =
+and start_auto_judge (entry : Keeper_approval_queue_rules_types.pending_approval) =
   if not (claim_auto_judge entry)
   then Ok Skipped
   else
@@ -882,7 +964,7 @@ and start_auto_judge (entry : Keeper_approval_queue.pending_approval) =
       Ok Skipped
     | Ok true -> spawn_claimed_auto_judge_entry entry
 
-and start_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
+and start_auto_judge_entry (entry : Keeper_approval_queue_rules_types.pending_approval) =
   match
     Keeper_approval_queue.get_pending_entry_for_workspace
       ~base_path:entry.audit_base_path
@@ -965,7 +1047,7 @@ and drain_auto_judge_owner_queue
       | Some reserved_id, [] ->
         (match
            List.exists
-             (fun (entry : Keeper_approval_queue.pending_approval) ->
+             (fun (entry : Keeper_approval_queue_rules_types.pending_approval) ->
                 String.equal entry.id reserved_id)
              entries
          with
@@ -1026,7 +1108,7 @@ and drain_auto_judges ~base_path =
      | Ok entries ->
        let owners =
          List.fold_left
-           (fun owners (entry : Keeper_approval_queue.pending_approval) ->
+           (fun owners (entry : Keeper_approval_queue_rules_types.pending_approval) ->
               if auto_judge_entry_ready entry
               then Auto_judge_owner_set.add (auto_judge_owner entry) owners
               else owners)
@@ -1046,10 +1128,10 @@ and drain_auto_judges ~base_path =
 ;;
 
 type recovered_work =
-  | Activate_worker of Keeper_approval_queue.pending_approval
+  | Activate_worker of Keeper_approval_queue_rules_types.pending_approval
   | Finalize_judgment of
-      Keeper_approval_queue.pending_approval
-      * Keeper_approval_queue.hitl_context_summary
+      Keeper_approval_queue_rules_types.pending_approval
+      * Keeper_approval_queue_rules_types.hitl_context_summary
 
 let recovered_work_for_base_path ~base_path =
   let enabled =
@@ -1070,24 +1152,24 @@ let recovered_work_for_base_path ~base_path =
     |> Result.map (fun entries ->
     let owners =
       List.fold_left
-        (fun owners (entry : Keeper_approval_queue.pending_approval) ->
+        (fun owners (entry : Keeper_approval_queue_rules_types.pending_approval) ->
            Auto_judge_owner_set.add (auto_judge_owner entry) owners)
         Auto_judge_owner_set.empty
         entries
     in
     let recovered_work_for_entry
-          (entry : Keeper_approval_queue.pending_approval)
+          (entry : Keeper_approval_queue_rules_types.pending_approval)
       =
       match classify_auto_judge_entry entry with
       | Auto_judge_not_requested
       | Auto_judge_pending_unbound ->
         Some (Activate_worker entry)
       | Auto_judge_finalizable
-          ({ judgment = (Keeper_approval_queue.Approve | Keeper_approval_queue.Deny); _ }
+          ({ judgment = (Keeper_approval_queue_rules_types.Approve | Keeper_approval_queue_rules_types.Deny); _ }
            as summary) ->
         Some (Finalize_judgment (entry, summary))
       | Auto_judge_finalizable
-          { judgment = Keeper_approval_queue.Require_human; _ }
+          { judgment = Keeper_approval_queue_rules_types.Require_human; _ }
       | Auto_judge_ineligible ->
         None
     in
@@ -1113,13 +1195,15 @@ let recovered_work_for_base_path ~base_path =
         (entry_of_recovered_work right)))
 ;;
 
-let observe_recovered_work kind (entry : Keeper_approval_queue.pending_approval) =
+let observe_recovered_work kind (entry : Keeper_approval_queue_rules_types.pending_approval) =
   let event_type, outcome =
     match kind with
     | `Activate_worker ->
-      "auto_judge_restart_worker_recovered", "restart_worker_recovered"
+      ( Keeper_approval.Audit.Auto_judge_restart_worker_recovered
+      , "restart_worker_recovered" )
     | `Finalize_judgment ->
-      "auto_judge_restart_judgment_recovered", "restart_judgment_recovered"
+      ( Keeper_approval.Audit.Auto_judge_restart_judgment_recovered
+      , "restart_judgment_recovered" )
   in
   Log.Keeper.warn
     ~keeper_name:entry.keeper_name
@@ -1131,17 +1215,17 @@ let observe_recovered_work kind (entry : Keeper_approval_queue.pending_approval)
     Keeper_metrics.(to_string HitlSummaryOutcomes)
     ~labels:[ "outcome", outcome ]
     ();
-  Keeper_approval_queue.audit_approval_event
-    ~base_path:entry.audit_base_path
-    ~event_type
-    ~id:entry.id
-    ~keeper_name:entry.keeper_name
-    ~tool_name:entry.tool_name
-    ?turn_id:entry.turn_id
-    ?task_id:entry.task_id
-    ?goal_id:entry.goal_id
-    ~goal_ids:entry.goal_ids
-    ()
+  ignore
+    (Keeper_approval.Audit.record
+       ~base_path:entry.audit_base_path
+       ~event_type
+       ~id:entry.id
+       ~keeper_name:entry.keeper_name
+       ~tool_name:entry.tool_name
+       ?turn_id:entry.turn_id
+       ?task_id:entry.task_id
+       ?goal_id:entry.goal_id
+       ())
 ;;
 
 let retry_blocked_auto_judge
@@ -1192,24 +1276,24 @@ let retry_blocked_auto_judge
             Keeper_metrics.(to_string HitlSummaryOutcomes)
             ~labels:[ "outcome", "operator_retry_started" ]
             ();
-       Keeper_approval_queue.audit_approval_event
-         ~base_path:entry.audit_base_path
-         ~event_type:"auto_judge_operator_retry_started"
-         ~id:entry.id
-         ~keeper_name:entry.keeper_name
-         ~tool_name:entry.tool_name
-         ?turn_id:entry.turn_id
-         ?task_id:entry.task_id
-         ?goal_id:entry.goal_id
-         ~goal_ids:entry.goal_ids
-       ~actor:requested_by
-       ();
+       ignore
+         (Keeper_approval.Audit.record
+            ~base_path:entry.audit_base_path
+            ~event_type:Keeper_approval.Audit.Auto_judge_operator_retry_started
+            ~id:entry.id
+            ~keeper_name:entry.keeper_name
+            ~tool_name:entry.tool_name
+            ?turn_id:entry.turn_id
+            ?task_id:entry.task_id
+            ?goal_id:entry.goal_id
+            ~actor:requested_by
+            ());
        Ok ()))
 ;;
 
 let finalize_recovered_judgment
       ~complete_summary_exact_attempt
-      (entry : Keeper_approval_queue.pending_approval)
+      (entry : Keeper_approval_queue_rules_types.pending_approval)
       summary
   =
   let persistence_uncertain () =
@@ -1222,12 +1306,12 @@ let finalize_recovered_judgment
        : (bool, Keeper_approval_queue.exact_attempt_error) result)
   in
   match entry.exact_attempt with
-  | Keeper_approval_queue.Exact_unbound ->
+  | Keeper_approval_queue_rules_types.Exact_unbound ->
     Error
       ( Resume_identity_unbound
       , "Recovered Auto Judge output has no exact attempt identity; finalization is withheld." )
-  | Keeper_approval_queue.Exact_bound
-      ({ status = Keeper_approval_queue.Exact_completed; _ } as binding) ->
+  | Keeper_approval_queue_rules_types.Exact_bound
+      ({ status = Keeper_approval_queue_rules_types.Exact_completed; _ } as binding) ->
     (match
        complete_summary_exact_attempt
          ~id:entry.id
@@ -1267,7 +1351,7 @@ let finalize_recovered_judgment
        Error
          ( Resume_completion_rejected rejection
          , completion_rejection_operator_detail rejection ))
-  | Keeper_approval_queue.Exact_bound _ ->
+  | Keeper_approval_queue_rules_types.Exact_bound _ ->
     Error
       ( Resume_exact_state_not_completed
       , "Recovered Auto Judge entry is not a completed exact judgment." )
@@ -1370,7 +1454,7 @@ let request_operator_auto_judge_recovery ~base_path =
            | Ok entries ->
              let queued =
                List.fold_left
-                 (fun count (entry : Keeper_approval_queue.pending_approval) ->
+                 (fun count (entry : Keeper_approval_queue_rules_types.pending_approval) ->
                     if auto_judge_entry_ready entry then count + 1 else count)
                  0
                  entries
@@ -1385,7 +1469,14 @@ let request_operator_auto_judge_recovery ~base_path =
 let defer request reason =
   match submit request with
   | Error error -> Unavailable (Queue_storage_unavailable error)
-  | Ok approval_id ->
+  | Ok submission ->
+    let approval_id = submission.approval_id in
+    let audit_receipts =
+      match submission.disposition with
+      | Keeper_approval_queue.Pending_created receipt -> [ receipt ]
+      | Keeper_approval_queue.Pending_deduplicated
+      | Keeper_approval_queue.Folded_onto_unconsumed_grant -> []
+    in
     let reason =
       match reason with
       | Judge_requested ->
@@ -1426,19 +1517,21 @@ let defer request reason =
          | Error (Keeper_approval_queue.Exact_attempt_storage_error error) ->
            Error error
          | Error (Keeper_approval_queue.Exact_attempt_rejected rejection) ->
-           Keeper_approval_queue.audit_approval_event
-             ~base_path:request.base_path
-             ~event_type:"auto_judge_block_observation_superseded"
-             ~id:approval_id
-             ~keeper_name:request.keeper_name
-             ~tool_name:request.operation
-             ();
+           ignore
+             (Keeper_approval.Audit.record
+                ~base_path:request.base_path
+                ~event_type:
+                  Keeper_approval.Audit.Auto_judge_block_observation_superseded
+                ~id:approval_id
+                ~keeper_name:request.keeper_name
+                ~tool_name:request.operation
+                ());
            Log.Keeper.warn
              ~keeper_name:request.keeper_name
              "Auto Judge pre-worker block observation superseded approval=%s \
               reason_code=%s reason=%s"
              approval_id
-             (Keeper_approval_queue
+             (Keeper_approval_queue_rules_types
               .summary_attempt_pre_worker_unavailable_code_to_string
                 reason_code)
              (Keeper_approval_queue.exact_attempt_error_to_string
@@ -1450,25 +1543,26 @@ let defer request reason =
        (match
           persist_pre_worker_block
             ~reason_code:
-              Keeper_approval_queue.Summary_pre_worker_mode_state_invalid
+              Keeper_approval_queue_rules_types.Summary_pre_worker_mode_state_invalid
             detail
         with
-        | Ok () -> Deferred { approval_id; reason }
+        | Ok () -> Deferred { approval_id; reason; audit_receipts }
         | Error error -> Unavailable (Queue_storage_unavailable error))
      | Auto_judge_unavailable detail ->
        (match
           persist_pre_worker_block
             ~reason_code:
-              Keeper_approval_queue.Summary_pre_worker_auto_judge_unavailable
+              Keeper_approval_queue_rules_types.Summary_pre_worker_auto_judge_unavailable
             detail
         with
-        | Ok () -> Deferred { approval_id; reason }
+        | Ok () -> Deferred { approval_id; reason; audit_receipts }
         | Error error -> Unavailable (Queue_storage_unavailable error))
-     | Human_requested | Judge_requested -> Deferred { approval_id; reason })
+     | Human_requested | Judge_requested ->
+       Deferred { approval_id; reason; audit_receipts })
 ;;
 
 let observe_exact_rule_store_degraded (request : request) error =
-  let detail = Keeper_approval_queue.rule_store_error_to_string error in
+  let detail = Keeper_approval_queue_rules_types.rule_store_error_to_string error in
   Log.Keeper.error
     ~keeper_name:request.keeper_name
     "exact Always Allowed rule lookup unavailable operation=%s: %s; continuing configured Gate mode"
@@ -1478,38 +1572,38 @@ let observe_exact_rule_store_degraded (request : request) error =
     Keeper_metrics.(to_string ApprovalQueueFailures)
     ~labels:[ "keeper", request.keeper_name; "site", "exact_rule_lookup" ]
     ();
-  Keeper_approval_queue.audit_approval_event
-    ~base_path:request.base_path
-    ~event_type:"gate_exact_rule_store_degraded"
-    ~id:(Keeper_approval_queue.generate_id ())
-    ~keeper_name:request.keeper_name
-    ~tool_name:request.operation
-    ?turn_id:(request_turn_id request)
-    ?task_id:request.task_id
-    ~goal_ids:request.goal_ids
-    ()
+  ignore
+    (Keeper_approval.Audit.record
+       ~base_path:request.base_path
+       ~event_type:Keeper_approval.Audit.Gate_exact_rule_store_degraded
+       ~id:(Keeper_approval_queue.generate_id ())
+       ~keeper_name:request.keeper_name
+       ~tool_name:request.operation
+       ?turn_id:(request_turn_id request)
+       ?task_id:request.task_id
+       ())
 ;;
 
 let observe_exact_rule_expired
       (request : request)
-      (rule_match : Keeper_approval_queue.rule_match)
+      (rule_match : Keeper_approval_queue_rules_types.rule_match)
   =
   Log.Keeper.warn
     ~keeper_name:request.keeper_name
     "exact Always Allowed rule %s expired operation=%s; continuing configured Gate mode"
     rule_match.rule_id
     request.operation;
-  Keeper_approval_queue.audit_approval_event
-    ~base_path:request.base_path
-    ~event_type:"gate_exact_rule_expired"
-    ~id:(Keeper_approval_queue.generate_id ())
-    ~keeper_name:request.keeper_name
-    ~tool_name:request.operation
-    ?turn_id:(request_turn_id request)
-    ?task_id:request.task_id
-    ~goal_ids:request.goal_ids
-    ~rule_match
-    ()
+  ignore
+    (Keeper_approval.Audit.record
+       ~base_path:request.base_path
+       ~event_type:Keeper_approval.Audit.Gate_exact_rule_expired
+       ~id:(Keeper_approval_queue.generate_id ())
+       ~keeper_name:request.keeper_name
+       ~tool_name:request.operation
+       ?turn_id:(request_turn_id request)
+       ?task_id:request.task_id
+       ~rule_match
+       ())
 ;;
 
 let decide_from_selected_mode request = function
@@ -1518,35 +1612,41 @@ let decide_from_selected_mode request = function
   | Ok Keeper_gate_mode.Auto_judge -> defer request Judge_requested
   | Ok Keeper_gate_mode.Always_allow ->
     let source = Workspace_always_allow in
-    audit_allow
-      request
-      ~decision_source:Keeper_approval_queue.Always_allowed
-      source;
-    Allow { source }
+    let audit_receipt =
+      audit_allow
+        request
+        ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
+        source
+    in
+    allow request source [ audit_receipt ]
 ;;
 
 let decide_without_cycle_grant ~keeper_always_allow request =
   if keeper_always_allow
   then (
     let source = Keeper_always_allow in
-    audit_allow
-      request
-      ~decision_source:Keeper_approval_queue.Always_allowed
-      source;
-    Allow { source })
+    let audit_receipt =
+      audit_allow
+        request
+        ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
+        source
+    in
+    allow request source [ audit_receipt ])
   else
     let mode = Keeper_gate_mode.read ~base_path:request.base_path in
     (match mode with
      | Ok Keeper_gate_mode.Always_allow ->
        let source = Workspace_always_allow in
-       audit_allow
-         request
-         ~decision_source:Keeper_approval_queue.Always_allowed
-         source;
-       Allow { source }
+       let audit_receipt =
+         audit_allow
+           request
+           ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
+           source
+       in
+       allow request source [ audit_receipt ]
      | Error _ | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Auto_judge) ->
        (match
-          Keeper_approval_queue.find_matching_rule
+          Keeper_approval_queue_rules.find_matching_rule
             ~base_path:request.base_path
             ~keeper_name:request.keeper_name
             ~tool_name:request.operation
@@ -1556,18 +1656,20 @@ let decide_without_cycle_grant ~keeper_always_allow request =
         | Error error ->
           observe_exact_rule_store_degraded request error;
           decide_from_selected_mode request mode
-        | Ok (Keeper_approval_queue.Rule_match_active rule_match) ->
+        | Ok (Keeper_approval_queue_rules_types.Rule_match_active rule_match) ->
           let source = Exact_always_rule rule_match.rule_id in
-          audit_allow
-            request
-            ~rule_match
-            ~decision_source:Keeper_approval_queue.Always_allowed
-            source;
-          Allow { source }
-        | Ok (Keeper_approval_queue.Rule_match_expired rule_match) ->
+          let audit_receipt =
+            audit_allow
+              request
+              ~rule_match
+              ~decision_source:Keeper_approval_queue_rules_types.Always_allowed
+              source
+          in
+          allow request source [ audit_receipt ]
+        | Ok (Keeper_approval_queue_rules_types.Rule_match_expired rule_match) ->
           observe_exact_rule_expired request rule_match;
           decide_from_selected_mode request mode
-        | Ok Keeper_approval_queue.Rule_match_absent ->
+        | Ok Keeper_approval_queue_rules_types.Rule_match_absent ->
           decide_from_selected_mode request mode))
 ;;
 
@@ -1578,10 +1680,12 @@ let decide ?cycle_grant ~keeper_always_allow request =
     | Some grant -> take_matching_cycle_grant grant request
   in
   match grant_result with
-  | Cycle_grant_authorized approval_id ->
+  | Cycle_grant_authorized (approval_id, grant_audit_receipt) ->
     let source = One_shot_resolution approval_id in
-    audit_allow request ~source_approval_id:approval_id source;
-    Allow { source }
+    let gate_audit_receipt =
+      audit_allow request ~source_approval_id:approval_id source
+    in
+    allow request source [ grant_audit_receipt; gate_audit_receipt ]
   | Cycle_grant_not_applicable ->
     decide_without_cycle_grant ~keeper_always_allow request
   | Cycle_grant_temporarily_unavailable (approval_id, reason) ->
@@ -1590,17 +1694,17 @@ let decide ?cycle_grant ~keeper_always_allow request =
       "one-shot Gate grant unavailable; preserving the unconsumed grant operation=%s reason=%s"
       request.operation
       (unavailable_reason_to_string reason);
-    Keeper_approval_queue.audit_approval_event
-      ~base_path:request.base_path
-      ~event_type:"gate_grant_unavailable"
-      ~id:approval_id
-      ~keeper_name:request.keeper_name
-      ~tool_name:request.operation
-      ?turn_id:(request_turn_id request)
-      ?task_id:request.task_id
-      ~goal_ids:request.goal_ids
-      ~source_approval_id:approval_id
-      ();
+    ignore
+      (Keeper_approval.Audit.record
+         ~base_path:request.base_path
+         ~event_type:Keeper_approval.Audit.Gate_grant_unavailable
+         ~id:approval_id
+         ~keeper_name:request.keeper_name
+         ~tool_name:request.operation
+         ?turn_id:(request_turn_id request)
+         ?task_id:request.task_id
+         ~source_approval_id:approval_id
+         ());
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ApprovalQueueFailures)
       ~labels:[ "keeper", request.keeper_name; "site", "cycle_grant_lookup" ]
@@ -1617,7 +1721,7 @@ module For_testing = struct
     call_id:string ->
     plan_fingerprint:string ->
     request_body_sha256:string ->
-    summary:Keeper_approval_queue.hitl_context_summary ->
+    summary:Keeper_approval_queue_rules_types.hitl_context_summary ->
     ( Keeper_approval_queue.exact_attempt_transition
     , Keeper_approval_queue.exact_attempt_error )
       result

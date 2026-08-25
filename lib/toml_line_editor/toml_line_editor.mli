@@ -13,9 +13,6 @@ val scalar_line : key:string -> value:string -> string
 val string_array_line : key:string -> values:string list -> string
 (** Render [key = ["a", "b"]] on one line. *)
 
-val multiline_array_lines : key:string -> values:string list -> string list
-(** Render [key = []] as a multi-line array block. *)
-
 val split_lines : string -> string list * bool
 (** Split content into lines and whether it ended with a trailing newline. *)
 

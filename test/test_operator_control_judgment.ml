@@ -142,6 +142,47 @@ let test_guidance_ignores_unsupported_target_type () =
       Alcotest.(check int) "fallback cannot synthesize actions" 0
         (List.length fields.recommended_actions))
 
+(* Each surface carries its own freshness default: a namespace judgment goes
+   stale in 60s, an intervention in 300s. The selection used to match the
+   normalized surface string with a wildcard default of 120s — unreachable,
+   because normalize_judgment_surface rejects everything else first, but it
+   would have absorbed a third surface in silence. Nothing pinned the two
+   values, so collapsing or swapping them was invisible. *)
+let test_judgment_freshness_default_is_per_surface () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator-judge"));
+      let ctx = operator_ctx env sw config "operator-judge" in
+      let ttl_for surface =
+        match
+          Operator_control.judgment_write_json ctx
+            (`Assoc
+              [ ("surface", `String surface)
+              ; ("target_type", `String "workspace")
+              ; ("summary", `String "default freshness probe")
+              ; ("confidence", `Float 0.5)
+              ; ("evidence_refs", `List [])
+              ])
+        with
+        | Error err -> Alcotest.fail err
+        | Ok json ->
+          let open Yojson.Safe.Util in
+          let judgment = json |> member "judgment" in
+          let generated = judgment |> member "generated_at_unix" |> to_float in
+          let fresh_until = judgment |> member "fresh_until_unix" |> to_float in
+          Float.round (fresh_until -. generated)
+      in
+      Alcotest.(check (float 0.5))
+        "command.namespace default ttl" 60.0 (ttl_for "command.namespace");
+      Alcotest.(check (float 0.5))
+        "intervene default ttl" 300.0 (ttl_for "intervene"))
+
 let test_operator_judgment_write_and_latest_roundtrip () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -246,59 +287,47 @@ let test_operator_judgment_requires_numeric_timestamps () =
     (Error "invalid generated_at_unix")
     (Operator_judgment.of_yojson invalid)
 
-let test_confirm_consumes_pending_token_before_delegated_action_fails () =
+(* [confidence] used to default to 0.5 when omitted and was clamped into range
+   on the way to disk. Both spellings put a number the judge never stated into
+   the operator digest, next to ["authoritative": true]. No code compares the
+   value, so a fabricated one is indistinguishable from a stated one — the
+   operator is the only reader, and they cannot tell. *)
+let test_operator_judgment_requires_stated_confidence () =
   Eio_main.run @@ fun env ->
-  ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Workspace.default_config base_dir in
-      ignore (Workspace.init config ~agent_name:(Some "operator"));
-      let pending_dir = Filename.concat (Workspace.masc_dir config) "operator" in
-      let path = Filename.concat pending_dir "pending_confirms.json" in
-      Workspace_utils.mkdir_p pending_dir;
-      let token = "retry-token" in
-      let entry_json =
-        `Assoc
-          [
-            ("token", `String token);
-            ("trace_id", `String "trace-retry");
-            ("actor", `String "operator");
-            ("action_type", `String "missing_action_type");
-            ( "target_type"
-            , `String Operator_action_constants.workspace_target_type );
-            ("target_id", `Null);
-            ("payload", `Assoc []);
-            ("delegated_tool", `String "missing_operator_tool");
-            ("created_at", `String (Masc_domain.now_iso ()));
-            ("expires_at", `Null);
-          ]
+      ignore (Workspace.init config ~agent_name:(Some "operator-judge"));
+      let ctx = operator_ctx env sw config "operator-judge" in
+      let write confidence_fields =
+        Operator_control.judgment_write_json ctx
+          (`Assoc
+            ([ ("surface", `String "command.namespace");
+               ("target_type", `String "workspace");
+               ("summary", `String "Judgment without a stated confidence.") ]
+             @ confidence_fields))
       in
-      (match Workspace_utils.write_json_result config path (`List [ entry_json ]) with
-       | Ok () -> ()
-       | Error err -> Alcotest.failf "failed to persist pending confirm fixture: %s" err);
-      let initial_pending_confirms =
-        Operator_control.pending_confirms_json ~actor:"operator" config
-        |> Yojson.Safe.Util.to_list
-      in
-      Alcotest.(check int)
-        "pending confirm fixture persisted" 1
-        (List.length initial_pending_confirms);
-      let ctx = operator_ctx env sw config "operator" in
-      (match
-         Operator_control.confirm_json ctx
-           (`Assoc [ ("actor", `String "operator"); ("confirm_token", `String token) ])
-       with
-      | Ok _ -> Alcotest.fail "expected delegated action failure"
-      | Error err ->
-          Alcotest.(check bool) "non-empty error" true (String.length err > 0));
-      let pending_confirms =
-        Operator_control.pending_confirms_json ~actor:"operator" config
-        |> Yojson.Safe.Util.to_list
-      in
-      Alcotest.(check int) "pending confirm consumed" 0 (List.length pending_confirms))
+      List.iter
+        (fun (label, fields) ->
+          match write fields with
+          | Error message ->
+            Alcotest.(check bool)
+              (label ^ " names the field") true
+              (Astring.String.is_infix ~affix:"confidence" message)
+          | Ok _ -> Alcotest.failf "%s must be rejected, got Ok" label)
+        [ ("omitted confidence", []);
+          ("string confidence", [ ("confidence", `String "0.9") ]);
+          ("null confidence", [ ("confidence", `Null) ]);
+          ("negative confidence", [ ("confidence", `Float (-0.1)) ]);
+          ("confidence above one", [ ("confidence", `Float 1.1) ]) ];
+      (* An integer 1 is a number a JSON encoder may emit for 1.0. *)
+      match write [ ("confidence", `Int 1) ] with
+      | Ok _ -> ()
+      | Error message -> Alcotest.failf "integer confidence must be accepted: %s" message)
+
 
 let tests =
   [
@@ -308,14 +337,16 @@ let tests =
       test_digest_workspace_ignores_stale_operator_judgment;
     Alcotest.test_case "guidance ignores unsupported target type" `Quick
       test_guidance_ignores_unsupported_target_type;
+    Alcotest.test_case "freshness default is per surface" `Quick
+      test_judgment_freshness_default_is_per_surface;
     Alcotest.test_case "operator judgment write/latest roundtrip" `Quick
       test_operator_judgment_write_and_latest_roundtrip;
     Alcotest.test_case "rejects retired target type aliases" `Quick
       test_operator_judgment_rejects_retired_target_type_aliases;
     Alcotest.test_case "requires numeric timestamps" `Quick
       test_operator_judgment_requires_numeric_timestamps;
-    Alcotest.test_case "confirm consumes token before delegated action failure" `Quick
-      test_confirm_consumes_pending_token_before_delegated_action_fails;
+    Alcotest.test_case "requires a stated confidence" `Quick
+      test_operator_judgment_requires_stated_confidence;
   ]
 
 let () = Alcotest.run "operator_control_judgment" [ ("operator_control_judgment", tests) ]

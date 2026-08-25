@@ -1,15 +1,19 @@
-(** Guard stale task-cache broadcasts against canonical backlog state. *)
+(** Guard an explicitly declared task-cache signal against canonical backlog state. *)
 
-val stale_active_task_signal_present :
-  config:Workspace_utils_backend_setup.config ->
-  from_agent:string ->
-  module_name:string ->
-  content:string ->
-  bool
+type signal =
+  { subject_agent : string
+  ; task_id : string
+  }
 
-val rewrite_broadcast_content :
+type rewrite =
+  | Unchanged of string
+  | Invalidated of string
+  | Rejected of string
+  | Dependency_unavailable of string
+
+val rewrite_signal :
   config:Workspace_utils_backend_setup.config ->
-  from_agent:string ->
   module_name:string ->
+  signal:signal ->
   content:string ->
-  string
+  rewrite

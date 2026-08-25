@@ -4,9 +4,8 @@
     These are top-level pure functions (no closures over outer state)
     that compute provider-attempt timeout bounds, health-key derivations,
     lane labels, etc. Lifting them out of the 1459-LOC
-    [keeper_turn_driver.ml] is a foundation step toward the eventual
-    A/B/C decomposition (Agent SDK call / runtime strategy / keeper
-    bookkeeping) deferred from RFC-0047 Phase 4.
+    [keeper_turn_driver.ml] separates agent-core calls, runtime strategy,
+    and keeper bookkeeping.
 
     No behavior change. Mechanical extraction.
 
@@ -18,5 +17,5 @@
 let checkpoint_after_attempt ?agent_ref = function
   | Some agent ->
       (match agent_ref with Some r -> r := Some agent | None -> ());
-      Some (Agent_sdk.Agent.checkpoint agent)
+      Some (Agent_core.Agent.checkpoint agent)
   | None -> None

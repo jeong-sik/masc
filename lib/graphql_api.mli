@@ -14,19 +14,19 @@
 
     Pagination defaults: {!default_first} = 50, {!max_first} =
     200.  {!clamp_first} folds [None] -> default and clamps
-    [Some n] to [\[0, max_first]].
+    [Some n] to [\[0, max_first\]].
 
     Internal: ~25+ helpers + 5 internal types stay private —
-    \[ctx] (the per-request GraphQL execution context, carrying
-    [workspace_config]), \[page_info] / [\'a edge] / [\'a connection]
+    [ctx] (the per-request GraphQL execution context, carrying
+    [workspace_config]), [page_info] / [\'a edge] / [\'a connection]
     (internal Connection-spec records used by the schema
-    builders), \[task_status_info] type +
-    \[task_status_info_of_task] projector, the schema typ
+    builders), [task_status_info] type +
+    [task_status_info_of_task] projector, the schema typ
     definitions ([page_info_typ],
     [task_status_typ], [task_typ], [agent_meta_typ],
     [agent_typ], [message_typ], [workspace_state_typ],
     [task_edge_typ], [agent_edge_typ], etc.), and
-    \[drop_after_id] (cursor-based pagination cursor
+    [drop_after_id] (cursor-based pagination cursor
     consumption helper).  All consumed only inside the schema
     + {!handle_request}'s pipeline. *)
 
@@ -60,7 +60,7 @@ val default_first : int
 val clamp_first : int option -> int
 (** [clamp_first None] is {!default_first}.  [clamp_first
       (Some n)] is [max 0 (min n max_first)] — clamps to
-    [\[0, max_first]] including non-negative coercion. *)
+    [\[0, max_first\]] including non-negative coercion. *)
 
 (** {1 List slicer} *)
 

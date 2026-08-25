@@ -3,19 +3,27 @@ import { h } from 'preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 
+const repositoryRow = {
+  id: 'masc',
+  name: 'masc',
+  url: 'https://github.com/jeong-sik/masc.git',
+  codebase: 'github.com_jeong-sik_masc' as string | null,
+  local_path: '/workspace/masc',
+  default_branch: 'main',
+  status: 'active',
+  auto_sync: false,
+  sync_interval: 300,
+  created_at: null,
+  updated_at: null,
+}
+
+// The list carries no git state; the status bar asks for the repository it
+// shows, which is the whole point of the split.
 vi.mock('../../api/repositories', () => ({
   discoverRepositories: vi.fn(() => Promise.resolve([])),
-  fetchRepositoriesList: vi.fn(() => Promise.resolve([{
-    id: 'masc',
-    name: 'masc',
-    url: '',
-    local_path: '/workspace/masc',
-    default_branch: 'main',
-    status: 'active',
-    auto_sync: false,
-    sync_interval: 300,
-    created_at: null,
-    updated_at: null,
+  fetchRepositoriesList: vi.fn(() => Promise.resolve([repositoryRow])),
+  fetchRepositoryObservation: vi.fn(() => Promise.resolve({
+    ...repositoryRow,
     git_status: {
       state: 'available',
       source: 'git-status-porcelain-v1',
@@ -26,7 +34,7 @@ vi.mock('../../api/repositories', () => ({
       untracked_files: 1,
       conflicted_files: 0,
     },
-  }])),
+  })),
 }))
 
 vi.mock('./ide-conversation-rail', () => ({
@@ -440,6 +448,7 @@ describe('IdeShell', () => {
         id: 'masc',
         name: 'masc',
         url: '',
+        codebase: null,
         local_path: '/workspace/masc',
         default_branch: 'main',
         status: 'active',
@@ -638,6 +647,10 @@ describe('IdeShell', () => {
   })
 
   it('surfaces malformed annotation responses in the IDE statusbar', async () => {
+    // RFC-0378 §5.4: annotations are code facts; the fetch only fires for an
+    // explicitly selected codebase, so the malformed-row guard is observed
+    // behind a persisted selection.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'masc')
     vi.stubGlobal(
       'fetch',
       vi.fn(dashboardFetchMockWithResponse(
@@ -702,6 +715,8 @@ describe('IdeShell', () => {
   })
 
   it('focuses active keeper breadcrumb chips into routeable code and keeper context', async () => {
+    // RFC-0378 §5.4: the cursor stream follows the explicit selection.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'masc')
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },
@@ -1018,10 +1033,10 @@ describe('IdeShell', () => {
 
     const rail = container.querySelector('[data-testid="ide-right-rail"]')
     expect(rail).not.toBeNull()
-    expect(rail?.classList.contains('ide-v2-rail')).toBe(true)
+    expect(rail?.classList.contains('ide-rail')).toBe(true)
     expect(buttonByText(container, '활동').getAttribute('aria-selected')).toBe('true')
     expect(buttonByText(container, 'Work Context').getAttribute('aria-expanded')).toBe('false')
-    expect(container.querySelectorAll('.ide-v2-rail-tab')).toHaveLength(3)
+    expect(container.querySelectorAll('.ide-rail-tab')).toHaveLength(3)
     expect(container.querySelector('.ide-activity-compact-status')?.getAttribute('role')).toBe('status')
     expect(container.querySelector('.ide-v2-presence-state')?.getAttribute('aria-label')).toBeTruthy()
     expect(container.querySelector('.ide-v2-connection-dot')?.getAttribute('aria-label')).toBeTruthy()
@@ -1068,7 +1083,7 @@ describe('IdeShell', () => {
     expect(rail).not.toBeNull()
     expect(contextStack).not.toBeNull()
     expect(primaryRail).not.toBeNull()
-    expect(rail?.classList.contains('ide-v2-rail')).toBe(true)
+    expect(rail?.classList.contains('ide-rail')).toBe(true)
     expect(buttonByText(container, 'Work Context').getAttribute('aria-expanded')).toBe('true')
     expect(buttonByText(container, '활동').getAttribute('title'))
       .toBe('Workspace and keeper activity linked to the active file and repository')
@@ -1082,6 +1097,8 @@ describe('IdeShell', () => {
 
 
   it('switches the IDE right rail tabs and renders cursor push focus', async () => {
+    // RFC-0378 §5.4: the cursor stream follows the explicit selection.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'masc')
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },
@@ -1157,6 +1174,36 @@ describe('IdeShell', () => {
       label: 'str_replace',
       keeper_id: 'sangsu',
     })
+  })
+
+  it('clears cursor overlays when the selected repository has no codebase', async () => {
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'masc')
+    repositoryRow.codebase = null
+    cursorOverlaySignal.value = {
+      cursors: new Map([['sangsu', {
+        keeper_id: 'sangsu',
+        file_path: 'lib/stale.ml',
+        line: 7,
+        column: 1,
+        focus_mode: 'editing',
+        last_update: Date.now(),
+      }]]),
+      heatmap: new Map([[7, 1]]),
+      collisions: [{ line: 7, keeper_ids: ['sangsu', 'albini'] }],
+      active_file: 'lib/stale.ml',
+      stream: { status: 'live', failedCount: 0 },
+    }
+
+    try {
+      render(h(IdeShell, {}), container)
+      await waitFor(() => expect(cursorOverlaySignal.value.stream?.status).toBe('closed'))
+      expect(cursorOverlaySignal.value.cursors.size).toBe(0)
+      expect(cursorOverlaySignal.value.heatmap.size).toBe(0)
+      expect(cursorOverlaySignal.value.collisions).toEqual([])
+      expect(cursorOverlaySignal.value.active_file).toBeNull()
+    } finally {
+      repositoryRow.codebase = 'github.com_jeong-sik_masc'
+    }
   })
 
   it('hydrates collapsed IDE rails from the route', () => {
@@ -1279,7 +1326,7 @@ describe('IdeShell', () => {
     render(h(IdeShell, {}), container)
 
     const shell = container.querySelector<HTMLElement>('.ide-plane-shell')
-    const grid = container.querySelector<HTMLElement>('.ide-v2-body')
+    const grid = container.querySelector<HTMLElement>('.ide-body')
     const handle = container.querySelector<HTMLElement>('[data-testid="ide-tree-resize"]')
     expect(shell?.getAttribute('data-tree-width')).toBe('315')
     expect(grid?.getAttribute('style')).toContain('--ide-tree-width: 315px')

@@ -1,0 +1,115 @@
+{
+  "schema": "masc.keeper_feature_matrix.create_admission_overlap.v1",
+  "captured_at": "2026-08-14T08:10:00Z",
+  "purpose": "Live proof for PR #28647 (fence Keeper creation before durable writes: hold the shutdown intake fence before session/config/runtime/Owner writes so a same-name shutdown conflict cannot split persistence from launch). Requested follow-up to the keeper-drain-restart-recall canary, covering the Operations/Keeper-create-admission row of the feature matrix.",
+  "daemon": {
+    "endpoint": "http://localhost:8935",
+    "version": "0.22.0",
+    "running_commit": "ff6a8fa6af",
+    "pr_28647_merge_commit": "1487385def42fb4a7c3cae3e2fc5287fd9843983",
+    "pr_28647_is_ancestor_of_running_commit": true,
+    "verification_command": "git merge-base --is-ancestor 1487385def42fb4a7c3cae3e2fc5287fd9843983 ff6a8fa6af"
+  },
+  "code_path_analysis": {
+    "summary": "Read lib/keeper/keeper_turn_up.ml, keeper_turn_up_create.ml, keeper_owner_registry.ml and keeper_shutdown_intake_fence.ml before designing the live probe, because the fence only matters for a specific admission state.",
+    "key_facts": [
+      "handle_keeper_up dispatches on Keeper_meta_store.read_meta: Ok None -> create_keeper (the code PR #28647 changed); Ok (Some old) -> update_keeper (untouched by this PR).",
+      "Keeper_owner_registry.begin_shutdown (which reserves the fence) itself requires an existing Owner entry (Owner_not_found otherwise) -- a shutdown for a name that has genuinely never existed cannot reserve the fence at all; it is rejected by the Owner lookup before the fence is ever touched.",
+      "Consequence: PR #28647's exact fence-rejection branch (Keeper_shutdown_intake_fence.Intake_shutdown_reserved inside create_keeper) is reachable via HTTP only through a narrow, same-process, sub-request window -- and is what the PR's own unit test (test/test_keeper_create_admission_transaction.ml) exercises directly via internal Fence.begin_shutdown calls, not through two independent HTTP requests.",
+      "The team lead's originally proposed procedure -- shutdown vs. re-boot overlap on one already-existing canary keeper -- does not exercise create_keeper's fence at all: since Owner meta already exists for that name, repeat /boot calls take the 'already_live wakeup' fast path (bypassing Keeper_tool_surface.dispatch entirely) or route to update_keeper, never create_keeper. This is documented below as probe_1 with that scope correction, and probe_2 is an additional, code-path-accurate design: genuinely brand-new keeper names (Keeper_meta_store.read_meta -> None), each raced once between /boot and /shutdown."
+    ]
+  },
+  "probe_1_existing_keeper_reboot_vs_shutdown": {
+    "keeper": "canary-admission-20260814-0803",
+    "config_toml_path": "/Users/dancer/me/.masc/config/keepers/canary-admission-20260814-0803.toml",
+    "note": "This keeper was created once, confirmed running, then subjected to two overlap trials (both orderings) of a repeat POST /boot racing against POST /shutdown for the same, already-existing name.",
+    "trials": [
+      {
+        "order_requests_fired": "shutdown_thread_started_first",
+        "boot_response": { "status": 200, "already_live": true, "note": "Woke the running fiber via the already-live fast path; never reached Keeper_tool_surface.dispatch." },
+        "shutdown_response": { "status": 200, "ok": true },
+        "final_state": { "paused": true, "latched_reason": { "kind": "operator_paused", "actor": "keeper_down" } }
+      },
+      {
+        "order_requests_fired": "boot_thread_started_first",
+        "boot_response": { "status": 200, "already_live": true },
+        "shutdown_response": { "status": 200, "ok": true },
+        "final_state": { "paused": true, "latched_reason": { "kind": "operator_paused", "actor": "keeper_down" } }
+      }
+    ],
+    "finding": "Both orderings converged on the same outcome regardless of client-side thread start order: shutdown always won the final state (paused=true), boot's overlapping request only ever hit the already-live wakeup fast path and never mutated config/runtime/session state. No corruption observed. This is a real, safe overlap result, but it demonstrates the already-live/shutdown interaction, not create_keeper's intake-fence rejection -- see code_path_analysis."
+  },
+  "probe_2_fresh_name_create_vs_shutdown_race": {
+    "design": "6 trials against 6 never-before-used keeper names (read_meta -> None at request time), 3 with the boot HTTP thread started first (adm-race-cf-000..002), 3 with the shutdown HTTP thread started second in code but effectively concurrent on the server (adm-race-sf-000..002). AGENT.md was pre-seeded for every trial name before firing so a missing-instructions error could not masquerade as a fence rejection.",
+    "trials": [
+      { "name": "adm-race-cf-000", "client_order": "create_first", "boot_status": 200, "shutdown_status": 500, "shutdown_body": "{\"ok\":false,\"error\":\"paused-state persist failed after shutdown\"}" },
+      { "name": "adm-race-cf-001", "client_order": "create_first", "boot_status": 200, "shutdown_status": 500, "shutdown_body": "{\"ok\":false,\"error\":\"paused-state persist failed after shutdown\"}" },
+      { "name": "adm-race-cf-002", "client_order": "create_first", "boot_status": 200, "shutdown_status": 500, "shutdown_body": "{\"ok\":false,\"error\":\"paused-state persist failed after shutdown\"}" },
+      { "name": "adm-race-sf-000", "client_order": "shutdown_first", "boot_status": 200, "shutdown_status": 500, "shutdown_body": "{\"ok\":false,\"error\":\"paused-state persist failed after shutdown\"}" },
+      { "name": "adm-race-sf-001", "client_order": "shutdown_first", "boot_status": 200, "shutdown_status": 500, "shutdown_body": "{\"ok\":false,\"error\":\"paused-state persist failed after shutdown\"}" },
+      { "name": "adm-race-sf-002", "client_order": "shutdown_first", "boot_status": 200, "shutdown_status": 500, "shutdown_body": "{\"ok\":false,\"error\":\"paused-state persist failed after shutdown\"}" }
+    ],
+    "reproducibility": "6/6 trials, both client-side thread orderings, identical typed outcome: boot succeeded (200), shutdown failed (500) with the same structured error body.",
+    "server_log_timeline_adm_race_cf_000": [
+      "08:05:48Z INFO keeper lifecycle shutdown name=adm-race-cf-000 actor=dashboard started",
+      "08:05:48Z INFO keeper lifecycle boot name=adm-race-cf-000 actor=dashboard started",
+      "08:05:48Z INFO Keeper shutdown found already absent: keeper=adm-race-cf-000",
+      "08:05:48Z ERROR keeper adm-race-cf-000 pause: owner lookup failed: Keeper owner not found: adm-race-cf-000",
+      "08:05:48Z WARN keeper lifecycle shutdown name=adm-race-cf-000 actor=dashboard outcome=persist_failed duration_ms=2",
+      "08:05:48Z INFO create_keeper: starting for name=adm-race-cf-000",
+      "08:05:48Z INFO create_keeper: starting keepalive for name=adm-race-cf-000",
+      "08:05:48Z INFO registry: registering keeper name=adm-race-cf-000 base_path=/Users/dancer/me phase=offline",
+      "08:05:48Z INFO registry: phase transition name=adm-race-cf-000 old=offline new=running event=fiber_started",
+      "08:05:48Z INFO create_keeper: completed for name=adm-race-cf-000 trace_id=trace-1786694748444-00004",
+      "08:05:48Z INFO keeper lifecycle boot name=adm-race-cf-000 actor=dashboard outcome=ok duration_ms=88",
+      "08:05:48Z INFO keepalive turn scheduled for adm-race-cf-000: channel=scheduled_autonomous reasons=scheduled_autonomous_turn,never_started,task_backlog",
+      "08:05:48Z-08:05:57Z [fsm:transition] idle -> phase_gating -> runtime_routing -> awaiting_provider -> streaming -> completing -> done (turn=0 completed, latency_ms=7799, stop=completed)"
+    ],
+    "server_log_timeline_adm_race_sf_000": [
+      "08:06:03Z INFO keeper lifecycle boot name=adm-race-sf-000 actor=dashboard started",
+      "08:06:03Z INFO keeper lifecycle shutdown name=adm-race-sf-000 actor=dashboard started",
+      "08:06:03Z INFO Keeper shutdown found already absent: keeper=adm-race-sf-000",
+      "08:06:03Z ERROR keeper adm-race-sf-000 pause: owner lookup failed: Keeper owner not found: adm-race-sf-000",
+      "08:06:03Z WARN keeper lifecycle shutdown name=adm-race-sf-000 actor=dashboard outcome=persist_failed duration_ms=8",
+      "08:06:03Z INFO create_keeper: starting for name=adm-race-sf-000",
+      "08:06:03Z INFO create_keeper: completed for name=adm-race-sf-000 trace_id=trace-1786694763471-00007",
+      "08:06:03Z INFO keeper lifecycle boot name=adm-race-sf-000 actor=dashboard outcome=ok duration_ms=220",
+      "08:06:03Z-08:06:09Z [fsm:transition] idle -> ... -> done (turn=0 completed, latency_ms=4248, stop=completed)"
+    ],
+    "interpretation": "For every trial, the server-side 'started' log lines for boot and shutdown landed within the same log timestamp regardless of which HTTP request the client fired first, confirming genuine concurrent dispatch on the daemon rather than serialized-by-client-latency execution. The shutdown request found the Owner registry empty for that name ('found already absent' / 'owner not found') and was rejected in 2-8ms with zero durable writes -- it never reached, and could not have reached, session/config/runtime/checkpoint creation, because those happen inside create_keeper on the other racing request. The concurrent create then proceeded through the complete exact-lane launch: keepalive start, registry phase transition offline->running, board-attention worker start/drain, keepalive turn scheduling, and a full FSM turn (phase_gating -> runtime_routing -> awaiting_provider -> streaming -> completing -> done) that produced a real model response -- undisturbed by the overlapping shutdown attempt in all 6 trials.",
+    "state_consistency_check": {
+      "adm_race_cf_000_final_meta": { "paused": true, "latched_reason": { "kind": "operator_paused", "actor": "keeper_down" }, "note": "paused=true only because this evidence run's own cleanup shutdown (a third, sequential call issued after the race, once the keeper already existed) succeeded normally; at the moment of the race itself the keeper launched and ran a full turn with paused=false, matching create-wins." },
+      "config_toml_clean": true,
+      "config_toml_path_example": "/Users/dancer/me/.masc/config/keepers/adm-race-cf-000.toml",
+      "no_partial_or_orphaned_files_observed": true
+    }
+  },
+  "ux_nuance_not_a_defect": {
+    "observation": "The client-facing 500 error body ('paused-state persist failed after shutdown') is generic and does not literally say 'keeper not found' or 'shutdown fence: nothing to shut down', even though the server log is unambiguous ('Keeper shutdown found already absent'). A caller reading only the HTTP response could misread this as 'the shutdown half-succeeded', when in fact nothing was mutated. This is a diagnostics/error-message-clarity gap, not a state-consistency defect: the underlying data (Owner meta, config, session, runtime files) is confirmed clean in every trial."
+  },
+  "unrelated_setup_note": {
+    "detail": "All 6 fresh-name race trials launched with proactive_enabled at its TOML default (true) because AGENT.md was pre-seeded but proactive_enabled was not patched before racing (patching first would have required a pre-existing meta, which is exactly what the trial needed to NOT have). Each of the 6 therefore ran exactly one autonomous scheduled_autonomous keepalive turn immediately after creation. Verified via keeper meta current_task_id (None on all 6) and last_proactive_preview text (all 6 explicitly declined to act, consistent with the AGENT.md instructions used in the drain-restart canary) that no real task backlog item was claimed or touched. All 6 plus the main probe_1 canary were shut down at the end of this run and left paused, not deleted."
+  },
+  "final_state": {
+    "canary_admission_20260814_0803_paused": true,
+    "adm_race_names_all_paused": true,
+    "keepers_deleted": false,
+    "existing_production_keepers_touched": false
+  },
+  "verdict": "PASS",
+  "proves": [
+    "A shutdown request for a keeper name with no existing Owner entry is rejected in 2-8ms with a typed error and mutates zero durable state (no session directory, no checkpoint, no config/runtime write) -- confirmed across 6/6 trials in both request-ordering variants.",
+    "A concurrent create for that same name is completely unaffected by the overlapping, ultimately-rejected shutdown: it proceeds through Owner registration, keepalive start, registry phase transition, and a full exact-lane turn to completion (FSM idle->...->done with a real model response) in all 6 trials.",
+    "Server-side dispatch of the two overlapping HTTP requests is genuinely concurrent (both 'started' log lines share the same timestamp) regardless of which request the client fired first, so this is not an artifact of one request simply completing before the other was ever sent.",
+    "On an already-existing, currently-live keeper, repeat boot/shutdown overlap (probe_1) is also safe and typed in both orderings, though it exercises the already-live wakeup path rather than create_keeper's fence."
+  ],
+  "does_not_prove": [
+    "That PR #28647's specific internal branch (Keeper_shutdown_intake_fence.Intake_shutdown_reserved being returned to a create_keeper call that is itself mid-flight past its own read_meta check) was hit by these HTTP-level races. Because Keeper_owner_registry.begin_shutdown requires an existing Owner entry, and because create_keeper's own read_meta check for a brand-new name always precedes any Owner commit, an external HTTP-level shutdown request for a name create_keeper is actively processing cannot itself reserve the fence before create_keeper's own admission point in the same way the PR's synchronous unit test does. What this evidence proves instead is the externally-observable, end-to-end safety property the PR claims (no split persistence, no orphaned writes, create completes cleanly) -- via the code's actual real-world entry point (Owner_not_found short-circuit), not via the exact internal fence-contention branch.",
+    "Behavior under a slower create (e.g. a keeper whose runtime/config resolution takes long enough for a shutdown request to land while Owner meta is committed but the lane is not yet fully launched) -- the true race window PR #28647 targets. All 6 trials here completed create_keeper end-to-end in well under 300ms, likely too fast for an external, independently-scheduled HTTP request to land inside that specific committed-but-not-launched sub-window.",
+    "Rate-limit or high-concurrency behavior beyond 2 simultaneous requests per name (bucket #28730 was intentionally avoided by keeping this probe to 8 total keepers / ~20 HTTP calls)."
+  ],
+  "required_follow_up": [
+    "Improve the shutdown-of-nonexistent-keeper error body to explicitly say the keeper was not found / nothing to shut down, rather than the generic 'paused-state persist failed after shutdown', so callers do not have to cross-reference server logs to learn nothing was mutated.",
+    "If direct proof of the exact Intake_shutdown_reserved branch is required, it likely needs either an artificial delay instrumented into create_keeper for a test build, or exercising Keeper_shutdown_intake_fence.begin_shutdown directly (as PR #28647's own unit test does) rather than pure external HTTP timing."
+  ]
+}

@@ -2,6 +2,26 @@ module Http = Http_server_eio
 
 val add_routes : Http.Router.t -> Http.Router.t
 
+val resolve_workspace_base :
+  state:Mcp_server.server_state ->
+  uri:Uri.t ->
+  string
+  * [ `Project
+    | `Repository of string
+    | `RepositoryMissing of string
+    | `RepositoryUnknown of string
+    | `Playground of string
+    | `PlaygroundMissing of string
+    | `KeeperUnknown of string ]
+(** The absolute workspace tree a request's relative paths hang off, from
+    the [?repo_id=] / [?keeper=] query params, plus the source tag naming how
+    it was resolved.
+
+    This is the anchor for every repo-relative path the dashboard sends. The
+    IDE LSP proxy resolves its connection anchor through the same function so
+    a document named over the LSP socket and the same document named over
+    [/api/v1/workspace/file] cannot resolve against different roots. *)
+
 (** Pure dispatch logic for the [?keeper=<name>] query param. Exposed
     for unit testing — production code goes through {!add_routes}. *)
 val classify_keeper_query :
@@ -146,6 +166,20 @@ module For_testing : sig
 
   val parse_git_numstat_line : string -> (string * string) option
 
+  val repository_owning : base:string -> path:string -> string option
+  (** The repository that owns [path], searched upward from the file and
+      stopped at [base].
+
+      git does not stop. Asked about a file under a playground that keeps its
+      clones in [repos/<id>/], it finds no repository at the playground root,
+      walks past it, and answers from whichever repository encloses MASC's own
+      checkout -- where the path does not exist, so it prints nothing and a
+      modified file reads as unchanged (#30322).
+
+      [base] is the far edge because it is where the caller's authority ends:
+      the query named a keeper or a repository, and an answer from outside
+      that is not an answer to the question asked. *)
+
   type safe_workspace_file
 
   (** Resolve to both the lexical path used for Git pathspecs and the
@@ -160,6 +194,16 @@ module For_testing : sig
     ?max_bytes:int ->
     safe_workspace_file ->
     (string, workspace_file_read_error) result
+end
+
+module For_testing_log : sig
+  (** White-box helper for the [/api/v1/git/log] row format. Not part of the
+      stable/public workspace API. *)
+
+  (** [git_log_row_of_line line] reads one
+      [%h%x09%ad%x09%an%x09%s]-formatted row; only the first three tabs
+      split, so a subject keeps its own. Malformed rows answer [None]. *)
+  val git_log_row_of_line : string -> Yojson.Safe.t option
 end
 
 module For_testing_blame : sig

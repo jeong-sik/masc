@@ -40,19 +40,13 @@ let iso_now () = Masc_domain.now_iso ()
 let goals_recovery_path config =
   Goal_store.goals_path config ^ ".last-good"
 
-let contains_substring haystack needle =
-  let hl = String.length haystack and nl = String.length needle in
-  let rec scan i = i + nl <= hl && (String.sub haystack i nl = needle || scan (i + 1)) in
-  nl = 0 || scan 0
-
 let make_goal id title =
   let ts = iso_now () in
   {
     Goal_store.id; title;
     metric = None; target_value = None; due_date = None;
     priority = 3; phase = Goal_phase.Executing;
-    parent_goal_id = None;
-    last_review_note = None; last_review_at = None; owner = None;
+    last_review_note = None; last_review_at = None;
     created_at = ts; updated_at = ts;
   }
 
@@ -179,7 +173,6 @@ let test_status_field_no_longer_decodes () =
         ("priority", `Int 3);
         ("status", `String status);
         ("phase", `String phase);
-        ("parent_goal_id", `Null);
         ("last_review_note", `Null);
         ("last_review_at", `Null);
         ("created_at", `String (iso_now ()));
@@ -208,12 +201,13 @@ let test_status_field_no_longer_decodes () =
      the next upsert would overwrite goals.json AND its .last-good mirror with the
      empty state, turning one undecodable row into permanent loss. *)
   (match
-     Goal_store.upsert_goal config ~title:"phase only" ~phase:Goal_phase.Paused ()
+     Goal_store.upsert_goal config ~title:"phase only" ~metric:"m"
+       ~target_value:"1" ~phase:Goal_phase.Dropped ()
    with
    | Ok _ -> fail "upsert_goal wrote over an undecodable store"
    | Error msg ->
        check bool "refusal names the store path" true
-         (contains_substring msg (Goal_store.goals_path config)));
+         (String_util.contains_substring msg (Goal_store.goals_path config)));
   let on_disk_after = In_channel.with_open_bin (Goal_store.goals_path config)
     In_channel.input_all
   in
@@ -225,7 +219,8 @@ let test_status_field_no_longer_decodes () =
 let test_serializer_omits_status () =
   with_workspace @@ fun config ->
   match
-    Goal_store.upsert_goal config ~title:"phase only" ~phase:Goal_phase.Paused ()
+    Goal_store.upsert_goal config ~title:"phase only" ~metric:"m"
+      ~target_value:"1" ~phase:Goal_phase.Dropped ()
   with
   | Error msg -> fail msg
   | Ok (goal, _) -> (
@@ -233,6 +228,43 @@ let test_serializer_omits_status () =
       | `Assoc fields ->
           check bool "serializer omits status" false (List.mem_assoc "status" fields)
       | _ -> fail "goal_to_yojson: expected object")
+
+let add_goal_field config key value =
+  match Yojson.Safe.from_file (Goal_store.goals_path config) with
+  | `Assoc state_fields ->
+    let goals =
+      match List.assoc_opt "goals" state_fields with
+      | Some (`List [ `Assoc goal_fields ]) ->
+        `List [ `Assoc ((key, value) :: goal_fields) ]
+      | _ -> fail "expected one persisted goal"
+    in
+    Workspace.write_json
+      config
+      (Goal_store.goals_path config)
+      (`Assoc (("goals", goals) :: List.remove_assoc "goals" state_fields));
+    Workspace.write_json
+      config
+      (goals_recovery_path config)
+      (`Assoc (("goals", goals) :: List.remove_assoc "goals" state_fields))
+  | _ -> fail "expected persisted goal state object"
+
+let test_other_unknown_goal_field_still_fails () =
+  with_workspace @@ fun config ->
+  let goal = make_goal "unknown-field" "unknown field fails" in
+  Goal_store.write_state config
+    { version = 1; updated_at = iso_now (); goals = [ goal ] };
+  add_goal_field config "unexpected_assignment" (`String "still-closed");
+  check int
+    "unrelated unknown field keeps store undecodable"
+    0
+    (List.length (Goal_store.read_state config).goals);
+  match Goal_store.update_goal config ~goal_id:goal.id Fun.id with
+  | Ok _ -> fail "unknown field licensed a write"
+  | Error detail ->
+    check bool
+      "unknown field write remains fail-closed"
+      true
+      (String_util.contains_substring detail "refusing to write")
 
 let test_phaseless_row_no_longer_decodes () =
   with_workspace @@ fun config ->
@@ -258,8 +290,7 @@ let test_phaseless_row_no_longer_decodes () =
                   ("due_date", `Null);
                   ("priority", `Int 3);
                   ("status", `String "paused");
-                  ("parent_goal_id", `Null);
-                  ("last_review_note", `Null);
+                          ("last_review_note", `Null);
                   ("last_review_at", `Null);
                   ("created_at", `String (iso_now ()));
                   ("updated_at", `String (iso_now ()));
@@ -269,16 +300,16 @@ let test_phaseless_row_no_longer_decodes () =
   let state = Goal_store.read_state config in
   check int "phase-less store rejected as corrupt" 0 (List.length state.goals)
 
-let test_blocked_phase_serializes_without_status () =
+let test_dropped_phase_serializes_without_status () =
   with_workspace @@ fun config ->
   let goal, _kind =
-    match Goal_store.upsert_goal config ~title:"Blocked goal"
-            ~phase:Goal_phase.Blocked ()
+    match Goal_store.upsert_goal config ~title:"Dropped goal"
+            ~metric:"m" ~target_value:"1" ~phase:Goal_phase.Dropped ()
     with
     | Ok payload -> payload
     | Error msg -> fail msg
   in
-  check string "blocked phase stored" "blocked" (Goal_phase.to_string goal.phase);
+  check string "dropped phase stored" "dropped" (Goal_phase.to_string goal.phase);
   match Goal_store.goal_to_yojson goal with
   | `Assoc fields ->
       check bool "no status field persisted" false (List.mem_assoc "status" fields)
@@ -287,13 +318,14 @@ let test_blocked_phase_serializes_without_status () =
 let test_list_goals_filters_by_phase () =
   with_workspace @@ fun config ->
   let make title phase =
-    match Goal_store.upsert_goal config ~title ~phase () with
+    match Goal_store.upsert_goal config ~title ~metric:"m" ~target_value:"1"
+            ~phase () with
     | Ok _ -> ()
     | Error msg -> fail msg
   in
   make "Executing goal" Goal_phase.Executing;
   make "Completed goal" Goal_phase.Completed;
-  make "Blocked goal" Goal_phase.Blocked;
+  make "Dropped goal" Goal_phase.Dropped;
   let goals =
     Goal_store.list_goals config ~phase:Goal_phase.Completed ()
   in
@@ -378,10 +410,12 @@ let () =
             test_status_field_no_longer_decodes;
           test_case "serializer omits status" `Quick
             test_serializer_omits_status;
+          test_case "other unknown goal field still fails" `Quick
+            test_other_unknown_goal_field_still_fails;
           test_case "phase-less row no longer decodes" `Quick
             test_phaseless_row_no_longer_decodes;
-          test_case "blocked phase serializes without status" `Quick
-            test_blocked_phase_serializes_without_status;
+          test_case "dropped phase serializes without status" `Quick
+            test_dropped_phase_serializes_without_status;
           test_case "list_goals filters by phase" `Quick
             test_list_goals_filters_by_phase;
           test_case "missing update: no bump" `Quick

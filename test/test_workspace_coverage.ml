@@ -22,21 +22,6 @@ let () = Workspace_metric_hooks.install ()
 (* Test Helpers                                                  *)
 (* ============================================================ *)
 
-(** Check for success emoji *)
-let contains_check result =
-  String.length result >= 3 && String.sub result 0 3 = "\xE2\x9C\x85" (* ✅ *)
-;;
-
-(** Check for warning emoji *)
-let contains_warning result =
-  String.length result >= 3 && String.sub result 0 3 = "\xE2\x9A\xA0" (* ⚠ *)
-;;
-
-(** Check for error emoji *)
-let contains_error result =
-  String.length result >= 3 && String.sub result 0 3 = "\xE2\x9D\x8C" (* ❌ *)
-;;
-
 (** Check for cancel emoji *)
 let _contains_cancel result =
   String.length result >= 4 && String.sub result 0 4 = "\xF0\x9F\x9A\xAB" (* 🚫 *)
@@ -167,6 +152,20 @@ let with_env key value f =
    | Some v -> Unix.putenv key v
    | None -> Unix.putenv key "");
   result
+;;
+
+let test_mixed_keeper_alias_keeps_canonical_and_loose_receipt_candidates () =
+  with_test_env (fun config ->
+    let candidates =
+      Workspace_task_schedule.keeper_receipt_candidate_names
+        config
+        ~agent_name:"keeper_foo-agent"
+    in
+    Alcotest.(check bool) "canonical keeper candidate" true (List.mem "foo" candidates);
+    Alcotest.(check bool)
+      "historical loose keeper candidate"
+      true
+      (List.mem "keeper_foo" candidates))
 ;;
 
 let latest_ring_seq () =
@@ -628,6 +627,31 @@ let test_claim_next_r_preserves_current_task () =
         true
         (str_contains message "already holds")
     | _ -> Alcotest.fail "second claim should succeed")
+;;
+
+(** The single-claim refusal has to carry its own correction hint: the prompt
+    used to spell out the escape route in prose because the message named the
+    held Task but not the way out. *)
+let test_claim_next_refusal_names_the_release_path () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Alpha" ~priority:1 ~description:"" in
+    let _ = Workspace.add_task config ~title:"Beta" ~priority:2 ~description:"" in
+    let _ = Workspace.claim_next_r config ~agent_name:"claude" () in
+    match Workspace.claim_next_r config ~agent_name:"claude" () with
+    | Workspace.Claim_next_claimed { message; _ } ->
+      Alcotest.(check bool)
+        "names the transition tool"
+        true
+        (str_contains message "masc_transition");
+      Alcotest.(check bool)
+        "names the release action"
+        true
+        (str_contains message "action=release");
+      Alcotest.(check bool)
+        "names the required handoff summary"
+        true
+        (str_contains message "handoff_context.summary")
+    | _ -> Alcotest.fail "second claim should be refused with the held task")
 ;;
 
 let test_release_hard_stop_todo_stays_claimable () =
@@ -1702,20 +1726,55 @@ let test_task_transitions_emit_observability () =
            ; "transition", "start"
            ; "task_id", "task-001"
            ]);
+    (* The done transition is recorded under the acting agent. Nothing
+       synthesises a board-keeper approval: [Approve] is not a task action
+       ([Masc_domain.task_action] is Claim | Start | Done_action | Cancel |
+       Release | Submit_for_verification), and [task_action_of_transition] maps
+       every one of them, so [Custom "task_approve"] has no producer. Asserting
+       its absence alongside the real entry keeps a re-introduced self-approval
+       failing here, which is the boundary types_core.ml states as "A Keeper is
+       not a verifier". *)
+    (* [transition_done_r] routes a live task through [Submit_for_verification]
+       and then a completion authority's verdict, so the actor's last audited
+       transition is the submission. Nothing synthesises a board-keeper
+       approval: [Approve] is not a task action ([Masc_domain.task_action] is
+       Claim | Start | Done_action | Cancel | Release |
+       Submit_for_verification) and [task_action_of_transition] maps every one
+       of them, so [Custom "task_approve"] has no producer. Asserting its
+       absence keeps a re-introduced self-approval failing here, which is the
+       boundary types_core.ml states as "A Keeper is not a verifier". *)
     Alcotest.(check bool)
-      "audit verifier approval recorded"
+      "audit submission recorded"
       true
       (audit_has_entry
          audit_entries
-         ~agent_id:"admin-board-keeper"
+         ~agent_id:claude
          ~action_pred:(function
-           | Audit_log.Custom "task_approve" -> true
+           | Audit_log.Custom "task_submit_for_verification" -> true
            | _ -> false)
          ~details:
            [ "event_family", "task_transition"
-           ; "transition", "approve"
+           ; "transition", "submit_for_verification"
            ; "task_id", "task-001"
            ]);
+    Alcotest.(check bool)
+      "no approval is synthesised for the actor"
+      false
+      (List.exists
+         (fun (entry : Audit_log.audit_entry) ->
+            match entry.action with
+            | Audit_log.Custom "task_approve" -> true
+            | _ -> false)
+         audit_entries);
+    Alcotest.(check bool)
+      "no approval is synthesised for a done transition"
+      false
+      (List.exists
+         (fun (entry : Audit_log.audit_entry) ->
+            match entry.action with
+            | Audit_log.Custom "task_approve" -> true
+            | _ -> false)
+         audit_entries);
     let telemetry_events = Telemetry_eio.read_all_events config in
     let has_started =
       List.exists
@@ -1760,14 +1819,17 @@ let test_task_transitions_emit_observability () =
            ; "transition", "start"
            ; "task_id", "task-001"
            ]);
+    (* A verdict-produced Done is observed as the Done it is; "approve" was
+       never a [task_action] and so never a transition value. The authority
+       rides in the details, not in the transition name. *)
     Alcotest.(check bool)
-      "ring verifier approval recorded"
+      "ring completion recorded"
       true
       (ring_has_entry
          ring_entries
          ~details:
            [ "event_family", "task_transition"
-           ; "transition", "approve"
+           ; "transition", "done"
            ; "task_id", "task-001"
            ]))
 ;;
@@ -1853,20 +1915,37 @@ let test_transition_done_from_claimed_emits_observability () =
     in
     Alcotest.(check bool) "claimed done succeeds" true (contains_check done_result);
     let audit_entries = Audit_log.read_entries ~n:50 config in
+    (* The done transition is recorded under the acting agent. Nothing
+       synthesises a board-keeper approval: [Approve] is not a task action
+       ([Masc_domain.task_action] is Claim | Start | Done_action | Cancel |
+       Release | Submit_for_verification), and [task_action_of_transition] maps
+       every one of them, so [Custom "task_approve"] has no producer. Asserting
+       its absence alongside the real entry keeps a re-introduced self-approval
+       failing here, which is the boundary types_core.ml states as "A Keeper is
+       not a verifier". *)
     Alcotest.(check bool)
-      "claimed task approval audit recorded"
+      "audit submission recorded"
       true
       (audit_has_entry
          audit_entries
-         ~agent_id:"admin-board-keeper"
+         ~agent_id:claude
          ~action_pred:(function
-           | Audit_log.Custom "task_approve" -> true
+           | Audit_log.Custom "task_submit_for_verification" -> true
            | _ -> false)
          ~details:
            [ "event_family", "task_transition"
-           ; "transition", "approve"
+           ; "transition", "submit_for_verification"
            ; "task_id", "task-001"
            ]);
+    Alcotest.(check bool)
+      "no approval is synthesised for a done transition"
+      false
+      (List.exists
+         (fun (entry : Audit_log.audit_entry) ->
+            match entry.action with
+            | Audit_log.Custom "task_approve" -> true
+            | _ -> false)
+         audit_entries);
     let telemetry_events = Telemetry_eio.read_all_events config in
     let has_completed =
       List.exists
@@ -1882,13 +1961,13 @@ let test_transition_done_from_claimed_emits_observability () =
       Log.Ring.recent ~limit:50 ~module_filter:"Task" ~since_seq:before_seq ()
     in
     Alcotest.(check bool)
-      "claimed task ring approval recorded"
+      "claimed task ring completion recorded"
       true
       (ring_has_entry
          ring_entries
          ~details:
            [ "event_family", "task_transition"
-           ; "transition", "approve"
+           ; "transition", "done"
            ; "task_id", "task-001"
            ]))
 ;;
@@ -2134,8 +2213,8 @@ let test_get_active_agents_filters_inactive_runtime_agents () =
 
 let test_get_messages_raw () =
   with_test_env (fun config ->
-    let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"Message 1" in
-    let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"Message 2" in
+    let _ = Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"Message 1" in
+    let _ = Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"Message 2" in
     let msgs = Workspace.get_messages_raw config ~since_seq:0 ~limit:10 in
     Alcotest.(check bool) "has messages" true (List.length msgs >= 2))
 ;;
@@ -2331,7 +2410,9 @@ let gc_make_task ~id ~created_at ~status : Masc_domain.task =
   ; handoff_context = None
   ; cycle_count = 0
   ; reclaim_policy = None
+  ; execution_links = Masc_domain.no_execution_links
   ; do_not_reclaim_reason = None
+  ; skills = []
   }
 ;;
 
@@ -2460,7 +2541,7 @@ let test_gc_restored_task_preserves_old_messages_same_pass () =
     Workspace.append_archive_tasks config [ orphan ];
     let content = "verification context for task-904" in
     let _ =
-      Workspace.broadcast
+      Workspace.broadcast ~audience:Workspace_broadcast.System_record
         config
         ~from_agent:"claude"
         ~content
@@ -2575,7 +2656,9 @@ let test_append_archive_tasks () =
       ; handoff_context = None
       ; cycle_count = 0
       ; reclaim_policy = None
+      ; execution_links = Masc_domain.no_execution_links
       ; do_not_reclaim_reason = None
+      ; skills = []
       }
     in
     Workspace.append_archive_tasks config [ task ];
@@ -2596,6 +2679,64 @@ let predecessor_of config task_id =
   with
   | Some t -> t.predecessor_task_id
   | None -> Alcotest.fail (Printf.sprintf "%s missing from backlog" task_id)
+;;
+
+(* ============================================================ *)
+(* task.skills — the value has to survive the write, or the      *)
+(* prompt line that reads it can never appear                    *)
+(* ============================================================ *)
+
+let task_of config task_id =
+  match
+    List.find_opt
+      (fun (t : Masc_domain.task) -> String.equal t.id task_id)
+      (Workspace.read_backlog config).tasks
+  with
+  | Some t -> t
+  | None -> Alcotest.fail (Printf.sprintf "%s missing from backlog" task_id)
+;;
+
+(* Reading the returned record would only prove the argument reached the
+   constructor. The keeper reads the task back off disk, so the assertion has
+   to go through the backlog: a field that serializes to nothing looks exactly
+   like a field that was never set. *)
+let test_skills_survive_the_backlog_round_trip () =
+  with_test_env (fun config ->
+    match
+      Workspace.add_task_with_result
+        config
+        ~title:"needs a skill"
+        ~priority:3
+        ~description:""
+        ~skills:[ "humanize-korean"; "second-skill" ]
+    with
+    | Error e ->
+      Alcotest.fail ("add_task rejected: " ^ Workspace.add_task_error_to_string e)
+    | Ok created ->
+      let task = task_of config created.Workspace.task_id in
+      Alcotest.(check (list string))
+        "skills read back in the order they were given"
+        [ "humanize-korean"; "second-skill" ]
+        task.Masc_domain.skills)
+;;
+
+(* The ordinary case. Omitting the argument has to leave the field empty
+   rather than absent-but-different, because [format_task_skills] builds no
+   line at all for an empty list. *)
+let test_a_task_without_skills_reads_back_empty () =
+  with_test_env (fun config ->
+    match
+      Workspace.add_task_with_result
+        config
+        ~title:"plain"
+        ~priority:3
+        ~description:""
+    with
+    | Error e ->
+      Alcotest.fail ("add_task rejected: " ^ Workspace.add_task_error_to_string e)
+    | Ok created ->
+      let task = task_of config created.Workspace.task_id in
+      Alcotest.(check (list string)) "no skills" [] task.Masc_domain.skills)
 ;;
 
 let test_predecessor_unknown_rejected () =
@@ -2704,8 +2845,231 @@ let test_predecessor_blank_treated_as_none () =
         ("blank predecessor rejected: " ^ Workspace.add_task_error_to_string e))
 ;;
 
+(* ============================================================ *)
+(* Contract vs. execution links — one concept, one field         *)
+(* ============================================================ *)
+
+let task_of config task_id =
+  match
+    List.find_opt
+      (fun (t : Masc_domain.task) -> String.equal t.id task_id)
+      (Workspace.read_backlog config).tasks
+  with
+  | Some t -> t
+  | None -> Alcotest.fail (Printf.sprintf "%s missing from backlog" task_id)
+;;
+
+let test_task_without_contract_keeps_none () =
+  with_test_env (fun config ->
+    match
+      Workspace.add_task_with_result
+        config
+        ~title:"Unstated criteria"
+        ~priority:2
+        ~description:"body text a title-derived criterion would have swallowed"
+    with
+    | Error e -> Alcotest.fail ("add_task rejected: " ^ Workspace.add_task_error_to_string e)
+    | Ok created ->
+      let task = task_of config created.task_id in
+      Alcotest.(check bool)
+        "creation states no criteria rather than inventing them"
+        true
+        (task.contract = None))
+;;
+
+let test_link_execution_artifacts_leaves_contract_alone () =
+  with_test_env (fun config ->
+    let stated : Masc_domain.task_contract =
+      { strict = false
+      ; completion_contract = [ "dashboard renders the linked run" ]
+      ; required_evidence = [ "artifact:run.log" ]
+      ; inspect_gate_evidence = []
+      ; verify_gate_evidence = [ "artifact:run.log" ]
+      }
+    in
+    match
+      Workspace.add_task_with_result
+        config
+        ~contract:stated
+        ~title:"Stated criteria"
+        ~priority:2
+        ~description:""
+    with
+    | Error e -> Alcotest.fail ("add_task rejected: " ^ Workspace.add_task_error_to_string e)
+    | Ok created ->
+      (match
+         Workspace.link_task_execution_artifacts_r
+           config
+           ~task_id:created.task_id
+           ~session_id:"session-alpha"
+           ~operation_id:"op-beta"
+           ()
+       with
+       | Error err ->
+         Alcotest.failf "link failed: %s" (Masc_domain.show_masc_error err)
+       | Ok _ -> ());
+      let task = task_of config created.task_id in
+      Alcotest.(check (option string))
+        "session id lands on the task"
+        (Some "session-alpha")
+        task.execution_links.session_id;
+      Alcotest.(check (option string))
+        "operation id lands on the task"
+        (Some "op-beta")
+        task.execution_links.operation_id;
+      Alcotest.(check (list string))
+        "linking did not rewrite the stated criteria"
+        stated.completion_contract
+        (match task.contract with
+         | Some c -> c.completion_contract
+         | None -> Alcotest.fail "linking dropped the stated contract"))
+;;
+
+let test_link_execution_artifacts_does_not_create_a_contract () =
+  with_test_env (fun config ->
+    match
+      Workspace.add_task_with_result
+        config
+        ~title:"Unstated criteria, later linked"
+        ~priority:2
+        ~description:""
+    with
+    | Error e -> Alcotest.fail ("add_task rejected: " ^ Workspace.add_task_error_to_string e)
+    | Ok created ->
+      (match
+         Workspace.link_task_execution_artifacts_r
+           config
+           ~task_id:created.task_id
+           ~session_id:"session-gamma"
+           ()
+       with
+       | Error err ->
+         Alcotest.failf "link failed: %s" (Masc_domain.show_masc_error err)
+       | Ok _ -> ());
+      let task = task_of config created.task_id in
+      Alcotest.(check (option string))
+        "session id lands on the task"
+        (Some "session-gamma")
+        task.execution_links.session_id;
+      Alcotest.(check bool)
+        "recording who ran it does not state what done means"
+        true
+        (task.contract = None))
+;;
+
+let test_execution_links_codec_omits_empty () =
+  let task = gc_make_task ~id:"task-l1" ~created_at:gc_ancient_ts ~status:Masc_domain.Todo in
+  let keys =
+    match Masc_domain.task_to_yojson task with
+    | `Assoc kvs -> List.map fst kvs
+    | _ -> []
+  in
+  Alcotest.(check bool)
+    "unlinked task writes no execution_links key"
+    false
+    (List.mem "execution_links" keys);
+  (match Masc_domain.task_of_yojson (Masc_domain.task_to_yojson task) with
+   | Ok decoded ->
+     Alcotest.(check bool)
+       "absent key decodes to no links"
+       true
+       (decoded.execution_links = Masc_domain.no_execution_links)
+   | Error e -> Alcotest.fail ("decode without key failed: " ^ e));
+  let linked =
+    { task with
+      execution_links = { operation_id = Some "op-1"; session_id = Some "sess-1" }
+    }
+  in
+  match Masc_domain.task_of_yojson (Masc_domain.task_to_yojson linked) with
+  | Ok decoded ->
+    Alcotest.(check (option string))
+      "operation id round-trips"
+      (Some "op-1")
+      decoded.execution_links.operation_id;
+    Alcotest.(check (option string))
+      "session id round-trips"
+      (Some "sess-1")
+      decoded.execution_links.session_id
+  | Error e -> Alcotest.fail ("decode with key failed: " ^ e)
+;;
+
+let set_json_member key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+  | other -> other
+;;
+
+let test_task_codec_accepts_removed_contract_fields () =
+  let task =
+    gc_make_task ~id:"task-l2" ~created_at:gc_ancient_ts ~status:Masc_domain.Todo
+  in
+  let legacy_contract =
+    `Assoc
+      [ ( "links"
+        , `Assoc
+            [ "operation_id", `String "op-old"
+            ; "session_id", `String "session-old"
+            ] )
+      ]
+  in
+  let json =
+    Masc_domain.task_to_yojson task
+    |> set_json_member "contract" legacy_contract
+  in
+  (match Masc_domain.task_of_yojson json with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.failf "persisted removed task.contract field was rejected: %s" error);
+  let backlog_json =
+    `Assoc
+      [ "tasks", `List [ json ]
+      ; "last_updated", `String "2026-08-05T00:00:00Z"
+      ; "version", `Int 1
+      ]
+  in
+  match Masc_domain.backlog_of_yojson backlog_json with
+  | Ok _ -> ()
+  | Error error ->
+    Alcotest.failf "backlog with removed task.contract field was rejected: %s" error
+;;
+
+let test_task_codec_rejects_malformed_execution_links () =
+  let task =
+    gc_make_task ~id:"task-l3" ~created_at:gc_ancient_ts ~status:Masc_domain.Todo
+  in
+  let base = Masc_domain.task_to_yojson task in
+  (match
+     base
+     |> set_json_member "execution_links" (`Assoc [])
+     |> Masc_domain.task_of_yojson
+   with
+   | Ok decoded ->
+     Alcotest.(check bool)
+       "empty execution links stay unlinked"
+       true
+       (decoded.execution_links = Masc_domain.no_execution_links)
+   | Error error ->
+     Alcotest.failf "empty execution_links must remain valid: %s" error);
+  List.iter
+    (fun malformed ->
+       match
+         base
+         |> set_json_member "execution_links" malformed
+         |> Masc_domain.task_of_yojson
+       with
+       | Error _ -> ()
+       | Ok _ ->
+         Alcotest.failf
+           "malformed execution_links was silently defaulted: %s"
+           (Yojson.Safe.to_string malformed))
+    [ `Null
+    ; `String "op-1"
+    ; `Assoc [ "operation_id", `Int 7 ]
+    ; `Assoc [ "unknown", `String "value" ]
+    ]
+;;
+
 let test_predecessor_codec_absent_and_malformed () =
-  (* Encoder omits the key when None (old readers never see it). *)
+  (* Encoder omits the key when no predecessor exists. *)
   let without =
     gc_make_task ~id:"task-c1" ~created_at:gc_ancient_ts ~status:Masc_domain.Todo
   in
@@ -2715,7 +3079,7 @@ let test_predecessor_codec_absent_and_malformed () =
     "key omitted when None"
     false
     (List.mem "predecessor_task_id" keys);
-  (* Absent key decodes to None (pre-W2 backlogs parse unchanged). *)
+  (* Absent key decodes to None. *)
   (match Masc_domain.task_of_yojson json with
    | Ok t ->
      Alcotest.(check (option string)) "absent -> None" None t.predecessor_task_id
@@ -2729,8 +3093,7 @@ let test_predecessor_codec_absent_and_malformed () =
        (Some "task-000")
        t.predecessor_task_id
    | Error e -> Alcotest.fail ("round-trip decode failed: " ^ e));
-  (* Malformed value degrades to None instead of erroring — a decode Error
-     would make backlog_of_yojson silently drop the whole task. *)
+  (* A non-string value does not define a predecessor edge. *)
   let malformed =
     match json with
     | `Assoc kvs -> `Assoc (kvs @ [ "predecessor_task_id", `Int 7 ])
@@ -2759,6 +3122,12 @@ let () =
             "preserves priorities"
             `Quick
             test_batch_add_preserves_priorities
+        ] )
+    ; ( "receipt candidates"
+      , [ Alcotest.test_case
+            "mixed alias keeps canonical and loose candidates"
+            `Quick
+            test_mixed_keeper_alias_keeps_canonical_and_loose_receipt_candidates
         ] )
     ; (* === Status === *)
       ( "status"
@@ -2798,6 +3167,10 @@ let () =
             "#10421: preserved task result"
             `Quick
             test_claim_next_r_preserves_current_task
+        ; Alcotest.test_case
+            "single-claim refusal names the release path"
+            `Quick
+            test_claim_next_refusal_names_the_release_path
         ; Alcotest.test_case
             "release hard-stop persists policy, todo stays claimable"
             `Quick
@@ -3012,6 +3385,16 @@ let () =
             `Quick
             test_backlog_version_decode_contract
         ] )
+    ; ( "task skills"
+      , [ Alcotest.test_case
+            "named skills survive the backlog round trip"
+            `Quick
+            test_skills_survive_the_backlog_round_trip
+        ; Alcotest.test_case
+            "a task without skills reads back empty"
+            `Quick
+            test_a_task_without_skills_reads_back_empty
+        ] )
     ; (* === RFC-0323 W2: predecessor_task_id === *)
       ( "predecessor"
       , [ Alcotest.test_case "unknown rejected" `Quick test_predecessor_unknown_rejected
@@ -3031,6 +3414,32 @@ let () =
             "codec absent and malformed"
             `Quick
             test_predecessor_codec_absent_and_malformed
+        ] )
+    ; ( "task contract vs execution links"
+      , [ Alcotest.test_case
+            "creation without a contract keeps None"
+            `Quick
+            test_task_without_contract_keeps_none
+        ; Alcotest.test_case
+            "linking leaves a stated contract alone"
+            `Quick
+            test_link_execution_artifacts_leaves_contract_alone
+        ; Alcotest.test_case
+            "linking does not create a contract"
+            `Quick
+            test_link_execution_artifacts_does_not_create_a_contract
+        ; Alcotest.test_case
+            "execution_links codec omits the empty value"
+            `Quick
+            test_execution_links_codec_omits_empty
+        ; Alcotest.test_case
+            "removed contract fields remain readable"
+            `Quick
+            test_task_codec_accepts_removed_contract_fields
+        ; Alcotest.test_case
+            "malformed execution links are rejected"
+            `Quick
+            test_task_codec_rejects_malformed_execution_links
         ] )
     ]
 ;;

@@ -21,7 +21,7 @@ let config_for_label
     ~(name : string)
     ~(model_label : string)
     ~(system_prompt : string)
-    ~(tools : Agent_sdk.Tool.t list)
+    ~(tools : Agent_core.Tool.t list)
     ~(max_tokens : int option)
     ~(temperature : float option)
     ?stream_idle_timeout_s
@@ -29,10 +29,10 @@ let config_for_label
     ?enable_thinking
     ?provider_config_transform
     ~(description : string option)
-    () : (Runtime_agent.config, Agent_sdk.Error.sdk_error) result =
+    () : (Runtime_agent.config, Agent_core.Error.t) result =
   let* provider =
     Runtime_agent.resolve_provider_config_of_label model_label
-    |> Result.map_error Runtime_agent.label_resolution_error_to_sdk_error
+    |> Result.map_error Runtime_agent.label_resolution_error_to_core_error
   in
   let* provider =
     match provider_config_transform with
@@ -62,7 +62,7 @@ let config_for_label
 (* RFC-0206: the runtime CLI-preflight wrapper is gone; run the attempt
    directly.  Kept as a thin pass-through so the two call sites read unchanged. *)
 let with_cli_preflight ~scope:(_ : string) ~config:(_ : Runtime_agent.config)
-    ~goal:(_ : string) (f : unit -> ('a, Agent_sdk.Error.sdk_error) result) =
+    ~goal:(_ : string) (f : unit -> ('a, Agent_core.Error.t) result) =
   f ()
 
 let run_model_by_label
@@ -73,7 +73,7 @@ let run_model_by_label
     ?stream_idle_timeout_s
     ?temperature
     ?max_tokens
-    ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
+    ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
     ?hooks
     ?enable_thinking
     ?provider_config_transform
@@ -82,17 +82,17 @@ let run_model_by_label
     ?sw
     ?net
     ()
-  : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Runtime_agent.run_result, Agent_core.Error.t) result =
   let* config =
-    config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
+    config_for_label ~name:"agent_core-label-model" ~model_label ~system_prompt
       ~tools ~max_tokens ~temperature ?stream_idle_timeout_s ?hooks
       ?enable_thinking
       ?provider_config_transform
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
       ()
   in
-  match Runtime_oas_runner.require_eio ?sw ?net () with
-  | Error e -> Error (Runtime_oas_runner.eio_context_error_to_sdk_error e)
+  match Runtime_agent_core_runner.require_eio ?sw ?net () with
+  | Error e -> Error (Runtime_agent_core_runner.eio_context_error_to_core_error e)
   | Ok (sw, net) ->
       let transport_resolved = match transport with
         | Some t -> t
@@ -100,7 +100,7 @@ let run_model_by_label
       in
       let config = { config with transport = transport_resolved } in
       Inference_inflight_observation.with_observation
-          ~keeper_name:"oas-label-model"
+          ~keeper_name:"agent_core-label-model"
           ~runtime_id:model_label
           (fun () ->
             with_cli_preflight
@@ -111,20 +111,20 @@ let run_model_by_label
                 | Ok result when accept result.response -> Ok result
                 | Ok result ->
                     let rejection =
-                      Keeper_tool_response.accept_rejection_of_response
+                      Keeper_tooling.Response.accept_rejection_of_response
                         (* RFC-0132-EXEMPT: internal observability *)
                         ~runtime_id:"runtime"
                         result.response
                     in
                     let reason_kind =
                       match rejection.kind with
-                      | Keeper_tool_response.No_usable_progress ->
+                      | Keeper_tooling.Response.No_usable_progress ->
                         Some Accept_no_usable_progress
-                      | Keeper_tool_response.Predicate_rejected ->
+                      | Keeper_tooling.Response.Predicate_rejected ->
                         Some Accept_predicate_rejected
                     in
                     Error
-                      (sdk_error_of_masc_internal_error
+                      (core_error_of_masc_internal_error
                          (Accept_rejected
                             {
                               scope = model_label;
@@ -138,7 +138,7 @@ let run_model_by_label
                               reason_kind;
                               response_shape =
                                 Option.map
-                                  accept_response_shape_of_agent_sdk
+                                  accept_response_shape_of_agent_core
                                   rejection.response_shape;
                               (* RFC-0271 §4.5: preserve provider stop_reason. *)
                               stop_reason = Some result.response.stop_reason;
@@ -156,32 +156,52 @@ let run_named_with_masc_tools
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?stream_idle_timeout_s
     ?temperature
-    ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
+    ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
     ?hooks
     ?raw_trace
     ?on_event
     ?on_yield
     ?on_resume
+    ?on_runtime_attempt_error
     ?transport
     ?(yield_on_tool = false)
     ?provider_config_transform
     ?sw
     ?net
     ()
-  : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
-  let oas_tools = List.map (fun (td : Masc_domain.tool_schema) ->
-    Tool_bridge.oas_tool_of_masc
+  : (Runtime_agent.run_result, Agent_core.Error.t) result =
+  let agent_core_tools = List.map (fun (td : Masc_domain.tool_schema) ->
+    Tool_bridge.agent_core_tool_of_masc
       ~base_path
       ~name:td.name ~description:td.description
       ~input_schema:td.input_schema
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
-  Keeper_turn_driver.run_named ~runtime_id ~keeper_name ~goal ~base_path ~system_prompt ~tools:oas_tools
-    ?temperature
-    ?stream_idle_timeout_s ?hooks
-    ~accept
-    ?raw_trace ?on_event ?on_yield ?on_resume 
-    ?transport ~yield_on_tool ?provider_config_transform ?sw ?net ()
+  let+ selected =
+    Keeper_turn_driver.run_named
+      ~runtime_id
+      ~keeper_name
+      ~goal
+      ~base_path
+      ~system_prompt
+      ~tools:agent_core_tools
+      ?temperature
+      ?stream_idle_timeout_s
+      ?hooks
+      ~accept
+      ?raw_trace
+      ?on_event
+      ?on_yield
+      ?on_resume
+      ?on_runtime_attempt_error
+      ?transport
+      ~yield_on_tool
+      ?provider_config_transform
+      ?sw
+      ?net
+      ()
+  in
+  selected.run_result
 
 let run_model_with_masc_tools
     ~(model_label : string)
@@ -201,17 +221,17 @@ let run_model_with_masc_tools
     ?sw
     ?net
     ()
-  : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
+  : (Runtime_agent.run_result, Agent_core.Error.t) result =
   let* config =
-    config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
+    config_for_label ~name:"agent_core-explicit-model" ~model_label ~system_prompt
       ~tools:[] ~max_tokens ~temperature
       ?stream_idle_timeout_s ?hooks ?enable_thinking
       ?provider_config_transform
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
       ()
   in
-  match Runtime_oas_runner.require_eio ?sw ?net () with
-  | Error e -> Error (Runtime_oas_runner.eio_context_error_to_sdk_error e)
+  match Runtime_agent_core_runner.require_eio ?sw ?net () with
+  | Error e -> Error (Runtime_agent_core_runner.eio_context_error_to_core_error e)
   | Ok (sw, net) ->
       let transport_resolved = match transport with
         | Some t -> t
@@ -219,7 +239,7 @@ let run_model_with_masc_tools
       in
       let config = { config with raw_trace; transport = transport_resolved } in
       Inference_inflight_observation.with_observation
-          ~keeper_name:"oas-explicit-model"
+          ~keeper_name:"agent_core-explicit-model"
           ~runtime_id:model_label
           (fun () ->
             with_cli_preflight
@@ -232,5 +252,12 @@ let run_model_with_masc_tools
                   ~config
                   ~masc_tools
                   ~dispatch
+                  ~agent_core_tool_of_masc:
+                    (fun ~name ~description ~input_schema handler ->
+                      Tool_bridge.agent_core_tool_of_masc
+                        ~name
+                        ~description
+                        ~input_schema
+                        handler)
                   ?on_event
                   goal))

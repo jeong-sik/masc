@@ -11,30 +11,23 @@
 val run :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
-  generation:int ->
-  profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   turn:int ->
-  oas_turn_count:int ->
+  agent_core_turn_count:int ->
   actual_tools:string list ->
-  librarian_messages:Agent_sdk.Types.message list ->
+  librarian_messages:Agent_core.Types.message list ->
   post_turn_t0:float ->
-  inference_telemetry:Agent_sdk.Types.inference_telemetry option ->
+  inference_telemetry:Agent_core.Types.inference_telemetry option ->
   unit ->
   unit
 (** Run the full post-turn memory series.
 
     [post_turn_t0] is the timestamp (from [Time_compat.now ()]) taken
-    immediately before this function is called; it is used to compute
-    the [post_turn_ms] metric written to the decision log.
+    immediately before this function is called. It fences asynchronous
+    counterpart evidence so a later turn is not admitted into this Librarian
+    unit, and starts the [post_turn_ms] metric written to the decision log.
 
-    [inference_telemetry] is [result.response.telemetry] from the OAS
+    [inference_telemetry] is [result.response.telemetry] from the AGENT_CORE
     result; it is optional because some providers do not emit telemetry.
-
-    [profile_defaults] feeds the persona-name resolution shared with the
-    keeper's own system prompt
-    ([Keeper_types_profile.load_resolved_persona_extended]); the resolved
-    persona text rides the Librarian input so curation judges importance
-    through the keeper's identity.
 
     The post-turn entrypoint owns Librarian admission and its execution fence.
     Disabled or invalid configuration does not submit a Librarian unit or read
@@ -43,3 +36,11 @@ val run :
     enabled, every completed conversation turn is eligible for Librarian
     extraction; the Librarian owns semantic selection rather than a scheduler-
     side external-effect heuristic. *)
+
+module For_testing : sig
+  val counterpart_observations_before :
+    base_dir:string ->
+    keeper_name:string ->
+    before:float ->
+    Keeper_counterpart_observation.t list
+end

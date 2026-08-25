@@ -24,28 +24,31 @@ type terminal_class =
   | Protocol_error
   | Config_mismatch
   | Provider_integration
-  | Terminal_effect_transient_failure
+  | Terminal_effect_dependency_unavailable
   | Terminal_effect_policy_rejection
   | Terminal_effect_runtime_failure
   | Terminal_effect_workflow_rejection
+  | Terminal_effect_operator_cancelled
+  | Provider_attempt_effect_fenced
+  | Tool_correction_lost
   | Internal_opaque
 
 type failure_provenance =
-  | Oas_api_error
-  | Oas_provider_error
-  | Oas_agent_error
-  | Oas_mcp_error
-  | Oas_config_error
-  | Oas_serialization_error
-  | Oas_io_error
-  | Oas_orchestration_error
-  | Oas_internal_error
+  | Agent_core_api_error
+  | Agent_core_provider_error
+  | Agent_core_agent_error
+  | Agent_core_mcp_error
+  | Agent_core_config_error
+  | Agent_core_serialization_error
+  | Agent_core_io_error
+  | Agent_core_orchestration_error
+  | Agent_core_internal_error
   | Masc_internal_error
   | Completion_contract
 
 type error_boundary =
   | Masc_execution
-  | Oas_execution
+  | Agent_core_execution
 
 type route =
   | Retry_after_observed of
@@ -59,20 +62,20 @@ type route =
       ; detail : string
       }
 
-let sdk_error_is_hard_quota (err : Agent_sdk.Error.sdk_error) =
+let core_error_is_hard_quota (err : Agent_core.Error.t) =
   match err with
-  | Agent_sdk.Error.Api (Llm_provider.Retry.PaymentRequired _)
-  | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) ->
+  | Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _)
+  | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) ->
     true
-  | Agent_sdk.Error.Api _
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Agent _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.Internal _ ->
+  | Agent_core.Error.Api _
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _ ->
     false
 ;;
 
@@ -82,7 +85,7 @@ let observe_retry ?retry_after retry_class =
 let rotate rotate_class = Rotate_now { rotate = rotate_class }
 
 let failure_detail err =
-  Keeper_internal_error.cap_blocker_detail (Agent_sdk.Error.to_string err)
+  Keeper_internal_error.cap_blocker_detail (Agent_core.Error.to_string err)
 
 let exhaust ~err ~provenance terminal_class =
   Exhausted_visible_alive
@@ -131,20 +134,37 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
        exhaust_failure Contract_violation
      | Tool_result.Proven_post_effect | Tool_result.Effect_outcome_unknown ->
        (match failure_class with
-        | Tool_result.Transient_error ->
-          exhaust_failure Terminal_effect_transient_failure
+        | Tool_result.Dependency_unavailable ->
+          exhaust_failure Terminal_effect_dependency_unavailable
         | Tool_result.Policy_rejection ->
           exhaust_failure Terminal_effect_policy_rejection
         | Tool_result.Runtime_failure ->
           exhaust_failure Terminal_effect_runtime_failure
         | Tool_result.Workflow_rejection ->
-          exhaust_failure Terminal_effect_workflow_rejection))
+          exhaust_failure Terminal_effect_workflow_rejection
+        | Tool_result.Operator_cancelled ->
+          exhaust_failure Terminal_effect_operator_cancelled))
+  | Keeper_internal_error.Provider_attempt_effect_fenced
+      { effect_disposition; _ } ->
+    (match effect_disposition with
+     | Keeper_provider_attempt_effect_core.No_effect_observed ->
+       exhaust_failure Contract_violation
+     | Keeper_provider_attempt_effect_core.Effect_attempted
+     | Keeper_provider_attempt_effect_core.Observation_unavailable ->
+       exhaust_failure Provider_attempt_effect_fenced)
+  | Keeper_internal_error.Tool_correction_lost { effect_disposition; _ } ->
+    (match effect_disposition with
+     | Keeper_provider_attempt_effect_core.No_effect_observed ->
+       exhaust_failure Contract_violation
+     | Keeper_provider_attempt_effect_core.Effect_attempted
+     | Keeper_provider_attempt_effect_core.Observation_unavailable ->
+       exhaust_failure Tool_correction_lost)
   | Keeper_internal_error.Internal_unhandled_exception _
   | Keeper_internal_error.Internal_bridge_exception _ ->
     exhaust_failure Internal_opaque
 
 let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
-  let exhaust_failure = exhaust ~err ~provenance:Oas_api_error in
+  let exhaust_failure = exhaust ~err ~provenance:Agent_core_api_error in
   match api with
   | Llm_provider.Retry.RateLimited { retry_after; _ } ->
     observe_retry ?retry_after Rate_limited
@@ -162,7 +182,7 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
   | Llm_provider.Retry.InputCapacity _ -> exhaust_failure Deterministic_request
 
 let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
-  let exhaust_failure = exhaust ~err ~provenance:Oas_provider_error in
+  let exhaust_failure = exhaust ~err ~provenance:Agent_core_provider_error in
   match p with
   | Llm_provider.Error.RateLimit { retry_after; _ } -> observe_retry ?retry_after Rate_limited
   | Llm_provider.Error.HardQuota { retry_after; _ } -> observe_retry ?retry_after Hard_quota
@@ -189,43 +209,43 @@ let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   | Llm_provider.Error.ProviderTerminal _ ->
     exhaust_failure Provider_integration
 
-let provenance_for_boundary boundary oas_provenance =
+let provenance_for_boundary boundary agent_core_provenance =
   match boundary with
-  | Oas_execution -> oas_provenance
+  | Agent_core_execution -> agent_core_provenance
   | Masc_execution -> Masc_internal_error
 ;;
 
-let route_of_error_family ~boundary (err : Agent_sdk.Error.sdk_error) : route =
+let route_of_error_family ~boundary (err : Agent_core.Error.t) : route =
   let exhaust_failure provenance terminal =
     exhaust ~err ~provenance:(provenance_for_boundary boundary provenance) terminal
   in
   match err with
-  | Agent_sdk.Error.Api api -> route_of_api_error ~err api
-  | Agent_sdk.Error.Provider p -> route_of_provider_error ~err p
-  | Agent_sdk.Error.Mcp _ ->
-    exhaust_failure Oas_mcp_error Protocol_error
-  | Agent_sdk.Error.Config _ ->
-    exhaust_failure Oas_config_error Config_mismatch
-  | Agent_sdk.Error.Agent _ ->
-    exhaust_failure Oas_agent_error Internal_opaque
-  | Agent_sdk.Error.Serialization _ ->
-    exhaust_failure Oas_serialization_error Internal_opaque
-  | Agent_sdk.Error.Io _ ->
-    exhaust_failure Oas_io_error Internal_opaque
-  | Agent_sdk.Error.Orchestration _ ->
-    exhaust_failure Oas_orchestration_error Internal_opaque
-  | Agent_sdk.Error.Internal _ ->
-    exhaust_failure Oas_internal_error Internal_opaque
+  | Agent_core.Error.Api api -> route_of_api_error ~err api
+  | Agent_core.Error.Provider p -> route_of_provider_error ~err p
+  | Agent_core.Error.Mcp _ ->
+    exhaust_failure Agent_core_mcp_error Protocol_error
+  | Agent_core.Error.Config _ ->
+    exhaust_failure Agent_core_config_error Config_mismatch
+  | Agent_core.Error.Agent _ ->
+    exhaust_failure Agent_core_agent_error Internal_opaque
+  | Agent_core.Error.Serialization _ ->
+    exhaust_failure Agent_core_serialization_error Internal_opaque
+  | Agent_core.Error.Io _ ->
+    exhaust_failure Agent_core_io_error Internal_opaque
+  | Agent_core.Error.Orchestration _ ->
+    exhaust_failure Agent_core_orchestration_error Internal_opaque
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
+    exhaust_failure Agent_core_internal_error Internal_opaque
 ;;
 
-let route_of_error ~boundary (err : Agent_sdk.Error.sdk_error) : route =
+let route_of_error ~boundary (err : Agent_core.Error.t) : route =
   match Keeper_internal_error.classify_masc_internal_error err with
   | Some (Keeper_internal_error.Terminal_effect_failed _ as internal) ->
     route_of_masc_internal ~err internal
   | Some internal ->
     (match boundary with
      | Masc_execution -> route_of_masc_internal ~err internal
-     | Oas_execution -> route_of_error_family ~boundary err)
+     | Agent_core_execution -> route_of_error_family ~boundary err)
   | None -> route_of_error_family ~boundary err
 
 let retry_after_of_route = function
@@ -262,10 +282,14 @@ let terminal_class_label = function
   | Protocol_error -> "protocol_error"
   | Config_mismatch -> "config_mismatch"
   | Provider_integration -> "provider_integration"
-  | Terminal_effect_transient_failure -> "terminal_effect_transient_failure"
+  | Terminal_effect_dependency_unavailable ->
+    "terminal_effect_dependency_unavailable"
   | Terminal_effect_policy_rejection -> "terminal_effect_policy_rejection"
   | Terminal_effect_runtime_failure -> "terminal_effect_runtime_failure"
   | Terminal_effect_workflow_rejection -> "terminal_effect_workflow_rejection"
+  | Terminal_effect_operator_cancelled -> "terminal_effect_operator_cancelled"
+  | Provider_attempt_effect_fenced -> "provider_attempt_effect_fenced"
+  | Tool_correction_lost -> "tool_correction_lost"
   | Internal_opaque -> "internal_opaque"
 
 let route_class_label = function

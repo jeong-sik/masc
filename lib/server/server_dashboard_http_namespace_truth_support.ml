@@ -2,37 +2,8 @@
 
 open Dashboard_http_helpers
 
-let pending_confirm_summary_ttl = 10.0
-let pending_confirm_summary_stale_for = pending_confirm_summary_ttl *. 3.0
-
-let pending_confirm_summary_empty_json =
-  `Assoc
-    [
-      ("actor_filter", `Null);
-      ("filter_active", `Bool false);
-      ("visible_count", `Int 0);
-      ("total_count", `Int 0);
-      ("hidden_count", `Int 0);
-      ("hidden_actors", `List []);
-      ("confirm_required_actions", `List []);
-    ]
-
-let last_good_pending_confirm_summary : Yojson.Safe.t Atomic.t =
-  Atomic.make pending_confirm_summary_empty_json
-
-let pending_confirm_summary_cached (config : Workspace.config) =
-  let key = Printf.sprintf "pending_confirm_summary:%s" config.base_path in
-  let fallback = Atomic.get last_good_pending_confirm_summary in
-  let compute () =
-    let json = Operator_control.pending_confirm_summary_json config in
-    Atomic.set last_good_pending_confirm_summary json;
-    json
-  in
-  if Option.is_some (Eio_context.get_switch_opt ()) then
-    Dashboard_cache.seed_stale_if_missing key
-      ~stale_for:pending_confirm_summary_stale_for fallback;
-  let result = Dashboard_cache.get_or_compute key ~ttl:pending_confirm_summary_ttl compute in
-  if result = `Null then fallback else result
+let pending_confirm_summary_json (config : Workspace.config) =
+  Operator_control.pending_confirm_summary_json config
 
 let dashboard_namespace_truth_focus_json ~initialized ~runtime_count ~top_queue =
   let focus_of_queue queue =
@@ -128,23 +99,11 @@ let execution_summary_json execution_json =
     | Some (`List items) -> items
     | _ -> []
   in
-  let execution_operation_briefs =
-    json_list_field "operation_briefs" execution_json |> take_n 20
-  in
-  let execution_worker_support =
-    json_list_field "worker_support_briefs" execution_json |> take_n 10
-  in
-  let execution_continuity =
-    json_list_field "continuity_briefs" execution_json |> take_n 10
-  in
-  let execution_keepers = json_list_field "keepers" execution_json |> take_n 20 in
+  let execution_operation_briefs = json_list_field "operation_briefs" execution_json in
+  let execution_worker_support = json_list_field "worker_support_briefs" execution_json in
+  let execution_continuity = json_list_field "continuity_briefs" execution_json in
+  let execution_keepers = json_list_field "keepers" execution_json in
   let has_text key json = json_string_field_opt key json |> Option.is_some in
-  (* This summary is always derived here. A pass-through arm used to return an
-     upstream [summary] whose [blocked_sessions] count was already an int, but
-     the team-session surfaces that produced that field were removed in #6363
-     and no producer has written it since — the arm could not be reached, so the
-     derivation below already ran on every request. Keeping the arm advertised a
-     pass-through path that does not exist. *)
   `Assoc
     [
       ("active_operations", `Int (List.length execution_operation_briefs));
@@ -219,22 +178,10 @@ let json_bool_field key json ~default =
 let keeper_live keeper =
   json_bool_field "keepalive_running" keeper ~default:false
 
-let keeper_has_goal keeper =
-  json_list_field "active_goal_ids" keeper <> []
-
-let keeper_actor_names keeper =
-  [ json_string_field_opt "name" keeper; json_string_field_opt "agent_name" keeper ]
-  |> List.filter_map Fun.id
-
 let task_is_active task =
   match json_string_field_opt "status" task with
   | Some ("todo" | "claimed" | "in_progress" | "awaiting_verification") -> true
   | _ -> false
-
-let readiness_score_of_status = function
-  | "bad" -> 40
-  | "warn" -> 72
-  | _ -> 100
 
 let summary_of_reasons ~ok_message reasons =
   match reasons with
@@ -245,13 +192,11 @@ let metrics_json entries =
   `Assoc (List.map (fun (key, value) -> (key, `Int value)) entries)
 
 let readiness_pillar_json ~key ~label ~status ~ok_message ~reasons ~metrics =
-  let score = readiness_score_of_status status in
   `Assoc
     [
       ("key", `String key);
       ("label", `String label);
       ("status", `String status);
-      ("score", `Int score);
       ("summary", `String (summary_of_reasons ~ok_message reasons));
       ("blocking_reasons", `List (List.map (fun reason -> `String reason) reasons));
       ("metrics", metrics_json metrics);
@@ -302,28 +247,9 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
     count_where live_keepers (fun keeper ->
       Option.is_some (json_string_field_opt "runtime_blocker_class" keeper))
   in
-  let goalful_keeper_names =
-    List.fold_left
-      (fun acc keeper ->
-        if keeper_has_goal keeper then
-          keeper_actor_names keeper
-          |> List.fold_left (fun names name -> String_set.add name names) acc
-        else acc)
-      String_set.empty keepers
-  in
-  let goalful_keeper_count = String_set.cardinal goalful_keeper_names in
-  let goal_dark_live_count =
-    count_where live_keepers (fun keeper -> not (keeper_has_goal keeper))
-  in
   let unassigned_active_tasks =
     count_where tasks (fun task ->
       Option.is_none (json_string_field_opt "assignee" task))
-  in
-  let assigned_goal_dark_tasks =
-    count_where tasks (fun task ->
-      match json_string_field_opt "assignee" task with
-      | Some assignee -> not (String_set.mem assignee goalful_keeper_names)
-      | None -> false)
   in
   let missing_audit_live_count =
     count_where live_keepers (fun keeper ->
@@ -380,31 +306,14 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
   let goal_coherence_reasons =
     List.filter_map Fun.id
       [
-        (if tasks <> [] && goalful_keeper_count = 0 then
-           Some "Active tasks exist, but no keeper exposes linked goals"
-         else None);
         (if unassigned_active_tasks > 0 then
            Some
              (Printf.sprintf "%d active tasks are still unassigned" unassigned_active_tasks)
          else None);
-        (if assigned_goal_dark_tasks > 0 then
-           Some
-             (Printf.sprintf "%d active tasks are assigned to keepers without visible goal context"
-                assigned_goal_dark_tasks)
-         else None);
-        (if goal_dark_live_count > 0 then
-           Some
-             (Printf.sprintf "%d live keepers are active without linked goal context"
-                goal_dark_live_count)
-         else None);
       ]
   in
   let goal_coherence_status =
-    if (tasks <> [] && goalful_keeper_count = 0) || unassigned_active_tasks > 0
-    then "bad"
-    else if assigned_goal_dark_tasks > 0 || goal_dark_live_count > 0
-    then "warn"
-    else "ok"
+    if unassigned_active_tasks > 0 then "bad" else "ok"
   in
   let operational_clarity_reasons =
     List.filter_map Fun.id
@@ -451,14 +360,12 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
         ~key:"goal_coherence"
         ~label:"Goal Coherence"
         ~status:goal_coherence_status
-        ~ok_message:"Active work is attached to keepers with visible goal context."
+        ~ok_message:"Active tasks all carry an assignee."
         ~reasons:goal_coherence_reasons
         ~metrics:
           [
             ("active_tasks", List.length tasks);
-            ("goalful_keepers", goalful_keeper_count);
             ("unassigned_tasks", unassigned_active_tasks);
-            ("goal_dark_keepers", goal_dark_live_count);
           ];
       readiness_pillar_json
         ~key:"operational_clarity"
@@ -478,15 +385,6 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
     then "warn"
     else "ok"
   in
-  let overall_score =
-    match pillars with
-    | [] -> 100
-    | _ ->
-        List.fold_left
-          (fun acc pillar -> acc + json_int_field "score" pillar ~default:100)
-          0 pillars
-        / List.length pillars
-  in
   let blocking_count =
     pending_visible + runtime_blocker_count + unassigned_active_tasks
     + missing_audit_live_count
@@ -501,6 +399,31 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
           ~recommended_action:"Review approvals in Operations"
           ~requires_decision:true ~provenance:"derived" ()
         :: !events;
+    (* Tool calls a keeper is holding right now. Unlike the rows above, these
+       expire: a held call is denied when its wait runs out, so an operator
+       who never sees it loses the call rather than deferring it. Read live
+       from the registry -- there is nothing durable to read, because the wait
+       exists only while the turn is parked on it. *)
+    (match Keeper_tool_approval_registry.pending
+             (Keeper_tool_approval_registry.shared ())
+     with
+     | [] -> ()
+     | held ->
+       let names =
+         held
+         |> List.map (fun (p : Keeper_tool_approval_registry.pending) ->
+              p.keeper_name)
+         |> List.sort_uniq String.compare
+       in
+       events :=
+         attention_event_json ~severity:"bad" ~kind:"tool_approval_held"
+           ~summary:
+             (Printf.sprintf
+                "%d tool call(s) waiting on you: %s"
+                (List.length held) (String.concat ", " names))
+           ~recommended_action:"Answer in the keeper's chat before the wait ends"
+           ~requires_decision:true ~provenance:"live" ()
+         :: !events);
     List.rev !events
   in
   let keeper_events =
@@ -524,14 +447,6 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
                     ~keeper_name ~target_type:"keeper" ~target_id:keeper_name
                     ~recommended_action:"Open the keeper row and inspect the blocker"
                     ~provenance:"execution" ())
-           | None when not (keeper_has_goal keeper) ->
-               Some
-                 (attention_event_json ~severity:"warn" ~kind:"goal_unscoped"
-                    ~summary:
-                      (Printf.sprintf "%s is active without linked goal context" keeper_name)
-                    ~keeper_name ~target_type:"keeper" ~target_id:keeper_name
-                    ~recommended_action:"Add a short/mid/long goal or link active goals"
-                    ~provenance:"execution" ())
            | None when Option.is_none (json_string_field_opt "tool_audit_at" keeper) ->
                Some
                  (attention_event_json ~severity:"warn" ~kind:"history_gap"
@@ -546,7 +461,6 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
   ( `Assoc
       [
         ("status", `String overall_status);
-        ("score", `Int overall_score);
         ("decision_required_count", `Int pending_visible);
         ("blocking_count", `Int blocking_count);
         ("pillars", `List pillars);
@@ -592,7 +506,7 @@ let runtime_count_authority_json ~runtime_count ~shell_counts
 let compose_namespace_truth_snapshot ~(config : Workspace.config) ~initialized ~shell_json
     ~execution_json =
   let generated_at = Masc_domain.now_iso () in
-  let pending_confirm_summary = pending_confirm_summary_cached config in
+  let pending_confirm_summary = pending_confirm_summary_json config in
   let top_queue = execution_top_queue execution_json in
   let execution_summary = execution_summary_json execution_json in
   let readiness_json, attention_events_json =

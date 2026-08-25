@@ -57,8 +57,6 @@ let inspect_keeper_toml (path : string)
   match load_profile_doc ~path with
   | Error _ as error -> error
   | Ok (doc, defaults) ->
-    let unknown_toml_keys = detect_unknown_keeper_toml_keys doc in
-    let defaults = { defaults with unknown_toml_keys } in
     let name =
       match Keeper_toml_loader.toml_string_opt doc "keeper.name" with
       | Some n when n <> "" -> n
@@ -79,12 +77,7 @@ let inspect_keeper_toml (path : string)
           { defaults with manifest_path = Some path
                         ; id = Some id })
 
-let load_keeper_toml path =
-  match inspect_keeper_toml path with
-  | Error _ as error -> error
-  | Ok (_name, defaults) as loaded ->
-    warn_unknown_keeper_toml_key_names ~path defaults.unknown_toml_keys;
-    loaded
+let load_keeper_toml = inspect_keeper_toml
 
 type keeper_toml_discovery =
   | Loaded of

@@ -7,38 +7,34 @@ open Alcotest
 let () = Mirage_crypto_rng_unix.use_default ()
 
 module EB = Masc.Keeper_unified_turn_event_bus
-module Invocation = Masc.Keeper_invocation_contract
-module Kmsg = Masc.Keeper_msg_async
-module Ops = Masc.Keeper_tool_surface_ops
-module Turn_outcome = Masc.Keeper_turn_outcome
 
 let dummy_event payload =
-  { Agent_sdk.Event_bus.meta =
-      { correlation_id = "c"
-      ; run_id = "r"
-      ; ts = 0.0
-      ; caused_by = None
-      }
+  { Agent_core.Event_bus.meta =
+      Agent_core.Event_bus.mk_envelope
+        ~event_id:"event"
+        ~correlation_id:"c"
+        ~run_id:"r"
+        ()
   ; payload
   }
 ;;
 
 let invocation name =
-  Agent_sdk.Tool_contract.Invocation.create
+  Agent_core.Tool_contract.Invocation.create
     ~tool_use_id:name
     ~turn:0
-    ~completion:Agent_sdk.Tool_contract.Continue_after_success
+    ~completion:Agent_core.Tool_contract.Continue_after_success
     ~schedule:
       { planned_index = 0
       ; batch_index = 0
       ; batch_size = 1
-      ; execution_mode = Agent_sdk.Tool_contract.Serial
+      ; execution_mode = Agent_core.Tool_contract.Serial
       }
 ;;
 
 let tool_called name =
   dummy_event
-    (Agent_sdk.Event_bus.ToolCalled
+    (Agent_core.Event_bus.ToolCalled
        { invocation = invocation name
        ; agent_name = "a"
        ; tool_name = name
@@ -48,11 +44,11 @@ let tool_called name =
 
 let tool_completed name =
   dummy_event
-    (Agent_sdk.Event_bus.ToolCompleted
+    (Agent_core.Event_bus.ToolCompleted
        { invocation = invocation name
        ; agent_name = "a"
        ; tool_name = name
-       ; output = Ok { Agent_sdk.Types.content = "done"; _meta = None }
+       ; output = Ok { Agent_core.Types.content = "done"; _meta = None }
        })
 ;;
 
@@ -171,7 +167,7 @@ let test_state_pending_count_integrity_under_concurrent_updates () =
 ;;
 
 let test_keeper_event_bus_is_intentionally_process_wide () =
-  let bus = Agent_sdk.Event_bus.create () in
+  let bus = Agent_core.Event_bus.create () in
   Event_bus_slots.set_keeper bus;
   let worker = Domain.spawn (fun () -> Event_bus_slots.get_keeper ()) in
   check
@@ -183,8 +179,8 @@ let test_keeper_event_bus_is_intentionally_process_wide () =
 
 let test_turn_event_bus_uses_creation_bus_after_fallback_changes () =
   Eio_main.run @@ fun _env ->
-  let captured_bus = Agent_sdk.Event_bus.create () in
-  let later_bus = Agent_sdk.Event_bus.create () in
+  let captured_bus = Agent_core.Event_bus.create () in
+  let later_bus = Agent_core.Event_bus.create () in
   Event_bus_slots.set_keeper captured_bus;
   let t = EB.create ~keeper_name:"a" ~turn_id:1 () in
   let unsubscribed = ref false in
@@ -200,8 +196,8 @@ let test_turn_event_bus_uses_creation_bus_after_fallback_changes () =
       Event_bus_slots.set_keeper captured_bus)
     (fun () ->
        Event_bus_slots.set_keeper later_bus;
-       Agent_sdk.Event_bus.publish captured_bus (tool_called "captured");
-       Agent_sdk.Event_bus.publish later_bus (tool_called "later");
+       Agent_core.Event_bus.publish captured_bus (tool_called "captured");
+       Agent_core.Event_bus.publish later_bus (tool_called "later");
        let summary = EB.drain ~site:"test_creation_bus" t in
        check int "captured bus only" 1 summary.event_count;
        check
@@ -210,7 +206,7 @@ let test_turn_event_bus_uses_creation_bus_after_fallback_changes () =
          1
          (EB.For_testing.get_state t).pending_tool_count;
        unsubscribe_once ();
-       Agent_sdk.Event_bus.publish captured_bus (tool_called "after-unsubscribe");
+       Agent_core.Event_bus.publish captured_bus (tool_called "after-unsubscribe");
        let summary_after_unsubscribe =
          EB.drain ~site:"test_after_unsubscribe" t
        in
@@ -223,8 +219,8 @@ let test_turn_event_bus_uses_creation_bus_after_fallback_changes () =
 
 let test_turn_event_bus_prefers_injected_bus_over_fallback () =
   Eio_main.run @@ fun _env ->
-  let injected_bus = Agent_sdk.Event_bus.create () in
-  let fallback_bus = Agent_sdk.Event_bus.create () in
+  let injected_bus = Agent_core.Event_bus.create () in
+  let fallback_bus = Agent_core.Event_bus.create () in
   Event_bus_slots.set_keeper fallback_bus;
   let t = EB.create ~event_bus:injected_bus ~keeper_name:"a" ~turn_id:1 () in
   Fun.protect
@@ -232,8 +228,8 @@ let test_turn_event_bus_prefers_injected_bus_over_fallback () =
       EB.unsubscribe t;
       Event_bus_slots.set_keeper fallback_bus)
     (fun () ->
-       Agent_sdk.Event_bus.publish fallback_bus (tool_called "fallback");
-       Agent_sdk.Event_bus.publish injected_bus (tool_called "injected");
+       Agent_core.Event_bus.publish fallback_bus (tool_called "fallback");
+       Agent_core.Event_bus.publish injected_bus (tool_called "injected");
        let summary = EB.drain ~site:"test_injected_bus" t in
        check int "injected bus only" 1 summary.event_count;
        check
@@ -241,302 +237,6 @@ let test_turn_event_bus_prefers_injected_bus_over_fallback () =
          "pending count from injected bus"
          1
          (EB.For_testing.get_state t).pending_tool_count)
-;;
-
-let temp_dir prefix =
-  let path = Filename.temp_file prefix "" in
-  Sys.remove path;
-  Unix.mkdir path 0o700;
-  path
-;;
-
-let keeper_msg_caller = "event-bus-test-caller"
-
-let wait_for_done ~clock ~base_path request_id =
-  let rec loop remaining =
-    match Kmsg.poll ~base_path ~caller:keeper_msg_caller request_id with
-    | Kmsg.Found { Kmsg.status = Kmsg.Done { ok = true; _ }; _ } ->
-      ()
-    | Kmsg.Found { Kmsg.status = Kmsg.Done { ok = false; body; _ }; _ } ->
-      Alcotest.failf "keeper_msg request failed: %s" body
-    | _ when remaining <= 0 ->
-      Alcotest.failf "keeper_msg request %s did not complete" request_id
-    | _ ->
-      Eio.Time.sleep clock 0.01;
-      loop (remaining - 1)
-  in
-  loop 100
-;;
-
-let test_keeper_msg_async_submit_uses_captured_event_bus () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  let base_path = temp_dir "keeper-msg-event-bus-" in
-  let captured_bus = Agent_sdk.Event_bus.create () in
-  let later_bus = Agent_sdk.Event_bus.create () in
-  let observed_bus = ref None in
-  let request =
-    match Invocation.request ~keeper_name:"event-bus-test" ~prompt:"run" with
-    | Ok request -> request
-    | Error error ->
-      Alcotest.fail (Invocation.request_error_to_string error)
-  in
-  Event_bus_slots.set_keeper captured_bus;
-  Fun.protect
-    ~finally:(fun () ->
-      Kmsg.For_testing.clear ();
-      Event_bus_slots.set_keeper captured_bus)
-    (fun () ->
-       let request_id =
-         Ops.For_testing.submit_keeper_msg_with_captured_event_bus
-           ~background_sw:sw
-           ~base_path
-           ~caller:keeper_msg_caller
-           ~request
-           ~f:(fun ?event_bus _request _request_sw ->
-             Event_bus_slots.set_keeper later_bus;
-             observed_bus := event_bus;
-             Tool_result.ok ~tool_name:"keeper-event-bus-test" ~start_time:0.0 "{}")
-           ()
-         |> function
-         | Ok
-             ({ acceptance = Kmsg.Durably_accepted; request_id }
-               : Kmsg.submit_outcome) ->
-           request_id
-         | Ok outcome ->
-           Alcotest.failf
-             "keeper_msg submission requires reconciliation: %s"
-             (Kmsg.submit_outcome_to_json outcome |> Yojson.Safe.to_string)
-         | Error error ->
-           Alcotest.failf
-             "keeper_msg submission rejected: %s"
-             (Kmsg.submit_error_to_json error |> Yojson.Safe.to_string)
-       in
-       wait_for_done ~clock:env#clock ~base_path request_id;
-       check
-         (option pass)
-         "worker received boundary-captured bus"
-         (Some captured_bus)
-         !observed_bus;
-       check
-         (option pass)
-         "worker changed fallback bus after capture"
-         (Some later_bus)
-       (Event_bus_slots.get_keeper ()))
-;;
-
-let require_unique_assoc label = function
-  | `Assoc fields ->
-    let keys = List.map fst fields in
-    let unique_keys = List.sort_uniq String.compare keys in
-    check int (label ^ " has no duplicate keys") (List.length keys)
-      (List.length unique_keys);
-    fields
-  | _ -> Alcotest.fail (label ^ " must be a JSON object")
-;;
-
-let test_keeper_msg_submission_projection_has_unique_keys () =
-  let reason = "directory fsync could not confirm publication" in
-  let outcome : Kmsg.submit_outcome =
-    { request_id = "kmsg-reconciliation-projection"
-    ; acceptance = Kmsg.Reconciliation_required { reason }
-    }
-  in
-  let request =
-    match
-      Invocation.request
-        ~keeper_name:"projection-keeper"
-        ~prompt:"inspect this request"
-    with
-    | Ok request -> request
-    | Error error -> Alcotest.fail (Invocation.request_error_to_string error)
-  in
-  let core_fields =
-    Kmsg.submit_outcome_to_json outcome
-    |> require_unique_assoc "core reconciliation outcome"
-  in
-  check
-    (option string)
-    "uncertainty reason has a dedicated field"
-    (Some reason)
-    (Option.bind
-       (List.assoc_opt "reason" core_fields)
-       (function `String value -> Some value | _ -> None));
-  let tool_fields =
-    Ops.For_testing.submit_outcome_with_keeper_json
-      ~request
-      outcome
-    |> require_unique_assoc "tool reconciliation outcome"
-  in
-  check bool "operator instruction is explicit" true
-    (List.mem_assoc "operator_instruction" tool_fields);
-  check bool "typed run reference is present" true
-    (List.mem_assoc "run_ref" tool_fields);
-  check
-    (option string)
-    "uncertain publication is not reported as queued"
-    (Some "publication_uncertain")
-    (match List.assoc_opt "result_contract" tool_fields with
-     | Some (`String value) -> Some value
-     | _ -> None);
-  let durable_fields =
-    Ops.For_testing.submit_outcome_with_keeper_json
-      ~request
-      { outcome with acceptance = Kmsg.Durably_accepted }
-    |> require_unique_assoc "durable tool submission outcome"
-  in
-  check
-    (option string)
-    "durable submission is queued"
-    (Some "queued")
-    (match List.assoc_opt "status" durable_fields with
-     | Some (`String value) -> Some value
-     | _ -> None);
-  let entry : Kmsg.entry =
-    { request_id = "kmsg-entry-projection"
-    ; keeper_name = "projection-keeper"
-    ; base_path = "/projection/base"
-    ; submitted_by = "projection-caller"
-    ; status = Kmsg.Running
-    ; submitted_at = 0.0
-    ; completed_at = None
-    }
-  in
-  let entry_json =
-    match Invocation.entry_to_json entry with
-    | Ok json -> json
-    | Error error -> Alcotest.fail (Invocation.request_error_to_string error)
-  in
-  let entry_fields =
-    entry_json |> require_unique_assoc "request entry projection"
-  in
-  check int "entry status is projected exactly once" 1
-    (List.fold_left
-       (fun count (key, _) -> if String.equal key "status" then count + 1 else count)
-       0
-       entry_fields);
-  check bool "running contract is typed" true
-    (Invocation.result_contract entry = Invocation.Running);
-  let yielded_entry =
-    { entry with
-      status =
-        Kmsg.Done
-          { ok = true
-          ; body = "checkpoint"
-          ; data =
-              Some
-                (`Assoc
-                   [ ( Turn_outcome.wire_key
-                     , `String
-                         (Turn_outcome.to_label
-                            Turn_outcome.Continuation_checkpoint) )
-                   ])
-          }
-    }
-  in
-  check bool "yield is distinct from completion" true
-    (Invocation.result_contract yielded_entry = Invocation.Yielded);
-  let cancelled_entry =
-    { entry with
-      status = Kmsg.Cancelled { reason = "operator"; cancelled_by = "operator" }
-    }
-  in
-  check bool "cancel is distinct from failure" true
-    (Invocation.result_contract cancelled_entry = Invocation.Cancelled);
-  let failed_entry =
-    { entry with status = Kmsg.Done { ok = false; body = "failed"; data = None } }
-  in
-  check bool "failure is distinct from completion" true
-    (Invocation.result_contract failed_entry = Invocation.Failed)
-;;
-
-let test_typed_keeper_invocation_wire_contract () =
-  let request_json =
-    `Assoc
-      [ ( "target"
-        , `Assoc [ "kind", `String "keeper"; "name", `String "projection-keeper" ] )
-      ; "capability", `String "invoke_turn"
-      ; "prompt", `String "inspect this request"
-      ]
-  in
-  let request =
-    match Invocation.request_of_json request_json with
-    | Ok request -> request
-    | Error error -> Alcotest.fail (Invocation.request_error_to_string error)
-  in
-  check string "typed target decoded" "projection-keeper"
-    (Invocation.target_name request);
-  (match
-     Invocation.request_of_json
-       (`Assoc [ "name", `String "projection-keeper"; "message", `String "legacy" ])
-   with
-   | Error (Invocation.Invalid_wire_value _) -> ()
-   | Error error ->
-     Alcotest.failf "unexpected legacy-input rejection: %s"
-       (Invocation.request_error_to_string error)
-   | Ok _ -> Alcotest.fail "legacy name/message input must not decode");
-  let outcome : Kmsg.submit_outcome =
-    { request_id = "typed-run-ref"; acceptance = Kmsg.Durably_accepted }
-  in
-  let submission_fields =
-    Invocation.delegate_submission_to_json request outcome
-    |> require_unique_assoc "typed submission"
-  in
-  check bool "raw request id omitted" false
-    (List.mem_assoc "request_id" submission_fields);
-  check bool "legacy status omitted" false
-    (List.mem_assoc "status" submission_fields);
-  let run_ref_json =
-    match List.assoc_opt "run_ref" submission_fields with
-    | Some value -> value
-    | None -> Alcotest.fail "typed submission missing run_ref"
-  in
-  let run_ref =
-    match Invocation.run_ref_of_json run_ref_json with
-    | Ok reference -> reference
-    | Error error -> Alcotest.fail (Invocation.request_error_to_string error)
-  in
-  let entry : Kmsg.entry =
-    { request_id = "typed-run-ref"
-    ; keeper_name = "projection-keeper"
-    ; base_path = "/projection/base"
-    ; submitted_by = "projection-caller"
-    ; status = Kmsg.Running
-    ; submitted_at = 0.0
-    ; completed_at = None
-    }
-  in
-  check bool "run ref binds exact durable entry" true
-    (Invocation.run_ref_matches_entry run_ref entry);
-  let wrong_target_ref =
-    match
-      Invocation.run_ref_of_json
-        (`Assoc
-           [ "run_id", `String "typed-run-ref"
-           ; "target", `Assoc [ "kind", `String "keeper"; "name", `String "other" ]
-           ; "capability", `String "invoke_turn"
-           ])
-    with
-    | Ok reference -> reference
-    | Error error -> Alcotest.fail (Invocation.request_error_to_string error)
-  in
-  check bool "same run id cannot retarget invocation" false
-    (Invocation.run_ref_matches_entry wrong_target_ref entry);
-  let entry_fields =
-    match Invocation.delegate_entry_to_json entry with
-    | Ok json -> require_unique_assoc "typed entry" json
-    | Error error -> Alcotest.fail (Invocation.request_error_to_string error)
-  in
-  check bool "entry omits raw request id" false
-    (List.mem_assoc "request_id" entry_fields);
-  check bool "entry exposes result contract" true
-    (List.mem_assoc "result_contract" entry_fields);
-  let cancellation_fields =
-    Invocation.delegate_cancellation_to_json run_ref Kmsg.Cancel_not_found
-    |> require_unique_assoc "typed cancellation"
-  in
-  check bool "cancellation omits raw request id" false
-    (List.mem_assoc "request_id" cancellation_fields)
 ;;
 
 let test_take_drain_cancel_clears_active_without_spin () =
@@ -568,7 +268,7 @@ let test_background_drain_continues_across_multiple_polls () =
     ~mono_clock:env#mono_clock
     ~sw
   @@ fun () ->
-  let bus = Agent_sdk.Event_bus.create () in
+  let bus = Agent_core.Event_bus.create () in
   Event_bus_slots.set_keeper bus;
   let t = EB.create ~keeper_name:"a" ~turn_id:1 () in
   let interval = Masc.Keeper_turn_helpers.turn_event_bus_drain_interval_sec () in
@@ -587,12 +287,12 @@ let test_background_drain_continues_across_multiple_polls () =
       | None -> ()
       | Some cc -> Eio.Cancel.cancel cc (Failure "background_drain_test_done"))
     (fun () ->
-       Agent_sdk.Event_bus.publish bus (tool_called "first");
+       Agent_core.Event_bus.publish bus (tool_called "first");
        EB.start_background_drain ~clock:env#clock t;
        check bool "first event drained" true (wait_for_event_count 1 20);
-       Agent_sdk.Event_bus.publish bus (tool_called "second");
+       Agent_core.Event_bus.publish bus (tool_called "second");
        check bool "second event drained" true (wait_for_event_count 2 20);
-       Agent_sdk.Event_bus.publish bus (tool_called "third");
+       Agent_core.Event_bus.publish bus (tool_called "third");
        check bool "background drain keeps polling" true (wait_for_event_count 3 20))
 ;;
 
@@ -620,12 +320,6 @@ let () =
             test_turn_event_bus_uses_creation_bus_after_fallback_changes
         ; test_case "turn event bus prefers injected bus" `Quick
             test_turn_event_bus_prefers_injected_bus_over_fallback
-        ; test_case "keeper msg async submit uses captured event bus" `Quick
-            test_keeper_msg_async_submit_uses_captured_event_bus
-        ; test_case "keeper msg submission JSON keys are unique" `Quick
-            test_keeper_msg_submission_projection_has_unique_keys
-        ; test_case "typed Keeper invocation wire contract" `Quick
-            test_typed_keeper_invocation_wire_contract
         ] )
     ; ( "background-drain"
       , [ test_case "continues across multiple polls" `Quick

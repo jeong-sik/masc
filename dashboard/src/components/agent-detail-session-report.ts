@@ -14,6 +14,7 @@ import {
 } from './agent-detail-state'
 import { findKeeper } from '../lib/keeper-utils'
 import type { AgentTimelineEvent } from '../api'
+import { timelineEventCategory } from './agent-detail-timeline'
 
 // ── Helpers (exported for testing) ───────────────
 
@@ -36,7 +37,7 @@ function extractBroadcasts(events: AgentTimelineEvent[]): AgentTimelineEvent[] {
 
 /** Extract task-related events from timeline */
 function extractTaskEvents(events: AgentTimelineEvent[]): AgentTimelineEvent[] {
-  return events.filter(evt => evt.type.startsWith('task_'))
+  return events.filter(evt => timelineEventCategory(evt.type) === 'task')
 }
 
 /** Group consecutive broadcasts that are part of the same report.

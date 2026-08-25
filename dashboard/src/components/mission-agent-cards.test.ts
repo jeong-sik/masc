@@ -27,7 +27,7 @@ describe('mission keeper runtime helpers', () => {
       keepalive_running: true,
       last_blocker: 'missing social headers',
       last_heartbeat: '2026-04-04T14:43:49Z',
-      last_autonomous_action_at: '2026-04-04T14:08:35Z',
+      tool_audit_at: '2026-04-04T14:08:35Z',
     } as Keeper
 
     expect(keeperDisplayStatus(keeper, 'idle')).toBe('paused')
@@ -58,22 +58,6 @@ describe('mission keeper runtime helpers', () => {
     expect(keeperRuntimeHint(keeper)).toBe('일시정지됨')
   })
 
-  it('labels timeout pauses as auto-retry wait instead of operator pause', () => {
-    const keeper = {
-      name: 'timeout-paused',
-      status: 'paused',
-      paused: true,
-      keepalive_running: false,
-      runtime_blocker_class: 'turn_timeout',
-      runtime_blocker_summary: 'turn_timeout',
-    } as Keeper
-
-    expect(isKeeperAutoRecoverPause(keeper)).toBe(true)
-    expect(keeperRuntimeHint(keeper)).toBe(
-      '자동 재시도 대기 · 턴 실행 시간이 제한 시간을 초과했습니다.',
-    )
-  })
-
   it('labels TLS handshake provider-runtime pauses as auto-retry wait', () => {
     const keeper = {
       name: 'tls-paused',
@@ -96,13 +80,13 @@ describe('mission keeper runtime helpers', () => {
       status: 'idle',
       paused: true,
       keepalive_running: true,
-      runtime_blocker_class: 'turn_timeout',
+      runtime_blocker_class: 'stale_turn_timeout',
       runtime_blocker_summary: 'Provider turn timed out.',
       last_blocker: 'missing social headers',
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe(
-      '자동 재시도 대기 · Provider turn timed out.',
+      '일시정지 원인 · Provider turn timed out.',
     )
   })
 
@@ -112,12 +96,12 @@ describe('mission keeper runtime helpers', () => {
       status: 'idle',
       paused: true,
       keepalive_running: true,
-      runtime_blocker_class: 'turn_timeout',
+      runtime_blocker_class: 'stale_turn_timeout',
       runtime_blocker_summary: 'Provider turn timed out.',
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe(
-      '자동 재시도 대기 · Provider turn timed out.',
+      '일시정지 원인 · Provider turn timed out.',
     )
   })
 

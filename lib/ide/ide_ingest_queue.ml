@@ -11,14 +11,18 @@ type queue_state =
   { mu : Stdlib.Mutex.t
   ; cond : Eio.Condition.t
   ; items : job Queue.t
-  ; mutable capacity : int
   }
+
+(* Production never changes this — the only writer is [For_testing.reset].
+   Keeping it beside the queue rather than inside it leaves [queue_state]
+   with nothing but its lock, condition and item buffer, and the knob does
+   not need the queue lock to be read. *)
+let capacity = Atomic.make default_capacity
 
 let queue =
   { mu = Stdlib.Mutex.create ()
   ; cond = Eio.Condition.create ()
   ; items = Queue.create ()
-  ; capacity = default_capacity
   }
 
 let with_queue f =
@@ -44,7 +48,7 @@ let submit (job : job) : unit =
          intentionally a Stdlib.Mutex rather than Eio.Mutex because submit can
          be reached from pre-Eio/test contexts, and the protected work never
          performs I/O or suspends. *)
-      if Queue.length queue.items >= queue.capacity
+      if Queue.length queue.items >= Atomic.get capacity
       then (
         (* See [dropped]: eviction is intentional for the bounded newest-job queue. *)
         ignore (Queue.take_opt queue.items : job option);
@@ -86,8 +90,8 @@ let run_writer () =
 module For_testing = struct
   let reset ?(capacity_override = default_capacity) () =
     with_queue (fun () ->
-      queue.capacity <- capacity_override;
       Queue.clear queue.items);
+    Atomic.set capacity capacity_override;
     Atomic.set active false;
     Atomic.set dropped 0;
     Eio.Condition.broadcast queue.cond

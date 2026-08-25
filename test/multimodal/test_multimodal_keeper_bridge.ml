@@ -84,7 +84,7 @@ let test_hydrate_one_provenance () =
   let parent = Aid.generate () in
   let raw = make_raw "image" in
   match
-    B.hydrate_one raw ~now:5.0 ~created_by:"executor"
+    B.hydrate_one raw ~now:5.0 ~created_by:"omega"
       ~origin_artifact_ids:[ parent ]
   with
   | None -> failwith "expected hydrate"
@@ -92,7 +92,7 @@ let test_hydrate_one_provenance () =
       check_bool "1 origin"
         (List.length art.provenance.origin_artifact_ids = 1);
       check_bool "created_by carries through"
-        (String.equal art.provenance.created_by "executor");
+        (String.equal art.provenance.created_by "omega");
       check_bool "created_at = 5.0"
         (Float.equal art.provenance.created_at 5.0)
 

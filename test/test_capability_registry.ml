@@ -6,7 +6,7 @@ open Alcotest
 
 let test_public_visible_surface_exposes_masc_transition () =
   let names =
-    Lib.Capability_registry.visible_public_tool_schemas_from
+    Lib.Capability_registry.visible_tool_schemas_from
       Lib.Config.raw_all_tool_schemas
     |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   in
@@ -61,24 +61,6 @@ let test_board_post_capability_merges_public_and_keeper_projections () =
     (Yojson.Safe.equal public.input_schema keeper.input_schema)
 
 
-let test_local_worker_projection_exposes_internal_and_auditable_tools () =
-  match
-    Lib.Capability_registry.local_worker_tool_schemas
-      ~names:
-        [
-          "masc_heartbeat";
-          "masc_run_plan";
-        ]
-      ()
-  with
-  | Error err -> failf "expected local worker schemas: %s" err
-  | Ok schemas ->
-      let names =
-        List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) schemas
-      in
-      check bool "heartbeat" true (List.mem "masc_heartbeat" names);
-      check bool "masc_run_plan" true (List.mem "masc_run_plan" names)
-
 let test_spawned_agent_surface_stays_curated () =
   let names = Lib.Capability_registry.spawned_agent_prefixed_tools in
   check bool "contains masc_status" true
@@ -92,8 +74,7 @@ let test_keeper_surface_is_exact_descriptor_projection () =
       match seed.projection.surface with
       | Lib.Capability_registry.Keeper -> Some seed.projection.tool_name
       | Lib.Capability_registry.Public_mcp
-      | Lib.Capability_registry.Spawned_agent_mcp
-      | Lib.Capability_registry.Local_worker -> None)
+      | Lib.Capability_registry.Spawned_agent_mcp -> None)
     |> List.sort_uniq String.compare
   in
   let descriptor_names =
@@ -126,8 +107,7 @@ let test_keeper_projection_uses_descriptor_capability_identity () =
            descriptor.Lib.Keeper_tool_descriptor.capability_id
            seed.capability_id)
     | Lib.Capability_registry.Public_mcp
-    | Lib.Capability_registry.Spawned_agent_mcp
-    | Lib.Capability_registry.Local_worker -> ())
+    | Lib.Capability_registry.Spawned_agent_mcp -> ())
 
 let test_inventory_marks_only_projected_keeper_names () =
   let open Yojson.Safe.Util in
@@ -159,9 +139,6 @@ let () =
             `Quick
             test_board_post_capability_merges_public_and_keeper_projections;
 
-          test_case "local worker projection exposes internal and auditable tools"
-            `Quick
-            test_local_worker_projection_exposes_internal_and_auditable_tools;
           test_case "spawned agent surface stays curated" `Quick
             test_spawned_agent_surface_stays_curated;
           test_case "Keeper surface is the exact descriptor projection" `Quick

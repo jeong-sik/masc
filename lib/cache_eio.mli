@@ -17,13 +17,9 @@ type cache_entry = {
 
 (** {1 Configuration} *)
 
-val eviction_sample_threshold : float
-val batch_eviction_interval : float
-
 (** {1 Paths} *)
 
 val cache_dir : Workspace_utils.config -> string
-val ensure_cache_dir : Workspace_utils.config -> unit
 val sanitize_key : string -> string
 val cache_filename : string -> string
 
@@ -54,7 +50,6 @@ val format_stats : int * int * float -> string
 val evict_expired : Workspace_utils.config -> int
 val maybe_evict_expired : Workspace_utils.config -> int
 val count_entries : Workspace_utils.config -> int
-val is_expired : cache_entry -> bool
 val last_batch_eviction : float Atomic.t
 val cached_entry_count : int Atomic.t
 val reset_cached_entry_count : unit -> unit

@@ -109,7 +109,6 @@ type pending_approval =
   ; request_context : Yojson.Safe.t option
   ; task_id : string option
   ; goal_id : string option
-  ; goal_ids : string list
   ; continuation_channel : Keeper_continuation_channel.t
   ; audit_base_path : string
   ; summary_status : summary_status
@@ -121,7 +120,6 @@ module Decision = struct
   type t =
     | Approve
     | Reject of string
-    | Edit of Yojson.Safe.t
 end
 
 type decision = Decision.t
@@ -130,6 +128,12 @@ type decision_source =
   | Always_allowed
   | Auto_judge
   | Human_operator
+
+type authorization_source =
+  | One_shot_resolution
+  | Exact_always_rule
+  | Keeper_always_allow
+  | Workspace_always_allow
 
 type approval_rule =
   { id : string
@@ -156,8 +160,6 @@ type rule_store_error =
   ; reason : string
   }
 
-type resolution_result = { remembered_rule : approval_rule option }
-
 let advisory_judgment_to_string = function
   | Approve -> "approve"
   | Deny -> "deny"
@@ -178,7 +180,6 @@ let advisory_judgment_of_string = function
 let approval_decision_to_string = function
   | Decision.Approve -> "approve"
   | Decision.Reject reason -> "reject:" ^ reason
-  | Decision.Edit _ -> "edit"
 ;;
 
 let decision_source_to_string = function
@@ -194,10 +195,18 @@ let decision_source_of_string = function
   | _ -> None
 ;;
 
-let string_opt_of_json = function
-  | `String value ->
-    let trimmed = String.trim value in
-    if String.equal trimmed "" then None else Some trimmed
+let authorization_source_to_string = function
+  | One_shot_resolution -> "one_shot_resolution"
+  | Exact_always_rule -> "exact_always_rule"
+  | Keeper_always_allow -> "keeper_always_allow"
+  | Workspace_always_allow -> "workspace_always_allow"
+;;
+
+let authorization_source_of_string = function
+  | "one_shot_resolution" -> Some One_shot_resolution
+  | "exact_always_rule" -> Some Exact_always_rule
+  | "keeper_always_allow" -> Some Keeper_always_allow
+  | "workspace_always_allow" -> Some Workspace_always_allow
   | _ -> None
 ;;
 

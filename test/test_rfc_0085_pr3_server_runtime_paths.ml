@@ -6,7 +6,7 @@ open Alcotest
     - lib/server/server_startup_takeover.ml: "/tmp/masc-" literal = 0
       (PID lock now via host.run_dir).
     - lib/server/server_runtime_bootstrap.ml: provider-specific admin policy = 0
-      (MASC bootstrap must not encode provider-specific OAS CLI policy).
+      (MASC bootstrap must not encode provider-specific AGENT_CORE CLI policy).
     - server_startup_takeover invokes Host_config.host >= 1.
 
     AST-based via Ast_grep, so docstring references do not false-positive. *)

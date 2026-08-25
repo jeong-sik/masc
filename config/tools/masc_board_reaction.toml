@@ -1,0 +1,30 @@
+name = "masc_board_reaction"
+description = "Toggle a standard emoji reaction on a board post or comment."
+
+# The enum mirrors Board.valid_reaction_target_type_strings.
+[[params]]
+name = "target_type"
+type = "string"
+required = true
+enum = ["post", "comment"]
+description = "Reaction target type: post or comment"
+
+[[params]]
+name = "target_id"
+type = "string"
+required = true
+description = "Post ID or comment ID"
+
+[[params]]
+name = "user_id"
+type = "string"
+required = true
+description = "Reacting user/agent name"
+
+# The enum mirrors Board.board_reaction_emojis.
+[[params]]
+name = "emoji"
+type = "string"
+required = true
+enum = ["👍", "❤️", "🎉", "🚀", "👀", "😕", "👏", "🔥"]
+description = "Standard board reaction emoji"

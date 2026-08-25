@@ -101,62 +101,6 @@ let test_keeper_subop_timing_log_after_profile_activity () =
   Alcotest.(check bool) "activity timing computed before non-paused log" true
     (activity_idx < emit_idx)
 
-let test_align_keeper_runtime_status_promotes_fresh_runtime_signal () =
-  let status =
-    Operator_control_snapshot.align_keeper_runtime_status
-      ~surface_status:"inactive"
-      ~diagnostic:(`Assoc [ ("health_state", `String "offline") ])
-      ~agent_status_json:
-        (`Assoc
-          [
-            ("status", `String "busy");
-            ("last_seen_ago_s", `Float 5.0);
-          ])
-      ~keepalive_running:true
-  in
-  Alcotest.(check string) "fresh runtime signal promotes keeper status" "busy"
-    status
-
-let test_align_keeper_runtime_status_ignores_legacy_zombie_flag () =
-  let status =
-    Operator_control_snapshot.align_keeper_runtime_status
-      ~surface_status:"inactive"
-      ~diagnostic:(`Assoc [ ("health_state", `String "offline") ])
-      ~agent_status_json:
-        (`Assoc
-          [
-            ("status", `String "busy");
-            ("last_seen_ago_s", `Float 5.0);
-            ("is_zombie", `Bool true);
-          ])
-      ~keepalive_running:true
-  in
-  Alcotest.(check string) "legacy zombie flag has no authority" "busy" status
-
-let test_align_keeper_runtime_status_preserves_attention_health () =
-  let status =
-    Operator_control_snapshot.align_keeper_runtime_status
-      ~surface_status:"inactive"
-      ~diagnostic:(`Assoc [ ("health_state", `String "degraded") ])
-      ~agent_status_json:
-        (`Assoc
-          [
-            ("status", `String "active");
-            ("last_seen_ago_s", `Float 5.0);
-          ])
-      ~keepalive_running:true
-  in
-  Alcotest.(check string) "degraded health remains inactive" "inactive" status
-
-let test_align_keeper_runtime_status_tolerates_null_status_json () =
-  let status =
-    Operator_control_snapshot.align_keeper_runtime_status
-      ~surface_status:"inactive" ~diagnostic:`Null ~agent_status_json:`Null
-      ~keepalive_running:true
-  in
-  Alcotest.(check string) "null runtime status keeps surface status" "inactive"
-    status
-
 let test_usage_does_not_create_context_snapshot () =
   let model_budget = 256_000 in
   let base =
@@ -272,6 +216,16 @@ max-concurrent = 1
   | Ok () -> ()
   | Error err -> Alcotest.failf "Runtime.init_default failed: %s" err
 
+let append_heartbeat_snapshot config keeper_name ~timestamp ~timestamp_unix =
+  Dated_jsonl.append
+    (Keeper_types_support.keeper_metrics_store config keeper_name)
+    (`Assoc
+      (Keeper_metrics_record.fields Keeper_metrics_record.Heartbeat
+       @ [ "ts", `String timestamp
+         ; "ts_unix", `Float timestamp_unix
+         ; "name", `String keeper_name
+         ]))
+
 let test_snapshot_keeps_context_unobserved_and_usage_separate () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -284,6 +238,10 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
       init_runtime_default_for_snapshot base_dir;
       ignore (Workspace.init config ~agent_name:(Some "owner"));
       ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+       | Ok _ -> ()
+       | Error error ->
+         Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
           config;
@@ -336,9 +294,22 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
             };
         }
       in
-      (match Keeper_meta_store.write_meta config updated_meta with
-      | Ok () -> ()
-      | Error err -> Alcotest.fail err);
+      let heartbeat_timestamp = "2026-08-12T01:02:03Z" in
+      append_heartbeat_snapshot
+        config
+        keeper_name
+        ~timestamp:heartbeat_timestamp
+        ~timestamp_unix:1_786_499_323.0;
+      (match
+         Keeper_owner_registry.commit_turn_runtime
+           ~base_path:config.base_path
+           ~keeper_name
+           ~before:meta
+           ~after:updated_meta
+       with
+       | Ok _ -> ()
+       | Error error ->
+         Alcotest.fail (Keeper_owner_registry.command_error_to_string error));
       Operator_control.invalidate_snapshot_cache ();
       let json =
         Operator_control.snapshot_json ~view:"summary"
@@ -354,6 +325,10 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
         | Some keeper -> keeper
         | None -> Alcotest.fail "expected keeper in snapshot"
       in
+      Alcotest.(check bool) "keeper row omits dead agent projection" false
+        (match keeper with
+         | `Assoc fields -> List.mem_assoc "agent" fields
+         | _ -> true);
       Alcotest.(check bool) "unowned ratio is ignored" true
         Yojson.Safe.Util.(keeper |> member "context_ratio" = `Null);
       Alcotest.(check bool) "unowned tokens are ignored" true
@@ -362,6 +337,17 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
         Yojson.Safe.Util.(keeper |> member "context_max" = `Null);
       Alcotest.(check bool) "unowned source is ignored" true
         Yojson.Safe.Util.(keeper |> member "context_source" = `Null);
+      Alcotest.(check (float 0.1)) "summary keeper cadence is projected" 300.0
+        Yojson.Safe.Util.(
+          keeper |> member "keeper_keepalive_interval_s" |> to_float);
+      Alcotest.(check (float 0.1)) "summary snapshot cadence is projected" 300.0
+        Yojson.Safe.Util.(
+          keeper |> member "keeper_snapshot_interval_s" |> to_float);
+      Alcotest.(check (float 0.1)) "summary stale window is projected" 360.0
+        Yojson.Safe.Util.(keeper |> member "heartbeat_stale_after_s" |> to_float);
+      Alcotest.(check string) "summary heartbeat comes from persisted producer"
+        heartbeat_timestamp
+        Yojson.Safe.Util.(keeper |> member "last_heartbeat" |> to_string);
       Alcotest.(check string) "missing owner remains explicit" "not_observed"
         Yojson.Safe.Util.(
           keeper
@@ -428,21 +414,10 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
           {
             meta with
             paused = true;
-            runtime =
-              {
-                meta.runtime with
-                last_blocker =
-                  Some
-                    (Keeper_meta_contract.blocker_info_of_class
-                      ~detail:
-                         "No configured provider runtime remained available"
-                       (Keeper_meta_contract.Runtime_exhausted
-                          Keeper_meta_contract.No_providers_available));
-              };
           }
         | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
       in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail err);
       Dated_jsonl.append
@@ -482,6 +457,12 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
             ("error", `Assoc [ ("kind", `String "runtime") ]);
             ("ended_at", `String (Masc_domain.now_iso ()));
           ]);
+      let heartbeat_timestamp = "2026-08-12T02:03:04Z" in
+      append_heartbeat_snapshot
+        config
+        keeper_name
+        ~timestamp:heartbeat_timestamp
+        ~timestamp_unix:1_786_502_584.0;
       Operator_control.invalidate_snapshot_cache ();
       let snapshot =
         Operator_control.snapshot_json ~view:"summary" ~include_messages:false
@@ -501,6 +482,9 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
         (keeper |> member "runtime_blocker_class" |> to_string);
       Alcotest.(check bool) "attention surfaced" true
         (keeper |> member "needs_attention" |> to_bool);
+      Alcotest.(check string) "paused lightweight heartbeat is persisted truth"
+        heartbeat_timestamp
+        (keeper |> member "last_heartbeat" |> to_string);
       let trust = keeper |> member "runtime_trust" in
       Alcotest.(check string) "trust disposition blocks" "Blocked"
         (trust |> member "disposition" |> to_string);
@@ -531,7 +515,149 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       Alcotest.(check string) "full pause state" "paused"
         (full_keeper |> member "pause_state" |> to_string);
       Alcotest.(check string) "full paused pipeline" "paused"
-        (full_keeper |> member "pipeline_stage" |> to_string))
+        (full_keeper |> member "pipeline_stage" |> to_string);
+      Alcotest.(check string) "full paused heartbeat is persisted truth"
+        heartbeat_timestamp
+        (full_keeper |> member "last_heartbeat" |> to_string))
+
+(* PR #28216 regression: an unreadable heartbeat ledger must not be relabeled
+   as an absent/missing heartbeat.  Corrupt the metrics ledger with an invalid
+   month directory so [Keeper_heartbeat_persisted_snapshot.latest] fails, then
+   assert the operator row surfaces [heartbeat_observation_error] and keeps
+   [last_heartbeat] null instead of substituting a fallback. *)
+let test_lightweight_snapshot_surfaces_heartbeat_read_error () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "heartbeat-read-error" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.For_testing.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      init_runtime_default_for_snapshot base_dir;
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [ ("name", `String keeper_name)
+              ; ( "agent_name"
+                , `String (Keeper_identity.keeper_agent_name keeper_name) )
+              ; ("trace_id", `String "trace-heartbeat-read-error")
+              ])
+        with
+        | Ok meta -> { meta with paused = true }
+        | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
+      in
+      (match Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error err -> Alcotest.fail err);
+      (* Corrupt the heartbeat metrics ledger: an invalid month directory is a
+         layout violation, so the persisted-snapshot read returns an error. *)
+      let metrics_dir =
+        Keeper_types_support.keeper_metrics_dir config keeper_name
+      in
+      let rec mkdir_p path =
+        if not (Sys.file_exists path)
+        then (
+          mkdir_p (Filename.dirname path);
+          Unix.mkdir path 0o755)
+      in
+      mkdir_p (Filename.concat metrics_dir "2026-13");
+      Operator_control.invalidate_snapshot_cache ();
+      let snapshot =
+        Operator_control.snapshot_json ~view:"summary" ~include_messages:false
+          ~include_keepers:true ~include_summary_fields:false
+          ~lightweight_summary:true
+          (operator_ctx env sw config "operator")
+      in
+      let open Yojson.Safe.Util in
+      let keeper =
+        snapshot |> member "keepers" |> member "items" |> to_list
+        |> List.find_opt (fun row -> row |> member "name" |> to_string = keeper_name)
+        |> Option.value ~default:`Null
+      in
+      Alcotest.(check bool) "keeper present" true (keeper <> `Null);
+      Alcotest.(check bool) "last_heartbeat is not relabeled" true
+        (keeper |> member "last_heartbeat" = `Null);
+      Alcotest.(check bool) "heartbeat observation error surfaced" true
+        (keeper |> member "heartbeat_observation_error" <> `Null))
+
+let test_diagnostic_uses_persisted_heartbeat_freshness () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      let keeper_name = "heartbeat-health" in
+      let now_ts = Unix.gettimeofday () in
+      let heartbeat_ts = now_ts -. 30.0 in
+      let heartbeat_timestamp =
+        Masc_domain.iso8601_of_unix_seconds heartbeat_ts
+      in
+      let meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [ "name", `String keeper_name
+              ; "agent_name", `String "keeper-heartbeat-health-agent"
+              ; "trace_id", `String "trace-heartbeat-health"
+              ; "total_turns", `Int 1
+              ])
+        with
+        | Ok meta -> meta
+        | Error error -> Alcotest.fail error
+      in
+      append_heartbeat_snapshot
+        config
+        keeper_name
+        ~timestamp:heartbeat_timestamp
+        ~timestamp_unix:heartbeat_ts;
+      let diagnostic =
+        Keeper_status_runtime.keeper_diagnostic_json
+          ~config
+          ~meta
+          ~keepalive_running:true
+          ~history_items:[]
+          ~now_ts
+      in
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "fresh heartbeat keeps runtime healthy"
+        "healthy"
+        (diagnostic |> member "health_state" |> to_string);
+      Alcotest.(check string) "diagnostic exposes persisted heartbeat"
+        heartbeat_timestamp
+        (diagnostic |> member "last_heartbeat" |> to_string);
+      let active_keeper_name = "active-health" in
+      let active_meta =
+        { meta with
+          name = active_keeper_name
+        ; agent_name = "keeper-active-health-agent"
+        }
+      in
+      append_heartbeat_snapshot
+        config
+        active_keeper_name
+        ~timestamp:(Masc_domain.iso8601_of_unix_seconds (now_ts -. 900.0))
+        ~timestamp_unix:(now_ts -. 900.0);
+      let active_diagnostic =
+        Keeper_status_runtime.keeper_diagnostic_json
+          ~config
+          ~meta:active_meta
+          ~keepalive_running:true
+          ~history_items:[]
+          ~now_ts
+      in
+      Alcotest.(check string) "stale heartbeat stays visible"
+        "stale"
+        (active_diagnostic |> member "health_state" |> to_string))
 
 let test_digest_workspace_includes_keeper_runtime_attention () =
   Eio_main.run @@ fun env ->
@@ -584,19 +710,9 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
         {
           meta with
           paused = true;
-          runtime =
-            {
-              meta.runtime with
-              last_blocker =
-                Some
-                  (Keeper_meta_contract.blocker_info_of_class
-                     ~detail:"No configured provider runtime remained available"
-                     (Keeper_meta_contract.Runtime_exhausted
-                        Keeper_meta_contract.No_providers_available));
-            };
         }
       in
-      (match Keeper_meta_store.write_meta config meta with
+      (match Keeper_meta_store.replace_snapshot config meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail err);
       let digest =
@@ -743,7 +859,7 @@ let test_snapshot_has_expected_sections () =
       ignore (Workspace.init config ~agent_name:(Some "owner"));
       ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       ignore (Workspace.add_task config ~title:"operator backlog" ~priority:2 ~description:"");
-      ignore (Workspace.broadcast config ~from_agent:"owner" ~content:"operator snapshot seed");
+      ignore (Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"owner" ~content:"operator snapshot seed");
       let json = Operator_control.snapshot_json (operator_ctx env sw config "owner") in
       let root = Yojson.Safe.Util.member "workspace" json in
       Alcotest.(check bool) "root block present" true
@@ -758,8 +874,8 @@ let test_snapshot_has_expected_sections () =
         (Yojson.Safe.Util.member "keepers" json <> `Null);
       Alcotest.(check bool) "recent_messages present" true
         (Yojson.Safe.Util.member "recent_messages" json <> `Null);
-      Alcotest.(check bool) "pending_confirms present" true
-        (Yojson.Safe.Util.member "pending_confirms" json <> `Null);
+      Alcotest.(check bool) "pending-confirm envelope present" true
+        (Yojson.Safe.Util.member "pending_confirm_envelope" json <> `Null);
       Alcotest.(check bool) "trace_id present" true
         (json |> Yojson.Safe.Util.member "trace_id" |> Yojson.Safe.Util.to_string
        <> "");
@@ -777,7 +893,7 @@ let test_snapshot_has_expected_sections () =
       let inference = Yojson.Safe.Util.member "inference_inflight" json in
       Alcotest.(check bool) "inference observation present" true
         (inference <> `Null);
-      Alcotest.(check string) "inference boundary owner" "oas_runtime"
+      Alcotest.(check string) "inference boundary owner" "agent_core_runtime"
         Yojson.Safe.Util.(inference |> member "boundary_owner" |> to_string);
       Alcotest.(check int) "no inference active" 0
         Yojson.Safe.Util.(inference |> member "active" |> to_int);
@@ -815,7 +931,9 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
       request_namespace_pause "operator-a";
       request_namespace_pause "operator-b";
       let snapshot = Operator_control.snapshot_json ~actor:"operator-a" ctx in
-      let summary = Yojson.Safe.Util.(snapshot |> member "pending_confirm_summary") in
+      let summary =
+        Yojson.Safe.Util.(snapshot |> member "pending_confirm_envelope" |> member "summary")
+      in
       Alcotest.(check string) "actor filter" "operator-a"
         Yojson.Safe.Util.(summary |> member "actor_filter" |> to_string);
       Alcotest.(check bool) "filter active" true
@@ -967,7 +1085,6 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
             ("ts", `String (Masc_domain.now_iso ()));
             ("ts_unix", `Float (Time_compat.now ()));
             ("trace_id", `String "trace-lightweight-audit");
-            ("generation", `Int 0);
             ("channel", `String "turn");
             ("turn_mode", `String "tool_use");
             ("latency_ms", `Int 1);
@@ -982,7 +1099,6 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
             ("ts", `String (Masc_domain.now_iso ()));
             ("ts_unix", `Float (Time_compat.now ()));
             ("trace_id", `String "trace-lightweight-audit");
-            ("generation", `Int 0);
             ("channel", `String "turn");
             ("turn_mode", `String "text_response");
             ("latency_ms", `Int 1);
@@ -1107,7 +1223,6 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
             ("ts", `String (Masc_domain.now_iso ()));
             ("ts_unix", `Float (Time_compat.now ()));
             ("trace_id", `String "trace-lightweight-recent-tools");
-            ("generation", `Int 0);
             ("channel", `String "turn");
             ("turn_mode", `String "tool_use");
             ("latency_ms", `Int 1);
@@ -1123,7 +1238,6 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
               ("ts", `String (Masc_domain.now_iso ()));
               ("ts_unix", `Float (Time_compat.now ()));
               ("trace_id", `String "trace-lightweight-recent-tools");
-              ("generation", `Int 0);
               ("channel", `String "turn");
               ("turn_mode", `String "text_response");
               ("latency_ms", `Int 1);
@@ -1260,6 +1374,7 @@ let test_digest_workspace_includes_tool_host_failure_attention () =
           tool_name = "masc_keeper_msg";
           transport = "mcp_http";
           phase = Some "tools/call";
+          cause = Failure_envelope.Tool_host_timeout;
           message = "timed out awaiting tools/call after 90s";
           request_id = Some "opsd-toolhost-1";
           session_id = Some "sess-toolhost-1";
@@ -1325,6 +1440,67 @@ let test_last_compaction_ago_s_removed_from_backend_serializers () =
              (Option.is_none (last_substring_index text "last_compaction_ago_s")))
     files
 
+let assert_snapshot_rejects_pending_confirm_store store_json =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      Workspace_utils.mkdir_p (Operator_control.operator_dir config);
+      (match
+         Workspace_utils.write_json_result config
+           (Operator_control.pending_confirms_path config)
+           store_json
+       with
+       | Ok () -> ()
+       | Error error -> Alcotest.fail error);
+      match
+        Operator_control.snapshot_json
+          (operator_ctx env sw config "operator")
+      with
+      | _ -> Alcotest.fail "malformed pending-confirm store must reject snapshot"
+      | exception Operator_control.Store_error _ -> ())
+
+let test_snapshot_rejects_non_list_pending_confirm_store () =
+  assert_snapshot_rejects_pending_confirm_store (`Assoc [])
+
+let test_snapshot_rejects_pending_confirm_without_confirm_token () =
+  assert_snapshot_rejects_pending_confirm_store
+    (`List
+      [ `Assoc
+          [ "trace_id", `String "trace-missing-token"
+          ; "actor", `String "operator"
+          ; "action_type", `String "namespace_pause"
+          ; "target_type", `String "workspace"
+          ; "target_id", `Null
+          ; "payload", `Assoc []
+          ; "delegated_tool", `String "masc_pause"
+          ; "created_at", `String "2026-08-08T00:00:00Z"
+          ; "expires_at", `Null
+          ]
+      ])
+
+let test_snapshot_rejects_pending_confirm_with_invalid_timestamp () =
+  assert_snapshot_rejects_pending_confirm_store
+    (`List
+      [ `Assoc
+          [ "confirm_token", `String "confirm-invalid-time"
+          ; "trace_id", `String "trace-invalid-time"
+          ; "actor", `String "operator"
+          ; "action_type", `String "namespace_pause"
+          ; "target_type", `String "workspace"
+          ; "target_id", `Null
+          ; "payload", `Assoc []
+          ; "delegated_tool", `String "masc_pause"
+          ; "created_at", `String "not-a-timestamp"
+          ; "expires_at", `Null
+          ]
+      ])
+
 let () =
   Alcotest.run
     "operator_control_snapshot"
@@ -1332,21 +1508,13 @@ let () =
       ( "runtime status"
       , [
           Alcotest.test_case
-            "fresh runtime signal promotes status"
+            "diagnostic uses persisted heartbeat freshness"
             `Quick
-            test_align_keeper_runtime_status_promotes_fresh_runtime_signal;
+            test_diagnostic_uses_persisted_heartbeat_freshness;
           Alcotest.test_case
-            "legacy zombie flag has no authority"
+            "lightweight snapshot surfaces heartbeat read error"
             `Quick
-            test_align_keeper_runtime_status_ignores_legacy_zombie_flag;
-          Alcotest.test_case
-            "attention health blocks promotion"
-            `Quick
-            test_align_keeper_runtime_status_preserves_attention_health;
-          Alcotest.test_case
-            "null runtime signal preserves surface status"
-            `Quick
-            test_align_keeper_runtime_status_tolerates_null_status_json;
+            test_lightweight_snapshot_surfaces_heartbeat_read_error;
         ] );
       ( "context metrics ledger"
       , [ Alcotest.test_case
@@ -1363,6 +1531,26 @@ let () =
             "backend serializers do not emit last_compaction_ago_s"
             `Quick
             test_last_compaction_ago_s_removed_from_backend_serializers
+        ] );
+      ( "tool host attention"
+      , [ Alcotest.test_case
+            "digest includes typed tool-host failure"
+            `Quick
+            test_digest_workspace_includes_tool_host_failure_attention
+        ] );
+      ( "pending-confirm store"
+      , [ Alcotest.test_case
+            "non-list store rejects snapshot"
+            `Quick
+            test_snapshot_rejects_non_list_pending_confirm_store
+        ; Alcotest.test_case
+            "missing confirm token rejects snapshot"
+            `Quick
+            test_snapshot_rejects_pending_confirm_without_confirm_token
+        ; Alcotest.test_case
+            "invalid timestamp rejects snapshot"
+            `Quick
+            test_snapshot_rejects_pending_confirm_with_invalid_timestamp
         ] );
     ]
 ;;

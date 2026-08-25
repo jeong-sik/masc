@@ -1,51 +1,73 @@
 
-(** Tool_misc_web_search — Web search MCP tool with multi-provider
-    fallback chain.
+(** Tool_misc_web_search — Web search MCP tool with a
+    credentialed multi-provider chain.
 
     Tries providers in priority order ([Searxng] / [Brave] /
-    [Tavily] / [Exa] / [Bing_api] / [Ddg] / [Bing_rss]) with
-    response caching.
+    [Tavily] / [Exa] / [Bing_api] / [Ollama]) with response
+    caching. Only
+    providers whose credentials are present enter the chain; an
+    empty chain is an explicit configuration failure, never an
+    empty success. [Brave_llm_context] joins only through explicit
+    provider config (never the default order) and answers with a
+    grounded context envelope — [context_text] + [sources] — in
+    place of result rows; its token budget is negotiated in the
+    provider request, not re-truncated locally.
 
-    Internal: ~50+ helpers + 5 internal types stay private —
-    \[normalized_hit] / \[provider] (7-variant) /
-    \[provider_response] / \[cache_entry] (cache + provider data
+    Internal: ~50+ helpers + internal types stay private —
+    [normalized_hit] / [provider] (7-variant) /
+    [grounded_source] / [grounded_context] / [search_payload] /
+    [provider_response] / [cache_entry] (cache + provider data
     types kept internal so callers cannot construct half-formed
     state),
     the pre-compiled whitespace normalizer,
-    text cleaning helpers (\[normalize_spaces],
-    \[clean_search_text], \[trim_nonempty]),
-    \[valid_search_result_url],
-    \[parse_json_search_results] (the generic JSON parser
-    behind the per-provider parsers), \[provider_to_string] /
-    \[provider_of_string] / \[parse_provider_csv] /
-    \[default_provider_order] / \[provider_order],
-    \[take_results], \[normalize_hits], \[provider_error],
-    \[result_data], all 7 \[fetch_*] HTTP fetchers,
-    \[fetch_provider], the cache state cells
-    (\[initial_cache_capacity = 32], \[cache_entries] hashtable,
-    \[cache_mutex]),
-    \[cache_key], \[cache_lookup], \[cache_store],
-    and \[search_impl].  All consumed
+    text cleaning helpers ([normalize_spaces],
+    [clean_search_text], [trim_nonempty]),
+    [valid_search_result_url],
+    [parse_json_search_results] (the generic JSON parser
+    behind the per-provider parsers), [provider_to_string] /
+    [provider_of_string] / [parse_provider_csv] /
+    [default_provider_order] / [provider_order],
+    [take_results], [normalize_hits], [provider_error],
+    [result_data], the per-provider \[fetch_*\] HTTP fetchers,
+    [fetch_provider], the cache state cells
+    (\[initial_cache_capacity = 32\], [cache_entries] hashtable,
+    [cache_mutex]),
+    [cache_key], [cache_lookup], [cache_store],
+    and [search_impl].  All consumed
     only inside {!handle} / {!simulate_for_test} pipelines. *)
 
 (** {1 Simulation outcome (test-only)} *)
 
 (** Per-provider outcome closure for the test simulator —
     [`Hits] supplies pre-fabricated (title, url, snippet)
-    triples; [`Empty] simulates a successful response with no
-    hits; [`Error msg] simulates a transport-layer failure. *)
+    triples; [`Grounded] supplies (url, title, snippets) grounded
+    entries rendered through the same envelope as the live
+    grounded provider (no client-side truncation, matching the
+    request-negotiated budget of the real path); [`Empty]
+    simulates a successful response with no hits; [`Error msg]
+    simulates a transport-layer failure. *)
 type simulated_provider_outcome =
   [ `Error of string
   | `Empty
   | `Hits of (string * string * string) list
+  | `Grounded of (string * string * string list) list
   ]
 
 (** {1 Provider fallback plan} *)
 
+val no_provider_configured_message : string
+(** Rendered when the credentialed provider chain is empty (no
+    searxng URL and no provider API key in the environment).
+    Pinned in the .mli so the tool-matrix expectation references
+    this exact message instead of duplicating the string — a
+    credential-less runner (CI) answers [masc_web_search] with
+    this guard rather than a hit list. *)
+
 val provider_plan : unit -> string list
 (** [provider_plan ()] returns the resolved provider order as
     canonical lowercase labels ([searxng] / [brave] / [tavily] /
-    [exa] / [bing_api] / [duckduckgo] / [bing_rss]).  Reads
+    [exa] / [bing_api] / [ollama], plus [brave_llm_context] when
+    explicitly configured).  Reads
     {!Env_config.Tools.web_search_provider_opt} and
     [web_search_fallbacks_opt] at call time, dedupes preserving
     order, then appends the default provider order to fill any
@@ -67,6 +89,22 @@ val redact_transport_error_detail : string -> string
     URL payloads in operator logs.  Pinned at the contract
     seam: drift would re-leak query content. *)
 
+(** {1 Typed provider error (RFC-0189 PR-2)} *)
+
+type provider_error =
+  | Transport of string  (** network / transport-level failure *)
+  | Server of string     (** endpoint returned a non-200 status or no status *)
+  | Config of string     (** missing credentials / invalid configuration *)
+  | Parse of string      (** payload could not be parsed into hits *)
+
+val provider_error_to_string : provider_error -> string
+(** [provider_error_to_string err] renders a typed per-provider
+    failure as a human-readable, query-safe string with a
+    [transport:] / [server:] / [config:] / [parse:] prefix.
+    Used by {!search_impl}'s aggregate boundary so the fallback
+    chain preserves the per-provider failure class instead of
+    collapsing it into an opaque string. *)
+
 (** {1 Provider parsers}
 
     Each parser returns [(title, url, snippet)] triples filtered
@@ -74,20 +112,6 @@ val redact_transport_error_detail : string -> string
     internally by {!handle}'s fetch pipeline; exposed for unit
     tests so per-provider payload parsing can be exercised
     without an HTTP roundtrip. *)
-
-val looks_like_rss_payload : string -> bool
-(** [looks_like_rss_payload payload] parses XML and is [true] iff the document
-    contains an [rss] or [channel] element.  Used by the Bing
-    fetcher to dispatch between {!parse_bing_rss_items} and
-    {!parse_bing_search_json}. *)
-
-val parse_bing_rss_items : string -> (string * string * string) list
-(** Parse Bing RSS feed items.  Reads [<item>], [<title>],
-    [<link>], and [<description>] elements through the shared XML parser. *)
-
-val parse_ddg_html : string -> (string * string * string) list
-(** Parse DuckDuckGo HTML lite results.  Decodes URL-encoded
-    href values via [Uri.pct_decode]. *)
 
 val parse_searxng_json : string -> (string * string * string) list
 (** Parse SearxNG JSON response from
@@ -109,6 +133,18 @@ val parse_bing_search_json : string -> (string * string * string) list
 (** Parse Bing Search API JSON response from
     [{ "webPages": { "value": \[{name, url, snippet}, ...\] } }]. *)
 
+val parse_ollama_search_json : string -> (string * string * string) list
+(** Parse an Ollama web-search response from
+    [{ "results": \[{title, url, content}, ...\] }]. *)
+
+val parse_brave_llm_context_json : string -> (string * string * string list) list
+(** Parse a Brave LLM Context response from
+    [{ "grounding": { "generic": \[{url, title, snippets}, ...\] } }]
+    into (url, title, snippets) entries.  Total like its sibling
+    parsers: malformed JSON or an unexpected shape yields [[]].
+    Entries without a valid http(s) url or with zero snippets are
+    dropped; a missing title falls back to the url. *)
+
 (** {1 HTML cleaning} *)
 
 val clean_search_text : string -> string
@@ -124,13 +160,19 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
 (** [handle ~tool_name ~start_time args] handles [masc_web_search] tool dispatch.
     Required: [query] (string).  Optional: [limit] (int,
     clamped to [\[1, 10\]], default 5).
-    The misc facade also accepts [includeContent=true] to best-effort enrich
-    each result with raw [page_content] via [WebFetch] and add a top-level
-    keeper-readable [content_text] rendering, plus optional [contentMaxChars]
+    The misc facade also accepts [includeContent=true] to best-effort fetch
+    each result page via [WebFetch] and add a top-level keeper-readable
+    [content_text] rendering (fetched bodies ride only there — the
+    [results] hits keep title/url/snippet), plus optional [contentMaxChars]
     and [contentTimeout] controls. This module remains the search-provider
     boundary to avoid depending on fetch.
 
-    On success [data] is the typed search result envelope.
+    On success [data] is the typed search result envelope. When the
+    serving provider is [brave_llm_context] the envelope carries
+    [grounded=true], [context_text] (the pre-extracted chunks) and
+    [sources] (url/title/snippet_count metadata) instead of [results]
+    rows; [includeContent=true] is then a structural no-op — there are
+    no result rows to enrich and the content already rides inline.
 
     Failure classes (RFC-0189):
     - [Workflow_rejection]: empty query input.

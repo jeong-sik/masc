@@ -1,0 +1,9 @@
+(include_subdirs no)
+
+(library
+ (name mcp_protocol_bundle)
+ (public_name masc.agent_core.mcp_protocol_bundle)
+ (libraries
+  (re_export mcp_protocol)
+  (re_export mcp_protocol.eio)
+  (re_export mcp_protocol.http)))

@@ -72,6 +72,118 @@ let defaults_with_prompt_fields =
     (Keeper_status_bridge.live_override_fields meta defaults_with_prompt_fields)
 ;;
 
+let test_shutdown_phase_names_are_pinned () =
+  (* These strings go on the wire in keeper_status. A consumer waits for a
+     terminal by comparing against them, so renaming one silently breaks that
+     wait — the compiler cannot see a string comparison in a Python runner
+     (#29181). Exhaustiveness is the compiler's job; this pins the values. *)
+  let check expected phase =
+    Alcotest.(check string)
+      expected
+      expected
+      (Keeper_shutdown_types.phase_to_string phase)
+  in
+  check "prepared" Keeper_shutdown_types.Prepared;
+  check "joining_lanes" Keeper_shutdown_types.Joining_lanes;
+  check "joined_idle" Keeper_shutdown_types.Joined_idle
+;;
+
+(* [quiet_reason] and [next_action_path] cross into the dashboard as bare
+   strings. There the union is checked by membership: an unlisted
+   [next_action_path] makes normalizeKeeperDiagnostic drop the whole
+   diagnostic, and an unlisted [quiet_reason] silently erases the reason. The
+   compiler cannot see a TypeScript union, so the match below pins each
+   constructor's wire form — adding one is a compile error here, and the list
+   it must be added to is the same list dashboard/src/types/core.ts mirrors. *)
+let quiet_reason_wire =
+  let open Keeper_status_runtime in
+  [ Proactive_disabled; Keepalive_not_running; Starting_up; Never_started ]
+  |> List.map (fun reason ->
+       ( match reason with
+         | Proactive_disabled -> "disabled"
+         | Keepalive_not_running -> "not_running"
+         | Starting_up -> "startup"
+         | Never_started -> "never_started" )
+       , keeper_quiet_reason_to_string reason )
+;;
+
+let next_action_path_wire =
+  let open Keeper_status_runtime in
+  [ Auto_restart; Recover; Probe; Direct_message ]
+  |> List.map (fun path ->
+       ( match path with
+         | Auto_restart -> "auto_restart"
+         | Recover -> "recover"
+         | Probe -> "probe"
+         | Direct_message -> "direct_message" )
+       , keeper_next_action_path_to_string path )
+;;
+
+let test_quiet_reason_wire_strings_are_pinned () =
+  List.iter
+    (fun (expected, actual) -> Alcotest.(check string) expected expected actual)
+    quiet_reason_wire
+;;
+
+let test_next_action_path_wire_strings_are_pinned () =
+  List.iter
+    (fun (expected, actual) -> Alcotest.(check string) expected expected actual)
+    next_action_path_wire
+;;
+
+let shutdown_operation_with_phase phase =
+  let trace_id =
+    match Keeper_id.Trace_id.of_string "trace-status-bridge-fence-test" with
+    | Ok trace_id -> trace_id
+    | Error detail -> Alcotest.failf "trace id rejected: %s" detail
+  in
+  { Keeper_shutdown_types.schema_version =
+      Keeper_shutdown_types.schema_version
+  ; revision = 1
+  ; operation_id = Keeper_shutdown_types.Operation_id.generate ()
+  ; keeper_name = "verifier"
+  ; lane_ownership = Keeper_shutdown_types.Dormant_meta
+  ; trace_id
+  ; actor = "test"
+  ; cleanup_intent =
+      { Keeper_shutdown_types.reason =
+          Keeper_shutdown_types.Operator_stop_remove_meta
+      ; remove_session = true
+      }
+  ; turn_disposition = Keeper_shutdown_types.No_inflight_turn
+  ; expected_backlog_version = 0
+  ; owned_task_ids = []
+  ; join_evidence = None
+  ; phase
+  ; created_at = Masc_domain.now_iso ()
+  ; updated_at = Masc_domain.now_iso ()
+  }
+;;
+
+let test_admission_fence_is_any_not_latest () =
+  (* keeper_status projects List.exists over the records, not the newest one:
+     admission is refused while any record still fences, so a consumer that
+     read only the latest phase would restart into a fence (#29181). *)
+  let fencing =
+    shutdown_operation_with_phase Keeper_shutdown_types.Joined_idle
+  in
+  let settled =
+    shutdown_operation_with_phase
+      (Keeper_shutdown_types.Superseded
+         (Keeper_shutdown_types.Operator_metadata_update { actor = "test" }))
+  in
+  Alcotest.(check bool)
+    "a settled record alone does not fence"
+    false
+    (List.exists Keeper_shutdown_types.requires_admission_fence [ settled ]);
+  Alcotest.(check bool)
+    "one fencing record fences the whole set"
+    true
+    (List.exists
+       Keeper_shutdown_types.requires_admission_fence
+       [ settled; fencing ])
+;;
+
 let test_nonempty_live_meta_still_reports_profile_override () =
   init_runtime_default_for_tests ();
   let meta =
@@ -84,38 +196,6 @@ let test_nonempty_live_meta_still_reports_profile_override () =
     "non-empty live prompt fields still surface as overrides"
     [ "prompt.instructions"; "workspace.mention_targets" ]
     (Keeper_status_bridge.live_override_fields meta defaults_with_prompt_fields)
-;;
-
-(* SSOT: last_compaction_decision null-guard policy (issue #25323). Extracted to
-   Keeper_meta_contract.compaction_decision_json_or_null and reused by
-   keeper_status.ml / dashboard_http_keeper.ml. Pin the policy so the guard can't
-   silently diverge across projection sites again. Counterfactual: dropping the
-   [String.trim = ""] guard turns the empty/whitespace cases red. *)
-let test_compaction_decision_empty_is_null () =
-  let d = Keeper_meta_contract.compaction_runtime_decision_of_string "" in
-  Alcotest.(check bool)
-    "empty decision serializes to `Null"
-    true
-    (Keeper_meta_contract.compaction_decision_json_or_null d = `Null)
-;;
-
-let test_compaction_decision_whitespace_is_null () =
-  let d = Keeper_meta_contract.compaction_runtime_decision_of_string "   " in
-  Alcotest.(check bool)
-    "whitespace-only decision serializes to `Null"
-    true
-    (Keeper_meta_contract.compaction_decision_json_or_null d = `Null)
-;;
-
-let test_compaction_decision_value_is_string () =
-  let d =
-    Keeper_meta_contract.compaction_runtime_decision_of_string "provider_overflow"
-  in
-  Alcotest.(check bool)
-    "non-empty decision serializes to `String"
-    true
-    (Keeper_meta_contract.compaction_decision_json_or_null d
-     = `String "provider_overflow")
 ;;
 
 let test_age_seconds_preserves_missing_timestamp () =
@@ -181,7 +261,6 @@ let test_tool_audit_cache_advances_from_negative_by_appended_rows () =
            @ [ "ts", `String "2026-07-30T05:00:01Z"
              ; "ts_unix", `Float 1_785_388_401.0
              ; "trace_id", `String "trace-tool-audit-cache"
-             ; "generation", `Int 0
              ; "channel", `String "turn"
              ; "turn_mode", `String "tool_use"
              ; "latency_ms", `Int 1
@@ -225,7 +304,6 @@ let test_tool_audit_cache_invalidation_for_recreated_keeper () =
            @ [ "ts", `String "2026-07-30T05:00:01Z"
              ; "ts_unix", `Float 1_785_388_401.0
              ; "trace_id", `String "trace-recreated-keeper"
-             ; "generation", `Int 0
              ; "channel", `String "turn"
              ; "turn_mode", `String "tool_use"
              ; "latency_ms", `Int 1
@@ -259,26 +337,160 @@ let test_tool_audit_cache_invalidation_for_recreated_keeper () =
         (latest_tool_names ()))
 ;;
 
+(* Every failure_reason the registry can hold, so a new variant lands here
+   rather than reaching the trust snapshot as an undecodable string. The
+   producer emits blocker_class as a string and the consumer parses it with
+   Keeper_meta_contract.blocker_class_of_serialized_string; the two
+   vocabularies are not the same set (#25797). *)
+let every_failure_reason : Keeper_registry.failure_reason list =
+  [ Keeper_registry.Heartbeat_consecutive_failures 3
+  ; Keeper_registry.Turn_consecutive_failures 2
+  ; Keeper_registry.Stale_termination_storm { count = 4 }
+  ; Keeper_registry.Provider_runtime_error
+      { code = "api_error_500"
+      ; detail = "boom"
+      ; provider_id = None
+      ; http_status = Some 500
+      ; runtime_id = None
+      ; agent_core_timeout = None
+      ; reason = None
+      }
+  ; (* The same constructor with the typed reason present. The registry wraps
+       runtime exhaustion this way ([keeper_unified_turn_types.ml:100-112]), and
+       reading only [code] made the status bridge's runtime_exhausted arm
+       unreachable — every exhaustion arrived labelled provider_runtime_error
+       (#30447). *)
+    Keeper_registry.Provider_runtime_error
+      { code = "connection_refused"
+      ; detail = "boom"
+      ; provider_id = None
+      ; http_status = None
+      ; runtime_id = Some "r1"
+      ; agent_core_timeout = None
+      ; reason = Some Keeper_meta_contract.Connection_refused
+      }
+  ; Keeper_registry.Turn_overflow_failure
+  ; Keeper_registry.Operator_interrupt
+  ; Keeper_registry.Exception "boom"
+  ]
+;;
+
+(* The arm this reaches is [keeper_status_bridge.ml]'s runtime_attempts_exhausted
+   label, which nothing could reach before: the producer stamped the string
+   "provider_runtime_error" for exhaustion too. *)
+let test_exhaustion_reaches_the_runtime_exhausted_class () =
+  let reason =
+    Keeper_registry.Provider_runtime_error
+      { code = "dns_failure"
+      ; detail = "no such host"
+      ; provider_id = None
+      ; http_status = None
+      ; runtime_id = Some "r1"
+      ; agent_core_timeout = None
+      ; reason = Some Keeper_meta_contract.Dns_failure
+      }
+  in
+  match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+  | None -> Alcotest.fail "an exhaustion reason must produce a blocker surface"
+  | Some surface ->
+    Alcotest.(check string)
+      "typed exhaustion is not flattened into provider_runtime_error"
+      "runtime_exhausted"
+      surface.Keeper_status_bridge.blocker_class
+
+(* Without the typed reason the same constructor is a plain provider error, so
+   the two must not collapse into one answer. *)
+let test_provider_error_without_reason_stays_provider_error () =
+  let reason =
+    Keeper_registry.Provider_runtime_error
+      { code = "api_error_500"
+      ; detail = "boom"
+      ; provider_id = None
+      ; http_status = Some 500
+      ; runtime_id = None
+      ; agent_core_timeout = None
+      ; reason = None
+      }
+  in
+  match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+  | None -> Alcotest.fail "a provider error must produce a blocker surface"
+  | Some surface ->
+    Alcotest.(check string)
+      "a provider error without an exhaustion reason keeps its own class"
+      "provider_runtime_error"
+      surface.Keeper_status_bridge.blocker_class
+
+let test_undecodable_blocker_classes_are_named_not_counted () =
+  let undecodable =
+    List.filter_map
+      (fun reason ->
+        match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+        | None -> None
+        | Some surface ->
+          (match
+             Keeper_meta_contract.blocker_class_of_serialized_string
+               surface.Keeper_status_bridge.blocker_class
+           with
+           | Some _ -> None
+           | None -> Some surface.Keeper_status_bridge.blocker_class))
+      every_failure_reason
+  in
+  (* This is the gap the issue reports, pinned as a list rather than a count:
+     when a class is taught to the decoder it leaves this list, and when a new
+     producer class appears it joins it. Either way the diff names it. *)
+  Alcotest.(check (slist string String.compare))
+    "classes the trust-snapshot decoder does not know"
+    [ "exception"
+    ; "heartbeat_failures"
+    ; "operator_interrupt"
+    ; "provider_runtime_error"
+    ; "stale_termination_storm"
+    ; "turn_failures"
+    ; "turn_overflow_failure"
+    ]
+    undecodable
+;;
+
+let test_decodable_blocker_classes_stay_decodable () =
+  let decodable =
+    List.filter_map
+      (fun reason ->
+        match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+        | None -> None
+        | Some surface ->
+          (match
+             Keeper_meta_contract.blocker_class_of_serialized_string
+               surface.Keeper_status_bridge.blocker_class
+           with
+           | Some _ -> Some surface.Keeper_status_bridge.blocker_class
+           | None -> None))
+      every_failure_reason
+  in
+  (* One producer class decodes: runtime_exhausted, since #30447 stopped
+     flattening a typed exhaustion reason into "provider_runtime_error". The
+     rest are still the two-vocabulary gap this suite pins.
+
+     This number is the point of the test — it was 0 when every producer class
+     was undecodable, and the comment then said a class taught to the decoder
+     "has to appear here". Raising it is that happening, not a regression. *)
+  Alcotest.(check (list string))
+    "producer classes that decode today"
+    [ "runtime_exhausted" ]
+    (List.sort_uniq String.compare decodable);
+  Alcotest.(check bool)
+    "the producer does emit classes"
+    true
+    (List.exists
+       (fun reason ->
+         Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason <> None)
+       every_failure_reason)
+;;
+
 let () =
   Alcotest.run
     "keeper_status_bridge"
     [
-      ( "last_compaction_decision null-guard SSOT",
-        [
-          Alcotest.test_case
-            "empty decision -> `Null"
-            `Quick
-            test_compaction_decision_empty_is_null;
-          Alcotest.test_case
-            "whitespace decision -> `Null"
-            `Quick
-            test_compaction_decision_whitespace_is_null;
-          Alcotest.test_case
-            "value decision -> `String"
-            `Quick
-            test_compaction_decision_value_is_string;
-        ] );
-      ( "timestamp age sentinel SSOT",
+( "timestamp age sentinel SSOT",
         [ Alcotest.test_case
             "missing timestamps do not become zero age"
             `Quick
@@ -305,5 +517,45 @@ let () =
             `Quick
             test_nonempty_live_meta_still_reports_profile_override;
         ] );
+      ( "shutdown operation phase projection",
+        [
+          Alcotest.test_case
+            "phase names are pinned for wire consumers"
+            `Quick
+            test_shutdown_phase_names_are_pinned;
+          Alcotest.test_case
+            "admission fence is any-record, not latest"
+            `Quick
+            test_admission_fence_is_any_not_latest;
+        ] );
+      ( "keeper diagnostic wire vocabulary",
+        [
+          Alcotest.test_case
+            "quiet_reason strings are pinned for the dashboard union"
+            `Quick
+            test_quiet_reason_wire_strings_are_pinned;
+          Alcotest.test_case
+            "next_action_path strings are pinned for the dashboard union"
+            `Quick
+            test_next_action_path_wire_strings_are_pinned;
+        ] );
+    ( "blocker_class_vocabulary"
+    , [ Alcotest.test_case
+          "undecodable producer classes are named"
+          `Quick
+          test_undecodable_blocker_classes_are_named_not_counted
+      ; Alcotest.test_case
+          "decodable classes still decode"
+          `Quick
+          test_decodable_blocker_classes_stay_decodable
+      ; Alcotest.test_case
+          "typed exhaustion reaches runtime_exhausted"
+          `Quick
+          test_exhaustion_reaches_the_runtime_exhausted_class
+      ; Alcotest.test_case
+          "provider error without a reason stays provider_runtime_error"
+          `Quick
+          test_provider_error_without_reason_stays_provider_error
+      ] );
     ]
 ;;

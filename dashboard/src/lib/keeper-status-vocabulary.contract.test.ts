@@ -19,8 +19,8 @@ import { PHASE_STYLES, getPhaseStyle } from '../components/keeper-phase-indicato
 import type { Keeper, KeeperPhase } from '../types/core'
 
 const ALL_PHASES: KeeperPhase[] = [
-  'Offline', 'Running', 'Failing', 'Overflowed', 'Compacting',
-  'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed', 'Restarting', 'Dead',
+  'Offline', 'Running', 'Failing', 'Compacting',
+  'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed', 'Restarting',
 ]
 
 function keeperInPhase(phase: KeeperPhase): Keeper {

@@ -1,3 +1,8 @@
+---
+rfc: "0063"
+status: Active
+---
+
 # RFC-0063 — Telemetry Feedback Loop & Cooperative Scheduling Safety
 
 - **Status**: Active (Postmortem chain merged: #14491 introduce → #14499 fix → #14503 release bump → #14508/#14511 follow-ups all on main. Cooperative scheduling guarantees from §"safety" remain advisory for future fiber additions.)
@@ -8,12 +13,12 @@
 
 ## 1. Problem
 
-PR #14491 (`feat(keeper): wire OAS telemetry into provider health, livelock gate, and supervisor`, merged 2026-05-10 14:34Z) introduced the OAS-side telemetry feedback loop without a tracking RFC. The PR body cited `RFC-WAIVED: telemetry feedback loop is new cross-repo concern, no prior RFC exists.` and pointed to `docs/design/telemetry-feedback-loop-architecture.md` as the design substitute.
+PR #14491 (`feat(keeper): wire agent_core telemetry into provider health, livelock gate, and supervisor`, merged 2026-05-10 14:34Z) introduced the agent_core-side telemetry feedback loop without a tracking RFC. The PR body cited `RFC-WAIVED: telemetry feedback loop is new cross-repo concern, no prior RFC exists.` and pointed to `docs/design/telemetry-feedback-loop-architecture.md` as the design substitute.
 
 Two retroactive findings from origin/main on 2026-05-11:
 
 1. **The cited design doc does not exist**. `git ls-tree origin/main docs/design/` shows no `telemetry-feedback-loop-architecture.md`. The PR template's RFC-WAIVED escape hatch was satisfied by a path that nobody verified.
-2. **A cooperative-scheduling regression slipped through.** The new `Keeper_telemetry_consumer.spawn_subscriber` drain fiber called the non-blocking `Agent_sdk_metrics_bridge.drain` and recursed without `Eio.Time.sleep` / `Eio.Fiber.yield`. On a quiet bus the fiber pinned a single Eio domain at ~100% CPU, starving every co-located fiber. Server boot stalled at `lazy_task: starting restore_sessions`; `/health` timed out; HTTP handlers accepted connections but never responded.
+2. **A cooperative-scheduling regression slipped through.** The new `Keeper_telemetry_consumer.spawn_subscriber` drain fiber called the non-blocking `Runtime_event_bus.drain` and recursed without `Eio.Time.sleep` / `Eio.Fiber.yield`. On a quiet bus the fiber pinned a single Eio domain at ~100% CPU, starving every co-located fiber. Server boot stalled at `lazy_task: starting restore_sessions`; `/health` timed out; HTTP handlers accepted connections but never responded.
 
 This RFC has two purposes:
 
@@ -32,7 +37,7 @@ This RFC has two purposes:
 
 Total wall clock from regression to recovery: **~14 minutes after user discovery**.
 
-Diagnostic decisive moment: `sample 22289 2 -mayDie` showed the hot stack as `Keeper_telemetry_consumer.loop → Agent_sdk_metrics_bridge.drain → Eio.Stream.take_nonblocking → caml_ml_mutex_lock/unlock`, ruling out `restore_sessions` (the last log line) as the cause. *Last log ≠ stuck location* under cooperative scheduling.
+Diagnostic decisive moment: `sample 22289 2 -mayDie` showed the hot stack as `Keeper_telemetry_consumer.loop → Runtime_event_bus.drain → Eio.Stream.take_nonblocking → caml_ml_mutex_lock/unlock`, ruling out `restore_sessions` (the last log line) as the cause. *Last log ≠ stuck location* under cooperative scheduling.
 
 ## 3. Goal
 
@@ -49,14 +54,14 @@ Diagnostic decisive moment: `sample 22289 2 -mayDie` showed the hot stack as `Ke
 ## 5. Telemetry feedback loop architecture (as shipped by #14491)
 
 ```
-OAS turn execution
+agent_core turn execution
    │
    ▼
 Agent_sdk.Event_bus  (bounded Eio.Stream, default depth 256)
    │
    │  Custom("telemetry_event", json) payloads
    ▼
-Agent_sdk_metrics_bridge   ── start_sampler ──▶ legacy metrics backend depth gauge
+Runtime_event_bus   ── start_sampler ──▶ legacy metrics backend depth gauge
    │
    │  bounded subscription per consumer
    ▼
@@ -78,7 +83,7 @@ Bounded back-pressure: each subscription has its own bounded stream (default dep
 
 ### 6.1 Rule
 
-> Every Eio fiber whose loop body is dominated by **non-blocking primitives** (`Eio.Stream.take_nonblocking`, `Agent_sdk_metrics_bridge.drain`, `Queue.take_opt`, etc.) MUST yield before recursing — either by `Eio.Time.sleep clock <interval>`, `Eio.Fiber.yield ()`, or a blocking IO call within the iteration.
+> Every Eio fiber whose loop body is dominated by **non-blocking primitives** (`Eio.Stream.take_nonblocking`, `Runtime_event_bus.drain`, `Queue.take_opt`, etc.) MUST yield before recursing — either by `Eio.Time.sleep clock <interval>`, `Eio.Fiber.yield ()`, or a blocking IO call within the iteration.
 
 ### 6.2 Why
 
@@ -99,10 +104,10 @@ The `let rec loop` drain-fiber pattern that motivated this RFC appears at four s
 
 #### Lint baseline (file-level, includes single-shot drain callers)
 
-The lint script `scripts/ci/check-drain-loop-yields.sh` walks every `.ml` under `lib/` that calls a non-blocking drain (`Agent_sdk_metrics_bridge.drain`, `Agent_sdk.Event_bus.drain`, `Eio.Stream.take_nonblocking`) and verifies the same file contains a yield primitive. Eleven files are in scope:
+The lint script `scripts/ci/check-drain-loop-yields.sh` walks every `.ml` under `lib/` that calls a non-blocking drain (`Runtime_event_bus.drain`, `Agent_sdk.Event_bus.drain`, `Eio.Stream.take_nonblocking`) and verifies the same file contains a yield primitive. Eleven files are in scope:
 
 ```
-lib/agent_sdk_metrics_bridge.ml         lib/keeper/keeper_compact_audit.ml
+lib/runtime_event_bus.ml         lib/keeper/keeper_compact_audit.ml
 lib/runtime/runtime_event_bridge.ml     lib/keeper/keeper_telemetry_consumer.ml
 lib/keeper/keeper_unified_turn.ml       lib/server/server_bootstrap_loops.ml
 lib/metrics_store_eio.ml                lib/session.ml
@@ -118,7 +123,7 @@ The contract retroactively explains why the four loop-fiber sites already had th
 
 | Option | Cost | Coverage | Notes |
 |--------|------|----------|-------|
-| **A. Sibling pattern grep on PR review** | very low | partial | Reviewer greps for `Agent_sdk_metrics_bridge.drain` / `take_nonblocking` and checks each call site has a sleep within the same `let rec loop` body. Already implicit; just promotes to a checklist item. |
+| **A. Sibling pattern grep on PR review** | very low | partial | Reviewer greps for `Runtime_event_bus.drain` / `take_nonblocking` and checks each call site has a sleep within the same `let rec loop` body. Already implicit; just promotes to a checklist item. |
 | **B. ocaml-lint or custom dune rule** | medium | high | AST-level rule: any `let rec f ... = ... ; f ()` whose body contains a `take_nonblocking` or `drain` call but no `sleep` / `yield` / blocking IO is rejected. Implementation cost: one merlin-style traversal. |
 | **C. TLA+ Bug Model** (per `software-development.md` §TLA+ Bug Model) | high | precise | Model the consumer fiber + bounded queue + scheduler as a TLA+ spec. `BugAction` = recurse without yield. `SafetyInvariant` = co-located fibers receive turns within bounded steps. Ships with `*-buggy.cfg` that must violate. Strongest correctness statement; cost matches RFC-0042 / KeeperOASAdvanced precedent. |
 | **D. Test harness probe** | low | partial | New alcotest case: spawn the subscriber under a `Eio_mock.Clock`, advance N ticks, assert that a co-located fiber received at least one turn. Catches the regression but only for sites that adopt the test pattern. |

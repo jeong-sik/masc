@@ -30,17 +30,55 @@ import { keepers } from '../store'
 
 const MOCK_RUNTIME_PATH = '/tmp/.masc/config/runtime.toml'
 
+const providerProtocols = [
+  {
+    protocol: 'messages-http',
+    transport: 'endpoint',
+    semantics: 'http_provider',
+    credential_policy: 'optional',
+    requires_non_interactive: false,
+  },
+  {
+    protocol: 'openai-compatible-http',
+    transport: 'endpoint',
+    semantics: 'http_provider',
+    credential_policy: 'optional',
+    requires_non_interactive: false,
+  },
+  {
+    protocol: 'ollama-http',
+    transport: 'endpoint',
+    semantics: 'http_provider',
+    credential_policy: 'optional',
+    requires_non_interactive: false,
+  },
+  {
+    protocol: 'codex-app-server',
+    transport: 'command',
+    semantics: 'official_client',
+    credential_policy: 'forbidden',
+    requires_non_interactive: true,
+  },
+  {
+    protocol: 'claude-code',
+    transport: 'command',
+    semantics: 'official_client',
+    credential_policy: 'forbidden',
+    requires_non_interactive: true,
+  },
+] as const
+
 const baseConfig = {
   ok: true,
   path: MOCK_RUNTIME_PATH,
   file_name: 'runtime.toml',
   source_text: '[runtime]\ndefault = "runpod_mtp.qwen"\n',
   reloaded: false,
+  provider_protocols: providerProtocols,
 }
 
 const richSourceText = `[runtime]
 default = "runpod_mtp.qwen"
-cross_verifier = "runpod_mtp.qwen"
 
 [providers.runpod_mtp]
 display-name = "RunPod"
@@ -120,15 +158,9 @@ describe('RuntimeTomlEditor', () => {
       reloaded: true,
     }))
     apiMocks.patchRuntimeRouting.mockImplementation(async (lane: string, runtimeId: string | null) => {
-      let sourceText = richConfig.source_text.replace(
+      const sourceText = richConfig.source_text.replace(
         'default = "runpod_mtp.qwen"',
         lane === 'default' && runtimeId ? `default = "${runtimeId}"` : 'default = "runpod_mtp.qwen"',
-      )
-      sourceText = sourceText.replace(
-        'cross_verifier = "runpod_mtp.qwen"',
-        lane === 'cross_verifier' && runtimeId
-          ? `cross_verifier = "${runtimeId}"`
-          : 'cross_verifier = "runpod_mtp.qwen"',
       )
       return {
         ...richConfig,
@@ -170,6 +202,35 @@ describe('RuntimeTomlEditor', () => {
     expect(container.querySelector('[data-testid="runtime-toml-stats"]')?.textContent).toContain('3 lines')
     expect(container.querySelector('[data-testid="runtime-toml-code-frame"]')?.classList.contains('v2-monitoring-code-frame')).toBe(true)
     expect(container.querySelector('.v2-monitoring-toolbar')).not.toBeNull()
+  })
+
+  it('renders a typed Keeper effective-value error instead of a blank value', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({
+      ...baseConfig,
+      keeper_settings: [{
+        key: 'memory_os.librarian_enabled',
+        env: 'MASC_KEEPER_MEMORY_OS_LIBRARIAN',
+        configured_value: 'invalid',
+        source: 'env',
+        effective_value: null,
+        effective_error: 'expected a boolean',
+        applied_at: null,
+        reload_class: 'restart',
+        requires_restart: false,
+        application_status: 'invalid',
+        consumers: ['Keeper_memory_os'],
+      }],
+    })
+
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector(
+        '[data-testid="runtime-keeper-setting-error-MASC_KEEPER_MEMORY_OS_LIBRARIAN"]',
+      )?.textContent).toContain('expected a boolean')
+    })
+    expect(container.querySelector('[data-testid="runtime-keeper-setting-matrix"]')?.textContent)
+      .toContain('invalid → —')
   })
 
   it('saves the edited TOML source and clears the dirty state', async () => {
@@ -268,6 +329,37 @@ describe('RuntimeTomlEditor', () => {
     expect(apiMocks.patchRuntimeAssignment).not.toHaveBeenCalled()
   })
 
+  it('disables providers and individual bindings through typed draft controls', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(
+      container.querySelector('[data-testid="runtime-provider-runpod_mtp-enabled"]') as HTMLInputElement,
+    )
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-bindings"]') as HTMLButtonElement)
+    fireEvent.click(
+      container.querySelector('[data-testid="runtime-binding-runpod_mtp.qwen-enabled"]') as HTMLInputElement,
+    )
+
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source.match(/^enabled = false$/gm)).toHaveLength(2)
+      expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('modified')
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      const savedSource = apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0] as string
+      expect(savedSource.match(/^enabled = false$/gm)).toHaveLength(2)
+    })
+  })
+
   it('edits binding runtime knobs as a draft and applies them through the existing save path', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)
@@ -361,28 +453,6 @@ describe('RuntimeTomlEditor', () => {
     })
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
     expect(runtimeRefreshMock.refreshRuntimeConfigConsumers).toHaveBeenCalledTimes(1)
-    expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
-  })
-
-  it('switches the cross verifier runtime through the typed backend routing patch', async () => {
-    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
-    render(html`<${RuntimeTomlEditor} />`, container)
-
-    await waitFor(() => {
-      expect((container.querySelector('[aria-label="cross_verifier runtime"]') as HTMLSelectElement | null)?.value)
-        .toBe('runpod_mtp.qwen')
-    })
-
-    fireEvent.change(container.querySelector('[aria-label="cross_verifier runtime"]') as HTMLSelectElement, {
-      target: { value: 'openai.gpt' },
-    })
-
-    await waitFor(() => {
-      expect(apiMocks.patchRuntimeRouting).toHaveBeenCalledWith('cross_verifier', 'openai.gpt')
-      expect((container.querySelector('textarea') as HTMLTextAreaElement).value)
-        .toContain('cross_verifier = "openai.gpt"')
-    })
-    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
     expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
   })
 
@@ -829,7 +899,6 @@ describe('RuntimeTomlEditor', () => {
     await waitFor(() => {
       const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
       expect(source).toContain('default = "openai.gpt"')
-      expect(source).not.toContain('cross_verifier = "runpod_mtp.qwen"')
       expect(source).not.toContain('[providers.runpod_mtp]')
       expect(source).not.toContain('[providers.runpod_mtp.credentials]')
       expect(source).not.toContain('[runpod_mtp.qwen]')
@@ -870,7 +939,7 @@ describe('RuntimeTomlEditor', () => {
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
   })
 
-  it('does not offer messages protocols or command transport in the add-provider form', async () => {
+  it('offers backend-validated HTTP protocols plus the typed Codex official client', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)
 
@@ -883,11 +952,68 @@ describe('RuntimeTomlEditor', () => {
     const protocolOptions = Array.from(
       container.querySelectorAll('[aria-label="새 provider protocol"] option'),
     ).map(option => (option as HTMLOptionElement).value)
-    expect(protocolOptions).toEqual(['openai-compatible-http', 'ollama-http', 'openai-compatible-cli'])
-    expect(protocolOptions).not.toContain('messages-http')
+    expect(protocolOptions).toEqual([
+      'messages-http',
+      'openai-compatible-http',
+      'ollama-http',
+      'codex-app-server',
+      'claude-code',
+    ])
     expect(protocolOptions).not.toContain('messages-cli')
+    expect(protocolOptions).not.toContain('openai-compatible-cli')
     // No transport-kind selector left to switch to 'command'.
     expect(container.querySelector('[aria-label="새 provider transport 종류"]')).toBeNull()
+  })
+
+  it('creates a Codex subscription provider and binding with the enforced no-key boundary', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-toggle"]') as HTMLButtonElement)
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-provider-id"]') as HTMLInputElement, {
+      target: { value: 'codex_subscription' },
+    })
+    fireEvent.change(container.querySelector('[aria-label="새 provider protocol"]') as HTMLSelectElement, {
+      target: { value: 'codex-app-server' },
+    })
+
+    const credentialType = container.querySelector('[aria-label="새 provider credential 종류"]') as HTMLSelectElement
+    expect(credentialType.value).toBe('none')
+    expect(credentialType.disabled).toBe(true)
+    expect(container.querySelector('[aria-label="새 provider credential 값"]')).toBeNull()
+
+    fireEvent.input(container.querySelector('[aria-label="새 provider transport 값"]') as HTMLInputElement, {
+      target: { value: '/Users/dancer/.local/bin/codex' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('[providers.codex_subscription]')
+      expect(source).toContain('protocol = "codex-app-server"')
+      expect(source).toContain('command = "/Users/dancer/.local/bin/codex"')
+      expect(source).toContain('is-non-interactive = true')
+      expect(source).not.toContain('[providers.codex_subscription.credentials]')
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-bindings"]') as HTMLButtonElement)
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-provider"]') as HTMLSelectElement, {
+      target: { value: 'codex_subscription' },
+    })
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-model"]') as HTMLSelectElement, {
+      target: { value: 'qwen' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-binding-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('[codex_subscription.qwen]')
+      expect(container.querySelector('[data-testid="runtime-add-binding-error"]')).toBeNull()
+    })
   })
 
   it('adds a new model through the form', async () => {
@@ -1048,16 +1174,12 @@ command = "provider-runtime --serve"
     expect(sourceAfter).toBe(sourceBefore)
   })
 
-  it('rejects a binding to an existing non-materializable messages-http provider', async () => {
-    // Legacy/hand-edited data: messages-http providers parse and can be rendered
-    // in the structured binding dropdown, but Runtime_adapter currently returns
-    // no Provider_config for Messages_api, so materialize_config would silently
-    // drop a binding pinned to one.
+  it('defers messages-http compatibility to the backend provider registry', async () => {
     const configWithMessagesProvider = {
       ...richConfig,
       source_text: `${richConfig.source_text}
-[providers.messages_api]
-display-name = "Messages API"
+[providers.kimi]
+display-name = "Kimi"
 protocol = "messages-http"
 endpoint = "https://messages.example/v1"
 `,
@@ -1073,19 +1195,16 @@ endpoint = "https://messages.example/v1"
     const sourceBefore = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
 
     fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-provider"]') as HTMLSelectElement, {
-      target: { value: 'messages_api' },
+      target: { value: 'kimi' },
     })
     fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-model"]') as HTMLSelectElement, {
       target: { value: 'gpt' },
     })
     fireEvent.click(container.querySelector('[data-testid="runtime-add-binding-submit"]') as HTMLButtonElement)
 
-    await waitFor(() => {
-      expect(container.querySelector('[data-testid="runtime-add-binding-error"]')?.textContent).toContain(
-        'messages-http',
-      )
-    })
+    await waitFor(() => expect(container.querySelector('[data-testid="runtime-add-binding-error"]')).toBeNull())
     const sourceAfter = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
-    expect(sourceAfter).toBe(sourceBefore)
+    expect(sourceAfter).not.toBe(sourceBefore)
+    expect(sourceAfter).toContain('[kimi.gpt]')
   })
 })

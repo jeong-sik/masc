@@ -70,6 +70,19 @@ is_det_ndt_pattern() {
   return 1
 }
 
+# A line that only changed indentation is the same line. Wrapping an
+# expression in a new scope re-indents everything inside it, and this
+# comparison was whitespace-exact, so such a refactor reported every wrapped
+# line as new deterministic-boundary debt (#26583, observed on #26573).
+# Both sides are compared with outer whitespace stripped: what the patterns
+# above match is the expression, not the column it sits in.
+strip_outer_space() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
 collect_moved_det_ndt_lines() {
   local current_path=""
   local raw=""
@@ -88,7 +101,7 @@ collect_moved_det_ndt_lines() {
         if [[ "$raw" != "---"* && "$current_path" == lib/*.ml ]]; then
           text="${raw:1}"
           if is_det_ndt_pattern "$text"; then
-            printf '%s\n' "$text" >> "$moved_det_ndt_lines_file"
+            printf '%s\n' "$(strip_outer_space "$text")" >> "$moved_det_ndt_lines_file"
           fi
         fi
         ;;
@@ -97,7 +110,8 @@ collect_moved_det_ndt_lines() {
 }
 
 is_moved_det_ndt_line() {
-  local text="$1"
+  local text
+  text="$(strip_outer_space "$1")"
   [ -s "$moved_det_ndt_lines_file" ] || return 1
   grep -Fxq -- "$text" "$moved_det_ndt_lines_file"
 }

@@ -10,7 +10,7 @@
 val text : string -> string
 (** MD5 hex of a rendered prompt block. *)
 
-val message_texts_as_joined : Agent_sdk.Types.message list -> string
+val message_texts_as_joined : Agent_core.Types.message list -> string
 (** MD5 hex of the message texts joined by newline, in order. The empty list
     digests as the empty string, so a turn with no replayed history is not
     distinguishable from one whose messages all rendered empty — the message

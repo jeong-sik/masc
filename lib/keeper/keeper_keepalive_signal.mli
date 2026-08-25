@@ -37,11 +37,10 @@ val register_record_wake_payload :
    unit) ->
   unit
 
-val record_tool_skipped :
-  keeper_name:string -> tool_name:string -> reason_code:string -> unit
+val record_tool_skipped : tool_name:string -> reason_code:string -> unit
 
 val register_record_tool_skipped :
-  (keeper_name:string -> tool_name:string -> reason_code:string -> unit) ->
+  (tool_name:string -> reason_code:string -> unit) ->
   unit
 
 val record_execute_output :
@@ -98,24 +97,33 @@ val post_heartbeat_tick : wakeup:bool Atomic.t -> unit
 type sleep_outcome =
   | Stopped   (** [stop] atomic was observed [true] before the duration
                   elapsed. *)
-  | Woken     (** [wakeup] atomic transitioned [true -> false] via CAS;
-                  the caller should treat this as a [HeartbeatTick]
-                  spec-action and dispatch a turn. *)
+  | Woken     (** [wakeup] transitioned [true -> false], or an active
+                  [cadence_sleeping] handshake was consumed by a cadence
+                  update; the caller should dispatch the next cycle. *)
   | Timeout   (** Full [duration] elapsed without [stop] or [wakeup]. *)
 
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~chunk_sec instead of waiting for the full interval. *)
 val interruptible_sleep :
-  clock:'a Eio.Time.clock -> stop:bool Atomic.t -> wakeup:bool Atomic.t ->
-  float -> sleep_outcome
+  ?cadence_sleeping:bool Atomic.t ->
+  clock:'a Eio.Time.clock ->
+  stop:bool Atomic.t ->
+  wakeup:bool Atomic.t ->
+  (unit -> float) ->
+  sleep_outcome
+(** When [cadence_sleeping] is supplied, it is [true] only inside this sleep.
+    A runtime cadence decrease consumes it with CAS, avoiding a queued wake
+    during active cycle setup and closing both the duration-resolution and
+    timeout-edge races. [duration] is resolved only after the handshake is
+    visible. *)
 
 (** Wake up a specific keeper immediately.
 
     When [?stimulus] is given, the stimulus is durably appended to the keeper's
     Event Layer queue ([Keeper_registry_event_queue.enqueue]) independently of
     lifecycle phase. The wake hint is sent only to a lifecycle-admitted Running
-    Keeper; inactive, paused, and dead-tombstone lanes retain the durable event
-    without a false delivery claim. If no live registry entry exists, callers
+    Keeper; inactive and paused lanes retain the durable event without a
+    false delivery claim. If no live registry entry exists, callers
     must supply [base_path] so the payload can be persisted for replay. Callers
     that only need to break the keeper out of [interruptible_sleep] may omit the
     stimulus. See RFC-0020 §3 (data channel vs hint signal). *)
@@ -126,6 +134,10 @@ val wakeup_keeper :
 
 val wakeup_relevant_keeper_for_board_signal :
   config:Workspace.config -> Board_dispatch.addressed_board_signal -> unit
+(** Route typed immediate audiences to durable Keeper stimulus queues.
+    Discoverable posts have no immediate recipient, so their durable Board
+    record is consumed by each Keeper owner's cursor instead of performing a
+    fleet-wide metadata/candidate write on the Board producer fiber. *)
 
 (** Test hook (#25600): force the next [count] board-signal relevance
     computations to report a transient store read failure, exercising the
@@ -155,16 +167,7 @@ val stage_timing_to_json :
 
 val format_since_last_scheduled_autonomous : int option -> string
 
-val keepalive_entry_accepts_late_event :
-  ctx:'a context -> keeper_name:string -> bool
-
 val dispatch_keepalive_event :
   ctx:'a context -> keeper_name:string ->
   Keeper_state_machine.event -> unit
 
-val dispatch_keepalive_event_with_audit :
-  ctx:'a context -> keeper_name:string ->
-  snapshot:Keeper_measurement.measurement_snapshot ->
-  events_fired:Keeper_state_machine.event list ->
-  selected_event:Keeper_state_machine.event ->
-  Keeper_state_machine.event -> unit

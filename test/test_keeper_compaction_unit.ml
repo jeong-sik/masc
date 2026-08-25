@@ -1,5 +1,5 @@
 module U = Masc.Keeper_compaction_unit
-module T = Agent_sdk.Types
+module T = Agent_core.Types
 
 let message ?tool_call_id role content : T.message =
   { role; content; name = None; tool_call_id; metadata = [] }
@@ -493,10 +493,12 @@ let test_provider_admission_quarantines_malformed_overlap () =
        Alcotest.(check string)
          "operator receipt terminal code"
          "incomplete_tool_transcript"
-         (Masc.Keeper_agent_error.terminal_reason_code_of_sdk_error error)
+         (Masc.Keeper_agent_error.terminal_reason_code_of_core_error error)
      | Some _ | None -> Alcotest.fail "missing typed transcript quarantine")
   | Ok () -> Alcotest.fail "poisoned transcript passed keeper admission"
 ;;
+
+
 
 let () =
   Alcotest.run "keeper_compaction_unit"

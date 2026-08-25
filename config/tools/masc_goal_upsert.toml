@@ -1,0 +1,48 @@
+name = "masc_goal_upsert"
+description = """
+Create or update Goal metadata and parent linkage. Creation requires a \
+measurable success condition: metric and target_value (RFC-0387 B1). Use \
+masc_goal_transition for lifecycle changes."""
+additional_properties = false
+
+[[params]]
+name = "id"
+type = "string"
+
+[[params]]
+name = "title"
+type = "string"
+
+# B1 is NOT expressed as required = true on purpose: this one tool serves both
+# create and update, and JSON Schema `required` is unconditional, so listing
+# metric/target_value would reject every metadata update of an existing goal.
+# The create/update split is only decidable against the store, so the handler
+# enforces it on the creation branch (Goal_store.upsert_goal, inside the write
+# lock).
+[[params]]
+name = "metric"
+type = "string"
+description = """
+What measures this goal, and where that measurement can be read: a file path, \
+a recorded command output, or a URL. The completion judge opens exactly what \
+this names — it cannot list directories or search, so a metric that names no \
+observable is refused as unmeasurable rather than hunted for. Required \
+(non-blank) when the upsert creates a new goal (RFC-0387 B1); optional on \
+update."""
+
+[[params]]
+name = "target_value"
+type = "string"
+description = """
+The value the metric has to reach, comparable against what the metric's source \
+actually reads: a number, a count, a threshold. The judge approves only when \
+it read the measurement and it reaches this. Required (non-blank) when the \
+upsert creates a new goal (RFC-0387 B1); optional on update."""
+
+[[params]]
+name = "due_date"
+type = "string"
+
+[[params]]
+name = "priority"
+type = "integer"

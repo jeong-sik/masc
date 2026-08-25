@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0077", "0088", "0089", "0090"]
-implementation_prs: [15759, 15776, 15784, 15789, 15793, 15826]
 ---
 
 # RFC-0098 — Typed JSON-RPC error envelope & production-code silent-failure lint
@@ -61,7 +60,7 @@ The two surfaces are coupled at the **boundary contract**: an internal silent fa
 
 - **Re-typing existing persistence writes.** [[RFC-0077]] owns that. This RFC will *consume* `Write_failure_reason.t` once it lands; it does not redefine it.
 - **Counter removal.** [[RFC-0088]] is the umbrella for telemetry-as-fix migration; this RFC adds a new emission shape (typed JSON-RPC error envelope) without removing existing legacy metrics backend counters.
-- **OAS / `agent_sdk` API change.** A separate RFC (forthcoming in the IMPROVE-series, see §9) covers `oas/lib/api_common.ml` `Error_type.t`. RFC-0098 stops at the masc boundary.
+- **agent_core / `agent_core` API change.** A separate RFC (forthcoming in the IMPROVE-series, see §9) covers `agent_core/lib/api_common.ml` `Error_type.t`. RFC-0098 stops at the masc boundary.
 - **`failure_envelope.ml` redesign.** That module is operator-visible **tool-host attachment** (severity / recoverability / operator action) and is orthogonal. The new envelope produced here may *embed* a `failure_envelope.t` in `data.evidence_ref`, but does not replace it.
 - **JSON-RPC error code spec change.** The set of well-known codes (`-32700`, `-32600`, `-32601`, `-32602`, `-32603`) is fixed by the spec. This RFC introduces **server-defined codes in `-32000` to `-32099`** per JSON-RPC 2.0 §5.1 ("reserved for implementation-defined server-errors").
 - **Replacing `with _ -> ()` everywhere.** Some of the 15 sites are legitimate (e.g., best-effort log writes during shutdown). Audit is per-cohort, not bulk rewrite.
@@ -207,7 +206,7 @@ PR-3 onward introduces *new* wire codes (`-32003`, `-32004`, …). Clients that 
 
 ## 7. Open questions
 
-- **Q1**: Should `Mcp_error_code` live in `lib/server/` (transport-only) or `lib/mcp/` (shared with consumer/SDK)? **Decision (default)**: `lib/server/` for PR-1 to bound the change; if/when OAS `Error_type.t` lands, consider promotion to `lib/mcp/` with phantom-type `server | client` discriminator.
+- **Q1**: Should `Mcp_error_code` live in `lib/server/` (transport-only) or `lib/mcp/` (shared with consumer/SDK)? **Decision (default)**: `lib/server/` for PR-1 to bound the change; if/when agent_core `Error_type.t` lands, consider promotion to `lib/mcp/` with phantom-type `server | client` discriminator.
 - **Q2**: Embed `failure_envelope.t` in `data` automatically, or always opt-in? **Decision**: opt-in via `?data:` argument. Auto-embed risks leaking operator-action hints to untrusted clients.
 - **Q3**: Should `Quiet` carry a *required* `surface : string` (which call site declared the skip) for grep traceability? **Open** — PR-1 introduces without `surface`, PR-2/3 considers based on real call sites.
 - **Q4**: `respond_sse_rate_limited` migration timing. **Open** — depends on whether WS-C RFC unifies SSE 429 into `Backpressure_shed`.

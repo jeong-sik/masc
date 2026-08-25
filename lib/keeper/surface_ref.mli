@@ -29,9 +29,15 @@ type t =
     }
   | Webhook of { source : string; event_id : string }
   | Agent
-      (** Keeper/agent-initiated lane traffic with no external surface
-          (the [masc_keeper_msg] direct path) — previously the open
-          string label ["agent"]. *)
+      (** Keeper/agent-initiated lane traffic addressed to this keeper
+          (the [masc_keeper_msg] direct path and workspace @mention
+          deliveries) — previously the open string label ["agent"]. *)
+  | Broadcast
+      (** A workspace fleet broadcast projected into every registered
+          keeper's transcript ([Workspace_broadcast.Fleet_conversation]
+          fanout). Distinct from {!Agent} so readers can tell a fanout
+          row from a directly addressed one; the author stays on the
+          row's speaker fields. *)
   | Gate of { label : string; address : (string * string) list }
 
 val equal : t -> t -> bool
@@ -40,8 +46,9 @@ val compare : t -> t -> int
 val lane_label : t -> string
 (** The legacy [source] label this surface writes on a lane row:
     ["dashboard"] / ["discord"] / ["slack"] / ["webhook"]
-    / ["agent"] / the gate channel label verbatim.  The single
-    derivation site — writers no longer invent label strings. *)
+    / ["agent"] / ["broadcast"] / the gate channel label verbatim.
+    The single derivation site — writers no longer invent label
+    strings. *)
 
 val to_json : t -> Yojson.Safe.t
 

@@ -3,7 +3,6 @@ title: Incremental Sub-Library Extraction from Flat masc Library
 rfc: 0056
 status: Active
 created: 2026-05-09
-implementation_prs: []
 ---
 
 # RFC-0056 — Incremental Sub-Library Extraction from Flat masc Library
@@ -175,7 +174,7 @@ Phase 0 PoC is included in this PR. RFC merges with Phase 0; Phase 1 RFC is a fo
 
 ## 7. Phase 2 — Tool surface leaf (LANE 6)
 
-Status: implemented (PR #20057, 2026-06-04). Design ledger: jeong-sik/masc-oas-docs#132 (boundary-decoupling §27 / LANE 6).
+Status: implemented (PR #20057, 2026-06-04). Design ledger: jeong-sik/masc-agent_core-docs#132 (boundary-decoupling §27 / LANE 6).
 
 Phase 0/1 defined and validated the extraction gate (G1–G5). Phase 2 applies that gate to the tool **surface** layer and folds in the previously unowned tool⊥keeper invariant.
 

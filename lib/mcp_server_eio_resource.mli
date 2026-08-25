@@ -34,6 +34,16 @@ val handle_read_resource_eio :
     appropriate read source (messages directory, tool-help
     schemas, etc.) based on the resource id.
 
+    Synchronous workspace, event, worktree, and library filesystem reads run
+    in a system thread so they cannot block the cooperative Eio domain.
+    Session registry reads remain on the calling fiber because they may yield
+    through the registry actor.
+
     Returns a JSON-RPC response envelope (jsonrpc / id / result or
     error fields).  Never raises — all error paths produce error
     envelopes via {!Mcp_transport_protocol.make_error}. *)
+
+module For_testing : sig
+  val blocking_io_execution_context : unit -> Eio_guard.execution_context
+  (** Execution context observed inside the resource filesystem boundary. *)
+end

@@ -11,15 +11,13 @@ type error =
   | Existing_operation of Operation_id.t
   | Meta_snapshot_missing
   | Meta_snapshot_identity_changed
-  | Meta_snapshot_version_changed of
-      { expected : int
-      ; actual : int
-      }
   | Meta_snapshot_read_failed of string
   | Task_discovery_failed of string
+  | Owner_command_failed of string
   | Prepare_persist_failed of Keeper_shutdown_store.error
   | Cancellation_failed of Keeper_shutdown_types.t
   | Join_failed of Keeper_shutdown_types.t
+  | Join_phase_mismatch of Keeper_shutdown_types.t
   | Join_record_update_failed of Keeper_shutdown_store.error
 
 let error_to_string = function
@@ -33,15 +31,11 @@ let error_to_string = function
   | Meta_snapshot_missing -> "Keeper shutdown metadata is absent"
   | Meta_snapshot_identity_changed ->
     "Keeper shutdown metadata identity changed before durable prepare"
-  | Meta_snapshot_version_changed { expected; actual } ->
-    Printf.sprintf
-      "Keeper shutdown metadata version changed before durable prepare: expected %d, actual %d"
-      expected
-      actual
   | Meta_snapshot_read_failed detail ->
     Printf.sprintf "Keeper shutdown metadata read failed: %s" detail
   | Task_discovery_failed detail ->
     Printf.sprintf "Keeper shutdown task discovery failed: %s" detail
+  | Owner_command_failed detail -> "Keeper Owner shutdown command failed: " ^ detail
   | Prepare_persist_failed error -> Keeper_shutdown_store.error_to_string error
   | Cancellation_failed operation ->
     Printf.sprintf
@@ -51,6 +45,10 @@ let error_to_string = function
     Printf.sprintf
       "Keeper shutdown join blocked in operation %s"
       (Operation_id.to_string operation.operation_id)
+  | Join_phase_mismatch operation ->
+    Printf.sprintf
+      "Keeper shutdown operation is not joinable at revision %d"
+      operation.revision
   | Join_record_update_failed error -> Keeper_shutdown_store.error_to_string error
 ;;
 
@@ -67,15 +65,15 @@ let current_entry ~config (observed : Keeper_registry.registry_entry) =
 ;;
 
 let admission_lane = function
-  | Keeper_turn_admission.Autonomous -> Autonomous
-  | Keeper_turn_admission.Chat -> Chat
+  | Keeper_owner.Autonomous | Keeper_owner.Maintenance -> Autonomous
+  | Keeper_owner.Chat_operation -> Chat
 ;;
 
 let active_turn_of_snapshots reservation current =
   let observation : Keeper_registry.turn_observation option =
     current.Keeper_registry.current_turn_observation
   in
-  match reservation.Keeper_turn_admission.in_flight, observation with
+  match reservation.Keeper_owner.in_flight, observation with
   | None, None -> No_inflight_turn
   | in_flight, observation ->
     let lane, admitted_at =
@@ -99,33 +97,25 @@ let active_turn_of_snapshots reservation current =
 
 let rollback_reservation ~config ~keeper_name operation_id =
   match
-    Keeper_turn_admission.rollback_shutdown
+    Keeper_owner_registry.rollback_shutdown
       ~base_path:config.Workspace.base_path
       ~keeper_name
       ~operation_id
   with
-  | Keeper_turn_admission.Shutdown_rolled_back
-  | Keeper_turn_admission.Shutdown_not_reserved -> ()
-  | Keeper_turn_admission.Shutdown_reserved_by_other existing ->
+  | Ok Keeper_owner.Shutdown_rolled_back
+  | Ok Keeper_owner.Shutdown_not_reserved -> ()
+  | Ok (Keeper_owner.Shutdown_reserved_by_other existing) ->
     Log.Keeper.error
       "%s: shutdown rollback for %s found reservation %s"
       keeper_name
       (Operation_id.to_string operation_id)
       (Operation_id.to_string existing)
-;;
-
-let validate_cleanup_reason reason (meta : Keeper_meta_contract.keeper_meta) =
-  match reason with
-  | Operator_stop_retain_meta
-  | Operator_stop_remove_meta
-  | Dead_tombstone_cleanup -> Ok ()
-  | Dashboard_keeper_purge context ->
-    if Int.equal meta.meta_version context.meta_version
-    then Ok ()
-    else
-      Error
-        (Meta_snapshot_version_changed
-           { expected = context.meta_version; actual = meta.meta_version })
+  | Error error ->
+    Log.Keeper.error
+      "%s: shutdown rollback for %s failed: %s"
+      keeper_name
+      (Operation_id.to_string operation_id)
+      (Keeper_owner_registry.command_error_to_string error)
 ;;
 
 let read_guarded_meta
@@ -140,16 +130,11 @@ let read_guarded_meta
     when not
            (Keeper_id.Trace_id.equal
               latest.runtime.trace_id
-              observed.runtime.trace_id)
-         || not
-              (Int.equal
-                 latest.runtime.nonce
-                 observed.runtime.nonce) ->
+              observed.runtime.trace_id) ->
     Error Meta_snapshot_identity_changed
   | Ok (Some latest) ->
-    (match validate_cleanup_reason cleanup_reason latest with
-     | Error _ as error -> error
-     | Ok () -> Ok latest)
+    ignore cleanup_reason;
+    Ok latest
 ;;
 
 let persist_blocked ~config operation stage detail =
@@ -176,6 +161,44 @@ let cancellation_error ~config operation stage detail =
   | Error error -> Error (Join_record_update_failed error)
 ;;
 
+let join_error ~config operation detail =
+  match persist_blocked ~config operation Lane_join detail with
+  | Ok blocked -> Error (Join_failed blocked)
+  | Error error -> Error (Join_record_update_failed error)
+;;
+
+let enter_joining_lanes ~config operation =
+  match operation.phase with
+  | Joining_lanes ->
+    join_error
+      ~config
+      operation
+      "a prior live lane-join attempt ended without a durable terminal receipt; refusing to replay safety-sensitive turn cancellation"
+  | Prepared ->
+    let joining =
+      { operation with
+        revision = operation.revision + 1
+      ; phase = Joining_lanes
+      ; updated_at = Masc_domain.now_iso ()
+      }
+    in
+    (match
+       Keeper_shutdown_store.replace
+         ~config
+         ~expected_revision:operation.revision
+         joining
+     with
+     | Ok () -> Ok joining
+     | Error error -> Error (Join_record_update_failed error))
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Reconciliation_required _
+  | Finalized _
+  | Blocked _
+  | Superseded _ -> Error (Join_phase_mismatch operation)
+;;
+
 let lane_outcome = function
   | Keeper_lane.Completed -> Lane_completed
   | Keeper_lane.Shutdown_before_start -> Lane_shutdown_requested
@@ -195,14 +218,16 @@ let terminal = function
 let prepare ~config ~(entry : Keeper_registry.registry_entry) ~request =
   let operation_id = Operation_id.generate () in
   match
-    Keeper_turn_admission.begin_shutdown
+    Keeper_owner_registry.begin_shutdown
       ~base_path:config.Workspace.base_path
       ~keeper_name:entry.name
       ~operation_id
   with
-  | Keeper_turn_admission.Shutdown_already_reserved reservation ->
+  | Error error ->
+    Error (Owner_command_failed (Keeper_owner_registry.command_error_to_string error))
+  | Ok (Keeper_owner.Shutdown_already_reserved reservation) ->
     Error (Existing_operation reservation.operation_id)
-  | Keeper_turn_admission.Shutdown_reserved reservation ->
+  | Ok (Keeper_owner.Shutdown_reserved reservation) ->
     let durable_prepare_committed = Atomic.make false in
     Fun.protect
       ~finally:(fun () ->
@@ -237,7 +262,6 @@ let prepare ~config ~(entry : Keeper_registry.registry_entry) ~request =
                    ; keeper_name = current.name
                    ; lane_ownership = Registered_lane (Keeper_lane.id current.lane)
                    ; trace_id = durable_meta.runtime.trace_id
-                   ; generation = durable_meta.runtime.nonce
                    ; actor = request.actor
                    ; cleanup_intent = request.cleanup_intent
                    ; turn_disposition
@@ -272,23 +296,32 @@ let prepare_dormant
   =
   let operation_id = Operation_id.generate () in
   match
-    Keeper_turn_admission.begin_shutdown
+    Keeper_owner_registry.begin_shutdown
       ~base_path:config.Workspace.base_path
       ~keeper_name:meta.name
       ~operation_id
   with
-  | Keeper_turn_admission.Shutdown_already_reserved reservation ->
+  | Error error ->
+    Error (Owner_command_failed (Keeper_owner_registry.command_error_to_string error))
+  | Ok (Keeper_owner.Shutdown_already_reserved reservation) ->
     Error (Existing_operation reservation.operation_id)
-  | Keeper_turn_admission.Shutdown_reserved _ ->
+  | Ok (Keeper_owner.Shutdown_reserved _) ->
     let durable_prepare_committed = Atomic.make false in
     Fun.protect
       ~finally:(fun () ->
         if not (Atomic.get durable_prepare_committed)
         then rollback_reservation ~config ~keeper_name:meta.name operation_id)
       (fun () ->
-         Keeper_turn_admission.await_idle_after_shutdown
-           ~base_path:config.Workspace.base_path
-           ~keeper_name:meta.name;
+         match
+           Keeper_owner_registry.await_idle_after_shutdown
+             ~base_path:config.Workspace.base_path
+             ~keeper_name:meta.name
+         with
+         | Error error ->
+           Error
+             (Owner_command_failed
+                (Keeper_owner_registry.command_error_to_string error))
+         | Ok () ->
          match Keeper_registry.get ~base_path:config.base_path meta.name with
          | Some _ -> Error Dormant_registry_lane_present
          | None ->
@@ -315,7 +348,6 @@ let prepare_dormant
                    ; keeper_name = durable_meta.name
                    ; lane_ownership = Dormant_meta
                    ; trace_id = durable_meta.runtime.trace_id
-                   ; generation = durable_meta.runtime.nonce
                    ; actor = request.actor
                    ; cleanup_intent = request.cleanup_intent
                    ; turn_disposition = No_inflight_turn
@@ -345,6 +377,16 @@ let prepare_dormant
 ;;
 
 let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
+  match operation.phase with
+  | Joining_lanes -> enter_joining_lanes ~config operation
+  | Prepared
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Reconciliation_required _
+  | Finalized _
+  | Blocked _
+  | Superseded _ ->
   match current_entry ~config entry with
   | Error error -> Error error
   | Ok current
@@ -354,6 +396,9 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
               Keeper_lane.Id.equal (Keeper_lane.id current.lane) lane_id
             | Dormant_meta -> false) -> Error Registry_lane_replaced
   | Ok current ->
+    (match enter_joining_lanes ~config operation with
+     | Error _ as error -> error
+     | Ok operation ->
     Keeper_keepalive.request_entry_stop current;
     let turn_cancel = Keeper_registry.interrupt_current_turn_exact current in
     let turn_cancel_error =
@@ -381,9 +426,18 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
         | Keeper_lane.Cancel_requested
         | Keeper_lane.Cancel_already_requested
         | Keeper_lane.Cancel_already_exiting ->
-          Keeper_turn_admission.await_idle_after_shutdown
-            ~base_path:config.Workspace.base_path
-            ~keeper_name:current.name;
+          (match
+             Keeper_owner_registry.await_idle_after_shutdown
+               ~base_path:config.Workspace.base_path
+               ~keeper_name:current.name
+           with
+           | Error error ->
+             join_error
+               ~config
+               operation
+               ("Keeper Owner shutdown command failed: "
+                ^ Keeper_owner_registry.command_error_to_string error)
+           | Ok () ->
           let lane_exit = Keeper_lane.await_exit current.lane in
           (match lane_exit.outcome with
            | Keeper_lane.Shutdown_before_start ->
@@ -406,11 +460,36 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
            | Keeper_lane.Shutdown_cancel_failed _
            | Keeper_lane.Cancelled_by_parent _
            | Keeper_lane.Failed _ -> ());
+          let memory_join_error =
+            match
+              Keeper_memory_lane.drain_and_join_librarian
+                ~base_path:config.Workspace.base_path
+                ~keeper_name:current.name
+            with
+            | Ok Keeper_memory_lane.No_librarian_work
+            | Ok Keeper_memory_lane.Librarian_drained -> None
+            | Error error ->
+              Some (Keeper_memory_lane.librarian_drain_error_to_string error)
+          in
+          let cleanup_error =
+            match lane_exit.cleanup_error, memory_join_error with
+            | None, None -> None
+            | Some detail, None | None, Some detail -> Some detail
+            | Some lane_detail, Some memory_detail ->
+              Some
+                (Printf.sprintf
+                   "lane cleanup failed: %s; Librarian join failed: %s"
+                   lane_detail
+                   memory_detail)
+          in
+          (match cleanup_error with
+           | Some detail -> join_error ~config operation detail
+           | None ->
           let terminal_result = Eio.Promise.await current.done_p in
           let evidence =
             { lane_outcome = lane_outcome lane_exit.outcome
             ; terminal = terminal terminal_result
-            ; cleanup_error = lane_exit.cleanup_error
+            ; cleanup_error = None
             }
           in
           (* [operation.turn_disposition] is an admission-time snapshot: it
@@ -446,31 +525,14 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
             ; updated_at = Masc_domain.now_iso ()
             }
           in
-          (match lane_exit.cleanup_error with
-           | Some detail ->
-             let blocked =
-               { joined with
-                 phase = Blocked { stage = Lane_join; detail }
-               ; updated_at = Masc_domain.now_iso ()
-               }
-             in
-             (match
-                Keeper_shutdown_store.replace
-                  ~config
-                  ~expected_revision:operation.revision
-                  blocked
-              with
-              | Ok () -> Error (Join_failed blocked)
-              | Error error -> Error (Join_record_update_failed error))
-           | None ->
-             (match
-                Keeper_shutdown_store.replace
-                  ~config
-                  ~expected_revision:operation.revision
-                  joined
-              with
-              | Ok () -> Ok joined
-              | Error error -> Error (Join_record_update_failed error)))))
+          (match
+             Keeper_shutdown_store.replace
+               ~config
+               ~expected_revision:operation.revision
+               joined
+           with
+           | Ok () -> Ok joined
+           | Error error -> Error (Join_record_update_failed error)))))))
 ;;
 
 let run ~config ~entry ~request =

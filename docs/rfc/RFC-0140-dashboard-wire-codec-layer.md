@@ -5,7 +5,6 @@ status: Implemented
 created: 2026-05-19
 updated: 2026-07-13
 author: vincent
-implementation_prs: [16700]
 ---
 
 # RFC-0140 — Dashboard wire codec for source observations

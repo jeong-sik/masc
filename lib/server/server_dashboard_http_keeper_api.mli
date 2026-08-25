@@ -9,56 +9,28 @@
 module Http = Http_server_eio
 (** Alias used internally for the Eio HTTP server module. *)
 
-(** {1 Trajectory merge}
+val tool_calls_fleet_cache_key : masc_root:string -> string
+(** Return the bounded fleet-row cache key after invalidating its cached value
+    when the durable tool-call revision has advanced. *)
 
-    The dashboard merges the on-disk turn trajectory with internal-history
-    lines (per-turn snapshots from the keeper subprocess) so the operator
-    sees both LLM messages and structural events in one feed. *)
+(** {1 Trajectory projection} *)
 
-val trajectory_line_ts : Trajectory.trajectory_line -> float
-(** Extract the timestamp used as the merge key. *)
-
-val dedupe_thinking_lines :
-  Trajectory.trajectory_line list ->
-  Trajectory.trajectory_line list
-(** Collapse consecutive identical "thinking" lines to one entry. *)
-
-val internal_history_json_to_trajectory_line :
-  Yojson.Safe.t -> Trajectory.trajectory_line option
-(** Parse a single internal-history JSON entry into a trajectory line;
-    [None] for malformed entries. *)
-
-val read_internal_history_lines :
-  config:Workspace.config ->
-  trace_id:string -> Trajectory.trajectory_line list
-(** Read the internal-history file for [trace_id] under [config]. *)
-
-val merge_keeper_trace_lines :
-  config:Workspace.config ->
-  trace_id:string ->
-  Trajectory.trajectory_line list ->
-  Trajectory.trajectory_line list
-(** Merge [trajectory_lines] with the internal-history file in
-    timestamp order, applying [dedupe_thinking_lines]. *)
-
-val handle_keeper_catchup_judge_post :
+val handle_keeper_fusion_post :
   Mcp_server.server_state ->
   Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
-(** Handle [POST /catchup-judge] by recomputing the keeper catch-up digest
-    and starting an out-of-band Fusion judge run. *)
+(** Handle [POST /fusion] by starting an out-of-band deliberation owned by the
+    keeper in the route, with the prompt, preset and topology supplied by the
+    operator. This is the only HTTP surface that can reach the judge-of-judges
+    and staged topologies; before it only a keeper deciding to call the tool
+    itself could run them. *)
 
-val handle_keeper_chat_recovery_post :
+val handle_keeper_operator_note_post :
   Mcp_server.server_state ->
   string ->
-  Httpun.Request.t ->
-  Httpun.Reqd.t ->
-  keeper_name:string ->
-  raw_receipt_id:string ->
-  string ->
-  unit
-(** Resolve exactly one recovery-required chat receipt using the caller's
-    revision and lease evidence. The route is wired only behind token-bound
-    [CanAdmin] authorization. *)
+  Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+(** Handle [POST /operator-note] by replacing this keeper's pending note
+    (RFC-0366). The note renders on the next turn that assembles and is then
+    stamped consumed; oversized text is rejected rather than truncated. *)
 
 val handle_keeper_board_attention_quarantine_recovery_post :
   Mcp_server.server_state ->
@@ -84,20 +56,40 @@ include module type of Server_dashboard_http_keeper_api_types
     moved to Server_dashboard_http_keeper_api_types — re-exported via
     [include module type of] above. *)
 
+(** {1 Chat history paging} *)
+
+val keeper_chat_history_json : Workspace.config -> string -> Yojson.Safe.t
+(** Body for [GET /chat/history]: the chat-store tail window plus every
+    autonomous turn retention still holds. Every row carries a stable [id] —
+    the dashboard history schema silently drops rows without one. *)
+
+val keeper_chat_history_page_json :
+  Workspace.config -> string -> before:float option -> Yojson.Safe.t
+(** Body for [GET /chat/history/page]: direct-conversation rows older than
+    [before], newest window when [before] is [None].
+
+    Autonomous turns are not included. They are bounded by
+    {!Masc.Keeper_raw_trace_retention.history_limit} rather than by this window,
+    so [GET /chat/history] already carried every one that exists; repeating them
+    per page would duplicate rows the caller holds.
+
+    [next_before] is the cursor for the following page — the oldest [ts] among
+    the returned rows, or [`Null] for an empty page. A caller must stop on a
+    null cursor rather than resend the previous one. *)
+
 (** {1 Checkpoint inventory} *)
 
 val stat_json_of_path : string -> Yojson.Safe.t
 (** [stat] result as JSON; [`Null] when the file is missing. *)
 
-val oas_checkpoint_summary_json :
+val agent_core_checkpoint_summary_json :
   source_kind:string ->
   snapshot_id:string ->
   path:string ->
   is_current:bool ->
-  fallback_generation:int ->
-  Agent_sdk.Checkpoint.t ->
+  Agent_core.Checkpoint.t ->
   Yojson.Safe.t
-(** JSON summary of an OAS checkpoint, used by the inventory listing. *)
+(** JSON summary of an AGENT_CORE checkpoint, used by the inventory listing. *)
 
 val keeper_checkpoint_inventory_json :
   Workspace.config -> string -> [ `Not_found | `OK ] * Yojson.Safe.t
@@ -132,7 +124,7 @@ type state_diagram_runtime_projection =
 val state_diagram_runtime_projection :
   Keeper_meta_contract.keeper_meta option -> state_diagram_runtime_projection
 (** Redacted runtime/provider projection for [GET /state-diagram].
-    It never exposes concrete OAS provider or model identifiers. *)
+    It never exposes concrete AGENT_CORE provider or model identifiers. *)
 
 val state_diagram_runtime_projection_json :
   state_diagram_runtime_projection -> Yojson.Safe.t
@@ -145,7 +137,7 @@ val state_diagram_runtime_fsm_mermaid :
 val handle_keeper_checkpoints_post :
   Mcp_server.server_state ->
   Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
-(** Handle [POST /checkpoints] (rollback / pin actions). *)
+(** Handle admin [POST /checkpoints] history deletion and checkpoint purge. *)
 
 (** {1 Keeper name validation} *)
 
@@ -184,6 +176,10 @@ val handle_keeper_secrets_post :
   Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Handle [POST /secrets] (redacted env-secret projection edits). *)
 
+val handle_keeper_github_login_post :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Stream an isolated GitHub CLI login for the selected keeper. *)
+
 val handle_keeper_lifecycle_post :
   ?body_str:string ->
   sw:Eio.Switch.t ->
@@ -194,7 +190,7 @@ val handle_keeper_lifecycle_post :
   string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Generic handler for boot / shutdown / reset / clear posts. Boot does not
     resume an ordinary paused owner; callers must commit [Resume_owner] through
-    the directive endpoint. Dead-tombstone revival remains separate. *)
+    the directive endpoint. *)
 
 val handle_keeper_directive_post :
   sw:Eio.Switch.t ->
@@ -202,7 +198,7 @@ val handle_keeper_directive_post :
   Mcp_server.server_state ->
   string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Handle [POST /directive] (operator directive injection). A resume body
-    must carry [owner_nonce] and a stable [operator_operation_id], and is
+    must carry a stable [operator_operation_id], and is
     committed through the typed paused-work disposition transaction. *)
 
 val handle_keeper_paused_work_post :
@@ -221,7 +217,7 @@ val handle_keeper_bulk_directive_post :
   string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Handle [POST /api/v1/keepers_bulk/directive]. Pause and wakeup use
     [{"names": [...]}]. Resume uses exact per-owner
-    [{"targets": [{"name", "owner_nonce", "operator_operation_id"}, ...]}]
+    [{"targets": [{"name", "operator_operation_id"}, ...]}]
     fences and commits each target through the typed paused-work disposition
     transaction. Cache invalidation runs once for the whole batch. *)
 
@@ -231,10 +227,6 @@ val handle_keeper_get_subroutes :
 (** Dispatch [GET /api/v1/keepers/<name>/<sub>] sub-routes
     (status / tools / checkpoints listing / etc.). *)
 
-val keeper_chat_receipt_route : string -> (string * string) option
-(** Parse the exact
-    [/api/v1/keepers/<name>/chat/receipts/<receipt_id>] read route. *)
-
 (** {1 Memory-OS dashboard JSON} *)
 
 val memory_os_fact_json :
@@ -242,33 +234,3 @@ val memory_os_fact_json :
 (** One current fact's read-only dashboard projection. [current] is derived
     from snapshot membership; no retention, score, or legacy kind field is
     serialized. *)
-
-val memory_os_dashboard_json
-  :  config:Workspace.config
-  -> keeper_id:string
-  -> Yojson.Safe.t
-(** Current-memory observability payload for one keeper. Recall and this
-    projection read the same snapshot; [change] exposes exact added/removed
-    facts from the latest atomic Librarian or explicit-write update. *)
-
-val compaction_snapshots_json :
-  config:Workspace.config -> keeper_id:string -> limit:int -> Yojson.Safe.t
-(** Durable compaction snapshot payload for
-    [GET /api/v1/keepers/:name/compaction-snapshots]. Reads runtime manifests
-    first, then keeper meta as a latest-only fallback, and emits only event
-    metadata/token counts/provenance — never raw prompt or compacted context
-    text. Exported for JSON contract tests. *)
-
-val cached_compaction_snapshots_json :
-  config:Workspace.config ->
-  keeper_id:string ->
-  limit:int ->
-  force_refresh:bool ->
-  Yojson.Safe.t
-(** Non-blocking HTTP projection. Returns a cached snapshot immediately, or a
-    typed [warming] envelope on a cold miss, and performs the manifest scan on
-    the shared IO pool from a background fiber. A completed refresh broadcasts
-    [keeper_compaction_snapshots_changed] so mounted clients re-read once.
-    Concurrent reads share one scan; a force refresh received during that scan
-    preserves exactly one trailing scan so the final source change is not
-    lost. *)

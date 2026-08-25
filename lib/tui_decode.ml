@@ -10,50 +10,298 @@ type agent = {
 type task = {
   id : string;
   title : string;
-  status : string;
+  status : Masc_domain.task_status;
   priority : int;
-  claimed_by : string option;
-  parent_task_id : string option;
-  goal_id : string option;
 }
 
 type keeper = {
   k_name : string;
-  k_active_goal_ids : string list;
-  k_generation : int;
-  k_active_model : string option;
-  k_models : string list;
-  k_proactive_enabled : bool;
-  k_initiative_enabled : bool option;
+  k_trace_id : string;
+  k_paused : bool;
+  k_current_task_id : string option;
   k_total_turns : int;
   k_total_tokens : int;
   k_total_cost_usd : float;
   k_last_turn_ts : string;
   k_compaction_count : int;
-  k_trigger_mode : string;
-  k_context_budget : int;
-  k_drift_enabled : bool;
-  k_verify : bool;
+  k_last_proactive_outcome : string;
   k_created_at : string;
   k_updated_at : string;
 }
 
+(* One row of GET /api/v1/gate/keepers. That route is [masc_keeper_list], which
+   renders [status] through [Keeper_status_runtime.keeper_surface_status] — the
+   six-member surface vocabulary, with no "paused" member. Operator pause is
+   durable metadata and arrives on the [keeper] record instead, so a reader
+   that wants the published control-plane status composes the two. Parsing the
+   status into the closed variant here means a producer that grows a seventh
+   label is a rejected row, not a row that silently reads as something else. *)
+type keeper_phase = Keeper_state_machine.phase
+
+let keeper_phase_of_string = Keeper_state_machine.phase_of_string
+
+type keeper_health = Keeper_types.keeper_health
+let keeper_health_to_string = Keeper_status_runtime.keeper_health_to_string
+let keeper_health_of_string = Keeper_status_runtime.keeper_health_of_string_opt
+
+type keeper_health_reading =
+  | Health_running
+  | Health_idle
+  | Health_offline
+  | Health_stale
+  | Health_degraded
+  | Health_zombie
+
+(* Exhaustive on purpose: a seventh member of [Keeper_types.keeper_health]
+   stops the build here rather than arriving on screen as one of these six. *)
+let keeper_health_reading : keeper_health -> keeper_health_reading = function
+  | Keeper_types.KH_healthy -> Health_running
+  | Keeper_types.KH_idle -> Health_idle
+  | Keeper_types.KH_offline -> Health_offline
+  | Keeper_types.KH_stale -> Health_stale
+  | Keeper_types.KH_degraded -> Health_degraded
+  | Keeper_types.KH_zombie -> Health_zombie
+
+let keeper_next_action_of_string =
+  Keeper_status_runtime.keeper_next_action_path_of_string_opt
+let keeper_phase_to_string = Keeper_state_machine.phase_to_string
+
+type keeper_runtime = {
+  kr_name : string;
+  kr_health : keeper_health;
+  kr_paused : bool;
+  kr_next_action : Keeper_status_runtime.keeper_next_action_path option;
+  kr_keepalive_running : bool;
+  kr_autoboot_enabled : bool;
+  kr_proactive_enabled : bool;
+  kr_runtime_id : string;
+  kr_phase : keeper_phase;
+}
+
+type keeper_lane_phase =
+  | Lane_phase_offline
+  | Lane_phase_running
+  | Lane_phase_failing
+  | Lane_phase_compacting
+  | Lane_phase_handing_off
+  | Lane_phase_draining
+  | Lane_phase_paused
+  | Lane_phase_stopped
+  | Lane_phase_crashed
+  | Lane_phase_restarting
+  | Lane_phase_unknown of string
+
+type keeper_lane_turn_phase =
+  | Lane_turn_idle
+  | Lane_turn_prompting
+  | Lane_turn_routing
+  | Lane_turn_executing
+  | Lane_turn_compacting
+  | Lane_turn_finalizing
+  | Lane_turn_exhausted
+  | Lane_turn_unknown of string
+
+type keeper_lane_last_outcome = {
+  klo_runtime_state : string;
+  klo_selected_model : string option;
+}
+
+type keeper_lane = {
+  kl_keeper : string;
+  kl_phase : keeper_lane_phase;
+  kl_turn_phase : keeper_lane_turn_phase;
+  kl_idle_seconds : int;
+  kl_last_outcome : keeper_lane_last_outcome option;
+  kl_diagnosis : string option;
+}
+
+type keeper_lanes_snapshot = {
+  kls_generated_at : float;
+  kls_count : int;
+  kls_lanes : keeper_lane list;
+}
+
+type fusion_run_status =
+  | Fusion_running
+  | Fusion_completed
+  | Fusion_failed of {
+      frs_failure_code : string;
+      frs_error : string;
+    }
+
+type fusion_run = {
+  fur_run_id : string;
+  fur_keeper : string;
+  fur_preset : string;
+  fur_topology : Fusion_types.fusion_topology;
+  fur_started_at : float;
+  fur_status : fusion_run_status;
+}
+
+type fusion_snapshot = {
+  fus_generated_at : string;
+  fus_runs : fusion_run list;
+}
+
+type fusion_panel_answer = {
+  fpa_model : string;
+  fpa_answer : string;
+  fpa_input_tokens : int;
+  fpa_output_tokens : int;
+}
+
+type fusion_panel_failure = {
+  fpf_model : string;
+  fpf_reason_code : string;
+  fpf_reason_detail : string;
+}
+
+type fusion_panel_result =
+  | Fusion_panel_answered of fusion_panel_answer
+  | Fusion_panel_failed of fusion_panel_failure
+
+type fusion_judge =
+  | Fusion_judge_synthesized of {
+      fj_decision : string;
+      fj_resolved_answer : string;
+      fj_reason : string;
+    }
+  | Fusion_judge_failed of {
+      fj_failure_code : string;
+      fj_error : string;
+    }
+
+type fusion_evidence = {
+  fe_post_id : string;
+  fe_title : string;
+  fe_question : string;
+  fe_panel : fusion_panel_result list;
+  fe_judge : fusion_judge;
+}
+
+type fusion_evidence_status =
+  | Fusion_evidence_recorded
+  | Fusion_evidence_pending
+  | Fusion_evidence_absent
+
+type fusion_detail = {
+  fud_generated_at : string;
+  fud_run : fusion_run;
+  fud_evidence_status : fusion_evidence_status;
+  fud_evidence : fusion_evidence option;
+}
+
+type goal_proof =
+  | Proof_idle
+  | Proof_pending
+  | Proof_proven of string option
+  | Proof_refuted of string option
+  | Proof_unreadable of string option
+
+type planning_goal = {
+  pg_id : string;
+  pg_title : string;
+  pg_phase : Goal_phase.t;
+  pg_priority : int;
+  pg_due_date : string option;
+  pg_metric : string option;
+  pg_target_value : string option;
+  pg_proof : goal_proof;
+  pg_last_review_note : string option;
+}
+
+type planning_rollup = {
+  pr_active : int;
+  pr_verifying : int;
+  pr_done : int;
+  pr_dropped : int;
+}
+
+type planning_backlog = {
+  pb_todo : int;
+  pb_claimed : int;
+  pb_running : int;
+  pb_done : int;
+  pb_cancelled : int;
+}
+
+type planning_snapshot = {
+  pl_goals : planning_goal list;
+  pl_rollup : planning_rollup;
+  pl_backlog : planning_backlog;
+  pl_generated_at : string;
+}
+
+(* One tool call a keeper is holding for an operator's answer, from
+   GET /api/v1/keepers/tool-approvals. [kta_asked_at] is the server clock's
+   epoch reading when the wait opened; the drawing side derives age from it. *)
+type keeper_tool_approval = {
+  kta_keeper : string;
+  kta_tool_call_id : string;
+  kta_tool : string;
+  kta_args : string;
+  kta_question : string;
+  kta_asked_at : float;
+  kta_timeout_sec : float;
+}
+
+type fleet_safety = {
+  fs_status : string;
+  fs_blocker : string option;
+  fs_operator_action_required : bool;
+  fs_bootable_count : int;
+  fs_running_count : int;
+  fs_executable_count : int;
+  fs_failing_count : int;
+  fs_recovering_count : int;
+  fs_paused_count : int;
+  fs_target_reaction_capacity : int;
+  fs_reaction_capacity_shortfall : int;
+  fs_bootable_names : string list;
+  fs_running_names : string list;
+  fs_executable_names : string list;
+  fs_active_task_owner_without_fiber_count : int;
+  fs_completion_authority_pending_count : int;
+}
+
+type log_kind =
+  | Log_turn
+  | Log_heartbeat
+
+type log_channel =
+  | Log_channel_turn
+  | Log_channel_scheduled_autonomous
+  | Log_channel_heartbeat
+
 type log_entry = {
+  le_kind : log_kind;
   le_ts : string;
-  le_channel : string;
-  le_context_ratio : float;
-  le_context_tokens : int;
-  le_context_max : int;
-  le_message_count : int;
-  le_model_used : string option;
+  le_channel : log_channel;
+  le_message_count : int option;
   le_input_tokens : int option;
   le_output_tokens : int option;
   le_latency_ms : int option;
   le_cost_usd : float option;
   le_work_kind : string option;
   le_tools_used : string list;
-  le_compacted : bool option;
 }
+
+type context_unavailable_reason =
+  | Context_measurement_missing
+  | Context_turn_record_undecodable
+  | Context_turn_record_read_failed
+  | Context_turn_record_without_usage
+  | Context_turn_record_trace_mismatch
+
+type context_observation =
+  | Context_observed of {
+      ratio : float option;
+      tokens : int;
+      maximum : int option;
+      observed_at : string;
+      turn_ref : string;
+    }
+  | Context_unavailable of context_unavailable_reason
 
 let ( let* ) = Result.bind
 
@@ -61,6 +309,11 @@ let member key json =
   match Json_util.assoc_member_opt key json with
   | Some v -> v
   | None -> `Null
+
+let required_member json key =
+  match Json_util.assoc_member_opt key json with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "missing required field '%s'" key)
 
 let optional_string json key =
   match member key json with
@@ -71,43 +324,72 @@ let optional_string json key =
         (Printf.sprintf "field '%s' must be a string (received %s)" key
            (Json_util.kind_name other))
 
-let optional_int json key =
-  match member key json with
-  | `Null -> Ok None
-  | `Int n -> Ok (Some n)
-  | `Intlit s -> (
+let required_nullable_int_field json key =
+  match Json_util.assoc_member_opt key json with
+  | None -> Error (Printf.sprintf "missing required field '%s'" key)
+  | Some `Null -> Ok None
+  | Some (`Int n) -> Ok (Some n)
+  | Some (`Intlit s) -> (
       match int_of_string_opt s with
       | Some n -> Ok (Some n)
       | None ->
           Error (Printf.sprintf "field '%s' has non-integer intlit %S" key s))
-  | other ->
+  | Some other ->
       Error
-        (Printf.sprintf "field '%s' must be an int (received %s)" key
+        (Printf.sprintf "field '%s' must be an int or null (received %s)" key
            (Json_util.kind_name other))
 
-let optional_float json key =
-  match member key json with
-  | `Null -> Ok None
-  | `Float f -> Ok (Some f)
-  | `Int n -> Ok (Some (Float.of_int n))
-  | other ->
+let required_nullable_float_field json key =
+  match Json_util.assoc_member_opt key json with
+  | None -> Error (Printf.sprintf "missing required field '%s'" key)
+  | Some `Null -> Ok None
+  | Some (`Float value) -> Ok (Some value)
+  | Some (`Int value) -> Ok (Some (Float.of_int value))
+  | Some other ->
       Error
-        (Printf.sprintf "field '%s' must be a float (received %s)" key
+        (Printf.sprintf "field '%s' must be a float or null (received %s)" key
            (Json_util.kind_name other))
 
-let optional_bool json key =
-  match member key json with
-  | `Null -> Ok None
-  | `Bool b -> Ok (Some b)
-  | other ->
+let required_nullable_string_field json key =
+  match Json_util.assoc_member_opt key json with
+  | None -> Error (Printf.sprintf "missing required field '%s'" key)
+  | Some `Null -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some other ->
       Error
-        (Printf.sprintf "field '%s' must be a bool (received %s)" key
+        (Printf.sprintf "field '%s' must be a string or null (received %s)" key
+           (Json_util.kind_name other))
+
+let required_nullable_bool_field json key =
+  match Json_util.assoc_member_opt key json with
+  | None -> Error (Printf.sprintf "missing required field '%s'" key)
+  | Some `Null -> Ok None
+  | Some (`Bool value) -> Ok (Some value)
+  | Some other ->
+      Error
+        (Printf.sprintf "field '%s' must be a bool or null (received %s)" key
+           (Json_util.kind_name other))
+
+let require_null_field json key =
+  match Json_util.assoc_member_opt key json with
+  | None -> Error (Printf.sprintf "missing required field '%s'" key)
+  | Some `Null -> Ok ()
+  | Some other ->
+      Error
+        (Printf.sprintf "field '%s' must be null (received %s)" key
            (Json_util.kind_name other))
 
 let require_string_field json key = require_string json key
 let require_int_field json key = require_int json key
 let require_float_field json key = require_float json key
-let require_bool_field json key = require_bool json key
+let required_bool_field json key =
+  match member key json with
+  | `Bool value -> Ok value
+  | `Null -> Error (Printf.sprintf "missing required field '%s'" key)
+  | bad ->
+      Error
+        (Printf.sprintf "field '%s' must be a bool (received %s)" key
+           (Json_util.kind_name bad))
 
 let require_string_list json key =
   match member key json with
@@ -135,14 +417,6 @@ let require_string_list json key =
         (Printf.sprintf "field '%s' must be an array (received %s)" key
            (Json_util.kind_name other))
 
-let string_of_intlike_float_field key f =
-  if not (Float.is_finite f) then
-    Error (Printf.sprintf "field '%s' must be a finite number" key)
-  else
-    try Ok (string_of_int (int_of_float f))
-    with Invalid_argument _ ->
-      Error (Printf.sprintf "field '%s' is out of range for int" key)
-
 let decode_status json =
   match member "status" json with
   | `String s -> Ok s
@@ -168,92 +442,364 @@ let decode_agent json =
   let* last_seen = require_string_field json "last_seen" in
   Ok { name; status; current_task; last_seen }
 
-let decode_task json =
-  let* id = require_string_field json "id" in
-  let* title = require_string_field json "title" in
-  let* status = require_string_field json "status" in
-  let* priority = optional_int json "priority" in
-  let* claimed_by = optional_string json "claimed_by" in
-  let* parent_task_id = optional_string json "parent_task_id" in
-  let* goal_id = optional_string json "goal_id" in
-  Ok
-    {
-      id;
-      title;
-      status;
-      priority = Option.value priority ~default:3;
-      claimed_by;
-      parent_task_id;
-      goal_id;
-    }
+let task_of_domain (task : Masc_domain.task) =
+  {
+    id = task.id;
+    title = task.title;
+    status = task.task_status;
+    priority = task.priority;
+  }
 
-let decode_keeper ~filename json =
-  let* k_active_goal_ids = require_string_list json "active_goal_ids" in
-  let* k_generation = require_int_field json "generation" in
-  let* k_active_model = optional_string json "active_model" in
-  let* k_models =
-    match member "models" json with
-    | `Null -> Ok []
-    | `List _ -> require_string_list json "models"
-    | other ->
+let active_tasks_of_domain tasks =
+  tasks
+  |> List.map task_of_domain
+  |> List.filter (fun task ->
+       not (Masc_domain.task_status_is_terminal task.status))
+  |> List.stable_sort (fun left right ->
+       Int.compare left.priority right.priority)
+
+let decode_task json =
+  let* task = Masc_domain.task_of_yojson json in
+  Ok (task_of_domain task)
+
+let sanitize_terminal_text text =
+  let escaped_byte byte = Printf.sprintf "\\x%02X" byte in
+  let escaped_codepoint byte = Printf.sprintf "\\u00%02X" byte in
+  let output = Buffer.create (String.length text) in
+  let byte_at index = Char.code text.[index] in
+  let is_continuation byte = byte >= 0x80 && byte <= 0xBF in
+  let valid_utf8_length index =
+    let remaining = String.length text - index in
+    let first = byte_at index in
+    if first >= 0xC2 && first <= 0xDF && remaining >= 2
+       && is_continuation (byte_at (index + 1))
+    then Some 2
+    else if first = 0xE0 && remaining >= 3
+            && byte_at (index + 1) >= 0xA0
+            && byte_at (index + 1) <= 0xBF
+            && is_continuation (byte_at (index + 2))
+    then Some 3
+    else if first >= 0xE1 && first <= 0xEC && remaining >= 3
+            && is_continuation (byte_at (index + 1))
+            && is_continuation (byte_at (index + 2))
+    then Some 3
+    else if first = 0xED && remaining >= 3
+            && byte_at (index + 1) >= 0x80
+            && byte_at (index + 1) <= 0x9F
+            && is_continuation (byte_at (index + 2))
+    then Some 3
+    else if first >= 0xEE && first <= 0xEF && remaining >= 3
+            && is_continuation (byte_at (index + 1))
+            && is_continuation (byte_at (index + 2))
+    then Some 3
+    else if first = 0xF0 && remaining >= 4
+            && byte_at (index + 1) >= 0x90
+            && byte_at (index + 1) <= 0xBF
+            && is_continuation (byte_at (index + 2))
+            && is_continuation (byte_at (index + 3))
+    then Some 4
+    else if first >= 0xF1 && first <= 0xF3 && remaining >= 4
+            && is_continuation (byte_at (index + 1))
+            && is_continuation (byte_at (index + 2))
+            && is_continuation (byte_at (index + 3))
+    then Some 4
+    else if first = 0xF4 && remaining >= 4
+            && byte_at (index + 1) >= 0x80
+            && byte_at (index + 1) <= 0x8F
+            && is_continuation (byte_at (index + 2))
+            && is_continuation (byte_at (index + 3))
+    then Some 4
+    else None
+  in
+  let rec append index =
+    if index < String.length text
+    then (
+      let byte = Char.code text.[index] in
+      if
+        byte < 0x20 || (byte >= 0x7F && byte <= 0x9F)
+      then (
+        Buffer.add_string output (escaped_byte byte);
+        append (index + 1))
+      else if byte < 0x80
+      then (
+        Buffer.add_char output text.[index];
+        append (index + 1))
+      else if
+        byte = 0xC2
+        && index + 1 < String.length text
+        && let next = Char.code text.[index + 1] in
+           next >= 0x80 && next <= 0x9F
+      then (
+        Buffer.add_string output (escaped_codepoint (Char.code text.[index + 1]));
+        append (index + 2))
+      else
+        match valid_utf8_length index with
+        | Some length ->
+          Buffer.add_substring output text index length;
+          append (index + length)
+        | None ->
+          Buffer.add_string output (escaped_byte byte);
+          append (index + 1))
+  in
+  append 0;
+  Buffer.contents output
+;;
+
+let short_timestamp_for_terminal text =
+  sanitize_terminal_text
+    (if String.length text > 19 then String.sub text 0 19
+     else if String.length text = 0 then "(never)"
+     else text)
+;;
+
+(* The clock beside a row, in the zone the operator's terminal is in. The
+   server writes RFC 3339 on the UTC timeline; slicing HH:MM:SS straight out
+   of that string put a UTC clock on every log row under a header that showed
+   local time, nine hours apart in Seoul. [localtime] is the conversion the
+   caller chooses -- the terminal's own zone on a screen, a fixed one in a
+   test -- so this stays a function of its inputs. A timestamp the codec
+   cannot read keeps the old slice: the byte positions are still where a
+   clock would be, and the sanitizer still makes them safe to draw. *)
+let clock_timestamp_for_terminal ~localtime text =
+  sanitize_terminal_text
+    (match Time_codec.parse_rfc3339_opt text with
+     | Some unix_seconds ->
+         let tm = localtime unix_seconds in
+         Printf.sprintf "%02d:%02d:%02d" tm.Unix.tm_hour tm.Unix.tm_min
+           tm.Unix.tm_sec
+     | None -> if String.length text >= 19 then String.sub text 11 8 else text)
+;;
+
+let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
+  let runtime = meta.runtime in
+  let usage = runtime.usage in
+  let compaction = runtime.compaction_rt in
+  let proactive = runtime.proactive_rt in
+  let k_last_turn_ts =
+    if Float.compare usage.last_turn_ts 0.0 <= 0 then ""
+    else Masc_domain.iso8601_of_unix_seconds usage.last_turn_ts
+  in
+  {
+    k_name = meta.name;
+    k_trace_id = Keeper_id.Trace_id.to_string runtime.trace_id;
+    k_paused = meta.paused;
+    k_current_task_id =
+      Option.map Keeper_id.Task_id.to_string meta.current_task_id;
+    k_total_turns = usage.total_turns;
+    k_total_tokens = usage.total_tokens;
+    k_total_cost_usd = usage.total_cost_usd;
+    k_last_turn_ts;
+    k_compaction_count = compaction.count;
+    k_last_proactive_outcome =
+      Keeper_meta_contract.proactive_cycle_outcome_to_string
+        proactive.last_outcome;
+    k_created_at = meta.created_at;
+    k_updated_at = meta.updated_at;
+  }
+
+let decode_keeper json =
+  let* meta = Keeper_meta_json_parse.meta_of_json json in
+  Ok (keeper_of_meta meta)
+
+let decode_turn_channel raw =
+  match Keeper_world_observation.channel_of_string raw with
+  | Some Keeper_world_observation.Reactive -> Ok Log_channel_turn
+  | Some Keeper_world_observation.Scheduled_autonomous ->
+      Ok Log_channel_scheduled_autonomous
+  | None -> Error (Printf.sprintf "unknown current turn channel %S" raw)
+
+let decode_turn_mode json =
+  let* raw = require_string_field json "turn_mode" in
+  match Turn_mode_codec.turn_mode_of_string raw with
+  | Some mode -> Ok mode
+  | None -> Error (Printf.sprintf "unknown current turn mode %S" raw)
+
+let validate_usage_projection ~input_tokens ~output_tokens
+    ~cache_creation_tokens ~cache_read_tokens ~total_tokens ~cost_usd
+    ~inner_trust ~inner_anomaly ~inner_reasons ~outer_trust ~outer_reasons =
+  let classified =
+    match
+      ( input_tokens,
+        output_tokens,
+        cache_creation_tokens,
+        cache_read_tokens,
+        total_tokens,
+        cost_usd )
+    with
+    | ( Some input_tokens,
+        Some output_tokens,
+        Some cache_creation_tokens,
+        Some cache_read_tokens,
+        Some total_tokens,
+        Some cost_usd ) ->
+        if total_tokens <> input_tokens + output_tokens then
+          Error "usage total_tokens does not equal input_tokens + output_tokens"
+        else
+          let usage : Agent_core.Types.api_usage =
+            { input_tokens;
+              output_tokens;
+              cache_creation_input_tokens = cache_creation_tokens;
+              cache_read_input_tokens = cache_read_tokens;
+              cost_usd = Some cost_usd;
+            }
+          in
+          Ok (Keeper_usage_trust.classify ~usage_reported:true ~usage)
+    | None, None, None, None, None, None ->
+        let usage : Agent_core.Types.api_usage =
+          { input_tokens = 0;
+            output_tokens = 0;
+            cache_creation_input_tokens = 0;
+            cache_read_input_tokens = 0;
+            cost_usd = None;
+          }
+        in
+        Ok (Keeper_usage_trust.classify ~usage_reported:false ~usage)
+    | _ ->
         Error
-          (Printf.sprintf
-             "field 'models' must be a list of strings (received %s)"
-             (Json_util.kind_name other))
+          "usage tokens, cost, and trust must form one current atomic observation"
   in
-  let* k_proactive_enabled = require_bool_field json "proactive_enabled" in
-  let* k_initiative_enabled = optional_bool json "initiative_enabled" in
-  let* k_total_turns = require_int_field json "total_turns" in
-  let* k_total_tokens = require_int_field json "total_tokens" in
-  let* k_total_cost_usd = require_float_field json "total_cost_usd" in
-  let* k_last_turn_ts =
-    match member "last_turn_ts" json with
-    | `String s -> Ok s
-    | `Float f -> string_of_intlike_float_field "last_turn_ts" f
-    | `Int n -> Ok (string_of_int n)
-    | `Null -> Ok ""
-    | other ->
+  let* classified = classified in
+  let expected_trust = Keeper_usage_trust.to_string classified in
+  let expected_reasons = Keeper_usage_trust.reasons classified in
+  let expected_anomaly =
+    match classified with
+    | Keeper_usage_trust.Usage_untrusted _ -> true
+    | Keeper_usage_trust.Usage_missing | Keeper_usage_trust.Usage_trusted ->
+        false
+  in
+  if
+    not
+      (String.equal inner_trust expected_trust
+      && String.equal outer_trust expected_trust)
+  then Error "usage trust does not match the current counter observation"
+  else if inner_anomaly <> expected_anomaly then
+    Error "usage anomaly flag does not match the current trust classification"
+  else if inner_reasons <> expected_reasons || outer_reasons <> expected_reasons
+  then Error "usage anomaly reasons do not match the current trust classification"
+  else Ok ()
+
+let decode_log_entry json =
+  let* kind =
+    match Keeper_metrics_record.kind_of_json json with
+    | Some kind -> Ok kind
+    | None -> Error "unknown current keeper metrics schema or record kind"
+  in
+  let* le_ts = require_string_field json "ts" in
+  let* _ts_unix = require_float_field json "ts_unix" in
+  let* raw_channel = require_string_field json "channel" in
+  let* _name = require_string_field json "name" in
+  let* _agent_name = require_string_field json "agent_name" in
+  let* _trace_id = require_string_field json "trace_id" in
+  match kind with
+  | Keeper_metrics_record.Heartbeat ->
+      if not (String.equal raw_channel "heartbeat") then
         Error
-          (Printf.sprintf
-             "field 'last_turn_ts' must be a string, number, or null \
-              (received %s)"
-             (Json_util.kind_name other))
-  in
-  let* k_compaction_count = require_int_field json "compaction_count" in
-  let* k_trigger_mode = require_string_field json "trigger_mode" in
-  let* k_context_budget = require_int_field json "context_budget" in
-  let* k_drift_enabled = require_bool_field json "drift_enabled" in
-  let* k_verify = require_bool_field json "verify" in
-  let* k_created_at = require_string_field json "created_at" in
-  let* k_updated_at = require_string_field json "updated_at" in
-  let default_name =
-    if Filename.check_suffix filename ".json" then
-      Filename.chop_suffix filename ".json"
-    else
-      Filename.remove_extension filename
-  in
-  let k_name = Option.value (get_string json "name") ~default:default_name in
-  Ok
-    {
-      k_name;
-      k_active_goal_ids;
-      k_generation;
-      k_active_model;
-      k_models;
-      k_proactive_enabled;
-      k_initiative_enabled;
-      k_total_turns;
-      k_total_tokens;
-      k_total_cost_usd;
-      k_last_turn_ts;
-      k_compaction_count;
-      k_trigger_mode;
-      k_context_budget;
-      k_drift_enabled;
-      k_verify;
-      k_created_at;
-      k_updated_at;
-    }
+          (Printf.sprintf "heartbeat metrics row has invalid channel %S"
+             raw_channel)
+      else
+        let* le_message_count =
+          required_nullable_int_field json "message_count"
+        in
+        let* () =
+          if Option.exists (fun count -> count < 0) le_message_count then
+            Error "heartbeat message_count must be non-negative"
+          else Ok ()
+        in
+        Ok
+          { le_kind = Log_heartbeat;
+            le_ts;
+            le_channel = Log_channel_heartbeat;
+            le_message_count;
+            le_input_tokens = None;
+            le_output_tokens = None;
+            le_latency_ms = None;
+            le_cost_usd = None;
+            le_work_kind = None;
+            le_tools_used = [];
+          }
+  | Keeper_metrics_record.Turn ->
+      let* le_channel = decode_turn_channel raw_channel in
+      let* le_message_count = require_int_field json "message_count" in
+      let* () =
+        if le_message_count < 0 then
+          Error "turn message_count must be non-negative"
+        else Ok ()
+      in
+      let* usage =
+        match member "usage" json with
+        | `Assoc _ as usage -> Ok usage
+        | `Null -> Error "missing required field 'usage'"
+        | other ->
+            Error
+              (Printf.sprintf "field 'usage' must be an object (received %s)"
+                 (Json_util.kind_name other))
+      in
+      let* le_input_tokens =
+        required_nullable_int_field usage "input_tokens"
+      in
+      let* le_output_tokens =
+        required_nullable_int_field usage "output_tokens"
+      in
+      let* cache_creation_tokens =
+        required_nullable_int_field usage "cache_creation_tokens"
+      in
+      let* cache_read_tokens =
+        required_nullable_int_field usage "cache_read_tokens"
+      in
+      let* total_tokens = required_nullable_int_field usage "total_tokens" in
+      let* inner_usage_trust = require_string_field usage "usage_trust" in
+      let* inner_usage_anomaly = require_bool usage "usage_anomaly" in
+      let* inner_usage_anomaly_reasons =
+        require_string_list usage "usage_anomaly_reasons"
+      in
+      let* outer_usage_trust = require_string_field json "usage_trust" in
+      let* outer_usage_anomaly_reasons =
+        require_string_list json "usage_anomaly_reasons"
+      in
+      let* latency_ms = require_int_field json "latency_ms" in
+      let* () =
+        if latency_ms < 0 then Error "latency_ms must be non-negative" else Ok ()
+      in
+      let* le_cost_usd = required_nullable_float_field json "cost_usd" in
+      let* () =
+        validate_usage_projection ~input_tokens:le_input_tokens
+          ~output_tokens:le_output_tokens ~cache_creation_tokens
+          ~cache_read_tokens ~total_tokens ~cost_usd:le_cost_usd
+          ~inner_trust:inner_usage_trust
+          ~inner_anomaly:inner_usage_anomaly
+          ~inner_reasons:inner_usage_anomaly_reasons
+          ~outer_trust:outer_usage_trust
+          ~outer_reasons:outer_usage_anomaly_reasons
+      in
+      let* turn_mode = decode_turn_mode json in
+      let* tool_call_count = require_int_field json "tool_call_count" in
+      let* le_tools_used = require_string_list json "tools_used" in
+      let* () =
+        if tool_call_count < 0 then Error "tool_call_count must be non-negative"
+        else if tool_call_count <> List.length le_tools_used then
+          Error "tool_call_count does not match tools_used"
+        else
+          match turn_mode with
+          | Turn_mode_codec.Tool_use -> Ok ()
+          | Turn_mode_codec.Text_response
+          | Turn_mode_codec.Skip_text
+          | Turn_mode_codec.Noop ->
+              if tool_call_count = 0 then Ok ()
+              else Error "non-tool turn mode cannot carry tool calls"
+      in
+      Ok
+        { le_kind = Log_turn;
+          le_ts;
+          le_channel;
+          le_message_count = Some le_message_count;
+          le_input_tokens;
+          le_output_tokens;
+          le_latency_ms = Some latency_ms;
+          le_cost_usd;
+          le_work_kind =
+            Some (Turn_mode_codec.work_kind_of_turn_mode turn_mode);
+          le_tools_used;
+        }
 
 let parse_log_entry line =
   let json =
@@ -261,56 +807,138 @@ let parse_log_entry line =
     with Yojson.Json_error msg -> Error ("invalid JSON: " ^ msg)
   in
   let* json = json in
-  let* le_ts = require_string_field json "ts" in
-  let* le_channel = require_string_field json "channel" in
-  let* le_context_ratio = require_float_field json "context_ratio" in
-  let* le_context_tokens = require_int_field json "context_tokens" in
-  let* le_context_max = require_int_field json "context_max" in
-  let* le_message_count = require_int_field json "message_count" in
-  let le_model_used = get_string json "model_used" in
-  let usage_json = get_object json "usage" in
-  let* le_input_tokens =
-    match usage_json with
-    | None -> Ok None
-    | Some usage -> optional_int usage "input_tokens"
-  in
-  let* le_output_tokens =
-    match usage_json with
-    | None -> Ok None
-    | Some usage -> optional_int usage "output_tokens"
-  in
-  let* le_latency_ms = optional_int json "latency_ms" in
-  let* le_cost_usd = optional_float json "cost_usd" in
-  let* le_work_kind = optional_string json "work_kind" in
-  let le_tools_used =
-    match member "tools_used" json with
-    | `Null -> Ok []
-    | `List _ -> require_string_list json "tools_used"
-    | other ->
-        Error
-          (Printf.sprintf
-             "field 'tools_used' must be an array (received %s)"
-             (Json_util.kind_name other))
-  in
-  let* le_tools_used = le_tools_used in
-  let* le_compacted = optional_bool json "compacted" in
-  Ok
-    {
-      le_ts;
-      le_channel;
-      le_context_ratio;
-      le_context_tokens;
-      le_context_max;
-      le_message_count;
-      le_model_used;
-      le_input_tokens;
-      le_output_tokens;
-      le_latency_ms;
-      le_cost_usd;
-      le_work_kind;
-      le_tools_used;
-      le_compacted;
-    }
+  decode_log_entry json
+
+let context_unavailable_reason_of_string = function
+  | "context_measurement_missing" -> Ok Context_measurement_missing
+  | "turn_record_undecodable" -> Ok Context_turn_record_undecodable
+  | "turn_record_read_failed" -> Ok Context_turn_record_read_failed
+  | "turn_record_without_usage" -> Ok Context_turn_record_without_usage
+  | "turn_record_trace_mismatch" -> Ok Context_turn_record_trace_mismatch
+  | raw -> Error (Printf.sprintf "unknown context unavailable reason %S" raw)
+
+let context_unavailable_reason_to_string = function
+  | Context_measurement_missing -> "context measurement missing"
+  | Context_turn_record_undecodable -> "turn record undecodable"
+  | Context_turn_record_read_failed -> "turn record read failed"
+  | Context_turn_record_without_usage -> "turn record has no provider usage"
+  | Context_turn_record_trace_mismatch -> "turn record belongs to a prior trace"
+
+let require_object_member json key =
+  let* value = required_member json key in
+  match value with
+  | `Assoc _ as object_value -> Ok object_value
+  | other ->
+      Error
+        (Printf.sprintf "field '%s' must be an object (received %s)" key
+           (Json_util.kind_name other))
+
+let decode_context_unavailable_payload json =
+  let* kind = require_string_field json "kind" in
+  if not (String.equal kind "not_observed") then
+    Error (Printf.sprintf "unknown context unavailable kind %S" kind)
+  else
+    let* reason = require_string_field json "reason" in
+    context_unavailable_reason_of_string reason
+
+let validate_context_ratio ~tokens ~maximum ~ratio =
+  match maximum, ratio with
+  | Some maximum, Some ratio when maximum > 0 ->
+      let expected = Float.of_int tokens /. Float.of_int maximum in
+      let tolerance = 1e-12 *. Float.max 1.0 (Float.abs expected) in
+      if Float.is_finite ratio && Float.abs (ratio -. expected) <= tolerance then
+        Ok ()
+      else Error "context ratio does not match tokens / context window"
+  | Some maximum, None when maximum > 0 ->
+      Error "positive context window requires an observed ratio"
+  | (None | Some 0), None -> Ok ()
+  | (None | Some 0), Some _ ->
+      Error "context ratio requires a positive context window"
+  | Some _, (Some _ | None) -> Error "context window must be non-negative"
+
+let decode_context_observation ~expected_trace_id json =
+  match Json_util.assoc_member_opt "context_metrics_unavailable" json with
+  | None -> Error "missing required field 'context_metrics_unavailable'"
+  | Some (`Assoc _ as unavailable) ->
+      let* reason = decode_context_unavailable_payload unavailable in
+      let* () = require_null_field json "context_ratio" in
+      let* () = require_null_field json "context_tokens" in
+      let* () = require_null_field json "context_max" in
+      let* () = require_null_field json "context_source" in
+      let* context = require_object_member json "context" in
+      let* () = require_null_field context "source" in
+      let* () = require_null_field context "context_ratio" in
+      let* () = require_null_field context "context_tokens" in
+      let* () = require_null_field context "context_max" in
+      let* nested_unavailable =
+        require_object_member context "metrics_unavailable"
+      in
+      let* nested_reason =
+        decode_context_unavailable_payload nested_unavailable
+      in
+      if nested_reason <> reason then
+        Error "nested and top-level context unavailable reasons disagree"
+      else Ok (Context_unavailable reason)
+  | Some `Null ->
+      let* ratio = required_nullable_float_field json "context_ratio" in
+      let* tokens = require_int_field json "context_tokens" in
+      let* maximum = required_nullable_int_field json "context_max" in
+      let* source = require_string_field json "context_source" in
+      if not (String.equal source "turn_record") then
+        Error (Printf.sprintf "unknown context observation source %S" source)
+      else if
+        tokens < 0
+        || Option.exists (fun value -> not (Float.is_finite value)) ratio
+      then
+        Error "context observation has an invalid numeric range"
+      else
+        let* () = validate_context_ratio ~tokens ~maximum ~ratio in
+        let* context = require_object_member json "context" in
+        let* nested_source = require_string_field context "source" in
+        let* nested_ratio =
+          required_nullable_float_field context "context_ratio"
+        in
+        let* nested_tokens = require_int_field context "context_tokens" in
+        let* nested_maximum =
+          required_nullable_int_field context "context_max"
+        in
+        let* () = require_null_field context "metrics_unavailable" in
+        if not (String.equal nested_source source) then
+          Error "nested and top-level context sources disagree"
+        else if
+          nested_ratio <> ratio || nested_tokens <> tokens
+          || nested_maximum <> maximum
+        then Error "nested and top-level context measurements disagree"
+        else
+          let* observed_at = require_string_field context "observed_at" in
+          let* turn_ref_json = required_member context "turn_ref" in
+          let* turn_ref = Ids.Turn_ref.of_yojson turn_ref_json in
+          let* absolute_turn = require_int_field context "absolute_turn" in
+          let* request_body_bytes =
+            required_nullable_int_field context "request_body_bytes"
+          in
+          if
+            not
+              (String.equal (Ids.Turn_ref.trace_id turn_ref) expected_trace_id)
+          then Error "context turn reference belongs to a different trace"
+          else if absolute_turn <> Ids.Turn_ref.absolute_turn turn_ref then
+            Error "context absolute turn disagrees with its turn reference"
+          else if Option.exists (fun value -> value < 0) request_body_bytes then
+            Error "context request body bytes must be non-negative"
+          else
+            Ok
+              (Context_observed
+                 { ratio;
+                   tokens;
+                   maximum;
+                   observed_at;
+                   turn_ref = Ids.Turn_ref.to_string turn_ref;
+                 })
+  | Some other ->
+      Error
+        (Printf.sprintf
+           "field 'context_metrics_unavailable' must be an object or null (received %s)"
+           (Json_util.kind_name other))
 
 let trim = String.trim
 
@@ -348,6 +976,72 @@ let decode_json_response_body ~allow_empty ~status_code ~body :
     try Ok (Yojson.Safe.from_string body)
     with Yojson.Json_error e -> Error (Printf.sprintf "(JSON parse: %s)" e)
 
+(** The [/api/v1/tools/*] write endpoints answer one envelope,
+    [{ok : bool; message : string}]. Reduced to a one-line outcome here so
+    every call site reports the server's own message instead of re-decoding
+    the envelope -- and a shape the endpoint never sends is an error rather
+    than a guessed success. *)
+let tool_envelope_outcome (json : Yojson.Safe.t) : (string, string) result =
+  let envelope_message fields =
+    match List.assoc_opt "message" fields with
+    | Some (`String message) -> message
+    | Some _ | None -> ""
+  in
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt "ok" fields with
+      | Some (`Bool ok) ->
+          let message = envelope_message fields in
+          if ok then
+            Ok (if String.equal message "" then "posted" else message)
+          else
+            Error
+              (if String.equal message "" then "request rejected" else message)
+      | _ -> Error "unexpected tool response envelope")
+  | _ -> Error "unexpected tool response envelope"
+
+(** Decode one SGR-encoded mouse report ([CSI ?1006;1000h] mode) into a key.
+
+    A wheel report becomes [wheel-up] / [wheel-down] rather than the arrow keys
+    it used to share. Two things wanted to be told apart: a wheel notch moves
+    further than one row, and the chat composer answers the arrows with its own
+    history. A surface that scrolls binds both. Wheel-up is button [64],
+    wheel-down [65]; the horizontal wheel, clicks, and releases stay [None] -- the
+    terminal sends them, but nothing consumes them yet, and an unconsumed
+    report must not masquerade as a claimed key. [parameters] is the raw CSI
+    parameter span (["<64;10;5"] for a wheel-up at column 10, row 5) and
+    [final] the CSI final byte. *)
+let sgr_wheel_key (parameters : string) (final : char) : string option =
+  if final <> 'M' then None
+  else
+    match String.split_on_char ';' parameters with
+    | button :: _ ->
+        if String.equal button "<64" then Some "wheel-up"
+        else if String.equal button "<65" then Some "wheel-down"
+        else None
+    | [] -> None
+
+(** Decode the button byte of a legacy X10 mouse report ([CSI M] followed by
+    three raw bytes) into the same key an SGR report produces.
+
+    Terminals that do not implement SGR ([?1006]) still answer the tracking
+    request ([?1000]) in this older shape. Apple Terminal is one, and it is the
+    macOS default: the combined [?1006;1000h] request leaves it reporting X10,
+    so a reader that only understands SGR sees [CSI M], calls the sequence
+    unknown, and leaves the three coordinate bytes in the stream to be typed as
+    text. Live shape 2026-08-24: one wheel notch put three characters in the
+    chat composer.
+
+    Each byte is offset by 32. Wheel-up is button 64 and wheel-down 65, the
+    same numbers SGR uses. Clicks, releases, and drags return [None] — nothing
+    consumes them yet — but the caller must still consume their bytes. *)
+let x10_wheel_key (button : char) : string option =
+  match Char.code button - 32 with
+  | 64 -> Some "wheel-up"
+  | 65 -> Some "wheel-down"
+  | _ -> None
+;;
+
 let missing_field key =
   Error (Printf.sprintf "missing required field '%s'" key)
 
@@ -368,6 +1062,12 @@ let optional_string_field json key =
   | `Null -> Ok None
   | bad -> field_type_error key "a string or null" bad
 
+let optional_bool_field json key =
+  match member key json with
+  | `Bool value -> Ok (Some value)
+  | `Null -> Ok None
+  | bad -> field_type_error key "a boolean or null" bad
+
 let required_int_field json key =
   match member key json with
   | `Int value -> Ok value
@@ -377,19 +1077,6 @@ let required_int_field json key =
       | None -> Error (Printf.sprintf "field '%s' has invalid int %S" key raw))
   | `Null -> missing_field key
   | bad -> field_type_error key "an int" bad
-
-let required_int_any_field json keys =
-  let rec loop = function
-    | [] ->
-        Error
-          (Printf.sprintf "missing required field '%s'"
-             (String.concat "' or '" keys))
-    | key :: rest -> (
-        match member key json with
-        | `Null -> loop rest
-        | _ -> required_int_field json key)
-  in
-  loop keys
 
 let int_field_or json key ~default =
   match member key json with
@@ -467,6 +1154,1739 @@ let decode_list label decode items =
         | Error err -> Error (Printf.sprintf "%s[%d]: %s" label idx err))
   in
   loop 0 [] items
+
+(* The ledger row the server joins onto each goal. Two shapes reach here: the
+   record, whose [completion] names the state, and [ledger_error_to_yojson],
+   which puts ["ledger_error"] at the top with a [detail]. Read leniently — this
+   is a projection for a pane and a shape it cannot read must not cost the
+   operator the goal list — but every branch says something different, so an
+   unreadable ledger never renders as an unreviewed goal.
+
+   The text comes from [evidence] before [reason]: an approval carries its text
+   in [evidence] and leaves [reason] null, while a refusal fills both with the
+   same string. *)
+let decode_goal_proof json =
+  let string_at container key =
+    match member key container with
+    | `String value when String.trim value <> "" -> Some (String.trim value)
+    | `String _ | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _
+    | `Null ->
+      None
+  in
+  let verdict_text completion =
+    let verdict = member "verdict" completion in
+    match string_at verdict "evidence" with
+    | Some _ as text -> text
+    | None -> string_at verdict "reason"
+  in
+  match json with
+  | `Assoc _ ->
+    (match string_at json "state" with
+     | Some "ledger_error" -> Proof_unreadable (string_at json "detail")
+     | Some other -> Proof_unreadable (Some other)
+     | None ->
+       let completion = member "completion" json in
+       (match string_at completion "state" with
+        | Some "proof_proven" -> Proof_proven (verdict_text completion)
+        | Some "proof_refuted" -> Proof_refuted (verdict_text completion)
+        | Some "proof_pending" -> Proof_pending
+        | Some "idle" -> Proof_idle
+        | Some other -> Proof_unreadable (Some other)
+        (* The server never leaves this out: a goal with no ledger row gets
+           the default record and a store that will not decode gets the
+           ledger_error marker, precisely so corruption is not dressed up as
+           "not verified yet". Reading an absent state as idle would put that
+           disguise back on this side of the wire. *)
+        | None -> Proof_unreadable (Some "no completion state on the goal")))
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    Proof_unreadable (Some "no verification block on the goal")
+;;
+
+let decode_planning_goal json =
+  let* pg_id = required_string_field json "id" in
+  let* pg_title = required_string_field json "title" in
+  let* raw_phase = required_string_field json "phase" in
+  let* pg_phase =
+    match Goal_phase.parse raw_phase with
+    | Some phase -> Ok phase
+    | None -> Error (Printf.sprintf "unknown planning goal phase %S" raw_phase)
+  in
+  let* pg_priority = required_int_field json "priority" in
+  let* pg_due_date = optional_string_field json "due_date" in
+  let* pg_metric = optional_string_field json "metric" in
+  let* pg_target_value = optional_string_field json "target_value" in
+  let* pg_last_review_note = optional_string_field json "last_review_note" in
+  let pg_proof = decode_goal_proof (member "verification" json) in
+  Ok
+    {
+      pg_id;
+      pg_title;
+      pg_phase;
+      pg_priority;
+      pg_due_date;
+      pg_metric;
+      pg_target_value;
+      pg_proof;
+      pg_last_review_note;
+    }
+
+let decode_planning_rollup json =
+  let* pr_active = required_int_field json "active_count" in
+  let* pr_verifying = required_int_field json "verifying_count" in
+  let* pr_done = required_int_field json "done_count" in
+  let* pr_dropped = required_int_field json "dropped_count" in
+  Ok { pr_active; pr_verifying; pr_done; pr_dropped }
+
+let decode_planning_backlog json =
+  let* pb_todo = required_int_field json "todo" in
+  let* pb_claimed = required_int_field json "claimed" in
+  let* pb_running = required_int_field json "in_progress" in
+  let* pb_done = required_int_field json "done" in
+  let* pb_cancelled = required_int_field json "cancelled" in
+  Ok { pb_todo; pb_claimed; pb_running; pb_done; pb_cancelled }
+
+type system_log_level =
+  | System_debug
+  | System_info
+  | System_warn
+  | System_error
+  | System_level_unknown of string
+
+type keeper_call = {
+  kc_at : float;
+  kc_tool : string;
+  kc_input : string;
+  kc_output : string option;
+  kc_success : bool;
+  kc_duration_ms : float option;
+  kc_turn : int option;
+  kc_task_id : string option;
+  kc_model : string option;
+}
+
+type keeper_calls_snapshot = {
+  kcs_keeper : string;
+  kcs_entries : keeper_call list;
+  kcs_count : int;
+  kcs_health : string;
+  kcs_latest_age_s : float option;
+  kcs_stale_reason : string option;
+  kcs_mismatched : int;
+}
+
+type system_log_entry = {
+  sl_seq : int;
+  sl_ts : string;
+  sl_level : system_log_level;
+  sl_module : string;
+  sl_keeper : string option;
+  sl_message : string;
+}
+
+type system_log_snapshot = {
+  sys_entries : system_log_entry list;
+  sys_total : int;
+  sys_latest_seq : int;
+}
+
+(* The server accepts "warn" and "warning" for one level and writes levels in
+   upper case. An unrecognised spelling keeps its text instead of becoming
+   Info, so a level added on the server shows up here as itself. *)
+let system_log_level_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "debug" -> System_debug
+  | "info" -> System_info
+  | "warn" | "warning" -> System_warn
+  | "error" -> System_error
+  | _ -> System_level_unknown raw
+
+let system_log_level_label = function
+  | System_debug -> "DEBUG"
+  | System_info -> "INFO "
+  | System_warn -> "WARN "
+  | System_error -> "ERROR"
+  | System_level_unknown raw ->
+      let raw = String.trim raw in
+      if String.length raw >= 5 then String.sub raw 0 5
+      else raw ^ String.make (5 - String.length raw) ' '
+
+let decode_system_log_entry json =
+  let* sl_seq = required_int_field json "seq" in
+  let* sl_ts = required_string_field json "ts" in
+  let* level_raw = required_string_field json "level" in
+  let* sl_module = required_string_field json "module" in
+  let* sl_message = required_string_field json "message" in
+  let* sl_keeper = optional_string_field json "keeper_name" in
+  Ok
+    { sl_seq
+    ; sl_ts
+    ; sl_level = system_log_level_of_string level_raw
+    ; sl_module
+    ; sl_keeper
+    ; sl_message
+    }
+
+type tool_entry = {
+  tl_name : string;
+  tl_description : string;
+  tl_surfaces : string list;
+  tl_direct_call : bool;
+}
+
+type inventory_freshness =
+  | Warming
+  | Settled
+
+type tool_snapshot = {
+  ts_tools : tool_entry list;
+  ts_count : int;
+  ts_freshness : inventory_freshness;
+}
+
+type connector = {
+  cn_id : string;
+  cn_display_name : string;
+  cn_available : bool;
+  cn_connected : bool;
+  cn_status : string;
+  cn_channel : string option;
+}
+
+type connector_snapshot = {
+  cs_connectors : connector list;
+  cs_total : int;
+  cs_active : int;
+}
+
+type runtime_probe_refresh_state =
+  | Runtime_probe_fresh
+  | Runtime_probe_recent
+  | Runtime_probe_served_stale
+  | Runtime_probe_warming_up
+
+type runtime_probe_status =
+  | Runtime_probe_reachable
+  | Runtime_probe_no_http_runtimes
+  | Runtime_probe_degraded
+  | Runtime_probe_unreachable
+  | Runtime_probe_warming
+
+type runtime_provider_status =
+  | Runtime_provider_reachable
+  | Runtime_provider_missing_auth
+  | Runtime_provider_auth_failed
+  | Runtime_provider_network_error
+  | Runtime_provider_server_error
+  | Runtime_provider_endpoint_not_found
+  | Runtime_provider_http_error
+  | Runtime_provider_unknown_http_status
+  | Runtime_provider_skipped_cli
+  | Runtime_provider_invalid_endpoint
+  | Runtime_provider_invalid_execution_transport
+
+type runtime_probe_transport =
+  | Runtime_probe_http
+  | Runtime_probe_cli
+
+type runtime_provider_probe = {
+  rpp_runtime_id : string;
+  rpp_transport : runtime_probe_transport;
+  rpp_status : runtime_provider_status;
+  rpp_reachable : bool option;
+  rpp_http_status : int option;
+  rpp_latency_ms : float option;
+  rpp_error : string option;
+  rpp_checked_at : string;
+}
+
+type runtime_probe_summary = {
+  rpsu_runtimes : int;
+  rpsu_probed : int;
+  rpsu_reachable : int;
+  rpsu_failed : int;
+  rpsu_skipped : int;
+  rpsu_default_runtime_id : string option;
+}
+
+type runtime_probe_snapshot = {
+  rps_generated_at : string;
+  rps_refreshed_at_unix : float option;
+  rps_cache_ttl_sec : float;
+  rps_cache_age_sec : float option;
+  rps_cache_hit : bool;
+  rps_refresh_state : runtime_probe_refresh_state;
+  rps_status : runtime_probe_status;
+  rps_probe_ok : bool;
+  rps_checked_at : string;
+  rps_summary : runtime_probe_summary;
+  rps_providers : runtime_provider_probe list;
+  rps_errors : string list;
+  rps_observations : string list;
+  rps_limitations : string list;
+}
+
+(* One decoder-owned resolved runtime row shared by the Keeper picker and the
+   Runtime surface. [ro_is_default] comes from the document's top-level
+   [default_runtime], not the row's independent binding flag. *)
+type runtime_option = {
+  ro_id : string;
+  ro_provider : string;
+  ro_model : string;
+  ro_dispatchable : bool;
+  ro_blocked_reason : string option;
+  ro_is_default : bool;
+}
+
+type runtime_resolved_lane = {
+  rrl_id : string;
+  rrl_runtime_ids : string list;
+  rrl_preferred_candidate : string option;
+  rrl_preferred_at_ts : float option;
+}
+
+type runtime_resolved_snapshot = {
+  rrs_generated_at_iso : string;
+  rrs_config_path : string option;
+  rrs_default_runtime_id : string option;
+  rrs_runtimes : runtime_option list;
+  rrs_lanes : runtime_resolved_lane list;
+}
+
+type runtime_candidate_row = {
+  rcr_lane_id : string;
+  rcr_position : int;
+  rcr_candidate_count : int;
+  rcr_runtime : runtime_option;
+  rcr_preferred_at_ts : float option;
+  rcr_probe : runtime_provider_probe option;
+}
+
+type runtime_surface_snapshot = {
+  rss_probe : runtime_probe_snapshot option;
+  rss_probe_error : string option;
+  rss_resolved : runtime_resolved_snapshot;
+  rss_candidates : runtime_candidate_row list;
+  rss_unassigned_probe_count : int;
+}
+
+type repository = {
+  rp_name : string;
+  rp_local_path : string;
+  rp_default_branch : string;
+  rp_status : string;
+  rp_keepers : string list;
+  rp_auto_sync : bool;
+}
+
+type repository_snapshot = {
+  rs_repositories : repository list;
+  rs_total : int;
+}
+
+type harness_verdict = {
+  hv_at : float;
+  hv_task_id : string;
+  hv_task_title : string;
+  hv_agent : string;
+  hv_gate : string;
+  hv_verdict : string;
+  hv_evaluator : string;
+  hv_fallback_reason : string option;
+}
+
+type harness_snapshot = { hs_verdicts : harness_verdict list }
+
+type verification_request = {
+  vr_request_id : string;
+  vr_task_id : string;
+  vr_task_title : string;
+  vr_kind : string;
+  vr_summary : string;
+  vr_next_action : string option;
+  vr_submitted_by : string;
+  vr_created_at : string;
+  vr_required_artifacts : string list;
+  vr_submitted_evidence : string list;
+  vr_evidence_error : string option;
+}
+
+type verification_snapshot = {
+  vs_requests : verification_request list;
+  vs_total : int;
+}
+
+let decode_string_name_list json key =
+  let* items = optional_list_field json key in
+  decode_list key
+    (fun item ->
+       match item with
+       | `String value -> Ok value
+       | bad -> field_type_error key "a string" bad)
+    items
+
+let decode_bool_field_or json key ~default =
+  match member key json with
+  | `Bool value -> Ok value
+  | `Null -> Ok default
+  | bad -> field_type_error key "a bool or null" bad
+
+let decode_tool_entry json =
+  let* tl_name = required_string_field json "name" in
+  let* tl_description = required_string_field json "description" in
+  let* tl_surfaces = decode_string_name_list json "surfaces" in
+  let* tl_direct_call =
+    decode_bool_field_or json "direct_call_allowed" ~default:false
+  in
+  Ok { tl_name; tl_description; tl_surfaces; tl_direct_call }
+
+let decode_tool_snapshot json =
+  (* The tools envelope carries config and runtime resolution beside the
+     inventory; this reads the inventory and leaves the rest to the dashboard,
+     which has room to show it. *)
+  let* inventory = required_object_field json "tool_inventory" in
+  let* tools_json = required_list_field inventory "tools" in
+  let* ts_tools = decode_list "tools" decode_tool_entry tools_json in
+  let* ts_count = required_int_field inventory "count" in
+  (* Only the warming placeholder carries this flag, and it carries it as
+     [true]; a payload built from a real inventory does not mention it. So an
+     absent flag is a built inventory, and the pane can tell "the server has
+     not looked yet" apart from "there are none" -- which it could not, and so
+     reported a warming server as a workspace with no tools registered. *)
+  let* warming = optional_bool_field json "is_warming" in
+  let ts_freshness =
+    match warming with Some true -> Warming | Some false | None -> Settled
+  in
+  Ok { ts_tools; ts_count; ts_freshness }
+
+let decode_connector json =
+  let* cn_id = required_string_field json "connector_id" in
+  let* cn_display_name = required_string_field json "display_name" in
+  let* cn_status = required_string_field json "status" in
+  (* Both default to false: a connector that does not say it is available or
+     connected is not, and defaulting the other way would draw a dead
+     connector as a working one. *)
+  let* cn_available = decode_bool_field_or json "available" ~default:false in
+  let* cn_connected = decode_bool_field_or json "connected" ~default:false in
+  let* cn_channel = optional_string_field json "channel" in
+  Ok { cn_id; cn_display_name; cn_available; cn_connected; cn_status; cn_channel }
+
+let decode_connector_snapshot json =
+  let* connectors_json = required_list_field json "connectors" in
+  let* cs_connectors =
+    decode_list "connectors" decode_connector connectors_json
+  in
+  let* cs_total = required_int_field json "total" in
+  let* cs_active = required_int_field json "active_count" in
+  Ok { cs_connectors; cs_total; cs_active }
+
+let runtime_probe_refresh_state_to_string = function
+  | Runtime_probe_fresh -> "fresh"
+  | Runtime_probe_recent -> "recent"
+  | Runtime_probe_served_stale -> "served_stale"
+  | Runtime_probe_warming_up -> "warming_up"
+
+let runtime_probe_status_to_string = function
+  | Runtime_probe_reachable -> "reachable"
+  | Runtime_probe_no_http_runtimes -> "no_http_runtimes"
+  | Runtime_probe_degraded -> "degraded"
+  | Runtime_probe_unreachable -> "unreachable"
+  | Runtime_probe_warming -> "warming_up"
+
+let runtime_provider_status_to_string = function
+  | Runtime_provider_reachable -> "reachable"
+  | Runtime_provider_missing_auth -> "missing_auth"
+  | Runtime_provider_auth_failed -> "auth_failed"
+  | Runtime_provider_network_error -> "network_error"
+  | Runtime_provider_server_error -> "server_error"
+  | Runtime_provider_endpoint_not_found -> "endpoint_not_found"
+  | Runtime_provider_http_error -> "http_error"
+  | Runtime_provider_unknown_http_status -> "unknown_http_status"
+  | Runtime_provider_skipped_cli -> "skipped_cli"
+  | Runtime_provider_invalid_endpoint -> "invalid_endpoint"
+  | Runtime_provider_invalid_execution_transport ->
+      "invalid_execution_transport"
+
+let runtime_probe_refresh_state_of_string = function
+  | "fresh" -> Ok Runtime_probe_fresh
+  | "recent" -> Ok Runtime_probe_recent
+  | "served_stale" -> Ok Runtime_probe_served_stale
+  | "warming_up" -> Ok Runtime_probe_warming_up
+  | value -> Error (Printf.sprintf "unknown runtime probe refresh_state %S" value)
+
+let runtime_probe_status_of_string = function
+  | "reachable" -> Ok Runtime_probe_reachable
+  | "no_http_runtimes" -> Ok Runtime_probe_no_http_runtimes
+  | "degraded" -> Ok Runtime_probe_degraded
+  | "unreachable" -> Ok Runtime_probe_unreachable
+  | "warming_up" -> Ok Runtime_probe_warming
+  | value -> Error (Printf.sprintf "unknown runtime probe status %S" value)
+
+let runtime_provider_status_of_string = function
+  | "reachable" -> Ok Runtime_provider_reachable
+  | "missing_auth" -> Ok Runtime_provider_missing_auth
+  | "auth_failed" -> Ok Runtime_provider_auth_failed
+  | "network_error" -> Ok Runtime_provider_network_error
+  | "server_error" -> Ok Runtime_provider_server_error
+  | "endpoint_not_found" -> Ok Runtime_provider_endpoint_not_found
+  | "http_error" -> Ok Runtime_provider_http_error
+  | "unknown_http_status" -> Ok Runtime_provider_unknown_http_status
+  | "skipped_cli" -> Ok Runtime_provider_skipped_cli
+  | "invalid_endpoint" -> Ok Runtime_provider_invalid_endpoint
+  | "invalid_execution_transport" ->
+      Ok Runtime_provider_invalid_execution_transport
+  | value -> Error (Printf.sprintf "unknown runtime provider status %S" value)
+
+let runtime_probe_transport_of_string = function
+  | "http" -> Ok Runtime_probe_http
+  | "cli" -> Ok Runtime_probe_cli
+  | value -> Error (Printf.sprintf "unknown runtime probe transport %S" value)
+
+let decode_runtime_provider_probe json =
+  let* rpp_runtime_id = required_string_field json "runtime_id" in
+  let* transport = required_string_field json "transport" in
+  let* rpp_transport = runtime_probe_transport_of_string transport in
+  let* status = required_string_field json "status" in
+  let* rpp_status = runtime_provider_status_of_string status in
+  let* rpp_reachable = required_nullable_bool_field json "reachable" in
+  let* rpp_http_status = required_nullable_int_field json "http_status" in
+  let* rpp_latency_ms = required_nullable_float_field json "latency_ms" in
+  let* rpp_error = required_nullable_string_field json "error" in
+  let* rpp_checked_at = required_string_field json "checked_at" in
+  let expected_reachable =
+    match rpp_status with
+    | Runtime_provider_reachable -> Some true
+    | Runtime_provider_skipped_cli -> None
+    | Runtime_provider_missing_auth
+    | Runtime_provider_auth_failed
+    | Runtime_provider_network_error
+    | Runtime_provider_server_error
+    | Runtime_provider_endpoint_not_found
+    | Runtime_provider_http_error
+    | Runtime_provider_unknown_http_status
+    | Runtime_provider_invalid_endpoint
+    | Runtime_provider_invalid_execution_transport -> Some false
+  in
+  let* () =
+    if rpp_reachable = expected_reachable then Ok ()
+    else
+      Error
+        (Printf.sprintf "runtime %S status %S disagrees with reachable"
+           rpp_runtime_id status)
+  in
+  let* () =
+    match rpp_transport, rpp_status with
+    | Runtime_probe_cli, Runtime_provider_skipped_cli
+    | Runtime_probe_http,
+      ( Runtime_provider_reachable
+      | Runtime_provider_missing_auth
+      | Runtime_provider_auth_failed
+      | Runtime_provider_network_error
+      | Runtime_provider_server_error
+      | Runtime_provider_endpoint_not_found
+      | Runtime_provider_http_error
+      | Runtime_provider_unknown_http_status
+      | Runtime_provider_invalid_endpoint
+      | Runtime_provider_invalid_execution_transport ) -> Ok ()
+    | Runtime_probe_cli, _ ->
+        Error (Printf.sprintf "CLI runtime %S was not skipped" rpp_runtime_id)
+    | Runtime_probe_http, Runtime_provider_skipped_cli ->
+        Error (Printf.sprintf "HTTP runtime %S was marked skipped_cli" rpp_runtime_id)
+  in
+  let nonnegative name = function
+    | Some value when value < 0 ->
+        Error (Printf.sprintf "runtime %S has negative %s" rpp_runtime_id name)
+    | Some _ | None -> Ok ()
+  in
+  let* () = nonnegative "http_status" rpp_http_status in
+  let* () =
+    match rpp_latency_ms with
+    | Some value when value < 0.0 ->
+        Error (Printf.sprintf "runtime %S has negative latency_ms" rpp_runtime_id)
+    | Some _ | None -> Ok ()
+  in
+  Ok
+    { rpp_runtime_id
+    ; rpp_transport
+    ; rpp_status
+    ; rpp_reachable
+    ; rpp_http_status
+    ; rpp_latency_ms
+    ; rpp_error
+    ; rpp_checked_at
+    }
+
+let decode_runtime_probe_summary json =
+  let* rpsu_runtimes = required_int_field json "runtimes" in
+  let* rpsu_probed = required_int_field json "probed" in
+  let* rpsu_reachable = required_int_field json "reachable" in
+  let* rpsu_failed = required_int_field json "failed" in
+  let* rpsu_skipped = required_int_field json "skipped" in
+  let* rpsu_default_runtime_id =
+    required_nullable_string_field json "default_runtime_id"
+  in
+  let counts =
+    [ "runtimes", rpsu_runtimes
+    ; "probed", rpsu_probed
+    ; "reachable", rpsu_reachable
+    ; "failed", rpsu_failed
+    ; "skipped", rpsu_skipped
+    ]
+  in
+  match List.find_opt (fun (_, value) -> value < 0) counts with
+  | Some (name, _) -> Error (Printf.sprintf "runtime probe summary %s is negative" name)
+  | None ->
+      Ok
+        { rpsu_runtimes
+        ; rpsu_probed
+        ; rpsu_reachable
+        ; rpsu_failed
+        ; rpsu_skipped
+        ; rpsu_default_runtime_id
+        }
+
+let decode_runtime_probe_snapshot json =
+  let* rps_generated_at = required_string_field json "generated_at" in
+  let* rps_refreshed_at_unix =
+    required_nullable_float_field json "refreshed_at_unix"
+  in
+  let* rps_cache_ttl_sec = require_float_field json "cache_ttl_sec" in
+  let* rps_cache_age_sec = required_nullable_float_field json "cache_age_sec" in
+  let* rps_cache_hit = required_bool_field json "cache_hit" in
+  let* refresh_state = required_string_field json "refresh_state" in
+  let* rps_refresh_state = runtime_probe_refresh_state_of_string refresh_state in
+  let* probe = required_object_field json "probe" in
+  let* source = required_string_field probe "source" in
+  let* () =
+    if String.equal source "runtime.toml" then Ok ()
+    else Error (Printf.sprintf "runtime probe source is %S, expected runtime.toml" source)
+  in
+  let* status = required_string_field probe "status" in
+  let* rps_status = runtime_probe_status_of_string status in
+  let* rps_probe_ok = required_bool_field probe "probe_ok" in
+  let* rps_checked_at = required_string_field probe "checked_at" in
+  let* summary = required_object_field probe "summary" in
+  let* rps_summary = decode_runtime_probe_summary summary in
+  let* providers = required_list_field probe "providers" in
+  let* rps_providers =
+    decode_list "providers" decode_runtime_provider_probe providers
+  in
+  let* rps_errors = require_string_list probe "errors" in
+  let* rps_observations = require_string_list probe "observations" in
+  let* rps_limitations = require_string_list probe "limitations" in
+  let* () =
+    if rps_cache_ttl_sec <= 0.0 then Error "runtime probe cache_ttl_sec must be positive"
+    else
+      match rps_cache_age_sec with
+      | Some age when age < 0.0 -> Error "runtime probe cache_age_sec is negative"
+      | Some _ | None -> Ok ()
+  in
+  let* () =
+    match rps_refreshed_at_unix, rps_cache_age_sec with
+    | Some _, Some _ | None, None -> Ok ()
+    | Some _, None | None, Some _ ->
+        Error "runtime probe refreshed_at_unix and cache_age_sec disagree"
+  in
+  let* () =
+    match rps_refresh_state, rps_cache_hit with
+    | (Runtime_probe_fresh | Runtime_probe_recent), true
+    | (Runtime_probe_served_stale | Runtime_probe_warming_up), false -> Ok ()
+    | _ ->
+        Error
+          (Printf.sprintf "runtime probe refresh_state %S disagrees with cache_hit"
+             refresh_state)
+  in
+  let observed_reachable, observed_failed, observed_skipped =
+    List.fold_left
+      (fun (reachable, failed, skipped) provider ->
+         match provider.rpp_reachable with
+         | Some true -> reachable + 1, failed, skipped
+         | Some false -> reachable, failed + 1, skipped
+         | None -> reachable, failed, skipped + 1)
+      (0, 0, 0) rps_providers
+  in
+  let row_count = List.length rps_providers in
+  let* () =
+    if rps_summary.rpsu_runtimes <> row_count then
+      Error
+        (Printf.sprintf "runtime probe summary has %d runtimes but providers has %d rows"
+           rps_summary.rpsu_runtimes row_count)
+    else if rps_summary.rpsu_reachable <> observed_reachable then
+      Error "runtime probe reachable count disagrees with providers"
+    else if rps_summary.rpsu_failed <> observed_failed then
+      Error "runtime probe failed count disagrees with providers"
+    else if rps_summary.rpsu_skipped <> observed_skipped then
+      Error "runtime probe skipped count disagrees with providers"
+    else if rps_summary.rpsu_probed <> observed_reachable + observed_failed then
+      Error "runtime probe probed count disagrees with providers"
+    else Ok ()
+  in
+  let* () =
+    let seen = Hashtbl.create (max 1 row_count) in
+    let rec loop = function
+      | [] -> Ok ()
+      | row :: rest ->
+          if Hashtbl.mem seen row.rpp_runtime_id then
+            Error
+              (Printf.sprintf "duplicate runtime probe id %S" row.rpp_runtime_id)
+          else begin
+            Hashtbl.add seen row.rpp_runtime_id ();
+            loop rest
+          end
+    in
+    loop rps_providers
+  in
+  let* () =
+    match rps_summary.rpsu_default_runtime_id with
+    | None -> Ok ()
+    | Some default_id ->
+        if List.exists (fun row -> String.equal row.rpp_runtime_id default_id) rps_providers
+        then Ok ()
+        else Error (Printf.sprintf "default runtime %S is absent from providers" default_id)
+  in
+  let status_counts_valid =
+    match rps_status with
+    | Runtime_probe_reachable -> observed_failed = 0 && observed_reachable > 0
+    | Runtime_probe_no_http_runtimes ->
+        observed_failed = 0 && observed_reachable = 0
+    | Runtime_probe_degraded -> observed_failed > 0 && observed_reachable > 0
+    | Runtime_probe_unreachable ->
+        observed_reachable = 0 && (observed_failed > 0 || row_count = 0)
+    | Runtime_probe_warming -> row_count = 0
+  in
+  let* () =
+    if status_counts_valid then Ok ()
+    else
+      Error
+        (Printf.sprintf "runtime probe status %S disagrees with provider counts" status)
+  in
+  let expected_probe_ok =
+    match rps_status with
+    | Runtime_probe_reachable | Runtime_probe_no_http_runtimes -> true
+    | Runtime_probe_degraded | Runtime_probe_unreachable | Runtime_probe_warming -> false
+  in
+  let* () =
+    if rps_probe_ok = expected_probe_ok then Ok ()
+    else Error (Printf.sprintf "runtime probe status %S disagrees with probe_ok" status)
+  in
+  let* () =
+    match rps_refresh_state, rps_status, rps_refreshed_at_unix with
+    | Runtime_probe_warming_up, Runtime_probe_warming, None -> Ok ()
+    | Runtime_probe_warming_up, _, _ ->
+        Error "runtime probe warming_up refresh must carry a warming probe without a cache time"
+    | (Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), _, Some _ ->
+        Ok ()
+    | (Runtime_probe_fresh | Runtime_probe_recent | Runtime_probe_served_stale), _, None ->
+        Error "runtime probe cached refresh is missing refreshed_at_unix"
+  in
+  Ok
+    { rps_generated_at
+    ; rps_refreshed_at_unix
+    ; rps_cache_ttl_sec
+    ; rps_cache_age_sec
+    ; rps_cache_hit
+    ; rps_refresh_state
+    ; rps_status
+    ; rps_probe_ok
+    ; rps_checked_at
+    ; rps_summary
+    ; rps_providers
+    ; rps_errors
+    ; rps_observations
+    ; rps_limitations
+    }
+
+let decode_runtime_option ~default_id json =
+  let* ro_id = required_string_field json "id" in
+  let* ro_provider = required_string_field json "provider" in
+  let* ro_model = required_string_field json "model" in
+  let* _binding_is_default = required_bool_field json "is_default" in
+  let* ro_dispatchable = required_bool_field json "keeper_dispatchable" in
+  let* ro_blocked_reason =
+    required_nullable_string_field json "keeper_dispatch_blocked_reason"
+  in
+  let* () =
+    match ro_dispatchable, ro_blocked_reason with
+    | true, None | false, Some _ -> Ok ()
+    | true, Some _ ->
+        Error
+          (Printf.sprintf "dispatchable runtime %S carries a blocker" ro_id)
+    | false, None ->
+        Error (Printf.sprintf "blocked runtime %S omits its blocker" ro_id)
+  in
+  let ro_is_default = Option.equal String.equal default_id (Some ro_id) in
+  Ok
+    { ro_id
+    ; ro_provider
+    ; ro_model
+    ; ro_dispatchable
+    ; ro_blocked_reason
+    ; ro_is_default
+    }
+
+let decode_runtime_default_member json =
+  match Json_util.assoc_member_opt "default_runtime" json with
+  | None -> missing_field "default_runtime"
+  | Some `Null -> Ok (None, None)
+  | Some (`Assoc _ as value) ->
+      let* id = required_string_field value "id" in
+      Ok (Some value, Some id)
+  | Some bad -> field_type_error "default_runtime" "an object or null" bad
+
+let decode_runtime_resolved_lane json =
+  let* rrl_id = required_string_field json "id" in
+  let* runtime_ids = required_list_field json "runtime_ids" in
+  let* rrl_runtime_ids =
+    decode_list "runtime_ids"
+      (function
+        | `String value -> Ok value
+        | bad -> field_type_error "runtime_ids" "a string" bad)
+      runtime_ids
+  in
+  let* rrl_preferred_candidate =
+    required_nullable_string_field json "preferred_candidate"
+  in
+  let* rrl_preferred_at_ts =
+    required_nullable_float_field json "preferred_at_ts"
+  in
+  let* () =
+    match rrl_runtime_ids with
+    | [] -> Error (Printf.sprintf "runtime lane %S has no candidates" rrl_id)
+    | _ -> Ok ()
+  in
+  let* () =
+    let seen = Hashtbl.create (List.length rrl_runtime_ids) in
+    let rec loop = function
+      | [] -> Ok ()
+      | runtime_id :: rest ->
+          if Hashtbl.mem seen runtime_id then
+            Error
+              (Printf.sprintf "runtime lane %S repeats candidate %S" rrl_id
+                 runtime_id)
+          else begin
+            Hashtbl.add seen runtime_id ();
+            loop rest
+          end
+    in
+    loop rrl_runtime_ids
+  in
+  let* () =
+    match rrl_preferred_candidate, rrl_preferred_at_ts with
+    | None, None -> Ok ()
+    | Some candidate, Some at
+      when at >= 0.0 && List.mem candidate rrl_runtime_ids -> Ok ()
+    | Some candidate, Some at when at < 0.0 ->
+        Error
+          (Printf.sprintf "runtime lane %S has negative preferred_at_ts" rrl_id)
+    | Some candidate, Some _ ->
+        Error
+          (Printf.sprintf "runtime lane %S prefers absent candidate %S" rrl_id
+             candidate)
+    | Some _, None | None, Some _ ->
+        Error
+          (Printf.sprintf
+             "runtime lane %S preferred_candidate and preferred_at_ts disagree"
+             rrl_id)
+  in
+  Ok
+    { rrl_id
+    ; rrl_runtime_ids
+    ; rrl_preferred_candidate
+    ; rrl_preferred_at_ts
+    }
+
+let decode_runtime_resolved_snapshot json =
+  let* rrs_generated_at_iso = required_string_field json "generated_at_iso" in
+  let* source = required_string_field json "source" in
+  let* () =
+    if String.equal source "/api/v1/runtime/resolved" then Ok ()
+    else
+      Error
+        (Printf.sprintf "runtime resolved source is %S, expected endpoint path"
+           source)
+  in
+  let* rrs_config_path = required_nullable_string_field json "config_path" in
+  let* default_json, rrs_default_runtime_id =
+    decode_runtime_default_member json
+  in
+  let* runtime_items = required_list_field json "runtimes" in
+  let* rrs_runtimes =
+    decode_list "runtimes"
+      (decode_runtime_option ~default_id:rrs_default_runtime_id)
+      runtime_items
+  in
+  let runtime_by_id = Hashtbl.create (max 1 (List.length rrs_runtimes)) in
+  let* () =
+    let rec loop = function
+      | [] -> Ok ()
+      | runtime :: rest ->
+          if Hashtbl.mem runtime_by_id runtime.ro_id then
+            Error (Printf.sprintf "duplicate resolved runtime id %S" runtime.ro_id)
+          else begin
+            Hashtbl.add runtime_by_id runtime.ro_id runtime;
+            loop rest
+          end
+    in
+    loop rrs_runtimes
+  in
+  let* default_runtime =
+    match default_json with
+    | None -> Ok None
+    | Some value ->
+        let* runtime =
+          decode_runtime_option ~default_id:rrs_default_runtime_id value
+        in
+        Ok (Some runtime)
+  in
+  let* () =
+    match default_runtime with
+    | None -> Ok ()
+    | Some default ->
+        (match Hashtbl.find_opt runtime_by_id default.ro_id with
+         | None -> Error "default_runtime is absent from the resolved runtime list"
+         | Some listed
+           when String.equal default.ro_provider listed.ro_provider
+                && String.equal default.ro_model listed.ro_model
+                && Bool.equal default.ro_dispatchable listed.ro_dispatchable
+                && Option.equal String.equal default.ro_blocked_reason
+                     listed.ro_blocked_reason -> Ok ()
+         | Some _ ->
+             Error "default_runtime disagrees with its resolved runtime row")
+  in
+  let* lane_items = required_list_field json "lanes" in
+  let* rrs_lanes =
+    decode_list "lanes" decode_runtime_resolved_lane lane_items
+  in
+  let lane_by_id = Hashtbl.create (max 1 (List.length rrs_lanes)) in
+  let* () =
+    let rec loop = function
+      | [] -> Ok ()
+      | lane :: rest ->
+          if Hashtbl.mem lane_by_id lane.rrl_id then
+            Error (Printf.sprintf "duplicate runtime lane id %S" lane.rrl_id)
+          else begin
+            Hashtbl.add lane_by_id lane.rrl_id lane;
+            match List.find_opt (fun id -> not (Hashtbl.mem runtime_by_id id)) lane.rrl_runtime_ids with
+            | Some runtime_id ->
+                Error
+                  (Printf.sprintf "runtime lane %S names absent runtime %S"
+                     lane.rrl_id runtime_id)
+            | None -> loop rest
+          end
+    in
+    loop rrs_lanes
+  in
+  Ok
+    { rrs_generated_at_iso
+    ; rrs_config_path
+    ; rrs_default_runtime_id
+    ; rrs_runtimes
+    ; rrs_lanes
+    }
+
+let join_runtime_surface ~probe ~probe_error ~resolved =
+  let probe_rows =
+    match probe with
+    | Some snapshot -> snapshot.rps_providers
+    | None -> []
+  in
+  let probe_by_runtime = Hashtbl.create (max 1 (List.length probe_rows)) in
+  List.iter
+    (fun row -> Hashtbl.add probe_by_runtime row.rpp_runtime_id row)
+    probe_rows;
+  let runtime_by_id = Hashtbl.create (max 1 (List.length resolved.rrs_runtimes)) in
+  List.iter
+    (fun runtime -> Hashtbl.add runtime_by_id runtime.ro_id runtime)
+    resolved.rrs_runtimes;
+  let rows_of_lane lane =
+    let candidate_count = List.length lane.rrl_runtime_ids in
+    let rec loop position acc = function
+      | [] -> Ok (List.rev acc)
+      | runtime_id :: rest ->
+          (match Hashtbl.find_opt runtime_by_id runtime_id with
+           | None ->
+               Error
+                 (Printf.sprintf "runtime lane %S names absent runtime %S"
+                    lane.rrl_id runtime_id)
+           | Some runtime ->
+               let rcr_preferred_at_ts =
+                 match lane.rrl_preferred_candidate with
+                 | Some preferred when String.equal preferred runtime_id ->
+                     lane.rrl_preferred_at_ts
+                 | Some _ | None -> None
+               in
+               loop (position + 1)
+                 ({ rcr_lane_id = lane.rrl_id
+                  ; rcr_position = position
+                  ; rcr_candidate_count = candidate_count
+                  ; rcr_runtime = runtime
+                  ; rcr_preferred_at_ts
+                  ; rcr_probe = Hashtbl.find_opt probe_by_runtime runtime_id
+                  }
+                  :: acc)
+                 rest)
+    in
+    loop 1 [] lane.rrl_runtime_ids
+  in
+  let* reversed_candidates =
+    List.fold_left
+      (fun result lane ->
+         let* acc = result in
+         let* rows = rows_of_lane lane in
+         Ok (List.rev_append rows acc))
+      (Ok []) resolved.rrs_lanes
+  in
+  let rss_candidates = List.rev reversed_candidates in
+  let candidate_ids = Hashtbl.create (max 1 (List.length rss_candidates)) in
+  List.iter
+    (fun row -> Hashtbl.replace candidate_ids row.rcr_runtime.ro_id ())
+    rss_candidates;
+  let rss_unassigned_probe_count =
+    List.fold_left
+      (fun count row ->
+         if Hashtbl.mem candidate_ids row.rpp_runtime_id then count else count + 1)
+      0 probe_rows
+  in
+  Ok
+    { rss_probe = probe
+    ; rss_probe_error = probe_error
+    ; rss_resolved = resolved
+    ; rss_candidates
+    ; rss_unassigned_probe_count
+    }
+
+let decode_runtime_surface_snapshot ~probe_json ~resolved_json =
+  match decode_runtime_probe_snapshot probe_json with
+  | Error detail -> Error ("runtime probe decode failed: " ^ detail)
+  | Ok probe ->
+      (match decode_runtime_resolved_snapshot resolved_json with
+       | Error detail -> Error ("runtime resolved decode failed: " ^ detail)
+       | Ok resolved ->
+           join_runtime_surface ~probe:(Some probe) ~probe_error:None ~resolved)
+
+let decode_repository json =
+  let* rp_name = required_string_field json "name" in
+  let* rp_local_path = required_string_field json "local_path" in
+  let* rp_default_branch = required_string_field json "default_branch" in
+  let* rp_status = required_string_field json "status" in
+  let* rp_keepers = decode_string_name_list json "keepers" in
+  let* rp_auto_sync =
+    match member "auto_sync" json with
+    | `Bool value -> Ok value
+    | `Null -> Ok false
+    | bad -> field_type_error "auto_sync" "a bool or null" bad
+  in
+  Ok
+    { rp_name; rp_local_path; rp_default_branch; rp_status; rp_keepers
+    ; rp_auto_sync
+    }
+
+let decode_repository_snapshot json =
+  let* repos_json = required_list_field json "repositories" in
+  let* rs_repositories =
+    decode_list "repositories" decode_repository repos_json
+  in
+  let* rs_total = required_int_field json "total" in
+  Ok { rs_repositories; rs_total }
+
+let decode_harness_verdict json =
+  let* hv_task_id = required_string_field json "task_id" in
+  let* hv_task_title = required_string_field json "task_title" in
+  let* hv_agent = required_string_field json "agent_name" in
+  let* hv_gate = required_string_field json "gate" in
+  let* hv_verdict = required_string_field json "verdict" in
+  let* hv_evaluator = required_string_field json "evaluator_runtime" in
+  let* hv_fallback_reason = optional_string_field json "fallback_reason" in
+  let* hv_at = require_float_field json "timestamp" in
+  Ok
+    { hv_at
+    ; hv_task_id
+    ; hv_task_title
+    ; hv_agent
+    ; hv_gate
+    ; hv_verdict
+    ; hv_evaluator
+    ; hv_fallback_reason
+    }
+
+let decode_harness_snapshot json =
+  let* verdicts_json = required_list_field json "recent_verdicts" in
+  let* hs_verdicts =
+    decode_list "recent_verdicts" decode_harness_verdict verdicts_json
+  in
+  Ok { hs_verdicts }
+
+let decode_verification_request json =
+  let* vr_request_id = required_string_field json "request_id" in
+  let* vr_task_id = required_string_field json "task_id" in
+  let* vr_task_title = required_string_field json "task_title" in
+  let* vr_kind = required_string_field json "request_kind" in
+  let* vr_summary = required_string_field json "request_summary" in
+  let* vr_submitted_by = required_string_field json "submitted_by" in
+  let* vr_created_at = required_string_field json "created_at" in
+  let* vr_required_artifacts =
+    decode_string_name_list json "required_artifacts"
+  in
+  let* vr_submitted_evidence =
+    decode_string_name_list json "submitted_evidence"
+  in
+  let* vr_next_action = optional_string_field json "next_action" in
+  let* vr_evidence_error =
+    optional_string_field json "evidence_projection_error"
+  in
+  Ok
+    { vr_request_id
+    ; vr_task_id
+    ; vr_task_title
+    ; vr_kind
+    ; vr_summary
+    ; vr_next_action
+    ; vr_submitted_by
+    ; vr_created_at
+    ; vr_required_artifacts
+    ; vr_submitted_evidence
+    ; vr_evidence_error
+    }
+
+let decode_verification_snapshot json =
+  let* requests_json = required_list_field json "requests" in
+  let* vs_requests =
+    decode_list "requests" decode_verification_request requests_json
+  in
+  let* vs_total = required_int_field json "total" in
+  Ok { vs_requests; vs_total }
+
+let decode_keeper_call json =
+  let* kc_at = require_float_field json "ts" in
+  let* kc_tool = required_string_field json "tool" in
+  let* keeper = required_string_field json "keeper" in
+  let* kc_success =
+    match member "success" json with
+    | `Bool value -> Ok value
+    | `Null -> Error "keeper call has no success field"
+    | _ -> Error "keeper call success is not a bool"
+  in
+  let kc_input =
+    match member "input" json with
+    | `String value -> value
+    | other -> Yojson.Safe.to_string other
+  in
+  (* What came back, as the server serves it. The row already said a call ran
+     and what it was called with; without this it never said what the call
+     answered, which is the question a failed call leaves open. The server
+     bounds it (the envelope carries [truncated_to]), so this is a read, not a
+     second budget. A row that carries no result says nothing rather than an
+     empty string: "returned nothing" and "was not recorded" are different. *)
+  let kc_output =
+    match member "output" json with
+    | `String value when String.trim value <> "" -> Some value
+    | `String _ | `Null -> None
+    | other -> Some (Yojson.Safe.to_string other)
+  in
+  let kc_duration_ms =
+    match member "duration_ms" json with
+    | `Float value -> Some value
+    | `Int value -> Some (float_of_int value)
+    | _ -> None
+  in
+  let kc_turn = match member "turn" json with `Int value -> Some value | _ -> None in
+  let string_opt key =
+    match member key json with
+    | `String value when String.trim value <> "" -> Some value
+    | _ -> None
+  in
+  Ok
+    ( keeper
+    , { kc_at
+      ; kc_tool
+      ; kc_input
+      ; kc_output
+      ; kc_success
+      ; kc_duration_ms
+      ; kc_turn
+      ; kc_task_id = string_opt "task_id"
+      ; kc_model = string_opt "model"
+      } )
+
+let decode_keeper_calls_snapshot ~requested_keeper json =
+  let* kcs_keeper = required_string_field json "keeper" in
+  let* kcs_count = required_int_field json "count" in
+  let* kcs_health = required_string_field json "health" in
+  let* entries_json = required_list_field json "entries" in
+  let* rows =
+    decode_list "entries" decode_keeper_call entries_json
+  in
+  (* A row naming another keeper is the store's problem to surface, not a
+     row to draw under this keeper's name. *)
+  let kcs_entries, kcs_mismatched =
+    List.fold_left
+      (fun (kept, mismatched) (keeper, row) ->
+        if String.equal keeper requested_keeper then (row :: kept, mismatched)
+        else (kept, mismatched + 1))
+      ([], 0) rows
+  in
+  let kcs_latest_age_s =
+    match member "latest_age_s" json with
+    | `Float value -> Some value
+    | `Int value -> Some (float_of_int value)
+    | _ -> None
+  in
+  let kcs_stale_reason =
+    match member "stale_reason" json with
+    | `String value when String.trim value <> "" && not (String.equal value "fresh")
+      ->
+        Some value
+    | _ -> None
+  in
+  Ok
+    { kcs_keeper
+    ; kcs_entries = List.rev kcs_entries
+    ; kcs_count
+    ; kcs_health
+    ; kcs_latest_age_s
+    ; kcs_stale_reason
+    ; kcs_mismatched
+    }
+
+let decode_system_log_snapshot json =
+  let* entries_json = required_list_field json "entries" in
+  let* sys_entries = decode_list "entries" decode_system_log_entry entries_json in
+  let* sys_total = required_int_field json "total" in
+  let* sys_latest_seq = required_int_field json "latest_seq" in
+  Ok { sys_entries; sys_total; sys_latest_seq }
+
+let decode_planning_snapshot json =
+  let* goals_json = required_list_field json "goals" in
+  let* pl_goals = decode_list "goals" decode_planning_goal goals_json in
+  let* rollup_json = required_object_field json "rollup" in
+  let* pl_rollup = decode_planning_rollup rollup_json in
+  let* backlog_json = required_object_field json "task_backlog" in
+  let* pl_backlog = decode_planning_backlog backlog_json in
+  let* pl_generated_at = required_string_field json "generated_at" in
+  Ok { pl_goals; pl_rollup; pl_backlog; pl_generated_at }
+
+let decode_keeper_runtime json =
+  let* kr_name = required_string_field json "name" in
+  let* raw_health = required_string_field json "health" in
+  let* kr_health =
+    match keeper_health_of_string raw_health with
+    | Some health -> Ok health
+    | None ->
+        Error
+          (Printf.sprintf "keeper %S has unknown health %S" kr_name raw_health)
+  in
+  let* kr_paused = required_bool_field json "paused" in
+  (* An absent action is absent, not a default one: the server publishes null
+     when the diagnostic named none, and a keeper with nothing to do is a
+     different reading from a keeper whose action this build cannot spell. *)
+  let* kr_next_action =
+    match member "next_action" json with
+    | `Null -> Ok None
+    | `String raw -> (
+      match keeper_next_action_of_string raw with
+      | Some action -> Ok (Some action)
+      | None ->
+          Error
+            (Printf.sprintf "keeper %S has unknown next action %S" kr_name raw))
+    | bad -> field_type_error "next_action" "a string or null" bad
+  in
+  let* kr_keepalive_running = required_bool_field json "keepalive_running" in
+  let* kr_autoboot_enabled = required_bool_field json "autoboot_enabled" in
+  let* kr_proactive_enabled = required_bool_field json "proactive_enabled" in
+  let* kr_runtime_id = required_string_field json "runtime_id" in
+  let* raw_phase = required_string_field json "phase" in
+  let* kr_phase =
+    match keeper_phase_of_string raw_phase with
+    | Some phase -> Ok phase
+    | None ->
+        Error
+          (Printf.sprintf "keeper %S has unknown lifecycle phase %S" kr_name
+             raw_phase)
+  in
+  Ok
+    { kr_name
+    ; kr_health
+    ; kr_paused
+    ; kr_next_action
+    ; kr_keepalive_running
+    ; kr_autoboot_enabled
+    ; kr_proactive_enabled
+    ; kr_runtime_id
+    ; kr_phase
+    }
+
+(* [truncated] is carried out rather than dropped: the route clamps its own
+   limit, so a workspace with more keepers than one response holds would
+   otherwise present a short list as the whole fleet. *)
+let decode_keeper_runtime_list json =
+  let* items = required_list_field json "keepers" in
+  let* rows = decode_list "keepers" decode_keeper_runtime items in
+  let* truncated =
+    match member "truncated" json with
+    | `Bool value -> Ok value
+    | `Null -> Ok false
+    | bad -> field_type_error "truncated" "a bool or null" bad
+  in
+  let* total = int_field_or json "total" ~default:(List.length rows) in
+  Ok (rows, truncated, total)
+
+let keeper_lane_phase_of_string raw =
+  match keeper_phase_of_string raw with
+  | None -> Lane_phase_unknown raw
+  | Some phase -> (
+      match phase with
+      | Keeper_state_machine.Offline -> Lane_phase_offline
+      | Keeper_state_machine.Running -> Lane_phase_running
+      | Keeper_state_machine.Failing -> Lane_phase_failing
+      | Keeper_state_machine.Compacting -> Lane_phase_compacting
+      | Keeper_state_machine.HandingOff -> Lane_phase_handing_off
+      | Keeper_state_machine.Draining -> Lane_phase_draining
+      | Keeper_state_machine.Paused -> Lane_phase_paused
+      | Keeper_state_machine.Stopped -> Lane_phase_stopped
+      | Keeper_state_machine.Crashed -> Lane_phase_crashed
+      | Keeper_state_machine.Restarting -> Lane_phase_restarting)
+
+let keeper_lane_phase_to_string = function
+  | Lane_phase_offline -> keeper_phase_to_string Keeper_state_machine.Offline
+  | Lane_phase_running -> keeper_phase_to_string Keeper_state_machine.Running
+  | Lane_phase_failing -> keeper_phase_to_string Keeper_state_machine.Failing
+  | Lane_phase_compacting ->
+      keeper_phase_to_string Keeper_state_machine.Compacting
+  | Lane_phase_handing_off ->
+      keeper_phase_to_string Keeper_state_machine.HandingOff
+  | Lane_phase_draining -> keeper_phase_to_string Keeper_state_machine.Draining
+  | Lane_phase_paused -> keeper_phase_to_string Keeper_state_machine.Paused
+  | Lane_phase_stopped -> keeper_phase_to_string Keeper_state_machine.Stopped
+  | Lane_phase_crashed -> keeper_phase_to_string Keeper_state_machine.Crashed
+  | Lane_phase_restarting ->
+      keeper_phase_to_string Keeper_state_machine.Restarting
+  | Lane_phase_unknown raw -> raw
+
+let keeper_lane_turn_phase_of_string = function
+  | "idle" -> Lane_turn_idle
+  | "prompting" -> Lane_turn_prompting
+  | "routing" -> Lane_turn_routing
+  | "executing" -> Lane_turn_executing
+  | "compacting" -> Lane_turn_compacting
+  | "finalizing" -> Lane_turn_finalizing
+  | "exhausted" -> Lane_turn_exhausted
+  | raw -> Lane_turn_unknown raw
+
+let keeper_lane_turn_phase_to_string = function
+  | Lane_turn_idle -> "idle"
+  | Lane_turn_prompting -> "prompting"
+  | Lane_turn_routing -> "routing"
+  | Lane_turn_executing -> "executing"
+  | Lane_turn_compacting -> "compacting"
+  | Lane_turn_finalizing -> "finalizing"
+  | Lane_turn_exhausted -> "exhausted"
+  | Lane_turn_unknown raw -> raw
+
+let decode_keeper_lane_last_outcome json =
+  let* klo_runtime_state = required_string_field json "runtime_state" in
+  let* klo_selected_model =
+    required_nullable_string_field json "selected_model"
+  in
+  Ok { klo_runtime_state; klo_selected_model }
+
+let decode_keeper_lane json =
+  let* kl_keeper = required_string_field json "keeper" in
+  let* raw_phase = required_string_field json "phase" in
+  let kl_phase = keeper_lane_phase_of_string raw_phase in
+  let* raw_turn_phase = required_string_field json "turn_phase" in
+  let kl_turn_phase = keeper_lane_turn_phase_of_string raw_turn_phase in
+  let* kl_idle_seconds = required_int_field json "idle_seconds" in
+  let* kl_last_outcome =
+    match Json_util.assoc_member_opt "last_outcome" json with
+    | None -> missing_field "last_outcome"
+    | Some `Null -> Ok None
+    | Some (`Assoc _ as outcome) ->
+        let* decoded = decode_keeper_lane_last_outcome outcome in
+        Ok (Some decoded)
+    | Some bad -> field_type_error "last_outcome" "an object or null" bad
+  in
+  let* diagnosis = required_object_field json "phase_diagnosis" in
+  let* kl_diagnosis =
+    required_nullable_string_field diagnosis "determining_condition"
+  in
+  Ok
+    { kl_keeper
+    ; kl_phase
+    ; kl_turn_phase
+    ; kl_idle_seconds
+    ; kl_last_outcome
+    ; kl_diagnosis
+    }
+
+let decode_keeper_lanes_snapshot json =
+  let* kls_generated_at = require_float_field json "generated_at" in
+  let* kls_count = required_int_field json "count" in
+  let* items = required_list_field json "snapshots" in
+  let* kls_lanes = decode_list "snapshots" decode_keeper_lane items in
+  Ok { kls_generated_at; kls_count; kls_lanes }
+
+let fusion_run_status_to_string = function
+  | Fusion_running -> "running"
+  | Fusion_completed -> "completed"
+  | Fusion_failed _ -> "failed"
+
+let decode_fusion_run json =
+  let* fur_run_id = required_string_field json "run_id" in
+  let* fur_keeper = required_string_field json "keeper" in
+  let* fur_preset = required_string_field json "preset" in
+  let* topology = required_string_field json "topology" in
+  let* fur_topology =
+    match Fusion_types.fusion_topology_of_string topology with
+    | Some topology -> Ok topology
+    | None -> Error (Printf.sprintf "unknown fusion topology %S" topology)
+  in
+  let* fur_started_at = require_float_field json "started_at" in
+  let* status = required_string_field json "status" in
+  let* fur_status =
+    match status with
+    | "running" -> Ok Fusion_running
+    | "completed" -> Ok Fusion_completed
+    | "failed" ->
+        let* frs_failure_code = required_string_field json "failure_code" in
+        let* frs_error = required_string_field json "error" in
+        Ok (Fusion_failed { frs_failure_code; frs_error })
+    | other -> Error (Printf.sprintf "unknown fusion run status %S" other)
+  in
+  Ok
+    { fur_run_id
+    ; fur_keeper
+    ; fur_preset
+    ; fur_topology
+    ; fur_started_at
+    ; fur_status
+    }
+
+let decode_fusion_snapshot json =
+  let* fus_generated_at = required_string_field json "generated_at" in
+  let* count = required_int_field json "count" in
+  let* runs_json = required_list_field json "runs" in
+  let* fus_runs = decode_list "runs" decode_fusion_run runs_json in
+  if count <> List.length fus_runs then
+    Error
+      (Printf.sprintf "fusion run count is %d but runs contains %d rows" count
+         (List.length fus_runs))
+  else Ok { fus_generated_at; fus_runs }
+
+let decode_fusion_panel_result json =
+  let* model = required_string_field json "model" in
+  let* status = required_string_field json "status" in
+  match status with
+  | "answered" ->
+      let* fpa_answer = required_string_field json "answer" in
+      let* fpa_input_tokens = required_int_field json "input_tokens" in
+      let* fpa_output_tokens = required_int_field json "output_tokens" in
+      Ok
+        (Fusion_panel_answered
+           { fpa_model = model
+           ; fpa_answer
+           ; fpa_input_tokens
+           ; fpa_output_tokens
+           })
+  | "failed" ->
+      let* fpf_reason_code = required_string_field json "reason_code" in
+      let* fpf_reason_detail = required_string_field json "reason_detail" in
+      Ok
+        (Fusion_panel_failed
+           { fpf_model = model; fpf_reason_code; fpf_reason_detail })
+  | other -> Error (Printf.sprintf "unknown fusion panel status %S" other)
+
+let decode_fusion_judge json =
+  let* status = required_string_field json "status" in
+  match status with
+  | "synthesized" ->
+      let* fj_decision = required_string_field json "decision" in
+      let* fj_resolved_answer = required_string_field json "resolved_answer" in
+      let* fj_reason = required_string_field json "synthesis" in
+      Ok
+        (Fusion_judge_synthesized
+           { fj_decision; fj_resolved_answer; fj_reason })
+  | "failed" ->
+      let* fj_failure_code = required_string_field json "failure_code" in
+      let* fj_error = required_string_field json "error" in
+      Ok (Fusion_judge_failed { fj_failure_code; fj_error })
+  | other -> Error (Printf.sprintf "unknown fusion judge status %S" other)
+
+let decode_fusion_evidence ~run_id json =
+  let* fe_post_id = required_string_field json "id" in
+  let* fe_title = required_string_field json "title" in
+  let* origin = required_object_field json "origin" in
+  let* source = required_string_field origin "source" in
+  let* origin_run_id = required_string_field origin "fusion_run_id" in
+  let* () =
+    if String.equal source "fusion" then Ok ()
+    else
+      Error
+        (Printf.sprintf "fusion evidence origin.source is %S, expected \"fusion\""
+           source)
+  in
+  let* () =
+    if String.equal origin_run_id run_id then Ok ()
+    else
+      Error
+        (Printf.sprintf
+           "fusion evidence origin run id is %S, expected %S" origin_run_id
+           run_id)
+  in
+  let* meta = required_object_field json "meta" in
+  let* fe_question = required_string_field meta "question" in
+  let* panel_json = required_list_field meta "panel" in
+  let* fe_panel = decode_list "panel" decode_fusion_panel_result panel_json in
+  let* judge_json = required_object_field meta "judge" in
+  let* fe_judge = decode_fusion_judge judge_json in
+  Ok { fe_post_id; fe_title; fe_question; fe_panel; fe_judge }
+
+let decode_fusion_detail json =
+  let* fud_generated_at = required_string_field json "generated_at" in
+  let* run_json = required_object_field json "run" in
+  let* fud_run = decode_fusion_run run_json in
+  let* evidence = required_object_field json "evidence" in
+  let* status = required_string_field evidence "status" in
+  let* post =
+    match Json_util.assoc_member_opt "post" evidence with
+    | None -> missing_field "post"
+    | Some post -> Ok post
+  in
+  match status, post with
+  | "recorded", (`Assoc _ as post_json) ->
+      let* fud_evidence =
+        decode_fusion_evidence ~run_id:fud_run.fur_run_id post_json
+      in
+      Ok
+        { fud_generated_at
+        ; fud_run
+        ; fud_evidence_status = Fusion_evidence_recorded
+        ; fud_evidence = Some fud_evidence
+        }
+  | "recorded", bad ->
+      field_type_error "evidence.post" "an object when status is recorded" bad
+  | "pending", `Null ->
+      (match fud_run.fur_status with
+       | Fusion_running ->
+           Ok
+             { fud_generated_at
+             ; fud_run
+             ; fud_evidence_status = Fusion_evidence_pending
+             ; fud_evidence = None
+             }
+       | Fusion_completed | Fusion_failed _ ->
+           Error "only a running fusion run may have pending evidence")
+  | "pending", _ -> Error "pending fusion evidence must carry post:null"
+  | "absent", `Null ->
+      (match fud_run.fur_status with
+       | Fusion_running ->
+           Error "a running fusion run cannot have absent evidence"
+       | Fusion_completed | Fusion_failed _ ->
+           Ok
+             { fud_generated_at
+             ; fud_run
+             ; fud_evidence_status = Fusion_evidence_absent
+             ; fud_evidence = None
+             })
+  | "absent", _ -> Error "absent fusion evidence must carry post:null"
+  | other, _ -> Error (Printf.sprintf "unknown fusion evidence status %S" other)
+
+(* The counts are read with a default rather than required: the server adds
+   fields to this section over time, and a TUI that refuses the whole reading
+   because one counter is new would hide the fleet exactly when it changed.
+   The three that name the fleet's own verdict -- status, blocker, and whether
+   an operator has to act -- are required, because a reading without them says
+   nothing. *)
+let decode_keeper_tool_approval json =
+  let* kta_keeper = required_string_field json "keeper" in
+  let* kta_tool_call_id = required_string_field json "tool_call_id" in
+  let* kta_tool = required_string_field json "tool" in
+  let* kta_args = required_string_field json "args" in
+  let* kta_question = required_string_field json "question" in
+  let* kta_asked_at = require_float_field json "asked_at" in
+  let* kta_timeout_sec = require_float_field json "timeout_sec" in
+  Ok
+    { kta_keeper
+    ; kta_tool_call_id
+    ; kta_tool
+    ; kta_args
+    ; kta_question
+    ; kta_asked_at
+    ; kta_timeout_sec
+    }
+
+(* GET /api/v1/keepers/tool-approval-mode: the keepers moved off the default
+   stance. Decoded to (keeper, mode) pairs; the caller decides what a mode
+   means — this module carries the wire vocabulary only. *)
+let decode_tool_approval_mode_overrides json =
+  let* items = required_list_field json "overrides" in
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest ->
+        let* keeper = required_string_field item "keeper" in
+        let* mode = required_string_field item "mode" in
+        loop ((keeper, mode) :: acc) rest
+  in
+  loop [] items
+
+let decode_keeper_tool_approvals json =
+  let* items = required_list_field json "pending" in
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest ->
+        let* decoded = decode_keeper_tool_approval item in
+        loop (decoded :: acc) rest
+  in
+  loop [] items
+
+type runtime_assignment = {
+  ra_keeper : string;
+  ra_source : string;  (* "default" | "explicit" *)
+  ra_target_id : string option;
+}
+
+let decode_runtime_assignment json =
+  let* ra_keeper = required_string_field json "keeper" in
+  let* ra_source = required_string_field json "assignment_source" in
+  let* () =
+    match ra_source with
+    | "default" | "explicit" -> Ok ()
+    | value -> Error (Printf.sprintf "unknown runtime assignment source %S" value)
+  in
+  let* resolved = required_object_field json "resolved" in
+  let* kind = required_string_field resolved "kind" in
+  let* id = required_nullable_string_field resolved "id" in
+  let* ra_target_id =
+    match kind, id with
+    | "lane", Some lane_id -> Ok (Some lane_id)
+    | "missing", None -> Ok None
+    | "lane", None -> Error "runtime lane assignment is missing its id"
+    | "missing", Some _ -> Error "missing runtime assignment carries an id"
+    | value, _ -> Error (Printf.sprintf "unknown resolved runtime kind %S" value)
+  in
+  Ok { ra_keeper; ra_source; ra_target_id }
+
+let decode_runtime_resolved json =
+  let* snapshot = decode_runtime_resolved_snapshot json in
+  let* assignment_items = required_list_field json "assignments" in
+  let* assignments =
+    decode_list "assignments" decode_runtime_assignment assignment_items
+  in
+  let* () =
+    match
+      List.find_opt
+        (fun assignment ->
+           match assignment.ra_target_id with
+           | None -> false
+           | Some lane_id ->
+               not
+                 (List.exists
+                    (fun lane -> String.equal lane.rrl_id lane_id)
+                    snapshot.rrs_lanes))
+        assignments
+    with
+    | None -> Ok ()
+    | Some assignment ->
+        Error
+          (Printf.sprintf "runtime assignment for %S names an absent lane"
+             assignment.ra_keeper)
+  in
+  Ok (snapshot.rrs_runtimes, assignments)
+
+type server_identity = {
+  sid_version : string;
+  sid_binary_commit : string;
+  sid_binary_commit_age_s : float option;
+  sid_base_path : string;
+  sid_masc_root : string;
+}
+
+(* [/health] answers before the workspace is fully up, so every field here is
+   optional in practice: a server that cannot yet name its base path still has
+   a version to show, and a footer that fails to render because one string was
+   missing tells the operator less than a footer with a gap in it. *)
+let decode_server_identity json =
+  let* build = optional_object_field json "build" in
+  let* paths = optional_object_field json "paths" in
+  (* A section the probe did not carry leaves its fields unread. Standing an
+     empty object in for it would read the same here and mean something else:
+     absent is what the footer draws as unread. *)
+  let string_in section field =
+    match Option.map (member field) section with
+    | Some (`String value) -> value
+    | Some _ | None -> ""
+  in
+  let sid_binary_commit_age_s =
+    match Option.map (member "binary_commit_age_seconds") build with
+    | Some (`Float value) -> Some value
+    | Some (`Int value) -> Some (float_of_int value)
+    | Some _ | None -> None
+  in
+  Ok
+    { sid_version =
+        (match member "version" json with
+         | `String value -> value
+         | _ -> "")
+    ; sid_binary_commit = string_in build "binary_commit"
+    ; sid_binary_commit_age_s
+    ; sid_base_path = string_in paths "effective_base_path"
+    ; sid_masc_root = string_in paths "effective_masc_root"
+    }
+;;
+
+let decode_fleet_safety json =
+  let* section = required_object_field json "keeper_fleet_safety" in
+  let* fs_status = required_string_field section "status" in
+  let* fs_blocker = optional_string_field section "blocker" in
+  let* fs_operator_action_required =
+    match member "operator_action_required" section with
+    | `Bool value -> Ok value
+    | `Null -> Ok false
+    | bad -> field_type_error "operator_action_required" "a bool or null" bad
+  in
+  let* fs_bootable_count = int_field_or section "bootable_keeper_count" ~default:0 in
+  let* fs_running_count = int_field_or section "running_keeper_fiber_count" ~default:0 in
+  let* fs_executable_count =
+    int_field_or section "executable_keeper_fiber_count" ~default:0
+  in
+  let* fs_failing_count = int_field_or section "failing_keeper_fiber_count" ~default:0 in
+  let* fs_recovering_count =
+    int_field_or section "recovering_keeper_fiber_count" ~default:0
+  in
+  let* fs_paused_count = int_field_or section "paused_keeper_count" ~default:0 in
+  let* fs_target_reaction_capacity =
+    int_field_or section "target_reaction_capacity_count" ~default:0
+  in
+  let* fs_reaction_capacity_shortfall =
+    int_field_or section "reaction_capacity_shortfall_count" ~default:0
+  in
+  let* fs_bootable_names = decode_string_name_list section "bootable_keeper_names" in
+  let* fs_running_names = decode_string_name_list section "running_keeper_names" in
+  let* fs_executable_names =
+    decode_string_name_list section "executable_keeper_names"
+  in
+  let* fs_active_task_owner_without_fiber_count =
+    int_field_or section "active_task_owner_without_executable_fiber_count" ~default:0
+  in
+  let* fs_completion_authority_pending_count =
+    int_field_or section "completion_authority_pending_task_count" ~default:0
+  in
+  Ok
+    { fs_status
+    ; fs_blocker
+    ; fs_operator_action_required
+    ; fs_bootable_count
+    ; fs_running_count
+    ; fs_executable_count
+    ; fs_failing_count
+    ; fs_recovering_count
+    ; fs_paused_count
+    ; fs_target_reaction_capacity
+    ; fs_reaction_capacity_shortfall
+    ; fs_bootable_names
+    ; fs_running_names
+    ; fs_executable_names
+    ; fs_active_task_owner_without_fiber_count
+    ; fs_completion_authority_pending_count
+    }
 
 let bounded_parent_depth ?(max_depth = 64) ~(id_of : 'a -> string)
     ~(parent_id_of : 'a -> string option) (items : 'a list) (item : 'a) : int =
@@ -579,3 +2999,263 @@ let parse_keeper_chat_response response =
                     | Some message -> Error message
                     | None -> Error "response JSON missing error.message")
                 | None -> Error "response JSON missing result"))
+
+type transport_health = {
+  th_primary_path : Transport_metrics.primary_path_kind;
+  th_queue_pressure : Transport_metrics.queue_pressure_kind;
+  th_sse_sessions : int;
+  th_websocket_sessions : int option;
+  th_grpc_port : int option;
+  th_events_dropped : int;
+}
+
+let require_object json key =
+  match member key json with
+  | `Assoc _ as obj -> Ok obj
+  | `Null -> Error (Printf.sprintf "missing required field '%s'" key)
+  | other ->
+      Error
+        (Printf.sprintf "field '%s' must be an object (received %s)" key
+           (Json_util.kind_name other))
+
+let decode_transport_health json =
+  let ( let* ) = Result.bind in
+  let* summary = require_object json "summary" in
+  (* Parsed into the producer's own type rather than carried as text. A
+     spelling this build does not know is a decode failure here, where the
+     surface can say so, instead of a word the TUI prints as if it were a
+     transport path (#27652). *)
+  let* th_primary_path =
+    let* raw = require_string_field summary "primary_path" in
+    match Transport_metrics.primary_path_kind_of_string raw with
+    | Some kind -> Ok kind
+    | None -> Error (Printf.sprintf "summary.primary_path: unknown value %S" raw)
+  in
+  let* th_queue_pressure =
+    let* raw = require_string_field summary "queue_pressure" in
+    match Transport_metrics.queue_pressure_kind_of_string raw with
+    | Some kind -> Ok kind
+    | None ->
+      Error (Printf.sprintf "summary.queue_pressure: unknown value %S" raw)
+  in
+  let* sse = require_object json "sse" in
+  let* th_sse_sessions = require_int_field sse "sessions_total" in
+  let* websocket = require_object json "websocket" in
+  let* websocket_listening = require_bool websocket "listening" in
+  (* A path that is not listening has no sessions to report. Reporting zero
+     would read as "listening, nobody connected", which is a different fact. *)
+  let* th_websocket_sessions =
+    if websocket_listening then
+      Result.map Option.some (require_int_field websocket "sessions")
+    else Ok None
+  in
+  let* grpc = require_object json "grpc" in
+  let* grpc_listening = require_bool grpc "listening" in
+  let* th_grpc_port =
+    if grpc_listening then Result.map Option.some (require_int_field grpc "port")
+    else Ok None
+  in
+  let* th_events_dropped = require_int_field grpc "events_dropped" in
+  Ok
+    {
+      th_primary_path;
+      th_queue_pressure;
+      th_sse_sessions;
+      th_websocket_sessions;
+      th_grpc_port;
+      th_events_dropped;
+    }
+
+(* ── Keeper file changes (/api/v1/keepers/<name>/file-changes) ──────────
+
+   The route answers with the projection in [Keeper_tool_call_file_change],
+   and the three location shapes are the ones that projection distinguishes.
+   Decoded into a variant here rather than kept as a tagged object: a reader
+   that wants to open a file needs to know whether it has a repository
+   address or an absolute path, and a string tag would make every such reader
+   re-decide. *)
+
+type file_change_location =
+  | Fc_in_repo of {
+      repo_id : string;
+      relative_path : string;
+    }
+  | Fc_in_bundle of { bundle_path : string }
+  | Fc_at_absolute_path of { path : string }
+
+type file_change_kind =
+  | Fc_edited of {
+      before : string;
+      after : string;
+      replace_all : bool;
+    }
+  | Fc_written of { content : string }
+
+type file_change = {
+  fc_at : float;
+  fc_keeper : string;
+  fc_turn : int option;
+  fc_task_id : string option;
+  fc_location : file_change_location;
+  fc_kind : file_change_kind;
+  fc_succeeded : bool;
+}
+
+type file_change_snapshot = {
+  fcs_keeper : string;
+  fcs_window_hours : float;
+  fcs_calls_in_window : int;
+  fcs_changes : file_change list;
+  fcs_over_budget : int;
+      (** Changes whose text the tool-call log did not keep. Carried to the
+          surface because a list that silently omitted them would say a turn
+          wrote less than it did. *)
+  fcs_malformed : int;
+}
+
+let optional_int_or_null json key =
+  match member key json with
+  | `Int value -> Ok (Some value)
+  | `Intlit raw -> (
+      match int_of_string_opt raw with
+      | Some value -> Ok (Some value)
+      | None -> Error (Printf.sprintf "field '%s' has invalid int %S" key raw))
+  | `Null -> Ok None
+  | bad -> field_type_error key "an int or null" bad
+
+let decode_file_change_location json =
+  let* kind = required_string_field json "kind" in
+  match kind with
+  | "repo" ->
+      let* repo_id = required_string_field json "repo_id" in
+      let* relative_path = required_string_field json "path" in
+      Ok (Fc_in_repo { repo_id; relative_path })
+  | "bundle" ->
+      let* bundle_path = required_string_field json "path" in
+      Ok (Fc_in_bundle { bundle_path })
+  | "absolute" ->
+      let* path = required_string_field json "path" in
+      Ok (Fc_at_absolute_path { path })
+  | other ->
+      (* A tag this build does not know is an error, not a bundle path. The
+         producer and this reader are the same repository; a new shape means
+         one of them moved without the other. *)
+      Error (Printf.sprintf "unknown file change location kind %S" other)
+
+let decode_file_change_kind json =
+  let* kind = required_string_field json "kind" in
+  match kind with
+  | "edit" ->
+      let* before = required_string_field json "before" in
+      let* after = required_string_field json "after" in
+      let* replace_all = optional_bool_field json "replace_all" in
+      Ok (Fc_edited { before; after; replace_all = Option.value ~default:false replace_all })
+  | "write" ->
+      let* content = required_string_field json "content" in
+      Ok (Fc_written { content })
+  | other -> Error (Printf.sprintf "unknown file change kind %S" other)
+
+let decode_file_change json =
+  let* fc_at = require_float_field json "at" in
+  let* fc_keeper = required_string_field json "keeper" in
+  let* fc_turn = optional_int_or_null json "turn" in
+  let* fc_task_id = optional_string_field json "task_id" in
+  let* location_json = required_object_field json "location" in
+  let* fc_location = decode_file_change_location location_json in
+  let* kind_json = required_object_field json "change" in
+  let* fc_kind = decode_file_change_kind kind_json in
+  let* fc_succeeded = required_bool_field json "succeeded" in
+  Ok { fc_at; fc_keeper; fc_turn; fc_task_id; fc_location; fc_kind; fc_succeeded }
+
+(* ── Workspace tree (/api/v1/workspace/tree, /workspace/children) ──────
+
+   The Code surface browses one directory at a time through the lazy
+   /children route; the node shape is the tree family's flat node object.
+   Unknown extra fields are the dashboard's (diff badges, keeper hues) and
+   are ignored here. *)
+
+type workspace_tree_node = {
+  wt_path : string;  (** relative to the workspace base *)
+  wt_label : string;
+  wt_has_children : bool;  (** a directory the /children route can open *)
+}
+
+let decode_workspace_tree_node json =
+  let* wt_path = required_string_field json "path" in
+  let* wt_label = required_string_field json "label" in
+  let* wt_has_children = required_bool_field json "hasChildren" in
+  Ok { wt_path; wt_label; wt_has_children }
+
+let decode_workspace_tree json =
+  match json with
+  | `List nodes -> decode_list "nodes" decode_workspace_tree_node nodes
+  | other ->
+      Error
+        (Printf.sprintf "workspace tree must be a list (received %s)"
+           (Json_util.kind_name other))
+
+(* /api/v1/workspace/file answers {ok, content}; anything else is a decode
+   failure, not an empty file. *)
+let decode_workspace_file json =
+  let* ok = required_bool_field json "ok" in
+  if not ok then Error "workspace file answered ok=false"
+  else required_string_field json "content"
+
+type git_diff_row_kind =
+  | Gd_context
+  | Gd_added
+  | Gd_removed
+
+type git_diff_row = {
+  gdr_kind : git_diff_row_kind;
+  gdr_old_line : int option;
+  gdr_new_line : int option;
+  gdr_text : string;
+}
+
+type git_diff = {
+  gd_has_changes : bool;
+  gd_rows : git_diff_row list;
+}
+
+let decode_file_change_snapshot json =
+  let* fcs_keeper = required_string_field json "keeper" in
+  let* fcs_window_hours = require_float_field json "window_hours" in
+  let* fcs_calls_in_window = required_int_field json "calls_in_window" in
+  let* changes_json = required_list_field json "changes" in
+  let* fcs_changes = decode_list "changes" decode_file_change changes_json in
+  let* fcs_over_budget = required_int_field json "over_budget" in
+  let* fcs_malformed = required_int_field json "malformed" in
+  Ok
+    { fcs_keeper
+    ; fcs_window_hours
+    ; fcs_calls_in_window
+    ; fcs_changes
+    ; fcs_over_budget
+    ; fcs_malformed
+    }
+
+(* ── git diff: what the tree holds ─────────────────────────────────── *)
+
+let decode_git_diff_row json =
+  let* kind = required_string_field json "kind" in
+  let* text = required_string_field json "text" in
+  let* gdr_old_line = optional_int_or_null json "oldLine" in
+  let* gdr_new_line = optional_int_or_null json "newLine" in
+  (* An unknown kind is an error, not a context line. git's vocabulary is
+     closed and a fourth word means the server changed under us; drawing it as
+     unchanged would report the opposite of whatever happened. *)
+  let* gdr_kind =
+    match kind with
+    | "context" -> Ok Gd_context
+    | "add" -> Ok Gd_added
+    | "delete" -> Ok Gd_removed
+    | other -> Error (Printf.sprintf "unknown git diff row kind: %s" other)
+  in
+  Ok { gdr_kind; gdr_old_line; gdr_new_line; gdr_text = text }
+
+let decode_git_diff json =
+  let* gd_has_changes = required_bool_field json "has_changes" in
+  let* rows_json = required_list_field json "unified" in
+  let* gd_rows = decode_list "unified" decode_git_diff_row rows_json in
+  Ok { gd_has_changes; gd_rows }

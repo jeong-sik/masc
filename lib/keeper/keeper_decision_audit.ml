@@ -37,17 +37,15 @@ let resolve_cached cache mu compute =
 type decision_record = {
   cycle_id : string;
   keeper_name : string;
-  generation : int;
-  snapshot : Keeper_measurement.measurement_snapshot option;
   turn_verdict : Keeper_world_observation.turn_verdict;
   wall_clock : float;
   tool_diversity_entropy : float option;
 }
 
-let make ~cycle_id ~keeper_name ~generation ?snapshot
+let make ~cycle_id ~keeper_name
     ~turn_verdict ~wall_clock
     ?tool_diversity_entropy () =
-  { cycle_id; keeper_name; generation; snapshot;
+  { cycle_id; keeper_name;
     turn_verdict; wall_clock;
     tool_diversity_entropy }
 
@@ -59,10 +57,6 @@ let to_json (r : decision_record) : Yojson.Safe.t =
   `Assoc [
     "cycle_id", `String r.cycle_id;
     "keeper_name", `String r.keeper_name;
-    "generation", `Int r.generation;
-    "snapshot", (match r.snapshot with
-      | Some s -> Keeper_measurement.measurement_snapshot_to_json s
-      | None -> `Null);
     "turn_verdict", `String
       (match r.turn_verdict with
        | Keeper_world_observation.Run _ -> "run"
@@ -166,6 +160,34 @@ let recent ~keeper_name ~limit : decision_record list =
 (* JSONL flush                                                      *)
 (* ================================================================ *)
 
+(* The day-file layout ([<base_dir>/YYYY-MM/DD.jsonl]) belongs to
+   [Dated_jsonl], and the same module prunes this store through
+   [Server_runtime_startup_maintenance.prune_shared_jsonl_stores]. Writing
+   through the store is what keeps the directory name and the pruner's cutoff
+   on one calendar: both resolve the day from the same clock, so a name never
+   denotes a different day to the reader than it did to the writer. *)
+let decision_audit_dirname = "decision_audit"
+
+(* Keyed by resolved [base_dir]: a base_path or keeper-name change resolves to
+   a different directory and therefore takes a distinct store rather than
+   reusing one bound to the previous path. *)
+let audit_stores : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 8
+
+let store_for ~base_path ~keeper_name =
+  let base_dir =
+    Filename.concat
+      (Filename.concat
+         (Common.masc_dir_from_base_path ~base_path)
+         decision_audit_dirname)
+      (Keeper_alerting_path.sanitize_keeper_name keeper_name)
+  in
+  match Hashtbl.find_opt audit_stores base_dir with
+  | Some store -> store
+  | None ->
+    let store = Dated_jsonl.create ~base_dir () in
+    Hashtbl.replace audit_stores base_dir store;
+    store
+
 let flush_if_needed ~base_path ~keeper_name =
   match Hashtbl.find_opt rings keeper_name with
     | None -> ()
@@ -178,31 +200,22 @@ let flush_if_needed ~base_path ~keeper_name =
       in
       if not should_flush then ()
       else begin
-        let safe_name = Keeper_alerting_path.sanitize_keeper_name keeper_name in
-        let dir =
-          let open Unix in
-          let tm = localtime now in
-          Printf.sprintf "%s/.masc/decision_audit/%s/%04d-%02d/%02d.jsonl"
-            base_path safe_name
-            (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-        in
-        let parent = Filename.dirname dir in
-        Safe_ops.protect ~default:() (fun () -> Fs_compat.mkdir_p parent);
+        let store = store_for ~base_path ~keeper_name in
         let cap = Array.length ring.buf in
         let start = ((ring.pos - ring.unflushed) mod cap + cap) mod cap in
-        let flush_lines =
+        let pending =
           let rec gather i acc =
             if i >= ring.unflushed then List.rev acc
             else
               let idx = (start + i) mod cap in
               match ring.buf.(idx) with
-              | Some r -> gather (i + 1) ((Yojson.Safe.to_string (to_json r) ^ "\n") :: acc)
+              | Some r -> gather (i + 1) (to_json r :: acc)
               | None -> gather (i + 1) acc
           in
-          String.concat "" (gather 0 [])
+          gather 0 []
         in
         (try
-          Fs_compat.append_file dir flush_lines;
+          List.iter (Dated_jsonl.append store) pending;
           ring.unflushed <- 0
         with Eio.Cancel.Cancelled _ as e -> raise e
            | e ->

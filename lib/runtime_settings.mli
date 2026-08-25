@@ -22,56 +22,49 @@
 (** {1 Keeper lifecycle} *)
 
 val keeper_supervisor_sweep_sec : float Runtime_params.param
-(** Supervisor sweep interval (seconds).  Range \[10.0, 120.0]. *)
+(** Supervisor sweep interval (seconds).  Range \[10.0, 120.0\]. *)
 
 val keeper_keepalive_interval_sec : int Runtime_params.param
 (** Heartbeat interval (seconds). Any positive value is accepted without an
     implicit upper bound. *)
 
-val keeper_dead_ttl_sec : float Runtime_params.param
-(** Dead-state retention (seconds).  Range \[60.0, 1 day]. *)
-
 (** {1 Keeper diagnostics} *)
 
 val keeper_snapshot_sec : int Runtime_params.param
-(** Snapshot capture interval (seconds).  Range \[15, 3600]. *)
+(** Snapshot capture interval (seconds).  Range \[15, 3600\]. *)
 
 val keeper_work_as_hb_enabled : bool Runtime_params.param
 (** Enable work-as-heartbeat fallback. *)
 
-val keeper_work_as_hb_max_silence_sec : float Runtime_params.param
-(** Maximum silence allowed in work-as-heartbeat mode (seconds).
-    Range \[10.0, 600.0]. *)
-
 val keeper_stage_timing_ring_size : int Runtime_params.param
 (** Stage-timing ring buffer size.  Applied on fiber restart only —
-    runtime mutation requires keeper restart.  Range \[10, 1000]. *)
+    runtime mutation requires keeper restart.  Range \[10, 1000\]. *)
 
 (** {1 Dashboard rendering} *)
 
 val dashboard_max_path_length : int Runtime_params.param
-(** Path truncation cap (chars).  Range \[10, 200].  Default 30. *)
+(** Path truncation cap (chars).  Range \[10, 200\].  Default 30. *)
 
 val dashboard_max_message_length : int Runtime_params.param
-(** Message-body truncation cap (chars).  Range \[10, 500].
+(** Message-body truncation cap (chars).  Range \[10, 500\].
     Default 35. *)
 
 val dashboard_max_pending_tasks : int Runtime_params.param
-(** Pending-task display cap.  Range \[1, 50].  Default 5. *)
+(** Pending-task display cap.  Range \[1, 50\].  Default 5. *)
 
 val dashboard_max_recent_messages : int Runtime_params.param
-(** Recent-message display cap.  Range \[1, 50].  Default 5. *)
+(** Recent-message display cap.  Range \[1, 50\].  Default 5. *)
 
 val dashboard_min_border_length : int Runtime_params.param
-(** Section-border minimum length.  Range \[20, 200].  Default 45. *)
+(** Section-border minimum length.  Range \[20, 200\].  Default 45. *)
 
 val dashboard_agent_quiet_threshold_sec : float Runtime_params.param
 (** Quiet-agent-warning threshold (seconds).
-    Range \[30.0, 1 day]. *)
+    Range \[30.0, 1 day\]. *)
 
 val dashboard_agent_stuck_threshold_sec : float Runtime_params.param
 (** Stuck-agent-warning threshold (seconds).
-    Range \[60.0, 7 days]. *)
+    Range \[60.0, 7 days\]. *)
 
 (** {1 Surface catalog} *)
 

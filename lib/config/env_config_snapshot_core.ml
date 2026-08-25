@@ -1,4 +1,4 @@
-(** Core entry/provenance helpers for {!Env_config_snapshot}. *)
+(** Pure entry/provenance projection for {!Env_config_snapshot}. *)
 
 let mask_sensitive _value = "[REDACTED]"
 
@@ -16,12 +16,23 @@ let is_sensitive_name name =
       contains_at 0)
     [ "token"; "password"; "secret"; "key"; "credential"; "neo4j_url"; "supabase" ]
 
-type entry =
+type spec =
   { env_name : string
   ; description : string
   ; default_display : string
   ; sensitive : bool
   }
+
+type effective_source =
+  | Default
+  | Environment
+
+type observation =
+  | Raw_environment of string option
+  | Applied_value of
+      { value : string
+      ; source : effective_source
+      }
 
 type source_provenance =
   { kind : string
@@ -36,50 +47,50 @@ type source_provenance =
   ; value_redacted : bool
   }
 
-let entry ?(sensitive = false) ~default env_name description =
+let make_spec ?(sensitive = false) ~default env_name description =
   let sensitive = sensitive || is_sensitive_name env_name in
   { env_name; description; default_display = default; sensitive }
 
-let default_provenance (e : entry) =
-  match e.default_display with
+let default_provenance (spec : spec) =
+  match spec.default_display with
   | "(derived)" ->
       { kind = "derived"
       ; detail = "computed by runtime config helpers from related settings"
       ; derived_from = []
-      ; env_name = e.env_name
+      ; env_name = spec.env_name
       ; raw_source = "derived_runtime"
       ; raw_env_present = false
       ; raw_env_blank = false
-      ; default_display = e.default_display
-      ; sensitive = e.sensitive
+      ; default_display = spec.default_display
+      ; sensitive = spec.sensitive
       ; value_redacted = false
       }
   | "(cwd)" ->
       { kind = "runtime"
       ; detail = "resolved from the process working directory or base path"
       ; derived_from = []
-      ; env_name = e.env_name
+      ; env_name = spec.env_name
       ; raw_source = "runtime"
       ; raw_env_present = false
       ; raw_env_blank = false
-      ; default_display = e.default_display
-      ; sensitive = e.sensitive
+      ; default_display = spec.default_display
+      ; sensitive = spec.sensitive
       ; value_redacted = false
       }
   | _ ->
       { kind = "default"
       ; detail = "compiled default value"
       ; derived_from = []
-      ; env_name = e.env_name
+      ; env_name = spec.env_name
       ; raw_source = "compiled_default"
       ; raw_env_present = false
       ; raw_env_blank = false
-      ; default_display = e.default_display
-      ; sensitive = e.sensitive
+      ; default_display = spec.default_display
+      ; sensitive = spec.sensitive
       ; value_redacted = false
       }
 
-let source_provenance (e : entry) ~raw_env raw =
+let source_provenance (spec : spec) ~raw_env raw =
   let raw_env_present = Option.is_some raw_env in
   let raw_env_blank =
     match raw_env with
@@ -89,19 +100,33 @@ let source_provenance (e : entry) ~raw_env raw =
   match raw with
   | Some _ ->
       { kind = "env"
-      ; detail = "environment variable " ^ e.env_name
+      ; detail = "environment variable " ^ spec.env_name
       ; derived_from = []
-      ; env_name = e.env_name
+      ; env_name = spec.env_name
       ; raw_source = "environment"
       ; raw_env_present
       ; raw_env_blank
-      ; default_display = e.default_display
-      ; sensitive = e.sensitive
-      ; value_redacted = e.sensitive
+      ; default_display = spec.default_display
+      ; sensitive = spec.sensitive
+      ; value_redacted = spec.sensitive
       }
   | None ->
-      let provenance = default_provenance e in
+      let provenance = default_provenance spec in
       { provenance with raw_env_present; raw_env_blank }
+
+let applied_provenance (spec : spec) source =
+  let raw_env_present = match source with Default -> false | Environment -> true in
+  { kind = (match source with Default -> "default" | Environment -> "env")
+  ; detail = "typed value resolved by the runtime owner"
+  ; derived_from = []
+  ; env_name = spec.env_name
+  ; raw_source = "applied_runtime"
+  ; raw_env_present
+  ; raw_env_blank = false
+  ; default_display = spec.default_display
+  ; sensitive = spec.sensitive
+  ; value_redacted = spec.sensitive
+  }
 
 let provenance_to_json p =
   `Assoc
@@ -120,25 +145,30 @@ let provenance_to_json p =
      then []
      else [ "derived_from", `List (List.map (fun v -> `String v) p.derived_from) ])
 
-let read_entry (e : entry) =
-  let raw_env = Sys.getenv_opt e.env_name in
-  let raw = Env_config_core.trim_opt raw_env in
-  let provenance = source_provenance e ~raw_env raw in
-  let display_value =
-    match raw with
-    | None -> None
-    | Some v when e.sensitive -> Some (mask_sensitive v)
-    | Some v -> Some v
+let to_json (spec : spec) observation =
+  let provenance, display_value =
+    match observation with
+    | Applied_value { value; source } ->
+      let value = if spec.sensitive then mask_sensitive value else value in
+      applied_provenance spec source, Some value
+    | Raw_environment raw_env ->
+      let raw = String_util.option_trim raw_env in
+      let provenance = source_provenance spec ~raw_env raw in
+      let display_value =
+        match raw with
+        | None -> None
+        | Some v when spec.sensitive -> Some (mask_sensitive v)
+        | Some v -> Some v
+      in
+      provenance, display_value
   in
   `Assoc
-    [ "env", `String e.env_name
-    ; "description", `String e.description
+    [ "env", `String spec.env_name
+    ; "description", `String spec.description
     ; "value", Json_util.string_opt_to_json display_value
-    ; "default", `String e.default_display
+    ; "default", `String spec.default_display
     ; "source", `String provenance.kind
     ; "source_detail", `String provenance.detail
     ; "provenance", provenance_to_json provenance
-    ; "sensitive", `Bool e.sensitive
+    ; "sensitive", `Bool spec.sensitive
     ]
-
-let category name entries = name, `List (List.map read_entry entries)

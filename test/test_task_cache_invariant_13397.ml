@@ -1,10 +1,9 @@
-(** #13397: Pin the pure [Task_cache_invariant] classifier and verify the
-    core invariant logic.
+(** #13397: Pin the pure [Task_cache_invariant] classifier and the canonical
+    backlog lookup.
 
-    [is_terminal] must correctly classify all six task status variants.
-    [with_fresh_task_status] must return [None] for terminal tasks and
-    [Some _] for active tasks, while [fresh_task_status] must read the
-    backlog and return the live status. *)
+    [is_terminal] must correctly classify all six task status variants, and
+    [read_fresh_task_status] must keep an absent task apart from a backlog it
+    could not read. *)
 
 open Alcotest
 module T = Masc_domain
@@ -57,7 +56,7 @@ let test_is_terminal_awaiting () =
     (TCI.is_terminal status_awaiting)
 
 (* ============================================================ *)
-(* with_fresh_task_status — requires a live backlog             *)
+(* read_fresh_task_status — requires a live backlog             *)
 (* ============================================================ *)
 
 (** Minimal Eio + temp-dir test harness, borrowed from test_task_dispatch. *)
@@ -95,7 +94,9 @@ let make_task ~id ~status =
   ; handoff_context = None
   ; cycle_count = 0
   ; reclaim_policy = None
+  ; execution_links = Masc_domain.no_execution_links
   ; do_not_reclaim_reason = None
+  ; skills = []
   }
 
 (** Write a minimal backlog with one task. *)
@@ -105,59 +106,22 @@ let seed_backlog config task =
   in
   Workspace_backlog.write_backlog config backlog
 
-let test_fresh_status_done () =
-  with_temp_config (fun config ->
-    let _ = Masc.Workspace.init config ~agent_name:(Some "tester") in
-    seed_backlog config (make_task ~id:"task-037" ~status:status_done);
-    let result = TCI.fresh_task_status config ~task_id:"task-037" in
-    check bool "done task status found" true (Option.is_some result);
-    check bool "done task is_terminal" true
-      (Option.value ~default:T.Todo result |> TCI.is_terminal))
-
-let test_fresh_status_active () =
-  with_temp_config (fun config ->
-    let _ = Masc.Workspace.init config ~agent_name:(Some "tester") in
-    seed_backlog config (make_task ~id:"task-038" ~status:status_claimed);
-    let result = TCI.fresh_task_status config ~task_id:"task-038" in
-    check bool "claimed task status found" true (Option.is_some result);
-    check bool "claimed task is not terminal" false
-      (Option.value ~default:T.Todo result |> TCI.is_terminal))
-
-let test_fresh_status_missing () =
+let test_typed_fresh_status_missing () =
   with_temp_config (fun config ->
     let _ = Masc.Workspace.init config ~agent_name:(Some "tester") in
     seed_backlog config (make_task ~id:"task-001" ~status:T.Todo);
-    let result = TCI.fresh_task_status config ~task_id:"task-999" in
-    check bool "absent task returns None" true (Option.is_none result))
+    match TCI.read_fresh_task_status config ~task_id:"task-999" with
+    | TCI.Absent -> ()
+    | TCI.Found _ -> fail "absent task was reported as found"
+    | TCI.Unavailable detail ->
+      failf "readable backlog was reported unavailable: %s" detail)
 
-let test_with_fresh_terminal_returns_none () =
+let test_typed_fresh_status_unavailable () =
   with_temp_config (fun config ->
-    let _ = Masc.Workspace.init config ~agent_name:(Some "tester") in
-    seed_backlog config (make_task ~id:"task-102" ~status:status_done);
-    let result =
-      TCI.with_fresh_task_status config
-        ~agent_name:"keeper-executor-agent"
-        ~task_id:"task-102"
-        ~module_name:"test.mention_tracker"
-        (fun _ -> `should_not_run)
-    in
-    check bool "terminal task → None (skip emission)" true
-      (Option.is_none result))
-
-let test_with_fresh_active_calls_continuation () =
-  with_temp_config (fun config ->
-    let _ = Masc.Workspace.init config ~agent_name:(Some "tester") in
-    seed_backlog config (make_task ~id:"task-050" ~status:status_claimed);
-    let called = ref false in
-    let result =
-      TCI.with_fresh_task_status config
-        ~agent_name:"keeper-bob-agent"
-        ~task_id:"task-050"
-        ~module_name:"test.broadcast"
-        (fun _status -> called := true; `proceed)
-    in
-    check bool "active task → continuation called" true !called;
-    check bool "active task → Some result" true (Option.is_some result))
+    match TCI.read_fresh_task_status config ~task_id:"task-999" with
+    | TCI.Unavailable _ -> ()
+    | TCI.Absent -> fail "missing backlog was collapsed into task absence"
+    | TCI.Found _ -> fail "missing backlog unexpectedly returned a task")
 
 (* ============================================================ *)
 (* Test runner                                                  *)
@@ -175,18 +139,10 @@ let () =
         ; test_case "AwaitingVerification is not terminal" `Quick
             test_is_terminal_awaiting
         ] )
-    ; ( "fresh_task_status"
-      , [ test_case "done task found and terminal" `Quick
-            test_fresh_status_done
-        ; test_case "claimed task found and non-terminal" `Quick
-            test_fresh_status_active
-        ; test_case "absent task returns None" `Quick
-            test_fresh_status_missing
-        ] )
-    ; ( "with_fresh_task_status"
-      , [ test_case "terminal task returns None (skip)" `Quick
-            test_with_fresh_terminal_returns_none
-        ; test_case "active task calls continuation" `Quick
-            test_with_fresh_active_calls_continuation
+    ; ( "read_fresh_task_status"
+      , [ test_case "typed lookup preserves task absence" `Quick
+            test_typed_fresh_status_missing
+        ; test_case "typed lookup preserves backlog failure" `Quick
+            test_typed_fresh_status_unavailable
         ] )
     ]

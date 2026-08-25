@@ -3,8 +3,8 @@
 
     Owns [parse_telemetry_entry] (decisions.jsonl rows) and
     [parse_cost_entry] (date-split cost rows), plus the model-attribution
-    helpers (runtime name canonicalization, candidate-model fallback,
-    provider hints) that both parsers share. Produces internal
+    helpers (runtime name canonicalization, provider hints) that both
+    parsers share. Produces internal
     {!Model_inference_metrics_entry.raw_entry} values tagged with the
     typed {!Model_inference_metrics_entry.parse_error} reason on
     failure.
@@ -47,30 +47,21 @@ let first_runtime_model_attribution field_sets =
   List.find_map runtime_model_attribution_of_fields field_sets
 ;;
 
-let first_candidate_model field_sets =
-  List.find_map
-    (fun fields ->
-       match List.assoc_opt "candidate_models" fields with
-       | Some (`List (`String m :: _)) -> Some m
-       | _ -> None)
-    field_sets
-;;
-
 let success_inference_identity fields telemetry_fields =
   match
     json_string_field_opt "trace_id" fields,
     json_int_field_opt "turn_id" fields,
-    json_int_field_opt "oas_turn_ordinal" telemetry_fields
+    json_int_field_opt "agent_core_turn_ordinal" telemetry_fields
   with
-  | Some trace_id, Some keeper_turn_id, Some oas_turn_ordinal
+  | Some trace_id, Some keeper_turn_id, Some agent_core_turn_ordinal
     when (not (String.equal (String.trim trace_id) ""))
          && keeper_turn_id > 0
-         && oas_turn_ordinal >= 0 ->
+         && agent_core_turn_ordinal >= 0 ->
     Ok
       (Some
          { Cost_ledger.trace_id = trace_id
          ; keeper_turn_id
-         ; oas_turn_ordinal
+         ; agent_core_turn_ordinal
          })
   | _ -> Error Missing_success_inference_identity
 ;;
@@ -125,16 +116,13 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
          in
          if is_error
          then (
-           (* Error turns: first candidate model or runtime_id. No silent
+           (* Error turns: attribute to the dispatched runtime_id. No silent
               [__error__] marker — refuse the row so caller sees the
               attribution gap typed. *)
            let model_result : (string, parse_error) result =
-             match first_candidate_model model_attribution_field_sets with
+             match first_runtime_model_attribution model_attribution_field_sets with
              | Some model -> Ok model
-             | None ->
-               (match first_runtime_model_attribution model_attribution_field_sets with
-                | Some model -> Ok model
-                | None -> Error Missing_error_model_attribution)
+             | None -> Error Missing_error_model_attribution
            in
            match model_result with
            | Error _ as e -> e
@@ -171,7 +159,6 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              ; cache_read_tokens = None
              ; cache_creation_tokens = None
              ; reasoning_tokens = None
-             ; fallback_applied = false
              ; cost_usd = None
              ; tool_call_count = outer_tool_call_count
              ; tools_used = outer_tools_used
@@ -190,7 +177,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
          else (
            (* Success turns: full telemetry parsing. Model attribution is
               structural: prefer the explicit selected/model fields, then use
-              the current runtime route when OAS did not surface a concrete
+              the current runtime route when AGENT_CORE did not surface a concrete
               model. *)
            let model_result : (string, parse_error) result =
              match first_json_string_field_opt "selected_model" model_attribution_field_sets with
@@ -256,11 +243,6 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
 	             json_int_field_opt "cache_creation_tokens" tfields
 	           in
            let reasoning_tokens_raw = json_int_field_opt "reasoning_tokens" tfields in
-           let fallback_applied =
-             match List.assoc_opt "fallback_applied" tfields with
-             | Some (`Bool b) -> b
-             | _ -> false
-           in
            let cost_usd_raw = json_float_field_opt "cost_usd" tfields in
            (* Per-turn thinking_enabled — emitted by keeper_unified_turn's
               append_decision_record under telemetry.thinking_enabled. Treat
@@ -310,7 +292,6 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              ; cache_read_tokens = cache_read_tokens_raw
              ; cache_creation_tokens = cache_creation_tokens_raw
              ; reasoning_tokens = reasoning_tokens_raw
-             ; fallback_applied
              ; cost_usd = cost_usd_raw
              ; tool_call_count = outer_tool_call_count
              ; tools_used = outer_tools_used
@@ -413,7 +394,6 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
       ; cache_read_tokens
       ; cache_creation_tokens
       ; reasoning_tokens = json_int_field_opt "reasoning_tokens" fields
-      ; fallback_applied = false
       ; cost_usd
       ; tool_call_count = 0
       ; tools_used = []

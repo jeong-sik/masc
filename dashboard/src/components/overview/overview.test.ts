@@ -22,23 +22,30 @@ import {
   Overview,
 } from './overview'
 import type {
-  DashboardScheduledAutomation,
-  DashboardToolsResponse,
+  DashboardScheduledAutomationAvailableData,
+  DashboardScheduledAutomationProjection,
+  DashboardScheduledAutomationRequest,
   DashboardScheduleRunnerStatus,
   FusionRunRecord,
   TelemetryEntry,
   TelemetrySourceSummary,
 } from '../../api/dashboard'
-import { keepers, boardPosts, boardTotal, lastBoardRefreshAt } from '../../store'
+import { keepers, boardPosts, boardTotal, lastBoardRefreshAt, shellRuntimeResolution } from '../../store'
 import type { Goal } from '../../types/core'
+import { dashboardFullHealthResource } from '../dashboard-full-health-state'
 
 const overviewMocks = vi.hoisted(() => ({
-  toolsData: { value: null as null | DashboardToolsResponse },
+  scheduledAutomationProjection: { value: null as null | DashboardScheduledAutomationProjection },
 }))
 
-vi.mock('../tools/tool-state', () => ({
-  toolsData: overviewMocks.toolsData,
+vi.mock('../schedule/schedule-state', () => ({
+  scheduledAutomationProjection: overviewMocks.scheduledAutomationProjection,
+  subscribeScheduledAutomationRefresh: () => () => {},
 }))
+
+afterEach(() => {
+  dashboardFullHealthResource.reset()
+})
 
 // bar-seg ratio helper (mirrors FunnelCard inline logic)
 function segPct(counts: FunnelCounts, key: 'created' | 'inProgress' | 'awaiting' | 'completed'): number {
@@ -89,26 +96,13 @@ function makeBoardPost(partial: Partial<BoardPost>): BoardPost {
   }
 }
 
-function makeToolsResponse(partial: Partial<DashboardToolsResponse> = {}): DashboardToolsResponse {
-  return {
-    tool_inventory: {
-      count: 0,
-      tools: [],
-    },
-    tool_usage: {
-      total_calls: 0,
-      distinct_tools_called: 0,
-      top_20: [],
-      never_called_count: 0,
-      dispatch_v2_enabled: false,
-      registered_count: 0,
-    },
-    ...partial,
-  }
-}
-
-function makeScheduledAutomation(partial: Partial<DashboardScheduledAutomation> = {}): DashboardScheduledAutomation {
-  return {
+function makeScheduledAutomation(
+  partial: Partial<DashboardScheduledAutomationAvailableData> = {},
+): DashboardScheduledAutomationProjection {
+  const data: DashboardScheduledAutomationAvailableData = {
+    status: 'ok',
+    schedule_store_known: true,
+    schedule_store_read_error: null,
     request_count: 3,
     request_limit: 10,
     truncated: false,
@@ -145,6 +139,16 @@ function makeScheduledAutomation(partial: Partial<DashboardScheduledAutomation> 
       },
     ],
     ...partial,
+  }
+  return {
+    state: 'available',
+    data,
+    page: {
+      visibleCount: data.requests.length,
+      totalCount: data.request_count,
+      limit: data.request_limit,
+      truncated: data.truncated,
+    },
   }
 }
 
@@ -412,7 +416,6 @@ describe('deriveFleetTickerEvents', () => {
           phase: 'Paused',
           pipeline_stage: 'paused',
           last_heartbeat: localIsoAt(4),
-          agent: { exists: true, status: 'busy' },
         }),
       ],
     })
@@ -558,7 +561,7 @@ describe('deriveKeeperAttentionReason', () => {
   it('uses runtime blocker semantics without a separate continuation approval state', () => {
     const reason = deriveKeeperAttentionReason(makeKeeper({
       name: 'gate',
-      runtime_blocker_class: 'turn_timeout',
+      runtime_blocker_class: 'stale_turn_timeout',
     }))
     expect(reason.sev).toBe('warn')
     expect(reason.act).toBe('상태 상세')
@@ -566,8 +569,8 @@ describe('deriveKeeperAttentionReason', () => {
 
   it('marks critical lifecycle states as bad', () => {
     const reason = deriveKeeperAttentionReason(makeKeeper({
-      name: 'dead',
-      lifecycle_phase: 'Dead',
+      name: 'crashed',
+      lifecycle_phase: 'Crashed',
       runtime_blocker_class: 'exception',
     }))
     expect(reason.sev).toBe('bad')
@@ -620,19 +623,11 @@ describe('pickAttentionKeepers', () => {
     expect(pickAttentionKeepers(keepers).map(k => k.name)).toEqual(['att'])
   })
 
-  it('selects keepers with runtime blocker awaiting_operator', () => {
-    const keepers = [
-      makeKeeper({ name: 'ok' }),
-      makeKeeper({ name: 'op', runtime_blocker_class: 'awaiting_operator' }),
-    ]
-    expect(pickAttentionKeepers(keepers).map(k => k.name)).toEqual(['op'])
-  })
 })
 
 describe('computeOverviewStats', () => {
   it('returns zeroed stats when empty', () => {
     expect(computeOverviewStats([], [])).toEqual({
-      run: 0,
       att: 0,
       hot: 0,
       avgCtx: null,
@@ -642,16 +637,18 @@ describe('computeOverviewStats', () => {
     })
   })
 
-  it('counts running keepers and context pressure', () => {
+  it('counts roster totals and context pressure without a running count', () => {
     const keepers = [
       makeKeeper({ name: 'a', status: 'active', context_ratio: 0.9, total_turns: 10 }),
       makeKeeper({ name: 'b', status: 'offline', context_ratio: 0.5, total_turns: 5 }),
     ]
     const stats = computeOverviewStats(keepers, [])
-    expect(stats.run).toBe(1)
     expect(stats.total).toBe(2)
     expect(stats.hot).toBe(1)
     expect(stats.traces).toBe(15)
+    // Execution counts are not derivable from roster rows; they come from the
+    // runtime-health fleet projection instead.
+    expect('run' in stats).toBe(false)
   })
 
   it('counts tasks assigned to keepers', () => {
@@ -684,10 +681,10 @@ describe('computeOverviewStats', () => {
 describe('keeperRuntimeLabel', () => {
   it('uses the shared runtime display priority', () => {
     expect(keeperRuntimeLabel(makeKeeper({
-      runtime_canonical: 'oas.primary',
-      selected_runtime_canonical: 'oas.secondary',
+      runtime_canonical: 'agentCore.primary',
+      selected_runtime_canonical: 'agentCore.secondary',
       runtime_id: 'legacy.runtime',
-    }))).toBe('oas.primary')
+    }))).toBe('agentCore.primary')
   })
 
   it('does not expose raw keeper model fields as runtime labels', () => {
@@ -706,12 +703,12 @@ describe('keeperRuntimeLabel', () => {
 describe('buildOverviewTelemetrySnapshot', () => {
   const nowMs = Date.parse('2026-04-18T10:00:00Z')
   const entry = (minutesAgo: number): TelemetryEntry => ({
-    source: 'oas_event',
+    source: 'agent_core_event',
     ts_unix: (nowMs - minutesAgo * 60 * 1000) / 1000,
   })
   const sources: TelemetrySourceSummary[] = [
     {
-      source: 'oas_event',
+      source: 'agent_core_event',
       entry_count: 10,
       latest_age_s: 8,
       health: 'ok',
@@ -801,6 +798,71 @@ describe('Overview v2 marker classes', () => {
   })
 })
 
+describe('Overview backend composite health', () => {
+  function stubOverviewFetch(operatorActionRequired: boolean) {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = `${input}`
+      if (url.includes('/health?full=1')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          overall_status: 'degraded',
+          operator_action_required: operatorActionRequired,
+          operator_action_reasons: operatorActionRequired ? ['keeper_event_queue'] : [],
+          full_health_snapshot: {
+            status: 'ready',
+            stale_reason: null,
+            last_good_available: true,
+            component_timed_out: false,
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      }
+      if (url.includes('/api/v1/dashboard/telemetry/summary')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          generated_at: '2026-08-14T00:00:00Z',
+          sources: [],
+          total_entries: 0,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      }
+      if (url.includes('/api/v1/dashboard/telemetry?')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          generated_at: '2026-08-14T00:00:00Z',
+          count: 0,
+          entries: [],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      }
+      return Promise.reject(new Error(`unexpected url: ${url}`))
+    }))
+  }
+
+  afterEach(() => {
+    cleanup()
+    dashboardFullHealthResource.reset()
+    vi.unstubAllGlobals()
+  })
+
+  it('joins one backend action requirement into the KPI and attention panel', async () => {
+    stubOverviewFetch(true)
+    const { container } = render(h(Overview, null))
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="kpi-att"] .ov-kpi-v')?.textContent).toBe('1')
+      expect(container.querySelector('[data-testid="attention-row-runtime-health"]')?.textContent)
+        .toContain('Runtime health degraded')
+    })
+  })
+
+  it('keeps a non-action degraded verdict visible without counting operator work', async () => {
+    stubOverviewFetch(false)
+    const { container } = render(h(Overview, null))
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="kpi-att"] .ov-kpi-v')?.textContent).toBe('0')
+      expect(container.querySelector('[data-testid="overview-attention"] h3')?.textContent)
+        .toBe('상태 참고')
+      expect(container.querySelector('[data-testid="attention-row-runtime-health"]')).not.toBeNull()
+    })
+  })
+})
+
 describe('Overview StyleSeed surfaces', () => {
   afterEach(() => {
     cleanup()
@@ -856,6 +918,7 @@ function makeFusionRun(partial: Partial<FusionRunRecord>): FusionRunRecord {
     runId: 'fr-1',
     keeper: 'sangsu',
     preset: 'default',
+    topology: null,
     startedAt: 1_700_000_000,
     status: 'running',
     ...partial,
@@ -937,9 +1000,12 @@ describe('computeOverviewDigest', () => {
         },
       }),
     )
-    expect(digest.scheduledAutomation.hasProjection).toBe(true)
-    expect(digest.scheduledAutomation.requestCount).toBe(5)
-    expect(digest.scheduledAutomation.requestLimit).toBe(10)
+    expect(digest.scheduledAutomation.state).toBe('available')
+    if (digest.scheduledAutomation.state !== 'available') {
+      throw new Error('expected available schedule projection')
+    }
+    expect(digest.scheduledAutomation.totalCount).toBe(5)
+    expect(digest.scheduledAutomation.limit).toBe(10)
     expect(digest.scheduledAutomation.fsmState).toBe('due')
     expect(digest.scheduledAutomation.dueCount).toBe(1)
     expect(digest.scheduledAutomation.runningCount).toBe(0)
@@ -947,6 +1013,42 @@ describe('computeOverviewDigest', () => {
     expect(digest.scheduledAutomation.unsupportedPayloadCount).toBe(2)
     expect(digest.scheduledAutomation.unknownPayloadCount).toBe(3)
     expect(digest.scheduledAutomation.tone).toBe('warn')
+  })
+
+  it('does not normalize invalid schedule status wire values', () => {
+    const digest = computeOverviewDigest(
+      0,
+      [],
+      [],
+      makeScheduledAutomation({
+        counts: {},
+        requests: [
+          {
+            schedule_id: 'status-skew',
+            status: ' Scheduled ' as DashboardScheduledAutomationRequest['status'],
+            source: 'operator',
+          },
+        ],
+      }),
+    )
+    expect(digest.scheduledAutomation.state).toBe('available')
+    if (digest.scheduledAutomation.state !== 'available') {
+      throw new Error('expected available schedule projection')
+    }
+    expect(digest.scheduledAutomation.scheduledCount).toBe(0)
+  })
+
+  it('keeps an unreadable schedule ledger unavailable instead of summarizing zero', () => {
+    const digest = computeOverviewDigest(0, [], [], {
+      state: 'unavailable',
+      reason: 'schedule store read failed: corrupt ledger',
+    })
+
+    expect(digest.scheduledAutomation).toEqual({
+      state: 'unavailable',
+      reason: 'schedule store read failed: corrupt ledger',
+      tone: 'bad',
+    })
   })
 
   it('summarizes schedule runner status from /health as a digest field', () => {
@@ -1010,6 +1112,102 @@ describe('Overview prototype surface', () => {
     ])
   })
 
+  it('shows keeper execution counts from the runtime-health fleet projection', () => {
+    keepers.value = [
+      makeKeeper({ name: 'a', status: 'active' }),
+      makeKeeper({ name: 'b', status: 'active' }),
+    ]
+    shellRuntimeResolution.value = {
+      fleet_safety: {
+        paused_keepers_health: { count: 1 },
+        keeper_fleet_safety: {
+          running_keeper_fiber_count: 4,
+          recovering_keeper_fiber_count: 3,
+          executable_keeper_fiber_count: 7,
+        },
+      },
+    } as never
+
+    const { container } = render(h(Overview, null))
+    // The roster holds 2 active-looking rows; the projection reports 4 running.
+    // The projection wins.
+    expect(container.querySelector('[data-testid="kpi-run"] .ov-kpi-v')?.textContent).toBe('4 / 2')
+    expect(container.querySelector('[data-testid="fleet-stat-running"] .v')?.textContent).toBe('4')
+    expect(container.querySelector('[data-testid="fleet-stat-recovering"] .v')?.textContent).toBe('3')
+    expect(container.querySelector('[data-testid="fleet-stat-paused"] .v')?.textContent).toBe('1')
+
+    keepers.value = []
+    shellRuntimeResolution.value = null
+  })
+
+  it('shows no keeper execution count when the fleet projection is missing', () => {
+    // Three rows that the roster heuristic would have counted as running. With
+    // no fleet projection the surface must say it does not know, not print an
+    // estimate derived from these status strings.
+    keepers.value = [
+      makeKeeper({ name: 'a', status: 'active' }),
+      makeKeeper({ name: 'b', status: 'busy' }),
+      makeKeeper({ name: 'c', status: 'idle' }),
+    ]
+    shellRuntimeResolution.value = null
+
+    const { container } = render(h(Overview, null))
+    expect(container.querySelector('[data-testid="kpi-run"] .ov-kpi-v')?.textContent).toBe('— / 3')
+    expect(container.querySelector('[data-testid="fleet-stat-running"] .v')?.textContent).toBe('—')
+    expect(container.querySelector('[data-testid="fleet-stat-recovering"] .v')?.textContent).toBe('—')
+    expect(container.querySelector('[data-testid="fleet-stat-paused"] .v')?.textContent).toBe('—')
+
+    keepers.value = []
+  })
+
+  it('renders a projection-reported zero as zero, not as unknown', () => {
+    keepers.value = [makeKeeper({ name: 'a', status: 'active' })]
+    shellRuntimeResolution.value = {
+      fleet_safety: {
+        keeper_fleet_safety: {
+          running_keeper_fiber_count: 0,
+          recovering_keeper_fiber_count: 0,
+          paused_keeper_count: 0,
+        },
+      },
+    } as never
+
+    const { container } = render(h(Overview, null))
+    expect(container.querySelector('[data-testid="kpi-run"] .ov-kpi-v')?.textContent).toBe('0 / 1')
+    expect(container.querySelector('[data-testid="fleet-stat-running"] .v')?.textContent).toBe('0')
+
+    keepers.value = []
+    shellRuntimeResolution.value = null
+  })
+
+  it('does not fetch the tool inventory when the home surface loads', async () => {
+    const previousFetch = global.fetch
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response('{}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    try {
+      render(h(Overview, null))
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+
+      // Root reached schedule state through /api/v1/dashboard/tools before the
+      // projection got its own route, so entering the home surface pulled the
+      // whole tool registry.
+      const requested = fetchMock.mock.calls.map(call => String(call[0]))
+      expect(requested.some(url => url.includes('/api/v1/dashboard/tools'))).toBe(false)
+    } finally {
+      if (previousFetch) {
+        vi.stubGlobal('fetch', previousFetch)
+      } else {
+        vi.unstubAllGlobals()
+      }
+    }
+  })
+
   it('marks deep-link KPI cells as buttons', () => {
     const { container } = render(h(Overview, null))
     const runCell = container.querySelector('[data-testid="kpi-run"]')
@@ -1040,23 +1238,21 @@ describe('Overview prototype surface', () => {
     ])
   })
 
-  it('renders live scheduled-automation summary from tools projection', () => {
-    const previousToolsData = overviewMocks.toolsData.value
-    overviewMocks.toolsData.value = makeToolsResponse({
-      scheduled_automation: makeScheduledAutomation({
-        fsm: {
-          state: 'active',
-          active_count: 2,
-          terminal_count: 1,
-          next_due_at: '2026-07-18T12:00:00Z',
-        },
-        counts: {
-          due: 2,
-          running: 1,
-          scheduled: 0,
-        },
-        warnings: ['warn'],
-      }),
+  it('renders live scheduled-automation summary from the schedule projection', () => {
+    const previousScheduledAutomation = overviewMocks.scheduledAutomationProjection.value
+    overviewMocks.scheduledAutomationProjection.value = makeScheduledAutomation({
+      fsm: {
+        state: 'active',
+        active_count: 2,
+        terminal_count: 1,
+        next_due_at: '2026-07-18T12:00:00Z',
+      },
+      counts: {
+        due: 2,
+        running: 1,
+        scheduled: 0,
+      },
+      warnings: ['warn'],
     })
 
     try {
@@ -1069,14 +1265,35 @@ describe('Overview prototype surface', () => {
       expect(bodyText).toContain('Due 2')
       expect(bodyText).toContain('Running 1')
       expect(bodyText).toContain('projection warning 1')
+      expect(bodyText).toContain('표시 3 / 전체 3 · 최대 10')
       expect(bodyText).not.toContain('예약 자동화 projection 미연결')
     } finally {
-      overviewMocks.toolsData.value = previousToolsData
+      overviewMocks.scheduledAutomationProjection.value = previousScheduledAutomation
+    }
+  })
+
+  it('renders an unreadable schedule ledger as an error with no zero count', () => {
+    const previousProjection = overviewMocks.scheduledAutomationProjection.value
+    overviewMocks.scheduledAutomationProjection.value = {
+      state: 'unavailable',
+      reason: 'schedule store read failed: corrupt ledger',
+    }
+
+    try {
+      const { container } = render(h(Overview, null))
+      const card = container.querySelector('[data-testid="domain-schedule"]')
+
+      expect(card?.querySelector('.ov-dcount')?.textContent).toBe('—')
+      expect(card?.querySelector('[data-testid="overview-schedule-unavailable"]')).not.toBeNull()
+      expect(card?.textContent).toContain('schedule store read failed: corrupt ledger')
+      expect(card?.textContent).not.toContain('Due 0')
+    } finally {
+      overviewMocks.scheduledAutomationProjection.value = previousProjection
     }
   })
 
   it('renders schedule_runner liveness row in the 예약 · 자동화 card when full health returns runner status', async () => {
-    const previousToolsData = overviewMocks.toolsData.value
+    const previousScheduledAutomation = overviewMocks.scheduledAutomationProjection.value
     const previousFetch = global.fetch
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const url = `${input}`
@@ -1122,18 +1339,16 @@ describe('Overview prototype surface', () => {
       return Promise.reject(new Error(`unexpected url: ${url}`))
     })
     try {
-      overviewMocks.toolsData.value = makeToolsResponse({
-        scheduled_automation: makeScheduledAutomation({
-          request_count: 1,
-          request_limit: 1,
-          counts: { scheduled: 1 },
-          fsm: {
-            state: 'active',
-            active_count: 1,
-            terminal_count: 0,
-            next_due_at: null,
-          },
-        }),
+      overviewMocks.scheduledAutomationProjection.value = makeScheduledAutomation({
+        request_count: 1,
+        request_limit: 1,
+        counts: { scheduled: 1 },
+        fsm: {
+          state: 'active',
+          active_count: 1,
+          terminal_count: 0,
+          next_due_at: null,
+        },
       })
       vi.stubGlobal('fetch', fetchMock)
 
@@ -1142,8 +1357,10 @@ describe('Overview prototype surface', () => {
         const card = container.querySelector('[data-testid="domain-schedule"]')
         expect(card?.textContent).toContain('runner: ok')
       })
+      expect(fetchMock.mock.calls.filter(call => String(call[0]).includes('/health?full=1')))
+        .toHaveLength(1)
     } finally {
-      overviewMocks.toolsData.value = previousToolsData
+      overviewMocks.scheduledAutomationProjection.value = previousScheduledAutomation
       if (previousFetch) {
         vi.stubGlobal('fetch', previousFetch)
       } else {

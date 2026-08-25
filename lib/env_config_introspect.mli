@@ -5,8 +5,9 @@
     attribution live in [Env_config_snapshot] inside the
     [masc_config] sub-library. This wrapper adds root-runtime
     metadata that is only available from the main server library
-    ([Version.version], [Server_startup_state.elapsed_since_start],
-    [Sys.ocaml_version], the live PID, and [MASC_BUILD_GIT_COMMIT]).
+    ([Runtime_build_version.current], [Server_startup_state.elapsed_since_start],
+    [Sys.ocaml_version], the live PID, and the build-time commit stamp
+    surfaced by [Build_identity]).
 
     Internal helper [server_meta] is hidden — callers consume only
     the two JSON entry points. *)

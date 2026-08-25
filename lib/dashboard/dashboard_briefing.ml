@@ -2,7 +2,6 @@ include Dashboard_utils
 
 type attention_context = Dashboard_briefing_assembly.attention_context = {
   severity : string;
-  has_action : bool;
   related_agent_names : string list;
   json : Yojson.Safe.t;
 }
@@ -11,42 +10,6 @@ let top_item items =
   match items with
   | item :: _ -> item
   | [] -> `Null
-
-let matching_action target_type target_id actions =
-  List.find_opt
-    (fun action ->
-      let action_target_type = string_field "target_type" action in
-      let action_target_id = String_util.trim_to_option (string_field "target_id" action) in
-      String.equal action_target_type target_type
-      &&
-      match target_id, action_target_id with
-      | Some left, Some right -> String.equal left right
-      | None, None -> true
-      | _ -> false)
-    actions
-
-let matching_action_for_incident incident actions =
-  let target_type = string_field "target_type" incident in
-  let target_id = String_util.trim_to_option (string_field "target_id" incident) in
-  let candidates =
-    actions
-    |> List.filter (fun action ->
-           let action_target_type = string_field "target_type" action in
-           let action_target_id = String_util.trim_to_option (string_field "target_id" action) in
-           String.equal action_target_type target_type
-           &&
-           match target_id, action_target_id with
-           | Some left, Some right -> String.equal left right
-           | None, None -> true
-           | _ -> false)
-  in
-  match
-    List.find_opt
-      (Dashboard_briefing_assembly.action_matches_incident incident)
-      candidates
-  with
-  | Some action -> Some action
-  | None -> (match candidates with action :: _ -> Some action | [] -> None)
 
 let rec evidence_preview_strings json =
   match json with
@@ -64,7 +27,7 @@ let is_internal_attention incident =
   Operator_digest_types.is_workspace_target_type
     (string_field "target_type" incident)
 
-let build_attention_queue incidents actions =
+let build_attention_queue incidents =
   let public_incidents =
     incidents
     |> List.filter (fun incident -> not (is_internal_attention incident))
@@ -77,14 +40,13 @@ let build_attention_queue incidents actions =
          if kind = "" || summary = "" then None
          else
            let target_type = string_field "target_type" incident in
-           let target_id = String_util.trim_to_option (string_field "target_id" incident) in
+           let target_id = String_util.trim_nonempty (string_field "target_id" incident) in
            let related_agent_names =
              dedup_strings
-               (match String_util.trim_to_option (string_field "actor" incident) with
+               (match String_util.trim_nonempty (string_field "actor" incident) with
                | Some actor -> [ actor ]
                | None -> [])
            in
-           let top_action = matching_action_for_incident incident actions in
            let id =
              Printf.sprintf "%s:%s:%s" kind target_type
                (match target_id with Some value -> value | None -> "none")
@@ -92,7 +54,6 @@ let build_attention_queue incidents actions =
            Some
              {
                severity;
-               has_action = Option.is_some top_action;
                related_agent_names;
                json =
                  `Assoc
@@ -103,16 +64,18 @@ let build_attention_queue incidents actions =
                      ("summary", `String summary);
                      ("target_type", `String target_type);
                      ("target_id", Json_util.string_opt_to_json target_id);
-                     ("top_action", Json_util.option_to_yojson (fun value -> value) top_action);
                      ("related_agent_names", `List (List.map (fun value -> `String value) related_agent_names));
                      ("evidence", member_assoc "evidence" incident);
                      ("evidence_preview", `List (List.map (fun value -> `String value) (evidence_preview_strings (member_assoc "evidence" incident))));
                    ];
              })
-  |> List.sort (fun left right ->
-         let by_severity = Int.compare (severity_rank right.severity) (severity_rank left.severity) in
-         if by_severity <> 0 then by_severity
-         else Bool.compare right.has_action left.has_action)
+  (* Stable, so incidents of equal severity keep the operator digest's own
+     order. The previous tie-break ranked "has a matching action" first, and
+     that flag was a guess (see {!Dashboard_briefing_assembly}). *)
+  |> List.stable_sort (fun left right ->
+         Int.compare
+           (Operator_digest_types.severity_rank_of_string right.severity)
+           (Operator_digest_types.severity_rank_of_string left.severity))
 
 
 type briefing_projection = {
@@ -180,11 +143,13 @@ let build_projection ?actor ~config ~sw ~clock
     list_field "attention_items" digest_json
     |> List.sort (fun left right ->
            Int.compare
-             (severity_rank (string_field ~default:"ok" "severity" right))
-             (severity_rank (string_field ~default:"ok" "severity" left)))
+             (Operator_digest_types.severity_rank_of_string
+                (string_field ~default:"ok" "severity" right))
+             (Operator_digest_types.severity_rank_of_string
+                (string_field ~default:"ok" "severity" left)))
   in
   let recommended_actions = list_field "recommended_actions" digest_json in
-  let attention_queue = build_attention_queue incidents recommended_actions in
+  let attention_queue = build_attention_queue incidents in
   let keeper_items =
     match member_assoc "keepers" snapshot_json |> member_assoc "items" with
     | `List items -> items
@@ -236,7 +201,6 @@ let json ?actor ~config ~sw ~clock ~proc_mgr
     `Assoc
       [
         ("keepers", `List projection.keeper_briefs);
-        ("pending_confirms", member_assoc "pending_confirms" projection.snapshot_json);
         ("available_actions", member_assoc "available_actions" projection.snapshot_json);
       ]
   in

@@ -33,24 +33,6 @@ module Gw = Slack_gateway_state
    mention-triggered baseline, same stance as the Discord gateway. *)
 let default_trigger_policy : Gw.trigger_policy = Gw.Mention_or_thread
 
-(* Parse a configured trigger policy. Delegates to the single strict parser in
-   [Slack_gateway_state] so config and the (test-covered) canonical grammar
-   cannot drift. Empty ⇒ default (unset); a non-empty value that fails to parse
-   is logged and falls back to the default rather than being silently coerced
-   into a policy the operator did not write. *)
-let parse_trigger_policy raw : Gw.trigger_policy =
-  let s = String.trim raw in
-  if String.equal s "" then default_trigger_policy
-  else
-    match Gw.parse_trigger_policy s with
-    | Ok policy -> policy
-    | Error msg ->
-      Log.Server.warn
-        "slack trigger_policy %S rejected (%s); using default %s"
-        s msg
-        (Gw.trigger_policy_to_string default_trigger_policy);
-      default_trigger_policy
-
 type trigger_policy_toml_load =
   | Runtime_toml_missing
   | Trigger_policy_missing
@@ -60,6 +42,7 @@ type trigger_policy_load_error =
   | Runtime_toml_unreadable of { path : string; detail : string }
   | Runtime_toml_invalid of { path : string; detail : string }
   | Trigger_policy_invalid of { path : string; detail : string }
+  | Trigger_policy_env_invalid of { detail : string }
 
 let trigger_policy_load_error_to_string = function
   | Runtime_toml_unreadable { path; detail } ->
@@ -68,6 +51,8 @@ let trigger_policy_load_error_to_string = function
     Printf.sprintf "invalid TOML in %s: %s" path detail
   | Trigger_policy_invalid { path; detail } ->
     Printf.sprintf "invalid slack.trigger_policy in %s: %s" path detail
+  | Trigger_policy_env_invalid { detail } ->
+    Printf.sprintf "invalid MASC_SLACK_TRIGGER_POLICY: %s" detail
 ;;
 
 let load_trigger_policy_from_toml ~path =
@@ -106,20 +91,28 @@ let load_trigger_policy_from_toml ~path =
                   Error (Trigger_policy_invalid { path; detail })))))
 ;;
 
+(* Env > TOML > default — the precedence config/runtime.toml documents for this
+   key, and the one the Discord sibling already applies. An invalid env value is
+   a load error like an invalid TOML value; a blank/unset env falls through to
+   the TOML plane. [Env_config_slack.trigger_policy_opt] already reports blank
+   as unset, so there is no empty-string case to absorb here. *)
 let resolved_trigger_policy () =
-  let resolution = Config_dir_resolver.resolve () in
-  let toml_path =
-    Filename.concat resolution.Config_dir_resolver.config_root.path
-      Config_dir_resolver.runtime_toml_filename
-  in
-  match load_trigger_policy_from_toml ~path:toml_path with
-  | Error _ as error -> error
-  | Ok (Trigger_policy_loaded policy) -> Ok policy
-  | Ok (Runtime_toml_missing | Trigger_policy_missing) ->
-    Ok
-      (match Env_config_slack.trigger_policy_opt () with
-       | None -> default_trigger_policy
-       | Some raw -> parse_trigger_policy raw)
+  match Env_config_slack.trigger_policy_opt () with
+  | Some raw ->
+    (match Gw.parse_trigger_policy raw with
+     | Ok policy -> Ok policy
+     | Error detail -> Error (Trigger_policy_env_invalid { detail }))
+  | None ->
+    let resolution = Config_dir_resolver.resolve () in
+    let toml_path =
+      Filename.concat resolution.Config_dir_resolver.config_root.path
+        Config_dir_resolver.runtime_toml_filename
+    in
+    (match load_trigger_policy_from_toml ~path:toml_path with
+     | Error _ as error -> error
+     | Ok (Trigger_policy_loaded policy) -> Ok policy
+     | Ok (Runtime_toml_missing | Trigger_policy_missing) ->
+       Ok default_trigger_policy)
 ;;
 
 (* ---------------------------------------------------------------- *)
@@ -140,23 +133,19 @@ let metadata_bool key value = [ (key, string_of_bool value) ]
 let slack_conversation_id ~channel_id = Printf.sprintf "slack:channel:%s" channel_id
 
 let slack_delivery ~team_id ~channel_id ~thread_ts ~reply_to_thread_ts ~user_id
-    ~user_name ~ts : Gate_keeper_backend.connector_delivery =
-  { source =
-      Keeper_chat_queue.Slack
-        { channel_id
-        ; user_id
-        ; user_name
-        ; team_id
-        ; thread_ts = Some reply_to_thread_ts
-        }
-  ; surface = Surface_ref.Slack { team_id; channel_id; thread_ts }
-  ; conversation_id = Some (slack_conversation_id ~channel_id)
-  ; external_message_id = Some ts
-    (* The team IS the workspace identity; when auth.test could not resolve
-       it, the typed delivery carries explicit absence ([None]), never an
-       empty string. *)
-  ; workspace_id = team_id
-  }
+    ~user_name:_ ~ts : (Gate_keeper_backend.connector_delivery, string) result =
+  Result.map
+    (fun continuation_channel ->
+       { Gate_keeper_backend.continuation_channel
+       ; surface =
+           Surface_ref.Slack
+             { team_id; channel_id; thread_ts = Some reply_to_thread_ts }
+       ; conversation_id = Some (slack_conversation_id ~channel_id)
+       ; external_message_id = Some ts
+       ; workspace_id = team_id
+       })
+    (Keeper_continuation_channel.slack
+       ~team_id ~channel_id ~thread_ts:(Some reply_to_thread_ts) ~user_id)
 
 (* ---------------------------------------------------------------- *)
 (* Ambient lane (RFC-0226 parity with the Discord gateway)          *)
@@ -309,18 +298,21 @@ let accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id ~
         ~mentions_bot:(mentions_bot || is_app_mention) ~route:"triggered"
         ~urgency
     in
-    let delivery =
-      slack_delivery ~team_id ~channel_id ~thread_ts ~reply_to_thread_ts ~user_id
-        ~user_name ~ts
+    let outcome =
+      match
+        slack_delivery ~team_id ~channel_id ~thread_ts ~reply_to_thread_ts
+          ~user_id ~user_name ~ts
+      with
+      | Error detail -> Error (Channel_gate.Internal detail)
+      | Ok delivery ->
+        Channel_gate.handle_inbound ~dispatch:(dispatch_for_delivery delivery) msg
     in
     Some
       { channel_id
       ; reply_to_thread_ts
       ; keeper_name
       ; attention_event_id
-      ; outcome =
-          Channel_gate.handle_inbound
-            ~dispatch:(dispatch_for_delivery delivery) msg
+      ; outcome
       }
 
 let deliver_inbound ~clock ~base_dir accepted =
@@ -431,8 +423,39 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id
       Slack_observability.Ignored;
     None
 
-let submit_event ?deliver ?team_id ingress ~dispatch_for_delivery ~clock
-    ~base_dir (ev : Gw.slack_event) =
+(* Inbound identity rendering (issue #28376): resolve the author's display
+   label and rewrite [<@U…>] mention escapes before the event reaches the
+   triggered/ambient lanes, so keeper prompts and durable transcripts carry
+   names instead of raw ids. Rendering only — [user_id] stays the identity
+   key everywhere (dedup, speaker_id, continuation channels). Runs after
+   [decode_event], so [mentions_bot] was already detected on the raw wire
+   text. Without a directory (no bot token) events pass through unchanged. *)
+let resolve_event_identity ?user_directory (ev : Gw.slack_event) =
+  match user_directory with
+  | None -> ev
+  | Some directory ->
+    (match ev with
+     | Gw.Message_create ({ user_id; user_name; text; _ } as message) ->
+       let user_name =
+         match user_name with
+         | Some _ as supplied -> supplied
+         | None -> Slack_user_directory.display_label directory ~user_id
+       in
+       Gw.Message_create
+         { message with
+           user_name
+         ; text = Slack_user_directory.rewrite_mentions directory text
+         }
+     | Gw.App_mention ({ text; _ } as mention) ->
+       Gw.App_mention
+         { mention with
+           text = Slack_user_directory.rewrite_mentions directory text
+         }
+     | Gw.Reaction_added _ | Gw.Ignored_event _ -> ev)
+
+let submit_event ?deliver ?team_id ?user_directory ingress ~dispatch_for_delivery
+    ~clock ~base_dir (ev : Gw.slack_event) =
+  let ev = resolve_event_identity ?user_directory ev in
   let submit ~channel_id ~event_id =
     match State.resolve_keeper_for_channel_result ~channel_id with
     | Error reason ->
@@ -629,7 +652,9 @@ let on_ambient ?resolved_keeper_name ?team_id ~base_dir (ev : Gw.slack_event) =
       Slack_observability.Reaction_added
   | Gw.Ignored_event _ -> ()
 
-let submit_ambient_event ?team_id ingress ~base_dir (ev : Gw.slack_event) =
+let submit_ambient_event ?team_id ?user_directory ingress ~base_dir
+    (ev : Gw.slack_event) =
+  let ev = resolve_event_identity ?user_directory ev in
   match ev with
   | Gw.Message_create { channel_id; ts; bot_id = None; _ } -> (
     match State.resolve_keeper_for_channel_result ~channel_id with
@@ -675,6 +700,7 @@ module For_testing = struct
   let submit_ambient_event = submit_ambient_event
   let record_external_attention = record_external_attention
   let mark_attention_resolved = mark_attention_resolved
+  let resolve_event_identity = resolve_event_identity
 end
 
 (* ---------------------------------------------------------------- *)
@@ -706,26 +732,39 @@ let start ~sw ~env ~state =
           without it, [app_mention] events still trigger (a mention by
           construction); only plain-message mention detection on the [message]
           event degrades. *)
-       let bot_user_id, team_id =
+       let bot_user_id, team_id, user_directory =
          match Env_config_slack.bot_token_opt () with
          | None ->
            Log.Server.warn
              "RFC-0317: SLACK_BOT_TOKEN unset; Slack plain-message mention \
               detection disabled (app_mention still triggers)";
-           None, None
-         | Some bot_token -> (
-           match Slack_rest_client.auth_test ~clock ~token:bot_token () with
-           | Ok { user_id; team_id } ->
-             State.record_ready ~bot_user_id:user_id;
-             Log.Server.info "RFC-0317: Slack auth.test ok (bot_user_id=%s)"
-               user_id;
-             Some user_id, team_id
-           | Error e ->
-             Log.Server.warn
-               "RFC-0317: Slack auth.test failed (%s); proceeding without \
-                bot_user_id"
-               (Format.asprintf "%a" Slack_rest_client.pp_error e);
-             None, None)
+           None, None, None
+         | Some bot_token ->
+           (* Inbound identity rendering (issue #28376) shares the bot token:
+              the directory resolves author ids to display labels through
+              users.info, bounded by the same gateway clock. *)
+           let user_directory =
+             Some
+               (Slack_user_directory.create
+                  ~fetch:(fun ~user_id ->
+                    Slack_rest_client.users_info ~clock ~token:bot_token
+                      ~user_id ())
+                  ~now:Unix.gettimeofday
+                    (* NDT-OK: cache-expiry clock only *)
+                  ())
+           in
+           (match Slack_rest_client.auth_test ~clock ~token:bot_token () with
+            | Ok { user_id; team_id } ->
+              State.record_ready ~bot_user_id:user_id;
+              Log.Server.info "RFC-0317: Slack auth.test ok (bot_user_id=%s)"
+                user_id;
+              Some user_id, team_id, user_directory
+            | Error e ->
+              Log.Server.warn
+                "RFC-0317: Slack auth.test failed (%s); proceeding without \
+                 bot_user_id"
+                (Format.asprintf "%a" Slack_rest_client.pp_error e);
+              None, None, user_directory)
        in
        State.set_trigger_policy policy;
        let ingress =
@@ -756,13 +795,14 @@ let start ~sw ~env ~state =
                  ingress
                  ~dispatch_for_delivery:(dispatch_for_config config)
                  ?team_id
+                 ?user_directory
                  ~clock
                  ~base_dir:config.base_path
                  ev)
              ~on_ambient:(fun ev ->
                let config = Mcp_server.workspace_config state in
-               submit_ambient_event ingress ?team_id ~base_dir:config.base_path
-                 ev)
+               submit_ambient_event ingress ?team_id ?user_directory
+                 ~base_dir:config.base_path ev)
              ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e

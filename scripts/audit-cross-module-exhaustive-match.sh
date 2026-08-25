@@ -29,8 +29,8 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 # Modules whose variants have historically broken main when extended.
 # Order matches the issue's "Concrete sites to audit" list.
 MATCH_SOURCES=(
-  'Oas\.Event_bus\.'
-  'Oas\.Error\.'
+  'Agent_core\.Event_bus\.'
+  'Agent_core\.Error\.'
   'Keeper_registry\.'
   'Keeper_types\.'
   ${EXTRA_MATCH_SOURCES:-}

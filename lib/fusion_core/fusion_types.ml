@@ -68,11 +68,10 @@ type panel_failure =
   | Invalid_structured_response of string
   | Empty_response of string
   | Invalid_max_output_tokens of int
+  | Invalid_timeout_s of float
 [@@deriving to_yojson, show, eq]
 
 let panel_failure_of_yojson = function
-  | `String "Timeout" -> Ok Timeout
-  | `String "Empty_response" -> Ok (Empty_response "empty response")
   | `List [ `String "Timeout" ] -> Ok Timeout
   | `List [ `String "Provider_error"; `String detail ] -> Ok (Provider_error detail)
   | `List [ `String "Invalid_structured_response"; `String detail ] ->
@@ -80,6 +79,7 @@ let panel_failure_of_yojson = function
   | `List [ `String "Empty_response"; `String detail ] -> Ok (Empty_response detail)
   | `List [ `String "Invalid_max_output_tokens"; `Int value ] ->
     Ok (Invalid_max_output_tokens value)
+  | `List [ `String "Invalid_timeout_s"; `Float value ] -> Ok (Invalid_timeout_s value)
   | json ->
     Error
       (Printf.sprintf
@@ -219,7 +219,7 @@ type judge_node =
 
 (* 심판(judge) 실패의 닫힌 합. {!panel_failure}와 동형이되 심판 도메인 전용 사유
    ([Empty_result]/[Build_error]/[Parse_error])를 추가한다.
-   [Fusion_judge] 계열이 {!Agent_sdk.Error}의 [Timeout] variant를 match에서 잡아 typed로
+   [Fusion_judge] 계열이 {!Agent_core.Error}의 [Timeout] variant를 match에서 잡아 typed로
    반환하므로, 호출자는 string substring 분류 없이 exhaustive match로 분류한다
    (CLAUDE.md §string-classifier 안티패턴 회피). [panel_failure]를 공유하지 않는 이유는
    mli 주석 참조. *)
@@ -293,18 +293,6 @@ let result_of_yojson ok_of_yojson error_of_yojson = function
          (Yojson.Safe.to_string json))
 ;;
 
-let equal_result equal_ok equal_error left right =
-  match left, right with
-  | Ok left, Ok right -> equal_ok left right
-  | Error left, Error right -> equal_error left right
-  | Ok _, Error _ | Error _, Ok _ -> false
-;;
-
-let pp_result pp_ok pp_error formatter = function
-  | Ok value -> Format.fprintf formatter "(Ok %a)" pp_ok value
-  | Error error -> Format.fprintf formatter "(Error %a)" pp_error error
-;;
-
 type deliberation_evidence =
   { question : string
   ; panel : panel_outcome list
@@ -322,14 +310,6 @@ type fusion_trigger =
   | Operator_requested
   | Harness_eval
 [@@deriving yojson, show, eq]
-
-let trigger_label = function
-  | Explicit_tool_call -> "explicit_tool_call"
-  | Low_confidence -> "low_confidence"
-  | High_stakes _ -> "high_stakes"
-  | Contested_board _ -> "contested_board"
-  | Operator_requested -> "operator_requested"
-  | Harness_eval -> "harness_eval"
 
 type fusion_request =
   { run_id : string

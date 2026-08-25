@@ -1,0 +1,116 @@
+{
+  "schema": "masc.keeper_feature_matrix.librarian_shutdown_evidence.v1",
+  "captured_at": "2026-08-13T16:05:06Z",
+  "source_main_commit": "372edb534d4def1996fa57a1fce9344784e5be45",
+  "canary": "canary-multiturn-codex-20260814-0042",
+  "trace_id": "trace-1786635970987-00001",
+  "runtime_id": "codex_subscription.gpt-5.4",
+  "artifacts": {
+    "current_snapshot": {
+      "path": "/Users/dancer/me/.masc/config/keepers/canary-multiturn-codex-20260814-0042.memory-current.json",
+      "sha256": "d05f29c3048253affe76cc439521c906c0e64f0f756ea38326a8bd4d297c1810",
+      "revision": 3,
+      "updated_at_unix": 1786636122.144292,
+      "fact_count": 3
+    },
+    "journal": {
+      "path": "/Users/dancer/me/.masc/config/keepers/canary-multiturn-codex-20260814-0042.memory-journal.jsonl",
+      "sha256": "7e3f2b6103c3c870c6f34111653226b62c1645e794591986d0f87405bbc62346",
+      "committed_entries": 3,
+      "failed_entries": 1
+    },
+    "exact_lane_registry": {
+      "path": "/Users/dancer/me/.masc/exact-lane-runs-v3.jsonl",
+      "sha256_at_capture": "6983053b7a6d32580fdd11bf9bfa32c15517ea4427e005d48eacf0d977ada34f"
+    }
+  },
+  "successful_librarian_runs": [
+    {
+      "run_id": "librarian-exact-2182bddb995bdeb29ead3385ee0adca5",
+      "turn_ref": "trace-1786635970987-00001#1",
+      "outcome": "succeeded",
+      "elapsed_seconds": 3.890584945678711,
+      "committed_revision": 1
+    },
+    {
+      "run_id": "librarian-exact-3859ec3683254ac8594f063675c23d4a",
+      "turn_ref": "trace-1786635970987-00001#4",
+      "outcome": "succeeded",
+      "elapsed_seconds": 5.937617063522339,
+      "committed_revision": 2
+    },
+    {
+      "run_id": "librarian-exact-830ba749ed6b39a337608840db52960a",
+      "turn_ref": "trace-1786635970987-00001#7",
+      "outcome": "succeeded",
+      "elapsed_seconds": 7.810714960098267,
+      "committed_revision": 3
+    }
+  ],
+  "cancelled_latest_run": {
+    "run_id": "librarian-exact-a7a2373a0f047458e8a85aadfd3f19f1",
+    "turn_ref": "trace-1786635970987-00001#10",
+    "started_at_unix": 1786636159.814652,
+    "outcome": "cancelled",
+    "elapsed_seconds": 106.09707593917847,
+    "message_count": 1,
+    "current_fact_count": 3,
+    "input_contains": [
+      "the final recovery notice goes to Harbor-3",
+      "amber tokens tagged glasswing are quarantined",
+      "the complete cobalt-first and Delta-7 recovery sequence"
+    ],
+    "journal_failure": {
+      "recorded_at_unix": 1786636265.913856,
+      "kind": "lane_cancelled",
+      "snapshot_present": true,
+      "cadence_deferred": false,
+      "detail": "memory os librarian cancelled lane=librarian_exact before commit"
+    }
+  },
+  "shutdown": {
+    "operation_id": "shutdown-70df459e-e092-4334-8006-c2e7ccee0bad",
+    "accepted_log_seq": 53863,
+    "cancelled_log_seq": 53866,
+    "finalized_log_seq": 53871,
+    "remove_meta": false,
+    "remove_session": false,
+    "paused": true
+  },
+  "source_diagnosis": {
+    "post_turn_submission": "Keeper_agent_run_post_turn_memory submits Librarian work asynchronously to the detached per-Keeper memory lane.",
+    "graceful_shutdown_behavior": "Both Keeper keepalive cleanup and explicit shutdown preparation called cancel_and_join_librarian, which requested cancellation before awaiting the lane exit.",
+    "cadence_behavior": "Cancellation leaves the process-local cadence counter due, so a later turn can schedule a new pass.",
+    "input_replay_behavior": "The cancelled immutable input is not durable and is not replayed. Official-client turns construct the next Librarian input from the new assistant message rather than the cancelled turn-10 closure.",
+    "restart_implication": "The prior revision remains readable, but Harbor-3 and glasswing are absent from revision 3. Restart recall of the latest cadence window is therefore not proven and can lose facts that a later assistant message does not repeat."
+  },
+  "remediation_pr": {
+    "number": 28625,
+    "url": "https://github.com/jeong-sik/masc/pull/28625",
+    "source_state_checked_at": "2026-08-13T16:54:23Z",
+    "head": "89b359a1a08452153a44da11fead256f4ffb9c56",
+    "base": "a7f641fa284a72f20d7e41a0616d800e4e0267c8",
+    "draft": true,
+    "ci_state_at_source_check": "in_progress",
+    "scope": "Graceful Keeper lifecycle fences admission, drains and joins current plus retained-latest Librarian work, preserves the exact owner receipt, persists Joining_lanes before stop, and fails closed on incomplete live join replay. Process-root cancellation remains unchanged.",
+    "independent_review": "no_remaining_p0_or_p1_on_rebased_exact_diff"
+  },
+  "verdict": "blocked",
+  "proves": [
+    "The first three cadence passes committed revisions 1 through 3.",
+    "The prior snapshot remained intact when graceful shutdown cancelled the fourth pass.",
+    "The fourth pass contained the latest facts and was cancelled before commit after 106.1 seconds.",
+    "The failed pass is visible in both the exact-lane registry and the Memory journal."
+  ],
+  "does_not_prove": [
+    "The latest cadence window survives graceful Keeper shutdown.",
+    "A later turn replays the exact cancelled Librarian input.",
+    "Memory OS recalls Harbor-3 or the glasswing exception after restart.",
+    "Crash or process-restart preserves unconsumed memory-lane work."
+  ],
+  "required_follow_up": [
+    "Graceful Keeper shutdown must drain and join retained Librarian work instead of cancelling it.",
+    "Exact-head CI must cover current plus retained-latest completion and the explicit shutdown path.",
+    "After deployment, rerun the ten-turn canary, stop it while the final pass is active, and prove the final revision plus restart recall in logs and Dashboard/browser."
+  ]
+}

@@ -22,8 +22,6 @@ type runtime_execution = {
 let next_fail_open_runtime_for_turn =
   Keeper_turn_runtime_budget_routing.next_fail_open_runtime_for_turn
 
-let sdk_error_kind = Keeper_turn_runtime_budget_routing.sdk_error_kind
-
 type degraded_retry_decision =
   | No_degraded_retry
   | Degraded_retry_allowed of EC.degraded_retry
@@ -37,7 +35,7 @@ type 'a degraded_retry_prepare_result =
   | Degraded_retry_setup_failed of {
       retry : EC.degraded_retry;
       reason : string;
-      fail_open_err : Agent_sdk.Error.sdk_error;
+      fail_open_err : Agent_core.Error.t;
     }
 
 type 'a degraded_retry_step =
@@ -45,7 +43,7 @@ type 'a degraded_retry_step =
   | Degraded_retry_step_setup_failed of {
       retry : EC.degraded_retry;
       reason : string;
-      fail_open_err : Agent_sdk.Error.sdk_error;
+      fail_open_err : Agent_core.Error.t;
     }
   | Degraded_retry_step_prepared of {
       retry : EC.degraded_retry;
@@ -54,7 +52,7 @@ type 'a degraded_retry_step =
     }
 
 let empty_degraded_retry_runtime_error =
-  Agent_sdk.Error.Internal "degraded retry selected empty next_runtime"
+  Agent_core.Error.Internal "degraded retry selected empty next_runtime"
 
 let prepare_degraded_retry_allowed
       ~current_runtime_id
@@ -105,7 +103,7 @@ let decide_degraded_retry
     ~(base_runtime : string)
     ~(effective_runtime : string)
     ~(attempted_runtimes : string list)
-    (err : Agent_sdk.Error.sdk_error) : degraded_retry_decision =
+    (err : Agent_core.Error.t) : degraded_retry_decision =
   match
     next_fail_open_runtime_for_turn
       ~base_runtime ~effective_runtime
@@ -195,7 +193,7 @@ let run_direct_no_progress_retry_loop
       ~current_turn_phase_elapsed_ms
       ~now_s
       ~(setup_retry_runtime :
-         string -> (runtime_execution, Agent_sdk.Error.sdk_error) result)
+         string -> (runtime_execution, Agent_core.Error.t) result)
       ~publish_cascade_resolution
       ~emit_runtime_selected
       ~emit_runtime_rotation
@@ -361,9 +359,9 @@ let add_payload_kind =
   Keeper_turn_runtime_budget_event_bus.add_payload_kind
 
 let summarize_turn_event_bus
-    (events : Agent_sdk.Event_bus.event list) : turn_event_bus_summary =
+    (events : Agent_core.Event_bus.event list) : turn_event_bus_summary =
   List.fold_left
-    (fun acc (evt : Agent_sdk.Event_bus.event) ->
+    (fun acc (evt : Agent_core.Event_bus.event) ->
       let correlation_id =
         match acc.correlation_id with
         | Some _ -> acc.correlation_id
@@ -385,7 +383,7 @@ let summarize_turn_event_bus
         event_count = acc.event_count + 1;
         payload_kinds =
           add_payload_kind acc.payload_kinds
-            (Agent_sdk.Event_bus.payload_kind evt.payload);
+            (Agent_core.Event_bus.payload_kind evt.payload);
       })
     empty_turn_event_bus_summary
     events
@@ -393,7 +391,7 @@ let summarize_turn_event_bus
 let turn_event_bus_evidence_detail
     (summary : turn_event_bus_summary) : string =
   Printf.sprintf
-    "oas_event_evidence(events=%d,payload_kinds=[%s])"
+    "agent_core_event_evidence(events=%d,payload_kinds=[%s])"
     summary.event_count
     (String.concat "," summary.payload_kinds)
 
@@ -422,25 +420,25 @@ type capacity_transition =
   | Capacity_non_compacting of capacity_non_compaction
 
 let capacity_transition_of_error
-    (err : Agent_sdk.Error.sdk_error) : capacity_transition =
+    (err : Agent_core.Error.t) : capacity_transition =
   match err with
-  | Agent_sdk.Error.Api (ContextOverflow { limit; _ }) ->
+  | Agent_core.Error.Api (ContextOverflow { limit; _ }) ->
     Capacity_refusal_classified
       (Compaction_trigger.Provider_overflow { limit_tokens = limit })
-  | Agent_sdk.Error.Api
+  | Agent_core.Error.Api
       (InvalidRequest
          { reason = Request_body_too_large { actual_bytes; limit_bytes }; _ })
     ->
     Capacity_refusal_classified
       (Compaction_trigger.Request_body_over_capacity
          { actual_bytes; limit_bytes })
-  | Agent_sdk.Error.Api
+  | Agent_core.Error.Api
       (InvalidRequest
          { reason = Request_body_refused_by_provider { status }; _ })
     ->
     Capacity_refusal_classified
       (Compaction_trigger.Request_body_refused_by_provider { status })
-  | Agent_sdk.Error.Api
+  | Agent_core.Error.Api
       (InputCapacity
          { reason =
              Serving_constraint_rejected
@@ -453,7 +451,7 @@ let capacity_transition_of_error
       (Compaction_trigger.Serving_input_capacity
          (Compaction_trigger.Boundary_unknown
             { input_tokens; accepted_through; rejected_from }))
-  | Agent_sdk.Error.Api
+  | Agent_core.Error.Api
       (InputCapacity
          { reason =
              Serving_constraint_rejected
@@ -466,7 +464,7 @@ let capacity_transition_of_error
       (Compaction_trigger.Serving_input_capacity
          (Compaction_trigger.Input_rejected
             { input_tokens; accepted_through; rejected_from }))
-  | Agent_sdk.Error.Api
+  | Agent_core.Error.Api
       (InputCapacity
          { reason =
              Serving_constraint_rejected
@@ -477,7 +475,7 @@ let capacity_transition_of_error
     ->
     Capacity_non_compacting
       (Serving_evidence_not_yet_valid { now_unix_s; checked_at_unix_s })
-  | Agent_sdk.Error.Api
+  | Agent_core.Error.Api
       (InputCapacity
          { reason =
              Serving_constraint_rejected
@@ -488,31 +486,32 @@ let capacity_transition_of_error
     ->
     Capacity_non_compacting
       (Serving_evidence_expired { now_unix_s; expires_at_unix_s })
-  | Agent_sdk.Error.Api
+  | Agent_core.Error.Api
       (InputCapacity { reason = Token_measurement_unavailable _; _ }) ->
     Capacity_non_compacting Token_measurement_unavailable
-  | Agent_sdk.Error.Api
-      (InvalidRequest { reason = Json_parse_error | Unknown_invalid_request; _ })
-  | Agent_sdk.Error.Api
+  | Agent_core.Error.Api
+      (InvalidRequest
+         { reason = Json_parse_error | Attempt_rejected | Unknown_invalid_request; _ })
+  | Agent_core.Error.Api
       ( RateLimited _ | Overloaded _ | ServerError _ | AuthError _
       | AuthorizationError _ | PaymentRequired _ | NotFound _ | NetworkError _
       | Timeout _ )
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Agent _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.Internal _ ->
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
     Not_capacity
 ;;
 
 (* The two-axis refusal view is a projection of the canonical transition
-   classifier. This keeps one exhaustive SDK-error match while preserving the
+   classifier. This keeps one exhaustive agent-core error match while preserving the
    narrow token/byte API used by existing lifecycle projections. *)
 let capacity_refusal_of_error
-    (err : Agent_sdk.Error.sdk_error) : capacity_refusal option =
+    (err : Agent_core.Error.t) : capacity_refusal option =
   match capacity_transition_of_error err with
   | Capacity_refusal_classified (Compaction_trigger.Provider_overflow { limit_tokens }) ->
     Some (Provider_context_window { limit_tokens })
@@ -535,162 +534,6 @@ let current_keeper_meta ~(config : Workspace.config) ~(fallback_meta : keeper_me
   | Some entry -> entry.meta
   | None -> fallback_meta
 
-type post_turn_resilience_handles = {
-  resilience_audit_store : Shared_audit.Store.t option;
-  resilience_strategy_executor : Resilience.Recovery.strategy_executor option;
-  sync_lifecycle_meta : post_turn_lifecycle -> post_turn_lifecycle;
-}
-
-let resilience_audit_dir
-    ~(config : Workspace.config)
-    ~(keeper_name : string) : string =
-  let masc_root =
-    Common.masc_dir_from_base_path ~base_path:config.base_path
-  in
-  Filename.concat
-    (Filename.concat masc_root "resilience_audit")
-    (Workspace_utils.safe_filename keeper_name)
-
-let short_resilience_detail detail =
-  let detail = String.trim detail in
-  if String.length detail <= 240 then detail
-  else String.sub detail 0 240 ^ "..."
-
-let resilience_execution_event_to_string = function
-  | Resilience.Recovery.RetryAttempt { attempt; max_attempts } ->
-      Printf.sprintf "retry_attempt(%d/%d)" attempt max_attempts
-  | Resilience.Recovery.RetryBackoff { attempt; delay_s; error } ->
-      Printf.sprintf "retry_backoff(attempt=%d,delay_s=%.3f,error=%s)"
-        attempt delay_s (short_resilience_detail error)
-  | Resilience.Recovery.FallbackApply { value } ->
-      Printf.sprintf "fallback_apply(value=%s)" (short_resilience_detail value)
-  | Resilience.Recovery.HandoffRequest { message; preserve_state } ->
-      Printf.sprintf "handoff_request(preserve_state=%b,message=%s)"
-        preserve_state (short_resilience_detail message)
-  | Resilience.Recovery.AbortRun { reason } ->
-      Printf.sprintf "abort_run(reason=%s)"
-        (short_resilience_detail reason)
-
-let make_post_turn_resilience_executor
-    ~(config : Workspace.config)
-    ~(meta : keeper_meta)
-  : Resilience.Recovery.strategy_executor =
-  let record_recovery_failure ~code ~detail =
-    let detail = short_resilience_detail detail in
-    Keeper_registry.set_failure_reason ~base_path:config.base_path meta.name
-      (Some
-         (Keeper_registry.Provider_runtime_error
-            { code; detail; provider_id = None; http_status = None
-            ; runtime_id = None
-            ; reason = None
-            }));
-    Log.Keeper.warn ~keeper_name:meta.name
-      "%s: post-turn resilience strategy failure (code=%s) observed; Keeper \
-       lifecycle remains active: %s"
-      meta.name code detail
-  in
-  let fail_with_observation ~code ~detail =
-    let detail = short_resilience_detail detail in
-    record_recovery_failure ~code ~detail;
-    detail
-  in
-  {
-    Resilience.Recovery.run_retry_attempt =
-      (fun ~attempt ->
-        let detail =
-          Printf.sprintf
-            "post-turn resilience retry attempt %d has no operation-specific \
-             retry callback"
-            attempt
-        in
-        Resilience.Recovery.Fatal_failure
-          (fail_with_observation ~code:"resilience_retry_unbound" ~detail));
-    sleep =
-      (fun delay_s ->
-        if delay_s > 0.0 then
-          match Eio_context.get_clock_opt () with
-          | Some clock -> Eio.Time.sleep clock delay_s
-          | None -> ());
-    on_event =
-      (fun event ->
-        Log.Keeper.warn ~keeper_name:meta.name "post-turn resilience event: %s"
-          (resilience_execution_event_to_string event));
-    apply_fallback =
-      (fun ~value ->
-        let detail =
-          Printf.sprintf
-            "post-turn resilience fallback has no typed target (value=%s)"
-            (short_resilience_detail value)
-        in
-        Error
-          (fail_with_observation ~code:"resilience_fallback_unbound" ~detail));
-    request_handoff =
-      (fun ~message ~preserve_state ->
-        let detail =
-          Printf.sprintf
-            "post-turn resilience handoff requested preserve_state=%b: %s"
-            preserve_state message
-        in
-        record_recovery_failure ~code:"resilience_handoff" ~detail;
-        Ok ());
-    abort =
-      (fun ~reason ->
-        let detail =
-          Printf.sprintf
-            "post-turn resilience abort requested: %s"
-            reason
-        in
-        record_recovery_failure ~code:"resilience_abort" ~detail;
-        Ok ());
-  }
-
-let post_turn_resilience_handles
-    ~(config : Workspace.config)
-    ~(meta : keeper_meta) : post_turn_resilience_handles =
-  let sync_lifecycle_meta lifecycle = lifecycle in
-  if not (Resilience.Keeper_bridge.masc_resilience_enabled ()) then
-    {
-      resilience_audit_store = None;
-      resilience_strategy_executor = None;
-      sync_lifecycle_meta;
-    }
-  else
-    match
-      (try
-         Ok
-           (Shared_audit.Store.create
-              ~base_dir:(resilience_audit_dir ~config ~keeper_name:meta.name))
-       with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn -> Error (Printexc.to_string exn))
-    with
-    | Error detail ->
-        Otel_metric_store.inc_counter Keeper_metrics.(to_string OasExecutionErrors)
-          ~labels:[("keeper", meta.name); ("phase", Keeper_oas_execution_error_phase.(to_label Resilience_audit_store))]
-          ();
-        Log.Keeper.error ~keeper_name:meta.name
-          "resilience audit store unavailable; execution disabled: %s"
-          detail;
-        {
-          resilience_audit_store = None;
-          resilience_strategy_executor = None;
-          sync_lifecycle_meta;
-        }
-    | Ok audit_store ->
-        let executor = make_post_turn_resilience_executor ~config ~meta in
-        {
-          resilience_audit_store = Some audit_store;
-          resilience_strategy_executor = Some executor;
-          sync_lifecycle_meta;
-        }
-
-(* Dedupe "mixed runtime context budget" log: the values are constant
-   per (keeper_name, primary_budget, runtime_budget) because runtime config
-   is static at startup.  Logging per turn produces 15-20 duplicates per
-   keeper per minute under load. Track the same tuple we've already
-   announced and skip subsequent identical log lines. The cache is an
-   immutable [StringMap] under an [Atomic.t] so concurrent turns can update
-   it without an Eio mutex. *)
 let runtime_budget_logged : unit StringMap.t Atomic.t =
   Atomic.make StringMap.empty
 

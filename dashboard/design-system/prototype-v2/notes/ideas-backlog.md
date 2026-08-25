@@ -28,7 +28,7 @@
 | 16 | **IDE 타겟 git** — origin 원격 URL·worktree 경로 표시 | cc-9 (m0160) | ✅(표시) | 헤더에 origin·worktree 노출. 원격 지정·체크아웃·worktree 생성 플로우는 설계 필요 |
 | 17 | **설정 정보구조 재편** — 좌측 카테고리 레일 + 풀폭 콘텐츠. 계정·MCP·런타임관리·경로/Basepath·시스템로그 등 12섹션 | cc-7·8·9 + m0228·m0229 | ✅(동작) | 근거: README의 /mcp·operator역할·masc_*도구·/api/v1게이트·12-FSM·namespace. 전부 로컬 상태 — 실제 저장·집행은 백엔드 필요 (나브에 명시) |
 | 18 | **시스템 Full 로그 + 도구 진행 피드** — 전체 keeper 로그를 레벨·성공/실패로 필터 | m0227·m0228 | ✅(표시) | 설정>관측·로그에 뷰어. 실제 tail -f 스트림·검색·시간범위는 백엔드 연동 필요 |
-| 19 | **keeper 성격·지침 설정** — persona·instructions·모델·런타임·도구권한 편집 | cc-9 (m0227) | ✅(동작) | 채팅 헤더 ⚙ 드로어. 실제 system prompt 반영·재시작 없이 적용은 백엔드 필요 |
+| 19 | **keeper 지침 설정** — instructions·모델·런타임·도구권한 편집 | cc-9 (m0227) | ✅(동작) | 채팅 헤더 ⚙ 드로어. 실제 system prompt 반영·재시작 없이 적용은 백엔드 필요 |
 | 20 | **계정·MCP** — operator 토큰·역할·세션, MCP 엔드포인트·전송·노출 도구 | m0229 | ✅(동작) | 설정에 섹션. 실제 인증·토큰 발급·MCP 서버 제어는 백엔드 필요 |
 | 21 | **room → ns 정정** — room 개념 폐기, namespace(ns)로 통일 | cc-7 (m0222) | ✅(완료) | 헤더·턴 인스펙터에서 room/방/cwd 표현 제거 |
 | 22 | **로스터 명령 메뉴** — 우클릭/⋯ 로 keeper에 직접 명령(대화·일시정지·핸드오프·컴팩션·중지) | cc-4 (m0191) | ✅(동작) | FSM 전이로 실제 연결됨(#25). 명령이 phase를 실제로 바꿈. 실제 런타임 집행은 백엔드 필요 |
@@ -37,7 +37,7 @@
 | 25 | **keeper 12-FSM 실제 전이 + 상태 색 + 모바일 lifecycle** — 일시정지/재개/컴팩션/핸드오프/중지/재시작/시작이 phase를 실제로 변경. 전이 phase(Compacting·Draining·HandingOff·Restarting)는 자동으로 다음 상태로 진행. phase→색(ok/warn/bad/busy+pulse)로 위험(Crashed·Dead·Overflowed·Failing=red)·전이(busy)·정상·정지 구분. 모바일은 헤더 ⋯ 오버플로 메뉴로 동일 명령 노출 | m0267·m0269 | ✅(동작) | keeper 상태를 App state로 리프트, `FSM_ACTIONS`/`PHASE_TONE`/`PHASE_PULSE`(data.jsx). 합법 전이만 노출(가드). 실제 런타임 FSM 집행·영속성은 백엔드 필요 |
 | 26 | **메모리 인스펙터** — keeper별/전체 컨텍스트 구성·핀 고정 사실·장기 메모리 스토어(memory-os)·회상 타임라인·압축 유지/폐기 | m0044 외 | ✅(표시) | 컨텍스트 레일 `메모리 보기` 오버레이. 읽기 전용. 실제 memory-os 연동 필요 |
 | 27 | **예약 자동화 스케줄러** — Keeper가 명시적 시간/이벤트 조건으로 미래 stimulus를 예약하고 due 시 origin lane을 깨움 | m0045 | ✅(동작) | `lib/schedule/` 기반 surface. 선택적 검토는 generic nonblocking Gate를 사용하며 risk class나 operator hierarchy를 만들지 않는다. 실제 schedule runner 집행은 백엔드 |
-| 28 | **런타임 편집기** — provider×model×binding 구조의 config/runtime.toml 편집(라우팅 레인·프로바이더·모델 능력·바인딩·keeper 배정·실시간 toml). 현재 대화 keeper의 multimodal·effort 조정 가능 여부 표시 | m0045·m0071 | ✅(동작) | `lib/runtime/runtime_schema.mli` 기반. 픽션 oas· id를 실제 provider.model로 전면 마이그레이션. 실제 toml 저장·reload는 백엔드 |
+| 28 | **런타임 편집기** — provider×model×binding 구조의 config/runtime.toml 편집(라우팅 레인·프로바이더·모델 능력·바인딩·keeper 배정·실시간 toml). 현재 대화 keeper의 multimodal·effort 조정 가능 여부 표시 | m0045·m0071 | ✅(동작) | `lib/runtime/runtime_schema.mli` 기반. 픽션 agentCore· id를 실제 provider.model로 전면 마이그레이션. 실제 toml 저장·reload는 백엔드 |
 | 29 | **Slash command 팔레트** — composer에서 `/`로 keeper 명령(FSM 라이프사이클) + 화면 이동(작업·승인·예약·로그). ↑↓ 탐색, Enter/Tab 실행 | m0154 | ✅(동작) | FSM_ACTIONS 동적 연결 → phase 실제 변경. 화면 이동은 navTo |
 | 30 | **이메일 통합 + 메모 통합** — keeper가 이메일을 인입 맥락/발신 채널로 사용, operator 메모(노트) 작성·고정·keeper 컨텍스트 주입 | m0171 | 💡 | 아이디어. 이메일=#3 다중 surface 인입의 한 채널로 편입 가능(provenance 칩 재사용). 메모=#26 메모리 스토어의 operator 수동 핀과 통합 여지. 별도 설계 필요 |
 

@@ -169,17 +169,7 @@ let observe_task_transition_event
        | Masc_domain.Release | Masc_domain.Submit_for_verification -> ())
    with
    | Stdlib.Effect.Unhandled _ as exn ->
-     warn_telemetry_drop ~event:(Task_transition transition) exn);
-  try
-    Keeper_accountability.record_task_transition
-      config
-      ~agent_name
-      ~task_id
-      ~transition
-      ~details
-  with
-  | Stdlib.Effect.Unhandled _ as exn ->
-    warn_telemetry_drop ~event:(Accountability transition) exn
+     warn_telemetry_drop ~event:(Task_transition transition) exn)
 ;;
 
 let record_workspace_broadcast ~msg_type ~elapsed_s =
@@ -267,7 +257,6 @@ let install () =
   Atomic.set Workspace_hooks.observe_agent_lifecycle_fn (fun config ~agent_id ~event ~details ->
     observe_agent_lifecycle config ~agent_id ~event ~details);
   Atomic.set Workspace_hooks.observe_task_transition_fn (fun config ~agent_name ~task_id ~transition ~details ->
-    (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
     observe_task_transition_event config ~agent_name ~task_id ~transition ~details);
 
   Atomic.set Workspace_hooks.activity_emit_fn (fun config ~actor ?subject ~kind ~payload ~tags () ->
@@ -314,13 +303,13 @@ let install () =
 
   Atomic.set Task.Anti_rationalization.outcome_observer_fn record_anti_rationalization_outcome;
 
-  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path ?sw ~evaluator_runtime ~prompt ~report_tool_schema ~lookup () ->
+  Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ~base_path ?sw ~evaluator_runtime ~prompt ~report_tool_schema ~lookup ~on_tool_result ~on_runtime_attempt_error () ->
     let verdict_ref = ref None in
     let protocol_error_ref = ref None in
     let lookup_schemas, lookup_dispatch =
       match (lookup : Task.Anti_rationalization.lookup_surface) with
       | No_lookup_surface -> [], None
-      | Lookup_tools { schemas; dispatch } -> schemas, Some dispatch
+      | Lookup_tools { schemas; dispatch; _ } -> schemas, Some dispatch
     in
     (* The verdict tool and the lookup tools share one dispatch entry point, so
        the name decides which surface answers. A name belonging to neither is an
@@ -329,7 +318,10 @@ let install () =
       let start_time = Time_compat.now () in
       match lookup_dispatch with
       | None ->
-        Tool_result.error ~tool_name:name ~start_time
+        Tool_result.error
+          ~failure_class:Tool_result.Workflow_rejection
+          ~tool_name:name
+          ~start_time
           (Printf.sprintf
              "unknown tool %s; this review offers only %s"
              name
@@ -337,11 +329,16 @@ let install () =
       | Some dispatch ->
         (match dispatch ~name ~args with
          | Ok output -> Tool_result.ok ~tool_name:name ~start_time output
-         | Error detail -> Tool_result.error ~tool_name:name ~start_time detail)
+         | Error detail ->
+           Tool_result.error
+             ~failure_class:Tool_result.Runtime_failure
+             ~tool_name:name
+             ~start_time
+             detail)
     in
     let dispatch_verdict ~name ~args =
       let start_time = Time_compat.now () in
-      match !verdict_ref with
+      let result = match !verdict_ref with
       | Some verdict ->
         let detail =
           Printf.sprintf
@@ -350,6 +347,7 @@ let install () =
         in
         protocol_error_ref := Some detail;
         Tool_result.error
+          ~failure_class:Tool_result.Workflow_rejection
           ~tool_name:name
           ~start_time
           detail
@@ -369,14 +367,21 @@ let install () =
              "[anti-rationalization] structured verdict parse failed: %s"
              msg;
            Tool_result.error
+             ~failure_class:Tool_result.Workflow_rejection
              ~tool_name:name
              ~start_time
              (Printf.sprintf "Invalid verdict format: %s" msg))
+      in
+      result
     in
     let dispatch ~name ~args =
-      if String.equal name report_tool_schema.Masc_domain.name
-      then dispatch_verdict ~name ~args
-      else dispatch_lookup ~name ~args
+      let result =
+        if String.equal name report_tool_schema.Masc_domain.name
+        then dispatch_verdict ~name ~args
+        else dispatch_lookup ~name ~args
+      in
+      on_tool_result ~input:args result;
+      result
     in
     let apply_review_verdict_output_contract provider_cfg =
       Ok
@@ -384,7 +389,7 @@ let install () =
            provider_cfg)
     in
     match
-      Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Anti_rationalization (fun () ->
+      Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Anti_rationalization (fun () ->
         Keeper_turn_driver_wrappers.run_named_with_masc_tools
           ~runtime_id:evaluator_runtime
           ~base_path
@@ -392,6 +397,7 @@ let install () =
           ~masc_tools:(report_tool_schema :: lookup_schemas)
           ~dispatch
           ~provider_config_transform:apply_review_verdict_output_contract
+          ~on_runtime_attempt_error
           ?sw
           ())
     with
@@ -399,7 +405,7 @@ let install () =
       (match !protocol_error_ref with
        | Some detail ->
          Error
-           (Agent_sdk.Error.Internal
+           (Agent_core.Error.Internal
               ("task completion verdict protocol violation: " ^ detail))
        | None -> Ok !verdict_ref)
     | Error err ->
@@ -478,58 +484,11 @@ let install () =
        let cancellation_degraded =
          deliver_task_cancellation config ~agent_name ~task_id
        in
-       let goal_delivery =
-         match
-           Keeper_goal_reconciliation_wake.enqueue_if_ready
-             ~config
-             ~completing_agent_name:agent_name
-             ~task_id
-         with
-         | Keeper_goal_reconciliation_wake.Not_ready
-         | Keeper_goal_reconciliation_wake.Enqueued _
-         | Keeper_goal_reconciliation_wake.Already_present _ -> None
-         | Keeper_goal_reconciliation_wake.Backlog_read_failed { detail } ->
-           Some { degraded_kind = "backlog_read_failed"; degraded_detail = detail }
-         | Keeper_goal_reconciliation_wake.No_keeper_target { goal_id } ->
-           Some
-             { degraded_kind = "no_keeper_target"
-             ; degraded_detail = "goal_id=" ^ goal_id
-             }
-         | Keeper_goal_reconciliation_wake.Keeper_target_lookup_failed
-             { goal_id; detail } ->
-           Some
-             { degraded_kind = "keeper_target_lookup_failed"
-             ; degraded_detail = Printf.sprintf "goal_id=%s: %s" goal_id detail
-             }
-         | Keeper_goal_reconciliation_wake.Enqueue_failed
-             { goal_id; keeper_name; detail } ->
-           Some
-             { degraded_kind = "storage_error"
-             ; degraded_detail =
-                 Printf.sprintf "keeper=%s goal_id=%s: %s" keeper_name goal_id detail
-             }
-       in
-       match cancellation_degraded, goal_delivery with
-       | None, None -> Workspace_hooks.Task_terminal_delivered
-       | Some degraded, None | None, Some degraded ->
+       match cancellation_degraded with
+       | None -> Workspace_hooks.Task_terminal_delivered
+       | Some degraded ->
          Workspace_hooks.Task_terminal_delivery_degraded
-           { kind = degraded.degraded_kind; detail = degraded.degraded_detail }
-       | Some cancellation, Some goal ->
-         (* Both paths degraded. Reporting one would hide the other, and the
-            result type carries a single record, so the kinds and details are
-            joined rather than picked between. *)
-         Workspace_hooks.Task_terminal_delivery_degraded
-           { kind =
-               Printf.sprintf
-                 "%s+%s"
-                 cancellation.degraded_kind
-                 goal.degraded_kind
-           ; detail =
-               Printf.sprintf
-                 "%s; %s"
-                 cancellation.degraded_detail
-                 goal.degraded_detail
-           });
+           { kind = degraded.degraded_kind; detail = degraded.degraded_detail });
 
   Atomic.set Workspace_hooks.verification_submit_request_fn
     (fun config ~task ~assignee ~verification_id ~evidence_refs ->

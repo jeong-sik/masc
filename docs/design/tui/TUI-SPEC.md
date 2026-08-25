@@ -1,13 +1,5 @@
 ---
 status: draft
-last_verified: 2026-06-26
-code_refs:
-  - bin/masc_tui.ml
-  - bin/masc_tui_types.ml
-  - bin/masc_tui_render.ml
-  - bin/masc_tui_loader.ml
-  - docs/TUI-GUIDE.md
-  - docs/design/tui/TUI-ROADMAP.md
 ---
 
 # MASC TUI Spec & Design Draft
@@ -58,7 +50,17 @@ MASC TUI를 Dashboard V2 surface 기준으로 확장하여, 웹 대시보드 없
 +------------------+
 ```
 
-### 2.1 확장된 view enum (제안)
+### 2.1 Render scheduling
+
+The main loop requests a frame only for typed input, an applied background
+result/refresh, or a terminal resize. A monotonic 16 ms frame window coalesces
+background bursts; input can preempt an already pending background frame, and a
+resize forces one frame. With no state change the renderer performs no work and
+writes no terminal output. Terminal dimensions are probed once, cached, and
+invalidated by `SIGWINCH`; the signal handler only sets an atomic flag and the
+main fiber performs the later process-backed probe.
+
+### 2.2 Surface enum
 
 ```ocaml
 type surface =
@@ -69,17 +71,22 @@ type surface =
   | Planning
 ```
 
-기존 `view_mode` (Dashboard | Keeper_list | Keeper_detail | Keeper_logs | Keeper_message)은 keepers surface 내부 상태로 재편된다.
+`bin/masc_tui_types.ml` 의 `type surface` 가 위 모양 그대로 구현돼 있다. 옛 `view_mode` 의
+`Keeper_list | Keeper_detail | Keeper_logs | Keeper_message` 는 keepers surface 안쪽 상태로
+들어갔고, `Dashboard` 는 surface 로도 렌더러로도 남지 않았다.
 
-### 2.2 데이터 로더 전략
+### 2.3 데이터 로더 전략
 
 | 소스 | 우선순위 | 사용 시나리오 |
 |---|---|---|
 | `.masc/` 파일시스템 | 기본 (serverless) | agent, task, keeper, board JSONL 등 정적/준정적 데이터 |
-| HTTP `/api/v1/dashboard/*` | 서버 실행 시 | overview, monitoring, approvals, operator action 등 |
+| HTTP `/api/v1/dashboard/*` | 서버 실행 시 | overview, monitoring, planning 등 |
+| HTTP `/api/v1/operator` | 서버 실행 시 | actor-scoped approvals와 operator action |
 | HTTP `/api/v1/*` | 필요 시 | board, keepers, tasks 등 |
 
-로더는 HTTP API 실패/미가용 시 파일시스템 폴백을 시도할 수 있다.
+각 surface는 독립적으로 성공/실패를 반영한다. 특히 Approvals는 권한과 actor
+scope가 결합된 서버 계약이므로 파일시스템이나 briefing을 대체 소스로 사용하지 않고,
+응답이 없거나 계약이 다르면 큐 대신 명시적 오류를 표시한다.
 
 ## 3. 데이터 소스
 
@@ -88,9 +95,10 @@ type surface =
 | 데이터 | 경로 |
 |---|---|
 | agents | `.masc/agents/*.json` |
-| tasks | `.masc/tasks/*.json` |
+| tasks | `.masc/tasks/backlog.json` |
 | keepers | `.masc/keepers/*.json` |
-| keeper metrics | `.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl` |
+| keeper metrics | `.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl` (`keeper.metrics.v1` Turn/Heartbeat) |
+| keeper context | `.masc/keepers/<name>/turn-records/YYYY-MM/DD.jsonl` (strict newest trace-matched TurnRecord) |
 | board posts | `.masc/board_posts.jsonl` |
 | board comments | `.masc/board_comments.jsonl` |
 | board votes | `.masc/board_votes.jsonl` |
@@ -117,6 +125,7 @@ type surface =
 | `GET /api/v1/verification/requests` | Verification queue |
 | `GET /api/v1/verification/summary` | Verification summary |
 | `GET /api/v1/operator/digest` | Operator digest |
+| `GET /api/v1/operator?view=summary&include_messages=0&include_keepers=0` | Actor-scoped approval queue |
 | `POST /api/v1/operator/confirm` | Confirm approval |
 | `POST /api/v1/operator/action` | Operator action |
 | `GET /api/v1/gate/connectors` | Connector status |
@@ -153,10 +162,18 @@ type surface =
 
 ### 4.3 Keepers Surface (기존 유지 + 강화)
 
+렌더 출력은 고정 viewport frame을 행 단위로 비교한다. 첫 frame, surface
+전환, SIGWINCH, geometry 변경, 외부 terminal write 뒤에는 전체 repaint하고,
+그 외에는 바뀌거나 사라진 행만 절대 cursor 주소와 `EL2`로 다시 쓴다. 비어
+있지 않은 patch는 한 번의 write/flush로 보내며 CSI 2026은 선택적 atomic
+display envelope일 뿐 correctness 조건이 아니다. 종료 signal과 job-control
+suspend는 cursor/autowrap/termios를 복구하고, resume 시 raw mode 재진입 뒤
+강제 repaint한다.
+
 - List: name, generation, runtime lane, composite phase, goal
 - Detail: identity, live context, runtime lane, runtime stats, behavior, timestamps
-- Logs: metrics JSONL tail
-- Message: chat stream
+- Logs: strict newest-200 physical-row tail across dated months/rotations; malformed, invalid current-schema, cross-Keeper identity mismatches, and storage failures remain explicit. Valid Turn/Heartbeat rows stay chronological, and context occupancy is not a metrics-ledger field.
+- Message: request-correlated asynchronous chat stream. The TUI creates one durable UUIDv7 request ID per send, accepts only the current Keeper SSE contract, and applies a completion only when both request and Keeper identities match. Partial text, interrupted streams, and terminal outcomes without a visible reply are explicit status/error values rather than successful replies.
 
 강화: 24h bucket 요약, tool call 카운트, composite phase (`Stable <- paused`)
 
@@ -181,11 +198,11 @@ type surface =
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Approvals  (2 pending)                                       │
+│ Approvals  (2/5, hidden 3, actor masc-tui)                   │
 ├─────────────────────────────────────────────────────────────┤
-│ > keeper alpha requests tool_call: shell_exec               │
-│   reason: run tests for PR #12345                           │
-│   [y] confirm  [n] deny  [d] details                        │
+│ > namespace_pause on workspace (masc_pause)                 │
+│   trace=ops_…  created=…  expires=…  payload={…}            │
+│   [y][y] confirm  [n][n] deny                               │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -240,9 +257,14 @@ type surface =
 
 | 키 | 동작 |
 |---|---|
-| `y` | confirm |
-| `n` | deny |
-| `d` | details |
+| `y` 두 번 | 선택한 token confirm |
+| `n` 두 번 | 선택한 token deny |
+
+다른 키, surface 이동, 요청 완료는 준비된 두 번째 키를 해제한다. 요청 중에는
+다음 승인을 준비할 수 없다. POST 응답의 token/decision/trace/tool/action 계약을
+검증한 뒤 같은 actor scope를 다시 읽으며, 오래된 refresh generation은 폐기한다.
+identity가 일치하는 `status=error`는 confirmation 수락 후 action 실행 실패로,
+전송/계약 오류는 결과 불확정으로 표시하며 둘 다 큐를 다시 읽어 사실을 갱신한다.
 
 ## 6. 상태 모델
 
@@ -259,7 +281,10 @@ type tui_state = {
   overview: overview_snapshot option;
   board_posts: board_post list;
   board_selected_post: Post_id.t option;
-  approvals: approval_item list;
+  approval_snapshot: approval_snapshot option;
+  approvals_error: string option;
+  approval_flow: approval_flow;
+  pending_approval_action: pending_approval_action option;
   planning: goal_tree option;
 
   (* keepers (기존) *)
@@ -269,10 +294,16 @@ type tui_state = {
   log_entries: log_entry list;
   log_scroll: int;
   msg_input: Buffer.t;
+  msg_target_keeper_name: string option;
+  msg_drafts: (string * string) list;
   msg_history: msg_entry list;
+  msg_inflight: keeper_chat_request option;
+  msg_unverified: keeper_chat_request option;
   ...
 }
 ```
+
+`msg_entry` carries a typed role plus Keeper and request identities. Sending runs on a cancellable background fiber and completion is returned through the UI mailbox; a stale completion cannot clear or overwrite a newer request. Selection survives roster refresh by Keeper identity and drafts are owned per Keeper. A transport cut cannot prove whether durable acceptance occurred, so the TUI retains the original request as `msg_unverified`, blocks fresh-ID submission, and uses `Ctrl-R` to poll `/api/v1/keepers/<name>/chat/operations/<request_id>` until its exact durable state settles. Recovery never issues a second chat POST or mints a new ID. The current initial-send transport buffers the SSE body before strict terminal decoding, so token-level incremental painting remains a follow-up transport/performance item.
 
 ## 7. 단계별 구현 계획
 
@@ -317,7 +348,7 @@ type tui_state = {
 
 | Risk | Mitigation |
 |---|---|
-| HTTP API 의존 시 서버 미실행으로 기능 제한 | 파일시스템 폴백 + `connection_status` 명시 |
+| HTTP API 의존 시 서버 미실행으로 기능 제한 | surface별 오류와 `connection_status`를 명시하고 권한 surface는 fail closed |
 | 터미널 크기 제한으로 정보 밀도 과다 | fold/unfold, scroll, section collapse 지원 |
 | 쓰기 작업(confirm/action) 실수 | confirm dialog (`y` 두 번 누르기 등) 추가 |
 | ANSI 호환성 문제 | `NO_COLOR` 환경 변수 존중, plain-text fallback |
@@ -327,6 +358,7 @@ type tui_state = {
 
 - P0 surface 중 **첫 번째 prototype**으로 어떤 것을 선택할 것인가?
 - WebSocket/SSE 실시간 업데이트를 TUI에서 수용할 것인가, 아니면 폴링만 할 것인가?
-- TUI에서의 **인증 흐름**: `ensureDevToken`을 어떻게 처리할 것인가?
-- 쓰기 작업의 **권한/안전성**: operator action/confirm은 누구나 가능한가?
+- TUI 인증은 `MASC_TOKEN` Bearer identity를 우선하고, 없으면 GET/POST 모두
+  `X-MASC-Agent: masc-tui` actor를 사용한다. 서버가 승인한 동일 actor만 자신의
+  pending confirmation을 조회하고 처리할 수 있다.
 - Overview의 briefing은 `/api/v1/dashboard/briefing/sections`(LLM 생성)을 사용할 것인가, 아니면 light 요약만 할 것인가?

@@ -1,24 +1,10 @@
 module Metrics = Llm_provider.Metrics
 
 let http_status_metric = Otel_metric_store.metric_llm_provider_http_status
-let fallback_triggered_metric = Otel_metric_store.metric_fallback_triggered
-
 let provider_cache : (string, string) Hashtbl.t = Hashtbl.create 64
 let provider_cache_mu = Stdlib.Mutex.create ()
 
 let with_provider_cache_lock f = Stdlib.Mutex.protect provider_cache_mu f
-;;
-
-let contains_substring haystack needle =
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else
-    let rec loop i =
-      i + needle_len <= haystack_len
-      && (String.equal (String.sub haystack i needle_len) needle || loop (i + 1))
-    in
-    loop 0
 ;;
 
 let note_provider ~model_id ~provider =
@@ -234,20 +220,8 @@ let emit_request_start ~model_id =
     ~labels:(model_labels ~model_id)
 ;;
 
-let error_reason error =
-  let error = String.lowercase_ascii error in
-  if contains_substring error "429" || contains_substring error "rate limit"
-  then "rate_limit"
-  else if
-    contains_substring error "timeout"
-    || contains_substring error "timed out"
-    || contains_substring error "deadline"
-  then "timeout"
-  else "unknown"
-;;
-
-let emit_error ~model_id ~error =
-  let reason = error_reason error in
+let emit_error ~model_id ~message ~reason =
+  let reason = Metrics.error_reason_to_string reason in
   let provider = genai_provider_for_model ~model_id in
   inc_counter
     Otel_metric_store.metric_llm_provider_errors
@@ -256,7 +230,7 @@ let emit_error ~model_id ~error =
     Otel_metric_store.metric_llm_provider_errors_by_reason
     ~labels:[ ("model", model_id); ("error_reason", reason) ];
   Otel_spans.record_error
-    ~message:error
+    ~message
     ~error_type:reason
     ~attrs:
       [ Otel_genai.Attr_key.gen_ai_operation_name, `String genai_operation_name
@@ -390,10 +364,6 @@ let emit_streaming_chunk ~provider ~model_id ~chunk_index ~inter_chunk_ms =
            ; "masc.gen_ai.streaming.inter_chunk_ms", `Float inter_chunk_ms
            ])
       ()
-;;
-
-let emit_fallback_triggered ~kind ~detail =
-  inc_counter fallback_triggered_metric ~labels:[ ("kind", kind); ("detail", detail) ]
 ;;
 
 let make_sink () : Metrics.t =

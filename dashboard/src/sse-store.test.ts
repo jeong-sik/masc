@@ -1,10 +1,6 @@
 import { signal } from '@preact/signals'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BoardPost, BoardSortMode, RouteState } from './types'
-import {
-  DASHBOARD_PUSH_SLICES,
-  type DashboardPushSlice,
-} from './dashboard-slices'
 
 void vi
 
@@ -33,20 +29,22 @@ const invalidateDashboardCache = vi.fn<() => void>(() => {})
 const hydrateBoardSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const hydrateShellSnapshot = vi.fn<(payload: unknown, opts?: unknown) => void>(() => {})
 const hydrateExecutionSnapshot = vi.fn<(payload: unknown) => void>(() => {})
+const invalidateExecutionSnapshotGeneration = vi.fn<(epoch: string, generation: number) => boolean>(() => true)
+const resetExecutionSnapshotGeneration = vi.fn<() => void>(() => {})
 const hydratePlanningSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const removeBoardPost = vi.fn<(postId?: string) => void>(() => {})
 const refreshForRoute = vi.fn<(nextRoute: CurrentRoute) => void>()
 const requestNamespaceTruthNow = vi.fn<() => void>()
 const requestNamespaceTruth = vi.fn<() => void>()
 const showToast = vi.fn<(message: string, kind?: string, durationMs?: number) => void>()
-const replayOasRuntimeTelemetry = vi.fn<() => Promise<void>>(async () => {})
-const hydrateOasTelemetrySample = vi.fn<(event: unknown) => void>()
+const replayAgentCoreRuntimeTelemetry = vi.fn<() => Promise<void>>(async () => {})
+const hydrateAgentCoreTelemetrySample = vi.fn<(event: unknown) => void>()
 const compositeTick = signal({ name: '', ts_unix: 0 })
 const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
 const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
+const hydrateTransportHealthFromSSE = vi.fn<(payload: unknown) => void>()
 const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown, blocks?: unknown) => void>()
 const refreshActiveKeeperChatHistory = vi.fn<(opts?: { force?: boolean }) => void>()
-const reconcileKeeperChatReceipts = vi.fn<(name: string) => Promise<void>>(async () => {})
 
 async function flushAsyncWork(): Promise<void> {
   await vi.dynamicImportSettled()
@@ -63,6 +61,8 @@ async function loadSseStore() {
     hydrateBoardSnapshot,
     hydrateShellSnapshot,
     hydrateExecutionSnapshot,
+    invalidateExecutionSnapshotGeneration,
+    resetExecutionSnapshotGeneration,
     hydratePlanningSnapshot,
     refreshDashboard,
     refreshExecution,
@@ -87,12 +87,12 @@ async function loadSseStore() {
   }))
   vi.doMock('./tab-refresh', () => ({ refreshForRoute }))
   vi.doMock('./components/common/toast', () => ({ showToast }))
-  vi.doMock('./oas-runtime-store', () => ({
-    replayOasRuntimeTelemetry,
-    applyOasRuntimeEvent: vi.fn(),
+  vi.doMock('./agent-core-runtime-store', () => ({
+    replayAgentCoreRuntimeTelemetry,
+    applyAgentCoreRuntimeEvent: vi.fn(),
   }))
-  vi.doMock('./oas-telemetry-store', () => ({
-    hydrateOasTelemetrySample,
+  vi.doMock('./agent-core-telemetry-store', () => ({
+    hydrateAgentCoreTelemetrySample,
   }))
   vi.doMock('./composite-signals', () => ({
     compositeTick,
@@ -101,15 +101,18 @@ async function loadSseStore() {
   vi.doMock('./goal-tree-state', () => ({
     hydrateGoalTreeSnapshot,
   }))
+  vi.doMock('./components/transport-health', () => ({
+    hydrateTransportHealthFromSSE,
+  }))
   vi.doMock('./keeper-runtime', () => ({
     noteKeeperChatAppended,
-    reconcileKeeperChatReceipts,
     refreshActiveKeeperChatHistory,
   }))
   vi.doMock('./router', () => ({ route }))
   const sseStore = await import('./sse-store')
+  const operatorSignals = await import('./operator-signals')
   const wsState = await import('./dashboard-ws-state')
-  return { sseStore, wsState, compositeTick }
+  return { sseStore, wsState, compositeTick, operatorSignals }
 }
 
 describe('setupServerPushReaction reconnect hydration', () => {
@@ -127,18 +130,18 @@ describe('setupServerPushReaction reconnect hydration', () => {
     hydrateBoardSnapshot.mockClear()
     hydrateShellSnapshot.mockClear()
     hydrateExecutionSnapshot.mockClear()
+    invalidateExecutionSnapshotGeneration.mockClear()
+    resetExecutionSnapshotGeneration.mockClear()
     hydratePlanningSnapshot.mockClear()
     removeBoardPost.mockClear()
     refreshForRoute.mockClear()
     requestNamespaceTruthNow.mockClear()
     requestNamespaceTruth.mockClear()
     showToast.mockClear()
-    replayOasRuntimeTelemetry.mockClear()
-    replayOasRuntimeTelemetry.mockResolvedValue(undefined)
-    hydrateOasTelemetrySample.mockClear()
+    replayAgentCoreRuntimeTelemetry.mockClear()
+    replayAgentCoreRuntimeTelemetry.mockResolvedValue(undefined)
+    hydrateAgentCoreTelemetrySample.mockClear()
     refreshActiveKeeperChatHistory.mockReset()
-    reconcileKeeperChatReceipts.mockReset()
-    reconcileKeeperChatReceipts.mockResolvedValue(undefined)
     hydrateFleetCompositeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockReturnValue(true)
@@ -163,8 +166,8 @@ describe('setupServerPushReaction reconnect hydration', () => {
     vi.doUnmock('./namespace-truth-store')
     vi.doUnmock('./tab-refresh')
     vi.doUnmock('./components/common/toast')
-    vi.doUnmock('./oas-runtime-store')
-    vi.doUnmock('./oas-telemetry-store')
+    vi.doUnmock('./agent-core-runtime-store')
+    vi.doUnmock('./agent-core-telemetry-store')
     vi.doUnmock('./composite-signals')
     vi.doUnmock('./goal-tree-state')
     vi.doUnmock('./router')
@@ -180,8 +183,10 @@ describe('setupServerPushReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(showToast).toHaveBeenCalled()
-    expect(replayOasRuntimeTelemetry).toHaveBeenCalledTimes(1)
+    expect(replayAgentCoreRuntimeTelemetry).toHaveBeenCalledTimes(1)
     expect(requestNamespaceTruthNow).toHaveBeenCalledTimes(1)
+    expect(resetExecutionSnapshotGeneration).toHaveBeenCalledTimes(1)
+    expect(refreshExecution).toHaveBeenCalledWith({ force: true })
     expect(refreshDashboard).toHaveBeenCalledWith({ force: true })
 
     vi.clearAllTimers()
@@ -267,6 +272,83 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshGate).toHaveBeenCalledWith({ force: true })
   })
 
+  it('projects a failed approval audit receipt from SSE without changing the committed event', async () => {
+    const { sseStore } = await loadSseStore()
+    const observe = vi.fn()
+    sseStore.registerGateAuditReceiptObserver(observe)
+
+    sseStore.routeServerPushEvent({
+      type: 'approval:resolved',
+      payload: {
+        id: 'appr-sse-audit',
+        audit: {
+          event: 'resolved',
+          recorded: false,
+          stage: 'append',
+          detail: 'audit append unavailable',
+        },
+      },
+    })
+
+    expect(observe).toHaveBeenCalledWith(
+      [{
+        event: 'resolved',
+        recorded: false,
+        stage: 'append',
+        detail: 'audit append unavailable',
+      }],
+      { id: 'appr-sse-audit', transport: 'sse' },
+    )
+  })
+
+  it('projects a failed authorization audit receipt without refreshing Gate state', async () => {
+    const { sseStore } = await loadSseStore()
+    const observe = vi.fn()
+    const refreshGate = vi.fn<(opts?: { force?: boolean }) => void>()
+    sseStore.registerGateAuditReceiptObserver(observe)
+    sseStore.registerGateRefresh(refreshGate)
+
+    sseStore.routeServerPushEvent({
+      type: 'approval:audit',
+      payload: {
+        id: 'appr-consumed',
+        audit: {
+          event: 'grant_consumed',
+          recorded: false,
+          stage: 'append',
+          detail: 'audit append unavailable',
+        },
+      },
+    })
+
+    expect(observe).toHaveBeenCalledWith(
+      [{
+        event: 'grant_consumed',
+        recorded: false,
+        stage: 'append',
+        detail: 'audit append unavailable',
+      }],
+      { id: 'appr-consumed', transport: 'sse' },
+    )
+    expect(refreshGate).not.toHaveBeenCalled()
+  })
+
+  it('rejects an audit receipt that does not match its SSE envelope', async () => {
+    const { sseStore } = await loadSseStore()
+    const observe = vi.fn()
+    sseStore.registerGateAuditReceiptObserver(observe)
+
+    sseStore.routeServerPushEvent({
+      type: 'approval:pending',
+      payload: {
+        id: 'appr-mismatch',
+        audit: { event: 'resolved', recorded: true },
+      },
+    })
+
+    expect(observe).not.toHaveBeenCalled()
+  })
+
   it('routes an approval:summary_updated SSE event to the Gate refresh (Auto Judge verdict contract)', async () => {
     const { sseStore } = await loadSseStore()
     const refreshGate = vi.fn<(opts?: { force?: boolean }) => void>()
@@ -310,6 +392,92 @@ describe('setupServerPushReaction reconnect hydration', () => {
 
   })
 
+  it('clears operator state when a pushed snapshot violates the envelope contract', async () => {
+    const { sseStore, operatorSignals } = await loadSseStore()
+    operatorSignals.operatorSnapshot.value = {
+      root: {},
+      keepers: [],
+      inference_inflight: null,
+      persistent_agents: [],
+      recent_messages: [],
+      pending_confirm_envelope: {
+        items: [],
+        summary: {
+          actor_filter: null,
+          filter_active: false,
+          visible_count: 0,
+          total_count: 0,
+          hidden_count: 0,
+          hidden_actors: [],
+          confirm_required_actions: [],
+        },
+      },
+      available_actions: [],
+    }
+
+    sseStore.hydrateDashboardSlice('operator', {
+      keepers: [],
+      snapshot_epoch: 'epoch-invalid-envelope',
+      snapshot_generation: 1,
+      snapshot_compute_sequence: 1,
+      snapshot_terminal_sequence: 1,
+    }, 'operator_snapshot')
+
+    expect(operatorSignals.operatorSnapshot.value).toBeNull()
+    expect(operatorSignals.operatorError.value).toBe('invalid pending_confirm_envelope')
+
+    sseStore.hydrateDashboardSlice('operator', {
+      snapshot_epoch: 'epoch-recovered',
+      snapshot_generation: 1,
+      snapshot_compute_sequence: 2,
+      snapshot_terminal_sequence: 2,
+      pending_confirm_envelope: {
+        items: [],
+        summary: {
+          actor_filter: null,
+          filter_active: false,
+          visible_count: 0,
+          total_count: 0,
+          hidden_count: 0,
+          hidden_actors: [],
+          confirm_required_actions: [],
+        },
+      },
+    }, 'operator_snapshot')
+
+    expect(operatorSignals.operatorSnapshot.value).not.toBeNull()
+    expect(operatorSignals.operatorError.value).toBeNull()
+  })
+
+  it('clears operator state when the pushed snapshot payload is not an object', async () => {
+    const { sseStore, operatorSignals } = await loadSseStore()
+    operatorSignals.operatorSnapshot.value = {
+      root: {},
+      keepers: [],
+      inference_inflight: null,
+      persistent_agents: [],
+      recent_messages: [],
+      pending_confirm_envelope: {
+        items: [],
+        summary: {
+          actor_filter: null,
+          filter_active: false,
+          visible_count: 0,
+          total_count: 0,
+          hidden_count: 0,
+          hidden_actors: [],
+          confirm_required_actions: [],
+        },
+      },
+      available_actions: [],
+    }
+
+    sseStore.hydrateDashboardSlice('operator', null, 'operator_snapshot')
+
+    expect(operatorSignals.operatorSnapshot.value).toBeNull()
+    expect(operatorSignals.operatorError.value).toBe('operator snapshot payload is invalid')
+  })
+
   it('does not refresh hidden heavy surfaces for keeper lifecycle events on overview', async () => {
     const { sseStore } = await loadSseStore()
     const refreshOperator = vi.fn()
@@ -350,9 +518,8 @@ describe('setupServerPushReaction reconnect hydration', () => {
     const { sseStore } = await loadSseStore()
     route.value = { tab: 'monitoring', params: { section: 'agents' }, postId: null }
     sseStore.routeServerPushEvent({
-      type: 'masc/keeper_guardrail',
+      type: 'masc/keeper_compaction',
       name: 'qa-king',
-      reason: 'tool boundary',
     })
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
@@ -362,8 +529,10 @@ describe('setupServerPushReaction reconnect hydration', () => {
 
   })
 
-  it('forces execution refresh on keeper turn complete for live roster status', async () => {
+  it('refreshes only the scoped Keeper status on turn complete', async () => {
     const { sseStore } = await loadSseStore()
+    const refreshKeeperTurn = vi.fn<(keeperName: string) => void>()
+    sseStore.registerKeeperTurnRefresh(refreshKeeperTurn)
     route.value = { tab: 'keepers', params: { keeper: 'qa-king' }, postId: null }
 
     sseStore.routeServerPushEvent({
@@ -374,8 +543,12 @@ describe('setupServerPushReaction reconnect hydration', () => {
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
-    expect(refreshExecution).toHaveBeenCalledTimes(1)
-    expect(refreshExecution).toHaveBeenCalledWith({ force: true })
+    // The agent-core hook precedes durable commit, so rebuilding the global execution
+    // snapshot here is both premature and expensive. The registered
+    // keeper-scoped status reader remains the authoritative immediate refresh.
+    expect(refreshExecution).not.toHaveBeenCalled()
+    expect(refreshKeeperTurn).toHaveBeenCalledTimes(1)
+    expect(refreshKeeperTurn).toHaveBeenCalledWith('qa-king')
   })
 
   it('normalizes MASC broadcast aliases before route-scoped execution refresh', async () => {
@@ -472,6 +645,35 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshFusionRuns).not.toHaveBeenCalled()
   })
 
+  it('refreshes the mounted internal-agent registry immediately from websocket invalidation', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'monitoring', params: { section: 'internal-agents' }, postId: null }
+    const refresh = vi.fn()
+    const unregister = sseStore.registerInternalAgentRefresh(refresh)
+
+    sseStore.routeServerPushEvent({ type: 'internal_agent_runs_changed' })
+    vi.advanceTimersByTime(1)
+    await flushAsyncWork()
+
+    expect(refresh).toHaveBeenCalledTimes(1)
+    unregister()
+  })
+
+  it('refreshes Fusion rows inside Internal Agents from the existing Fusion websocket event', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'monitoring', params: { section: 'internal-agents' }, postId: null }
+    const refresh = vi.fn()
+    const unregister = sseStore.registerInternalAgentRefresh(refresh)
+
+    sseStore.routeServerPushEvent({ type: 'fusion_run_status' })
+    vi.advanceTimersByTime(1)
+    await flushAsyncWork()
+
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(refreshFusionRuns).not.toHaveBeenCalled()
+    unregister()
+  })
+
   it('routes keeper_tool_call to the IDE workspace refresh while on the code surface', async () => {
     const { sseStore } = await loadSseStore()
     route.value = { tab: 'code', params: {}, postId: null }
@@ -555,7 +757,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', undefined, undefined)
   })
 
-  it('delivers every Keeper inventory invalidation immediately while coalescing receipt reads', async () => {
+  it('delivers every Keeper chat-operation inventory invalidation immediately', async () => {
     const { sseStore } = await loadSseStore()
     const refreshQueue = vi.fn()
     sseStore.registerKeeperWaitingInventoryRefresh(refreshQueue)
@@ -563,25 +765,19 @@ describe('setupServerPushReaction reconnect hydration', () => {
     sseStore.routeServerPushEvent({
       type: 'keeper_waiting_inventory_changed',
       keeper_name: 'echo',
-      queue_kind: 'chat_queue',
+      queue_kind: 'chat_operation',
     })
     sseStore.routeServerPushEvent({
       type: 'keeper_waiting_inventory_changed',
       keeper_name: 'echo',
-      queue_kind: 'chat_queue',
+      queue_kind: 'chat_operation',
     })
     expect(refreshQueue).toHaveBeenCalledTimes(2)
     expect(refreshQueue).toHaveBeenNthCalledWith(1, 'echo')
     expect(refreshQueue).toHaveBeenNthCalledWith(2, 'echo')
-    expect(reconcileKeeperChatReceipts).not.toHaveBeenCalled()
-    vi.advanceTimersByTime(1_000)
-    await flushAsyncWork()
-
-    expect(reconcileKeeperChatReceipts).toHaveBeenCalledTimes(1)
-    expect(reconcileKeeperChatReceipts).toHaveBeenCalledWith('echo')
   })
 
-  it('refreshes waiting inventory for event-queue changes without reading Admin chat receipts', async () => {
+  it('refreshes waiting inventory for event-queue changes', async () => {
     const { sseStore } = await loadSseStore()
     const refreshQueue = vi.fn()
     sseStore.registerKeeperWaitingInventoryRefresh(refreshQueue)
@@ -593,31 +789,6 @@ describe('setupServerPushReaction reconnect hydration', () => {
     })
     expect(refreshQueue).toHaveBeenCalledTimes(1)
     expect(refreshQueue).toHaveBeenCalledWith('echo')
-    vi.advanceTimersByTime(1_000)
-    await flushAsyncWork()
-
-    expect(reconcileKeeperChatReceipts).not.toHaveBeenCalled()
-  })
-
-  it('forces compaction hydration from the typed source event, then re-reads on cache completion', async () => {
-    const { sseStore } = await loadSseStore()
-    const refreshCompaction = vi.fn()
-    sseStore.registerKeeperCompactionRefresh(refreshCompaction)
-
-    sseStore.routeServerPushEvent({
-      type: 'oas:context_compacted',
-      agent_name: 'echo',
-      before_tokens: 100,
-      after_tokens: 40,
-    })
-    sseStore.routeServerPushEvent({
-      type: 'keeper_compaction_snapshots_changed',
-      keeper_name: 'echo',
-      status: 'ready',
-    })
-
-    expect(refreshCompaction).toHaveBeenNthCalledWith(1, 'echo', 'source_changed')
-    expect(refreshCompaction).toHaveBeenNthCalledWith(2, 'echo', 'ready')
   })
 
   it('forwards RFC-0235 audio clips on keeper_chat_appended to the chat handler', async () => {
@@ -672,13 +843,13 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(hydrateFleetCompositeSnapshot).not.toHaveBeenCalled()
   })
 
-  it('routes oas_telemetry_sample to the telemetry read model without an HTTP refresh', async () => {
+  it('routes agent_core_telemetry_sample to the telemetry read model without an HTTP refresh', async () => {
     const { sseStore } = await loadSseStore()
 
     // The push payload carries the sample itself (schemas/sse.ts validates the
     // envelope), so the read model hydrates directly — nothing to re-fetch.
     sseStore.routeServerPushEvent({
-      type: 'oas_telemetry_sample',
+      type: 'agent_core_telemetry_sample',
       provider_id: 'runtime',
       model_id: 'runtime',
       payload: {
@@ -689,7 +860,7 @@ describe('setupServerPushReaction reconnect hydration', () => {
     })
     await flushAsyncWork()
 
-    expect(hydrateOasTelemetrySample).toHaveBeenCalledTimes(1)
+    expect(hydrateAgentCoreTelemetrySample).toHaveBeenCalledTimes(1)
     expect(refreshExecution).not.toHaveBeenCalled()
   })
 
@@ -709,6 +880,46 @@ describe('setupServerPushReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(refreshBoard).toHaveBeenCalledTimes(1)
+  })
+
+  it('refetches the fusion board-sink track when a post is created', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshFusion = vi.fn()
+    sseStore.registerFusionBoardRefresh(refreshFusion)
+    route.value = { tab: 'fusion', params: {}, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'post_created',
+      post_id: 'post-fusion-1',
+      title: 'Deliberation',
+      content: 'preview only',
+      author: 'agent-a',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    // The event carries a preview and no meta, so the detail browser cannot be
+    // built from it — the surface has to refetch (#21822).
+    expect(refreshFusion).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves the fusion track alone when the operator is elsewhere', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshFusion = vi.fn()
+    sseStore.registerFusionBoardRefresh(refreshFusion)
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'post_created',
+      post_id: 'post-fusion-2',
+      title: 'Deliberation',
+      content: 'preview only',
+      author: 'agent-a',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshFusion).not.toHaveBeenCalled()
   })
 
   it('keeps optimistic post_created hydration inside the active hearth filter', async () => {
@@ -913,65 +1124,72 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(refreshBoard).not.toHaveBeenCalled()
   })
 
-  it('hydrates websocket dashboard snapshots for board, goals, and composite slices', async () => {
+  // Every dashboard delta carries an event_type. This table pins the complete
+  // server mapping and the typed hydration arm selected for each event.
+  it('routes every server-producible dashboard delta by its event type', async () => {
     const { sseStore } = await loadSseStore()
 
-    sseStore.hydrateDashboardSlice('board', { posts: [], generated_at: 'now' })
-    sseStore.hydrateDashboardSlice('goals', {
-      planning: { goals: [], generated_at: 'now' },
-      tree: {
-        approval_queue_state: { state: 'ready' },
-        tree: [],
-        summary: { total_goals: 0 },
+    const transportPayload = {
+      status: 'initializing',
+      generated_at: '2026-08-08T12:00:00Z',
+      message: 'transport health warming',
+      projection_diagnostics: {
+        source: 'cached_surface',
+        cache_state: 'initializing',
+        last_success_at: null,
+        last_attempt_at: '2026-08-08T12:00:00Z',
+        last_error_at: '2026-08-08T12:00:01Z',
+        stale_reason: 'transport metric read failed',
+        stale_age_ms: null,
       },
-    })
-    sseStore.hydrateDashboardSlice('composite', {
-      generated_at: 1,
-      count: 0,
-      snapshots: [],
-    })
-
-    expect(hydrateBoardSnapshot).toHaveBeenCalledWith({ posts: [], generated_at: 'now' })
-    expect(hydratePlanningSnapshot).toHaveBeenCalledWith({ goals: [], generated_at: 'now' })
-    expect(hydrateGoalTreeSnapshot).toHaveBeenCalledWith({
-      approval_queue_state: { state: 'ready' },
-      tree: [],
-      summary: { total_goals: 0 },
-    })
-    expect(hydrateFleetCompositeSnapshot).toHaveBeenCalledWith({
-      generated_at: 1,
-      count: 0,
-      snapshots: [],
-    })
-  })
-
-  it('handles every dashboard push slice advertised to route subscriptions', async () => {
-    const { sseStore } = await loadSseStore()
-    const payloads: Record<DashboardPushSlice, unknown> = {
-      shell: { counts: { agents: 1, tasks: 2, keepers: 3 } },
-      namespace: { root: { status: { project: 'default' } } },
-      transport: { transports: [] },
-      execution: { agents: [], tasks: [], messages: [], keepers: [] },
-      goals: {
-        planning: { goals: [], generated_at: 'now' },
-        tree: { tree: [], summary: { total_goals: 0 } },
-      },
-      board: { posts: [], generated_at: 'now' },
-      composite: { generated_at: 1, count: 0, snapshots: [] },
-      operator: { snapshot: { keepers: [] }, digest: { target_type: 'namespace' } },
     }
 
-    for (const slice of DASHBOARD_PUSH_SLICES) {
-      expect(() => sseStore.hydrateDashboardSlice(slice, payloads[slice])).not.toThrow()
-    }
+    // The full image of dashboard_slice_for_sse_type
+    // (lib/server/server_mcp_transport_ws.ml). If the server gains a mapping,
+    // this list has to gain the event type, and the assertion below fails until
+    // a handler exists for it.
+    const deltas: Array<{ eventType: string; slice: string; payload: unknown }> = [
+      { eventType: 'project_snapshot', slice: 'namespace',
+        payload: { root: { status: { project: 'default' } } } },
+      { eventType: 'namespace_truth_snapshot', slice: 'namespace',
+        payload: { root: { status: { project: 'default' } } } },
+      { eventType: 'execution_snapshot', slice: 'execution',
+        payload: { agents: [], tasks: [], messages: [], keepers: [] } },
+      { eventType: 'operator_snapshot', slice: 'operator', payload: {
+        keepers: [],
+        snapshot_epoch: 'epoch-table',
+        snapshot_generation: 1,
+        snapshot_compute_sequence: 1,
+        snapshot_terminal_sequence: 1,
+        pending_confirm_envelope: {
+          items: [],
+          summary: {
+            actor_filter: null,
+            filter_active: false,
+            visible_count: 0,
+            total_count: 0,
+            hidden_count: 0,
+            hidden_actors: [],
+            confirm_required_actions: [],
+          },
+        },
+      } },
+      { eventType: 'operator_digest', slice: 'operator', payload: { target_type: 'namespace' } },
+      { eventType: 'transport_health_snapshot', slice: 'transport', payload: transportPayload },
+      { eventType: 'keeper_composite_changed', slice: 'composite',
+        payload: { name: 'alpha', ts_unix: 1 } },
+    ]
 
-    expect(hydrateShellSnapshot).toHaveBeenCalledWith(
-      payloads.shell,
-      { light: true, preserveAuth: true },
+    for (const { eventType, slice, payload } of deltas) {
+      expect(() => sseStore.hydrateDashboardSlice(slice, payload, eventType)).not.toThrow()
+    }
+    await flushAsyncWork()
+
+    // Not merely "did not throw": the typed arms must actually hydrate.
+    expect(hydrateExecutionSnapshot).toHaveBeenCalledWith(
+      { agents: [], tasks: [], messages: [], keepers: [] },
     )
-    expect(hydrateExecutionSnapshot).toHaveBeenCalledWith(payloads.execution)
-    expect(hydrateBoardSnapshot).toHaveBeenCalledWith(payloads.board)
-    expect(hydrateFleetCompositeSnapshot).toHaveBeenCalledWith(payloads.composite)
+    expect(hydrateTransportHealthFromSSE).toHaveBeenCalledWith(transportPayload)
   })
 
   it('routes websocket dashboard delta event types without treating payloads as snapshots', async () => {

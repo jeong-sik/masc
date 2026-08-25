@@ -214,7 +214,7 @@ describe('HarnessHealth', () => {
     expect(get).toHaveBeenCalledTimes(1)
 
     lastEvent.value = {
-      type: 'oas:masc:harness:verdict_recorded',
+      type: 'agent_core:masc:harness:verdict_recorded',
       payload: {
         timestamp: 1711440600,
         task_id: 'task-2',
@@ -222,7 +222,7 @@ describe('HarnessHealth', () => {
         agent_name: 'codex',
         gate: 'fallback',
         verdict: 'reject:vague notes',
-        evaluator_runtime: 'cross_verifier',
+        evaluator_runtime: 'judge-runtime',
         generator_runtime: 'generator_runtime',
         cross_runtime: true,
         fallback_reason: 'judge timeout',
@@ -272,7 +272,7 @@ describe('HarnessHealth', () => {
     expect(container.textContent).toContain('keeper-a')
 
     lastEvent.value = {
-      type: 'oas:masc:harness:handoff',
+      type: 'agent_core:masc:harness:handoff',
       payload: {
         timestamp: 1711440900,
         keeper_name: 'keeper-b',

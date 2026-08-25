@@ -8,10 +8,6 @@ val error_json : ?fields:(string * Yojson.Safe.t) list -> string -> string
 
 (** Render a failed [Tool_result.result] as [error_json], preserving
     [failure_class] for keeper-facing routing and diagnostics. *)
-val tool_result_error_json : Tool_result.result -> string
-
-val file_not_found_prefix : string
-
 (** Render a missing-file JSON envelope with the error, path, and
     path-resolution guidance.
     #10349: directory entries are intentionally excluded to prevent
@@ -28,11 +24,7 @@ val missing_file_error_json
 val assoc_override_string : string -> string -> Yojson.Safe.t -> Yojson.Safe.t
 
 (** Re-export of [Keeper_alerting_path.effective_allowed_paths]. *)
-val keeper_effective_allowed_paths : meta:Keeper_meta_contract.keeper_meta -> string list
-
 (** Re-export of [Keeper_alerting_path.effective_write_allowed_paths]. *)
-val keeper_effective_write_allowed_paths : meta:Keeper_meta_contract.keeper_meta -> string list
-
 (** Sandbox playground root for [meta]; ensures the bundle dirs
     exist as a side effect. *)
 val keeper_playground_root
@@ -126,12 +118,6 @@ val verify_keeper_confined_root :
 (** Verify the immutable root identity captured by the path resolver against
     the Eio directory capability that will be used by the caller. *)
 
-val resolve_keeper_execute_cwd
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> raw_path:string
-  -> (string, string) result
-
 (** Resolve an already projected host path that came from a
     Keeper-visible [cwd] + relative [file_path] composition. [raw_for_error]
     is the model-facing path to keep diagnostics in the visible namespace. *)
@@ -150,8 +136,6 @@ val shell_readonly_limit : Yojson.Safe.t -> int
 
 (** Clamp [args.max_bytes] to [256..100000] (default 4000) for
     the structured [cat] read operation. *)
-val shell_readonly_cat_max_bytes : Yojson.Safe.t -> int
-
 (** Project [text] to a JSON array of lines, capped by [limit]
     lines and [max_bytes] total payload. The omitted-tail line
     surfaces a hint for the LLM to narrow its search. *)

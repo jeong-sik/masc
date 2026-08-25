@@ -17,9 +17,9 @@
   (language c)
   (names test_env_stubs))
  (libraries
-  (re_export agent_sdk)
-  (re_export agent_sdk.base)
-  (re_export agent_sdk.llm_provider)
+  (re_export masc.agent_core)
+  (re_export masc.agent_core.base)
+  (re_export masc.agent_core.llm_provider)
   (re_export alcotest)
   (re_export astring)
   (re_export base64)
@@ -37,16 +37,15 @@
   (re_export masc_backend)
   (re_export masc_compression)
   (re_export masc_core)
+  (re_export masc.string_util)
   (re_export masc_eio_context)
   ; RFC-0107 Phase D.2d — pool unit tests need access to Pool module.
   (re_export masc.http_client)
   (re_export masc.discovery_cache)
   (re_export masc.json_field)
-  (re_export masc.keeper_hooks_oas_types)
+  (re_export masc.keeper_hooks_agent_core_types)
   (re_export masc.local_runtime_pool)
   (re_export masc.lockfree_atomic)
-  (re_export masc.worker_execution_backend)
-  (re_export masc.worker_execution_spec)
   (re_export masc.otel_dispatch_hook)
   (re_export masc.otel_genai)
   (re_export masc.otel_metrics)
@@ -61,6 +60,7 @@
   (re_export masc.voice_runtime_overlay)
   (re_export masc_log)
   (re_export masc)
+  (re_export masc.run_registry_core)
   (re_export masc.activity_graph)
   ;; Board handler shim removal — tests need direct access to
   ;; Masc_board_handlers for modules no longer re-exported via masc.
@@ -87,7 +87,12 @@
   ;; RFC-0056 Phase 1H — Tool_call_quality_benchmark family sub-library.
   (re_export masc.tool_call_quality_benchmark)
   (re_export masc.keeper_runtime)
+  ; keeper_canary_run.ml's pure logic (nonce fact gen + turn plan +
+  ; recall scoring + evidence JSON schema), split out for unit-testability
+  ; (masc, task-11).
+  (re_export masc.keeper_canary)
   (re_export masc.keeper_chat_delivery_identity)
+  (re_export masc.keeper_chat_operations)
   (re_export masc.keeper_contract)
   ;; RFC-0056 Phase 1K — Compaction_trigger leaf sub-library.
   (re_export masc.compaction_trigger)
@@ -123,7 +128,6 @@
   (re_export masc.prompt_registry)
   (re_export masc.pulse)
   (re_export masc.repo_manager)
-  (re_export masc.resilience)
   (re_export masc.dashboard)
   (re_export masc.operator)
   (re_export masc.server)
@@ -132,7 +136,6 @@
   (re_export masc.pool_metrics)
   (re_export masc.auth)
   (re_export masc.fd_accountant)
-  (re_export masc.response)
   (re_export masc.shared_audit)
   (re_export masc.tool_schemas)
   (re_export masc.tool_schemas_specs)
@@ -173,7 +176,6 @@
   (re_export mirage-crypto-rng.unix)
   (re_export multimodal)
   (re_export ocaml-protoc-plugin)
-  (re_export ocaml-webrtc)
   (re_export opentelemetry)
   ; RFC-0129 — Pool.For_testing.read_body_with_idle tests build a mock
   ; Piaf.Body via Piaf.Stream.create + Piaf.Body.of_string_stream.

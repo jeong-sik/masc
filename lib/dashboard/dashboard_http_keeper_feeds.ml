@@ -1,4 +1,3 @@
-open Dashboard_http_helpers
 open Dashboard_http_keeper_types
 
 (** Per-keeper cost/latency aggregates for the O4 cost dashboard.

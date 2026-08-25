@@ -18,6 +18,11 @@ val agent_status_to_string : agent_status -> string
 val string_of_agent_status : agent_status -> string
 val all_agent_statuses : agent_status list
 val valid_agent_status_strings : string list
+(** Presence ordering for operator surfaces: [Busy] 4, [Active] 3,
+    [Listening] 2, [Inactive] 1. Descending-rank comparators sort a working
+    agent above an idle one. *)
+val agent_status_rank : agent_status -> int
+
 val agent_status_of_string_opt : string -> agent_status option
 val agent_status_of_string_r : string -> (agent_status, string) result
 val agent_status_to_yojson : agent_status -> Yojson.Safe.t
@@ -51,8 +56,6 @@ type agent =
 val agent_to_yojson : agent -> Yojson.Safe.t
 val agent_of_yojson : Yojson.Safe.t -> (agent, string) result
 val iso8601_of_unix_seconds : float -> string
-val normalize_agent_last_seen : session_bound_at:Yojson.Safe.t option -> Yojson.Safe.t -> Yojson.Safe.t option
-val short_json_repr : Yojson.Safe.t -> string
 
 (** Actions an *agent* may drive. A completion verdict is not among them; a
     trusted operator or judge caller constructs its authority provenance
@@ -114,21 +117,13 @@ val task_status_to_string : task_status -> string
 val string_of_task_status : task_status -> string
 val task_status_icon : task_status -> string
 val task_display_assignee : task_status -> string
-(** Who acted on a Task, and in what relationship. A bare [string option]
-    records the name and drops the role, which let three separate local
-    [task_assignee] helpers disagree about [Done] and [Cancelled]. Naming the
-    role makes that disagreement unwritable, and a new status must state which
-    role it carries. *)
-type task_actor =
-  | Unassigned
-  | Holder of string
-  | Submitter of string
-  | Completer of string
-  | Canceller of string
-
-val task_actor_of_status : task_status -> task_actor
-
-val task_actor_name : task_actor -> string option
+(* [task_actor] and [task_actor_of_status] stay inside this module. They exist
+   so the three questions below cannot disagree about [Done] and [Cancelled] --
+   each is a total match over the same sum -- and that job is done entirely
+   here. Nothing outside ever named the type or its constructors, so exporting
+   them offered a second vocabulary for "who acted on a Task" beside the three
+   answers that are actually asked for. [task_actor_name] had no caller at all
+   and is gone. *)
 
 (** Who owes work now. [Done] and [Cancelled] owe nothing. *)
 val task_assignee_of_status : task_status -> string option
@@ -147,7 +142,11 @@ type task_execution_links =
   { operation_id : string option [@default None]
   ; session_id : string option [@default None]
   }
-[@@deriving show, yojson { strict = false }]
+[@@deriving show, yojson { strict = true }]
+
+(** No producer has been linked yet. A task starts here and stays here until a
+    runtime records the operation or session that carried it out. *)
+val no_execution_links : task_execution_links
 
 type task_contract =
   { strict : bool [@default false]
@@ -155,8 +154,6 @@ type task_contract =
   ; required_evidence : string list [@default []]
   ; inspect_gate_evidence : string list [@default []]
   ; verify_gate_evidence : string list [@default []]
-  ; links : task_execution_links
-        [@default { operation_id = None; session_id = None }]
   }
 [@@deriving show, yojson { strict = false }]
 
@@ -167,9 +164,6 @@ type task_reclaim_policy =
 
 val task_reclaim_policy_to_string : task_reclaim_policy -> string
 val task_reclaim_policy_of_string : string -> (task_reclaim_policy, string) result
-val task_reclaim_policy_to_yojson : task_reclaim_policy -> Yojson.Safe.t
-val task_reclaim_policy_of_yojson : Yojson.Safe.t -> (task_reclaim_policy, string) result
-
 type task_handoff_context =
   { summary : string [@default ""]
   ; reason : string option [@default None]
@@ -211,10 +205,26 @@ type task =
         (** RFC-0323 W2: write-once lineage pointer to the terminal task this
             one re-runs. Set only at creation; transitions carry it through. *)
   ; contract : task_contract option [@default None]
+  ; execution_links : task_execution_links
+        [@default no_execution_links]
+        (** Runtime identifiers attached after creation by whichever execution
+            picks the task up. Separate from [contract] so linking them never
+            rewrites what counts as done. *)
   ; handoff_context : task_handoff_context option [@default None]
   ; cycle_count : int [@default 0]
   ; reclaim_policy : task_reclaim_policy option [@default None]
   ; do_not_reclaim_reason : string option [@default None]
+  ; skills : string list [@default []]
+        (** Skills a keeper working this task may read, named by their
+            directory under [<base_path>/.masc/skills/].
+
+            Declared here rather than discovered at turn time. The Agent
+            Skills default lists every skill's description in the prompt and
+            lets the model pick; naming them on the task makes "what was
+            loaded on that turn" a fact the task states rather than one
+            reconstructed from what the model chose.
+
+            Empty is the ordinary case and builds no skill block at all. *)
   }
 [@@deriving show]
 
@@ -224,6 +234,12 @@ type task =
 val task_last_transition_at : task -> string
 
 val task_to_yojson : task -> Yojson.Safe.t
+
+(** Listing row without the task body: [id], [title], [priority], [created_at]
+    and the status fields ([status], [assignee], timestamps). [task_to_yojson]
+    is the full record. *)
+val task_compact_to_yojson : task -> Yojson.Safe.t
+
 val task_of_yojson : Yojson.Safe.t -> (task, string) result
 
 type task_claim_readiness =
@@ -267,16 +283,26 @@ val task_claim_next_action :
 val task_claim_next_action_is_claimable :
   task -> bool
 
+type message_mention_delivery =
+  | Mention_passive
+  | Mention_pending
+  | Mention_accepted
+  | Mention_rejected
+[@@deriving yojson, show]
+
+val message_mention_delivery_to_string : message_mention_delivery -> string
+
 type message =
-  { seq : int
+  { request_id : string
+  ; seq : int
   ; from_agent : string [@key "from"]
   ; msg_type : string [@key "type"] [@default "broadcast"]
   ; content : string
   ; mention : string option [@default None]
+  ; mention_delivery : message_mention_delivery
   ; timestamp : string
   ; trace_context : string option [@default None]
   ; expires_at : float option [@default None]
-  ; relevance : string [@default "medium"]
   }
 [@@deriving yojson { strict = false }, show]
 

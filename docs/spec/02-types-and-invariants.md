@@ -1,10 +1,5 @@
 ---
 status: reference
-last_verified: 2026-04-17
-code_refs:
-  - lib/types/
-  - lib/tool/tool_dispatch.ml
-  - lib/client_identity.ml
 ---
 
 # Types and Invariants
@@ -401,7 +396,7 @@ lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다. 제�
 
 ### 4.4 Tool_result.result (structured)
 
-**소스**: `lib/tool_result.mli`
+**소스**: `lib/tool_types/tool_result.mli`
 
 ```ocaml
 type success_payload = {
@@ -474,28 +469,6 @@ module Registry : sig
   val count : registry -> int
 end
 ```
-
----
-
-## 6. Agent Ecosystem Types (RETIRED)
-
-`lib/agent_ecosystem.mli`와 `agent_lifecycle`, `agent_profile`, `lineage`, `extended` 타입은 dead code sweep (#2848)에서 `lib/anti_fake`, `lib/agent_neo4j`와 함께 제거됐다 (-1368 LOC). 현재 agent identity는 `lib/client_identity.ml` 하나로 정리됐고, 생명주기 추적은 `lib/workspace/workspace_lifecycle.ml` + `observe_agent_lifecycle` hook이 담당한다.
-
----
-
-## 7. Checkpoint Types (RETIRED)
-
-`lib/checkpoint_types.ml`는 Time-Travel checkpoint 실험을 지원하던 전용 타입 모듈이었고, 현재 repo에서 제거됐다. `checkpoint_status` 7-variant FSM(`Pending`/`InProgress`/`Interrupted`/`Completed`/`Rejected`/`Reverted`/`Branched`)과 `checkpoint_info` record는 더 이상 어떤 subsystem도 참조하지 않는다 (`grep -rn checkpoint_status lib/ test/` → 0 hits).
-
-체크포인트 개념이 남아 있는 곳은 keeper turn lifecycle(`lib/keeper/keeper_turn_lifecycle.ml`)에 통합된 per-turn resume snapshot뿐이며, 별도 타입 모듈로는 더 이상 노출되지 않는다.
-
----
-
-## 8. Context Budget Types (RETIRED)
-
-`lib/context_budget_manager.mli`는 MASC 레벨의 `compression_phase` 4-variant FSM(`None_phase`/`Compact_tools`/`Drop_low`/`Summarize`)과 `Budget_tracker` API(`record_tool_schemas`, `record_turn`, `usage_ratio`, `current_phase`)를 노출하던 모듈이었고, 현재 repo에서 제거됐다. `grep -rn compression_phase lib/ test/` → 0 hits.
-
-현재 기준은 `feedback_budget-belongs-in-oas.md` 메모리에 기록된 경계 원칙이다. Raw token 수/컨텍스트 한도 추적은 OAS(agent_sdk)가 소유하고, MASC는 OAS가 내보내는 추상 신호(ratio/status)만 소비한다. 환경변수 `MASC_CONTEXT_BUDGET_MAX` 역시 더 이상 active runtime에서 읽히지 않는다.
 
 ---
 
@@ -576,14 +549,6 @@ type rate_limit_error = {
   category : rate_limit_category;
 }
 ```
-
----
-
-## 10. Structured Message Types (RETIRED)
-
-`lib/message_schema.mli`는 swarm 내부 메시지를 위한 `validation_mode` 3-variant, `structured_message` 5-variant(`TaskUpdate`/`StatusReport`/`Request`/`Response`/`Freeform`), `swarm_envelope` record를 노출하던 모듈이었고, Gen37에서 frontmatter code_refs 정리 시점에 #2848 dead-code sweep과 함께 제거된 것이 확인됐다. `grep -rn "validation_mode\|swarm_envelope" lib/ test/` → 0 hits.
-
-현재 workspace collaboration 경로는 `board_posts` + keeper FSM으로 통합됐으며 별도 "structured message / envelope" 타입 레이어는 노출되지 않는다. Swarm 문맥에서 message delivery 의미론이 필요하면 `docs/spec/11-board.md`를 참조한다.
 
 ---
 

@@ -8,7 +8,7 @@ import {
   type IdeContextFocus,
   type IdeContextFocusRouteLink,
 } from './ide-state'
-import { getIdeDataWorkspaceStore } from './ide-workspace-singleton'
+import { codebaseForRepositoryId, getIdeDataWorkspaceStore } from './ide-workspace-singleton'
 import { parsePositiveLineString } from '../common/normalize'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
@@ -54,7 +54,7 @@ import { keepers } from '../../store'
 import { dashboardBearerToken } from '../../api/core'
 import { devTokenBootstrapStatus } from '../../api/dev-token'
 import { dashboardWsReady } from '../../dashboard-ws-state'
-import type { Repository } from '../../api/repositories'
+import { fetchRepositoryObservation, type Repository } from '../../api/repositories'
 import type { WorkspaceSource } from '../../api/workspace-source'
 import { KeeperBadge } from '../keeper-badge'
 import type { WorkspaceFetchIssue } from './ide-data-workspace-store'
@@ -583,7 +583,7 @@ function IdeDashboardConnectionChip({
     : 'Dashboard event transport is not live. Repository tree loads, LSP, and keeper cursor streams report separate status.'
   return html`
     <span
-      class=${`chip sm is-${tone}`}
+      class=${`tag-chip sm is-${tone}`}
       data-testid="ide-dashboard-connection"
       title=${title}
       aria-label=${`${label}; ${title}`}
@@ -726,7 +726,7 @@ function IdeCursorRailPanel() {
       </div>
       ${overlay.stream ? html`
         <div
-          class=${`ide-cursor-stream-status chip sm is-${cursorStreamStatusTone(overlay.stream.status)}`}
+          class=${`ide-cursor-stream-status tag-chip sm is-${cursorStreamStatusTone(overlay.stream.status)}`}
           data-testid="ide-cursor-stream-status"
           data-state=${overlay.stream.status}
           role="status"
@@ -802,8 +802,34 @@ function IdeCursorRailRow({ cursor }: { readonly cursor: KeeperCursor }) {
  * keeper-v2 `.ide-repo` / `.ide-remote` / `.ide-web` / `.br` skin classes.
  *
  */
-function repositoryGitStatusView(repository: Repository) {
-  const status = repository.git_status
+// The repository list carries no git state — deriving it is two subprocesses
+// per repository — so the status bar asks for the one repository it shows.
+// Nothing is spent on the four repositories nobody is looking at.
+function RepositoryGitStatus({ repositoryId }: { readonly repositoryId: string }) {
+  const [status, setStatus] = useState<Repository['git_status']>(undefined)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setStatus(undefined)
+    fetchRepositoryObservation(repositoryId, { signal: controller.signal })
+      .then(repository => {
+        if (controller.signal.aborted) return
+        setStatus(repository?.git_status ?? null)
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return
+        setStatus(null)
+      })
+    return () => controller.abort()
+  }, [repositoryId])
+
+  if (status === undefined) {
+    return html`<span data-state="loading" title="git status --porcelain=v1 조회 중">변경 확인 중</span>`
+  }
+  return repositoryGitStatusView(status)
+}
+
+function repositoryGitStatusView(status: Repository['git_status']) {
   if (!status) {
     return html`<span data-state="missing" title="repository git_status 필드 미수신">변경 상태 없음</span>`
   }
@@ -875,7 +901,7 @@ function IdeRepoOrigin({
         : null}
       ${branch ? html`<span class="br" title="기본 브랜치 (default_branch)">${branch}</span>` : null}
       ${' · '}
-      ${repositoryGitStatusView(repository)}
+      <${RepositoryGitStatus} repositoryId=${repository.id} />
     </span>
   `
 }
@@ -916,6 +942,7 @@ export function IdeShell() {
     workspaceStore.workspaceIssues,
     workspaceStore.subscribeWorkspaceIssues,
   )
+  const activeCodebase = codebaseForRepositoryId(activeRepositoryId)
   const [activeFilePath, setActiveFilePath] = useState(activeIdeFile.value)
 
   useEffect(() => {
@@ -931,9 +958,13 @@ export function IdeShell() {
 
   useEffect(() => {
     const repoId = activeRepositoryId?.trim()
-    if (!repoId) {
+    const codebase = activeCodebase
+    if (!repoId || !codebase) {
       cursorOverlaySignal.value = {
-        ...cursorOverlaySignal.value,
+        cursors: new Map(),
+        heatmap: new Map(),
+        collisions: [],
+        active_file: null,
         stream: { status: 'closed', failedCount: 0 },
       }
       return
@@ -941,12 +972,12 @@ export function IdeShell() {
     return connectKeeperCursorPush((overlay) => {
       cursorOverlaySignal.value = { ...overlay, stream: cursorOverlaySignal.value.stream }
     }, {
-      repoId,
+      codebase,
       onStatus: stream => {
         cursorOverlaySignal.value = { ...cursorOverlaySignal.value, stream }
       },
     })
-  }, [activeRepositoryId])
+  }, [activeCodebase, activeRepositoryId])
 
   const routeFileFocus = routeFocusFile(route.value.params)
   const routeLineFocus = routeFocusLine(route.value.params)
@@ -1128,7 +1159,7 @@ export function IdeShell() {
   }
 
   // Annotation deletion (#23471 FE follow-up). Mirrors the composer's
-  // contract: mutations need a repo scope (keeper_lane is read-only) and
+  // contract: mutations need a repository-backed codebase scope and
   // ownership is decided server-side from the token identity, so the
   // handler translates each outcome into a toast instead of pre-judging
   // deletability in the FE.
@@ -1137,10 +1168,17 @@ export function IdeShell() {
   ): Promise<IdeAnnotationDeleteOutcome> => {
     const repoId = workspaceStore.activeRepositoryId()
     if (repoId === null) {
-      showToast('주석 삭제에는 repo 선택이 필요합니다 (keeper_lane scope는 read-only)', 'error')
+      showToast('주석 삭제에는 repo 선택이 필요합니다', 'error')
       return 'error'
     }
-    const outcome = await deleteIdeAnnotation(annotation.id, { repoId })
+    const codebase = codebaseForRepositoryId(repoId)
+    if (codebase === null) {
+      showToast('주석 삭제에는 canonical codebase가 있는 repo 선택이 필요합니다', 'error')
+      return 'error'
+    }
+    const outcome = await deleteIdeAnnotation(annotation.id, {
+      codebase,
+    })
     switch (outcome) {
       case 'deleted':
         showToast(`주석 삭제됨: ${annotation.file_path}:${annotation.line_start}`, 'success')
@@ -1235,7 +1273,7 @@ export function IdeShell() {
       data-tree-width=${String(treeWidth)}
     >
       <h1 class="sr-only">MASC IDE</h1>
-      <div class="ide-v2-top">
+      <div class="ide-top">
         <button
           type="button"
           class="ide-v2-action ide-v2-tree-toggle"
@@ -1270,7 +1308,7 @@ export function IdeShell() {
           aria-label="IDE operational status"
         >
           <summary
-            class="chip sm is-warn"
+            class="tag-chip sm is-warn"
             data-testid="ide-readiness-notice"
             title="IDE shell is observational; LSP, overlay, and shell flows are not a verified execution boundary."
           >
@@ -1286,7 +1324,7 @@ export function IdeShell() {
             aria-label="IDE operational status"
           >
             <span
-              class="chip sm is-brass"
+              class="tag-chip sm is-brass"
               data-testid="ide-statusbar-workspace"
               title=${statusbar.workspaceBasePath
                 ? `base_path: ${statusbar.workspaceBasePath} (set MASC_BASE_PATH to change)`
@@ -1295,7 +1333,7 @@ export function IdeShell() {
             ${statusbar.chips.map(chip => html`
               <span
                 key=${chip.id}
-                class=${`chip sm is-${chip.tone}`}
+                class=${`tag-chip sm is-${chip.tone}`}
                 title=${chip.title}
                 data-testid=${`ide-statusbar-chip-${chip.id}`}
               >${chip.label}</span>
@@ -1318,12 +1356,12 @@ export function IdeShell() {
         >${railsCollapsed ? '⊢' : '⊣'}</button>
       </div>
       <div
-        class="ide-plane-grid ide-v2-body ${treeCollapsed ? 'no-tree' : ''} ${railsCollapsed ? 'no-rail' : ''}"
+        class="ide-plane-grid ide-body ${treeCollapsed ? 'no-tree' : ''} ${railsCollapsed ? 'no-rail' : ''}"
         role="presentation"
         style=${`--ide-tree-width: ${treeWidth}px;`}
       >
         ${treeCollapsed ? null : html`
-          <div id="ide-file-tree" class="ide-plane-tree ide-v2-tree v2-ide-panel" data-testid="ide-file-tree">
+          <div id="ide-file-tree" class="ide-plane-tree ide-tree v2-ide-panel" data-testid="ide-file-tree">
             <${IdeExplorer}
               fileTreeStore=${workspaceStore.fileTreeStore}
               workspaceSource=${workspaceStore.workspaceSource}
@@ -1350,7 +1388,7 @@ export function IdeShell() {
           </div>
         `}
         <div
-          class="ide-plane-editor ide-v2-editor v2-ide-panel"
+          class="ide-plane-editor ide-ed v2-ide-panel"
         >
           ${reviewFocusActive
             ? html`<${IdeReviewFocusStrip} activeLayers=${activeLayers} />`
@@ -1360,6 +1398,7 @@ export function IdeShell() {
               documentStore=${workspaceStore.documentStore}
               activeRepositoryId=${workspaceStore.activeRepositoryId}
               subscribeActiveRepositoryId=${workspaceStore.subscribeActiveRepositoryId}
+              codebaseForRepo=${codebaseForRepositoryId}
               refresh=${workspaceStore.refresh}
               draft=${annotationDraft}
               onDraftChange=${setAnnotationDraft}
@@ -1393,10 +1432,10 @@ export function IdeShell() {
           ? null
           : html`
             <div
-              class="ide-plane-conversation ide-v2-rail v2-ide-panel"
+              class="ide-plane-conversation ide-rail v2-ide-panel"
               data-testid="ide-right-rail"
             >
-              <div class="ide-v2-rail-tabs" role="tablist" aria-label="IDE right rail">
+              <div class="ide-rail-tabs" role="tablist" aria-label="IDE right rail">
                 ${IDE_RIGHT_RAIL_TABS.map(tab => html`
                   <button
                     key=${tab.id}
@@ -1405,18 +1444,17 @@ export function IdeShell() {
                     aria-selected=${rightRailTab === tab.id ? 'true' : 'false'}
                     aria-label=${tab.title}
                     title=${tab.title}
-                    class=${`ide-v2-rail-tab ${rightRailTab === tab.id ? 'on' : ''}`}
+                    class=${`ide-rail-tab ${rightRailTab === tab.id ? 'on' : ''}`}
                     onClick=${() => setRightRailTab(tab.id)}
                   >${tab.label}</button>
                 `)}
               </div>
-              <div class="ide-v2-rail-scroll">
+              <div class="ide-rail-scroll">
                 ${rightRailTab === 'activity' ? html`
                   <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
                     <${IdeActivityPanel}
                       activeFile=${activeFilePath}
-                      repoId=${activeRepositoryId}
-                      keeperLane=${terminalKeeper}
+                      codebase=${activeCodebase}
                       annotations=${annotations}
                       diffRows=${diffRows}
                       pollMs=${IDE_ACTIVITY_POLL_MS}
@@ -1432,7 +1470,7 @@ export function IdeShell() {
                         <div class="ide-plane-context-stack" data-testid="ide-right-context-stack">
                           <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
                           <${IdePersistencePanel} keeperName=${terminalKeeper} />
-                          <${IdeMemoryPanel} keeperName=${terminalKeeper} repoId=${activeRepositoryId} />
+                          <${IdeMemoryPanel} keeperName=${terminalKeeper} codebase=${activeCodebase} />
                         </div>
                         <div class="ide-plane-primary-rail" data-testid="ide-primary-conversation-rail">
                           <${IdeConversationRail} />
@@ -1447,6 +1485,7 @@ export function IdeShell() {
                       documentStore=${workspaceStore.documentStore}
                       activeRepositoryId=${workspaceStore.activeRepositoryId}
                       subscribeActiveRepositoryId=${workspaceStore.subscribeActiveRepositoryId}
+              codebaseForRepo=${codebaseForRepositoryId}
                       refresh=${workspaceStore.refresh}
                       draft=${annotationDraft}
                       onDraftChange=${setAnnotationDraft}

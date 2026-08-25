@@ -1,0 +1,68 @@
+{
+  "schema": "masc.keeper_feature_state_snapshot.v1",
+  "captured_at": "2026-08-13T13:25:46Z",
+  "source": {
+    "health_route": "http://127.0.0.1:8935/health?full=1",
+    "feature_proof_route": "http://127.0.0.1:8935/api/v1/dashboard/keeper-feature-proof"
+  },
+  "health": {
+    "status": "ok",
+    "overall_status": "degraded",
+    "runtime_commit": "f83f655904",
+    "runtime_commit_source": "runtime_repo_head",
+    "binary_commit": null,
+    "repo_head_commit": "f83f655904",
+    "started_at": "2026-08-13T13:19:03Z",
+    "uptime_seconds": 403,
+    "effective_base_path": "/Users/dancer/me",
+    "effective_masc_root": "/Users/dancer/me/.masc",
+    "keeper_fibers": 10,
+    "bootable_keepers": 10,
+    "running_keepers": 10,
+    "executable_keepers": 7,
+    "reaction_capacity_shortfall": 3,
+    "queue_pending_stimuli": 0,
+    "durable_queue_pending": 0,
+    "schedule_ticks": 27,
+    "schedule_successes": 27,
+    "schedule_failures": 0,
+    "schedule_crashes": 0,
+    "schedule_last_emitted": 0,
+    "dashboard_surface": "stale"
+  },
+  "feature_proof": {
+    "generated_at": "2026-08-13T13:25:36Z",
+    "status": "warn",
+    "feature_count": 5,
+    "pass_count": 2,
+    "warn_count": 3,
+    "keeper_count": 13,
+    "runtime_liveness": "13/13",
+    "persistent_24h": "1/13",
+    "autonomous_tool_use": "9/13",
+    "board_reactive": "8/13",
+    "scheduled_proactive": "13/13"
+  },
+  "pull_requests": {
+    "28574": {
+      "head": "c9df777b836477c9a60ecf89fe9e3b3e70e4a770",
+      "is_draft": false,
+      "merge_state": "BLOCKED",
+      "build_and_test": "IN_PROGRESS",
+      "run_url": "https://github.com/jeong-sik/masc/actions/runs/31704238533"
+    },
+    "28597": {
+      "head": "abe0e09c2b4cd43398f14533858b24913f06371b",
+      "is_draft": false,
+      "merge_state": "BLOCKED",
+      "build_and_test": "IN_PROGRESS",
+      "run_url": "https://github.com/jeong-sik/masc/actions/runs/31704177944"
+    }
+  },
+  "interpretation": {
+    "binary_identity": "Unknown. runtime_commit is a checkout probe and is not proof of the executable build SHA.",
+    "queue": "Idle snapshot only; no enqueue-drain-restart item receipt was captured.",
+    "scheduler": "Healthy idle ticks only; no create-due-wake-terminal-cancel occurrence was captured.",
+    "live_numbers": "Historical after captured_at; do not present as current without a new snapshot."
+  }
+}

@@ -4,7 +4,7 @@
 # Tests the fundamental 10-step external MCP workflow:
 #   producer join → add_task → claim → plan_set_task → heartbeat → broadcast
 #   → status → direct-done rejection → submit_for_verification
-#   → awaiting-verification projection
+#   → post-submission producer projection
 #
 # This is the opt-in strict verification path. Advisory/default task completion
 # remains direct and is covered by the workspace and Keeper outcome suites.
@@ -30,7 +30,7 @@ START_PATH="${BASE_PATH:-$PWD}"
 cleanup_contract_task() {
   local exit_status=$?
   if [ "$CLEANUP_TASK_FINALIZED" -ne 1 ] && [ -n "${task_id:-}" ]; then
-    call_tool 1999 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"cancel",notes:"GP1 contract cleanup after unsuccessful run"}')" >/dev/null 2>&1 || true
+    call_tool 1999 "masc_transition" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id,action:"cancel",notes:"GP1 contract cleanup after unsuccessful run"}')" >/dev/null 2>&1 || true
   fi
   exit "$exit_status"
 }
@@ -49,7 +49,7 @@ ensure_contract_goal() {
   local goal_payload
   local goal_json
 
-  goal_payload="$(call_tool 1000 "masc_goal_upsert" '{"title":"GP1 contract goal","priority":1}')"
+  goal_payload="$(call_tool 1000 "masc_goal_upsert" '{"title":"GP1 contract goal","metric":"contract steps pass","target_value":"all steps","priority":1}')"
   goal_json="$(printf '%s' "$goal_payload" | extract_result)"
   GOAL_ID="$(printf '%s' "$goal_json" | jq -r '.goal_id // empty')"
   if [ -z "$GOAL_ID" ]; then
@@ -99,7 +99,7 @@ echo "  task_id=$task_id"
 
 # ── Step 3/10: claim ──
 echo "[3/10] masc_transition (producer claim)"
-r3="$(call_tool 1003 "masc_transition" "{\"task_id\":\"$task_id\",\"agent_name\":\"$AGENT_NAME\",\"action\":\"claim\",\"notes\":\"GP1 contract claim\"}")"
+r3="$(call_tool 1003 "masc_transition" "{\"task_id\":\"$task_id\",\"action\":\"claim\",\"notes\":\"GP1 contract claim\"}")"
 if require_ok "$r3"; then
   step_pass
 else
@@ -130,7 +130,7 @@ fi
 
 # ── Step 6/10: broadcast ──
 echo "[6/10] masc_broadcast"
-r6="$(call_tool 1006 "masc_broadcast" "$(jq -cn --arg agent_name "$AGENT_NAME" --arg message "GP1 contract verification in progress" '{agent_name:$agent_name,message:$message}')")"
+r6="$(call_tool 1006 "masc_broadcast" "$(jq -cn --arg agent_name "$AGENT_NAME" --arg content "GP1 contract verification in progress" '{agent_name:$agent_name,content:$content}')")"
 if require_ok "$r6"; then
   step_pass
 else
@@ -154,7 +154,7 @@ done_summary="GP1 contract flow verified end to end via live MCP transcript"
 
 # ── Step 8/10: producer cannot bypass verification with direct done ──
 echo "[8/10] masc_transition (direct done rejection)"
-r8="$(call_tool 1008 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,agent_name:$agent_name,action:"done",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
+r8="$(call_tool 1008 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,action:"done",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
 if require_ok "$r8" >/dev/null 2>&1; then
   step_fail "direct done unexpectedly succeeded"
   echo "$r8"
@@ -168,7 +168,7 @@ fi
 
 # ── Step 9/10: producer submits typed evidence for verification ──
 echo "[9/10] masc_transition (submit_for_verification)"
-r9="$(call_tool 1009 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,agent_name:$agent_name,action:"submit_for_verification",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
+r9="$(call_tool 1009 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,action:"submit_for_verification",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
 if require_ok "$r9"; then
   step_pass
 else
@@ -176,17 +176,20 @@ else
   echo "$r9"
 fi
 
-# ── Step 10/10: submission is awaiting verification and credited to producer ──
-echo "[10/10] masc_tasks (AwaitingVerification producer credit)"
-r10="$(call_tool 1010 "masc_tasks" '{"status":"awaiting_verification"}')"
+# ── Step 10/10: submission remains credited to its producer ──
+# The application-owned authority may reject before this query runs, returning
+# the task to in_progress. Both states must retain the submitting producer.
+echo "[10/10] masc_tasks (post-submission producer credit)"
+r10="$(call_tool 1010 "masc_tasks" '{}')"
 if require_ok "$r10" \
   && [[ "$r10" == *"$task_id"* ]] \
-  && [[ "$r10" == *"awaiting_verification"* ]] \
+  && { [[ "$r10" == *"awaiting_verification"* ]] || [[ "$r10" == *"in_progress"* ]]; } \
   && [[ "$r10" == *"$AGENT_NAME"* ]]; then
-  CLEANUP_TASK_FINALIZED=1
+  # Submission is not terminal. Keep EXIT cleanup armed so a verifier rejection
+  # cannot leak this producer-owned task into the next contract scenario.
   step_pass
 else
-  step_fail "AwaitingVerification projection did not retain producer credit"
+  step_fail "post-submission projection did not retain producer credit"
   echo "$r10"
 fi
 

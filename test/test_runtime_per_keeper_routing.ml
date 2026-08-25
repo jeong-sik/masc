@@ -1,6 +1,6 @@
 (* Per-keeper LLM runtime routing via runtime.toml [[runtime.assignments]].
 
-   persona⊥{model,runtime}: runtime.toml is the sole SSOT for keeper→runtime
+   runtime.toml is the sole SSOT for keeper→runtime
    assignment, keyed by keeper name.  [Keeper_meta_contract.runtime_id_of_meta]
    resolves a keeper's assignment via [Runtime.runtime_id_for_keeper] so it
    reaches the turn driver; an unassigned keeper falls through to
@@ -74,7 +74,7 @@ let restore_model_catalog = function
 ;;
 
 let with_model_catalog_content content f =
-  let path = Filename.temp_file "runtime-thinking-oas-models" ".toml" in
+  let path = Filename.temp_file "runtime-thinking-agent_core-models" ".toml" in
   let previous = Llm_provider.Model_catalog.global () in
   Fun.protect
     ~finally:(fun () ->
@@ -84,7 +84,7 @@ let with_model_catalog_content content f =
     (fun () ->
       write_file path content;
       match Llm_provider.Model_catalog.load_file path with
-      | Error msg -> Alcotest.failf "test OAS model catalog should load: %s" msg
+      | Error msg -> Alcotest.failf "test AGENT_CORE model catalog should load: %s" msg
       | Ok catalog ->
         Llm_provider.Model_catalog.set_global catalog;
         f ())
@@ -136,7 +136,7 @@ let make_meta name : KMC.keeper_meta =
 (* Runtime config materializing two bindings: the default ["runpod_mtp.qwen"]
    and ["openai.gpt"] (used to prove [get_runtime_by_id] resolution).
 
-   persona⊥{model,runtime}: per-keeper routing is declared in
+   Per-keeper routing is declared in
    [[runtime.assignments]] (runtime.toml SSOT), keyed by keeper name — NOT in
    keeper TOML.  [routingtest]/[budgettest] route to the non-default
    [openai.gpt]; an unassigned keeper falls to [runtime].default. *)
@@ -271,7 +271,7 @@ let runtime_config_messages_http =
 default = "kimi.kimi-for-coding"
 
 [runtime.assignments]
-ramarama = "kimi.kimi-for-coding"
+nu = "kimi.kimi-for-coding"
 
 [providers.kimi]
 display-name = "Kimi Code Plan"
@@ -345,6 +345,36 @@ let with_runtime_initialized f =
   with_runtime_file (fun _path -> f ())
 ;;
 
+let codex_runtime_config =
+  {|[providers.codex]
+protocol = "codex-app-server"
+command = "codex"
+is-non-interactive = true
+
+[models.codex]
+api-name = "gpt-5.6-sol"
+max-context = 400000
+
+[codex.codex]
+
+[runtime]
+default = "codex.codex"
+|}
+;;
+
+let with_codex_runtime_initialized f =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+       with_temp_dir "runtime-codex-dashboard" @@ fun dir ->
+       let path = Filename.concat dir "runtime.toml" in
+       write_file path codex_runtime_config;
+       match Runtime.init_default ~config_path:path with
+       | Error msg -> Alcotest.failf "Codex runtime init failed: %s" msg
+       | Ok () -> f ())
+;;
+
 let test_messages_http_runtime_loads_and_assignment_resolves () =
   let snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
@@ -359,9 +389,9 @@ let test_messages_http_runtime_loads_and_assignment_resolves () =
          Alcotest.failf "messages-http runtime init_default failed: %s" msg
        | Ok () ->
          Alcotest.(check string)
-           "ramarama assignment resolves to kimi.kimi-for-coding"
+           "nu assignment resolves to kimi.kimi-for-coding"
            "kimi.kimi-for-coding"
-           (KMC.runtime_id_of_meta (make_meta "ramarama"));
+           (KMC.runtime_id_of_meta (make_meta "nu"));
          Alcotest.(check bool)
            "messages-http runtime is materialized"
            true
@@ -404,6 +434,35 @@ let test_runtime_assignment_writer_updates_runtime_toml () =
       "meta runtime resolver sees updated assignment"
       "runpod_mtp.qwen"
       (KMC.runtime_id_of_meta (make_meta "routingtest")))
+;;
+
+(* The inventory reports two kind fields per provider: [runtime_kind] is the
+   transport as classified, [kind] is the operator-facing bucket. A
+   non-loopback HTTP endpoint is "http" / "cloud". The mapping used to reach
+   "cloud" through a wildcard over the serialized name, so this pair was the
+   wildcard's only live input and nothing asserted it. *)
+let test_runtime_inventory_reports_transport_kind () =
+  with_runtime_initialized (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let providers = json |> J.member "providers" |> J.to_list in
+    let field runtime_id key =
+      providers
+      |> List.find (fun p ->
+           String.equal runtime_id (p |> J.member "runtime_id" |> J.to_string))
+      |> J.member key
+      |> J.to_string
+    in
+    List.iter
+      (fun runtime_id ->
+         Alcotest.(check string)
+           (Printf.sprintf "%s runtime_kind" runtime_id)
+           "http"
+           (field runtime_id "runtime_kind");
+         Alcotest.(check string)
+           (Printf.sprintf "%s dashboard kind" runtime_id)
+           "cloud"
+           (field runtime_id "kind"))
+      [ "runpod_mtp.qwen"; "openai.gpt" ])
 ;;
 
 let test_runtime_inventory_surfaces_assignment_status () =
@@ -461,6 +520,67 @@ let test_runtime_inventory_surfaces_assignment_status () =
       (match gpt |> J.member "temperature" with
        | `Null -> true
        | _ -> false))
+;;
+
+let test_codex_runtime_inventory_is_unverified_until_measured () =
+  with_codex_runtime_initialized (fun () ->
+    let entry =
+      Server_dashboard_http_runtime_info.runtime_inventory_json ()
+      |> J.member "providers"
+      |> J.to_list
+      |> List.find (fun entry ->
+        String.equal
+          "codex.codex"
+          (entry |> J.member "runtime_id" |> J.to_string))
+    in
+    Alcotest.(check string)
+      "status"
+      "configured_unverified"
+      (entry |> J.member "status" |> J.to_string);
+    Alcotest.(check bool)
+      "not available without runtime evidence"
+      false
+      (entry |> J.member "available" |> J.to_bool);
+    let verification = entry |> J.member "verification" in
+    Alcotest.(check bool)
+      "not measured"
+      false
+      (verification |> J.member "measured" |> J.to_bool);
+    Alcotest.(check string)
+      "reason"
+      "no_successful_runtime_observation"
+      (verification |> J.member "reason" |> J.to_string))
+;;
+
+let test_codex_runtime_cannot_enter_agent_core_runner () =
+  with_codex_runtime_initialized (fun () ->
+    match Runtime_agent_core_runner.For_testing.resolve_runtime_providers ~runtime_id:"codex.codex" () with
+    | Ok _ -> Alcotest.fail "Codex official-client runtime entered the AGENT_CORE runner"
+    | Error detail ->
+      Alcotest.(check bool)
+        "typed ownership diagnostic"
+          true
+          (* Matches provider_config_of_runtime's Codex_app_server arm verbatim
+             minus the runtime id, so the assertion pins both the ownership
+             claim and which owner is denied. *)
+          (string_contains detail "is owned by an official client, not Agent Core"))
+;;
+
+let test_codex_runtime_has_no_agent_core_thinking_seed () =
+  with_codex_runtime_initialized (fun () ->
+    let seed = Runtime_inference.for_runtime ~name:"codex.codex" in
+    Alcotest.(check (option int))
+      "thinking budget"
+      None
+      seed.Runtime_inference.thinking_budget;
+    Alcotest.(check (option bool))
+      "thinking enabled"
+      None
+      seed.Runtime_inference.thinking_enabled;
+    Alcotest.(check (option bool))
+      "preserve thinking"
+      None
+      seed.Runtime_inference.preserve_thinking)
 ;;
 
 let test_runtime_inventory_surfaces_declared_model_capabilities () =
@@ -760,17 +880,6 @@ let test_runtime_config_text_save_rejects_invalid_without_write () =
       (Runtime.get_default_runtime_id ()))
 ;;
 
-let test_runtime_id_tool_arg_is_not_removed_keeper_arg () =
-  match
-    Keeper_types_profile.reject_removed_keeper_input_keys
-      ~tool_name:"masc_keeper_up"
-      (`Assoc [ "runtime_id", `String "openai.gpt" ])
-  with
-  | Ok () -> ()
-  | Error msg ->
-    Alcotest.failf "runtime_id dashboard patch arg should be accepted: %s" msg
-;;
-
 let test_undeclared_keeper_falls_to_default () =
   with_config_dir (fun _config_dir ->
     with_runtime_initialized (fun () ->
@@ -801,14 +910,17 @@ let test_get_runtime_by_id_resolves_and_fails_fast () =
 
 (* ---- rerank resolver: resolve the requested runtime, or fail fast ----
 
-   Audit F8: [Runtime_oas_runner.resolve_runtime_providers] used to discard
+   Audit F8: [Runtime_agent_core_runner.resolve_runtime_providers] used to discard
    [runtime_id] and always return the default runtime, silently substituting
    an operator-selected runtime id.  It must resolve the requested id via the RFC-0207 catalog
    and return [Error] on an unknown id — never the default runtime. *)
 
 let provider_base_url_of_runtime_id runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
-  | Some rt -> rt.Runtime.provider_config.Llm_provider.Provider_config.base_url
+  | Some { Runtime.execution = Runtime_execution.Agent_core provider_config; _ } ->
+    provider_config.Llm_provider.Provider_config.base_url
+  | Some rt ->
+    Alcotest.failf "fixture runtime %s is not agent_core" rt.Runtime.id
   | None -> Alcotest.failf "fixture runtime %s missing from catalog" runtime_id
 ;;
 
@@ -817,7 +929,7 @@ let test_rerank_resolver_resolves_requested_runtime () =
     (* Known non-default id resolves to that runtime's provider, not the
        default's. *)
     (match
-       Runtime_oas_runner.resolve_runtime_providers ~runtime_id:"openai.gpt" ()
+       Runtime_agent_core_runner.For_testing.resolve_runtime_providers ~runtime_id:"openai.gpt" ()
      with
      | Error msg -> Alcotest.failf "expected openai.gpt to resolve: %s" msg
      | Ok [ provider ] ->
@@ -828,7 +940,7 @@ let test_rerank_resolver_resolves_requested_runtime () =
      | Ok providers ->
        Alcotest.failf "expected exactly one provider, got %d" (List.length providers));
     (* Empty id resolves the default runtime. *)
-    match Runtime_oas_runner.resolve_runtime_providers ~runtime_id:"" () with
+    match Runtime_agent_core_runner.For_testing.resolve_runtime_providers ~runtime_id:"" () with
     | Error msg -> Alcotest.failf "expected empty id to resolve default: %s" msg
     | Ok [ provider ] ->
       Alcotest.(check string)
@@ -842,7 +954,7 @@ let test_rerank_resolver_resolves_requested_runtime () =
 let test_rerank_resolver_errors_on_unknown_runtime_id () =
   with_runtime_initialized (fun () ->
     match
-      Runtime_oas_runner.resolve_runtime_providers ~runtime_id:"bogus.binding" ()
+      Runtime_agent_core_runner.For_testing.resolve_runtime_providers ~runtime_id:"bogus.binding" ()
     with
     | Ok _ ->
       Alcotest.fail
@@ -986,21 +1098,28 @@ let test_runtime_budget_source_survives_to_status_json () =
        | _ -> Alcotest.fail "context budget JSON must be an object"))
 ;;
 
-(* Remaining projection path: [resolve_max_context_resolution_of_meta] must
-   prefer the keeper's routed runtime (openai.gpt = 64000), NOT
-   [runtime].default (runpod_mtp.qwen = 128000). Actual turn admission is
-   exercised separately through the strict runtime-ID resolver. *)
+(* The keeper's routed runtime (openai.gpt = 64000) must be preferred over
+   [runtime].default (runpod_mtp.qwen = 128000) through the strict runtime-ID
+   resolver, which is the only remaining capacity path. *)
 let test_of_meta_projection_budgets_against_routed_runtime () =
   with_runtime_initialized (fun () ->
     (* [budgettest] is assigned [openai.gpt] in [[runtime.assignments]]. *)
-    let res =
-      Keeper_context_runtime.resolve_max_context_resolution_of_meta
-        (make_meta "budgettest")
-    in
-    Alcotest.(check int)
-      "of_meta budgets against routed runtime (openai.gpt=64000), not default (128000)"
-      64000
-      res.Keeper_context_runtime.effective_budget)
+    let m = make_meta "budgettest" in
+    let runtime_id = KMC.runtime_id_of_meta m in
+    match
+      Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+        ~requested_override:m.max_context_override
+        ~runtime_id
+    with
+    | Error error ->
+        Alcotest.failf
+          "budgettest routed runtime must resolve: %s"
+          (Keeper_context_runtime.max_context_resolution_error_to_string error)
+    | Ok res ->
+        Alcotest.(check int)
+          "of_meta budgets against routed runtime (openai.gpt=64000), not default (128000)"
+          64000
+          res.Keeper_context_runtime.effective_budget)
 ;;
 
 (* ---- per-model thinking gate: runtime.toml [thinking-support] drives the
@@ -1192,7 +1311,7 @@ let test_thinking_support_true_leaves_preserve_unset () =
   with_runtime_thinking (fun () ->
     let seed = Runtime_inference.for_runtime ~name:"ollama_cloud.thinkdefault" in
     Alcotest.(check (option bool))
-      "OAS request-side preserve capability does not auto-enable preserve"
+      "AGENT_CORE request-side preserve capability does not auto-enable preserve"
       None
       seed.Runtime_inference.preserve_thinking)
 ;;
@@ -1271,7 +1390,7 @@ let test_runtime_inventory_surfaces_effective_capabilities () =
     let caps = thinkdefault |> J.member "effective_capabilities" in
     Alcotest.(check string)
       "effective capability source"
-      "oas-provider-config-model"
+      "agent_core-provider-config-model"
       (caps |> J.member "source" |> J.to_string);
     Alcotest.(check int)
       "effective max output"
@@ -1364,7 +1483,7 @@ let test_runtime_inventory_surfaces_request_config () =
     let request = thinkdefault |> J.member "request_config" in
     Alcotest.(check string)
       "request config source"
-      "oas-provider-config"
+      "agent_core-provider-config"
       (request |> J.member "source" |> J.to_string);
     Alcotest.(check string)
       "provider kind"
@@ -1578,7 +1697,7 @@ let test_max_output_tokens_accessor_projects_catalog () =
 let test_max_context_accessor_clamps_to_provider_cap () =
   with_runtime_thinking (fun () ->
     Alcotest.(check (option int))
-      "runtime TOML 524288 is clamped to provider/OAS qwen36 cap 131072"
+      "runtime TOML 524288 is clamped to provider/AGENT_CORE qwen36 cap 131072"
       (Some 131072)
       (Runtime.max_context_of_runtime_id "ollama_cloud.stalecontext");
     let resolution =
@@ -1601,7 +1720,7 @@ let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
   let keeper_logged_max_context =
     fixture_int_field fields "keeper_logged_max_context"
   in
-  let oas_provider_limit = fixture_int_field fields "oas_provider_limit" in
+  let agent_core_provider_limit = fixture_int_field fields "agent_core_provider_limit" in
   Alcotest.(check string)
     "fixture runtime id"
     "ollama_cloud.stalecontext"
@@ -1611,13 +1730,13 @@ let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
     524288
     keeper_logged_max_context;
   Alcotest.(check int)
-    "fixture captures OAS provider cap"
+    "fixture captures AGENT_CORE provider cap"
     131072
-    oas_provider_limit;
+    agent_core_provider_limit;
   with_runtime_thinking (fun () ->
     Alcotest.(check (option int))
       "current runtime accessor replays fixture through provider cap"
-      (Some oas_provider_limit)
+      (Some agent_core_provider_limit)
       (Runtime.max_context_of_runtime_id runtime_id);
     let resolution =
       Keeper_context_runtime.resolve_max_context_resolution
@@ -1626,7 +1745,7 @@ let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
     in
     Alcotest.(check int)
       "current keeper budget no longer reproduces historical oversized value"
-      oas_provider_limit
+      agent_core_provider_limit
       resolution.Keeper_context_runtime.effective_budget;
     Alcotest.(check bool)
       "historical oversized keeper budget is not current effective budget"
@@ -1640,7 +1759,7 @@ let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
    Regression guard for messages-http boot diagnostics (2026-07-03): an
    unregistered [messages-http] provider binding cannot be materialized into a
    provider_config, so it is dropped from the runtime list. An assignment
-   targeting it used to report the misleading "[runtime.assignments].ramarama =
+   targeting it used to report the misleading "[runtime.assignments].nu =
    ... not found among N runtimes" — pointing the operator at a typo that does
    not exist — when the real cause is that the binding was defined but failed to
    materialize. Behavior is unchanged (the binding is still excluded,
@@ -1649,7 +1768,7 @@ let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
    "not found among N runtimes". Registered providers such as Kimi keep using
    the provider registry SSOT to materialize their messages-compatible kind. *)
 
-(* [ramarama] is assigned [local.kimi-for-coding], a defined binding whose
+(* [nu] is assigned [local.kimi-for-coding], a defined binding whose
    provider uses protocol messages-http but has no provider-registry entry. The
    default [openai.gpt] materializes so validation reaches the assignment. *)
 let runtime_config_messages_http_assignment =
@@ -1658,7 +1777,7 @@ let runtime_config_messages_http_assignment =
 default = "openai.gpt"
 
 [runtime.assignments]
-ramarama = "local.kimi-for-coding"
+nu = "local.kimi-for-coding"
 
 [providers.openai]
 display-name = "OpenAI"
@@ -1691,7 +1810,7 @@ max-concurrent = 1
 |}
 ;;
 
-(* [ramarama] is assigned [bogus.binding], which names no declared binding at
+(* [nu] is assigned [bogus.binding], which names no declared binding at
    all — the genuine operator-typo case whose "not found among N runtimes"
    message must be preserved. *)
 let runtime_config_typo_assignment =
@@ -1700,7 +1819,7 @@ let runtime_config_typo_assignment =
 default = "openai.gpt"
 
 [runtime.assignments]
-ramarama = "bogus.binding"
+nu = "bogus.binding"
 
 [providers.openai]
 display-name = "OpenAI"
@@ -1746,7 +1865,7 @@ let test_assignment_materialize_failure_surfaces_reason () =
   Alcotest.(check bool)
     "error explains the missing provider-registry SSOT entry"
     true
-    (string_contains msg "no OAS provider registry entry");
+    (string_contains msg "no AGENT_CORE provider registry entry");
   Alcotest.(check bool)
     "error does NOT fall back to the misleading bare not-found wording"
     false
@@ -1771,7 +1890,7 @@ let test_assignment_typo_keeps_not_found () =
 
 let () =
   (match Llm_provider.Model_catalog.load_default () with
-   | Error msg -> Alcotest.failf "packaged OAS models.toml should load: %s" msg
+   | Error msg -> Alcotest.failf "packaged AGENT_CORE models.toml should load: %s" msg
    | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
   Alcotest.run
     "runtime_per_keeper_routing"
@@ -1792,6 +1911,14 @@ let () =
             "dashboard runtime inventory exposes assignment status"
             `Quick
             test_runtime_inventory_surfaces_assignment_status
+        ; Alcotest.test_case
+            "dashboard Codex runtime stays unavailable until measured"
+            `Quick
+            test_codex_runtime_inventory_is_unverified_until_measured
+        ; Alcotest.test_case
+            "dashboard runtime inventory reports transport kind"
+            `Quick
+            test_runtime_inventory_reports_transport_kind
         ; Alcotest.test_case
             "unknown assignment is rejected before runtime.toml write"
             `Quick
@@ -1824,10 +1951,6 @@ let () =
             "dashboard raw runtime.toml save rejects invalid source before write"
             `Quick
             test_runtime_config_text_save_rejects_invalid_without_write
-        ; Alcotest.test_case
-            "runtime_id API arg is not rejected as a removed keeper arg"
-            `Quick
-            test_runtime_id_tool_arg_is_not_removed_keeper_arg
         ; Alcotest.test_case
             "messages-http provider loads and keeper assignment resolves"
             `Quick
@@ -1866,6 +1989,14 @@ let () =
             "of_meta projection prefers the routed runtime"
             `Quick
             test_of_meta_projection_budgets_against_routed_runtime
+        ; Alcotest.test_case
+            "Codex official-client runtime cannot enter AGENT_CORE runner"
+            `Quick
+            test_codex_runtime_cannot_enter_agent_core_runner
+        ; Alcotest.test_case
+            "Codex official-client runtime has no AGENT_CORE thinking seed"
+            `Quick
+            test_codex_runtime_has_no_agent_core_thinking_seed
         ] )
     ; ( "per-model thinking gate"
       , [ Alcotest.test_case
@@ -1885,15 +2016,15 @@ let () =
             `Quick
             test_thinking_support_false_forces_off
         ; Alcotest.test_case
-            "runtime inventory surfaces OAS parameter policy"
+            "runtime inventory surfaces AGENT_CORE parameter policy"
             `Quick
             test_runtime_inventory_surfaces_parameter_policy
         ; Alcotest.test_case
-            "runtime inventory surfaces OAS effective capabilities"
+            "runtime inventory surfaces AGENT_CORE effective capabilities"
             `Quick
             test_runtime_inventory_surfaces_effective_capabilities
         ; Alcotest.test_case
-            "runtime inventory surfaces OAS request config"
+            "runtime inventory surfaces AGENT_CORE request config"
             `Quick
             test_runtime_inventory_surfaces_request_config
         ; Alcotest.test_case

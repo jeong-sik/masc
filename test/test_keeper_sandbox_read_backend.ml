@@ -56,17 +56,6 @@ let read_file path =
   Fun.protect ~finally:(fun () -> close_in ic) @@ fun () ->
   really_input_string ic (in_channel_length ic)
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop i =
-    if nlen = 0 then true
-    else if i + nlen > hlen then false
-    else if String.sub haystack i nlen = needle then true
-    else loop (i + 1)
-  in
-  loop 0
-
 let env_file_path_from_docker_line line =
   let rec loop = function
     | "--env-file" :: path :: _ -> Some path
@@ -268,11 +257,11 @@ let test_read_directory_names_a_real_listing_tool () =
   | Ok _ -> Alcotest.fail "expected path_is_directory error for a directory"
   | Error msg ->
       Alcotest.(check bool) "error reports path_is_directory" true
-        (contains_substring msg "path_is_directory");
+        (String_util.contains_substring msg "path_is_directory");
       Alcotest.(check bool)
         "error names a real listing command"
         true
-        (contains_substring msg "argv=['ls'")
+        (String_util.contains_substring msg "argv=['ls'")
 
 (* ── run_command error paths
    (exercised without invoking docker) ──────────────────────────── *)
@@ -860,7 +849,7 @@ case \"$1\" in\n\
         exit 1\n\
         ;;\n\
       rm-gone)\n\
-        printf '\\t100.000\\tfalse\\t600\\n'\n\
+        printf '4242\\t100.000\\tfalse\\t600\\n'\n\
         exit 0\n\
         ;;\n\
     esac\n\
@@ -945,7 +934,7 @@ let test_sandbox_container_label_args_include_managed_ttl () =
     Keeper_sandbox_runtime.docker_label_args
       ~ttl_sec:90.0
       ~base_path:"/tmp/masc"
-      ~keeper_name:"issue-king"
+      ~keeper_name:"kappa-keeper"
       ~container_kind:"managed"
       ~network_label:"inherit" ()
   in
@@ -1076,6 +1065,41 @@ let test_docker_failure_class_is_typed_and_serializes_stable_string () =
      | Docker_daemon_timeout -> true
      | _ -> false)
 
+(* Under a non-default cluster the board, task and goal stores live in
+   .masc/clusters/<name>/, which is where Board_paths reads them. A mount
+   rooted at .masc/ handed the container a different set of files — usually
+   none, since the default-cluster copies do not exist (#28953). *)
+let test_docker_workspace_state_mounts_follow_the_cluster () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_CLUSTER_NAME" "cluster-alpha" @@ fun () ->
+  let default_root = Filename.concat base ".masc" in
+  let cluster_root =
+    Filename.concat (Filename.concat default_root "clusters") "cluster-alpha"
+  in
+  ensure_dir cluster_root;
+  write_file (Filename.concat cluster_root "board_posts.jsonl") "";
+  (* A same-named file in the default root, so a mount that ignores the cluster
+     still finds something and the assertion below is about which one. *)
+  ensure_dir default_root;
+  write_file (Filename.concat default_root "board_posts.jsonl") "";
+  let specs =
+    Keeper_sandbox_runtime.docker_workspace_state_mount_specs
+      ~base_path:base
+      ~container_root:"/home/keeper/playground/minjae"
+  in
+  Alcotest.(check bool) "mounts the cluster's board posts" true
+    (List.mem
+       (Filename.concat cluster_root "board_posts.jsonl"
+        ^ ":/tmp/masc-runtime/.masc/board_posts.jsonl:ro")
+       specs);
+  Alcotest.(check bool) "does not mount the default-cluster copy" false
+    (List.mem
+       (Filename.concat default_root "board_posts.jsonl"
+        ^ ":/tmp/masc-runtime/.masc/board_posts.jsonl:ro")
+       specs)
+;;
+
 let test_docker_workspace_state_mount_args_expose_safe_subset () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -1120,7 +1144,7 @@ let test_docker_workspace_state_mount_args_expose_safe_subset () =
          | _ -> false)
        specs);
   Alcotest.(check bool) "does not mount auth" false
-    (List.exists (fun spec -> contains_substring spec "/auth/") specs)
+    (List.exists (fun spec -> String_util.contains_substring spec "/auth/") specs)
 
 let test_cleanup_stale_containers_removes_only_stale_masc_scope () =
   with_fake_docker fake_docker_cleanup_script @@ fun () ->
@@ -1140,9 +1164,9 @@ let test_cleanup_stale_containers_removes_only_stale_masc_scope () =
   Alcotest.(check (list string)) "no cleanup errors" [] result.errors;
   let log = read_file log_path in
   Alcotest.(check bool) "removes old container" true
-    (contains_substring log "rm -f -v old-container");
+    (String_util.contains_substring log "rm -f -v old-container");
   Alcotest.(check bool) "keeps fresh container" false
-    (contains_substring log "rm -f -v fresh-container")
+    (String_util.contains_substring log "rm -f -v fresh-container")
 
 let test_cleanup_stale_containers_accepts_concurrent_disappearance () =
   with_fake_docker fake_docker_cleanup_disappeared_script @@ fun () ->
@@ -1163,11 +1187,11 @@ let test_cleanup_stale_containers_accepts_concurrent_disappearance () =
   Alcotest.(check bool)
     "inspect-absent container is not removed again"
     false
-    (contains_substring log "rm -f -v inspect-gone");
+    (String_util.contains_substring log "rm -f -v inspect-gone");
   Alcotest.(check bool)
     "remove race reaches docker rm"
     true
-    (contains_substring log "rm -f -v rm-gone")
+    (String_util.contains_substring log "rm -f -v rm-gone")
 
 let test_cleanup_stale_containers_preserves_present_failure () =
   with_fake_docker fake_docker_cleanup_present_failure_script @@ fun () ->
@@ -1187,7 +1211,7 @@ let test_cleanup_stale_containers_preserves_present_failure () =
     Alcotest.(check bool)
       "original inspect failure remains explicit"
       true
-      (contains_substring error "synthetic inspect failure")
+      (String_util.contains_substring error "synthetic inspect failure")
   | errors -> Alcotest.failf "expected one explicit cleanup error, got %d" (List.length errors)
 
 let test_maybe_cleanup_disappearance_allows_next_interval () =
@@ -1262,7 +1286,7 @@ let test_maybe_cleanup_stale_containers_runs_once_per_interval () =
     |> String.split_on_char '\n'
     |> List.filter (fun line ->
       String.starts_with ~prefix:"ps -aq " line
-      && contains_substring
+      && String_util.contains_substring
            line
            "label=masc.mcp.component=keeper-sandbox")
     |> List.length
@@ -1477,7 +1501,7 @@ let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
                  ~max_bytes:4096 ~timeout_sec:5.0 ()));
       let run_started () =
         Sys.file_exists log_path
-        && contains_substring (read_file log_path) "run-started"
+        && String_util.contains_substring (read_file log_path) "run-started"
       in
       Alcotest.(check bool)
         "fallback docker run holds Docker_spawn slot after run starts"
@@ -1536,11 +1560,11 @@ let test_run_command_projects_keeper_secret_dir () =
   | Ok (_st, _out) ->
     let line = read_file log_path in
     Alcotest.(check bool) "projected raw token not in docker argv" false
-      (contains_substring line "projected-token");
+      (String_util.contains_substring line "projected-token");
     Alcotest.(check bool) "projected env uses env-file" true
-      (contains_substring line "--env-file ");
+      (String_util.contains_substring line "--env-file ");
     Alcotest.(check bool) "projected file mounted read-only" true
-      (contains_substring line (ssh_path ^ ":/home/keeper/.ssh/id_ed25519:ro"));
+      (String_util.contains_substring line (ssh_path ^ ":/home/keeper/.ssh/id_ed25519:ro"));
     (match env_file_path_from_docker_line line with
      | None -> Alcotest.fail "missing --env-file path in docker log"
      | Some env_file ->
@@ -1565,9 +1589,9 @@ let test_run_command_scrubs_sensitive_env () =
       let env_dump_path = log_path ^ ".env" in
       let env_dump = read_file env_dump_path in
       Alcotest.(check bool) "GH_TOKEN scrubbed" false
-        (contains_substring env_dump "GH_TOKEN=");
+        (String_util.contains_substring env_dump "GH_TOKEN=");
       Alcotest.(check bool) "ANTHROPIC_API_KEY scrubbed" false
-        (contains_substring env_dump "ANTHROPIC_API_KEY=")
+        (String_util.contains_substring env_dump "ANTHROPIC_API_KEY=")
 
 let test_turn_runtime_reuses_single_container () =
   with_fake_docker fake_docker_turn_runtime_script @@ fun () ->
@@ -1637,13 +1661,13 @@ let test_turn_runtime_reuses_single_container () =
     |> Option.value ~default:""
   in
   Alcotest.(check bool) "turn run mounts config read-only" true
-    (contains_substring
+    (String_util.contains_substring
        run_line
        (host_config_dir ^ ":" ^ container_config_dir ^ ":ro"));
   Alcotest.(check bool) "turn run pins MASC_CONFIG_DIR" true
-    (contains_substring run_line ("MASC_CONFIG_DIR=" ^ container_config_dir));
+    (String_util.contains_substring run_line ("MASC_CONFIG_DIR=" ^ container_config_dir));
   Alcotest.(check bool) "turn exec pins MASC_CONFIG_DIR" true
-    (contains_substring exec_line ("MASC_CONFIG_DIR=" ^ container_config_dir))
+    (String_util.contains_substring exec_line ("MASC_CONFIG_DIR=" ^ container_config_dir))
 
 let test_streaming_exec_validates_cached_container_before_retry () =
   with_fake_docker fake_docker_stale_streaming_retry_script @@ fun () ->
@@ -1667,19 +1691,19 @@ let test_streaming_exec_validates_cached_container_before_retry () =
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
   (match
-     Keeper_turn_sandbox_runtime.run_exec_with_status
+     Keeper_turn_sandbox_runtime.run_exec_with_status_split
        ~timeout_sec:5.0
        runtime
        ~cwd:host_root
        ~command_argv:[ "cat"; "/tmp/first" ]
    with
    | Error msg -> Alcotest.failf "expected initial exec success, got %s" msg
-   | Ok (Unix.WEXITED 0, out) ->
+   | Ok (Unix.WEXITED 0, out, _) ->
        Alcotest.(check string) "initial exec output" "exec ok\n" out
    | Ok _ -> Alcotest.fail "expected initial exec exit 0");
   let stderr_chunks = ref [] in
   (match
-     Keeper_turn_sandbox_runtime.run_exec_with_status
+     Keeper_turn_sandbox_runtime.run_exec_with_status_split
        ~on_stderr_chunk:(fun chunk -> stderr_chunks := chunk :: !stderr_chunks)
        ~timeout_sec:5.0
        runtime
@@ -1687,14 +1711,14 @@ let test_streaming_exec_validates_cached_container_before_retry () =
        ~command_argv:[ "cat"; "/tmp/second" ]
    with
    | Error msg -> Alcotest.failf "expected retried exec success, got %s" msg
-   | Ok (Unix.WEXITED 0, out) ->
+   | Ok (Unix.WEXITED 0, out, _) ->
        Alcotest.(check string) "retried exec output" "exec ok\n" out
    | Ok _ -> Alcotest.fail "expected retried exec exit 0");
   let streamed_stderr = String.concat "" (List.rev !stderr_chunks) in
   Alcotest.(check bool)
     "stale container error is not streamed"
     false
-    (contains_substring streamed_stderr "synthetic opaque state inspection failure")
+    (String_util.contains_substring streamed_stderr "synthetic opaque state inspection failure")
 
 let test_streaming_exec_preserves_split_stderr () =
   with_fake_docker fake_docker_turn_runtime_script @@ fun () ->
@@ -1769,7 +1793,7 @@ let test_streaming_exec_forwards_timeout_to_split_exec () =
        Alcotest.(check bool)
          "timeout stderr surfaced"
          true
-         (contains_substring stderr "timeout after")
+         (String_util.contains_substring stderr "timeout after")
    | Ok _ -> Alcotest.fail "expected split exec timeout exit 124");
   let elapsed = Unix.gettimeofday () -. start in
   Alcotest.(check bool)
@@ -1815,7 +1839,7 @@ let test_streaming_pipeline_forwards_timeout_to_split_exec () =
        Alcotest.(check bool)
          "pipeline timeout stderr surfaced"
          true
-         (contains_substring stderr "timeout after")
+         (String_util.contains_substring stderr "timeout after")
    | Ok _ -> Alcotest.fail "expected pipeline timeout exit 124");
   let elapsed = Unix.gettimeofday () -. start in
   Alcotest.(check string)
@@ -1845,19 +1869,19 @@ let test_streaming_exec_restarts_stopped_container_before_exec () =
     Keeper_turn_sandbox_runtime.cleanup runtime;
     cleanup_dir base) @@ fun () ->
   (match
-     Keeper_turn_sandbox_runtime.run_exec_with_status
+     Keeper_turn_sandbox_runtime.run_exec_with_status_split
        ~timeout_sec:5.0
        runtime
        ~cwd:host_root
        ~command_argv:[ "cat"; "/tmp/first" ]
    with
    | Error msg -> Alcotest.failf "expected initial exec success, got %s" msg
-   | Ok (Unix.WEXITED 0, out) ->
+   | Ok (Unix.WEXITED 0, out, _) ->
        Alcotest.(check string) "initial exec output" "exec ok\n" out
    | Ok _ -> Alcotest.fail "expected initial exec exit 0");
   let stderr_chunks = ref [] in
   (match
-     Keeper_turn_sandbox_runtime.run_exec_with_status
+     Keeper_turn_sandbox_runtime.run_exec_with_status_split
        ~on_stderr_chunk:(fun chunk -> stderr_chunks := chunk :: !stderr_chunks)
        ~timeout_sec:5.0
        runtime
@@ -1865,14 +1889,14 @@ let test_streaming_exec_restarts_stopped_container_before_exec () =
        ~command_argv:[ "cat"; "/tmp/second" ]
    with
    | Error msg -> Alcotest.failf "expected restarted exec success, got %s" msg
-   | Ok (Unix.WEXITED 0, out) ->
+   | Ok (Unix.WEXITED 0, out, _) ->
        Alcotest.(check string) "restarted exec output" "exec ok\n" out
    | Ok _ -> Alcotest.fail "expected restarted exec exit 0");
   let streamed_stderr = String.concat "" (List.rev !stderr_chunks) in
   Alcotest.(check bool)
     "stopped container error is not streamed"
     false
-    (contains_substring streamed_stderr "synthetic opaque stopped-container exec failure")
+    (String_util.contains_substring streamed_stderr "synthetic opaque stopped-container exec failure")
 
 let test_streaming_exec_surfaces_process_failure_once () =
   with_fake_docker fake_docker_streaming_script @@ fun () ->
@@ -2059,7 +2083,7 @@ let test_default_fs_hardening_helpers () =
     [ "--read-only" ]
     (Env_config_sandbox.Hardening.read_only_rootfs_args ());
   Alcotest.(check bool) "default helper keeps tmpfs noexec" true
-    (contains_substring
+    (String_util.contains_substring
        (Env_config_sandbox.Hardening.tmpfs_mount ())
        "/tmp:rw,nosuid,nodev,noexec,size=")
 
@@ -2068,11 +2092,11 @@ let test_relaxed_fs_helpers () =
   Alcotest.(check (list string)) "relaxed helper drops read-only rootfs"
     [] (Env_config_sandbox.Hardening.read_only_rootfs_args ());
   Alcotest.(check bool) "relaxed helper drops tmpfs noexec" false
-    (contains_substring
+    (String_util.contains_substring
        (Env_config_sandbox.Hardening.tmpfs_mount ())
        "/tmp:rw,nosuid,nodev,noexec,size=");
   Alcotest.(check bool) "relaxed helper keeps writable tmpfs mount" true
-    (contains_substring
+    (String_util.contains_substring
        (Env_config_sandbox.Hardening.tmpfs_mount ())
        "/tmp:rw,nosuid,nodev,size=")
 
@@ -2110,11 +2134,11 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
   | None -> Alcotest.fail "expected docker run log line"
   | Some line ->
       Alcotest.(check bool) "relaxed runtime drops read-only rootfs" false
-        (contains_substring line "--read-only");
+        (String_util.contains_substring line "--read-only");
       Alcotest.(check bool) "relaxed runtime drops tmpfs noexec" false
-        (contains_substring line "/tmp:rw,nosuid,nodev,noexec,size=");
+        (String_util.contains_substring line "/tmp:rw,nosuid,nodev,noexec,size=");
       Alcotest.(check bool) "relaxed runtime keeps tmpfs mount" true
-        (contains_substring line "/tmp:rw,nosuid,nodev,size=")
+        (String_util.contains_substring line "/tmp:rw,nosuid,nodev,size=")
 
 let run_tests ~clock () =
   Alcotest.run "Keeper_sandbox_read_backend"
@@ -2142,6 +2166,8 @@ let run_tests ~clock () =
             test_docker_failure_class_is_typed_and_serializes_stable_string;
           Alcotest.test_case "docker workspace state mount exposes safe subset" `Quick
             test_docker_workspace_state_mount_args_expose_safe_subset;
+          Alcotest.test_case "docker-workspace-state-mounts-follow-the-cluster" `Quick
+            test_docker_workspace_state_mounts_follow_the_cluster;
           Alcotest.test_case "managed label args include ttl" `Quick
             test_sandbox_container_label_args_include_managed_ttl;
           Alcotest.test_case "sandbox label args include owner scope" `Quick

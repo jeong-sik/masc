@@ -8,14 +8,14 @@ open Keeper_types_profile
 type run_context =
   { meta : keeper_meta
   ; temperature : float
-  ; context_injector : Agent_sdk.Hooks.context_injector
-  ; shared_context : Agent_sdk.Context.t
+  ; context_injector : Agent_core.Hooks.context_injector
+  ; shared_context : Agent_core.Context.t
   ; session_dir : string
   ; session : Keeper_types.session_context
   ; loaded_checkpoint_present : bool
   ; base_system_prompt : string
   ; ctx_work : working_context
-  ; resume_oas_checkpoint : Agent_sdk.Checkpoint.t option
+  ; resume_agent_core_checkpoint : Agent_core.Checkpoint.t option
   ; start_turn_count : int
   ; receipt_started_at : string
   ; config_root : string
@@ -37,8 +37,7 @@ val prepare_run_context :
   -> base_dir:string
   -> runtime_id:string
   -> ?temperature:float
-  -> ?shared_context:Agent_sdk.Context.t
-  -> generation:int
+  -> ?shared_context:Agent_core.Context.t
   -> unit
   -> run_context
 (** Resolve [temperature] as the caller fallback; a temperature declared by the

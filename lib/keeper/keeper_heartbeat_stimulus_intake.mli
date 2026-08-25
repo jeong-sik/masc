@@ -11,10 +11,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_execution
 
-(** [stimulus_urgency_to_string u] returns the Otel_metric_store / log label
-    for [u] ([immediate] / [normal] / [low]). *)
-val stimulus_urgency_to_string : Keeper_event_queue.urgency -> string
-
 (** [pending_board_event_of_stimulus ~meta_after_triage stim] wraps a
     stimulus into a pending board event, threading the keeper meta's
     continuity summary. [Error unavailable] reports a failed board read
@@ -90,6 +86,7 @@ type heartbeat_event_intake = {
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
   pending_selection : Keeper_event_queue_state.pending_selection option;
+  consumed_selections : Keeper_event_queue_state.pending_selection list;
   event_queue_intake_error : event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
@@ -97,12 +94,35 @@ type heartbeat_event_intake = {
 (** [consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim]
     increments Otel_metric_store and logs only after consumption is known.
     A transient Board read returns [Stimulus_retry_later] without incrementing
-    the consumed counter. *)
+    the consumed counter.
+
+    [?connector_attention_items] (RFC-0377 P1-1): for a [Connector_attention]
+    stimulus, a preloaded (event_id, item) association to resolve [stim]'s
+    recorded item from instead of a fresh
+    {!Keeper_external_attention.load_events} scan. The caller supplies this
+    when consuming a batch of Connector_attention stimuli (the primary plus
+    same-conversation companions) so the whole batch costs one scan
+    ({!Keeper_external_attention.recorded_items_by_event_ids}) rather than
+    one scan per stimulus. Omitted (or [None]), this falls back to the
+    original one-id-at-a-time lookup — unchanged for every non-batched
+    call. Ignored for every other payload kind. *)
 val consume_single_heartbeat_stimulus
   :  ctx:_ context
   -> meta_after_triage:keeper_meta
+  -> ?connector_attention_items:(string * Keeper_external_attention.item) list
   -> Keeper_event_queue.stimulus
   -> stimulus_intake_result
+
+(** [ready_hitl_resolution_peek ~base_path ~keeper_name] returns the first
+    queued [Hitl_resolved] whose approval has left the pending map, without
+    consuming the queue entry (#28809). A turn woken by a different stimulus
+    projects this durable resolution as cycle context so the RFC-0356 host
+    replay is not starved behind the queue position; the untouched entry is
+    later retired by [reconcile_spent_selection] once its grant is spent. *)
+val ready_hitl_resolution_peek
+  :  base_path:string
+  -> keeper_name:string
+  -> Keeper_event_queue.hitl_resolution option
 
 type spent_selection_reconciliation =
   | Selection_actionable
@@ -121,13 +141,25 @@ val reconcile_spent_selection
 
 (** [heartbeat_event_intake ~ctx ~meta_after_triage
      ~pending_board_events]
-    peeks at most one ready Event-Layer stimulus (per RFC-0020 §3 Rule 4).
-    A pending [Manual_compaction_requested] is the sole runtime
+    peeks at most one ready Event-Layer *selection* per turn (per RFC-0020
+    §3 Rule 4). A pending [Manual_compaction_requested] is the sole runtime
     exception: it is selected ahead of data-plane stimuli so an in-flight
     source checkpoint can yield, compact, and then resume from the unchanged
-    durable queue. The selected observation is merged with the
-    [pending_board_events] already accumulated by the caller, deduplicating by
-    [post_id]. A
+    durable queue.
+
+    RFC-0377: when that selection is a [Connector_attention] stimulus, every
+    OTHER pending [Connector_attention] stimulus for the same conversation
+    (same {!Keeper_continuation_channel.same_conversation} channel) is
+    admitted into this same turn too, in arrival order — one turn sees the
+    whole backlog for that conversation instead of one message per turn.
+    [consumed_stimuli]/[consumed_selections] then hold every admitted
+    stimulus (primary first), not only the primary; [pending_selection]
+    stays the primary alone. Other conversations' stimuli, and every
+    non-[Connector_attention] payload, keep the pre-RFC-0377 single-stimulus
+    behavior.
+
+    The selected observation(s) are merged with the [pending_board_events]
+    already accumulated by the caller, deduplicating by [post_id]. A
     [Hitl_resolved] stimulus remains queued until its exact approval id has
     left the pending map, while later ready stimuli can still be selected.
     A transient Board read returns no consumed stimuli, keeps the exact

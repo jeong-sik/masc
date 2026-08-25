@@ -28,7 +28,7 @@
    final assertion fails.
 
    The test does NOT call the keeper post-turn lifecycle — that
-   brings in the entire keeper FSM including OAS Checkpoint construction.
+   brings in the entire keeper FSM including AGENT_CORE Checkpoint construction.
    The pieces excerpted here are the same modules
    apply_multimodal_wirein dispatches to, so the chain is identical
    from the artifact's point of view. *)

@@ -14,8 +14,8 @@
 
 
 
-    Internal: filesystem helpers ([ensure_dir],
-    [read_file_content], [write_file_content]), text helpers
+    Internal: filesystem helpers ([read_file_content],
+    [write_file_content]), text helpers
     ([find_substring_from], [normalize_placeholder],
     [extract_markdown_section]), markdown parser
     ([parsed_full_context] type + [parse_full_context_markdown]),

@@ -62,18 +62,6 @@ type credential_status =
   | Credential_present of agent_credential
   | Credential_missing
 
-let audit_keeper_credentials config ~keeper_names =
-  List.map
-    (fun keeper_name ->
-       let status =
-         match load_credential config keeper_name with
-         | Some cred -> Credential_present cred
-         | None -> Credential_missing
-       in
-       keeper_name, status)
-    keeper_names
-;;
-
 (** Refresh a token (generate new one, update credential) *)
 let refresh_token config ~agent_name ~old_token
   : (string * agent_credential, masc_error) result
@@ -132,7 +120,9 @@ let verify_workspace_secret config ~cached_hash secret : bool =
        if Sys.file_exists file
        then constant_time_string_equal hash (String.trim (In_channel.with_open_text file In_channel.input_all))
        else false
-     with _ -> false)
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | _ -> false)
 ;;
 
 let check_permission config ~agent_name ~token ~permission : (unit, masc_error) result =

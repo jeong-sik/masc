@@ -13,8 +13,7 @@ import type { Goal, Task } from '../../types'
 export type GoalPhaseFilter =
   | 'all'
   | 'executing'
-  | 'blocked'
-  | 'paused'
+  | 'verifying'
   | 'completed'
   | 'dropped'
 
@@ -60,9 +59,9 @@ export function goalById(id: string): Goal | undefined {
 }
 
 // -- Task completion counts --------------------------------------
-// This is not a goal-attainment metric. It is a count of linked tasks from
-// the planning store, used only where the richer dashboard goal-tree summary
-// is not available yet. Metric/attainment truth belongs to the goal-tree API.
+// A count of linked tasks from the planning store. It says how many tasks
+// finished, not whether the goal's declared metric was reached — nothing in
+// the system answers that, and nothing here should look like it does.
 
 export interface GoalProgress {
   done: number
@@ -117,7 +116,7 @@ export function TaskProgressBar({ done, total, size = 'md' }: { done: number; to
     <div class="flex items-center gap-2">
       <div
         class="flex-1 ${h} rounded-[var(--r-0)] bg-[var(--color-bg-hover)] overflow-hidden"
-        title="Linked task completion count. This is not a goal-attainment metric."
+        title="끝난 하위 작업 수. 목표 지표를 잰 값이 아닙니다."
         data-task-count-meter
         data-task-count-meter-pct=${pct}
       >
@@ -137,8 +136,7 @@ export function priorityStars(n: number): string {
 export function goalPhaseLabel(phase: string): string {
   switch (phase) {
     case 'executing': return '실행 중'
-    case 'blocked': return '차단됨'
-    case 'paused': return '일시정지'
+    case 'verifying': return '검증 중'
     case 'completed': return '완료'
     case 'dropped': return '중단'
     default: return phase
@@ -148,8 +146,7 @@ export function goalPhaseLabel(phase: string): string {
 export function goalPhaseStatus(phase: string): string {
   switch (phase) {
     case 'completed': return 'completed'
-    case 'blocked': return 'error'
-    case 'paused': return 'paused'
+    case 'verifying': return 'awaiting_verification'
     case 'dropped': return 'offline'
     case 'executing':
     default:
@@ -176,8 +173,7 @@ export function matchesGoalPhaseFilter(
 export function phaseFilterLabel(value: GoalPhaseFilter): string {
   switch (value) {
     case 'executing':
-    case 'blocked':
-    case 'paused':
+    case 'verifying':
     case 'completed':
     case 'dropped':
       return goalPhaseLabel(value)

@@ -3,6 +3,7 @@ include Server_dashboard_http_composite_recommendations
 
 let enrich_composite_snapshot_json
       ~(config : Workspace.config)
+      ~claim_window
       (entry : Keeper_registry.registry_entry)
       json
   =
@@ -20,7 +21,9 @@ let enrich_composite_snapshot_json
               || String.equal name "recommended_actions"))
         fields
     in
-    let execution = composite_execution_receipt_json ~config ~keeper_name in
+    let execution =
+      composite_execution_receipt_json ~config ~claim_window ~keeper_name
+    in
     let attention = composite_runtime_attention ~snapshot:json ~execution in
     let recommended_actions =
       composite_recommended_actions_json ~keeper_name ~snapshot:json ~execution ~attention
@@ -43,14 +46,28 @@ let enrich_composite_snapshot_json
   | other -> other
 ;;
 
-let dashboard_keeper_composite_json
+(* The projection itself. Both routes below run exactly this; they differ only
+   in who owns the tool-call window it reads from. *)
+let composite_snapshot_json
       ~(config : Workspace.config)
+      ~claim_window
       (entry : Keeper_registry.registry_entry)
   : Yojson.Safe.t
   =
   Keeper_composite_observer.observe entry
   |> Keeper_composite_observer.snapshot_to_json
-  |> enrich_composite_snapshot_json ~config entry
+  |> enrich_composite_snapshot_json ~config ~claim_window entry
+;;
+
+let dashboard_keeper_composite_json
+      ~(config : Workspace.config)
+      (entry : Keeper_registry.registry_entry)
+  : Yojson.Safe.t
+  =
+  (* Single-keeper route: one window read, the same one the per-keeper
+     [read_recent] performed before. Cost here is unchanged; the saving is in
+     the fleet envelope below, which shares one window across every keeper. *)
+  composite_snapshot_json ~config ~claim_window:(read_claim_window ()) entry
 ;;
 
 let dashboard_fleet_composite_json ~(config : Workspace.config) () : Yojson.Safe.t =
@@ -74,7 +91,14 @@ let dashboard_fleet_composite_json ~(config : Workspace.config) () : Yojson.Safe
     (fun () ->
       Domain_pool_ref.submit_io_or_inline (fun () ->
         let entries = Keeper_registry.all ~base_path:config.base_path () in
-        let snapshots = List.map (dashboard_keeper_composite_json ~config) entries in
+        (* One tool-call window for the whole envelope. Every keeper's claim
+           lookup used to read this same fleet-wide tail for itself, so the
+           store was read and parsed once per keeper to produce N answers that
+           one read produces. *)
+        let claim_window = read_claim_window () in
+        let snapshots =
+          List.map (composite_snapshot_json ~config ~claim_window) entries
+        in
         `Assoc
           (* generated_at is a unix-second number (not ISO8601 string) to match the
              sibling timestamps in this same envelope (snapshots[].started_at /

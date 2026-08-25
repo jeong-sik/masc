@@ -237,7 +237,7 @@ let handle_initialize_eio ?(profile = Full) id params =
              ; ( "_meta"
                , `Assoc
                    [ "serverStartedAt", `String (Masc_domain.now_iso ())
-                   ; "serverVersion", `String Version.version
+                   ; "serverVersion", `String Runtime_build_version.current
                    ; ( "profile"
                      , `String
                          (match profile with
@@ -281,7 +281,6 @@ let handle_list_tools_eio
       ?names
       ?(include_hidden = false)
       ?(include_usage = false)
-      ?(include_agent_internal = false)
       ?cursor
       ?agent_id
       state
@@ -299,7 +298,6 @@ let handle_list_tools_eio
   let tools =
     TP.tool_schemas_for_profile
       ~include_hidden
-      ~include_agent_internal
       state
       profile
     |> (match names with
@@ -307,9 +305,6 @@ let handle_list_tools_eio
       | Some wanted ->
         List.filter (fun (schema : Masc_domain.tool_schema) ->
           List.mem schema.name wanted))
-    (* The Agent_internal surface was empty, so the former agent-internal-first
-       ranking applied to no schema; the order reduces to name comparison.
-       Surface deleted in the surface-cut refactor. *)
     |> List.sort (fun (a : Masc_domain.tool_schema) (b : Masc_domain.tool_schema) ->
       String.compare a.name b.name)
   in
@@ -557,7 +552,11 @@ let handle_dashboard_subscribe_eio id ?mcp_session_id params =
   | Some session_id, Some (`Assoc fields) ->
     let route = optional_string_member "route" fields in
     let slices = string_list_member "slices" fields in
-    let slices = if slices = [] then [ "shell"; "namespace"; "transport" ] else slices in
+    (* Server-side copy of the dashboard's GLOBAL_DASHBOARD_PUSH_SLICES, for a
+       caller that subscribes without naming slices. "shell" was here until
+       #27027 deleted the snapshot provider that was its only filler; keeping it
+       would hand such a caller a slice no event can ever be routed to. *)
+    let slices = if slices = [] then [ "namespace"; "transport" ] else slices in
     !dashboard_subscribe_handler ~session_id ?route ~slices ()
     |> dashboard_response_or_error id
   | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
@@ -913,7 +912,6 @@ let handle_request
                          ?names
                          ~include_hidden
                          ~include_usage
-                         ~include_agent_internal:internal_keeper_runtime
                          ?cursor
                          ?agent_id:auth_token
                          state
@@ -941,15 +939,18 @@ let handle_request
                            (max 0.0 (Eio.Time.now clock -. operation_start_time));
                        make_error_typed ~id code message)
 	                in
-	                (match req.params with
-	                 | Some params ->
-	                   let params_tool_name () =
-	                     match Json_util.get_string params "name" with
-	                     | Some name -> name
-	                     | None -> ""
-	                   in
+	                (match Mcp_server_eio_call_request.decode req.params with
+	                 | Error error ->
+	                   failed_tool_call_error
+	                     ~tool_name:
+	                       (Option.value
+	                          ~default:""
+	                          (Mcp_server_eio_call_request.error_requested_name error))
+	                     Mcp_error_code.Invalid_params
+	                     (Mcp_server_eio_call_request.error_message error)
+	                 | Ok call ->
+	                   let name = Mcp_server_eio_call_request.requested_name call in
 	                   (try
-	                      let name = params_tool_name () in
 	                      (* Issue #8699: exhaustive match on tool_profile.
 	                               Catch-all `_ -> Full` would silently elevate any
 	                               future restricted profile to full tool access
@@ -963,9 +964,7 @@ let handle_request
                       in
                       if
                         not
-                          (TP.tool_allowed_in_profile
-                             ~internal_keeper_runtime
-                             state
+                          (TP.tool_allowed_in_profile state
                              call_profile
                              name)
                       then
@@ -1004,7 +1003,7 @@ let handle_request
                                  ~internal_keeper_runtime
                                  state
                                  id
-                                 params)
+                                 call)
                         in
                         let outcome = tool_call_outcome result in
                         let outcome_s = Tool_result.string_of_tool_call_outcome outcome in
@@ -1025,24 +1024,18 @@ let handle_request
                              outcome_s);
                         result)
 	                    with
-	                    | Yojson.Safe.Util.Type_error (_, _) ->
-	                      failed_tool_call_error
-	                        Mcp_error_code.Invalid_params
-	                        "Invalid params: name must be a string"
-	                    | Invalid_argument msg
-		                      when String.starts_with
-		                             ~prefix:"managed agent tool translation failed:"
-		                             msg ->
-		                      let name =
-		                        try params_tool_name () with
-		                        | Yojson.Safe.Util.Type_error (_, _) -> ""
-		                      in
+	                    | Mcp_server_eio_call_tool.Managed_agent_translation_failed
+		                        reason ->
+		                      (* The sentence the caller reads. It carried the
+		                         dispatch decision before; now it only carries
+		                         the words, so rewording it cannot change which
+		                         error code comes back. *)
 		                      failed_tool_call_error
 		                        ~tool_name:name
 		                        Mcp_error_code.Invalid_params
-	                        msg)
-	                 | None ->
-	                   failed_tool_call_error Mcp_error_code.Invalid_params "Missing params")
+	                        (Printf.sprintf
+	                           "managed agent tool translation failed: %s"
+	                           reason)))
                 in
                 with_required_auth
                   ~base_path
@@ -1089,12 +1082,22 @@ let handle_request
                 (Masc_domain.masc_error_to_string
                    (Masc_domain.System Masc_domain.System_error.NotInitialized))
             | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | Auth.Auth_config_error _ ->
+              make_error_typed
+                ~id
+                Mcp_error_code.Internal_error
+                "Authentication configuration unavailable"
             | exn ->
               let err = Printexc.to_string exn in
               Log.Mcp.error "Request handling failed: method=%s: %s" req.method_ err;
               make_error_typed ~id Mcp_error_code.Internal_error (Printf.sprintf "Internal error: %s" err)))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Auth.Auth_config_error _ ->
+    make_error_typed
+      ~id:`Null
+      Mcp_error_code.Internal_error
+      "Authentication configuration unavailable"
   | exn ->
     make_error_typed
       ~id:`Null

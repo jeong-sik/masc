@@ -24,10 +24,10 @@ import type { Keeper, KeeperConditions, KeeperPhase } from '../types'
 type DivergenceFn = (value: boolean, phase: KeeperPhase | null | undefined) => string | null
 
 export const isOperating = (p: KeeperPhase | null | undefined): boolean =>
-  p === 'Running' || p === 'Failing' || p === 'Overflowed'
+  p === 'Running' || p === 'Failing'
 
 export const isTerminated = (p: KeeperPhase | null | undefined): boolean =>
-  p === 'Stopped' || p === 'Dead'
+  p === 'Stopped'
 
 /** Rule table — each entry returns a ko-language reason when divergent,
  *  null when the condition is consistent with (or expected by) the phase. */
@@ -62,10 +62,6 @@ const DIVERGENCE_RULES: Partial<Record<keyof KeeperConditions, DivergenceFn>> = 
       ? '파이버 죽음 (Offline도 종료도 아님)'
       : null,
 
-  dead_tombstone_latched: (v, p) =>
-    v && p !== 'Dead'
-      ? 'Dead tombstone이 기록됐지만 Dead phase 미반영'
-      : null,
 }
 
 interface Divergence {

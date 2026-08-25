@@ -3,8 +3,6 @@
 type request =
   { source : Keeper_event_queue.stimulus
   ; source_incarnation : int64
-  ; owner_nonce : int
-  ; target_generation : int
   ; continuation_binding : Keeper_paused_work_disposition_receipt.continuation_binding
   ; operator_operation_id : string
   }
@@ -15,7 +13,8 @@ type projection_stage =
 
 type failure =
   | Invalid_request of string
-  | Admission_busy of Keeper_turn_admission.autonomous_block
+  | Admission_busy of Keeper_owner.autonomous_block
+  | Owner_unavailable of string
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
   | Receipt_lock_failed of string
   | Receipt_read_failed of string
@@ -27,17 +26,8 @@ type failure =
       }
   | Durable_meta_missing of string
   | Source_owner_not_paused
-  | Source_owner_dead_tombstone
-  | Source_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Source_owner_identity_changed
   | Target_owner_not_active
-  | Target_owner_nonce_changed of
-      { expected : int
-      ; actual : int
-      }
   | Target_owner_identity_changed
   | Continuation_binding_mismatch
   | Source_queue_validation_failed of string
@@ -75,7 +65,7 @@ type success =
 val error_to_string : error -> string
 
 val project_committed_target_if_receipted :
-  ?intake_token:Keeper_turn_admission.intake_token ->
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
   Workspace.config ->
   transfer:Keeper_registry_event_queue.accepted_transfer ->
   (target_projection option, failure) result

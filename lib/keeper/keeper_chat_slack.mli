@@ -1,8 +1,8 @@
 (** Keeper_chat_slack — Slack delivery adapter for keeper chat events.
 
     Subscribes to a [Keeper_chat_events] stream, accumulates assistant
-    text deltas and rich Block Kit blocks, and sends the final reply to
-    a Slack channel via the Web API when the run finishes. When the reply
+    text deltas and rich Block Kit blocks, and incrementally edits one Slack
+    reply before committing the final content when the run finishes. When the reply
     belongs to a thread, the production adapter projects active work through
     Slack's native assistant thread status.
 
@@ -15,6 +15,15 @@ type error =
   | Other of string
 
 val pp_error : Format.formatter -> error -> unit
+
+val effect_disposition : error -> Tool_result.failure_effect_disposition
+(** [effect_disposition error] states what the Slack transport proves about
+    the requested send. Slack answers every Web API call with HTTP 200 and
+    [{ ok, error? }] (RFC-0317, {!Slack_rest_client}), so [Slack_api] is a
+    logical refusal of a request Slack fully received and declined to act on
+    — the message was not posted. Callers turn this into
+    {!Tool_result.Proven_pre_effect} so the refusal stays correctable inside
+    the provider turn instead of reaching the terminal effect boundary. *)
 
 val send_message :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
@@ -29,21 +38,26 @@ val send_message_with_blocks :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->
   ?thread_ts:string ->
+  ?mention_user_ids:string list ->
   token:string -> channel:string -> content:string -> blocks:Yojson.Safe.t list -> unit -> (unit, error) result
 (** [send_message_with_blocks ~token ~channel ~content ~blocks] posts to
-    [chat.postMessage] with the given Block Kit [blocks]. Logs errors via
-    [Log.Keeper.warn] and returns the outcome. *)
+    [chat.postMessage] with the given Block Kit [blocks]. Stable Slack ids in
+    [mention_user_ids] are emitted both in the accessible fallback and the
+    visible blocks assembled by the caller. Logs errors via [Log.Keeper.warn]
+    and returns the outcome. *)
 
 val content_blocks_of_text : string -> Yojson.Safe.t list
-(** [content_blocks_of_text text] projects server chat blocks into Slack
-    Block Kit blocks:
-    - Markdown images [![alt](url)] become image blocks.
-    - Standalone image URLs (png/jpg/gif/webp/svg) become image blocks.
-    - Other standalone URLs become link blocks with a hostname-derived title.
-    Code and Mermaid fences become section code-block sections.
-    Text and most other block kinds are omitted because primary text is
-    already delivered via the [content] field; fusion cards also have no
-    Slack-native projection yet. *)
+(** [content_blocks_of_text text] puts the complete LLM-authored standard
+    Markdown in Slack's native [markdown] block, which renders headings,
+    emphasis, lists, links, code, task lists, and tables without a local
+    Markdown-to-mrkdwn heuristic. Safe image chat blocks are also projected as
+    image blocks. Blank text produces no block. *)
+
+val message_blocks_of_text :
+  mention_user_ids:string list -> string -> Yojson.Safe.t list
+(** Prepend one visible mrkdwn mention section to
+    {!content_blocks_of_text}. Ids must already have passed the surface-post
+    validator. *)
 
 val link_block_json :
   url:string -> title:string -> description:string option -> Yojson.Safe.t
@@ -53,11 +67,6 @@ val link_block_json :
 
 val image_block_json : url:string -> caption:string option -> Yojson.Safe.t
 (** Block Kit image block; [caption] becomes the redacted [alt_text]. *)
-
-val section_block_json : text:string -> Yojson.Safe.t
-(** Plain Block Kit mrkdwn section for notices that carry no URL (e.g. an
-    attachment whose stored metadata failed the typed decode). The text is
-    redacted, mrkdwn-escaped, and truncated like every other builder. *)
 
 val adapter_loop :
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
@@ -70,15 +79,22 @@ val adapter_loop :
   unit ->
   unit
 (** [adapter_loop ~token ~channel ~events ?base_url ?on_send_result ()]
-    blocks on the event stream until [Run_finished] or [Error], then sends
-    the accumulated text (or error message) to the given Slack channel.
+    blocks on the event stream until [Run_finished] or [Error]. Stable text
+    creates one Slack message and updates that same message no more frequently
+    than Slack's documented streaming interval; terminal delivery commits the
+    complete text and rich blocks to the same message.
 
     Rich events ([Link_block], [Image_block], [Status_block], [Audio_block])
     are rendered as Slack Block Kit sections and included alongside the final
-    message. [Tool_call_start],
-    [Tool_call_args], [Tool_call_args_snapshot], and [Tool_call_end] are
-    projected only as native activity; [Tool_context_block] is not exposed in
-    the conversation.
+    message. [Tool_call_start], [Tool_call_args], [Tool_call_args_snapshot],
+    and [Tool_call_end] create no message of their own: they show as native
+    activity while the run is open, and {!Keeper_chat_tool_trail} collects them
+    into one fenced block appended to the terminal reply, so the delivered
+    message names the work the turn did. That block carries each call's name and
+    the one argument it acted on -- a path, a command, a search pattern -- which
+    a channel with readers beyond the keeper's operator should be bound with in
+    mind. [Tool_context_block] stays out of the conversation entirely: its
+    summaries are the tool's own account of itself, not the call's identity.
 
     [base_url] is used to build public voice-audio URLs; when omitted the
     configured {!Env_config_core.masc_http_base_url} is used.
@@ -113,6 +129,13 @@ module For_testing : sig
   val content_blocks_of_text : string -> Yojson.Safe.t list
   (** Same as {!content_blocks_of_text}; exposed for unit testing. *)
 
+  val message_blocks_of_text :
+    mention_user_ids:string list -> string -> Yojson.Safe.t list
+
+  val markdown_block_json : string -> Yojson.Safe.t
+
+  val mention_block_json : string list -> Yojson.Safe.t
+
   val final_message_blocks :
     content:string -> event_blocks:Yojson.Safe.t list -> Yojson.Safe.t list
   (** Merge text-derived blocks with explicitly emitted rich event blocks in
@@ -134,6 +157,16 @@ module For_testing : sig
 
   val adapter_loop :
     events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
+    ?post_stream:(content:string -> (string, error) result) ->
+    ?edit_stream:(message_id:string -> content:string -> (unit, error) result) ->
+    ?edit_blocks:
+      (message_id:string ->
+       content:string ->
+       blocks:Yojson.Safe.t list ->
+       (unit, error) result) ->
+    ?delete_stream:(message_id:string -> (unit, error) result) ->
+    ?now:(unit -> float) ->
+    ?sleep:(float -> unit) ->
     send_plain:(content:string -> (unit, error) result) ->
     send_blocks:(content:string -> blocks:Yojson.Safe.t list -> (unit, error) result) ->
     ?set_activity_status:(status:string -> (unit, error) result) ->
@@ -141,7 +174,8 @@ module For_testing : sig
     ?on_send_result:((unit, error) result -> unit) ->
     unit ->
     unit
-  (** Test seam for the outbound transport. It runs the production terminal
-      settlement state machine with injected Slack sends and native activity
-      status updates. Activity failures never settle terminal delivery. *)
+  (** Test seam for the outbound transport. [post_stream], [edit_stream],
+      [edit_blocks], and [delete_stream] are supplied together to exercise
+      incremental delivery. [now] and [sleep] make update pacing deterministic.
+      Activity failures never settle terminal delivery. *)
 end

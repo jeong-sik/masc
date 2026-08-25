@@ -1,106 +1,122 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
-  oasTotalEvents,
-  oasReplayLoadedEvents,
-  oasReplayTotalMatchingEvents,
-  oasReplayTruncated,
-  oasTotalLlmCalls,
-  oasTotalErrors,
-  oasLastLlmCallTs,
-  oasLastErrorTs,
-  oasEvidenceRefsCount,
-  oasArtifactRefsCount,
-  oasRawTraceRefsCount,
-  oasReportRefsCount,
-  oasProofRefsCount,
-  oasTelemetryRefsCount,
-  oasRuntimeEvidenceRefsCount,
-  oasLastEvidenceTs,
-  oasHealthSummary,
-  noteOasReplayWindow,
-  resetOasRuntimeSignals,
-  pushOasAgentEvent,
-  recordOasLlmCall,
-  recordOasError,
-  recordOasEvidenceRefs,
+  agentCoreTotalEvents,
+  agentCoreReplayLoadedEvents,
+  agentCoreReplayTotalMatchingEvents,
+  agentCoreReplayTruncated,
+  agentCoreReplayCapped,
+  agentCoreTotalLlmCalls,
+  agentCoreTotalErrors,
+  agentCoreLastLlmCallTs,
+  agentCoreLastErrorTs,
+  agentCoreEvidenceRefsCount,
+  agentCoreArtifactRefsCount,
+  agentCoreRawTraceRefsCount,
+  agentCoreReportRefsCount,
+  agentCoreProofRefsCount,
+  agentCoreTelemetryRefsCount,
+  agentCoreRuntimeEvidenceRefsCount,
+  agentCoreLastEvidenceTs,
+  agentCoreHealthSummary,
+  noteAgentCoreReplayWindow,
+  resetAgentCoreRuntimeSignals,
+  pushAgentCoreAgentEvent,
+  recordAgentCoreLlmCall,
+  recordAgentCoreError,
+  recordAgentCoreEvidenceRefs,
 } from './store'
-import type { OasAgentEvent } from './types/oas'
+import type { AgentCoreAgentEvent } from './types/agent-core'
 
-function resetOasSignals() {
-  resetOasRuntimeSignals()
+function resetAgentCoreSignals() {
+  resetAgentCoreRuntimeSignals()
 }
 
-describe('oasHealthSummary', () => {
-  beforeEach(resetOasSignals)
+describe('agentCoreHealthSummary', () => {
+  beforeEach(resetAgentCoreSignals)
 
   it('mirrors raw counter signals', () => {
-    oasTotalEvents.value = 10
-    oasTotalLlmCalls.value = 4
-    oasTotalErrors.value = 2
-    expect(oasHealthSummary.value.totalEvents).toBe(10)
-    expect(oasHealthSummary.value.replayLoadedEvents).toBe(0)
-    expect(oasHealthSummary.value.replayTotalMatchingEvents).toBe(0)
-    expect(oasHealthSummary.value.replayTruncated).toBe(false)
-    expect(oasHealthSummary.value.totalLlmCalls).toBe(4)
-    expect(oasHealthSummary.value.totalErrors).toBe(2)
-    expect(oasHealthSummary.value.evidenceRefsCount).toBe(0)
+    agentCoreTotalEvents.value = 10
+    agentCoreTotalLlmCalls.value = 4
+    agentCoreTotalErrors.value = 2
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(10)
+    expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(0)
+    expect(agentCoreHealthSummary.value.replayTotalMatchingEvents).toBe(0)
+    expect(agentCoreHealthSummary.value.replayTruncated).toBe(false)
+    expect(agentCoreHealthSummary.value.replayCapped).toBe(false)
+    expect(agentCoreHealthSummary.value.totalLlmCalls).toBe(4)
+    expect(agentCoreHealthSummary.value.totalErrors).toBe(2)
+    expect(agentCoreHealthSummary.value.evidenceRefsCount).toBe(0)
   })
 
   it('tracks replay sample size separately from total matching entries', () => {
-    noteOasReplayWindow({
+    noteAgentCoreReplayWindow({
       loadedEvents: 500,
       totalMatchingEvents: 1842,
       truncated: true,
     })
 
-    expect(oasTotalEvents.value).toBe(1842)
-    expect(oasReplayLoadedEvents.value).toBe(500)
-    expect(oasReplayTotalMatchingEvents.value).toBe(1842)
-    expect(oasReplayTruncated.value).toBe(true)
-    expect(oasHealthSummary.value.totalEvents).toBe(1842)
-    expect(oasHealthSummary.value.replayLoadedEvents).toBe(500)
-    expect(oasHealthSummary.value.replayTotalMatchingEvents).toBe(1842)
-    expect(oasHealthSummary.value.replayTruncated).toBe(true)
+    expect(agentCoreTotalEvents.value).toBe(1842)
+    expect(agentCoreReplayLoadedEvents.value).toBe(500)
+    expect(agentCoreReplayTotalMatchingEvents.value).toBe(1842)
+    expect(agentCoreReplayTruncated.value).toBe(true)
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(1842)
+    expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(500)
+    expect(agentCoreHealthSummary.value.replayTotalMatchingEvents).toBe(1842)
+    expect(agentCoreHealthSummary.value.replayTruncated).toBe(true)
+    expect(agentCoreHealthSummary.value.replayCapped).toBe(false)
+  })
+
+  it('marks a server-capped replay window without offering another page', () => {
+    noteAgentCoreReplayWindow({
+      loadedEvents: 5499,
+      totalMatchingEvents: 6000,
+      truncated: false,
+      capped: true,
+    })
+
+    expect(agentCoreReplayCapped.value).toBe(true)
+    expect(agentCoreHealthSummary.value.replayCapped).toBe(true)
+    expect(agentCoreHealthSummary.value.hasMore).toBe(false)
   })
 
   it('reflects agent event buffer length', () => {
     const evt = {
-      type: 'trust_updated',
-      actor_kind: 'agent',
+      type: 'keeper_lifecycle',
+      actor_kind: 'keeper',
       agent_name: 'alice',
       timestamp: 1,
-      trust_score: 0.5,
-    } satisfies OasAgentEvent
-    pushOasAgentEvent(evt)
-    pushOasAgentEvent({ ...evt, timestamp: 2 })
-    expect(oasHealthSummary.value.agentEventsCount).toBe(2)
-    expect(oasHealthSummary.value.totalEvents).toBe(0)
+      phase: 'Running',
+    } satisfies AgentCoreAgentEvent
+    pushAgentCoreAgentEvent(evt)
+    pushAgentCoreAgentEvent({ ...evt, timestamp: 2 })
+    expect(agentCoreHealthSummary.value.agentEventsCount).toBe(2)
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(0)
   })
 
   it('dedups identical consecutive agent events', () => {
     const evt = {
-      type: 'trust_updated',
-      actor_kind: 'agent',
+      type: 'keeper_lifecycle',
+      actor_kind: 'keeper',
       agent_name: 'alice',
       timestamp: 1,
       event_key: 'same-event',
-      trust_score: 0.5,
-    } satisfies OasAgentEvent
-    pushOasAgentEvent(evt)
-    pushOasAgentEvent(evt)
-    expect(oasHealthSummary.value.agentEventsCount).toBe(1)
+      phase: 'Running',
+    } satisfies AgentCoreAgentEvent
+    pushAgentCoreAgentEvent(evt)
+    pushAgentCoreAgentEvent(evt)
+    expect(agentCoreHealthSummary.value.agentEventsCount).toBe(1)
   })
 
   it('keeps distinct events that only share actor and timestamp', () => {
-    pushOasAgentEvent({
-      type: 'trust_updated',
-      actor_kind: 'agent',
+    pushAgentCoreAgentEvent({
+      type: 'keeper_lifecycle',
+      actor_kind: 'keeper',
       agent_name: 'alice',
       timestamp: 1,
       event_key: 'action',
-      trust_score: 0.5,
-    } satisfies OasAgentEvent)
-    pushOasAgentEvent({
+      phase: 'Paused',
+    } satisfies AgentCoreAgentEvent)
+    pushAgentCoreAgentEvent({
       type: 'keeper_lifecycle',
       actor_kind: 'keeper',
       agent_name: 'alice',
@@ -108,17 +124,18 @@ describe('oasHealthSummary', () => {
       event_key: 'lifecycle',
       phase: 'Running',
       detail: 'started',
-    } satisfies OasAgentEvent)
-    expect(oasHealthSummary.value.agentEventsCount).toBe(2)
+    } satisfies AgentCoreAgentEvent)
+    expect(agentCoreHealthSummary.value.agentEventsCount).toBe(2)
   })
 
   it('starts with zero totals', () => {
-    resetOasSignals()
-    const s = oasHealthSummary.value
+    resetAgentCoreSignals()
+    const s = agentCoreHealthSummary.value
     expect(s.totalEvents).toBe(0)
     expect(s.replayLoadedEvents).toBe(0)
     expect(s.replayTotalMatchingEvents).toBe(0)
     expect(s.replayTruncated).toBe(false)
+    expect(s.replayCapped).toBe(false)
     expect(s.totalLlmCalls).toBe(0)
     expect(s.totalErrors).toBe(0)
     expect(s.agentEventsCount).toBe(0)
@@ -135,33 +152,33 @@ describe('oasHealthSummary', () => {
   })
 })
 
-describe('recordOasLlmCall / recordOasError / recordOasEvidenceRefs', () => {
-  beforeEach(resetOasSignals)
+describe('recordAgentCoreLlmCall / recordAgentCoreError / recordAgentCoreEvidenceRefs', () => {
+  beforeEach(resetAgentCoreSignals)
 
   it('increments LLM call counter and pins timestamp', () => {
-    recordOasLlmCall(1_700_000_000_000)
-    recordOasLlmCall(1_700_000_060_000)
-    expect(oasTotalLlmCalls.value).toBe(2)
-    expect(oasLastLlmCallTs.value).toBe(1_700_000_060_000)
-    expect(oasHealthSummary.value.lastLlmCallTs).toBe(1_700_000_060_000)
+    recordAgentCoreLlmCall(1_700_000_000_000)
+    recordAgentCoreLlmCall(1_700_000_060_000)
+    expect(agentCoreTotalLlmCalls.value).toBe(2)
+    expect(agentCoreLastLlmCallTs.value).toBe(1_700_000_060_000)
+    expect(agentCoreHealthSummary.value.lastLlmCallTs).toBe(1_700_000_060_000)
   })
 
   it('increments error counter and pins timestamp', () => {
-    recordOasError(1_700_000_000_000)
-    expect(oasTotalErrors.value).toBe(1)
-    expect(oasLastErrorTs.value).toBe(1_700_000_000_000)
-    expect(oasHealthSummary.value.lastErrorTs).toBe(1_700_000_000_000)
+    recordAgentCoreError(1_700_000_000_000)
+    expect(agentCoreTotalErrors.value).toBe(1)
+    expect(agentCoreLastErrorTs.value).toBe(1_700_000_000_000)
+    expect(agentCoreHealthSummary.value.lastErrorTs).toBe(1_700_000_000_000)
   })
 
   it('keeps LLM and error counters independent', () => {
-    recordOasLlmCall(1)
-    recordOasError(2)
-    expect(oasTotalLlmCalls.value).toBe(1)
-    expect(oasTotalErrors.value).toBe(1)
+    recordAgentCoreLlmCall(1)
+    recordAgentCoreError(2)
+    expect(agentCoreTotalLlmCalls.value).toBe(1)
+    expect(agentCoreTotalErrors.value).toBe(1)
   })
 
-  it('tracks OAS evidence reference counters independently', () => {
-    recordOasEvidenceRefs({
+  it('tracks Agent Core evidence reference counters independently', () => {
+    recordAgentCoreEvidenceRefs({
       evidenceRefsCount: 6,
       artifactRefsCount: 2,
       rawTraceRefsCount: 1,
@@ -172,15 +189,15 @@ describe('recordOasLlmCall / recordOasError / recordOasEvidenceRefs', () => {
       tsMs: 1_700_000_000_000,
     })
 
-    expect(oasEvidenceRefsCount.value).toBe(6)
-    expect(oasArtifactRefsCount.value).toBe(2)
-    expect(oasRawTraceRefsCount.value).toBe(1)
-    expect(oasReportRefsCount.value).toBe(1)
-    expect(oasProofRefsCount.value).toBe(1)
-    expect(oasTelemetryRefsCount.value).toBe(1)
-    expect(oasRuntimeEvidenceRefsCount.value).toBe(1)
-    expect(oasLastEvidenceTs.value).toBe(1_700_000_000_000)
-    expect(oasHealthSummary.value).toMatchObject({
+    expect(agentCoreEvidenceRefsCount.value).toBe(6)
+    expect(agentCoreArtifactRefsCount.value).toBe(2)
+    expect(agentCoreRawTraceRefsCount.value).toBe(1)
+    expect(agentCoreReportRefsCount.value).toBe(1)
+    expect(agentCoreProofRefsCount.value).toBe(1)
+    expect(agentCoreTelemetryRefsCount.value).toBe(1)
+    expect(agentCoreRuntimeEvidenceRefsCount.value).toBe(1)
+    expect(agentCoreLastEvidenceTs.value).toBe(1_700_000_000_000)
+    expect(agentCoreHealthSummary.value).toMatchObject({
       evidenceRefsCount: 6,
       artifactRefsCount: 2,
       rawTraceRefsCount: 1,

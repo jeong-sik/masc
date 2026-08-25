@@ -2,6 +2,150 @@
 
 ## Unreleased
 
+## [0.24.0] - 2026-08-22
+
+- **Goal completion passes through verification** (RFC-0387, #29152 → #29258):
+  a Goal must declare a success condition, `request_complete` moves
+  `executing -> verifying` instead of completing, and the verifier agent reads
+  the durable verification ledger, inspects the linked task artifacts before a
+  verdict, and records each run as an observation the dashboard API projects.
+  The dashboard renders the `verifying` phase and the Work goal detail is built
+  around the completion criteria; attainment is no longer derived from the
+  lifecycle phase.
+- **Tools compose and run in parallel**: tool kind is a closed sum type
+  (RFC-0386, #29148); audited read-only descriptors declare composable output
+  schemas and run as `Concurrent` batches (#29012, #29017, #29146); and
+  `keeper_plan_execute` (#29021) lets the model define a typed DAG of tool
+  nodes in its turn with the same vocabulary as `tool-compositions.toml`.
+  Rejections carry the composable tool list so the model can correct itself.
+- **No duplicated streaming text** (constitution B5, #29149): OpenAI-compatible
+  servers that resend the accumulated text on every chunk are deduplicated at
+  the stream bridge; the Anthropic and Responses paths were already
+  incremental.
+- **A dashboard purge that died mid-way has an exit** (#29295): three Keepers
+  sat half-removed for three days while reconcile retried about 238 times an
+  hour. The blocked purge is now a typed operation with a release path; the
+  dashboard refuses a purge while the Keeper is still executing and shows an
+  asynchronous purge as in progress.
+- **Channel-aware autonomous instructions**: `autonomous_instructions` flow
+  through turn-up and the `Update_profile` reducer and select the prompt
+  channel for `Scheduled_autonomous` turns.
+- **Keeper runtime projections**: the shutdown operation phase and admission
+  fence are visible on `keeper_status`; runtime serving receipts are verified;
+  the compaction saving reaches the owner projection; autonomous turns are not
+  replayed as conversation (RFC-0385 §5.1).
+- **Legacy readers are gone**: the first purge sweep removed readers, default
+  values and converters kept for earlier on-disk shapes across 61 files
+  (#29379), `active_goal_ids` and its surfaces are removed (#29374), and the
+  `Dead` phase, tombstone latch and `Keeper_measurement` are deleted. Stores
+  written by earlier versions are not migrated; the decoders reject them.
+- **Issue triage is declarative** (#29309): the issue body's `masc-triage`
+  block is the single source of labels, the vocabulary is four closed axes
+  (`kind`, `area`, `impact`, `root`) plus `must-do`, and the `impact` order is
+  the priority order.
+- **The quickstart and release path run as documented** (#29302): the source
+  quickstart starts the workspace server without Keepers or a provider key and
+  reaches an authenticated MCP initialize; the stale Homebrew formula and the
+  duplicate quick-start document are removed.
+- **Dashboard**: global autonomous-turn expand toggle, runtime observables in
+  the Monitor lane, recorded tool-call evidence decoded with the composition
+  tree, a Keeper can be removed from the screen with its chat store swept, and
+  `pnpm lint` runs in CI.
+- **Build**: warning 69 (unused record field) is a build error alongside 32;
+  the dead-export ratchet and the changed-files `ocamlformat` check run on every
+  PR.
+
+## [0.23.0] - 2026-08-16
+
+- **Keeper broadcasts reach the other Keepers' prompts**: projecting a fleet
+  broadcast into every other Keeper's transcript got the row to the dashboard
+  and no further. The prompt's `Pending Messages` section renders only rows that
+  mention this Keeper or that the Owner authored, and nothing else read the
+  transcript into context. A `Fleet Messages` layer now carries the newest
+  `keeper.fleet.messages.max` projected rows (default 10, `0` disables) as
+  standing context. Selection reads the typed `Surface_ref.Agent` surface, and
+  the lane predicate is shared with the reactive lanes so no row can render in
+  both sections. No acknowledgement cursor: lane ack advances only on
+  autonomous turn success, so a Keeper with `proactive_enabled = false` would
+  otherwise accumulate rows forever. Measured on an isolated instance: the
+  probe string appeared once in the transcript and not at all in the rendered
+  prompt before, and once in both after, with the mention rendered once under
+  `Pending Messages` and the two broadcasts once under `Fleet Messages`.
+- **The direct-keeper-message path reads no transcript**: an earlier cut of the
+  fleet layer called the uncapped `Keeper_chat_store.load_all` there, on a path
+  that performs no transcript I/O otherwise, costing a full read and parse of
+  the whole store per direct message — the largest in production was about
+  1.8 MB over roughly 2,900 rows, and it is append-only. That path
+  empties the reactive lanes because the triggering message is the point; the
+  Keeper sees fleet context on its next observation turn, where the load
+  already happens.
+- **Approved Gate resolutions are delivered past queue-ordered stimuli**: a
+  turn suspended at an approval gate resumed on a redelivered workspace message
+  rather than the approval, so `hitl_resolution` was absent and the host replay
+  never fired.
+- **The agent surface badge no longer claims a row is the viewer's own**: it
+  read `Agent (Self)`, which held while that surface carried only the viewed
+  Keeper's traffic. Projected broadcasts share the surface, so the badge named
+  the wrong Keeper; the speaker chip beside it already identifies the author.
+- **`LspCall` rpc and the inline LSP dispatcher are removed** from the gRPC
+  surface.
+- **Build**: the commit-stamp rule moved to a `lib/build_commit` leaf, dead
+  dune descriptions were removed, and the health snapshot no longer archives
+  the purged `examples/` root — that pathspec made `git archive` exit 128 and
+  failed the required `CI Gate` on every PR. The same change restored
+  `dune build @check`, which a test applying a `private` variant directly had
+  broken; both landed inside this window, so no release carried either.
+
+- **Workspace messages reach the linear event queue**: a workspace message
+  that names a Keeper is committed as a typed
+  `Keeper_event_queue.Workspace_message` entry in that Keeper's per-Keeper
+  drain, ordered against every other stimulus and deduplicated by the
+  workspace request id. The same path now emits the `keeper_chat_appended`
+  SSE it was missing, so the conversation window updates without a reload.
+  Measured on an isolated instance: one addressed message produced zero queue
+  entries before and one `workspace-message:<request_id>` entry at urgency
+  `immediate` after.
+- **Keeper speech reaches every Keeper's conversation window**: a committed
+  `Fleet_conversation` message is projected into each registered Keeper's
+  transcript (author excluded), with no queue entry and no wake, so one
+  announcement cannot open a turn on every Keeper. Before this, 17 of the 18
+  retained workspace messages were unmentioned Keeper broadcasts that reached
+  nobody — the dispatcher answered `Passive` without calling the delivery
+  handler at all. The projected row's mentions are still derived from the
+  message text, so a second `@name` in one message reaches that Keeper as a
+  transcript mention without a queue entry (masc#28795).
+- `Workspace_broadcast.audience` is a **required** argument, so the compiler
+  makes all 14 library producers state their answer. Five are speech —
+  `masc_broadcast`, `keeper_broadcast`, the gRPC `Broadcast` RPC, the operator
+  dashboard route, the operator control action — and nine are records: task
+  claim, task create (2), task transition, session lifecycle (3) and workspace
+  init (2). Records reach no conversation window. It was optional at first,
+  and that silently classified `keeper_broadcast` — the only broadcast tool
+  live Keepers use, 55 of 55 calls in the reference traces — as a record, so
+  the projection was dead on the only path production exercises.
+- Measured cost of projecting one message across the reference fleet: 4.53 MB
+  of locked transcript across 39 registered Keepers, 22-95 ms per append
+  against a broadcast that otherwise takes 33 ms.
+
+## [0.22.0] - 2026-08-14
+
+- **Breaking (keeper output contract, RFC-0376)**: an autonomous turn's final
+  text no longer auto-delivers to the channel that woke it. The
+  continuation-delivery outbox/publisher/recovery subsystem and the schedule
+  result-delivery dashboard view are removed; keeper speech reaches connectors
+  only through speech tools (`keeper_surface_post` / connector posts), and the
+  connector-attention ledger consumes the typed continuation-route disposition
+  carried by `Turn_completed`. Live measurement before/after: obligation
+  growth +11/hour under the old path, zero after, with real replies unaffected.
+- **Keeper turn batching (RFC-0377)**: one turn consumes the pending backlog
+  of a single conversation together (one-scan batch read, pure batch
+  disposition) instead of one stimulus per wake.
+
+- **Breaking (agent execution ownership)**: MASC now owns its execution engine
+  as the embedded `masc.agent_core` library. Runtime modules, configuration,
+  environment keys, telemetry, dashboard events, persistence fields, and
+  public OCaml types use the Agent Core contract directly. No alternate module,
+  wire name, environment key, storage decoder, or compatibility facade remains.
 - **Breaking (startup/task storage contract)**: startup health and readiness
   now expose only lifecycle, lazy-task, readiness, error, and path/config
   diagnostics. Task operations bind directly to the supplied Workspace
@@ -10,7 +154,7 @@
 - **Breaking (cost ledger storage/schema)**: the Keeper producer, `masc-cost`,
   and inference metrics now share one current row codec and the date-split
   `.masc/costs/YYYY-MM/DD.jsonl` store. Automatic rows carry the runtime-owned
-  `(trace_id, keeper_turn_id, oas_turn_ordinal)` identity, so decision/cost
+  `(trace_id, keeper_turn_id, agent_core_turn_ordinal)` identity, so decision/cost
   observations merge only on exact identity; nearby timestamps and equal token
   counts no longer act as a deduplication rule. Windowed readers open only the
   requested day range, and malformed rows, schema violations, or duplicate
@@ -111,30 +255,33 @@
   represented by `tokens_per_second`.
 - **Breaking (keeper config schema)**: removed the keeper TOML `base = "..."` inheritance mechanism. `keeper.base` is no longer a recognised key, `config/keepers/base.toml` and `presets/classic/keepers/base.toml` are deleted, and every keeper TOML now states its own values. Effective per-keeper profiles are unchanged: each formerly inherited value was written out explicitly (`config/keepers/{taskmaster,issue_king,verifier,adversary}.toml`, `presets/classic/keepers/{backend,frontend,qa,tech_lead}.toml`).
   - Migration order matters. A keeper TOML that still carries `base = "..."` after this build is deployed does **not** fail to boot: `keeper.base` becomes an unrecognised key, so the keeper loads while silently losing every value it used to inherit, with one `Log.Keeper.warn`, a `masc_config_unknown_keys_ignored_total` increment, and a row on the dashboard drift surface. `/health` additionally reports `keeper_config_schema: config_unknown_keys` with status `blocked` and `operator_action_required: true` for the whole server (`server_routes_http_runtime.ml:479-488`). Flatten the deployed TOMLs first, then deploy this build.
-  - `merge_keeper_profile_defaults` and `merge_string_list` are retained: they still implement the persona `profile.json` → keeper TOML overlay (`keeper_types_profile.ml:244`), which is a separate mechanism. Note `merge_string_list` is replace-if-non-empty, not union.
+  - Keeper prompts now have one authoring source: `<keeper>/AGENT.md`. Keeper TOML stores the Keeper handle and operational settings without copying the prompt.
 
 ### Changed
-- Bumped the OAS Agent SDK pin to v0.231.4
-  (`2add6bf4a0c7a70dab3b60f82c62643a5bd8a9d6`). Compaction can now project
-  exact credential-free request-body bytes through the same provider serializer
-  and output requirement used by OAS admission, without duplicating serializer
-  or provider/model limit logic in MASC.
-- Bumped the OAS Agent SDK pin to v0.231.3
-  (`e01940b14d501900b8cbfa2fbb1e0484ada5a42d`). The GLM streaming backend now
-  consumes the catalog-resolved typed reasoning dialect instead of hardcoding
-  `reasoning_content`; MASC's deployment overlay declares the exact
-  `delta:reasoning_content` capability for both GLM-5-Turbo provider bindings.
+- Agent Core compaction projects exact credential-free request-body bytes
+  through the provider serializer and output requirement used by admission,
+  without duplicating serializer or provider/model limit logic in MASC.
+- The Agent Core GLM streaming backend consumes the catalog-resolved typed
+  reasoning dialect instead of hardcoding `reasoning_content`; MASC's
+  deployment overlay declares the exact `delta:reasoning_content` capability
+  for both GLM-5-Turbo provider bindings.
 - Provider materialization and registry/model-string resolution now share
   `Runtime_provider_binding.default_headers_for_kind` as the sole owner of
   non-credential provider header defaults. The duplicate Runtime adapter
   table and unused `headers_with_auth` public surface were removed; auth
-  tokens remain carried only through OAS `api_key`.
+  tokens remain carried only through Agent Core `api_key`.
 - Workspace broadcast delivery now returns the canonical content, mention, and
   message type produced by its single terminal-task invariant check. MCP
   session/SSE/notification/audit consumers reuse that exact result instead of
   pre-running the invariant through a bypass flag.
-- Bumped the OAS Agent SDK pin to `ca7a02b7` (oas#2766). Supports non-standard stop_reason provider dialects (e.g. `context_length_exceeded`, `max_context_length`) and preserves empty completion stop_reason in GLM parser to prevent orphan retries on context overflow.
-- Bumped the OAS Agent SDK pin to `c1eaa88b` (oas#2764). Allows empty delta `id` and `name` strings as `Ok None` in the SSE stream parser to prevent stream failure crashes on GLM-5-Turbo and OpenAI-compatible backends emitting empty initial delta fragments.
+- Agent Core accepts provider-specific stop-reason dialects such as
+  `context_length_exceeded` and `max_context_length`, and preserves empty GLM
+  completion stop reasons so context overflow cannot become an orphan retry.
+- Agent Core accepts empty initial SSE delta `id` and `name` strings as
+  `Ok None`, preventing stream failures on GLM-5-Turbo and compatible backends.
+- Malformed artifact markers that end before all required fields now return the
+  typed `Invalid_marker` result instead of escaping as `End_of_file` during
+  tool-blob maintenance.
 
 
 ## [0.21.2] - 2026-07-20
@@ -226,7 +373,7 @@
 ### Fixed
 - Keeper self-wake approval deadlock: `masc.keeper_wake` is now reminder-only (intrinsic risk class), ending the self-approval stall that produced empty placeholder replies (#23716).
 - Repo-id clone denials routed to HITL with a typed clone-probe ADT (fail-closed on unknown repo-id) (#23638).
-- `persona_crud` `.mli` added and module-name reference fixed, recovering main from a fleet-wide Structure Ratchet / build red (#23683, #23688, #23692, #23702).
+- `keeper_crud` `.mli` added and module-name reference fixed, recovering main from a fleet-wide Structure Ratchet / build red (#23683, #23688, #23692, #23702).
 - `anti_rationalization` gate-0: a disabled gate now falls through to gate-1, and `evidence_refs` is threaded through all `review_request` construction sites (#23691, #23694, #23724).
 - Workspace gate-0 rejection blocking resolved and task evidence enforced (#23719).
 - Dashboard: top-bar ops chip ellipsis, fleet roster action-column width, Fusion surface copy tidy, generic title clamp (#23684, #23701, #23707, #23711).
@@ -577,7 +724,7 @@
   the opaque "include pr_url..." hint string.
 - RFC-0109 Phase A: introduced `Masc_mcp_cdal_runtime.Criteria` typed
   sum (Keeper_turn_capture_v1, Contract_catalog_invariants,
-  Verification_request, Persona_probe, Free) and migrated
+  Verification_request, Keeper_probe, Free) and migrated
   `Risk_contract.eval_criteria` away from opaque `Yojson.Safe.t`. Wire
   format preserved via legacy `kind` field + new `criteria_kind` tag.
   Amends §4.1 of the RFC to match the live producer inventory and adds
@@ -611,7 +758,6 @@
 - Fixed `Execute` tool `rg` context path args.
 
 ### Fixed
-- Regenerated `runtime-tunables.md` to fix env knob catalog drift.
 - Resolved pre-existing CI gate failures (version truth, code-smell
   baseline drift, RFC numbering).
 
@@ -766,7 +912,6 @@
 ### Changed
 - Bumped the downstream OAS `agent_sdk` pin to `main@5f8e07b7` (`v0.194.1`) and raised the dependency floor to `agent_sdk >= 0.194.1`.
 - Moved the OAS pin note out of the older 0.19.20 changelog section so release history matches merge chronology.
-- Captured the follow-on runtime wave: required-tool candidate hotfix, force-done/release schema-audit enforcement, dashboard A0.2 atdts PoC, current goal-loop verify fixture, and chunked first-flush for POST `/mcp` JSON responses.
 
 ## [0.19.21] - 2026-05-17
 
@@ -780,7 +925,6 @@
 - Runtime configuration now continues purging legacy path/default fallback surfaces, including repo-config fallback removal and legacy path default cleanup.
 - Log retention defaults are opt-in disabled as part of the RFC-0103 closeout path.
 - Runtime legacy-runner worker tuning constants are lifted to SSOT, and the obsolete swarm harness entrypoint is removed.
-- RFC-0004 docs now record Phase A0.1 completion and add the Phase A0.2 implementation plan while additional SSE event arms move onto typed emitters.
 
 ### Fixed
 - Keeper/tool gates: lane semaphores, generic required-tool gate behavior, typed handoff-context vocabulary, and tool-input validation exception qualification.
@@ -810,10 +954,8 @@
 ## [0.19.19] - 2026-05-17
 
 ### Added
-- `docs/rfc/0004-phase-a0-1-implementation-plan.md`: RFC-0004 Phase A0.1 implementation plan — sub-PR sequencing (PR-0 through PR-4), byte-equal golden test protocol, atd schema candidate for SSE wire envelope.
 - `lib/sse_event_poc/`: byte-equal PoC sublib (atdgen + atdgen-runtime, `(optional)`) demonstrating 3-way byte-equal output (`` `Assoc `` + `Yojson.Safe.to_string` vs hand-coded module vs atdgen `-j -j-std`) for `agent_started` payload. Gated behind `with-test` to avoid leaking atdgen into production opam install.
 - `test/sse_event_poc/test_sse_event_poc.ml`: 3-way byte-equal Alcotest fixture (PASS, single run, byte-identical across all three emit paths).
-- `docs/rfc/RFC-0004-shared-contract-ocaml-ts.md`: Resume note (2026-05-17), Phase A0 sprint A0.1-A0.5 분할 table, drift surface quantification (SSE event types 60+→68 over 12 months, 4 drift categories with 3 silent pass).
 
 ### Changed
 - `dashboard/src/components/ide/ide-context-lens.ts`: defensive `?? ''` null coalescing on `link.label.trim()` and `anchor.surface.trim()` to stop runtime crash from SSE schema drift (`TypeError: Cannot read properties of null (reading 'trim')`, observed 2026-05-17). Marked WORKAROUND; root removal once RFC-0004 Phase A0.4 (Zod-from-JSON-Schema payload nested validation) lands.
@@ -962,7 +1104,7 @@
 ## [0.19.8] - 2026-05-05
 
 ### Added
-- RFC-0026 keeper admission router + WFQ overflow + persona policy types (shadow-mode).
+- RFC-0026 keeper admission router + WFQ overflow + keeper policy types (shadow-mode).
 - Per-provider token bucket primitive and runtime confidence ring buffer.
 - Stale-binary warning at startup via `commit_age_seconds` build identity.
 - Dashboard provider color tokens and keeper-aware `/api/v1/git/blame` + `/api/v1/git/diff`.
@@ -1133,7 +1275,7 @@ Post-v0.18.24 merge train for keeper event-queue registry wiring, silent-failure
 - Remaining dev-only diagnostics in agent, runtime, provider, repo-manager, sidecar, tool, and verification paths now surface through structured operator-visible logging instead of disappearing silently (#12400).
 - Keeper memory compaction knobs now route through `keeper_runtime.toml` / env precedence so boot-time runtime overrides are visible to memory-bank readers (#12384).
 - Runtime exhaustion user messages now render through the runtime FSM boundary instead of duplicated worker-side string formatting (#12383).
-- Persona and goal prompt blocks now escape XML predefined entities before injection into pseudo-XML prompt tags (#12408).
+- Keeper and goal prompt blocks now escape XML predefined entities before injection into pseudo-XML prompt tags (#12408).
 
 ## [0.18.24] - 2026-05-01
 
@@ -1386,7 +1528,6 @@ The headline thread for this release is the autonomous **Cycle 24-44 spec ↔ co
 - `#11617` `keeper_memory_policy.ml`, `#11622` `keeper_memory_bank.ml` — KeeperMemoryLifecycle 2/2.
 - `#11618` `keeper_execution_receipt.ml` — multi-spec anchor first (ReceiptOutcomeSet + OperatorPauseBroadcast).
 - `#11625` `keeper_stale_watchdog.ml` — OperatorPauseBroadcast 2/2 with module-relocation drift correction.
-- `#11626` retired personality-state FSM anchor with issue #8949 topology drift record.
 - `#11634` `keeper_guards.ml` — KeeperTurnCycle anchor (single-action `GateRejected` ownership).
 
 ### Changed (spec citation refresh — autonomous Cycle 40-43)
@@ -1418,11 +1559,11 @@ This release also rolls up substantial operational and infrastructure work merge
 
 Aggregate of 8 commits since v0.18.7 (3 feat / 2 fix / 2 test / 1 chore). No breaking API changes.
 
-Keeper fleet reliability release: empty `active_goal_ids` now auto-repairs via persona audit (PR1 #11351), claimed tasks auto-start immediately (PR2 #11364), and social/dispatch presets gained workspace collaboration tool access (PR3 #11345).
+Keeper fleet reliability release: empty `active_goal_ids` now auto-repairs via keeper audit (PR1 #11351), claimed tasks auto-start immediately (PR2 #11364), and social/dispatch presets gained workspace collaboration tool access (PR3 #11345).
 
 ### Added (keeper reliability)
 
-- **keeper_goal_repair**: detect and repair keepers with empty `active_goal_ids` by creating goals from persona purpose statements. New module `Keeper_goal_repair` with dry-run and execute modes.
+- **keeper_goal_repair**: detect and repair keepers with empty `active_goal_ids` by creating goals from keeper purpose statements. New module `Keeper_goal_repair` with dry-run and execute modes.
 - **auto-task-start**: `keeper_task_claim` now automatically calls `masc_transition(action=start)` after successful claim, eliminating the claim-without-start pattern that caused task abandonment.
 - **preset workspace collaboration tools**: social and dispatch tool presets now include `masc.workspace collaboration` group, granting access to `masc_transition`, `masc_claim_next` and related workspace collaboration tools.
 
@@ -1498,7 +1639,6 @@ Operational hardening release: keeper recovery surfaces (oas_timeout retry guard
 - `#11080` keeper — stop leaking host playground paths to LLM tool responses
 - `#11099` keeper — surface 5 P2 silent failures (telemetry gaps)
 - `#11074` keeper — surface 2 P1 silent failures in registry
-- `#11077` keeper — resolve `unknown_toml_keys` and tidy provider match errors
 
 ### Fixed (build / types / dashboard)
 - `#11092` main — restore green build broken by #11077 + #11078
@@ -1571,9 +1711,8 @@ Follow-up patch that closes the dashboard a11y round (#10930 focus trap + aria-e
 - `#11008` build — drop 5 redundant catch-all arms after provider_kind exhaustive sweep
 - `#11019` provider — exhaust provider_kind matches for lint (broader sweep)
 - `#11022` session — bound registry + mcp-store mailboxes (was max_int)
-- `#11024` keeper — include unknown_toml_keys in merge_overlay
 - `#11025` keeper — warn once when sandbox GH_TOKEN unavailable
-- `#11012` keeper-supervisor — surface persona drift at registration (#10993)
+- `#11012` keeper-supervisor — surface keeper drift at registration (#10993)
 - `#11004` admission — inline fd-growth rate in admission rejection log (#10745)
 - `#10995` approval-queue — skip Critical risk in expire_stale to break re-enqueue cycle
 - `#10992` contract — harden public tool sweep and runtime guard edges
@@ -1750,11 +1889,11 @@ The v0.18.0 tag exists but its GitHub release workflow failed: the OAS pin bump 
 
 ## [0.18.0] - 2026-04-26
 
-Aggregate of 50 commits since v0.17.0 (18 feat / 11 fix / 9 refactor / 5 perf / 3 docs / 3 chore / 1 diag). No breaking API changes. Headline: dashboard localisation continues (rounds 24–28, 50+ chips/labels), keeper stability gains noop-cycle classifier fix unblocking 8x cooldown trap (#10672) and `/workspace` LLM hallucination negative anchor (#10647), RFC-0008 PR-1 introduces `Credential_provider` trait + `Host_config_provider` (#10660).
+Aggregate of 50 commits since v0.17.0 (18 feat / 11 fix / 9 refactor / 5 perf / 3 docs / 3 chore / 1 diag). No breaking API changes. Headline: dashboard localisation continues (rounds 24–28, 50+ chips/labels), keeper stability gains noop-cycle classifier fix unblocking 8x cooldown trap (#10672) and `/workspace` LLM hallucination negative anchor (#10647), RFC-0008 PR-1 introduces `Credential_provider` property + `Host_config_provider` (#10660).
 
 ### Added (feat)
 - Dashboard localisation rounds 24–28: 50+ chips/labels/headings across multiple components (#10644 round-24, #10651 round-25, #10653 round-26, #10655 round-27, #10666 round-28); WS-only cutover dev default + transport beacon (#10657).
-- Keeper architecture: RFC-0008 PR-1 — `Credential_provider` trait + `Host_config_provider` (#10660).
+- Keeper architecture: RFC-0008 PR-1 — `Credential_provider` property + `Host_config_provider` (#10660).
 - Config SSOT: `Pr_review_post` caller (30s) + migrate `gh pr review` write site (#10626); `Git_meta` + `Shell_probe` callers added to `exec_timeout` SSOT (#10603).
 
 ### Changed (refactor)
@@ -1788,13 +1927,13 @@ Aggregate of 103 commits since v0.16.0 (42 feat / 24 fix / 15 perf / 15 refactor
 - Topbar variant API unified (Phase 3 consistency, #10505); SectionHeading primitive extracted (#10476).
 
 ### Changed (refactor)
-- SSOT consolidation: cohort_key moved to source-of-truth module (#10618); 12 deprecated re-exports dropped from `Keeper_context_runtime` (#10616); KeeperSandbox/DockerPlayground aliased to `Env_config_sandbox` (#10536); 5 Alerting/Pr_review timeout literals migrated to SSOT (#10502); 4 Sandbox/Turn_sandbox timeout literals migrated (#10486); 3 sandbox hardcoded constants migrated (#10551); personality I/O consolidated via samchon-style harness (#10538). Alerting default 15→20s (#10615).
+- SSOT consolidation: cohort_key moved to source-of-truth module (#10618); 12 deprecated re-exports dropped from `Keeper_context_runtime` (#10616); KeeperSandbox/DockerPlayground aliased to `Env_config_sandbox` (#10536); 5 Alerting/Pr_review timeout literals migrated to SSOT (#10502); 4 Sandbox/Turn_sandbox timeout literals migrated (#10486); 3 sandbox hardcoded constants migrated (#10551). Alerting default 15→20s (#10615).
 - Yojson hygiene: drop unused decoder for `agent_identity.t` + `post_eval_result` (#10526); lint exempts encoder-only deriving from option-default rule (#10537).
 - Bumped `agent_sdk` floor to 0.177.0 (#10608) after raising cap to <0.178.0 to align with pinned SHA v0.177.0 (#10592).
 
 ### Fixed
 - Runtime unblock series: accept `weight=0` in toml materializer (#10571 / #10610) after the codex_cli weight=0 sweep (#10554) was reverted (#10613). Pin agent_sdk upper bound to <0.177.0 (#10497 / #10529), then raised to <0.178.0 (#10592). `check-oas-pin` regex accepts capped-floor pattern (#10596). Keeper supervisor handles `Stale_turn_timeout` in cohort_key (#10572 / #10574).
-- Keeper stability: stale watchdog triggers fiber restart instead of cosmetic broadcast (#10540); `stream_idle_timeout` set to gap-detection value 120s (#10604); `Stdlib.Lazy` replaced with Atomic+Mutex memo in keeper memory bank (#10399 / #10407); personality re-sync loop stopped via symmetric compare (#10479); turn_timeout_sec_live aligned with SSOT (#10456 / #10469); pause directive persist + duplicate cohort key drop (#10593).
+- Keeper stability: stale watchdog triggers fiber restart instead of cosmetic broadcast (#10540); `stream_idle_timeout` set to gap-detection value 120s (#10604); `Stdlib.Lazy` replaced with Atomic+Mutex memo in keeper memory bank (#10399 / #10407); turn_timeout_sec_live aligned with SSOT (#10456 / #10469); pause directive persist + duplicate cohort key drop (#10593).
 - Sandbox: accept legacy 3-field `docker inspect` without `ttl_sec` (#10488 / #10513 / #10514); preserve trailing tab; scrub `roots=` leak from path-rejection errors (#10349 / #10383); `gh-validation` inlines allowed command list in blocked error (#10561 / #10566).
 - Auth: write short-form alias for every keeper at bootstrap (#10440 / #10525). Auth bridge SSOT routing (#10400 follow-through).
 - Observability: inline rejection context in `runtime-no-callable-models` ERROR (#10528 / #10541); align `system_log` filename to UTC (#10392 / #10401); duplicate `InferenceTelemetry` emit dropped (#10489 / #10490 / #10511).
@@ -1845,7 +1984,7 @@ Aggregate of 206 commits since v0.15.0 (95 fix / 38 perf / 21 feat / 13 chore / 
 - PCRE caching: `Re.compile` hoisted in 4 hot paths + `String_util.find_substring` added (#10371); 2 more per-call `Re.compile` hoisted in drift-guard / board-votes (#10375); output-parse / memory-bank / consensus paths (#10367); tool-board / notify / inline-dispatch (#10361); link-preview compiled PCREs cached in `first_match` (#10381).
 
 ### Diagnostics
-- Per-field personality drift exposed on re-sync (#10269 / #10370); structured `Timeout` / `Parse_degraded` from agent-stress failure path (#10341 / #10346); structured signals replace boilerplate institution-episode failure learnings (#10325 / #10339); `agent_stress` emits `Turn_failure` from `keeper_unified_turn` (#10341 / #10362); 9 diag commits total.
+- Structured `Timeout` / `Parse_degraded` from agent-stress failure path (#10341 / #10346); structured signals replace boilerplate institution-episode failure learnings (#10325 / #10339); `agent_stress` emits `Turn_failure` from `keeper_unified_turn` (#10341 / #10362); 9 diag commits total.
 
 ## [0.15.0] - 2026-04-25
 
@@ -1853,7 +1992,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 
 ### Added (feat)
 - Keeper observability counters: per-keeper turn-latency buckets (#10124), livelock observer (#10123), context_max drift (#10122), require_tool_use violations (#10099), proactive skip-reason (#10060), compaction outcome (#10011), usage-trust retired scrape backend (#10021), Hebbian per-outcome edge (#10048), metric-emit drops (#10053).
-- Keeper runtime: affordance-tool intersection at `Require_tool_use` gate (#10141), Ollama `keep_alive`/`num_ctx` forwarding from keeper_runtime.toml (#9985), wire `Gh_exit_class` into docker sandbox (#9974), persona authoring wizard (#9940).
+- Keeper runtime: affordance-tool intersection at `Require_tool_use` gate (#10141), Ollama `keep_alive`/`num_ctx` forwarding from keeper_runtime.toml (#9985), wire `Gh_exit_class` into docker sandbox (#9974), keeper authoring wizard (#9940).
 - Workspace/FSM: per-agent FSM drift counter (#10152), retired scrape backend task FSM drift (#10082).
 - Dashboard: gRPC `events_dropped` strip (#10114), WS delivery counters (#10106, #10107), WS-only cutover flag (#10102), websocket route slice expansion (#9963), a11y high-contrast + forced-colors support (#10080).
 - OAS/runtime: per-kind `masc_oas_error` counter (#10039), resolved_model_id metric label (#9962), context_overflow_imminent action signal (#9954).
@@ -1896,7 +2035,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 - `keeper_shell_docker.run_docker_shell_command_with_status` now appends `Env_git_noninteractive.docker_env_args` to the docker `-e` env list at the single credential-composition callsite (`lib/keeper/keeper_shell_docker.ml:234-245`). No change to identity/auth semantics; the container now fails fast on a git credential prompt rather than hanging.
 
 ### RFC
-- RFC-0007 rev.3 and RFC-0008 landed as design documents (`docs/rfc/`). This release implements RFC-0007 PR-1 only; PR-2 (`gh_result.t` structured result), PR-3 (typed `Api_get` / `Api_graphql_query`), and RFC-0008 `CredentialProvider` trait are tracked for follow-up releases.
+- RFC-0007 rev.3 and RFC-0008 landed as design documents (`docs/rfc/`). This release implements RFC-0007 PR-1 only; PR-2 (`gh_result.t` structured result), PR-3 (typed `Api_get` / `Api_graphql_query`), and RFC-0008 `CredentialProvider` property are tracked for follow-up releases.
 
 ## [0.13.0] - 2026-04-24
 
@@ -2351,7 +2490,7 @@ Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-
 
 - **Tool-failure root-cause sweep (#8688, RFC #8760).** Server-authored
   hints now have Good/Bad examples for the top rejection classes and
-  the keeper persona prompt documents how to consume them. Observability
+  the Keeper prompt documents how to consume them. Observability
   script `scripts/sweep-tool-error-signatures.sh` (#8767) buckets daily
   `tool_calls/*.jsonl` failures by normalized signature so the impact
   of prompt changes is measurable. Shipped:
@@ -2513,7 +2652,7 @@ observation and fix — silent cost of the pre-fix contract shape.
     MCP / approval policy now lives at the OAS transport/config boundary,
     keeping keeper behavior deterministic without stale provider aliases.
   - `merge_keeper_profile_defaults` merges `oas_env` key-by-key: a
-    persona-level base survives where the keeper TOML overlay doesn't
+    keeper-level base survives where the keeper TOML overlay doesn't
     override.
   - 5 new inline tests in `test_keeper_toml.ml` cover allowed / dropped
     / absent / bool-coerced / unknown-keys-whitelist paths.
@@ -2681,7 +2820,7 @@ Bulk merge cycle (2 `/loop` batches, admin override) covering dashboard UX, keep
   - OAS pin floor in badge + Tech Stack: `0.118.2` → `0.153.0` (matches `masc.opam` and `dune-project`).
   - Keeper lifecycle diagram corrected from "11-state" to the actual **12 states** in `lib/keeper/keeper_state_machine.mli` (`Overflowed` was missing).
   - WebRTC signaling endpoints made precise: `POST /webrtc/offer`, `POST /webrtc/answer`, gated by `Server_webrtc_transport.is_enabled`.
-  - Personal-project disclaimer added (Korean + English) at the top.
+  - Keeperl-project disclaimer added (Korean + English) at the top.
   - "Production surface" framing replaced with surface-map vocabulary that doesn't imply external SLA.
 - **Root scratch removed (PR #7744).**
   - `git rm` on 9 tracked one-off files: `pr-payload.json`, `pr6975.json`, `pr_body_tmp.txt`, `test-integration-{retry,verify}.txt`, `test_portal_lock_stress.ml` (no rg refs in `lib/bin/test/scripts`), `EIO_REFACTOR_ISSUES.md`, `AGENTS.md` (CLAUDE.md is the live SSOT), `session_tracker_qa_tests.md`.
@@ -3508,7 +3647,7 @@ had the full Phase 2 release to migrate.
 - Output validation stats in tool-quality dashboard (#5832)
 - Dashboard SSE `keeper_tool_skipped` event + centralized thresholds (#5824)
 - Deterministic tool output validation (Samchon-style schema constraints) (#5821)
-- Analyst persona (verification-driven) (#5850)
+- Analyst keeper (verification-driven) (#5850)
 
 ### Fixed
 - Comprehensive Eio.Cancel.Cancelled guard sweep — 72 files, 129 patterns (#5842)

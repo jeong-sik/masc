@@ -4,8 +4,24 @@
     and root-level wrappers such as [Env_config_introspect] can reuse the same
     category definitions, masking rules, and source attribution logic. *)
 
-let entry = Env_config_snapshot_core.entry
-let category = Env_config_snapshot_core.category
+let entry = Env_config_snapshot_collector.entry
+let category = Env_config_snapshot_collector.category
+
+let keeper_registry_entries predicate =
+  Keeper_runtime_setting_registry.active
+  |> List.filter predicate
+  |> List.map (fun (row : Keeper_runtime_setting_registry.setting) ->
+    entry ~default:row.default_display row.env_name row.description)
+;;
+
+let keeper_runtime_entries =
+  keeper_registry_entries (fun row ->
+    String.starts_with ~prefix:"MASC_KEEPER_" row.env_name)
+;;
+
+let keeper_web_search_entries =
+  keeper_registry_entries (fun row -> String.equal row.category "web_search")
+;;
 
 let server_entries =
   [
@@ -16,10 +32,10 @@ let server_entries =
       "MASC MCP endpoint URL (derived from base URL when unset)";
     entry ~default:"" "MASC_CLUSTER_NAME" "Cluster name for multi-instance";
     entry ~default:"(cwd)" Env_config_core.base_path_env_key "Base storage directory";
-    entry ~default:"(none)" "MASC_BUILD_GIT_COMMIT" "Build git commit hash";
     entry ~default:Masc_network_defaults.masc_http_default_host
       "MASC_HTTP_HOST" "HTTP server listen host";
-    entry ~default:"128" "MASC_HTTP_MAX_CONNECTIONS" "HTTP server max connections";
+    entry ~default:Masc_network_defaults.masc_http_default_max_connections_s
+      "MASC_HTTP_MAX_CONNECTIONS" "HTTP server max connections";
   ]
 
 let auth_entries =
@@ -34,7 +50,6 @@ let auth_entries =
 
 let runtime_entries =
   [
-    (* RFC-0084 host-config-cleanup-J — MASC_DISPATCH_V2 removed. *)
     entry ~default:"(auto)" Env_config_core.log_level_env_key "Log level override";
     entry ~default:"debug" Env_config_core.log_routine_level_env_key
       "Routine telemetry log level override (debug|info|warn|error|off)";
@@ -106,12 +121,10 @@ let transport_entries =
        slice. Catch-all events (no slice mapping) still reach every session. \
        masc_ws_slice_fanout_skipped_total advances per skip. RFC #10119 \
        Phase 2. Set to false for emergency rollback only.";
-    entry ~default:"true" "MASC_WEBRTC_ENABLED" "Enable WebRTC transport";
-    entry ~default:"auto" "MASC_USE_H2" "HTTP mode (auto|h2_only|h1_only)";
+    Env_config_runtime.Transport.h2_snapshot_entry;
     entry ~default:"240" "MASC_STARTUP_WATCHDOG_SEC"
       "Startup watchdog timeout (seconds)";
-    entry ~default:"(none)" "MASC_AGENT_TRANSPORT"
-      "Agent transport preference";
+    Masc_grpc_transport.snapshot_entry;
     entry ~default:"32" "MASC_WS_MAX_INBOUND_DISPATCHES_PER_SESSION"
       "Maximum concurrent JSON-RPC request dispatch fibers admitted from one \
        WebSocket session. 0 disables the per-session admission gate.";
@@ -119,28 +132,18 @@ let transport_entries =
 
 let keeper_entries =
   [
-    entry ~default:"true" "MASC_KEEPER_BOOTSTRAP_ENABLED"
-      "Enable keeper auto-bootstrap";
-    entry ~default:"300" "MASC_KEEPER_SNAPSHOT_SEC"
-      "Keeper keepalive snapshot interval";
-    entry ~default:"false" "MASC_KEEPER_DEBUG" "Enable keeper debug logging";
     entry ~default:"(none)" "MASC_TLA_TRACE"
       "Enable TLA+ trace emission";
   ]
 
 let keeper_execution_entries =
   [
-    entry ~default:"0.4" "MASC_KEEPER_UNIFIED_TEMP" "Unified turn temperature";
-    entry ~default:"131072" "MASC_KEEPER_UNIFIED_MAX_TOKENS"
-      "Unified turn max output tokens";
     entry ~default:"4000" "MASC_KEEPER_AUTONOMOUS_MAX_TOKENS"
       "Autonomous execution max tokens";
   ]
 
 let autonomy_entries =
   [
-    entry ~default:"3" "MASC_AUTONOMY_QUIET_START" "Quiet hours start (0-23)";
-    entry ~default:"7" "MASC_AUTONOMY_QUIET_END" "Quiet hours end (0-23)";
   ]
 
 let dashboard_entries =
@@ -189,12 +192,6 @@ let dashboard_entries =
       "Shell render timeout — full path (floor 1)";
     entry ~default:"8" "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
       "Transport health timeout";
-    (* RFC-0138 Phase 3 Step 4 — MASC_NAMESPACE_TRUTH_*_TIMEOUT_S env
-       knobs retired.  After Step 3 (#16738) wired /project-snapshot
-       through Dashboard_snapshot, the fallback path that consumed
-       those tunables runs at most once per process lifetime; values
-       are now module constants in
-       [Server_dashboard_http_namespace_truth]. *)
   ]
 
 (* --- New categories for the 229 missing env vars --- *)
@@ -215,12 +212,10 @@ let cache_entries =
 
 let channel_gate_entries =
   [
-    entry ~default:"(none)" "MASC_CHANNEL_GATE_DEDUP_TTL_SEC"
-      "Dedup TTL (seconds, clamped 10-3600)";
-    entry ~default:"(none)" "MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH"
-      "Max content length (clamped 100-16000)";
-    entry ~default:"30" "MASC_DISCORD_STATUS_STALE_SEC"
-      "Discord status stale threshold (seconds)";
+    entry ~default:"3600" "MASC_CHANNEL_GATE_DEDUP_TTL_SEC"
+      "Dedup TTL (seconds, floored at 1)";
+    entry ~default:"4000" "MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH"
+      "Max content length (floored at 1)";
     entry ~default:"30" "MASC_IMESSAGE_STATUS_STALE_SEC"
       "iMessage status stale threshold (seconds)";
   ]
@@ -252,7 +247,7 @@ let keeper_sandbox_entries =
       "Writable /tmp tmpfs size for hardened keeper containers";
     entry ~default:"false" "MASC_KEEPER_SANDBOX_RELAX_FS"
       "Relax Docker sandbox filesystem hardening (writable rootfs + exec /tmp)";
-    entry ~default:"(none)" "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE"
+    entry ~default:"" "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE"
       "Optional seccomp profile path for hardened keeper containers";
     entry ~default:"false" "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS"
       "Fail closed unless Docker reports rootless mode";
@@ -280,85 +275,10 @@ let internal_timer_entries =
       "Stalled session threshold (seconds, 5 min)";
   ]
 
-let keeper_grpc_entries =
-  [
-    entry ~default:"5.0" "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC"
-      "Backoff delay between gRPC reconnect attempts (clamped 1-60 seconds)";
-  ]
-
-let keeper_keepalive_entries =
-  [
-    entry ~default:"30" "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"
-      "Heartbeat cycle interval (positive integer, no implicit upper bound)";
-    entry ~default:"120.0" "MASC_KEEPER_MAX_SILENCE_SEC"
-      "Max seconds since last heartbeat before presence sync required";
-    entry ~default:"0.5" "MASC_KEEPER_SLEEP_CHUNK_SEC"
-      "Interruptible sleep chunk size (seconds, clamped 0.1-10)";
-    entry ~default:"(none)" "MASC_KEEPER_WORK_AS_HEARTBEAT"
-      "Successful workspace heartbeat after turn counts as presence proof (feature flag)";
-  ]
-
-let keeper_metrics_entries =
-  [
-    entry ~default:"(none)" "MASC_KEEPER_METRICS_MAX_BYTES"
-      "Max metrics file size before rotation (10MB)";
-    entry ~default:"1" "MASC_KEEPER_METRICS_MAX_ROTATED"
-      "Number of rotated files to keep";
-  ]
-
-let keeper_health_entries =
-  [
-    entry ~default:"0.0" "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC"
-      "Durable keeper event-queue backlog age before full-health degrades (seconds)";
-  ]
-
-let keeper_proactive_entries =
-  [
-    entry ~default:"100" "MASC_KEEPER_STAGE_TIMING_RING_SIZE"
-      "Stage timing ring buffer size for profiling (clamped 10-1000)";
-  ]
-
-let keeper_supervisor_entries =
-  [
-    entry ~default:"3600.0" "MASC_KEEPER_DEAD_TTL_SEC"
-      "Dead tombstone TTL before cleanup (seconds, floor 60)";
-    entry ~default:"30.0" "MASC_KEEPER_SUPERVISOR_SWEEP_SEC"
-      "Supervisor sweep interval (seconds)";
-  ]
-
 let local_runtime_entries =
   [
     entry ~default:"(none)" "MASC_URL"
       "MASC MCP endpoint URL";
-  ]
-
-module Memory_os_defaults = Env_config_keeper.KeeperMemoryOs
-
-(* Env-var names come from Env_config_keeper.KeeperMemoryOs (the reader
-   module), never from re-spelled literals: a registry entry whose env var
-   nothing reads is a silent no-op reported as source=env. *)
-let memory_entries =
-  [
-    entry
-      ~default:(string_of_bool Memory_os_defaults.recall_enabled_default)
-      Memory_os_defaults.recall_env_key
-      "Memory OS recall prompt injection enabled; invalid values fail closed";
-    entry
-      ~default:(string_of_bool Memory_os_defaults.librarian_enabled_default)
-      Memory_os_defaults.librarian_env_key
-      "Memory OS post-turn librarian extraction enabled; invalid values fail closed";
-    entry
-      ~default:(string_of_int Memory_os_defaults.librarian_cadence_turns_default)
-      Memory_os_defaults.librarian_cadence_turns_env_key
-      "Turns between librarian extraction attempts per keeper (floor 1)";
-    entry
-      ~default:(string_of_int Memory_os_defaults.librarian_max_messages_default)
-      Memory_os_defaults.librarian_max_messages_env_key
-      "Recent-message window for librarian extraction (floor 1)";
-    entry
-      ~default:(string_of_int Memory_os_defaults.recall_facts_max_bytes_default)
-      Memory_os_defaults.recall_facts_max_bytes_env_key
-      "Maximum UTF-8 bytes for rendered Memory OS recall fact lines (floor 1)";
   ]
 
 let message_gc_entries =
@@ -377,9 +297,9 @@ let model_routing_entries =
       "Sticky lane failover preference TTL (seconds, 1 hour); 0 disables";
   ]
 
-let oas_sse_entries =
+let agent_core_sse_entries =
   [
-    entry ~default:"2.0" "MASC_OAS_SSE_DRAIN_INTERVAL_SEC"
+    entry ~default:"2.0" "MASC_AGENT_CORE_SSE_DRAIN_INTERVAL_SEC"
       "SSE drain interval (seconds, floor 0.1)";
   ]
 
@@ -415,8 +335,6 @@ let path_entries =
       "Config directory override; None when unset";
     entry ~default:"(none)" Env_config_core.data_dir_env_key
       "Data directory override; None=<base_path>/data";
-    entry ~default:"(none)" Env_config_core.personas_dir_env_key
-      "Personas directory override; None when unset";
   ]
 
 let session_entries =
@@ -455,7 +373,7 @@ let telemetry_entries =
       "Routine telemetry level (debug|info|warn|error|off)";
     entry ~default:"false" Env_config_core.parse_warn_env_key
       "Whether malformed env parses fail fast";
-    entry ~default:"(none)" "MASC_OTEL_ENABLED"
+    entry ~default:"true" "MASC_OTEL_ENABLED"
       "Enable OpenTelemetry span collection";
   ]
 
@@ -470,33 +388,15 @@ let test_entries =
     entry ~default:"false" "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE"
       "Allow explicit MASC_BASE_PATH override handling in test executables";
     entry ~default:"false" "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE"
-      "Allow explicit MASC_CONFIG_DIR and MASC_PERSONAS_DIR overrides in test executables";
+      "Allow explicit MASC_CONFIG_DIR overrides in test executables";
   ]
 
 let tool_entries =
   [
     entry ~default:"512" "MASC_LIST_PAGE_SIZE"
       "Tool list page size (clamped 10-1024)";
-    entry ~default:"(none)" "MASC_PLACEHOLDER_TOOLS_ENABLED"
-      "Enable placeholder tool exposure";
-    entry ~default:"(none)" "MASC_PUBLIC_TOOLS_EXTRA"
-      "Extra public tools (comma-separated names); None when unset";
-  ]
-
-let web_search_entries =
-  [
-    entry ~default:"(none)" "MASC_SEARXNG_URL"
-      "SearXNG instance URL; None when unset";
-    entry ~default:"30.0" "MASC_WEB_SEARCH_CACHE_TTL_SEC"
-      "Web search cache TTL (seconds, floor 0)";
-    entry ~default:"(none)" "MASC_WEB_SEARCH_FALLBACKS"
-      "Web search fallback providers; None when unset";
-    entry ~default:"(none)" "MASC_WEB_SEARCH_PROVIDER"
-      "Web search provider override; None when unset";
-    entry ~default:"(none)" "MASC_WEB_SEARCH_PROVIDER_ORDER"
-      "Web search provider fallback order; None when unset";
-    entry ~default:"15" "MASC_WEB_SEARCH_TIMEOUT_SEC"
-      "Web search timeout (clamped 1-60 seconds)";
+    entry ~default:"true" "MASC_PLACEHOLDER_TOOLS_ENABLED"
+      "Show placeholder (unimplemented) tools in tool catalog; set false/0/no to hide";
   ]
 
 let worker_entries =
@@ -505,49 +405,43 @@ let worker_entries =
       "Local runtime cooldown (seconds); None when unset";
     entry ~default:"(none)" "MASC_LOCAL_RUNTIME_DEBUG"
       "Local runtime debug logging (feature flag)";
-    entry ~default:"60" "MASC_LOCAL_WORKER_HEARTBEAT_SEC"
-      "Local worker heartbeat interval (seconds, clamped >=1)";
+  ]
+
+let category_specs =
+  [
+    ( "server"
+    , server_entries @ path_entries
+      @ docker_playground_entries @ test_entries );
+    "auth", auth_entries;
+    "transport", transport_entries;
+    "storage", storage_entries @ cache_entries @ board_entries;
+    ( "runtime"
+    , runtime_entries
+      @ message_gc_entries @ internal_timer_entries
+      @ sse_entries @ telemetry_entries
+      @ tool_entries );
+    "rate_limiting", rate_limiting_entries;
+    "inference", model_routing_entries @ agent_core_sse_entries @ local_runtime_entries;
+    ( "keeper"
+    , keeper_runtime_entries @ keeper_entries
+      @ docker_playground_entries
+      @ keeper_sandbox_entries );
+    ( "keeper_execution"
+    , keeper_execution_entries @ decision_entries );
+    "autonomy", autonomy_entries;
+    "dashboard", dashboard_entries;
+    "operations", operator_entries @ orchestrator_entries;
+    "channel", channel_gate_entries;
+    "process", shutdown_entries;
+    "worker", worker_entries;
+    "web_search", keeper_web_search_entries;
+    "session", session_entries @ tempo_entries;
   ]
 
 let all_categories () =
-  [
-    category "server"
-      (server_entries @ path_entries
-       @ docker_playground_entries @ test_entries);
-    category "auth" auth_entries;
-    category "transport" transport_entries;
-    category "storage" (storage_entries @ cache_entries @ memory_entries @ board_entries);
-    category "runtime"
-      (runtime_entries
-       @ message_gc_entries @ internal_timer_entries
-       @ sse_entries @ telemetry_entries
-       @ tool_entries);
-    category "rate_limiting" rate_limiting_entries;
-    category "inference"
-      (model_routing_entries @ oas_sse_entries @ local_runtime_entries);
-    category "keeper"
-      (keeper_entries
-       @ keeper_keepalive_entries @ keeper_metrics_entries
-       @ keeper_health_entries
-       @ docker_playground_entries
-       @ keeper_sandbox_entries);
-    category "keeper_execution"
-      (keeper_execution_entries @ decision_entries @ keeper_proactive_entries
-       @ keeper_grpc_entries);
-    category "autonomy" (autonomy_entries @ keeper_supervisor_entries);
-    category "dashboard" dashboard_entries;
-    category "operations"
-      (operator_entries @ orchestrator_entries);
-    category "channel" channel_gate_entries;
-    category "process"
-      shutdown_entries;
-    category "worker" worker_entries;
-    category "web_search" web_search_entries;
-    category "session" (session_entries @ tempo_entries);
-  ]
+  List.map (fun (name, entries) -> category name entries) category_specs
 
-let valid_config_category_strings =
-  all_categories () |> List.map fst
+let valid_config_category_strings = List.map fst category_specs
 
 let to_json ?server_meta ?generated_at ?cat () =
   let categories =

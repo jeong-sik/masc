@@ -1,21 +1,5 @@
 open Masc_board_handlers
 
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
-module Option = Stdlib.Option
-module Result = Stdlib.Result
-module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
-module List = Stdlib.List
-module Array = Stdlib.Array
-module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
 
 (** Board_tool_handlers — non-post mutating / read handlers and the
     shared agent-lookup / SOUL-evolution callbacks.
@@ -112,31 +96,20 @@ let invalid_vote_direction ~tool_name ~start_time raw : Tool_result.result =
     (Printf.sprintf "invalid vote direction %S; expected up or down" raw)
 ;;
 
-(* Rejection tombstone for the retired [vote] parameter. Deleting it (#23710)
-   made a legacy {vote:"down"} call silently default direction to "up" —
-   an inverted vote instead of a typed rejection (main red #23901, voting). *)
-let legacy_vote_parameter_removed ~tool_name ~start_time raw : Tool_result.result =
+let missing_vote_direction ~tool_name ~start_time : Tool_result.result =
   Tool_result.make_err
     ~tool_name
-    ~class_:Tool_result.Policy_rejection
+    ~class_:Tool_result.Workflow_rejection
     ~start_time
-    (Printf.sprintf
-       "legacy vote parameter %S is no longer accepted; use direction"
-       raw)
+    "vote direction required; expected up or down"
 ;;
 
 let handle_vote ~tool_name ~start_time args =
   let post_id = get_string args "post_id" "" in
   let voter = get_string args "voter" "anonymous" in
-  match Safe_ops.json_string_opt "direction" args, get_string_opt args "vote" with
-  | None, Some raw ->
-    legacy_vote_parameter_removed ~tool_name ~start_time raw
-  | direction_arg, _ ->
-    let direction_str =
-      match direction_arg with
-      | Some raw -> raw
-      | None -> "up"
-    in
+  match Safe_ops.json_string_opt "direction" args with
+  | None -> missing_vote_direction ~tool_name ~start_time
+  | Some direction_str ->
     (match Board.vote_direction_of_string_opt direction_str with
      | None -> invalid_vote_direction ~tool_name ~start_time direction_str
      | Some direction ->
@@ -262,10 +235,12 @@ let handle_search ~tool_name ~start_time args : Tool_result.result =
 let handle_comment_vote ~tool_name ~start_time args : Tool_result.result =
   let comment_id = get_string args "comment_id" "" in
   let voter = get_string args "voter" "anonymous" in
-  let direction_str = get_string args "direction" "up" in
-  match Board.vote_direction_of_string_opt direction_str with
-  | None -> invalid_vote_direction ~tool_name ~start_time direction_str
-  | Some direction ->
+  match Safe_ops.json_string_opt "direction" args with
+  | None -> missing_vote_direction ~tool_name ~start_time
+  | Some direction_str ->
+    (match Board.vote_direction_of_string_opt direction_str with
+     | None -> invalid_vote_direction ~tool_name ~start_time direction_str
+     | Some direction ->
     if String.equal comment_id ""
     then
       Tool_result.make_err
@@ -283,7 +258,7 @@ let handle_comment_vote ~tool_name ~start_time args : Tool_result.result =
             (`String
                (Printf.sprintf
                   "%s 코멘트 투표 완료! 점수: %+d"
-                  (if String.equal direction_str "down" then "👎" else "👍")
+                  (if direction = Board.Down then "👎" else "👍")
                   score))
           ()
       | Error (Board.Already_voted _) ->
@@ -294,10 +269,10 @@ let handle_comment_vote ~tool_name ~start_time args : Tool_result.result =
             (`String
                (Printf.sprintf
                   "%s Already voted (idempotent)."
-                  (if String.equal direction_str "down" then "👎" else "👍")))
+                  (if direction = Board.Down then "👎" else "👍")))
           ()
       | Error e ->
-        Board_tool_format.error_of_board_error ~tool_name ~start_time e)
+        Board_tool_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 
 let handle_reaction ~tool_name ~start_time args : Tool_result.result =

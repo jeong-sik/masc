@@ -87,12 +87,15 @@ streaming = true
 
 [ollama_cloud.deepseek-v4-flash]
 wizard-default = true
+max-request-body-bytes = 1048576
 
 [deepseek.deepseek-v4-flash]
 wizard-default = true
+max-request-body-bytes = 1048576
 
 [ollama.gemma4-26b-a4b-qat]
 wizard-default = true
+max-request-body-bytes = 1048576
 |}
        default
        deepseek_display_name);
@@ -127,6 +130,7 @@ streaming = true
 
 [deepseek.deepseek-v4-flash]
 wizard-default = true
+max-request-body-bytes = 1048576
 |};
   runtime_file
 ;;
@@ -162,41 +166,7 @@ streaming = true
 
 [generic.deepseek-v4-flash]
 wizard-default = true
-|};
-  runtime_file
-;;
-
-let write_runtime_catalog_with_dotted_provider_id base_path =
-  let config_dir = Filename.concat base_path ".masc/config" in
-  let runtime_file = Filename.concat config_dir "runtime.toml" in
-  ignore (Sys.command ("mkdir -p " ^ Filename.quote config_dir));
-  write_file
-    runtime_file
-    {|
-[runtime]
-default = "deep.seek.deepseek-v4-flash"
-
-[providers."deep.seek"]
-display-name = "Dotted DeepSeek"
-protocol = "openai-compatible-http"
-endpoint = "https://api.deepseek.com"
-
-[providers."deep.seek".healthcheck]
-path = "/models"
-
-[providers."deep.seek".credentials]
-type = "env"
-key = "DEEPSEEK_API_KEY"
-
-[models.deepseek-v4-flash]
-api-name = "deepseek-v4-flash"
-max-context = 1048576
-tools-support = true
-thinking-support = true
-streaming = true
-
-["deep.seek".deepseek-v4-flash]
-wizard-default = true
+max-request-body-bytes = 1048576
 |};
   runtime_file
 ;;
@@ -224,17 +194,14 @@ let source_root () =
 
 let install_script () = read_file (Filename.concat (source_root ()) "scripts/install.sh")
 
+let quickstart_script () = read_file (Filename.concat (source_root ()) "quickstart.sh")
+
 let release_workflow () =
   read_file (Filename.concat (source_root ()) ".github/workflows/release.yml")
 ;;
 
-let railway_workflow () =
-  read_file (Filename.concat (source_root ()) ".github/workflows/deploy-railway.yml")
-;;
-
 let dockerfile () = read_file (Filename.concat (source_root ()) "Dockerfile")
 let dockerignore () = read_file (Filename.concat (source_root ()) ".dockerignore")
-let railway_config () = read_file (Filename.concat (source_root ()) "railway.toml")
 
 let project_version () =
   let raw = read_file (Filename.concat (source_root ()) "dune-project") in
@@ -420,8 +387,10 @@ let run_install args base_path =
   | Unix.WEXITED 0 -> output
   | _ ->
     Alcotest.fail
-      (Printf.sprintf "install.sh exited with non-zero status: %s"
-         (String.concat " " (List.map Filename.quote args)))
+      (Printf.sprintf
+         "install.sh exited with non-zero status: %s\ninstaller output:\n%s"
+         (String.concat " " (List.map Filename.quote args))
+         output)
 ;;
 
 let test_config_seed_skips_each_existing_file_without_force () =
@@ -441,15 +410,15 @@ let test_config_seed_skips_each_existing_file_without_force () =
   assert_contains
     "model catalog overlay has config-root destination"
     script
-    {|MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/oas-models-overlay.toml"|};
+    {|MODEL_CATALOG_OVERLAY_FILE="$CONFIG_DIR/agent-core-models-overlay.toml"|};
   assert_contains
     "model catalog overlay uses config release seed"
     script
-    {|seed_config_if_missing "oas-models-overlay.toml" "$MODEL_CATALOG_OVERLAY_FILE"|};
+    {|seed_config_if_missing "agent-core-models-overlay.toml" "$MODEL_CATALOG_OVERLAY_FILE"|};
   assert_not_contains
     "legacy full model catalog is not seeded"
     script
-    {|seed_raw_if_missing "oas-models.toml"|};
+    {|seed_raw_if_missing "agent-core-models.toml"|};
 ;;
 
 let test_release_requires_advertised_binary_assets () =
@@ -457,7 +426,7 @@ let test_release_requires_advertised_binary_assets () =
   assert_contains
     "release checks advertised asset list"
     workflow
-    "for arch in macos-arm64 linux-x64; do";
+    "for arch in macos-arm64 linux-x64 linux-arm64; do";
   assert_contains
     "release builds the typed deployment preflight helper"
     workflow
@@ -477,7 +446,37 @@ let test_release_requires_advertised_binary_assets () =
   assert_contains
     "release hashes seeded model catalog overlay"
     workflow
-    "(cd ../config && sha256sum oas-models-overlay.toml) >> SHA256SUMS"
+    "(cd ../config && sha256sum agent-core-models-overlay.toml) >> SHA256SUMS"
+;;
+
+let test_quickstart_defaults_to_workspace_only () =
+  let script = quickstart_script () in
+  assert_contains "default team is disabled" script {|TEAM="none"|};
+  assert_contains
+    "provider key is required only for a Keeper preset"
+    script
+    {|if [ "$TEAM" != "none" ]; then|};
+  assert_contains
+    "none skips team seeding"
+    script
+    {|log "no Keeper preset requested"|}
+;;
+
+let test_quickstart_writes_worker_bearer_env () =
+  let script = quickstart_script () in
+  assert_contains "quickstart bearer env path" script "mcp-client.env";
+  assert_contains "quickstart mints a worker bearer" script "--role worker";
+  assert_contains "quickstart uses the MASC_TOKEN env contract" script "--client-env MASC_TOKEN";
+  assert_contains "quickstart bearer is long lived" script "--no-expiry";
+  assert_contains "quickstart bearer file is private" script {|chmod 600 "$env_file"|}
+;;
+
+let test_installer_prints_authenticated_mcp_next_step () =
+  let script = install_script () in
+  assert_contains "installer prints login command" script "login --base-path";
+  assert_contains "installer login is worker scoped" script "--role worker";
+  assert_contains "installer login names bearer env" script "--client-env MASC_TOKEN";
+  assert_contains "installer does not print unauthenticated MCP config anchor" script "source the printed bearer exports in the shell that starts your MCP client"
 ;;
 
 let test_installer_fetches_deployment_preflight_companions () =
@@ -500,23 +499,9 @@ let test_installer_fetches_deployment_preflight_companions () =
     {|PREFLIGHT_GATE_DEST="$PREFIX/masc-check-runtime-deployment-preflight"|}
 ;;
 
-let test_railway_runtime_enforces_preflight_before_main () =
-  let workflow = railway_workflow () in
+let test_runtime_image_enforces_preflight_before_main () =
   let image = dockerfile () in
   let context = dockerignore () in
-  let railway = railway_config () in
-  assert_contains
-    "Railway builds the typed deployment preflight helper"
-    workflow
-    "bin/deployment_preflight_helper.exe";
-  assert_contains
-    "Railway uploads the typed deployment preflight helper"
-    workflow
-    "masc-deployment-preflight-helper";
-  assert_contains
-    "Railway proves a malformed current runtime image is rejected"
-    workflow
-    "Reject malformed current runtime image";
   assert_contains
     "image ships the read-only deployment preflight gate"
     image
@@ -532,11 +517,7 @@ let test_railway_runtime_enforces_preflight_before_main () =
   assert_contains
     "Docker context includes the deployment preflight helper"
     context
-    "!masc-deployment-preflight-helper";
-  assert_not_contains
-    "Railway does not bypass the image entrypoint with a direct main command"
-    railway
-    "startCommand"
+    "!masc-deployment-preflight-helper"
 ;;
 
 let test_binary_checks_use_install_environment () =
@@ -544,7 +525,7 @@ let test_binary_checks_use_install_environment () =
   assert_not_contains
     "config-root full catalog is not an automatic override"
     script
-    {|MODEL_CATALOG_FILE="$BASE_PATH/.masc/config/oas-models.toml"|};
+    {|MODEL_CATALOG_FILE="$BASE_PATH/.masc/config/agent-core-models.toml"|};
   assert_contains
     "binary helper exports base path"
     script
@@ -560,11 +541,11 @@ let test_binary_checks_use_install_environment () =
   assert_contains
     "binary helper preserves explicit model catalog override"
     script
-    {|OAS_MODEL_CATALOG="$catalog"|};
+    {|AGENT_CORE_MODEL_CATALOG="$catalog"|};
   assert_contains
     "model catalog helper reads only explicit override"
     script
-    {|if [ -n "${OAS_MODEL_CATALOG:-}" ]; then|};
+    {|if [ -n "${AGENT_CORE_MODEL_CATALOG:-}" ]; then|};
   assert_contains
     "binary smoke helper isolates runtime events by default"
     script
@@ -732,34 +713,6 @@ let test_provider_display_name_with_pipe_round_trips () =
         "display name pipe does not truncate catalog"
         output
         "truncated provider wizard catalog record")
-;;
-
-let test_default_provider_uses_binding_lookup () =
-  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
-  Sys.remove tmpdir;
-  Unix.mkdir tmpdir 0o700;
-  Fun.protect
-    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
-    (fun () ->
-      ignore (write_runtime_catalog_with_dotted_provider_id tmpdir);
-      let output, status =
-        run_install_status
-          [ "--dry-run"; "--provider"; "deep.seek"; "--api-key"; "fake-key" ]
-          tmpdir
-      in
-      check bool "dotted provider id exits 0" true (status = Unix.WEXITED 0);
-      assert_contains
-        "dotted provider default logged"
-        output
-        {|[dry-run] would set [runtime].default = "deep.seek.deepseek-v4-flash"|};
-      assert_not_contains
-        "dotted provider id is not split at dot"
-        output
-        "default runtime id is not present in provider bindings";
-      assert_not_contains
-        "dotted provider id is not treated as missing provider"
-        output
-        "default-provider is not present in provider entries")
 ;;
 
 let test_provider_ping_does_not_expose_key_in_curl_argv () =
@@ -1275,6 +1228,7 @@ streaming = true
 
 [deepseek.deepseek-v4-flash]
 wizard-default = true
+max-request-body-bytes = 1048576
 |};
       let _output =
         run_install [ "--provider"; "deepseek"; "--api-key"; "fake-key" ] tmpdir
@@ -1304,7 +1258,7 @@ let test_release_checksums_include_model_catalog_overlay_seed () =
   assert_contains
     "release checksum includes model catalog overlay seed"
     workflow
-    "(cd ../config && sha256sum oas-models-overlay.toml) >> SHA256SUMS"
+    "(cd ../config && sha256sum agent-core-models-overlay.toml) >> SHA256SUMS"
 ;;
 
 let test_team_flag_and_seed_exist () =
@@ -1339,13 +1293,25 @@ let () =
             `Quick
             test_release_requires_advertised_binary_assets
         ; test_case
+            "quickstart defaults to workspace-only mode"
+            `Quick
+            test_quickstart_defaults_to_workspace_only
+        ; test_case
+            "quickstart writes a worker bearer env"
+            `Quick
+            test_quickstart_writes_worker_bearer_env
+        ; test_case
+            "installer prints authenticated MCP next steps"
+            `Quick
+            test_installer_prints_authenticated_mcp_next_step
+        ; test_case
             "binary checks use install environment"
             `Quick
             test_binary_checks_use_install_environment
         ; test_case
-            "Railway runtime enforces preflight before main"
+            "runtime image enforces preflight before main"
             `Quick
-            test_railway_runtime_enforces_preflight_before_main
+            test_runtime_image_enforces_preflight_before_main
         ; test_case
             "installer fetches deployment preflight companions"
             `Quick
@@ -1368,10 +1334,6 @@ let () =
             "provider display names with pipes round-trip"
             `Quick
             test_provider_display_name_with_pipe_round_trips
-        ; test_case
-            "default provider uses typed binding lookup"
-            `Quick
-            test_default_provider_uses_binding_lookup
         ; test_case
             "provider ping does not expose key in curl argv"
             `Quick

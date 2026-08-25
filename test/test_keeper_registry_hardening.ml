@@ -233,7 +233,10 @@ let test_get_filters_corrupted_entry () =
     { entry with
       meta =
         { entry.meta with
-          runtime = { entry.meta.runtime with nonce = -1 }
+          runtime =
+            { entry.meta.runtime with
+              usage = { entry.meta.runtime.usage with total_turns = -1 }
+            }
         }
     }
   in
@@ -244,7 +247,7 @@ let test_get_filters_corrupted_entry () =
   match KR.get_with_health ~base_path "alice" with
   | None -> fail "get_with_health returned None for an existing (corrupted) entry"
   | Some (e, KR.Required_field_missing { field }) ->
-    check string "missing field" "generation" field;
+    check string "missing field" "usage.total_turns" field;
     check string "entry base_path" base_path e.base_path
   | Some (_, other) -> fail ("unexpected health: " ^ health_to_string other)
 ;;
@@ -364,8 +367,6 @@ let test_wakeup_running_exact_reports_deferred_outcomes () =
    | KR.Exact_wake_missing
    | KR.Exact_wake_replaced
    | KR.Exact_wake_not_running _
-   | KR.Exact_wake_lifecycle_denied
-       Keeper_lifecycle_admission.Autonomous_dead_tombstone
    | KR.Exact_wake_lifecycle_reserved _ ->
      fail "paused exact owner did not report lifecycle denial")
 ;;
@@ -379,7 +380,6 @@ let test_wakeup_running_exact_respects_lifecycle_owner_and_replacement () =
       Reservation.acquire
         ~base_path
         ~keeper_name:captured.name
-        ~expected_generation:captured.meta.runtime.nonce
         ~purpose:Reservation.Paused_work_disposition
     with
     | Ok token -> token
@@ -442,38 +442,6 @@ let test_wakeup_running_exact_respects_lifecycle_owner_and_replacement () =
     (Atomic.get replacement.fiber_wakeup)
 ;;
 
-let test_wakeup_denies_paused_and_dead_without_signaling () =
-  KR.For_testing.clear ();
-  let paused_meta = { (make_meta "paused-wakeup") with paused = true } in
-  let paused_entry = KR.For_testing.register ~base_path paused_meta.name paused_meta in
-  Atomic.set paused_entry.fiber_wakeup false;
-  (match KR.wakeup_running ~intent:KR.Scheduled_signal ~base_path paused_meta.name with
-   | KR.Deferred_lifecycle (Keeper_lifecycle_admission.Autonomous_paused _) -> ()
-   | KR.Signaled
-   | KR.Deferred_unregistered
-   | KR.Deferred_not_running _
-   | KR.Deferred_lifecycle Keeper_lifecycle_admission.Autonomous_dead_tombstone ->
-     fail "paused wake was not lifecycle-deferred");
-  check bool "paused wake flag remains false" false (Atomic.get paused_entry.fiber_wakeup);
-  let meta =
-    { (make_meta "dead-wakeup") with
-      paused = true
-    ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
-    }
-  in
-  let entry = KR.For_testing.register ~base_path meta.name meta in
-  Atomic.set entry.fiber_wakeup false;
-  (match KR.wakeup_running ~intent:KR.Scheduled_signal ~base_path meta.name with
-   | KR.Deferred_lifecycle
-       Keeper_lifecycle_admission.Autonomous_dead_tombstone -> ()
-   | KR.Signaled
-   | KR.Deferred_unregistered
-   | KR.Deferred_not_running _
-   | KR.Deferred_lifecycle (Keeper_lifecycle_admission.Autonomous_paused _) ->
-     fail "dead tombstone wake was not lifecycle-deferred");
-  check bool "dead tombstone wake flag remains false" false
-    (Atomic.get entry.fiber_wakeup)
-;;
 
 let temp_dir prefix =
   let dir = Filename.temp_file prefix "" in
@@ -495,6 +463,72 @@ let cleanup_dir path =
   match rm path with
   | () -> ()
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+;;
+
+let test_tool_usage_restore_uses_lifecycle_authority () =
+  let dir = temp_dir "registry_tool_usage_restore" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.For_testing.clear ();
+      cleanup_dir dir)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       KR.For_testing.clear ();
+       let meta = make_meta "lifecycle-restore" in
+       let registered = KR.For_testing.register ~base_path:dir meta.name meta in
+       let path =
+         Filename.concat
+           dir
+           ".masc/keepers/tool_usage/lifecycle-restore.json"
+       in
+       Fs_compat.mkdir_p (Filename.dirname path);
+       Fs_compat.save_file
+         path
+         (Yojson.Safe.to_string
+            (`Assoc
+              [ "schema_version", `Int 2
+              ; "keeper", `String meta.name
+              ; "flushed_at", `Float 1.0
+              ; ( "tools"
+                , `List
+                    [ `Assoc
+                        [ "tool", `String "masc_status"
+                        ; "count", `Int 1
+                        ; "successes", `Int 1
+                        ; "deferred", `Int 0
+                        ; "failures", `Int 0
+                        ; "last_used_at", `Float 1.0
+                        ]
+                    ] )
+              ])
+          ^ "\n");
+       let token =
+         match
+           Reservation.acquire
+             ~base_path:dir
+             ~keeper_name:meta.name
+             ~purpose:Reservation.Keepalive_launch
+         with
+         | Ok token -> token
+         | Error _ -> fail "failed to reserve Keeper launch lifecycle"
+       in
+       Fun.protect
+         ~finally:(fun () ->
+           ignore (Reservation.release token : Reservation.release_outcome))
+         (fun () ->
+            Masc.Keeper_registry_tool_usage_persistence.restore
+              ~base_path:dir
+              meta.name;
+            check (list string) "name-only restore is fenced" []
+              (KR.tool_usage_of ~base_path:dir meta.name |> List.map fst);
+            Masc.Keeper_registry_tool_usage_persistence.restore_for_lifecycle
+              token
+              registered;
+            check (option int) "token-qualified restore keeps exact count" (Some 1)
+              (KR.tool_usage_of ~base_path:dir meta.name
+               |> List.assoc_opt "masc_status"
+               |> Option.map (fun entry -> entry.Keeper_types.count))))
 ;;
 
 let test_reactive_wakeup_defers_offline_lane_after_queue_commit () =
@@ -532,608 +566,8 @@ let test_reactive_wakeup_defers_offline_lane_after_queue_commit () =
        | _ -> fail "reactive stimulus was not retained in the offline lane")
 ;;
 
-let test_goal_assignment_defers_offline_lane_after_queue_commit () =
-  let dir = temp_dir "registry_goal_offline_wakeup" in
-  Fun.protect
-    ~finally:(fun () ->
-      KR.For_testing.clear ();
-      cleanup_dir dir)
-    (fun () ->
-       Eio_main.run @@ fun env ->
-       Fs_compat.set_fs (Eio.Stdenv.fs env);
-       KR.For_testing.clear ();
-       let config = Masc.Workspace.default_config dir in
-       let meta = make_meta "goal-offline" in
-       let entry =
-         KR.register_offline ~base_path:config.base_path meta.name meta
-       in
-       Atomic.set entry.fiber_wakeup false;
-       let added =
-         Masc.Keeper_goal_assignment_wake.enqueue_goal_assigned_wakes
-           ~config
-           ~keeper_name:meta.name
-           ~assigned_by:"test"
-           ~old_ids:[]
-           ~new_ids:[ "goal-offline-1" ]
-           ()
-       in
-       check (list string) "new goal is reported" [ "goal-offline-1" ] added;
-       check bool "offline goal wake flag remains clear" false
-         (Atomic.get entry.fiber_wakeup);
-       match
-         registry_snapshot
-           ~base_path:config.base_path
-           meta.name
-         |> Keeper_event_queue.to_list
-       with
-       | [ { payload = Keeper_event_queue.Goal_assigned assignment; _ } ] ->
-         check string "queued goal id" "goal-offline-1" assignment.ga_goal_id;
-         check string "queued assignment actor" "test" assignment.ga_assigned_by
-       | _ -> fail "goal assignment was not retained in the offline lane")
-;;
-
-let test_goal_reconciliation_enqueues_once_after_last_terminal_task () =
-  let dir = temp_dir "registry_goal_reconciliation" in
-  Fun.protect
-    ~finally:(fun () ->
-      KR.For_testing.clear ();
-      cleanup_dir dir)
-    (fun () ->
-       Eio_main.run @@ fun env ->
-       Fs_compat.set_fs (Eio.Stdenv.fs env);
-       KR.For_testing.clear ();
-       let config = Masc.Workspace.default_config dir in
-       let meta = make_goal_reconciler_meta () in
-       ignore (Masc.Workspace.init config ~agent_name:(Some meta.agent_name));
-       Masc.Workspace_metric_hooks.install ();
-       ignore (KR.register_offline ~base_path:config.base_path meta.name meta);
-       let goal, _ =
-         match
-           Goal_store.upsert_goal
-             config
-             ~id:"goal-reconciliation-test"
-             ~title:"Reconcile after terminal tasks"
-             ()
-         with
-         | Ok result -> result
-         | Error detail -> fail detail
-       in
-       ignore
-         (Workspace_task.add_task
-            ~goal_id:goal.id
-            config
-            ~title:"first"
-            ~priority:2
-            ~description:"first linked task");
-       ignore
-         (Workspace_task.add_task
-            ~goal_id:goal.id
-            config
-            ~title:"second"
-            ~priority:2
-            ~description:"second linked task");
-       let agent_name = "keeper-goal-reconciler-agent" in
-       let transition task_id action =
-         match
-           Masc.Workspace.transition_task_r
-             config
-             ~agent_name
-             ~task_id
-             ~action
-             ()
-         with
-         | Ok _ -> ()
-         | Error error -> fail (Masc_domain.masc_error_to_string error)
-       in
-       let finish task_id =
-         transition task_id Masc_domain.Claim;
-         transition task_id Masc_domain.Start;
-         transition task_id Masc_domain.Cancel
-       in
-       finish "task-001";
-       check int "no early durable wake" 0
-         (registry_snapshot ~base_path:config.base_path meta.name
-          |> Keeper_event_queue.length);
-       finish "task-002";
-       check int "last terminal commit enqueued reconciliation" 1
-         (registry_snapshot ~base_path:config.base_path meta.name
-          |> Keeper_event_queue.length);
-       (match
-          Masc.Keeper_goal_reconciliation_wake.enqueue_if_ready
-            ~config
-            ~completing_agent_name:agent_name
-            ~task_id:"task-002"
-        with
-        | Masc.Keeper_goal_reconciliation_wake.Already_present _ -> ()
-        | _ -> fail "terminal replay did not deduplicate reconciliation");
-       check int "exactly one pending reconciliation" 1
-         (registry_snapshot ~base_path:config.base_path meta.name
-          |> Keeper_event_queue.length);
-       KR.For_testing.clear ();
-       (match
-          Keeper_event_queue_persistence.load_pending_result
-            ~base_path:config.base_path
-            ~keeper_name:meta.name
-        with
-        | Ok queue ->
-          (match Keeper_event_queue.to_list queue with
-           | [ { payload =
-                   Keeper_event_queue.Goal_reconciliation_ready ready
-               ; _
-               } ] ->
-             check string "durable goal id" goal.id ready.gr_goal_id;
-             check string "triggering task id" "task-002"
-               ready.gr_triggering_task_id
-           | _ -> fail "durable reconciliation stimulus was not retained")
-        | Error detail -> fail detail);
-       match Goal_store.get_goal config ~goal_id:goal.id with
-       | Some { phase = Goal_phase.Executing; _ } -> ()
-       | Some _ -> fail "Task completion must not auto-complete its Goal"
-       | None -> fail "Goal disappeared")
-;;
-
-let test_goal_reconciliation_prefers_authoritative_assignment
-      ?(assigned_paused = false)
-      ?(corrupt_persisted_assignment = false)
-      () =
-  let dir = temp_dir "registry_goal_reconciliation_assignment" in
-  Fun.protect
-    ~finally:(fun () ->
-      KR.For_testing.clear ();
-      cleanup_dir dir)
-    (fun () ->
-       Eio_main.run @@ fun env ->
-       Fs_compat.set_fs (Eio.Stdenv.fs env);
-       KR.For_testing.clear ();
-       let config = Masc.Workspace.default_config dir in
-       let completing_agent_name = "keeper-executor-agent-agent" in
-       ignore (Masc.Workspace.init config ~agent_name:(Some completing_agent_name));
-       let producer_meta =
-         { (make_meta "producer") with agent_name = completing_agent_name }
-       in
-       let goal, _ =
-         match
-           Goal_store.upsert_goal
-             config
-             ~id:"goal-reconciliation-assignment"
-             ~title:"Use the assigned Keeper"
-             ()
-         with
-         | Ok result -> result
-         | Error detail -> fail detail
-       in
-       ignore
-         (Workspace_task.add_task
-            ~goal_id:goal.id
-            config
-            ~title:"first assigned task"
-            ~priority:2
-            ~description:"first linked task");
-       ignore
-         (Workspace_task.add_task
-            ~goal_id:goal.id
-            config
-            ~title:"second assigned task"
-            ~priority:2
-            ~description:"second linked task");
-       let transition task_id action =
-         match
-           Masc.Workspace.transition_task_r
-             config
-             ~agent_name:completing_agent_name
-             ~task_id
-             ~action
-             ()
-         with
-         | Ok _ -> ()
-         | Error error -> fail (Masc_domain.masc_error_to_string error)
-       in
-       let finish task_id =
-         transition task_id Masc_domain.Claim;
-         transition task_id Masc_domain.Start;
-         transition task_id Masc_domain.Cancel
-       in
-       finish "task-001";
-       finish "task-002";
-       ignore
-         (KR.register_offline
-            ~base_path:config.base_path
-            producer_meta.name
-            producer_meta);
-       let assigned_meta =
-         { (make_goal_reconciler_meta ()) with
-           active_goal_ids = [ goal.id ]
-         ; paused = assigned_paused
-         }
-       in
-       ignore
-         (KR.register_offline
-            ~base_path:config.base_path
-            assigned_meta.name
-            assigned_meta);
-       if corrupt_persisted_assignment
-       then
-         write_text_file
-           (Masc.Keeper_types_profile.keeper_meta_path config "corrupt-assignment")
-           "{ malformed Keeper metadata";
-       (match
-          Masc.Keeper_goal_reconciliation_wake.enqueue_if_ready
-            ~config
-            ~completing_agent_name
-            ~task_id:"task-002"
-        with
-        | Masc.Keeper_goal_reconciliation_wake.Enqueued { keeper_name } ->
-          if corrupt_persisted_assignment
-          then fail "incomplete assignment scan was treated as routable"
-          else
-            check string
-              "assigned Keeper owns reconciliation wake"
-              assigned_meta.name
-              keeper_name
-        | Masc.Keeper_goal_reconciliation_wake.Keeper_target_lookup_failed
-            { goal_id; detail = _ } ->
-          if not corrupt_persisted_assignment
-          then fail "authoritative Goal assignment lookup unexpectedly failed"
-          else check string "incomplete scan remains a typed failure" goal.id goal_id
-        | _ -> fail "authoritative Goal assignment did not produce a durable wake");
-       check int "producer does not receive an assignment-owned wake" 0
-         (registry_snapshot ~base_path:config.base_path producer_meta.name
-          |> Keeper_event_queue.length);
-       if corrupt_persisted_assignment
-       then
-         check int "assigned Keeper does not receive a partial-scan wake" 0
-           (registry_snapshot ~base_path:config.base_path assigned_meta.name
-            |> Keeper_event_queue.length);
-       if corrupt_persisted_assignment
-       then (
-         let summary =
-           Masc.Keeper_goal_reconciliation_wake.reconcile_startup ~config
-         in
-         check int "assignment scan error is classified as failed" 1 summary.failed_count;
-         check int "assignment scan error is not unresolved" 0 summary.unresolved_count);
-       let discovery =
-         Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
-           ~base_path:config.base_path
-       in
-       match discovery.read_error with
-       | Some detail -> fail detail
-       | None ->
-         check
-           (list string)
-           "only the assigned canonical Keeper receives the wake"
-           (if corrupt_persisted_assignment then [] else [ assigned_meta.name ])
-           discovery.keeper_names)
-;;
-
-let test_goal_reconciliation_keeps_paused_assignment_authoritative () =
-  test_goal_reconciliation_prefers_authoritative_assignment
-    ~assigned_paused:true
-    ()
-;;
-
-let test_goal_reconciliation_fails_closed_on_assignment_scan_error () =
-  test_goal_reconciliation_prefers_authoritative_assignment
-    ~corrupt_persisted_assignment:true
-    ()
-;;
-
-let test_goal_reconciliation_restart_scan_retries_missed_delivery () =
-  let dir = temp_dir "registry_goal_reconciliation_restart" in
-  let previous_hook = Atomic.get Workspace_hooks.task_terminal_committed_fn in
-  Fun.protect
-    ~finally:(fun () ->
-      Atomic.set Workspace_hooks.task_terminal_committed_fn previous_hook;
-      KR.For_testing.clear ();
-      cleanup_dir dir)
-    (fun () ->
-       Eio_main.run @@ fun env ->
-       Fs_compat.set_fs (Eio.Stdenv.fs env);
-       KR.For_testing.clear ();
-       let config = Masc.Workspace.default_config dir in
-       let meta = make_goal_reconciler_meta () in
-       ignore (Masc.Workspace.init config ~agent_name:(Some meta.agent_name));
-       ignore (KR.register_offline ~base_path:config.base_path meta.name meta);
-       Atomic.set Workspace_hooks.task_terminal_committed_fn
-         (fun _config ~agent_name:_ ~task_id:_ ->
-            Workspace_hooks.Task_terminal_delivered);
-       let goal, _ =
-         match
-           Goal_store.upsert_goal
-             config
-             ~id:"goal-reconciliation-restart"
-             ~title:"Recover a missed terminal hook"
-             ()
-         with
-         | Ok result -> result
-         | Error detail -> fail detail
-       in
-       ignore
-         (Workspace_task.add_task
-            ~goal_id:goal.id
-            config
-            ~title:"terminal before restart"
-            ~priority:2
-            ~description:"missed hook");
-       let transition action =
-         match
-           Masc.Workspace.transition_task_r
-             config
-             ~agent_name:meta.agent_name
-             ~task_id:"task-001"
-             ~action
-             ()
-         with
-         | Ok _ -> ()
-         | Error error -> fail (Masc_domain.masc_error_to_string error)
-       in
-       transition Masc_domain.Claim;
-       transition Masc_domain.Start;
-       transition Masc_domain.Cancel;
-       check int "missed hook left no queue item" 0
-         (registry_snapshot ~base_path:config.base_path meta.name
-          |> Keeper_event_queue.length);
-       let backlog_path = Masc.Workspace.backlog_path config in
-       let authoritative_backlog = Fs_compat.load_file backlog_path in
-       write_text_file backlog_path "{ malformed current backlog";
-       let degraded =
-         Masc.Keeper_goal_reconciliation_wake.reconcile_startup ~config
-       in
-       check int "recovery-only startup scan is failed" 1 degraded.failed_count;
-       check int "recovery-only startup scan enqueues nothing" 0
-         (registry_snapshot ~base_path:config.base_path meta.name
-          |> Keeper_event_queue.length);
-       (match Fs_compat.save_file_atomic backlog_path authoritative_backlog with
-        | Ok () -> ()
-        | Error detail -> fail detail);
-       let queue_path =
-         Filename.concat
-           (Filename.concat
-              (Common.keepers_runtime_dir_of_base ~base_path:config.base_path)
-              meta.name)
-           "event-queue-v15.json"
-       in
-       Fs_compat.mkdir_p queue_path;
-       let failed =
-         Masc.Keeper_goal_reconciliation_wake.reconcile_startup ~config
-       in
-       check int "storage failure remains visible" 1 failed.failed_count;
-       Unix.rmdir queue_path;
-       let first = ref None in
-       let second = ref None in
-       Eio.Fiber.both
-         (fun () ->
-            first :=
-              Some
-                (Masc.Keeper_goal_reconciliation_wake.reconcile_startup
-                   ~config))
-         (fun () ->
-            second :=
-              Some
-                (Masc.Keeper_goal_reconciliation_wake.reconcile_startup
-                   ~config));
-       let require_summary = function
-         | Some summary -> summary
-         | None -> fail "concurrent reconciliation fiber returned no summary"
-       in
-       let first = require_summary !first in
-       let second = require_summary !second in
-       check int "one concurrent scan enqueued"
-         1 (first.enqueued_count + second.enqueued_count);
-       check int "the other concurrent scan observed durable identity"
-         1 (first.already_present_count + second.already_present_count);
-       check int "restart recovery persisted exactly once" 1
-         (registry_snapshot ~base_path:config.base_path meta.name
-          |> Keeper_event_queue.length))
-;;
-
-let add_and_cancel_goal_task ~config ~goal_id ~title ~agent_name =
-  let goal, _ =
-    match Goal_store.upsert_goal config ~id:goal_id ~title () with
-    | Ok result -> result
-    | Error detail -> fail detail
-  in
-  ignore
-    (Workspace_task.add_task
-       ~goal_id:goal.id
-       config
-       ~title:(title ^ " task")
-       ~priority:2
-       ~description:"terminal reconciliation fixture");
-  let task =
-    Masc.Workspace.get_tasks_raw config
-    |> List.find (fun (task : Masc_domain.task) ->
-         String.equal task.title (title ^ " task"))
-  in
-  let transition action =
-    match
-      Masc.Workspace.transition_task_r
-        config
-        ~agent_name
-        ~task_id:task.id
-        ~action
-        ()
-    with
-    | Ok _ -> ()
-    | Error error -> fail (Masc_domain.masc_error_to_string error)
-  in
-  transition Masc_domain.Claim;
-  transition Masc_domain.Start;
-  transition Masc_domain.Cancel;
-  goal, task.id
-;;
-
-let goal_reconciliation_stimulus ~goal_id ~task_id =
-  let ready : Keeper_event_queue.goal_reconciliation_ready =
-    { gr_goal_id = goal_id; gr_triggering_task_id = task_id }
-  in
-  { Keeper_event_queue.post_id =
-      Keeper_event_queue.goal_reconciliation_ready_post_id ready
-  ; urgency = Keeper_event_queue.Immediate
-  ; arrived_at = 100.0
-  ; payload = Keeper_event_queue.Goal_reconciliation_ready ready
-  }
-;;
-
-let test_goal_reconciliation_retry_after_keeper_registration () =
-  let dir = temp_dir "registry_goal_reconciliation_late_keeper" in
-  let previous_hook = Atomic.get Workspace_hooks.task_terminal_committed_fn in
-  Fun.protect
-    ~finally:(fun () ->
-      Atomic.set Workspace_hooks.task_terminal_committed_fn previous_hook;
-      KR.For_testing.clear ();
-      cleanup_dir dir)
-    (fun () ->
-       Eio_main.run @@ fun env ->
-       Fs_compat.set_fs (Eio.Stdenv.fs env);
-       KR.For_testing.clear ();
-       let config = Masc.Workspace.default_config dir in
-       ignore (Masc.Workspace.init config ~agent_name:(Some "external"));
-       Atomic.set Workspace_hooks.task_terminal_committed_fn
-         (fun _config ~agent_name:_ ~task_id:_ ->
-            Workspace_hooks.Task_terminal_delivered);
-       let goal, _ =
-         add_and_cancel_goal_task
-           ~config
-           ~goal_id:"goal-reconciliation-late-keeper"
-           ~title:"Late keeper"
-           ~agent_name:"external"
-       in
-       let unresolved =
-         Masc.Keeper_goal_reconciliation_wake.reconcile_startup ~config
-       in
-       check int "ready Goal remains visibly unresolved" 1 unresolved.unresolved_count;
-       let meta =
-         { (make_goal_reconciler_meta ()) with active_goal_ids = [ goal.id ] }
-       in
-       let entry =
-         KR.For_testing.register ~base_path:config.base_path meta.name meta
-       in
-       Atomic.set entry.fiber_wakeup false;
-       let retried =
-         Masc.Keeper_goal_reconciliation_wake.reconcile_startup ~config
-       in
-       check int "later registered owner receives durable event" 1 retried.enqueued_count;
-       check bool "later reconciliation emits wake" true
-         (Atomic.get entry.fiber_wakeup);
-       check int "later reconciliation enqueues once" 1
-         (registry_snapshot ~base_path:config.base_path meta.name
-          |> Keeper_event_queue.length))
-;;
-
-let test_goal_reconciliation_outbox_identity_rewakes_without_duplicate () =
-  let dir = temp_dir "registry_goal_reconciliation_outbox" in
-  let previous_hook = Atomic.get Workspace_hooks.task_terminal_committed_fn in
-  Fun.protect
-    ~finally:(fun () ->
-      Atomic.set Workspace_hooks.task_terminal_committed_fn previous_hook;
-      KR.For_testing.clear ();
-      cleanup_dir dir)
-    (fun () ->
-       Eio_main.run @@ fun env ->
-       Fs_compat.set_fs (Eio.Stdenv.fs env);
-       KR.For_testing.clear ();
-       let config = Masc.Workspace.default_config dir in
-       let meta = make_goal_reconciler_meta () in
-       ignore (Masc.Workspace.init config ~agent_name:(Some meta.agent_name));
-       Atomic.set Workspace_hooks.task_terminal_committed_fn
-         (fun _config ~agent_name:_ ~task_id:_ ->
-            Workspace_hooks.Task_terminal_delivered);
-       let goal, task_id =
-         add_and_cancel_goal_task
-           ~config
-           ~goal_id:"goal-reconciliation-outbox"
-           ~title:"Outbox identity"
-           ~agent_name:meta.agent_name
-       in
-       let stimulus =
-         goal_reconciliation_stimulus ~goal_id:goal.id ~task_id
-       in
-       (match
-          Masc.Keeper_registry_event_queue.enqueue_stimulus_durable_result
-            ~base_path:config.base_path
-            meta.name
-            stimulus
-        with
-        | Masc.Keeper_registry_event_queue.Stimulus_enqueued -> ()
-        | _ -> fail "failed to seed durable reconciliation source");
-       let state =
-         match
-           Keeper_event_queue_persistence.load_state_result
-             ~base_path:config.base_path
-             ~keeper_name:meta.name
-         with
-         | Ok state -> state
-         | Error detail -> fail detail
-       in
-       let cancellation : Keeper_event_queue_persistence.accepted_cancellation =
-         { source = stimulus
-         ; source_incarnation =
-             (Keeper_event_queue_state.select_when
-                ~ready:(Keeper_event_queue.stimulus_identity_equal stimulus)
-                state
-              |> function
-              | Some selection -> selection.admitted_revision
-              | None -> fail "durable reconciliation source was not selectable")
-         ; owner_nonce = 17
-         ; operator_operation_id = "goal-reconciliation-outbox-fixture"
-         ; reason = "stage source in genuine transition outbox"
-         }
-       in
-       (match
-          Keeper_event_queue_persistence.cancel_pending_accepted_result
-            ~base_path:config.base_path
-            ~keeper_name:meta.name
-            ~current_owner_nonce:17
-            ~applied_at:101.0
-            ~cancellation
-            ()
-        with
-        | Ok
-            (Keeper_event_queue_persistence.Transition_applied _
-            | Keeper_event_queue_persistence.Transition_already_applied _) -> ()
-        | Error detail -> fail detail
-        | Ok (Keeper_event_queue_persistence.Transition_committed_followup_failed { detail; _ }) ->
-          fail detail);
-       let staged =
-         match
-           Keeper_event_queue_persistence.load_state_result
-             ~base_path:config.base_path
-             ~keeper_name:meta.name
-         with
-         | Ok state -> state
-         | Error detail -> fail detail
-       in
-       check int "source left pending" 0
-         (Keeper_event_queue_state.pending staged |> Keeper_event_queue.length);
-       check int "genuine transition outbox retained source" 1
-         (Keeper_event_queue_state.transition_outbox staged |> List.length);
-       let entry =
-         KR.For_testing.register ~base_path:config.base_path meta.name meta
-       in
-       Atomic.set entry.fiber_wakeup false;
-       let replay =
-         Masc.Keeper_goal_reconciliation_wake.reconcile_startup ~config
-       in
-       check int "outbox identity is already accounted" 1 replay.already_present_count;
-       check bool "startup reconciliation restores lost wake" true
-         (Atomic.get entry.fiber_wakeup);
-       let after =
-         match
-           Keeper_event_queue_persistence.load_state_result
-             ~base_path:config.base_path
-             ~keeper_name:meta.name
-         with
-         | Ok state -> state
-         | Error detail -> fail detail
-       in
-       check int "reconciliation did not duplicate pending source" 0
-         (Keeper_event_queue_state.pending after |> Keeper_event_queue.length);
-       check int "reconciliation preserved sole outbox identity" 1
-         (Keeper_event_queue_state.transition_outbox after |> List.length))
-;;
-
 let test_terminal_hook_degradation_does_not_invalidate_task_commit () =
-  let dir = temp_dir "registry_goal_reconciliation_hook_degradation" in
+  let dir = temp_dir "registry_terminal_hook_degradation" in
   let previous_hook = Atomic.get Workspace_hooks.task_terminal_committed_fn in
   Fun.protect
     ~finally:(fun () ->
@@ -1249,14 +683,6 @@ let test_terminal_hook_degradation_does_not_invalidate_task_commit () =
        | Some _ | None -> fail "cancellation propagation invalidated committed Task")
 ;;
 
-let contains_substring text needle =
-  let text_len = String.length text in
-  let needle_len = String.length needle in
-  let rec loop idx =
-    idx + needle_len <= text_len
-    && (String.sub text idx needle_len = needle || loop (idx + 1))
-  in
-  needle_len = 0 || loop 0
 ;;
 
 let test_tool_dispatch_preserves_exact_meta_after_replacement () =
@@ -1399,6 +825,12 @@ let () =
             `Quick
             test_lane_fork_rejects_cancelling_switch
         ] )
+    ; ( "tool_usage_restore"
+      , [ test_case
+            "uses exact lifecycle authority"
+            `Quick
+            test_tool_usage_restore_uses_lifecycle_authority
+        ] )
     ; ( "get_with_health"
       , [ test_case "get filters corrupted entry" `Quick test_get_filters_corrupted_entry ] )
     ; ( "wakeup"
@@ -1406,10 +838,6 @@ let () =
             "reports signaled and deferred outcomes"
             `Quick
             test_wakeup_running_reports_typed_outcome
-        ; test_case
-            "paused and dead keepers never receive runnable signal"
-            `Quick
-            test_wakeup_denies_paused_and_dead_without_signaling
         ; test_case
             "exact wake signals only the captured owner lane"
             `Quick
@@ -1428,38 +856,6 @@ let () =
             "reactive stimulus persists while offline wake is deferred"
             `Quick
             test_reactive_wakeup_defers_offline_lane_after_queue_commit
-        ; test_case
-            "goal assignment persists while offline wake is deferred"
-            `Quick
-            test_goal_assignment_defers_offline_lane_after_queue_commit
-        ; test_case
-            "goal reconciliation persists once after last terminal task"
-            `Quick
-            test_goal_reconciliation_enqueues_once_after_last_terminal_task
-        ; test_case
-            "goal reconciliation prefers authoritative assignment"
-            `Quick
-            test_goal_reconciliation_prefers_authoritative_assignment
-        ; test_case
-            "paused Goal assignment remains authoritative"
-            `Quick
-            test_goal_reconciliation_keeps_paused_assignment_authoritative
-        ; test_case
-            "Goal reconciliation fails closed on assignment scan error"
-            `Quick
-            test_goal_reconciliation_fails_closed_on_assignment_scan_error
-        ; test_case
-            "restart scan retries missed reconciliation exactly once"
-            `Quick
-            test_goal_reconciliation_restart_scan_retries_missed_delivery
-        ; test_case
-            "no target retries after Keeper registration"
-            `Quick
-            test_goal_reconciliation_retry_after_keeper_registration
-        ; test_case
-            "outbox identity restores wake without duplicate enqueue"
-            `Quick
-            test_goal_reconciliation_outbox_identity_rewakes_without_duplicate
         ; test_case
             "terminal hook degradation preserves committed Task outcome"
             `Quick

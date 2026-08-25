@@ -58,6 +58,14 @@ let read_backlog_with_source_r config =
   let path = backlog_path config in
   let recover primary_msg =
     let recovery_path = backlog_recovery_path config in
+    (* [read_json_result] answers a missing key with an empty object, so an
+       absent mirror would otherwise reach [decode_backlog] and be reported as a
+       schema violation. Split absence out before the decode. Root fix: #29562. *)
+    if not (Workspace_utils.path_exists config recovery_path)
+    then
+      Error
+        (Printf.sprintf "%s; no recovery mirror at %s" primary_msg recovery_path)
+    else
     match read_json_result config recovery_path with
     | Ok json ->
       (match decode_backlog ~path:recovery_path json with
@@ -100,6 +108,8 @@ let read_backlog_with_source_r config =
   match cached with
   | Some backlog ->
     Ok { observed_backlog = backlog; recovered_from = None }
+  | None when not (Workspace_utils.path_exists config path) ->
+      recover (Printf.sprintf "no backlog at %s" path)
   | None -> (
       match read_json_result config path with
       | Ok json ->
@@ -142,6 +152,12 @@ let read_backlog_observation_r config =
 exception Backlog_read_failed of string
 exception Backlog_write_failed of string
 
+let protect_backlog_commit_settlement f =
+  match Eio_guard.execution_context () with
+  | Eio_guard.Eio_fiber -> Eio.Cancel.protect f
+  | Eio_guard.Non_eio -> f ()
+;;
+
 let read_backlog config =
   match read_backlog_with_source_r config with
   | Ok { observed_backlog; _ } -> observed_backlog
@@ -181,6 +197,7 @@ let write_backlog_result ?after_commit config backlog =
   match write_json_commit_result config primary_path json with
   | Error msg -> Error msg
   | Ok primary_commit ->
+    protect_backlog_commit_settlement (fun () ->
     Option.iter
       (fun message ->
          Log.TaskState.error
@@ -207,7 +224,21 @@ let write_backlog_result ?after_commit config backlog =
     in
     clear_backlog_cache_for primary_path;
     clear_backlog_cache_for recovery_path;
-    let post_commit_error =
+    let mutation_observer_error =
+      try
+        (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
+        None
+      with
+      | exn ->
+        let message = Printexc.to_string exn in
+        Log.TaskState.error
+          "backlog primary committed but task mutation observer failed path=%s \
+           error=%s"
+          primary_path
+          message;
+        Some message
+    in
+    let caller_post_commit_error =
       match after_commit with
       | None -> None
       | Some f ->
@@ -215,7 +246,6 @@ let write_backlog_result ?after_commit config backlog =
            f ();
            None
          with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
            let message = Printexc.to_string exn in
            Log.TaskState.error
@@ -225,12 +255,23 @@ let write_backlog_result ?after_commit config backlog =
              message;
            Some message)
     in
+    let post_commit_error =
+      match mutation_observer_error, caller_post_commit_error with
+      | None, None -> None
+      | Some message, None | None, Some message -> Some message
+      | Some observer_error, Some caller_error ->
+        Some
+          (Printf.sprintf
+             "task mutation observer: %s; caller post-commit: %s"
+             observer_error
+             caller_error)
+    in
     Ok
       { committed_revision = backlog.version
       ; primary_mirror_error = primary_commit.mirror_error
       ; recovery_error
       ; post_commit_error
-      }
+      })
 
 (** [write_backlog ?after_commit config backlog] persists the primary SSOT,
     then observes secondary recovery/mirror/projection failures without

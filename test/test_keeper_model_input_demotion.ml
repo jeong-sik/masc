@@ -9,7 +9,7 @@
     adversarial review — to break that direction. *)
 
 module Demotion = Masc.Keeper_model_input_demotion
-module Types = Agent_sdk.Types
+module Types = Agent_core.Types
 module Window = Runtime_model_input_tail_window
 
 (* The production encoder, not a test-local one: the bound is only meaningful
@@ -67,10 +67,112 @@ let content_of (m : Types.message) =
 
 let markers messages = List.concat_map content_of messages
 
+(* --- Turn boundary: the keeper keeps what it is working on --------------- *)
+
+(* The assembly demotes results from earlier turns and leaves this turn's
+   alone. Stated against the seeded history rather than a count of recent
+   results: a keeper that read a file this turn has to still see what it read,
+   and a keeper that read one three turns ago has an address for it. *)
+let this_turns_results_survive_the_boundary () =
+  let body i = String.make 4_000 (Char.chr (Char.code 'a' + i)) in
+  let earlier = history_with_tool_bodies [ body 0; body 1 ] in
+  let this_turn = history_with_tool_bodies [ body 2 ] in
+  let messages = earlier @ this_turn in
+  let demote_before =
+    Window.first_atom_at_or_after
+      messages
+      ~message_index:(List.length earlier)
+  in
+  let planned =
+    Demotion.plan ~measure_message_bytes ~demote_before messages
+  in
+  let transmitted = markers planned.Demotion.messages in
+  Alcotest.(check int)
+    "every result is still present"
+    3
+    (List.length transmitted);
+  Alcotest.(check bool)
+    "this turn's result is verbatim"
+    true
+    (List.exists (fun body -> String.equal body (String.make 4_000 'c')) transmitted);
+  Alcotest.(check int)
+    "and both earlier ones became addresses"
+    2
+    (List.length planned.Demotion.pending)
+;;
+
+(* A turn that has produced nothing yet must not demote its own seed out from
+   under itself before it has read anything. *)
+let a_turn_that_produced_nothing_demotes_everything_before_it () =
+  let messages = history_with_tool_bodies [ String.make 4_000 'a' ] in
+  let demote_before =
+    Window.first_atom_at_or_after
+      messages
+      ~message_index:(List.length messages)
+  in
+  let planned =
+    Demotion.plan ~measure_message_bytes ~demote_before messages
+  in
+  Alcotest.(check int)
+    "the seeded history is all earlier work"
+    1
+    (List.length planned.Demotion.pending)
+;;
+
+(* [earlier] ends
+   with an Assistant that issued a call whose Tool answer has not been
+   recorded yet — the checkpoint captured a dangling tool cycle at the turn
+   boundary, exactly the shape [Keeper_compaction_unit]'s [protected_suffix]
+   exists to handle elsewhere. On request 1 (before the answer exists)
+   [first_atom_at_or_after] returns one value; once the answer lands on
+   request 2, it returns a different one. Confirm the drift is real, then
+   confirm it is inert: the disputed atom has no [ToolResult] content on the
+   request where the value differs, so [plan] demotes the same set either
+   way, and the completed atom is never split once it exists. *)
+let a_split_atom_at_the_boundary_never_gets_demoted_half () =
+  let earlier =
+    history_with_tool_bodies [ String.make 4_000 'e' ] @ [ assistant "dangling call" ]
+  in
+  let dangling_result = tool_message ~id:"dangling" (String.make 4_000 'd') in
+  let boundary = List.length earlier in
+  let messages_request_1 = earlier in
+  let messages_request_2 = earlier @ [ dangling_result ] in
+  let demote_before_1 =
+    Window.first_atom_at_or_after messages_request_1 ~message_index:boundary
+  in
+  let demote_before_2 =
+    Window.first_atom_at_or_after messages_request_2 ~message_index:boundary
+  in
+  Alcotest.(check bool)
+    "the boundary value does drift across the dangling call"
+    true
+    (demote_before_1 <> demote_before_2);
+  let planned_1 =
+    Demotion.plan ~measure_message_bytes ~demote_before:demote_before_1 messages_request_1
+  in
+  let planned_2 =
+    Demotion.plan ~measure_message_bytes ~demote_before:demote_before_2 messages_request_2
+  in
+  Alcotest.(check int)
+    "request 1 has nothing demotable at the disputed atom yet"
+    1
+    (List.length planned_1.Demotion.pending);
+  Alcotest.(check int)
+    "request 2 demotes the same count once the answer exists"
+    1
+    (List.length planned_2.Demotion.pending);
+  Alcotest.(check bool)
+    "the completed dangling call survives verbatim, not split"
+    true
+    (List.exists
+       (String.equal (String.make 4_000 'd'))
+       (markers planned_2.Demotion.messages))
+;;
+
 (* --- 1. Bound soundness (RFC-0363 §6 test 2) -------------------------- *)
 
 (* The placeholder must bound the real marker for every byte range, because
-   [encode_for_oas] renders the preview with [%S] — bytes outside 0x20-0x7E
+   [encode_for_agent_core] renders the preview with [%S] — bytes outside 0x20-0x7E
    expand fourfold — and the JSON encoder then escapes those escapes. A Korean
    body and a body of raw high bytes are the cases that broke the RFC's first
    draft, where the bound was stated as a flat 200-300 bytes. *)
@@ -187,7 +289,7 @@ let invalid_markers_are_not_demoted () =
     "fixture really is marker-shaped"
     true
     (Tool_output.is_marker corrupt);
-  (match Tool_output.decode_from_oas corrupt with
+  (match Tool_output.decode_from_agent_core corrupt with
    | Tool_output.Invalid_marker _ -> ()
    | Tool_output.Not_marker | Tool_output.Decoded _ ->
      Alcotest.fail "fixture must decode as Invalid_marker");
@@ -204,7 +306,7 @@ let invalid_markers_are_not_demoted () =
 let stored_results_are_not_demoted_again () =
   let store = Tool_blob_store.create ~base_path:(Filename.temp_dir "demote" "") in
   let marker =
-    Tool_output.encode_for_oas
+    Tool_output.encode_for_agent_core
       (Tool_blob_store.put store ~bytes:(String.make 4000 'a') ~mime:"text/plain")
   in
   let messages = history_with_tool_bodies [ marker ] in
@@ -234,9 +336,9 @@ let raw_cut_retained_atoms_are_verbatim () =
        (markers planned.Demotion.messages))
 ;;
 
-(* --- 6. The demotion boundary moves only with the raw cut -------------- *)
+(* --- 6. [plan] honours whatever boundary it is handed ------------------- *)
 
-let boundary_moves_only_with_the_raw_cut () =
+let plan_honours_a_monotonic_boundary () =
   let body = String.make 4000 'a' in
   let build atoms =
     List.concat
@@ -293,6 +395,234 @@ let boundary_moves_only_with_the_raw_cut () =
     demoted
 ;;
 
+(* The production pipeline measures the raw history, rewrites only atoms below
+   that cut, then measures the planned list. This fixture makes every atom
+   eligible so the per-projection identity cache must reuse every candidate
+   measurement without retaining independently allocated equal messages. *)
+let projection_reuses_candidate_measurements () =
+  let bodies = List.init 20 (fun _ -> String.make 4000 'a') in
+  let messages = history_with_tool_bodies bodies in
+  let raw_measurements = ref 0 in
+  let measured message =
+    incr raw_measurements;
+    measure_message_bytes message
+  in
+  let measure_message_bytes =
+    Masc.Keeper_turn_driver_try_provider.For_testing
+    .memoize_message_measurement measured
+  in
+  let planned =
+    Demotion.plan ~measure_message_bytes ~demote_before:max_int messages
+  in
+  Alcotest.(check int)
+    "fixture creates one candidate per aged tool result"
+    20
+    (List.length planned.Demotion.pending);
+  (match
+     Window.project
+       ~measure_message_bytes
+       ~capacity_bytes:max_int
+       ~reserved_bytes:0
+       planned.Demotion.messages
+   with
+  | Error error ->
+     Alcotest.fail (Window.budget_error_to_string error)
+   | Ok _ -> ());
+  let expected_unique_measurements =
+    List.length messages + List.length planned.Demotion.pending + 1
+    (* The window's synthetic preamble. *)
+  in
+  Alcotest.(check int)
+    "each original, candidate, and preamble identity is encoded once"
+    expected_unique_measurements
+    !raw_measurements
+;;
+
+(* --- 7. Last resort: the newest atom does not fit (#28845) ------------- *)
+
+(* The alpha incident shape: parallel WebSearch results joined the assistant
+   atom that called them, and that one atom (indivisible to the tail window)
+   outgrew the whole history budget. Ordinary demotion cannot help — its
+   boundary excludes the current turn (RFC-0351 §4) — so composition refused
+   the turn outright. The last-resort path retries the composition once with
+   the boundary moved past the newest atom, and the turn's own results leave
+   as externalized markers instead of the turn failing. *)
+module Try_provider = Masc.Keeper_turn_driver_try_provider
+
+let compose ~base_path ~capacity_bytes ~demote_before messages =
+  Try_provider.For_testing.plan_and_window_model_input
+    ~measure_message_bytes
+    ~capacity_bytes
+    ~reserved_bytes:0
+    ~base_path
+    ~demote_before
+    messages
+;;
+
+let bytes_of messages =
+  List.fold_left (fun acc m -> acc + measure_message_bytes m) 0 messages
+;;
+
+let newest_bodies = [ 24_000; 31_000; 47_000; 7_000 ]
+
+let oversized_newest_history () =
+  (* Earlier atoms carry tiny bodies, so nothing below the turn boundary is
+     demotable and every pending entry the composition produces belongs to the
+     newest atom. *)
+  let earlier = history_with_tool_bodies [ "tick"; "tock" ] in
+  let newest =
+    assistant "search batch"
+    :: List.mapi
+         (fun i size ->
+            tool_message
+              ~id:(Printf.sprintf "search-%d" i)
+              (String.make size (Char.chr (Char.code 'a' + i))))
+         newest_bodies
+  in
+  earlier, earlier @ newest, bytes_of newest
+;;
+
+let oversized_newest_atom_is_demoted_as_last_resort () =
+  let earlier, messages, newest_bytes = oversized_newest_history () in
+  (* [capacity] admits the newest atom only demoted: the raw history budget is
+     exactly the atom's own bytes, which the charged preamble pushes over. *)
+  let capacity_bytes = newest_bytes in
+  let demote_before =
+    Window.first_atom_at_or_after
+      messages
+      ~message_index:(List.length earlier)
+  in
+  let store = Tool_blob_store.create ~base_path:(Filename.temp_dir "demote" "") in
+  (match
+     Window.project_with_drop
+       ~measure_message_bytes
+       ~capacity_bytes
+       ~reserved_bytes:0
+       messages
+   with
+   | Error (Window.Newest_atom_exceeds_available _) -> ()
+   | Error error -> Alcotest.fail (Window.budget_error_to_string error)
+   | Ok _ -> Alcotest.fail "fixture must not fit without the last resort");
+  match
+    compose
+      ~base_path:(Filename.temp_dir "demote" "")
+      ~capacity_bytes
+      ~demote_before
+      messages
+  with
+  | Error error -> Alcotest.fail (Window.budget_error_to_string error)
+  | Ok (planned, windowed, history_atom_count) ->
+    Alcotest.(check int)
+      "each of the newest atom's results is demoted"
+      (List.length newest_bodies)
+      (List.length planned.Demotion.pending);
+    Alcotest.(check int)
+      "the denominator is still the whole history"
+      3
+      history_atom_count;
+    let outcome =
+      Demotion.materialize ~store ~pending:planned.Demotion.pending windowed.Window.messages
+    in
+    Alcotest.(check int) "a healthy store reverts nothing" 0 outcome.Demotion.reverted;
+    let transmitted = markers outcome.Demotion.messages in
+    List.iteri
+      (fun i size ->
+         let body = String.make size (Char.chr (Char.code 'a' + i)) in
+         Alcotest.(check bool)
+           (Printf.sprintf "body %d left as a reference, not its bytes" i)
+           false
+           (List.exists (String.equal body) transmitted))
+      newest_bodies;
+    Alcotest.(check int)
+      "the references are readable blob markers"
+      (List.length newest_bodies)
+      (List.length (List.filter Tool_output.is_marker transmitted))
+;;
+
+(* The last resort is not a blank cheque: an oversized atom with nothing
+   demotable in it keeps the typed refusal, with the original measured
+   values. *)
+let oversized_atom_without_demotable_body_still_refuses () =
+  let newest = [ assistant (String.make 50_000 'x') ] in
+  let messages = history_with_tool_bodies [ "tick" ] @ newest in
+  let capacity_bytes = bytes_of newest in
+  match
+    compose
+      ~base_path:(Filename.temp_dir "demote" "")
+      ~capacity_bytes
+      ~demote_before:1
+      messages
+  with
+  | Ok _ -> Alcotest.fail "an atom with no tool results cannot be demoted"
+  | Error (Window.Newest_atom_exceeds_available { newest_atom_bytes; _ }) ->
+    Alcotest.(check int)
+      "the refusal carries the atom's real bytes"
+      capacity_bytes
+      newest_atom_bytes
+  | Error error -> Alcotest.fail (Window.budget_error_to_string error)
+;;
+
+(* Without a blob store there is nothing a marker could reference, so the
+   refusal stands exactly as it did before #28845. *)
+let last_resort_requires_a_blob_store () =
+  let earlier, messages, newest_bytes = oversized_newest_history () in
+  let demote_before =
+    Window.first_atom_at_or_after
+      messages
+      ~message_index:(List.length earlier)
+  in
+  match
+    compose ~base_path:"" ~capacity_bytes:newest_bytes ~demote_before messages
+  with
+  | Ok _ -> Alcotest.fail "demotion without a store would dangle its markers"
+  | Error (Window.Newest_atom_exceeds_available _) -> ()
+  | Error error -> Alcotest.fail (Window.budget_error_to_string error)
+;;
+
+(* Demotion can shrink an atom only down to its non-demotable residue. When
+   that residue alone exceeds the budget, the last resort still refuses — and
+   the refusal must carry the atom's true bytes, not the placeholder-saturated
+   measurement the re-cut saw. *)
+let still_oversized_after_demotion_reports_true_magnitude () =
+  let earlier = history_with_tool_bodies [ "tick" ] in
+  let residue = assistant (String.make 50_000 'x') in
+  let newest =
+    residue
+    :: [ tool_message ~id:"big-0" (String.make 4_000 'a')
+       ; tool_message ~id:"big-1" (String.make 4_000 'b')
+       ]
+  in
+  let messages = earlier @ newest in
+  let _, atom_count = Window.annotate messages in
+  (* [plan] is pure, so this probe is exactly the plan the last-resort arm
+     computes: it proves the composition took the demotion branch and still
+     refused, rather than refusing for want of anything demotable. *)
+  let probe =
+    Demotion.plan ~measure_message_bytes ~demote_before:atom_count messages
+  in
+  Alcotest.(check int)
+    "the atom carries demotable results, so the last resort planned demotions"
+    2
+    (List.length probe.Demotion.pending);
+  (* [capacity] admits neither the raw atom nor its demoted residue: even the
+     assistant text alone overruns the budget once the preamble is charged. *)
+  let capacity_bytes = bytes_of [ residue ] in
+  match
+    compose
+      ~base_path:(Filename.temp_dir "demote" "")
+      ~capacity_bytes
+      ~demote_before:1
+      messages
+  with
+  | Ok _ -> Alcotest.fail "the residue alone exceeds the budget"
+  | Error (Window.Newest_atom_exceeds_available { newest_atom_bytes; _ }) ->
+    Alcotest.(check int)
+      "the refusal carries the atom's true bytes, not the demoted measurement"
+      (bytes_of newest)
+      newest_atom_bytes
+  | Error error -> Alcotest.fail (Window.budget_error_to_string error)
+;;
+
 let () =
   Alcotest.run
     "keeper_model_input_demotion"
@@ -302,6 +632,18 @@ let () =
             `Quick
             demotion_actually_happens
         ; Alcotest.test_case "placeholder bounds the real marker" `Quick bound_is_sound
+        ; Alcotest.test_case
+            "this turn's results survive the boundary"
+            `Quick
+            this_turns_results_survive_the_boundary
+        ; Alcotest.test_case
+            "a turn that produced nothing demotes everything before it"
+            `Quick
+            a_turn_that_produced_nothing_demotes_everything_before_it
+        ; Alcotest.test_case
+            "a split atom at the boundary never gets demoted half"
+            `Quick
+            a_split_atom_at_the_boundary_never_gets_demoted_half
         ] )
     ; ( "exclusions"
       , [ Alcotest.test_case
@@ -323,9 +665,31 @@ let () =
         ] )
     ; ( "stability"
       , [ Alcotest.test_case
-            "demotion boundary moves only with the raw cut"
+            "plan honours a monotonic boundary"
             `Quick
-            boundary_moves_only_with_the_raw_cut
+            plan_honours_a_monotonic_boundary
+        ; Alcotest.test_case
+            "projection reuses candidate measurements"
+            `Quick
+            projection_reuses_candidate_measurements
+         ] )
+    ; ( "last_resort"
+      , [ Alcotest.test_case
+            "oversized newest atom is demoted as a last resort"
+            `Quick
+            oversized_newest_atom_is_demoted_as_last_resort
+        ; Alcotest.test_case
+            "oversized atom without a demotable body still refuses"
+            `Quick
+            oversized_atom_without_demotable_body_still_refuses
+        ; Alcotest.test_case
+            "last resort requires a blob store"
+            `Quick
+            last_resort_requires_a_blob_store
+        ; Alcotest.test_case
+            "still oversized after demotion reports the true magnitude"
+            `Quick
+            still_oversized_after_demotion_reports_true_magnitude
         ] )
     ]
 ;;

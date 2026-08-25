@@ -89,9 +89,7 @@ describe('parseGateStatusData', () => {
       total_messages: 100,
       total_success: 95,
       total_errors: 5,
-      total_duplicates: 0,
       success_rate_pct: 95,
-      dedup_table_size: 0,
       uptime_seconds: 3600,
     })
     expect(out.total_messages).toBe(100)

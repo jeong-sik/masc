@@ -19,6 +19,7 @@ let append_decision_record
     ~(observation : Keeper_world_observation.world_observation)
     ~(latency_ms : int)
     ~(outcome : string)
+    ?channel
     ?(degraded_retry_applied = false)
     ?degraded_retry_runtime
     ?fallback_reason
@@ -28,6 +29,12 @@ let append_decision_record
     ?terminal_reason
     () : unit =
   let now_ts = Time_compat.now () in
+  let channel =
+    Option.value
+      ~default:(decision_channel_of_observation observation)
+      channel
+  in
+  let claimable_task_count = Keeper_world_observation.claimable_task_count observation in
   let trigger_signals = observed_triggers_of_observation observation in
   let affordances = observed_affordances_of_observation observation in
   let response_preview =
@@ -50,7 +57,6 @@ let append_decision_record
       , _turn_number
       , turn_id_opt
       , task_id_opt
-      , turn_goal_ids_opt
       , _sandbox_profile
       , _network_mode ) =
     Keeper_tool_call_log.get_turn_context ~cell:turn_ctx_cell ()
@@ -62,16 +68,6 @@ let append_decision_record
     match task_id_opt with
     | Some _ as value -> value
     | None -> Keeper_runtime_contract.current_task_id_opt meta
-  in
-  let goal_ids =
-    match turn_goal_ids_opt with
-    | Some values -> values
-    | None -> meta.active_goal_ids
-  in
-  let goal_id =
-    match goal_ids with
-    | value :: _ -> Some value
-    | [] -> None
   in
   let runtime_contract =
     Keeper_runtime_contract.runtime_observability_contract_json ~config meta
@@ -120,13 +116,10 @@ let append_decision_record
         ("ts_unix", `Float now_ts);
         ("audience", `String "internal_human_only");
         ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-        ("generation", `Int meta.runtime.nonce);
         ("turn_id", `Int turn_id);
         ("keeper_name", `String meta.name);
         ("agent_name", `String meta.agent_name);
         ("task_id", Json_util.string_opt_to_json task_id);
-        ("goal_id", Json_util.string_opt_to_json goal_id);
-        ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) goal_ids));
         ("runtime_contract", runtime_contract);
         ("terminal_reason", Keeper_turn_terminal.to_json terminal_reason);
         ("terminal_reason_code", `String terminal_reason_code);
@@ -142,7 +135,7 @@ let append_decision_record
         ( "channel",
           `String
             (Keeper_world_observation.channel_to_string
-               (decision_channel_of_observation observation)) );
+               channel) );
         ("outcome", `String outcome);
         ("degraded_retry_applied", `Bool degraded_retry_applied);
         ( "degraded_retry_runtime",
@@ -172,12 +165,12 @@ let append_decision_record
               ("active_goals", `Int (List.length observation.active_goals));
               ("idle_seconds", `Int observation.idle_seconds);
               ("unclaimed_task_count", `Int observation.unclaimed_task_count);
-              ("claimable_task_count", `Int observation.claimable_task_count);
+              ("claimable_task_count", `Int claimable_task_count);
               ( "claim_blocked_task_count",
                 `Int
                   (max 0
                      (observation.unclaimed_task_count
-                      - observation.claimable_task_count)) );
+                      - claimable_task_count)) );
               ("failed_task_count", `Int observation.failed_task_count);
               ( "scheduled_automation_active_count",
                 `Int observation.scheduled_automation.active_count );
@@ -185,9 +178,6 @@ let append_decision_record
                 `Int observation.scheduled_automation.due_ready_count );
               ("running_keeper_fiber_count", `Int observation.running_keeper_fiber_count);
             ] );
-        ("claim_absolute_available", `Bool (observation.unclaimed_task_count > 0));
-        ("claim_matched_available", `Bool (observation.claimable_task_count > 0));
-        ("claim_was_available", `Bool (observation.claimable_task_count > 0));
         ( "response_preview", Json_util.string_opt_to_json response_preview );
         ( "response_preview_2000",
           match result with
@@ -198,12 +188,12 @@ let append_decision_record
         ( "trace_ref",
           match result with
           | Some { trace_ref = Some trace_ref; _ } ->
-              Agent_sdk.Raw_trace.run_ref_to_yojson trace_ref
+              Agent_core.Raw_trace.run_ref_to_yojson trace_ref
           | _ -> `Null );
         ( "run_validation",
           match result with
           | Some { run_validation = Some validation; _ } ->
-              Agent_sdk.Raw_trace.run_validation_to_yojson validation
+              Agent_core.Raw_trace.run_validation_to_yojson validation
           | _ -> `Null );
         ( "telemetry",
           match result with
@@ -236,12 +226,7 @@ let append_decision_record
                     in
                     [
                       ("runtime_id", `String runtime_id);
-                      ("strategy", Json_util.string_opt_to_json co.strategy);
-                      ("primary_model", `Null);
                       ("selected_model", `Null);
-                      ("fallback_applied", `Bool co.fallback_applied);
-                      ("fallback_hops", match co.fallback_hops with Some n -> `Int n | None -> `Int 0);
-                      ("candidate_models", `List []);
                     ] @ streaming_fields
                 | None -> []
               in
@@ -318,7 +303,7 @@ let append_decision_record
                 ("resolved_model_id", `Null);
                 ("outcome", `String "success");
                 ("turn_count", `Int r.turn_count);
-                ("oas_turn_ordinal", `Int r.final_oas_turn_ordinal);
+                ("agent_core_turn_ordinal", `Int r.final_agent_core_turn_ordinal);
                 ("stop_reason", `String stop_reason_str);
                 ("usage_reported", `Bool r.usage_reported);
                 ("telemetry_reported", `Bool telemetry_reported);
@@ -331,7 +316,6 @@ let append_decision_record
                  outcomes into telemetry.outcome=error. *)
               `Assoc [
                 ("runtime_id", `String (runtime_id_of_meta meta));
-                ("candidate_models", `List []);
                 (* The terminal reason is the typed failure projection built at
                    the dispatch boundary. Persist its canonical code directly;
                    free-form provider/error prose is diagnostic data, never a

@@ -5,9 +5,7 @@ open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_id
-
-(** Failure-reason cluster re-included from Keeper_registry_types for backward compatibility. *)
-include Keeper_registry_types
+open Keeper_registry_types
 
 let registry : registry_entry StringMap.t Atomic.t = Atomic.make StringMap.empty
 let running_count_atomic = Atomic.make 0
@@ -27,9 +25,8 @@ let registry_entry_validation_error_to_string = function
   | Healthy -> "registry entry is healthy"
   | Lifecycle_transaction_reserved owner ->
     Printf.sprintf
-      "registry mutation reserved by lifecycle transaction owner=%s expected_generation=%d"
+      "registry mutation reserved by lifecycle transaction owner=%s"
       owner.owner_id
-      owner.expected_generation
   | Meta_validation_failed { reason } ->
       Printf.sprintf "registry entry meta validation failed: %s" reason
   | Required_field_missing { field } ->
@@ -45,9 +42,6 @@ let registry_entry_validation_error_to_string = function
         expected
         actual
 ;;
-
-let registry_key_parts = Keeper_registry_types.registry_key_parts
-let canonical_base_path_exn = Keeper_registry_types.canonical_base_path_exn
 
 let has_blank_string names =
   List.exists (fun name -> String.equal (String.trim name) "") names
@@ -78,8 +72,6 @@ let validate_string_list field names =
 let validate_runtime_fields (runtime : agent_runtime_state) =
   if String.equal (Trace_id.to_string runtime.trace_id) ""
   then Error (Required_field_missing { field = "trace_id" })
-  else if runtime.nonce < 0
-  then Error (Required_field_missing { field = "generation" })
   else if runtime.usage.total_turns < 0
   then Error (Required_field_missing { field = "usage.total_turns" })
   else if runtime.usage.total_tokens < 0
@@ -109,42 +101,6 @@ let validate_registry_meta ~base_path:_ name (meta : keeper_meta) =
   else if String.equal (String.trim meta.agent_name) ""
   then Error (Meta_validation_failed { reason = "meta.agent_name is empty" })
   else Ok ()
-;;
-
-let preserve_process_local_usage_observation
-      ~(current : keeper_meta)
-      ~(incoming : keeper_meta)
-  =
-  let same_runtime_identity =
-    Keeper_id.Trace_id.equal
-      current.runtime.trace_id
-      incoming.runtime.trace_id
-    && Int.equal current.runtime.nonce incoming.runtime.nonce
-  in
-  match
-    same_runtime_identity,
-    current.runtime.usage.last_usage_reported_at,
-    incoming.runtime.usage.last_usage_reported_at
-  with
-  | true, Some _, None ->
-    let observed_usage = current.runtime.usage in
-    {
-      incoming with
-      runtime =
-        {
-          incoming.runtime with
-          usage =
-            {
-              incoming.runtime.usage with
-              last_input_tokens = observed_usage.last_input_tokens;
-              last_output_tokens = observed_usage.last_output_tokens;
-              last_total_tokens = observed_usage.last_total_tokens;
-              last_usage_reported_at =
-                observed_usage.last_usage_reported_at;
-            };
-        };
-    }
-  | true, _, _ | false, _, _ -> incoming
 ;;
 
 let record_invalid_registry_entry ~operation ~name reason =
@@ -209,7 +165,7 @@ let decr_running_count_clamped () =
    the metric store and [Log] use stdlib I/O rather than Eio flows, and the
    install is a CAS loop.
    That totality is what makes this body legal to run inside
-   [Keeper_turn_admission.commit_registration_if_open], whose critical section
+   [Keeper_shutdown_intake_fence.commit_registration_if_open], whose critical section
    is guarded by a scheduler-blocking [Stdlib.Mutex]: a fiber that suspends
    there can never be resumed, because [Stdlib.Mutex.lock] blocks the very OS
    thread that runs the Eio scheduler. Acquiring the key lock here instead
@@ -467,13 +423,9 @@ let update_entry_if_registered ~base_path name f =
   loop ())
 ;;
 
-let update_entry_if_registered_unit ~base_path name f =
-  (* fire-and-forget: discard whether the validated registry write was installed. *)
-  ignore (update_entry_if_registered ~base_path name (fun entry -> f entry, true))
-;;
-
 type registration_error =
   | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Registration_intake_token_not_live
   | Registration_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Registration_invalid of registry_entry_validation_error
   | Registration_event_queue_unavailable of
@@ -483,6 +435,7 @@ type registration_error =
 
 let register_with_state_result
       ?lifecycle_token
+      ?intake_token
       ~respect_shutdown_fence
       ~base_path
       name
@@ -523,6 +476,7 @@ let register_with_state_result
     ; conditions
     ; fiber_stop = Atomic.make false
     ; fiber_wakeup = Atomic.make false
+    ; cadence_sleeping = Atomic.make false
     ; event_queue = Atomic.make initial_event_queue
     ; started_at = Time_compat.now ()
     ; grpc_close = Atomic.make None
@@ -531,7 +485,6 @@ let register_with_state_result
     ; done_r
     ; restart_count = 0
     ; last_restart_ts = 0.0
-    ; dead_since_ts = None
     ; crash_log = []
     ; last_error = None
     ; last_failure_reason = None
@@ -566,30 +519,56 @@ let register_with_state_result
      | Some _ | None -> ());
     put_entry_key_locked ?lifecycle_token ~base_path name entry
   in
-  (* The key lock is taken OUTSIDE the admission fence. Nesting it inside
-     [commit_registration_if_open] would suspend the fiber while it owns the
-     admission slot's [Stdlib.Mutex], wedging the whole domain. The fence check
-     and the registry install still happen together under that mutex, so
-     shutdown reservation and same-name lane installation stay totally
-     ordered. *)
+  (* Ordinary registration takes the key lock before the non-yielding
+     [commit_registration_if_open] state check. A caller-supplied intake token
+     already owns the fiber-aware per-Keeper intake mutex, so it validates that
+     exact transaction and commits without trying to reacquire the same gate.
+     In both paths the registry install remains ordered with shutdown. *)
   let commit_result =
     Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
-      if respect_shutdown_fence
+      if Option.is_some intake_token
+      then (
+        match intake_token with
+        | Some token
+          when Keeper_shutdown_intake_fence.intake_token_matches
+                 token
+                 ~base_path
+                 ~keeper_name:name ->
+          (match commit_key_locked () with
+           | Ok () -> Ok ()
+           | Error (Lifecycle_transaction_reserved owner) ->
+             Error (Registration_lifecycle_reserved owner)
+           | Error validation_error -> Error (Registration_invalid validation_error))
+        | Some _ | None -> Error Registration_intake_token_not_live)
+      else if respect_shutdown_fence
       then (
         match
-          Keeper_turn_admission.commit_registration_if_open
+          Keeper_shutdown_intake_fence.commit_registration_if_open
             ~base_path
             ~keeper_name:name
             commit_key_locked
         with
-        | Keeper_turn_admission.Registration_shutdown_reserved operation_id ->
-          Error (Registration_shutdown_reserved operation_id)
-        | Keeper_turn_admission.Registration_committed
+        | Keeper_shutdown_intake_fence.Registration_shutdown_reserved operation_id ->
+          (* Observed, not obeyed. The reservation records that a shutdown
+             began; one that never finalises never clears it, and refusing on
+             it stopped every registration for as long as the process lived —
+             15h32m on 2026-08-20 (#29566). Register and name what stood. *)
+          Log.Keeper.warn
+            "keeper registered while a shutdown reservation stood: keeper=%s \
+             operation=%s"
+            name
+            (Keeper_shutdown_types.Operation_id.to_string operation_id);
+          (match commit_key_locked () with
+           | Ok () -> Ok ()
+           | Error (Lifecycle_transaction_reserved owner) ->
+             Error (Registration_lifecycle_reserved owner)
+           | Error validation_error -> Error (Registration_invalid validation_error))
+        | Keeper_shutdown_intake_fence.Registration_committed
             (Error (Lifecycle_transaction_reserved owner)) ->
           Error (Registration_lifecycle_reserved owner)
-        | Keeper_turn_admission.Registration_committed (Error validation_error) ->
+        | Keeper_shutdown_intake_fence.Registration_committed (Error validation_error) ->
           Error (Registration_invalid validation_error)
-        | Keeper_turn_admission.Registration_committed (Ok ()) -> Ok ())
+        | Keeper_shutdown_intake_fence.Registration_committed (Ok ()) -> Ok ())
       else (
         match commit_key_locked () with
         | Ok () -> Ok ()
@@ -629,6 +608,8 @@ let register_with_state ~base_path name meta ~phase ~conditions =
          detail)
   | Error (Registration_shutdown_reserved _) ->
     invalid_arg "unchecked registry registration observed a shutdown fence"
+  | Error Registration_intake_token_not_live ->
+    invalid_arg "unchecked registry registration observed an inactive intake token"
   | Error (Registration_lifecycle_reserved owner) ->
     invalid_arg
       (Printf.sprintf
@@ -656,7 +637,7 @@ let register_offline ~base_path name meta =
   register_with_state ~base_path name meta ~phase ~conditions
 ;;
 
-let register_offline_if_admitted ~base_path name meta =
+let register_offline_if_admitted ?intake_token ~base_path name meta =
   let conditions =
     { Keeper_state_machine.default_conditions with
       launch_pending = true
@@ -664,6 +645,7 @@ let register_offline_if_admitted ~base_path name meta =
   in
   let phase = Keeper_state_machine.derive_phase conditions in
   register_with_state_result
+    ?intake_token
     ~respect_shutdown_fence:true
     ~base_path
     name
@@ -672,7 +654,13 @@ let register_offline_if_admitted ~base_path name meta =
     ~conditions
 ;;
 
-let register_offline_if_admitted_for_lifecycle token ~base_path name meta =
+let register_offline_if_admitted_for_lifecycle
+      ?intake_token
+      token
+      ~base_path
+      name
+      meta
+  =
   let conditions =
     { Keeper_state_machine.default_conditions with
       launch_pending = true
@@ -681,6 +669,7 @@ let register_offline_if_admitted_for_lifecycle token ~base_path name meta =
   let phase = Keeper_state_machine.derive_phase conditions in
   register_with_state_result
     ~lifecycle_token:token
+    ?intake_token
     ~respect_shutdown_fence:true
     ~base_path
     name
@@ -691,13 +680,14 @@ let register_offline_if_admitted_for_lifecycle token ~base_path name meta =
 
 type register_restarting_error =
   | Restart_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Restart_intake_token_not_live
   | Restart_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Restart_event_queue_unavailable of
       { keeper_name : string
       ; detail : string
       }
 
-let register_restarting ~base_path name meta
+let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name meta
   : (registry_entry, register_restarting_error) result
   =
   let base_path = canonical_base_path_exn base_path in
@@ -706,7 +696,11 @@ let register_restarting ~base_path name meta
   in
   let key = registry_key ~base_path name in
   match
-    Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name ()
+    Keeper_lifecycle_reservation.authorize
+      ?token:lifecycle_token
+      ~base_path
+      ~keeper_name:name
+      ()
   with
   | Error owner -> Error (Restart_lifecycle_reserved owner)
   | Ok () ->
@@ -736,6 +730,7 @@ let register_restarting ~base_path name meta
     ; conditions
     ; fiber_stop = Atomic.make false
     ; fiber_wakeup = Atomic.make false
+    ; cadence_sleeping = Atomic.make false
     ; event_queue = Atomic.make initial_event_queue
     ; started_at = Time_compat.now ()
     ; grpc_close = Atomic.make None
@@ -744,7 +739,6 @@ let register_restarting ~base_path name meta
     ; done_r
     ; restart_count = 0
     ; last_restart_ts = 0.0
-    ; dead_since_ts = None
     ; crash_log = []
     ; last_error = None
     ; last_failure_reason = None
@@ -775,29 +769,62 @@ let register_restarting ~base_path name meta
   in
   (* Runs with the lifecycle key lock already held, so it never suspends. *)
   let guarded_loop_key_locked () =
-    match Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name () with
+    match
+      Keeper_lifecycle_reservation.authorize
+        ?token:lifecycle_token
+        ~base_path
+        ~keeper_name:name
+        ()
+    with
     | Error owner -> Error (Restart_lifecycle_reserved owner)
     | Ok () -> loop ()
   in
-  (* Key lock outside the admission fence — see the register path for why
-     nesting it inside would wedge the domain. *)
-  match
+  (* The launch transaction already owns the durable-intake epoch when it
+     supplies [intake_token]. Validate that exact ownership instead of
+     reacquiring/checking the shutdown slot midway through the transaction. *)
+  let commit_result =
     Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
-      Keeper_turn_admission.commit_registration_if_open
-        ~base_path
-        ~keeper_name:name
-        guarded_loop_key_locked)
-  with
-  | Keeper_turn_admission.Registration_shutdown_reserved operation_id ->
-    Error (Restart_shutdown_reserved operation_id)
-  | Keeper_turn_admission.Registration_committed (Error _ as error) -> error
-  | Keeper_turn_admission.Registration_committed (Ok registered) ->
+      match intake_token with
+      | Some token
+        when Keeper_shutdown_intake_fence.intake_token_matches
+               token
+               ~base_path
+               ~keeper_name:name ->
+        guarded_loop_key_locked ()
+      | Some _ -> Error Restart_intake_token_not_live
+      | None ->
+        (match
+           Keeper_shutdown_intake_fence.commit_registration_if_open
+             ~base_path
+             ~keeper_name:name
+             guarded_loop_key_locked
+         with
+         | Keeper_shutdown_intake_fence.Registration_shutdown_reserved operation_id ->
+           Error (Restart_shutdown_reserved operation_id)
+         | Keeper_shutdown_intake_fence.Registration_committed result -> result))
+  in
+  match commit_result with
+  | Error _ as error -> error
+  | Ok registered ->
     Log.Keeper.info
       "registry: registering keeper name=%s base_path=%s phase=%s"
       name
       base_path
       (Keeper_state_machine.phase_to_string phase);
     Ok registered
+;;
+
+let register_restarting ~base_path name meta =
+  register_restarting_internal ~base_path name meta
+;;
+
+let register_restarting_for_lifecycle ?intake_token token ~base_path name meta =
+  register_restarting_internal
+    ~lifecycle_token:token
+    ?intake_token
+    ~base_path
+    name
+    meta
 ;;
 
 type unregister_exact_result =
@@ -953,12 +980,22 @@ let health_of_entry ~base_path name entry =
   | Error health -> health
 ;;
 
+let project_owner_meta ~base_path ~name (entry : registry_entry) =
+  match Keeper_owner_projection.lookup ~base_path ~keeper_name:name with
+  | Keeper_owner_projection.Owner_absent -> Some entry
+  | Owner_projection { meta = None; _ } -> None
+  | Owner_projection { meta = Some meta; _ } -> Some { entry with meta }
+;;
+
 let get_with_health ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None ->
       Log.Keeper.debug "registry: lookup miss name=%s base_path=%s" name base_path;
       None
-  | Some entry -> Some (entry, health_of_entry ~base_path name entry)
+  | Some entry ->
+    Option.map
+      (fun entry -> entry, health_of_entry ~base_path name entry)
+      (project_owner_meta ~base_path ~name entry)
 ;;
 
 let get ~base_path name =
@@ -985,110 +1022,19 @@ let all ?base_path () =
            (match base_path with
             | Some expected when not (String.equal expected key_base_path) -> acc
             | Some _ | None -> (
-                match validate_registry_entry ~base_path:key_base_path key_name v with
-                | Ok () -> v :: acc
-                | Error reason ->
-                    record_invalid_registry_entry ~operation:"all" ~name:key_name reason;
-                    acc)))
+                match project_owner_meta ~base_path:key_base_path ~name:key_name v with
+                | None -> acc
+                | Some v ->
+                  (match validate_registry_entry ~base_path:key_base_path key_name v with
+                   | Ok () -> v :: acc
+                   | Error reason ->
+                     record_invalid_registry_entry ~operation:"all" ~name:key_name reason;
+                     acc))))
     (Atomic.get registry)
     []
 ;;
 
-let update_meta ~base_path name meta =
-  let base_path = canonical_base_path_exn base_path in
-  match validate_registry_meta ~base_path name meta with
-  | Error reason ->
-      record_invalid_registry_entry ~operation:"update_meta" ~name reason
-  | Ok () ->
-      update_entry_unit ~base_path name (fun e -> { e with base_path; name; meta })
-;;
-
-let update_meta_from_persisted ~base_path name meta =
-  let base_path = canonical_base_path_exn base_path in
-  match validate_registry_meta ~base_path name meta with
-  | Error reason ->
-    record_invalid_registry_entry
-      ~operation:"update_meta_from_persisted"
-      ~name
-      reason
-  | Ok () ->
-    update_entry_unit ~base_path name (fun entry ->
-      let meta =
-        preserve_process_local_usage_observation
-          ~current:entry.meta
-          ~incoming:meta
-      in
-      { entry with base_path; name; meta })
-;;
-
-let reload_meta_from_disk ~base_path name =
-  let base_path = canonical_base_path_exn base_path in
-  let config = Workspace.default_config base_path in
-  match read_meta config name with
-  | Error msg -> Error msg
-  | Ok None -> Ok None
-  | Ok (Some meta) -> (
-      let meta =
-        canonicalize_registry_meta ~operation:"reload_meta_from_disk" ~base_path name meta
-      in
-      (match load_keeper_profile_defaults_result_for_base_path ~base_path name with
-       | Error error -> Error (keeper_toml_load_error_to_string error)
-       | Ok defaults ->
-       match effective_meta_of_profile_defaults defaults meta with
-       | Error msg -> Error msg
-       | Ok effective_meta -> (
-          match validate_registry_meta ~base_path name effective_meta with
-          | Error reason ->
-              record_invalid_registry_entry ~operation:"reload_meta_from_disk" ~name reason;
-              Error (registry_entry_validation_error_to_string reason)
-          | Ok () ->
-              let updated =
-                update_entry_if_registered ~base_path name (fun e ->
-                  let effective_meta =
-                    preserve_process_local_usage_observation
-                      ~current:e.meta
-                      ~incoming:effective_meta
-                  in
-                  { e with base_path; name; meta = effective_meta }, true)
-              in
-              if updated then Ok (get ~base_path name) else Ok None)))
-;;
-
 (* Runtime-attempt cluster (runtime_attempt_merge / meta_for_runtime_attempt / record_runtime_attempt / runtime_attempt_suffix / last_runtime_attempt / runtime_attempt_freshness_threshold_sec / enrich... *)
-
-let sync_meta_if_registered ~base_path name meta =
-  let base_path = canonical_base_path_exn base_path in
-  match validate_registry_meta ~base_path name meta with
-  | Error reason ->
-    record_invalid_registry_entry ~operation:"sync_meta_if_registered" ~name reason
-  | Ok () ->
-    let key = registry_key ~base_path name in
-    let rec loop () =
-      let current = Atomic.get registry in
-      match StringMap.find_opt key current with
-      | None -> ()
-      | Some entry ->
-        let updated =
-          StringMap.add key { entry with base_path; name; meta } current
-        in
-        if not (Atomic.compare_and_set registry current updated) then loop ()
-    in
-    loop ()
-;;
-
-let () =
-  register_runtime_meta_write_sync (fun config meta ->
-    sync_meta_if_registered ~base_path:config.base_path meta.name meta)
-;;
-
-let mark_dead ~base_path name ~at =
-  Error_tracking.mark_dead
-    ~base_path
-    name
-    ~at
-    ~decr_running_count_clamped
-    ~update_entry:update_entry_unit
-;;
 
 let record_restart ~base_path name =
   Error_tracking.record_restart ~base_path name ~update_entry:update_entry_unit
@@ -1098,7 +1044,7 @@ let set_last_error_entry ~base_path ~name err =
   Error_tracking.set_last_error_entry ~base_path ~name err ~update_entry:update_entry_unit
 ;;
 
-(* record_error (MASC/OAS Error-Warn Reduction Goal §P6 dedup logic) moved to Keeper_registry_error_recording. No alias here — it would create a cycle via [Keeper_registry.set_last_error_entry], so ca... *)
+(* record_error (MASC/AGENT_CORE Error-Warn Reduction Goal §P6 dedup logic) moved to Keeper_registry_error_recording. No alias here — it would create a cycle via [Keeper_registry.set_last_error_entry], so callers use that module directly. *)
 
 let clear_error ~base_path name =
   Error_tracking.clear_error ~base_path name ~update_entry:update_entry_unit
@@ -1106,24 +1052,6 @@ let clear_error ~base_path name =
 
 let set_failure_reason ~base_path name reason =
   Error_tracking.set_failure_reason ~base_path name reason ~update_entry:update_entry_unit
-;;
-
-let set_compaction_decision ~base_path name decision =
-  (* Reactive provider-overflow recovery has no other path to
-     [compaction_rt]: the [update_entry] helpers mutate only the turn
-     observation, and [meta.compaction_rt] is otherwise persisted wholesale by
-     the turn lifecycle (post_turn returns [updated_meta]; its caller persists).
-     Stamping the specific recovery decision onto the already-serialized
-     [last_decision] lets the dashboard surface why an overflow compaction
-     failed instead of only a generic [Turn_overflow_failure]. *)
-  update_entry_unit ~base_path name (fun e ->
-    { e with
-      meta =
-        map_compaction_rt
-          (fun rt ->
-            { rt with last_decision = compaction_runtime_decision_of_string decision })
-          e.meta
-    })
 ;;
 
 let set_last_correlation_id ~base_path name cid =
@@ -1197,8 +1125,9 @@ let record_turn_tool_inflight ~base_path name ~count =
   ()
 ;;
 
-(* RFC-0045: SDK-turn boundary reset.  Resets in-turn FSM fields without touching keeper-turn-scoped data ([turn_id], [started_at], [selected_model], [measurement], [measurement_bind_count]).  Bypasse... *)
-let mark_sdk_turn_started ~base_path name =
+(* Reset agent core-turn FSM fields while retaining Keeper-turn identity,
+   timing, model, and measurement state. *)
+let mark_agent_core_turn_started ~base_path name =
   let now = Time_compat.now () in
   let changed =
     update_entry_if_registered ~base_path name (fun e ->
@@ -1211,7 +1140,7 @@ let mark_sdk_turn_started ~base_path name =
         then e, false
         else (
           let new_obs =
-            { (stamp_turn_progress ~now ~event_kind:"sdk_turn_started" obs) with
+            { (stamp_turn_progress ~now ~event_kind:"agent_core_turn_started" obs) with
               turn_phase = Packed Turn_prompting
             ; decision_stage = Packed Decision_undecided
             }
@@ -1417,18 +1346,24 @@ let interrupt_current_turn_exact observed_entry =
            })
 ;;
 
+(* A cancellation that failed used to collapse into [`No_turn_in_flight], which
+   reads as "there was nothing to cancel" — the opposite of what happened. The
+   metric and the warn line stay; the outcome now reaches the caller so an
+   operator surface can say which of the two it was. *)
 let interrupt_current_turn ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  | None -> `No_turn_in_flight
+  | None ->
+    Exact_turn_cancel_failed
+      { turn_id = None; detail = "no registry entry for this Keeper name" }
   | Some entry ->
     (match interrupt_current_turn_exact entry with
-     | Exact_turn_cancelled turn_id -> `Cancelled turn_id
-     | Exact_no_turn_in_flight -> `No_turn_in_flight
-     | Exact_turn_cancel_failed { detail; _ } ->
+     | Exact_turn_cancelled _ as cancelled -> cancelled
+     | Exact_no_turn_in_flight -> Exact_no_turn_in_flight
+     | Exact_turn_cancel_failed { detail; _ } as failed ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string LifecycleDispatchRejections)
          ~labels:[ "keeper", name; "event", "turn_cancel_failed" ]
          ();
        Log.Keeper.warn "%s: turn cancellation failed: %s" name detail;
-       `No_turn_in_flight)
+       failed)
 ;;

@@ -3,7 +3,7 @@
     All hardcoded network defaults live here. Other modules reference
     these constants instead of inlining magic strings/numbers.
 
-    The [local_llm_default_url] follows the same env override chain that OAS
+    The [local_llm_default_url] follows the same env override chain that AGENT_CORE
     discovery uses before falling back to the current local runtime URL.
 
     @since 2.241.0 *)
@@ -29,12 +29,8 @@ let openai_chat_completions_path = "/v1/chat/completions"
     When [base_url] already carries a version segment (e.g. [/v1], [/v4]),
     the request path should not repeat it — the concatenation [base_url ^
     request_path] must produce exactly one version prefix.  This constant
-    matches what the OAS SDK's own [api_openai.ml] uses internally. *)
+    matches what the Agent Core's own [api_openai.ml] uses internally. *)
 let chat_completions_path = "/chat/completions"
-
-(** OpenAI-compatible model listing path.  See
-    {!openai_chat_completions_path}. *)
-let openai_models_path = "/v1/models"
 
 (** Default URL for Ollama. *)
 let ollama_default_url =
@@ -88,9 +84,9 @@ let is_cli_transport_url url =
   && String.sub url 0 plen = cli_transport_prefix
 
 (** Default URL for the local OpenAI-compatible runtime.
-    Override order: OAS_LOCAL_LLM_URL -> local runtime. *)
+    Override order: AGENT_CORE_LOCAL_LLM_URL -> local runtime. *)
 let local_llm_default_url =
-  match nonempty_env "OAS_LOCAL_LLM_URL" with
+  match nonempty_env "AGENT_CORE_LOCAL_LLM_URL" with
   | Some value -> value
   | None -> ollama_default_url
 
@@ -104,11 +100,43 @@ let masc_http_default_port_s =
 (** Default host for the MASC HTTP server. *)
 let masc_http_default_host = "127.0.0.1"
 
+(* The address a client on this machine dials to reach that server.
+
+   The same string as the bind default today, and a different question. A
+   bind address answers "which interfaces do I accept on" and may be a
+   wildcard -- [is_unspecified_host] exists because 0.0.0.0 and :: mean
+   "every interface" rather than a reachable peer, and dialing one is not
+   reaching the server that bound it. Sharing one name for both let a client
+   read the server's bind setting as its destination. *)
+let masc_http_loopback_peer = "127.0.0.1"
+
+(* Lives here rather than at the reader so [Env_config_snapshot] can name it
+   instead of restating the number. Restating is how the operator surface came
+   to report 128 while the server accepted 512 (#14143 raised the reader and
+   left the snapshot). [Masc_network_defaults] is in the config layer, which
+   the snapshot can reference and [Http_server_eio] cannot be. *)
+
+(** Default concurrent-connection ceiling for the MASC HTTP server. *)
+let masc_http_default_max_connections = 512
+
+(** String form of {!masc_http_default_max_connections} for the env snapshot. *)
+let masc_http_default_max_connections_s = string_of_int masc_http_default_max_connections
+
 (** [is_loopback_host host] returns [true] when [host] resolves to any
     IPv4/IPv6 loopback address (via {!Ipaddr}).  Treats the literal
     "localhost" (after trim + lowercase) as loopback.  Malformed
     addresses return [false] — unlike a plain string prefix match,
-    which would wrongly accept garbage like "127.invalid". *)
+    which would wrongly accept garbage like "127.invalid".
+
+    "Any" means the whole of 127.0.0.0/8, which is what RFC 1122 §3.2.1.3
+    reserves. This used to compare against 127.0.0.1 alone while saying
+    otherwise, so 127.0.0.2 and systemd-resolved's 127.0.0.53 read as remote
+    on the one implementation three others already treated as loopback
+    (#27576). Traffic addressed anywhere in 127/8 cannot leave the host,
+    which is what the callers are asking about.
+
+    An IPv4-mapped IPv6 address (::ffff:127.0.0.1) is the same address
+    arriving over a dual-stack socket; every implementation missed it. *)
 let is_loopback_host host =
   let normalized = String.trim host |> String.lowercase_ascii in
   match normalized with
@@ -117,8 +145,11 @@ let is_loopback_host host =
       match Ipaddr.of_string normalized with
       | Ok ip -> (
           match ip with
-          | Ipaddr.V4 addr -> Ipaddr.V4.compare addr Ipaddr.V4.localhost = 0
-          | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0)
+          | Ipaddr.V4 addr -> Ipaddr.V4.Prefix.(mem addr loopback)
+          | Ipaddr.V6 addr -> (
+              match Ipaddr.v4_of_v6 addr with
+              | Some mapped -> Ipaddr.V4.Prefix.(mem mapped loopback)
+              | None -> Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0))
       | Error _ -> false)
 
 (** Convenience wrapper for [Uri.host]-style inputs.  Returns [false]
@@ -127,6 +158,31 @@ let is_loopback_host_opt = function
   | Some host -> is_loopback_host host
   | None -> false
 
+(** [is_unspecified_host host] returns [true] for the wildcard bind addresses
+    0.0.0.0 and ::, which mean "every interface" rather than a reachable peer.
+    Callers ask this to tell an advertised address apart from a bind address.
+
+    Three modules carried a byte-identical copy of this before (#27219);
+    unspecified and loopback are decided in the same place because the callers
+    that ask one almost always ask the other. *)
+let is_unspecified_host host =
+  match Ipaddr.of_string (String.trim host) with
+  | Ok (Ipaddr.V4 addr) -> Ipaddr.V4.compare addr Ipaddr.V4.any = 0
+  | Ok (Ipaddr.V6 addr) -> Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
+  | Error _ -> false
+
+(* Sole owner of URL-shaped trailing-slash trimming. This is the lowest
+   layer that needs it ([Env_config_core] depends on this module, not the
+   other way round), so callers above reach it here instead of keeping a
+   copy.
+
+   [""] and ["/"] both become [""]. Paths, where ["/"] is the root and must
+   survive, use [Env_config_core.strip_path_trailing_slashes] instead — a
+   different function because it is a different rule, not a variant of this
+   one.
+
+   Scans the index once and calls [String.sub] at most once, so a value
+   ending in many slashes does not allocate one string per slash. *)
 let trim_trailing_slashes value =
   let len = String.length value in
   let rec last_non_slash i =

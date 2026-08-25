@@ -24,7 +24,7 @@ val sha256_hash : string -> string
 
 val save_private_text_file : string -> string -> unit
 (** [save_private_text_file path content] writes [content] to [path] with
-    mode 0o600. Creates the file if missing, truncates otherwise. *)
+    mode 0o600 using an fsynced sibling replacement. *)
 
 (** {1 Path Helpers} *)
 
@@ -35,14 +35,26 @@ val auth_config_file : string -> string
 val credential_file : string -> string -> string
 val internal_keeper_token_hash_file : string -> string
 val internal_keeper_token_env_key : string
+
+val internal_keeper_token : unit -> string option
+(** The internal keeper token this process ensured at boot, as a typed
+    in-process value. [None] before {!ensure_internal_keeper_token} has
+    run. In-process consumers use this; the env var remains only as the
+    cross-process surface. *)
 val extract_agent_type_prefix : string -> string option
 val save_internal_keeper_token_hash : string -> raw_token:string -> unit
 
 (** {1 Auth Config} *)
 
+exception Auth_config_error of {
+  file : string;
+  reason : string;
+}
+
 val load_auth_config : string -> auth_config
 (** [load_auth_config config] reads [.masc/auth/config.json] under [config].
-    Returns [default_auth_config] on missing / parse errors. *)
+    A missing file yields {!default_auth_config}. Malformed or unreadable
+    configuration raises {!Auth_config_error}. *)
 
 val save_auth_config : string -> auth_config -> unit
 (** [save_auth_config config cfg] persists the auth config. *)
@@ -58,8 +70,8 @@ val load_credential : string -> string -> agent_credential option
     dispatcher-validated [ctx_agent_name]".  The second case is the
     {b dual identity} mode where {!load_credential} silently returned a
     credential whose [agent_name] differs from the caller's claimed
-    identity (e.g. requested [sangsu] resolves to bare-nickname cred
-    while [ctx_agent_name] is [keeper-sangsu-agent]).
+    identity (e.g. requested [example-keeper] resolves to bare-nickname cred
+    while [ctx_agent_name] is [keeper-example-keeper-agent]).
     [load_credential_of] surfaces the mismatch instead of
     perpetuating it. *)
 type load_credential_error =
@@ -101,8 +113,8 @@ val load_credential_of :
     simple exact-match lookup with explicit error variants.
 
     This replaces the removed silent alias fallback
-    where a stem of [sangsu] against a [ctx_agent_name] of
-    [keeper-sangsu-agent] would return the bare-nickname credential and
+    where a stem of [example-keeper] against a [ctx_agent_name] of
+    [keeper-example-keeper-agent] would return the bare-nickname credential and
     perpetuate dual identity. *)
 
 val save_credential : string -> agent_credential -> unit
@@ -242,9 +254,8 @@ val save_raw_token_credential_without_expiry :
 val load_raw_token : string -> agent_name:string -> string option
 (** [load_raw_token base_path ~agent_name] reads the raw bearer token from
     [<base_path>/.masc/auth/<agent_name>.token] if present. Returns [None] if
-    the file is missing, empty after trim, or unreadable. Used by
-    [oas_worker_exec_transport] as a fallback for CLI subprocesses that do
-    not inherit the parent's [MASC_TOKEN] env. *)
+    the file is missing, empty after trim, or unreadable. Runtime subprocesses
+    use it when they do not inherit the parent's [MASC_TOKEN] environment. *)
 
 val verify_internal_keeper_token :
   string -> token:string -> bool
@@ -264,16 +275,6 @@ type credential_status =
   | Credential_present of agent_credential
   | Credential_missing
 
-val audit_keeper_credentials :
-  string -> keeper_names:string list ->
-  (string * credential_status) list
-(** Read-only audit: for each [keeper_name] in [keeper_names], report
-    whether a credential file exists at [.masc/auth/agents/<n>.json].
-    Used at boot to emit one structured summary instead of
-    enumerating individual fail logs.  Does NOT mutate any state;
-    [ensure_keeper_credential] / [ensure_credential_alias] remain
-    the write paths. *)
-
 (** {1 Token Lifecycle} *)
 
 val create_token :
@@ -286,6 +287,15 @@ val create_token_without_expiry :
   (string * agent_credential, masc_error) result
 (** [create_token_without_expiry config ~agent_name ~role] returns a fresh raw
     token and non-expiring credential for local MCP client identity sync. *)
+
+val create_token_expiring_in :
+  string -> agent_name:string -> role:agent_role -> hours:int ->
+  (string * agent_credential, masc_error) result
+(** [create_token_expiring_in config ~agent_name ~role ~hours] returns a fresh
+    raw token whose credential expires [hours] from now. Use it for a client
+    that outlives the workspace's operator-session window but should still lose
+    its bearer eventually. A window outside 1..8760 hours comes back as an
+    error rather than an exception. *)
 
 val verify_token :
   string -> agent_name:string -> token:string ->

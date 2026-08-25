@@ -18,9 +18,7 @@ let test_make_next_resets_on_new_generation () =
     make_next ~now:300.0 ~backoff_seconds:30.0 ~generation:2
       ~last_result:Start_dispatched ~previous:(Some next_same_gen)
   in
-  Alcotest.(check int) "resets on new generation" 1 next_new_gen.attempt_number;
-  Alcotest.(check string)
-    "attempt_id format" "2:1" next_new_gen.attempt_id
+  Alcotest.(check int) "resets on new generation" 1 next_new_gen.attempt_number
 
 let test_backoff_window () =
   let t =
@@ -50,7 +48,6 @@ let test_json_roundtrip_start_dispatched () =
   | Some t' ->
       Alcotest.(check int) "gen" t.generation t'.generation;
       Alcotest.(check int) "num" t.attempt_number t'.attempt_number;
-      Alcotest.(check string) "id" t.attempt_id t'.attempt_id;
       Alcotest.(check (option (float 0.001)))
         "next_retry" t.next_retry_unix t'.next_retry_unix;
       Alcotest.(check (float 0.001)) "updated" t.updated_unix t'.updated_unix
@@ -85,7 +82,6 @@ let test_of_json_rejects_missing_fields () =
       [
         ("generation", `Int 1);
         ("attempt_number", `Int 1);
-        ("attempt_id", `String "1:1");
         ("last_result", `String "not_a_real_state");
         ("next_retry_unix", `Null);
         ("updated_unix", `Float 100.0);

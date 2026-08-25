@@ -48,6 +48,29 @@ val parse_playground_file_path
     structural parser only; callers enforcing an I/O boundary must pass
     realpath-resolved inputs and separately check the filesystem kind. *)
 
+val parse_bundle_relative_repo_path : string -> (string * string) option
+(** [parse_bundle_relative_repo_path rel] parses [repos/<repo_id>/<rel>], a
+    path relative to one keeper's bundle root, into [(repo_id, rel)].
+
+    This is the anchor {!parse_playground_repo_path} looks for once it has
+    stripped the playground prefix, exposed for callers that already hold the
+    bundle-relative form and know whose bundle it is — a tool call's
+    [action_radius.target_path] is written that way. Local and Docker keepers
+    differ in where the bundle sits, not in the path inside it, so a caller
+    reaching this needs no sandbox knowledge and should not manufacture an
+    absolute path to get here.
+
+    Paths that do not start at [repos/], name an empty repository, or stop
+    before naming a file inside it, return [None]. Structural only: this does
+    not reject [.] or [..] segments, and callers turning the result into an
+    I/O path must resolve it themselves. *)
+
+val bundle_relative_repo_path : repo_id:string -> string -> string
+(** [bundle_relative_repo_path ~repo_id rel] is the bundle-relative path of
+    [rel] inside [repo_id]'s clone — the inverse of
+    {!parse_bundle_relative_repo_path}. Building it here keeps the [repos]
+    segment spelled in one place. *)
+
 val parse_playground_repo_path
   :  base_path:string
   -> abs_path:string

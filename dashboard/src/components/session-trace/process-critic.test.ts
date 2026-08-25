@@ -4,9 +4,9 @@ import type { TraceSummary, UnifiedTraceEvent } from './session-trace-state'
 
 const baseSummary: TraceSummary = {
   tool_call_count: 0,
-  oas_tool_count: 0,
-  oas_turn_count: 0,
-  oas_context_count: 0,
+  agent_core_tool_count: 0,
+  agent_core_turn_count: 0,
+  agent_core_context_count: 0,
   broadcast_count: 0,
   task_completed_count: 0,
   task_claimed_count: 0,
@@ -14,14 +14,14 @@ const baseSummary: TraceSummary = {
   lifecycle_count: 0,
   thinking_count: 0,
   total_cost_usd: 0,
-  oas_input_tokens: 0,
-  oas_output_tokens: 0,
-  oas_cache_creation_tokens: 0,
-  oas_cache_read_tokens: 0,
-  oas_cache_miss_input_tokens: 0,
-  oas_llm_call_count: 0,
-  oas_error_count: 0,
-  oas_tokens_saved: 0,
+  agent_core_input_tokens: 0,
+  agent_core_output_tokens: 0,
+  agent_core_cache_creation_tokens: 0,
+  agent_core_cache_read_tokens: 0,
+  agent_core_cache_miss_input_tokens: 0,
+  agent_core_llm_call_count: 0,
+  agent_core_error_count: 0,
+  agent_core_tokens_saved: 0,
 }
 
 function summary(overrides: Partial<TraceSummary> = {}): TraceSummary {
@@ -113,9 +113,9 @@ describe('evaluateProcessTrace', () => {
   it('flags context compaction as process pressure', () => {
     const findings = evaluateProcessTrace({
       events: [
-        event({ kind: 'oas_context', summary: 'OAS compact', detail: { before_tokens: 180_000, after_tokens: 90_000 } }),
+        event({ kind: 'agent_core_context', summary: 'Agent Core compact', detail: { before_tokens: 180_000, after_tokens: 90_000 } }),
       ],
-      summary: summary({ oas_context_count: 1, oas_tokens_saved: 90_000 }),
+      summary: summary({ agent_core_context_count: 1, agent_core_tokens_saved: 90_000 }),
     })
 
     expect(ids(findings)).toContain('context-pressure')
@@ -142,8 +142,8 @@ describe('evaluateProcessTrace', () => {
       events: repeated,
       summary: summary({
         tool_call_count: 8,
-        oas_context_count: 1,
-        oas_error_count: 1,
+        agent_core_context_count: 1,
+        agent_core_error_count: 1,
       }),
       nowMs,
     })

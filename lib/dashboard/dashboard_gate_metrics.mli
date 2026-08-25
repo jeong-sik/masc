@@ -3,7 +3,7 @@
 
     Two ingestion paths backing the public surface:
     - In-memory ring of recent tool-skip events fed by
-      {!record_tool_skipped} (called from [Keeper_hooks_oas]).
+      {!record_tool_skipped} (the [Keeper_keepalive_signal] callback).
     - Workspace-scoped durable approval queue reads.
 
     The ring buffer, rejection event record, and supporting helpers
@@ -21,8 +21,7 @@ type approval_summary = {
   oldest_pending_sec : float option;
 }
 
-val record_tool_skipped :
-  keeper_name:string -> tool_name:string -> reason_code:string -> unit
+val record_tool_skipped : tool_name:string -> reason_code:string -> unit
 (** Record a tool-skip event into the bounded ring. Safe to call from
     cancellable Eio fibers — internal cancellation is re-raised, all
     other exceptions are reported via
@@ -53,7 +52,6 @@ val reset_for_testing : unit -> unit
     start from a clean state regardless of test order. *)
 
 val inject_for_testing :
-  keeper_name:string ->
   tool_name:string ->
   reason_code:string ->
   ts:float ->
@@ -71,7 +69,6 @@ val ring_size_for_testing : unit -> int
 
 val record_tool_skipped_with_append_for_testing :
   append:(unit -> unit) ->
-  keeper_name:string ->
   tool_name:string ->
   reason_code:string ->
   unit
@@ -82,7 +79,7 @@ val record_tool_skipped_with_append_for_testing :
 val gate_tool_events_json_with_pending_result_for_testing :
   now_ts:float ->
   window_minutes:int ->
-  ( Keeper_approval_queue.pending_approval list
+  ( Keeper_approval_queue_rules_types.pending_approval list
   , Keeper_approval_queue.storage_error )
   result ->
   Yojson.Safe.t

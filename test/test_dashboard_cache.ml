@@ -15,19 +15,25 @@ let check_json msg expected actual =
 let timeout_kind json =
   Yojson.Safe.Util.(member "timeout_kind" json |> to_string)
 
-let test_proactive_refresh_timeout_message_names_phase () =
-  let msg =
-    Proactive_refresh.For_testing.timeout_failure_message
-      ~label:"operator_snapshot"
-      ~phase:"refresh"
-      ~timeout_s:24.0
-      ~elapsed_s:33.2
+let test_proactive_refresh_timeout_is_typed_and_rendered_at_boundary () =
+  let failure =
+    Proactive_refresh.Timed_out
+      { label = "operator_snapshot"
+      ; phase = Proactive_refresh.Refresh
+      ; timeout_s = 24.0
+      ; elapsed_s = 33.2
+      }
   in
+  (match failure with
+   | Proactive_refresh.Timed_out { phase = Proactive_refresh.Refresh; _ } -> ()
+   | Proactive_refresh.Timed_out { phase = Proactive_refresh.Warm_cache; _ }
+   | Proactive_refresh.Raised _ ->
+     Alcotest.fail "refresh timeout lost its typed phase");
   Alcotest.(check string)
-    "typed proactive refresh timeout"
-    "refresh_timeout label=operator_snapshot phase=refresh timeout_s=24.0 \
-     elapsed_s=33.2"
-    msg
+    "operator boundary rendering"
+    "Failure(\"refresh_timeout label=operator_snapshot phase=refresh timeout_s=24.0 \
+     elapsed_s=33.2\")"
+    (Proactive_refresh.failure_message failure)
 
 let test_proactive_refresh_failure_warn_throttle () =
   let should_warn =
@@ -258,6 +264,89 @@ let test_invalidate_prefix () =
   Alcotest.(check int) "proof entries recomputed" 4 !proof_counter;
   Alcotest.(check int) "non-matching prefix preserved" 1 !mission_counter
 
+(* A board write must not leave the 120s projection cache serving the
+   previous list: the dashboard refetches on notifications/board and read
+   the stale projection until the TTL lapsed (2026-08-22, #board only
+   updated after a hard refresh). *)
+let test_board_write_invalidates_every_board_projection () =
+  Dashboard_cache.invalidate_all ();
+  let memory_counter = ref 0 in
+  let list_counter = ref 0 in
+  let hearths_counter = ref 0 in
+  let unrelated_counter = ref 0 in
+  let read key counter =
+    Dashboard_cache.get_or_compute key ~ttl:120.0 (fun () ->
+      incr counter;
+      `Int !counter)
+  in
+  ignore (read "board:memory:-;-;recent;true;false;50;0;ws;-;true" memory_counter);
+  ignore (read "board:list:ws:-:-:true:false:recent:50:0:-:-:true:false" list_counter);
+  ignore (read "board:hearths:ws:exclude-system=true:exclude-automation=false" hearths_counter);
+  ignore (read "workspace:default" unrelated_counter);
+  Server_dashboard_http_core_cache.invalidate_board_projections ();
+  ignore (read "board:memory:-;-;recent;true;false;50;0;ws;-;true" memory_counter);
+  ignore (read "board:list:ws:-:-:true:false:recent:50:0:-:-:true:false" list_counter);
+  ignore (read "board:hearths:ws:exclude-system=true:exclude-automation=false" hearths_counter);
+  ignore (read "workspace:default" unrelated_counter);
+  Alcotest.(check int) "board memory projection recomputed" 2 !memory_counter;
+  Alcotest.(check int) "board list projection recomputed" 2 !list_counter;
+  Alcotest.(check int) "board hearths projection recomputed" 2 !hearths_counter;
+  Alcotest.(check int) "unrelated projection untouched" 1 !unrelated_counter;
+  Dashboard_cache.invalidate_all ()
+
+let test_task_mutation_hook_invalidates_all_execution_variants () =
+  Dashboard_cache.invalidate_all ();
+  let default_counter = ref 0 in
+  let full_counter = ref 0 in
+  let unrelated_counter = ref 0 in
+  let read key counter =
+    Dashboard_cache.get_or_compute key ~ttl:120.0 (fun () ->
+      incr counter;
+      `Int !counter)
+  in
+  ignore (read "execution:default:light" default_counter);
+  ignore (read "execution:operator::full" full_counter);
+  ignore (read "workspace:default" unrelated_counter);
+  let stale_generation =
+    Server_dashboard_http_execution_surfaces.For_testing
+    .execution_publication_generation ()
+  in
+  Alcotest.(check bool)
+    "initial execution publication accepted"
+    true
+    (Server_dashboard_http_execution_surfaces.For_testing
+     .publish_execution_success_if_current
+       ~generation:stale_generation
+       (`Assoc [ "tasks", `List [] ]));
+  let previous = Atomic.get Workspace_hooks.on_task_mutation_fn in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.on_task_mutation_fn previous;
+      Dashboard_cache.invalidate_all ())
+    (fun () ->
+      Server_dashboard_http_execution_surfaces.install_task_mutation_cache_invalidation ();
+      (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
+      Alcotest.(check bool)
+        "pre-mutation execution publication rejected"
+        false
+        (Server_dashboard_http_execution_surfaces.For_testing
+         .publish_execution_success_if_current
+           ~generation:stale_generation
+           (`Assoc [ "tasks", `List [ `String "stale" ] ]));
+      Alcotest.(check bool)
+        "stale publication did not resurrect execution success"
+        true
+        (Option.is_none
+           (Server_dashboard_http_cache.snapshot
+              Server_dashboard_http_execution_surfaces.execution_cache)
+             .last_success_unix);
+      ignore (read "execution:default:light" default_counter);
+      ignore (read "execution:operator::full" full_counter);
+      ignore (read "workspace:default" unrelated_counter);
+      Alcotest.(check int) "default execution recomputed" 2 !default_counter;
+      Alcotest.(check int) "full execution recomputed" 2 !full_counter;
+      Alcotest.(check int) "unrelated cache preserved" 1 !unrelated_counter)
+
 (* -- 5. Stats reports active + computing ------------------------------------ *)
 
 let test_stats () =
@@ -418,14 +507,7 @@ let test_stale_preserved_on_timeout ~clock ~sw () =
     Dashboard_cache.get_or_compute "stale_timeout" ~ttl:0.1 (fun () ->
       `String "fresh_recompute")
   in
-  let is_timeout_error =
-    match after with
-    | `Assoc pairs ->
-      (match List.assoc_opt "error" pairs with
-       | Some (`String "computation_timeout") -> true
-       | _ -> false)
-    | _ -> false
-  in
+  let is_timeout_error = Dashboard_cache.is_timeout_envelope after in
   Alcotest.(check bool) "no timeout error cached" false is_timeout_error
 
 (* -- 10. Expired stale falls back to last-good on timeout ------------------- *)
@@ -450,14 +532,7 @@ let test_expired_stale_restored_on_timeout ~clock () =
     Dashboard_cache.get_or_compute "expired_stale_timeout" ~ttl:0.05 (fun () ->
       `String "fresh_after_restore")
   in
-  let is_timeout_error =
-    match after with
-    | `Assoc pairs ->
-      (match List.assoc_opt "error" pairs with
-       | Some (`String "computation_timeout") -> true
-       | _ -> false)
-    | _ -> false
-  in
+  let is_timeout_error = Dashboard_cache.is_timeout_envelope after in
   Alcotest.(check bool) "expired stale restore avoids timeout poison" false
     is_timeout_error
 
@@ -475,14 +550,7 @@ let test_timeout_no_stale_returns_error ~clock () =
         `String "never_reached")
   in
   (* Should get timeout error JSON *)
-  let is_timeout_error =
-    match result with
-    | `Assoc pairs ->
-      (match List.assoc_opt "error" pairs with
-       | Some (`String "computation_timeout") -> true
-       | _ -> false)
-    | _ -> false
-  in
+  let is_timeout_error = Dashboard_cache.is_timeout_envelope result in
   Alcotest.(check bool) "timeout error returned" true is_timeout_error;
   (* Next call should recompute, not return cached error *)
   let v2 =
@@ -694,6 +762,92 @@ let test_runtime_git_probe_argv_disables_optional_locks () =
     [ "git"; "-C"; "/tmp/demo"; "--no-optional-locks"; "rev-parse"; "--short"; "HEAD" ]
     (Runtime.git_rev_parse_short_probe_argv "/tmp/demo")
 
+(* RFC-0372 Phase 5 — the compute must leave the caller's domain.
+
+   HTTP connections are fibers on one domain, and a pure compute never yields,
+   so a dashboard read run inline stops every sibling fiber for its duration.
+   The fix routes it through the executor pool; this test asserts the routing
+   actually happened by observing which domain [compute] ran on.
+
+   The no-pool leg is the control, and it must observe the caller's own domain.
+   Without it, "compute ran on some domain" passes whether or not the offload
+   took effect — the assertion would hold on the unfixed code too. *)
+let test_compute_leaves_caller_domain ~clock ~sw ~dm () =
+  let caller_domain = (Domain.self () :> int) in
+  let observed = ref None in
+  let compute () =
+    observed := Some (Domain.self () :> int);
+    `String "value"
+  in
+  let run_on key =
+    observed := None;
+    ignore
+      (Dashboard_cache.get_or_compute_with_timeout key ~ttl:60.0 ~clock
+         ~timeout_sec:30.0 compute);
+    !observed
+  in
+  Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+    Alcotest.(check (option int))
+      "control: with no pool installed the compute stays on the caller domain"
+      (Some caller_domain)
+      (run_on "rfc0372-phase5-control"));
+  let pool = Eio.Executor_pool.create ~sw ~domain_count:1 dm in
+  Executor_pool_ref.For_testing.with_pool pool (fun () ->
+    match run_on "rfc0372-phase5-offloaded" with
+    | None -> Alcotest.fail "compute did not run"
+    | Some d ->
+      Alcotest.(check bool)
+        (Printf.sprintf
+           "compute must run off the caller domain (caller=%d, compute=%d)"
+           caller_domain d)
+        true
+        (d <> caller_domain))
+
+(* -- The timeout envelope has one producer and one recognizer -------------- *)
+
+(** Every timeout path returns the same envelope and the recognizer that sits
+    beside the producer accepts all of them, so no reader has to match the
+    [error] string itself.
+
+    The literal pins the value clients route on
+    ([dashboard/src/api/core.ts:725] branches on
+    [errorCode = "computation_timeout"]), so changing
+    {!Dashboard_cache.timeout_error_code} fails here rather than at a client
+    that quietly stops recognizing timeouts.
+
+    The control is a computed payload that carries its own [error] field: it
+    must stay unrecognized, or the check would swallow real data. *)
+let test_timeout_envelope_recognizer ~clock () =
+  Alcotest.(check string) "wire value clients route on" "computation_timeout"
+    Dashboard_cache.timeout_error_code;
+  Dashboard_cache.invalidate_all ();
+  let slow () =
+    Eio.Time.sleep clock 1.0;
+    `String "never_reached"
+  in
+  let timed_out () =
+    Dashboard_cache.get_or_compute_with_timeout "envelope_paths" ~ttl:1.0
+      ~clock ~timeout_sec:0.05 slow
+  in
+  let owner = timed_out () in
+  Alcotest.(check string) "owner kind" "owner" (timeout_kind owner);
+  Alcotest.(check bool) "owner envelope recognized" true
+    (Dashboard_cache.is_timeout_envelope owner);
+  for _ = 1 to 2 do
+    ignore (timed_out () : Yojson.Safe.t)
+  done;
+  let circuit = timed_out () in
+  Alcotest.(check string) "circuit kind" "circuit_open" (timeout_kind circuit);
+  Alcotest.(check bool) "circuit envelope recognized" true
+    (Dashboard_cache.is_timeout_envelope circuit);
+  Dashboard_cache.invalidate_all ();
+  let computed =
+    Dashboard_cache.get_or_compute "envelope_control" ~ttl:1.0 (fun () ->
+      `Assoc [ ("error", `String "not_a_timeout"); ("rows", `List []) ])
+  in
+  Alcotest.(check bool) "computed payload is not an envelope" false
+    (Dashboard_cache.is_timeout_envelope computed)
+
 (* -- Harness ---------------------------------------------------------------- *)
 
 let () =
@@ -710,6 +864,12 @@ let () =
           test_case "nested get_or_compute" `Quick test_nested_no_deadlock;
           test_case "triple nesting" `Quick test_triple_nesting;
         ] );
+      ( "offload",
+        [
+          test_case "compute leaves the caller domain" `Quick
+            (test_compute_leaves_caller_domain ~clock ~sw
+               ~dm:(Eio.Stdenv.domain_mgr env));
+        ] );
       ( "correctness",
         [
           test_case "cache hit" `Quick test_cache_hit;
@@ -723,6 +883,10 @@ let () =
             test_projection_digest_cache_separates_actors;
           test_case "invalidate" `Quick test_invalidate;
           test_case "invalidate_prefix" `Quick test_invalidate_prefix;
+          test_case "board write invalidates every board projection" `Quick
+            test_board_write_invalidates_every_board_projection;
+          test_case "task mutation invalidates every execution variant" `Quick
+            test_task_mutation_hook_invalidates_all_execution_variants;
           test_case "stats" `Quick test_stats;
           test_case "stats detail surface" `Quick test_stats_detail_surface;
           test_case "stats empty table" `Quick test_stats_handles_empty_table;
@@ -745,8 +909,8 @@ let () =
         ] );
       ( "timeout",
         [
-          test_case "proactive refresh timeout names phase" `Quick
-            test_proactive_refresh_timeout_message_names_phase;
+          test_case "proactive refresh timeout is typed" `Quick
+            test_proactive_refresh_timeout_is_typed_and_rendered_at_boundary;
           test_case "proactive refresh failure WARN throttle" `Quick
             test_proactive_refresh_failure_warn_throttle;
           test_case "proactive refresh can suppress first WARN" `Quick
@@ -765,5 +929,7 @@ let () =
             (test_repeated_no_stale_timeout_opens_circuit ~clock);
           test_case "waiter timeout returns error, not cached" `Quick
             (test_waiter_timeout_returns_error_not_cached ~clock);
+          test_case "timeout envelope producer and recognizer agree" `Quick
+            (test_timeout_envelope_recognizer ~clock);
         ] );
     ]

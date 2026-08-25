@@ -1,6 +1,5 @@
 (* Workspace_task_cleanup — post-transition hooks extracted from Workspace_task_transitions. *)
 open Masc_domain
-open Workspace_utils
 open Workspace_state
 
 let run_done_hooks config ~agent_name =

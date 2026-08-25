@@ -7,8 +7,6 @@
 open Masc_domain
 include Workspace_utils
 include Workspace_state
-open Workspace_backlog
-open Workspace_task_id
 include Workspace_broadcast
 open Workspace_backlog
 open Workspace_task_id
@@ -79,6 +77,12 @@ let append_goal_link_rollback_failures msg rollback_failures =
       (String.concat "; " failures)
 ;;
 
+let protect_task_create_settlement f =
+  match Eio_guard.execution_context () with
+  | Eio_guard.Eio_fiber -> Eio.Cancel.protect f
+  | Eio_guard.Non_eio -> f ()
+;;
+
 let rollback_goal_links config task_goal_ids =
   List.filter_map
     (fun (task_id, goal_id_opt) ->
@@ -106,6 +110,7 @@ let add_task_with_result
       ?goal_id
       ?created_by
       ?predecessor_task_id
+      ?(skills = [])
       config
       ~title
       ~priority
@@ -117,6 +122,7 @@ let add_task_with_result
   let goal_id = Workspace_task_classify.trim_opt goal_id in
   let predecessor_task_id = Workspace_task_classify.trim_opt predecessor_task_id in
   try
+    protect_task_create_settlement (fun () ->
     with_file_lock config lock_path (fun () ->
       match read_backlog_r config with
       | Error msg -> Error (Backlog_read_failed msg)
@@ -148,12 +154,7 @@ let add_task_with_result
              Printf.sprintf "task-%03d" (next_task_number config backlog)
            in
            let contract =
-             Some
-               (Workspace_task_classify.ensure_task_contract_for_verification
-                  ?contract
-                  ~title
-                  ~description
-                  ())
+             Option.map Workspace_task_classify.normalize_task_contract contract
            in
            let new_task =
              { id = task_id
@@ -169,7 +170,9 @@ let add_task_with_result
              ; handoff_context = None
              ; cycle_count = 0
              ; reclaim_policy = None
+             ; execution_links = Masc_domain.no_execution_links
              ; do_not_reclaim_reason = None
+             ; skills
              }
            in
            (* [write_backlog] stamps version/last_updated at the commit point. *)
@@ -221,15 +224,14 @@ let add_task_with_result
                                  | Some contract -> contract.strict
                                  | None -> false) )
                           ]);
-                  (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
                   let _ =
-                    broadcast
+                    broadcast ~audience:System_record
                       config
                       ~from_agent:actor
                       ~content:(Printf.sprintf "New quest: %s" title)
                   in
                   let summary = Printf.sprintf "Added %s: %s" task_id title in
-                  Ok { task_id; summary; title; priority; description; goal_id }))))
+                  Ok { task_id; summary; title; priority; description; goal_id })))))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Unexpected_error (Printexc.to_string e))
@@ -256,6 +258,7 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
   ensure_initialized config;
   let lock_path = backlog_lock_path config in
   let actor = Option.value ~default:"system" created_by in
+  protect_task_create_settlement (fun () ->
   with_file_lock config lock_path (fun () ->
     match read_backlog_r config with
     | Error msg -> Error (Batch_backlog_read_failed msg)
@@ -268,12 +271,9 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                 let task_id = Printf.sprintf "task-%03d" !next_num in
                 incr next_num;
                 let contract =
-                  Some
-                    (Workspace_task_classify.ensure_task_contract_for_verification
-                       ?contract
-                       ~title
-                       ~description
-                       ())
+                  Option.map
+                    Workspace_task_classify.normalize_task_contract
+                    contract
                 in
                 let task =
                   { id = task_id
@@ -291,7 +291,9 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                   ; handoff_context = None
                   ; cycle_count = 0
                   ; reclaim_policy = None
+                  ; execution_links = Masc_domain.no_execution_links
                   ; do_not_reclaim_reason = None
+                  ; skills = []
                   }
                 in
                 (task, goal_id))
@@ -359,21 +361,27 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                     ", "
                     (List.map (fun (t : Masc_domain.task) -> t.id) added_tasks)
                 in
-                (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
                 let msg =
                   Printf.sprintf
                     "New batch of %d quests added: %s"
                     (List.length added_tasks)
                     summary
                 in
-                let _ = broadcast config ~from_agent:actor ~content:msg in
+                (match broadcast ~audience:System_record config ~from_agent:actor ~content:msg with
+                 | Ok _ -> ()
+                 | Error error ->
+                   Log.Workspace.error
+                     "batch task creation committed but broadcast was not persisted actor=%s task_ids=%s detail=%s"
+                     actor
+                     summary
+                     (broadcast_error_to_string error));
                 let count = List.length added_tasks in
                 let task_ids = List.map (fun (task : Masc_domain.task) -> task.id) added_tasks in
                 let summary = Printf.sprintf "Added %d tasks: %s" count summary in
                 Ok { task_ids; summary; count }))
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
-       | e -> Error (Batch_unexpected_error (Printexc.to_string e))))
+       | e -> Error (Batch_unexpected_error (Printexc.to_string e)))))
 ;;
 
 let batch_add_tasks_internal ?created_by config tasks =
@@ -390,10 +398,6 @@ let batch_add_tasks ?created_by config tasks =
        (fun (title, priority, description, goal_id) ->
           title, priority, description, None, goal_id)
        tasks)
-;;
-
-let batch_add_tasks_with_contracts ?created_by config tasks =
-  batch_add_tasks_internal ?created_by config tasks
 ;;
 
 let batch_add_tasks_with_contracts_result ?created_by config tasks =

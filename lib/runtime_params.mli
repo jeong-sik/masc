@@ -24,6 +24,11 @@ type param_meta = {
 (** Opaque typed parameter handle.  Obtained from {!register}. *)
 type 'a param
 
+(** Canonical registered key for a typed parameter handle.  Callers that need
+    to route a string-keyed API side effect can compare against this value
+    without duplicating the key literal. *)
+val key : 'a param -> string
+
 (** {1 Initialization} *)
 
 (** Set the workspace base path used for automatic persistence and audit.
@@ -49,6 +54,14 @@ val register :
 
 (** {1 Read / Write} *)
 
+type json_change =
+  { old_value : Yojson.Safe.t
+  ; new_value : Yojson.Safe.t
+  }
+(** Values captured in the same mutex transaction as a string-keyed
+    mutation. Callers must use this snapshot for ordered side effects instead
+    of re-reading the registry after the write. *)
+
 (** Get current value.  Returns the override if set, otherwise the default. *)
 val get : 'a param -> 'a
 
@@ -61,6 +74,15 @@ val set : ?base_path:string -> ?actor:string -> 'a param -> 'a -> (unit, string)
 val set_by_key :
   ?base_path:string -> ?actor:string -> string -> Yojson.Safe.t -> (unit, string) result
 
+val set_by_key_with_change :
+  ?base_path:string ->
+  ?actor:string ->
+  string ->
+  Yojson.Safe.t ->
+  (json_change, string) result
+(** As [set_by_key], returning the prior and committed serialized values from
+    the same mutex transaction. *)
+
 (** Clear override; reverts to env default.  Persists and audits the
     reversion when a base path is available. *)
 val clear : ?base_path:string -> ?actor:string -> 'a param -> unit
@@ -68,6 +90,11 @@ val clear : ?base_path:string -> ?actor:string -> 'a param -> unit
 (** Clear override by string key. Returns [Error] if key is unknown.
     Persists and audits the reversion when a base path is available. *)
 val clear_by_key : ?base_path:string -> ?actor:string -> string -> (unit, string) result
+
+val clear_by_key_with_change :
+  ?base_path:string -> ?actor:string -> string -> (json_change, string) result
+(** As [clear_by_key], returning the prior and committed default values from
+    the same mutex transaction. *)
 
 (** {1 Introspection} *)
 

@@ -35,17 +35,6 @@ let get_int_logged name ~default =
            default)
 ;;
 
-let get_float_positive_logged name ~default =
-  match env_opt name with
-  | None -> default
-  | Some raw ->
-      (match float_of_string_opt raw with
-       | Some value when Float.is_finite value && value > 0.0 -> value
-       | _ ->
-           Log.Keeper.warn "invalid %s=%S; using default %.3f" name raw default;
-           default)
-;;
-
 let get_bool_logged ?(invalid = Default) name ~default =
   match env_opt name with
   | None -> default

@@ -5,34 +5,6 @@
 
 open Alcotest
 
-let tmp_base_path suffix =
-  Filename.concat (Filename.get_temp_dir_name ()) ("masc-test-" ^ suffix)
-;;
-
-let test_compact_audit_store_cache () =
-  let open Masc in
-  let base1 = tmp_base_path "compact-audit-1" in
-  let start =
-    { Keeper_compact_audit.compaction_id = "id-1"
-    ; ts_unix = 0.0
-    ; keeper_name = "k"
-    ; trigger = Keeper_compact_audit.Proactive
-    ; correlation_id = "c"
-    ; run_id = "r"
-    }
-  in
-  let r1 = Keeper_compact_audit.persist_start ~base_path:base1 ~retention_days:14 start in
-  check (result unit (of_pp (fun _ _ -> ()))) "persist_start base1 succeeds" (Ok ()) r1;
-  let r1' = Keeper_compact_audit.persist_start ~base_path:base1 ~retention_days:14 start in
-  check (result unit (of_pp (fun _ _ -> ()))) "persist_start base1 again succeeds" (Ok ()) r1';
-  let base2 = tmp_base_path "compact-audit-2" in
-  let r2 = Keeper_compact_audit.persist_start ~base_path:base2 ~retention_days:14 start in
-  check (result unit (of_pp (fun _ _ -> ()))) "persist_start base2 succeeds" (Ok ()) r2;
-  (* Switching back to base1 still works after base2 store was created. *)
-  let r1'' = Keeper_compact_audit.persist_start ~base_path:base1 ~retention_days:14 start in
-  check (result unit (of_pp (fun _ _ -> ()))) "persist_start base1 after base2 succeeds" (Ok ()) r1''
-;;
-
 let test_compact_policy_callback () =
   let open Masc in
   let called = ref false in
@@ -66,16 +38,6 @@ let test_compact_policy_callback () =
       ~strategies:_
       ~trigger:_
     -> None)
-;;
-
-let test_meta_store_hook () =
-  let open Masc in
-  let called = ref false in
-  Keeper_meta_store.register_runtime_meta_write_sync
-    (fun _config _meta -> called := true);
-  Keeper_meta_store.runtime_meta_write_sync_hook (Obj.magic ()) (Obj.magic ());
-  check bool "sync hook was invoked" true !called;
-  Keeper_meta_store.register_runtime_meta_write_sync (fun _config _meta -> ())
 ;;
 
 let test_keepalive_signal_callbacks () =
@@ -137,14 +99,11 @@ let test_keepalive_signal_callbacks () =
     -> ());
   let skipped = ref false in
   Keeper_keepalive_signal.register_record_tool_skipped
-    (fun ~keeper_name:_ ~tool_name:_ ~reason_code:_ -> skipped := true);
-  Keeper_keepalive_signal.record_tool_skipped
-    ~keeper_name:"k"
-    ~tool_name:"t"
-    ~reason_code:"r";
+    (fun ~tool_name:_ ~reason_code:_ -> skipped := true);
+  Keeper_keepalive_signal.record_tool_skipped ~tool_name:"t" ~reason_code:"r";
   check bool "tool skipped callback invoked" true !skipped;
   Keeper_keepalive_signal.register_record_tool_skipped
-    (fun ~keeper_name:_ ~tool_name:_ ~reason_code:_ -> ());
+    (fun ~tool_name:_ ~reason_code:_ -> ());
   let output = ref false in
   Keeper_keepalive_signal.register_record_execute_output
     (fun
@@ -224,20 +183,11 @@ let test_turn_lifecycle_callback () =
 let () =
   Alcotest.run
     "keeper-global-shared-refs-atomic"
-    [ ( "compact-audit"
-      , [ test_case
-            "store cache is shared per base_path"
-            `Quick
-            test_compact_audit_store_cache
-        ] )
-    ; ( "compact-policy"
+    [ ( "compact-policy"
       , [ test_case
             "record_pre_compact callback registration"
             `Quick
             test_compact_policy_callback
-        ] )
-    ; ( "meta-store"
-      , [ test_case "runtime_meta_write_sync_hook registration" `Quick test_meta_store_hook
         ] )
     ; ( "keepalive-signal"
       , [ test_case

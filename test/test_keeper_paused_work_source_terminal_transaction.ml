@@ -6,6 +6,14 @@ module Persistence = Keeper_event_queue_persistence
 module Receipt = Keeper_paused_work_disposition_receipt
 module Transaction = Keeper_paused_work_source_terminal_transaction
 
+let test_switch : Eio.Switch.t option ref = ref None
+
+let current_switch () =
+  match !test_switch with
+  | Some sw -> sw
+  | None -> Alcotest.fail "test Owner switch is not installed"
+;;
+
 let require_ok label = function
   | Ok value -> value
   | Error detail -> Alcotest.failf "%s: %s" label detail
@@ -53,7 +61,8 @@ let receipt_path config ~keeper_name ~operator_operation_id =
     (Filename.concat
        (Filename.concat
           (Workspace.masc_root_dir config)
-          "paused-work-dispositions-v6")
+          ("paused-work-dispositions-"
+           ^ Masc.Keeper_paused_work_disposition_receipt.store_version))
        ("keeper-" ^ sha256 keeper_name))
     ("operation-" ^ sha256 operator_operation_id ^ ".json")
 ;;
@@ -87,10 +96,19 @@ let with_source_terminal_lane f =
                   { operator_actor =
                       Keeper_latched_reason.operator_actor_grpc_directive
                   })
-         ; runtime = { meta.runtime with nonce = 51 }
          }
        in
-       Keeper_meta_store.write_meta config meta |> require_ok "persist Keeper metadata";
+       Keeper_meta_store.replace_snapshot config meta |> require_ok "persist Keeper metadata";
+       (match
+          Keeper_owner_registry.install_from_store
+            ~sw:(current_switch ())
+            ~operation_runner:None
+           ~on_turn_slot_released:None
+            config
+        with
+        | Ok count -> Alcotest.(check int) "installed owner count" 1 count
+        | Error error ->
+          Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
        let channel =
          Keeper_continuation_channel.dashboard ~thread_id:"thread-terminal-1"
          |> require_ok "construct terminal continuation channel"
@@ -122,7 +140,6 @@ let with_source_terminal_lane f =
        let request : Transaction.request =
          { source
          ; source_incarnation
-         ; owner_nonce = meta.runtime.nonce
          ; source_receipt = State.Hitl_terminal resolution
          ; operator_operation_id = "operator-source-terminal-1"
          }
@@ -134,6 +151,19 @@ let check_applied = function
   | Transaction.Applied
       (Keeper_registry_event_queue.Acked _
       | Keeper_registry_event_queue.Already_acked _) -> ()
+  | Transaction.Applied
+      (Keeper_registry_event_queue.Ack_committed_followup_failed { detail; _ }) ->
+    Alcotest.fail detail
+  | Transaction.Committed_followup_failed failure ->
+    Alcotest.fail
+      (Transaction.error_to_string
+         { cause = failure; reservation_release = None })
+;;
+
+let transition_receipt_of_applied = function
+  | Transaction.Applied
+      (Keeper_registry_event_queue.Acked receipt
+      | Keeper_registry_event_queue.Already_acked receipt) -> receipt
   | Transaction.Applied
       (Keeper_registry_event_queue.Ack_committed_followup_failed { detail; _ }) ->
     Alcotest.fail detail
@@ -168,13 +198,11 @@ let source_ack_transition_state (request : Transaction.request) state =
     State.
       { source = request.source
     ; source_incarnation = request.source_incarnation
-    ; owner_nonce = request.owner_nonce
     ; operator_operation_id = request.operator_operation_id
     ; source_receipt = request.source_receipt
     }
   in
   State.ack_pending_source_terminal
-    ~current_owner_nonce:request.owner_nonce
     ~applied_at:2.0
     ~source_terminal
     state
@@ -272,6 +300,7 @@ let test_source_ack_identity_survives_checkpoint_reload () =
       | State.Hitl_terminal resolution ->
         { resolution with approval_id = "approval-terminal-2" }
       | State.Fusion_terminal _
+      | State.Turn_completed
       | State.Turn_attempt_terminal _ ->
         Alcotest.fail "fixture must carry a HITL terminal receipt"
     in
@@ -292,7 +321,6 @@ let test_source_ack_identity_survives_checkpoint_reload () =
     let second_request : Transaction.request =
       { source = second_source
       ; source_incarnation = second_selection.admitted_revision
-      ; owner_nonce = request.owner_nonce
       ; source_receipt = State.Hitl_terminal second_resolution
       ; operator_operation_id = "operator-source-terminal-2"
       }
@@ -483,23 +511,22 @@ let test_terminal_ack_replays_after_projection_and_snapshot_reload () =
       |> require_ok "commit source-terminal ACK"
     in
     check_applied first.projection;
+    let transition_receipt =
+      transition_receipt_of_applied first.projection
+    in
     let staged =
       Persistence.load_state_result
         ~base_path:config.Workspace.base_path
         ~keeper_name
-      |> require_ok "load unprojected source-terminal ACK"
+      |> require_ok "load owner-projected source-terminal ACK"
     in
-    let outbox_entry =
-      match State.transition_outbox staged with
-      | [ entry ] -> entry
-      | [] | _ :: _ :: _ ->
-        Alcotest.fail "source-terminal ACK must retain one transition outbox entry"
+    Alcotest.(check int)
+      "owner-facing source-terminal ACK retires its transition outbox"
+      0
+      (List.length (State.transition_outbox staged));
+    let outbox_entry : State.outbox_entry =
+      { receipt = transition_receipt; stimuli = [ request.source ] }
     in
-    Persistence.project_transition_outbox_result
-      ~append_before_retire:(fun _entry -> Ok ())
-      ~base_path:config.Workspace.base_path
-      ~keeper_name
-    |> require_ok "project source-terminal ACK transition";
     let projected =
       Persistence.load_state_result
         ~base_path:config.Workspace.base_path
@@ -527,6 +554,23 @@ let test_terminal_ack_replays_after_projection_and_snapshot_reload () =
     in
     let residual_wal_bytes = Yojson.Safe.to_string residual_wal_row ^ "\n" in
     write_text transition_wal_path residual_wal_bytes;
+    let observed =
+      Persistence.observe_snapshot_with_errors
+        ~base_path:config.Workspace.base_path
+        ~keeper_name
+    in
+    Alcotest.(check int)
+      "lock-free operator observation reports no read errors"
+      0
+      (List.length observed.read_errors);
+    Alcotest.(check int)
+      "lock-free operator observation preserves the pending projection"
+      (Queue.length (State.pending projected))
+      (Queue.length observed.pending);
+    Alcotest.(check string)
+      "lock-free operator observation preserves residual WAL bytes"
+      residual_wal_bytes
+      (In_channel.with_open_bin transition_wal_path In_channel.input_all);
     let validated =
       Persistence.validate_existing_state_read_only_result
         ~base_path:config.Workspace.base_path
@@ -584,6 +628,7 @@ let test_projected_wal_recovery_allows_next_source_ack () =
       | State.Hitl_terminal resolution ->
         { resolution with approval_id = "approval-terminal-after-projection" }
       | State.Fusion_terminal _
+      | State.Turn_completed
       | State.Turn_attempt_terminal _ ->
         Alcotest.fail "fixture must carry a HITL terminal receipt"
     in
@@ -612,22 +657,22 @@ let test_projected_wal_recovery_allows_next_source_ack () =
       |> require_ok "commit first source-terminal ACK"
     in
     check_applied first.projection;
+    let first_transition_receipt =
+      transition_receipt_of_applied first.projection
+    in
     let staged =
       Persistence.load_state_result
         ~base_path:config.Workspace.base_path
         ~keeper_name
-      |> require_ok "load first source-terminal ACK outbox"
+      |> require_ok "load first owner-projected source-terminal ACK"
     in
-    let first_outbox =
-      match State.transition_outbox staged with
-      | [ entry ] -> entry
-      | [] | _ :: _ :: _ -> Alcotest.fail "first ACK must retain one transition outbox entry"
+    Alcotest.(check int)
+      "first owner-facing ACK retires its transition outbox"
+      0
+      (List.length (State.transition_outbox staged));
+    let first_outbox : State.outbox_entry =
+      { receipt = first_transition_receipt; stimuli = [ first_request.source ] }
     in
-    Persistence.project_transition_outbox_result
-      ~append_before_retire:(fun _entry -> Ok ())
-      ~base_path:config.Workspace.base_path
-      ~keeper_name
-    |> require_ok "project first source-terminal ACK";
     let transition_wal_path =
       Filename.concat
         (Filename.concat
@@ -661,7 +706,6 @@ let test_projected_wal_recovery_allows_next_source_ack () =
              recovered
            |> require_some "select second recovered source")
             .admitted_revision
-      ; owner_nonce = first_request.owner_nonce
       ; source_receipt = State.Hitl_terminal second_resolution
       ; operator_operation_id = "operator-source-terminal-after-projection"
       }
@@ -672,11 +716,6 @@ let test_projected_wal_recovery_allows_next_source_ack () =
       |> require_ok "commit second source-terminal ACK"
     in
     check_applied second.projection;
-    Persistence.project_transition_outbox_result
-      ~append_before_retire:(fun _entry -> Ok ())
-      ~base_path:config.Workspace.base_path
-      ~keeper_name
-    |> require_ok "project second source-terminal ACK after recovery";
     let final =
       Persistence.load_state_result
         ~base_path:config.Workspace.base_path
@@ -753,7 +792,6 @@ let test_retired_v3_receipt_file_is_rejected () =
     let current : Receipt.t =
       { keeper_name
       ; expected_trace_id = meta.runtime.trace_id
-      ; expected_generation = request.owner_nonce
       ; operator_operation_id = request.operator_operation_id
       ; requested_at = 2.0
       ; operation = Receipt.Ack_source_terminal operation
@@ -803,15 +841,17 @@ let test_source_terminal_busy_has_zero_mutation () =
   with_source_terminal_lane (fun config keeper_name _meta request ->
     let base_path = config.Workspace.base_path in
     (match
-       Keeper_turn_admission.run_if_free
+       Keeper_owner_registry.run_maintenance_if_idle
          ~base_path
          ~keeper_name
          (fun () -> Transaction.ack_pending config ~keeper_name request)
      with
-     | `Ran (Error { cause = Transaction.Admission_busy _; _ }) -> ()
-     | `Ran (Error error) -> Alcotest.fail (Transaction.error_to_string error)
-     | `Ran (Ok _) | `Busy _ ->
-       Alcotest.fail "source-terminal ACK was not deferred by turn admission");
+     | Ok (`Ran (Error { cause = Transaction.Admission_busy _; _ })) -> ()
+     | Ok (`Ran (Error error)) -> Alcotest.fail (Transaction.error_to_string error)
+     | Error error ->
+       Alcotest.fail (Keeper_owner_registry.command_error_to_string error)
+     | Ok (`Ran (Ok _) | `Busy _) ->
+       Alcotest.fail "source-terminal ACK was not deferred by Keeper Owner");
     let state =
       Persistence.load_state_result ~base_path ~keeper_name
       |> require_ok "load admission-busy source-terminal lane"
@@ -873,6 +913,10 @@ let test_nonterminal_payload_is_rejected () =
 ;;
 
 let () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  test_switch := Some sw;
   Alcotest.run
     "keeper paused-work source-terminal transaction"
     [ ( "Ack_source_terminal"

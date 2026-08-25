@@ -7,10 +7,9 @@
     - {!valid_config_category_strings} consumed by
       [tool_schemas_misc] when generating the
       [masc_config] tool enum + by
-      [test/test_types].
+      [test/test_operator_surface_toml_parity.ml].
     - {!all_categories} consumed by
-      [env_config_introspect] +
-      [test/test_types].
+      [env_config_introspect].
     - {!to_json} consumed by [env_config] (the
       facade) + [env_config_introspect].
 

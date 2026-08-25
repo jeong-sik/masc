@@ -188,7 +188,6 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   // KSM
   running: PHASE_LABEL_KO.running,
   failing: PHASE_LABEL_KO.failing,
-  overflowed: PHASE_LABEL_KO.overflowed,
   handing_off: PHASE_LABEL_KO.handoff,
   draining: PHASE_LABEL_KO.draining,
   offline: '오프라인',
@@ -196,9 +195,7 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   stopped: PHASE_LABEL_KO.stopped,
   crashed: PHASE_LABEL_KO.crashed,
   restarting: PHASE_LABEL_KO.restarting,
-  dead: PHASE_LABEL_KO.dead,
   Running: PHASE_LABEL_KO.running,
-  Overflowed: PHASE_LABEL_KO.overflowed,
   Compacting: PHASE_LABEL_KO.compacting,
   HandingOff: PHASE_LABEL_KO.handoff,
   Failing: PHASE_LABEL_KO.failing,
@@ -208,7 +205,6 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   Stopped: PHASE_LABEL_KO.stopped,
   Draining: PHASE_LABEL_KO.draining,
   Restarting: PHASE_LABEL_KO.restarting,
-  Dead: PHASE_LABEL_KO.dead,
 }
 
 /** Resolve display name: Korean label for UI, raw value preserved in tooltips. */
@@ -353,6 +349,7 @@ const TURN_TERMINAL_FAILURE_CODES = new Set<string>([
   'provider_runtime_error',
   'fiber_unresolved',
   'stale_turn_timeout',
+  'provider_attempt_effect_fenced',
 ])
 
 export function isTurnTerminalFailureCode(code: string | null | undefined): boolean {
@@ -396,11 +393,19 @@ const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   degraded_retry: '저하 상태 재시도',
   runtime_fallback: '런타임 폴백',
   transient_runtime_retry: '일시적 런타임 재시도',
+  capacity_backpressure: 'Provider 수용량 부족',
   provider_runtime_error: '런타임 호출 오류',
   internal_error: '내부 오류',
   input_required: '사용자 입력 대기',
   cancelled: '취소됨',
   phase_skipped: 'phase 건너뜀',
+  transcript_corruption: '도구 호출 기록이 끊김 - 재기동 때 자동 복구',
+  provider_attempt_effect_fenced: 'Provider 효과 결과 확인 필요',
+  // tool_correction_lost has been a backend reason since #29038 and was
+  // missing here, so the table fell back to printing the raw wire string.
+  tool_correction_lost: '도구 교정 유실 - 거절 응답이 전달되지 못함',
+  accept_rejected: '응답에 쓸 내용이 없어 거절 - 출력 예산 확인',
+  terminal_effect_failed: '턴을 닫는 도구가 실패 - 결과가 나갔는지 불명',
   unmapped_runtime_state: '매핑되지 않은 runtime 상태',
 }
 
@@ -435,10 +440,10 @@ export function runtimeOutcomeLabel(value: string | null | undefined): string | 
  *  across multiple paths:
  *  - `Keeper_turn_terminal_code.to_wire` (lib/keeper/keeper_turn_terminal_code.ml:28-50)
  *    emits 10 fixed wire values + parameterized `Provider_runtime_error`,
- *    `Tool_required_unsatisfied`, `Sdk_error` (which inject the raw `code`
+ *    `Tool_required_unsatisfied`, `Agent_core_error` (which inject the raw `code`
  *    string straight onto the wire).
  *  - `Keeper_agent_error.to_terminal_reason_code` (lib/keeper/keeper_agent_error.ml:134-143)
- *    maps Agent SDK Retry variants to `api_error_*` codes
+ *    maps Agent-core retry variants to `api_error_*` codes
  *    (`api_error_server:<http_status>` is parameterized).
  *  - `Keeper_agent_run` emits `"completed"` on Runtime_runner.Completed.
  *  Kept separate from `STATE_DISPLAY_NAMES` because generic tokens like
